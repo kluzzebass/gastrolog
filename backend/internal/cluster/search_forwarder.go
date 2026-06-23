@@ -212,6 +212,20 @@ func (sf *SearchForwarder) ListChunks(ctx context.Context, nodeID string, req *g
 	return resp, nil
 }
 
+// GetPipelineBacklogDisk sends ForwardGetPipelineBacklog to a peer node.
+func (sf *SearchForwarder) GetPipelineBacklogDisk(ctx context.Context, nodeID string, req *gastrologv1.ForwardGetPipelineBacklogRequest) (*gastrologv1.ForwardGetPipelineBacklogResponse, error) {
+	conn, err := sf.peers.Conn(nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("dial node %s: %w", nodeID, err)
+	}
+	resp := &gastrologv1.ForwardGetPipelineBacklogResponse{}
+	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardGetPipelineBacklog", req, resp); err != nil {
+		sf.peers.Invalidate(nodeID, err)
+		return nil, fmt.Errorf("forward pipeline backlog to %s: %w", nodeID, err)
+	}
+	return resp, nil
+}
+
 // GetChunk sends a ForwardGetChunk RPC to the given node.
 func (sf *SearchForwarder) GetChunk(ctx context.Context, nodeID string, req *gastrologv1.ForwardGetChunkRequest) (*gastrologv1.ForwardGetChunkResponse, error) {
 	conn, err := sf.peers.Conn(nodeID)

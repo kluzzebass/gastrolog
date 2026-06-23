@@ -135,6 +135,7 @@ func DefaultRoutes() map[string]RPCRoute {
 		gastrologv1connect.VaultServiceListChunksProcedure:    {Strategy: RouteFanOut},
 		gastrologv1connect.VaultServiceGetChunkProcedure:      {Strategy: RouteTargeted, WrapResponse: NewRespWrapper[apiv1.GetChunkResponse]()},
 		gastrologv1connect.VaultServiceGetIndexesProcedure:    {Strategy: RouteLocal}, // gastrolog-3570f: handler fans out to vault-hosting peers
+		gastrologv1connect.VaultServiceGetPipelineBacklogProcedure: {Strategy: RouteLocal},
 
 		gastrologv1connect.VaultServiceAnalyzeChunkProcedure:  {Strategy: RouteTargeted, WrapResponse: NewRespWrapper[apiv1.AnalyzeChunkResponse]()},
 		gastrologv1connect.VaultServiceValidateVaultProcedure: {Strategy: RouteTargeted, WrapResponse: NewRespWrapper[apiv1.ValidateVaultResponse]()},

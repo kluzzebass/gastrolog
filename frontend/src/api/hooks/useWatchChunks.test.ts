@@ -3,6 +3,7 @@ import { Timestamp } from "@bufbuild/protobuf";
 import {
   ChunkChangeOp,
   ChunkMeta,
+  ChunkState,
   WatchChunksResponse,
 } from "../gen/gastrolog/v1/vault_pb";
 import { mergeMeta, mutateCache, shouldRefetchChunksAfterDelete } from "./useWatchChunks";
@@ -82,6 +83,39 @@ describe("mergeMeta — replica info trust model (gastrolog-66vmg)", () => {
     const merged = mergeMeta(existing, incoming);
     expect(merged.replicaCount).toBe(2);
     expect(merged.replicaNodeIds).toEqual(["node-a", "node-b"]);
+  });
+
+  test("advances chunk state active → sealing and never rolls back", () => {
+    const existing = new ChunkMeta({
+      id: bytes(5),
+      state: ChunkState.ACTIVE,
+    });
+    const sealing = new ChunkMeta({
+      id: bytes(5),
+      state: ChunkState.SEALING,
+    });
+    expect(mergeMeta(existing, sealing).state).toBe(ChunkState.SEALING);
+
+    const staleActive = new ChunkMeta({
+      id: bytes(5),
+      state: ChunkState.ACTIVE,
+    });
+    expect(mergeMeta(sealing, staleActive).state).toBe(ChunkState.SEALING);
+  });
+
+  test("sealing → sealed when SEALED event carries sealed=true", () => {
+    const sealing = new ChunkMeta({
+      id: bytes(6),
+      state: ChunkState.SEALING,
+    });
+    const sealedPayload = new ChunkMeta({
+      id: bytes(6),
+      state: ChunkState.SEALING, // backend may still carry sealing enum
+      sealed: true,
+    });
+    const merged = mergeMeta(sealing, sealedPayload);
+    expect(merged.sealed).toBe(true);
+    expect(merged.state).toBe(ChunkState.SEALED);
   });
 
   test("preserves monotonic fields (writeEnd, recordCount) from existing on stale incoming", () => {

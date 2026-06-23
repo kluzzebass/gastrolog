@@ -400,7 +400,54 @@ func TestManagerUnregisterVault(t *testing.T) {
 		t.Fatal(err)
 	}
 	mgr.UnregisterVault(vaultID)
+	entries, err := os.ReadDir(paths.WorkingDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("working segments after unregister = %d, want 0", len(entries))
+	}
 	if _, err := mgr.RegisterVault(vaultID, dir, segmentation.VaultConfig{}); err != nil {
 		t.Fatalf("re-register after unregister: %v", err)
+	}
+	entries, err = os.ReadDir(paths.WorkingDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("working segments after re-register = %d, want 1", len(entries))
+	}
+}
+
+func TestManagerUnregisterVaultDuringRun(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	vaultID := glid.New()
+	mgr, _ := segmentation.New(segmentation.Config{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		_ = mgr.Run(ctx)
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+
+	time.Sleep(20 * time.Millisecond)
+
+	if _, err := mgr.RegisterVault(vaultID, dir, segmentation.VaultConfig{}); err != nil {
+		t.Fatal(err)
+	}
+	mgr.UnregisterVault(vaultID)
+
+	entries, err := os.ReadDir(paths.WorkingDir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("working segments after unregister during run = %d, want 0", len(entries))
 	}
 }

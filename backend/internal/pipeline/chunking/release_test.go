@@ -92,7 +92,7 @@ func TestPartitionPendingReleaseWaitsForHolders(t *testing.T) {
 	}
 
 	required := []string{"home-a", "home-b"}
-	ready, pending := partitionPendingRelease(fsm, []glid.GLID{segID}, required)
+	ready, pending := partitionPendingRelease(fsm, []glid.GLID{segID}, required, true)
 	if len(ready) != 0 || len(pending) != 1 {
 		t.Fatalf("before ack: ready=%v pending=%v", ready, pending)
 	}
@@ -100,7 +100,7 @@ func TestPartitionPendingReleaseWaitsForHolders(t *testing.T) {
 	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalAckSegmentHolder(segID, "home-a")}); err != nil {
 		t.Fatal(err)
 	}
-	ready, pending = partitionPendingRelease(fsm, []glid.GLID{segID}, required)
+	ready, pending = partitionPendingRelease(fsm, []glid.GLID{segID}, required, true)
 	if len(ready) != 0 || len(pending) != 1 {
 		t.Fatalf("after one ack: ready=%v pending=%v", ready, pending)
 	}
@@ -108,7 +108,7 @@ func TestPartitionPendingReleaseWaitsForHolders(t *testing.T) {
 	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalAckSegmentHolder(segID, "home-b")}); err != nil {
 		t.Fatal(err)
 	}
-	ready, pending = partitionPendingRelease(fsm, []glid.GLID{segID}, required)
+	ready, pending = partitionPendingRelease(fsm, []glid.GLID{segID}, required, true)
 	if len(ready) != 1 || ready[0] != segID || len(pending) != 0 {
 		t.Fatalf("after all acks: ready=%v pending=%v", ready, pending)
 	}

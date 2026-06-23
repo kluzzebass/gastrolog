@@ -120,6 +120,8 @@ type VaultSpec struct {
 	ChunkRoot string
 	// FSM is the vault-ctl state machine. Required when Home is set.
 	FSM *vaultctlfsm.FSM
+	// LookupFSM returns the live vault-ctl sub-FSM after snapshot Restore.
+	LookupFSM func() *vaultctlfsm.FSM
 	// Log, Pull, Receipts feed the collection manager. Required when Home is set.
 	Log      collection.LogReader
 	Pull     collection.PullClient
@@ -466,6 +468,8 @@ func (s *Supervisor) IngestQueueCapacity() int { return cap(s.ingestOut) }
 // RegisterVault starts the managers for the roles the vault holds on this node.
 // Safe before or during Start. It is idempotent only in the sense that a second
 // registration of the same vault returns ErrVaultRegistered.
+//
+//nolint:gocognit // wires origin, home, collection, chunking, and release hooks per vault
 func (s *Supervisor) RegisterVault(spec VaultSpec) error {
 	if spec.VaultID.IsZero() {
 		return errors.New("vault spec missing ID")
@@ -511,11 +515,22 @@ func (s *Supervisor) RegisterVault(spec VaultSpec) error {
 	}
 	if spec.FSM != nil && releaseRoot != "" {
 		vaultID := spec.VaultID
+		homeRoot := spec.HomeRoot
+		purgeHomeHead := homeSide && homeRoot != ""
 		roles.unsubRelease = spec.FSM.AddOnReleaseSegments(func(ids []glid.GLID) {
 			if spec.Origin {
 				s.dist.RetireSegments(vaultID, ids)
 				for _, id := range ids {
 					_ = paths.PurgeCompleted(releaseRoot, id)
+				}
+			}
+			// Drop home head/ copies once the registry releases a segment so
+			// collection does not re-pull bytes this home already chunked, and
+			// follower homes still purge when build-time head purge was skipped
+			// (gastrolog-3vlse).
+			if purgeHomeHead {
+				for _, id := range ids {
+					_ = paths.PurgeHeadStaging(homeRoot, id)
 				}
 			}
 		})
@@ -531,10 +546,17 @@ func (s *Supervisor) registerOrigin(spec VaultSpec) error {
 		return fmt.Errorf("segmentation register: %w", err)
 	}
 	s.route.RegisterVault(spec.VaultID, in)
-	if err := s.dist.RegisterVault(spec.VaultID, spec.OriginRoot, distribution.VaultConfig{
+	distCfg := distribution.VaultConfig{
 		Publisher:   spec.Publisher,
 		LocalHolder: spec.LocalHolder,
-	}); err != nil {
+	}
+	if spec.Home {
+		vaultID := spec.VaultID
+		distCfg.OnLocalHeadPromoted = func(glid.GLID) {
+			s.col.Notify(vaultID)
+		}
+	}
+	if err := s.dist.RegisterVault(spec.VaultID, spec.OriginRoot, distCfg); err != nil {
 		s.route.UnregisterVault(spec.VaultID)
 		s.seg.UnregisterVault(spec.VaultID)
 		return fmt.Errorf("distribution register: %w", err)
@@ -571,6 +593,7 @@ func (s *Supervisor) registerHome(spec VaultSpec) error {
 			VaultRoot:  spec.HomeRoot,
 			ChunkRoot:  spec.ChunkRoot,
 			FSM:        spec.FSM,
+			LookupFSM:  spec.LookupFSM,
 			Locate:     spec.Locate,
 			Nudge:      collectionNudge{mgr: s.col, vaultID: spec.VaultID},
 			Applier:    spec.Applier,
@@ -617,6 +640,40 @@ func (s *Supervisor) RecoverVault(ctx context.Context, vaultID glid.GLID) error 
 		return nil
 	}
 	return s.chunk.RecoverOnce(ctx, vaultID)
+}
+
+// RewireVaultAfterCtlRestore rebinds chunking and collection to the live vault-ctl
+// sub-FSM after a group-level snapshot Restore. Returns ErrUnknownVault when the
+// vault is not registered on this home yet (transient during startup).
+func (s *Supervisor) RewireVaultAfterCtlRestore(vaultID glid.GLID, cfg RewireVaultConfig) error {
+	if cfg.FSM == nil {
+		return errors.New("vault-ctl FSM required")
+	}
+	if s.chunk != nil {
+		if err := s.chunk.RewireVaultFSM(vaultID, cfg.FSM, cfg.Applier); err != nil && !errors.Is(err, chunking.ErrUnknownVault) {
+			return fmt.Errorf("chunking rewire: %w", err)
+		}
+	}
+	if s.col != nil && cfg.Log != nil && cfg.Pull != nil && cfg.Receipts != nil {
+		if err := s.col.RewireVaultFSM(vaultID, collection.VaultConfig{
+			FSM:      cfg.FSM,
+			Log:      cfg.Log,
+			Pull:     cfg.Pull,
+			Receipts: cfg.Receipts,
+		}); err != nil && !errors.Is(err, collection.ErrUnknownVault) {
+			return fmt.Errorf("collection rewire: %w", err)
+		}
+	}
+	return nil
+}
+
+// RewireVaultConfig carries live vault-ctl handles for post-restore pipeline rebind.
+type RewireVaultConfig struct {
+	FSM      *vaultctlfsm.FSM
+	Applier  chunking.VaultCtlApplier
+	Log      collection.LogReader
+	Pull     collection.PullClient
+	Receipts collection.ReceiptCommitter
 }
 
 // RotateChunkCron runs one leader-gated cron rotation step for a vault's open

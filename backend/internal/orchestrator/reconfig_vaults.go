@@ -1135,6 +1135,7 @@ func (o *Orchestrator) ensureVaultCtlMetadata(vaultCfg system.VaultConfig, clust
 	vaultID := vaultCfg.ID
 	vfsm.SetOnAfterRestore(func() { o.afterVaultCtlRestore(vaultID) })
 	vaultFSM := vfsm.EnsureVaultFSM(vaultCfg.ID)
+	wireVaultFSMPipelineChunkEvents(o, vaultID, vaultFSM)
 	r := g.Raft
 	timeout := cluster.ReplicationTimeout
 
@@ -1450,6 +1451,46 @@ func wireVaultFSMOnDelete(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkM
 					"chunk", id, "error", err)
 			}
 		}
+	})
+}
+
+// wireVaultFSMPipelineChunkEvents connects vault-ctl pipeline manifest
+// lifecycle callbacks to the WatchChunks event bus. Legacy CmdCreateChunk
+// already emits CREATED via SetOnCreate; open/sealing pipeline chunks use
+// OpenChunkManifest / SealOpenChunkManifest instead and need their own
+// path so the inspector chunk list shows active and sealing chunks without
+// polling ListChunks. Uses AddOn* so the chunking manager's SetOn* slot-0
+// callbacks are not disturbed. Idempotent per vaultID.
+func wireVaultFSMPipelineChunkEvents(o *Orchestrator, vaultID glid.GLID, fsm *vaultctlfsm.FSM) {
+	if o == nil || fsm == nil {
+		return
+	}
+	if _, loaded := o.vaultCtlPipelineChunkEvents.LoadOrStore(vaultID, struct{}{}); loaded {
+		return
+	}
+	fsm.AddOnOpenChunkManifest(func(m *vaultctlfsm.OpenChunkManifest) {
+		if m == nil {
+			return
+		}
+		o.EmitChunkCreated(vaultID, openChunkManifestToChunkMeta(m, chunk.ChunkStateActive))
+	})
+	fsm.AddOnOpenChunkRefAdded(func(m *vaultctlfsm.OpenChunkManifest) {
+		if m == nil {
+			return
+		}
+		o.EmitChunkProgress(vaultID, openChunkManifestToChunkMeta(m, chunk.ChunkStateActive))
+	})
+	fsm.AddOnSealedManifest(func(m *vaultctlfsm.OpenChunkManifest) {
+		if m == nil {
+			return
+		}
+		o.EmitChunkCreated(vaultID, openChunkManifestToChunkMeta(m, chunk.ChunkStateSealing))
+	})
+	fsm.AddOnSeal(func(e vaultctlfsm.ManifestEntry) {
+		if e.State != chunk.ChunkStateSealed {
+			return
+		}
+		o.EmitChunkSealed(vaultID, manifestEntryToChunkMeta(e, true))
 	})
 }
 

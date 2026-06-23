@@ -949,6 +949,8 @@ const staleLeaderFSMGracePeriod = 1 * time.Hour
 // the receipt protocol is already running.
 //
 // See gastrolog-5nhwe.
+//
+//nolint:gocognit // compares FSM entries against local chunk manager per idle-active rule
 func (r *VaultLifecycleReconciler) SweepStaleLeaderFSMEntries() {
 	if r.fsm == nil || r.vaultInst == nil || r.vaultInst.Chunks == nil {
 		return
@@ -991,6 +993,16 @@ func (r *VaultLifecycleReconciler) SweepStaleLeaderFSMEntries() {
 		}
 		if have[e.ID] {
 			continue
+		}
+		// Pipeline GLCB builds materialize under segments/<vault>/chunks/<id>/
+		// before the chunk registers locally. Do not delete while that work is
+		// in flight — stale-fsm would remove the directory mid-GLCB write.
+		if r.orch != nil {
+			if chunkRoot, ok := r.orch.pipelineVaultChunkRoot(r.vaultID); ok {
+				if _, err := os.Stat(filepath.Join(chunkRoot, e.ID.String())); err == nil {
+					continue
+				}
+			}
 		}
 		// Grace period anchored on WriteEnd (the seal completion time)
 		// for Sealed entries. Sealing entries don't have a WriteEnd yet

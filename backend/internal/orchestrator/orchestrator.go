@@ -210,6 +210,10 @@ type Orchestrator struct {
 	// during ApplyConfig; used by ApplyVaultControlPlane forwarding.
 	peerConns *cluster.PeerConns
 
+	// vaultCtlPipelineChunkEvents tracks vaults whose vault-ctl FSM already has
+	// pipeline manifest → chunk-bus wiring (AddOn* subscribers).
+	vaultCtlPipelineChunkEvents sync.Map
+
 	// Pipeline lifecycle. The durable write path lives in the pipeline supervisor
 	// (o.pipeline); cancel stops the orchestrator's aux goroutines.
 	cancel context.CancelFunc

@@ -600,6 +600,7 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 	clusterSrv.SetSearchExecutor(newSearchExecutor(orch))
 	clusterSrv.SetContextExecutor(newContextExecutor(orch))
 	clusterSrv.SetListChunksExecutor(newListChunksExecutor(orch))
+	clusterSrv.SetPipelineBacklogDiskExecutor(newPipelineBacklogDiskExecutor(orch))
 	clusterSrv.SetGetIndexesExecutor(newGetIndexesExecutor(orch))
 	clusterSrv.SetValidateVaultExecutor(newValidateVaultExecutor(orch))
 	clusterSrv.SetGetChunkExecutor(newGetChunkExecutor(orch))
@@ -1256,8 +1257,10 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 			AfterConfigApply: deps.AfterConfigApply, ConfigSignal: deps.ConfigSignal, StatsSignal: deps.StatsSignal,
 			Cluster: deps.ClusterSrv, PeerStats: deps.PeerState,
 			PeerVaultStats: deps.PeerState, PeerIngesterStats: deps.PeerState, PeerRouteStats: deps.PeerState,
+			PeerPipelineDisk: deps.PeerState,
 			PeerJobs:   deps.PeerJobState,
 			LocalStats: deps.LocalStats, RemoteSearcher: deps.SearchForwarder, RemoteChunkLister: deps.SearchForwarder,
+			RemotePipelineBacklog: deps.SearchForwarder,
 			RemoteChunkWatcher: deps.SearchForwarder,
 			RemoteIndexer:      deps.SearchForwarder,
 			RoutingForwarder: deps.RoutingForwarder, ClusterAddress: deps.ClusterAddr,

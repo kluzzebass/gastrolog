@@ -66,6 +66,16 @@ type StatsPerRouteSnapshot struct {
 	Matched int64
 }
 
+// StatsVaultPipelineDiskSnapshot is local on-disk pipeline segment counts
+// for one vault on this node, broadcast via NodeStats.
+type StatsVaultPipelineDiskSnapshot struct {
+	VaultID          glid.GLID
+	Working          int
+	CompletedStaging int
+	Head             int
+	PreHead          int
+}
+
 // StatsProvider abstracts the orchestrator for stats collection.
 // Defined here at the consumer site to avoid importing orchestrator.
 type StatsProvider interface {
@@ -75,6 +85,7 @@ type StatsProvider interface {
 	IngesterIDs() []string
 	IngesterStats(id string) (name string, messages, bytes, errors int64, running bool)
 	RouteStats() StatsRouteSnapshot
+	PipelineDiskSnapshots() []StatsVaultPipelineDiskSnapshot
 }
 
 // RaftStatsProvider exposes local Raft stats for the collector.
@@ -304,6 +315,16 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 			stats.RoutePerRouteStats = append(stats.RoutePerRouteStats, &gastrologv1.PerRouteStats{
 				RouteId:        ps.RouteID.ToProto(),
 				RecordsMatched: ps.Matched,
+			})
+		}
+
+		for _, pd := range c.cfg.Stats.PipelineDiskSnapshots() {
+			stats.VaultPipelineDisk = append(stats.VaultPipelineDisk, &gastrologv1.VaultPipelineNodeDisk{
+				VaultId:                  pd.VaultID.ToProto(),
+				WorkingSegments:          uint32(pd.Working),          //nolint:gosec
+				CompletedStagingSegments: uint32(pd.CompletedStaging), //nolint:gosec
+				HeadSegments:             uint32(pd.Head),               //nolint:gosec
+				PreHeadSegments:            uint32(pd.PreHead),            //nolint:gosec
 			})
 		}
 	}

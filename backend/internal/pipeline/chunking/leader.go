@@ -5,8 +5,58 @@ import (
 	"time"
 
 	"gastrolog/internal/glid"
+	"gastrolog/internal/record"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
+
+// CatchUpBudget returns how many planner steps to attempt in one wake/tick pass.
+func CatchUpBudget(eligible int, policy ManifestRotationPolicy) int {
+	return catchUpBudget(eligible, policy)
+}
+
+// catchUpBudget returns how many planner steps to attempt in one wake/tick pass.
+// Each step is at most one Raft proposal. Scale with eligible registry depth so
+// a backlog drains in fewer wall-clock passes; cap so one pass cannot monopolize
+// the vault-ctl leader indefinitely.
+func catchUpBudget(eligible int, policy ManifestRotationPolicy) int {
+	const minBudget = 32
+	const maxBudget = 4096
+
+	// Rough refs needed to fill one chunk at typical ~5–10k records/segment/ref,
+	// plus backlog proportional to eligible segments still holding records.
+	perChunk := int64(64)
+	if policy.MaxRecords > 0 {
+		perChunk = int64(policy.MaxRecords)/5000 + 8 //nolint:gosec // G115: MaxRecords bounded by rotation policy
+	}
+	backlog := int64(eligible)/4 + perChunk
+	if backlog < minBudget {
+		return minBudget
+	}
+	if backlog > maxBudget {
+		return maxBudget
+	}
+	return int(backlog)
+}
+
+// sealStalledEmptyOpen seals an open manifest that has stayed at zero refs
+// longer than the rotation MaxAge stall threshold.
+func sealStalledEmptyOpen(open *vaultctlfsm.OpenChunkManifest, manifest ManifestSnapshot, policy ManifestRotationPolicy, refAddedAt time.Time, applier vaultctlfsm.Applier) error {
+	if open == nil || len(manifest.Refs) != 0 || applier == nil {
+		return nil
+	}
+	stall := policy.MaxAge
+	if stall <= 0 {
+		stall = 30 * time.Second
+	}
+	if time.Since(open.OpenedAt) <= stall {
+		return nil
+	}
+	sealedAt := refAddedAt
+	if sealedAt.IsZero() {
+		sealedAt = open.OpenedAt
+	}
+	return applier.Apply(vaultctlfsm.MarshalSealOpenChunkManifest(open.ChunkID, sealedAt))
+}
 
 // planOnce runs one leader planner step. cronDue=true forces a cron rotation
 // trigger for a non-empty open manifest (scheduler-driven sealing); the planner
@@ -15,31 +65,60 @@ func (v *vaultChunking) planOnce(ctx context.Context, cronDue bool) error {
 	if !v.cfg.IsLeader() || v.cfg.Applier == nil {
 		return nil
 	}
-	if v.cfg.FSM.SealedManifest() != nil {
+	if v.fsm().SealedManifest() != nil {
 		return nil
 	}
 
 	v.planMu.Lock()
 
-	open := v.cfg.FSM.OpenChunk()
-	views, err := v.loadSegmentViews()
-	if err != nil {
-		v.planMu.Unlock()
-		return err
-	}
+	open := v.fsm().OpenChunk()
+	eligible := v.eligibleRegistrySegments()
+	v.pruneSegmentIndexCache(eligible)
 
-	if open == nil && len(views) == 0 {
+	if open == nil && len(eligible) == 0 {
 		v.planMu.Unlock()
 		return nil
 	}
 
-	manifest, resume := plannerStateFromFSM(v.cfg.FSM, open)
-	refAddedAt := plannerRefAddedAt(v.cfg.FSM.ListCompletedSegments(), views)
+	manifest, resume := plannerStateFromFSM(v.fsm(), open)
+	refAddedAt := plannerRefAddedAtForEligible(v.fsm().ListCompletedSegments(), eligible)
+
+	if open == nil {
+		v.planMu.Unlock()
+		chunkID := v.cfg.newChunkID()
+		openedAt := refAddedAt
+		if openedAt.IsZero() {
+			openedAt = decisionRefAddedAt(eligible)
+		}
+		return v.cfg.Applier.Apply(vaultctlfsm.MarshalOpenChunkManifest(chunkID, openedAt))
+	}
+
+	if _, ok := v.cfg.Policy.rotateTrigger(manifest, refAddedAt, cronDue); ok {
+		sealedAt := refAddedAt
+		if sealedAt.IsZero() {
+			sealedAt = open.OpenedAt
+		}
+		v.planMu.Unlock()
+		return v.cfg.Applier.Apply(vaultctlfsm.MarshalSealOpenChunkManifest(open.ChunkID, sealedAt))
+	}
+
+	seg, ok := v.lazyPickSegment(manifest, resume, eligible)
+	if !ok {
+		if err := sealStalledEmptyOpen(open, manifest, v.cfg.Policy, refAddedAt, v.cfg.Applier); err != nil {
+			v.planMu.Unlock()
+			return err
+		}
+		if v.cfg.Nudge != nil && len(eligible) > 0 {
+			_ = v.cfg.Nudge.CollectMissing(ctx)
+		}
+		v.planMu.Unlock()
+		return nil
+	}
 
 	decision := Plan(PlannerInput{
 		Manifest:   manifest,
 		Resume:     resume,
-		Segments:   views,
+		Segments:   []SegmentView{seg},
 		Policy:     v.cfg.Policy,
 		RefAddedAt: refAddedAt,
 		CronDue:    cronDue,
@@ -50,23 +129,12 @@ func (v *vaultChunking) planOnce(ctx context.Context, cronDue bool) error {
 	case PlannerIdle:
 		return nil
 	case PlannerRotate:
-		if open == nil {
-			return nil
-		}
 		sealedAt := refAddedAt
 		if sealedAt.IsZero() {
 			sealedAt = open.OpenedAt
 		}
 		return v.cfg.Applier.Apply(vaultctlfsm.MarshalSealOpenChunkManifest(open.ChunkID, sealedAt))
 	case PlannerAddRef:
-		if open == nil {
-			chunkID := v.cfg.newChunkID()
-			openedAt := refAddedAt
-			if openedAt.IsZero() {
-				openedAt = decision.Ref.RefAddedAt
-			}
-			return v.cfg.Applier.Apply(vaultctlfsm.MarshalOpenChunkManifest(chunkID, openedAt))
-		}
 		ref := decision.Ref
 		return v.cfg.Applier.Apply(vaultctlfsm.MarshalAddOpenChunkSegmentRef(open.ChunkID, vaultctlfsm.OpenChunkSegmentRef{
 			SegmentID:         ref.SegmentID,
@@ -88,14 +156,17 @@ func (v *vaultChunking) planCatchUp(ctx context.Context) error {
 	if !v.cfg.IsLeader() || v.cfg.Applier == nil {
 		return nil
 	}
-	for range 32 {
-		if v.cfg.FSM.SealedManifest() != nil {
+	budget := catchUpBudget(len(v.eligibleRegistrySegments()), v.cfg.Policy)
+	for range budget {
+		if v.fsm().SealedManifest() != nil {
 			return nil
 		}
-		open := v.cfg.FSM.OpenChunk()
+		open := v.fsm().OpenChunk()
 		refs := 0
+		var totalRecords uint64
 		if open != nil {
 			refs = len(open.Refs)
+			totalRecords = open.TotalRecords
 		}
 		hadOpen := open != nil
 
@@ -103,22 +174,18 @@ func (v *vaultChunking) planCatchUp(ctx context.Context) error {
 			return err
 		}
 
-		if v.cfg.FSM.SealedManifest() != nil {
+		if v.fsm().SealedManifest() != nil {
 			return nil
 		}
-		open = v.cfg.FSM.OpenChunk()
+		open = v.fsm().OpenChunk()
 		newRefs := 0
+		var newTotal uint64
 		if open != nil {
 			newRefs = len(open.Refs)
+			newTotal = open.TotalRecords
 		}
 		if !hadOpen && open == nil {
-			v.planMu.Lock()
-			views, err := v.loadSegmentViews()
-			v.planMu.Unlock()
-			if err != nil {
-				return err
-			}
-			if len(views) == 0 {
+			if len(v.eligibleRegistrySegments()) == 0 {
 				return nil
 			}
 			continue
@@ -126,10 +193,10 @@ func (v *vaultChunking) planCatchUp(ctx context.Context) error {
 		if !hadOpen && open != nil {
 			continue
 		}
-		if newRefs > refs {
+		if newRefs > refs || newTotal > totalRecords {
 			continue
 		}
-		if hadOpen && open != nil && newRefs == refs {
+		if hadOpen && open != nil && newRefs == refs && newTotal == totalRecords {
 			return nil
 		}
 	}
@@ -171,18 +238,24 @@ func (v *vaultChunking) closeSegmentIndexCache() {
 	}
 }
 
-// loadSegmentViews returns SegmentViews for every non-exhausted registry
-// segment. Indexes are cached on the vaultChunking instance between planner
-// steps so planOnce opens each active segment at most once until it is
-// released or fully consumed.
-func (v *vaultChunking) loadSegmentViews() ([]SegmentView, error) {
-	entries := v.cfg.FSM.ListCompletedSegments()
-	active := make(map[glid.GLID]vaultctlfsm.CompletedSegmentEntry, len(entries))
+// eligibleRegistrySegments returns completed-segment registry entries that still
+// have records to chunk. Does not open on-disk indexes.
+func (v *vaultChunking) eligibleRegistrySegments() []vaultctlfsm.CompletedSegmentEntry {
+	entries := v.fsm().ListCompletedSegments()
+	out := make([]vaultctlfsm.CompletedSegmentEntry, 0, len(entries))
 	for _, entry := range entries {
-		if segmentExhaustedForPlanning(v.cfg.FSM, entry) {
+		if segmentExhaustedForPlanning(v.fsm(), entry) {
 			continue
 		}
-		active[entry.SegmentID] = entry
+		out = append(out, entry)
+	}
+	return out
+}
+
+func (v *vaultChunking) pruneSegmentIndexCache(eligible []vaultctlfsm.CompletedSegmentEntry) {
+	active := make(map[glid.GLID]struct{}, len(eligible))
+	for _, entry := range eligible {
+		active[entry.SegmentID] = struct{}{}
 	}
 	for id, idx := range v.segmentIndexCache {
 		if _, ok := active[id]; !ok {
@@ -192,34 +265,77 @@ func (v *vaultChunking) loadSegmentViews() ([]SegmentView, error) {
 			delete(v.segmentIndexCache, id)
 		}
 	}
+}
 
-	views := make([]SegmentView, 0, len(active))
-	for _, entry := range entries {
-		entry, ok := active[entry.SegmentID]
+// segmentViewForEntry opens the segment index at most once per cache generation.
+// Caller must hold planMu.
+func (v *vaultChunking) segmentViewForEntry(entry vaultctlfsm.CompletedSegmentEntry) (SegmentView, bool) {
+	idx := v.segmentIndexCache[entry.SegmentID]
+	if idx == nil {
+		path, ok := v.cfg.Locate.SegmentPath(entry.SegmentID)
+		if !ok {
+			return SegmentView{}, false
+		}
+		var err error
+		idx, err = v.openOrderedIndex(path)
+		if err != nil {
+			return SegmentView{}, false
+		}
+		v.segmentIndexCache[entry.SegmentID] = idx
+	}
+	return SegmentView{
+		ID:            entry.SegmentID,
+		FirstIngestTS: entry.FirstIngestTS,
+		PublishedAt:   entry.PublishedAt,
+		Index:         idx,
+	}, true
+}
+
+// lazyPickSegment chooses the next segment to plan against, opening at most one
+// index on the partial-manifest path (continuing the last ref) or one index per
+// candidate considered on the k-way EventID path.
+func (v *vaultChunking) lazyPickSegment(manifest ManifestSnapshot, resume map[glid.GLID]uint32, eligible []vaultctlfsm.CompletedSegmentEntry) (SegmentView, bool) {
+	if len(eligible) == 0 {
+		return SegmentView{}, false
+	}
+
+	byID := make(map[glid.GLID]vaultctlfsm.CompletedSegmentEntry, len(eligible))
+	for _, entry := range eligible {
+		byID[entry.SegmentID] = entry
+	}
+
+	if len(manifest.Refs) > 0 {
+		last := manifest.Refs[len(manifest.Refs)-1]
+		if entry, ok := byID[last.SegmentID]; ok && partialSegmentTarget(manifest, resume, entry.RecordCount, last.SegmentID) {
+			return v.segmentViewForEntry(entry)
+		}
+	}
+
+	var (
+		bestView  SegmentView
+		bestEvent record.EventID
+		found     bool
+	)
+	for _, entry := range eligible {
+		seg, ok := v.segmentViewForEntry(entry)
 		if !ok {
 			continue
 		}
-		idx := v.segmentIndexCache[entry.SegmentID]
-		if idx == nil {
-			path, ok := v.cfg.Locate.SegmentPath(entry.SegmentID)
-			if !ok {
-				continue
-			}
-			var err error
-			idx, err = v.openOrderedIndex(path)
-			if err != nil {
-				continue
-			}
-			v.segmentIndexCache[entry.SegmentID] = idx
+		start := resumeStart(resume, seg.ID)
+		if start >= seg.Index.Len() {
+			continue
 		}
-		views = append(views, SegmentView{
-			ID:            entry.SegmentID,
-			FirstIngestTS: entry.FirstIngestTS,
-			PublishedAt:   entry.PublishedAt,
-			Index:         idx,
-		})
+		entryAt, err := seg.Index.EntryAt(start)
+		if err != nil {
+			continue
+		}
+		if !found || segmentPrecedes(seg, entryAt.EventID, bestView, bestEvent) {
+			bestView = seg
+			bestEvent = entryAt.EventID
+			found = true
+		}
 	}
-	return views, nil
+	return bestView, found
 }
 
 func plannerStateFromFSM(fsm *vaultctlfsm.FSM, open *vaultctlfsm.OpenChunkManifest) (ManifestSnapshot, map[glid.GLID]uint32) {
@@ -253,19 +369,29 @@ func plannerStateFromFSM(fsm *vaultctlfsm.FSM, open *vaultctlfsm.OpenChunkManife
 	return manifest, resume
 }
 
-func plannerRefAddedAt(entries []vaultctlfsm.CompletedSegmentEntry, views []SegmentView) time.Time {
-	if len(views) == 0 {
+func plannerRefAddedAtForEligible(entries []vaultctlfsm.CompletedSegmentEntry, eligible []vaultctlfsm.CompletedSegmentEntry) time.Time {
+	if len(eligible) == 0 {
 		return time.Time{}
 	}
-	eligible := make(map[glid.GLID]struct{}, len(views))
-	for _, v := range views {
-		eligible[v.ID] = struct{}{}
+	eligibleIDs := make(map[glid.GLID]struct{}, len(eligible))
+	for _, e := range eligible {
+		eligibleIDs[e.SegmentID] = struct{}{}
 	}
 	var best time.Time
 	for _, entry := range entries {
-		if _, ok := eligible[entry.SegmentID]; !ok {
+		if _, ok := eligibleIDs[entry.SegmentID]; !ok {
 			continue
 		}
+		if best.IsZero() || entry.PublishedAt.After(best) {
+			best = entry.PublishedAt
+		}
+	}
+	return best
+}
+
+func decisionRefAddedAt(eligible []vaultctlfsm.CompletedSegmentEntry) time.Time {
+	var best time.Time
+	for _, entry := range eligible {
 		if best.IsZero() || entry.PublishedAt.After(best) {
 			best = entry.PublishedAt
 		}

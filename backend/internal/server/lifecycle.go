@@ -57,6 +57,7 @@ type LifecycleServer struct {
 	setNodeSuffrageFn func(ctx context.Context, nodeID string, voter bool) error
 	statsSignal       *notify.Signal         // fired by stats collector on each broadcast tick
 	peerRouteStats    PeerRouteStatsProvider // for aggregating route stats across cluster
+	peerPipelineDisk  PeerPipelineDiskProvider
 	listVaultsFn      func(ctx context.Context) []*apiv1.VaultInfo
 	getStatsFn        func(ctx context.Context) *apiv1.GetStatsResponse
 	logger            *slog.Logger
@@ -106,6 +107,11 @@ func (s *LifecycleServer) SetStatsSignal(sig *notify.Signal) {
 // SetPeerRouteStats wires the peer route stats provider for cluster aggregation.
 func (s *LifecycleServer) SetPeerRouteStats(p PeerRouteStatsProvider) {
 	s.peerRouteStats = p
+}
+
+// SetPeerPipelineDisk wires peer pipeline disk aggregation for WatchSystemStatus.
+func (s *LifecycleServer) SetPeerPipelineDisk(p PeerPipelineDiskProvider) {
+	s.peerPipelineDisk = p
 }
 
 // SetVaultFuncs wires vault data providers for the WatchSystemStatus stream.
@@ -480,6 +486,11 @@ func (s *LifecycleServer) buildSystemStatus(ctx context.Context) *apiv1.WatchSys
 	// Route stats.
 	routeStats := s.buildRouteStats()
 
+	pipelineBacklog, err := BuildAllPipelineBacklogs(s.orch, s.nodeID, s.peerPipelineDisk)
+	if err != nil {
+		s.logger.Warn("build pipeline backlog for WatchSystemStatus", "error", err)
+	}
+
 	var vaults []*apiv1.VaultInfo
 	if s.listVaultsFn != nil {
 		vaults = s.listVaultsFn(ctx)
@@ -490,12 +501,13 @@ func (s *LifecycleServer) buildSystemStatus(ctx context.Context) *apiv1.WatchSys
 	}
 
 	return &apiv1.WatchSystemStatusResponse{
-		Cluster:       cluster,
-		Health:        health,
-		RouteStats:    routeStats,
-		Vaults:        vaults,
-		Stats:         stats,
-		IngesterAlive: s.buildIngesterAlive(ctx),
+		Cluster:         cluster,
+		Health:          health,
+		RouteStats:      routeStats,
+		Vaults:          vaults,
+		Stats:           stats,
+		IngesterAlive:   s.buildIngesterAlive(ctx),
+		PipelineBacklog: pipelineBacklog,
 	}
 }
 

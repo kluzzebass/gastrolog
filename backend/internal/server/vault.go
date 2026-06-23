@@ -53,6 +53,7 @@ type VaultServer struct {
 	factories          orchestrator.Factories
 	peerStats          PeerVaultStatsProvider
 	remoteChunkLister  RemoteChunkLister
+	remotePipelineBacklog RemotePipelineBacklogGetter
 	remoteChunkWatcher RemoteChunkWatcher
 	remoteIndexer      RemoteIndexer
 	localNodeID        string
@@ -62,13 +63,14 @@ type VaultServer struct {
 var _ gastrologv1connect.VaultServiceHandler = (*VaultServer)(nil)
 
 // NewVaultServer creates a new VaultServer.
-func NewVaultServer(orch *orchestrator.Orchestrator, cfgStore system.Store, factories orchestrator.Factories, peerStats PeerVaultStatsProvider, remoteChunkLister RemoteChunkLister, remoteChunkWatcher RemoteChunkWatcher, remoteIndexer RemoteIndexer, localNodeID string, logger *slog.Logger) *VaultServer {
+func NewVaultServer(orch *orchestrator.Orchestrator, cfgStore system.Store, factories orchestrator.Factories, peerStats PeerVaultStatsProvider, remoteChunkLister RemoteChunkLister, remotePipelineBacklog RemotePipelineBacklogGetter, remoteChunkWatcher RemoteChunkWatcher, remoteIndexer RemoteIndexer, localNodeID string, logger *slog.Logger) *VaultServer {
 	return &VaultServer{
 		orch:               orch,
 		cfgStore:           cfgStore,
 		factories:          factories,
 		peerStats:          peerStats,
 		remoteChunkLister:  remoteChunkLister,
+		remotePipelineBacklog: remotePipelineBacklog,
 		remoteChunkWatcher: remoteChunkWatcher,
 		remoteIndexer:      remoteIndexer,
 		localNodeID:        localNodeID,

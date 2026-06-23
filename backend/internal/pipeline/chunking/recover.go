@@ -52,16 +52,16 @@ func (v *vaultChunking) recoverOnce(ctx context.Context) error {
 		return err
 	}
 	var lastErr error
-	if pending := v.cfg.FSM.SealedManifest(); pending != nil {
+	if pending := v.fsm().SealedManifest(); pending != nil {
 		if err := v.recoverBuiltGLCB(ctx, pending); err != nil {
 			lastErr = err
 		}
 	}
 	pendingID := chunk.ChunkID{}
-	if pending := v.cfg.FSM.SealedManifest(); pending != nil {
+	if pending := v.fsm().SealedManifest(); pending != nil {
 		pendingID = pending.ChunkID
 	}
-	for _, e := range v.cfg.FSM.List() {
+	for _, e := range v.fsm().List() {
 		if e.IsSealed() || e.ID == pendingID {
 			continue
 		}
@@ -84,7 +84,7 @@ func (v *vaultChunking) recoverBuiltGLCB(ctx context.Context, pending *vaultctlf
 	if pending == nil || pending.ChunkID == chunk.ChunkID(glid.Nil) {
 		return nil
 	}
-	entry := v.cfg.FSM.Get(pending.ChunkID)
+	entry := v.fsm().Get(pending.ChunkID)
 	if entry != nil && entry.IsSealed() {
 		return nil
 	}
@@ -155,7 +155,7 @@ func (v *vaultChunking) recoverBuiltGLCB(ctx context.Context, pending *vaultctlf
 	v.mu.Lock()
 	v.doneSealProposed = key
 	v.mu.Unlock()
-	v.afterSealBuild(pending)
+	v.afterSealBuild(ctx, pending)
 
 	if v.cfg.OnBuilt != nil {
 		v.mu.Lock()

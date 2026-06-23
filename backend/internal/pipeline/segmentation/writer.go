@@ -398,6 +398,15 @@ func (w *vaultWriter) closeSegmentLocked() error {
 	if w.seg.Header().RecordCount == 0 {
 		return nil
 	}
+	if err := w.completeWorkingSegmentLocked(); err != nil {
+		return err
+	}
+	return w.openNewSegmentLocked()
+}
+
+// completeWorkingSegmentLocked finalizes the open segment and moves it to completed/.
+// The caller must hold w.mu and ensure RecordCount > 0.
+func (w *vaultWriter) completeWorkingSegmentLocked() error {
 	if !w.disableFsync {
 		if err := w.seg.Sync(); err != nil {
 			return err
@@ -428,7 +437,16 @@ func (w *vaultWriter) closeSegmentLocked() error {
 		default:
 		}
 	}
-	return w.openNewSegmentLocked()
+	return nil
+}
+
+// discardWorkingSegmentLocked closes and deletes an empty in-progress segment.
+// The caller must hold w.mu.
+func (w *vaultWriter) discardWorkingSegmentLocked() {
+	path := w.workingPath
+	_ = w.seg.Close()
+	w.seg = nil
+	_ = os.Remove(path)
 }
 
 func (w *vaultWriter) openNewSegment() error {
@@ -458,9 +476,9 @@ func (w *vaultWriter) flushAndCloseSegment() {
 	if w.seg == nil {
 		return
 	}
-	if !w.disableFsync {
-		_ = w.seg.Sync()
+	if w.seg.Header().RecordCount == 0 {
+		w.discardWorkingSegmentLocked()
+		return
 	}
-	_ = w.seg.Close()
-	w.seg = nil
+	_ = w.completeWorkingSegmentLocked()
 }

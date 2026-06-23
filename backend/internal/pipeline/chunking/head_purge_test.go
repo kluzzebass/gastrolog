@@ -17,6 +17,56 @@ import (
 	hraft "github.com/hashicorp/raft"
 )
 
+func TestFlushHeadPurgeWaitsForAllHolderReceipts(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	segID := glid.New()
+	vaultID := glid.New()
+	chunkID := chunk.NewChunkID()
+	home := t.TempDir()
+	writeHeadSegment(t, home, segID, vaultID, []recordForSeg{{0, base, "one"}})
+	headPath := filepath.Join(home, "head", segID.String())
+
+	const localNode = "node-a"
+	required := []string{localNode, "node-b", "node-c"}
+
+	fsm := vaultctlfsm.New()
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalPublishCompletedSegment(vaultctlfsm.CompletedSegmentEntry{
+		SegmentID: segID, RecordCount: 1, ByteSize: 1,
+		FirstIngestTS: base, LastIngestTS: base, Checksum: 1, PublishedAt: base,
+		OriginNodeID: localNode, Holders: []string{localNode},
+	}))
+	openedAt := base
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalOpenChunkManifest(chunkID, openedAt))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
+		SegmentID: segID, FirstRecordNumber: 0, LastRecordNumber: 0,
+		SliceBytes: 4096, RefAddedAt: openedAt,
+	}))
+
+	mgr := chunking.New(chunking.Config{})
+	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
+		VaultRoot:       home,
+		ChunkRoot:       filepath.Join(home, "chunks"),
+		FSM:             fsm,
+		Locate:          chunking.HeadSegmentLocator{Root: home},
+		Applier:         &fsmApplier{fsm: fsm},
+		IsLeader:        func() bool { return true },
+		RequiredHolders: func() []string { return required },
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	sealedAt := base.Add(time.Minute)
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, sealedAt))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealChunk(chunkID, sealedAt.Add(time.Second), 1, 100, base, base, base, true))
+	if err := mgr.BuildOnce(t.Context(), vaultID); err != nil {
+		t.Fatalf("BuildOnce: %v", err)
+	}
+	if _, err := os.Stat(headPath); err != nil {
+		t.Fatalf("head must remain until all holders ack: %v", err)
+	}
+}
+
 func TestFlushHeadPurgeWaitsForLocalBuild(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
@@ -155,5 +205,58 @@ func assertHeadPresent(t *testing.T, root string, id glid.GLID) {
 	t.Helper()
 	if _, err := os.Stat(paths.HeadSegment(root, id)); err != nil {
 		t.Fatalf("head %s should remain: %v", id, err)
+	}
+}
+
+// Regression: vault-ctl leader CmdSealChunk can replicate before a follower
+// home finishes building. OnSealedManifestCleared must not consume the
+// post-seal slot until doneBuild, and finishBuildOnce must purge head/ once
+// the local GLCB lands (gastrolog-3vlse).
+func TestManagerPurgesHeadWhenPeerSealBeforeLocalBuild(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	segID := glid.New()
+	vaultID := glid.New()
+	chunkID := chunk.NewChunkID()
+	home := t.TempDir()
+	writeHeadSegment(t, home, segID, vaultID, []recordForSeg{{0, base, "one"}})
+	headPath := filepath.Join(home, "head", segID.String())
+
+	fsm := vaultctlfsm.New()
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalPublishCompletedSegment(vaultctlfsm.CompletedSegmentEntry{
+		SegmentID: segID, RecordCount: 1, ByteSize: 1,
+		FirstIngestTS: base, LastIngestTS: base, Checksum: 1, PublishedAt: base,
+	}))
+	openedAt := base
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalOpenChunkManifest(chunkID, openedAt))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
+		SegmentID: segID, FirstRecordNumber: 0, LastRecordNumber: 0,
+		SliceBytes: 4096, RefAddedAt: openedAt,
+	}))
+	sealedAt := base.Add(time.Minute)
+
+	mgr := chunking.New(chunking.Config{})
+	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
+		VaultRoot: home,
+		ChunkRoot: filepath.Join(home, "chunks"),
+		FSM:       fsm,
+		Locate:    chunking.HeadSegmentLocator{Root: home},
+		Applier:   &fsmApplier{fsm: fsm},
+		IsLeader:  func() bool { return false },
+	}); err != nil {
+		t.Fatal(err)
+	}
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, sealedAt))
+	// Leader seals cluster-wide while the follower has not built yet.
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealChunk(chunkID, sealedAt.Add(time.Second), 1, 100, base, base, base, true))
+	if _, err := os.Stat(headPath); err != nil {
+		t.Fatalf("head must remain before follower build: %v", err)
+	}
+
+	if err := mgr.BuildOnce(t.Context(), vaultID); err != nil {
+		t.Fatalf("follower BuildOnce after peer seal: %v", err)
+	}
+	if _, err := os.Stat(headPath); !os.IsNotExist(err) {
+		t.Fatalf("head should purge after follower build, stat err=%v", err)
 	}
 }

@@ -242,6 +242,24 @@ func partialSegmentID(input PlannerInput) (glid.GLID, bool) {
 	return glid.Nil, false
 }
 
+// partialSegmentTarget reports whether the open manifest's last ref still has
+// unconsumed records in segmentID, using registry record counts so the leader
+// planner need not open every segment index to decide.
+func partialSegmentTarget(m ManifestSnapshot, resume map[glid.GLID]uint32, recordCount uint32, segmentID glid.GLID) bool {
+	if len(m.Refs) == 0 {
+		return false
+	}
+	last := m.Refs[len(m.Refs)-1]
+	if last.SegmentID != segmentID {
+		return false
+	}
+	start, hasResume := resume[last.SegmentID]
+	if !hasResume {
+		start = last.LastRecordNumber + 1
+	}
+	return start < recordCount
+}
+
 func segmentPrecedes(a SegmentView, aEvent record.EventID, b SegmentView, bEvent record.EventID) bool {
 	if cmp := aEvent.Compare(bEvent); cmp != 0 {
 		return cmp < 0

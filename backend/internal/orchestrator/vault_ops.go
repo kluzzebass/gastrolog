@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"gastrolog/internal/glid"
 	"sync"
+	"time"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
 	"gastrolog/internal/index/analyzer"
+	"gastrolog/internal/orchestrator/pipeline"
+	"gastrolog/internal/pipeline/chunking"
 	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/vaultraft"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
@@ -589,13 +592,77 @@ func (o *Orchestrator) runAfterVaultCtlRestore(vaultID glid.GLID) {
 		t.Reconciler.ReconcileFromSnapshot(liveFSM)
 	}
 	if o.pipeline != nil {
-		if err := o.pipeline.RecoverVault(context.Background(), vaultID); err != nil {
-			o.vaultOpsLogger.Warn("vault-ctl after-restore: pipeline recover failed",
+		if err := o.rewirePipelineAfterCtlRestore(vaultID); err != nil {
+			o.vaultOpsLogger.Warn("vault-ctl after-restore: pipeline rewire failed",
 				"vault", vaultID, "error", err)
 		}
+		o.recoverPipelineVaultAfterRestore(vaultID)
 	}
 	o.vaultOpsLogger.Info("vault-ctl after-restore reconcile complete",
 		"vault", vaultID, "has_instance", t != nil)
+}
+
+// rewirePipelineAfterCtlRestore rebinds chunking/collection to the live vault-ctl
+// sub-FSM. vaultraft.FSM.Restore allocates fresh sub-FSMs; pipeline managers
+// otherwise keep reading the pre-restore object and the planner stalls.
+func (o *Orchestrator) rewirePipelineAfterCtlRestore(vaultID glid.GLID) error {
+	fsm, applier, _, ok := o.vaultCtlHandle(vaultID)
+	if !ok || fsm == nil {
+		return nil
+	}
+	root, err := o.originRoot(vaultID)
+	if err != nil {
+		return err
+	}
+	cfg := pipeline.RewireVaultConfig{
+		FSM:     fsm,
+		Applier: applier,
+	}
+	if o.segmentPuller != nil {
+		lookup := func() *vaultctlfsm.FSM {
+			f, _, _, ok := o.vaultCtlHandle(vaultID)
+			if ok && f != nil {
+				return f
+			}
+			return fsm
+		}
+		cfg.Log = &segmentLogReader{lookup: lookup, localNodeID: o.localNodeID}
+		cfg.Pull = &segmentPullClient{
+			lookup:      lookup,
+			puller:      o.segmentPuller,
+			localNodeID: o.localNodeID,
+			vaultRoot:   root,
+		}
+		cfg.Receipts = &segmentReceiptCommitter{applier: applier, localNodeID: o.localNodeID}
+	}
+	return o.pipeline.RewireVaultAfterCtlRestore(vaultID, cfg)
+}
+
+func (o *Orchestrator) recoverPipelineVaultAfterRestore(vaultID glid.GLID) {
+	const attempts = 8
+	const delay = 500 * time.Millisecond
+	var lastRewire, lastRecover error
+	for attempt := range attempts {
+		lastRewire = o.rewirePipelineAfterCtlRestore(vaultID)
+		lastRecover = o.pipeline.RecoverVault(context.Background(), vaultID)
+		if lastRewire == nil && lastRecover == nil {
+			return
+		}
+		if lastRewire != nil {
+			o.vaultOpsLogger.Warn("vault-ctl after-restore: pipeline rewire failed",
+				"vault", vaultID, "error", lastRewire, "attempt", attempt+1)
+		}
+		if lastRecover != nil && !errors.Is(lastRecover, chunking.ErrUnknownVault) {
+			o.vaultOpsLogger.Warn("vault-ctl after-restore: pipeline recover failed",
+				"vault", vaultID, "error", lastRecover)
+			return
+		}
+		time.Sleep(delay)
+	}
+	if lastRecover != nil && errors.Is(lastRecover, chunking.ErrUnknownVault) {
+		o.vaultOpsLogger.Warn("vault-ctl after-restore: pipeline recover failed",
+			"vault", vaultID, "error", lastRecover)
+	}
 }
 
 // Errors are logged at warn but do not abort: the next reconcile pass

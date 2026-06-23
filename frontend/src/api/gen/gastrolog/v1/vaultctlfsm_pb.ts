@@ -1238,6 +1238,38 @@ export class OpenChunkManifestState extends Message<OpenChunkManifestState> {
    */
   sealedAtNanos = protoInt64.zero;
 
+  /**
+   * Running min/max record timestamps across all refs (inspector / query bounds).
+   *
+   * @generated from field: int64 write_start_nanos = 7;
+   */
+  writeStartNanos = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 write_end_nanos = 8;
+   */
+  writeEndNanos = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 ingest_start_nanos = 9;
+   */
+  ingestStartNanos = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 ingest_end_nanos = 10;
+   */
+  ingestEndNanos = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 source_start_nanos = 11;
+   */
+  sourceStartNanos = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 source_end_nanos = 12;
+   */
+  sourceEndNanos = protoInt64.zero;
+
   constructor(data?: PartialMessage<OpenChunkManifestState>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1252,6 +1284,12 @@ export class OpenChunkManifestState extends Message<OpenChunkManifestState> {
     { no: 4, name: "total_records", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 5, name: "total_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 6, name: "sealed_at_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 7, name: "write_start_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 8, name: "write_end_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 9, name: "ingest_start_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 10, name: "ingest_end_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 11, name: "source_start_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 12, name: "source_end_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): OpenChunkManifestState {
@@ -1398,6 +1436,38 @@ export class AddOpenChunkSegmentRefCommand extends Message<AddOpenChunkSegmentRe
    */
   refAddedAtNanos = protoInt64.zero;
 
+  /**
+   * Min/max timestamps across this ref slice (from segment indexes at plan time).
+   *
+   * @generated from field: int64 write_start_nanos = 7;
+   */
+  writeStartNanos = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 write_end_nanos = 8;
+   */
+  writeEndNanos = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 ingest_start_nanos = 9;
+   */
+  ingestStartNanos = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 ingest_end_nanos = 10;
+   */
+  ingestEndNanos = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 source_start_nanos = 11;
+   */
+  sourceStartNanos = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 source_end_nanos = 12;
+   */
+  sourceEndNanos = protoInt64.zero;
+
   constructor(data?: PartialMessage<AddOpenChunkSegmentRefCommand>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1412,6 +1482,12 @@ export class AddOpenChunkSegmentRefCommand extends Message<AddOpenChunkSegmentRe
     { no: 4, name: "last_record_number", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 5, name: "slice_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 6, name: "ref_added_at_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 7, name: "write_start_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 8, name: "write_end_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 9, name: "ingest_start_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 10, name: "ingest_end_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 11, name: "source_start_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 12, name: "source_end_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): AddOpenChunkSegmentRefCommand {

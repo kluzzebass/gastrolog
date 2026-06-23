@@ -697,3 +697,43 @@ func TestManagerUnregisterVault(t *testing.T) {
 		t.Fatalf("PlanOnce() = %v, want ErrUnknownVault", err)
 	}
 }
+
+func TestRewireVaultFSMRebindsLiveRegistry(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	segID := glid.New()
+	vaultID := glid.New()
+	home := t.TempDir()
+	writeHeadSegment(t, home, segID, vaultID, []recordForSeg{{0, base, "one"}})
+
+	staleFSM := vaultctlfsm.New()
+	liveFSM := vaultctlfsm.New()
+	applyChunkCmd(t, liveFSM, vaultctlfsm.MarshalPublishCompletedSegment(vaultctlfsm.CompletedSegmentEntry{
+		SegmentID:   segID,
+		RecordCount: 1,
+		PublishedAt: base,
+	}))
+
+	var applied [][]byte
+	applier := &recordingApplier{out: &applied, fsm: liveFSM}
+	mgr := chunking.New(chunking.Config{})
+	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
+		VaultRoot: home,
+		ChunkRoot: filepath.Join(home, "chunks"),
+		FSM:       staleFSM,
+		Locate:    chunking.HeadSegmentLocator{Root: home},
+		Applier:   applier,
+		IsLeader:  func() bool { return true },
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.RewireVaultFSM(vaultID, liveFSM, applier); err != nil {
+		t.Fatalf("RewireVaultFSM: %v", err)
+	}
+	if err := mgr.PlanOnce(context.Background(), vaultID); err != nil {
+		t.Fatalf("PlanOnce after rewire: %v", err)
+	}
+	if len(applied) == 0 {
+		t.Fatal("expected OpenChunkManifest apply after rewire")
+	}
+}

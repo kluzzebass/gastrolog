@@ -1,5 +1,5 @@
 import { encode } from "../../api/glid";
-import { Fragment, useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { clickableProps } from "../../utils";
 import { useChunks, useIndexes, useValidateVault, useConfig, useArchiveChunk, useRestoreChunk } from "../../api/hooks";
@@ -16,6 +16,7 @@ import { Badge } from "../Badge";
 import { CogIcon } from "../icons";
 import { ExpandableCard } from "../settings/ExpandableCard";
 import { CrossLinkBadge } from "./CrossLinkBadge";
+import { PipelineBacklogView } from "./PipelineBacklogView";
 
 // chunkEndInstant returns the ingest/write end for display, omitting unset or
 // sentinel epoch timestamps that proto encodes for zero-value Go times.
@@ -40,11 +41,11 @@ function chunkStartInstant(chunk: ChunkMeta): Date | undefined {
 }
 
 function chunkStatusBadge(chunk: ChunkMeta, dark: boolean) {
-  if (chunk.state === ChunkState.SEALING) {
-    return <Badge variant="warn" dark={dark}>sealing</Badge>;
-  }
   if (chunk.sealed || chunk.state === ChunkState.SEALED) {
     return <Badge variant="copper" dark={dark}>sealed</Badge>;
+  }
+  if (chunk.state === ChunkState.SEALING) {
+    return <Badge variant="warn" dark={dark}>sealing</Badge>;
   }
   return <Badge variant="info" dark={dark}>active</Badge>;
 }
@@ -98,13 +99,13 @@ export function VaultCard({
         </span>
       }
     >
-      <VaultActions vaultId={vault.id} dark={dark} />
+      <PipelineBacklogView vaultId={vault.id} dark={dark} />
       <ChunkList vaultId={vault.id} dark={dark} />
     </ExpandableCard>
   );
 }
 
-function VaultActions({
+function ValidateVaultButton({
   vaultId,
   dark,
 }: Readonly<{
@@ -116,41 +117,112 @@ function VaultActions({
   const { addToast } = useToast();
 
   return (
-    <div
-      className={`flex items-center gap-2 px-4 py-2 border-b ${c(
-        "border-ink-border-subtle",
-        "border-light-border-subtle",
+    <button
+      type="button"
+      className={`px-2.5 py-1 text-[0.8em] rounded border transition-colors ${c(
+        "border-ink-border-subtle text-text-muted hover:bg-ink-hover",
+        "border-light-border-subtle text-light-text-muted hover:bg-light-hover",
       )}`}
-    >
-      <button
-        type="button"
-        className={`px-2.5 py-1 text-[0.8em] rounded border transition-colors ${c(
-          "border-ink-border-subtle text-text-muted hover:bg-ink-hover",
-          "border-light-border-subtle text-light-text-muted hover:bg-light-hover",
-        )}`}
-        disabled={validate.isPending}
-        onClick={async () => {
-          try {
-            const result = await validate.mutateAsync(vaultId);
-            if (result.valid) {
-              addToast(
-                `Vault valid (${result.chunks.length} chunk(s) checked)`,
-                "info",
-              );
-            } else {
-              const issues = result.chunks
-                .filter((ch) => !ch.valid)
-                .map((ch) => `${encode(ch.chunkId)}: ${ch.issues.join(", ")}`)
-                .join("; ");
-              addToast(`Validation failed: ${issues}`, "error");
-            }
-          } catch (err: unknown) {
-            addToast(err instanceof Error ? err.message : "Validation failed", "error");
+      disabled={validate.isPending}
+      onClick={async () => {
+        try {
+          const result = await validate.mutateAsync(vaultId);
+          if (result.valid) {
+            addToast(
+              `Vault valid (${result.chunks.length} chunk(s) checked)`,
+              "info",
+            );
+          } else {
+            const issues = result.chunks
+              .filter((ch) => !ch.valid)
+              .map((ch) => `${encode(ch.chunkId)}: ${ch.issues.join(", ")}`)
+              .join("; ");
+            addToast(`Validation failed: ${issues}`, "error");
           }
-        }}
-      >
-        {validate.isPending ? "Validating..." : "Validate"}
-      </button>
+        } catch (err: unknown) {
+          addToast(err instanceof Error ? err.message : "Validation failed", "error");
+        }
+      }}
+    >
+      {validate.isPending ? "Validating..." : "Validate"}
+    </button>
+  );
+}
+
+function followerDisplayName(
+  nodeId: string,
+  storageClass: number,
+  nscs: readonly { nodeId: Uint8Array; fileStorages: { storageClass: number }[] }[],
+  nodeNameMap: Map<string, string>,
+): ReactNode {
+  const name = resolveNodeName(nodeNameMap, nodeId);
+  if (storageClass <= 0) return name;
+  const nsc = nscs.find((n) => encode(n.nodeId) === nodeId);
+  const hasExact = nsc?.fileStorages.some((a) => a.storageClass === storageClass);
+  if (hasExact || !nsc || nsc.fileStorages.length === 0) return name;
+  const fallbackClass = nsc.fileStorages[0]!.storageClass;
+  return (
+    <>
+      {name}
+      <span className="text-severity-warn">{` (class ${String(fallbackClass)})`}</span>
+    </>
+  );
+}
+
+function VaultPlacementSummary({
+  leaderName,
+  followerIds,
+  rf,
+  storageClass,
+  jsonlPath,
+  nscs,
+  nodeNameMap,
+  dark,
+}: Readonly<{
+  leaderName: string;
+  followerIds: string[];
+  rf: number;
+  storageClass: number;
+  jsonlPath?: string;
+  nscs: readonly { nodeId: Uint8Array; fileStorages: { storageClass: number }[] }[];
+  nodeNameMap: Map<string, string>;
+  dark: boolean;
+}>) {
+  const c = useThemeClass(dark);
+  const labelClass = `text-[0.7em] font-medium uppercase tracking-[0.15em] ${c("text-text-muted", "text-light-text-muted")}`;
+  const valueClass = c("text-text-bright", "text-light-text-bright");
+
+  return (
+    <div
+      className={`rounded-lg border px-4 py-3 mb-3 ${c("border-ink-border bg-ink-well", "border-light-border bg-light-well")}`}
+    >
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[0.85em]">
+        <div className="flex items-baseline gap-2">
+          <span className={labelClass}>Leader</span>
+          <span className={`font-mono ${leaderName ? valueClass : c("text-text-muted", "text-light-text-muted")}`}>
+            {leaderName || "unplaced"}
+          </span>
+        </div>
+        {rf > 1 && <Badge variant="info" dark={dark}>{`RF=${String(rf)}`}</Badge>}
+        {jsonlPath && (
+          <span className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}>{jsonlPath}</span>
+        )}
+      </div>
+      {followerIds.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[0.85em]">
+          <span className={labelClass}>Followers</span>
+          <span className={valueClass}>
+            {followerIds.map((id, si) => (
+              <span key={id}>
+                {si > 0 && ", "}
+                <span className="font-mono">
+                  {followerDisplayName(id, storageClass, nscs, nodeNameMap)}
+                </span>
+              </span>
+            ))}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -229,180 +301,119 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
       return bTime - aTime;
     });
 
-  // One <table> per vault so column widths align across chunks. Vault
-  // header is a colSpan row above the chunk rows; a remote (placement-only,
-  // no local chunks) vault renders as a single placeholder header row with
-  // no chunk rows underneath. See gastrolog-28yi3.
+  // One placement summary per vault, then a single chunk table. Placement used
+  // to render as a colspan row between the table header and chunk rows (gastrolog-28yi3).
   const nscs = config?.nodeStorageConfigs ?? [];
+  const vaultIds = vaultMatches.map((v: { id: Uint8Array }) => encode(v.id));
+  const chunkRows = vaultIds.flatMap((vId: string) => {
+    const group = chunkGroups.get(vId);
+    if (!group) return [];
+    const vaultCfg = config?.vaults.find((v) => encode(v.id) === vId);
+    const rf = vaultCfg?.replicationFactor || 1;
+    const secondaries = vaultCfg ? followerNodeIds(vaultCfg, nscs) : [];
+    const pnId = vaultCfg ? leaderNodeId(vaultCfg, nscs) : "";
+    return sortChunks(group.chunks).map((chunk) => {
+      const start = chunkStartInstant(chunk);
+      const end = chunkEndInstant(chunk, start);
+      const isExpanded = expandedChunk === encode(chunk.id);
+      const replicas = chunk.replicaCount || 1;
+      const residentNodes = chunk.replicaNodeIds.map((id) =>
+        resolveNodeName(nodeNameMap, id),
+      );
+      const placementNodes = vaultCfg
+        ? [pnId, ...secondaries].filter(Boolean).map((id) => resolveNodeName(nodeNameMap, id))
+        : [];
+      const pendingAckNodes = chunk.pendingAckNodeIds.map((id) =>
+        resolveNodeName(nodeNameMap, id),
+      );
+      return (
+        <ChunkRow
+          key={encode(chunk.id)}
+          chunk={chunk}
+          vaultId={vaultId}
+          start={start}
+          end={end}
+          isExpanded={isExpanded}
+          onToggle={() => setExpandedChunk(isExpanded ? null : encode(chunk.id))}
+          dark={dark}
+          c={c}
+          replicas={replicas}
+          rf={rf}
+          residentNodes={residentNodes}
+          placementNodes={placementNodes}
+          pendingAckNodes={pendingAckNodes}
+        />
+      );
+    });
+  });
+
   return (
-    <div>
-      <table className="w-full border-collapse">
-        <thead>
-          <tr
-            className={`text-left text-[0.7em] font-medium uppercase tracking-[0.15em] border-b ${c(
-              "text-text-muted border-ink-border-subtle",
-              "text-light-text-muted border-light-border-subtle",
-            )}`}
-          >
-            <th className="px-4 py-2 font-medium">Chunk ID</th>
-            <th className="px-2 py-2 font-medium">Time Range</th>
-            <th className="px-2 py-2 font-medium">Status</th>
-            <th className="px-2 py-2 font-medium text-right">Records</th>
-            <th className="px-4 py-2 font-medium text-right">Size</th>
-          </tr>
-        </thead>
-        <tbody>
-          {vaultMatches.map((v: { id: Uint8Array }) => encode(v.id)).map((vId: string) => {
-            const group = chunkGroups.get(vId);
-            const remote = remoteVaultInfo.find((rv: { id: string }) => rv.id === vId);
+    <div className="mt-4 px-4 pb-4">
+      {vaultIds.map((vId: string) => {
+        const group = chunkGroups.get(vId);
+        const remote = remoteVaultInfo.find((rv: { id: string }) => rv.id === vId);
+        const vaultCfg = config?.vaults.find((v) => encode(v.id) === vId);
+        const rf = vaultCfg?.replicationFactor || remote?.rf || 1;
+        const followerIds = vaultCfg
+          ? followerNodeIds(vaultCfg, nscs)
+          : remote?.followerNodeIds ?? [];
+        const leaderId = vaultCfg ? leaderNodeId(vaultCfg, nscs) : "";
+        const leaderName = leaderId
+          ? resolveNodeName(nodeNameMap, leaderId)
+          : remote?.nodeName ?? "";
+        const storageClass = vaultCfg?.storageClass ?? remote?.storageClass ?? 0;
 
-            // Remote vault with no local chunks — single placeholder row.
-            if (!group && remote) {
-              return (
-                <tr
-                  key={vId}
-                  className={`text-[0.75em] font-medium uppercase tracking-[0.12em] border-b ${c(
-                    "text-text-muted border-ink-border-subtle bg-ink-base/30",
-                    "text-light-text-muted border-light-border-subtle bg-light-base/30",
-                  )}`}
-                >
-                  <td colSpan={5} className="px-4 py-1.5">
-                    <span className="inline-flex flex-wrap items-center gap-2">
-              <Badge variant="muted" dark={dark}>{remote.type.toUpperCase()}</Badge>
-              <span>{remote.nodeName ? `on ${remote.nodeName}` : "unplaced"}</span>
-              {remote.rf > 1 && <Badge variant="info" dark={dark}>{`RF=${String(remote.rf)}`}</Badge>}
-              {remote.followerNodeIds.length > 0 && (
-                <span>
-                  {"\u2192 "}
-                  {remote.followerNodeIds.map((id: string, si: number) => {
-                    const name = resolveNodeName(nodeNameMap, id);
-                    let fallbackClass = 0;
-                    if (remote.storageClass > 0) {
-                      const nsc = (config?.nodeStorageConfigs ?? []).find((n) => encode(n.nodeId) === id);
-                      const hasExact = nsc?.fileStorages.some((a) => a.storageClass === remote.storageClass);
-                      if (!hasExact && nsc && nsc.fileStorages.length > 0) {
-                        fallbackClass = nsc.fileStorages[0]!.storageClass;
-                      }
-                    }
-                    return (
-                      <span key={id}>
-                        {si > 0 && ", "}
-                        {name}
-                        {fallbackClass > 0 && (
-                          <span className="text-severity-warn">{` (class ${String(fallbackClass)})`}</span>
-                        )}
-                      </span>
-                    );
-                  })}
-                </span>
-              )}
-                    </span>
-                  </td>
-                </tr>
-              );
-            }
+        return (
+          <VaultPlacementSummary
+            key={vId}
+            leaderName={leaderName}
+            followerIds={followerIds}
+            rf={rf}
+            storageClass={storageClass}
+            jsonlPath={group?.vaultType === "jsonl" ? vaultCfg?.path : undefined}
+            nscs={nscs}
+            nodeNameMap={nodeNameMap}
+            dark={dark}
+          />
+        );
+      })}
 
-            if (!group) return null;
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h3
+          className={`text-[0.75em] font-medium uppercase tracking-[0.15em] ${c("text-text-muted", "text-light-text-muted")}`}
+        >
+          Chunks
+        </h3>
+        <ValidateVaultButton vaultId={vaultId} dark={dark} />
+      </div>
 
-            const label = group.vaultType.toUpperCase();
-            const vaultCfg = config?.vaults.find((v) => encode(v.id) === vId);
-            const rf = vaultCfg?.replicationFactor || 1;
-            const secondaries = vaultCfg ? followerNodeIds(vaultCfg, nscs) : [];
-            const pnId = vaultCfg ? leaderNodeId(vaultCfg, nscs) : "";
-            const nodeName = pnId ? resolveNodeName(nodeNameMap, pnId) : "";
-            return (
-              <Fragment key={vId}>
-                <tr
-                  className={`text-[0.75em] font-medium uppercase tracking-[0.12em] border-b ${c(
-                    "text-text-muted border-ink-border-subtle bg-ink-base/30",
-                    "text-light-text-muted border-light-border-subtle bg-light-base/30",
-                  )}`}
-                >
-                  <td colSpan={5} className="px-4 py-1.5">
-                    <span className="inline-flex flex-wrap items-center gap-2">
-                      <Badge variant="copper" dark={dark}>{label}</Badge>
-                      {nodeName && <span>{`on ${nodeName}`}</span>}
-                      {group.vaultType === "jsonl" && vaultCfg?.path && (
-                        <span className="font-mono">{vaultCfg.path}</span>
-                      )}
-                      <span>{`${String(group.chunks.length)} ${group.chunks.length === 1 ? "chunk" : "chunks"}`}</span>
-                      <span>{`${group.chunks.reduce((sum, ch) => sum + Number(ch.recordCount), 0).toLocaleString()} records`}</span>
-                      {rf > 1 && <Badge variant="info" dark={dark}>{`RF=${String(rf)}`}</Badge>}
-                      {secondaries.length > 0 && (
-                        <span>
-                          {"\u2192 "}
-                          {secondaries.map((id, si) => {
-                            const name = resolveNodeName(nodeNameMap, id);
-                            const requiredClass = vaultCfg?.storageClass ?? 0;
-                            let fallbackClass = 0;
-                            if (requiredClass > 0) {
-                              const nsc = nscs.find((n) => encode(n.nodeId) === id);
-                              const hasExact = nsc?.fileStorages.some((a) => a.storageClass === requiredClass);
-                              if (!hasExact && nsc && nsc.fileStorages.length > 0) {
-                                fallbackClass = nsc.fileStorages[0]!.storageClass;
-                              }
-                            }
-                            return (
-                              <span key={id}>
-                                {si > 0 && ", "}
-                                {name}
-                                {fallbackClass > 0 && (
-                                  <span className="text-severity-warn">{` (class ${String(fallbackClass)})`}</span>
-                                )}
-                              </span>
-                            );
-                          })}
-                        </span>
-                      )}
-                    </span>
-                  </td>
-                </tr>
-                {sortChunks(group.chunks).map((chunk) => {
-                const start = chunkStartInstant(chunk);
-                const end = chunkEndInstant(chunk, start);
-                const isExpanded = expandedChunk === encode(chunk.id);
-
-                const replicas = chunk.replicaCount || 1;
-                // Actual residency from the cluster fan-out: which nodes
-                // physically hold this chunk right now. Distinct from
-                // placement (leader + secondaries from vault config), which
-                // says where the chunk SHOULD live, not where it IS.
-                const residentNodes = chunk.replicaNodeIds.map((id) =>
-                  resolveNodeName(nodeNameMap, id),
-                );
-                const placementNodes = vaultCfg
-                  ? [pnId, ...secondaries].filter(Boolean).map((id) => resolveNodeName(nodeNameMap, id))
-                  : [];
-                // Per-node ack laggards for chunks stuck in the receipt
-                // protocol's pendingDeletes — tells operators which node
-                // is holding up a delete.
-                const pendingAckNodes = chunk.pendingAckNodeIds.map((id) =>
-                  resolveNodeName(nodeNameMap, id),
-                );
-                return (
-                  <ChunkRow
-                    key={encode(chunk.id)}
-                    chunk={chunk}
-                    vaultId={vaultId}
-                    start={start}
-                    end={end}
-                    isExpanded={isExpanded}
-                    onToggle={() => setExpandedChunk(isExpanded ? null : encode(chunk.id))}
-                    dark={dark}
-                    c={c}
-                    replicas={replicas}
-                    rf={rf}
-                    residentNodes={residentNodes}
-                    placementNodes={placementNodes}
-                    pendingAckNodes={pendingAckNodes}
-                  />
-                );
-                })}
-              </Fragment>
-            );
-          })}
-        </tbody>
-      </table>
+      {chunkRows.length > 0 ? (
+        <div
+          className={`rounded-lg border overflow-hidden ${c("border-ink-border", "border-light-border")}`}
+        >
+          <table className="w-full border-collapse">
+            <thead>
+              <tr
+                className={`text-left text-[0.7em] font-medium uppercase tracking-[0.15em] border-b ${c(
+                  "text-text-muted border-ink-border-subtle bg-ink-well",
+                  "text-light-text-muted border-light-border-subtle bg-light-well",
+                )}`}
+              >
+                <th className="px-4 py-2 font-medium">Chunk ID</th>
+                <th className="px-2 py-2 font-medium">Time Range</th>
+                <th className="px-2 py-2 font-medium">Status</th>
+                <th className="px-2 py-2 font-medium text-right">Records</th>
+                <th className="px-4 py-2 font-medium text-right">Size</th>
+              </tr>
+            </thead>
+            <tbody>{chunkRows}</tbody>
+          </table>
+        </div>
+      ) : (
+        <div className={`text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}>
+          No chunks on this node yet.
+        </div>
+      )}
     </div>
   );
 }

@@ -70,6 +70,27 @@ func manifestEntryToChunkMeta(e vaultctlfsm.ManifestEntry, sealed bool) chunk.Ch
 	}
 }
 
+// openChunkManifestToChunkMeta projects a pipeline open/sealed manifest into
+// chunk metadata for WatchChunks events. Every vault-ctl voter applies the
+// same manifest commands, so events derived here are cluster-wide.
+func openChunkManifestToChunkMeta(m *vaultctlfsm.OpenChunkManifest, state chunk.ChunkState) chunk.ChunkMeta {
+	if m == nil {
+		return chunk.ChunkMeta{}
+	}
+	meta := chunk.ChunkMeta{
+		ID:          m.ChunkID,
+		WriteStart:  m.OpenedAt,
+		IngestStart: m.OpenedAt,
+		SourceStart: m.OpenedAt,
+		State:       state,
+		RecordCount: int64(m.TotalRecords), //nolint:gosec // G115: manifest totals fit in int64 for chunk metadata
+		Bytes:       int64(m.TotalBytes),   //nolint:gosec // G115: manifest totals fit in int64 for chunk metadata
+		Sealed:      state == chunk.ChunkStateSealed,
+	}
+	vaultctlfsm.ApplyManifestBoundsToChunkMeta(&meta, m.Bounds)
+	return meta
+}
+
 // ChunkChangeOp identifies what changed about a chunk in a ChunkChangeEvent.
 // Subscribers (WatchChunks RPC handler, downstream cluster fan-out) use the
 // op to decide how to mutate their projection of vault state: CREATED and

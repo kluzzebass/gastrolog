@@ -89,6 +89,25 @@ func (a *orchStatsAdapter) RouteStats() cluster.StatsRouteSnapshot {
 	return snap
 }
 
+func (a *orchStatsAdapter) PipelineDiskSnapshots() []cluster.StatsVaultPipelineDiskSnapshot {
+	vaultIDs := a.orch.ListVaults()
+	out := make([]cluster.StatsVaultPipelineDiskSnapshot, 0, len(vaultIDs))
+	for _, vaultID := range vaultIDs {
+		disk, err := a.orch.LocalPipelineDiskSegmentCounts(vaultID)
+		if err != nil {
+			continue
+		}
+		out = append(out, cluster.StatsVaultPipelineDiskSnapshot{
+			VaultID:          vaultID,
+			Working:          disk.Working,
+			CompletedStaging: disk.CompletedStaging,
+			Head:             disk.Head,
+			PreHead:          disk.PreHead,
+		})
+	}
+	return out
+}
+
 // jobBroadcastAdapter bridges the scheduler to the cluster.JobsProvider interface.
 type jobBroadcastAdapter struct {
 	scheduler *orchestrator.Scheduler
@@ -311,6 +330,21 @@ func newListChunksExecutor(o *orchestrator.Orchestrator) cluster.ListChunksExecu
 			out = append(out, pb)
 		}
 		return out, nil
+	}
+}
+
+func newPipelineBacklogDiskExecutor(o *orchestrator.Orchestrator) cluster.PipelineBacklogDiskExecutor {
+	return func(ctx context.Context, vaultID glid.GLID) (*gastrologv1.ForwardGetPipelineBacklogResponse, error) {
+		disk, err := o.LocalPipelineDiskSegmentCounts(vaultID)
+		if err != nil {
+			return nil, err
+		}
+		return &gastrologv1.ForwardGetPipelineBacklogResponse{
+			WorkingSegments:          uint32(disk.Working),          //nolint:gosec
+			CompletedStagingSegments: uint32(disk.CompletedStaging),   //nolint:gosec
+			HeadSegments:             uint32(disk.Head),               //nolint:gosec
+			PreHeadSegments:          uint32(disk.PreHead),            //nolint:gosec
+		}, nil
 	}
 }
 

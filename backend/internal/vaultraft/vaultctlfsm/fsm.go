@@ -224,7 +224,9 @@ type FSM struct {
 	// without polling. No callers wired yet — adding the surface here
 	// unblocks subsequent steps without requiring an FSM API churn.
 	onCreate           func(ManifestEntry) // CmdCreateChunk applied; passes the freshly-created entry
-	onSeal             func(ManifestEntry) // CmdSealChunk applied; passes the now-sealed entry
+	// onSeal fan-out: slot 0 is SetOnSeal (reconciler); AddOnSeal uses ids ≥ 1.
+	onSeal             map[int]func(ManifestEntry)
+	onSealSeq          int
 	onRetentionPending func(chunk.ChunkID) // CmdRetentionPending applied
 
 	// Step-2 receipt-protocol state and hooks for gastrolog-51gme.
@@ -268,7 +270,11 @@ type FSM struct {
 
 	// onSealedManifest fires after SealOpenChunkManifest transitions open →
 	// sealed manifest awaiting local GLCB build (outside the FSM lock).
-	onSealedManifest func(*OpenChunkManifest)
+	// Slot 0 is reserved for SetOnSealedManifest; AddOnSealedManifest uses
+	// monotonic ids ≥ 1 so orchestrator chunk-bus wiring can coexist with
+	// the chunking manager's primary callback.
+	onSealedManifest    map[int]func(*OpenChunkManifest)
+	onSealedManifestSeq int
 	// onSealedManifestCleared fires after CmdSealChunk clears the pending
 	// sealed manifest, signalling the build cycle finished (outside the FSM
 	// lock). The chunking planner uses it to start the next manifest.
@@ -280,9 +286,13 @@ type FSM struct {
 	onPublishCompletedSegment map[int]func(CompletedSegmentEntry)
 	onPublishSeq              int
 	// onOpenChunkManifest fires after a new open-chunk manifest is created.
-	onOpenChunkManifest func(*OpenChunkManifest)
+	// Slot 0 is reserved for SetOnOpenChunkManifest; AddOnOpenChunkManifest
+	// uses monotonic ids ≥ 1.
+	onOpenChunkManifest    map[int]func(*OpenChunkManifest)
+	onOpenChunkManifestSeq int
 	// onOpenChunkRefAdded fires after a new segment ref is appended to the open manifest.
-	onOpenChunkRefAdded func(*OpenChunkManifest)
+	onOpenChunkRefAdded    map[int]func(*OpenChunkManifest)
+	onOpenChunkRefAddedSeq int
 	// onReleaseSegments fan-out: each subscriber fires after ReleaseSegments drops
 	// registry entries (outside the FSM lock).
 	onReleaseSegments map[int]func([]glid.GLID)
@@ -399,7 +409,39 @@ func (f *FSM) SetOnUpload(fn func(ManifestEntry)) {
 func (f *FSM) SetOnSeal(fn func(ManifestEntry)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.onSeal = fn
+	if f.onSeal == nil {
+		f.onSeal = make(map[int]func(ManifestEntry))
+	}
+	if fn == nil {
+		delete(f.onSeal, 0)
+		return
+	}
+	f.onSeal[0] = fn
+}
+
+// AddOnSeal registers an additional callback invoked (outside the FSM lock)
+// after CmdSealChunk applies. The returned closure removes this subscriber
+// without disturbing SetOnSeal's slot-0 callback (reconciler).
+func (f *FSM) AddOnSeal(fn func(ManifestEntry)) (remove func()) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.onSeal == nil {
+		f.onSeal = make(map[int]func(ManifestEntry))
+	}
+	id := f.onSealSeq
+	if id == 0 {
+		id = 1
+	}
+	f.onSealSeq++
+	if f.onSealSeq == 0 {
+		f.onSealSeq = 1
+	}
+	f.onSeal[id] = fn
+	return func() {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		delete(f.onSeal, id)
+	}
 }
 
 // SetOnSealedManifest registers a callback invoked (outside the FSM lock)
@@ -409,7 +451,41 @@ func (f *FSM) SetOnSeal(fn func(ManifestEntry)) {
 func (f *FSM) SetOnSealedManifest(fn func(*OpenChunkManifest)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.onSealedManifest = fn
+	if f.onSealedManifest == nil {
+		f.onSealedManifest = make(map[int]func(*OpenChunkManifest))
+	}
+	if fn == nil {
+		delete(f.onSealedManifest, 0)
+		return
+	}
+	f.onSealedManifest[0] = fn
+}
+
+// AddOnSealedManifest registers an additional callback invoked (outside the
+// FSM lock) after SealOpenChunkManifest transitions the open manifest into
+// sealedManifest. Idempotent replays do not fire. The returned closure
+// removes this subscriber without disturbing SetOnSealedManifest's slot-0
+// callback (chunking manager).
+func (f *FSM) AddOnSealedManifest(fn func(*OpenChunkManifest)) (remove func()) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.onSealedManifest == nil {
+		f.onSealedManifest = make(map[int]func(*OpenChunkManifest))
+	}
+	id := f.onSealedManifestSeq
+	if id == 0 {
+		id = 1
+	}
+	f.onSealedManifestSeq++
+	if f.onSealedManifestSeq == 0 {
+		f.onSealedManifestSeq = 1
+	}
+	f.onSealedManifest[id] = fn
+	return func() {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		delete(f.onSealedManifest, id)
+	}
 }
 
 // SetOnSealedManifestCleared registers a callback invoked (outside the FSM
@@ -489,7 +565,40 @@ func (f *FSM) AddOnPublishCompletedSegment(fn func(CompletedSegmentEntry)) (remo
 func (f *FSM) SetOnOpenChunkManifest(fn func(*OpenChunkManifest)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.onOpenChunkManifest = fn
+	if f.onOpenChunkManifest == nil {
+		f.onOpenChunkManifest = make(map[int]func(*OpenChunkManifest))
+	}
+	if fn == nil {
+		delete(f.onOpenChunkManifest, 0)
+		return
+	}
+	f.onOpenChunkManifest[0] = fn
+}
+
+// AddOnOpenChunkManifest registers an additional callback invoked (outside the
+// FSM lock) after OpenChunkManifest creates a new open manifest. Idempotent
+// replays do not fire. The returned closure removes this subscriber without
+// disturbing SetOnOpenChunkManifest's slot-0 callback (chunking manager).
+func (f *FSM) AddOnOpenChunkManifest(fn func(*OpenChunkManifest)) (remove func()) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.onOpenChunkManifest == nil {
+		f.onOpenChunkManifest = make(map[int]func(*OpenChunkManifest))
+	}
+	id := f.onOpenChunkManifestSeq
+	if id == 0 {
+		id = 1
+	}
+	f.onOpenChunkManifestSeq++
+	if f.onOpenChunkManifestSeq == 0 {
+		f.onOpenChunkManifestSeq = 1
+	}
+	f.onOpenChunkManifest[id] = fn
+	return func() {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		delete(f.onOpenChunkManifest, id)
+	}
 }
 
 // SetOnOpenChunkRefAdded registers a callback invoked (outside the FSM lock)
@@ -498,7 +607,39 @@ func (f *FSM) SetOnOpenChunkManifest(fn func(*OpenChunkManifest)) {
 func (f *FSM) SetOnOpenChunkRefAdded(fn func(*OpenChunkManifest)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.onOpenChunkRefAdded = fn
+	if f.onOpenChunkRefAdded == nil {
+		f.onOpenChunkRefAdded = make(map[int]func(*OpenChunkManifest))
+	}
+	if fn == nil {
+		delete(f.onOpenChunkRefAdded, 0)
+		return
+	}
+	f.onOpenChunkRefAdded[0] = fn
+}
+
+// AddOnOpenChunkRefAdded registers an additional ref-added callback. The
+// returned closure removes this subscriber without disturbing
+// SetOnOpenChunkRefAdded's slot-0 callback.
+func (f *FSM) AddOnOpenChunkRefAdded(fn func(*OpenChunkManifest)) (remove func()) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.onOpenChunkRefAdded == nil {
+		f.onOpenChunkRefAdded = make(map[int]func(*OpenChunkManifest))
+	}
+	id := f.onOpenChunkRefAddedSeq
+	if id == 0 {
+		id = 1
+	}
+	f.onOpenChunkRefAddedSeq++
+	if f.onOpenChunkRefAddedSeq == 0 {
+		f.onOpenChunkRefAddedSeq = 1
+	}
+	f.onOpenChunkRefAdded[id] = fn
+	return func() {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		delete(f.onOpenChunkRefAdded, id)
+	}
 }
 
 // SetOnRetentionPending registers a callback invoked (outside the FSM
@@ -681,12 +822,12 @@ type applyEffects struct {
 	onCreate                     func(ManifestEntry)
 	onDelete                     func(chunk.ChunkID)
 	onUpload                     func(ManifestEntry)
-	onSeal                       func(ManifestEntry)
-	onSealedManifest             func(*OpenChunkManifest)
+	onSeal                       []func(ManifestEntry)
+	onSealedManifest             []func(*OpenChunkManifest)
 	onSealedManifestCleared      func(chunk.ChunkID)
 	onPublishCompletedSegment    []func(CompletedSegmentEntry)
-	onOpenChunkManifest          func(*OpenChunkManifest)
-	onOpenChunkRefAdded          func(*OpenChunkManifest)
+	onOpenChunkManifest          []func(*OpenChunkManifest)
+	onOpenChunkRefAdded          []func(*OpenChunkManifest)
 	onReleaseSegments            map[int]func([]glid.GLID)
 	onAckSegmentHolder           map[int]func(glid.GLID)
 	onRetentionPending           func(chunk.ChunkID)
@@ -706,8 +847,10 @@ func (e applyEffects) fire() {
 	if e.uploadedEntry != nil && e.onUpload != nil {
 		e.onUpload(*e.uploadedEntry)
 	}
-	if e.sealedEntry != nil && e.onSeal != nil {
-		e.onSeal(*e.sealedEntry)
+	if e.sealedEntry != nil {
+		for _, fn := range e.onSeal {
+			fn(*e.sealedEntry)
+		}
 	}
 	e.firePipelineCallbacks()
 	if e.retentionPendingID != nil && e.onRetentionPending != nil {
@@ -729,8 +872,10 @@ func (e applyEffects) fire() {
 }
 
 func (e applyEffects) firePipelineCallbacks() {
-	if e.sealedManifest != nil && e.onSealedManifest != nil {
-		e.onSealedManifest(e.sealedManifest)
+	if e.sealedManifest != nil {
+		for _, fn := range e.onSealedManifest {
+			fn(e.sealedManifest)
+		}
 	}
 	if e.sealedManifestClearedID != nil && e.onSealedManifestCleared != nil {
 		e.onSealedManifestCleared(*e.sealedManifestClearedID)
@@ -740,11 +885,15 @@ func (e applyEffects) firePipelineCallbacks() {
 			fn(*e.publishedSegment)
 		}
 	}
-	if e.openChunkOpened != nil && e.onOpenChunkManifest != nil {
-		e.onOpenChunkManifest(e.openChunkOpened)
+	if e.openChunkOpened != nil {
+		for _, fn := range e.onOpenChunkManifest {
+			fn(e.openChunkOpened)
+		}
 	}
-	if e.openChunkRefAdded != nil && e.onOpenChunkRefAdded != nil {
-		e.onOpenChunkRefAdded(e.openChunkRefAdded)
+	if e.openChunkRefAdded != nil {
+		for _, fn := range e.onOpenChunkRefAdded {
+			fn(e.openChunkRefAdded)
+		}
 	}
 	if len(e.releasedSegmentIDs) > 0 {
 		for _, fn := range e.onReleaseSegments {
@@ -919,8 +1068,18 @@ func (f *FSM) attachApplyCallbacks(fx *applyEffects) {
 	fx.onCreate = f.onCreate
 	fx.onDelete = f.onDelete
 	fx.onUpload = f.onUpload
-	fx.onSeal = f.onSeal
-	fx.onSealedManifest = f.onSealedManifest
+	if len(f.onSeal) > 0 {
+		fx.onSeal = make([]func(ManifestEntry), 0, len(f.onSeal))
+		for _, fn := range f.onSeal {
+			fx.onSeal = append(fx.onSeal, fn)
+		}
+	}
+	if len(f.onSealedManifest) > 0 {
+		fx.onSealedManifest = make([]func(*OpenChunkManifest), 0, len(f.onSealedManifest))
+		for _, fn := range f.onSealedManifest {
+			fx.onSealedManifest = append(fx.onSealedManifest, fn)
+		}
+	}
 	fx.onSealedManifestCleared = f.onSealedManifestCleared
 	if len(f.onPublishCompletedSegment) > 0 {
 		fx.onPublishCompletedSegment = make([]func(CompletedSegmentEntry), 0, len(f.onPublishCompletedSegment))
@@ -928,8 +1087,18 @@ func (f *FSM) attachApplyCallbacks(fx *applyEffects) {
 			fx.onPublishCompletedSegment = append(fx.onPublishCompletedSegment, fn)
 		}
 	}
-	fx.onOpenChunkManifest = f.onOpenChunkManifest
-	fx.onOpenChunkRefAdded = f.onOpenChunkRefAdded
+	if len(f.onOpenChunkManifest) > 0 {
+		fx.onOpenChunkManifest = make([]func(*OpenChunkManifest), 0, len(f.onOpenChunkManifest))
+		for _, fn := range f.onOpenChunkManifest {
+			fx.onOpenChunkManifest = append(fx.onOpenChunkManifest, fn)
+		}
+	}
+	if len(f.onOpenChunkRefAdded) > 0 {
+		fx.onOpenChunkRefAdded = make([]func(*OpenChunkManifest), 0, len(f.onOpenChunkRefAdded))
+		for _, fn := range f.onOpenChunkRefAdded {
+			fx.onOpenChunkRefAdded = append(fx.onOpenChunkRefAdded, fn)
+		}
+	}
 	if len(f.onReleaseSegments) > 0 {
 		fx.onReleaseSegments = maps.Clone(f.onReleaseSegments)
 	}

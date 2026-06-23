@@ -237,6 +237,12 @@ enroll_nodes() {
   done
   if [[ ! -f "${DATA_DIR}/cluster-token" ]]; then
     echo ">>> Error: timed out waiting for join token" >&2
+    if [[ -f "${DATA_DIR}/init-1.log" ]]; then
+      echo ">>> node 1 log (last 30 lines):" >&2
+      tail -30 "${DATA_DIR}/init-1.log" >&2
+    else
+      echo ">>> (no ${DATA_DIR}/init-1.log — node 1 may have failed before logging)" >&2
+    fi
     cleanup
     exit 1
   fi
@@ -307,7 +313,7 @@ configure() {
 
   echo ">>> Creating vaults..."
   # Two-vault local→cloud chain wired via inter-vault routing (gastrolog-4kkoo).
-  #   - first-vault: file-backed on local disk, 10000-records rotation, 3-minute
+  #   - first-vault: file-backed on local disk, 10000-records rotation, 1-hour
   #                  retention. Chunks past their TTL fire the retention
   #                  sweep, which streams their records back through the
   #                  routing engine.
@@ -316,7 +322,7 @@ configure() {
   #                  no retention policy means data lives forever.
   $GLOG config vault create --addr "$S" --name "first-vault" \
     --type file --storage-class 1 --replication-factor "$NODES" \
-    --rotation-policy "10000-records" --retention-policy "3m-retain" 2>&1 | sed 's/^/  /'
+    --rotation-policy "10000-records" --retention-policy "1h-retain" 2>&1 | sed 's/^/  /'
   $GLOG config vault create --addr "$S" --name "second-vault" \
     --type file --storage-class 1 --replication-factor "$NODES" \
     --cloud-service "S3" \
@@ -343,7 +349,7 @@ configure() {
     --name "ingest-to-first" \
     --expression '_source = "ingest"' \
     --destination "first-vault" 2>&1 | sed 's/^/  /'
-  # First-vault retention firing → second-vault. When first-vault's 3m retention
+  # First-vault retention firing → second-vault. When first-vault's 1h retention
   # expires a chunk, its records stream back through the routing engine with
   # `_source = "retention"` and `_vault = "<first-vault-id>"`. This route picks
   # them up and lands them in second-vault before the original chunk is
@@ -364,13 +370,12 @@ configure() {
       NODE_IDS+=("$nid")
     fi
   done
-  local CHATTER_NODE SCATTER_NODE
+  local CHATTER_NODE
   CHATTER_NODE="${NODE_IDS[$((RANDOM % ${#NODE_IDS[@]}))]}"
-  SCATTER_NODE="${NODE_IDS[$((RANDOM % ${#NODE_IDS[@]}))]}"
   $GLOG config ingester create --addr "$S" \
     --name "chatterbox" --type chatterbox --node-id "$CHATTER_NODE" --enabled=false 2>&1 | sed 's/^/  /'
   $GLOG config ingester create --addr "$S" \
-    --name "scatterbox" --type scatterbox --node-id "$SCATTER_NODE" --enabled=false 2>&1 | sed 's/^/  /'
+    --name "scatterbox" --type scatterbox --all-nodes --param interval=1ms --enabled=false 2>&1 | sed 's/^/  /'
 }
 
 # --- Main ---

@@ -436,8 +436,122 @@ func TestLeaderPlannerSecondManifestSkipsConsumedSegments(t *testing.T) {
 	}
 }
 
+// TestLazyPlannerPartialPathIndexesOneSegment ensures continuing a partial
+// manifest ref opens only that segment's index, not the full registry.
+func TestLazyPlannerPartialPathIndexesOneSegment(t *testing.T) {
+	t.Parallel()
+	const segmentCount = 50
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	pubAt := base.Add(time.Minute)
+	vaultID := glid.New()
+	vaultRoot := t.TempDir()
+	segA := glid.New()
+	segIDs := make([]glid.GLID, 0, segmentCount)
+	segIDs = append(segIDs, segA)
+	for i := 1; i < segmentCount; i++ {
+		segIDs = append(segIDs, glid.New())
+	}
+	for i, segID := range segIDs {
+		ts := base.Add(time.Duration(i) * time.Second)
+		writeCompletedSegment(t, vaultRoot, segID, vaultID, []recordForSeg{
+			{0, ts, "a"},
+			{1, ts.Add(time.Millisecond), "b"},
+		})
+	}
+
+	fsm := vaultctlfsm.New()
+	applier := &fsmApplier{fsm: fsm}
+	var indexOpens atomic.Int64
+	indexOpener := func(path string) (*chunking.OrderedIndex, error) {
+		indexOpens.Add(1)
+		return chunking.BuildOrderedIndex(path)
+	}
+
+	mgr := chunking.New(chunking.Config{})
+	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
+		VaultRoot:   vaultRoot,
+		ChunkRoot:   filepath.Join(vaultRoot, "chunks"),
+		FSM:         fsm,
+		Locate:      chunking.VaultSegmentLocator{Root: vaultRoot},
+		Applier:     applier,
+		IsLeader:    func() bool { return true },
+		Policy:      chunking.ManifestRotationPolicy{MaxRecords: 1000},
+		IndexOpener: indexOpener,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for i, segID := range segIDs {
+		ts := base.Add(time.Duration(i) * time.Second)
+		publishSegment(t, fsm, segID, pubAt.Add(time.Duration(i)*time.Millisecond), 2, ts, ts.Add(time.Millisecond))
+	}
+
+	ctx := t.Context()
+	if err := mgr.PlanOnce(ctx, vaultID); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.PlanOnce(ctx, vaultID); err != nil {
+		t.Fatal(err)
+	}
+	open := fsm.OpenChunk()
+	if open == nil || len(open.Refs) != 1 || open.Refs[0].SegmentID != segA {
+		t.Fatalf("open refs = %+v, want one partial ref on segA", open)
+	}
+
+	indexOpens.Store(0)
+	if err := mgr.PlanOnce(ctx, vaultID); err != nil {
+		t.Fatal(err)
+	}
+	if got := indexOpens.Load(); got > 1 {
+		t.Fatalf("partial planOnce index opens = %d, want at most 1", got)
+	}
+}
+
+// TestLazyPlannerOpenManifestSkipsIndexes guards the open-manifest fast path:
+// the first planner step must not open segment indexes before the manifest exists.
+func TestLazyPlannerOpenManifestSkipsIndexes(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	pubAt := base.Add(time.Minute)
+	segID := glid.New()
+	vaultID := glid.New()
+	vaultRoot := t.TempDir()
+	writeCompletedSegment(t, vaultRoot, segID, vaultID, []recordForSeg{{0, base, "a"}})
+
+	fsm := vaultctlfsm.New()
+	applier := &fsmApplier{fsm: fsm}
+	var indexOpens atomic.Int64
+	indexOpener := func(path string) (*chunking.OrderedIndex, error) {
+		indexOpens.Add(1)
+		return chunking.BuildOrderedIndex(path)
+	}
+
+	mgr := chunking.New(chunking.Config{})
+	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
+		VaultRoot:   vaultRoot,
+		ChunkRoot:   filepath.Join(vaultRoot, "chunks"),
+		FSM:         fsm,
+		Locate:      chunking.VaultSegmentLocator{Root: vaultRoot},
+		Applier:     applier,
+		IsLeader:    func() bool { return true },
+		Policy:      chunking.ManifestRotationPolicy{MaxRecords: 1000},
+		IndexOpener: indexOpener,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	publishSegment(t, fsm, segID, pubAt, 1, base, base)
+
+	ctx := t.Context()
+	if err := mgr.PlanOnce(ctx, vaultID); err != nil {
+		t.Fatal(err)
+	}
+	if got := indexOpens.Load(); got != 0 {
+		t.Fatalf("open-manifest PlanOnce index opens = %d, want 0", got)
+	}
+}
+
 // TestLoadSegmentViewsCachesIndexesAcrossPlanSteps guards gastrolog-3bn3q:
-// planOnce must not re-open every active registry segment on each step.
+// once a segment index is warm, later partial-manifest steps must not reopen it.
 func TestLoadSegmentViewsCachesIndexesAcrossPlanSteps(t *testing.T) {
 	t.Parallel()
 	const segmentCount = 20
@@ -480,12 +594,15 @@ func TestLoadSegmentViewsCachesIndexesAcrossPlanSteps(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	indexOpens.Store(0)
 	if err := mgr.PlanOnce(ctx, vaultID); err != nil {
 		t.Fatal(err)
 	}
-	if got := indexOpens.Load(); got != segmentCount {
-		t.Fatalf("first PlanOnce index opens = %d, want %d (cold cache)", got, segmentCount)
+	if err := mgr.PlanOnce(ctx, vaultID); err != nil {
+		t.Fatal(err)
+	}
+	open := fsm.OpenChunk()
+	if open == nil || len(open.Refs) != 1 {
+		t.Fatalf("open refs = %+v, want one ref", open)
 	}
 
 	indexOpens.Store(0)
@@ -493,7 +610,7 @@ func TestLoadSegmentViewsCachesIndexesAcrossPlanSteps(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := indexOpens.Load(); got != 0 {
-		t.Fatalf("second PlanOnce index opens = %d, want 0 (warm cache)", got)
+		t.Fatalf("warm-cache partial PlanOnce index opens = %d, want 0", got)
 	}
 }
 

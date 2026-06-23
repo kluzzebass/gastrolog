@@ -161,6 +161,9 @@ type Server struct {
 	// listChunksExecutor lists chunks in a local vault for remote ListChunks requests.
 	listChunksExecutor ListChunksExecutor
 
+	// pipelineBacklogDiskExecutor returns local pipeline disk counts for remote fan-out.
+	pipelineBacklogDiskExecutor PipelineBacklogDiskExecutor
+
 	// getIndexesExecutor returns index status for a local chunk for remote GetIndexes requests.
 	getIndexesExecutor GetIndexesExecutor
 

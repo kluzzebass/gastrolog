@@ -125,6 +125,21 @@ message NodeStats {
   // broadcast, vault replication, query forwarding, chunk streaming, etc.
   // See gastrolog-47u85.
   repeated PeerBytesStat peer_bytes = 35;
+
+  // Per-vault on-disk pipeline segment counts on this node (working/completed
+  // at origins; head/pre-head on homes). Aggregated cluster-wide by
+  // WatchSystemStatus for the inspector.
+  repeated VaultPipelineNodeDisk vault_pipeline_disk = 36;
+}
+
+// VaultPipelineNodeDisk is one vault's local pipeline storage areas on a
+// single node, included in the periodic NodeStats broadcast.
+message VaultPipelineNodeDisk {
+  bytes vault_id = 1;
+  uint32 working_segments = 2;
+  uint32 completed_staging_segments = 3;
+  uint32 head_segments = 4;
+  uint32 pre_head_segments = 5;
 }
 
 // PeerBytesStat reports cumulative gRPC wire bytes sent to and received from
@@ -319,6 +334,19 @@ message ForwardListChunksRequest {
 
 message ForwardListChunksResponse {
   repeated ChunkMeta chunks = 1;
+}
+
+// ForwardGetPipelineBacklogRequest asks a remote node for its local
+// on-disk pipeline segment counts for one vault.
+message ForwardGetPipelineBacklogRequest {
+  bytes vault_id = 1;
+}
+
+message ForwardGetPipelineBacklogResponse {
+  uint32 working_segments = 1;
+  uint32 completed_staging_segments = 2;
+  uint32 head_segments = 3;
+  uint32 pre_head_segments = 4;
 }
 
 // ForwardWatchChunksRequest opens a peer-to-peer server-streaming

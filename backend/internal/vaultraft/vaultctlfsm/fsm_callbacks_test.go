@@ -445,3 +445,97 @@ func TestOnReleaseSegmentsCallbackFires(t *testing.T) {
 		t.Fatalf("released = %v, want [%s]", released, segA)
 	}
 }
+
+func TestAddOnOpenChunkManifestCoexistsWithSetOn(t *testing.T) {
+	t.Parallel()
+
+	fsm := New()
+	chunkID := chunk.NewChunkID()
+	openedAt := time.Now().UTC()
+
+	var mu sync.Mutex
+	var primary, secondary int
+	fsm.SetOnOpenChunkManifest(func(*OpenChunkManifest) {
+		mu.Lock()
+		primary++
+		mu.Unlock()
+	})
+	remove := fsm.AddOnOpenChunkManifest(func(*OpenChunkManifest) {
+		mu.Lock()
+		secondary++
+		mu.Unlock()
+	})
+	defer remove()
+
+	fsm.Apply(&hraft.Log{Data: MarshalOpenChunkManifest(chunkID, openedAt)})
+
+	mu.Lock()
+	defer mu.Unlock()
+	if primary != 1 || secondary != 1 {
+		t.Fatalf("primary=%d secondary=%d, want 1/1", primary, secondary)
+	}
+}
+
+func TestAddOnSealedManifestCoexistsWithSetOn(t *testing.T) {
+	t.Parallel()
+
+	fsm := New()
+	chunkID := chunk.NewChunkID()
+	openedAt := time.Now().UTC()
+	sealedAt := openedAt.Add(time.Minute)
+
+	fsm.Apply(&hraft.Log{Data: MarshalOpenChunkManifest(chunkID, openedAt)})
+
+	var mu sync.Mutex
+	var primary, secondary int
+	fsm.SetOnSealedManifest(func(*OpenChunkManifest) {
+		mu.Lock()
+		primary++
+		mu.Unlock()
+	})
+	remove := fsm.AddOnSealedManifest(func(*OpenChunkManifest) {
+		mu.Lock()
+		secondary++
+		mu.Unlock()
+	})
+	defer remove()
+
+	fsm.Apply(&hraft.Log{Data: MarshalSealOpenChunkManifest(chunkID, sealedAt)})
+
+	mu.Lock()
+	defer mu.Unlock()
+	if primary != 1 || secondary != 1 {
+		t.Fatalf("primary=%d secondary=%d, want 1/1", primary, secondary)
+	}
+}
+
+func TestAddOnSealCoexistsWithSetOn(t *testing.T) {
+	t.Parallel()
+
+	fsm := New()
+	id := chunk.NewChunkID()
+	now := time.Now()
+
+	var mu sync.Mutex
+	var primary, secondary int
+	fsm.SetOnSeal(func(ManifestEntry) {
+		mu.Lock()
+		primary++
+		mu.Unlock()
+	})
+	remove := fsm.AddOnSeal(func(ManifestEntry) {
+		mu.Lock()
+		secondary++
+		mu.Unlock()
+	})
+	defer remove()
+
+	fsm.Apply(&hraft.Log{Data: MarshalCreateChunk(id, now, now, now)})
+	fsm.Apply(&hraft.Log{Data: MarshalSealChunk(id, now, 1, 1, now, now, now, false)})
+
+	mu.Lock()
+	defer mu.Unlock()
+	if primary != 1 || secondary != 1 {
+		t.Fatalf("primary=%d secondary=%d, want 1/1", primary, secondary)
+	}
+}

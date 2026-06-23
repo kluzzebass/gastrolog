@@ -2416,3 +2416,289 @@ export class RepatriateOrphanResponse extends Message<RepatriateOrphanResponse> 
   }
 }
 
+/**
+ * @generated from message gastrolog.v1.GetPipelineBacklogRequest
+ */
+export class GetPipelineBacklogRequest extends Message<GetPipelineBacklogRequest> {
+  /**
+   * @generated from field: string vault = 1;
+   */
+  vault = "";
+
+  constructor(data?: PartialMessage<GetPipelineBacklogRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.GetPipelineBacklogRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "vault", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetPipelineBacklogRequest {
+    return new GetPipelineBacklogRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetPipelineBacklogRequest {
+    return new GetPipelineBacklogRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetPipelineBacklogRequest {
+    return new GetPipelineBacklogRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: GetPipelineBacklogRequest | PlainMessage<GetPipelineBacklogRequest> | undefined, b: GetPipelineBacklogRequest | PlainMessage<GetPipelineBacklogRequest> | undefined): boolean {
+    return proto3.util.equals(GetPipelineBacklogRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.GetPipelineBacklogResponse
+ */
+export class GetPipelineBacklogResponse extends Message<GetPipelineBacklogResponse> {
+  /**
+   * @generated from field: gastrolog.v1.VaultPipelineBacklog backlog = 1;
+   */
+  backlog?: VaultPipelineBacklog;
+
+  constructor(data?: PartialMessage<GetPipelineBacklogResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.GetPipelineBacklogResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "backlog", kind: "message", T: VaultPipelineBacklog },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetPipelineBacklogResponse {
+    return new GetPipelineBacklogResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetPipelineBacklogResponse {
+    return new GetPipelineBacklogResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetPipelineBacklogResponse {
+    return new GetPipelineBacklogResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: GetPipelineBacklogResponse | PlainMessage<GetPipelineBacklogResponse> | undefined, b: GetPipelineBacklogResponse | PlainMessage<GetPipelineBacklogResponse> | undefined): boolean {
+    return proto3.util.equals(GetPipelineBacklogResponse, a, b);
+  }
+}
+
+/**
+ * VaultPipelineBacklog surfaces chunking pipeline depth for one vault.
+ * Registry and manifest fields come from the replicated vault-ctl FSM
+ * (identical on every voter). Segment counts are summed across all
+ * cluster nodes — every node is an ingest origin, and home nodes hold
+ * head/pre-head copies after distribution.
+ *
+ * @generated from message gastrolog.v1.VaultPipelineBacklog
+ */
+export class VaultPipelineBacklog extends Message<VaultPipelineBacklog> {
+  /**
+   * @generated from field: bytes vault_id = 1;
+   */
+  vaultId = new Uint8Array(0);
+
+  /**
+   * vault-ctl completed-segment registry (replicated).
+   *
+   * @generated from field: uint32 registry_segments = 2;
+   */
+  registrySegments = 0;
+
+  /**
+   * @generated from field: uint32 eligible_segments = 3;
+   */
+  eligibleSegments = 0;
+
+  /**
+   * @generated from field: uint64 registry_records = 4;
+   */
+  registryRecords = protoInt64.zero;
+
+  /**
+   * Open manifest being filled by the chunking planner.
+   *
+   * @generated from field: uint32 open_manifest_refs = 5;
+   */
+  openManifestRefs = 0;
+
+  /**
+   * @generated from field: uint64 open_manifest_records = 6;
+   */
+  openManifestRecords = protoInt64.zero;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp open_manifest_ingest_end = 7;
+   */
+  openManifestIngestEnd?: Timestamp;
+
+  /**
+   * Sealed manifest awaiting local GLCB build on homes.
+   *
+   * @generated from field: bool sealed_manifest_pending = 8;
+   */
+  sealedManifestPending = false;
+
+  /**
+   * On-disk segment file counts (cluster-wide sum).
+   *
+   * @generated from field: uint32 working_segments = 10;
+   */
+  workingSegments = 0;
+
+  /**
+   * @generated from field: uint32 completed_staging_segments = 11;
+   */
+  completedStagingSegments = 0;
+
+  /**
+   * @generated from field: uint32 head_segments = 12;
+   */
+  headSegments = 0;
+
+  /**
+   * @generated from field: uint32 pre_head_segments = 13;
+   */
+  preHeadSegments = 0;
+
+  /**
+   * Oldest LastIngestTS among registry segments still eligible for
+   * planning — how far behind wall clock unchunked data may be.
+   *
+   * @generated from field: google.protobuf.Timestamp oldest_eligible_last_ingest = 14;
+   */
+  oldestEligibleLastIngest?: Timestamp;
+
+  /**
+   * vault-ctl Raft leader for this vault (chunking planner runs here).
+   *
+   * @generated from field: bytes vault_ctl_leader_node_id = 15;
+   */
+  vaultCtlLeaderNodeId = new Uint8Array(0);
+
+  /**
+   * @generated from field: bool connected_node_is_vault_ctl_leader = 16;
+   */
+  connectedNodeIsVaultCtlLeader = false;
+
+  /**
+   * Per-node on-disk segment counts. Every cluster node may act as an ingest
+   * origin (working/completed); home nodes also hold head/pre-head copies.
+   *
+   * @generated from field: repeated gastrolog.v1.PipelineNodeSegments node_segments = 17;
+   */
+  nodeSegments: PipelineNodeSegments[] = [];
+
+  constructor(data?: PartialMessage<VaultPipelineBacklog>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.VaultPipelineBacklog";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "registry_segments", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 3, name: "eligible_segments", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 4, name: "registry_records", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 5, name: "open_manifest_refs", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 6, name: "open_manifest_records", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 7, name: "open_manifest_ingest_end", kind: "message", T: Timestamp },
+    { no: 8, name: "sealed_manifest_pending", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 10, name: "working_segments", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 11, name: "completed_staging_segments", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 12, name: "head_segments", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 13, name: "pre_head_segments", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 14, name: "oldest_eligible_last_ingest", kind: "message", T: Timestamp },
+    { no: 15, name: "vault_ctl_leader_node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 16, name: "connected_node_is_vault_ctl_leader", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 17, name: "node_segments", kind: "message", T: PipelineNodeSegments, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultPipelineBacklog {
+    return new VaultPipelineBacklog().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): VaultPipelineBacklog {
+    return new VaultPipelineBacklog().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): VaultPipelineBacklog {
+    return new VaultPipelineBacklog().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: VaultPipelineBacklog | PlainMessage<VaultPipelineBacklog> | undefined, b: VaultPipelineBacklog | PlainMessage<VaultPipelineBacklog> | undefined): boolean {
+    return proto3.util.equals(VaultPipelineBacklog, a, b);
+  }
+}
+
+/**
+ * PipelineNodeSegments is one node's pipeline storage areas for a vault.
+ *
+ * @generated from message gastrolog.v1.PipelineNodeSegments
+ */
+export class PipelineNodeSegments extends Message<PipelineNodeSegments> {
+  /**
+   * @generated from field: bytes node_id = 1;
+   */
+  nodeId = new Uint8Array(0);
+
+  /**
+   * @generated from field: uint32 working_segments = 2;
+   */
+  workingSegments = 0;
+
+  /**
+   * @generated from field: uint32 completed_staging_segments = 3;
+   */
+  completedStagingSegments = 0;
+
+  /**
+   * @generated from field: uint32 head_segments = 4;
+   */
+  headSegments = 0;
+
+  /**
+   * @generated from field: uint32 pre_head_segments = 5;
+   */
+  preHeadSegments = 0;
+
+  constructor(data?: PartialMessage<PipelineNodeSegments>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PipelineNodeSegments";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "working_segments", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 3, name: "completed_staging_segments", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 4, name: "head_segments", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 5, name: "pre_head_segments", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PipelineNodeSegments {
+    return new PipelineNodeSegments().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PipelineNodeSegments {
+    return new PipelineNodeSegments().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PipelineNodeSegments {
+    return new PipelineNodeSegments().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PipelineNodeSegments | PlainMessage<PipelineNodeSegments> | undefined, b: PipelineNodeSegments | PlainMessage<PipelineNodeSegments> | undefined): boolean {
+    return proto3.util.equals(PipelineNodeSegments, a, b);
+  }
+}
+

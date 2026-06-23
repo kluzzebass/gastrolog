@@ -6,6 +6,7 @@ import { Timestamp } from "@bufbuild/protobuf";
 import {
   ChunkChangeOp,
   ChunkMeta,
+  ChunkState,
   WatchChunksResponse,
 } from "../gen/gastrolog/v1/vault_pb";
 import { encode } from "../glid";
@@ -228,11 +229,17 @@ export function mutateCache(
       // WriteEnd / IngestEnd / Bytes flow through to the inspector, not
       // just record_count.
       const idx = findIdx();
-      if (idx < 0) return prev;
       if (msg.meta) {
-        next[idx] = mergeMeta(next[idx], msg.meta);
+        if (idx >= 0) {
+          next[idx] = mergeMeta(next[idx], msg.meta);
+          return next;
+        }
+        // Pipeline manifest ref updates can arrive before the CREATED event
+        // is applied on this subscriber; upsert so the chunk list converges.
+        next.push(msg.meta);
         return next;
       }
+      if (idx < 0) return prev;
       // Backward-compat for events without an inline meta — record_count
       // update only.
       const existing = next[idx];
@@ -295,6 +302,10 @@ export function mergeMeta(existing: ChunkMeta | undefined, incoming: ChunkMeta):
   if (incoming.sealed) merged.sealed = true;
   if (incoming.cloudBacked) merged.cloudBacked = true;
   if (incoming.archived) merged.archived = true;
+  merged.state = pickChunkState(merged.state, merged.sealed, incoming.state, incoming.sealed);
+  if (merged.sealed) {
+    merged.state = ChunkState.SEALED;
+  }
   merged.compressed = incoming.compressed;
   merged.storageClass = incoming.storageClass;
   // Monotone time-end fields: take max(existing, incoming). CREATED
@@ -357,4 +368,27 @@ function tsZero(t: Timestamp): boolean {
 function tsLess(a: Timestamp, b: Timestamp): boolean {
   if (a.seconds !== b.seconds) return a.seconds < b.seconds;
   return a.nanos < b.nanos;
+}
+
+/** pickChunkState advances lifecycle state monotonically (active → sealing → sealed). */
+function pickChunkState(
+  existing: ChunkState,
+  existingSealed: boolean,
+  incoming: ChunkState,
+  incomingSealed: boolean,
+): ChunkState {
+  const rank = (s: ChunkState, sealed: boolean): number => {
+    if (sealed || s === ChunkState.SEALED) return 3;
+    switch (s) {
+      case ChunkState.SEALING:
+        return 2;
+      case ChunkState.ACTIVE:
+        return 1;
+      default:
+        return 0;
+    }
+  };
+  const existingRank = rank(existing, existingSealed);
+  const incomingRank = rank(incoming, incomingSealed);
+  return incomingRank > existingRank ? incoming : existing;
 }

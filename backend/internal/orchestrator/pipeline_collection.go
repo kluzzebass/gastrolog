@@ -6,10 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"slices"
 
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/collection"
+	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
@@ -28,14 +31,25 @@ type segmentPuller interface {
 // segments. Roll therefore returns every registry entry whose holder set does
 // not yet include the local node.
 type segmentLogReader struct {
-	fsm         *vaultctlfsm.FSM
+	lookup      func() *vaultctlfsm.FSM
 	localNodeID string
 }
 
 var _ collection.LogReader = (*segmentLogReader)(nil)
 
+func (r *segmentLogReader) fsm() *vaultctlfsm.FSM {
+	if r.lookup != nil {
+		return r.lookup()
+	}
+	return nil
+}
+
 func (r *segmentLogReader) Roll(_ context.Context, vaultID glid.GLID) ([]collection.AssignedSegment, error) {
-	entries := r.fsm.ListCompletedSegments()
+	fsm := r.fsm()
+	if fsm == nil {
+		return nil, errors.New("vault-ctl FSM required")
+	}
+	entries := fsm.ListCompletedSegments()
 	var out []collection.AssignedSegment
 	for i := range entries {
 		e := &entries[i]
@@ -58,17 +72,30 @@ func (r *segmentLogReader) Roll(_ context.Context, vaultID glid.GLID) ([]collect
 // so a mid-stream failure from one source never leaves partial bytes in dest
 // for the next candidate (or for the collector's pre-head temp file).
 type segmentPullClient struct {
-	fsm         *vaultctlfsm.FSM
+	lookup      func() *vaultctlfsm.FSM
 	puller      segmentPuller
 	localNodeID string
+	// vaultRoot is this home's segmentation root (head/, completed/, pre-head/).
+	// Segments this node originated land here before holder receipts replicate;
+	// read locally instead of looping RPC back to self as origin.
+	vaultRoot string
 }
 
 var _ collection.PullClient = (*segmentPullClient)(nil)
 
 func (c *segmentPullClient) Pull(ctx context.Context, vaultID, segmentID glid.GLID, dest io.Writer) error {
-	entry := c.fsm.GetCompletedSegment(segmentID)
+	fsm := c.lookup()
+	if fsm == nil {
+		return errors.New("vault-ctl FSM required")
+	}
+	entry := fsm.GetCompletedSegment(segmentID)
 	if entry == nil {
 		return fmt.Errorf("segment %s not in vault-ctl registry", segmentID)
+	}
+	if c.vaultRoot != "" {
+		if err := copyLocalSegmentFile(c.vaultRoot, segmentID, dest); err == nil {
+			return nil
+		}
 	}
 	sources := segmentPullSources(entry, c.localNodeID)
 	if len(sources) == 0 {
@@ -87,6 +114,30 @@ func (c *segmentPullClient) Pull(ctx context.Context, vaultID, segmentID glid.GL
 		return nil
 	}
 	return errors.Join(errs...)
+}
+
+// copyLocalSegmentFile streams a segment from this home's head/, completed/,
+// or pre-head/ when present. The registry publish callback can run before
+// distribution promotes a locally-originated segment into head/; without this
+// path collection tries to RPC-pull from OriginNodeID (self) and fails with
+// "no remote holder".
+func copyLocalSegmentFile(vaultRoot string, segmentID glid.GLID, dest io.Writer) error {
+	for _, path := range []string{
+		paths.HeadSegment(vaultRoot, segmentID),
+		paths.CompletedSegment(vaultRoot, segmentID),
+		paths.PreHeadSegment(vaultRoot, segmentID),
+	} {
+		data, err := os.ReadFile(filepath.Clean(path))
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return err
+		}
+		_, err = dest.Write(data)
+		return err
+	}
+	return os.ErrNotExist
 }
 
 // segmentPullSources lists candidate source nodes for a segment in preference

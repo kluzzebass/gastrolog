@@ -5,6 +5,7 @@ import (
 	"time"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/glid"
 )
 
 type peerEntry struct {
@@ -223,6 +224,40 @@ func (p *PeerState) AggregateRouteStats() (ingested, dropped, routed int64, filt
 		routeStats = append(routeStats, rs)
 	}
 	return
+}
+
+// PeerVaultPipelineDisk is one peer node's broadcast pipeline disk counts for a vault.
+type PeerVaultPipelineDisk struct {
+	NodeID           string
+	Working          int
+	CompletedStaging int
+	Head             int
+	PreHead          int
+}
+
+// AggregatePipelineDisk collects per-vault pipeline disk counts from all live peers.
+func (p *PeerState) AggregatePipelineDisk() map[glid.GLID][]PeerVaultPipelineDisk {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	now := time.Now()
+
+	out := make(map[glid.GLID][]PeerVaultPipelineDisk)
+	for nodeID, e := range p.entries {
+		if now.Sub(e.received) > p.ttl || e.stats == nil {
+			continue
+		}
+		for _, vd := range e.stats.VaultPipelineDisk {
+			vid := glid.FromBytes(vd.GetVaultId())
+			out[vid] = append(out[vid], PeerVaultPipelineDisk{
+				NodeID:           nodeID,
+				Working:          int(vd.GetWorkingSegments()),
+				CompletedStaging: int(vd.GetCompletedStagingSegments()),
+				Head:             int(vd.GetHeadSegments()),
+				PreHead:          int(vd.GetPreHeadSegments()),
+			})
+		}
+	}
+	return out
 }
 
 // LastSeen returns the timestamp of the most recent broadcast received

@@ -12,6 +12,7 @@ export {
   useArchiveChunk,
   useRestoreChunk,
 } from "./useVaults";
+export { usePipelineBacklog } from "./usePipelineBacklog";
 export { useSearch, extractTokens } from "./useSearch";
 export { useFollow } from "./useFollow";
 export { useExplain } from "./useExplain";

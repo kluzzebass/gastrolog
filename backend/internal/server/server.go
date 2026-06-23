@@ -92,10 +92,15 @@ type Config struct {
 	// Nil in single-node mode. Typically the same *cluster.PeerState as PeerStats.
 	PeerRouteStats PeerRouteStatsProvider
 
+	// PeerPipelineDisk aggregates per-node pipeline disk counts from peer broadcasts.
+	// Nil in single-node mode. Typically the same *cluster.PeerState as PeerRouteStats.
+	PeerPipelineDisk PeerPipelineDiskProvider
+
 	// RemoteSearcher forwards search requests to remote cluster nodes.
 	// Nil in single-node mode.
 	RemoteSearcher     RemoteSearcher
 	RemoteChunkLister  RemoteChunkLister
+	RemotePipelineBacklog RemotePipelineBacklogGetter
 	RemoteChunkWatcher RemoteChunkWatcher
 	RemoteIndexer      RemoteIndexer
 
@@ -190,8 +195,10 @@ type Server struct {
 	peerVaultStats     PeerVaultStatsProvider
 	peerIngesterStats  PeerIngesterStatsProvider
 	peerRouteStats     PeerRouteStatsProvider
+	peerPipelineDisk   PeerPipelineDiskProvider
 	remoteSearcher     RemoteSearcher
 	remoteChunkLister  RemoteChunkLister
+	remotePipelineBacklog RemotePipelineBacklogGetter
 	remoteChunkWatcher RemoteChunkWatcher
 	remoteIndexer      RemoteIndexer
 	peerJobs           PeerJobsProvider
@@ -264,8 +271,10 @@ func New(orch *orchestrator.Orchestrator, cfgStore system.Store, factories orche
 		peerVaultStats:     cfg.PeerVaultStats,
 		peerIngesterStats:  cfg.PeerIngesterStats,
 		peerRouteStats:     cfg.PeerRouteStats,
+		peerPipelineDisk:   cfg.PeerPipelineDisk,
 		remoteSearcher:     cfg.RemoteSearcher,
 		remoteChunkLister:  cfg.RemoteChunkLister,
+		remotePipelineBacklog: cfg.RemotePipelineBacklog,
 		remoteChunkWatcher: cfg.RemoteChunkWatcher,
 		remoteIndexer:      cfg.RemoteIndexer,
 		peerJobs:           cfg.PeerJobs,
@@ -505,7 +514,7 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 
 	queryServer := NewQueryServer(s.orch, s.cfgStore, s.remoteSearcher, s.localNodeID, lookupRegistry.Resolve, lookupRegistry.Names(), queryTimeout, maxFollowDuration, maxResultCount, compQuery.Apply(s.logger))
 	s.queryServer = queryServer
-	vaultServer := NewVaultServer(s.orch, s.cfgStore, s.factories, s.peerVaultStats, s.remoteChunkLister, s.remoteChunkWatcher, s.remoteIndexer, s.localNodeID, s.logger)
+	vaultServer := NewVaultServer(s.orch, s.cfgStore, s.factories, s.peerVaultStats, s.remoteChunkLister, s.remotePipelineBacklog, s.remoteChunkWatcher, s.remoteIndexer, s.localNodeID, s.logger)
 	configServer := NewSystemServer(SystemServerConfig{
 		Orch:               s.orch,
 		CfgStore:           s.cfgStore,
@@ -544,6 +553,7 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 	}
 	if s.peerRouteStats != nil {
 		lifecycleServer.SetPeerRouteStats(s.peerRouteStats)
+		lifecycleServer.SetPeerPipelineDisk(s.peerPipelineDisk)
 	}
 	lifecycleServer.SetVaultFuncs(vaultServer.allVaultInfos, func(ctx context.Context) *apiv1.GetStatsResponse {
 		resp, _ := vaultServer.GetStats(ctx, connect.NewRequest(&apiv1.GetStatsRequest{}))

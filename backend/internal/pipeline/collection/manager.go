@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -198,7 +199,9 @@ func (v *vaultCollect) collectMissing(ctx context.Context) error {
 }
 
 // Config configures a CollectionManager.
-type Config struct{}
+type Config struct {
+	Logger *slog.Logger
+}
 
 // Manager pulls assigned segments into pre-head, verifies, and promotes to head.
 // Collection passes are driven by vault-ctl FSM SetOnPublishCompletedSegment
@@ -223,6 +226,13 @@ func New(cfg Config) *Manager {
 	}
 }
 
+func (m *Manager) logger() *slog.Logger {
+	if m.cfg.Logger != nil {
+		return m.cfg.Logger
+	}
+	return slog.Default()
+}
+
 // RegisterVault adds a home vault collection path. Safe before or during Run.
 func (m *Manager) RegisterVault(vaultID glid.GLID, root string, cfg VaultConfig) error {
 	m.mu.Lock()
@@ -235,16 +245,56 @@ func (m *Manager) RegisterVault(vaultID glid.GLID, root string, cfg VaultConfig)
 		return err
 	}
 	m.vaults[vaultID] = v
-
-	if cfg.FSM != nil {
-		v.unsubPublish = cfg.FSM.AddOnPublishCompletedSegment(func(vaultctlfsm.CompletedSegmentEntry) {
-			v.wake.Notify()
-		})
-	}
+	m.wireVaultFSMCallbacks(v, cfg.FSM)
 	if m.runCtx != nil {
 		m.startWorkerLocked(v)
 	}
 	return nil
+}
+
+// RewireVaultFSM rebinds collection to a fresh vault-ctl sub-FSM after snapshot
+// Restore. The log reader and pull client must be updated too — they hold FSM
+// pointers captured at register time.
+func (m *Manager) RewireVaultFSM(vaultID glid.GLID, cfg VaultConfig) error {
+	if cfg.FSM == nil {
+		return errors.New("vault-ctl FSM required")
+	}
+	m.mu.Lock()
+	v, ok := m.vaults[vaultID]
+	m.mu.Unlock()
+	if !ok {
+		return ErrUnknownVault
+	}
+	m.unwireVaultFSMCallbacks(v)
+	v.fsm = cfg.FSM
+	if cfg.Log != nil {
+		v.log = cfg.Log
+	}
+	if cfg.Pull != nil {
+		v.pull = cfg.Pull
+	}
+	if cfg.Receipts != nil {
+		v.receipts = cfg.Receipts
+	}
+	m.wireVaultFSMCallbacks(v, cfg.FSM)
+	v.wake.Notify()
+	return nil
+}
+
+func (m *Manager) wireVaultFSMCallbacks(v *vaultCollect, fsm *vaultctlfsm.FSM) {
+	if fsm == nil {
+		return
+	}
+	v.unsubPublish = fsm.AddOnPublishCompletedSegment(func(vaultctlfsm.CompletedSegmentEntry) {
+		v.wake.Notify()
+	})
+}
+
+func (m *Manager) unwireVaultFSMCallbacks(v *vaultCollect) {
+	if v.unsubPublish != nil {
+		v.unsubPublish()
+		v.unsubPublish = nil
+	}
 }
 
 // UnregisterVault removes a vault from collection.
@@ -256,9 +306,7 @@ func (m *Manager) UnregisterVault(vaultID glid.GLID) {
 	if !ok {
 		return
 	}
-	if v.unsubPublish != nil {
-		v.unsubPublish()
-	}
+	m.unwireVaultFSMCallbacks(v)
 	if v.stopWorker != nil {
 		v.stopWorker()
 	}
@@ -335,7 +383,10 @@ func (m *Manager) startWorkerLocked(v *vaultCollect) {
 		// Capture the wake channel BEFORE each pass so a signal arriving
 		// mid-pass re-fires the loop instead of being lost.
 		ch := v.wake.C()
-		_ = v.collectMissing(ctx)
+		log := m.logger().With("vault", v.vaultID, "component", "pipeline.collection")
+		if err := v.collectMissing(ctx); err != nil && ctx.Err() == nil {
+			log.Warn("collect pass failed", "error", err)
+		}
 		tick := time.NewTicker(recollectInterval)
 		defer tick.Stop()
 		for {
@@ -346,7 +397,9 @@ func (m *Manager) startWorkerLocked(v *vaultCollect) {
 			case <-tick.C:
 			}
 			ch = v.wake.C()
-			_ = v.collectMissing(ctx)
+			if err := v.collectMissing(ctx); err != nil && ctx.Err() == nil {
+				log.Warn("collect pass failed", "error", err)
+			}
 		}
 	})
 }

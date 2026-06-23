@@ -642,6 +642,15 @@ export class NodeStats extends Message<NodeStats> {
    */
   peerBytes: PeerBytesStat[] = [];
 
+  /**
+   * Per-vault on-disk pipeline segment counts on this node (working/completed
+   * at origins; head/pre-head on homes). Aggregated cluster-wide by
+   * WatchSystemStatus for the inspector.
+   *
+   * @generated from field: repeated gastrolog.v1.VaultPipelineNodeDisk vault_pipeline_disk = 36;
+   */
+  vaultPipelineDisk: VaultPipelineNodeDisk[] = [];
+
   constructor(data?: PartialMessage<NodeStats>) {
     super();
     proto3.util.initPartial(data, this);
@@ -685,6 +694,7 @@ export class NodeStats extends Message<NodeStats> {
     { no: 33, name: "route_per_route_stats", kind: "message", T: PerRouteStats, repeated: true },
     { no: 34, name: "alerts", kind: "message", T: SystemAlert, repeated: true },
     { no: 35, name: "peer_bytes", kind: "message", T: PeerBytesStat, repeated: true },
+    { no: 36, name: "vault_pipeline_disk", kind: "message", T: VaultPipelineNodeDisk, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): NodeStats {
@@ -701,6 +711,70 @@ export class NodeStats extends Message<NodeStats> {
 
   static equals(a: NodeStats | PlainMessage<NodeStats> | undefined, b: NodeStats | PlainMessage<NodeStats> | undefined): boolean {
     return proto3.util.equals(NodeStats, a, b);
+  }
+}
+
+/**
+ * VaultPipelineNodeDisk is one vault's local pipeline storage areas on a
+ * single node, included in the periodic NodeStats broadcast.
+ *
+ * @generated from message gastrolog.v1.VaultPipelineNodeDisk
+ */
+export class VaultPipelineNodeDisk extends Message<VaultPipelineNodeDisk> {
+  /**
+   * @generated from field: bytes vault_id = 1;
+   */
+  vaultId = new Uint8Array(0);
+
+  /**
+   * @generated from field: uint32 working_segments = 2;
+   */
+  workingSegments = 0;
+
+  /**
+   * @generated from field: uint32 completed_staging_segments = 3;
+   */
+  completedStagingSegments = 0;
+
+  /**
+   * @generated from field: uint32 head_segments = 4;
+   */
+  headSegments = 0;
+
+  /**
+   * @generated from field: uint32 pre_head_segments = 5;
+   */
+  preHeadSegments = 0;
+
+  constructor(data?: PartialMessage<VaultPipelineNodeDisk>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.VaultPipelineNodeDisk";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "working_segments", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 3, name: "completed_staging_segments", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 4, name: "head_segments", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 5, name: "pre_head_segments", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultPipelineNodeDisk {
+    return new VaultPipelineNodeDisk().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): VaultPipelineNodeDisk {
+    return new VaultPipelineNodeDisk().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): VaultPipelineNodeDisk {
+    return new VaultPipelineNodeDisk().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: VaultPipelineNodeDisk | PlainMessage<VaultPipelineNodeDisk> | undefined, b: VaultPipelineNodeDisk | PlainMessage<VaultPipelineNodeDisk> | undefined): boolean {
+    return proto3.util.equals(VaultPipelineNodeDisk, a, b);
   }
 }
 
@@ -1736,6 +1810,101 @@ export class ForwardListChunksResponse extends Message<ForwardListChunksResponse
 
   static equals(a: ForwardListChunksResponse | PlainMessage<ForwardListChunksResponse> | undefined, b: ForwardListChunksResponse | PlainMessage<ForwardListChunksResponse> | undefined): boolean {
     return proto3.util.equals(ForwardListChunksResponse, a, b);
+  }
+}
+
+/**
+ * ForwardGetPipelineBacklogRequest asks a remote node for its local
+ * on-disk pipeline segment counts for one vault.
+ *
+ * @generated from message gastrolog.v1.ForwardGetPipelineBacklogRequest
+ */
+export class ForwardGetPipelineBacklogRequest extends Message<ForwardGetPipelineBacklogRequest> {
+  /**
+   * @generated from field: bytes vault_id = 1;
+   */
+  vaultId = new Uint8Array(0);
+
+  constructor(data?: PartialMessage<ForwardGetPipelineBacklogRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardGetPipelineBacklogRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardGetPipelineBacklogRequest {
+    return new ForwardGetPipelineBacklogRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardGetPipelineBacklogRequest {
+    return new ForwardGetPipelineBacklogRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardGetPipelineBacklogRequest {
+    return new ForwardGetPipelineBacklogRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardGetPipelineBacklogRequest | PlainMessage<ForwardGetPipelineBacklogRequest> | undefined, b: ForwardGetPipelineBacklogRequest | PlainMessage<ForwardGetPipelineBacklogRequest> | undefined): boolean {
+    return proto3.util.equals(ForwardGetPipelineBacklogRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ForwardGetPipelineBacklogResponse
+ */
+export class ForwardGetPipelineBacklogResponse extends Message<ForwardGetPipelineBacklogResponse> {
+  /**
+   * @generated from field: uint32 working_segments = 1;
+   */
+  workingSegments = 0;
+
+  /**
+   * @generated from field: uint32 completed_staging_segments = 2;
+   */
+  completedStagingSegments = 0;
+
+  /**
+   * @generated from field: uint32 head_segments = 3;
+   */
+  headSegments = 0;
+
+  /**
+   * @generated from field: uint32 pre_head_segments = 4;
+   */
+  preHeadSegments = 0;
+
+  constructor(data?: PartialMessage<ForwardGetPipelineBacklogResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardGetPipelineBacklogResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "working_segments", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 2, name: "completed_staging_segments", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 3, name: "head_segments", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 4, name: "pre_head_segments", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardGetPipelineBacklogResponse {
+    return new ForwardGetPipelineBacklogResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardGetPipelineBacklogResponse {
+    return new ForwardGetPipelineBacklogResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardGetPipelineBacklogResponse {
+    return new ForwardGetPipelineBacklogResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardGetPipelineBacklogResponse | PlainMessage<ForwardGetPipelineBacklogResponse> | undefined, b: ForwardGetPipelineBacklogResponse | PlainMessage<ForwardGetPipelineBacklogResponse> | undefined): boolean {
+    return proto3.util.equals(ForwardGetPipelineBacklogResponse, a, b);
   }
 }
 
@@ -2880,6 +3049,47 @@ export class ImportRecordMessage extends Message<ImportRecordMessage> {
 
   static equals(a: ImportRecordMessage | PlainMessage<ImportRecordMessage> | undefined, b: ImportRecordMessage | PlainMessage<ImportRecordMessage> | undefined): boolean {
     return proto3.util.equals(ImportRecordMessage, a, b);
+  }
+}
+
+/**
+ * ForwardImportRecordsResponse reports how many records the client-streaming
+ * ForwardImportRecords RPC committed into the destination vault's sealed-chunk
+ * store.
+ *
+ * @generated from message gastrolog.v1.ForwardImportRecordsResponse
+ */
+export class ForwardImportRecordsResponse extends Message<ForwardImportRecordsResponse> {
+  /**
+   * @generated from field: int64 records_written = 1;
+   */
+  recordsWritten = protoInt64.zero;
+
+  constructor(data?: PartialMessage<ForwardImportRecordsResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardImportRecordsResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "records_written", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardImportRecordsResponse {
+    return new ForwardImportRecordsResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardImportRecordsResponse {
+    return new ForwardImportRecordsResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardImportRecordsResponse {
+    return new ForwardImportRecordsResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardImportRecordsResponse | PlainMessage<ForwardImportRecordsResponse> | undefined, b: ForwardImportRecordsResponse | PlainMessage<ForwardImportRecordsResponse> | undefined): boolean {
+    return proto3.util.equals(ForwardImportRecordsResponse, a, b);
   }
 }
 

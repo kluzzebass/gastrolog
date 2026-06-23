@@ -125,8 +125,8 @@ func TestPromoteToHead(t *testing.T) {
 	if _, err := os.Stat(dest); err != nil {
 		t.Fatalf("head file: %v", err)
 	}
-	if _, err := os.Stat(seg.Path); !os.IsNotExist(err) {
-		t.Fatal("completed copy should be gone after promote")
+	if _, err := os.Stat(seg.Path); err != nil {
+		t.Fatalf("completed/ should remain after promote: %v", err)
 	}
 }
 
@@ -163,11 +163,15 @@ func TestLocalHolderPromotesToHead(t *testing.T) {
 	vaultID := glid.New()
 	root := t.TempDir()
 	pub := &recordingPublisher{}
+	var promoted []glid.GLID
 
 	mgr, _ := distribution.New(distribution.Config{})
 	if err := mgr.RegisterVault(vaultID, root, distribution.VaultConfig{
 		Publisher:   pub,
 		LocalHolder: func() bool { return true },
+		OnLocalHeadPromoted: func(id glid.GLID) {
+			promoted = append(promoted, id)
+		},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -176,12 +180,16 @@ func TestLocalHolderPromotesToHead(t *testing.T) {
 	if err := mgr.PublishCompleted(context.Background(), seg); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(seg.Path); !os.IsNotExist(err) {
-		t.Fatal("completed path should be empty after local promote")
+	if len(promoted) != 1 || promoted[0] != seg.Meta.ID {
+		t.Fatalf("OnLocalHeadPromoted = %v, want [%s]", promoted, seg.Meta.ID)
+	}
+	completedPath := paths.CompletedSegment(root, seg.Meta.ID)
+	if _, err := os.Stat(completedPath); err != nil {
+		t.Fatalf("completed/ should remain after local promote: %v", err)
 	}
 	headPath := paths.HeadSegment(root, seg.Meta.ID)
 	if _, err := os.Stat(headPath); err != nil {
-		t.Fatalf("head file: %v", err)
+		t.Fatalf("head copy should exist after local promote: %v", err)
 	}
 }
 
@@ -567,7 +575,7 @@ func TestPromoteToHeadMissingSource(t *testing.T) {
 	t.Parallel()
 	_, err := distribution.PromoteToHead(filepath.Join(t.TempDir(), "missing"), t.TempDir())
 	if err == nil {
-		t.Fatal("expected rename error")
+		t.Fatal("expected copy error for missing source")
 	}
 }
 
@@ -604,4 +612,62 @@ func TestStreamSegmentGoneDuringPull(t *testing.T) {
 	if !errors.Is(err, distribution.ErrSegmentGone) {
 		t.Fatalf("ServePull() = %v, want ErrSegmentGone", err)
 	}
+}
+
+type blockingPublisher struct {
+	release chan struct{}
+}
+
+func (p *blockingPublisher) Publish(ctx context.Context, _ distribution.Metadata) error {
+	select {
+	case <-p.release:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func TestPullServedWhilePublishBlocked(t *testing.T) {
+	// Vault-ctl publish must not block segment pulls — collection depends on
+	// pulls completing while origins drain a publish backlog.
+	t.Parallel()
+	vaultID := glid.New()
+	root := t.TempDir()
+	pub := &blockingPublisher{release: make(chan struct{})}
+
+	mgr, _ := distribution.New(distribution.Config{})
+	if err := mgr.RegisterVault(vaultID, root, distribution.VaultConfig{
+		Publisher: pub,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	seg := writeCompletedSegment(t, root, vaultID, "pull-during-publish")
+	completed := make(chan segmentation.CompletedSegment, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		_ = mgr.Run(ctx, completed)
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+
+	completed <- seg
+	time.Sleep(50 * time.Millisecond)
+
+	var buf bytes.Buffer
+	if err := mgr.ServePull(distribution.PullRequest{
+		VaultID: vaultID, SegmentID: seg.Meta.ID, Dest: &buf,
+	}); err != nil {
+		t.Fatalf("ServePull while publish blocked: %v", err)
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("pull-during-publish")) {
+		t.Fatalf("pull bytes = %q", buf.Bytes())
+	}
+
+	close(pub.release)
+	time.Sleep(50 * time.Millisecond)
 }

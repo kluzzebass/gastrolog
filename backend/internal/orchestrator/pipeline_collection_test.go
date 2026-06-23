@@ -229,8 +229,8 @@ func TestPipelineCollectionReplicatesToRemoteHome(t *testing.T) {
 	puller := &originPuller{dist: origin.dist}
 	colMgr := collection.New(collection.Config{})
 	if err := colMgr.RegisterVault(vaultID, homeRoot, collection.VaultConfig{
-		Log:      &segmentLogReader{fsm: fsm, localNodeID: testHomeNode},
-		Pull:     &segmentPullClient{fsm: fsm, puller: puller, localNodeID: testHomeNode},
+		Log:      &segmentLogReader{lookup: func() *vaultctlfsm.FSM { return fsm }, localNodeID: testHomeNode},
+		Pull:     &segmentPullClient{lookup: func() *vaultctlfsm.FSM { return fsm }, puller: puller, localNodeID: testHomeNode},
 		Receipts: &segmentReceiptCommitter{applier: &fsmApplier{fsm: fsm}, localNodeID: testHomeNode},
 		FSM:      fsm,
 	}); err != nil {
@@ -294,8 +294,8 @@ func TestPipelineCollectionPullFailureLeavesNoPartialHead(t *testing.T) {
 	puller := &originPuller{dist: origin.dist, failsLeft: 1 << 30} // unreachable
 	colMgr := collection.New(collection.Config{})
 	if err := colMgr.RegisterVault(vaultID, homeRoot, collection.VaultConfig{
-		Log:      &segmentLogReader{fsm: fsm, localNodeID: testHomeNode},
-		Pull:     &segmentPullClient{fsm: fsm, puller: puller, localNodeID: testHomeNode},
+		Log:      &segmentLogReader{lookup: func() *vaultctlfsm.FSM { return fsm }, localNodeID: testHomeNode},
+		Pull:     &segmentPullClient{lookup: func() *vaultctlfsm.FSM { return fsm }, puller: puller, localNodeID: testHomeNode},
 		Receipts: &segmentReceiptCommitter{applier: &fsmApplier{fsm: fsm}, localNodeID: testHomeNode},
 		// No FSM wiring: this test owns the collect cadence via CollectOnce.
 	}); err != nil {
@@ -343,8 +343,8 @@ func TestPipelineCollectionRecoversFromUnreachableOriginViaRetries(t *testing.T)
 	puller := &originPuller{dist: origin.dist, failsLeft: 3} // 3 transient failures
 	colMgr := collection.New(collection.Config{})
 	if err := colMgr.RegisterVault(vaultID, homeRoot, collection.VaultConfig{
-		Log:      &segmentLogReader{fsm: fsm, localNodeID: testHomeNode},
-		Pull:     &segmentPullClient{fsm: fsm, puller: puller, localNodeID: testHomeNode},
+		Log:      &segmentLogReader{lookup: func() *vaultctlfsm.FSM { return fsm }, localNodeID: testHomeNode},
+		Pull:     &segmentPullClient{lookup: func() *vaultctlfsm.FSM { return fsm }, puller: puller, localNodeID: testHomeNode},
 		Receipts: &segmentReceiptCommitter{applier: &fsmApplier{fsm: fsm}, localNodeID: testHomeNode},
 		FSM:      fsm,
 	}); err != nil {
@@ -393,13 +393,56 @@ func TestPipelineSegmentLogReaderSkipsHeldSegments(t *testing.T) {
 		t.Fatalf("ack holder: %v", err)
 	}
 
-	reader := &segmentLogReader{fsm: fsm, localNodeID: testHomeNode}
+	reader := &segmentLogReader{lookup: func() *vaultctlfsm.FSM { return fsm }, localNodeID: testHomeNode}
 	assigned, err := reader.Roll(context.Background(), vaultID)
 	if err != nil {
 		t.Fatalf("Roll: %v", err)
 	}
 	if len(assigned) != 1 || assigned[0].SegmentID != segOpen {
 		t.Fatalf("Roll = %+v, want only %s (the unheld segment)", assigned, segOpen)
+	}
+}
+
+// TestSegmentPullClientReadsLocalOriginBeforeRPC: when this home originated
+// the segment, collection must read completed/ (or head/) locally instead of
+// RPC-pulling from self as origin — the registry publish wake can run before
+// distribution promotes the file into head/.
+func TestSegmentPullClientReadsLocalOriginBeforeRPC(t *testing.T) {
+	fsm := vaultctlfsm.New()
+	applier := &fsmApplier{fsm: fsm}
+	vaultID := glid.New()
+	segID := glid.New()
+	root := t.TempDir()
+	if err := paths.EnsureSegmentationDirs(root); err != nil {
+		t.Fatal(err)
+	}
+	const want = "local-origin-segment-bytes"
+	if err := os.WriteFile(paths.CompletedSegment(root, segID), []byte(want), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := applier.Apply(vaultctlfsm.MarshalPublishCompletedSegment(vaultctlfsm.CompletedSegmentEntry{
+		SegmentID:    segID,
+		RecordCount:  1,
+		OriginNodeID: testHomeNode,
+	})); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	fake := &recordingPuller{serve: map[string]string{"should-not-run": "nope"}}
+	client := &segmentPullClient{
+		lookup:      func() *vaultctlfsm.FSM { return fsm },
+		puller:      fake,
+		localNodeID: testHomeNode,
+		vaultRoot:   root,
+	}
+	var dest writeCounter
+	if err := client.Pull(context.Background(), vaultID, segID, &dest); err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+	if len(fake.order) != 0 {
+		t.Fatalf("RPC pull order = %v, want none (local read)", fake.order)
+	}
+	if dest.String() != want {
+		t.Fatalf("dest = %q, want %q", dest.String(), want)
 	}
 }
 
@@ -434,7 +477,7 @@ func TestPipelineSegmentPullClientResolvesSourcesAndBuffers(t *testing.T) {
 		serve: map[string]string{"node-holder": goodBytes},
 		fail:  map[string]bool{testOriginNode: true},
 	}
-	client := &segmentPullClient{fsm: fsm, puller: fake, localNodeID: testHomeNode}
+	client := &segmentPullClient{lookup: func() *vaultctlfsm.FSM { return fsm }, puller: fake, localNodeID: testHomeNode}
 
 	var dest writeCounter
 	if err := client.Pull(context.Background(), vaultID, segID, &dest); err != nil {

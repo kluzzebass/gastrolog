@@ -64,6 +64,35 @@ func segmentReadyForRegistryRelease(fsm *vaultctlfsm.FSM, segmentID glid.GLID, r
 	return holdersCover(entry.Holders, requiredHolders)
 }
 
+// mayPurgeHeadAfterBuild reports whether this home may drop its head/ copy of a
+// segment after local GLCB build. Cluster vaults keep origin head/ and completed/
+// until every placement holder has ack'd; tests without
+// RequiredHolders wired keep the legacy immediate purge.
+func mayPurgeHeadAfterBuild(fsm *vaultctlfsm.FSM, segmentID glid.GLID, requiredHolders []string, holdersWired bool) bool {
+	entry := fsm.GetCompletedSegment(segmentID)
+	if entry == nil || !segmentExhaustedForPlanning(fsm, *entry) {
+		return false
+	}
+	if !holdersWired {
+		return true
+	}
+	if len(requiredHolders) == 0 {
+		return false
+	}
+	return holdersCover(entry.Holders, requiredHolders)
+}
+
+// mayReleaseFromRegistry is like segmentReadyForRegistryRelease but refuses
+// release when placement wiring is present yet unresolved (empty required
+// slice). holdersCover treats empty required as "ready" for single-node tests;
+// that must not drop segments on a multi-home vault when placement lookup fails.
+func mayReleaseFromRegistry(fsm *vaultctlfsm.FSM, segmentID glid.GLID, requiredHolders []string, holdersWired bool) bool {
+	if holdersWired && len(requiredHolders) == 0 {
+		return false
+	}
+	return segmentReadyForRegistryRelease(fsm, segmentID, requiredHolders)
+}
+
 func holdersCover(holders, required []string) bool {
 	if len(required) == 0 {
 		return true
@@ -78,9 +107,9 @@ func holdersCover(holders, required []string) bool {
 
 // partitionPendingRelease splits queued segment IDs into those ready for
 // ReleaseSegments now and those still awaiting holder receipts.
-func partitionPendingRelease(fsm *vaultctlfsm.FSM, pending []glid.GLID, requiredHolders []string) (ready, stillPending []glid.GLID) {
+func partitionPendingRelease(fsm *vaultctlfsm.FSM, pending []glid.GLID, requiredHolders []string, holdersWired bool) (ready, stillPending []glid.GLID) {
 	for _, id := range pending {
-		if segmentReadyForRegistryRelease(fsm, id, requiredHolders) {
+		if mayReleaseFromRegistry(fsm, id, requiredHolders, holdersWired) {
 			ready = append(ready, id)
 			continue
 		}

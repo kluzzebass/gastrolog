@@ -74,6 +74,12 @@ service VaultService {
   // proposes CmdRepatriateChunk to the vault-ctl FSM. Refuses if the
   // chunk is already FSM-tracked or tombstoned. See gastrolog-32bf2.
   rpc RepatriateOrphan(RepatriateOrphanRequest) returns (RepatriateOrphanResponse);
+
+  // GetPipelineBacklog returns vault-ctl registry/manifest state plus
+  // cluster-wide on-disk segment counts (working, completed, head,
+  // pre-head) so operators can see chunking pipeline depth in the
+  // inspector without shell access.
+  rpc GetPipelineBacklog(GetPipelineBacklogRequest) returns (GetPipelineBacklogResponse);
 }
 
 message ListVaultsRequest {}
@@ -450,3 +456,60 @@ message RepatriateOrphanRequest {
 }
 
 message RepatriateOrphanResponse {}
+
+message GetPipelineBacklogRequest {
+  string vault = 1;
+}
+
+message GetPipelineBacklogResponse {
+  VaultPipelineBacklog backlog = 1;
+}
+
+// VaultPipelineBacklog surfaces chunking pipeline depth for one vault.
+// Registry and manifest fields come from the replicated vault-ctl FSM
+// (identical on every voter). Segment counts are summed across all
+// cluster nodes — every node is an ingest origin, and home nodes hold
+// head/pre-head copies after distribution.
+message VaultPipelineBacklog {
+  bytes vault_id = 1;
+
+  // vault-ctl completed-segment registry (replicated).
+  uint32 registry_segments = 2;
+  uint32 eligible_segments = 3;
+  uint64 registry_records = 4;
+
+  // Open manifest being filled by the chunking planner.
+  uint32 open_manifest_refs = 5;
+  uint64 open_manifest_records = 6;
+  google.protobuf.Timestamp open_manifest_ingest_end = 7;
+
+  // Sealed manifest awaiting local GLCB build on homes.
+  bool sealed_manifest_pending = 8;
+
+  // On-disk segment file counts (cluster-wide sum).
+  uint32 working_segments = 10;
+  uint32 completed_staging_segments = 11;
+  uint32 head_segments = 12;
+  uint32 pre_head_segments = 13;
+
+  // Oldest LastIngestTS among registry segments still eligible for
+  // planning — how far behind wall clock unchunked data may be.
+  google.protobuf.Timestamp oldest_eligible_last_ingest = 14;
+
+  // vault-ctl Raft leader for this vault (chunking planner runs here).
+  bytes vault_ctl_leader_node_id = 15;
+  bool connected_node_is_vault_ctl_leader = 16;
+
+  // Per-node on-disk segment counts. Every cluster node may act as an ingest
+  // origin (working/completed); home nodes also hold head/pre-head copies.
+  repeated PipelineNodeSegments node_segments = 17;
+}
+
+// PipelineNodeSegments is one node's pipeline storage areas for a vault.
+message PipelineNodeSegments {
+  bytes node_id = 1;
+  uint32 working_segments = 2;
+  uint32 completed_staging_segments = 3;
+  uint32 head_segments = 4;
+  uint32 pre_head_segments = 5;
+}

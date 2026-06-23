@@ -141,6 +141,13 @@ func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, home bool, fsm 
 		// sealed GLCB. Locate resolves manifest refs under head/ then completed/.
 		spec.HomeRoot = root
 		spec.FSM = fsm
+		spec.LookupFSM = func() *vaultctlfsm.FSM {
+			f, _, _, ok := o.vaultCtlHandle(vaultID)
+			if ok && f != nil {
+				return f
+			}
+			return fsm
+		}
 		spec.Locate = chunking.VaultSegmentLocator{Root: root}
 		spec.ChunkRoot = filepath.Join(root, "chunks")
 		spec.Applier = applier
@@ -149,11 +156,6 @@ func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, home bool, fsm 
 		spec.OnChunkBuilt = func(id chunk.ChunkID) {
 			o.registerBuiltPipelineChunk(vaultID, fsm, id)
 		}
-		spec.OnManifestOpened = func(m *vaultctlfsm.OpenChunkManifest) {
-			if m != nil {
-				o.logChunkCreated(vaultID, m.ChunkID)
-			}
-		}
 		spec.ChunkRequiredHolders = func() []string {
 			return o.vaultPlacementNodeIDs(vaultID)
 		}
@@ -161,8 +163,14 @@ func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, home bool, fsm 
 		// other nodes; without peers (single-node) there is nothing to pull.
 		if o.segmentPuller != nil {
 			spec.Home = true
-			spec.Log = &segmentLogReader{fsm: fsm, localNodeID: o.localNodeID}
-			spec.Pull = &segmentPullClient{fsm: fsm, puller: o.segmentPuller, localNodeID: o.localNodeID}
+			lookup := spec.LookupFSM
+			spec.Log = &segmentLogReader{lookup: lookup, localNodeID: o.localNodeID}
+			spec.Pull = &segmentPullClient{
+				lookup:      lookup,
+				puller:      o.segmentPuller,
+				localNodeID: o.localNodeID,
+				vaultRoot:   root,
+			}
 			spec.Receipts = &segmentReceiptCommitter{applier: applier, localNodeID: o.localNodeID}
 		}
 	}
@@ -244,7 +252,14 @@ func (o *Orchestrator) vaultCtlHandle(vaultID glid.GLID) (*vaultctlfsm.FSM, vaul
 		applier = &vaultCtlApplier{o: o, vaultID: vaultID}
 	}
 	raft := g.Raft
-	isLeader := func() bool { return raft != nil && raft.State() == hraft.Leader }
+	localID := o.localNodeID
+	isLeader := func() bool {
+		if raft == nil || raft.State() != hraft.Leader {
+			return false
+		}
+		_, id := raft.LeaderWithID()
+		return id != "" && string(id) == localID
+	}
 	return fsm, applier, isLeader, true
 }
 
@@ -528,6 +543,13 @@ func (o *Orchestrator) reloadPipelineFromConfig(sys *system.System) error {
 		}
 		o.pipelineVaults[vid] = want
 		o.reconcileChunkCron(vid, chunkEnabled, cronExpr)
+	}
+
+	for vid := range desired {
+		if err := o.rewirePipelineAfterCtlRestore(vid); err != nil {
+			o.logger.Warn("pipeline rewire after config reload failed",
+				"vault", vid, "error", err)
+		}
 	}
 
 	return nil

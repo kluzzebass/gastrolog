@@ -36,6 +36,10 @@ type ContextExecutor func(ctx context.Context, vaultID glid.GLID, chunkID chunk.
 // ListChunksExecutor lists chunks in a local vault for remote requests.
 type ListChunksExecutor func(ctx context.Context, vaultID glid.GLID) ([]*gastrologv1.ChunkMeta, error)
 
+// PipelineBacklogDiskExecutor returns local on-disk segment counts for remote
+// GetPipelineBacklog fan-out.
+type PipelineBacklogDiskExecutor func(ctx context.Context, vaultID glid.GLID) (*gastrologv1.ForwardGetPipelineBacklogResponse, error)
+
 // GetIndexesExecutor returns index status for a chunk in a local vault.
 type GetIndexesExecutor func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID) (*gastrologv1.GetIndexesResponse, error)
 
@@ -146,6 +150,11 @@ func (s *Server) SetContextExecutor(fn ContextExecutor) {
 // SetListChunksExecutor injects the callback for handling remote ListChunks requests.
 func (s *Server) SetListChunksExecutor(fn ListChunksExecutor) {
 	s.listChunksExecutor = fn
+}
+
+// SetPipelineBacklogDiskExecutor injects the callback for remote pipeline backlog disk counts.
+func (s *Server) SetPipelineBacklogDiskExecutor(fn PipelineBacklogDiskExecutor) {
+	s.pipelineBacklogDiskExecutor = fn
 }
 
 // SetGetIndexesExecutor injects the callback for handling remote GetIndexes requests.
@@ -472,6 +481,18 @@ func (s *Server) forwardListChunks(ctx context.Context, req *gastrologv1.Forward
 		return nil, status.Errorf(codes.Internal, "list chunks: %v", err)
 	}
 	return &gastrologv1.ForwardListChunksResponse{Chunks: chunks}, nil
+}
+
+// forwardGetPipelineBacklog handles ForwardGetPipelineBacklog RPCs.
+func (s *Server) forwardGetPipelineBacklog(ctx context.Context, req *gastrologv1.ForwardGetPipelineBacklogRequest) (*gastrologv1.ForwardGetPipelineBacklogResponse, error) {
+	if s.pipelineBacklogDiskExecutor == nil {
+		return nil, status.Error(codes.Unavailable, "pipeline backlog executor not configured")
+	}
+	vaultID, err := parseVaultID(req.GetVaultId())
+	if err != nil {
+		return nil, err
+	}
+	return s.pipelineBacklogDiskExecutor(ctx, vaultID)
 }
 
 // forwardGetIndexes handles the ForwardGetIndexes RPC. Returns index status
@@ -888,6 +909,10 @@ var clusterServiceDesc = grpc.ServiceDesc{
 			Handler:    forwardListChunksHandler,
 		},
 		{
+			MethodName: "ForwardGetPipelineBacklog",
+			Handler:    forwardGetPipelineBacklogHandler,
+		},
+		{
 			MethodName: "ForwardGetIndexes",
 			Handler:    forwardGetIndexesHandler,
 		},
@@ -997,6 +1022,7 @@ type clusterServiceServer interface {
 	broadcast(context.Context, *gastrologv1.BroadcastRequest) (*gastrologv1.BroadcastResponse, error)
 	forwardGetContext(context.Context, *gastrologv1.ForwardGetContextRequest) (*gastrologv1.ForwardGetContextResponse, error)
 	forwardListChunks(context.Context, *gastrologv1.ForwardListChunksRequest) (*gastrologv1.ForwardListChunksResponse, error)
+	forwardGetPipelineBacklog(context.Context, *gastrologv1.ForwardGetPipelineBacklogRequest) (*gastrologv1.ForwardGetPipelineBacklogResponse, error)
 	forwardGetIndexes(context.Context, *gastrologv1.ForwardGetIndexesRequest) (*gastrologv1.ForwardGetIndexesResponse, error)
 	forwardValidateVault(context.Context, *gastrologv1.ForwardValidateVaultRequest) (*gastrologv1.ForwardValidateVaultResponse, error)
 	notifyEviction(context.Context, *gastrologv1.NotifyEvictionRequest) (*gastrologv1.NotifyEvictionResponse, error)
@@ -1083,6 +1109,25 @@ func forwardListChunksHandler(srv any, ctx context.Context, dec func(any) error,
 	}
 	handler := func(ctx context.Context, req any) (any, error) {
 		return s.forwardListChunks(ctx, req.(*gastrologv1.ForwardListChunksRequest))
+	}
+	return interceptor(ctx, req, info, handler)
+}
+
+func forwardGetPipelineBacklogHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	req := &gastrologv1.ForwardGetPipelineBacklogRequest{}
+	if err := dec(req); err != nil {
+		return nil, err
+	}
+	s := srv.(*Server)
+	if interceptor == nil {
+		return s.forwardGetPipelineBacklog(ctx, req)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/gastrolog.v1.ClusterService/ForwardGetPipelineBacklog",
+	}
+	handler := func(ctx context.Context, req any) (any, error) {
+		return s.forwardGetPipelineBacklog(ctx, req.(*gastrologv1.ForwardGetPipelineBacklogRequest))
 	}
 	return interceptor(ctx, req, info, handler)
 }
