@@ -1,0 +1,19 @@
+---
+description: NEVER kill, start, stop, or restart the user's local gastrolog cluster without explicit user instruction in that message.
+alwaysApply: true
+---
+
+# DO
+# NOT
+# FUCKING
+# TOUCH
+# THE
+# CLUSTER!
+
+Unless the user **explicitly** tells you to in that conversation — not implied by a plan, acceptance checklist, or “validate on live cluster.”
+
+**Forbidden:** `just cluster-kill`, `just cluster-run`, `scripts/cluster.sh` run/kill/init, `pkill` on gastrolog server processes, background `go run … server` to start nodes, restarting or “recovering” the cluster, live soak/head-count probes against the user’s running homes (`/Volumes/Storage/Gastrolog`, `data/node*`, etc.).
+
+**Allowed:** in-process `go test` (orchestrator reliability harness, etc.), code changes, telling the user what they can run when ready.
+
+See [`MEMORY.md`](../../MEMORY.md) and [`CLAUDE.md`](../../CLAUDE.md).

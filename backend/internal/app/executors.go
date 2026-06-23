@@ -132,7 +132,14 @@ func forwardSearchAfterParse(
 	pipeline *querylang.Pipeline,
 	resumeTokenData []byte,
 ) (iter.Seq2[chunk.Record, error], func() []byte, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, error) {
-	histogram := server.HistogramToProto(eng.ComputeHistogram(ctx, q, 50))
+	// Filtered forward searches already pay a full lazy-prime record scan in
+	// Search below. Skip the histogram pre-pass (timechartScanPath → Search)
+	// which would duplicate that work and spike RSS on scatterbox nodes.
+	// Unfiltered queries keep the fast binary-search histogram path.
+	var histogram []*gastrologv1.HistogramBucket
+	if q.BoolExpr == nil {
+		histogram = server.HistogramToProto(eng.ComputeHistogram(ctx, q, 50))
+	}
 
 	if pipeline != nil && len(pipeline.Pipes) > 0 && !query.CanStreamPipeline(pipeline) {
 		result, err := eng.RunPipeline(ctx, q, pipeline)

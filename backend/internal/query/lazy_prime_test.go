@@ -181,3 +181,131 @@ func TestLazyPrimeUnlimitedSearchCorrectness(t *testing.T) {
 		t.Errorf("expected %d records, got %d", total, count)
 	}
 }
+
+// TestLazyPrimeBoundedOpensAtManyChunks guards gastrolog-2o9e9 acceptance: cursor
+// opens must not scale with total chunk count when the result limit is small.
+func TestLazyPrimeBoundedOpensAtManyChunks(t *testing.T) {
+	t.Parallel()
+
+	const (
+		recordsPerChunk = 10
+		chunkCount      = 100
+		limit           = 5
+		maxOpens        = 4
+	)
+
+	reg := &testRegistry{
+		vaults: make(map[glid.GLID]struct {
+			cm chunk.ChunkManager
+			im index.IndexManager
+		}),
+	}
+
+	vaultID := glid.New()
+	base := memtest.MustNewVault(t, chunkmem.Config{
+		RotationPolicy: chunk.NewRecordCountPolicy(recordsPerChunk),
+	})
+
+	t0 := time.Date(2026, 6, 17, 14, 0, 0, 0, time.UTC)
+	total := recordsPerChunk * chunkCount
+	for i := range total {
+		base.CM.Append(chunk.Record{
+			IngestTS: t0.Add(time.Duration(i) * time.Second),
+			Raw:      fmt.Appendf(nil, "r-%d", i),
+		})
+	}
+	base.CM.Seal()
+
+	counter := &cursorCountCM{ChunkManager: base.CM}
+	reg.vaults[vaultID] = struct {
+		cm chunk.ChunkManager
+		im index.IndexManager
+	}{counter, base.IM}
+
+	eng := query.NewWithRegistry(reg, nil)
+
+	iter, _ := eng.Search(context.Background(), query.Query{
+		Limit:     limit,
+		IsReverse: true,
+		Start:     t0,
+		End:       t0.Add(time.Duration(total) * time.Second),
+	}, nil)
+
+	got := 0
+	for _, err := range iter {
+		if err != nil {
+			t.Fatalf("search error: %v", err)
+		}
+		got++
+	}
+	if got != limit {
+		t.Fatalf("expected %d records, got %d", limit, got)
+	}
+
+	opens := counter.opens.Load()
+	if opens > maxOpens {
+		t.Errorf("OpenCursor calls = %d over %d chunks with limit=%d, want at most %d",
+			opens, chunkCount, limit, maxOpens)
+	}
+}
+
+func BenchmarkLazyPrimeReverseSearchCursorOpens(b *testing.B) {
+	const recordsPerChunk = 10
+
+	for _, chunkCount := range []int{25, 100, 200} {
+		b.Run(fmt.Sprintf("chunks=%d", chunkCount), func(b *testing.B) {
+			reg := &testRegistry{
+				vaults: make(map[glid.GLID]struct {
+					cm chunk.ChunkManager
+					im index.IndexManager
+				}),
+			}
+
+			vaultID := glid.New()
+			base, err := memtest.NewVault(chunkmem.Config{
+				RotationPolicy: chunk.NewRecordCountPolicy(recordsPerChunk),
+			})
+			if err != nil {
+				b.Fatalf("memtest.NewVault: %v", err)
+			}
+
+			t0 := time.Date(2026, 6, 17, 15, 0, 0, 0, time.UTC)
+			total := recordsPerChunk * chunkCount
+			for i := range total {
+				base.CM.Append(chunk.Record{
+					IngestTS: t0.Add(time.Duration(i) * time.Second),
+					Raw:      fmt.Appendf(nil, "r-%d", i),
+				})
+			}
+			base.CM.Seal()
+
+			counter := &cursorCountCM{ChunkManager: base.CM}
+			reg.vaults[vaultID] = struct {
+				cm chunk.ChunkManager
+				im index.IndexManager
+			}{counter, base.IM}
+
+			eng := query.NewWithRegistry(reg, nil)
+			q := query.Query{
+				Limit:     5,
+				IsReverse: true,
+				Start:     t0,
+				End:       t0.Add(time.Duration(total) * time.Second),
+			}
+
+			b.ResetTimer()
+			for range b.N {
+				counter.opens.Store(0)
+				iter, _ := eng.Search(context.Background(), q, nil)
+				for _, err := range iter {
+					if err != nil {
+						b.Fatalf("search error: %v", err)
+					}
+				}
+				if opens := counter.opens.Load(); opens > 4 {
+					b.Fatalf("OpenCursor calls = %d for %d chunks, want at most 4", opens, chunkCount)
+				}
+			}
+		})
+	}
+}
