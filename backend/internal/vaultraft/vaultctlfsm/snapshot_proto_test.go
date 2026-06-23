@@ -26,7 +26,7 @@ func buildRichFSM(t *testing.T) *FSM {
 	hash[0], hash[31] = 0x11, 0xFF
 	cloud := glidFromByte(0x42)
 	applyCmd(t, f, MarshalCreateChunk(uploaded, now, now, now))
-	applyCmd(t, f, MarshalSealChunk(uploaded, now.Add(time.Second), 7, 700, now, now, now, true))
+	applyCmd(t, f, MarshalSealChunk(uploaded, now.Add(time.Second), 7, 700, now, now, now, true, now.Add(time.Second)))
 	applyCmd(t, f, MarshalCompressChunk(uploaded, 350))
 	applyCmd(t, f, MarshalUploadChunk(uploaded, 300, 1, 2, 3, 4, hash, cloud, 2))
 

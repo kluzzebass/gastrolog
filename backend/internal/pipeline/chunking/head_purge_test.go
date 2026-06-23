@@ -58,7 +58,7 @@ func TestFlushHeadPurgeWaitsForAllHolderReceipts(t *testing.T) {
 
 	sealedAt := base.Add(time.Minute)
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, sealedAt))
-	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealChunk(chunkID, sealedAt.Add(time.Second), 1, 100, base, base, base, true))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealChunk(chunkID, sealedAt.Add(time.Second), 1, 100, base, base, base, true, sealedAt.Add(time.Second)))
 	if err := mgr.BuildOnce(t.Context(), vaultID); err != nil {
 		t.Fatalf("BuildOnce: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestFlushHeadPurgeWaitsForLocalBuild(t *testing.T) {
 
 	sealedAt := base.Add(time.Minute)
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, sealedAt))
-	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealChunk(chunkID, sealedAt.Add(time.Second), 1, 100, base, base, base, true))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealChunk(chunkID, sealedAt.Add(time.Second), 1, 100, base, base, base, true, sealedAt.Add(time.Second)))
 	if _, err := os.Stat(headPath); err != nil {
 		t.Fatalf("head must remain before local build: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestPurgeStaleHeadCatchUpDropsOrphans(t *testing.T) {
 	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, base.Add(time.Minute))}); err != nil {
 		t.Fatal(err)
 	}
-	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(chunkID, base.Add(2*time.Minute), 2, 100, base, base, base, true)}); err != nil {
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(chunkID, base.Add(2*time.Minute), 2, 100, base, base, base, true, base.Add(2*time.Minute))}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -248,7 +248,7 @@ func TestManagerPurgesHeadWhenPeerSealBeforeLocalBuild(t *testing.T) {
 	}
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, sealedAt))
 	// Leader seals cluster-wide while the follower has not built yet.
-	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealChunk(chunkID, sealedAt.Add(time.Second), 1, 100, base, base, base, true))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealChunk(chunkID, sealedAt.Add(time.Second), 1, 100, base, base, base, true, sealedAt.Add(time.Second)))
 	if _, err := os.Stat(headPath); err != nil {
 		t.Fatalf("head must remain before follower build: %v", err)
 	}

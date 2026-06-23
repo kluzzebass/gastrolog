@@ -63,6 +63,7 @@ func manifestEntryToChunkMeta(e vaultctlfsm.ManifestEntry, sealed bool) chunk.Ch
 		RecordCount: e.RecordCount,
 		Bytes:       e.Bytes,
 		DiskBytes:   e.DiskBytes,
+		SealedAt:    e.SealedAt,
 		Sealed:      sealed,
 		State:       e.State,
 		CloudBacked: e.CloudBacked,

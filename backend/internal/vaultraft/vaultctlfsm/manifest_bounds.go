@@ -148,6 +148,7 @@ func manifestEntryFromOpenChunk(m *OpenChunkManifest, state chunk.ChunkState) Ma
 		WriteStart:  m.OpenedAt,
 		IngestStart: m.OpenedAt,
 		SourceStart: m.OpenedAt,
+		SealedAt:    m.SealedAt,
 		State:       state,
 		RecordCount: int64(m.TotalRecords), //nolint:gosec // G115: manifest totals fit in int64 for chunk metadata
 		Bytes:       int64(m.TotalBytes),   //nolint:gosec // G115: manifest totals fit in int64 for chunk metadata

@@ -201,35 +201,35 @@ func TestAgePolicyBasic(t *testing.T) {
 	testCases := []struct {
 		name       string
 		maxAge     time.Duration
-		createdAt  time.Time
+		writeStart time.Time
 		now        time.Time
 		wantRotate bool
 	}{
 		{
 			name:       "young_chunk",
 			maxAge:     time.Hour,
-			createdAt:  baseTime,
+			writeStart: baseTime,
 			now:        baseTime.Add(30 * time.Minute),
 			wantRotate: false,
 		},
 		{
 			name:       "exactly_at_limit",
 			maxAge:     time.Hour,
-			createdAt:  baseTime,
+			writeStart: baseTime,
 			now:        baseTime.Add(time.Hour),
-			wantRotate: false, // Not over, exactly at
+			wantRotate: true,
 		},
 		{
 			name:       "over_limit",
 			maxAge:     time.Hour,
-			createdAt:  baseTime,
+			writeStart: baseTime,
 			now:        baseTime.Add(time.Hour + time.Second),
 			wantRotate: true,
 		},
 		{
 			name:       "way_over_limit",
 			maxAge:     time.Hour,
-			createdAt:  baseTime,
+			writeStart: baseTime,
 			now:        baseTime.Add(24 * time.Hour),
 			wantRotate: true,
 		},
@@ -240,7 +240,7 @@ func TestAgePolicyBasic(t *testing.T) {
 			nowFunc := func() time.Time { return tc.now }
 			policy := NewAgePolicy(tc.maxAge, nowFunc)
 
-			state := ActiveChunkState{CreatedAt: tc.createdAt}
+			state := ActiveChunkState{WriteStart: tc.writeStart}
 			record := Record{Raw: []byte("test")}
 
 			got := policy.ShouldRotate(state, record)
@@ -254,7 +254,7 @@ func TestAgePolicyBasic(t *testing.T) {
 func TestAgePolicyTriggerName(t *testing.T) {
 	now := time.Now()
 	policy := NewAgePolicy(time.Hour, func() time.Time { return now })
-	state := ActiveChunkState{CreatedAt: now.Add(-2 * time.Hour)}
+	state := ActiveChunkState{WriteStart: now.Add(-2 * time.Hour)}
 	record := Record{Raw: []byte("x")}
 
 	got := policy.ShouldRotate(state, record)
@@ -268,7 +268,7 @@ func TestAgePolicyZeroMaxAge(t *testing.T) {
 	policy := NewAgePolicy(0, nowFunc)
 
 	state := ActiveChunkState{
-		CreatedAt: time.Now().Add(-365 * 24 * time.Hour), // 1 year old
+		WriteStart: time.Now().Add(-365 * 24 * time.Hour), // 1 year old
 	}
 	record := Record{Raw: []byte("test")}
 
@@ -277,15 +277,15 @@ func TestAgePolicyZeroMaxAge(t *testing.T) {
 	}
 }
 
-func TestAgePolicyZeroCreatedAt(t *testing.T) {
+func TestAgePolicyZeroWriteStart(t *testing.T) {
 	nowFunc := func() time.Time { return time.Now() }
 	policy := NewAgePolicy(time.Hour, nowFunc)
 
-	state := ActiveChunkState{} // CreatedAt is zero
+	state := ActiveChunkState{} // WriteStart is zero
 	record := Record{Raw: []byte("test")}
 
 	if policy.ShouldRotate(state, record) != nil {
-		t.Fatal("zero CreatedAt should not trigger rotation")
+		t.Fatal("zero WriteStart should not trigger rotation")
 	}
 }
 
@@ -294,7 +294,7 @@ func TestAgePolicyNilNowFunc(t *testing.T) {
 	policy := NewAgePolicy(time.Hour, nil)
 
 	state := ActiveChunkState{
-		CreatedAt: time.Now().Add(-2 * time.Hour), // 2 hours ago
+		WriteStart: time.Now().Add(-2 * time.Hour), // 2 hours ago
 	}
 	record := Record{Raw: []byte("test")}
 

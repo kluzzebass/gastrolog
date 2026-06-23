@@ -13,7 +13,11 @@ type ManifestSnapshot struct {
 	OpenedAt     time.Time
 	TotalRecords uint64
 	TotalBytes   uint64
-	Refs         []ManifestRef
+	// Bounds carries running WriteTS/IngestTS/SourceTS extrema committed on
+	// the vault-ctl manifest. Rotation MaxAge uses Bounds.WriteStart (WriteTS
+	// of the first record planned into the chunk).
+	Bounds vaultctlfsm.ManifestTimeBounds
+	Refs   []ManifestRef
 }
 
 // ManifestRef names one segment slice in EventID order (inclusive last).
@@ -45,7 +49,10 @@ type PlannerInput struct {
 	Segments   []SegmentView
 	Policy     ManifestRotationPolicy
 	RefAddedAt time.Time
-	CronDue    bool
+	// EvalNow is the leader wall clock for MaxAge rotation. Zero skips
+	// age-based rotation so pure Plan() replay stays deterministic.
+	EvalNow time.Time
+	CronDue bool
 }
 
 // PlannerAction is the kind of decision Plan returns.
@@ -77,7 +84,7 @@ type AddRefDecision struct {
 
 // Plan chooses the next AddSegmentRef or rotate-now decision.
 func Plan(input PlannerInput) PlannerDecision {
-	if trig, ok := input.Policy.rotateTrigger(input.Manifest, input.RefAddedAt, input.CronDue); ok {
+	if trig, ok := input.Policy.rotateTrigger(input.Manifest, input.CronDue, input.EvalNow); ok {
 		return PlannerDecision{Action: PlannerRotate, Trigger: trig}
 	}
 
@@ -105,7 +112,7 @@ func Plan(input PlannerInput) PlannerDecision {
 	}
 
 	if count == 0 {
-		if trig, ok := input.Policy.rotateTrigger(input.Manifest, input.RefAddedAt, input.CronDue); ok {
+		if trig, ok := input.Policy.rotateTrigger(input.Manifest, input.CronDue, input.EvalNow); ok {
 			return PlannerDecision{Action: PlannerRotate, Trigger: trig}
 		}
 		return PlannerDecision{Action: PlannerIdle}
@@ -144,12 +151,21 @@ const (
 	rotateTriggerBytes   = "bytes"
 )
 
-func (p ManifestRotationPolicy) rotateTrigger(m ManifestSnapshot, refAddedAt time.Time, cronDue bool) (string, bool) {
+// manifestFirstChunkWrite is the WriteTS of the first record committed on
+// the open chunk manifest — the start of the chunk's planned span.
+func manifestFirstChunkWrite(m ManifestSnapshot) time.Time {
+	return m.Bounds.WriteStart
+}
+
+func (p ManifestRotationPolicy) rotateTrigger(m ManifestSnapshot, cronDue bool, now time.Time) (string, bool) {
 	if cronDue && manifestHasContent(m) {
 		return rotateTriggerCron, true
 	}
-	if p.MaxAge > 0 && !m.OpenedAt.IsZero() && refAddedAt.Sub(m.OpenedAt) > p.MaxAge && manifestHasContent(m) {
-		return rotateTriggerAge, true
+	if p.MaxAge > 0 && !now.IsZero() && manifestHasContent(m) {
+		firstWrite := manifestFirstChunkWrite(m)
+		if !firstWrite.IsZero() && now.Sub(firstWrite) >= p.MaxAge {
+			return rotateTriggerAge, true
+		}
 	}
 	if p.MaxRecords > 0 && m.TotalRecords >= p.MaxRecords {
 		return rotateTriggerRecords, true

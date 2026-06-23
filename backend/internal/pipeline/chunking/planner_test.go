@@ -7,6 +7,7 @@ import (
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/chunking"
 	"gastrolog/internal/record"
+	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
 func segmentView(t *testing.T, path string, id glid.GLID, firstIngest time.Time) chunking.SegmentView {
@@ -216,22 +217,48 @@ func TestPlannerRotateAtByteThreshold(t *testing.T) {
 func TestPlannerRotateAtMaxAge(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
-	opened := base
-	refAt := opened.Add(2 * time.Hour)
+	firstWrite := base.Add(10 * time.Minute)
+	evalNow := firstWrite.Add(2 * time.Hour)
 
 	decision := chunking.Plan(chunking.PlannerInput{
 		Manifest: chunking.ManifestSnapshot{
-			OpenedAt:     opened,
+			OpenedAt:     base,
 			TotalRecords: 1,
+			Bounds: vaultctlfsm.ManifestTimeBounds{
+				WriteStart: firstWrite,
+				WriteEnd:   firstWrite.Add(time.Minute),
+			},
 			Refs: []chunking.ManifestRef{{
 				SegmentID: glid.New(), FirstRecordNumber: 0, LastRecordNumber: 0,
 			}},
 		},
-		Policy:     chunking.ManifestRotationPolicy{MaxAge: time.Hour},
-		RefAddedAt: refAt,
+		Policy:  chunking.ManifestRotationPolicy{MaxAge: time.Hour},
+		EvalNow: evalNow,
 	})
 	if decision.Action != chunking.PlannerRotate || decision.Trigger != "age" {
 		t.Fatalf("Plan = %+v, want rotate age", decision)
+	}
+}
+
+func TestPlannerMaxAgeUsesFirstChunkWriteNotLast(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	firstWrite := base.Add(time.Minute)
+	lastWrite := base.Add(30 * time.Minute)
+	// Age from first planned record write, not the latest ref in the chunk.
+	decision := chunking.Plan(chunking.PlannerInput{
+		Manifest: chunking.ManifestSnapshot{
+			TotalRecords: 2,
+			Bounds: vaultctlfsm.ManifestTimeBounds{
+				WriteStart: firstWrite,
+				WriteEnd:   lastWrite,
+			},
+		},
+		Policy:  chunking.ManifestRotationPolicy{MaxAge: time.Hour},
+		EvalNow: lastWrite.Add(30 * time.Minute),
+	})
+	if decision.Action != chunking.PlannerIdle {
+		t.Fatalf("Plan = %+v, want idle (age from WriteStart, not WriteEnd)", decision)
 	}
 }
 

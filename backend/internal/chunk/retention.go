@@ -56,7 +56,7 @@ func (c *CompositeRetentionPolicy) Apply(state VaultState) []ChunkID {
 }
 
 // TTLRetentionPolicy deletes sealed chunks older than maxAge.
-// Age is measured from the chunk's WriteEnd (last record written).
+// Age is measured from SealedAt (sealing completion), not record WriteTS.
 type TTLRetentionPolicy struct {
 	maxAge time.Duration
 }
@@ -75,7 +75,12 @@ func (p *TTLRetentionPolicy) Apply(state VaultState) []ChunkID {
 	cutoff := state.Now.Add(-p.maxAge)
 
 	for _, meta := range state.Chunks {
-		if meta.WriteEnd.Before(cutoff) {
+		anchor := meta.SealedAt
+		if anchor.IsZero() {
+			// Legacy chunks sealed before SealedAt was persisted.
+			anchor = meta.WriteEnd
+		}
+		if !anchor.IsZero() && anchor.Before(cutoff) {
 			result = append(result, meta.ID)
 		}
 	}

@@ -66,6 +66,7 @@ message VaultCtlCommand {
     SealOpenChunkManifestCommand seal_open_chunk_manifest = 17;
     ReleaseSegmentsCommand release_segments = 18;
     AckSegmentHolderCommand ack_segment_holder = 19;
+    DiscardOpenChunkManifestCommand discard_open_chunk_manifest = 20;
   }
 }
 
@@ -85,6 +86,9 @@ message SealChunkCommand {
   int64 source_end_nanos = 6;
   int64 ingest_start_nanos = 7;
   bool ingest_ts_monotonic = 8;
+  // Wall-clock sealing completion (leader-chosen, replicated). Retention
+  // MaxAge measures age from this timestamp, not WriteEnd.
+  int64 sealed_at_nanos = 9;
 }
 
 message CompressChunkCommand {
@@ -244,6 +248,13 @@ message SealOpenChunkManifestCommand {
   int64 sealed_at_nanos = 2;
 }
 
+// DiscardOpenChunkManifestCommand drops an empty open or sealed-pending
+// manifest without creating a chunk. Used when the planner opened a manifest
+// but never planned any segment refs (stall timeout).
+message DiscardOpenChunkManifestCommand {
+  bytes chunk_id = 1;
+}
+
 // ReleaseSegmentsCommand drops completed segment registry entries after chunk
 // replication (purge signaling). See chunking-design direction D.
 message ReleaseSegmentsCommand {
@@ -286,6 +297,8 @@ message ManifestEntry {
   bytes hash = 20;
   bytes cloud_service_id = 21;
   uint32 key_scheme = 22;
+  // Wall-clock time when sealing completed (CmdSealChunk apply).
+  int64 sealed_at_nanos = 23;
 }
 
 // Tombstone records a deleted chunk ID and the apply time of the delete.

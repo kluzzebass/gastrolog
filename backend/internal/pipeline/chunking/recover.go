@@ -53,7 +53,11 @@ func (v *vaultChunking) recoverOnce(ctx context.Context) error {
 	}
 	var lastErr error
 	if pending := v.fsm().SealedManifest(); pending != nil {
-		if err := v.recoverBuiltGLCB(ctx, pending); err != nil {
+		if len(pending.Refs) == 0 && pending.TotalRecords == 0 {
+			if err := v.discardEmptySealedManifest(pending); err != nil {
+				lastErr = err
+			}
+		} else if err := v.recoverBuiltGLCB(ctx, pending); err != nil {
 			lastErr = err
 		}
 	}
@@ -146,6 +150,7 @@ func (v *vaultChunking) recoverBuiltGLCB(ctx context.Context, pending *vaultctlf
 		result.IngestEnd,
 		result.SourceEnd,
 		result.IngestTSMonotonic,
+		v.now(),
 	)); err != nil {
 		return err
 	}

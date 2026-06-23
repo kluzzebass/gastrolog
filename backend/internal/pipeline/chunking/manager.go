@@ -76,6 +76,9 @@ type VaultConfig struct {
 	// IndexOpener opens a completed segment for planner indexing. Defaults
 	// to BuildOrderedIndex when nil (tests may inject a counting wrapper).
 	IndexOpener func(path string) (*OrderedIndex, error)
+	// Now overrides wall clock for MaxAge rotation on the open manifest.
+	// Nil uses time.Now (production). Tests inject a fixed clock.
+	Now func() time.Time
 }
 
 type vaultChunking struct {
@@ -628,6 +631,9 @@ func (v *vaultChunking) buildOnce(ctx context.Context) error {
 	if pending == nil {
 		return nil
 	}
+	if len(pending.Refs) == 0 && pending.TotalRecords == 0 {
+		return v.discardEmptySealedManifest(pending)
+	}
 
 	key := buildKey{chunkID: pending.ChunkID, sealedAt: pending.SealedAt}
 	if done, err := v.buildOnceIfSealedElsewhere(ctx, pending, key); done || err != nil {
@@ -765,6 +771,7 @@ func (v *vaultChunking) proposeSealOnce(ctx context.Context, pending *vaultctlfs
 		result.IngestEnd,
 		result.SourceEnd,
 		result.IngestTSMonotonic,
+		v.now(),
 	)); err != nil {
 		return err
 	}
@@ -822,6 +829,13 @@ func (v *vaultChunking) finishBuildOnce(ctx context.Context, pending *vaultctlfs
 	if entry != nil && entry.State == chunk.ChunkStateSealed {
 		v.pendingSeal = nil
 	}
+}
+
+func (v *vaultChunking) discardEmptySealedManifest(pending *vaultctlfsm.OpenChunkManifest) error {
+	if pending == nil || v.cfg.Applier == nil || !v.cfg.IsLeader() {
+		return nil
+	}
+	return v.cfg.Applier.Apply(vaultctlfsm.MarshalDiscardOpenChunkManifest(pending.ChunkID))
 }
 
 func (v *vaultChunking) build(ctx context.Context, pending *vaultctlfsm.OpenChunkManifest) (BuildResult, error) {

@@ -140,6 +140,8 @@ type ManifestEntry struct {
 	SourceStart time.Time
 	SourceEnd   time.Time
 
+	SealedAt time.Time // wall-clock sealing completion (FSM / retention anchor)
+
 	// IngestTSMonotonic is true when records were appended in IngestTS-
 	// ascending order; the histogram fast path uses position-as-rank only
 	// when this is true. Set by CmdSealChunk from the chunk manager's
@@ -194,6 +196,7 @@ func (e *ManifestEntry) ToChunkMeta() chunk.ChunkMeta {
 		ID:                e.ID,
 		WriteStart:        e.WriteStart,
 		WriteEnd:          e.WriteEnd,
+		SealedAt:          e.SealedAt,
 		RecordCount:       e.RecordCount,
 		Bytes:             e.Bytes,
 		Sealed:            state == chunk.ChunkStateSealed,
@@ -1037,6 +1040,12 @@ func (f *FSM) tryApplySegmentPipelineLocked(cmd *gastrologv1.VaultCtlCommand) (a
 		result, sealed := f.applySealOpenChunkManifestLocked(c.SealOpenChunkManifest)
 		fx.sealedManifest = sealed
 		return result, fx, true
+	case *gastrologv1.VaultCtlCommand_DiscardOpenChunkManifest:
+		deleted, result := f.applyDiscardOpenChunkManifest(c.DiscardOpenChunkManifest)
+		if deleted != nil {
+			fx.deletedID = deleted
+		}
+		return result, fx, true
 	case *gastrologv1.VaultCtlCommand_ReleaseSegments:
 		released := f.applyReleaseSegments(c.ReleaseSegments)
 		if len(released) > 0 {
@@ -1300,6 +1309,11 @@ func (f *FSM) applySeal(c *gastrologv1.SealChunkCommand) error {
 	e.IngestStart = time.Unix(0, c.GetIngestStartNanos())
 	e.IngestTSMonotonic = c.GetIngestTsMonotonic()
 	e.State = chunk.ChunkStateSealed
+	sealedAt := time.Unix(0, c.GetSealedAtNanos())
+	if sealedAt.IsZero() {
+		sealedAt = e.WriteEnd
+	}
+	e.SealedAt = sealedAt
 	if f.sealedManifest != nil && f.sealedManifest.ChunkID == id {
 		f.sealedManifest = nil
 	}
@@ -1489,7 +1503,7 @@ func MarshalCreateChunk(id chunk.ChunkID, writeStart, ingestStart, sourceStart t
 }
 
 // NewSealChunk builds a SealChunk command message.
-func NewSealChunk(id chunk.ChunkID, writeEnd time.Time, recordCount, bytes int64, ingestStart, ingestEnd, sourceEnd time.Time, ingestTSMonotonic bool) *gastrologv1.VaultCtlCommand {
+func NewSealChunk(id chunk.ChunkID, writeEnd time.Time, recordCount, bytes int64, ingestStart, ingestEnd, sourceEnd time.Time, ingestTSMonotonic bool, sealedAt time.Time) *gastrologv1.VaultCtlCommand {
 	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_SealChunk{SealChunk: &gastrologv1.SealChunkCommand{
 		Id:                id[:],
 		WriteEndNanos:     writeEnd.UnixNano(),
@@ -1499,12 +1513,13 @@ func NewSealChunk(id chunk.ChunkID, writeEnd time.Time, recordCount, bytes int64
 		SourceEndNanos:    sourceEnd.UnixNano(),
 		IngestStartNanos:  ingestStart.UnixNano(),
 		IngestTsMonotonic: ingestTSMonotonic,
+		SealedAtNanos:     sealedAt.UnixNano(),
 	}}}
 }
 
 // MarshalSealChunk builds the Raft log data for a SealChunk command.
-func MarshalSealChunk(id chunk.ChunkID, writeEnd time.Time, recordCount, bytes int64, ingestStart, ingestEnd, sourceEnd time.Time, ingestTSMonotonic bool) []byte {
-	return mustMarshalCommand(NewSealChunk(id, writeEnd, recordCount, bytes, ingestStart, ingestEnd, sourceEnd, ingestTSMonotonic))
+func MarshalSealChunk(id chunk.ChunkID, writeEnd time.Time, recordCount, bytes int64, ingestStart, ingestEnd, sourceEnd time.Time, ingestTSMonotonic bool, sealedAt time.Time) []byte {
+	return mustMarshalCommand(NewSealChunk(id, writeEnd, recordCount, bytes, ingestStart, ingestEnd, sourceEnd, ingestTSMonotonic, sealedAt))
 }
 
 // NewBeginSeal builds a BeginSeal command message. gastrolog-1huz5.
@@ -1625,6 +1640,7 @@ func entryToProto(e *ManifestEntry) *gastrologv1.ManifestEntry {
 		Hash:              e.Hash[:],
 		CloudServiceId:    e.CloudServiceID[:],
 		KeyScheme:         uint32(e.KeyScheme),
+		SealedAtNanos:     e.SealedAt.UnixNano(),
 	}
 }
 
@@ -1643,6 +1659,7 @@ func entryFromProto(p *gastrologv1.ManifestEntry) ManifestEntry {
 		SourceStart:       time.Unix(0, p.GetSourceStartNanos()),
 		SourceEnd:         time.Unix(0, p.GetSourceEndNanos()),
 		IngestTSMonotonic: p.GetIngestTsMonotonic(),
+		SealedAt:          time.Unix(0, p.GetSealedAtNanos()),
 		CloudBacked:       p.GetCloudBacked(),
 		Archived:          p.GetArchived(),
 		RetentionPending:  p.GetRetentionPending(),

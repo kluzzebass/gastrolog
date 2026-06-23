@@ -141,16 +141,16 @@ func TestFactoryCustomMaxChunkAge(t *testing.T) {
 	now := time.Now()
 	next := chunk.Record{Raw: []byte("x")}
 
-	// State created recently - should not rotate
+	// Age is measured from first record WriteTS, not chunk open time.
 	state := chunk.ActiveChunkState{
-		CreatedAt: now.Add(-30 * time.Minute),
+		WriteStart: now.Add(-30 * time.Minute),
 	}
 	if mgr.cfg.RotationPolicy.ShouldRotate(state, next) != nil {
 		t.Error("should not rotate when chunk is younger than max age")
 	}
 
-	// State created over 1 hour ago - should rotate
-	state.CreatedAt = now.Add(-2 * time.Hour)
+	// First write over 1 hour ago — should rotate.
+	state.WriteStart = now.Add(-2 * time.Hour)
 	if mgr.cfg.RotationPolicy.ShouldRotate(state, next) == nil {
 		t.Error("should rotate when chunk is older than max age")
 	}

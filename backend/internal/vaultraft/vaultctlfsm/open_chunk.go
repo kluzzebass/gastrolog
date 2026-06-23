@@ -165,15 +165,6 @@ func (f *FSM) applyOpenChunkManifest(c *gastrologv1.OpenChunkManifestCommand) er
 		ChunkID:  id,
 		OpenedAt: openedAt,
 	}
-	if existing := f.chunks[id]; existing == nil {
-		f.chunks[id] = &ManifestEntry{
-			ID:          id,
-			WriteStart:  openedAt,
-			IngestStart: openedAt,
-			SourceStart: openedAt,
-			State:       chunk.ChunkStateActive,
-		}
-	}
 	return nil
 }
 
@@ -215,6 +206,17 @@ func (f *FSM) applyAddOpenChunkSegmentRef(c *gastrologv1.AddOpenChunkSegmentRefC
 		sliceBounds.IngestStart, sliceBounds.IngestEnd,
 		sliceBounds.SourceStart, sliceBounds.SourceEnd,
 	)
+	if e := f.chunks[id]; e == nil {
+		openedAt := f.openChunk.OpenedAt
+		e = &ManifestEntry{
+			ID:          id,
+			WriteStart:  openedAt,
+			IngestStart: openedAt,
+			SourceStart: openedAt,
+			State:       chunk.ChunkStateActive,
+		}
+		f.chunks[id] = e
+	}
 	if e := f.chunks[id]; e != nil {
 		e.RecordCount = int64(f.openChunk.TotalRecords) //nolint:gosec // G115: manifest totals fit in int64 for chunk metadata
 		e.Bytes = int64(f.openChunk.TotalBytes)       //nolint:gosec // G115: manifest totals fit in int64 for chunk metadata
@@ -250,6 +252,31 @@ func (f *FSM) applySealOpenChunkManifest(c *gastrologv1.SealOpenChunkManifestCom
 	f.clearStaleSealTombstoneLocked(f.sealedManifest.ChunkID)
 	f.ensureManifestChunkEntryLocked(f.sealedManifest, chunk.ChunkStateSealing)
 	return nil
+}
+
+func (f *FSM) applyDiscardOpenChunkManifest(c *gastrologv1.DiscardOpenChunkManifestCommand) (*chunk.ChunkID, error) {
+	id := chunkIDFromProto(c.GetChunkId())
+	if id == chunk.ChunkID(glid.Nil) {
+		return nil, errors.New("chunk id required")
+	}
+	var m *OpenChunkManifest
+	switch {
+	case f.openChunk != nil && f.openChunk.ChunkID == id:
+		m = f.openChunk
+	case f.sealedManifest != nil && f.sealedManifest.ChunkID == id:
+		m = f.sealedManifest
+	default:
+		return nil, nil
+	}
+	if len(m.Refs) != 0 || m.TotalRecords != 0 {
+		return nil, fmt.Errorf("discard open chunk manifest: %s has content", id)
+	}
+	f.clearOpenManifestStateIfChunkIDLocked(id)
+	if _, existed := f.chunks[id]; !existed {
+		return nil, nil
+	}
+	delete(f.chunks, id)
+	return &id, nil
 }
 
 // clearStaleSealTombstoneLocked removes a delete-protocol tombstone that blocks
@@ -514,6 +541,20 @@ func NewSealOpenChunkManifest(id chunk.ChunkID, sealedAt time.Time) *gastrologv1
 // MarshalSealOpenChunkManifest builds Raft log data for SealOpenChunkManifest.
 func MarshalSealOpenChunkManifest(id chunk.ChunkID, sealedAt time.Time) []byte {
 	return mustMarshalCommand(NewSealOpenChunkManifest(id, sealedAt))
+}
+
+// NewDiscardOpenChunkManifest builds a DiscardOpenChunkManifest command.
+func NewDiscardOpenChunkManifest(id chunk.ChunkID) *gastrologv1.VaultCtlCommand {
+	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_DiscardOpenChunkManifest{
+		DiscardOpenChunkManifest: &gastrologv1.DiscardOpenChunkManifestCommand{
+			ChunkId: id[:],
+		},
+	}}
+}
+
+// MarshalDiscardOpenChunkManifest builds Raft log data for DiscardOpenChunkManifest.
+func MarshalDiscardOpenChunkManifest(id chunk.ChunkID) []byte {
+	return mustMarshalCommand(NewDiscardOpenChunkManifest(id))
 }
 
 // NewReleaseSegments builds a ReleaseSegments command.

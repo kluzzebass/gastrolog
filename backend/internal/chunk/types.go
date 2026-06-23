@@ -186,6 +186,7 @@ type ChunkMeta struct {
 	ID          ChunkID
 	WriteStart  time.Time // min WriteTS in chunk
 	WriteEnd    time.Time // max WriteTS in chunk
+	SealedAt    time.Time // wall-clock sealing completion; retention MaxAge anchor
 	RecordCount int64
 	Bytes       int64 // Total logical bytes (raw + attr + idx)
 	// Sealed is the legacy two-state flag. Equivalent to State == Sealed

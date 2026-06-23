@@ -545,7 +545,7 @@ func TestSealChunkClearsSealedManifest(t *testing.T) {
 	if fsm.SealedManifest() == nil {
 		t.Fatal("expected sealed manifest before SealChunk")
 	}
-	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealChunk(chunkID, now.Add(2*time.Minute), 1, 100, now, now, now, true))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealChunk(chunkID, now.Add(2*time.Minute), 1, 100, now, now, now, true, now.Add(2*time.Minute)))
 	if fsm.SealedManifest() != nil {
 		t.Fatal("sealed manifest must clear after SealChunk")
 	}
@@ -555,7 +555,7 @@ func TestRecordingApplierSealChunkProto(t *testing.T) {
 	t.Parallel()
 	id := chunk.NewChunkID()
 	now := time.Unix(0, 1_700_000_000_000).UTC()
-	data := vaultctlfsm.MarshalSealChunk(id, now, 10, 500, now, now, now, true)
+	data := vaultctlfsm.MarshalSealChunk(id, now, 10, 500, now, now, now, true, now)
 	var cmd gastrologv1.VaultCtlCommand
 	if err := proto.Unmarshal(data, &cmd); err != nil {
 		t.Fatal(err)

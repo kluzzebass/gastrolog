@@ -48,8 +48,7 @@ function NodeSegmentTable({
   nodeNames: Map<string, string>;
 }>) {
   const c = useThemeClass(dark);
-  const active = rows.filter((row) => colA.get(row) > 0 || colB.get(row) > 0);
-  if (active.length === 0) return null;
+  if (rows.length === 0) return null;
 
   const border = c("border-ink-border", "border-light-border");
   const rowBorder = c("border-ink-border-subtle", "border-light-border-subtle");
@@ -71,7 +70,7 @@ function NodeSegmentTable({
             </tr>
           </thead>
           <tbody>
-            {active.map((row) => {
+            {rows.map((row) => {
               const label = resolveNodeName(nodeNames, row.nodeId);
               const a = colA.get(row);
               const b = colB.get(row);

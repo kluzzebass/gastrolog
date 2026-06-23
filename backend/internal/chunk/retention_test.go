@@ -9,11 +9,12 @@ import (
 // Helper to build a ChunkMeta with the given parameters.
 func metaAt(id ChunkID, start, end time.Time, bytes int64) ChunkMeta {
 	return ChunkMeta{
-		ID:      id,
+		ID:         id,
 		WriteStart: start,
 		WriteEnd:   end,
-		Bytes:   bytes,
-		Sealed:  true,
+		SealedAt:   end,
+		Bytes:      bytes,
+		Sealed:     true,
 	}
 }
 
@@ -148,6 +149,22 @@ func TestTTLRetentionPolicy(t *testing.T) {
 				t.Errorf("got %s, want %s", formatIDs(got), formatIDs(tt.want))
 			}
 		})
+	}
+}
+
+func TestTTLRetentionPolicyUsesSealedAtNotWriteEnd(t *testing.T) {
+	now := time.Date(2025, 6, 15, 12, 0, 0, 0, time.UTC)
+	id := idAt(now)
+	meta := ChunkMeta{
+		ID:       id,
+		WriteEnd: now.Add(-72 * time.Hour), // old records
+		SealedAt: now.Add(-1 * time.Hour),  // sealed recently
+		Sealed:   true,
+	}
+	policy := NewTTLRetentionPolicy(24 * time.Hour)
+	got := policy.Apply(VaultState{Chunks: []ChunkMeta{meta}, Now: now})
+	if len(got) != 0 {
+		t.Fatalf("retention must anchor on SealedAt, not WriteEnd; got deletes %v", got)
 	}
 }
 

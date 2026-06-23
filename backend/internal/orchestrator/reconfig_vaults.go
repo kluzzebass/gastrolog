@@ -1469,7 +1469,7 @@ func wireVaultFSMPipelineChunkEvents(o *Orchestrator, vaultID glid.GLID, fsm *va
 		return
 	}
 	fsm.AddOnOpenChunkManifest(func(m *vaultctlfsm.OpenChunkManifest) {
-		if m == nil {
+		if m == nil || len(m.Refs) == 0 {
 			return
 		}
 		o.EmitChunkCreated(vaultID, openChunkManifestToChunkMeta(m, chunk.ChunkStateActive))
@@ -1478,7 +1478,12 @@ func wireVaultFSMPipelineChunkEvents(o *Orchestrator, vaultID glid.GLID, fsm *va
 		if m == nil {
 			return
 		}
-		o.EmitChunkProgress(vaultID, openChunkManifestToChunkMeta(m, chunk.ChunkStateActive))
+		meta := openChunkManifestToChunkMeta(m, chunk.ChunkStateActive)
+		if len(m.Refs) == 1 {
+			o.EmitChunkCreated(vaultID, meta)
+			return
+		}
+		o.EmitChunkProgress(vaultID, meta)
 	})
 	fsm.AddOnSealedManifest(func(m *vaultctlfsm.OpenChunkManifest) {
 		if m == nil {

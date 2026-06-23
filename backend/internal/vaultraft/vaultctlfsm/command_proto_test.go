@@ -47,7 +47,7 @@ func TestCommandRoundTrip(t *testing.T) {
 	})
 
 	t.Run("seal", func(t *testing.T) {
-		c := decodeCommand(t, MarshalSealChunk(id, now, 42, 99, now, now, now, true))
+		c := decodeCommand(t, MarshalSealChunk(id, now, 42, 99, now, now, now, true, now))
 		got := c.GetSealChunk()
 		if got == nil {
 			t.Fatalf("wrong case: %T", c.GetCommand())

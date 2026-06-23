@@ -38,9 +38,10 @@ func catchUpBudget(eligible int, policy ManifestRotationPolicy) int {
 	return int(backlog)
 }
 
-// sealStalledEmptyOpen seals an open manifest that has stayed at zero refs
-// longer than the rotation MaxAge stall threshold.
-func sealStalledEmptyOpen(open *vaultctlfsm.OpenChunkManifest, manifest ManifestSnapshot, policy ManifestRotationPolicy, refAddedAt time.Time, applier vaultctlfsm.Applier) error {
+// discardStalledEmptyOpen drops an open manifest that has stayed at zero refs
+// longer than the rotation MaxAge stall threshold. Empty manifests must not be
+// sealed — GLCB build requires at least one record.
+func discardStalledEmptyOpen(open *vaultctlfsm.OpenChunkManifest, manifest ManifestSnapshot, policy ManifestRotationPolicy, now time.Time, applier vaultctlfsm.Applier) error {
 	if open == nil || len(manifest.Refs) != 0 || applier == nil {
 		return nil
 	}
@@ -48,14 +49,20 @@ func sealStalledEmptyOpen(open *vaultctlfsm.OpenChunkManifest, manifest Manifest
 	if stall <= 0 {
 		stall = 30 * time.Second
 	}
-	if time.Since(open.OpenedAt) <= stall {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if now.Sub(open.OpenedAt) < stall {
 		return nil
 	}
-	sealedAt := refAddedAt
-	if sealedAt.IsZero() {
-		sealedAt = open.OpenedAt
+	return applier.Apply(vaultctlfsm.MarshalDiscardOpenChunkManifest(open.ChunkID))
+}
+
+func (v *vaultChunking) now() time.Time {
+	if v.cfg.Now != nil {
+		return v.cfg.Now()
 	}
-	return applier.Apply(vaultctlfsm.MarshalSealOpenChunkManifest(open.ChunkID, sealedAt))
+	return time.Now()
 }
 
 // planOnce runs one leader planner step. cronDue=true forces a cron rotation
@@ -82,29 +89,28 @@ func (v *vaultChunking) planOnce(ctx context.Context, cronDue bool) error {
 
 	manifest, resume := plannerStateFromFSM(v.fsm(), open)
 	refAddedAt := plannerRefAddedAtForEligible(v.fsm().ListCompletedSegments(), eligible)
+	evalNow := v.now()
 
 	if open == nil {
+		wire, ready := v.proposeOpenManifestWire(manifest, resume, eligible, refAddedAt, evalNow, cronDue)
 		v.planMu.Unlock()
-		chunkID := v.cfg.newChunkID()
-		openedAt := refAddedAt
-		if openedAt.IsZero() {
-			openedAt = decisionRefAddedAt(eligible)
+		if !ready {
+			if v.cfg.Nudge != nil && len(eligible) > 0 {
+				_ = v.cfg.Nudge.CollectMissing(ctx)
+			}
+			return nil
 		}
-		return v.cfg.Applier.Apply(vaultctlfsm.MarshalOpenChunkManifest(chunkID, openedAt))
+		return v.cfg.Applier.Apply(wire)
 	}
 
-	if _, ok := v.cfg.Policy.rotateTrigger(manifest, refAddedAt, cronDue); ok {
-		sealedAt := refAddedAt
-		if sealedAt.IsZero() {
-			sealedAt = open.OpenedAt
-		}
+	if _, ok := v.cfg.Policy.rotateTrigger(manifest, cronDue, evalNow); ok {
 		v.planMu.Unlock()
-		return v.cfg.Applier.Apply(vaultctlfsm.MarshalSealOpenChunkManifest(open.ChunkID, sealedAt))
+		return v.cfg.Applier.Apply(vaultctlfsm.MarshalSealOpenChunkManifest(open.ChunkID, evalNow))
 	}
 
 	seg, ok := v.lazyPickSegment(manifest, resume, eligible)
 	if !ok {
-		if err := sealStalledEmptyOpen(open, manifest, v.cfg.Policy, refAddedAt, v.cfg.Applier); err != nil {
+		if err := discardStalledEmptyOpen(open, manifest, v.cfg.Policy, evalNow, v.cfg.Applier); err != nil {
 			v.planMu.Unlock()
 			return err
 		}
@@ -121,6 +127,7 @@ func (v *vaultChunking) planOnce(ctx context.Context, cronDue bool) error {
 		Segments:   []SegmentView{seg},
 		Policy:     v.cfg.Policy,
 		RefAddedAt: refAddedAt,
+		EvalNow:    evalNow,
 		CronDue:    cronDue,
 	})
 	v.planMu.Unlock()
@@ -129,11 +136,7 @@ func (v *vaultChunking) planOnce(ctx context.Context, cronDue bool) error {
 	case PlannerIdle:
 		return nil
 	case PlannerRotate:
-		sealedAt := refAddedAt
-		if sealedAt.IsZero() {
-			sealedAt = open.OpenedAt
-		}
-		return v.cfg.Applier.Apply(vaultctlfsm.MarshalSealOpenChunkManifest(open.ChunkID, sealedAt))
+		return v.cfg.Applier.Apply(vaultctlfsm.MarshalSealOpenChunkManifest(open.ChunkID, evalNow))
 	case PlannerAddRef:
 		ref := decision.Ref
 		return v.cfg.Applier.Apply(vaultctlfsm.MarshalAddOpenChunkSegmentRef(open.ChunkID, vaultctlfsm.OpenChunkSegmentRef{
@@ -147,6 +150,40 @@ func (v *vaultChunking) planOnce(ctx context.Context, cronDue bool) error {
 	default:
 		return nil
 	}
+}
+
+// proposeOpenManifestWire picks a plannable segment and returns Raft log data
+// for OpenChunkManifest when the planner would add the first ref. Caller holds
+// planMu. The second return is false when no manifest should be opened yet.
+func (v *vaultChunking) proposeOpenManifestWire(
+	manifest ManifestSnapshot,
+	resume map[glid.GLID]uint32,
+	eligible []vaultctlfsm.CompletedSegmentEntry,
+	refAddedAt, evalNow time.Time,
+	cronDue bool,
+) ([]byte, bool) {
+	seg, ok := v.lazyPickSegment(manifest, resume, eligible)
+	if !ok {
+		return nil, false
+	}
+	decision := Plan(PlannerInput{
+		Manifest:   manifest,
+		Resume:     resume,
+		Segments:   []SegmentView{seg},
+		Policy:     v.cfg.Policy,
+		RefAddedAt: refAddedAt,
+		EvalNow:    evalNow,
+		CronDue:    cronDue,
+	})
+	if decision.Action != PlannerAddRef {
+		return nil, false
+	}
+	chunkID := v.cfg.newChunkID()
+	openedAt := refAddedAt
+	if openedAt.IsZero() {
+		openedAt = decisionRefAddedAt(eligible)
+	}
+	return vaultctlfsm.MarshalOpenChunkManifest(chunkID, openedAt), true
 }
 
 // planCatchUp runs planOnce until the manifest stops changing or a sealed
@@ -357,6 +394,7 @@ func plannerStateFromFSM(fsm *vaultctlfsm.FSM, open *vaultctlfsm.OpenChunkManife
 		OpenedAt:     open.OpenedAt,
 		TotalRecords: open.TotalRecords,
 		TotalBytes:   open.TotalBytes,
+		Bounds:       open.Bounds,
 		Refs:         make([]ManifestRef, len(open.Refs)),
 	}
 	for i, ref := range open.Refs {

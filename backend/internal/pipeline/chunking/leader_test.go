@@ -178,6 +178,141 @@ func TestLeaderPlannerRotatesAtMaxRecords(t *testing.T) {
 	}
 }
 
+func TestLeaderPlannerRotatesAtMaxAgeWhenCaughtUp(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	firstWrite := base.Add(10 * time.Minute)
+	evalNow := firstWrite.Add(2 * time.Hour)
+	pubAt := base.Add(time.Minute)
+	segID := glid.New()
+	vaultID := glid.New()
+	vaultRoot := t.TempDir()
+	writeCompletedSegment(t, vaultRoot, segID, vaultID, []recordForSeg{
+		{0, firstWrite, "a"},
+		{1, firstWrite.Add(time.Second), "b"},
+	})
+
+	fsm := vaultctlfsm.New()
+	chunkID := chunk.NewChunkID()
+	applier := &fsmApplier{fsm: fsm}
+
+	mgr := chunking.New(chunking.Config{})
+	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
+		VaultRoot:  vaultRoot,
+		ChunkRoot:  filepath.Join(vaultRoot, "chunks"),
+		FSM:        fsm,
+		Locate:     chunking.VaultSegmentLocator{Root: vaultRoot},
+		Applier:    applier,
+		IsLeader:   func() bool { return true },
+		NewChunkID: func() chunk.ChunkID { return chunkID },
+		Policy:     chunking.ManifestRotationPolicy{MaxAge: time.Hour},
+		Now:        func() time.Time { return evalNow },
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	publishSegment(t, fsm, segID, pubAt, 2, firstWrite, firstWrite.Add(time.Second))
+	ctx := t.Context()
+	for step := 0; step < 8; step++ {
+		if fsm.SealedManifest() != nil {
+			break
+		}
+		if err := mgr.PlanOnce(ctx, vaultID); err != nil {
+			t.Fatalf("PlanOnce step %d: %v", step, err)
+		}
+	}
+	sealed := fsm.SealedManifest()
+	if sealed == nil {
+		t.Fatal("expected sealed manifest after MaxAge rotation")
+	}
+	if !sealed.SealedAt.Equal(evalNow) {
+		t.Fatalf("SealedAt = %v, want wall-clock evalNow %v", sealed.SealedAt, evalNow)
+	}
+	if fsm.OpenChunk() != nil {
+		t.Fatal("open manifest must clear on age rotate")
+	}
+}
+
+func TestLeaderPlannerDoesNotOpenWithoutLocalSegment(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	segID := glid.New()
+	vaultID := glid.New()
+	vaultRoot := t.TempDir()
+
+	fsm := vaultctlfsm.New()
+	chunkID := chunk.NewChunkID()
+	applier := &fsmApplier{fsm: fsm}
+
+	mgr := chunking.New(chunking.Config{})
+	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
+		VaultRoot:  vaultRoot,
+		ChunkRoot:  filepath.Join(vaultRoot, "chunks"),
+		FSM:        fsm,
+		Locate:     chunking.VaultSegmentLocator{Root: vaultRoot},
+		Applier:    applier,
+		IsLeader:   func() bool { return true },
+		NewChunkID: func() chunk.ChunkID { return chunkID },
+		Policy:     chunking.ManifestRotationPolicy{MaxRecords: 100},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Registry entry without a local completed segment file — planner must not
+	// open an empty manifest while waiting for collection.
+	publishSegment(t, fsm, segID, base, 2, base, base.Add(time.Second))
+	if err := mgr.PlanOnce(t.Context(), vaultID); err != nil {
+		t.Fatal(err)
+	}
+	if fsm.OpenChunk() != nil {
+		t.Fatal("must not open manifest before a segment is plannable locally")
+	}
+	if fsm.Get(chunkID) != nil {
+		t.Fatal("must not create phantom chunk entry")
+	}
+}
+
+func TestLeaderPlannerDiscardsStalledEmptyOpen(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	evalNow := base.Add(2 * time.Minute)
+	chunkID := chunk.NewChunkID()
+	vaultID := glid.New()
+	vaultRoot := t.TempDir()
+
+	fsm := vaultctlfsm.New()
+	applier := &fsmApplier{fsm: fsm}
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalOpenChunkManifest(chunkID, base))
+
+	mgr := chunking.New(chunking.Config{})
+	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
+		VaultRoot:  vaultRoot,
+		ChunkRoot:  filepath.Join(vaultRoot, "chunks"),
+		FSM:        fsm,
+		Locate:     chunking.VaultSegmentLocator{Root: vaultRoot},
+		Applier:    applier,
+		IsLeader:   func() bool { return true },
+		NewChunkID: func() chunk.ChunkID { return chunkID },
+		Policy:     chunking.ManifestRotationPolicy{MaxAge: time.Minute},
+		Now:        func() time.Time { return evalNow },
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := mgr.PlanOnce(t.Context(), vaultID); err != nil {
+		t.Fatal(err)
+	}
+	if fsm.OpenChunk() != nil {
+		t.Fatal("stalled empty open manifest must be discarded, not left open")
+	}
+	if fsm.SealedManifest() != nil {
+		t.Fatal("empty manifest must not enter sealed pending state")
+	}
+	if fsm.Get(chunkID) != nil {
+		t.Fatal("phantom chunk entry must be removed")
+	}
+}
+
 func TestLeaderPlannerFollowerDoesNotPropose(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
@@ -421,6 +556,7 @@ func TestLeaderPlannerSecondManifestSkipsConsumedSegments(t *testing.T) {
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealChunk(
 		first.ChunkID, base.Add(time.Minute), 2, 1024,
 		base, base.Add(time.Second), base.Add(time.Second), true,
+		base.Add(time.Minute),
 	))
 
 	second := planUntilSealed(t, mgr, vaultID, fsm)
@@ -507,9 +643,9 @@ func TestLazyPlannerPartialPathIndexesOneSegment(t *testing.T) {
 	}
 }
 
-// TestLazyPlannerOpenManifestSkipsIndexes guards the open-manifest fast path:
-// the first planner step must not open segment indexes before the manifest exists.
-func TestLazyPlannerOpenManifestSkipsIndexes(t *testing.T) {
+// TestPlannerOpensManifestAfterPickingSegment verifies the leader only opens a
+// manifest once it has picked a plannable segment (one index open for k-way).
+func TestPlannerOpensManifestAfterPickingSegment(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
 	pubAt := base.Add(time.Minute)
@@ -545,8 +681,11 @@ func TestLazyPlannerOpenManifestSkipsIndexes(t *testing.T) {
 	if err := mgr.PlanOnce(ctx, vaultID); err != nil {
 		t.Fatal(err)
 	}
-	if got := indexOpens.Load(); got != 0 {
-		t.Fatalf("open-manifest PlanOnce index opens = %d, want 0", got)
+	if got := indexOpens.Load(); got != 1 {
+		t.Fatalf("first PlanOnce index opens = %d, want 1 (pick before open)", got)
+	}
+	if fsm.OpenChunk() == nil {
+		t.Fatal("manifest must open once a local segment is plannable")
 	}
 }
 

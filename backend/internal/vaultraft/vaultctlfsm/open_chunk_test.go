@@ -27,9 +27,8 @@ func TestOpenChunkManifestLifecycle(t *testing.T) {
 	if open == nil || open.ChunkID != chunkID || !open.OpenedAt.Equal(openedAt) {
 		t.Fatalf("OpenChunk = %+v", open)
 	}
-	entry := fsm.Get(chunkID)
-	if entry == nil || entry.State != chunk.ChunkStateActive {
-		t.Fatalf("chunk entry = %+v", entry)
+	if fsm.Get(chunkID) != nil {
+		t.Fatal("chunk entry must not exist until the first segment ref is planned")
 	}
 
 	ref := OpenChunkSegmentRef{
@@ -40,6 +39,10 @@ func TestOpenChunkManifestLifecycle(t *testing.T) {
 		RefAddedAt:        refAddedAt,
 	}
 	applyCmd(t, fsm, MarshalAddOpenChunkSegmentRef(chunkID, ref))
+	entry := fsm.Get(chunkID)
+	if entry == nil || entry.State != chunk.ChunkStateActive {
+		t.Fatalf("chunk entry after first ref = %+v", entry)
+	}
 	open = fsm.OpenChunk()
 	if open.TotalRecords != 50 || open.TotalBytes != 8192 {
 		t.Fatalf("totals = records:%d bytes:%d", open.TotalRecords, open.TotalBytes)
@@ -308,7 +311,7 @@ func TestSealChunkRepairsMissingManifestEntry(t *testing.T) {
 		t.Fatal("expected missing manifest entry before repair")
 	}
 
-	applyCmd(t, fsm, MarshalSealChunk(chunkID, now.Add(2*time.Minute), 10, 500, now, now, now, true))
+	applyCmd(t, fsm, MarshalSealChunk(chunkID, now.Add(2*time.Minute), 10, 500, now, now, now, true, now.Add(2*time.Minute)))
 	entry := fsm.Get(chunkID)
 	if entry == nil || entry.State != chunk.ChunkStateSealed {
 		t.Fatalf("entry after repair = %+v", entry)
@@ -339,12 +342,62 @@ func TestSealChunkClearsStaleTombstoneForPendingManifest(t *testing.T) {
 		t.Fatal("expected tombstone before repair")
 	}
 
-	applyCmd(t, fsm, MarshalSealChunk(chunkID, now.Add(2*time.Minute), 10, 500, now, now, now, true))
+	applyCmd(t, fsm, MarshalSealChunk(chunkID, now.Add(2*time.Minute), 10, 500, now, now, now, true, now.Add(2*time.Minute)))
 	if fsm.IsTombstoned(chunkID) {
 		t.Fatal("stale tombstone must clear when pending sealed manifest seals")
 	}
 	entry := fsm.Get(chunkID)
 	if entry == nil || entry.State != chunk.ChunkStateSealed {
 		t.Fatalf("entry after tombstone repair = %+v", entry)
+	}
+}
+
+func TestDiscardEmptyOpenChunkManifest(t *testing.T) {
+	t.Parallel()
+	fsm := New()
+	chunkID := testChunkID(0x60)
+	now := time.Unix(0, 1_700_000_000_000).UTC()
+	applyCmd(t, fsm, MarshalOpenChunkManifest(chunkID, now))
+	applyCmd(t, fsm, MarshalDiscardOpenChunkManifest(chunkID))
+	if fsm.OpenChunk() != nil {
+		t.Fatal("open manifest must clear on discard")
+	}
+	if fsm.Get(chunkID) != nil {
+		t.Fatal("phantom active entry must be removed")
+	}
+}
+
+func TestDiscardEmptySealedManifest(t *testing.T) {
+	t.Parallel()
+	fsm := New()
+	chunkID := testChunkID(0x61)
+	now := time.Unix(0, 1_700_000_000_000).UTC()
+	applyCmd(t, fsm, MarshalOpenChunkManifest(chunkID, now))
+	applyCmd(t, fsm, MarshalSealOpenChunkManifest(chunkID, now.Add(time.Minute)))
+	if fsm.SealedManifest() == nil {
+		t.Fatal("expected sealed pending manifest")
+	}
+	applyCmd(t, fsm, MarshalDiscardOpenChunkManifest(chunkID))
+	if fsm.SealedManifest() != nil {
+		t.Fatal("sealed manifest must clear on discard")
+	}
+	if fsm.Get(chunkID) != nil {
+		t.Fatal("phantom sealing entry must be removed")
+	}
+}
+
+func TestDiscardRejectsNonemptyManifest(t *testing.T) {
+	t.Parallel()
+	fsm := New()
+	chunkID := testChunkID(0x62)
+	now := time.Unix(0, 1_700_000_000_000).UTC()
+	segID := glid.New()
+	applyCmd(t, fsm, MarshalOpenChunkManifest(chunkID, now))
+	applyCmd(t, fsm, MarshalAddOpenChunkSegmentRef(chunkID, OpenChunkSegmentRef{
+		SegmentID: segID, FirstRecordNumber: 0, LastRecordNumber: 0,
+		SliceBytes: 100, RefAddedAt: now,
+	}))
+	if err := fsm.Apply(&hraft.Log{Data: MarshalDiscardOpenChunkManifest(chunkID)}); err == nil {
+		t.Fatal("expected error discarding non-empty manifest")
 	}
 }
