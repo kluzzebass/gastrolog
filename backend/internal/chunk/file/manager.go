@@ -3248,7 +3248,12 @@ func (m *Manager) openLocalGLCBCursor(id chunk.ChunkID) (chunk.RecordCursor, err
 		return nil, err
 	}
 	blob.Retain()
-	rd := blob.Reader()
+	rd, err := blob.Reader()
+	if err != nil {
+		blob.Release()
+		chunkLock.RUnlock()
+		return nil, err
+	}
 	return chunkcloud.NewSeekableCursorWithClose(rd, id, func() {
 		blob.Release()
 		chunkLock.RUnlock()

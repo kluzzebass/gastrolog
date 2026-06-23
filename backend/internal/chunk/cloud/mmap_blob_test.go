@@ -39,7 +39,10 @@ func TestMappedBlobRoundTrip(t *testing.T) {
 	}
 	defer blob.Close()
 
-	rd := blob.Reader()
+	rd, err := blob.Reader()
+	if err != nil {
+		t.Fatalf("Reader: %v", err)
+	}
 	for i := range records {
 		got, err := rd.ReadRecord(uint32(i))
 		if err != nil {

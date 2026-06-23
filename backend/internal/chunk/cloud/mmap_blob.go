@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"syscall"
 
@@ -16,14 +17,20 @@ import (
 // MappedBlob is a read-only mmap of an entire data.glcb file. Dict, record
 // index, record frames, embedded sections, and TOC are all accessed as slices
 // into the mapping — one open, one mmap, OS page cache owns the bytes.
+//
+// Dict and record index are parsed lazily on first Reader() call so histogram
+// and TS-index lookups (Section only) do not heap-load every chunk in a window.
 type MappedBlob struct {
 	path           string
 	data           []byte
+	layout         blobLayoutMeta
 	meta           BlobMeta
 	dict           *chunk.StringDict
 	index          []recordIndex
 	recordsBaseOff int64
 	toc            BlobTOC
+	recordInit     sync.Once
+	recordInitErr  error
 	pins           atomic.Int32
 	closed         atomic.Bool
 }
@@ -115,7 +122,10 @@ func (b *MappedBlob) Section(sectionType byte) ([]byte, bool) {
 }
 
 // Reader returns a record cursor backend that reads frames from this mapping.
-func (b *MappedBlob) Reader() *Reader {
+func (b *MappedBlob) Reader() (*Reader, error) {
+	if err := b.ensureRecordTables(); err != nil {
+		return nil, err
+	}
 	return &Reader{
 		meta:           b.meta,
 		dict:           b.dict,
@@ -123,7 +133,41 @@ func (b *MappedBlob) Reader() *Reader {
 		recordsBaseOff: b.recordsBaseOff,
 		mmapData:       b.data,
 		keepFile:       true,
+	}, nil
+}
+
+func (b *MappedBlob) ensureRecordTables() error {
+	b.recordInit.Do(func() {
+		b.recordInitErr = b.loadRecordTables()
+	})
+	return b.recordInitErr
+}
+
+func (b *MappedBlob) loadRecordTables() error {
+	layout := b.layout
+	if int(layout.DictOff)+int(layout.DictSize) > len(b.data) {
+		return errors.New("dict out of range")
 	}
+	dict, err := decodeDictFromBuf(b.data[int(layout.DictOff):int(layout.DictOff)+int(layout.DictSize)], layout.DictEntries)
+	if err != nil {
+		return err
+	}
+	if int(layout.IndexOff)+int(layout.IndexSize) > len(b.data) {
+		return errors.New("record index out of range")
+	}
+	index := make([]recordIndex, layout.RecordCount)
+	indexBytes := b.data[int(layout.IndexOff) : int(layout.IndexOff)+int(layout.IndexSize)]
+	for i := range layout.RecordCount {
+		off := int(i) * indexEntrySize
+		index[i] = recordIndex{
+			Offset: binary.LittleEndian.Uint64(indexBytes[off:]),
+			Size:   binary.LittleEndian.Uint32(indexBytes[off+8:]),
+		}
+	}
+	b.dict = dict
+	b.index = index
+	b.recordsBaseOff = int64(layout.RecordsOff)
+	return nil
 }
 
 func parseMappedBlob(data []byte) (*MappedBlob, error) {
@@ -140,32 +184,17 @@ func parseMappedBlob(data []byte) (*MappedBlob, error) {
 	if int(layout.DictOff)+int(layout.DictSize) > len(data) {
 		return nil, errors.New("dict out of range")
 	}
-	dict, err := decodeDictFromBuf(data[int(layout.DictOff):int(layout.DictOff)+int(layout.DictSize)], layout.DictEntries)
-	if err != nil {
-		return nil, err
-	}
 	if int(layout.IndexOff)+int(layout.IndexSize) > len(data) {
 		return nil, errors.New("record index out of range")
-	}
-	index := make([]recordIndex, layout.RecordCount)
-	indexBytes := data[int(layout.IndexOff) : int(layout.IndexOff)+int(layout.IndexSize)]
-	for i := range layout.RecordCount {
-		off := int(i) * indexEntrySize
-		index[i] = recordIndex{
-			Offset: binary.LittleEndian.Uint64(indexBytes[off:]),
-			Size:   binary.LittleEndian.Uint32(indexBytes[off+8:]),
-		}
 	}
 	toc, err := parseTOCFromMapped(data)
 	if err != nil {
 		return nil, fmt.Errorf("read TOC: %w", err)
 	}
 	return &MappedBlob{
-		meta:           layoutMetaToBlobMeta(layout, toc),
-		dict:           dict,
-		index:          index,
-		recordsBaseOff: int64(layout.RecordsOff),
-		toc:            toc,
+		layout: layout,
+		meta:   layoutMetaToBlobMeta(layout, toc),
+		toc:    toc,
 	}, nil
 }
 
