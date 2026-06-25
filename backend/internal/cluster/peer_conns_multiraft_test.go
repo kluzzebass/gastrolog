@@ -111,6 +111,44 @@ func TestStaticPeerConnsConnForAddress(t *testing.T) {
 	}
 }
 
+func TestResolveNodeIDFromAddressHostVariants(t *testing.T) {
+	t.Parallel()
+
+	const (
+		localID    = "node-a"
+		peerID     = "node-b"
+		configAddr = ":4586"
+		leaderAddr = "[::]:4586"
+	)
+
+	conf := hraft.DefaultConfig()
+	conf.LocalID = hraft.ServerID(localID)
+	conf.LogOutput = io.Discard
+
+	_, trans := hraft.NewInmemTransport(hraft.ServerAddress(localID))
+	r, err := hraft.NewRaft(conf, &noopFSM{}, hraft.NewInmemStore(), hraft.NewInmemStore(), hraft.NewInmemSnapshotStore(), trans)
+	if err != nil {
+		t.Fatalf("NewRaft: %v", err)
+	}
+	t.Cleanup(func() { _ = r.Shutdown().Error() })
+
+	if err := r.BootstrapCluster(hraft.Configuration{Servers: []hraft.Server{
+		{ID: localID, Address: "127.0.0.1:4565"},
+		{ID: peerID, Address: hraft.ServerAddress(configAddr)},
+	}}).Error(); err != nil {
+		t.Fatalf("BootstrapCluster: %v", err)
+	}
+
+	pool := NewPeerConns(r, nil, localID)
+	got, err := pool.resolveNodeIDFromAddress(leaderAddr)
+	if err != nil {
+		t.Fatalf("resolveNodeIDFromAddress(%q): %v", leaderAddr, err)
+	}
+	if got != peerID {
+		t.Fatalf("got node ID %q, want %q", got, peerID)
+	}
+}
+
 type noopFSM struct{}
 
 func (*noopFSM) Apply(*hraft.Log) any                      { return nil }

@@ -329,7 +329,7 @@ func (p *PeerConns) resolveNodeIDFromAddress(addr string) (string, error) {
 		ids := p.staticPeerIDs
 		p.mu.Unlock()
 		for _, id := range ids {
-			if mapped, ok := p.staticResolve(id); ok && mapped == addr {
+			if mapped, ok := p.staticResolve(id); ok && clusterAddrsEquivalent(mapped, addr) {
 				return id, nil
 			}
 		}
@@ -343,7 +343,7 @@ func (p *PeerConns) resolveNodeIDFromAddress(addr string) (string, error) {
 		return "", fmt.Errorf("get raft config: %w", err)
 	}
 	for _, srv := range future.Configuration().Servers {
-		if string(srv.Address) == addr {
+		if clusterAddrsEquivalent(string(srv.Address), addr) {
 			return string(srv.ID), nil
 		}
 	}
