@@ -136,6 +136,121 @@ func planUntilSealed(t *testing.T, mgr *chunking.Manager, vaultID glid.GLID, fsm
 	return nil
 }
 
+func TestLeaderPlannerFillsOpenWhileSealedManifestPending(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	pubAt := base.Add(time.Minute)
+	segID := glid.New()
+	vaultID := glid.New()
+	vaultRoot := t.TempDir()
+	writeCompletedSegment(t, vaultRoot, segID, vaultID, []recordForSeg{
+		{0, base, "a"},
+		{1, base.Add(time.Second), "b"},
+	})
+
+	chunkA := chunk.NewChunkID()
+	chunkB := chunk.NewChunkID()
+	fsm := vaultctlfsm.New()
+	applier := &fsmApplier{fsm: fsm}
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalOpenChunkManifest(chunkA, base))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealOpenChunkManifest(chunkA, base.Add(30*time.Second)))
+	if pending := fsm.SealedManifest(); pending == nil || pending.ChunkID != chunkA {
+		t.Fatalf("sealed pending = %+v, want %s", pending, chunkA)
+	}
+
+	mgr := chunking.New(chunking.Config{})
+	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
+		VaultRoot:  vaultRoot,
+		ChunkRoot:  filepath.Join(vaultRoot, "chunks"),
+		FSM:        fsm,
+		Locate:     chunking.VaultSegmentLocator{Root: vaultRoot},
+		Applier:    applier,
+		IsLeader:   func() bool { return true },
+		NewChunkID: func() chunk.ChunkID { return chunkB },
+		Policy:     chunking.ManifestRotationPolicy{MaxRecords: 100},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	publishSegment(t, fsm, segID, pubAt, 2, base, base.Add(time.Second))
+	ctx := t.Context()
+	for step := range 8 {
+		if open := fsm.OpenChunk(); open != nil && len(open.Refs) > 0 {
+			if pending := fsm.SealedManifest(); pending == nil || pending.ChunkID != chunkA {
+				t.Fatalf("step %d: sealed pending = %+v, want %s", step, pending, chunkA)
+			}
+			if open.ChunkID != chunkB {
+				t.Fatalf("open chunk = %s, want %s", open.ChunkID, chunkB)
+			}
+			return
+		}
+		if err := mgr.PlanOnce(ctx, vaultID); err != nil {
+			t.Fatalf("PlanOnce step %d: %v", step, err)
+		}
+	}
+	t.Fatal("expected open manifest refs while sealed manifest pending")
+}
+
+func TestLeaderPlannerRotatesWhileSealedManifestPending(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	pubAt := base.Add(time.Minute)
+	segID := glid.New()
+	vaultID := glid.New()
+	vaultRoot := t.TempDir()
+	writeCompletedSegment(t, vaultRoot, segID, vaultID, []recordForSeg{
+		{0, base, "a"},
+		{1, base.Add(time.Second), "b"},
+		{2, base.Add(2 * time.Second), "c"},
+		{3, base.Add(3 * time.Second), "d"},
+	})
+
+	chunkA := chunk.NewChunkID()
+	chunkB := chunk.NewChunkID()
+	chunkC := chunk.NewChunkID()
+	fsm := vaultctlfsm.New()
+	applier := &fsmApplier{fsm: fsm}
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalOpenChunkManifest(chunkA, base))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealOpenChunkManifest(chunkA, base.Add(30*time.Second)))
+
+	mgr := chunking.New(chunking.Config{})
+	nextChunk := chunkB
+	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
+		VaultRoot:  vaultRoot,
+		ChunkRoot:  filepath.Join(vaultRoot, "chunks"),
+		FSM:        fsm,
+		Locate:     chunking.VaultSegmentLocator{Root: vaultRoot},
+		Applier:    applier,
+		IsLeader:   func() bool { return true },
+		NewChunkID: func() chunk.ChunkID {
+			id := nextChunk
+			if id == chunkB {
+				nextChunk = chunkC
+			}
+			return id
+		},
+		Policy: chunking.ManifestRotationPolicy{MaxRecords: 2},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	publishSegment(t, fsm, segID, pubAt, 4, base, base.Add(3*time.Second))
+	ctx := t.Context()
+	for step := range 16 {
+		if fsm.SealedManifestCount() >= 2 {
+			open := fsm.OpenChunk()
+			if open != nil && open.ChunkID == chunkC {
+				return
+			}
+		}
+		if err := mgr.PlanOnce(ctx, vaultID); err != nil {
+			t.Fatalf("PlanOnce step %d: %v", step, err)
+		}
+	}
+	t.Fatalf("sealed queue=%d open=%+v, want chunk B sealed and chunk C open",
+		fsm.SealedManifestCount(), fsm.OpenChunk())
+}
+
 func TestLeaderPlannerRotatesAtMaxRecords(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)

@@ -111,6 +111,10 @@ type vaultCtlLeaderManager struct {
 	// node don't block finalization. See gastrolog-51gme step 10.
 	// Nil leaves the prune as a no-op (single-node tests, etc.).
 	onMemberRemoved func(vaultID glid.GLID, removedNodeID string)
+
+	// onLeadGained fires at the start of each vault-ctl leader epoch so the
+	// orchestrator can wake pipeline chunking (manifest planner + sealed build).
+	onLeadGained func(vaultID glid.GLID)
 }
 
 // SetOnMemberRemoved registers a callback invoked after the leader
@@ -121,6 +125,14 @@ func (m *vaultCtlLeaderManager) SetOnMemberRemoved(fn func(vaultID glid.GLID, re
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.onMemberRemoved = fn
+}
+
+// SetOnLeadGained registers a callback invoked at the start of each vault-ctl
+// leader epoch (after Barrier). Used to wake pipeline chunking on the leader home.
+func (m *vaultCtlLeaderManager) SetOnLeadGained(fn func(vaultID glid.GLID)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onLeadGained = fn
 }
 
 // newVaultCtlLeaderManager supervises per-vault control-plane Raft leader epochs
@@ -272,6 +284,12 @@ func (o *Orchestrator) startVaultCtlMembershipReconcile() error {
 func (m *vaultCtlLeaderManager) runLeaderEpoch(ctx context.Context, vaultID glid.GLID, group *raftgroup.Group) {
 	// Initial reconcile immediately after barrier.
 	m.reconcile(vaultID, group)
+	if m.onLeadGained != nil {
+		m.mu.Lock()
+		fn := m.onLeadGained
+		m.mu.Unlock()
+		fn(vaultID)
+	}
 
 	for {
 		wakeCh := m.desiredChanged.C()

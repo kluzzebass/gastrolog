@@ -32,6 +32,9 @@ func (o *Orchestrator) postSealWork(vaultID glid.GLID, cm chunk.ChunkManager, ch
 // as one sequential job. Otherwise falls back to compress-only for non-file managers.
 // After the pipeline completes, sealed-chunk replication is triggered for leader vaults.
 func (o *Orchestrator) schedulePostSeal(vaultID glid.GLID, cm chunk.ChunkManager, chunkID chunk.ChunkID) {
+	if o.isPipelineIngestVault(vaultID) {
+		return
+	}
 	followerTargets := o.followerReplicationTargets(vaultID, cm)
 
 	processor, ok := cm.(chunk.ChunkPostSealProcessor)

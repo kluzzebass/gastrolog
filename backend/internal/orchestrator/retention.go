@@ -975,7 +975,7 @@ func (r *retentionRunner) expireChunk(id chunk.ChunkID, reason string) {
 		if r.orch.retentionRates != nil {
 			r.orch.retentionRates.Record(r.vaultID, r.orch.now())
 		}
-		// Carry the DELETED op so subscribers remove the cache entry.
+		r.orch.logChunkExpunged(r.vaultID, id, reason)
 		r.orch.EmitChunkDeleted(r.vaultID, id)
 		r.orch.deleteFromFollowers(r.vaultID, id)
 		r.forwardDeletionToFollowers(id)

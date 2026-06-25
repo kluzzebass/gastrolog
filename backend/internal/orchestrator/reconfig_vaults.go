@@ -840,9 +840,9 @@ func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultCo
 	}
 	qe := query.New(cm, im, qeLogger)
 
-	// Inject index builders into the chunk manager's post-seal pipeline.
+	// Post-seal index builds disabled for pipeline soak — re-enable before shipping.
 	if processor, ok := cm.(chunk.ChunkPostSealProcessor); ok {
-		processor.SetIndexBuilders([]chunk.ChunkIndexBuilder{im.BuildAdapter()})
+		processor.SetIndexBuilders(nil)
 	}
 
 	ti := &VaultInstance{
@@ -953,7 +953,7 @@ func (o *Orchestrator) buildInstanceForStorage(sys *system.System, vaultCfg syst
 	qe := query.New(cm, im, qeLogger)
 
 	if processor, ok := cm.(chunk.ChunkPostSealProcessor); ok {
-		processor.SetIndexBuilders([]chunk.ChunkIndexBuilder{im.BuildAdapter()})
+		processor.SetIndexBuilders(nil)
 	}
 
 	ti := &VaultInstance{
@@ -1231,6 +1231,13 @@ func buildVaultRaftCallbacks(r *hraft.Raft, fsm *vaultctlfsm.FSM, applier vaultc
 			// codebase) still behave correctly: Sealing reads as
 			// not-yet-sealed.
 			m.Sealed = e.State == chunk.ChunkStateSealed
+			// Retention TTL anchors on SealedAt (wall-clock seal completion).
+			// Pipeline/file managers often leave local meta.SealedAt zero and
+			// only populate record-span WriteEnd — backlog catch-up then
+			// looks instantly expired without the FSM anchor.
+			if !e.SealedAt.IsZero() {
+				m.SealedAt = e.SealedAt
+			}
 			return m
 		},
 		chunkResidency: func(id chunk.ChunkID, placementNodeIDs []string) []string {

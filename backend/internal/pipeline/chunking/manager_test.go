@@ -305,7 +305,7 @@ func TestManagerBuildOnceWaitsForHoldersBeforeRelease(t *testing.T) {
 	}
 }
 
-func TestManagerMissingSegmentNudgesCollection(t *testing.T) {
+func TestBuildMaterializesMissingSegments(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
 	present := glid.New()
@@ -334,14 +334,14 @@ func TestManagerMissingSegmentNudgesCollection(t *testing.T) {
 	}))
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, base.Add(time.Minute)))
 
-	var nudges atomic.Int32
+	var collects atomic.Int32
 	mgr := chunking.New(chunking.Config{})
 	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
 		VaultRoot: home,
 		ChunkRoot: filepath.Join(home, "chunks"),
 		FSM:       fsm,
 		Locate:    chunking.HeadSegmentLocator{Root: home},
-		Nudge:     nudgeCounter{&nudges},
+		Collector: collectorSpy{&collects},
 		IsLeader:  func() bool { return true },
 	}); err != nil {
 		t.Fatal(err)
@@ -349,8 +349,8 @@ func TestManagerMissingSegmentNudgesCollection(t *testing.T) {
 	if err := mgr.BuildOnce(t.Context(), vaultID); err == nil {
 		t.Fatal("expected missing segment error on leader")
 	}
-	if nudges.Load() != 1 {
-		t.Fatalf("collection nudges = %d, want 1", nudges.Load())
+	if collects.Load() != 1 {
+		t.Fatalf("segment collects = %d, want 1", collects.Load())
 	}
 }
 
@@ -383,14 +383,14 @@ func TestManagerFollowerSkipsQuietlyWhenSegmentsMissing(t *testing.T) {
 	}))
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, base.Add(time.Minute)))
 
-	var nudges atomic.Int32
+	var collects atomic.Int32
 	mgr := chunking.New(chunking.Config{})
 	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
 		VaultRoot: home,
 		ChunkRoot: filepath.Join(home, "chunks"),
 		FSM:       fsm,
 		Locate:    chunking.HeadSegmentLocator{Root: home},
-		Nudge:     nudgeCounter{&nudges},
+		Collector: collectorSpy{&collects},
 		IsLeader:  func() bool { return false },
 	}); err != nil {
 		t.Fatal(err)
@@ -398,8 +398,8 @@ func TestManagerFollowerSkipsQuietlyWhenSegmentsMissing(t *testing.T) {
 	if err := mgr.BuildOnce(t.Context(), vaultID); err != nil {
 		t.Fatalf("follower BuildOnce should skip quietly: %v", err)
 	}
-	if nudges.Load() != 1 {
-		t.Fatalf("collection nudges = %d, want 1", nudges.Load())
+	if collects.Load() != 1 {
+		t.Fatalf("segment collects = %d, want 1", collects.Load())
 	}
 }
 
@@ -519,13 +519,86 @@ func (a *recordingApplier) Apply(data []byte) error {
 	return nil
 }
 
-type nudgeCounter struct {
+type collectorSpy struct {
 	n *atomic.Int32
 }
 
-func (n nudgeCounter) CollectMissing(context.Context) error {
-	n.n.Add(1)
+func (c collectorSpy) CollectOnce(context.Context) error {
+	c.n.Add(1)
 	return nil
+}
+
+func (c collectorSpy) CollectSegments(_ context.Context, _ []glid.GLID) error {
+	c.n.Add(1)
+	return nil
+}
+
+type segmentCollectorRecorder struct {
+	calls atomic.Int32
+	ids   []glid.GLID
+}
+
+func (n *segmentCollectorRecorder) CollectOnce(context.Context) error {
+	n.calls.Add(1)
+	return nil
+}
+
+func (n *segmentCollectorRecorder) CollectSegments(_ context.Context, segmentIDs []glid.GLID) error {
+	n.calls.Add(1)
+	n.ids = append([]glid.GLID(nil), segmentIDs...)
+	return nil
+}
+
+func TestBuildMaterializesSpecificSegmentIDs(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	present := glid.New()
+	missing := glid.New()
+	vaultID := glid.New()
+	chunkID := chunk.NewChunkID()
+	home := t.TempDir()
+	writeHeadSegment(t, home, present, vaultID, []recordForSeg{{0, base, "ok"}})
+
+	fsm := vaultctlfsm.New()
+	openedAt := base
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalOpenChunkManifest(chunkID, openedAt))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
+		SegmentID:         present,
+		FirstRecordNumber: 0,
+		LastRecordNumber:  0,
+		SliceBytes:        2048,
+		RefAddedAt:        openedAt,
+	}))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
+		SegmentID:         missing,
+		FirstRecordNumber: 0,
+		LastRecordNumber:  0,
+		SliceBytes:        2048,
+		RefAddedAt:        openedAt,
+	}))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, base.Add(time.Minute)))
+
+	rec := &segmentCollectorRecorder{}
+	mgr := chunking.New(chunking.Config{})
+	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
+		VaultRoot: home,
+		ChunkRoot: filepath.Join(home, "chunks"),
+		FSM:       fsm,
+		Locate:    chunking.HeadSegmentLocator{Root: home},
+		Collector: rec,
+		IsLeader:  func() bool { return true },
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.BuildOnce(t.Context(), vaultID); err == nil {
+		t.Fatal("expected missing segment error on leader")
+	}
+	if rec.calls.Load() != 1 {
+		t.Fatalf("segment collects = %d, want 1", rec.calls.Load())
+	}
+	if len(rec.ids) != 1 || rec.ids[0] != missing {
+		t.Fatalf("CollectSegments ids = %v, want [%s]", rec.ids, missing)
+	}
 }
 
 func applyChunkCmd(t *testing.T, fsm *vaultctlfsm.FSM, data []byte) {

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"iter"
 
+	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/record"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
@@ -86,6 +87,23 @@ func CollectOpenChunk(in OpenChunkQueryInput) ([]record.Record, OpenChunkQueryRe
 		out = append(out, rec)
 	}
 	return out, report, nil
+}
+
+// RecordToChunk converts a pipeline segment record into chunk.Record for query.
+func RecordToChunk(rec record.Record) chunk.Record {
+	return chunk.Record{
+		SourceTS: rec.SourceTS,
+		IngestTS: rec.IngestTS,
+		WriteTS:  rec.WriteTS,
+		EventID: chunk.EventID{
+			IngesterID: rec.EventID.IngesterID,
+			NodeID:     rec.EventID.NodeID,
+			IngestTS:   rec.EventID.IngestTS,
+			IngestSeq:  rec.EventID.IngestSeq,
+		},
+		Attrs: chunk.Attributes(rec.Attrs),
+		Raw:   rec.Raw,
+	}
 }
 
 func mergeSpanRefsDedup(refs []SpanRef) iter.Seq2[record.Record, error] {

@@ -54,6 +54,9 @@ func releasableSegmentIDs(fsm *vaultctlfsm.FSM, m *vaultctlfsm.OpenChunkManifest
 // the completed-segment registry: fully consumed and every required vault home
 // has committed a holder receipt.
 func segmentReadyForRegistryRelease(fsm *vaultctlfsm.FSM, segmentID glid.GLID, requiredHolders []string) bool {
+	if fsm != nil && fsm.SegmentReferencedInManifest(segmentID) {
+		return false
+	}
 	entry := fsm.GetCompletedSegment(segmentID)
 	if entry == nil {
 		return false

@@ -40,9 +40,15 @@ type VaultCtlApplier interface {
 	Apply(data []byte) error
 }
 
-// CollectionNudger triggers segment collection when manifest segments are missing locally.
-type CollectionNudger interface {
-	CollectMissing(ctx context.Context) error
+// SegmentCollector pulls segment bytes onto this home. Chunking invokes it as a
+// build prerequisite (every manifest ref must be local before GLCB merge) and
+// during planner catch-up when eligible registry segments are not yet in head/.
+type SegmentCollector interface {
+	// CollectOnce runs a full assignment-log pass for this vault.
+	CollectOnce(ctx context.Context) error
+	// CollectSegments pulls the given segment IDs when manifest refs require
+	// bytes this home does not yet hold.
+	CollectSegments(ctx context.Context, segmentIDs []glid.GLID) error
 }
 
 // VaultConfig is per-vault chunking execution state.
@@ -55,7 +61,7 @@ type VaultConfig struct {
 	// the object RegisterVault captured. Falls back to FSM when nil.
 	LookupFSM func() *vaultctlfsm.FSM
 	Locate    SegmentLocator
-	Nudge     CollectionNudger
+	Collector SegmentCollector
 	Applier   VaultCtlApplier
 	IsLeader  func() bool
 	Policy    ManifestRotationPolicy
@@ -134,6 +140,9 @@ type vaultChunking struct {
 	releaseWake *notify.Signal
 	// stopWorker cancels the per-vault worker; nil until the worker starts.
 	stopWorker context.CancelFunc
+	// buildRunning gates a single in-flight GLCB build so planCatchUp can keep
+	// running on wake while materialization/build proceeds asynchronously.
+	buildRunning atomic.Bool
 	// log is the per-vault logger; set when the worker starts.
 	log *slog.Logger
 }
@@ -267,8 +276,21 @@ func (m *Manager) RewireVaultFSM(vaultID glid.GLID, fsm *vaultctlfsm.FSM, applie
 	cfg := v.cfg
 	cfg.FSM = fsm
 	m.wireVaultFSMCallbacks(v, cfg)
+	if pending := fsm.SealedManifest(); pending != nil {
+		v.mu.Lock()
+		v.pendingSeal = pending
+		v.mu.Unlock()
+	}
 	v.wake.Notify()
 	return nil
+}
+
+// HasVault reports whether chunking is registered for a vault on this home.
+func (m *Manager) HasVault(vaultID glid.GLID) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_, ok := m.vaults[vaultID]
+	return ok
 }
 
 func (m *Manager) unwireVaultFSMCallbacks(v *vaultChunking) {
@@ -316,8 +338,7 @@ func (m *Manager) wireVaultFSMCallbacks(v *vaultChunking, cfg VaultConfig) {
 		v.wake.Notify()
 	})
 	// Without this wake, segments published while a build was in flight
-	// are only chunked when a future publish arrives — the planner refuses
-	// to open a new manifest while a sealed one is pending.
+	// are only chunked when a future publish arrives.
 	//
 	// Must NOT call afterSealBuild inline: holder-receipt Apply on the Raft
 	// FSM apply goroutine deadlocks the vault-ctl leader. Dispatch post-seal
@@ -473,6 +494,9 @@ func (m *Manager) startWorkerLocked(v *vaultChunking) {
 		for {
 			select {
 			case <-ctx.Done():
+				for v.buildRunning.Load() {
+					time.Sleep(5 * time.Millisecond)
+				}
 				return
 			case <-releaseCh:
 				if err := v.releaseOnce(ctx); err != nil && ctx.Err() == nil {
@@ -500,9 +524,16 @@ func (m *Manager) runBuildPass(ctx context.Context, v *vaultChunking, log *slog.
 	if !v.buildDue(time.Now(), onTick) {
 		return
 	}
-	if err := v.buildOnce(ctx); err != nil && ctx.Err() == nil {
-		log.Warn("chunking build failed", "error", err)
+	if !v.buildRunning.CompareAndSwap(false, true) {
+		return
 	}
+	go func() {
+		defer v.buildRunning.Store(false)
+		if err := v.buildOnce(ctx); err != nil && ctx.Err() == nil {
+			log.Warn("chunking build failed", "error", err)
+		}
+		v.wake.Notify()
+	}()
 }
 
 func (v *vaultChunking) buildDue(now time.Time, onTick bool) bool {
@@ -839,34 +870,51 @@ func (v *vaultChunking) discardEmptySealedManifest(pending *vaultctlfsm.OpenChun
 }
 
 func (v *vaultChunking) build(ctx context.Context, pending *vaultctlfsm.OpenChunkManifest) (BuildResult, error) {
+	manifest := sealedManifestFromFSM(pending)
+	if err := v.materializeManifestSegments(ctx, manifest); err != nil {
+		return BuildResult{}, err
+	}
 	input := BuildInput{
-		Manifest:  sealedManifestFromFSM(pending),
+		Manifest:  manifest,
 		VaultID:   v.cfg.VaultID,
 		ChunkRoot: v.cfg.ChunkRoot,
 		Locate:    v.cfg.Locate,
 	}
-	result, err := BuildSealedChunk(input)
-	if err == nil {
-		return result, nil
+	return BuildSealedChunk(input)
+}
+
+// materializeManifestSegments ensures every segment referenced by a sealed
+// manifest awaiting GLCB build is present under this home's head/ or
+// completed/. Collection is the normal multi-home replication path — each
+// placement member builds the GLCB locally from the same manifest refs.
+func (v *vaultChunking) materializeManifestSegments(ctx context.Context, manifest SealedManifest) error {
+	if v.cfg.Locate == nil {
+		return nil
 	}
-	var missing *MissingSegmentsError
-	if !errors.As(err, &missing) || v.cfg.Nudge == nil {
-		return BuildResult{}, err
+	missing := missingManifestSegmentIDs(manifest, v.cfg.Locate)
+	if len(missing) == 0 {
+		return nil
 	}
-	if nudgeErr := v.cfg.Nudge.CollectMissing(ctx); nudgeErr != nil {
+	if v.cfg.Collector == nil {
 		if !v.cfg.IsLeader() {
-			return BuildResult{}, ErrAwaitingLocalSegments
+			return ErrAwaitingLocalSegments
 		}
-		return BuildResult{}, err
+		return &MissingSegmentsError{SegmentIDs: missing}
 	}
-	result, err = BuildSealedChunk(input)
-	if err == nil {
-		return result, nil
+	if err := v.cfg.Collector.CollectSegments(ctx, missing); err != nil {
+		if !v.cfg.IsLeader() {
+			return ErrAwaitingLocalSegments
+		}
+		return err
 	}
-	if errors.As(err, &missing) && !v.cfg.IsLeader() {
-		return BuildResult{}, ErrAwaitingLocalSegments
+	stillMissing := missingManifestSegmentIDs(manifest, v.cfg.Locate)
+	if len(stillMissing) == 0 {
+		return nil
 	}
-	return BuildResult{}, err
+	if !v.cfg.IsLeader() {
+		return ErrAwaitingLocalSegments
+	}
+	return &MissingSegmentsError{SegmentIDs: stillMissing}
 }
 
 // chunkSealCommitted reports whether CmdSealChunk took effect cluster-wide.

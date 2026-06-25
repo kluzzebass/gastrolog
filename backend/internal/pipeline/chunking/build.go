@@ -48,8 +48,31 @@ type BuildResult struct {
 	IngestTSMonotonic bool
 }
 
+// missingManifestSegmentIDs returns segment IDs from manifest refs that are
+// not present locally under head/ or completed/.
+func missingManifestSegmentIDs(m SealedManifest, locate SegmentLocator) []glid.GLID {
+	if locate == nil || len(m.Refs) == 0 {
+		return nil
+	}
+	var missing []glid.GLID
+	seen := make(map[glid.GLID]struct{}, len(m.Refs))
+	for _, ref := range m.Refs {
+		if ref.SegmentID == glid.Nil {
+			continue
+		}
+		if _, ok := seen[ref.SegmentID]; ok {
+			continue
+		}
+		seen[ref.SegmentID] = struct{}{}
+		if _, ok := locate.SegmentPath(ref.SegmentID); !ok {
+			missing = append(missing, ref.SegmentID)
+		}
+	}
+	return missing
+}
+
 // ManifestSpanRefs binds manifest refs to local segment paths. Missing segments
-// are returned separately so callers can nudge Collection without guessing paths.
+// are returned separately so callers can collect them before GLCB merge.
 func ManifestSpanRefs(m SealedManifest, locate SegmentLocator) ([]SpanRef, []glid.GLID, error) {
 	if locate == nil {
 		return nil, nil, errors.New("segment locator required")
@@ -103,29 +126,21 @@ func BuildSealedChunk(in BuildInput) (BuildResult, error) {
 		return BuildResult{}, err
 	}
 
-	meta, monotonic, fileBytes, err := readGLCBSealMeta(glcbPath)
-	if err != nil {
-		return BuildResult{}, err
-	}
-	if _, err := os.Stat(glcbPath); err != nil {
-		return BuildResult{}, fmt.Errorf("glcb missing after build: %w", err)
-	}
-
 	writeEnd := in.Manifest.SealedAt
 	if writeEnd.IsZero() {
-		writeEnd = meta.WriteEnd
+		writeEnd = build.Meta.WriteEnd
 	}
 
 	return BuildResult{
 		GLCBPath:          glcbPath,
 		BlobDigest:        build.BlobDigest,
 		RecordCount:       build.RecordCount,
-		Bytes:             fileBytes,
+		Bytes:             build.Bytes,
 		WriteEnd:          writeEnd,
-		IngestStart:       meta.IngestStart,
-		IngestEnd:         meta.IngestEnd,
-		SourceEnd:         meta.SourceEnd,
-		IngestTSMonotonic: monotonic,
+		IngestStart:       build.Meta.IngestStart,
+		IngestEnd:         build.Meta.IngestEnd,
+		SourceEnd:         build.Meta.SourceEnd,
+		IngestTSMonotonic: build.IngestTSMonotonic,
 	}, nil
 }
 

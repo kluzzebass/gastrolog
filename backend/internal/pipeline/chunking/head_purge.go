@@ -45,8 +45,8 @@ func (v *vaultChunking) flushHeadPurgeForManifest(ctx context.Context, pending *
 	if !built {
 		return
 	}
-	if v.cfg.Nudge != nil {
-		_ = v.cfg.Nudge.CollectMissing(ctx)
+	if v.cfg.Collector != nil {
+		_ = v.cfg.Collector.CollectOnce(ctx)
 	}
 	required := v.requiredHolders()
 	holdersWired := v.cfg.RequiredHolders != nil

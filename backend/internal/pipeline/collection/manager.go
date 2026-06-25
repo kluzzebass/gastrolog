@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"gastrolog/internal/glid"
+	"gastrolog/internal/logging"
 	"gastrolog/internal/notify"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
@@ -155,6 +156,24 @@ func (v *vaultCollect) commitReceipt(ctx context.Context, ref AssignedSegment) e
 	return nil
 }
 
+func (v *vaultCollect) collectForRef(ctx context.Context, ref AssignedSegment) error {
+	if _, done := v.receipted[ref.SegmentID]; done {
+		if _, ok := v.layout.head[ref.SegmentID]; ok {
+			return nil
+		}
+		// Holder receipt recorded but head/ was purged after a partial
+		// chunking pass — re-pull so the planner can resume the segment.
+	} else if _, ok := v.layout.head[ref.SegmentID]; ok {
+		return v.commitReceipt(ctx, ref)
+	}
+	// Received but not yet promoted (a prior or concurrent pass owns it):
+	// skip until it reaches head, then the next pass records the receipt.
+	if _, ok := v.layout.preHead[ref.SegmentID]; ok {
+		return nil
+	}
+	return v.collectOne(ctx, ref)
+}
+
 func (v *vaultCollect) collectMissing(ctx context.Context) error {
 	v.collectMu.Lock()
 	defer v.collectMu.Unlock()
@@ -172,26 +191,54 @@ func (v *vaultCollect) collectMissing(ctx context.Context) error {
 	}
 	var errs []error
 	for _, ref := range assigned {
-		if _, done := v.receipted[ref.SegmentID]; done {
+		if err := v.collectForRef(ctx, ref); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// CollectSegments pulls specific segment IDs into head/ when they are absent
+// locally. Used when chunking build fails with MissingSegmentsError so bytes
+// referenced by a sealed-pending manifest are re-fetched even if the planner
+// resume cursor already reached RecordCount.
+func (m *Manager) CollectSegments(ctx context.Context, vaultID glid.GLID, segmentIDs []glid.GLID) error {
+	m.mu.Lock()
+	v, ok := m.vaults[vaultID]
+	m.mu.Unlock()
+	if !ok {
+		return ErrUnknownVault
+	}
+	return v.collectSegments(ctx, segmentIDs)
+}
+
+func (v *vaultCollect) collectSegments(ctx context.Context, segmentIDs []glid.GLID) error {
+	if len(segmentIDs) == 0 {
+		return nil
+	}
+	v.collectMu.Lock()
+	defer v.collectMu.Unlock()
+
+	if err := v.refreshLayout(); err != nil {
+		return err
+	}
+	var errs []error
+	for _, segmentID := range segmentIDs {
+		if LocalSegmentPresent(v.root, segmentID) {
 			continue
 		}
-		// Already held locally but the holder receipt is not yet recorded:
-		// the origin self-assigns segments it produced (distribution promoted
-		// them straight to head/ via LocalHolder), so a home that is also the
-		// origin must still grow the holder set. Record the receipt without
-		// pulling.
-		if _, ok := v.layout.head[ref.SegmentID]; ok {
-			if err := v.commitReceipt(ctx, ref); err != nil {
-				errs = append(errs, err)
+		var checksum uint32
+		if v.fsm != nil {
+			if entry := v.fsm.GetCompletedSegment(segmentID); entry != nil {
+				checksum = entry.Checksum
 			}
-			continue
 		}
-		// Received but not yet promoted (a prior or concurrent pass owns it):
-		// skip until it reaches head, then the next pass records the receipt.
-		if _, ok := v.layout.preHead[ref.SegmentID]; ok {
-			continue
+		ref := AssignedSegment{
+			VaultID:   v.vaultID,
+			SegmentID: segmentID,
+			Checksum:  checksum,
 		}
-		if err := v.collectOne(ctx, ref); err != nil {
+		if err := v.collectForRef(ctx, ref); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -205,7 +252,7 @@ type Config struct {
 
 // Manager pulls assigned segments into pre-head, verifies, and promotes to head.
 // Collection passes are driven by vault-ctl FSM SetOnPublishCompletedSegment
-// (when FSM is wired), explicit Notify calls, and CollectOnce nudges — not by
+// (when FSM is wired), explicit Notify calls, and CollectOnce from chunking — not by
 // polling FSM or log state on a timer.
 type Manager struct {
 	cfg Config
@@ -220,6 +267,7 @@ type Manager struct {
 
 // New returns a collection manager.
 func New(cfg Config) *Manager {
+	cfg.Logger = compCollection.Apply(logging.Default(cfg.Logger))
 	return &Manager{
 		cfg:    cfg,
 		vaults: make(map[glid.GLID]*vaultCollect),
@@ -227,10 +275,7 @@ func New(cfg Config) *Manager {
 }
 
 func (m *Manager) logger() *slog.Logger {
-	if m.cfg.Logger != nil {
-		return m.cfg.Logger
-	}
-	return slog.Default()
+	return m.cfg.Logger
 }
 
 // RegisterVault adds a home vault collection path. Safe before or during Run.
@@ -320,7 +365,7 @@ func (m *Manager) Notify(vaultID glid.GLID) {
 }
 
 // CollectOnce rolls the log and collects missing segments for one vault (for tests
-// and ChunkingManager nudges).
+// and ChunkingManager materialization).
 func (m *Manager) CollectOnce(ctx context.Context, vaultID glid.GLID) error {
 	m.mu.Lock()
 	v, ok := m.vaults[vaultID]
@@ -368,6 +413,14 @@ func (m *Manager) triggerCollect(vaultID glid.GLID) {
 	v.wake.Notify()
 }
 
+func (m *Manager) logCollectPassErr(log *slog.Logger, err error) {
+	if retryableCollectErr(err) {
+		log.Debug("collect pass deferred", "error", err)
+		return
+	}
+	log.Warn("collect pass failed", "error", err)
+}
+
 // startWorkerLocked launches the per-vault collect worker. Caller holds m.mu
 // and has verified m.runCtx is non-nil. The worker decouples collect passes
 // from their triggers: FSM publish callbacks fire on the Raft FSM-apply
@@ -383,9 +436,9 @@ func (m *Manager) startWorkerLocked(v *vaultCollect) {
 		// Capture the wake channel BEFORE each pass so a signal arriving
 		// mid-pass re-fires the loop instead of being lost.
 		ch := v.wake.C()
-		log := m.logger().With("vault", v.vaultID, "component", "pipeline.collection")
+		log := m.logger().With("vault", v.vaultID)
 		if err := v.collectMissing(ctx); err != nil && ctx.Err() == nil {
-			log.Warn("collect pass failed", "error", err)
+			m.logCollectPassErr(log, err)
 		}
 		tick := time.NewTicker(recollectInterval)
 		defer tick.Stop()
@@ -398,7 +451,7 @@ func (m *Manager) startWorkerLocked(v *vaultCollect) {
 			}
 			ch = v.wake.C()
 			if err := v.collectMissing(ctx); err != nil && ctx.Err() == nil {
-				log.Warn("collect pass failed", "error", err)
+				m.logCollectPassErr(log, err)
 			}
 		}
 	})

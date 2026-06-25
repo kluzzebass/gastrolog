@@ -29,10 +29,12 @@ type segmentPuller interface {
 // Rubicon C), so the orchestrator only registers a vault as Home on placement
 // members and a registered home should end up holding all of the vault's
 // segments. Roll therefore returns every registry entry whose holder set does
-// not yet include the local node.
+// not yet include the local node, plus segments already ack'd as holder but
+// missing locally while chunking still needs their bytes.
 type segmentLogReader struct {
 	lookup      func() *vaultctlfsm.FSM
 	localNodeID string
+	vaultRoot   string
 }
 
 var _ collection.LogReader = (*segmentLogReader)(nil)
@@ -53,7 +55,8 @@ func (r *segmentLogReader) Roll(_ context.Context, vaultID glid.GLID) ([]collect
 	var out []collection.AssignedSegment
 	for i := range entries {
 		e := &entries[i]
-		if slices.Contains(e.Holders, r.localNodeID) {
+		held := slices.Contains(e.Holders, r.localNodeID)
+		if held && !segmentNeedsLocalRepull(fsm, *e, r.vaultRoot) {
 			continue
 		}
 		out = append(out, collection.AssignedSegment{
@@ -63,6 +66,32 @@ func (r *segmentLogReader) Roll(_ context.Context, vaultID glid.GLID) ([]collect
 		})
 	}
 	return out, nil
+}
+
+// segmentNeedsLocalRepull reports whether this home should pull segment bytes
+// even though it already appears in the holder set — for example after head/
+// purge left the registry resume cursor mid-segment.
+func segmentNeedsLocalRepull(fsm *vaultctlfsm.FSM, entry vaultctlfsm.CompletedSegmentEntry, vaultRoot string) bool {
+	if vaultRoot == "" {
+		return false
+	}
+	if collection.LocalSegmentPresent(vaultRoot, entry.SegmentID) {
+		return false
+	}
+	if fsm == nil {
+		return true
+	}
+	// GLCB build still needs segment bytes while the open or sealed-pending
+	// manifest references them, even when the planner resume cursor reached
+	// RecordCount (segment exhausted for planning).
+	if fsm.SegmentReferencedInManifest(entry.SegmentID) {
+		return true
+	}
+	n, ok := fsm.ResumeRecordNumber(entry.SegmentID)
+	if !ok {
+		return true
+	}
+	return n < entry.RecordCount
 }
 
 // segmentPullClient implements collection.PullClient by resolving a segment's

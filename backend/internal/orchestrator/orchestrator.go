@@ -57,12 +57,16 @@ type PerRouteStats struct {
 	Matched int64 // records matched by this route
 }
 
-// ingesterInfo holds metadata about an ingester for logging purposes.
-// The Ingester interface is a bare Run() — metadata lives alongside it.
+// ingesterInfo holds metadata about an ingester for logging and reconcile
+// diffing. The Ingester interface is a bare Run() — metadata lives alongside it.
 type ingesterInfo struct {
 	Name    string
 	Type    string
 	Passive bool // true for listener ingesters that should retry on failure
+	// Params is the config-store parameter snapshot last used to build the
+	// running instance. Compared on reconcile so param edits restart the
+	// ingester without a disable/enable toggle.
+	Params map[string]string
 }
 
 var (
@@ -297,6 +301,11 @@ type Orchestrator struct {
 	// ctlRestorePending coalesces deferred after-vault-ctl-restore passes
 	// (see scheduleAfterVaultCtlRestore). Keyed by vault ID.
 	ctlRestorePending sync.Map
+
+	// pendingPipelineCtlRestore holds vault IDs whose vault-ctl FSM restored
+	// before pipeline chunking registered on this home. finishPendingPipelineCtlRestore
+	// runs rewire+recover when RegisterVault completes (startup ordering).
+	pendingPipelineCtlRestore sync.Map
 
 	// catchupPushInFlight tracks async replica-catchup push batches keyed by
 	// (vault, requester). Prevents SweepMissingReplicas from stacking
@@ -736,6 +745,7 @@ func New(cfg Config) (*Orchestrator, error) {
 	// reconciler's onPruneNode handler will then propose
 	// CmdFinalizeDelete for any chunk whose ExpectedFrom became empty.
 	o.vaultCtlLeaders.SetOnMemberRemoved(o.proposePruneNodeForVault)
+	o.vaultCtlLeaders.SetOnLeadGained(o.onVaultCtlLeadGained)
 
 	// Per-instance retention rate alerter (gastrolog-47qyw): warn at >10/sec
 	// sustained over 30s. The orchestrator's vaultName closure looks up the

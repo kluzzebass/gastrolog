@@ -265,11 +265,16 @@ type FSM struct {
 
 	// openChunk is the in-progress manifest-backed active chunk. See open_chunk.go.
 	openChunk *OpenChunkManifest
-	// sealedManifest is the sealed open-chunk manifest awaiting local GLCB build.
-	sealedManifest *OpenChunkManifest
+	// sealedManifests is the FIFO queue of sealed open-chunk manifests awaiting
+	// local GLCB build. SealedManifest() returns the queue head.
+	sealedManifests []*OpenChunkManifest
 	// segmentResume maps segment ID → next EventID-order record number after
 	// a partial manifest ref.
 	segmentResume map[glid.GLID]uint32
+	// releasedSegments records segment IDs dropped by ReleaseSegments. Stale
+	// PublishCompletedSegment replays after release must not re-add registry
+	// entries without on-disk bytes (distribution publish race).
+	releasedSegments map[glid.GLID]struct{}
 
 	// onSealedManifest fires after SealOpenChunkManifest transitions open →
 	// sealed manifest awaiting local GLCB build (outside the FSM lock).
@@ -313,6 +318,7 @@ func New() *FSM {
 		pendingDeletes:    make(map[chunk.ChunkID]*PendingDelete),
 		completedSegments: make(map[glid.GLID]*CompletedSegmentEntry),
 		segmentResume:     make(map[glid.GLID]uint32),
+		releasedSegments:  make(map[glid.GLID]struct{}),
 	}
 }
 
@@ -744,7 +750,7 @@ func (f *FSM) ListIncludingPipelineManifest() []ManifestEntry {
 	if oc := f.openChunk; oc != nil {
 		overlayManifest(oc, chunk.ChunkStateActive)
 	}
-	if sm := f.sealedManifest; sm != nil {
+	for _, sm := range f.sealedManifests {
 		overlayManifest(sm, chunk.ChunkStateSealing)
 	}
 	return out
@@ -942,7 +948,8 @@ func (f *FSM) applyLocked(cmd *gastrologv1.VaultCtlCommand) (any, applyEffects) 
 		fx.createdEntry = f.captureEntry(result, chunkIDFromProto(c.CreateChunk.GetId()))
 	case *gastrologv1.VaultCtlCommand_SealChunk:
 		sealID := chunkIDFromProto(c.SealChunk.GetId())
-		hadSealedManifest := f.sealedManifest != nil && f.sealedManifest.ChunkID == sealID
+		head := f.sealedManifestHeadLocked()
+		hadSealedManifest := head != nil && head.ChunkID == sealID
 		result = f.applySeal(c.SealChunk)
 		fx.sealedEntry = f.captureEntry(result, sealID)
 		if result == nil && hadSealedManifest {
@@ -1171,8 +1178,14 @@ func (f *FSM) snapshotProtoLocked() *gastrologv1.VaultCtlSnapshot {
 		PendingDeletes:     make([]*gastrologv1.PendingDelete, 0, len(f.pendingDeletes)),
 		CompletedSegments:  f.snapshotCompletedSegmentsLocked(),
 		OpenChunk:          f.snapshotOpenChunkLocked(),
-		SealedManifest: f.snapshotSealedManifestLocked(),
+		SealedManifests:   f.snapshotSealedManifestsLocked(),
 		SegmentResume:      f.snapshotSegmentResumeLocked(),
+	}
+
+	releasedIDs := slices.SortedFunc(maps.Keys(f.releasedSegments), glid.Compare)
+	for _, id := range releasedIDs {
+		idCopy := id
+		snap.ReleasedSegmentIds = append(snap.ReleasedSegmentIds, idCopy[:])
 	}
 
 	entryIDs := slices.SortedFunc(maps.Keys(f.chunks), chunk.ChunkID.Compare)
@@ -1243,6 +1256,10 @@ func (f *FSM) restoreFromProtoLocked(snap *gastrologv1.VaultCtlSnapshot) {
 		f.pendingDeletes[p.ChunkID] = &p
 	}
 	f.restoreCompletedSegmentsLocked(snap.GetCompletedSegments())
+	f.releasedSegments = make(map[glid.GLID]struct{}, len(snap.GetReleasedSegmentIds()))
+	for _, raw := range snap.GetReleasedSegmentIds() {
+		f.releasedSegments[glid.FromBytes(raw)] = struct{}{}
+	}
 	f.restoreOpenChunkLocked(snap)
 	f.repairSealedManifestChunkEntryLocked()
 	f.ready = true
@@ -1292,9 +1309,9 @@ func (f *FSM) applySeal(c *gastrologv1.SealChunkCommand) error {
 
 	e := f.chunks[id]
 	if e == nil {
-		if f.sealedManifest != nil && f.sealedManifest.ChunkID == id {
+		if sm := f.sealedManifestByIDLocked(id); sm != nil {
 			f.clearStaleSealTombstoneLocked(id)
-			f.ensureManifestChunkEntryLocked(f.sealedManifest, chunk.ChunkStateSealing)
+			f.ensureManifestChunkEntryLocked(sm, chunk.ChunkStateSealing)
 			e = f.chunks[id]
 		}
 	}
@@ -1314,9 +1331,7 @@ func (f *FSM) applySeal(c *gastrologv1.SealChunkCommand) error {
 		sealedAt = e.WriteEnd
 	}
 	e.SealedAt = sealedAt
-	if f.sealedManifest != nil && f.sealedManifest.ChunkID == id {
-		f.sealedManifest = nil
-	}
+	f.popSealedManifestHeadIfIDLocked(id)
 	return nil
 }
 

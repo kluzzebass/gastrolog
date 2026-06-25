@@ -65,6 +65,11 @@ type tsIndexView struct {
 	findRank func(chunk.ChunkID, time.Time) (uint64, bool, error)
 }
 
+func chunkHasTSIndex(view tsIndexView, chunkID chunk.ChunkID) bool {
+	_, err := view.lenFn(chunkID)
+	return err == nil
+}
+
 func tsIndexViewForOrder(im index.IndexManager, orderBy OrderBy) tsIndexView {
 	switch orderBy { //nolint:exhaustive // IngestTS is the default
 	case OrderBySourceTS:

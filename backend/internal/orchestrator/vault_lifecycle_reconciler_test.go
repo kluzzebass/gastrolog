@@ -1624,6 +1624,81 @@ func TestSweepStaleLeaderFSMEntriesProposesDeleteForStrandedSealingChunk(t *test
 	}
 }
 
+func TestSweepStaleLeaderFSMEntriesSkipsPipelineVault(t *testing.T) {
+	t.Parallel()
+
+	fsm := vaultctlfsm.New()
+	old := time.Now().Add(-2 * time.Hour)
+	id := chunk.NewChunkID()
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(id, old, old, old)}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(id, old, 1, 1, old, old, old, false, old)}); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+
+	vaultID := glid.New()
+	orch := &Orchestrator{
+		segmentsDir:    t.TempDir(),
+		pipelineVaults: map[glid.GLID]pipelineVaultReg{vaultID: {home: true, hasHandle: true}},
+	}
+	var deleted []chunk.ChunkID
+	vaultInst := &VaultInstance{
+		VaultID:     vaultID,
+		Chunks:     &reconcilerFakeChunkManager{},
+		IsFollower: false,
+		HasRaftLeader: func() bool { return true },
+		ApplyRaftRequestDelete: func(id chunk.ChunkID, _ string, _ []string) error {
+			deleted = append(deleted, id)
+			return nil
+		},
+	}
+	rec := NewVaultLifecycleReconciler(orch, vaultID, vaultInst, "node-A", slog.Default())
+	rec.fsm = fsm
+
+	rec.SweepStaleLeaderFSMEntries()
+
+	if len(deleted) != 0 {
+		t.Fatalf("pipeline vault must skip stale-fsm sweep; got deletes %v", deleted)
+	}
+}
+
+func TestSweepStaleLeaderFSMEntriesRespectsSealedAtGrace(t *testing.T) {
+	t.Parallel()
+
+	fsm := vaultctlfsm.New()
+	now := time.Now()
+	oldWrite := now.Add(-3 * time.Hour)
+	recentSeal := now.Add(-10 * time.Minute)
+	id := chunk.NewChunkID()
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(id, oldWrite, oldWrite, oldWrite)}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(id, oldWrite, 1, 1, oldWrite, oldWrite, oldWrite, false, recentSeal)}); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+
+	var deleted []chunk.ChunkID
+	vaultInst := &VaultInstance{
+		VaultID:     glid.New(),
+		Chunks:     &reconcilerFakeChunkManager{},
+		IsFollower: false,
+		HasRaftLeader: func() bool { return true },
+		ApplyRaftRequestDelete: func(id chunk.ChunkID, _ string, _ []string) error {
+			deleted = append(deleted, id)
+			return nil
+		},
+	}
+	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
+	rec.fsm = fsm
+
+	rec.SweepStaleLeaderFSMEntries()
+
+	if len(deleted) != 0 {
+		t.Fatalf("recent SealedAt must keep chunk within grace despite old WriteEnd; deleted=%v", deleted)
+	}
+}
+
 // TestSweepStalePendingDeleteAcksPrunesNonPlacementNodes pins the
 // self-healing receipt-protocol-unstick path: after a vault placement
 // change (kubectl scale, vault rebalance), pendingDelete entries can

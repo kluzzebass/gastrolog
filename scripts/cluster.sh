@@ -17,11 +17,6 @@
 #   --auth             Enable JWT auth (default: --no-auth for local dev clusters)
 #   --base-port PORT   Base HTTP port for node 1 (default: GLOG_BASE_PORT or 4564)
 #   --pprof            Enable pprof on each node (ports 6060, 6061, ...)
-#   --mem-limit LIMIT  Set GOMEMLIMIT per node (e.g. 512MiB). Makes the Go GC
-#                      and scavenger work harder to keep RSS near the live heap
-#                      instead of retaining a past peak's HeapSys. Default: off
-#                      (GLOG_MEM_LIMIT). Use a value well above steady-state
-#                      live heap (~150MB/node) to avoid GC thrashing.
 #   GLOG_NO_AUTH       Disable auth when truthy (default: true). Set false/0 to require login.
 #   GLOG_SEGMENT_HOT_PATH_FSYNC  Segmentation group-commit fsync (default: true; set false/0 for load testing)
 
@@ -45,7 +40,6 @@ ADMIN_PASS="${GLOG_ADMIN_PASS:-admin123}"
 NO_AUTH="${GLOG_NO_AUTH:-true}"
 BASE_PORT="${GLOG_BASE_PORT:-4564}"
 PPROF="${GLOG_PPROF:-false}"
-MEM_LIMIT="${GLOG_MEM_LIMIT:-}"
 # Environment banner (gastrolog-4vr0l). Tags every node in this cluster as
 # the local dev deployment in the UI header so operators don't confuse it
 # with a K8s/staging instance. Single token only (no spaces).
@@ -62,7 +56,6 @@ while [[ $# -gt 0 ]]; do
     --auth)       NO_AUTH=false; shift ;;
     --base-port)  BASE_PORT="$2"; shift 2 ;;
     --pprof)      PPROF=true; shift ;;
-    --mem-limit)  MEM_LIMIT="$2"; shift 2 ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
   esac
 done
@@ -85,30 +78,19 @@ no_auth_enabled() {
   [[ "$NO_AUTH" == true || "$NO_AUTH" == "1" || "$NO_AUTH" == "yes" || "$NO_AUTH" == "y" || "$NO_AUTH" == "on" ]]
 }
 
-# run_glog_server starts gastrolog server with optional GOMEMLIMIT from MEM_LIMIT.
-# Do not use command-substitution env prefixes like $(glog_env_prefix)$GLOG —
-# bash treats GOMEMLIMIT=… as a command name, not an assignment.
 run_glog_server() {
-  if [[ -n "$MEM_LIMIT" ]]; then
-    GOMEMLIMIT="$MEM_LIMIT" go run ./cmd/gastrolog server "$@"
-  else
-    go run ./cmd/gastrolog server "$@"
-  fi
+  go run ./cmd/gastrolog server "$@"
 }
 
-# glog_server_cmd returns the imux command string for one node (env prefix via env(1)).
+# glog_server_cmd returns the imux command string for one node.
 glog_server_cmd() {
   local i="$1"
   local extra=""
   if [[ "$PPROF" == true ]]; then
     extra=" --pprof localhost:$((6059 + i))"
   fi
-  local cmd="go run ./cmd/gastrolog server --home $(node_dir "$i") --listen :$(http_port "$i") --cluster-addr :$(cluster_port "$i")${extra}$(env_flags)"
-  if [[ -n "$MEM_LIMIT" ]]; then
-    printf 'env GOMEMLIMIT=%s %s' "$MEM_LIMIT" "$cmd"
-  else
-    printf '%s' "$cmd"
-  fi
+  printf 'go run ./cmd/gastrolog server --home %s --listen :%s --cluster-addr :%s%s%s' \
+    "$(node_dir "$i")" "$(http_port "$i")" "$(cluster_port "$i")" "$extra" "$(env_flags)"
 }
 
 # env_flags emits optional server flags from cluster env (banner, auth, segment fsync, etc.).
@@ -303,6 +285,7 @@ configure() {
   $GLOG config rotation-policy create --addr "$S" --name "1m-rotate" --max-age 1m 2>&1 | sed 's/^/  /'
   $GLOG config rotation-policy create --addr "$S" --name "100-records" --max-records 100 2>&1 | sed 's/^/  /'
   $GLOG config rotation-policy create --addr "$S" --name "10000-records" --max-records 10000 2>&1 | sed 's/^/  /'
+  $GLOG config rotation-policy create --addr "$S" --name "1M-1m" --max-records 1000000 --max-age 1m 2>&1 | sed 's/^/  /'
   $GLOG config retention-policy create --addr "$S" --name "3m-retain" --max-age 3m 2>&1 | sed 's/^/  /'
   $GLOG config retention-policy create --addr "$S" --name "1h-retain" --max-age 1h 2>&1 | sed 's/^/  /'
 
@@ -313,7 +296,7 @@ configure() {
 
   echo ">>> Creating vaults..."
   # Two-vault local→cloud chain wired via inter-vault routing (gastrolog-4kkoo).
-  #   - first-vault: file-backed on local disk, 10000-records rotation, 1-hour
+  #   - first-vault: file-backed on local disk, 1M-records / 1m rotation, 1-hour
   #                  retention. Chunks past their TTL fire the retention
   #                  sweep, which streams their records back through the
   #                  routing engine.
@@ -322,7 +305,7 @@ configure() {
   #                  no retention policy means data lives forever.
   $GLOG config vault create --addr "$S" --name "first-vault" \
     --type file --storage-class 1 --replication-factor "$NODES" \
-    --rotation-policy "10000-records" --retention-policy "1h-retain" 2>&1 | sed 's/^/  /'
+    --rotation-policy "1M-1m" --retention-policy "1h-retain" 2>&1 | sed 's/^/  /'
   $GLOG config vault create --addr "$S" --name "second-vault" \
     --type file --storage-class 1 --replication-factor "$NODES" \
     --cloud-service "S3" \
@@ -375,7 +358,8 @@ configure() {
   $GLOG config ingester create --addr "$S" \
     --name "chatterbox" --type chatterbox --node-id "$CHATTER_NODE" --enabled=false 2>&1 | sed 's/^/  /'
   $GLOG config ingester create --addr "$S" \
-    --name "scatterbox" --type scatterbox --all-nodes --param interval=1ms --enabled=false 2>&1 | sed 's/^/  /'
+    --name "scatterbox" --type scatterbox --all-nodes \
+    --param interval=10ms --param burst=100 --enabled=false 2>&1 | sed 's/^/  /'
 }
 
 # --- Main ---

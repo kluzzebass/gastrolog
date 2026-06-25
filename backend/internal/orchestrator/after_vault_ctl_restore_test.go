@@ -25,6 +25,10 @@ import (
 
 const afterRestoreTestBufSize = 1 << 20
 
+func afterRestoreRaftTimeouts() (heartbeat, election, lease time.Duration) {
+	return 100 * time.Millisecond, 100 * time.Millisecond, 50 * time.Millisecond
+}
+
 // TestCreateGroupRestoreWithInstanceDoesNotDeadlock pins gastrolog-4tadr:
 // afterVaultCtlRestore must not call groupMgr.GetGroup synchronously from
 // inside fsm.Restore while CreateGroup holds groupMgr.mu.
@@ -70,6 +74,7 @@ func TestCreateGroupRestoreWithInstanceDoesNotDeadlock(t *testing.T) {
 
 	vaultID := glid.New()
 	groupID := raftgroup.VaultControlPlaneGroupID(vaultID)
+	hb, el, ll := afterRestoreRaftTimeouts()
 	seed := []hraft.Server{{
 		ID:      hraft.ServerID(nodeID),
 		Address: hraft.ServerAddress(nodeID),
@@ -78,9 +83,12 @@ func TestCreateGroupRestoreWithInstanceDoesNotDeadlock(t *testing.T) {
 	// Bootstrap the group and persist a snapshot on disk.
 	bootstrapFSM := vaultraft.NewFSM()
 	g1, err := mgr.CreateGroup(raftgroup.GroupConfig{
-		GroupID:     groupID,
-		FSM:         bootstrapFSM,
-		SeedMembers: seed,
+		GroupID:            groupID,
+		FSM:                bootstrapFSM,
+		SeedMembers:        seed,
+		HeartbeatTimeout:   hb,
+		ElectionTimeout:    el,
+		LeaderLeaseTimeout: ll,
 	})
 	if err != nil {
 		t.Fatalf("bootstrap CreateGroup: %v", err)
@@ -117,9 +125,12 @@ func TestCreateGroupRestoreWithInstanceDoesNotDeadlock(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		_, err := mgr.CreateGroup(raftgroup.GroupConfig{
-			GroupID:     groupID,
-			FSM:         restoreFSM,
-			SeedMembers: seed,
+			GroupID:            groupID,
+			FSM:                restoreFSM,
+			SeedMembers:        seed,
+			HeartbeatTimeout:   hb,
+			ElectionTimeout:    el,
+			LeaderLeaseTimeout: ll,
 		})
 		done <- err
 	}()

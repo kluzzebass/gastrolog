@@ -73,3 +73,38 @@ func TestMappedBlobSectionSkipsRecordTables(t *testing.T) {
 		t.Fatal("dict/index should be loaded after Reader()")
 	}
 }
+
+func TestMappedBlobTryReleaseRecordTables(t *testing.T) {
+	t.Parallel()
+	path := writeTestGLCB(t)
+
+	blob, err := OpenMappedBlob(path)
+	if err != nil {
+		t.Fatalf("OpenMappedBlob: %v", err)
+	}
+	defer blob.Close()
+
+	blob.Retain()
+	if _, err := blob.Reader(); err != nil {
+		t.Fatalf("Reader: %v", err)
+	}
+	if !blob.RecordTablesLoaded() {
+		t.Fatal("expected loaded tables after Reader")
+	}
+	if blob.TryReleaseRecordTables() {
+		t.Fatal("TryReleaseRecordTables should fail while pinned")
+	}
+	blob.Release()
+	if !blob.TryReleaseRecordTables() {
+		t.Fatal("TryReleaseRecordTables should succeed with no pins")
+	}
+	if blob.RecordTablesLoaded() {
+		t.Fatal("tables should be released")
+	}
+
+	blob.Retain()
+	if _, err := blob.Reader(); err != nil {
+		t.Fatalf("re-Reader after release: %v", err)
+	}
+	blob.Release()
+}

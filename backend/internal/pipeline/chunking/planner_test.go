@@ -245,7 +245,7 @@ func TestPlannerMaxAgeUsesFirstChunkWriteNotLast(t *testing.T) {
 	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
 	firstWrite := base.Add(time.Minute)
 	lastWrite := base.Add(30 * time.Minute)
-	// Age from first planned record write, not the latest ref in the chunk.
+	// OpenedAt unset: age anchor is WriteStart, not WriteEnd on the latest ref.
 	decision := chunking.Plan(chunking.PlannerInput{
 		Manifest: chunking.ManifestSnapshot{
 			TotalRecords: 2,
@@ -258,7 +258,56 @@ func TestPlannerMaxAgeUsesFirstChunkWriteNotLast(t *testing.T) {
 		EvalNow: lastWrite.Add(30 * time.Minute),
 	})
 	if decision.Action != chunking.PlannerIdle {
-		t.Fatalf("Plan = %+v, want idle (age from WriteStart, not WriteEnd)", decision)
+		t.Fatalf("Plan = %+v, want idle (age from WriteStart when OpenedAt unset)", decision)
+	}
+}
+
+// TestPlannerMaxAgeBacklogDoesNotRotateOnStaleWriteStart: under backlog the
+// planner ingests segments whose records carry old WriteTS. MaxAge must use
+// manifest OpenedAt so catch-up can fill toward MaxRecords instead of sealing
+// micro-chunks the moment the first ref lands.
+func TestPlannerMaxAgeBacklogDoesNotRotateOnStaleWriteStart(t *testing.T) {
+	t.Parallel()
+	evalNow := time.Date(2024, 8, 1, 12, 5, 0, 0, time.UTC)
+	staleWriteStart := evalNow.Add(-5 * time.Minute)
+	decision := chunking.Plan(chunking.PlannerInput{
+		Manifest: chunking.ManifestSnapshot{
+			OpenedAt:     evalNow.Add(-30 * time.Second),
+			TotalRecords: 25_000,
+			Bounds: vaultctlfsm.ManifestTimeBounds{
+				WriteStart: staleWriteStart,
+				WriteEnd:   staleWriteStart.Add(time.Second),
+			},
+			Refs: []chunking.ManifestRef{{
+				SegmentID: glid.New(), FirstRecordNumber: 0, LastRecordNumber: 24_999,
+			}},
+		},
+		Policy:  chunking.ManifestRotationPolicy{MaxAge: time.Minute, MaxRecords: 1_000_000},
+		EvalNow: evalNow,
+	})
+	if decision.Action == chunking.PlannerRotate && decision.Trigger == "age" {
+		t.Fatalf("Plan = %+v, want no age rotate when OpenedAt is recent", decision)
+	}
+}
+
+func TestPlannerMaxAgeRotatesAfterManifestOpenWallClock(t *testing.T) {
+	t.Parallel()
+	evalNow := time.Date(2024, 8, 1, 12, 5, 0, 0, time.UTC)
+	staleWriteStart := evalNow.Add(-5 * time.Minute)
+	decision := chunking.Plan(chunking.PlannerInput{
+		Manifest: chunking.ManifestSnapshot{
+			OpenedAt:     evalNow.Add(-2 * time.Minute),
+			TotalRecords: 25_000,
+			Bounds: vaultctlfsm.ManifestTimeBounds{
+				WriteStart: staleWriteStart,
+				WriteEnd:   staleWriteStart.Add(time.Second),
+			},
+		},
+		Policy:  chunking.ManifestRotationPolicy{MaxAge: time.Minute},
+		EvalNow: evalNow,
+	})
+	if decision.Action != chunking.PlannerRotate || decision.Trigger != "age" {
+		t.Fatalf("Plan = %+v, want rotate age after manifest open exceeds MaxAge", decision)
 	}
 }
 

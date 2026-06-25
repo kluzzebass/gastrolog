@@ -28,10 +28,25 @@ import (
 // lifecycle is deterministic; the manager's async Run path (callback-driven) is
 // covered in the chunking package's own manager_test.go.
 
-// nudgeFunc adapts a closure to chunking's CollectionNudger.
-type nudgeFunc func(context.Context) error
+// collectorFunc adapts closures to chunking's SegmentCollector.
+type collectorFunc struct {
+	once   func(context.Context) error
+	byID   func(context.Context, []glid.GLID) error
+}
 
-func (f nudgeFunc) CollectMissing(ctx context.Context) error { return f(ctx) }
+func (f collectorFunc) CollectOnce(ctx context.Context) error {
+	if f.once != nil {
+		return f.once(ctx)
+	}
+	return nil
+}
+
+func (f collectorFunc) CollectSegments(ctx context.Context, segmentIDs []glid.GLID) error {
+	if f.byID != nil {
+		return f.byID(ctx, segmentIDs)
+	}
+	return nil
+}
 
 // copyCompletedToHead copies the origin's completed segment file into a home's
 // head/ directory, modeling a segment this home already holds (post-collection).
@@ -292,10 +307,9 @@ func TestPipelineChunkingByteIdenticalAcrossHomes(t *testing.T) {
 	}
 }
 
-// TestPipelineChunkingMissingSegmentNudgeRecovers: a build that cannot find a
-// referenced segment locally nudges collection once; the nudge fetches the
-// segment into head/, and the manager's internal retry then builds the GLCB.
-func TestPipelineChunkingMissingSegmentNudgeRecovers(t *testing.T) {
+// TestPipelineChunkingMaterializesSegmentsBeforeBuild: GLCB build collects
+// manifest-referenced segment bytes before attempting merge.
+func TestPipelineChunkingMaterializesSegmentsBeforeBuild(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -318,30 +332,32 @@ func TestPipelineChunkingMissingSegmentNudgeRecovers(t *testing.T) {
 	}
 	chunkID := fsm.SealedManifest().ChunkID
 
-	// Remove the local copy: the build will miss it and must nudge collection.
+	// Remove the local copy: build must materialize before merge.
 	if err := os.Remove(paths.HeadSegment(home, segID)); err != nil {
 		t.Fatalf("remove head segment: %v", err)
 	}
 
-	var nudges atomic.Int32
+	var collects atomic.Int32
 	cfg := chunkingSpec(home, fsm, func() bool { return false })
-	cfg.Nudge = nudgeFunc(func(context.Context) error {
-		nudges.Add(1)
-		copyCompletedToHead(t, origin.root, home, segID) // "collection" fetches it back
-		return nil
-	})
+	cfg.Collector = collectorFunc{
+		byID: func(_ context.Context, _ []glid.GLID) error {
+			collects.Add(1)
+			copyCompletedToHead(t, origin.root, home, segID)
+			return nil
+		},
+	}
 	buildMgr := chunking.New(chunking.Config{})
 	if err := buildMgr.RegisterVault(vaultID, cfg); err != nil {
 		t.Fatalf("buildMgr RegisterVault: %v", err)
 	}
 
 	if err := buildMgr.BuildOnce(ctx, vaultID); err != nil {
-		t.Fatalf("BuildOnce after nudge recovery: %v", err)
+		t.Fatalf("BuildOnce after segment materialization: %v", err)
 	}
-	if got := nudges.Load(); got != 1 {
-		t.Fatalf("collection nudges = %d, want 1", got)
+	if got := collects.Load(); got != 1 {
+		t.Fatalf("segment collects = %d, want 1", got)
 	}
 	if _, err := os.Stat(chunking.ChunkGLCBPath(filepath.Join(home, "chunks"), chunkID)); err != nil {
-		t.Fatalf("GLCB not built after nudge recovery: %v", err)
+		t.Fatalf("GLCB not built after materialization: %v", err)
 	}
 }

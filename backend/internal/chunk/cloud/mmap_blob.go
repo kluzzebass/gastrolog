@@ -29,7 +29,8 @@ type MappedBlob struct {
 	index          []recordIndex
 	recordsBaseOff int64
 	toc            BlobTOC
-	recordInit     sync.Once
+	recordMu       sync.Mutex
+	recordLoaded   bool
 	recordInitErr  error
 	pins           atomic.Int32
 	closed         atomic.Bool
@@ -69,6 +70,37 @@ func OpenMappedBlob(path string) (*MappedBlob, error) {
 	blob.path = path
 	blob.data = data
 	return blob, nil
+}
+
+// PinCount returns active Retain pins (tests and cache eviction).
+func (b *MappedBlob) PinCount() int32 { return b.pins.Load() }
+
+// RecordTablesLoaded reports whether dict and record index are heap-decoded.
+func (b *MappedBlob) RecordTablesLoaded() bool {
+	b.recordMu.Lock()
+	loaded := b.recordLoaded
+	b.recordMu.Unlock()
+	return loaded
+}
+
+// TryReleaseRecordTables drops heap-decoded dict and record index while
+// keeping the mmap. No-op when retain pins are held or tables were never
+// loaded. Safe to call after the last cursor / section reader closes.
+func (b *MappedBlob) TryReleaseRecordTables() bool {
+	if b.pins.Load() > 0 {
+		return false
+	}
+	b.recordMu.Lock()
+	defer b.recordMu.Unlock()
+	if !b.recordLoaded {
+		return false
+	}
+	b.dict = nil
+	b.index = nil
+	b.recordsBaseOff = 0
+	b.recordLoaded = false
+	b.recordInitErr = nil
+	return true
 }
 
 // Retain pins the mapping for an in-flight cursor or TS-index lookup.
@@ -126,24 +158,44 @@ func (b *MappedBlob) Reader() (*Reader, error) {
 	if err := b.ensureRecordTables(); err != nil {
 		return nil, err
 	}
+	b.recordMu.Lock()
+	dict := b.dict
+	index := b.index
+	base := b.recordsBaseOff
+	data := b.data
+	meta := b.meta
+	b.recordMu.Unlock()
 	return &Reader{
-		meta:           b.meta,
-		dict:           b.dict,
-		index:          b.index,
-		recordsBaseOff: b.recordsBaseOff,
-		mmapData:       b.data,
+		meta:           meta,
+		dict:           dict,
+		index:          index,
+		recordsBaseOff: base,
+		mmapData:       data,
 		keepFile:       true,
 	}, nil
 }
 
 func (b *MappedBlob) ensureRecordTables() error {
-	b.recordInit.Do(func() {
-		b.recordInitErr = b.loadRecordTables()
-	})
-	return b.recordInitErr
+	b.recordMu.Lock()
+	if b.recordLoaded {
+		err := b.recordInitErr
+		b.recordMu.Unlock()
+		return err
+	}
+	err := b.loadRecordTablesLocked()
+	b.recordInitErr = err
+	b.recordLoaded = true
+	b.recordMu.Unlock()
+	return err
 }
 
 func (b *MappedBlob) loadRecordTables() error {
+	b.recordMu.Lock()
+	defer b.recordMu.Unlock()
+	return b.loadRecordTablesLocked()
+}
+
+func (b *MappedBlob) loadRecordTablesLocked() error {
 	layout := b.layout
 	if int(layout.DictOff)+int(layout.DictSize) > len(b.data) {
 		return errors.New("dict out of range")

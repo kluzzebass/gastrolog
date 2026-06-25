@@ -11,6 +11,9 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
 	"gastrolog/internal/system"
+	"gastrolog/internal/vaultraft/vaultctlfsm"
+
+	hraft "github.com/hashicorp/raft"
 )
 
 // ---------- fake chunk manager ----------
@@ -165,6 +168,50 @@ func newRetentionRunner(cm chunk.ChunkManager, im index.IndexManager, policy chu
 		logger:   slog.Default(),
 	}
 	return r, rules
+}
+
+func TestSweepTTLAnchorsOnOverlaySealedAt(t *testing.T) {
+	now := time.Date(2026, 6, 24, 23, 0, 0, 0, time.UTC)
+	writeEnd := now.Add(-4 * time.Hour)
+	sealedAt := now.Add(-10 * time.Minute)
+
+	chunkID := chunk.NewChunkID()
+	fsm := vaultctlfsm.New()
+	opened := writeEnd.Add(-time.Hour)
+	if result := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(chunkID, opened, opened, opened)}); result != nil {
+		t.Fatalf("create: %v", result)
+	}
+	if result := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(
+		chunkID, writeEnd, 1000, 100, opened, writeEnd, writeEnd, true, sealedAt,
+	)}); result != nil {
+		t.Fatalf("seal: %v", result)
+	}
+
+	cm := &retentionFakeChunkManager{
+		chunks: []chunk.ChunkMeta{{
+			ID: chunkID, WriteEnd: writeEnd, Sealed: true,
+		}},
+	}
+	vaultID := glid.New()
+	inst := &VaultInstance{VaultID: vaultID}
+	inst.applyRaftCallbacks(buildVaultRaftCallbacks(nil, fsm, nil))
+	orch := &Orchestrator{vaults: map[glid.GLID]*Vault{vaultID: {ID: vaultID, Instance: inst}}}
+
+	r := &retentionRunner{
+		isLeader: true,
+		vaultID:  vaultID,
+		cm:       cm,
+		im:       &retentionFakeIndexManager{},
+		orch:     orch,
+		now:      func() time.Time { return now },
+		logger:   slog.Default(),
+	}
+	r.sweep([]retentionRule{{policy: chunk.NewTTLRetentionPolicy(time.Hour)}})
+
+	if len(cm.deleted) != 0 {
+		t.Fatalf("chunk sealed %v ago must survive 1h TTL; deleted=%v writeEnd=%v",
+			now.Sub(sealedAt), cm.deleted, writeEnd)
+	}
 }
 
 // ---------- tests ----------

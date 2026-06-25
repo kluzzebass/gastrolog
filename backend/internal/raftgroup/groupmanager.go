@@ -63,7 +63,29 @@ type GroupConfig struct {
 	// TrailingLogs is the number of log entries kept after a snapshot.
 	// Defaults to 64 if zero.
 	TrailingLogs uint64
+
+	// HeartbeatTimeout, ElectionTimeout, and LeaderLeaseTimeout override Raft
+	// timing when > 0. Vault control-plane groups (vault/*/ctl) default to
+	// longer timeouts when unset — see vaultCtl* constants below.
+	HeartbeatTimeout     time.Duration
+	ElectionTimeout      time.Duration
+	LeaderLeaseTimeout   time.Duration
 }
+
+// Default Raft timing for cluster-ctl and other non-vault-ctl groups.
+const (
+	defaultHeartbeatTimeout  = 1000 * time.Millisecond
+	defaultElectionTimeout   = 1000 * time.Millisecond
+	defaultLeaderLeaseTimeout = 500 * time.Millisecond
+)
+
+// Vault control-plane groups run heavier FSM work and share the node with
+// chunking GLCB builds; tolerate longer scheduling pauses than cluster-ctl.
+const (
+	vaultCtlHeartbeatTimeout   = 3 * time.Second
+	vaultCtlElectionTimeout    = 3 * time.Second
+	vaultCtlLeaderLeaseTimeout = 1500 * time.Millisecond
+)
 
 // Group is a running Raft group managed by the GroupManager.
 type Group struct {
@@ -323,7 +345,7 @@ func (m *GroupManager) newRaftConfig(cfg GroupConfig) *hraft.Config {
 	conf := hraft.DefaultConfig()
 	conf.LocalID = hraft.ServerID(m.nodeID)
 
-	raftLogger := logging.NewHclogAdapter(m.logger.With("group", cfg.GroupID))
+	raftLogger := logging.NewRaftGroupHclog(m.logger, cfg.GroupID)
 	filtered := logging.FilterHclogMessages(raftLogger, "entering follower state")
 	conf.Logger = logging.DowngradeHclogToDebug(filtered,
 		"failed to heartbeat",
@@ -357,11 +379,30 @@ func (m *GroupManager) newRaftConfig(cfg GroupConfig) *hraft.Config {
 		conf.TrailingLogs = cfg.TrailingLogs
 	}
 
-	conf.HeartbeatTimeout = 1000 * time.Millisecond
-	conf.ElectionTimeout = 1000 * time.Millisecond
-	conf.LeaderLeaseTimeout = 500 * time.Millisecond
+	conf.HeartbeatTimeout, conf.ElectionTimeout, conf.LeaderLeaseTimeout = raftTimeouts(cfg)
 
 	return conf
+}
+
+func raftTimeouts(cfg GroupConfig) (heartbeat, election, lease time.Duration) {
+	heartbeat = defaultHeartbeatTimeout
+	election = defaultElectionTimeout
+	lease = defaultLeaderLeaseTimeout
+	if IsVaultControlPlaneGroupID(cfg.GroupID) {
+		heartbeat = vaultCtlHeartbeatTimeout
+		election = vaultCtlElectionTimeout
+		lease = vaultCtlLeaderLeaseTimeout
+	}
+	if cfg.HeartbeatTimeout > 0 {
+		heartbeat = cfg.HeartbeatTimeout
+	}
+	if cfg.ElectionTimeout > 0 {
+		election = cfg.ElectionTimeout
+	}
+	if cfg.LeaderLeaseTimeout > 0 {
+		lease = cfg.LeaderLeaseTimeout
+	}
+	return heartbeat, election, lease
 }
 
 // seedGroup gives a fresh Raft instance its initial member configuration via

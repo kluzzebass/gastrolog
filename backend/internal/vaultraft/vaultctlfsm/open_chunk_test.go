@@ -280,14 +280,47 @@ func TestOpenChunkSnapshotRoundTrip(t *testing.T) {
 func TestOpenChunkManifestWhileSealedManifestPending(t *testing.T) {
 	t.Parallel()
 	fsm := New()
-	chunkID := testChunkID(0x5A)
+	chunkA := testChunkID(0x5A)
+	chunkB := testChunkID(0x5B)
 	now := time.Unix(0, 1_700_000_000_000).UTC()
-	applyCmd(t, fsm, MarshalOpenChunkManifest(chunkID, now))
-	applyCmd(t, fsm, MarshalSealOpenChunkManifest(chunkID, now.Add(time.Minute)))
+	applyCmd(t, fsm, MarshalOpenChunkManifest(chunkA, now))
+	applyCmd(t, fsm, MarshalSealOpenChunkManifest(chunkA, now.Add(time.Minute)))
 
-	result := fsm.Apply(&hraft.Log{Data: MarshalOpenChunkManifest(testChunkID(0x5B), now)})
-	if err, ok := result.(error); !ok || !errors.Is(err, ErrSealedManifestPending) {
-		t.Fatalf("open while pending = %v", result)
+	result := fsm.Apply(&hraft.Log{Data: MarshalOpenChunkManifest(chunkB, now)})
+	if err, ok := result.(error); ok && err != nil {
+		t.Fatalf("open while pending sealed build = %v", result)
+	}
+	open := fsm.OpenChunk()
+	if open == nil || open.ChunkID != chunkB {
+		t.Fatalf("open = %+v, want chunk %s", open, chunkB)
+	}
+	if pending := fsm.SealedManifest(); pending == nil || pending.ChunkID != chunkA {
+		t.Fatalf("sealed = %+v, want chunk %s pending", pending, chunkA)
+	}
+}
+
+func TestSealOpenChunkWhileOtherSealedPending(t *testing.T) {
+	t.Parallel()
+	fsm := New()
+	chunkA := testChunkID(0x5A)
+	chunkB := testChunkID(0x5B)
+	now := time.Unix(0, 1_700_000_000_000).UTC()
+	applyCmd(t, fsm, MarshalOpenChunkManifest(chunkA, now))
+	applyCmd(t, fsm, MarshalSealOpenChunkManifest(chunkA, now.Add(time.Minute)))
+	applyCmd(t, fsm, MarshalOpenChunkManifest(chunkB, now))
+
+	result := fsm.Apply(&hraft.Log{Data: MarshalSealOpenChunkManifest(chunkB, now.Add(2*time.Minute))})
+	if err, ok := result.(error); ok && err != nil {
+		t.Fatalf("seal open B while A pending = %v", result)
+	}
+	if open := fsm.OpenChunk(); open != nil {
+		t.Fatalf("open = %+v, want nil after B sealed", open)
+	}
+	if fsm.SealedManifestCount() != 2 {
+		t.Fatalf("sealed queue depth = %d, want 2", fsm.SealedManifestCount())
+	}
+	if head := fsm.SealedManifest(); head == nil || head.ChunkID != chunkA {
+		t.Fatalf("queue head = %+v, want chunk %s", head, chunkA)
 	}
 }
 

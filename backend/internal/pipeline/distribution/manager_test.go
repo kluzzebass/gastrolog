@@ -609,8 +609,8 @@ func TestStreamSegmentGoneDuringPull(t *testing.T) {
 	err := mgr.ServePull(distribution.PullRequest{
 		VaultID: vaultID, SegmentID: seg.Meta.ID, Dest: &bytes.Buffer{},
 	})
-	if !errors.Is(err, distribution.ErrSegmentGone) {
-		t.Fatalf("ServePull() = %v, want ErrSegmentGone", err)
+	if !errors.Is(err, distribution.ErrSegmentNotFound) {
+		t.Fatalf("ServePull() = %v, want ErrSegmentNotFound after file removed", err)
 	}
 }
 

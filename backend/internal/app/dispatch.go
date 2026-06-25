@@ -372,6 +372,7 @@ func (d *configDispatcher) ingesterDesired(ctx context.Context, cfg system.Inges
 		Name:    cfg.Name,
 		Type:    cfg.Type,
 		Passive: reg.ListenAddrs != nil,
+		Params:  maps.Clone(cfg.Params),
 		Build: func() (orchestrator.Ingester, error) {
 			params := cfg.Params
 			if d.factories.HomeDir != "" {

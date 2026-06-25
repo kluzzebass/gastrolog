@@ -193,6 +193,9 @@ type Manager struct {
 	// Aliased by OpenCursor, index TS lookups, and histogram paths.
 	glcbMapped sync.Map // chunk.ChunkID → *mappedGLCBEntry
 
+	glcbDecodeMu  sync.Mutex
+	glcbDecodeLRU []chunk.ChunkID // MRU first; ids with decode tables loaded
+
 	zstdEnc        *zstd.Encoder
 	zstdEncMu      sync.Mutex                // serializes concurrent CompressChunk calls sharing zstdEnc
 	cloudIdx       *cloudIndex               // local B+ tree cache of cloud chunk metadata (nil if no cloud store)
@@ -2229,22 +2232,30 @@ func (s *importState) writeRecord(rec chunk.Record) error {
 // time from Now is used. Records are written to a new chunk directory
 // separate from the active chunk; concurrent Append calls are not affected.
 //
+// The write loop does not hold m.mu so List() and PostSealProcess are not
+// frozen for the duration of a large replication import.
+//
 // If id is the zero ChunkID, a new ID is generated. Passing the ID directly
 // rather than via SetNextChunkID avoids a race where a concurrent Append
 // (via openLocked) could consume the pending ID and leave the import to
 // allocate a fresh, untracked one — see gastrolog-11rzz.
 func (m *Manager) ImportRecords(id chunk.ChunkID, next chunk.RecordIterator) (chunk.ChunkMeta, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	if m.closed {
+		m.mu.Unlock()
 		return chunk.ChunkMeta{}, ErrManagerClosed
 	}
-
 	if id == (chunk.ChunkID{}) {
 		id = chunk.NewChunkID()
 	}
-	files, err := m.openImportFiles(id, m.cfg.Now())
+	if _, exists := m.metas[id]; exists {
+		m.mu.Unlock()
+		return chunk.ChunkMeta{}, fmt.Errorf("chunk %s already exists", id)
+	}
+	now := m.cfg.Now()
+	m.mu.Unlock()
+
+	files, err := m.openImportFiles(id, now)
 	if err != nil {
 		return chunk.ChunkMeta{}, err
 	}
@@ -2306,6 +2317,16 @@ func (m *Manager) ImportRecords(id chunk.ChunkID, next chunk.RecordIterator) (ch
 	s.meta.bytes = m.computeTotalLogicalBytes(id, s.meta.logicalDataBytes)
 	s.meta.diskBytes = m.computeDiskBytes(id)
 
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		_ = os.RemoveAll(files.chunkDir)
+		return chunk.ChunkMeta{}, ErrManagerClosed
+	}
+	if _, exists := m.metas[id]; exists {
+		_ = os.RemoveAll(files.chunkDir)
+		return chunk.ChunkMeta{}, fmt.Errorf("chunk %s already exists", id)
+	}
 	m.metas[id] = s.meta
 	m.logger.Debug("chunk-lifecycle: import registered in metas",
 		"chunk", id.String(), "records", s.count)
@@ -3254,8 +3275,10 @@ func (m *Manager) openLocalGLCBCursor(id chunk.ChunkID) (chunk.RecordCursor, err
 		chunkLock.RUnlock()
 		return nil, err
 	}
+	m.noteGLCBDecoded(id)
 	return chunkcloud.NewSeekableCursorWithClose(rd, id, func() {
 		blob.Release()
+		m.releaseGLCBDecodeTables(id, blob)
 		chunkLock.RUnlock()
 	}), nil
 }

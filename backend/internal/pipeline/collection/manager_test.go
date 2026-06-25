@@ -122,6 +122,38 @@ func TestCollectOncePullsMissingSegment(t *testing.T) {
 	}
 }
 
+func TestCollectSegmentsPullsByID(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	segID := glid.New()
+	root := t.TempDir()
+
+	segBytes := writeSegmentBytes(t, vaultID, segID, "targeted-collect")
+	pull := newMemoryPull()
+	pull.Put(segID, segBytes)
+	receipts := &recordingReceipts{}
+
+	mgr := collection.New(collection.Config{})
+	if err := mgr.RegisterVault(vaultID, root, collection.VaultConfig{
+		Log:      &staticLog{},
+		Pull:     pull,
+		Receipts: receipts,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := mgr.CollectSegments(context.Background(), vaultID, []glid.GLID{segID}); err != nil {
+		t.Fatal(err)
+	}
+	headPath := paths.HeadSegment(root, segID)
+	if _, err := os.Stat(headPath); err != nil {
+		t.Fatalf("head file: %v", err)
+	}
+	if receipts.count() != 1 {
+		t.Fatalf("receipts = %d, want 1", receipts.count())
+	}
+}
+
 // TestCollectOnceReceiptsSegmentAlreadyInHead covers the origin-home case: the
 // node already holds the segment in head/ (distribution promoted it there via
 // LocalHolder), but the assignment log still lists it because the holder

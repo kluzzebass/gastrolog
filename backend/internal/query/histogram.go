@@ -218,6 +218,11 @@ func (e *Engine) vaultChunkMetas(vaultID glid.GLID) []chunk.ChunkMeta {
 		metas, _ := cm.List()
 		return metas
 	}
+	if scl, ok := e.registry.(manifest.SearchChunkLister); ok {
+		if metas := scl.SearchChunkMetas(vaultID); len(metas) > 0 {
+			return metas
+		}
+	}
 	entries := e.registry.Reader().EntriesForVault(vaultID)
 	out := make([]chunk.ChunkMeta, 0, len(entries)+1)
 	for i := range entries {

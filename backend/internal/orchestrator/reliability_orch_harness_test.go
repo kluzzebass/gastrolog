@@ -168,7 +168,9 @@ func withMatchAllRoute(vaultIdx int) orchRelOption {
 const (
 	orchHarnessReadyWait  = 8 * time.Second
 	orchHarnessConvWait   = 60 * time.Second
-	orchHarnessLeaderWait = 5 * time.Second
+	// Vault-ctl groups use longer Raft election timeouts than cluster-ctl;
+	// post-failover leader election can exceed the old 5s budget.
+	orchHarnessLeaderWait = 15 * time.Second
 )
 
 // newOrchRelHarness boots n nodes with a shared config store, at least one

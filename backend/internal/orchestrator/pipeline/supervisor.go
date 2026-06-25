@@ -11,7 +11,7 @@
 // Ingester factories, ack-after-durable semantics, vault-ctl feeds, and the
 // leader planner are filled in by later Rubicon slices (gastrolog-214bz B→E).
 // Injection points (publishers, appliers, FSM callbacks, pull/log/receipt
-// clients, nudge hooks) are supplied per vault via VaultSpec, so this package
+// clients, segment collectors) are supplied per vault via VaultSpec, so this package
 // carries no opinion about how they are produced.
 package pipeline
 
@@ -226,7 +226,7 @@ func New(cfg Config) *Supervisor {
 		PullQueueCap: cfg.DistributionPullQueueCap,
 		Logger:       cfg.Logger,
 	})
-	col := collection.New(collection.Config{})
+	col := collection.New(collection.Config{Logger: cfg.Logger})
 	chunk := chunking.New(chunking.Config{Logger: cfg.Logger})
 
 	routingCap := cfg.RoutingInCapacity
@@ -378,7 +378,7 @@ func (s *Supervisor) ServePull(req distribution.PullRequest) error {
 // CollectOnce runs one collection pass for a home vault: roll the assignment log,
 // pull any missing segments, and promote them to head. Slice C drives this from
 // publish/assignment signals; it is exposed as the orchestrator-owned collection
-// seam (also used by the chunking build nudge).
+// seam (also used by chunking build materialization).
 func (s *Supervisor) CollectOnce(ctx context.Context, vaultID glid.GLID) error {
 	return s.col.CollectOnce(ctx, vaultID)
 }
@@ -595,7 +595,7 @@ func (s *Supervisor) registerHome(spec VaultSpec) error {
 			FSM:        spec.FSM,
 			LookupFSM:  spec.LookupFSM,
 			Locate:     spec.Locate,
-			Nudge:      collectionNudge{mgr: s.col, vaultID: spec.VaultID},
+			Collector:  vaultSegmentCollector{mgr: s.col, vaultID: spec.VaultID},
 			Applier:    spec.Applier,
 			IsLeader:   spec.IsLeader,
 			Policy:     spec.ChunkPolicy,
@@ -642,6 +642,18 @@ func (s *Supervisor) RecoverVault(ctx context.Context, vaultID glid.GLID) error 
 	return s.chunk.RecoverOnce(ctx, vaultID)
 }
 
+// NotifyChunkingVault wakes the per-vault chunking worker (plan/build loop).
+func (s *Supervisor) NotifyChunkingVault(vaultID glid.GLID) {
+	if s.chunk != nil {
+		s.chunk.NotifyVault(vaultID)
+	}
+}
+
+// ChunkingRegistered reports whether chunking is active for a vault on this home.
+func (s *Supervisor) ChunkingRegistered(vaultID glid.GLID) bool {
+	return s.chunk != nil && s.chunk.HasVault(vaultID)
+}
+
 // RewireVaultAfterCtlRestore rebinds chunking and collection to the live vault-ctl
 // sub-FSM after a group-level snapshot Restore. Returns ErrUnknownVault when the
 // vault is not registered on this home yet (transient during startup).
@@ -649,9 +661,14 @@ func (s *Supervisor) RewireVaultAfterCtlRestore(vaultID glid.GLID, cfg RewireVau
 	if cfg.FSM == nil {
 		return errors.New("vault-ctl FSM required")
 	}
+	chunkUnknown := false
 	if s.chunk != nil {
-		if err := s.chunk.RewireVaultFSM(vaultID, cfg.FSM, cfg.Applier); err != nil && !errors.Is(err, chunking.ErrUnknownVault) {
-			return fmt.Errorf("chunking rewire: %w", err)
+		if err := s.chunk.RewireVaultFSM(vaultID, cfg.FSM, cfg.Applier); err != nil {
+			if errors.Is(err, chunking.ErrUnknownVault) {
+				chunkUnknown = true
+			} else {
+				return fmt.Errorf("chunking rewire: %w", err)
+			}
 		}
 	}
 	if s.col != nil && cfg.Log != nil && cfg.Pull != nil && cfg.Receipts != nil {
@@ -663,6 +680,9 @@ func (s *Supervisor) RewireVaultAfterCtlRestore(vaultID glid.GLID, cfg RewireVau
 		}); err != nil && !errors.Is(err, collection.ErrUnknownVault) {
 			return fmt.Errorf("collection rewire: %w", err)
 		}
+	}
+	if chunkUnknown {
+		return chunking.ErrUnknownVault
 	}
 	return nil
 }
@@ -718,13 +738,18 @@ func (s *Supervisor) unregisterOrigin(vaultID glid.GLID) {
 	s.seg.UnregisterVault(vaultID)
 }
 
-// collectionNudge adapts the collection manager to chunking's CollectionNudger so
-// a chunk build that is missing segments locally can trigger a collect pass.
-type collectionNudge struct {
+// vaultSegmentCollector adapts the collection manager to chunking's
+// SegmentCollector — the build prerequisite that materializes manifest
+// segment bytes on each home before GLCB merge.
+type vaultSegmentCollector struct {
 	mgr     *collection.Manager
 	vaultID glid.GLID
 }
 
-func (n collectionNudge) CollectMissing(ctx context.Context) error {
+func (n vaultSegmentCollector) CollectOnce(ctx context.Context) error {
 	return n.mgr.CollectOnce(ctx, n.vaultID)
+}
+
+func (n vaultSegmentCollector) CollectSegments(ctx context.Context, segmentIDs []glid.GLID) error {
+	return n.mgr.CollectSegments(ctx, n.vaultID, segmentIDs)
 }

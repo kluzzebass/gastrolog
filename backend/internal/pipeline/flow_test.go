@@ -177,13 +177,17 @@ func (p *flowVaultCtlPublisher) Publish(ctx context.Context, meta distribution.M
 	return p.vctl.Publish(ctx, meta)
 }
 
-type flowCollectionNudger struct {
+type flowSegmentCollector struct {
 	collect *collection.Manager
 	vaultID glid.GLID
 }
 
-func (n flowCollectionNudger) CollectMissing(ctx context.Context) error {
+func (n flowSegmentCollector) CollectOnce(ctx context.Context) error {
 	return n.collect.CollectOnce(ctx, n.vaultID)
+}
+
+func (n flowSegmentCollector) CollectSegments(ctx context.Context, segmentIDs []glid.GLID) error {
+	return n.collect.CollectSegments(ctx, n.vaultID, segmentIDs)
 }
 
 type flakyFlowPull struct {
@@ -356,7 +360,7 @@ func newHarness(t *testing.T, nodeID, ingesterID, vaultID glid.GLID, route *rout
 			IsLeader:   isLeader,
 			NewChunkID: func() chunk.ChunkID { return chunkID },
 			Policy:     policy,
-			Nudge:      flowCollectionNudger{collect: h.collect, vaultID: vaultID},
+			Collector:  flowSegmentCollector{collect: h.collect, vaultID: vaultID},
 		}); err != nil {
 			t.Fatalf("RegisterVault chunking: %v", err)
 		}

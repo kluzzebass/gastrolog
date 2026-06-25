@@ -164,7 +164,7 @@ func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, home bool, fsm 
 		if o.segmentPuller != nil {
 			spec.Home = true
 			lookup := spec.LookupFSM
-			spec.Log = &segmentLogReader{lookup: lookup, localNodeID: o.localNodeID}
+			spec.Log = &segmentLogReader{lookup: lookup, localNodeID: o.localNodeID, vaultRoot: root}
 			spec.Pull = &segmentPullClient{
 				lookup:      lookup,
 				puller:      o.segmentPuller,
@@ -187,7 +187,13 @@ func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, home bool, fsm 
 // and the later onSeal registers it.
 func (o *Orchestrator) registerBuiltPipelineChunk(vaultID glid.GLID, fsm *vaultctlfsm.FSM, id chunk.ChunkID) {
 	e := fsm.Get(id)
-	if e == nil || e.State != chunk.ChunkStateSealed {
+	if e == nil {
+		return
+	}
+	// Register as soon as the GLCB exists so sealing chunks are queryable
+	// before CmdSealChunk; fully sealed chunks still register here when build
+	// finishes after seal (registerBuiltPipelineChunk ordering gap).
+	if e.State != chunk.ChunkStateSealed && e.State != chunk.ChunkStateSealing {
 		return
 	}
 	ti := o.findLocalVaultInstance(vaultID)
@@ -380,6 +386,23 @@ func (o *Orchestrator) originRoot(vaultID glid.GLID) (string, error) {
 	return filepath.Join(o.segmentsDir, vaultID.String()), nil
 }
 
+// isPipelineIngestVault reports whether this vault receives records through the
+// segmentation pipeline (routing → segments → chunking → GLCB at ChunkRoot).
+//
+// Pipeline ingest vaults do not use the legacy chunk-manager path: no append to
+// m.active, no PostSealProcess/sealToGLCB in storage/disk-*, and no record-stream
+// replication or missing-replica catchup. Sealed bytes are produced once by the
+// pipeline; query access is registerPipelineGLCB (external path registration).
+func (o *Orchestrator) isPipelineIngestVault(vaultID glid.GLID) bool {
+	if o == nil {
+		return false
+	}
+	o.mu.RLock()
+	_, ok := o.pipelineVaults[vaultID]
+	o.mu.RUnlock()
+	return ok
+}
+
 // pipelineVaultChunkRoot returns the segmentation chunk root for a vault when
 // this node currently runs the pipeline as a home for it — the directory under
 // which pipeline-built sealed GLCBs land (<segmentsDir>/<vaultID>/chunks, the
@@ -529,6 +552,7 @@ func (o *Orchestrator) reloadPipelineFromConfig(sys *system.System) error {
 		if prev, ok := o.pipelineVaults[vid]; ok {
 			if prev == want {
 				o.reconcileChunkCron(vid, chunkEnabled, cronExpr)
+				o.finishPendingPipelineCtlRestore(vid)
 				continue
 			}
 			o.pipeline.UnregisterVault(vid)
@@ -543,6 +567,7 @@ func (o *Orchestrator) reloadPipelineFromConfig(sys *system.System) error {
 		}
 		o.pipelineVaults[vid] = want
 		o.reconcileChunkCron(vid, chunkEnabled, cronExpr)
+		o.finishPendingPipelineCtlRestore(vid)
 	}
 
 	for vid := range desired {

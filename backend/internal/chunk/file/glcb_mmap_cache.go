@@ -43,6 +43,7 @@ func (m *Manager) evictMappedGLCB(id chunk.ChunkID) {
 	if v, ok := m.glcbMapped.LoadAndDelete(id); ok {
 		_ = v.(*mappedGLCBEntry).blob.Close()
 	}
+	m.dropGLCBDecodeEntry(id)
 }
 
 // WithGLCBSection implements chunk.GLCBSectionReader.

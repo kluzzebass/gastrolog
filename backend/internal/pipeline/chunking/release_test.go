@@ -113,3 +113,31 @@ func TestPartitionPendingReleaseWaitsForHolders(t *testing.T) {
 		t.Fatalf("after all acks: ready=%v pending=%v", ready, pending)
 	}
 }
+
+func TestSegmentReadyForRegistryReleaseBlockedInSealedManifest(t *testing.T) {
+	t.Parallel()
+	now := time.Unix(0, 1_700_000_000_000).UTC()
+	segID := glid.New()
+	chunkID := chunk.NewChunkID()
+	fsm := vaultctlfsm.New()
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalPublishCompletedSegment(vaultctlfsm.CompletedSegmentEntry{
+		SegmentID: segID, RecordCount: 1, ByteSize: 1,
+		FirstIngestTS: now, LastIngestTS: now, Checksum: 1, PublishedAt: now,
+	})}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalOpenChunkManifest(chunkID, now)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
+		SegmentID: segID, FirstRecordNumber: 0, LastRecordNumber: 0, SliceBytes: 1, RefAddedAt: now,
+	})}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, now.Add(time.Minute))}); err != nil {
+		t.Fatal(err)
+	}
+	if segmentReadyForRegistryRelease(fsm, segID, nil) {
+		t.Fatal("segment in sealed manifest awaiting build must not be releasable")
+	}
+}

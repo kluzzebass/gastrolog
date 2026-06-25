@@ -43,6 +43,12 @@ var ErrNotRunning = errors.New("distribution manager not running")
 // ErrUnknownVault is returned for an unregistered vault.
 var ErrUnknownVault = errors.New("unknown vault")
 
+// errPublishBytesMissing is returned when a queued publish runs after local
+// segment bytes were purged. The worker must not retry — a stale queue item
+// or publish retry after ReleaseSegments would otherwise re-commit metadata
+// to vault-ctl without any on-disk copy (permanent collection wedge).
+var errPublishBytesMissing = errors.New("segment bytes missing for publish")
+
 // VaultConfig is per-vault distribution state.
 type VaultConfig struct {
 	// Root is the vault storage root (contains segmentation completed/).
@@ -185,10 +191,24 @@ func (v *vaultDist) publish(ctx context.Context, seg segmentation.CompletedSegme
 	if err != nil {
 		return err
 	}
+	return v.publishStaged(ctx, meta, seg.Meta.ID, path)
+}
+
+func (v *vaultDist) publishStaged(ctx context.Context, meta Metadata, segID glid.GLID, path string) error {
+	if v.isRetired(segID) {
+		return nil
+	}
+	if !v.segmentBytesPresent(segID, path) {
+		v.forgetSegment(segID)
+		return errPublishBytesMissing
+	}
 	if err := v.publisher.Publish(ctx, meta); err != nil {
 		return err
 	}
-	return v.finalizeAfterPublish(seg.Meta.ID, path)
+	if v.isRetired(segID) {
+		return nil
+	}
+	return v.finalizeAfterPublish(segID, path)
 }
 
 func (v *vaultDist) servePull(req PullRequest) error {
@@ -222,10 +242,43 @@ func (v *vaultDist) segmentPathForPull(segmentID glid.GLID) (string, bool) {
 			return path, true
 		}
 	}
-	if known {
-		return registered, true
-	}
 	return "", false
+}
+
+func (v *vaultDist) isRetired(segID glid.GLID) bool {
+	v.mu.RLock()
+	_, ok := v.retired[segID]
+	v.mu.RUnlock()
+	return ok
+}
+
+// segmentBytesPresent reports whether this vault still holds the segment in
+// staging (completed/, head/, or pre-head/). Publish must not commit vault-ctl
+// metadata when bytes are gone — RetireSegments only guards the rescan path,
+// not pending queue items or publish retries.
+func (v *vaultDist) segmentBytesPresent(segID glid.GLID, path string) bool {
+	if path != "" {
+		if _, err := os.Stat(path); err == nil {
+			return true
+		}
+	}
+	for _, p := range []string{
+		paths.HeadSegment(v.root, segID),
+		paths.CompletedSegment(v.root, segID),
+		paths.PreHeadSegment(v.root, segID),
+	} {
+		if _, err := os.Stat(p); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func (v *vaultDist) forgetSegment(segID glid.GLID) {
+	v.mu.Lock()
+	delete(v.segments, segID)
+	v.retired[segID] = struct{}{}
+	v.mu.Unlock()
 }
 
 // Config configures a DistributionManager.
@@ -379,7 +432,9 @@ func (m *Manager) runPublishWorker(ctx context.Context, publishQ chan pendingPub
 			if !ok {
 				return
 			}
-			if err := m.publishMeta(ctx, p.vaultID, p.meta, p.segID, p.path); err != nil && !errors.Is(err, ErrUnknownVault) {
+			if err := m.publishMeta(ctx, p.vaultID, p.meta, p.segID, p.path); err != nil &&
+				!errors.Is(err, ErrUnknownVault) &&
+				!errors.Is(err, errPublishBytesMissing) {
 				pCopy := p
 				time.AfterFunc(publishRetryInterval, func() {
 					m.enqueuePublish(ctx, publishQ, pCopy)
@@ -475,10 +530,7 @@ func (m *Manager) publishMeta(ctx context.Context, vaultID glid.GLID, meta Metad
 	if !ok {
 		return ErrUnknownVault
 	}
-	if err := v.publisher.Publish(ctx, meta); err != nil {
-		return err
-	}
-	return v.finalizeAfterPublish(segID, path)
+	return v.publishStaged(ctx, meta, segID, path)
 }
 
 func (m *Manager) onPull(req PullRequest) {

@@ -14,4 +14,7 @@ func TestVaultControlPlaneGroupID_format(t *testing.T) {
 	if got != want {
 		t.Fatalf("VaultControlPlaneGroupID = %q, want %q", got, want)
 	}
+	if !IsVaultControlPlaneGroupID(got) {
+		t.Fatalf("IsVaultControlPlaneGroupID(%q) = false", got)
+	}
 }

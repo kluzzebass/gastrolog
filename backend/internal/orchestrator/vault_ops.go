@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"gastrolog/internal/glid"
 	"sync"
-	"time"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
@@ -591,15 +590,50 @@ func (o *Orchestrator) runAfterVaultCtlRestore(vaultID glid.GLID) {
 	if t != nil && t.Reconciler != nil && liveFSM != nil {
 		t.Reconciler.ReconcileFromSnapshot(liveFSM)
 	}
-	if o.pipeline != nil {
-		if err := o.rewirePipelineAfterCtlRestore(vaultID); err != nil {
-			o.vaultOpsLogger.Warn("vault-ctl after-restore: pipeline rewire failed",
-				"vault", vaultID, "error", err)
-		}
+	if o.pipeline != nil && o.isPipelineIngestVault(vaultID) {
 		o.recoverPipelineVaultAfterRestore(vaultID)
 	}
 	o.vaultOpsLogger.Info("vault-ctl after-restore reconcile complete",
 		"vault", vaultID, "has_instance", t != nil)
+}
+
+// onVaultCtlLeadGained wakes the chunking worker when this home becomes the
+// vault-ctl leader. Planning and build passes run in the worker loop.
+func (o *Orchestrator) onVaultCtlLeadGained(vaultID glid.GLID) {
+	if o.pipeline == nil || !o.isPipelineIngestVault(vaultID) {
+		return
+	}
+	o.pipeline.NotifyChunkingVault(vaultID)
+}
+
+// reconcilePipelineAfterCtlRestore rebinds pipeline managers to the live vault-ctl
+// FSM after snapshot restore and runs chunk recover. Returns ErrUnknownVault when
+// pipeline has not registered the vault on this home yet — caller must defer.
+func (o *Orchestrator) reconcilePipelineAfterCtlRestore(vaultID glid.GLID) error {
+	if o.pipeline == nil || !o.isPipelineIngestVault(vaultID) {
+		return nil
+	}
+	if err := o.rewirePipelineAfterCtlRestore(vaultID); err != nil {
+		return err
+	}
+	if err := o.pipeline.RecoverVault(context.Background(), vaultID); err != nil {
+		return err
+	}
+	o.pipeline.NotifyChunkingVault(vaultID)
+	return nil
+}
+
+// finishPendingPipelineCtlRestore completes a deferred ctl-restore reconcile after
+// pipeline RegisterVault. Vault-ctl Restore can finish before ApplyConfig registers
+// pipeline homes; without this hook rewire never runs against the live FSM.
+func (o *Orchestrator) finishPendingPipelineCtlRestore(vaultID glid.GLID) {
+	if _, ok := o.pendingPipelineCtlRestore.LoadAndDelete(vaultID); !ok {
+		return
+	}
+	if err := o.reconcilePipelineAfterCtlRestore(vaultID); err != nil {
+		o.vaultOpsLogger.Warn("pipeline ctl-restore reconcile after register failed",
+			"vault", vaultID, "error", err)
+	}
 }
 
 // rewirePipelineAfterCtlRestore rebinds chunking/collection to the live vault-ctl
@@ -626,7 +660,7 @@ func (o *Orchestrator) rewirePipelineAfterCtlRestore(vaultID glid.GLID) error {
 			}
 			return fsm
 		}
-		cfg.Log = &segmentLogReader{lookup: lookup, localNodeID: o.localNodeID}
+		cfg.Log = &segmentLogReader{lookup: lookup, localNodeID: o.localNodeID, vaultRoot: root}
 		cfg.Pull = &segmentPullClient{
 			lookup:      lookup,
 			puller:      o.segmentPuller,
@@ -639,29 +673,13 @@ func (o *Orchestrator) rewirePipelineAfterCtlRestore(vaultID glid.GLID) error {
 }
 
 func (o *Orchestrator) recoverPipelineVaultAfterRestore(vaultID glid.GLID) {
-	const attempts = 8
-	const delay = 500 * time.Millisecond
-	var lastRewire, lastRecover error
-	for attempt := range attempts {
-		lastRewire = o.rewirePipelineAfterCtlRestore(vaultID)
-		lastRecover = o.pipeline.RecoverVault(context.Background(), vaultID)
-		if lastRewire == nil && lastRecover == nil {
+	if err := o.reconcilePipelineAfterCtlRestore(vaultID); err != nil {
+		if errors.Is(err, chunking.ErrUnknownVault) {
+			o.pendingPipelineCtlRestore.Store(vaultID, struct{}{})
 			return
 		}
-		if lastRewire != nil {
-			o.vaultOpsLogger.Warn("vault-ctl after-restore: pipeline rewire failed",
-				"vault", vaultID, "error", lastRewire, "attempt", attempt+1)
-		}
-		if lastRecover != nil && !errors.Is(lastRecover, chunking.ErrUnknownVault) {
-			o.vaultOpsLogger.Warn("vault-ctl after-restore: pipeline recover failed",
-				"vault", vaultID, "error", lastRecover)
-			return
-		}
-		time.Sleep(delay)
-	}
-	if lastRecover != nil && errors.Is(lastRecover, chunking.ErrUnknownVault) {
-		o.vaultOpsLogger.Warn("vault-ctl after-restore: pipeline recover failed",
-			"vault", vaultID, "error", lastRecover)
+		o.vaultOpsLogger.Warn("vault-ctl after-restore: pipeline reconcile failed",
+			"vault", vaultID, "error", err)
 	}
 }
 
@@ -783,6 +801,12 @@ func (o *Orchestrator) ImportToVault(ctx context.Context, vaultID glid.GLID, chu
 // empty, the local instance is targeted unconditionally. Used by same-node
 // replication to route to specific file storage instances.
 func (o *Orchestrator) ImportToInstanceStorage(ctx context.Context, vaultID glid.GLID, storageID string, chunkID chunk.ChunkID, next chunk.RecordIterator) error {
+	if o.isPipelineIngestVault(vaultID) {
+		drainIterator(next)
+		o.vaultOpsLogger.Debug("replication: record-stream import refused for pipeline vault",
+			"vault", vaultID, "chunk", chunkID)
+		return nil
+	}
 	// Look up the instance under lock, then release BEFORE the import.
 	// ImportRecords reads from a network stream and can block — holding
 	// RLock during a network read starves writers (FSM dispatcher) and

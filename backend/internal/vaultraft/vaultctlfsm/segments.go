@@ -162,6 +162,9 @@ func (f *FSM) applyPublishCompletedSegment(c *gastrologv1.PublishCompletedSegmen
 	if err != nil {
 		return err
 	}
+	if _, released := f.releasedSegments[entry.SegmentID]; released {
+		return nil
+	}
 	if existing, ok := f.completedSegments[entry.SegmentID]; ok {
 		if completedSegmentEqual(entry, *existing) {
 			return nil

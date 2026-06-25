@@ -48,6 +48,9 @@ func (o *Orchestrator) ScheduleCatchup(vaultID glid.GLID, followerNodeIDs []stri
 	if found == nil || found.IsFollower {
 		return
 	}
+	if o.isPipelineIngestVault(vaultID) {
+		return
+	}
 	o.scheduleCatchup(vaultID, followerNodeIDs)
 }
 
@@ -95,6 +98,9 @@ func (o *Orchestrator) scheduleCatchupForNode(vaultID glid.GLID, nodeID string, 
 // to a follower node. Each chunk's records are streamed via TransferRecords,
 // producing an identical sealed chunk on the follower.
 func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID glid.GLID, nodeID string) error {
+	if o.isPipelineIngestVault(vaultID) {
+		return nil
+	}
 	vaultInst := o.findLocalVaultInstance(vaultID)
 	if vaultInst == nil {
 		return fmt.Errorf("vault %s not found", vaultID)
@@ -200,6 +206,9 @@ func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID glid.GLID, n
 // sweep to declare the chunks unrecoverable. See gastrolog-2dgvj for
 // the original (follower→leader) design.
 func (o *Orchestrator) CatchupSelectedChunks(ctx context.Context, vaultID glid.GLID, requesterNodeID string, chunkIDs []chunk.ChunkID) (uint32, error) {
+	if o.isPipelineIngestVault(vaultID) {
+		return 0, nil
+	}
 	o.mu.RLock()
 	vault := o.vaults[vaultID]
 	o.mu.RUnlock()
@@ -259,7 +268,7 @@ func (o *Orchestrator) CatchupSelectedChunks(ctx context.Context, vaultID glid.G
 	}
 
 	if len(eligible) == 0 {
-		o.replicationLogger.Info("replica catchup: no eligible chunks to push",
+		o.replicationLogger.Debug("replica catchup: no eligible chunks to push",
 			"vault", vaultID, "requester", requesterNodeID,
 			"requested", len(chunkIDs))
 		return 0, nil

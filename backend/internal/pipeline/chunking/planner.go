@@ -14,8 +14,9 @@ type ManifestSnapshot struct {
 	TotalRecords uint64
 	TotalBytes   uint64
 	// Bounds carries running WriteTS/IngestTS/SourceTS extrema committed on
-	// the vault-ctl manifest. Rotation MaxAge uses Bounds.WriteStart (WriteTS
-	// of the first record planned into the chunk).
+	// the vault-ctl manifest. MaxAge rotation uses manifestMaxAgeStart (see
+	// rotateTrigger): wall clock since OpenedAt when set, else WriteStart for
+	// tests and legacy snapshots without OpenedAt.
 	Bounds vaultctlfsm.ManifestTimeBounds
 	Refs   []ManifestRef
 }
@@ -151,9 +152,16 @@ const (
 	rotateTriggerBytes   = "bytes"
 )
 
-// manifestFirstChunkWrite is the WriteTS of the first record committed on
-// the open chunk manifest — the start of the chunk's planned span.
-func manifestFirstChunkWrite(m ManifestSnapshot) time.Time {
+// manifestMaxAgeStart is the wall-clock anchor for MaxAge rotation. When the
+// manifest has OpenedAt (always true for FSM-driven pipeline chunks), age is
+// measured from manifest open time so backlog catch-up does not instantly seal
+// slivers just because the first planned records carry old WriteTS. When
+// OpenedAt is unset (unit tests), fall back to Bounds.WriteStart so age still
+// reflects data span rather than WriteEnd on the latest ref.
+func manifestMaxAgeStart(m ManifestSnapshot) time.Time {
+	if !m.OpenedAt.IsZero() {
+		return m.OpenedAt
+	}
 	return m.Bounds.WriteStart
 }
 
@@ -162,8 +170,8 @@ func (p ManifestRotationPolicy) rotateTrigger(m ManifestSnapshot, cronDue bool, 
 		return rotateTriggerCron, true
 	}
 	if p.MaxAge > 0 && !now.IsZero() && manifestHasContent(m) {
-		firstWrite := manifestFirstChunkWrite(m)
-		if !firstWrite.IsZero() && now.Sub(firstWrite) >= p.MaxAge {
+		ageStart := manifestMaxAgeStart(m)
+		if !ageStart.IsZero() && now.Sub(ageStart) >= p.MaxAge {
 			return rotateTriggerAge, true
 		}
 	}

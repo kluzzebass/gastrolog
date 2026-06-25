@@ -48,6 +48,21 @@ type VaultRegistry interface {
 	IndexReader() IndexReader
 }
 
+// SearchChunkLister supplies the chunk metadata set for query and histogram
+// discovery. When implemented by the registry, the query engine includes
+// pipeline active and sealing chunks (manifest-backed, no GLCB yet) in
+// addition to sealed manifest entries and the legacy chunk-manager active
+// head. Reader() remains sealed-only for retention and integrity surfaces.
+type SearchChunkLister interface {
+	SearchChunkMetas(vaultID glid.GLID) []chunk.ChunkMeta
+}
+
+// PipelineChunkOpener opens a record cursor for pipeline active or sealing
+// chunks that have no registered GLCB yet (manifest segment-span reads).
+type PipelineChunkOpener interface {
+	OpenPipelineChunkCursor(vaultID glid.GLID, chunkID chunk.ChunkID) (chunk.RecordCursor, error)
+}
+
 // Reader exposes the FSM-projected view of chunk manifests. Every caller
 // that needs sealed-chunk metadata routes through this interface instead
 // of reaching into chunk.Manager.metas / cloudIdx / chunkMeta — the FSM

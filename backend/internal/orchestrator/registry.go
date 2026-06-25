@@ -223,6 +223,14 @@ func (r *searchReadyRegistry) IndexManager(key glid.GLID) index.IndexManager {
 
 func (r *searchReadyRegistry) Reader() manifest.Reader { return r.o.ManifestReader() }
 
+func (r *searchReadyRegistry) SearchChunkMetas(vaultID glid.GLID) []chunk.ChunkMeta {
+	return r.o.SearchChunkMetasForVault(vaultID)
+}
+
+func (r *searchReadyRegistry) OpenPipelineChunkCursor(vaultID glid.GLID, chunkID chunk.ChunkID) (chunk.RecordCursor, error) {
+	return r.o.OpenPipelineChunkCursor(vaultID, chunkID)
+}
+
 func (r *searchReadyRegistry) IndexReader() manifest.IndexReader { return r.o.IndexReader() }
 
 // LeaderVaultQueryEngine returns a query engine that only searches leader
@@ -304,6 +312,14 @@ func (r *localVaultRegistry) QueryEngine(_ glid.GLID) *query.Engine { return nil
 
 func (r *localVaultRegistry) Reader() manifest.Reader { return r.o.ManifestReader() }
 
+func (r *localVaultRegistry) SearchChunkMetas(vaultID glid.GLID) []chunk.ChunkMeta {
+	return r.o.SearchChunkMetasForVault(vaultID)
+}
+
+func (r *localVaultRegistry) OpenPipelineChunkCursor(vaultID glid.GLID, chunkID chunk.ChunkID) (chunk.RecordCursor, error) {
+	return r.o.OpenPipelineChunkCursor(vaultID, chunkID)
+}
+
 func (r *localVaultRegistry) IndexReader() manifest.IndexReader { return r.o.IndexReader() }
 
 // leaderVaultRegistry provides a flat view of all leader vaults. Each
@@ -366,6 +382,14 @@ func (r *leaderVaultRegistry) QueryEngine(_ glid.GLID) *query.Engine { return ni
 
 func (r *leaderVaultRegistry) Reader() manifest.Reader { return r.o.ManifestReader() }
 
+func (r *leaderVaultRegistry) SearchChunkMetas(vaultID glid.GLID) []chunk.ChunkMeta {
+	return r.o.SearchChunkMetasForVault(vaultID)
+}
+
+func (r *leaderVaultRegistry) OpenPipelineChunkCursor(vaultID glid.GLID, chunkID chunk.ChunkID) (chunk.RecordCursor, error) {
+	return r.o.OpenPipelineChunkCursor(vaultID, chunkID)
+}
+
 func (r *leaderVaultRegistry) IndexReader() manifest.IndexReader { return r.o.IndexReader() }
 
 // LeaderQueryEngineForVault returns a query engine scoped to the
@@ -423,5 +447,19 @@ func (r *singleVaultRegistry) IndexManager(key glid.GLID) index.IndexManager {
 func (r *singleVaultRegistry) QueryEngine(_ glid.GLID) *query.Engine { return nil }
 
 func (r *singleVaultRegistry) Reader() manifest.Reader { return r.o.ManifestReader() }
+
+func (r *singleVaultRegistry) SearchChunkMetas(vaultID glid.GLID) []chunk.ChunkMeta {
+	if vaultID == r.vaultID {
+		return r.o.SearchChunkMetasForVault(vaultID)
+	}
+	return nil
+}
+
+func (r *singleVaultRegistry) OpenPipelineChunkCursor(vaultID glid.GLID, chunkID chunk.ChunkID) (chunk.RecordCursor, error) {
+	if vaultID == r.vaultID {
+		return r.o.OpenPipelineChunkCursor(vaultID, chunkID)
+	}
+	return nil, chunk.ErrChunkNotFound
+}
 
 func (r *singleVaultRegistry) IndexReader() manifest.IndexReader { return r.o.IndexReader() }

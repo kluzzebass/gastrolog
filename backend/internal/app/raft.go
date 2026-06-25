@@ -15,6 +15,7 @@ import (
 	"gastrolog/internal/glid"
 	"gastrolog/internal/home"
 	"gastrolog/internal/logging"
+	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/raftwal"
 	"gastrolog/internal/system"
 	"gastrolog/internal/system/raftfsm"
@@ -265,7 +266,7 @@ func newRaftConfig(nodeID string, logger *slog.Logger) *hraft.Config {
 	// Wire Raft's internal hclog logger to the application's slog pipeline.
 	// This makes election events, heartbeat timeouts, and state transitions
 	// visible through the normal logging system (component "raft").
-	raftLogger := logging.NewHclogAdapter(compRaft.Apply(logger))
+	raftLogger := logging.NewRaftGroupHclog(compRaft.Apply(logger), raftgroup.ClusterControlPlaneGroupID)
 	// Suppress the noisy "entering follower state" log that fires on every
 	// heartbeat timeout cycle, even when the node remains a follower.
 	filtered := logging.FilterHclogMessages(raftLogger, "entering follower state")

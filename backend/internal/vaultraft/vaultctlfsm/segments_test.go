@@ -301,3 +301,65 @@ func TestListCompletedSegmentsSortOrder(t *testing.T) {
 		t.Fatalf("order = [%s, %s]", list[0].SegmentID, list[1].SegmentID)
 	}
 }
+
+func TestPublishCompletedSegmentIgnoredAfterRelease(t *testing.T) {
+	t.Parallel()
+	fsm := New()
+	now := time.Unix(0, 1_700_000_000_000).UTC()
+	segID := glid.New()
+	entry := CompletedSegmentEntry{
+		SegmentID:     segID,
+		RecordCount:   10,
+		ByteSize:      512,
+		FirstIngestTS: now,
+		LastIngestTS:  now,
+		Checksum:      1,
+		OriginNodeID:  "node-a",
+		PublishedAt:   now,
+	}
+	applyCmd(t, fsm, MarshalPublishCompletedSegment(entry))
+	applyCmd(t, fsm, MarshalReleaseSegments([]glid.GLID{segID}))
+
+	// Stale distribution publish after ReleaseSegments must not resurrect registry entry.
+	applyCmd(t, fsm, MarshalPublishCompletedSegment(entry))
+	if got := fsm.GetCompletedSegment(segID); got != nil {
+		t.Fatalf("GetCompletedSegment = %+v, want nil after release + stale publish", got)
+	}
+	if len(fsm.ListCompletedSegments()) != 0 {
+		t.Fatalf("ListCompletedSegments = %d, want 0", len(fsm.ListCompletedSegments()))
+	}
+}
+
+func TestReleasedSegmentSnapshotRoundTrip(t *testing.T) {
+	t.Parallel()
+	src := New()
+	now := time.Unix(0, 1_700_000_000_000).UTC()
+	segID := glid.New()
+	applyCmd(t, src, MarshalPublishCompletedSegment(CompletedSegmentEntry{
+		SegmentID:     segID,
+		RecordCount:   1,
+		ByteSize:      1,
+		FirstIngestTS: now,
+		LastIngestTS:  now,
+		Checksum:      1,
+		PublishedAt:   now,
+	}))
+	applyCmd(t, src, MarshalReleaseSegments([]glid.GLID{segID}))
+
+	snap := src.SnapshotProto()
+	dst := New()
+	dst.RestoreProto(snap)
+
+	applyCmd(t, dst, MarshalPublishCompletedSegment(CompletedSegmentEntry{
+		SegmentID:     segID,
+		RecordCount:   1,
+		ByteSize:      1,
+		FirstIngestTS: now,
+		LastIngestTS:  now,
+		Checksum:      1,
+		PublishedAt:   now,
+	}))
+	if dst.GetCompletedSegment(segID) != nil {
+		t.Fatal("released segment tombstone must survive snapshot restore")
+	}
+}

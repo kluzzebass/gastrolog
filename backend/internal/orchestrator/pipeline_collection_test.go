@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/collection"
 	"gastrolog/internal/pipeline/distribution"
@@ -400,6 +401,108 @@ func TestPipelineSegmentLogReaderSkipsHeldSegments(t *testing.T) {
 	}
 	if len(assigned) != 1 || assigned[0].SegmentID != segOpen {
 		t.Fatalf("Roll = %+v, want only %s (the unheld segment)", assigned, segOpen)
+	}
+}
+
+// TestPipelineSegmentLogReaderReassignsHeldWhenLocalMissing: a holder receipt
+// without local bytes must be re-assigned when chunking still needs records.
+func TestPipelineSegmentLogReaderReassignsHeldWhenLocalMissing(t *testing.T) {
+	fsm := vaultctlfsm.New()
+	applier := &fsmApplier{fsm: fsm}
+	vaultID := glid.New()
+	segID := glid.New()
+	root := t.TempDir()
+
+	if err := applier.Apply(vaultctlfsm.MarshalPublishCompletedSegment(vaultctlfsm.CompletedSegmentEntry{
+		SegmentID:    segID,
+		RecordCount:  10,
+		OriginNodeID: testOriginNode,
+	})); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if err := applier.Apply(vaultctlfsm.MarshalAckSegmentHolder(segID, testHomeNode)); err != nil {
+		t.Fatalf("ack holder: %v", err)
+	}
+	chunkID := chunk.NewChunkID()
+	if err := applier.Apply(vaultctlfsm.MarshalOpenChunkManifest(chunkID, time.Unix(0, 1_700_000_000_000).UTC())); err != nil {
+		t.Fatalf("open manifest: %v", err)
+	}
+	// Partial chunking: resume at 5, bytes purged from head/.
+	if err := applier.Apply(vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
+		SegmentID: segID, FirstRecordNumber: 0, LastRecordNumber: 4,
+		SliceBytes: 50, RefAddedAt: time.Unix(0, 1_700_000_000_000).UTC(),
+	})); err != nil {
+		t.Fatalf("add ref: %v", err)
+	}
+
+	reader := &segmentLogReader{
+		lookup:      func() *vaultctlfsm.FSM { return fsm },
+		localNodeID: testHomeNode,
+		vaultRoot:   root,
+	}
+	assigned, err := reader.Roll(context.Background(), vaultID)
+	if err != nil {
+		t.Fatalf("Roll: %v", err)
+	}
+	if len(assigned) != 1 || assigned[0].SegmentID != segID {
+		t.Fatalf("Roll = %+v, want %s reassigned for re-pull", assigned, segID)
+	}
+}
+
+// TestPipelineSegmentLogReaderReassignsWhenSealedManifestNeedsBytes: when the
+// planner fully consumed a segment but GLCB build still references it in the
+// sealed-pending manifest, Roll must re-assign the segment for re-pull even
+// though the resume cursor reached RecordCount and a holder receipt exists.
+func TestPipelineSegmentLogReaderReassignsWhenSealedManifestNeedsBytes(t *testing.T) {
+	fsm := vaultctlfsm.New()
+	applier := &fsmApplier{fsm: fsm}
+	vaultID := glid.New()
+	segID := glid.New()
+	root := t.TempDir()
+	const recordCount uint32 = 10
+
+	if err := applier.Apply(vaultctlfsm.MarshalPublishCompletedSegment(vaultctlfsm.CompletedSegmentEntry{
+		SegmentID:    segID,
+		RecordCount:  recordCount,
+		OriginNodeID: testOriginNode,
+	})); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if err := applier.Apply(vaultctlfsm.MarshalAckSegmentHolder(segID, testHomeNode)); err != nil {
+		t.Fatalf("ack holder: %v", err)
+	}
+	chunkID := chunk.NewChunkID()
+	openedAt := time.Unix(0, 1_700_000_000_000).UTC()
+	if err := applier.Apply(vaultctlfsm.MarshalOpenChunkManifest(chunkID, openedAt)); err != nil {
+		t.Fatalf("open manifest: %v", err)
+	}
+	if err := applier.Apply(vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
+		SegmentID:         segID,
+		FirstRecordNumber: 0,
+		LastRecordNumber:  recordCount - 1,
+		SliceBytes:        100,
+		RefAddedAt:        openedAt,
+	})); err != nil {
+		t.Fatalf("add ref: %v", err)
+	}
+	if err := applier.Apply(vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, openedAt.Add(time.Minute))); err != nil {
+		t.Fatalf("seal open manifest: %v", err)
+	}
+	if next, ok := fsm.ResumeRecordNumber(segID); !ok || next != recordCount {
+		t.Fatalf("ResumeRecordNumber = (%d, %v), want (%d, true)", next, ok, recordCount)
+	}
+
+	reader := &segmentLogReader{
+		lookup:      func() *vaultctlfsm.FSM { return fsm },
+		localNodeID: testHomeNode,
+		vaultRoot:   root,
+	}
+	assigned, err := reader.Roll(context.Background(), vaultID)
+	if err != nil {
+		t.Fatalf("Roll: %v", err)
+	}
+	if len(assigned) != 1 || assigned[0].SegmentID != segID {
+		t.Fatalf("Roll = %+v, want [%s] for sealed-manifest build recovery", assigned, segID)
 	}
 }
 

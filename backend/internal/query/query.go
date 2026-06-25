@@ -565,28 +565,9 @@ func sortChunks(out []chunk.ChunkMeta, orderBy OrderBy, reverse bool) {
 // Unsealed chunks are scanned sequentially without indexes.
 func (e *Engine) searchChunkWithRef(ctx context.Context, q Query, vaultID glid.GLID, meta chunk.ChunkMeta, startPos *uint64) iter.Seq2[recordWithRef, error] {
 	return func(yield func(recordWithRef, error) bool) {
-		cm, im := e.getVaultManagers(vaultID)
-		if cm == nil {
-			yield(recordWithRef{}, errors.New("vault not found: "+vaultID.String()))
-			return
-		}
-
-		cursor, err := cm.OpenCursor(meta.ID)
+		cursor, err := e.openSearchChunkCursor(vaultID, meta)
 		if err != nil {
-			// FSM-vs-local-cm divergence is a real consistency issue
-			// (gastrolog-3ukgz) but not a per-query failure: the cluster
-			// fan-out asks every node, so peers that DO have the chunk
-			// fill in the records. Streaming a stream-fatal error from
-			// one node would abort the whole client query (records +
-			// histogram), which is worse than missing records from
-			// chunks no node has. Log every skip so operators see the
-			// stale FSM state accumulating, and surface it via metrics
-			// rather than killing the user's query.
-			if errors.Is(err, chunk.ErrChunkNotFound) {
-				if e.logger != nil {
-					e.logger.Warn("chunk in FSM but missing from local cm — skipping (gastrolog-3ukgz)",
-						"vault", vaultID, "chunk", meta.ID, "sealed", meta.Sealed, "cloud_backed", meta.CloudBacked)
-				}
+			if errors.Is(err, errSkipMissingLocalChunk) {
 				return
 			}
 			yield(recordWithRef{}, err)
@@ -599,8 +580,7 @@ func (e *Engine) searchChunkWithRef(ctx context.Context, q Query, vaultID glid.G
 			return
 		}
 
-		// Try to use indexes for sealed chunks, fall back to sequential scan
-		// if indexes aren't available yet (chunk sealed but not yet indexed).
+		cm, im := e.getVaultManagers(vaultID)
 		scanner, err := e.buildScannerWithManagers(ctx, cursor, q, vaultID, meta, startPos, cm, im)
 		if err != nil {
 			yield(recordWithRef{}, err)
@@ -619,6 +599,35 @@ func (e *Engine) searchChunkWithRef(ctx context.Context, q Query, vaultID glid.G
 			}
 		}
 	}
+}
+
+var errSkipMissingLocalChunk = errors.New("chunk in FSM but missing from local cm")
+
+func (e *Engine) openSearchChunkCursor(vaultID glid.GLID, meta chunk.ChunkMeta) (chunk.RecordCursor, error) {
+	cm, _ := e.getVaultManagers(vaultID)
+	if cm == nil {
+		return nil, errors.New("vault not found: " + vaultID.String())
+	}
+
+	cursor, err := cm.OpenCursor(meta.ID)
+	if err != nil {
+		if errors.Is(err, chunk.ErrChunkNotFound) && e.registry != nil {
+			if pco, ok := e.registry.(manifest.PipelineChunkOpener); ok {
+				cursor, err = pco.OpenPipelineChunkCursor(vaultID, meta.ID)
+			}
+		}
+	}
+	if err != nil {
+		if errors.Is(err, chunk.ErrChunkNotFound) {
+			if e.logger != nil {
+				e.logger.Warn("chunk in FSM but missing from local cm — skipping (gastrolog-3ukgz)",
+					"vault", vaultID, "chunk", meta.ID, "sealed", meta.Sealed, "cloud_backed", meta.CloudBacked)
+			}
+			return nil, errSkipMissingLocalChunk
+		}
+		return nil, err
+	}
+	return cursor, nil
 }
 
 // positionCursor sets the cursor to the correct starting position for the query.
@@ -688,8 +697,19 @@ func (e *Engine) buildScannerWithManagers(ctx context.Context, cursor chunk.Reco
 		b.addFilter(sourceTimeFilter(q.SourceStart, q.SourceEnd))
 	}
 
+	// Active/sealing chunks without a TS rank index (pipeline manifest reads,
+	// legacy actives before the B+ tree is wired) scan sequentially with
+	// runtime filters — same path Explain labels "buffer-sort".
+	if !meta.Sealed {
+		view := tsIndexViewForChunk(cm, im, q.OrderBy)
+		if !chunkHasTSIndex(view, meta.ID) {
+			return b.build(ctx, cursor, q), nil
+		}
+	}
+
 	// Records are stored in physical write order but must be yielded in
-	// IngestTS or SourceTS order. Always go through TS-ordered scanning.
+	// IngestTS or SourceTS order. Sealed chunks and actives with a TS index
+	// go through rank-ordered scanning.
 	return e.buildTSOrderedScanner(ctx, cursor, q, b, meta, startPos, cm, im)
 }
 

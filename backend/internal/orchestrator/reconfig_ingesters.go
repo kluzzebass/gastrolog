@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"errors"
 	"fmt"
+	"maps"
 
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/ingestion"
@@ -20,7 +21,10 @@ type IngesterDesired struct {
 	Name    string
 	Type    string
 	Passive bool
-	Build   func() (Ingester, error)
+	// Params is the config-store parameter snapshot. A change triggers rebuild
+	// even when Name, Type, and Passive are unchanged.
+	Params map[string]string
+	Build  func() (Ingester, error)
 }
 
 // ReconcileIngesters drives the running ingester set toward desired. It is the
@@ -67,8 +71,13 @@ func (o *Orchestrator) reconcileIngestersLocked(desired []IngesterDesired) error
 	// Add or rebuild changed ingesters.
 	var buildErr error
 	for id, d := range want {
-		meta := ingesterInfo{Name: d.Name, Type: d.Type, Passive: d.Passive}
-		if _, had := o.ingesters[id]; had && o.ingesterMeta[id] == meta {
+		meta := ingesterInfo{
+			Name:    d.Name,
+			Type:    d.Type,
+			Passive: d.Passive,
+			Params:  cloneIngesterParams(d.Params),
+		}
+		if _, had := o.ingesters[id]; had && o.ingesterMeta[id].equal(meta) {
 			continue // unchanged — keep the running instance and cached adapter
 		}
 		ing, err := d.Build()
@@ -83,6 +92,20 @@ func (o *Orchestrator) reconcileIngestersLocked(desired []IngesterDesired) error
 		return errors.Join(buildErr, err)
 	}
 	return buildErr
+}
+
+func cloneIngesterParams(p map[string]string) map[string]string {
+	if len(p) == 0 {
+		return nil
+	}
+	return maps.Clone(p)
+}
+
+func (i ingesterInfo) equal(other ingesterInfo) bool {
+	return i.Name == other.Name &&
+		i.Type == other.Type &&
+		i.Passive == other.Passive &&
+		maps.Equal(i.Params, other.Params)
 }
 
 // setIngesterLocked installs (or replaces) an ingester in the desired set and

@@ -219,7 +219,7 @@ func (o *Orchestrator) archivalExpire(vaultInst *VaultInstance, id chunk.ChunkID
 				"chunk", id.String(), "error", err)
 			return
 		}
-		o.retentionLogger.Info("archival sweep: expired chunk",
+		o.retentionLogger.Debug("archival sweep: expired chunk",
 			"chunk", id.String(), "age", age)
 		return
 	}
@@ -228,7 +228,7 @@ func (o *Orchestrator) archivalExpire(vaultInst *VaultInstance, id chunk.ChunkID
 			"chunk", id.String(), "error", err)
 		return
 	}
-	o.retentionLogger.Info("archival sweep: expired chunk",
+	o.retentionLogger.Debug("archival sweep: expired chunk",
 		"chunk", id.String(), "age", age)
 }
 

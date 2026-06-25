@@ -323,8 +323,15 @@ message VaultCtlSnapshot {
   repeated PendingDelete pending_deletes = 3;
   repeated CompletedSegmentEntry completed_segments = 4;
   OpenChunkManifestState open_chunk = 5;
-  OpenChunkManifestState sealed_manifest = 6;
+  // FIFO queue of sealed manifests awaiting local GLCB build on each home.
+  // Multiple entries let the leader rotate the open chunk while earlier
+  // chunks are still building without freezing ingest at rotation limits.
+  repeated OpenChunkManifestState sealed_manifests = 6;
   repeated SegmentResumeRecordNumber segment_resume = 7;
+  // Segment IDs dropped by ReleaseSegments. PublishCompletedSegment after
+  // release is ignored so a stale distribution publish cannot re-register
+  // metadata without bytes (permanent collection/chunking wedge).
+  repeated bytes released_segment_ids = 8;
 }
 
 // VaultGroupSnapshot is the snapshot of the whole vault-ctl Raft group: one
