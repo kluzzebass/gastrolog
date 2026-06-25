@@ -219,3 +219,39 @@ func TestQueryOpenChunkNilManifest(t *testing.T) {
 		t.Fatalf("err = %v, want ErrNoOpenChunkManifest", err)
 	}
 }
+
+func TestReadManifestRecordAt(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	segID := glid.New()
+	vaultID := glid.New()
+	home := t.TempDir()
+	writeHeadSegment(t, home, segID, vaultID, []recordForSeg{
+		{0, base, "a"},
+		{1, base.Add(time.Second), "b"},
+	})
+
+	manifest := &vaultctlfsm.OpenChunkManifest{
+		ChunkID:      chunk.NewChunkID(),
+		TotalRecords: 2,
+		Refs: []vaultctlfsm.OpenChunkSegmentRef{
+			{SegmentID: segID, FirstRecordNumber: 0, LastRecordNumber: 1},
+		},
+	}
+	locate := mapLocator{segID: paths.HeadSegment(home, segID)}
+
+	last, err := chunking.ReadManifestRecordAt(manifest, locate, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(last.Raw) != "b" {
+		t.Fatalf("last record = %q, want b", last.Raw)
+	}
+	first, err := chunking.ReadManifestRecordAt(manifest, locate, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(first.Raw) != "a" {
+		t.Fatalf("first record = %q, want a", first.Raw)
+	}
+}

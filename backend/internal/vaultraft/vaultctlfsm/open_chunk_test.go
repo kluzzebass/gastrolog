@@ -434,3 +434,43 @@ func TestDiscardRejectsNonemptyManifest(t *testing.T) {
 		t.Fatal("expected error discarding non-empty manifest")
 	}
 }
+
+func TestListIncludingPipelineManifestIngestBounds(t *testing.T) {
+	t.Parallel()
+	fsm := New()
+	chunkID := testChunkID(0x63)
+	openedAt := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	ingestStart := openedAt.Add(-time.Minute)
+	ingestEnd := openedAt.Add(time.Minute)
+	segID := glid.New()
+
+	applyCmd(t, fsm, MarshalOpenChunkManifest(chunkID, openedAt))
+	applyCmd(t, fsm, MarshalAddOpenChunkSegmentRef(chunkID, OpenChunkSegmentRef{
+		SegmentID:         segID,
+		FirstRecordNumber: 0,
+		LastRecordNumber:  9,
+		SliceBytes:        512,
+		RefAddedAt:        openedAt,
+		Bounds: ManifestTimeBounds{
+			WriteStart:  openedAt,
+			WriteEnd:    openedAt.Add(time.Second),
+			IngestStart: ingestStart,
+			IngestEnd:   ingestEnd,
+		},
+	}))
+	applyCmd(t, fsm, MarshalSealOpenChunkManifest(chunkID, openedAt.Add(2*time.Minute)))
+
+	for _, e := range fsm.ListIncludingPipelineManifest() {
+		if e.ID != chunkID {
+			continue
+		}
+		if e.State != chunk.ChunkStateSealing {
+			t.Fatalf("state = %v, want Sealing", e.State)
+		}
+		if !e.IngestStart.Equal(ingestStart) || !e.IngestEnd.Equal(ingestEnd) {
+			t.Fatalf("ingest bounds = %v..%v, want %v..%v", e.IngestStart, e.IngestEnd, ingestStart, ingestEnd)
+		}
+		return
+	}
+	t.Fatal("sealing chunk missing from ListIncludingPipelineManifest")
+}

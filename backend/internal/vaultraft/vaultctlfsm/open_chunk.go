@@ -341,7 +341,7 @@ func (f *FSM) ensureManifestChunkEntryLocked(m *OpenChunkManifest, state chunk.C
 	id := m.ChunkID
 	f.clearStaleSealTombstoneLocked(id)
 	if e := f.chunks[id]; e != nil {
-		if e.State == chunk.ChunkStateActive && state != chunk.ChunkStateActive {
+		if e.State != chunk.ChunkStateSealed {
 			e.State = state
 		}
 		e.RecordCount = int64(m.TotalRecords) //nolint:gosec // G115: manifest totals fit in int64 for chunk metadata

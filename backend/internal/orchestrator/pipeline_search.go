@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"iter"
+	"os"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
@@ -19,7 +20,6 @@ func (o *Orchestrator) SearchChunkMetasForVault(vaultID glid.GLID) []chunk.Chunk
 		out := make([]chunk.ChunkMeta, 0, len(entries))
 		for _, e := range entries {
 			m := e.ToChunkMeta()
-			o.overlayPipelineChunkMetaBounds(vaultID, &m)
 			out = append(out, m)
 		}
 		return out
@@ -42,9 +42,8 @@ func (o *Orchestrator) SearchChunkMetasForVault(vaultID glid.GLID) []chunk.Chunk
 }
 
 // OpenPipelineChunkCursor streams records from a pipeline active or sealing
-// chunk via manifest-listed segment spans (direction D). Returns
-// ErrChunkNotFound when the chunk is not an open/sealed manifest on this
-// vault or no local segment refs resolve.
+// chunk. When a local GLCB exists it is opened for indexed seek/reverse reads;
+// otherwise records come from manifest-listed segment spans.
 func (o *Orchestrator) OpenPipelineChunkCursor(vaultID glid.GLID, chunkID chunk.ChunkID) (chunk.RecordCursor, error) {
 	if !o.isPipelineIngestVault(vaultID) {
 		return nil, chunk.ErrChunkNotFound
@@ -53,34 +52,67 @@ func (o *Orchestrator) OpenPipelineChunkCursor(vaultID glid.GLID, chunkID chunk.
 	if manifest == nil || len(manifest.Refs) == 0 {
 		return nil, chunk.ErrChunkNotFound
 	}
+	if chunkRoot, ok := o.pipelineVaultChunkRoot(vaultID); ok {
+		glcbPath := chunking.ChunkGLCBPath(chunkRoot, chunkID)
+		if _, err := os.Stat(glcbPath); err == nil {
+			if cursor, err := chunking.OpenGLCBCursor(glcbPath, chunkID); err == nil {
+				return cursor, nil
+			}
+		}
+	}
 	root, err := o.originRoot(vaultID)
 	if err != nil {
 		return nil, err
 	}
+	locate := chunking.VaultSegmentLocator{Root: root}
 	seq, _, err := chunking.QueryOpenChunk(chunking.OpenChunkQueryInput{
 		Manifest: manifest,
-		Locate:   chunking.VaultSegmentLocator{Root: root},
+		Locate:   locate,
 	})
 	if err != nil {
 		return nil, err
 	}
-	return newManifestRecordCursor(chunkID, seq), nil
+	readAt := func(pos uint64) (chunk.Record, error) {
+		rec, err := chunking.ReadManifestRecordAt(manifest, locate, pos)
+		if err != nil {
+			return chunk.Record{}, err
+		}
+		cr := chunking.RecordToChunk(rec)
+		cr.Ref = chunk.RecordRef{ChunkID: chunkID, Pos: pos}
+		return cr, nil
+	}
+	return newManifestRecordCursor(chunkID, seq, manifest.TotalRecords, readAt), nil
 }
 
 // manifestRecordCursor adapts QueryOpenChunk's forward iterator to RecordCursor.
+// When readAt is set, reverse seeks and Prev avoid materializing the full chunk.
 type manifestRecordCursor struct {
-	chunkID chunk.ChunkID
-	pull    func() (chunk.Record, error, bool)
-	stop    func()
-	pos     uint64
-	buf     []chunk.Record
-	bufPos  int
-	useBuf  bool
+	chunkID      chunk.ChunkID
+	pull         func() (chunk.Record, error, bool)
+	stop         func()
+	pos          uint64
+	totalRecords uint64
+	readAt       func(pos uint64) (chunk.Record, error)
+	revPos       uint64
+	fwdExhausted bool
+	buf          []chunk.Record
+	bufPos       int
+	useBuf       bool
 }
 
-func newManifestRecordCursor(chunkID chunk.ChunkID, seq iter.Seq2[record.Record, error]) *manifestRecordCursor {
+func newManifestRecordCursor(
+	chunkID chunk.ChunkID,
+	seq iter.Seq2[record.Record, error],
+	totalRecords uint64,
+	readAt func(pos uint64) (chunk.Record, error),
+) *manifestRecordCursor {
 	pull, stop := iter.Pull2(seq)
-	c := &manifestRecordCursor{chunkID: chunkID, stop: stop}
+	c := &manifestRecordCursor{
+		chunkID:      chunkID,
+		stop:         stop,
+		totalRecords: totalRecords,
+		readAt:       readAt,
+	}
 	c.pull = func() (chunk.Record, error, bool) {
 		rec, err, ok := pull()
 		if !ok {
@@ -107,6 +139,18 @@ func (c *manifestRecordCursor) Close() error {
 }
 
 func (c *manifestRecordCursor) Next() (chunk.Record, chunk.RecordRef, error) {
+	if c.fwdExhausted && c.readAt != nil {
+		nextPos := c.revPos + 1
+		if nextPos == 0 || nextPos > c.totalRecords {
+			return chunk.Record{}, chunk.RecordRef{}, chunk.ErrNoMoreRecords
+		}
+		rec, err := c.readAt(nextPos)
+		if err != nil {
+			return chunk.Record{}, chunk.RecordRef{}, err
+		}
+		c.revPos = nextPos
+		return rec, rec.Ref, nil
+	}
 	if c.useBuf {
 		if c.bufPos >= len(c.buf) {
 			return chunk.Record{}, chunk.RecordRef{}, chunk.ErrNoMoreRecords
@@ -126,6 +170,19 @@ func (c *manifestRecordCursor) Next() (chunk.Record, chunk.RecordRef, error) {
 }
 
 func (c *manifestRecordCursor) Prev() (chunk.Record, chunk.RecordRef, error) {
+	if c.readAt != nil && c.revPos > 0 {
+		rec, err := c.readAt(c.revPos)
+		if err != nil {
+			return chunk.Record{}, chunk.RecordRef{}, err
+		}
+		ref := rec.Ref
+		if ref.Pos == 0 {
+			ref = chunk.RecordRef{ChunkID: c.chunkID, Pos: c.revPos}
+			rec.Ref = ref
+		}
+		c.revPos--
+		return rec, ref, nil
+	}
 	if err := c.bufferAll(); err != nil {
 		return chunk.Record{}, chunk.RecordRef{}, err
 	}
@@ -139,9 +196,22 @@ func (c *manifestRecordCursor) Prev() (chunk.Record, chunk.RecordRef, error) {
 
 func (c *manifestRecordCursor) Seek(ref chunk.RecordRef) error {
 	if ref.Pos == 0 {
+		c.revPos = 0
+		c.pos = 0
+		c.fwdExhausted = false
 		if c.useBuf {
 			c.bufPos = 0
 		}
+		return nil
+	}
+	if c.readAt != nil && c.totalRecords > 0 {
+		if ref.Pos >= c.totalRecords {
+			c.revPos = c.totalRecords
+			c.fwdExhausted = true
+			return nil
+		}
+		c.revPos = ref.Pos
+		c.fwdExhausted = true
 		return nil
 	}
 	if err := c.bufferAll(); err != nil {
@@ -177,3 +247,6 @@ func (c *manifestRecordCursor) bufferAll() error {
 	c.bufPos = len(c.buf)
 	return nil
 }
+
+// Ensure manifestRecordCursor satisfies chunk.RecordCursor.
+var _ chunk.RecordCursor = (*manifestRecordCursor)(nil)

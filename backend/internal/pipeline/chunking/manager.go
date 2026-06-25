@@ -279,6 +279,12 @@ func (m *Manager) RewireVaultFSM(vaultID glid.GLID, fsm *vaultctlfsm.FSM, applie
 	if pending := fsm.SealedManifest(); pending != nil {
 		v.mu.Lock()
 		v.pendingSeal = pending
+		// Hot FSM restore can leave doneSealProposed set from when this home
+		// was a follower; clear so the vault-ctl leader can commit CmdSealChunk.
+		if entry := fsm.Get(pending.ChunkID); entry == nil || !entry.IsSealed() {
+			v.doneSealProposed = buildKey{}
+			v.sealAttemptKey = buildKey{}
+		}
 		v.mu.Unlock()
 	}
 	v.wake.Notify()
@@ -558,6 +564,11 @@ func (v *vaultChunking) buildDue(now time.Time, onTick bool) bool {
 		return true
 	}
 	if v.doneSealProposed == key {
+		if v.cfg.IsLeader() && !v.chunkSealCommitted(pending.ChunkID) {
+			v.doneSealProposed = buildKey{}
+			v.sealAttemptKey = buildKey{}
+			return true
+		}
 		return false
 	}
 	if !onTick {
@@ -734,6 +745,11 @@ func (v *vaultChunking) runBuildOncePass(ctx context.Context, pending *vaultctlf
 	builtNow := false
 	switch {
 	case !alreadyBuilt:
+		if result, ok, err := v.adoptExistingGLCBIfPresent(pending, key); err != nil {
+			return BuildResult{}, false, err
+		} else if ok {
+			return result, false, nil
+		}
 		result, err = v.build(ctx, pending)
 		if err != nil {
 			return BuildResult{}, false, err
@@ -752,6 +768,11 @@ func (v *vaultChunking) runBuildOncePass(ctx context.Context, pending *vaultctlf
 		// segment on each wake/tick while the sealed manifest is still pending.
 		result = cached.result
 	case v.cfg.Applier != nil:
+		if result, ok, err := v.adoptExistingGLCBIfPresent(pending, key); err != nil {
+			return BuildResult{}, false, err
+		} else if ok {
+			return result, false, nil
+		}
 		result, err = v.build(ctx, pending)
 		if err != nil {
 			return BuildResult{}, false, err
@@ -770,6 +791,58 @@ func (v *vaultChunking) runBuildOncePass(ctx context.Context, pending *vaultctlf
 	return result, builtNow, nil
 }
 
+// adoptExistingGLCBIfPresent loads BuildResult when data.glcb is already on
+// disk (BuildGLCBFile only renames into place after a complete build).
+func (v *vaultChunking) adoptExistingGLCBIfPresent(pending *vaultctlfsm.OpenChunkManifest, key buildKey) (BuildResult, bool, error) {
+	glcbPath := ChunkGLCBPath(v.cfg.ChunkRoot, pending.ChunkID)
+	if _, err := os.Stat(glcbPath); err != nil {
+		if os.IsNotExist(err) {
+			return BuildResult{}, false, nil
+		}
+		return BuildResult{}, false, err
+	}
+	sealedAt := pending.SealedAt
+	if sealedAt.IsZero() {
+		if entry := v.fsm().Get(pending.ChunkID); entry != nil && !entry.WriteEnd.IsZero() {
+			sealedAt = entry.WriteEnd
+		}
+	}
+	result, readErr := BuildResultFromExistingGLCB(glcbPath, sealedAt)
+	if readErr != nil {
+		return BuildResult{}, false, nil //nolint:nilerr // corrupt GLCB; caller falls through to full rebuild
+	}
+	adoptKey := key
+	if adoptKey.sealedAt.IsZero() {
+		adoptKey.sealedAt = result.WriteEnd
+	}
+	v.mu.Lock()
+	v.doneBuild = adoptKey
+	v.lastBuild = struct {
+		key    buildKey
+		result BuildResult
+		ok     bool
+	}{key: adoptKey, result: result, ok: true}
+	v.mu.Unlock()
+	return result, true, nil
+}
+
+// clearSealProposedIfLeaderUncommitted drops a stale doneSealProposed marker
+// when this home is now vault-ctl leader but CmdSealChunk never committed
+// (e.g. leadership transferred after a follower build pass).
+func (v *vaultChunking) clearSealProposedIfLeaderUncommitted(pending *vaultctlfsm.OpenChunkManifest, key buildKey) bool {
+	if pending == nil || !v.cfg.IsLeader() || v.chunkSealCommitted(pending.ChunkID) {
+		return false
+	}
+	v.mu.Lock()
+	stale := v.doneSealProposed == key
+	if stale {
+		v.doneSealProposed = buildKey{}
+		v.sealAttemptKey = buildKey{}
+	}
+	v.mu.Unlock()
+	return stale
+}
+
 func (v *vaultChunking) proposeSealOnce(ctx context.Context, pending *vaultctlfsm.OpenChunkManifest, key buildKey, result BuildResult) error {
 	if v.cfg.Applier == nil {
 		return nil
@@ -778,7 +851,9 @@ func (v *vaultChunking) proposeSealOnce(ctx context.Context, pending *vaultctlfs
 	alreadyProposed := v.doneSealProposed == key
 	v.mu.Unlock()
 	if alreadyProposed {
-		return nil
+		if !v.clearSealProposedIfLeaderUncommitted(pending, key) {
+			return nil
+		}
 	}
 	// Only the vault-ctl leader commits CmdSealChunk. Follower homes
 	// materialize the GLCB locally; proposing seal from a follower

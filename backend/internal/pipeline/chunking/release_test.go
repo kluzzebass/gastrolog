@@ -90,6 +90,13 @@ func TestPartitionPendingReleaseWaitsForHolders(t *testing.T) {
 	})}); err != nil {
 		t.Fatal(err)
 	}
+	sealedAt := now.Add(time.Minute)
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, sealedAt)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(chunkID, sealedAt, 1, 1, now, now, now, true, sealedAt)}); err != nil {
+		t.Fatal(err)
+	}
 
 	required := []string{"home-a", "home-b"}
 	ready, pending := partitionPendingRelease(fsm, []glid.GLID{segID}, required, true)

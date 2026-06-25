@@ -107,14 +107,24 @@ func (r *pipelineSearchRegistry) OpenPipelineChunkCursor(vaultID glid.GLID, chun
 			return nil, chunk.ErrChunkNotFound
 		}
 	}
+	locate := chunking.VaultSegmentLocator{Root: r.home}
 	seq, _, err := chunking.QueryOpenChunk(chunking.OpenChunkQueryInput{
 		Manifest: open,
-		Locate:   chunking.VaultSegmentLocator{Root: r.home},
+		Locate:   locate,
 	})
 	if err != nil {
 		return nil, err
 	}
-	return newManifestRecordCursor(chunkID, seq), nil
+	readAt := func(pos uint64) (chunk.Record, error) {
+		rec, err := chunking.ReadManifestRecordAt(open, locate, pos)
+		if err != nil {
+			return chunk.Record{}, err
+		}
+		cr := chunking.RecordToChunk(rec)
+		cr.Ref = chunk.RecordRef{ChunkID: chunkID, Pos: pos}
+		return cr, nil
+	}
+	return newManifestRecordCursor(chunkID, seq, open.TotalRecords, readAt), nil
 }
 
 // TestPipelineActiveChunkSearchable: active pipeline chunks appear in search
@@ -148,4 +158,45 @@ func TestPipelineActiveChunkSearchable(t *testing.T) {
 		}
 	}
 	_ = chunkID
+}
+
+func TestManifestRecordCursorReverseSeek(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	vaultID, fsm, home, chunkID, wantRecords := buildOpenPipelineManifest(t, ctx)
+	open := fsm.OpenChunk()
+	if wantRecords < 2 {
+		t.Fatalf("need >= 2 records for reverse test, got %d", wantRecords)
+	}
+
+	reg := &pipelineSearchRegistry{vaultID: vaultID, home: home, fsm: fsm}
+	cursor, err := reg.OpenPipelineChunkCursor(vaultID, chunkID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cursor.Close() }()
+
+	if err := cursor.Seek(chunk.RecordRef{ChunkID: chunkID, Pos: open.TotalRecords}); err != nil {
+		t.Fatalf("Seek: %v", err)
+	}
+	rec, _, err := cursor.Prev()
+	if err != nil {
+		t.Fatalf("Prev: %v", err)
+	}
+	if len(rec.Raw) == 0 {
+		t.Fatal("expected non-empty last record")
+	}
+
+	// Forward from start should still work after reverse positioning.
+	if err := cursor.Seek(chunk.RecordRef{ChunkID: chunkID, Pos: 0}); err != nil {
+		t.Fatalf("Seek start: %v", err)
+	}
+	rec, _, err = cursor.Next()
+	if err != nil {
+		t.Fatalf("Next: %v", err)
+	}
+	if len(rec.Raw) == 0 {
+		t.Fatal("expected non-empty first record")
+	}
 }

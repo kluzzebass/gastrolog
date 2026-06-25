@@ -686,6 +686,126 @@ func TestManagerBuildOnceFollowerHomeBuildsGLCBWithoutSealing(t *testing.T) {
 	}
 }
 
+func TestManagerBuildOnceUsesExistingGLCBWithoutSegments(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	segID := glid.New()
+	vaultID := glid.New()
+	chunkID := chunk.NewChunkID()
+	home := t.TempDir()
+	writeHeadSegment(t, home, segID, vaultID, []recordForSeg{{0, base, "one"}})
+
+	fsm := vaultctlfsm.New()
+	openedAt := base
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalOpenChunkManifest(chunkID, openedAt))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
+		SegmentID:         segID,
+		FirstRecordNumber: 0,
+		LastRecordNumber:  0,
+		SliceBytes:        1024,
+		RefAddedAt:        openedAt,
+	}))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, base.Add(time.Minute)))
+
+	follower := chunking.New(chunking.Config{})
+	if err := follower.RegisterVault(vaultID, chunking.VaultConfig{
+		VaultRoot: home,
+		ChunkRoot: filepath.Join(home, "chunks"),
+		FSM:       fsm,
+		Locate:    chunking.HeadSegmentLocator{Root: home},
+		Applier:   &flakyFSMApplier{fsm: fsm},
+		IsLeader:  func() bool { return false },
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := follower.BuildOnce(t.Context(), vaultID); err != nil {
+		t.Fatalf("follower BuildOnce: %v", err)
+	}
+	glcbPath := chunking.ChunkGLCBPath(filepath.Join(home, "chunks"), chunkID)
+	if _, err := os.Stat(glcbPath); err != nil {
+		t.Fatalf("follower GLCB: %v", err)
+	}
+	if err := os.RemoveAll(filepath.Join(home, "head")); err != nil {
+		t.Fatal(err)
+	}
+
+	leader := chunking.New(chunking.Config{})
+	if err := leader.RegisterVault(vaultID, chunking.VaultConfig{
+		VaultRoot: home,
+		ChunkRoot: filepath.Join(home, "chunks"),
+		FSM:       fsm,
+		Locate:    chunking.HeadSegmentLocator{Root: home},
+		Applier:   &flakyFSMApplier{fsm: fsm},
+		IsLeader:  func() bool { return true },
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := leader.BuildOnce(t.Context(), vaultID); err != nil {
+		t.Fatalf("leader BuildOnce with existing GLCB: %v", err)
+	}
+	entry := fsm.Get(chunkID)
+	if entry == nil || entry.State != chunk.ChunkStateSealed {
+		t.Fatalf("chunk entry = %+v, want Sealed", entry)
+	}
+	if fsm.SealedManifest() != nil {
+		t.Fatal("sealed manifest must clear after leader seals")
+	}
+}
+
+func TestManagerBuildOnceSealsAfterLeadershipTransfer(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	segID := glid.New()
+	vaultID := glid.New()
+	chunkID := chunk.NewChunkID()
+	home := t.TempDir()
+	writeHeadSegment(t, home, segID, vaultID, []recordForSeg{{0, base, "one"}})
+
+	fsm := vaultctlfsm.New()
+	openedAt := base
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalOpenChunkManifest(chunkID, openedAt))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
+		SegmentID:         segID,
+		FirstRecordNumber: 0,
+		LastRecordNumber:  0,
+		SliceBytes:        1024,
+		RefAddedAt:        openedAt,
+	}))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, base.Add(time.Minute)))
+
+	var leader atomic.Bool
+	leader.Store(false)
+	mgr := chunking.New(chunking.Config{})
+	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
+		VaultRoot: home,
+		ChunkRoot: filepath.Join(home, "chunks"),
+		FSM:       fsm,
+		Locate:    chunking.HeadSegmentLocator{Root: home},
+		Applier:   &flakyFSMApplier{fsm: fsm},
+		IsLeader:  leader.Load,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.BuildOnce(t.Context(), vaultID); err != nil {
+		t.Fatalf("follower BuildOnce: %v", err)
+	}
+	if fsm.SealedManifest() == nil {
+		t.Fatal("sealed manifest must remain until vault-ctl leader seals")
+	}
+
+	leader.Store(true)
+	if err := mgr.BuildOnce(t.Context(), vaultID); err != nil {
+		t.Fatalf("leader BuildOnce after transfer: %v", err)
+	}
+	entry := fsm.Get(chunkID)
+	if entry == nil || entry.State != chunk.ChunkStateSealed {
+		t.Fatalf("chunk entry = %+v, want Sealed after leadership transfer", entry)
+	}
+	if fsm.SealedManifest() != nil {
+		t.Fatal("sealed manifest must clear after leader seals")
+	}
+}
+
 func TestManagerBuildOnceRetriesSealApplyAfterFailure(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)

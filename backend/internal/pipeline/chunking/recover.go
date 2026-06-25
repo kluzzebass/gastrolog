@@ -12,8 +12,8 @@ import (
 )
 
 // BuildResultFromExistingGLCB reads seal metadata from a pipeline GLCB that
-// already exists on disk. Used after restart when local materialization
-// finished but CmdSealChunk did not apply before shutdown.
+// already exists on disk. Used on the hot build path and after restart when
+// local materialization finished but CmdSealChunk did not apply before shutdown.
 func BuildResultFromExistingGLCB(glcbPath string, sealedAt time.Time) (BuildResult, error) {
 	meta, monotonic, fileBytes, err := readGLCBSealMeta(glcbPath)
 	if err != nil {
@@ -114,9 +114,12 @@ func (v *vaultChunking) recoverBuiltGLCB(ctx context.Context, pending *vaultctlf
 	v.mu.Lock()
 	if v.doneSealProposed == key {
 		v.mu.Unlock()
-		return nil
+		if !v.clearSealProposedIfLeaderUncommitted(pending, key) {
+			return nil
+		}
+	} else {
+		v.mu.Unlock()
 	}
-	v.mu.Unlock()
 
 	v.mu.Lock()
 	v.doneBuild = key
@@ -132,9 +135,11 @@ func (v *vaultChunking) recoverBuiltGLCB(ctx context.Context, pending *vaultctlf
 		return nil
 	}
 	if !v.cfg.IsLeader() {
-		v.mu.Lock()
-		v.doneSealProposed = key
-		v.mu.Unlock()
+		if !v.chunkSealCommitted(pending.ChunkID) {
+			v.mu.Lock()
+			v.doneSealProposed = key
+			v.mu.Unlock()
+		}
 		return nil
 	}
 	v.mu.Lock()
