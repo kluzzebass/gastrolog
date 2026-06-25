@@ -138,7 +138,7 @@ func forwardSearchAfterParse(
 	// Unfiltered queries keep the fast binary-search histogram path.
 	var histogram []*gastrologv1.HistogramBucket
 	if q.BoolExpr == nil {
-		histogram = server.HistogramToProto(eng.ComputeHistogram(ctx, q, 50))
+		histogram = server.HistogramToProto(eng.ComputeSearchPageHistogram(ctx, q, 50))
 	}
 
 	if pipeline != nil && len(pipeline.Pipes) > 0 && !query.CanStreamPipeline(pipeline) {

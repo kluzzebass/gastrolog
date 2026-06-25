@@ -17,6 +17,14 @@ type HistogramBucket struct {
 
 const histogramGroupField = "level"
 
+// ComputeSearchPageHistogram returns volume counts for the search sidebar
+// histogram. Skips the per-bucket level attr scan — that path is O(chunks ×
+// buckets × samples) and dominates latency on pipeline vaults during seal
+// catch-up. Counts come from the ITSI fast path only; level breakdown is omitted.
+func (e *Engine) ComputeSearchPageHistogram(ctx context.Context, q Query, numBuckets int) []HistogramBucket {
+	return e.computeHistogram(ctx, q, numBuckets, false)
+}
+
 // ComputeHistogram returns an approximate volume histogram grouped by level
 // for the given query's time range.
 //
@@ -25,6 +33,10 @@ const histogramGroupField = "level"
 // When a filter is present, falls back to a record scan so the histogram
 // reflects the filtered result set.
 func (e *Engine) ComputeHistogram(ctx context.Context, q Query, numBuckets int) []HistogramBucket {
+	return e.computeHistogram(ctx, q, numBuckets, true)
+}
+
+func (e *Engine) computeHistogram(ctx context.Context, q Query, numBuckets int, groupByLevel bool) []HistogramBucket {
 	numBuckets = clampBuckets(numBuckets)
 	selectedVaults := e.timechartVaults(q)
 
@@ -58,7 +70,7 @@ func (e *Engine) ComputeHistogram(ctx context.Context, q Query, numBuckets int) 
 	hasFilter := q.BoolExpr != nil
 	_, _ = e.runTimechartStrategy(ctx, q, nil, selectedVaults,
 		start, end, bucketWidth, numBuckets,
-		hasFilter, false, true, histogramGroupField,
+		hasFilter, false, groupByLevel, histogramGroupField,
 		acc)
 
 	return buildHistogramBuckets(start, bucketWidth, numBuckets, acc.counts, acc.groupCounts, acc.cloudFlags, acc.cloudCounts)
@@ -67,6 +79,10 @@ func (e *Engine) ComputeHistogram(ctx context.Context, q Query, numBuckets int) 
 // ComputeHistogramForVaults computes a histogram for specific vaults only.
 // Used by the forward search handler to compute a per-node histogram.
 func (e *Engine) ComputeHistogramForVaults(ctx context.Context, q Query, numBuckets int, vaultIDs []glid.GLID) []HistogramBucket {
+	return e.computeHistogramForVaults(ctx, q, numBuckets, vaultIDs, true)
+}
+
+func (e *Engine) computeHistogramForVaults(ctx context.Context, q Query, numBuckets int, vaultIDs []glid.GLID, groupByLevel bool) []HistogramBucket {
 	numBuckets = clampBuckets(numBuckets)
 
 	if q.Start.IsZero() || q.End.IsZero() {
@@ -99,7 +115,7 @@ func (e *Engine) ComputeHistogramForVaults(ctx context.Context, q Query, numBuck
 	hasFilter := q.BoolExpr != nil
 	_, _ = e.runTimechartStrategy(ctx, q, nil, vaultIDs,
 		start, end, bucketWidth, numBuckets,
-		hasFilter, false, true, histogramGroupField,
+		hasFilter, false, groupByLevel, histogramGroupField,
 		acc)
 
 	return buildHistogramBuckets(start, bucketWidth, numBuckets, acc.counts, acc.groupCounts, acc.cloudFlags, acc.cloudCounts)

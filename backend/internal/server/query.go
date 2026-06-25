@@ -229,15 +229,17 @@ func (s *QueryServer) searchDirect(
 }
 
 // computePageHistogram builds the page-1 volume histogram for a search.
+// Counts only — level breakdown is omitted so histogram work stays on the
+// ITSI fast path and cannot block search completion.
 func (s *QueryServer) computePageHistogram(ctx context.Context, eng *query.Engine, histogramQ query.Query, remoteHist []*apiv1.HistogramBucket) []*apiv1.HistogramBucket {
 	if s.histogramFullyLocal(ctx, histogramQ) {
 		localEng := s.orch.LocalVaultQueryEngine()
 		if s.lookupResolver != nil {
 			localEng.SetLookupResolver(s.lookupResolver)
 		}
-		return HistogramToProto(localEng.ComputeHistogram(ctx, histogramQ, 50))
+		return HistogramToProto(localEng.ComputeSearchPageHistogram(ctx, histogramQ, 50))
 	}
-	localHist := HistogramToProto(eng.ComputeHistogram(ctx, histogramQ, 50))
+	localHist := HistogramToProto(eng.ComputeSearchPageHistogram(ctx, histogramQ, 50))
 	return mergeHistogramBuckets(localHist, remoteHist)
 }
 
@@ -461,6 +463,18 @@ func (s *QueryServer) mergeAndStream(
 	synthOK := mergeInvolved && limitHit
 	tokenBytes := buildResumeTokenBytes(transform, getToken, mergeHighwater, reverse, lastLocalSet, lastLocalRec, synthOK)
 
+	// Attach histogram when already computed; never block search completion on
+	// level-breakdown work. Slow histogram goroutines are drained in the
+	// background so they cannot extend the RPC past record delivery.
+	if histCh != nil {
+		select {
+		case h := <-histCh:
+			histogram = h
+		default:
+			go func(ch chan []*apiv1.HistogramBucket) { <-ch }(histCh)
+		}
+	}
+
 	if err := stream.Send(&apiv1.SearchResponse{
 		Records:         sb.pending(),
 		ResumeToken:     tokenBytes,
@@ -471,19 +485,6 @@ func (s *QueryServer) mergeAndStream(
 		return err
 	}
 
-	// Late histogram: records and resume token are already on the wire.
-	if histCh != nil {
-		select {
-		case h := <-histCh:
-			if len(h) > 0 {
-				return stream.Send(&apiv1.SearchResponse{
-					Histogram:       h,
-					ServerElapsedMs: time.Since(serverStart).Milliseconds(),
-				})
-			}
-		case <-ctx.Done():
-		}
-	}
 	return nil
 }
 

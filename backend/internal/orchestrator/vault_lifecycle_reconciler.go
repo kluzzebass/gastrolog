@@ -428,21 +428,31 @@ func (r *VaultLifecycleReconciler) registerPipelineGLCB(e vaultctlfsm.ManifestEn
 		// node is not a holder). Query on a holder node serves it instead.
 		return
 	}
-	info := chunk.ExternalGLCBInfo{
-		WriteStart:        e.WriteStart,
-		WriteEnd:          e.WriteEnd,
-		IngestStart:       e.IngestStart,
-		IngestEnd:         e.IngestEnd,
-		SourceStart:       e.SourceStart,
-		SourceEnd:         e.SourceEnd,
-		RecordCount:       e.RecordCount,
-		Bytes:             e.Bytes,
-		DiskBytes:         e.DiskBytes,
-		IngestIdxOffset:   e.IngestIdxOffset,
-		IngestIdxSize:     e.IngestIdxSize,
-		SourceIdxOffset:   e.SourceIdxOffset,
-		SourceIdxSize:     e.SourceIdxSize,
-		IngestTSMonotonic: e.IngestTSMonotonic,
+	if ext, ok := r.vaultInst.Chunks.(interface {
+		IsExternalGLCBAt(chunk.ChunkID, string) bool
+	}); ok && ext.IsExternalGLCBAt(e.ID, glcbPath) {
+		return
+	}
+	info, err := externalGLCBInfoForPipeline(e, glcbPath)
+	if err != nil {
+		r.logger.Warn("registerPipelineGLCB: read GLCB metadata failed",
+			"chunk", e.ID, "path", glcbPath, "error", err)
+		info = chunk.ExternalGLCBInfo{
+			WriteStart:        e.WriteStart,
+			WriteEnd:          e.WriteEnd,
+			IngestStart:       e.IngestStart,
+			IngestEnd:         e.IngestEnd,
+			SourceStart:       e.SourceStart,
+			SourceEnd:         e.SourceEnd,
+			RecordCount:       e.RecordCount,
+			Bytes:             e.Bytes,
+			DiskBytes:         e.DiskBytes,
+			IngestIdxOffset:   e.IngestIdxOffset,
+			IngestIdxSize:     e.IngestIdxSize,
+			SourceIdxOffset:   e.SourceIdxOffset,
+			SourceIdxSize:     e.SourceIdxSize,
+			IngestTSMonotonic: e.IngestTSMonotonic,
+		}
 	}
 	if err := registrar.RegisterExternalGLCB(e.ID, glcbPath, info); err != nil {
 		r.logger.Warn("registerPipelineGLCB: RegisterExternalGLCB failed",
@@ -897,19 +907,23 @@ func (r *VaultLifecycleReconciler) SweepMissingReplicas() {
 	}
 }
 
-// syncPipelineSealedGLCBs registers pipeline-built sealed GLCBs that exist
-// locally under the vault ChunkRoot so query/OpenCursor resolve them via
-// RegisterExternalGLCB. Replaces the legacy missing-replica catchup sweep
-// for pipeline ingest vaults — record streaming would duplicate GLCB assembly.
+// syncPipelineSealedGLCBs registers pipeline-built GLCBs that exist locally
+// under the vault ChunkRoot so query/OpenCursor resolve them via
+// RegisterExternalGLCB. Includes Sealing entries (GLCB built, CmdSealChunk
+// not yet committed) so search can use embedded ITSI instead of scanning
+// manifest segments. Replaces the legacy missing-replica catchup sweep for
+// pipeline ingest vaults.
 func (r *VaultLifecycleReconciler) syncPipelineSealedGLCBs() {
 	if r.fsm == nil {
 		return
 	}
 	for _, e := range r.fsm.List() {
-		if !e.IsSealed() || e.CloudBacked {
+		if e.CloudBacked {
 			continue
 		}
-		r.registerPipelineGLCB(e)
+		if e.IsSealed() || e.State == chunk.ChunkStateSealing {
+			r.registerPipelineGLCB(e)
+		}
 	}
 }
 

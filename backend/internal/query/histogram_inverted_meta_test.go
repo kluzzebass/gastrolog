@@ -57,7 +57,7 @@ func TestTimechartChunkGroups_InvertedMetaIsNoOp(t *testing.T) {
 			t.Fatalf("timechartChunkGroups panicked on inverted meta: %v", r)
 		}
 	}()
-	timechartChunkGroups(nil, nil, meta, start, bucketWidth, numBuckets, 100, "level", groupCounts)
+	timechartChunkGroups(nil, nil, meta, start, bucketWidth, numBuckets, 100, "level", groupCounts, 1000)
 
 	for b, m := range groupCounts {
 		if len(m) != 0 {

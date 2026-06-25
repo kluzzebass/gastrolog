@@ -20,6 +20,7 @@ func (o *Orchestrator) SearchChunkMetasForVault(vaultID glid.GLID) []chunk.Chunk
 		out := make([]chunk.ChunkMeta, 0, len(entries))
 		for _, e := range entries {
 			m := e.ToChunkMeta()
+			o.overlayPipelineChunkMetaBounds(vaultID, &m)
 			out = append(out, m)
 		}
 		return out

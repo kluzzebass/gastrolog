@@ -444,58 +444,106 @@ func bucketForTS(tsNanos, startNanos, bucketNanos int64, numBuckets int) (int, b
 // timechartAttrScanGroups populates group breakdown counts using per-bucket
 // sampling. For each bucket, binary search finds the record position range,
 // then ScanAttrs reads up to samplePerBucket attrs and scales the proportions
-// to the exact count. Total cost: O(buckets × samplePerBucket) regardless of
-// dataset size (~50K records for default 50 buckets).
+// to the exact count. Total cost is capped so soak-scale vaults with many
+// in-window chunks cannot spend tens of seconds on level breakdown alone.
 // Does NOT update total counts — those come from timechartFastPath.
 func (e *Engine) timechartAttrScanGroups(selectedVaults []glid.GLID, start, end time.Time, bucketWidth time.Duration, numBuckets int, groupField string, groupCounts []map[string]int64) {
 	const samplePerBucket = 1000
+	const maxAttrScanSamples = 50_000
+
+	candidates := e.attrScanGroupCandidates(selectedVaults, start, end)
 	ir := e.indexReader()
+
+	samplesUsed := 0
+	for _, c := range candidates {
+		if samplesUsed >= maxAttrScanSamples {
+			break
+		}
+		budget := maxAttrScanSamples - samplesUsed
+		used := timechartChunkGroups(c.cm, ir, c.meta, start, bucketWidth, numBuckets, samplePerBucket, groupField, groupCounts, budget)
+		samplesUsed += used
+	}
+}
+
+type attrScanCandidate struct {
+	cm   chunk.ChunkManager
+	meta chunk.ChunkMeta
+}
+
+func (e *Engine) attrScanGroupCandidates(selectedVaults []glid.GLID, start, end time.Time) []attrScanCandidate {
+	const maxChunksForAttrScan = 64
+
+	var candidates []attrScanCandidate
 	for _, vaultID := range selectedVaults {
 		cm, _ := e.getVaultManagers(vaultID)
 		if cm == nil {
 			continue
 		}
-		metas := e.vaultChunkMetas(vaultID)
-		for _, meta := range metas {
-			if meta.RecordCount == 0 {
+		for _, meta := range e.vaultChunkMetas(vaultID) {
+			if !attrScanGroupCandidateOK(cm, meta, start, end) {
 				continue
 			}
-			if !meta.IngestEnd.IsZero() && meta.IngestEnd.Before(start) {
-				continue
-			}
-			if !meta.IngestStart.IsZero() && !meta.IngestStart.Before(end) {
-				continue
-			}
-			// Skip chunks whose content isn't locally readable — for cloud
-			// chunks that means "blob is not in the warm cache." We never
-			// trigger an S3 download just to compute the level breakdown;
-			// histogram refreshes that span 30d would otherwise pull
-			// hundreds of cloud blobs. Cloud chunks still contribute
-			// accurate counts via the TS index, and the bucket renders as
-			// a hatched "data here, breakdown not loaded" ghost via the
-			// cloudFlags overlay. If the same chunk gets cached later
-			// (because a real search needs its records) it'll
-			// automatically pick up a real level breakdown on the next
-			// histogram refresh. See gastrolog-66b7x and gastrolog-20z6h.
-			if !cm.HasLocalContent(meta.ID) {
-				continue
-			}
-			// Active non-monotonic chunks: handled by the unified pass in
-			// runTimechartStrategy (timechartActiveNonMonotonic) so counts
-			// and groupCounts come from the same B+ tree snapshot. See
-			// gastrolog-66b7x.
-			if !meta.Sealed && !meta.IngestTSMonotonic {
-				continue
-			}
-			timechartChunkGroups(cm, ir, meta, start, bucketWidth, numBuckets, samplePerBucket, groupField, groupCounts)
+			candidates = append(candidates, attrScanCandidate{cm: cm, meta: meta})
 		}
 	}
+	slices.SortFunc(candidates, func(a, b attrScanCandidate) int {
+		ae, be := a.meta.IngestEnd, b.meta.IngestEnd
+		if ae.IsZero() && be.IsZero() {
+			return 0
+		}
+		if ae.IsZero() {
+			return 1
+		}
+		if be.IsZero() {
+			return -1
+		}
+		return be.Compare(ae)
+	})
+	if len(candidates) > maxChunksForAttrScan {
+		candidates = candidates[:maxChunksForAttrScan]
+	}
+	return candidates
+}
+
+func attrScanGroupCandidateOK(cm chunk.ChunkManager, meta chunk.ChunkMeta, start, end time.Time) bool {
+	if meta.RecordCount == 0 {
+		return false
+	}
+	if !meta.IngestEnd.IsZero() && meta.IngestEnd.Before(start) {
+		return false
+	}
+	if !meta.IngestStart.IsZero() && !meta.IngestStart.Before(end) {
+		return false
+	}
+	// Skip chunks whose content isn't locally readable — for cloud
+	// chunks that means "blob is not in the warm cache." We never
+	// trigger an S3 download just to compute the level breakdown;
+	// histogram refreshes that span 30d would otherwise pull
+	// hundreds of cloud blobs. Cloud chunks still contribute
+	// accurate counts via the TS index, and the bucket renders as
+	// a hatched "data here, breakdown not loaded" ghost via the
+	// cloudFlags overlay. If the same chunk gets cached later
+	// (because a real search needs its records) it'll
+	// automatically pick up a real level breakdown on the next
+	// histogram refresh. See gastrolog-66b7x and gastrolog-20z6h.
+	if !cm.HasLocalContent(meta.ID) {
+		return false
+	}
+	// Active non-monotonic chunks: handled by the unified pass in
+	// runTimechartStrategy (timechartActiveNonMonotonic) so counts
+	// and groupCounts come from the same B+ tree snapshot. See
+	// gastrolog-66b7x.
+	if !meta.Sealed && !meta.IngestTSMonotonic {
+		return false
+	}
+	return true
 }
 
 // timechartChunkGroups samples attrs per bucket within a single chunk.
 // For each bucket that overlaps the chunk, it binary-searches for the position
 // range via IngestTS, scans up to sampleSize records, and scales the observed
 // group proportions to the exact bucket count (from binary search).
+// Returns the number of ScanAttrs samples consumed (for global budgeting).
 func timechartChunkGroups(
 	cm chunk.ChunkManager,
 	ir manifest.IndexReader,
@@ -506,14 +554,15 @@ func timechartChunkGroups(
 	sampleSize int,
 	groupField string,
 	groupCounts []map[string]int64,
-) {
+	sampleBudget int,
+) int {
 	end := start.Add(bucketWidth * time.Duration(numBuckets))
 
 	firstBucket := 0
 	if !meta.IngestStart.IsZero() && meta.IngestStart.After(start) {
 		firstBucket = int(meta.IngestStart.Sub(start) / bucketWidth)
 		if firstBucket >= numBuckets {
-			return
+			return 0
 		}
 	}
 	lastBucket := numBuckets - 1
@@ -528,7 +577,11 @@ func timechartChunkGroups(
 	// transition (IngestStart vs IngestEnd applied in separate Raft entries).
 	// A negative-length bucket range would crash makeslice downstream.
 	if firstBucket > lastBucket {
-		return
+		return 0
+	}
+
+	if sampleBudget <= 0 {
+		return 0
 	}
 
 	// Non-monotonic chunks (active or sealed): the per-bucket sampler below
@@ -539,10 +592,34 @@ func timechartChunkGroups(
 	// gastrolog-66b7x.
 	if !meta.IngestTSMonotonic {
 		nonMonotonicChunkGroups(cm, ir, meta, start, bucketWidth, firstBucket, lastBucket, groupField, groupCounts)
-		return
+		return min(sampleBudget, 1000)
 	}
 
+	const wideSpanBuckets = 8
+	if lastBucket-firstBucket+1 > wideSpanBuckets {
+		return timechartChunkGroupsWideSpan(cm, ir, meta, start, bucketWidth, firstBucket, lastBucket, sampleSize, groupField, groupCounts, sampleBudget)
+	}
+
+	return timechartChunkGroupsPerBucket(cm, ir, meta, start, bucketWidth, firstBucket, lastBucket, sampleSize, groupField, groupCounts, sampleBudget)
+}
+
+func timechartChunkGroupsPerBucket(
+	cm chunk.ChunkManager,
+	ir manifest.IndexReader,
+	meta chunk.ChunkMeta,
+	start time.Time,
+	bucketWidth time.Duration,
+	firstBucket, lastBucket int,
+	sampleSize int,
+	groupField string,
+	groupCounts []map[string]int64,
+	sampleBudget int,
+) int {
+	samplesUsed := 0
 	for b := firstBucket; b <= lastBucket; b++ {
+		if samplesUsed >= sampleBudget {
+			break
+		}
 		bStart := start.Add(bucketWidth * time.Duration(b))
 		bEnd := start.Add(bucketWidth * time.Duration(b+1))
 
@@ -575,7 +652,7 @@ func timechartChunkGroups(
 		// Sample attrs from this bucket range.
 		localCounts := make(map[string]int64)
 		sampled := 0
-		limit := min(int(bucketRecords), sampleSize)
+		limit := min(int(bucketRecords), sampleSize, sampleBudget-samplesUsed)
 
 		_ = cm.ScanAttrs(meta.ID, startPos, func(_ time.Time, attrs chunk.Attributes) bool {
 			if v := attrs[groupField]; v != "" {
@@ -593,6 +670,7 @@ func timechartChunkGroups(
 			sampled++
 			return sampled < limit
 		})
+		samplesUsed += sampled
 
 		if sampled == 0 {
 			continue
@@ -603,6 +681,78 @@ func timechartChunkGroups(
 			groupCounts[b][k] += v * int64(bucketRecords) / int64(sampled)
 		}
 	}
+	return samplesUsed
+}
+
+// timechartChunkGroupsWideSpan samples attrs once for a chunk that spans many
+// buckets, then distributes observed level ratios across bucket totals from
+// rank arithmetic. Avoids O(buckets × sampleSize) ScanAttrs on short windows
+// where dozens of buckets overlap the same sealing chunk.
+func timechartChunkGroupsWideSpan(
+	cm chunk.ChunkManager,
+	ir manifest.IndexReader,
+	meta chunk.ChunkMeta,
+	start time.Time,
+	bucketWidth time.Duration,
+	firstBucket, lastBucket int,
+	sampleSize int,
+	groupField string,
+	groupCounts []map[string]int64,
+	sampleBudget int,
+) int {
+	bStart := start.Add(bucketWidth * time.Duration(firstBucket))
+	bEnd := start.Add(bucketWidth * time.Duration(lastBucket + 1))
+
+	startPos, startOK := ir.FindIngestPos(meta.ID, bStart)
+	if !startOK {
+		return 0
+	}
+	startRank, rankOK := ir.FindIngestRank(meta.ID, bStart)
+	if !rankOK {
+		return 0
+	}
+	var endRank uint64
+	if !meta.IngestEnd.IsZero() && !bEnd.Before(meta.IngestEnd) {
+		endRank = uint64(meta.RecordCount) //nolint:gosec // G115: RecordCount is always non-negative
+	} else if rank, ok := ir.FindIngestRank(meta.ID, bEnd); ok {
+		endRank = rank
+	}
+	if endRank <= startRank {
+		return 0
+	}
+
+	spanRecords := endRank - startRank
+	limit := min(int(spanRecords), sampleSize, sampleBudget)
+	if limit <= 0 {
+		return 0
+	}
+
+	localCounts := make(map[string]int64)
+	sampled := 0
+	_ = cm.ScanAttrs(meta.ID, startPos, func(_ time.Time, attrs chunk.Attributes) bool {
+		if v := attrs[groupField]; v != "" {
+			localCounts[v]++
+		} else {
+			localCounts["other"]++
+		}
+		sampled++
+		return sampled < limit
+	})
+	if sampled == 0 {
+		return 0
+	}
+
+	bucketTotals := chunkBucketTotals(cm, ir, meta, start, bucketWidth, firstBucket, lastBucket)
+	for i, total := range bucketTotals {
+		if total == 0 {
+			continue
+		}
+		b := firstBucket + i
+		for k, v := range localCounts {
+			groupCounts[b][k] += v * total / int64(sampled)
+		}
+	}
+	return sampled
 }
 
 // timechartScanPath counts records per bucket via record scanning with optional grouping and pre-ops.

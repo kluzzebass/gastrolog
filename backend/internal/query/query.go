@@ -531,6 +531,16 @@ func chunkMatchesQuery(m chunk.ChunkMeta, q Query, lower, upper time.Time, chunk
 		return false
 	}
 
+	// Time-bounded queries must not treat missing bounds as "matches everything".
+	// Sealed/sealing entries whose IngestTS range could not be resolved would
+	// otherwise pass the overlap test and pull the entire sealing backlog into
+	// a narrow last=5m search.
+	if (!lower.IsZero() || !upper.IsZero()) && m.IngestStart.IsZero() && m.IngestEnd.IsZero() {
+		if m.Sealed || m.State == chunk.ChunkStateSealing {
+			return false
+		}
+	}
+
 	return true
 }
 
@@ -601,7 +611,7 @@ func (e *Engine) searchChunkWithRef(ctx context.Context, q Query, vaultID glid.G
 	}
 }
 
-var errSkipMissingLocalChunk = errors.New("chunk in FSM but missing from local cm")
+var errSkipMissingLocalChunk = errors.New("chunk in cluster manifest but not readable on this node")
 
 func (e *Engine) openSearchChunkCursor(vaultID glid.GLID, meta chunk.ChunkMeta) (chunk.RecordCursor, error) {
 	cm, _ := e.getVaultManagers(vaultID)
@@ -620,7 +630,7 @@ func (e *Engine) openSearchChunkCursor(vaultID glid.GLID, meta chunk.ChunkMeta) 
 	if err != nil {
 		if errors.Is(err, chunk.ErrChunkNotFound) {
 			if e.logger != nil {
-				e.logger.Warn("chunk in FSM but missing from local cm — skipping (gastrolog-3ukgz)",
+				e.logger.Warn("chunk in cluster manifest but not readable on this node — skipping",
 					"vault", vaultID, "chunk", meta.ID, "sealed", meta.Sealed, "cloud_backed", meta.CloudBacked)
 			}
 			return nil, errSkipMissingLocalChunk
@@ -662,6 +672,17 @@ func positionCursor(cursor chunk.RecordCursor, q Query, meta chunk.ChunkMeta, st
 //
 // When OrderBy != OrderByWriteTS, chunks use TS-index-ordered scanning: the TS
 // index is walked rank-by-rank in timestamp order. There is no heap fallback.
+func chunkLocallyMaterialized(cm chunk.ChunkManager, meta chunk.ChunkMeta) bool {
+	if meta.Sealed {
+		return true
+	}
+	type localContent interface {
+		HasLocalContent(chunk.ChunkID) bool
+	}
+	lc, ok := cm.(localContent)
+	return ok && lc.HasLocalContent(meta.ID)
+}
+
 func (e *Engine) buildScannerWithManagers(ctx context.Context, cursor chunk.RecordCursor, q Query, vaultID glid.GLID, meta chunk.ChunkMeta, startPos *uint64, cm chunk.ChunkManager, im index.IndexManager) (iter.Seq2[recordWithRef, error], error) {
 	b := newScannerBuilder(meta.ID)
 	b.vaultID = vaultID
@@ -697,10 +718,10 @@ func (e *Engine) buildScannerWithManagers(ctx context.Context, cursor chunk.Reco
 		b.addFilter(sourceTimeFilter(q.SourceStart, q.SourceEnd))
 	}
 
-	// Active/sealing chunks without a TS rank index (pipeline manifest reads,
-	// legacy actives before the B+ tree is wired) scan sequentially with
-	// runtime filters — same path Explain labels "buffer-sort".
-	if !meta.Sealed {
+	// Active/sealing FSM entries without a local GLCB fall back to manifest
+	// segment scans. Once data.glcb is on disk (registered with the chunk
+	// manager), use the embedded ITSI like a sealed chunk.
+	if !chunkLocallyMaterialized(cm, meta) {
 		view := tsIndexViewForChunk(cm, im, q.OrderBy)
 		if !chunkHasTSIndex(view, meta.ID) {
 			return b.build(ctx, cursor, q), nil

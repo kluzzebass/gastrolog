@@ -4479,6 +4479,15 @@ func (m *Manager) RegisterCloudChunk(id chunk.ChunkID, info chunk.CloudChunkInfo
 	return nil
 }
 
+// IsExternalGLCBAt reports whether id is registered to read glcbPath via the
+// external pipeline GLCB path (RegisterExternalGLCB).
+func (m *Manager) IsExternalGLCBAt(id chunk.ChunkID, glcbPath string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.externalGLCB[id]
+	return ok && p == glcbPath
+}
+
 // RegisterExternalGLCB registers a pipeline-built sealed chunk whose data.glcb
 // lives at glcbPath — an absolute path under the vault's segmentation ChunkRoot,
 // outside this manager's Dir. No bytes are copied: the read path resolves the
@@ -4495,6 +4504,12 @@ func (m *Manager) RegisterExternalGLCB(id chunk.ChunkID, glcbPath string, info c
 	defer m.mu.Unlock()
 	if m.closed {
 		return ErrManagerClosed
+	}
+	// Re-registering an already-registered external GLCB must not evict the
+	// mapped blob cache or rewrite meta — search/histogram list every FSM
+	// entry and reconciler sweeps call this frequently on the vault leader.
+	if existing, ok := m.externalGLCB[id]; ok && existing == glcbPath {
+		return nil
 	}
 	// A chunk this manager owns locally (built/sealed here, or cloud-backed)
 	// must not be shadowed by an external registration — its bytes live under

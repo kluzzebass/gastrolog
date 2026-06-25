@@ -397,3 +397,24 @@ func TestPipelineSealedGLCBMultiNode(t *testing.T) {
 		t.Fatalf("missing-bytes node returned %d records, want 0 (graceful skip)", len(skipped))
 	}
 }
+
+func TestExternalGLCBInfoForPipelineReadsIndexFromFile(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	fx := buildSealedPipelineGLCB(t, ctx, 6, e1Payload, nil)
+	sealingEntry := vaultctlfsm.ManifestEntry{ID: fx.sealed.ID, State: chunk.ChunkStateSealing}
+	info, err := externalGLCBInfoForPipeline(sealingEntry, fx.glcbPath)
+	if err != nil {
+		t.Fatalf("externalGLCBInfoForPipeline: %v", err)
+	}
+	if info.RecordCount != fx.sealed.RecordCount {
+		t.Fatalf("RecordCount = %d, want %d", info.RecordCount, fx.sealed.RecordCount)
+	}
+	if info.IngestIdxOffset == 0 || info.IngestIdxSize == 0 {
+		t.Fatalf("ingest index not populated from GLCB footer")
+	}
+	if info.IngestStart.IsZero() || info.IngestEnd.IsZero() {
+		t.Fatalf("ingest bounds not populated from GLCB")
+	}
+}

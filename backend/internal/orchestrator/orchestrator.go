@@ -218,6 +218,11 @@ type Orchestrator struct {
 	// pipeline manifest → chunk-bus wiring (AddOn* subscribers).
 	vaultCtlPipelineChunkEvents sync.Map
 
+	// pipelineChunkBoundsCache memoizes ingest bounds overlaid from GLCB/manifest
+	// for sealing chunks. Search lists every FSM entry per query; without this
+	// each list re-reads data.glcb for entries whose FSM bounds are still empty.
+	pipelineChunkBoundsCache sync.Map // chunk.ChunkID → pipelineChunkBoundsOverlay
+
 	// Pipeline lifecycle. The durable write path lives in the pipeline supervisor
 	// (o.pipeline); cancel stops the orchestrator's aux goroutines.
 	cancel context.CancelFunc
