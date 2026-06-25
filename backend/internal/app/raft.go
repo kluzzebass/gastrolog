@@ -244,7 +244,7 @@ func openRaftClusterCtlStore(opts raftStoreOpts) (*raftClusterCtlStore, error) {
 	opts.ClusterSrv.SetApplyFn(func(ctx context.Context, data []byte) (uint64, error) {
 		return store.ApplyRaw(data)
 	})
-	fwd := cluster.NewForwarder(r, opts.ClusterTLS)
+	fwd := cluster.NewForwarder(r, opts.ClusterSrv.PeerConns())
 	store.SetForwarder(fwd)
 
 	ownsWAL := !opts.VaultCtlRaftSharesWAL

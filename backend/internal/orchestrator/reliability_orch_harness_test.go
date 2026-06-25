@@ -431,12 +431,12 @@ func (h *orchRelHarness) startNode(id string) {
 		},
 		Logger: logger,
 	}
+	// Vault-ctl multiraft always dials through PeerConns (shared with
+	// ClusterService when pipeline mode is enabled).
+	n.peerConns = cluster.NewStaticPeerConns(id, h.resolver())
+	n.peerConns.SetStaticPeerIDs(h.nodeIDs)
+	n.clusterSrv.MultiRaftTransport().SetPeerConnPool(n.peerConns)
 	if h.pipeline != nil {
-		// Real cross-node transport: PeerConns backs both the vault-ctl
-		// apply forwarder (origin publish from non-leader nodes) and the
-		// SegmentPuller (home-side collection). The PullSegment server
-		// closure must be rebound on every (re)start since it captures orch.
-		n.peerConns = cluster.NewStaticPeerConns(id, h.resolver())
 		factories.PeerConns = n.peerConns
 		n.clusterSrv.SetSegmentPullServer(orch.ServeSegmentPull)
 		// ForwardVaultApply receiver: applies forwarded vault-ctl commands to

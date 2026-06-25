@@ -3,33 +3,25 @@ package cluster
 import (
 	"context"
 	"errors"
-	"fmt"
-	"sync"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 
 	hraft "github.com/hashicorp/raft"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 // Forwarder sends pre-marshaled ConfigCommand bytes to the current Raft leader's
 // cluster port via the ForwardApply RPC. Used by raftstore.Store on follower
 // nodes to transparently proxy config writes.
 type Forwarder struct {
-	raft       *hraft.Raft
-	clusterTLS *ClusterTLS // nil = insecure
-
-	mu   sync.Mutex
-	conn *grpc.ClientConn
-	last hraft.ServerAddress // cached leader address
+	raft  *hraft.Raft
+	peers *PeerConns
 }
 
-// NewForwarder creates a Forwarder that resolves the leader from r.
-// If clusterTLS is non-nil, connections use mTLS; otherwise insecure.
-func NewForwarder(r *hraft.Raft, clusterTLS *ClusterTLS) *Forwarder {
-	return &Forwarder{raft: r, clusterTLS: clusterTLS}
+// NewForwarder creates a Forwarder that resolves the leader from r and dials
+// through the shared PeerConns pool.
+func NewForwarder(r *hraft.Raft, peers *PeerConns) *Forwarder {
+	return &Forwarder{raft: r, peers: peers}
 }
 
 // Forward sends a pre-marshaled ConfigCommand to the leader for raft.Apply().
@@ -42,64 +34,37 @@ func NewForwarder(r *hraft.Raft, clusterTLS *ClusterTLS) *Forwarder {
 // this bound the RPC hangs indefinitely when the leader (or its
 // connection) is frozen. See gastrolog-5oofa.
 func (f *Forwarder) Forward(ctx context.Context, data []byte) (uint64, error) {
-	conn, err := f.leaderConn()
+	addr, leaderID := f.raft.LeaderWithID()
+	if addr == "" {
+		return 0, errors.New("no known leader")
+	}
+
+	conn, err := f.peers.ConnForAddress(addr)
 	if err != nil {
 		return 0, err
 	}
+
 	ctx, cancel := context.WithTimeout(ctx, ReplicationTimeout)
 	defer cancel()
 	client := NewForwardApplyClient(conn)
 	resp, err := client.ForwardApply(ctx, &gastrologv1.ForwardApplyRequest{Command: data})
 	if err != nil {
+		if leaderID != "" {
+			f.peers.Invalidate(string(leaderID), err)
+		}
 		return 0, err
 	}
 	return resp.GetAppliedIndex(), nil
 }
 
-func (f *Forwarder) leaderConn() (*grpc.ClientConn, error) {
-	addr, _ := f.raft.LeaderWithID()
+// Close is a no-op — connection lifecycle is managed by PeerConns.
+func (f *Forwarder) Close() error { return nil }
+
+// ConnForLeader returns a shared connection to the current config Raft leader.
+func (p *PeerConns) ConnForLeader(r *hraft.Raft) (*grpc.ClientConn, error) {
+	addr, _ := r.LeaderWithID()
 	if addr == "" {
 		return nil, errors.New("no known leader")
 	}
-
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
-	// Reuse existing connection if leader hasn't changed.
-	if f.conn != nil && f.last == addr {
-		return f.conn, nil
-	}
-	if f.conn != nil {
-		_ = f.conn.Close()
-		f.conn = nil
-	}
-
-	var creds credentials.TransportCredentials
-	if f.clusterTLS != nil && f.clusterTLS.State() != nil {
-		creds = f.clusterTLS.TransportCredentials()
-	} else {
-		creds = insecure.NewCredentials()
-	}
-
-	conn, err := grpc.NewClient(string(addr),
-		grpc.WithTransportCredentials(creds),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("dial leader %s: %w", addr, err)
-	}
-	f.conn = conn
-	f.last = addr
-	return conn, nil
-}
-
-// Close closes the cached connection to the leader.
-func (f *Forwarder) Close() error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.conn != nil {
-		err := f.conn.Close()
-		f.conn = nil
-		return err
-	}
-	return nil
+	return p.ConnForAddress(addr)
 }

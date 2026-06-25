@@ -52,9 +52,9 @@ func shouldInvalidate(err error) bool {
 const invalidateGracePeriod = 5 * time.Second
 
 // PeerConns manages a shared pool of gRPC connections to cluster peers.
-// All cluster components (Broadcaster, SearchForwarder, ChunkReplicator)
-// share a single PeerConns so that traffic to each peer is multiplexed
-// over one connection.
+// MultiRaft transport and ClusterService forwarders (SearchForwarder,
+// ChunkReplicator, etc.) share this pool so traffic to each peer multiplexes
+// over one HTTP/2 connection.
 type PeerConns struct {
 	raft        *hraft.Raft
 	clusterTLS  *ClusterTLS
@@ -65,6 +65,9 @@ type PeerConns struct {
 	// in resolveAddr. Set by NewStaticPeerConns for in-process multi-node
 	// harnesses that run cluster gRPC servers without a system Raft.
 	staticResolve func(nodeID string) (string, bool)
+	// staticPeerIDs lists peer node IDs for staticResolve reverse lookup
+	// (Raft server address → node ID). Optional; set via SetStaticPeerIDs.
+	staticPeerIDs []string
 
 	mu    sync.Mutex
 	conns map[string]*grpc.ClientConn
@@ -91,6 +94,25 @@ func NewStaticPeerConns(nodeID string, resolve func(nodeID string) (string, bool
 		staticResolve: resolve,
 		conns:         make(map[string]*grpc.ClientConn),
 	}
+}
+
+// SetStaticPeerIDs lists peer node IDs for address reverse lookup when
+// staticResolve is configured. Required when multiraft shares this pool in
+// harnesses that dial by cluster listen address rather than node ID.
+func (p *PeerConns) SetStaticPeerIDs(ids []string) {
+	p.mu.Lock()
+	p.staticPeerIDs = append([]string(nil), ids...)
+	p.mu.Unlock()
+}
+
+// ConnForAddress returns a shared connection for a Raft server address.
+// Implements multiraft.PeerConnPool.
+func (p *PeerConns) ConnForAddress(addr hraft.ServerAddress) (*grpc.ClientConn, error) {
+	nodeID, err := p.resolveNodeIDFromAddress(string(addr))
+	if err != nil {
+		return nil, err
+	}
+	return p.Conn(nodeID)
 }
 
 // SetByteMetrics attaches a PeerByteMetrics tracker. Must be called before
@@ -296,4 +318,34 @@ func (p *PeerConns) resolveAddr(nodeID string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("node %s not found in raft config", nodeID)
+}
+
+func (p *PeerConns) resolveNodeIDFromAddress(addr string) (string, error) {
+	if p.staticResolve != nil {
+		if mapped, ok := p.staticResolve(addr); ok && mapped != "" {
+			return addr, nil
+		}
+		p.mu.Lock()
+		ids := p.staticPeerIDs
+		p.mu.Unlock()
+		for _, id := range ids {
+			if mapped, ok := p.staticResolve(id); ok && mapped == addr {
+				return id, nil
+			}
+		}
+		return "", fmt.Errorf("node not found for address %s", addr)
+	}
+	if p.raft == nil {
+		return "", errors.New("peer conns: no raft configuration (static pool)")
+	}
+	future := p.raft.GetConfiguration()
+	if err := future.Error(); err != nil {
+		return "", fmt.Errorf("get raft config: %w", err)
+	}
+	for _, srv := range future.Configuration().Servers {
+		if string(srv.Address) == addr {
+			return string(srv.ID), nil
+		}
+	}
+	return "", fmt.Errorf("node not found for address %s", addr)
 }

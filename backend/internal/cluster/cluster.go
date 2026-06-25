@@ -31,10 +31,8 @@ import (
 	"github.com/Jille/raftadmin"
 	hraft "github.com/hashicorp/raft"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 )
@@ -309,26 +307,8 @@ const ConfigGroupID = "config"
 // scoped to the config group, suitable for passing to raft.NewRaft().
 // Must be called before Start().
 func (s *Server) Transport() hraft.Transport {
-	var creds credentials.TransportCredentials
-	if s.cfg.TLS != nil {
-		creds = s.cfg.TLS.TransportCredentials()
-	} else {
-		creds = insecure.NewCredentials()
-	}
-
 	s.tm = multiraft.New(
 		hraft.ServerAddress(s.localAddr),
-		[]grpc.DialOption{
-			grpc.WithTransportCredentials(creds),
-			grpc.WithConnectParams(grpc.ConnectParams{
-				Backoff: backoff.Config{
-					BaseDelay:  500 * time.Millisecond,
-					Multiplier: 1.6,
-					Jitter:     0.2,
-					MaxDelay:   3 * time.Second,
-				},
-			}),
-		},
 		func(s string) []byte { return []byte(s) },
 		func(b []byte) string { return string(b) },
 	)
@@ -354,6 +334,9 @@ func (s *Server) SetRaft(r *hraft.Raft) {
 	// Share the byte-metrics tracker with the outbound pool so tx/rx is
 	// attributed from every dialed connection.
 	s.peerConns.SetByteMetrics(s.cfg.ByteMetrics)
+	if s.tm != nil {
+		s.tm.SetPeerConnPool(s.peerConns)
+	}
 }
 
 // ByteMetrics returns the shared per-peer byte-counter tracker. Returns
@@ -363,20 +346,11 @@ func (s *Server) ByteMetrics() *PeerByteMetrics {
 }
 
 // PeerConns returns the shared peer connection pool. All components that
-// need to communicate with peer nodes should use this single pool.
+// need to communicate with peer nodes — including multiraft transport —
+// should use this single pool.
 // Returns nil if SetRaft has not been called.
 func (s *Server) PeerConns() *PeerConns {
 	return s.peerConns
-}
-
-// NewPeerConnsPool creates an independent connection pool using the same
-// Raft discovery and TLS system. Use for bulk traffic (replication, migration)
-// that shouldn't compete for HTTP/2 flow control with queries and config RPCs.
-// Inherits the shared byte-metrics tracker so bulk traffic is counted too.
-func (s *Server) NewPeerConnsPool() *PeerConns {
-	p := NewPeerConns(s.raft, s.cfg.TLS, s.cfg.NodeID)
-	p.SetByteMetrics(s.cfg.ByteMetrics)
-	return p
 }
 
 // AddVoter adds a new node to the Raft cluster as a voter.

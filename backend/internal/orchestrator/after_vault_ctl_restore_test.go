@@ -1,7 +1,6 @@
 package orchestrator
 
 import (
-	"context"
 	"net"
 	"path/filepath"
 	"testing"
@@ -19,7 +18,6 @@ import (
 
 	hraft "github.com/hashicorp/raft"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 )
 
@@ -40,21 +38,19 @@ func TestCreateGroupRestoreWithInstanceDoesNotDeadlock(t *testing.T) {
 	srv := grpc.NewServer()
 	tp := multiraft.New(
 		hraft.ServerAddress(nodeID),
-		[]grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
 		func(s string) []byte { return []byte(s) },
 		func(b []byte) string { return string(b) },
 	)
+	pool := multiraft.NewSimpleDialerPeerPool(map[string]func() (net.Conn, error){
+		nodeID: func() (net.Conn, error) { return lis.Dial() },
+	})
+	tp.SetPeerConnPool(pool)
 	tp.Register(srv)
 	go func() { _ = srv.Serve(lis) }()
 	t.Cleanup(func() {
+		pool.Close()
 		srv.Stop()
 		_ = tp.Close()
-	})
-	tp.SetDialOptions([]grpc.DialOption{
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithContextDialer(func(_ context.Context, _ string) (net.Conn, error) {
-			return lis.Dial()
-		}),
 	})
 
 	baseDir := t.TempDir()

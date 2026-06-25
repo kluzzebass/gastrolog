@@ -2,7 +2,6 @@ package multiraft
 
 import (
 	"bytes"
-	"context"
 	"crypto/rand"
 	"io"
 	"net"
@@ -12,7 +11,6 @@ import (
 
 	"github.com/hashicorp/raft"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 )
 
@@ -22,6 +20,7 @@ const bufSize = 1 << 20
 // a Transport, and a bufconn listener.
 type testNode struct {
 	transport *Transport[string]
+	pool      *DialerPeerPool
 	server    *grpc.Server
 	lis       *bufconn.Listener
 }
@@ -37,7 +36,7 @@ func makeTestCluster(t *testing.T, n int) []*testNode {
 		addr := raft.ServerAddress(lis.Addr().String())
 		srv := grpc.NewServer()
 
-		tp := New[string](addr, []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
+		tp := New[string](addr,
 			func(s string) []byte { return []byte(s) },
 			func(b []byte) string { return string(b) },
 		)
@@ -47,29 +46,23 @@ func makeTestCluster(t *testing.T, n int) []*testNode {
 		go func() { _ = srv.Serve(lis) }()
 	}
 
-	// Override dial options so nodes dial each other via bufconn.
+	// Wire shared dialers into each node's peer pool.
 	dialers := make(map[string]func() (net.Conn, error))
 	for _, node := range nodes {
 		addr := string(node.transport.localAddress)
 		l := node.lis
 		dialers[addr] = func() (net.Conn, error) { return l.Dial() }
 	}
-
 	for _, node := range nodes {
-		node.transport.dialOptions = []grpc.DialOption{
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithContextDialer(func(_ context.Context, addr string) (net.Conn, error) {
-				d, ok := dialers[addr]
-				if !ok {
-					return nil, net.UnknownNetworkError("no dialer for " + addr)
-				}
-				return d()
-			}),
-		}
+		node.pool = NewSimpleDialerPeerPool(dialers)
+		node.transport.SetPeerConnPool(node.pool)
 	}
 
 	t.Cleanup(func() {
 		for _, node := range nodes {
+			if node.pool != nil {
+				node.pool.Close()
+			}
 			node.server.Stop()
 			_ = node.transport.Close()
 		}
@@ -77,8 +70,6 @@ func makeTestCluster(t *testing.T, n int) []*testNode {
 
 	return nodes
 }
-
-// ---------- Tests ----------
 
 func TestAppendEntriesRoundTrip(t *testing.T) {
 	// Not parallel — gRPC servers + bufconn need clean sequential lifecycle.
@@ -485,11 +476,9 @@ func TestNonStringGroupID(t *testing.T) {
 	srv2 := grpc.NewServer()
 
 	tp1 := New[groupID](raft.ServerAddress(lis1.Addr().String()),
-		[]grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
 		encodeGroupID, decodeGroupID,
 	)
 	tp2 := New[groupID](raft.ServerAddress(lis2.Addr().String()),
-		[]grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
 		encodeGroupID, decodeGroupID,
 	)
 	tp1.Register(srv1)
@@ -497,23 +486,20 @@ func TestNonStringGroupID(t *testing.T) {
 	go func() { _ = srv1.Serve(lis1) }()
 	go func() { _ = srv2.Serve(lis2) }()
 
-	// Cross-connect via bufconn.
 	dialers := map[string]func() (net.Conn, error){
 		lis1.Addr().String(): func() (net.Conn, error) { return lis1.Dial() },
 		lis2.Addr().String(): func() (net.Conn, error) { return lis2.Dial() },
 	}
-	dialOpts := []grpc.DialOption{
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithContextDialer(func(_ context.Context, addr string) (net.Conn, error) {
-			return dialers[addr]()
-		}),
-	}
-	tp1.SetDialOptions(dialOpts)
-	tp2.SetDialOptions(dialOpts)
+	pool1 := NewSimpleDialerPeerPool(dialers)
+	pool2 := NewSimpleDialerPeerPool(dialers)
+	tp1.SetPeerConnPool(pool1)
+	tp2.SetPeerConnPool(pool2)
 
 	t.Cleanup(func() {
 		srv1.Stop()
 		srv2.Stop()
+		pool1.Close()
+		pool2.Close()
 		_ = tp1.Close()
 		_ = tp2.Close()
 	})

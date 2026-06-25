@@ -13,21 +13,26 @@ import (
 	"google.golang.org/grpc"
 )
 
+// PeerConnPool supplies outbound gRPC connections to cluster peers keyed by
+// Raft server address. Production nodes use cluster.PeerConns so MultiRaft and
+// ClusterService share one ClientConn per peer.
+type PeerConnPool interface {
+	ConnForAddress(addr raft.ServerAddress) (*grpc.ClientConn, error)
+}
+
 // Transport multiplexes multiple Raft groups over a single gRPC service.
 // Each group gets a scoped raft.Transport via GroupTransport(). All groups
 // share the same peer connection pool. K is the group ID type (must be comparable).
 // The encodeKey/decodeKey functions convert between K and the []byte wire format.
 type Transport[K comparable] struct {
 	localAddress raft.ServerAddress
-	dialOptions  []grpc.DialOption
 	encodeKey    func(K) []byte
 	decodeKey    func([]byte) K
 
+	peerPool PeerConnPool
+
 	mu     sync.RWMutex
 	groups map[K]*groupState
-
-	connMu sync.Mutex
-	conns  map[raft.ServerAddress]*peerConn
 
 	// Heartbeat coalescing: per-peer batch of pending heartbeats.
 	hbMu      sync.Mutex
@@ -62,13 +67,6 @@ type groupState struct {
 	heartbeatFunc    func(raft.RPC)
 	heartbeatFuncMtx sync.Mutex
 	heartbeatTimeout time.Duration
-}
-
-// peerConn holds a shared gRPC connection and typed client for one peer.
-type peerConn struct {
-	clientConn *grpc.ClientConn
-	client     *multiRaftClient
-	mtx        sync.Mutex
 }
 
 // multiRaftClient wraps a grpc.ClientConn for manually-invoked RPCs.
@@ -158,16 +156,14 @@ func (c *multiRaftClient) AppendEntriesPipeline(ctx context.Context) (grpc.Clien
 }
 
 // New creates a MultiRaftTransport bound to a local address.
-// encodeKey converts a group ID to bytes for the proto wire format.
-// decodeKey converts bytes from the wire format back to a group ID.
-func New[K comparable](localAddress raft.ServerAddress, dialOptions []grpc.DialOption, encodeKey func(K) []byte, decodeKey func([]byte) K) *Transport[K] {
+// Call SetPeerConnPool before any outbound RPC (cluster.Server.SetRaft does
+// this in production; tests use DialerPeerPool).
+func New[K comparable](localAddress raft.ServerAddress, encodeKey func(K) []byte, decodeKey func([]byte) K) *Transport[K] {
 	return &Transport[K]{
 		localAddress: localAddress,
-		dialOptions:  dialOptions,
 		encodeKey:    encodeKey,
 		decodeKey:    decodeKey,
 		groups:       make(map[K]*groupState),
-		conns:        make(map[raft.ServerAddress]*peerConn),
 		shutdownCh:   make(chan struct{}),
 	}
 }
@@ -210,37 +206,22 @@ func (t *Transport[K]) getGroup(groupID K) *groupState {
 	return gs
 }
 
-// getPeer returns or creates a connection + client for a peer.
+// getPeer returns a client for a peer via the configured PeerConnPool.
 func (t *Transport[K]) getPeer(target raft.ServerAddress) (*multiRaftClient, error) {
-	t.connMu.Lock()
-	pc, ok := t.conns[target]
-	if !ok {
-		pc = &peerConn{}
-		pc.mtx.Lock()
-		t.conns[target] = pc
+	if t.peerPool == nil {
+		return nil, errors.New("multiraft transport: peer connection pool not configured")
 	}
-	t.connMu.Unlock()
-	if ok {
-		pc.mtx.Lock()
+	cc, err := t.peerPool.ConnForAddress(target)
+	if err != nil {
+		return nil, err
 	}
-	defer pc.mtx.Unlock()
-	if pc.clientConn == nil {
-		conn, err := grpc.NewClient("passthrough:///"+string(target), t.dialOptions...)
-		if err != nil {
-			return nil, err
-		}
-		pc.clientConn = conn
-		pc.client = &multiRaftClient{cc: conn}
-	}
-	return pc.client, nil
+	return &multiRaftClient{cc: cc}, nil
 }
 
-// SetDialOptions replaces the dial options. Used by tests to inject bufconn
-// dialers after construction.
-func (t *Transport[K]) SetDialOptions(opts []grpc.DialOption) {
-	t.connMu.Lock()
-	t.dialOptions = opts
-	t.connMu.Unlock()
+// SetPeerConnPool wires the shared outbound connection pool. Required before
+// any outbound Raft RPC.
+func (t *Transport[K]) SetPeerConnPool(pool PeerConnPool) {
+	t.peerPool = pool
 }
 
 // LocalAddr returns the advertised local address.
@@ -266,17 +247,6 @@ func (t *Transport[K]) Close() error {
 		delete(t.groups, k)
 	}
 	t.mu.Unlock()
-
-	t.connMu.Lock()
-	defer t.connMu.Unlock()
-	for k, pc := range t.conns {
-		pc.mtx.Lock()
-		if pc.clientConn != nil {
-			_ = pc.clientConn.Close()
-		}
-		pc.mtx.Unlock()
-		delete(t.conns, k)
-	}
 	return nil
 }
 
@@ -558,22 +528,7 @@ func (g *groupTransport[K]) Connect(target raft.ServerAddress, _ raft.Transport)
 	_, _ = g.parent.getPeer(target)
 }
 
-func (g *groupTransport[K]) Disconnect(target raft.ServerAddress) {
-	t := g.parent
-	t.connMu.Lock()
-	pc, ok := t.conns[target]
-	if ok {
-		delete(t.conns, target)
-	}
-	t.connMu.Unlock()
-	if ok {
-		pc.mtx.Lock()
-		if pc.clientConn != nil {
-			_ = pc.clientConn.Close()
-		}
-		pc.mtx.Unlock()
-	}
-}
+func (g *groupTransport[K]) Disconnect(raft.ServerAddress) {}
 
 func (g *groupTransport[K]) DisconnectAll() {
 	_ = g.parent.Close()
