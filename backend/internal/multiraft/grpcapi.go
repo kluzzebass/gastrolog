@@ -2,6 +2,7 @@ package multiraft
 
 import (
 	"io"
+	"sync"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 
@@ -100,17 +101,22 @@ func (g *grpcAPI[K]) timeoutNow(req *gastrologv1.MultiRaftTimeoutNowRequest) (*g
 }
 
 func (g *grpcAPI[K]) batchHeartbeat(req *gastrologv1.MultiRaftBatchHeartbeatRequest) (*gastrologv1.MultiRaftBatchHeartbeatResponse, error) {
-	responses := make([]*gastrologv1.MultiRaftAppendEntriesResponse, len(req.GetHeartbeats()))
-	for i, hb := range req.GetHeartbeats() {
-		resp, err := g.appendEntries(hb)
-		if err != nil {
-			// Return an error response for this group but continue with
-			// others — a single dead group shouldn't kill the whole batch.
-			responses[i] = &gastrologv1.MultiRaftAppendEntriesResponse{}
-			continue
-		}
-		responses[i] = resp
+	hbs := req.GetHeartbeats()
+	responses := make([]*gastrologv1.MultiRaftAppendEntriesResponse, len(hbs))
+	var wg sync.WaitGroup
+	for i, hb := range hbs {
+		wg.Add(1)
+		go func(i int, hb *gastrologv1.MultiRaftAppendEntriesRequest) {
+			defer wg.Done()
+			resp, err := g.appendEntries(hb)
+			if err != nil {
+				responses[i] = &gastrologv1.MultiRaftAppendEntriesResponse{}
+				return
+			}
+			responses[i] = resp
+		}(i, hb)
 	}
+	wg.Wait()
 	return &gastrologv1.MultiRaftBatchHeartbeatResponse{Responses: responses}, nil
 }
 

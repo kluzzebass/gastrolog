@@ -34,30 +34,9 @@ type Transport[K comparable] struct {
 	mu     sync.RWMutex
 	groups map[K]*groupState
 
-	// Heartbeat coalescing: per-peer batch of pending heartbeats.
-	hbMu      sync.Mutex
-	hbBatches map[raft.ServerAddress]*heartbeatBatch
-
 	shutdown     bool
 	shutdownCh   chan struct{}
 	shutdownLock sync.Mutex
-}
-
-// pendingHeartbeat is a single heartbeat waiting in the batch.
-type pendingHeartbeat struct {
-	req  *gastrologv1.MultiRaftAppendEntriesRequest
-	resp chan heartbeatResult
-}
-
-type heartbeatResult struct {
-	resp *raft.AppendEntriesResponse
-	err  error
-}
-
-// heartbeatBatch collects heartbeats for one peer.
-type heartbeatBatch struct {
-	pending []pendingHeartbeat
-	timer   *time.Timer
 }
 
 // groupState holds the per-group dispatch state (rpcChan + heartbeat handler).
@@ -290,16 +269,15 @@ func (g *groupTransport[K]) Consumer() <-chan raft.RPC {
 func (g *groupTransport[K]) LocalAddr() raft.ServerAddress { return g.parent.localAddress }
 
 func (g *groupTransport[K]) AppendEntries(id raft.ServerID, target raft.ServerAddress, args *raft.AppendEntriesRequest, resp *raft.AppendEntriesResponse) error {
-	// Coalesce heartbeats: enqueue and let the batch flush send them.
-	if isHeartbeat(args) {
-		return g.batchHeartbeat(target, args, resp)
-	}
-
 	c, err := g.parent.getPeer(target)
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), appendEntriesRPCTimeout)
+	timeout := appendEntriesRPCTimeout
+	if isHeartbeat(args) {
+		timeout = heartbeatRPCTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	ret, err := c.AppendEntries(ctx, encodeAppendEntriesRequest(g.parent.encodeKey(g.groupID), args))
 	if err != nil {
@@ -307,87 +285,6 @@ func (g *groupTransport[K]) AppendEntries(id raft.ServerID, target raft.ServerAd
 	}
 	*resp = *decodeAppendEntriesResponse(ret)
 	return nil
-}
-
-const heartbeatBatchWindow = 1 * time.Millisecond
-
-func (g *groupTransport[K]) batchHeartbeat(target raft.ServerAddress, args *raft.AppendEntriesRequest, resp *raft.AppendEntriesResponse) error {
-	req := encodeAppendEntriesRequest(g.parent.encodeKey(g.groupID), args)
-	result := make(chan heartbeatResult, 1)
-
-	t := g.parent
-	t.hbMu.Lock()
-	if t.hbBatches == nil {
-		t.hbBatches = make(map[raft.ServerAddress]*heartbeatBatch)
-	}
-	batch, ok := t.hbBatches[target]
-	if !ok {
-		batch = &heartbeatBatch{}
-		t.hbBatches[target] = batch
-	}
-	batch.pending = append(batch.pending, pendingHeartbeat{req: req, resp: result})
-	if batch.timer == nil {
-		batch.timer = time.AfterFunc(heartbeatBatchWindow, func() {
-			t.flushHeartbeats(target)
-		})
-	}
-	t.hbMu.Unlock()
-
-	// Block until the batch is flushed.
-	r := <-result
-	if r.err != nil {
-		return r.err
-	}
-	*resp = *r.resp
-	return nil
-}
-
-func (t *Transport[K]) flushHeartbeats(target raft.ServerAddress) {
-	t.hbMu.Lock()
-	batch := t.hbBatches[target]
-	if batch == nil || len(batch.pending) == 0 {
-		t.hbMu.Unlock()
-		return
-	}
-	pending := batch.pending
-	batch.pending = nil
-	batch.timer = nil
-	t.hbMu.Unlock()
-
-	// Build the batched request.
-	reqs := make([]*gastrologv1.MultiRaftAppendEntriesRequest, len(pending))
-	for i, p := range pending {
-		reqs[i] = p.req
-	}
-
-	c, err := t.getPeer(target)
-	if err != nil {
-		for _, p := range pending {
-			p.resp <- heartbeatResult{err: err}
-		}
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), heartbeatRPCTimeout)
-	defer cancel()
-	batchResp, err := c.BatchHeartbeat(ctx, &gastrologv1.MultiRaftBatchHeartbeatRequest{
-		Heartbeats: reqs,
-	})
-	if err != nil {
-		for _, p := range pending {
-			p.resp <- heartbeatResult{err: err}
-		}
-		return
-	}
-
-	// Dispatch responses back to callers.
-	for i, p := range pending {
-		if i < len(batchResp.Responses) {
-			p.resp <- heartbeatResult{resp: decodeAppendEntriesResponse(batchResp.Responses[i])}
-		} else {
-			p.resp <- heartbeatResult{err: errors.New("batch response too short")}
-		}
-	}
 }
 
 func (g *groupTransport[K]) RequestVote(id raft.ServerID, target raft.ServerAddress, args *raft.RequestVoteRequest, resp *raft.RequestVoteResponse) error {
