@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -387,6 +388,74 @@ func TestCollectOnceUnknownVault(t *testing.T) {
 type errPull struct{ err error }
 
 func (p errPull) Pull(context.Context, glid.GLID, glid.GLID, io.Writer) error { return p.err }
+
+// TestCollectOnceWaitersShareWorkerPass verifies concurrent CollectOnce calls
+// with an active worker coalesce on one worker pass instead of each caller
+// acquiring passMu and running a separate pass.
+func TestCollectOnceWaitersShareWorkerPass(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	seg1 := glid.New()
+	seg2 := glid.New()
+	root := t.TempDir()
+
+	pull := newMemoryPull()
+	pull.Put(seg1, writeSegmentBytes(t, vaultID, seg1, "one"))
+	pull.Put(seg2, writeSegmentBytes(t, vaultID, seg2, "two"))
+	slow := &countingSlowPull{inner: pull, delay: 50 * time.Millisecond}
+
+	log := &staticLog{}
+	log.setAssigned(collection.AssignedSegment{VaultID: vaultID, SegmentID: seg1})
+	receipts := &recordingReceipts{}
+
+	mgr := collection.New(collection.Config{})
+	if err := mgr.RegisterVault(vaultID, root, collection.VaultConfig{
+		Log: log, Pull: slow, Receipts: receipts,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		_ = mgr.Run(ctx)
+	}()
+	time.Sleep(150 * time.Millisecond) // initial pass collects seg1
+
+	log.setAssigned(collection.AssignedSegment{VaultID: vaultID, SegmentID: seg2})
+	slow.pulls.Store(0)
+
+	var wg sync.WaitGroup
+	errs := make([]error, 3)
+	for i := range errs {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			errs[i] = mgr.CollectOnce(context.Background(), vaultID)
+		}(i)
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("CollectOnce[%d]: %v", i, err)
+		}
+	}
+	if n := slow.pulls.Load(); n != 1 {
+		t.Fatalf("pulls during coalesced CollectOnce = %d, want 1", n)
+	}
+}
+
+type countingSlowPull struct {
+	inner collection.PullClient
+	delay time.Duration
+	pulls atomic.Int64
+}
+
+func (s *countingSlowPull) Pull(ctx context.Context, vaultID, segmentID glid.GLID, dest io.Writer) error {
+	s.pulls.Add(1)
+	time.Sleep(s.delay)
+	return s.inner.Pull(ctx, vaultID, segmentID, dest)
+}
 
 func TestCollectOncePullFailure(t *testing.T) {
 	t.Parallel()

@@ -112,7 +112,10 @@ type CompactionStats struct {
 // WAL is the shared write-ahead log. Create one per node; all Raft
 // groups on that node share it.
 type WAL struct {
-	mu       sync.Mutex
+	// stateMu protects in-memory group state (groups, groupIDs, nextGID,
+	// lastCompaction). Disk writes and fsync run in batchWriter without
+	// holding stateMu so concurrent reads are not blocked on I/O.
+	stateMu  sync.RWMutex
 	dir      string
 	cfg      Config
 	groups   map[uint32]*groupState // groupID → state
@@ -199,7 +202,7 @@ func Open(dir string, cfgs ...Config) (*WAL, error) {
 // GroupStore returns a handle for the named group that implements
 // raft.LogStore and raft.StableStore.
 func (w *WAL) GroupStore(name string) *GroupStore {
-	w.mu.Lock()
+	w.stateMu.Lock()
 
 	gid, ok := w.groupIDs[name]
 	needsReg := false
@@ -215,7 +218,7 @@ func (w *WAL) GroupStore(name string) *GroupStore {
 		}
 		needsReg = true
 	}
-	w.mu.Unlock()
+	w.stateMu.Unlock()
 
 	// Persist the name→ID mapping outside the lock (submit acquires it).
 	if needsReg {
@@ -232,22 +235,22 @@ func (w *WAL) GroupStore(name string) *GroupStore {
 // LastCompactionStats returns statistics from the most recent automatic
 // compaction run. If no compaction has run yet, fields are zero.
 func (w *WAL) LastCompactionStats() CompactionStats {
-	w.mu.Lock()
-	defer w.mu.Unlock()
+	w.stateMu.RLock()
+	defer w.stateMu.RUnlock()
 	return w.lastCompaction
 }
 
 // Close flushes pending writes and closes the WAL. Safe to call multiple times.
 func (w *WAL) Close() error {
-	w.mu.Lock()
+	w.stateMu.Lock()
 	select {
 	case <-w.done:
-		w.mu.Unlock()
+		w.stateMu.Unlock()
 		return nil // already closed
 	default:
 		close(w.done)
 	}
-	w.mu.Unlock()
+	w.stateMu.Unlock()
 	w.wg.Wait()
 	// Drain any ops that were enqueued but never processed.
 	for {
@@ -336,20 +339,41 @@ func (w *WAL) syncActiveSegment() error {
 }
 
 // flushBatch writes all ops to the segment, fsyncs once, and notifies callers.
+// Segment I/O and fsync run without stateMu so reads can proceed concurrently.
 func (w *WAL) flushBatch(batch []writeOp) {
 	if len(batch) == 0 {
 		return
 	}
 
-	w.mu.Lock()
-	defer w.mu.Unlock()
+	appliedOps, writeErr, sawDeleteRange := w.appendBatchToSegment(batch)
 
-	var writeErr error
-	sawDeleteRange := false
+	if len(appliedOps) > 0 {
+		w.stateMu.Lock()
+		for _, op := range appliedOps {
+			w.applyToMemory(op.groupID, op.typ, op.payload)
+		}
+		w.stateMu.Unlock()
+	}
 
+	// Single fsync for the entire batch — no stateMu held.
+	syncErr := w.syncActiveSegment()
+
+	if syncErr == nil && writeErr == nil && sawDeleteRange {
+		// Best effort: compaction must never affect caller-visible success
+		// for already-fsynced writes. Run before notifying waiters so
+		// LastCompactionStats is stable when DeleteRange returns.
+		_ = w.compactSegments()
+	}
+
+	w.notifyBatchWaiters(batch, syncErr)
+}
+
+func (w *WAL) appendBatchToSegment(batch []writeOp) (appliedOps []writeOp, writeErr error, sawDeleteRange bool) {
 	for i := range batch {
 		if writeErr != nil {
-			batch[i].done <- writeErr
+			if batch[i].done != nil {
+				batch[i].done <- writeErr
+			}
 			continue
 		}
 		// Rotate before writing if this entry would push the segment
@@ -359,26 +383,28 @@ func (w *WAL) flushBatch(batch []writeOp) {
 		if w.segSize > 0 && w.segSize+entrySize > w.cfg.SegmentTargetSize {
 			if err := w.rotateSegment(); err != nil {
 				writeErr = err
-				batch[i].done <- err
+				if batch[i].done != nil {
+					batch[i].done <- err
+				}
 				continue
 			}
 		}
 		if err := w.appendEntry(batch[i].groupID, batch[i].typ, batch[i].payload); err != nil {
 			writeErr = err
-			batch[i].done <- err
+			if batch[i].done != nil {
+				batch[i].done <- err
+			}
 			continue
 		}
-		// Apply to in-memory state.
-		w.applyToMemory(batch[i].groupID, batch[i].typ, batch[i].payload)
+		appliedOps = append(appliedOps, batch[i])
 		if batch[i].typ == entryDeleteRange {
 			sawDeleteRange = true
 		}
 	}
+	return appliedOps, writeErr, sawDeleteRange
+}
 
-	// Single fsync for the entire batch.
-	syncErr := w.syncActiveSegment()
-
-	// Notify all callers.
+func (w *WAL) notifyBatchWaiters(batch []writeOp, syncErr error) {
 	for i := range batch {
 		if batch[i].done != nil {
 			select {
@@ -388,16 +414,10 @@ func (w *WAL) flushBatch(batch []writeOp) {
 			}
 		}
 	}
-
-	if syncErr == nil && writeErr == nil && sawDeleteRange {
-		// Best effort: compaction must never affect caller-visible success
-		// for already-fsynced writes.
-		_ = w.compactSegmentsLocked()
-	}
 }
 
 // appendEntry writes a single WAL entry to the current segment.
-// Must be called with w.mu held.
+// Must be called from batchWriter only.
 func (w *WAL) appendEntry(groupID uint32, typ entryType, payload []byte) error {
 	// Format: [groupID:4][type:1][length:4][payload:N][crc32:4]
 	hdr := make([]byte, headerSize)
@@ -418,7 +438,7 @@ func (w *WAL) appendEntry(groupID uint32, typ entryType, payload []byte) error {
 }
 
 // applyToMemory updates the in-memory index for a group.
-// Must be called with w.mu held.
+// Must be called with w.stateMu held for writing.
 func (w *WAL) applyToMemory(groupID uint32, typ entryType, payload []byte) {
 	gs := w.groups[groupID]
 	if gs == nil {
@@ -467,7 +487,7 @@ func (w *WAL) applyToMemory(groupID uint32, typ entryType, payload []byte) {
 }
 
 // rotateSegment closes the current segment and opens a new one.
-// Must be called with w.mu held.
+// Must be called from batchWriter only.
 func (w *WAL) rotateSegment() error {
 	if w.seg != nil {
 		if err := w.seg.Close(); err != nil {
@@ -574,7 +594,7 @@ func (w *WAL) listSegments() ([]segmentInfo, error) {
 	return segments, nil
 }
 
-func (w *WAL) compactSegmentsLocked() error {
+func (w *WAL) compactSegments() error {
 	segments, err := w.listSegments()
 	if err != nil {
 		return err
@@ -597,7 +617,9 @@ func (w *WAL) compactSegmentsLocked() error {
 	if err := w.rotateSegment(); err != nil {
 		return err
 	}
-	if err := w.writeCompactedSnapshotLocked(); err != nil {
+
+	records := w.collectCompactionSnapshot()
+	if err := w.writeCompactionSnapshot(records); err != nil {
 		return err
 	}
 	if err := w.syncActiveSegment(); err != nil {
@@ -625,26 +647,28 @@ func (w *WAL) compactSegmentsLocked() error {
 	for _, seg := range remaining {
 		retainedBytes += seg.size
 	}
+	w.stateMu.Lock()
 	w.lastCompaction = CompactionStats{
 		ReclaimedSegments: reclaimedSegments,
 		ReclaimedBytes:    reclaimedBytes,
 		RetainedSegments:  len(remaining),
 		RetainedBytes:     retainedBytes,
 	}
+	w.stateMu.Unlock()
 	return nil
 }
 
-func (w *WAL) appendCompactedEntryLocked(groupID uint32, typ entryType, payload []byte) error {
-	entrySize := int64(headerSize + len(payload))
-	if w.segSize > 0 && w.segSize+entrySize > w.cfg.SegmentTargetSize {
-		if err := w.rotateSegment(); err != nil {
-			return err
-		}
-	}
-	return w.appendEntry(groupID, typ, payload)
+type snapshotRecord struct {
+	groupID uint32
+	typ     entryType
+	payload []byte
 }
 
-func (w *WAL) writeCompactedSnapshotLocked() error {
+// collectCompactionSnapshot copies live WAL state under stateMu for compaction.
+func (w *WAL) collectCompactionSnapshot() []snapshotRecord {
+	w.stateMu.RLock()
+	defer w.stateMu.RUnlock()
+
 	type groupRef struct {
 		name string
 		id   uint32
@@ -659,10 +683,15 @@ func (w *WAL) writeCompactedSnapshotLocked() error {
 		}
 		return refs[i].id < refs[j].id
 	})
+
+	var records []snapshotRecord
 	for _, ref := range refs {
-		if err := w.appendCompactedEntryLocked(ref.id, entryGroupReg, []byte(ref.name)); err != nil {
-			return err
-		}
+		payload := append([]byte(nil), []byte(ref.name)...)
+		records = append(records, snapshotRecord{
+			groupID: ref.id,
+			typ:     entryGroupReg,
+			payload: payload,
+		})
 	}
 
 	groupIDs := make([]uint32, 0, len(w.groups))
@@ -683,9 +712,13 @@ func (w *WAL) writeCompactedSnapshotLocked() error {
 		}
 		sort.Strings(stableKeys)
 		for _, key := range stableKeys {
-			if err := w.appendCompactedEntryLocked(gid, entryStableSet, encodeStableSet(key, gs.stable[key])); err != nil {
-				return err
-			}
+			val := gs.stable[key]
+			payload := encodeStableSet(key, val)
+			records = append(records, snapshotRecord{
+				groupID: gid,
+				typ:     entryStableSet,
+				payload: payload,
+			})
 		}
 
 		logIndexes := make([]uint64, 0, len(gs.logs))
@@ -694,12 +727,34 @@ func (w *WAL) writeCompactedSnapshotLocked() error {
 		}
 		slices.Sort(logIndexes)
 		for _, idx := range logIndexes {
-			if err := w.appendCompactedEntryLocked(gid, entryLog, gs.logs[idx]); err != nil {
-				return err
-			}
+			payload := append([]byte(nil), gs.logs[idx]...)
+			records = append(records, snapshotRecord{
+				groupID: gid,
+				typ:     entryLog,
+				payload: payload,
+			})
+		}
+	}
+	return records
+}
+
+func (w *WAL) writeCompactionSnapshot(records []snapshotRecord) error {
+	for _, rec := range records {
+		if err := w.appendCompactedEntry(rec.groupID, rec.typ, rec.payload); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+func (w *WAL) appendCompactedEntry(groupID uint32, typ entryType, payload []byte) error {
+	entrySize := int64(headerSize + len(payload))
+	if w.segSize > 0 && w.segSize+entrySize > w.cfg.SegmentTargetSize {
+		if err := w.rotateSegment(); err != nil {
+			return err
+		}
+	}
+	return w.appendEntry(groupID, typ, payload)
 }
 
 // replaySegment reads a single WAL segment file and applies entries to memory.

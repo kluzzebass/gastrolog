@@ -34,9 +34,9 @@ run-bootstrap:
 run-noauth:
   go run ./cmd/gastrolog server --no-auth --home "${GLOG_DATA_DIR:-data}"
 
-# Runs the gastrolog backend with pprof server.
+# Runs the gastrolog backend with pprof server and debug sampling (mutex/block).
 pprof:
-  go run ./cmd/gastrolog server --home "${GLOG_DATA_DIR:-data}" --pprof localhost:6060
+  go run ./cmd/gastrolog server --home "${GLOG_DATA_DIR:-data}" --pprof localhost:6060 --pprof-debug
 
 # Runs a config CLI command against the local server. Usage: just cfg filter list
 conf *args:
@@ -119,7 +119,7 @@ audit:
 cluster-run:
   ../scripts/cluster.sh run
 
-# Runs an existing 4-node cluster with pprof enabled (ports 6060-6063).
+# Runs an existing 4-node cluster with full pprof (6060-6063, mutex/block/trace).
 cluster-run-pprof:
   ../scripts/cluster.sh run --pprof
 
@@ -144,6 +144,64 @@ heap-profile node="1":
   #!/usr/bin/env bash
   port=$((6059 + {{node}}))
   curl -s "http://localhost:${port}/debug/pprof/heap" -o "/tmp/gastrolog-node{{node}}-heap.prof" && go tool pprof -top "/tmp/gastrolog-node{{node}}-heap.prof"
+
+# CPU profile for N seconds. Usage: just cpu-profile 4 30
+cpu-profile node="1" seconds="30":
+  #!/usr/bin/env bash
+  port=$((6059 + {{node}}))
+  out="/tmp/gastrolog-node{{node}}-cpu.prof"
+  curl -s "http://localhost:${port}/debug/pprof/profile?seconds={{seconds}}" -o "$out"
+  go tool pprof -top "$out"
+
+# Goroutine profile. Usage: just goroutine-profile 3
+goroutine-profile node="1":
+  #!/usr/bin/env bash
+  port=$((6059 + {{node}}))
+  out="/tmp/gastrolog-node{{node}}-goroutine.prof"
+  curl -s "http://localhost:${port}/debug/pprof/goroutine" -o "$out"
+  go tool pprof -top -cum "$out"
+
+# Mutex contention profile (requires --pprof-debug or --pprof-mutex-fraction). Usage: just mutex-profile 4
+mutex-profile node="1":
+  #!/usr/bin/env bash
+  port=$((6059 + {{node}}))
+  out="/tmp/gastrolog-node{{node}}-mutex.prof"
+  curl -s "http://localhost:${port}/debug/pprof/mutex" -o "$out"
+  go tool pprof -top -cum "$out"
+
+# Block profile (requires --pprof-debug or --pprof-block-rate). Usage: just block-profile 3
+block-profile node="1":
+  #!/usr/bin/env bash
+  port=$((6059 + {{node}}))
+  out="/tmp/gastrolog-node{{node}}-block.prof"
+  curl -s "http://localhost:${port}/debug/pprof/block" -o "$out"
+  go tool pprof -top -cum "$out"
+
+# Execution trace. Usage: just trace-profile 3 5
+trace-profile node="1" seconds="5":
+  #!/usr/bin/env bash
+  port=$((6059 + {{node}}))
+  out="/tmp/gastrolog-node{{node}}.trace"
+  curl -s "http://localhost:${port}/debug/pprof/trace?seconds={{seconds}}" -o "$out"
+  echo "saved $out — open with: go tool trace $out"
+
+# Capture CPU, goroutine, mutex, block, and trace in one shot during an incident.
+# Usage: just pprof-capture 4 30 5
+pprof-capture node="4" cpu_seconds="30" trace_seconds="5":
+  #!/usr/bin/env bash
+  set -euo pipefail
+  port=$((6059 + {{node}}))
+  base="/tmp/gastrolog-node{{node}}"
+  echo "capturing from localhost:${port} ..."
+  curl -s "http://localhost:${port}/debug/pprof/profile?seconds={{cpu_seconds}}" -o "${base}-cpu.prof"
+  curl -s "http://localhost:${port}/debug/pprof/goroutine" -o "${base}-goroutine.prof"
+  curl -s "http://localhost:${port}/debug/pprof/mutex" -o "${base}-mutex.prof"
+  curl -s "http://localhost:${port}/debug/pprof/block" -o "${base}-block.prof"
+  curl -s "http://localhost:${port}/debug/pprof/trace?seconds={{trace_seconds}}" -o "${base}.trace"
+  echo "saved:"
+  ls -lh "${base}"*.prof "${base}.trace"
+  echo "inspect: go tool pprof -http=:0 ${base}-cpu.prof"
+  echo "trace:   go tool trace ${base}.trace"
 
 # --- End cluster recipes ---
 

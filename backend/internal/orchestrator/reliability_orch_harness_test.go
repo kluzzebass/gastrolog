@@ -14,6 +14,7 @@ import (
 	chunkfile "gastrolog/internal/chunk/file"
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/home"
 	"gastrolog/internal/index"
 	indexfile "gastrolog/internal/index/file"
 	"gastrolog/internal/orchestrator"
@@ -382,7 +383,7 @@ func (h *orchRelHarness) startNode(id string) {
 	h.t.Helper()
 	n := h.nodes[id]
 
-	walDir := filepath.Join(n.home, "raft/wal")
+	walDir := home.New(n.home).VaultCtlWALDir()
 	wal, err := raftwal.Open(walDir)
 	if err != nil {
 		h.t.Fatalf("%s: raftwal.Open: %v", id, err)

@@ -984,6 +984,55 @@ func TestMultipleReopenCycles(t *testing.T) {
 
 // --- Concurrent read/write ---
 
+// TestReadsNotBlockedDuringFsync verifies GetLog does not wait on segment fsync.
+// Before the stateMu/fsync split, batchWriter held the exclusive lock through
+// syncActiveSegment and blocked all readers for the full fsync duration.
+func TestReadsNotBlockedDuringFsync(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	const fsyncDelay = 200 * time.Millisecond
+	cfg := Config{
+		SyncBatchWindow: 1 * time.Millisecond,
+		SegmentSync: func(*os.File) error {
+			time.Sleep(fsyncDelay)
+			return nil
+		},
+	}
+	w, err := Open(dir, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+
+	gs := w.GroupStore("vault-1")
+	if err := gs.StoreLog(&hraft.Log{Index: 1, Term: 1, Data: []byte("seed")}); err != nil {
+		t.Fatal(err)
+	}
+
+	writeStarted := make(chan struct{})
+	go func() {
+		close(writeStarted)
+		_ = gs.StoreLog(&hraft.Log{Index: 2, Term: 1, Data: []byte("slow-fsync")})
+	}()
+
+	<-writeStarted
+	time.Sleep(10 * time.Millisecond) // let batchWriter reach fsync
+
+	const readBudget = 50 * time.Millisecond
+	start := time.Now()
+	var log hraft.Log
+	if err := gs.GetLog(1, &log); err != nil {
+		t.Fatalf("GetLog during fsync: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > readBudget {
+		t.Fatalf("GetLog blocked %v during fsync, want <%v", elapsed, readBudget)
+	}
+	if string(log.Data) != "seed" {
+		t.Fatalf("GetLog data=%q want seed", log.Data)
+	}
+}
+
 func TestConcurrentReadWrite(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

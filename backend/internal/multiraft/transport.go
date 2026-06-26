@@ -269,8 +269,12 @@ func (g *groupTransport[K]) Consumer() <-chan raft.RPC {
 func (g *groupTransport[K]) LocalAddr() raft.ServerAddress { return g.parent.localAddress }
 
 func (g *groupTransport[K]) AppendEntries(id raft.ServerID, target raft.ServerAddress, args *raft.AppendEntriesRequest, resp *raft.AppendEntriesResponse) error {
+	start := time.Now()
+	connStart := start
 	c, err := g.parent.getPeer(target)
+	connWait := time.Since(connStart)
 	if err != nil {
+		traceOutboundAppendEntries(g.groupID, target, args, connWait, 0, time.Since(start), err)
 		return err
 	}
 	timeout := appendEntriesRPCTimeout
@@ -279,7 +283,11 @@ func (g *groupTransport[K]) AppendEntries(id raft.ServerID, target raft.ServerAd
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
+	rpcStart := time.Now()
 	ret, err := c.AppendEntries(ctx, encodeAppendEntriesRequest(g.parent.encodeKey(g.groupID), args))
+	rpcDur := time.Since(rpcStart)
+	total := time.Since(start)
+	traceOutboundAppendEntries(g.groupID, target, args, connWait, rpcDur, total, err)
 	if err != nil {
 		return err
 	}

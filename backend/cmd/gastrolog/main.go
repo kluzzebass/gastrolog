@@ -23,6 +23,8 @@ import (
 	"gastrolog/cmd/gastrolog/cli"
 	"gastrolog/internal/app"
 	"gastrolog/internal/logging"
+	"gastrolog/internal/multiraft"
+	"gastrolog/internal/profiling"
 
 	"github.com/spf13/cobra"
 )
@@ -73,6 +75,27 @@ func main() {
 		Short: "Log aggregation service",
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			pprofAddr, _ := cmd.Flags().GetString("pprof")
+			pprofDebug, _ := cmd.Flags().GetBool("pprof-debug")
+			mutexFraction, _ := cmd.Flags().GetInt("pprof-mutex-fraction")
+			blockRate, _ := cmd.Flags().GetInt("pprof-block-rate")
+
+			if pprofDebug {
+				debug := profiling.DebugConfig()
+				if !cmd.Flags().Changed("pprof-mutex-fraction") {
+					mutexFraction = debug.MutexFraction
+				}
+				if !cmd.Flags().Changed("pprof-block-rate") {
+					blockRate = debug.BlockRate
+				}
+			}
+			profiling.Setup(logger, profiling.Config{
+				MutexFraction: mutexFraction,
+				BlockRate:     blockRate,
+			})
+			if pprofDebug {
+				multiraft.EnableLeaseTrace(logger, true)
+			}
+
 			if pprofAddr != "" {
 				go func() {
 					logger.Info("pprof server listening", "addr", pprofAddr)
@@ -88,7 +111,10 @@ func main() {
 
 	rootCmd.PersistentFlags().String("home", "", "home directory (default: platform config dir)")
 	rootCmd.PersistentFlags().String("config-type", "raft", "config store type: raft or memory")
-	rootCmd.PersistentFlags().String("pprof", "", "pprof HTTP server address (e.g. localhost:6060)")
+	rootCmd.PersistentFlags().String("pprof", "", "pprof HTTP server address (e.g. localhost:6060); exposes /debug/pprof/{profile,trace,heap,goroutine,mutex,block}")
+	rootCmd.PersistentFlags().Bool("pprof-debug", false, "enable mutex (1/5) and block (10ms) sampling for pprof; dev/incident use only")
+	rootCmd.PersistentFlags().Int("pprof-mutex-fraction", 0, "mutex contention sample rate for /debug/pprof/mutex (0=off, 1=all, 5=one in five)")
+	rootCmd.PersistentFlags().Int("pprof-block-rate", 0, "block profile sample period in nanoseconds for /debug/pprof/block (0=off, 1=all events, 10000000≈one per 10ms blocked)")
 	rootCmd.PersistentFlags().String("log-level", "", "boot-time log levels, comma-separated (e.g. \"default=info,orchestrator.**=debug\"). Once the cluster config store has rules, those take precedence. Patterns follow gitignore-style globs (* = one segment, ** = any depth).")
 	cli.AddClientFlags(rootCmd)
 

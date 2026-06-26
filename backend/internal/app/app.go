@@ -220,7 +220,6 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		Home: hd, NodeID: nodeID, JoinAddr: cfg.JoinAddr,
 		ClusterSrv: clusterSrv, ClusterTLS: clusterTLS,
 		Logger: logger, FSMOpts: []raftfsm.Option{raftfsm.WithOnApply(disp.Handle)},
-		VaultCtlRaftSharesWAL: clusterSrv != nil,
 	})
 	if err != nil {
 		return fmt.Errorf("open config store: %w", err)
@@ -1230,7 +1229,7 @@ type serverDeps struct {
 	SetNodeSuffrageFunc func(ctx context.Context, nodeID string, voter bool) error
 	Dispatcher          *configDispatcher
 	GroupMgr            *raftgroup.GroupManager
-	WAL                 *raftwal.WAL // vault-group WAL (same file as system raft when cluster mode); nil = per-group boltdb
+	WAL                 *raftwal.WAL // vault-ctl raftwal at raft/groups/wal; closed after cluster-ctl raft
 	ConfigStore         io.Closer    // rawStore — closed before gRPC for clean Raft shutdown
 	PlacementReconcile  func(ctx context.Context)
 
@@ -1307,10 +1306,9 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 		_ = deps.Broadcaster.Close()
 	}
 
-	// Shutdown order: vault multiraft (control-plane) → cluster-ctl Raft → WAL → gRPC server.
-	// Vault multiraft and system raft both use the same raftwal when cluster mode is on;
-	// system raft must stop before WAL.Close. Raft must shut down WHILE the
-	// transport is alive, otherwise the leader's replication goroutines block
+	// Shutdown order: vault multiraft → cluster-ctl Raft → vault WAL → cluster WAL (via ConfigStore) → gRPC.
+	// Cluster-ctl and vault groups use separate raftwal directories (gastrolog-3tp89). Raft must
+	// shut down WHILE the transport is alive, otherwise the leader's replication goroutines block
 	// on dead gRPC connections.
 	if deps.GroupMgr != nil {
 		deps.Logger.Info("shutting down vault multiraft groups")
@@ -1324,7 +1322,7 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 
 	if deps.WAL != nil {
 		if err := deps.WAL.Close(); err != nil {
-			deps.Logger.Error("raftwal close failed", "error", err)
+			deps.Logger.Error("vault-ctl raftwal close failed", "error", err)
 		}
 	}
 
@@ -1366,21 +1364,14 @@ func setupMultiRaft(clusterSrv *cluster.Server, rawStore system.Store, nodeID, h
 		return nil, nil, nil
 	}
 
-	// Prefer the system store's WAL (opened first in Run) so we never attach
-	// two raftwal instances to the same on-disk directory.
-	var wal *raftwal.WAL
-	if rcs, ok := rawStore.(*raftClusterCtlStore); ok && !rcs.ownsWAL {
-		wal = rcs.wal
+	hd := home.New(homeDir)
+	walDir := hd.VaultCtlWALDir()
+	wal, err := raftwal.Open(walDir)
+	if err != nil {
+		logger.Warn("failed to open vault-ctl raft WAL", "dir", walDir, "error", err)
+		return nil, nil, nil
 	}
-	if wal == nil {
-		walDir := filepath.Join(homeDir, "raft", "wal")
-		var err error
-		wal, err = raftwal.Open(walDir)
-		if err != nil {
-			logger.Warn("failed to open shared WAL, falling back to per-group boltdb", "error", err)
-			wal = nil
-		}
-	}
+	logger.Info("vault-ctl raft WAL ready", "dir", walDir)
 
 	groupMgr := raftgroup.NewGroupManager(raftgroup.GroupManagerConfig{
 		Transport: mrt,

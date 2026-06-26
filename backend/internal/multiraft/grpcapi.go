@@ -3,6 +3,7 @@ package multiraft
 import (
 	"io"
 	"sync"
+	"time"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 
@@ -20,7 +21,9 @@ type grpcAPI[K comparable] struct {
 // handleRPC dispatches a decoded Raft command to the correct group.
 // groupID arrives as []byte from the proto wire format; decoded to K for lookup.
 func (g *grpcAPI[K]) handleRPC(groupID []byte, command any, data io.Reader) (any, error) {
-	gs := g.transport.getGroup(g.transport.decodeKey(groupID))
+	start := time.Now()
+	decodedGroupID := g.transport.decodeKey(groupID)
+	gs := g.transport.getGroup(decodedGroupID)
 	if gs == nil {
 		return nil, status.Errorf(codes.NotFound, "raft group %x not registered", groupID)
 	}
@@ -33,6 +36,7 @@ func (g *grpcAPI[K]) handleRPC(groupID []byte, command any, data io.Reader) (any
 	}
 
 	dispatched := false
+	var queueWait time.Duration
 	if req, ok := command.(*raft.AppendEntriesRequest); ok && isHeartbeat(req) {
 		gs.heartbeatFuncMtx.Lock()
 		fn := gs.heartbeatFunc
@@ -44,6 +48,7 @@ func (g *grpcAPI[K]) handleRPC(groupID []byte, command any, data io.Reader) (any
 	}
 
 	if !dispatched {
+		queueStart := time.Now()
 		select {
 		case gs.rpcChan <- rpc:
 		case <-gs.doneCh:
@@ -51,13 +56,19 @@ func (g *grpcAPI[K]) handleRPC(groupID []byte, command any, data io.Reader) (any
 		case <-g.transport.shutdownCh:
 			return nil, raft.ErrTransportShutdown
 		}
+		queueWait = time.Since(queueStart)
 	}
 
+	waitStart := time.Now()
 	select {
 	case resp := <-ch:
+		waitDur := time.Since(waitStart)
+		total := time.Since(start)
 		if resp.Error != nil {
+			traceInboundAppendEntries(decodedGroupID, command, dispatched, queueWait, waitDur, total, resp.Error)
 			return nil, resp.Error
 		}
+		traceInboundAppendEntries(decodedGroupID, command, dispatched, queueWait, waitDur, total, nil)
 		return resp.Response, nil
 	case <-gs.doneCh:
 		return nil, status.Error(codes.Unavailable, "raft group removed")

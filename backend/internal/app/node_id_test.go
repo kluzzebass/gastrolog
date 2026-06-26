@@ -30,13 +30,12 @@ func nodeIDTestLogger() *slog.Logger {
 // Used by tests to verify that resolveNodeID persisted the value.
 func readStableStoreNodeID(t *testing.T, hd home.Dir) ([]byte, error) {
 	t.Helper()
-	walDir := filepath.Join(hd.RaftDir(), "wal")
-	wal, err := raftwal.Open(walDir)
+	wal, err := raftwal.Open(hd.ClusterCtlWALDir())
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = wal.Close() }()
-	gs := wal.GroupStore("system")
+	gs := wal.GroupStore("cluster-ctl")
 	return gs.Get([]byte(nodeIDKey))
 }
 
@@ -174,7 +173,7 @@ func TestResolveNodeID_RejectsCorruptStableStoreValue(t *testing.T) {
 	logger := nodeIDTestLogger()
 
 	// Seed the StableStore with a wrong-size blob.
-	walDir := filepath.Join(hd.RaftDir(), "wal")
+	walDir := hd.ClusterCtlWALDir()
 	if err := os.MkdirAll(walDir, 0o750); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -182,7 +181,7 @@ func TestResolveNodeID_RejectsCorruptStableStoreValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open wal: %v", err)
 	}
-	gs := wal.GroupStore("system")
+	gs := wal.GroupStore("cluster-ctl")
 	if err := gs.Set([]byte(nodeIDKey), []byte{0x01, 0x02, 0x03}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}

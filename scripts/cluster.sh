@@ -17,6 +17,7 @@
 #   --auth             Enable JWT auth (default: --no-auth for local dev clusters)
 #   --base-port PORT   Base HTTP port for node 1 (default: GLOG_BASE_PORT or 4564)
 #   --pprof            Enable pprof on each node (ports 6060, 6061, ...)
+#   --pprof-debug      With --pprof: enable mutex/block sampling (dev/incident)
 #   GLOG_NO_AUTH       Disable auth when truthy (default: true). Set false/0 to require login.
 #   GLOG_SEGMENT_HOT_PATH_FSYNC  Segmentation group-commit fsync (default: true; set false/0 for load testing)
 
@@ -40,6 +41,7 @@ ADMIN_PASS="${GLOG_ADMIN_PASS:-admin123}"
 NO_AUTH="${GLOG_NO_AUTH:-true}"
 BASE_PORT="${GLOG_BASE_PORT:-4564}"
 PPROF="${GLOG_PPROF:-false}"
+PPROF_DEBUG="${GLOG_PPROF_DEBUG:-false}"
 # Environment banner (gastrolog-4vr0l). Tags every node in this cluster as
 # the local dev deployment in the UI header so operators don't confuse it
 # with a K8s/staging instance. Single token only (no spaces).
@@ -56,6 +58,7 @@ while [[ $# -gt 0 ]]; do
     --auth)       NO_AUTH=false; shift ;;
     --base-port)  BASE_PORT="$2"; shift 2 ;;
     --pprof)      PPROF=true; shift ;;
+    --pprof-debug) PPROF_DEBUG=true; shift ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
   esac
 done
@@ -87,7 +90,7 @@ glog_server_cmd() {
   local i="$1"
   local extra=""
   if [[ "$PPROF" == true ]]; then
-    extra=" --pprof localhost:$((6059 + i))"
+    extra=" --pprof localhost:$((6059 + i)) --pprof-debug"
   fi
   printf 'go run ./cmd/gastrolog server --home %s --listen :%s --cluster-addr :%s%s%s' \
     "$(node_dir "$i")" "$(http_port "$i")" "$(cluster_port "$i")" "$extra" "$(env_flags)"

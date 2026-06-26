@@ -7,7 +7,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strconv"
 	"time"
 
@@ -22,6 +21,7 @@ import (
 	"gastrolog/internal/system/raftstore"
 
 	petname "github.com/dustinkirkland/golang-petname"
+	"github.com/hashicorp/go-hclog"
 	hraft "github.com/hashicorp/raft"
 )
 
@@ -40,12 +40,6 @@ type raftStoreOpts struct {
 	// when the cluster server has already created a fresh transport).
 	// When nil, a new transport is obtained from ClusterSrv.Transport().
 	transport hraft.Transport
-
-	// VaultCtlRaftSharesWAL is set only from the main Run path when cluster mode
-	// is enabled: vault-ctl Raft groups use the same raftwal instance as the
-	// system store, and serveAndAwaitShutdown closes it after system raft.
-	// Rejoin / rollback paths omit this so each store owns its WAL again.
-	VaultCtlRaftSharesWAL bool
 }
 
 // raftClusterCtlStore wraps a raftstore.Store with cleanup logic for the
@@ -55,7 +49,6 @@ type raftClusterCtlStore struct {
 	raftStore *raftstore.Store
 	raft      *hraft.Raft
 	wal       *raftwal.WAL
-	ownsWAL   bool
 	forwarder io.Closer // *cluster.Forwarder; nil for single-node
 }
 
@@ -184,7 +177,7 @@ func (s *raftClusterCtlStore) Close() error {
 	// 4 entries) provide recovery; the log replay on restart is minimal.
 	future := s.raft.Shutdown()
 	err := future.Error()
-	if s.ownsWAL && s.wal != nil {
+	if s.wal != nil {
 		if cerr := s.wal.Close(); cerr != nil && err == nil {
 			err = cerr
 		}
@@ -199,9 +192,10 @@ func openRaftClusterCtlStore(opts raftStoreOpts) (*raftClusterCtlStore, error) {
 		return nil, fmt.Errorf("create raft directory: %w", err)
 	}
 
-	wal, err := raftwal.Open(filepath.Join(raftDir, "wal"))
+	walDir := opts.Home.ClusterCtlWALDir()
+	wal, err := raftwal.Open(walDir)
 	if err != nil {
-		return nil, fmt.Errorf("open system raft WAL: %w", err)
+		return nil, fmt.Errorf("open cluster-ctl raft WAL: %w", err)
 	}
 	gs := wal.GroupStore("cluster-ctl")
 
@@ -230,13 +224,14 @@ func openRaftClusterCtlStore(opts raftStoreOpts) (*raftClusterCtlStore, error) {
 		return nil, fmt.Errorf("create raft: %w", err)
 	}
 
-	observeLeaderChanges(r, opts.Logger)
+	clusterCtlLogger := logging.NewRaftGroupSlog(compRaft.Apply(opts.Logger), raftgroup.ClusterControlPlaneGroupID)
+	raftgroup.ObserveRaftDiagnostics(r, clusterCtlLogger, conf.LeaderLeaseTimeout)
 
-	if err := bootstrapAndWaitForLeader(r, wal, tp, opts); err != nil {
+	if err := bootstrapAndWaitForLeader(r, wal, tp, opts, clusterCtlLogger); err != nil {
 		return nil, err
 	}
 
-	opts.Logger.Info("raft system store ready", "wal_dir", filepath.Join(raftDir, "wal"), "snapshots", clusterCtlSnapDir)
+	clusterCtlLogger.Info("raft system store ready", "wal_dir", walDir, "snapshots", clusterCtlSnapDir)
 
 	store := raftstore.New(r, fsm, 10*time.Second)
 
@@ -247,13 +242,11 @@ func openRaftClusterCtlStore(opts raftStoreOpts) (*raftClusterCtlStore, error) {
 	fwd := cluster.NewForwarder(r, opts.ClusterSrv.PeerConns())
 	store.SetForwarder(fwd)
 
-	ownsWAL := !opts.VaultCtlRaftSharesWAL
 	return &raftClusterCtlStore{
 		Store:     store,
 		raftStore: store,
 		raft:      r,
 		wal:       wal,
-		ownsWAL:   ownsWAL,
 		forwarder: fwd,
 	}, nil
 }
@@ -270,21 +263,26 @@ func newRaftConfig(nodeID string, logger *slog.Logger) *hraft.Config {
 	// Suppress the noisy "entering follower state" log that fires on every
 	// heartbeat timeout cycle, even when the node remains a follower.
 	filtered := logging.FilterHclogMessages(raftLogger, "entering follower state")
-	// Downgrade noisy Raft messages to DEBUG: heartbeat/replication failures
-	// fire constantly when peers are unreachable, and snapshot lifecycle
-	// messages are routine housekeeping.
-	conf.Logger = logging.DowngradeHclogToDebug(filtered,
-		"failed to heartbeat",
-		"failed to appendEntries",
+	// Downgrade routine snapshot/pipeline noise. Do NOT downgrade
+	// "failed to contact" — that substring also matches the quorum
+	// step-down message and hides the primary leader-loss signal.
+	downgraded := logging.DowngradeHclogToDebug(
+		logging.EnsureHclogMinLevel(filtered, hclog.Warn,
+			"failed to contact quorum of nodes, stepping down",
+			"failed to contact",
+			"failed to heartbeat to",
+			"failed to appendEntries to",
+			"new leader elected, stepping down",
+		),
 		"failed to take snapshot",
 		"starting snapshot up to",
 		"snapshot complete up to",
 		"compacting logs",
 		"pipelining replication",
 		"aborting pipeline replication",
-		"failed to contact",
 		"failed to make requestVote RPC",
 	)
+	conf.Logger = downgraded
 	conf.LogOutput = nil
 
 	conf.SnapshotThreshold = 4
@@ -299,7 +297,7 @@ func newRaftConfig(nodeID string, logger *slog.Logger) *hraft.Config {
 
 // bootstrapAndWaitForLeader handles state-based Raft bootstrap and waits for
 // leadership when this node should become leader.
-func bootstrapAndWaitForLeader(r *hraft.Raft, boltStore io.Closer, transport hraft.Transport, opts raftStoreOpts) error {
+func bootstrapAndWaitForLeader(r *hraft.Raft, boltStore io.Closer, transport hraft.Transport, opts raftStoreOpts, logger *slog.Logger) error {
 	existing := r.GetConfiguration()
 	if err := existing.Error(); err != nil {
 		_ = r.Shutdown().Error()
@@ -313,7 +311,7 @@ func bootstrapAndWaitForLeader(r *hraft.Raft, boltStore io.Closer, transport hra
 	shouldBootstrap := needsBootstrap && !joining
 
 	if needsBootstrap && !shouldBootstrap {
-		opts.Logger.Info("raft: waiting to be added to cluster by leader")
+		logger.Info("waiting to be added to cluster by leader")
 	}
 
 	if shouldBootstrap {
@@ -327,14 +325,14 @@ func bootstrapAndWaitForLeader(r *hraft.Raft, boltStore io.Closer, transport hra
 			_ = boltStore.Close()
 			return fmt.Errorf("bootstrap raft: %w", err)
 		}
-		opts.Logger.Info("raft cluster bootstrapped", "node_id", opts.NodeID)
+		logger.Info("cluster bootstrapped", "node_id", opts.NodeID)
 	}
 
 	singleNode := len(servers) == 1 && string(servers[0].ID) == opts.NodeID
 	if shouldBootstrap || singleNode {
 		select {
 		case <-r.LeaderCh():
-			opts.Logger.Info("raft: leader elected", "node_id", opts.NodeID)
+			logger.Info("leader elected", "node_id", opts.NodeID)
 		case <-time.After(5 * time.Second):
 			_ = r.Shutdown().Error()
 			_ = boltStore.Close()
@@ -343,29 +341,6 @@ func bootstrapAndWaitForLeader(r *hraft.Raft, boltStore io.Closer, transport hra
 	}
 
 	return nil
-}
-
-// observeLeaderChanges registers a Raft observer that logs leader elections.
-// Uses blocking mode to guarantee observations are never silently dropped.
-func observeLeaderChanges(r *hraft.Raft, logger *slog.Logger) {
-	ch := make(chan hraft.Observation, 16)
-	r.RegisterObserver(hraft.NewObserver(ch, true, func(o *hraft.Observation) bool {
-		_, ok := o.Data.(hraft.LeaderObservation)
-		return ok
-	}))
-	go func() {
-		for obs := range ch {
-			if lo, ok := obs.Data.(hraft.LeaderObservation); ok {
-				if lo.LeaderID == "" {
-					logger.Info("cluster lost leader")
-				} else {
-					logger.Info("cluster leader elected",
-						"node_id", string(lo.LeaderID),
-						"addr", string(lo.LeaderAddr))
-				}
-			}
-		}
-	}()
 }
 
 // peerEvictor is the minimal contract the peer-removal observer needs —

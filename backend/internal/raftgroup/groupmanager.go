@@ -197,6 +197,9 @@ func (m *GroupManager) CreateGroup(cfg GroupConfig) (*Group, error) {
 	}
 	m.groups[cfg.GroupID] = g
 
+	_, _, leaseTimeout := raftTimeouts(cfg)
+	ObserveRaftDiagnostics(r, logging.NewRaftGroupSlog(m.logger, cfg.GroupID), leaseTimeout)
+
 	m.logger.Info("raft group created",
 		"group", cfg.GroupID,
 		"seed_members", len(cfg.SeedMembers),

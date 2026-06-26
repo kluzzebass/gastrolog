@@ -59,10 +59,9 @@ type vaultCollect struct {
 	// stopWorker cancels the per-vault worker; nil until the worker starts.
 	stopWorker context.CancelFunc
 
-	// collectMu serializes collect passes for this vault. Passes are triggered
-	// from several goroutines (Run startup, FSM publish callback, Notify,
-	// CollectOnce) and must not overlap: they share the layout cache and the
-	// receipted set, and concurrent pulls of the same segment are wasteful.
+	// passMu serializes full collect passes. collectMu protects layout and
+	// receipted only — never held across pull or vault-ctl apply I/O.
+	passMu    sync.Mutex
 	collectMu sync.Mutex
 
 	// layout mirrors head/ and pre-head/ segment IDs. Refreshed at the start of
@@ -78,6 +77,17 @@ type vaultCollect struct {
 	// a segment until the receipt replicates into its holder set) do not
 	// re-commit. Bounded by the vault's live segment set; released in slice D.
 	receipted map[glid.GLID]struct{}
+
+	// collectWaiters receives the result of the worker's next pass. CollectOnce
+	// registers here when the per-vault worker is running so chunking/planner
+	// goroutines never block on passMu while a pass pulls segments or applies
+	// holder receipts through vault-ctl Raft.
+	collectWaitMu sync.Mutex
+	collectWaiters  []collectWaiter
+}
+
+type collectWaiter struct {
+	done chan error
 }
 
 func newVaultCollect(vaultID glid.GLID, root string, cfg VaultConfig) (*vaultCollect, error) {
@@ -136,11 +146,15 @@ func (v *vaultCollect) collectOne(ctx context.Context, ref AssignedSegment) erro
 	if err != nil {
 		return err
 	}
+	v.collectMu.Lock()
 	v.notePreHead(ref.SegmentID)
+	v.collectMu.Unlock()
 	if _, err := PromoteVerified(prePath, v.root); err != nil {
 		return err
 	}
+	v.collectMu.Lock()
 	v.noteHead(ref.SegmentID)
+	v.collectMu.Unlock()
 	return v.commitReceipt(ctx, ref)
 }
 
@@ -152,45 +166,73 @@ func (v *vaultCollect) commitReceipt(ctx context.Context, ref AssignedSegment) e
 	if err := v.receipts.CommitHolderReceipt(ctx, ref.VaultID, ref.SegmentID); err != nil {
 		return err
 	}
+	v.collectMu.Lock()
 	v.receipted[ref.SegmentID] = struct{}{}
+	v.collectMu.Unlock()
 	return nil
 }
 
-func (v *vaultCollect) collectForRef(ctx context.Context, ref AssignedSegment) error {
+type collectAction int
+
+const (
+	collectSkip collectAction = iota
+	collectReceiptOnly
+	collectPull
+)
+
+func (v *vaultCollect) planCollectAction(ref AssignedSegment) collectAction {
+	v.collectMu.Lock()
+	defer v.collectMu.Unlock()
 	if _, done := v.receipted[ref.SegmentID]; done {
 		if _, ok := v.layout.head[ref.SegmentID]; ok {
-			return nil
+			return collectSkip
 		}
 		// Holder receipt recorded but head/ was purged after a partial
 		// chunking pass — re-pull so the planner can resume the segment.
 	} else if _, ok := v.layout.head[ref.SegmentID]; ok {
-		return v.commitReceipt(ctx, ref)
+		return collectReceiptOnly
 	}
-	// Received but not yet promoted (a prior or concurrent pass owns it):
-	// skip until it reaches head, then the next pass records the receipt.
 	if _, ok := v.layout.preHead[ref.SegmentID]; ok {
-		return nil
+		return collectSkip
 	}
-	return v.collectOne(ctx, ref)
+	return collectPull
+}
+
+func (v *vaultCollect) collectForRef(ctx context.Context, ref AssignedSegment) error {
+	switch v.planCollectAction(ref) {
+	case collectSkip:
+		return nil
+	case collectReceiptOnly:
+		return v.commitReceipt(ctx, ref)
+	case collectPull:
+		return v.collectOne(ctx, ref)
+	}
+	return nil
 }
 
 func (v *vaultCollect) collectMissing(ctx context.Context) error {
-	v.collectMu.Lock()
-	defer v.collectMu.Unlock()
+	v.passMu.Lock()
+	defer v.passMu.Unlock()
 
+	v.collectMu.Lock()
 	assigned, err := v.log.Roll(ctx, v.vaultID)
 	if err != nil {
+		v.collectMu.Unlock()
 		return err
 	}
 	if len(assigned) == 0 {
+		v.collectMu.Unlock()
 		return nil
 	}
-
 	if err := v.refreshLayout(); err != nil {
+		v.collectMu.Unlock()
 		return err
 	}
+	work := append([]AssignedSegment(nil), assigned...)
+	v.collectMu.Unlock()
+
 	var errs []error
-	for _, ref := range assigned {
+	for _, ref := range work {
 		if err := v.collectForRef(ctx, ref); err != nil {
 			errs = append(errs, err)
 		}
@@ -216,14 +258,19 @@ func (v *vaultCollect) collectSegments(ctx context.Context, segmentIDs []glid.GL
 	if len(segmentIDs) == 0 {
 		return nil
 	}
-	v.collectMu.Lock()
-	defer v.collectMu.Unlock()
+	v.passMu.Lock()
+	defer v.passMu.Unlock()
 
+	v.collectMu.Lock()
 	if err := v.refreshLayout(); err != nil {
+		v.collectMu.Unlock()
 		return err
 	}
+	ids := append([]glid.GLID(nil), segmentIDs...)
+	v.collectMu.Unlock()
+
 	var errs []error
-	for _, segmentID := range segmentIDs {
+	for _, segmentID := range ids {
 		if LocalSegmentPresent(v.root, segmentID) {
 			continue
 		}
@@ -243,6 +290,33 @@ func (v *vaultCollect) collectSegments(ctx context.Context, segmentIDs []glid.GL
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func (v *vaultCollect) awaitCollectPass(ctx context.Context) error {
+	w := collectWaiter{done: make(chan error, 1)}
+	v.collectWaitMu.Lock()
+	v.collectWaiters = append(v.collectWaiters, w)
+	v.collectWaitMu.Unlock()
+	v.wake.Notify()
+	select {
+	case err := <-w.done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (v *vaultCollect) completeCollectWaiters(err error) {
+	v.collectWaitMu.Lock()
+	waiters := v.collectWaiters
+	v.collectWaiters = nil
+	v.collectWaitMu.Unlock()
+	for _, w := range waiters {
+		select {
+		case w.done <- err:
+		default:
+		}
+	}
 }
 
 // Config configures a CollectionManager.
@@ -373,6 +447,9 @@ func (m *Manager) CollectOnce(ctx context.Context, vaultID glid.GLID) error {
 	if !ok {
 		return ErrUnknownVault
 	}
+	if v.stopWorker != nil {
+		return v.awaitCollectPass(ctx)
+	}
 	return v.collectMissing(ctx)
 }
 
@@ -437,9 +514,11 @@ func (m *Manager) startWorkerLocked(v *vaultCollect) {
 		// mid-pass re-fires the loop instead of being lost.
 		ch := v.wake.C()
 		log := m.logger().With("vault", v.vaultID)
-		if err := v.collectMissing(ctx); err != nil && ctx.Err() == nil {
+		err := v.collectMissing(ctx)
+		if err != nil && ctx.Err() == nil {
 			m.logCollectPassErr(log, err)
 		}
+		v.completeCollectWaiters(err)
 		tick := time.NewTicker(recollectInterval)
 		defer tick.Stop()
 		for {
@@ -450,9 +529,11 @@ func (m *Manager) startWorkerLocked(v *vaultCollect) {
 			case <-tick.C:
 			}
 			ch = v.wake.C()
-			if err := v.collectMissing(ctx); err != nil && ctx.Err() == nil {
+			err := v.collectMissing(ctx)
+			if err != nil && ctx.Err() == nil {
 				m.logCollectPassErr(log, err)
 			}
+			v.completeCollectWaiters(err)
 		}
 	})
 }
