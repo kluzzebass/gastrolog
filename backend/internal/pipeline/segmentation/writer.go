@@ -38,6 +38,7 @@ type vaultWriter struct {
 	encoded     chan encodedWork
 	completed   chan<- CompletedSegment
 	onSync      func()
+	onCompletedDropped func()
 	openedAt    time.Time
 	segmentID   glid.GLID
 	seg         *segment.File
@@ -79,9 +80,10 @@ func newVaultWriter(vaultID glid.GLID, root string, cfg Config, vc VaultConfig, 
 		disableFsync: vc.DisableFsync || cfg.DisableFsync,
 		in:           make(chan Input, queueCap),
 		encoded:      make(chan encodedWork, queueCap),
-		completed:    completed,
-		onSync:       cfg.OnSync,
-		done:         make(chan struct{}),
+		completed:          completed,
+		onSync:             cfg.OnSync,
+		onCompletedDropped: cfg.OnCompletedDropped,
+		done:               make(chan struct{}),
 	}
 	if err := w.openNewSegment(); err != nil {
 		return nil, err
@@ -435,6 +437,9 @@ func (w *vaultWriter) completeWorkingSegmentLocked() error {
 			Header:  hdr,
 		}:
 		default:
+			if w.onCompletedDropped != nil {
+				w.onCompletedDropped()
+			}
 		}
 	}
 	return nil

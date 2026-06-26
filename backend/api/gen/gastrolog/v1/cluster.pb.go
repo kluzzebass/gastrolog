@@ -615,11 +615,9 @@ type NodeStats struct {
 	RoutePerRouteStats     []*PerRouteStats   `protobuf:"bytes,33,rep,name=route_per_route_stats,json=routePerRouteStats,proto3" json:"route_per_route_stats,omitempty"`
 	// Active system alerts on this node.
 	Alerts []*SystemAlert `protobuf:"bytes,34,rep,name=alerts,proto3" json:"alerts,omitempty"`
-	// Per-peer inter-node gRPC transport bytes, from this node's perspective.
-	// Populated from the cluster transport stats handlers — includes Raft,
-	// broadcast, vault replication, query forwarding, chunk streaming, etc.
-	// See gastrolog-47u85.
-	PeerBytes []*PeerBytesStat `protobuf:"bytes,35,rep,name=peer_bytes,json=peerBytes,proto3" json:"peer_bytes,omitempty"`
+	// Outbound peer connection catalog (service pools + raft singletons).
+	// Populated from PeerConnManager on each broadcast tick. See gastrolog-1dg8z.
+	PeerConnections []*PeerConnStat `protobuf:"bytes,35,rep,name=peer_connections,json=peerConnections,proto3" json:"peer_connections,omitempty"`
 	// Per-vault on-disk pipeline segment counts on this node (working/completed
 	// at origins; head/pre-head on homes). Aggregated cluster-wide by
 	// WatchSystemStatus for the inspector.
@@ -896,9 +894,9 @@ func (x *NodeStats) GetAlerts() []*SystemAlert {
 	return nil
 }
 
-func (x *NodeStats) GetPeerBytes() []*PeerBytesStat {
+func (x *NodeStats) GetPeerConnections() []*PeerConnStat {
 	if x != nil {
-		return x.PeerBytes
+		return x.PeerConnections
 	}
 	return nil
 }
@@ -988,41 +986,39 @@ func (x *VaultPipelineNodeDisk) GetPreHeadSegments() uint32 {
 	return 0
 }
 
-// PeerBytesStat reports cumulative gRPC wire bytes sent to and received from
-// a single peer, since the emitting node started. Rate is left to the
-// consumer (UI / PromQL-equivalent delta) — these are monotonic counters.
-type PeerBytesStat struct {
+// PeerConnStat reports one managed outbound cluster gRPC connection.
+type PeerConnStat struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Peer          string                 `protobuf:"bytes,1,opt,name=peer,proto3" json:"peer,omitempty"`                                         // target node ID
-	BytesSent     int64                  `protobuf:"varint,2,opt,name=bytes_sent,json=bytesSent,proto3" json:"bytes_sent,omitempty"`             // bytes this node has sent to peer
-	BytesReceived int64                  `protobuf:"varint,3,opt,name=bytes_received,json=bytesReceived,proto3" json:"bytes_received,omitempty"` // bytes this node has received from peer
-	// Backend-derived rates (bytes/sec) computed by differencing consecutive
-	// monotonic samples on the node. These exist to avoid UI cold-start and to
-	// make the inspector immediately useful after mount.
-	TxBytesPerSec float64 `protobuf:"fixed64,4,opt,name=tx_bytes_per_sec,json=txBytesPerSec,proto3" json:"tx_bytes_per_sec,omitempty"`
-	RxBytesPerSec float64 `protobuf:"fixed64,5,opt,name=rx_bytes_per_sec,json=rxBytesPerSec,proto3" json:"rx_bytes_per_sec,omitempty"`
-	// Rolling sparkline windows (bytes/sec), oldest → newest.
-	// Kept short (e.g. 20 points) so inspector renders quickly.
-	TxSpark       []float64 `protobuf:"fixed64,6,rep,packed,name=tx_spark,json=txSpark,proto3" json:"tx_spark,omitempty"`
-	RxSpark       []float64 `protobuf:"fixed64,7,rep,packed,name=rx_spark,json=rxSpark,proto3" json:"rx_spark,omitempty"`
+	Peer          string                 `protobuf:"bytes,1,opt,name=peer,proto3" json:"peer,omitempty"`
+	Lane          string                 `protobuf:"bytes,2,opt,name=lane,proto3" json:"lane,omitempty"`                      // "service" | "raft"
+	GroupId       string                 `protobuf:"bytes,3,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"` // empty for service lane
+	Purposes      []string               `protobuf:"bytes,4,rep,name=purposes,proto3" json:"purposes,omitempty"`              // active subsystem labels
+	Connectivity  string                 `protobuf:"bytes,5,opt,name=connectivity,proto3" json:"connectivity,omitempty"`
+	PoolIndex     int32                  `protobuf:"varint,6,opt,name=pool_index,json=poolIndex,proto3" json:"pool_index,omitempty"` // 0 for raft singletons
+	BytesSent     int64                  `protobuf:"varint,7,opt,name=bytes_sent,json=bytesSent,proto3" json:"bytes_sent,omitempty"`
+	BytesReceived int64                  `protobuf:"varint,8,opt,name=bytes_received,json=bytesReceived,proto3" json:"bytes_received,omitempty"`
+	TxBytesPerSec float64                `protobuf:"fixed64,9,opt,name=tx_bytes_per_sec,json=txBytesPerSec,proto3" json:"tx_bytes_per_sec,omitempty"`
+	RxBytesPerSec float64                `protobuf:"fixed64,10,opt,name=rx_bytes_per_sec,json=rxBytesPerSec,proto3" json:"rx_bytes_per_sec,omitempty"`
+	TxSpark       []float64              `protobuf:"fixed64,11,rep,packed,name=tx_spark,json=txSpark,proto3" json:"tx_spark,omitempty"`
+	RxSpark       []float64              `protobuf:"fixed64,12,rep,packed,name=rx_spark,json=rxSpark,proto3" json:"rx_spark,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *PeerBytesStat) Reset() {
-	*x = PeerBytesStat{}
+func (x *PeerConnStat) Reset() {
+	*x = PeerConnStat{}
 	mi := &file_gastrolog_v1_cluster_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *PeerBytesStat) String() string {
+func (x *PeerConnStat) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*PeerBytesStat) ProtoMessage() {}
+func (*PeerConnStat) ProtoMessage() {}
 
-func (x *PeerBytesStat) ProtoReflect() protoreflect.Message {
+func (x *PeerConnStat) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_cluster_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1034,54 +1030,89 @@ func (x *PeerBytesStat) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use PeerBytesStat.ProtoReflect.Descriptor instead.
-func (*PeerBytesStat) Descriptor() ([]byte, []int) {
+// Deprecated: Use PeerConnStat.ProtoReflect.Descriptor instead.
+func (*PeerConnStat) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{11}
 }
 
-func (x *PeerBytesStat) GetPeer() string {
+func (x *PeerConnStat) GetPeer() string {
 	if x != nil {
 		return x.Peer
 	}
 	return ""
 }
 
-func (x *PeerBytesStat) GetBytesSent() int64 {
+func (x *PeerConnStat) GetLane() string {
+	if x != nil {
+		return x.Lane
+	}
+	return ""
+}
+
+func (x *PeerConnStat) GetGroupId() string {
+	if x != nil {
+		return x.GroupId
+	}
+	return ""
+}
+
+func (x *PeerConnStat) GetPurposes() []string {
+	if x != nil {
+		return x.Purposes
+	}
+	return nil
+}
+
+func (x *PeerConnStat) GetConnectivity() string {
+	if x != nil {
+		return x.Connectivity
+	}
+	return ""
+}
+
+func (x *PeerConnStat) GetPoolIndex() int32 {
+	if x != nil {
+		return x.PoolIndex
+	}
+	return 0
+}
+
+func (x *PeerConnStat) GetBytesSent() int64 {
 	if x != nil {
 		return x.BytesSent
 	}
 	return 0
 }
 
-func (x *PeerBytesStat) GetBytesReceived() int64 {
+func (x *PeerConnStat) GetBytesReceived() int64 {
 	if x != nil {
 		return x.BytesReceived
 	}
 	return 0
 }
 
-func (x *PeerBytesStat) GetTxBytesPerSec() float64 {
+func (x *PeerConnStat) GetTxBytesPerSec() float64 {
 	if x != nil {
 		return x.TxBytesPerSec
 	}
 	return 0
 }
 
-func (x *PeerBytesStat) GetRxBytesPerSec() float64 {
+func (x *PeerConnStat) GetRxBytesPerSec() float64 {
 	if x != nil {
 		return x.RxBytesPerSec
 	}
 	return 0
 }
 
-func (x *PeerBytesStat) GetTxSpark() []float64 {
+func (x *PeerConnStat) GetTxSpark() []float64 {
 	if x != nil {
 		return x.TxSpark
 	}
 	return nil
 }
 
-func (x *PeerBytesStat) GetRxSpark() []float64 {
+func (x *PeerConnStat) GetRxSpark() []float64 {
 	if x != nil {
 		return x.RxSpark
 	}
@@ -4120,7 +4151,7 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\apayload\"\v\n" +
 	"\tHeartbeat\"1\n" +
 	"\bNodeJobs\x12%\n" +
-	"\x04jobs\x18\x01 \x03(\v2\x11.gastrolog.v1.JobR\x04jobs\"\xd3\f\n" +
+	"\x04jobs\x18\x01 \x03(\v2\x11.gastrolog.v1.JobR\x04jobs\"\xde\f\n" +
 	"\tNodeStats\x12\x1f\n" +
 	"\vcpu_percent\x18\x01 \x01(\x01R\n" +
 	"cpuPercent\x12!\n" +
@@ -4163,25 +4194,31 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x19route_stats_filter_active\x18\x1f \x01(\bR\x16routeStatsFilterActive\x12I\n" +
 	"\x11route_vault_stats\x18  \x03(\v2\x1d.gastrolog.v1.VaultRouteStatsR\x0frouteVaultStats\x12N\n" +
 	"\x15route_per_route_stats\x18! \x03(\v2\x1b.gastrolog.v1.PerRouteStatsR\x12routePerRouteStats\x121\n" +
-	"\x06alerts\x18\" \x03(\v2\x19.gastrolog.v1.SystemAlertR\x06alerts\x12:\n" +
-	"\n" +
-	"peer_bytes\x18# \x03(\v2\x1b.gastrolog.v1.PeerBytesStatR\tpeerBytes\x12S\n" +
+	"\x06alerts\x18\" \x03(\v2\x19.gastrolog.v1.SystemAlertR\x06alerts\x12E\n" +
+	"\x10peer_connections\x18# \x03(\v2\x1a.gastrolog.v1.PeerConnStatR\x0fpeerConnections\x12S\n" +
 	"\x13vault_pipeline_disk\x18$ \x03(\v2#.gastrolog.v1.VaultPipelineNodeDiskR\x11vaultPipelineDisk\"\xec\x01\n" +
 	"\x15VaultPipelineNodeDisk\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12)\n" +
 	"\x10working_segments\x18\x02 \x01(\rR\x0fworkingSegments\x12<\n" +
 	"\x1acompleted_staging_segments\x18\x03 \x01(\rR\x18completedStagingSegments\x12#\n" +
 	"\rhead_segments\x18\x04 \x01(\rR\fheadSegments\x12*\n" +
-	"\x11pre_head_segments\x18\x05 \x01(\rR\x0fpreHeadSegments\"\xf1\x01\n" +
-	"\rPeerBytesStat\x12\x12\n" +
-	"\x04peer\x18\x01 \x01(\tR\x04peer\x12\x1d\n" +
+	"\x11pre_head_segments\x18\x05 \x01(\rR\x0fpreHeadSegments\"\xfe\x02\n" +
+	"\fPeerConnStat\x12\x12\n" +
+	"\x04peer\x18\x01 \x01(\tR\x04peer\x12\x12\n" +
+	"\x04lane\x18\x02 \x01(\tR\x04lane\x12\x19\n" +
+	"\bgroup_id\x18\x03 \x01(\tR\agroupId\x12\x1a\n" +
+	"\bpurposes\x18\x04 \x03(\tR\bpurposes\x12\"\n" +
+	"\fconnectivity\x18\x05 \x01(\tR\fconnectivity\x12\x1d\n" +
 	"\n" +
-	"bytes_sent\x18\x02 \x01(\x03R\tbytesSent\x12%\n" +
-	"\x0ebytes_received\x18\x03 \x01(\x03R\rbytesReceived\x12'\n" +
-	"\x10tx_bytes_per_sec\x18\x04 \x01(\x01R\rtxBytesPerSec\x12'\n" +
-	"\x10rx_bytes_per_sec\x18\x05 \x01(\x01R\rrxBytesPerSec\x12\x19\n" +
-	"\btx_spark\x18\x06 \x03(\x01R\atxSpark\x12\x19\n" +
-	"\brx_spark\x18\a \x03(\x01R\arxSpark\"\xfc\x01\n" +
+	"pool_index\x18\x06 \x01(\x05R\tpoolIndex\x12\x1d\n" +
+	"\n" +
+	"bytes_sent\x18\a \x01(\x03R\tbytesSent\x12%\n" +
+	"\x0ebytes_received\x18\b \x01(\x03R\rbytesReceived\x12'\n" +
+	"\x10tx_bytes_per_sec\x18\t \x01(\x01R\rtxBytesPerSec\x12'\n" +
+	"\x10rx_bytes_per_sec\x18\n" +
+	" \x01(\x01R\rrxBytesPerSec\x12\x19\n" +
+	"\btx_spark\x18\v \x03(\x01R\atxSpark\x12\x19\n" +
+	"\brx_spark\x18\f \x03(\x01R\arxSpark\"\xfc\x01\n" +
 	"\vSystemAlert\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x127\n" +
 	"\bseverity\x18\x02 \x01(\x0e2\x1b.gastrolog.v1.AlertSeverityR\bseverity\x12\x16\n" +
@@ -4384,7 +4421,7 @@ var file_gastrolog_v1_cluster_proto_goTypes = []any{
 	(*NodeJobs)(nil),                          // 9: gastrolog.v1.NodeJobs
 	(*NodeStats)(nil),                         // 10: gastrolog.v1.NodeStats
 	(*VaultPipelineNodeDisk)(nil),             // 11: gastrolog.v1.VaultPipelineNodeDisk
-	(*PeerBytesStat)(nil),                     // 12: gastrolog.v1.PeerBytesStat
+	(*PeerConnStat)(nil),                      // 12: gastrolog.v1.PeerConnStat
 	(*SystemAlert)(nil),                       // 13: gastrolog.v1.SystemAlert
 	(*IngesterNodeStats)(nil),                 // 14: gastrolog.v1.IngesterNodeStats
 	(*ForwardVaultApplyRequest)(nil),          // 15: gastrolog.v1.ForwardVaultApplyRequest
@@ -4467,7 +4504,7 @@ var file_gastrolog_v1_cluster_proto_depIdxs = []int32{
 	71, // 8: gastrolog.v1.NodeStats.route_vault_stats:type_name -> gastrolog.v1.VaultRouteStats
 	72, // 9: gastrolog.v1.NodeStats.route_per_route_stats:type_name -> gastrolog.v1.PerRouteStats
 	13, // 10: gastrolog.v1.NodeStats.alerts:type_name -> gastrolog.v1.SystemAlert
-	12, // 11: gastrolog.v1.NodeStats.peer_bytes:type_name -> gastrolog.v1.PeerBytesStat
+	12, // 11: gastrolog.v1.NodeStats.peer_connections:type_name -> gastrolog.v1.PeerConnStat
 	11, // 12: gastrolog.v1.NodeStats.vault_pipeline_disk:type_name -> gastrolog.v1.VaultPipelineNodeDisk
 	0,  // 13: gastrolog.v1.SystemAlert.severity:type_name -> gastrolog.v1.AlertSeverity
 	68, // 14: gastrolog.v1.SystemAlert.first_seen:type_name -> google.protobuf.Timestamp

@@ -26,7 +26,7 @@ type VaultCtlChunkApplyForwarder struct {
 	raft            *hraft.Raft
 	vaultCtlGroupID string
 	vaultID          glid.GLID
-	peers           *PeerConns
+	peers           *PeerConnManager
 	timeout         time.Duration
 }
 
@@ -34,7 +34,7 @@ type VaultCtlChunkApplyForwarder struct {
 // commands to the vault control-plane Raft group, wrapping each payload
 // with OpVaultChunkFSM + instance ID. ForwardVaultApply uses the vault-ctl
 // group_id.
-func NewVaultCtlChunkApplyForwarder(r *hraft.Raft, vaultCtlGroupID string, vaultID glid.GLID, peers *PeerConns, timeout time.Duration) *VaultCtlChunkApplyForwarder {
+func NewVaultCtlChunkApplyForwarder(r *hraft.Raft, vaultCtlGroupID string, vaultID glid.GLID, peers *PeerConnManager, timeout time.Duration) *VaultCtlChunkApplyForwarder {
 	return &VaultCtlChunkApplyForwarder{
 		raft:            r,
 		vaultCtlGroupID: vaultCtlGroupID,
@@ -69,11 +69,6 @@ func (f *VaultCtlChunkApplyForwarder) forwardToLeader(data []byte) error {
 		return ErrNoRaftLeader
 	}
 
-	conn, err := f.peers.Conn(string(leaderID))
-	if err != nil {
-		return fmt.Errorf("dial raft leader %s: %w", leaderID, err)
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), f.timeout)
 	defer cancel()
 
@@ -82,8 +77,8 @@ func (f *VaultCtlChunkApplyForwarder) forwardToLeader(data []byte) error {
 		Command: data,
 	}
 	resp := &gastrologv1.ForwardVaultApplyResponse{}
-	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardVaultApply", req, resp); err != nil {
-		f.peers.Invalidate(string(leaderID), err)
+	if err := f.peers.InvokeService(ctx, string(leaderID), "vault-ctl-chunk-apply-forward",
+		"/gastrolog.v1.ClusterService/ForwardVaultApply", req, resp); err != nil {
 		return fmt.Errorf("forward vault-ctl chunk apply RPC to %s: %w", leaderID, err)
 	}
 	return nil

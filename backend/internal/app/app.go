@@ -82,6 +82,9 @@ type RunConfig struct {
 	// (DNS name) so peers reconnect after IP changes without manual
 	// reconfiguration. See gastrolog-4zy8a.
 	ClusterAdvertise string
+	// ServicePoolMaxPerPeer caps parallel outbound service-lane gRPC
+	// connections per peer (0 = default 4).
+	ServicePoolMaxPerPeer int
 	JoinAddr         string
 	JoinToken        string
 	NodeName         string
@@ -707,7 +710,7 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 		Broadcaster: broadcaster,
 		RaftStats:   clusterSrv,
 		Stats:       &orchStatsAdapter{orch: orch},
-		PeerBytes:   clusterSrv.ByteMetrics(),
+		PeerConns:   clusterSrv.PeerConns(),
 		Alerts:      alerts,
 		Jobs:        &jobBroadcastAdapter{scheduler: orch.Scheduler(), nodeID: nodeID},
 		NodeID:      nodeID,
@@ -1380,9 +1383,12 @@ func setupMultiRaft(clusterSrv *cluster.Server, rawStore system.Store, nodeID, h
 		// System/config raft is not managed by GroupManager; only vault/.../ctl
 		// multiraft groups are. Leave ShutdownLast empty so Shutdown does not look for a
 		// non-existent group ID.
-		ShutdownLast: "",
-		WAL:          wal,
-		Logger:       logger,
+		ShutdownLast:   "",
+		WAL:            wal,
+		PeerConns:      clusterSrv.PeerConns(),
+		EnsureRaftLane: clusterSrv.EnsureRaftGroupLane,
+		RemoveRaftLane: clusterSrv.RemoveRaftGroupLane,
+		Logger:         logger,
 	})
 
 	var resolver func(string) (string, bool)

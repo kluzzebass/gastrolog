@@ -257,18 +257,20 @@ func newHarness(t *testing.T, nodeID, ingesterID, vaultID glid.GLID, route *rout
 		}
 	}
 
+	distMgr, _ := distribution.New(distribution.Config{})
+
 	segMgr, completed := segmentation.New(segmentation.Config{
-		ClosePolicy:     opts.closePolicy,
-		SyncBatchSize:   1,
-		SyncBatchWindow: time.Millisecond,
-		OnSync:          func() { h.syncs.Add(1) },
+		ClosePolicy:          opts.closePolicy,
+		SyncBatchSize:        1,
+		SyncBatchWindow:      time.Millisecond,
+		OnSync:               func() { h.syncs.Add(1) },
+		OnCompletedDropped:   distMgr.NotifyStranded,
 	})
 	vaultIn, err := segMgr.RegisterVault(vaultID, vaultRoot, segmentation.VaultConfig{})
 	if err != nil {
 		t.Fatalf("RegisterVault: %v", err)
 	}
 
-	distMgr, _ := distribution.New(distribution.Config{})
 	if err := distMgr.RegisterVault(vaultID, vaultRoot, distribution.VaultConfig{
 		Publisher:   distPublisher,
 		LocalHolder: func() bool { return opts.localHolder },
@@ -311,8 +313,16 @@ func newHarness(t *testing.T, nodeID, ingesterID, vaultID glid.GLID, route *rout
 		close(h.distDone)
 	}()
 
+	var onPassComplete func(glid.GLID)
+
 	if opts.withCollection {
-		colMgr := collection.New(collection.Config{})
+		colMgr := collection.New(collection.Config{
+			OnPassComplete: func(vaultID glid.GLID) {
+				if onPassComplete != nil {
+					onPassComplete(vaultID)
+				}
+			},
+		})
 		basePull := &flowDistributionPull{dist: distMgr}
 		var pull collection.PullClient = basePull
 		if opts.gatedPull {
@@ -365,6 +375,7 @@ func newHarness(t *testing.T, nodeID, ingesterID, vaultID glid.GLID, route *rout
 			t.Fatalf("RegisterVault chunking: %v", err)
 		}
 		h.chunk = chunkMgr
+		onPassComplete = chunkMgr.NotifyVault
 		h.chunkDone = make(chan struct{})
 		go func() {
 			_ = h.chunk.Run(ctx)
@@ -463,6 +474,32 @@ func (h *harness) waitPublishedStable(t *testing.T, min int) []distribution.Meta
 	return nil
 }
 
+// waitPublishQuiescent waits until the publish count stops growing for a short
+// window. Segments can still close after OnSync fires; without poll ticks the
+// final publishes trail the last fsync.
+func (h *harness) waitPublishQuiescent(t *testing.T) []distribution.Metadata {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	var last int
+	var stableSince time.Time
+	for time.Now().Before(deadline) {
+		n := h.pub.count()
+		if n > 0 && n == last {
+			if stableSince.IsZero() {
+				stableSince = time.Now()
+			} else if time.Since(stableSince) >= 50*time.Millisecond {
+				return h.pub.all()
+			}
+		} else {
+			last = n
+			stableSince = time.Time{}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("publish count did not quiesce (last %d)", last)
+	return nil
+}
+
 func (h *harness) waitCollected(t *testing.T, want int) {
 	t.Helper()
 	if h.receipts == nil {
@@ -480,6 +517,28 @@ func (h *harness) waitCollected(t *testing.T, want int) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatalf("collected %d segments, want %d", h.receipts.receiptCount(), want)
+}
+
+func (h *harness) waitCollectedMatchesPublish(t *testing.T) []distribution.Metadata {
+	t.Helper()
+	if h.receipts == nil {
+		t.Fatal("harness has no collection")
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		h.collect.Notify(h.vaultID)
+		pubN := h.pub.count()
+		recN := h.receipts.receiptCount()
+		if pubN > 0 && recN == pubN {
+			time.Sleep(50 * time.Millisecond)
+			if h.pub.count() == pubN && h.receipts.receiptCount() == pubN {
+				return h.pub.all()
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("collected %d segments, published %d", h.receipts.receiptCount(), h.pub.count())
+	return nil
 }
 
 func (h *harness) waitCollectedWithRetry(t *testing.T, want int) {
@@ -564,20 +623,19 @@ func (h *harness) readCompletedRecords(t *testing.T) []record.Record {
 	return got
 }
 
-func (h *harness) waitCompletedEmpty(t *testing.T) {
+func (h *harness) waitLocalHeadPromoted(t *testing.T, minPublished, minHead int) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		entries, err := os.ReadDir(paths.CompletedDir(h.vaultRoot))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(entries) == 0 {
-			return
+		if h.pub.count() >= minPublished {
+			entries, err := os.ReadDir(paths.HeadDir(h.vaultRoot))
+			if err == nil && len(entries) >= minHead {
+				return
+			}
 		}
 		time.Sleep(time.Millisecond)
 	}
-	t.Fatal("completed dir not empty after local promote")
+	t.Fatalf("local head promote incomplete: published=%d want>=%d", h.pub.count(), minPublished)
 }
 
 func (h *harness) readWorkingRecords(t *testing.T) []record.Record {
@@ -740,17 +798,15 @@ func TestPipelineIngestToDistributionLocalHolder(t *testing.T) {
 	h.runIngester(t, &emitIngester{msgs: msgs})
 
 	h.waitSyncs(t, 8)
-	h.waitCompletedEmpty(t)
-	if h.pub.count() < 1 {
-		t.Fatalf("published %d segments", h.pub.count())
-	}
+	h.waitLocalHeadPromoted(t, 1, 1)
 
-	headEntries, err := os.ReadDir(paths.HeadDir(h.vaultRoot))
+	// Local holders copy into head/; completed/ stays for peer pull until release.
+	completedEntries, err := os.ReadDir(paths.CompletedDir(h.vaultRoot))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(headEntries) < 1 {
-		t.Fatalf("head segments = %d, want >= 1", len(headEntries))
+	if len(completedEntries) < 1 {
+		t.Fatalf("completed segments = %d, want >= 1 (origin bytes for pull)", len(completedEntries))
 	}
 }
 
@@ -782,8 +838,7 @@ func TestPipelineFullPath(t *testing.T) {
 	h.runIngester(t, &emitIngester{msgs: msgs})
 
 	h.waitSyncs(t, 8)
-	published := h.waitPublishedStable(t, 1)
-	h.waitCollected(t, len(published))
+	published := h.waitCollectedMatchesPublish(t)
 
 	meta := published[0]
 	if meta.RecordCount == 0 {
@@ -888,8 +943,7 @@ func TestPipelineOpenChunkQueryBeforeSeal(t *testing.T) {
 	h.runIngester(t, &emitIngester{msgs: msgs})
 
 	h.waitSyncs(t, 8)
-	published := h.waitPublishedStable(t, 1)
-	h.waitCollected(t, len(published))
+	published := h.waitCollectedMatchesPublish(t)
 
 	var totalRecords uint32
 	for _, meta := range published {
@@ -968,8 +1022,7 @@ func TestPipelineRemotePullFailureThenRecovery(t *testing.T) {
 	h.runIngester(t, &emitIngester{msgs: msgs})
 
 	h.waitSyncs(t, 8)
-	published := h.waitPublishedStable(t, 1)
-	h.waitCollectedWithRetry(t, len(published))
+	published := h.waitCollectedMatchesPublish(t)
 	headPath := paths.HeadSegment(h.homeRoot, published[0].SegmentID)
 	if _, err := os.Stat(headPath); err != nil {
 		t.Fatalf("head on remote home: %v", err)
@@ -1004,8 +1057,7 @@ func TestPipelineRemoteHomeFollowerBuildsGLCBWithoutSealing(t *testing.T) {
 	h.runIngester(t, &emitIngester{msgs: msgs})
 
 	h.waitSyncs(t, 8)
-	published := h.waitPublishedStable(t, 1)
-	h.waitCollected(t, len(published))
+	published := h.waitCollectedMatchesPublish(t)
 
 	meta := published[0]
 	openedAt := time.Now().UTC()
@@ -1061,8 +1113,6 @@ func TestPipelineRemoteHomePlannerRequiresLocalHead(t *testing.T) {
 	h.runIngester(t, &emitIngester{msgs: msgs})
 
 	h.waitSyncs(t, 8)
-	published := h.waitPublishedStable(t, 1)
-
 	if err := h.chunk.PlanOnce(h.ctx, h.vaultID); err != nil {
 		t.Fatal(err)
 	}
@@ -1071,7 +1121,7 @@ func TestPipelineRemoteHomePlannerRequiresLocalHead(t *testing.T) {
 	}
 
 	h.gatePull.allow()
-	h.waitCollectedWithRetry(t, len(published))
+	h.waitCollectedMatchesPublish(t)
 	// Each PlanOnce makes a single planner decision (open manifest, then one
 	// ref per pass); FSM callbacks wake the async chunking worker for the
 	// rest, so poll until refs land.

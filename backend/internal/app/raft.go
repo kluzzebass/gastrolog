@@ -289,9 +289,9 @@ func newRaftConfig(nodeID string, logger *slog.Logger) *hraft.Config {
 	conf.SnapshotInterval = 30 * time.Second
 	conf.TrailingLogs = 64
 
-	conf.HeartbeatTimeout = 1000 * time.Millisecond
-	conf.ElectionTimeout = 1000 * time.Millisecond
-	conf.LeaderLeaseTimeout = 500 * time.Millisecond
+	conf.HeartbeatTimeout, conf.ElectionTimeout, conf.LeaderLeaseTimeout = raftgroup.RaftTimeouts(raftgroup.GroupConfig{
+		GroupID: raftgroup.ClusterControlPlaneGroupID,
+	})
 	return conf
 }
 

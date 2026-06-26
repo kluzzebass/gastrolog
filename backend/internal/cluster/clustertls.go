@@ -12,6 +12,8 @@ import (
 	"os"
 	"sync/atomic"
 
+	"gastrolog/internal/multiraft"
+
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -158,69 +160,94 @@ func (c *ClusterTLS) ServerTLSConfig() *tls.Config {
 	}
 }
 
-// ClientTLSConfig returns a tls.Config for dialing other cluster nodes.
+// ClientTLSConfig returns a tls.Config for dialing other cluster nodes on the
+// service lane (ClusterService, chunk transfer, search forward, etc.).
 func (c *ClusterTLS) ClientTLSConfig() *tls.Config {
+	return c.clientTLSConfigForServerName(SNIServiceLane)
+}
+
+// ClientTLSConfigForRaft returns a tls.Config for dialing the raft lane.
+func (c *ClusterTLS) ClientTLSConfigForRaft() *tls.Config {
+	return c.clientTLSConfigForServerName(SNIRaftLane)
+}
+
+func (c *ClusterTLS) clientTLSConfigForServerName(serverName string) *tls.Config {
 	st := c.state.Load()
 	if st == nil {
 		return nil
 	}
-	return &tls.Config{
+	cfg := &tls.Config{
 		Certificates: []tls.Certificate{st.Cert},
 		RootCAs:      st.CAPool,
-		ServerName:   "localhost",
 		MinVersion:   tls.VersionTLS13,
 	}
+	if multiraft.IsRaftLaneSNI(serverName) {
+		// Per-group raft SNIs (gastrolog-raft.config, gastrolog-raft.vault…)
+		// must stay in the ClientHello for inbound SNI demux. Node certs only
+		// SAN gastrolog-raft / gastrolog-cluster, so skip default hostname
+		// verification and verify the cluster CA chain in VerifyConnection.
+		cfg.ServerName = serverName
+		cfg.InsecureSkipVerify = true
+		cfg.VerifyConnection = func(cs tls.ConnectionState) error {
+			if len(cs.PeerCertificates) == 0 {
+				return errors.New("cluster TLS: no peer certificate")
+			}
+			opts := x509.VerifyOptions{Roots: st.CAPool}
+			_, err := cs.PeerCertificates[0].Verify(opts)
+			return err
+		}
+		return cfg
+	}
+	cfg.ServerName = serverName
+	return cfg
 }
 
-// TransportCredentials returns gRPC transport credentials for dialing
-// other cluster nodes with mTLS. If TLS state has not been loaded yet,
-// the returned credentials fall back to insecure and automatically
-// upgrade once Load is called. This allows the Raft transport to be
-// created before TLS material is available (bootstrap flow).
+// TransportCredentials returns gRPC transport credentials for the service lane.
 func (c *ClusterTLS) TransportCredentials() credentials.TransportCredentials {
-	return &dynamicCreds{ctls: c}
+	return c.TransportCredentialsForServerName(SNIServiceLane)
 }
 
-// dynamicCreds implements credentials.TransportCredentials by reading from
-// the ClusterTLS atomic pointer on each handshake. This enables the Raft
-// gRPC transport to start before TLS is available and seamlessly upgrade
-// when TLS material is loaded.
-type dynamicCreds struct {
-	ctls *ClusterTLS
+// TransportCredentialsForRaft returns gRPC transport credentials for the raft lane.
+func (c *ClusterTLS) TransportCredentialsForRaft() credentials.TransportCredentials {
+	return c.TransportCredentialsForServerName(SNIRaftLane)
 }
 
-func (d *dynamicCreds) ClientHandshake(ctx context.Context, authority string, rawConn net.Conn) (net.Conn, credentials.AuthInfo, error) {
+// TransportCredentialsForServerName returns lane-specific outbound credentials.
+func (c *ClusterTLS) TransportCredentialsForServerName(serverName string) credentials.TransportCredentials {
+	return &laneDynamicCreds{ctls: c, serverName: serverName}
+}
+
+// laneDynamicCreds implements credentials.TransportCredentials with a fixed
+// TLS ServerName for lane-specific verification after SNI demux.
+type laneDynamicCreds struct {
+	ctls       *ClusterTLS
+	serverName string
+}
+
+func (d *laneDynamicCreds) ClientHandshake(ctx context.Context, authority string, rawConn net.Conn) (net.Conn, credentials.AuthInfo, error) {
 	return d.current().ClientHandshake(ctx, authority, rawConn)
 }
 
-func (d *dynamicCreds) ServerHandshake(rawConn net.Conn) (net.Conn, credentials.AuthInfo, error) {
+func (d *laneDynamicCreds) ServerHandshake(rawConn net.Conn) (net.Conn, credentials.AuthInfo, error) {
 	return d.current().ServerHandshake(rawConn)
 }
 
-func (d *dynamicCreds) Info() credentials.ProtocolInfo {
+func (d *laneDynamicCreds) Info() credentials.ProtocolInfo {
 	return d.current().Info()
 }
 
-func (d *dynamicCreds) Clone() credentials.TransportCredentials {
-	return &dynamicCreds{ctls: d.ctls}
+func (d *laneDynamicCreds) Clone() credentials.TransportCredentials {
+	return &laneDynamicCreds{ctls: d.ctls, serverName: d.serverName}
 }
 
-func (d *dynamicCreds) OverrideServerName(name string) error {
+func (d *laneDynamicCreds) OverrideServerName(name string) error {
 	return nil
 }
 
-func (d *dynamicCreds) current() credentials.TransportCredentials {
-	st := d.ctls.state.Load()
-	if st == nil {
+func (d *laneDynamicCreds) current() credentials.TransportCredentials {
+	cfg := d.ctls.clientTLSConfigForServerName(d.serverName)
+	if cfg == nil {
 		return insecure.NewCredentials()
 	}
-	return credentials.NewTLS(&tls.Config{
-		Certificates: []tls.Certificate{st.Cert},
-		RootCAs:      st.CAPool,
-		// All cluster nodes share one cert with "localhost" in SANs.
-		// Override ServerName so TLS verification succeeds regardless of
-		// how the peer address resolves (e.g., [::]:4585 → "::" as host).
-		ServerName: "localhost",
-		MinVersion: tls.VersionTLS13,
-	})
+	return credentials.NewTLS(cfg)
 }

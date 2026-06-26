@@ -15,17 +15,19 @@ import (
 	"google.golang.org/grpc"
 )
 
+const managedFilePurpose = "managed-file-transfer"
+
 const managedFileChunkSize = 64 * 1024 // 64 KB per streamed chunk
 
 // ManagedFileTransferrer handles cross-node distribution of managed files.
-// Uses the shared PeerConns pool, following the same pattern as
+// Uses the shared PeerConnManager service lane, following the same pattern as
 // ChunkTransferrer and SearchForwarder.
 type ManagedFileTransferrer struct {
-	peers *PeerConns
+	peers *PeerConnManager
 }
 
-// NewManagedFileTransferrer creates a ManagedFileTransferrer using the shared PeerConns pool.
-func NewManagedFileTransferrer(peers *PeerConns) *ManagedFileTransferrer {
+// NewManagedFileTransferrer creates a ManagedFileTransferrer using the shared PeerConnManager.
+func NewManagedFileTransferrer(peers *PeerConnManager) *ManagedFileTransferrer {
 	return &ManagedFileTransferrer{peers: peers}
 }
 
@@ -34,12 +36,7 @@ func NewManagedFileTransferrer(peers *PeerConns) *ManagedFileTransferrer {
 // against the expected SHA256 hash before the temp file is renamed to its
 // final location. destPath is the full canonical path (from home.Dir.ManagedFilePath).
 func (lt *ManagedFileTransferrer) PullFile(ctx context.Context, nodeID, fileID, destPath string) error {
-	conn, err := lt.peers.Conn(nodeID)
-	if err != nil {
-		return fmt.Errorf("dial node %s: %w", nodeID, err)
-	}
-
-	stream, err := conn.NewStream(ctx,
+	h, stream, err := lt.peers.OpenServiceStream(ctx, nodeID, managedFilePurpose,
 		&grpc.StreamDesc{
 			StreamName:    "PullManagedFile",
 			ServerStreams: true,
@@ -47,21 +44,19 @@ func (lt *ManagedFileTransferrer) PullFile(ctx context.Context, nodeID, fileID, 
 		"/gastrolog.v1.ClusterService/PullManagedFile",
 	)
 	if err != nil {
-		lt.peers.Invalidate(nodeID, err)
 		return fmt.Errorf("open pull stream to %s: %w", nodeID, err)
 	}
+	defer h.Release()
 
-	// Send the request.
 	if err := stream.SendMsg(&gastrologv1.PullManagedFileRequest{FileId: []byte(fileID)}); err != nil {
-		lt.peers.Invalidate(nodeID, err)
+		h.Invalidate(err)
 		return fmt.Errorf("send pull request to %s: %w", nodeID, err)
 	}
 	if err := stream.CloseSend(); err != nil {
-		lt.peers.Invalidate(nodeID, err)
+		h.Invalidate(err)
 		return fmt.Errorf("close send to %s: %w", nodeID, err)
 	}
 
-	// Receive chunks, writing to a temp file.
 	destDir := filepath.Dir(destPath)
 	if err := os.MkdirAll(destDir, 0o750); err != nil {
 		return fmt.Errorf("create dest dir: %w", err)
@@ -77,7 +72,7 @@ func (lt *ManagedFileTransferrer) PullFile(ctx context.Context, nodeID, fileID, 
 		_ = os.Remove(tmpPath) // no-op after successful rename
 	}()
 
-	h := sha256.New()
+	hsh := sha256.New()
 	var filename, expectedHash string
 
 	for {
@@ -86,10 +81,9 @@ func (lt *ManagedFileTransferrer) PullFile(ctx context.Context, nodeID, fileID, 
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			lt.peers.Invalidate(nodeID, err)
+			h.Invalidate(err)
 			return fmt.Errorf("receive chunk from %s: %w", nodeID, err)
 		}
-		// First chunk carries metadata.
 		if chunk.GetName() != "" {
 			filename = chunk.GetName()
 		}
@@ -100,7 +94,7 @@ func (lt *ManagedFileTransferrer) PullFile(ctx context.Context, nodeID, fileID, 
 			if _, err := tmp.Write(chunk.GetData()); err != nil {
 				return fmt.Errorf("write chunk: %w", err)
 			}
-			_, _ = h.Write(chunk.GetData())
+			_, _ = hsh.Write(chunk.GetData())
 		}
 	}
 	_ = tmp.Close()
@@ -109,8 +103,7 @@ func (lt *ManagedFileTransferrer) PullFile(ctx context.Context, nodeID, fileID, 
 		return fmt.Errorf("peer %s sent no filename for file %s", nodeID, fileID)
 	}
 
-	// Verify hash.
-	actualHash := hex.EncodeToString(h.Sum(nil))
+	actualHash := hex.EncodeToString(hsh.Sum(nil))
 	if expectedHash != "" && actualHash != expectedHash {
 		return fmt.Errorf("hash mismatch for %s: expected %s, got %s", fileID, expectedHash, actualHash)
 	}
@@ -125,14 +118,10 @@ func (lt *ManagedFileTransferrer) PullFile(ctx context.Context, nodeID, fileID, 
 
 // ListPeerFiles asks a peer which managed files it has on disk.
 func (lt *ManagedFileTransferrer) ListPeerFiles(ctx context.Context, nodeID string) ([]string, error) {
-	conn, err := lt.peers.Conn(nodeID)
-	if err != nil {
-		return nil, fmt.Errorf("dial node %s: %w", nodeID, err)
-	}
-
 	resp := &gastrologv1.ListPeerManagedFilesResponse{}
-	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ListPeerManagedFiles", &gastrologv1.ListPeerManagedFilesRequest{}, resp); err != nil {
-		lt.peers.Invalidate(nodeID, err)
+	if err := lt.peers.InvokeService(ctx, nodeID, managedFilePurpose,
+		"/gastrolog.v1.ClusterService/ListPeerManagedFiles",
+		&gastrologv1.ListPeerManagedFilesRequest{}, resp); err != nil {
 		return nil, fmt.Errorf("list peer files on %s: %w", nodeID, err)
 	}
 

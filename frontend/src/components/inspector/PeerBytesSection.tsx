@@ -1,24 +1,39 @@
 /**
- * Per-peer inter-node gRPC tx/rx for a single node. Reads cumulative counters
- * from NodeStats.peerBytes and renders backend-derived rates + sparkline
- * windows. Covers ALL cluster transport traffic —
- * Raft, broadcast, vault replication, query forwarding, chunk streaming,
- * drain, etc. See gastrolog-47u85.
+ * Outbound peer connection telemetry from NodeStats.peerConnections — per-lane,
+ * per-group, with purpose labels and backend-derived rates/sparklines.
  */
+import { useLayoutEffect, useRef, useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { formatBytes } from "../../utils";
-// eslint-disable-next-line no-restricted-imports -- NodeStats / PeerBytesStat are passthrough types from Node.stats; no model wrap planned
+// eslint-disable-next-line no-restricted-imports -- passthrough proto types from Node.stats
 import type {
   NodeStats,
-  PeerBytesStat,
+  PeerConnStat,
 } from "../../api/gen/gastrolog/v1/cluster_pb";
 import { asEntityID } from "../../api/model/id";
 import type { NodeRegistry } from "../../api/hooks";
 
-// peerKey returns the peer identifier used as the state-map key. Uses the
-// proto-defined peer string (node ID) directly.
-function peerKey(p: PeerBytesStat): string {
-  return p.peer;
+function rowKey(p: PeerConnStat): string {
+  return `${p.peer}\0${p.lane}\0${p.groupId}\0${p.poolIndex}`;
+}
+
+function laneLabel(p: PeerConnStat): string {
+  if (p.lane === "service" && p.poolIndex > 0) {
+    return `service #${p.poolIndex}`;
+  }
+  return p.lane || "service";
+}
+
+/** Strip vault/…/ctl wrapper for display; full id stays in title. */
+function groupDisplay(groupId: string): { label: string; title: string } {
+  if (!groupId) {
+    return { label: "—", title: "" };
+  }
+  if (groupId.startsWith("vault/") && groupId.endsWith("/ctl")) {
+    const vaultId = groupId.slice("vault/".length, -"/ctl".length);
+    return { label: vaultId, title: groupId };
+  }
+  return { label: groupId, title: groupId };
 }
 
 export interface PeerBytesSectionProps {
@@ -34,104 +49,111 @@ export function PeerBytesSection({
 }: PeerBytesSectionProps) {
   const c = useThemeClass(dark);
 
-  const peerBytes: readonly PeerBytesStat[] = nodeStats?.peerBytes ?? [];
-
-  if (peerBytes.length === 0) {
-    return (
-      <div
-        className={`text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}
-      >
-        No inter-node traffic recorded for this node.
-      </div>
-    );
-  }
-
-  // Defensive: drop rows whose peer is no longer in the cluster
-  // registry (gastrolog-9ohip). Backend cleanup on PeerObservation.Removed
-  // now evicts PeerByteMetrics, but the UI should also guard against a
-  // stale broadcast arriving after the removal observer fired — or against
-  // any future backend leak that escapes the eviction path.
-  const rows = [...peerBytes]
-    .filter((p) => nodes.byId.has(asEntityID(p.peer)))
-    .sort((a, b) => {
-      const na = nodes.nameOf(asEntityID(a.peer));
-      const nb = nodes.nameOf(asEntityID(b.peer));
-      return na.localeCompare(nb);
-    });
+  const rows: readonly PeerConnStat[] = nodeStats?.peerConnections ?? [];
 
   if (rows.length === 0) {
     return (
       <div
         className={`text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}
       >
-        No inter-node traffic recorded for this node.
+        No inter-node connections recorded for this node.
       </div>
     );
   }
 
+  const filtered = [...rows]
+    .filter((p) => nodes.byId.has(asEntityID(p.peer)))
+    .sort((a, b) => {
+      const na = nodes.nameOf(asEntityID(a.peer));
+      const nb = nodes.nameOf(asEntityID(b.peer));
+      if (na !== nb) {
+        return na.localeCompare(nb);
+      }
+      const la = laneLabel(a);
+      const lb = laneLabel(b);
+      if (la !== lb) {
+        return la.localeCompare(lb);
+      }
+      return a.groupId.localeCompare(b.groupId);
+    });
+
+  if (filtered.length === 0) {
+    return (
+      <div
+        className={`text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}
+      >
+        No inter-node connections recorded for this node.
+      </div>
+    );
+  }
+
+  const th = `px-3 py-1.5 text-left font-medium ${c("text-text-muted", "text-light-text-muted")}`;
+  const thMetric = `${th} text-right whitespace-nowrap`;
+  const tdTruncateCell = `px-3 py-1.5 max-w-0 ${c("text-text-normal", "text-light-text-normal")}`;
+  const tdPeer = `px-3 py-1.5 whitespace-nowrap ${c("text-text-bright", "text-light-text-bright")}`;
+  const tdRate = `px-3 py-1.5 text-right whitespace-nowrap tabular-nums ${c("text-text-bright", "text-light-text-bright")}`;
+
   return (
     <div
-      className={`rounded-md border overflow-hidden ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
+      className={`rounded-md border overflow-x-auto ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
     >
       <table className="w-full text-[0.8em] font-mono">
         <thead>
           <tr className={c("bg-ink-surface/80", "bg-light-surface/80")}>
-            <th
-              className={`px-3 py-1.5 text-left font-medium ${c("text-text-muted", "text-light-text-muted")}`}
-            >
-              Peer
-            </th>
-            <th
-              className={`px-3 py-1.5 text-right font-medium ${c("text-text-muted", "text-light-text-muted")}`}
-            >
-              Tx/s
-            </th>
-            <th
-              className={`px-3 py-1.5 w-16 ${c("text-text-muted", "text-light-text-muted")}`}
-            ></th>
-            <th
-              className={`px-3 py-1.5 text-right font-medium ${c("text-text-muted", "text-light-text-muted")}`}
-            >
-              Rx/s
-            </th>
-            <th
-              className={`px-3 py-1.5 w-16 ${c("text-text-muted", "text-light-text-muted")}`}
-            ></th>
+            <th className={`${th} whitespace-nowrap`}>Peer</th>
+            <th className={`${th} whitespace-nowrap`}>Lane</th>
+            <th className={th}>Group</th>
+            <th className={th}>Purpose</th>
+            <th className={thMetric}>Tx/s</th>
+            <th className="px-3 py-1.5" aria-hidden="true" />
+            <th className={thMetric}>Rx/s</th>
+            <th className="px-3 py-1.5" aria-hidden="true" />
           </tr>
         </thead>
         <tbody>
-          {rows.map((p) => {
-            const k = peerKey(p);
-            const name = nodes.nameOf(asEntityID(p.peer));
-            const tx = p.txBytesPerSec;
-            const rx = p.rxBytesPerSec;
+          {filtered.map((p) => {
             const txSpark = p.txSpark;
             const rxSpark = p.rxSpark;
             const hasHistory = txSpark.length > 0 || rxSpark.length > 0;
+            const purposes = p.purposes.length > 0 ? p.purposes.join(", ") : "—";
+            const group = groupDisplay(p.groupId);
             return (
               <tr
-                key={k}
+                key={rowKey(p)}
                 className={`border-t ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
               >
-                <td
-                  className={`px-3 py-1.5 truncate ${c("text-text-bright", "text-light-text-bright")}`}
-                >
-                  {name}
+                <td className={tdPeer}>
+                  {nodes.nameOf(asEntityID(p.peer))}
                 </td>
-                <td
-                  className={`px-3 py-1.5 text-right ${c("text-text-bright", "text-light-text-bright")}`}
-                >
-                  {hasHistory ? `${formatBytes(Math.round(tx))}/s` : "—"}
+                <td className={`px-3 py-1.5 whitespace-nowrap ${c("text-text-normal", "text-light-text-normal")}`}>
+                  {laneLabel(p)}
                 </td>
-                <td className="px-3 py-1 text-copper">
+                <td className={tdTruncateCell}>
+                  <TruncatedText
+                    text={group.label}
+                    hint={group.title || group.label}
+                  />
+                </td>
+                <td className={tdTruncateCell}>
+                  <TruncatedText
+                    text={purposes}
+                    className={c("text-text-muted", "text-light-text-muted")}
+                  />
+                </td>
+                <td className={tdRate}>
+                  {hasHistory
+                    ? `${formatBytes(Math.round(p.txBytesPerSec))}/s`
+                    : "—"}
+                </td>
+                <td className="px-3 py-1 whitespace-nowrap text-copper">
                   <Spark values={txSpark} />
                 </td>
-                <td
-                  className={`px-3 py-1.5 text-right ${c("text-text-bright", "text-light-text-bright")}`}
-                >
-                  {hasHistory ? `${formatBytes(Math.round(rx))}/s` : "—"}
+                <td className={tdRate}>
+                  {hasHistory
+                    ? `${formatBytes(Math.round(p.rxBytesPerSec))}/s`
+                    : "—"}
                 </td>
-                <td className="px-3 py-1 text-copper-dim">
+                <td className="px-3 py-1 whitespace-nowrap text-copper-dim">
                   <Spark values={rxSpark} />
                 </td>
               </tr>
@@ -143,10 +165,45 @@ export function PeerBytesSection({
   );
 }
 
-// Spark renders a minimal inline line chart. Fixed-size SVG; auto-scales
-// Y-axis to the window's own max so quiet and busy peers each fill the
-// band meaningfully. Color comes from the parent via currentColor —
-// callers set a Tailwind text-* class on the wrapper to pick the hue.
+/** Truncated single-line text; native title appears only when ellipsis is shown. */
+function TruncatedText({
+  text,
+  hint,
+  className,
+}: Readonly<{
+  text: string;
+  hint?: string;
+  className?: string;
+}>) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const [overflowed, setOverflowed] = useState(false);
+  const tooltip = hint ?? text;
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) {
+      return;
+    }
+    const check = () => {
+      setOverflowed(el.scrollWidth > el.clientWidth);
+    };
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [text, tooltip]);
+
+  return (
+    <span
+      ref={ref}
+      className={`block truncate ${className ?? ""}`}
+      title={overflowed && tooltip !== "—" ? tooltip : undefined}
+    >
+      {text}
+    </span>
+  );
+}
+
 function Spark({ values }: Readonly<{ values: number[] }>) {
   if (values.length < 2) {
     return <svg width="56" height="16" aria-hidden="true" />;

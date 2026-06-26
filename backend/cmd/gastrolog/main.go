@@ -130,6 +130,10 @@ func main() {
 				NoAuth:      mustBool(cmd, "no-auth"),
 				ClusterAddr:      mustString(cmd, "cluster-addr"),
 				ClusterAdvertise: mustString(cmd, "cluster-advertise"),
+				ServicePoolMaxPerPeer: func() int {
+					v, _ := cmd.Flags().GetInt("service-pool-max-per-peer")
+					return v
+				}(),
 				JoinAddr:         mustString(cmd, "join-addr"),
 				JoinToken:   mustString(cmd, "join-token"),
 				NodeName:    mustString(cmd, "name"),
@@ -167,6 +171,7 @@ func main() {
 	serverCmd.Flags().Bool("no-auth", false, "disable authentication (all requests treated as admin)")
 	serverCmd.Flags().String("cluster-addr", ":4566", "cluster gRPC listen address")
 	serverCmd.Flags().String("cluster-advertise", "", "address peers store and dial to reach this node (empty = use bind address); set to a stable DNS name in environments with rotating pod IPs (e.g. Kubernetes)")
+	serverCmd.Flags().Int("service-pool-max-per-peer", 0, "max parallel outbound service-lane gRPC connections per peer (0 = default 4)")
 	serverCmd.Flags().String("join-addr", "", "leader's cluster address to join an existing cluster")
 	serverCmd.Flags().String("join-token", "", "join token for cluster enrollment (from cluster-init node)")
 	serverCmd.Flags().String("name", "", "node name (default: random petname)")

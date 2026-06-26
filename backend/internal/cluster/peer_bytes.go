@@ -124,6 +124,32 @@ func (m *PeerByteMetrics) Snapshot() []PeerByteCounter {
 	return out
 }
 
+func newManagedConnStatsHandler(mc *managedConn) *managedConnStatsHandler {
+	return &managedConnStatsHandler{mc: mc}
+}
+
+type managedConnStatsHandler struct {
+	mc *managedConn
+}
+
+func (h *managedConnStatsHandler) TagConn(ctx context.Context, _ *stats.ConnTagInfo) context.Context {
+	return ctx
+}
+func (*managedConnStatsHandler) HandleConn(context.Context, stats.ConnStats) {}
+
+func (h *managedConnStatsHandler) TagRPC(ctx context.Context, _ *stats.RPCTagInfo) context.Context {
+	return ctx
+}
+
+func (h *managedConnStatsHandler) HandleRPC(_ context.Context, rs stats.RPCStats) {
+	switch s := rs.(type) {
+	case *stats.OutPayload:
+		h.mc.bytesSent.Add(int64(s.WireLength))
+	case *stats.InPayload:
+		h.mc.bytesRecv.Add(int64(s.WireLength))
+	}
+}
+
 // clientStatsHandler is a grpc/stats.Handler installed on each outbound
 // PeerConn. One instance per dialed peer — the peer ID is baked in at
 // construction time, so HandleRPC doesn't need to look it up on every

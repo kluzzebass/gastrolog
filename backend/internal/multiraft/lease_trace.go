@@ -13,7 +13,7 @@ import (
 
 // clusterConfigGroupID is the multiraft group for cluster-ctl Raft RPCs.
 // Must stay aligned with cluster.ConfigGroupID ("config").
-const clusterConfigGroupID = "config"
+const clusterConfigGroupID = ClusterConfigGroupID
 
 const (
 	leaseTraceSlowConfigHeartbeat = 50 * time.Millisecond
@@ -155,4 +155,21 @@ func traceInboundAppendEntries[K comparable](
 		args = append(args, "entries", len(req.Entries))
 	}
 	leaseTraceLog().Log(context.Background(), level, "inbound AppendEntries", args...)
+}
+
+// logOutboundRaftRPCError records election-path RPC failures at WARN. Hashicorp
+// raft downgrades its own "failed to make requestVote RPC" to debug, so without
+// this, TLS/transport failures on per-group lanes show up only as pre-vote
+// refused=3 with no visible cause (gastrolog-1dg8z).
+func logOutboundRaftRPCError[K comparable](groupID K, rpc string, target raft.ServerAddress, total time.Duration, err error) {
+	if err == nil {
+		return
+	}
+	leaseTraceLog().Warn("outbound raft RPC failed",
+		"rpc", rpc,
+		"group", groupIDString(groupID),
+		"peer", string(target),
+		"total_ms", total.Milliseconds(),
+		"err", err,
+	)
 }

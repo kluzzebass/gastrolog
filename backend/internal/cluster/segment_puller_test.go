@@ -11,7 +11,6 @@ import (
 	"gastrolog/internal/glid"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 // startSegmentPullServer stands up a real gRPC server with the ClusterService
@@ -29,16 +28,15 @@ func startSegmentPullServer(t *testing.T, fn SegmentPullServer) (*SegmentPuller,
 	gsrv.RegisterService(&clusterServiceDesc, &Server{segmentPullServer: fn})
 	go func() { _ = gsrv.Serve(lis) }()
 
-	conn, err := grpc.NewClient(lis.Addr().String(),
-		grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		gsrv.Stop()
-		_ = lis.Close()
-		t.Fatalf("dial: %v", err)
-	}
-	sp := &SegmentPuller{peers: &PeerConns{conns: map[string]*grpc.ClientConn{"node-origin": conn}}}
+	mgr := NewStaticPeerConns("local", func(id string) (string, bool) {
+		if id == "node-origin" {
+			return lis.Addr().String(), true
+		}
+		return "", false
+	})
+	sp := &SegmentPuller{peers: mgr}
 	return sp, func() {
-		_ = conn.Close()
+		_ = mgr.Close()
 		gsrv.Stop()
 		_ = lis.Close()
 	}

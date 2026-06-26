@@ -12,16 +12,19 @@ import (
 	"google.golang.org/grpc"
 )
 
+const segmentPullerPurpose = "segment-puller"
+
 // SegmentPuller streams completed segments from a peer node (the segment
 // origin or another holder) over the internode ClusterService, using the shared
-// PeerConns pool and cluster mTLS — the same pattern as ManagedFileTransferrer.
+// PeerConnManager service lane and cluster mTLS — the same pattern as
+// ManagedFileTransferrer.
 // It is the production transport behind collection.PullClient (Rubicon C).
 type SegmentPuller struct {
-	peers *PeerConns
+	peers *PeerConnManager
 }
 
-// NewSegmentPuller creates a SegmentPuller over the shared PeerConns pool.
-func NewSegmentPuller(peers *PeerConns) *SegmentPuller {
+// NewSegmentPuller creates a SegmentPuller over the shared PeerConnManager.
+func NewSegmentPuller(peers *PeerConnManager) *SegmentPuller {
 	return &SegmentPuller{peers: peers}
 }
 
@@ -31,12 +34,7 @@ func NewSegmentPuller(peers *PeerConns) *SegmentPuller {
 // no integrity check — a mid-stream failure surfaces as an error and leaves no
 // promoted segment.
 func (sp *SegmentPuller) Pull(ctx context.Context, nodeID string, vaultID, segmentID glid.GLID, dest io.Writer) error {
-	conn, err := sp.peers.Conn(nodeID)
-	if err != nil {
-		return fmt.Errorf("dial node %s: %w", nodeID, err)
-	}
-
-	stream, err := conn.NewStream(ctx,
+	h, stream, err := sp.peers.OpenServiceStream(ctx, nodeID, segmentPullerPurpose,
 		&grpc.StreamDesc{
 			StreamName:    "PullSegment",
 			ServerStreams: true,
@@ -44,20 +42,20 @@ func (sp *SegmentPuller) Pull(ctx context.Context, nodeID string, vaultID, segme
 		"/gastrolog.v1.ClusterService/PullSegment",
 	)
 	if err != nil {
-		sp.peers.Invalidate(nodeID, err)
 		return fmt.Errorf("open pull stream to %s: %w", nodeID, err)
 	}
+	defer h.Release()
 
 	req := &gastrologv1.PullSegmentRequest{
 		VaultId:   vaultID[:],
 		SegmentId: segmentID[:],
 	}
 	if err := stream.SendMsg(req); err != nil {
-		sp.peers.Invalidate(nodeID, err)
+		h.Invalidate(err)
 		return fmt.Errorf("send pull request to %s: %w", nodeID, err)
 	}
 	if err := stream.CloseSend(); err != nil {
-		sp.peers.Invalidate(nodeID, err)
+		h.Invalidate(err)
 		return fmt.Errorf("close send to %s: %w", nodeID, err)
 	}
 
@@ -67,7 +65,7 @@ func (sp *SegmentPuller) Pull(ctx context.Context, nodeID string, vaultID, segme
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			sp.peers.Invalidate(nodeID, err)
+			h.Invalidate(err)
 			return fmt.Errorf("receive segment chunk from %s: %w", nodeID, err)
 		}
 		if len(chunk.GetData()) > 0 {

@@ -13,12 +13,20 @@ import (
 
 // DialerPeerPool resolves outbound connections through a static address→dialer
 // map. Used by in-process multiraft tests (bufconn); production nodes use
-// cluster.PeerConns via SetPeerConnPool.
+// cluster.PeerConnManager via SetPeerConnPool.
 type DialerPeerPool struct {
 	mu    sync.Mutex
 	conns map[string]*grpc.ClientConn
 	dial  func(context.Context, string) (net.Conn, error)
 }
+
+type dialerLease struct {
+	cc *grpc.ClientConn
+}
+
+func (l *dialerLease) GRPC() *grpc.ClientConn { return l.cc }
+func (l *dialerLease) Release()               {}
+func (l *dialerLease) Invalidate(err error)   {}
 
 // NewDialerPeerPool creates a peer pool that dials via dialers keyed by target
 // address string.
@@ -52,16 +60,16 @@ func dialForMap(dialers map[string]func(context.Context, string) (net.Conn, erro
 	}
 }
 
-func (p *DialerPeerPool) ConnForAddress(addr raft.ServerAddress) (*grpc.ClientConn, error) {
-	key := string(addr)
+func (p *DialerPeerPool) AcquireRaft(addr raft.ServerAddress, groupID string, _ string) (RaftConnLease, error) {
+	key := string(addr) + "\x00" + groupID
 	p.mu.Lock()
 	if conn, ok := p.conns[key]; ok {
 		p.mu.Unlock()
-		return conn, nil
+		return &dialerLease{cc: conn}, nil
 	}
 	p.mu.Unlock()
 
-	conn, err := grpc.NewClient("passthrough:///"+key,
+	conn, err := grpc.NewClient("passthrough:///"+string(addr),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithContextDialer(p.dial),
 	)
@@ -73,11 +81,11 @@ func (p *DialerPeerPool) ConnForAddress(addr raft.ServerAddress) (*grpc.ClientCo
 	if existing, ok := p.conns[key]; ok {
 		p.mu.Unlock()
 		_ = conn.Close()
-		return existing, nil
+		return &dialerLease{cc: existing}, nil
 	}
 	p.conns[key] = conn
 	p.mu.Unlock()
-	return conn, nil
+	return &dialerLease{cc: conn}, nil
 }
 
 // Close tears down cached test connections.

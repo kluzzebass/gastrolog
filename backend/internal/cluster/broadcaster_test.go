@@ -49,6 +49,18 @@ func (f *fakePeerSource) Peers() ([]hraft.Server, error) {
 	return out, nil
 }
 
+func (f *fakePeerSource) InvokeService(ctx context.Context, id, purpose, method string, req, resp any) error {
+	conn, err := f.Conn(id)
+	if err != nil {
+		return err
+	}
+	if err := conn.Invoke(ctx, method, req, resp); err != nil {
+		f.Invalidate(id, err)
+		return err
+	}
+	return nil
+}
+
 func (f *fakePeerSource) Conn(id string) (*grpc.ClientConn, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

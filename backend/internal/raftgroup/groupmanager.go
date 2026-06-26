@@ -73,14 +73,15 @@ type GroupConfig struct {
 }
 
 // Default Raft timing for cluster-ctl and other non-vault-ctl groups.
+// LeaderLeaseTimeout must not exceed HeartbeatTimeout (hashicorp/raft).
 const (
-	defaultHeartbeatTimeout  = 1000 * time.Millisecond
-	defaultElectionTimeout   = 1000 * time.Millisecond
-	defaultLeaderLeaseTimeout = 500 * time.Millisecond
+	defaultHeartbeatTimeout   = 2 * time.Second
+	defaultElectionTimeout    = 2 * time.Second
+	defaultLeaderLeaseTimeout = 1500 * time.Millisecond
 )
 
 // Vault control-plane groups run heavier FSM work and share the node with
-// chunking GLCB builds; tolerate longer scheduling pauses than cluster-ctl.
+// chunking GLCB builds; tolerate longer scheduling pauses than data-plane groups.
 const (
 	vaultCtlHeartbeatTimeout   = 3 * time.Second
 	vaultCtlElectionTimeout    = 3 * time.Second
@@ -100,12 +101,21 @@ type GroupManager struct {
 	mu     sync.RWMutex
 	groups map[string]*Group
 
-	transport    *multiraft.Transport[string]
-	nodeID       string
+	transport      *multiraft.Transport[string]
+	peerConns      GroupConnCloser
+	ensureRaftLane func(groupID string) error
+	removeRaftLane func(groupID string)
+	nodeID         string
 	baseDir      string       // <home>/raft/groups/
 	shutdownLast string       // group ID to shut down last (e.g. config group)
 	wal          *raftwal.WAL // optional shared WAL; nil = per-group boltdb
 	logger       *slog.Logger
+}
+
+// GroupConnCloser closes outbound raft-lane peer connections when a group is
+// destroyed. Optional; production nodes pass cluster.PeerConns.
+type GroupConnCloser interface {
+	CloseGroupConns(groupID string)
 }
 
 // GroupManagerConfig holds configuration for creating a GroupManager.
@@ -132,14 +142,27 @@ type GroupManagerConfig struct {
 	// Writes from all groups are batched into a single fsync, reducing disk
 	// I/O at high group counts. When nil, each group gets its own boltdb.
 	WAL *raftwal.WAL
+
+	// PeerConns closes per-group outbound raft-lane connections on DestroyGroup.
+	PeerConns GroupConnCloser
+
+	// EnsureRaftLane starts the inbound per-group gRPC stack for groupID.
+	// Required in TLS cluster mode before the group receives raft RPCs.
+	EnsureRaftLane func(groupID string) error
+
+	// RemoveRaftLane tears down the inbound per-group gRPC stack for groupID.
+	RemoveRaftLane func(groupID string)
 }
 
 // NewGroupManager creates a manager for Raft group lifecycle.
 func NewGroupManager(cfg GroupManagerConfig) *GroupManager {
 	return &GroupManager{
-		groups:       make(map[string]*Group),
-		transport:    cfg.Transport,
-		nodeID:       cfg.NodeID,
+		groups:         make(map[string]*Group),
+		transport:      cfg.Transport,
+		peerConns:      cfg.PeerConns,
+		ensureRaftLane: cfg.EnsureRaftLane,
+		removeRaftLane: cfg.RemoveRaftLane,
+		nodeID:         cfg.NodeID,
 		baseDir:      cfg.BaseDir,
 		shutdownLast: cfg.ShutdownLast,
 		wal:          cfg.WAL,
@@ -168,6 +191,13 @@ func (m *GroupManager) CreateGroup(cfg GroupConfig) (*Group, error) {
 	if m.wal == nil {
 		return nil, fmt.Errorf("WAL required for group %q", cfg.GroupID)
 	}
+
+	if m.ensureRaftLane != nil {
+		if err := m.ensureRaftLane(cfg.GroupID); err != nil {
+			return nil, fmt.Errorf("ensure raft lane for group %q: %w", cfg.GroupID, err)
+		}
+	}
+
 	gs := m.wal.GroupStore(cfg.GroupID)
 
 	snapStore, err := hraft.NewFileSnapshotStore(groupDir, 2, io.Discard)
@@ -241,6 +271,12 @@ func (m *GroupManager) DestroyGroup(groupID string) error {
 		m.logger.Error("raft shutdown failed", "group", groupID, "error", err)
 	}
 	m.transport.RemoveGroup(groupID)
+	if m.peerConns != nil {
+		m.peerConns.CloseGroupConns(groupID)
+	}
+	if m.removeRaftLane != nil {
+		m.removeRaftLane(groupID)
+	}
 
 	m.logger.Info("raft group destroyed", "group", groupID)
 	return nil
@@ -385,6 +421,12 @@ func (m *GroupManager) newRaftConfig(cfg GroupConfig) *hraft.Config {
 	conf.HeartbeatTimeout, conf.ElectionTimeout, conf.LeaderLeaseTimeout = raftTimeouts(cfg)
 
 	return conf
+}
+
+// RaftTimeouts returns HeartbeatTimeout, ElectionTimeout, and LeaderLeaseTimeout
+// for a group, honoring per-field overrides on cfg when > 0.
+func RaftTimeouts(cfg GroupConfig) (heartbeat, election, lease time.Duration) {
+	return raftTimeouts(cfg)
 }
 
 func raftTimeouts(cfg GroupConfig) (heartbeat, election, lease time.Duration) {

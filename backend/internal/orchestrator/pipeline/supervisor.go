@@ -213,21 +213,27 @@ func New(cfg Config) *Supervisor {
 		Workers: cfg.RoutingWorkers,
 		Table:   cfg.Table,
 	})
-	seg, completed := segmentation.New(segmentation.Config{
-		ClosePolicy:     cfg.SegmentClosePolicy,
-		SyncBatchSize:   cfg.SegmentSyncBatchSize,
-		SyncBatchWindow: cfg.SegmentSyncBatchWindow,
-		MaxCommitDelay:  cfg.SegmentMaxCommitDelay,
-		DisableFsync:    cfg.SegmentDisableFsync,
-		EncodeQueueCap:  cfg.SegmentationEncodeCap,
-		CompletedCap:    cfg.SegmentationCompletedCap,
-	})
 	dist, pullIn := distribution.New(distribution.Config{
 		PullQueueCap: cfg.DistributionPullQueueCap,
 		Logger:       cfg.Logger,
 	})
-	col := collection.New(collection.Config{Logger: cfg.Logger})
 	chunk := chunking.New(chunking.Config{Logger: cfg.Logger})
+	col := collection.New(collection.Config{
+		Logger: cfg.Logger,
+		OnPassComplete: func(vaultID glid.GLID) {
+			chunk.NotifyVault(vaultID)
+		},
+	})
+	seg, completed := segmentation.New(segmentation.Config{
+		ClosePolicy:        cfg.SegmentClosePolicy,
+		SyncBatchSize:        cfg.SegmentSyncBatchSize,
+		SyncBatchWindow:      cfg.SegmentSyncBatchWindow,
+		MaxCommitDelay:       cfg.SegmentMaxCommitDelay,
+		DisableFsync:         cfg.SegmentDisableFsync,
+		EncodeQueueCap:       cfg.SegmentationEncodeCap,
+		CompletedCap:         cfg.SegmentationCompletedCap,
+		OnCompletedDropped:   dist.NotifyStranded,
+	})
 
 	routingCap := cfg.RoutingInCapacity
 	if routingCap <= 0 {
@@ -554,6 +560,7 @@ func (s *Supervisor) registerOrigin(spec VaultSpec) error {
 		vaultID := spec.VaultID
 		distCfg.OnLocalHeadPromoted = func(glid.GLID) {
 			s.col.Notify(vaultID)
+			s.chunk.NotifyVault(vaultID)
 		}
 	}
 	if err := s.dist.RegisterVault(spec.VaultID, spec.OriginRoot, distCfg); err != nil {

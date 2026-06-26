@@ -12,7 +12,7 @@ import (
 // retryableCollectErr reports whether a collect pass failure is an expected
 // catch-up race at high ingest: the registry still lists a segment but no peer
 // has bytes yet (no holder acks), or a holder already purged head/ after seal.
-// The worker retries on recollectInterval; logging these at Warn drowns signal.
+// The worker schedules a wake retry; logging these at Warn drowns signal.
 func retryableCollectErr(err error) bool {
 	if err == nil {
 		return false

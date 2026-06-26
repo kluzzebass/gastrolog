@@ -2,9 +2,11 @@ package cluster
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -93,10 +95,9 @@ type RaftStatsProvider interface {
 	LocalStats() map[string]string
 }
 
-// PeerBytesProvider exposes cumulative per-peer inter-node gRPC byte
-// counters. Satisfied by *PeerByteMetrics.
-type PeerBytesProvider interface {
-	Snapshot() []PeerByteCounter
+// PeerConnSnapshotProvider exposes managed outbound connection telemetry.
+type PeerConnSnapshotProvider interface {
+	Snapshot() []PeerConnSnapshot
 }
 
 // AlertProvider exposes active system alerts for broadcast.
@@ -116,7 +117,7 @@ type StatsCollectorConfig struct {
 	Broadcaster  *Broadcaster
 	RaftStats    RaftStatsProvider
 	Stats        StatsProvider
-	PeerBytes    PeerBytesProvider // optional; nil disables per-peer byte stats
+	PeerConns         PeerConnSnapshotProvider // optional; nil disables peer conn stats
 	Alerts       AlertProvider           // optional; nil if no alert collector
 	Jobs         JobsProvider            // optional; nil in single-node mode
 	NodeID            string
@@ -137,12 +138,12 @@ type StatsCollector struct {
 	cfg StatsCollectorConfig
 
 	mu        sync.Mutex
-	peerBytes map[string]*peerBytesWindow
+	peerConnStats map[string]*peerConnStatsWindow
 }
 
-const peerBytesSparkPoints = 20
+const peerConnStatsSparkPoints = 20
 
-type peerBytesWindow struct {
+type peerConnStatsWindow struct {
 	lastSent int64
 	lastRecv int64
 	lastAt   time.Time
@@ -160,7 +161,7 @@ func NewStatsCollector(cfg StatsCollectorConfig) *StatsCollector {
 	}
 	return &StatsCollector{
 		cfg:       cfg,
-		peerBytes: make(map[string]*peerBytesWindow),
+		peerConnStats: make(map[string]*peerConnStatsWindow),
 	}
 }
 
@@ -170,19 +171,21 @@ func NewStatsCollector(cfg StatsCollectorConfig) *StatsCollector {
 // aligns with the peerEvictor interface.
 func (c *StatsCollector) Delete(peer string) {
 	c.mu.Lock()
-	delete(c.peerBytes, peer)
+	for k := range c.peerConnStats {
+		if strings.HasPrefix(k, peer+"\x00") || strings.HasPrefix(k, peer+":") {
+			delete(c.peerConnStats, k)
+		}
+	}
 	c.mu.Unlock()
 }
 
-// ReconcilePeers drops any rate window whose peer is not in keep.
-// Backstop for the observer path when hraft delivers a config
-// change via snapshot install (no PeerObservation fires).
 func (c *StatsCollector) ReconcilePeers(keep map[string]struct{}) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	for p := range c.peerBytes {
-		if _, ok := keep[p]; !ok {
-			delete(c.peerBytes, p)
+	for k := range c.peerConnStats {
+		peer := strings.SplitN(k, "\x00", 2)[0]
+		if _, ok := keep[peer]; !ok {
+			delete(c.peerConnStats, k)
 		}
 	}
 }
@@ -329,14 +332,19 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 		}
 	}
 
-	// Per-peer inter-node byte counters. See gastrolog-47u85.
-	if c.cfg.PeerBytes != nil {
-		for _, pc := range c.cfg.PeerBytes.Snapshot() {
-			txPerSec, rxPerSec, txSpark, rxSpark := c.observePeerBytes(now, pc.Peer, pc.Sent, pc.Received, stepWindows)
-			stats.PeerBytes = append(stats.PeerBytes, &gastrologv1.PeerBytesStat{
-				Peer:          pc.Peer,
-				BytesSent:     pc.Sent,
-				BytesReceived: pc.Received,
+	if c.cfg.PeerConns != nil {
+		for _, pc := range c.cfg.PeerConns.Snapshot() {
+			key := peerConnStatsKey(pc)
+			txPerSec, rxPerSec, txSpark, rxSpark := c.observePeerConnStats(now, key, pc.BytesSent, pc.BytesRecv, stepWindows)
+			stats.PeerConnections = append(stats.PeerConnections, &gastrologv1.PeerConnStat{
+				Peer:          pc.PeerNodeID,
+				Lane:          pc.Lane,
+				GroupId:       pc.GroupID,
+				Purposes:      append([]string(nil), pc.Purposes...),
+				Connectivity:  pc.Connectivity,
+				PoolIndex:     int32(pc.PoolIndex), //nolint:gosec
+				BytesSent:     pc.BytesSent,
+				BytesReceived: pc.BytesRecv,
 				TxBytesPerSec: txPerSec,
 				RxBytesPerSec: rxPerSec,
 				TxSpark:       txSpark,
@@ -374,22 +382,24 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 	return stats
 }
 
-func (c *StatsCollector) observePeerBytes(now time.Time, peer string, sent, recv int64, step bool) (txPerSec, rxPerSec float64, txSpark, rxSpark []float64) {
-	if peer == "" {
+func peerConnStatsKey(s PeerConnSnapshot) string {
+	return fmt.Sprintf("%s\x00%s\x00%s\x00%d", s.PeerNodeID, s.Lane, s.GroupID, s.PoolIndex)
+}
+
+func (c *StatsCollector) observePeerConnStats(now time.Time, key string, sent, recv int64, step bool) (txPerSec, rxPerSec float64, txSpark, rxSpark []float64) {
+	if key == "" {
 		return 0, 0, nil, nil
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	w := c.peerBytes[peer]
+	w := c.peerConnStats[key]
 	if w == nil {
-		w = &peerBytesWindow{lastSent: sent, lastRecv: recv, lastAt: now}
-		c.peerBytes[peer] = w
+		w = &peerConnStatsWindow{lastSent: sent, lastRecv: recv, lastAt: now}
+		c.peerConnStats[key] = w
 		return 0, 0, nil, nil
 	}
 
-	// Snapshot-only reads should not advance the window (prevents UI/opening
-	// inspector from skewing rates with tiny dt).
 	if !step {
 		txSpark = append([]float64(nil), w.txRates...)
 		rxSpark = append([]float64(nil), w.rxRates...)
@@ -407,7 +417,6 @@ func (c *StatsCollector) observePeerBytes(now time.Time, peer string, sent, recv
 		return 0, 0, append([]float64(nil), w.txRates...), append([]float64(nil), w.rxRates...)
 	}
 
-	// Handle counter resets (process restart) or any monotonicity violation.
 	if sent < w.lastSent || recv < w.lastRecv {
 		w.lastSent = sent
 		w.lastRecv = recv
@@ -424,11 +433,11 @@ func (c *StatsCollector) observePeerBytes(now time.Time, peer string, sent, recv
 
 	w.txRates = append(w.txRates, txPerSec)
 	w.rxRates = append(w.rxRates, rxPerSec)
-	if len(w.txRates) > peerBytesSparkPoints {
-		w.txRates = w.txRates[len(w.txRates)-peerBytesSparkPoints:]
+	if len(w.txRates) > peerConnStatsSparkPoints {
+		w.txRates = w.txRates[len(w.txRates)-peerConnStatsSparkPoints:]
 	}
-	if len(w.rxRates) > peerBytesSparkPoints {
-		w.rxRates = w.rxRates[len(w.rxRates)-peerBytesSparkPoints:]
+	if len(w.rxRates) > peerConnStatsSparkPoints {
+		w.rxRates = w.rxRates[len(w.rxRates)-peerConnStatsSparkPoints:]
 	}
 
 	txSpark = append([]float64(nil), w.txRates...)

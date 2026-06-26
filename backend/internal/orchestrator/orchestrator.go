@@ -212,7 +212,7 @@ type Orchestrator struct {
 
 	// peerConns is the shared gRPC pool for cluster peers. Set from factories
 	// during ApplyConfig; used by ApplyVaultControlPlane forwarding.
-	peerConns *cluster.PeerConns
+	peerConns *cluster.PeerConnManager
 
 	// vaultCtlPipelineChunkEvents tracks vaults whose vault-ctl FSM already has
 	// pipeline manifest → chunk-bus wiring (AddOn* subscribers).

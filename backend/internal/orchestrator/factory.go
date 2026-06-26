@@ -94,7 +94,7 @@ type Factories struct {
 	// Used by the instance apply forwarder to forward Raft applies when
 	// the config placement leader is not the vault-ctl Raft leader.
 	// Nil in single-node mode.
-	PeerConns *cluster.PeerConns
+	PeerConns *cluster.PeerConnManager
 
 	// Note: No QueryEngineFactory is needed because QueryEngine construction
 	// is trivial and uniform (query.New(cm, im, logger)). If QueryEngine ever

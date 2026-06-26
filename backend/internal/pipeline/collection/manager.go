@@ -18,11 +18,10 @@ import (
 // ErrNotRunning is returned when Run is called twice.
 var ErrNotRunning = errors.New("collection manager not running")
 
-// recollectInterval is the worker's periodic catch-up pass. A collect pass
-// that fails transiently (origin unreachable, pull stream error) would
-// otherwise only be retried when the next segment publish fires the FSM
-// callback — which may never come on a quiet vault.
-const recollectInterval = 2 * time.Second
+// collectRetryDelay backs off retryable collect failures (origin not ready,
+// segment bytes missing). Event-driven wakes handle the happy path; this only
+// schedules a retry when a pass fails transiently.
+const collectRetryDelay = 250 * time.Millisecond
 
 // ErrUnknownVault is returned for an unregistered vault.
 var ErrUnknownVault = errors.New("unknown vault")
@@ -58,6 +57,8 @@ type vaultCollect struct {
 	wake *notify.Signal
 	// stopWorker cancels the per-vault worker; nil until the worker starts.
 	stopWorker context.CancelFunc
+	// retryScheduled coalesces scheduled retries after transient failures.
+	retryScheduled atomic.Bool
 
 	// passMu serializes full collect passes. collectMu protects layout and
 	// receipted only — never held across pull or vault-ctl apply I/O.
@@ -163,6 +164,12 @@ func (v *vaultCollect) collectOne(ctx context.Context, ref AssignedSegment) erro
 // set. Idempotent at the FSM layer too (CmdAckSegmentHolder de-dups), so a
 // crash between commit and marking is harmless.
 func (v *vaultCollect) commitReceipt(ctx context.Context, ref AssignedSegment) error {
+	v.collectMu.Lock()
+	if _, done := v.receipted[ref.SegmentID]; done {
+		v.collectMu.Unlock()
+		return nil
+	}
+	v.collectMu.Unlock()
 	if err := v.receipts.CommitHolderReceipt(ctx, ref.VaultID, ref.SegmentID); err != nil {
 		return err
 	}
@@ -322,6 +329,9 @@ func (v *vaultCollect) completeCollectWaiters(err error) {
 // Config configures a CollectionManager.
 type Config struct {
 	Logger *slog.Logger
+	// OnPassComplete fires after each collect pass finishes without a hard
+	// error. Wired by the orchestrator to wake chunking when head/ changes.
+	OnPassComplete func(vaultID glid.GLID)
 }
 
 // Manager pulls assigned segments into pre-head, verifies, and promotes to head.
@@ -498,6 +508,31 @@ func (m *Manager) logCollectPassErr(log *slog.Logger, err error) {
 	log.Warn("collect pass failed", "error", err)
 }
 
+func (v *vaultCollect) scheduleRetry(delay time.Duration) {
+	if !v.retryScheduled.CompareAndSwap(false, true) {
+		return
+	}
+	time.AfterFunc(delay, func() {
+		v.retryScheduled.Store(false)
+		v.wake.Notify()
+	})
+}
+
+func (m *Manager) afterCollectPass(v *vaultCollect, err error, log *slog.Logger) {
+	if err != nil {
+		if retryableCollectErr(err) {
+			m.logCollectPassErr(log, err)
+			v.scheduleRetry(collectRetryDelay)
+			return
+		}
+		m.logCollectPassErr(log, err)
+		return
+	}
+	if m.cfg.OnPassComplete != nil {
+		m.cfg.OnPassComplete(v.vaultID)
+	}
+}
+
 // startWorkerLocked launches the per-vault collect worker. Caller holds m.mu
 // and has verified m.runCtx is non-nil. The worker decouples collect passes
 // from their triggers: FSM publish callbacks fire on the Raft FSM-apply
@@ -515,23 +550,20 @@ func (m *Manager) startWorkerLocked(v *vaultCollect) {
 		ch := v.wake.C()
 		log := m.logger().With("vault", v.vaultID)
 		err := v.collectMissing(ctx)
-		if err != nil && ctx.Err() == nil {
-			m.logCollectPassErr(log, err)
+		if ctx.Err() == nil {
+			m.afterCollectPass(v, err, log)
 		}
 		v.completeCollectWaiters(err)
-		tick := time.NewTicker(recollectInterval)
-		defer tick.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ch:
-			case <-tick.C:
 			}
 			ch = v.wake.C()
 			err := v.collectMissing(ctx)
-			if err != nil && ctx.Err() == nil {
-				m.logCollectPassErr(log, err)
+			if ctx.Err() == nil {
+				m.afterCollectPass(v, err, log)
 			}
 			v.completeCollectWaiters(err)
 		}

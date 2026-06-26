@@ -9,15 +9,14 @@ import (
 	"google.golang.org/grpc"
 )
 
-// TestPeerConnsMultiraftShareConn verifies multiraft and ClusterService callers
-// receive the same *grpc.ClientConn for a peer when wired through SetPeerConnPool.
-func TestPeerConnsMultiraftShareConn(t *testing.T) {
+func TestPeerConnsMultiraftLaneIsolation(t *testing.T) {
 	t.Parallel()
 
 	const (
 		localID  = "node-a"
 		peerID   = "node-b"
 		peerAddr = "127.0.0.1:4566"
+		groupID  = "config"
 	)
 
 	conf := hraft.DefaultConfig()
@@ -49,41 +48,26 @@ func TestPeerConnsMultiraftShareConn(t *testing.T) {
 		_ = lis.Close()
 	})
 
-	pool := NewPeerConns(r, nil, localID)
-	viaNode, err := pool.Conn(peerID)
+	mgr := NewPeerConns(r, nil, localID)
+	svc, err := mgr.AcquireService(peerID, "test")
 	if err != nil {
-		t.Fatalf("Conn(peer): %v", err)
+		t.Fatalf("AcquireService: %v", err)
 	}
-	viaAddr, err := pool.ConnForAddress(hraft.ServerAddress(peerAddr))
+	raftH, err := mgr.AcquireRaftPeer(peerID, groupID, "test")
 	if err != nil {
-		t.Fatalf("ConnForAddress: %v", err)
+		t.Fatalf("AcquireRaft: %v", err)
 	}
-	if viaNode != viaAddr {
-		t.Fatal("Conn and ConnForAddress returned different ClientConns")
+	if svc.GRPC() == raftH.GRPC() {
+		t.Fatal("service and raft lanes returned the same ClientConn")
 	}
+	svc.Release()
+	raftH.Release()
 }
 
-// TestStaticPeerConnsConnForAddress verifies reverse lookup for harness pools.
-func TestStaticPeerConnsConnForAddress(t *testing.T) {
+func TestServicePoolMaxPerPeer(t *testing.T) {
 	t.Parallel()
 
-	const (
-		localID  = "node-a"
-		peerID   = "node-b"
-		peerAddr = "127.0.0.1:4567"
-	)
-
-	resolve := func(nodeID string) (string, bool) {
-		switch nodeID {
-		case localID:
-			return "127.0.0.1:4565", true
-		case peerID:
-			return peerAddr, true
-		default:
-			return "", false
-		}
-	}
-
+	const peerAddr = "127.0.0.1:4568"
 	lis, err := net.Listen("tcp", peerAddr)
 	if err != nil {
 		t.Fatalf("listen: %v", err)
@@ -95,67 +79,26 @@ func TestStaticPeerConnsConnForAddress(t *testing.T) {
 		_ = lis.Close()
 	})
 
-	pool := NewStaticPeerConns(localID, resolve)
-	pool.SetStaticPeerIDs([]string{localID, peerID})
+	mgr := NewStaticPeerConns("local", func(id string) (string, bool) {
+		if id == "peer" {
+			return peerAddr, true
+		}
+		return "", false
+	})
+	mgr.SetServicePoolMaxPerPeer(2)
 
-	viaNode, err := pool.Conn(peerID)
-	if err != nil {
-		t.Fatalf("Conn(peer): %v", err)
+	var conns []PeerConnHandle
+	for i := 0; i < 2; i++ {
+		h, err := mgr.AcquireService("peer", "test")
+		if err != nil {
+			t.Fatalf("AcquireService %d: %v", i, err)
+		}
+		conns = append(conns, h)
 	}
-	viaAddr, err := pool.ConnForAddress(hraft.ServerAddress(peerAddr))
-	if err != nil {
-		t.Fatalf("ConnForAddress: %v", err)
+	if conns[0].GRPC() == conns[1].GRPC() {
+		t.Fatal("expected two distinct pool connections under concurrent acquire")
 	}
-	if viaNode != viaAddr {
-		t.Fatal("static pool: Conn and ConnForAddress returned different ClientConns")
-	}
-}
-
-func TestResolveNodeIDFromAddressHostVariants(t *testing.T) {
-	t.Parallel()
-
-	const (
-		localID    = "node-a"
-		peerID     = "node-b"
-		configAddr = ":4586"
-		leaderAddr = "[::]:4586"
-	)
-
-	conf := hraft.DefaultConfig()
-	conf.LocalID = hraft.ServerID(localID)
-	conf.LogOutput = io.Discard
-
-	_, trans := hraft.NewInmemTransport(hraft.ServerAddress(localID))
-	r, err := hraft.NewRaft(conf, &noopFSM{}, hraft.NewInmemStore(), hraft.NewInmemStore(), hraft.NewInmemSnapshotStore(), trans)
-	if err != nil {
-		t.Fatalf("NewRaft: %v", err)
-	}
-	t.Cleanup(func() { _ = r.Shutdown().Error() })
-
-	if err := r.BootstrapCluster(hraft.Configuration{Servers: []hraft.Server{
-		{ID: localID, Address: "127.0.0.1:4565"},
-		{ID: peerID, Address: hraft.ServerAddress(configAddr)},
-	}}).Error(); err != nil {
-		t.Fatalf("BootstrapCluster: %v", err)
-	}
-
-	pool := NewPeerConns(r, nil, localID)
-	got, err := pool.resolveNodeIDFromAddress(leaderAddr)
-	if err != nil {
-		t.Fatalf("resolveNodeIDFromAddress(%q): %v", leaderAddr, err)
-	}
-	if got != peerID {
-		t.Fatalf("got node ID %q, want %q", got, peerID)
+	for _, h := range conns {
+		h.Release()
 	}
 }
-
-type noopFSM struct{}
-
-func (*noopFSM) Apply(*hraft.Log) any                      { return nil }
-func (*noopFSM) Snapshot() (hraft.FSMSnapshot, error)        { return &noopSnapshot{}, nil }
-func (*noopFSM) Restore(io.ReadCloser) error                 { return nil }
-
-type noopSnapshot struct{}
-
-func (*noopSnapshot) Persist(s hraft.SnapshotSink) error { return s.Close() }
-func (*noopSnapshot) Release()                         {}

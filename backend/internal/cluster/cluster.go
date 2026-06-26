@@ -57,10 +57,13 @@ type Config struct {
 	// When nil, the cluster port uses insecure credentials (tests, single-node).
 	TLS *ClusterTLS
 
-	// ByteMetrics tracks cumulative per-peer gRPC wire bytes. When non-nil,
-	// a stats handler is installed that records inbound RPC bytes, attributed
-	// by the x-gastrolog-node-id header set by PeerConns' outgoing
-	// interceptor. See gastrolog-47u85.
+	// ServicePoolMaxPerPeer caps parallel outbound service-lane connections
+	// per peer (default DefaultServicePoolMaxPerPeer).
+	ServicePoolMaxPerPeer int
+
+	// ByteMetrics tracks cumulative inbound per-peer gRPC wire bytes on the
+	// cluster server. Outbound bytes are tracked per connection on
+	// PeerConnManager. See gastrolog-47u85 / gastrolog-1dg8z.
 	ByteMetrics *PeerByteMetrics
 
 	// Logger for structured logging.
@@ -70,7 +73,10 @@ type Config struct {
 // Server manages the cluster gRPC port, Raft transport, and inter-node services.
 type Server struct {
 	cfg       Config
-	grpcSrv   *grpc.Server
+	grpcSrv   *grpc.Server // service lane (ClusterService, raftadmin, …)
+	raftLaneMu sync.Mutex
+	raftGroupServers map[string]*grpc.Server // per-group raft lanes (TLS mode)
+	sniDemux  *sniDemuxListener
 	tm        *multiraft.Transport[string]
 	listener  net.Listener
 	localAddr string // advertised address (may differ from listen addr)
@@ -205,9 +211,8 @@ type Server struct {
 	// composition root before Start().
 	internalHandler http.Handler
 
-	// peerConns is the shared connection pool for all peer communication.
-	// Created in SetRaft once the raft instance is available.
-	peerConns *PeerConns
+	// peerConns is the outbound peer connection manager.
+	peerConns *PeerConnManager
 
 	// pauseGate, when non-nil, makes every gRPC handler block until the
 	// channel is closed. Used exclusively by reliability tests to simulate
@@ -329,11 +334,14 @@ func (s *Server) SetRaft(r *hraft.Raft) {
 	if s.peerConns != nil {
 		s.peerConns.Reset(r)
 	} else {
-		s.peerConns = NewPeerConns(r, s.cfg.TLS, s.cfg.NodeID)
+		s.peerConns = NewPeerConnManager(PeerConnManagerConfig{
+			Raft:                  r,
+			ClusterTLS:            s.cfg.TLS,
+			NodeID:                s.cfg.NodeID,
+			Logger:                s.logger,
+			ServicePoolMaxPerPeer: s.cfg.ServicePoolMaxPerPeer,
+		})
 	}
-	// Share the byte-metrics tracker with the outbound pool so tx/rx is
-	// attributed from every dialed connection.
-	s.peerConns.SetByteMetrics(s.cfg.ByteMetrics)
 	if s.tm != nil {
 		s.tm.SetPeerConnPool(s.peerConns)
 	}
@@ -345,11 +353,9 @@ func (s *Server) ByteMetrics() *PeerByteMetrics {
 	return s.cfg.ByteMetrics
 }
 
-// PeerConns returns the shared peer connection pool. All components that
-// need to communicate with peer nodes — including multiraft transport —
-// should use this single pool.
+// PeerConns returns the outbound peer connection manager.
 // Returns nil if SetRaft has not been called.
-func (s *Server) PeerConns() *PeerConns {
+func (s *Server) PeerConns() *PeerConnManager {
 	return s.peerConns
 }
 
@@ -553,20 +559,107 @@ func (s *Server) awaitSlowDown(ctx context.Context) error {
 	}
 }
 
-// Start creates the gRPC server, registers all services, and begins serving.
-// The listener was already bound in New().
+// Start creates the gRPC servers, registers services, and begins serving.
+// The listener was already bound in New(). With TLS, inbound connections are
+// demuxed by SNI onto separate service and raft server stacks on the same port.
 func (s *Server) Start() error {
+	if s.cfg.TLS != nil {
+		return s.startWithLaneIsolation()
+	}
+	return s.startCombined()
+}
+
+func (s *Server) startCombined() error {
+	opts := s.baseServerOpts(maxChunkTransferBytes, true)
+	s.grpcSrv = grpc.NewServer(opts...)
+	s.tm.Register(s.grpcSrv)
+	if s.raft != nil {
+		raftadmin.Register(s.grpcSrv, s.raft)
+		leaderhealth.Setup(s.raft, s.grpcSrv, []string{"cluster"})
+	}
+	registerClusterService(s.grpcSrv, s)
+	return s.serveListener(s.listener, s.grpcSrv, "cluster")
+}
+
+func (s *Server) startWithLaneIsolation() error {
+	registry := multiraft.NewInboundLaneRegistry(s.listener.Addr())
+	s.tm.SetInboundLaneRegistry(registry)
+	s.sniDemux = newSNIDemuxListener(s.listener, registry)
+
+	serviceOpts := s.baseServerOpts(maxChunkTransferBytes, true)
+	s.grpcSrv = grpc.NewServer(serviceOpts...)
+	if s.raft != nil {
+		raftadmin.Register(s.grpcSrv, s.raft)
+		leaderhealth.Setup(s.raft, s.grpcSrv, []string{"cluster"})
+	}
+	registerClusterService(s.grpcSrv, s)
+
+	if err := s.serveListener(s.sniDemux.ServiceListener(), s.grpcSrv, "cluster-service"); err != nil {
+		return err
+	}
+	return s.EnsureRaftGroupLane(ConfigGroupID)
+}
+
+// EnsureRaftGroupLane starts a dedicated inbound gRPC stack for one multiraft
+// group. No-op in combined (non-TLS) mode where all groups share grpcSrv.
+func (s *Server) EnsureRaftGroupLane(groupID string) error {
+	if s.cfg.TLS == nil {
+		return nil
+	}
+	s.raftLaneMu.Lock()
+	defer s.raftLaneMu.Unlock()
+	if s.raftGroupServers == nil {
+		s.raftGroupServers = make(map[string]*grpc.Server)
+	}
+	if _, ok := s.raftGroupServers[groupID]; ok {
+		return nil
+	}
+	reg := s.tm.InboundLanes()
+	if reg == nil {
+		return errors.New("cluster: inbound raft lane registry not configured")
+	}
+	ln := reg.Listener(groupID)
+	// Register transport group state before serving inbound RPCs so demuxed
+	// connections never hit dispatchRPC with an unregistered group.
+	s.tm.GroupTransport(groupID)
+	raftOpts := append(s.baseServerOpts(maxRaftLaneRecvBytes, false),
+		grpc.ChainUnaryInterceptor(s.pauseUnaryInterceptor),
+		grpc.ChainStreamInterceptor(s.pauseStreamInterceptor),
+	)
+	srv := grpc.NewServer(raftOpts...)
+	s.tm.RegisterGroup(srv, groupID)
+	s.raftGroupServers[groupID] = srv
+	return s.serveListener(ln, srv, "cluster-raft-"+groupID)
+}
+
+// RemoveRaftGroupLane stops and removes the inbound gRPC stack for groupID.
+func (s *Server) RemoveRaftGroupLane(groupID string) {
+	s.raftLaneMu.Lock()
+	srv := s.raftGroupServers[groupID]
+	delete(s.raftGroupServers, groupID)
+	s.raftLaneMu.Unlock()
+	if srv != nil {
+		s.gracefulStopServer(srv)
+	}
+	if reg := s.tm.InboundLanes(); reg != nil {
+		reg.Remove(groupID)
+	}
+}
+
+func (s *Server) baseServerOpts(maxRecv int, fullInterceptors bool) []grpc.ServerOption {
 	var opts []grpc.ServerOption
-	opts = append(opts, grpc.MaxRecvMsgSize(maxChunkTransferBytes))
+	opts = append(opts, grpc.MaxRecvMsgSize(maxRecv))
 
 	if s.cfg.TLS != nil {
 		tlsCfg := s.cfg.TLS.ServerTLSConfig()
-		opts = append(opts,
-			grpc.Creds(credentials.NewTLS(tlsCfg)),
-			grpc.ChainUnaryInterceptor(s.pauseUnaryInterceptor, s.mTLSUnaryInterceptor),
-			grpc.ChainStreamInterceptor(s.pauseStreamInterceptor, s.mTLSStreamInterceptor),
-		)
-	} else {
+		opts = append(opts, grpc.Creds(credentials.NewTLS(tlsCfg)))
+		if fullInterceptors {
+			opts = append(opts,
+				grpc.ChainUnaryInterceptor(s.pauseUnaryInterceptor, s.mTLSUnaryInterceptor),
+				grpc.ChainStreamInterceptor(s.pauseStreamInterceptor, s.mTLSStreamInterceptor),
+			)
+		}
+	} else if fullInterceptors {
 		opts = append(opts,
 			grpc.ChainUnaryInterceptor(s.pauseUnaryInterceptor),
 			grpc.ChainStreamInterceptor(s.pauseStreamInterceptor),
@@ -576,31 +669,16 @@ func (s *Server) Start() error {
 	if s.cfg.ByteMetrics != nil {
 		opts = append(opts, grpc.StatsHandler(newServerStatsHandler(s.cfg.ByteMetrics)))
 	}
+	return opts
+}
 
-	s.grpcSrv = grpc.NewServer(opts...)
-
-	// Multi-raft transport (AppendEntries, RequestVote, InstallSnapshot, etc.).
-	// Multiplexes all Raft groups (config + per-vault control-plane groups)
-	// over one gRPC service.
-	s.tm.Register(s.grpcSrv)
-
-	// Membership management (AddVoter, RemoveServer, GetConfiguration, etc.).
-	if s.raft != nil {
-		raftadmin.Register(s.grpcSrv, s.raft)
-		leaderhealth.Setup(s.raft, s.grpcSrv, []string{"cluster"})
-	}
-
-	// Cluster service (ForwardApply + Enroll).
-	registerClusterService(s.grpcSrv, s)
-
-	s.logger.Info("cluster gRPC server starting", "addr", s.listener.Addr().String())
-
+func (s *Server) serveListener(ln net.Listener, srv *grpc.Server, label string) error {
+	s.logger.Info("cluster gRPC server starting", "lane", label, "addr", s.listener.Addr().String())
 	go func() {
-		if err := s.grpcSrv.Serve(s.listener); err != nil {
-			s.logger.Error("cluster gRPC server error", "error", err)
+		if err := srv.Serve(ln); err != nil {
+			s.logger.Error("cluster gRPC server error", "lane", label, "error", err)
 		}
 	}()
-
 	return nil
 }
 
@@ -655,15 +733,18 @@ func requireClientCert(ctx context.Context, method string) error {
 //     also shutting down — and GracefulStop() waits the full fallback
 //     timeout. See gastrolog-1e5ke.
 //
-//  2. tm.Close() closes the multiraft transport. This unblocks Raft
-//     handlers stuck in handleRPC waiting on rpcChan (by closing
-//     shutdownCh + the per-group channels).
+//  2. Close the SNI demuxer so no new inbound cluster connections arrive.
 //
-//  3. peerConns.Close() tears down outbound peer connections.
+//  3. tm.BeginShutdown() closes shutdownCh and per-group doneCh. This
+//     unblocks Raft handlers stuck in dispatchRPC on rpcChan while
+//     keeping group entries registered (Unavailable, not NotFound).
 //
-//  4. grpcSrv.GracefulStop() should now return promptly because all
-//     long-running handlers have already exited and the multiraft
-//     consumers are drained.
+//  4. grpcSrv.GracefulStop() drains in-flight handlers; raft lane
+//     servers stop before group map cleanup.
+//
+//  5. tm.Close() drops registered groups.
+//
+//  6. peerConns.Close() tears down outbound peer connections.
 //
 // A 2-second fallback timeout remains as a last-resort safety net. If
 // it ever fires in production, that is a signal to investigate a
@@ -679,20 +760,39 @@ func (s *Server) Stop() {
 		s.stopCancel()
 	}
 
-	// Step 2: close the multiraft transport.
+	if s.sniDemux != nil {
+		_ = s.sniDemux.Close()
+	}
+
+	if s.tm != nil {
+		s.tm.BeginShutdown()
+	}
+
+	s.gracefulStopServer(s.grpcSrv)
+	s.raftLaneMu.Lock()
+	raftServers := s.raftGroupServers
+	s.raftGroupServers = nil
+	s.raftLaneMu.Unlock()
+	for groupID, srv := range raftServers {
+		s.gracefulStopServer(srv)
+		if reg := s.tm.InboundLanes(); reg != nil {
+			reg.Remove(groupID)
+		}
+	}
+
 	if s.tm != nil {
 		_ = s.tm.Close()
 	}
 
-	// Step 3: close outbound peer connections.
 	if s.peerConns != nil {
 		_ = s.peerConns.Close()
 	}
+}
 
-	// Step 4: graceful gRPC drain. Should return near-instantly.
+func (s *Server) gracefulStopServer(srv *grpc.Server) {
 	done := make(chan struct{})
 	go func() {
-		s.grpcSrv.GracefulStop()
+		srv.GracefulStop()
 		close(done)
 	}()
 
@@ -700,7 +800,7 @@ func (s *Server) Stop() {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		s.logger.Warn("cluster gRPC graceful stop timed out, forcing — a handler is not observing stopCtx")
-		s.grpcSrv.Stop()
+		srv.Stop()
 	}
 }
 

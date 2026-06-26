@@ -633,14 +633,12 @@ export class NodeStats extends Message<NodeStats> {
   alerts: SystemAlert[] = [];
 
   /**
-   * Per-peer inter-node gRPC transport bytes, from this node's perspective.
-   * Populated from the cluster transport stats handlers — includes Raft,
-   * broadcast, vault replication, query forwarding, chunk streaming, etc.
-   * See gastrolog-47u85.
+   * Outbound peer connection catalog (service pools + raft singletons).
+   * Populated from PeerConnManager on each broadcast tick. See gastrolog-1dg8z.
    *
-   * @generated from field: repeated gastrolog.v1.PeerBytesStat peer_bytes = 35;
+   * @generated from field: repeated gastrolog.v1.PeerConnStat peer_connections = 35;
    */
-  peerBytes: PeerBytesStat[] = [];
+  peerConnections: PeerConnStat[] = [];
 
   /**
    * Per-vault on-disk pipeline segment counts on this node (working/completed
@@ -693,7 +691,7 @@ export class NodeStats extends Message<NodeStats> {
     { no: 32, name: "route_vault_stats", kind: "message", T: VaultRouteStats, repeated: true },
     { no: 33, name: "route_per_route_stats", kind: "message", T: PerRouteStats, repeated: true },
     { no: 34, name: "alerts", kind: "message", T: SystemAlert, repeated: true },
-    { no: 35, name: "peer_bytes", kind: "message", T: PeerBytesStat, repeated: true },
+    { no: 35, name: "peer_connections", kind: "message", T: PeerConnStat, repeated: true },
     { no: 36, name: "vault_pipeline_disk", kind: "message", T: VaultPipelineNodeDisk, repeated: true },
   ]);
 
@@ -779,92 +777,115 @@ export class VaultPipelineNodeDisk extends Message<VaultPipelineNodeDisk> {
 }
 
 /**
- * PeerBytesStat reports cumulative gRPC wire bytes sent to and received from
- * a single peer, since the emitting node started. Rate is left to the
- * consumer (UI / PromQL-equivalent delta) — these are monotonic counters.
+ * PeerConnStat reports one managed outbound cluster gRPC connection.
  *
- * @generated from message gastrolog.v1.PeerBytesStat
+ * @generated from message gastrolog.v1.PeerConnStat
  */
-export class PeerBytesStat extends Message<PeerBytesStat> {
+export class PeerConnStat extends Message<PeerConnStat> {
   /**
-   * target node ID
-   *
    * @generated from field: string peer = 1;
    */
   peer = "";
 
   /**
-   * bytes this node has sent to peer
+   * "service" | "raft"
    *
-   * @generated from field: int64 bytes_sent = 2;
+   * @generated from field: string lane = 2;
+   */
+  lane = "";
+
+  /**
+   * empty for service lane
+   *
+   * @generated from field: string group_id = 3;
+   */
+  groupId = "";
+
+  /**
+   * active subsystem labels
+   *
+   * @generated from field: repeated string purposes = 4;
+   */
+  purposes: string[] = [];
+
+  /**
+   * @generated from field: string connectivity = 5;
+   */
+  connectivity = "";
+
+  /**
+   * 0 for raft singletons
+   *
+   * @generated from field: int32 pool_index = 6;
+   */
+  poolIndex = 0;
+
+  /**
+   * @generated from field: int64 bytes_sent = 7;
    */
   bytesSent = protoInt64.zero;
 
   /**
-   * bytes this node has received from peer
-   *
-   * @generated from field: int64 bytes_received = 3;
+   * @generated from field: int64 bytes_received = 8;
    */
   bytesReceived = protoInt64.zero;
 
   /**
-   * Backend-derived rates (bytes/sec) computed by differencing consecutive
-   * monotonic samples on the node. These exist to avoid UI cold-start and to
-   * make the inspector immediately useful after mount.
-   *
-   * @generated from field: double tx_bytes_per_sec = 4;
+   * @generated from field: double tx_bytes_per_sec = 9;
    */
   txBytesPerSec = 0;
 
   /**
-   * @generated from field: double rx_bytes_per_sec = 5;
+   * @generated from field: double rx_bytes_per_sec = 10;
    */
   rxBytesPerSec = 0;
 
   /**
-   * Rolling sparkline windows (bytes/sec), oldest → newest.
-   * Kept short (e.g. 20 points) so inspector renders quickly.
-   *
-   * @generated from field: repeated double tx_spark = 6;
+   * @generated from field: repeated double tx_spark = 11;
    */
   txSpark: number[] = [];
 
   /**
-   * @generated from field: repeated double rx_spark = 7;
+   * @generated from field: repeated double rx_spark = 12;
    */
   rxSpark: number[] = [];
 
-  constructor(data?: PartialMessage<PeerBytesStat>) {
+  constructor(data?: PartialMessage<PeerConnStat>) {
     super();
     proto3.util.initPartial(data, this);
   }
 
   static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.PeerBytesStat";
+  static readonly typeName = "gastrolog.v1.PeerConnStat";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "peer", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "bytes_sent", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 3, name: "bytes_received", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 4, name: "tx_bytes_per_sec", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
-    { no: 5, name: "rx_bytes_per_sec", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
-    { no: 6, name: "tx_spark", kind: "scalar", T: 1 /* ScalarType.DOUBLE */, repeated: true },
-    { no: 7, name: "rx_spark", kind: "scalar", T: 1 /* ScalarType.DOUBLE */, repeated: true },
+    { no: 2, name: "lane", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "group_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "purposes", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 5, name: "connectivity", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 6, name: "pool_index", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+    { no: 7, name: "bytes_sent", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 8, name: "bytes_received", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 9, name: "tx_bytes_per_sec", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
+    { no: 10, name: "rx_bytes_per_sec", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
+    { no: 11, name: "tx_spark", kind: "scalar", T: 1 /* ScalarType.DOUBLE */, repeated: true },
+    { no: 12, name: "rx_spark", kind: "scalar", T: 1 /* ScalarType.DOUBLE */, repeated: true },
   ]);
 
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PeerBytesStat {
-    return new PeerBytesStat().fromBinary(bytes, options);
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PeerConnStat {
+    return new PeerConnStat().fromBinary(bytes, options);
   }
 
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PeerBytesStat {
-    return new PeerBytesStat().fromJson(jsonValue, options);
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PeerConnStat {
+    return new PeerConnStat().fromJson(jsonValue, options);
   }
 
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PeerBytesStat {
-    return new PeerBytesStat().fromJsonString(jsonString, options);
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PeerConnStat {
+    return new PeerConnStat().fromJsonString(jsonString, options);
   }
 
-  static equals(a: PeerBytesStat | PlainMessage<PeerBytesStat> | undefined, b: PeerBytesStat | PlainMessage<PeerBytesStat> | undefined): boolean {
-    return proto3.util.equals(PeerBytesStat, a, b);
+  static equals(a: PeerConnStat | PlainMessage<PeerConnStat> | undefined, b: PeerConnStat | PlainMessage<PeerConnStat> | undefined): boolean {
+    return proto3.util.equals(PeerConnStat, a, b);
   }
 }
 

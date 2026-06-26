@@ -59,7 +59,7 @@ type orchRelNode struct {
 	wal           *raftwal.WAL
 	groupMgr      *raftgroup.GroupManager
 	orch          *orchestrator.Orchestrator
-	peerConns     *cluster.PeerConns // non-nil only with withPipelineCluster
+	peerConns     *cluster.PeerConnManager // non-nil only with withPipelineCluster
 	// factories is the node's component-factory set as built by startNode,
 	// kept so tests can drive dispatcher-equivalent calls (AddVaultInstance)
 	// after config changes.

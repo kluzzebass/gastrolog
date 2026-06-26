@@ -46,8 +46,11 @@ type Config struct {
 	DisableFsync bool
 	// EncodeQueueCap is the bounded channel between encode and append stages. Defaults to 64.
 	EncodeQueueCap int
-	// CompletedCap is the bounded completed-segment notification queue. Defaults to 16.
+	// CompletedCap is the bounded completed-segment notification queue. Defaults to 512.
 	CompletedCap int
+	// OnCompletedDropped fires when a completed segment cannot be enqueued because
+	// the notification channel is full. Distribution should rescan completed/ immediately.
+	OnCompletedDropped func()
 	// Now returns the current time (for tests). Defaults to time.Now().UTC.
 	Now func() time.Time
 	// OnSync is invoked after each real fsync (for tests). It is NOT called for
@@ -120,7 +123,7 @@ type Manager struct {
 func New(cfg Config) (*Manager, <-chan CompletedSegment) {
 	completedCap := cfg.CompletedCap
 	if completedCap <= 0 {
-		completedCap = 16
+		completedCap = 512
 	}
 	completed := make(chan CompletedSegment, completedCap)
 	return &Manager{

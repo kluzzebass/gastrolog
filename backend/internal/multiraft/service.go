@@ -22,8 +22,15 @@ type raftDispatcher interface {
 }
 
 // Register registers the MultiRaftTransportService on a gRPC server.
+// Used for single-stack (non-TLS / test) mode where all groups share one server.
 func (t *Transport[K]) Register(s grpc.ServiceRegistrar) {
 	s.RegisterService(&serviceDesc, &grpcAPI[K]{transport: t})
+}
+
+// RegisterGroup registers MultiRaftTransportService on a dedicated per-group
+// gRPC stack (isolated inbound raft lane).
+func (t *Transport[K]) RegisterGroup(s grpc.ServiceRegistrar, groupID K) {
+	s.RegisterService(&serviceDesc, newGroupLaneAPI(t, groupID))
 }
 
 var serviceDesc = grpc.ServiceDesc{

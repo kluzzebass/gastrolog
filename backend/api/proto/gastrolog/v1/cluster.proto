@@ -120,11 +120,9 @@ message NodeStats {
   // Active system alerts on this node.
   repeated SystemAlert alerts = 34;
 
-  // Per-peer inter-node gRPC transport bytes, from this node's perspective.
-  // Populated from the cluster transport stats handlers — includes Raft,
-  // broadcast, vault replication, query forwarding, chunk streaming, etc.
-  // See gastrolog-47u85.
-  repeated PeerBytesStat peer_bytes = 35;
+  // Outbound peer connection catalog (service pools + raft singletons).
+  // Populated from PeerConnManager on each broadcast tick. See gastrolog-1dg8z.
+  repeated PeerConnStat peer_connections = 35;
 
   // Per-vault on-disk pipeline segment counts on this node (working/completed
   // at origins; head/pre-head on homes). Aggregated cluster-wide by
@@ -142,24 +140,20 @@ message VaultPipelineNodeDisk {
   uint32 pre_head_segments = 5;
 }
 
-// PeerBytesStat reports cumulative gRPC wire bytes sent to and received from
-// a single peer, since the emitting node started. Rate is left to the
-// consumer (UI / PromQL-equivalent delta) — these are monotonic counters.
-message PeerBytesStat {
-  string peer = 1;        // target node ID
-  int64 bytes_sent = 2;   // bytes this node has sent to peer
-  int64 bytes_received = 3; // bytes this node has received from peer
-
-  // Backend-derived rates (bytes/sec) computed by differencing consecutive
-  // monotonic samples on the node. These exist to avoid UI cold-start and to
-  // make the inspector immediately useful after mount.
-  double tx_bytes_per_sec = 4;
-  double rx_bytes_per_sec = 5;
-
-  // Rolling sparkline windows (bytes/sec), oldest → newest.
-  // Kept short (e.g. 20 points) so inspector renders quickly.
-  repeated double tx_spark = 6;
-  repeated double rx_spark = 7;
+// PeerConnStat reports one managed outbound cluster gRPC connection.
+message PeerConnStat {
+  string peer = 1;
+  string lane = 2;              // "service" | "raft"
+  string group_id = 3;          // empty for service lane
+  repeated string purposes = 4; // active subsystem labels
+  string connectivity = 5;
+  int32 pool_index = 6;         // 0 for raft singletons
+  int64 bytes_sent = 7;
+  int64 bytes_received = 8;
+  double tx_bytes_per_sec = 9;
+  double rx_bytes_per_sec = 10;
+  repeated double tx_spark = 11;
+  repeated double rx_spark = 12;
 }
 
 // SystemAlert represents a runtime condition that operators should be aware of.

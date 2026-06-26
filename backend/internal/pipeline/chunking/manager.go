@@ -22,17 +22,8 @@ import (
 // ErrNotRunning is returned when Run is called twice.
 var ErrNotRunning = errors.New("chunking manager not running")
 
-// replanInterval is the worker's periodic catch-up pass. The wake-signal
-// event chain has gaps no FSM callback covers: a collection pull finishing
-// (planner skips segments not yet in head/, and the pull is a local file
-// operation with no Raft event) and a failed/timed-out planner Apply. One
-// successful tick-driven step re-arms the event chain, so this only bounds
-// stall recovery, not steady-state latency.
-const replanInterval = 2 * time.Second
-
 // sealRetryInterval bounds how often a home retries CmdSealChunk after a
-// failed forward/apply. Without it every replanInterval tick on every home
-// logs and hammers the vault-ctl leader while sealedManifest is pending.
+// failed forward/apply. Retries are scheduled as a one-shot wake, not a poll loop.
 const sealRetryInterval = 15 * time.Second
 
 // VaultCtlApplier applies marshaled vault-ctl commands for one vault.
@@ -143,6 +134,8 @@ type vaultChunking struct {
 	// buildRunning gates a single in-flight GLCB build so planCatchUp can keep
 	// running on wake while materialization/build proceeds asynchronously.
 	buildRunning atomic.Bool
+	// sealRetryScheduled coalesces one-shot seal retries after Apply failures.
+	sealRetryScheduled atomic.Bool
 	// log is the per-vault logger; set when the worker starts.
 	log *slog.Logger
 }
@@ -493,9 +486,7 @@ func (m *Manager) startWorkerLocked(v *vaultChunking) {
 			log.Warn("chunking recover failed", "error", err)
 		}
 		v.purgeStaleHeadCatchUp()
-		m.runBuildPass(ctx, v, log, false)
-		tick := time.NewTicker(replanInterval)
-		defer tick.Stop()
+		m.runBuildPass(ctx, v, log)
 		releaseCh := v.releaseWake.C()
 		for {
 			select {
@@ -511,23 +502,18 @@ func (m *Manager) startWorkerLocked(v *vaultChunking) {
 				releaseCh = v.releaseWake.C()
 				continue
 			case <-ch:
-				m.runBuildPass(ctx, v, log, false)
-			case <-tick.C:
-				if err := v.releaseOnce(ctx); err != nil && ctx.Err() == nil {
-					log.Warn("chunking release failed", "error", err)
-				}
-				m.runBuildPass(ctx, v, log, true)
+				m.runBuildPass(ctx, v, log)
 			}
 			ch = v.wake.C()
 		}
 	})
 }
 
-func (m *Manager) runBuildPass(ctx context.Context, v *vaultChunking, log *slog.Logger, onTick bool) {
+func (m *Manager) runBuildPass(ctx context.Context, v *vaultChunking, log *slog.Logger) {
 	if err := v.planCatchUp(ctx); err != nil && ctx.Err() == nil {
 		log.Warn("chunking plan catch-up failed", "error", err)
 	}
-	if !v.buildDue(time.Now(), onTick) {
+	if !v.buildDue() {
 		return
 	}
 	if !v.buildRunning.CompareAndSwap(false, true) {
@@ -537,12 +523,23 @@ func (m *Manager) runBuildPass(ctx context.Context, v *vaultChunking, log *slog.
 		defer v.buildRunning.Store(false)
 		if err := v.buildOnce(ctx); err != nil && ctx.Err() == nil {
 			log.Warn("chunking build failed", "error", err)
+			v.scheduleSealRetry()
 		}
 		v.wake.Notify()
 	}()
 }
 
-func (v *vaultChunking) buildDue(now time.Time, onTick bool) bool {
+func (v *vaultChunking) scheduleSealRetry() {
+	if !v.sealRetryScheduled.CompareAndSwap(false, true) {
+		return
+	}
+	time.AfterFunc(sealRetryInterval, func() {
+		v.sealRetryScheduled.Store(false)
+		v.wake.Notify()
+	})
+}
+
+func (v *vaultChunking) buildDue() bool {
 	pending := v.sealedManifestForBuild()
 	if pending == nil {
 		return false
@@ -571,10 +568,10 @@ func (v *vaultChunking) buildDue(now time.Time, onTick bool) bool {
 		}
 		return false
 	}
-	if !onTick {
-		return true
+	if v.sealAttemptKey == key && time.Since(v.lastSealAttempt) < sealRetryInterval {
+		return false
 	}
-	return v.sealAttemptKey != key || now.Sub(v.lastSealAttempt) >= sealRetryInterval
+	return true
 }
 
 func (v *vaultChunking) sealedManifestForBuild() *vaultctlfsm.OpenChunkManifest {

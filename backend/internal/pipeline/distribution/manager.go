@@ -11,26 +11,16 @@ import (
 	"time"
 
 	"gastrolog/internal/glid"
+	"gastrolog/internal/notify"
 	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/pipeline/segment"
 	"gastrolog/internal/pipeline/segmentation"
 )
 
-// publishRetryInterval is how often failed vault-ctl publishes are retried.
-// Publish failures are expected transients (no vault-ctl leader during an
-// election or leadership transfer, forwarding RPC timeout); the completed
-// segment stays on disk and registered for pulls, so the retry only needs to
-// re-announce the metadata.
+// publishRetryInterval is how long to wait before re-enqueueing a failed
+// vault-ctl publish. Publish failures are expected transients (no vault-ctl
+// leader during an election or leadership transfer, forwarding RPC timeout).
 const publishRetryInterval = time.Second
-
-// rescanInterval is how often each vault's completed/ directory is scanned
-// for segments that never arrived on the completed channel. The segmentation
-// writer's channel send is non-blocking (a full channel must not stall the
-// fsync path), so under burst load a completed segment can be silently
-// dropped from the channel — and a restart loses everything buffered. The
-// scan is the durable catch-up: anything in completed/ that this manager has
-// not prepared yet gets prepared and published.
-const rescanInterval = 2 * time.Second
 
 // publishQueueCap bounds staged publishes waiting for the vault-ctl worker.
 // Ingress only enqueues; a dedicated worker issues Raft applies so pull serving
@@ -295,6 +285,7 @@ type Manager struct {
 	mu      sync.Mutex
 	vaults  map[glid.GLID]*vaultDist
 	pullIn  chan PullRequest
+	stranded *notify.Signal
 	runCtx  context.Context
 	running atomic.Bool
 	wg      sync.WaitGroup
@@ -308,10 +299,19 @@ func New(cfg Config) (*Manager, chan<- PullRequest) {
 	}
 	pullIn := make(chan PullRequest, queueCap)
 	return &Manager{
-		cfg:    cfg,
-		vaults: make(map[glid.GLID]*vaultDist),
-		pullIn: pullIn,
+		cfg:      cfg,
+		vaults:   make(map[glid.GLID]*vaultDist),
+		pullIn:   pullIn,
+		stranded: notify.NewSignal(),
 	}, pullIn
+}
+
+// NotifyStranded wakes publish ingress to scan completed/ for segments whose
+// channel notification was dropped under burst load.
+func (m *Manager) NotifyStranded() {
+	if m.stranded != nil {
+		m.stranded.Notify()
+	}
 }
 
 func (m *Manager) logger() *slog.Logger {
@@ -421,8 +421,8 @@ func (m *Manager) runPullLoop(ctx context.Context) {
 	}
 }
 
-// runPublishWorker commits staged segments to vault-ctl one at a time. Failed
-// publishes are re-queued after publishRetryInterval.
+// runPublishWorker commits staged segments to vault-ctl. Failed publishes are
+// re-enqueued after publishRetryInterval.
 func (m *Manager) runPublishWorker(ctx context.Context, publishQ chan pendingPublish) {
 	for {
 		select {
@@ -432,23 +432,43 @@ func (m *Manager) runPublishWorker(ctx context.Context, publishQ chan pendingPub
 			if !ok {
 				return
 			}
-			if err := m.publishMeta(ctx, p.vaultID, p.meta, p.segID, p.path); err != nil &&
+			m.publishOne(ctx, publishQ, p)
+		}
+	}
+}
+
+func (m *Manager) publishOne(ctx context.Context, publishQ chan pendingPublish, p pendingPublish) {
+	if err := m.publishMeta(ctx, p.vaultID, p.meta, p.segID, p.path); err != nil &&
+		!errors.Is(err, ErrUnknownVault) &&
+		!errors.Is(err, errPublishBytesMissing) {
+		pCopy := p
+		time.AfterFunc(publishRetryInterval, func() {
+			m.enqueuePublish(ctx, publishQ, pCopy)
+		})
+		return
+	}
+	for {
+		select {
+		case p2 := <-publishQ:
+			if err := m.publishMeta(ctx, p2.vaultID, p2.meta, p2.segID, p2.path); err != nil &&
 				!errors.Is(err, ErrUnknownVault) &&
 				!errors.Is(err, errPublishBytesMissing) {
-				pCopy := p
+				pCopy := p2
 				time.AfterFunc(publishRetryInterval, func() {
 					m.enqueuePublish(ctx, publishQ, pCopy)
 				})
 			}
+		default:
+			return
 		}
 	}
 }
 
 // runPublishIngress stages completed segments and enqueues vault-ctl publishes.
-// It never blocks on Raft; rescans catch channel drops and restarts.
+// Stranded rescans run only on explicit wake (segment channel drop or startup).
 func (m *Manager) runPublishIngress(ctx context.Context, completed <-chan segmentation.CompletedSegment, publishQ chan<- pendingPublish) {
-	rescan := time.NewTicker(rescanInterval)
-	defer rescan.Stop()
+	strandedCh := m.stranded.C()
+	m.rescanStranded(ctx, publishQ)
 	for {
 		select {
 		case <-ctx.Done():
@@ -460,13 +480,18 @@ func (m *Manager) runPublishIngress(ctx context.Context, completed <-chan segmen
 			if p, err := m.stageForPublish(seg); err == nil {
 				m.enqueuePublish(ctx, publishQ, p)
 			}
-		case <-rescan.C:
-			for vaultID, v := range m.vaultsSnapshot() {
-				for _, seg := range v.stranded(vaultID) {
-					if p, err := m.stageForPublish(seg); err == nil {
-						m.enqueuePublish(ctx, publishQ, p)
-					}
-				}
+		case <-strandedCh:
+			strandedCh = m.stranded.C()
+			m.rescanStranded(ctx, publishQ)
+		}
+	}
+}
+
+func (m *Manager) rescanStranded(ctx context.Context, publishQ chan<- pendingPublish) {
+	for vaultID, v := range m.vaultsSnapshot() {
+		for _, seg := range v.stranded(vaultID) {
+			if p, err := m.stageForPublish(seg); err == nil {
+				m.enqueuePublish(ctx, publishQ, p)
 			}
 		}
 	}

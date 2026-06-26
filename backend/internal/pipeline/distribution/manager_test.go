@@ -303,7 +303,7 @@ func TestRunConsumesCompletedChannel(t *testing.T) {
 func TestRescanPublishesStrandedSegments(t *testing.T) {
 	// The segmentation writer's completed-channel send is non-blocking, so a
 	// full channel (burst) or a restart strands completed segments on disk
-	// with no notification. The Run loop's periodic rescan must find and
+	// with no notification. Startup rescan and NotifyStranded must find and
 	// publish them.
 	t.Parallel()
 	vaultID := glid.New()

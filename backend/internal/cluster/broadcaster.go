@@ -9,15 +9,13 @@ import (
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 
 	hraft "github.com/hashicorp/raft"
-	"google.golang.org/grpc"
 )
 
-// broadcastPeerSource is the subset of *PeerConns that Broadcaster needs.
+// broadcastPeerSource is the subset of *PeerConnManager that Broadcaster needs.
 // Extracted so tests can inject a fake without standing up a real Raft.
 type broadcastPeerSource interface {
 	Peers() ([]hraft.Server, error)
-	Conn(nodeID string) (*grpc.ClientConn, error)
-	Invalidate(nodeID string, err error)
+	InvokeService(ctx context.Context, peerNodeID, purpose, method string, req, resp any) error
 }
 
 // Broadcaster fans out BroadcastMessages to all cluster peers via the
@@ -37,7 +35,7 @@ type Broadcaster struct {
 }
 
 // NewBroadcaster creates a Broadcaster that uses the shared PeerConns pool.
-func NewBroadcaster(peers *PeerConns, logger *slog.Logger) *Broadcaster {
+func NewBroadcaster(peers *PeerConnManager, logger *slog.Logger) *Broadcaster {
 	return newBroadcaster(peers, logger, ForwardingTimeout)
 }
 
@@ -80,21 +78,16 @@ func (b *Broadcaster) Send(ctx context.Context, msg *gastrologv1.BroadcastMessag
 	}
 }
 
-// sendToPeer handles one peer's delivery: dial → per-peer-timeout context →
+// sendToPeer handles one peer's delivery: acquire → per-peer-timeout context →
 // Invoke.
 func (b *Broadcaster) sendToPeer(ctx context.Context, id string, req *gastrologv1.BroadcastRequest) {
-	conn, err := b.peers.Conn(id)
-	if err != nil {
-		b.logPeerError(id, "dial peer", err)
-		return
-	}
-
 	peerCtx, cancel := b.peerContext(ctx)
 	defer cancel()
 
-	if err := b.sendOne(peerCtx, conn, req); err != nil {
+	resp := &gastrologv1.BroadcastResponse{}
+	if err := b.peers.InvokeService(peerCtx, id, "broadcast",
+		"/gastrolog.v1.ClusterService/Broadcast", req, resp); err != nil {
 		b.logPeerError(id, "send", err)
-		b.peers.Invalidate(id, err)
 		return
 	}
 	b.clearPeerError(id)
@@ -136,14 +129,7 @@ func (b *Broadcaster) clearPeerError(id string) {
 	}
 }
 
-// sendOne sends a BroadcastRequest to a single peer via the manually-defined
-// RPC path (same pattern as ForwardApplyClient).
-func (b *Broadcaster) sendOne(ctx context.Context, conn *grpc.ClientConn, req *gastrologv1.BroadcastRequest) error {
-	out := &gastrologv1.BroadcastResponse{}
-	return conn.Invoke(ctx, "/gastrolog.v1.ClusterService/Broadcast", req, out)
-}
-
-// Close is a no-op — connection lifecycle is managed by PeerConns.
+// Close is a no-op — connection lifecycle is managed by PeerConnManager.
 func (b *Broadcaster) Close() error { return nil }
 
 // Delete drops the failure-suppression entry for a removed peer.

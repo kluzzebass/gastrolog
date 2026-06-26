@@ -11,14 +11,11 @@ import (
 
 	"github.com/hashicorp/raft"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
-// PeerConnPool supplies outbound gRPC connections to cluster peers keyed by
-// Raft server address. Production nodes use cluster.PeerConns so MultiRaft and
-// ClusterService share one ClientConn per peer.
-type PeerConnPool interface {
-	ConnForAddress(addr raft.ServerAddress) (*grpc.ClientConn, error)
-}
+// PeerConnPool is defined in peer_pool.go.
 
 // Transport multiplexes multiple Raft groups over a single gRPC service.
 // Each group gets a scoped raft.Transport via GroupTransport(). All groups
@@ -30,6 +27,8 @@ type Transport[K comparable] struct {
 	decodeKey    func([]byte) K
 
 	peerPool PeerConnPool
+
+	inboundLanes *InboundLaneRegistry
 
 	mu     sync.RWMutex
 	groups map[K]*groupState
@@ -62,10 +61,9 @@ const servicePath = "/gastrolog.v1.MultiRaftTransportService/"
 // cascades into leader replication stalls and cluster-wide head-of-line
 // blocking — see gastrolog-5oofa.
 //
-// Values are chosen against hraft's defaults (HeartbeatTimeout=1s,
-// ElectionTimeout=1s, LeaderLeaseTimeout=500ms): tight enough that a
-// slow peer fails fast and hraft retries, generous enough to tolerate
-// normal network jitter and short GC pauses.
+// Values are chosen against cluster-ctl / vault-ctl Raft timeouts in
+// raftgroup: tight enough that a paused peer fails fast and hraft retries,
+// generous enough to tolerate normal network jitter and short GC pauses.
 const (
 	appendEntriesRPCTimeout   = 3 * time.Second
 	heartbeatRPCTimeout       = 1 * time.Second
@@ -185,16 +183,23 @@ func (t *Transport[K]) getGroup(groupID K) *groupState {
 	return gs
 }
 
-// getPeer returns a client for a peer via the configured PeerConnPool.
-func (t *Transport[K]) getPeer(target raft.ServerAddress) (*multiRaftClient, error) {
+func (t *Transport[K]) groupIDString(groupID K) string {
+	if s, ok := any(groupID).(string); ok {
+		return s
+	}
+	return string(t.encodeKey(groupID))
+}
+
+func (t *Transport[K]) acquireRaft(target raft.ServerAddress, groupID K) (RaftConnLease, *multiRaftClient, error) {
 	if t.peerPool == nil {
-		return nil, errors.New("multiraft transport: peer connection pool not configured")
+		return nil, nil, errors.New("multiraft transport: peer connection pool not configured")
 	}
-	cc, err := t.peerPool.ConnForAddress(target)
+	gid := t.groupIDString(groupID)
+	lease, err := t.peerPool.AcquireRaft(target, gid, "multiraft/"+gid)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return &multiRaftClient{cc: cc}, nil
+	return lease, &multiRaftClient{cc: lease.GRPC()}, nil
 }
 
 // SetPeerConnPool wires the shared outbound connection pool. Required before
@@ -203,26 +208,104 @@ func (t *Transport[K]) SetPeerConnPool(pool PeerConnPool) {
 	t.peerPool = pool
 }
 
+// SetInboundLaneRegistry wires per-group inbound virtual listeners for TLS
+// SNI demux on the cluster port.
+func (t *Transport[K]) SetInboundLaneRegistry(r *InboundLaneRegistry) {
+	t.inboundLanes = r
+}
+
+// InboundLanes returns the per-group inbound listener registry, or nil.
+func (t *Transport[K]) InboundLanes() *InboundLaneRegistry {
+	return t.inboundLanes
+}
+
+// dispatchRPC delivers command to the Hashicorp raft consumer for groupID.
+func (t *Transport[K]) dispatchRPC(groupID K, command any, data io.Reader) (any, error) {
+	start := time.Now()
+	gs := t.getGroup(groupID)
+	if gs == nil {
+		return nil, status.Errorf(codes.NotFound, "raft group %q not registered", t.groupIDString(groupID))
+	}
+
+	ch := make(chan raft.RPCResponse, 1)
+	rpc := raft.RPC{
+		Command:  command,
+		RespChan: ch,
+		Reader:   data,
+	}
+
+	dispatched := false
+	var queueWait time.Duration
+	if req, ok := command.(*raft.AppendEntriesRequest); ok && isHeartbeat(req) {
+		gs.heartbeatFuncMtx.Lock()
+		fn := gs.heartbeatFunc
+		gs.heartbeatFuncMtx.Unlock()
+		if fn != nil {
+			fn(rpc)
+			dispatched = true
+		}
+	}
+
+	if !dispatched {
+		queueStart := time.Now()
+		select {
+		case gs.rpcChan <- rpc:
+		case <-gs.doneCh:
+			return nil, status.Error(codes.Unavailable, "raft group removed")
+		case <-t.shutdownCh:
+			return nil, raft.ErrTransportShutdown
+		}
+		queueWait = time.Since(queueStart)
+	}
+
+	waitStart := time.Now()
+	select {
+	case resp := <-ch:
+		waitDur := time.Since(waitStart)
+		total := time.Since(start)
+		if resp.Error != nil {
+			traceInboundAppendEntries(groupID, command, dispatched, queueWait, waitDur, total, resp.Error)
+			return nil, resp.Error
+		}
+		traceInboundAppendEntries(groupID, command, dispatched, queueWait, waitDur, total, nil)
+		return resp.Response, nil
+	case <-gs.doneCh:
+		return nil, status.Error(codes.Unavailable, "raft group removed")
+	case <-t.shutdownCh:
+		return nil, raft.ErrTransportShutdown
+	}
+}
+
 // LocalAddr returns the advertised local address.
 func (t *Transport[K]) LocalAddr() raft.ServerAddress {
 	return t.localAddress
 }
 
 // Close shuts down all connections and closes all group consumer channels.
-func (t *Transport[K]) Close() error {
+// BeginShutdown signals all groups to stop and unblocks inbound gRPC handlers
+// stuck in dispatchRPC. Group entries remain registered until Close so inbound
+// RPCs during drain return Unavailable instead of NotFound.
+func (t *Transport[K]) BeginShutdown() {
 	t.shutdownLock.Lock()
 	defer t.shutdownLock.Unlock()
 	if t.shutdown {
-		return nil
+		return
 	}
 	close(t.shutdownCh)
 	t.shutdown = true
 
-	// Signal all groups to stop. doneCh unblocks senders and the
-	// Consumer() bridge goroutine, which closes the output channel.
 	t.mu.Lock()
-	for k, gs := range t.groups {
+	for _, gs := range t.groups {
 		close(gs.doneCh)
+	}
+	t.mu.Unlock()
+}
+
+func (t *Transport[K]) Close() error {
+	t.BeginShutdown()
+
+	t.mu.Lock()
+	for k := range t.groups {
 		delete(t.groups, k)
 	}
 	t.mu.Unlock()
@@ -271,12 +354,13 @@ func (g *groupTransport[K]) LocalAddr() raft.ServerAddress { return g.parent.loc
 func (g *groupTransport[K]) AppendEntries(id raft.ServerID, target raft.ServerAddress, args *raft.AppendEntriesRequest, resp *raft.AppendEntriesResponse) error {
 	start := time.Now()
 	connStart := start
-	c, err := g.parent.getPeer(target)
+	lease, c, err := g.parent.acquireRaft(target, g.groupID)
 	connWait := time.Since(connStart)
 	if err != nil {
 		traceOutboundAppendEntries(g.groupID, target, args, connWait, 0, time.Since(start), err)
 		return err
 	}
+	defer lease.Release()
 	timeout := appendEntriesRPCTimeout
 	if isHeartbeat(args) {
 		timeout = heartbeatRPCTimeout
@@ -289,6 +373,7 @@ func (g *groupTransport[K]) AppendEntries(id raft.ServerID, target raft.ServerAd
 	total := time.Since(start)
 	traceOutboundAppendEntries(g.groupID, target, args, connWait, rpcDur, total, err)
 	if err != nil {
+		lease.Invalidate(err)
 		return err
 	}
 	*resp = *decodeAppendEntriesResponse(ret)
@@ -296,14 +381,16 @@ func (g *groupTransport[K]) AppendEntries(id raft.ServerID, target raft.ServerAd
 }
 
 func (g *groupTransport[K]) RequestVote(id raft.ServerID, target raft.ServerAddress, args *raft.RequestVoteRequest, resp *raft.RequestVoteResponse) error {
-	c, err := g.parent.getPeer(target)
+	lease, c, err := g.parent.acquireRaft(target, g.groupID)
 	if err != nil {
 		return err
 	}
+	defer lease.Release()
 	ctx, cancel := context.WithTimeout(context.Background(), requestVoteRPCTimeout)
 	defer cancel()
 	ret, err := c.RequestVote(ctx, encodeRequestVoteRequest(g.parent.encodeKey(g.groupID), args))
 	if err != nil {
+		lease.Invalidate(err)
 		return err
 	}
 	*resp = *decodeRequestVoteResponse(ret)
@@ -311,14 +398,18 @@ func (g *groupTransport[K]) RequestVote(id raft.ServerID, target raft.ServerAddr
 }
 
 func (g *groupTransport[K]) RequestPreVote(id raft.ServerID, target raft.ServerAddress, args *raft.RequestPreVoteRequest, resp *raft.RequestPreVoteResponse) error {
-	c, err := g.parent.getPeer(target)
+	start := time.Now()
+	lease, c, err := g.parent.acquireRaft(target, g.groupID)
 	if err != nil {
 		return err
 	}
+	defer lease.Release()
 	ctx, cancel := context.WithTimeout(context.Background(), requestPreVoteRPCTimeout)
 	defer cancel()
 	ret, err := c.RequestPreVote(ctx, encodeRequestPreVoteRequest(g.parent.encodeKey(g.groupID), args))
 	if err != nil {
+		lease.Invalidate(err)
+		logOutboundRaftRPCError(g.groupID, "RequestPreVote", target, time.Since(start), err)
 		return err
 	}
 	*resp = *decodeRequestPreVoteResponse(ret)
@@ -326,14 +417,16 @@ func (g *groupTransport[K]) RequestPreVote(id raft.ServerID, target raft.ServerA
 }
 
 func (g *groupTransport[K]) TimeoutNow(id raft.ServerID, target raft.ServerAddress, args *raft.TimeoutNowRequest, resp *raft.TimeoutNowResponse) error {
-	c, err := g.parent.getPeer(target)
+	lease, c, err := g.parent.acquireRaft(target, g.groupID)
 	if err != nil {
 		return err
 	}
+	defer lease.Release()
 	ctx, cancel := context.WithTimeout(context.Background(), timeoutNowRPCTimeout)
 	defer cancel()
 	ret, err := c.TimeoutNow(ctx, encodeTimeoutNowRequest(g.parent.encodeKey(g.groupID), args))
 	if err != nil {
+		lease.Invalidate(err)
 		return err
 	}
 	*resp = *decodeTimeoutNowResponse(ret)
@@ -341,10 +434,11 @@ func (g *groupTransport[K]) TimeoutNow(id raft.ServerID, target raft.ServerAddre
 }
 
 func (g *groupTransport[K]) InstallSnapshot(id raft.ServerID, target raft.ServerAddress, req *raft.InstallSnapshotRequest, resp *raft.InstallSnapshotResponse, data io.Reader) error {
-	c, err := g.parent.getPeer(target)
+	lease, c, err := g.parent.acquireRaft(target, g.groupID)
 	if err != nil {
 		return err
 	}
+	defer lease.Release()
 	ctx, cancel := context.WithTimeout(context.Background(), installSnapshotRPCTimeout)
 	defer cancel()
 	stream, err := c.InstallSnapshot(ctx)
@@ -375,6 +469,7 @@ func (g *groupTransport[K]) InstallSnapshot(id raft.ServerID, target raft.Server
 		return err
 	}
 	if err := stream.RecvMsg(rawResp); err != nil {
+		lease.Invalidate(err)
 		return err
 	}
 	*resp = *decodeInstallSnapshotResponse(rawResp)
@@ -382,7 +477,7 @@ func (g *groupTransport[K]) InstallSnapshot(id raft.ServerID, target raft.Server
 }
 
 func (g *groupTransport[K]) AppendEntriesPipeline(id raft.ServerID, target raft.ServerAddress) (raft.AppendPipeline, error) {
-	c, err := g.parent.getPeer(target)
+	lease, c, err := g.parent.acquireRaft(target, g.groupID)
 	if err != nil {
 		return nil, err
 	}
@@ -399,12 +494,14 @@ func (g *groupTransport[K]) AppendEntriesPipeline(id raft.ServerID, target raft.
 	stream, err := c.AppendEntriesPipeline(ctx)
 	if err != nil {
 		cancel()
+		lease.Release()
 		return nil, err
 	}
 	p := &pipelineAPI{
 		stream:       stream,
 		groupID:      g.parent.encodeKey(g.groupID),
 		cancel:       cancel,
+		lease:        lease,
 		inflightCh:   make(chan *appendFuture, 20),
 		doneCh:       make(chan raft.AppendFuture, 20),
 		receiverDone: make(chan struct{}),
@@ -430,7 +527,11 @@ func (g *groupTransport[K]) DecodePeer(p []byte) raft.ServerAddress {
 func (g *groupTransport[K]) Close() error { return nil }
 
 func (g *groupTransport[K]) Connect(target raft.ServerAddress, _ raft.Transport) {
-	_, _ = g.parent.getPeer(target)
+	lease, _, err := g.parent.acquireRaft(target, g.groupID)
+	if err != nil {
+		return
+	}
+	lease.Release()
 }
 
 func (g *groupTransport[K]) Disconnect(raft.ServerAddress) {}
@@ -445,6 +546,7 @@ type pipelineAPI struct {
 	stream        grpc.ClientStream
 	groupID       []byte
 	cancel        func()
+	lease         RaftConnLease
 	inflightChMtx sync.Mutex
 	inflightCh    chan *appendFuture
 	doneCh        chan raft.AppendFuture
@@ -478,6 +580,9 @@ func (p *pipelineAPI) Close() error {
 	close(p.inflightCh)
 	p.inflightChMtx.Unlock()
 	<-p.receiverDone // wait for receiver goroutine to exit
+	if p.lease != nil {
+		p.lease.Release()
+	}
 	return nil
 }
 

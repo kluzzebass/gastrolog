@@ -41,6 +41,7 @@ type streamKey struct {
 type vaultStream struct {
 	mu     sync.Mutex
 	stream grpc.ClientStream
+	handle PeerConnHandle
 	cancel context.CancelFunc
 	closed bool
 }
@@ -49,7 +50,7 @@ type vaultStream struct {
 // to its followers. All operations for a given (vaultID, followerNodeID)
 // are serialized on a single bidirectional gRPC stream.
 type ChunkReplicator struct {
-	peers  *PeerConns
+	peers  *PeerConnManager
 	logger *slog.Logger
 
 	mu      sync.Mutex
@@ -63,7 +64,7 @@ var chunkReplicationStreamDesc = &grpc.StreamDesc{
 }
 
 // NewChunkReplicator creates a replicator using the given peer connections.
-func NewChunkReplicator(peers *PeerConns, logger *slog.Logger) *ChunkReplicator {
+func NewChunkReplicator(peers *PeerConnManager, logger *slog.Logger) *ChunkReplicator {
 	return &ChunkReplicator{
 		peers:   peers,
 		logger:  logger,
@@ -85,27 +86,24 @@ func (tr *ChunkReplicator) getOrOpen(vaultID glid.GLID, nodeID string) (*vaultSt
 	tr.mu.Unlock()
 
 	// Open a new stream.
-	conn, err := tr.peers.Conn(nodeID)
-	if err != nil {
-		return nil, fmt.Errorf("dial node %s: %w", nodeID, err)
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
-	stream, err := conn.NewStream(ctx, chunkReplicationStreamDesc,
-		"/gastrolog.v1.ClusterService/ChunkReplication")
+	h, stream, err := tr.peers.OpenServiceStream(ctx, nodeID, "chunk-replicator",
+		chunkReplicationStreamDesc,
+		"/gastrolog.v1.ClusterService/ChunkReplication",
+	)
 	if err != nil {
 		cancel()
-		tr.peers.Invalidate(nodeID, err)
 		return nil, fmt.Errorf("open vault replication stream to %s: %w", nodeID, err)
 	}
 
-	ts = &vaultStream{stream: stream, cancel: cancel}
+	ts = &vaultStream{stream: stream, handle: h, cancel: cancel}
 
 	tr.mu.Lock()
 	// Another goroutine may have opened one while we were dialing.
 	if existing := tr.streams[key]; existing != nil && !existing.closed {
 		tr.mu.Unlock()
 		cancel()
+		h.Release()
 		return existing, nil
 	}
 	tr.streams[key] = ts
@@ -189,6 +187,10 @@ func (tr *ChunkReplicator) closeStream(vaultID glid.GLID, nodeID string) {
 	if ts != nil {
 		ts.closed = true
 		ts.cancel()
+		if ts.handle != nil {
+			ts.handle.Release()
+			ts.handle = nil
+		}
 		delete(tr.streams, key)
 	}
 	tr.mu.Unlock()
@@ -307,10 +309,6 @@ func (tr *ChunkReplicator) DeleteChunk(ctx context.Context, nodeID string, vault
 // follower→leader and small, so a one-shot Invoke is the cleaner
 // match.
 func (tr *ChunkReplicator) RequestReplicaCatchup(ctx context.Context, leaderNodeID string, vaultID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (uint32, error) {
-	conn, err := tr.peers.Conn(leaderNodeID)
-	if err != nil {
-		return 0, fmt.Errorf("dial leader %s: %w", leaderNodeID, err)
-	}
 	rawIDs := make([][]byte, len(chunkIDs))
 	for i := range chunkIDs {
 		rawIDs[i] = chunkIDs[i][:]
@@ -321,7 +319,8 @@ func (tr *ChunkReplicator) RequestReplicaCatchup(ctx context.Context, leaderNode
 		RequesterNodeId: []byte(requesterNodeID),
 	}
 	resp := &gastrologv1.RequestReplicaCatchupResponse{}
-	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/RequestReplicaCatchup", req, resp); err != nil {
+	if err := tr.peers.InvokeService(ctx, leaderNodeID, "chunk-replicator-catchup",
+		"/gastrolog.v1.ClusterService/RequestReplicaCatchup", req, resp); err != nil {
 		return 0, err
 	}
 	return resp.GetScheduled(), nil

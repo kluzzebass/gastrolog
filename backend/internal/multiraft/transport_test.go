@@ -795,10 +795,11 @@ func TestBatchHeartbeatParallelInbound(t *testing.T) {
 		})
 	}
 
-	cc, err := nodes[0].transport.getPeer(nodes[1].transport.LocalAddr())
+	lease, cc, err := nodes[0].transport.acquireRaft(nodes[1].transport.LocalAddr(), "batch-in-A")
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer lease.Release()
 
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

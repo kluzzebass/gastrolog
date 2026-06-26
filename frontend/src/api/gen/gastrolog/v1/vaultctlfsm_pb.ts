@@ -266,6 +266,12 @@ export class VaultCtlCommand extends Message<VaultCtlCommand> {
      */
     value: AckSegmentHolderCommand;
     case: "ackSegmentHolder";
+  } | {
+    /**
+     * @generated from field: gastrolog.v1.DiscardOpenChunkManifestCommand discard_open_chunk_manifest = 20;
+     */
+    value: DiscardOpenChunkManifestCommand;
+    case: "discardOpenChunkManifest";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<VaultCtlCommand>) {
@@ -295,6 +301,7 @@ export class VaultCtlCommand extends Message<VaultCtlCommand> {
     { no: 17, name: "seal_open_chunk_manifest", kind: "message", T: SealOpenChunkManifestCommand, oneof: "command" },
     { no: 18, name: "release_segments", kind: "message", T: ReleaseSegmentsCommand, oneof: "command" },
     { no: 19, name: "ack_segment_holder", kind: "message", T: AckSegmentHolderCommand, oneof: "command" },
+    { no: 20, name: "discard_open_chunk_manifest", kind: "message", T: DiscardOpenChunkManifestCommand, oneof: "command" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultCtlCommand {
@@ -413,6 +420,14 @@ export class SealChunkCommand extends Message<SealChunkCommand> {
    */
   ingestTsMonotonic = false;
 
+  /**
+   * Wall-clock sealing completion (leader-chosen, replicated). Retention
+   * MaxAge measures age from this timestamp, not WriteEnd.
+   *
+   * @generated from field: int64 sealed_at_nanos = 9;
+   */
+  sealedAtNanos = protoInt64.zero;
+
   constructor(data?: PartialMessage<SealChunkCommand>) {
     super();
     proto3.util.initPartial(data, this);
@@ -429,6 +444,7 @@ export class SealChunkCommand extends Message<SealChunkCommand> {
     { no: 6, name: "source_end_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 7, name: "ingest_start_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 8, name: "ingest_ts_monotonic", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 9, name: "sealed_at_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SealChunkCommand {
@@ -1553,6 +1569,47 @@ export class SealOpenChunkManifestCommand extends Message<SealOpenChunkManifestC
 }
 
 /**
+ * DiscardOpenChunkManifestCommand drops an empty open or sealed-pending
+ * manifest without creating a chunk. Used when the planner opened a manifest
+ * but never planned any segment refs (stall timeout).
+ *
+ * @generated from message gastrolog.v1.DiscardOpenChunkManifestCommand
+ */
+export class DiscardOpenChunkManifestCommand extends Message<DiscardOpenChunkManifestCommand> {
+  /**
+   * @generated from field: bytes chunk_id = 1;
+   */
+  chunkId = new Uint8Array(0);
+
+  constructor(data?: PartialMessage<DiscardOpenChunkManifestCommand>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.DiscardOpenChunkManifestCommand";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DiscardOpenChunkManifestCommand {
+    return new DiscardOpenChunkManifestCommand().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): DiscardOpenChunkManifestCommand {
+    return new DiscardOpenChunkManifestCommand().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): DiscardOpenChunkManifestCommand {
+    return new DiscardOpenChunkManifestCommand().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: DiscardOpenChunkManifestCommand | PlainMessage<DiscardOpenChunkManifestCommand> | undefined, b: DiscardOpenChunkManifestCommand | PlainMessage<DiscardOpenChunkManifestCommand> | undefined): boolean {
+    return proto3.util.equals(DiscardOpenChunkManifestCommand, a, b);
+  }
+}
+
+/**
  * ReleaseSegmentsCommand drops completed segment registry entries after chunk
  * replication (purge signaling). See chunking-design direction D.
  *
@@ -1757,6 +1814,13 @@ export class ManifestEntry extends Message<ManifestEntry> {
    */
   keyScheme = 0;
 
+  /**
+   * Wall-clock time when sealing completed (CmdSealChunk apply).
+   *
+   * @generated from field: int64 sealed_at_nanos = 23;
+   */
+  sealedAtNanos = protoInt64.zero;
+
   constructor(data?: PartialMessage<ManifestEntry>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1787,6 +1851,7 @@ export class ManifestEntry extends Message<ManifestEntry> {
     { no: 20, name: "hash", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 21, name: "cloud_service_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 22, name: "key_scheme", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 23, name: "sealed_at_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ManifestEntry {
@@ -1941,14 +2006,27 @@ export class VaultCtlSnapshot extends Message<VaultCtlSnapshot> {
   openChunk?: OpenChunkManifestState;
 
   /**
-   * @generated from field: gastrolog.v1.OpenChunkManifestState sealed_manifest = 6;
+   * FIFO queue of sealed manifests awaiting local GLCB build on each home.
+   * Multiple entries let the leader rotate the open chunk while earlier
+   * chunks are still building without freezing ingest at rotation limits.
+   *
+   * @generated from field: repeated gastrolog.v1.OpenChunkManifestState sealed_manifests = 6;
    */
-  sealedManifest?: OpenChunkManifestState;
+  sealedManifests: OpenChunkManifestState[] = [];
 
   /**
    * @generated from field: repeated gastrolog.v1.SegmentResumeRecordNumber segment_resume = 7;
    */
   segmentResume: SegmentResumeRecordNumber[] = [];
+
+  /**
+   * Segment IDs dropped by ReleaseSegments. PublishCompletedSegment after
+   * release is ignored so a stale distribution publish cannot re-register
+   * metadata without bytes (permanent collection/chunking wedge).
+   *
+   * @generated from field: repeated bytes released_segment_ids = 8;
+   */
+  releasedSegmentIds: Uint8Array[] = [];
 
   constructor(data?: PartialMessage<VaultCtlSnapshot>) {
     super();
@@ -1963,8 +2041,9 @@ export class VaultCtlSnapshot extends Message<VaultCtlSnapshot> {
     { no: 3, name: "pending_deletes", kind: "message", T: PendingDelete, repeated: true },
     { no: 4, name: "completed_segments", kind: "message", T: CompletedSegmentEntry, repeated: true },
     { no: 5, name: "open_chunk", kind: "message", T: OpenChunkManifestState },
-    { no: 6, name: "sealed_manifest", kind: "message", T: OpenChunkManifestState },
+    { no: 6, name: "sealed_manifests", kind: "message", T: OpenChunkManifestState, repeated: true },
     { no: 7, name: "segment_resume", kind: "message", T: SegmentResumeRecordNumber, repeated: true },
+    { no: 8, name: "released_segment_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultCtlSnapshot {

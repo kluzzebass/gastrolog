@@ -21,12 +21,12 @@ var ErrNoVaultRaftLeader = errors.New("no vault raft leader")
 type VaultApplyForwarder struct {
 	raft    *hraft.Raft
 	groupID string
-	peers   *PeerConns
+	peers   *PeerConnManager
 	timeout time.Duration
 }
 
 // NewVaultApplyForwarder creates a forwarder for a vault control-plane Raft group.
-func NewVaultApplyForwarder(r *hraft.Raft, groupID string, peers *PeerConns, timeout time.Duration) *VaultApplyForwarder {
+func NewVaultApplyForwarder(r *hraft.Raft, groupID string, peers *PeerConnManager, timeout time.Duration) *VaultApplyForwarder {
 	return &VaultApplyForwarder{
 		raft:    r,
 		groupID: groupID,
@@ -54,11 +54,6 @@ func (f *VaultApplyForwarder) forwardToLeader(data []byte) error {
 		return ErrNoVaultRaftLeader
 	}
 
-	conn, err := f.peers.Conn(string(leaderID))
-	if err != nil {
-		return fmt.Errorf("dial vault raft leader %s: %w", leaderID, err)
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), f.timeout)
 	defer cancel()
 
@@ -67,8 +62,8 @@ func (f *VaultApplyForwarder) forwardToLeader(data []byte) error {
 		Command: data,
 	}
 	resp := &gastrologv1.ForwardVaultApplyResponse{}
-	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardVaultApply", req, resp); err != nil {
-		f.peers.Invalidate(string(leaderID), err)
+	if err := f.peers.InvokeService(ctx, string(leaderID), "vault-apply-forward",
+		"/gastrolog.v1.ClusterService/ForwardVaultApply", req, resp); err != nil {
 		return fmt.Errorf("forward vault apply to %s: %w", leaderID, err)
 	}
 	return nil
