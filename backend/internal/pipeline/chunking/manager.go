@@ -22,9 +22,8 @@ import (
 // ErrNotRunning is returned when Run is called twice.
 var ErrNotRunning = errors.New("chunking manager not running")
 
-// sealRetryInterval bounds how often a home retries CmdSealChunk after a
-// failed forward/apply. Retries are scheduled as a one-shot wake, not a poll loop.
-const sealRetryInterval = 15 * time.Second
+// sealRetryInterval removed — seal/build retries wake on FSM events and
+// vault-ctl leadership changes, not timed polls.
 
 // VaultCtlApplier applies marshaled vault-ctl commands for one vault.
 type VaultCtlApplier interface {
@@ -134,8 +133,6 @@ type vaultChunking struct {
 	// buildRunning gates a single in-flight GLCB build so planCatchUp can keep
 	// running on wake while materialization/build proceeds asynchronously.
 	buildRunning atomic.Bool
-	// sealRetryScheduled coalesces one-shot seal retries after Apply failures.
-	sealRetryScheduled atomic.Bool
 	// log is the per-vault logger; set when the worker starts.
 	log *slog.Logger
 }
@@ -523,20 +520,9 @@ func (m *Manager) runBuildPass(ctx context.Context, v *vaultChunking, log *slog.
 		defer v.buildRunning.Store(false)
 		if err := v.buildOnce(ctx); err != nil && ctx.Err() == nil {
 			log.Warn("chunking build failed", "error", err)
-			v.scheduleSealRetry()
 		}
 		v.wake.Notify()
 	}()
-}
-
-func (v *vaultChunking) scheduleSealRetry() {
-	if !v.sealRetryScheduled.CompareAndSwap(false, true) {
-		return
-	}
-	time.AfterFunc(sealRetryInterval, func() {
-		v.sealRetryScheduled.Store(false)
-		v.wake.Notify()
-	})
 }
 
 func (v *vaultChunking) buildDue() bool {
@@ -566,9 +552,6 @@ func (v *vaultChunking) buildDue() bool {
 			v.sealAttemptKey = buildKey{}
 			return true
 		}
-		return false
-	}
-	if v.sealAttemptKey == key && time.Since(v.lastSealAttempt) < sealRetryInterval {
 		return false
 	}
 	return true

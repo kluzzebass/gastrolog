@@ -562,6 +562,9 @@ func (s *Supervisor) registerOrigin(spec VaultSpec) error {
 			s.col.Notify(vaultID)
 			s.chunk.NotifyVault(vaultID)
 		}
+		distCfg.OnPublishCommitted = func(glid.GLID) {
+			s.col.Notify(vaultID)
+		}
 	}
 	if err := s.dist.RegisterVault(spec.VaultID, spec.OriginRoot, distCfg); err != nil {
 		s.route.UnregisterVault(spec.VaultID)
@@ -653,6 +656,20 @@ func (s *Supervisor) RecoverVault(ctx context.Context, vaultID glid.GLID) error 
 func (s *Supervisor) NotifyChunkingVault(vaultID glid.GLID) {
 	if s.chunk != nil {
 		s.chunk.NotifyVault(vaultID)
+	}
+}
+
+// NotifyPublishRetry wakes distribution to drain staged vault-ctl publish retries.
+func (s *Supervisor) NotifyPublishRetry() {
+	if s.dist != nil {
+		s.dist.NotifyPublishRetry()
+	}
+}
+
+// NotifyCollectionVault wakes the per-vault collection worker.
+func (s *Supervisor) NotifyCollectionVault(vaultID glid.GLID) {
+	if s.col != nil {
+		s.col.Notify(vaultID)
 	}
 }
 

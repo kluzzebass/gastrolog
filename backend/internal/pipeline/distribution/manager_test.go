@@ -399,6 +399,66 @@ type errPublisher struct{ err error }
 
 func (p errPublisher) Publish(context.Context, distribution.Metadata) error { return p.err }
 
+func TestPublishRetryDrainsOnNotify(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	root := t.TempDir()
+	pub := &flakyRetryPublisher{}
+
+	mgr, _ := distribution.New(distribution.Config{})
+	if err := mgr.RegisterVault(vaultID, root, distribution.VaultConfig{
+		Publisher: pub,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	completed := make(chan segmentation.CompletedSegment, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		_ = mgr.Run(ctx, completed)
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+
+	seg := writeCompletedSegment(t, root, vaultID, "retry-me")
+	completed <- seg
+	deadline := time.Now().Add(2 * time.Second)
+	for pub.successes() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("publish never retried after NotifyPublishRetry")
+		}
+		mgr.NotifyPublishRetry()
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+type flakyRetryPublisher struct {
+	mu      sync.Mutex
+	attempt int
+	ok      int
+}
+
+func (p *flakyRetryPublisher) Publish(context.Context, distribution.Metadata) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.attempt++
+	if p.attempt == 1 {
+		return errors.New("no vault-ctl leader")
+	}
+	p.ok++
+	return nil
+}
+
+func (p *flakyRetryPublisher) successes() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.ok
+}
+
 func TestPublishCompletedKeepsSegmentOnPublisherError(t *testing.T) {
 	// A failed vault-ctl publish is a retryable transient (election,
 	// transfer window): the segment file stays in completed/ (local holders

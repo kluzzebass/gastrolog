@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"gastrolog/internal/glid"
 	"gastrolog/internal/logging"
@@ -17,11 +16,6 @@ import (
 
 // ErrNotRunning is returned when Run is called twice.
 var ErrNotRunning = errors.New("collection manager not running")
-
-// collectRetryDelay backs off retryable collect failures (origin not ready,
-// segment bytes missing). Event-driven wakes handle the happy path; this only
-// schedules a retry when a pass fails transiently.
-const collectRetryDelay = 250 * time.Millisecond
 
 // ErrUnknownVault is returned for an unregistered vault.
 var ErrUnknownVault = errors.New("unknown vault")
@@ -57,8 +51,6 @@ type vaultCollect struct {
 	wake *notify.Signal
 	// stopWorker cancels the per-vault worker; nil until the worker starts.
 	stopWorker context.CancelFunc
-	// retryScheduled coalesces scheduled retries after transient failures.
-	retryScheduled atomic.Bool
 
 	// passMu serializes full collect passes. collectMu protects layout and
 	// receipted only — never held across pull or vault-ctl apply I/O.
@@ -156,27 +148,28 @@ func (v *vaultCollect) collectOne(ctx context.Context, ref AssignedSegment) erro
 	v.collectMu.Lock()
 	v.noteHead(ref.SegmentID)
 	v.collectMu.Unlock()
-	return v.commitReceipt(ctx, ref)
+	_, err = v.commitReceipt(ctx, ref)
+	return err
 }
 
 // commitReceipt records that this node holds the segment and remembers it so a
 // later pass does not re-commit before the receipt replicates into the holder
 // set. Idempotent at the FSM layer too (CmdAckSegmentHolder de-dups), so a
 // crash between commit and marking is harmless.
-func (v *vaultCollect) commitReceipt(ctx context.Context, ref AssignedSegment) error {
+func (v *vaultCollect) commitReceipt(ctx context.Context, ref AssignedSegment) (bool, error) {
 	v.collectMu.Lock()
 	if _, done := v.receipted[ref.SegmentID]; done {
 		v.collectMu.Unlock()
-		return nil
+		return false, nil
 	}
 	v.collectMu.Unlock()
 	if err := v.receipts.CommitHolderReceipt(ctx, ref.VaultID, ref.SegmentID); err != nil {
-		return err
+		return false, err
 	}
 	v.collectMu.Lock()
 	v.receipted[ref.SegmentID] = struct{}{}
 	v.collectMu.Unlock()
-	return nil
+	return true, nil
 }
 
 type collectAction int
@@ -205,19 +198,21 @@ func (v *vaultCollect) planCollectAction(ref AssignedSegment) collectAction {
 	return collectPull
 }
 
-func (v *vaultCollect) collectForRef(ctx context.Context, ref AssignedSegment) error {
+func (v *vaultCollect) collectForRef(ctx context.Context, ref AssignedSegment) (bool, error) {
 	switch v.planCollectAction(ref) {
 	case collectSkip:
-		return nil
+		return false, nil
 	case collectReceiptOnly:
-		return v.commitReceipt(ctx, ref)
+		committed, err := v.commitReceipt(ctx, ref)
+		return committed, err
 	case collectPull:
-		return v.collectOne(ctx, ref)
+		err := v.collectOne(ctx, ref)
+		return err == nil, err
 	}
-	return nil
+	return false, nil
 }
 
-func (v *vaultCollect) collectMissing(ctx context.Context) error {
+func (v *vaultCollect) collectMissing(ctx context.Context) (bool, error) {
 	v.passMu.Lock()
 	defer v.passMu.Unlock()
 
@@ -225,26 +220,31 @@ func (v *vaultCollect) collectMissing(ctx context.Context) error {
 	assigned, err := v.log.Roll(ctx, v.vaultID)
 	if err != nil {
 		v.collectMu.Unlock()
-		return err
+		return false, err
 	}
 	if len(assigned) == 0 {
 		v.collectMu.Unlock()
-		return nil
+		return false, nil
 	}
 	if err := v.refreshLayout(); err != nil {
 		v.collectMu.Unlock()
-		return err
+		return false, err
 	}
 	work := append([]AssignedSegment(nil), assigned...)
 	v.collectMu.Unlock()
 
 	var errs []error
+	var progress bool
 	for _, ref := range work {
-		if err := v.collectForRef(ctx, ref); err != nil {
+		made, err := v.collectForRef(ctx, ref)
+		if made {
+			progress = true
+		}
+		if err != nil {
 			errs = append(errs, err)
 		}
 	}
-	return errors.Join(errs...)
+	return progress, errors.Join(errs...)
 }
 
 // CollectSegments pulls specific segment IDs into head/ when they are absent
@@ -292,7 +292,7 @@ func (v *vaultCollect) collectSegments(ctx context.Context, segmentIDs []glid.GL
 			SegmentID: segmentID,
 			Checksum:  checksum,
 		}
-		if err := v.collectForRef(ctx, ref); err != nil {
+		if _, err := v.collectForRef(ctx, ref); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -460,7 +460,8 @@ func (m *Manager) CollectOnce(ctx context.Context, vaultID glid.GLID) error {
 	if v.stopWorker != nil {
 		return v.awaitCollectPass(ctx)
 	}
-	return v.collectMissing(ctx)
+	_, err := v.collectMissing(ctx)
+	return err
 }
 
 // Run blocks until ctx is cancelled. Each registered vault gets a worker
@@ -508,27 +509,16 @@ func (m *Manager) logCollectPassErr(log *slog.Logger, err error) {
 	log.Warn("collect pass failed", "error", err)
 }
 
-func (v *vaultCollect) scheduleRetry(delay time.Duration) {
-	if !v.retryScheduled.CompareAndSwap(false, true) {
-		return
-	}
-	time.AfterFunc(delay, func() {
-		v.retryScheduled.Store(false)
-		v.wake.Notify()
-	})
-}
-
-func (m *Manager) afterCollectPass(v *vaultCollect, err error, log *slog.Logger) {
+func (m *Manager) afterCollectPass(v *vaultCollect, progress bool, err error, log *slog.Logger) {
 	if err != nil {
 		if retryableCollectErr(err) {
 			m.logCollectPassErr(log, err)
-			v.scheduleRetry(collectRetryDelay)
 			return
 		}
 		m.logCollectPassErr(log, err)
 		return
 	}
-	if m.cfg.OnPassComplete != nil {
+	if progress && m.cfg.OnPassComplete != nil {
 		m.cfg.OnPassComplete(v.vaultID)
 	}
 }
@@ -549,9 +539,9 @@ func (m *Manager) startWorkerLocked(v *vaultCollect) {
 		// mid-pass re-fires the loop instead of being lost.
 		ch := v.wake.C()
 		log := m.logger().With("vault", v.vaultID)
-		err := v.collectMissing(ctx)
+		progress, err := v.collectMissing(ctx)
 		if ctx.Err() == nil {
-			m.afterCollectPass(v, err, log)
+			m.afterCollectPass(v, progress, err, log)
 		}
 		v.completeCollectWaiters(err)
 		for {
@@ -561,9 +551,9 @@ func (m *Manager) startWorkerLocked(v *vaultCollect) {
 			case <-ch:
 			}
 			ch = v.wake.C()
-			err := v.collectMissing(ctx)
+			progress, err = v.collectMissing(ctx)
 			if ctx.Err() == nil {
-				m.afterCollectPass(v, err, log)
+				m.afterCollectPass(v, progress, err, log)
 			}
 			v.completeCollectWaiters(err)
 		}

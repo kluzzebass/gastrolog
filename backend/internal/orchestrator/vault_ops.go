@@ -604,6 +604,8 @@ func (o *Orchestrator) onVaultCtlLeadGained(vaultID glid.GLID) {
 		return
 	}
 	o.pipeline.NotifyChunkingVault(vaultID)
+	o.pipeline.NotifyPublishRetry()
+	o.pipeline.NotifyCollectionVault(vaultID)
 }
 
 // reconcilePipelineAfterCtlRestore rebinds pipeline managers to the live vault-ctl

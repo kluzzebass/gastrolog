@@ -8,7 +8,6 @@ import (
 	"os"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"gastrolog/internal/glid"
 	"gastrolog/internal/notify"
@@ -16,11 +15,6 @@ import (
 	"gastrolog/internal/pipeline/segment"
 	"gastrolog/internal/pipeline/segmentation"
 )
-
-// publishRetryInterval is how long to wait before re-enqueueing a failed
-// vault-ctl publish. Publish failures are expected transients (no vault-ctl
-// leader during an election or leadership transfer, forwarding RPC timeout).
-const publishRetryInterval = time.Second
 
 // publishQueueCap bounds staged publishes waiting for the vault-ctl worker.
 // Ingress only enqueues; a dedicated worker issues Raft applies so pull serving
@@ -49,6 +43,10 @@ type VaultConfig struct {
 	// Collection uses this to commit holder receipts without waiting for the
 	// next publish wake — publish applies before finalizeAfterPublish promotes.
 	OnLocalHeadPromoted func(segmentID glid.GLID)
+	// OnPublishCommitted fires after vault-ctl accepts segment metadata and
+	// the segment is registered for pull. Wired to wake collection on the
+	// same node when origin and home overlap.
+	OnPublishCommitted func(segmentID glid.GLID)
 }
 
 type vaultDist struct {
@@ -56,6 +54,7 @@ type vaultDist struct {
 	publisher   Publisher
 	localHolder func() bool
 	onLocalHeadPromoted func(glid.GLID)
+	onPublishCommitted  func(glid.GLID)
 	mu          sync.RWMutex
 	segments    map[glid.GLID]string // segment ID → on-disk path
 	retired     map[glid.GLID]struct{} // released from vault-ctl; skip rescan republish
@@ -73,6 +72,7 @@ func newVaultDist(root string, cfg VaultConfig) (*vaultDist, error) {
 		publisher:           cfg.Publisher,
 		localHolder:         cfg.LocalHolder,
 		onLocalHeadPromoted: cfg.OnLocalHeadPromoted,
+		onPublishCommitted:  cfg.OnPublishCommitted,
 		segments:            make(map[glid.GLID]string),
 		retired:             make(map[glid.GLID]struct{}),
 	}, nil
@@ -198,7 +198,13 @@ func (v *vaultDist) publishStaged(ctx context.Context, meta Metadata, segID glid
 	if v.isRetired(segID) {
 		return nil
 	}
-	return v.finalizeAfterPublish(segID, path)
+	if err := v.finalizeAfterPublish(segID, path); err != nil {
+		return err
+	}
+	if v.onPublishCommitted != nil {
+		v.onPublishCommitted(segID)
+	}
+	return nil
 }
 
 func (v *vaultDist) servePull(req PullRequest) error {
@@ -284,9 +290,12 @@ type Manager struct {
 
 	mu      sync.Mutex
 	vaults  map[glid.GLID]*vaultDist
-	pullIn  chan PullRequest
-	stranded *notify.Signal
-	runCtx  context.Context
+	pullIn       chan PullRequest
+	stranded     *notify.Signal
+	publishRetry *notify.Signal
+	retryMu      sync.Mutex
+	retryPending []pendingPublish
+	runCtx       context.Context
 	running atomic.Bool
 	wg      sync.WaitGroup
 }
@@ -299,11 +308,20 @@ func New(cfg Config) (*Manager, chan<- PullRequest) {
 	}
 	pullIn := make(chan PullRequest, queueCap)
 	return &Manager{
-		cfg:      cfg,
-		vaults:   make(map[glid.GLID]*vaultDist),
-		pullIn:   pullIn,
-		stranded: notify.NewSignal(),
+		cfg:          cfg,
+		vaults:       make(map[glid.GLID]*vaultDist),
+		pullIn:       pullIn,
+		stranded:     notify.NewSignal(),
+		publishRetry: notify.NewSignal(),
 	}, pullIn
+}
+
+// NotifyPublishRetry wakes the publish worker to drain staged retries. Call
+// after vault-ctl leadership changes or other events that unblock applies.
+func (m *Manager) NotifyPublishRetry() {
+	if m.publishRetry != nil {
+		m.publishRetry.Notify()
+	}
 }
 
 // NotifyStranded wakes publish ingress to scan completed/ for segments whose
@@ -422,8 +440,9 @@ func (m *Manager) runPullLoop(ctx context.Context) {
 }
 
 // runPublishWorker commits staged segments to vault-ctl. Failed publishes are
-// re-enqueued after publishRetryInterval.
+// queued for retry and drained on the next publishRetry wake.
 func (m *Manager) runPublishWorker(ctx context.Context, publishQ chan pendingPublish) {
+	retryCh := m.publishRetry.C()
 	for {
 		select {
 		case <-ctx.Done():
@@ -433,6 +452,46 @@ func (m *Manager) runPublishWorker(ctx context.Context, publishQ chan pendingPub
 				return
 			}
 			m.publishOne(ctx, publishQ, p)
+		case <-retryCh:
+			retryCh = m.publishRetry.C()
+			m.drainPublishRetries(ctx, publishQ)
+		}
+	}
+}
+
+func (m *Manager) enqueuePublishRetry(p pendingPublish) {
+	m.retryMu.Lock()
+	for _, existing := range m.retryPending {
+		if existing.segID == p.segID {
+			m.retryMu.Unlock()
+			m.NotifyPublishRetry()
+			return
+		}
+	}
+	m.retryPending = append(m.retryPending, p)
+	m.retryMu.Unlock()
+	m.NotifyPublishRetry()
+}
+
+func (m *Manager) drainPublishRetries(ctx context.Context, publishQ chan pendingPublish) {
+	m.retryMu.Lock()
+	pending := m.retryPending
+	m.retryPending = nil
+	m.retryMu.Unlock()
+	for _, p := range pending {
+		if err := m.publishMeta(ctx, p.vaultID, p.meta, p.segID, p.path); err != nil &&
+			!errors.Is(err, ErrUnknownVault) &&
+			!errors.Is(err, errPublishBytesMissing) {
+			m.enqueuePublishRetry(p)
+		}
+	}
+	// After retries, drain any fresh ingress items without waiting for another wake.
+	for {
+		select {
+		case p := <-publishQ:
+			m.publishOne(ctx, publishQ, p)
+		default:
+			return
 		}
 	}
 }
@@ -441,10 +500,7 @@ func (m *Manager) publishOne(ctx context.Context, publishQ chan pendingPublish, 
 	if err := m.publishMeta(ctx, p.vaultID, p.meta, p.segID, p.path); err != nil &&
 		!errors.Is(err, ErrUnknownVault) &&
 		!errors.Is(err, errPublishBytesMissing) {
-		pCopy := p
-		time.AfterFunc(publishRetryInterval, func() {
-			m.enqueuePublish(ctx, publishQ, pCopy)
-		})
+		m.enqueuePublishRetry(p)
 		return
 	}
 	for {
@@ -453,10 +509,7 @@ func (m *Manager) publishOne(ctx context.Context, publishQ chan pendingPublish, 
 			if err := m.publishMeta(ctx, p2.vaultID, p2.meta, p2.segID, p2.path); err != nil &&
 				!errors.Is(err, ErrUnknownVault) &&
 				!errors.Is(err, errPublishBytesMissing) {
-				pCopy := p2
-				time.AfterFunc(publishRetryInterval, func() {
-					m.enqueuePublish(ctx, publishQ, pCopy)
-				})
+				m.enqueuePublishRetry(p2)
 			}
 		default:
 			return
