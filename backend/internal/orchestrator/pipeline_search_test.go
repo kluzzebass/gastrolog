@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -127,6 +128,26 @@ func (r *pipelineSearchRegistry) OpenPipelineChunkCursor(vaultID glid.GLID, chun
 	return newManifestRecordCursor(chunkID, seq, open.TotalRecords, readAt), nil
 }
 
+func (r *pipelineSearchRegistry) ScanPipelineChunkIngestTS(vaultID glid.GLID, chunkID chunk.ChunkID, cb func(tsNanos int64) bool) error {
+	cursor, err := r.OpenPipelineChunkCursor(vaultID, chunkID)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = cursor.Close() }()
+	for {
+		rec, _, err := cursor.Next()
+		if errors.Is(err, chunk.ErrNoMoreRecords) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if !cb(rec.IngestTS.UnixNano()) {
+			return nil
+		}
+	}
+}
+
 // TestPipelineActiveChunkSearchable: active pipeline chunks appear in search
 // chunk discovery and stream records via manifest segment spans.
 func TestPipelineActiveChunkSearchable(t *testing.T) {
@@ -198,5 +219,39 @@ func TestManifestRecordCursorReverseSeek(t *testing.T) {
 	}
 	if len(rec.Raw) == 0 {
 		t.Fatal("expected non-empty first record")
+	}
+}
+
+func TestPipelineActiveChunkHistogram(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	vaultID, fsm, home, chunkID, wantRecords := buildOpenPipelineManifest(t, ctx)
+	open := fsm.OpenChunk()
+	meta := openChunkManifestToChunkMeta(open, chunk.ChunkStateActive)
+
+	cm, im := newQueryCM(t)
+	reg := &pipelineSearchRegistry{
+		vaultID: vaultID,
+		cm:      cm,
+		im:      im,
+		metas:   []chunk.ChunkMeta{meta},
+		home:    home,
+		fsm:     fsm,
+	}
+
+	eng := query.NewWithRegistry(reg, nil)
+	q := query.Query{
+		Start: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		End:   time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC),
+	}
+
+	buckets := eng.ComputeSearchPageHistogram(ctx, q, 10)
+	var total int64
+	for _, b := range buckets {
+		total += b.Count
+	}
+	if total != int64(wantRecords) {
+		t.Fatalf("histogram total = %d, want %d (active pipeline chunk %s)", total, wantRecords, chunkID)
 	}
 }

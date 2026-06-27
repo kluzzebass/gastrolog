@@ -13,6 +13,7 @@ import (
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/collection"
 	"gastrolog/internal/pipeline/paths"
+	"gastrolog/internal/pipeline/segment"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
@@ -151,17 +152,23 @@ func (c *segmentPullClient) Pull(ctx context.Context, vaultID, segmentID glid.GL
 // path collection tries to RPC-pull from OriginNodeID (self) and fails with
 // "no remote holder".
 func copyLocalSegmentFile(vaultRoot string, segmentID glid.GLID, dest io.Writer) error {
-	for _, path := range []string{
-		paths.HeadSegment(vaultRoot, segmentID),
-		paths.CompletedSegment(vaultRoot, segmentID),
-		paths.PreHeadSegment(vaultRoot, segmentID),
+	for _, spec := range []struct {
+		path     string
+		minBytes int
+	}{
+		{paths.HeadSegment(vaultRoot, segmentID), 0},
+		{paths.CompletedSegment(vaultRoot, segmentID), 0},
+		{paths.PreHeadSegment(vaultRoot, segmentID), segment.HeaderSizeV1},
 	} {
-		data, err := os.ReadFile(filepath.Clean(path))
+		data, err := os.ReadFile(filepath.Clean(spec.path))
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue
 			}
 			return err
+		}
+		if len(data) < spec.minBytes {
+			continue
 		}
 		_, err = dest.Write(data)
 		return err

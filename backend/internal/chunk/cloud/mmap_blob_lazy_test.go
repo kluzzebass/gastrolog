@@ -108,3 +108,32 @@ func TestMappedBlobTryReleaseRecordTables(t *testing.T) {
 	}
 	blob.Release()
 }
+
+func TestReadRecordSurvivesBlobClose(t *testing.T) {
+	t.Parallel()
+	path := writeTestGLCB(t)
+
+	blob, err := OpenMappedBlob(path)
+	if err != nil {
+		t.Fatalf("OpenMappedBlob: %v", err)
+	}
+
+	rd, err := blob.Reader()
+	if err != nil {
+		t.Fatalf("Reader: %v", err)
+	}
+	rec, err := rd.ReadRecord(0)
+	if err != nil {
+		t.Fatalf("ReadRecord: %v", err)
+	}
+	if err := rd.Close(); err != nil {
+		t.Fatalf("reader Close: %v", err)
+	}
+	if err := blob.Close(); err != nil {
+		t.Fatalf("blob Close: %v", err)
+	}
+
+	if string(rec.Raw) != "log line" {
+		t.Fatalf("Raw after munmap = %q, want log line", rec.Raw)
+	}
+}

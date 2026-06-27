@@ -7,6 +7,8 @@ import (
 	"io"
 	"math"
 	"os"
+	"slices"
+	"strings"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/format"
@@ -244,7 +246,13 @@ func (rd *Reader) ReadRecord(pos uint32) (chunk.Record, error) {
 		if absOff < 0 || frameEnd > int64(len(rd.mmapData)) {
 			return chunk.Record{}, fmt.Errorf("record %d: frame [%d,%d) out of mmap bounds %d", pos, absOff, frameEnd, len(rd.mmapData))
 		}
-		return decodeFrame(rd.mmapData[absOff:frameEnd], rd.dict)
+		rec, err := decodeFrame(rd.mmapData[absOff:frameEnd], rd.dict)
+		if err != nil {
+			return chunk.Record{}, err
+		}
+		// Records may outlive this cursor (search batching, export queues).
+		// Detach payload bytes from the GLCB mmap before the mapping is evicted.
+		return cloneMmapRecord(rec), nil
 	}
 	buf := make([]byte, idx.Size)
 	if _, err := rd.file.ReadAt(buf, absOff); err != nil {
@@ -303,6 +311,20 @@ func decodeDictFromBuf(buf []byte, dictEntries uint32) (*chunk.StringDict, error
 		off += strLen
 	}
 	return dict, nil
+}
+
+func cloneMmapRecord(rec chunk.Record) chunk.Record {
+	if len(rec.Raw) > 0 {
+		rec.Raw = slices.Clone(rec.Raw)
+	}
+	if len(rec.Attrs) > 0 {
+		attrs := make(chunk.Attributes, len(rec.Attrs))
+		for k, v := range rec.Attrs {
+			attrs[strings.Clone(k)] = strings.Clone(v)
+		}
+		rec.Attrs = attrs
+	}
+	return rec
 }
 
 // decodeFrame decodes a record frame into a Record using the given dictionary.

@@ -443,6 +443,22 @@ func (o *Orchestrator) EmitChunkProgress(vault glid.GLID, meta chunk.ChunkMeta) 
 	})
 }
 
+// EmitChunkSealing marks a pipeline chunk entering the sealing phase after
+// SealOpenChunkManifest (rotation triggered, GLCB build pending). Logs
+// "chunk sealed" for operators and emits PROGRESS with sealing-state meta
+// so WatchChunks clients advance active → sealing without a spurious CREATED.
+func (o *Orchestrator) EmitChunkSealing(vault glid.GLID, meta chunk.ChunkMeta) {
+	o.logChunkSealed(vault, meta.ID)
+	m := meta
+	o.EmitChunkChange(ChunkChangeEvent{
+		VaultID:     vault,
+		ChunkID:     meta.ID,
+		Op:          ChunkChangeOpProgress,
+		Meta:        &m,
+		RecordCount: uint64(meta.RecordCount), //nolint:gosec // G115: record count bounded by rotation policy
+	})
+}
+
 // EmitChunkSealed emits a SEALED event with the final post-seal metadata.
 func (o *Orchestrator) EmitChunkSealed(vault glid.GLID, meta chunk.ChunkMeta) {
 	m := meta

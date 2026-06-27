@@ -89,9 +89,9 @@ func traceOutboundAppendEntries[K comparable](
 		return
 	}
 
-	level := slog.LevelWarn
-	if err == nil && total < 200*time.Millisecond {
-		level = slog.LevelInfo
+	level := slog.LevelDebug
+	if err != nil {
+		level = slog.LevelWarn
 	}
 
 	leaseTraceLog().Log(context.Background(), level, "outbound AppendEntries",
@@ -136,9 +136,9 @@ func traceInboundAppendEntries[K comparable](
 		return
 	}
 
-	level := slog.LevelWarn
-	if err == nil && total < 200*time.Millisecond {
-		level = slog.LevelInfo
+	level := slog.LevelDebug
+	if err != nil {
+		level = slog.LevelWarn
 	}
 
 	args := []any{

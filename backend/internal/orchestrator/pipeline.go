@@ -584,10 +584,22 @@ func (o *Orchestrator) reloadPipelineFromConfig(sys *system.System) error {
 // pipeline chunks from a built GLCB or, when absent, from the replicated manifest
 // (and local segment refs when manifest bounds are not yet populated).
 func (o *Orchestrator) overlayPipelineChunkMetaBounds(vaultID glid.GLID, m *chunk.ChunkMeta) {
-	if m == nil || chunkMetaBoundsComplete(m) {
+	if m == nil {
 		return
 	}
 	if m.State != chunk.ChunkStateActive && m.State != chunk.ChunkStateSealing {
+		return
+	}
+	// Active chunks grow continuously — refresh bounds from GLCB/manifest on
+	// every search/histogram pass instead of trusting a one-shot cache.
+	if m.State == chunk.ChunkStateActive {
+		if o.overlayPipelineChunkMetaBoundsFromGLCB(vaultID, m) {
+			return
+		}
+		o.overlayPipelineChunkMetaBoundsFromManifest(vaultID, m)
+		return
+	}
+	if chunkMetaBoundsComplete(m) {
 		return
 	}
 	if o.applyCachedPipelineChunkBounds(m) {

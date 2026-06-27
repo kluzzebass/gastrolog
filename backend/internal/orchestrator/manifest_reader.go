@@ -181,9 +181,7 @@ func (o *Orchestrator) IndexReader() manifest.IndexReader {
 // orchestratorIndexReader implements manifest.IndexReader by walking the
 // orchestrator's local vault instances to find the chunk's owning instance,
 // then dispatching to that instance's chunk manager (and index manager) for
-// the actual rank/pos lookup. Same fallback logic as the legacy
-// findIngestRank/findIngestPos helpers in internal/query/histogram.go,
-// just behind the manifest.IndexReader interface.
+// the actual rank/pos lookup.
 type orchestratorIndexReader struct {
 	o *Orchestrator
 }
@@ -205,6 +203,9 @@ func (r *orchestratorIndexReader) FindIngestRank(chunkID chunk.ChunkID, ts time.
 		if rank, found, err := im.FindIngestEntryIndex(chunkID, ts); err == nil && found {
 			return rank, true
 		}
+	}
+	if rank, ok := r.o.PipelineFindIngestRank(chunkID, ts); ok {
+		return rank, true
 	}
 	return 0, false
 }

@@ -190,6 +190,7 @@ func (ing *ingester) convert(cr logging.CapturedRecord) orchestrator.IngestMessa
 	return orchestrator.IngestMessage{
 		Attrs:      attrs,
 		Raw:        raw,
+		RawOwned:   true,
 		SourceTS:   cr.Time,
 		IngestTS:   time.Now(),
 		IngesterID: ing.id,

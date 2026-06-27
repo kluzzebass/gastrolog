@@ -843,15 +843,15 @@ func pullManagedFileStreamHandler(srv any, stream grpc.ServerStream) error {
 type segmentChunkWriter struct {
 	stream grpc.ServerStream
 	chunk  gastrologv1.PullSegmentChunk
-	buf    []byte
 }
 
 func (w *segmentChunkWriter) Write(p []byte) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
-	w.buf = append(w.buf[:0], p...)
-	w.chunk.Data = w.buf
+	// Own a copy per frame: io.Copy reuses its scratch buffer and the transport
+	// may retain the previous frame's Data slice until the send completes.
+	w.chunk.Data = append([]byte(nil), p...)
 	if err := w.stream.SendMsg(&w.chunk); err != nil {
 		return 0, err
 	}

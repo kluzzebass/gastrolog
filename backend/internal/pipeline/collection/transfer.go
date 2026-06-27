@@ -1,20 +1,56 @@
 package collection
 
 import (
+	"context"
 	"errors"
 	"io"
 	"os"
 	"path/filepath"
 
 	"gastrolog/internal/glid"
-	"gastrolog/internal/pipeline/segment"
 	"gastrolog/internal/pipeline/paths"
+	"gastrolog/internal/pipeline/segment"
 )
 
 var (
 	// ErrCorruptSegment is returned when a pre-head file fails verification.
 	ErrCorruptSegment = errors.New("segment checksum verification failed")
 )
+
+// preHeadPullSuffix marks an in-flight collect temp file under pre-head/.
+// The final segment filename must not exist until the pull completes: the
+// production PullClient reads local head/completed/pre-head before RPC and
+// would otherwise copy the empty truncated pre-head file to itself.
+const preHeadPullSuffix = ".pulling"
+
+// PullToPreHead streams a segment from pull directly into pre-head without
+// holding the full payload in an intermediate memory buffer.
+func PullToPreHead(ctx context.Context, vaultRoot string, vaultID, segmentID glid.GLID, pull PullClient) (string, error) {
+	if err := paths.EnsurePreHeadDir(vaultRoot); err != nil {
+		return "", err
+	}
+	finalPath := paths.PreHeadSegment(vaultRoot, segmentID)
+	tmpPath := finalPath + preHeadPullSuffix
+	f, err := os.OpenFile(filepath.Clean(tmpPath), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return "", err
+	}
+	pullErr := pull.Pull(ctx, vaultID, segmentID, f)
+	closeErr := f.Close()
+	if pullErr != nil {
+		_ = os.Remove(tmpPath)
+		return "", pullErr
+	}
+	if closeErr != nil {
+		_ = os.Remove(tmpPath)
+		return "", closeErr
+	}
+	if err := os.Rename(filepath.Clean(tmpPath), filepath.Clean(finalPath)); err != nil {
+		_ = os.Remove(tmpPath)
+		return "", err
+	}
+	return finalPath, nil
+}
 
 // ReceiveToPreHead writes pulled segment bytes into the vault pre-head area.
 func ReceiveToPreHead(vaultRoot string, segmentID glid.GLID, src io.Reader) (string, error) {

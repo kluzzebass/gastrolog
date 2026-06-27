@@ -193,6 +193,9 @@ type Manager struct {
 	// Aliased by OpenCursor, index TS lookups, and histogram paths.
 	glcbMapped sync.Map // chunk.ChunkID → *mappedGLCBEntry
 
+	glcbMapMu  sync.Mutex
+	glcbMapLRU []chunk.ChunkID // MRU first; ids with whole-file GLCB mmaps
+
 	glcbDecodeMu  sync.Mutex
 	glcbDecodeLRU []chunk.ChunkID // MRU first; ids with decode tables loaded
 

@@ -1,10 +1,7 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
-import { usePipelineBacklog } from "../../api/hooks/usePipelineBacklog";
-import { useConfig } from "../../api/hooks";
-import { idFromBytes } from "../../api/model/id";
-import { resolveNodeName, buildNodeNameMap } from "../../utils/nodeNames";
+import { usePipelineBacklog, useNodeRegistry } from "../../api/hooks";
+import { idFromBytes, type EntityID } from "../../api/model/id";
 import { protoToInstant, instantToDate, formatDateTimeShort } from "../../utils/temporal";
-import { Badge } from "../Badge";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
 
 interface PipelineBacklogViewProps {
@@ -38,14 +35,14 @@ function NodeSegmentTable({
   colB,
   rows,
   dark,
-  nodeNames,
+  nodeNameOf,
 }: Readonly<{
   title: string;
   colA: { label: string; get: (row: NodeRow) => number };
   colB: { label: string; get: (row: NodeRow) => number };
   rows: NodeRow[];
   dark: boolean;
-  nodeNames: Map<string, string>;
+  nodeNameOf: (id: EntityID) => string;
 }>) {
   const c = useThemeClass(dark);
   if (rows.length === 0) return null;
@@ -71,7 +68,7 @@ function NodeSegmentTable({
           </thead>
           <tbody>
             {rows.map((row) => {
-              const label = resolveNodeName(nodeNames, row.nodeId);
+              const label = nodeNameOf(row.nodeId);
               const a = colA.get(row);
               const b = colB.get(row);
               return (
@@ -103,7 +100,7 @@ function NodeSegmentTable({
 }
 
 interface NodeRow {
-  nodeId: string;
+  nodeId: EntityID;
   working: number;
   staged: number;
   head: number;
@@ -113,15 +110,10 @@ interface NodeRow {
 export function PipelineBacklogView({ vaultId, dark }: Readonly<PipelineBacklogViewProps>) {
   const c = useThemeClass(dark);
   const { data: backlog, isLoading } = usePipelineBacklog(vaultId);
-  const { data: config } = useConfig();
-  const nodeNames = buildNodeNameMap(config?.nodeConfigs ?? []);
+  const nodes = useNodeRegistry();
 
   if (isLoading) {
-    return (
-      <div className={`px-4 py-3 border-b ${c("border-ink-border", "border-light-border")}`}>
-        <LoadingPlaceholder dark={dark} />
-      </div>
-    );
+    return <LoadingPlaceholder dark={dark} />;
   }
   if (!backlog) return null;
 
@@ -133,43 +125,29 @@ export function PipelineBacklogView({ vaultId, dark }: Readonly<PipelineBacklogV
     ? formatDateTimeShort(instantToDate(protoToInstant(backlog.oldestEligibleLastIngest)))
     : "—";
 
-  const leaderId = backlog.vaultCtlLeaderNodeId
-    ? idFromBytes(backlog.vaultCtlLeaderNodeId)
-    : undefined;
-  const leaderLabel = leaderId
-    ? resolveNodeName(nodeNames, leaderId)
-    : null;
-
-  const nodeRows: NodeRow[] = backlog.nodeSegments.map((ns) => ({
-    nodeId: ns.nodeId.length > 0 ? idFromBytes(ns.nodeId) : "",
-    working: ns.workingSegments,
-    staged: ns.completedStagingSegments,
-    head: ns.headSegments,
-    preHead: ns.preHeadSegments,
-  })).filter((row) => row.nodeId.length > 0);
+  const nodeRows: NodeRow[] = backlog.nodeSegments.flatMap((ns) => {
+    if (ns.nodeId.length === 0) return [];
+    return [
+      {
+        nodeId: idFromBytes(ns.nodeId),
+        working: ns.workingSegments,
+        staged: ns.completedStagingSegments,
+        head: ns.headSegments,
+        preHead: ns.preHeadSegments,
+      },
+    ];
+  });
 
   const border = c("border-ink-border", "border-light-border");
   const rowBorder = c("border-ink-border-subtle", "border-light-border-subtle");
 
   return (
-    <div
-      className={`px-4 py-3 border-b ${c("border-ink-border bg-ink-well", "border-light-border bg-light-well")}`}
-    >
-      <div className="flex items-center gap-2 mb-3">
-        <span
-          className={`text-[0.75em] font-medium uppercase tracking-[0.15em] whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}
-        >
-          Pipeline backlog
-        </span>
-        {backlog.connectedNodeIsVaultCtlLeader && (
-          <Badge variant="info" dark={dark}>planner here</Badge>
-        )}
-        {leaderLabel && !backlog.connectedNodeIsVaultCtlLeader && (
-          <Badge variant="muted" dark={dark} title="vault-ctl leader">
-            planner: {leaderLabel}
-          </Badge>
-        )}
-      </div>
+    <section className="flex flex-col gap-4">
+      <h3
+        className={`text-[0.75em] font-medium uppercase tracking-[0.15em] whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}
+      >
+        Pipeline backlog
+      </h3>
 
       <div className={`rounded-lg border overflow-x-auto ${border}`}>
         <table className="w-full border-collapse">
@@ -196,14 +174,14 @@ export function PipelineBacklogView({ vaultId, dark }: Readonly<PipelineBacklogV
         </table>
       </div>
 
-      <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
         <NodeSegmentTable
           title="Segmentation (origins)"
           colA={{ label: "Working", get: (r) => r.working }}
           colB={{ label: "Staged", get: (r) => r.staged }}
           rows={nodeRows}
           dark={dark}
-          nodeNames={nodeNames}
+          nodeNameOf={nodes.nameOf}
         />
 
         <NodeSegmentTable
@@ -212,9 +190,9 @@ export function PipelineBacklogView({ vaultId, dark }: Readonly<PipelineBacklogV
           colB={{ label: "Pre-head", get: (r) => r.preHead }}
           rows={nodeRows}
           dark={dark}
-          nodeNames={nodeNames}
+          nodeNameOf={nodes.nameOf}
         />
       </div>
-    </div>
+    </section>
   );
 }

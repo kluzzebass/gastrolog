@@ -15,6 +15,7 @@ import { leaderNodeId, followerNodeIds } from "../../utils/placement";
 import { Badge } from "../Badge";
 import { CogIcon } from "../icons";
 import { ExpandableCard } from "../settings/ExpandableCard";
+import { LoadingPlaceholder } from "../LoadingPlaceholder";
 import { CrossLinkBadge } from "./CrossLinkBadge";
 import { PipelineBacklogView } from "./PipelineBacklogView";
 
@@ -99,8 +100,11 @@ export function VaultCard({
         </span>
       }
     >
-      <PipelineBacklogView vaultId={vault.id} dark={dark} />
-      <ChunkList vaultId={vault.id} dark={dark} />
+      <div className="flex flex-col gap-4 pt-2">
+        <VaultLeaderSummary vaultId={vault.id} vaultTypeLabel={vault.typeLabel} dark={dark} />
+        <PipelineBacklogView vaultId={vault.id} dark={dark} />
+        <ChunkList vaultId={vault.id} dark={dark} />
+      </div>
     </ExpandableCard>
   );
 }
@@ -169,6 +173,61 @@ function followerDisplayName(
   );
 }
 
+function VaultLeaderSummary({
+  vaultId,
+  vaultTypeLabel,
+  dark,
+}: Readonly<{ vaultId: string; vaultTypeLabel: string; dark: boolean }>) {
+  const c = useThemeClass(dark);
+  const { data: config, isLoading } = useConfig();
+
+  const sectionTitle = (
+    <h3
+      className={`text-[0.75em] font-medium uppercase tracking-[0.15em] whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}
+    >
+      Topology
+    </h3>
+  );
+
+  const panelClass = `rounded-lg border px-4 py-3 ${c("border-ink-border bg-ink-well", "border-light-border bg-light-well")}`;
+
+  if (isLoading || !config) {
+    return (
+      <section className="flex flex-col gap-4">
+        {sectionTitle}
+        <div className={panelClass}>
+          <LoadingPlaceholder dark={dark} />
+        </div>
+      </section>
+    );
+  }
+
+  const nscs = config.nodeStorageConfigs ?? [];
+  const nodeNameMap = buildNodeNameMap(config.nodeConfigs ?? []);
+  const vaultCfg = config.vaults.find((v) => encode(v.id) === vaultId);
+
+  const rf = vaultCfg?.replicationFactor || 1;
+  const leaderId = vaultCfg ? leaderNodeId(vaultCfg, nscs) : "";
+  const leaderName = leaderId ? resolveNodeName(nodeNameMap, leaderId) : "";
+  const followerIds = vaultCfg ? followerNodeIds(vaultCfg, nscs) : [];
+
+  return (
+    <section className="flex flex-col gap-4">
+      {sectionTitle}
+      <VaultPlacementSummary
+        leaderName={leaderName}
+        followerIds={followerIds}
+        rf={rf}
+        storageClass={vaultCfg?.storageClass ?? 0}
+        jsonlPath={vaultTypeLabel === "jsonl" ? vaultCfg?.path : undefined}
+        nscs={nscs}
+        nodeNameMap={nodeNameMap}
+        dark={dark}
+      />
+    </section>
+  );
+}
+
 function VaultPlacementSummary({
   leaderName,
   followerIds,
@@ -194,7 +253,7 @@ function VaultPlacementSummary({
 
   return (
     <div
-      className={`rounded-lg border px-4 py-3 mb-3 ${c("border-ink-border bg-ink-well", "border-light-border bg-light-well")}`}
+      className={`rounded-lg border px-4 py-3 ${c("border-ink-border bg-ink-well", "border-light-border bg-light-well")}`}
     >
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[0.85em]">
         <div className="flex items-baseline gap-2">
@@ -264,34 +323,6 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
   // Node name resolution — used by both local and remote vault headers.
   const nodeNameMap = buildNodeNameMap(config?.nodeConfigs ?? []);
 
-  // Identify remote vaults (in vault config but no local chunks).
-  const remoteVaultInfo = (() => {
-    if (vaultMatches.length === 0) return [];
-    const localVaultIds = new Set(chunkGroups.keys());
-    // Cloud-backed vaults wire as VAULT_TYPE_FILE with cloud_service_id set,
-    // so derive the display label from cloudServiceId presence rather than
-    // the raw enum.
-    const vaultTypeMap: Record<number, string> = { 1: "memory", 2: "file", 4: "jsonl" };
-    const vaultTypeLabel = (v: { type: number; cloudServiceId: Uint8Array }): string => {
-      const base = vaultTypeMap[v.type] ?? "unknown";
-      return base === "file" && v.cloudServiceId.length > 0 ? "cloud" : base;
-    };
-    const nscs = config?.nodeStorageConfigs ?? [];
-    return vaultMatches
-      .filter((v: { id: Uint8Array }) => !localVaultIds.has(encode(v.id)))
-      .map((v: { id: Uint8Array; type: number; cloudServiceId: Uint8Array; replicationFactor: number; storageClass: number; placements: { storageId: Uint8Array; leader: boolean }[] }) => {
-        const pnId = leaderNodeId(v, nscs);
-        return {
-          id: encode(v.id),
-          type: vaultTypeLabel(v),
-          nodeName: pnId ? resolveNodeName(nodeNameMap, pnId) : "",
-          rf: v.replicationFactor || 1,
-          followerNodeIds: followerNodeIds(v, nscs),
-          storageClass: v.storageClass,
-        };
-      });
-  })();
-
   const sortChunks = (arr: ChunkMeta[]) =>
     arr.toSorted((a, b) => {
       const aTs = a.ingestStart ?? a.writeStart;
@@ -348,36 +379,7 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
   });
 
   return (
-    <div className="mt-4 px-4 pb-4">
-      {vaultIds.map((vId: string) => {
-        const group = chunkGroups.get(vId);
-        const remote = remoteVaultInfo.find((rv: { id: string }) => rv.id === vId);
-        const vaultCfg = config?.vaults.find((v) => encode(v.id) === vId);
-        const rf = vaultCfg?.replicationFactor || remote?.rf || 1;
-        const followerIds = vaultCfg
-          ? followerNodeIds(vaultCfg, nscs)
-          : remote?.followerNodeIds ?? [];
-        const leaderId = vaultCfg ? leaderNodeId(vaultCfg, nscs) : "";
-        const leaderName = leaderId
-          ? resolveNodeName(nodeNameMap, leaderId)
-          : remote?.nodeName ?? "";
-        const storageClass = vaultCfg?.storageClass ?? remote?.storageClass ?? 0;
-
-        return (
-          <VaultPlacementSummary
-            key={vId}
-            leaderName={leaderName}
-            followerIds={followerIds}
-            rf={rf}
-            storageClass={storageClass}
-            jsonlPath={group?.vaultType === "jsonl" ? vaultCfg?.path : undefined}
-            nscs={nscs}
-            nodeNameMap={nodeNameMap}
-            dark={dark}
-          />
-        );
-      })}
-
+    <div>
       <div className="mb-3 flex items-center justify-between gap-3">
         <h3
           className={`text-[0.75em] font-medium uppercase tracking-[0.15em] ${c("text-text-muted", "text-light-text-muted")}`}

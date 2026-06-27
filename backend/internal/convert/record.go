@@ -5,8 +5,11 @@
 package convert
 
 import (
-	"gastrolog/internal/glid"
 	"maps"
+	"slices"
+	"strings"
+
+	"gastrolog/internal/glid"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
@@ -27,7 +30,7 @@ import (
 // ExportToRecord), and zero timestamps become nil proto fields.
 func RecordToExport(rec chunk.Record) *gastrologv1.ExportRecord {
 	er := &gastrologv1.ExportRecord{
-		Raw:        rec.Raw,
+		Raw:        slices.Clone(rec.Raw),
 		VaultId:    rec.VaultID.ToProto(),
 		ChunkId:    glid.GLID(rec.Ref.ChunkID).ToProto(),
 		Pos:        rec.Ref.Pos,
@@ -48,11 +51,13 @@ func RecordToExport(rec chunk.Record) *gastrologv1.ExportRecord {
 		// Attrs are proto3 map<string,string>; invalid UTF-8 would fail
 		// marshal. Ingesters normally produce clean attrs, but raw
 		// message bytes sometimes leak in — sanitize at the wire
-		// boundary. safeutf8.Attrs returns the input unchanged when
-		// already clean; we then copy so the export is detached from
-		// the source record.
-		er.Attrs = make(map[string]string, len(rec.Attrs))
-		maps.Copy(er.Attrs, safeutf8.Attrs(rec.Attrs))
+		// boundary. Clone every key/value so the export is detached
+		// from mmap-backed dict strings in the source record.
+		sanitized := safeutf8.Attrs(rec.Attrs)
+		er.Attrs = make(map[string]string, len(sanitized))
+		for k, v := range sanitized {
+			er.Attrs[strings.Clone(k)] = strings.Clone(v)
+		}
 	}
 	return er
 }

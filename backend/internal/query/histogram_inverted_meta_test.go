@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/glid"
 )
 
 // TestChunkBucketTotals_InvertedRangeReturnsNil guards against the cluster
@@ -15,7 +16,7 @@ func TestChunkBucketTotals_InvertedRangeReturnsNil(t *testing.T) {
 	t.Parallel()
 
 	totals := chunkBucketTotals(
-		nil, nil,
+		nil, glid.Nil, nil, nil,
 		chunk.ChunkMeta{Sealed: true},
 		time.Unix(0, 0),
 		time.Second,
@@ -57,7 +58,7 @@ func TestTimechartChunkGroups_InvertedMetaIsNoOp(t *testing.T) {
 			t.Fatalf("timechartChunkGroups panicked on inverted meta: %v", r)
 		}
 	}()
-	timechartChunkGroups(nil, nil, meta, start, bucketWidth, numBuckets, 100, "level", groupCounts, 1000)
+	timechartChunkGroups(nil, glid.Nil, nil, nil, meta, start, bucketWidth, numBuckets, 100, "level", groupCounts, 1000)
 
 	for b, m := range groupCounts {
 		if len(m) != 0 {

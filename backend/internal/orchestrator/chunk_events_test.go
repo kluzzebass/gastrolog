@@ -57,6 +57,33 @@ func TestChunkBusEmitsCreated(t *testing.T) {
 	}
 }
 
+// TestChunkBusEmitsSealing covers the pipeline manifest-seal path: PROGRESS
+// with sealing-state meta (not CREATED) so the inspector advances active →
+// sealing without looking like a second chunk was opened.
+func TestChunkBusEmitsSealing(t *testing.T) {
+	t.Parallel()
+	orch := mustNewTestOrch(t, orchestrator.Config{})
+	bus := orch.ChunkBus()
+	id, ch, _ := bus.Subscribe()
+	defer bus.Unsubscribe(id)
+
+	vault := glid.New()
+	chunkID := chunk.NewChunkID()
+	meta := chunk.ChunkMeta{ID: chunkID, RecordCount: 500, State: chunk.ChunkStateSealing}
+	orch.EmitChunkSealing(vault, meta)
+
+	got := receiveChunkEvent(t, ch)
+	if got.Op != orchestrator.ChunkChangeOpProgress {
+		t.Errorf("Op = %v, want Progress", got.Op)
+	}
+	if got.Meta == nil || got.Meta.State != chunk.ChunkStateSealing {
+		t.Errorf("Meta = %+v, want sealing state", got.Meta)
+	}
+	if got.RecordCount != 500 {
+		t.Errorf("RecordCount = %d, want 500", got.RecordCount)
+	}
+}
+
 // TestChunkBusEmitsSealedAndDeleted covers the two ops the inspector
 // cares about most: SEALED carries the post-seal Meta so the client can
 // flip the sealed flag in place; DELETED carries no Meta (subscriber

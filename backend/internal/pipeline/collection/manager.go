@@ -1,7 +1,6 @@
 package collection
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"log/slog"
@@ -131,11 +130,7 @@ func (v *vaultCollect) noteHead(segmentID glid.GLID) {
 }
 
 func (v *vaultCollect) collectOne(ctx context.Context, ref AssignedSegment) error {
-	var buf bytes.Buffer
-	if err := v.pull.Pull(ctx, ref.VaultID, ref.SegmentID, &buf); err != nil {
-		return err
-	}
-	prePath, err := ReceiveToPreHead(v.root, ref.SegmentID, &buf)
+	prePath, err := PullToPreHead(ctx, v.root, ref.VaultID, ref.SegmentID, v.pull)
 	if err != nil {
 		return err
 	}

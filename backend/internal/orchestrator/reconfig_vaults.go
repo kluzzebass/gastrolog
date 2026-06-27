@@ -1496,7 +1496,7 @@ func wireVaultFSMPipelineChunkEvents(o *Orchestrator, vaultID glid.GLID, fsm *va
 		if m == nil {
 			return
 		}
-		o.EmitChunkCreated(vaultID, openChunkManifestToChunkMeta(m, chunk.ChunkStateSealing))
+		o.EmitChunkSealing(vaultID, openChunkManifestToChunkMeta(m, chunk.ChunkStateSealing))
 	})
 	fsm.AddOnSeal(func(e vaultctlfsm.ManifestEntry) {
 		if e.State != chunk.ChunkStateSealed {

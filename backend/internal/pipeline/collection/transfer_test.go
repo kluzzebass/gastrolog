@@ -2,7 +2,9 @@ package collection_test
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -155,5 +157,82 @@ func TestPreHeadDoesNotSatisfyHeadInvariant(t *testing.T) {
 	}
 	if len(headEntries) != 0 {
 		t.Fatal("segment in pre-head must not appear in head")
+	}
+}
+
+type stubPull struct {
+	data []byte
+	err  error
+}
+
+func (p stubPull) Pull(_ context.Context, _, _ glid.GLID, dest io.Writer) error {
+	if p.err != nil {
+		return p.err
+	}
+	_, err := io.Copy(dest, bytes.NewReader(p.data))
+	return err
+}
+
+func TestPullToPreHeadStreamsWithoutBuffer(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	segID := glid.New()
+	data := writeSegmentBytes(t, vaultID, segID, "streamed segment")
+	root := t.TempDir()
+
+	path, err := collection.PullToPreHead(context.Background(), root, vaultID, segID, stubPull{data: data})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, data) {
+		t.Fatalf("pre-head bytes mismatch: got %d want %d", len(got), len(data))
+	}
+}
+
+// localFirstPull mimics segmentPullClient: read local layout before remote.
+type localFirstPull struct {
+	root string
+	seg  glid.GLID
+	remote stubPull
+}
+
+func (p localFirstPull) Pull(_ context.Context, _, segmentID glid.GLID, dest io.Writer) error {
+	for _, path := range []string{
+		paths.PreHeadSegment(p.root, segmentID),
+	} {
+		data, err := os.ReadFile(path)
+		if err == nil && len(data) > 0 {
+			_, werr := dest.Write(data)
+			return werr
+		}
+	}
+	return p.remote.Pull(context.Background(), glid.New(), segmentID, dest)
+}
+
+func TestPullToPreHeadDoesNotCopyEmptyPreHeadPlaceholder(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	segID := glid.New()
+	data := writeSegmentBytes(t, vaultID, segID, "remote segment")
+	root := t.TempDir()
+
+	path, err := collection.PullToPreHead(context.Background(), root, vaultID, segID, localFirstPull{
+		root:   root,
+		seg:    segID,
+		remote: stubPull{data: data},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, data) {
+		t.Fatalf("pre-head bytes mismatch: got %d want %d", len(got), len(data))
 	}
 }

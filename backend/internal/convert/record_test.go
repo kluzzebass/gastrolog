@@ -266,6 +266,20 @@ func TestRecordToExport_AttrsCopied(t *testing.T) {
 	}
 }
 
+func TestRecordToExport_RawCopied(t *testing.T) {
+	raw := []byte("mmap-backed payload")
+	rec := chunk.Record{Raw: raw}
+	er := RecordToExport(rec)
+
+	raw[0] = 'X'
+	if er.Raw[0] == 'X' {
+		t.Fatal("RecordToExport must copy Raw, not share the backing array")
+	}
+	if string(er.Raw) != "mmap-backed payload" {
+		t.Fatalf("Raw = %q", er.Raw)
+	}
+}
+
 func TestExportToRecord_AttrsCopied(t *testing.T) {
 	er := &gastrologv1.ExportRecord{
 		Raw:   []byte("test"),

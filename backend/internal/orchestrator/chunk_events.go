@@ -27,6 +27,13 @@ func (o *Orchestrator) logChunkExpunged(vaultID glid.GLID, chunkID chunk.ChunkID
 	o.vaultOpsLogger.Info("chunk expunged", "vault", vaultID, "chunk", chunkID, "reason", reason)
 }
 
+func (o *Orchestrator) logChunkSealed(vaultID glid.GLID, chunkID chunk.ChunkID) {
+	if o == nil || o.vaultOpsLogger == nil {
+		return
+	}
+	o.vaultOpsLogger.Info("chunk sealed", "vault", vaultID, "chunk", chunkID)
+}
+
 // manifestEntryToChunkMeta builds a chunk.ChunkMeta from the FSM's
 // authoritative ManifestEntry. Used by the vault-ctl FSM callbacks
 // (OnCreate / OnSeal / OnUpload) to emit ChunkChangeEvents that carry

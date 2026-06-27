@@ -288,7 +288,7 @@ func (e *Engine) timechartFastPath(selectedVaults []glid.GLID, start time.Time, 
 			if !meta.IngestStart.IsZero() && !meta.IngestStart.Before(end) {
 				continue
 			}
-			timechartChunkByIngestTS(cm, ir, meta, start, bucketWidth, numBuckets, counts, cloudFlags)
+			timechartChunkByIngestTS(e, vaultID, cm, ir, meta, start, bucketWidth, numBuckets, counts, cloudFlags)
 		}
 	}
 }
@@ -316,7 +316,7 @@ func (e *Engine) timechartCloudCounts(selectedVaults []glid.GLID, start, end tim
 				continue
 			}
 			found = true
-			timechartChunkByIngestTS(cm, ir, meta, start, bucketWidth, numBuckets, cloudCounts, cloudFlags)
+			timechartChunkByIngestTS(e, vaultID, cm, ir, meta, start, bucketWidth, numBuckets, cloudCounts, cloudFlags)
 		}
 	}
 	return found
@@ -348,7 +348,7 @@ func (e *Engine) timechartLocalCounts(selectedVaults []glid.GLID, start, end tim
 			if sealedOnly && !meta.Sealed && !meta.IngestTSMonotonic {
 				continue
 			}
-			timechartChunkByIngestTS(cm, ir, meta, start, bucketWidth, numBuckets, counts, nil)
+			timechartChunkByIngestTS(e, vaultID, cm, ir, meta, start, bucketWidth, numBuckets, counts, nil)
 		}
 	}
 }
@@ -376,7 +376,7 @@ func (e *Engine) timechartActiveNonMonotonic(selectedVaults []glid.GLID, start, 
 			if !activeNonMonoEligible(meta, start, end) {
 				continue
 			}
-			scanActiveNonMono(cm, meta, startNanos, bucketNanos, numBuckets, hasGroupBy, groupField, counts, groupCounts)
+			scanActiveNonMono(e, vaultID, cm, meta, startNanos, bucketNanos, numBuckets, hasGroupBy, groupField, counts, groupCounts)
 		}
 	}
 }
@@ -397,9 +397,9 @@ func activeNonMonoEligible(meta chunk.ChunkMeta, start, end time.Time) bool {
 	return true
 }
 
-func scanActiveNonMono(cm chunk.ChunkManager, meta chunk.ChunkMeta, startNanos, bucketNanos int64, numBuckets int, hasGroupBy bool, groupField string, counts []int64, groupCounts []map[string]int64) {
+func scanActiveNonMono(e *Engine, vaultID glid.GLID, cm chunk.ChunkManager, meta chunk.ChunkMeta, startNanos, bucketNanos int64, numBuckets int, hasGroupBy bool, groupField string, counts []int64, groupCounts []map[string]int64) {
 	if hasGroupBy {
-		_ = cm.ScanActiveByIngestTS(meta.ID, func(ingestTS time.Time, attrs chunk.Attributes) bool {
+		e.scanActiveChunkByIngestTS(vaultID, meta, func(ingestTS time.Time, attrs chunk.Attributes) bool {
 			b, ok := bucketForTS(ingestTS.UnixNano(), startNanos, bucketNanos, numBuckets)
 			if !ok {
 				return b >= 0 // skip-this-record vs stop-iteration
@@ -417,7 +417,7 @@ func scanActiveNonMono(cm chunk.ChunkManager, meta chunk.ChunkMeta, startNanos, 
 		})
 		return
 	}
-	_ = cm.ScanActiveIngestTS(meta.ID, func(tsNanos int64) bool {
+	e.scanActiveChunkIngestTS(vaultID, meta, func(tsNanos int64) bool {
 		b, ok := bucketForTS(tsNanos, startNanos, bucketNanos, numBuckets)
 		if !ok {
 			return b >= 0
@@ -460,14 +460,15 @@ func (e *Engine) timechartAttrScanGroups(selectedVaults []glid.GLID, start, end 
 			break
 		}
 		budget := maxAttrScanSamples - samplesUsed
-		used := timechartChunkGroups(c.cm, ir, c.meta, start, bucketWidth, numBuckets, samplePerBucket, groupField, groupCounts, budget)
+		used := timechartChunkGroups(e, c.vaultID, c.cm, ir, c.meta, start, bucketWidth, numBuckets, samplePerBucket, groupField, groupCounts, budget)
 		samplesUsed += used
 	}
 }
 
 type attrScanCandidate struct {
-	cm   chunk.ChunkManager
-	meta chunk.ChunkMeta
+	vaultID glid.GLID
+	cm      chunk.ChunkManager
+	meta    chunk.ChunkMeta
 }
 
 func (e *Engine) attrScanGroupCandidates(selectedVaults []glid.GLID, start, end time.Time) []attrScanCandidate {
@@ -483,7 +484,7 @@ func (e *Engine) attrScanGroupCandidates(selectedVaults []glid.GLID, start, end 
 			if !attrScanGroupCandidateOK(cm, meta, start, end) {
 				continue
 			}
-			candidates = append(candidates, attrScanCandidate{cm: cm, meta: meta})
+			candidates = append(candidates, attrScanCandidate{vaultID: vaultID, cm: cm, meta: meta})
 		}
 	}
 	slices.SortFunc(candidates, func(a, b attrScanCandidate) int {
@@ -545,6 +546,8 @@ func attrScanGroupCandidateOK(cm chunk.ChunkManager, meta chunk.ChunkMeta, start
 // group proportions to the exact bucket count (from binary search).
 // Returns the number of ScanAttrs samples consumed (for global budgeting).
 func timechartChunkGroups(
+	e *Engine,
+	vaultID glid.GLID,
 	cm chunk.ChunkManager,
 	ir manifest.IndexReader,
 	meta chunk.ChunkMeta,
@@ -591,19 +594,21 @@ func timechartChunkGroups(
 	// is effectively a random slice of the chunk regardless. See
 	// gastrolog-66b7x.
 	if !meta.IngestTSMonotonic {
-		nonMonotonicChunkGroups(cm, ir, meta, start, bucketWidth, firstBucket, lastBucket, groupField, groupCounts)
+		nonMonotonicChunkGroups(e, vaultID, cm, ir, meta, start, bucketWidth, firstBucket, lastBucket, groupField, groupCounts)
 		return min(sampleBudget, 1000)
 	}
 
 	const wideSpanBuckets = 8
 	if lastBucket-firstBucket+1 > wideSpanBuckets {
-		return timechartChunkGroupsWideSpan(cm, ir, meta, start, bucketWidth, firstBucket, lastBucket, sampleSize, groupField, groupCounts, sampleBudget)
+		return timechartChunkGroupsWideSpan(e, vaultID, cm, ir, meta, start, bucketWidth, firstBucket, lastBucket, sampleSize, groupField, groupCounts, sampleBudget)
 	}
 
-	return timechartChunkGroupsPerBucket(cm, ir, meta, start, bucketWidth, firstBucket, lastBucket, sampleSize, groupField, groupCounts, sampleBudget)
+	return timechartChunkGroupsPerBucket(e, vaultID, cm, ir, meta, start, bucketWidth, firstBucket, lastBucket, sampleSize, groupField, groupCounts, sampleBudget)
 }
 
 func timechartChunkGroupsPerBucket(
+	e *Engine,
+	vaultID glid.GLID,
 	cm chunk.ChunkManager,
 	ir manifest.IndexReader,
 	meta chunk.ChunkMeta,
@@ -689,6 +694,8 @@ func timechartChunkGroupsPerBucket(
 // rank arithmetic. Avoids O(buckets × sampleSize) ScanAttrs on short windows
 // where dozens of buckets overlap the same sealing chunk.
 func timechartChunkGroupsWideSpan(
+	e *Engine,
+	vaultID glid.GLID,
 	cm chunk.ChunkManager,
 	ir manifest.IndexReader,
 	meta chunk.ChunkMeta,
@@ -742,7 +749,7 @@ func timechartChunkGroupsWideSpan(
 		return 0
 	}
 
-	bucketTotals := chunkBucketTotals(cm, ir, meta, start, bucketWidth, firstBucket, lastBucket)
+	bucketTotals := chunkBucketTotals(e, vaultID, cm, ir, meta, start, bucketWidth, firstBucket, lastBucket)
 	for i, total := range bucketTotals {
 		if total == 0 {
 			continue
@@ -894,6 +901,8 @@ func timechartToTable(groupField string, start time.Time, bucketWidth time.Durat
 // any chunk the FSM exposes; transient lookup failures are real errors,
 // not histogram artifacts.
 func timechartChunkByIngestTS(
+	e *Engine,
+	vaultID glid.GLID,
 	cm chunk.ChunkManager,
 	ir manifest.IndexReader,
 	meta chunk.ChunkMeta,
@@ -945,6 +954,13 @@ func timechartChunkByIngestTS(
 	// "cloud data here" flag without any cloud data — exactly the false
 	// positive that surfaced after the non-monotonic clamp landed.
 
+	// Pipeline open/sealing chunks are not in m.active — always scan via the
+	// manifest cursor. File/memory vault active heads use the paths below.
+	if !meta.Sealed && pipelineOpenChunk(meta, cm) {
+		bucketizeActiveChunk(e, vaultID, meta, start, bucketWidth, firstBucket, lastBucket, counts, cloudFlags, meta.CloudBacked)
+		return
+	}
+
 	// Non-monotonic ACTIVE chunks need a full B+ tree iteration: physical
 	// position doesn't match IngestTS-sorted rank, and we can't get rank
 	// from the in-memory B+ tree without iterating. Sealed non-monotonic
@@ -953,7 +969,11 @@ func timechartChunkByIngestTS(
 	// the fast O(buckets × log N) path because position == rank. See
 	// gastrolog-66b7x.
 	if !meta.Sealed && !meta.IngestTSMonotonic {
-		bucketizeActiveChunk(cm, meta, start, bucketWidth, firstBucket, lastBucket, counts, cloudFlags, meta.CloudBacked)
+		bucketizeActiveChunk(e, vaultID, meta, start, bucketWidth, firstBucket, lastBucket, counts, cloudFlags, meta.CloudBacked)
+		return
+	}
+	if activeMonotonicNeedsBucketize(ir, meta) {
+		bucketizeActiveChunk(e, vaultID, meta, start, bucketWidth, firstBucket, lastBucket, counts, cloudFlags, meta.CloudBacked)
 		return
 	}
 
@@ -964,6 +984,23 @@ func timechartChunkByIngestTS(
 	timechartChunkByIndex(ir, meta, start, bucketWidth, firstBucket, lastBucket, counts, cloudFlags)
 }
 
+// activeMonotonicNeedsBucketize reports whether a monotonic active chunk lacks
+// a usable ingest rank probe and must be walked record-by-record.
+func activeMonotonicNeedsBucketize(ir manifest.IndexReader, meta chunk.ChunkMeta) bool {
+	if meta.Sealed || !meta.IngestTSMonotonic {
+		return false
+	}
+	probeTS := meta.IngestStart
+	if probeTS.IsZero() {
+		probeTS = meta.IngestEnd
+	}
+	if probeTS.IsZero() {
+		return true
+	}
+	_, ok := ir.FindIngestRank(meta.ID, probeTS)
+	return !ok
+}
+
 // bucketizeActiveChunk iterates the active chunk's records once and
 // increments the corresponding bucket for each record. Required for
 // non-monotonic active chunks (downstream destinations receiving streamed
@@ -971,7 +1008,8 @@ func timechartChunkByIngestTS(
 // there because cm.FindIngestStartPosition returns physical position,
 // not rank. See gastrolog-66b7x.
 func bucketizeActiveChunk(
-	cm chunk.ChunkManager,
+	e *Engine,
+	vaultID glid.GLID,
 	meta chunk.ChunkMeta,
 	start time.Time,
 	bucketWidth time.Duration,
@@ -985,7 +1023,7 @@ func bucketizeActiveChunk(
 	if bucketNanos <= 0 {
 		return
 	}
-	_ = cm.ScanActiveIngestTS(meta.ID, func(tsNanos int64) bool {
+	e.scanActiveChunkIngestTS(vaultID, meta, func(tsNanos int64) bool {
 		if tsNanos < startNanos {
 			return true
 		}
@@ -1011,6 +1049,8 @@ func bucketizeActiveChunk(
 // proportions to each bucket. Cost: O(sampleCap + buckets × log N) instead
 // of O(buckets × sampleCap). See gastrolog-66b7x.
 func nonMonotonicChunkGroups(
+	e *Engine,
+	vaultID glid.GLID,
 	cm chunk.ChunkManager,
 	ir manifest.IndexReader,
 	meta chunk.ChunkMeta,
@@ -1041,7 +1081,7 @@ func nonMonotonicChunkGroups(
 	for k, v := range levelCounts {
 		ratios[k] = float64(v) / float64(sampled)
 	}
-	bucketTotals := chunkBucketTotals(cm, ir, meta, start, bucketWidth, firstBucket, lastBucket)
+	bucketTotals := chunkBucketTotals(e, vaultID, cm, ir, meta, start, bucketWidth, firstBucket, lastBucket)
 	for b := firstBucket; b <= lastBucket; b++ {
 		total := bucketTotals[b-firstBucket]
 		if total == 0 {
@@ -1058,6 +1098,8 @@ func nonMonotonicChunkGroups(
 // rank cannot be computed via random access) and rank arithmetic on the
 // on-disk TS index for sealed chunks. See gastrolog-66b7x.
 func chunkBucketTotals(
+	e *Engine,
+	vaultID glid.GLID,
 	cm chunk.ChunkManager,
 	ir manifest.IndexReader,
 	meta chunk.ChunkMeta,
@@ -1072,7 +1114,7 @@ func chunkBucketTotals(
 	if !meta.Sealed {
 		startNanos := start.UnixNano()
 		bucketNanos := bucketWidth.Nanoseconds()
-		_ = cm.ScanActiveIngestTS(meta.ID, func(tsNanos int64) bool {
+		e.scanActiveChunkIngestTS(vaultID, meta, func(tsNanos int64) bool {
 			if tsNanos < startNanos {
 				return true
 			}

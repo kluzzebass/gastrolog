@@ -231,6 +231,10 @@ func (r *searchReadyRegistry) OpenPipelineChunkCursor(vaultID glid.GLID, chunkID
 	return r.o.OpenPipelineChunkCursor(vaultID, chunkID)
 }
 
+func (r *searchReadyRegistry) ScanPipelineChunkIngestTS(vaultID glid.GLID, chunkID chunk.ChunkID, cb func(tsNanos int64) bool) error {
+	return r.o.ScanPipelineChunkIngestTS(vaultID, chunkID, cb)
+}
+
 func (r *searchReadyRegistry) IndexReader() manifest.IndexReader { return r.o.IndexReader() }
 
 // LeaderVaultQueryEngine returns a query engine that only searches leader
@@ -320,6 +324,10 @@ func (r *localVaultRegistry) OpenPipelineChunkCursor(vaultID glid.GLID, chunkID 
 	return r.o.OpenPipelineChunkCursor(vaultID, chunkID)
 }
 
+func (r *localVaultRegistry) ScanPipelineChunkIngestTS(vaultID glid.GLID, chunkID chunk.ChunkID, cb func(tsNanos int64) bool) error {
+	return r.o.ScanPipelineChunkIngestTS(vaultID, chunkID, cb)
+}
+
 func (r *localVaultRegistry) IndexReader() manifest.IndexReader { return r.o.IndexReader() }
 
 // leaderVaultRegistry provides a flat view of all leader vaults. Each
@@ -388,6 +396,10 @@ func (r *leaderVaultRegistry) SearchChunkMetas(vaultID glid.GLID) []chunk.ChunkM
 
 func (r *leaderVaultRegistry) OpenPipelineChunkCursor(vaultID glid.GLID, chunkID chunk.ChunkID) (chunk.RecordCursor, error) {
 	return r.o.OpenPipelineChunkCursor(vaultID, chunkID)
+}
+
+func (r *leaderVaultRegistry) ScanPipelineChunkIngestTS(vaultID glid.GLID, chunkID chunk.ChunkID, cb func(tsNanos int64) bool) error {
+	return r.o.ScanPipelineChunkIngestTS(vaultID, chunkID, cb)
 }
 
 func (r *leaderVaultRegistry) IndexReader() manifest.IndexReader { return r.o.IndexReader() }
@@ -460,6 +472,13 @@ func (r *singleVaultRegistry) OpenPipelineChunkCursor(vaultID glid.GLID, chunkID
 		return r.o.OpenPipelineChunkCursor(vaultID, chunkID)
 	}
 	return nil, chunk.ErrChunkNotFound
+}
+
+func (r *singleVaultRegistry) ScanPipelineChunkIngestTS(vaultID glid.GLID, chunkID chunk.ChunkID, cb func(tsNanos int64) bool) error {
+	if vaultID == r.vaultID {
+		return r.o.ScanPipelineChunkIngestTS(vaultID, chunkID, cb)
+	}
+	return chunk.ErrChunkNotFound
 }
 
 func (r *singleVaultRegistry) IndexReader() manifest.IndexReader { return r.o.IndexReader() }

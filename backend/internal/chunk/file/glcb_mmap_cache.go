@@ -21,6 +21,7 @@ func (m *Manager) mappedGLCB(id chunk.ChunkID) (*chunkcloud.MappedBlob, error) {
 		e := v.(*mappedGLCBEntry)
 		if e.path == path {
 			if _, err := os.Stat(path); err == nil {
+				m.touchGLCBMapped(id)
 				return e.blob, nil
 			}
 			m.evictMappedGLCB(id)
@@ -36,10 +37,16 @@ func (m *Manager) mappedGLCB(id chunk.ChunkID) (*chunkcloud.MappedBlob, error) {
 		return nil, err
 	}
 	m.glcbMapped.Store(id, &mappedGLCBEntry{path: path, blob: blob})
+	m.noteGLCBMapped(id)
 	return blob, nil
 }
 
 func (m *Manager) evictMappedGLCB(id chunk.ChunkID) {
+	m.closeMappedGLCB(id)
+	m.dropGLCBMapEntry(id)
+}
+
+func (m *Manager) closeMappedGLCB(id chunk.ChunkID) {
 	if v, ok := m.glcbMapped.LoadAndDelete(id); ok {
 		_ = v.(*mappedGLCBEntry).blob.Close()
 	}

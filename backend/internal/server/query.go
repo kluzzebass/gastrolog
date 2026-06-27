@@ -463,14 +463,16 @@ func (s *QueryServer) mergeAndStream(
 	synthOK := mergeInvolved && limitHit
 	tokenBytes := buildResumeTokenBytes(transform, getToken, mergeHighwater, reverse, lastLocalSet, lastLocalRec, synthOK)
 
-	// Attach histogram when already computed; never block search completion on
-	// level-breakdown work. Slow histogram goroutines are drained in the
-	// background so they cannot extend the RPC past record delivery.
+	// Attach histogram from the page-1 goroutine. Records are already
+	// streamed — waiting here only delays the trailing empty batch, not
+	// first-row delivery. Do not use a non-blocking receive: a slow
+	// histogram (pipeline open-chunk scan, remote merge) would otherwise
+	// be discarded and the UI shows no chart at all.
 	if histCh != nil {
 		select {
 		case h := <-histCh:
 			histogram = h
-		default:
+		case <-ctx.Done():
 			go func(ch chan []*apiv1.HistogramBucket) { <-ch }(histCh)
 		}
 	}

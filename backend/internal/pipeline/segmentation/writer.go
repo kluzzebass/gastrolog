@@ -35,7 +35,6 @@ type vaultWriter struct {
 	disableFsync bool
 
 	in          chan Input
-	encoded     chan encodedWork
 	completed   chan<- CompletedSegment
 	onSync      func()
 	onCompletedDropped func()
@@ -79,7 +78,6 @@ func newVaultWriter(vaultID glid.GLID, root string, cfg Config, vc VaultConfig, 
 		commitDelay:  commitDelay,
 		disableFsync: vc.DisableFsync || cfg.DisableFsync,
 		in:           make(chan Input, queueCap),
-		encoded:      make(chan encodedWork, queueCap),
 		completed:          completed,
 		onSync:             cfg.OnSync,
 		onCompletedDropped: cfg.OnCompletedDropped,
@@ -100,11 +98,7 @@ func (w *vaultWriter) run(ctx context.Context) {
 		return
 	}
 	defer close(w.done)
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() { defer wg.Done(); w.encodeLoop(ctx) }()
-	go func() { defer wg.Done(); w.appendLoop(ctx) }()
-	wg.Wait()
+	w.recordLoop(ctx)
 }
 
 func (w *vaultWriter) stop() {
@@ -128,50 +122,7 @@ func (w *vaultWriter) stop() {
 	w.flushAndCloseSegment()
 }
 
-func (w *vaultWriter) encodeLoop(ctx context.Context) {
-	defer close(w.encoded)
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case in, ok := <-w.in:
-			if !ok {
-				return
-			}
-			writeTS := w.cfg.now()
-			body, err := segment.EncodeFrame(in.Record, writeTS)
-			if err != nil {
-				if in.Ack != nil {
-					in.Ack <- err
-				}
-				continue
-			}
-			work := encodedWork{rec: in.Record, writeTS: writeTS, body: body, ack: in.Ack}
-			select {
-			case w.encoded <- work:
-			case <-ctx.Done():
-				return
-			}
-		}
-	}
-}
-
-// appendLoop appends encoded frames and commits (fsyncs) them.
-//
-// Commit policy:
-//   - Records with a non-nil ack use waiter-driven GROUP COMMIT: after appending,
-//     the loop drains whatever is immediately queued and fsyncs once, then releases
-//     that batch's acks. No fixed window — low load gives a batch of one at raw
-//     fsync latency; high load grows batches naturally (bounded fsync rate). When
-//     commitDelay > 0, ack records coalesce within that window before the fsync.
-//   - Fire-and-forget records (nil ack) use the lazy SyncBatchSize / SyncBatchWindow
-//     flush so a stream nobody waits on does not fsync per record.
-//   - DisableFsync skips every fsync; acks fire after the in-memory append.
-//
-// A single fsync covers every frame appended since the last commit (ack-bearing
-// and fire-and-forget alike), so the two regimes share commits when interleaved.
-func (w *vaultWriter) appendLoop(ctx context.Context) {
+func (w *vaultWriter) recordLoop(ctx context.Context) {
 	b := newCommitBatch(w)
 	defer b.timer.Stop()
 
@@ -180,12 +131,12 @@ func (w *vaultWriter) appendLoop(ctx context.Context) {
 		case <-ctx.Done():
 			_ = b.commit()
 			return
-		case work, ok := <-w.encoded:
+		case in, ok := <-w.in:
 			if !ok {
 				_ = b.commit()
 				return
 			}
-			if !b.append(work) || !w.afterAppend(b) {
+			if !w.appendInput(b, in) || !w.afterAppend(b) {
 				return
 			}
 		case <-b.timer.C:
@@ -195,6 +146,18 @@ func (w *vaultWriter) appendLoop(ctx context.Context) {
 			}
 		}
 	}
+}
+
+func (w *vaultWriter) appendInput(b *commitBatch, in Input) bool {
+	writeTS := w.cfg.now()
+	body, err := segment.EncodeFrame(in.Record, writeTS)
+	if err != nil {
+		if in.Ack != nil {
+			in.Ack <- err
+		}
+		return true
+	}
+	return b.append(encodedWork{rec: in.Record, writeTS: writeTS, body: body, ack: in.Ack})
 }
 
 // afterAppend applies the commit policy once a frame has been added to the batch.
@@ -218,7 +181,7 @@ func (w *vaultWriter) afterAppend(b *commitBatch) bool {
 		return true
 	default:
 		// Pure group commit: drain whatever is queued, then fsync once.
-		return w.drainAvailable(b.append) && b.commit()
+		return w.drainAvailable(b) && b.commit()
 	}
 }
 
@@ -306,16 +269,16 @@ func (b *commitBatch) releaseParked(err error) {
 	b.parked = b.parked[:0]
 }
 
-// drainAvailable appends every frame currently buffered in the encoded queue
-// without blocking, forming the group-commit batch. Returns false on append error.
-func (w *vaultWriter) drainAvailable(appendOne func(encodedWork) bool) bool {
+// drainAvailable appends every input currently buffered in the in queue without
+// blocking, forming the group-commit batch. Returns false on append error.
+func (w *vaultWriter) drainAvailable(b *commitBatch) bool {
 	for {
 		select {
-		case work, ok := <-w.encoded:
+		case in, ok := <-w.in:
 			if !ok {
 				return true
 			}
-			if !appendOne(work) {
+			if !w.appendInput(b, in) {
 				return false
 			}
 		default:

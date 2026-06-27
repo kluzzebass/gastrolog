@@ -39,7 +39,7 @@ function sumClusterStats(nodes: readonly ClusterNode[]) {
     const s = node.stats;
     if (!s) continue;
     totalCpu += s.cpuPercent;
-    totalMemory += Number(s.memoryRss);
+    totalMemory += Number(s.memoryInuse);
     for (const v of s.vaults) {
       totalStorage += Number(v.dataBytes);
     }
@@ -157,7 +157,7 @@ export function HeaderBar({
             value={loading ? "..." : formatBytes(totalMemory)}
             dark={dark}
             nodes={nodes}
-            renderNodeValue={(n) => formatBytes(Number(n.stats?.memoryRss ?? 0))}
+            renderNodeValue={(n) => formatBytes(Number(n.stats?.memoryInuse ?? 0))}
           />
           <span className={`text-xs ${c("text-ink-border", "text-light-border")}`}>|</span>
           <HoverStat
