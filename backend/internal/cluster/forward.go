@@ -842,13 +842,17 @@ func pullManagedFileStreamHandler(srv any, stream grpc.ServerStream) error {
 // comfortably under the gRPC message limit.
 type segmentChunkWriter struct {
 	stream grpc.ServerStream
+	chunk  gastrologv1.PullSegmentChunk
+	buf    []byte
 }
 
 func (w *segmentChunkWriter) Write(p []byte) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
-	if err := w.stream.SendMsg(&gastrologv1.PullSegmentChunk{Data: p}); err != nil {
+	w.buf = append(w.buf[:0], p...)
+	w.chunk.Data = w.buf
+	if err := w.stream.SendMsg(&w.chunk); err != nil {
 		return 0, err
 	}
 	return len(p), nil

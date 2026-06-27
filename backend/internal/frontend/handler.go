@@ -21,12 +21,14 @@ import (
 type staticHandler struct {
 	fs    fs.FS
 	files map[string]bool // set of original paths (without .br) that exist
+	cache map[string][]byte
 }
 
 func newStaticHandler(fsys fs.FS) *staticHandler {
 	h := &staticHandler{
 		fs:    fsys,
 		files: make(map[string]bool),
+		cache: make(map[string][]byte),
 	}
 
 	_ = fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
@@ -35,6 +37,16 @@ func newStaticHandler(fsys fs.FS) *staticHandler {
 		}
 		if after, found := strings.CutSuffix(p, ".br"); found {
 			h.files[after] = true
+			f, openErr := fsys.Open(p)
+			if openErr != nil {
+				return openErr
+			}
+			data, readErr := io.ReadAll(f)
+			_ = f.Close()
+			if readErr != nil {
+				return readErr
+			}
+			h.cache[p] = data
 		}
 		return nil
 	})
@@ -61,17 +73,19 @@ func (h *staticHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	brPath := p + ".br"
 
-	f, err := h.fs.Open(brPath)
-	if err != nil {
-		http.Error(w, "not found", http.StatusNotFound)
-		return
-	}
-	defer func() { _ = f.Close() }()
-
-	data, err := io.ReadAll(f)
-	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
+	data, ok := h.cache[brPath]
+	if !ok {
+		f, err := h.fs.Open(brPath)
+		if err != nil {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		defer func() { _ = f.Close() }()
+		data, err = io.ReadAll(f)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	// MIME type from the original filename (without .br).
@@ -96,7 +110,7 @@ func (h *staticHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", intToStr(len(data)))
 		w.WriteHeader(http.StatusOK)
 		if r.Method != http.MethodHead {
-			_, _ = w.Write(data)
+			_, _ = w.Write(data) //nolint:gosec // G705: embedded static asset bytes
 		}
 
 	case acceptsEncoding(ae, "gzip"):
@@ -125,7 +139,7 @@ func (h *staticHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", intToStr(len(plain)))
 		w.WriteHeader(http.StatusOK)
 		if r.Method != http.MethodHead {
-			_, _ = w.Write(plain)
+			_, _ = w.Write(plain) //nolint:gosec // G705: decompressed embedded static asset
 		}
 	}
 }

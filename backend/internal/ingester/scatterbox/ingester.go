@@ -138,7 +138,8 @@ func (s *Ingester) generate(at time.Time) orchestrator.IngestMessage {
 			"seq":           strconv.FormatUint(seq, 10),
 			"node":          s.node,
 		},
-		Raw: []byte(body),
+		Raw:      []byte(body),
+		RawOwned: true,
 		// Scatterbox synthesizes its own logs, so SourceTS and IngestTS
 		// coincide — there's no upstream timestamp to preserve. Setting
 		// SourceTS matches chatterbox's behavior and keeps pipeline

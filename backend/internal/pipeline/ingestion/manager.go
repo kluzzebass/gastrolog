@@ -269,6 +269,7 @@ func (m *Manager) runWithCheckpoints(
 			EventID:  minter.Mint(),
 			Attrs:    msg.Attrs,
 			Raw:      msg.Raw,
+			RawOwned: msg.RawOwned,
 			SourceTS: msg.SourceTS,
 			Ack:      msg.Ack,
 		}

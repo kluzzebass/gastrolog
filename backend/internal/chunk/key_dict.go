@@ -136,7 +136,7 @@ func EncodeWithDict(attrs Attributes, dict *StringDict) (encoded []byte, newEntr
 
 // DecodeWithDict decodes attributes that were encoded with EncodeWithDict.
 // Format: [count:u16][keyID:u32][valID:u32]...
-func DecodeWithDict(data []byte, dict *StringDict) (Attributes, error) {
+func DecodeWithDict(data []byte, dict DictReader) (Attributes, error) {
 	if len(data) < 2 {
 		return nil, ErrInvalidAttrsData
 	}

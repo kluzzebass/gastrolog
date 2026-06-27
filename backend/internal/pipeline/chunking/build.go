@@ -163,46 +163,21 @@ func (e *MissingSegmentsError) Is(target error) bool {
 }
 
 func readGLCBSealMeta(path string) (chunkcloud.BlobMeta, bool, int64, error) {
-	f, err := os.Open(filepath.Clean(path))
+	blob, err := chunkcloud.OpenMappedBlob(filepath.Clean(path))
 	if err != nil {
 		return chunkcloud.BlobMeta{}, false, 0, err
 	}
-	defer func() { _ = f.Close() }()
+	defer func() { _ = blob.Close() }()
 
-	info, err := f.Stat()
+	info, err := os.Stat(filepath.Clean(path))
 	if err != nil {
 		return chunkcloud.BlobMeta{}, false, 0, err
 	}
 
-	rd, err := chunkcloud.NewCacheReader(f)
-	if err != nil {
-		return chunkcloud.BlobMeta{}, false, 0, err
-	}
-	defer func() { _ = rd.Close() }()
-
-	meta := rd.Meta()
-	monotonic, err := ingestMonotonicInMergeOrder(rd)
+	meta := blob.Meta()
+	monotonic, err := blob.IngestMonotonicInMergeOrder()
 	if err != nil {
 		return chunkcloud.BlobMeta{}, false, 0, err
 	}
 	return meta, monotonic, info.Size(), nil
-}
-
-func ingestMonotonicInMergeOrder(rd *chunkcloud.Reader) (bool, error) {
-	meta := rd.Meta()
-	if meta.RecordCount == 0 {
-		return true, nil
-	}
-	var prev time.Time
-	for i := range meta.RecordCount {
-		rec, err := rd.ReadRecord(i)
-		if err != nil {
-			return false, err
-		}
-		if i > 0 && rec.IngestTS.Before(prev) {
-			return false, nil
-		}
-		prev = rec.IngestTS
-	}
-	return true, nil
 }

@@ -122,8 +122,10 @@ func (m *Manager) digest(msg ingestion.Message) Output {
 }
 
 func buildRecord(msg ingestion.Message) *record.Record {
-	raw := make([]byte, len(msg.Raw))
-	copy(raw, msg.Raw)
+	raw := msg.Raw
+	if msg.Ack != nil || !msg.RawOwned {
+		raw = append([]byte(nil), msg.Raw...)
+	}
 
 	var attrs record.Attributes
 	if len(msg.Attrs) > 0 {

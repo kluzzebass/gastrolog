@@ -1551,24 +1551,18 @@ func (m *Manager) rebuildBTrees(id chunk.ChunkID, idxFile *os.File, recordCount 
 // path still goes through loadChunkMeta (idx.log-based).
 func (m *Manager) loadChunkMetaFromGLCB(id chunk.ChunkID) (*chunkMeta, error) {
 	path := filepath.Join(m.chunkDir(id), dataGLCBFileName)
-	f, err := os.Open(filepath.Clean(path))
+	blob, err := chunkcloud.OpenMappedBlob(filepath.Clean(path))
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = f.Close() }()
-
-	rd, err := chunkcloud.NewCacheReader(f)
-	if err != nil {
-		return nil, fmt.Errorf("open data.glcb for %s: %w", id, err)
-	}
-	defer func() { _ = rd.Close() }()
-	bm := rd.Meta()
+	defer func() { _ = blob.Close() }()
+	bm := blob.Meta()
 
 	// Layout metadata stores RecordsSize as RawBytes. Fall back to the
 	// on-disk file size when zero (e.g. empty records section).
 	bytes := bm.RawBytes
 	if bytes == 0 {
-		if st, err := f.Stat(); err == nil {
+		if st, err := os.Stat(filepath.Clean(path)); err == nil {
 			bytes = st.Size()
 		}
 	}

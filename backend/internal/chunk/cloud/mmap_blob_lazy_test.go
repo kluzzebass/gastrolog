@@ -58,7 +58,7 @@ func TestMappedBlobSectionSkipsRecordTables(t *testing.T) {
 	if !ok || len(section) == 0 {
 		t.Fatal("expected non-empty ingest TS section")
 	}
-	if blob.dict != nil || blob.index != nil {
+	if blob.dict != nil || blob.indexBytes != nil {
 		t.Fatal("dict/index should not be loaded before Reader()")
 	}
 
@@ -69,7 +69,7 @@ func TestMappedBlobSectionSkipsRecordTables(t *testing.T) {
 	if _, err := rd.ReadRecord(0); err != nil {
 		t.Fatalf("ReadRecord: %v", err)
 	}
-	if blob.dict == nil || blob.index == nil {
+	if blob.dict == nil || blob.indexBytes == nil {
 		t.Fatal("dict/index should be loaded after Reader()")
 	}
 }

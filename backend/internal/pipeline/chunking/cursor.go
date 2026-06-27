@@ -2,7 +2,6 @@ package chunking
 
 import (
 	"errors"
-	"os"
 	"path/filepath"
 
 	"gastrolog/internal/chunk"
@@ -15,16 +14,19 @@ func OpenGLCBCursor(glcbPath string, chunkID chunk.ChunkID) (chunk.RecordCursor,
 	if glcbPath == "" {
 		return nil, errors.New("GLCB path required")
 	}
-	f, err := os.Open(filepath.Clean(glcbPath))
+	blob, err := chunkcloud.OpenMappedBlob(filepath.Clean(glcbPath))
 	if err != nil {
 		return nil, err
 	}
-	rd, err := chunkcloud.NewCacheReader(f)
+	rd, err := blob.Reader()
 	if err != nil {
-		_ = f.Close()
+		_ = blob.Close()
 		return nil, err
 	}
+	blob.Retain()
 	return chunkcloud.NewSeekableCursorWithClose(rd, chunkID, func() {
 		_ = rd.Close()
+		blob.Release()
+		_ = blob.Close()
 	}), nil
 }

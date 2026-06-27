@@ -67,6 +67,7 @@ func (a *ingesterAdapter) Run(ctx context.Context, out chan<- ingestion.Ingester
 		minted := ingestion.IngesterMessage{
 			Attrs:    msg.Attrs,
 			Raw:      msg.Raw,
+			RawOwned: msg.RawOwned,
 			SourceTS: msg.SourceTS,
 			Ack:      msg.Ack,
 		}

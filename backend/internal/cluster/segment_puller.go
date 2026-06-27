@@ -59,8 +59,9 @@ func (sp *SegmentPuller) Pull(ctx context.Context, nodeID string, vaultID, segme
 		return fmt.Errorf("close send to %s: %w", nodeID, err)
 	}
 
+	chunk := &gastrologv1.PullSegmentChunk{}
 	for {
-		chunk := &gastrologv1.PullSegmentChunk{}
+		chunk.Reset()
 		if err := stream.RecvMsg(chunk); err != nil {
 			if errors.Is(err, io.EOF) {
 				break

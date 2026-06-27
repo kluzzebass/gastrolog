@@ -1,7 +1,6 @@
 package cloud
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
@@ -25,8 +24,9 @@ type MappedBlob struct {
 	data           []byte
 	layout         blobLayoutMeta
 	meta           BlobMeta
-	dict           *chunk.StringDict
-	index          []recordIndex
+	dict           chunk.DictReader
+	indexBytes     []byte
+	indexCount     uint32
 	recordsBaseOff int64
 	toc            BlobTOC
 	recordMu       sync.Mutex
@@ -39,7 +39,7 @@ type MappedBlob struct {
 // OpenMappedBlob memory-maps path and parses the GLCB in place.
 func OpenMappedBlob(path string) (*MappedBlob, error) {
 	path = filepath.Clean(path)
-	f, err := os.Open(path)
+	f, err := os.Open(path) //nolint:gosec // G703: path cleaned above
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +75,7 @@ func OpenMappedBlob(path string) (*MappedBlob, error) {
 // PinCount returns active Retain pins (tests and cache eviction).
 func (b *MappedBlob) PinCount() int32 { return b.pins.Load() }
 
-// RecordTablesLoaded reports whether dict and record index are heap-decoded.
+// RecordTablesLoaded reports whether dict and record index are parsed for reads.
 func (b *MappedBlob) RecordTablesLoaded() bool {
 	b.recordMu.Lock()
 	loaded := b.recordLoaded
@@ -96,7 +96,8 @@ func (b *MappedBlob) TryReleaseRecordTables() bool {
 		return false
 	}
 	b.dict = nil
-	b.index = nil
+	b.indexBytes = nil
+	b.indexCount = 0
 	b.recordsBaseOff = 0
 	b.recordLoaded = false
 	b.recordInitErr = nil
@@ -160,7 +161,7 @@ func (b *MappedBlob) Reader() (*Reader, error) {
 	}
 	b.recordMu.Lock()
 	dict := b.dict
-	index := b.index
+	indexBytes := b.indexBytes
 	base := b.recordsBaseOff
 	data := b.data
 	meta := b.meta
@@ -168,7 +169,8 @@ func (b *MappedBlob) Reader() (*Reader, error) {
 	return &Reader{
 		meta:           meta,
 		dict:           dict,
-		index:          index,
+		indexBytes:     indexBytes,
+		indexCount:     b.layout.RecordCount,
 		recordsBaseOff: base,
 		mmapData:       data,
 		keepFile:       true,
@@ -200,26 +202,33 @@ func (b *MappedBlob) loadRecordTablesLocked() error {
 	if int(layout.DictOff)+int(layout.DictSize) > len(b.data) {
 		return errors.New("dict out of range")
 	}
-	dict, err := decodeDictFromBuf(b.data[int(layout.DictOff):int(layout.DictOff)+int(layout.DictSize)], layout.DictEntries)
+	dictRegion := b.data[int(layout.DictOff) : int(layout.DictOff)+int(layout.DictSize)]
+	dict, err := chunk.NewMmapStringDict(dictRegion, layout.DictEntries)
 	if err != nil {
 		return err
 	}
 	if int(layout.IndexOff)+int(layout.IndexSize) > len(b.data) {
 		return errors.New("record index out of range")
 	}
-	index := make([]recordIndex, layout.RecordCount)
-	indexBytes := b.data[int(layout.IndexOff) : int(layout.IndexOff)+int(layout.IndexSize)]
-	for i := range layout.RecordCount {
-		off := int(i) * indexEntrySize
-		index[i] = recordIndex{
-			Offset: binary.LittleEndian.Uint64(indexBytes[off:]),
-			Size:   binary.LittleEndian.Uint32(indexBytes[off+8:]),
-		}
-	}
 	b.dict = dict
-	b.index = index
+	b.indexBytes = b.data[int(layout.IndexOff) : int(layout.IndexOff)+int(layout.IndexSize)]
+	b.indexCount = layout.RecordCount
 	b.recordsBaseOff = int64(layout.RecordsOff)
 	return nil
+}
+
+// IngestMonotonicInMergeOrder reports whether ingest timestamps are
+// non-decreasing in merge order using only the mmap'd record index.
+func (b *MappedBlob) IngestMonotonicInMergeOrder() (bool, error) {
+	layout := b.layout
+	if layout.RecordCount == 0 {
+		return true, nil
+	}
+	if int(layout.IndexOff)+int(layout.IndexSize) > len(b.data) {
+		return false, errors.New("record index out of range")
+	}
+	indexBytes := b.data[int(layout.IndexOff) : int(layout.IndexOff)+int(layout.IndexSize)]
+	return ingestMonotonicFromIndex(indexBytes, int64(layout.RecordsOff), layout.RecordCount, b.data, nil)
 }
 
 func parseMappedBlob(data []byte) (*MappedBlob, error) {

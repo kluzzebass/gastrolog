@@ -15,19 +15,40 @@ import (
 // Reader provides random-access record reads from a GLCB on local disk.
 // Records are read directly via file.ReadAt — no decompression step.
 type Reader struct {
-	meta            BlobMeta
-	dict            *chunk.StringDict
-	index           []recordIndex
-	recordsBaseOff  int64    // absolute offset of the records section in the file
-	mmapData        []byte   // when set, record frames are sliced from this mapping
-	file            *os.File // GLCB file; closed (and removed unless keepFile) on Close()
-	keepFile        bool     // if true, Close() does not remove the file (local cache)
+	meta           BlobMeta
+	dict           chunk.DictReader
+	index          []recordIndex // heap path when indexBytes is nil
+	indexBytes     []byte
+	indexCount     uint32
+	recordsBaseOff int64    // absolute offset of the records section in the file
+	mmapData       []byte   // when set, record frames are sliced from this mapping
+	dictBuf        []byte   // keeps dict bytes alive for MmapStringDict when not mmap'd
+	file           *os.File // GLCB file; closed (and removed unless keepFile) on Close()
+	mappedOwner    *MappedBlob
+	keepFile       bool // if true, Close() does not remove the file (local cache)
 }
 
 // NewCacheReader opens a GLCB from a local cache file.
 // Unlike NewReader, Close() does NOT remove the file — the cache
 // manages the file's lifecycle.
 func NewCacheReader(f *os.File) (*Reader, error) {
+	path := f.Name()
+	if path != "" {
+		if blob, err := OpenMappedBlob(path); err == nil {
+			_ = f.Close()
+			rd, err := blob.Reader()
+			if err != nil {
+				_ = blob.Close()
+				return nil, err
+			}
+			rd.mappedOwner = blob
+			rd.keepFile = true
+			return rd, nil
+		}
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("rewind GLCB: %w", err)
+	}
 	rd, err := NewReader(f)
 	if err != nil {
 		return nil, err
@@ -59,22 +80,14 @@ func NewReader(f *os.File) (*Reader, error) {
 	if _, err := f.ReadAt(dictBuf, int64(layout.DictOff)); err != nil {
 		return nil, fmt.Errorf("read dict: %w", err)
 	}
-	dict, err := decodeDictFromBuf(dictBuf, layout.DictEntries)
+	dict, err := chunk.NewMmapStringDict(dictBuf, layout.DictEntries)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decode dict: %w", err)
 	}
 
 	indexBuf := make([]byte, layout.IndexSize)
 	if _, err := f.ReadAt(indexBuf, int64(layout.IndexOff)); err != nil {
 		return nil, fmt.Errorf("read index: %w", err)
-	}
-	index := make([]recordIndex, layout.RecordCount)
-	for i := range layout.RecordCount {
-		off := int(i) * indexEntrySize
-		index[i] = recordIndex{
-			Offset: binary.LittleEndian.Uint64(indexBuf[off:]),
-			Size:   binary.LittleEndian.Uint32(indexBuf[off+8:]),
-		}
 	}
 
 	fileInfo, err := f.Stat()
@@ -89,7 +102,9 @@ func NewReader(f *os.File) (*Reader, error) {
 	return &Reader{
 		meta:           layoutMetaToBlobMeta(layout, toc),
 		dict:           dict,
-		index:          index,
+		indexBytes:     indexBuf,
+		indexCount:     layout.RecordCount,
+		dictBuf:        dictBuf,
 		recordsBaseOff: int64(layout.RecordsOff),
 		file:           f,
 	}, nil
@@ -216,7 +231,10 @@ func (rd *Reader) ReadRecord(pos uint32) (chunk.Record, error) {
 		return chunk.Record{}, chunk.ErrNoMoreRecords
 	}
 
-	idx := rd.index[pos]
+	idx, err := rd.recordIndexAt(pos)
+	if err != nil {
+		return chunk.Record{}, err
+	}
 	if idx.Offset > math.MaxInt64 {
 		return chunk.Record{}, fmt.Errorf("record %d: offset %d overflows int64", pos, idx.Offset)
 	}
@@ -238,6 +256,14 @@ func (rd *Reader) ReadRecord(pos uint32) (chunk.Record, error) {
 
 // Close closes the file and (unless keepFile is set) removes it.
 func (rd *Reader) Close() error {
+	if rd.mappedOwner != nil {
+		owner := rd.mappedOwner
+		rd.mappedOwner = nil
+		rd.mmapData = nil
+		rd.dict = nil
+		rd.indexBytes = nil
+		return owner.Close()
+	}
 	if rd.mmapData != nil {
 		// Mapping lifetime is owned by MappedBlob, not this Reader.
 		rd.mmapData = nil
@@ -282,7 +308,7 @@ func decodeDictFromBuf(buf []byte, dictEntries uint32) (*chunk.StringDict, error
 // decodeFrame decodes a record frame into a Record using the given dictionary.
 // Every field read is bounds-checked at its own site so the layout and the
 // guard never drift. No upstream magic-number length check.
-func decodeFrame(frame []byte, dict *chunk.StringDict) (chunk.Record, error) {
+func decodeFrame(frame []byte, dict chunk.DictReader) (chunk.Record, error) {
 	off := 0
 	var rec chunk.Record
 

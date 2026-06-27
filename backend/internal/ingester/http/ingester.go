@@ -316,6 +316,7 @@ func (r *Ingester) parseValue(val Value, streamLabels map[string]string) (orches
 	return orchestrator.IngestMessage{
 		Attrs:      attrs,
 		Raw:        []byte(line),
+		RawOwned:   true,
 		SourceTS:   sourceTS,
 		IngestTS:   time.Now(),
 		IngesterID: r.id,
