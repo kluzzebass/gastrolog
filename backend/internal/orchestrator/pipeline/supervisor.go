@@ -74,6 +74,8 @@ type Config struct {
 	SegmentationCompletedCap int
 	SegmentationEncodeCap    int
 	DistributionPullQueueCap int
+	DistributionPublishWorkers   int
+	DistributionPublishBatchSize int
 
 	// Segmentation close policy and node-global commit/fsync defaults. Per-vault
 	// overrides ride on VaultSpec.Commit.
@@ -214,8 +216,10 @@ func New(cfg Config) *Supervisor {
 		Table:   cfg.Table,
 	})
 	dist, pullIn := distribution.New(distribution.Config{
-		PullQueueCap: cfg.DistributionPullQueueCap,
-		Logger:       cfg.Logger,
+		PullQueueCap:       cfg.DistributionPullQueueCap,
+		PublishWorkers:     cfg.DistributionPublishWorkers,
+		PublishBatchSize:   cfg.DistributionPublishBatchSize,
+		Logger:             cfg.Logger,
 	})
 	chunk := chunking.New(chunking.Config{Logger: cfg.Logger})
 	col := collection.New(collection.Config{

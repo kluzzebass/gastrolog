@@ -67,6 +67,7 @@ message VaultCtlCommand {
     ReleaseSegmentsCommand release_segments = 18;
     AckSegmentHolderCommand ack_segment_holder = 19;
     DiscardOpenChunkManifestCommand discard_open_chunk_manifest = 20;
+    PublishCompletedSegmentsCommand publish_completed_segments = 21;
   }
 }
 
@@ -168,6 +169,13 @@ message PublishCompletedSegmentCommand {
   string origin_node_id = 7;
   // Wall time carried in the command for deterministic replay (Unix nanos).
   int64 published_at_nanos = 8;
+}
+
+// PublishCompletedSegmentsCommand registers many completed segments in one
+// vault-ctl apply so origin nodes amortize a single Raft round-trip under burst
+// ingest.
+message PublishCompletedSegmentsCommand {
+  repeated PublishCompletedSegmentCommand segments = 1;
 }
 
 // CompletedSegmentEntry is replicated registry state for one completed segment.

@@ -272,6 +272,12 @@ export class VaultCtlCommand extends Message<VaultCtlCommand> {
      */
     value: DiscardOpenChunkManifestCommand;
     case: "discardOpenChunkManifest";
+  } | {
+    /**
+     * @generated from field: gastrolog.v1.PublishCompletedSegmentsCommand publish_completed_segments = 21;
+     */
+    value: PublishCompletedSegmentsCommand;
+    case: "publishCompletedSegments";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<VaultCtlCommand>) {
@@ -302,6 +308,7 @@ export class VaultCtlCommand extends Message<VaultCtlCommand> {
     { no: 18, name: "release_segments", kind: "message", T: ReleaseSegmentsCommand, oneof: "command" },
     { no: 19, name: "ack_segment_holder", kind: "message", T: AckSegmentHolderCommand, oneof: "command" },
     { no: 20, name: "discard_open_chunk_manifest", kind: "message", T: DiscardOpenChunkManifestCommand, oneof: "command" },
+    { no: 21, name: "publish_completed_segments", kind: "message", T: PublishCompletedSegmentsCommand, oneof: "command" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultCtlCommand {
@@ -1061,6 +1068,47 @@ export class PublishCompletedSegmentCommand extends Message<PublishCompletedSegm
 
   static equals(a: PublishCompletedSegmentCommand | PlainMessage<PublishCompletedSegmentCommand> | undefined, b: PublishCompletedSegmentCommand | PlainMessage<PublishCompletedSegmentCommand> | undefined): boolean {
     return proto3.util.equals(PublishCompletedSegmentCommand, a, b);
+  }
+}
+
+/**
+ * PublishCompletedSegmentsCommand registers many completed segments in one
+ * vault-ctl apply so origin nodes amortize a single Raft round-trip under burst
+ * ingest.
+ *
+ * @generated from message gastrolog.v1.PublishCompletedSegmentsCommand
+ */
+export class PublishCompletedSegmentsCommand extends Message<PublishCompletedSegmentsCommand> {
+  /**
+   * @generated from field: repeated gastrolog.v1.PublishCompletedSegmentCommand segments = 1;
+   */
+  segments: PublishCompletedSegmentCommand[] = [];
+
+  constructor(data?: PartialMessage<PublishCompletedSegmentsCommand>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PublishCompletedSegmentsCommand";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "segments", kind: "message", T: PublishCompletedSegmentCommand, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PublishCompletedSegmentsCommand {
+    return new PublishCompletedSegmentsCommand().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PublishCompletedSegmentsCommand {
+    return new PublishCompletedSegmentsCommand().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PublishCompletedSegmentsCommand {
+    return new PublishCompletedSegmentsCommand().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PublishCompletedSegmentsCommand | PlainMessage<PublishCompletedSegmentsCommand> | undefined, b: PublishCompletedSegmentsCommand | PlainMessage<PublishCompletedSegmentsCommand> | undefined): boolean {
+    return proto3.util.equals(PublishCompletedSegmentsCommand, a, b);
   }
 }
 

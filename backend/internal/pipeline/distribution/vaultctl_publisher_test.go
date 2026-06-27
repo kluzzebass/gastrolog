@@ -58,6 +58,29 @@ func TestVaultCtlPublisherPublish(t *testing.T) {
 	}
 }
 
+func TestVaultCtlPublisherPublishBatch(t *testing.T) {
+	t.Parallel()
+	now := time.Unix(0, 1_700_000_000_000).UTC()
+	segA, segB := glid.New(), glid.New()
+	vaultID := glid.New()
+	fsm := vaultctlfsm.New()
+	pub := &VaultCtlPublisher{
+		Applier:      &fsmApplier{fsm: fsm},
+		OriginNodeID: "node-a",
+		Now:          func() time.Time { return now },
+	}
+	metas := []Metadata{
+		{SegmentID: segA, VaultID: vaultID, RecordCount: 1, ByteSize: 1, FirstIngestTS: now, LastIngestTS: now, Checksum: 1},
+		{SegmentID: segB, VaultID: vaultID, RecordCount: 2, ByteSize: 2, FirstIngestTS: now, LastIngestTS: now, Checksum: 2},
+	}
+	if err := pub.PublishBatch(t.Context(), metas); err != nil {
+		t.Fatalf("PublishBatch: %v", err)
+	}
+	if len(fsm.ListCompletedSegments()) != 2 {
+		t.Fatalf("registry len = %d, want 2", len(fsm.ListCompletedSegments()))
+	}
+}
+
 func TestVaultCtlPublisherReplicatesOnFollowerFSM(t *testing.T) {
 	t.Parallel()
 	now := time.Unix(0, 1_700_000_000_000).UTC()

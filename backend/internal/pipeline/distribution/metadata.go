@@ -26,6 +26,12 @@ type Publisher interface {
 	Publish(ctx context.Context, meta Metadata) error
 }
 
+// BatchPublisher publishes many segments in one vault-ctl apply when supported.
+type BatchPublisher interface {
+	Publisher
+	PublishBatch(ctx context.Context, metas []Metadata) error
+}
+
 // MetadataFrom builds publish metadata from a completed segment on disk.
 func MetadataFrom(seg segmentation.CompletedSegment) (Metadata, error) {
 	return metadataFromPath(seg.Path, seg.VaultID, seg.Meta.ID, seg.Header)

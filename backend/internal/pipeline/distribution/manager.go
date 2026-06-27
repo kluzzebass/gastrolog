@@ -21,6 +21,11 @@ import (
 // never blocks behind a publish backlog.
 const publishQueueCap = 512
 
+const (
+	defaultPublishWorkers   = 4
+	defaultPublishBatchSize = 32
+)
+
 // ErrNotRunning is returned when Run is called twice.
 var ErrNotRunning = errors.New("distribution manager not running")
 
@@ -207,6 +212,57 @@ func (v *vaultDist) publishStaged(ctx context.Context, meta Metadata, segID glid
 	return nil
 }
 
+func (v *vaultDist) publishStagedBatch(ctx context.Context, items []pendingPublish) error {
+	live := make([]pendingPublish, 0, len(items))
+	for _, p := range items {
+		if v.isRetired(p.segID) {
+			continue
+		}
+		if !v.segmentBytesPresent(p.segID, p.path) {
+			v.forgetSegment(p.segID)
+			return errPublishBytesMissing
+		}
+		live = append(live, p)
+	}
+	if len(live) == 0 {
+		return nil
+	}
+	if len(live) == 1 {
+		p := live[0]
+		return v.publishStaged(ctx, p.meta, p.segID, p.path)
+	}
+	metas := make([]Metadata, len(live))
+	for i, p := range live {
+		metas[i] = p.meta
+	}
+	var err error
+	if bp, ok := v.publisher.(BatchPublisher); ok {
+		err = bp.PublishBatch(ctx, metas)
+	} else {
+		for _, meta := range metas {
+			if pubErr := v.publisher.Publish(ctx, meta); pubErr != nil {
+				err = pubErr
+				break
+			}
+		}
+	}
+	if err != nil {
+		return err
+	}
+	for _, p := range live {
+		if v.isRetired(p.segID) {
+			continue
+		}
+		if err := v.finalizeAfterPublish(p.segID, p.path); err != nil {
+			return err
+		}
+		if v.onPublishCommitted != nil {
+			v.onPublishCommitted(p.segID)
+		}
+	}
+	return nil
+}
+
 func (v *vaultDist) servePull(req PullRequest) error {
 	path, ok := v.segmentPathForPull(req.SegmentID)
 	if !ok {
@@ -281,7 +337,28 @@ func (v *vaultDist) forgetSegment(segID glid.GLID) {
 type Config struct {
 	// PullQueueCap bounds incoming pull requests. Defaults to 16.
 	PullQueueCap int
-	Logger       *slog.Logger
+	// PublishWorkers is the number of vault-ctl publish workers. Defaults to 4.
+	// Workers on different vaults apply in parallel; batches for the same vault
+	// are serialized by the per-vault publisher path.
+	PublishWorkers int
+	// PublishBatchSize is how many staged segments one worker coalesces into a
+	// single vault-ctl apply when the publisher supports batching. Defaults to 32.
+	PublishBatchSize int
+	Logger *slog.Logger
+}
+
+func (c Config) publishWorkers() int {
+	if c.PublishWorkers <= 0 {
+		return defaultPublishWorkers
+	}
+	return c.PublishWorkers
+}
+
+func (c Config) publishBatchSize() int {
+	if c.PublishBatchSize <= 0 {
+		return defaultPublishBatchSize
+	}
+	return c.PublishBatchSize
 }
 
 // Manager publishes completed segment metadata and serves segment pulls.
@@ -402,7 +479,7 @@ func (m *Manager) Run(ctx context.Context, completed <-chan segmentation.Complet
 		m.runPullLoop(ctx)
 	})
 	m.wg.Go(func() {
-		m.runPublishWorker(ctx, publishQ)
+		m.runPublishWorkers(ctx, publishQ)
 	})
 	m.wg.Go(func() {
 		m.runPublishIngress(ctx, completed, publishQ)
@@ -439,9 +516,18 @@ func (m *Manager) runPullLoop(ctx context.Context) {
 	}
 }
 
-// runPublishWorker commits staged segments to vault-ctl. Failed publishes are
-// queued for retry and drained on the next publishRetry wake.
-func (m *Manager) runPublishWorker(ctx context.Context, publishQ chan pendingPublish) {
+// runPublishWorkers commit staged segments to vault-ctl. Failed publishes are
+// queued for retry and drained on publishRetry wake.
+func (m *Manager) runPublishWorkers(ctx context.Context, publishQ chan pendingPublish) {
+	workers := m.cfg.publishWorkers()
+	for range workers {
+		m.wg.Go(func() {
+			m.publishWorkerLoop(ctx, publishQ)
+		})
+	}
+}
+
+func (m *Manager) publishWorkerLoop(ctx context.Context, publishQ chan pendingPublish) {
 	retryCh := m.publishRetry.C()
 	for {
 		select {
@@ -451,12 +537,52 @@ func (m *Manager) runPublishWorker(ctx context.Context, publishQ chan pendingPub
 			if !ok {
 				return
 			}
-			m.publishOne(ctx, publishQ, p)
+			m.publishBurst(ctx, publishQ, p)
 		case <-retryCh:
 			retryCh = m.publishRetry.C()
 			m.drainPublishRetries(ctx, publishQ)
 		}
 	}
+}
+
+func (m *Manager) publishBurst(ctx context.Context, publishQ chan pendingPublish, first pendingPublish) {
+	batch := m.coalesceBatch(publishQ, first)
+	for vaultID, items := range groupPendingByVault(batch) {
+		if err := m.publishVaultBatch(ctx, vaultID, items); publishRetryable(err) {
+			for _, p := range items {
+				m.enqueuePublishRetry(p)
+			}
+		}
+	}
+}
+
+func (m *Manager) coalesceBatch(publishQ chan pendingPublish, first pendingPublish) []pendingPublish {
+	maxBatch := m.cfg.publishBatchSize()
+	batch := make([]pendingPublish, 1, maxBatch)
+	batch[0] = first
+	for len(batch) < maxBatch {
+		select {
+		case p := <-publishQ:
+			batch = append(batch, p)
+		default:
+			return batch
+		}
+	}
+	return batch
+}
+
+func groupPendingByVault(batch []pendingPublish) map[glid.GLID][]pendingPublish {
+	out := make(map[glid.GLID][]pendingPublish)
+	for _, p := range batch {
+		out[p.vaultID] = append(out[p.vaultID], p)
+	}
+	return out
+}
+
+func publishRetryable(err error) bool {
+	return err != nil &&
+		!errors.Is(err, ErrUnknownVault) &&
+		!errors.Is(err, errPublishBytesMissing)
 }
 
 func (m *Manager) enqueuePublishRetry(p pendingPublish) {
@@ -478,39 +604,20 @@ func (m *Manager) drainPublishRetries(ctx context.Context, publishQ chan pending
 	pending := m.retryPending
 	m.retryPending = nil
 	m.retryMu.Unlock()
-	for _, p := range pending {
-		if err := m.publishMeta(ctx, p.vaultID, p.meta, p.segID, p.path); err != nil &&
-			!errors.Is(err, ErrUnknownVault) &&
-			!errors.Is(err, errPublishBytesMissing) {
-			m.enqueuePublishRetry(p)
+	if len(pending) == 0 {
+		return
+	}
+	for vaultID, items := range groupPendingByVault(pending) {
+		if err := m.publishVaultBatch(ctx, vaultID, items); publishRetryable(err) {
+			for _, p := range items {
+				m.enqueuePublishRetry(p)
+			}
 		}
 	}
-	// After retries, drain any fresh ingress items without waiting for another wake.
 	for {
 		select {
 		case p := <-publishQ:
-			m.publishOne(ctx, publishQ, p)
-		default:
-			return
-		}
-	}
-}
-
-func (m *Manager) publishOne(ctx context.Context, publishQ chan pendingPublish, p pendingPublish) {
-	if err := m.publishMeta(ctx, p.vaultID, p.meta, p.segID, p.path); err != nil &&
-		!errors.Is(err, ErrUnknownVault) &&
-		!errors.Is(err, errPublishBytesMissing) {
-		m.enqueuePublishRetry(p)
-		return
-	}
-	for {
-		select {
-		case p2 := <-publishQ:
-			if err := m.publishMeta(ctx, p2.vaultID, p2.meta, p2.segID, p2.path); err != nil &&
-				!errors.Is(err, ErrUnknownVault) &&
-				!errors.Is(err, errPublishBytesMissing) {
-				m.enqueuePublishRetry(p2)
-			}
+			m.publishBurst(ctx, publishQ, p)
 		default:
 			return
 		}
@@ -600,15 +707,26 @@ func (m *Manager) vaultsSnapshot() map[glid.GLID]*vaultDist {
 	return out
 }
 
-// publishMeta re-attempts vault-ctl publish and promotes to head/ on success.
-func (m *Manager) publishMeta(ctx context.Context, vaultID glid.GLID, meta Metadata, segID glid.GLID, path string) error {
+// publishVaultBatch commits one coalesced batch for a vault and promotes local
+// holders after vault-ctl accepts the registry entries.
+func (m *Manager) publishVaultBatch(ctx context.Context, vaultID glid.GLID, items []pendingPublish) error {
 	m.mu.Lock()
 	v, ok := m.vaults[vaultID]
 	m.mu.Unlock()
 	if !ok {
 		return ErrUnknownVault
 	}
-	return v.publishStaged(ctx, meta, segID, path)
+	return v.publishStagedBatch(ctx, items)
+}
+
+// publishMeta re-attempts vault-ctl publish and promotes to head/ on success.
+func (m *Manager) publishMeta(ctx context.Context, vaultID glid.GLID, meta Metadata, segID glid.GLID, path string) error {
+	return m.publishVaultBatch(ctx, vaultID, []pendingPublish{{
+		vaultID: vaultID,
+		segID:   segID,
+		path:    path,
+		meta:    meta,
+	}})
 }
 
 func (m *Manager) onPull(req PullRequest) {

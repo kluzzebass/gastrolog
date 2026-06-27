@@ -110,6 +110,10 @@ const (
 	// (Rubicon C). Appends the node to the segment registry entry's holder
 	// set; idempotent. See gastrolog-2z3oa.
 	CmdAckSegmentHolder Command = 19
+
+	// CmdPublishCompletedSegments registers many completed segments in one
+	// vault-ctl apply (burst ingest on origin nodes).
+	CmdPublishCompletedSegments Command = 21
 )
 
 // ManifestEntry holds the full metadata for one chunk in this vault's
@@ -823,6 +827,7 @@ type applyEffects struct {
 	sealedManifest          *OpenChunkManifest
 	sealedManifestClearedID *chunk.ChunkID
 	publishedSegment        *CompletedSegmentEntry
+	publishedSegments       []CompletedSegmentEntry
 	openChunkOpened         *OpenChunkManifest
 	openChunkRefAdded       *OpenChunkManifest
 	releasedSegmentIDs      []glid.GLID
@@ -892,6 +897,11 @@ func (e applyEffects) firePipelineCallbacks() {
 	if e.publishedSegment != nil {
 		for _, fn := range e.onPublishCompletedSegment {
 			fn(*e.publishedSegment)
+		}
+	}
+	for _, seg := range e.publishedSegments {
+		for _, fn := range e.onPublishCompletedSegment {
+			fn(seg)
 		}
 	}
 	if e.openChunkOpened != nil {
@@ -1021,6 +1031,28 @@ func (f *FSM) applyLocked(cmd *gastrologv1.VaultCtlCommand) (any, applyEffects) 
 
 // tryApplySegmentPipelineLocked dispatches completed-segment registry and
 // open-chunk manifest commands. Caller holds f.mu.
+func (f *FSM) applyPublishCompletedSegmentsBatch(c *gastrologv1.PublishCompletedSegmentsCommand) (any, applyEffects, bool) {
+	var fx applyEffects
+	var newOnes []CompletedSegmentEntry
+	for _, seg := range c.GetSegments() {
+		segID := glid.FromBytes(seg.GetSegmentId())
+		had := f.completedSegments[segID] != nil
+		if err := f.applyPublishCompletedSegment(seg); err != nil {
+			return err, fx, true
+		}
+		if !had {
+			if e := f.completedSegments[segID]; e != nil {
+				cp := *e
+				newOnes = append(newOnes, cp)
+			}
+		}
+	}
+	if len(newOnes) > 0 {
+		fx.publishedSegments = newOnes
+	}
+	return nil, fx, true
+}
+
 func (f *FSM) tryApplySegmentPipelineLocked(cmd *gastrologv1.VaultCtlCommand) (any, applyEffects, bool) {
 	var fx applyEffects
 	switch c := cmd.GetCommand().(type) {
@@ -1035,6 +1067,8 @@ func (f *FSM) tryApplySegmentPipelineLocked(cmd *gastrologv1.VaultCtlCommand) (a
 			}
 		}
 		return result, fx, true
+	case *gastrologv1.VaultCtlCommand_PublishCompletedSegments:
+		return f.applyPublishCompletedSegmentsBatch(c.PublishCompletedSegments)
 	case *gastrologv1.VaultCtlCommand_OpenChunkManifest:
 		result, opened := f.applyOpenChunkManifestLocked(c.OpenChunkManifest)
 		fx.openChunkOpened = opened

@@ -216,6 +216,24 @@ func MarshalPublishCompletedSegment(entry CompletedSegmentEntry) []byte {
 	return mustMarshalCommand(NewPublishCompletedSegment(entry))
 }
 
+// NewPublishCompletedSegments builds a batched PublishCompletedSegments command.
+func NewPublishCompletedSegments(entries []CompletedSegmentEntry) *gastrologv1.VaultCtlCommand {
+	segs := make([]*gastrologv1.PublishCompletedSegmentCommand, len(entries))
+	for i, entry := range entries {
+		segs[i] = NewPublishCompletedSegment(entry).GetPublishCompletedSegment()
+	}
+	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_PublishCompletedSegments{
+		PublishCompletedSegments: &gastrologv1.PublishCompletedSegmentsCommand{
+			Segments: segs,
+		},
+	}}
+}
+
+// MarshalPublishCompletedSegments builds Raft log data for a batched publish.
+func MarshalPublishCompletedSegments(entries []CompletedSegmentEntry) []byte {
+	return mustMarshalCommand(NewPublishCompletedSegments(entries))
+}
+
 // applyAckSegmentHolder records that nodeID now holds a completed segment by
 // appending it to the entry's holder set. Idempotent: a repeated ack for a node
 // already in the set is a no-op. An ack for an unknown segment is tolerated as a

@@ -244,6 +244,27 @@ func TestAckSegmentHolderSurvivesSnapshot(t *testing.T) {
 	}
 }
 
+func TestPublishCompletedSegmentsBatchApply(t *testing.T) {
+	t.Parallel()
+	fsm := New()
+	now := time.Unix(0, 1_700_000_000_000).UTC()
+	segA, segB := glid.New(), glid.New()
+	var callbacks int
+	fsm.AddOnPublishCompletedSegment(func(CompletedSegmentEntry) { callbacks++ })
+
+	applyCmd(t, fsm, MarshalPublishCompletedSegments([]CompletedSegmentEntry{
+		{SegmentID: segA, RecordCount: 1, ByteSize: 1, FirstIngestTS: now, LastIngestTS: now, Checksum: 1, PublishedAt: now},
+		{SegmentID: segB, RecordCount: 2, ByteSize: 2, FirstIngestTS: now, LastIngestTS: now, Checksum: 2, PublishedAt: now},
+	}))
+	if callbacks != 2 {
+		t.Fatalf("callbacks = %d, want 2", callbacks)
+	}
+	got := fsm.ListCompletedSegments()
+	if len(got) != 2 {
+		t.Fatalf("registry len = %d, want 2", len(got))
+	}
+}
+
 func TestPublishCompletedSegmentFanOut(t *testing.T) {
 	t.Parallel()
 	fsm := New()
