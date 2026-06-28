@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 
+	erragg "gastrolog/internal/errs"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/collection"
 	"gastrolog/internal/pipeline/paths"
@@ -143,7 +144,7 @@ func (c *segmentPullClient) Pull(ctx context.Context, vaultID, segmentID glid.GL
 		}
 		return nil
 	}
-	return errors.Join(errs...)
+	return erragg.SummaryJoin(errs...)
 }
 
 // copyLocalSegmentFile streams a segment from this home's head/, completed/,

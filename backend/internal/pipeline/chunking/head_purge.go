@@ -59,9 +59,22 @@ func (v *vaultChunking) flushHeadPurgeForManifest(ctx context.Context, pending *
 	}
 }
 
+// purgeReleasedHead drops head/pre-head copies for segments the registry just
+// released. Idempotent; safe to call from both chunking and supervisor hooks.
+func (v *vaultChunking) purgeReleasedHead(ids []glid.GLID) {
+	root := v.cfg.VaultRoot
+	if root == "" || len(ids) == 0 {
+		return
+	}
+	for _, id := range ids {
+		_ = paths.PurgeHeadStaging(root, id)
+	}
+}
+
 // purgeStaleHeadCatchUp removes head/ files with no completed-segment registry
-// entry (released or never published). Registry-backed segments are purged only
-// after local GLCB build via flushHeadPurgeForManifest — not here.
+// entry (released or never published). Registry-backed segments are purged via
+// flushHeadPurgeForManifest after local build, or purgeReleasedHead when the
+// registry drops the entry.
 //
 // Skipped until the vault-ctl FSM has replayed: on process start the registry
 // can be empty briefly while head/ still holds the prior process's files. Purging
@@ -71,19 +84,24 @@ func (v *vaultChunking) purgeStaleHeadCatchUp() {
 	if v.fsm() != nil && !v.fsm().Ready() {
 		return
 	}
-	ids, err := paths.ListSegmentIDs(paths.HeadDir(v.cfg.VaultRoot))
+	root := v.cfg.VaultRoot
+	if root == "" {
+		return
+	}
+	ids, err := paths.ListSegmentIDs(paths.HeadDir(root))
 	if err != nil || len(ids) == 0 {
 		return
 	}
 	pending := v.sealedManifestForBuild()
 	open := v.fsm().OpenChunk()
+	fsm := v.fsm()
 	for id := range ids {
-		if v.fsm().GetCompletedSegment(id) != nil {
+		if fsm.GetCompletedSegment(id) != nil {
 			continue
 		}
 		if manifestReferencesSegment(pending, id) || openChunkReferencesSegment(open, id) {
 			continue
 		}
-		_ = paths.PurgeHeadStaging(v.cfg.VaultRoot, id)
+		_ = paths.PurgeHeadStaging(root, id)
 	}
 }

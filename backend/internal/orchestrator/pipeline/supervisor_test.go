@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -15,6 +16,7 @@ import (
 	"gastrolog/internal/pipeline/collection"
 	"gastrolog/internal/pipeline/distribution"
 	"gastrolog/internal/pipeline/ingestion"
+	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/pipeline/routing"
 	"gastrolog/internal/pipeline/segmentation"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
@@ -377,5 +379,75 @@ func TestSupervisorReconcilePlacementFlap(t *testing.T) {
 	// Vault returns; re-registration must succeed against the same managers.
 	if err := sup.RegisterVault(newSpec()); err != nil {
 		t.Fatalf("re-register after flap: %v", err)
+	}
+}
+
+func TestSupervisorReleasePurgesOriginAndHomeHead(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	segID := glid.New()
+	originRoot := t.TempDir()
+	homeRoot := t.TempDir()
+	fsm := vaultctlfsm.New()
+
+	if err := paths.EnsureHeadDir(originRoot); err != nil {
+		t.Fatal(err)
+	}
+	if err := paths.EnsureHeadDir(homeRoot); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.HeadSegment(originRoot, segID), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.HeadSegment(homeRoot, segID), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	sup := New(Config{NodeID: glid.New(), Table: allRoute(t, vaultID)})
+	if err := sup.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { _ = sup.Stop() })
+
+	spec := VaultSpec{
+		VaultID:    vaultID,
+		Origin:     true,
+		OriginRoot: originRoot,
+		Publisher:  &recordingPublisher{},
+		HomeRoot:   homeRoot,
+		ChunkRoot:  filepath.Join(homeRoot, "chunks"),
+		FSM:        fsm,
+		Locate:     chunking.VaultSegmentLocator{Root: homeRoot},
+		Applier:    &fsmApplier{fsm: fsm},
+		IsLeader:   func() bool { return true },
+	}
+	if err := sup.RegisterVault(spec); err != nil {
+		t.Fatalf("RegisterVault: %v", err)
+	}
+
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalPublishCompletedSegment(vaultctlfsm.CompletedSegmentEntry{
+		SegmentID: segID, RecordCount: 1, ByteSize: 1,
+		FirstIngestTS: base, LastIngestTS: base, Checksum: 1, PublishedAt: base,
+	})}); err != nil {
+		t.Fatalf("PublishCompletedSegment: %v", err)
+	}
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalReleaseSegments([]glid.GLID{segID})}); err != nil {
+		t.Fatalf("ReleaseSegments: %v", err)
+	}
+	if _, err := os.Stat(paths.HeadSegment(originRoot, segID)); !os.IsNotExist(err) {
+		t.Fatalf("origin head should be purged, stat err=%v", err)
+	}
+	if _, err := os.Stat(paths.HeadSegment(homeRoot, segID)); !os.IsNotExist(err) {
+		t.Fatalf("home head should be purged, stat err=%v", err)
+	}
+}
+
+func TestStagingHeadPurgeRootsDedupesSharedRoot(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	got := stagingHeadPurgeRoots(root, root, true, true)
+	if len(got) != 1 || got[0] != root {
+		t.Fatalf("stagingHeadPurgeRoots = %v, want [%s]", got, root)
 	}
 }

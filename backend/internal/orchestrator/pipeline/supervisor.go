@@ -157,6 +157,20 @@ type vaultRoles struct {
 	unsubRelease func()
 }
 
+// stagingHeadPurgeRoots returns distinct vault staging roots whose head/ copies
+// must be dropped after ReleaseSegments. Origin and home often share one root
+// in production; tests and misconfig can split them.
+func stagingHeadPurgeRoots(originRoot, homeRoot string, origin, homeSide bool) []string {
+	var roots []string
+	if origin && originRoot != "" {
+		roots = append(roots, originRoot)
+	}
+	if homeSide && homeRoot != "" && homeRoot != originRoot {
+		roots = append(roots, homeRoot)
+	}
+	return roots
+}
+
 // Supervisor owns the pipeline queue graph and the seven phase managers, and
 // drives per-vault start/stop on placement changes.
 type Supervisor struct {
@@ -527,6 +541,8 @@ func (s *Supervisor) RegisterVault(spec VaultSpec) error {
 		vaultID := spec.VaultID
 		homeRoot := spec.HomeRoot
 		purgeHomeHead := homeSide && homeRoot != ""
+		originRoot := spec.OriginRoot
+		headPurgeRoots := stagingHeadPurgeRoots(originRoot, homeRoot, spec.Origin, purgeHomeHead)
 		roles.unsubRelease = spec.FSM.AddOnReleaseSegments(func(ids []glid.GLID) {
 			if spec.Origin {
 				s.dist.RetireSegments(vaultID, ids)
@@ -534,13 +550,12 @@ func (s *Supervisor) RegisterVault(spec VaultSpec) error {
 					_ = paths.PurgeCompleted(releaseRoot, id)
 				}
 			}
-			// Drop home head/ copies once the registry releases a segment so
-			// collection does not re-pull bytes this home already chunked, and
-			// follower homes still purge when build-time head purge was skipped
-			// (gastrolog-3vlse).
-			if purgeHomeHead {
-				for _, id := range ids {
-					_ = paths.PurgeHeadStaging(homeRoot, id)
+			// Drop head/pre-head on every staging root this node uses. Distribution
+			// promotes under OriginRoot; collection/chunking use HomeRoot when set.
+			// Purging only HomeRoot left OriginRoot/head debris (gastrolog-3vlse).
+			for _, id := range ids {
+				for _, root := range headPurgeRoots {
+					_ = paths.PurgeHeadStaging(root, id)
 				}
 			}
 		})

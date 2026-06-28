@@ -194,6 +194,34 @@ func TestPurgeStaleHeadCatchUpDropsOrphans(t *testing.T) {
 	assertHeadPresent(t, home, active)
 }
 
+func TestReleaseSegmentsPurgesHeadOnFSMCallback(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	segID := glid.New()
+	vaultID := glid.New()
+	home := t.TempDir()
+	writeHeadSegment(t, home, segID, vaultID, []recordForSeg{{0, base, "one"}})
+
+	fsm := vaultctlfsm.New()
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalPublishCompletedSegment(vaultctlfsm.CompletedSegmentEntry{
+		SegmentID: segID, RecordCount: 1, ByteSize: 1,
+		FirstIngestTS: base, LastIngestTS: base, Checksum: 1, PublishedAt: base,
+	}))
+
+	mgr := chunking.New(chunking.Config{})
+	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
+		VaultRoot: home,
+		ChunkRoot: filepath.Join(home, "chunks"),
+		FSM:       fsm,
+		Locate:    chunking.HeadSegmentLocator{Root: home},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalReleaseSegments([]glid.GLID{segID}))
+	assertHeadMissing(t, home, segID)
+}
+
 func assertHeadMissing(t *testing.T, root string, id glid.GLID) {
 	t.Helper()
 	if _, err := os.Stat(paths.HeadSegment(root, id)); !os.IsNotExist(err) {

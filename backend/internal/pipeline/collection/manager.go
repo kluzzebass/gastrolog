@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	erragg "gastrolog/internal/errs"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/notify"
@@ -239,7 +240,7 @@ func (v *vaultCollect) collectMissing(ctx context.Context) (bool, error) {
 			errs = append(errs, err)
 		}
 	}
-	return progress, errors.Join(errs...)
+	return progress, erragg.SummaryJoin(errs...)
 }
 
 // CollectSegments pulls specific segment IDs into head/ when they are absent
@@ -291,7 +292,7 @@ func (v *vaultCollect) collectSegments(ctx context.Context, segmentIDs []glid.GL
 			errs = append(errs, err)
 		}
 	}
-	return errors.Join(errs...)
+	return erragg.SummaryJoin(errs...)
 }
 
 func (v *vaultCollect) awaitCollectPass(ctx context.Context) error {

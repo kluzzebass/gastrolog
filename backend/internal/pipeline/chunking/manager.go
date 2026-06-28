@@ -117,6 +117,8 @@ type vaultChunking struct {
 	unsubPublish func()
 	// unsubAckHolder removes the holder-ack subscription used to retry release.
 	unsubAckHolder func()
+	// unsubRelease removes the ReleaseSegments subscription used to purge head/.
+	unsubRelease func()
 	// wake coalesces plan/build triggers for the per-vault worker goroutine.
 	// FSM callbacks (publish, open-manifest, ref-added, sealed-manifest) fire
 	// on the Raft FSM-apply goroutine and only poke this signal — running the
@@ -303,6 +305,10 @@ func (m *Manager) unwireVaultFSMCallbacks(v *vaultChunking) {
 		v.unsubAckHolder()
 		v.unsubAckHolder = nil
 	}
+	if v.unsubRelease != nil {
+		v.unsubRelease()
+		v.unsubRelease = nil
+	}
 	fsm.SetOnOpenChunkManifest(nil)
 	fsm.SetOnOpenChunkRefAdded(nil)
 	fsm.SetOnSealedManifestCleared(nil)
@@ -323,6 +329,10 @@ func (m *Manager) wireVaultFSMCallbacks(v *vaultChunking, cfg VaultConfig) {
 	})
 	v.unsubAckHolder = cfg.FSM.AddOnAckSegmentHolder(func(glid.GLID) {
 		v.releaseWake.Notify()
+	})
+	v.unsubRelease = cfg.FSM.AddOnReleaseSegments(func(ids []glid.GLID) {
+		v.purgeReleasedHead(ids)
+		v.purgeStaleHeadCatchUp()
 	})
 	cfg.FSM.SetOnOpenChunkManifest(func(m *vaultctlfsm.OpenChunkManifest) {
 		if m != nil && cfg.OnManifestOpened != nil {
@@ -496,6 +506,7 @@ func (m *Manager) startWorkerLocked(v *vaultChunking) {
 				if err := v.releaseOnce(ctx); err != nil && ctx.Err() == nil {
 					log.Warn("chunking release failed", "error", err)
 				}
+				v.purgeStaleHeadCatchUp()
 				releaseCh = v.releaseWake.C()
 				continue
 			case <-ch:

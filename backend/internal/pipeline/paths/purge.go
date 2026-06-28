@@ -1,9 +1,9 @@
 package paths
 
 import (
-	"errors"
 	"os"
 
+	erragg "gastrolog/internal/errs"
 	"gastrolog/internal/glid"
 )
 
@@ -31,7 +31,7 @@ func PurgeHeadStaging(root string, segmentID glid.GLID) error {
 			errs = append(errs, err)
 		}
 	}
-	return errors.Join(errs...)
+	return erragg.SummaryJoin(errs...)
 }
 
 // PurgeSegmentStaging removes a segment file from head/, pre-head/, and
@@ -47,5 +47,5 @@ func PurgeSegmentStaging(root string, segmentID glid.GLID) error {
 			errs = append(errs, err)
 		}
 	}
-	return errors.Join(errs...)
+	return erragg.SummaryJoin(errs...)
 }
