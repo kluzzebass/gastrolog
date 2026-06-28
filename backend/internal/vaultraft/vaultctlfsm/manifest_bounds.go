@@ -76,6 +76,29 @@ func boundsFromAddRefCommand(c *gastrologv1.AddOpenChunkSegmentRefCommand) Manif
 	)
 }
 
+func boundsFromRefEntry(c *gastrologv1.AddOpenChunkSegmentRefEntry) ManifestTimeBounds {
+	if c == nil {
+		return ManifestTimeBounds{}
+	}
+	return manifestBoundsFromProto(
+		c.GetWriteStartNanos(),
+		c.GetWriteEndNanos(),
+		c.GetIngestStartNanos(),
+		c.GetIngestEndNanos(),
+		c.GetSourceStartNanos(),
+		c.GetSourceEndNanos(),
+	)
+}
+
+// MergeManifestTimeBounds folds src into dst (min/max per axis).
+func MergeManifestTimeBounds(dst *ManifestTimeBounds, src ManifestTimeBounds) {
+	mergeManifestTimeBounds(dst,
+		src.WriteStart, src.WriteEnd,
+		src.IngestStart, src.IngestEnd,
+		src.SourceStart, src.SourceEnd,
+	)
+}
+
 func manifestBoundsToProto(b ManifestTimeBounds) (writeStart, writeEnd, ingestStart, ingestEnd, sourceStart, sourceEnd int64) {
 	if !b.WriteStart.IsZero() {
 		writeStart = b.WriteStart.UnixNano()

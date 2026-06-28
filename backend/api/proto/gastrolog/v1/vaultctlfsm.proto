@@ -68,6 +68,7 @@ message VaultCtlCommand {
     AckSegmentHolderCommand ack_segment_holder = 19;
     DiscardOpenChunkManifestCommand discard_open_chunk_manifest = 20;
     PublishCompletedSegmentsCommand publish_completed_segments = 21;
+    AddOpenChunkSegmentRefsCommand add_open_chunk_segment_refs = 22;
   }
 }
 
@@ -248,6 +249,28 @@ message AddOpenChunkSegmentRefCommand {
   int64 ingest_end_nanos = 10;
   int64 source_start_nanos = 11;
   int64 source_end_nanos = 12;
+}
+
+// AddOpenChunkSegmentRefEntry is one ref payload inside AddOpenChunkSegmentRefs.
+message AddOpenChunkSegmentRefEntry {
+  bytes segment_id = 1;
+  uint32 first_record_number = 2;
+  uint32 last_record_number = 3;
+  uint64 slice_bytes = 4;
+  int64 ref_added_at_nanos = 5;
+  int64 write_start_nanos = 6;
+  int64 write_end_nanos = 7;
+  int64 ingest_start_nanos = 8;
+  int64 ingest_end_nanos = 9;
+  int64 source_start_nanos = 10;
+  int64 source_end_nanos = 11;
+}
+
+// AddOpenChunkSegmentRefsCommand appends many segment slices in one vault-ctl
+// apply so the chunking planner amortizes a single Raft quorum round-trip.
+message AddOpenChunkSegmentRefsCommand {
+  bytes chunk_id = 1;
+  repeated AddOpenChunkSegmentRefEntry refs = 2;
 }
 
 // SealOpenChunkManifestCommand closes the open manifest for materialization.

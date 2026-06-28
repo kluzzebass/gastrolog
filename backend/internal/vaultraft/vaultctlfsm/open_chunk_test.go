@@ -118,6 +118,50 @@ func TestAddOpenChunkSegmentRefPartialResume(t *testing.T) {
 	}
 }
 
+func TestAddOpenChunkSegmentRefsBatchApply(t *testing.T) {
+	t.Parallel()
+	fsm := New()
+	chunkID := testChunkID(0x56)
+	now := time.Unix(0, 1_700_000_000_000).UTC()
+	segA, segB := glid.New(), glid.New()
+	applyCmd(t, fsm, MarshalOpenChunkManifest(chunkID, now))
+	applyCmd(t, fsm, MarshalAddOpenChunkSegmentRefs(chunkID, []OpenChunkSegmentRef{
+		{
+			SegmentID:         segA,
+			FirstRecordNumber: 0,
+			LastRecordNumber:  4,
+			SliceBytes:        512,
+			RefAddedAt:        now,
+		},
+		{
+			SegmentID:         segB,
+			FirstRecordNumber: 0,
+			LastRecordNumber:  9,
+			SliceBytes:        1024,
+			RefAddedAt:        now.Add(time.Millisecond),
+		},
+	}))
+
+	open := fsm.OpenChunk()
+	if open == nil || len(open.Refs) != 2 {
+		t.Fatalf("refs = %d, want 2", len(open.Refs))
+	}
+	if open.TotalRecords != 15 {
+		t.Fatalf("total records = %d, want 15", open.TotalRecords)
+	}
+	if open.TotalBytes != 1536 {
+		t.Fatalf("total bytes = %d, want 1536", open.TotalBytes)
+	}
+	nextA, ok := fsm.ResumeRecordNumber(segA)
+	if !ok || nextA != 5 {
+		t.Fatalf("segA resume = %d ok=%v", nextA, ok)
+	}
+	nextB, ok := fsm.ResumeRecordNumber(segB)
+	if !ok || nextB != 10 {
+		t.Fatalf("segB resume = %d ok=%v", nextB, ok)
+	}
+}
+
 func TestOpenChunkIdempotentReplay(t *testing.T) {
 	t.Parallel()
 	fsm := New()

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/chunking"
@@ -17,6 +18,7 @@ import (
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 
 	hraft "github.com/hashicorp/raft"
+	"google.golang.org/protobuf/proto"
 )
 
 type fsmApplier struct {
@@ -923,5 +925,118 @@ func TestLoadSegmentViewsIndexesAllActiveSegments(t *testing.T) {
 	}
 	if open.Refs[0].SegmentID != segIDs[0] {
 		t.Fatalf("first ref segment = %s, want earliest EventID segment %s", open.Refs[0].SegmentID, segIDs[0])
+	}
+}
+
+// TestPlannerCatchUpBatchesRefsInOneApply verifies planCatchUp amortizes many
+// segment refs into a single vault-ctl apply (gastrolog-3i9nt).
+func TestPlannerCatchUpBatchesRefsInOneApply(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	pubAt := base.Add(time.Minute)
+	const segmentCount = 12
+	vaultID := glid.New()
+	vaultRoot := t.TempDir()
+	segIDs := make([]glid.GLID, segmentCount)
+	for i := range segIDs {
+		segIDs[i] = glid.New()
+		ts := base.Add(time.Duration(i) * time.Second)
+		writeCompletedSegment(t, vaultRoot, segIDs[i], vaultID, []recordForSeg{{0, ts, "x"}})
+	}
+
+	fsm := vaultctlfsm.New()
+	var applyLog [][]byte
+	applier := &fsmApplier{fsm: fsm, log: &applyLog}
+	mgr := chunking.New(chunking.Config{})
+	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
+		VaultRoot: vaultRoot,
+		ChunkRoot: filepath.Join(vaultRoot, "chunks"),
+		FSM:       fsm,
+		Locate:    chunking.VaultSegmentLocator{Root: vaultRoot},
+		Applier:   applier,
+		IsLeader:  func() bool { return true },
+		Policy:    chunking.ManifestRotationPolicy{MaxRecords: 10_000},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for i, segID := range segIDs {
+		ts := base.Add(time.Duration(i) * time.Second)
+		publishSegment(t, fsm, segID, pubAt.Add(time.Duration(i)*time.Millisecond), 1, ts, ts)
+	}
+
+	ctx := t.Context()
+	if err := mgr.PlanOnce(ctx, vaultID); err != nil {
+		t.Fatalf("open manifest: %v", err)
+	}
+	nBefore := len(applyLog)
+	if err := mgr.PlanCatchUp(ctx, vaultID); err != nil {
+		t.Fatalf("PlanCatchUp: %v", err)
+	}
+	catchUpApplies := applyLog[nBefore:]
+	if len(catchUpApplies) != 1 {
+		t.Fatalf("catch-up applies = %d, want 1 batched apply", len(catchUpApplies))
+	}
+	var cmd gastrologv1.VaultCtlCommand
+	if err := proto.Unmarshal(catchUpApplies[0], &cmd); err != nil {
+		t.Fatalf("decode apply: %v", err)
+	}
+	batch := cmd.GetAddOpenChunkSegmentRefs()
+	if batch == nil {
+		t.Fatalf("apply command = %T, want AddOpenChunkSegmentRefs", cmd.GetCommand())
+	}
+	if got := len(batch.GetRefs()); got != segmentCount {
+		t.Fatalf("batched refs = %d, want %d", got, segmentCount)
+	}
+	open := fsm.OpenChunk()
+	if open == nil || len(open.Refs) != segmentCount {
+		t.Fatalf("open refs = %d, want %d", len(open.Refs), segmentCount)
+	}
+}
+
+// TestPlannerCatchUpAppliesRefsBeforeSealAtMaxRecords guards against sealing an
+// empty manifest when a batched catch-up step fills MaxRecords in simulation.
+func TestPlannerCatchUpAppliesRefsBeforeSealAtMaxRecords(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	pubAt := base.Add(time.Minute)
+	segID := glid.New()
+	vaultID := glid.New()
+	vaultRoot := t.TempDir()
+	writeCompletedSegment(t, vaultRoot, segID, vaultID, []recordForSeg{
+		{0, base, "a"},
+		{1, base.Add(time.Second), "b"},
+		{2, base.Add(2 * time.Second), "c"},
+		{3, base.Add(3 * time.Second), "d"},
+	})
+
+	fsm := vaultctlfsm.New()
+	applier := &fsmApplier{fsm: fsm}
+	mgr := chunking.New(chunking.Config{})
+	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
+		VaultRoot:  vaultRoot,
+		ChunkRoot:  filepath.Join(vaultRoot, "chunks"),
+		FSM:        fsm,
+		Locate:     chunking.VaultSegmentLocator{Root: vaultRoot},
+		Applier:    applier,
+		IsLeader:   func() bool { return true },
+		Policy:     chunking.ManifestRotationPolicy{MaxRecords: 2},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	publishSegment(t, fsm, segID, pubAt, 4, base, base.Add(3*time.Second))
+
+	ctx := t.Context()
+	if err := mgr.PlanOnce(ctx, vaultID); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.PlanCatchUp(ctx, vaultID); err != nil {
+		t.Fatal(err)
+	}
+	sealed := fsm.SealedManifest()
+	if sealed == nil {
+		t.Fatal("expected sealed manifest")
+	}
+	if sealed.TotalRecords != 2 {
+		t.Fatalf("sealed records = %d, want 2", sealed.TotalRecords)
 	}
 }

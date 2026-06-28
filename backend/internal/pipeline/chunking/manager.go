@@ -394,6 +394,17 @@ func (m *Manager) PlanOnce(ctx context.Context, vaultID glid.GLID) error {
 	return v.planOnce(ctx, false)
 }
 
+// PlanCatchUp runs leader catch-up planner passes for a vault (for tests).
+func (m *Manager) PlanCatchUp(ctx context.Context, vaultID glid.GLID) error {
+	m.mu.Lock()
+	v, ok := m.vaults[vaultID]
+	m.mu.Unlock()
+	if !ok {
+		return ErrUnknownVault
+	}
+	return v.planCatchUp(ctx)
+}
+
 // RotateCron runs one leader planner step with the cron rotation trigger set,
 // sealing a non-empty open manifest on schedule. It is the entry point for the
 // orchestrator's shared scheduler; the planner no-ops for non-leaders, so the
@@ -521,6 +532,9 @@ func (m *Manager) runBuildPass(ctx context.Context, v *vaultChunking, log *slog.
 	if err := v.planCatchUp(ctx); err != nil && ctx.Err() == nil {
 		log.Warn("chunking plan catch-up failed", "error", err)
 	}
+	if v.cfg.IsLeader() {
+		v.releaseWake.Notify()
+	}
 	if !v.buildDue() {
 		return
 	}
@@ -588,6 +602,7 @@ func (v *vaultChunking) releaseOnce(ctx context.Context) error {
 	if !v.cfg.IsLeader() || v.cfg.Applier == nil {
 		return nil
 	}
+	v.enqueueRegistryReleaseCandidates()
 	v.mu.Lock()
 	pending := v.pendingRelease
 	v.pendingRelease = nil
@@ -647,10 +662,13 @@ func (v *vaultChunking) afterSealBuild(ctx context.Context, pending *vaultctlfsm
 
 	segmentIDs := releasableSegmentIDs(v.fsm(), pending)
 	v.flushHeadPurgeForManifest(ctx, pending, segmentIDs)
-	if v.cfg.IsLeader() && len(segmentIDs) > 0 {
-		v.mu.Lock()
-		v.pendingRelease = appendUniqueGLIDs(v.pendingRelease, segmentIDs)
-		v.mu.Unlock()
+	if v.cfg.IsLeader() {
+		if len(segmentIDs) > 0 {
+			v.mu.Lock()
+			v.pendingRelease = appendUniqueGLIDs(v.pendingRelease, segmentIDs)
+			v.mu.Unlock()
+		}
+		v.releaseWake.Notify()
 	}
 	v.mu.Lock()
 	if v.pendingSeal != nil && v.pendingSeal.ChunkID == pending.ChunkID && v.doneBuild == key {

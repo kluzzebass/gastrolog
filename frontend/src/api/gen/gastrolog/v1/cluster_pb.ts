@@ -650,9 +650,9 @@ export class NodeStats extends Message<NodeStats> {
   vaultPipelineDisk: VaultPipelineNodeDisk[] = [];
 
   /**
-   * Total on-disk bytes on this node (home, --vaults root, configured
-   * FileStorage paths). Distinct from per-vault data_bytes (chunk payload
-   * totals only).
+   * Total on-disk bytes on this node: local chunk/index stores, pipeline
+   * segments (FSM ByteSize where published, otherwise file stat), raft
+   * persistence, and managed files. Distinct from per-vault data_bytes.
    *
    * @generated from field: int64 storage_bytes = 37;
    */

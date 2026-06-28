@@ -278,6 +278,12 @@ export class VaultCtlCommand extends Message<VaultCtlCommand> {
      */
     value: PublishCompletedSegmentsCommand;
     case: "publishCompletedSegments";
+  } | {
+    /**
+     * @generated from field: gastrolog.v1.AddOpenChunkSegmentRefsCommand add_open_chunk_segment_refs = 22;
+     */
+    value: AddOpenChunkSegmentRefsCommand;
+    case: "addOpenChunkSegmentRefs";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<VaultCtlCommand>) {
@@ -309,6 +315,7 @@ export class VaultCtlCommand extends Message<VaultCtlCommand> {
     { no: 19, name: "ack_segment_holder", kind: "message", T: AckSegmentHolderCommand, oneof: "command" },
     { no: 20, name: "discard_open_chunk_manifest", kind: "message", T: DiscardOpenChunkManifestCommand, oneof: "command" },
     { no: 21, name: "publish_completed_segments", kind: "message", T: PublishCompletedSegmentsCommand, oneof: "command" },
+    { no: 22, name: "add_open_chunk_segment_refs", kind: "message", T: AddOpenChunkSegmentRefsCommand, oneof: "command" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultCtlCommand {
@@ -1568,6 +1575,151 @@ export class AddOpenChunkSegmentRefCommand extends Message<AddOpenChunkSegmentRe
 
   static equals(a: AddOpenChunkSegmentRefCommand | PlainMessage<AddOpenChunkSegmentRefCommand> | undefined, b: AddOpenChunkSegmentRefCommand | PlainMessage<AddOpenChunkSegmentRefCommand> | undefined): boolean {
     return proto3.util.equals(AddOpenChunkSegmentRefCommand, a, b);
+  }
+}
+
+/**
+ * AddOpenChunkSegmentRefEntry is one ref payload inside AddOpenChunkSegmentRefs.
+ *
+ * @generated from message gastrolog.v1.AddOpenChunkSegmentRefEntry
+ */
+export class AddOpenChunkSegmentRefEntry extends Message<AddOpenChunkSegmentRefEntry> {
+  /**
+   * @generated from field: bytes segment_id = 1;
+   */
+  segmentId = new Uint8Array(0);
+
+  /**
+   * @generated from field: uint32 first_record_number = 2;
+   */
+  firstRecordNumber = 0;
+
+  /**
+   * @generated from field: uint32 last_record_number = 3;
+   */
+  lastRecordNumber = 0;
+
+  /**
+   * @generated from field: uint64 slice_bytes = 4;
+   */
+  sliceBytes = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 ref_added_at_nanos = 5;
+   */
+  refAddedAtNanos = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 write_start_nanos = 6;
+   */
+  writeStartNanos = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 write_end_nanos = 7;
+   */
+  writeEndNanos = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 ingest_start_nanos = 8;
+   */
+  ingestStartNanos = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 ingest_end_nanos = 9;
+   */
+  ingestEndNanos = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 source_start_nanos = 10;
+   */
+  sourceStartNanos = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 source_end_nanos = 11;
+   */
+  sourceEndNanos = protoInt64.zero;
+
+  constructor(data?: PartialMessage<AddOpenChunkSegmentRefEntry>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.AddOpenChunkSegmentRefEntry";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "segment_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "first_record_number", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 3, name: "last_record_number", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 4, name: "slice_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 5, name: "ref_added_at_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 6, name: "write_start_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 7, name: "write_end_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 8, name: "ingest_start_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 9, name: "ingest_end_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 10, name: "source_start_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 11, name: "source_end_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): AddOpenChunkSegmentRefEntry {
+    return new AddOpenChunkSegmentRefEntry().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): AddOpenChunkSegmentRefEntry {
+    return new AddOpenChunkSegmentRefEntry().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): AddOpenChunkSegmentRefEntry {
+    return new AddOpenChunkSegmentRefEntry().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: AddOpenChunkSegmentRefEntry | PlainMessage<AddOpenChunkSegmentRefEntry> | undefined, b: AddOpenChunkSegmentRefEntry | PlainMessage<AddOpenChunkSegmentRefEntry> | undefined): boolean {
+    return proto3.util.equals(AddOpenChunkSegmentRefEntry, a, b);
+  }
+}
+
+/**
+ * AddOpenChunkSegmentRefsCommand appends many segment slices in one vault-ctl
+ * apply so the chunking planner amortizes a single Raft quorum round-trip.
+ *
+ * @generated from message gastrolog.v1.AddOpenChunkSegmentRefsCommand
+ */
+export class AddOpenChunkSegmentRefsCommand extends Message<AddOpenChunkSegmentRefsCommand> {
+  /**
+   * @generated from field: bytes chunk_id = 1;
+   */
+  chunkId = new Uint8Array(0);
+
+  /**
+   * @generated from field: repeated gastrolog.v1.AddOpenChunkSegmentRefEntry refs = 2;
+   */
+  refs: AddOpenChunkSegmentRefEntry[] = [];
+
+  constructor(data?: PartialMessage<AddOpenChunkSegmentRefsCommand>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.AddOpenChunkSegmentRefsCommand";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "refs", kind: "message", T: AddOpenChunkSegmentRefEntry, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): AddOpenChunkSegmentRefsCommand {
+    return new AddOpenChunkSegmentRefsCommand().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): AddOpenChunkSegmentRefsCommand {
+    return new AddOpenChunkSegmentRefsCommand().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): AddOpenChunkSegmentRefsCommand {
+    return new AddOpenChunkSegmentRefsCommand().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: AddOpenChunkSegmentRefsCommand | PlainMessage<AddOpenChunkSegmentRefsCommand> | undefined, b: AddOpenChunkSegmentRefsCommand | PlainMessage<AddOpenChunkSegmentRefsCommand> | undefined): boolean {
+    return proto3.util.equals(AddOpenChunkSegmentRefsCommand, a, b);
   }
 }
 

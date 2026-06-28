@@ -622,9 +622,9 @@ type NodeStats struct {
 	// at origins; head/pre-head on homes). Aggregated cluster-wide by
 	// WatchSystemStatus for the inspector.
 	VaultPipelineDisk []*VaultPipelineNodeDisk `protobuf:"bytes,36,rep,name=vault_pipeline_disk,json=vaultPipelineDisk,proto3" json:"vault_pipeline_disk,omitempty"`
-	// Total on-disk bytes on this node (home, --vaults root, configured
-	// FileStorage paths). Distinct from per-vault data_bytes (chunk payload
-	// totals only).
+	// Total on-disk bytes on this node: local chunk/index stores, pipeline
+	// segments (FSM ByteSize where published, otherwise file stat), raft
+	// persistence, and managed files. Distinct from per-vault data_bytes.
 	StorageBytes  int64 `protobuf:"varint,37,opt,name=storage_bytes,json=storageBytes,proto3" json:"storage_bytes,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

@@ -114,6 +114,10 @@ const (
 	// CmdPublishCompletedSegments registers many completed segments in one
 	// vault-ctl apply (burst ingest on origin nodes).
 	CmdPublishCompletedSegments Command = 21
+
+	// CmdAddOpenChunkSegmentRefs appends many open-chunk segment refs in one
+	// vault-ctl apply (chunking planner batching). See gastrolog-3i9nt.
+	CmdAddOpenChunkSegmentRefs Command = 22
 )
 
 // ManifestEntry holds the full metadata for one chunk in this vault's
@@ -1075,6 +1079,10 @@ func (f *FSM) tryApplySegmentPipelineLocked(cmd *gastrologv1.VaultCtlCommand) (a
 		return result, fx, true
 	case *gastrologv1.VaultCtlCommand_AddOpenChunkSegmentRef:
 		result, refAdded := f.applyAddOpenChunkSegmentRefLocked(c.AddOpenChunkSegmentRef)
+		fx.openChunkRefAdded = refAdded
+		return result, fx, true
+	case *gastrologv1.VaultCtlCommand_AddOpenChunkSegmentRefs:
+		result, refAdded := f.applyAddOpenChunkSegmentRefsLocked(c.AddOpenChunkSegmentRefs)
 		fx.openChunkRefAdded = refAdded
 		return result, fx, true
 	case *gastrologv1.VaultCtlCommand_SealOpenChunkManifest:

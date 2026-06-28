@@ -276,6 +276,20 @@ func (f *FSM) applyAddOpenChunkSegmentRef(c *gastrologv1.AddOpenChunkSegmentRefC
 	return nil
 }
 
+func (f *FSM) applyAddOpenChunkSegmentRefs(c *gastrologv1.AddOpenChunkSegmentRefsCommand) error {
+	if c == nil || len(c.GetRefs()) == 0 {
+		return errors.New("open chunk segment refs required")
+	}
+	id := chunkIDFromProto(c.GetChunkId())
+	for _, entry := range c.GetRefs() {
+		cmd := addOpenChunkSegmentRefCommandFromEntry(id, entry)
+		if err := f.applyAddOpenChunkSegmentRef(cmd); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (f *FSM) applySealOpenChunkManifest(c *gastrologv1.SealOpenChunkManifestCommand) error {
 	id := chunkIDFromProto(c.GetChunkId())
 	sealedAt := time.Unix(0, c.GetSealedAtNanos())
@@ -394,6 +408,20 @@ func (f *FSM) applyAddOpenChunkSegmentRefLocked(c *gastrologv1.AddOpenChunkSegme
 		refCount = len(f.openChunk.Refs)
 	}
 	result := f.applyAddOpenChunkSegmentRef(c)
+	if result == nil && f.openChunk != nil && len(f.openChunk.Refs) > refCount {
+		return result, copyOpenChunkManifest(f.openChunk)
+	}
+	return result, nil
+}
+
+// applyAddOpenChunkSegmentRefsLocked applies AddOpenChunkSegmentRefs and returns
+// a callback effect when any new ref was appended. Caller MUST hold f.mu.
+func (f *FSM) applyAddOpenChunkSegmentRefsLocked(c *gastrologv1.AddOpenChunkSegmentRefsCommand) (any, *OpenChunkManifest) {
+	refCount := 0
+	if f.openChunk != nil {
+		refCount = len(f.openChunk.Refs)
+	}
+	result := f.applyAddOpenChunkSegmentRefs(c)
 	if result == nil && f.openChunk != nil && len(f.openChunk.Refs) > refCount {
 		return result, copyOpenChunkManifest(f.openChunk)
 	}
@@ -601,6 +629,62 @@ func NewAddOpenChunkSegmentRef(chunkID chunk.ChunkID, ref OpenChunkSegmentRef) *
 // MarshalAddOpenChunkSegmentRef builds Raft log data for AddOpenChunkSegmentRef.
 func MarshalAddOpenChunkSegmentRef(chunkID chunk.ChunkID, ref OpenChunkSegmentRef) []byte {
 	return mustMarshalCommand(NewAddOpenChunkSegmentRef(chunkID, ref))
+}
+
+func addOpenChunkSegmentRefCommandFromEntry(chunkID chunk.ChunkID, entry *gastrologv1.AddOpenChunkSegmentRefEntry) *gastrologv1.AddOpenChunkSegmentRefCommand {
+	if entry == nil {
+		return nil
+	}
+	return &gastrologv1.AddOpenChunkSegmentRefCommand{
+		ChunkId:            chunkID[:],
+		SegmentId:          entry.GetSegmentId(),
+		FirstRecordNumber:  entry.GetFirstRecordNumber(),
+		LastRecordNumber:   entry.GetLastRecordNumber(),
+		SliceBytes:         entry.GetSliceBytes(),
+		RefAddedAtNanos:    entry.GetRefAddedAtNanos(),
+		WriteStartNanos:    entry.GetWriteStartNanos(),
+		WriteEndNanos:      entry.GetWriteEndNanos(),
+		IngestStartNanos:   entry.GetIngestStartNanos(),
+		IngestEndNanos:     entry.GetIngestEndNanos(),
+		SourceStartNanos:   entry.GetSourceStartNanos(),
+		SourceEndNanos:     entry.GetSourceEndNanos(),
+	}
+}
+
+func openChunkSegmentRefEntryFromRef(ref OpenChunkSegmentRef) *gastrologv1.AddOpenChunkSegmentRefEntry {
+	ws, we, is, ie, ss, se := manifestBoundsToProto(ref.Bounds)
+	return &gastrologv1.AddOpenChunkSegmentRefEntry{
+		SegmentId:          ref.SegmentID[:],
+		FirstRecordNumber:  ref.FirstRecordNumber,
+		LastRecordNumber:   ref.LastRecordNumber,
+		SliceBytes:         ref.SliceBytes,
+		RefAddedAtNanos:    ref.RefAddedAt.UnixNano(),
+		WriteStartNanos:    ws,
+		WriteEndNanos:      we,
+		IngestStartNanos:   is,
+		IngestEndNanos:     ie,
+		SourceStartNanos:   ss,
+		SourceEndNanos:     se,
+	}
+}
+
+// NewAddOpenChunkSegmentRefs builds an AddOpenChunkSegmentRefs command.
+func NewAddOpenChunkSegmentRefs(chunkID chunk.ChunkID, refs []OpenChunkSegmentRef) *gastrologv1.VaultCtlCommand {
+	entries := make([]*gastrologv1.AddOpenChunkSegmentRefEntry, len(refs))
+	for i, ref := range refs {
+		entries[i] = openChunkSegmentRefEntryFromRef(ref)
+	}
+	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_AddOpenChunkSegmentRefs{
+		AddOpenChunkSegmentRefs: &gastrologv1.AddOpenChunkSegmentRefsCommand{
+			ChunkId: chunkID[:],
+			Refs:    entries,
+		},
+	}}
+}
+
+// MarshalAddOpenChunkSegmentRefs builds Raft log data for AddOpenChunkSegmentRefs.
+func MarshalAddOpenChunkSegmentRefs(chunkID chunk.ChunkID, refs []OpenChunkSegmentRef) []byte {
+	return mustMarshalCommand(NewAddOpenChunkSegmentRefs(chunkID, refs))
 }
 
 // NewSealOpenChunkManifest builds a SealOpenChunkManifest command.

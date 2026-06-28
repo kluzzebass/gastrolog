@@ -210,6 +210,28 @@ func TestCommandRoundTrip(t *testing.T) {
 		}
 	})
 
+	t.Run("add_open_chunk_segment_refs", func(t *testing.T) {
+		segA := glidFromByte(0xCE)
+		segB := glidFromByte(0xCF)
+		c := decodeCommand(t, MarshalAddOpenChunkSegmentRefs(id, []OpenChunkSegmentRef{
+			{SegmentID: segA, FirstRecordNumber: 0, LastRecordNumber: 1, SliceBytes: 10, RefAddedAt: now},
+			{SegmentID: segB, FirstRecordNumber: 0, LastRecordNumber: 2, SliceBytes: 20, RefAddedAt: now},
+		}))
+		got := c.GetAddOpenChunkSegmentRefs()
+		if got == nil {
+			t.Fatalf("wrong case: %T", c.GetCommand())
+		}
+		if string(got.GetChunkId()) != string(id[:]) {
+			t.Errorf("chunk id mismatch")
+		}
+		if len(got.GetRefs()) != 2 {
+			t.Fatalf("refs = %d, want 2", len(got.GetRefs()))
+		}
+		if got.GetRefs()[1].GetSliceBytes() != 20 {
+			t.Errorf("second ref bytes = %d", got.GetRefs()[1].GetSliceBytes())
+		}
+	})
+
 	t.Run("seal_open_chunk_manifest", func(t *testing.T) {
 		c := decodeCommand(t, MarshalSealOpenChunkManifest(id, now))
 		if c.GetSealOpenChunkManifest().GetSealedAtNanos() != now.UnixNano() {

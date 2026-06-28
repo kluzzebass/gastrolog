@@ -141,3 +141,27 @@ func appendUniqueGLIDs(pending []glid.GLID, ids []glid.GLID) []glid.GLID {
 	}
 	return pending
 }
+
+// enqueueRegistryReleaseCandidates queues every registry segment that is fully
+// consumed and holder-ready. Catches segments missed by afterSealBuild and
+// retries after the last required holder ack arrived before release ran.
+func (v *vaultChunking) enqueueRegistryReleaseCandidates() {
+	if !v.cfg.IsLeader() {
+		return
+	}
+	fsm := v.fsm()
+	required := v.requiredHolders()
+	holdersWired := v.cfg.RequiredHolders != nil
+	var candidates []glid.GLID
+	for _, entry := range fsm.ListCompletedSegments() {
+		if mayReleaseFromRegistry(fsm, entry.SegmentID, required, holdersWired) {
+			candidates = append(candidates, entry.SegmentID)
+		}
+	}
+	if len(candidates) == 0 {
+		return
+	}
+	v.mu.Lock()
+	v.pendingRelease = appendUniqueGLIDs(v.pendingRelease, candidates)
+	v.mu.Unlock()
+}

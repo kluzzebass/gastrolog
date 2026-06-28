@@ -2,6 +2,7 @@ package chunking
 
 import (
 	"context"
+	"maps"
 	"time"
 
 	"gastrolog/internal/chunk"
@@ -9,6 +10,32 @@ import (
 	"gastrolog/internal/record"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
+
+const (
+	defaultRefApplyBatchSize = 64
+	maxRefApplyBatchSize     = 256
+)
+
+// refApplyBatchSize is how many segment refs one planner apply may carry.
+func refApplyBatchSize(policy ManifestRotationPolicy) int {
+	perChunk := int64(defaultRefApplyBatchSize)
+	if policy.MaxRecords > 0 {
+		perChunk = int64(policy.MaxRecords)/5000 + 8 //nolint:gosec // G115: MaxRecords bounded by rotation policy
+	}
+	if perChunk < defaultRefApplyBatchSize {
+		return defaultRefApplyBatchSize
+	}
+	if perChunk > maxRefApplyBatchSize {
+		return maxRefApplyBatchSize
+	}
+	return int(perChunk)
+}
+
+type refBatchResult struct {
+	refs   []AddRefDecision
+	rotate bool
+	noSeg  bool
+}
 
 // CatchUpBudget returns how many planner steps to attempt in one wake/tick pass.
 func CatchUpBudget(eligible int, policy ManifestRotationPolicy) int {
@@ -66,10 +93,16 @@ func (v *vaultChunking) now() time.Time {
 	return time.Now()
 }
 
-// planOnce runs one leader planner step. cronDue=true forces a cron rotation
-// trigger for a non-empty open manifest (scheduler-driven sealing); the planner
-// no-ops for non-leaders regardless.
+// planOnce runs one leader planner step (at most one segment ref per apply).
+// cronDue=true forces a cron rotation trigger for a non-empty open manifest;
+// the planner no-ops for non-leaders regardless.
 func (v *vaultChunking) planOnce(ctx context.Context, cronDue bool) error {
+	return v.planLeaderStep(ctx, cronDue, 1)
+}
+
+// planLeaderStep proposes open/seal/ref vault-ctl commands. maxRefs caps how
+// many segment refs one apply may carry (1 for planOnce, larger for catch-up).
+func (v *vaultChunking) planLeaderStep(ctx context.Context, cronDue bool, maxRefs int) error {
 	if !v.cfg.IsLeader() || v.cfg.Applier == nil {
 		return nil
 	}
@@ -106,48 +139,92 @@ func (v *vaultChunking) planOnce(ctx context.Context, cronDue bool) error {
 		return v.applySealOpenManifest(open.ChunkID, evalNow)
 	}
 
-	seg, ok := v.lazyPickSegment(manifest, resume, eligible)
-	if !ok {
+	batch := v.collectRefBatch(manifest, resume, eligible, refAddedAt, evalNow, cronDue, maxRefs)
+	v.planMu.Unlock()
+
+	if len(batch.refs) > 0 {
+		refs := make([]vaultctlfsm.OpenChunkSegmentRef, len(batch.refs))
+		for i, ref := range batch.refs {
+			refs[i] = openChunkSegmentRefFromDecision(ref)
+		}
+		return v.cfg.Applier.Apply(vaultctlfsm.MarshalAddOpenChunkSegmentRefs(open.ChunkID, refs))
+	}
+	if batch.rotate {
+		return v.applySealOpenManifest(open.ChunkID, evalNow)
+	}
+	if batch.noSeg {
 		if err := discardStalledEmptyOpen(open, manifest, v.cfg.Policy, evalNow, v.cfg.Applier); err != nil {
-			v.planMu.Unlock()
 			return err
 		}
 		if v.cfg.Collector != nil && len(eligible) > 0 {
 			_ = v.cfg.Collector.CollectOnce(ctx)
 		}
-		v.planMu.Unlock()
-		return nil
 	}
+	return nil
+}
 
-	decision := Plan(PlannerInput{
-		Manifest:   manifest,
-		Resume:     resume,
-		Segments:   []SegmentView{seg},
-		Policy:     v.cfg.Policy,
-		RefAddedAt: refAddedAt,
-		EvalNow:    evalNow,
-		CronDue:    cronDue,
-	})
-	v.planMu.Unlock()
-
-	switch decision.Action {
-	case PlannerIdle:
-		return nil
-	case PlannerRotate:
-		return v.applySealOpenManifest(open.ChunkID, evalNow)
-	case PlannerAddRef:
-		ref := decision.Ref
-		return v.cfg.Applier.Apply(vaultctlfsm.MarshalAddOpenChunkSegmentRef(open.ChunkID, vaultctlfsm.OpenChunkSegmentRef{
-			SegmentID:         ref.SegmentID,
-			FirstRecordNumber: ref.FirstRecordNumber,
-			LastRecordNumber:  ref.LastRecordNumber,
-			SliceBytes:        ref.SliceBytes,
-			RefAddedAt:        ref.RefAddedAt,
-			Bounds:            ref.Bounds,
-		}))
-	default:
-		return nil
+func openChunkSegmentRefFromDecision(ref AddRefDecision) vaultctlfsm.OpenChunkSegmentRef {
+	return vaultctlfsm.OpenChunkSegmentRef{
+		SegmentID:         ref.SegmentID,
+		FirstRecordNumber: ref.FirstRecordNumber,
+		LastRecordNumber:  ref.LastRecordNumber,
+		SliceBytes:        ref.SliceBytes,
+		RefAddedAt:        ref.RefAddedAt,
+		Bounds:            ref.Bounds,
 	}
+}
+
+// collectRefBatch simulates planner steps under planMu and returns the refs
+// that can be committed in one vault-ctl apply. Caller holds planMu.
+func (v *vaultChunking) collectRefBatch(
+	manifest ManifestSnapshot,
+	resume map[glid.GLID]uint32,
+	eligible []vaultctlfsm.CompletedSegmentEntry,
+	refAddedAt, evalNow time.Time,
+	cronDue bool,
+	maxRefs int,
+) refBatchResult {
+	var out refBatchResult
+	if maxRefs <= 0 {
+		maxRefs = defaultRefApplyBatchSize
+	}
+	sim := manifest
+	simResume := maps.Clone(resume)
+	if simResume == nil {
+		simResume = make(map[glid.GLID]uint32)
+	}
+	for range maxRefs {
+		if _, ok := v.cfg.Policy.rotateTrigger(sim, cronDue, evalNow); ok && manifestHasContent(sim) {
+			out.rotate = true
+			return out
+		}
+		seg, ok := v.lazyPickSegment(sim, simResume, eligible)
+		if !ok {
+			out.noSeg = true
+			return out
+		}
+		decision := Plan(PlannerInput{
+			Manifest:   sim,
+			Resume:     simResume,
+			Segments:   []SegmentView{seg},
+			Policy:     v.cfg.Policy,
+			RefAddedAt: refAddedAt,
+			EvalNow:    evalNow,
+			CronDue:    cronDue,
+		})
+		switch decision.Action {
+		case PlannerAddRef:
+			out.refs = append(out.refs, decision.Ref)
+			sim = manifestAfterAddRef(sim, decision.Ref)
+			simResume[decision.Ref.SegmentID] = decision.Ref.LastRecordNumber + 1
+		case PlannerRotate:
+			out.rotate = true
+			return out
+		case PlannerIdle:
+			return out
+		}
+	}
+	return out
 }
 
 // applySealOpenManifest proposes SealOpenChunkManifest. Sealed manifests queue
@@ -208,7 +285,7 @@ func (v *vaultChunking) planCatchUp(ctx context.Context) error {
 		}
 		hadOpen := open != nil
 
-		if err := v.planOnce(ctx, false); err != nil {
+		if err := v.planLeaderStep(ctx, false, refApplyBatchSize(v.cfg.Policy)); err != nil {
 			return err
 		}
 

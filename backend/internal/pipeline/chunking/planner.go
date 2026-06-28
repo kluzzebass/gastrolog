@@ -1,6 +1,7 @@
 package chunking
 
 import (
+	"maps"
 	"time"
 
 	"gastrolog/internal/glid"
@@ -292,4 +293,34 @@ func segmentPrecedes(a SegmentView, aEvent record.EventID, b SegmentView, bEvent
 		return cmp < 0
 	}
 	return a.ID.Compare(b.ID) < 0
+}
+
+// manifestAfterAddRef returns the manifest snapshot after appending one planned
+// ref (for leader-side batch simulation before a single vault-ctl apply).
+func manifestAfterAddRef(m ManifestSnapshot, ref AddRefDecision) ManifestSnapshot {
+	count := uint64(ref.LastRecordNumber - ref.FirstRecordNumber + 1)
+	refs := append(append([]ManifestRef(nil), m.Refs...), ManifestRef{
+		SegmentID:         ref.SegmentID,
+		FirstRecordNumber: ref.FirstRecordNumber,
+		LastRecordNumber:  ref.LastRecordNumber,
+	})
+	bounds := m.Bounds
+	vaultctlfsm.MergeManifestTimeBounds(&bounds, ref.Bounds)
+	return ManifestSnapshot{
+		OpenedAt:     m.OpenedAt,
+		TotalRecords: m.TotalRecords + count,
+		TotalBytes:   m.TotalBytes + ref.SliceBytes,
+		Bounds:       bounds,
+		Refs:         refs,
+	}
+}
+
+// resumeAfterAddRef returns resume cursor state after one ref is committed.
+func resumeAfterAddRef(resume map[glid.GLID]uint32, ref AddRefDecision) map[glid.GLID]uint32 {
+	out := maps.Clone(resume)
+	if out == nil {
+		out = make(map[glid.GLID]uint32)
+	}
+	out[ref.SegmentID] = ref.LastRecordNumber + 1
+	return out
 }

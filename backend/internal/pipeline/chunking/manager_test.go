@@ -305,6 +305,63 @@ func TestManagerBuildOnceWaitsForHoldersBeforeRelease(t *testing.T) {
 	}
 }
 
+func TestManagerWorkerReleasesAfterBuildWithoutNewHolderAck(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	segID := glid.New()
+	vaultID := glid.New()
+	chunkID := chunk.NewChunkID()
+	home := t.TempDir()
+	writeHeadSegment(t, home, segID, vaultID, []recordForSeg{{0, base, "one"}})
+
+	fsm := vaultctlfsm.New()
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalPublishCompletedSegment(vaultctlfsm.CompletedSegmentEntry{
+		SegmentID: segID, RecordCount: 1, ByteSize: 1,
+		FirstIngestTS: base, LastIngestTS: base, Checksum: 1, PublishedAt: base,
+	}))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAckSegmentHolder(segID, "home-a"))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAckSegmentHolder(segID, "home-b"))
+	openedAt := base
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalOpenChunkManifest(chunkID, openedAt))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
+		SegmentID: segID, FirstRecordNumber: 0, LastRecordNumber: 0,
+		SliceBytes: 4096, RefAddedAt: openedAt,
+	}))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, base.Add(time.Minute)))
+
+	mgr := chunking.New(chunking.Config{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() { errCh <- mgr.Run(ctx) }()
+
+	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
+		VaultRoot: home,
+		ChunkRoot: filepath.Join(home, "chunks"),
+		FSM:       fsm,
+		Locate:    chunking.HeadSegmentLocator{Root: home},
+		Applier:   &fsmApplier{fsm: fsm},
+		IsLeader:  func() bool { return true },
+		RequiredHolders: func() []string {
+			return []string{"home-a", "home-b"}
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := mgr.BuildOnce(ctx, vaultID); err != nil {
+		t.Fatalf("BuildOnce: %v", err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if fsm.GetCompletedSegment(segID) == nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("registry entry must release after build without a new holder ack")
+}
+
 func TestBuildMaterializesMissingSegments(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
