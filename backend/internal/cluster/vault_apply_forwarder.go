@@ -62,7 +62,7 @@ func (f *VaultApplyForwarder) forwardToLeader(data []byte) error {
 		Command: data,
 	}
 	resp := &gastrologv1.ForwardVaultApplyResponse{}
-	if err := f.peers.InvokeService(ctx, string(leaderID), "vault-apply-forward",
+	if err := f.peers.InvokeService(ctx, string(leaderID), PurposeVaultApply,
 		"/gastrolog.v1.ClusterService/ForwardVaultApply", req, resp); err != nil {
 		return fmt.Errorf("forward vault apply to %s: %w", leaderID, err)
 	}

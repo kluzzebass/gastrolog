@@ -15,7 +15,7 @@ import (
 	"google.golang.org/grpc"
 )
 
-const managedFilePurpose = "managed-file-transfer"
+const managedFilePurpose = PurposeFileXfer
 
 const managedFileChunkSize = 64 * 1024 // 64 KB per streamed chunk
 

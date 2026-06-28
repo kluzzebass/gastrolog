@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -118,7 +119,7 @@ type StatsCollectorConfig struct {
 	Broadcaster  *Broadcaster
 	RaftStats    RaftStatsProvider
 	Stats        StatsProvider
-	PeerConns         PeerConnSnapshotProvider // optional; nil disables peer conn stats
+	PeerConns    PeerConnSnapshotProvider // optional; nil disables peer conn stats
 	Alerts       AlertProvider           // optional; nil if no alert collector
 	Jobs         JobsProvider            // optional; nil in single-node mode
 	NodeID            string
@@ -139,7 +140,8 @@ type StatsCollector struct {
 	cfg StatsCollectorConfig
 
 	mu        sync.Mutex
-	peerConnStats map[string]*peerConnStatsWindow
+	peerConnStats    map[string]*peerConnStatsWindow
+	peerTrafficStats map[string]*peerConnStatsWindow // keyed by peer node ID
 }
 
 const peerConnStatsSparkPoints = 20
@@ -161,8 +163,9 @@ func NewStatsCollector(cfg StatsCollectorConfig) *StatsCollector {
 		cfg.HeartbeatInterval = 1 * time.Second
 	}
 	return &StatsCollector{
-		cfg:       cfg,
-		peerConnStats: make(map[string]*peerConnStatsWindow),
+		cfg:              cfg,
+		peerConnStats:    make(map[string]*peerConnStatsWindow),
+		peerTrafficStats: make(map[string]*peerConnStatsWindow),
 	}
 }
 
@@ -177,6 +180,7 @@ func (c *StatsCollector) Delete(peer string) {
 			delete(c.peerConnStats, k)
 		}
 	}
+	delete(c.peerTrafficStats, peer)
 	c.mu.Unlock()
 }
 
@@ -187,6 +191,11 @@ func (c *StatsCollector) ReconcilePeers(keep map[string]struct{}) {
 		peer := strings.SplitN(k, "\x00", 2)[0]
 		if _, ok := keep[peer]; !ok {
 			delete(c.peerConnStats, k)
+		}
+	}
+	for peer := range c.peerTrafficStats {
+		if _, ok := keep[peer]; !ok {
+			delete(c.peerTrafficStats, peer)
 		}
 	}
 }
@@ -343,6 +352,7 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 			})
 		}
 	}
+	c.appendPeerTrafficTotals(stats, now, stepWindows)
 
 	// Active alerts.
 	if c.cfg.Alerts != nil {
@@ -373,21 +383,57 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 	return stats
 }
 
+func (c *StatsCollector) appendPeerTrafficTotals(stats *gastrologv1.NodeStats, now time.Time, stepWindows bool) {
+	totals := make(map[string]struct {
+		sent int64
+		recv int64
+	})
+	for _, row := range stats.PeerConnections {
+		t := totals[row.Peer]
+		t.sent += row.BytesSent
+		t.recv += row.BytesReceived
+		totals[row.Peer] = t
+	}
+	for peer, sum := range totals {
+		txPerSec, rxPerSec, txSpark, rxSpark := c.observePeerTrafficTotal(now, peer, sum.sent, sum.recv, stepWindows)
+		stats.PeerTrafficTotals = append(stats.PeerTrafficTotals, &gastrologv1.PeerTrafficTotal{
+			Peer:          peer,
+			BytesSent:     sum.sent,
+			BytesReceived: sum.recv,
+			TxBytesPerSec: txPerSec,
+			RxBytesPerSec: rxPerSec,
+			TxSpark:       txSpark,
+			RxSpark:       rxSpark,
+		})
+	}
+	sort.Slice(stats.PeerTrafficTotals, func(i, j int) bool {
+		return stats.PeerTrafficTotals[i].Peer < stats.PeerTrafficTotals[j].Peer
+	})
+}
+
 func peerConnStatsKey(s PeerConnSnapshot) string {
 	return fmt.Sprintf("%s\x00%s\x00%s\x00%d", s.PeerNodeID, s.Lane, s.GroupID, s.PoolIndex)
 }
 
 func (c *StatsCollector) observePeerConnStats(now time.Time, key string, sent, recv int64, step bool) (txPerSec, rxPerSec float64, txSpark, rxSpark []float64) {
+	return c.observeTrafficWindow(now, key, sent, recv, step, c.peerConnStats)
+}
+
+func (c *StatsCollector) observePeerTrafficTotal(now time.Time, peer string, sent, recv int64, step bool) (txPerSec, rxPerSec float64, txSpark, rxSpark []float64) {
+	return c.observeTrafficWindow(now, peer, sent, recv, step, c.peerTrafficStats)
+}
+
+func (c *StatsCollector) observeTrafficWindow(now time.Time, key string, sent, recv int64, step bool, store map[string]*peerConnStatsWindow) (txPerSec, rxPerSec float64, txSpark, rxSpark []float64) {
 	if key == "" {
 		return 0, 0, nil, nil
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	w := c.peerConnStats[key]
+	w := store[key]
 	if w == nil {
 		w = &peerConnStatsWindow{lastSent: sent, lastRecv: recv, lastAt: now}
-		c.peerConnStats[key] = w
+		store[key] = w
 		return 0, 0, nil, nil
 	}
 

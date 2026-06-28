@@ -87,7 +87,7 @@ func (tr *ChunkReplicator) getOrOpen(vaultID glid.GLID, nodeID string) (*vaultSt
 
 	// Open a new stream.
 	ctx, cancel := context.WithCancel(context.Background())
-	h, stream, err := tr.peers.OpenServiceStream(ctx, nodeID, "chunk-replicator",
+	h, stream, err := tr.peers.OpenServiceStream(ctx, nodeID, PurposeReplicate,
 		chunkReplicationStreamDesc,
 		"/gastrolog.v1.ClusterService/ChunkReplication",
 	)
@@ -319,7 +319,7 @@ func (tr *ChunkReplicator) RequestReplicaCatchup(ctx context.Context, leaderNode
 		RequesterNodeId: []byte(requesterNodeID),
 	}
 	resp := &gastrologv1.RequestReplicaCatchupResponse{}
-	if err := tr.peers.InvokeService(ctx, leaderNodeID, "chunk-replicator-catchup",
+	if err := tr.peers.InvokeService(ctx, leaderNodeID, PurposeReplCatchup,
 		"/gastrolog.v1.ClusterService/RequestReplicaCatchup", req, resp); err != nil {
 		return 0, err
 	}

@@ -50,7 +50,7 @@ func (ct *ChunkTransferrer) TransferRecords(ctx context.Context, nodeID string, 
 	ctx, cancel := context.WithTimeout(ctx, streamCallTimeout)
 	defer cancel()
 
-	h, stream, err := ct.peers.OpenServiceStream(ctx, nodeID, "chunk-transferrer",
+	h, stream, err := ct.peers.OpenServiceStream(ctx, nodeID, PurposeChunkXfer,
 		&grpc.StreamDesc{StreamName: "ForwardImportRecords", ClientStreams: true},
 		"/gastrolog.v1.ClusterService/ForwardImportRecords",
 	)
@@ -101,7 +101,7 @@ func (ct *ChunkTransferrer) WaitVaultReady(ctx context.Context, nodeID string, v
 		probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		req := &gastrologv1.ForwardListChunksRequest{VaultId: vid}
 		resp := &gastrologv1.ForwardListChunksResponse{}
-		err := ct.peers.InvokeService(probeCtx, nodeID, "chunk-transferrer-wait",
+		err := ct.peers.InvokeService(probeCtx, nodeID, PurposeChunkWait,
 			"/gastrolog.v1.ClusterService/ForwardListChunks", req, resp)
 		cancel()
 		if err == nil {

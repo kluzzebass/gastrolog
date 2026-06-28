@@ -85,7 +85,7 @@ func (b *Broadcaster) sendToPeer(ctx context.Context, id string, req *gastrologv
 	defer cancel()
 
 	resp := &gastrologv1.BroadcastResponse{}
-	if err := b.peers.InvokeService(peerCtx, id, "broadcast",
+	if err := b.peers.InvokeService(peerCtx, id, PurposeBroadcast,
 		"/gastrolog.v1.ClusterService/Broadcast", req, resp); err != nil {
 		b.logPeerError(id, "send", err)
 		return

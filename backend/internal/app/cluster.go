@@ -553,7 +553,7 @@ func makeRemoveNodeFunc(
 		peerConns := clusterSrv.PeerConns()
 		var evictHandle cluster.PeerConnHandle
 		if peerConns != nil {
-			if h, err := peerConns.AcquireService(targetNodeID, "notify-eviction"); err == nil {
+			if h, err := peerConns.AcquireService(targetNodeID, cluster.PurposeEviction); err == nil {
 				evictHandle = h
 			} else {
 				logger.Warn("cannot pre-connect to evicted node for notification", "error", err)
@@ -620,7 +620,7 @@ func makeRemoveNodeFunc(
 			Force:  force,
 		}
 		resp := &gastrologv1.ForwardRemoveNodeResponse{}
-		if err := peerConns.InvokeService(ctx, leaderID, "remove-node-forward",
+		if err := peerConns.InvokeService(ctx, leaderID, cluster.PurposeRemoveNode,
 			"/gastrolog.v1.ClusterService/ForwardRemoveNode", req, resp); err != nil {
 			return fmt.Errorf("forward remove node to leader %s: %w", leaderID, err)
 		}
@@ -791,7 +791,7 @@ func forwardSuffrage(clusterSrv *cluster.Server, leaderID, targetNodeID string, 
 		Voter:    voter,
 	}
 	resp := &gastrologv1.ForwardSetNodeSuffrageResponse{}
-	if err := peerConns.InvokeService(context.Background(), leaderID, "set-node-suffrage-forward",
+	if err := peerConns.InvokeService(context.Background(), leaderID, cluster.PurposeSuffrage,
 		"/gastrolog.v1.ClusterService/ForwardSetNodeSuffrage", req, resp); err != nil {
 		return fmt.Errorf("forward suffrage to leader %s: %w", leaderID, err)
 	}

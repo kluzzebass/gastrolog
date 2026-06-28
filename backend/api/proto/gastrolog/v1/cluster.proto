@@ -120,9 +120,13 @@ message NodeStats {
   // Active system alerts on this node.
   repeated SystemAlert alerts = 34;
 
-  // Outbound peer connection catalog (service pools + raft singletons).
+  // Per-node outbound peer connection catalog (service pools + raft singletons).
   // Populated from PeerConnManager on each broadcast tick. See gastrolog-1dg8z.
   repeated PeerConnStat peer_connections = 35;
+
+  // Per-peer sum of this node's peer_connections. Inspector merges both peers'
+  // lane rows client-side for the full link view. See gastrolog-5uyy6.
+  repeated PeerTrafficTotal peer_traffic_totals = 38;
 
   // Per-vault on-disk pipeline segment counts on this node (working/completed
   // at origins; head/pre-head on homes). Aggregated cluster-wide by
@@ -145,7 +149,7 @@ message VaultPipelineNodeDisk {
   uint32 pre_head_segments = 5;
 }
 
-// PeerConnStat reports one managed outbound cluster gRPC connection.
+// PeerConnStat reports one managed outbound cluster gRPC connection on this node.
 message PeerConnStat {
   string peer = 1;
   string lane = 2;              // "service" | "raft"
@@ -159,6 +163,17 @@ message PeerConnStat {
   double rx_bytes_per_sec = 10;
   repeated double tx_spark = 11;
   repeated double rx_spark = 12;
+}
+
+// PeerTrafficTotal is the per-peer sum of this node's peer_connections.
+message PeerTrafficTotal {
+  string peer = 1;
+  int64 bytes_sent = 2;
+  int64 bytes_received = 3;
+  double tx_bytes_per_sec = 4;
+  double rx_bytes_per_sec = 5;
+  repeated double tx_spark = 6;
+  repeated double rx_spark = 7;
 }
 
 // SystemAlert represents a runtime condition that operators should be aware of.

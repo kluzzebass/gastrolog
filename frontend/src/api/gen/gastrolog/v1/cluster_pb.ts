@@ -633,12 +633,20 @@ export class NodeStats extends Message<NodeStats> {
   alerts: SystemAlert[] = [];
 
   /**
-   * Outbound peer connection catalog (service pools + raft singletons).
+   * Per-node outbound peer connection catalog (service pools + raft singletons).
    * Populated from PeerConnManager on each broadcast tick. See gastrolog-1dg8z.
    *
    * @generated from field: repeated gastrolog.v1.PeerConnStat peer_connections = 35;
    */
   peerConnections: PeerConnStat[] = [];
+
+  /**
+   * Per-peer sum of this node's peer_connections. Inspector merges both peers'
+   * lane rows client-side for the full link view. See gastrolog-5uyy6.
+   *
+   * @generated from field: repeated gastrolog.v1.PeerTrafficTotal peer_traffic_totals = 38;
+   */
+  peerTrafficTotals: PeerTrafficTotal[] = [];
 
   /**
    * Per-vault on-disk pipeline segment counts on this node (working/completed
@@ -701,6 +709,7 @@ export class NodeStats extends Message<NodeStats> {
     { no: 33, name: "route_per_route_stats", kind: "message", T: PerRouteStats, repeated: true },
     { no: 34, name: "alerts", kind: "message", T: SystemAlert, repeated: true },
     { no: 35, name: "peer_connections", kind: "message", T: PeerConnStat, repeated: true },
+    { no: 38, name: "peer_traffic_totals", kind: "message", T: PeerTrafficTotal, repeated: true },
     { no: 36, name: "vault_pipeline_disk", kind: "message", T: VaultPipelineNodeDisk, repeated: true },
     { no: 37, name: "storage_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
   ]);
@@ -787,7 +796,7 @@ export class VaultPipelineNodeDisk extends Message<VaultPipelineNodeDisk> {
 }
 
 /**
- * PeerConnStat reports one managed outbound cluster gRPC connection.
+ * PeerConnStat reports one managed outbound cluster gRPC connection on this node.
  *
  * @generated from message gastrolog.v1.PeerConnStat
  */
@@ -896,6 +905,81 @@ export class PeerConnStat extends Message<PeerConnStat> {
 
   static equals(a: PeerConnStat | PlainMessage<PeerConnStat> | undefined, b: PeerConnStat | PlainMessage<PeerConnStat> | undefined): boolean {
     return proto3.util.equals(PeerConnStat, a, b);
+  }
+}
+
+/**
+ * PeerTrafficTotal is the per-peer sum of this node's peer_connections.
+ *
+ * @generated from message gastrolog.v1.PeerTrafficTotal
+ */
+export class PeerTrafficTotal extends Message<PeerTrafficTotal> {
+  /**
+   * @generated from field: string peer = 1;
+   */
+  peer = "";
+
+  /**
+   * @generated from field: int64 bytes_sent = 2;
+   */
+  bytesSent = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 bytes_received = 3;
+   */
+  bytesReceived = protoInt64.zero;
+
+  /**
+   * @generated from field: double tx_bytes_per_sec = 4;
+   */
+  txBytesPerSec = 0;
+
+  /**
+   * @generated from field: double rx_bytes_per_sec = 5;
+   */
+  rxBytesPerSec = 0;
+
+  /**
+   * @generated from field: repeated double tx_spark = 6;
+   */
+  txSpark: number[] = [];
+
+  /**
+   * @generated from field: repeated double rx_spark = 7;
+   */
+  rxSpark: number[] = [];
+
+  constructor(data?: PartialMessage<PeerTrafficTotal>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PeerTrafficTotal";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "peer", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "bytes_sent", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 3, name: "bytes_received", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 4, name: "tx_bytes_per_sec", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
+    { no: 5, name: "rx_bytes_per_sec", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
+    { no: 6, name: "tx_spark", kind: "scalar", T: 1 /* ScalarType.DOUBLE */, repeated: true },
+    { no: 7, name: "rx_spark", kind: "scalar", T: 1 /* ScalarType.DOUBLE */, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PeerTrafficTotal {
+    return new PeerTrafficTotal().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PeerTrafficTotal {
+    return new PeerTrafficTotal().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PeerTrafficTotal {
+    return new PeerTrafficTotal().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PeerTrafficTotal | PlainMessage<PeerTrafficTotal> | undefined, b: PeerTrafficTotal | PlainMessage<PeerTrafficTotal> | undefined): boolean {
+    return proto3.util.equals(PeerTrafficTotal, a, b);
   }
 }
 

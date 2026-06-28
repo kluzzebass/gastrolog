@@ -93,6 +93,7 @@ type PeerConnManager struct {
 	clusterTLS *ClusterTLS
 	nodeID     string
 	logger     *slog.Logger
+	byteMetrics *PeerByteMetrics // optional; mirrors outbound bytes per peer
 
 	servicePoolMax int
 
@@ -173,6 +174,10 @@ type PeerConnManagerConfig struct {
 	Logger                *slog.Logger
 	ServicePoolMaxPerPeer int
 	StaticResolve         func(nodeID string) (string, bool)
+	// ByteMetrics receives a per-peer mirror of outbound wire bytes from every
+	// managed connection (service and raft lanes). Inbound bytes are tracked on
+	// the cluster server stats handler separately.
+	ByteMetrics *PeerByteMetrics
 }
 
 // NewPeerConnManager creates the central outbound connection manager.
@@ -188,6 +193,7 @@ func NewPeerConnManager(cfg PeerConnManagerConfig) *PeerConnManager {
 		logger:         compPeerConns.Apply(logging.Default(cfg.Logger)),
 		servicePoolMax: poolMax,
 		staticResolve:  cfg.StaticResolve,
+		byteMetrics:    cfg.ByteMetrics,
 	}
 	for i := range m.shards {
 		m.shards[i].entries = make(map[string]*connEntry)
@@ -549,7 +555,7 @@ func (m *PeerConnManager) dial(spec ConnSpec, poolIndex int) (*managedConn, erro
 		}),
 		grpc.WithUnaryInterceptor(m.attachNodeIDUnaryInterceptor),
 		grpc.WithStreamInterceptor(m.attachNodeIDStreamInterceptor),
-		grpc.WithStatsHandler(newManagedConnStatsHandler(mc)),
+		grpc.WithStatsHandler(newManagedConnStatsHandler(mc, m.byteMetrics)),
 	}
 	conn, err := grpc.NewClient(addr, dialOpts...)
 	if err != nil {

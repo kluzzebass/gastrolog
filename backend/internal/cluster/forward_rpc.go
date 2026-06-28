@@ -135,7 +135,7 @@ func httpStatusToConnectCode(httpStatus int) uint32 {
 	}
 }
 
-const forwardRPCPurpose = "forward-rpc"
+const forwardRPCPurpose = PurposeFwdRPC
 
 // ForwardRPC opens a ForwardRPC bidirectional stream to a remote node and
 // sends a single request, returning the serialized response payload(s).

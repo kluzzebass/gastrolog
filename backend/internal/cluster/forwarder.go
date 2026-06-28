@@ -30,7 +30,7 @@ func (f *Forwarder) Forward(ctx context.Context, data []byte) (uint64, error) {
 		return 0, errors.New("no known leader")
 	}
 
-	h, err := f.peers.AcquireService(string(leaderID), "forward-apply")
+	h, err := f.peers.AcquireService(string(leaderID), PurposeForward)
 	if err != nil {
 		return 0, err
 	}

@@ -104,9 +104,10 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings }: Readonly<NodeDe
         )}
       </Section>
 
-      {/* Network section — per-peer tx/rx across all inter-node transport. */}
+      {/* Network — per-link traffic (both peers' lanes merged). */}
       <Section title="Network" dark={dark}>
         <PeerBytesSection
+          viewNodeId={nodeIdTyped}
           nodeStats={nodeInfo?.stats ?? null}
           nodes={registry}
           dark={dark}

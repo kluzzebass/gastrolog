@@ -11,7 +11,7 @@ import (
 	"google.golang.org/grpc"
 )
 
-const searchForwarderPurpose = "search-forwarder"
+const searchForwarderPurpose = PurposeSearch
 
 // SearchForwarder sends search requests to remote cluster nodes.
 type SearchForwarder struct {

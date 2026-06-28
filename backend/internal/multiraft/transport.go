@@ -195,7 +195,7 @@ func (t *Transport[K]) acquireRaft(target raft.ServerAddress, groupID K) (RaftCo
 		return nil, nil, errors.New("multiraft transport: peer connection pool not configured")
 	}
 	gid := t.groupIDString(groupID)
-	lease, err := t.peerPool.AcquireRaft(target, gid, "multiraft/"+gid)
+	lease, err := t.peerPool.AcquireRaft(target, gid, "raft")
 	if err != nil {
 		return nil, nil, err
 	}

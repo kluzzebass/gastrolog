@@ -12,7 +12,7 @@ import (
 	"google.golang.org/grpc"
 )
 
-const segmentPullerPurpose = "segment-puller"
+const segmentPullerPurpose = PurposeSegmentPull
 
 // SegmentPuller streams completed segments from a peer node (the segment
 // origin or another holder) over the internode ClusterService, using the shared

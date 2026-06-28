@@ -61,9 +61,9 @@ type Config struct {
 	// per peer (default DefaultServicePoolMaxPerPeer).
 	ServicePoolMaxPerPeer int
 
-	// ByteMetrics tracks cumulative inbound per-peer gRPC wire bytes on the
-	// cluster server. Outbound bytes are tracked per connection on
-	// PeerConnManager. See gastrolog-47u85 / gastrolog-1dg8z.
+	// ByteMetrics tracks per-peer gRPC wire bytes on the cluster port.
+	// Inbound: server stats handler (all lanes). Outbound: mirrored from
+	// PeerConnManager when wired in SetRaft. See gastrolog-5uyy6.
 	ByteMetrics *PeerByteMetrics
 
 	// Logger for structured logging.
@@ -340,6 +340,7 @@ func (s *Server) SetRaft(r *hraft.Raft) {
 			NodeID:                s.cfg.NodeID,
 			Logger:                s.logger,
 			ServicePoolMaxPerPeer: s.cfg.ServicePoolMaxPerPeer,
+			ByteMetrics:           s.cfg.ByteMetrics,
 		})
 	}
 	if s.tm != nil {
