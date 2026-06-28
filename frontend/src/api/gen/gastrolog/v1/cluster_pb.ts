@@ -649,6 +649,15 @@ export class NodeStats extends Message<NodeStats> {
    */
   vaultPipelineDisk: VaultPipelineNodeDisk[] = [];
 
+  /**
+   * Total on-disk bytes on this node (home, --vaults root, configured
+   * FileStorage paths). Distinct from per-vault data_bytes (chunk payload
+   * totals only).
+   *
+   * @generated from field: int64 storage_bytes = 37;
+   */
+  storageBytes = protoInt64.zero;
+
   constructor(data?: PartialMessage<NodeStats>) {
     super();
     proto3.util.initPartial(data, this);
@@ -693,6 +702,7 @@ export class NodeStats extends Message<NodeStats> {
     { no: 34, name: "alerts", kind: "message", T: SystemAlert, repeated: true },
     { no: 35, name: "peer_connections", kind: "message", T: PeerConnStat, repeated: true },
     { no: 36, name: "vault_pipeline_disk", kind: "message", T: VaultPipelineNodeDisk, repeated: true },
+    { no: 37, name: "storage_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): NodeStats {

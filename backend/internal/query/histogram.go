@@ -981,7 +981,19 @@ func timechartChunkByIngestTS(
 	// (on-disk for sealed chunks, B+ tree for monotonic active chunks,
 	// cached local file for cloud-backed sealed chunks). The FSM has
 	// already promised an index exists for this chunk.
-	timechartChunkByIndex(ir, meta, start, bucketWidth, firstBucket, lastBucket, counts, cloudFlags)
+	if timechartChunkByIndex(ir, meta, start, bucketWidth, firstBucket, lastBucket, counts, cloudFlags) {
+		return
+	}
+	if meta.CloudBacked || meta.RecordCount == 0 {
+		return
+	}
+	// Local chunk: index path missed in-window records (transient probe miss
+	// or bucket clamp). Walk records by IngestTS — never smear via overlap.
+	if meta.Sealed {
+		timechartChunkByIndex(ir, meta, start, bucketWidth, 0, numBuckets-1, counts, cloudFlags)
+		return
+	}
+	bucketizeActiveChunk(e, vaultID, meta, start, bucketWidth, firstBucket, lastBucket, counts, cloudFlags, false)
 }
 
 // activeMonotonicNeedsBucketize reports whether a monotonic active chunk lacks
@@ -1160,6 +1172,8 @@ func chunkBucketTotals(
 // the index file silently contribute zero to the histogram even though the
 // search itself can stream the records — the vault inspector reports N
 // records but the histogram shows N/2 because every cloud chunk drops out.
+// Local chunks never use overlap — it smears by chunk metadata bounds rather
+// than per-record ingest_ts, producing phantom counts in quiet periods.
 //
 // We can't probe the index up front: findIngestRank at the chunk's
 // IngestStart returns (0, true) for a healthy index AND for a missing
@@ -1167,7 +1181,7 @@ func chunkBucketTotals(
 // so a single probe can't distinguish the two. Instead, run rank arithmetic
 // across all buckets first; if the total contribution is zero despite the
 // chunk having records, the index isn't actually serving lookups and we
-// fall back to overlap-based distribution.
+// fall back to overlap-based distribution (cloud-backed only).
 func timechartChunkByIndex(
 	ir manifest.IndexReader,
 	meta chunk.ChunkMeta,
@@ -1176,9 +1190,9 @@ func timechartChunkByIndex(
 	firstBucket, lastBucket int,
 	counts []int64,
 	cloudFlags []bool,
-) {
+) bool {
 	if firstBucket > lastBucket {
-		return
+		return false
 	}
 	// IngestStart/IngestEnd track first/last appended records, not
 	// min/max IngestTS. For non-monotonic chunks the IngestEnd-fallthrough
@@ -1203,8 +1217,11 @@ func timechartChunkByIndex(
 	}
 	if !probeTS.IsZero() {
 		if _, ok := ir.FindIngestRank(meta.ID, probeTS); !ok {
-			distributeChunkRecordsByOverlap(meta, start, bucketWidth, firstBucket, lastBucket, counts, cloudFlags, meta.CloudBacked)
-			return
+			if meta.CloudBacked {
+				distributeChunkRecordsByOverlap(meta, start, bucketWidth, firstBucket, lastBucket, counts, cloudFlags, true)
+				return true
+			}
+			return false
 		}
 	}
 
@@ -1229,31 +1246,23 @@ func timechartChunkByIndex(
 			rankTotal += delta
 		}
 	}
-	if rankTotal < meta.RecordCount {
-		// Rank arithmetic under-counted the chunk. Three known causes:
-		//   1. Local index unreachable (cloud chunk whose index file
-		//      isn't cached on this node) — every per-bucket lookup
-		//      returns (0, false).
-		//   2. lastBucket was clamped at numBuckets-1 because the chunk
-		//      extends past the histogram window — the upper-bound
-		//      fallthrough gate fails for every bucket.
-		//   3. Non-monotonic chunk where IngestStart/IngestEnd are
-		//      first/last *appended* records' TS rather than min/max,
-		//      so the bucket clamping in timechartChunkByIngestTS lands
-		//      a range that doesn't fully cover the chunk's records.
-		// In all three the FSM still tells us how many records the
-		// chunk holds — fall back to overlap-based distribution so they
-		// show up in the histogram. Was the production gap "vault
-		// inspector reports N, histogram shows ~N/2".
-		distributeChunkRecordsByOverlap(meta, start, bucketWidth, firstBucket, lastBucket, counts, cloudFlags, meta.CloudBacked)
-		return
-	}
-	for i, c := range rankCounts {
-		counts[firstBucket+i] += c
-		if c > 0 && meta.CloudBacked && cloudFlags != nil {
-			cloudFlags[firstBucket+i] = true
+	if rankTotal > 0 {
+		for i, c := range rankCounts {
+			counts[firstBucket+i] += c
+			if c > 0 && meta.CloudBacked && cloudFlags != nil {
+				cloudFlags[firstBucket+i] = true
+			}
 		}
+		// rankTotal < RecordCount is normal when part of the chunk falls
+		// outside the histogram window. Overlap smearing used to paint
+		// phantom counts into quiet buckets (e.g. cluster shutdown trough).
+		return true
 	}
+	if meta.CloudBacked {
+		distributeChunkRecordsByOverlap(meta, start, bucketWidth, firstBucket, lastBucket, counts, cloudFlags, true)
+		return true
+	}
+	return false
 }
 
 // distributeChunkRecordsByOverlap spreads meta.RecordCount across the

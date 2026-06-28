@@ -128,6 +128,11 @@ message NodeStats {
   // at origins; head/pre-head on homes). Aggregated cluster-wide by
   // WatchSystemStatus for the inspector.
   repeated VaultPipelineNodeDisk vault_pipeline_disk = 36;
+
+  // Total on-disk bytes on this node: local chunk/index stores, pipeline
+  // segments (FSM ByteSize where published, otherwise file stat), raft
+  // persistence, and managed files. Distinct from per-vault data_bytes.
+  int64 storage_bytes = 37;
 }
 
 // VaultPipelineNodeDisk is one vault's local pipeline storage areas on a

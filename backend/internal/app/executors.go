@@ -108,6 +108,10 @@ func (a *orchStatsAdapter) PipelineDiskSnapshots() []cluster.StatsVaultPipelineD
 	return out
 }
 
+func (a *orchStatsAdapter) LocalStorageBytes() int64 {
+	return a.orch.LocalStorageBytes()
+}
+
 // jobBroadcastAdapter bridges the scheduler to the cluster.JobsProvider interface.
 type jobBroadcastAdapter struct {
 	scheduler *orchestrator.Scheduler

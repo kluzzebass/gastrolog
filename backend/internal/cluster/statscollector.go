@@ -88,6 +88,7 @@ type StatsProvider interface {
 	IngesterStats(id string) (name string, messages, bytes, errors int64, running bool)
 	RouteStats() StatsRouteSnapshot
 	PipelineDiskSnapshots() []StatsVaultPipelineDiskSnapshot
+	LocalStorageBytes() int64
 }
 
 // RaftStatsProvider exposes local Raft stats for the collector.
@@ -330,6 +331,8 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 				PreHeadSegments:            uint32(pd.PreHead),            //nolint:gosec
 			})
 		}
+
+		stats.StorageBytes = c.cfg.Stats.LocalStorageBytes()
 	}
 
 	if c.cfg.PeerConns != nil {

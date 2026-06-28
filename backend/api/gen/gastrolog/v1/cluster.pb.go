@@ -622,8 +622,12 @@ type NodeStats struct {
 	// at origins; head/pre-head on homes). Aggregated cluster-wide by
 	// WatchSystemStatus for the inspector.
 	VaultPipelineDisk []*VaultPipelineNodeDisk `protobuf:"bytes,36,rep,name=vault_pipeline_disk,json=vaultPipelineDisk,proto3" json:"vault_pipeline_disk,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Total on-disk bytes on this node (home, --vaults root, configured
+	// FileStorage paths). Distinct from per-vault data_bytes (chunk payload
+	// totals only).
+	StorageBytes  int64 `protobuf:"varint,37,opt,name=storage_bytes,json=storageBytes,proto3" json:"storage_bytes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *NodeStats) Reset() {
@@ -906,6 +910,13 @@ func (x *NodeStats) GetVaultPipelineDisk() []*VaultPipelineNodeDisk {
 		return x.VaultPipelineDisk
 	}
 	return nil
+}
+
+func (x *NodeStats) GetStorageBytes() int64 {
+	if x != nil {
+		return x.StorageBytes
+	}
+	return 0
 }
 
 // VaultPipelineNodeDisk is one vault's local pipeline storage areas on a
@@ -4151,7 +4162,7 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\apayload\"\v\n" +
 	"\tHeartbeat\"1\n" +
 	"\bNodeJobs\x12%\n" +
-	"\x04jobs\x18\x01 \x03(\v2\x11.gastrolog.v1.JobR\x04jobs\"\xde\f\n" +
+	"\x04jobs\x18\x01 \x03(\v2\x11.gastrolog.v1.JobR\x04jobs\"\x83\r\n" +
 	"\tNodeStats\x12\x1f\n" +
 	"\vcpu_percent\x18\x01 \x01(\x01R\n" +
 	"cpuPercent\x12!\n" +
@@ -4196,7 +4207,8 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x15route_per_route_stats\x18! \x03(\v2\x1b.gastrolog.v1.PerRouteStatsR\x12routePerRouteStats\x121\n" +
 	"\x06alerts\x18\" \x03(\v2\x19.gastrolog.v1.SystemAlertR\x06alerts\x12E\n" +
 	"\x10peer_connections\x18# \x03(\v2\x1a.gastrolog.v1.PeerConnStatR\x0fpeerConnections\x12S\n" +
-	"\x13vault_pipeline_disk\x18$ \x03(\v2#.gastrolog.v1.VaultPipelineNodeDiskR\x11vaultPipelineDisk\"\xec\x01\n" +
+	"\x13vault_pipeline_disk\x18$ \x03(\v2#.gastrolog.v1.VaultPipelineNodeDiskR\x11vaultPipelineDisk\x12#\n" +
+	"\rstorage_bytes\x18% \x01(\x03R\fstorageBytes\"\xec\x01\n" +
 	"\x15VaultPipelineNodeDisk\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12)\n" +
 	"\x10working_segments\x18\x02 \x01(\rR\x0fworkingSegments\x12<\n" +

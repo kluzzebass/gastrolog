@@ -190,6 +190,8 @@ type Orchestrator struct {
 	// segmentsDir is the base directory for per-vault segment roots
 	// (OriginRoot = segmentsDir/<vaultID>).
 	segmentsDir string
+	// homeDir is the gastrolog home directory (stores, segments, raft, …).
+	homeDir string
 	// pipelineVaults tracks which vaults are currently registered in the pipeline
 	// supervisor and whether each is registered as a Home (collection) on this
 	// node, so a route/placement reload registers/unregisters/re-registers only
@@ -719,6 +721,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		onIngesterAlive:      cfg.OnIngesterAlive,
 		onIngesterCheckpoint: cfg.OnIngesterCheckpoint,
 		segmentsDir:          cfg.SegmentsDir,
+		homeDir:              homeDirFromSegments(cfg.SegmentsDir),
 		pipelineVaults:             make(map[glid.GLID]pipelineVaultReg),
 		now:                  cfg.Now,
 		logger:               logger,

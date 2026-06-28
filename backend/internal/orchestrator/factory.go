@@ -123,7 +123,10 @@ func (o *Orchestrator) ApplyConfig(sys *system.System, factories Factories) erro
 	// configured. Origin vaults are registered during applyVaults→route reload,
 	// so this must be set first. See originRoot.
 	if o.segmentsDir == "" && factories.HomeDir != "" {
+		o.homeDir = factories.HomeDir
 		o.segmentsDir = home.New(factories.HomeDir).SegmentsDir()
+	} else if factories.HomeDir != "" {
+		o.homeDir = factories.HomeDir
 	}
 
 	if err := o.applyVaults(sys, factories); err != nil {
