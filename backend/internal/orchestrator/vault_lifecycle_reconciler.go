@@ -555,8 +555,15 @@ func (r *VaultLifecycleReconciler) onAckDelete(chunkID chunk.ChunkID, ackingNode
 
 func (r *VaultLifecycleReconciler) onFinalizeDelete(chunkID chunk.ChunkID) {
 	r.logger.Debug("onFinalizeDelete", "chunk", chunkID)
-	// Audit-only. Local bytes were removed in deleteLocalCopy; cluster
-	// manifest entry dropped inside applyFinalizeDelete before this fired.
+	// Emit DELETED on every node where the FSM entry was removed, even
+	// when this node never held local bytes and never ran deleteLocalCopy.
+	// Without this, the WatchChunks projection on nodes that only learned
+	// about the chunk via ListChunks fan-out keeps showing retention-pending
+	// rows until a manual reload. Mirrors wireVaultFSMOnDelete / gastrolog-2ob86.
+	if r.orch != nil {
+		r.orch.logChunkDeleted(r.vaultID, chunkID)
+		r.orch.EmitChunkDeleted(r.vaultID, chunkID)
+	}
 }
 
 // onPruneNode fires on every node when CmdPruneNode commits.
