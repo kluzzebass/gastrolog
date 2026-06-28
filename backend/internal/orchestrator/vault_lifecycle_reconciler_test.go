@@ -1302,6 +1302,62 @@ func TestWireInstanceFSMOnDeleteFiresNotifyChunkChange(t *testing.T) {
 	}
 }
 
+// TestReconcilerOnFinalizeDeleteEmitsChunkDeleted pins that the receipt-
+// protocol finalize path (CmdAckDelete draining ExpectedFrom) emits a
+// typed DELETED event on every node, not just nodes that ran
+// deleteLocalCopy. Without this, inspector clients connected to a node that
+// only saw the chunk via ListChunks fan-out keep stale retention-pending
+// rows until reload.
+func TestReconcilerOnFinalizeDeleteEmitsChunkDeleted(t *testing.T) {
+	t.Parallel()
+
+	orch, err := New(Config{LocalNodeID: "node-A"})
+	if err != nil {
+		t.Fatalf("orchestrator.New: %v", err)
+	}
+	fsm := vaultctlfsm.New()
+	vaultID := glid.New()
+	vaultInst := &VaultInstance{
+		VaultID:            vaultID,
+		Chunks:             &reconcilerFakeChunkManager{},
+		IsRaftLeader:       func() bool { return true },
+		ApplyRaftAckDelete: func(_ chunk.ChunkID, _ string) error { return nil },
+	}
+	rec := NewVaultLifecycleReconciler(orch, vaultID, vaultInst, "node-A", slog.Default())
+	rec.Wire(fsm)
+
+	chunkID := chunk.NewChunkID()
+	now := time.Now()
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(chunkID, now, now, now)})
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(chunkID, now, 1, 1, now, now, now, false, now)})
+	_ = fsm.Apply(&hraft.Log{
+		Data: vaultctlfsm.MarshalRequestDelete(chunkID, now, "retention-ttl", []string{"node-B"}),
+	})
+
+	bus := orch.ChunkBus()
+	subID, events, _ := bus.Subscribe()
+	defer bus.Unsubscribe(subID)
+
+	// node-A is not in ExpectedFrom — simulates a node that only rendered
+	// the chunk via cluster-wide ListChunks, not local storage.
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalAckDelete(chunkID, "node-B")})
+
+	select {
+	case msg := <-events:
+		if msg.Event.Op != ChunkChangeOpDeleted {
+			t.Fatalf("event op = %v, want Deleted", msg.Event.Op)
+		}
+		if msg.Event.ChunkID != chunkID {
+			t.Fatalf("event chunk = %s, want %s", msg.Event.ChunkID, chunkID)
+		}
+		if msg.Event.VaultID != vaultID {
+			t.Fatalf("event vault = %s, want %s", msg.Event.VaultID, vaultID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for DELETED event on finalize")
+	}
+}
+
 // TestWireInstanceFSMOnDeleteNotifiesEvenWhenDeleteSilentFails pins the
 // FSM-state-is-authoritative principle for the delete callback: a
 // failed local file delete (chunk missing, manager closed, etc.) must
