@@ -41,14 +41,18 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	// Start shared scheduler (cron rotation, retention, and future scheduled tasks).
 	o.scheduler.Start()
 
-	// pipeline pressure gate. PressureAware ingesters consult it to throttle
+	// Pipeline pressure gate. PressureAware ingesters consult it to throttle
 	// when the pipeline backs up; the supervisor's ingestion manager injects it
-	// into each ingester. The supervisor's internal inter-phase queues are
-	// bounded and block, which is the primary backpressure mechanism for the
-	// durable write path.
-	// TODO(gastrolog-jiwlf): expose supervisor queue depths as gate probes so
-	// local-pipeline saturation raises pressure alerts.
+	// into each ingester. Bounded inter-phase queues still block on send and
+	// remain the primary backpressure mechanism for the durable write path.
+	// Hysteresis transitions update ingest-pressure alerts only — NOT slog —
+	// to avoid a feedback loop where the self-ingester captures throttle
+	// messages and adds to the pressure.
 	gate := o.pipelineGate
+	ingestProbe := func() (int, int) {
+		return o.pipeline.IngestQueueDepth(), o.pipeline.IngestQueueCapacity()
+	}
+	gate.AddProbe("ingest-digest", ingestProbe)
 	if ac, ok := o.alerts.(*alert.Collector); ok {
 		gate.AddOnChange(func(tr chanwatch.PressureTransition) {
 			if tr.To == chanwatch.PressureNormal {
@@ -79,6 +83,15 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 		o.cancel = nil
 		return fmt.Errorf("start pipeline: %w", err)
 	}
+
+	// Channel pressure watchdog — slog-based alerts at 90%, separate from the
+	// hysteresis gate used for throttling (logs once on cross, once on resolve).
+	cw := chanwatch.New(o.logger, time.Second)
+	if ac, ok := o.alerts.(*alert.Collector); ok {
+		cw.SetAlerts(ac)
+	}
+	cw.Watch("ingest-digest", ingestProbe, 0.9)
+	o.auxWg.Go(func() { cw.Run(ctx) })
 
 	// Start the pressure gate after everything else is wired.
 	o.auxWg.Go(func() { gate.Run(ctx, 200*time.Millisecond) })

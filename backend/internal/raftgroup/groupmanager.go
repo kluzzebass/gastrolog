@@ -398,6 +398,7 @@ func (m *GroupManager) newRaftConfig(cfg GroupConfig) *hraft.Config {
 		"starting snapshot up to",
 		"snapshot complete up to",
 		"compacting logs",
+		"no logs to truncate",
 		"pipelining replication",
 		"aborting pipeline replication",
 		"failed to contact",

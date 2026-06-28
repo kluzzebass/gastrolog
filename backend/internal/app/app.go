@@ -739,7 +739,9 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 		go collector.BroadcastJobs(ctx)
 	})
 
-	go collector.Run(ctx)
+	if err := startStatsCollectorJobs(orch.Scheduler(), collector, ctx, broadcastInterval, heartbeatInterval); err != nil {
+		logger.Error("register stats collector scheduler jobs", "error", err)
+	}
 
 	// Evict per-peer satellite state the moment a node is removed
 	// from the Raft configuration. Without this the various caches

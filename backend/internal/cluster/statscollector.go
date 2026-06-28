@@ -191,48 +191,36 @@ func (c *StatsCollector) ReconcilePeers(keep map[string]struct{}) {
 	}
 }
 
-// Run starts the periodic broadcast loops. Blocks until ctx is cancelled.
-//
-// Two cadences run in parallel:
-//   - Stats ticker (cfg.Interval, default 5s): full NodeStats payload.
-//     Heavy — carries vault stats, ingester stats, route stats, peer
-//     bytes, alerts, raft state, etc.
-//   - Heartbeat ticker (cfg.HeartbeatInterval, default 1s): empty
-//     Heartbeat marker. Just refreshes peer last-seen so paused/wedged
-//     peers fall out of LivePeers within a few seconds without making
-//     the heavy payload fly every second. See gastrolog-2kio8.
-func (c *StatsCollector) Run(ctx context.Context) {
-	statsTicker := time.NewTicker(c.cfg.Interval)
-	defer statsTicker.Stop()
-	heartbeatTicker := time.NewTicker(c.cfg.HeartbeatInterval)
-	defer heartbeatTicker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case tickAt := <-statsTicker.C:
-			stats := c.CollectLocalTick(tickAt)
-			if c.cfg.Broadcaster != nil {
-				c.cfg.Broadcaster.Send(ctx, &gastrologv1.BroadcastMessage{
-					SenderId:  []byte(c.cfg.NodeID),
-					Timestamp: timestamppb.Now(),
-					Payload:   &gastrologv1.BroadcastMessage_NodeStats{NodeStats: stats},
-				})
-				c.BroadcastJobs(ctx)
-			}
-			if c.cfg.StatsSignal != nil {
-				c.cfg.StatsSignal.Notify()
-			}
-		case <-heartbeatTicker.C:
-			if c.cfg.Broadcaster != nil {
-				c.cfg.Broadcaster.Send(ctx, &gastrologv1.BroadcastMessage{
-					SenderId:  []byte(c.cfg.NodeID),
-					Timestamp: timestamppb.Now(),
-					Payload:   &gastrologv1.BroadcastMessage_Heartbeat{Heartbeat: &gastrologv1.Heartbeat{}},
-				})
-			}
-		}
+// BroadcastStats gathers local NodeStats, broadcasts them to all cluster
+// peers, and advances rolling rate windows. Registered as a scheduler job
+// from app.startStatsCollectorJobs.
+func (c *StatsCollector) BroadcastStats(ctx context.Context) {
+	now := time.Now()
+	stats := c.CollectLocalTick(now)
+	if c.cfg.Broadcaster != nil {
+		c.cfg.Broadcaster.Send(ctx, &gastrologv1.BroadcastMessage{
+			SenderId:  []byte(c.cfg.NodeID),
+			Timestamp: timestamppb.Now(),
+			Payload:   &gastrologv1.BroadcastMessage_NodeStats{NodeStats: stats},
+		})
+		c.BroadcastJobs(ctx)
 	}
+	if c.cfg.StatsSignal != nil {
+		c.cfg.StatsSignal.Notify()
+	}
+}
+
+// BroadcastHeartbeat sends the lightweight peer-liveness marker. Registered as
+// a separate scheduler job so it cannot be delayed by BroadcastStats work.
+func (c *StatsCollector) BroadcastHeartbeat(ctx context.Context) {
+	if c.cfg.Broadcaster == nil {
+		return
+	}
+	c.cfg.Broadcaster.Send(ctx, &gastrologv1.BroadcastMessage{
+		SenderId:  []byte(c.cfg.NodeID),
+		Timestamp: timestamppb.Now(),
+		Payload:   &gastrologv1.BroadcastMessage_Heartbeat{Heartbeat: &gastrologv1.Heartbeat{}},
+	})
 }
 
 // CollectLocalSnapshot gathers a NodeStats snapshot for the local node without

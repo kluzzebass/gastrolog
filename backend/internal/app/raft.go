@@ -278,6 +278,7 @@ func newRaftConfig(nodeID string, logger *slog.Logger) *hraft.Config {
 		"starting snapshot up to",
 		"snapshot complete up to",
 		"compacting logs",
+		"no logs to truncate",
 		"pipelining replication",
 		"aborting pipeline replication",
 		"failed to make requestVote RPC",
