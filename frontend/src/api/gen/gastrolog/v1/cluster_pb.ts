@@ -1908,6 +1908,26 @@ export class ForwardGetPipelineBacklogResponse extends Message<ForwardGetPipelin
    */
   preHeadSegments = 0;
 
+  /**
+   * @generated from field: uint64 working_bytes = 5;
+   */
+  workingBytes = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 completed_staging_bytes = 6;
+   */
+  completedStagingBytes = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 head_bytes = 7;
+   */
+  headBytes = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 pre_head_bytes = 8;
+   */
+  preHeadBytes = protoInt64.zero;
+
   constructor(data?: PartialMessage<ForwardGetPipelineBacklogResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1920,6 +1940,10 @@ export class ForwardGetPipelineBacklogResponse extends Message<ForwardGetPipelin
     { no: 2, name: "completed_staging_segments", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 3, name: "head_segments", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 4, name: "pre_head_segments", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 5, name: "working_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 6, name: "completed_staging_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 7, name: "head_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 8, name: "pre_head_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardGetPipelineBacklogResponse {

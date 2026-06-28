@@ -2596,6 +2596,28 @@ export class VaultPipelineBacklog extends Message<VaultPipelineBacklog> {
    */
   nodeSegments: PipelineNodeSegments[] = [];
 
+  /**
+   * Cluster-wide on-disk segment byte totals (summed across nodes).
+   *
+   * @generated from field: uint64 working_bytes = 18;
+   */
+  workingBytes = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 completed_staging_bytes = 19;
+   */
+  completedStagingBytes = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 head_bytes = 20;
+   */
+  headBytes = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 pre_head_bytes = 21;
+   */
+  preHeadBytes = protoInt64.zero;
+
   constructor(data?: PartialMessage<VaultPipelineBacklog>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2620,6 +2642,10 @@ export class VaultPipelineBacklog extends Message<VaultPipelineBacklog> {
     { no: 15, name: "vault_ctl_leader_node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 16, name: "connected_node_is_vault_ctl_leader", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 17, name: "node_segments", kind: "message", T: PipelineNodeSegments, repeated: true },
+    { no: 18, name: "working_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 19, name: "completed_staging_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 20, name: "head_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 21, name: "pre_head_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultPipelineBacklog {
@@ -2670,6 +2696,26 @@ export class PipelineNodeSegments extends Message<PipelineNodeSegments> {
    */
   preHeadSegments = 0;
 
+  /**
+   * @generated from field: uint64 working_bytes = 6;
+   */
+  workingBytes = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 completed_staging_bytes = 7;
+   */
+  completedStagingBytes = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 head_bytes = 8;
+   */
+  headBytes = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 pre_head_bytes = 9;
+   */
+  preHeadBytes = protoInt64.zero;
+
   constructor(data?: PartialMessage<PipelineNodeSegments>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2683,6 +2729,10 @@ export class PipelineNodeSegments extends Message<PipelineNodeSegments> {
     { no: 3, name: "completed_staging_segments", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 4, name: "head_segments", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 5, name: "pre_head_segments", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 6, name: "working_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 7, name: "completed_staging_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 8, name: "head_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 9, name: "pre_head_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PipelineNodeSegments {

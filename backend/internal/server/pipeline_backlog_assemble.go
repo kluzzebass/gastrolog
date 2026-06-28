@@ -27,10 +27,14 @@ func AssemblePipelineBacklog(
 	}}
 	for _, pd := range peerDisk {
 		disk := orchestrator.PipelineDiskSegmentCounts{
-			Working:          pd.Working,
-			CompletedStaging: pd.CompletedStaging,
-			Head:             pd.Head,
-			PreHead:          pd.PreHead,
+			Working:               pd.Working,
+			CompletedStaging:      pd.CompletedStaging,
+			Head:                  pd.Head,
+			PreHead:               pd.PreHead,
+			WorkingBytes:          pd.WorkingBytes,
+			CompletedStagingBytes: pd.CompletedStagingBytes,
+			HeadBytes:             pd.HeadBytes,
+			PreHeadBytes:          pd.PreHeadBytes,
 		}
 		snap.AddDiskCounts(disk)
 		nodeSegments = append(nodeSegments, orchestrator.PipelineNodeDiskSegments{

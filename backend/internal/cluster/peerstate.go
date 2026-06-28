@@ -233,6 +233,10 @@ type PeerVaultPipelineDisk struct {
 	CompletedStaging int
 	Head             int
 	PreHead          int
+	WorkingBytes          int64
+	CompletedStagingBytes int64
+	HeadBytes             int64
+	PreHeadBytes            int64
 }
 
 // AggregatePipelineDisk collects per-vault pipeline disk counts from all live peers.

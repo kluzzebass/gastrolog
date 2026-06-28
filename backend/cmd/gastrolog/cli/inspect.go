@@ -35,15 +35,22 @@ func NewInspectCommand() *cobra.Command {
 }
 
 func newInspectVaultCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "vault <name-or-id>",
 		Short: "Show vault details and chunks with status badges",
 		Args:  cobra.ExactArgs(1),
 		RunE:  runInspectVault,
 	}
+	cmd.Flags().Bool("segments", false, inspectSegmentsFlagHelp)
+	return cmd
 }
 
 func runInspectVault(cmd *cobra.Command, args []string) error {
+	segments, _ := cmd.Flags().GetBool("segments")
+	if segments {
+		return runInspectVaultSegments(cmd, args[0])
+	}
+
 	client := clientFromCmd(cmd)
 	r, err := newResolver(context.Background(), client)
 	if err != nil {

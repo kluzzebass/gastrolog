@@ -2988,9 +2988,14 @@ type VaultPipelineBacklog struct {
 	ConnectedNodeIsVaultCtlLeader bool   `protobuf:"varint,16,opt,name=connected_node_is_vault_ctl_leader,json=connectedNodeIsVaultCtlLeader,proto3" json:"connected_node_is_vault_ctl_leader,omitempty"`
 	// Per-node on-disk segment counts. Every cluster node may act as an ingest
 	// origin (working/completed); home nodes also hold head/pre-head copies.
-	NodeSegments  []*PipelineNodeSegments `protobuf:"bytes,17,rep,name=node_segments,json=nodeSegments,proto3" json:"node_segments,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	NodeSegments []*PipelineNodeSegments `protobuf:"bytes,17,rep,name=node_segments,json=nodeSegments,proto3" json:"node_segments,omitempty"`
+	// Cluster-wide on-disk segment byte totals (summed across nodes).
+	WorkingBytes          uint64 `protobuf:"varint,18,opt,name=working_bytes,json=workingBytes,proto3" json:"working_bytes,omitempty"`
+	CompletedStagingBytes uint64 `protobuf:"varint,19,opt,name=completed_staging_bytes,json=completedStagingBytes,proto3" json:"completed_staging_bytes,omitempty"`
+	HeadBytes             uint64 `protobuf:"varint,20,opt,name=head_bytes,json=headBytes,proto3" json:"head_bytes,omitempty"`
+	PreHeadBytes          uint64 `protobuf:"varint,21,opt,name=pre_head_bytes,json=preHeadBytes,proto3" json:"pre_head_bytes,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *VaultPipelineBacklog) Reset() {
@@ -3135,6 +3140,34 @@ func (x *VaultPipelineBacklog) GetNodeSegments() []*PipelineNodeSegments {
 	return nil
 }
 
+func (x *VaultPipelineBacklog) GetWorkingBytes() uint64 {
+	if x != nil {
+		return x.WorkingBytes
+	}
+	return 0
+}
+
+func (x *VaultPipelineBacklog) GetCompletedStagingBytes() uint64 {
+	if x != nil {
+		return x.CompletedStagingBytes
+	}
+	return 0
+}
+
+func (x *VaultPipelineBacklog) GetHeadBytes() uint64 {
+	if x != nil {
+		return x.HeadBytes
+	}
+	return 0
+}
+
+func (x *VaultPipelineBacklog) GetPreHeadBytes() uint64 {
+	if x != nil {
+		return x.PreHeadBytes
+	}
+	return 0
+}
+
 // PipelineNodeSegments is one node's pipeline storage areas for a vault.
 type PipelineNodeSegments struct {
 	state                    protoimpl.MessageState `protogen:"open.v1"`
@@ -3143,6 +3176,10 @@ type PipelineNodeSegments struct {
 	CompletedStagingSegments uint32                 `protobuf:"varint,3,opt,name=completed_staging_segments,json=completedStagingSegments,proto3" json:"completed_staging_segments,omitempty"`
 	HeadSegments             uint32                 `protobuf:"varint,4,opt,name=head_segments,json=headSegments,proto3" json:"head_segments,omitempty"`
 	PreHeadSegments          uint32                 `protobuf:"varint,5,opt,name=pre_head_segments,json=preHeadSegments,proto3" json:"pre_head_segments,omitempty"`
+	WorkingBytes             uint64                 `protobuf:"varint,6,opt,name=working_bytes,json=workingBytes,proto3" json:"working_bytes,omitempty"`
+	CompletedStagingBytes    uint64                 `protobuf:"varint,7,opt,name=completed_staging_bytes,json=completedStagingBytes,proto3" json:"completed_staging_bytes,omitempty"`
+	HeadBytes                uint64                 `protobuf:"varint,8,opt,name=head_bytes,json=headBytes,proto3" json:"head_bytes,omitempty"`
+	PreHeadBytes             uint64                 `protobuf:"varint,9,opt,name=pre_head_bytes,json=preHeadBytes,proto3" json:"pre_head_bytes,omitempty"`
 	unknownFields            protoimpl.UnknownFields
 	sizeCache                protoimpl.SizeCache
 }
@@ -3208,6 +3245,34 @@ func (x *PipelineNodeSegments) GetHeadSegments() uint32 {
 func (x *PipelineNodeSegments) GetPreHeadSegments() uint32 {
 	if x != nil {
 		return x.PreHeadSegments
+	}
+	return 0
+}
+
+func (x *PipelineNodeSegments) GetWorkingBytes() uint64 {
+	if x != nil {
+		return x.WorkingBytes
+	}
+	return 0
+}
+
+func (x *PipelineNodeSegments) GetCompletedStagingBytes() uint64 {
+	if x != nil {
+		return x.CompletedStagingBytes
+	}
+	return 0
+}
+
+func (x *PipelineNodeSegments) GetHeadBytes() uint64 {
+	if x != nil {
+		return x.HeadBytes
+	}
+	return 0
+}
+
+func (x *PipelineNodeSegments) GetPreHeadBytes() uint64 {
+	if x != nil {
+		return x.PreHeadBytes
 	}
 	return 0
 }
@@ -3430,7 +3495,7 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\x19GetPipelineBacklogRequest\x12\x14\n" +
 	"\x05vault\x18\x01 \x01(\tR\x05vault\"Z\n" +
 	"\x1aGetPipelineBacklogResponse\x12<\n" +
-	"\abacklog\x18\x01 \x01(\v2\".gastrolog.v1.VaultPipelineBacklogR\abacklog\"\x86\a\n" +
+	"\abacklog\x18\x01 \x01(\v2\".gastrolog.v1.VaultPipelineBacklogR\abacklog\"\xa8\b\n" +
 	"\x14VaultPipelineBacklog\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12+\n" +
 	"\x11registry_segments\x18\x02 \x01(\rR\x10registrySegments\x12+\n" +
@@ -3448,13 +3513,23 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\x1boldest_eligible_last_ingest\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampR\x18oldestEligibleLastIngest\x126\n" +
 	"\x18vault_ctl_leader_node_id\x18\x0f \x01(\fR\x14vaultCtlLeaderNodeId\x12I\n" +
 	"\"connected_node_is_vault_ctl_leader\x18\x10 \x01(\bR\x1dconnectedNodeIsVaultCtlLeader\x12G\n" +
-	"\rnode_segments\x18\x11 \x03(\v2\".gastrolog.v1.PipelineNodeSegmentsR\fnodeSegments\"\xe9\x01\n" +
+	"\rnode_segments\x18\x11 \x03(\v2\".gastrolog.v1.PipelineNodeSegmentsR\fnodeSegments\x12#\n" +
+	"\rworking_bytes\x18\x12 \x01(\x04R\fworkingBytes\x126\n" +
+	"\x17completed_staging_bytes\x18\x13 \x01(\x04R\x15completedStagingBytes\x12\x1d\n" +
+	"\n" +
+	"head_bytes\x18\x14 \x01(\x04R\theadBytes\x12$\n" +
+	"\x0epre_head_bytes\x18\x15 \x01(\x04R\fpreHeadBytes\"\x8b\x03\n" +
 	"\x14PipelineNodeSegments\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\fR\x06nodeId\x12)\n" +
 	"\x10working_segments\x18\x02 \x01(\rR\x0fworkingSegments\x12<\n" +
 	"\x1acompleted_staging_segments\x18\x03 \x01(\rR\x18completedStagingSegments\x12#\n" +
 	"\rhead_segments\x18\x04 \x01(\rR\fheadSegments\x12*\n" +
-	"\x11pre_head_segments\x18\x05 \x01(\rR\x0fpreHeadSegments*r\n" +
+	"\x11pre_head_segments\x18\x05 \x01(\rR\x0fpreHeadSegments\x12#\n" +
+	"\rworking_bytes\x18\x06 \x01(\x04R\fworkingBytes\x126\n" +
+	"\x17completed_staging_bytes\x18\a \x01(\x04R\x15completedStagingBytes\x12\x1d\n" +
+	"\n" +
+	"head_bytes\x18\b \x01(\x04R\theadBytes\x12$\n" +
+	"\x0epre_head_bytes\x18\t \x01(\x04R\fpreHeadBytes*r\n" +
 	"\n" +
 	"ChunkState\x12\x1b\n" +
 	"\x17CHUNK_STATE_UNSPECIFIED\x10\x00\x12\x16\n" +

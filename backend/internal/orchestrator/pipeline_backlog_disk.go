@@ -4,16 +4,22 @@ import (
 	"os"
 	"path/filepath"
 
+	"gastrolog/internal/diskusage"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/paths"
 )
 
-// PipelineDiskSegmentCounts holds on-disk segment file counts for one node.
+// PipelineDiskSegmentCounts holds on-disk segment file counts and byte totals
+// for one node.
 type PipelineDiskSegmentCounts struct {
-	Working           int
-	CompletedStaging  int
-	Head              int
-	PreHead           int
+	Working          int
+	CompletedStaging int
+	Head             int
+	PreHead          int
+	WorkingBytes          int64
+	CompletedStagingBytes int64
+	HeadBytes             int64
+	PreHeadBytes            int64
 }
 
 // LocalPipelineDiskSegmentCounts counts segment GLID files under the vault's
@@ -24,35 +30,56 @@ func (o *Orchestrator) LocalPipelineDiskSegmentCounts(vaultID glid.GLID) (Pipeli
 	if err != nil {
 		return out, err
 	}
-	if n, err := countSegmentFiles(paths.WorkingDir(root)); err != nil {
+	fsmBytes := o.completedSegmentByteSizes(vaultID)
+	if n, b, err := segmentAreaStats(paths.WorkingDir(root), fsmBytes); err != nil {
 		return out, err
 	} else {
-		out.Working = n
+		out.Working, out.WorkingBytes = n, b
 	}
-	if n, err := countSegmentFiles(paths.CompletedDir(root)); err != nil {
+	if n, b, err := segmentAreaStats(paths.CompletedDir(root), fsmBytes); err != nil {
 		return out, err
 	} else {
-		out.CompletedStaging = n
+		out.CompletedStaging, out.CompletedStagingBytes = n, b
 	}
-	if n, err := countSegmentFiles(paths.HeadDir(root)); err != nil {
+	if n, b, err := segmentAreaStats(paths.HeadDir(root), fsmBytes); err != nil {
 		return out, err
 	} else {
-		out.Head = n
+		out.Head, out.HeadBytes = n, b
 	}
-	if n, err := countSegmentFiles(paths.PreHeadDir(root)); err != nil {
+	if n, b, err := segmentAreaStats(paths.PreHeadDir(root), fsmBytes); err != nil {
 		return out, err
 	} else {
-		out.PreHead = n
+		out.PreHead, out.PreHeadBytes = n, b
 	}
 	return out, nil
 }
 
-func countSegmentFiles(dir string) (int, error) {
+func (o *Orchestrator) completedSegmentByteSizes(vaultID glid.GLID) map[glid.GLID]uint64 {
+	out := make(map[glid.GLID]uint64)
+	fsm, _, _, ok := o.vaultCtlHandle(vaultID)
+	if !ok || fsm == nil {
+		return out
+	}
+	for _, entry := range fsm.ListCompletedSegments() {
+		out[entry.SegmentID] = entry.ByteSize
+	}
+	return out
+}
+
+func segmentAreaStats(dir string, fsmBytes map[glid.GLID]uint64) (count int, bytes int64, err error) {
 	ids, err := paths.ListSegmentIDs(dir)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
-	return len(ids), nil
+	count = len(ids)
+	for id := range ids {
+		if sz, ok := fsmBytes[id]; ok {
+			bytes += int64(sz) //nolint:gosec // segment sizes are bounded
+			continue
+		}
+		bytes += diskusage.FileBytes(filepath.Join(dir, id.String()))
+	}
+	return count, bytes, nil
 }
 
 // AddDiskCounts merges remote disk totals into dst.
@@ -61,6 +88,10 @@ func (c *PipelineDiskSegmentCounts) AddDiskCounts(other PipelineDiskSegmentCount
 	c.CompletedStaging += other.CompletedStaging
 	c.Head += other.Head
 	c.PreHead += other.PreHead
+	c.WorkingBytes += other.WorkingBytes
+	c.CompletedStagingBytes += other.CompletedStagingBytes
+	c.HeadBytes += other.HeadBytes
+	c.PreHeadBytes += other.PreHeadBytes
 }
 
 // TouchSegmentFile creates an empty segment file for tests.

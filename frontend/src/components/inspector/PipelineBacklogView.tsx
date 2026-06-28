@@ -2,6 +2,7 @@ import { useThemeClass } from "../../hooks/useThemeClass";
 import { usePipelineBacklog, useNodeRegistry } from "../../api/hooks";
 import { idFromBytes, type EntityID } from "../../api/model/id";
 import { protoToInstant, instantToDate, formatDateTimeShort } from "../../utils/temporal";
+import { formatBytes } from "../../utils/units";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
 
 interface PipelineBacklogViewProps {
@@ -17,6 +18,14 @@ function formatCount(n: number | bigint | undefined): string {
   return num.toLocaleString();
 }
 
+function formatCountAndBytes(count: number, bytes: bigint): string {
+  return `${formatCount(count)} (${formatBytes(bytes)})`;
+}
+
+function protoBytes(n: bigint | undefined): bigint {
+  return n ?? 0n;
+}
+
 const thClass = (c: (d: string, l: string) => string) =>
   `px-3 py-2 text-left text-[0.7em] font-medium uppercase tracking-[0.15em] whitespace-nowrap ${c(
     "text-text-muted border-ink-border-subtle bg-ink-well",
@@ -29,6 +38,48 @@ const tdClass = (c: (d: string, l: string) => string, warn?: boolean) => {
   return `px-3 py-2.5 font-mono font-semibold tabular-nums whitespace-nowrap ${color}`;
 };
 
+const tdMutedClass = (c: (d: string, l: string) => string, active: boolean) =>
+  `px-3 py-2.5 font-mono text-right tabular-nums whitespace-nowrap text-[0.85em] ${
+    active ? c("text-text-bright", "text-light-text-bright") : c("text-text-muted", "text-light-text-muted")
+  }`;
+
+function ClusterStagingTable({
+  rows,
+  dark,
+}: Readonly<{
+  rows: { area: string; count: number; bytes: bigint }[];
+  dark: boolean;
+}>) {
+  const c = useThemeClass(dark);
+  const border = c("border-ink-border", "border-light-border");
+  const rowBorder = c("border-ink-border-subtle", "border-light-border-subtle");
+
+  return (
+    <div className={`rounded-lg border overflow-x-auto ${border}`}>
+      <table className="w-full border-collapse">
+        <thead>
+          <tr className={`border-b ${rowBorder}`}>
+            <th className={thClass(c)}>Area</th>
+            <th className={`${thClass(c)} text-right`}>Segments</th>
+            <th className={`${thClass(c)} text-right`}>Bytes</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.area} className={`border-b last:border-b-0 ${rowBorder} text-[0.85em]`}>
+              <td className={`px-3 py-2.5 font-mono whitespace-nowrap ${c("text-text-bright", "text-light-text-bright")}`}>
+                {row.area}
+              </td>
+              <td className={tdMutedClass(c, row.count > 0)}>{formatCount(row.count)}</td>
+              <td className={tdMutedClass(c, row.bytes > 0n)}>{formatBytes(row.bytes)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function NodeSegmentTable({
   title,
   colA,
@@ -38,8 +89,8 @@ function NodeSegmentTable({
   nodeNameOf,
 }: Readonly<{
   title: string;
-  colA: { label: string; get: (row: NodeRow) => number };
-  colB: { label: string; get: (row: NodeRow) => number };
+  colA: { label: string; get: (row: NodeRow) => { count: number; bytes: bigint } };
+  colB: { label: string; get: (row: NodeRow) => { count: number; bytes: bigint } };
   rows: NodeRow[];
   dark: boolean;
   nodeNameOf: (id: EntityID) => string;
@@ -79,16 +130,8 @@ function NodeSegmentTable({
                   >
                     {label}
                   </td>
-                  <td
-                    className={`px-3 py-2.5 font-mono text-right tabular-nums whitespace-nowrap ${a > 0 ? c("text-text-bright", "text-light-text-bright") : c("text-text-muted", "text-light-text-muted")}`}
-                  >
-                    {formatCount(a)}
-                  </td>
-                  <td
-                    className={`px-3 py-2.5 font-mono text-right tabular-nums whitespace-nowrap ${b > 0 ? c("text-text-bright", "text-light-text-bright") : c("text-text-muted", "text-light-text-muted")}`}
-                  >
-                    {formatCount(b)}
-                  </td>
+                  <td className={tdMutedClass(c, a.count > 0)}>{formatCountAndBytes(a.count, a.bytes)}</td>
+                  <td className={tdMutedClass(c, b.count > 0)}>{formatCountAndBytes(b.count, b.bytes)}</td>
                 </tr>
               );
             })}
@@ -105,6 +148,10 @@ interface NodeRow {
   staged: number;
   head: number;
   preHead: number;
+  workingBytes: bigint;
+  stagedBytes: bigint;
+  headBytes: bigint;
+  preHeadBytes: bigint;
 }
 
 export function PipelineBacklogView({ vaultId, dark }: Readonly<PipelineBacklogViewProps>) {
@@ -134,9 +181,20 @@ export function PipelineBacklogView({ vaultId, dark }: Readonly<PipelineBacklogV
         staged: ns.completedStagingSegments,
         head: ns.headSegments,
         preHead: ns.preHeadSegments,
+        workingBytes: protoBytes(ns.workingBytes),
+        stagedBytes: protoBytes(ns.completedStagingBytes),
+        headBytes: protoBytes(ns.headBytes),
+        preHeadBytes: protoBytes(ns.preHeadBytes),
       },
     ];
   });
+
+  const clusterStaging = [
+    { area: "working", count: backlog.workingSegments, bytes: protoBytes(backlog.workingBytes) },
+    { area: "completed", count: backlog.completedStagingSegments, bytes: protoBytes(backlog.completedStagingBytes) },
+    { area: "pre-head", count: backlog.preHeadSegments, bytes: protoBytes(backlog.preHeadBytes) },
+    { area: "head", count: backlog.headSegments, bytes: protoBytes(backlog.headBytes) },
+  ];
 
   const border = c("border-ink-border", "border-light-border");
   const rowBorder = c("border-ink-border-subtle", "border-light-border-subtle");
@@ -174,11 +232,20 @@ export function PipelineBacklogView({ vaultId, dark }: Readonly<PipelineBacklogV
         </table>
       </div>
 
+      <div className="flex flex-col gap-2">
+        <h3
+          className={`text-[0.75em] font-medium uppercase tracking-[0.15em] whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}
+        >
+          Segment staging (cluster total)
+        </h3>
+        <ClusterStagingTable rows={clusterStaging} dark={dark} />
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
         <NodeSegmentTable
           title="Segmentation (origins)"
-          colA={{ label: "Working", get: (r) => r.working }}
-          colB={{ label: "Staged", get: (r) => r.staged }}
+          colA={{ label: "Working", get: (r) => ({ count: r.working, bytes: r.workingBytes }) }}
+          colB={{ label: "Completed", get: (r) => ({ count: r.staged, bytes: r.stagedBytes }) }}
           rows={nodeRows}
           dark={dark}
           nodeNameOf={nodes.nameOf}
@@ -186,8 +253,8 @@ export function PipelineBacklogView({ vaultId, dark }: Readonly<PipelineBacklogV
 
         <NodeSegmentTable
           title="Distribution (homes)"
-          colA={{ label: "Head", get: (r) => r.head }}
-          colB={{ label: "Pre-head", get: (r) => r.preHead }}
+          colA={{ label: "Head", get: (r) => ({ count: r.head, bytes: r.headBytes }) }}
+          colB={{ label: "Pre-head", get: (r) => ({ count: r.preHead, bytes: r.preHeadBytes }) }}
           rows={nodeRows}
           dark={dark}
           nodeNameOf={nodes.nameOf}

@@ -2316,6 +2316,10 @@ type ForwardGetPipelineBacklogResponse struct {
 	CompletedStagingSegments uint32                 `protobuf:"varint,2,opt,name=completed_staging_segments,json=completedStagingSegments,proto3" json:"completed_staging_segments,omitempty"`
 	HeadSegments             uint32                 `protobuf:"varint,3,opt,name=head_segments,json=headSegments,proto3" json:"head_segments,omitempty"`
 	PreHeadSegments          uint32                 `protobuf:"varint,4,opt,name=pre_head_segments,json=preHeadSegments,proto3" json:"pre_head_segments,omitempty"`
+	WorkingBytes             uint64                 `protobuf:"varint,5,opt,name=working_bytes,json=workingBytes,proto3" json:"working_bytes,omitempty"`
+	CompletedStagingBytes    uint64                 `protobuf:"varint,6,opt,name=completed_staging_bytes,json=completedStagingBytes,proto3" json:"completed_staging_bytes,omitempty"`
+	HeadBytes                uint64                 `protobuf:"varint,7,opt,name=head_bytes,json=headBytes,proto3" json:"head_bytes,omitempty"`
+	PreHeadBytes             uint64                 `protobuf:"varint,8,opt,name=pre_head_bytes,json=preHeadBytes,proto3" json:"pre_head_bytes,omitempty"`
 	unknownFields            protoimpl.UnknownFields
 	sizeCache                protoimpl.SizeCache
 }
@@ -2374,6 +2378,34 @@ func (x *ForwardGetPipelineBacklogResponse) GetHeadSegments() uint32 {
 func (x *ForwardGetPipelineBacklogResponse) GetPreHeadSegments() uint32 {
 	if x != nil {
 		return x.PreHeadSegments
+	}
+	return 0
+}
+
+func (x *ForwardGetPipelineBacklogResponse) GetWorkingBytes() uint64 {
+	if x != nil {
+		return x.WorkingBytes
+	}
+	return 0
+}
+
+func (x *ForwardGetPipelineBacklogResponse) GetCompletedStagingBytes() uint64 {
+	if x != nil {
+		return x.CompletedStagingBytes
+	}
+	return 0
+}
+
+func (x *ForwardGetPipelineBacklogResponse) GetHeadBytes() uint64 {
+	if x != nil {
+		return x.HeadBytes
+	}
+	return 0
+}
+
+func (x *ForwardGetPipelineBacklogResponse) GetPreHeadBytes() uint64 {
+	if x != nil {
+		return x.PreHeadBytes
 	}
 	return 0
 }
@@ -4301,12 +4333,17 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x19ForwardListChunksResponse\x12/\n" +
 	"\x06chunks\x18\x01 \x03(\v2\x17.gastrolog.v1.ChunkMetaR\x06chunks\"=\n" +
 	" ForwardGetPipelineBacklogRequest\x12\x19\n" +
-	"\bvault_id\x18\x01 \x01(\fR\avaultId\"\xdd\x01\n" +
+	"\bvault_id\x18\x01 \x01(\fR\avaultId\"\xff\x02\n" +
 	"!ForwardGetPipelineBacklogResponse\x12)\n" +
 	"\x10working_segments\x18\x01 \x01(\rR\x0fworkingSegments\x12<\n" +
 	"\x1acompleted_staging_segments\x18\x02 \x01(\rR\x18completedStagingSegments\x12#\n" +
 	"\rhead_segments\x18\x03 \x01(\rR\fheadSegments\x12*\n" +
-	"\x11pre_head_segments\x18\x04 \x01(\rR\x0fpreHeadSegments\"\x1b\n" +
+	"\x11pre_head_segments\x18\x04 \x01(\rR\x0fpreHeadSegments\x12#\n" +
+	"\rworking_bytes\x18\x05 \x01(\x04R\fworkingBytes\x126\n" +
+	"\x17completed_staging_bytes\x18\x06 \x01(\x04R\x15completedStagingBytes\x12\x1d\n" +
+	"\n" +
+	"head_bytes\x18\a \x01(\x04R\theadBytes\x12$\n" +
+	"\x0epre_head_bytes\x18\b \x01(\x04R\fpreHeadBytes\"\x1b\n" +
 	"\x19ForwardWatchChunksRequest\"\xe9\x01\n" +
 	"\x1aForwardWatchChunksResponse\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12\x19\n" +

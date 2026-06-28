@@ -503,6 +503,12 @@ message VaultPipelineBacklog {
   // Per-node on-disk segment counts. Every cluster node may act as an ingest
   // origin (working/completed); home nodes also hold head/pre-head copies.
   repeated PipelineNodeSegments node_segments = 17;
+
+  // Cluster-wide on-disk segment byte totals (summed across nodes).
+  uint64 working_bytes = 18;
+  uint64 completed_staging_bytes = 19;
+  uint64 head_bytes = 20;
+  uint64 pre_head_bytes = 21;
 }
 
 // PipelineNodeSegments is one node's pipeline storage areas for a vault.
@@ -512,4 +518,8 @@ message PipelineNodeSegments {
   uint32 completed_staging_segments = 3;
   uint32 head_segments = 4;
   uint32 pre_head_segments = 5;
+  uint64 working_bytes = 6;
+  uint64 completed_staging_bytes = 7;
+  uint64 head_bytes = 8;
+  uint64 pre_head_bytes = 9;
 }
