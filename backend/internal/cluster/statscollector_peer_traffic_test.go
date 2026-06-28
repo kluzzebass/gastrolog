@@ -13,6 +13,8 @@ func (s *stubPeerConnSnapshots) Snapshot() []PeerConnSnapshot {
 	return s.snaps
 }
 
+func (s *stubPeerConnSnapshots) ResetPurposeWindows() {}
+
 func TestStatsCollector_PeerTrafficTotals_SumLanes(t *testing.T) {
 	provider := &stubPeerConnSnapshots{
 		snaps: []PeerConnSnapshot{

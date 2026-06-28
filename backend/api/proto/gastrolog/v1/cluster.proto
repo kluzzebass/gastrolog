@@ -163,6 +163,9 @@ message PeerConnStat {
   double rx_bytes_per_sec = 10;
   repeated double tx_spark = 11;
   repeated double rx_spark = 12;
+  // Subsystems that acquired this connection since the previous stats snapshot
+  // (union of brief holds that may not appear in purposes at tick time).
+  repeated string purposes_window = 13;
 }
 
 // PeerTrafficTotal is the per-peer sum of this node's peer_connections.

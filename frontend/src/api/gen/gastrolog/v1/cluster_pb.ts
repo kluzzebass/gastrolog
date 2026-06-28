@@ -869,6 +869,14 @@ export class PeerConnStat extends Message<PeerConnStat> {
    */
   rxSpark: number[] = [];
 
+  /**
+   * Subsystems that acquired this connection since the previous stats snapshot
+   * (union of brief holds that may not appear in purposes at tick time).
+   *
+   * @generated from field: repeated string purposes_window = 13;
+   */
+  purposesWindow: string[] = [];
+
   constructor(data?: PartialMessage<PeerConnStat>) {
     super();
     proto3.util.initPartial(data, this);
@@ -889,6 +897,7 @@ export class PeerConnStat extends Message<PeerConnStat> {
     { no: 10, name: "rx_bytes_per_sec", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
     { no: 11, name: "tx_spark", kind: "scalar", T: 1 /* ScalarType.DOUBLE */, repeated: true },
     { no: 12, name: "rx_spark", kind: "scalar", T: 1 /* ScalarType.DOUBLE */, repeated: true },
+    { no: 13, name: "purposes_window", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PeerConnStat {

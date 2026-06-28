@@ -71,6 +71,7 @@ type PeerConnSnapshot struct {
 	PoolIndex    int
 	Connectivity string
 	Purposes     []string
+	PurposesWindow []string
 	BytesSent    int64
 	BytesRecv    int64
 	CreatedAt    time.Time
@@ -140,6 +141,9 @@ type managedConn struct {
 
 	purposeMu sync.Mutex
 	purposes  map[string]int
+	// windowPurposes accumulates every purpose that acquired this conn since the
+	// last stats broadcast tick (ResetPurposeWindows).
+	windowPurposes map[string]struct{}
 
 	bytesSent atomic.Int64
 	bytesRecv atomic.Int64
@@ -388,6 +392,38 @@ func (m *PeerConnManager) Snapshot() []PeerConnSnapshot {
 	return out
 }
 
+// ResetPurposeWindows clears accumulated purpose activity since the last
+// stats broadcast tick. Called once per BroadcastStats after the snapshot
+// is published — not on read-only Snapshot() calls from the lifecycle API.
+func (m *PeerConnManager) ResetPurposeWindows() {
+	for i := range m.shards {
+		sh := &m.shards[i]
+		sh.mu.RLock()
+		for _, ent := range sh.entries {
+			ent.mu.Lock()
+			if ent.policy == policySingleton {
+				if ent.single != nil {
+					ent.single.resetPurposeWindowLocked()
+				}
+			} else {
+				for _, mc := range ent.pool {
+					if mc != nil {
+						mc.resetPurposeWindowLocked()
+					}
+				}
+			}
+			ent.mu.Unlock()
+		}
+		sh.mu.RUnlock()
+	}
+}
+
+func (mc *managedConn) resetPurposeWindowLocked() {
+	mc.purposeMu.Lock()
+	mc.windowPurposes = make(map[string]struct{})
+	mc.purposeMu.Unlock()
+}
+
 func (m *PeerConnManager) snapshotManaged(mc *managedConn) PeerConnSnapshot {
 	mc.purposeMu.Lock()
 	purposes := make([]string, 0, len(mc.purposes))
@@ -397,6 +433,11 @@ func (m *PeerConnManager) snapshotManaged(mc *managedConn) PeerConnSnapshot {
 		}
 	}
 	sort.Strings(purposes)
+	purposesWindow := make([]string, 0, len(mc.windowPurposes))
+	for p := range mc.windowPurposes {
+		purposesWindow = append(purposesWindow, p)
+	}
+	sort.Strings(purposesWindow)
 	mc.purposeMu.Unlock()
 
 	last := time.Unix(0, mc.lastUsed.Load())
@@ -413,6 +454,7 @@ func (m *PeerConnManager) snapshotManaged(mc *managedConn) PeerConnSnapshot {
 		PoolIndex:    mc.poolIndex,
 		Connectivity: mc.grpc.GetState().String(),
 		Purposes:     purposes,
+		PurposesWindow: purposesWindow,
 		BytesSent:    mc.bytesSent.Load(),
 		BytesRecv:    mc.bytesRecv.Load(),
 		CreatedAt:    mc.createdAt,
@@ -539,8 +581,9 @@ func (m *PeerConnManager) dial(spec ConnSpec, poolIndex int) (*managedConn, erro
 		dialAddr:   addr,
 		serverName: serverName,
 		poolIndex:  poolIndex,
-		purposes:   make(map[string]int),
-		createdAt:  time.Now(),
+		purposes:       make(map[string]int),
+		windowPurposes: make(map[string]struct{}),
+		createdAt:      time.Now(),
 	}
 
 	dialOpts := []grpc.DialOption{
@@ -573,7 +616,14 @@ func (m *PeerConnManager) touchUsed(mc *managedConn) {
 
 func (m *PeerConnManager) addPurposeLocked(mc *managedConn, purpose string) {
 	mc.purposeMu.Lock()
+	if mc.purposes == nil {
+		mc.purposes = make(map[string]int)
+	}
+	if mc.windowPurposes == nil {
+		mc.windowPurposes = make(map[string]struct{})
+	}
 	mc.purposes[purpose]++
+	mc.windowPurposes[purpose] = struct{}{}
 	mc.purposeMu.Unlock()
 }
 

@@ -1022,8 +1022,11 @@ type PeerConnStat struct {
 	RxBytesPerSec float64                `protobuf:"fixed64,10,opt,name=rx_bytes_per_sec,json=rxBytesPerSec,proto3" json:"rx_bytes_per_sec,omitempty"`
 	TxSpark       []float64              `protobuf:"fixed64,11,rep,packed,name=tx_spark,json=txSpark,proto3" json:"tx_spark,omitempty"`
 	RxSpark       []float64              `protobuf:"fixed64,12,rep,packed,name=rx_spark,json=rxSpark,proto3" json:"rx_spark,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// Subsystems that acquired this connection since the previous stats snapshot
+	// (union of brief holds that may not appear in purposes at tick time).
+	PurposesWindow []string `protobuf:"bytes,13,rep,name=purposes_window,json=purposesWindow,proto3" json:"purposes_window,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *PeerConnStat) Reset() {
@@ -1136,6 +1139,13 @@ func (x *PeerConnStat) GetTxSpark() []float64 {
 func (x *PeerConnStat) GetRxSpark() []float64 {
 	if x != nil {
 		return x.RxSpark
+	}
+	return nil
+}
+
+func (x *PeerConnStat) GetPurposesWindow() []string {
+	if x != nil {
+		return x.PurposesWindow
 	}
 	return nil
 }
@@ -4350,7 +4360,7 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x10working_segments\x18\x02 \x01(\rR\x0fworkingSegments\x12<\n" +
 	"\x1acompleted_staging_segments\x18\x03 \x01(\rR\x18completedStagingSegments\x12#\n" +
 	"\rhead_segments\x18\x04 \x01(\rR\fheadSegments\x12*\n" +
-	"\x11pre_head_segments\x18\x05 \x01(\rR\x0fpreHeadSegments\"\xfe\x02\n" +
+	"\x11pre_head_segments\x18\x05 \x01(\rR\x0fpreHeadSegments\"\xa7\x03\n" +
 	"\fPeerConnStat\x12\x12\n" +
 	"\x04peer\x18\x01 \x01(\tR\x04peer\x12\x12\n" +
 	"\x04lane\x18\x02 \x01(\tR\x04lane\x12\x19\n" +
@@ -4366,7 +4376,8 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x10rx_bytes_per_sec\x18\n" +
 	" \x01(\x01R\rrxBytesPerSec\x12\x19\n" +
 	"\btx_spark\x18\v \x03(\x01R\atxSpark\x12\x19\n" +
-	"\brx_spark\x18\f \x03(\x01R\arxSpark\"\xf4\x01\n" +
+	"\brx_spark\x18\f \x03(\x01R\arxSpark\x12'\n" +
+	"\x0fpurposes_window\x18\r \x03(\tR\x0epurposesWindow\"\xf4\x01\n" +
 	"\x10PeerTrafficTotal\x12\x12\n" +
 	"\x04peer\x18\x01 \x01(\tR\x04peer\x12\x1d\n" +
 	"\n" +

@@ -100,6 +100,10 @@ type RaftStatsProvider interface {
 // PeerConnSnapshotProvider exposes managed outbound connection telemetry.
 type PeerConnSnapshotProvider interface {
 	Snapshot() []PeerConnSnapshot
+	// ResetPurposeWindows clears per-connection purpose activity windows after
+	// a stats broadcast tick. Snapshot must not reset windows — lifecycle
+	// polls CollectLocalSnapshot between ticks.
+	ResetPurposeWindows()
 }
 
 // AlertProvider exposes active system alerts for broadcast.
@@ -142,6 +146,11 @@ type StatsCollector struct {
 	mu        sync.Mutex
 	peerConnStats    map[string]*peerConnStatsWindow
 	peerTrafficStats map[string]*peerConnStatsWindow // keyed by peer node ID
+	// lastPublishedPurposeWindows holds purposes_window from the most recent
+	// CollectLocalTick (5s broadcast). CollectLocalSnapshot overlays this onto
+	// read-only snapshots briefly after each tick so WatchSystemStatus still
+	// shows the completed interval after ResetPurposeWindows runs.
+	lastPublishedPurposeWindows map[string][]string
 }
 
 const peerConnStatsSparkPoints = 20
@@ -236,7 +245,9 @@ func (c *StatsCollector) BroadcastHeartbeat(ctx context.Context) {
 // advancing any rolling windows. Used by the lifecycle server for "real-time"
 // reads so opening the inspector doesn't skew rate calculations.
 func (c *StatsCollector) CollectLocalSnapshot() *gastrologv1.NodeStats {
-	return c.collectLocal(time.Now(), false)
+	stats := c.collectLocal(time.Now(), false)
+	c.applyPublishedPurposeWindows(stats)
+	return stats
 }
 
 // CollectLocalTick gathers NodeStats and advances rolling windows. Called
@@ -340,7 +351,8 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 				Peer:          pc.PeerNodeID,
 				Lane:          pc.Lane,
 				GroupId:       pc.GroupID,
-				Purposes:      append([]string(nil), pc.Purposes...),
+				Purposes:       append([]string(nil), pc.Purposes...),
+				PurposesWindow: append([]string(nil), pc.PurposesWindow...),
 				Connectivity:  pc.Connectivity,
 				PoolIndex:     int32(pc.PoolIndex), //nolint:gosec
 				BytesSent:     pc.BytesSent,
@@ -350,6 +362,10 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 				TxSpark:       txSpark,
 				RxSpark:       rxSpark,
 			})
+		}
+		if stepWindows {
+			c.storePublishedPurposeWindows(stats.PeerConnections)
+			c.cfg.PeerConns.ResetPurposeWindows()
 		}
 	}
 	c.appendPeerTrafficTotals(stats, now, stepWindows)
@@ -413,6 +429,39 @@ func (c *StatsCollector) appendPeerTrafficTotals(stats *gastrologv1.NodeStats, n
 
 func peerConnStatsKey(s PeerConnSnapshot) string {
 	return fmt.Sprintf("%s\x00%s\x00%s\x00%d", s.PeerNodeID, s.Lane, s.GroupID, s.PoolIndex)
+}
+
+func peerConnStatKey(row *gastrologv1.PeerConnStat) string {
+	return fmt.Sprintf("%s\x00%s\x00%s\x00%d", row.Peer, row.Lane, row.GroupId, row.PoolIndex)
+}
+
+func (c *StatsCollector) storePublishedPurposeWindows(rows []*gastrologv1.PeerConnStat) {
+	published := make(map[string][]string)
+	for _, row := range rows {
+		if len(row.PurposesWindow) == 0 {
+			continue
+		}
+		published[peerConnStatKey(row)] = append([]string(nil), row.PurposesWindow...)
+	}
+	c.mu.Lock()
+	c.lastPublishedPurposeWindows = published
+	c.mu.Unlock()
+}
+
+func (c *StatsCollector) applyPublishedPurposeWindows(stats *gastrologv1.NodeStats) {
+	c.mu.Lock()
+	published := c.lastPublishedPurposeWindows
+	c.mu.Unlock()
+	if len(published) == 0 {
+		return
+	}
+	for _, row := range stats.PeerConnections {
+		if pw, ok := published[peerConnStatKey(row)]; ok && len(pw) > 0 {
+			row.PurposesWindow = append([]string(nil), pw...)
+		} else {
+			row.PurposesWindow = nil
+		}
+	}
 }
 
 func (c *StatsCollector) observePeerConnStats(now time.Time, key string, sent, recv int64, step bool) (txPerSec, rxPerSec float64, txSpark, rxSpark []float64) {

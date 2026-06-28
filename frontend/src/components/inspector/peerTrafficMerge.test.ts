@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { PeerConnStat } from "../../api/gen/gastrolog/v1/cluster_pb";
 import { asEntityID } from "../../api/model/id";
-import { mergePeerTraffic, laneDetailText } from "./peerTrafficMerge";
+import { mergePeerTraffic, laneDetailText, mergedPurposesWindow } from "./peerTrafficMerge";
 
 const NODE_A = asEntityID("node-a");
 const NODE_B = asEntityID("node-b");
@@ -122,6 +122,7 @@ describe("mergePeerTraffic", () => {
       poolIndex: 0,
       groupId: "vault/abc123/ctl",
       purposes: ["raft"],
+      purposesWindow: [],
       bytesSent: 0,
       bytesReceived: 0,
       txBytesPerSec: 0,
@@ -135,19 +136,66 @@ describe("mergePeerTraffic", () => {
       }).label,
     ).toBe("logs");
     expect(laneDetailText(raftLane).label).toBe("—");
+    const serviceDetail = laneDetailText({
+      lane: "service",
+      poolIndex: 0,
+      groupId: "",
+      purposes: ["search"],
+      purposesWindow: ["search", "chunk-apply"],
+      bytesSent: 0,
+      bytesReceived: 0,
+      txBytesPerSec: 0,
+      rxBytesPerSec: 0,
+      txSpark: [],
+      rxSpark: [],
+    });
+    expect(serviceDetail.label).toBe("search");
     expect(
-      laneDetailText({
+      [...mergedPurposesWindow({
         lane: "service",
         poolIndex: 0,
         groupId: "",
-        purposes: ["search", "chunk-apply"],
+        purposes: [],
+        purposesWindow: ["search", "chunk-apply"],
         bytesSent: 0,
         bytesReceived: 0,
         txBytesPerSec: 0,
         rxBytesPerSec: 0,
         txSpark: [],
         rxSpark: [],
-      }).label,
-    ).toBe("chunk-apply, search");
+      })].sort(),
+    ).toEqual(["chunk-apply", "search"]);
+  });
+
+  test("merges purposes_window across both peers on the same pool slot", () => {
+    const merged = mergePeerTraffic(
+      NODE_A,
+      {
+        peerConnections: [
+          new PeerConnStat({
+            peer: "node-b",
+            lane: "service",
+            poolIndex: 0,
+            purposesWindow: ["search"],
+            bytesSent: 1n,
+            bytesReceived: 1n,
+          }),
+        ],
+      },
+      NODE_B,
+      {
+        peerConnections: [
+          new PeerConnStat({
+            peer: "node-a",
+            lane: "service",
+            poolIndex: 0,
+            purposesWindow: ["chunk-apply"],
+            bytesSent: 1n,
+            bytesReceived: 1n,
+          }),
+        ],
+      },
+    );
+    expect(merged!.lanes[0]!.purposesWindow).toEqual(["chunk-apply", "search"]);
   });
 });

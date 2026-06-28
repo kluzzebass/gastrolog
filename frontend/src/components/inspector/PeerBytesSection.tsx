@@ -12,8 +12,11 @@ import type { NodeRegistry } from "../../api/hooks";
 import {
   mergeAllPeerTraffic,
   laneDetailText,
+  mergedPurposesWindow,
   type MergedPeerLane,
 } from "./peerTrafficMerge";
+import { PurposeWindowStrip } from "./PurposeWindowStrip";
+import type { ReactNode } from "react";
 
 function laneLabel(lane: string, poolIndex: number): string {
   if (lane === "service") {
@@ -24,6 +27,34 @@ function laneLabel(lane: string, poolIndex: number): string {
 
 function rowKey(peerId: EntityID, lane: MergedPeerLane): string {
   return `${peerId}\0${lane.lane}\0${lane.groupId}\0${lane.poolIndex}`;
+}
+
+function laneDetailCell(
+  lane: MergedPeerLane,
+  opts: {
+    isTotal?: boolean;
+    vaultNameOf?: (vaultId: EntityID) => string | undefined;
+    muted?: boolean;
+  },
+): { content: ReactNode; title?: string } {
+  if (opts.isTotal || lane.lane === "total") {
+    return { content: "—" };
+  }
+  if (lane.lane === "raft") {
+    const text = laneDetailText(lane, opts);
+    return {
+      content: text.label,
+      title: text.title || undefined,
+    };
+  }
+  return {
+    content: (
+      <PurposeWindowStrip
+        active={mergedPurposesWindow(lane)}
+        muted={opts.muted}
+      />
+    ),
+  };
 }
 
 export interface PeerBytesSectionProps {
@@ -138,7 +169,7 @@ function PeerTrafficGroup({
       <TrafficRow
         label={peerName}
         child={false}
-        detail={laneDetailText(total, { isTotal: true, ...detailOpts })}
+        detail={laneDetailCell(total, { isTotal: true, ...detailOpts })}
         txBytesPerSec={total.txBytesPerSec}
         rxBytesPerSec={total.rxBytesPerSec}
         txSpark={total.txSpark}
@@ -155,7 +186,7 @@ function PeerTrafficGroup({
             key={rowKey(peerId, lane)}
             label={laneLabel(lane.lane, lane.poolIndex)}
             child
-            detail={laneDetailText(lane, detailOpts)}
+            detail={laneDetailCell(lane, { ...detailOpts, muted: true })}
             txBytesPerSec={lane.txBytesPerSec}
             rxBytesPerSec={lane.rxBytesPerSec}
             txSpark={lane.txSpark}
@@ -189,7 +220,7 @@ function TrafficRow({
 }: Readonly<{
   label: string;
   child: boolean;
-  detail: { label: string; title: string };
+  detail: { content: ReactNode; title?: string };
   txBytesPerSec: number;
   rxBytesPerSec: number;
   txSpark: readonly number[];
@@ -205,14 +236,12 @@ function TrafficRow({
   const detailClass = child
     ? `${tdDetail} ${c("text-text-muted", "text-light-text-muted")}`
     : tdDetail;
-  const detailTitle =
-    detail.title && detail.title !== detail.label ? detail.title : undefined;
 
   return (
     <tr className={border}>
       <td className={child ? tdChild : tdPeer}>{label}</td>
-      <td className={detailClass} title={detailTitle}>
-        {detail.label}
+      <td className={detailClass} title={detail.title}>
+        {detail.content}
       </td>
       <td className={tdMetric}>
         <MetricCell

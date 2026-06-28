@@ -8,6 +8,7 @@ export interface MergedPeerLane {
   poolIndex: number;
   groupId: string;
   purposes: string[];
+  purposesWindow: string[];
   bytesSent: number;
   bytesReceived: number;
   txBytesPerSec: number;
@@ -50,12 +51,19 @@ function addRow(map: Map<string, MergedPeerLane>, row: PeerConnStat): void {
       purposes.add(p);
     }
   }
+  const purposesWindow = new Set(existing?.purposesWindow);
+  for (const p of row.purposesWindow ?? []) {
+    if (p) {
+      purposesWindow.add(p);
+    }
+  }
   const lane = row.lane === "raft" ? "raft" : "service";
   map.set(key, {
     lane,
     poolIndex: row.lane === "raft" ? 0 : row.poolIndex,
     groupId: row.lane === "raft" ? row.groupId : "",
     purposes: [...purposes].sort(),
+    purposesWindow: [...purposesWindow].sort(),
     bytesSent: (existing?.bytesSent ?? 0) + Number(row.bytesSent),
     bytesReceived: (existing?.bytesReceived ?? 0) + Number(row.bytesReceived),
     txBytesPerSec: (existing?.txBytesPerSec ?? 0) + row.txBytesPerSec,
@@ -67,6 +75,7 @@ function addRow(map: Map<string, MergedPeerLane>, row: PeerConnStat): void {
 
 function sumLanes(lanes: readonly MergedPeerLane[]): MergedPeerLane {
   const purposes = new Set<string>();
+  const purposesWindow = new Set<string>();
   let bytesSent = 0;
   let bytesReceived = 0;
   let txBytesPerSec = 0;
@@ -76,6 +85,9 @@ function sumLanes(lanes: readonly MergedPeerLane[]): MergedPeerLane {
   for (const lane of lanes) {
     for (const p of lane.purposes) {
       purposes.add(p);
+    }
+    for (const p of lane.purposesWindow) {
+      purposesWindow.add(p);
     }
     bytesSent += lane.bytesSent;
     bytesReceived += lane.bytesReceived;
@@ -89,6 +101,7 @@ function sumLanes(lanes: readonly MergedPeerLane[]): MergedPeerLane {
     poolIndex: 0,
     groupId: "",
     purposes: [...purposes].sort(),
+    purposesWindow: [...purposesWindow].sort(),
     bytesSent,
     bytesReceived,
     txBytesPerSec,
@@ -148,6 +161,11 @@ export function laneDetailText(
   }
   const label = purposes.join(", ");
   return { label, title: label };
+}
+
+/** Union of window purposes for emoji activity strip (service lanes). */
+export function mergedPurposesWindow(lane: MergedPeerLane): ReadonlySet<string> {
+  return new Set(lane.purposesWindow.filter((p) => p && p !== "unknown"));
 }
 
 type PeerConnStatsView = Pick<NodeStats, "peerConnections">;
