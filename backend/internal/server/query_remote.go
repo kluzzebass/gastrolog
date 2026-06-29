@@ -40,6 +40,7 @@ func (s *QueryServer) collectRemote(ctx context.Context, q query.Query, remoteTo
 		records        <-chan []*apiv1.ExportRecord
 		errCh          <-chan error
 		getResumeToken func() []byte
+		getHistogram   func() []*apiv1.HistogramBucket
 		vaultID        glid.GLID
 	}
 	var streams []vaultStream
@@ -50,19 +51,24 @@ func (s *QueryServer) collectRemote(ctx context.Context, q query.Query, remoteTo
 	for nodeID, vaultIDs := range byNode {
 		for _, vid := range vaultIDs {
 			wg.Go(func() {
-				recCh, hist, _, eCh, getToken := s.remoteSearcher.SearchStream(ctx, nodeID, &apiv1.ForwardSearchRequest{
+				recCh, _, eCh, getToken, getHist := s.remoteSearcher.SearchStream(ctx, nodeID, &apiv1.ForwardSearchRequest{
 					VaultId:     vid.ToProto(),
 					Query:       queryExpr,
 					ResumeToken: remoteTokens[vid],
 				})
 				mu.Lock()
-				streams = append(streams, vaultStream{records: recCh, errCh: eCh, getResumeToken: getToken, vaultID: vid})
-				allHist = mergeHistogramBuckets(allHist, hist)
+				streams = append(streams, vaultStream{records: recCh, errCh: eCh, getResumeToken: getToken, getHistogram: getHist, vaultID: vid})
 				mu.Unlock()
 			})
 		}
 	}
 	wg.Wait()
+
+	for _, vs := range streams {
+		if vs.getHistogram != nil {
+			allHist = mergeHistogramBuckets(allHist, vs.getHistogram())
+		}
+	}
 
 	getRemoteTokens := func() map[glid.GLID][]byte {
 		tokens := make(map[glid.GLID][]byte)

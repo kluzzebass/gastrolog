@@ -2010,15 +2010,19 @@ func (x *RequestReplicaCatchupResponse) GetScheduled() uint32 {
 	return 0
 }
 
-// ForwardSearchRequest is sent to the node that owns a remote vault,
-// asking it to execute a search locally and return matching records.
+// ForwardSearchRequest is sent to a replica holder node to execute a
+// scoped search locally and return matching records. When sealed_chunk_ids
+// is empty and search_pipeline_chunks is false, the holder runs a legacy
+// leader-only full-vault search (backward compatible).
 type ForwardSearchRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	VaultId       []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
-	Query         string                 `protobuf:"bytes,2,opt,name=query,proto3" json:"query,omitempty"`
-	ResumeToken   []byte                 `protobuf:"bytes,3,opt,name=resume_token,json=resumeToken,proto3" json:"resume_token,omitempty"` // resume token for pagination across pages
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                protoimpl.MessageState `protogen:"open.v1"`
+	VaultId              []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
+	Query                string                 `protobuf:"bytes,2,opt,name=query,proto3" json:"query,omitempty"`
+	ResumeToken          []byte                 `protobuf:"bytes,3,opt,name=resume_token,json=resumeToken,proto3" json:"resume_token,omitempty"`                               // resume token for pagination across pages
+	SealedChunkIds       [][]byte               `protobuf:"bytes,4,rep,name=sealed_chunk_ids,json=sealedChunkIds,proto3" json:"sealed_chunk_ids,omitempty"`                    // sealed chunks this holder should scan
+	SearchPipelineChunks bool                   `protobuf:"varint,5,opt,name=search_pipeline_chunks,json=searchPipelineChunks,proto3" json:"search_pipeline_chunks,omitempty"` // include active/sealing chunks (leader only)
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *ForwardSearchRequest) Reset() {
@@ -2070,6 +2074,20 @@ func (x *ForwardSearchRequest) GetResumeToken() []byte {
 		return x.ResumeToken
 	}
 	return nil
+}
+
+func (x *ForwardSearchRequest) GetSealedChunkIds() [][]byte {
+	if x != nil {
+		return x.SealedChunkIds
+	}
+	return nil
+}
+
+func (x *ForwardSearchRequest) GetSearchPipelineChunks() bool {
+	if x != nil {
+		return x.SearchPipelineChunks
+	}
+	return false
 }
 
 type ForwardSearchResponse struct {
@@ -4431,11 +4449,13 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\tchunk_ids\x18\x02 \x03(\fR\bchunkIds\x12*\n" +
 	"\x11requester_node_id\x18\x03 \x01(\fR\x0frequesterNodeId\"=\n" +
 	"\x1dRequestReplicaCatchupResponse\x12\x1c\n" +
-	"\tscheduled\x18\x01 \x01(\rR\tscheduled\"j\n" +
+	"\tscheduled\x18\x01 \x01(\rR\tscheduled\"\xca\x01\n" +
 	"\x14ForwardSearchRequest\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12\x14\n" +
 	"\x05query\x18\x02 \x01(\tR\x05query\x12!\n" +
-	"\fresume_token\x18\x03 \x01(\fR\vresumeToken\"\x86\x02\n" +
+	"\fresume_token\x18\x03 \x01(\fR\vresumeToken\x12(\n" +
+	"\x10sealed_chunk_ids\x18\x04 \x03(\fR\x0esealedChunkIds\x124\n" +
+	"\x16search_pipeline_chunks\x18\x05 \x01(\bR\x14searchPipelineChunks\"\x86\x02\n" +
 	"\x15ForwardSearchResponse\x124\n" +
 	"\arecords\x18\x01 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecords\x12!\n" +
 	"\fresume_token\x18\x02 \x01(\fR\vresumeToken\x12\x19\n" +

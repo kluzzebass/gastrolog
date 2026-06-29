@@ -25,9 +25,10 @@ import (
 // it returns a TableResult with a nil iterator. The histogram slice (if
 // non-nil) provides an approximate volume histogram for the searched vault.
 // Used by the ForwardSearch handler to serve remote search requests.
-// The resumeToken parameter allows resuming a paginated search. The returned
-// getToken function returns a resume token for the next page (nil if exhausted).
-type SearchExecutor func(ctx context.Context, vaultID glid.GLID, queryExpr string, resumeToken []byte) (iter.Seq2[chunk.Record, error], func() []byte, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, error)
+// The request may carry sealed-chunk subset fields for distributed search
+// (gastrolog-2qj7m). The returned getToken function returns a resume token
+// for the next page (nil if exhausted).
+type SearchExecutor func(ctx context.Context, req *gastrologv1.ForwardSearchRequest) (iter.Seq2[chunk.Record, error], func() []byte, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, error)
 
 // ContextExecutor fetches records surrounding a specific position in a local vault.
 // Used by the ForwardGetContext handler to serve remote context requests.
@@ -360,8 +361,9 @@ func forwardSearchStreamHandler(srv any, stream grpc.ServerStream) error {
 	if err != nil {
 		return err
 	}
+	_ = vaultID // validated; executor reads vault_id from req
 
-	searchIter, getToken, tableResult, histogram, err := s.searchExecutor(stream.Context(), vaultID, req.GetQuery(), req.GetResumeToken())
+	searchIter, getToken, tableResult, histogram, err := s.searchExecutor(stream.Context(), req)
 	if err != nil {
 		return status.Errorf(codes.Internal, "search: %v", err)
 	}

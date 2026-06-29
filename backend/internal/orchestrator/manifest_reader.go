@@ -116,6 +116,23 @@ func (o *Orchestrator) VaultManifestEntriesFromCtlFSM(vaultID glid.GLID) []vault
 	return out
 }
 
+// vaultCtlFSMForVault returns the vault-ctl chunk FSM for vaultID when this
+// node has joined the vault control-plane Raft group.
+func (o *Orchestrator) vaultCtlFSMForVault(vaultID glid.GLID) *vaultctlfsm.FSM {
+	if o.groupMgr == nil {
+		return nil
+	}
+	g := o.groupMgr.GetGroup(raftgroup.VaultControlPlaneGroupID(vaultID))
+	if g == nil {
+		return nil
+	}
+	vfsm, ok := g.FSM.(*vaultraft.FSM)
+	if !ok || vfsm == nil {
+		return nil
+	}
+	return vfsm.VaultFSM(vaultID)
+}
+
 func collectSealedEntries(vaultInst *VaultInstance) []vaultctlfsm.ManifestEntry {
 	if vaultInst == nil {
 		return nil

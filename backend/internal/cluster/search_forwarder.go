@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 
@@ -72,16 +73,26 @@ func (sf *SearchForwarder) Search(ctx context.Context, nodeID string, req *gastr
 }
 
 // SearchStream opens a server-streaming ForwardSearch RPC and returns the
-// results via channels.
+// results via channels. The call returns before the first remote batch arrives
+// so coordinators can start k-way merge while slow holders are still seeking.
 func (sf *SearchForwarder) SearchStream(ctx context.Context, nodeID string, req *gastrologv1.ForwardSearchRequest) (
 	records <-chan []*gastrologv1.ExportRecord,
-	histogram []*gastrologv1.HistogramBucket,
 	tableResult *gastrologv1.TableResult,
 	errCh <-chan error,
 	getResumeToken func() []byte,
+	getHistogram func() []*gastrologv1.HistogramBucket,
 ) {
 	var resumeToken []byte
 	getResumeToken = func() []byte { return resumeToken }
+
+	var histogram []*gastrologv1.HistogramBucket
+	var histOnce sync.Once
+	histReady := make(chan struct{})
+	getHistogram = func() []*gastrologv1.HistogramBucket {
+		histOnce.Do(func() { <-histReady })
+		return histogram
+	}
+
 	recCh := make(chan []*gastrologv1.ExportRecord, 16)
 	eCh := make(chan error, 1)
 
@@ -93,7 +104,8 @@ func (sf *SearchForwarder) SearchStream(ctx context.Context, nodeID string, req 
 		eCh <- fmt.Errorf("open search stream to %s: %w", nodeID, err)
 		close(recCh)
 		close(eCh)
-		return recCh, nil, nil, eCh, getResumeToken
+		close(histReady)
+		return recCh, nil, eCh, getResumeToken, getHistogram
 	}
 
 	if err := stream.SendMsg(req); err != nil {
@@ -102,15 +114,38 @@ func (sf *SearchForwarder) SearchStream(ctx context.Context, nodeID string, req 
 		eCh <- fmt.Errorf("send search request to %s: %w", nodeID, err)
 		close(recCh)
 		close(eCh)
-		return recCh, nil, nil, eCh, getResumeToken
+		close(histReady)
+		return recCh, nil, eCh, getResumeToken, getHistogram
 	}
 	if err := stream.CloseSend(); err != nil {
 		h.Release()
 		eCh <- fmt.Errorf("close send to %s: %w", nodeID, err)
 		close(recCh)
 		close(eCh)
-		return recCh, nil, nil, eCh, getResumeToken
+		close(histReady)
+		return recCh, nil, eCh, getResumeToken, getHistogram
 	}
+
+	go sf.drainSearchStream(ctx, nodeID, stream, h, recCh, eCh, histReady, &histogram, &resumeToken)
+
+	return recCh, nil, eCh, getResumeToken, getHistogram
+}
+
+func (sf *SearchForwarder) drainSearchStream(
+	ctx context.Context,
+	nodeID string,
+	stream grpc.ClientStream,
+	h PeerConnHandle,
+	recCh chan<- []*gastrologv1.ExportRecord,
+	eCh chan<- error,
+	histReady chan struct{},
+	histogram *[]*gastrologv1.HistogramBucket,
+	resumeToken *[]byte,
+) {
+	defer h.Release()
+	defer close(recCh)
+	defer close(eCh)
+	defer close(histReady)
 
 	first := &gastrologv1.ForwardSearchResponse{}
 	if err := stream.RecvMsg(first); err != nil {
@@ -118,55 +153,40 @@ func (sf *SearchForwarder) SearchStream(ctx context.Context, nodeID string, req 
 			h.Invalidate(err)
 			eCh <- fmt.Errorf("search stream from %s: %w", nodeID, err)
 		}
-		h.Release()
-		close(recCh)
-		close(eCh)
-		return recCh, nil, nil, eCh, getResumeToken
+		return
 	}
-	histogram = first.GetHistogram()
-	tableResult = first.GetTableResult()
-
-	if tableResult != nil {
-		h.Release()
-		close(recCh)
-		close(eCh)
-		return recCh, histogram, tableResult, eCh, getResumeToken
+	*histogram = first.GetHistogram()
+	if first.GetTableResult() != nil {
+		return
 	}
 
 	if len(first.GetRecords()) > 0 {
 		recCh <- first.GetRecords()
 	}
 	if len(first.GetResumeToken()) > 0 {
-		resumeToken = first.GetResumeToken()
+		*resumeToken = first.GetResumeToken()
 	}
 
-	go func() {
-		defer h.Release()
-		defer close(recCh)
-		defer close(eCh)
-		for {
-			msg := &gastrologv1.ForwardSearchResponse{}
-			if err := stream.RecvMsg(msg); err != nil {
-				if !errors.Is(err, io.EOF) {
-					h.Invalidate(err)
-					eCh <- fmt.Errorf("search stream from %s: %w", nodeID, err)
-				}
+	for {
+		msg := &gastrologv1.ForwardSearchResponse{}
+		if err := stream.RecvMsg(msg); err != nil {
+			if !errors.Is(err, io.EOF) {
+				h.Invalidate(err)
+				eCh <- fmt.Errorf("search stream from %s: %w", nodeID, err)
+			}
+			return
+		}
+		if len(msg.GetRecords()) > 0 {
+			select {
+			case recCh <- msg.GetRecords():
+			case <-ctx.Done():
 				return
 			}
-			if len(msg.GetRecords()) > 0 {
-				select {
-				case recCh <- msg.GetRecords():
-				case <-ctx.Done():
-					return
-				}
-			}
-			if len(msg.GetResumeToken()) > 0 {
-				resumeToken = msg.GetResumeToken()
-			}
 		}
-	}()
-
-	return recCh, histogram, tableResult, eCh, getResumeToken
+		if len(msg.GetResumeToken()) > 0 {
+			*resumeToken = msg.GetResumeToken()
+		}
+	}
 }
 
 func (sf *SearchForwarder) GetContext(ctx context.Context, nodeID string, req *gastrologv1.ForwardGetContextRequest) (*gastrologv1.ForwardGetContextResponse, error) {

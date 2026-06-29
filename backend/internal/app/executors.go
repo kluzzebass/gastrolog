@@ -135,13 +135,14 @@ func forwardSearchAfterParse(
 	q query.Query,
 	pipeline *querylang.Pipeline,
 	resumeTokenData []byte,
+	includeHistogram bool,
 ) (iter.Seq2[chunk.Record, error], func() []byte, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, error) {
 	// Filtered forward searches already pay a full lazy-prime record scan in
 	// Search below. Skip the histogram pre-pass (timechartScanPath → Search)
 	// which would duplicate that work and spike RSS on scatterbox nodes.
-	// Unfiltered queries keep the fast binary-search histogram path.
+	// Unfiltered legacy full-vault forwards keep the fast binary-search path.
 	var histogram []*gastrologv1.HistogramBucket
-	if q.BoolExpr == nil {
+	if includeHistogram {
 		histogram = server.HistogramToProto(eng.ComputeSearchPageHistogram(ctx, q, 50))
 	}
 
@@ -189,24 +190,25 @@ func forwardSearchAfterParse(
 // TableResult instead of individual records. For regular searches, returns
 // the iterator directly — the streaming handler sends records as it iterates.
 func newSearchExecutor(o *orchestrator.Orchestrator) cluster.SearchExecutor {
-	return func(ctx context.Context, vaultID glid.GLID, queryExpr string, resumeTokenData []byte) (iter.Seq2[chunk.Record, error], func() []byte, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, error) {
-		// Don't add vault_id= scope — the engine is already scoped to this
-		// vault's leader instances. Adding vault_id= would fail because the
-		// engine uses vault IDs, not vault IDs.
-		q, pipeline, err := server.ParseExpression(queryExpr)
+	return func(ctx context.Context, req *gastrologv1.ForwardSearchRequest) (iter.Seq2[chunk.Record, error], func() []byte, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, error) {
+		if glid.FromBytes(req.GetVaultId()).IsZero() {
+			return nil, nil, nil, nil, errors.New("invalid vault_id")
+		}
+		q, pipeline, err := server.ParseExpression(req.GetQuery())
 		if err != nil {
 			return nil, nil, nil, nil, fmt.Errorf("parse query: %w", err)
 		}
 
-		eng, err := o.LeaderQueryEngineForVault(vaultID)
+		eng, err := server.ForwardSearchEngine(o, req)
 		if err != nil {
 			return nil, nil, nil, nil, err
 		}
 		if eng == nil {
-			return nil, nil, nil, nil, nil // no leader instance for this vault
+			return nil, nil, nil, nil, nil
 		}
 
-		return forwardSearchAfterParse(ctx, eng, q, pipeline, resumeTokenData)
+		includeHist := server.ForwardSearchIncludesHistogram(req, q)
+		return forwardSearchAfterParse(ctx, eng, q, pipeline, req.GetResumeToken(), includeHist)
 	}
 }
 

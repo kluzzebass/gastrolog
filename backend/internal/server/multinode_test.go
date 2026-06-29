@@ -446,9 +446,8 @@ func (d *directRemoteSearcher) Search(ctx context.Context, nodeID string, req *g
 		return nil, fmt.Errorf("invalid vault_id: empty or too short")
 	}
 
-	// Match production behavior: only search leader vaults on this node.
-	// Production ForwardSearch uses LeaderQueryEngineForVault.
-	eng, engErr := orch.LeaderQueryEngineForVault(vaultID)
+	// Match production ForwardSearch engine resolution.
+	eng, engErr := server.ForwardSearchEngine(orch, req)
 	if engErr != nil {
 		return nil, engErr
 	}
@@ -474,15 +473,17 @@ func (d *directRemoteSearcher) Search(ctx context.Context, nodeID string, req *g
 		}
 	}
 
-	// Compute histogram for this vault.
-	histogram := eng.ComputeHistogram(ctx, q, 50)
+	// Compute histogram for legacy full-vault forwards only.
 	var histProto []*gastrologv1.HistogramBucket
-	for _, b := range histogram {
-		histProto = append(histProto, &gastrologv1.HistogramBucket{
-			TimestampMs: b.TimestampMs,
-			Count:       b.Count,
-			GroupCounts: b.GroupCounts,
-		})
+	if server.ForwardSearchIncludesHistogram(req, q) {
+		histogram := eng.ComputeHistogram(ctx, q, 50)
+		for _, b := range histogram {
+			histProto = append(histProto, &gastrologv1.HistogramBucket{
+				TimestampMs: b.TimestampMs,
+				Count:       b.Count,
+				GroupCounts: b.GroupCounts,
+			})
+		}
 	}
 
 	// Regular search.
@@ -503,20 +504,22 @@ func (d *directRemoteSearcher) Search(ctx context.Context, nodeID string, req *g
 
 func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, req *gastrologv1.ForwardSearchRequest) (
 	<-chan []*gastrologv1.ExportRecord,
-	[]*gastrologv1.HistogramBucket,
 	*gastrologv1.TableResult,
 	<-chan error,
 	func() []byte,
+	func() []*gastrologv1.HistogramBucket,
 ) {
 	recCh := make(chan []*gastrologv1.ExportRecord, 16)
 	errCh := make(chan error, 1)
+	nilToken := func() []byte { return nil }
+	nilHist := func() []*gastrologv1.HistogramBucket { return nil }
 
 	orch, ok := d.nodes[nodeID]
 	if !ok {
 		errCh <- fmt.Errorf("unknown node: %s", nodeID)
 		close(recCh)
 		close(errCh)
-		return recCh, nil, nil, errCh, func() []byte { return nil }
+		return recCh, nil, errCh, nilToken, nilHist
 	}
 
 	vaultID := glid.FromBytes(req.GetVaultId())
@@ -524,21 +527,21 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 		errCh <- fmt.Errorf("invalid vault_id: empty or too short")
 		close(recCh)
 		close(errCh)
-		return recCh, nil, nil, errCh, func() []byte { return nil }
+		return recCh, nil, errCh, nilToken, nilHist
 	}
 
 	// Match production behavior: only search leader vaults on this node.
-	eng, engErr := orch.LeaderQueryEngineForVault(vaultID)
+	eng, engErr := server.ForwardSearchEngine(orch, req)
 	if engErr != nil {
 		errCh <- engErr
 		close(recCh)
 		close(errCh)
-		return recCh, nil, nil, errCh, func() []byte { return nil }
+		return recCh, nil, errCh, nilToken, nilHist
 	}
 	if eng == nil {
 		close(recCh)
 		close(errCh)
-		return recCh, nil, nil, errCh, func() []byte { return nil }
+		return recCh, nil, errCh, nilToken, nilHist
 	}
 
 	q, pipeline, parseErr := server.ParseExpression(req.GetQuery())
@@ -546,7 +549,7 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 		errCh <- fmt.Errorf("parse: %w", parseErr)
 		close(recCh)
 		close(errCh)
-		return recCh, nil, nil, errCh, func() []byte { return nil }
+		return recCh, nil, errCh, nilToken, nilHist
 	}
 
 	// Pipeline query: return table result synchronously.
@@ -556,27 +559,32 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 			errCh <- runErr
 			close(recCh)
 			close(errCh)
-			return recCh, nil, nil, errCh, func() []byte { return nil }
+			return recCh, nil, errCh, nilToken, nilHist
 		}
 		if result.Table != nil {
 			close(recCh)
 			close(errCh)
-			return recCh, nil, server.TableResultToBasicProto(result.Table), errCh, func() []byte { return nil }
+			return recCh, server.TableResultToBasicProto(result.Table), errCh, nilToken, nilHist
 		}
 	}
 
-	// Compute histogram.
-	histogram := eng.ComputeHistogram(ctx, q, 50)
+	// Compute histogram for legacy full-vault forwards only.
 	var histProto []*gastrologv1.HistogramBucket
-	for _, b := range histogram {
-		histProto = append(histProto, &gastrologv1.HistogramBucket{
-			TimestampMs: b.TimestampMs,
-			Count:       b.Count,
-			GroupCounts: b.GroupCounts,
-		})
+	if server.ForwardSearchIncludesHistogram(req, q) {
+		histogram := eng.ComputeHistogram(ctx, q, 50)
+		for _, b := range histogram {
+			histProto = append(histProto, &gastrologv1.HistogramBucket{
+				TimestampMs: b.TimestampMs,
+				Count:       b.Count,
+				GroupCounts: b.GroupCounts,
+			})
+		}
 	}
+	histReady := make(chan struct{})
+	close(histReady)
+	getHistogram := func() []*gastrologv1.HistogramBucket { return histProto }
 
-	// Decode the resume token (if any) so the mock honors paginated requests
+	// Decode the resume token
 	// the same way the production ForwardSearch handler does. Without this,
 	// every page from a remote node restarts at the window edge.
 	var resume *query.ResumeToken
@@ -587,7 +595,7 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 			errCh <- fmt.Errorf("invalid resume token: %w", err)
 			close(recCh)
 			close(errCh)
-			return recCh, nil, nil, errCh, func() []byte { return nil }
+			return recCh, nil, errCh, nilToken, getHistogram
 		}
 	}
 
@@ -630,7 +638,7 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 		}
 	}()
 
-	return recCh, histProto, nil, errCh, getTokenBytes
+	return recCh, nil, errCh, getTokenBytes, getHistogram
 }
 
 func (d *directRemoteSearcher) GetContext(ctx context.Context, nodeID string, req *gastrologv1.ForwardGetContextRequest) (*gastrologv1.ForwardGetContextResponse, error) {

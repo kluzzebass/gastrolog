@@ -310,12 +310,16 @@ message RequestReplicaCatchupResponse {
   uint32 scheduled = 1; // number of chunk pushes scheduled (after leader-side filtering)
 }
 
-// ForwardSearchRequest is sent to the node that owns a remote vault,
-// asking it to execute a search locally and return matching records.
+// ForwardSearchRequest is sent to a replica holder node to execute a
+// scoped search locally and return matching records. When sealed_chunk_ids
+// is empty and search_pipeline_chunks is false, the holder runs a legacy
+// leader-only full-vault search (backward compatible).
 message ForwardSearchRequest {
   bytes vault_id = 1;
   string query = 2;
   bytes resume_token = 3; // resume token for pagination across pages
+  repeated bytes sealed_chunk_ids = 4; // sealed chunks this holder should scan
+  bool search_pipeline_chunks = 5; // include active/sealing chunks (leader only)
 }
 
 message ForwardSearchResponse {
