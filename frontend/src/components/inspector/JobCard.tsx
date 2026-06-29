@@ -80,12 +80,12 @@ export function ScheduledJobsTable({
     >
       {/* Column headers */}
       <div
-        className={`grid grid-cols-[1fr_8rem_9rem_9rem] gap-3 px-4 py-2 text-[0.7em] font-medium uppercase tracking-[0.15em] border-b ${c(
+        className={`grid grid-cols-[minmax(0,1fr)_8rem_9rem_9rem] gap-3 px-4 py-2 text-[0.7em] font-medium uppercase tracking-[0.15em] border-b ${c(
           "text-text-muted border-ink-border-subtle",
           "text-light-text-muted border-light-border-subtle",
         )}`}
       >
-        <span>Description</span>
+        <span>Job</span>
         <span>Schedule</span>
         <span>Last run</span>
         <span>Next run</span>
@@ -94,7 +94,7 @@ export function ScheduledJobsTable({
       {jobs.map((job) => (
         <div
           key={job.id}
-          className={`grid grid-cols-[1fr_8rem_9rem_9rem] gap-3 px-4 py-2 text-[0.85em] border-b last:border-b-0 ${c(
+          className={`grid grid-cols-[minmax(0,1fr)_8rem_9rem_9rem] gap-3 px-4 py-2 text-[0.85em] border-b last:border-b-0 ${c(
             "border-ink-border-subtle",
             "border-light-border-subtle",
           )}`}
@@ -102,15 +102,16 @@ export function ScheduledJobsTable({
           <span
             className={`flex items-center gap-2 min-w-0 ${c("text-text-bright", "text-light-text-bright")}`}
           >
-            <span className="font-mono truncate" title={job.displayLabel}>
-              {job.displayLabel}
+            <span className="font-mono truncate" title={job.scheduleLabel}>
+              {job.scheduleLabel}
             </span>
             {showNodeBadge && <NodeBadge nodeId={job.nodeId} dark={dark} />}
           </span>
           <span
-            className={`font-mono text-[0.9em] ${c("text-text-muted", "text-light-text-muted")}`}
+            className={`font-mono text-[0.9em] whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}
+            title={job.displaySchedule ? `Schedule: ${job.displaySchedule}` : undefined}
           >
-            {job.schedule}
+            {job.displaySchedule}
           </span>
           <span
             className={`font-mono text-[0.9em] ${c("text-text-muted", "text-light-text-muted")}`}

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"gastrolog/internal/cluster"
+	"gastrolog/internal/orchestrator"
 )
 
 const (
@@ -25,7 +26,7 @@ func startStatsCollectorJobs(
 ) error {
 	if err := scheduler.AddJob(
 		clusterStatsBroadcastJobName,
-		everyCron(broadcastInterval, 5*time.Second),
+		orchestrator.CronEvery(broadcastIntervalOr(5*time.Second, broadcastInterval)),
 		func() { collector.BroadcastStats(ctx) },
 	); err != nil {
 		return fmt.Errorf("cluster stats broadcast job: %w", err)
@@ -38,7 +39,7 @@ func startStatsCollectorJobs(
 	}
 	if err := scheduler.AddJob(
 		clusterPeerHeartbeatJobName,
-		everyCron(heartbeatInterval, time.Second),
+		orchestrator.CronEvery(heartbeatIntervalOr(time.Second, heartbeatInterval)),
 		func() { collector.BroadcastHeartbeat(ctx) },
 	); err != nil {
 		return fmt.Errorf("cluster peer heartbeat job: %w", err)
@@ -48,9 +49,16 @@ func startStatsCollectorJobs(
 	return nil
 }
 
-func everyCron(interval, fallback time.Duration) string {
+func broadcastIntervalOr(fallback, interval time.Duration) time.Duration {
 	if interval <= 0 {
-		interval = fallback
+		return fallback
 	}
-	return "@every " + interval.String()
+	return interval
+}
+
+func heartbeatIntervalOr(fallback, interval time.Duration) time.Duration {
+	if interval <= 0 {
+		return fallback
+	}
+	return interval
 }

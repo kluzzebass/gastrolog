@@ -11,6 +11,7 @@ import { toastError } from "../Toast";
 import { VaultCard } from "./VaultCard";
 import { IngesterCard } from "./IngesterCard";
 import { JobCard, ScheduledJobsTable } from "./JobCard";
+import { HelpButton } from "../HelpButton";
 import { SystemStatsView } from "./SystemStatsView";
 import { PeerBytesSection } from "./PeerBytesSection";
 import { Badge } from "../Badge";
@@ -115,7 +116,7 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings }: Readonly<NodeDe
       </Section>
 
       {/* Scheduled jobs section */}
-      <Section title="Scheduled" dark={dark}>
+      <Section title="Scheduled" dark={dark} helpTopic="inspector-jobs">
         {scheduled.length === 0 ? (
           <EmptyMessage dark={dark}>No scheduled jobs on this node.</EmptyMessage>
         ) : (
@@ -152,11 +153,13 @@ function Section({
   title,
   dark,
   count,
+  helpTopic,
   children,
 }: Readonly<{
   title: string;
   dark: boolean;
   count?: number;
+  helpTopic?: string;
   children: React.ReactNode;
 }>) {
   const c = useThemeClass(dark);
@@ -168,6 +171,7 @@ function Section({
         >
           {title}
         </h3>
+        {helpTopic ? <HelpButton topicId={helpTopic} /> : null}
         {count !== undefined && count > 0 && (
           <Badge variant="muted" dark={dark}>{count}</Badge>
         )}

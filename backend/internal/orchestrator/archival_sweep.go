@@ -14,9 +14,9 @@ import (
 
 const (
 	archivalSweepJobName     = "archival-sweep"
-	archivalSweepSchedule    = "0 * * * *" // every hour, at minute 0
+	archivalSweepSchedule    = "0 0 * * * *" // every hour, at minute 0
 	reconcileSweepJobName    = "cloud-reconcile"
-	defaultReconcileSchedule = "0 3 * * *" // daily at 3 AM
+	defaultReconcileSchedule = "0 0 3 * * *" // daily at 3 AM
 	defaultSuspectGraceDays  = 7
 )
 

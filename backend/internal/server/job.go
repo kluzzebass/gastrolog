@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
@@ -173,7 +174,11 @@ func (s *JobServer) allJobs() []*apiv1.Job {
 	}
 	if s.peerJobs != nil {
 		for _, peerJobList := range s.peerJobs.GetAll() {
-			all = append(all, peerJobList...)
+			for _, job := range peerJobList {
+				cp := proto.Clone(job).(*apiv1.Job)
+				cp.Schedule = orchestrator.NormalizeCronSchedule(cp.Schedule)
+				all = append(all, cp)
+			}
 		}
 	}
 
@@ -187,7 +192,10 @@ func (s *JobServer) allJobs() []*apiv1.Job {
 				return 1
 			}
 		}
-		// By description (or name as fallback).
+		if a.Kind == apiv1.JobKind_JOB_KIND_SCHEDULED {
+			return cmp.Compare(a.Name, b.Name)
+		}
+		// Tasks: by description (or name as fallback).
 		aDesc := a.Description
 		if aDesc == "" {
 			aDesc = a.Name
@@ -212,7 +220,7 @@ func JobInfoToProto(info orchestrator.JobInfo, nodeID string) *apiv1.Job {
 		Id:          []byte(info.ID),
 		Name:        info.Name,
 		Description: info.Description,
-		Schedule:    info.Schedule,
+		Schedule:    orchestrator.NormalizeCronSchedule(info.Schedule),
 		NodeId:      []byte(nodeID),
 	}
 

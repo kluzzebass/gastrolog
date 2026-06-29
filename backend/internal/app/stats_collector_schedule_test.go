@@ -33,10 +33,10 @@ func TestStartStatsCollectorJobsRegistersSeparateCadences(t *testing.T) {
 	if len(sched.jobs) != 2 {
 		t.Fatalf("jobs = %v, want stats + heartbeat", sched.jobs)
 	}
-	if sched.jobs[0] != clusterStatsBroadcastJobName+":@every 5s" {
+	if sched.jobs[0] != clusterStatsBroadcastJobName+":*/5 * * * * *" {
 		t.Fatalf("stats job = %q", sched.jobs[0])
 	}
-	if sched.jobs[1] != clusterPeerHeartbeatJobName+":@every 1s" {
+	if sched.jobs[1] != clusterPeerHeartbeatJobName+":* * * * * *" {
 		t.Fatalf("heartbeat job = %q", sched.jobs[1])
 	}
 }

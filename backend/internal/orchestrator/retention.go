@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	defaultRetentionSchedule = "* * * * *" // every minute
+	defaultRetentionSchedule = "0 * * * * *" // every minute
 	retentionJobName         = "retention"
 
 	// Vault catchup sweep — runs every 20 seconds (cron: 13/33/53s of

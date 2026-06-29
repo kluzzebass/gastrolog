@@ -69,6 +69,13 @@ describe("Job display + ids", () => {
     expect(idOnly.displayLabel).toBe(idOnly.id);
   });
 
+  test("scheduleLabel uses job name, not long description", () => {
+    expect(
+      mkJob({ description: "Archive cloud chunks per lifecycle policy", name: "archival-sweep" }).scheduleLabel,
+    ).toBe("archival-sweep");
+    expect(mkJob({ description: "", name: "" }).scheduleLabel).toBe(mkJob({ description: "", name: "" }).id);
+  });
+
   test("nodeId converts to EntityID", () => {
     const j = mkJob({ nodeId: bytes(7) });
     expect(j.nodeId).toBe(idFromBytes(bytes(7)));
