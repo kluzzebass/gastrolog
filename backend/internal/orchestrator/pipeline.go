@@ -201,6 +201,9 @@ func (o *Orchestrator) registerBuiltPipelineChunk(vaultID glid.GLID, fsm *vaultc
 		return
 	}
 	ti.Reconciler.registerPipelineGLCB(*e)
+	if e.State == chunk.ChunkStateSealed {
+		o.schedulePipelineCloudUpload(vaultID, id)
+	}
 }
 
 // vaultPlacementNodeIDs returns the node IDs of every placement member for a

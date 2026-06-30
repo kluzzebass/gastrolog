@@ -642,20 +642,17 @@ func (s *VaultServer) WatchChunks(
 	}
 }
 
-// stampReplicaInfo overlays authoritative cluster-wide replica info on
-// the outbound event's chunk meta, sourced from the vault-ctl FSM
-// (placement set minus in-flight delete-acks). Without this, the
-// client has to reconstruct replica counts from per-node event
-// attribution, which drifts on leadership transfer and during the
-// active-chunk catchup window because the accumulator only grows. See
-// gastrolog-66vmg.
+// stampReplicaInfo overlays authoritative cluster-wide replica and
+// retention state on the outbound event's chunk meta, sourced from the
+// vault-ctl FSM. Without this, the client has to reconstruct replica
+// counts from per-node event attribution (which drifts — gastrolog-66vmg)
+// and never sees retention_pending flip live (ListChunks-only overlay).
 //
-// Silently no-ops when the FSM doesn't know about the chunk (single-
-// node mode, memory vault, or the chunk has been finalized between
-// event emit and relay): leaving the fields zero on the wire signals
-// "no authoritative value" to the client, which preserves whatever it
-// already has cached via mergeMeta. The cold-start ListChunks fetch
-// still produces correct counts on first observation.
+// Replica fields silently no-op when the FSM doesn't know about the chunk
+// (single-node mode, memory vault, or the chunk has been finalized between
+// event emit and relay): leaving replica_count zero on the wire signals
+// "no authoritative value" to the client. Retention and pending-ack
+// fields are stamped whenever the vault is known to the orchestrator.
 func (s *VaultServer) stampReplicaInfo(ctx context.Context, msg *apiv1.WatchChunksResponse) {
 	if msg == nil || msg.Meta == nil {
 		return
@@ -669,6 +666,19 @@ func (s *VaultServer) stampReplicaInfo(ctx context.Context, msg *apiv1.WatchChun
 	}
 	var cid chunk.ChunkID
 	copy(cid[:], msg.ChunkId)
+
+	if pending := s.orch.RetentionPendingChunks(vid); pending != nil {
+		msg.Meta.RetentionPending = pending[cid]
+	}
+	if acks := s.orch.PendingDeleteAcks(vid); acks != nil {
+		if owed := acks[cid]; len(owed) > 0 {
+			sortedOwed := append([]string(nil), owed...)
+			sort.Strings(sortedOwed)
+			msg.Meta.PendingAckNodeIds = sortedOwed
+		} else {
+			msg.Meta.PendingAckNodeIds = nil
+		}
+	}
 
 	placement := s.vaultPlacementNodeIDs(ctx, vid)
 	residency := s.orch.ChunkResidency(vid, cid, placement)

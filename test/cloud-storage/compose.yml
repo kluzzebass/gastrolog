@@ -4,8 +4,9 @@
 #   just cloud-storage-up     # start all emulators
 #   just cloud-storage-down   # tear down
 #
-# Endpoints:
-#   MinIO (S3):    http://localhost:9000  (console: http://localhost:9001)
+# Endpoints (host ports 19000–19001 avoid Portainer on :9001 on OrbStack/k3s):
+#   MinIO S3 API:  http://localhost:19000
+#   MinIO console: http://localhost:19001
 #   Azurite:       http://localhost:10000 (blob), :10001 (queue), :10002 (table)
 #   fake-gcs:      http://localhost:4443
 #
@@ -21,10 +22,11 @@ services:
     command:
       - server
       - /data
-      - --console-address=:9001
+      # Console on 19001 (not 9001): k3s/OrbStack Portainer agent often binds host :9001.
+      - --console-address=:19001
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "19000:9000"
+      - "19001:19001"
     environment:
       MINIO_ROOT_USER: gastrolog
       MINIO_ROOT_PASSWORD: gastrolog

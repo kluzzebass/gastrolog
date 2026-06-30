@@ -3996,7 +3996,17 @@ func (m *Manager) UploadToCloud(id chunk.ChunkID) error {
 	if m.cfg.CloudStore == nil {
 		return errors.New("cloud store not configured")
 	}
+	if m.cfg.CloudReadOnly {
+		return errors.New("cloud upload disabled on follower")
+	}
 	return m.uploadToCloud(id)
+}
+
+// CloudStoreConfigured reports whether this manager can upload sealed chunks
+// to object storage (leader with a wired CloudStore). Used by cloud-health
+// evaluation for file vaults with cloud_service_id. See gastrolog-34azvz.
+func (m *Manager) CloudStoreConfigured() bool {
+	return m.cfg.CloudStore != nil && !m.cfg.CloudReadOnly
 }
 
 // sealToGLCB packages a sealed multi-file chunk into a single
@@ -4174,7 +4184,7 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		return m.adoptCloudBlob(id, existing.Size)
 	}
 
-	glcbPath := filepath.Join(m.chunkDir(id), dataGLCBFileName)
+	glcbPath := m.glcbPath(id)
 
 	uploadFile, err := os.Open(filepath.Clean(glcbPath))
 	if err != nil {

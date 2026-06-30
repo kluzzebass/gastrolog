@@ -22,7 +22,7 @@
 # Why the deps are inlined here (not pulled from test/cloud-storage and
 # test/ingester-integration): those compose files are tuned for the
 # `cluster.sh` dev workflow where gastrolog runs on the host and needs
-# `localhost:9000`/`localhost:9092` to work. The bundled deployment
+# `localhost:19000`/`localhost:9092` to work. The bundled deployment
 # wants the opposite — internal-only DNS, single Kafka listener
 # advertised as `kafka:9092`, push-services aimed at `gastrolog-0` not
 # `host.docker.internal`. The two configurations diverge enough that

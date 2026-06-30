@@ -273,16 +273,10 @@ function bytesToHex(bytes: Uint8Array): string {
  * mergeMeta returns a ChunkMeta with the event's authoritative fields
  * (Sealed, RecordCount, Bytes, DiskBytes, CloudBacked, etc. — every
  * field ChunkMetaToProto knows about on the backend) overlaid on top
- * of the existing cache entry. The merge preserves fields that the
- * event does NOT carry — replica_count, replica_node_ids, retention_
- * pending, pending_ack_node_ids — which are populated by ListChunks'
- * cluster-side dedup pass, not by the chunk manager's per-chunk
- * snapshot.
- *
- * Without this merge, the first event for an existing chunk would
- * zero out those server-computed fields, hiding important operator
- * signal (replica count, retention-pending) from the inspector until
- * the next ListChunks refetch.
+ * of the existing cache entry. Replica info uses the gastrolog-66vmg
+ * trust model (incoming replicaCount > 0 is authoritative). Retention_
+ * pending and pending_ack_node_ids are merged when stamped on WatchChunks
+ * events; ListChunks still seeds them on cold start.
  *
  * If there's no existing entry to merge against, returns the event
  * meta unchanged — fresh chunks won't have replica info yet anyway.
@@ -339,9 +333,16 @@ export function mergeMeta(existing: ChunkMeta | undefined, incoming: ChunkMeta):
     merged.replicaCount = incoming.replicaCount;
     merged.replicaNodeIds = incoming.replicaNodeIds;
   }
-  // Fields NOT carried by the event — preserved from existing:
-  // - retentionPending (set by retention runner via FSM apply)
-  // - pendingAckNodeIds (set by retention runner during fan-out)
+  // Retention lifecycle flags: authoritative when stamped on WatchChunks
+  // events (same FSM overlay as ListChunks). retentionPending is monotone
+  // true — the flag is set before routing/expunge and cleared only by
+  // DELETED.
+  if (incoming.retentionPending) {
+    merged.retentionPending = true;
+  }
+  if (incoming.pendingAckNodeIds.length > 0) {
+    merged.pendingAckNodeIds = incoming.pendingAckNodeIds.slice();
+  }
   return merged;
 }
 

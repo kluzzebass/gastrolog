@@ -28,11 +28,30 @@ func (o *Orchestrator) evaluateCloudHealth() {
 
 	for _, vault := range o.vaults {
 		vaultInst := vault.Instance
-		if vaultInst == nil || vaultInst.Type != "cloud" {
+		if vaultInst == nil || !vaultInstanceHasCloudBacking(vaultInst) {
 			continue
 		}
 		o.evaluateVaultCloudHealth(vaultInst)
 	}
+}
+
+// vaultInstanceHasCloudBacking reports whether this instance participates in
+// cloud upload / health monitoring: dedicated cloud vaults, or file vaults with
+// a wired CloudStore on the placement leader. Followers (CloudReadOnly) are excluded.
+func vaultInstanceHasCloudBacking(vi *VaultInstance) bool {
+	return vaultInstCanUploadToCloud(vi) || (vi != nil && vi.Type == "cloud")
+}
+
+// vaultInstCanUploadToCloud reports whether this node's vault instance can
+// perform S3 uploads (placement leader with CloudStore). Vault-ctl Raft
+// leadership alone is insufficient — followers keep CloudReadOnly even when
+// they are the ctl leader. See gastrolog-34azvz.
+func vaultInstCanUploadToCloud(vi *VaultInstance) bool {
+	if vi == nil || vi.Chunks == nil {
+		return false
+	}
+	cs, ok := vi.Chunks.(interface{ CloudStoreConfigured() bool })
+	return ok && cs.CloudStoreConfigured()
 }
 
 // evaluateVaultCloudHealth checks a single cloud instance's health and runs
@@ -51,9 +70,23 @@ func (o *Orchestrator) evaluateVaultCloudHealth(vaultInst *VaultInstance) {
 	} else {
 		o.alerts.Clear(alertID)
 	}
-	if vaultInst.IsRaftLeader != nil && vaultInst.IsRaftLeader() {
+	if vaultInstRunsCloudBackfill(vaultInst) {
 		o.backfillCloudUploads(vaultInst)
 	}
+}
+
+// vaultInstRunsCloudBackfill reports whether this node should schedule cloud
+// upload backfill for a vault. File/cloud-backed pipeline vaults upload from
+// the placement leader (CloudStore configured). Legacy type=cloud vaults keep
+// the vault-ctl Raft leader gate.
+func vaultInstRunsCloudBackfill(vi *VaultInstance) bool {
+	if vi == nil {
+		return false
+	}
+	if vi.Type == "cloud" {
+		return vi.IsRaftLeader == nil || vi.IsRaftLeader()
+	}
+	return vaultInstCanUploadToCloud(vi)
 }
 
 // backfillCloudUploads reconciles sealed chunks against the vault-ctl FSM
@@ -65,6 +98,9 @@ func (o *Orchestrator) evaluateVaultCloudHealth(vaultInst *VaultInstance) {
 // The local CloudBacked flag from List() is intentionally ignored — only
 // the FSM decides whether a chunk needs work. See gastrolog-68fqk.
 func (o *Orchestrator) backfillCloudUploads(vaultInst *VaultInstance) {
+	if !vaultInstRunsCloudBackfill(vaultInst) {
+		return
+	}
 	uploader, ok := vaultInst.Chunks.(chunk.ChunkCloudUploader)
 	if !ok {
 		return
@@ -93,7 +129,12 @@ func (o *Orchestrator) backfillCloudUploads(vaultInst *VaultInstance) {
 			continue
 		}
 		if err := o.scheduler.RunOnce(name, func(id chunk.ChunkID) error {
-			return uploader.UploadToCloud(id)
+			err := uploader.UploadToCloud(id)
+			if err != nil {
+				o.cloudHealthLogger.Warn("cloud backfill upload failed",
+					"vault", vaultInst.VaultID, "chunk", id, "error", err)
+			}
+			return err
 		}, m.ID); err == nil {
 			backfilled++
 		}

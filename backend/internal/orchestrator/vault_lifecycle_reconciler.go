@@ -512,6 +512,9 @@ func (r *VaultLifecycleReconciler) onSeal(e vaultctlfsm.ManifestEntry) {
 	// path so a freshly-sealed pipeline chunk is queryable on this home node
 	// immediately. No-op for legacy/cloud chunks. See gastrolog-2kysn.
 	r.registerPipelineGLCB(e)
+	if r.orch != nil && r.orch.isPipelineIngestVault(r.vaultID) {
+		r.orch.schedulePipelineCloudUpload(r.vaultID, e.ID)
+	}
 }
 
 func (r *VaultLifecycleReconciler) onRetentionPending(id chunk.ChunkID) {

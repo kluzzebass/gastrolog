@@ -66,6 +66,21 @@ describe("mergeMeta — replica info trust model (gastrolog-66vmg)", () => {
     expect(merged.replicaNodeIds).toEqual(["node-a", "node-b", "node-c"]);
   });
 
+  test("incoming retentionPending stamps the ret badge live", () => {
+    const existing = new ChunkMeta({
+      id: bytes(20),
+      sealed: true,
+      retentionPending: false,
+    });
+    const incoming = new ChunkMeta({
+      id: bytes(20),
+      sealed: true,
+      retentionPending: true,
+    });
+    const merged = mergeMeta(existing, incoming);
+    expect(merged.retentionPending).toBe(true);
+  });
+
   test("incoming replicaCount can shrink the existing value (e.g. after RF decrease)", () => {
     // Pre-fix the only way to shrink replicaCount was a cold-start
     // ListChunks refetch. Now the server's authoritative stamp shrinks

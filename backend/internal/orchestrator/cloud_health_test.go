@@ -17,9 +17,10 @@ import (
 // evaluation and backfill scheduling.
 type mockCloudChunkManager struct {
 	chunk.ChunkManager // embedded nil — only List/UploadToCloud used
-	degraded           atomic.Bool
-	degradedErr        atomic.Value // string
-	chunks             []chunk.ChunkMeta
+	degraded              atomic.Bool
+	degradedErr           atomic.Value // string
+	cloudStoreConfigured  atomic.Bool
+	chunks                []chunk.ChunkMeta
 
 	mu          sync.Mutex
 	uploadCalls []chunk.ChunkID
@@ -31,6 +32,9 @@ func (m *mockCloudChunkManager) CloudDegradedError() string {
 		return v.(string)
 	}
 	return ""
+}
+func (m *mockCloudChunkManager) CloudStoreConfigured() bool {
+	return m.cloudStoreConfigured.Load()
 }
 func (m *mockCloudChunkManager) List() ([]chunk.ChunkMeta, error) {
 	return m.chunks, nil
@@ -125,7 +129,7 @@ func TestEvaluateCloudHealth_ClearsAlertWhenHealthy(t *testing.T) {
 	}
 }
 
-func TestEvaluateCloudHealth_SkipsNonCloudVaults(t *testing.T) {
+func TestEvaluateCloudHealth_SkipsFileVaultWithoutCloudStore(t *testing.T) {
 	t.Parallel()
 
 	ac := alert.New()
@@ -136,14 +140,41 @@ func TestEvaluateCloudHealth_SkipsNonCloudVaults(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = ac
 
-	// Type is "file", not "cloud" — should be skipped.
+	// File vault without cloud store configured — should be skipped.
 	vaultInst := &VaultInstance{VaultID: glid.New(), Type: "file", Chunks: mock}
 	orch.RegisterVault(NewVault(glid.New(), vaultInst))
 
 	orch.evaluateCloudHealth()
 
 	if alerts := ac.Active(); len(alerts) != 0 {
-		t.Fatalf("expected 0 alerts for non-cloud vaultInst, got %d", len(alerts))
+		t.Fatalf("expected 0 alerts for file vault without cloud store, got %d", len(alerts))
+	}
+}
+
+func TestEvaluateCloudHealth_FileVaultWithCloudStore(t *testing.T) {
+	t.Parallel()
+
+	ac := alert.New()
+	vaultID := glid.New()
+	mock := &mockCloudChunkManager{}
+	mock.cloudStoreConfigured.Store(true)
+	mock.degraded.Store(true)
+	mock.degradedErr.Store("connection refused")
+
+	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
+	orch.alerts = ac
+	vaultInst := &VaultInstance{VaultID: vaultID, Type: "file", Chunks: mock}
+	orch.RegisterVault(NewVault(glid.New(), vaultInst))
+
+	orch.evaluateCloudHealth()
+
+	alerts := ac.Active()
+	if len(alerts) != 1 {
+		t.Fatalf("expected 1 alert, got %d", len(alerts))
+	}
+	wantID := fmt.Sprintf("cloud-store:%s", vaultID)
+	if alerts[0].ID != wantID {
+		t.Errorf("alert ID = %q, want %q", alerts[0].ID, wantID)
 	}
 }
 
@@ -192,6 +223,67 @@ func TestBackfillCloudUploads_SchedulesSealedNonCloudBacked(t *testing.T) {
 	calls := mock.uploadCallsCopy()
 	if calls[0] != chunkID {
 		t.Errorf("uploaded chunk = %s, want %s", calls[0], chunkID)
+	}
+}
+
+func TestBackfillCloudUploads_FileVaultWithCloudStore(t *testing.T) {
+	t.Parallel()
+
+	chunkID := chunk.NewChunkID()
+	mock := &mockCloudChunkManager{
+		chunks: []chunk.ChunkMeta{
+			{ID: chunkID, Sealed: true, CloudBacked: false,
+				WriteStart: time.Now(), WriteEnd: time.Now()},
+		},
+	}
+	mock.cloudStoreConfigured.Store(true)
+
+	vaultID := glid.New()
+	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
+	vaultInst := &VaultInstance{
+		VaultID:      vaultID,
+		Type:         "file",
+		Chunks:       mock,
+		IsRaftLeader: func() bool { return true },
+	}
+
+	orch.backfillCloudUploads(vaultInst)
+	orch.Scheduler().Start()
+	defer func() { _ = orch.Scheduler().Stop() }()
+
+	if got := waitUploadCount(mock, 1, 5*time.Second); got != 1 {
+		t.Fatalf("expected 1 upload call, got %d", got)
+	}
+}
+
+func TestBackfillCloudUploads_SkipsPlacementFollower(t *testing.T) {
+	t.Parallel()
+
+	chunkID := chunk.NewChunkID()
+	mock := &mockCloudChunkManager{
+		chunks: []chunk.ChunkMeta{
+			{ID: chunkID, Sealed: true, CloudBacked: false,
+				WriteStart: time.Now(), WriteEnd: time.Now()},
+		},
+	}
+	// Placement follower: no cloud store write access.
+	mock.cloudStoreConfigured.Store(false)
+
+	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
+	vaultInst := &VaultInstance{
+		VaultID:      glid.New(),
+		Type:         "file",
+		Chunks:       mock,
+		IsRaftLeader: func() bool { return true }, // ctl leader, but not uploader
+	}
+
+	orch.backfillCloudUploads(vaultInst)
+	orch.Scheduler().Start()
+	defer func() { _ = orch.Scheduler().Stop() }()
+	time.Sleep(100 * time.Millisecond)
+
+	if mock.uploadCallCount() != 0 {
+		t.Fatalf("expected 0 uploads on placement follower, got %d", mock.uploadCallCount())
 	}
 }
 

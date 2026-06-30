@@ -2,13 +2,16 @@ package file
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"gastrolog/internal/blobstore"
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/glid"
 )
 
 // buildSealedGLCB appends recordCount records, seals, and runs sealToGLCB so the
@@ -241,5 +244,51 @@ func TestDeleteSilent_RemovesExternalGLCBDir(t *testing.T) {
 	}
 	if _, err := cm.Meta(chunkID); !errors.Is(err, chunk.ErrChunkNotFound) {
 		t.Fatalf("Meta after delete = %v, want ErrChunkNotFound", err)
+	}
+}
+
+// TestUploadToCloud_ExternalGLCBPath verifies pipeline-registered GLCBs upload
+// from their external path, not chunkDir(id). See gastrolog-34azvz.
+func TestUploadToCloud_ExternalGLCBPath(t *testing.T) {
+	t.Parallel()
+
+	srcDir := t.TempDir()
+	src, err := NewManager(Config{Dir: srcDir})
+	if err != nil {
+		t.Fatalf("new src manager: %v", err)
+	}
+	defer func() { _ = src.Close() }()
+	chunkID, glcbPath := buildSealedGLCB(t, src, 6)
+
+	store := blobstore.NewMemory()
+	vaultID := glid.New()
+	cm, err := NewManager(Config{
+		Dir:            t.TempDir(),
+		Now:            time.Now,
+		RotationPolicy: chunk.NewRecordCountPolicy(1000),
+		CloudStore:     store,
+		VaultID:        vaultID,
+	})
+	if err != nil {
+		t.Fatalf("new consumer manager: %v", err)
+	}
+	defer func() { _ = cm.Close() }()
+
+	if err := cm.RegisterExternalGLCB(chunkID, glcbPath, chunk.ExternalGLCBInfo{RecordCount: 6}); err != nil {
+		t.Fatalf("RegisterExternalGLCB: %v", err)
+	}
+	if err := cm.UploadToCloud(chunkID); err != nil {
+		t.Fatalf("UploadToCloud: %v", err)
+	}
+
+	var count int
+	if err := store.List(context.Background(), "", func(blobstore.BlobInfo) error {
+		count++
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("blob count = %d, want 1", count)
 	}
 }

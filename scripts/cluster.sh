@@ -128,7 +128,7 @@ build_imux_cmd() {
 
 # check_dependencies probes the external services the bootstrap depends on.
 # Currently the only hard dependency is the S3-compatible object store at
-# localhost:9000, which the second-vault setup needs for cloud-backed
+# localhost:19000, which the second-vault setup needs for cloud-backed
 # placement. Without it, the second-vault placement step blocks each node
 # in a 3-attempt S3 retry loop (~5s/node) and leaves nodes hung in retry
 # state at shutdown — the script appears to "take a loooong time" then
@@ -136,7 +136,7 @@ build_imux_cmd() {
 # a clear message is much better than that. See gastrolog-18du3.
 check_dependencies() {
   local s3_host="localhost"
-  local s3_port="9000"
+  local s3_port="19000"
   # Use bash's /dev/tcp pseudo-device so we don't depend on nc/curl/etc
   # being installed; works on macOS and Linux out of the box.
   if ! (exec 3<>/dev/tcp/${s3_host}/${s3_port}) 2>/dev/null; then
@@ -282,7 +282,7 @@ configure() {
   echo ">>> Creating cloud service..."
   $GLOG config cloud-service create --addr "$S" \
     --name "S3" --provider s3 --bucket gastrolog --region gastrolog \
-    --endpoint "localhost:9000" --access-key gastrolog --secret-key gastrolog 2>&1 | sed 's/^/  /'
+    --endpoint "localhost:19000" --access-key gastrolog --secret-key gastrolog 2>&1 | sed 's/^/  /'
 
   echo ">>> Creating policies..."
   $GLOG config rotation-policy create --addr "$S" --name "1m-rotate" --max-age 1m 2>&1 | sed 's/^/  /'

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -28,6 +29,10 @@ type S3Config struct {
 type S3Store struct {
 	client *s3.Client
 	bucket string
+	// customEndpoint is true for MinIO and other S3-compatible stores reached
+	// via BaseEndpoint. Plain-HTTP mocks require spooling unseekable upload
+	// bodies so PutObject can set Content-Length.
+	customEndpoint bool
 }
 
 // NewS3(cfg) creates a new S3Store.
@@ -45,15 +50,53 @@ func NewS3(ctx context.Context, cfg S3Config) (*S3Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load aws config: %w", err)
 	}
-	var s3Opts []func(*s3.Options)
+	client := s3.NewFromConfig(awsCfg, func(o *s3.Options) {
+		applyS3ClientOptions(cfg, o)
+	})
+	return &S3Store{
+		client:         client,
+		bucket:         cfg.Bucket,
+		customEndpoint: cfg.Endpoint != "",
+	}, nil
+}
+
+// applyS3ClientOptions configures the AWS S3 client for Gastrolog blob uploads.
+// RequestChecksumCalculationWhenRequired disables the SDK default of always
+// computing a trailing CRC on PutObject. Trailing checksums need a seekable
+// body or TLS; our upload path streams GLCB through zstd + io.Pipe over plain
+// HTTP to MinIO and similar mocks. See gastrolog-4agaw.
+func applyS3ClientOptions(cfg S3Config, o *s3.Options) {
+	o.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
 	if cfg.Endpoint != "" {
-		s3Opts = append(s3Opts, func(o *s3.Options) {
-			o.BaseEndpoint = aws.String(cfg.Endpoint)
-			o.UsePathStyle = true // Required for MinIO and most S3-compatible stores.
-		})
+		o.BaseEndpoint = aws.String(cfg.Endpoint)
+		o.UsePathStyle = true // Required for MinIO and most S3-compatible stores.
 	}
-	client := s3.NewFromConfig(awsCfg, s3Opts...)
-	return &S3Store{client: client, bucket: cfg.Bucket}, nil
+}
+
+// s3StreamUploadCompat reports whether unseekable PutObject bodies should be
+// spooled to a temp file before upload. Custom endpoints (MinIO, k8s mocks)
+// are reached over plain HTTP and require a known Content-Length.
+func s3StreamUploadCompat(endpoint string) bool {
+	return endpoint != ""
+}
+
+func spoolReaderToTemp(r io.Reader) (*os.File, int64, error) {
+	tmp, err := os.CreateTemp("", "gastrolog-s3-upload-*")
+	if err != nil {
+		return nil, 0, fmt.Errorf("create temp upload file: %w", err)
+	}
+	n, err := io.Copy(tmp, r)
+	if err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name()) //nolint:gosec // G703: path from os.CreateTemp
+		return nil, 0, fmt.Errorf("spool upload body: %w", err)
+	}
+	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name()) //nolint:gosec // G703: path from os.CreateTemp
+		return nil, 0, fmt.Errorf("rewind spooled upload body: %w", err)
+	}
+	return tmp, n, nil
 }
 
 func (s *S3Store) EnsureBucket(ctx context.Context) error {
@@ -67,14 +110,38 @@ func (s *S3Store) EnsureBucket(ctx context.Context) error {
 }
 
 func (s *S3Store) Upload(ctx context.Context, key string, data io.Reader, metadata map[string]string) error {
+	body := data
+	var contentLength *int64
+	if s.customEndpoint && !isSeekableReader(data) {
+		tmp, n, err := spoolReaderToTemp(data)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			_ = tmp.Close()
+			_ = os.Remove(tmp.Name()) //nolint:gosec // G703: path from os.CreateTemp
+		}()
+		body = tmp
+		contentLength = aws.Int64(n)
+	}
+
 	input := &s3.PutObjectInput{
-		Bucket:   &s.bucket,
-		Key:      &key,
-		Body:     data,
-		Metadata: metadata,
+		Bucket:        &s.bucket,
+		Key:           &key,
+		Body:          body,
+		Metadata:      metadata,
+		ContentLength: contentLength,
 	}
 	_, err := s.client.PutObject(ctx, input)
 	return err
+}
+
+func isSeekableReader(r io.Reader) bool {
+	if r == nil {
+		return true
+	}
+	_, ok := r.(io.Seeker)
+	return ok
 }
 
 func (s *S3Store) Download(ctx context.Context, key string) (io.ReadCloser, error) {
