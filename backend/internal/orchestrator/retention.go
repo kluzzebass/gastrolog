@@ -21,6 +21,16 @@ const (
 	defaultRetentionSchedule = "0 * * * * *" // every minute
 	retentionJobName         = "retention"
 
+	// retentionFanOutWorkers is the number of goroutines that submit records
+	// from a single chunk's cursor into the routing pipeline. Matches the
+	// digestion and routing worker counts so retention can feed the pipeline
+	// at scatterbox-like concurrency without unbounded goroutines.
+	retentionFanOutWorkers = 4
+
+	// retentionChunkWorkers limits how many chunks a sweep may process
+	// concurrently. Each chunk still routes at most once (!alreadyPending).
+	retentionChunkWorkers = 4
+
 	// Vault catchup sweep — runs every 20 seconds (cron: 13/33/53s of
 	// each minute) on every node, with a phase offset that doesn't
 	// collide with the retention sweep at second 0. Each node consults
@@ -580,13 +590,22 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 
 	for _, b := range rules {
 		matched := b.policy.Apply(state)
+		var chunkWG sync.WaitGroup
+		chunkSem := make(chan struct{}, retentionChunkWorkers)
 		for _, id := range matched {
 			if processed[id] {
 				continue
 			}
 			processed[id] = true
-			r.tryRetainChunk(id, b, pendingFlag[id])
+			chunkWG.Add(1)
+			go func(id chunk.ChunkID, rule retentionRule, alreadyPending bool) {
+				defer chunkWG.Done()
+				chunkSem <- struct{}{}
+				defer func() { <-chunkSem }()
+				r.tryRetainChunk(id, rule, alreadyPending)
+			}(id, b, pendingFlag[id])
 		}
+		chunkWG.Wait()
 	}
 }
 
@@ -778,6 +797,21 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) {
 		}
 	}()
 
+	jobs := make(chan chunk.Record, retentionFanOutWorkers)
+	var submitWG sync.WaitGroup
+	for range retentionFanOutWorkers {
+		submitWG.Go(func() {
+			for rec := range jobs {
+				if subErr := r.orch.SubmitRetentionRecord(context.Background(), r.vaultID, rec, ""); subErr != nil {
+					r.logger.Warn("retention: fan-out submit error",
+						"vault", r.vaultID, "chunk", id, "error", subErr)
+					// Continue — partial fan-out is acceptable; the original
+					// chunk will still be destroyed by the caller.
+				}
+			}
+		})
+	}
+
 	fanned := 0
 	for {
 		rec, _, err := cur.Next()
@@ -785,6 +819,8 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) {
 			break
 		}
 		if err != nil {
+			close(jobs)
+			submitWG.Wait()
 			r.logger.Warn("retention: fan-out cursor error",
 				"vault", r.vaultID, "chunk", id, "error", err)
 			return
@@ -792,14 +828,11 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) {
 		// Cursor records may reference mmap'd memory that becomes
 		// invalid once we move on. Copy so the pipeline can persist
 		// independently of the cursor lifecycle.
-		if subErr := r.orch.SubmitRetentionRecord(context.Background(), r.vaultID, rec.Copy(), ""); subErr != nil {
-			r.logger.Warn("retention: fan-out submit error",
-				"vault", r.vaultID, "chunk", id, "error", subErr)
-			// Continue — partial fan-out is acceptable; the original
-			// chunk will still be destroyed by the caller.
-		}
+		jobs <- rec.Copy()
 		fanned++
 	}
+	close(jobs)
+	submitWG.Wait()
 	r.logger.Debug("retention: fanned out chunk records via pipeline routing",
 		"vault", r.vaultID, "chunk", id, "count", fanned)
 }
