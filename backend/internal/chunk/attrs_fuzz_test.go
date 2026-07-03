@@ -4,20 +4,20 @@ import "testing"
 
 func FuzzDecodeWithDict(f *testing.F) {
 	// Seed corpus.
-	f.Add([]byte{0, 0})           // count=0 (valid empty)
-	f.Add([]byte{})               // too short
-	f.Add([]byte{0x01})           // truncated count
+	f.Add([]byte{0, 0})                         // count=0 (valid empty)
+	f.Add([]byte{})                             // too short
+	f.Add([]byte{0x01})                         // truncated count
 	f.Add([]byte{1, 0, 0, 0, 0, 0, 0, 0, 0, 0}) // count=1, keyID=0, valID=0
-	f.Add([]byte{0xff, 0xff})     // count=65535, way too many
+	f.Add([]byte{0xff, 0xff})                   // count=65535, way too many
 	f.Add(make([]byte, 100))
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		dict := NewStringDict()
 		// Populate dict so some ID lookups can succeed.
-		dict.Add("host")       //nolint:errcheck
-		dict.Add("srv-001")    //nolint:errcheck
-		dict.Add("service")    //nolint:errcheck
-		dict.Add("api")        //nolint:errcheck
+		dict.Add("host")    //nolint:errcheck
+		dict.Add("srv-001") //nolint:errcheck
+		dict.Add("service") //nolint:errcheck
+		dict.Add("api")     //nolint:errcheck
 
 		// Must never panic.
 		_, _ = DecodeWithDict(data, dict)
@@ -26,10 +26,10 @@ func FuzzDecodeWithDict(f *testing.F) {
 
 func FuzzDecodeDictData(f *testing.F) {
 	f.Add([]byte{})
-	f.Add([]byte{0x00})                               // partial length field
-	f.Add([]byte{3, 0, 'f', 'o', 'o'})                // one valid entry "foo"
-	f.Add([]byte{3, 0, 'f', 'o', 'o', 3, 0, 'b'})    // second entry truncated
-	f.Add([]byte{0xff, 0xff})                          // strLen=65535, no data
+	f.Add([]byte{0x00})                           // partial length field
+	f.Add([]byte{3, 0, 'f', 'o', 'o'})            // one valid entry "foo"
+	f.Add([]byte{3, 0, 'f', 'o', 'o', 3, 0, 'b'}) // second entry truncated
+	f.Add([]byte{0xff, 0xff})                     // strLen=65535, no data
 	f.Add(make([]byte, 200))
 
 	f.Fuzz(func(t *testing.T, data []byte) {

@@ -122,7 +122,7 @@ func TestEvalArithmetic(t *testing.T) {
 		{
 			"nested: (a + b) * 2",
 			&ArithExpr{
-				Left: &ArithExpr{Left: &FieldRef{Name: "a"}, Op: ArithAdd, Right: &FieldRef{Name: "b"}},
+				Left:  &ArithExpr{Left: &FieldRef{Name: "a"}, Op: ArithAdd, Right: &FieldRef{Name: "b"}},
 				Op:    ArithMul,
 				Right: &NumberLit{Value: "2"},
 			},

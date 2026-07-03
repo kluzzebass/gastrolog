@@ -98,11 +98,11 @@ type Config struct {
 
 	// RemoteSearcher forwards search requests to remote cluster nodes.
 	// Nil in single-node mode.
-	RemoteSearcher     RemoteSearcher
-	RemoteChunkLister  RemoteChunkLister
+	RemoteSearcher        RemoteSearcher
+	RemoteChunkLister     RemoteChunkLister
 	RemotePipelineBacklog RemotePipelineBacklogGetter
-	RemoteChunkWatcher RemoteChunkWatcher
-	RemoteIndexer      RemoteIndexer
+	RemoteChunkWatcher    RemoteChunkWatcher
+	RemoteIndexer         RemoteIndexer
 
 	// PeerJobs provides active jobs from peer cluster nodes.
 	// Nil in single-node mode.
@@ -183,41 +183,41 @@ type CertManager interface {
 // Server is the Connect RPC server for GastroLog.
 // HTTP is always on; HTTPS is added when TLS enabled and default cert exists.
 type Server struct {
-	orch               *orchestrator.Orchestrator
-	cfgStore           system.Store
-	factories          orchestrator.Factories
-	tokens             *auth.TokenService
-	certManager        CertManager
-	noAuth             bool
-	logger             *slog.Logger
-	cluster            ClusterStatusProvider
-	peerStats          NodeStatsProvider
-	peerVaultStats     PeerVaultStatsProvider
-	peerIngesterStats  PeerIngesterStatsProvider
-	peerRouteStats     PeerRouteStatsProvider
-	peerPipelineDisk   PeerPipelineDiskProvider
-	remoteSearcher     RemoteSearcher
-	remoteChunkLister  RemoteChunkLister
+	orch                  *orchestrator.Orchestrator
+	cfgStore              system.Store
+	factories             orchestrator.Factories
+	tokens                *auth.TokenService
+	certManager           CertManager
+	noAuth                bool
+	logger                *slog.Logger
+	cluster               ClusterStatusProvider
+	peerStats             NodeStatsProvider
+	peerVaultStats        PeerVaultStatsProvider
+	peerIngesterStats     PeerIngesterStatsProvider
+	peerRouteStats        PeerRouteStatsProvider
+	peerPipelineDisk      PeerPipelineDiskProvider
+	remoteSearcher        RemoteSearcher
+	remoteChunkLister     RemoteChunkLister
 	remotePipelineBacklog RemotePipelineBacklogGetter
-	remoteChunkWatcher RemoteChunkWatcher
-	remoteIndexer      RemoteIndexer
-	peerJobs           PeerJobsProvider
-	localStatsFn       func() *apiv1.NodeStats
-	localNodeID        string
-	clusterAddress     string
-	joinClusterFn      func(ctx context.Context, leaderAddr, joinToken string) error
-	removeNodeFn       func(ctx context.Context, nodeID string, force bool) error
-	setNodeSuffrageFn  func(ctx context.Context, nodeID string, voter bool) error
-	startTime          time.Time
-	homeDir            string                     // gastrolog home directory; empty for in-memory config
-	afterConfigApply   func(raftfsm.Notification) // non-raft dispatch hook
-	configSignal       *notify.Signal             // broadcasts config changes to WatchConfig streams
-	statsSignal        *notify.Signal             // broadcasts stats updates to WatchSystemStatus streams
-	cloudTesters       map[string]CloudServiceTester
-	repairManagedFile  func(fileID string) bool  // on-demand pull from peer; set by app wiring
-	queryServer        *QueryServer              // stored for ExportToVault executor wiring
-	routingForwarder   routing.UnaryForwarder    // forwards requests to remote nodes; nil in single-node
-	placementReconcile func(ctx context.Context) // synchronous placement; nil in non-cluster mode
+	remoteChunkWatcher    RemoteChunkWatcher
+	remoteIndexer         RemoteIndexer
+	peerJobs              PeerJobsProvider
+	localStatsFn          func() *apiv1.NodeStats
+	localNodeID           string
+	clusterAddress        string
+	joinClusterFn         func(ctx context.Context, leaderAddr, joinToken string) error
+	removeNodeFn          func(ctx context.Context, nodeID string, force bool) error
+	setNodeSuffrageFn     func(ctx context.Context, nodeID string, voter bool) error
+	startTime             time.Time
+	homeDir               string                     // gastrolog home directory; empty for in-memory config
+	afterConfigApply      func(raftfsm.Notification) // non-raft dispatch hook
+	configSignal          *notify.Signal             // broadcasts config changes to WatchConfig streams
+	statsSignal           *notify.Signal             // broadcasts stats updates to WatchSystemStatus streams
+	cloudTesters          map[string]CloudServiceTester
+	repairManagedFile     func(fileID string) bool  // on-demand pull from peer; set by app wiring
+	queryServer           *QueryServer              // stored for ExportToVault executor wiring
+	routingForwarder      routing.UnaryForwarder    // forwards requests to remote nodes; nil in single-node
+	placementReconcile    func(ctx context.Context) // synchronous placement; nil in non-cluster mode
 
 	// gastrolog-o9z6o: bootstrap-token endpoint configuration. When the
 	// secret is non-empty, /cluster/bootstrap-token is registered and
@@ -231,13 +231,13 @@ type Server struct {
 	environmentLabel string
 	environmentColor string
 
-	mu                 sync.Mutex
-	listener           net.Listener
-	server             *http.Server
-	handler            http.Handler // core handler (mux + CORS + tracking), shared by HTTP and HTTPS
-	shutdown           chan struct{}
-	inFlight           sync.WaitGroup // tracks in-flight requests for graceful drain
-	draining           atomic.Bool    // true when server is draining (rejecting new requests)
+	mu       sync.Mutex
+	listener net.Listener
+	server   *http.Server
+	handler  http.Handler // core handler (mux + CORS + tracking), shared by HTTP and HTTPS
+	shutdown chan struct{}
+	inFlight sync.WaitGroup // tracks in-flight requests for graceful drain
+	draining atomic.Bool    // true when server is draining (rejecting new requests)
 
 	rl       *rateLimiter // per-IP rate limiter for auth endpoints
 	rlCancel context.CancelFunc
@@ -259,47 +259,47 @@ type Server struct {
 // New creates a new Server.
 func New(orch *orchestrator.Orchestrator, cfgStore system.Store, factories orchestrator.Factories, tokens *auth.TokenService, cfg Config) *Server {
 	return &Server{
-		orch:               orch,
-		cfgStore:           cfgStore,
-		factories:          factories,
-		tokens:             tokens,
-		certManager:        cfg.CertManager,
-		noAuth:             cfg.NoAuth,
-		logger:             compServer.Apply(logging.Default(cfg.Logger)),
-		cluster:            cfg.Cluster,
-		peerStats:          cfg.PeerStats,
-		peerVaultStats:     cfg.PeerVaultStats,
-		peerIngesterStats:  cfg.PeerIngesterStats,
-		peerRouteStats:     cfg.PeerRouteStats,
-		peerPipelineDisk:   cfg.PeerPipelineDisk,
-		remoteSearcher:     cfg.RemoteSearcher,
-		remoteChunkLister:  cfg.RemoteChunkLister,
-		remotePipelineBacklog: cfg.RemotePipelineBacklog,
-		remoteChunkWatcher: cfg.RemoteChunkWatcher,
-		remoteIndexer:      cfg.RemoteIndexer,
-		peerJobs:           cfg.PeerJobs,
-		localStatsFn:       cfg.LocalStats,
-		localNodeID:        cfg.NodeID,
-		clusterAddress:     cfg.ClusterAddress,
-		joinClusterFn:      cfg.JoinClusterFunc,
-		removeNodeFn:       cfg.RemoveNodeFunc,
-		setNodeSuffrageFn:  cfg.SetNodeSuffrageFunc,
-		startTime:          time.Now(),
-		homeDir:            cfg.HomeDir,
-		unixSocketConfig:   cfg.UnixSocket,
-		cloudTesters:       cfg.CloudTesters,
-		afterConfigApply:   cfg.AfterConfigApply,
-		configSignal:       cfg.ConfigSignal,
-		statsSignal:        cfg.StatsSignal,
-		routingForwarder:   cfg.RoutingForwarder,
-		placementReconcile: cfg.PlacementReconcile,
+		orch:                      orch,
+		cfgStore:                  cfgStore,
+		factories:                 factories,
+		tokens:                    tokens,
+		certManager:               cfg.CertManager,
+		noAuth:                    cfg.NoAuth,
+		logger:                    compServer.Apply(logging.Default(cfg.Logger)),
+		cluster:                   cfg.Cluster,
+		peerStats:                 cfg.PeerStats,
+		peerVaultStats:            cfg.PeerVaultStats,
+		peerIngesterStats:         cfg.PeerIngesterStats,
+		peerRouteStats:            cfg.PeerRouteStats,
+		peerPipelineDisk:          cfg.PeerPipelineDisk,
+		remoteSearcher:            cfg.RemoteSearcher,
+		remoteChunkLister:         cfg.RemoteChunkLister,
+		remotePipelineBacklog:     cfg.RemotePipelineBacklog,
+		remoteChunkWatcher:        cfg.RemoteChunkWatcher,
+		remoteIndexer:             cfg.RemoteIndexer,
+		peerJobs:                  cfg.PeerJobs,
+		localStatsFn:              cfg.LocalStats,
+		localNodeID:               cfg.NodeID,
+		clusterAddress:            cfg.ClusterAddress,
+		joinClusterFn:             cfg.JoinClusterFunc,
+		removeNodeFn:              cfg.RemoveNodeFunc,
+		setNodeSuffrageFn:         cfg.SetNodeSuffrageFunc,
+		startTime:                 time.Now(),
+		homeDir:                   cfg.HomeDir,
+		unixSocketConfig:          cfg.UnixSocket,
+		cloudTesters:              cfg.CloudTesters,
+		afterConfigApply:          cfg.AfterConfigApply,
+		configSignal:              cfg.ConfigSignal,
+		statsSignal:               cfg.StatsSignal,
+		routingForwarder:          cfg.RoutingForwarder,
+		placementReconcile:        cfg.PlacementReconcile,
 		bootstrapTokenServeSecret: cfg.BootstrapTokenServeSecret,
 		bootstrapTokenFn:          cfg.BootstrapTokenFn,
-		logFilter:          cfg.LogFilter,
-		environmentLabel:   cfg.EnvironmentLabel,
-		environmentColor:   cfg.EnvironmentColor,
-		shutdown:           make(chan struct{}),
-		rl:                 newRateLimiter(5.0/60.0, 5), // 5 req/min per IP, burst of 5
+		logFilter:                 cfg.LogFilter,
+		environmentLabel:          cfg.EnvironmentLabel,
+		environmentColor:          cfg.EnvironmentColor,
+		shutdown:                  make(chan struct{}),
+		rl:                        newRateLimiter(5.0/60.0, 5), // 5 req/min per IP, burst of 5
 	}
 }
 

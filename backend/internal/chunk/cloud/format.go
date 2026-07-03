@@ -85,16 +85,16 @@ const (
 // Reuses format.Type so a section's type byte matches the type byte that
 // would appear in the same kind of standalone file.
 const (
-	SectionIngestTSIndex = format.TypeIngestIndex
-	SectionSourceTSIndex = format.TypeSourceIndex
-	SectionTokenIndex    = format.TypeTokenIndex
-	SectionJSONIndex     = format.TypeJSONIndex
-	SectionKVKeyIndex    = format.TypeKVKeyIndex
-	SectionKVValueIndex  = format.TypeKVValueIndex
-	SectionKVKVIndex     = format.TypeKVIndex
-	SectionAttrKeyIndex  = format.TypeAttrKeyIndex
+	SectionIngestTSIndex  = format.TypeIngestIndex
+	SectionSourceTSIndex  = format.TypeSourceIndex
+	SectionTokenIndex     = format.TypeTokenIndex
+	SectionJSONIndex      = format.TypeJSONIndex
+	SectionKVKeyIndex     = format.TypeKVKeyIndex
+	SectionKVValueIndex   = format.TypeKVValueIndex
+	SectionKVKVIndex      = format.TypeKVIndex
+	SectionAttrKeyIndex   = format.TypeAttrKeyIndex
 	SectionAttrValueIndex = format.TypeAttrValueIndex
-	SectionAttrKVIndex   = format.TypeAttrKVIndex
+	SectionAttrKVIndex    = format.TypeAttrKVIndex
 )
 
 // tsNanos converts a time.Time to nanoseconds, using 0 for the zero value.

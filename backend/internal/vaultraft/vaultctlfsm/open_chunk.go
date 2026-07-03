@@ -266,7 +266,7 @@ func (f *FSM) applyAddOpenChunkSegmentRef(c *gastrologv1.AddOpenChunkSegmentRefC
 	}
 	if e := f.chunks[id]; e != nil {
 		e.RecordCount = int64(f.openChunk.TotalRecords) //nolint:gosec // G115: manifest totals fit in int64 for chunk metadata
-		e.Bytes = int64(f.openChunk.TotalBytes)       //nolint:gosec // G115: manifest totals fit in int64 for chunk metadata
+		e.Bytes = int64(f.openChunk.TotalBytes)         //nolint:gosec // G115: manifest totals fit in int64 for chunk metadata
 		applyManifestBoundsToEntry(e, f.openChunk.Bounds)
 	}
 	if f.segmentResume == nil {
@@ -359,7 +359,7 @@ func (f *FSM) ensureManifestChunkEntryLocked(m *OpenChunkManifest, state chunk.C
 			e.State = state
 		}
 		e.RecordCount = int64(m.TotalRecords) //nolint:gosec // G115: manifest totals fit in int64 for chunk metadata
-		e.Bytes = int64(m.TotalBytes)       //nolint:gosec // G115: manifest totals fit in int64 for chunk metadata
+		e.Bytes = int64(m.TotalBytes)         //nolint:gosec // G115: manifest totals fit in int64 for chunk metadata
 		applyManifestBoundsToEntry(e, m.Bounds)
 		return
 	}
@@ -483,11 +483,11 @@ func openChunkManifestToProto(m *OpenChunkManifest) *gastrologv1.OpenChunkManife
 		return nil
 	}
 	out := &gastrologv1.OpenChunkManifestState{
-		ChunkId:      m.ChunkID[:],
+		ChunkId:       m.ChunkID[:],
 		OpenedAtNanos: m.OpenedAt.UnixNano(),
-		Refs:         make([]*gastrologv1.OpenChunkSegmentRef, len(m.Refs)),
-		TotalRecords: m.TotalRecords,
-		TotalBytes:   m.TotalBytes,
+		Refs:          make([]*gastrologv1.OpenChunkSegmentRef, len(m.Refs)),
+		TotalRecords:  m.TotalRecords,
+		TotalBytes:    m.TotalBytes,
 	}
 	if !m.SealedAt.IsZero() {
 		out.SealedAtNanos = m.SealedAt.UnixNano()
@@ -502,11 +502,11 @@ func openChunkManifestToProto(m *OpenChunkManifest) *gastrologv1.OpenChunkManife
 	for i := range m.Refs {
 		ref := &m.Refs[i]
 		out.Refs[i] = &gastrologv1.OpenChunkSegmentRef{
-			SegmentId:          ref.SegmentID[:],
-			FirstRecordNumber:  ref.FirstRecordNumber,
-			LastRecordNumber:   ref.LastRecordNumber,
-			SliceBytes:         ref.SliceBytes,
-			RefAddedAtNanos:    ref.RefAddedAt.UnixNano(),
+			SegmentId:         ref.SegmentID[:],
+			FirstRecordNumber: ref.FirstRecordNumber,
+			LastRecordNumber:  ref.LastRecordNumber,
+			SliceBytes:        ref.SliceBytes,
+			RefAddedAtNanos:   ref.RefAddedAt.UnixNano(),
 		}
 	}
 	return out
@@ -569,7 +569,7 @@ func (f *FSM) snapshotSegmentResumeLocked() []*gastrologv1.SegmentResumeRecordNu
 	for _, id := range ids {
 		idCopy := id
 		out = append(out, &gastrologv1.SegmentResumeRecordNumber{
-			SegmentId:         idCopy[:],
+			SegmentId:        idCopy[:],
 			NextRecordNumber: f.segmentResume[id],
 		})
 	}
@@ -610,18 +610,18 @@ func NewAddOpenChunkSegmentRef(chunkID chunk.ChunkID, ref OpenChunkSegmentRef) *
 	ws, we, is, ie, ss, se := manifestBoundsToProto(ref.Bounds)
 	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_AddOpenChunkSegmentRef{
 		AddOpenChunkSegmentRef: &gastrologv1.AddOpenChunkSegmentRefCommand{
-			ChunkId:            chunkID[:],
-			SegmentId:          ref.SegmentID[:],
-			FirstRecordNumber:  ref.FirstRecordNumber,
-			LastRecordNumber:   ref.LastRecordNumber,
-			SliceBytes:         ref.SliceBytes,
-			RefAddedAtNanos:    ref.RefAddedAt.UnixNano(),
-			WriteStartNanos:    ws,
-			WriteEndNanos:      we,
-			IngestStartNanos:   is,
-			IngestEndNanos:     ie,
-			SourceStartNanos:   ss,
-			SourceEndNanos:     se,
+			ChunkId:           chunkID[:],
+			SegmentId:         ref.SegmentID[:],
+			FirstRecordNumber: ref.FirstRecordNumber,
+			LastRecordNumber:  ref.LastRecordNumber,
+			SliceBytes:        ref.SliceBytes,
+			RefAddedAtNanos:   ref.RefAddedAt.UnixNano(),
+			WriteStartNanos:   ws,
+			WriteEndNanos:     we,
+			IngestStartNanos:  is,
+			IngestEndNanos:    ie,
+			SourceStartNanos:  ss,
+			SourceEndNanos:    se,
 		},
 	}}
 }
@@ -636,35 +636,35 @@ func addOpenChunkSegmentRefCommandFromEntry(chunkID chunk.ChunkID, entry *gastro
 		return nil
 	}
 	return &gastrologv1.AddOpenChunkSegmentRefCommand{
-		ChunkId:            chunkID[:],
-		SegmentId:          entry.GetSegmentId(),
-		FirstRecordNumber:  entry.GetFirstRecordNumber(),
-		LastRecordNumber:   entry.GetLastRecordNumber(),
-		SliceBytes:         entry.GetSliceBytes(),
-		RefAddedAtNanos:    entry.GetRefAddedAtNanos(),
-		WriteStartNanos:    entry.GetWriteStartNanos(),
-		WriteEndNanos:      entry.GetWriteEndNanos(),
-		IngestStartNanos:   entry.GetIngestStartNanos(),
-		IngestEndNanos:     entry.GetIngestEndNanos(),
-		SourceStartNanos:   entry.GetSourceStartNanos(),
-		SourceEndNanos:     entry.GetSourceEndNanos(),
+		ChunkId:           chunkID[:],
+		SegmentId:         entry.GetSegmentId(),
+		FirstRecordNumber: entry.GetFirstRecordNumber(),
+		LastRecordNumber:  entry.GetLastRecordNumber(),
+		SliceBytes:        entry.GetSliceBytes(),
+		RefAddedAtNanos:   entry.GetRefAddedAtNanos(),
+		WriteStartNanos:   entry.GetWriteStartNanos(),
+		WriteEndNanos:     entry.GetWriteEndNanos(),
+		IngestStartNanos:  entry.GetIngestStartNanos(),
+		IngestEndNanos:    entry.GetIngestEndNanos(),
+		SourceStartNanos:  entry.GetSourceStartNanos(),
+		SourceEndNanos:    entry.GetSourceEndNanos(),
 	}
 }
 
 func openChunkSegmentRefEntryFromRef(ref OpenChunkSegmentRef) *gastrologv1.AddOpenChunkSegmentRefEntry {
 	ws, we, is, ie, ss, se := manifestBoundsToProto(ref.Bounds)
 	return &gastrologv1.AddOpenChunkSegmentRefEntry{
-		SegmentId:          ref.SegmentID[:],
-		FirstRecordNumber:  ref.FirstRecordNumber,
-		LastRecordNumber:   ref.LastRecordNumber,
-		SliceBytes:         ref.SliceBytes,
-		RefAddedAtNanos:    ref.RefAddedAt.UnixNano(),
-		WriteStartNanos:    ws,
-		WriteEndNanos:      we,
-		IngestStartNanos:   is,
-		IngestEndNanos:     ie,
-		SourceStartNanos:   ss,
-		SourceEndNanos:     se,
+		SegmentId:         ref.SegmentID[:],
+		FirstRecordNumber: ref.FirstRecordNumber,
+		LastRecordNumber:  ref.LastRecordNumber,
+		SliceBytes:        ref.SliceBytes,
+		RefAddedAtNanos:   ref.RefAddedAt.UnixNano(),
+		WriteStartNanos:   ws,
+		WriteEndNanos:     we,
+		IngestStartNanos:  is,
+		IngestEndNanos:    ie,
+		SourceStartNanos:  ss,
+		SourceEndNanos:    se,
 	}
 }
 

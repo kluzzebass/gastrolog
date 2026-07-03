@@ -67,4 +67,3 @@ func (o *Orchestrator) startCacheEvictionSweep() error {
 	o.scheduler.Describe(cacheEvictionJobName, "Warm-cache eviction (LRU + TTL on cloud-backed chunks)")
 	return nil
 }
-

@@ -161,9 +161,9 @@ func (s *SystemServer) buildIngesterStatus(ctx context.Context, id glid.GLID, ra
 	}
 	if s.peerStats != nil {
 		pMsgs, pBytes, pErrs, _ := s.peerStats.AggregateIngesterStats(id.String())
-		resp.MessagesIngested += int64(pMsgs)  //nolint:gosec // G115: broadcast uses uint64
-		resp.Errors += int64(pErrs)            //nolint:gosec // G115: broadcast uses uint64
-		resp.BytesIngested += int64(pBytes)    //nolint:gosec // G115: broadcast uses uint64
+		resp.MessagesIngested += int64(pMsgs) //nolint:gosec // G115: broadcast uses uint64
+		resp.Errors += int64(pErrs)           //nolint:gosec // G115: broadcast uses uint64
+		resp.BytesIngested += int64(pBytes)   //nolint:gosec // G115: broadcast uses uint64
 	}
 
 	return resp, nil

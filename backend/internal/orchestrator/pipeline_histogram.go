@@ -5,8 +5,8 @@ import (
 	"os"
 	"time"
 
-	chunkcloud "gastrolog/internal/chunk/cloud"
 	"gastrolog/internal/chunk"
+	chunkcloud "gastrolog/internal/chunk/cloud"
 	"gastrolog/internal/glid"
 	filetsidx "gastrolog/internal/index/file/tsidx"
 	"gastrolog/internal/pipeline/chunking"

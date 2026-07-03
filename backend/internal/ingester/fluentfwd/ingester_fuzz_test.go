@@ -50,7 +50,7 @@ func FuzzDecodeRecord(f *testing.F) {
 	f.Add(emptyBuf)
 
 	// Not a map.
-	f.Add([]byte{0xc0}) // nil
+	f.Add([]byte{0xc0})       // nil
 	f.Add([]byte{0x91, 0x01}) // array
 	f.Add([]byte{})
 

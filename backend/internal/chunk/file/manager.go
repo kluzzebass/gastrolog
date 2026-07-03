@@ -173,12 +173,12 @@ type Config struct {
 //   - Logging is intentionally sparse; only lifecycle events are logged
 //   - No logging in hot paths (Append, cursor iteration)
 type Manager struct {
-	mu             sync.Mutex
-	cfg            Config
-	lockFile       *os.File // Exclusive lock on vault directory
-	active         *chunkState
-	metas          map[chunk.ChunkID]*chunkMeta // In-memory chunk metadata
-	closed         bool
+	mu       sync.Mutex
+	cfg      Config
+	lockFile *os.File // Exclusive lock on vault directory
+	active   *chunkState
+	metas    map[chunk.ChunkID]*chunkMeta // In-memory chunk metadata
+	closed   bool
 
 	// externalGLCB maps a chunk ID to an absolute data.glcb path that lives
 	// OUTSIDE this manager's Dir. Used for pipeline-built sealed chunks whose
@@ -1071,14 +1071,14 @@ func scanAttrsViaGLCB(m *Manager, id chunk.ChunkID, startPos uint64, fn func(wri
 //     record.
 //   - chunks present on disk but absent from the FSM manifest and
 //     not in pendingDeletes:
-//       * tombstoned in the FSM → SweepLocalOrphans deletes (positive
-//         proof of finalize-delete);
-//       * RecordCount == 0 ghost (rotation artifact never received
-//         records) → SweepLocalOrphans deletes per gastrolog-66b7x;
-//       * RecordCount > 0 unknown orphan → SweepLocalOrphans alerts
-//         and PRESERVES the on-disk files per the no-auto-delete-of-
-//         unknown-orphans invariant (docs/disk-authority-audit.md;
-//         gastrolog-3y8py).
+//   - tombstoned in the FSM → SweepLocalOrphans deletes (positive
+//     proof of finalize-delete);
+//   - RecordCount == 0 ghost (rotation artifact never received
+//     records) → SweepLocalOrphans deletes per gastrolog-66b7x;
+//   - RecordCount > 0 unknown orphan → SweepLocalOrphans alerts
+//     and PRESERVES the on-disk files per the no-auto-delete-of-
+//     unknown-orphans invariant (docs/disk-authority-audit.md;
+//     gastrolog-3y8py).
 //   - chunks present in the FSM manifest but absent on disk:
 //     SweepMissingReplicas requests catchup from a peer.
 //

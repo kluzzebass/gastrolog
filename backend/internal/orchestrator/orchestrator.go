@@ -722,7 +722,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		onIngesterCheckpoint: cfg.OnIngesterCheckpoint,
 		segmentsDir:          cfg.SegmentsDir,
 		homeDir:              homeDirFromSegments(cfg.SegmentsDir),
-		pipelineVaults:             make(map[glid.GLID]pipelineVaultReg),
+		pipelineVaults:       make(map[glid.GLID]pipelineVaultReg),
 		now:                  cfg.Now,
 		logger:               logger,
 		baseLogger:           baseLogger,
@@ -878,9 +878,9 @@ func (o *Orchestrator) IsIngesterRunning(id glid.GLID) bool {
 func (o *Orchestrator) GetRouteStats() *RouteStats {
 	snap := o.pipeline.RouteStats()
 	return &RouteStats{
-		Ingested: int64(snap.Ingested), //nolint:gosec // G115: counter bounded in practice
+		Ingested: int64(snap.Ingested),  //nolint:gosec // G115: counter bounded in practice
 		Dropped:  int64(snap.Unmatched), //nolint:gosec // G115
-		Routed:   int64(snap.Matched),  //nolint:gosec // G115
+		Routed:   int64(snap.Matched),   //nolint:gosec // G115
 	}
 }
 

@@ -105,12 +105,12 @@ type pipelineVaultReg struct {
 // to the registry via the leader-forwarding applier; otherwise it falls back to
 // the noop publisher (single-node/memory mode with no group).
 //
-	// When this node is also a placement member (Home) for the vault with a
-	// vault-ctl handle, it registers the chunking side (Rubicon D): the leader
-	// plans the open-chunk manifest via the applier, and every home builds the
-	// sealed GLCB at seal. LocalHolder marks this node as a home holder so
-	// segments promote to head/ only after vault-ctl publishes the registry
-	// entry, giving chunking local segments to build from.
+// When this node is also a placement member (Home) for the vault with a
+// vault-ctl handle, it registers the chunking side (Rubicon D): the leader
+// plans the open-chunk manifest via the applier, and every home builds the
+// sealed GLCB at seal. LocalHolder marks this node as a home holder so
+// segments promote to head/ only after vault-ctl publishes the registry
+// entry, giving chunking local segments to build from.
 //
 // Peer collection (Rubicon C) is registered additionally only when a segment
 // puller is available (cluster mode): roll the registry, pull segments this

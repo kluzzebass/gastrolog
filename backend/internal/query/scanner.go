@@ -1648,4 +1648,3 @@ func matchJSONPathExists(raw []byte, key string) bool {
 	}, nil)
 	return found
 }
-

@@ -14,8 +14,8 @@ type Message struct {
 	EventID  record.EventID
 	Attrs    map[string]string
 	Raw      []byte
-	RawOwned bool // when true, Raw is exclusively owned and need not be copied
-	SourceTS time.Time // when the log was generated at the source (zero if unknown)
+	RawOwned bool         // when true, Raw is exclusively owned and need not be copied
+	SourceTS time.Time    // when the log was generated at the source (zero if unknown)
 	Ack      chan<- error // optional ingestion ack; non-nil for RELP-style sources
 }
 

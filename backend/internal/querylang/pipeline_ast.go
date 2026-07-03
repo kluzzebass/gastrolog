@@ -8,7 +8,7 @@ import (
 // Pipeline represents a parsed query with optional pipe operators.
 // If Pipes is empty, the query is a filter-only query (existing behavior).
 type Pipeline struct {
-	Filter Expr   // the filter expression (left of first |); nil for pipe-only queries
+	Filter Expr     // the filter expression (left of first |); nil for pipe-only queries
 	Pipes  []PipeOp // pipe operators in order (right of |)
 }
 
@@ -73,9 +73,9 @@ func (w *WhereOp) String() string {
 
 // AggExpr represents an aggregation expression: count or func(expr) [as alias].
 type AggExpr struct {
-	Func  string     // aggregate function name: "count", "avg", "sum", "min", "max"
-	Arg   PipeExpr   // argument expression; nil for bare "count"
-	Alias string     // optional alias from "as"; empty if not specified
+	Func  string   // aggregate function name: "count", "avg", "sum", "min", "max"
+	Arg   PipeExpr // argument expression; nil for bare "count"
+	Alias string   // optional alias from "as"; empty if not specified
 }
 
 // String returns a human-readable representation.

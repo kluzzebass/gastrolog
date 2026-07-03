@@ -152,4 +152,3 @@ func TestFSM_OnAfterRestoreFires(t *testing.T) {
 		t.Errorf("post-restore Instances() = %d, want 2", len(got))
 	}
 }
-

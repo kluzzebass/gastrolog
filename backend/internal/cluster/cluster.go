@@ -72,15 +72,15 @@ type Config struct {
 
 // Server manages the cluster gRPC port, Raft transport, and inter-node services.
 type Server struct {
-	cfg       Config
-	grpcSrv   *grpc.Server // service lane (ClusterService, raftadmin, …)
-	raftLaneMu sync.Mutex
+	cfg              Config
+	grpcSrv          *grpc.Server // service lane (ClusterService, raftadmin, …)
+	raftLaneMu       sync.Mutex
 	raftGroupServers map[string]*grpc.Server // per-group raft lanes (TLS mode)
-	sniDemux  *sniDemuxListener
-	tm        *multiraft.Transport[string]
-	listener  net.Listener
-	localAddr string // advertised address (may differ from listen addr)
-	logger    *slog.Logger
+	sniDemux         *sniDemuxListener
+	tm               *multiraft.Transport[string]
+	listener         net.Listener
+	localAddr        string // advertised address (may differ from listen addr)
+	logger           *slog.Logger
 
 	// stopCtx is cancelled by Stop() to signal long-running stream handlers
 	// that they should return cleanly. Handlers that block in

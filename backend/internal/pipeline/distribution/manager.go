@@ -55,14 +55,14 @@ type VaultConfig struct {
 }
 
 type vaultDist struct {
-	root        string
-	publisher   Publisher
-	localHolder func() bool
+	root                string
+	publisher           Publisher
+	localHolder         func() bool
 	onLocalHeadPromoted func(glid.GLID)
 	onPublishCommitted  func(glid.GLID)
-	mu          sync.RWMutex
-	segments    map[glid.GLID]string // segment ID → on-disk path
-	retired     map[glid.GLID]struct{} // released from vault-ctl; skip rescan republish
+	mu                  sync.RWMutex
+	segments            map[glid.GLID]string   // segment ID → on-disk path
+	retired             map[glid.GLID]struct{} // released from vault-ctl; skip rescan republish
 }
 
 func newVaultDist(root string, cfg VaultConfig) (*vaultDist, error) {
@@ -351,7 +351,7 @@ type Config struct {
 	// PublishBatchSize is how many staged segments one worker coalesces into a
 	// single vault-ctl apply when the publisher supports batching. Defaults to 32.
 	PublishBatchSize int
-	Logger *slog.Logger
+	Logger           *slog.Logger
 }
 
 func (c Config) publishWorkers() int {
@@ -372,16 +372,16 @@ func (c Config) publishBatchSize() int {
 type Manager struct {
 	cfg Config
 
-	mu      sync.Mutex
-	vaults  map[glid.GLID]*vaultDist
+	mu           sync.Mutex
+	vaults       map[glid.GLID]*vaultDist
 	pullIn       chan PullRequest
 	stranded     *notify.Signal
 	publishRetry *notify.Signal
 	retryMu      sync.Mutex
 	retryPending []pendingPublish
 	runCtx       context.Context
-	running atomic.Bool
-	wg      sync.WaitGroup
+	running      atomic.Bool
+	wg           sync.WaitGroup
 }
 
 // New returns a manager. Pull requests are sent to the returned channel.

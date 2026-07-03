@@ -18,7 +18,7 @@ var (
 	ErrVaultNotFound  = errors.New("vault not found")
 	ErrActiveChunk    = errors.New("cannot delete active chunk")
 	ErrChunkArchived  = errors.New("chunk is archived and not immediately readable")
-	ErrChunkSuspect = errors.New("chunk blob not found in cloud storage — may be transient")
+	ErrChunkSuspect   = errors.New("chunk blob not found in cloud storage — may be transient")
 	// ErrChunkSealed signals that an Append targeted a chunk the
 	// cluster (via vault-ctl Raft FSM) considers sealed. Returned by
 	// the Manager's append-side gate so the caller can rotate to a
@@ -275,19 +275,19 @@ type ChunkCacheEvictor interface {
 // on a follower without streaming any records. All fields come from the vault
 // Raft FSM entry (populated by AnnounceSeal + AnnounceUpload on the leader).
 type CloudChunkInfo struct {
-	WriteStart        time.Time
-	WriteEnd          time.Time
-	IngestStart       time.Time
-	IngestEnd         time.Time
-	SourceStart       time.Time
-	SourceEnd         time.Time
-	RecordCount       int64
-	Bytes             int64
-	DiskBytes         int64
-	IngestIdxOffset   int64
-	IngestIdxSize     int64
-	SourceIdxOffset   int64
-	SourceIdxSize     int64
+	WriteStart      time.Time
+	WriteEnd        time.Time
+	IngestStart     time.Time
+	IngestEnd       time.Time
+	SourceStart     time.Time
+	SourceEnd       time.Time
+	RecordCount     int64
+	Bytes           int64
+	DiskBytes       int64
+	IngestIdxOffset int64
+	IngestIdxSize   int64
+	SourceIdxOffset int64
+	SourceIdxSize   int64
 
 	IngestTSMonotonic bool // see ChunkMeta.IngestTSMonotonic
 }
@@ -306,19 +306,19 @@ type CloudChunkRegistrar interface {
 // segmentation ChunkRoot (<homeRoot>/chunks/<id>/data.glcb). All fields come
 // from the vault-ctl FSM sealed-chunk entry. See gastrolog-2kysn (Rubicon E1).
 type ExternalGLCBInfo struct {
-	WriteStart        time.Time
-	WriteEnd          time.Time
-	IngestStart       time.Time
-	IngestEnd         time.Time
-	SourceStart       time.Time
-	SourceEnd         time.Time
-	RecordCount       int64
-	Bytes             int64
-	DiskBytes         int64
-	IngestIdxOffset   int64
-	IngestIdxSize     int64
-	SourceIdxOffset   int64
-	SourceIdxSize     int64
+	WriteStart      time.Time
+	WriteEnd        time.Time
+	IngestStart     time.Time
+	IngestEnd       time.Time
+	SourceStart     time.Time
+	SourceEnd       time.Time
+	RecordCount     int64
+	Bytes           int64
+	DiskBytes       int64
+	IngestIdxOffset int64
+	IngestIdxSize   int64
+	SourceIdxOffset int64
+	SourceIdxSize   int64
 
 	IngestTSMonotonic bool // see ChunkMeta.IngestTSMonotonic
 }

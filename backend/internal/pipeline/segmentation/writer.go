@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"gastrolog/internal/glid"
-	"gastrolog/internal/pipeline/segment"
 	"gastrolog/internal/pipeline/paths"
+	"gastrolog/internal/pipeline/segment"
 	"gastrolog/internal/record"
 )
 
@@ -34,14 +34,14 @@ type vaultWriter struct {
 	commitDelay  time.Duration
 	disableFsync bool
 
-	in          chan Input
-	completed   chan<- CompletedSegment
-	onSync      func()
+	in                 chan Input
+	completed          chan<- CompletedSegment
+	onSync             func()
 	onCompletedDropped func()
-	openedAt    time.Time
-	segmentID   glid.GLID
-	seg         *segment.File
-	workingPath string
+	openedAt           time.Time
+	segmentID          glid.GLID
+	seg                *segment.File
+	workingPath        string
 
 	mu      sync.Mutex
 	closed  bool
@@ -70,14 +70,14 @@ func newVaultWriter(vaultID glid.GLID, root string, cfg Config, vc VaultConfig, 
 		commitDelay = cfg.MaxCommitDelay
 	}
 	w := &vaultWriter{
-		vaultID:      vaultID,
-		root:         root,
-		cfg:          cfg,
-		syncEvery:    syncEvery,
-		syncWindow:   syncWindow,
-		commitDelay:  commitDelay,
-		disableFsync: vc.DisableFsync || cfg.DisableFsync,
-		in:           make(chan Input, queueCap),
+		vaultID:            vaultID,
+		root:               root,
+		cfg:                cfg,
+		syncEvery:          syncEvery,
+		syncWindow:         syncWindow,
+		commitDelay:        commitDelay,
+		disableFsync:       vc.DisableFsync || cfg.DisableFsync,
+		in:                 make(chan Input, queueCap),
 		completed:          completed,
 		onSync:             cfg.OnSync,
 		onCompletedDropped: cfg.OnCompletedDropped,

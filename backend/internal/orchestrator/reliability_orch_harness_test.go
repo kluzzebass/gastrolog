@@ -51,8 +51,8 @@ const harnessStorageClass uint32 = 1
 // form and calls NodeAddressResolver with that, so id here MUST be the
 // GLID string form, not a human-readable label.
 type orchRelNode struct {
-	id            string    // GLID string; also orchestrator LocalNodeID
-	label         string    // human label for test output ("node-1" etc.)
+	id            string // GLID string; also orchestrator LocalNodeID
+	label         string // human label for test output ("node-1" etc.)
 	home          string
 	fileStorageID glid.GLID // FileStorage.ID for this node's chunk directory
 	clusterSrv    *cluster.Server
@@ -80,10 +80,10 @@ type orchRelNode struct {
 // through vault-ctl Raft only, which is the primary target for
 // metadata-divergence tests.
 type orchRelHarness struct {
-	t            *testing.T
-	nodes        map[string]*orchRelNode
-	nodeIDs      []string
-	cfgStore     system.Store
+	t        *testing.T
+	nodes    map[string]*orchRelNode
+	nodeIDs  []string
+	cfgStore system.Store
 	// vaultID is the default (first) vault's identifier; kept as a top-level
 	// field for the single-vault convenience API.
 	vaultID glid.GLID
@@ -167,8 +167,8 @@ func withMatchAllRoute(vaultIdx int) orchRelOption {
 }
 
 const (
-	orchHarnessReadyWait  = 8 * time.Second
-	orchHarnessConvWait   = 60 * time.Second
+	orchHarnessReadyWait = 8 * time.Second
+	orchHarnessConvWait  = 60 * time.Second
 	// Vault-ctl groups use longer Raft election timeouts than cluster-ctl;
 	// post-failover leader election can exceed the old 5s budget.
 	orchHarnessLeaderWait = 15 * time.Second
@@ -854,4 +854,3 @@ func (h *orchRelHarness) waitForVaultCtlLeader() *orchRelNode {
 	h.t.Fatalf("no vault-ctl Raft leader within %s", orchHarnessLeaderWait)
 	return nil
 }
-

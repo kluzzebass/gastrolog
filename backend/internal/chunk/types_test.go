@@ -81,7 +81,7 @@ func TestParseChunkIDInvalid(t *testing.T) {
 		"",
 		"short",
 		"toolongstringfortesting!!!!!", // too long
-		"!!!!!!!!!!!!!!!!!!!!!!!!!!", // 26 chars but invalid base32hex
+		"!!!!!!!!!!!!!!!!!!!!!!!!!!",   // 26 chars but invalid base32hex
 	}
 	for _, input := range cases {
 		_, err := ParseChunkID(input)

@@ -879,7 +879,6 @@ func BuildSnapshot(sys *system.System, users []system.User, tokens []system.Refr
 		snap.CloudServices = append(snap.CloudServices, putCloudServiceCmd(cs))
 	}
 
-
 	// Users and tokens.
 	for _, u := range users {
 		snap.Users = append(snap.Users, createUserCmd(u))

@@ -31,7 +31,7 @@ const (
 // specific vault. One stream per key.
 type streamKey struct {
 	vaultID glid.GLID
-	nodeID string
+	nodeID  string
 }
 
 // vaultStream wraps a bidirectional gRPC stream (per vault, per follower)

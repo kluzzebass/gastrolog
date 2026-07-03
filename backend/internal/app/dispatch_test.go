@@ -82,18 +82,18 @@ type mockOrch struct {
 	updateMaxJobsErr   error
 	currentMaxJobs     int
 
-	drainCalls         []glid.GLID   // IDs passed to DrainVault
-	cancelDrainIDs     []glid.GLID   // IDs passed to CancelDrain
-	forceRemoveIDs     []glid.GLID   // IDs passed to ForceRemoveVault
-	unregisterIDs      []glid.GLID   // IDs passed to UnregisterVault
+	drainCalls         []glid.GLID // IDs passed to DrainVault
+	cancelDrainIDs     []glid.GLID // IDs passed to CancelDrain
+	forceRemoveIDs     []glid.GLID // IDs passed to ForceRemoveVault
+	unregisterIDs      []glid.GLID // IDs passed to UnregisterVault
 	unregisterErr      error
 	reconcileCalls     [][]glid.GLID // desired ID sets passed to ReconcileIngesters
 	addVaultCalls      []glid.GLID   // IDs passed to AddVault
 	reloadFiltersCalls int           // number of ReloadFilters calls
 
 	// Vault drain tracking.
-	vaultDrainCalls        []glid.GLID                                       // vault IDs passed to DrainInstance
-	removeInstanceCalls   []glid.GLID                                       // vault IDs passed to RemoveVaultInstance
+	vaultDrainCalls       []glid.GLID                                         // vault IDs passed to DrainInstance
+	removeInstanceCalls   []glid.GLID                                         // vault IDs passed to RemoveVaultInstance
 	localInstanceExported func(vaultID glid.GLID) *orchestrator.VaultInstance // configurable return
 
 	refreshVaultCtlCalls [][]system.NodeConfig // node lists passed to RefreshVaultCtlMembers
@@ -127,8 +127,8 @@ func (m *mockOrch) ReloadRetentionPolicies(context.Context) error { return m.rel
 func (m *mockOrch) ApplyRotationPolicyForRole(context.Context, glid.GLID) error {
 	return nil
 }
-func (m *mockOrch) DisableVault(glid.GLID) error                  { return m.disableVaultErr }
-func (m *mockOrch) EnableVault(glid.GLID) error                   { return m.enableVaultErr }
+func (m *mockOrch) DisableVault(glid.GLID) error { return m.disableVaultErr }
+func (m *mockOrch) EnableVault(glid.GLID) error  { return m.enableVaultErr }
 func (m *mockOrch) ForceRemoveVault(id glid.GLID) error {
 	m.forceRemoveIDs = append(m.forceRemoveIDs, id)
 	return m.forceRemoveErr
@@ -150,7 +150,7 @@ func (m *mockOrch) UnregisterVault(id glid.GLID) error {
 	return m.unregisterErr
 }
 func (m *mockOrch) MissingVaultInstance(_ glid.GLID, _ []glid.GLID) bool { return false }
-func (m *mockOrch) LocalInstanceIDs(_ glid.GLID) []glid.GLID            { return nil }
+func (m *mockOrch) LocalInstanceIDs(_ glid.GLID) []glid.GLID             { return nil }
 func (m *mockOrch) AddVaultInstance(_ context.Context, _ glid.GLID, _ orchestrator.Factories) error {
 	return nil
 }
@@ -218,10 +218,10 @@ type stubCfgStore struct {
 	// per-ingester `GetIngester` lookups that handleIngesterPut performs
 	// after iterating the list. Falls back to `ingester` when nil.
 	ingestersByID map[glid.GLID]system.IngesterConfig
-	settings     system.ServerSettings
-	settingsErr  error
-	cfg          *system.Config
-	loadErr      error
+	settings      system.ServerSettings
+	settingsErr   error
+	cfg           *system.Config
+	loadErr       error
 
 	ingesterAssignments map[glid.GLID]string // ingester ID → assigned node
 
@@ -1078,7 +1078,6 @@ func TestHandle_PlacementsSet_RefreshesLeaderPointerWhenRoleUnchanged(t *testing
 		t.Fatal("IsFollower should still be true (role didn't change)")
 	}
 }
-
 
 // gastrolog-3idjc: when a fresh joiner replays the cluster's post-snapshot
 // log, NotifyVaultPlacementsSet for a vault can arrive before the dispatcher

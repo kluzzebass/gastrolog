@@ -14,7 +14,7 @@ func TestActiveChunkStateIsValueType(t *testing.T) {
 	// Verify that ActiveChunkState can be copied by value
 	state1 := ActiveChunkState{
 		ChunkID:     NewChunkID(),
-		WriteStart:     time.Now(),
+		WriteStart:  time.Now(),
 		LastWriteTS: time.Now(),
 		CreatedAt:   time.Now(),
 		Bytes:       1000,
@@ -622,7 +622,7 @@ func TestPoliciesArePure(t *testing.T) {
 	// Policies should not modify their inputs
 	state := ActiveChunkState{
 		ChunkID:     NewChunkID(),
-		WriteStart:     time.Now(),
+		WriteStart:  time.Now(),
 		LastWriteTS: time.Now(),
 		CreatedAt:   time.Now(),
 		Bytes:       1000,

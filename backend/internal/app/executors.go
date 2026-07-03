@@ -353,14 +353,14 @@ func newPipelineBacklogDiskExecutor(o *orchestrator.Orchestrator) cluster.Pipeli
 			return nil, err
 		}
 		return &gastrologv1.ForwardGetPipelineBacklogResponse{
-			WorkingSegments:          uint32(disk.Working),          //nolint:gosec
-			CompletedStagingSegments: uint32(disk.CompletedStaging),   //nolint:gosec
-			HeadSegments:             uint32(disk.Head),               //nolint:gosec
-			PreHeadSegments:          uint32(disk.PreHead),            //nolint:gosec
-			WorkingBytes:             uint64(disk.WorkingBytes),       //nolint:gosec
+			WorkingSegments:          uint32(disk.Working),               //nolint:gosec
+			CompletedStagingSegments: uint32(disk.CompletedStaging),      //nolint:gosec
+			HeadSegments:             uint32(disk.Head),                  //nolint:gosec
+			PreHeadSegments:          uint32(disk.PreHead),               //nolint:gosec
+			WorkingBytes:             uint64(disk.WorkingBytes),          //nolint:gosec
 			CompletedStagingBytes:    uint64(disk.CompletedStagingBytes), //nolint:gosec
-			HeadBytes:                uint64(disk.HeadBytes),          //nolint:gosec
-			PreHeadBytes:             uint64(disk.PreHeadBytes),         //nolint:gosec
+			HeadBytes:                uint64(disk.HeadBytes),             //nolint:gosec
+			PreHeadBytes:             uint64(disk.PreHeadBytes),          //nolint:gosec
 		}, nil
 	}
 }

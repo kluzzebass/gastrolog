@@ -17,8 +17,8 @@ import (
 type sniDemuxListener struct {
 	base net.Listener
 
-	service    *virtualListener
-	raftLanes  *multiraft.InboundLaneRegistry
+	service   *virtualListener
+	raftLanes *multiraft.InboundLaneRegistry
 
 	closeOnce sync.Once
 	closed    chan struct{}

@@ -27,7 +27,7 @@ func newMemInstance(t *testing.T, vaultID glid.GLID, isFollower bool, followers 
 	}
 	im, _ := indexmem.NewFactory()(nil, cm, nil)
 	return &VaultInstance{
-		VaultID:          vaultID,
+		VaultID:         vaultID,
 		Type:            "memory",
 		Chunks:          cm,
 		Indexes:         im,
@@ -261,7 +261,6 @@ func TestListAllChunkMetasNilOverlayPassthrough(t *testing.T) {
 	}
 }
 
-
 // TestListAllChunkMetasSkipsFollowerInstances is the regression test for
 // gastrolog-2rvak. When a vault has both a leader and a follower instance
 // instance for the same instance on the same node, ListAllChunkMetas must
@@ -331,7 +330,6 @@ func TestLocalLeaderVaultIDsExcludesFollowerOnlyVaults(t *testing.T) {
 }
 
 // --- followerReplicationTargets ---
-
 
 // --- Retention action from position ---
 
@@ -425,7 +423,7 @@ func TestAppendToInstanceSecondarySkipsPostSeal(t *testing.T) {
 	}
 	im, _ := indexmem.NewFactory()(nil, cm, nil)
 	vaultInst := &VaultInstance{
-		VaultID:     vaultID,
+		VaultID:    vaultID,
 		Type:       "memory",
 		Chunks:     cm,
 		Indexes:    im,

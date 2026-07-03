@@ -46,9 +46,9 @@ func (p PressureLevel) String() string {
 // Once pressure is elevated or critical, the gate only returns to normal
 // when the ratio drops below NormalAt — this prevents throttle flapping.
 type PressureThresholds struct {
-	NormalAt    float64 // gate returns to Normal below this ratio
-	ElevatedAt  float64 // gate enters Elevated at or above this ratio
-	CriticalAt  float64 // gate enters Critical at or above this ratio
+	NormalAt   float64 // gate returns to Normal below this ratio
+	ElevatedAt float64 // gate enters Elevated at or above this ratio
+	CriticalAt float64 // gate enters Critical at or above this ratio
 }
 
 // DefaultThresholds returns the recommended thresholds from gastrolog-4fguu:
@@ -90,9 +90,9 @@ type PressureGate struct {
 }
 
 type pressureProbe struct {
-	name    string
-	probe   Probe
-	level   PressureLevel // last computed level for this probe
+	name  string
+	probe Probe
+	level PressureLevel // last computed level for this probe
 }
 
 // NewPressureGate creates a gate with the given thresholds. Use

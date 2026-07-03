@@ -25,7 +25,7 @@ var ErrNoRaftLeader = errors.New("no raft leader")
 type VaultCtlChunkApplyForwarder struct {
 	raft            *hraft.Raft
 	vaultCtlGroupID string
-	vaultID          glid.GLID
+	vaultID         glid.GLID
 	peers           *PeerConnManager
 	timeout         time.Duration
 }
@@ -38,7 +38,7 @@ func NewVaultCtlChunkApplyForwarder(r *hraft.Raft, vaultCtlGroupID string, vault
 	return &VaultCtlChunkApplyForwarder{
 		raft:            r,
 		vaultCtlGroupID: vaultCtlGroupID,
-		vaultID:          vaultID,
+		vaultID:         vaultID,
 		peers:           peers,
 		timeout:         timeout,
 	}

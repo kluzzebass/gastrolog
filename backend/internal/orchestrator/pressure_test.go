@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"gastrolog/internal/chanwatch"
-	"gastrolog/internal/memtest"
 	chunkmem "gastrolog/internal/chunk/memory"
+	"gastrolog/internal/memtest"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/pipeline/digestion"
 	"gastrolog/internal/pipeline/ingestion"

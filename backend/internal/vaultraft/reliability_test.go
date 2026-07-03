@@ -315,7 +315,7 @@ func TestReliability_ConcurrentWrites_NoDivergence(t *testing.T) {
 	h := newReliabilityHarness(t, 3)
 
 	const (
-		writers          = 4
+		writers           = 4
 		commandsPerWriter = 25
 	)
 
@@ -725,8 +725,8 @@ func TestReliability_LargeFSM_SnapshotRestoreRoundtrip(t *testing.T) {
 	now := time.Now().Truncate(time.Nanosecond)
 
 	const (
-		numVaults         = 20
-		chunksPerVault    = 30
+		numVaults      = 20
+		chunksPerVault = 30
 	)
 	vaultIDs := make([]glid.GLID, numVaults)
 	for i := range numVaults {

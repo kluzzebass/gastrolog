@@ -167,7 +167,10 @@ func TestManagerMintsEventIDOnEmit(t *testing.T) {
 		t.Fatalf("SourceTS = %v", msg1.SourceTS)
 	}
 
-	go func() { for range out {} }()
+	go func() {
+		for range out {
+		}
+	}()
 	_ = mgr.Stop()
 }
 
@@ -205,7 +208,10 @@ func TestManagerPreservesAckChannel(t *testing.T) {
 		t.Fatal("downstream ack not delivered to ingester channel")
 	}
 
-	go func() { for range out {} }()
+	go func() {
+		for range out {
+		}
+	}()
 	_ = mgr.Stop()
 }
 
@@ -246,7 +252,10 @@ func TestManagerBackpressure(t *testing.T) {
 		t.Fatal("third message arrived before queue had capacity")
 	}
 
-	go func() { for range out {} }()
+	go func() {
+		for range out {
+		}
+	}()
 	_ = mgr.Stop()
 }
 
@@ -279,7 +288,10 @@ func TestManagerPassiveRetry(t *testing.T) {
 		}
 	}
 
-	go func() { for range out {} }()
+	go func() {
+		for range out {
+		}
+	}()
 	_ = mgr.Stop()
 }
 
@@ -329,7 +341,10 @@ func TestManagerReconcileReplace(t *testing.T) {
 		t.Fatalf("messages = %v, want [first second]", got)
 	}
 
-	go func() { for range out {} }()
+	go func() {
+		for range out {
+		}
+	}()
 	_ = mgr.Stop()
 }
 
@@ -356,7 +371,10 @@ func TestManagerStartBeforeReconcile(t *testing.T) {
 		t.Fatalf("raw = %q, want late", msg.Raw)
 	}
 
-	go func() { for range out {} }()
+	go func() {
+		for range out {
+		}
+	}()
 	_ = mgr.Stop()
 }
 
@@ -404,7 +422,10 @@ func TestManagerCheckpointOnStop(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
-	go func() { for range out {} }()
+	go func() {
+		for range out {
+		}
+	}()
 	if err := mgr.Stop(); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
@@ -448,7 +469,10 @@ func TestManagerStartStopErrors(t *testing.T) {
 		t.Fatalf("second Start = %v, want ErrAlreadyRunning", err)
 	}
 
-	go func() { for range out {} }()
+	go func() {
+		for range out {
+		}
+	}()
 	if err := mgr.Stop(); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
@@ -491,7 +515,10 @@ func TestManagerReconcileNoOp(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 	}
 
-	go func() { for range out {} }()
+	go func() {
+		for range out {
+		}
+	}()
 	_ = mgr.Stop()
 }
 
@@ -538,7 +565,10 @@ func TestManagerActiveIngesterErrorExit(t *testing.T) {
 		t.Fatalf("attempts = %d, want 1 (no passive retry)", ing.attempts.Load())
 	}
 
-	go func() { for range out {} }()
+	go func() {
+		for range out {
+		}
+	}()
 	_ = mgr.Stop()
 }
 
@@ -566,7 +596,10 @@ func TestManagerIngesterPanicRecovery(t *testing.T) {
 
 	time.Sleep(200 * time.Millisecond)
 
-	go func() { for range out {} }()
+	go func() {
+		for range out {
+		}
+	}()
 	if err := mgr.Stop(); err != nil {
 		t.Fatalf("Stop after panic: %v", err)
 	}
@@ -619,7 +652,10 @@ func TestManagerPressureGateInjection(t *testing.T) {
 		t.Fatal("PressureAware ingester did not receive configured gate")
 	}
 
-	go func() { for range out {} }()
+	go func() {
+		for range out {
+		}
+	}()
 	_ = mgr.Stop()
 }
 
@@ -655,7 +691,10 @@ func TestManagerAckErrorDelivery(t *testing.T) {
 		t.Fatal("error ack not delivered")
 	}
 
-	go func() { for range out {} }()
+	go func() {
+		for range out {
+		}
+	}()
 	_ = mgr.Stop()
 }
 
@@ -684,7 +723,10 @@ func TestManagerAttrsPassthrough(t *testing.T) {
 		t.Fatalf("attrs = %v", msg.Attrs)
 	}
 
-	go func() { for range out {} }()
+	go func() {
+		for range out {
+		}
+	}()
 	_ = mgr.Stop()
 }
 
@@ -721,7 +763,10 @@ func TestManagerCheckpointSaveError(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
-	go func() { for range out {} }()
+	go func() {
+		for range out {
+		}
+	}()
 	if err := mgr.Stop(); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}

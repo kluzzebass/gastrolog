@@ -27,8 +27,8 @@ type Config struct {
 // Manager runs a worker pool that converts ingestion messages into immutable
 // record pointers for the routing stage.
 type Manager struct {
-	workers  int
-	out      chan Output
+	workers   int
+	out       chan Output
 	digesters []Digester
 
 	running atomic.Bool

@@ -152,12 +152,12 @@ type JSONIndexStats struct {
 
 // ChunkAnalysis contains all index analysis for a single chunk.
 type ChunkAnalysis struct {
-	ChunkID      chunk.ChunkID `json:"chunk_id"`
-	ChunkBytes   int64         `json:"chunk_bytes"`   // Raw data size
-	ChunkRecords int64         `json:"chunk_records"` // Total records in chunk
-	ChunkWriteStart time.Time  `json:"chunk_write_start"`
-	ChunkWriteEnd   time.Time  `json:"chunk_write_end"`
-	Sealed       bool          `json:"sealed"`
+	ChunkID         chunk.ChunkID `json:"chunk_id"`
+	ChunkBytes      int64         `json:"chunk_bytes"`   // Raw data size
+	ChunkRecords    int64         `json:"chunk_records"` // Total records in chunk
+	ChunkWriteStart time.Time     `json:"chunk_write_start"`
+	ChunkWriteEnd   time.Time     `json:"chunk_write_end"`
+	Sealed          bool          `json:"sealed"`
 
 	// High-level summaries
 	Summaries []IndexSummary `json:"summaries"`

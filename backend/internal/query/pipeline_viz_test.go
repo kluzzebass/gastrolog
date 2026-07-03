@@ -9,9 +9,9 @@ import (
 func TestValidateBarchart(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
-		table   *TableResult
-		wantOK  bool
+		name   string
+		table  *TableResult
+		wantOK bool
 	}{
 		{
 			name: "valid 2 cols 3 rows",

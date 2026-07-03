@@ -67,9 +67,9 @@ type GroupConfig struct {
 	// HeartbeatTimeout, ElectionTimeout, and LeaderLeaseTimeout override Raft
 	// timing when > 0. Vault control-plane groups (vault/*/ctl) default to
 	// longer timeouts when unset — see vaultCtl* constants below.
-	HeartbeatTimeout     time.Duration
-	ElectionTimeout      time.Duration
-	LeaderLeaseTimeout   time.Duration
+	HeartbeatTimeout   time.Duration
+	ElectionTimeout    time.Duration
+	LeaderLeaseTimeout time.Duration
 }
 
 // Default Raft timing for cluster-ctl and other non-vault-ctl groups.
@@ -106,10 +106,10 @@ type GroupManager struct {
 	ensureRaftLane func(groupID string) error
 	removeRaftLane func(groupID string)
 	nodeID         string
-	baseDir      string       // <home>/raft/groups/
-	shutdownLast string       // group ID to shut down last (e.g. config group)
-	wal          *raftwal.WAL // optional shared WAL; nil = per-group boltdb
-	logger       *slog.Logger
+	baseDir        string       // <home>/raft/groups/
+	shutdownLast   string       // group ID to shut down last (e.g. config group)
+	wal            *raftwal.WAL // optional shared WAL; nil = per-group boltdb
+	logger         *slog.Logger
 }
 
 // GroupConnCloser closes outbound raft-lane peer connections when a group is
@@ -163,9 +163,9 @@ func NewGroupManager(cfg GroupManagerConfig) *GroupManager {
 		ensureRaftLane: cfg.EnsureRaftLane,
 		removeRaftLane: cfg.RemoveRaftLane,
 		nodeID:         cfg.NodeID,
-		baseDir:      cfg.BaseDir,
-		shutdownLast: cfg.ShutdownLast,
-		wal:          cfg.WAL,
+		baseDir:        cfg.BaseDir,
+		shutdownLast:   cfg.ShutdownLast,
+		wal:            cfg.WAL,
 		logger: comp.Root("raft-group-manager").Desc(
 			"Per-vault Raft group manager — opens, closes, and supervises the per-vault control-plane Raft groups.",
 		).Apply(logging.Default(cfg.Logger)),

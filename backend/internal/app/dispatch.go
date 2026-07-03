@@ -66,12 +66,12 @@ type configDispatcher struct {
 	factories          orchestrator.Factories
 	localNodeID        string
 	logger             *slog.Logger
-	clusterTLS         *cluster.ClusterTLS                              // nil for single-node or memory mode
-	tlsFilePath        string                                           // path to persist cluster TLS on rotation
-	configSignal       *notify.Signal                                   // broadcasts config changes to WatchConfig streams
-	managedFileHandler ManagedFileHandler                               // nil for single-node or before wiring
+	clusterTLS         *cluster.ClusterTLS                               // nil for single-node or memory mode
+	tlsFilePath        string                                            // path to persist cluster TLS on rotation
+	configSignal       *notify.Signal                                    // broadcasts config changes to WatchConfig streams
+	managedFileHandler ManagedFileHandler                                // nil for single-node or before wiring
 	catchupScheduler   func(vaultID glid.GLID, followerNodeIDs []string) // nil until orch is wired
-	placementTrigger   func()                                           // triggers immediate placement reconcile; nil for single-node
+	placementTrigger   func()                                            // triggers immediate placement reconcile; nil for single-node
 }
 
 // Handle dispatches a single FSM notification to the appropriate orchestrator

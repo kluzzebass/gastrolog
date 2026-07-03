@@ -49,7 +49,7 @@ type System struct {
 type Config struct {
 	// Entity collections.
 	// gastrolog-4kkoo (Phase 5): Filters removed; expressions inlined on Routes.
-	RotationPolicies []RotationPolicyConfig `json:"rotationPolicies,omitempty"`
+	RotationPolicies  []RotationPolicyConfig  `json:"rotationPolicies,omitempty"`
 	RetentionPolicies []RetentionPolicyConfig `json:"retentionPolicies,omitempty"`
 	Ingesters         []IngesterConfig        `json:"ingesters,omitempty"`
 	Vaults            []VaultConfig           `json:"vaults,omitempty"`

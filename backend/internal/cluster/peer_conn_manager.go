@@ -11,9 +11,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	hraft "github.com/hashicorp/raft"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/multiraft"
+	hraft "github.com/hashicorp/raft"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/connectivity"
@@ -62,20 +62,20 @@ type AcquireOpts struct {
 // PeerConnSnapshot is a point-in-time view of one managed connection for
 // stats broadcast and inspection.
 type PeerConnSnapshot struct {
-	ConnID       uint64
-	PeerNodeID   string
-	Lane         string
-	GroupID      string
-	DialAddr     string
-	ServerName   string
-	PoolIndex    int
-	Connectivity string
-	Purposes     []string
+	ConnID         uint64
+	PeerNodeID     string
+	Lane           string
+	GroupID        string
+	DialAddr       string
+	ServerName     string
+	PoolIndex      int
+	Connectivity   string
+	Purposes       []string
 	PurposesWindow []string
-	BytesSent    int64
-	BytesRecv    int64
-	CreatedAt    time.Time
-	LastUsedAt   time.Time
+	BytesSent      int64
+	BytesRecv      int64
+	CreatedAt      time.Time
+	LastUsedAt     time.Time
 }
 
 // PeerConnHandle is a leased outbound connection. Call Release when done.
@@ -90,10 +90,10 @@ type PeerConnHandle interface {
 // PeerConnManager owns all outbound cluster gRPC connections. Raft lanes use
 // a singleton per (peer, group); service lanes use a bounded pool per peer.
 type PeerConnManager struct {
-	raft       *hraft.Raft
-	clusterTLS *ClusterTLS
-	nodeID     string
-	logger     *slog.Logger
+	raft        *hraft.Raft
+	clusterTLS  *ClusterTLS
+	nodeID      string
+	logger      *slog.Logger
 	byteMetrics *PeerByteMetrics // optional; mirrors outbound bytes per peer
 
 	servicePoolMax int
@@ -152,14 +152,14 @@ type managedConn struct {
 }
 
 type peerConnHandle struct {
-	mgr     *PeerConnManager
-	mc      *managedConn
-	purpose string
+	mgr      *PeerConnManager
+	mc       *managedConn
+	purpose  string
 	released bool
 }
 
-func (h *peerConnHandle) Spec() ConnSpec       { return h.mc.spec }
-func (h *peerConnHandle) Purpose() string      { return h.purpose }
+func (h *peerConnHandle) Spec() ConnSpec         { return h.mc.spec }
+func (h *peerConnHandle) Purpose() string        { return h.purpose }
 func (h *peerConnHandle) GRPC() *grpc.ClientConn { return h.mc.grpc }
 func (h *peerConnHandle) Release() {
 	if h.released {
@@ -445,20 +445,20 @@ func (m *PeerConnManager) snapshotManaged(mc *managedConn) PeerConnSnapshot {
 		last = mc.createdAt
 	}
 	return PeerConnSnapshot{
-		ConnID:       mc.id,
-		PeerNodeID:   mc.spec.PeerNodeID,
-		Lane:         mc.spec.Lane.String(),
-		GroupID:      mc.spec.GroupID,
-		DialAddr:     mc.dialAddr,
-		ServerName:   mc.serverName,
-		PoolIndex:    mc.poolIndex,
-		Connectivity: mc.grpc.GetState().String(),
-		Purposes:     purposes,
+		ConnID:         mc.id,
+		PeerNodeID:     mc.spec.PeerNodeID,
+		Lane:           mc.spec.Lane.String(),
+		GroupID:        mc.spec.GroupID,
+		DialAddr:       mc.dialAddr,
+		ServerName:     mc.serverName,
+		PoolIndex:      mc.poolIndex,
+		Connectivity:   mc.grpc.GetState().String(),
+		Purposes:       purposes,
 		PurposesWindow: purposesWindow,
-		BytesSent:    mc.bytesSent.Load(),
-		BytesRecv:    mc.bytesRecv.Load(),
-		CreatedAt:    mc.createdAt,
-		LastUsedAt:   last,
+		BytesSent:      mc.bytesSent.Load(),
+		BytesRecv:      mc.bytesRecv.Load(),
+		CreatedAt:      mc.createdAt,
+		LastUsedAt:     last,
 	}
 }
 
@@ -576,11 +576,11 @@ func (m *PeerConnManager) dial(spec ConnSpec, poolIndex int) (*managedConn, erro
 	creds, serverName := m.dialTransportCreds(spec)
 
 	mc := &managedConn{
-		id:         m.nextConnID.Add(1),
-		spec:       spec,
-		dialAddr:   addr,
-		serverName: serverName,
-		poolIndex:  poolIndex,
+		id:             m.nextConnID.Add(1),
+		spec:           spec,
+		dialAddr:       addr,
+		serverName:     serverName,
+		poolIndex:      poolIndex,
 		purposes:       make(map[string]int),
 		windowPurposes: make(map[string]struct{}),
 		createdAt:      time.Now(),

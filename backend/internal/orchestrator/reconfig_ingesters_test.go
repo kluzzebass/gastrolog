@@ -26,10 +26,10 @@ func TestReconcileIngesters_RebuildsOnParamChange(t *testing.T) {
 
 	desired := func(burst string) []orchestrator.IngesterDesired {
 		return []orchestrator.IngesterDesired{{
-			ID:      id,
-			Name:    "scatterbox",
-			Type:    "scatterbox",
-			Params:  map[string]string{"burst": burst, "interval": "10ms"},
+			ID:     id,
+			Name:   "scatterbox",
+			Type:   "scatterbox",
+			Params: map[string]string{"burst": burst, "interval": "10ms"},
 			Build: func() (orchestrator.Ingester, error) {
 				builds.Add(1)
 				lastBurst.Store(burst)

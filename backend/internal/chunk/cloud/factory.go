@@ -18,9 +18,9 @@ const (
 	ParamAccessKey        = "access_key"        // S3 access key
 	ParamSecretKey        = "secret_key"        // S3 secret key
 	ParamContainer        = "container"         // Azure container name
-	ParamConnectionString = "connection_string"  // Azure connection string
-	ParamCredentialsJSON  = "credentials_json"   // GCS service account JSON
-	ParamVaultID          = "_vault_id"          // Injected by orchestrator
+	ParamConnectionString = "connection_string" // Azure connection string
+	ParamCredentialsJSON  = "credentials_json"  // GCS service account JSON
+	ParamVaultID          = "_vault_id"         // Injected by orchestrator
 )
 
 var (

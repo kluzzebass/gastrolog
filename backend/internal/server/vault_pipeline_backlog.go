@@ -64,15 +64,15 @@ func (s *VaultServer) assemblePipelineBacklogRPC(ctx context.Context, vaultID gl
 			}
 			disk := orchestratorDiskFromProto(remote)
 			peerDisk = append(peerDisk, cluster.PeerVaultPipelineDisk{
-				NodeID:           remoteNodes[i],
-				Working:          disk.Working,
-				CompletedStaging: disk.CompletedStaging,
-				Head:             disk.Head,
-				PreHead:          disk.PreHead,
+				NodeID:                remoteNodes[i],
+				Working:               disk.Working,
+				CompletedStaging:      disk.CompletedStaging,
+				Head:                  disk.Head,
+				PreHead:               disk.PreHead,
 				WorkingBytes:          disk.WorkingBytes,
 				CompletedStagingBytes: disk.CompletedStagingBytes,
 				HeadBytes:             disk.HeadBytes,
-				PreHeadBytes:            disk.PreHeadBytes,
+				PreHeadBytes:          disk.PreHeadBytes,
 			})
 		}
 	}
@@ -84,14 +84,14 @@ func orchestratorDiskFromProto(p *apiv1.ForwardGetPipelineBacklogResponse) orche
 		return orchestrator.PipelineDiskSegmentCounts{}
 	}
 	return orchestrator.PipelineDiskSegmentCounts{
-		Working:          int(p.GetWorkingSegments()),
-		CompletedStaging: int(p.GetCompletedStagingSegments()),
-		Head:             int(p.GetHeadSegments()),
-		PreHead:          int(p.GetPreHeadSegments()),
+		Working:               int(p.GetWorkingSegments()),
+		CompletedStaging:      int(p.GetCompletedStagingSegments()),
+		Head:                  int(p.GetHeadSegments()),
+		PreHead:               int(p.GetPreHeadSegments()),
 		WorkingBytes:          int64(p.GetWorkingBytes()),          //nolint:gosec
 		CompletedStagingBytes: int64(p.GetCompletedStagingBytes()), //nolint:gosec
 		HeadBytes:             int64(p.GetHeadBytes()),             //nolint:gosec
-		PreHeadBytes:            int64(p.GetPreHeadBytes()),          //nolint:gosec
+		PreHeadBytes:          int64(p.GetPreHeadBytes()),          //nolint:gosec
 	}
 }
 
@@ -104,14 +104,14 @@ func pipelineBacklogToProto(snap orchestrator.PipelineBacklogSnapshot) *apiv1.Va
 		OpenManifestRefs:              snap.OpenManifestRefs,
 		OpenManifestRecords:           snap.OpenManifestRecords,
 		SealedManifestPending:         snap.SealedManifestPending,
-		WorkingSegments:               uint32(snap.Working),          //nolint:gosec
-		CompletedStagingSegments:      uint32(snap.CompletedStaging),   //nolint:gosec
-		HeadSegments:                  uint32(snap.Head),               //nolint:gosec
-		PreHeadSegments:               uint32(snap.PreHead),            //nolint:gosec
-		WorkingBytes:                  uint64(snap.WorkingBytes),       //nolint:gosec
+		WorkingSegments:               uint32(snap.Working),               //nolint:gosec
+		CompletedStagingSegments:      uint32(snap.CompletedStaging),      //nolint:gosec
+		HeadSegments:                  uint32(snap.Head),                  //nolint:gosec
+		PreHeadSegments:               uint32(snap.PreHead),               //nolint:gosec
+		WorkingBytes:                  uint64(snap.WorkingBytes),          //nolint:gosec
 		CompletedStagingBytes:         uint64(snap.CompletedStagingBytes), //nolint:gosec
-		HeadBytes:                     uint64(snap.HeadBytes),          //nolint:gosec
-		PreHeadBytes:                  uint64(snap.PreHeadBytes),         //nolint:gosec
+		HeadBytes:                     uint64(snap.HeadBytes),             //nolint:gosec
+		PreHeadBytes:                  uint64(snap.PreHeadBytes),          //nolint:gosec
 		ConnectedNodeIsVaultCtlLeader: snap.ConnectedNodeIsVaultCtlLeader,
 	}
 	if !snap.OpenManifestIngestEnd.IsZero() {
@@ -132,14 +132,14 @@ func pipelineBacklogToProto(snap orchestrator.PipelineBacklogSnapshot) *apiv1.Va
 		}
 		pb.NodeSegments = append(pb.NodeSegments, &apiv1.PipelineNodeSegments{
 			NodeId:                   nodeID.ToProto(),
-			WorkingSegments:          uint32(ns.Working),          //nolint:gosec
-			CompletedStagingSegments: uint32(ns.CompletedStaging), //nolint:gosec
-			HeadSegments:             uint32(ns.Head),               //nolint:gosec
-			PreHeadSegments:          uint32(ns.PreHead),            //nolint:gosec
-			WorkingBytes:             uint64(ns.WorkingBytes),       //nolint:gosec
+			WorkingSegments:          uint32(ns.Working),               //nolint:gosec
+			CompletedStagingSegments: uint32(ns.CompletedStaging),      //nolint:gosec
+			HeadSegments:             uint32(ns.Head),                  //nolint:gosec
+			PreHeadSegments:          uint32(ns.PreHead),               //nolint:gosec
+			WorkingBytes:             uint64(ns.WorkingBytes),          //nolint:gosec
 			CompletedStagingBytes:    uint64(ns.CompletedStagingBytes), //nolint:gosec
-			HeadBytes:                uint64(ns.HeadBytes),          //nolint:gosec
-			PreHeadBytes:             uint64(ns.PreHeadBytes),         //nolint:gosec
+			HeadBytes:                uint64(ns.HeadBytes),             //nolint:gosec
+			PreHeadBytes:             uint64(ns.PreHeadBytes),          //nolint:gosec
 		})
 	}
 	return pb

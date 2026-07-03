@@ -228,15 +228,15 @@ func (p *PeerState) AggregateRouteStats() (ingested, dropped, routed int64, filt
 
 // PeerVaultPipelineDisk is one peer node's broadcast pipeline disk counts for a vault.
 type PeerVaultPipelineDisk struct {
-	NodeID           string
-	Working          int
-	CompletedStaging int
-	Head             int
-	PreHead          int
+	NodeID                string
+	Working               int
+	CompletedStaging      int
+	Head                  int
+	PreHead               int
 	WorkingBytes          int64
 	CompletedStagingBytes int64
 	HeadBytes             int64
-	PreHeadBytes            int64
+	PreHeadBytes          int64
 }
 
 // AggregatePipelineDisk collects per-vault pipeline disk counts from all live peers.

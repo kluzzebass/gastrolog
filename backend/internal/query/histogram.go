@@ -708,7 +708,7 @@ func timechartChunkGroupsWideSpan(
 	sampleBudget int,
 ) int {
 	bStart := start.Add(bucketWidth * time.Duration(firstBucket))
-	bEnd := start.Add(bucketWidth * time.Duration(lastBucket + 1))
+	bEnd := start.Add(bucketWidth * time.Duration(lastBucket+1))
 
 	startPos, startOK := ir.FindIngestPos(meta.ID, bStart)
 	if !startOK {

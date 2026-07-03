@@ -255,10 +255,10 @@ func (p *vaultCtlLearnerPromoter) evaluateLearner(g *raftgroup.Group, vaultID gl
 // vault-ctl state from broadcasts. Used by the promoter to choose
 // between "wait" (no evidence) and "evaluate catchup" (have evidence).
 type peerVaultObservation struct {
-	hasPeerStats   bool   // PeerState had an entry at all
-	hasVaultEntry  bool   // peer's NodeStats included this vault
-	totalVaults    int    // number of vault entries the peer broadcast (diagnostic)
-	appliedIndex   uint64 // raft applied index for this vault (only valid when hasVaultEntry)
+	hasPeerStats  bool   // PeerState had an entry at all
+	hasVaultEntry bool   // peer's NodeStats included this vault
+	totalVaults   int    // number of vault entries the peer broadcast (diagnostic)
+	appliedIndex  uint64 // raft applied index for this vault (only valid when hasVaultEntry)
 }
 
 // observePeerVault looks up the named peer's broadcast vault-ctl

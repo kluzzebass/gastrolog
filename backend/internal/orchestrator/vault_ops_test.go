@@ -289,4 +289,3 @@ func TestNewAnalyzerForChunk(t *testing.T) {
 		t.Fatal("expected analysis")
 	}
 }
-

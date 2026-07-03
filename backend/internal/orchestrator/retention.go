@@ -82,13 +82,13 @@ type retentionRunner struct {
 	// Cached for job descriptions so the Jobs inspector can tell sweep
 	// sub-jobs apart by their vault. Refreshed from config on every sweep
 	// via retentionTargetForInstance.
-	vaultName string
-	vaultType string
-	cm           chunk.ChunkManager
-	im           index.IndexManager
-	inflight     map[chunk.ChunkID]bool // chunks currently being processed
-	unreadable   map[chunk.ChunkID]*unreadableEntry // chunks that failed to read — retried with exponential backoff (gastrolog-25vur)
-	orch         *Orchestrator          // for eject/transition callbacks
+	vaultName  string
+	vaultType  string
+	cm         chunk.ChunkManager
+	im         index.IndexManager
+	inflight   map[chunk.ChunkID]bool             // chunks currently being processed
+	unreadable map[chunk.ChunkID]*unreadableEntry // chunks that failed to read — retried with exponential backoff (gastrolog-25vur)
+	orch       *Orchestrator                      // for eject/transition callbacks
 
 	applyRaftRetentionPending func(id chunk.ChunkID) error
 
@@ -402,7 +402,6 @@ func (o *Orchestrator) RetryUnreadableChunks(vaultID glid.GLID) int {
 	}
 	return total
 }
-
 
 // RetentionPendingChunks returns chunk IDs marked as retention-pending in the
 // vault-ctl FSM for a vault. Visible to all nodes via Raft replication.
@@ -1031,16 +1030,18 @@ func (r *retentionRunner) retryUnreadableChunks() int {
 // catalog.
 //
 // Cluster path (gastrolog-51gme step 4):
-//   reconciler.deleteChunk → CmdRequestDelete → onRequestDelete fires on
-//   every node in expectedFrom (including this leader) and each one
-//   deletes its local copy + acks. Once expectedFrom is empty the leader
-//   proposes CmdFinalizeDelete and the FSM entry is removed. The
-//   reconciler bumps NotifyChunkChange and walks same-node sibling TIs
-//   itself, so retention only owns the rate-alert side-effect here.
+//
+//	reconciler.deleteChunk → CmdRequestDelete → onRequestDelete fires on
+//	every node in expectedFrom (including this leader) and each one
+//	deletes its local copy + acks. Once expectedFrom is empty the leader
+//	proposes CmdFinalizeDelete and the FSM entry is removed. The
+//	reconciler bumps NotifyChunkChange and walks same-node sibling TIs
+//	itself, so retention only owns the rate-alert side-effect here.
 //
 // Single-node path:
-//   reconciler.deleteChunk's local-only fallback handles the direct
-//   delete (indexes + chunk + sibling TIs + chunk-change notify).
+//
+//	reconciler.deleteChunk's local-only fallback handles the direct
+//	delete (indexes + chunk + sibling TIs + chunk-change notify).
 func (r *retentionRunner) expireChunk(id chunk.ChunkID, reason string) {
 	if r.reconciler != nil {
 		expectedFrom := r.expectedFromForExpire()

@@ -139,7 +139,7 @@ func TestPeerState_PausedPeerDetectedWithinTTL(t *testing.T) {
 	const (
 		heartbeatTick = 100 * time.Millisecond
 		ttl           = 400 * time.Millisecond // 4× heartbeat
-		detectBudget  = ttl + 2*heartbeatTick   // TTL + 2 ticks of polling slack
+		detectBudget  = ttl + 2*heartbeatTick  // TTL + 2 ticks of polling slack
 	)
 	ps := NewPeerState(ttl)
 

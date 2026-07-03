@@ -120,18 +120,18 @@ type JobsProvider interface {
 
 // StatsCollectorConfig configures a StatsCollector.
 type StatsCollectorConfig struct {
-	Broadcaster  *Broadcaster
-	RaftStats    RaftStatsProvider
-	Stats        StatsProvider
-	PeerConns    PeerConnSnapshotProvider // optional; nil disables peer conn stats
-	Alerts       AlertProvider           // optional; nil if no alert collector
-	Jobs         JobsProvider            // optional; nil in single-node mode
+	Broadcaster       *Broadcaster
+	RaftStats         RaftStatsProvider
+	Stats             StatsProvider
+	PeerConns         PeerConnSnapshotProvider // optional; nil disables peer conn stats
+	Alerts            AlertProvider            // optional; nil if no alert collector
+	Jobs              JobsProvider             // optional; nil in single-node mode
 	NodeID            string
 	NodeNameFn        func() string // lazily resolved node name
 	Version           string
 	StartTime         time.Time
-	Interval          time.Duration // heavy NodeStats broadcast cadence (default 5s)
-	HeartbeatInterval time.Duration // lightweight liveness ping cadence (default 1s); 0 disables
+	Interval          time.Duration  // heavy NodeStats broadcast cadence (default 5s)
+	HeartbeatInterval time.Duration  // lightweight liveness ping cadence (default 1s); 0 disables
 	ApiAddress        string         // HTTP API listen address (e.g. ":4564")
 	PprofAddress      string         // pprof listen address, empty if disabled
 	StatsSignal       *notify.Signal // fired after each broadcast to notify WatchSystemStatus streams
@@ -143,7 +143,7 @@ type StatsCollectorConfig struct {
 type StatsCollector struct {
 	cfg StatsCollectorConfig
 
-	mu        sync.Mutex
+	mu               sync.Mutex
 	peerConnStats    map[string]*peerConnStatsWindow
 	peerTrafficStats map[string]*peerConnStatsWindow // keyed by peer node ID
 	// lastPublishedPurposeWindows holds purposes_window from the most recent
@@ -335,8 +335,8 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 				VaultId:                  pd.VaultID.ToProto(),
 				WorkingSegments:          uint32(pd.Working),          //nolint:gosec
 				CompletedStagingSegments: uint32(pd.CompletedStaging), //nolint:gosec
-				HeadSegments:             uint32(pd.Head),               //nolint:gosec
-				PreHeadSegments:            uint32(pd.PreHead),            //nolint:gosec
+				HeadSegments:             uint32(pd.Head),             //nolint:gosec
+				PreHeadSegments:          uint32(pd.PreHead),          //nolint:gosec
 			})
 		}
 
@@ -348,19 +348,19 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 			key := peerConnStatsKey(pc)
 			txPerSec, rxPerSec, txSpark, rxSpark := c.observePeerConnStats(now, key, pc.BytesSent, pc.BytesRecv, stepWindows)
 			stats.PeerConnections = append(stats.PeerConnections, &gastrologv1.PeerConnStat{
-				Peer:          pc.PeerNodeID,
-				Lane:          pc.Lane,
-				GroupId:       pc.GroupID,
+				Peer:           pc.PeerNodeID,
+				Lane:           pc.Lane,
+				GroupId:        pc.GroupID,
 				Purposes:       append([]string(nil), pc.Purposes...),
 				PurposesWindow: append([]string(nil), pc.PurposesWindow...),
-				Connectivity:  pc.Connectivity,
-				PoolIndex:     int32(pc.PoolIndex), //nolint:gosec
-				BytesSent:     pc.BytesSent,
-				BytesReceived: pc.BytesRecv,
-				TxBytesPerSec: txPerSec,
-				RxBytesPerSec: rxPerSec,
-				TxSpark:       txSpark,
-				RxSpark:       rxSpark,
+				Connectivity:   pc.Connectivity,
+				PoolIndex:      int32(pc.PoolIndex), //nolint:gosec
+				BytesSent:      pc.BytesSent,
+				BytesReceived:  pc.BytesRecv,
+				TxBytesPerSec:  txPerSec,
+				RxBytesPerSec:  rxPerSec,
+				TxSpark:        txSpark,
+				RxSpark:        rxSpark,
 			})
 		}
 		if stepWindows {

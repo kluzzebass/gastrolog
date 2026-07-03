@@ -12,8 +12,8 @@ import (
 
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/collection"
-	"gastrolog/internal/pipeline/segment"
 	"gastrolog/internal/pipeline/paths"
+	"gastrolog/internal/pipeline/segment"
 	"gastrolog/internal/record"
 )
 
@@ -195,8 +195,8 @@ func TestPullToPreHeadStreamsWithoutBuffer(t *testing.T) {
 
 // localFirstPull mimics segmentPullClient: read local layout before remote.
 type localFirstPull struct {
-	root string
-	seg  glid.GLID
+	root   string
+	seg    glid.GLID
 	remote stubPull
 }
 

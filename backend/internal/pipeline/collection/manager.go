@@ -75,8 +75,8 @@ type vaultCollect struct {
 	// registers here when the per-vault worker is running so chunking/planner
 	// goroutines never block on passMu while a pass pulls segments or applies
 	// holder receipts through vault-ctl Raft.
-	collectWaitMu sync.Mutex
-	collectWaiters  []collectWaiter
+	collectWaitMu  sync.Mutex
+	collectWaiters []collectWaiter
 }
 
 type collectWaiter struct {

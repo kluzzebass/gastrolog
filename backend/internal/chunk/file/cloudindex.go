@@ -31,9 +31,9 @@ type cloudMetaValue [106]byte
 
 const (
 	cloudMetaValSize = 106
-	flagSealed     = 1 << 0
-	flagCompressed = 1 << 1
-	flagArchived   = 1 << 2
+	flagSealed       = 1 << 0
+	flagCompressed   = 1 << 1
+	flagArchived     = 1 << 2
 )
 
 func encodeCloudMeta(m *chunkMeta) cloudMetaValue {
@@ -58,29 +58,29 @@ func encodeCloudMeta(m *chunkMeta) cloudMetaValue {
 		flags |= flagArchived
 	}
 	binary.LittleEndian.PutUint16(v[72:74], flags)
-	binary.LittleEndian.PutUint64(v[74:82], uint64(m.ingestIdxOffset))  //nolint:gosec // offset is always non-negative
-	binary.LittleEndian.PutUint64(v[82:90], uint64(m.ingestIdxSize))    //nolint:gosec // size is always non-negative
-	binary.LittleEndian.PutUint64(v[90:98], uint64(m.sourceIdxOffset))  //nolint:gosec // offset is always non-negative
-	binary.LittleEndian.PutUint64(v[98:106], uint64(m.sourceIdxSize))   //nolint:gosec // size is always non-negative
+	binary.LittleEndian.PutUint64(v[74:82], uint64(m.ingestIdxOffset)) //nolint:gosec // offset is always non-negative
+	binary.LittleEndian.PutUint64(v[82:90], uint64(m.ingestIdxSize))   //nolint:gosec // size is always non-negative
+	binary.LittleEndian.PutUint64(v[90:98], uint64(m.sourceIdxOffset)) //nolint:gosec // offset is always non-negative
+	binary.LittleEndian.PutUint64(v[98:106], uint64(m.sourceIdxSize))  //nolint:gosec // size is always non-negative
 	return v
 }
 
 func decodeCloudMeta(id chunk.ChunkID, v cloudMetaValue) *chunkMeta {
 	flags := binary.LittleEndian.Uint16(v[72:74])
 	return &chunkMeta{
-		id:              id,
-		writeStart:      time.Unix(0, int64(binary.LittleEndian.Uint64(v[0:8]))),   //nolint:gosec // nano timestamp round-trip
-		writeEnd:        time.Unix(0, int64(binary.LittleEndian.Uint64(v[8:16]))),   //nolint:gosec // nano timestamp round-trip
-		recordCount:     int64(binary.LittleEndian.Uint64(v[16:24])),                //nolint:gosec // count round-trip
-		bytes:           int64(binary.LittleEndian.Uint64(v[24:32])),                //nolint:gosec // round-trip
-		diskBytes:       int64(binary.LittleEndian.Uint64(v[32:40])),                //nolint:gosec // round-trip
-		ingestStart:     time.Unix(0, int64(binary.LittleEndian.Uint64(v[40:48]))),  //nolint:gosec // round-trip
-		ingestEnd:       time.Unix(0, int64(binary.LittleEndian.Uint64(v[48:56]))),  //nolint:gosec // round-trip
-		sourceStart:     time.Unix(0, int64(binary.LittleEndian.Uint64(v[56:64]))),  //nolint:gosec // round-trip
-		sourceEnd:       time.Unix(0, int64(binary.LittleEndian.Uint64(v[64:72]))),  //nolint:gosec // round-trip
-		sealed: flags&flagSealed != 0,
+		id:          id,
+		writeStart:  time.Unix(0, int64(binary.LittleEndian.Uint64(v[0:8]))),   //nolint:gosec // nano timestamp round-trip
+		writeEnd:    time.Unix(0, int64(binary.LittleEndian.Uint64(v[8:16]))),  //nolint:gosec // nano timestamp round-trip
+		recordCount: int64(binary.LittleEndian.Uint64(v[16:24])),               //nolint:gosec // count round-trip
+		bytes:       int64(binary.LittleEndian.Uint64(v[24:32])),               //nolint:gosec // round-trip
+		diskBytes:   int64(binary.LittleEndian.Uint64(v[32:40])),               //nolint:gosec // round-trip
+		ingestStart: time.Unix(0, int64(binary.LittleEndian.Uint64(v[40:48]))), //nolint:gosec // round-trip
+		ingestEnd:   time.Unix(0, int64(binary.LittleEndian.Uint64(v[48:56]))), //nolint:gosec // round-trip
+		sourceStart: time.Unix(0, int64(binary.LittleEndian.Uint64(v[56:64]))), //nolint:gosec // round-trip
+		sourceEnd:   time.Unix(0, int64(binary.LittleEndian.Uint64(v[64:72]))), //nolint:gosec // round-trip
+		sealed:      flags&flagSealed != 0,
 		// flagCompressed (1<<1) reserved — see Phase 6 (gastrolog-69fd5).
-		archived: flags&flagArchived != 0,
+		archived:        flags&flagArchived != 0,
 		cloudBacked:     true,
 		ingestIdxOffset: int64(binary.LittleEndian.Uint64(v[74:82])),  //nolint:gosec // round-trip
 		ingestIdxSize:   int64(binary.LittleEndian.Uint64(v[82:90])),  //nolint:gosec // round-trip

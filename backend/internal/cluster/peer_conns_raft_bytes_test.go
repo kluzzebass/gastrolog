@@ -54,8 +54,8 @@ func TestPeerConnManager_RaftLaneTracksBytes(t *testing.T) {
 	})
 
 	mgr := NewPeerConnManager(PeerConnManagerConfig{
-		NodeID:        localID,
-		ByteMetrics:   clientMetrics,
+		NodeID:      localID,
+		ByteMetrics: clientMetrics,
 		StaticResolve: func(id string) (string, bool) {
 			if id == peerID {
 				return lis.Addr().String(), true

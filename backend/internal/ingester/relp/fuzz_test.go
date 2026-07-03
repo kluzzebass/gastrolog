@@ -23,13 +23,13 @@ func FuzzReadFrame(f *testing.F) {
 	f.Add([]byte("\n"))
 	f.Add([]byte(""))
 	f.Add([]byte("not a frame at all"))
-	f.Add([]byte("1 syslog 100 short\n"))           // datalen exceeds actual data
-	f.Add([]byte("1 syslog -1 bad\n"))               // negative datalen
-	f.Add([]byte("abc syslog 5 hello\n"))             // non-numeric txnr
-	f.Add([]byte("1 syslog notanum hello\n"))         // non-numeric datalen
-	f.Add([]byte("1\n"))                              // truncated
-	f.Add([]byte("1 \n"))                             // empty command then LF
-	f.Add([]byte(strings.Repeat("A", 65536)))         // very long token with no delimiter
+	f.Add([]byte("1 syslog 100 short\n"))     // datalen exceeds actual data
+	f.Add([]byte("1 syslog -1 bad\n"))        // negative datalen
+	f.Add([]byte("abc syslog 5 hello\n"))     // non-numeric txnr
+	f.Add([]byte("1 syslog notanum hello\n")) // non-numeric datalen
+	f.Add([]byte("1\n"))                      // truncated
+	f.Add([]byte("1 \n"))                     // empty command then LF
+	f.Add([]byte(strings.Repeat("A", 65536))) // very long token with no delimiter
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		r := bytes.NewReader(data)

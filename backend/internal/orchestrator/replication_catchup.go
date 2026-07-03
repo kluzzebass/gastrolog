@@ -309,7 +309,7 @@ func (o *Orchestrator) CatchupSelectedChunks(ctx context.Context, vaultID glid.G
 			"transferred", transferred, "scheduled", len(eligible))
 	}()
 
-	_ = ctx // unused — async path uses its own timeout context
+	_ = ctx                           // unused — async path uses its own timeout context
 	return uint32(len(eligible)), nil //nolint:gosec // G115: bounded by chunkIDs slice length
 }
 

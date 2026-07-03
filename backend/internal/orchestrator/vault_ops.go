@@ -366,8 +366,8 @@ func (o *Orchestrator) GetVaultChunkMeta(vaultID glid.GLID, chunkID chunk.ChunkI
 			}
 			return VaultChunkMeta{
 				ChunkMeta: m,
-				VaultID:      vaultInst.VaultID,
-				VaultType:  vaultInst.Type,
+				VaultID:   vaultInst.VaultID,
+				VaultType: vaultInst.Type,
 			}, nil
 		}
 	}
@@ -1155,4 +1155,3 @@ func (o *Orchestrator) NewAnalyzerForChunk(vaultID glid.GLID, chunkID chunk.Chun
 	}
 	return analyzer.New(cm, im), nil
 }
-

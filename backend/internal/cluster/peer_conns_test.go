@@ -160,9 +160,9 @@ func TestInvalidateConcurrentUsersNotDisrupted(t *testing.T) {
 
 type noopFSM struct{}
 
-func (*noopFSM) Apply(*hraft.Log) any                      { return nil }
-func (*noopFSM) Snapshot() (hraft.FSMSnapshot, error)        { return &noopSnapshot{}, nil }
-func (*noopFSM) Restore(io.ReadCloser) error                 { return nil }
+func (*noopFSM) Apply(*hraft.Log) any                 { return nil }
+func (*noopFSM) Snapshot() (hraft.FSMSnapshot, error) { return &noopSnapshot{}, nil }
+func (*noopFSM) Restore(io.ReadCloser) error          { return nil }
 
 type noopSnapshot struct{}
 

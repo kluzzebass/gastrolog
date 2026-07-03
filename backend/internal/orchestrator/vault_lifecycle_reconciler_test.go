@@ -23,13 +23,13 @@ import (
 // the leader to push. Other ChunkReplicator methods are no-ops — the
 // missing-replica sweep only exercises the one inverse method.
 type captureCatchupReplicator struct {
-	calls          atomic.Int32
-	lastLeader     string
-	lastVault      glid.GLID
-	lastChunks     []chunk.ChunkID
-	lastRequester  string
-	scheduledRet   uint32
-	failNextWith   error
+	calls         atomic.Int32
+	lastLeader    string
+	lastVault     glid.GLID
+	lastChunks    []chunk.ChunkID
+	lastRequester string
+	scheduledRet  uint32
+	failNextWith  error
 }
 
 func (c *captureCatchupReplicator) AppendRecords(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
@@ -96,7 +96,7 @@ func TestReconcilerOnRequestDeleteDeletesLocalAndAcks(t *testing.T) {
 	var ackCount atomic.Int32
 	vaultInst := &VaultInstance{
 		VaultID: glid.New(),
-		Chunks: cm,
+		Chunks:  cm,
 		ApplyRaftAckDelete: func(id chunk.ChunkID, nodeID string) error {
 			ackedID = id
 			ackedNode = nodeID
@@ -150,7 +150,7 @@ func TestReconcilerOnRequestDeleteIgnoresNotInExpectedFrom(t *testing.T) {
 	var ackCount atomic.Int32
 	vaultInst := &VaultInstance{
 		VaultID: glid.New(),
-		Chunks: cm,
+		Chunks:  cm,
 		ApplyRaftAckDelete: func(_ chunk.ChunkID, _ string) error {
 			ackCount.Add(1)
 			return nil
@@ -262,7 +262,7 @@ func TestReconcilerDeleteChunkSingleNodeFallback(t *testing.T) {
 	cm := &reconcilerFakeChunkManager{}
 	vaultInst := &VaultInstance{
 		VaultID: glid.New(),
-		Chunks: cm,
+		Chunks:  cm,
 		// ApplyRaftRequestDelete deliberately nil — single-node mode.
 	}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
@@ -368,7 +368,7 @@ func TestReconcilerOnSealProjectsToLocalManager(t *testing.T) {
 	cm := &reconcilerFakeSealEnsurerChunkManager{}
 	vaultInst := &VaultInstance{
 		VaultID: glid.New(),
-		Chunks: cm,
+		Chunks:  cm,
 	}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
 	rec.Wire(fsm)
@@ -411,7 +411,7 @@ func TestReconcileFromSnapshotProjectsAllSealedEntries(t *testing.T) {
 	cm := &reconcilerFakeSealEnsurerChunkManager{}
 	vaultInst := &VaultInstance{
 		VaultID: glid.New(),
-		Chunks: cm,
+		Chunks:  cm,
 	}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
 
@@ -453,7 +453,7 @@ func TestReconcileFromSnapshotProcessesPendingObligations(t *testing.T) {
 	ackCh := make(chan chunk.ChunkID, 4)
 	vaultInst := &VaultInstance{
 		VaultID: glid.New(),
-		Chunks: cm,
+		Chunks:  cm,
 		ApplyRaftAckDelete: func(id chunk.ChunkID, _ string) error {
 			ackCh <- id
 			return nil
@@ -600,8 +600,8 @@ func TestSweepLocalOrphansPreservesDataBearingUnknownOrphans(t *testing.T) {
 		{
 			ID:          idUnknown,
 			Sealed:      true,
-			RecordCount: 42,                       // load-bearing: > 0 triggers the preserve path
-			WriteEnd:    now.Add(-1 * time.Hour),  // old enough to be a "ghost" if records were 0
+			RecordCount: 42,                      // load-bearing: > 0 triggers the preserve path
+			WriteEnd:    now.Add(-1 * time.Hour), // old enough to be a "ghost" if records were 0
 		},
 	}
 
@@ -702,7 +702,7 @@ func TestSweepMissingReplicasRequestsOnlySealedAndAbsentEntries(t *testing.T) {
 	orch.SetChunkReplicator(fake)
 
 	vaultInst := &VaultInstance{
-		VaultID:       glid.New(),
+		VaultID:      glid.New(),
 		Type:         "memory",
 		Chunks:       cm,
 		IsFollower:   true,
@@ -752,7 +752,7 @@ func TestSweepMissingReplicasBatchesCatchupRequests(t *testing.T) {
 	orch.SetChunkReplicator(fake)
 
 	vaultInst := &VaultInstance{
-		VaultID:       glid.New(),
+		VaultID:      glid.New(),
 		Type:         "memory",
 		Chunks:       cm,
 		IsFollower:   true,
@@ -961,7 +961,7 @@ func TestSweepMissingReplicasSkipsWhenLeaderUnknown(t *testing.T) {
 	orch.SetChunkReplicator(fake)
 
 	vaultInst := &VaultInstance{
-		VaultID:       glid.New(),
+		VaultID:      glid.New(),
 		Type:         "memory",
 		Chunks:       cm,
 		IsFollower:   true,
@@ -1036,7 +1036,7 @@ func TestFulfillObligationDemotesLocalActiveBeforeDelete(t *testing.T) {
 	var ackCount atomic.Int32
 	vaultInst := &VaultInstance{
 		VaultID: glid.New(),
-		Chunks: cm,
+		Chunks:  cm,
 		ApplyRaftAckDelete: func(id chunk.ChunkID, _ string) error {
 			ackedID = id
 			ackCount.Add(1)
@@ -1147,7 +1147,7 @@ func (r *recordingSilentDeleter) DeleteSilent(id chunk.ChunkID) error {
 // silent-deleter fake.
 type recordingCloudRegistrar struct {
 	recordingSilentDeleter
-	registered []chunk.ChunkID
+	registered  []chunk.ChunkID
 	registerErr error
 }
 
@@ -1478,7 +1478,7 @@ func TestReconcileFromSnapshotResumesSealingChunks(t *testing.T) {
 
 	vaultInst := &VaultInstance{
 		VaultID: glid.New(),
-		Chunks: cm,
+		Chunks:  cm,
 	}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
 
@@ -1521,7 +1521,7 @@ func TestReconcileFromSnapshotSkipsSealingWithNoLocalChunk(t *testing.T) {
 	cm := &reconcilerFakeChunkManager{}
 	vaultInst := &VaultInstance{
 		VaultID: glid.New(),
-		Chunks: cm,
+		Chunks:  cm,
 	}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
 
@@ -1560,7 +1560,7 @@ func TestReconcileFromSnapshotSkipsSealingWithUnsealedLocalChunk(t *testing.T) {
 	cm.chunks = []chunk.ChunkMeta{{ID: idSealing, Sealed: false}}
 	vaultInst := &VaultInstance{
 		VaultID: glid.New(),
-		Chunks: cm,
+		Chunks:  cm,
 	}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
 
@@ -1641,7 +1641,7 @@ func TestSweepStaleLeaderFSMEntriesProposesDeleteForStrandedSealingChunk(t *test
 	var deletedRequests []chunk.ChunkID
 	var deleteReasons []string
 	vaultInst := &VaultInstance{
-		VaultID:     glid.New(),
+		VaultID:    glid.New(),
 		Chunks:     cm,
 		IsFollower: false, // leader-only sweep
 		ApplyRaftRequestDelete: func(id chunk.ChunkID, reason string, _ []string) error {
@@ -1700,9 +1700,9 @@ func TestSweepStaleLeaderFSMEntriesSkipsPipelineVault(t *testing.T) {
 	}
 	var deleted []chunk.ChunkID
 	vaultInst := &VaultInstance{
-		VaultID:     vaultID,
-		Chunks:     &reconcilerFakeChunkManager{},
-		IsFollower: false,
+		VaultID:       vaultID,
+		Chunks:        &reconcilerFakeChunkManager{},
+		IsFollower:    false,
 		HasRaftLeader: func() bool { return true },
 		ApplyRaftRequestDelete: func(id chunk.ChunkID, _ string, _ []string) error {
 			deleted = append(deleted, id)
@@ -1736,9 +1736,9 @@ func TestSweepStaleLeaderFSMEntriesRespectsSealedAtGrace(t *testing.T) {
 
 	var deleted []chunk.ChunkID
 	vaultInst := &VaultInstance{
-		VaultID:     glid.New(),
-		Chunks:     &reconcilerFakeChunkManager{},
-		IsFollower: false,
+		VaultID:       glid.New(),
+		Chunks:        &reconcilerFakeChunkManager{},
+		IsFollower:    false,
 		HasRaftLeader: func() bool { return true },
 		ApplyRaftRequestDelete: func(id chunk.ChunkID, _ string, _ []string) error {
 			deleted = append(deleted, id)
@@ -1896,11 +1896,11 @@ func TestSweepStalePendingDeleteAcksFollowersAreNoOp(t *testing.T) {
 type idleActiveSweepFakeManager struct {
 	retentionFakeChunkManager
 
-	metas       map[chunk.ChunkID]chunk.ChunkMeta
-	active      *chunk.ChunkMeta
-	sealCalls   []chunk.ChunkID
-	ensured     []chunk.ChunkID
-	announcer   *captureAnnouncer
+	metas     map[chunk.ChunkID]chunk.ChunkMeta
+	active    *chunk.ChunkMeta
+	sealCalls []chunk.ChunkID
+	ensured   []chunk.ChunkID
+	announcer *captureAnnouncer
 }
 
 func (f *idleActiveSweepFakeManager) Meta(id chunk.ChunkID) (chunk.ChunkMeta, error) {
@@ -1945,7 +1945,7 @@ type capturedSeal struct {
 }
 
 func (a *captureAnnouncer) AnnounceCreate(chunk.ChunkID, time.Time, time.Time, time.Time) {}
-func (a *captureAnnouncer) AnnounceBeginSeal(chunk.ChunkID)                                {}
+func (a *captureAnnouncer) AnnounceBeginSeal(chunk.ChunkID)                               {}
 func (a *captureAnnouncer) AnnounceSeal(id chunk.ChunkID, writeEnd time.Time, recordCount, bytes int64, _ time.Time, _ time.Time, _ time.Time, _ bool) {
 	a.sealed = append(a.sealed, capturedSeal{id: id, writeEnd: writeEnd, recordCount: recordCount, bytes: bytes})
 }

@@ -21,8 +21,8 @@ func FuzzTokens(f *testing.F) {
 		"AB CD EF",
 		"    ",
 		"\t\n\r",
-		"a",  // too short
-		"ab", // minimum length
+		"a",                 // too short
+		"ab",                // minimum length
 		"aaaaaaaaaaaaaaaa",  // exactly max length
 		"aaaaaaaaaaaaaaaaa", // exceeds max length
 	}

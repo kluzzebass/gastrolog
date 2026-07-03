@@ -10,7 +10,7 @@ type joined struct {
 	unwrap []error
 }
 
-func (e *joined) Error() string { return e.msg }
+func (e *joined) Error() string   { return e.msg }
 func (e *joined) Unwrap() []error { return e.unwrap }
 
 // SummaryJoin combines non-nil errors into one message suitable for logs and

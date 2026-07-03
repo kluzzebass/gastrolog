@@ -22,8 +22,8 @@ import (
 	"gastrolog/internal/query"
 	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/system"
-	"gastrolog/internal/vaultraft/vaultctlfsm"
 	"gastrolog/internal/vaultraft"
+	"gastrolog/internal/vaultraft/vaultctlfsm"
 
 	hraft "github.com/hashicorp/raft"
 )

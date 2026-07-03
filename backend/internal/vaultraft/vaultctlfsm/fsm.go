@@ -234,7 +234,7 @@ type FSM struct {
 	// reconciler can project FSM state changes into local Manager state
 	// without polling. No callers wired yet — adding the surface here
 	// unblocks subsequent steps without requiring an FSM API churn.
-	onCreate           func(ManifestEntry) // CmdCreateChunk applied; passes the freshly-created entry
+	onCreate func(ManifestEntry) // CmdCreateChunk applied; passes the freshly-created entry
 	// onSeal fan-out: slot 0 is SetOnSeal (reconciler); AddOnSeal uses ids ≥ 1.
 	onSeal             map[int]func(ManifestEntry)
 	onSealSeq          int
@@ -817,17 +817,17 @@ func (f *FSM) ApplyCommand(cmd *gastrologv1.VaultCtlCommand) any {
 // produced the IDs/entries, so a concurrent SetOn... after Apply
 // returns can never observe a stale binding.
 type applyEffects struct {
-	createdEntry       *ManifestEntry
-	deletedID          *chunk.ChunkID
-	uploadedEntry      *ManifestEntry
-	sealedEntry        *ManifestEntry
-	retentionPendingID *chunk.ChunkID
-	requestedDelete    *PendingDelete
-	ackedDeleteID      *chunk.ChunkID
-	ackedDeleteNodeID  string
-	finalizedDeleteID  *chunk.ChunkID
-	prunedNode         string
-	prunedFinalizable  []chunk.ChunkID
+	createdEntry            *ManifestEntry
+	deletedID               *chunk.ChunkID
+	uploadedEntry           *ManifestEntry
+	sealedEntry             *ManifestEntry
+	retentionPendingID      *chunk.ChunkID
+	requestedDelete         *PendingDelete
+	ackedDeleteID           *chunk.ChunkID
+	ackedDeleteNodeID       string
+	finalizedDeleteID       *chunk.ChunkID
+	prunedNode              string
+	prunedFinalizable       []chunk.ChunkID
 	sealedManifest          *OpenChunkManifest
 	sealedManifestClearedID *chunk.ChunkID
 	publishedSegment        *CompletedSegmentEntry
@@ -837,22 +837,22 @@ type applyEffects struct {
 	releasedSegmentIDs      []glid.GLID
 	ackSegmentHolderID      *glid.GLID
 
-	onCreate                     func(ManifestEntry)
-	onDelete                     func(chunk.ChunkID)
-	onUpload                     func(ManifestEntry)
-	onSeal                       []func(ManifestEntry)
-	onSealedManifest             []func(*OpenChunkManifest)
-	onSealedManifestCleared      func(chunk.ChunkID)
-	onPublishCompletedSegment    []func(CompletedSegmentEntry)
-	onOpenChunkManifest          []func(*OpenChunkManifest)
-	onOpenChunkRefAdded          []func(*OpenChunkManifest)
-	onReleaseSegments            map[int]func([]glid.GLID)
-	onAckSegmentHolder           map[int]func(glid.GLID)
-	onRetentionPending           func(chunk.ChunkID)
-	onRequestDelete    func(PendingDelete)
-	onAckDelete        func(chunk.ChunkID, string)
-	onFinalizeDelete   func(chunk.ChunkID)
-	onPruneNode        func(string, []chunk.ChunkID)
+	onCreate                  func(ManifestEntry)
+	onDelete                  func(chunk.ChunkID)
+	onUpload                  func(ManifestEntry)
+	onSeal                    []func(ManifestEntry)
+	onSealedManifest          []func(*OpenChunkManifest)
+	onSealedManifestCleared   func(chunk.ChunkID)
+	onPublishCompletedSegment []func(CompletedSegmentEntry)
+	onOpenChunkManifest       []func(*OpenChunkManifest)
+	onOpenChunkRefAdded       []func(*OpenChunkManifest)
+	onReleaseSegments         map[int]func([]glid.GLID)
+	onAckSegmentHolder        map[int]func(glid.GLID)
+	onRetentionPending        func(chunk.ChunkID)
+	onRequestDelete           func(PendingDelete)
+	onAckDelete               func(chunk.ChunkID, string)
+	onFinalizeDelete          func(chunk.ChunkID)
+	onPruneNode               func(string, []chunk.ChunkID)
 }
 
 func (e applyEffects) fire() {
@@ -1215,13 +1215,13 @@ func (f *FSM) SnapshotProto() *gastrologv1.VaultCtlSnapshot {
 // and round-trip equality checks sane (gastrolog-5lrg7).
 func (f *FSM) snapshotProtoLocked() *gastrologv1.VaultCtlSnapshot {
 	snap := &gastrologv1.VaultCtlSnapshot{
-		Entries:            make([]*gastrologv1.ManifestEntry, 0, len(f.chunks)),
-		Tombstones:         make([]*gastrologv1.Tombstone, 0, len(f.tombstones)),
-		PendingDeletes:     make([]*gastrologv1.PendingDelete, 0, len(f.pendingDeletes)),
-		CompletedSegments:  f.snapshotCompletedSegmentsLocked(),
-		OpenChunk:          f.snapshotOpenChunkLocked(),
+		Entries:           make([]*gastrologv1.ManifestEntry, 0, len(f.chunks)),
+		Tombstones:        make([]*gastrologv1.Tombstone, 0, len(f.tombstones)),
+		PendingDeletes:    make([]*gastrologv1.PendingDelete, 0, len(f.pendingDeletes)),
+		CompletedSegments: f.snapshotCompletedSegmentsLocked(),
+		OpenChunk:         f.snapshotOpenChunkLocked(),
 		SealedManifests:   f.snapshotSealedManifestsLocked(),
-		SegmentResume:      f.snapshotSegmentResumeLocked(),
+		SegmentResume:     f.snapshotSegmentResumeLocked(),
 	}
 
 	releasedIDs := slices.SortedFunc(maps.Keys(f.releasedSegments), glid.Compare)

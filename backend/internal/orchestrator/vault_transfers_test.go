@@ -658,4 +658,3 @@ func TestDrainVault_NoTransferrer(t *testing.T) {
 		t.Error("vault should remain registered when drain fails")
 	}
 }
-

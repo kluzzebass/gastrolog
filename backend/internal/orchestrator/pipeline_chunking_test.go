@@ -30,8 +30,8 @@ import (
 
 // collectorFunc adapts closures to chunking's SegmentCollector.
 type collectorFunc struct {
-	once   func(context.Context) error
-	byID   func(context.Context, []glid.GLID) error
+	once func(context.Context) error
+	byID func(context.Context, []glid.GLID) error
 }
 
 func (f collectorFunc) CollectOnce(ctx context.Context) error {

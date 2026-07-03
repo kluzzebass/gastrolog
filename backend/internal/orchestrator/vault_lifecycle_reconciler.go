@@ -92,7 +92,7 @@ import (
 // outside a small allow-list (vault teardown, replaceForwardedChunk).
 type VaultLifecycleReconciler struct {
 	vaultID     glid.GLID
-	vaultInst        *VaultInstance
+	vaultInst   *VaultInstance
 	localNodeID string
 	logger      *slog.Logger
 
@@ -133,7 +133,7 @@ type VaultLifecycleReconciler struct {
 func NewVaultLifecycleReconciler(orch *Orchestrator, vaultID glid.GLID, vaultInst *VaultInstance, localNodeID string, logger *slog.Logger) *VaultLifecycleReconciler {
 	return &VaultLifecycleReconciler{
 		vaultID:     vaultID,
-		vaultInst:        vaultInst,
+		vaultInst:   vaultInst,
 		localNodeID: localNodeID,
 		orch:        orch,
 		logger:      compVaultLifecycle.Apply(logger).With("vault", vaultID),
@@ -1528,12 +1528,12 @@ func (r *VaultLifecycleReconciler) deletePipelineChunkDir(chunkID chunk.ChunkID)
 // over steps 4-8. reason is a short free-form label that ends up in the
 // FSM's pendingDeletes entry and in audit logs:
 //
-//   "retention-ttl"             retention rule fired
-//   "transition-source-expire"  source after destination receipt
-//   "manual-delete-rpc"         operator-initiated via CLI/UI
-//   "archived-to-glacier"       archival sweep on cloud instance
-//   "unreadable"                chunk classified as corrupt
-//   "crash-recovery-orphan"     local-only orphan with no FSM entry
+//	"retention-ttl"             retention rule fired
+//	"transition-source-expire"  source after destination receipt
+//	"manual-delete-rpc"         operator-initiated via CLI/UI
+//	"archived-to-glacier"       archival sweep on cloud instance
+//	"unreadable"                chunk classified as corrupt
+//	"crash-recovery-orphan"     local-only orphan with no FSM entry
 //
 // expectedFrom is the set of node IDs that must ack before the entry
 // finalizes. For cluster-wide deletes, pass placement-membership-at-

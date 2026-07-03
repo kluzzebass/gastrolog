@@ -24,7 +24,6 @@ import (
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
-	"gastrolog/internal/system/command"
 	"gastrolog/internal/auth"
 	"gastrolog/internal/convert"
 	"gastrolog/internal/logging"
@@ -33,6 +32,7 @@ import (
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/pipeline/routing"
 	"gastrolog/internal/system"
+	"gastrolog/internal/system/command"
 	"gastrolog/internal/system/raftfsm"
 )
 
@@ -71,7 +71,7 @@ type SystemServerConfig struct {
 	OnLookupConfigChange func(system.LookupConfig, system.MaxMindConfig)
 	CloudTesters         map[string]CloudServiceTester
 	Tokens               *auth.TokenService
-	PlacementReconcile   func(ctx context.Context) // synchronous placement for RPC handlers
+	PlacementReconcile   func(ctx context.Context)       // synchronous placement for RPC handlers
 	LogFilter            *logging.ComponentFilterHandler // log-level RPC handlers (gastrolog-3flfp); nil disables them
 
 	// Environment banner (gastrolog-4vr0l). Display-only metadata
@@ -415,7 +415,7 @@ func (s *SystemServer) loadConfigCloudServices(ctx context.Context, resp *apiv1.
 			StorageClass:      cs.StorageClass,
 			ArchivalMode:      cs.ArchivalMode,
 			Transitions:       transitions,
-			RestoreSpeed:       cs.RestoreSpeed,
+			RestoreSpeed:      cs.RestoreSpeed,
 			RestoreDays:       cs.RestoreDays,
 			SuspectGraceDays:  cs.SuspectGraceDays,
 			ReconcileSchedule: cs.ReconcileSchedule,

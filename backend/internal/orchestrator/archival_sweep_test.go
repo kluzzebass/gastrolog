@@ -52,7 +52,7 @@ func archivalTestSetup(t *testing.T, transitions []system.CloudStorageTransition
 		Provider:     "memory",
 		ArchivalMode: "active",
 		Transitions:  transitions,
-		RestoreSpeed:  "Standard",
+		RestoreSpeed: "Standard",
 		RestoreDays:  7,
 	})
 
@@ -433,7 +433,7 @@ func TestCloudServiceArchivalConfigRoundTrip(t *testing.T) {
 			{After: "90d", StorageClass: "deep-freeze"},
 			{After: "365d", StorageClass: ""},
 		},
-		RestoreSpeed:       "Expedited",
+		RestoreSpeed:      "Expedited",
 		RestoreDays:       14,
 		SuspectGraceDays:  3,
 		ReconcileSchedule: "0 */6 * * *",
@@ -553,7 +553,7 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 		Provider:     "memory",
 		ArchivalMode: "active",
 		Transitions:  transitions,
-		RestoreSpeed:  "Standard",
+		RestoreSpeed: "Standard",
 		RestoreDays:  7,
 	})
 
@@ -603,8 +603,8 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 
 		orch.RegisterVault(NewVault(vaultID, vaultInst))
 		nodes[nid] = &clusterTestNode{
-			nodeID:   nid,
-			orch:     orch,
+			nodeID:       nid,
+			orch:         orch,
 			instances:    []*VaultInstance{vaultInst},
 			instanceDirs: []string{dir},
 		}

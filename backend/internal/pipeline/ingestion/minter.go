@@ -7,8 +7,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"gastrolog/internal/record"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/record"
 )
 
 // Minter assigns cluster-unique EventIDs for one ingester instance on one node.

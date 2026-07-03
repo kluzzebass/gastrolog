@@ -28,13 +28,13 @@ const (
 
 // Codec defines how keys and values are serialized to and from bytes.
 type Codec[K, V any] struct {
-	KeySize int            // encoded size of a key in bytes
-	ValSize int            // encoded size of a value in bytes
+	KeySize int // encoded size of a key in bytes
+	ValSize int // encoded size of a value in bytes
 	PutKey  func([]byte, K)
 	Key     func([]byte) K
 	PutVal  func([]byte, V)
 	Val     func([]byte) V
-	Compare compare[K]     // key comparison function
+	Compare compare[K] // key comparison function
 }
 
 // Int64Uint32 is a codec for int64 keys and uint32 values,

@@ -18,19 +18,19 @@ type PipelineNodeDiskSegments struct {
 type PipelineBacklogSnapshot struct {
 	VaultID glid.GLID
 
-	RegistrySegments  uint32
-	EligibleSegments  uint32
-	RegistryRecords   uint64
-	OpenManifestRefs  uint32
-	OpenManifestRecords uint64
-	OpenManifestIngestEnd time.Time
-	SealedManifestPending bool
+	RegistrySegments         uint32
+	EligibleSegments         uint32
+	RegistryRecords          uint64
+	OpenManifestRefs         uint32
+	OpenManifestRecords      uint64
+	OpenManifestIngestEnd    time.Time
+	SealedManifestPending    bool
 	OldestEligibleLastIngest time.Time
 
 	PipelineDiskSegmentCounts
 	NodeSegments []PipelineNodeDiskSegments
 
-	VaultCtlLeaderNodeID      string
+	VaultCtlLeaderNodeID          string
 	ConnectedNodeIsVaultCtlLeader bool
 }
 
@@ -50,7 +50,7 @@ func (o *Orchestrator) LocalPipelineBacklogSnapshot(vaultID glid.GLID) (Pipeline
 	}
 
 	stats := chunking.RegistryPlanningStatsFromFSM(fsm)
-	out.RegistrySegments = uint32(stats.TotalSegments)   //nolint:gosec
+	out.RegistrySegments = uint32(stats.TotalSegments)    //nolint:gosec
 	out.EligibleSegments = uint32(stats.EligibleSegments) //nolint:gosec
 	out.RegistryRecords = stats.RegistryRecords
 	out.OldestEligibleLastIngest = stats.OldestLastIngest

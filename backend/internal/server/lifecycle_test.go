@@ -395,7 +395,7 @@ func TestReadyz_localVaultReplicationNotReady(t *testing.T) {
 		t.Fatal(err)
 	}
 	orch.RegisterVault(orchestrator.NewVault(vid, &orchestrator.VaultInstance{
-		VaultID:     glid.New(),
+		VaultID:    glid.New(),
 		Type:       "memory",
 		Chunks:     s.CM,
 		Indexes:    s.IM,

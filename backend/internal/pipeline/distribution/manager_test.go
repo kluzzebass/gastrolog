@@ -12,9 +12,9 @@ import (
 
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/distribution"
+	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/pipeline/segment"
 	"gastrolog/internal/pipeline/segmentation"
-	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/record"
 )
 

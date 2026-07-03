@@ -322,7 +322,7 @@ func TestOrchRel_ConcurrentAppendAndPause(t *testing.T) {
 	t.Cleanup(func() { h.unpausePeer(victim) })
 
 	const (
-		writers         = 4
+		writers          = 4
 		recordsPerWriter = 10
 	)
 	now := time.Now()

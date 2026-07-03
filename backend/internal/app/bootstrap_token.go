@@ -261,9 +261,10 @@ func makeBootstrapTokenFn(cfgStore system.Store) func() (string, error) {
 
 // resolveJoinTokenFromSources populates cfg.JoinToken when the operator
 // supplied a delivery path instead of the literal token. Precedence:
-//   1. cfg.JoinToken (literal) — wins if set
-//   2. cfg.BootstrapTokenFile — file-based
-//   3. cfg.BootstrapTokenURL  — endpoint-based
+//  1. cfg.JoinToken (literal) — wins if set
+//  2. cfg.BootstrapTokenFile — file-based
+//  3. cfg.BootstrapTokenURL  — endpoint-based
+//
 // At most one of (file, URL) should be set; if both are, file wins.
 //
 // Returns nil with cfg unmodified when no source applies (single-node

@@ -66,14 +66,14 @@ type Config struct {
 	Digesters []digestion.Digester
 
 	// Queue sizing. Zero selects the manager default.
-	IngestionOutCapacity     int
-	DigestionWorkers         int
-	DigestionOutCapacity     int
-	RoutingWorkers           int
-	RoutingInCapacity        int
-	SegmentationCompletedCap int
-	SegmentationEncodeCap    int
-	DistributionPullQueueCap int
+	IngestionOutCapacity         int
+	DigestionWorkers             int
+	DigestionOutCapacity         int
+	RoutingWorkers               int
+	RoutingInCapacity            int
+	SegmentationCompletedCap     int
+	SegmentationEncodeCap        int
+	DistributionPullQueueCap     int
 	DistributionPublishWorkers   int
 	DistributionPublishBatchSize int
 
@@ -230,10 +230,10 @@ func New(cfg Config) *Supervisor {
 		Table:   cfg.Table,
 	})
 	dist, pullIn := distribution.New(distribution.Config{
-		PullQueueCap:       cfg.DistributionPullQueueCap,
-		PublishWorkers:     cfg.DistributionPublishWorkers,
-		PublishBatchSize:   cfg.DistributionPublishBatchSize,
-		Logger:             cfg.Logger,
+		PullQueueCap:     cfg.DistributionPullQueueCap,
+		PublishWorkers:   cfg.DistributionPublishWorkers,
+		PublishBatchSize: cfg.DistributionPublishBatchSize,
+		Logger:           cfg.Logger,
 	})
 	chunk := chunking.New(chunking.Config{Logger: cfg.Logger})
 	col := collection.New(collection.Config{
@@ -244,13 +244,13 @@ func New(cfg Config) *Supervisor {
 	})
 	seg, completed := segmentation.New(segmentation.Config{
 		ClosePolicy:        cfg.SegmentClosePolicy,
-		SyncBatchSize:        cfg.SegmentSyncBatchSize,
-		SyncBatchWindow:      cfg.SegmentSyncBatchWindow,
-		MaxCommitDelay:       cfg.SegmentMaxCommitDelay,
-		DisableFsync:         cfg.SegmentDisableFsync,
-		EncodeQueueCap:       cfg.SegmentationEncodeCap,
-		CompletedCap:         cfg.SegmentationCompletedCap,
-		OnCompletedDropped:   dist.NotifyStranded,
+		SyncBatchSize:      cfg.SegmentSyncBatchSize,
+		SyncBatchWindow:    cfg.SegmentSyncBatchWindow,
+		MaxCommitDelay:     cfg.SegmentMaxCommitDelay,
+		DisableFsync:       cfg.SegmentDisableFsync,
+		EncodeQueueCap:     cfg.SegmentationEncodeCap,
+		CompletedCap:       cfg.SegmentationCompletedCap,
+		OnCompletedDropped: dist.NotifyStranded,
 	})
 
 	routingCap := cfg.RoutingInCapacity
@@ -619,19 +619,19 @@ func (s *Supervisor) registerHome(spec VaultSpec) error {
 	// independent of the peer collector.
 	if spec.Locate != nil {
 		if err := s.chunk.RegisterVault(spec.VaultID, chunking.VaultConfig{
-			VaultRoot:  spec.HomeRoot,
-			ChunkRoot:  spec.ChunkRoot,
-			FSM:        spec.FSM,
-			LookupFSM:  spec.LookupFSM,
-			Locate:     spec.Locate,
-			Collector:  vaultSegmentCollector{mgr: s.col, vaultID: spec.VaultID},
-			Applier:    spec.Applier,
-			IsLeader:   spec.IsLeader,
-			Policy:     spec.ChunkPolicy,
-			NewChunkID:      spec.NewChunkID,
-			OnBuilt:         spec.OnChunkBuilt,
+			VaultRoot:        spec.HomeRoot,
+			ChunkRoot:        spec.ChunkRoot,
+			FSM:              spec.FSM,
+			LookupFSM:        spec.LookupFSM,
+			Locate:           spec.Locate,
+			Collector:        vaultSegmentCollector{mgr: s.col, vaultID: spec.VaultID},
+			Applier:          spec.Applier,
+			IsLeader:         spec.IsLeader,
+			Policy:           spec.ChunkPolicy,
+			NewChunkID:       spec.NewChunkID,
+			OnBuilt:          spec.OnChunkBuilt,
 			OnManifestOpened: spec.OnManifestOpened,
-			RequiredHolders: spec.ChunkRequiredHolders,
+			RequiredHolders:  spec.ChunkRequiredHolders,
 		}); err != nil {
 			if collectionRegistered {
 				s.col.UnregisterVault(spec.VaultID)

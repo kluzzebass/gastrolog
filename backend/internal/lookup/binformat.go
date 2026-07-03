@@ -182,10 +182,10 @@ func encodeBinLookup(columns []string, rows []binRow) ([]byte, int, error) {
 	// --- File Header ---
 	hdr := format.Header{Type: format.TypeLookupTable, Version: binVersion, Flags: format.FlagComplete}
 	hdr.EncodeInto(buf)
-	le.PutUint32(buf[4:], uint32(numRows))   //nolint:gosec // bounded
-	le.PutUint32(buf[8:], uint32(numCols))   //nolint:gosec // bounded
+	le.PutUint32(buf[4:], uint32(numRows)) //nolint:gosec // bounded
+	le.PutUint32(buf[8:], uint32(numCols)) //nolint:gosec // bounded
 	le.PutUint32(buf[12:], uint32(keyOffTblOffset))
-	le.PutUint32(buf[16:], uint32(keyDataOffset))   //nolint:gosec // bounded
+	le.PutUint32(buf[16:], uint32(keyDataOffset)) //nolint:gosec // bounded
 
 	// --- Column Names ---
 	off := colNamesOffset
@@ -197,8 +197,8 @@ func encodeBinLookup(columns []string, rows []binRow) ([]byte, int, error) {
 	}
 
 	// --- Key Offset Table + Key Data + Value Data ---
-	keyOff := 0                  // offset within key data section
-	valOff := valueDataOffset    // absolute offset for value data
+	keyOff := 0               // offset within key data section
+	valOff := valueDataOffset // absolute offset for value data
 	for i, r := range rows {
 		// Key offset table entry.
 		le.PutUint32(buf[keyOffTblOffset+i*4:], uint32(keyOff))

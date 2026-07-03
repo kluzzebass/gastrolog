@@ -16,11 +16,11 @@ import (
 // cloudHealthChecker and ChunkCloudUploader for testing cloud health
 // evaluation and backfill scheduling.
 type mockCloudChunkManager struct {
-	chunk.ChunkManager // embedded nil — only List/UploadToCloud used
-	degraded              atomic.Bool
-	degradedErr           atomic.Value // string
-	cloudStoreConfigured  atomic.Bool
-	chunks                []chunk.ChunkMeta
+	chunk.ChunkManager   // embedded nil — only List/UploadToCloud used
+	degraded             atomic.Bool
+	degradedErr          atomic.Value // string
+	cloudStoreConfigured atomic.Bool
+	chunks               []chunk.ChunkMeta
 
 	mu          sync.Mutex
 	uploadCalls []chunk.ChunkID
@@ -205,7 +205,7 @@ func TestBackfillCloudUploads_SchedulesSealedNonCloudBacked(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = alert.New()
 	vaultInst := &VaultInstance{
-		VaultID:       vaultID,
+		VaultID:      vaultID,
 		Type:         "cloud",
 		Chunks:       mock,
 		IsRaftLeader: func() bool { return true },
@@ -300,7 +300,7 @@ func TestBackfillCloudUploads_SkipsCloudBacked(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = alert.New()
 	vaultInst := &VaultInstance{
-		VaultID:       glid.New(),
+		VaultID:      glid.New(),
 		Type:         "cloud",
 		Chunks:       mock,
 		IsRaftLeader: func() bool { return true },
@@ -330,7 +330,7 @@ func TestBackfillCloudUploads_SkipsUnsealed(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = alert.New()
 	vaultInst := &VaultInstance{
-		VaultID:       glid.New(),
+		VaultID:      glid.New(),
 		Type:         "cloud",
 		Chunks:       mock,
 		IsRaftLeader: func() bool { return true },
@@ -361,7 +361,7 @@ func TestBackfillCloudUploads_SkipsWhenFSMOverlaySaysCloudBacked(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = alert.New()
 	vaultInst := &VaultInstance{
-		VaultID:       glid.New(),
+		VaultID:      glid.New(),
 		Type:         "cloud",
 		Chunks:       mock,
 		IsRaftLeader: func() bool { return true },
@@ -403,7 +403,7 @@ func TestBackfillCloudUploadsLeaderOnly(t *testing.T) {
 	orch.alerts = ac
 
 	vaultInst := &VaultInstance{
-		VaultID:       vaultID,
+		VaultID:      vaultID,
 		Type:         "cloud",
 		Chunks:       mock,
 		IsRaftLeader: func() bool { return true },
@@ -447,7 +447,7 @@ func TestBackfillCloudUploadsSkippedOnFollower(t *testing.T) {
 	orch.alerts = ac
 
 	vaultInst := &VaultInstance{
-		VaultID:       glid.New(),
+		VaultID:      glid.New(),
 		Type:         "cloud",
 		Chunks:       mock,
 		IsRaftLeader: func() bool { return false },
@@ -482,7 +482,7 @@ func TestBackfillCloudUploads_DeduplicatesPendingJobs(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = alert.New()
 	vaultInst := &VaultInstance{
-		VaultID:       vaultID,
+		VaultID:      vaultID,
 		Type:         "cloud",
 		Chunks:       mock,
 		IsRaftLeader: func() bool { return true },

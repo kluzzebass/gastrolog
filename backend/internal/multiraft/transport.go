@@ -323,9 +323,9 @@ type groupTransport[K comparable] struct {
 }
 
 var (
-	_ raft.Transport  = (*groupTransport[string])(nil)
-	_ raft.WithClose  = (*groupTransport[string])(nil)
-	_ raft.WithPeers  = (*groupTransport[string])(nil)
+	_ raft.Transport   = (*groupTransport[string])(nil)
+	_ raft.WithClose   = (*groupTransport[string])(nil)
+	_ raft.WithPeers   = (*groupTransport[string])(nil)
 	_ raft.WithPreVote = (*groupTransport[string])(nil)
 )
 

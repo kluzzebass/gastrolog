@@ -84,9 +84,9 @@ func TestSweepParallelChunkRouteFanOut(t *testing.T) {
 	t.Parallel()
 
 	const (
-		chunkCount       = 4
-		recordsPerChunk  = 5
-		expectedRouted   = (chunkCount - 1) * recordsPerChunk // keep newest chunk
+		chunkCount      = 4
+		recordsPerChunk = 5
+		expectedRouted  = (chunkCount - 1) * recordsPerChunk // keep newest chunk
 	)
 
 	sourceID := glid.New()

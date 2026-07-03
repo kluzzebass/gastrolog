@@ -22,12 +22,12 @@ import (
 
 // fakePeerSource implements broadcastPeerSource without touching Raft.
 type fakePeerSource struct {
-	mu             sync.Mutex
-	peers          []hraft.Server // ordered list; returned by Peers()
-	conns          map[string]*grpc.ClientConn
-	connErrors     map[string]error // dial errors by node ID
-	invalidated    map[string]int   // count of Invalidate calls per node
-	peersErr       error            // set to simulate Peers() failure
+	mu          sync.Mutex
+	peers       []hraft.Server // ordered list; returned by Peers()
+	conns       map[string]*grpc.ClientConn
+	connErrors  map[string]error // dial errors by node ID
+	invalidated map[string]int   // count of Invalidate calls per node
+	peersErr    error            // set to simulate Peers() failure
 }
 
 func newFakePeerSource() *fakePeerSource {

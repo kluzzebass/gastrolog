@@ -224,10 +224,10 @@ func TestNewRuleSet_DefensiveCopy(t *testing.T) {
 func TestParseRuleSetSpec_BasicCases(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		name       string
-		spec       string
+		name        string
+		spec        string
 		wantDefault slog.Level
-		wantRules  []LevelRule
+		wantRules   []LevelRule
 	}{
 		{
 			name:        "empty spec",
@@ -297,13 +297,13 @@ func TestParseRuleSetSpec_BasicCases(t *testing.T) {
 func TestParseRuleSetSpec_Errors(t *testing.T) {
 	t.Parallel()
 	cases := []string{
-		"foo",                        // no equals
-		"default=trace",              // unknown level
-		"default=info,default=warn",  // duplicate default
-		"foo=info,foo=warn",          // duplicate pattern
-		".=info",                     // pattern starts with dot
-		"foo..bar=info",              // double dot
-		"FOO=info",                   // uppercase literal
+		"foo",                       // no equals
+		"default=trace",             // unknown level
+		"default=info,default=warn", // duplicate default
+		"foo=info,foo=warn",         // duplicate pattern
+		".=info",                    // pattern starts with dot
+		"foo..bar=info",             // double dot
+		"FOO=info",                  // uppercase literal
 	}
 	for _, spec := range cases {
 		t.Run(spec, func(t *testing.T) {
@@ -318,14 +318,14 @@ func TestParseRuleSetSpec_Errors(t *testing.T) {
 func TestValidatePattern_Rejects(t *testing.T) {
 	t.Parallel()
 	cases := []string{
-		"",          // empty
-		".",         // empty segments
-		".foo",      // leading dot
-		"foo.",      // trailing dot
-		"foo..bar",  // consecutive dots
-		"foo.BAR",   // uppercase literal
-		"foo.b@r",   // invalid char
-		"foo.b*r",   // partial wildcard (must be whole-segment)
+		"",         // empty
+		".",        // empty segments
+		".foo",     // leading dot
+		"foo.",     // trailing dot
+		"foo..bar", // consecutive dots
+		"foo.BAR",  // uppercase literal
+		"foo.b@r",  // invalid char
+		"foo.b*r",  // partial wildcard (must be whole-segment)
 	}
 	for _, p := range cases {
 		t.Run(p, func(t *testing.T) {

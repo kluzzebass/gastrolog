@@ -12,14 +12,14 @@ import (
 // PipelineDiskSegmentCounts holds on-disk segment file counts and byte totals
 // for one node.
 type PipelineDiskSegmentCounts struct {
-	Working          int
-	CompletedStaging int
-	Head             int
-	PreHead          int
+	Working               int
+	CompletedStaging      int
+	Head                  int
+	PreHead               int
 	WorkingBytes          int64
 	CompletedStagingBytes int64
 	HeadBytes             int64
-	PreHeadBytes            int64
+	PreHeadBytes          int64
 }
 
 // LocalPipelineDiskSegmentCounts counts segment GLID files under the vault's

@@ -39,7 +39,7 @@ type serverSettings struct {
 type Store struct {
 	mu sync.RWMutex
 	// gastrolog-4kkoo (Phase 5): no filters map; expressions inline on routes.
-	rotationPolicies map[glid.GLID]system.RotationPolicyConfig
+	rotationPolicies     map[glid.GLID]system.RotationPolicyConfig
 	retentionPolicies    map[glid.GLID]system.RetentionPolicyConfig
 	vaults               map[glid.GLID]system.VaultConfig
 	ingesters            map[glid.GLID]system.IngesterConfig
@@ -51,14 +51,14 @@ type Store struct {
 	nodes                map[glid.GLID]system.NodeConfig   // keyed by node ID
 	managedFiles         map[glid.GLID]system.ManagedFileConfig
 	cloudServices        map[glid.GLID]system.CloudService
-	vaultPlacements       map[glid.GLID][]system.VaultPlacement // runtime: system-managed
-	ingesterAlive        map[glid.GLID]map[string]bool        // runtime: system-managed
-	ingesterCheckpoints  map[glid.GLID][]byte                 // runtime: system-managed
-	ingesterAssignment   map[glid.GLID]string                 // runtime: system-managed
-	nodeStorageConfigs   map[string]system.NodeStorageConfig  // runtime: keyed by nodeID
-	clusterTLS           *system.ClusterTLS                   // runtime: cluster identity
-	setupWizardDismissed bool                                 // runtime: UI state
-	logLevels            *system.LogLevelConfig               // operator-controlled: nil until first PutLogLevels
+	vaultPlacements      map[glid.GLID][]system.VaultPlacement // runtime: system-managed
+	ingesterAlive        map[glid.GLID]map[string]bool         // runtime: system-managed
+	ingesterCheckpoints  map[glid.GLID][]byte                  // runtime: system-managed
+	ingesterAssignment   map[glid.GLID]string                  // runtime: system-managed
+	nodeStorageConfigs   map[string]system.NodeStorageConfig   // runtime: keyed by nodeID
+	clusterTLS           *system.ClusterTLS                    // runtime: cluster identity
+	setupWizardDismissed bool                                  // runtime: UI state
+	logLevels            *system.LogLevelConfig                // operator-controlled: nil until first PutLogLevels
 }
 
 var _ system.Store = (*Store)(nil)
@@ -77,7 +77,7 @@ func NewStore() *Store {
 		nodes:               make(map[glid.GLID]system.NodeConfig),
 		managedFiles:        make(map[glid.GLID]system.ManagedFileConfig),
 		cloudServices:       make(map[glid.GLID]system.CloudService),
-		vaultPlacements:      make(map[glid.GLID][]system.VaultPlacement),
+		vaultPlacements:     make(map[glid.GLID][]system.VaultPlacement),
 		ingesterAlive:       make(map[glid.GLID]map[string]bool),
 		ingesterCheckpoints: make(map[glid.GLID][]byte),
 		ingesterAssignment:  make(map[glid.GLID]string),

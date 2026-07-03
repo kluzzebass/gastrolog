@@ -112,10 +112,10 @@ func TestAckDeleteRemovesNodeFromExpected(t *testing.T) {
 	now := time.Now()
 
 	var (
-		mu             sync.Mutex
-		ackedID        chunk.ChunkID
-		ackedNodeID    string
-		callbackFires  int
+		mu            sync.Mutex
+		ackedID       chunk.ChunkID
+		ackedNodeID   string
+		callbackFires int
 	)
 	f.SetOnAckDelete(func(cid chunk.ChunkID, node string) {
 		mu.Lock()

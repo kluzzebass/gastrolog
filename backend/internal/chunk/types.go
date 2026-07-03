@@ -203,10 +203,10 @@ type ChunkMeta struct {
 	// IngestTS and SourceTS bounds (zero = unknown).
 	// Used to filter chunks by ingest_start/ingest_end and source_start/source_end
 	// without scanning records.
-	IngestStart  time.Time // min IngestTS in chunk
-	IngestEnd    time.Time // max IngestTS in chunk
-	SourceStart  time.Time // min SourceTS (excluding zero)
-	SourceEnd    time.Time // max SourceTS in chunk
+	IngestStart time.Time // min IngestTS in chunk
+	IngestEnd   time.Time // max IngestTS in chunk
+	SourceStart time.Time // min SourceTS (excluding zero)
+	SourceEnd   time.Time // max SourceTS in chunk
 
 	// IngestTSMonotonic is true when records were appended in
 	// IngestTS-monotonic order (typical edge ingest path). False when
@@ -217,9 +217,9 @@ type ChunkMeta struct {
 	// this to pick between fast O(buckets × log N) rank arithmetic
 	// and the slower full-scan bucketize path. See gastrolog-66b7x.
 	IngestTSMonotonic bool
-	CloudBacked  bool      // true = chunk lives in cloud storage, not local disk
-	Archived     bool      // true = chunk is in an offline storage class (Glacier, Azure Archive)
-	StorageClass string    // cloud storage class (e.g. "GLACIER", "cold", "Archive"); empty = standard
+	CloudBacked       bool   // true = chunk lives in cloud storage, not local disk
+	Archived          bool   // true = chunk is in an offline storage class (Glacier, Azure Archive)
+	StorageClass      string // cloud storage class (e.g. "GLACIER", "cold", "Archive"); empty = standard
 }
 
 // EventID uniquely identifies a record across the cluster.

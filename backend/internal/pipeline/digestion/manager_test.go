@@ -136,9 +136,9 @@ func TestManagerParseErrorDoesNotBlockPeers(t *testing.T) {
 	t.Parallel()
 
 	mgr, out := digestion.New(digestion.Config{
-		Workers:   4,
+		Workers:     4,
 		OutCapacity: 4,
-		Digesters: []digestion.Digester{&failDigester{failRaw: []byte("bad")}},
+		Digesters:   []digestion.Digester{&failDigester{failRaw: []byte("bad")}},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

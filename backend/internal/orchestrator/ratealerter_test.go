@@ -58,7 +58,7 @@ func newTestRateAlerter(alerts AlertCollector) *RateAlerter {
 		WarningAt: 1.0, // >= 10 events in 10s
 		ErrorAt:   5.0, // >= 50 events in 10s
 		Alerts:    alerts,
-		VaultName:  func(id glid.GLID) string { return "test-vault-" + id.String()[:4] },
+		VaultName: func(id glid.GLID) string { return "test-vault-" + id.String()[:4] },
 	})
 }
 

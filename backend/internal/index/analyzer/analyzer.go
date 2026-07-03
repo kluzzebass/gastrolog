@@ -50,13 +50,13 @@ func (a *Analyzer) AnalyzeChunk(chunkID chunk.ChunkID) (*ChunkAnalysis, error) {
 	_ = cursor.Close()
 
 	analysis := &ChunkAnalysis{
-		ChunkID:      chunkID,
-		ChunkBytes:   chunkBytes,
-		ChunkRecords: chunkRecords,
+		ChunkID:         chunkID,
+		ChunkBytes:      chunkBytes,
+		ChunkRecords:    chunkRecords,
 		ChunkWriteStart: meta.WriteStart,
 		ChunkWriteEnd:   meta.WriteEnd,
-		Sealed:       meta.Sealed,
-		AnalyzedAt:   time.Now(),
+		Sealed:          meta.Sealed,
+		AnalyzedAt:      time.Now(),
 	}
 
 	// Analyze each index type

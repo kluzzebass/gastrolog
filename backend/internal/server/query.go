@@ -535,7 +535,6 @@ func (s *QueryServer) mergeAndStream(
 // Histogram counts are deliberately NOT deduped: cross-vault fanout
 // double-counts in the histogram by design (documented in the UI as
 // approximate / "~"). The record list shows unique events.
-//
 type dedupWindow struct {
 	ts      time.Time
 	seen    map[chunk.EventID]struct{}

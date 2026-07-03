@@ -12,7 +12,7 @@ func FuzzParseChunkID(f *testing.F) {
 		// Wrong lengths
 		"",
 		"a",
-		"abcdefghijklmnopqrstuvwxy",  // 25 chars
+		"abcdefghijklmnopqrstuvwxy",   // 25 chars
 		"abcdefghijklmnopqrstuvwxyz0", // 27 chars
 		// Invalid characters (base32hex uses 0-9, a-v)
 		"wwwwwwwwwwwwwwwwwwwwwwwwww", // 'w' is invalid in base32hex

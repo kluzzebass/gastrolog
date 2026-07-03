@@ -33,7 +33,6 @@ import (
 	digestlevel "gastrolog/internal/digester/level"
 	digesttimestamp "gastrolog/internal/digester/timestamp"
 	"gastrolog/internal/home"
-	"gastrolog/internal/pipeline/digestion"
 	"gastrolog/internal/index"
 	indexfile "gastrolog/internal/index/file"
 	indexmem "gastrolog/internal/index/memory"
@@ -54,6 +53,7 @@ import (
 	"gastrolog/internal/logging"
 	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/pipeline/digestion"
 	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/raftwal"
 	"gastrolog/internal/server"
@@ -85,9 +85,9 @@ type RunConfig struct {
 	// ServicePoolMaxPerPeer caps parallel outbound service-lane gRPC
 	// connections per peer (0 = default 4).
 	ServicePoolMaxPerPeer int
-	JoinAddr         string
-	JoinToken        string
-	NodeName         string
+	JoinAddr              string
+	JoinToken             string
+	NodeName              string
 
 	// PprofAddr is the pprof HTTP server address (e.g. "localhost:6060").
 	// Empty if pprof is disabled. Advertised to cluster peers via broadcast.
@@ -172,12 +172,13 @@ func (c RunConfig) advertisedClusterAddr() string {
 // Run starts the gastrolog server. It wires all components, starts the
 // orchestrator and HTTP server, and blocks until ctx is cancelled.
 //
-//nolint:gocognit,gocyclo // composition root: wires every subsystem at
 // boot. Splitting this into helpers per subsystem has been tried in
 // past passes and produced worse readability — each subsystem's
 // wiring depends on every earlier one and threading 15+ parameters
 // into helpers obscures the dataflow. Accept the linear complexity
 // here; individual subsystem logic lives in dedicated files.
+//
+//nolint:gocognit,gocyclo // composition root: wires every subsystem at
 func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	hd, err := resolveHome(cfg.HomeFlag)
 	if err != nil {
@@ -301,8 +302,8 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		},
 		// digestion enrichers: extract log level and parse source
 		// timestamps from raw bodies when the ingester didn't supply them.
-		Digesters:             []digestion.Digester{digestlevel.New(), digesttimestamp.New()},
-		SegmentDisableFsync:   !cfg.SegmentHotPathFsync,
+		Digesters:           []digestion.Digester{digestlevel.New(), digesttimestamp.New()},
+		SegmentDisableFsync: !cfg.SegmentHotPathFsync,
 	})
 	if err != nil {
 		return fmt.Errorf("create orchestrator: %w", err)
@@ -1262,18 +1263,18 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 			Cluster: deps.ClusterSrv, PeerStats: deps.PeerState,
 			PeerVaultStats: deps.PeerState, PeerIngesterStats: deps.PeerState, PeerRouteStats: deps.PeerState,
 			PeerPipelineDisk: deps.PeerState,
-			PeerJobs:   deps.PeerJobState,
-			LocalStats: deps.LocalStats, RemoteSearcher: deps.SearchForwarder, RemoteChunkLister: deps.SearchForwarder,
+			PeerJobs:         deps.PeerJobState,
+			LocalStats:       deps.LocalStats, RemoteSearcher: deps.SearchForwarder, RemoteChunkLister: deps.SearchForwarder,
 			RemotePipelineBacklog: deps.SearchForwarder,
-			RemoteChunkWatcher: deps.SearchForwarder,
-			RemoteIndexer:      deps.SearchForwarder,
-			RoutingForwarder: deps.RoutingForwarder, ClusterAddress: deps.ClusterAddr,
+			RemoteChunkWatcher:    deps.SearchForwarder,
+			RemoteIndexer:         deps.SearchForwarder,
+			RoutingForwarder:      deps.RoutingForwarder, ClusterAddress: deps.ClusterAddr,
 			JoinClusterFunc: deps.JoinClusterFunc, RemoveNodeFunc: deps.RemoveNodeFunc,
 			SetNodeSuffrageFunc: deps.SetNodeSuffrageFunc,
 			CloudTesters: map[string]server.CloudServiceTester{
 				"file": chunkcloud.NewConnectionTester(),
 			},
-			PlacementReconcile: deps.PlacementReconcile,
+			PlacementReconcile:        deps.PlacementReconcile,
 			BootstrapTokenServeSecret: deps.BootstrapTokenServeSecret,
 			BootstrapTokenFn:          deps.BootstrapTokenFn,
 			EnvironmentLabel:          deps.EnvironmentLabel,

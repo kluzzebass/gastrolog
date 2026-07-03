@@ -429,4 +429,3 @@ func (o *Orchestrator) IsDraining(vaultID glid.GLID) bool {
 	_, ok := o.draining[vaultID]
 	return ok
 }
-

@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/pipeline/segment"
 	"gastrolog/internal/pipeline/segmentation"
-	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/record"
 )
 
@@ -71,7 +71,7 @@ func TestManagerAppendsToWorkingSegment(t *testing.T) {
 	_, _ = startManager(t, segmentation.Config{
 		SyncBatchSize:   1,
 		SyncBatchWindow: time.Hour,
-		OnSync:            func() { syncs.Add(1) },
+		OnSync:          func() { syncs.Add(1) },
 	}, func(t *testing.T, mgr *segmentation.Manager) {
 		t.Helper()
 		var err error
@@ -122,7 +122,7 @@ func TestManagerGroupSyncBatchesFsync(t *testing.T) {
 	_, _ = startManager(t, segmentation.Config{
 		SyncBatchSize:   4,
 		SyncBatchWindow: time.Hour,
-		OnSync:            func() { syncs.Add(1) },
+		OnSync:          func() { syncs.Add(1) },
 	}, func(t *testing.T, mgr *segmentation.Manager) {
 		t.Helper()
 		var err error
@@ -149,10 +149,10 @@ func TestManagerClosesOnSize(t *testing.T) {
 
 	var in chan<- segmentation.Input
 	_, completed := startManager(t, segmentation.Config{
-		ClosePolicy:       segmentation.ClosePolicy{MaxBytes: 256},
+		ClosePolicy:     segmentation.ClosePolicy{MaxBytes: 256},
 		SyncBatchSize:   1,
 		SyncBatchWindow: time.Hour,
-		CompletedCap:      4,
+		CompletedCap:    4,
 	}, func(t *testing.T, mgr *segmentation.Manager) {
 		t.Helper()
 		var err error
@@ -208,10 +208,10 @@ func TestManagerClosesOnAge(t *testing.T) {
 
 	var in chan<- segmentation.Input
 	_, completed := startManager(t, segmentation.Config{
-		ClosePolicy:       segmentation.ClosePolicy{MaxAge: time.Minute},
+		ClosePolicy:     segmentation.ClosePolicy{MaxAge: time.Minute},
 		SyncBatchSize:   1,
 		SyncBatchWindow: time.Hour,
-		CompletedCap:      4,
+		CompletedCap:    4,
 		Now: func() time.Time {
 			return time.Unix(0, clock.Load()).UTC()
 		},
@@ -249,7 +249,7 @@ func TestManagerPerVaultIsolation(t *testing.T) {
 	_, _ = startManager(t, segmentation.Config{
 		SyncBatchSize:   1,
 		SyncBatchWindow: time.Hour,
-		OnSync:            func() { syncs.Add(1) },
+		OnSync:          func() { syncs.Add(1) },
 	}, func(t *testing.T, mgr *segmentation.Manager) {
 		t.Helper()
 		var err error
@@ -285,10 +285,10 @@ func TestManagerDoesNotCloseEmptySegment(t *testing.T) {
 	vaultID := glid.New()
 
 	_, completed := startManager(t, segmentation.Config{
-		ClosePolicy:       segmentation.ClosePolicy{MaxBytes: 64},
+		ClosePolicy:     segmentation.ClosePolicy{MaxBytes: 64},
 		SyncBatchSize:   1,
 		SyncBatchWindow: time.Hour,
-		CompletedCap:      1,
+		CompletedCap:    1,
 	}, func(t *testing.T, mgr *segmentation.Manager) {
 		t.Helper()
 		if _, err := mgr.RegisterVault(vaultID, dir, segmentation.VaultConfig{}); err != nil {
@@ -340,7 +340,7 @@ func TestManagerRegisterDuringRun(t *testing.T) {
 	mgr, _ := segmentation.New(segmentation.Config{
 		SyncBatchSize:   1,
 		SyncBatchWindow: time.Hour,
-		OnSync:            func() { syncs.Add(1) },
+		OnSync:          func() { syncs.Add(1) },
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())

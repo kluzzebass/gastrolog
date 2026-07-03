@@ -526,11 +526,12 @@ func makeEvictionHandler(
 // (gastrolog-2ch9y): if removing the target would leave any vault with
 // zero placements, the call fails with an operator-actionable error
 // listing the affected vaults. force=true skips the gate.
-//nolint:gocognit // composition root for remove-node: holds the
 // leader-side orphan gate, eviction notification, FSM cleanup, and
 // follower-forward fallback in one function. Splitting them would
 // require threading clusterSrv, cfgStore, and logger through three
 // helpers without any reuse — net negative readability.
+//
+//nolint:gocognit // composition root for remove-node: holds the
 func makeRemoveNodeFunc(
 	clusterSrv *cluster.Server,
 	cfgStore system.Store,

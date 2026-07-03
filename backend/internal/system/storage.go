@@ -156,7 +156,7 @@ type CloudService struct {
 	// Archival lifecycle.
 	ArchivalMode      string                   `json:"archivalMode,omitempty"`      // "none" or "active"
 	Transitions       []CloudStorageTransition `json:"transitions,omitempty"`       // ordered by After duration
-	RestoreSpeed       string                   `json:"restoreSpeed,omitempty"`       // default restore speed
+	RestoreSpeed      string                   `json:"restoreSpeed,omitempty"`      // default restore speed
 	RestoreDays       uint32                   `json:"restoreDays,omitempty"`       // S3 restore window
 	SuspectGraceDays  uint32                   `json:"suspectGraceDays,omitempty"`  // default 7
 	ReconcileSchedule string                   `json:"reconcileSchedule,omitempty"` // default "0 3 * * *"

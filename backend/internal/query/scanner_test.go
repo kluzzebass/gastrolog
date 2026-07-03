@@ -752,7 +752,7 @@ func makePositions(n int, start, step uint64) []uint64 {
 
 // BenchmarkIntersectPositions_Dense benchmarks intersection where ~50% of elements overlap.
 func BenchmarkIntersectPositions_Dense(b *testing.B) {
-	a := makePositions(10000, 0, 2)  // 0, 2, 4, ..., 19998
+	a := makePositions(10000, 0, 2)      // 0, 2, 4, ..., 19998
 	bSlice := makePositions(10000, 0, 3) // 0, 3, 6, ..., 29997
 	for b.Loop() {
 		_ = intersectPositions(a, bSlice)
@@ -770,7 +770,7 @@ func BenchmarkIntersectPositions_Sparse(b *testing.B) {
 
 // BenchmarkUnionPositions benchmarks union of two large position lists.
 func BenchmarkUnionPositions(b *testing.B) {
-	a := makePositions(10000, 0, 3) // 0, 3, 6, ...
+	a := makePositions(10000, 0, 3)      // 0, 3, 6, ...
 	bSlice := makePositions(10000, 0, 5) // 0, 5, 10, ...
 	for b.Loop() {
 		_ = unionPositions(a, bSlice)

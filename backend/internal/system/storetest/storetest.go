@@ -1624,7 +1624,6 @@ func testCloudServices(t *testing.T, newStore func(t *testing.T) system.Store) {
 	})
 }
 
-
 func testNodeStorageConfigs(t *testing.T, newStore func(t *testing.T) system.Store) {
 	t.Run("SetGetNodeStorageConfig", func(t *testing.T) {
 		s := newStore(t)

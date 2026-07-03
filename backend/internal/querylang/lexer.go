@@ -11,28 +11,28 @@ const regexDelimiter = '/'
 type TokenKind int
 
 const (
-	TokEOF    TokenKind = iota
-	TokWord             // bareword or quoted string (quotes stripped, escapes processed)
-	TokOr               // OR (case-insensitive)
-	TokAnd              // AND (case-insensitive)
-	TokNot              // NOT (case-insensitive)
-	TokLParen           // (
-	TokRParen           // )
-	TokEq               // =
-	TokNe               // !=
-	TokGt               // >
-	TokGte              // >=
-	TokLt               // <
-	TokLte              // <=
-	TokStar             // *
-	TokRegex            // /pattern/ (regex literal, slashes stripped)
-	TokGlob             // bareword with glob metacharacters (*, ?, [)
-	TokPipe             // |
-	TokComma            // ,
-	TokPlus             // +
-	TokMinus            // -
-	TokSlash            // / (arithmetic division, only in pipe context)
-	TokPercent          // % (modulo, only in pipe context)
+	TokEOF     TokenKind = iota
+	TokWord              // bareword or quoted string (quotes stripped, escapes processed)
+	TokOr                // OR (case-insensitive)
+	TokAnd               // AND (case-insensitive)
+	TokNot               // NOT (case-insensitive)
+	TokLParen            // (
+	TokRParen            // )
+	TokEq                // =
+	TokNe                // !=
+	TokGt                // >
+	TokGte               // >=
+	TokLt                // <
+	TokLte               // <=
+	TokStar              // *
+	TokRegex             // /pattern/ (regex literal, slashes stripped)
+	TokGlob              // bareword with glob metacharacters (*, ?, [)
+	TokPipe              // |
+	TokComma             // ,
+	TokPlus              // +
+	TokMinus             // -
+	TokSlash             // / (arithmetic division, only in pipe context)
+	TokPercent           // % (modulo, only in pipe context)
 )
 
 func (k TokenKind) String() string {

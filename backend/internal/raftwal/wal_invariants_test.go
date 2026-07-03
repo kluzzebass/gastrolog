@@ -133,8 +133,8 @@ func TestHarnessRandomAppendPrefixDeleteMatchesReference(t *testing.T) {
 		// Delete a contiguous prefix of the *current* live suffix [first..last],
 		// leaving at least one entry so append indices stay aligned with Raft.
 		span := int(ref.lastIndex - ref.firstIndex) // >= 1
-		extra := rng.IntN(span)                      // 0 .. span-1
-		kEnd := ref.firstIndex + uint64(extra)       // first .. last-1
+		extra := rng.IntN(span)                     // 0 .. span-1
+		kEnd := ref.firstIndex + uint64(extra)      // first .. last-1
 		if err := gs.DeleteRange(ref.firstIndex, kEnd); err != nil {
 			t.Fatalf("step %d DeleteRange(%d,%d): %v", s, ref.firstIndex, kEnd, err)
 		}

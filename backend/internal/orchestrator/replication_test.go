@@ -49,7 +49,7 @@ func newReplicationInstance(t *testing.T, vaultID glid.GLID, followers []system.
 		t.Fatal(err)
 	}
 	return &VaultInstance{
-		VaultID:          vaultID,
+		VaultID:         vaultID,
 		Type:            "memory",
 		Chunks:          cm,
 		Indexes:         im,

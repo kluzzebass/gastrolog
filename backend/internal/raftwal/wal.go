@@ -38,7 +38,7 @@ const (
 	entryStableSet    entryType = 2 // StableStore.Set(key, val)
 	entryStableUint64 entryType = 3 // StableStore.SetUint64(key, val)
 	entryDeleteRange  entryType = 4 // LogStore.DeleteRange(min, max)
-	entryGroupReg    entryType = 5 // group name → numeric ID registration
+	entryGroupReg     entryType = 5 // group name → numeric ID registration
 )
 
 const (
@@ -63,7 +63,7 @@ const (
 var (
 	ErrNotFound  = errors.New("not found")
 	errWALClosed = errors.New("wal closed")
-	crc32Table    = crc32.MakeTable(crc32.Castagnoli)
+	crc32Table   = crc32.MakeTable(crc32.Castagnoli)
 )
 
 // Config holds tunable parameters for the WAL.
