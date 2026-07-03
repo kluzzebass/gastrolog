@@ -3,10 +3,8 @@ package chunking
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"os"
-	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -49,12 +47,12 @@ type VaultConfig struct {
 	FSM       *vaultctlfsm.FSM
 	// LookupFSM returns the live vault-ctl sub-FSM after snapshot Restore replaces
 	// the object RegisterVault captured. Falls back to FSM when nil.
-	LookupFSM func() *vaultctlfsm.FSM
-	Locate    SegmentLocator
-	Collector SegmentCollector
-	Applier   VaultCtlApplier
-	IsLeader  func() bool
-	Policy    ManifestRotationPolicy
+	LookupFSM  func() *vaultctlfsm.FSM
+	Locate     SegmentLocator
+	Collector  SegmentCollector
+	Applier    VaultCtlApplier
+	IsLeader   func() bool
+	Policy     ManifestRotationPolicy
 	NewChunkID func() chunk.ChunkID
 	// OnBuilt fires after this node successfully builds a sealed GLCB
 	// (every home, not just the leader). Homes that finish building AFTER
@@ -80,35 +78,14 @@ type VaultConfig struct {
 type vaultChunking struct {
 	cfg VaultConfig
 
-	mu        sync.Mutex
-	planMu    sync.Mutex
+	mu     sync.Mutex
+	planMu sync.Mutex
 	// segmentIndexCache holds open EventID indexes for segments the planner has
 	// opened lazily. pruneSegmentIndexCache evicts released or exhausted entries.
 	segmentIndexCache map[glid.GLID]*OrderedIndex
-	doneBuild         buildKey
-	// donePostSeal tracks head-purge + release-queue work already done for a
-	// sealed manifest so seal retries do not re-purge or re-enqueue segments.
-	donePostSeal buildKey
-	// doneSealProposed stops vault-ctl CmdSealChunk replays after the first
-	// successful Apply for a sealed manifest; without it every wake/tick on
-	// every home floods Raft while sealedManifest is still pending locally.
-	doneSealProposed buildKey
-	// sealAttemptKey/lastSealAttempt rate-limit CmdSealChunk retries after
-	// forward failures (e.g. stale vault-ctl leader) so tick loops stay quiet.
-	sealAttemptKey  buildKey
-	lastSealAttempt time.Time
-	// doneOnBuilt ensures OnBuilt fires once per sealed manifest build.
-	doneOnBuilt buildKey
-	// lastBuild caches the most recent GLCB build for seal retries without
-	// re-reading every segment on each wake/tick while sealedManifest pending.
-	lastBuild struct {
-		key    buildKey
-		result BuildResult
-		ok     bool
-	}
-	// pendingSeal is a copy of the sealed manifest retained after CmdSealChunk
-	// clears sealedManifest cluster-wide so follower homes can still build.
-	pendingSeal *vaultctlfsm.OpenChunkManifest
+	// progress is the exactly-once state machine for the sealed-manifest
+	// build/seal/post-seal/OnBuilt lifecycle. Owns its own lock.
+	progress sealProgress
 	// pendingRelease holds segment IDs awaiting ReleaseSegments once every
 	// required vault home has committed a holder receipt.
 	pendingRelease []glid.GLID
@@ -135,6 +112,9 @@ type vaultChunking struct {
 	// buildRunning gates a single in-flight GLCB build so planCatchUp can keep
 	// running on wake while materialization/build proceeds asynchronously.
 	buildRunning atomic.Bool
+	// buildWG tracks the in-flight build goroutine so worker shutdown waits
+	// for it without polling.
+	buildWG sync.WaitGroup
 	// log is the per-vault logger; set when the worker starts.
 	log *slog.Logger
 }
@@ -153,11 +133,6 @@ func (v *vaultChunking) fsm() *vaultctlfsm.FSM {
 		}
 	}
 	return v.cfg.FSM
-}
-
-type buildKey struct {
-	chunkID  chunk.ChunkID
-	sealedAt time.Time
 }
 
 func (c VaultConfig) newChunkID() chunk.ChunkID {
@@ -269,15 +244,13 @@ func (m *Manager) RewireVaultFSM(vaultID glid.GLID, fsm *vaultctlfsm.FSM, applie
 	cfg.FSM = fsm
 	m.wireVaultFSMCallbacks(v, cfg)
 	if pending := fsm.SealedManifest(); pending != nil {
-		v.mu.Lock()
-		v.pendingSeal = pending
-		// Hot FSM restore can leave doneSealProposed set from when this home
-		// was a follower; clear so the vault-ctl leader can commit CmdSealChunk.
+		v.progress.setPending(pending)
+		// Hot FSM restore can leave the seal-proposed guard set from when this
+		// home was a follower; clear so the vault-ctl leader can commit
+		// CmdSealChunk.
 		if entry := fsm.Get(pending.ChunkID); entry == nil || !entry.IsSealed() {
-			v.doneSealProposed = buildKey{}
-			v.sealAttemptKey = buildKey{}
+			v.progress.resetSealProposal()
 		}
-		v.mu.Unlock()
 	}
 	v.wake.Notify()
 	return nil
@@ -319,9 +292,7 @@ func (m *Manager) wireVaultFSMCallbacks(v *vaultChunking, cfg VaultConfig) {
 	// runs a plan step followed by a build step on every wake, and both
 	// no-op quickly when there is nothing to do.
 	cfg.FSM.SetOnSealedManifest(func(m *vaultctlfsm.OpenChunkManifest) {
-		v.mu.Lock()
-		v.pendingSeal = m
-		v.mu.Unlock()
+		v.progress.setPending(m)
 		v.wake.Notify()
 	})
 	v.unsubPublish = cfg.FSM.AddOnPublishCompletedSegment(func(vaultctlfsm.CompletedSegmentEntry) {
@@ -350,18 +321,7 @@ func (m *Manager) wireVaultFSMCallbacks(v *vaultChunking, cfg VaultConfig) {
 	// FSM apply goroutine deadlocks the vault-ctl leader. Dispatch post-seal
 	// work on a goroutine (same pattern as onRequestDelete acks).
 	cfg.FSM.SetOnSealedManifestCleared(func(_ chunk.ChunkID) {
-		v.mu.Lock()
-		var pending *vaultctlfsm.OpenChunkManifest
-		if v.pendingSeal != nil {
-			sealedCopy := *v.pendingSeal
-			sealedCopy.Refs = slices.Clone(v.pendingSeal.Refs)
-			pending = &sealedCopy
-		}
-		v.doneSealProposed = buildKey{}
-		v.sealAttemptKey = buildKey{}
-		v.doneOnBuilt = buildKey{}
-		v.mu.Unlock()
-		if pending != nil {
+		if pending := v.progress.noteSealCleared(); pending != nil {
 			go v.afterSealBuild(context.Background(), pending)
 		}
 		v.wake.Notify()
@@ -509,9 +469,7 @@ func (m *Manager) startWorkerLocked(v *vaultChunking) {
 		for {
 			select {
 			case <-ctx.Done():
-				for v.buildRunning.Load() {
-					time.Sleep(5 * time.Millisecond)
-				}
+				v.buildWG.Wait()
 				return
 			case <-releaseCh:
 				if err := v.releaseOnce(ctx); err != nil && ctx.Err() == nil {
@@ -541,58 +499,13 @@ func (m *Manager) runBuildPass(ctx context.Context, v *vaultChunking, log *slog.
 	if !v.buildRunning.CompareAndSwap(false, true) {
 		return
 	}
-	go func() {
+	v.buildWG.Go(func() {
 		defer v.buildRunning.Store(false)
 		if err := v.buildOnce(ctx); err != nil && ctx.Err() == nil {
 			log.Warn("chunking build failed", "error", err)
 		}
 		v.wake.Notify()
-	}()
-}
-
-func (v *vaultChunking) buildDue() bool {
-	pending := v.sealedManifestForBuild()
-	if pending == nil {
-		return false
-	}
-	key := buildKey{chunkID: pending.ChunkID, sealedAt: pending.SealedAt}
-	if entry := v.fsm().Get(pending.ChunkID); entry != nil && entry.State == chunk.ChunkStateSealed {
-		v.mu.Lock()
-		alreadyBuilt := v.doneBuild == key
-		v.mu.Unlock()
-		if alreadyBuilt {
-			return false
-		}
-		// Sealed cluster-wide but this home still needs to materialize GLCB.
-		return true
-	}
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	if v.doneBuild != key {
-		return true
-	}
-	if v.doneSealProposed == key {
-		if v.cfg.IsLeader() && !v.chunkSealCommitted(pending.ChunkID) {
-			v.doneSealProposed = buildKey{}
-			v.sealAttemptKey = buildKey{}
-			return true
-		}
-		return false
-	}
-	return true
-}
-
-func (v *vaultChunking) sealedManifestForBuild() *vaultctlfsm.OpenChunkManifest {
-	if pending := v.fsm().SealedManifest(); pending != nil {
-		v.mu.Lock()
-		v.pendingSeal = pending
-		v.mu.Unlock()
-		return pending
-	}
-	v.mu.Lock()
-	pending := v.pendingSeal
-	v.mu.Unlock()
-	return pending
+	})
 }
 
 func (v *vaultChunking) releaseOnce(ctx context.Context) error {
@@ -636,397 +549,6 @@ func (v *vaultChunking) requiredHolders() []string {
 		return nil
 	}
 	return v.cfg.RequiredHolders()
-}
-
-func (v *vaultChunking) afterSealBuild(ctx context.Context, pending *vaultctlfsm.OpenChunkManifest) {
-	if pending == nil {
-		return
-	}
-	key := buildKey{chunkID: pending.ChunkID, sealedAt: pending.SealedAt}
-	v.mu.Lock()
-	if v.donePostSeal == key {
-		v.mu.Unlock()
-		return
-	}
-	built := v.doneBuild == key
-	v.mu.Unlock()
-	// OnSealedManifestCleared can fire on follower homes before local GLCB
-	// build finishes. Do not mark post-seal work done until doneBuild is set,
-	// or finishBuildOnce cannot run afterSealBuild later (gastrolog-3vlse).
-	if !built {
-		return
-	}
-	v.mu.Lock()
-	v.donePostSeal = key
-	v.mu.Unlock()
-
-	segmentIDs := releasableSegmentIDs(v.fsm(), pending)
-	v.flushHeadPurgeForManifest(ctx, pending, segmentIDs)
-	if v.cfg.IsLeader() {
-		if len(segmentIDs) > 0 {
-			v.mu.Lock()
-			v.pendingRelease = appendUniqueGLIDs(v.pendingRelease, segmentIDs)
-			v.mu.Unlock()
-		}
-		v.releaseWake.Notify()
-	}
-	v.mu.Lock()
-	if v.pendingSeal != nil && v.pendingSeal.ChunkID == pending.ChunkID && v.doneBuild == key {
-		v.pendingSeal = nil
-	}
-	v.mu.Unlock()
-}
-
-func (v *vaultChunking) buildOnce(ctx context.Context) error {
-	pending := v.sealedManifestForBuild()
-	if pending == nil {
-		return nil
-	}
-	if len(pending.Refs) == 0 && pending.TotalRecords == 0 {
-		return v.discardEmptySealedManifest(pending)
-	}
-
-	key := buildKey{chunkID: pending.ChunkID, sealedAt: pending.SealedAt}
-	if done, err := v.buildOnceIfSealedElsewhere(ctx, pending, key); done || err != nil {
-		return err
-	}
-
-	result, builtNow, err := v.runBuildOncePass(ctx, pending, key)
-	if errors.Is(err, ErrAwaitingLocalSegments) {
-		return nil
-	}
-	if err != nil || (!builtNow && v.cfg.Applier == nil) {
-		return err
-	}
-
-	if err := v.proposeSealOnce(ctx, pending, key, result); err != nil {
-		return err
-	}
-
-	v.fireOnBuiltOnce(pending, key, builtNow)
-	v.finishBuildOnce(ctx, pending, key)
-	return nil
-}
-
-// buildOnceIfSealedElsewhere handles the case where CmdSealChunk already
-// applied cluster-wide. Returns true when no further build work is needed.
-func (v *vaultChunking) buildOnceIfSealedElsewhere(ctx context.Context, pending *vaultctlfsm.OpenChunkManifest, key buildKey) (bool, error) {
-	entry := v.fsm().Get(pending.ChunkID)
-	if entry == nil || entry.State != chunk.ChunkStateSealed {
-		return false, nil
-	}
-
-	v.mu.Lock()
-	alreadyBuilt := v.doneBuild == key
-	if alreadyBuilt && v.pendingSeal != nil && v.pendingSeal.ChunkID == pending.ChunkID {
-		v.pendingSeal = nil
-	}
-	v.mu.Unlock()
-	if !alreadyBuilt {
-		return false, nil
-	}
-
-	// Another home proposed CmdSealChunk first; this home still needs local
-	// head purge and release-queue work (gastrolog-3vlse).
-	v.afterSealBuild(ctx, pending)
-	if v.cfg.OnBuilt != nil {
-		v.mu.Lock()
-		fire := v.doneOnBuilt != key
-		if fire {
-			v.doneOnBuilt = key
-		}
-		v.mu.Unlock()
-		if fire {
-			v.cfg.OnBuilt(pending.ChunkID)
-		}
-	}
-	return true, nil
-}
-
-func (v *vaultChunking) runBuildOncePass(ctx context.Context, pending *vaultctlfsm.OpenChunkManifest, key buildKey) (BuildResult, bool, error) {
-	v.mu.Lock()
-	alreadyBuilt := v.doneBuild == key
-	cached := v.lastBuild
-	v.mu.Unlock()
-
-	var result BuildResult
-	var err error
-	builtNow := false
-	switch {
-	case !alreadyBuilt:
-		if result, ok, err := v.adoptExistingGLCBIfPresent(pending, key); err != nil {
-			return BuildResult{}, false, err
-		} else if ok {
-			return result, false, nil
-		}
-		result, err = v.build(ctx, pending)
-		if err != nil {
-			return BuildResult{}, false, err
-		}
-		builtNow = true
-		v.mu.Lock()
-		v.doneBuild = key
-		v.lastBuild = struct {
-			key    buildKey
-			result BuildResult
-			ok     bool
-		}{key: key, result: result, ok: true}
-		v.mu.Unlock()
-	case v.cfg.Applier != nil && cached.ok && cached.key == key:
-		// Retry CmdSealChunk with the prior build output; do not re-read every
-		// segment on each wake/tick while the sealed manifest is still pending.
-		result = cached.result
-	case v.cfg.Applier != nil:
-		if result, ok, err := v.adoptExistingGLCBIfPresent(pending, key); err != nil {
-			return BuildResult{}, false, err
-		} else if ok {
-			return result, false, nil
-		}
-		result, err = v.build(ctx, pending)
-		if err != nil {
-			return BuildResult{}, false, err
-		}
-		builtNow = true
-		v.mu.Lock()
-		v.lastBuild = struct {
-			key    buildKey
-			result BuildResult
-			ok     bool
-		}{key: key, result: result, ok: true}
-		v.mu.Unlock()
-	default:
-		return BuildResult{}, false, nil
-	}
-	return result, builtNow, nil
-}
-
-// adoptExistingGLCBIfPresent loads BuildResult when data.glcb is already on
-// disk (BuildGLCBFile only renames into place after a complete build).
-func (v *vaultChunking) adoptExistingGLCBIfPresent(pending *vaultctlfsm.OpenChunkManifest, key buildKey) (BuildResult, bool, error) {
-	glcbPath := ChunkGLCBPath(v.cfg.ChunkRoot, pending.ChunkID)
-	if _, err := os.Stat(glcbPath); err != nil {
-		if os.IsNotExist(err) {
-			return BuildResult{}, false, nil
-		}
-		return BuildResult{}, false, err
-	}
-	sealedAt := pending.SealedAt
-	if sealedAt.IsZero() {
-		if entry := v.fsm().Get(pending.ChunkID); entry != nil && !entry.WriteEnd.IsZero() {
-			sealedAt = entry.WriteEnd
-		}
-	}
-	result, readErr := BuildResultFromExistingGLCB(glcbPath, sealedAt)
-	if readErr != nil {
-		return BuildResult{}, false, nil //nolint:nilerr // corrupt GLCB; caller falls through to full rebuild
-	}
-	adoptKey := key
-	if adoptKey.sealedAt.IsZero() {
-		adoptKey.sealedAt = result.WriteEnd
-	}
-	v.mu.Lock()
-	v.doneBuild = adoptKey
-	v.lastBuild = struct {
-		key    buildKey
-		result BuildResult
-		ok     bool
-	}{key: adoptKey, result: result, ok: true}
-	v.mu.Unlock()
-	return result, true, nil
-}
-
-// clearSealProposedIfLeaderUncommitted drops a stale doneSealProposed marker
-// when this home is now vault-ctl leader but CmdSealChunk never committed
-// (e.g. leadership transferred after a follower build pass).
-func (v *vaultChunking) clearSealProposedIfLeaderUncommitted(pending *vaultctlfsm.OpenChunkManifest, key buildKey) bool {
-	if pending == nil || !v.cfg.IsLeader() || v.chunkSealCommitted(pending.ChunkID) {
-		return false
-	}
-	v.mu.Lock()
-	stale := v.doneSealProposed == key
-	if stale {
-		v.doneSealProposed = buildKey{}
-		v.sealAttemptKey = buildKey{}
-	}
-	v.mu.Unlock()
-	return stale
-}
-
-func (v *vaultChunking) proposeSealOnce(ctx context.Context, pending *vaultctlfsm.OpenChunkManifest, key buildKey, result BuildResult) error {
-	if v.cfg.Applier == nil {
-		return nil
-	}
-	v.mu.Lock()
-	alreadyProposed := v.doneSealProposed == key
-	v.mu.Unlock()
-	if alreadyProposed {
-		if !v.clearSealProposedIfLeaderUncommitted(pending, key) {
-			return nil
-		}
-	}
-	// Only the vault-ctl leader commits CmdSealChunk. Follower homes
-	// materialize the GLCB locally; proposing seal from a follower
-	// forwards to the leader but local FSM verification races replication.
-	if !v.cfg.IsLeader() {
-		v.mu.Lock()
-		v.doneSealProposed = key
-		v.mu.Unlock()
-		return nil
-	}
-	v.mu.Lock()
-	v.sealAttemptKey = key
-	v.lastSealAttempt = time.Now()
-	v.mu.Unlock()
-	if err := v.cfg.Applier.Apply(vaultctlfsm.MarshalSealChunk(
-		pending.ChunkID,
-		result.WriteEnd,
-		int64(result.RecordCount),
-		result.Bytes,
-		result.IngestStart,
-		result.IngestEnd,
-		result.SourceEnd,
-		result.IngestTSMonotonic,
-		v.now(),
-	)); err != nil {
-		return err
-	}
-	if !v.chunkSealCommitted(pending.ChunkID) {
-		return fmt.Errorf("chunking: CmdSealChunk did not commit seal for %s", pending.ChunkID)
-	}
-	v.mu.Lock()
-	v.doneSealProposed = key
-	v.mu.Unlock()
-	v.afterSealBuild(ctx, pending)
-	return nil
-}
-
-func (v *vaultChunking) fireOnBuiltOnce(pending *vaultctlfsm.OpenChunkManifest, key buildKey, builtNow bool) {
-	if !builtNow || v.cfg.OnBuilt == nil {
-		return
-	}
-	v.mu.Lock()
-	fire := v.doneOnBuilt != key
-	if fire {
-		v.doneOnBuilt = key
-	}
-	v.mu.Unlock()
-	if fire {
-		v.cfg.OnBuilt(pending.ChunkID)
-	}
-}
-
-func (v *vaultChunking) finishBuildOnce(ctx context.Context, pending *vaultctlfsm.OpenChunkManifest, key buildKey) {
-	v.mu.Lock()
-	doneBuild := v.doneBuild == key
-	postSeal := v.donePostSeal == key
-	v.mu.Unlock()
-	// Follower homes: CmdSealChunk often replicates before local build completes.
-	// OnSealedManifestCleared is a no-op until doneBuild; finish the purge here.
-	if doneBuild && !postSeal {
-		if entry := v.fsm().Get(pending.ChunkID); entry != nil && entry.State == chunk.ChunkStateSealed {
-			v.afterSealBuild(ctx, pending)
-			v.mu.Lock()
-			postSeal = v.donePostSeal == key
-			v.mu.Unlock()
-		}
-	}
-	if postSeal {
-		v.flushHeadPurgeForManifest(ctx, pending, releasableSegmentIDs(v.fsm(), pending))
-	}
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	if v.doneBuild != key || v.pendingSeal == nil || v.pendingSeal.ChunkID != pending.ChunkID {
-		return
-	}
-	// Retain pendingSeal until CmdSealChunk commits so
-	// OnSealedManifestCleared can run afterSealBuild on follower homes.
-	entry := v.fsm().Get(pending.ChunkID)
-	if entry != nil && entry.State == chunk.ChunkStateSealed {
-		v.pendingSeal = nil
-	}
-}
-
-func (v *vaultChunking) discardEmptySealedManifest(pending *vaultctlfsm.OpenChunkManifest) error {
-	if pending == nil || v.cfg.Applier == nil || !v.cfg.IsLeader() {
-		return nil
-	}
-	return v.cfg.Applier.Apply(vaultctlfsm.MarshalDiscardOpenChunkManifest(pending.ChunkID))
-}
-
-func (v *vaultChunking) build(ctx context.Context, pending *vaultctlfsm.OpenChunkManifest) (BuildResult, error) {
-	manifest := sealedManifestFromFSM(pending)
-	if err := v.materializeManifestSegments(ctx, manifest); err != nil {
-		return BuildResult{}, err
-	}
-	input := BuildInput{
-		Manifest:  manifest,
-		VaultID:   v.cfg.VaultID,
-		ChunkRoot: v.cfg.ChunkRoot,
-		Locate:    v.cfg.Locate,
-	}
-	return BuildSealedChunk(input)
-}
-
-// materializeManifestSegments ensures every segment referenced by a sealed
-// manifest awaiting GLCB build is present under this home's head/ or
-// completed/. Collection is the normal multi-home replication path — each
-// placement member builds the GLCB locally from the same manifest refs.
-func (v *vaultChunking) materializeManifestSegments(ctx context.Context, manifest SealedManifest) error {
-	if v.cfg.Locate == nil {
-		return nil
-	}
-	missing := missingManifestSegmentIDs(manifest, v.cfg.Locate)
-	if len(missing) == 0 {
-		return nil
-	}
-	if v.cfg.Collector == nil {
-		if !v.cfg.IsLeader() {
-			return ErrAwaitingLocalSegments
-		}
-		return &MissingSegmentsError{SegmentIDs: missing}
-	}
-	if err := v.cfg.Collector.CollectSegments(ctx, missing); err != nil {
-		if !v.cfg.IsLeader() {
-			return ErrAwaitingLocalSegments
-		}
-		return err
-	}
-	stillMissing := missingManifestSegmentIDs(manifest, v.cfg.Locate)
-	if len(stillMissing) == 0 {
-		return nil
-	}
-	if !v.cfg.IsLeader() {
-		return ErrAwaitingLocalSegments
-	}
-	return &MissingSegmentsError{SegmentIDs: stillMissing}
-}
-
-// chunkSealCommitted reports whether CmdSealChunk took effect cluster-wide.
-// After a forwarded apply the local FSM may lag briefly; a cleared pending
-// sealed manifest is treated as success even before the entry shows Sealed.
-func (v *vaultChunking) chunkSealCommitted(chunkID chunk.ChunkID) bool {
-	if entry := v.fsm().Get(chunkID); entry != nil && entry.State == chunk.ChunkStateSealed {
-		return true
-	}
-	sm := v.fsm().SealedManifest()
-	return sm == nil || sm.ChunkID != chunkID
-}
-
-func sealedManifestFromFSM(m *vaultctlfsm.OpenChunkManifest) SealedManifest {
-	out := SealedManifest{
-		ChunkID:  m.ChunkID,
-		OpenedAt: m.OpenedAt,
-		SealedAt: m.SealedAt,
-		Refs:     make([]ManifestRefEntry, len(m.Refs)),
-	}
-	for i, ref := range m.Refs {
-		out.Refs[i] = ManifestRefEntry{
-			SegmentID:         ref.SegmentID,
-			FirstRecordNumber: ref.FirstRecordNumber,
-			LastRecordNumber:  ref.LastRecordNumber,
-		}
-	}
-	return out
 }
 
 // HeadSegmentLocator resolves segments present under vaultRoot/head/.
