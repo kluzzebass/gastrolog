@@ -71,9 +71,14 @@ func writeCompletedSegment(t *testing.T, vaultRoot string, vaultID glid.GLID, ra
 		t.Fatal(err)
 	}
 	segID := glid.New()
+	// Mirror the segmentation writer: build the file under working/ and
+	// rename it into completed/ once finalized. Writing in place races the
+	// manager's stranded rescan, whose segment.Open reconciles (truncates!)
+	// partial frames out from under this writer.
+	workingPath := paths.WorkingSegment(vaultRoot, segID)
 	path := paths.CompletedSegment(vaultRoot, segID)
 
-	sf, err := segment.Create(path, segment.Meta{ID: segID, VaultID: vaultID})
+	sf, err := segment.Create(workingPath, segment.Meta{ID: segID, VaultID: vaultID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,6 +106,9 @@ func writeCompletedSegment(t *testing.T, vaultRoot string, vaultID glid.GLID, ra
 	}
 	hdr := sf.Header()
 	if err := sf.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(workingPath, path); err != nil {
 		t.Fatal(err)
 	}
 	return segmentation.CompletedSegment{
