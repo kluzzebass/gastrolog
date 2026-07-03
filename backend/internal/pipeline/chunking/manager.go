@@ -112,6 +112,11 @@ type vaultChunking struct {
 	// buildRunning gates a single in-flight GLCB build so planCatchUp can keep
 	// running on wake while materialization/build proceeds asynchronously.
 	buildRunning atomic.Bool
+	// buildMu serializes actual build passes. The worker's spawned build and
+	// the Manager.BuildOnce test entry point must not run buildOnce
+	// concurrently: the winner seals and purges head/ while the loser is
+	// mid-merge reading those segment files (gastrolog-2qj3pw).
+	buildMu sync.Mutex
 	// buildWG tracks the in-flight build goroutine so worker shutdown waits
 	// for it without polling.
 	buildWG sync.WaitGroup
@@ -391,7 +396,10 @@ func (m *Manager) NotifyVault(vaultID glid.GLID) {
 	}
 }
 
-// BuildOnce runs one build pass for a vault (for tests).
+// BuildOnce runs one build pass for a vault (for tests). It serializes with
+// the worker's in-flight build via buildMu: an unserialized foreground build
+// races the background build+seal+head-purge and hits ENOENT mid-merge
+// (gastrolog-2qj3pw).
 func (m *Manager) BuildOnce(ctx context.Context, vaultID glid.GLID) error {
 	m.mu.Lock()
 	v, ok := m.vaults[vaultID]
@@ -399,7 +407,10 @@ func (m *Manager) BuildOnce(ctx context.Context, vaultID glid.GLID) error {
 	if !ok {
 		return ErrUnknownVault
 	}
-	if err := v.buildOnce(ctx); err != nil {
+	v.buildMu.Lock()
+	err := v.buildOnce(ctx)
+	v.buildMu.Unlock()
+	if err != nil {
 		return err
 	}
 	return v.releaseOnce(ctx)
@@ -501,7 +512,10 @@ func (m *Manager) runBuildPass(ctx context.Context, v *vaultChunking, log *slog.
 	}
 	v.buildWG.Go(func() {
 		defer v.buildRunning.Store(false)
-		if err := v.buildOnce(ctx); err != nil && ctx.Err() == nil {
+		v.buildMu.Lock()
+		err := v.buildOnce(ctx)
+		v.buildMu.Unlock()
+		if err != nil && ctx.Err() == nil {
 			log.Warn("chunking build failed", "error", err)
 		}
 		v.wake.Notify()
