@@ -18,6 +18,26 @@ import (
 	"gastrolog/internal/record"
 )
 
+// syncBuffer is an io.Writer tests can poll while the manager's pull loop
+// streams into it from its own goroutine; a bare bytes.Buffer read
+// concurrently is a data race.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) bytes() []byte {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return bytes.Clone(b.buf.Bytes())
+}
+
 type recordingPublisher struct {
 	mu        sync.Mutex
 	published []distribution.Metadata
@@ -596,18 +616,18 @@ func TestRunPullViaChannel(t *testing.T) {
 	completed <- seg
 	time.Sleep(50 * time.Millisecond)
 
-	var buf bytes.Buffer
+	var buf syncBuffer
 	pullIn <- distribution.PullRequest{
 		VaultID: vaultID, SegmentID: seg.Meta.ID, Dest: &buf,
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if bytes.Contains(buf.Bytes(), []byte("async-pull")) {
+		if bytes.Contains(buf.bytes(), []byte("async-pull")) {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("pull payload = %q", buf.Bytes())
+	t.Fatalf("pull payload = %q", buf.bytes())
 }
 
 func TestRunPullUnknownVaultIsNoOp(t *testing.T) {
