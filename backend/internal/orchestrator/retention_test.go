@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"gastrolog/internal/glid"
 	"log/slog"
+	"slices"
 	"testing"
 	"time"
 
@@ -239,26 +240,25 @@ func TestSweepDeletesExpiredChunks(t *testing.T) {
 
 	r.sweep(rules)
 
-	// With max 2, the 2 oldest (id0, id1) should be deleted.
+	// With max 2, the 2 oldest (id0, id1) should be deleted. Parallel chunk
+	// workers may complete in any order.
+	wantDeleted := []chunk.ChunkID{id0, id1}
 	if len(cm.deleted) != 2 {
 		t.Fatalf("expected 2 chunk deletions, got %d", len(cm.deleted))
 	}
-	if cm.deleted[0] != id0 {
-		t.Errorf("expected first deleted chunk %s, got %s", id0, cm.deleted[0])
-	}
-	if cm.deleted[1] != id1 {
-		t.Errorf("expected second deleted chunk %s, got %s", id1, cm.deleted[1])
+	for _, id := range wantDeleted {
+		if !slices.Contains(cm.deleted, id) {
+			t.Errorf("expected deleted chunk %s, got %v", id, cm.deleted)
+		}
 	}
 
-	// Indexes should be deleted first (same IDs, same order).
 	if len(im.deleted) != 2 {
 		t.Fatalf("expected 2 index deletions, got %d", len(im.deleted))
 	}
-	if im.deleted[0] != id0 {
-		t.Errorf("expected first deleted index %s, got %s", id0, im.deleted[0])
-	}
-	if im.deleted[1] != id1 {
-		t.Errorf("expected second deleted index %s, got %s", id1, im.deleted[1])
+	for _, id := range wantDeleted {
+		if !slices.Contains(im.deleted, id) {
+			t.Errorf("expected deleted index %s, got %v", id, im.deleted)
+		}
 	}
 }
 

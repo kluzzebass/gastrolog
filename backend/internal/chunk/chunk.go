@@ -341,6 +341,21 @@ type RecordCursor interface {
 	Close() error
 }
 
+// RecordFanOutSource supports concurrent retention-style fan-out by record
+// position. Records from ReadFanOutRecord are detached from any mmap backing
+// and safe to hand to other goroutines without Copy().
+type RecordFanOutSource interface {
+	RecordCount() uint64
+	ReadFanOutRecord(pos uint32) (Record, error)
+}
+
+// RecordBatchReader extends RecordCursor with batched forward reads for
+// sequential scans (retention fan-out fallback, export).
+type RecordBatchReader interface {
+	RecordCursor
+	NextBatch(limit int) ([]Record, error)
+}
+
 // RecordIterator yields records one at a time. Returns ErrNoMoreRecords when
 // exhausted. Records are valid at least until the next call. Callers that
 // store records beyond the next call must Copy() them.

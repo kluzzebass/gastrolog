@@ -1,11 +1,13 @@
 package orchestrator
 
 import (
+	"context"
 	"log/slog"
 	"testing"
 	"time"
 
 	"gastrolog/internal/chunk"
+	chunkfile "gastrolog/internal/chunk/file"
 	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/system"
@@ -132,4 +134,66 @@ func TestFireRetentionEventPipelineStopped(t *testing.T) {
 	if s := fx.orch.GetRouteStats(); s.Ingested != 0 {
 		t.Errorf("stopped pipeline should not ingest records, got Ingested=%d", s.Ingested)
 	}
+}
+
+// TestFireRetentionEventFileBackedGLCBParallel verifies parallel position-range
+// fan-out on a sealed file vault chunk with a local data.glcb.
+func TestFireRetentionEventFileBackedGLCBParallel(t *testing.T) {
+	t.Parallel()
+
+	const recordCount = 32
+	sourceID := glid.New()
+	archiveID := glid.New()
+
+	orch := newRoutingOrch(t, retentionRouteTable(t, sourceID, archiveID))
+	vi, _ := newFileInstance(t, sourceID)
+	orch.RegisterVault(NewVault(sourceID, vi))
+
+	for i := range recordCount {
+		rec := chunk.Record{
+			Attrs: chunk.Attributes{"i": string(rune('0' + i%10))},
+			Raw:   []byte{byte('a' + i)},
+		}
+		if _, _, err := vi.Chunks.Append(rec); err != nil {
+			t.Fatalf("Append %d: %v", i, err)
+		}
+	}
+	if err := vi.Chunks.Seal(); err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
+	metas, err := vi.Chunks.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	var sealedID chunk.ChunkID
+	for _, m := range metas {
+		if m.Sealed {
+			sealedID = m.ID
+			break
+		}
+	}
+	cm := vi.Chunks.(*chunkfile.Manager)
+	if err := cm.PostSealProcess(context.Background(), sealedID); err != nil {
+		t.Fatalf("PostSealProcess: %v", err)
+	}
+
+	cur, err := vi.Chunks.OpenCursor(sealedID)
+	if err != nil {
+		t.Fatalf("OpenCursor: %v", err)
+	}
+	if _, ok := cur.(chunk.RecordFanOutSource); !ok {
+		t.Fatal("sealed GLCB cursor should implement RecordFanOutSource")
+	}
+	cur.Close()
+
+	r := &retentionRunner{
+		vaultID: sourceID,
+		orch:    orch,
+		logger:  slog.Default(),
+	}
+	r.fireRetentionEvent(sealedID)
+
+	waitForRouteStats(t, orch, "file GLCB parallel fan-out", func(s *RouteStats) bool {
+		return s.Routed == recordCount
+	})
 }

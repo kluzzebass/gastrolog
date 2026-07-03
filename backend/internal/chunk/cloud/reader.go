@@ -229,6 +229,17 @@ func (rd *Reader) Meta() BlobMeta { return rd.meta }
 // ReadRecord reads a single record by position (0-based).
 // One file.ReadAt — no decompression step.
 func (rd *Reader) ReadRecord(pos uint32) (chunk.Record, error) {
+	return rd.readRecordAt(pos, true)
+}
+
+// ReadFanOutRecord reads a record for immediate hand-off to another goroutine
+// (retention fan-out). On the mmap path the payload is detached once via
+// cloneMmapRecord; callers must not retain references across cursor close.
+func (rd *Reader) ReadFanOutRecord(pos uint32) (chunk.Record, error) {
+	return rd.readRecordAt(pos, true)
+}
+
+func (rd *Reader) readRecordAt(pos uint32, detach bool) (chunk.Record, error) {
 	if pos >= rd.meta.RecordCount {
 		return chunk.Record{}, chunk.ErrNoMoreRecords
 	}
@@ -252,7 +263,10 @@ func (rd *Reader) ReadRecord(pos uint32) (chunk.Record, error) {
 		}
 		// Records may outlive this cursor (search batching, export queues).
 		// Detach payload bytes from the GLCB mmap before the mapping is evicted.
-		return cloneMmapRecord(rec), nil
+		if detach {
+			return cloneMmapRecord(rec), nil
+		}
+		return rec, nil
 	}
 	buf := make([]byte, idx.Size)
 	if _, err := rd.file.ReadAt(buf, absOff); err != nil {

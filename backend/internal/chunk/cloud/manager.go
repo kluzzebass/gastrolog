@@ -1,6 +1,7 @@
 package cloud
 
 import (
+	"errors"
 	"strconv"
 	"time"
 
@@ -126,13 +127,21 @@ func NewSeekableCursorWithClose(rd *Reader, id chunk.ChunkID, onClose func()) ch
 	}
 }
 
+func (c *glcbCursor) RecordCount() uint64 { return c.recordCount }
+
+// ReadFanOutRecord reads one record by position for parallel retention fan-out.
+// The record is detached from the GLCB mmap and safe across goroutines.
+func (c *glcbCursor) ReadFanOutRecord(pos uint32) (chunk.Record, error) {
+	return c.reader.ReadFanOutRecord(pos)
+}
+
 func (c *glcbCursor) Next() (chunk.Record, chunk.RecordRef, error) {
 	if c.fwdDone || c.fwdIndex >= c.recordCount {
 		c.fwdDone = true
 		return chunk.Record{}, chunk.RecordRef{}, chunk.ErrNoMoreRecords
 	}
 
-	rec, err := c.reader.ReadRecord(uint32(c.fwdIndex)) //nolint:gosec // G115: bounded by recordCount
+	rec, err := c.reader.ReadFanOutRecord(uint32(c.fwdIndex)) //nolint:gosec // G115: bounded by recordCount
 	if err != nil {
 		return chunk.Record{}, chunk.RecordRef{}, err
 	}
@@ -149,7 +158,7 @@ func (c *glcbCursor) Prev() (chunk.Record, chunk.RecordRef, error) {
 	}
 
 	c.revIndex--
-	rec, err := c.reader.ReadRecord(uint32(c.revIndex)) //nolint:gosec // G115: bounded by recordCount
+	rec, err := c.reader.ReadFanOutRecord(uint32(c.revIndex)) //nolint:gosec // G115: bounded by recordCount
 	if err != nil {
 		c.revIndex++
 		return chunk.Record{}, chunk.RecordRef{}, err
@@ -166,6 +175,28 @@ func (c *glcbCursor) Seek(ref chunk.RecordRef) error {
 	return nil
 }
 
+// NextBatch reads up to max records forward without per-call interface churn.
+func (c *glcbCursor) NextBatch(limit int) ([]chunk.Record, error) {
+	if limit <= 0 {
+		limit = 1
+	}
+	batch := make([]chunk.Record, 0, limit)
+	for len(batch) < limit {
+		rec, _, err := c.Next()
+		if errors.Is(err, chunk.ErrNoMoreRecords) {
+			if len(batch) == 0 {
+				return nil, chunk.ErrNoMoreRecords
+			}
+			return batch, nil
+		}
+		if err != nil {
+			return batch, err
+		}
+		batch = append(batch, rec)
+	}
+	return batch, nil
+}
+
 func (c *glcbCursor) Close() error {
 	var err error
 	if c.reader != nil {
@@ -178,3 +209,8 @@ func (c *glcbCursor) Close() error {
 	}
 	return err
 }
+
+var (
+	_ chunk.RecordFanOutSource = (*glcbCursor)(nil)
+	_ chunk.RecordBatchReader  = (*glcbCursor)(nil)
+)

@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"gastrolog/internal/alert"
@@ -812,6 +813,45 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) {
 		})
 	}
 
+	fanned := r.fanOutChunkRecords(cur, id, jobs)
+	close(jobs)
+	submitWG.Wait()
+	r.logger.Debug("retention: fanned out chunk records via pipeline routing",
+		"vault", r.vaultID, "chunk", id, "count", fanned)
+}
+
+func (r *retentionRunner) fanOutChunkRecords(cur chunk.RecordCursor, id chunk.ChunkID, jobs chan<- chunk.Record) int {
+	if fanout, ok := cur.(chunk.RecordFanOutSource); ok && fanout.RecordCount() > 0 {
+		return r.fanOutRecordsParallel(fanout, id, jobs)
+	}
+	return r.fanOutRecordsSerial(cur, id, jobs)
+}
+
+func (r *retentionRunner) fanOutRecordsSerial(cur chunk.RecordCursor, id chunk.ChunkID, jobs chan<- chunk.Record) int {
+	const batchSize = 256
+	if batchCur, ok := cur.(chunk.RecordBatchReader); ok {
+		fanned := 0
+		for {
+			batch, err := batchCur.NextBatch(batchSize)
+			if errors.Is(err, chunk.ErrNoMoreRecords) && len(batch) == 0 {
+				break
+			}
+			for _, rec := range batch {
+				jobs <- rec
+				fanned++
+			}
+			if errors.Is(err, chunk.ErrNoMoreRecords) {
+				break
+			}
+			if err != nil {
+				r.logger.Warn("retention: fan-out batch cursor error",
+					"vault", r.vaultID, "chunk", id, "error", err)
+				return fanned
+			}
+		}
+		return fanned
+	}
+
 	fanned := 0
 	for {
 		rec, _, err := cur.Next()
@@ -819,22 +859,57 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) {
 			break
 		}
 		if err != nil {
-			close(jobs)
-			submitWG.Wait()
 			r.logger.Warn("retention: fan-out cursor error",
 				"vault", r.vaultID, "chunk", id, "error", err)
-			return
+			return fanned
 		}
-		// Cursor records may reference mmap'd memory that becomes
-		// invalid once we move on. Copy so the pipeline can persist
-		// independently of the cursor lifecycle.
-		jobs <- rec.Copy()
+		// Cursor records are already detached by ReadRecord / ReadFanOutRecord.
+		jobs <- rec
 		fanned++
 	}
-	close(jobs)
-	submitWG.Wait()
-	r.logger.Debug("retention: fanned out chunk records via pipeline routing",
-		"vault", r.vaultID, "chunk", id, "count", fanned)
+	return fanned
+}
+
+func (r *retentionRunner) fanOutRecordsParallel(src chunk.RecordFanOutSource, id chunk.ChunkID, jobs chan<- chunk.Record) int {
+	count := src.RecordCount()
+	workers := retentionFanOutWorkers
+	var wg sync.WaitGroup
+	var fanned atomic.Uint64
+	var fanErr atomic.Pointer[error]
+	var errOnce sync.Once
+
+	recordErr := func(err error) {
+		errOnce.Do(func() {
+			fanErr.Store(&err)
+		})
+	}
+
+	for w := range workers {
+		start := count * uint64(w) / uint64(workers)
+		end := count * uint64(w+1) / uint64(workers)
+		wg.Add(1)
+		go func(start, end uint64) {
+			defer wg.Done()
+			for pos := start; pos < end; pos++ {
+				if fanErr.Load() != nil {
+					return
+				}
+				rec, err := src.ReadFanOutRecord(uint32(pos)) //nolint:gosec // G115: pos < count
+				if err != nil {
+					recordErr(fmt.Errorf("record %d: %w", pos, err))
+					return
+				}
+				jobs <- rec
+				fanned.Add(1)
+			}
+		}(start, end)
+	}
+	wg.Wait()
+	if p := fanErr.Load(); p != nil {
+		r.logger.Warn("retention: parallel fan-out decode error",
+			"vault", r.vaultID, "chunk", id, "error", *p)
+	}
+	return int(fanned.Load()) //nolint:gosec // G115: fanned bounded by chunk record count
 }
 
 // findVaultInstance looks up this runner's instance in the orchestrator's vault registry.
