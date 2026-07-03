@@ -11,10 +11,6 @@ import (
 func TestGLCBDecodeLRUEvictsUnpinned(t *testing.T) {
 	t.Parallel()
 
-	oldCap := glcbDecodedTablesCap
-	glcbDecodedTablesCap = 1
-	t.Cleanup(func() { glcbDecodedTablesCap = oldCap })
-
 	srcDir := t.TempDir()
 	src, err := NewManager(Config{Dir: srcDir})
 	if err != nil {
@@ -31,6 +27,9 @@ func TestGLCBDecodeLRUEvictsUnpinned(t *testing.T) {
 		t.Fatalf("consumer manager: %v", err)
 	}
 	defer func() { _ = cm.Close() }()
+	// Force eviction on the second decode. Per-Manager, so parallel tests
+	// keep their own default cap (gastrolog-1woee2).
+	cm.glcbDecodeCap = 1
 
 	if err := cm.RegisterExternalGLCB(idA, glcbA, chunk.ExternalGLCBInfo{RecordCount: 4}); err != nil {
 		t.Fatalf("register A: %v", err)
