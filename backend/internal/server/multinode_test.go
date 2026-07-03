@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -233,7 +234,7 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 func setupMNNode(t *testing.T, nodeID string, loader system.Store) multinodeTestNode {
 	t.Helper()
 
-	orch, err := orchestrator.New(orchestrator.Config{LocalNodeID: nodeID, SystemLoader: loader})
+	orch, err := orchestrator.New(orchestrator.Config{LocalNodeID: nodeID, SystemLoader: loader, SegmentsDir: filepath.Join(t.TempDir(), "segments")})
 	if err != nil {
 		t.Fatalf("orchestrator.New: %v", err)
 	}
@@ -251,7 +252,7 @@ func setupMNNode(t *testing.T, nodeID string, loader system.Store) multinodeTest
 func setupMNNodeNoVault(t *testing.T, nodeID string, loader system.Store) multinodeTestNode {
 	t.Helper()
 
-	orch, err := orchestrator.New(orchestrator.Config{LocalNodeID: nodeID, SystemLoader: loader})
+	orch, err := orchestrator.New(orchestrator.Config{LocalNodeID: nodeID, SystemLoader: loader, SegmentsDir: filepath.Join(t.TempDir(), "segments")})
 	if err != nil {
 		t.Fatalf("orchestrator.New: %v", err)
 	}

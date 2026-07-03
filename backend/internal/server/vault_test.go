@@ -5,6 +5,7 @@ import (
 	"gastrolog/internal/glid"
 	"io"
 	"net/http"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -284,7 +285,7 @@ func newFullVaultTestSetup(t *testing.T, recordCount int) fullVaultTestClients {
 	t.Helper()
 
 	cfgStore := sysmem.NewStore()
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: cfgStore})
+	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: cfgStore, SegmentsDir: filepath.Join(t.TempDir(), "segments")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -531,4 +532,3 @@ func TestExportImportRoundTrip(t *testing.T) {
 		t.Errorf("expected 12 seeded records queryable, got %d", stats.Msg.TotalRecords)
 	}
 }
-

@@ -6,6 +6,7 @@ import (
 	"maps"
 	"net"
 	"net/http"
+	"path/filepath"
 	"slices"
 	"testing"
 	"time"
@@ -31,7 +32,10 @@ import (
 
 // testAfterConfigApply creates a dispatch callback for non-raft test stores.
 // It mirrors the production configDispatcher but lives in the test package.
-func testAfterConfigApply(orch *orchestrator.Orchestrator, cfgStore system.Store, factories orchestrator.Factories) func(raftfsm.Notification) {
+// ReloadFilters failures are reported instead of swallowed: a harness whose
+// pipeline vault registration fails silently makes every route-touching test
+// pass vacuously (gastrolog-4cl2u4).
+func testAfterConfigApply(t *testing.T, orch *orchestrator.Orchestrator, cfgStore system.Store, factories orchestrator.Factories) func(raftfsm.Notification) {
 	return func(n raftfsm.Notification) {
 		ctx := context.Background()
 		switch n.Kind {
@@ -41,7 +45,9 @@ func testAfterConfigApply(orch *orchestrator.Orchestrator, cfgStore system.Store
 				return
 			}
 			if slices.Contains(orch.ListVaults(), n.ID) {
-				_ = orch.ReloadFilters(ctx)
+				if err := orch.ReloadFilters(ctx); err != nil {
+					t.Errorf("testAfterConfigApply: ReloadFilters: %v", err)
+				}
 				_ = orch.ReloadRotationPolicies(ctx)
 				_ = orch.ReloadRetentionPolicies(ctx)
 				if !cfg.Enabled {
@@ -96,7 +102,7 @@ func newConfigTestSetup(t *testing.T) (gastrologv1connect.SystemServiceClient, s
 	t.Helper()
 
 	cfgStore := sysmem.NewStore()
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: cfgStore})
+	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: cfgStore, SegmentsDir: filepath.Join(t.TempDir(), "segments")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +120,7 @@ func newConfigTestSetup(t *testing.T) (gastrologv1connect.SystemServiceClient, s
 	}
 
 	srv := server.New(orch, cfgStore, factories, nil, server.Config{
-		AfterConfigApply: testAfterConfigApply(orch, cfgStore, factories),
+		AfterConfigApply: testAfterConfigApply(t, orch, cfgStore, factories),
 	})
 	handler := srv.Handler()
 
@@ -511,7 +517,7 @@ func newConfigTestSetupWithIngesters(t *testing.T) (gastrologv1connect.SystemSer
 	t.Helper()
 
 	cfgStore := sysmem.NewStore()
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: cfgStore})
+	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: cfgStore, SegmentsDir: filepath.Join(t.TempDir(), "segments")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -532,7 +538,7 @@ func newConfigTestSetupWithIngesters(t *testing.T) (gastrologv1connect.SystemSer
 	}
 
 	srv := server.New(orch, cfgStore, factories, nil, server.Config{
-		AfterConfigApply: testAfterConfigApply(orch, cfgStore, factories),
+		AfterConfigApply: testAfterConfigApply(t, orch, cfgStore, factories),
 	})
 	handler := srv.Handler()
 

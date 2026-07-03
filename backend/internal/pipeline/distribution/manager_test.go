@@ -18,6 +18,26 @@ import (
 	"gastrolog/internal/record"
 )
 
+// syncBuffer is an io.Writer tests can poll while the manager's pull loop
+// streams into it from its own goroutine; a bare bytes.Buffer read
+// concurrently is a data race.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) bytes() []byte {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return bytes.Clone(b.buf.Bytes())
+}
+
 type recordingPublisher struct {
 	mu        sync.Mutex
 	published []distribution.Metadata
@@ -51,9 +71,14 @@ func writeCompletedSegment(t *testing.T, vaultRoot string, vaultID glid.GLID, ra
 		t.Fatal(err)
 	}
 	segID := glid.New()
+	// Mirror the segmentation writer: build the file under working/ and
+	// rename it into completed/ once finalized. Writing in place races the
+	// manager's stranded rescan, whose segment.Open reconciles (truncates!)
+	// partial frames out from under this writer.
+	workingPath := paths.WorkingSegment(vaultRoot, segID)
 	path := paths.CompletedSegment(vaultRoot, segID)
 
-	sf, err := segment.Create(path, segment.Meta{ID: segID, VaultID: vaultID})
+	sf, err := segment.Create(workingPath, segment.Meta{ID: segID, VaultID: vaultID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,6 +106,9 @@ func writeCompletedSegment(t *testing.T, vaultRoot string, vaultID glid.GLID, ra
 	}
 	hdr := sf.Header()
 	if err := sf.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(workingPath, path); err != nil {
 		t.Fatal(err)
 	}
 	return segmentation.CompletedSegment{
@@ -596,18 +624,18 @@ func TestRunPullViaChannel(t *testing.T) {
 	completed <- seg
 	time.Sleep(50 * time.Millisecond)
 
-	var buf bytes.Buffer
+	var buf syncBuffer
 	pullIn <- distribution.PullRequest{
 		VaultID: vaultID, SegmentID: seg.Meta.ID, Dest: &buf,
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if bytes.Contains(buf.Bytes(), []byte("async-pull")) {
+		if bytes.Contains(buf.bytes(), []byte("async-pull")) {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("pull payload = %q", buf.Bytes())
+	t.Fatalf("pull payload = %q", buf.bytes())
 }
 
 func TestRunPullUnknownVaultIsNoOp(t *testing.T) {

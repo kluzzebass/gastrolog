@@ -198,6 +198,7 @@ type Manager struct {
 
 	glcbDecodeMu  sync.Mutex
 	glcbDecodeLRU []chunk.ChunkID // MRU first; ids with decode tables loaded
+	glcbDecodeCap int             // decode-table LRU bound; defaultGLCBDecodedTablesCap
 
 	zstdEnc        *zstd.Encoder
 	zstdEncMu      sync.Mutex                // serializes concurrent CompressChunk calls sharing zstdEnc
@@ -438,6 +439,7 @@ func NewManager(cfg Config) (*Manager, error) {
 		zstdEnc:        zstdEnc,
 		chunkLocks:     make(map[chunk.ChunkID]*sync.RWMutex),
 		lastAccess:     make(map[chunk.ChunkID]time.Time),
+		glcbDecodeCap:  defaultGLCBDecodedTablesCap,
 		logger:         logger,
 	}
 	if err := manager.loadExisting(); err != nil {

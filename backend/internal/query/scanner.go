@@ -35,6 +35,14 @@ func prunePositions(positions []uint64, minPos uint64) []uint64 {
 	return positions[idx:]
 }
 
+// pruneMaxPositions returns positions < maxPos from a sorted slice.
+func pruneMaxPositions(positions []uint64, maxPos uint64) []uint64 {
+	idx := sort.Search(len(positions), func(i int) bool {
+		return positions[i] >= maxPos
+	})
+	return positions[:idx]
+}
+
 // intersectPositions returns positions present in both sorted slices.
 func intersectPositions(a, b []uint64) []uint64 {
 	var result []uint64
@@ -93,9 +101,32 @@ type scannerBuilder struct {
 	chunkID        chunk.ChunkID
 	positions      []uint64       // nil = sequential, empty = no matches, non-empty = seek positions
 	filters        []recordFilter // applied in order; cheap filters should be added first
-	minPos         uint64         // prune positions below this (from time index or resume)
+	minPos         uint64         // prune positions below this (from time index or forward resume)
 	hasMinPos      bool
+	maxPos         uint64 // exclusive; prune positions at or above this (from reverse resume)
+	hasMaxPos      bool
 	skipTimeBounds bool // when true, position scanners skip IngestTS bounds checking (already pruned by TS index)
+}
+
+// posWindow is the half-open position window [min, max) a scan may yield.
+type posWindow struct {
+	min, max       uint64
+	hasMin, hasMax bool
+}
+
+func (w posWindow) contains(pos uint64) bool {
+	if w.hasMin && pos < w.min {
+		return false
+	}
+	if w.hasMax && pos >= w.max {
+		return false
+	}
+	return true
+}
+
+// window snapshots the builder's position bounds for scan-time checks.
+func (b *scannerBuilder) window() posWindow {
+	return posWindow{min: b.minPos, max: b.maxPos, hasMin: b.hasMinPos, hasMax: b.hasMaxPos}
 }
 
 // newScannerBuilder creates a builder for the given chunk.
@@ -104,7 +135,8 @@ func newScannerBuilder(chunkID chunk.ChunkID) *scannerBuilder {
 }
 
 // setMinPosition sets the minimum position for pruning posting lists.
-// Positions below this are excluded. Used for time-based start bounds and resume.
+// Positions below this are excluded. Used for time-based start bounds and
+// forward resume.
 func (b *scannerBuilder) setMinPosition(pos uint64) {
 	if !b.hasMinPos || pos > b.minPos {
 		b.minPos = pos
@@ -112,13 +144,28 @@ func (b *scannerBuilder) setMinPosition(pos uint64) {
 	}
 }
 
+// setMaxPosition sets the exclusive maximum position for pruning posting
+// lists. Positions at or above this are excluded. Used for reverse resume:
+// in a reverse scan over a monotonic chunk the records already returned are
+// those at positions >= the resume position, so the resume position is an
+// exclusive upper bound on what remains.
+func (b *scannerBuilder) setMaxPosition(pos uint64) {
+	if !b.hasMaxPos || pos < b.maxPos {
+		b.maxPos = pos
+		b.hasMaxPos = true
+	}
+}
+
 // addPositions intersects the given positions with existing positions.
 // If this is the first position source, it sets positions directly.
 // Returns false if the intersection is empty (no matches possible).
 func (b *scannerBuilder) addPositions(positions []uint64) bool {
-	// Prune positions below minPos.
+	// Prune positions outside the [minPos, maxPos) window.
 	if b.hasMinPos {
 		positions = prunePositions(positions, b.minPos)
+	}
+	if b.hasMaxPos {
+		positions = pruneMaxPositions(positions, b.maxPos)
 	}
 	if len(positions) == 0 {
 		b.positions = []uint64{} // empty, not nil

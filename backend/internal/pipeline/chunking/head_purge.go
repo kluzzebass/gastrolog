@@ -39,10 +39,7 @@ func (v *vaultChunking) flushHeadPurgeForManifest(ctx context.Context, pending *
 		return
 	}
 	key := buildKey{chunkID: pending.ChunkID, sealedAt: pending.SealedAt}
-	v.mu.Lock()
-	built := v.doneBuild == key
-	v.mu.Unlock()
-	if !built {
+	if !v.progress.alreadyBuilt(key) {
 		return
 	}
 	if v.cfg.Collector != nil {

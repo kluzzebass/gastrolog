@@ -20,10 +20,10 @@ import (
 	"gastrolog/internal/pipeline/digestion"
 	"gastrolog/internal/pipeline/distribution"
 	"gastrolog/internal/pipeline/ingestion"
+	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/pipeline/routing"
 	"gastrolog/internal/pipeline/segment"
 	"gastrolog/internal/pipeline/segmentation"
-	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/record"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 
@@ -51,12 +51,12 @@ func (e *emitIngester) Run(ctx context.Context, out chan<- ingestion.IngesterMes
 // (→ collection when opts.withCollection), the way the orchestrator will
 // (gastrolog-214bz), without control-plane or ack semantics yet.
 type harness struct {
-	ctx    context.Context
-	cancel context.CancelFunc
+	ctx       context.Context
+	cancel    context.CancelFunc
 	segDone   chan struct{}
 	distDone  chan struct{}
-	colDone    chan struct{}
-	chunkDone  chan struct{}
+	colDone   chan struct{}
+	chunkDone chan struct{}
 
 	nodeID     glid.GLID
 	ingesterID glid.GLID
@@ -64,11 +64,11 @@ type harness struct {
 	vaultRoot  string
 	homeRoot   string
 
-	ingest   *ingestion.Manager
-	route    *routing.Manager
-	digest   *digestion.Manager
-	seg      *segmentation.Manager
-	dist     *distribution.Manager
+	ingest    *ingestion.Manager
+	route     *routing.Manager
+	digest    *digestion.Manager
+	seg       *segmentation.Manager
+	dist      *distribution.Manager
 	collect   *collection.Manager
 	chunk     *chunking.Manager
 	pub       *recordingPublisher
@@ -260,11 +260,11 @@ func newHarness(t *testing.T, nodeID, ingesterID, vaultID glid.GLID, route *rout
 	distMgr, _ := distribution.New(distribution.Config{})
 
 	segMgr, completed := segmentation.New(segmentation.Config{
-		ClosePolicy:          opts.closePolicy,
-		SyncBatchSize:        1,
-		SyncBatchWindow:      time.Millisecond,
-		OnSync:               func() { h.syncs.Add(1) },
-		OnCompletedDropped:   distMgr.NotifyStranded,
+		ClosePolicy:        opts.closePolicy,
+		SyncBatchSize:      1,
+		SyncBatchWindow:    time.Millisecond,
+		OnSync:             func() { h.syncs.Add(1) },
+		OnCompletedDropped: distMgr.NotifyStranded,
 	})
 	vaultIn, err := segMgr.RegisterVault(vaultID, vaultRoot, segmentation.VaultConfig{})
 	if err != nil {
@@ -826,7 +826,12 @@ func TestPipelineFullPath(t *testing.T) {
 		closePolicy:    segmentation.ClosePolicy{MaxBytes: 256},
 		withCollection: true,
 		withChunking:   true,
-		chunkPolicy:    chunking.ManifestRotationPolicy{MaxRecords: 8},
+		// MaxRecords stays above the published record count so the event-driven
+		// worker cannot auto-seal while the test still reads head/ copies —
+		// post-seal purge legitimately deletes them (gastrolog-2qj3pw). The
+		// seal is triggered explicitly via RotateCron once every ref is in the
+		// open manifest.
+		chunkPolicy: chunking.ManifestRotationPolicy{MaxRecords: 100},
 	})
 	msgs := make([]ingestion.IngesterMessage, 8)
 	for i := range msgs {
@@ -877,6 +882,27 @@ func TestPipelineFullPath(t *testing.T) {
 	var totalRecords uint32
 	for _, meta := range published {
 		totalRecords += meta.RecordCount
+	}
+
+	// Deterministic seal: drain the planner until every published record's
+	// ref is in the open manifest (RotateCron's trigger fires before pending
+	// refs are added, so sealing early would drop records), then rotate.
+	sealDeadline := time.Now().Add(5 * time.Second)
+	for {
+		if err := h.chunk.PlanCatchUp(h.ctx, h.vaultID); err != nil {
+			t.Fatalf("PlanCatchUp: %v", err)
+		}
+		if open := h.fsm.OpenChunk(); open != nil && open.TotalRecords == uint64(totalRecords) {
+			break
+		}
+		if time.Now().After(sealDeadline) {
+			open := h.fsm.OpenChunk()
+			t.Fatalf("open manifest never accumulated %d records: %+v", totalRecords, open)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if err := h.chunk.RotateCron(h.ctx, h.vaultID); err != nil {
+		t.Fatalf("RotateCron: %v", err)
 	}
 
 	glcbPath := h.waitChunkGLCB(t, totalRecords)
