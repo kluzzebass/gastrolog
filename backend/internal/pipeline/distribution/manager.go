@@ -86,26 +86,31 @@ func newVaultDist(root string, cfg VaultConfig) (*vaultDist, error) {
 // prepare stages a completed segment for vault-ctl publish: builds metadata and
 // registers the on-disk path for pull serving. Local holders keep the file in
 // completed/ until publish succeeds (see finalizeAfterPublish).
-func (v *vaultDist) prepare(seg segmentation.CompletedSegment) (Metadata, string, error) {
+//
+// alreadyStaged reports that a prior prepare registered this segment — the
+// stranded rescan and the completed-channel delivery can race on the same
+// segment (the file exists in completed/ before its notification is consumed),
+// and only the first staging may enqueue the publish (gastrolog-x5c8ge).
+func (v *vaultDist) prepare(seg segmentation.CompletedSegment) (meta Metadata, path string, alreadyStaged bool, err error) {
 	v.mu.RLock()
 	registered, known := v.segments[seg.Meta.ID]
 	v.mu.RUnlock()
 	if known {
 		seg.Path = registered
 		meta, err := metadataForPublish(seg)
-		return meta, registered, err
+		return meta, registered, true, err
 	}
 
-	path := seg.Path
-	meta, err := metadataForPublish(seg)
+	path = seg.Path
+	meta, err = metadataForPublish(seg)
 	if err != nil {
-		return Metadata{}, "", err
+		return Metadata{}, "", false, err
 	}
 
 	v.mu.Lock()
 	v.segments[seg.Meta.ID] = path
 	v.mu.Unlock()
-	return meta, path, nil
+	return meta, path, false, nil
 }
 
 // finalizeAfterPublish moves a locally-held segment into head/ after vault-ctl
@@ -182,7 +187,9 @@ func (v *vaultDist) stranded(vaultID glid.GLID) []segmentation.CompletedSegment 
 }
 
 func (v *vaultDist) publish(ctx context.Context, seg segmentation.CompletedSegment) error {
-	meta, path, err := v.prepare(seg)
+	// Synchronous path (PublishCompleted): publishes regardless of prior
+	// staging; the FSM treats an identical re-publish as a no-op.
+	meta, path, _, err := v.prepare(seg)
 	if err != nil {
 		return err
 	}
@@ -637,7 +644,10 @@ func (m *Manager) runPublishIngress(ctx context.Context, completed <-chan segmen
 			if !ok {
 				return
 			}
-			if p, err := m.stageForPublish(seg); err == nil {
+			// A stranded rescan may already have staged this segment before
+			// its channel notification was consumed; only the first staging
+			// enqueues, or the segment publishes twice (gastrolog-x5c8ge).
+			if p, alreadyStaged, err := m.stageForPublish(seg); err == nil && !alreadyStaged {
 				m.enqueuePublish(ctx, publishQ, p)
 			}
 		case <-strandedCh:
@@ -650,7 +660,7 @@ func (m *Manager) runPublishIngress(ctx context.Context, completed <-chan segmen
 func (m *Manager) rescanStranded(ctx context.Context, publishQ chan<- pendingPublish) {
 	for vaultID, v := range m.vaultsSnapshot() {
 		for _, seg := range v.stranded(vaultID) {
-			if p, err := m.stageForPublish(seg); err == nil {
+			if p, alreadyStaged, err := m.stageForPublish(seg); err == nil && !alreadyStaged {
 				m.enqueuePublish(ctx, publishQ, p)
 			}
 		}
@@ -664,23 +674,25 @@ func (m *Manager) enqueuePublish(ctx context.Context, publishQ chan<- pendingPub
 	}
 }
 
-func (m *Manager) stageForPublish(seg segmentation.CompletedSegment) (pendingPublish, error) {
+// stageForPublish prepares a segment and reports whether an earlier staging
+// already owns its publish — see vaultDist.prepare (gastrolog-x5c8ge).
+func (m *Manager) stageForPublish(seg segmentation.CompletedSegment) (pendingPublish, bool, error) {
 	m.mu.Lock()
 	v, ok := m.vaults[seg.VaultID]
 	m.mu.Unlock()
 	if !ok {
-		return pendingPublish{}, ErrUnknownVault
+		return pendingPublish{}, false, ErrUnknownVault
 	}
-	meta, path, err := v.prepare(seg)
+	meta, path, alreadyStaged, err := v.prepare(seg)
 	if err != nil {
-		return pendingPublish{}, err
+		return pendingPublish{}, false, err
 	}
 	return pendingPublish{
 		vaultID: seg.VaultID,
 		segID:   seg.Meta.ID,
 		path:    path,
 		meta:    meta,
-	}, nil
+	}, alreadyStaged, nil
 }
 
 // onCompleted stages and publishes one completed segment. Returns metadata, the
@@ -688,7 +700,7 @@ func (m *Manager) stageForPublish(seg segmentation.CompletedSegment) (pendingPub
 // staging succeeded but vault-ctl publish failed — the file stays in completed/
 // for local holders until a retry commits the registry entry.
 func (m *Manager) onCompleted(ctx context.Context, seg segmentation.CompletedSegment) (Metadata, string, bool, error) {
-	p, err := m.stageForPublish(seg)
+	p, _, err := m.stageForPublish(seg)
 	if err != nil {
 		return Metadata{}, "", false, err
 	}
