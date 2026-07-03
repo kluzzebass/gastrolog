@@ -68,11 +68,18 @@ type originPuller struct {
 	mu        sync.Mutex
 	attempts  int
 	failsLeft int
+	// pulled counts attempts per segment so tests can assert exactly-once
+	// pulls instead of comparing aggregate counters across a race window.
+	pulled map[glid.GLID]int
 }
 
 func (p *originPuller) Pull(_ context.Context, nodeID string, vaultID, segmentID glid.GLID, dest io.Writer) error {
 	p.mu.Lock()
 	p.attempts++
+	if p.pulled == nil {
+		p.pulled = make(map[glid.GLID]int)
+	}
+	p.pulled[segmentID]++
 	fail := p.failsLeft > 0
 	if fail {
 		p.failsLeft--
@@ -91,6 +98,16 @@ func (p *originPuller) attemptCount() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.attempts
+}
+
+func (p *originPuller) pulledCounts() map[glid.GLID]int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make(map[glid.GLID]int, len(p.pulled))
+	for id, n := range p.pulled {
+		out[id] = n
+	}
+	return out
 }
 
 func (p *originPuller) setFails(n int) {
@@ -150,8 +167,12 @@ func newOriginFixture(t *testing.T, ctx context.Context, vaultID glid.GLID, fsm 
 	return &originFixture{vaultID: vaultID, root: root, dist: distMgr, in: in, fsm: fsm}
 }
 
-// ingestAndPublish feeds enough records to close and publish exactly one
-// segment, then waits for it to appear in the FSM registry and returns its ID.
+// ingestAndPublish feeds an 8-record batch that closes and publishes one or
+// more segments (the 256-byte close policy typically yields several), waits
+// for the first to appear in the FSM registry, and returns that segment's ID.
+// Callers that assert on pull counts must quiesce until every published
+// segment is collected — waiting on just the returned ID races the remaining
+// segments' first pulls (gastrolog-4fv63d).
 func (o *originFixture) ingestAndPublish(t *testing.T, ctx context.Context) glid.GLID {
 	t.Helper()
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
@@ -256,25 +277,44 @@ func TestPipelineCollectionReplicatesToRemoteHome(t *testing.T) {
 		return segmentHolds(fsm, segID, testHomeNode)
 	})
 
-	// Idempotency: a redundant nudge must not re-pull or double-add the holder.
+	// The close policy publishes several segments for the 8-record batch;
+	// quiesce until the home holds every one of them before snapshotting pull
+	// attempts, or a late segment's first pull reads as a "re-pull".
+	waitTrue(t, "every published segment collected and receipted", func() bool {
+		entries := fsm.ListCompletedSegments()
+		if len(entries) == 0 {
+			return false
+		}
+		for _, e := range entries {
+			if !slices.Contains(e.Holders, testHomeNode) {
+				return false
+			}
+		}
+		return true
+	})
+
+	// Idempotency: a redundant nudge must not re-pull or double-add holders.
 	attemptsAfterCollect := puller.attemptCount()
 	colMgr.Notify(vaultID)
 	time.Sleep(50 * time.Millisecond)
 	if got := puller.attemptCount(); got != attemptsAfterCollect {
 		t.Fatalf("redundant nudge re-pulled: attempts %d -> %d", attemptsAfterCollect, got)
 	}
-	entry := fsm.GetCompletedSegment(segID)
-	if entry == nil {
-		t.Fatal("segment missing from FSM")
-	}
-	n := 0
-	for _, h := range entry.Holders {
-		if h == testHomeNode {
-			n++
+	for id, n := range puller.pulledCounts() {
+		if n != 1 {
+			t.Fatalf("segment %s pulled %d times, want exactly 1", id, n)
 		}
 	}
-	if n != 1 {
-		t.Fatalf("home appears %d times in holders %v, want 1", n, entry.Holders)
+	for _, e := range fsm.ListCompletedSegments() {
+		n := 0
+		for _, h := range e.Holders {
+			if h == testHomeNode {
+				n++
+			}
+		}
+		if n != 1 {
+			t.Fatalf("home appears %d times in holders %v for segment %s, want 1", n, e.Holders, e.SegmentID)
+		}
 	}
 }
 
