@@ -218,12 +218,12 @@ func TestLeaderPlannerRotatesWhileSealedManifestPending(t *testing.T) {
 	mgr := chunking.New(chunking.Config{})
 	nextChunk := chunkB
 	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
-		VaultRoot:  vaultRoot,
-		ChunkRoot:  filepath.Join(vaultRoot, "chunks"),
-		FSM:        fsm,
-		Locate:     chunking.VaultSegmentLocator{Root: vaultRoot},
-		Applier:    applier,
-		IsLeader:   func() bool { return true },
+		VaultRoot: vaultRoot,
+		ChunkRoot: filepath.Join(vaultRoot, "chunks"),
+		FSM:       fsm,
+		Locate:    chunking.VaultSegmentLocator{Root: vaultRoot},
+		Applier:   applier,
+		IsLeader:  func() bool { return true },
 		NewChunkID: func() chunk.ChunkID {
 			id := nextChunk
 			if id == chunkB {
@@ -1013,13 +1013,13 @@ func TestPlannerCatchUpAppliesRefsBeforeSealAtMaxRecords(t *testing.T) {
 	applier := &fsmApplier{fsm: fsm}
 	mgr := chunking.New(chunking.Config{})
 	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
-		VaultRoot:  vaultRoot,
-		ChunkRoot:  filepath.Join(vaultRoot, "chunks"),
-		FSM:        fsm,
-		Locate:     chunking.VaultSegmentLocator{Root: vaultRoot},
-		Applier:    applier,
-		IsLeader:   func() bool { return true },
-		Policy:     chunking.ManifestRotationPolicy{MaxRecords: 2},
+		VaultRoot: vaultRoot,
+		ChunkRoot: filepath.Join(vaultRoot, "chunks"),
+		FSM:       fsm,
+		Locate:    chunking.VaultSegmentLocator{Root: vaultRoot},
+		Applier:   applier,
+		IsLeader:  func() bool { return true },
+		Policy:    chunking.ManifestRotationPolicy{MaxRecords: 2},
 	}); err != nil {
 		t.Fatal(err)
 	}

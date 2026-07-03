@@ -2,7 +2,6 @@ package chunking
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"time"
 
@@ -111,72 +110,15 @@ func (v *vaultChunking) recoverBuiltGLCB(ctx context.Context, pending *vaultctlf
 	if key.sealedAt.IsZero() {
 		key.sealedAt = result.WriteEnd
 	}
-	v.mu.Lock()
-	if v.doneSealProposed == key {
-		v.mu.Unlock()
-		if !v.clearSealProposedIfLeaderUncommitted(pending, key) {
-			return nil
-		}
-	} else {
-		v.mu.Unlock()
-	}
-
-	v.mu.Lock()
-	v.doneBuild = key
-	v.lastBuild = struct {
-		key    buildKey
-		result BuildResult
-		ok     bool
-	}{key: key, result: result, ok: true}
-	alreadyProposed := v.doneSealProposed == key
-	v.mu.Unlock()
-
-	if v.cfg.Applier == nil || alreadyProposed {
-		return nil
-	}
-	if !v.cfg.IsLeader() {
-		if !v.chunkSealCommitted(pending.ChunkID) {
-			v.mu.Lock()
-			v.doneSealProposed = key
-			v.mu.Unlock()
-		}
-		return nil
-	}
-	v.mu.Lock()
-	v.sealAttemptKey = key
-	v.lastSealAttempt = time.Now()
-	v.mu.Unlock()
-	if err := v.cfg.Applier.Apply(vaultctlfsm.MarshalSealChunk(
-		pending.ChunkID,
-		result.WriteEnd,
-		int64(result.RecordCount),
-		result.Bytes,
-		result.IngestStart,
-		result.IngestEnd,
-		result.SourceEnd,
-		result.IngestTSMonotonic,
-		v.now(),
-	)); err != nil {
+	v.progress.markBuilt(key, result)
+	applied, err := v.proposeSealOnce(ctx, pending, key, result)
+	if err != nil {
 		return err
 	}
-	if !v.chunkSealCommitted(pending.ChunkID) {
-		return fmt.Errorf("chunking: CmdSealChunk did not commit seal for %s", pending.ChunkID)
-	}
-	v.mu.Lock()
-	v.doneSealProposed = key
-	v.mu.Unlock()
-	v.afterSealBuild(ctx, pending)
-
-	if v.cfg.OnBuilt != nil {
-		v.mu.Lock()
-		fire := v.doneOnBuilt != key
-		if fire {
-			v.doneOnBuilt = key
-		}
-		v.mu.Unlock()
-		if fire {
-			v.cfg.OnBuilt(pending.ChunkID)
-		}
+	if applied {
+		// Restart lost the in-memory GLCB registration; fire OnBuilt so the
+		// recovered chunk is queryable on this home.
+		v.fireOnBuiltOnce(pending, key, true)
 	}
 	return nil
 }
