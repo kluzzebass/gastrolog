@@ -133,7 +133,7 @@ func TestStrategyDistribution(t *testing.T) {
 	}
 
 	want := map[routing.Strategy]int{
-		routing.RouteLocal:    46,
+		routing.RouteLocal:    47,
 		routing.RouteLeader:   37,
 		routing.RouteTargeted: 11,
 		routing.RouteFanOut:   7,
@@ -151,8 +151,8 @@ func TestStrategyDistribution(t *testing.T) {
 	for _, c := range counts {
 		total += c
 	}
-	if total != 101 {
-		t.Errorf("total procedures: got %d, want 101", total)
+	if total != 102 {
+		t.Errorf("total procedures: got %d, want 102", total)
 	}
 }
 
