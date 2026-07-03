@@ -10,6 +10,13 @@ import (
 
 // Regression: ImportRecords must not hold m.mu across the write loop.
 // Replication imports large sealed chunks; List() blocked the UI for minutes.
+//
+// The record iterator parks the import mid-loop until released, so List must
+// complete while the import is provably inside its write loop. If
+// ImportRecords held m.mu across the loop, List could not return until the
+// iterator is released — deterministic under any machine load, unlike the
+// previous wall-clock race that both false-positived under full-suite -race
+// load and false-negatived when a lock-holding import finished quickly.
 func TestImportRecordsDoesNotBlockList(t *testing.T) {
 	t.Parallel()
 
@@ -20,10 +27,20 @@ func TestImportRecordsDoesNotBlockList(t *testing.T) {
 	}
 	defer func() { _ = cm.Close() }()
 
-	const n = 5000
+	const n = 8
 	cid := chunk.NewChunkID()
+	entered := make(chan struct{})
+	release := make(chan struct{})
 	var idx int
 	iter := chunk.RecordIterator(func() (chunk.Record, error) {
+		switch idx {
+		case 0:
+			close(entered)
+		case 1:
+			// The import already consumed and wrote record 0; park it inside
+			// the write loop until List has proven it can run concurrently.
+			<-release
+		}
 		if idx >= n {
 			return chunk.Record{}, chunk.ErrNoMoreRecords
 		}
@@ -34,41 +51,49 @@ func TestImportRecordsDoesNotBlockList(t *testing.T) {
 		}, nil
 	})
 
+	// unpark releases the parked import exactly once; the failure paths call
+	// it before t.Fatal so cleanup (cm.Close needs m.mu) never wedges behind
+	// a lock-holding import.
+	var releaseOnce sync.Once
+	unpark := func() { releaseOnce.Do(func() { close(release) }) }
+	defer unpark()
+
 	importDone := make(chan error, 1)
 	go func() {
 		_, err := cm.ImportRecords(cid, iter)
 		importDone <- err
 	}()
 
-	deadline := time.After(2 * time.Second)
-	for {
-		listDone := make(chan error, 1)
-		go func() {
-			_, err := cm.List()
-			listDone <- err
-		}()
-		select {
-		case err := <-listDone:
-			if err != nil {
-				t.Fatalf("List during import: %v", err)
-			}
-			select {
-			case err := <-importDone:
-				if err != nil {
-					t.Fatalf("ImportRecords: %v", err)
-				}
-				return
-			case <-time.After(50 * time.Millisecond):
-				continue
-			}
-		case <-deadline:
-			t.Fatal("List blocked while ImportRecords was writing")
-		case err := <-importDone:
-			if err != nil {
-				t.Fatalf("ImportRecords finished early: %v", err)
-			}
-			return
+	select {
+	case <-entered:
+	case <-time.After(30 * time.Second):
+		unpark()
+		t.Fatal("ImportRecords never called the record iterator")
+	}
+
+	listDone := make(chan error, 1)
+	go func() {
+		_, err := cm.List()
+		listDone <- err
+	}()
+	select {
+	case err := <-listDone:
+		if err != nil {
+			t.Fatalf("List during import: %v", err)
 		}
+	case <-time.After(30 * time.Second):
+		unpark()
+		t.Fatal("List blocked while ImportRecords was inside its write loop")
+	}
+
+	unpark()
+	select {
+	case err := <-importDone:
+		if err != nil {
+			t.Fatalf("ImportRecords: %v", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("ImportRecords did not finish after release")
 	}
 }
 
