@@ -175,20 +175,19 @@ func buildMmapTSIndexRankScanner(
 	chunkID := meta.ID
 	vaultID := b.vaultID
 	filters := b.filters
-	minPos := b.minPos
-	hasMinPos := b.hasMinPos
+	window := b.window()
 
 	return func(yield func(recordWithRef, error) bool) {
 		if q.Reverse() {
 			for rank := end; rank > start; rank-- {
-				if err := yieldMmapTSIndexRank(ctx, yield, cursor, chunkID, vaultID, view, rank-1, q, filters, minPos, hasMinPos); err != nil {
+				if err := yieldMmapTSIndexRank(ctx, yield, cursor, chunkID, vaultID, view, rank-1, q, filters, window); err != nil {
 					return
 				}
 			}
 			return
 		}
 		for rank := start; rank < end; rank++ {
-			if err := yieldMmapTSIndexRank(ctx, yield, cursor, chunkID, vaultID, view, rank, q, filters, minPos, hasMinPos); err != nil {
+			if err := yieldMmapTSIndexRank(ctx, yield, cursor, chunkID, vaultID, view, rank, q, filters, window); err != nil {
 				return
 			}
 		}
@@ -212,20 +211,19 @@ func buildMmapTSIndexFilteredScanner(
 	chunkID := meta.ID
 	vaultID := b.vaultID
 	filters := b.filters
-	minPos := b.minPos
-	hasMinPos := b.hasMinPos
+	window := b.window()
 
 	return func(yield func(recordWithRef, error) bool) {
 		if q.Reverse() {
 			for rank := end; rank > start; rank-- {
-				if err := yieldMmapTSIndexRankFiltered(ctx, yield, cursor, chunkID, vaultID, view, rank-1, q, posSet, filters, minPos, hasMinPos); err != nil {
+				if err := yieldMmapTSIndexRankFiltered(ctx, yield, cursor, chunkID, vaultID, view, rank-1, q, posSet, filters, window); err != nil {
 					return
 				}
 			}
 			return
 		}
 		for rank := start; rank < end; rank++ {
-			if err := yieldMmapTSIndexRankFiltered(ctx, yield, cursor, chunkID, vaultID, view, rank, q, posSet, filters, minPos, hasMinPos); err != nil {
+			if err := yieldMmapTSIndexRankFiltered(ctx, yield, cursor, chunkID, vaultID, view, rank, q, posSet, filters, window); err != nil {
 				return
 			}
 		}
@@ -260,8 +258,7 @@ func yieldMmapTSIndexRank(
 	rank uint64,
 	q Query,
 	filters []recordFilter,
-	minPos uint64,
-	hasMinPos bool,
+	window posWindow,
 ) error {
 	if err := ctx.Err(); err != nil {
 		yield(recordWithRef{VaultID: vaultID}, err)
@@ -274,7 +271,7 @@ func yieldMmapTSIndexRank(
 		return err
 	}
 	pos := uint64(entry.Pos)
-	if hasMinPos && pos < minPos {
+	if !window.contains(pos) {
 		return nil
 	}
 
@@ -310,8 +307,7 @@ func yieldMmapTSIndexRankFiltered(
 	q Query,
 	posSet map[uint64]struct{},
 	filters []recordFilter,
-	minPos uint64,
-	hasMinPos bool,
+	window posWindow,
 ) error {
 	entry, err := view.entryAt(chunkID, rank)
 	if err != nil {
@@ -322,7 +318,7 @@ func yieldMmapTSIndexRankFiltered(
 	if _, ok := posSet[pos]; !ok {
 		return nil
 	}
-	return yieldMmapTSIndexRank(ctx, yield, cursor, chunkID, vaultID, view, rank, q, filters, minPos, hasMinPos)
+	return yieldMmapTSIndexRank(ctx, yield, cursor, chunkID, vaultID, view, rank, q, filters, window)
 }
 
 // errScanStopped is returned internally when yield returns false.

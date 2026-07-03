@@ -689,9 +689,17 @@ func (e *Engine) buildScannerWithManagers(ctx context.Context, cursor chunk.Reco
 
 	setMinPositionsFromBounds(b, q, meta, cm, im)
 
-	// Resume position takes precedence over time-based start.
+	// Resume position takes precedence over time-based start. Direction
+	// decides which bound it is: forward has already returned everything
+	// below the resume position, reverse everything at or above it. Using
+	// minPos for a reverse resume would exclude every remaining record and
+	// silently truncate pagination (gastrolog-i2uman).
 	if startPos != nil {
-		b.setMinPosition(*startPos)
+		if q.Reverse() {
+			b.setMaxPosition(*startPos)
+		} else {
+			b.setMinPosition(*startPos)
+		}
 	}
 
 	// Exact position filter: seek directly to one record.
@@ -937,6 +945,9 @@ func collectBranchPositions(parent *scannerBuilder, branch *querylang.Conjunctio
 	bb := newScannerBuilder(meta.ID)
 	if parent.hasMinPos {
 		bb.setMinPosition(parent.minPos)
+	}
+	if parent.hasMaxPos {
+		bb.setMaxPosition(parent.maxPos)
 	}
 
 	tokens, kv, globs, _ := ConjunctionToFilters(branch)
