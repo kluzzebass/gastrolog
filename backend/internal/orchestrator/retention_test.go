@@ -6,6 +6,7 @@ import (
 	"gastrolog/internal/glid"
 	"log/slog"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,7 +21,12 @@ import (
 // ---------- fake chunk manager ----------
 
 type retentionFakeChunkManager struct {
-	chunks  []chunk.ChunkMeta
+	chunks []chunk.ChunkMeta
+
+	// mu guards deleted: the retention sweep deletes matched chunks from
+	// retentionChunkWorkers goroutines concurrently. Reads after sweep() are
+	// safe without locking (the sweep joins its workers before returning).
+	mu      sync.Mutex
 	deleted []chunk.ChunkID
 }
 
@@ -36,6 +42,8 @@ func (f *retentionFakeChunkManager) List() ([]chunk.ChunkMeta, error) {
 	return f.chunks, nil
 }
 func (f *retentionFakeChunkManager) Delete(id chunk.ChunkID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.deleted = append(f.deleted, id)
 	return nil
 }
@@ -78,6 +86,8 @@ func (f *retentionFakeChunkManager) Close() error                   { return nil
 // ---------- fake index manager ----------
 
 type retentionFakeIndexManager struct {
+	// mu guards deleted; see retentionFakeChunkManager.mu.
+	mu      sync.Mutex
 	deleted []chunk.ChunkID
 }
 
@@ -85,6 +95,8 @@ func (f *retentionFakeIndexManager) BuildIndexes(ctx context.Context, chunkID ch
 	return nil
 }
 func (f *retentionFakeIndexManager) DeleteIndexes(chunkID chunk.ChunkID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.deleted = append(f.deleted, chunkID)
 	return nil
 }
@@ -362,11 +374,12 @@ func TestSetBindingsHotSwap(t *testing.T) {
 	if len(cm.deleted) != 2 {
 		t.Fatalf("expected 2 chunk deletions after rule swap, got %d", len(cm.deleted))
 	}
-	if cm.deleted[0] != id0 {
-		t.Errorf("expected first deleted chunk %s, got %s", id0, cm.deleted[0])
-	}
-	if cm.deleted[1] != id1 {
-		t.Errorf("expected second deleted chunk %s, got %s", id1, cm.deleted[1])
+	// The sweep deletes matched chunks from parallel workers; inter-chunk
+	// order is intentionally unspecified (gastrolog-2fvcb5).
+	for _, id := range []chunk.ChunkID{id0, id1} {
+		if !slices.Contains(cm.deleted, id) {
+			t.Errorf("expected deleted chunk %s, got %v", id, cm.deleted)
+		}
 	}
 }
 
@@ -392,7 +405,7 @@ func TestExpireChunkProposesRequestDelete(t *testing.T) {
 	)
 	vaultInst := &VaultInstance{
 		VaultID: vaultID,
-		Chunks: cm,
+		Chunks:  cm,
 		Indexes: im,
 		FollowerTargets: []system.ReplicationTarget{
 			{NodeID: "node-B", StorageID: "s-B"},
@@ -456,7 +469,7 @@ func TestExpireChunkSkipsLocalOnRequestDeleteFailure(t *testing.T) {
 
 	vaultID := glid.New()
 	vaultInst := &VaultInstance{
-		VaultID:  vaultID,
+		VaultID: vaultID,
 		Chunks:  cm,
 		Indexes: im,
 		ApplyRaftRequestDelete: func(_ chunk.ChunkID, _ string, _ []string) error {
@@ -471,8 +484,8 @@ func TestExpireChunkSkipsLocalOnRequestDeleteFailure(t *testing.T) {
 		cm:         cm,
 		im:         im,
 		reconciler: rec,
-		now:    time.Now,
-		logger: slog.Default(),
+		now:        time.Now,
+		logger:     slog.Default(),
 	}
 
 	r.expireChunk(id, "retention-ttl")
@@ -562,7 +575,6 @@ func TestClusterRetentionSweepDeletesOnAllNodes(t *testing.T) {
 	const keepN = 3
 	rules := []retentionRule{{
 		policy: chunk.NewCountRetentionPolicy(keepN),
-		
 	}}
 	runner := newClusterRetentionRunner(leaderNode.orch, h.vaultID, leaderInst)
 	runner.sweep(rules)
@@ -641,7 +653,6 @@ func TestClusterRetentionSweepWithTTLOnAllNodes(t *testing.T) {
 	frozenNow := time.Now().Add(5 * time.Minute)
 	rules := []retentionRule{{
 		policy: chunk.NewTTLRetentionPolicy(1 * time.Minute),
-		
 	}}
 	runner := newClusterRetentionRunner(leaderNode.orch, h.vaultID, leaderInst)
 	runner.now = func() time.Time { return frozenNow }
@@ -667,7 +678,7 @@ func TestRetentionTargetRefreshesCmOnExistingRunner(t *testing.T) {
 
 	// Vault and instance share the same ID.
 	vaultID := glid.New()
-	
+
 	policyID := glid.New()
 
 	cm1 := &retentionFakeChunkManager{}
@@ -700,7 +711,7 @@ func TestRetentionTargetRefreshesCmOnExistingRunner(t *testing.T) {
 
 	// First call: creates a new runner with cm1/im1.
 	vaultA := &VaultInstance{
-		VaultID:  vaultID,
+		VaultID: vaultID,
 		Chunks:  cm1,
 		Indexes: im1,
 	}
@@ -719,7 +730,7 @@ func TestRetentionTargetRefreshesCmOnExistingRunner(t *testing.T) {
 
 	// Second call with different chunk manager: runner is reused, cm/im refreshed.
 	vaultB := &VaultInstance{
-		VaultID:  vaultID,
+		VaultID: vaultID,
 		Chunks:  cm2,
 		Indexes: im2,
 	}
