@@ -124,7 +124,7 @@ func configureSealedBacking(cfg *Config, params map[string]string) error {
 		return nil
 	}
 
-	store, err := chunkcloud.CreateStore(backing, params)
+	store, err := chunkcloud.CreateStore(backing, params, cfg.Logger)
 	if err != nil {
 		return fmt.Errorf("create %s store for sealed backing: %w", backing, err)
 	}
