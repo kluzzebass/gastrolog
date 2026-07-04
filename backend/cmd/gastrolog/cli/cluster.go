@@ -132,8 +132,8 @@ func newClusterThroughputCmd() *cobra.Command {
 			}
 
 			p.kv([][2]string{
-				{"Ingest Rate", fmt.Sprintf("%.1f rec/s", rs.Msg.IngestedPerSec)},
-				{"Route Rate", fmt.Sprintf("%.1f rec/s", rs.Msg.RoutedPerSec)},
+				{"Ingest Rate", formatRateTriple(rs.Msg.IngestedRate)},
+				{"Route Rate", formatRateTriple(rs.Msg.RoutedRate)},
 				{"Total Ingested", strconv.FormatInt(rs.Msg.TotalIngested, 10)},
 				{"Total Routed", strconv.FormatInt(rs.Msg.TotalRouted, 10)},
 				{"Total Dropped", strconv.FormatInt(rs.Msg.TotalDropped, 10)},
@@ -151,9 +151,9 @@ func newClusterThroughputCmd() *cobra.Command {
 					rows = append(rows, []string{
 						n.Name,
 						vs.Name,
-						fmt.Sprintf("%.1f/s", vs.AppendRecordsPerSec),
-						fmt.Sprintf("%.1f/s", vs.AppendDurablePerSec),
-						formatBytesCLI(vs.AppendBytesPerSec) + "/s",
+						fmt.Sprintf("%.1f/s", vs.AppendRecords.GetInstantPerSec()),
+						fmt.Sprintf("%.1f/s", vs.AppendDurable.GetInstantPerSec()),
+						formatBytesCLI(vs.AppendBytes.GetInstantPerSec()) + "/s",
 						fmt.Sprintf("%d/%d", vs.AppendQueueDepth, vs.AppendQueueCapacity),
 					})
 				}
@@ -165,6 +165,14 @@ func newClusterThroughputCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// formatRateTriple renders instant / ~30s / ~60s averages side by side.
+func formatRateTriple(r *v1.ThroughputRate) string {
+	if r == nil {
+		return "0.0 rec/s"
+	}
+	return fmt.Sprintf("%.1f rec/s (30s: %.1f, 1m: %.1f)", r.InstantPerSec, r.Avg_30SPerSec, r.Avg_60SPerSec)
 }
 
 func formatBytesCLI(b float64) string {

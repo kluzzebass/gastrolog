@@ -174,10 +174,25 @@ type StatsCollector struct {
 
 const peerConnStatsSparkPoints = 20
 
+type trafficSample struct {
+	at   time.Time
+	sent int64
+	recv int64
+}
+
 type peerConnStatsWindow struct {
 	lastSent int64
 	lastRecv int64
 	lastAt   time.Time
+	// samples retains (tick time, counters) for trailing-average rates:
+	// counter delta over the retained sample closest to now-horizon
+	// (gastrolog-4eh5ns). Capped at peerConnStatsSparkPoints (~100s at the
+	// 5s broadcast cadence).
+	samples []trafficSample
+	tx30    float64
+	rx30    float64
+	tx60    float64
+	rx60    float64
 	txRates  []float64
 	rxRates  []float64
 }
@@ -332,13 +347,19 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 				v = &gastrologv1.VaultStats{Id: as.VaultID.ToProto()}
 				stats.Vaults = append(stats.Vaults, v)
 			}
-			recPerSec, bytesPerSec, _, _ := c.observeTrafficWindow(now, "append:"+as.VaultID.String(),
+			ar := c.observeTrafficWindowRates(now, "append:"+as.VaultID.String(),
 				int64(as.RecordsAppended), int64(as.BytesAppended), stepWindows, c.vaultAppendStats) //nolint:gosec // counters < 2^63
-			durPerSec, _, _, _ := c.observeTrafficWindow(now, "durable:"+as.VaultID.String(),
+			dr := c.observeTrafficWindowRates(now, "durable:"+as.VaultID.String(),
 				int64(as.RecordsDurable), 0, stepWindows, c.vaultAppendStats) //nolint:gosec // counter < 2^63
-			v.AppendRecordsPerSec = recPerSec
-			v.AppendBytesPerSec = bytesPerSec
-			v.AppendDurablePerSec = durPerSec
+			v.AppendRecords = &gastrologv1.ThroughputRate{
+				InstantPerSec: ar.txPerSec, Avg_30SPerSec: ar.tx30, Avg_60SPerSec: ar.tx60, Spark: ar.txSpark,
+			}
+			v.AppendBytes = &gastrologv1.ThroughputRate{
+				InstantPerSec: ar.rxPerSec, Avg_30SPerSec: ar.rx30, Avg_60SPerSec: ar.rx60, Spark: ar.rxSpark,
+			}
+			v.AppendDurable = &gastrologv1.ThroughputRate{
+				InstantPerSec: dr.txPerSec, Avg_30SPerSec: dr.tx30, Avg_60SPerSec: dr.tx60, Spark: dr.txSpark,
+			}
 			v.AppendRecordsTotal = as.RecordsAppended
 			v.AppendBytesTotal = as.BytesAppended
 			v.AppendQueueDepth = uint32(as.QueueDepth)  //nolint:gosec
@@ -365,10 +386,14 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 		stats.RouteStatsRouted = rs.Routed
 		stats.RouteStatsFilterActive = rs.FilterActive
 		// Node-level routing throughput windows (gastrolog-4eh5ns).
-		inPerSec, routedPerSec, _, _ := c.observeTrafficWindow(now, "route",
+		rr := c.observeTrafficWindowRates(now, "route",
 			rs.Ingested, rs.Routed, stepWindows, c.routeRateStats)
-		stats.RouteIngestedPerSec = inPerSec
-		stats.RouteRoutedPerSec = routedPerSec
+		stats.RouteIngested = &gastrologv1.ThroughputRate{
+			InstantPerSec: rr.txPerSec, Avg_30SPerSec: rr.tx30, Avg_60SPerSec: rr.tx60, Spark: rr.txSpark,
+		}
+		stats.RouteRouted = &gastrologv1.ThroughputRate{
+			InstantPerSec: rr.rxPerSec, Avg_30SPerSec: rr.rx30, Avg_60SPerSec: rr.rx60, Spark: rr.rxSpark,
+		}
 		for _, vs := range rs.VaultStats {
 			stats.RouteVaultStats = append(stats.RouteVaultStats, &gastrologv1.VaultRouteStats{
 				VaultId:        vs.VaultID.ToProto(),
@@ -525,50 +550,63 @@ func (c *StatsCollector) observePeerTrafficTotal(now time.Time, peer string, sen
 }
 
 func (c *StatsCollector) observeTrafficWindow(now time.Time, key string, sent, recv int64, step bool, store map[string]*peerConnStatsWindow) (txPerSec, rxPerSec float64, txSpark, rxSpark []float64) {
+	r := c.observeTrafficWindowRates(now, key, sent, recv, step, store)
+	return r.txPerSec, r.rxPerSec, r.txSpark, r.rxSpark
+}
+
+// trafficRates is one window observation: instantaneous rates, trailing
+// averages (~30s / ~60s counter deltas), and the per-tick spark history.
+type trafficRates struct {
+	txPerSec, rxPerSec float64
+	tx30, rx30         float64
+	tx60, rx60         float64
+	txSpark, rxSpark   []float64
+}
+
+func (c *StatsCollector) observeTrafficWindowRates(now time.Time, key string, sent, recv int64, step bool, store map[string]*peerConnStatsWindow) trafficRates {
 	if key == "" {
-		return 0, 0, nil, nil
+		return trafficRates{}
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	w := store[key]
 	if w == nil {
-		w = &peerConnStatsWindow{lastSent: sent, lastRecv: recv, lastAt: now}
+		w = &peerConnStatsWindow{lastSent: sent, lastRecv: recv, lastAt: now,
+			samples: []trafficSample{{at: now, sent: sent, recv: recv}}}
 		store[key] = w
-		return 0, 0, nil, nil
+		return trafficRates{}
 	}
 
 	if !step {
-		txSpark = append([]float64(nil), w.txRates...)
-		rxSpark = append([]float64(nil), w.rxRates...)
-		if len(txSpark) > 0 {
-			txPerSec = txSpark[len(txSpark)-1]
-		}
-		if len(rxSpark) > 0 {
-			rxPerSec = rxSpark[len(rxSpark)-1]
-		}
-		return txPerSec, rxPerSec, txSpark, rxSpark
+		return w.snapshotRates()
 	}
 
 	dt := now.Sub(w.lastAt).Seconds()
 	if dt <= 0 {
-		return 0, 0, append([]float64(nil), w.txRates...), append([]float64(nil), w.rxRates...)
+		return w.snapshotRates()
 	}
 
 	if sent < w.lastSent || recv < w.lastRecv {
-		w.lastSent = sent
-		w.lastRecv = recv
-		w.lastAt = now
-		return 0, 0, append([]float64(nil), w.txRates...), append([]float64(nil), w.rxRates...)
+		// Counter reset (process restart): re-anchor everything.
+		*w = peerConnStatsWindow{lastSent: sent, lastRecv: recv, lastAt: now,
+			samples: []trafficSample{{at: now, sent: sent, recv: recv}}}
+		return trafficRates{}
 	}
 
-	txPerSec = float64(sent-w.lastSent) / dt
-	rxPerSec = float64(recv-w.lastRecv) / dt
+	txPerSec := float64(sent-w.lastSent) / dt
+	rxPerSec := float64(recv-w.lastRecv) / dt
+	w.tx30, w.rx30 = trailingRates(w.samples, now, sent, recv, 30*time.Second)
+	w.tx60, w.rx60 = trailingRates(w.samples, now, sent, recv, 60*time.Second)
 
 	w.lastSent = sent
 	w.lastRecv = recv
 	w.lastAt = now
 
+	w.samples = append(w.samples, trafficSample{at: now, sent: sent, recv: recv})
+	if len(w.samples) > peerConnStatsSparkPoints {
+		w.samples = w.samples[len(w.samples)-peerConnStatsSparkPoints:]
+	}
 	w.txRates = append(w.txRates, txPerSec)
 	w.rxRates = append(w.rxRates, rxPerSec)
 	if len(w.txRates) > peerConnStatsSparkPoints {
@@ -578,9 +616,59 @@ func (c *StatsCollector) observeTrafficWindow(now time.Time, key string, sent, r
 		w.rxRates = w.rxRates[len(w.rxRates)-peerConnStatsSparkPoints:]
 	}
 
-	txSpark = append([]float64(nil), w.txRates...)
-	rxSpark = append([]float64(nil), w.rxRates...)
-	return txPerSec, rxPerSec, txSpark, rxSpark
+	return trafficRates{
+		txPerSec: txPerSec, rxPerSec: rxPerSec,
+		tx30: w.tx30, rx30: w.rx30, tx60: w.tx60, rx60: w.rx60,
+		txSpark: append([]float64(nil), w.txRates...),
+		rxSpark: append([]float64(nil), w.rxRates...),
+	}
+}
+
+// snapshotRates returns the last stepped observation without advancing the
+// window (read paths between broadcast ticks).
+func (w *peerConnStatsWindow) snapshotRates() trafficRates {
+	r := trafficRates{
+		tx30: w.tx30, rx30: w.rx30, tx60: w.tx60, rx60: w.rx60,
+		txSpark: append([]float64(nil), w.txRates...),
+		rxSpark: append([]float64(nil), w.rxRates...),
+	}
+	if len(r.txSpark) > 0 {
+		r.txPerSec = r.txSpark[len(r.txSpark)-1]
+	}
+	if len(r.rxSpark) > 0 {
+		r.rxPerSec = r.rxSpark[len(r.rxSpark)-1]
+	}
+	return r
+}
+
+// trailingRates computes average rates over roughly horizon: the counter
+// delta between now and the retained sample whose age is closest to horizon.
+// With a young window (uptime < horizon) it falls back to the oldest sample —
+// an average over the available span rather than a fabricated one.
+func trailingRates(samples []trafficSample, now time.Time, sent, recv int64, horizon time.Duration) (tx, rx float64) {
+	if len(samples) == 0 {
+		return 0, 0
+	}
+	target := now.Add(-horizon)
+	best := samples[0]
+	bestDiff := absDuration(best.at.Sub(target))
+	for _, s := range samples[1:] {
+		if d := absDuration(s.at.Sub(target)); d < bestDiff {
+			best, bestDiff = s, d
+		}
+	}
+	dt := now.Sub(best.at).Seconds()
+	if dt <= 0 {
+		return 0, 0
+	}
+	return float64(sent-best.sent) / dt, float64(recv-best.recv) / dt
+}
+
+func absDuration(d time.Duration) time.Duration {
+	if d < 0 {
+		return -d
+	}
+	return d
 }
 
 // BroadcastJobs sends the current job list to all cluster peers.

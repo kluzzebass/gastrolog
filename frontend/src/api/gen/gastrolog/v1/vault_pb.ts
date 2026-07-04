@@ -1285,7 +1285,66 @@ export class ProcessMemoryStats extends Message<ProcessMemoryStats> {
 
 /**
  * VaultStats provides per-vault statistics.
+ * ThroughputRate is one rolling-window rate series: the instantaneous rate
+ * (delta over the ~5s between stats ticks), trailing averages computed from
+ * counter deltas over the sample ring (~30s and ~60s spans), and the recent
+ * per-tick history for sparklines (gastrolog-4eh5ns).
  *
+ * @generated from message gastrolog.v1.ThroughputRate
+ */
+export class ThroughputRate extends Message<ThroughputRate> {
+  /**
+   * @generated from field: double instant_per_sec = 1;
+   */
+  instantPerSec = 0;
+
+  /**
+   * @generated from field: double avg_30s_per_sec = 2;
+   */
+  avg30sPerSec = 0;
+
+  /**
+   * @generated from field: double avg_60s_per_sec = 3;
+   */
+  avg60sPerSec = 0;
+
+  /**
+   * @generated from field: repeated double spark = 4;
+   */
+  spark: number[] = [];
+
+  constructor(data?: PartialMessage<ThroughputRate>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ThroughputRate";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "instant_per_sec", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
+    { no: 2, name: "avg_30s_per_sec", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
+    { no: 3, name: "avg_60s_per_sec", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
+    { no: 4, name: "spark", kind: "scalar", T: 1 /* ScalarType.DOUBLE */, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ThroughputRate {
+    return new ThroughputRate().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ThroughputRate {
+    return new ThroughputRate().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ThroughputRate {
+    return new ThroughputRate().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ThroughputRate | PlainMessage<ThroughputRate> | undefined, b: ThroughputRate | PlainMessage<ThroughputRate> | undefined): boolean {
+    return proto3.util.equals(ThroughputRate, a, b);
+  }
+}
+
+/**
  * @generated from message gastrolog.v1.VaultStats
  */
 export class VaultStats extends Message<VaultStats> {
@@ -1365,24 +1424,24 @@ export class VaultStats extends Message<VaultStats> {
    * Segmentation append throughput on THIS node (origin side), from the
    * stats collector's rolling windows over the writer's cumulative
    * counters. Zero when the vault has no local segmentation writer.
-   * append_records_per_sec counts frames appended to the working segment;
-   * append_durable_per_sec counts records released by a successful group
-   * commit — the gap between them plus the queue depth is the write-path
+   * append_records counts frames appended to the working segment;
+   * append_durable counts records released by a successful group commit —
+   * the gap between them plus the queue depth is the write-path
    * backpressure picture (gastrolog-4eh5ns).
    *
-   * @generated from field: double append_records_per_sec = 14;
+   * @generated from field: gastrolog.v1.ThroughputRate append_records = 14;
    */
-  appendRecordsPerSec = 0;
+  appendRecords?: ThroughputRate;
 
   /**
-   * @generated from field: double append_bytes_per_sec = 15;
+   * @generated from field: gastrolog.v1.ThroughputRate append_bytes = 15;
    */
-  appendBytesPerSec = 0;
+  appendBytes?: ThroughputRate;
 
   /**
-   * @generated from field: double append_durable_per_sec = 16;
+   * @generated from field: gastrolog.v1.ThroughputRate append_durable = 16;
    */
-  appendDurablePerSec = 0;
+  appendDurable?: ThroughputRate;
 
   /**
    * @generated from field: uint64 append_records_total = 17;
@@ -1425,9 +1484,9 @@ export class VaultStats extends Message<VaultStats> {
     { no: 11, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 12, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 13, name: "raft_applied_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
-    { no: 14, name: "append_records_per_sec", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
-    { no: 15, name: "append_bytes_per_sec", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
-    { no: 16, name: "append_durable_per_sec", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
+    { no: 14, name: "append_records", kind: "message", T: ThroughputRate },
+    { no: 15, name: "append_bytes", kind: "message", T: ThroughputRate },
+    { no: 16, name: "append_durable", kind: "message", T: ThroughputRate },
     { no: 17, name: "append_records_total", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 18, name: "append_bytes_total", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 19, name: "append_queue_depth", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },

@@ -1,4 +1,8 @@
+import { useEffect, useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
+import { Spark } from "../Spark";
+// eslint-disable-next-line no-restricted-imports -- ThroughputRate is a passthrough stats type; no model wrap planned
+import type { ThroughputRate } from "../../api/gen/gastrolog/v1/vault_pb";
 import { useRouteStats } from "../../api/hooks/useRouteStats";
 import { useRoutes, useVaults } from "../../api/hooks";
 import { idFromBytes, type EntityID } from "../../api/model/id";
@@ -75,16 +79,10 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
             variant={Number(stats.totalDropped) > 0 ? "error" : undefined}
           />
           <StatBox label="Drop rate" value={`${dropRate}%`} dark={dark} />
-          <StatBox
-            label="Ingest rate"
-            value={`${formatCount(stats.ingestedPerSec)}/s`}
-            dark={dark}
-          />
-          <StatBox
-            label="Route rate"
-            value={`${formatCount(stats.routedPerSec)}/s`}
-            dark={dark}
-          />
+        </div>
+        <div className={`mt-4 pt-3 border-t grid grid-cols-2 gap-4 ${c("border-ink-border-subtle", "border-light-border-subtle")}`}>
+          <RateBox label="Ingest rate" rate={stats.ingestedRate} dark={dark} />
+          <RateBox label="Route rate" rate={stats.routedRate} dark={dark} />
         </div>
       </div>
 
@@ -177,6 +175,51 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
           No records have been routed yet.
         </div>
       )}
+    </div>
+  );
+}
+
+// useRateHistory accumulates the displayed cluster rate client-side for a
+// sparkline. Per-node sparks are server-side; a cluster-level spark cannot be
+// summed from them (tick phases differ), so this is the honest history of the
+// number actually shown, starting from panel mount.
+function useRateHistory(value: number, cap = 20): number[] {
+  const [history, setHistory] = useState<number[]>([]);
+  useEffect(() => {
+    setHistory((h) => [...h.slice(-(cap - 1)), value]);
+  }, [value, cap]);
+  return history;
+}
+
+// RateBox shows one throughput series: instant rate with a sparkline of its
+// recent values, and the ~30s / ~1m trailing averages underneath.
+function RateBox({
+  label,
+  rate,
+  dark,
+}: Readonly<{ label: string; rate?: ThroughputRate; dark: boolean }>) {
+  const c = useThemeClass(dark);
+  const instant = rate?.instantPerSec ?? 0;
+  const history = useRateHistory(instant);
+
+  return (
+    <div>
+      <div
+        className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-1 ${c("text-text-muted", "text-light-text-muted")}`}
+      >
+        {label}
+      </div>
+      <div className="flex items-center gap-3">
+        <span className={`text-[1.3em] font-mono font-semibold ${c("text-text-bright", "text-light-text-bright")}`}>
+          {formatCount(instant)}/s
+        </span>
+        <span className={c("text-copper/70", "text-copper/60")}>
+          <Spark values={history} />
+        </span>
+      </div>
+      <div className={`mt-0.5 text-[0.75em] font-mono ${c("text-text-muted", "text-light-text-muted")}`}>
+        30s {formatCount(rate?.avg30sPerSec ?? 0)}/s · 1m {formatCount(rate?.avg60sPerSec ?? 0)}/s
+      </div>
     </div>
   );
 }

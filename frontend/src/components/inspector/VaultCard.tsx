@@ -11,6 +11,7 @@ import { ChunkState, type ChunkMeta } from "../../api/gen/gastrolog/v1/vault_pb"
 import type { Vault } from "../../api/model/vault";
 import { protoToInstant, instantToMs, instantToDate, formatDateTimeShort } from "../../utils/temporal";
 import { formatBytes, formatRate } from "../../utils/units";
+import { Spark } from "../Spark";
 import { middleTruncate } from "../../utils/middleTruncate";
 import { leaderNodeId, followerNodeIds } from "../../utils/placement";
 import { Badge } from "../Badge";
@@ -127,6 +128,7 @@ function VaultThroughputSection({
     recordsPerSec: number;
     durablePerSec: number;
     bytesPerSec: number;
+    spark: number[];
     depth: number;
     cap: number;
   }[] = [];
@@ -136,9 +138,10 @@ function VaultThroughputSection({
       if (encode(vs.id) !== vaultId || vs.appendQueueCapacity === 0) continue;
       rows.push({
         node: n.name || encode(n.id).slice(0, 8),
-        recordsPerSec: vs.appendRecordsPerSec,
-        durablePerSec: vs.appendDurablePerSec,
-        bytesPerSec: vs.appendBytesPerSec,
+        recordsPerSec: vs.appendRecords?.instantPerSec ?? 0,
+        durablePerSec: vs.appendDurable?.instantPerSec ?? 0,
+        bytesPerSec: vs.appendBytes?.instantPerSec ?? 0,
+        spark: vs.appendRecords?.spark ?? [],
         depth: vs.appendQueueDepth,
         cap: vs.appendQueueCapacity,
       });
@@ -177,9 +180,12 @@ function VaultThroughputSection({
         {rows.length > 0 && (
           <div className="mt-2 flex flex-col gap-1 text-[0.85em]">
             {rows.map((r) => (
-              <div key={r.node} className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+              <div key={r.node} className="flex flex-wrap items-center gap-x-4 gap-y-1">
                 <span className={`font-mono w-32 truncate ${c("text-text-muted", "text-light-text-muted")}`} title={r.node}>
                   {r.node}
+                </span>
+                <span className={c("text-copper/70", "text-copper/60")}>
+                  <Spark values={r.spark} width={40} height={12} />
                 </span>
                 <span className={mutedMono}>{formatRate(r.recordsPerSec)}/s</span>
                 <span className={mutedMono}>{formatBytes(r.bytesPerSec)}/s</span>

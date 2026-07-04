@@ -227,9 +227,12 @@ func (p *PeerState) AggregateRouteStats() (ingested, dropped, routed int64, filt
 }
 
 // AggregateRouteRates sums live peers' rolling-window routing rates from
-// their NodeStats broadcasts. The caller adds the local node's own rates
-// (gastrolog-4eh5ns).
-func (p *PeerState) AggregateRouteRates() (ingestedPerSec, routedPerSec float64) {
+// their NodeStats broadcasts, per horizon. Sparks are omitted: per-node tick
+// phases differ, so an element-wise sum would fabricate a series no node
+// observed. The caller adds the local node's own rates (gastrolog-4eh5ns).
+func (p *PeerState) AggregateRouteRates() (ingested, routed *gastrologv1.ThroughputRate) {
+	ingested = &gastrologv1.ThroughputRate{}
+	routed = &gastrologv1.ThroughputRate{}
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	now := time.Now()
@@ -237,10 +240,21 @@ func (p *PeerState) AggregateRouteRates() (ingestedPerSec, routedPerSec float64)
 		if now.Sub(e.received) > p.ttl || e.stats == nil {
 			continue
 		}
-		ingestedPerSec += e.stats.RouteIngestedPerSec
-		routedPerSec += e.stats.RouteRoutedPerSec
+		addThroughput(ingested, e.stats.RouteIngested)
+		addThroughput(routed, e.stats.RouteRouted)
 	}
-	return ingestedPerSec, routedPerSec
+	return ingested, routed
+}
+
+// addThroughput accumulates src's per-horizon rates into dst (nil src is a
+// node that has not broadcast rate fields yet).
+func addThroughput(dst, src *gastrologv1.ThroughputRate) {
+	if src == nil {
+		return
+	}
+	dst.InstantPerSec += src.InstantPerSec
+	dst.Avg_30SPerSec += src.Avg_30SPerSec
+	dst.Avg_60SPerSec += src.Avg_60SPerSec
 }
 
 // PeerVaultPipelineDisk is one peer node's broadcast pipeline disk counts for a vault.

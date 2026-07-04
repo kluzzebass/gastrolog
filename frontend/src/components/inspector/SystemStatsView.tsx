@@ -5,6 +5,9 @@ import type { ClusterNode } from "../../api/gen/gastrolog/v1/lifecycle_pb";
 // eslint-disable-next-line no-restricted-imports -- NodeStats is a passthrough type from Node.stats; no model wrap planned
 import type { NodeStats } from "../../api/gen/gastrolog/v1/cluster_pb";
 import { formatBytes, formatRate } from "../../utils/units";
+import { Spark } from "../Spark";
+// eslint-disable-next-line no-restricted-imports -- ThroughputRate is a passthrough stats type; no model wrap planned
+import type { ThroughputRate } from "../../api/gen/gastrolog/v1/vault_pb";
 
 /**
  * System stats view for a single node, using gossip-broadcast NodeStats.
@@ -101,15 +104,14 @@ function CompactView({
           <CompactDivider dark={dark} />
           <CompactSectionLabel label="Throughput" dark={dark} />
           <div className="grid grid-cols-2 gap-x-6 gap-y-1">
-            <CompactStatRow label="Ingested" value={`${formatRate(stats.routeIngestedPerSec)}/s`} mono dark={dark} />
-            <CompactStatRow label="Routed" value={`${formatRate(stats.routeRoutedPerSec)}/s`} mono dark={dark} />
+            <CompactRateRow label="Ingested" rate={stats.routeIngested} dark={dark} />
+            <CompactRateRow label="Routed" rate={stats.routeRouted} dark={dark} />
           </div>
           {stats.vaults.filter((v) => v.appendQueueCapacity > 0).map((v) => (
             <div key={encode(v.id)} className="grid grid-cols-2 gap-x-6 gap-y-1 mt-1">
-              <CompactStatRow
+              <CompactRateRow
                 label={v.name || encode(v.id).slice(0, 8)}
-                value={`${formatRate(v.appendRecordsPerSec)}/s · ${formatBytes(v.appendBytesPerSec)}/s`}
-                mono
+                rate={v.appendRecords}
                 dark={dark}
               />
               <CompactStatRow
@@ -144,6 +146,35 @@ function CompactView({
 }
 
 // ---- Compact view building blocks ----
+
+// CompactRateRow renders one throughput series: instant rate, sparkline of
+// the server-side per-tick history, and ~30s/~1m trailing averages on hover.
+function CompactRateRow({
+  label,
+  rate,
+  dark,
+}: Readonly<{ label: string; rate?: ThroughputRate; dark: boolean }>) {
+  const c = useThemeClass(dark);
+  const instant = rate?.instantPerSec ?? 0;
+  return (
+    <div
+      className="flex items-baseline justify-between gap-4"
+      title={`30s avg ${formatRate(rate?.avg30sPerSec ?? 0)}/s · 1m avg ${formatRate(rate?.avg60sPerSec ?? 0)}/s`}
+    >
+      <span
+        className={`text-[0.75em] font-medium uppercase tracking-wider shrink-0 ${c("text-text-muted", "text-light-text-muted")}`}
+      >
+        {label}
+      </span>
+      <span className={`flex items-center gap-2 text-[0.8em] font-mono ${c("text-text-muted", "text-light-text-muted")}`}>
+        <span className={c("text-copper/70", "text-copper/60")}>
+          <Spark values={rate?.spark ?? []} width={40} height={12} />
+        </span>
+        {formatRate(instant)}/s
+      </span>
+    </div>
+  );
+}
 
 function CompactStatRow({
   label,
@@ -241,15 +272,15 @@ export function ClusterSummaryView({
     totalGoroutines += s.goroutines;
     totalQueueDepth += s.ingestQueueDepth;
     totalQueueCapacity += s.ingestQueueCapacity;
-    totalIngestRate += s.routeIngestedPerSec;
-    totalRouteRate += s.routeRoutedPerSec;
+    totalIngestRate += s.routeIngested?.instantPerSec ?? 0;
+    totalRouteRate += s.routeRouted?.instantPerSec ?? 0;
     for (const v of s.vaults) {
       totalVaults++;
       totalRecords += Number(v.recordCount);
       totalBytes += Number(v.dataBytes);
       totalChunks += Number(v.chunkCount);
-      totalAppendRate += v.appendRecordsPerSec;
-      totalAppendBytesRate += v.appendBytesPerSec;
+      totalAppendRate += v.appendRecords?.instantPerSec ?? 0;
+      totalAppendBytesRate += v.appendBytes?.instantPerSec ?? 0;
     }
   }
 

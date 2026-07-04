@@ -6,6 +6,7 @@ option go_package = "gastrolog/api/gen/gastrolog/v1;gastrologv1";
 
 import "google/protobuf/timestamp.proto";
 import "gastrolog/v1/storage.proto";
+import "gastrolog/v1/vault.proto";
 
 // SystemService provides configuration management.
 service SystemService {
@@ -975,10 +976,12 @@ message GetRouteStatsResponse {
   // Per-route counters.
   repeated PerRouteStats route_stats = 6;
 
-  // Cluster-total routing throughput: sum of every node's rolling-window
-  // rates from the NodeStats broadcast (gastrolog-4eh5ns).
-  double ingested_per_sec = 7;
-  double routed_per_sec = 8;
+  // Cluster-total routing throughput: per-horizon sums of every node's
+  // rolling-window rates from the NodeStats broadcast. Sparks are omitted
+  // at cluster level — per-node tick phases differ, so element-wise sums
+  // would fabricate a series no node observed (gastrolog-4eh5ns).
+  gastrolog.v1.ThroughputRate ingested_rate = 7;
+  gastrolog.v1.ThroughputRate routed_rate = 8;
 }
 
 message VaultRouteStats {

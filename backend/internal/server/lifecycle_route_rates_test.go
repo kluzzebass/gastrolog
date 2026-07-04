@@ -21,8 +21,8 @@ func (s *stubStreamPeerRates) AggregateRouteStats() (int64, int64, int64, bool, 
 	return 0, 0, 0, false, nil, nil
 }
 
-func (s *stubStreamPeerRates) AggregateRouteRates() (float64, float64) {
-	return s.in, s.routed
+func (s *stubStreamPeerRates) AggregateRouteRates() (*gastrologv1.ThroughputRate, *gastrologv1.ThroughputRate) {
+	return &gastrologv1.ThroughputRate{InstantPerSec: s.in}, &gastrologv1.ThroughputRate{InstantPerSec: s.routed}
 }
 
 func TestBuildRouteStatsIncludesThroughputRates(t *testing.T) {
@@ -38,16 +38,19 @@ func TestBuildRouteStatsIncludesThroughputRates(t *testing.T) {
 	t.Cleanup(orch.Close)
 
 	localStats := func() *gastrologv1.NodeStats {
-		return &gastrologv1.NodeStats{RouteIngestedPerSec: 40, RouteRoutedPerSec: 30}
+		return &gastrologv1.NodeStats{
+			RouteIngested: &gastrologv1.ThroughputRate{InstantPerSec: 40},
+			RouteRouted:   &gastrologv1.ThroughputRate{InstantPerSec: 30},
+		}
 	}
 	srv := NewLifecycleServer(orch, nil, nil, cfgStore, "node-a", "", nil, localStats, nil)
 	srv.SetPeerRouteStats(&stubStreamPeerRates{in: 10, routed: 5})
 
 	resp := srv.buildRouteStats()
-	if got := resp.IngestedPerSec; got != 50 {
-		t.Fatalf("stream IngestedPerSec = %v, want 50 (40 local + 10 peers)", got)
+	if got := resp.IngestedRate.GetInstantPerSec(); got != 50 {
+		t.Fatalf("stream ingested instant = %v, want 50 (40 local + 10 peers)", got)
 	}
-	if got := resp.RoutedPerSec; got != 35 {
-		t.Fatalf("stream RoutedPerSec = %v, want 35 (30 local + 5 peers)", got)
+	if got := resp.RoutedRate.GetInstantPerSec(); got != 35 {
+		t.Fatalf("stream routed instant = %v, want 35 (30 local + 5 peers)", got)
 	}
 }

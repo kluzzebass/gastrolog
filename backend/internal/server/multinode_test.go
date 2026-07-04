@@ -331,8 +331,8 @@ func (p *mnPeerRouteStats) AggregateRouteStats() (ingested, dropped, routed int6
 // AggregateRouteRates: the multinode harness has no stats-collector windows,
 // so peer rates are zero — the RPC's rate fields are exercised by the
 // cluster-package window tests.
-func (p *mnPeerRouteStats) AggregateRouteRates() (ingestedPerSec, routedPerSec float64) {
-	return 0, 0
+func (p *mnPeerRouteStats) AggregateRouteRates() (*gastrologv1.ThroughputRate, *gastrologv1.ThroughputRate) {
+	return &gastrologv1.ThroughputRate{}, &gastrologv1.ThroughputRate{}
 }
 
 // mnPeerIngesterStats implements PeerIngesterStatsProvider by scanning all

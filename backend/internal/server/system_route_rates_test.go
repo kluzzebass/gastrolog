@@ -23,8 +23,9 @@ func (s *stubPeerRouteRates) AggregateRouteStats() (int64, int64, int64, bool, [
 	return 0, 0, 0, false, nil, nil
 }
 
-func (s *stubPeerRouteRates) AggregateRouteRates() (float64, float64) {
-	return s.in, s.routed
+func (s *stubPeerRouteRates) AggregateRouteRates() (*gastrologv1.ThroughputRate, *gastrologv1.ThroughputRate) {
+	return &gastrologv1.ThroughputRate{InstantPerSec: s.in, Avg_30SPerSec: s.in / 2, Avg_60SPerSec: s.in / 4},
+		&gastrologv1.ThroughputRate{InstantPerSec: s.routed}
 }
 
 func TestGetRouteStatsSumsLocalAndPeerRates(t *testing.T) {
@@ -44,7 +45,10 @@ func TestGetRouteStatsSumsLocalAndPeerRates(t *testing.T) {
 		CfgStore:       cfgStore,
 		PeerRouteStats: &stubPeerRouteRates{in: 75, routed: 60},
 		LocalStats: func() *gastrologv1.NodeStats {
-			return &gastrologv1.NodeStats{RouteIngestedPerSec: 25, RouteRoutedPerSec: 15}
+			return &gastrologv1.NodeStats{
+				RouteIngested: &gastrologv1.ThroughputRate{InstantPerSec: 25, Avg_30SPerSec: 20, Avg_60SPerSec: 10},
+				RouteRouted:   &gastrologv1.ThroughputRate{InstantPerSec: 15},
+			}
 		},
 	})
 
@@ -52,10 +56,16 @@ func TestGetRouteStatsSumsLocalAndPeerRates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRouteStats: %v", err)
 	}
-	if got := resp.Msg.IngestedPerSec; got != 100 {
-		t.Fatalf("IngestedPerSec = %v, want 100 (25 local + 75 peers)", got)
+	if got := resp.Msg.IngestedRate.GetInstantPerSec(); got != 100 {
+		t.Fatalf("ingested instant = %v, want 100 (25 local + 75 peers)", got)
 	}
-	if got := resp.Msg.RoutedPerSec; got != 75 {
-		t.Fatalf("RoutedPerSec = %v, want 75 (15 local + 60 peers)", got)
+	if got := resp.Msg.IngestedRate.GetAvg_30SPerSec(); got != 57.5 {
+		t.Fatalf("ingested 30s = %v, want 57.5 (20 local + 37.5 peers)", got)
+	}
+	if got := resp.Msg.IngestedRate.GetAvg_60SPerSec(); got != 28.75 {
+		t.Fatalf("ingested 60s = %v, want 28.75 (10 local + 18.75 peers)", got)
+	}
+	if got := resp.Msg.RoutedRate.GetInstantPerSec(); got != 75 {
+		t.Fatalf("routed instant = %v, want 75 (15 local + 60 peers)", got)
 	}
 }

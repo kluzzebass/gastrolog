@@ -2,6 +2,7 @@
  * Cluster-port traffic per peer link — each lane merges this node's outbound
  * connection with the peer's outbound connection back (both directions).
  */
+import { Spark } from "../Spark";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { formatBytes } from "../../utils";
 import { useVaults } from "../../api/hooks";
@@ -280,29 +281,4 @@ function MetricCell({
   );
 }
 
-function Spark({ values }: Readonly<{ values: readonly number[] }>) {
-  if (values.length < 2) {
-    return <svg width="56" height="16" aria-hidden="true" />;
-  }
-  const w = 56;
-  const h = 16;
-  const max = Math.max(...values, 1);
-  const step = w / (values.length - 1);
-  const points = values
-    .map((v, i) => {
-      const x = i * step;
-      const y = h - (v / max) * h;
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(" ");
-  return (
-    <svg width={w} height={h} aria-hidden="true">
-      <polyline
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        points={points}
-      />
-    </svg>
-  );
-}
+

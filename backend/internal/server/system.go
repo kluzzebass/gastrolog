@@ -52,7 +52,7 @@ type PeerIngesterStatsProvider interface {
 // Implemented by cluster.PeerState; nil in single-node mode.
 type PeerRouteStatsProvider interface {
 	AggregateRouteStats() (ingested, dropped, routed int64, filterActive bool, vaultStats []*apiv1.VaultRouteStats, routeStats []*apiv1.PerRouteStats)
-	AggregateRouteRates() (ingestedPerSec, routedPerSec float64)
+	AggregateRouteRates() (ingested, routed *apiv1.ThroughputRate)
 }
 
 // SystemServerConfig holds all dependencies for SystemServer construction.

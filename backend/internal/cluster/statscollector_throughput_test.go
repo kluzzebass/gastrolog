@@ -62,8 +62,9 @@ func TestStatsCollector_ThroughputRates(t *testing.T) {
 	stats := collector.CollectLocalTick(t0)
 	// First tick initializes the windows: rates zero, totals pass through.
 	v := findVaultStats(t, stats, vaultID)
-	if v.AppendRecordsPerSec != 0 || stats.RouteIngestedPerSec != 0 {
-		t.Fatalf("first tick rates = %v/%v, want 0 (window init)", v.AppendRecordsPerSec, stats.RouteIngestedPerSec)
+	if v.AppendRecords.GetInstantPerSec() != 0 || stats.RouteIngested.GetInstantPerSec() != 0 {
+		t.Fatalf("first tick rates = %v/%v, want 0 (window init)",
+			v.AppendRecords.GetInstantPerSec(), stats.RouteIngested.GetInstantPerSec())
 	}
 	if v.AppendRecordsTotal != 1000 || v.AppendBytesTotal != 10000 {
 		t.Fatalf("totals = %d/%d, want 1000/10000", v.AppendRecordsTotal, v.AppendBytesTotal)
@@ -81,11 +82,43 @@ func TestStatsCollector_ThroughputRates(t *testing.T) {
 
 	stats = collector.CollectLocalTick(t0.Add(2 * time.Second))
 	v = findVaultStats(t, stats, vaultID)
-	assertRate(t, "append_records_per_sec", v.AppendRecordsPerSec, 150)
-	assertRate(t, "append_bytes_per_sec", v.AppendBytesPerSec, 1500)
-	assertRate(t, "append_durable_per_sec", v.AppendDurablePerSec, 100)
-	assertRate(t, "route_ingested_per_sec", stats.RouteIngestedPerSec, 50)
-	assertRate(t, "route_routed_per_sec", stats.RouteRoutedPerSec, 25)
+	assertRate(t, "append_records instant", v.AppendRecords.GetInstantPerSec(), 150)
+	assertRate(t, "append_bytes instant", v.AppendBytes.GetInstantPerSec(), 1500)
+	assertRate(t, "append_durable instant", v.AppendDurable.GetInstantPerSec(), 100)
+	assertRate(t, "route_ingested instant", stats.RouteIngested.GetInstantPerSec(), 50)
+	assertRate(t, "route_routed instant", stats.RouteRouted.GetInstantPerSec(), 25)
+	if len(stats.RouteIngested.Spark) != 1 {
+		t.Fatalf("route spark len = %d, want 1 after one stepped tick", len(stats.RouteIngested.Spark))
+	}
+}
+
+// TestStatsCollector_TrailingAverages: 30s/60s averages come from counter
+// deltas over the sample ring, not means of instant samples — a burst then
+// silence averages down smoothly.
+func TestStatsCollector_TrailingAverages(t *testing.T) {
+	t.Parallel()
+	provider := &stubStatsProvider{route: StatsRouteSnapshot{Ingested: 0, Routed: 0}}
+	collector := NewStatsCollector(StatsCollectorConfig{
+		Stats:      provider,
+		NodeID:     "node-a",
+		NodeNameFn: func() string { return "node-a" },
+	})
+
+	// 13 ticks, 5s apart: +1000 ingested per tick for the first 6 intervals,
+	// then flat. At t=60s: instant 0; last 30s = 0; last 60s spans the burst.
+	t0 := time.Now()
+	var stats *gastrologv1.NodeStats
+	for i := 0; i <= 12; i++ {
+		if i > 0 && i <= 6 {
+			provider.route.Ingested += 1000 * 5 // 1000 rec/s for 5s
+		}
+		stats = collector.CollectLocalTick(t0.Add(time.Duration(i) * 5 * time.Second))
+	}
+	// t=60s. Burst delivered 30000 records between t0 and t=30s.
+	assertRate(t, "instant after silence", stats.RouteIngested.GetInstantPerSec()+1, 1) // 0
+	assertRate(t, "30s avg after silence", stats.RouteIngested.GetAvg_30SPerSec()+1, 1) // 0
+	// 60s span covers the whole burst: 30000 records / 60s = 500/s.
+	assertRate(t, "60s avg spans burst", stats.RouteIngested.GetAvg_60SPerSec(), 500)
 }
 
 func findVaultStats(t *testing.T, stats *gastrologv1.NodeStats, vaultID glid.GLID) *gastrologv1.VaultStats {
@@ -110,12 +143,22 @@ func assertRate(t *testing.T, name string, got, want float64) {
 func TestPeerState_AggregateRouteRates(t *testing.T) {
 	t.Parallel()
 	ps := NewPeerState(time.Minute)
-	ps.Update("node-b", &gastrologv1.NodeStats{RouteIngestedPerSec: 100, RouteRoutedPerSec: 80}, time.Now())
-	ps.Update("node-c", &gastrologv1.NodeStats{RouteIngestedPerSec: 25, RouteRoutedPerSec: 20}, time.Now())
+	ps.Update("node-b", &gastrologv1.NodeStats{
+		RouteIngested: &gastrologv1.ThroughputRate{InstantPerSec: 100, Avg_30SPerSec: 90, Avg_60SPerSec: 85},
+		RouteRouted:   &gastrologv1.ThroughputRate{InstantPerSec: 80},
+	}, time.Now())
+	ps.Update("node-c", &gastrologv1.NodeStats{
+		RouteIngested: &gastrologv1.ThroughputRate{InstantPerSec: 25, Avg_30SPerSec: 10, Avg_60SPerSec: 5},
+		RouteRouted:   &gastrologv1.ThroughputRate{InstantPerSec: 20},
+	}, time.Now())
 	// Expired entries must not count.
-	ps.Update("node-dead", &gastrologv1.NodeStats{RouteIngestedPerSec: 999, RouteRoutedPerSec: 999}, time.Now().Add(-2*time.Minute))
+	ps.Update("node-dead", &gastrologv1.NodeStats{
+		RouteIngested: &gastrologv1.ThroughputRate{InstantPerSec: 999},
+	}, time.Now().Add(-2*time.Minute))
 
 	in, routed := ps.AggregateRouteRates()
-	assertRate(t, "aggregate ingested", in, 125)
-	assertRate(t, "aggregate routed", routed, 100)
+	assertRate(t, "aggregate ingested instant", in.InstantPerSec, 125)
+	assertRate(t, "aggregate ingested 30s", in.Avg_30SPerSec, 100)
+	assertRate(t, "aggregate ingested 60s", in.Avg_60SPerSec, 90)
+	assertRate(t, "aggregate routed instant", routed.InstantPerSec, 100)
 }

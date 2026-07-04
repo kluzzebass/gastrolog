@@ -6,7 +6,7 @@
 import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialMessage, PlainMessage } from "@bufbuild/protobuf";
 import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
 import { Job } from "./job_pb.js";
-import { ChunkAnalysis, ChunkChangeOp, ChunkMeta, ChunkValidation, ExportRecord, IndexInfo, VaultStats } from "./vault_pb.js";
+import { ChunkAnalysis, ChunkChangeOp, ChunkMeta, ChunkValidation, ExportRecord, IndexInfo, ThroughputRate, VaultStats } from "./vault_pb.js";
 import { PerRouteStats, VaultRouteStats } from "./system_pb.js";
 import { ChunkPlan, HistogramBucket, TableResult } from "./query_pb.js";
 
@@ -671,14 +671,14 @@ export class NodeStats extends Message<NodeStats> {
    * windows over the cumulative route counters (fields 28/30). Cluster
    * totals are the sum across nodes (gastrolog-4eh5ns).
    *
-   * @generated from field: double route_ingested_per_sec = 39;
+   * @generated from field: gastrolog.v1.ThroughputRate route_ingested = 39;
    */
-  routeIngestedPerSec = 0;
+  routeIngested?: ThroughputRate;
 
   /**
-   * @generated from field: double route_routed_per_sec = 40;
+   * @generated from field: gastrolog.v1.ThroughputRate route_routed = 40;
    */
-  routeRoutedPerSec = 0;
+  routeRouted?: ThroughputRate;
 
   constructor(data?: PartialMessage<NodeStats>) {
     super();
@@ -726,8 +726,8 @@ export class NodeStats extends Message<NodeStats> {
     { no: 38, name: "peer_traffic_totals", kind: "message", T: PeerTrafficTotal, repeated: true },
     { no: 36, name: "vault_pipeline_disk", kind: "message", T: VaultPipelineNodeDisk, repeated: true },
     { no: 37, name: "storage_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 39, name: "route_ingested_per_sec", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
-    { no: 40, name: "route_routed_per_sec", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
+    { no: 39, name: "route_ingested", kind: "message", T: ThroughputRate },
+    { no: 40, name: "route_routed", kind: "message", T: ThroughputRate },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): NodeStats {

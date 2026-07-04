@@ -141,8 +141,8 @@ message NodeStats {
   // Routing throughput on this node, from the stats collector's rolling
   // windows over the cumulative route counters (fields 28/30). Cluster
   // totals are the sum across nodes (gastrolog-4eh5ns).
-  double route_ingested_per_sec = 39;
-  double route_routed_per_sec = 40;
+  gastrolog.v1.ThroughputRate route_ingested = 39;
+  gastrolog.v1.ThroughputRate route_routed = 40;
 }
 
 // VaultPipelineNodeDisk is one vault's local pipeline storage areas on a

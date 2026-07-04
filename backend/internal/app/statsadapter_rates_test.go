@@ -80,17 +80,21 @@ func TestStatsCollectorRouteRatesEndToEnd(t *testing.T) {
 
 	// Tick 2, nominally 5s later: rate must be n/5 records per second.
 	tick := collector.CollectLocalTick(t0.Add(5 * time.Second))
-	if tick.RouteIngestedPerSec <= 0 {
-		t.Fatalf("tick RouteIngestedPerSec = %v after %d records, want > 0", tick.RouteIngestedPerSec, n)
+	if tick.RouteIngested.GetInstantPerSec() <= 0 {
+		t.Fatalf("tick route ingested = %v after %d records, want > 0", tick.RouteIngested.GetInstantPerSec(), n)
 	}
 
 	// The snapshot path (what GetRouteStats reads via LocalStats) must report
-	// the last stepped rate, not zero.
+	// the last stepped rates — instant AND trailing averages.
 	snap := collector.CollectLocalSnapshot()
-	if snap.RouteIngestedPerSec <= 0 {
-		t.Fatalf("snapshot RouteIngestedPerSec = %v, want > 0 (last stepped rate)", snap.RouteIngestedPerSec)
+	if snap.RouteIngested.GetInstantPerSec() <= 0 {
+		t.Fatalf("snapshot route ingested = %v, want > 0 (last stepped rate)", snap.RouteIngested.GetInstantPerSec())
 	}
-	if snap.RouteRoutedPerSec <= 0 {
-		t.Fatalf("snapshot RouteRoutedPerSec = %v, want > 0", snap.RouteRoutedPerSec)
+	if snap.RouteRouted.GetInstantPerSec() <= 0 {
+		t.Fatalf("snapshot route routed = %v, want > 0", snap.RouteRouted.GetInstantPerSec())
+	}
+	if snap.RouteIngested.GetAvg_30SPerSec() <= 0 || snap.RouteIngested.GetAvg_60SPerSec() <= 0 {
+		t.Fatalf("snapshot trailing averages = %v/%v, want > 0",
+			snap.RouteIngested.GetAvg_30SPerSec(), snap.RouteIngested.GetAvg_60SPerSec())
 	}
 }
