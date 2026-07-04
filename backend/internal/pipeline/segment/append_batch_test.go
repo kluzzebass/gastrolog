@@ -141,3 +141,90 @@ func TestAppendFramesRecoversTornBatchTail(t *testing.T) {
 		t.Fatalf("reconciled RecordCount = %d, want 3", sf2.Header().RecordCount)
 	}
 }
+
+// TestFinalizeFromMemoryMatchesDiskScan: writer-created segments finalize via
+// the in-memory index build (gastrolog-oin19g); crash-recovered segments
+// (Open path, no capture) use the disk scan. Both must produce byte-identical
+// files — same tails, same sort, same checksums, same header.
+func TestFinalizeFromMemoryMatchesDiskScan(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	meta := segment.Meta{ID: glid.New(), VaultID: glid.New()}
+
+	frames := make([]segment.Frame, 32)
+	for i := range frames {
+		frames[i] = encodeSample(t, uint32(len(frames)-i)) //nolint:gosec // G115: small test index
+	}
+
+	write := func(name string) string {
+		path := filepath.Join(dir, name)
+		sf, err := segment.Create(path, meta)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := sf.AppendFrames(frames); err != nil {
+			t.Fatal(err)
+		}
+		if err := sf.Sync(); err != nil {
+			t.Fatal(err)
+		}
+		if err := sf.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+
+	// Fast path: reopen the writer's File? No — Create+Append keeps the
+	// in-memory capture, so finalize directly on a fresh writer instance.
+	fastPath := filepath.Join(dir, "fast")
+	sfFast, err := segment.Create(fastPath, meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sfFast.AppendFrames(frames); err != nil {
+		t.Fatal(err)
+	}
+	if err := sfFast.Finalize(); err != nil {
+		t.Fatal(err)
+	}
+	if err := sfFast.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Disk path: identical unfinalized file, reopened via Open (no capture).
+	diskPath := write("disk")
+	sfDisk, err := segment.Open(diskPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sfDisk.Finalize(); err != nil {
+		t.Fatal(err)
+	}
+	if err := sfDisk.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	fastBytes, err := os.ReadFile(fastPath) //ok:io-readall small test fixture
+	if err != nil {
+		t.Fatal(err)
+	}
+	diskBytes, err := os.ReadFile(diskPath) //ok:io-readall small test fixture
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(fastBytes, diskBytes) {
+		t.Fatalf("in-memory finalize diverges from disk-scan finalize: %d vs %d bytes", len(fastBytes), len(diskBytes))
+	}
+
+	// Both must pass full open-time verification (layout + checksums).
+	for _, p := range []string{fastPath, diskPath} {
+		sf, err := segment.Open(p)
+		if err != nil {
+			t.Fatalf("Open(%s) after finalize: %v", p, err)
+		}
+		if sf.Header().SourceIndexCount != 32 {
+			t.Fatalf("SourceIndexCount = %d, want 32", sf.Header().SourceIndexCount)
+		}
+		_ = sf.Close()
+	}
+}

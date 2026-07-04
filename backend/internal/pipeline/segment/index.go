@@ -3,8 +3,10 @@ package segment
 import (
 	"encoding/binary"
 	"errors"
+	"hash/crc32"
 	"slices"
 	"syscall"
+	"time"
 
 	"gastrolog/internal/format"
 	"gastrolog/internal/record"
@@ -81,8 +83,14 @@ func sortIndexRegion(data []byte) {
 	}
 }
 
-// BuildIndex scans the record region, appends a sorted (EventID, filepos) tail,
-// and updates IndexOffset and checksums. The segment must not already be indexed.
+// BuildIndex appends a sorted (EventID, filepos) tail and updates IndexOffset
+// and checksums. Writer-created segments build both index tails from the
+// in-memory per-frame capture — sort in memory, ONE pwrite per tail, CRCs
+// over the in-memory buffers (gastrolog-oin19g). The disk-scan path below
+// remains for Open-path (crash-recovered) segments, whose capture is absent:
+// it re-reads the file with ~8 preads and issues 2 pwrites per record, which
+// stalled the writer's record loop for the whole rebuild at rotation time.
+// The segment must not already be indexed.
 func (sf *File) BuildIndex() error {
 	if sf.hdr.RecordCount == 0 {
 		return errors.New("empty segment")
@@ -94,6 +102,10 @@ func (sf *File) BuildIndex() error {
 	recordEnd, err := sf.validDataEnd()
 	if err != nil {
 		return err
+	}
+
+	if len(sf.memEntries) == int(sf.hdr.RecordCount) {
+		return sf.buildIndexFromMemory(recordEnd)
 	}
 
 	indexBytes := int64(sf.hdr.RecordCount) * IndexEntrySize
@@ -152,6 +164,83 @@ func (sf *File) BuildIndex() error {
 	if err := sf.buildSourceIndex(recordEnd); err != nil {
 		return err
 	}
+	return sf.writeHeader()
+}
+
+// buildIndexFromMemory writes both index tails from the per-append capture:
+// in-memory sorts, ONE pwrite per tail, checksums over the in-memory buffers.
+// Output is byte-identical to the disk-scan path (same comparators, same
+// entry encodings, same header fields) — enforced by test (gastrolog-oin19g).
+func (sf *File) buildIndexFromMemory(recordEnd uint32) error {
+	entries := make([]memIndexEntry, len(sf.memEntries))
+	copy(entries, sf.memEntries)
+	slices.SortFunc(entries, func(a, b memIndexEntry) int {
+		return compareIndexEntries(a.entry, b.entry)
+	})
+
+	idxBuf := make([]byte, len(entries)*IndexEntrySize)
+	for i := range entries {
+		encodeIndexEntry(idxBuf[i*IndexEntrySize:], entries[i].entry)
+	}
+	if _, err := sf.f.WriteAt(idxBuf, int64(recordEnd)); err != nil {
+		return err
+	}
+	eventIndexEnd := recordEnd + sf.hdr.RecordCount*IndexEntrySize
+
+	// Source index entries reference EventID-order positions; walk the sorted
+	// entries so pos matches what readIndexEntry(pos) would return.
+	var srcEntries []sourceIndexEntry
+	var first, last time.Time
+	for pos, e := range entries {
+		if e.sourceNS == 0 {
+			continue // zero SourceTS is excluded, as in the disk scan
+		}
+		ts := tsFromNanos(e.sourceNS)
+		if len(srcEntries) == 0 {
+			first, last = ts, ts
+		} else {
+			if ts.Before(first) {
+				first = ts
+			}
+			if ts.After(last) {
+				last = ts
+			}
+		}
+		srcEntries = append(srcEntries, sourceIndexEntry{ts: int64(e.sourceNS), pos: uint32(pos)}) //nolint:gosec // G115: pos bounded by RecordCount; nanos fit int64
+	}
+	slices.SortStableFunc(srcEntries, compareSourceIndexEntries)
+
+	sf.hdr.SourceIndexOffset = eventIndexEnd
+	sf.hdr.SourceIndexCount = uint32(len(srcEntries)) //nolint:gosec // G115: bounded by RecordCount
+	sf.hdr.FirstSourceTS = first
+	sf.hdr.LastSourceTS = last
+	sf.hdr.SourceIndexChecksum = 0
+	fileEnd := int64(eventIndexEnd)
+	if len(srcEntries) > 0 {
+		srcBuf := make([]byte, len(srcEntries)*SourceIndexEntrySize)
+		for i, e := range srcEntries {
+			encodeSourceIndexEntry(srcBuf[i*SourceIndexEntrySize:], e)
+		}
+		if _, err := sf.f.WriteAt(srcBuf, int64(eventIndexEnd)); err != nil {
+			return err
+		}
+		sf.hdr.SourceIndexChecksum = crc32.ChecksumIEEE(srcBuf)
+		fileEnd += int64(len(srcBuf))
+	}
+	// Drop anything beyond the tails (a lagging header cannot leave trailing
+	// bytes for writer-created files, but verifyIndexedLayout requires the
+	// exact size, so enforce it the way the disk path's Truncate does).
+	if err := sf.f.Truncate(fileEnd); err != nil {
+		return err
+	}
+
+	sf.hdr.IndexOffset = recordEnd
+	sf.hdr.IndexChecksum = crc32.ChecksumIEEE(idxBuf)
+	sf.dataEnd = recordEnd
+	if sf.recordCRC != nil {
+		sf.hdr.SegmentChecksum = sf.recordCRC.Sum32()
+	}
+	sf.memEntries = nil
 	return sf.writeHeader()
 }
 

@@ -26,6 +26,18 @@ type File struct {
 	recordCRC hash.Hash32 // rolling CRC32/IEEE over [HeaderSize:recordsEnd)
 	dataEnd   uint32      // exclusive end of committed record bytes (hot-path append anchor)
 	batchBuf  []byte      // reused AppendFrames scratch (gastrolog-1ojsm6)
+	// memEntries captures (EventID, filePos, sourceTS) per appended frame so
+	// Finalize can build both index tails from memory instead of re-reading
+	// the whole file (gastrolog-oin19g). Only writer-created segments have a
+	// complete capture; Open-path (recovered) segments fall back to the disk
+	// scan. Freed after BuildIndex.
+	memEntries []memIndexEntry
+}
+
+// memIndexEntry is the in-memory per-frame index capture (gastrolog-oin19g).
+type memIndexEntry struct {
+	entry    IndexEntry
+	sourceNS uint64 // tsNanos(rec.SourceTS); 0 = unset, excluded from source index
 }
 
 // Create initializes a new empty segment file at path.
@@ -153,6 +165,10 @@ func (sf *File) AppendFrames(frames []Frame) error {
 		if _, err := sf.recordCRC.Write(frames[i].Body); err != nil {
 			return err
 		}
+		sf.memEntries = append(sf.memEntries, memIndexEntry{
+			entry:    IndexEntry{EventID: frames[i].Rec.EventID, FilePos: lastFrameStart},
+			sourceNS: tsNanos(frames[i].Rec.SourceTS),
+		})
 	}
 
 	if _, err := sf.f.WriteAt(sf.batchBuf, int64(writeOff)); err != nil {

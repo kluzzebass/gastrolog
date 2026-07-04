@@ -36,7 +36,13 @@ type ClosePolicy struct {
 type Config struct {
 	ClosePolicy ClosePolicy
 	// SyncBatchSize is the max appended frames between fsync calls for
-	// fire-and-forget (no-ack) records. Defaults to 16.
+	// fire-and-forget (no-ack) records. Defaults to 1024. This is a memory
+	// bound, not the durability bound: SyncBatchWindow (2ms) fires first at
+	// realistic rates, so batches size themselves to the ingest rate while
+	// the un-fsynced loss window stays pinned at the window duration
+	// (gastrolog-1ojsm6 — with batched appends, fsync cadence is the write
+	// path's dominant cost; the old default of 16 forced a full fsync every
+	// ~300us under load).
 	SyncBatchSize int
 	// SyncBatchWindow is the max wait before fsyncing a partial fire-and-forget
 	// group. Defaults to 2ms.
@@ -48,7 +54,9 @@ type Config struct {
 	// DisableFsync turns off fsync entirely (durability falls back to the OS page
 	// cache); ack-bearing records ack after the in-memory append. Off by default.
 	DisableFsync bool
-	// EncodeQueueCap is the bounded channel between encode and append stages. Defaults to 64.
+	// EncodeQueueCap is the bounded channel between encode and append stages.
+	// Defaults to 1024 so a 2ms commit window can fill from a fast producer
+	// without blocking it mid-window (gastrolog-1ojsm6).
 	EncodeQueueCap int
 	// CompletedCap is the bounded completed-segment notification queue. Defaults to 512.
 	CompletedCap int
@@ -107,7 +115,7 @@ func (c Config) now() time.Time {
 
 func (c Config) syncBatchSize() int {
 	if c.SyncBatchSize <= 0 {
-		return 16
+		return 1024
 	}
 	return c.SyncBatchSize
 }
