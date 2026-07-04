@@ -157,28 +157,49 @@ func (v *vaultCollect) collectOne(ctx context.Context, ref AssignedSegment) erro
 	v.collectMu.Lock()
 	v.noteHead(ref.SegmentID)
 	v.collectMu.Unlock()
-	_, err = v.commitReceipt(ctx, ref)
-	return err
+	// The holder receipt is committed by the caller's end-of-pass batch
+	// (commitReceipts), never per segment.
+	return nil
 }
 
-// commitReceipt records that this node holds the segment and remembers it so a
-// later pass does not re-commit before the receipt replicates into the holder
-// set. Idempotent at the FSM layer too (CmdAckSegmentHolder de-dups), so a
-// crash between commit and marking is harmless.
-func (v *vaultCollect) commitReceipt(ctx context.Context, ref AssignedSegment) (bool, error) {
-	v.collectMu.Lock()
-	if _, done := v.receipted[ref.SegmentID]; done {
-		v.collectMu.Unlock()
-		return false, nil
-	}
-	v.collectMu.Unlock()
-	if err := v.receipts.CommitHolderReceipt(ctx, ref.VaultID, ref.SegmentID); err != nil {
-		return false, err
+// commitReceipts records this node as holder for every given segment in ONE
+// vault-ctl apply, then marks them locally so later passes skip re-commits.
+// Batching is load-bearing: one Raft round per pass instead of per segment —
+// sequential per-segment applies serialized whole passes (under passMu)
+// behind the publish flood and starved leader-home GLCB builds
+// (gastrolog-38snf4). Idempotent at the FSM layer too (CmdAckSegmentHolder
+// de-dups per segment), so a crash between commit and marking is harmless.
+// Returns how many receipts were freshly committed.
+func (v *vaultCollect) commitReceipts(ctx context.Context, ids []glid.GLID) (int, error) {
+	if len(ids) == 0 {
+		return 0, nil
 	}
 	v.collectMu.Lock()
-	v.receipted[ref.SegmentID] = struct{}{}
+	fresh := make([]glid.GLID, 0, len(ids))
+	seen := make(map[glid.GLID]struct{}, len(ids))
+	for _, id := range ids {
+		if _, done := v.receipted[id]; done {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		fresh = append(fresh, id)
+	}
 	v.collectMu.Unlock()
-	return true, nil
+	if len(fresh) == 0 {
+		return 0, nil
+	}
+	if err := v.receipts.CommitHolderReceipts(ctx, v.vaultID, fresh); err != nil {
+		return 0, err
+	}
+	v.collectMu.Lock()
+	for _, id := range fresh {
+		v.receipted[id] = struct{}{}
+	}
+	v.collectMu.Unlock()
+	return len(fresh), nil
 }
 
 type collectAction int
@@ -207,18 +228,22 @@ func (v *vaultCollect) planCollectAction(ref AssignedSegment) collectAction {
 	return collectPull
 }
 
-func (v *vaultCollect) collectForRef(ctx context.Context, ref AssignedSegment) (bool, error) {
+// collectForRef pulls a segment when needed and reports (pulled, needsAck):
+// needsAck segments are receipt-committed in one batch at the end of the
+// pass (commitReceipts), never per ref.
+func (v *vaultCollect) collectForRef(ctx context.Context, ref AssignedSegment) (pulled, needsAck bool, err error) {
 	switch v.planCollectAction(ref) {
 	case collectSkip:
-		return false, nil
+		return false, false, nil
 	case collectReceiptOnly:
-		committed, err := v.commitReceipt(ctx, ref)
-		return committed, err
+		return false, true, nil
 	case collectPull:
-		err := v.collectOne(ctx, ref)
-		return err == nil, err
+		if err := v.collectOne(ctx, ref); err != nil {
+			return false, false, err
+		}
+		return true, true, nil
 	}
-	return false, nil
+	return false, false, nil
 }
 
 func (v *vaultCollect) collectMissing(ctx context.Context) (bool, error) {
@@ -244,14 +269,25 @@ func (v *vaultCollect) collectMissing(ctx context.Context) (bool, error) {
 
 	var errs []error
 	var progress bool
+	var toAck []glid.GLID
 	for _, ref := range work {
-		made, err := v.collectForRef(ctx, ref)
-		if made {
+		pulled, needsAck, err := v.collectForRef(ctx, ref)
+		if pulled {
 			progress = true
+		}
+		if needsAck {
+			toAck = append(toAck, ref.SegmentID)
 		}
 		if err != nil {
 			errs = append(errs, err)
 		}
+	}
+	committed, err := v.commitReceipts(ctx, toAck)
+	if committed > 0 {
+		progress = true
+	}
+	if err != nil {
+		errs = append(errs, err)
 	}
 	return progress, erragg.SummaryJoin(errs...)
 }
@@ -286,6 +322,7 @@ func (v *vaultCollect) collectSegments(ctx context.Context, segmentIDs []glid.GL
 	v.collectMu.Unlock()
 
 	var errs []error
+	var toAck []glid.GLID
 	for _, segmentID := range ids {
 		if LocalSegmentPresent(v.root, segmentID) {
 			continue
@@ -301,9 +338,16 @@ func (v *vaultCollect) collectSegments(ctx context.Context, segmentIDs []glid.GL
 			SegmentID: segmentID,
 			Checksum:  checksum,
 		}
-		if _, err := v.collectForRef(ctx, ref); err != nil {
+		_, needsAck, err := v.collectForRef(ctx, ref)
+		if needsAck {
+			toAck = append(toAck, segmentID)
+		}
+		if err != nil {
 			errs = append(errs, err)
 		}
+	}
+	if _, err := v.commitReceipts(ctx, toAck); err != nil {
+		errs = append(errs, err)
 	}
 	return erragg.SummaryJoin(errs...)
 }

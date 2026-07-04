@@ -1195,9 +1195,9 @@ type flowCollectionReceipts struct {
 	n  int
 }
 
-func (r *flowCollectionReceipts) CommitHolderReceipt(_ context.Context, _ glid.GLID, _ glid.GLID) error {
+func (r *flowCollectionReceipts) CommitHolderReceipts(_ context.Context, _ glid.GLID, segmentIDs []glid.GLID) error {
 	r.mu.Lock()
-	r.n++
+	r.n += len(segmentIDs)
 	r.mu.Unlock()
 	return nil
 }

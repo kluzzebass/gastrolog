@@ -72,9 +72,9 @@ type recordingReceipts struct {
 	receipts []glid.GLID
 }
 
-func (r *recordingReceipts) CommitHolderReceipt(_ context.Context, _ glid.GLID, segmentID glid.GLID) error {
+func (r *recordingReceipts) CommitHolderReceipts(_ context.Context, _ glid.GLID, segmentIDs []glid.GLID) error {
 	r.mu.Lock()
-	r.receipts = append(r.receipts, segmentID)
+	r.receipts = append(r.receipts, segmentIDs...)
 	r.mu.Unlock()
 	return nil
 }
