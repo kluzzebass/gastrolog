@@ -611,11 +611,15 @@ func (s *LifecycleServer) buildRouteStats() *apiv1.GetRouteStatsResponse {
 		mergePerRouteStats(routeMap, pRouteStats)
 	}
 
+	ingestedPerSec, routedPerSec := clusterRouteRates(s.localStats, s.peerRouteStats)
+
 	resp := &apiv1.GetRouteStatsResponse{
 		TotalIngested:   totalIngested,
 		TotalDropped:    totalDropped,
 		TotalRouted:     totalRouted,
 		FilterSetActive: filterActive,
+		IngestedPerSec:  ingestedPerSec,
+		RoutedPerSec:    routedPerSec,
 	}
 	for _, vs := range vaultMap {
 		resp.VaultStats = append(resp.VaultStats, vs)

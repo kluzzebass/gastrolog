@@ -56,18 +56,7 @@ func (s *SystemServer) GetRouteStats(
 
 	// Cluster-total throughput: local rolling-window rates plus live peers'
 	// broadcast rates (gastrolog-4eh5ns).
-	var ingestedPerSec, routedPerSec float64
-	if s.localStats != nil {
-		if ls := s.localStats(); ls != nil {
-			ingestedPerSec = ls.RouteIngestedPerSec
-			routedPerSec = ls.RouteRoutedPerSec
-		}
-	}
-	if s.peerRouteStats != nil {
-		pIn, pRouted := s.peerRouteStats.AggregateRouteRates()
-		ingestedPerSec += pIn
-		routedPerSec += pRouted
-	}
+	ingestedPerSec, routedPerSec := clusterRouteRates(s.localStats, s.peerRouteStats)
 
 	resp := &apiv1.GetRouteStatsResponse{
 		TotalIngested:   totalIngested,
@@ -109,4 +98,26 @@ func mergePerRouteStats(m map[string]*apiv1.PerRouteStats, stats []*apiv1.PerRou
 		}
 		existing.RecordsMatched += rs.RecordsMatched
 	}
+}
+
+// clusterRouteRates returns cluster-total routing throughput: the local
+// node's rolling-window rates (stats collector snapshot) plus the sum of
+// live peers' broadcast rates. Shared by the GetRouteStats RPC and the
+// WatchSystemStatus stream builder — the stream previously shipped a
+// response without the rate fields, so the UI cache was continuously
+// overwritten with 0/s while the RPC reported correct rates
+// (gastrolog-4eh5ns).
+func clusterRouteRates(localStats func() *apiv1.NodeStats, peers PeerRouteStatsProvider) (ingestedPerSec, routedPerSec float64) {
+	if localStats != nil {
+		if ls := localStats(); ls != nil {
+			ingestedPerSec = ls.RouteIngestedPerSec
+			routedPerSec = ls.RouteRoutedPerSec
+		}
+	}
+	if peers != nil {
+		pIn, pRouted := peers.AggregateRouteRates()
+		ingestedPerSec += pIn
+		routedPerSec += pRouted
+	}
+	return ingestedPerSec, routedPerSec
 }
