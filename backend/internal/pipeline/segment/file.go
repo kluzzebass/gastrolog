@@ -30,9 +30,22 @@ type File struct {
 	// Finalize can build both index tails from memory instead of re-reading
 	// the whole file (gastrolog-oin19g). Only writer-created segments have a
 	// complete capture; Open-path (recovered) segments fall back to the disk
-	// scan. Freed after BuildIndex.
-	memEntries []memIndexEntry
+	// scan. Freed after BuildIndex, and HARD-CAPPED at memIndexEntryCap:
+	// past the cap the capture is dropped (memCaptureOff) and Finalize uses
+	// the disk scan — the capture is an optimization, never a correctness
+	// requirement or a memory liability. The bound holds regardless of the
+	// caller's close policy.
+	memEntries    []memIndexEntry
+	memCaptureOff bool
 }
+
+// memIndexEntryCap bounds the in-memory index capture (~80B/entry → ~21 MiB
+// worst case). The production close policy (8 MiB segments) yields ~30K
+// entries, ~8x under the cap; a missing or misconfigured close policy hits
+// the cap and degrades to the disk-scan finalize instead of growing RAM with
+// the file (gastrolog-oin19g). Var, not const, so tests can exercise the
+// overflow path without 262K appends.
+var memIndexEntryCap = 1 << 18
 
 // memIndexEntry is the in-memory per-frame index capture (gastrolog-oin19g).
 type memIndexEntry struct {
@@ -165,10 +178,16 @@ func (sf *File) AppendFrames(frames []Frame) error {
 		if _, err := sf.recordCRC.Write(frames[i].Body); err != nil {
 			return err
 		}
-		sf.memEntries = append(sf.memEntries, memIndexEntry{
-			entry:    IndexEntry{EventID: frames[i].Rec.EventID, FilePos: lastFrameStart},
-			sourceNS: tsNanos(frames[i].Rec.SourceTS),
-		})
+		if !sf.memCaptureOff {
+			sf.memEntries = append(sf.memEntries, memIndexEntry{
+				entry:    IndexEntry{EventID: frames[i].Rec.EventID, FilePos: lastFrameStart},
+				sourceNS: tsNanos(frames[i].Rec.SourceTS),
+			})
+			if len(sf.memEntries) > memIndexEntryCap {
+				sf.memEntries = nil
+				sf.memCaptureOff = true
+			}
+		}
 	}
 
 	if _, err := sf.f.WriteAt(sf.batchBuf, int64(writeOff)); err != nil {
