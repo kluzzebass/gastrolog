@@ -4,7 +4,7 @@ import { useThemeClass } from "../../hooks/useThemeClass";
 import type { ClusterNode } from "../../api/gen/gastrolog/v1/lifecycle_pb";
 // eslint-disable-next-line no-restricted-imports -- NodeStats is a passthrough type from Node.stats; no model wrap planned
 import type { NodeStats } from "../../api/gen/gastrolog/v1/cluster_pb";
-import { formatBytes } from "../../utils/units";
+import { formatBytes, formatRate } from "../../utils/units";
 
 /**
  * System stats view for a single node, using gossip-broadcast NodeStats.
@@ -313,9 +313,3 @@ export function ClusterSummaryView({
   );
 }
 
-function formatRate(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  if (n >= 10) return Math.round(n).toString();
-  return n.toFixed(1);
-}

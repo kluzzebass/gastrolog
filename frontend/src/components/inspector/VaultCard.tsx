@@ -3,13 +3,14 @@ import { useState, type ReactNode } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { clickableProps } from "../../utils";
 import { useChunks, useIndexes, useValidateVault, useConfig, useArchiveChunk, useRestoreChunk } from "../../api/hooks";
+import { useClusterStatus } from "../../api/hooks/useClusterStatus";
 import { useToast } from "../Toast";
 import { buildNodeNameMap, resolveNodeName } from "../../utils/nodeNames";
 // eslint-disable-next-line no-restricted-imports -- no Chunk model yet (gastrolog-2e2qs follow-up)
 import { ChunkState, type ChunkMeta } from "../../api/gen/gastrolog/v1/vault_pb";
 import type { Vault } from "../../api/model/vault";
 import { protoToInstant, instantToMs, instantToDate, formatDateTimeShort } from "../../utils/temporal";
-import { formatBytes } from "../../utils/units";
+import { formatBytes, formatRate } from "../../utils/units";
 import { middleTruncate } from "../../utils/middleTruncate";
 import { leaderNodeId, followerNodeIds } from "../../utils/placement";
 import { Badge } from "../Badge";
@@ -102,10 +103,106 @@ export function VaultCard({
     >
       <div className="flex flex-col gap-4 pt-2">
         <VaultLeaderSummary vaultId={vault.id} vaultTypeLabel={vault.typeLabel} dark={dark} />
+        <VaultThroughputSection vaultId={vault.id} dark={dark} />
         <PipelineBacklogView vaultId={vault.id} dark={dark} />
         <ChunkList vaultId={vault.id} dark={dark} />
       </div>
     </ExpandableCard>
+  );
+}
+
+// VaultThroughputSection aggregates this vault's segmentation append rates
+// across every node's gossip-broadcast NodeStats (gastrolog-4eh5ns): the
+// vault-level view is the cross-node sum, with per-node rows showing where
+// the vault's ingest is landing. Hidden while no node reports a writer.
+function VaultThroughputSection({
+  vaultId,
+  dark,
+}: Readonly<{ vaultId: string; dark: boolean }>) {
+  const c = useThemeClass(dark);
+  const { data: cluster } = useClusterStatus();
+
+  const rows: {
+    node: string;
+    recordsPerSec: number;
+    durablePerSec: number;
+    bytesPerSec: number;
+    depth: number;
+    cap: number;
+  }[] = [];
+  for (const n of cluster?.nodes ?? []) {
+    if (!n.stats) continue;
+    for (const vs of n.stats.vaults) {
+      if (encode(vs.id) !== vaultId || vs.appendQueueCapacity === 0) continue;
+      rows.push({
+        node: n.name || encode(n.id).slice(0, 8),
+        recordsPerSec: vs.appendRecordsPerSec,
+        durablePerSec: vs.appendDurablePerSec,
+        bytesPerSec: vs.appendBytesPerSec,
+        depth: vs.appendQueueDepth,
+        cap: vs.appendQueueCapacity,
+      });
+    }
+  }
+  if (rows.length === 0) return null;
+  rows.sort((a, b) => a.node.localeCompare(b.node));
+
+  const totalRecords = rows.reduce((sum, r) => sum + r.recordsPerSec, 0);
+  const totalBytes = rows.reduce((sum, r) => sum + r.bytesPerSec, 0);
+
+  const labelClass = `text-[0.7em] font-medium uppercase tracking-[0.15em] ${c("text-text-muted", "text-light-text-muted")}`;
+  const valueClass = `font-mono ${c("text-text-bright", "text-light-text-bright")}`;
+  const mutedMono = `font-mono ${c("text-text-muted", "text-light-text-muted")}`;
+
+  return (
+    <section className="flex flex-col gap-4">
+      <h3
+        className={`text-[0.75em] font-medium uppercase tracking-[0.15em] whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}
+      >
+        Throughput
+      </h3>
+      <div
+        className={`rounded-lg border px-4 py-3 ${c("border-ink-border bg-ink-well", "border-light-border bg-light-well")}`}
+      >
+        <div className="flex flex-wrap items-baseline gap-x-5 gap-y-2 text-[0.85em]">
+          <div className="flex items-baseline gap-2">
+            <span className={labelClass}>Append</span>
+            <span className={valueClass}>{formatRate(totalRecords)}/s</span>
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className={labelClass}>Data</span>
+            <span className={valueClass}>{formatBytes(totalBytes)}/s</span>
+          </div>
+        </div>
+        {rows.length > 0 && (
+          <div className="mt-2 flex flex-col gap-1 text-[0.85em]">
+            {rows.map((r) => (
+              <div key={r.node} className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+                <span className={`font-mono w-32 truncate ${c("text-text-muted", "text-light-text-muted")}`} title={r.node}>
+                  {r.node}
+                </span>
+                <span className={mutedMono}>{formatRate(r.recordsPerSec)}/s</span>
+                <span className={mutedMono}>{formatBytes(r.bytesPerSec)}/s</span>
+                <span
+                  className={`font-mono ${r.depth > 0 ? "text-severity-warn" : c("text-text-muted", "text-light-text-muted")}`}
+                  title="Segmentation queue depth / capacity"
+                >
+                  queue {r.depth}/{r.cap}
+                </span>
+                {r.durablePerSec + 1 < r.recordsPerSec && (
+                  <span
+                    className="font-mono text-severity-warn"
+                    title="Durable-commit rate lags the append rate — fsync backpressure"
+                  >
+                    durable {formatRate(r.durablePerSec)}/s
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 
