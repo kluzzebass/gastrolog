@@ -1541,16 +1541,19 @@ func (x *ProcessMemoryStats) GetNumGc() uint32 {
 }
 
 // VaultStats provides per-vault statistics.
-// ThroughputRate is one rolling-window rate series: the instantaneous rate
-// (delta over the ~5s between stats ticks), trailing averages computed from
-// counter deltas over the sample ring (~30s and ~60s spans), and the recent
-// per-tick history for sparklines (gastrolog-4eh5ns).
+// ThroughputRate is one rate series: the instantaneous rate (delta over the
+// ~5s between stats ticks) with its per-tick spark history for reading burst
+// shape, plus Unix-load-style exponentially weighted moving averages at
+// 1m/5m/15m for sustained rates. EWMAs keep one number per horizon — no
+// history buffer — folding each tick's sample in with e^(-dt/tau) decay,
+// exactly the kernel's load-average technique (gastrolog-4eh5ns).
 type ThroughputRate struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	InstantPerSec float64                `protobuf:"fixed64,1,opt,name=instant_per_sec,json=instantPerSec,proto3" json:"instant_per_sec,omitempty"`
-	Avg_30SPerSec float64                `protobuf:"fixed64,2,opt,name=avg_30s_per_sec,json=avg30sPerSec,proto3" json:"avg_30s_per_sec,omitempty"`
-	Avg_60SPerSec float64                `protobuf:"fixed64,3,opt,name=avg_60s_per_sec,json=avg60sPerSec,proto3" json:"avg_60s_per_sec,omitempty"`
-	Spark         []float64              `protobuf:"fixed64,4,rep,packed,name=spark,proto3" json:"spark,omitempty"`
+	Avg_1MPerSec  float64                `protobuf:"fixed64,2,opt,name=avg_1m_per_sec,json=avg1mPerSec,proto3" json:"avg_1m_per_sec,omitempty"`
+	Avg_5MPerSec  float64                `protobuf:"fixed64,3,opt,name=avg_5m_per_sec,json=avg5mPerSec,proto3" json:"avg_5m_per_sec,omitempty"`
+	Avg_15MPerSec float64                `protobuf:"fixed64,4,opt,name=avg_15m_per_sec,json=avg15mPerSec,proto3" json:"avg_15m_per_sec,omitempty"`
+	Spark         []float64              `protobuf:"fixed64,5,rep,packed,name=spark,proto3" json:"spark,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1592,16 +1595,23 @@ func (x *ThroughputRate) GetInstantPerSec() float64 {
 	return 0
 }
 
-func (x *ThroughputRate) GetAvg_30SPerSec() float64 {
+func (x *ThroughputRate) GetAvg_1MPerSec() float64 {
 	if x != nil {
-		return x.Avg_30SPerSec
+		return x.Avg_1MPerSec
 	}
 	return 0
 }
 
-func (x *ThroughputRate) GetAvg_60SPerSec() float64 {
+func (x *ThroughputRate) GetAvg_5MPerSec() float64 {
 	if x != nil {
-		return x.Avg_60SPerSec
+		return x.Avg_5MPerSec
+	}
+	return 0
+}
+
+func (x *ThroughputRate) GetAvg_15MPerSec() float64 {
+	if x != nil {
+		return x.Avg_15MPerSec
 	}
 	return 0
 }
@@ -3534,12 +3544,13 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\x11stack_inuse_bytes\x18\x06 \x01(\x03R\x0fstackInuseBytes\x12\x1b\n" +
 	"\tsys_bytes\x18\a \x01(\x03R\bsysBytes\x12!\n" +
 	"\fheap_objects\x18\b \x01(\x04R\vheapObjects\x12\x15\n" +
-	"\x06num_gc\x18\t \x01(\rR\x05numGc\"\x9c\x01\n" +
+	"\x06num_gc\x18\t \x01(\rR\x05numGc\"\xbf\x01\n" +
 	"\x0eThroughputRate\x12&\n" +
-	"\x0finstant_per_sec\x18\x01 \x01(\x01R\rinstantPerSec\x12%\n" +
-	"\x0favg_30s_per_sec\x18\x02 \x01(\x01R\favg30sPerSec\x12%\n" +
-	"\x0favg_60s_per_sec\x18\x03 \x01(\x01R\favg60sPerSec\x12\x14\n" +
-	"\x05spark\x18\x04 \x03(\x01R\x05spark\"\xe9\x06\n" +
+	"\x0finstant_per_sec\x18\x01 \x01(\x01R\rinstantPerSec\x12#\n" +
+	"\x0eavg_1m_per_sec\x18\x02 \x01(\x01R\vavg1mPerSec\x12#\n" +
+	"\x0eavg_5m_per_sec\x18\x03 \x01(\x01R\vavg5mPerSec\x12%\n" +
+	"\x0favg_15m_per_sec\x18\x04 \x01(\x01R\favg15mPerSec\x12\x14\n" +
+	"\x05spark\x18\x05 \x03(\x01R\x05spark\"\xe9\x06\n" +
 	"\n" +
 	"VaultStats\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +

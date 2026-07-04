@@ -1285,10 +1285,12 @@ export class ProcessMemoryStats extends Message<ProcessMemoryStats> {
 
 /**
  * VaultStats provides per-vault statistics.
- * ThroughputRate is one rolling-window rate series: the instantaneous rate
- * (delta over the ~5s between stats ticks), trailing averages computed from
- * counter deltas over the sample ring (~30s and ~60s spans), and the recent
- * per-tick history for sparklines (gastrolog-4eh5ns).
+ * ThroughputRate is one rate series: the instantaneous rate (delta over the
+ * ~5s between stats ticks) with its per-tick spark history for reading burst
+ * shape, plus Unix-load-style exponentially weighted moving averages at
+ * 1m/5m/15m for sustained rates. EWMAs keep one number per horizon — no
+ * history buffer — folding each tick's sample in with e^(-dt/tau) decay,
+ * exactly the kernel's load-average technique (gastrolog-4eh5ns).
  *
  * @generated from message gastrolog.v1.ThroughputRate
  */
@@ -1299,17 +1301,22 @@ export class ThroughputRate extends Message<ThroughputRate> {
   instantPerSec = 0;
 
   /**
-   * @generated from field: double avg_30s_per_sec = 2;
+   * @generated from field: double avg_1m_per_sec = 2;
    */
-  avg30sPerSec = 0;
+  avg1mPerSec = 0;
 
   /**
-   * @generated from field: double avg_60s_per_sec = 3;
+   * @generated from field: double avg_5m_per_sec = 3;
    */
-  avg60sPerSec = 0;
+  avg5mPerSec = 0;
 
   /**
-   * @generated from field: repeated double spark = 4;
+   * @generated from field: double avg_15m_per_sec = 4;
+   */
+  avg15mPerSec = 0;
+
+  /**
+   * @generated from field: repeated double spark = 5;
    */
   spark: number[] = [];
 
@@ -1322,9 +1329,10 @@ export class ThroughputRate extends Message<ThroughputRate> {
   static readonly typeName = "gastrolog.v1.ThroughputRate";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "instant_per_sec", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
-    { no: 2, name: "avg_30s_per_sec", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
-    { no: 3, name: "avg_60s_per_sec", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
-    { no: 4, name: "spark", kind: "scalar", T: 1 /* ScalarType.DOUBLE */, repeated: true },
+    { no: 2, name: "avg_1m_per_sec", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
+    { no: 3, name: "avg_5m_per_sec", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
+    { no: 4, name: "avg_15m_per_sec", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
+    { no: 5, name: "spark", kind: "scalar", T: 1 /* ScalarType.DOUBLE */, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ThroughputRate {

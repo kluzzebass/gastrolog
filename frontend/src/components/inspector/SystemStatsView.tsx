@@ -191,7 +191,7 @@ function CompactRateRow({
   return (
     <div
       className="flex items-baseline justify-between gap-4"
-      title={`30s avg ${formatRate(rate?.avg30sPerSec ?? 0)}/s · 1m avg ${formatRate(rate?.avg60sPerSec ?? 0)}/s`}
+      title={`1m ${formatRate(rate?.avg1mPerSec ?? 0)}/s · 5m ${formatRate(rate?.avg5mPerSec ?? 0)}/s · 15m ${formatRate(rate?.avg15mPerSec ?? 0)}/s (EWMA)`}
     >
       <span
         className={`text-[0.75em] font-medium uppercase tracking-wider shrink-0 ${c("text-text-muted", "text-light-text-muted")}`}

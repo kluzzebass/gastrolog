@@ -253,8 +253,9 @@ func addThroughput(dst, src *gastrologv1.ThroughputRate) {
 		return
 	}
 	dst.InstantPerSec += src.InstantPerSec
-	dst.Avg_30SPerSec += src.Avg_30SPerSec
-	dst.Avg_60SPerSec += src.Avg_60SPerSec
+	dst.Avg_1MPerSec += src.Avg_1MPerSec
+	dst.Avg_5MPerSec += src.Avg_5MPerSec
+	dst.Avg_15MPerSec += src.Avg_15MPerSec
 }
 
 // PeerVaultPipelineDisk is one peer node's broadcast pipeline disk counts for a vault.

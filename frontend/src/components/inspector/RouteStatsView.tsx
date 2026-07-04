@@ -222,9 +222,9 @@ function RateBox({
       </div>
       <div
         className={`mt-0.5 text-[0.75em] font-mono ${c("text-text-muted", "text-light-text-muted")}`}
-        title="Trailing averages from counter deltas over the sample history — the stable figures for before/after comparisons"
+        title="Unix-load-style EWMAs (1m/5m/15m) — the sustained-rate figures; the big number and spark show instantaneous burst shape"
       >
-        30s {formatCount(rate?.avg30sPerSec ?? 0)}/s · 1m {formatCount(rate?.avg60sPerSec ?? 0)}/s
+        1m {formatCount(rate?.avg1mPerSec ?? 0)}/s · 5m {formatCount(rate?.avg5mPerSec ?? 0)}/s · 15m {formatCount(rate?.avg15mPerSec ?? 0)}/s
       </div>
     </div>
   );

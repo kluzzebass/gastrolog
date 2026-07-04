@@ -268,15 +268,18 @@ message ProcessMemoryStats {
 }
 
 // VaultStats provides per-vault statistics.
-// ThroughputRate is one rolling-window rate series: the instantaneous rate
-// (delta over the ~5s between stats ticks), trailing averages computed from
-// counter deltas over the sample ring (~30s and ~60s spans), and the recent
-// per-tick history for sparklines (gastrolog-4eh5ns).
+// ThroughputRate is one rate series: the instantaneous rate (delta over the
+// ~5s between stats ticks) with its per-tick spark history for reading burst
+// shape, plus Unix-load-style exponentially weighted moving averages at
+// 1m/5m/15m for sustained rates. EWMAs keep one number per horizon — no
+// history buffer — folding each tick's sample in with e^(-dt/tau) decay,
+// exactly the kernel's load-average technique (gastrolog-4eh5ns).
 message ThroughputRate {
   double instant_per_sec = 1;
-  double avg_30s_per_sec = 2;
-  double avg_60s_per_sec = 3;
-  repeated double spark = 4;
+  double avg_1m_per_sec = 2;
+  double avg_5m_per_sec = 3;
+  double avg_15m_per_sec = 4;
+  repeated double spark = 5;
 }
 
 message VaultStats {

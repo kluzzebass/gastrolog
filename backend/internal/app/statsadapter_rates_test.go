@@ -93,8 +93,8 @@ func TestStatsCollectorRouteRatesEndToEnd(t *testing.T) {
 	if snap.RouteRouted.GetInstantPerSec() <= 0 {
 		t.Fatalf("snapshot route routed = %v, want > 0", snap.RouteRouted.GetInstantPerSec())
 	}
-	if snap.RouteIngested.GetAvg_30SPerSec() <= 0 || snap.RouteIngested.GetAvg_60SPerSec() <= 0 {
-		t.Fatalf("snapshot trailing averages = %v/%v, want > 0",
-			snap.RouteIngested.GetAvg_30SPerSec(), snap.RouteIngested.GetAvg_60SPerSec())
+	if snap.RouteIngested.GetAvg_1MPerSec() <= 0 || snap.RouteIngested.GetAvg_15MPerSec() <= 0 {
+		t.Fatalf("snapshot EWMAs = %v/%v, want > 0",
+			snap.RouteIngested.GetAvg_1MPerSec(), snap.RouteIngested.GetAvg_15MPerSec())
 	}
 }

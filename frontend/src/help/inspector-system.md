@@ -38,8 +38,9 @@ section:
   its capacity.
 
 The number shown is the instantaneous rate over the last stats tick
-(~5 seconds); hovering a row reveals the ~30s and ~1m trailing averages —
-the stable figures for before/after comparisons. A vault whose queue stays
+(~5 seconds) with its sparkline; hovering a row reveals the 1m/5m/15m
+exponentially weighted moving averages (the Unix load-average technique) —
+the sustained-rate figures for before/after comparisons. A vault whose queue stays
 near capacity while its durable-commit rate lags its append rate is
 experiencing write-path backpressure (usually fsync pressure on that node's
 disk).

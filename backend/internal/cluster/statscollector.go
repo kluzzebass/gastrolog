@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"runtime"
 	"sort"
 	"strconv"
@@ -143,11 +144,11 @@ type JobsProvider interface {
 
 // StatsCollectorConfig configures a StatsCollector.
 type StatsCollectorConfig struct {
-	Broadcaster       *Broadcaster
-	RaftStats         RaftStatsProvider
-	Stats             StatsProvider
-	PeerConns         PeerConnSnapshotProvider // optional; nil disables peer conn stats
-	RaftLiveness      RaftLivenessProvider     // optional; nil disables Raft liveness stats (gastrolog-1io54g)
+	Broadcaster  *Broadcaster
+	RaftStats    RaftStatsProvider
+	Stats        StatsProvider
+	PeerConns    PeerConnSnapshotProvider // optional; nil disables peer conn stats
+	RaftLiveness RaftLivenessProvider     // optional; nil disables Raft liveness stats (gastrolog-1io54g)
 	// ClusterRouteTotals returns the cluster-wide cumulative route counters
 	// (local node + live peers' broadcast totals). The collector windows the
 	// SUMMED counters so cluster rates and their spark history are computed
@@ -155,18 +156,18 @@ type StatsCollectorConfig struct {
 	// never fabricated by summing phase-skewed per-node spark arrays
 	// (gastrolog-4eh5ns). Optional; nil disables cluster route rates.
 	ClusterRouteTotals func() (ingested, routed int64)
-	Alerts            AlertProvider            // optional; nil if no alert collector
-	Jobs              JobsProvider             // optional; nil in single-node mode
-	NodeID            string
-	NodeNameFn        func() string // lazily resolved node name
-	Version           string
-	StartTime         time.Time
-	Interval          time.Duration  // heavy NodeStats broadcast cadence (default 5s)
-	HeartbeatInterval time.Duration  // lightweight liveness ping cadence (default 1s); 0 disables
-	ApiAddress        string         // HTTP API listen address (e.g. ":4564")
-	PprofAddress      string         // pprof listen address, empty if disabled
-	StatsSignal       *notify.Signal // fired after each broadcast to notify WatchSystemStatus streams
-	Logger            *slog.Logger
+	Alerts             AlertProvider // optional; nil if no alert collector
+	Jobs               JobsProvider  // optional; nil in single-node mode
+	NodeID             string
+	NodeNameFn         func() string // lazily resolved node name
+	Version            string
+	StartTime          time.Time
+	Interval           time.Duration  // heavy NodeStats broadcast cadence (default 5s)
+	HeartbeatInterval  time.Duration  // lightweight liveness ping cadence (default 1s); 0 disables
+	ApiAddress         string         // HTTP API listen address (e.g. ":4564")
+	PprofAddress       string         // pprof listen address, empty if disabled
+	StatsSignal        *notify.Signal // fired after each broadcast to notify WatchSystemStatus streams
+	Logger             *slog.Logger
 }
 
 // StatsCollector periodically gathers local node statistics and
@@ -202,25 +203,15 @@ type StatsCollector struct {
 
 const peerConnStatsSparkPoints = 20
 
-type trafficSample struct {
-	at   time.Time
-	sent int64
-	recv int64
-}
-
 type peerConnStatsWindow struct {
 	lastSent int64
 	lastRecv int64
 	lastAt   time.Time
-	// samples retains (tick time, counters) for trailing-average rates:
-	// counter delta over the retained sample closest to now-horizon
-	// (gastrolog-4eh5ns). Capped at peerConnStatsSparkPoints (~100s at the
-	// 5s broadcast cadence).
-	samples []trafficSample
-	tx30    float64
-	rx30    float64
-	tx60    float64
-	rx60    float64
+	// Unix-load-style EWMAs (one float per horizon, no history buffer):
+	// each step folds the instantaneous rate in with e^(-dt/tau) decay,
+	// tau = 1m/5m/15m (gastrolog-4eh5ns).
+	txEwma  [3]float64
+	rxEwma  [3]float64
 	txRates []float64
 	rxRates []float64
 }
@@ -381,13 +372,13 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 			dr := c.observeTrafficWindowRates(now, "durable:"+as.VaultID.String(),
 				int64(as.RecordsDurable), 0, stepWindows, c.vaultAppendStats) //nolint:gosec // counter < 2^63
 			v.AppendRecords = &gastrologv1.ThroughputRate{
-				InstantPerSec: ar.txPerSec, Avg_30SPerSec: ar.tx30, Avg_60SPerSec: ar.tx60, Spark: ar.txSpark,
+				InstantPerSec: ar.txPerSec, Avg_1MPerSec: ar.txEwma[0], Avg_5MPerSec: ar.txEwma[1], Avg_15MPerSec: ar.txEwma[2], Spark: ar.txSpark,
 			}
 			v.AppendBytes = &gastrologv1.ThroughputRate{
-				InstantPerSec: ar.rxPerSec, Avg_30SPerSec: ar.rx30, Avg_60SPerSec: ar.rx60, Spark: ar.rxSpark,
+				InstantPerSec: ar.rxPerSec, Avg_1MPerSec: ar.rxEwma[0], Avg_5MPerSec: ar.rxEwma[1], Avg_15MPerSec: ar.rxEwma[2], Spark: ar.rxSpark,
 			}
 			v.AppendDurable = &gastrologv1.ThroughputRate{
-				InstantPerSec: dr.txPerSec, Avg_30SPerSec: dr.tx30, Avg_60SPerSec: dr.tx60, Spark: dr.txSpark,
+				InstantPerSec: dr.txPerSec, Avg_1MPerSec: dr.txEwma[0], Avg_5MPerSec: dr.txEwma[1], Avg_15MPerSec: dr.txEwma[2], Spark: dr.txSpark,
 			}
 			v.AppendRecordsTotal = as.RecordsAppended
 			v.AppendBytesTotal = as.BytesAppended
@@ -420,10 +411,10 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 		rr := c.observeTrafficWindowRates(now, "route",
 			rs.Ingested, rs.Routed, stepWindows, c.routeRateStats)
 		stats.RouteIngested = &gastrologv1.ThroughputRate{
-			InstantPerSec: rr.txPerSec, Avg_30SPerSec: rr.tx30, Avg_60SPerSec: rr.tx60, Spark: rr.txSpark,
+			InstantPerSec: rr.txPerSec, Avg_1MPerSec: rr.txEwma[0], Avg_5MPerSec: rr.txEwma[1], Avg_15MPerSec: rr.txEwma[2], Spark: rr.txSpark,
 		}
 		stats.RouteRouted = &gastrologv1.ThroughputRate{
-			InstantPerSec: rr.rxPerSec, Avg_30SPerSec: rr.rx30, Avg_60SPerSec: rr.rx60, Spark: rr.rxSpark,
+			InstantPerSec: rr.rxPerSec, Avg_1MPerSec: rr.rxEwma[0], Avg_5MPerSec: rr.rxEwma[1], Avg_15MPerSec: rr.rxEwma[2], Spark: rr.rxSpark,
 		}
 		for _, vs := range rs.VaultStats {
 			stats.RouteVaultStats = append(stats.RouteVaultStats, &gastrologv1.VaultRouteStats{
@@ -586,12 +577,14 @@ func (c *StatsCollector) observeTrafficWindow(now time.Time, key string, sent, r
 	return r.txPerSec, r.rxPerSec, r.txSpark, r.rxSpark
 }
 
-// trafficRates is one window observation: instantaneous rates, trailing
-// averages (~30s / ~60s counter deltas), and the per-tick spark history.
+// ewmaTaus are the Unix-load-average horizons for sustained rates.
+var ewmaTaus = [3]time.Duration{time.Minute, 5 * time.Minute, 15 * time.Minute}
+
+// trafficRates is one window observation: instantaneous rates with spark
+// history (burst shape), and 1m/5m/15m EWMAs (sustained rates).
 type trafficRates struct {
 	txPerSec, rxPerSec float64
-	tx30, rx30         float64
-	tx60, rx60         float64
+	txEwma, rxEwma     [3]float64
 	txSpark, rxSpark   []float64
 }
 
@@ -604,8 +597,7 @@ func (c *StatsCollector) observeTrafficWindowRates(now time.Time, key string, se
 
 	w := store[key]
 	if w == nil {
-		w = &peerConnStatsWindow{lastSent: sent, lastRecv: recv, lastAt: now,
-			samples: []trafficSample{{at: now, sent: sent, recv: recv}}}
+		w = &peerConnStatsWindow{lastSent: sent, lastRecv: recv, lastAt: now}
 		store[key] = w
 		return trafficRates{}
 	}
@@ -620,25 +612,33 @@ func (c *StatsCollector) observeTrafficWindowRates(now time.Time, key string, se
 	}
 
 	if sent < w.lastSent || recv < w.lastRecv {
-		// Counter reset (process restart): re-anchor everything.
-		*w = peerConnStatsWindow{lastSent: sent, lastRecv: recv, lastAt: now,
-			samples: []trafficSample{{at: now, sent: sent, recv: recv}}}
-		return trafficRates{}
+		// Counter reset (process restart, peer expiry in summed series):
+		// re-anchor the counters but PRESERVE the EWMAs and spark — the
+		// sustained-rate history is still true; only the delta baseline
+		// moved. This tick has no measurable delta, so instant reads 0 and
+		// the EWMAs are not updated (no sample, rather than a fake zero).
+		w.lastSent = sent
+		w.lastRecv = recv
+		w.lastAt = now
+		return trafficRates{
+			txEwma: w.txEwma, rxEwma: w.rxEwma,
+			txSpark: append([]float64(nil), w.txRates...),
+			rxSpark: append([]float64(nil), w.rxRates...),
+		}
 	}
 
 	txPerSec := float64(sent-w.lastSent) / dt
 	rxPerSec := float64(recv-w.lastRecv) / dt
-	w.tx30, w.rx30 = trailingRates(w.samples, now, sent, recv, 30*time.Second)
-	w.tx60, w.rx60 = trailingRates(w.samples, now, sent, recv, 60*time.Second)
+	for i, tau := range ewmaTaus {
+		decay := math.Exp(-dt / tau.Seconds())
+		w.txEwma[i] = w.txEwma[i]*decay + txPerSec*(1-decay)
+		w.rxEwma[i] = w.rxEwma[i]*decay + rxPerSec*(1-decay)
+	}
 
 	w.lastSent = sent
 	w.lastRecv = recv
 	w.lastAt = now
 
-	w.samples = append(w.samples, trafficSample{at: now, sent: sent, recv: recv})
-	if len(w.samples) > peerConnStatsSparkPoints {
-		w.samples = w.samples[len(w.samples)-peerConnStatsSparkPoints:]
-	}
 	w.txRates = append(w.txRates, txPerSec)
 	w.rxRates = append(w.rxRates, rxPerSec)
 	if len(w.txRates) > peerConnStatsSparkPoints {
@@ -650,7 +650,7 @@ func (c *StatsCollector) observeTrafficWindowRates(now time.Time, key string, se
 
 	return trafficRates{
 		txPerSec: txPerSec, rxPerSec: rxPerSec,
-		tx30: w.tx30, rx30: w.rx30, tx60: w.tx60, rx60: w.rx60,
+		txEwma: w.txEwma, rxEwma: w.rxEwma,
 		txSpark: append([]float64(nil), w.txRates...),
 		rxSpark: append([]float64(nil), w.rxRates...),
 	}
@@ -732,7 +732,7 @@ func (c *StatsCollector) collectRaftLiveness(stats *gastrologv1.NodeStats, now t
 // window (read paths between broadcast ticks).
 func (w *peerConnStatsWindow) snapshotRates() trafficRates {
 	r := trafficRates{
-		tx30: w.tx30, rx30: w.rx30, tx60: w.tx60, rx60: w.rx60,
+		txEwma: w.txEwma, rxEwma: w.rxEwma,
 		txSpark: append([]float64(nil), w.txRates...),
 		rxSpark: append([]float64(nil), w.rxRates...),
 	}
@@ -743,36 +743,6 @@ func (w *peerConnStatsWindow) snapshotRates() trafficRates {
 		r.rxPerSec = r.rxSpark[len(r.rxSpark)-1]
 	}
 	return r
-}
-
-// trailingRates computes average rates over roughly horizon: the counter
-// delta between now and the retained sample whose age is closest to horizon.
-// With a young window (uptime < horizon) it falls back to the oldest sample —
-// an average over the available span rather than a fabricated one.
-func trailingRates(samples []trafficSample, now time.Time, sent, recv int64, horizon time.Duration) (tx, rx float64) {
-	if len(samples) == 0 {
-		return 0, 0
-	}
-	target := now.Add(-horizon)
-	best := samples[0]
-	bestDiff := absDuration(best.at.Sub(target))
-	for _, s := range samples[1:] {
-		if d := absDuration(s.at.Sub(target)); d < bestDiff {
-			best, bestDiff = s, d
-		}
-	}
-	dt := now.Sub(best.at).Seconds()
-	if dt <= 0 {
-		return 0, 0
-	}
-	return float64(sent-best.sent) / dt, float64(recv-best.recv) / dt
-}
-
-func absDuration(d time.Duration) time.Duration {
-	if d < 0 {
-		return -d
-	}
-	return d
 }
 
 // collectClusterRouteRates windows the SUMMED cluster route counters; the
@@ -788,10 +758,10 @@ func (c *StatsCollector) collectClusterRouteRates(now time.Time, stepWindows boo
 		cin, crouted, stepWindows, c.routeRateStats)
 	c.mu.Lock()
 	c.clusterIngested = &gastrologv1.ThroughputRate{
-		InstantPerSec: cr.txPerSec, Avg_30SPerSec: cr.tx30, Avg_60SPerSec: cr.tx60, Spark: cr.txSpark,
+		InstantPerSec: cr.txPerSec, Avg_1MPerSec: cr.txEwma[0], Avg_5MPerSec: cr.txEwma[1], Avg_15MPerSec: cr.txEwma[2], Spark: cr.txSpark,
 	}
 	c.clusterRouted = &gastrologv1.ThroughputRate{
-		InstantPerSec: cr.rxPerSec, Avg_30SPerSec: cr.rx30, Avg_60SPerSec: cr.rx60, Spark: cr.rxSpark,
+		InstantPerSec: cr.rxPerSec, Avg_1MPerSec: cr.rxEwma[0], Avg_5MPerSec: cr.rxEwma[1], Avg_15MPerSec: cr.rxEwma[2], Spark: cr.rxSpark,
 	}
 	c.mu.Unlock()
 }
@@ -813,8 +783,9 @@ func (c *StatsCollector) ClusterRouteRates() (ingested, routed *gastrologv1.Thro
 func copyThroughputRate(r *gastrologv1.ThroughputRate) *gastrologv1.ThroughputRate {
 	return &gastrologv1.ThroughputRate{
 		InstantPerSec: r.InstantPerSec,
-		Avg_30SPerSec: r.Avg_30SPerSec,
-		Avg_60SPerSec: r.Avg_60SPerSec,
+		Avg_1MPerSec:  r.Avg_1MPerSec,
+		Avg_5MPerSec:  r.Avg_5MPerSec,
+		Avg_15MPerSec: r.Avg_15MPerSec,
 		Spark:         append([]float64(nil), r.Spark...),
 	}
 }

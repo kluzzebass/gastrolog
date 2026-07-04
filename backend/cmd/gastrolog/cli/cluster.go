@@ -188,12 +188,14 @@ func newClusterThroughputCmd() *cobra.Command {
 	}
 }
 
-// formatRateTriple renders instant / ~30s / ~60s averages side by side.
+// formatRateTriple renders the instant rate with Unix-load-style 1m/5m/15m
+// EWMAs, uptime-style.
 func formatRateTriple(r *v1.ThroughputRate) string {
 	if r == nil {
 		return "0.0 rec/s"
 	}
-	return fmt.Sprintf("%.1f rec/s (30s: %.1f, 1m: %.1f)", r.InstantPerSec, r.Avg_30SPerSec, r.Avg_60SPerSec)
+	return fmt.Sprintf("%.1f rec/s (1m: %.1f, 5m: %.1f, 15m: %.1f)",
+		r.InstantPerSec, r.Avg_1MPerSec, r.Avg_5MPerSec, r.Avg_15MPerSec)
 }
 
 func formatBytesCLI(b float64) string {

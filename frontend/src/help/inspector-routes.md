@@ -35,12 +35,12 @@ Each rate shows three horizons:
 
 - The **large number** is the instantaneous rate: the counter delta over the
   last stats tick (~5 seconds). It jumps with genuine burstiness — that is
-  signal, not noise.
-- **30s / 1m** are trailing averages computed from counter deltas over the
-  retained sample history — the stable figures to use when comparing
-  performance before and after a change.
-- The **sparkline** is the recent history of the displayed cluster rate,
-  accumulated while the panel is open.
+  signal, not noise — and the **sparkline** beside it shows its recent
+  per-tick history (computed server-side; it survives closing the panel).
+- **1m / 5m / 15m** are exponentially weighted moving averages, the same
+  technique as the Unix load average: one number per horizon, folding each
+  tick in with exponential decay. These are the sustained-rate figures to
+  use when comparing performance before and after a change.
 
 Note that "ingest" here is measured at the router, not at the ingesters: when
 the ingest queue backs up, this rate reflects what flows *through* routing.
