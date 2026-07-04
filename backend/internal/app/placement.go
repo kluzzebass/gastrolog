@@ -350,9 +350,22 @@ func (pm *placementManager) placeVault(ctx context.Context, v system.VaultConfig
 	}
 
 	old := currentLeader
-	// Replace the leader placement.
+	// Replace the leader placement. StorageIDForNode is strict: "" means the
+	// selected node lost its matching storage class since the eligibility
+	// check — refuse the placement loudly rather than land the leader on the
+	// wrong disk class (gastrolog-2bv1x).
+	storageID := system.StorageIDForNode(best, v, nscs)
+	if storageID == "" {
+		pm.logger.Error("placement: no storage of required class on selected node; refusing leader placement",
+			"vault", v.ID, "name", v.Name, "node", best, "class", v.StorageClass)
+		if pm.alerts != nil {
+			pm.alerts.Set(alertKey, alert.Error, "placement",
+				fmt.Sprintf("Vault %q: selected node %s has no storage of class %d", v.Name, best, v.StorageClass))
+		}
+		return
+	}
 	oldP, _ := pm.cfgStore.GetVaultPlacements(context.Background(), v.ID)
-	newP := replaceLeaderPlacement(oldP, system.StorageIDForNode(best, v, nscs))
+	newP := replaceLeaderPlacement(oldP, storageID)
 	if err := pm.cfgStore.SetVaultPlacements(ctx, v.ID, newP); err != nil {
 		pm.logger.Error("placement: assign vault", "vault", v.ID, "name", v.Name, "node", best, "error", err)
 		return
