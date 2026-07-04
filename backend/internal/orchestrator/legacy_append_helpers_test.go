@@ -23,27 +23,40 @@ import (
 // manager, preserving an explicit leader chunk ID when provided. Test-only
 // seeding primitive — see the file comment.
 func (o *Orchestrator) AppendToVault(vaultID glid.GLID, leaderChunkID chunk.ChunkID, rec chunk.Record) error {
+	cm, sealedID, err := o.appendToVaultLocked(vaultID, leaderChunkID, rec)
+	if err != nil {
+		return err
+	}
+	if sealedID != (chunk.ChunkID{}) {
+		// Outside the lock: schedulePostSeal is self-locking, and calling it
+		// under o.mu deadlocks behind a queued writer (recursive RLock).
+		o.schedulePostSeal(vaultID, cm, sealedID)
+	}
+	return nil
+}
+
+func (o *Orchestrator) appendToVaultLocked(vaultID glid.GLID, leaderChunkID chunk.ChunkID, rec chunk.Record) (chunk.ChunkManager, chunk.ChunkID, error) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 
 	vault := o.vaults[vaultID]
 	if vault == nil {
-		return fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
+		return nil, chunk.ChunkID{}, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
 	if err := vaultReplicationReadinessErr(vaultID, vault); err != nil {
-		return err
+		return nil, chunk.ChunkID{}, err
 	}
 	vaultInst := vault.Instance
 	if vaultInst == nil {
-		return fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
+		return nil, chunk.ChunkID{}, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
 	if _, draining := o.vaultDraining[vaultDrainKey(vaultID)]; draining {
-		return ErrVaultDraining
+		return nil, chunk.ChunkID{}, ErrVaultDraining
 	}
 	cm := vaultInst.Chunks
 
 	if leaderChunkID != (chunk.ChunkID{}) && vaultInst.IsTombstoned != nil && vaultInst.IsTombstoned(leaderChunkID) {
-		return fmt.Errorf("%w: append to tombstoned chunk %s", chunk.ErrChunkTombstoned, leaderChunkID)
+		return nil, chunk.ChunkID{}, fmt.Errorf("%w: append to tombstoned chunk %s", chunk.ErrChunkTombstoned, leaderChunkID)
 	}
 
 	if leaderChunkID != (chunk.ChunkID{}) {
@@ -55,16 +68,16 @@ func (o *Orchestrator) AppendToVault(vaultID glid.GLID, leaderChunkID chunk.Chun
 
 	activeBefore := cm.Active()
 	if _, _, err := cm.Append(rec); err != nil {
-		return err
+		return nil, chunk.ChunkID{}, err
 	}
 	o.progressTrigger.Signal()
 
 	activeAfter := cm.Active()
 	sealed := activeBefore != nil && (activeAfter == nil || activeAfter.ID != activeBefore.ID)
 	if sealed && !vaultInst.IsFollower {
-		o.schedulePostSeal(vaultID, cm, activeBefore.ID)
+		return cm, activeBefore.ID, nil
 	}
-	return nil
+	return cm, chunk.ChunkID{}, nil
 }
 
 // SetTestRoutingTable publishes a routing table directly onto the pipeline

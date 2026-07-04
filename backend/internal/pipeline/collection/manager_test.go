@@ -631,11 +631,17 @@ func TestDeferredPassRetriesWithoutNewEvents(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if receipts.count() != 1 {
-		t.Fatalf("receipts = %d, want 1", receipts.count())
-	}
-	if passComplete.Load() == 0 {
-		t.Fatal("OnPassComplete never fired after the successful retry")
+	// head/ appears mid-pass; the receipt batch and OnPassComplete land at
+	// pass end — wait rather than asserting instantly.
+	for {
+		if receipts.count() == 1 && passComplete.Load() > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("after retry: receipts = %d (want 1), passComplete = %d (want > 0)",
+				receipts.count(), passComplete.Load())
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

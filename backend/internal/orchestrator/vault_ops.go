@@ -776,9 +776,7 @@ func (o *Orchestrator) ImportChunkRecords(ctx context.Context, vaultID glid.GLID
 	}
 
 	if meta.ID != (chunk.ChunkID{}) {
-		o.mu.RLock()
 		o.schedulePostSeal(vaultID, cm, meta.ID)
-		o.mu.RUnlock()
 	}
 
 	return nil
@@ -986,9 +984,7 @@ func (o *Orchestrator) SealActive(vaultID glid.GLID) (int, error) {
 			return sealed, fmt.Errorf("seal vault %s: %w", vaultID, err)
 		}
 		sealed++
-		o.mu.RLock()
 		o.schedulePostSeal(vaultID, vaultInst.Chunks, chunkID)
-		o.mu.RUnlock()
 	}
 	return sealed, nil
 }
