@@ -40,16 +40,22 @@ type StatsVaultSnapshot struct {
 	RaftAppliedIndex uint64
 }
 
-// StatsVaultAppendSnapshot captures one vault's cumulative segmentation
-// append counters for broadcast; the collector's rolling windows turn them
-// into per-second rates (gastrolog-4eh5ns).
+// StatsVaultAppendSnapshot captures one vault's cumulative pipeline stage
+// counters for broadcast; the collector's rolling windows turn them into
+// per-second rates (gastrolog-4eh5ns, gastrolog-10n6k8). Append counters are
+// origin-side; Collected/Sealed are home-side and zero on nodes without that
+// role for the vault.
 type StatsVaultAppendSnapshot struct {
-	VaultID         glid.GLID
-	RecordsAppended uint64
-	BytesAppended   uint64
-	RecordsDurable  uint64
-	QueueDepth      int
-	QueueCap        int
+	VaultID          glid.GLID
+	RecordsAppended  uint64
+	BytesAppended    uint64
+	RecordsDurable   uint64
+	QueueDepth       int
+	QueueCap         int
+	CollectedRecords uint64
+	CollectedBytes   uint64
+	SealedRecords    uint64
+	SealedBytes      uint64
 }
 
 // StatsRouteSnapshot captures route stats for broadcast.
@@ -384,6 +390,15 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 			v.AppendBytesTotal = as.BytesAppended
 			v.AppendQueueDepth = uint32(as.QueueDepth)  //nolint:gosec
 			v.AppendQueueCapacity = uint32(as.QueueCap) //nolint:gosec
+
+			cr := c.observeTrafficWindowRates(now, "collect:"+as.VaultID.String(),
+				int64(as.CollectedRecords), int64(as.CollectedBytes), stepWindows, c.vaultAppendStats) //nolint:gosec // counters < 2^63
+			v.CollectedRecords = throughputRateProto(cr, true)
+			v.CollectedBytes = throughputRateProto(cr, false)
+			sr := c.observeTrafficWindowRates(now, "seal:"+as.VaultID.String(),
+				int64(as.SealedRecords), int64(as.SealedBytes), stepWindows, c.vaultAppendStats) //nolint:gosec // counters < 2^63
+			v.SealedRecords = throughputRateProto(sr, true)
+			v.SealedBytes = throughputRateProto(sr, false)
 		}
 
 		// Ingester stats.
@@ -725,6 +740,19 @@ func (c *StatsCollector) collectRaftLiveness(stats *gastrologv1.NodeStats, now t
 			fmt.Sprintf("Raft WAL append latency degraded: max %.0fms since last tick — bulk I/O may be starving consensus", stats.RaftWalAppendMaxMs))
 	case stats.RaftWalAppendMaxMs < walAppendMaxClearMs:
 		alerts.Clear("raft-wal-latency")
+	}
+}
+
+// throughputRateProto converts one side (tx or rx) of a window observation
+// into the wire series.
+func throughputRateProto(r trafficRates, tx bool) *gastrologv1.ThroughputRate {
+	if tx {
+		return &gastrologv1.ThroughputRate{
+			InstantPerSec: r.txPerSec, Avg_1MPerSec: r.txEwma[0], Avg_5MPerSec: r.txEwma[1], Avg_15MPerSec: r.txEwma[2], Spark: r.txSpark,
+		}
+	}
+	return &gastrologv1.ThroughputRate{
+		InstantPerSec: r.rxPerSec, Avg_1MPerSec: r.rxEwma[0], Avg_5MPerSec: r.rxEwma[1], Avg_15MPerSec: r.rxEwma[2], Spark: r.rxSpark,
 	}
 }
 

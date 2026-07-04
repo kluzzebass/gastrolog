@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"gastrolog/internal/glid"
 	"iter"
+	"slices"
 	"time"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -67,18 +68,40 @@ func (a *orchStatsAdapter) IngesterStats(id string) (name string, messages, byte
 }
 
 func (a *orchStatsAdapter) VaultAppendStats() []cluster.StatsVaultAppendSnapshot {
-	stats := a.orch.VaultAppendStats()
-	out := make([]cluster.StatsVaultAppendSnapshot, len(stats))
-	for i, s := range stats {
-		out[i] = cluster.StatsVaultAppendSnapshot{
-			VaultID:         s.VaultID,
-			RecordsAppended: s.RecordsAppended,
-			BytesAppended:   s.BytesAppended,
-			RecordsDurable:  s.RecordsDurable,
-			QueueDepth:      s.QueueDepth,
-			QueueCap:        s.QueueCap,
+	byVault := make(map[glid.GLID]*cluster.StatsVaultAppendSnapshot)
+	get := func(id glid.GLID) *cluster.StatsVaultAppendSnapshot {
+		if s, ok := byVault[id]; ok {
+			return s
 		}
+		s := &cluster.StatsVaultAppendSnapshot{VaultID: id}
+		byVault[id] = s
+		return s
 	}
+	for _, s := range a.orch.VaultAppendStats() {
+		snap := get(s.VaultID)
+		snap.RecordsAppended = s.RecordsAppended
+		snap.BytesAppended = s.BytesAppended
+		snap.RecordsDurable = s.RecordsDurable
+		snap.QueueDepth = s.QueueDepth
+		snap.QueueCap = s.QueueCap
+	}
+	for _, s := range a.orch.VaultCollectStats() {
+		snap := get(s.VaultID)
+		snap.CollectedRecords = s.CollectedRecords
+		snap.CollectedBytes = s.CollectedBytes
+	}
+	for _, s := range a.orch.VaultSealStats() {
+		snap := get(s.VaultID)
+		snap.SealedRecords = s.SealedRecords
+		snap.SealedBytes = s.SealedBytes
+	}
+	out := make([]cluster.StatsVaultAppendSnapshot, 0, len(byVault))
+	for _, s := range byVault {
+		out = append(out, *s)
+	}
+	slices.SortFunc(out, func(a, b cluster.StatsVaultAppendSnapshot) int {
+		return a.VaultID.Compare(b.VaultID)
+	})
 	return out
 }
 

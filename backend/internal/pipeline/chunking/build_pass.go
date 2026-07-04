@@ -92,6 +92,12 @@ func (v *vaultChunking) buildOnce(ctx context.Context) error {
 	if err != nil || (!builtNow && v.cfg.Applier == nil) {
 		return err
 	}
+	if builtNow {
+		// Stage throughput (gastrolog-10n6k8): this home just materialized
+		// the sealed GLCB locally.
+		v.sealedRecords.Add(uint64(result.RecordCount))
+		v.sealedBytes.Add(uint64(result.Bytes)) //nolint:gosec // sizes are non-negative
+	}
 
 	if _, err := v.proposeSealOnce(ctx, pending, key, result); err != nil {
 		return err

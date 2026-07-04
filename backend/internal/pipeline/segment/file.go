@@ -76,6 +76,23 @@ func Create(path string, meta Meta) (*File, error) {
 	return sf, nil
 }
 
+// ReadHeader decodes just the fixed header of a segment file without opening,
+// reconciling, or checksum-verifying it. For cheap metadata reads (record
+// counts for stage throughput counters — gastrolog-10n6k8); NOT a validity
+// check.
+func ReadHeader(path string) (Header, error) {
+	f, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		return Header{}, err
+	}
+	defer func() { _ = f.Close() }()
+	var buf [HeaderSize]byte
+	if _, err := io.ReadFull(f, buf[:]); err != nil {
+		return Header{}, err
+	}
+	return decodeHeader(buf[:])
+}
+
 // Open opens an existing segment and reconciles the header against on-disk frames.
 func Open(path string) (*File, error) {
 	f, err := os.OpenFile(filepath.Clean(path), os.O_RDWR, 0)

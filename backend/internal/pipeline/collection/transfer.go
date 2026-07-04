@@ -92,26 +92,29 @@ func ReceiveToPreHead(vaultRoot string, segmentID glid.GLID, src io.Reader) (str
 }
 
 // PromoteVerified opens the pre-head segment, verifies its checksum, and atomically
-// renames it into head. A corrupt transfer is discarded from pre-head.
-func PromoteVerified(preHeadPath, vaultRoot string) (string, error) {
+// renames it into head. A corrupt transfer is discarded from pre-head. The
+// verified header is returned so callers can count arrivals without a
+// re-read (gastrolog-10n6k8).
+func PromoteVerified(preHeadPath, vaultRoot string) (string, segment.Header, error) {
 	sf, err := segment.Open(preHeadPath)
 	if err != nil {
 		_ = os.Remove(preHeadPath)
-		return "", errors.Join(ErrCorruptSegment, err)
+		return "", segment.Header{}, errors.Join(ErrCorruptSegment, err)
 	}
+	hdr := sf.Header()
 	_ = sf.Close()
 
 	if err := paths.EnsureHeadDir(vaultRoot); err != nil {
 		_ = os.Remove(preHeadPath)
-		return "", err
+		return "", segment.Header{}, err
 	}
 	dest := filepath.Join(paths.HeadDir(vaultRoot), filepath.Base(preHeadPath))
 	if err := os.Rename(filepath.Clean(preHeadPath), dest); err != nil {
 		_ = os.Remove(preHeadPath)
-		return "", err
+		return "", segment.Header{}, err
 	}
 	if err := paths.SyncDir(paths.HeadDir(vaultRoot)); err != nil {
-		return "", err
+		return "", segment.Header{}, err
 	}
-	return dest, nil
+	return dest, hdr, nil
 }

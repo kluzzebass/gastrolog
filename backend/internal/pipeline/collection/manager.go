@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"maps"
+	"os"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -12,6 +15,8 @@ import (
 	"gastrolog/internal/glid"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/notify"
+	"gastrolog/internal/pipeline/paths"
+	"gastrolog/internal/pipeline/segment"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
@@ -84,6 +89,12 @@ type vaultCollect struct {
 	// re-commit. Bounded by the vault's live segment set; released in slice D.
 	receipted map[glid.GLID]struct{}
 
+	// Stage-throughput counters (gastrolog-10n6k8): records/bytes arriving
+	// in head/ on this node, via remote pull or local-holder promotion.
+	// Rates are derived downstream by the stats collector windows.
+	collectedRecords atomic.Uint64
+	collectedBytes   atomic.Uint64
+
 	// collectWaiters receives the result of the worker's next pass. CollectOnce
 	// registers here when the per-vault worker is running so chunking/planner
 	// goroutines never block on passMu while a pass pulls segments or applies
@@ -151,15 +162,26 @@ func (v *vaultCollect) collectOne(ctx context.Context, ref AssignedSegment) erro
 	v.collectMu.Lock()
 	v.notePreHead(ref.SegmentID)
 	v.collectMu.Unlock()
-	if _, err := PromoteVerified(prePath, v.root); err != nil {
+	dest, hdr, err := PromoteVerified(prePath, v.root)
+	if err != nil {
 		return err
 	}
+	v.noteHeadArrival(dest, hdr)
 	v.collectMu.Lock()
 	v.noteHead(ref.SegmentID)
 	v.collectMu.Unlock()
 	// The holder receipt is committed by the caller's end-of-pass batch
 	// (commitReceipts), never per segment.
 	return nil
+}
+
+// noteHeadArrival counts a segment's records/bytes as home-side ingress for
+// the stage throughput gauges (gastrolog-10n6k8).
+func (v *vaultCollect) noteHeadArrival(path string, hdr segment.Header) {
+	v.collectedRecords.Add(uint64(hdr.RecordCount))
+	if info, err := os.Stat(path); err == nil {
+		v.collectedBytes.Add(uint64(info.Size())) //nolint:gosec // sizes are non-negative
+	}
 }
 
 // commitReceipts records this node as holder for every given segment in ONE
@@ -517,6 +539,50 @@ func (m *Manager) Notify(vaultID glid.GLID) {
 
 // CollectOnce rolls the log and collects missing segments for one vault (for tests
 // and ChunkingManager materialization).
+// VaultCollectStats is one vault's cumulative home-side ingress counters
+// (records/bytes arrived in head/ on this node) — gastrolog-10n6k8.
+type VaultCollectStats struct {
+	VaultID          glid.GLID
+	CollectedRecords uint64
+	CollectedBytes   uint64
+}
+
+// CollectStats returns per-vault cumulative collection counters.
+func (m *Manager) CollectStats() []VaultCollectStats {
+	m.mu.Lock()
+	vaults := make(map[glid.GLID]*vaultCollect, len(m.vaults))
+	maps.Copy(vaults, m.vaults)
+	m.mu.Unlock()
+	out := make([]VaultCollectStats, 0, len(vaults))
+	for vaultID, v := range vaults {
+		out = append(out, VaultCollectStats{
+			VaultID:          vaultID,
+			CollectedRecords: v.collectedRecords.Load(),
+			CollectedBytes:   v.collectedBytes.Load(),
+		})
+	}
+	slices.SortFunc(out, func(a, b VaultCollectStats) int { return a.VaultID.Compare(b.VaultID) })
+	return out
+}
+
+// NoteLocalHeadArrival counts a locally-promoted segment (origin == home:
+// distribution renames completed/ into head/ without a pull) as home-side
+// ingress, reading only the fixed header (gastrolog-10n6k8).
+func (m *Manager) NoteLocalHeadArrival(vaultID, segmentID glid.GLID) {
+	m.mu.Lock()
+	v := m.vaults[vaultID]
+	m.mu.Unlock()
+	if v == nil {
+		return
+	}
+	path := paths.HeadSegment(v.root, segmentID)
+	hdr, err := segment.ReadHeader(path)
+	if err != nil {
+		return
+	}
+	v.noteHeadArrival(path, hdr)
+}
+
 func (m *Manager) CollectOnce(ctx context.Context, vaultID glid.GLID) error {
 	m.mu.Lock()
 	v, ok := m.vaults[vaultID]

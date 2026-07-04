@@ -83,6 +83,17 @@ func TestManagerBuildOnceBuildsGLCBAndAnnouncesSeal(t *testing.T) {
 	if fsm.SealedManifest() != nil {
 		t.Fatal("sealed manifest must clear after SealChunk")
 	}
+
+	// Stage throughput counters (gastrolog-10n6k8): this home materialized
+	// the sealed GLCB, so the seal counters must reflect it.
+	stats := mgr.SealStats()
+	if len(stats) != 1 || stats[0].VaultID != vaultID {
+		t.Fatalf("SealStats = %+v, want one entry for %s", stats, vaultID)
+	}
+	if stats[0].SealedRecords != 2 || stats[0].SealedBytes == 0 {
+		t.Fatalf("sealed = %d records / %d bytes, want 2 records and > 0 bytes",
+			stats[0].SealedRecords, stats[0].SealedBytes)
+	}
 }
 
 func TestManagerBuildOnceReleasesCompletedRegistry(t *testing.T) {

@@ -112,10 +112,21 @@ export function VaultCard({
   );
 }
 
-// VaultThroughputSection aggregates this vault's segmentation append rates
-// across every node's gossip-broadcast NodeStats (gastrolog-4eh5ns): the
-// vault-level view is the cross-node sum, with per-node rows showing where
-// the vault's ingest is landing. Hidden while no node reports a writer.
+// stageRow is one node's contribution to one pipeline stage.
+interface StageRow {
+  node: string;
+  recordsPerSec: number;
+  bytesPerSec: number;
+  spark: number[];
+  extra?: { depth: number; cap: number; durablePerSec: number };
+}
+
+// VaultThroughputSection is the three-stage pipeline readout for one vault,
+// aggregated across every node's gossip-broadcast NodeStats: append (origin
+// ingress), collected (segments arriving in head/ at the home), and sealed
+// (records materialized into GLCBs). A downstream stage's rate falling away
+// from its upstream is a pipeline stall in progress; the backlog panel below
+// shows where the inventory stacks (gastrolog-10n6k8).
 function VaultThroughputSection({
   vaultId,
   dark,
@@ -123,39 +134,46 @@ function VaultThroughputSection({
   const c = useThemeClass(dark);
   const { data: cluster } = useClusterStatus();
 
-  const rows: {
-    node: string;
-    recordsPerSec: number;
-    durablePerSec: number;
-    bytesPerSec: number;
-    spark: number[];
-    depth: number;
-    cap: number;
-  }[] = [];
+  const append: StageRow[] = [];
+  const collected: StageRow[] = [];
+  const sealed: StageRow[] = [];
   for (const n of cluster?.nodes ?? []) {
     if (!n.stats) continue;
     for (const vs of n.stats.vaults) {
-      if (encode(vs.id) !== vaultId || vs.appendQueueCapacity === 0) continue;
-      rows.push({
-        node: n.name || encode(n.id).slice(0, 8),
-        recordsPerSec: vs.appendRecords?.instantPerSec ?? 0,
-        durablePerSec: vs.appendDurable?.instantPerSec ?? 0,
-        bytesPerSec: vs.appendBytes?.instantPerSec ?? 0,
-        spark: vs.appendRecords?.spark ?? [],
-        depth: vs.appendQueueDepth,
-        cap: vs.appendQueueCapacity,
-      });
+      if (encode(vs.id) !== vaultId) continue;
+      const node = n.name || encode(n.id).slice(0, 8);
+      if (vs.appendQueueCapacity > 0) {
+        append.push({
+          node,
+          recordsPerSec: vs.appendRecords?.instantPerSec ?? 0,
+          bytesPerSec: vs.appendBytes?.instantPerSec ?? 0,
+          spark: vs.appendRecords?.spark ?? [],
+          extra: {
+            depth: vs.appendQueueDepth,
+            cap: vs.appendQueueCapacity,
+            durablePerSec: vs.appendDurable?.instantPerSec ?? 0,
+          },
+        });
+      }
+      if ((vs.collectedRecords?.spark.length ?? 0) > 0) {
+        collected.push({
+          node,
+          recordsPerSec: vs.collectedRecords?.instantPerSec ?? 0,
+          bytesPerSec: vs.collectedBytes?.instantPerSec ?? 0,
+          spark: vs.collectedRecords?.spark ?? [],
+        });
+      }
+      if ((vs.sealedRecords?.spark.length ?? 0) > 0) {
+        sealed.push({
+          node,
+          recordsPerSec: vs.sealedRecords?.instantPerSec ?? 0,
+          bytesPerSec: vs.sealedBytes?.instantPerSec ?? 0,
+          spark: vs.sealedRecords?.spark ?? [],
+        });
+      }
     }
   }
-  if (rows.length === 0) return null;
-  rows.sort((a, b) => a.node.localeCompare(b.node));
-
-  const totalRecords = rows.reduce((sum, r) => sum + r.recordsPerSec, 0);
-  const totalBytes = rows.reduce((sum, r) => sum + r.bytesPerSec, 0);
-
-  const labelClass = `text-[0.7em] font-medium uppercase tracking-[0.15em] ${c("text-text-muted", "text-light-text-muted")}`;
-  const valueClass = `font-mono ${c("text-text-bright", "text-light-text-bright")}`;
-  const mutedMono = `font-mono ${c("text-text-muted", "text-light-text-muted")}`;
+  if (append.length === 0 && collected.length === 0 && sealed.length === 0) return null;
 
   return (
     <section className="flex flex-col gap-4">
@@ -165,56 +183,84 @@ function VaultThroughputSection({
         Throughput
       </h3>
       <div
-        className={`rounded-lg border px-4 py-3 ${c("border-ink-border bg-ink-well", "border-light-border bg-light-well")}`}
+        className={`rounded-lg border px-4 py-3 flex flex-col gap-3 ${c("border-ink-border bg-ink-well", "border-light-border bg-light-well")}`}
       >
-        <div className="flex flex-wrap items-baseline gap-x-5 gap-y-2 text-[0.85em]">
-          <div
-            className="flex items-baseline gap-2"
-            title="Records/s appended to this vault's working segments, summed across all writing nodes (instantaneous, ~5s window)"
-          >
-            <span className={labelClass}>Append</span>
-            <span className={valueClass}>{formatRate(totalRecords)}/s</span>
-          </div>
-          <div
-            className="flex items-baseline gap-2"
-            title="Bytes/s appended to this vault's working segments, summed across all writing nodes"
-          >
-            <span className={labelClass}>Data</span>
-            <span className={valueClass}>{formatBytes(totalBytes)}/s</span>
-          </div>
-        </div>
-        {rows.length > 0 && (
-          <div className="mt-2 flex flex-col gap-1 text-[0.85em]">
-            {rows.map((r) => (
-              <div key={r.node} className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                <span className={`font-mono w-32 truncate ${c("text-text-muted", "text-light-text-muted")}`} title={r.node}>
-                  {r.node}
-                </span>
-                <span className={c("text-copper/70", "text-copper/60")}>
-                  <Spark values={r.spark} width={40} height={12} />
-                </span>
-                <span className={mutedMono}>{formatRate(r.recordsPerSec)}/s</span>
-                <span className={mutedMono}>{formatBytes(r.bytesPerSec)}/s</span>
-                <span
-                  className={`font-mono ${r.depth > 0 ? "text-severity-warn" : c("text-text-muted", "text-light-text-muted")}`}
-                  title="Segmentation queue depth / capacity"
-                >
-                  queue {r.depth}/{r.cap}
-                </span>
-                {r.durablePerSec + 1 < r.recordsPerSec && (
-                  <span
-                    className="font-mono text-severity-warn"
-                    title="Durable-commit rate lags the append rate — fsync backpressure"
-                  >
-                    durable {formatRate(r.durablePerSec)}/s
-                  </span>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
+        <StageBlock
+          label="Append"
+          title="Origin ingress: records/s appended to this vault's working segments, per writing node"
+          rows={append}
+          dark={dark}
+        />
+        <StageBlock
+          label="Collected"
+          title="Home ingress: records/s arriving in head/ (remote pull or local promotion), per home node"
+          rows={collected}
+          dark={dark}
+        />
+        <StageBlock
+          label="Sealed"
+          title="Records/s materialized into sealed GLCB chunks, per home node"
+          rows={sealed}
+          dark={dark}
+        />
       </div>
     </section>
+  );
+}
+
+function StageBlock({
+  label,
+  title,
+  rows,
+  dark,
+}: Readonly<{ label: string; title: string; rows: StageRow[]; dark: boolean }>) {
+  const c = useThemeClass(dark);
+  if (rows.length === 0) return null;
+  rows.sort((a, b) => a.node.localeCompare(b.node));
+  const totalRecords = rows.reduce((sum, r) => sum + r.recordsPerSec, 0);
+  const totalBytes = rows.reduce((sum, r) => sum + r.bytesPerSec, 0);
+  const labelClass = `text-[0.7em] font-medium uppercase tracking-[0.15em] ${c("text-text-muted", "text-light-text-muted")}`;
+  const valueClass = `font-mono ${c("text-text-bright", "text-light-text-bright")}`;
+  const mutedMono = `font-mono ${c("text-text-muted", "text-light-text-muted")}`;
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-baseline gap-x-4 text-[0.85em]" title={title}>
+        <span className={`${labelClass} w-20`}>{label}</span>
+        <span className={valueClass}>{formatRate(totalRecords)}/s</span>
+        <span className={mutedMono}>{formatBytes(totalBytes)}/s</span>
+      </div>
+      <div className="mt-1 flex flex-col gap-1 text-[0.85em]">
+        {rows.map((r) => (
+          <div key={r.node} className="flex flex-wrap items-center gap-x-4 gap-y-1 pl-4">
+            <span className={`font-mono w-28 truncate ${c("text-text-muted", "text-light-text-muted")}`} title={r.node}>
+              {r.node}
+            </span>
+            <span className={c("text-copper/70", "text-copper/60")}>
+              <Spark values={r.spark} width={40} height={12} />
+            </span>
+            <span className={mutedMono}>{formatRate(r.recordsPerSec)}/s</span>
+            <span className={mutedMono}>{formatBytes(r.bytesPerSec)}/s</span>
+            {r.extra && (
+              <span
+                className={`font-mono ${r.extra.depth > 0 ? "text-severity-warn" : c("text-text-muted", "text-light-text-muted")}`}
+                title="Segmentation queue depth / capacity"
+              >
+                queue {r.extra.depth}/{r.extra.cap}
+              </span>
+            )}
+            {r.extra && r.extra.durablePerSec + 1 < r.recordsPerSec && (
+              <span
+                className="font-mono text-severity-warn"
+                title="Durable-commit rate lags the append rate — fsync backpressure"
+              >
+                durable {formatRate(r.extra.durablePerSec)}/s
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 

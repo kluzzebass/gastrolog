@@ -1471,6 +1471,33 @@ export class VaultStats extends Message<VaultStats> {
    */
   appendQueueCapacity = 0;
 
+  /**
+   * Downstream pipeline stage throughput on THIS node (home side):
+   * collected = records/bytes arriving in head/ (remote pull or local
+   * promotion); sealed = records/bytes materialized into sealed GLCBs.
+   * Together with append (origin side) these give the three-stage
+   * append -> collected -> sealed readout; a downstream rate falling away
+   * from its upstream is a pipeline stall in progress (gastrolog-10n6k8).
+   *
+   * @generated from field: gastrolog.v1.ThroughputRate collected_records = 21;
+   */
+  collectedRecords?: ThroughputRate;
+
+  /**
+   * @generated from field: gastrolog.v1.ThroughputRate collected_bytes = 22;
+   */
+  collectedBytes?: ThroughputRate;
+
+  /**
+   * @generated from field: gastrolog.v1.ThroughputRate sealed_records = 23;
+   */
+  sealedRecords?: ThroughputRate;
+
+  /**
+   * @generated from field: gastrolog.v1.ThroughputRate sealed_bytes = 24;
+   */
+  sealedBytes?: ThroughputRate;
+
   constructor(data?: PartialMessage<VaultStats>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1499,6 +1526,10 @@ export class VaultStats extends Message<VaultStats> {
     { no: 18, name: "append_bytes_total", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 19, name: "append_queue_depth", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 20, name: "append_queue_capacity", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 21, name: "collected_records", kind: "message", T: ThroughputRate },
+    { no: 22, name: "collected_bytes", kind: "message", T: ThroughputRate },
+    { no: 23, name: "sealed_records", kind: "message", T: ThroughputRate },
+    { no: 24, name: "sealed_bytes", kind: "message", T: ThroughputRate },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultStats {

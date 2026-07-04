@@ -500,6 +500,18 @@ func (s *Supervisor) AppendStats() []segmentation.AppendStats {
 	return s.seg.AppendStats()
 }
 
+// CollectStats returns per-vault cumulative home-side collection counters
+// (gastrolog-10n6k8).
+func (s *Supervisor) CollectStats() []collection.VaultCollectStats {
+	return s.col.CollectStats()
+}
+
+// SealStats returns per-vault cumulative GLCB seal counters
+// (gastrolog-10n6k8).
+func (s *Supervisor) SealStats() []chunking.VaultSealStats {
+	return s.chunk.SealStats()
+}
+
 // RegisterVault starts the managers for the roles the vault holds on this node.
 // Safe before or during Start. It is idempotent only in the sense that a second
 // registration of the same vault returns ErrVaultRegistered.
@@ -588,7 +600,8 @@ func (s *Supervisor) registerOrigin(spec VaultSpec) error {
 	}
 	if spec.Home {
 		vaultID := spec.VaultID
-		distCfg.OnLocalHeadPromoted = func(glid.GLID) {
+		distCfg.OnLocalHeadPromoted = func(segmentID glid.GLID) {
+			s.col.NoteLocalHeadArrival(vaultID, segmentID)
 			s.col.Notify(vaultID)
 			s.chunk.NotifyVault(vaultID)
 		}

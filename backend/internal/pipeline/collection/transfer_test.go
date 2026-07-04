@@ -69,7 +69,7 @@ func TestReceiveAndPromoteVerified(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	headPath, err := collection.PromoteVerified(prePath, root)
+	headPath, _, err := collection.PromoteVerified(prePath, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestPromoteVerifiedRejectsCorruptTransfer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := collection.PromoteVerified(prePath, root)
+	_, _, err := collection.PromoteVerified(prePath, root)
 	if !errors.Is(err, collection.ErrCorruptSegment) {
 		t.Fatalf("PromoteVerified() = %v, want ErrCorruptSegment", err)
 	}

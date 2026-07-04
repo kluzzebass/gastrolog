@@ -172,7 +172,7 @@ func TestCollectOnceReceiptsSegmentAlreadyInHead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := collection.PromoteVerified(prePath, root); err != nil {
+	if _, _, err = collection.PromoteVerified(prePath, root); err != nil {
 		t.Fatal(err)
 	}
 
@@ -252,7 +252,7 @@ func TestCollectOnceReceiptsSegmentPromotedAfterLayoutWarm(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := collection.PromoteVerified(prePath, root); err != nil {
+	if _, _, err = collection.PromoteVerified(prePath, root); err != nil {
 		t.Fatal(err)
 	}
 

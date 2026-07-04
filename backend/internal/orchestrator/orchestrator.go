@@ -21,6 +21,8 @@ import (
 	"gastrolog/internal/logging"
 	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator/pipeline"
+	"gastrolog/internal/pipeline/chunking"
+	"gastrolog/internal/pipeline/collection"
 	"gastrolog/internal/pipeline/digestion"
 	"gastrolog/internal/pipeline/ingestion"
 	"gastrolog/internal/pipeline/segmentation"
@@ -965,6 +967,24 @@ func (o *Orchestrator) VaultAppendStats() []segmentation.AppendStats {
 		return nil
 	}
 	return o.pipeline.AppendStats()
+}
+
+// VaultCollectStats returns per-vault home-side collection counters from the
+// pipeline supervisor (gastrolog-10n6k8).
+func (o *Orchestrator) VaultCollectStats() []collection.VaultCollectStats {
+	if o.pipeline == nil {
+		return nil
+	}
+	return o.pipeline.CollectStats()
+}
+
+// VaultSealStats returns per-vault GLCB seal counters from the pipeline
+// supervisor (gastrolog-10n6k8).
+func (o *Orchestrator) VaultSealStats() []chunking.VaultSealStats {
+	if o.pipeline == nil {
+		return nil
+	}
+	return o.pipeline.SealStats()
 }
 
 // VaultSnapshots returns a snapshot of stats for all registered vaults.

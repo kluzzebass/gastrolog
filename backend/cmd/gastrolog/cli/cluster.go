@@ -166,8 +166,9 @@ func newClusterThroughputCmd() *cobra.Command {
 					continue
 				}
 				for _, vs := range n.Stats.Vaults {
-					if vs.AppendQueueCapacity == 0 {
-						continue // no segmentation writer on this node
+					hasHome := len(vs.CollectedRecords.GetSpark()) > 0 || len(vs.SealedRecords.GetSpark()) > 0
+					if vs.AppendQueueCapacity == 0 && !hasHome {
+						continue // vault has no pipeline role on this node
 					}
 					rows = append(rows, []string{
 						n.Name,
@@ -176,12 +177,14 @@ func newClusterThroughputCmd() *cobra.Command {
 						fmt.Sprintf("%.1f/s", vs.AppendDurable.GetInstantPerSec()),
 						formatBytesCLI(vs.AppendBytes.GetInstantPerSec()) + "/s",
 						fmt.Sprintf("%d/%d", vs.AppendQueueDepth, vs.AppendQueueCapacity),
+						fmt.Sprintf("%.1f/s", vs.CollectedRecords.GetInstantPerSec()),
+						fmt.Sprintf("%.1f/s", vs.SealedRecords.GetInstantPerSec()),
 					})
 				}
 			}
 			if len(rows) > 0 {
 				fmt.Println()
-				p.table([]string{"NODE", "VAULT", "APPEND", "DURABLE", "BYTES", "QUEUE"}, rows)
+				p.table([]string{"NODE", "VAULT", "APPEND", "DURABLE", "BYTES", "QUEUE", "COLLECT", "SEAL"}, rows)
 			}
 			return nil
 		},

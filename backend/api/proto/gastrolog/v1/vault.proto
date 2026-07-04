@@ -317,6 +317,17 @@ message VaultStats {
   uint64 append_bytes_total = 18;
   uint32 append_queue_depth = 19;
   uint32 append_queue_capacity = 20;
+
+  // Downstream pipeline stage throughput on THIS node (home side):
+  // collected = records/bytes arriving in head/ (remote pull or local
+  // promotion); sealed = records/bytes materialized into sealed GLCBs.
+  // Together with append (origin side) these give the three-stage
+  // append -> collected -> sealed readout; a downstream rate falling away
+  // from its upstream is a pipeline stall in progress (gastrolog-10n6k8).
+  ThroughputRate collected_records = 21;
+  ThroughputRate collected_bytes = 22;
+  ThroughputRate sealed_records = 23;
+  ThroughputRate sealed_bytes = 24;
 }
 
 message ReindexVaultRequest {
