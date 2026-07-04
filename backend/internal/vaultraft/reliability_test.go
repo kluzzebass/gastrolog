@@ -173,12 +173,12 @@ func TestReliability_Failover_LeaderDown_NewLeaderElected(t *testing.T) {
 		t.Fatalf("no new leader elected after %s went down", oldLeader)
 	}
 
-	// New leader accepts writes.
-	leader := h.nodes[newLeader]
+	// A post-failover leader accepts writes. Leadership can churn again right
+	// after the first new winner emerges (300ms election timeouts), so retry
+	// across transients rather than pinning the apply to that first winner —
+	// the downed node can't win, so any leader reached is a new one.
 	cmd := MarshalVaultChunkCommand(vaultID, vaultctlfsm.MarshalCreateChunk(chunkIDWithPrefix(0x11), now, now, now))
-	if err := leader.raft.Apply(cmd, 2*time.Second).Error(); err != nil {
-		t.Fatalf("apply under new leader: %v", err)
-	}
+	h.applyCommand(cmd, "apply under new leader")
 
 	// Two-node quorum converges.
 	liveIDs := []string{}
