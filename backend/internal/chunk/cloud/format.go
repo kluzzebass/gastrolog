@@ -128,7 +128,11 @@ type BlobMeta struct {
 	VaultID     glid.GLID
 	RecordCount uint32
 	RawBytes    int64 // uncompressed record data size (0 if unknown)
-	WriteStart  time.Time
+	// IngestTSMonotonic is the build-time fact that ingest timestamps are
+	// non-decreasing in merge order, persisted in the layout meta — never
+	// derived by touching record frames (gastrolog-699s7p).
+	IngestTSMonotonic bool
+	WriteStart        time.Time
 	WriteEnd    time.Time
 	IngestStart time.Time
 	IngestEnd   time.Time

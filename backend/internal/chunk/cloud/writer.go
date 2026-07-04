@@ -342,7 +342,10 @@ func (w *Writer) emitBlobDirect() (int64, error) {
 		SourceEnd:   tsNanos(w.bounds.sourceEnd),
 		DictEntries: uint32(w.dict.Len()), //nolint:gosec // G115: dict bounded
 		DictSize:    uint32(len(dictBuf)), //nolint:gosec // G115: dict bytes bounded
-		RecordsOff:  recordsOff,
+
+		IngestTSMonotonic: w.ingestMonotonic,
+
+		RecordsOff: recordsOff,
 		RecordsSize: uint32(w.sectionOff), //nolint:gosec // G115: section bounded by chunk policy
 		DictOff:     dictOff,
 		IndexOff:    indexOff,
@@ -440,7 +443,10 @@ func (w *Writer) emitBlobStaging(dst io.Writer) (int64, error) {
 		SourceEnd:   tsNanos(w.bounds.sourceEnd),
 		DictEntries: uint32(w.dict.Len()), //nolint:gosec // G115: dict bounded
 		DictSize:    uint32(len(dictBuf)), //nolint:gosec // G115: dict bytes bounded
-		RecordsOff:  recordsOff,
+
+		IngestTSMonotonic: w.ingestMonotonic,
+
+		RecordsOff: recordsOff,
 		RecordsSize: uint32(w.sectionOff), //nolint:gosec // G115: section bounded by chunk policy
 		DictOff:     dictOff,
 		IndexOff:    indexOff,
@@ -603,9 +609,10 @@ func (w *Writer) TOC() BlobTOC { return w.toc }
 
 func (w *Writer) Meta() BlobMeta {
 	return BlobMeta{
-		ChunkID:         w.chunkID,
-		VaultID:         w.vaultID,
-		RecordCount:     w.count,
+		ChunkID:           w.chunkID,
+		VaultID:           w.vaultID,
+		RecordCount:       w.count,
+		IngestTSMonotonic: w.ingestMonotonic,
 		RawBytes:        int64(w.sectionOff), //nolint:gosec // G115: section bounded by chunk policy
 		WriteStart:      w.bounds.writeStart,
 		WriteEnd:        w.bounds.writeEnd,
