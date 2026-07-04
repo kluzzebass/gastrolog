@@ -177,7 +177,7 @@ function VaultThroughputSection({
 
   // Fixed grid template shared by every row (header, stage totals, node
   // rows) so changing number widths never shift columns horizontally.
-  const gridCols = "grid grid-cols-[6rem_minmax(6rem,1fr)_3.5rem_5.5rem_6.5rem_minmax(8rem,1.2fr)] items-center gap-x-3";
+  const gridCols = "grid grid-cols-[5.5rem_minmax(5rem,1fr)_4.5rem_5.5rem_6.5rem_minmax(7rem,1.2fr)] items-center gap-x-3";
 
   return (
     <section className="flex flex-col gap-4">
@@ -225,6 +225,18 @@ function VaultThroughputSection({
   );
 }
 
+// stageRowActive: a node row earns its place by doing something — nonzero
+// rate, standing queue, or recent spark history. Idle registered writers are
+// noise ("quiet until needed").
+function stageRowActive(r: StageRow): boolean {
+  return (
+    r.recordsPerSec > 0 ||
+    r.bytesPerSec > 0 ||
+    (r.extra?.depth ?? 0) > 0 ||
+    r.spark.some((v) => v > 0)
+  );
+}
+
 function StageRows({
   label,
   title,
@@ -233,18 +245,34 @@ function StageRows({
   dark,
 }: Readonly<{ label: string; title: string; rows: StageRow[]; gridCols: string; dark: boolean }>) {
   const c = useThemeClass(dark);
-  const sorted = rows.toSorted((a, b) => a.node.localeCompare(b.node));
-  const totalRecords = sorted.reduce((sum, r) => sum + r.recordsPerSec, 0);
-  const totalBytes = sorted.reduce((sum, r) => sum + r.bytesPerSec, 0);
+  const active = rows.filter(stageRowActive).toSorted((a, b) => a.node.localeCompare(b.node));
+  const totalRecords = active.reduce((sum, r) => sum + r.recordsPerSec, 0);
+  const totalBytes = active.reduce((sum, r) => sum + r.bytesPerSec, 0);
   const stageClass = `text-[0.75em] font-medium uppercase tracking-[0.15em] ${c("text-text-muted", "text-light-text-muted")}`;
   const brightMono = `font-mono text-right ${c("text-text-bright", "text-light-text-bright")}`;
   const mutedMono = `font-mono text-right ${c("text-text-muted", "text-light-text-muted")}`;
   const rowBorder = c("border-ink-border-subtle", "border-light-border-subtle");
+  const rowClass = `${gridCols} px-4 py-1.5 text-[0.85em] border-b last:border-b-0 ${rowBorder}`;
+
+  // A stage with rows but zero activity is a SIGNAL (e.g. sealing
+  // flatlined behind a backlog) — one muted zero row, not N of them.
+  if (rows.length > 0 && active.length === 0) {
+    return (
+      <div className={rowClass} title={title}>
+        <span className={stageClass}>{label}</span>
+        <span className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}>all nodes</span>
+        <span />
+        <span className={mutedMono}>0.0/s</span>
+        <span className={mutedMono}>0 B/s</span>
+        <span />
+      </div>
+    );
+  }
 
   return (
     <>
-      {sorted.length > 1 && (
-        <div className={`${gridCols} px-4 py-2 text-[0.85em] border-b last:border-b-0 ${rowBorder}`} title={title}>
+      {active.length > 1 && (
+        <div className={rowClass} title={title}>
           <span className={stageClass}>{label}</span>
           <span className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}>all nodes</span>
           <span />
@@ -253,25 +281,21 @@ function StageRows({
           <span />
         </div>
       )}
-      {sorted.map((r, i) => (
-        <div
-          key={r.node}
-          className={`${gridCols} px-4 py-2 text-[0.85em] border-b last:border-b-0 ${rowBorder}`}
-          title={title}
-        >
-          <span className={stageClass}>{sorted.length === 1 && i === 0 ? label : ""}</span>
+      {active.map((r, i) => (
+        <div key={r.node} className={rowClass} title={title}>
+          <span className={stageClass}>{active.length === 1 && i === 0 ? label : ""}</span>
           <span className={`font-mono truncate ${c("text-text-muted", "text-light-text-muted")}`} title={r.node}>
             {r.node}
           </span>
-          <span className={c("text-copper/70", "text-copper/60")}>
-            <Spark values={r.spark} width={40} height={12} />
+          <span className="text-copper">
+            <Spark values={r.spark} />
           </span>
-          <span className={sorted.length > 1 ? mutedMono : brightMono}>{formatRate(r.recordsPerSec)}/s</span>
-          <span className={sorted.length > 1 ? mutedMono : brightMono}>{formatBytes(r.bytesPerSec)}/s</span>
+          <span className={active.length > 1 ? mutedMono : brightMono}>{formatRate(r.recordsPerSec)}/s</span>
+          <span className={active.length > 1 ? mutedMono : brightMono}>{formatBytes(r.bytesPerSec)}/s</span>
           <span className="flex items-center gap-2 whitespace-nowrap">
-            {r.extra && (
+            {r.extra && r.extra.depth > 0 && (
               <span
-                className={`font-mono ${r.extra.depth > 0 ? "text-severity-warn" : c("text-text-muted", "text-light-text-muted")}`}
+                className="font-mono text-severity-warn"
                 title="Segmentation queue depth / capacity"
               >
                 queue {r.extra.depth}/{r.extra.cap}
