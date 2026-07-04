@@ -9,7 +9,7 @@ import (
 )
 
 type spanCursor struct {
-	idx *OrderedIndex
+	seg *segment.MappedSegment
 	pos uint32
 	end uint32
 }
@@ -18,7 +18,7 @@ func (c *spanCursor) popEntry() (segment.IndexEntry, bool, error) {
 	if c.pos >= c.end {
 		return segment.IndexEntry{}, false, nil
 	}
-	entry, err := c.idx.EntryAt(c.pos)
+	entry, err := c.seg.IndexEntryAt(c.pos)
 	if err != nil {
 		return segment.IndexEntry{}, false, err
 	}
@@ -87,26 +87,41 @@ func (h *mergeHeap) pop() mergeEntry {
 	return top
 }
 
-func loadSpanCursors(refs []SpanRef) ([]spanCursor, error) {
-	indexes := make(map[string]*OrderedIndex, len(refs))
+// loadSpanCursors maps every referenced segment read-only (one mapping per
+// distinct path, shared across spans) and returns a closer that unmaps them
+// all. Mapped access replaces the previous ~3 preads per merged record, and
+// skips the full-file CRC re-verification that segment.Open performs — each
+// segment was already verified when it entered this node, and the built
+// GLCB carries its own digest (gastrolog-1rca2d). The closer also fixes the
+// long-standing leak of one open segment handle per merged segment: the
+// previous OrderedIndex opens were never closed.
+func loadSpanCursors(refs []SpanRef) ([]spanCursor, func(), error) {
+	segments := make(map[string]*segment.MappedSegment, len(refs))
+	closeAll := func() {
+		for _, m := range segments {
+			_ = m.Close()
+		}
+	}
 	cursors := make([]spanCursor, len(refs))
 	for i, ref := range refs {
-		idx, ok := indexes[ref.Path]
+		m, ok := segments[ref.Path]
 		if !ok {
 			var err error
-			idx, err = BuildOrderedIndex(ref.Path)
+			m, err = segment.OpenMapped(ref.Path)
 			if err != nil {
-				return nil, err
+				closeAll()
+				return nil, nil, err
 			}
-			indexes[ref.Path] = idx
+			segments[ref.Path] = m
 		}
-		if err := ref.Span.validate(idx.Len()); err != nil {
-			return nil, err
+		if err := ref.Span.validate(m.Len()); err != nil {
+			closeAll()
+			return nil, nil, err
 		}
 		end, _ := spanEnd(ref.Span.Start, ref.Span.Count)
-		cursors[i] = spanCursor{idx: idx, pos: ref.Span.Start, end: end}
+		cursors[i] = spanCursor{seg: m, pos: ref.Span.Start, end: end}
 	}
-	return cursors, nil
+	return cursors, closeAll, nil
 }
 
 func seedMergeEntries(cursors []spanCursor) ([]mergeEntry, error) {
@@ -132,11 +147,12 @@ func MergeSpanRefs(refs []SpanRef) iter.Seq2[record.Record, error] {
 			return
 		}
 
-		cursors, err := loadSpanCursors(refs)
+		cursors, closeAll, err := loadSpanCursors(refs)
 		if err != nil {
 			yield(record.Record{}, err)
 			return
 		}
+		defer closeAll()
 
 		entries, err := seedMergeEntries(cursors)
 		if err != nil {
@@ -151,7 +167,7 @@ func MergeSpanRefs(refs []SpanRef) iter.Seq2[record.Record, error] {
 
 		for len(h.entries) > 0 {
 			me := h.pop()
-			rec, err := cursors[me.cur].idx.RecordAtFilePos(me.entry.FilePos)
+			rec, err := cursors[me.cur].seg.RecordAtFilePos(me.entry.FilePos)
 			if err != nil {
 				yield(record.Record{}, err)
 				return

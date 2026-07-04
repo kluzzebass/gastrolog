@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/logging"
@@ -33,12 +34,18 @@ type VaultCtlApplier interface {
 // SegmentCollector pulls segment bytes onto this home. Chunking invokes it as a
 // build prerequisite (every manifest ref must be local before GLCB merge) and
 // during planner catch-up when eligible registry segments are not yet in head/.
+//
+// Deliberately NO blocking full-pass method: the chunking worker must never
+// wait on a collection pass. Under backlog a pass takes minutes-to-hours and
+// the serial seal loop stalled at one chunk per pass (gastrolog-1b51yf).
+// Collection wakes chunking on every pass completion (OnPassComplete), so a
+// non-blocking Nudge is all the worker ever needs.
 type SegmentCollector interface {
-	// CollectOnce runs a full assignment-log pass for this vault.
-	CollectOnce(ctx context.Context) error
 	// CollectSegments pulls the given segment IDs when manifest refs require
 	// bytes this home does not yet hold.
 	CollectSegments(ctx context.Context, segmentIDs []glid.GLID) error
+	// Nudge wakes the collection worker for this vault without waiting.
+	Nudge()
 }
 
 // VaultConfig is per-vault chunking execution state.
@@ -75,6 +82,18 @@ type VaultConfig struct {
 	// Now overrides wall clock for MaxAge rotation on the open manifest.
 	// Nil uses time.Now (production). Tests inject a fixed clock.
 	Now func() time.Time
+	// Alerts raises operator alerts for blocked GLCB builds (sealed manifest
+	// referencing segments missing on this node — chunks pinned in Sealing,
+	// gastrolog-67c9b0). Nil inherits the manager Config sink; both nil
+	// disables alerts.
+	Alerts AlertSink
+}
+
+// AlertSink is the subset of alert.Collector chunking raises blocked-build
+// alerts through (satisfied by the orchestrator's collector).
+type AlertSink interface {
+	Set(id string, severity alert.Severity, source, message string)
+	Clear(id string)
 }
 
 type vaultChunking struct {
@@ -93,6 +112,12 @@ type vaultChunking struct {
 	// progress is the exactly-once state machine for the sealed-manifest
 	// build/seal/post-seal/OnBuilt lifecycle. Owns its own lock.
 	progress sealProgress
+	// blockedChunk/blockedSince track how long the head-of-queue sealed
+	// manifest has been unbuildable for lack of segment files, feeding the
+	// blocked-build operator alert (gastrolog-67c9b0). Accessed only under
+	// buildMu (the build pass is the sole writer).
+	blockedChunk chunk.ChunkID
+	blockedSince time.Time
 	// pendingRelease holds segment IDs awaiting ReleaseSegments once every
 	// required vault home has committed a holder receipt.
 	pendingRelease []glid.GLID
@@ -183,6 +208,8 @@ func newVaultChunking(cfg VaultConfig) (*vaultChunking, error) {
 // Config configures a ChunkingManager.
 type Config struct {
 	Logger *slog.Logger
+	// Alerts is the default AlertSink for vaults registered without one.
+	Alerts AlertSink
 }
 
 // Manager runs per-home chunking for registered vaults. The vault leader
@@ -224,6 +251,9 @@ func (m *Manager) RegisterVault(vaultID glid.GLID, cfg VaultConfig) error {
 		return errors.New("vault already registered")
 	}
 	cfg.VaultID = vaultID
+	if cfg.Alerts == nil {
+		cfg.Alerts = m.cfg.Alerts
+	}
 	v, err := newVaultChunking(cfg)
 	if err != nil {
 		return err

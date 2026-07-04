@@ -71,7 +71,16 @@ func segmentReadyForRegistryRelease(fsm *vaultctlfsm.FSM, segmentID glid.GLID, r
 // segment after local GLCB build. Cluster vaults keep origin head/ and completed/
 // until every placement holder has ack'd; tests without
 // RequiredHolders wired keep the legacy immediate purge.
+//
+// A segment referenced by the open chunk or ANY queued sealed manifest must
+// survive: "exhausted for planning" means fully assigned to manifests, not
+// fully built. Purging on exhaustion alone deleted segments that later queued
+// chunks still needed, pinning those chunks in Sealing forever
+// (gastrolog-67c9b0).
 func mayPurgeHeadAfterBuild(fsm *vaultctlfsm.FSM, segmentID glid.GLID, requiredHolders []string, holdersWired bool) bool {
+	if fsm != nil && fsm.SegmentReferencedInManifest(segmentID) {
+		return false
+	}
 	entry := fsm.GetCompletedSegment(segmentID)
 	if entry == nil || !segmentExhaustedForPlanning(fsm, *entry) {
 		return false

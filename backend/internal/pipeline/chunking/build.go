@@ -162,22 +162,20 @@ func (e *MissingSegmentsError) Is(target error) bool {
 	return target == ErrMissingSegments
 }
 
-func readGLCBSealMeta(path string) (chunkcloud.BlobMeta, bool, int64, error) {
+// readGLCBSealMeta reads seal metadata from the blob header. Header-only —
+// IngestTSMonotonic is persisted in the layout meta at build time, never
+// derived by touching record frames (gastrolog-699s7p: the old frame scan
+// cost minutes per large chunk on slow volumes).
+func readGLCBSealMeta(path string) (chunkcloud.BlobMeta, int64, error) {
 	blob, err := chunkcloud.OpenMappedBlob(filepath.Clean(path))
 	if err != nil {
-		return chunkcloud.BlobMeta{}, false, 0, err
+		return chunkcloud.BlobMeta{}, 0, err
 	}
 	defer func() { _ = blob.Close() }()
 
 	info, err := os.Stat(filepath.Clean(path))
 	if err != nil {
-		return chunkcloud.BlobMeta{}, false, 0, err
+		return chunkcloud.BlobMeta{}, 0, err
 	}
-
-	meta := blob.Meta()
-	monotonic, err := blob.IngestMonotonicInMergeOrder()
-	if err != nil {
-		return chunkcloud.BlobMeta{}, false, 0, err
-	}
-	return meta, monotonic, info.Size(), nil
+	return blob.Meta(), info.Size(), nil
 }

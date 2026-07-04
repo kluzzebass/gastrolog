@@ -185,12 +185,12 @@ type flowSegmentCollector struct {
 	vaultID glid.GLID
 }
 
-func (n flowSegmentCollector) CollectOnce(ctx context.Context) error {
-	return n.collect.CollectOnce(ctx, n.vaultID)
-}
-
 func (n flowSegmentCollector) CollectSegments(ctx context.Context, segmentIDs []glid.GLID) error {
 	return n.collect.CollectSegments(ctx, n.vaultID, segmentIDs)
+}
+
+func (n flowSegmentCollector) Nudge() {
+	n.collect.Notify(n.vaultID)
 }
 
 type flakyFlowPull struct {

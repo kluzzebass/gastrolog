@@ -1,28 +1,10 @@
 package chunking
 
 import (
-	"context"
-
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
-
-func manifestReferencesSegment(m *vaultctlfsm.OpenChunkManifest, segmentID glid.GLID) bool {
-	if m == nil {
-		return false
-	}
-	for _, ref := range m.Refs {
-		if ref.SegmentID == segmentID {
-			return true
-		}
-	}
-	return false
-}
-
-func openChunkReferencesSegment(m *vaultctlfsm.OpenChunkManifest, segmentID glid.GLID) bool {
-	return manifestReferencesSegment(m, segmentID)
-}
 
 // flushHeadPurgeForManifest removes head/ copies for manifest segment IDs once
 // this home has built the sealed GLCB. Purging before build completes leaves
@@ -34,7 +16,7 @@ func openChunkReferencesSegment(m *vaultctlfsm.OpenChunkManifest, segmentID glid
 // committed a receipt. Origins promote completed→head (rename), so head/ is
 // the only on-disk copy peers can pull; purging it early while collection is
 // still catching up wedges remote homes with "segment file missing".
-func (v *vaultChunking) flushHeadPurgeForManifest(ctx context.Context, pending *vaultctlfsm.OpenChunkManifest, segmentIDs []glid.GLID) {
+func (v *vaultChunking) flushHeadPurgeForManifest(pending *vaultctlfsm.OpenChunkManifest, segmentIDs []glid.GLID) {
 	if pending == nil || len(segmentIDs) == 0 {
 		return
 	}
@@ -42,17 +24,33 @@ func (v *vaultChunking) flushHeadPurgeForManifest(ctx context.Context, pending *
 	if !v.progress.alreadyBuilt(key) {
 		return
 	}
-	if v.cfg.Collector != nil {
-		_ = v.cfg.Collector.CollectOnce(ctx)
-	}
+	// No blocking collect here (gastrolog-1b51yf): this used to run a full
+	// CollectOnce pass to freshen holder receipts before the purge decision,
+	// which serialized the seal queue behind collection — one sealed chunk
+	// per full pass under backlog. Receipts arrive via collection's own
+	// wake-driven passes; a purge refused now is retried by the
+	// release-driven purge (OnReleaseSegments → drainReleasedPurge) and by
+	// later manifests referencing the same segment.
 	required := v.requiredHolders()
 	holdersWired := v.cfg.RequiredHolders != nil
 	fsm := v.fsm()
+	purged := 0
 	for _, id := range segmentIDs {
 		if !mayPurgeHeadAfterBuild(fsm, id, required, holdersWired) {
 			continue
 		}
+		// Per-segment detail at Debug: purges are a healthy-path event that
+		// fires per segment per node — Info per segment floods the log at
+		// production ingest rates (gastrolog-67c9b0 forensics only need the
+		// trail when purge behavior is in question).
+		v.logger().Debug("purging head segment after build",
+			"segment", id, "chunk", pending.ChunkID)
 		_ = paths.PurgeHeadStaging(v.cfg.VaultRoot, id)
+		purged++
+	}
+	if purged > 0 {
+		v.logger().Info("purged head segments after build",
+			"chunk", pending.ChunkID, "count", purged)
 	}
 }
 
@@ -77,8 +75,10 @@ func (v *vaultChunking) purgeReleasedHead(ids []glid.GLID) {
 		return
 	}
 	for _, id := range ids {
+		v.logger().Debug("purging head segment after registry release", "segment", id)
 		_ = paths.PurgeHeadStaging(root, id)
 	}
+	v.logger().Info("purged head segments after registry release", "count", len(ids))
 }
 
 // purgeStaleHeadCatchUp removes head/ files with no completed-segment registry
@@ -102,16 +102,23 @@ func (v *vaultChunking) purgeStaleHeadCatchUp() {
 	if err != nil || len(ids) == 0 {
 		return
 	}
-	pending := v.sealedManifestForBuild()
-	open := v.fsm().OpenChunk()
 	fsm := v.fsm()
+	purged := 0
 	for id := range ids {
 		if fsm.GetCompletedSegment(id) != nil {
 			continue
 		}
-		if manifestReferencesSegment(pending, id) || openChunkReferencesSegment(open, id) {
+		// Full-queue reference scan, not just the head-of-queue manifest:
+		// a segment can be referenced only by a later queued sealed manifest
+		// (gastrolog-67c9b0).
+		if fsm.SegmentReferencedInManifest(id) {
 			continue
 		}
+		v.logger().Debug("purging stale head segment with no registry entry", "segment", id)
 		_ = paths.PurgeHeadStaging(root, id)
+		purged++
+	}
+	if purged > 0 {
+		v.logger().Info("purged stale head segments with no registry entry", "count", purged)
 	}
 }

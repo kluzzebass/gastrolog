@@ -5,8 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
+	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/glid"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
@@ -59,7 +62,7 @@ func (v *vaultChunking) afterSealBuild(ctx context.Context, pending *vaultctlfsm
 	}
 
 	segmentIDs := releasableSegmentIDs(v.fsm(), pending)
-	v.flushHeadPurgeForManifest(ctx, pending, segmentIDs)
+	v.flushHeadPurgeForManifest(pending, segmentIDs)
 	if v.cfg.IsLeader() {
 		if len(segmentIDs) > 0 {
 			v.mu.Lock()
@@ -258,7 +261,7 @@ func (v *vaultChunking) finishBuildOnce(ctx context.Context, pending *vaultctlfs
 		}
 	}
 	if postSeal {
-		v.flushHeadPurgeForManifest(ctx, pending, releasableSegmentIDs(v.fsm(), pending))
+		v.flushHeadPurgeForManifest(pending, releasableSegmentIDs(v.fsm(), pending))
 	}
 	// Retain the pending manifest until CmdSealChunk commits so
 	// OnSealedManifestCleared can run afterSealBuild on follower homes.
@@ -298,15 +301,18 @@ func (v *vaultChunking) materializeManifestSegments(ctx context.Context, manifes
 	}
 	missing := missingManifestSegmentIDs(manifest, v.cfg.Locate)
 	if len(missing) == 0 {
+		v.clearBuildBlocked()
 		return nil
 	}
 	if v.cfg.Collector == nil {
+		v.noteBuildBlocked(manifest.ChunkID, missing)
 		if !v.cfg.IsLeader() {
 			return ErrAwaitingLocalSegments
 		}
 		return &MissingSegmentsError{SegmentIDs: missing}
 	}
 	if err := v.cfg.Collector.CollectSegments(ctx, missing); err != nil {
+		v.noteBuildBlocked(manifest.ChunkID, missing)
 		if !v.cfg.IsLeader() {
 			return ErrAwaitingLocalSegments
 		}
@@ -314,12 +320,58 @@ func (v *vaultChunking) materializeManifestSegments(ctx context.Context, manifes
 	}
 	stillMissing := missingManifestSegmentIDs(manifest, v.cfg.Locate)
 	if len(stillMissing) == 0 {
+		v.clearBuildBlocked()
 		return nil
 	}
+	v.noteBuildBlocked(manifest.ChunkID, stillMissing)
 	if !v.cfg.IsLeader() {
 		return ErrAwaitingLocalSegments
 	}
 	return &MissingSegmentsError{SegmentIDs: stillMissing}
+}
+
+// buildBlockedAlertAfter is the grace period before a blocked build raises an
+// operator alert. Collection normally materializes missing segments within
+// seconds of a seal; anything blocked minutes is stuck, not catching up.
+const buildBlockedAlertAfter = 2 * time.Minute
+
+func (v *vaultChunking) buildBlockedAlertID() string {
+	return "chunking-build-blocked-" + v.cfg.VaultID.String()
+}
+
+// noteBuildBlocked tracks how long the head-of-queue sealed manifest has been
+// unbuildable because referenced segment files are missing on this node, and
+// raises an operator alert once the condition outlives the grace period.
+// Sealing is serial per vault: a blocked head manifest pins every later chunk
+// in Sealing and the records inside are unqueryable until it clears
+// (gastrolog-67c9b0). Called only from the build pass, under buildMu.
+func (v *vaultChunking) noteBuildBlocked(chunkID chunk.ChunkID, missing []glid.GLID) {
+	now := v.now()
+	if v.blockedChunk != chunkID || v.blockedSince.IsZero() {
+		v.blockedChunk = chunkID
+		v.blockedSince = now
+		return
+	}
+	blockedFor := now.Sub(v.blockedSince)
+	if v.cfg.Alerts == nil || blockedFor < buildBlockedAlertAfter || len(missing) == 0 {
+		return
+	}
+	v.cfg.Alerts.Set(v.buildBlockedAlertID(), alert.Error, "chunking",
+		fmt.Sprintf("vault %s: chunk %s blocked in Sealing for %s — %d referenced segment(s) missing on this node (e.g. %s); later chunks cannot seal until this resolves",
+			v.cfg.VaultID, chunkID, blockedFor.Round(time.Second), len(missing), missing[0]))
+}
+
+// clearBuildBlocked resets blocked-build tracking and drops the alert. Called
+// when every referenced segment is present again (or the manifest advanced).
+func (v *vaultChunking) clearBuildBlocked() {
+	if v.blockedSince.IsZero() {
+		return
+	}
+	v.blockedChunk = chunk.ChunkID{}
+	v.blockedSince = time.Time{}
+	if v.cfg.Alerts != nil {
+		v.cfg.Alerts.Clear(v.buildBlockedAlertID())
+	}
 }
 
 // chunkSealCommitted reports whether CmdSealChunk took effect cluster-wide.

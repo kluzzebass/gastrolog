@@ -217,20 +217,6 @@ func (b *MappedBlob) loadRecordTablesLocked() error {
 	return nil
 }
 
-// IngestMonotonicInMergeOrder reports whether ingest timestamps are
-// non-decreasing in merge order using only the mmap'd record index.
-func (b *MappedBlob) IngestMonotonicInMergeOrder() (bool, error) {
-	layout := b.layout
-	if layout.RecordCount == 0 {
-		return true, nil
-	}
-	if int(layout.IndexOff)+int(layout.IndexSize) > len(b.data) {
-		return false, errors.New("record index out of range")
-	}
-	indexBytes := b.data[int(layout.IndexOff) : int(layout.IndexOff)+int(layout.IndexSize)]
-	return ingestMonotonicFromIndex(indexBytes, int64(layout.RecordsOff), layout.RecordCount, b.data, nil)
-}
-
 func parseMappedBlob(data []byte) (*MappedBlob, error) {
 	if len(data) < headerSize+int(tocFooterSize) {
 		return nil, fmt.Errorf("GLCB too small: %d bytes", len(data))

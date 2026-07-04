@@ -444,6 +444,12 @@ func (f *FSM) applySealOpenChunkManifestLocked(c *gastrologv1.SealOpenChunkManif
 func (f *FSM) SegmentReferencedInManifest(segmentID glid.GLID) bool {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
+	return f.segmentReferencedInManifestLocked(segmentID)
+}
+
+// segmentReferencedInManifestLocked is SegmentReferencedInManifest for callers
+// already holding f.mu (the Raft apply path).
+func (f *FSM) segmentReferencedInManifestLocked(segmentID glid.GLID) bool {
 	for _, m := range append([]*OpenChunkManifest{f.openChunk}, f.sealedManifests...) {
 		if m == nil {
 			continue
@@ -462,6 +468,13 @@ func (f *FSM) applyReleaseSegments(c *gastrologv1.ReleaseSegmentsCommand) []glid
 	for _, raw := range c.GetSegmentIds() {
 		segID := glid.FromBytes(raw)
 		if segID == glid.Nil {
+			continue
+		}
+		// Apply-time re-check: a proposal raced ahead of a plan command that
+		// referenced this segment. Releasing here would purge the head/ copy
+		// every home still needs to build the queued chunk (gastrolog-67c9b0).
+		// Deterministic — every node sees identical state at this log index.
+		if f.segmentReferencedInManifestLocked(segID) {
 			continue
 		}
 		if f.completedSegments[segID] != nil {

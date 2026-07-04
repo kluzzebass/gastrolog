@@ -238,7 +238,7 @@ func New(cfg Config) *Supervisor {
 		PublishBatchSize: cfg.DistributionPublishBatchSize,
 		Logger:           cfg.Logger,
 	})
-	chunk := chunking.New(chunking.Config{Logger: cfg.Logger})
+	chunk := chunking.New(chunking.Config{Logger: cfg.Logger, Alerts: cfg.Alerts})
 	col := collection.New(collection.Config{
 		Logger: cfg.Logger,
 		OnPassComplete: func(vaultID glid.GLID) {
@@ -813,10 +813,13 @@ type vaultSegmentCollector struct {
 	vaultID glid.GLID
 }
 
-func (n vaultSegmentCollector) CollectOnce(ctx context.Context) error {
-	return n.mgr.CollectOnce(ctx, n.vaultID)
-}
-
 func (n vaultSegmentCollector) CollectSegments(ctx context.Context, segmentIDs []glid.GLID) error {
 	return n.mgr.CollectSegments(ctx, n.vaultID, segmentIDs)
+}
+
+// Nudge wakes the collection worker without waiting for a pass. The chunking
+// worker must never block on collection (gastrolog-1b51yf); pass completion
+// re-wakes chunking via OnPassComplete.
+func (n vaultSegmentCollector) Nudge() {
+	n.mgr.Notify(n.vaultID)
 }

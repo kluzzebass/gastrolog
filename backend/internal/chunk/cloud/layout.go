@@ -35,6 +35,10 @@ type blobLayoutMeta struct {
 	DictOff     uint32
 	IndexOff    uint32
 	IndexSize   uint32
+	// IngestTSMonotonic records at build time whether ingest timestamps are
+	// non-decreasing in merge (EventID) order. Persisted so recovery never
+	// re-derives it by touching every record frame (gastrolog-699s7p).
+	IngestTSMonotonic bool
 }
 
 func encodeBlobLayoutMeta(m blobLayoutMeta) []byte {
@@ -55,6 +59,9 @@ func encodeBlobLayoutMeta(m blobLayoutMeta) []byte {
 	binary.LittleEndian.PutUint32(buf[100:104], m.DictOff)
 	binary.LittleEndian.PutUint32(buf[104:108], m.IndexOff)
 	binary.LittleEndian.PutUint32(buf[108:112], m.IndexSize)
+	if m.IngestTSMonotonic {
+		buf[112] = 1
+	}
 	return buf
 }
 
@@ -79,14 +86,16 @@ func decodeBlobLayoutMeta(buf []byte) (blobLayoutMeta, error) {
 	m.DictOff = binary.LittleEndian.Uint32(buf[100:104])
 	m.IndexOff = binary.LittleEndian.Uint32(buf[104:108])
 	m.IndexSize = binary.LittleEndian.Uint32(buf[108:112])
+	m.IngestTSMonotonic = buf[112] != 0
 	return m, nil
 }
 
 func layoutMetaToBlobMeta(layout blobLayoutMeta, toc BlobTOC) BlobMeta {
 	return BlobMeta{
-		ChunkID:         layout.ChunkID,
-		VaultID:         layout.VaultID,
-		RecordCount:     layout.RecordCount,
+		ChunkID:           layout.ChunkID,
+		VaultID:           layout.VaultID,
+		RecordCount:       layout.RecordCount,
+		IngestTSMonotonic: layout.IngestTSMonotonic,
 		RawBytes:        int64(layout.RecordsSize),
 		WriteStart:      tsFromNanos(layout.WriteStart),
 		WriteEnd:        tsFromNanos(layout.WriteEnd),

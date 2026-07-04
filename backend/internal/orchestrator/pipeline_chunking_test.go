@@ -30,15 +30,8 @@ import (
 
 // collectorFunc adapts closures to chunking's SegmentCollector.
 type collectorFunc struct {
-	once func(context.Context) error
-	byID func(context.Context, []glid.GLID) error
-}
-
-func (f collectorFunc) CollectOnce(ctx context.Context) error {
-	if f.once != nil {
-		return f.once(ctx)
-	}
-	return nil
+	byID  func(context.Context, []glid.GLID) error
+	nudge func()
 }
 
 func (f collectorFunc) CollectSegments(ctx context.Context, segmentIDs []glid.GLID) error {
@@ -46,6 +39,12 @@ func (f collectorFunc) CollectSegments(ctx context.Context, segmentIDs []glid.GL
 		return f.byID(ctx, segmentIDs)
 	}
 	return nil
+}
+
+func (f collectorFunc) Nudge() {
+	if f.nudge != nil {
+		f.nudge()
+	}
 }
 
 // copyCompletedToHead copies the origin's completed segment file into a home's

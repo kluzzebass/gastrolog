@@ -812,3 +812,91 @@ func (p *missingSegmentPull) Pull(ctx context.Context, nodeID glid.GLID, segment
 	}
 	return p.inner.Pull(ctx, nodeID, segmentID, dest)
 }
+
+// segGatedPull blocks pulls of one specific segment until release is closed;
+// pulls of other segments pass straight through.
+type segGatedPull struct {
+	inner   collection.PullClient
+	gateSeg glid.GLID
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (g *segGatedPull) Pull(ctx context.Context, vaultID, segmentID glid.GLID, dest io.Writer) error {
+	if segmentID == g.gateSeg {
+		g.once.Do(func() { close(g.started) })
+		<-g.release
+	}
+	return g.inner.Pull(ctx, vaultID, segmentID, dest)
+}
+
+// TestCollectSegmentsDoesNotWaitForFullPass pins the gastrolog-1b51yf fix:
+// a targeted CollectSegments (chunking build materializing manifest refs)
+// must complete while a full collect pass is wedged mid-pull. Before the fix
+// collectSegments took passMu and the serial seal queue drained at one chunk
+// per full pass under backlog.
+func TestCollectSegmentsDoesNotWaitForFullPass(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	passSeg := glid.New()
+	targetSeg := glid.New()
+	root := t.TempDir()
+
+	inner := newMemoryPull()
+	inner.Put(passSeg, writeSegmentBytes(t, vaultID, passSeg, "pass-owned"))
+	inner.Put(targetSeg, writeSegmentBytes(t, vaultID, targetSeg, "build-needed"))
+	// Gate keyed by segment ID: gatedPull's sync.Once gate would block the
+	// SECOND Pull inside Once.Do until the first releases, serializing the
+	// very concurrency this test asserts.
+	gate := &segGatedPull{
+		inner:   inner,
+		gateSeg: passSeg,
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+
+	log := &staticLog{}
+	log.setAssigned(collection.AssignedSegment{VaultID: vaultID, SegmentID: passSeg})
+	receipts := &recordingReceipts{}
+
+	mgr := collection.New(collection.Config{})
+	if err := mgr.RegisterVault(vaultID, root, collection.VaultConfig{
+		Log:      log,
+		Pull:     gate,
+		Receipts: receipts,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Freeze a full pass mid-pull on passSeg.
+	passDone := make(chan error, 1)
+	go func() { passDone <- mgr.CollectOnce(context.Background(), vaultID) }()
+	<-gate.started
+
+	// The targeted pull must not queue behind the frozen pass.
+	targetDone := make(chan error, 1)
+	go func() {
+		targetDone <- mgr.CollectSegments(context.Background(), vaultID, []glid.GLID{targetSeg})
+	}()
+	select {
+	case err := <-targetDone:
+		if err != nil {
+			t.Fatalf("CollectSegments: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("CollectSegments blocked behind the in-flight full pass (gastrolog-1b51yf regression)")
+	}
+	if _, err := os.Stat(paths.HeadSegment(root, targetSeg)); err != nil {
+		t.Fatalf("targeted segment not in head/: %v", err)
+	}
+
+	// Unfreeze the pass; it must still finish and land its own segment.
+	close(gate.release)
+	if err := <-passDone; err != nil {
+		t.Fatalf("CollectOnce: %v", err)
+	}
+	if _, err := os.Stat(paths.HeadSegment(root, passSeg)); err != nil {
+		t.Fatalf("pass segment not in head/: %v", err)
+	}
+}
