@@ -406,9 +406,12 @@ func TestPipelineCollectionRecoversFromUnreachableOriginViaRetries(t *testing.T)
 	if !headHas(t, homeRoot, segID) {
 		t.Fatalf("segment never recovered into head/ after transient failures (attempts=%d)", puller.attemptCount())
 	}
-	if !segmentHolds(fsm, segID, testHomeNode) {
-		t.Fatal("home not recorded as holder after recovery")
-	}
+	// The holder receipt commits as a batch at the END of the collect pass
+	// (gastrolog-38snf4), so head/ becomes visible slightly before the FSM
+	// records the holder — wait rather than asserting instantly.
+	waitTrue(t, "home recorded as holder after recovery", func() bool {
+		return segmentHolds(fsm, segID, testHomeNode)
+	})
 }
 
 // TestPipelineSegmentLogReaderSkipsHeldSegments: Roll returns only segments the local
