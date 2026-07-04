@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"gastrolog/internal/blobstore"
@@ -29,11 +30,10 @@ var (
 )
 
 // NewConnectionTester returns a function that validates cloud storage connectivity
-// by creating a temporary store and listing objects.
-// NewConnectionTester returns a function that validates cloud storage connectivity
 // by exercising the same operations the vault will use at runtime:
-// EnsureBucket, Upload, Download, List, Delete.
-func NewConnectionTester() func(ctx context.Context, params map[string]string) (string, error) {
+// EnsureBucket, Upload, Download, List, Delete. log receives provider-SDK
+// diagnostics via the blobstore component tree.
+func NewConnectionTester(log *slog.Logger) func(ctx context.Context, params map[string]string) (string, error) {
 	return func(ctx context.Context, params map[string]string) (string, error) {
 		provider := params[ParamProvider]
 		if provider == "" {
@@ -42,7 +42,7 @@ func NewConnectionTester() func(ctx context.Context, params map[string]string) (
 		if provider == "" {
 			return "", ErrMissingProvider
 		}
-		store, err := createStore(provider, params)
+		store, err := createStore(provider, params, log)
 		if err != nil {
 			return "", err
 		}
@@ -81,9 +81,10 @@ func NewConnectionTester() func(ctx context.Context, params map[string]string) (
 }
 
 // CreateStore creates a blobstore.Store for the given provider and params.
-// Exported for use by the file vault's sealed backing integration.
-func CreateStore(provider string, params map[string]string) (blobstore.Store, error) {
-	return createStore(provider, params)
+// Exported for use by the file vault's sealed backing integration. log
+// receives provider-SDK diagnostics via the blobstore component tree.
+func CreateStore(provider string, params map[string]string, log *slog.Logger) (blobstore.Store, error) {
+	return createStore(provider, params, log)
 }
 
 // normalizeEndpoint ensures a custom endpoint has a scheme.
@@ -98,7 +99,7 @@ func normalizeEndpoint(ep string) string {
 	return ep
 }
 
-func createStore(provider string, params map[string]string) (blobstore.Store, error) {
+func createStore(provider string, params map[string]string, log *slog.Logger) (blobstore.Store, error) {
 	switch provider {
 	case "s3":
 		cfg := blobstore.S3Config{
@@ -107,6 +108,7 @@ func createStore(provider string, params map[string]string) (blobstore.Store, er
 			Endpoint:  normalizeEndpoint(params[ParamEndpoint]),
 			AccessKey: params[ParamAccessKey],
 			SecretKey: params[ParamSecretKey],
+			Logger:    log,
 		}
 		if cfg.Bucket == "" {
 			return nil, errors.New("missing required parameter: bucket")

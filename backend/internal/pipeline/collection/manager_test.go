@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"sync"
@@ -554,4 +555,159 @@ func TestRegisterVaultRequiresDependencies(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error without log/pull/receipts")
 	}
+}
+
+// retryablePull fails the first `failures` pulls with a retryable error
+// (wrapping os.ErrNotExist — the "no holder has bytes yet" catch-up race),
+// then delegates to inner.
+type retryablePull struct {
+	inner    *memoryPull
+	failures atomic.Int32
+}
+
+func (p *retryablePull) Pull(ctx context.Context, nodeID glid.GLID, segmentID glid.GLID, dest io.Writer) error {
+	if p.failures.Add(-1) >= 0 {
+		return fmt.Errorf("pull segment %s: %w", segmentID, os.ErrNotExist)
+	}
+	return p.inner.Pull(ctx, nodeID, segmentID, dest)
+}
+
+// TestDeferredPassRetriesWithoutNewEvents pins the retry edge for deferred
+// collect passes. A retryable pull failure (catch-up race: registry lists the
+// segment before any holder can serve bytes) used to be logged as "deferred"
+// and then dropped — the retry relied on a FUTURE publish event, which never
+// arrives for the last segments of a burst. The worker must retry on its own
+// backoff wake with no external Notify (gastrolog-38snf4: follower homes
+// stalled without their sealed-chunk segments, GLCB never materialized).
+func TestDeferredPassRetriesWithoutNewEvents(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	segID := glid.New()
+	root := t.TempDir()
+
+	segBytes := writeSegmentBytes(t, vaultID, segID, "late-holder")
+	inner := newMemoryPull()
+	inner.Put(segID, segBytes)
+	pull := &retryablePull{inner: inner}
+	pull.failures.Store(2)
+
+	log := &staticLog{}
+	log.setAssigned(collection.AssignedSegment{VaultID: vaultID, SegmentID: segID})
+	receipts := &recordingReceipts{}
+
+	var passComplete atomic.Int32
+	mgr := collection.New(collection.Config{
+		OnPassComplete: func(glid.GLID) { passComplete.Add(1) },
+	})
+	if err := mgr.RegisterVault(vaultID, root, collection.VaultConfig{
+		Log:      log,
+		Pull:     pull,
+		Receipts: receipts,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		_ = mgr.Run(ctx)
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+
+	// The worker's startup pass is the only external trigger; the failed
+	// pulls must be retried by the manager itself.
+	headPath := paths.HeadSegment(root, segID)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := os.Stat(headPath); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("deferred collect pass never retried: segment missing from head/ with no new publish events")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if receipts.count() != 1 {
+		t.Fatalf("receipts = %d, want 1", receipts.count())
+	}
+	if passComplete.Load() == 0 {
+		t.Fatal("OnPassComplete never fired after the successful retry")
+	}
+}
+
+// TestPartialPassStillSignalsProgress pins OnPassComplete for passes that
+// land some segments while others keep failing retryably. Downstream
+// (chunking GLCB build) must be woken for the segments that DID arrive; the
+// old code suppressed the signal whenever the pass had any error.
+func TestPartialPassStillSignalsProgress(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	okID := glid.New()
+	badID := glid.New()
+	root := t.TempDir()
+
+	inner := newMemoryPull()
+	inner.Put(okID, writeSegmentBytes(t, vaultID, okID, "arrives"))
+
+	log := &staticLog{}
+	log.setAssigned(
+		collection.AssignedSegment{VaultID: vaultID, SegmentID: okID},
+		collection.AssignedSegment{VaultID: vaultID, SegmentID: badID},
+	)
+	receipts := &recordingReceipts{}
+
+	passComplete := make(chan struct{}, 8)
+	mgr := collection.New(collection.Config{
+		OnPassComplete: func(glid.GLID) {
+			select {
+			case passComplete <- struct{}{}:
+			default:
+			}
+		},
+	})
+	if err := mgr.RegisterVault(vaultID, root, collection.VaultConfig{
+		Log:      log,
+		Pull:     &missingSegmentPull{inner: inner, missing: badID},
+		Receipts: receipts,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		_ = mgr.Run(ctx)
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+
+	select {
+	case <-passComplete:
+	case <-time.After(10 * time.Second):
+		t.Fatal("OnPassComplete suppressed for a pass that made partial progress")
+	}
+	if _, err := os.Stat(paths.HeadSegment(root, okID)); err != nil {
+		t.Fatalf("collected segment missing from head/: %v", err)
+	}
+}
+
+// missingSegmentPull serves inner bytes except for one permanently-missing
+// segment, which fails retryably (os.ErrNotExist) on every attempt.
+type missingSegmentPull struct {
+	inner   *memoryPull
+	missing glid.GLID
+}
+
+func (p *missingSegmentPull) Pull(ctx context.Context, nodeID glid.GLID, segmentID glid.GLID, dest io.Writer) error {
+	if segmentID == p.missing {
+		return fmt.Errorf("pull segment %s: %w", segmentID, os.ErrNotExist)
+	}
+	return p.inner.Pull(ctx, nodeID, segmentID, dest)
 }

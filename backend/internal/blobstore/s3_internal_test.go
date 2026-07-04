@@ -1,12 +1,16 @@
 package blobstore
 
 import (
+	"bytes"
 	"io"
+	"log/slog"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	smithylogging "github.com/aws/smithy-go/logging"
 )
 
 func TestApplyS3ClientOptionsChecksumWhenRequired(t *testing.T) {
@@ -16,12 +20,45 @@ func TestApplyS3ClientOptionsChecksumWhenRequired(t *testing.T) {
 	if opts.RequestChecksumCalculation != aws.RequestChecksumCalculationWhenRequired {
 		t.Fatalf("RequestChecksumCalculation = %v, want WhenRequired", opts.RequestChecksumCalculation)
 	}
+	if opts.ResponseChecksumValidation != aws.ResponseChecksumValidationWhenRequired {
+		t.Fatalf("ResponseChecksumValidation = %v, want WhenRequired", opts.ResponseChecksumValidation)
+	}
 	if opts.BaseEndpoint == nil || *opts.BaseEndpoint != "http://localhost:19000" {
 		t.Fatalf("BaseEndpoint = %v, want http://localhost:19000", opts.BaseEndpoint)
 	}
 	if !opts.UsePathStyle {
 		t.Fatal("UsePathStyle = false, want true for custom endpoint")
 	}
+}
+
+// TestSDKLoggerRoutesToSlog pins the SDK→slog adapter: AWS SDK output must
+// land in the structured logger with the blobstore.s3 component, at Warn for
+// SDK warnings and Debug otherwise — never as raw stdlib stderr lines.
+func TestSDKLoggerRoutesToSlog(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	base := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	l := sdkLogger{log: compS3.Apply(base)}
+
+	l.Logf(smithylogging.Warn, "checksum %s", "missing")
+	l.Logf(smithylogging.Debug, "retrying %d", 2)
+
+	out := buf.String()
+	if !strings.Contains(out, "level=WARN") || !strings.Contains(out, "checksum missing") {
+		t.Fatalf("warn line not routed: %q", out)
+	}
+	if !strings.Contains(out, "level=DEBUG") || !strings.Contains(out, "retrying 2") {
+		t.Fatalf("debug line not routed: %q", out)
+	}
+	if !strings.Contains(out, "component=blobstore.s3") {
+		t.Fatalf("component tag missing: %q", out)
+	}
+}
+
+func TestSDKLoggerNilLoggerDiscards(t *testing.T) {
+	t.Parallel()
+	// Must not panic.
+	sdkLogger{}.Logf(smithylogging.Warn, "dropped")
 }
 
 func TestS3StreamUploadCompat(t *testing.T) {

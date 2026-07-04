@@ -1272,7 +1272,7 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 			JoinClusterFunc: deps.JoinClusterFunc, RemoveNodeFunc: deps.RemoveNodeFunc,
 			SetNodeSuffrageFunc: deps.SetNodeSuffrageFunc,
 			CloudTesters: map[string]server.CloudServiceTester{
-				"file": chunkcloud.NewConnectionTester(),
+				"file": chunkcloud.NewConnectionTester(deps.Logger),
 			},
 			PlacementReconcile:        deps.PlacementReconcile,
 			BootstrapTokenServeSecret: deps.BootstrapTokenServeSecret,

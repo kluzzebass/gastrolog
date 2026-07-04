@@ -5,8 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"strings"
+
+	"gastrolog/internal/logging"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -14,6 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
+	smithylogging "github.com/aws/smithy-go/logging"
 )
 
 // S3Config holds configuration for an S3-compatible blob store.
@@ -23,6 +27,10 @@ type S3Config struct {
 	Endpoint  string // Optional: for MinIO or other S3-compatible stores.
 	AccessKey string //nolint:gosec // config field, not a hardcoded secret
 	SecretKey string //nolint:gosec // config field, not a hardcoded secret
+	// Logger receives AWS SDK diagnostics via the blobstore.s3 component.
+	// Nil discards them (tests); production wiring threads the node logger
+	// so SDK output never bypasses the structured logging system.
+	Logger *slog.Logger
 }
 
 // S3Store implements Store using AWS S3 or S3-compatible services.
@@ -37,7 +45,14 @@ type S3Store struct {
 
 // NewS3(cfg) creates a new S3Store.
 func NewS3(ctx context.Context, cfg S3Config) (*S3Store, error) {
-	var opts []func(*config.LoadOptions) error
+	log := compS3.Apply(logging.Default(cfg.Logger))
+	opts := []func(*config.LoadOptions) error{
+		// Route SDK log output (retries, checksum notices, transport
+		// diagnostics) through the structured logger. Without this the SDK
+		// writes raw stdlib "SDK WARN ..." lines to stderr, bypassing every
+		// logging pattern in the codebase.
+		config.WithLogger(sdkLogger{log: log}),
+	}
 	if cfg.Region != "" {
 		opts = append(opts, config.WithRegion(cfg.Region))
 	}
@@ -65,12 +80,35 @@ func NewS3(ctx context.Context, cfg S3Config) (*S3Store, error) {
 // computing a trailing CRC on PutObject. Trailing checksums need a seekable
 // body or TLS; our upload path streams GLCB through zstd + io.Pipe over plain
 // HTTP to MinIO and similar mocks. See gastrolog-4agaw.
+// ResponseChecksumValidationWhenRequired is the download-side mirror: MinIO
+// and other S3-compatibles return no checksum headers, so the default
+// WhenSupported mode logs a per-GetObject "Response has no supported
+// checksum" warning while validating nothing. GLCB blobs carry their own
+// digests and are verified on read.
 func applyS3ClientOptions(cfg S3Config, o *s3.Options) {
 	o.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
+	o.ResponseChecksumValidation = aws.ResponseChecksumValidationWhenRequired
 	if cfg.Endpoint != "" {
 		o.BaseEndpoint = aws.String(cfg.Endpoint)
 		o.UsePathStyle = true // Required for MinIO and most S3-compatible stores.
 	}
+}
+
+// sdkLogger adapts the AWS SDK's logging interface onto the structured
+// logger so SDK diagnostics carry the blobstore.s3 component and respect
+// log rules instead of landing as raw stderr lines.
+type sdkLogger struct{ log *slog.Logger }
+
+func (l sdkLogger) Logf(class smithylogging.Classification, format string, v ...any) {
+	if l.log == nil {
+		return
+	}
+	msg := fmt.Sprintf(format, v...)
+	if class == smithylogging.Warn {
+		l.log.Warn(msg)
+		return
+	}
+	l.log.Debug(msg)
 }
 
 // s3StreamUploadCompat reports whether unseekable PutObject bodies should be

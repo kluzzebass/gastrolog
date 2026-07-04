@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	erragg "gastrolog/internal/errs"
 	"gastrolog/internal/glid"
@@ -51,6 +52,18 @@ type vaultCollect struct {
 	wake *notify.Signal
 	// stopWorker cancels the per-vault worker; nil until the worker starts.
 	stopWorker context.CancelFunc
+
+	// retryTimer re-arms the wake after a pass ends with only retryable
+	// errors (catch-up race: registry lists a segment no holder can serve
+	// yet, or a holder purged after seal). Those obligations have no future
+	// event of their own — the publish that assigned them already fired, and
+	// for the last segments of a burst no later publish arrives to piggyback
+	// on (gastrolog-38snf4: follower homes stalled forever missing sealed
+	// GLCB segments). One-shot with exponential backoff, armed only while an
+	// obligation is failing; a healthy vault has no timer.
+	retryMu    sync.Mutex
+	retryTimer *time.Timer
+	retryDelay time.Duration
 
 	// passMu serializes full collect passes. collectMu protects layout and
 	// receipted only — never held across pull or vault-ctl apply I/O.
@@ -325,8 +338,10 @@ func (v *vaultCollect) completeCollectWaiters(err error) {
 // Config configures a CollectionManager.
 type Config struct {
 	Logger *slog.Logger
-	// OnPassComplete fires after each collect pass finishes without a hard
-	// error. Wired by the orchestrator to wake chunking when head/ changes.
+	// OnPassComplete fires after every collect pass that made progress,
+	// including passes where other segments failed retryably — head/ changed,
+	// so downstream must be woken for what landed. Wired by the orchestrator
+	// to wake chunking.
 	OnPassComplete func(vaultID glid.GLID)
 }
 
@@ -435,6 +450,7 @@ func (m *Manager) UnregisterVault(vaultID glid.GLID) {
 	if v.stopWorker != nil {
 		v.stopWorker()
 	}
+	v.stopRetryWake()
 }
 
 // Notify triggers one collect pass for a vault when Run is active. Use when
@@ -507,15 +523,62 @@ func (m *Manager) logCollectPassErr(log *slog.Logger, err error) {
 
 func (m *Manager) afterCollectPass(v *vaultCollect, progress bool, err error, log *slog.Logger) {
 	if err != nil {
-		if retryableCollectErr(err) {
-			m.logCollectPassErr(log, err)
-			return
-		}
 		m.logCollectPassErr(log, err)
-		return
+		if retryableCollectErr(err) {
+			// "Deferred" must actually defer: nothing else retries these
+			// obligations once the burst's publish events are spent.
+			v.scheduleRetryWake()
+		}
+	} else {
+		v.resetRetryBackoff()
 	}
+	// Signal progress even when other segments in the pass failed —
+	// downstream (chunking GLCB build) must be woken for what DID land.
 	if progress && m.cfg.OnPassComplete != nil {
 		m.cfg.OnPassComplete(v.vaultID)
+	}
+}
+
+// collectRetryBaseDelay/collectRetryMaxDelay bound the deferred-pass retry
+// backoff: quick first retry for transient races, 2s steady-state while an
+// origin stays unreachable.
+const (
+	collectRetryBaseDelay = 50 * time.Millisecond
+	collectRetryMaxDelay  = 2 * time.Second
+)
+
+// scheduleRetryWake arms a one-shot backoff wake so a deferred pass retries
+// without depending on future publish events. Not a poll: the timer exists
+// only while a retryable obligation is outstanding.
+func (v *vaultCollect) scheduleRetryWake() {
+	v.retryMu.Lock()
+	defer v.retryMu.Unlock()
+	switch {
+	case v.retryDelay == 0:
+		v.retryDelay = collectRetryBaseDelay
+	case v.retryDelay < collectRetryMaxDelay:
+		v.retryDelay *= 2
+	}
+	if v.retryTimer != nil {
+		v.retryTimer.Stop()
+	}
+	v.retryTimer = time.AfterFunc(v.retryDelay, v.wake.Notify)
+}
+
+// resetRetryBackoff clears the backoff after a clean pass.
+func (v *vaultCollect) resetRetryBackoff() {
+	v.retryMu.Lock()
+	defer v.retryMu.Unlock()
+	v.retryDelay = 0
+}
+
+// stopRetryWake cancels any pending retry wake (vault unregistration).
+func (v *vaultCollect) stopRetryWake() {
+	v.retryMu.Lock()
+	defer v.retryMu.Unlock()
+	if v.retryTimer != nil {
+		v.retryTimer.Stop()
+		v.retryTimer = nil
 	}
 }
 
