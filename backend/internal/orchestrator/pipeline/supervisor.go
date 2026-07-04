@@ -57,6 +57,9 @@ var ErrVaultNotRegistered = errors.New("vault not registered as origin on this n
 type Config struct {
 	NodeID glid.GLID
 	Logger *slog.Logger
+	// Alerts raises operator alerts for degraded pipeline components
+	// (segmentation writers that lose their working segment). Nil disables.
+	Alerts segmentation.AlertSink
 
 	// Table is the shared, static routing table. Records matched against it are
 	// fanned out to the per-vault segmentation queues registered via RegisterVault.
@@ -244,6 +247,7 @@ func New(cfg Config) *Supervisor {
 	})
 	seg, completed := segmentation.New(segmentation.Config{
 		Logger:             cfg.Logger,
+		Alerts:             cfg.Alerts,
 		ClosePolicy:        cfg.SegmentClosePolicy,
 		SyncBatchSize:      cfg.SegmentSyncBatchSize,
 		SyncBatchWindow:    cfg.SegmentSyncBatchWindow,

@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"gastrolog/internal/alert"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/segment"
 	"gastrolog/internal/record"
@@ -58,8 +59,22 @@ type Config struct {
 	// vaults with DisableFsync set, since no fsync occurs.
 	OnSync func()
 	// Logger receives structured segmentation events (working-segment crash
-	// recovery). Nil discards.
+	// recovery, degraded writers, dropped records). Nil discards.
 	Logger *slog.Logger
+	// Alerts raises operator alerts for degraded writers (commit failures,
+	// abandoned working segments). Nil disables alerts.
+	Alerts AlertSink
+
+	// newSegmentFile overrides working-segment creation for fault-injection
+	// tests. Nil uses segment.Create.
+	newSegmentFile func(path string, meta segment.Meta) (segmentFile, error)
+}
+
+// AlertSink is the subset of alert.Collector segmentation raises
+// degraded-writer alerts through (satisfied by the orchestrator's collector).
+type AlertSink interface {
+	Set(id string, severity alert.Severity, source, message string)
+	Clear(id string)
 }
 
 // VaultConfig overrides per-vault commit/fsync tuning at RegisterVault time.
@@ -115,6 +130,11 @@ type Manager struct {
 	cfg       Config
 	completed chan CompletedSegment
 
+	// dropped counts records lost without an ack to carry the error (encode
+	// failures and fire-and-forget records rejected while a writer is
+	// degraded). Post-accept loss must be visible, not silent.
+	dropped atomic.Uint64
+
 	mu      sync.Mutex
 	writers map[glid.GLID]*vaultWriter
 	runCtx  context.Context // non-nil while Run is active
@@ -137,6 +157,13 @@ func New(cfg Config) (*Manager, <-chan CompletedSegment) {
 	}, completed
 }
 
+// DroppedRecords reports how many records this manager dropped without an ack
+// to carry the error: encode failures and fire-and-forget records rejected
+// while a writer was degraded.
+func (m *Manager) DroppedRecords() uint64 {
+	return m.dropped.Load()
+}
+
 // RegisterVault starts a per-vault writer under root (creates working/ and completed/).
 // Safe to call before or during Run — the orchestrator can register vaults as placement
 // changes. vc overrides the manager-global commit/fsync defaults for this vault.
@@ -150,7 +177,7 @@ func (m *Manager) RegisterVault(vaultID glid.GLID, root string, vc VaultConfig) 
 	if _, ok := m.writers[vaultID]; ok {
 		return nil, errors.New("vault already registered")
 	}
-	w, err := newVaultWriter(vaultID, root, m.cfg, vc, m.completed)
+	w, err := newVaultWriter(vaultID, root, m.cfg, vc, m.completed, &m.dropped)
 	if err != nil {
 		return nil, err
 	}

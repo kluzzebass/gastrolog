@@ -745,6 +745,7 @@ func New(cfg Config) (*Orchestrator, error) {
 	o.pipeline = pipeline.New(pipeline.Config{
 		NodeID:               o.localNodeIDGLID,
 		Logger:               baseLogger,
+		Alerts:               o.alerts,
 		Digesters:            cfg.Digesters,
 		OnCheckpoint:         cfg.OnIngesterCheckpoint,
 		PressureGate:         o.pipelineGate,

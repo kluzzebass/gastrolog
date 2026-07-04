@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"gastrolog/internal/alert"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/pipeline/paths"
@@ -17,6 +18,33 @@ import (
 )
 
 var errWriterClosed = errors.New("segmentation writer closed")
+
+// errWriterDegraded nacks ack-bearing inputs while the writer has no usable
+// working segment (commit failed and reopen has not yet succeeded).
+var errWriterDegraded = errors.New("segmentation writer degraded: no usable working segment")
+
+// segmentFile is the subset of *segment.File the writer drives. It exists so
+// fault-injection tests can wrap Sync/Append/rotation failures.
+type segmentFile interface {
+	AppendFrame(rec *record.Record, writeTS time.Time, body []byte) error
+	Sync() error
+	Size() (int64, error)
+	Header() segment.Header
+	Finalize() error
+	Close() error
+}
+
+func defaultCreateSegmentFile(path string, meta segment.Meta) (segmentFile, error) {
+	return segment.Create(path, meta)
+}
+
+// reopenBaseDelay/reopenMaxDelay bound the degraded-writer reopen backoff:
+// quick first retry for transient errors, 5s steady-state while the disk
+// stays sick.
+const (
+	reopenBaseDelay = 100 * time.Millisecond
+	reopenMaxDelay  = 5 * time.Second
+)
 
 type encodedWork struct {
 	rec     *record.Record
@@ -29,6 +57,9 @@ type vaultWriter struct {
 	vaultID glid.GLID
 	root    string
 	cfg     Config
+	log     *slog.Logger
+	alerts  AlertSink
+	dropped *atomic.Uint64 // manager-wide dropped-records counter
 
 	// Resolved per-vault commit/fsync tuning (Config default + VaultConfig override).
 	syncEvery    int
@@ -42,8 +73,14 @@ type vaultWriter struct {
 	onCompletedDropped func()
 	openedAt           time.Time
 	segmentID          glid.GLID
-	seg                *segment.File
+	seg                segmentFile
 	workingPath        string
+
+	// Degraded-writer state, owned by the recordLoop goroutine.
+	degraded      bool
+	reopenDelay   time.Duration
+	degradedDrops uint64 // nil-ack records dropped in the current episode
+	lastFailure   error
 
 	mu      sync.Mutex
 	closed  bool
@@ -51,7 +88,7 @@ type vaultWriter struct {
 	done    chan struct{} // closed when run() returns
 }
 
-func newVaultWriter(vaultID glid.GLID, root string, cfg Config, vc VaultConfig, completed chan<- CompletedSegment) (*vaultWriter, error) {
+func newVaultWriter(vaultID glid.GLID, root string, cfg Config, vc VaultConfig, completed chan<- CompletedSegment, dropped *atomic.Uint64) (*vaultWriter, error) {
 	if err := paths.EnsureSegmentationDirs(root); err != nil {
 		return nil, err
 	}
@@ -79,6 +116,9 @@ func newVaultWriter(vaultID glid.GLID, root string, cfg Config, vc VaultConfig, 
 		vaultID:            vaultID,
 		root:               root,
 		cfg:                cfg,
+		log:                compSegmentation.Apply(logging.Default(cfg.Logger)).With("vault", vaultID),
+		alerts:             cfg.Alerts,
+		dropped:            dropped,
 		syncEvery:          syncEvery,
 		syncWindow:         syncWindow,
 		commitDelay:        commitDelay,
@@ -201,59 +241,180 @@ func (w *vaultWriter) recordLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			_ = b.commit()
+			w.shutdownCommit(b)
 			return
 		case in, ok := <-w.in:
 			if !ok {
-				_ = b.commit()
+				w.shutdownCommit(b)
 				return
 			}
-			if !w.appendInput(b, in) || !w.afterAppend(b) {
-				return
-			}
+			w.handleInput(b, in)
 		case <-b.timer.C:
 			b.timerArmed = false
-			if !b.commit() {
-				return
+			if w.degraded {
+				w.tryReopen(b)
+			} else if err := b.commit(); err != nil {
+				w.enterDegraded(b, err)
 			}
 		}
 	}
 }
 
-func (w *vaultWriter) appendInput(b *commitBatch, in Input) bool {
+// shutdownCommit flushes the final batch on loop exit. A failure here cannot
+// wedge anything (the writer is going away) but must not be silent: the
+// unsynced tail stays in working/ for crash recovery at next registration.
+func (w *vaultWriter) shutdownCommit(b *commitBatch) {
+	if err := b.commit(); err != nil {
+		w.log.Error("final commit failed on writer shutdown; unsynced records remain in the working segment for crash recovery",
+			"segment", w.segmentID, "error", err)
+	}
+}
+
+// handleInput encodes and appends one input under the active commit policy,
+// downgrading the writer instead of killing the loop on disk errors: a dead
+// writer with a still-open bounded input queue wedges routing — and then the
+// node — once the queue fills (gastrolog-1c9f5l).
+func (w *vaultWriter) handleInput(b *commitBatch, in Input) {
+	if w.degraded {
+		w.rejectDegraded(in)
+		return
+	}
 	writeTS := w.cfg.now()
 	body, err := segment.EncodeFrame(in.Record, writeTS)
 	if err != nil {
-		if in.Ack != nil {
-			in.Ack <- err
-		}
-		return true
+		w.rejectEncodeFailure(in, err)
+		return
 	}
-	return b.append(encodedWork{rec: in.Record, writeTS: writeTS, body: body, ack: in.Ack})
+	if err := b.append(encodedWork{rec: in.Record, writeTS: writeTS, body: body, ack: in.Ack}); err != nil {
+		w.enterDegraded(b, err)
+		return
+	}
+	w.afterAppend(b)
 }
 
 // afterAppend applies the commit policy once a frame has been added to the batch.
-// Returns false if the writer should stop (a commit failed).
-func (w *vaultWriter) afterAppend(b *commitBatch) bool {
+func (w *vaultWriter) afterAppend(b *commitBatch) {
 	switch {
 	case b.pendingSync >= w.syncEvery:
 		// Size cap: hard flush regardless of regime.
-		return b.commit()
+		if err := b.commit(); err != nil {
+			w.enterDegraded(b, err)
+		}
 	case !b.hasAck:
 		// Fire-and-forget: arm the lazy window once per batch.
 		if !b.timerArmed {
 			b.armTimer(w.syncWindow)
 		}
-		return true
 	case w.commitDelay > 0:
 		// Coalesce ack records within the delay window.
 		if !b.timerArmed {
 			b.armTimer(w.commitDelay)
 		}
-		return true
 	default:
 		// Pure group commit: drain whatever is queued, then fsync once.
-		return w.drainAvailable(b) && b.commit()
+		if err := w.drainAvailable(b); err != nil {
+			w.enterDegraded(b, err)
+			return
+		}
+		if err := b.commit(); err != nil {
+			w.enterDegraded(b, err)
+		}
+	}
+}
+
+// rejectEncodeFailure handles a record whose frame cannot be encoded (nil
+// record, unencodable attrs). This is a per-record data problem, not a disk
+// problem: the writer stays healthy, but the record must not vanish silently
+// — an accepted, minted record dropped without a trace is post-accept loss.
+func (w *vaultWriter) rejectEncodeFailure(in Input, err error) {
+	if in.Ack != nil {
+		in.Ack <- err
+		return
+	}
+	w.dropped.Add(1)
+	var eventID record.EventID
+	if in.Record != nil {
+		eventID = in.Record.EventID
+	}
+	w.log.Error("dropping record: frame encode failed", "event_id", eventID, "error", err)
+}
+
+// rejectDegraded fails an input while the writer has no working segment.
+// Ack-bearing producers get an immediate nack (ack-after-durable upstream
+// holds the record); fire-and-forget records are counted and logged sampled
+// so a sick disk cannot flood the log at ingest rate.
+func (w *vaultWriter) rejectDegraded(in Input) {
+	if in.Ack != nil {
+		in.Ack <- errWriterDegraded
+		return
+	}
+	w.dropped.Add(1)
+	w.degradedDrops++
+	if w.degradedDrops == 1 {
+		w.log.Error("dropping fire-and-forget records while writer is degraded; drop total reported on reopen attempts",
+			"error", w.lastFailure)
+	}
+}
+
+func (w *vaultWriter) alertID() string {
+	return "segmentation-writer:" + w.vaultID.String()
+}
+
+// enterDegraded abandons the suspect working segment and rotates to a fresh
+// one. The failed batch's parked acks were already nacked by commit/append.
+// The abandoned file keeps its fsynced prefix and is reconciled by
+// working-segment crash recovery at the next registration — after an fsync
+// failure the kernel may mark dirty pages clean, so re-syncing the same fd
+// can falsely succeed; never trust that segment again.
+func (w *vaultWriter) enterDegraded(b *commitBatch, cause error) {
+	b.disarmTimer()
+	b.pendingSync = 0
+	b.hasAck = false
+	w.lastFailure = cause
+	w.degraded = true
+	w.degradedDrops = 0
+
+	w.mu.Lock()
+	segID, path := w.segmentID, w.workingPath
+	if w.seg != nil {
+		_ = w.seg.Close()
+		w.seg = nil
+	}
+	w.mu.Unlock()
+
+	w.log.Error("segment commit failed; abandoning working segment for crash recovery and rotating",
+		"segment", segID, "path", path, "error", cause)
+	if w.alerts != nil {
+		w.alerts.Set(w.alertID(), alert.Error, "segmentation",
+			"vault "+w.vaultID.String()+" segment commit failed: "+cause.Error())
+	}
+	w.tryReopen(b)
+}
+
+// tryReopen attempts to open a fresh working segment. On failure the writer
+// stays degraded and re-arms the batch timer as a reopen backoff (the timer
+// is otherwise idle while degraded — no batch can exist without a segment).
+func (w *vaultWriter) tryReopen(b *commitBatch) {
+	if err := w.openNewSegment(); err != nil {
+		switch {
+		case w.reopenDelay == 0:
+			w.reopenDelay = reopenBaseDelay
+		case w.reopenDelay < reopenMaxDelay:
+			w.reopenDelay *= 2
+		}
+		w.log.Error("reopen failed; writer degraded — nacking ack records, dropping fire-and-forget records",
+			"error", err, "retry_in", w.reopenDelay, "dropped_this_episode", w.degradedDrops)
+		b.armTimer(w.reopenDelay)
+		return
+	}
+	w.degraded = false
+	w.reopenDelay = 0
+	w.lastFailure = nil
+	w.log.Info("segmentation writer recovered: fresh working segment opened",
+		"segment", w.segmentID, "dropped_while_degraded", w.degradedDrops)
+	w.degradedDrops = 0
+	if w.alerts != nil {
+		w.alerts.Clear(w.alertID())
 	}
 }
 
@@ -296,30 +457,32 @@ func (b *commitBatch) disarmTimer() {
 	b.timerArmed = false
 }
 
-// append appends a frame and parks its ack. Returns false on append error, after
-// nacking the offending and any already-parked acks so the loop can stop.
-func (b *commitBatch) append(work encodedWork) bool {
+// append appends a frame and parks its ack. On append error it nacks the
+// offending and any already-parked acks (their frames share the now-suspect
+// segment) and returns the error so the writer can rotate.
+func (b *commitBatch) append(work encodedWork) error {
 	if err := b.w.appendFrame(work); err != nil {
 		if work.ack != nil {
 			work.ack <- err
 		}
 		b.releaseParked(err)
-		return false
+		return err
 	}
 	b.pendingSync++
 	if work.ack != nil {
 		b.parked = append(b.parked, work.ack)
 		b.hasAck = true
 	}
-	return true
+	return nil
 }
 
 // commit syncs the pending batch (unless fsync is disabled) and releases the
-// parked acks with the result. Returns false if the writer should stop.
-func (b *commitBatch) commit() bool {
+// parked acks with the result. A non-nil return means the batch's segment is
+// suspect and the writer must rotate.
+func (b *commitBatch) commit() error {
 	if b.pendingSync == 0 {
 		b.disarmTimer()
-		return true
+		return nil
 	}
 	var err error
 	if b.w.disableFsync {
@@ -331,7 +494,7 @@ func (b *commitBatch) commit() bool {
 	b.pendingSync = 0
 	b.hasAck = false
 	b.disarmTimer()
-	return err == nil
+	return err
 }
 
 func (b *commitBatch) releaseParked(err error) {
@@ -342,19 +505,26 @@ func (b *commitBatch) releaseParked(err error) {
 }
 
 // drainAvailable appends every input currently buffered in the in queue without
-// blocking, forming the group-commit batch. Returns false on append error.
-func (w *vaultWriter) drainAvailable(b *commitBatch) bool {
+// blocking, forming the group-commit batch. Encode failures reject that record
+// and keep draining; an append (disk) error stops the drain.
+func (w *vaultWriter) drainAvailable(b *commitBatch) error {
 	for {
 		select {
 		case in, ok := <-w.in:
 			if !ok {
-				return true
+				return nil
 			}
-			if !w.appendInput(b, in) {
-				return false
+			writeTS := w.cfg.now()
+			body, err := segment.EncodeFrame(in.Record, writeTS)
+			if err != nil {
+				w.rejectEncodeFailure(in, err)
+				continue
+			}
+			if err := b.append(encodedWork{rec: in.Record, writeTS: writeTS, body: body, ack: in.Ack}); err != nil {
+				return err
 			}
 		default:
-			return true
+			return nil
 		}
 	}
 }
@@ -499,7 +669,11 @@ func (w *vaultWriter) openNewSegmentLocked() error {
 	w.segmentID = glid.New()
 	w.workingPath = paths.WorkingSegment(w.root, w.segmentID)
 	w.openedAt = w.cfg.now()
-	sf, err := segment.Create(w.workingPath, segment.Meta{
+	create := w.cfg.newSegmentFile
+	if create == nil {
+		create = defaultCreateSegmentFile
+	}
+	sf, err := create(w.workingPath, segment.Meta{
 		ID:      w.segmentID,
 		VaultID: w.vaultID,
 	})
@@ -520,5 +694,8 @@ func (w *vaultWriter) flushAndCloseSegment() {
 		w.discardWorkingSegmentLocked()
 		return
 	}
-	_ = w.completeWorkingSegmentLocked()
+	if err := w.completeWorkingSegmentLocked(); err != nil {
+		w.log.Error("final segment flush failed on writer close; segment left in working/ for crash recovery",
+			"segment", w.segmentID, "path", w.workingPath, "error", err)
+	}
 }
