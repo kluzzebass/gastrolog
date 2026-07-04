@@ -24,4 +24,24 @@ For other [cluster](help:clustering) nodes, metrics are collected via [broadcast
 - **Raft state** — current role (leader/follower/candidate), term, and applied log index
 - **Per-ingester** message and byte count summaries
 
+## Throughput
+
+Nodes with routing activity or a local vault writer show a **Throughput**
+section:
+
+- **Ingested / Routed** — this node's routing rates: records per second
+  entering the routing stage, and records per second matched to at least one
+  [route](help:routing). The difference is this node's live drop rate.
+- **Per-vault rows** — for each vault this node writes locally: the append
+  rate (records per second written to the vault's working segment) with a
+  sparkline of recent history, and the segmentation **queue** depth against
+  its capacity.
+
+The number shown is the instantaneous rate over the last stats tick
+(~5 seconds); hovering a row reveals the ~30s and ~1m trailing averages —
+the stable figures for before/after comparisons. A vault whose queue stays
+near capacity while its durable-commit rate lags its append rate is
+experiencing write-path backpressure (usually fsync pressure on that node's
+disk).
+
 Remote node data is refreshed at the [broadcast interval](help:clustering-broadcasting) (default 5 seconds). Nodes that haven't broadcast recently show stale timestamps.

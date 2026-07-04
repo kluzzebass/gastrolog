@@ -168,11 +168,17 @@ function VaultThroughputSection({
         className={`rounded-lg border px-4 py-3 ${c("border-ink-border bg-ink-well", "border-light-border bg-light-well")}`}
       >
         <div className="flex flex-wrap items-baseline gap-x-5 gap-y-2 text-[0.85em]">
-          <div className="flex items-baseline gap-2">
+          <div
+            className="flex items-baseline gap-2"
+            title="Records/s appended to this vault's working segments, summed across all writing nodes (instantaneous, ~5s window)"
+          >
             <span className={labelClass}>Append</span>
             <span className={valueClass}>{formatRate(totalRecords)}/s</span>
           </div>
-          <div className="flex items-baseline gap-2">
+          <div
+            className="flex items-baseline gap-2"
+            title="Bytes/s appended to this vault's working segments, summed across all writing nodes"
+          >
             <span className={labelClass}>Data</span>
             <span className={valueClass}>{formatBytes(totalBytes)}/s</span>
           </div>
