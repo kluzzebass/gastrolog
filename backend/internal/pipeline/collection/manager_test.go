@@ -446,6 +446,101 @@ func TestCollectOnceWaitersShareWorkerPass(t *testing.T) {
 	}
 }
 
+// gatedPull blocks the first Pull until release is closed and records which
+// segments were pulled, so tests can freeze a collect pass mid-flight.
+type gatedPull struct {
+	inner   collection.PullClient
+	started chan struct{} // closed when the first Pull begins
+	release chan struct{} // the first Pull blocks until this is closed
+	first   sync.Once
+	mu      sync.Mutex
+	pulled  map[glid.GLID]bool
+}
+
+func (g *gatedPull) Pull(ctx context.Context, vaultID, segmentID glid.GLID, dest io.Writer) error {
+	g.first.Do(func() {
+		close(g.started)
+		<-g.release
+	})
+	g.mu.Lock()
+	if g.pulled == nil {
+		g.pulled = make(map[glid.GLID]bool)
+	}
+	g.pulled[segmentID] = true
+	g.mu.Unlock()
+	return g.inner.Pull(ctx, vaultID, segmentID, dest)
+}
+
+func (g *gatedPull) pulledSegment(id glid.GLID) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.pulled[id]
+}
+
+// TestCollectOnceWaiterWaitsForFreshPass verifies a CollectOnce arriving while
+// a worker pass is already in flight is NOT satisfied by that pass: the pass
+// read the log before the request and can return stale success. The waiter
+// must be completed by a pass that starts after the request registers
+// (gastrolog-38snf4 gate finding — TestCollectOnceWaitersShareWorkerPass flaked
+// exactly this way under full-suite load).
+func TestCollectOnceWaiterWaitsForFreshPass(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	seg1 := glid.New()
+	seg2 := glid.New()
+	root := t.TempDir()
+
+	pull := newMemoryPull()
+	pull.Put(seg1, writeSegmentBytes(t, vaultID, seg1, "one"))
+	pull.Put(seg2, writeSegmentBytes(t, vaultID, seg2, "two"))
+	gated := &gatedPull{inner: pull, started: make(chan struct{}), release: make(chan struct{})}
+
+	log := &staticLog{}
+	log.setAssigned(collection.AssignedSegment{VaultID: vaultID, SegmentID: seg1})
+	receipts := &recordingReceipts{}
+
+	mgr := collection.New(collection.Config{})
+	if err := mgr.RegisterVault(vaultID, root, collection.VaultConfig{
+		Log: log, Pull: gated, Receipts: receipts,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = mgr.Run(ctx) }()
+
+	<-gated.started // initial pass is mid-pull on seg1; its log snapshot predates seg2
+
+	log.setAssigned(
+		collection.AssignedSegment{VaultID: vaultID, SegmentID: seg1},
+		collection.AssignedSegment{VaultID: vaultID, SegmentID: seg2},
+	)
+
+	type result struct {
+		err        error
+		seg2Pulled bool
+	}
+	done := make(chan result, 1)
+	go func() {
+		err := mgr.CollectOnce(context.Background(), vaultID)
+		// Snapshot immediately on return: the bug is CollectOnce returning
+		// BEFORE any pass that could have seen seg2.
+		done <- result{err: err, seg2Pulled: gated.pulledSegment(seg2)}
+	}()
+
+	// Let the CollectOnce waiter register while the first pass is still frozen.
+	time.Sleep(100 * time.Millisecond)
+	close(gated.release)
+
+	res := <-done
+	if res.err != nil {
+		t.Fatalf("CollectOnce: %v", res.err)
+	}
+	if !res.seg2Pulled {
+		t.Fatal("CollectOnce returned before a fresh pass pulled seg2 — waiter was satisfied by the stale in-flight pass")
+	}
+}
+
 type countingSlowPull struct {
 	inner collection.PullClient
 	delay time.Duration

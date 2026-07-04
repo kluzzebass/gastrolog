@@ -366,11 +366,22 @@ func (v *vaultCollect) awaitCollectPass(ctx context.Context) error {
 	}
 }
 
-func (v *vaultCollect) completeCollectWaiters(err error) {
+// takeCollectWaiters snapshots the waiters registered so far. The worker calls
+// this at pass START: a pass may only satisfy requests made before it began
+// observing log state. A waiter that registers mid-pass stays queued — its
+// Notify has already closed the wake channel captured before the pass, so the
+// loop re-fires and the NEXT pass (which observes post-registration state)
+// completes it. Completing mid-pass registrants with the in-flight pass's
+// result returned stale success (gastrolog-38snf4 gate finding).
+func (v *vaultCollect) takeCollectWaiters() []collectWaiter {
 	v.collectWaitMu.Lock()
+	defer v.collectWaitMu.Unlock()
 	waiters := v.collectWaiters
 	v.collectWaiters = nil
-	v.collectWaitMu.Unlock()
+	return waiters
+}
+
+func completeCollectWaiters(waiters []collectWaiter, err error) {
 	for _, w := range waiters {
 		select {
 		case w.done <- err:
@@ -638,15 +649,20 @@ func (m *Manager) startWorkerLocked(v *vaultCollect) {
 	ctx, cancel := context.WithCancel(m.runCtx)
 	v.stopWorker = cancel
 	m.wg.Go(func() {
+		// Waiters queued when the worker stops must not hang CollectOnce
+		// callers that passed a non-cancellable context.
+		defer func() { completeCollectWaiters(v.takeCollectWaiters(), ctx.Err()) }()
 		// Capture the wake channel BEFORE each pass so a signal arriving
-		// mid-pass re-fires the loop instead of being lost.
+		// mid-pass re-fires the loop instead of being lost, and snapshot the
+		// waiter queue AFTER capturing it — see takeCollectWaiters.
 		ch := v.wake.C()
+		waiters := v.takeCollectWaiters()
 		log := m.logger().With("vault", v.vaultID)
 		progress, err := v.collectMissing(ctx)
 		if ctx.Err() == nil {
 			m.afterCollectPass(v, progress, err, log)
 		}
-		v.completeCollectWaiters(err)
+		completeCollectWaiters(waiters, err)
 		for {
 			select {
 			case <-ctx.Done():
@@ -654,11 +670,12 @@ func (m *Manager) startWorkerLocked(v *vaultCollect) {
 			case <-ch:
 			}
 			ch = v.wake.C()
+			waiters = v.takeCollectWaiters()
 			progress, err = v.collectMissing(ctx)
 			if ctx.Err() == nil {
 				m.afterCollectPass(v, progress, err, log)
 			}
-			v.completeCollectWaiters(err)
+			completeCollectWaiters(waiters, err)
 		}
 	})
 }
