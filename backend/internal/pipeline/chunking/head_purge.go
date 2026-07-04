@@ -8,22 +8,6 @@ import (
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
-func manifestReferencesSegment(m *vaultctlfsm.OpenChunkManifest, segmentID glid.GLID) bool {
-	if m == nil {
-		return false
-	}
-	for _, ref := range m.Refs {
-		if ref.SegmentID == segmentID {
-			return true
-		}
-	}
-	return false
-}
-
-func openChunkReferencesSegment(m *vaultctlfsm.OpenChunkManifest, segmentID glid.GLID) bool {
-	return manifestReferencesSegment(m, segmentID)
-}
-
 // flushHeadPurgeForManifest removes head/ copies for manifest segment IDs once
 // this home has built the sealed GLCB. Purging before build completes leaves
 // "no such file" build failures on follower homes (gastrolog-3vlse). Holder
@@ -52,6 +36,8 @@ func (v *vaultChunking) flushHeadPurgeForManifest(ctx context.Context, pending *
 		if !mayPurgeHeadAfterBuild(fsm, id, required, holdersWired) {
 			continue
 		}
+		v.logger().Info("purging head segment after build",
+			"segment", id, "chunk", pending.ChunkID)
 		_ = paths.PurgeHeadStaging(v.cfg.VaultRoot, id)
 	}
 }
@@ -77,6 +63,7 @@ func (v *vaultChunking) purgeReleasedHead(ids []glid.GLID) {
 		return
 	}
 	for _, id := range ids {
+		v.logger().Info("purging head segment after registry release", "segment", id)
 		_ = paths.PurgeHeadStaging(root, id)
 	}
 }
@@ -102,16 +89,18 @@ func (v *vaultChunking) purgeStaleHeadCatchUp() {
 	if err != nil || len(ids) == 0 {
 		return
 	}
-	pending := v.sealedManifestForBuild()
-	open := v.fsm().OpenChunk()
 	fsm := v.fsm()
 	for id := range ids {
 		if fsm.GetCompletedSegment(id) != nil {
 			continue
 		}
-		if manifestReferencesSegment(pending, id) || openChunkReferencesSegment(open, id) {
+		// Full-queue reference scan, not just the head-of-queue manifest:
+		// a segment can be referenced only by a later queued sealed manifest
+		// (gastrolog-67c9b0).
+		if fsm.SegmentReferencedInManifest(id) {
 			continue
 		}
+		v.logger().Info("purging stale head segment with no registry entry", "segment", id)
 		_ = paths.PurgeHeadStaging(root, id)
 	}
 }

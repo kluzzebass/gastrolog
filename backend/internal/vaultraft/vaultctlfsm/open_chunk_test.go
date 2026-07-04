@@ -266,12 +266,32 @@ func TestReleaseSegments(t *testing.T) {
 		RefAddedAt:        now,
 	}))
 
+	// segA is referenced by the open chunk manifest: the apply-time guard must
+	// refuse the release even though a (buggy or racing) leader proposed it.
+	// Releasing a referenced segment purges the head/ copy homes still need to
+	// build the chunk (gastrolog-67c9b0).
+	applyCmd(t, fsm, MarshalReleaseSegments([]glid.GLID{segA}))
+	if fsm.GetCompletedSegment(segA) == nil {
+		t.Fatal("segA is referenced by the open chunk; release must be refused")
+	}
+
+	// Unreferenced segB releases normally.
+	applyCmd(t, fsm, MarshalReleaseSegments([]glid.GLID{segB}))
+	if fsm.GetCompletedSegment(segB) != nil {
+		t.Fatal("segB should be released from completed registry")
+	}
+	if _, ok := fsm.ResumeRecordNumber(segB); ok {
+		t.Fatal("segB resume should be cleared")
+	}
+
+	// Run the manifest through its full lifecycle (seal manifest → seal chunk
+	// pops it from the queue). With no manifest referencing segA, release
+	// succeeds.
+	applyCmd(t, fsm, MarshalSealOpenChunkManifest(chunkID, now))
+	applyCmd(t, fsm, MarshalSealChunk(chunkID, now, 1, 1, now, now, now, false, now))
 	applyCmd(t, fsm, MarshalReleaseSegments([]glid.GLID{segA}))
 	if fsm.GetCompletedSegment(segA) != nil {
-		t.Fatal("segA should be released from completed registry")
-	}
-	if fsm.GetCompletedSegment(segB) == nil {
-		t.Fatal("segB should remain")
+		t.Fatal("segA should be released once no manifest references it")
 	}
 	if _, ok := fsm.ResumeRecordNumber(segA); ok {
 		t.Fatal("segA resume should be cleared")

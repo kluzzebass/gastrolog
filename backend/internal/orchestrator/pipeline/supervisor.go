@@ -238,7 +238,7 @@ func New(cfg Config) *Supervisor {
 		PublishBatchSize: cfg.DistributionPublishBatchSize,
 		Logger:           cfg.Logger,
 	})
-	chunk := chunking.New(chunking.Config{Logger: cfg.Logger})
+	chunk := chunking.New(chunking.Config{Logger: cfg.Logger, Alerts: cfg.Alerts})
 	col := collection.New(collection.Config{
 		Logger: cfg.Logger,
 		OnPassComplete: func(vaultID glid.GLID) {
