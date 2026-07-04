@@ -17,3 +17,29 @@ Sealed chunks list their [indexes](help:indexers) with name, status, entry count
 ## Validate
 
 The Validate button checks data integrity for a vault — verifying that chunk files are consistent and indexes match their data. Use it if you suspect corruption after a crash or disk issue.
+
+## Throughput
+
+Each vault card shows the pipeline as three stage rates, per node, with
+sparklines (recent per-tick history) and Unix-load-style 1m/5m/15m averages
+on hover:
+
+- **Append** — origin ingress: records written into the vault's working
+  segments on the node where they land. The queue gauge appears when the
+  writer's bounded queue holds records (backpressure); a *durable* figure
+  appears when fsync commits lag appends.
+- **Collected** — home ingress: records arriving in `head/` on each
+  placement node, whether pulled from a peer or promoted locally.
+- **Sealed** — records materialized into sealed, queryable GLCB chunks.
+
+Reading the panel: the three rates should track each other at steady state.
+A downstream stage falling away from its upstream is a pipeline stall in
+progress — e.g. **Sealed** flatlining at 0 while **Append** runs means
+chunks are accumulating unsealed (the Pipeline Backlog panel below shows
+where the inventory stacks).
+
+Nodes listed as **idle** on a stage have no current activity. Idle usually
+means *caught up* — a node whose `head/` count equals the registry's
+published count has simply finished collecting. Compare the per-node counts
+in Pipeline Backlog to distinguish caught-up from stalled.
+

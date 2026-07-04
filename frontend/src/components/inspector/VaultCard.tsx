@@ -246,6 +246,7 @@ function StageRows({
 }: Readonly<{ label: string; title: string; rows: StageRow[]; gridCols: string; dark: boolean }>) {
   const c = useThemeClass(dark);
   const active = rows.filter(stageRowActive).toSorted((a, b) => a.node.localeCompare(b.node));
+  const idle = rows.filter((r) => !stageRowActive(r)).toSorted((a, b) => a.node.localeCompare(b.node));
   const totalRecords = active.reduce((sum, r) => sum + r.recordsPerSec, 0);
   const totalBytes = active.reduce((sum, r) => sum + r.bytesPerSec, 0);
   const stageClass = `text-[0.75em] font-medium uppercase tracking-[0.15em] ${c("text-text-muted", "text-light-text-muted")}`;
@@ -312,6 +313,20 @@ function StageRows({
           </span>
         </div>
       ))}
+      {idle.length > 0 && active.length > 0 && (
+        <div
+          className={rowClass}
+          title="No activity in the recent spark window. Idle can mean caught up (nothing left to do) or never involved — the Pipeline Backlog panel below shows each node's standing inventory to tell them apart."
+        >
+          <span />
+          <span className={`font-mono truncate col-span-2 ${c("text-text-muted", "text-light-text-muted")}`}>
+            idle: {idle.map((r) => r.node).join(", ")}
+          </span>
+          <span />
+          <span />
+          <span />
+        </div>
+      )}
     </>
   );
 }
