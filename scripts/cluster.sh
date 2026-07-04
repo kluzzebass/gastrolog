@@ -273,6 +273,27 @@ configure() {
       --username "$ADMIN_USER" --password "$ADMIN_PASS" 2>&1 | sed 's/^/  /'
   fi
 
+  # A node's socket existing means ITS server is up — not that its name
+  # registration has committed through cluster-ctl Raft and reached node 1,
+  # which is where every config command below is addressed. Poll node 1's
+  # registry until all names are visible (the old bare "sleep 2" lost this
+  # race on slow disks).
+  echo ">>> Waiting for all nodes in node 1's registry..."
+  for _ in $(seq 1 120); do
+    local listing missing=0
+    listing="$($GLOG config node list --addr "$S" 2>/dev/null || true)"
+    for i in $(seq 1 "$NODES"); do
+      grep -q "node-${i}" <<<"$listing" || { missing=1; break; }
+    done
+    [[ "$missing" -eq 0 ]] && break
+    sleep 0.5
+  done
+  if [[ "${missing:-1}" -ne 0 ]]; then
+    echo "!!! Timed out waiting for all ${NODES} nodes in the registry:" >&2
+    $GLOG config node list --addr "$S" >&2 || true
+    exit 1
+  fi
+
   echo ">>> Creating file storage on each node..."
   for i in $(seq 1 "$NODES"); do
     $GLOG config node add-storage --addr "$S" \
