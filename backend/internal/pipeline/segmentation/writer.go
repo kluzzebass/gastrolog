@@ -372,13 +372,20 @@ func (w *vaultWriter) closeSegmentLocked() error {
 // completeWorkingSegmentLocked finalizes the open segment and moves it to completed/.
 // The caller must hold w.mu and ensure RecordCount > 0.
 func (w *vaultWriter) completeWorkingSegmentLocked() error {
+	if err := w.seg.Finalize(); err != nil {
+		return err
+	}
+	// Durability barrier AFTER Finalize: it truncates, writes the index
+	// tails, sorts via writable mmap, and rewrites the header. Syncing
+	// before it (as this used to) left all of that unsynced at publish —
+	// after a crash the registry-referenced segment could fail
+	// segment.Open on the origin and collectors got non-retryable
+	// ErrCorruptSegment (gastrolog-4mqy06). DisableFsync vaults opt out
+	// of durability wholesale (dev/load testing only).
 	if !w.disableFsync {
 		if err := w.seg.Sync(); err != nil {
 			return err
 		}
-	}
-	if err := w.seg.Finalize(); err != nil {
-		return err
 	}
 	hdr := w.seg.Header()
 	meta := segment.Meta{ID: w.segmentID, VaultID: w.vaultID}
@@ -390,6 +397,11 @@ func (w *vaultWriter) completeWorkingSegmentLocked() error {
 	w.seg = nil
 	if err := os.Rename(working, completed); err != nil {
 		return err
+	}
+	if !w.disableFsync {
+		if err := paths.SyncDir(paths.CompletedDir(w.root)); err != nil {
+			return err
+		}
 	}
 	if w.completed != nil {
 		select {

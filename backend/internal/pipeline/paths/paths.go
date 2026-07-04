@@ -61,6 +61,23 @@ func EnsurePreHeadDir(root string) error {
 }
 
 // EnsureHeadDir creates head/ under root.
+// SyncDir fsyncs a directory so preceding renames into it survive power
+// loss. Rename-as-commit is durable only once the parent directory entry is
+// flushed; without it, files that cluster-visible Raft state references
+// (published segments, holder-receipted pulls, sealed GLCBs) can vanish
+// after a crash (gastrolog-4mqy06).
+func SyncDir(dir string) error {
+	d, err := os.Open(filepath.Clean(dir))
+	if err != nil {
+		return err
+	}
+	err = d.Sync()
+	if cerr := d.Close(); err == nil {
+		err = cerr
+	}
+	return err
+}
+
 func EnsureHeadDir(root string) error {
 	return os.MkdirAll(HeadDir(root), 0o750)
 }
