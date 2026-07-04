@@ -36,13 +36,16 @@ type ClosePolicy struct {
 type Config struct {
 	ClosePolicy ClosePolicy
 	// SyncBatchSize is the max appended frames between fsync calls for
-	// fire-and-forget (no-ack) records. Defaults to 1024. This is a memory
-	// bound, not the durability bound: SyncBatchWindow (2ms) fires first at
-	// realistic rates, so batches size themselves to the ingest rate while
-	// the un-fsynced loss window stays pinned at the window duration
-	// (gastrolog-1ojsm6 — with batched appends, fsync cadence is the write
-	// path's dominant cost; the old default of 16 forced a full fsync every
-	// ~300us under load).
+	// fire-and-forget (no-ack) records. Defaults to 8192. This is a memory
+	// bound (~2.5MB of frame bodies at typical record sizes), not the
+	// durability bound: SyncBatchWindow (2ms) fires first at realistic
+	// rates, so batches size themselves to the ingest rate. The cap only
+	// binds when fsync latency dominates the commit cycle — on volumes
+	// where F_FULLFSYNC costs tens to hundreds of ms, sustained throughput
+	// is SyncBatchSize divided by that latency, so the cap must exceed the
+	// records arriving during one flush (gastrolog-1ojsm6/oin19g: measured
+	// ~200ms per F_FULLFSYNC on an external volume → 1024 capped the
+	// pipeline at ~22K rec/s while the node sat idle).
 	SyncBatchSize int
 	// SyncBatchWindow is the max wait before fsyncing a partial fire-and-forget
 	// group. Defaults to 2ms.
@@ -55,8 +58,8 @@ type Config struct {
 	// cache); ack-bearing records ack after the in-memory append. Off by default.
 	DisableFsync bool
 	// EncodeQueueCap is the bounded channel between encode and append stages.
-	// Defaults to 1024 so a 2ms commit window can fill from a fast producer
-	// without blocking it mid-window (gastrolog-1ojsm6).
+	// Defaults to 8192 so producers keep filling the next batch while the
+	// current commit's fsync is in flight (gastrolog-1ojsm6).
 	EncodeQueueCap int
 	// CompletedCap is the bounded completed-segment notification queue. Defaults to 512.
 	CompletedCap int
@@ -115,7 +118,7 @@ func (c Config) now() time.Time {
 
 func (c Config) syncBatchSize() int {
 	if c.SyncBatchSize <= 0 {
-		return 1024
+		return 8192
 	}
 	return c.SyncBatchSize
 }

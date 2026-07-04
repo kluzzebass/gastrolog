@@ -104,7 +104,7 @@ func newVaultWriter(vaultID glid.GLID, root string, cfg Config, vc VaultConfig, 
 	}
 	queueCap := cfg.EncodeQueueCap
 	if queueCap <= 0 {
-		queueCap = 1024
+		queueCap = 8192
 	}
 	syncEvery := vc.SyncBatchSize
 	if syncEvery <= 0 {
