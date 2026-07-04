@@ -52,6 +52,7 @@ type PeerIngesterStatsProvider interface {
 // Implemented by cluster.PeerState; nil in single-node mode.
 type PeerRouteStatsProvider interface {
 	AggregateRouteStats() (ingested, dropped, routed int64, filterActive bool, vaultStats []*apiv1.VaultRouteStats, routeStats []*apiv1.PerRouteStats)
+	AggregateRouteRates() (ingested, routed *apiv1.ThroughputRate)
 }
 
 // SystemServerConfig holds all dependencies for SystemServer construction.
@@ -73,6 +74,8 @@ type SystemServerConfig struct {
 	Tokens               *auth.TokenService
 	PlacementReconcile   func(ctx context.Context)       // synchronous placement for RPC handlers
 	LogFilter            *logging.ComponentFilterHandler // log-level RPC handlers (gastrolog-3flfp); nil disables them
+	LocalStats           func() *apiv1.NodeStats         // local NodeStats snapshot (rolling-window rates); nil in tests
+	ClusterRouteRates    func() (*apiv1.ThroughputRate, *apiv1.ThroughputRate) // server-side cluster rate series; nil in single-node/tests
 
 	// Environment banner (gastrolog-4vr0l). Display-only metadata
 	// surfaced on GetSystem so the UI header can render a per-deployment
@@ -89,6 +92,8 @@ type SystemServer struct {
 	certManager          CertManager
 	peerStats            PeerIngesterStatsProvider
 	peerRouteStats       PeerRouteStatsProvider
+	localStats           func() *apiv1.NodeStats
+	clusterRouteRates    func() (*apiv1.ThroughputRate, *apiv1.ThroughputRate)
 	localNodeID          string
 	onTLSConfigChange    func()
 	onLookupConfigChange func(system.LookupConfig, system.MaxMindConfig)
@@ -115,6 +120,8 @@ func NewSystemServer(cfg SystemServerConfig) *SystemServer {
 		certManager:          cfg.CertManager,
 		peerStats:            cfg.PeerStats,
 		peerRouteStats:       cfg.PeerRouteStats,
+		localStats:           cfg.LocalStats,
+		clusterRouteRates:    cfg.ClusterRouteRates,
 		localNodeID:          cfg.LocalNodeID,
 		afterConfigApply:     cfg.AfterConfigApply,
 		configSignal:         cfg.ConfigSignal,

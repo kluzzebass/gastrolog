@@ -1851,16 +1851,19 @@ export class ReleaseSegmentsCommand extends Message<ReleaseSegmentsCommand> {
 
 /**
  * AckSegmentHolderCommand records that a node has pulled, verified, and now
- * holds a completed segment (Rubicon C). Appends node_id to the
- * segment registry entry's holder set; idempotent.
+ * holds one or more completed segments (Rubicon C). Appends node_id to each
+ * segment registry entry's holder set; idempotent per segment. Batched so a
+ * collect pass commits every receipt in one Raft apply — per-segment applies
+ * serialized whole passes behind the publish flood and starved GLCB builds
+ * (gastrolog-38snf4).
  *
  * @generated from message gastrolog.v1.AckSegmentHolderCommand
  */
 export class AckSegmentHolderCommand extends Message<AckSegmentHolderCommand> {
   /**
-   * @generated from field: bytes segment_id = 1;
+   * @generated from field: repeated bytes segment_ids = 1;
    */
-  segmentId = new Uint8Array(0);
+  segmentIds: Uint8Array[] = [];
 
   /**
    * @generated from field: string node_id = 2;
@@ -1875,7 +1878,7 @@ export class AckSegmentHolderCommand extends Message<AckSegmentHolderCommand> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.AckSegmentHolderCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "segment_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 1, name: "segment_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
     { no: 2, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 

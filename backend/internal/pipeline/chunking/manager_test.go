@@ -83,6 +83,17 @@ func TestManagerBuildOnceBuildsGLCBAndAnnouncesSeal(t *testing.T) {
 	if fsm.SealedManifest() != nil {
 		t.Fatal("sealed manifest must clear after SealChunk")
 	}
+
+	// Stage throughput counters (gastrolog-10n6k8): this home materialized
+	// the sealed GLCB, so the seal counters must reflect it.
+	stats := mgr.SealStats()
+	if len(stats) != 1 || stats[0].VaultID != vaultID {
+		t.Fatalf("SealStats = %+v, want one entry for %s", stats, vaultID)
+	}
+	if stats[0].SealedRecords != 2 || stats[0].SealedBytes == 0 {
+		t.Fatalf("sealed = %d records / %d bytes, want 2 records and > 0 bytes",
+			stats[0].SealedRecords, stats[0].SealedBytes)
+	}
 }
 
 func TestManagerBuildOnceReleasesCompletedRegistry(t *testing.T) {
@@ -228,6 +239,15 @@ func TestManagerPurgesHeadWhenSealWinsElsewhere(t *testing.T) {
 	if err := mgrB.RegisterVault(vaultID, spec(homeB, &flakyFSMApplier{fsm: fsm, fail: 1}, false)); err != nil {
 		t.Fatal(err)
 	}
+	// B's worker must run: the ReleaseSegments callback is wake-only and the
+	// worker's release branch performs the purge (gastrolog-38snf4).
+	ctxB, cancelB := context.WithCancel(context.Background())
+	doneB := make(chan struct{})
+	go func() { _ = mgrB.Run(ctxB); close(doneB) }()
+	t.Cleanup(func() {
+		cancelB()
+		<-doneB
+	})
 
 	// Home B builds locally; only the vault-ctl leader proposes CmdSealChunk.
 	if err := mgrB.BuildOnce(t.Context(), vaultID); err != nil {
@@ -240,8 +260,15 @@ func TestManagerPurgesHeadWhenSealWinsElsewhere(t *testing.T) {
 	if err := mgrA.BuildOnce(t.Context(), vaultID); err != nil {
 		t.Fatalf("home A BuildOnce: %v", err)
 	}
-	if _, err := os.Stat(headB); !os.IsNotExist(err) {
-		t.Fatalf("home B head should purge when peer seals, stat err=%v", err)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(headB); os.IsNotExist(err) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("home B head should purge when peer seals")
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 

@@ -232,7 +232,15 @@ func (h *reliabilityHarness) leader() *reliabilityNode {
 func (h *reliabilityHarness) applyInstanceCreate(vaultID glid.GLID, chunkID chunk.ChunkID, at time.Time) {
 	h.t.Helper()
 	wire := vaultctlfsm.MarshalCreateChunk(chunkID, at, at, at)
-	cmd := MarshalVaultChunkCommand(vaultID, wire)
+	h.applyCommand(MarshalVaultChunkCommand(vaultID, wire), "apply instance create")
+}
+
+// applyCommand submits pre-marshalled command bytes via whichever node
+// currently leads, with the same transient-retry policy as
+// applyInstanceCreate. Stopped nodes can't win elections, so following
+// h.leader() never resurrects a downed leader in failover scenarios.
+func (h *reliabilityHarness) applyCommand(cmd []byte, what string) {
+	h.t.Helper()
 	deadline := time.Now().Add(harnessApplyRetryWait)
 	for {
 		leader := h.leader()
@@ -240,12 +248,12 @@ func (h *reliabilityHarness) applyInstanceCreate(vaultID glid.GLID, chunkID chun
 		err := fut.Error()
 		if err == nil {
 			if r, ok := fut.Response().(error); ok && r != nil {
-				h.t.Fatalf("apply instance create FSM error: %v", r)
+				h.t.Fatalf("%s FSM error: %v", what, r)
 			}
 			return
 		}
 		if !isLeadershipTransient(err) || time.Now().After(deadline) {
-			h.t.Fatalf("apply instance create: %v", err)
+			h.t.Fatalf("%s: %v", what, err)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}

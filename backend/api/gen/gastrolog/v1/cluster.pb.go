@@ -628,9 +628,27 @@ type NodeStats struct {
 	// Total on-disk bytes on this node: local chunk/index stores, pipeline
 	// segments (FSM ByteSize where published, otherwise file stat), raft
 	// persistence, and managed files. Distinct from per-vault data_bytes.
-	StorageBytes  int64 `protobuf:"varint,37,opt,name=storage_bytes,json=storageBytes,proto3" json:"storage_bytes,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	StorageBytes int64 `protobuf:"varint,37,opt,name=storage_bytes,json=storageBytes,proto3" json:"storage_bytes,omitempty"`
+	// Routing throughput on this node, from the stats collector's rolling
+	// windows over the cumulative route counters (fields 28/30). Cluster
+	// totals are the sum across nodes (gastrolog-4eh5ns).
+	RouteIngested *ThroughputRate `protobuf:"bytes,39,opt,name=route_ingested,json=routeIngested,proto3" json:"route_ingested,omitempty"`
+	RouteRouted   *ThroughputRate `protobuf:"bytes,40,opt,name=route_routed,json=routeRouted,proto3" json:"route_routed,omitempty"`
+	// Raft liveness / WAL health (gastrolog-1io54g). Append latency covers
+	// every Raft WAL on the node (vault groups share one WAL; cluster-ctl has
+	// its own): count/total are cumulative, avg is the rolling-window average
+	// between stats ticks, max is the worst single append since the previous
+	// tick. Election counters aggregate hashicorp/raft observer events across
+	// all groups — elections_per_min > ~3 sustained is a storm.
+	RaftWalAppendsTotal       uint64  `protobuf:"varint,41,opt,name=raft_wal_appends_total,json=raftWalAppendsTotal,proto3" json:"raft_wal_appends_total,omitempty"`
+	RaftWalAppendAvgMs        float64 `protobuf:"fixed64,42,opt,name=raft_wal_append_avg_ms,json=raftWalAppendAvgMs,proto3" json:"raft_wal_append_avg_ms,omitempty"`
+	RaftWalAppendMaxMs        float64 `protobuf:"fixed64,43,opt,name=raft_wal_append_max_ms,json=raftWalAppendMaxMs,proto3" json:"raft_wal_append_max_ms,omitempty"`
+	RaftElectionsTotal        uint64  `protobuf:"varint,44,opt,name=raft_elections_total,json=raftElectionsTotal,proto3" json:"raft_elections_total,omitempty"`
+	RaftLeaderLossesTotal     uint64  `protobuf:"varint,45,opt,name=raft_leader_losses_total,json=raftLeaderLossesTotal,proto3" json:"raft_leader_losses_total,omitempty"`
+	RaftFailedHeartbeatsTotal uint64  `protobuf:"varint,46,opt,name=raft_failed_heartbeats_total,json=raftFailedHeartbeatsTotal,proto3" json:"raft_failed_heartbeats_total,omitempty"`
+	RaftElectionsPerMin       float64 `protobuf:"fixed64,47,opt,name=raft_elections_per_min,json=raftElectionsPerMin,proto3" json:"raft_elections_per_min,omitempty"`
+	unknownFields             protoimpl.UnknownFields
+	sizeCache                 protoimpl.SizeCache
 }
 
 func (x *NodeStats) Reset() {
@@ -925,6 +943,69 @@ func (x *NodeStats) GetVaultPipelineDisk() []*VaultPipelineNodeDisk {
 func (x *NodeStats) GetStorageBytes() int64 {
 	if x != nil {
 		return x.StorageBytes
+	}
+	return 0
+}
+
+func (x *NodeStats) GetRouteIngested() *ThroughputRate {
+	if x != nil {
+		return x.RouteIngested
+	}
+	return nil
+}
+
+func (x *NodeStats) GetRouteRouted() *ThroughputRate {
+	if x != nil {
+		return x.RouteRouted
+	}
+	return nil
+}
+
+func (x *NodeStats) GetRaftWalAppendsTotal() uint64 {
+	if x != nil {
+		return x.RaftWalAppendsTotal
+	}
+	return 0
+}
+
+func (x *NodeStats) GetRaftWalAppendAvgMs() float64 {
+	if x != nil {
+		return x.RaftWalAppendAvgMs
+	}
+	return 0
+}
+
+func (x *NodeStats) GetRaftWalAppendMaxMs() float64 {
+	if x != nil {
+		return x.RaftWalAppendMaxMs
+	}
+	return 0
+}
+
+func (x *NodeStats) GetRaftElectionsTotal() uint64 {
+	if x != nil {
+		return x.RaftElectionsTotal
+	}
+	return 0
+}
+
+func (x *NodeStats) GetRaftLeaderLossesTotal() uint64 {
+	if x != nil {
+		return x.RaftLeaderLossesTotal
+	}
+	return 0
+}
+
+func (x *NodeStats) GetRaftFailedHeartbeatsTotal() uint64 {
+	if x != nil {
+		return x.RaftFailedHeartbeatsTotal
+	}
+	return 0
+}
+
+func (x *NodeStats) GetRaftElectionsPerMin() float64 {
+	if x != nil {
+		return x.RaftElectionsPerMin
 	}
 	return 0
 }
@@ -4325,7 +4406,7 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\apayload\"\v\n" +
 	"\tHeartbeat\"1\n" +
 	"\bNodeJobs\x12%\n" +
-	"\x04jobs\x18\x01 \x03(\v2\x11.gastrolog.v1.JobR\x04jobs\"\xd3\r\n" +
+	"\x04jobs\x18\x01 \x03(\v2\x11.gastrolog.v1.JobR\x04jobs\"\xd7\x11\n" +
 	"\tNodeStats\x12\x1f\n" +
 	"\vcpu_percent\x18\x01 \x01(\x01R\n" +
 	"cpuPercent\x12!\n" +
@@ -4372,7 +4453,16 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x10peer_connections\x18# \x03(\v2\x1a.gastrolog.v1.PeerConnStatR\x0fpeerConnections\x12N\n" +
 	"\x13peer_traffic_totals\x18& \x03(\v2\x1e.gastrolog.v1.PeerTrafficTotalR\x11peerTrafficTotals\x12S\n" +
 	"\x13vault_pipeline_disk\x18$ \x03(\v2#.gastrolog.v1.VaultPipelineNodeDiskR\x11vaultPipelineDisk\x12#\n" +
-	"\rstorage_bytes\x18% \x01(\x03R\fstorageBytes\"\xec\x01\n" +
+	"\rstorage_bytes\x18% \x01(\x03R\fstorageBytes\x12C\n" +
+	"\x0eroute_ingested\x18' \x01(\v2\x1c.gastrolog.v1.ThroughputRateR\rrouteIngested\x12?\n" +
+	"\froute_routed\x18( \x01(\v2\x1c.gastrolog.v1.ThroughputRateR\vrouteRouted\x123\n" +
+	"\x16raft_wal_appends_total\x18) \x01(\x04R\x13raftWalAppendsTotal\x122\n" +
+	"\x16raft_wal_append_avg_ms\x18* \x01(\x01R\x12raftWalAppendAvgMs\x122\n" +
+	"\x16raft_wal_append_max_ms\x18+ \x01(\x01R\x12raftWalAppendMaxMs\x120\n" +
+	"\x14raft_elections_total\x18, \x01(\x04R\x12raftElectionsTotal\x127\n" +
+	"\x18raft_leader_losses_total\x18- \x01(\x04R\x15raftLeaderLossesTotal\x12?\n" +
+	"\x1craft_failed_heartbeats_total\x18. \x01(\x04R\x19raftFailedHeartbeatsTotal\x123\n" +
+	"\x16raft_elections_per_min\x18/ \x01(\x01R\x13raftElectionsPerMin\"\xec\x01\n" +
 	"\x15VaultPipelineNodeDisk\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12)\n" +
 	"\x10working_segments\x18\x02 \x01(\rR\x0fworkingSegments\x12<\n" +
@@ -4676,15 +4766,16 @@ var file_gastrolog_v1_cluster_proto_goTypes = []any{
 	(*VaultStats)(nil),                        // 71: gastrolog.v1.VaultStats
 	(*VaultRouteStats)(nil),                   // 72: gastrolog.v1.VaultRouteStats
 	(*PerRouteStats)(nil),                     // 73: gastrolog.v1.PerRouteStats
-	(*ExportRecord)(nil),                      // 74: gastrolog.v1.ExportRecord
-	(*TableResult)(nil),                       // 75: gastrolog.v1.TableResult
-	(*HistogramBucket)(nil),                   // 76: gastrolog.v1.HistogramBucket
-	(*ChunkMeta)(nil),                         // 77: gastrolog.v1.ChunkMeta
-	(ChunkChangeOp)(0),                        // 78: gastrolog.v1.ChunkChangeOp
-	(*IndexInfo)(nil),                         // 79: gastrolog.v1.IndexInfo
-	(*ChunkValidation)(nil),                   // 80: gastrolog.v1.ChunkValidation
-	(*ChunkAnalysis)(nil),                     // 81: gastrolog.v1.ChunkAnalysis
-	(*ChunkPlan)(nil),                         // 82: gastrolog.v1.ChunkPlan
+	(*ThroughputRate)(nil),                    // 74: gastrolog.v1.ThroughputRate
+	(*ExportRecord)(nil),                      // 75: gastrolog.v1.ExportRecord
+	(*TableResult)(nil),                       // 76: gastrolog.v1.TableResult
+	(*HistogramBucket)(nil),                   // 77: gastrolog.v1.HistogramBucket
+	(*ChunkMeta)(nil),                         // 78: gastrolog.v1.ChunkMeta
+	(ChunkChangeOp)(0),                        // 79: gastrolog.v1.ChunkChangeOp
+	(*IndexInfo)(nil),                         // 80: gastrolog.v1.IndexInfo
+	(*ChunkValidation)(nil),                   // 81: gastrolog.v1.ChunkValidation
+	(*ChunkAnalysis)(nil),                     // 82: gastrolog.v1.ChunkAnalysis
+	(*ChunkPlan)(nil),                         // 83: gastrolog.v1.ChunkPlan
 }
 var file_gastrolog_v1_cluster_proto_depIdxs = []int32{
 	7,  // 0: gastrolog.v1.BroadcastRequest.message:type_name -> gastrolog.v1.BroadcastMessage
@@ -4701,35 +4792,37 @@ var file_gastrolog_v1_cluster_proto_depIdxs = []int32{
 	12, // 11: gastrolog.v1.NodeStats.peer_connections:type_name -> gastrolog.v1.PeerConnStat
 	13, // 12: gastrolog.v1.NodeStats.peer_traffic_totals:type_name -> gastrolog.v1.PeerTrafficTotal
 	11, // 13: gastrolog.v1.NodeStats.vault_pipeline_disk:type_name -> gastrolog.v1.VaultPipelineNodeDisk
-	0,  // 14: gastrolog.v1.SystemAlert.severity:type_name -> gastrolog.v1.AlertSeverity
-	69, // 15: gastrolog.v1.SystemAlert.first_seen:type_name -> google.protobuf.Timestamp
-	69, // 16: gastrolog.v1.SystemAlert.last_seen:type_name -> google.protobuf.Timestamp
-	22, // 17: gastrolog.v1.ChunkReplicationCommand.delete_chunk:type_name -> gastrolog.v1.ChunkReplicationDelete
-	19, // 18: gastrolog.v1.ChunkReplicationCommand.import_begin:type_name -> gastrolog.v1.ChunkReplicationImportBegin
-	20, // 19: gastrolog.v1.ChunkReplicationCommand.import_records:type_name -> gastrolog.v1.ChunkReplicationImportRecords
-	21, // 20: gastrolog.v1.ChunkReplicationCommand.import_commit:type_name -> gastrolog.v1.ChunkReplicationImportCommit
-	74, // 21: gastrolog.v1.ChunkReplicationImportRecords.records:type_name -> gastrolog.v1.ExportRecord
-	74, // 22: gastrolog.v1.ForwardSearchResponse.records:type_name -> gastrolog.v1.ExportRecord
-	75, // 23: gastrolog.v1.ForwardSearchResponse.table_result:type_name -> gastrolog.v1.TableResult
-	76, // 24: gastrolog.v1.ForwardSearchResponse.histogram:type_name -> gastrolog.v1.HistogramBucket
-	74, // 25: gastrolog.v1.ForwardGetContextResponse.before:type_name -> gastrolog.v1.ExportRecord
-	74, // 26: gastrolog.v1.ForwardGetContextResponse.anchor:type_name -> gastrolog.v1.ExportRecord
-	74, // 27: gastrolog.v1.ForwardGetContextResponse.after:type_name -> gastrolog.v1.ExportRecord
-	77, // 28: gastrolog.v1.ForwardListChunksResponse.chunks:type_name -> gastrolog.v1.ChunkMeta
-	78, // 29: gastrolog.v1.ForwardWatchChunksResponse.op:type_name -> gastrolog.v1.ChunkChangeOp
-	77, // 30: gastrolog.v1.ForwardWatchChunksResponse.meta:type_name -> gastrolog.v1.ChunkMeta
-	79, // 31: gastrolog.v1.ForwardGetIndexesResponse.indexes:type_name -> gastrolog.v1.IndexInfo
-	80, // 32: gastrolog.v1.ForwardValidateVaultResponse.chunks:type_name -> gastrolog.v1.ChunkValidation
-	77, // 33: gastrolog.v1.ForwardGetChunkResponse.chunk:type_name -> gastrolog.v1.ChunkMeta
-	81, // 34: gastrolog.v1.ForwardAnalyzeChunkResponse.analyses:type_name -> gastrolog.v1.ChunkAnalysis
-	82, // 35: gastrolog.v1.ForwardExplainResponse.chunks:type_name -> gastrolog.v1.ChunkPlan
-	74, // 36: gastrolog.v1.ForwardFollowResponse.records:type_name -> gastrolog.v1.ExportRecord
-	74, // 37: gastrolog.v1.ImportRecordMessage.record:type_name -> gastrolog.v1.ExportRecord
-	38, // [38:38] is the sub-list for method output_type
-	38, // [38:38] is the sub-list for method input_type
-	38, // [38:38] is the sub-list for extension type_name
-	38, // [38:38] is the sub-list for extension extendee
-	0,  // [0:38] is the sub-list for field type_name
+	74, // 14: gastrolog.v1.NodeStats.route_ingested:type_name -> gastrolog.v1.ThroughputRate
+	74, // 15: gastrolog.v1.NodeStats.route_routed:type_name -> gastrolog.v1.ThroughputRate
+	0,  // 16: gastrolog.v1.SystemAlert.severity:type_name -> gastrolog.v1.AlertSeverity
+	69, // 17: gastrolog.v1.SystemAlert.first_seen:type_name -> google.protobuf.Timestamp
+	69, // 18: gastrolog.v1.SystemAlert.last_seen:type_name -> google.protobuf.Timestamp
+	22, // 19: gastrolog.v1.ChunkReplicationCommand.delete_chunk:type_name -> gastrolog.v1.ChunkReplicationDelete
+	19, // 20: gastrolog.v1.ChunkReplicationCommand.import_begin:type_name -> gastrolog.v1.ChunkReplicationImportBegin
+	20, // 21: gastrolog.v1.ChunkReplicationCommand.import_records:type_name -> gastrolog.v1.ChunkReplicationImportRecords
+	21, // 22: gastrolog.v1.ChunkReplicationCommand.import_commit:type_name -> gastrolog.v1.ChunkReplicationImportCommit
+	75, // 23: gastrolog.v1.ChunkReplicationImportRecords.records:type_name -> gastrolog.v1.ExportRecord
+	75, // 24: gastrolog.v1.ForwardSearchResponse.records:type_name -> gastrolog.v1.ExportRecord
+	76, // 25: gastrolog.v1.ForwardSearchResponse.table_result:type_name -> gastrolog.v1.TableResult
+	77, // 26: gastrolog.v1.ForwardSearchResponse.histogram:type_name -> gastrolog.v1.HistogramBucket
+	75, // 27: gastrolog.v1.ForwardGetContextResponse.before:type_name -> gastrolog.v1.ExportRecord
+	75, // 28: gastrolog.v1.ForwardGetContextResponse.anchor:type_name -> gastrolog.v1.ExportRecord
+	75, // 29: gastrolog.v1.ForwardGetContextResponse.after:type_name -> gastrolog.v1.ExportRecord
+	78, // 30: gastrolog.v1.ForwardListChunksResponse.chunks:type_name -> gastrolog.v1.ChunkMeta
+	79, // 31: gastrolog.v1.ForwardWatchChunksResponse.op:type_name -> gastrolog.v1.ChunkChangeOp
+	78, // 32: gastrolog.v1.ForwardWatchChunksResponse.meta:type_name -> gastrolog.v1.ChunkMeta
+	80, // 33: gastrolog.v1.ForwardGetIndexesResponse.indexes:type_name -> gastrolog.v1.IndexInfo
+	81, // 34: gastrolog.v1.ForwardValidateVaultResponse.chunks:type_name -> gastrolog.v1.ChunkValidation
+	78, // 35: gastrolog.v1.ForwardGetChunkResponse.chunk:type_name -> gastrolog.v1.ChunkMeta
+	82, // 36: gastrolog.v1.ForwardAnalyzeChunkResponse.analyses:type_name -> gastrolog.v1.ChunkAnalysis
+	83, // 37: gastrolog.v1.ForwardExplainResponse.chunks:type_name -> gastrolog.v1.ChunkPlan
+	75, // 38: gastrolog.v1.ForwardFollowResponse.records:type_name -> gastrolog.v1.ExportRecord
+	75, // 39: gastrolog.v1.ImportRecordMessage.record:type_name -> gastrolog.v1.ExportRecord
+	40, // [40:40] is the sub-list for method output_type
+	40, // [40:40] is the sub-list for method input_type
+	40, // [40:40] is the sub-list for extension type_name
+	40, // [40:40] is the sub-list for extension extendee
+	0,  // [0:40] is the sub-list for field type_name
 }
 
 func init() { file_gastrolog_v1_cluster_proto_init() }

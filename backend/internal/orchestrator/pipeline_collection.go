@@ -161,17 +161,27 @@ func copyLocalSegmentFile(vaultRoot string, segmentID glid.GLID, dest io.Writer)
 		{paths.CompletedSegment(vaultRoot, segmentID), 0},
 		{paths.PreHeadSegment(vaultRoot, segmentID), segment.HeaderSizeV1},
 	} {
-		data, err := os.ReadFile(filepath.Clean(spec.path))
+		f, err := os.Open(filepath.Clean(spec.path))
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue
 			}
 			return err
 		}
-		if len(data) < spec.minBytes {
+		info, err := f.Stat()
+		if err != nil {
+			_ = f.Close()
+			return err
+		}
+		if info.Size() < int64(spec.minBytes) {
+			_ = f.Close()
 			continue
 		}
-		_, err = dest.Write(data)
+		// Stream instead of buffering the whole segment in RAM. Callers
+		// discard dest on error (temp-file removal + checksum verification
+		// downstream), so a mid-stream failure cannot leak partial bytes.
+		_, err = io.Copy(dest, f)
+		_ = f.Close()
 		return err
 	}
 	return os.ErrNotExist
@@ -211,9 +221,13 @@ type segmentReceiptCommitter struct {
 
 var _ collection.ReceiptCommitter = (*segmentReceiptCommitter)(nil)
 
-func (c *segmentReceiptCommitter) CommitHolderReceipt(_ context.Context, _, segmentID glid.GLID) error {
+func (c *segmentReceiptCommitter) CommitHolderReceipts(_ context.Context, _ glid.GLID, segmentIDs []glid.GLID) error {
 	if c.applier == nil {
 		return errors.New("vault-ctl applier required")
 	}
-	return c.applier.Apply(vaultctlfsm.MarshalAckSegmentHolder(segmentID, c.localNodeID))
+	if len(segmentIDs) == 0 {
+		return nil
+	}
+	// One vault-ctl apply for the whole pass (gastrolog-38snf4).
+	return c.applier.Apply(vaultctlfsm.MarshalAckSegmentHolders(segmentIDs, c.localNodeID))
 }

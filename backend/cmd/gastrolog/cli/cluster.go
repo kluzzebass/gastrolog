@@ -22,6 +22,7 @@ func newClusterCmd() *cobra.Command {
 	}
 	cmd.AddCommand(
 		newClusterStatusCmd(),
+		newClusterThroughputCmd(),
 		newClusterHealthCmd(),
 		newClusterJoinTokenCmd(),
 		newClusterShutdownCmd(),
@@ -85,6 +86,27 @@ func newClusterStatusCmd() *cobra.Command {
 				p.table([]string{"ID", "NAME", "ADDRESS", "ROLE", "SUFFRAGE"}, rows)
 			}
 
+			// Raft liveness per node (gastrolog-1io54g) — parity with the
+			// inspector's Raft section.
+			var liveRows [][]string
+			for _, n := range msg.Nodes {
+				if n.Stats == nil || n.Stats.RaftWalAppendsTotal == 0 {
+					continue
+				}
+				liveRows = append(liveRows, []string{
+					n.Name,
+					fmt.Sprintf("%.1fms", n.Stats.RaftWalAppendAvgMs),
+					fmt.Sprintf("%.0fms", n.Stats.RaftWalAppendMaxMs),
+					fmt.Sprintf("%d (%.1f/min)", n.Stats.RaftElectionsTotal, n.Stats.RaftElectionsPerMin),
+					strconv.FormatUint(n.Stats.RaftLeaderLossesTotal, 10),
+					strconv.FormatUint(n.Stats.RaftFailedHeartbeatsTotal, 10),
+				})
+			}
+			if len(liveRows) > 0 {
+				fmt.Println()
+				p.table([]string{"NODE", "WAL AVG", "WAL MAX", "ELECTIONS", "LEADER LOSSES", "FAILED HBS"}, liveRows)
+			}
+
 			if msg.LocalStats != nil {
 				fmt.Println()
 				s := msg.LocalStats
@@ -101,6 +123,94 @@ func newClusterStatusCmd() *cobra.Command {
 			}
 			return nil
 		},
+	}
+}
+
+// newClusterThroughputCmd shows the pipeline throughput rates the inspector
+// displays: cluster-total routing rates from GetRouteStats and per-node,
+// per-vault segmentation append rates from the NodeStats broadcast
+// (gastrolog-4eh5ns).
+func newClusterThroughputCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "throughput",
+		Short: "Show pipeline throughput (routing and per-vault append rates)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client := clientFromCmd(cmd)
+			rs, err := client.System.GetRouteStats(context.Background(), connect.NewRequest(&v1.GetRouteStatsRequest{}))
+			if err != nil {
+				return err
+			}
+			cs, err := client.Lifecycle.GetClusterStatus(context.Background(), connect.NewRequest(&v1.GetClusterStatusRequest{}))
+			if err != nil {
+				return err
+			}
+			p := newPrinter(outputFormat(cmd))
+			if outputFormat(cmd) == "json" {
+				return p.json(map[string]any{
+					"route_stats": rs.Msg,
+					"nodes":       cs.Msg.Nodes,
+				})
+			}
+
+			p.kv([][2]string{
+				{"Ingest Rate", formatRateTriple(rs.Msg.IngestedRate)},
+				{"Route Rate", formatRateTriple(rs.Msg.RoutedRate)},
+				{"Total Ingested", strconv.FormatInt(rs.Msg.TotalIngested, 10)},
+				{"Total Routed", strconv.FormatInt(rs.Msg.TotalRouted, 10)},
+				{"Total Dropped", strconv.FormatInt(rs.Msg.TotalDropped, 10)},
+			})
+
+			var rows [][]string
+			for _, n := range cs.Msg.Nodes {
+				if n.Stats == nil {
+					continue
+				}
+				for _, vs := range n.Stats.Vaults {
+					hasHome := len(vs.CollectedRecords.GetSpark()) > 0 || len(vs.SealedRecords.GetSpark()) > 0
+					if vs.AppendQueueCapacity == 0 && !hasHome {
+						continue // vault has no pipeline role on this node
+					}
+					rows = append(rows, []string{
+						n.Name,
+						vs.Name,
+						fmt.Sprintf("%.1f/s", vs.AppendRecords.GetInstantPerSec()),
+						fmt.Sprintf("%.1f/s", vs.AppendDurable.GetInstantPerSec()),
+						formatBytesCLI(vs.AppendBytes.GetInstantPerSec()) + "/s",
+						fmt.Sprintf("%d/%d", vs.AppendQueueDepth, vs.AppendQueueCapacity),
+						fmt.Sprintf("%.1f/s", vs.CollectedRecords.GetInstantPerSec()),
+						fmt.Sprintf("%.1f/s", vs.SealedRecords.GetInstantPerSec()),
+					})
+				}
+			}
+			if len(rows) > 0 {
+				fmt.Println()
+				p.table([]string{"NODE", "VAULT", "APPEND", "DURABLE", "BYTES", "QUEUE", "COLLECT", "SEAL"}, rows)
+			}
+			return nil
+		},
+	}
+}
+
+// formatRateTriple renders the instant rate with Unix-load-style 1m/5m/15m
+// EWMAs, uptime-style.
+func formatRateTriple(r *v1.ThroughputRate) string {
+	if r == nil {
+		return "0.0 rec/s"
+	}
+	return fmt.Sprintf("%.1f rec/s (1m: %.1f, 5m: %.1f, 15m: %.1f)",
+		r.InstantPerSec, r.Avg_1MPerSec, r.Avg_5MPerSec, r.Avg_15MPerSec)
+}
+
+func formatBytesCLI(b float64) string {
+	switch {
+	case b >= 1<<30:
+		return fmt.Sprintf("%.1f GB", b/(1<<30))
+	case b >= 1<<20:
+		return fmt.Sprintf("%.1f MB", b/(1<<20))
+	case b >= 1<<10:
+		return fmt.Sprintf("%.1f KB", b/(1<<10))
+	default:
+		return fmt.Sprintf("%.0f B", b)
 	}
 }
 

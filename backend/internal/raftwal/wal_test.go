@@ -1061,7 +1061,10 @@ func TestConcurrentReadWrite(t *testing.T) {
 		}
 	}
 
-	// Writer: keeps appending.
+	// Writer: keeps appending. Signals its first append so the timed window
+	// cannot start before this goroutine has run (the LastIndex > 100
+	// assertion below false-fails if scheduling starves it).
+	logWritten := make(chan struct{})
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -1074,6 +1077,9 @@ func TestConcurrentReadWrite(t *testing.T) {
 			if err := gs.StoreLog(&hraft.Log{Index: i, Term: 1, Data: []byte("new")}); err != nil {
 				recordErr(err)
 				return
+			}
+			if i == 101 {
+				close(logWritten)
 			}
 		}
 	}()
@@ -1104,11 +1110,16 @@ func TestConcurrentReadWrite(t *testing.T) {
 		}
 	}()
 
-	// Stable writer.
+	// Stable writer. Starts at 1 (a single write of 0 would be
+	// indistinguishable from no write in the final assertion) and signals
+	// its first write so the timed window below cannot start before the
+	// goroutine has been scheduled — full-suite load starved it past the
+	// whole window and false-failed the "written at least once" check.
+	counterWritten := make(chan struct{})
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		for i := uint64(0); ; i++ {
+		for i := uint64(1); ; i++ {
 			select {
 			case <-done:
 				return
@@ -1118,8 +1129,23 @@ func TestConcurrentReadWrite(t *testing.T) {
 				recordErr(err)
 				return
 			}
+			if i == 1 {
+				close(counterWritten)
+			}
 		}
 	}()
+
+	for name, ch := range map[string]chan struct{}{"stable writer": counterWritten, "log writer": logWritten} {
+		select {
+		case <-ch:
+		case <-time.After(30 * time.Second):
+			close(done)
+			wg.Wait()
+			errMu.Lock()
+			defer errMu.Unlock()
+			t.Fatalf("%s never completed a write; goroutine errors: %v", name, goroutineErrs)
+		}
+	}
 
 	// Run for 200ms then stop.
 	time.Sleep(200 * time.Millisecond)

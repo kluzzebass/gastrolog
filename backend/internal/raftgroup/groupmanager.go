@@ -110,6 +110,9 @@ type GroupManager struct {
 	shutdownLast   string       // group ID to shut down last (e.g. config group)
 	wal            *raftwal.WAL // optional shared WAL; nil = per-group boltdb
 	logger         *slog.Logger
+	// liveness accumulates Raft liveness events across all groups on this
+	// node for the NodeStats broadcast (gastrolog-1io54g).
+	liveness LivenessCounters
 }
 
 // GroupConnCloser closes outbound raft-lane peer connections when a group is
@@ -228,7 +231,7 @@ func (m *GroupManager) CreateGroup(cfg GroupConfig) (*Group, error) {
 	m.groups[cfg.GroupID] = g
 
 	_, _, leaseTimeout := raftTimeouts(cfg)
-	ObserveRaftDiagnostics(r, logging.NewRaftGroupSlog(m.logger, cfg.GroupID), leaseTimeout)
+	ObserveRaftDiagnostics(r, logging.NewRaftGroupSlog(m.logger, cfg.GroupID), leaseTimeout, &m.liveness)
 
 	m.logger.Info("raft group created",
 		"group", cfg.GroupID,
@@ -322,6 +325,12 @@ func (m *GroupManager) RemoveMember(groupID string, serverID hraft.ServerID) err
 // Groups are shut down concurrently to avoid sequential election timeout
 // delays on follower nodes. If shutdownLast is set, that group is stopped after
 // all others complete.
+// Liveness returns the node-level Raft liveness counters accumulated across
+// every group this manager observes (gastrolog-1io54g).
+func (m *GroupManager) Liveness() *LivenessCounters {
+	return &m.liveness
+}
+
 func (m *GroupManager) Shutdown() {
 	m.mu.Lock()
 	defer m.mu.Unlock()

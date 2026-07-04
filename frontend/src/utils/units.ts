@@ -11,6 +11,14 @@ export function formatBytes(b: bigint | number): string {
   return `${n} B`;
 }
 
+/** Format a per-second rate to a compact count (e.g. "1.5K"); pair with a "/s" suffix. */
+export function formatRate(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  if (n >= 10) return Math.round(n).toString();
+  return n.toFixed(1);
+}
+
 /** Format a bigint byte count to a compact string (e.g. "64MB"). */
 export function formatBytesBigint(b: bigint): string {
   if (b === 0n) return "";

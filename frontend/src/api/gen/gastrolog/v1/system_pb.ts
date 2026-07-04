@@ -6,6 +6,7 @@
 import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialMessage, PlainMessage } from "@bufbuild/protobuf";
 import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
 import { CloudService, NodeStorageConfig } from "./storage_pb.js";
+import { ThroughputRate } from "./vault_pb.js";
 
 /**
  * VaultType identifies the storage shape of a vault.
@@ -5928,6 +5929,21 @@ export class GetRouteStatsResponse extends Message<GetRouteStatsResponse> {
    */
   routeStats: PerRouteStats[] = [];
 
+  /**
+   * Cluster-total routing throughput: per-horizon sums of every node's
+   * rolling-window rates from the NodeStats broadcast. Sparks are omitted
+   * at cluster level — per-node tick phases differ, so element-wise sums
+   * would fabricate a series no node observed (gastrolog-4eh5ns).
+   *
+   * @generated from field: gastrolog.v1.ThroughputRate ingested_rate = 7;
+   */
+  ingestedRate?: ThroughputRate;
+
+  /**
+   * @generated from field: gastrolog.v1.ThroughputRate routed_rate = 8;
+   */
+  routedRate?: ThroughputRate;
+
   constructor(data?: PartialMessage<GetRouteStatsResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -5942,6 +5958,8 @@ export class GetRouteStatsResponse extends Message<GetRouteStatsResponse> {
     { no: 4, name: "filter_set_active", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 5, name: "vault_stats", kind: "message", T: VaultRouteStats, repeated: true },
     { no: 6, name: "route_stats", kind: "message", T: PerRouteStats, repeated: true },
+    { no: 7, name: "ingested_rate", kind: "message", T: ThroughputRate },
+    { no: 8, name: "routed_rate", kind: "message", T: ThroughputRate },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetRouteStatsResponse {

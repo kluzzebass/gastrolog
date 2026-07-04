@@ -25,6 +25,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	hraft "github.com/hashicorp/raft"
@@ -132,7 +133,17 @@ type WAL struct {
 	writeCh chan writeOp
 	syncCh  chan chan error // request a sync, get back the result
 	done    chan struct{}
-	wg      sync.WaitGroup
+
+	// Append-latency instrumentation (gastrolog-1io54g): caller-observed
+	// submit latency — queue wait + write + batch fsync — which is exactly
+	// what a Raft StoreLogs call experiences. The shared batch writer
+	// serializes ALL groups, so one slow fsync inflates every group's
+	// latency; these counters make that visible in NodeStats instead of
+	// discoverable only by pprof during an incident.
+	appendCount    atomic.Uint64
+	appendNanos    atomic.Uint64
+	appendMaxNanos atomic.Uint64 // max since the last AppendLatencyStats read
+	wg             sync.WaitGroup
 
 	lastCompaction CompactionStats
 }
@@ -278,13 +289,42 @@ func (w *WAL) submit(op writeOp) error {
 		return errWALClosed
 	default:
 	}
+	start := time.Now()
 	op.done = make(chan error, 1)
 	select {
 	case w.writeCh <- op:
 	case <-w.done:
 		return errWALClosed
 	}
-	return <-op.done
+	err := <-op.done
+	w.observeAppendLatency(time.Since(start))
+	return err
+}
+
+func (w *WAL) observeAppendLatency(d time.Duration) {
+	ns := uint64(d.Nanoseconds()) //nolint:gosec // durations are non-negative
+	w.appendCount.Add(1)
+	w.appendNanos.Add(ns)
+	for {
+		cur := w.appendMaxNanos.Load()
+		if ns <= cur || w.appendMaxNanos.CompareAndSwap(cur, ns) {
+			return
+		}
+	}
+}
+
+// AppendTotals returns the cumulative submit count and total latency. Pure
+// read — safe for snapshot paths between stats ticks (gastrolog-1io54g).
+func (w *WAL) AppendTotals() (count, totalNanos uint64) {
+	return w.appendCount.Load(), w.appendNanos.Load()
+}
+
+// TakeMaxAppendLatency returns the maximum single-submit latency observed
+// since the previous call and resets it ("max since last stats tick"). Call
+// only from the ticking stats path, never from snapshot reads, or the tick's
+// max gets consumed early (gastrolog-1io54g).
+func (w *WAL) TakeMaxAppendLatency() (maxNanos uint64) {
+	return w.appendMaxNanos.Swap(0)
 }
 
 // batchWriter is the single goroutine that writes to the WAL file.

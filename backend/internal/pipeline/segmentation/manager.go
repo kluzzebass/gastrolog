@@ -3,10 +3,14 @@ package segmentation
 import (
 	"context"
 	"errors"
+	"log/slog"
+	"maps"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"gastrolog/internal/alert"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/segment"
 	"gastrolog/internal/record"
@@ -32,7 +36,16 @@ type ClosePolicy struct {
 type Config struct {
 	ClosePolicy ClosePolicy
 	// SyncBatchSize is the max appended frames between fsync calls for
-	// fire-and-forget (no-ack) records. Defaults to 16.
+	// fire-and-forget (no-ack) records. Defaults to 8192. This is a memory
+	// bound (~2.5MB of frame bodies at typical record sizes), not the
+	// durability bound: SyncBatchWindow (2ms) fires first at realistic
+	// rates, so batches size themselves to the ingest rate. The cap only
+	// binds when fsync latency dominates the commit cycle — on volumes
+	// where F_FULLFSYNC costs tens to hundreds of ms, sustained throughput
+	// is SyncBatchSize divided by that latency, so the cap must exceed the
+	// records arriving during one flush (gastrolog-1ojsm6/oin19g: measured
+	// ~200ms per F_FULLFSYNC on an external volume → 1024 capped the
+	// pipeline at ~22K rec/s while the node sat idle).
 	SyncBatchSize int
 	// SyncBatchWindow is the max wait before fsyncing a partial fire-and-forget
 	// group. Defaults to 2ms.
@@ -44,7 +57,9 @@ type Config struct {
 	// DisableFsync turns off fsync entirely (durability falls back to the OS page
 	// cache); ack-bearing records ack after the in-memory append. Off by default.
 	DisableFsync bool
-	// EncodeQueueCap is the bounded channel between encode and append stages. Defaults to 64.
+	// EncodeQueueCap is the bounded channel between encode and append stages.
+	// Defaults to 8192 so producers keep filling the next batch while the
+	// current commit's fsync is in flight (gastrolog-1ojsm6).
 	EncodeQueueCap int
 	// CompletedCap is the bounded completed-segment notification queue. Defaults to 512.
 	CompletedCap int
@@ -56,6 +71,23 @@ type Config struct {
 	// OnSync is invoked after each real fsync (for tests). It is NOT called for
 	// vaults with DisableFsync set, since no fsync occurs.
 	OnSync func()
+	// Logger receives structured segmentation events (working-segment crash
+	// recovery, degraded writers, dropped records). Nil discards.
+	Logger *slog.Logger
+	// Alerts raises operator alerts for degraded writers (commit failures,
+	// abandoned working segments). Nil disables alerts.
+	Alerts AlertSink
+
+	// newSegmentFile overrides working-segment creation for fault-injection
+	// tests. Nil uses segment.Create.
+	newSegmentFile func(path string, meta segment.Meta) (segmentFile, error)
+}
+
+// AlertSink is the subset of alert.Collector segmentation raises
+// degraded-writer alerts through (satisfied by the orchestrator's collector).
+type AlertSink interface {
+	Set(id string, severity alert.Severity, source, message string)
+	Clear(id string)
 }
 
 // VaultConfig overrides per-vault commit/fsync tuning at RegisterVault time.
@@ -86,7 +118,7 @@ func (c Config) now() time.Time {
 
 func (c Config) syncBatchSize() int {
 	if c.SyncBatchSize <= 0 {
-		return 16
+		return 8192
 	}
 	return c.SyncBatchSize
 }
@@ -111,6 +143,11 @@ type Manager struct {
 	cfg       Config
 	completed chan CompletedSegment
 
+	// dropped counts records lost without an ack to carry the error (encode
+	// failures and fire-and-forget records rejected while a writer is
+	// degraded). Post-accept loss must be visible, not silent.
+	dropped atomic.Uint64
+
 	mu      sync.Mutex
 	writers map[glid.GLID]*vaultWriter
 	runCtx  context.Context // non-nil while Run is active
@@ -133,6 +170,48 @@ func New(cfg Config) (*Manager, <-chan CompletedSegment) {
 	}, completed
 }
 
+// AppendStats is one vault's cumulative segmentation throughput counters.
+// RecordsDurable lags RecordsAppended by the in-flight commit batch; the gap
+// plus queue depth is the backpressure picture. Rates are computed downstream
+// by the stats collector's rolling windows (gastrolog-4eh5ns).
+type AppendStats struct {
+	VaultID         glid.GLID
+	RecordsAppended uint64
+	BytesAppended   uint64
+	RecordsDurable  uint64
+	QueueDepth      int
+	QueueCap        int
+}
+
+// AppendStats returns cumulative throughput counters for every registered
+// vault writer.
+func (m *Manager) AppendStats() []AppendStats {
+	m.mu.Lock()
+	writers := make(map[glid.GLID]*vaultWriter, len(m.writers))
+	maps.Copy(writers, m.writers)
+	m.mu.Unlock()
+	out := make([]AppendStats, 0, len(writers))
+	for vaultID, w := range writers {
+		out = append(out, AppendStats{
+			VaultID:         vaultID,
+			RecordsAppended: w.recordsAppended.Load(),
+			BytesAppended:   w.bytesAppended.Load(),
+			RecordsDurable:  w.recordsDurable.Load(),
+			QueueDepth:      len(w.in),
+			QueueCap:        cap(w.in),
+		})
+	}
+	slices.SortFunc(out, func(a, b AppendStats) int { return a.VaultID.Compare(b.VaultID) })
+	return out
+}
+
+// DroppedRecords reports how many records this manager dropped without an ack
+// to carry the error: encode failures and fire-and-forget records rejected
+// while a writer was degraded.
+func (m *Manager) DroppedRecords() uint64 {
+	return m.dropped.Load()
+}
+
 // RegisterVault starts a per-vault writer under root (creates working/ and completed/).
 // Safe to call before or during Run — the orchestrator can register vaults as placement
 // changes. vc overrides the manager-global commit/fsync defaults for this vault.
@@ -146,7 +225,7 @@ func (m *Manager) RegisterVault(vaultID glid.GLID, root string, vc VaultConfig) 
 	if _, ok := m.writers[vaultID]; ok {
 		return nil, errors.New("vault already registered")
 	}
-	w, err := newVaultWriter(vaultID, root, m.cfg, vc, m.completed)
+	w, err := newVaultWriter(vaultID, root, m.cfg, vc, m.completed, &m.dropped)
 	if err != nil {
 		return nil, err
 	}

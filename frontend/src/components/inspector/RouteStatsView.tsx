@@ -1,4 +1,7 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
+import { Spark } from "../Spark";
+// eslint-disable-next-line no-restricted-imports -- ThroughputRate is a passthrough stats type; no model wrap planned
+import type { ThroughputRate } from "../../api/gen/gastrolog/v1/vault_pb";
 import { useRouteStats } from "../../api/hooks/useRouteStats";
 import { useRoutes, useVaults } from "../../api/hooks";
 import { idFromBytes, type EntityID } from "../../api/model/id";
@@ -61,20 +64,37 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
             label="Ingested"
             value={formatCount(stats.totalIngested)}
             dark={dark}
+            title="Records that entered the routing stage since process start, cluster-wide"
           />
           <StatBox
             label="Routed"
             value={formatCount(stats.totalRouted)}
             dark={dark}
             variant={Number(stats.totalRouted) > 0 ? "ok" : undefined}
+            title="Records that matched at least one route and were delivered to a vault (fan-out counts once)"
           />
           <StatBox
             label="Dropped"
             value={formatCount(stats.totalDropped)}
             dark={dark}
             variant={Number(stats.totalDropped) > 0 ? "error" : undefined}
+            title="Records that matched no route and were silently discarded — ingested = routed + dropped"
           />
           <StatBox label="Drop rate" value={`${dropRate}%`} dark={dark} />
+        </div>
+        <div className={`mt-4 pt-3 border-t grid grid-cols-2 gap-4 ${c("border-ink-border-subtle", "border-light-border-subtle")}`}>
+          <RateBox
+            label="Ingest rate"
+            rate={stats.ingestedRate}
+            dark={dark}
+            title="Records/s entering the routing stage, summed across all nodes. The gap between this and the route rate is the live drop rate."
+          />
+          <RateBox
+            label="Route rate"
+            rate={stats.routedRate}
+            dark={dark}
+            title="Records/s matched to at least one route, summed across all nodes. Equal to the ingest rate when nothing is dropped."
+          />
         </div>
       </div>
 
@@ -171,16 +191,57 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
   );
 }
 
+// RateBox shows one throughput series: instant rate with the server-side
+// spark history (the stats collector windows SUMMED cluster counters, so the
+// series is system data that survives panel remounts — never client-side
+// accumulation), and the ~30s / ~1m trailing averages underneath.
+function RateBox({
+  label,
+  rate,
+  dark,
+  title,
+}: Readonly<{ label: string; rate?: ThroughputRate; dark: boolean; title?: string }>) {
+  const c = useThemeClass(dark);
+  const instant = rate?.instantPerSec ?? 0;
+  const history = rate?.spark ?? [];
+
+  return (
+    <div title={title}>
+      <div
+        className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-1 ${c("text-text-muted", "text-light-text-muted")}`}
+      >
+        {label}
+      </div>
+      <div className="flex items-center gap-3">
+        <span className={`text-[1.3em] font-mono font-semibold ${c("text-text-bright", "text-light-text-bright")}`}>
+          {formatCount(instant)}/s
+        </span>
+        <span className={c("text-copper/70", "text-copper/60")}>
+          <Spark values={history} />
+        </span>
+      </div>
+      <div
+        className={`mt-0.5 text-[0.75em] font-mono ${c("text-text-muted", "text-light-text-muted")}`}
+        title="Unix-load-style EWMAs (1m/5m/15m) — the sustained-rate figures; the big number and spark show instantaneous burst shape"
+      >
+        1m {formatCount(rate?.avg1mPerSec ?? 0)}/s · 5m {formatCount(rate?.avg5mPerSec ?? 0)}/s · 15m {formatCount(rate?.avg15mPerSec ?? 0)}/s
+      </div>
+    </div>
+  );
+}
+
 function StatBox({
   label,
   value,
   dark,
   variant,
+  title,
 }: Readonly<{
   label: string;
   value: string;
   dark: boolean;
   variant?: "ok" | "error";
+  title?: string;
 }>) {
   const c = useThemeClass(dark);
 
@@ -189,7 +250,7 @@ function StatBox({
   if (variant === "error") valueColor = "text-severity-error";
 
   return (
-    <div>
+    <div title={title}>
       <div
         className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-1 ${c("text-text-muted", "text-light-text-muted")}`}
       >

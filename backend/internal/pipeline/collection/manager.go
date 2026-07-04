@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"maps"
+	"os"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -12,6 +15,8 @@ import (
 	"gastrolog/internal/glid"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/notify"
+	"gastrolog/internal/pipeline/paths"
+	"gastrolog/internal/pipeline/segment"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
@@ -84,6 +89,12 @@ type vaultCollect struct {
 	// re-commit. Bounded by the vault's live segment set; released in slice D.
 	receipted map[glid.GLID]struct{}
 
+	// Stage-throughput counters (gastrolog-10n6k8): records/bytes arriving
+	// in head/ on this node, via remote pull or local-holder promotion.
+	// Rates are derived downstream by the stats collector windows.
+	collectedRecords atomic.Uint64
+	collectedBytes   atomic.Uint64
+
 	// collectWaiters receives the result of the worker's next pass. CollectOnce
 	// registers here when the per-vault worker is running so chunking/planner
 	// goroutines never block on passMu while a pass pulls segments or applies
@@ -151,34 +162,66 @@ func (v *vaultCollect) collectOne(ctx context.Context, ref AssignedSegment) erro
 	v.collectMu.Lock()
 	v.notePreHead(ref.SegmentID)
 	v.collectMu.Unlock()
-	if _, err := PromoteVerified(prePath, v.root); err != nil {
+	dest, hdr, err := PromoteVerified(prePath, v.root)
+	if err != nil {
 		return err
 	}
+	v.noteHeadArrival(dest, hdr)
 	v.collectMu.Lock()
 	v.noteHead(ref.SegmentID)
 	v.collectMu.Unlock()
-	_, err = v.commitReceipt(ctx, ref)
-	return err
+	// The holder receipt is committed by the caller's end-of-pass batch
+	// (commitReceipts), never per segment.
+	return nil
 }
 
-// commitReceipt records that this node holds the segment and remembers it so a
-// later pass does not re-commit before the receipt replicates into the holder
-// set. Idempotent at the FSM layer too (CmdAckSegmentHolder de-dups), so a
-// crash between commit and marking is harmless.
-func (v *vaultCollect) commitReceipt(ctx context.Context, ref AssignedSegment) (bool, error) {
+// noteHeadArrival counts a segment's records/bytes as home-side ingress for
+// the stage throughput gauges (gastrolog-10n6k8).
+func (v *vaultCollect) noteHeadArrival(path string, hdr segment.Header) {
+	v.collectedRecords.Add(uint64(hdr.RecordCount))
+	if info, err := os.Stat(path); err == nil {
+		v.collectedBytes.Add(uint64(info.Size())) //nolint:gosec // sizes are non-negative
+	}
+}
+
+// commitReceipts records this node as holder for every given segment in ONE
+// vault-ctl apply, then marks them locally so later passes skip re-commits.
+// Batching is load-bearing: one Raft round per pass instead of per segment —
+// sequential per-segment applies serialized whole passes (under passMu)
+// behind the publish flood and starved leader-home GLCB builds
+// (gastrolog-38snf4). Idempotent at the FSM layer too (CmdAckSegmentHolder
+// de-dups per segment), so a crash between commit and marking is harmless.
+// Returns how many receipts were freshly committed.
+func (v *vaultCollect) commitReceipts(ctx context.Context, ids []glid.GLID) (int, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
 	v.collectMu.Lock()
-	if _, done := v.receipted[ref.SegmentID]; done {
-		v.collectMu.Unlock()
-		return false, nil
+	fresh := make([]glid.GLID, 0, len(ids))
+	seen := make(map[glid.GLID]struct{}, len(ids))
+	for _, id := range ids {
+		if _, done := v.receipted[id]; done {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		fresh = append(fresh, id)
 	}
 	v.collectMu.Unlock()
-	if err := v.receipts.CommitHolderReceipt(ctx, ref.VaultID, ref.SegmentID); err != nil {
-		return false, err
+	if len(fresh) == 0 {
+		return 0, nil
+	}
+	if err := v.receipts.CommitHolderReceipts(ctx, v.vaultID, fresh); err != nil {
+		return 0, err
 	}
 	v.collectMu.Lock()
-	v.receipted[ref.SegmentID] = struct{}{}
+	for _, id := range fresh {
+		v.receipted[id] = struct{}{}
+	}
 	v.collectMu.Unlock()
-	return true, nil
+	return len(fresh), nil
 }
 
 type collectAction int
@@ -207,18 +250,22 @@ func (v *vaultCollect) planCollectAction(ref AssignedSegment) collectAction {
 	return collectPull
 }
 
-func (v *vaultCollect) collectForRef(ctx context.Context, ref AssignedSegment) (bool, error) {
+// collectForRef pulls a segment when needed and reports (pulled, needsAck):
+// needsAck segments are receipt-committed in one batch at the end of the
+// pass (commitReceipts), never per ref.
+func (v *vaultCollect) collectForRef(ctx context.Context, ref AssignedSegment) (pulled, needsAck bool, err error) {
 	switch v.planCollectAction(ref) {
 	case collectSkip:
-		return false, nil
+		return false, false, nil
 	case collectReceiptOnly:
-		committed, err := v.commitReceipt(ctx, ref)
-		return committed, err
+		return false, true, nil
 	case collectPull:
-		err := v.collectOne(ctx, ref)
-		return err == nil, err
+		if err := v.collectOne(ctx, ref); err != nil {
+			return false, false, err
+		}
+		return true, true, nil
 	}
-	return false, nil
+	return false, false, nil
 }
 
 func (v *vaultCollect) collectMissing(ctx context.Context) (bool, error) {
@@ -244,14 +291,25 @@ func (v *vaultCollect) collectMissing(ctx context.Context) (bool, error) {
 
 	var errs []error
 	var progress bool
+	var toAck []glid.GLID
 	for _, ref := range work {
-		made, err := v.collectForRef(ctx, ref)
-		if made {
+		pulled, needsAck, err := v.collectForRef(ctx, ref)
+		if pulled {
 			progress = true
+		}
+		if needsAck {
+			toAck = append(toAck, ref.SegmentID)
 		}
 		if err != nil {
 			errs = append(errs, err)
 		}
+	}
+	committed, err := v.commitReceipts(ctx, toAck)
+	if committed > 0 {
+		progress = true
+	}
+	if err != nil {
+		errs = append(errs, err)
 	}
 	return progress, erragg.SummaryJoin(errs...)
 }
@@ -286,6 +344,7 @@ func (v *vaultCollect) collectSegments(ctx context.Context, segmentIDs []glid.GL
 	v.collectMu.Unlock()
 
 	var errs []error
+	var toAck []glid.GLID
 	for _, segmentID := range ids {
 		if LocalSegmentPresent(v.root, segmentID) {
 			continue
@@ -301,9 +360,16 @@ func (v *vaultCollect) collectSegments(ctx context.Context, segmentIDs []glid.GL
 			SegmentID: segmentID,
 			Checksum:  checksum,
 		}
-		if _, err := v.collectForRef(ctx, ref); err != nil {
+		_, needsAck, err := v.collectForRef(ctx, ref)
+		if needsAck {
+			toAck = append(toAck, segmentID)
+		}
+		if err != nil {
 			errs = append(errs, err)
 		}
+	}
+	if _, err := v.commitReceipts(ctx, toAck); err != nil {
+		errs = append(errs, err)
 	}
 	return erragg.SummaryJoin(errs...)
 }
@@ -322,11 +388,22 @@ func (v *vaultCollect) awaitCollectPass(ctx context.Context) error {
 	}
 }
 
-func (v *vaultCollect) completeCollectWaiters(err error) {
+// takeCollectWaiters snapshots the waiters registered so far. The worker calls
+// this at pass START: a pass may only satisfy requests made before it began
+// observing log state. A waiter that registers mid-pass stays queued — its
+// Notify has already closed the wake channel captured before the pass, so the
+// loop re-fires and the NEXT pass (which observes post-registration state)
+// completes it. Completing mid-pass registrants with the in-flight pass's
+// result returned stale success (gastrolog-38snf4 gate finding).
+func (v *vaultCollect) takeCollectWaiters() []collectWaiter {
 	v.collectWaitMu.Lock()
+	defer v.collectWaitMu.Unlock()
 	waiters := v.collectWaiters
 	v.collectWaiters = nil
-	v.collectWaitMu.Unlock()
+	return waiters
+}
+
+func completeCollectWaiters(waiters []collectWaiter, err error) {
 	for _, w := range waiters {
 		select {
 		case w.done <- err:
@@ -462,6 +539,50 @@ func (m *Manager) Notify(vaultID glid.GLID) {
 
 // CollectOnce rolls the log and collects missing segments for one vault (for tests
 // and ChunkingManager materialization).
+// VaultCollectStats is one vault's cumulative home-side ingress counters
+// (records/bytes arrived in head/ on this node) — gastrolog-10n6k8.
+type VaultCollectStats struct {
+	VaultID          glid.GLID
+	CollectedRecords uint64
+	CollectedBytes   uint64
+}
+
+// CollectStats returns per-vault cumulative collection counters.
+func (m *Manager) CollectStats() []VaultCollectStats {
+	m.mu.Lock()
+	vaults := make(map[glid.GLID]*vaultCollect, len(m.vaults))
+	maps.Copy(vaults, m.vaults)
+	m.mu.Unlock()
+	out := make([]VaultCollectStats, 0, len(vaults))
+	for vaultID, v := range vaults {
+		out = append(out, VaultCollectStats{
+			VaultID:          vaultID,
+			CollectedRecords: v.collectedRecords.Load(),
+			CollectedBytes:   v.collectedBytes.Load(),
+		})
+	}
+	slices.SortFunc(out, func(a, b VaultCollectStats) int { return a.VaultID.Compare(b.VaultID) })
+	return out
+}
+
+// NoteLocalHeadArrival counts a locally-promoted segment (origin == home:
+// distribution renames completed/ into head/ without a pull) as home-side
+// ingress, reading only the fixed header (gastrolog-10n6k8).
+func (m *Manager) NoteLocalHeadArrival(vaultID, segmentID glid.GLID) {
+	m.mu.Lock()
+	v := m.vaults[vaultID]
+	m.mu.Unlock()
+	if v == nil {
+		return
+	}
+	path := paths.HeadSegment(v.root, segmentID)
+	hdr, err := segment.ReadHeader(path)
+	if err != nil {
+		return
+	}
+	v.noteHeadArrival(path, hdr)
+}
+
 func (m *Manager) CollectOnce(ctx context.Context, vaultID glid.GLID) error {
 	m.mu.Lock()
 	v, ok := m.vaults[vaultID]
@@ -594,15 +715,20 @@ func (m *Manager) startWorkerLocked(v *vaultCollect) {
 	ctx, cancel := context.WithCancel(m.runCtx)
 	v.stopWorker = cancel
 	m.wg.Go(func() {
+		// Waiters queued when the worker stops must not hang CollectOnce
+		// callers that passed a non-cancellable context.
+		defer func() { completeCollectWaiters(v.takeCollectWaiters(), ctx.Err()) }()
 		// Capture the wake channel BEFORE each pass so a signal arriving
-		// mid-pass re-fires the loop instead of being lost.
+		// mid-pass re-fires the loop instead of being lost, and snapshot the
+		// waiter queue AFTER capturing it — see takeCollectWaiters.
 		ch := v.wake.C()
+		waiters := v.takeCollectWaiters()
 		log := m.logger().With("vault", v.vaultID)
 		progress, err := v.collectMissing(ctx)
 		if ctx.Err() == nil {
 			m.afterCollectPass(v, progress, err, log)
 		}
-		v.completeCollectWaiters(err)
+		completeCollectWaiters(waiters, err)
 		for {
 			select {
 			case <-ctx.Done():
@@ -610,11 +736,12 @@ func (m *Manager) startWorkerLocked(v *vaultCollect) {
 			case <-ch:
 			}
 			ch = v.wake.C()
+			waiters = v.takeCollectWaiters()
 			progress, err = v.collectMissing(ctx)
 			if ctx.Err() == nil {
 				m.afterCollectPass(v, progress, err, log)
 			}
-			v.completeCollectWaiters(err)
+			completeCollectWaiters(waiters, err)
 		}
 	})
 }

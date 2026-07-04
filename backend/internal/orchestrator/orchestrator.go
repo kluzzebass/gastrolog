@@ -21,6 +21,8 @@ import (
 	"gastrolog/internal/logging"
 	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator/pipeline"
+	"gastrolog/internal/pipeline/chunking"
+	"gastrolog/internal/pipeline/collection"
 	"gastrolog/internal/pipeline/digestion"
 	"gastrolog/internal/pipeline/ingestion"
 	"gastrolog/internal/pipeline/segmentation"
@@ -745,6 +747,7 @@ func New(cfg Config) (*Orchestrator, error) {
 	o.pipeline = pipeline.New(pipeline.Config{
 		NodeID:               o.localNodeIDGLID,
 		Logger:               baseLogger,
+		Alerts:               o.alerts,
 		Digesters:            cfg.Digesters,
 		OnCheckpoint:         cfg.OnIngesterCheckpoint,
 		PressureGate:         o.pipelineGate,
@@ -954,6 +957,34 @@ type VaultSnapshot struct {
 	// NodeStats so the per-vault-ctl learner promoter
 	// (gastrolog-gcbx7) can observe each follower's catchup progress.
 	RaftAppliedIndex uint64
+}
+
+// VaultAppendStats returns per-vault cumulative segmentation throughput
+// counters from the pipeline supervisor. Empty when the pipeline is not
+// running (gastrolog-4eh5ns).
+func (o *Orchestrator) VaultAppendStats() []segmentation.AppendStats {
+	if o.pipeline == nil {
+		return nil
+	}
+	return o.pipeline.AppendStats()
+}
+
+// VaultCollectStats returns per-vault home-side collection counters from the
+// pipeline supervisor (gastrolog-10n6k8).
+func (o *Orchestrator) VaultCollectStats() []collection.VaultCollectStats {
+	if o.pipeline == nil {
+		return nil
+	}
+	return o.pipeline.CollectStats()
+}
+
+// VaultSealStats returns per-vault GLCB seal counters from the pipeline
+// supervisor (gastrolog-10n6k8).
+func (o *Orchestrator) VaultSealStats() []chunking.VaultSealStats {
+	if o.pipeline == nil {
+		return nil
+	}
+	return o.pipeline.SealStats()
 }
 
 // VaultSnapshots returns a snapshot of stats for all registered vaults.

@@ -94,3 +94,13 @@ func TestListSegmentIDs(t *testing.T) {
 		t.Fatalf("missing dir = %v, want empty", empty)
 	}
 }
+
+func TestSyncDir(t *testing.T) {
+	dir := t.TempDir()
+	if err := paths.SyncDir(dir); err != nil {
+		t.Fatalf("SyncDir on real dir: %v", err)
+	}
+	if err := paths.SyncDir(filepath.Join(dir, "missing")); err == nil {
+		t.Fatal("SyncDir on missing dir should error")
+	}
+}

@@ -50,6 +50,16 @@ type raftClusterCtlStore struct {
 	raft      *hraft.Raft
 	wal       *raftwal.WAL
 	forwarder io.Closer // *cluster.Forwarder; nil for single-node
+	// liveness accumulates cluster-ctl Raft liveness events for the
+	// NodeStats broadcast (gastrolog-1io54g); vault groups have their own
+	// counters on the GroupManager.
+	liveness raftgroup.LivenessCounters
+}
+
+// RaftLivenessSources exposes the cluster-ctl group's liveness counters and
+// WAL for the node-level Raft liveness aggregation (gastrolog-1io54g).
+func (s *raftClusterCtlStore) RaftLivenessSources() (*raftgroup.LivenessCounters, *raftwal.WAL) {
+	return &s.liveness, s.wal
 }
 
 // WaitForLeader polls until any node in the cluster becomes leader or the
@@ -224,8 +234,9 @@ func openRaftClusterCtlStore(opts raftStoreOpts) (*raftClusterCtlStore, error) {
 		return nil, fmt.Errorf("create raft: %w", err)
 	}
 
+	ctlStore := &raftClusterCtlStore{raft: r, wal: wal}
 	clusterCtlLogger := logging.NewRaftGroupSlog(compRaft.Apply(opts.Logger), raftgroup.ClusterControlPlaneGroupID)
-	raftgroup.ObserveRaftDiagnostics(r, clusterCtlLogger, conf.LeaderLeaseTimeout)
+	raftgroup.ObserveRaftDiagnostics(r, clusterCtlLogger, conf.LeaderLeaseTimeout, &ctlStore.liveness)
 
 	if err := bootstrapAndWaitForLeader(r, wal, tp, opts, clusterCtlLogger); err != nil {
 		return nil, err
@@ -242,13 +253,10 @@ func openRaftClusterCtlStore(opts raftStoreOpts) (*raftClusterCtlStore, error) {
 	fwd := cluster.NewForwarder(r, opts.ClusterSrv.PeerConns())
 	store.SetForwarder(fwd)
 
-	return &raftClusterCtlStore{
-		Store:     store,
-		raftStore: store,
-		raft:      r,
-		wal:       wal,
-		forwarder: fwd,
-	}, nil
+	ctlStore.Store = store
+	ctlStore.raftStore = store
+	ctlStore.forwarder = fwd
+	return ctlStore, nil
 }
 
 // newRaftConfig creates a hashicorp/raft config with cluster-ready timeouts.

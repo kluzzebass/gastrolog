@@ -293,10 +293,13 @@ message ReleaseSegmentsCommand {
 }
 
 // AckSegmentHolderCommand records that a node has pulled, verified, and now
-// holds a completed segment (Rubicon C). Appends node_id to the
-// segment registry entry's holder set; idempotent.
+// holds one or more completed segments (Rubicon C). Appends node_id to each
+// segment registry entry's holder set; idempotent per segment. Batched so a
+// collect pass commits every receipt in one Raft apply — per-segment applies
+// serialized whole passes behind the publish flood and starved GLCB builds
+// (gastrolog-38snf4).
 message AckSegmentHolderCommand {
-  bytes segment_id = 1;
+  repeated bytes segment_ids = 1;
   string node_id = 2;
 }
 

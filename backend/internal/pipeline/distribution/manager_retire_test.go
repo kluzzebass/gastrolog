@@ -171,7 +171,7 @@ func TestSegmentPathForPullMissingFile(t *testing.T) {
 	segID := glid.New()
 	v, err := newVaultDist(root, VaultConfig{
 		Publisher: &countPublisher{},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

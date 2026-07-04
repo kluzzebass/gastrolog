@@ -56,6 +56,19 @@ func (v *vaultChunking) flushHeadPurgeForManifest(ctx context.Context, pending *
 	}
 }
 
+// drainReleasedPurge purges head/ copies for segment IDs queued by the
+// wake-only ReleaseSegments FSM callback. Runs on the worker goroutine —
+// never on the Raft apply goroutine (gastrolog-38snf4 teardown deadlock).
+func (v *vaultChunking) drainReleasedPurge() {
+	v.purgeMu.Lock()
+	ids := v.pendingPurge
+	v.pendingPurge = nil
+	v.purgeMu.Unlock()
+	if len(ids) > 0 {
+		v.purgeReleasedHead(ids)
+	}
+}
+
 // purgeReleasedHead drops head/pre-head copies for segments the registry just
 // released. Idempotent; safe to call from both chunking and supervisor hooks.
 func (v *vaultChunking) purgeReleasedHead(ids []glid.GLID) {

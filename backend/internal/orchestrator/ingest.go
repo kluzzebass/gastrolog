@@ -14,8 +14,6 @@ import (
 // Safe to call from any context (sealed-chunk import, lifecycle reconciler,
 // leader-triggered SealActive) — acquires the orchestrator lock internally.
 func (o *Orchestrator) postSealWork(vaultID glid.GLID, cm chunk.ChunkManager, chunkID chunk.ChunkID) {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
 	o.schedulePostSeal(vaultID, cm, chunkID)
 	// Notify WatchChunks subscribers: the chunk's sealed flag has changed.
 	// Fetch the post-seal meta so the event carries the final state instead
@@ -31,11 +29,24 @@ func (o *Orchestrator) postSealWork(vaultID glid.GLID, cm chunk.ChunkManager, ch
 // If the chunk manager implements ChunkPostSealProcessor, the entire pipeline runs
 // as one sequential job. Otherwise falls back to compress-only for non-file managers.
 // After the pipeline completes, sealed-chunk replication is triggered for leader vaults.
+//
+// Self-locking: callers must NOT hold o.mu. The old contract (callers wrap in
+// RLock for the vault-map read, while isPipelineIngestVault re-RLocked
+// internally) deadlocked the node whenever a writer (DrainVault, retention
+// sweep, config reload) queued between the two acquisitions — RWMutex blocks
+// recursive RLock behind a waiting writer. Found via the gastrolog-38snf4
+// gate forensics (TestDrainConcurrentWithIngestion 10-minute hang).
 func (o *Orchestrator) schedulePostSeal(vaultID glid.GLID, cm chunk.ChunkManager, chunkID chunk.ChunkID) {
-	if o.isPipelineIngestVault(vaultID) {
+	o.mu.RLock()
+	_, pipeline := o.pipelineVaults[vaultID]
+	var followerTargets []system.ReplicationTarget
+	if !pipeline {
+		followerTargets = o.followerReplicationTargetsLocked(vaultID, cm)
+	}
+	o.mu.RUnlock()
+	if pipeline {
 		return
 	}
-	followerTargets := o.followerReplicationTargets(vaultID, cm)
 
 	processor, ok := cm.(chunk.ChunkPostSealProcessor)
 	if ok {
@@ -71,10 +82,10 @@ func (o *Orchestrator) schedulePostSeal(vaultID glid.GLID, cm chunk.ChunkManager
 	o.scheduleReplication(vaultID, chunkID, followerTargets)
 }
 
-// followerReplicationTargets returns the follower targets for the vault that
-// owns the given ChunkManager. Returns nil if not found or if the vault is a
-// follower (followers don't replicate further).
-func (o *Orchestrator) followerReplicationTargets(vaultID glid.GLID, cm chunk.ChunkManager) []system.ReplicationTarget {
+// followerReplicationTargetsLocked returns the follower targets for the vault
+// that owns the given ChunkManager. Returns nil if not found or if the vault
+// is a follower (followers don't replicate further). Caller holds o.mu.
+func (o *Orchestrator) followerReplicationTargetsLocked(vaultID glid.GLID, cm chunk.ChunkManager) []system.ReplicationTarget {
 	vault := o.vaults[vaultID]
 	if vault == nil {
 		return nil

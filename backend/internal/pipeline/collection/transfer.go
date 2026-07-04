@@ -36,6 +36,13 @@ func PullToPreHead(ctx context.Context, vaultRoot string, vaultID, segmentID gli
 		return "", err
 	}
 	pullErr := pull.Pull(ctx, vaultID, segmentID, f)
+	if pullErr == nil {
+		// Durability barrier: the holder receipt this pull leads to asserts
+		// cluster-wide that a copy exists. Fsync before the receipt can
+		// commit, or a crash leaves the cluster trusting a torn copy —
+		// potentially the last one (gastrolog-4mqy06).
+		pullErr = f.Sync()
+	}
 	closeErr := f.Close()
 	if pullErr != nil {
 		_ = os.Remove(tmpPath)
@@ -47,6 +54,9 @@ func PullToPreHead(ctx context.Context, vaultRoot string, vaultID, segmentID gli
 	}
 	if err := os.Rename(filepath.Clean(tmpPath), filepath.Clean(finalPath)); err != nil {
 		_ = os.Remove(tmpPath)
+		return "", err
+	}
+	if err := paths.SyncDir(paths.PreHeadDir(vaultRoot)); err != nil {
 		return "", err
 	}
 	return finalPath, nil
@@ -63,6 +73,9 @@ func ReceiveToPreHead(vaultRoot string, segmentID glid.GLID, src io.Reader) (str
 		return "", err
 	}
 	_, copyErr := io.Copy(f, src)
+	if copyErr == nil {
+		copyErr = f.Sync()
+	}
 	closeErr := f.Close()
 	if copyErr != nil {
 		_ = os.Remove(path)
@@ -72,27 +85,36 @@ func ReceiveToPreHead(vaultRoot string, segmentID glid.GLID, src io.Reader) (str
 		_ = os.Remove(path)
 		return "", closeErr
 	}
+	if err := paths.SyncDir(paths.PreHeadDir(vaultRoot)); err != nil {
+		return "", err
+	}
 	return path, nil
 }
 
 // PromoteVerified opens the pre-head segment, verifies its checksum, and atomically
-// renames it into head. A corrupt transfer is discarded from pre-head.
-func PromoteVerified(preHeadPath, vaultRoot string) (string, error) {
+// renames it into head. A corrupt transfer is discarded from pre-head. The
+// verified header is returned so callers can count arrivals without a
+// re-read (gastrolog-10n6k8).
+func PromoteVerified(preHeadPath, vaultRoot string) (string, segment.Header, error) {
 	sf, err := segment.Open(preHeadPath)
 	if err != nil {
 		_ = os.Remove(preHeadPath)
-		return "", errors.Join(ErrCorruptSegment, err)
+		return "", segment.Header{}, errors.Join(ErrCorruptSegment, err)
 	}
+	hdr := sf.Header()
 	_ = sf.Close()
 
 	if err := paths.EnsureHeadDir(vaultRoot); err != nil {
 		_ = os.Remove(preHeadPath)
-		return "", err
+		return "", segment.Header{}, err
 	}
 	dest := filepath.Join(paths.HeadDir(vaultRoot), filepath.Base(preHeadPath))
 	if err := os.Rename(filepath.Clean(preHeadPath), dest); err != nil {
 		_ = os.Remove(preHeadPath)
-		return "", err
+		return "", segment.Header{}, err
 	}
-	return dest, nil
+	if err := paths.SyncDir(paths.HeadDir(vaultRoot)); err != nil {
+		return "", segment.Header{}, err
+	}
+	return dest, hdr, nil
 }

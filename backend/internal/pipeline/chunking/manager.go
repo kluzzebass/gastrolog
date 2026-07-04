@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"maps"
 	"os"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -78,6 +80,11 @@ type VaultConfig struct {
 type vaultChunking struct {
 	cfg VaultConfig
 
+	// Stage-throughput counters (gastrolog-10n6k8): records/bytes this home
+	// materialized into sealed GLCBs.
+	sealedRecords atomic.Uint64
+	sealedBytes   atomic.Uint64
+
 	mu     sync.Mutex
 	planMu sync.Mutex
 	// segmentIndexCache holds open EventID indexes for segments the planner has
@@ -89,6 +96,11 @@ type vaultChunking struct {
 	// pendingRelease holds segment IDs awaiting ReleaseSegments once every
 	// required vault home has committed a holder receipt.
 	pendingRelease []glid.GLID
+	// pendingPurge holds released segment IDs queued by the wake-only
+	// ReleaseSegments FSM callback; the worker's release branch drains it
+	// (purging on the Raft apply goroutine deadlocked teardown).
+	purgeMu      sync.Mutex
+	pendingPurge []glid.GLID
 	// unsubPublish removes this vault's publish-callback subscription on the
 	// shared FSM fan-out.
 	unsubPublish func()
@@ -307,8 +319,17 @@ func (m *Manager) wireVaultFSMCallbacks(v *vaultChunking, cfg VaultConfig) {
 		v.releaseWake.Notify()
 	})
 	v.unsubRelease = cfg.FSM.AddOnReleaseSegments(func(ids []glid.GLID) {
-		v.purgeReleasedHead(ids)
-		v.purgeStaleHeadCatchUp()
+		// Wake-only, like every other FSM callback: this fires on the Raft
+		// FSM-apply goroutine. Purging inline did disk I/O there and — via
+		// purgeStaleHeadCatchUp → LookupFSM → GroupManager.GetGroup —
+		// acquired the group-manager lock, which Shutdown holds while
+		// waiting for this very apply goroutine to exit: a teardown
+		// deadlock (gastrolog-38snf4 gate forensics). The worker's release
+		// branch drains the queued IDs.
+		v.purgeMu.Lock()
+		v.pendingPurge = append(v.pendingPurge, ids...)
+		v.purgeMu.Unlock()
+		v.releaseWake.Notify()
 	})
 	cfg.FSM.SetOnOpenChunkManifest(func(m *vaultctlfsm.OpenChunkManifest) {
 		if m != nil && cfg.OnManifestOpened != nil {
@@ -387,6 +408,32 @@ func (m *Manager) RotateCron(ctx context.Context, vaultID glid.GLID) error {
 // NotifyVault wakes the per-vault plan/build worker. Used when vault-ctl
 // leadership aligns on the placement leader so catch-up runs after startup
 // elections, not only on the first worker tick.
+// VaultSealStats is one vault's cumulative seal counters on this home
+// (records/bytes materialized into sealed GLCBs) — gastrolog-10n6k8.
+type VaultSealStats struct {
+	VaultID       glid.GLID
+	SealedRecords uint64
+	SealedBytes   uint64
+}
+
+// SealStats returns per-vault cumulative seal counters.
+func (m *Manager) SealStats() []VaultSealStats {
+	m.mu.Lock()
+	vaults := make(map[glid.GLID]*vaultChunking, len(m.vaults))
+	maps.Copy(vaults, m.vaults)
+	m.mu.Unlock()
+	out := make([]VaultSealStats, 0, len(vaults))
+	for vaultID, v := range vaults {
+		out = append(out, VaultSealStats{
+			VaultID:       vaultID,
+			SealedRecords: v.sealedRecords.Load(),
+			SealedBytes:   v.sealedBytes.Load(),
+		})
+	}
+	slices.SortFunc(out, func(a, b VaultSealStats) int { return a.VaultID.Compare(b.VaultID) })
+	return out
+}
+
 func (m *Manager) NotifyVault(vaultID glid.GLID) {
 	m.mu.Lock()
 	v, ok := m.vaults[vaultID]
@@ -474,6 +521,7 @@ func (m *Manager) startWorkerLocked(v *vaultChunking) {
 		if err := v.recoverOnce(ctx); err != nil && ctx.Err() == nil {
 			log.Warn("chunking recover failed", "error", err)
 		}
+		v.drainReleasedPurge()
 		v.purgeStaleHeadCatchUp()
 		m.runBuildPass(ctx, v, log)
 		releaseCh := v.releaseWake.C()
@@ -486,6 +534,7 @@ func (m *Manager) startWorkerLocked(v *vaultChunking) {
 				if err := v.releaseOnce(ctx); err != nil && ctx.Err() == nil {
 					log.Warn("chunking release failed", "error", err)
 				}
+				v.drainReleasedPurge()
 				v.purgeStaleHeadCatchUp()
 				releaseCh = v.releaseWake.C()
 				continue

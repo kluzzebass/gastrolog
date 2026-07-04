@@ -52,6 +52,7 @@ type LifecycleServer struct {
 	clusterAddress    string
 	peerStats         NodeStatsProvider
 	localStats        func() *apiv1.NodeStats
+	clusterRouteRates func() (*apiv1.ThroughputRate, *apiv1.ThroughputRate)
 	joinClusterFn     func(ctx context.Context, leaderAddr, joinToken string) error
 	removeNodeFn      func(ctx context.Context, nodeID string, force bool) error
 	setNodeSuffrageFn func(ctx context.Context, nodeID string, voter bool) error
@@ -107,6 +108,12 @@ func (s *LifecycleServer) SetStatsSignal(sig *notify.Signal) {
 // SetPeerRouteStats wires the peer route stats provider for cluster aggregation.
 func (s *LifecycleServer) SetPeerRouteStats(p PeerRouteStatsProvider) {
 	s.peerRouteStats = p
+}
+
+// SetClusterRouteRates wires the collector's server-side cluster route rate
+// series (gastrolog-4eh5ns).
+func (s *LifecycleServer) SetClusterRouteRates(fn func() (*apiv1.ThroughputRate, *apiv1.ThroughputRate)) {
+	s.clusterRouteRates = fn
 }
 
 // SetPeerPipelineDisk wires peer pipeline disk aggregation for WatchSystemStatus.
@@ -611,11 +618,20 @@ func (s *LifecycleServer) buildRouteStats() *apiv1.GetRouteStatsResponse {
 		mergePerRouteStats(routeMap, pRouteStats)
 	}
 
+	var ingestedRate, routedRate *apiv1.ThroughputRate
+	if s.clusterRouteRates != nil {
+		ingestedRate, routedRate = s.clusterRouteRates()
+	} else {
+		ingestedRate, routedRate = clusterRouteRates(s.localStats, s.peerRouteStats)
+	}
+
 	resp := &apiv1.GetRouteStatsResponse{
 		TotalIngested:   totalIngested,
 		TotalDropped:    totalDropped,
 		TotalRouted:     totalRouted,
 		FilterSetActive: filterActive,
+		IngestedRate:    ingestedRate,
+		RoutedRate:      routedRate,
 	}
 	for _, vs := range vaultMap {
 		resp.VaultStats = append(resp.VaultStats, vs)

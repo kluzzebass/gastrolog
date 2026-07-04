@@ -835,7 +835,7 @@ type applyEffects struct {
 	openChunkOpened         *OpenChunkManifest
 	openChunkRefAdded       *OpenChunkManifest
 	releasedSegmentIDs      []glid.GLID
-	ackSegmentHolderID      *glid.GLID
+	ackedSegmentHolderIDs   []glid.GLID
 
 	onCreate                  func(ManifestEntry)
 	onDelete                  func(chunk.ChunkID)
@@ -924,9 +924,9 @@ func (e applyEffects) firePipelineCallbacks() {
 			fn(ids)
 		}
 	}
-	if e.ackSegmentHolderID != nil {
+	for _, id := range e.ackedSegmentHolderIDs {
 		for _, fn := range e.onAckSegmentHolder {
-			fn(*e.ackSegmentHolderID)
+			fn(id)
 		}
 	}
 }
@@ -1102,18 +1102,8 @@ func (f *FSM) tryApplySegmentPipelineLocked(cmd *gastrologv1.VaultCtlCommand) (a
 		}
 		return nil, fx, true
 	case *gastrologv1.VaultCtlCommand_AckSegmentHolder:
-		segID := glid.FromBytes(c.AckSegmentHolder.GetSegmentId())
-		holdersBefore := 0
-		if entry := f.completedSegments[segID]; entry != nil {
-			holdersBefore = len(entry.Holders)
-		}
-		result := f.applyAckSegmentHolder(c.AckSegmentHolder)
-		if result == nil && segID != glid.Nil {
-			if entry := f.completedSegments[segID]; entry != nil && len(entry.Holders) > holdersBefore {
-				idCopy := segID
-				fx.ackSegmentHolderID = &idCopy
-			}
-		}
+		added, result := f.applyAckSegmentHolder(c.AckSegmentHolder)
+		fx.ackedSegmentHolderIDs = added
 		return result, fx, true
 	default:
 		return nil, applyEffects{}, false
@@ -1268,7 +1258,7 @@ func (f *FSM) RestoreProto(snap *gastrologv1.VaultCtlSnapshot) {
 func (f *FSM) Restore(rc io.ReadCloser) error {
 	defer func() { _ = rc.Close() }()
 
-	raw, err := io.ReadAll(rc)
+	raw, err := io.ReadAll(rc) //ok:io-readall proto.Unmarshal needs the full buffer; vault-ctl snapshots are bounded metadata (manifest+registry), not record data
 	if err != nil {
 		return fmt.Errorf("restore chunk FSM: read: %w", err)
 	}

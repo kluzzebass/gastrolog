@@ -54,11 +54,25 @@ func (s *SystemServer) GetRouteStats(
 		mergePerRouteStats(routeMap, pRouteStats)
 	}
 
+	// Cluster-total throughput. Preferred source: the stats collector's
+	// window over SUMMED cluster counters — one server-side series carrying
+	// instant/30s/1m AND spark history, so the UI never fabricates history
+	// client-side. Fallback (single-node, tests): sum local + peer
+	// per-horizon rates, sparkless (gastrolog-4eh5ns).
+	var ingestedRate, routedRate *apiv1.ThroughputRate
+	if s.clusterRouteRates != nil {
+		ingestedRate, routedRate = s.clusterRouteRates()
+	} else {
+		ingestedRate, routedRate = clusterRouteRates(s.localStats, s.peerRouteStats)
+	}
+
 	resp := &apiv1.GetRouteStatsResponse{
 		TotalIngested:   totalIngested,
 		TotalDropped:    totalDropped,
 		TotalRouted:     totalRouted,
 		FilterSetActive: filterActive,
+		IngestedRate:    ingestedRate,
+		RoutedRate:      routedRate,
 	}
 	for _, vs := range vaultMap {
 		resp.VaultStats = append(resp.VaultStats, vs)
@@ -92,4 +106,37 @@ func mergePerRouteStats(m map[string]*apiv1.PerRouteStats, stats []*apiv1.PerRou
 		}
 		existing.RecordsMatched += rs.RecordsMatched
 	}
+}
+
+// clusterRouteRates returns cluster-total routing throughput per horizon:
+// the local node's rolling-window rates (stats collector snapshot) plus the
+// sum of live peers' broadcast rates. Shared by the GetRouteStats RPC and
+// the WatchSystemStatus stream builder — the stream previously shipped a
+// response without the rate fields, so the UI cache was continuously
+// overwritten with 0/s while the RPC reported correct rates
+// (gastrolog-4eh5ns). Sparks stay per-node (phase-skewed sums would
+// fabricate a series no node observed).
+func clusterRouteRates(localStats func() *apiv1.NodeStats, peers PeerRouteStatsProvider) (ingested, routed *apiv1.ThroughputRate) {
+	ingested = &apiv1.ThroughputRate{}
+	routed = &apiv1.ThroughputRate{}
+	if peers != nil {
+		ingested, routed = peers.AggregateRouteRates()
+	}
+	if localStats != nil {
+		if ls := localStats(); ls != nil {
+			addRate(ingested, ls.RouteIngested)
+			addRate(routed, ls.RouteRouted)
+		}
+	}
+	return ingested, routed
+}
+
+func addRate(dst, src *apiv1.ThroughputRate) {
+	if src == nil {
+		return
+	}
+	dst.InstantPerSec += src.InstantPerSec
+	dst.Avg_1MPerSec += src.Avg_1MPerSec
+	dst.Avg_5MPerSec += src.Avg_5MPerSec
+	dst.Avg_15MPerSec += src.Avg_15MPerSec
 }

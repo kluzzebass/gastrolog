@@ -10,6 +10,7 @@ import (
 	"gastrolog/internal/chunk"
 	chunkcloud "gastrolog/internal/chunk/cloud"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/record"
 )
 
@@ -81,6 +82,11 @@ func BuildGLCBFile(path string, in BuildGLCBInput) (BuildGLCBResult, error) {
 	}
 	dest := filepath.Clean(path)
 	if err := os.Rename(tmpPath, dest); err != nil { //nolint:gosec // G703: path from pipeline caller, not untrusted input
+		return BuildGLCBResult{}, err
+	}
+	// Durability barrier: CmdSealChunk references this GLCB cluster-wide;
+	// the rename must survive power loss (gastrolog-4mqy06).
+	if err := paths.SyncDir(filepath.Dir(dest)); err != nil {
 		return BuildGLCBResult{}, err
 	}
 	cleanup = false

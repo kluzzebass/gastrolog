@@ -2444,11 +2444,14 @@ func (x *ReleaseSegmentsCommand) GetSegmentIds() [][]byte {
 }
 
 // AckSegmentHolderCommand records that a node has pulled, verified, and now
-// holds a completed segment (Rubicon C). Appends node_id to the
-// segment registry entry's holder set; idempotent.
+// holds one or more completed segments (Rubicon C). Appends node_id to each
+// segment registry entry's holder set; idempotent per segment. Batched so a
+// collect pass commits every receipt in one Raft apply — per-segment applies
+// serialized whole passes behind the publish flood and starved GLCB builds
+// (gastrolog-38snf4).
 type AckSegmentHolderCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	SegmentId     []byte                 `protobuf:"bytes,1,opt,name=segment_id,json=segmentId,proto3" json:"segment_id,omitempty"`
+	SegmentIds    [][]byte               `protobuf:"bytes,1,rep,name=segment_ids,json=segmentIds,proto3" json:"segment_ids,omitempty"`
 	NodeId        string                 `protobuf:"bytes,2,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -2484,9 +2487,9 @@ func (*AckSegmentHolderCommand) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_vaultctlfsm_proto_rawDescGZIP(), []int{30}
 }
 
-func (x *AckSegmentHolderCommand) GetSegmentId() []byte {
+func (x *AckSegmentHolderCommand) GetSegmentIds() [][]byte {
 	if x != nil {
-		return x.SegmentId
+		return x.SegmentIds
 	}
 	return nil
 }
@@ -3244,10 +3247,10 @@ const file_gastrolog_v1_vaultctlfsm_proto_rawDesc = "" +
 	"\bchunk_id\x18\x01 \x01(\fR\achunkId\"9\n" +
 	"\x16ReleaseSegmentsCommand\x12\x1f\n" +
 	"\vsegment_ids\x18\x01 \x03(\fR\n" +
-	"segmentIds\"Q\n" +
-	"\x17AckSegmentHolderCommand\x12\x1d\n" +
-	"\n" +
-	"segment_id\x18\x01 \x01(\fR\tsegmentId\x12\x17\n" +
+	"segmentIds\"S\n" +
+	"\x17AckSegmentHolderCommand\x12\x1f\n" +
+	"\vsegment_ids\x18\x01 \x03(\fR\n" +
+	"segmentIds\x12\x17\n" +
 	"\anode_id\x18\x02 \x01(\tR\x06nodeId\"\xf4\x06\n" +
 	"\rManifestEntry\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12*\n" +
