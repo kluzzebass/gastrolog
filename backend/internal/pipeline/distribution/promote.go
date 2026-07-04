@@ -32,6 +32,14 @@ func PromoteToHead(completedPath, vaultRoot string) (string, error) {
 		_ = os.Remove(tmp)
 		return "", err
 	}
+	// Durability barrier: head/ copies feed GLCB builds whose seal commits
+	// to vault-ctl; the bytes must survive a crash once referenced
+	// (gastrolog-4mqy06).
+	if err := out.Sync(); err != nil {
+		_ = out.Close()
+		_ = os.Remove(tmp)
+		return "", err
+	}
 	if err := out.Close(); err != nil {
 		_ = os.Remove(tmp)
 		return "", err
@@ -39,6 +47,9 @@ func PromoteToHead(completedPath, vaultRoot string) (string, error) {
 	if err := os.Rename(tmp, dest); err != nil {
 		_ = os.Remove(tmp)
 		return "", fmt.Errorf("install head copy: %w", err)
+	}
+	if err := paths.SyncDir(paths.HeadDir(vaultRoot)); err != nil {
+		return "", err
 	}
 	return dest, nil
 }

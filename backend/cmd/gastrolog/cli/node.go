@@ -152,13 +152,7 @@ func newNodeAddStorageCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			var existing []*v1.FileStorage
-			for _, nsc := range resp.Msg.NodeStorageConfigs {
-				if glid.FromBytes(nsc.NodeId).String() == nodeID {
-					existing = nsc.FileStorages
-					break
-				}
-			}
+			existing := fileStoragesForNode(resp.Msg.NodeStorageConfigs, nodeID)
 
 			// Append new storage.
 			newFsID := glid.New()
@@ -246,4 +240,17 @@ func newNodeListStorageCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// fileStoragesForNode returns the existing FileStorages for nodeID. NodeId on
+// the wire is the UTF-8 GLID string ([]byte(cfg.NodeID)) — decode with
+// string(), like list-storage. Decoding as binary GLID bytes made add-storage
+// miss the existing config and clobber it instead of merging (gastrolog-4gp8h).
+func fileStoragesForNode(nscs []*v1.NodeStorageConfig, nodeID string) []*v1.FileStorage {
+	for _, nsc := range nscs {
+		if string(nsc.NodeId) == nodeID {
+			return nsc.FileStorages
+		}
+	}
+	return nil
 }

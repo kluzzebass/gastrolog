@@ -243,43 +243,40 @@ func NodeIDForStorage(storageID string, nscs []NodeStorageConfig) string {
 }
 
 // StorageIDForNode returns the best storage ID on a given node for a vault.
-// For file/cloud vaults, matches the required storage class.
-// Returns a synthetic storage ID for memory vaults on nodes without matching file storages.
+// For file vaults it requires an exact storage-class match and returns ""
+// when the node has none — the caller must fail placement loudly. The old
+// silent FileStorages[0] fallback placed leaders on the wrong disk class
+// while follower placement (eligibleStorages/storageEligible) stayed strict
+// (gastrolog-2bv1x). Memory/JSONL vaults have no class requirement and fall
+// back to a synthetic storage ID.
 func StorageIDForNode(nodeID string, v VaultConfig, nscs []NodeStorageConfig) string {
 	idx := slices.IndexFunc(nscs, func(n NodeStorageConfig) bool { return n.NodeID == nodeID })
-	if idx < 0 {
-		// Node has no storage config — use synthetic storage ID.
-		return SyntheticStorageID(nodeID)
-	}
 
-	nsc := nscs[idx]
-	var requiredClass uint32
 	switch v.Type {
+	case VaultTypeMemory, VaultTypeJSONL:
+		// No storage class — pick any storage, or synthetic if none.
+		if idx >= 0 && len(nscs[idx].FileStorages) > 0 {
+			return nscs[idx].FileStorages[0].ID.String()
+		}
+		return SyntheticStorageID(nodeID)
 	case VaultTypeFile:
+		if idx < 0 {
+			return ""
+		}
 		// Single storage class for all file vaults (local-only and
 		// cloud-backed alike). After step 7k, the active chunk and
 		// the warm cache live at the same path under chunkDir, so
 		// distinguishing "active" and "cache" classes serves no
 		// purpose. See gastrolog-4k5mg.
-		requiredClass = v.StorageClass
-	case VaultTypeMemory, VaultTypeJSONL:
-		// No storage class — pick any storage, or synthetic if none.
-		if len(nsc.FileStorages) > 0 {
-			return nsc.FileStorages[0].ID.String()
+		for _, fs := range nscs[idx].FileStorages {
+			if fs.StorageClass == v.StorageClass {
+				return fs.ID.String()
+			}
 		}
-		return SyntheticStorageID(nodeID)
+		return ""
+	default:
+		return ""
 	}
-
-	for _, fs := range nsc.FileStorages {
-		if fs.StorageClass == requiredClass {
-			return fs.ID.String()
-		}
-	}
-	// Fallback for follower replicas on nodes without exact class match.
-	if len(nsc.FileStorages) > 0 {
-		return nsc.FileStorages[0].ID.String()
-	}
-	return SyntheticStorageID(nodeID)
 }
 
 // PlacementNodeIDs returns the unique node ID of every vault placement member.

@@ -360,7 +360,7 @@ describe("SearchView", () => {
         name: "node-1",
         stats: {
           cpuPercent: 42.5,
-          memoryRss: BigInt(1024 * 1024 * 256),
+          memoryInuse: BigInt(1024 * 1024 * 256),
           vaults: [],
         },
       }],

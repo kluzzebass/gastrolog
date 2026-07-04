@@ -239,7 +239,7 @@ describe("NodesSettings", () => {
       wrapper: settingsWrapper(qc),
     });
 
-    expect(getByText("abcd1234...9876")).toBeTruthy();
+    expect(getByText("abcd1234…9876")).toBeTruthy();
     expect(queryByText("abcd1234secrettoken9876")).toBeNull();
   });
 

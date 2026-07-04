@@ -36,6 +36,13 @@ func PullToPreHead(ctx context.Context, vaultRoot string, vaultID, segmentID gli
 		return "", err
 	}
 	pullErr := pull.Pull(ctx, vaultID, segmentID, f)
+	if pullErr == nil {
+		// Durability barrier: the holder receipt this pull leads to asserts
+		// cluster-wide that a copy exists. Fsync before the receipt can
+		// commit, or a crash leaves the cluster trusting a torn copy —
+		// potentially the last one (gastrolog-4mqy06).
+		pullErr = f.Sync()
+	}
 	closeErr := f.Close()
 	if pullErr != nil {
 		_ = os.Remove(tmpPath)
@@ -47,6 +54,9 @@ func PullToPreHead(ctx context.Context, vaultRoot string, vaultID, segmentID gli
 	}
 	if err := os.Rename(filepath.Clean(tmpPath), filepath.Clean(finalPath)); err != nil {
 		_ = os.Remove(tmpPath)
+		return "", err
+	}
+	if err := paths.SyncDir(paths.PreHeadDir(vaultRoot)); err != nil {
 		return "", err
 	}
 	return finalPath, nil
@@ -63,6 +73,9 @@ func ReceiveToPreHead(vaultRoot string, segmentID glid.GLID, src io.Reader) (str
 		return "", err
 	}
 	_, copyErr := io.Copy(f, src)
+	if copyErr == nil {
+		copyErr = f.Sync()
+	}
 	closeErr := f.Close()
 	if copyErr != nil {
 		_ = os.Remove(path)
@@ -71,6 +84,9 @@ func ReceiveToPreHead(vaultRoot string, segmentID glid.GLID, src io.Reader) (str
 	if closeErr != nil {
 		_ = os.Remove(path)
 		return "", closeErr
+	}
+	if err := paths.SyncDir(paths.PreHeadDir(vaultRoot)); err != nil {
+		return "", err
 	}
 	return path, nil
 }
@@ -92,6 +108,9 @@ func PromoteVerified(preHeadPath, vaultRoot string) (string, error) {
 	dest := filepath.Join(paths.HeadDir(vaultRoot), filepath.Base(preHeadPath))
 	if err := os.Rename(filepath.Clean(preHeadPath), dest); err != nil {
 		_ = os.Remove(preHeadPath)
+		return "", err
+	}
+	if err := paths.SyncDir(paths.HeadDir(vaultRoot)); err != nil {
 		return "", err
 	}
 	return dest, nil
