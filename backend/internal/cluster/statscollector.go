@@ -105,6 +105,16 @@ type StatsProvider interface {
 	LocalStorageBytes() int64
 }
 
+// RaftLivenessProvider exposes aggregated Raft WAL append latency and
+// liveness counters across every Raft instance on this node
+// (gastrolog-1io54g). Totals are pure reads; TakeWALAppendMax resets the
+// max and must only be called from the ticking path.
+type RaftLivenessProvider interface {
+	WALAppendTotals() (count, totalNanos uint64)
+	TakeWALAppendMax() (maxNanos uint64)
+	RaftLiveness() (elections, leaderLosses, failedHeartbeats uint64)
+}
+
 // RaftStatsProvider exposes local Raft stats for the collector.
 type RaftStatsProvider interface {
 	LocalStats() map[string]string
@@ -137,6 +147,7 @@ type StatsCollectorConfig struct {
 	RaftStats         RaftStatsProvider
 	Stats             StatsProvider
 	PeerConns         PeerConnSnapshotProvider // optional; nil disables peer conn stats
+	RaftLiveness      RaftLivenessProvider     // optional; nil disables Raft liveness stats (gastrolog-1io54g)
 	Alerts            AlertProvider            // optional; nil if no alert collector
 	Jobs              JobsProvider             // optional; nil in single-node mode
 	NodeID            string
@@ -165,6 +176,12 @@ type StatsCollector struct {
 	// ingested+routed). Same mechanics as the peer traffic windows.
 	vaultAppendStats map[string]*peerConnStatsWindow
 	routeRateStats   map[string]*peerConnStatsWindow
+	// raftLiveStats windows: "wal" (tx=append count, rx=append nanos) and
+	// "live" (tx=elections, rx=failed heartbeats). walMaxNanos caches the
+	// last tick's max so snapshot reads between ticks see it without
+	// consuming the WAL-side accumulator (gastrolog-1io54g).
+	raftLiveStats map[string]*peerConnStatsWindow
+	walMaxNanos   uint64
 	// lastPublishedPurposeWindows holds purposes_window from the most recent
 	// CollectLocalTick (5s broadcast). CollectLocalSnapshot overlays this onto
 	// read-only snapshots briefly after each tick so WatchSystemStatus still
@@ -193,8 +210,8 @@ type peerConnStatsWindow struct {
 	rx30    float64
 	tx60    float64
 	rx60    float64
-	txRates  []float64
-	rxRates  []float64
+	txRates []float64
+	rxRates []float64
 }
 
 // NewStatsCollector creates a collector with the given system.
@@ -211,6 +228,7 @@ func NewStatsCollector(cfg StatsCollectorConfig) *StatsCollector {
 		peerTrafficStats: make(map[string]*peerConnStatsWindow),
 		vaultAppendStats: make(map[string]*peerConnStatsWindow),
 		routeRateStats:   make(map[string]*peerConnStatsWindow),
+		raftLiveStats:    make(map[string]*peerConnStatsWindow),
 	}
 }
 
@@ -446,6 +464,7 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 		}
 	}
 	c.appendPeerTrafficTotals(stats, now, stepWindows)
+	c.collectRaftLiveness(stats, now, stepWindows)
 
 	// Active alerts.
 	if c.cfg.Alerts != nil {
@@ -621,6 +640,78 @@ func (c *StatsCollector) observeTrafficWindowRates(now time.Time, key string, se
 		tx30: w.tx30, rx30: w.rx30, tx60: w.tx60, rx60: w.rx60,
 		txSpark: append([]float64(nil), w.txRates...),
 		rxSpark: append([]float64(nil), w.rxRates...),
+	}
+}
+
+// Raft liveness alert thresholds (gastrolog-1io54g). Storm: sustained
+// elections at a rate no healthy cluster shows (the 2026-07-04 incident ran
+// 7-13/min). Calm clears with hysteresis so a single quiet tick doesn't
+// flap the alert. WAL max latency: one slow append is normal on shared
+// disks; above a second, Raft replication RTTs and lease checks are in the
+// danger zone.
+const (
+	raftElectionStormPerMin = 3.0
+	raftElectionCalmPerMin  = 0.5
+	walAppendMaxAlertMs     = 1000.0
+	walAppendMaxClearMs     = 250.0
+)
+
+// collectRaftLiveness populates the Raft WAL latency and election liveness
+// fields and maintains the degraded-liveness alerts. Alert evaluation lives
+// here, not in a component, because the rolling-window rates only exist in
+// the collector (gastrolog-1io54g).
+func (c *StatsCollector) collectRaftLiveness(stats *gastrologv1.NodeStats, now time.Time, stepWindows bool) {
+	if c.cfg.RaftLiveness == nil {
+		return
+	}
+	count, totalNanos := c.cfg.RaftLiveness.WALAppendTotals()
+	elections, losses, failedHB := c.cfg.RaftLiveness.RaftLiveness()
+
+	stats.RaftWalAppendsTotal = count
+	stats.RaftElectionsTotal = elections
+	stats.RaftLeaderLossesTotal = losses
+	stats.RaftFailedHeartbeatsTotal = failedHB
+
+	wal := c.observeTrafficWindowRates(now, "wal",
+		int64(count), int64(totalNanos), stepWindows, c.raftLiveStats) //nolint:gosec // counters < 2^63
+	if wal.txPerSec > 0 {
+		stats.RaftWalAppendAvgMs = wal.rxPerSec / wal.txPerSec / 1e6
+	}
+	live := c.observeTrafficWindowRates(now, "live",
+		int64(elections), int64(failedHB), stepWindows, c.raftLiveStats) //nolint:gosec // counters < 2^63
+	stats.RaftElectionsPerMin = live.txPerSec * 60
+
+	c.mu.Lock()
+	if stepWindows {
+		c.walMaxNanos = c.cfg.RaftLiveness.TakeWALAppendMax()
+	}
+	maxNanos := c.walMaxNanos
+	c.mu.Unlock()
+	stats.RaftWalAppendMaxMs = float64(maxNanos) / 1e6
+
+	if c.cfg.Alerts == nil || !stepWindows {
+		return
+	}
+	alerts, ok := c.cfg.Alerts.(interface {
+		Set(id string, severity alert.Severity, source, message string)
+		Clear(id string)
+	})
+	if !ok {
+		return
+	}
+	switch {
+	case stats.RaftElectionsPerMin >= raftElectionStormPerMin:
+		alerts.Set("raft-liveness-elections", alert.Error, "raft",
+			fmt.Sprintf("Raft election storm: %.1f elections/min on this node — consensus is churning (see gastrolog-1io54g)", stats.RaftElectionsPerMin))
+	case stats.RaftElectionsPerMin < raftElectionCalmPerMin:
+		alerts.Clear("raft-liveness-elections")
+	}
+	switch {
+	case stats.RaftWalAppendMaxMs >= walAppendMaxAlertMs:
+		alerts.Set("raft-wal-latency", alert.Warning, "raft",
+			fmt.Sprintf("Raft WAL append latency degraded: max %.0fms since last tick — bulk I/O may be starving consensus", stats.RaftWalAppendMaxMs))
+	case stats.RaftWalAppendMaxMs < walAppendMaxClearMs:
+		alerts.Clear("raft-wal-latency")
 	}
 }
 

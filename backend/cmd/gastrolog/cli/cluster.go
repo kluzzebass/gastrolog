@@ -86,6 +86,27 @@ func newClusterStatusCmd() *cobra.Command {
 				p.table([]string{"ID", "NAME", "ADDRESS", "ROLE", "SUFFRAGE"}, rows)
 			}
 
+			// Raft liveness per node (gastrolog-1io54g) — parity with the
+			// inspector's Raft section.
+			var liveRows [][]string
+			for _, n := range msg.Nodes {
+				if n.Stats == nil || n.Stats.RaftWalAppendsTotal == 0 {
+					continue
+				}
+				liveRows = append(liveRows, []string{
+					n.Name,
+					fmt.Sprintf("%.1fms", n.Stats.RaftWalAppendAvgMs),
+					fmt.Sprintf("%.0fms", n.Stats.RaftWalAppendMaxMs),
+					fmt.Sprintf("%d (%.1f/min)", n.Stats.RaftElectionsTotal, n.Stats.RaftElectionsPerMin),
+					strconv.FormatUint(n.Stats.RaftLeaderLossesTotal, 10),
+					strconv.FormatUint(n.Stats.RaftFailedHeartbeatsTotal, 10),
+				})
+			}
+			if len(liveRows) > 0 {
+				fmt.Println()
+				p.table([]string{"NODE", "WAL AVG", "WAL MAX", "ELECTIONS", "LEADER LOSSES", "FAILED HBS"}, liveRows)
+			}
+
 			if msg.LocalStats != nil {
 				fmt.Println()
 				s := msg.LocalStats

@@ -143,6 +143,20 @@ message NodeStats {
   // totals are the sum across nodes (gastrolog-4eh5ns).
   gastrolog.v1.ThroughputRate route_ingested = 39;
   gastrolog.v1.ThroughputRate route_routed = 40;
+
+  // Raft liveness / WAL health (gastrolog-1io54g). Append latency covers
+  // every Raft WAL on the node (vault groups share one WAL; cluster-ctl has
+  // its own): count/total are cumulative, avg is the rolling-window average
+  // between stats ticks, max is the worst single append since the previous
+  // tick. Election counters aggregate hashicorp/raft observer events across
+  // all groups — elections_per_min > ~3 sustained is a storm.
+  uint64 raft_wal_appends_total = 41;
+  double raft_wal_append_avg_ms = 42;
+  double raft_wal_append_max_ms = 43;
+  uint64 raft_elections_total = 44;
+  uint64 raft_leader_losses_total = 45;
+  uint64 raft_failed_heartbeats_total = 46;
+  double raft_elections_per_min = 47;
 }
 
 // VaultPipelineNodeDisk is one vault's local pipeline storage areas on a

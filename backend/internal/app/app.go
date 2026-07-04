@@ -392,7 +392,27 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		go slogCW.Run(ctx)
 	}
 
-	broadcaster, peerState, peerJobState, localStatsFn := setupClusterStats(ctx, logger, cfgStore, clusterSrv, orch, alertCollector, nodeID, cfg.ServerAddr, cfg.PprofAddr, statsSignal)
+	// Aggregate Raft liveness sources: the vault-group WAL + GroupManager
+	// counters, and the cluster-ctl store's own WAL + counters
+	// (gastrolog-1io54g). Nil-tolerant: single-node mode may lack any.
+	raftLive := &raftLivenessAdapter{}
+	if vaultWAL != nil {
+		raftLive.wals = append(raftLive.wals, vaultWAL)
+	}
+	if groupMgr != nil {
+		raftLive.counters = append(raftLive.counters, groupMgr.Liveness())
+	}
+	if src, ok := rawStore.(interface {
+		RaftLivenessSources() (*raftgroup.LivenessCounters, *raftwal.WAL)
+	}); ok {
+		ctlCounters, ctlWAL := src.RaftLivenessSources()
+		raftLive.counters = append(raftLive.counters, ctlCounters)
+		if ctlWAL != nil {
+			raftLive.wals = append(raftLive.wals, ctlWAL)
+		}
+	}
+
+	broadcaster, peerState, peerJobState, localStatsFn := setupClusterStats(ctx, logger, cfgStore, clusterSrv, orch, alertCollector, nodeID, cfg.ServerAddr, cfg.PprofAddr, statsSignal, raftLive)
 
 	// Start vault placement manager (cluster mode only).
 	var placementReconcileFn func(ctx context.Context)
@@ -670,7 +690,43 @@ func startOrchestrator(ctx context.Context, logger *slog.Logger, orch *orchestra
 
 // setupClusterStats creates the broadcaster, peer state tracker, and stats
 // collector. Returns nils for single-node mode.
-func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system.Store, clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, alerts *alert.Collector, nodeID string, apiAddr string, pprofAddr string, statsSignal *notify.Signal) (*cluster.Broadcaster, *cluster.PeerState, *cluster.PeerJobState, func() *gastrologv1.NodeStats) {
+// raftLivenessAdapter sums WAL append latency and liveness counters across
+// every Raft instance on this node for the stats collector
+// (gastrolog-1io54g).
+type raftLivenessAdapter struct {
+	wals     []*raftwal.WAL
+	counters []*raftgroup.LivenessCounters
+}
+
+func (a *raftLivenessAdapter) WALAppendTotals() (count, totalNanos uint64) {
+	for _, w := range a.wals {
+		c, n := w.AppendTotals()
+		count += c
+		totalNanos += n
+	}
+	return count, totalNanos
+}
+
+func (a *raftLivenessAdapter) TakeWALAppendMax() (maxNanos uint64) {
+	for _, w := range a.wals {
+		if m := w.TakeMaxAppendLatency(); m > maxNanos {
+			maxNanos = m
+		}
+	}
+	return maxNanos
+}
+
+func (a *raftLivenessAdapter) RaftLiveness() (elections, leaderLosses, failedHeartbeats uint64) {
+	for _, c := range a.counters {
+		e, l, f := c.Snapshot()
+		elections += e
+		leaderLosses += l
+		failedHeartbeats += f
+	}
+	return elections, leaderLosses, failedHeartbeats
+}
+
+func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system.Store, clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, alerts *alert.Collector, nodeID string, apiAddr string, pprofAddr string, statsSignal *notify.Signal, raftLive cluster.RaftLivenessProvider) (*cluster.Broadcaster, *cluster.PeerState, *cluster.PeerJobState, func() *gastrologv1.NodeStats) {
 	var broadcaster *cluster.Broadcaster
 	if clusterSrv != nil && clusterSrv.PeerConns() != nil {
 		broadcaster = cluster.NewBroadcaster(clusterSrv.PeerConns(), compBroadcast.Apply(logger))
@@ -708,13 +764,14 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 	observePeerAdditions(ctx, clusterSrv, cfgStore, logger)
 
 	collector := cluster.NewStatsCollector(cluster.StatsCollectorConfig{
-		Broadcaster: broadcaster,
-		RaftStats:   clusterSrv,
-		Stats:       &orchStatsAdapter{orch: orch},
-		PeerConns:   clusterSrv.PeerConns(),
-		Alerts:      alerts,
-		Jobs:        &jobBroadcastAdapter{scheduler: orch.Scheduler(), nodeID: nodeID},
-		NodeID:      nodeID,
+		Broadcaster:  broadcaster,
+		RaftStats:    clusterSrv,
+		Stats:        &orchStatsAdapter{orch: orch},
+		PeerConns:    clusterSrv.PeerConns(),
+		RaftLiveness: raftLive,
+		Alerts:       alerts,
+		Jobs:         &jobBroadcastAdapter{scheduler: orch.Scheduler(), nodeID: nodeID},
+		NodeID:       nodeID,
 		NodeNameFn: func() string {
 			nid, err := glid.ParseAny(nodeID)
 			if err != nil {

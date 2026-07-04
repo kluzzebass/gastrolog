@@ -680,6 +680,48 @@ export class NodeStats extends Message<NodeStats> {
    */
   routeRouted?: ThroughputRate;
 
+  /**
+   * Raft liveness / WAL health (gastrolog-1io54g). Append latency covers
+   * every Raft WAL on the node (vault groups share one WAL; cluster-ctl has
+   * its own): count/total are cumulative, avg is the rolling-window average
+   * between stats ticks, max is the worst single append since the previous
+   * tick. Election counters aggregate hashicorp/raft observer events across
+   * all groups — elections_per_min > ~3 sustained is a storm.
+   *
+   * @generated from field: uint64 raft_wal_appends_total = 41;
+   */
+  raftWalAppendsTotal = protoInt64.zero;
+
+  /**
+   * @generated from field: double raft_wal_append_avg_ms = 42;
+   */
+  raftWalAppendAvgMs = 0;
+
+  /**
+   * @generated from field: double raft_wal_append_max_ms = 43;
+   */
+  raftWalAppendMaxMs = 0;
+
+  /**
+   * @generated from field: uint64 raft_elections_total = 44;
+   */
+  raftElectionsTotal = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 raft_leader_losses_total = 45;
+   */
+  raftLeaderLossesTotal = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 raft_failed_heartbeats_total = 46;
+   */
+  raftFailedHeartbeatsTotal = protoInt64.zero;
+
+  /**
+   * @generated from field: double raft_elections_per_min = 47;
+   */
+  raftElectionsPerMin = 0;
+
   constructor(data?: PartialMessage<NodeStats>) {
     super();
     proto3.util.initPartial(data, this);
@@ -728,6 +770,13 @@ export class NodeStats extends Message<NodeStats> {
     { no: 37, name: "storage_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 39, name: "route_ingested", kind: "message", T: ThroughputRate },
     { no: 40, name: "route_routed", kind: "message", T: ThroughputRate },
+    { no: 41, name: "raft_wal_appends_total", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 42, name: "raft_wal_append_avg_ms", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
+    { no: 43, name: "raft_wal_append_max_ms", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
+    { no: 44, name: "raft_elections_total", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 45, name: "raft_leader_losses_total", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 46, name: "raft_failed_heartbeats_total", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 47, name: "raft_elections_per_min", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): NodeStats {

@@ -634,8 +634,21 @@ type NodeStats struct {
 	// totals are the sum across nodes (gastrolog-4eh5ns).
 	RouteIngested *ThroughputRate `protobuf:"bytes,39,opt,name=route_ingested,json=routeIngested,proto3" json:"route_ingested,omitempty"`
 	RouteRouted   *ThroughputRate `protobuf:"bytes,40,opt,name=route_routed,json=routeRouted,proto3" json:"route_routed,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// Raft liveness / WAL health (gastrolog-1io54g). Append latency covers
+	// every Raft WAL on the node (vault groups share one WAL; cluster-ctl has
+	// its own): count/total are cumulative, avg is the rolling-window average
+	// between stats ticks, max is the worst single append since the previous
+	// tick. Election counters aggregate hashicorp/raft observer events across
+	// all groups — elections_per_min > ~3 sustained is a storm.
+	RaftWalAppendsTotal       uint64  `protobuf:"varint,41,opt,name=raft_wal_appends_total,json=raftWalAppendsTotal,proto3" json:"raft_wal_appends_total,omitempty"`
+	RaftWalAppendAvgMs        float64 `protobuf:"fixed64,42,opt,name=raft_wal_append_avg_ms,json=raftWalAppendAvgMs,proto3" json:"raft_wal_append_avg_ms,omitempty"`
+	RaftWalAppendMaxMs        float64 `protobuf:"fixed64,43,opt,name=raft_wal_append_max_ms,json=raftWalAppendMaxMs,proto3" json:"raft_wal_append_max_ms,omitempty"`
+	RaftElectionsTotal        uint64  `protobuf:"varint,44,opt,name=raft_elections_total,json=raftElectionsTotal,proto3" json:"raft_elections_total,omitempty"`
+	RaftLeaderLossesTotal     uint64  `protobuf:"varint,45,opt,name=raft_leader_losses_total,json=raftLeaderLossesTotal,proto3" json:"raft_leader_losses_total,omitempty"`
+	RaftFailedHeartbeatsTotal uint64  `protobuf:"varint,46,opt,name=raft_failed_heartbeats_total,json=raftFailedHeartbeatsTotal,proto3" json:"raft_failed_heartbeats_total,omitempty"`
+	RaftElectionsPerMin       float64 `protobuf:"fixed64,47,opt,name=raft_elections_per_min,json=raftElectionsPerMin,proto3" json:"raft_elections_per_min,omitempty"`
+	unknownFields             protoimpl.UnknownFields
+	sizeCache                 protoimpl.SizeCache
 }
 
 func (x *NodeStats) Reset() {
@@ -946,6 +959,55 @@ func (x *NodeStats) GetRouteRouted() *ThroughputRate {
 		return x.RouteRouted
 	}
 	return nil
+}
+
+func (x *NodeStats) GetRaftWalAppendsTotal() uint64 {
+	if x != nil {
+		return x.RaftWalAppendsTotal
+	}
+	return 0
+}
+
+func (x *NodeStats) GetRaftWalAppendAvgMs() float64 {
+	if x != nil {
+		return x.RaftWalAppendAvgMs
+	}
+	return 0
+}
+
+func (x *NodeStats) GetRaftWalAppendMaxMs() float64 {
+	if x != nil {
+		return x.RaftWalAppendMaxMs
+	}
+	return 0
+}
+
+func (x *NodeStats) GetRaftElectionsTotal() uint64 {
+	if x != nil {
+		return x.RaftElectionsTotal
+	}
+	return 0
+}
+
+func (x *NodeStats) GetRaftLeaderLossesTotal() uint64 {
+	if x != nil {
+		return x.RaftLeaderLossesTotal
+	}
+	return 0
+}
+
+func (x *NodeStats) GetRaftFailedHeartbeatsTotal() uint64 {
+	if x != nil {
+		return x.RaftFailedHeartbeatsTotal
+	}
+	return 0
+}
+
+func (x *NodeStats) GetRaftElectionsPerMin() float64 {
+	if x != nil {
+		return x.RaftElectionsPerMin
+	}
+	return 0
 }
 
 // VaultPipelineNodeDisk is one vault's local pipeline storage areas on a
@@ -4344,7 +4406,7 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\apayload\"\v\n" +
 	"\tHeartbeat\"1\n" +
 	"\bNodeJobs\x12%\n" +
-	"\x04jobs\x18\x01 \x03(\v2\x11.gastrolog.v1.JobR\x04jobs\"\xd9\x0e\n" +
+	"\x04jobs\x18\x01 \x03(\v2\x11.gastrolog.v1.JobR\x04jobs\"\xd7\x11\n" +
 	"\tNodeStats\x12\x1f\n" +
 	"\vcpu_percent\x18\x01 \x01(\x01R\n" +
 	"cpuPercent\x12!\n" +
@@ -4393,7 +4455,14 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x13vault_pipeline_disk\x18$ \x03(\v2#.gastrolog.v1.VaultPipelineNodeDiskR\x11vaultPipelineDisk\x12#\n" +
 	"\rstorage_bytes\x18% \x01(\x03R\fstorageBytes\x12C\n" +
 	"\x0eroute_ingested\x18' \x01(\v2\x1c.gastrolog.v1.ThroughputRateR\rrouteIngested\x12?\n" +
-	"\froute_routed\x18( \x01(\v2\x1c.gastrolog.v1.ThroughputRateR\vrouteRouted\"\xec\x01\n" +
+	"\froute_routed\x18( \x01(\v2\x1c.gastrolog.v1.ThroughputRateR\vrouteRouted\x123\n" +
+	"\x16raft_wal_appends_total\x18) \x01(\x04R\x13raftWalAppendsTotal\x122\n" +
+	"\x16raft_wal_append_avg_ms\x18* \x01(\x01R\x12raftWalAppendAvgMs\x122\n" +
+	"\x16raft_wal_append_max_ms\x18+ \x01(\x01R\x12raftWalAppendMaxMs\x120\n" +
+	"\x14raft_elections_total\x18, \x01(\x04R\x12raftElectionsTotal\x127\n" +
+	"\x18raft_leader_losses_total\x18- \x01(\x04R\x15raftLeaderLossesTotal\x12?\n" +
+	"\x1craft_failed_heartbeats_total\x18. \x01(\x04R\x19raftFailedHeartbeatsTotal\x123\n" +
+	"\x16raft_elections_per_min\x18/ \x01(\x01R\x13raftElectionsPerMin\"\xec\x01\n" +
 	"\x15VaultPipelineNodeDisk\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12)\n" +
 	"\x10working_segments\x18\x02 \x01(\rR\x0fworkingSegments\x12<\n" +

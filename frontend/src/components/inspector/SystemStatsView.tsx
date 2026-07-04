@@ -138,6 +138,38 @@ function CompactView({
             <CompactStatRow label="FSM Pending" value={stats.raftFsmPending.toString()} mono dark={dark} />
             <CompactStatRow label="Last Contact" value={stats.raftLastContact || "never"} dark={dark} />
           </div>
+          {/* Raft liveness (gastrolog-1io54g): WAL append health and election
+              churn across every group on this node. Elections/min above ~3
+              sustained is a storm; WAL max latency near 1s means bulk I/O is
+              starving consensus. */}
+          {stats.raftWalAppendsTotal > 0 && (
+            <div className="grid grid-cols-2 gap-x-6 gap-y-1 mt-1">
+              <CompactStatRow
+                label="WAL Append"
+                value={`avg ${stats.raftWalAppendAvgMs.toFixed(1)}ms · max ${stats.raftWalAppendMaxMs.toFixed(0)}ms`}
+                mono
+                dark={dark}
+              />
+              <CompactStatRow
+                label="Elections"
+                value={`${stats.raftElectionsTotal.toString()} (${stats.raftElectionsPerMin.toFixed(1)}/min)`}
+                mono
+                dark={dark}
+              />
+              <CompactStatRow
+                label="Leader Losses"
+                value={stats.raftLeaderLossesTotal.toString()}
+                mono
+                dark={dark}
+              />
+              <CompactStatRow
+                label="Failed HBs"
+                value={stats.raftFailedHeartbeatsTotal.toString()}
+                mono
+                dark={dark}
+              />
+            </div>
+          )}
         </section>
       )}
 
