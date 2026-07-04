@@ -62,7 +62,7 @@ func (v *vaultChunking) afterSealBuild(ctx context.Context, pending *vaultctlfsm
 	}
 
 	segmentIDs := releasableSegmentIDs(v.fsm(), pending)
-	v.flushHeadPurgeForManifest(ctx, pending, segmentIDs)
+	v.flushHeadPurgeForManifest(pending, segmentIDs)
 	if v.cfg.IsLeader() {
 		if len(segmentIDs) > 0 {
 			v.mu.Lock()
@@ -261,7 +261,7 @@ func (v *vaultChunking) finishBuildOnce(ctx context.Context, pending *vaultctlfs
 		}
 	}
 	if postSeal {
-		v.flushHeadPurgeForManifest(ctx, pending, releasableSegmentIDs(v.fsm(), pending))
+		v.flushHeadPurgeForManifest(pending, releasableSegmentIDs(v.fsm(), pending))
 	}
 	// Retain the pending manifest until CmdSealChunk commits so
 	// OnSealedManifestCleared can run afterSealBuild on follower homes.

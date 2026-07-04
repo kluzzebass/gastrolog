@@ -1,8 +1,6 @@
 package chunking
 
 import (
-	"context"
-
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
@@ -18,7 +16,7 @@ import (
 // committed a receipt. Origins promote completed→head (rename), so head/ is
 // the only on-disk copy peers can pull; purging it early while collection is
 // still catching up wedges remote homes with "segment file missing".
-func (v *vaultChunking) flushHeadPurgeForManifest(ctx context.Context, pending *vaultctlfsm.OpenChunkManifest, segmentIDs []glid.GLID) {
+func (v *vaultChunking) flushHeadPurgeForManifest(pending *vaultctlfsm.OpenChunkManifest, segmentIDs []glid.GLID) {
 	if pending == nil || len(segmentIDs) == 0 {
 		return
 	}
@@ -26,9 +24,13 @@ func (v *vaultChunking) flushHeadPurgeForManifest(ctx context.Context, pending *
 	if !v.progress.alreadyBuilt(key) {
 		return
 	}
-	if v.cfg.Collector != nil {
-		_ = v.cfg.Collector.CollectOnce(ctx)
-	}
+	// No blocking collect here (gastrolog-1b51yf): this used to run a full
+	// CollectOnce pass to freshen holder receipts before the purge decision,
+	// which serialized the seal queue behind collection — one sealed chunk
+	// per full pass under backlog. Receipts arrive via collection's own
+	// wake-driven passes; a purge refused now is retried by the
+	// release-driven purge (OnReleaseSegments → drainReleasedPurge) and by
+	// later manifests referencing the same segment.
 	required := v.requiredHolders()
 	holdersWired := v.cfg.RequiredHolders != nil
 	fsm := v.fsm()

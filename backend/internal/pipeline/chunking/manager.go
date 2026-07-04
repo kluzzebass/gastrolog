@@ -34,12 +34,18 @@ type VaultCtlApplier interface {
 // SegmentCollector pulls segment bytes onto this home. Chunking invokes it as a
 // build prerequisite (every manifest ref must be local before GLCB merge) and
 // during planner catch-up when eligible registry segments are not yet in head/.
+//
+// Deliberately NO blocking full-pass method: the chunking worker must never
+// wait on a collection pass. Under backlog a pass takes minutes-to-hours and
+// the serial seal loop stalled at one chunk per pass (gastrolog-1b51yf).
+// Collection wakes chunking on every pass completion (OnPassComplete), so a
+// non-blocking Nudge is all the worker ever needs.
 type SegmentCollector interface {
-	// CollectOnce runs a full assignment-log pass for this vault.
-	CollectOnce(ctx context.Context) error
 	// CollectSegments pulls the given segment IDs when manifest refs require
 	// bytes this home does not yet hold.
 	CollectSegments(ctx context.Context, segmentIDs []glid.GLID) error
+	// Nudge wakes the collection worker for this vault without waiting.
+	Nudge()
 }
 
 // VaultConfig is per-vault chunking execution state.

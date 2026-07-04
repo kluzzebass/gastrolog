@@ -607,14 +607,13 @@ type collectorSpy struct {
 	n *atomic.Int32
 }
 
-func (c collectorSpy) CollectOnce(context.Context) error {
+func (c collectorSpy) CollectSegments(_ context.Context, _ []glid.GLID) error {
 	c.n.Add(1)
 	return nil
 }
 
-func (c collectorSpy) CollectSegments(_ context.Context, _ []glid.GLID) error {
+func (c collectorSpy) Nudge() {
 	c.n.Add(1)
-	return nil
 }
 
 type segmentCollectorRecorder struct {
@@ -622,9 +621,8 @@ type segmentCollectorRecorder struct {
 	ids   []glid.GLID
 }
 
-func (n *segmentCollectorRecorder) CollectOnce(context.Context) error {
+func (n *segmentCollectorRecorder) Nudge() {
 	n.calls.Add(1)
-	return nil
 }
 
 func (n *segmentCollectorRecorder) CollectSegments(_ context.Context, segmentIDs []glid.GLID) error {

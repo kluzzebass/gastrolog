@@ -126,8 +126,11 @@ func (v *vaultChunking) planLeaderStep(ctx context.Context, cronDue bool, maxRef
 		wire, ready := v.proposeOpenManifestWire(manifest, resume, eligible, refAddedAt, evalNow, cronDue)
 		v.planMu.Unlock()
 		if !ready {
+			// Non-blocking: collection's pass completion re-wakes this
+			// worker (OnPassComplete). Blocking on a full pass here stalled
+			// planning and sealing under backlog (gastrolog-1b51yf).
 			if v.cfg.Collector != nil && len(eligible) > 0 {
-				_ = v.cfg.Collector.CollectOnce(ctx)
+				v.cfg.Collector.Nudge()
 			}
 			return nil
 		}
@@ -157,7 +160,7 @@ func (v *vaultChunking) planLeaderStep(ctx context.Context, cronDue bool, maxRef
 			return err
 		}
 		if v.cfg.Collector != nil && len(eligible) > 0 {
-			_ = v.cfg.Collector.CollectOnce(ctx)
+			v.cfg.Collector.Nudge()
 		}
 	}
 	return nil
