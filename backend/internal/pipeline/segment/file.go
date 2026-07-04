@@ -17,13 +17,15 @@ import (
 var errSegmentFinalized = errors.New("segment is finalized")
 
 // File is a durable segment on disk. The fixed header is rewritten after
-// each append; record data follows the header as [frameLen:u32][frame body] frames.
+// each append batch; record data follows the header as
+// [frameLen:u32][frame body] frames.
 type File struct {
 	f         *os.File
 	hdr       Header
 	hdrBuf    [HeaderSize]byte
 	recordCRC hash.Hash32 // rolling CRC32/IEEE over [HeaderSize:recordsEnd)
 	dataEnd   uint32      // exclusive end of committed record bytes (hot-path append anchor)
+	batchBuf  []byte      // reused AppendFrames scratch (gastrolog-1ojsm6)
 }
 
 // Create initializes a new empty segment file at path.
@@ -96,11 +98,34 @@ func (sf *File) Append(rec *record.Record, writeTS time.Time) error {
 
 // AppendFrame appends a pre-encoded frame body and rewrites the header.
 func (sf *File) AppendFrame(rec *record.Record, _ time.Time, body []byte) error {
-	if rec == nil {
-		return errors.New("nil record")
+	return sf.AppendFrames([]Frame{{Rec: rec, Body: body}})
+}
+
+// Frame is one pre-encoded record frame for batched append.
+type Frame struct {
+	Rec  *record.Record
+	Body []byte
+}
+
+// AppendFrames appends a batch of pre-encoded frames with ONE data write and
+// ONE header rewrite. The previous per-record shape (length-prefix pwrite +
+// body pwrite + header-rewrite pwrite) put 3 serialized syscalls on the hot
+// path and capped a vault writer at ~25K rec/s while the node sat mostly idle
+// (gastrolog-1ojsm6). Crash safety is unchanged: recovery reconciles frames
+// beyond (or torn around) the last header rewrite from the fsynced prefix
+// (reconcileOnOpen/scanForward), and acks only release after the group-commit
+// fsync.
+func (sf *File) AppendFrames(frames []Frame) error {
+	if len(frames) == 0 {
+		return nil
 	}
 	if sf.hdr.IndexOffset > 0 {
 		return errSegmentFinalized
+	}
+	for i := range frames {
+		if frames[i].Rec == nil {
+			return errors.New("nil record")
+		}
 	}
 
 	writeOff, err := sf.appendOffset()
@@ -108,37 +133,50 @@ func (sf *File) AppendFrame(rec *record.Record, _ time.Time, body []byte) error 
 		return err
 	}
 
-	var lenPrefix [frameLenPrefixSize]byte
-	binary.LittleEndian.PutUint32(lenPrefix[:], uint32(len(body))) //nolint:gosec // G115: frame bounded by encode
-
-	if _, err := sf.f.WriteAt(lenPrefix[:], int64(writeOff)); err != nil {
-		return err
-	}
-	if _, err := sf.f.WriteAt(body, int64(writeOff+frameLenPrefixSize)); err != nil {
-		return err
-	}
-
 	if sf.recordCRC == nil {
 		sf.recordCRC = crc32.NewIEEE()
 	}
-	if _, err := sf.recordCRC.Write(lenPrefix[:]); err != nil {
-		return err
+
+	// Build the batch buffer — [lenPrefix|body]... — feeding the running CRC
+	// in frame order, exactly as sequential single appends would have.
+	sf.batchBuf = sf.batchBuf[:0]
+	var lastFrameStart uint32
+	var lenPrefix [frameLenPrefixSize]byte
+	for i := range frames {
+		lastFrameStart = writeOff + uint32(len(sf.batchBuf))                     //nolint:gosec // G115: batch bounded by commit window
+		binary.LittleEndian.PutUint32(lenPrefix[:], uint32(len(frames[i].Body))) //nolint:gosec // G115: frame bounded by encode
+		sf.batchBuf = append(sf.batchBuf, lenPrefix[:]...)
+		sf.batchBuf = append(sf.batchBuf, frames[i].Body...)
+		if _, err := sf.recordCRC.Write(lenPrefix[:]); err != nil {
+			return err
+		}
+		if _, err := sf.recordCRC.Write(frames[i].Body); err != nil {
+			return err
+		}
 	}
-	if _, err := sf.recordCRC.Write(body); err != nil {
+
+	if _, err := sf.f.WriteAt(sf.batchBuf, int64(writeOff)); err != nil {
 		return err
 	}
 
-	frameLen := frameLenPrefixSize + len(body)
-
-	sf.hdr.RecordCount++
-	if sf.hdr.RecordCount == 1 {
-		sf.hdr.FirstIngestTS = rec.EventID.IngestTS
+	first := sf.hdr.RecordCount == 0
+	sf.hdr.RecordCount += uint32(len(frames)) //nolint:gosec // G115: batch bounded by commit window
+	if first {
+		sf.hdr.FirstIngestTS = frames[0].Rec.EventID.IngestTS
 	}
-	sf.hdr.LastIngestTS = rec.EventID.IngestTS
-	sf.hdr.DataEnd = writeOff
+	sf.hdr.LastIngestTS = frames[len(frames)-1].Rec.EventID.IngestTS
+	sf.hdr.DataEnd = lastFrameStart
 	sf.hdr.SegmentChecksum = sf.recordCRC.Sum32()
-	sf.dataEnd = writeOff + uint32(frameLen) //nolint:gosec // G115: frame bounded by encode
+	sf.dataEnd = writeOff + uint32(len(sf.batchBuf)) //nolint:gosec // G115: batch bounded by commit window
 	return sf.writeHeader()
+}
+
+// DataSize returns the current end-of-data offset (header plus every appended
+// frame) from the in-memory append anchor — no Stat syscall. Valid for the
+// writer's rotation checks until Finalize writes the index tail
+// (gastrolog-1ojsm6).
+func (sf *File) DataSize() int64 {
+	return int64(sf.dataEnd)
 }
 
 // Sync persists appended frames and header rewrites to stable storage.

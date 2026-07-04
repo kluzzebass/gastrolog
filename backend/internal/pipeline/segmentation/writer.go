@@ -26,9 +26,9 @@ var errWriterDegraded = errors.New("segmentation writer degraded: no usable work
 // segmentFile is the subset of *segment.File the writer drives. It exists so
 // fault-injection tests can wrap Sync/Append/rotation failures.
 type segmentFile interface {
-	AppendFrame(rec *record.Record, writeTS time.Time, body []byte) error
+	AppendFrames(frames []segment.Frame) error
 	Sync() error
-	Size() (int64, error)
+	DataSize() int64
 	Header() segment.Header
 	Finalize() error
 	Close() error
@@ -291,10 +291,7 @@ func (w *vaultWriter) handleInput(b *commitBatch, in Input) {
 		w.rejectEncodeFailure(in, err)
 		return
 	}
-	if err := b.append(encodedWork{rec: in.Record, writeTS: writeTS, body: body, ack: in.Ack}); err != nil {
-		w.enterDegraded(b, err)
-		return
-	}
+	b.append(encodedWork{rec: in.Record, writeTS: writeTS, body: body, ack: in.Ack})
 	w.afterAppend(b)
 }
 
@@ -318,10 +315,7 @@ func (w *vaultWriter) afterAppend(b *commitBatch) {
 		}
 	default:
 		// Pure group commit: drain whatever is queued, then fsync once.
-		if err := w.drainAvailable(b); err != nil {
-			w.enterDegraded(b, err)
-			return
-		}
+		w.drainAvailable(b)
 		if err := b.commit(); err != nil {
 			w.enterDegraded(b, err)
 		}
@@ -374,6 +368,8 @@ func (w *vaultWriter) alertID() string {
 // can falsely succeed; never trust that segment again.
 func (w *vaultWriter) enterDegraded(b *commitBatch, cause error) {
 	b.disarmTimer()
+	b.frames = b.frames[:0]
+	b.frameBytes = 0
 	b.pendingSync = 0
 	b.hasAck = false
 	w.lastFailure = cause
@@ -424,11 +420,18 @@ func (w *vaultWriter) tryReopen(b *commitBatch) {
 	}
 }
 
-// commitBatch accumulates appended frames and their parked acks between fsyncs.
+// commitBatch accumulates encoded frames and their parked acks between
+// fsyncs. Frames stay in memory until commit flushes them with ONE data
+// write + ONE header rewrite (gastrolog-1ojsm6) — the previous per-record
+// 3-pwrite shape capped a writer at ~25K rec/s. The loss window is
+// unchanged: acks release only after the commit fsync, and un-acked
+// records were never durable before their fsync either.
 type commitBatch struct {
 	w           *vaultWriter
 	timer       *time.Timer
 	timerArmed  bool
+	frames      []segment.Frame
+	frameBytes  uint64
 	parked      []chan<- error
 	pendingSync int
 	hasAck      bool
@@ -463,45 +466,43 @@ func (b *commitBatch) disarmTimer() {
 	b.timerArmed = false
 }
 
-// append appends a frame and parks its ack. On append error it nacks the
-// offending and any already-parked acks (their frames share the now-suspect
-// segment) and returns the error so the writer can rotate.
-func (b *commitBatch) append(work encodedWork) error {
-	if err := b.w.appendFrame(work); err != nil {
-		if work.ack != nil {
-			work.ack <- err
-		}
-		b.releaseParked(err)
-		return err
-	}
-	b.w.recordsAppended.Add(1)
-	b.w.bytesAppended.Add(uint64(len(work.body)))
+// append stashes an encoded frame in the batch and parks its ack. Disk I/O
+// happens at commit (flush + fsync); a stash cannot fail.
+func (b *commitBatch) append(work encodedWork) {
+	b.frames = append(b.frames, segment.Frame{Rec: work.rec, Body: work.body})
+	b.frameBytes += uint64(len(work.body))
 	b.pendingSync++
 	if work.ack != nil {
 		b.parked = append(b.parked, work.ack)
 		b.hasAck = true
 	}
-	return nil
 }
 
-// commit syncs the pending batch (unless fsync is disabled) and releases the
-// parked acks with the result. A non-nil return means the batch's segment is
-// suspect and the writer must rotate.
+// commit flushes the stashed frames (one data write + one header rewrite),
+// syncs (unless fsync is disabled), and releases the parked acks with the
+// result. A non-nil return means the batch's segment is suspect and the
+// writer must rotate.
 func (b *commitBatch) commit() error {
 	if b.pendingSync == 0 {
 		b.disarmTimer()
 		return nil
 	}
-	var err error
-	if b.w.disableFsync {
-		err = b.w.maybeCloseNoSync()
-	} else {
-		err = b.w.syncAndMaybeClose()
+	err := b.w.appendFrames(b.frames)
+	if err == nil {
+		b.w.recordsAppended.Add(uint64(b.pendingSync)) //nolint:gosec // pendingSync >= 0
+		b.w.bytesAppended.Add(b.frameBytes)
+		if b.w.disableFsync {
+			err = b.w.maybeCloseNoSync()
+		} else {
+			err = b.w.syncAndMaybeClose()
+		}
 	}
 	b.releaseParked(err)
 	if err == nil {
 		b.w.recordsDurable.Add(uint64(b.pendingSync)) //nolint:gosec // pendingSync >= 0
 	}
+	b.frames = b.frames[:0]
+	b.frameBytes = 0
 	b.pendingSync = 0
 	b.hasAck = false
 	b.disarmTimer()
@@ -515,15 +516,15 @@ func (b *commitBatch) releaseParked(err error) {
 	b.parked = b.parked[:0]
 }
 
-// drainAvailable appends every input currently buffered in the in queue without
-// blocking, forming the group-commit batch. Encode failures reject that record
-// and keep draining; an append (disk) error stops the drain.
-func (w *vaultWriter) drainAvailable(b *commitBatch) error {
+// drainAvailable stashes every input currently buffered in the in queue
+// without blocking, forming the group-commit batch. Encode failures reject
+// that record and keep draining; disk errors surface at commit.
+func (w *vaultWriter) drainAvailable(b *commitBatch) {
 	for {
 		select {
 		case in, ok := <-w.in:
 			if !ok {
-				return nil
+				return
 			}
 			writeTS := w.cfg.now()
 			body, err := segment.EncodeFrame(in.Record, writeTS)
@@ -531,11 +532,9 @@ func (w *vaultWriter) drainAvailable(b *commitBatch) error {
 				w.rejectEncodeFailure(in, err)
 				continue
 			}
-			if err := b.append(encodedWork{rec: in.Record, writeTS: writeTS, body: body, ack: in.Ack}); err != nil {
-				return err
-			}
+			b.append(encodedWork{rec: in.Record, writeTS: writeTS, body: body, ack: in.Ack})
 		default:
-			return nil
+			return
 		}
 	}
 }
@@ -550,13 +549,13 @@ func resetSyncTimer(timer *time.Timer, window time.Duration) {
 	timer.Reset(window)
 }
 
-func (w *vaultWriter) appendFrame(work encodedWork) error {
+func (w *vaultWriter) appendFrames(frames []segment.Frame) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.seg == nil {
 		return errWriterClosed
 	}
-	return w.seg.AppendFrame(work.rec, work.writeTS, work.body)
+	return w.seg.AppendFrames(frames)
 }
 
 // syncAndMaybeClose fsyncs the open segment, notifies OnSync, and rotates the
@@ -588,11 +587,9 @@ func (w *vaultWriter) maybeCloseNoSync() error {
 }
 
 func (w *vaultWriter) maybeCloseLocked() error {
-	size, err := w.seg.Size()
-	if err != nil {
-		return err
-	}
-	if w.shouldClose(size) {
+	// In-memory append anchor: the per-commit Stat syscall bought nothing
+	// (gastrolog-1ojsm6).
+	if w.shouldClose(w.seg.DataSize()) {
 		return w.closeSegmentLocked()
 	}
 	return nil
