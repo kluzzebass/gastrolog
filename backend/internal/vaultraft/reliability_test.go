@@ -222,6 +222,37 @@ func TestReliability_Failover_FollowerDown_QuorumHolds(t *testing.T) {
 	assertSubsetConverged(t, h, liveIDs)
 }
 
+// TestReliability_ApplyRetriesAcrossLeadershipTransfer forces leadership
+// transfers while populating FSM state. hashicorp/raft surfaces a mid-commit
+// step-down as ErrLeadershipLost (and pre-commit ones as ErrNotLeader /
+// ErrLeadershipTransferInProgress) — retryable transients any raft client
+// must absorb; the FSM commands are convergent so a re-applied command is
+// harmless. At the harness's aggressive 300ms election timeouts the same
+// transients fire spontaneously when a full-suite run starves the scheduler
+// (gastrolog-2qqp8l); this scenario reproduces that failure class
+// deterministically instead of waiting for CPU pressure.
+func TestReliability_ApplyRetriesAcrossLeadershipTransfer(t *testing.T) {
+	t.Parallel()
+	h := newReliabilityHarness(t, 3)
+
+	vaultID := glid.New()
+	now := time.Now().Truncate(time.Nanosecond)
+
+	for i := range 8 {
+		leader := h.nodes[h.waitForLeader()]
+		leader.mu.Lock()
+		r := leader.raft
+		leader.mu.Unlock()
+		if r != nil {
+			// Fire-and-forget: the transfer deliberately races the apply
+			// below; both orderings must end with the command committed.
+			_ = r.LeadershipTransfer()
+		}
+		h.applyInstanceCreate(vaultID, chunkIDWithPrefix(byte(0x40+i)), now)
+	}
+	h.assertAllFSMsConverged()
+}
+
 // Partition one node from the other two. The isolated minority must lose
 // leadership if it held it and stop committing. After healing, the
 // minority catches up and FSMs reconverge.

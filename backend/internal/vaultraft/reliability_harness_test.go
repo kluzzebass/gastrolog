@@ -1,6 +1,7 @@
 package vaultraft
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -54,6 +55,10 @@ const (
 	harnessLeaseTimeout     = 150 * time.Millisecond
 	harnessLeaderWait       = 5 * time.Second
 	harnessConvergeWait     = 5 * time.Second
+	// harnessApplyRetryWait bounds retries across leadership transitions in
+	// applyInstanceCreate; several election rounds at 300ms timeouts fit
+	// comfortably, so exhausting it means quorum is genuinely gone.
+	harnessApplyRetryWait = 10 * time.Second
 )
 
 // newReliabilityHarness boots an N-node cluster, bootstraps the first node,
@@ -214,20 +219,46 @@ func (h *reliabilityHarness) leader() *reliabilityNode {
 	return h.nodes[h.waitForLeader()]
 }
 
-// applyInstanceCreate submits a CmdCreateChunk to the vault FSM via the current
-// leader. Used by scenarios that want to populate FSM state.
+// applyInstanceCreate submits a CmdCreateChunk to the vault FSM via the
+// current leader, retrying across leadership transitions. At the harness's
+// aggressive 300ms election timeouts, leadership can move mid-apply — either
+// spontaneously when a loaded machine starves heartbeats (hraft returns
+// ErrLeadershipLost for a mid-commit step-down; observed under full-suite
+// runs, gastrolog-2qqp8l) or when a scenario forces a transfer. These are
+// documented retryable transients, not quorum failures; re-applying the same
+// command bytes is safe because the FSM apply is convergent (applyCreate
+// overwrites with identical values). A real quorum loss still fails: the
+// retries exhaust harnessApplyRetryWait.
 func (h *reliabilityHarness) applyInstanceCreate(vaultID glid.GLID, chunkID chunk.ChunkID, at time.Time) {
 	h.t.Helper()
-	leader := h.leader()
 	wire := vaultctlfsm.MarshalCreateChunk(chunkID, at, at, at)
 	cmd := MarshalVaultChunkCommand(vaultID, wire)
-	fut := leader.raft.Apply(cmd, 2*time.Second)
-	if err := fut.Error(); err != nil {
-		h.t.Fatalf("apply instance create: %v", err)
+	deadline := time.Now().Add(harnessApplyRetryWait)
+	for {
+		leader := h.leader()
+		fut := leader.raft.Apply(cmd, 2*time.Second)
+		err := fut.Error()
+		if err == nil {
+			if r, ok := fut.Response().(error); ok && r != nil {
+				h.t.Fatalf("apply instance create FSM error: %v", r)
+			}
+			return
+		}
+		if !isLeadershipTransient(err) || time.Now().After(deadline) {
+			h.t.Fatalf("apply instance create: %v", err)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
-	if r, ok := fut.Response().(error); ok && r != nil {
-		h.t.Fatalf("apply instance create FSM error: %v", r)
-	}
+}
+
+// isLeadershipTransient reports whether an Apply error only means "the
+// leader moved" — retry against the new leader — as opposed to a real
+// commit failure.
+func isLeadershipTransient(err error) bool {
+	return errors.Is(err, hraft.ErrLeadershipLost) ||
+		errors.Is(err, hraft.ErrNotLeader) ||
+		errors.Is(err, hraft.ErrLeadershipTransferInProgress) ||
+		errors.Is(err, hraft.ErrEnqueueTimeout)
 }
 
 // stopNode shuts down a node's Raft and WAL (persistent state stays on
