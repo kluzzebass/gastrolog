@@ -36,15 +36,27 @@ type VaultConfig struct {
 	FSM *vaultctlfsm.FSM
 }
 
-type vaultCollect struct {
-	vaultID  glid.GLID
-	root     string
+// collectDeps bundles the rewireable collaborators (log reader, pull client,
+// receipt committer, vault-ctl FSM). Published atomically as ONE immutable
+// snapshot: RewireVaultFSM after a group snapshot Restore used to overwrite
+// the fields one by one while worker goroutines were mid-pass — a data race
+// and a window where a worker saw a fresh FSM with a stale pull client
+// (gastrolog-50m2vi). Workers Load a snapshot per use.
+type collectDeps struct {
 	log      LogReader
 	pull     PullClient
 	receipts ReceiptCommitter
 	fsm      *vaultctlfsm.FSM
+}
+
+type vaultCollect struct {
+	vaultID glid.GLID
+	root    string
+	// deps is the current collaborator bundle; never nil after construction.
+	deps atomic.Pointer[collectDeps]
 	// unsubPublish removes this vault's publish-callback subscription on the
-	// shared FSM fan-out; nil when no FSM was wired.
+	// shared FSM fan-out; nil when no FSM was wired. Guarded by Manager.mu
+	// (RegisterVault, RewireVaultFSM, UnregisterVault).
 	unsubPublish func()
 	// wake coalesces collect triggers for the per-vault worker goroutine.
 	// FSM publish callbacks and Notify only poke this signal — they must
@@ -117,16 +129,19 @@ func newVaultCollect(vaultID glid.GLID, root string, cfg VaultConfig) (*vaultCol
 	if cfg.Receipts == nil {
 		return nil, errors.New("receipt committer required")
 	}
-	return &vaultCollect{
+	v := &vaultCollect{
 		vaultID:   vaultID,
 		root:      root,
-		log:       cfg.Log,
-		pull:      cfg.Pull,
-		receipts:  cfg.Receipts,
-		fsm:       cfg.FSM,
 		wake:      notify.NewSignal(),
 		receipted: make(map[glid.GLID]struct{}),
-	}, nil
+	}
+	v.deps.Store(&collectDeps{
+		log:      cfg.Log,
+		pull:     cfg.Pull,
+		receipts: cfg.Receipts,
+		fsm:      cfg.FSM,
+	})
+	return v, nil
 }
 
 func (v *vaultCollect) refreshLayout() error {
@@ -155,7 +170,7 @@ func (v *vaultCollect) noteHead(segmentID glid.GLID) {
 }
 
 func (v *vaultCollect) collectOne(ctx context.Context, ref AssignedSegment) error {
-	prePath, err := PullToPreHead(ctx, v.root, ref.VaultID, ref.SegmentID, v.pull)
+	prePath, err := PullToPreHead(ctx, v.root, ref.VaultID, ref.SegmentID, v.deps.Load().pull)
 	if err != nil {
 		return err
 	}
@@ -213,7 +228,7 @@ func (v *vaultCollect) commitReceipts(ctx context.Context, ids []glid.GLID) (int
 	if len(fresh) == 0 {
 		return 0, nil
 	}
-	if err := v.receipts.CommitHolderReceipts(ctx, v.vaultID, fresh); err != nil {
+	if err := v.deps.Load().receipts.CommitHolderReceipts(ctx, v.vaultID, fresh); err != nil {
 		return 0, err
 	}
 	v.collectMu.Lock()
@@ -273,7 +288,7 @@ func (v *vaultCollect) collectMissing(ctx context.Context) (bool, error) {
 	defer v.passMu.Unlock()
 
 	v.collectMu.Lock()
-	assigned, err := v.log.Roll(ctx, v.vaultID)
+	assigned, err := v.deps.Load().log.Roll(ctx, v.vaultID)
 	if err != nil {
 		v.collectMu.Unlock()
 		return false, err
@@ -350,8 +365,8 @@ func (v *vaultCollect) collectSegments(ctx context.Context, segmentIDs []glid.GL
 			continue
 		}
 		var checksum uint32
-		if v.fsm != nil {
-			if entry := v.fsm.GetCompletedSegment(segmentID); entry != nil {
+		if fsm := v.deps.Load().fsm; fsm != nil {
+			if entry := fsm.GetCompletedSegment(segmentID); entry != nil {
 				checksum = entry.Checksum
 			}
 		}
@@ -471,28 +486,38 @@ func (m *Manager) RegisterVault(vaultID glid.GLID, root string, cfg VaultConfig)
 
 // RewireVaultFSM rebinds collection to a fresh vault-ctl sub-FSM after snapshot
 // Restore. The log reader and pull client must be updated too — they hold FSM
-// pointers captured at register time.
+// pointers captured at register time. The whole bundle is published as one
+// atomic snapshot; Manager.mu is held across the body so concurrent rewires
+// (placement sweep vs route reload both reach this path) serialize and the
+// unsub/wire callback bookkeeping cannot interleave (gastrolog-50m2vi).
 func (m *Manager) RewireVaultFSM(vaultID glid.GLID, cfg VaultConfig) error {
 	if cfg.FSM == nil {
 		return errors.New("vault-ctl FSM required")
 	}
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	v, ok := m.vaults[vaultID]
-	m.mu.Unlock()
 	if !ok {
 		return ErrUnknownVault
 	}
 	m.unwireVaultFSMCallbacks(v)
-	v.fsm = cfg.FSM
+	prev := v.deps.Load()
+	next := &collectDeps{
+		log:      prev.log,
+		pull:     prev.pull,
+		receipts: prev.receipts,
+		fsm:      cfg.FSM,
+	}
 	if cfg.Log != nil {
-		v.log = cfg.Log
+		next.log = cfg.Log
 	}
 	if cfg.Pull != nil {
-		v.pull = cfg.Pull
+		next.pull = cfg.Pull
 	}
 	if cfg.Receipts != nil {
-		v.receipts = cfg.Receipts
+		next.receipts = cfg.Receipts
 	}
+	v.deps.Store(next)
 	m.wireVaultFSMCallbacks(v, cfg.FSM)
 	v.wake.Notify()
 	return nil

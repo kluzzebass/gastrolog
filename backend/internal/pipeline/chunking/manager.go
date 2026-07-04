@@ -90,6 +90,11 @@ type vaultChunking struct {
 	// segmentIndexCache holds open EventID indexes for segments the planner has
 	// opened lazily. pruneSegmentIndexCache evicts released or exhausted entries.
 	segmentIndexCache map[glid.GLID]*OrderedIndex
+	// rewired, when non-nil, overrides cfg.FSM/LookupFSM/Applier after a
+	// vault-ctl snapshot Restore. Atomic publication — workers read via
+	// fsm()/applier() while RewireVaultFSM stores under Manager.mu
+	// (gastrolog-50m2vi).
+	rewired atomic.Pointer[chunkRewire]
 	// progress is the exactly-once state machine for the sealed-manifest
 	// build/seal/post-seal/OnBuilt lifecycle. Owns its own lock.
 	progress sealProgress
@@ -143,11 +148,47 @@ func (v *vaultChunking) logger() *slog.Logger {
 	return slog.Default()
 }
 
+// chunkRewire is the rewireable collaborator bundle, published atomically by
+// RewireVaultFSM after a group snapshot Restore. Field-by-field mutation of
+// v.cfg raced live build/plan workers reading it (gastrolog-50m2vi); workers
+// go through fsm()/applier() which Load one immutable snapshot.
+type chunkRewire struct {
+	fsm       *vaultctlfsm.FSM
+	lookupFSM func() *vaultctlfsm.FSM
+	applier   VaultCtlApplier
+}
+
 func (v *vaultChunking) fsm() *vaultctlfsm.FSM {
+	if rw := v.rewired.Load(); rw != nil {
+		if rw.lookupFSM != nil {
+			if f := rw.lookupFSM(); f != nil {
+				return f
+			}
+		}
+		return rw.fsm
+	}
 	if v.cfg.LookupFSM != nil {
 		if f := v.cfg.LookupFSM(); f != nil {
 			return f
 		}
+	}
+	return v.cfg.FSM
+}
+
+// applier returns the current vault-ctl applier, honoring a rewire.
+func (v *vaultChunking) applier() VaultCtlApplier {
+	if rw := v.rewired.Load(); rw != nil {
+		return rw.applier
+	}
+	return v.cfg.Applier
+}
+
+// wiredFSM returns the FSM object callbacks are currently attached to (the
+// last rewired object, NOT the LookupFSM indirection) — unwire must target
+// the same object wire used.
+func (v *vaultChunking) wiredFSM() *vaultctlfsm.FSM {
+	if rw := v.rewired.Load(); rw != nil {
+		return rw.fsm
 	}
 	return v.cfg.FSM
 }
@@ -239,24 +280,36 @@ func (m *Manager) RegisterVault(vaultID glid.GLID, cfg VaultConfig) error {
 // RewireVaultFSM rebinds chunking to a fresh vault-ctl sub-FSM after a group-level
 // snapshot Restore replaces the old object. Without this the planner reads a frozen
 // manifest/registry and stalls cluster-wide after leadership transfer.
+//
+// The FSM/LookupFSM/Applier trio is published as ONE atomic chunkRewire
+// snapshot instead of mutating v.cfg under live build/plan workers, and
+// Manager.mu is held across the body so concurrent rewires serialize
+// (gastrolog-50m2vi).
 func (m *Manager) RewireVaultFSM(vaultID glid.GLID, fsm *vaultctlfsm.FSM, applier VaultCtlApplier) error {
 	if fsm == nil {
 		return errors.New("vault-ctl FSM required")
 	}
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	v, ok := m.vaults[vaultID]
-	m.mu.Unlock()
 	if !ok {
 		return ErrUnknownVault
 	}
 	m.unwireVaultFSMCallbacks(v)
-	v.cfg.FSM = fsm
-	if v.cfg.LookupFSM == nil {
-		v.cfg.LookupFSM = func() *vaultctlfsm.FSM { return fsm }
+	// lookupFSM stays the registration-time live getter (cfg is immutable
+	// now); when none was registered, fsm() falls back to rw.fsm directly.
+	// The old code synthesized a closure capturing the first rewire's FSM,
+	// which went stale on a second rewire.
+	rw := &chunkRewire{fsm: fsm, lookupFSM: v.cfg.LookupFSM}
+	if prev := v.rewired.Load(); prev != nil {
+		rw.applier = prev.applier
+	} else {
+		rw.applier = v.cfg.Applier
 	}
 	if applier != nil {
-		v.cfg.Applier = applier
+		rw.applier = applier
 	}
+	v.rewired.Store(rw)
 	cfg := v.cfg
 	cfg.FSM = fsm
 	m.wireVaultFSMCallbacks(v, cfg)
@@ -282,7 +335,7 @@ func (m *Manager) HasVault(vaultID glid.GLID) bool {
 }
 
 func (m *Manager) unwireVaultFSMCallbacks(v *vaultChunking) {
-	fsm := v.cfg.FSM
+	fsm := v.wiredFSM()
 	if fsm == nil {
 		return
 	}
@@ -575,7 +628,7 @@ func (v *vaultChunking) releaseOnce(ctx context.Context) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	if !v.cfg.IsLeader() || v.cfg.Applier == nil {
+	if !v.cfg.IsLeader() || v.applier() == nil {
 		return nil
 	}
 	v.enqueueRegistryReleaseCandidates()
@@ -595,7 +648,7 @@ func (v *vaultChunking) releaseOnce(ctx context.Context) error {
 		v.mu.Unlock()
 		return nil
 	}
-	if err := v.cfg.Applier.Apply(vaultctlfsm.MarshalReleaseSegments(ready)); err != nil {
+	if err := v.applier().Apply(vaultctlfsm.MarshalReleaseSegments(ready)); err != nil {
 		v.mu.Lock()
 		v.pendingRelease = append(pending, v.pendingRelease...)
 		v.mu.Unlock()

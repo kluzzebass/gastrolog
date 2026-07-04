@@ -89,7 +89,7 @@ func (v *vaultChunking) buildOnce(ctx context.Context) error {
 	if errors.Is(err, ErrAwaitingLocalSegments) {
 		return nil
 	}
-	if err != nil || (!builtNow && v.cfg.Applier == nil) {
+	if err != nil || (!builtNow && v.applier() == nil) {
 		return err
 	}
 	if builtNow {
@@ -129,7 +129,7 @@ func (v *vaultChunking) buildOnceIfSealedElsewhere(ctx context.Context, pending 
 
 func (v *vaultChunking) runBuildOncePass(ctx context.Context, pending *vaultctlfsm.OpenChunkManifest, key buildKey) (BuildResult, bool, error) {
 	if v.progress.alreadyBuilt(key) {
-		if v.cfg.Applier == nil {
+		if v.applier() == nil {
 			return BuildResult{}, false, nil
 		}
 		// Retry CmdSealChunk with the prior build output; do not re-read every
@@ -193,7 +193,7 @@ func (v *vaultChunking) clearSealProposedIfLeaderUncommitted(pending *vaultctlfs
 // cycle; shared by the live build path (buildOnce) and restart recovery
 // (recoverBuiltGLCB). Returns true when this call committed the seal.
 func (v *vaultChunking) proposeSealOnce(ctx context.Context, pending *vaultctlfsm.OpenChunkManifest, key buildKey, result BuildResult) (bool, error) {
-	if v.cfg.Applier == nil {
+	if v.applier() == nil {
 		return false, nil
 	}
 	if !v.progress.shouldPropose(key) {
@@ -213,7 +213,7 @@ func (v *vaultChunking) proposeSealOnce(ctx context.Context, pending *vaultctlfs
 		}
 		return false, nil
 	}
-	if err := v.cfg.Applier.Apply(vaultctlfsm.MarshalSealChunk(
+	if err := v.applier().Apply(vaultctlfsm.MarshalSealChunk(
 		pending.ChunkID,
 		result.WriteEnd,
 		int64(result.RecordCount),
@@ -268,10 +268,10 @@ func (v *vaultChunking) finishBuildOnce(ctx context.Context, pending *vaultctlfs
 }
 
 func (v *vaultChunking) discardEmptySealedManifest(pending *vaultctlfsm.OpenChunkManifest) error {
-	if pending == nil || v.cfg.Applier == nil || !v.cfg.IsLeader() {
+	if pending == nil || v.applier() == nil || !v.cfg.IsLeader() {
 		return nil
 	}
-	return v.cfg.Applier.Apply(vaultctlfsm.MarshalDiscardOpenChunkManifest(pending.ChunkID))
+	return v.applier().Apply(vaultctlfsm.MarshalDiscardOpenChunkManifest(pending.ChunkID))
 }
 
 func (v *vaultChunking) build(ctx context.Context, pending *vaultctlfsm.OpenChunkManifest) (BuildResult, error) {
