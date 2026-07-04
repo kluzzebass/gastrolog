@@ -5928,6 +5928,19 @@ export class GetRouteStatsResponse extends Message<GetRouteStatsResponse> {
    */
   routeStats: PerRouteStats[] = [];
 
+  /**
+   * Cluster-total routing throughput: sum of every node's rolling-window
+   * rates from the NodeStats broadcast (gastrolog-4eh5ns).
+   *
+   * @generated from field: double ingested_per_sec = 7;
+   */
+  ingestedPerSec = 0;
+
+  /**
+   * @generated from field: double routed_per_sec = 8;
+   */
+  routedPerSec = 0;
+
   constructor(data?: PartialMessage<GetRouteStatsResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -5942,6 +5955,8 @@ export class GetRouteStatsResponse extends Message<GetRouteStatsResponse> {
     { no: 4, name: "filter_set_active", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 5, name: "vault_stats", kind: "message", T: VaultRouteStats, repeated: true },
     { no: 6, name: "route_stats", kind: "message", T: PerRouteStats, repeated: true },
+    { no: 7, name: "ingested_per_sec", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
+    { no: 8, name: "routed_per_sec", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetRouteStatsResponse {

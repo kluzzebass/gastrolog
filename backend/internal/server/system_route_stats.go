@@ -54,11 +54,28 @@ func (s *SystemServer) GetRouteStats(
 		mergePerRouteStats(routeMap, pRouteStats)
 	}
 
+	// Cluster-total throughput: local rolling-window rates plus live peers'
+	// broadcast rates (gastrolog-4eh5ns).
+	var ingestedPerSec, routedPerSec float64
+	if s.localStats != nil {
+		if ls := s.localStats(); ls != nil {
+			ingestedPerSec = ls.RouteIngestedPerSec
+			routedPerSec = ls.RouteRoutedPerSec
+		}
+	}
+	if s.peerRouteStats != nil {
+		pIn, pRouted := s.peerRouteStats.AggregateRouteRates()
+		ingestedPerSec += pIn
+		routedPerSec += pRouted
+	}
+
 	resp := &apiv1.GetRouteStatsResponse{
 		TotalIngested:   totalIngested,
 		TotalDropped:    totalDropped,
 		TotalRouted:     totalRouted,
 		FilterSetActive: filterActive,
+		IngestedPerSec:  ingestedPerSec,
+		RoutedPerSec:    routedPerSec,
 	}
 	for _, vs := range vaultMap {
 		resp.VaultStats = append(resp.VaultStats, vs)

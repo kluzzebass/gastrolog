@@ -974,6 +974,11 @@ message GetRouteStatsResponse {
 
   // Per-route counters.
   repeated PerRouteStats route_stats = 6;
+
+  // Cluster-total routing throughput: sum of every node's rolling-window
+  // rates from the NodeStats broadcast (gastrolog-4eh5ns).
+  double ingested_per_sec = 7;
+  double routed_per_sec = 8;
 }
 
 message VaultRouteStats {

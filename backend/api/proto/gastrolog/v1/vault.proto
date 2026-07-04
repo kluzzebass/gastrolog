@@ -288,6 +288,21 @@ message VaultStats {
   // has no vault-ctl group for this vault (e.g. vault placed
   // elsewhere) or Raft is not yet initialized.
   uint64 raft_applied_index = 13;
+
+  // Segmentation append throughput on THIS node (origin side), from the
+  // stats collector's rolling windows over the writer's cumulative
+  // counters. Zero when the vault has no local segmentation writer.
+  // append_records_per_sec counts frames appended to the working segment;
+  // append_durable_per_sec counts records released by a successful group
+  // commit — the gap between them plus the queue depth is the write-path
+  // backpressure picture (gastrolog-4eh5ns).
+  double append_records_per_sec = 14;
+  double append_bytes_per_sec = 15;
+  double append_durable_per_sec = 16;
+  uint64 append_records_total = 17;
+  uint64 append_bytes_total = 18;
+  uint32 append_queue_depth = 19;
+  uint32 append_queue_capacity = 20;
 }
 
 message ReindexVaultRequest {

@@ -323,3 +323,41 @@ func TestShutdownFlushFailureLogged(t *testing.T) {
 		t.Fatalf("shutdown flush failure left no log trace; log output:\n%s", out)
 	}
 }
+
+// TestAppendStatsCounters: the per-vault throughput counters feeding the
+// stats broadcast (gastrolog-4eh5ns). After N acked records, appended and
+// durable both equal N (acks resolve only after the group-commit fsync), and
+// byte counts reflect the appended frame bodies.
+func TestAppendStatsCounters(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	mgr, in := startManager(t, Config{}, vaultID)
+
+	const n = 5
+	for range n {
+		if err := sendAck(t, in, testRecord(t)); err != nil {
+			t.Fatalf("append: %v", err)
+		}
+	}
+
+	stats := mgr.AppendStats()
+	if len(stats) != 1 {
+		t.Fatalf("AppendStats len = %d, want 1", len(stats))
+	}
+	s := stats[0]
+	if s.VaultID != vaultID {
+		t.Fatalf("vault = %s, want %s", s.VaultID, vaultID)
+	}
+	if s.RecordsAppended != n {
+		t.Fatalf("RecordsAppended = %d, want %d", s.RecordsAppended, n)
+	}
+	if s.RecordsDurable != n {
+		t.Fatalf("RecordsDurable = %d, want %d (ack resolves only after commit)", s.RecordsDurable, n)
+	}
+	if s.BytesAppended == 0 {
+		t.Fatal("BytesAppended = 0, want > 0")
+	}
+	if s.QueueCap == 0 {
+		t.Fatal("QueueCap = 0, want the writer's bounded queue capacity")
+	}
+}

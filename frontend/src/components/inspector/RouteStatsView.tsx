@@ -75,6 +75,16 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
             variant={Number(stats.totalDropped) > 0 ? "error" : undefined}
           />
           <StatBox label="Drop rate" value={`${dropRate}%`} dark={dark} />
+          <StatBox
+            label="Ingest rate"
+            value={`${formatCount(stats.ingestedPerSec)}/s`}
+            dark={dark}
+          />
+          <StatBox
+            label="Route rate"
+            value={`${formatCount(stats.routedPerSec)}/s`}
+            dark={dark}
+          />
         </div>
       </div>
 

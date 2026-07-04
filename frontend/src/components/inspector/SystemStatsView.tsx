@@ -93,6 +93,36 @@ function CompactView({
         </section>
       )}
 
+      {/* Pipeline throughput: rolling-window rates from the stats broadcast
+          (gastrolog-4eh5ns). Section appears once the node has routing
+          activity or a local segmentation writer. */}
+      {(Number(stats.routeStatsIngested) > 0 || stats.vaults.some((v) => v.appendQueueCapacity > 0)) && (
+        <section>
+          <CompactDivider dark={dark} />
+          <CompactSectionLabel label="Throughput" dark={dark} />
+          <div className="grid grid-cols-2 gap-x-6 gap-y-1">
+            <CompactStatRow label="Ingested" value={`${formatRate(stats.routeIngestedPerSec)}/s`} mono dark={dark} />
+            <CompactStatRow label="Routed" value={`${formatRate(stats.routeRoutedPerSec)}/s`} mono dark={dark} />
+          </div>
+          {stats.vaults.filter((v) => v.appendQueueCapacity > 0).map((v) => (
+            <div key={encode(v.id)} className="grid grid-cols-2 gap-x-6 gap-y-1 mt-1">
+              <CompactStatRow
+                label={v.name || encode(v.id).slice(0, 8)}
+                value={`${formatRate(v.appendRecordsPerSec)}/s · ${formatBytes(v.appendBytesPerSec)}/s`}
+                mono
+                dark={dark}
+              />
+              <CompactStatRow
+                label="Queue"
+                value={`${v.appendQueueDepth} / ${v.appendQueueCapacity}`}
+                mono
+                dark={dark}
+              />
+            </div>
+          ))}
+        </section>
+      )}
+
       {/* Raft stats */}
       {stats.raftState && (
         <section>
@@ -195,6 +225,10 @@ export function ClusterSummaryView({
   let totalGoroutines = 0;
   let totalQueueDepth = 0;
   let totalQueueCapacity = 0;
+  let totalIngestRate = 0;
+  let totalRouteRate = 0;
+  let totalAppendRate = 0;
+  let totalAppendBytesRate = 0;
   let leaderName = "";
 
   for (const node of nodes) {
@@ -207,11 +241,15 @@ export function ClusterSummaryView({
     totalGoroutines += s.goroutines;
     totalQueueDepth += s.ingestQueueDepth;
     totalQueueCapacity += s.ingestQueueCapacity;
+    totalIngestRate += s.routeIngestedPerSec;
+    totalRouteRate += s.routeRoutedPerSec;
     for (const v of s.vaults) {
       totalVaults++;
       totalRecords += Number(v.recordCount);
       totalBytes += Number(v.dataBytes);
       totalChunks += Number(v.chunkCount);
+      totalAppendRate += v.appendRecordsPerSec;
+      totalAppendBytesRate += v.appendBytesPerSec;
     }
   }
 
@@ -227,6 +265,18 @@ export function ClusterSummaryView({
           <CompactStatRow label="Records" value={totalRecords.toLocaleString()} mono dark={dark} />
           <CompactStatRow label="Data" value={formatBytes(totalBytes)} mono dark={dark} />
           <CompactStatRow label="Chunks" value={totalChunks.toLocaleString()} mono dark={dark} />
+        </div>
+      </section>
+
+      {/* Cluster throughput: summed rolling-window rates (gastrolog-4eh5ns) */}
+      <CompactDivider dark={dark} />
+      <section>
+        <CompactSectionLabel label="Throughput" dark={dark} />
+        <div className="grid grid-cols-2 gap-x-6 gap-y-1">
+          <CompactStatRow label="Ingested" value={`${formatRate(totalIngestRate)}/s`} mono dark={dark} />
+          <CompactStatRow label="Routed" value={`${formatRate(totalRouteRate)}/s`} mono dark={dark} />
+          <CompactStatRow label="Appended" value={`${formatRate(totalAppendRate)}/s`} mono dark={dark} />
+          <CompactStatRow label="Append data" value={`${formatBytes(totalAppendBytesRate)}/s`} mono dark={dark} />
         </div>
       </section>
 
@@ -261,4 +311,11 @@ export function ClusterSummaryView({
       )}
     </div>
   );
+}
+
+function formatRate(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  if (n >= 10) return Math.round(n).toString();
+  return n.toFixed(1);
 }

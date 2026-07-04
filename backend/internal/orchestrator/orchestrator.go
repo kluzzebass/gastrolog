@@ -957,6 +957,16 @@ type VaultSnapshot struct {
 	RaftAppliedIndex uint64
 }
 
+// VaultAppendStats returns per-vault cumulative segmentation throughput
+// counters from the pipeline supervisor. Empty when the pipeline is not
+// running (gastrolog-4eh5ns).
+func (o *Orchestrator) VaultAppendStats() []segmentation.AppendStats {
+	if o.pipeline == nil {
+		return nil
+	}
+	return o.pipeline.AppendStats()
+}
+
 // VaultSnapshots returns a snapshot of stats for all registered vaults.
 // Vaults without a local chunk instance (e.g. placement excludes this
 // node) are still reported with zero chunk/byte counts so consumers

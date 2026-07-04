@@ -494,6 +494,12 @@ func (s *Supervisor) IngestQueueDepth() int { return len(s.ingestOut) }
 // IngestQueueCapacity reports the capacity of the ingestion→digestion queue.
 func (s *Supervisor) IngestQueueCapacity() int { return cap(s.ingestOut) }
 
+// AppendStats returns per-vault cumulative segmentation throughput counters
+// for the stats broadcast (gastrolog-4eh5ns).
+func (s *Supervisor) AppendStats() []segmentation.AppendStats {
+	return s.seg.AppendStats()
+}
+
 // RegisterVault starts the managers for the roles the vault holds on this node.
 // Safe before or during Start. It is idempotent only in the sense that a second
 // registration of the same vault returns ErrVaultRegistered.

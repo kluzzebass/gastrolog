@@ -1361,6 +1361,49 @@ export class VaultStats extends Message<VaultStats> {
    */
   raftAppliedIndex = protoInt64.zero;
 
+  /**
+   * Segmentation append throughput on THIS node (origin side), from the
+   * stats collector's rolling windows over the writer's cumulative
+   * counters. Zero when the vault has no local segmentation writer.
+   * append_records_per_sec counts frames appended to the working segment;
+   * append_durable_per_sec counts records released by a successful group
+   * commit — the gap between them plus the queue depth is the write-path
+   * backpressure picture (gastrolog-4eh5ns).
+   *
+   * @generated from field: double append_records_per_sec = 14;
+   */
+  appendRecordsPerSec = 0;
+
+  /**
+   * @generated from field: double append_bytes_per_sec = 15;
+   */
+  appendBytesPerSec = 0;
+
+  /**
+   * @generated from field: double append_durable_per_sec = 16;
+   */
+  appendDurablePerSec = 0;
+
+  /**
+   * @generated from field: uint64 append_records_total = 17;
+   */
+  appendRecordsTotal = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 append_bytes_total = 18;
+   */
+  appendBytesTotal = protoInt64.zero;
+
+  /**
+   * @generated from field: uint32 append_queue_depth = 19;
+   */
+  appendQueueDepth = 0;
+
+  /**
+   * @generated from field: uint32 append_queue_capacity = 20;
+   */
+  appendQueueCapacity = 0;
+
   constructor(data?: PartialMessage<VaultStats>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1382,6 +1425,13 @@ export class VaultStats extends Message<VaultStats> {
     { no: 11, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 12, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 13, name: "raft_applied_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 14, name: "append_records_per_sec", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
+    { no: 15, name: "append_bytes_per_sec", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
+    { no: 16, name: "append_durable_per_sec", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
+    { no: 17, name: "append_records_total", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 18, name: "append_bytes_total", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 19, name: "append_queue_depth", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 20, name: "append_queue_capacity", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultStats {

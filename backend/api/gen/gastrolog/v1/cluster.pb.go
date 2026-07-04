@@ -628,9 +628,14 @@ type NodeStats struct {
 	// Total on-disk bytes on this node: local chunk/index stores, pipeline
 	// segments (FSM ByteSize where published, otherwise file stat), raft
 	// persistence, and managed files. Distinct from per-vault data_bytes.
-	StorageBytes  int64 `protobuf:"varint,37,opt,name=storage_bytes,json=storageBytes,proto3" json:"storage_bytes,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	StorageBytes int64 `protobuf:"varint,37,opt,name=storage_bytes,json=storageBytes,proto3" json:"storage_bytes,omitempty"`
+	// Routing throughput on this node, from the stats collector's rolling
+	// windows over the cumulative route counters (fields 28/30). Cluster
+	// totals are the sum across nodes (gastrolog-4eh5ns).
+	RouteIngestedPerSec float64 `protobuf:"fixed64,39,opt,name=route_ingested_per_sec,json=routeIngestedPerSec,proto3" json:"route_ingested_per_sec,omitempty"`
+	RouteRoutedPerSec   float64 `protobuf:"fixed64,40,opt,name=route_routed_per_sec,json=routeRoutedPerSec,proto3" json:"route_routed_per_sec,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *NodeStats) Reset() {
@@ -925,6 +930,20 @@ func (x *NodeStats) GetVaultPipelineDisk() []*VaultPipelineNodeDisk {
 func (x *NodeStats) GetStorageBytes() int64 {
 	if x != nil {
 		return x.StorageBytes
+	}
+	return 0
+}
+
+func (x *NodeStats) GetRouteIngestedPerSec() float64 {
+	if x != nil {
+		return x.RouteIngestedPerSec
+	}
+	return 0
+}
+
+func (x *NodeStats) GetRouteRoutedPerSec() float64 {
+	if x != nil {
+		return x.RouteRoutedPerSec
 	}
 	return 0
 }
@@ -4325,7 +4344,7 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\apayload\"\v\n" +
 	"\tHeartbeat\"1\n" +
 	"\bNodeJobs\x12%\n" +
-	"\x04jobs\x18\x01 \x03(\v2\x11.gastrolog.v1.JobR\x04jobs\"\xd3\r\n" +
+	"\x04jobs\x18\x01 \x03(\v2\x11.gastrolog.v1.JobR\x04jobs\"\xb9\x0e\n" +
 	"\tNodeStats\x12\x1f\n" +
 	"\vcpu_percent\x18\x01 \x01(\x01R\n" +
 	"cpuPercent\x12!\n" +
@@ -4372,7 +4391,9 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x10peer_connections\x18# \x03(\v2\x1a.gastrolog.v1.PeerConnStatR\x0fpeerConnections\x12N\n" +
 	"\x13peer_traffic_totals\x18& \x03(\v2\x1e.gastrolog.v1.PeerTrafficTotalR\x11peerTrafficTotals\x12S\n" +
 	"\x13vault_pipeline_disk\x18$ \x03(\v2#.gastrolog.v1.VaultPipelineNodeDiskR\x11vaultPipelineDisk\x12#\n" +
-	"\rstorage_bytes\x18% \x01(\x03R\fstorageBytes\"\xec\x01\n" +
+	"\rstorage_bytes\x18% \x01(\x03R\fstorageBytes\x123\n" +
+	"\x16route_ingested_per_sec\x18' \x01(\x01R\x13routeIngestedPerSec\x12/\n" +
+	"\x14route_routed_per_sec\x18( \x01(\x01R\x11routeRoutedPerSec\"\xec\x01\n" +
 	"\x15VaultPipelineNodeDisk\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12)\n" +
 	"\x10working_segments\x18\x02 \x01(\rR\x0fworkingSegments\x12<\n" +

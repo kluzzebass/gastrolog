@@ -1562,8 +1562,22 @@ type VaultStats struct {
 	// has no vault-ctl group for this vault (e.g. vault placed
 	// elsewhere) or Raft is not yet initialized.
 	RaftAppliedIndex uint64 `protobuf:"varint,13,opt,name=raft_applied_index,json=raftAppliedIndex,proto3" json:"raft_applied_index,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Segmentation append throughput on THIS node (origin side), from the
+	// stats collector's rolling windows over the writer's cumulative
+	// counters. Zero when the vault has no local segmentation writer.
+	// append_records_per_sec counts frames appended to the working segment;
+	// append_durable_per_sec counts records released by a successful group
+	// commit — the gap between them plus the queue depth is the write-path
+	// backpressure picture (gastrolog-4eh5ns).
+	AppendRecordsPerSec float64 `protobuf:"fixed64,14,opt,name=append_records_per_sec,json=appendRecordsPerSec,proto3" json:"append_records_per_sec,omitempty"`
+	AppendBytesPerSec   float64 `protobuf:"fixed64,15,opt,name=append_bytes_per_sec,json=appendBytesPerSec,proto3" json:"append_bytes_per_sec,omitempty"`
+	AppendDurablePerSec float64 `protobuf:"fixed64,16,opt,name=append_durable_per_sec,json=appendDurablePerSec,proto3" json:"append_durable_per_sec,omitempty"`
+	AppendRecordsTotal  uint64  `protobuf:"varint,17,opt,name=append_records_total,json=appendRecordsTotal,proto3" json:"append_records_total,omitempty"`
+	AppendBytesTotal    uint64  `protobuf:"varint,18,opt,name=append_bytes_total,json=appendBytesTotal,proto3" json:"append_bytes_total,omitempty"`
+	AppendQueueDepth    uint32  `protobuf:"varint,19,opt,name=append_queue_depth,json=appendQueueDepth,proto3" json:"append_queue_depth,omitempty"`
+	AppendQueueCapacity uint32  `protobuf:"varint,20,opt,name=append_queue_capacity,json=appendQueueCapacity,proto3" json:"append_queue_capacity,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *VaultStats) Reset() {
@@ -1683,6 +1697,55 @@ func (x *VaultStats) GetName() string {
 func (x *VaultStats) GetRaftAppliedIndex() uint64 {
 	if x != nil {
 		return x.RaftAppliedIndex
+	}
+	return 0
+}
+
+func (x *VaultStats) GetAppendRecordsPerSec() float64 {
+	if x != nil {
+		return x.AppendRecordsPerSec
+	}
+	return 0
+}
+
+func (x *VaultStats) GetAppendBytesPerSec() float64 {
+	if x != nil {
+		return x.AppendBytesPerSec
+	}
+	return 0
+}
+
+func (x *VaultStats) GetAppendDurablePerSec() float64 {
+	if x != nil {
+		return x.AppendDurablePerSec
+	}
+	return 0
+}
+
+func (x *VaultStats) GetAppendRecordsTotal() uint64 {
+	if x != nil {
+		return x.AppendRecordsTotal
+	}
+	return 0
+}
+
+func (x *VaultStats) GetAppendBytesTotal() uint64 {
+	if x != nil {
+		return x.AppendBytesTotal
+	}
+	return 0
+}
+
+func (x *VaultStats) GetAppendQueueDepth() uint32 {
+	if x != nil {
+		return x.AppendQueueDepth
+	}
+	return 0
+}
+
+func (x *VaultStats) GetAppendQueueCapacity() uint32 {
+	if x != nil {
+		return x.AppendQueueCapacity
 	}
 	return 0
 }
@@ -3399,7 +3462,7 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\x11stack_inuse_bytes\x18\x06 \x01(\x03R\x0fstackInuseBytes\x12\x1b\n" +
 	"\tsys_bytes\x18\a \x01(\x03R\bsysBytes\x12!\n" +
 	"\fheap_objects\x18\b \x01(\x04R\vheapObjects\x12\x15\n" +
-	"\x06num_gc\x18\t \x01(\rR\x05numGc\"\xdc\x03\n" +
+	"\x06num_gc\x18\t \x01(\rR\x05numGc\"\xb9\x06\n" +
 	"\n" +
 	"VaultStats\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
@@ -3418,7 +3481,14 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	" \x01(\v2\x1a.google.protobuf.TimestampR\fnewestRecord\x12\x18\n" +
 	"\aenabled\x18\v \x01(\bR\aenabled\x12\x12\n" +
 	"\x04name\x18\f \x01(\tR\x04name\x12,\n" +
-	"\x12raft_applied_index\x18\r \x01(\x04R\x10raftAppliedIndex\"+\n" +
+	"\x12raft_applied_index\x18\r \x01(\x04R\x10raftAppliedIndex\x123\n" +
+	"\x16append_records_per_sec\x18\x0e \x01(\x01R\x13appendRecordsPerSec\x12/\n" +
+	"\x14append_bytes_per_sec\x18\x0f \x01(\x01R\x11appendBytesPerSec\x123\n" +
+	"\x16append_durable_per_sec\x18\x10 \x01(\x01R\x13appendDurablePerSec\x120\n" +
+	"\x14append_records_total\x18\x11 \x01(\x04R\x12appendRecordsTotal\x12,\n" +
+	"\x12append_bytes_total\x18\x12 \x01(\x04R\x10appendBytesTotal\x12,\n" +
+	"\x12append_queue_depth\x18\x13 \x01(\rR\x10appendQueueDepth\x122\n" +
+	"\x15append_queue_capacity\x18\x14 \x01(\rR\x13appendQueueCapacity\"+\n" +
 	"\x13ReindexVaultRequest\x12\x14\n" +
 	"\x05vault\x18\x01 \x01(\tR\x05vault\"-\n" +
 	"\x14ReindexVaultResponse\x12\x15\n" +

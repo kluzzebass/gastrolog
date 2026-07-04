@@ -226,6 +226,23 @@ func (p *PeerState) AggregateRouteStats() (ingested, dropped, routed int64, filt
 	return
 }
 
+// AggregateRouteRates sums live peers' rolling-window routing rates from
+// their NodeStats broadcasts. The caller adds the local node's own rates
+// (gastrolog-4eh5ns).
+func (p *PeerState) AggregateRouteRates() (ingestedPerSec, routedPerSec float64) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	now := time.Now()
+	for _, e := range p.entries {
+		if now.Sub(e.received) > p.ttl || e.stats == nil {
+			continue
+		}
+		ingestedPerSec += e.stats.RouteIngestedPerSec
+		routedPerSec += e.stats.RouteRoutedPerSec
+	}
+	return ingestedPerSec, routedPerSec
+}
+
 // PeerVaultPipelineDisk is one peer node's broadcast pipeline disk counts for a vault.
 type PeerVaultPipelineDisk struct {
 	NodeID                string

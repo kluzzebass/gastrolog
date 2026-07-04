@@ -522,6 +522,7 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 		CertManager:        s.certManager,
 		PeerStats:          s.peerIngesterStats,
 		PeerRouteStats:     s.peerRouteStats,
+		LocalStats:         s.localStatsFn,
 		LocalNodeID:        s.localNodeID,
 		AfterConfigApply:   s.afterConfigApply,
 		ConfigSignal:       s.configSignal,

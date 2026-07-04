@@ -66,6 +66,22 @@ func (a *orchStatsAdapter) IngesterStats(id string) (name string, messages, byte
 	return a.orch.IngesterName(uid), s.MessagesIngested.Load(), s.BytesIngested.Load(), s.Errors.Load(), a.orch.IsIngesterRunning(uid)
 }
 
+func (a *orchStatsAdapter) VaultAppendStats() []cluster.StatsVaultAppendSnapshot {
+	stats := a.orch.VaultAppendStats()
+	out := make([]cluster.StatsVaultAppendSnapshot, len(stats))
+	for i, s := range stats {
+		out[i] = cluster.StatsVaultAppendSnapshot{
+			VaultID:         s.VaultID,
+			RecordsAppended: s.RecordsAppended,
+			BytesAppended:   s.BytesAppended,
+			RecordsDurable:  s.RecordsDurable,
+			QueueDepth:      s.QueueDepth,
+			QueueCap:        s.QueueCap,
+		}
+	}
+	return out
+}
+
 func (a *orchStatsAdapter) RouteStats() cluster.StatsRouteSnapshot {
 	rs := a.orch.GetRouteStats()
 	snap := cluster.StatsRouteSnapshot{

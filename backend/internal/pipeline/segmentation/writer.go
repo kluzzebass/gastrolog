@@ -61,6 +61,12 @@ type vaultWriter struct {
 	alerts  AlertSink
 	dropped *atomic.Uint64 // manager-wide dropped-records counter
 
+	// Cumulative throughput counters for the stats broadcast; the collector's
+	// rolling windows turn them into per-second rates (gastrolog-4eh5ns).
+	recordsAppended atomic.Uint64 // frames appended to the working segment
+	bytesAppended   atomic.Uint64 // frame body bytes appended
+	recordsDurable  atomic.Uint64 // records released by a successful group commit
+
 	// Resolved per-vault commit/fsync tuning (Config default + VaultConfig override).
 	syncEvery    int
 	syncWindow   time.Duration
@@ -468,6 +474,8 @@ func (b *commitBatch) append(work encodedWork) error {
 		b.releaseParked(err)
 		return err
 	}
+	b.w.recordsAppended.Add(1)
+	b.w.bytesAppended.Add(uint64(len(work.body)))
 	b.pendingSync++
 	if work.ack != nil {
 		b.parked = append(b.parked, work.ack)
@@ -491,6 +499,9 @@ func (b *commitBatch) commit() error {
 		err = b.w.syncAndMaybeClose()
 	}
 	b.releaseParked(err)
+	if err == nil {
+		b.w.recordsDurable.Add(uint64(b.pendingSync)) //nolint:gosec // pendingSync >= 0
+	}
 	b.pendingSync = 0
 	b.hasAck = false
 	b.disarmTimer()

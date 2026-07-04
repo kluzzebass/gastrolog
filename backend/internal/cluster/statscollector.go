@@ -39,6 +39,18 @@ type StatsVaultSnapshot struct {
 	RaftAppliedIndex uint64
 }
 
+// StatsVaultAppendSnapshot captures one vault's cumulative segmentation
+// append counters for broadcast; the collector's rolling windows turn them
+// into per-second rates (gastrolog-4eh5ns).
+type StatsVaultAppendSnapshot struct {
+	VaultID         glid.GLID
+	RecordsAppended uint64
+	BytesAppended   uint64
+	RecordsDurable  uint64
+	QueueDepth      int
+	QueueCap        int
+}
+
 // StatsRouteSnapshot captures route stats for broadcast.
 type StatsRouteSnapshot struct {
 	Ingested     int64
@@ -88,6 +100,7 @@ type StatsProvider interface {
 	IngesterIDs() []string
 	IngesterStats(id string) (name string, messages, bytes, errors int64, running bool)
 	RouteStats() StatsRouteSnapshot
+	VaultAppendStats() []StatsVaultAppendSnapshot
 	PipelineDiskSnapshots() []StatsVaultPipelineDiskSnapshot
 	LocalStorageBytes() int64
 }
@@ -146,6 +159,12 @@ type StatsCollector struct {
 	mu               sync.Mutex
 	peerConnStats    map[string]*peerConnStatsWindow
 	peerTrafficStats map[string]*peerConnStatsWindow // keyed by peer node ID
+	// vaultAppendStats holds per-vault append-rate windows, two entries per
+	// vault ("append:<id>" records+bytes, "durable:<id>" durable records).
+	// routeRateStats holds the single node-level routing window ("route"
+	// ingested+routed). Same mechanics as the peer traffic windows.
+	vaultAppendStats map[string]*peerConnStatsWindow
+	routeRateStats   map[string]*peerConnStatsWindow
 	// lastPublishedPurposeWindows holds purposes_window from the most recent
 	// CollectLocalTick (5s broadcast). CollectLocalSnapshot overlays this onto
 	// read-only snapshots briefly after each tick so WatchSystemStatus still
@@ -175,6 +194,8 @@ func NewStatsCollector(cfg StatsCollectorConfig) *StatsCollector {
 		cfg:              cfg,
 		peerConnStats:    make(map[string]*peerConnStatsWindow),
 		peerTrafficStats: make(map[string]*peerConnStatsWindow),
+		vaultAppendStats: make(map[string]*peerConnStatsWindow),
+		routeRateStats:   make(map[string]*peerConnStatsWindow),
 	}
 }
 
@@ -298,6 +319,32 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 			})
 		}
 
+		// Per-vault segmentation append throughput (gastrolog-4eh5ns).
+		// Rates come from rolling windows over the writer's cumulative
+		// counters; totals and queue gauges pass through as-is.
+		vaultByID := make(map[string]*gastrologv1.VaultStats, len(stats.Vaults))
+		for _, v := range stats.Vaults {
+			vaultByID[string(v.Id)] = v
+		}
+		for _, as := range c.cfg.Stats.VaultAppendStats() {
+			v := vaultByID[string(as.VaultID.ToProto())]
+			if v == nil {
+				v = &gastrologv1.VaultStats{Id: as.VaultID.ToProto()}
+				stats.Vaults = append(stats.Vaults, v)
+			}
+			recPerSec, bytesPerSec, _, _ := c.observeTrafficWindow(now, "append:"+as.VaultID.String(),
+				int64(as.RecordsAppended), int64(as.BytesAppended), stepWindows, c.vaultAppendStats) //nolint:gosec // counters < 2^63
+			durPerSec, _, _, _ := c.observeTrafficWindow(now, "durable:"+as.VaultID.String(),
+				int64(as.RecordsDurable), 0, stepWindows, c.vaultAppendStats) //nolint:gosec // counter < 2^63
+			v.AppendRecordsPerSec = recPerSec
+			v.AppendBytesPerSec = bytesPerSec
+			v.AppendDurablePerSec = durPerSec
+			v.AppendRecordsTotal = as.RecordsAppended
+			v.AppendBytesTotal = as.BytesAppended
+			v.AppendQueueDepth = uint32(as.QueueDepth)  //nolint:gosec
+			v.AppendQueueCapacity = uint32(as.QueueCap) //nolint:gosec
+		}
+
 		// Ingester stats.
 		for _, id := range c.cfg.Stats.IngesterIDs() {
 			name, msgs, bytes, errs, running := c.cfg.Stats.IngesterStats(id)
@@ -317,6 +364,11 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 		stats.RouteStatsDropped = rs.Dropped
 		stats.RouteStatsRouted = rs.Routed
 		stats.RouteStatsFilterActive = rs.FilterActive
+		// Node-level routing throughput windows (gastrolog-4eh5ns).
+		inPerSec, routedPerSec, _, _ := c.observeTrafficWindow(now, "route",
+			rs.Ingested, rs.Routed, stepWindows, c.routeRateStats)
+		stats.RouteIngestedPerSec = inPerSec
+		stats.RouteRoutedPerSec = routedPerSec
 		for _, vs := range rs.VaultStats {
 			stats.RouteVaultStats = append(stats.RouteVaultStats, &gastrologv1.VaultRouteStats{
 				VaultId:        vs.VaultID.ToProto(),

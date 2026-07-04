@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"maps"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -155,6 +157,41 @@ func New(cfg Config) (*Manager, <-chan CompletedSegment) {
 		completed: completed,
 		writers:   make(map[glid.GLID]*vaultWriter),
 	}, completed
+}
+
+// AppendStats is one vault's cumulative segmentation throughput counters.
+// RecordsDurable lags RecordsAppended by the in-flight commit batch; the gap
+// plus queue depth is the backpressure picture. Rates are computed downstream
+// by the stats collector's rolling windows (gastrolog-4eh5ns).
+type AppendStats struct {
+	VaultID         glid.GLID
+	RecordsAppended uint64
+	BytesAppended   uint64
+	RecordsDurable  uint64
+	QueueDepth      int
+	QueueCap        int
+}
+
+// AppendStats returns cumulative throughput counters for every registered
+// vault writer.
+func (m *Manager) AppendStats() []AppendStats {
+	m.mu.Lock()
+	writers := make(map[glid.GLID]*vaultWriter, len(m.writers))
+	maps.Copy(writers, m.writers)
+	m.mu.Unlock()
+	out := make([]AppendStats, 0, len(writers))
+	for vaultID, w := range writers {
+		out = append(out, AppendStats{
+			VaultID:         vaultID,
+			RecordsAppended: w.recordsAppended.Load(),
+			BytesAppended:   w.bytesAppended.Load(),
+			RecordsDurable:  w.recordsDurable.Load(),
+			QueueDepth:      len(w.in),
+			QueueCap:        cap(w.in),
+		})
+	}
+	slices.SortFunc(out, func(a, b AppendStats) int { return a.VaultID.Compare(b.VaultID) })
+	return out
 }
 
 // DroppedRecords reports how many records this manager dropped without an ack

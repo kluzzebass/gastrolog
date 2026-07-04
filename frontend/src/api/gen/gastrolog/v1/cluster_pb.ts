@@ -666,6 +666,20 @@ export class NodeStats extends Message<NodeStats> {
    */
   storageBytes = protoInt64.zero;
 
+  /**
+   * Routing throughput on this node, from the stats collector's rolling
+   * windows over the cumulative route counters (fields 28/30). Cluster
+   * totals are the sum across nodes (gastrolog-4eh5ns).
+   *
+   * @generated from field: double route_ingested_per_sec = 39;
+   */
+  routeIngestedPerSec = 0;
+
+  /**
+   * @generated from field: double route_routed_per_sec = 40;
+   */
+  routeRoutedPerSec = 0;
+
   constructor(data?: PartialMessage<NodeStats>) {
     super();
     proto3.util.initPartial(data, this);
@@ -712,6 +726,8 @@ export class NodeStats extends Message<NodeStats> {
     { no: 38, name: "peer_traffic_totals", kind: "message", T: PeerTrafficTotal, repeated: true },
     { no: 36, name: "vault_pipeline_disk", kind: "message", T: VaultPipelineNodeDisk, repeated: true },
     { no: 37, name: "storage_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 39, name: "route_ingested_per_sec", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
+    { no: 40, name: "route_routed_per_sec", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): NodeStats {

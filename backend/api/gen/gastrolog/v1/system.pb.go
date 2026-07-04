@@ -6988,9 +6988,13 @@ type GetRouteStatsResponse struct {
 	// Per-vault destination counters.
 	VaultStats []*VaultRouteStats `protobuf:"bytes,5,rep,name=vault_stats,json=vaultStats,proto3" json:"vault_stats,omitempty"`
 	// Per-route counters.
-	RouteStats    []*PerRouteStats `protobuf:"bytes,6,rep,name=route_stats,json=routeStats,proto3" json:"route_stats,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	RouteStats []*PerRouteStats `protobuf:"bytes,6,rep,name=route_stats,json=routeStats,proto3" json:"route_stats,omitempty"`
+	// Cluster-total routing throughput: sum of every node's rolling-window
+	// rates from the NodeStats broadcast (gastrolog-4eh5ns).
+	IngestedPerSec float64 `protobuf:"fixed64,7,opt,name=ingested_per_sec,json=ingestedPerSec,proto3" json:"ingested_per_sec,omitempty"`
+	RoutedPerSec   float64 `protobuf:"fixed64,8,opt,name=routed_per_sec,json=routedPerSec,proto3" json:"routed_per_sec,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *GetRouteStatsResponse) Reset() {
@@ -7063,6 +7067,20 @@ func (x *GetRouteStatsResponse) GetRouteStats() []*PerRouteStats {
 		return x.RouteStats
 	}
 	return nil
+}
+
+func (x *GetRouteStatsResponse) GetIngestedPerSec() float64 {
+	if x != nil {
+		return x.IngestedPerSec
+	}
+	return 0
+}
+
+func (x *GetRouteStatsResponse) GetRoutedPerSec() float64 {
+	if x != nil {
+		return x.RoutedPerSec
+	}
+	return 0
 }
 
 type VaultRouteStats struct {
@@ -9296,7 +9314,7 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x12WatchSystemRequest\"A\n" +
 	"\x13WatchSystemResponse\x12*\n" +
 	"\x11system_raft_index\x18\x01 \x01(\x04R\x0fsystemRaftIndex\"\x16\n" +
-	"\x14GetRouteStatsRequest\"\xb0\x02\n" +
+	"\x14GetRouteStatsRequest\"\x80\x03\n" +
 	"\x15GetRouteStatsResponse\x12%\n" +
 	"\x0etotal_ingested\x18\x01 \x01(\x03R\rtotalIngested\x12#\n" +
 	"\rtotal_dropped\x18\x02 \x01(\x03R\ftotalDropped\x12!\n" +
@@ -9305,7 +9323,9 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\vvault_stats\x18\x05 \x03(\v2\x1d.gastrolog.v1.VaultRouteStatsR\n" +
 	"vaultStats\x12<\n" +
 	"\vroute_stats\x18\x06 \x03(\v2\x1b.gastrolog.v1.PerRouteStatsR\n" +
-	"routeStats\"U\n" +
+	"routeStats\x12(\n" +
+	"\x10ingested_per_sec\x18\a \x01(\x01R\x0eingestedPerSec\x12$\n" +
+	"\x0erouted_per_sec\x18\b \x01(\x01R\froutedPerSec\"U\n" +
 	"\x0fVaultRouteStats\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12'\n" +
 	"\x0frecords_matched\x18\x02 \x01(\x03R\x0erecordsMatched\"S\n" +
