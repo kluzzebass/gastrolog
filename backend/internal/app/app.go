@@ -55,6 +55,7 @@ import (
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/pipeline/digestion"
 	"gastrolog/internal/raftgroup"
+	"gastrolog/internal/schedwatch"
 	"gastrolog/internal/raftwal"
 	"gastrolog/internal/server"
 	"gastrolog/internal/server/routing"
@@ -269,6 +270,13 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	}
 
 	alertCollector := alert.New()
+
+	// Scheduler-stall watchdog (gastrolog-1io54g phase 2): measures runtime
+	// starvation — the one resource every Raft group on this node shares.
+	// Stalls past the leader lease raise an operator alert; the WARN log
+	// timestamps correlate against election events to pin the liveness leak.
+	schedWatch := schedwatch.New(logger, alertCollector)
+	go schedWatch.Run(ctx)
 
 	// Shared shutdown phase. Constructed once per process and threaded into
 	// every subsystem that needs to short-circuit work during drain — the
