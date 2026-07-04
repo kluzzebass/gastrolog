@@ -34,13 +34,23 @@ func (v *vaultChunking) flushHeadPurgeForManifest(pending *vaultctlfsm.OpenChunk
 	required := v.requiredHolders()
 	holdersWired := v.cfg.RequiredHolders != nil
 	fsm := v.fsm()
+	purged := 0
 	for _, id := range segmentIDs {
 		if !mayPurgeHeadAfterBuild(fsm, id, required, holdersWired) {
 			continue
 		}
-		v.logger().Info("purging head segment after build",
+		// Per-segment detail at Debug: purges are a healthy-path event that
+		// fires per segment per node — Info per segment floods the log at
+		// production ingest rates (gastrolog-67c9b0 forensics only need the
+		// trail when purge behavior is in question).
+		v.logger().Debug("purging head segment after build",
 			"segment", id, "chunk", pending.ChunkID)
 		_ = paths.PurgeHeadStaging(v.cfg.VaultRoot, id)
+		purged++
+	}
+	if purged > 0 {
+		v.logger().Info("purged head segments after build",
+			"chunk", pending.ChunkID, "count", purged)
 	}
 }
 
@@ -65,9 +75,10 @@ func (v *vaultChunking) purgeReleasedHead(ids []glid.GLID) {
 		return
 	}
 	for _, id := range ids {
-		v.logger().Info("purging head segment after registry release", "segment", id)
+		v.logger().Debug("purging head segment after registry release", "segment", id)
 		_ = paths.PurgeHeadStaging(root, id)
 	}
+	v.logger().Info("purged head segments after registry release", "count", len(ids))
 }
 
 // purgeStaleHeadCatchUp removes head/ files with no completed-segment registry
@@ -92,6 +103,7 @@ func (v *vaultChunking) purgeStaleHeadCatchUp() {
 		return
 	}
 	fsm := v.fsm()
+	purged := 0
 	for id := range ids {
 		if fsm.GetCompletedSegment(id) != nil {
 			continue
@@ -102,7 +114,11 @@ func (v *vaultChunking) purgeStaleHeadCatchUp() {
 		if fsm.SegmentReferencedInManifest(id) {
 			continue
 		}
-		v.logger().Info("purging stale head segment with no registry entry", "segment", id)
+		v.logger().Debug("purging stale head segment with no registry entry", "segment", id)
 		_ = paths.PurgeHeadStaging(root, id)
+		purged++
+	}
+	if purged > 0 {
+		v.logger().Info("purged stale head segments with no registry entry", "count", purged)
 	}
 }
