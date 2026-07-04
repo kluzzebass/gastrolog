@@ -175,6 +175,10 @@ function VaultThroughputSection({
   }
   if (append.length === 0 && collected.length === 0 && sealed.length === 0) return null;
 
+  // Fixed grid template shared by every row (header, stage totals, node
+  // rows) so changing number widths never shift columns horizontally.
+  const gridCols = "grid grid-cols-[6rem_minmax(6rem,1fr)_3.5rem_5.5rem_6.5rem_minmax(8rem,1.2fr)] items-center gap-x-3";
+
   return (
     <section className="flex flex-col gap-4">
       <h3
@@ -183,24 +187,37 @@ function VaultThroughputSection({
         Throughput
       </h3>
       <div
-        className={`rounded-lg border px-4 py-3 flex flex-col gap-3 ${c("border-ink-border bg-ink-well", "border-light-border bg-light-well")}`}
+        className={`rounded-lg border overflow-hidden ${c("border-ink-border", "border-light-border")}`}
       >
-        <StageBlock
+        <div
+          className={`${gridCols} px-4 py-2 text-[0.7em] font-medium uppercase tracking-[0.15em] border-b ${c("text-text-muted border-ink-border-subtle bg-ink-well", "text-light-text-muted border-light-border-subtle bg-light-well")}`}
+        >
+          <span>Stage</span>
+          <span>Node</span>
+          <span />
+          <span className="text-right">Records</span>
+          <span className="text-right">Data</span>
+          <span>Status</span>
+        </div>
+        <StageRows
           label="Append"
           title="Origin ingress: records/s appended to this vault's working segments, per writing node"
           rows={append}
+          gridCols={gridCols}
           dark={dark}
         />
-        <StageBlock
+        <StageRows
           label="Collected"
           title="Home ingress: records/s arriving in head/ (remote pull or local promotion), per home node"
           rows={collected}
+          gridCols={gridCols}
           dark={dark}
         />
-        <StageBlock
+        <StageRows
           label="Sealed"
           title="Records/s materialized into sealed GLCB chunks, per home node"
           rows={sealed}
+          gridCols={gridCols}
           dark={dark}
         />
       </div>
@@ -208,39 +225,50 @@ function VaultThroughputSection({
   );
 }
 
-function StageBlock({
+function StageRows({
   label,
   title,
   rows,
+  gridCols,
   dark,
-}: Readonly<{ label: string; title: string; rows: StageRow[]; dark: boolean }>) {
+}: Readonly<{ label: string; title: string; rows: StageRow[]; gridCols: string; dark: boolean }>) {
   const c = useThemeClass(dark);
-  if (rows.length === 0) return null;
-  rows.sort((a, b) => a.node.localeCompare(b.node));
-  const totalRecords = rows.reduce((sum, r) => sum + r.recordsPerSec, 0);
-  const totalBytes = rows.reduce((sum, r) => sum + r.bytesPerSec, 0);
-  const labelClass = `text-[0.7em] font-medium uppercase tracking-[0.15em] ${c("text-text-muted", "text-light-text-muted")}`;
-  const valueClass = `font-mono ${c("text-text-bright", "text-light-text-bright")}`;
-  const mutedMono = `font-mono ${c("text-text-muted", "text-light-text-muted")}`;
+  const sorted = rows.toSorted((a, b) => a.node.localeCompare(b.node));
+  const totalRecords = sorted.reduce((sum, r) => sum + r.recordsPerSec, 0);
+  const totalBytes = sorted.reduce((sum, r) => sum + r.bytesPerSec, 0);
+  const stageClass = `text-[0.75em] font-medium uppercase tracking-[0.15em] ${c("text-text-muted", "text-light-text-muted")}`;
+  const brightMono = `font-mono text-right ${c("text-text-bright", "text-light-text-bright")}`;
+  const mutedMono = `font-mono text-right ${c("text-text-muted", "text-light-text-muted")}`;
+  const rowBorder = c("border-ink-border-subtle", "border-light-border-subtle");
 
   return (
-    <div>
-      <div className="flex flex-wrap items-baseline gap-x-4 text-[0.85em]" title={title}>
-        <span className={`${labelClass} w-20`}>{label}</span>
-        <span className={valueClass}>{formatRate(totalRecords)}/s</span>
-        <span className={mutedMono}>{formatBytes(totalBytes)}/s</span>
-      </div>
-      <div className="mt-1 flex flex-col gap-1 text-[0.85em]">
-        {rows.map((r) => (
-          <div key={r.node} className="flex flex-wrap items-center gap-x-4 gap-y-1 pl-4">
-            <span className={`font-mono w-28 truncate ${c("text-text-muted", "text-light-text-muted")}`} title={r.node}>
-              {r.node}
-            </span>
-            <span className={c("text-copper/70", "text-copper/60")}>
-              <Spark values={r.spark} width={40} height={12} />
-            </span>
-            <span className={mutedMono}>{formatRate(r.recordsPerSec)}/s</span>
-            <span className={mutedMono}>{formatBytes(r.bytesPerSec)}/s</span>
+    <>
+      {sorted.length > 1 && (
+        <div className={`${gridCols} px-4 py-2 text-[0.85em] border-b last:border-b-0 ${rowBorder}`} title={title}>
+          <span className={stageClass}>{label}</span>
+          <span className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}>all nodes</span>
+          <span />
+          <span className={brightMono}>{formatRate(totalRecords)}/s</span>
+          <span className={brightMono}>{formatBytes(totalBytes)}/s</span>
+          <span />
+        </div>
+      )}
+      {sorted.map((r, i) => (
+        <div
+          key={r.node}
+          className={`${gridCols} px-4 py-2 text-[0.85em] border-b last:border-b-0 ${rowBorder}`}
+          title={title}
+        >
+          <span className={stageClass}>{sorted.length === 1 && i === 0 ? label : ""}</span>
+          <span className={`font-mono truncate ${c("text-text-muted", "text-light-text-muted")}`} title={r.node}>
+            {r.node}
+          </span>
+          <span className={c("text-copper/70", "text-copper/60")}>
+            <Spark values={r.spark} width={40} height={12} />
+          </span>
+          <span className={sorted.length > 1 ? mutedMono : brightMono}>{formatRate(r.recordsPerSec)}/s</span>
+          <span className={sorted.length > 1 ? mutedMono : brightMono}>{formatBytes(r.bytesPerSec)}/s</span>
+          <span className="flex items-center gap-2 whitespace-nowrap">
             {r.extra && (
               <span
                 className={`font-mono ${r.extra.depth > 0 ? "text-severity-warn" : c("text-text-muted", "text-light-text-muted")}`}
@@ -257,10 +285,10 @@ function StageBlock({
                 durable {formatRate(r.extra.durablePerSec)}/s
               </span>
             )}
-          </div>
-        ))}
-      </div>
-    </div>
+          </span>
+        </div>
+      ))}
+    </>
   );
 }
 
