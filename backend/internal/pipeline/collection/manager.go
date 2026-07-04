@@ -70,10 +70,20 @@ type vaultCollect struct {
 	retryTimer *time.Timer
 	retryDelay time.Duration
 
-	// passMu serializes full collect passes. collectMu protects layout and
-	// receipted only — never held across pull or vault-ctl apply I/O.
+	// passMu serializes full collect passes. collectMu protects layout,
+	// receipted, and pulling — never held across pull or vault-ctl apply I/O.
+	//
+	// Targeted CollectSegments deliberately does NOT take passMu: under
+	// backlog a full pass runs for a very long time, and the chunking build
+	// blocking behind it stalled the serial seal queue (gastrolog-1b51yf).
+	// Pull exclusivity is per segment via the pulling set instead.
 	passMu    sync.Mutex
 	collectMu sync.Mutex
+
+	// pulling holds segment IDs with an in-flight pull, so the full-pass
+	// worker and targeted CollectSegments never pull the SAME segment
+	// concurrently (pre-head file collision). Guarded by collectMu.
+	pulling map[glid.GLID]struct{}
 
 	// layout mirrors head/ and pre-head/ segment IDs. Refreshed at the start of
 	// every collect pass so a segment promoted to head/ by distribution
@@ -260,12 +270,41 @@ func (v *vaultCollect) collectForRef(ctx context.Context, ref AssignedSegment) (
 	case collectReceiptOnly:
 		return false, true, nil
 	case collectPull:
-		if err := v.collectOne(ctx, ref); err != nil {
+		if !v.claimPull(ref.SegmentID) {
+			// The other pull path (full pass vs targeted CollectSegments)
+			// owns this segment right now; both callers re-check presence
+			// on their own retry cadence, so skipping is safe.
+			return false, false, nil
+		}
+		err := v.collectOne(ctx, ref)
+		v.releasePull(ref.SegmentID)
+		if err != nil {
 			return false, false, err
 		}
 		return true, true, nil
 	}
 	return false, false, nil
+}
+
+// claimPull marks segmentID as having an in-flight pull. Returns false when
+// another goroutine already owns the pull (gastrolog-1b51yf).
+func (v *vaultCollect) claimPull(id glid.GLID) bool {
+	v.collectMu.Lock()
+	defer v.collectMu.Unlock()
+	if v.pulling == nil {
+		v.pulling = make(map[glid.GLID]struct{})
+	}
+	if _, busy := v.pulling[id]; busy {
+		return false
+	}
+	v.pulling[id] = struct{}{}
+	return true
+}
+
+func (v *vaultCollect) releasePull(id glid.GLID) {
+	v.collectMu.Lock()
+	delete(v.pulling, id)
+	v.collectMu.Unlock()
 }
 
 func (v *vaultCollect) collectMissing(ctx context.Context) (bool, error) {
@@ -332,9 +371,11 @@ func (v *vaultCollect) collectSegments(ctx context.Context, segmentIDs []glid.GL
 	if len(segmentIDs) == 0 {
 		return nil
 	}
-	v.passMu.Lock()
-	defer v.passMu.Unlock()
-
+	// No passMu: a targeted pull must not wait for the full-pass worker —
+	// under backlog that pass runs for a very long time and the chunking
+	// build (serial seal queue) blocked behind it (gastrolog-1b51yf).
+	// Per-segment exclusivity comes from claimPull inside collectForRef;
+	// layout/receipted mutations stay under collectMu.
 	v.collectMu.Lock()
 	if err := v.refreshLayout(); err != nil {
 		v.collectMu.Unlock()
