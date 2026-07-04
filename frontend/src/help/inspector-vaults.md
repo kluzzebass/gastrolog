@@ -30,7 +30,16 @@ on hover:
   appears when fsync commits lag appends.
 - **Collected** — home ingress: records arriving in `head/` on each
   placement node, whether pulled from a peer or promoted locally.
-- **Sealed** — records materialized into sealed, queryable GLCB chunks.
+- **Sealed** — records materialized into sealed, queryable GLCB chunks on
+  each home.
+
+**Collected and Sealed sums exceed Append by design.** Every placement
+member collects and seals its own copy, so their totals count each record
+once *per home* — with a replication factor of 4, one appended record shows
+up as four collection events. Those rows measure replication *work* (real
+bytes moved to each node), not record throughput; the totals row is labeled
+"Σ N homes" as a reminder. Divide by the number of active homes to compare
+against the Append rate.
 
 Reading the panel: the three rates should track each other at steady state.
 A downstream stage falling away from its upstream is a pipeline stall in

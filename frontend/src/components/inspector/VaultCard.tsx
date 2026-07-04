@@ -208,17 +208,19 @@ function VaultThroughputSection({
         />
         <StageRows
           label="Collected"
-          title="Home ingress: records/s arriving in head/ (remote pull or local promotion), per home node"
+          title="Home ingress: records/s arriving in head/ per home node. Every placement member collects its own copy, so the sum counts each record once PER HOME — with RF=4, one appended record is collected up to four times. This measures replication work, not record throughput."
           rows={collected}
           gridCols={gridCols}
           dark={dark}
+          replicated
         />
         <StageRows
           label="Sealed"
-          title="Records/s materialized into sealed GLCB chunks, per home node"
+          title="Records/s materialized into sealed GLCB chunks per home node. Every home builds its own GLCB, so the sum counts each record once PER HOME — replication work, not record throughput."
           rows={sealed}
           gridCols={gridCols}
           dark={dark}
+          replicated
         />
       </div>
     </section>
@@ -243,7 +245,8 @@ function StageRows({
   rows,
   gridCols,
   dark,
-}: Readonly<{ label: string; title: string; rows: StageRow[]; gridCols: string; dark: boolean }>) {
+  replicated,
+}: Readonly<{ label: string; title: string; rows: StageRow[]; gridCols: string; dark: boolean; replicated?: boolean }>) {
   const c = useThemeClass(dark);
   const active = rows.filter(stageRowActive).toSorted((a, b) => a.node.localeCompare(b.node));
   const idle = rows.filter((r) => !stageRowActive(r)).toSorted((a, b) => a.node.localeCompare(b.node));
@@ -275,7 +278,9 @@ function StageRows({
       {active.length > 1 && (
         <div className={rowClass} title={title}>
           <span className={stageClass}>{label}</span>
-          <span className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}>all nodes</span>
+          <span className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}>
+            {replicated ? `Σ ${active.length} homes` : "all nodes"}
+          </span>
           <span />
           <span className={brightMono}>{formatRate(totalRecords)}/s</span>
           <span className={brightMono}>{formatBytes(totalBytes)}/s</span>
