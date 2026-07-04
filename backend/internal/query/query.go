@@ -544,11 +544,16 @@ func chunkMatchesQuery(m chunk.ChunkMeta, q Query, lower, upper time.Time, chunk
 	return true
 }
 
-// sortChunks sorts chunks by the appropriate timestamp bounds based on OrderBy.
-func sortChunks(out []chunk.ChunkMeta, orderBy OrderBy, reverse bool) {
+// chunkCmp returns the planner sort comparator for chunk metas: forward =
+// ascending start, reverse = live chunks first, then descending end. The
+// lazy-prime merge (vaultChunksOverlap, one-scanner-at-a-time opening)
+// assumes this order holds GLOBALLY across the chunk list it receives —
+// per-vault sorted runs concatenated in registry order are not enough
+// (gastrolog-33bkl7).
+func chunkCmp(orderBy OrderBy, reverse bool) func(a, b chunk.ChunkMeta) int {
 	startTS, endTS := chunkTimeBounds(orderBy)
 	if reverse {
-		slices.SortFunc(out, func(a, b chunk.ChunkMeta) int {
+		return func(a, b chunk.ChunkMeta) int {
 			// Live (unsealed) chunks may hold records newer than their
 			// IngestStart meta; rank them first when scanning backward.
 			if a.Sealed != b.Sealed {
@@ -561,12 +566,16 @@ func sortChunks(out []chunk.ChunkMeta, orderBy OrderBy, reverse bool) {
 				return c
 			}
 			return startTS(b).Compare(startTS(a))
-		})
-		return
+		}
 	}
-	slices.SortFunc(out, func(a, b chunk.ChunkMeta) int {
+	return func(a, b chunk.ChunkMeta) int {
 		return startTS(a).Compare(startTS(b))
-	})
+	}
+}
+
+// sortChunks sorts chunks by the appropriate timestamp bounds based on OrderBy.
+func sortChunks(out []chunk.ChunkMeta, orderBy OrderBy, reverse bool) {
+	slices.SortFunc(out, chunkCmp(orderBy, reverse))
 }
 
 // searchChunkWithRef returns an iterator over records in a single chunk, including their refs.
