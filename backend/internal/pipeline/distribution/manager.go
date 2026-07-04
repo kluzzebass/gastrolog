@@ -8,6 +8,7 @@ import (
 	"os"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"gastrolog/internal/glid"
 	"gastrolog/internal/notify"
@@ -24,6 +25,16 @@ const publishQueueCap = 512
 const (
 	defaultPublishWorkers   = 4
 	defaultPublishBatchSize = 32
+)
+
+// publishRetryBaseDelay/publishRetryMaxDelay bound the failed-publish retry
+// backoff: quick first retry for transient races (vault-ctl leadership
+// settling), 2s steady-state while applies keep failing. Without this the
+// retry path was a hot loop — enqueue notified the retry signal, the drain
+// re-ran immediately, failed again, and re-notified (gastrolog-353kwm).
+const (
+	publishRetryBaseDelay = 50 * time.Millisecond
+	publishRetryMaxDelay  = 2 * time.Second
 )
 
 // ErrNotRunning is returned when Run is called twice.
@@ -56,6 +67,7 @@ type VaultConfig struct {
 
 type vaultDist struct {
 	root                string
+	log                 *slog.Logger
 	publisher           Publisher
 	localHolder         func() bool
 	onLocalHeadPromoted func(glid.GLID)
@@ -65,15 +77,19 @@ type vaultDist struct {
 	retired             map[glid.GLID]struct{} // released from vault-ctl; skip rescan republish
 }
 
-func newVaultDist(root string, cfg VaultConfig) (*vaultDist, error) {
+func newVaultDist(root string, cfg VaultConfig, log *slog.Logger) (*vaultDist, error) {
 	if cfg.Publisher == nil {
 		return nil, errors.New("publisher required")
 	}
 	if cfg.LocalHolder == nil {
 		cfg.LocalHolder = func() bool { return false }
 	}
+	if log == nil {
+		log = slog.Default()
+	}
 	return &vaultDist{
 		root:                root,
+		log:                 log,
 		publisher:           cfg.Publisher,
 		localHolder:         cfg.LocalHolder,
 		onLocalHeadPromoted: cfg.OnLocalHeadPromoted,
@@ -151,6 +167,7 @@ func metadataForPublish(seg segmentation.CompletedSegment) (Metadata, error) {
 func (v *vaultDist) stranded(vaultID glid.GLID) []segmentation.CompletedSegment {
 	entries, err := os.ReadDir(paths.CompletedDir(v.root))
 	if err != nil {
+		v.log.Warn("stranded rescan: reading completed/ failed", "vault", vaultID, "error", err)
 		return nil
 	}
 	var out []segmentation.CompletedSegment
@@ -172,6 +189,8 @@ func (v *vaultDist) stranded(vaultID glid.GLID) []segmentation.CompletedSegment 
 		path := paths.CompletedSegment(v.root, segID)
 		sf, err := segment.Open(path)
 		if err != nil {
+			v.log.Warn("stranded rescan: completed segment unreadable; skipping",
+				"vault", vaultID, "segment", segID, "path", path, "error", err)
 			continue
 		}
 		hdr := sf.Header()
@@ -202,6 +221,8 @@ func (v *vaultDist) publishStaged(ctx context.Context, meta Metadata, segID glid
 	}
 	if !v.segmentBytesPresent(segID, path) {
 		v.forgetSegment(segID)
+		v.log.Warn("segment bytes missing at publish; forgetting segment",
+			"segment", segID, "path", path)
 		return errPublishBytesMissing
 	}
 	if err := v.publisher.Publish(ctx, meta); err != nil {
@@ -226,8 +247,15 @@ func (v *vaultDist) publishStagedBatch(ctx context.Context, items []pendingPubli
 			continue
 		}
 		if !v.segmentBytesPresent(p.segID, p.path) {
+			// Forget THIS item only. Failing the whole coalesced batch here
+			// stranded the surviving batchmates permanently: the batch error
+			// was classified non-retryable, the items stayed in v.segments,
+			// and the stranded rescan skipped them as known — durable
+			// segments invisible to vault-ctl until restart (gastrolog-353kwm).
 			v.forgetSegment(p.segID)
-			return errPublishBytesMissing
+			v.log.Warn("segment bytes missing at publish; forgetting segment",
+				"segment", p.segID, "path", p.path)
+			continue
 		}
 		live = append(live, p)
 	}
@@ -379,6 +407,8 @@ type Manager struct {
 	publishRetry *notify.Signal
 	retryMu      sync.Mutex
 	retryPending []pendingPublish
+	retryDelay   time.Duration
+	retryTimer   *time.Timer
 	runCtx       context.Context
 	running      atomic.Bool
 	wg           sync.WaitGroup
@@ -430,7 +460,7 @@ func (m *Manager) RegisterVault(vaultID glid.GLID, root string, cfg VaultConfig)
 	if _, ok := m.vaults[vaultID]; ok {
 		return errors.New("vault already registered")
 	}
-	v, err := newVaultDist(root, cfg)
+	v, err := newVaultDist(root, cfg, m.logger())
 	if err != nil {
 		return err
 	}
@@ -493,6 +523,7 @@ func (m *Manager) Run(ctx context.Context, completed <-chan segmentation.Complet
 	})
 
 	m.wg.Wait()
+	m.stopRetryWake()
 
 	m.mu.Lock()
 	m.runCtx = nil
@@ -553,13 +584,30 @@ func (m *Manager) publishWorkerLoop(ctx context.Context, publishQ chan pendingPu
 }
 
 func (m *Manager) publishBurst(ctx context.Context, publishQ chan pendingPublish, first pendingPublish) {
-	batch := m.coalesceBatch(publishQ, first)
-	for vaultID, items := range groupPendingByVault(batch) {
-		if err := m.publishVaultBatch(ctx, vaultID, items); publishRetryable(err) {
-			for _, p := range items {
-				m.enqueuePublishRetry(p)
-			}
+	m.publishGroups(ctx, groupPendingByVault(m.coalesceBatch(publishQ, first)))
+}
+
+// publishGroups commits per-vault batches, queuing retryable failures behind a
+// backoff wake and logging every failure — a persistent vault-ctl apply error
+// previously looped forever with no log line and no delay.
+func (m *Manager) publishGroups(ctx context.Context, groups map[glid.GLID][]pendingPublish) {
+	for vaultID, items := range groups {
+		err := m.publishVaultBatch(ctx, vaultID, items)
+		if err == nil {
+			m.resetRetryBackoff()
+			continue
 		}
+		if publishRetryable(err) {
+			m.logger().Warn("vault-ctl publish failed; queuing retry",
+				"vault", vaultID, "segments", len(items), "error", err)
+			for _, p := range items {
+				m.queuePublishRetry(p)
+			}
+			m.scheduleRetryWake()
+			continue
+		}
+		m.logger().Warn("publish failed terminally; dropping batch",
+			"vault", vaultID, "segments", len(items), "error", err)
 	}
 }
 
@@ -592,18 +640,51 @@ func publishRetryable(err error) bool {
 		!errors.Is(err, errPublishBytesMissing)
 }
 
-func (m *Manager) enqueuePublishRetry(p pendingPublish) {
+func (m *Manager) queuePublishRetry(p pendingPublish) {
 	m.retryMu.Lock()
+	defer m.retryMu.Unlock()
 	for _, existing := range m.retryPending {
 		if existing.segID == p.segID {
-			m.retryMu.Unlock()
-			m.NotifyPublishRetry()
 			return
 		}
 	}
 	m.retryPending = append(m.retryPending, p)
-	m.retryMu.Unlock()
-	m.NotifyPublishRetry()
+}
+
+// scheduleRetryWake arms a one-shot backoff wake for the queued retries. Not a
+// poll: the timer exists only while failed publishes are outstanding. External
+// NotifyPublishRetry calls (vault-ctl leadership changes) bypass the backoff
+// deliberately.
+func (m *Manager) scheduleRetryWake() {
+	m.retryMu.Lock()
+	defer m.retryMu.Unlock()
+	switch {
+	case m.retryDelay == 0:
+		m.retryDelay = publishRetryBaseDelay
+	case m.retryDelay < publishRetryMaxDelay:
+		m.retryDelay *= 2
+	}
+	if m.retryTimer != nil {
+		m.retryTimer.Stop()
+	}
+	m.retryTimer = time.AfterFunc(m.retryDelay, m.NotifyPublishRetry)
+}
+
+// resetRetryBackoff clears the backoff after a successful publish.
+func (m *Manager) resetRetryBackoff() {
+	m.retryMu.Lock()
+	defer m.retryMu.Unlock()
+	m.retryDelay = 0
+}
+
+// stopRetryWake cancels any pending retry wake (manager shutdown).
+func (m *Manager) stopRetryWake() {
+	m.retryMu.Lock()
+	defer m.retryMu.Unlock()
+	if m.retryTimer != nil {
+		m.retryTimer.Stop()
+		m.retryTimer = nil
+	}
 }
 
 func (m *Manager) drainPublishRetries(ctx context.Context, publishQ chan pendingPublish) {
@@ -614,13 +695,7 @@ func (m *Manager) drainPublishRetries(ctx context.Context, publishQ chan pending
 	if len(pending) == 0 {
 		return
 	}
-	for vaultID, items := range groupPendingByVault(pending) {
-		if err := m.publishVaultBatch(ctx, vaultID, items); publishRetryable(err) {
-			for _, p := range items {
-				m.enqueuePublishRetry(p)
-			}
-		}
-	}
+	m.publishGroups(ctx, groupPendingByVault(pending))
 	for {
 		select {
 		case p := <-publishQ:
@@ -647,7 +722,12 @@ func (m *Manager) runPublishIngress(ctx context.Context, completed <-chan segmen
 			// A stranded rescan may already have staged this segment before
 			// its channel notification was consumed; only the first staging
 			// enqueues, or the segment publishes twice (gastrolog-x5c8ge).
-			if p, alreadyStaged, err := m.stageForPublish(seg); err == nil && !alreadyStaged {
+			p, alreadyStaged, err := m.stageForPublish(seg)
+			switch {
+			case err != nil:
+				m.logger().Warn("staging completed segment for publish failed",
+					"vault", seg.VaultID, "segment", seg.Meta.ID, "error", err)
+			case !alreadyStaged:
 				m.enqueuePublish(ctx, publishQ, p)
 			}
 		case <-strandedCh:
@@ -660,7 +740,12 @@ func (m *Manager) runPublishIngress(ctx context.Context, completed <-chan segmen
 func (m *Manager) rescanStranded(ctx context.Context, publishQ chan<- pendingPublish) {
 	for vaultID, v := range m.vaultsSnapshot() {
 		for _, seg := range v.stranded(vaultID) {
-			if p, alreadyStaged, err := m.stageForPublish(seg); err == nil && !alreadyStaged {
+			p, alreadyStaged, err := m.stageForPublish(seg)
+			switch {
+			case err != nil:
+				m.logger().Warn("staging stranded segment for publish failed",
+					"vault", vaultID, "segment", seg.Meta.ID, "error", err)
+			case !alreadyStaged:
 				m.enqueuePublish(ctx, publishQ, p)
 			}
 		}
