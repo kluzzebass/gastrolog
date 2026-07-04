@@ -47,8 +47,9 @@ progress — e.g. **Sealed** flatlining at 0 while **Append** runs means
 chunks are accumulating unsealed (the Pipeline Backlog panel below shows
 where the inventory stacks).
 
-Nodes listed as **idle** on a stage have no current activity. Idle usually
-means *caught up* — a node whose `head/` count equals the registry's
-published count has simply finished collecting. Compare the per-node counts
-in Pipeline Backlog to distinguish caught-up from stalled.
+Quiet nodes state their reason in the STATUS column: **caught up** (that
+node's `head/` holds every published segment), **no ingest** (no records
+arriving on that node), **up to date** (nothing eligible to seal), or
+**behind N segments** — which, on a node showing no activity, means that
+node's stage has stalled and is highlighted as a warning.
 

@@ -4,6 +4,7 @@ import { useThemeClass } from "../../hooks/useThemeClass";
 import { clickableProps } from "../../utils";
 import { useChunks, useIndexes, useValidateVault, useConfig, useArchiveChunk, useRestoreChunk } from "../../api/hooks";
 import { useClusterStatus } from "../../api/hooks/useClusterStatus";
+import { usePipelineBacklog } from "../../api/hooks";
 import { useToast } from "../Toast";
 import { buildNodeNameMap, resolveNodeName } from "../../utils/nodeNames";
 // eslint-disable-next-line no-restricted-imports -- no Chunk model yet (gastrolog-2e2qs follow-up)
@@ -115,10 +116,19 @@ export function VaultCard({
 // stageRow is one node's contribution to one pipeline stage.
 interface StageRow {
   node: string;
+  nodeId: string;
   recordsPerSec: number;
   bytesPerSec: number;
   spark: number[];
   extra?: { depth: number; cap: number; durablePerSec: number };
+}
+
+// idleNote explains WHY an idle node is idle — "caught up" is fine,
+// "behind" while idle is a stall and warns. Absence of an explanation is
+// how support cases are born.
+interface IdleNote {
+  text: string;
+  warn: boolean;
 }
 
 // VaultThroughputSection is the three-stage pipeline readout for one vault,
@@ -133,6 +143,7 @@ function VaultThroughputSection({
 }: Readonly<{ vaultId: string; dark: boolean }>) {
   const c = useThemeClass(dark);
   const { data: cluster } = useClusterStatus();
+  const { data: backlog } = usePipelineBacklog(vaultId);
 
   const append: StageRow[] = [];
   const collected: StageRow[] = [];
@@ -142,9 +153,11 @@ function VaultThroughputSection({
     for (const vs of n.stats.vaults) {
       if (encode(vs.id) !== vaultId) continue;
       const node = n.name || encode(n.id).slice(0, 8);
+      const nodeId = encode(n.id);
       if (vs.appendQueueCapacity > 0) {
         append.push({
           node,
+          nodeId,
           recordsPerSec: vs.appendRecords?.instantPerSec ?? 0,
           bytesPerSec: vs.appendBytes?.instantPerSec ?? 0,
           spark: vs.appendRecords?.spark ?? [],
@@ -158,6 +171,7 @@ function VaultThroughputSection({
       if ((vs.collectedRecords?.spark.length ?? 0) > 0) {
         collected.push({
           node,
+          nodeId,
           recordsPerSec: vs.collectedRecords?.instantPerSec ?? 0,
           bytesPerSec: vs.collectedBytes?.instantPerSec ?? 0,
           spark: vs.collectedRecords?.spark ?? [],
@@ -166,6 +180,7 @@ function VaultThroughputSection({
       if ((vs.sealedRecords?.spark.length ?? 0) > 0) {
         sealed.push({
           node,
+          nodeId,
           recordsPerSec: vs.sealedRecords?.instantPerSec ?? 0,
           bytesPerSec: vs.sealedBytes?.instantPerSec ?? 0,
           spark: vs.sealedRecords?.spark ?? [],
@@ -174,6 +189,25 @@ function VaultThroughputSection({
     }
   }
   if (append.length === 0 && collected.length === 0 && sealed.length === 0) return null;
+
+  // Idle explanations from the backlog data (same source as the panel below).
+  const published = backlog?.registrySegments ?? 0;
+  const headByNode = new Map<string, number>();
+  for (const ns of backlog?.nodeSegments ?? []) {
+    headByNode.set(encode(ns.nodeId), ns.headSegments);
+  }
+  const collectIdleNote = (r: StageRow): IdleNote => {
+    const head = headByNode.get(r.nodeId);
+    if (head === undefined || published === 0) return { text: "idle", warn: false };
+    if (head >= published) return { text: "caught up", warn: false };
+    return { text: `behind ${(published - head).toLocaleString()} segments`, warn: true };
+  };
+  const appendIdleNote = (): IdleNote => ({ text: "no ingest", warn: false });
+  const eligible = backlog?.eligibleSegments ?? 0;
+  const sealIdleNote = (): IdleNote =>
+    eligible > 0 || backlog?.sealedManifestPending
+      ? { text: `backlog: ${eligible.toLocaleString()} segments eligible`, warn: true }
+      : { text: "up to date", warn: false };
 
   // Fixed grid template shared by every row (header, stage totals, node
   // rows) so changing number widths never shift columns horizontally.
@@ -205,6 +239,7 @@ function VaultThroughputSection({
           rows={append}
           gridCols={gridCols}
           dark={dark}
+          idleNote={appendIdleNote}
         />
         <StageRows
           label="Collected"
@@ -213,6 +248,7 @@ function VaultThroughputSection({
           gridCols={gridCols}
           dark={dark}
           replicated
+          idleNote={collectIdleNote}
         />
         <StageRows
           label="Sealed"
@@ -221,15 +257,15 @@ function VaultThroughputSection({
           gridCols={gridCols}
           dark={dark}
           replicated
+          idleNote={sealIdleNote}
         />
       </div>
     </section>
   );
 }
 
-// stageRowActive: a node row earns its place by doing something — nonzero
-// rate, standing queue, or recent spark history. Idle registered writers are
-// noise ("quiet until needed").
+// stageRowActive: nonzero rate, standing queue, or recent spark history.
+// Inactive rows still render — their STATUS column says why they're quiet.
 function stageRowActive(r: StageRow): boolean {
   return (
     r.recordsPerSec > 0 ||
@@ -246,40 +282,33 @@ function StageRows({
   gridCols,
   dark,
   replicated,
-}: Readonly<{ label: string; title: string; rows: StageRow[]; gridCols: string; dark: boolean; replicated?: boolean }>) {
+  idleNote,
+}: Readonly<{
+  label: string;
+  title: string;
+  rows: StageRow[];
+  gridCols: string;
+  dark: boolean;
+  replicated?: boolean;
+  idleNote?: (r: StageRow) => IdleNote;
+}>) {
   const c = useThemeClass(dark);
-  const active = rows.filter(stageRowActive).toSorted((a, b) => a.node.localeCompare(b.node));
-  const idle = rows.filter((r) => !stageRowActive(r)).toSorted((a, b) => a.node.localeCompare(b.node));
-  const totalRecords = active.reduce((sum, r) => sum + r.recordsPerSec, 0);
-  const totalBytes = active.reduce((sum, r) => sum + r.bytesPerSec, 0);
+  const sorted = rows.toSorted((a, b) => a.node.localeCompare(b.node));
+  const totalRecords = sorted.reduce((sum, r) => sum + r.recordsPerSec, 0);
+  const totalBytes = sorted.reduce((sum, r) => sum + r.bytesPerSec, 0);
   const stageClass = `text-[0.75em] font-medium uppercase tracking-[0.15em] ${c("text-text-muted", "text-light-text-muted")}`;
   const brightMono = `font-mono text-right ${c("text-text-bright", "text-light-text-bright")}`;
   const mutedMono = `font-mono text-right ${c("text-text-muted", "text-light-text-muted")}`;
   const rowBorder = c("border-ink-border-subtle", "border-light-border-subtle");
   const rowClass = `${gridCols} px-4 py-1.5 text-[0.85em] border-b last:border-b-0 ${rowBorder}`;
 
-  // A stage with rows but zero activity is a SIGNAL (e.g. sealing
-  // flatlined behind a backlog) — one muted zero row, not N of them.
-  if (rows.length > 0 && active.length === 0) {
-    return (
-      <div className={rowClass} title={title}>
-        <span className={stageClass}>{label}</span>
-        <span className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}>all nodes</span>
-        <span />
-        <span className={mutedMono}>0.0/s</span>
-        <span className={mutedMono}>0 B/s</span>
-        <span />
-      </div>
-    );
-  }
-
   return (
     <>
-      {active.length > 1 && (
+      {sorted.length > 1 && (
         <div className={rowClass} title={title}>
           <span className={stageClass}>{label}</span>
           <span className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}>
-            {replicated ? `Σ ${active.length} homes` : "all nodes"}
+            {replicated ? `Σ ${sorted.length} homes` : "all nodes"}
           </span>
           <span />
           <span className={brightMono}>{formatRate(totalRecords)}/s</span>
@@ -287,51 +316,50 @@ function StageRows({
           <span />
         </div>
       )}
-      {active.map((r, i) => (
-        <div key={r.node} className={rowClass} title={title}>
-          <span className={stageClass}>{active.length === 1 && i === 0 ? label : ""}</span>
-          <span className={`font-mono truncate ${c("text-text-muted", "text-light-text-muted")}`} title={r.node}>
-            {r.node}
-          </span>
-          <span className="text-copper">
-            <Spark values={r.spark} />
-          </span>
-          <span className={active.length > 1 ? mutedMono : brightMono}>{formatRate(r.recordsPerSec)}/s</span>
-          <span className={active.length > 1 ? mutedMono : brightMono}>{formatBytes(r.bytesPerSec)}/s</span>
-          <span className="flex items-center gap-2 whitespace-nowrap">
-            {r.extra && r.extra.depth > 0 && (
-              <span
-                className="font-mono text-severity-warn"
-                title="Segmentation queue depth / capacity"
-              >
-                queue {r.extra.depth}/{r.extra.cap}
-              </span>
-            )}
-            {r.extra && r.extra.durablePerSec + 1 < r.recordsPerSec && (
-              <span
-                className="font-mono text-severity-warn"
-                title="Durable-commit rate lags the append rate — fsync backpressure"
-              >
-                durable {formatRate(r.extra.durablePerSec)}/s
-              </span>
-            )}
-          </span>
-        </div>
-      ))}
-      {idle.length > 0 && active.length > 0 && (
-        <div
-          className={rowClass}
-          title="No activity in the recent spark window. Idle can mean caught up (nothing left to do) or never involved — the Pipeline Backlog panel below shows each node's standing inventory to tell them apart."
-        >
-          <span />
-          <span className={`font-mono truncate col-span-2 ${c("text-text-muted", "text-light-text-muted")}`}>
-            idle: {idle.map((r) => r.node).join(", ")}
-          </span>
-          <span />
-          <span />
-          <span />
-        </div>
-      )}
+      {sorted.map((r, i) => {
+        const isActive = stageRowActive(r);
+        const note = isActive ? undefined : (idleNote?.(r) ?? { text: "idle", warn: false });
+        const rateClass = sorted.length > 1 || !isActive ? mutedMono : brightMono;
+        return (
+          <div key={r.node} className={rowClass} title={title}>
+            <span className={stageClass}>{sorted.length === 1 && i === 0 ? label : ""}</span>
+            <span className={`font-mono truncate ${c("text-text-muted", "text-light-text-muted")}`} title={r.node}>
+              {r.node}
+            </span>
+            <span className="text-copper">
+              <Spark values={r.spark} />
+            </span>
+            <span className={rateClass}>{formatRate(r.recordsPerSec)}/s</span>
+            <span className={rateClass}>{formatBytes(r.bytesPerSec)}/s</span>
+            <span className="flex items-center gap-2 whitespace-nowrap">
+              {note && (
+                <span
+                  className={`font-mono ${note.warn ? "text-severity-warn" : c("text-text-muted", "text-light-text-muted")}`}
+                  title="Why this node is quiet on this stage. 'Caught up' / 'up to date' is healthy; 'behind' while idle means this node's stage has stalled."
+                >
+                  {note.text}
+                </span>
+              )}
+              {isActive && r.extra && r.extra.depth > 0 && (
+                <span
+                  className="font-mono text-severity-warn"
+                  title="Segmentation queue depth / capacity"
+                >
+                  queue {r.extra.depth}/{r.extra.cap}
+                </span>
+              )}
+              {isActive && r.extra && r.extra.durablePerSec + 1 < r.recordsPerSec && (
+                <span
+                  className="font-mono text-severity-warn"
+                  title="Durable-commit rate lags the append rate — fsync backpressure"
+                >
+                  durable {formatRate(r.extra.durablePerSec)}/s
+                </span>
+              )}
+            </span>
+          </div>
+        );
+      })}
     </>
   );
 }
