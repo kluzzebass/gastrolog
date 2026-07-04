@@ -249,8 +249,10 @@ func TestOrchRel_FollowerWipe_CatchupRebuilds(t *testing.T) {
 
 	// Post-wipe: the node rejoins the cluster with empty state. Wait
 	// for instance FSMs to converge again; catchup replication rebuilds
-	// the manifest through snapshot install or log replay.
-	h.assertAllNodesSee(baseline)
+	// the manifest through snapshot install or log replay. Extended
+	// budget: recovery is boot + snapshot install + 20s sweep ticks +
+	// push, which overruns the default wait under full-suite load.
+	h.assertAllNodesSeeWithin(3*time.Minute, baseline)
 }
 
 // Two independent vaults on the same cluster. Pausing a follower of

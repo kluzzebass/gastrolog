@@ -740,7 +740,16 @@ func (h *orchRelHarness) chunkIDsOnLeader() map[chunk.ChunkID]bool {
 // expected and no unexpected extras, or fails.
 func (h *orchRelHarness) assertAllNodesSee(expected map[chunk.ChunkID]bool) {
 	h.t.Helper()
-	deadline := time.Now().Add(orchHarnessConvWait)
+	h.assertAllNodesSeeWithin(orchHarnessConvWait, expected)
+}
+
+// assertAllNodesSeeWithin is assertAllNodesSee with an explicit budget, for
+// scenarios whose convergence is inherently multi-stage (wipe recovery: node
+// boot + vault-ctl snapshot install + 20s catchup-sweep ticks + chunk push)
+// and legitimately overruns the default under full-suite load.
+func (h *orchRelHarness) assertAllNodesSeeWithin(wait time.Duration, expected map[chunk.ChunkID]bool) {
+	h.t.Helper()
+	deadline := time.Now().Add(wait)
 	var lastSnapshot map[string]map[chunk.ChunkID]bool
 	for time.Now().Before(deadline) {
 		lastSnapshot = map[string]map[chunk.ChunkID]bool{}
@@ -776,7 +785,7 @@ func (h *orchRelHarness) assertAllNodesSee(expected map[chunk.ChunkID]bool) {
 		expHex = append(expHex, fmt.Sprintf("%x", k[:]))
 	}
 	h.t.Fatalf("chunk-ID sets did not converge within %s:\nexpected (%d): %v\nactual:\n%s",
-		orchHarnessConvWait, len(expected), expHex, formatChunkSnapshot(lastSnapshot))
+		wait, len(expected), expHex, formatChunkSnapshot(lastSnapshot))
 }
 
 func formatChunkSnapshot(m map[string]map[chunk.ChunkID]bool) string {

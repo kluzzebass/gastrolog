@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"runtime/pprof"
 	"strconv"
 	"testing"
 	"time"
@@ -147,6 +148,19 @@ func (h *orchRelHarness) waitSealedRecordsAtLeast(v vaultSpec, nodeID string, wa
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+	if sub := h.vaultCtlSubFSM(v, nodeID); sub != nil {
+		states := map[chunk.ChunkState]int{}
+		var total int64
+		for _, e := range sub.List() {
+			states[e.State]++
+			total += e.RecordCount
+		}
+		h.t.Logf("vault %s on %s FSM census at deadline: entries_by_state=%v total_records=%d sealed_manifest=%v open_chunk=%v",
+			v.label, h.nodes[nodeID].label, states, total, sub.SealedManifest() != nil, sub.OpenChunk() != nil)
+	}
+	var stacks bytes.Buffer
+	_ = pprof.Lookup("goroutine").WriteTo(&stacks, 1)
+	h.t.Logf("goroutine profile at deadline:\n%s", stacks.String())
 	h.t.Fatalf("vault %s on %s: sealed records did not reach >= %d within %s (last %d)",
 		v.label, h.nodes[nodeID].label, wantRecords, orchHarnessConvWait, last)
 	return 0

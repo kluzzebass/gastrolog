@@ -218,8 +218,28 @@ func TestReleaseSegmentsPurgesHeadOnFSMCallback(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { _ = mgr.Run(ctx); close(done) }()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalReleaseSegments([]glid.GLID{segID}))
-	assertHeadMissing(t, home, segID)
+	// The ReleaseSegments callback is wake-only (purging on the Raft apply
+	// goroutine deadlocked teardown, gastrolog-38snf4); the worker's release
+	// branch performs the purge — poll instead of asserting synchronously.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(paths.HeadSegment(home, segID)); os.IsNotExist(err) {
+			break
+		}
+		if time.Now().After(deadline) {
+			assertHeadMissing(t, home, segID)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }
 
 func assertHeadMissing(t *testing.T, root string, id glid.GLID) {

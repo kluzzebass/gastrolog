@@ -234,39 +234,60 @@ func MarshalPublishCompletedSegments(entries []CompletedSegmentEntry) []byte {
 	return mustMarshalCommand(NewPublishCompletedSegments(entries))
 }
 
-// applyAckSegmentHolder records that nodeID now holds a completed segment by
-// appending it to the entry's holder set. Idempotent: a repeated ack for a node
-// already in the set is a no-op. An ack for an unknown segment is tolerated as a
-// no-op (the publish may not have replicated to this node yet, or the entry was
-// already released).
-func (f *FSM) applyAckSegmentHolder(c *gastrologv1.AckSegmentHolderCommand) error {
-	segID := glid.FromBytes(c.GetSegmentId())
+// applyAckSegmentHolder records that nodeID now holds the given completed
+// segments by appending it to each entry's holder set, and returns the
+// segment IDs whose holder sets actually grew (for the ack fan-out).
+// Idempotent per segment: a repeated ack for a node already in the set is a
+// no-op. Acks for unknown segments are tolerated as no-ops (the publish may
+// not have replicated to this node yet, or the entry was already released).
+// Batched: a collect pass commits every receipt in one Raft apply
+// (gastrolog-38snf4).
+func (f *FSM) applyAckSegmentHolder(c *gastrologv1.AckSegmentHolderCommand) ([]glid.GLID, error) {
 	nodeID := c.GetNodeId()
 	if nodeID == "" {
-		return errors.New("ack segment holder: node id required")
+		return nil, errors.New("ack segment holder: node id required")
 	}
-	entry, ok := f.completedSegments[segID]
-	if !ok {
-		return nil
+	var added []glid.GLID
+	for _, raw := range c.GetSegmentIds() {
+		segID := glid.FromBytes(raw)
+		if segID == glid.Nil {
+			continue
+		}
+		entry, ok := f.completedSegments[segID]
+		if !ok {
+			continue
+		}
+		if slices.Contains(entry.Holders, nodeID) {
+			continue
+		}
+		entry.Holders = append(entry.Holders, nodeID)
+		added = append(added, segID)
 	}
-	if slices.Contains(entry.Holders, nodeID) {
-		return nil
-	}
-	entry.Holders = append(entry.Holders, nodeID)
-	return nil
+	return added, nil
 }
 
-// NewAckSegmentHolder builds an AckSegmentHolder VaultCtlCommand.
-func NewAckSegmentHolder(segmentID glid.GLID, nodeID string) *gastrologv1.VaultCtlCommand {
+// NewAckSegmentHolders builds an AckSegmentHolder VaultCtlCommand covering
+// every given segment.
+func NewAckSegmentHolders(segmentIDs []glid.GLID, nodeID string) *gastrologv1.VaultCtlCommand {
+	raw := make([][]byte, len(segmentIDs))
+	for i, id := range segmentIDs {
+		raw[i] = append([]byte(nil), id[:]...)
+	}
 	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_AckSegmentHolder{
 		AckSegmentHolder: &gastrologv1.AckSegmentHolderCommand{
-			SegmentId: segmentID[:],
-			NodeId:    nodeID,
+			SegmentIds: raw,
+			NodeId:     nodeID,
 		},
 	}}
 }
 
-// MarshalAckSegmentHolder builds Raft log data for AckSegmentHolder.
+// MarshalAckSegmentHolders builds Raft log data acking every given segment in
+// one apply.
+func MarshalAckSegmentHolders(segmentIDs []glid.GLID, nodeID string) []byte {
+	return mustMarshalCommand(NewAckSegmentHolders(segmentIDs, nodeID))
+}
+
+// MarshalAckSegmentHolder builds Raft log data for a single-segment ack.
 func MarshalAckSegmentHolder(segmentID glid.GLID, nodeID string) []byte {
-	return mustMarshalCommand(NewAckSegmentHolder(segmentID, nodeID))
+	return MarshalAckSegmentHolders([]glid.GLID{segmentID}, nodeID)
 }
