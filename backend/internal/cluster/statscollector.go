@@ -148,6 +148,13 @@ type StatsCollectorConfig struct {
 	Stats             StatsProvider
 	PeerConns         PeerConnSnapshotProvider // optional; nil disables peer conn stats
 	RaftLiveness      RaftLivenessProvider     // optional; nil disables Raft liveness stats (gastrolog-1io54g)
+	// ClusterRouteTotals returns the cluster-wide cumulative route counters
+	// (local node + live peers' broadcast totals). The collector windows the
+	// SUMMED counters so cluster rates and their spark history are computed
+	// server-side from system data — never accumulated client-side, and
+	// never fabricated by summing phase-skewed per-node spark arrays
+	// (gastrolog-4eh5ns). Optional; nil disables cluster route rates.
+	ClusterRouteTotals func() (ingested, routed int64)
 	Alerts            AlertProvider            // optional; nil if no alert collector
 	Jobs              JobsProvider             // optional; nil in single-node mode
 	NodeID            string
@@ -176,6 +183,10 @@ type StatsCollector struct {
 	// ingested+routed). Same mechanics as the peer traffic windows.
 	vaultAppendStats map[string]*peerConnStatsWindow
 	routeRateStats   map[string]*peerConnStatsWindow
+	// clusterIngested/clusterRouted cache the latest cluster-total route
+	// rate series for the RPC/stream builders (gastrolog-4eh5ns).
+	clusterIngested *gastrologv1.ThroughputRate
+	clusterRouted   *gastrologv1.ThroughputRate
 	// raftLiveStats windows: "wal" (tx=append count, rx=append nanos) and
 	// "live" (tx=elections, rx=failed heartbeats). walMaxNanos caches the
 	// last tick's max so snapshot reads between ticks see it without
@@ -403,6 +414,8 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 		stats.RouteStatsDropped = rs.Dropped
 		stats.RouteStatsRouted = rs.Routed
 		stats.RouteStatsFilterActive = rs.FilterActive
+		c.collectClusterRouteRates(now, stepWindows)
+
 		// Node-level routing throughput windows (gastrolog-4eh5ns).
 		rr := c.observeTrafficWindowRates(now, "route",
 			rs.Ingested, rs.Routed, stepWindows, c.routeRateStats)
@@ -760,6 +773,50 @@ func absDuration(d time.Duration) time.Duration {
 		return -d
 	}
 	return d
+}
+
+// collectClusterRouteRates windows the SUMMED cluster route counters; the
+// resulting series (including spark) is this node's honest observation of
+// cluster rate at its tick cadence. Counter drops (peer TTL expiry, node
+// restart) re-anchor via the window's reset guard (gastrolog-4eh5ns).
+func (c *StatsCollector) collectClusterRouteRates(now time.Time, stepWindows bool) {
+	if c.cfg.ClusterRouteTotals == nil {
+		return
+	}
+	cin, crouted := c.cfg.ClusterRouteTotals()
+	cr := c.observeTrafficWindowRates(now, "clusterroute",
+		cin, crouted, stepWindows, c.routeRateStats)
+	c.mu.Lock()
+	c.clusterIngested = &gastrologv1.ThroughputRate{
+		InstantPerSec: cr.txPerSec, Avg_30SPerSec: cr.tx30, Avg_60SPerSec: cr.tx60, Spark: cr.txSpark,
+	}
+	c.clusterRouted = &gastrologv1.ThroughputRate{
+		InstantPerSec: cr.rxPerSec, Avg_30SPerSec: cr.rx30, Avg_60SPerSec: cr.rx60, Spark: cr.rxSpark,
+	}
+	c.mu.Unlock()
+}
+
+// ClusterRouteRates returns the latest cluster-total route throughput series
+// (instant/30s/1m + spark), computed server-side from summed cluster counters
+// at each stats tick. Safe between ticks; returns empty rates before the
+// first tick. Proto messages carry an internal mutex, so the copies are
+// rebuilt field-by-field rather than dereferenced (gastrolog-4eh5ns).
+func (c *StatsCollector) ClusterRouteRates() (ingested, routed *gastrologv1.ThroughputRate) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.clusterIngested == nil {
+		return &gastrologv1.ThroughputRate{}, &gastrologv1.ThroughputRate{}
+	}
+	return copyThroughputRate(c.clusterIngested), copyThroughputRate(c.clusterRouted)
+}
+
+func copyThroughputRate(r *gastrologv1.ThroughputRate) *gastrologv1.ThroughputRate {
+	return &gastrologv1.ThroughputRate{
+		InstantPerSec: r.InstantPerSec,
+		Avg_30SPerSec: r.Avg_30SPerSec,
+		Avg_60SPerSec: r.Avg_60SPerSec,
+		Spark:         append([]float64(nil), r.Spark...),
+	}
 }
 
 // BroadcastJobs sends the current job list to all cluster peers.

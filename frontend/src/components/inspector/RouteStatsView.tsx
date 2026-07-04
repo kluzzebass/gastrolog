@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { Spark } from "../Spark";
 // eslint-disable-next-line no-restricted-imports -- ThroughputRate is a passthrough stats type; no model wrap planned
@@ -192,20 +191,10 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
   );
 }
 
-// useRateHistory accumulates the displayed cluster rate client-side for a
-// sparkline. Per-node sparks are server-side; a cluster-level spark cannot be
-// summed from them (tick phases differ), so this is the honest history of the
-// number actually shown, starting from panel mount.
-function useRateHistory(value: number, cap = 20): number[] {
-  const [history, setHistory] = useState<number[]>([]);
-  useEffect(() => {
-    setHistory((h) => [...h.slice(-(cap - 1)), value]);
-  }, [value, cap]);
-  return history;
-}
-
-// RateBox shows one throughput series: instant rate with a sparkline of its
-// recent values, and the ~30s / ~1m trailing averages underneath.
+// RateBox shows one throughput series: instant rate with the server-side
+// spark history (the stats collector windows SUMMED cluster counters, so the
+// series is system data that survives panel remounts — never client-side
+// accumulation), and the ~30s / ~1m trailing averages underneath.
 function RateBox({
   label,
   rate,
@@ -214,7 +203,7 @@ function RateBox({
 }: Readonly<{ label: string; rate?: ThroughputRate; dark: boolean; title?: string }>) {
   const c = useThemeClass(dark);
   const instant = rate?.instantPerSec ?? 0;
-  const history = useRateHistory(instant);
+  const history = rate?.spark ?? [];
 
   return (
     <div title={title}>

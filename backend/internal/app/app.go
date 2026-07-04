@@ -412,7 +412,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		}
 	}
 
-	broadcaster, peerState, peerJobState, localStatsFn := setupClusterStats(ctx, logger, cfgStore, clusterSrv, orch, alertCollector, nodeID, cfg.ServerAddr, cfg.PprofAddr, statsSignal, raftLive)
+	broadcaster, peerState, peerJobState, localStatsFn, clusterRouteRatesFn := setupClusterStats(ctx, logger, cfgStore, clusterSrv, orch, alertCollector, nodeID, cfg.ServerAddr, cfg.PprofAddr, statsSignal, raftLive)
 
 	// Start vault placement manager (cluster mode only).
 	var placementReconcileFn func(ctx context.Context)
@@ -549,6 +549,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		PeerState:           peerState,
 		PeerJobState:        peerJobState,
 		LocalStats:          localStatsFn,
+		ClusterRouteRates:   clusterRouteRatesFn,
 		SearchForwarder:     searchForwarder,
 		RoutingForwarder:    routingForwarder,
 		JoinClusterFunc:     joinClusterFn,
@@ -726,13 +727,13 @@ func (a *raftLivenessAdapter) RaftLiveness() (elections, leaderLosses, failedHea
 	return elections, leaderLosses, failedHeartbeats
 }
 
-func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system.Store, clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, alerts *alert.Collector, nodeID string, apiAddr string, pprofAddr string, statsSignal *notify.Signal, raftLive cluster.RaftLivenessProvider) (*cluster.Broadcaster, *cluster.PeerState, *cluster.PeerJobState, func() *gastrologv1.NodeStats) {
+func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system.Store, clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, alerts *alert.Collector, nodeID string, apiAddr string, pprofAddr string, statsSignal *notify.Signal, raftLive cluster.RaftLivenessProvider) (*cluster.Broadcaster, *cluster.PeerState, *cluster.PeerJobState, func() *gastrologv1.NodeStats, func() (*gastrologv1.ThroughputRate, *gastrologv1.ThroughputRate)) {
 	var broadcaster *cluster.Broadcaster
 	if clusterSrv != nil && clusterSrv.PeerConns() != nil {
 		broadcaster = cluster.NewBroadcaster(clusterSrv.PeerConns(), compBroadcast.Apply(logger))
 	}
 	if broadcaster == nil || clusterSrv == nil {
-		return nil, nil, nil, nil
+		return nil, nil, nil, nil, nil
 	}
 
 	broadcastInterval, heartbeatInterval := loadClusterIntervals(ctx, cfgStore)
@@ -763,12 +764,21 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 	// preferred value (e.g. pod hostname).
 	observePeerAdditions(ctx, clusterSrv, cfgStore, logger)
 
+	statsAdapter := &orchStatsAdapter{orch: orch}
 	collector := cluster.NewStatsCollector(cluster.StatsCollectorConfig{
 		Broadcaster:  broadcaster,
 		RaftStats:    clusterSrv,
-		Stats:        &orchStatsAdapter{orch: orch},
+		Stats:        statsAdapter,
 		PeerConns:    clusterSrv.PeerConns(),
 		RaftLiveness: raftLive,
+		// Cluster-total route counters: local + live peers' cumulative
+		// broadcast totals. Windowed server-side so cluster rate history is
+		// system data, not client-side accumulation (gastrolog-4eh5ns).
+		ClusterRouteTotals: func() (int64, int64) {
+			rs := statsAdapter.RouteStats()
+			pIngested, _, pRouted, _, _, _ := peerState.AggregateRouteStats()
+			return rs.Ingested + pIngested, rs.Routed + pRouted
+		},
 		Alerts:       alerts,
 		Jobs:         &jobBroadcastAdapter{scheduler: orch.Scheduler(), nodeID: nodeID},
 		NodeID:       nodeID,
@@ -831,7 +841,7 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 		logger.Warn("schedule peer-cache reconcile job", "error", err)
 	}
 
-	return broadcaster, peerState, peerJobState, collector.CollectLocalSnapshot
+	return broadcaster, peerState, peerJobState, collector.CollectLocalSnapshot, collector.ClusterRouteRates
 }
 
 // resolveIdentity ensures the home directory exists and resolves the node ID.
@@ -1285,6 +1295,7 @@ type serverDeps struct {
 	PeerState           *cluster.PeerState
 	PeerJobState        *cluster.PeerJobState
 	LocalStats          func() *gastrologv1.NodeStats
+	ClusterRouteRates   func() (*gastrologv1.ThroughputRate, *gastrologv1.ThroughputRate)
 	SearchForwarder     *cluster.SearchForwarder
 	RoutingForwarder    routing.UnaryForwarder
 	JoinClusterFunc     func(ctx context.Context, leaderAddr, joinToken string) error
@@ -1321,7 +1332,7 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 			PeerVaultStats: deps.PeerState, PeerIngesterStats: deps.PeerState, PeerRouteStats: deps.PeerState,
 			PeerPipelineDisk: deps.PeerState,
 			PeerJobs:         deps.PeerJobState,
-			LocalStats:       deps.LocalStats, RemoteSearcher: deps.SearchForwarder, RemoteChunkLister: deps.SearchForwarder,
+			LocalStats:       deps.LocalStats, ClusterRouteRates: deps.ClusterRouteRates, RemoteSearcher: deps.SearchForwarder, RemoteChunkLister: deps.SearchForwarder,
 			RemotePipelineBacklog: deps.SearchForwarder,
 			RemoteChunkWatcher:    deps.SearchForwarder,
 			RemoteIndexer:         deps.SearchForwarder,

@@ -110,6 +110,10 @@ type Config struct {
 
 	// LocalStats returns real-time stats for the local node.
 	LocalStats func() *apiv1.NodeStats
+	// ClusterRouteRates returns the server-side cluster-total route rate
+	// series (instant/30s/1m + spark) windowed over summed cluster counters
+	// by the stats collector. Nil in single-node mode (gastrolog-4eh5ns).
+	ClusterRouteRates func() (*apiv1.ThroughputRate, *apiv1.ThroughputRate)
 
 	// ConfigSignal broadcasts config changes to WatchConfig streams.
 	// May be nil in tests.
@@ -203,6 +207,7 @@ type Server struct {
 	remoteIndexer         RemoteIndexer
 	peerJobs              PeerJobsProvider
 	localStatsFn          func() *apiv1.NodeStats
+	clusterRouteRatesFn   func() (*apiv1.ThroughputRate, *apiv1.ThroughputRate)
 	localNodeID           string
 	clusterAddress        string
 	joinClusterFn         func(ctx context.Context, leaderAddr, joinToken string) error
@@ -279,6 +284,7 @@ func New(orch *orchestrator.Orchestrator, cfgStore system.Store, factories orche
 		remoteIndexer:             cfg.RemoteIndexer,
 		peerJobs:                  cfg.PeerJobs,
 		localStatsFn:              cfg.LocalStats,
+		clusterRouteRatesFn:       cfg.ClusterRouteRates,
 		localNodeID:               cfg.NodeID,
 		clusterAddress:            cfg.ClusterAddress,
 		joinClusterFn:             cfg.JoinClusterFunc,
@@ -523,6 +529,7 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 		PeerStats:          s.peerIngesterStats,
 		PeerRouteStats:     s.peerRouteStats,
 		LocalStats:         s.localStatsFn,
+		ClusterRouteRates:  s.clusterRouteRatesFn,
 		LocalNodeID:        s.localNodeID,
 		AfterConfigApply:   s.afterConfigApply,
 		ConfigSignal:       s.configSignal,
@@ -554,6 +561,7 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 	}
 	if s.peerRouteStats != nil {
 		lifecycleServer.SetPeerRouteStats(s.peerRouteStats)
+		lifecycleServer.SetClusterRouteRates(s.clusterRouteRatesFn)
 		lifecycleServer.SetPeerPipelineDisk(s.peerPipelineDisk)
 	}
 	lifecycleServer.SetVaultFuncs(vaultServer.allVaultInfos, func(ctx context.Context) *apiv1.GetStatsResponse {

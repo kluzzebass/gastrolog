@@ -54,9 +54,17 @@ func (s *SystemServer) GetRouteStats(
 		mergePerRouteStats(routeMap, pRouteStats)
 	}
 
-	// Cluster-total throughput: local rolling-window rates plus live peers'
-	// broadcast rates, per horizon (gastrolog-4eh5ns).
-	ingestedRate, routedRate := clusterRouteRates(s.localStats, s.peerRouteStats)
+	// Cluster-total throughput. Preferred source: the stats collector's
+	// window over SUMMED cluster counters — one server-side series carrying
+	// instant/30s/1m AND spark history, so the UI never fabricates history
+	// client-side. Fallback (single-node, tests): sum local + peer
+	// per-horizon rates, sparkless (gastrolog-4eh5ns).
+	var ingestedRate, routedRate *apiv1.ThroughputRate
+	if s.clusterRouteRates != nil {
+		ingestedRate, routedRate = s.clusterRouteRates()
+	} else {
+		ingestedRate, routedRate = clusterRouteRates(s.localStats, s.peerRouteStats)
+	}
 
 	resp := &apiv1.GetRouteStatsResponse{
 		TotalIngested:   totalIngested,

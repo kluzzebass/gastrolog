@@ -162,3 +162,44 @@ func TestPeerState_AggregateRouteRates(t *testing.T) {
 	assertRate(t, "aggregate ingested 60s", in.Avg_60SPerSec, 90)
 	assertRate(t, "aggregate routed instant", routed.InstantPerSec, 100)
 }
+
+// TestStatsCollector_ClusterRouteRates: the cluster-total series (including
+// the spark the route panel renders) is windowed server-side over SUMMED
+// cluster counters — never accumulated client-side (gastrolog-4eh5ns).
+func TestStatsCollector_ClusterRouteRates(t *testing.T) {
+	t.Parallel()
+	var clusterIngested, clusterRouted int64 = 10000, 8000
+	collector := NewStatsCollector(StatsCollectorConfig{
+		Stats:      &stubStatsProvider{},
+		NodeID:     "node-a",
+		NodeNameFn: func() string { return "node-a" },
+		ClusterRouteTotals: func() (int64, int64) {
+			return clusterIngested, clusterRouted
+		},
+	})
+
+	t0 := time.Now()
+	_ = collector.CollectLocalTick(t0)
+	in, _ := collector.ClusterRouteRates()
+	if in.InstantPerSec != 0 || len(in.Spark) != 0 {
+		t.Fatalf("first tick = %v/%d sparks, want 0/none (window init)", in.InstantPerSec, len(in.Spark))
+	}
+
+	clusterIngested += 500 // +500 over 5s → 100/s
+	clusterRouted += 250
+	_ = collector.CollectLocalTick(t0.Add(5 * time.Second))
+	in, routed := collector.ClusterRouteRates()
+	assertRate(t, "cluster ingested instant", in.InstantPerSec, 100)
+	assertRate(t, "cluster routed instant", routed.InstantPerSec, 50)
+	if len(in.Spark) != 1 {
+		t.Fatalf("spark len = %d, want 1 (server-side history)", len(in.Spark))
+	}
+
+	// A peer expiring (summed counter drops) re-anchors instead of going negative.
+	clusterIngested -= 5000
+	_ = collector.CollectLocalTick(t0.Add(10 * time.Second))
+	in, _ = collector.ClusterRouteRates()
+	if in.InstantPerSec != 0 {
+		t.Fatalf("post-drop instant = %v, want 0 (reset guard)", in.InstantPerSec)
+	}
+}
