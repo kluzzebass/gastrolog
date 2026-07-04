@@ -130,6 +130,9 @@ type harnessOpts struct {
 	chunkLeader    func() bool // nil defaults to vault leader
 	pullFails      int         // simulate transient origin pull failures on remote home
 	gatedPull      bool        // block pulls until allowPull() (multi-node recovery tests)
+	// seedOriginRoot runs before segmentation registers the vault — pre-seed
+	// crash leftovers (orphaned working/ segments) the pipeline must recover.
+	seedOriginRoot func(root string)
 }
 
 type gateFlowPull struct {
@@ -221,6 +224,9 @@ func newHarness(t *testing.T, nodeID, ingesterID, vaultID glid.GLID, route *rout
 	}
 
 	vaultRoot := t.TempDir()
+	if opts.seedOriginRoot != nil {
+		opts.seedOriginRoot(vaultRoot)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 
 	h := &harness{
@@ -1371,4 +1377,92 @@ func TestPipelineUnmatchedNotWritten(t *testing.T) {
 	if sf.Header().RecordCount != 0 {
 		t.Fatalf("segment record count = %d, want 0", sf.Header().RecordCount)
 	}
+}
+
+// TestPipelineRecoversOrphanedWorkingSegmentAcrossNodes: an orphaned working/
+// segment left by a crashed origin process is recovered at vault
+// registration, published, pulled by the remote home, and receipted — the
+// acked records survive the crash end to end (gastrolog-1sylj7). No fresh
+// ingest happens: recovery alone must drive the whole flow.
+func TestPipelineRecoversOrphanedWorkingSegmentAcrossNodes(t *testing.T) {
+	nodeID := glid.New()
+	ingesterID := glid.New()
+	vaultID := glid.New()
+
+	route, err := routing.CompileRoute(glid.New(), "all", 0, "*", []glid.GLID{vaultID})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var orphanID glid.GLID
+	h := newHarness(t, nodeID, ingesterID, vaultID, route, harnessOpts{
+		closePolicy:    segmentation.ClosePolicy{MaxBytes: 1 << 20},
+		withCollection: true,
+		seedOriginRoot: func(root string) {
+			orphanID = seedCrashedWorkingSegment(t, root, vaultID, 3)
+		},
+	})
+
+	published := h.waitCollectedMatchesPublish(t)
+	if len(published) != 1 || published[0].SegmentID != orphanID {
+		t.Fatalf("published = %+v, want exactly the recovered orphan %s", published, orphanID)
+	}
+	if published[0].RecordCount != 3 {
+		t.Fatalf("recovered RecordCount = %d, want 3", published[0].RecordCount)
+	}
+
+	headPath := paths.HeadSegment(h.homeRoot, orphanID)
+	sf, err := segment.Open(headPath)
+	if err != nil {
+		t.Fatalf("recovered segment missing on remote home head/: %v", err)
+	}
+	defer sf.Close()
+	got, err := sf.ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("remote home records = %d, want 3", len(got))
+	}
+	if !bytes.Contains(got[0].Raw, []byte("crash-orphan payload")) {
+		t.Fatalf("payload = %q", got[0].Raw)
+	}
+}
+
+// seedCrashedWorkingSegment writes n fsynced records into working/<segID> and
+// abandons the file without Finalize or Close — the on-disk state a crash
+// leaves behind after the records were acked.
+func seedCrashedWorkingSegment(t *testing.T, root string, vaultID glid.GLID, n int) glid.GLID {
+	t.Helper()
+	if err := paths.EnsureSegmentationDirs(root); err != nil {
+		t.Fatal(err)
+	}
+	segID := glid.New()
+	sf, err := segment.Create(paths.WorkingSegment(root, segID), segment.Meta{ID: segID, VaultID: vaultID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := time.Date(2026, 7, 4, 4, 0, 0, 0, time.UTC)
+	for i := range n {
+		rec := &record.Record{
+			SourceTS: ts,
+			IngestTS: ts.Add(time.Duration(i) * time.Second),
+			EventID: record.EventID{
+				IngesterID: glid.New(),
+				NodeID:     glid.New(),
+				IngestTS:   ts.Add(time.Duration(i) * time.Second),
+				IngestSeq:  uint32(i), //nolint:gosec // test loop index
+			},
+			Attrs: record.Attributes{"env": "prod"},
+			Raw:   []byte("crash-orphan payload"),
+		}
+		if err := sf.Append(rec, ts); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := sf.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	// No Finalize, no Close: crash.
+	return segID
 }

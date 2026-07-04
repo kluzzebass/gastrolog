@@ -3,6 +3,7 @@ package segmentation
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -56,6 +57,9 @@ type Config struct {
 	// OnSync is invoked after each real fsync (for tests). It is NOT called for
 	// vaults with DisableFsync set, since no fsync occurs.
 	OnSync func()
+	// Logger receives structured segmentation events (working-segment crash
+	// recovery). Nil discards.
+	Logger *slog.Logger
 }
 
 // VaultConfig overrides per-vault commit/fsync tuning at RegisterVault time.

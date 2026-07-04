@@ -243,6 +243,7 @@ func New(cfg Config) *Supervisor {
 		},
 	})
 	seg, completed := segmentation.New(segmentation.Config{
+		Logger:             cfg.Logger,
 		ClosePolicy:        cfg.SegmentClosePolicy,
 		SyncBatchSize:      cfg.SegmentSyncBatchSize,
 		SyncBatchWindow:    cfg.SegmentSyncBatchWindow,

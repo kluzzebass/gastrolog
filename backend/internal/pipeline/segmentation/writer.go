@@ -3,12 +3,14 @@ package segmentation
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"gastrolog/internal/glid"
+	"gastrolog/internal/logging"
 	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/pipeline/segment"
 	"gastrolog/internal/record"
@@ -53,6 +55,10 @@ func newVaultWriter(vaultID glid.GLID, root string, cfg Config, vc VaultConfig, 
 	if err := paths.EnsureSegmentationDirs(root); err != nil {
 		return nil, err
 	}
+	if err := recoverWorkingSegments(root, vaultID, completed, cfg.OnCompletedDropped,
+		compSegmentation.Apply(logging.Default(cfg.Logger))); err != nil {
+		return nil, err
+	}
 	queueCap := cfg.EncodeQueueCap
 	if queueCap <= 0 {
 		queueCap = 64
@@ -87,6 +93,72 @@ func newVaultWriter(vaultID glid.GLID, root string, cfg Config, vc VaultConfig, 
 		return nil, err
 	}
 	return w, nil
+}
+
+// recoverWorkingSegments finalizes working/ segments a previous process left
+// behind (crash or kill before the close policy fired). Records in them were
+// fsynced and ACKED — dropping them is post-accept loss, a cardinal-rule
+// violation. Non-empty orphans are finalized (segment.Open reconciles a torn
+// tail down to the synced prefix) and moved to completed/, where the
+// completed channel — or distribution's stranded rescan when the channel is
+// full — publishes them like any freshly-closed segment. Empty orphans are
+// deleted. Files that fail to open or finalize are left in place and logged:
+// recovery must never destroy bytes it cannot prove empty.
+func recoverWorkingSegments(root string, vaultID glid.GLID, completed chan<- CompletedSegment, onCompletedDropped func(), log *slog.Logger) error {
+	ids, err := paths.ListSegmentIDs(paths.WorkingDir(root))
+	if err != nil {
+		return err
+	}
+	for id := range ids {
+		workingPath := paths.WorkingSegment(root, id)
+		sf, err := segment.Open(workingPath)
+		if err != nil {
+			log.Warn("orphaned working segment unreadable; left in place",
+				"vault", vaultID, "segment", id, "error", err)
+			continue
+		}
+		if sf.Header().RecordCount == 0 {
+			_ = sf.Close()
+			_ = os.Remove(workingPath)
+			continue
+		}
+		if err := sf.Finalize(); err != nil {
+			_ = sf.Close()
+			log.Warn("orphaned working segment finalize failed; left in place",
+				"vault", vaultID, "segment", id, "error", err)
+			continue
+		}
+		hdr := sf.Header()
+		if err := sf.Close(); err != nil {
+			log.Warn("orphaned working segment close failed; left in place",
+				"vault", vaultID, "segment", id, "error", err)
+			continue
+		}
+		completedPath := paths.CompletedSegment(root, id)
+		if err := os.Rename(workingPath, completedPath); err != nil {
+			log.Warn("orphaned working segment rename failed; left in place",
+				"vault", vaultID, "segment", id, "error", err)
+			continue
+		}
+		log.Info("recovered orphaned working segment",
+			"vault", vaultID, "segment", id, "records", hdr.RecordCount)
+		if completed == nil {
+			continue
+		}
+		select {
+		case completed <- CompletedSegment{
+			VaultID: vaultID,
+			Meta:    segment.Meta{ID: id, VaultID: vaultID},
+			Path:    completedPath,
+			Header:  hdr,
+		}:
+		default:
+			if onCompletedDropped != nil {
+				onCompletedDropped()
+			}
+		}
+	}
+	return nil
 }
 
 func (w *vaultWriter) input() chan<- Input {

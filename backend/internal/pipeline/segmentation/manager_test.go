@@ -451,3 +451,143 @@ func TestManagerUnregisterVaultDuringRun(t *testing.T) {
 		t.Fatalf("working segments after unregister during run = %d, want 0", len(entries))
 	}
 }
+
+// --- working/ restart recovery (gastrolog-1sylj7) ---
+
+// seedWorkingSegment simulates a crashed writer: records appended and fsynced
+// (and therefore ACKED) into working/<segID>, process killed before the close
+// policy fired. The file is deliberately left unclosed and unfinalized — the
+// exact on-disk state a crash leaves behind.
+func seedWorkingSegment(t *testing.T, root string, vaultID glid.GLID, n int) glid.GLID {
+	t.Helper()
+	if err := paths.EnsureSegmentationDirs(root); err != nil {
+		t.Fatal(err)
+	}
+	segID := glid.New()
+	sf, err := segment.Create(paths.WorkingSegment(root, segID), segment.Meta{ID: segID, VaultID: vaultID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := time.Date(2026, 7, 4, 3, 0, 0, 0, time.UTC)
+	for i := range n {
+		if err := sf.Append(sampleRecord(uint32(i), ts.Add(time.Duration(i)*time.Second)), ts); err != nil { //nolint:gosec // test loop index
+			t.Fatal(err)
+		}
+	}
+	if err := sf.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	// No Finalize, no Close: crash.
+	return segID
+}
+
+// Acked records in an orphaned working segment must become a completed
+// segment on re-register — losing them is a cardinal-rule violation.
+func TestRegisterVaultRecoversOrphanedWorkingSegment(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	vaultID := glid.New()
+	segID := seedWorkingSegment(t, root, vaultID, 3)
+
+	mgr, completed := segmentation.New(segmentation.Config{})
+	if _, err := mgr.RegisterVault(vaultID, root, segmentation.VaultConfig{}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { mgr.UnregisterVault(vaultID) })
+
+	if _, err := os.Stat(paths.WorkingSegment(root, segID)); !os.IsNotExist(err) {
+		t.Fatalf("working/ orphan still present after recovery (err=%v)", err)
+	}
+	completedPath := paths.CompletedSegment(root, segID)
+	sf, err := segment.Open(completedPath)
+	if err != nil {
+		t.Fatalf("open recovered completed segment: %v", err)
+	}
+	defer sf.Close()
+	if got := sf.Header().RecordCount; got != 3 {
+		t.Fatalf("recovered RecordCount = %d, want 3", got)
+	}
+
+	select {
+	case cs := <-completed:
+		if cs.Meta.ID != segID || cs.VaultID != vaultID {
+			t.Fatalf("completed notification = %+v, want segment %s vault %s", cs, segID, vaultID)
+		}
+		if cs.Header.RecordCount != 3 {
+			t.Fatalf("notification RecordCount = %d, want 3", cs.Header.RecordCount)
+		}
+	default:
+		t.Fatal("recovered segment was not announced on the completed channel")
+	}
+}
+
+// An empty orphan (crash before any append) holds no acked data; recovery
+// discards it instead of publishing an empty segment.
+func TestRegisterVaultDiscardsEmptyWorkingOrphan(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	vaultID := glid.New()
+	segID := seedWorkingSegment(t, root, vaultID, 0)
+
+	mgr, completed := segmentation.New(segmentation.Config{})
+	if _, err := mgr.RegisterVault(vaultID, root, segmentation.VaultConfig{}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { mgr.UnregisterVault(vaultID) })
+
+	if _, err := os.Stat(paths.WorkingSegment(root, segID)); !os.IsNotExist(err) {
+		t.Fatalf("empty orphan still present (err=%v)", err)
+	}
+	if _, err := os.Stat(paths.CompletedSegment(root, segID)); !os.IsNotExist(err) {
+		t.Fatalf("empty orphan promoted to completed/ (err=%v)", err)
+	}
+	select {
+	case cs := <-completed:
+		t.Fatalf("empty orphan announced: %+v", cs)
+	default:
+	}
+}
+
+// A torn tail (crash mid-append after the last fsync) recovers the synced
+// prefix: the acked records survive, the partial frame is dropped.
+func TestRegisterVaultRecoversTornTailWorkingOrphan(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	vaultID := glid.New()
+	segID := seedWorkingSegment(t, root, vaultID, 2)
+
+	// Simulate the torn frame: raw garbage appended after the synced prefix.
+	f, err := os.OpenFile(paths.WorkingSegment(root, segID), os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Write([]byte{0xDE, 0xAD, 0xBE}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	mgr, completed := segmentation.New(segmentation.Config{})
+	if _, err := mgr.RegisterVault(vaultID, root, segmentation.VaultConfig{}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { mgr.UnregisterVault(vaultID) })
+
+	sf, err := segment.Open(paths.CompletedSegment(root, segID))
+	if err != nil {
+		t.Fatalf("open recovered completed segment: %v", err)
+	}
+	defer sf.Close()
+	if got := sf.Header().RecordCount; got != 2 {
+		t.Fatalf("recovered RecordCount = %d, want 2 (synced prefix)", got)
+	}
+	select {
+	case cs := <-completed:
+		if cs.Header.RecordCount != 2 {
+			t.Fatalf("notification RecordCount = %d, want 2", cs.Header.RecordCount)
+		}
+	default:
+		t.Fatal("torn-tail orphan was not announced after recovery")
+	}
+}
