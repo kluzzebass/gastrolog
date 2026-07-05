@@ -40,7 +40,7 @@ func (s *sinkSpy) active() int {
 
 func TestRecordCountsTiers(t *testing.T) {
 	t.Parallel()
-	w := New(slog.Default(), nil)
+	w := New(slog.Default(), nil, 0)
 	base := time.Unix(0, 0)
 
 	w.record(base, 120*time.Millisecond)  // note only
@@ -62,7 +62,7 @@ func TestRecordCountsTiers(t *testing.T) {
 func TestCriticalStallRaisesAndClearsAlert(t *testing.T) {
 	t.Parallel()
 	sink := &sinkSpy{}
-	w := New(slog.Default(), sink)
+	w := New(slog.Default(), sink, 0)
 	base := time.Unix(1_700_000_000, 0)
 
 	w.record(base, 2*time.Second)
@@ -83,9 +83,31 @@ func TestCriticalStallRaisesAndClearsAlert(t *testing.T) {
 	}
 }
 
+// TestCriticalTierFollowsConfiguredLease: with a widened leader lease
+// (gastrolog-o6plq9), gaps past the shipped 1.5s default but inside the
+// lease stay sub-critical — no alert, no critical count.
+func TestCriticalTierFollowsConfiguredLease(t *testing.T) {
+	t.Parallel()
+	sink := &sinkSpy{}
+	w := New(slog.Default(), sink, 4*time.Second)
+	base := time.Unix(1_700_000_000, 0)
+
+	w.record(base, 2*time.Second) // lethal at default lease, survivable at 4s
+	_, _, nCritical := w.Counters()
+	if nCritical != 0 || sink.active() != 0 {
+		t.Fatalf("2s gap under a 4s lease: criticals=%d alerts=%d, want 0/0", nCritical, sink.active())
+	}
+
+	w.record(base, 5*time.Second)
+	_, _, nCritical = w.Counters()
+	if nCritical != 1 || sink.active() != 1 {
+		t.Fatalf("5s gap under a 4s lease: criticals=%d alerts=%d, want 1/1", nCritical, sink.active())
+	}
+}
+
 func TestRunMeasuresRealGaps(t *testing.T) {
 	t.Parallel()
-	w := New(slog.Default(), nil)
+	w := New(slog.Default(), nil, 0)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { w.Run(ctx); close(done) }()

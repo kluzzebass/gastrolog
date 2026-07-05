@@ -65,8 +65,9 @@ type GroupConfig struct {
 	TrailingLogs uint64
 
 	// HeartbeatTimeout, ElectionTimeout, and LeaderLeaseTimeout override Raft
-	// timing when > 0. Vault control-plane groups (vault/*/ctl) default to
-	// longer timeouts when unset — see vaultCtl* constants below.
+	// timing when > 0. When unset, the node-wide base applies (defaults
+	// below, operator-adjustable via ConfigureTimeouts); vault control-plane
+	// groups (vault/*/ctl) get vaultCtlTimeoutSlack on top of the base.
 	HeartbeatTimeout   time.Duration
 	ElectionTimeout    time.Duration
 	LeaderLeaseTimeout time.Duration
@@ -74,19 +75,46 @@ type GroupConfig struct {
 
 // Default Raft timing for cluster-ctl and other non-vault-ctl groups.
 // LeaderLeaseTimeout must not exceed HeartbeatTimeout (hashicorp/raft).
+// Exported so boot code can resolve partially-configured operator input
+// against the shipped defaults before calling ConfigureTimeouts.
 const (
-	defaultHeartbeatTimeout   = 2 * time.Second
-	defaultElectionTimeout    = 2 * time.Second
-	defaultLeaderLeaseTimeout = 1500 * time.Millisecond
+	DefaultHeartbeatTimeout   = 2 * time.Second
+	DefaultLeaderLeaseTimeout = 1500 * time.Millisecond
+
+	// vaultCtlTimeoutSlack widens the vault control-plane detector over the
+	// base: those groups run heavier FSM work and share the node with
+	// chunking GLCB builds, so they tolerate longer scheduling pauses than
+	// data-plane groups.
+	vaultCtlTimeoutSlack = 1 * time.Second
 )
 
-// Vault control-plane groups run heavier FSM work and share the node with
-// chunking GLCB builds; tolerate longer scheduling pauses than data-plane groups.
-const (
-	vaultCtlHeartbeatTimeout   = 3 * time.Second
-	vaultCtlElectionTimeout    = 3 * time.Second
-	vaultCtlLeaderLeaseTimeout = 1500 * time.Millisecond
+// Node-wide base failure-detector timing, overridable once at boot via
+// ConfigureTimeouts (--raft-heartbeat-timeout / --raft-leader-lease,
+// gastrolog-o6plq9). The election timeout always equals the heartbeat
+// timeout, as the previous per-profile constants had it; per-group
+// GroupConfig overrides still win over the base.
+var (
+	baseHeartbeatTimeout = DefaultHeartbeatTimeout
+	baseLeaderLease      = DefaultLeaderLeaseTimeout
 )
+
+// ConfigureTimeouts sets the node-wide base Raft failure-detector timing.
+// Call once at boot, before any group starts — running groups do not pick
+// up changes. The lease must not exceed the heartbeat timeout:
+// hashicorp/raft rejects that configuration, and a lease outliving the
+// detector window would let a deposed leader keep serving lease-gated
+// reads.
+func ConfigureTimeouts(heartbeat, lease time.Duration) error {
+	if heartbeat <= 0 || lease <= 0 {
+		return fmt.Errorf("raft timeouts must be positive: heartbeat %v, leader lease %v", heartbeat, lease)
+	}
+	if lease > heartbeat {
+		return fmt.Errorf("raft leader lease (%v) must not exceed the heartbeat timeout (%v)", lease, heartbeat)
+	}
+	baseHeartbeatTimeout = heartbeat
+	baseLeaderLease = lease
+	return nil
+}
 
 // Group is a running Raft group managed by the GroupManager.
 type Group struct {
@@ -440,14 +468,12 @@ func RaftTimeouts(cfg GroupConfig) (heartbeat, election, lease time.Duration) {
 }
 
 func raftTimeouts(cfg GroupConfig) (heartbeat, election, lease time.Duration) {
-	heartbeat = defaultHeartbeatTimeout
-	election = defaultElectionTimeout
-	lease = defaultLeaderLeaseTimeout
+	heartbeat = baseHeartbeatTimeout
+	lease = baseLeaderLease
 	if IsVaultControlPlaneGroupID(cfg.GroupID) {
-		heartbeat = vaultCtlHeartbeatTimeout
-		election = vaultCtlElectionTimeout
-		lease = vaultCtlLeaderLeaseTimeout
+		heartbeat += vaultCtlTimeoutSlack
 	}
+	election = heartbeat
 	if cfg.HeartbeatTimeout > 0 {
 		heartbeat = cfg.HeartbeatTimeout
 	}

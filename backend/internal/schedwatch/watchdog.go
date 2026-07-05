@@ -44,8 +44,10 @@ const (
 	// load while consensus stayed healthy).
 	stallDebug = 250 * time.Millisecond
 
-	// stallCritical raises an operator alert: with a 1.5s leader lease and
-	// 2s heartbeat timeout, gaps of this size manufacture elections.
+	// stallCritical raises an operator alert: gaps at or beyond the Raft
+	// leader lease manufacture elections. This is the fallback when New is
+	// given no lease; production passes the configured lease so the
+	// critical tier stays lease-lethal by definition (gastrolog-o6plq9).
 	stallCritical = 1500 * time.Millisecond
 
 	// alertID identifies the scheduler-stall alert; cleared after a clean
@@ -68,10 +70,13 @@ type AlertSink interface {
 type Watchdog struct {
 	logger *slog.Logger
 	alerts AlertSink
+	// critical is the election-lethal gap threshold — the configured Raft
+	// leader lease (stallCritical when New is given zero).
+	critical time.Duration
 
-	stalls100 atomic.Uint64 // gaps >= 100ms
-	stalls250 atomic.Uint64 // gaps >= 250ms
-	stalls1s5 atomic.Uint64 // gaps >= 1.5s (election-lethal)
+	stalls100      atomic.Uint64 // gaps >= 100ms
+	stalls250      atomic.Uint64 // gaps >= 250ms
+	stallsCritical atomic.Uint64 // gaps >= critical (election-lethal)
 
 	maxStallNanos atomic.Int64 // max gap since last TakeMaxStall
 
@@ -79,14 +84,18 @@ type Watchdog struct {
 }
 
 // New creates a watchdog. logger must be non-nil; alerts may be nil (no
-// operator alerts, counters and logs only — tests).
-func New(logger *slog.Logger, alerts AlertSink) *Watchdog {
-	return &Watchdog{logger: logger, alerts: alerts}
+// operator alerts, counters and logs only — tests). leaderLease sets the
+// critical (election-lethal) tier; zero falls back to the 1.5s default.
+func New(logger *slog.Logger, alerts AlertSink, leaderLease time.Duration) *Watchdog {
+	if leaderLease <= 0 {
+		leaderLease = stallCritical
+	}
+	return &Watchdog{logger: logger, alerts: alerts, critical: leaderLease}
 }
 
-// Counters returns cumulative stall counts (>=100ms, >=250ms, >=1.5s).
-func (w *Watchdog) Counters() (n100, n250, n1500 uint64) {
-	return w.stalls100.Load(), w.stalls250.Load(), w.stalls1s5.Load()
+// Counters returns cumulative stall counts (>=100ms, >=250ms, >=lease).
+func (w *Watchdog) Counters() (n100, n250, nCritical uint64) {
+	return w.stalls100.Load(), w.stalls250.Load(), w.stallsCritical.Load()
 }
 
 // TakeMaxStall returns the largest gap observed since the previous call and
@@ -132,21 +141,21 @@ func (w *Watchdog) record(now time.Time, gap time.Duration) {
 		return
 	}
 	w.stalls250.Add(1)
-	if gap < stallCritical {
+	if gap < w.critical {
 		w.logger.Debug("scheduler stall: no goroutine ran on schedule",
 			"gap", gap.Round(time.Millisecond),
-			"heartbeat_interval", "200ms", "leader_lease", "1.5s")
+			"leader_lease", w.critical)
 		return
 	}
-	w.stalls1s5.Add(1)
+	w.stallsCritical.Add(1)
 	w.lastCriticalNanos.Store(now.UnixNano())
 	w.logger.Warn("scheduler stall: no goroutine ran on schedule",
 		"gap", gap.Round(time.Millisecond),
-		"heartbeat_interval", "200ms", "leader_lease", "1.5s")
+		"leader_lease", w.critical)
 	if w.alerts != nil {
 		w.alerts.Set(alertID, alert.Error, "runtime",
 			"scheduler stalled "+gap.Round(time.Millisecond).String()+
-				" — longer than the Raft leader lease; heartbeats and election timers did not run (gastrolog-1io54g)")
+				" — longer than the Raft leader lease ("+w.critical.String()+"); heartbeats and election timers did not run (gastrolog-1io54g)")
 	}
 }
 

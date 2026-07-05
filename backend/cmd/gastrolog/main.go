@@ -122,6 +122,14 @@ func main() {
 		Use:   "server",
 		Short: "Start the gastrolog service",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			raftHeartbeat, err := resolveDurationFlag(cmd, "raft-heartbeat-timeout", "GLOG_RAFT_HEARTBEAT_TIMEOUT")
+			if err != nil {
+				return err
+			}
+			raftLease, err := resolveDurationFlag(cmd, "raft-leader-lease", "GLOG_RAFT_LEADER_LEASE")
+			if err != nil {
+				return err
+			}
 			cfg := app.RunConfig{
 				HomeFlag:    mustString(cmd, "home"),
 				VaultsFlag:  mustString(cmd, "vaults"),
@@ -153,12 +161,15 @@ func main() {
 				EnvironmentColor: mustString(cmd, "environment-color"),
 				SegmentHotPathFsync: resolveSegmentHotPathFsync(cmd),
 
+				RaftHeartbeatTimeout: raftHeartbeat,
+				RaftLeaderLease:      raftLease,
+
 				SlogCapture:        slogCaptureCh,
 				SlogCaptureHandler: captureHandler,
 				LogFilter:          filterHandler,
 			}
 
-			err := app.Run(cmd.Context(), logger, cfg)
+			err = app.Run(cmd.Context(), logger, cfg)
 			if cmd.Context().Err() != nil {
 				return nil //nolint:nilerr // signal-triggered shutdown is not an error
 			}
@@ -195,6 +206,15 @@ func main() {
 	serverCmd.Flags().String("environment-label", "", "label rendered in the UI header banner (e.g. \"Kubernetes\", \"Development\"); empty hides the banner")
 	serverCmd.Flags().String("environment-color", "", "CSS color for the UI header banner (e.g. \"red\", \"#c4302b\"); empty uses the palette default")
 	serverCmd.Flags().Bool("segment-hot-path-fsync", true, "fsync segmentation group-commit flushes (default true); set false for load testing — also GLOG_SEGMENT_HOT_PATH_FSYNC")
+
+	// Raft failure-detector timing (gastrolog-o6plq9). The operator lever
+	// for substrates whose scheduler-stall tail exceeds the shipped window
+	// (e.g. a loaded macOS dev host): widen both to tolerate longer pauses
+	// at the cost of slower real-crash failover. Election timeout tracks the
+	// heartbeat timeout; vault-ctl groups add 1s slack; transport RPC
+	// deadlines derive so they can never undercut the detector.
+	serverCmd.Flags().Duration("raft-heartbeat-timeout", 0, "base Raft heartbeat/election timeout for all groups (default 2s, vault-ctl +1s); 0 keeps the default — also GLOG_RAFT_HEARTBEAT_TIMEOUT")
+	serverCmd.Flags().Duration("raft-leader-lease", 0, "Raft leader lease for all groups (default 1.5s, must not exceed the heartbeat timeout); 0 keeps the default — also GLOG_RAFT_LEADER_LEASE")
 
 	versionCmd := &cobra.Command{
 		Use:   "version",
@@ -253,6 +273,27 @@ func resolveSegmentHotPathFsync(cmd *cobra.Command) bool {
 		return mustBool(cmd, "segment-hot-path-fsync")
 	}
 	return envBoolDefaultTrue("GLOG_SEGMENT_HOT_PATH_FSYNC")
+}
+
+// resolveDurationFlag resolves a duration setting: the CLI flag wins when
+// explicitly set; otherwise the environment variable is parsed. A malformed
+// environment value fails the command instead of being silently ignored —
+// these knobs exist for operators mid-incident, who need "GLOG_RAFT_...=5"
+// (missing unit) to error loudly, not boot with the default.
+func resolveDurationFlag(cmd *cobra.Command, flagName, envKey string) (time.Duration, error) {
+	if cmd.Flags().Changed(flagName) {
+		v, _ := cmd.Flags().GetDuration(flagName)
+		return v, nil
+	}
+	raw := strings.TrimSpace(os.Getenv(envKey))
+	if raw == "" {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", envKey, err)
+	}
+	return d, nil
 }
 
 func envBoolDefaultTrue(key string) bool {

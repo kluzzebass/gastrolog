@@ -55,6 +55,7 @@ import (
 	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/pipeline/digestion"
+	"gastrolog/internal/multiraft"
 	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/raftwal"
 	"gastrolog/internal/schedwatch"
@@ -146,6 +147,14 @@ type RunConfig struct {
 	// the pipeline supervisor sets SegmentDisableFsync (load testing only).
 	SegmentHotPathFsync bool
 
+	// RaftHeartbeatTimeout and RaftLeaderLease override the node-wide base
+	// Raft failure-detector timing when > 0 (gastrolog-o6plq9). Zero keeps
+	// the raftgroup defaults. The operator lever for substrates whose
+	// scheduler-stall tail exceeds the shipped detector window; boot fails
+	// if lease > heartbeat.
+	RaftHeartbeatTimeout time.Duration
+	RaftLeaderLease      time.Duration
+
 	// SlogCapture receives copies of slog records for the "self" ingester.
 	// Created by main and shared with the CaptureHandler. Nil disables capture.
 	SlogCapture <-chan logging.CapturedRecord
@@ -182,6 +191,27 @@ func (c RunConfig) advertisedClusterAddr() string {
 //
 //nolint:gocognit,gocyclo // composition root: wires every subsystem at
 func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
+	// Raft failure-detector timing must be installed before ANY group or
+	// transport exists — openConfigStore below already starts cluster-ctl.
+	// Partial operator input resolves against the shipped defaults so
+	// setting only the lease (or only the heartbeat) validates correctly.
+	raftHeartbeat := cfg.RaftHeartbeatTimeout
+	if raftHeartbeat <= 0 {
+		raftHeartbeat = raftgroup.DefaultHeartbeatTimeout
+	}
+	raftLease := cfg.RaftLeaderLease
+	if raftLease <= 0 {
+		raftLease = raftgroup.DefaultLeaderLeaseTimeout
+	}
+	if err := raftgroup.ConfigureTimeouts(raftHeartbeat, raftLease); err != nil {
+		return fmt.Errorf("raft timing (--raft-heartbeat-timeout / --raft-leader-lease): %w", err)
+	}
+	multiraft.ConfigureRPCTimeouts(raftHeartbeat, raftHeartbeat)
+	if cfg.RaftHeartbeatTimeout > 0 || cfg.RaftLeaderLease > 0 {
+		logger.Info("raft failure-detector timing configured",
+			"heartbeat_timeout", raftHeartbeat, "leader_lease", raftLease)
+	}
+
 	hd, err := resolveHome(cfg.HomeFlag)
 	if err != nil {
 		return fmt.Errorf("resolve home directory: %w", err)
@@ -276,7 +306,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	// starvation — the one resource every Raft group on this node shares.
 	// Stalls past the leader lease raise an operator alert; the WARN log
 	// timestamps correlate against election events to pin the liveness leak.
-	schedWatch := schedwatch.New(logger, alertCollector)
+	schedWatch := schedwatch.New(logger, alertCollector, raftLease)
 	go schedWatch.Run(ctx)
 
 	// Shared shutdown phase. Constructed once per process and threaded into

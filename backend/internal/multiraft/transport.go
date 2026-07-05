@@ -64,26 +64,44 @@ const servicePath = "/gastrolog.v1.MultiRaftTransportService/"
 // Values are chosen against cluster-ctl / vault-ctl Raft timeouts in
 // raftgroup: tight enough that a paused peer fails fast and hraft retries,
 // generous enough to tolerate normal network jitter and short GC pauses.
-const (
+const installSnapshotRPCTimeout = 5 * time.Minute // bulk transfer; bounded by chunk/snapshot size
+
+// Defaults match the raftgroup base detector timing (heartbeat 2s,
+// election 2s); ConfigureRPCTimeouts re-derives them when the operator
+// widens the detector (gastrolog-o6plq9).
+var (
 	appendEntriesRPCTimeout = 3 * time.Second
 	// heartbeatRPCTimeout must not undercut the consensus failure budget
-	// (raftgroup defaultHeartbeatTimeout = 2s, leader lease = 1.5s). At the
-	// old 1s the transport was STRICTER than the failure detector it
+	// (raftgroup base heartbeat timeout, leader lease). At the old
+	// hardcoded 1s the transport was STRICTER than the failure detector it
 	// serves: probes that would have completed at ~1.2s — endpoint paused
 	// by a sub-second scheduler stall — were aborted at exactly 1000ms and
 	// counted as failed contact, aging lease/last-contact clocks past their
 	// real thresholds and manufacturing elections from stalls that were
 	// individually survivable (gastrolog-1io54g: lease traces showed
 	// conn_wait_ms=0, rpc_ms=1000, DeadlineExceeded during churn). A probe
-	// completing inside 2s still resets the follower's election timer and
-	// still counts as leader contact; only the failure detector may decide
-	// something is dead.
-	heartbeatRPCTimeout       = 2 * time.Second
-	requestVoteRPCTimeout     = 2 * time.Second
-	requestPreVoteRPCTimeout  = 2 * time.Second
-	timeoutNowRPCTimeout      = 2 * time.Second
-	installSnapshotRPCTimeout = 5 * time.Minute // bulk transfer; bounded by chunk/snapshot size
+	// completing inside the detector window still resets the follower's
+	// election timer and still counts as leader contact; only the failure
+	// detector may decide something is dead. ConfigureRPCTimeouts keeps
+	// this relation true by construction.
+	heartbeatRPCTimeout      = 2 * time.Second
+	requestVoteRPCTimeout    = 2 * time.Second
+	requestPreVoteRPCTimeout = 2 * time.Second
+	timeoutNowRPCTimeout     = 2 * time.Second
 )
+
+// ConfigureRPCTimeouts derives the per-RPC deadlines from the configured
+// failure-detector timing so the transport can never be stricter than the
+// detector it serves (the gastrolog-1io54g inversion, unrepresentable by
+// construction). Call once at boot, before any transport carries traffic;
+// deadlines never shrink below the shipped defaults.
+func ConfigureRPCTimeouts(heartbeat, election time.Duration) {
+	heartbeatRPCTimeout = max(2*time.Second, heartbeat)
+	appendEntriesRPCTimeout = max(3*time.Second, heartbeat+time.Second)
+	requestVoteRPCTimeout = max(2*time.Second, election)
+	requestPreVoteRPCTimeout = requestVoteRPCTimeout
+	timeoutNowRPCTimeout = requestVoteRPCTimeout
+}
 
 func (c *multiRaftClient) AppendEntries(ctx context.Context, req *gastrologv1.MultiRaftAppendEntriesRequest) (*gastrologv1.MultiRaftAppendEntriesResponse, error) {
 	resp := new(gastrologv1.MultiRaftAppendEntriesResponse)
