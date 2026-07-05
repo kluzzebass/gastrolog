@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -55,8 +56,8 @@ import (
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/pipeline/digestion"
 	"gastrolog/internal/raftgroup"
-	"gastrolog/internal/schedwatch"
 	"gastrolog/internal/raftwal"
+	"gastrolog/internal/schedwatch"
 	"gastrolog/internal/server"
 	"gastrolog/internal/server/routing"
 	"gastrolog/internal/system"
@@ -782,14 +783,18 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 		// Cluster-total route counters: local + live peers' cumulative
 		// broadcast totals. Windowed server-side so cluster rate history is
 		// system data, not client-side accumulation (gastrolog-4eh5ns).
-		ClusterRouteTotals: func() (int64, int64) {
+		ClusterRouteTotals: func() (int64, int64, string) {
 			rs := statsAdapter.RouteStats()
-			pIngested, _, pRouted, _, _, _ := peerState.AggregateRouteStats()
-			return rs.Ingested + pIngested, rs.Routed + pRouted
+			pIngested, pRouted, members := peerState.AggregateRouteTotals()
+			// "self" + sorted live peers: the summed window re-anchors on
+			// any change so peers entering/leaving the sum never read as
+			// traffic (gastrolog-mliwrd).
+			return rs.Ingested + pIngested, rs.Routed + pRouted,
+				"self," + strings.Join(members, ",")
 		},
-		Alerts:       alerts,
-		Jobs:         &jobBroadcastAdapter{scheduler: orch.Scheduler(), nodeID: nodeID},
-		NodeID:       nodeID,
+		Alerts: alerts,
+		Jobs:   &jobBroadcastAdapter{scheduler: orch.Scheduler(), nodeID: nodeID},
+		NodeID: nodeID,
 		NodeNameFn: func() string {
 			nid, err := glid.ParseAny(nodeID)
 			if err != nil {

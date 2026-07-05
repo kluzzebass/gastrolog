@@ -192,8 +192,8 @@ func TestStatsCollector_ClusterRouteRates(t *testing.T) {
 		Stats:      &stubStatsProvider{},
 		NodeID:     "node-a",
 		NodeNameFn: func() string { return "node-a" },
-		ClusterRouteTotals: func() (int64, int64) {
-			return clusterIngested, clusterRouted
+		ClusterRouteTotals: func() (int64, int64, string) {
+			return clusterIngested, clusterRouted, "self"
 		},
 	})
 

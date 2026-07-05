@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"sort"
 	"sync"
 	"time"
 
@@ -172,6 +173,28 @@ func (p *PeerState) CollectIngesterAlive(ingesterID string) map[string]bool {
 
 // AggregateRouteStats sums route stats from all live peers.
 // Returns per-peer totals merged into a single snapshot.
+// AggregateRouteTotals returns the summed cumulative route counters across
+// TTL-live peers plus a fingerprint of exactly which peers contributed —
+// taken under one lock so the sums and the fingerprint can never disagree.
+// The stats collector's summed window re-anchors when the fingerprint
+// changes, so a peer's stats expiring and later resuming can never read as
+// a throughput spike (gastrolog-mliwrd).
+func (p *PeerState) AggregateRouteTotals() (ingested, routed int64, members []string) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	now := time.Now()
+	for id, e := range p.entries {
+		if now.Sub(e.received) > p.ttl || e.stats == nil {
+			continue
+		}
+		ingested += e.stats.RouteStatsIngested
+		routed += e.stats.RouteStatsRouted
+		members = append(members, id)
+	}
+	sort.Strings(members)
+	return ingested, routed, members
+}
+
 func (p *PeerState) AggregateRouteStats() (ingested, dropped, routed int64, filterActive bool, vaultStats []*gastrologv1.VaultRouteStats, routeStats []*gastrologv1.PerRouteStats) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
