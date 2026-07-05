@@ -628,14 +628,27 @@ func (o *Orchestrator) reconcilePipelineAfterCtlRestore(vaultID glid.GLID) error
 // finishPendingPipelineCtlRestore completes a deferred ctl-restore reconcile after
 // pipeline RegisterVault. Vault-ctl Restore can finish before ApplyConfig registers
 // pipeline homes; without this hook rewire never runs against the live FSM.
+//
+// The reconcile runs on its own goroutine: callers reach here from
+// reloadPipelineFromConfig while HOLDING o.mu (write) — reconcileFilters and
+// ReloadFilters both lock around the reload — and the reconcile chain takes
+// o.mu.RLock (isPipelineIngestVault). Go's RWMutex is non-reentrant, so
+// running it inline self-deadlocked the whole orchestrator the first time a
+// node rejoined via snapshot restore (gastrolog-3wpfet: node bricked seconds
+// after rejoin, every o.mu user queued forever). The goroutine simply blocks
+// until the caller releases the write lock — the exact ordering we want.
+// LoadAndDelete keeps it exactly-once per restore, and the FSM restore hook
+// already runs this reconcile concurrently, so the contract permits async.
 func (o *Orchestrator) finishPendingPipelineCtlRestore(vaultID glid.GLID) {
 	if _, ok := o.pendingPipelineCtlRestore.LoadAndDelete(vaultID); !ok {
 		return
 	}
-	if err := o.reconcilePipelineAfterCtlRestore(vaultID); err != nil {
-		o.vaultOpsLogger.Warn("pipeline ctl-restore reconcile after register failed",
-			"vault", vaultID, "error", err)
-	}
+	go func() {
+		if err := o.reconcilePipelineAfterCtlRestore(vaultID); err != nil {
+			o.vaultOpsLogger.Warn("pipeline ctl-restore reconcile after register failed",
+				"vault", vaultID, "error", err)
+		}
+	}()
 }
 
 // rewirePipelineAfterCtlRestore rebinds chunking/collection to the live vault-ctl
