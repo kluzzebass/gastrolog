@@ -295,11 +295,18 @@ func TestLeaderPlannerRotatesAtMaxRecords(t *testing.T) {
 	}
 }
 
+// TestLeaderPlannerRotatesAtMaxAgeWhenCaughtUp: MaxAge is a bound on how
+// long a manifest stays OPEN, anchored at open-time wall clock — never at
+// segment PublishedAt. A manifest opened over a lagging backlog (published
+// hours ago) must NOT rotate at its first evaluation; it rotates once the
+// clock advances MaxAge past the open (gastrolog-4olqp6: the PublishedAt
+// anchor made every backlog manifest born expired, flooding the seal queue
+// with ~30K-record chunks).
 func TestLeaderPlannerRotatesAtMaxAgeWhenCaughtUp(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
 	firstWrite := base.Add(10 * time.Minute)
-	evalNow := firstWrite.Add(2 * time.Hour)
+	openNow := firstWrite.Add(2 * time.Hour) // planner runs 2h behind the publish
 	pubAt := base.Add(time.Minute)
 	segID := glid.New()
 	vaultID := glid.New()
@@ -313,6 +320,7 @@ func TestLeaderPlannerRotatesAtMaxAgeWhenCaughtUp(t *testing.T) {
 	chunkID := chunk.NewChunkID()
 	applier := &fsmApplier{fsm: fsm}
 
+	now := openNow
 	mgr := chunking.New(chunking.Config{})
 	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
 		VaultRoot:  vaultRoot,
@@ -323,27 +331,48 @@ func TestLeaderPlannerRotatesAtMaxAgeWhenCaughtUp(t *testing.T) {
 		IsLeader:   func() bool { return true },
 		NewChunkID: func() chunk.ChunkID { return chunkID },
 		Policy:     chunking.ManifestRotationPolicy{MaxAge: time.Hour},
-		Now:        func() time.Time { return evalNow },
+		Now:        func() time.Time { return now },
 	}); err != nil {
 		t.Fatal(err)
 	}
 
 	publishSegment(t, fsm, segID, pubAt, 2, firstWrite, firstWrite.Add(time.Second))
 	ctx := t.Context()
+
+	// Phase 1 — backlog: the segment published 2h ago must not make the
+	// fresh manifest rotate. Plan to a fixpoint at the open-time clock.
+	for step := 0; step < 8; step++ {
+		if err := mgr.PlanOnce(ctx, vaultID); err != nil {
+			t.Fatalf("PlanOnce step %d: %v", step, err)
+		}
+	}
+	if sealed := fsm.SealedManifest(); sealed != nil {
+		t.Fatalf("manifest sealed at open-time eval (SealedAt %v) — max-age anchored on PublishedAt, not open time", sealed.SealedAt)
+	}
+	open := fsm.OpenChunk()
+	if open == nil {
+		t.Fatal("expected open manifest holding the backlog refs")
+	}
+	if !open.OpenedAt.Equal(openNow) {
+		t.Fatalf("OpenedAt = %v, want open-time wall clock %v (not segment PublishedAt %v)", open.OpenedAt, openNow, pubAt)
+	}
+
+	// Phase 2 — the clock passes MaxAge since open: now it rotates.
+	now = openNow.Add(time.Hour + time.Second)
 	for step := 0; step < 8; step++ {
 		if fsm.SealedManifest() != nil {
 			break
 		}
 		if err := mgr.PlanOnce(ctx, vaultID); err != nil {
-			t.Fatalf("PlanOnce step %d: %v", step, err)
+			t.Fatalf("PlanOnce (aged) step %d: %v", step, err)
 		}
 	}
 	sealed := fsm.SealedManifest()
 	if sealed == nil {
-		t.Fatal("expected sealed manifest after MaxAge rotation")
+		t.Fatal("expected sealed manifest once MaxAge elapsed since open")
 	}
-	if !sealed.SealedAt.Equal(evalNow) {
-		t.Fatalf("SealedAt = %v, want wall-clock evalNow %v", sealed.SealedAt, evalNow)
+	if !sealed.SealedAt.Equal(now) {
+		t.Fatalf("SealedAt = %v, want wall-clock %v", sealed.SealedAt, now)
 	}
 	if fsm.OpenChunk() != nil {
 		t.Fatal("open manifest must clear on age rotate")

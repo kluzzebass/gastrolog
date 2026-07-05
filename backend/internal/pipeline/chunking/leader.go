@@ -263,9 +263,20 @@ func (v *vaultChunking) proposeOpenManifestWire(
 		return nil, false
 	}
 	chunkID := v.cfg.newChunkID()
-	openedAt := refAddedAt
+	// OpenedAt is the manifest's max-age rotation anchor and MUST be the
+	// wall clock at open — never a segment-derived timestamp. The previous
+	// stamp (newest eligible PublishedAt) trails open time by exactly the
+	// planning lag, so under seal backlog every new manifest was born
+	// already older than MaxAge and rotated at its first ref batch,
+	// flooding the FIFO seal queue with tiny chunks (gastrolog-4olqp6).
+	openedAt := evalNow
 	if openedAt.IsZero() {
-		openedAt = decisionRefAddedAt(eligible)
+		// Replay-style callers without a clock: fall back to the segment
+		// timestamps rather than stamping a zero OpenedAt.
+		openedAt = refAddedAt
+		if openedAt.IsZero() {
+			openedAt = decisionRefAddedAt(eligible)
+		}
 	}
 	return vaultctlfsm.MarshalOpenChunkManifest(chunkID, openedAt), true
 }
