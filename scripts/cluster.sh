@@ -96,8 +96,21 @@ node_gomaxprocs() {
   echo "$share"
 }
 
+# GC cadence for co-hosted dev nodes (gastrolog-1io54g execution-trace
+# finding): the world stops in ~14µs, but the runtime then spends up to
+# seconds INSIDE sweep-termination STW returning freed spans to a
+# page-cache-starved macOS via per-span madvise. With a ~70MB live heap and
+# a ferocious allocation rate (40k rec/s decode + retention re-ingest),
+# GOGC=100 fired ~80 cycles/min — each a fresh chance at an 800ms-3s STW
+# that freezes heartbeats and election timers. GOGC=400 cuts cycle
+# frequency ~4x; GOMEMLIMIT keeps the grown heap bounded so 4 nodes cannot
+# collectively swap the machine.
+GLOG_GOGC="${GLOG_GOGC:-400}"
+GLOG_GOMEMLIMIT="${GLOG_GOMEMLIMIT:-2GiB}"
+
 run_glog_server() {
-  GOMAXPROCS="$(node_gomaxprocs)" go run ./cmd/gastrolog server "$@"
+  GOMAXPROCS="$(node_gomaxprocs)" GOGC="$GLOG_GOGC" GOMEMLIMIT="$GLOG_GOMEMLIMIT" \
+    go run ./cmd/gastrolog server "$@"
 }
 
 # glog_server_cmd returns the imux command string for one node.
@@ -107,8 +120,8 @@ glog_server_cmd() {
   if [[ "$PPROF" == true ]]; then
     extra=" --pprof localhost:$((6059 + i)) --pprof-debug"
   fi
-  printf 'GOMAXPROCS=%s go run ./cmd/gastrolog server --home %s --listen :%s --cluster-addr :%s%s%s' \
-    "$(node_gomaxprocs)" \
+  printf 'GOMAXPROCS=%s GOGC=%s GOMEMLIMIT=%s go run ./cmd/gastrolog server --home %s --listen :%s --cluster-addr :%s%s%s' \
+    "$(node_gomaxprocs)" "$GLOG_GOGC" "$GLOG_GOMEMLIMIT" \
     "$(node_dir "$i")" "$(http_port "$i")" "$(cluster_port "$i")" "$extra" "$(env_flags)"
 }
 
