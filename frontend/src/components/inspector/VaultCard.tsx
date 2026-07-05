@@ -204,14 +204,27 @@ function VaultThroughputSection({
   };
   const appendIdleNote = (): IdleNote => ({ text: "no ingest", warn: false });
   const eligible = backlog?.eligibleSegments ?? 0;
-  const sealIdleNote = (): IdleNote =>
-    eligible > 0 || backlog?.sealedManifestPending
-      ? { text: `backlog: ${eligible.toLocaleString()} segments eligible`, warn: true }
-      : { text: "up to date", warn: false };
+  const sealIdleNote = (): IdleNote => {
+    if (eligible > 0) {
+      return {
+        text: `backlog: ${eligible.toLocaleString()} segments eligible`,
+        warn: true,
+      };
+    }
+    // A sealed manifest pending build with nothing else eligible reads as
+    // "backlog: 0" — say what is actually happening instead.
+    if (backlog?.sealedManifestPending) {
+      return { text: "manifest awaiting build", warn: true };
+    }
+    return { text: "up to date", warn: false };
+  };
 
   // Fixed grid template shared by every row (header, stage totals, node
   // rows) so changing number widths never shift columns horizontally.
-  const gridCols = "grid grid-cols-[5.5rem_minmax(5rem,1fr)_4.5rem_5.5rem_6.5rem_minmax(7rem,1.2fr)] items-center gap-x-3";
+  // STAGE ("COLLECTED") and NODE ("Σ 4 homes") have fixed-width content, so
+  // they get fixed columns; STATUS is the only prose column and takes all
+  // spare width — it was clipping while NODE flexed (gastrolog-4deb9e).
+  const gridCols = "grid grid-cols-[5rem_4.5rem_4.5rem_5rem_5.5rem_minmax(11rem,1fr)] items-center gap-x-3";
 
   return (
     <section className="flex flex-col gap-4">
