@@ -81,8 +81,23 @@ no_auth_enabled() {
   [[ "$NO_AUTH" == true || "$NO_AUTH" == "1" || "$NO_AUTH" == "yes" || "$NO_AUTH" == "y" || "$NO_AUTH" == "on" ]]
 }
 
+# node_gomaxprocs divides the machine's cores fairly between the co-hosted
+# node processes. Without this every node runs GOMAXPROCS=ncpu, so N nodes
+# in a synchronized heavy phase (startup catch-up, seal bursts) schedule
+# N*ncpu threads onto ncpu cores — run-queue waits reach hundreds of ms,
+# Raft heartbeat goroutines on BOTH endpoints miss their windows, and the
+# convoy manufactures election churn (gastrolog-1io54g). Minimum 2 so a
+# single node still overlaps I/O with compute.
+node_gomaxprocs() {
+  local cores share
+  cores="$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 8)"
+  share=$(( cores / NODES ))
+  [[ "$share" -lt 2 ]] && share=2
+  echo "$share"
+}
+
 run_glog_server() {
-  go run ./cmd/gastrolog server "$@"
+  GOMAXPROCS="$(node_gomaxprocs)" go run ./cmd/gastrolog server "$@"
 }
 
 # glog_server_cmd returns the imux command string for one node.
@@ -92,7 +107,8 @@ glog_server_cmd() {
   if [[ "$PPROF" == true ]]; then
     extra=" --pprof localhost:$((6059 + i)) --pprof-debug"
   fi
-  printf 'go run ./cmd/gastrolog server --home %s --listen :%s --cluster-addr :%s%s%s' \
+  printf 'GOMAXPROCS=%s go run ./cmd/gastrolog server --home %s --listen :%s --cluster-addr :%s%s%s' \
+    "$(node_gomaxprocs)" \
     "$(node_dir "$i")" "$(http_port "$i")" "$(cluster_port "$i")" "$extra" "$(env_flags)"
 }
 
