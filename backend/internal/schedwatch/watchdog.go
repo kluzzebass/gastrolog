@@ -37,9 +37,12 @@ const (
 	// load sits well below this; page-fault convoys sit well above.
 	stallNote = 100 * time.Millisecond
 
-	// stallWarn logs a warning: gaps this size delay Raft heartbeats by a
-	// meaningful fraction of their 200ms send interval.
-	stallWarn = 250 * time.Millisecond
+	// stallDebug logs at Debug: gaps this size delay Raft heartbeats by a
+	// meaningful fraction of their 200ms send interval but are routine on a
+	// loaded macOS host — business as usual, counted and visible in stats,
+	// not worth a WARN per occurrence (they were near-constant under soak
+	// load while consensus stayed healthy).
+	stallDebug = 250 * time.Millisecond
 
 	// stallCritical raises an operator alert: with a 1.5s leader lease and
 	// 2s heartbeat timeout, gaps of this size manufacture elections.
@@ -125,18 +128,21 @@ func (w *Watchdog) record(now time.Time, gap time.Duration) {
 			break
 		}
 	}
-	if gap < stallWarn {
+	if gap < stallDebug {
 		return
 	}
 	w.stalls250.Add(1)
-	w.logger.Warn("scheduler stall: no goroutine ran on schedule",
-		"gap", gap.Round(time.Millisecond),
-		"heartbeat_interval", "200ms", "leader_lease", "1.5s")
 	if gap < stallCritical {
+		w.logger.Debug("scheduler stall: no goroutine ran on schedule",
+			"gap", gap.Round(time.Millisecond),
+			"heartbeat_interval", "200ms", "leader_lease", "1.5s")
 		return
 	}
 	w.stalls1s5.Add(1)
 	w.lastCriticalNanos.Store(now.UnixNano())
+	w.logger.Warn("scheduler stall: no goroutine ran on schedule",
+		"gap", gap.Round(time.Millisecond),
+		"heartbeat_interval", "200ms", "leader_lease", "1.5s")
 	if w.alerts != nil {
 		w.alerts.Set(alertID, alert.Error, "runtime",
 			"scheduler stalled "+gap.Round(time.Millisecond).String()+

@@ -98,10 +98,16 @@ func segmentNeedsLocalRepull(fsm *vaultctlfsm.FSM, entry vaultctlfsm.CompletedSe
 
 // segmentPullClient implements collection.PullClient by resolving a segment's
 // source node from the local registry entry (origin first, then any other
-// holder for recovery) and streaming bytes over the PullSegment RPC. Each
-// candidate is pulled into a private buffer and copied to dest only on success,
-// so a mid-stream failure from one source never leaves partial bytes in dest
-// for the next candidate (or for the collector's pre-head temp file).
+// holder for recovery) and streaming bytes over the PullSegment RPC. A failed
+// candidate must never leave partial bytes in dest for the next candidate (or
+// for the collector's pre-head temp file): when dest can rewind (the
+// production pre-head temp file), each candidate streams directly into it and
+// a failure truncates back to the starting offset; otherwise each candidate
+// is pulled into a private buffer and copied only on success. Streaming
+// matters at scale — buffering held every segment fully in RAM and the
+// bytes.Buffer doubling growth alone was 24% of all bytes allocated in a soak
+// run, garbage that fed the GC sweep stalls behind election churn
+// (gastrolog-1xee1s).
 type segmentPullClient struct {
 	lookup      func() *vaultctlfsm.FSM
 	puller      segmentPuller
@@ -114,6 +120,14 @@ type segmentPullClient struct {
 
 var _ collection.PullClient = (*segmentPullClient)(nil)
 
+// rewindableWriter is the subset of *os.File that lets Pull stream a
+// candidate directly into dest and discard partial bytes on failure.
+type rewindableWriter interface {
+	io.Writer
+	io.Seeker
+	Truncate(size int64) error
+}
+
 func (c *segmentPullClient) Pull(ctx context.Context, vaultID, segmentID glid.GLID, dest io.Writer) error {
 	fsm := c.lookup()
 	if fsm == nil {
@@ -123,15 +137,72 @@ func (c *segmentPullClient) Pull(ctx context.Context, vaultID, segmentID glid.GL
 	if entry == nil {
 		return fmt.Errorf("segment %s not in vault-ctl registry", segmentID)
 	}
+
+	rw, streaming := dest.(rewindableWriter)
+	var start int64
+	if streaming {
+		pos, err := rw.Seek(0, io.SeekCurrent)
+		if err != nil {
+			streaming = false
+		} else {
+			start = pos
+		}
+	}
+
 	if c.vaultRoot != "" {
-		if err := copyLocalSegmentFile(c.vaultRoot, segmentID, dest); err == nil {
+		err := copyLocalSegmentFile(c.vaultRoot, segmentID, dest)
+		if err == nil {
 			return nil
+		}
+		if streaming {
+			if derr := discardPartial(rw, start); derr != nil {
+				return derr
+			}
 		}
 	}
 	sources := segmentPullSources(entry, c.localNodeID)
 	if len(sources) == 0 {
 		return fmt.Errorf("no remote holder for segment %s", segmentID)
 	}
+	if streaming {
+		return c.pullStreaming(ctx, sources, vaultID, segmentID, rw, start)
+	}
+	return c.pullBuffered(ctx, sources, vaultID, segmentID, dest)
+}
+
+// discardPartial rewinds dest to where this pull started so the next
+// candidate (or a later retry of the whole pull) writes a clean file.
+// A rewind failure is terminal: dest holds bytes we cannot retract.
+func discardPartial(rw rewindableWriter, start int64) error {
+	if err := rw.Truncate(start); err != nil {
+		return fmt.Errorf("discard partial segment bytes: %w", err)
+	}
+	if _, err := rw.Seek(start, io.SeekStart); err != nil {
+		return fmt.Errorf("rewind after partial segment: %w", err)
+	}
+	return nil
+}
+
+// pullStreaming streams each candidate directly into the rewindable dest,
+// truncating partial bytes from a failed source before trying the next.
+func (c *segmentPullClient) pullStreaming(ctx context.Context, sources []string, vaultID, segmentID glid.GLID, rw rewindableWriter, start int64) error {
+	var errs []error
+	for _, node := range sources {
+		err := c.puller.Pull(ctx, node, vaultID, segmentID, rw)
+		if err == nil {
+			return nil
+		}
+		errs = append(errs, fmt.Errorf("pull from %s: %w", node, err))
+		if derr := discardPartial(rw, start); derr != nil {
+			return errors.Join(derr, erragg.SummaryJoin(errs...))
+		}
+	}
+	return erragg.SummaryJoin(errs...)
+}
+
+// pullBuffered pulls each candidate into a private buffer and copies to dest
+// only on success — the fallback when dest cannot rewind.
+func (c *segmentPullClient) pullBuffered(ctx context.Context, sources []string, vaultID, segmentID glid.GLID, dest io.Writer) error {
 	var errs []error
 	for _, node := range sources {
 		var buf bytes.Buffer

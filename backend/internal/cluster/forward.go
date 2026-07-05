@@ -851,9 +851,14 @@ func (w *segmentChunkWriter) Write(p []byte) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
-	// Own a copy per frame: io.Copy reuses its scratch buffer and the transport
-	// may retain the previous frame's Data slice until the send completes.
-	w.chunk.Data = append([]byte(nil), p...)
+	// No per-frame copy: SendMsg marshals the message into the transport's
+	// wire buffer before returning, so p is fully consumed by the time
+	// io.Copy reuses its scratch. The copy this replaced was 17GB/run of
+	// garbage feeding GC sweep stalls (gastrolog-1xee1s). Constraint:
+	// nothing on the internode server may retain the message past SendMsg —
+	// serverStatsHandler reads only WireLength; a payload-retaining
+	// StatsHandler or codec would need the copy back.
+	w.chunk.Data = p
 	if err := w.stream.SendMsg(&w.chunk); err != nil {
 		return 0, err
 	}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"slices"
 	"sync"
 	"testing"
@@ -638,6 +639,97 @@ func TestPipelineSegmentPullClientResolvesSourcesAndBuffers(t *testing.T) {
 	// the failed origin.
 	if dest.String() != goodBytes {
 		t.Fatalf("dest = %q, want %q (no partial bytes from failed source)", dest.String(), goodBytes)
+	}
+}
+
+// TestPipelineSegmentPullClientStreamsToFileTruncatingFailures: with a
+// rewindable dest (the production pre-head temp file), the pull client
+// streams each candidate directly into the file — no whole-segment RAM
+// buffer (gastrolog-1xee1s) — and truncates partial bytes from a failed
+// source before trying the next one.
+func TestPipelineSegmentPullClientStreamsToFileTruncatingFailures(t *testing.T) {
+	fsm := vaultctlfsm.New()
+	applier := &fsmApplier{fsm: fsm}
+	vaultID := glid.New()
+	segID := glid.New()
+
+	if err := applier.Apply(vaultctlfsm.MarshalPublishCompletedSegment(vaultctlfsm.CompletedSegmentEntry{
+		SegmentID:    segID,
+		RecordCount:  1,
+		OriginNodeID: testOriginNode,
+	})); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if err := applier.Apply(vaultctlfsm.MarshalAckSegmentHolder(segID, "node-holder")); err != nil {
+		t.Fatalf("ack: %v", err)
+	}
+
+	const goodBytes = "the-real-segment-bytes"
+	fake := &recordingPuller{
+		serve: map[string]string{"node-holder": goodBytes},
+		fail:  map[string]bool{testOriginNode: true},
+	}
+	client := &segmentPullClient{lookup: func() *vaultctlfsm.FSM { return fsm }, puller: fake, localNodeID: testHomeNode}
+
+	path := filepath.Join(t.TempDir(), "seg.pulling")
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := client.Pull(context.Background(), vaultID, segID, f); err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+	want := []string{testOriginNode, "node-holder"}
+	if !slices.Equal(fake.order, want) {
+		t.Fatalf("source order = %v, want %v", fake.order, want)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The failed origin wrote a partial prefix straight into the file; the
+	// client must have truncated it before streaming the holder's bytes.
+	if string(got) != goodBytes {
+		t.Fatalf("file = %q, want %q (partial bytes from failed source not truncated)", got, goodBytes)
+	}
+}
+
+// TestPipelineSegmentPullClientAllSourcesFailLeavesEmptyFile: when every
+// source fails mid-stream, the rewindable dest ends truncated to its
+// starting offset — no partial bytes survive for the caller to promote.
+func TestPipelineSegmentPullClientAllSourcesFailLeavesEmptyFile(t *testing.T) {
+	fsm := vaultctlfsm.New()
+	applier := &fsmApplier{fsm: fsm}
+	vaultID := glid.New()
+	segID := glid.New()
+
+	if err := applier.Apply(vaultctlfsm.MarshalPublishCompletedSegment(vaultctlfsm.CompletedSegmentEntry{
+		SegmentID:    segID,
+		RecordCount:  1,
+		OriginNodeID: testOriginNode,
+	})); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	fake := &recordingPuller{fail: map[string]bool{testOriginNode: true}}
+	client := &segmentPullClient{lookup: func() *vaultctlfsm.FSM { return fsm }, puller: fake, localNodeID: testHomeNode}
+
+	path := filepath.Join(t.TempDir(), "seg.pulling")
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := client.Pull(context.Background(), vaultID, segID, f); err == nil {
+		t.Fatal("Pull succeeded, want error (all sources fail)")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Size() != 0 {
+		t.Fatalf("file size = %d, want 0 (partial bytes must be truncated)", info.Size())
 	}
 }
 

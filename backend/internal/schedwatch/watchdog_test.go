@@ -44,7 +44,7 @@ func TestRecordCountsTiers(t *testing.T) {
 	base := time.Unix(0, 0)
 
 	w.record(base, 120*time.Millisecond)  // note only
-	w.record(base, 300*time.Millisecond)  // warn
+	w.record(base, 300*time.Millisecond)  // debug tier
 	w.record(base, 1600*time.Millisecond) // critical
 
 	n100, n250, n1500 := w.Counters()
