@@ -224,7 +224,7 @@ function VaultThroughputSection({
   // STAGE ("COLLECTED") and NODE ("Σ 4 homes") have fixed-width content, so
   // they get fixed columns; STATUS is the only prose column and takes all
   // spare width — it was clipping while NODE flexed (gastrolog-4deb9e).
-  const gridCols = "grid grid-cols-[5rem_4.5rem_4.5rem_5rem_5.5rem_minmax(11rem,1fr)] items-center gap-x-3";
+  const gridCols = "grid grid-cols-[5rem_5.5rem_4.5rem_5rem_5.5rem_minmax(10rem,1fr)] items-center gap-x-3";
 
   return (
     <section className="flex flex-col gap-4">
@@ -320,7 +320,7 @@ function StageRows({
       {sorted.length > 1 && (
         <div className={rowClass} title={title}>
           <span className={stageClass}>{label}</span>
-          <span className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}>
+          <span className={`font-mono whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}>
             {replicated ? `Σ ${sorted.length} homes` : "all nodes"}
           </span>
           <span />
