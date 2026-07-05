@@ -170,7 +170,17 @@ func (o *Orchestrator) applyVaults(sys *system.System, factories Factories) erro
 
 	// Compile filters at startup so vaults can receive records immediately.
 	// The rotation sweep also reconciles every 15s as a safety net.
-	if err := o.reloadRoutesFromConfig(sys); err != nil {
+	//
+	// Under o.mu like every other reloadRoutesFromConfig caller: startup is
+	// NOT single-threaded — raft config replay drives the dispatcher
+	// (handleInstancePut → ReloadFilters, locked) concurrently with
+	// ApplyConfig, and the unlocked reload here raced it into a fatal
+	// concurrent map write on o.pipelineVaults during a rolling restart
+	// with live placement changes (gastrolog-2xog2h, node crash).
+	o.mu.Lock()
+	err := o.reloadRoutesFromConfig(sys)
+	o.mu.Unlock()
+	if err != nil {
 		return err
 	}
 	return nil

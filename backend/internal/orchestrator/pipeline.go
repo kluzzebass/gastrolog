@@ -51,7 +51,9 @@ func (o *Orchestrator) SubmitRetentionRecord(ctx context.Context, sourceVaultID 
 	pl := o.pipeline
 	o.mu.RUnlock()
 	if pl == nil {
-		return errors.New("pipeline not initialized")
+		// Same terminal condition as a stopped supervisor: callers abort
+		// their fan-out on this sentinel (gastrolog-5034va).
+		return pipeline.ErrNotRunning
 	}
 	prec := convert.ChunkToRecord(rec)
 	return pl.Submit(ctx, routing.Input{

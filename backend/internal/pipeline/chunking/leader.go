@@ -103,7 +103,7 @@ func (v *vaultChunking) planOnce(ctx context.Context, cronDue bool) error {
 // planLeaderStep proposes open/seal/ref vault-ctl commands. maxRefs caps how
 // many segment refs one apply may carry (1 for planOnce, larger for catch-up).
 func (v *vaultChunking) planLeaderStep(ctx context.Context, cronDue bool, maxRefs int) error {
-	if !v.cfg.IsLeader() || v.cfg.Applier == nil {
+	if !v.cfg.IsLeader() || v.applier() == nil {
 		return nil
 	}
 
@@ -134,7 +134,7 @@ func (v *vaultChunking) planLeaderStep(ctx context.Context, cronDue bool, maxRef
 			}
 			return nil
 		}
-		return v.cfg.Applier.Apply(wire)
+		return v.applier().Apply(wire)
 	}
 
 	if _, ok := v.cfg.Policy.rotateTrigger(manifest, cronDue, evalNow); ok {
@@ -150,13 +150,13 @@ func (v *vaultChunking) planLeaderStep(ctx context.Context, cronDue bool, maxRef
 		for i, ref := range batch.refs {
 			refs[i] = openChunkSegmentRefFromDecision(ref)
 		}
-		return v.cfg.Applier.Apply(vaultctlfsm.MarshalAddOpenChunkSegmentRefs(open.ChunkID, refs))
+		return v.applier().Apply(vaultctlfsm.MarshalAddOpenChunkSegmentRefs(open.ChunkID, refs))
 	}
 	if batch.rotate {
 		return v.applySealOpenManifest(open.ChunkID, evalNow)
 	}
 	if batch.noSeg {
-		if err := discardStalledEmptyOpen(open, manifest, v.cfg.Policy, evalNow, v.cfg.Applier); err != nil {
+		if err := discardStalledEmptyOpen(open, manifest, v.cfg.Policy, evalNow, v.applier()); err != nil {
 			return err
 		}
 		if v.cfg.Collector != nil && len(eligible) > 0 {
@@ -233,7 +233,7 @@ func (v *vaultChunking) collectRefBatch(
 // applySealOpenManifest proposes SealOpenChunkManifest. Sealed manifests queue
 // FIFO on the FSM so rotation is not blocked while earlier chunks build.
 func (v *vaultChunking) applySealOpenManifest(chunkID chunk.ChunkID, sealedAt time.Time) error {
-	return v.cfg.Applier.Apply(vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, sealedAt))
+	return v.applier().Apply(vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, sealedAt))
 }
 
 // proposeOpenManifestWire picks a plannable segment and returns Raft log data
@@ -274,7 +274,7 @@ func (v *vaultChunking) proposeOpenManifestWire(
 // manifest is pending. Callbacks from Apply may advance the chain; the loop
 // covers catch-up when Run starts with work already in the FSM.
 func (v *vaultChunking) planCatchUp(ctx context.Context) error {
-	if !v.cfg.IsLeader() || v.cfg.Applier == nil {
+	if !v.cfg.IsLeader() || v.applier() == nil {
 		return nil
 	}
 	budget := catchUpBudget(len(v.eligibleRegistrySegments()), v.cfg.Policy)
