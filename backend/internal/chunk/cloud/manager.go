@@ -131,6 +131,12 @@ func (c *glcbCursor) RecordCount() uint64 { return c.recordCount }
 
 // ReadFanOutRecord reads one record by position for parallel retention fan-out.
 // The record is detached from the GLCB mmap and safe across goroutines.
+// PrewarmSequential implements chunk.SequentialPrewarmer for full-scan
+// consumers (retention fan-out) — see Reader.PrewarmSequential.
+func (c *glcbCursor) PrewarmSequential() {
+	c.reader.PrewarmSequential()
+}
+
 func (c *glcbCursor) ReadFanOutRecord(pos uint32) (chunk.Record, error) {
 	return c.reader.ReadFanOutRecord(pos)
 }

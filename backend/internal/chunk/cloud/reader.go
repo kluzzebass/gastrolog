@@ -235,6 +235,31 @@ func (rd *Reader) ReadRecord(pos uint32) (chunk.Record, error) {
 // ReadFanOutRecord reads a record for immediate hand-off to another goroutine
 // (retention fan-out). On the mmap path the payload is detached once via
 // cloneMmapRecord; callers must not retain references across cursor close.
+// PrewarmSequential warms the page cache for the whole GLCB with
+// pread-style syscalls before a full scan. Frames served from the mmap
+// otherwise cold-fault in scan order, pinning scheduler Ps inside
+// non-preemptible kernel fault handlers — under disk saturation that
+// stalls the entire runtime and manufactures Raft elections
+// (gastrolog-1io54g). Syscall reads release their P, and the scan then
+// hits warm pages as minor faults. No-op for non-mmap readers;
+// best-effort on errors (real I/O problems surface on access).
+func (rd *Reader) PrewarmSequential() {
+	if rd.mmapData == nil || rd.file == nil {
+		return
+	}
+	info, err := rd.file.Stat()
+	if err != nil {
+		return
+	}
+	buf := make([]byte, 1<<20)
+	for off := int64(0); off < info.Size(); off += int64(len(buf)) {
+		n, err := rd.file.ReadAt(buf, off)
+		if n == 0 && err != nil {
+			return
+		}
+	}
+}
+
 func (rd *Reader) ReadFanOutRecord(pos uint32) (chunk.Record, error) {
 	return rd.readRecordAt(pos, true)
 }

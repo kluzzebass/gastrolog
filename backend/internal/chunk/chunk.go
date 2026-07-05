@@ -349,6 +349,16 @@ type RecordFanOutSource interface {
 	ReadFanOutRecord(pos uint32) (Record, error)
 }
 
+// SequentialPrewarmer is implemented by cursors whose backing store benefits
+// from a sequential page-cache warm before a full scan. mmap major faults pin
+// scheduler Ps inside non-preemptible kernel fault handlers; a full-chunk
+// scan (retention fan-out) cold-faulting through a mapping stalls the whole
+// runtime under disk saturation (gastrolog-1io54g). PrewarmSequential moves
+// that I/O onto P-releasing syscalls; best-effort and idempotent.
+type SequentialPrewarmer interface {
+	PrewarmSequential()
+}
+
 // RecordBatchReader extends RecordCursor with batched forward reads for
 // sequential scans (retention fan-out fallback, export).
 type RecordBatchReader interface {

@@ -820,6 +820,14 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) {
 }
 
 func (r *retentionRunner) fanOutChunkRecords(cur chunk.RecordCursor, id chunk.ChunkID, jobs chan<- chunk.Record) int {
+	// Full-chunk scan ahead: warm the page cache with syscall reads first so
+	// the scan's mmap accesses are minor faults. Cold-faulting a whole GLCB
+	// through the mapping pins scheduler Ps and stalls the runtime under
+	// disk saturation — measured as Raft election storms during retention
+	// expiry (gastrolog-1io54g).
+	if warm, ok := cur.(chunk.SequentialPrewarmer); ok {
+		warm.PrewarmSequential()
+	}
 	if fanout, ok := cur.(chunk.RecordFanOutSource); ok && fanout.RecordCount() > 0 {
 		return r.fanOutRecordsParallel(fanout, id, jobs)
 	}
