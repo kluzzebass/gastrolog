@@ -28,9 +28,26 @@ const (
 	// at scatterbox-like concurrency without unbounded goroutines.
 	retentionFanOutWorkers = 4
 
+	// retentionFanOutBuffer decouples the cursor readers from the submit
+	// workers: reads are bursty (mmap page decode) while submits pace at
+	// the pipeline's group-commit cadence. A shallow channel (== worker
+	// count) made each side stall on the other's jitter (gastrolog-4c72hr).
+	retentionFanOutBuffer = 1024
+
 	// retentionChunkWorkers limits how many chunks a sweep may process
 	// concurrently. Each chunk still routes at most once (!alreadyPending).
-	retentionChunkWorkers = 4
+	//
+	// ONE, deliberately (gastrolog-4c72hr): a route-disposition drain reads
+	// the chunk's whole GLCB (hundreds of MB, sequentially prewarmed) and
+	// re-ingests every record. Four concurrent drains interleaved four large
+	// I/O streams with live ingest on the shared volume — the page cache
+	// thrashed (prewarmed pages evicted before the scan reached them, so
+	// mmap major faults returned) and the disk-latency bursts stacked into
+	// Raft heartbeat gaps (election churn synchronized with expiry). One
+	// stream at a time keeps the prewarm effective and the burst flat;
+	// total drain time is unchanged because the disk was the constraint
+	// anyway.
+	retentionChunkWorkers = 1
 
 	// Vault catchup sweep — runs every 20 seconds (cron: 13/33/53s of
 	// each minute) on every node, with a phase offset that doesn't
@@ -797,7 +814,7 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) {
 		}
 	}()
 
-	jobs := make(chan chunk.Record, retentionFanOutWorkers)
+	jobs := make(chan chunk.Record, retentionFanOutBuffer)
 	var submitWG sync.WaitGroup
 	for range retentionFanOutWorkers {
 		submitWG.Go(func() {
