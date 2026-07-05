@@ -65,8 +65,20 @@ const servicePath = "/gastrolog.v1.MultiRaftTransportService/"
 // raftgroup: tight enough that a paused peer fails fast and hraft retries,
 // generous enough to tolerate normal network jitter and short GC pauses.
 const (
-	appendEntriesRPCTimeout   = 3 * time.Second
-	heartbeatRPCTimeout       = 1 * time.Second
+	appendEntriesRPCTimeout = 3 * time.Second
+	// heartbeatRPCTimeout must not undercut the consensus failure budget
+	// (raftgroup defaultHeartbeatTimeout = 2s, leader lease = 1.5s). At the
+	// old 1s the transport was STRICTER than the failure detector it
+	// serves: probes that would have completed at ~1.2s — endpoint paused
+	// by a sub-second scheduler stall — were aborted at exactly 1000ms and
+	// counted as failed contact, aging lease/last-contact clocks past their
+	// real thresholds and manufacturing elections from stalls that were
+	// individually survivable (gastrolog-1io54g: lease traces showed
+	// conn_wait_ms=0, rpc_ms=1000, DeadlineExceeded during churn). A probe
+	// completing inside 2s still resets the follower's election timer and
+	// still counts as leader contact; only the failure detector may decide
+	// something is dead.
+	heartbeatRPCTimeout       = 2 * time.Second
 	requestVoteRPCTimeout     = 2 * time.Second
 	requestPreVoteRPCTimeout  = 2 * time.Second
 	timeoutNowRPCTimeout      = 2 * time.Second
