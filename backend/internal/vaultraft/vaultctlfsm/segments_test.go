@@ -65,6 +65,40 @@ func TestPublishCompletedSegmentIdempotentReplay(t *testing.T) {
 	}
 }
 
+func TestRepublishWithNewPublishedAtIsIdempotent(t *testing.T) {
+	t.Parallel()
+	fsm := New()
+	now := time.Unix(0, 1_700_000_000_000).UTC()
+	segID := glid.New()
+	first := CompletedSegmentEntry{
+		SegmentID:     segID,
+		RecordCount:   10,
+		ByteSize:      512,
+		FirstIngestTS: now,
+		LastIngestTS:  now,
+		Checksum:      1,
+		OriginNodeID:  "node-a",
+		PublishedAt:   now,
+	}
+	applyCmd(t, fsm, MarshalPublishCompletedSegment(first))
+
+	// Distribution catch-up after restart re-publishes with a FRESH attempt
+	// timestamp. Same content = same publish: must no-op, not conflict
+	// (gastrolog-2usqfx: the old check retried this forever, hammering the
+	// vault-ctl leader queue during restart-under-load).
+	republish := first
+	republish.PublishedAt = now.Add(45 * time.Minute)
+	applyCmd(t, fsm, MarshalPublishCompletedSegment(republish))
+
+	entries := fsm.ListCompletedSegments()
+	if len(entries) != 1 {
+		t.Fatalf("registry entries = %d, want 1", len(entries))
+	}
+	if !entries[0].PublishedAt.Equal(now) {
+		t.Fatalf("PublishedAt = %v, want original %v (first write wins)", entries[0].PublishedAt, now)
+	}
+}
+
 func TestPublishCompletedSegmentConflict(t *testing.T) {
 	t.Parallel()
 	fsm := New()

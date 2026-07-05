@@ -32,10 +32,14 @@ type CompletedSegmentEntry struct {
 	Holders []string
 }
 
-// completedSegmentEqual compares the published metadata of two entries. It
-// deliberately ignores Holders: the publish command never carries holders, and
-// holders grow independently via CmdAckSegmentHolder, so a re-published segment
-// must still compare equal to an entry whose holder set has already grown.
+// completedSegmentEqual compares the published CONTENT of two entries. It
+// deliberately ignores Holders (the publish command never carries them;
+// holders grow independently via CmdAckSegmentHolder) and PublishedAt (the
+// publisher stamps wall clock per ATTEMPT, so distribution's post-restart
+// catch-up re-publish of an already-registered segment carried a fresh
+// timestamp and could never compare equal — a permanent conflict/retry
+// storm into the vault-ctl leader queue, gastrolog-2usqfx). Content defines
+// identity; first write wins on PublishedAt.
 func completedSegmentEqual(a, b CompletedSegmentEntry) bool {
 	return a.SegmentID == b.SegmentID &&
 		a.RecordCount == b.RecordCount &&
@@ -43,8 +47,7 @@ func completedSegmentEqual(a, b CompletedSegmentEntry) bool {
 		a.FirstIngestTS.Equal(b.FirstIngestTS) &&
 		a.LastIngestTS.Equal(b.LastIngestTS) &&
 		a.Checksum == b.Checksum &&
-		a.OriginNodeID == b.OriginNodeID &&
-		a.PublishedAt.Equal(b.PublishedAt)
+		a.OriginNodeID == b.OriginNodeID
 }
 
 func completedSegmentToProto(e *CompletedSegmentEntry) *gastrologv1.CompletedSegmentEntry {
