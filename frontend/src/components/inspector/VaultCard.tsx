@@ -219,6 +219,22 @@ function VaultThroughputSection({
     return { text: "up to date", warn: false };
   };
 
+  // Answers "why is COLLECTED 4x APPEND?" inline instead of via tooltip:
+  // replicated stages count each record once PER HOME, so their Σ runs at
+  // append × home-count when healthy — and ahead of it when a rejoined
+  // node backfills or backlog drains (gastrolog-4deb9e).
+  const totalAppend = append.reduce((s, r) => s + r.recordsPerSec, 0);
+  const replicationNote = (rows: StageRow[]): IdleNote | undefined => {
+    if (rows.length < 2) return undefined;
+    const total = rows.reduce((s, r) => s + r.recordsPerSec, 0);
+    if (total <= 0) return undefined;
+    if (totalAppend <= 0) return { text: "catch-up", warn: false };
+    const ratio = total / (totalAppend * rows.length);
+    return ratio > 1.25
+      ? { text: `×${rows.length} replication + catch-up`, warn: false }
+      : { text: `×${rows.length} replication`, warn: false };
+  };
+
   // Fixed grid template shared by every row (header, stage totals, node
   // rows) so changing number widths never shift columns horizontally.
   // STAGE ("COLLECTED") and NODE ("Σ 4 homes") have fixed-width content, so
@@ -262,6 +278,7 @@ function VaultThroughputSection({
           dark={dark}
           replicated
           idleNote={collectIdleNote}
+          totalsNote={replicationNote(collected)}
         />
         <StageRows
           label="Sealed"
@@ -271,6 +288,7 @@ function VaultThroughputSection({
           dark={dark}
           replicated
           idleNote={sealIdleNote}
+          totalsNote={replicationNote(sealed)}
         />
       </div>
     </section>
@@ -296,6 +314,7 @@ function StageRows({
   dark,
   replicated,
   idleNote,
+  totalsNote,
 }: Readonly<{
   label: string;
   title: string;
@@ -304,6 +323,7 @@ function StageRows({
   dark: boolean;
   replicated?: boolean;
   idleNote?: (r: StageRow) => IdleNote;
+  totalsNote?: IdleNote;
 }>) {
   const c = useThemeClass(dark);
   const sorted = rows.toSorted((a, b) => a.node.localeCompare(b.node));
@@ -326,7 +346,12 @@ function StageRows({
           <span />
           <span className={brightMono}>{formatRate(totalRecords)}/s</span>
           <span className={brightMono}>{formatBytes(totalBytes)}/s</span>
-          <span />
+          <span
+            className={`font-mono whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}
+            title="Replicated stages count each record once per home: Σ ≈ append × homes when replication keeps pace; 'catch-up' when a rejoined node backfills or backlog drains."
+          >
+            {totalsNote?.text ?? ""}
+          </span>
         </div>
       )}
       {sorted.map((r, i) => {
