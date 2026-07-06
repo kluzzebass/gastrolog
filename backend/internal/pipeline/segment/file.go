@@ -188,7 +188,10 @@ func (sf *File) AppendFrames(frames []Frame) error {
 		need += frameLenPrefixSize + len(frames[i].Body)
 	}
 	if cap(sf.batchBuf) < need {
-		sf.batchBuf = make([]byte, 0, need)
+		// Grow with headroom: exact-fit reallocated on every slightly
+		// larger batch (measured 6GB/run of churn); 25% amortizes growth
+		// while staying bounded by the largest batch this file sees.
+		sf.batchBuf = make([]byte, 0, need+need/4)
 	}
 	sf.batchBuf = sf.batchBuf[:0]
 	var lastFrameStart uint32

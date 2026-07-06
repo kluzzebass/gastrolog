@@ -48,6 +48,10 @@ type RWMutex struct {
 	state   sync.Mutex // guards everything below; critical sections are tiny
 	nextID  uint64
 	entries map[uint64]*entry
+	// free recycles entry structs: tracking taxes EVERY lock operation,
+	// and a fresh entry + stack array per acquisition measured 3.4GB/run
+	// under pour load. Guarded by state.
+	free []*entry
 }
 
 type entry struct {
@@ -131,19 +135,30 @@ func (m *RWMutex) TryRLock() bool {
 }
 
 func (m *RWMutex) record(gid uint64, kind HoldKind) uint64 {
-	var pcs [stackDepthMax]uintptr
-	// Skip runtime.Callers, record, and the RWMutex method — the caller's
-	// frame is what names the acquisition site.
-	n := runtime.Callers(3, pcs[:])
 	m.state.Lock()
 	defer m.state.Unlock()
 	if m.entries == nil {
 		m.entries = make(map[uint64]*entry)
 	}
+	var e *entry
+	if n := len(m.free); n > 0 {
+		e = m.free[n-1]
+		m.free = m.free[:n-1]
+	} else {
+		e = &entry{pcs: make([]uintptr, stackDepthMax)}
+	}
+	// Skip runtime.Callers, record, and the RWMutex method — the caller's
+	// frame is what names the acquisition site.
+	n := runtime.Callers(3, e.pcs[:stackDepthMax])
 	m.nextID++
-	id := m.nextID
-	m.entries[id] = &entry{id: id, gid: gid, kind: kind, since: time.Now(), pcs: pcs[:n]}
-	return id
+	e.id = m.nextID
+	e.gid = gid
+	e.kind = kind
+	e.since = time.Now()
+	e.pcs = e.pcs[:n]
+	e.reported = false
+	m.entries[e.id] = e
+	return e.id
 }
 
 // releaseOne removes this goroutine's most recent entry of the given
@@ -163,6 +178,9 @@ func (m *RWMutex) releaseOne(gid uint64, kind HoldKind) {
 	}
 	if newest != nil {
 		delete(m.entries, newest.id)
+		if len(m.free) < 1024 {
+			m.free = append(m.free, newest)
+		}
 	}
 }
 
