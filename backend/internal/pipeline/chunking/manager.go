@@ -123,6 +123,14 @@ type vaultChunking struct {
 	// buildMu (the build pass is the sole writer).
 	blockedChunk chunk.ChunkID
 	blockedSince time.Time
+	// blockedAlerted makes the blocked-build alert log exactly once per
+	// episode instead of drowning in per-retry lines (gastrolog-4bl9xx).
+	blockedAlerted bool
+
+	// underReplicatedAlerted tracks the under-replicated-segments alert
+	// state so planner passes log/alert only on transitions
+	// (gastrolog-4bl9xx). Guarded by planMu like the planner pass itself.
+	underReplicatedAlerted bool
 	// pendingRelease holds segment IDs awaiting ReleaseSegments once every
 	// required vault home has committed a holder receipt.
 	pendingRelease []glid.GLID

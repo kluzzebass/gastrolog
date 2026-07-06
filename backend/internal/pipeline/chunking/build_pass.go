@@ -353,12 +353,23 @@ func (v *vaultChunking) noteBuildBlocked(chunkID chunk.ChunkID, missing []glid.G
 		return
 	}
 	blockedFor := now.Sub(v.blockedSince)
-	if v.cfg.Alerts == nil || blockedFor < buildBlockedAlertAfter || len(missing) == 0 {
+	if blockedFor < buildBlockedAlertAfter || len(missing) == 0 {
 		return
 	}
-	v.cfg.Alerts.Set(v.buildBlockedAlertID(), alert.Error, "chunking",
-		fmt.Sprintf("vault %s: chunk %s blocked in Sealing for %s — %d referenced segment(s) missing on this node (e.g. %s); later chunks cannot seal until this resolves",
-			v.cfg.VaultID, chunkID, blockedFor.Round(time.Second), len(missing), missing[0]))
+	// Log the transition exactly once: during the 6h gastrolog-4bl9xx stall
+	// the alert fired only into the collector while the log carried 244k
+	// bare retry lines — log-watching operators never saw a statement of
+	// WHAT was blocked on WHOM (gastrolog-67c9b0 follow-up).
+	msg := fmt.Sprintf("vault %s: chunk %s blocked in Sealing for %s — %d referenced segment(s) missing on this node (e.g. %s); later chunks cannot seal until this resolves",
+		v.cfg.VaultID, chunkID, blockedFor.Round(time.Second), len(missing), missing[0])
+	if !v.blockedAlerted {
+		v.blockedAlerted = true
+		v.logger().Error("GLCB build blocked — seal queue wedged", "chunk", chunkID,
+			"blocked_for", blockedFor.Round(time.Second), "missing_segments", len(missing), "example", missing[0])
+	}
+	if v.cfg.Alerts != nil {
+		v.cfg.Alerts.Set(v.buildBlockedAlertID(), alert.Error, "chunking", msg)
+	}
 }
 
 // clearBuildBlocked resets blocked-build tracking and drops the alert. Called
@@ -369,6 +380,10 @@ func (v *vaultChunking) clearBuildBlocked() {
 	}
 	v.blockedChunk = chunk.ChunkID{}
 	v.blockedSince = time.Time{}
+	if v.blockedAlerted {
+		v.blockedAlerted = false
+		v.logger().Info("GLCB build unblocked — seal queue moving again")
+	}
 	if v.cfg.Alerts != nil {
 		v.cfg.Alerts.Clear(v.buildBlockedAlertID())
 	}

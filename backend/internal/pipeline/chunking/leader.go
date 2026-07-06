@@ -2,9 +2,11 @@ package chunking
 
 import (
 	"context"
+	"fmt"
 	"maps"
 	"time"
 
+	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/record"
@@ -368,14 +370,87 @@ func (v *vaultChunking) closeSegmentIndexCache() {
 // have records to chunk. Does not open on-disk indexes.
 func (v *vaultChunking) eligibleRegistrySegments() []vaultctlfsm.CompletedSegmentEntry {
 	entries := v.fsm().ListCompletedSegments()
+	minHolders := v.plannerMinHolders()
+	now := v.now()
 	out := make([]vaultctlfsm.CompletedSegmentEntry, 0, len(entries))
+	var gated int
+	var oldestGated time.Duration
 	for _, entry := range entries {
 		if segmentExhaustedForPlanning(v.fsm(), entry) {
 			continue
 		}
+		// Replication-window gate (gastrolog-4bl9xx): never plan a segment
+		// whose bytes exist on fewer than minHolders nodes. Registry publish
+		// precedes replication, and a manifest referencing a single-copy
+		// segment wedges the vault's entire serial seal queue if that copy's
+		// node dies (builds require real bytes on every home; skipping would
+		// be record loss). Release/purge already respect holder receipts;
+		// this makes planning respect the same window. Cost: chunking lags
+		// ingestion by replication lag — seconds in steady state.
+		if minHolders > 0 && len(entry.Holders) < minHolders {
+			gated++
+			if age := now.Sub(entry.PublishedAt); age > oldestGated {
+				oldestGated = age
+			}
+			continue
+		}
 		out = append(out, entry)
 	}
+	v.noteUnderReplicated(gated, oldestGated)
 	return out
+}
+
+// plannerMinHolders returns the minimum holder count for a segment to be
+// plannable: min(2, placement size), from the same live RequiredHolders
+// source release/purge gating trusts. Zero (placement wiring absent —
+// single-node tests, memory vaults) disables the gate.
+func (v *vaultChunking) plannerMinHolders() int {
+	if v.cfg.RequiredHolders == nil {
+		return 0
+	}
+	n := len(v.cfg.RequiredHolders())
+	if n <= 0 {
+		return 0
+	}
+	return min(2, n)
+}
+
+// underReplicatedAlertAfter is the grace period before gated segments raise
+// an operator alert. Fresh segments are under-replicated for the seconds
+// between publish and the first holder receipts; anything gated minutes has
+// lost its replication path (origin died holding the only copy) and the
+// loss-vs-wait decision is explicit operator territory (gastrolog-4bl9xx).
+const underReplicatedAlertAfter = 2 * time.Minute
+
+func (v *vaultChunking) underReplicatedAlertID() string {
+	return "chunking-underreplicated-" + v.cfg.VaultID.String()
+}
+
+// noteUnderReplicated raises/clears the under-replicated-segments alert and
+// logs each transition once. Called from the planner pass with the count of
+// gated segments and the age of the oldest one; the alert exists so a stuck
+// replication window is a visible registry condition instead of a silent
+// planning stall. Caller holds planMu.
+func (v *vaultChunking) noteUnderReplicated(gated int, oldest time.Duration) {
+	stuck := gated > 0 && oldest >= underReplicatedAlertAfter
+	if stuck == v.underReplicatedAlerted {
+		return
+	}
+	v.underReplicatedAlerted = stuck
+	if stuck {
+		v.logger().Warn("segments stuck inside their replication window — planning gated",
+			"gated", gated, "oldest", oldest.Round(time.Second))
+		if v.cfg.Alerts != nil {
+			v.cfg.Alerts.Set(v.underReplicatedAlertID(), alert.Warning, "chunking",
+				fmt.Sprintf("vault %s: %d segment(s) below the holder minimum for %s — bytes exist on too few nodes to chunk safely; if the origin node is gone these records need it back (gastrolog-4bl9xx)",
+					v.cfg.VaultID, gated, oldest.Round(time.Second)))
+		}
+		return
+	}
+	v.logger().Info("replication window cleared — planning resumed for gated segments")
+	if v.cfg.Alerts != nil {
+		v.cfg.Alerts.Clear(v.underReplicatedAlertID())
+	}
 }
 
 func (v *vaultChunking) pruneSegmentIndexCache(eligible []vaultctlfsm.CompletedSegmentEntry) {

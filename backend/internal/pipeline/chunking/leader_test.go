@@ -1069,3 +1069,157 @@ func TestPlannerCatchUpAppliesRefsBeforeSealAtMaxRecords(t *testing.T) {
 		t.Fatalf("sealed records = %d, want 2", sealed.TotalRecords)
 	}
 }
+
+// TestLeaderPlannerGatesSingleCopySegments: the planner never references a
+// segment with fewer than min(2, placement) holders — a single-copy segment
+// in a manifest wedges the vault's serial seal queue if that copy's node
+// dies (gastrolog-4bl9xx). Holders accrue via receipts; planning follows.
+func TestLeaderPlannerGatesSingleCopySegments(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	segID := glid.New()
+	vaultID := glid.New()
+	vaultRoot := t.TempDir()
+	writeCompletedSegment(t, vaultRoot, segID, vaultID, []recordForSeg{
+		{0, base, "a"},
+		{1, base.Add(time.Second), "b"},
+	})
+
+	fsm := vaultctlfsm.New()
+	applier := &fsmApplier{fsm: fsm}
+	chunkID := chunk.NewChunkID()
+	now := base.Add(10 * time.Minute)
+
+	mgr := chunking.New(chunking.Config{})
+	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
+		VaultRoot:  vaultRoot,
+		ChunkRoot:  filepath.Join(vaultRoot, "chunks"),
+		FSM:        fsm,
+		Locate:     chunking.VaultSegmentLocator{Root: vaultRoot},
+		Applier:    applier,
+		IsLeader:   func() bool { return true },
+		NewChunkID: func() chunk.ChunkID { return chunkID },
+		Policy:     chunking.ManifestRotationPolicy{MaxRecords: 100},
+		Now:        func() time.Time { return now },
+		RequiredHolders: func() []string {
+			return []string{"node-origin", "node-home", "node-3", "node-4"}
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	publishSegment(t, fsm, segID, base.Add(time.Minute), 2, base, base.Add(time.Second))
+	ctx := t.Context()
+
+	// Zero holders: publish precedes replication; nothing plannable.
+	for range 4 {
+		if err := mgr.PlanOnce(ctx, vaultID); err != nil {
+			t.Fatalf("PlanOnce: %v", err)
+		}
+	}
+	if open := fsm.OpenChunk(); open != nil {
+		t.Fatalf("planner referenced a zero-holder segment: %+v", open.Refs)
+	}
+
+	// One holder (the origin's own receipt): still inside the window.
+	if err := applier.Apply(vaultctlfsm.MarshalAckSegmentHolder(segID, "node-origin")); err != nil {
+		t.Fatal(err)
+	}
+	for range 4 {
+		if err := mgr.PlanOnce(ctx, vaultID); err != nil {
+			t.Fatalf("PlanOnce: %v", err)
+		}
+	}
+	if open := fsm.OpenChunk(); open != nil {
+		t.Fatalf("planner referenced a single-copy segment: %+v", open.Refs)
+	}
+
+	// Second holder receipt: replication window closed — plan it.
+	if err := applier.Apply(vaultctlfsm.MarshalAckSegmentHolder(segID, "node-home")); err != nil {
+		t.Fatal(err)
+	}
+	for range 8 {
+		if open := fsm.OpenChunk(); open != nil && len(open.Refs) > 0 {
+			break
+		}
+		if err := mgr.PlanOnce(ctx, vaultID); err != nil {
+			t.Fatalf("PlanOnce: %v", err)
+		}
+	}
+	open := fsm.OpenChunk()
+	if open == nil || len(open.Refs) != 1 || open.Refs[0].SegmentID != segID {
+		t.Fatalf("segment not planned after reaching 2 holders: %+v", open)
+	}
+}
+
+// TestLeaderPlannerUnderReplicatedAlert: segments gated past the grace
+// period raise the under-replicated alert; reaching the holder minimum
+// clears it (gastrolog-4bl9xx — a stuck replication window is a visible
+// registry condition, not a silent planning stall).
+func TestLeaderPlannerUnderReplicatedAlert(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	segID := glid.New()
+	vaultID := glid.New()
+	vaultRoot := t.TempDir()
+	writeCompletedSegment(t, vaultRoot, segID, vaultID, []recordForSeg{{0, base, "a"}})
+
+	fsm := vaultctlfsm.New()
+	applier := &fsmApplier{fsm: fsm}
+	sink := &recordingAlertSink{}
+	now := base
+
+	mgr := chunking.New(chunking.Config{})
+	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
+		VaultRoot:  vaultRoot,
+		ChunkRoot:  filepath.Join(vaultRoot, "chunks"),
+		FSM:        fsm,
+		Locate:     chunking.VaultSegmentLocator{Root: vaultRoot},
+		Applier:    applier,
+		IsLeader:   func() bool { return true },
+		NewChunkID: chunk.NewChunkID,
+		Policy:     chunking.ManifestRotationPolicy{MaxRecords: 100},
+		Now:        func() time.Time { return now },
+		Alerts:     sink,
+		RequiredHolders: func() []string {
+			return []string{"node-origin", "node-home", "node-3"}
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	publishSegment(t, fsm, segID, base, 1, base, base)
+	ctx := t.Context()
+
+	// Freshly published: gated but inside the grace period — no alert.
+	if err := mgr.PlanOnce(ctx, vaultID); err != nil {
+		t.Fatal(err)
+	}
+	if active, _ := sink.snapshot(); len(active) != 0 {
+		t.Fatalf("alert raised inside grace period: %v", active)
+	}
+
+	// Still zero holders past the grace period: alert.
+	now = base.Add(5 * time.Minute)
+	if err := mgr.PlanOnce(ctx, vaultID); err != nil {
+		t.Fatal(err)
+	}
+	active, _ := sink.snapshot()
+	if len(active) != 1 {
+		t.Fatalf("expected under-replicated alert, got %v", active)
+	}
+
+	// Holder minimum reached: cleared.
+	for _, n := range []string{"node-origin", "node-home"} {
+		if err := applier.Apply(vaultctlfsm.MarshalAckSegmentHolder(segID, n)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := mgr.PlanOnce(ctx, vaultID); err != nil {
+		t.Fatal(err)
+	}
+	active, cleared := sink.snapshot()
+	if len(active) != 0 || cleared == 0 {
+		t.Fatalf("alert not cleared after holders reached minimum: active=%v cleared=%d", active, cleared)
+	}
+}
