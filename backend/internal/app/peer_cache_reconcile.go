@@ -58,6 +58,6 @@ func startPeerCacheReconcile(scheduler scheduledJobRegistry, src memberSource, l
 		return err
 	}
 	scheduler.Describe(peerCacheReconcileJobName,
-		"Reconcile per-peer caches (PeerState, PeerJobState, PeerByteMetrics, Broadcaster, StatsCollector) against current Raft membership — backstop for snapshot-install config changes that don't fire PeerObservation (gastrolog-9ohip)")
+		"Reconcile per-peer caches (PeerState, PeerJobState, PeerByteMetrics, Broadcaster, StatsCollector) against current Raft membership — backstop for snapshot-install config changes that don't fire PeerObservation")
 	return nil
 }

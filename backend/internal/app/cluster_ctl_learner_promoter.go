@@ -115,7 +115,7 @@ func startClusterCtlLearnerPromoter(ctx context.Context, scheduler scheduledJobR
 		return err
 	}
 	scheduler.Describe(clusterCtlLearnerPromoterJobName,
-		"Cluster-ctl learner promotion. Leader-only: scans the Raft configuration for Nonvoter / Staging members and promotes them to Voter once their broadcast RaftAppliedIndex has matched the leader's for a stability window. Companion to gastrolog-41sut (JoinCluster-as-learner) and gastrolog-gcbx7 (per-vault-ctl promoter). Original implementation gastrolog-2czh9.")
+		"Cluster-ctl learner promotion. Leader-only: scans the Raft configuration for Nonvoter / Staging members and promotes them to Voter once their broadcast RaftAppliedIndex has matched the leader's for a stability window.")
 	return nil
 }
 

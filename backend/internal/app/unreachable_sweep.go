@@ -109,7 +109,7 @@ func startUnreachableSweep(ctx context.Context, scheduler scheduledJobRegistry, 
 		return err
 	}
 	scheduler.Describe(unreachableSweepJobName,
-		"Heartbeat-driven Live↔Unreachable node-state sweep. Two phases per tick: (1) transitions — leader-only, proposes SetNodeState commands when PeerState lastSeen crosses the threshold; (2) alerts — every node, raises a warning when a node has been Unreachable for longer than the alert threshold. Tunable via GLOG_UNREACHABLE_THRESHOLD and GLOG_UNREACHABLE_ALERT_THRESHOLD (gastrolog-39m2k, gastrolog-cku75).")
+		"Heartbeat-driven Live↔Unreachable node-state sweep. Two phases per tick: (1) transitions — leader-only, proposes SetNodeState commands when PeerState lastSeen crosses the threshold; (2) alerts — every node, raises a warning when a node has been Unreachable for longer than the alert threshold. Tunable via GLOG_UNREACHABLE_THRESHOLD and GLOG_UNREACHABLE_ALERT_THRESHOLD.")
 	return nil
 }
 

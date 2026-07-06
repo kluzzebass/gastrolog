@@ -758,7 +758,7 @@ func (c *StatsCollector) collectRaftLiveness(stats *gastrologv1.NodeStats, now t
 	switch {
 	case stats.RaftElectionsPerMin >= raftElectionStormPerMin:
 		alerts.Set("raft-liveness-elections", alert.Error, "raft",
-			fmt.Sprintf("Raft election storm: %.1f elections/min on this node — consensus is churning (see gastrolog-1io54g)", stats.RaftElectionsPerMin))
+			fmt.Sprintf("Raft election storm: %.1f elections/min on this node — consensus is churning; check for scheduler stalls, disk saturation, or an overloaded node", stats.RaftElectionsPerMin))
 	case stats.RaftElectionsPerMin < raftElectionCalmPerMin:
 		alerts.Clear("raft-liveness-elections")
 	}

@@ -123,7 +123,7 @@ func startVaultCtlLearnerPromoter(ctx context.Context, scheduler scheduledJobReg
 		return err
 	}
 	scheduler.Describe(vaultCtlLearnerPromoterJobName,
-		"Per-vault-ctl learner promotion. Runs on every node and iterates every vault-ctl group; the per-group leader gate inside the tick body only proposes AddVoter for groups this node currently leads. Each learner must hold its broadcast RaftAppliedIndex within tolerance of the group leader's applied index for a stability window before promotion. Companion to gastrolog-2czh9 (cluster-ctl promoter) and gastrolog-41sut (JoinCluster-as-learner). Original implementation gastrolog-gcbx7.")
+		"Per-vault-ctl learner promotion. Runs on every node and iterates every vault-ctl group; the per-group leader gate inside the tick body only proposes AddVoter for groups this node currently leads. Each learner must hold its broadcast RaftAppliedIndex within tolerance of the group leader's applied index for a stability window before promotion.")
 	return nil
 }
 

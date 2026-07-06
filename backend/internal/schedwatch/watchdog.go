@@ -155,7 +155,7 @@ func (w *Watchdog) record(now time.Time, gap time.Duration) {
 	if w.alerts != nil {
 		w.alerts.Set(alertID, alert.Error, "runtime",
 			"scheduler stalled "+gap.Round(time.Millisecond).String()+
-				" — longer than the Raft leader lease ("+w.critical.String()+"); heartbeats and election timers did not run (gastrolog-1io54g)")
+				" — longer than the Raft leader lease ("+w.critical.String()+"); heartbeats and election timers did not run, so this node may lose or depose leaders. Usually CPU/GC/disk starvation on this host")
 	}
 }
 

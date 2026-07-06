@@ -46,7 +46,7 @@ func (o *Orchestrator) runLockLeakReporter(ctx context.Context) {
 				o.alerts.Set(lockLeakAlertID, alert.Error, "orchestrator",
 					string(leak.Kind)+" on the orchestrator registry lock held/stuck for "+
 						leak.Age.Round(time.Second).String()+
-						" — node is likely wedging; acquisition stack in the log (gastrolog-1ug3rq)")
+						" — node is likely wedging; the acquisition stack is in this node's log. Restart the node to clear; report the stack")
 			}
 		}
 	}

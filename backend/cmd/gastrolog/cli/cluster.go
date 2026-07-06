@@ -344,7 +344,7 @@ func newClusterDemoteSelfCmd() *cobra.Command {
 			"change has committed. Intended as a Kubernetes preStop lifecycle " +
 			"hook so pods leaving via `kubectl scale` / rolling restart / " +
 			"voluntary eviction take themselves out of the Raft voter set " +
-			"before SIGTERM. See gastrolog-24iv4.",
+			"before SIGTERM.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			hostname, err := os.Hostname()
 			if err != nil {
@@ -414,7 +414,7 @@ func newClusterYieldLeadershipCmd() *cobra.Command {
 		Long: "Asks the local node to hand off Raft leadership if it currently " +
 			"holds it; no-op if it's already a follower. Designed for Kubernetes " +
 			"preStop hooks so a pod restart triggers a clean leadership transfer " +
-			"without removing the node from cluster membership. See gastrolog-2yeie.",
+			"without removing the node from cluster membership.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := clientFromCmd(cmd)
 			resp, err := client.Lifecycle.YieldLeadership(context.Background(), connect.NewRequest(&v1.YieldLeadershipRequest{}))

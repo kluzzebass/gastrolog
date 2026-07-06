@@ -442,7 +442,7 @@ func (v *vaultChunking) noteUnderReplicated(gated int, oldest time.Duration) {
 			"gated", gated, "oldest", oldest.Round(time.Second))
 		if v.cfg.Alerts != nil {
 			v.cfg.Alerts.Set(v.underReplicatedAlertID(), alert.Warning, "chunking",
-				fmt.Sprintf("vault %s: %d segment(s) below the holder minimum for %s — bytes exist on too few nodes to chunk safely; if the origin node is gone these records need it back (gastrolog-4bl9xx)",
+				fmt.Sprintf("vault %s: %d segment(s) have been below the replication minimum for %s — chunking waits until a second node holds a copy. Check that all placement nodes are up and replication is progressing; if the origin node is permanently lost, the affected records exist only there",
 					v.cfg.VaultID, gated, oldest.Round(time.Second)))
 		}
 		return
