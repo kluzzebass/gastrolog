@@ -181,6 +181,15 @@ func (sf *File) AppendFrames(frames []Frame) error {
 
 	// Build the batch buffer — [lenPrefix|body]... — feeding the running CRC
 	// in frame order, exactly as sequential single appends would have.
+	// Size it exactly up front: append-doubling growth across batches was
+	// ~10GB of garbage per soak run (gastrolog-11y2iv).
+	need := 0
+	for i := range frames {
+		need += frameLenPrefixSize + len(frames[i].Body)
+	}
+	if cap(sf.batchBuf) < need {
+		sf.batchBuf = make([]byte, 0, need)
+	}
 	sf.batchBuf = sf.batchBuf[:0]
 	var lastFrameStart uint32
 	var lenPrefix [frameLenPrefixSize]byte

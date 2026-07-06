@@ -226,26 +226,29 @@ func (w *Writer) Add(rec chunk.Record) error {
 		}
 	}
 
-	frame, err := encodeRecordFrame(rec, w.dict)
+	// Encode directly into the reused scratch after a 4-byte length
+	// placeholder — the old flow allocated a fresh frame per record and
+	// immediately copied it here (gastrolog-11y2iv).
+	if cap(w.frameScratch) < 4 {
+		w.frameScratch = make([]byte, 4, 512)
+	}
+	scratch, err := appendRecordFrame(w.frameScratch[:4], rec, w.dict)
 	if err != nil {
 		return err
 	}
+	w.frameScratch = scratch
 
 	pos := w.count
 	w.bounds.update(rec)
 	w.noteIngestTS(rec.IngestTS)
 
-	bodySize := uint32(len(frame)) //nolint:gosec // G115: frame size bounded by record limits
+	bodySize := uint32(len(scratch) - 4) //nolint:gosec // G115: frame size bounded by record limits
 	w.recordIndex = append(w.recordIndex, recordIndex{
 		Offset: w.sectionOff + 4,
 		Size:   bodySize,
 	})
 	w.sectionOff += 4 + uint64(bodySize)
-
-	var frameLenBuf [4]byte
-	binary.LittleEndian.PutUint32(frameLenBuf[:], bodySize)
-	w.frameScratch = append(w.frameScratch[:0], frameLenBuf[:]...)
-	w.frameScratch = append(w.frameScratch, frame...)
+	binary.LittleEndian.PutUint32(w.frameScratch[:4], bodySize)
 
 	var sink *bufio.Writer
 	if w.direct {

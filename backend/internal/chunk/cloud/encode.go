@@ -8,14 +8,31 @@ import (
 	"gastrolog/internal/chunk"
 )
 
+// encodeRecordFrame allocates a fresh frame. Hot writers use
+// appendRecordFrame with a reused scratch buffer instead — per-record
+// frame slices were 14GB of garbage per soak run (gastrolog-11y2iv).
 func encodeRecordFrame(rec chunk.Record, dict *chunk.StringDict) ([]byte, error) {
+	return appendRecordFrame(nil, rec, dict)
+}
+
+// appendRecordFrame appends the encoded frame to dst and returns the
+// (possibly grown) slice. dst may carry a prefix the caller wrote (e.g.
+// a length placeholder); only bytes after len(dst) are produced here.
+func appendRecordFrame(dst []byte, rec chunk.Record, dict *chunk.StringDict) ([]byte, error) {
 	attrData, _, err := chunk.EncodeWithDict(rec.Attrs, dict)
 	if err != nil {
-		return nil, fmt.Errorf("encode attrs: %w", err)
+		return dst, fmt.Errorf("encode attrs: %w", err)
 	}
 
 	frameSize := 3*8 + 16 + 16 + 4 + len(attrData) + 4 + len(rec.Raw)
-	frame := make([]byte, frameSize)
+	base := len(dst)
+	if cap(dst)-base < frameSize {
+		grown := make([]byte, base, base+frameSize)
+		copy(grown, dst)
+		dst = grown
+	}
+	dst = dst[:base+frameSize]
+	frame := dst[base:]
 	off := 0
 
 	binary.LittleEndian.PutUint64(frame[off:], tsNanos(rec.SourceTS))
@@ -35,7 +52,7 @@ func encodeRecordFrame(rec chunk.Record, dict *chunk.StringDict) ([]byte, error)
 	binary.LittleEndian.PutUint32(frame[off:], uint32(len(rec.Raw))) //nolint:gosec // G115: raw bounded by chunk limits
 	off += 4
 	copy(frame[off:], rec.Raw)
-	return frame, nil
+	return dst, nil
 }
 
 func encodeDictionary(dict *chunk.StringDict) []byte {
