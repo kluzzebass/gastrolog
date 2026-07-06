@@ -254,6 +254,7 @@ func newVaultChunking(cfg VaultConfig) (*vaultChunking, error) {
 	}
 	return &vaultChunking{
 		cfg:               cfg,
+		purgeLogThrottle:  logging.Throttle{Interval: retryLogInterval},
 		wake:              notify.NewSignal(),
 		releaseWake:       notify.NewSignal(),
 		segmentIndexCache: make(map[glid.GLID]*OrderedIndex),
