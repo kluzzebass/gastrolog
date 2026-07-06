@@ -1,6 +1,7 @@
 package segment
 
 import (
+	"encoding/binary"
 	"bytes"
 	"errors"
 	"fmt"
@@ -124,14 +125,25 @@ func (m *MappedSegment) IndexEntryAt(pos uint32) (IndexEntry, error) {
 	return decodeIndexEntry(m.data[off : off+IndexEntrySize])
 }
 
-// RecordAtFilePos decodes the record frame starting at filePos. The frame
-// body is copied out of the mapping by the shared decoder.
+// RecordAtFilePos decodes the record frame starting at filePos, straight
+// from the mapping — no intermediate body buffer. decodeFrameBody copies
+// every field out (Raw via make+copy, attrs via string conversion), so
+// handing it the mmap slice is safe and removes a per-record allocation
+// that was ~50GB cumulative per soak run on merge reads (gastrolog-11y2iv).
 func (m *MappedSegment) RecordAtFilePos(filePos uint32) (record.Record, error) {
 	if filePos < HeaderSize || filePos >= m.hdr.IndexOffset {
 		return record.Record{}, ErrFrameLength
 	}
-	rec, _, err := readFrameAt(m.rd, int64(filePos), m.hdr.IndexOffset-filePos)
-	return rec, err
+	limit := m.hdr.IndexOffset - filePos
+	if limit < frameLenPrefixSize {
+		return record.Record{}, ErrFrameLength
+	}
+	bodyLen := binary.LittleEndian.Uint32(m.data[filePos:])
+	if bodyLen == 0 || bodyLen > limit-frameLenPrefixSize {
+		return record.Record{}, ErrFrameLength
+	}
+	start := filePos + frameLenPrefixSize
+	return decodeFrameBody(m.data[start : start+bodyLen])
 }
 
 // Close unmaps and closes the file.

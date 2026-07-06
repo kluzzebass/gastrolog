@@ -3,7 +3,6 @@ package routing
 import (
 	"cmp"
 	"fmt"
-	"maps"
 	"slices"
 	"strings"
 
@@ -123,41 +122,99 @@ func (t *Table) MatchRoute(attrs record.Attributes, src SourceContext) (*Route, 
 	if t == nil {
 		return nil, nil
 	}
-	enriched := enrichAttrs(attrs, src)
+	view := overlayAttrs(attrs, src)
 	for _, r := range t.routes {
-		if routeMatches(r, enriched) {
+		if routeMatches(r, &view) {
 			return r, slices.Clone(r.VaultIDs)
 		}
 	}
 	return nil, nil
 }
 
-func enrichAttrs(attrs record.Attributes, src SourceContext) record.Attributes {
-	enriched := make(record.Attributes, len(attrs)+4)
-	maps.Copy(enriched, attrs)
-	if src.Kind != SourceUnknown {
-		enriched[synthAttrSource] = string(src.Kind)
-	}
-	if src.IngesterID != glid.Nil {
-		enriched[synthAttrIngester] = src.IngesterID.String()
-	}
-	if src.VaultID != glid.Nil {
-		enriched[synthAttrVault] = src.VaultID.String()
-	}
-	if src.Reason != "" {
-		enriched[synthAttrReason] = src.Reason
-	}
-	return enriched
+// srcOverlay is a zero-copy querylang.AttrSource layering the synthetic
+// source attributes over a record's own attrs for route matching. Replaces
+// a per-record make+maps.Copy of the whole attributes map — ~10GB of
+// garbage per soak run at pour rates (gastrolog-11y2iv). Set synthetic
+// keys win over record attrs of the same name, exactly as the map
+// overwrite did; All skips shadowed record attrs so no key yields twice.
+type srcOverlay struct {
+	attrs record.Attributes
+	// Precomputed synthetic values; empty string means absent.
+	source, ingester, vault, reason string
 }
 
-func routeMatches(r *Route, attrs record.Attributes) bool {
+func overlayAttrs(attrs record.Attributes, src SourceContext) srcOverlay {
+	o := srcOverlay{attrs: attrs}
+	if src.Kind != SourceUnknown {
+		o.source = string(src.Kind)
+	}
+	if src.IngesterID != glid.Nil {
+		o.ingester = src.IngesterID.String()
+	}
+	if src.VaultID != glid.Nil {
+		o.vault = src.VaultID.String()
+	}
+	if src.Reason != "" {
+		o.reason = src.Reason
+	}
+	return o
+}
+
+func (o *srcOverlay) synth(key string) (string, bool) {
+	switch key {
+	case synthAttrSource:
+		return o.source, o.source != ""
+	case synthAttrIngester:
+		return o.ingester, o.ingester != ""
+	case synthAttrVault:
+		return o.vault, o.vault != ""
+	case synthAttrReason:
+		return o.reason, o.reason != ""
+	}
+	return "", false
+}
+
+func (o *srcOverlay) Get(key string) (string, bool) {
+	if v, ok := o.synth(key); ok {
+		return v, true
+	}
+	// An unset synthetic falls through to the record attr of the same
+	// name, matching the map version (which only overwrote set values).
+	v, ok := o.attrs[key]
+	return v, ok
+}
+
+func (o *srcOverlay) All(yield func(key, value string) bool) {
+	if o.source != "" && !yield(synthAttrSource, o.source) {
+		return
+	}
+	if o.ingester != "" && !yield(synthAttrIngester, o.ingester) {
+		return
+	}
+	if o.vault != "" && !yield(synthAttrVault, o.vault) {
+		return
+	}
+	if o.reason != "" && !yield(synthAttrReason, o.reason) {
+		return
+	}
+	for k, v := range o.attrs {
+		if _, shadowed := o.synth(k); shadowed {
+			continue
+		}
+		if !yield(k, v) {
+			return
+		}
+	}
+}
+
+func routeMatches(r *Route, attrs *srcOverlay) bool {
 	switch r.Kind {
 	case MatchNone:
 		return false
 	case MatchAll:
 		return true
 	case MatchExpr:
-		return querylang.MatchAttrs(r.DNF, attrs)
+		return querylang.MatchAttrSource(r.DNF, attrs)
 	}
 	return false
 }

@@ -126,3 +126,22 @@ func ChunkToRecord(rec chunk.Record) record.Record {
 	}
 	return out
 }
+
+// ChunkToRecordOwned is ChunkToRecord for callers that exclusively own
+// rec.Attrs (freshly materialized per record, e.g. a retention drain
+// cursor): the map transfers without a defensive copy. Raw already
+// transfers by reference in both variants; this extends the same
+// ownership contract to Attrs. Per-record attrs copies on the drain
+// path were a measurable slice of GC churn (gastrolog-11y2iv).
+func ChunkToRecordOwned(rec chunk.Record) record.Record {
+	out := ChunkToRecord(chunk.Record{
+		SourceTS:       rec.SourceTS,
+		IngestTS:       rec.IngestTS,
+		WriteTS:        rec.WriteTS,
+		EventID:        rec.EventID,
+		Raw:            rec.Raw,
+		WaitForReplica: rec.WaitForReplica,
+	})
+	out.Attrs = record.Attributes(rec.Attrs)
+	return out
+}

@@ -322,3 +322,70 @@ func TestRetentionSource(t *testing.T) {
 		t.Errorf("RetentionSource = %+v", src)
 	}
 }
+
+// TestOverlaySemantics: the zero-copy srcOverlay must reproduce the old
+// enrichAttrs map semantics exactly (gastrolog-11y2iv): set synthetic keys
+// shadow record attrs of the same name, unset synthetics fall through,
+// and scan-based predicates (case-insensitive, glob keys, value-exists)
+// see both layers without duplicates.
+func TestOverlaySemantics(t *testing.T) {
+	t.Parallel()
+	vaultA := glid.New()
+	srcVault := glid.New()
+
+	mk := func(expr string) *routing.Table {
+		r, err := routing.CompileRoute(glid.New(), "r", 0, expr, []glid.GLID{vaultA})
+		if err != nil {
+			t.Fatalf("compile %q: %v", expr, err)
+		}
+		return routing.NewTable([]*routing.Route{r})
+	}
+	retention := routing.RetentionSource(srcVault, "age")
+
+	// Synthetic key matches via exact lookup.
+	if got := mk("_source=retention").Match(record.Attributes{"app": "x"}, retention); len(got) != 1 {
+		t.Fatal("_source=retention must match on retention source")
+	}
+	// Set synthetic shadows a record attr of the same name.
+	if got := mk("_source=fake").Match(record.Attributes{"_source": "fake"}, retention); len(got) != 0 {
+		t.Fatal("set synthetic must shadow record attr of the same name")
+	}
+	// Unset synthetic falls through to the record attr.
+	if got := mk("_ingester=abc").Match(record.Attributes{"_ingester": "abc"}, retention); len(got) != 1 {
+		t.Fatal("unset synthetic must fall through to record attr")
+	}
+	// Case-insensitive predicate finds a record attr through the overlay.
+	if got := mk("APP=x").Match(record.Attributes{"app": "x"}, retention); len(got) != 1 {
+		t.Fatal("case-insensitive key must find record attr through overlay")
+	}
+	// Value-exists scan sees the synthetic layer.
+	if got := mk("*=age").Match(record.Attributes{"app": "x"}, retention); len(got) != 1 {
+		t.Fatal("value-exists must see synthetic reason value")
+	}
+	// Key-exists via glob sees record attrs.
+	if got := mk("ap*=x").Match(record.Attributes{"app": "x"}, retention); len(got) != 1 {
+		t.Fatal("glob key must see record attrs through overlay")
+	}
+}
+
+// BenchmarkMatchRoute measures per-record match cost: the srcOverlay
+// replaced a full map copy per record (make + maps.Copy, ~10GB/run).
+func BenchmarkMatchRoute(b *testing.B) {
+	vaultA := glid.New()
+	r, err := routing.CompileRoute(glid.New(), "r", 0, "env=prod AND level=error", []glid.GLID{vaultA})
+	if err != nil {
+		b.Fatal(err)
+	}
+	tbl := routing.NewTable([]*routing.Route{r})
+	attrs := record.Attributes{
+		"env": "prod", "level": "error", "app": "api", "host": "h1",
+		"dc": "eu-1", "team": "core", "svc": "ingest", "ver": "1.2.3",
+	}
+	src := routing.RetentionSource(vaultA, "age")
+	b.ReportAllocs()
+	for b.Loop() {
+		if got := tbl.Match(attrs, src); len(got) != 1 {
+			b.Fatal("expected match")
+		}
+	}
+}

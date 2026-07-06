@@ -55,7 +55,9 @@ func (o *Orchestrator) SubmitRetentionRecord(ctx context.Context, sourceVaultID 
 		// their fan-out on this sentinel (gastrolog-5034va).
 		return pipeline.ErrNotRunning
 	}
-	prec := convert.ChunkToRecord(rec)
+	// Owned conversion: the drain cursor materializes rec.Attrs fresh per
+	// record; nothing else holds the map (gastrolog-11y2iv).
+	prec := convert.ChunkToRecordOwned(rec)
 	return pl.Submit(ctx, routing.Input{
 		Record: &prec,
 		Source: routing.RetentionSource(sourceVaultID, reason),

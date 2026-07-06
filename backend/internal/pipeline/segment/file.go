@@ -268,11 +268,13 @@ func (sf *File) ReadAll() ([]record.Record, error) {
 		out = make([]record.Record, 0, sf.hdr.RecordCount)
 	}
 	off := uint32(HeaderSize)
+	var scratch []byte
 	for off < recEnd {
-		rec, n, err := readFrameAt(sf.f, int64(off), recEnd-off)
+		rec, n, buf, err := readFrameAtBuf(sf.f, int64(off), recEnd-off, scratch)
 		if err != nil {
 			return nil, err
 		}
+		scratch = buf
 		out = append(out, rec)
 		off += n
 	}
@@ -425,8 +427,10 @@ func (sf *File) scanForward(off, fileSize, count uint32, firstTS, lastTS time.Ti
 	outFirst = firstTS
 	outLast = lastTS
 
+	var scanScratch []byte
 	for off < fileSize {
-		rec, n, readErr := readFrameAt(sf.f, int64(off), fileSize-off)
+		rec, n, buf, readErr := readFrameAtBuf(sf.f, int64(off), fileSize-off, scanScratch)
+		scanScratch = buf
 		if readErr != nil {
 			break
 		}
@@ -470,22 +474,39 @@ func (sf *File) verifyChecksum() error {
 	return nil
 }
 
+// readFrameAt decodes one frame. Allocates a fresh body buffer per call;
+// loop callers use readFrameAtBuf to reuse a scratch buffer across
+// records — the per-record body alloc was 18GB flat / 51GB cumulative of
+// garbage per soak run in merge reads (gastrolog-11y2iv). Safe because
+// decodeFrameBody copies everything out of the body (Raw via make+copy,
+// attrs via string conversion); nothing aliases the buffer after return.
 func readFrameAt(r io.ReaderAt, offset int64, limit uint32) (record.Record, uint32, error) {
+	rec, n, _, err := readFrameAtBuf(r, offset, limit, nil)
+	return rec, n, err
+}
+
+// readFrameAtBuf is readFrameAt with a caller-owned scratch buffer. The
+// returned buffer replaces the caller's (it may have grown); the caller
+// must not retain views into it across calls.
+func readFrameAtBuf(r io.ReaderAt, offset int64, limit uint32, scratch []byte) (record.Record, uint32, []byte, error) {
 	var lenBuf [4]byte
 	if _, err := r.ReadAt(lenBuf[:], offset); err != nil {
-		return record.Record{}, 0, err
+		return record.Record{}, 0, scratch, err
 	}
 	bodyLen := binary.LittleEndian.Uint32(lenBuf[:])
 	if bodyLen == 0 || bodyLen > limit-frameLenPrefixSize {
-		return record.Record{}, 0, ErrFrameLength
+		return record.Record{}, 0, scratch, ErrFrameLength
 	}
-	body := make([]byte, bodyLen)
+	if uint32(cap(scratch)) < bodyLen { //nolint:gosec // G115: cap bounded by segment size
+		scratch = make([]byte, bodyLen)
+	}
+	body := scratch[:bodyLen]
 	if _, err := r.ReadAt(body, offset+frameLenPrefixSize); err != nil {
-		return record.Record{}, 0, err
+		return record.Record{}, 0, scratch, err
 	}
 	rec, err := decodeFrameBody(body)
 	if err != nil {
-		return record.Record{}, 0, err
+		return record.Record{}, 0, scratch, err
 	}
-	return rec, frameLenPrefixSize + bodyLen, nil
+	return rec, frameLenPrefixSize + bodyLen, scratch, nil
 }
