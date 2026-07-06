@@ -4,16 +4,24 @@ import (
 	"hash"
 	"hash/crc32"
 	"io"
+	"sync"
 )
 
 const crcReadChunk = 256 << 10
 
 // crc32IEEEFeed checksums bytes [start:end) into h without loading the whole range at once.
+// crcBufPool recycles feed buffers: pull-verify CRCs every collected
+// segment, and a fresh 256KB buffer per feed measured ~1GB/run of churn
+// at parallel-pull rates (gastrolog-11y2iv).
+var crcBufPool = sync.Pool{New: func() any { b := make([]byte, crcReadChunk); return &b }}
+
 func crc32IEEEFeed(h hash.Hash32, r io.ReaderAt, start, end uint32) error {
 	if end <= start {
 		return nil
 	}
-	buf := make([]byte, crcReadChunk)
+	bp := crcBufPool.Get().(*[]byte)
+	defer crcBufPool.Put(bp)
+	buf := *bp
 	pos := int64(start)
 	remain := int64(end - start)
 	for remain > 0 {

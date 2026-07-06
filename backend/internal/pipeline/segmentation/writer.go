@@ -616,7 +616,28 @@ func (w *vaultWriter) closeSegmentLocked() error {
 	if err := w.completeWorkingSegmentLocked(); err != nil {
 		return err
 	}
-	return w.openNewSegmentLocked()
+	// Hand the finalized segment's batch buffer to its successor: a fresh
+	// multi-MB buffer per rotation was the top allocation site under pour
+	// load (gastrolog-11y2iv). Optional interface — test fakes don't carry
+	// scratch.
+	var scratch []byte
+	if sc, ok := w.seg.(scratchCarrier); ok {
+		scratch = sc.TakeScratch()
+	}
+	if err := w.openNewSegmentLocked(); err != nil {
+		return err
+	}
+	if sc, ok := w.seg.(scratchCarrier); ok && scratch != nil {
+		sc.GiveScratch(scratch)
+	}
+	return nil
+}
+
+// scratchCarrier is the optional segmentFile capability for batch-buffer
+// handoff across rotation (implemented by *segment.File).
+type scratchCarrier interface {
+	TakeScratch() []byte
+	GiveScratch([]byte)
 }
 
 // completeWorkingSegmentLocked finalizes the open segment and moves it to completed/.

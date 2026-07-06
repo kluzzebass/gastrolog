@@ -138,6 +138,25 @@ func (sf *File) Append(rec *record.Record, writeTS time.Time) error {
 	return sf.AppendFrame(rec, writeTS, body)
 }
 
+// TakeScratch surrenders the file's batch buffer for reuse by a successor
+// file. Segment rotation under load created a fresh multi-megabyte batch
+// buffer per segment (top allocation site under pour load); the writer
+// hands the buffer across rotations instead (gastrolog-11y2iv). Call only
+// after appends to this file have stopped.
+func (sf *File) TakeScratch() []byte {
+	b := sf.batchBuf
+	sf.batchBuf = nil
+	return b
+}
+
+// GiveScratch seeds the batch buffer, typically with a predecessor's via
+// TakeScratch. No-op if the file already grew its own.
+func (sf *File) GiveScratch(b []byte) {
+	if sf.batchBuf == nil {
+		sf.batchBuf = b[:0]
+	}
+}
+
 // AppendFrame appends a pre-encoded frame body and rewrites the header.
 func (sf *File) AppendFrame(rec *record.Record, _ time.Time, body []byte) error {
 	return sf.AppendFrames([]Frame{{Rec: rec, Body: body}})
