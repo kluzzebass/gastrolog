@@ -278,6 +278,12 @@ func (v *vaultCollect) planCollectAction(ref AssignedSegment) collectAction {
 // collectForRef pulls a segment when needed and reports (pulled, needsAck):
 // needsAck segments are receipt-committed in one batch at the end of the
 // pass (commitReceipts), never per ref.
+// collectPullWorkers bounds concurrent segment pulls per vault during a
+// collect pass. Sized to the per-peer service connection pool (4): more
+// in-flight pulls than pooled streams to one origin just queue on the
+// pool. Runtime tuning belongs to the configurability backlog.
+const collectPullWorkers = 4
+
 func (v *vaultCollect) collectForRef(ctx context.Context, ref AssignedSegment) (pulled, needsAck bool, err error) {
 	switch v.planCollectAction(ref) {
 	case collectSkip:
@@ -343,21 +349,37 @@ func (v *vaultCollect) collectMissing(ctx context.Context) (bool, error) {
 	work := append([]AssignedSegment(nil), assigned...)
 	v.collectMu.Unlock()
 
+	// Pull segments concurrently: pulls are dominated by per-segment
+	// stream round-trips against the origin, and a serial loop capped
+	// replication at ~850 records/s while a pour ejected far faster —
+	// the whole vault's chunking (holder-gated) stalled behind it.
+	// Per-segment exclusivity stays with claimPull inside collectForRef;
+	// receipts still commit in one batched apply after the pass.
+	var mu sync.Mutex
 	var errs []error
 	var progress bool
 	var toAck []glid.GLID
+	sem := make(chan struct{}, collectPullWorkers)
+	var pullWG sync.WaitGroup
 	for _, ref := range work {
-		pulled, needsAck, err := v.collectForRef(ctx, ref)
-		if pulled {
-			progress = true
-		}
-		if needsAck {
-			toAck = append(toAck, ref.SegmentID)
-		}
-		if err != nil {
-			errs = append(errs, err)
-		}
+		sem <- struct{}{}
+		pullWG.Go(func() {
+			defer func() { <-sem }()
+			pulled, needsAck, err := v.collectForRef(ctx, ref)
+			mu.Lock()
+			defer mu.Unlock()
+			if pulled {
+				progress = true
+			}
+			if needsAck {
+				toAck = append(toAck, ref.SegmentID)
+			}
+			if err != nil {
+				errs = append(errs, err)
+			}
+		})
 	}
+	pullWG.Wait()
 	committed, err := v.commitReceipts(ctx, toAck)
 	if committed > 0 {
 		progress = true

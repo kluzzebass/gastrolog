@@ -900,3 +900,74 @@ func TestCollectSegmentsDoesNotWaitForFullPass(t *testing.T) {
 		t.Fatalf("pass segment not in head/: %v", err)
 	}
 }
+
+// concurrencyProbePull blocks each pull briefly and records the peak number
+// of pulls in flight, proving the collect pass runs them in parallel.
+type concurrencyProbePull struct {
+	inner    collection.PullClient
+	mu       sync.Mutex
+	inflight int
+	peak     int
+}
+
+func (p *concurrencyProbePull) Pull(ctx context.Context, vaultID, segmentID glid.GLID, dest io.Writer) error {
+	p.mu.Lock()
+	p.inflight++
+	if p.inflight > p.peak {
+		p.peak = p.inflight
+	}
+	p.mu.Unlock()
+	time.Sleep(20 * time.Millisecond)
+	err := p.inner.Pull(ctx, vaultID, segmentID, dest)
+	p.mu.Lock()
+	p.inflight--
+	p.mu.Unlock()
+	return err
+}
+
+func (p *concurrencyProbePull) peakInflight() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.peak
+}
+
+// TestCollectOncePullsInParallel: a serial pull loop capped replication at
+// ~850 records/s and starved holder-gated chunking behind it; the collect
+// pass must run bounded-concurrent pulls while still committing one receipt
+// per pulled segment.
+func TestCollectOncePullsInParallel(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	root := t.TempDir()
+
+	mem := newMemoryPull()
+	probe := &concurrencyProbePull{inner: mem}
+	log := &staticLog{}
+	const n = 8
+	segs := make([]collection.AssignedSegment, 0, n)
+	for range n {
+		segID := glid.New()
+		mem.Put(segID, writeSegmentBytes(t, vaultID, segID, "parallel"))
+		segs = append(segs, collection.AssignedSegment{VaultID: vaultID, SegmentID: segID})
+	}
+	log.setAssigned(segs...)
+	receipts := &recordingReceipts{}
+
+	mgr := collection.New(collection.Config{})
+	if err := mgr.RegisterVault(vaultID, root, collection.VaultConfig{
+		Log:      log,
+		Pull:     probe,
+		Receipts: receipts,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.CollectOnce(context.Background(), vaultID); err != nil {
+		t.Fatal(err)
+	}
+	if got := receipts.count(); got != n {
+		t.Fatalf("receipts = %d, want %d", got, n)
+	}
+	if peak := probe.peakInflight(); peak < 2 {
+		t.Fatalf("peak in-flight pulls = %d, want >= 2 (pulls ran serially)", peak)
+	}
+}
