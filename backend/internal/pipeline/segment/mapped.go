@@ -146,6 +146,28 @@ func (m *MappedSegment) RecordAtFilePos(filePos uint32) (record.Record, error) {
 	return decodeFrameBody(m.data[start : start+bodyLen])
 }
 
+// RecordViewAtFilePos parses the frame at filePos into a record.View whose
+// AttrsWire and Raw alias the mapping — zero copies, no attrs map. The
+// GLCB merge transcodes straight from these views; the full Record path
+// materialized a map per record (~24GB/run, gastrolog-11y2iv). CRC is
+// verified exactly as the copying decoder does. The View is valid only
+// while the mapping is open.
+func (m *MappedSegment) RecordViewAtFilePos(filePos uint32) (record.View, error) {
+	if filePos < HeaderSize || filePos >= m.hdr.IndexOffset {
+		return record.View{}, ErrFrameLength
+	}
+	limit := m.hdr.IndexOffset - filePos
+	if limit < frameLenPrefixSize {
+		return record.View{}, ErrFrameLength
+	}
+	bodyLen := binary.LittleEndian.Uint32(m.data[filePos:])
+	if bodyLen == 0 || bodyLen > limit-frameLenPrefixSize {
+		return record.View{}, ErrFrameLength
+	}
+	start := filePos + frameLenPrefixSize
+	return decodeFrameView(m.data[start : start+bodyLen])
+}
+
 // Close unmaps and closes the file.
 func (m *MappedSegment) Close() error {
 	if m.data != nil {

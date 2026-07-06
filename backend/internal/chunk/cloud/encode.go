@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/record"
 )
 
 // encodeRecordFrame allocates a fresh frame. Hot writers use
@@ -52,6 +53,52 @@ func appendRecordFrame(dst []byte, rec chunk.Record, dict *chunk.StringDict) ([]
 	binary.LittleEndian.PutUint32(frame[off:], uint32(len(rec.Raw))) //nolint:gosec // G115: raw bounded by chunk limits
 	off += 4
 	copy(frame[off:], rec.Raw)
+	return dst, nil
+}
+
+// appendRecordFrameView is appendRecordFrame for a record.View: the attrs
+// blob transcodes from segment wire form via chunk.AppendWithDictWire
+// without materializing a map; header fields and Raw come from the view.
+func appendRecordFrameView(dst []byte, v record.View, dict *chunk.StringDict) ([]byte, error) {
+	base := len(dst)
+	fixed := 3*8 + 16 + 16 + 4
+	if cap(dst)-base < fixed {
+		grown := make([]byte, base, base+fixed+len(v.AttrsWire)*2+4+len(v.Raw))
+		copy(grown, dst)
+		dst = grown
+	}
+	dst = dst[:base+fixed]
+	frame := dst[base:]
+	off := 0
+
+	binary.LittleEndian.PutUint64(frame[off:], tsNanos(v.SourceTS))
+	off += 8
+	binary.LittleEndian.PutUint64(frame[off:], tsNanos(v.IngestTS))
+	off += 8
+	binary.LittleEndian.PutUint64(frame[off:], tsNanos(v.WriteTS))
+	off += 8
+	copy(frame[off:], v.EventID.IngesterID[:])
+	off += 16
+	copy(frame[off:], v.EventID.NodeID[:])
+	off += 16
+	binary.LittleEndian.PutUint32(frame[off:], v.EventID.IngestSeq)
+
+	out, _, err := chunk.AppendWithDictWire(dst, v.AttrsWire, dict)
+	if err != nil {
+		return dst[:base], fmt.Errorf("encode attrs: %w", err)
+	}
+	dst = out
+
+	rawPrefix := len(dst)
+	need := 4 + len(v.Raw)
+	if cap(dst)-rawPrefix < need {
+		grown := make([]byte, rawPrefix, rawPrefix+need)
+		copy(grown, dst)
+		dst = grown
+	}
+	dst = dst[:rawPrefix+need]
+	binary.LittleEndian.PutUint32(dst[rawPrefix:], uint32(len(v.Raw))) //nolint:gosec // G115: raw bounded by chunk limits
+	copy(dst[rawPrefix+4:], v.Raw)
 	return dst, nil
 }
 

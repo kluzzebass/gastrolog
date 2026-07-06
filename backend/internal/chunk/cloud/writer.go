@@ -17,6 +17,7 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/format"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/record"
 )
 
 const (
@@ -238,11 +239,47 @@ func (w *Writer) Add(rec chunk.Record) error {
 	}
 	w.frameScratch = scratch
 
-	pos := w.count
-	w.bounds.update(rec)
-	w.noteIngestTS(rec.IngestTS)
+	return w.commitFrame(rec.SourceTS, rec.IngestTS, rec.WriteTS)
+}
 
-	bodySize := uint32(len(scratch) - 4) //nolint:gosec // G115: frame size bounded by record limits
+// AddView is Add for a record.View: attributes transcode straight from
+// segment wire form to dict form with no intermediate map, and Raw copies
+// exactly once (view -> frame scratch). The bulk GLCB merge feeds this;
+// the map-per-record path cost ~24GB of garbage per soak run
+// (gastrolog-11y2iv).
+func (w *Writer) AddView(v record.View) error {
+	if w.output != nil && !w.direct {
+		if err := w.beginDirect(w.output); err != nil {
+			return err
+		}
+	}
+	if !w.direct {
+		if err := w.ensureStaging(); err != nil {
+			return err
+		}
+	}
+
+	if cap(w.frameScratch) < 4 {
+		w.frameScratch = make([]byte, 4, 512)
+	}
+	scratch, err := appendRecordFrameView(w.frameScratch[:4], v, w.dict)
+	if err != nil {
+		return err
+	}
+	w.frameScratch = scratch
+
+	return w.commitFrame(v.SourceTS, v.IngestTS, v.WriteTS)
+}
+
+// commitFrame finishes an Add/AddView after w.frameScratch holds
+// [4-byte placeholder][frame]: stamps the length, updates bounds/indexes,
+// and writes the frame to the active sink.
+func (w *Writer) commitFrame(sourceTS, ingestTS, writeTS time.Time) error {
+	pos := w.count
+	w.bounds.update(chunk.Record{SourceTS: sourceTS, IngestTS: ingestTS, WriteTS: writeTS})
+	w.noteIngestTS(ingestTS)
+
+	bodySize := uint32(len(w.frameScratch) - 4) //nolint:gosec // G115: frame size bounded by record limits
 	w.recordIndex = append(w.recordIndex, recordIndex{
 		Offset: w.sectionOff + 4,
 		Size:   bodySize,
@@ -260,9 +297,9 @@ func (w *Writer) Add(rec chunk.Record) error {
 		return fmt.Errorf("write record frame: %w", err)
 	}
 
-	w.ingestEntries = append(w.ingestEntries, tsEntry{ts: rec.IngestTS.UnixNano(), pos: pos})
-	if !rec.SourceTS.IsZero() {
-		w.sourceEntries = append(w.sourceEntries, tsEntry{ts: rec.SourceTS.UnixNano(), pos: pos})
+	w.ingestEntries = append(w.ingestEntries, tsEntry{ts: ingestTS.UnixNano(), pos: pos})
+	if !sourceTS.IsZero() {
+		w.sourceEntries = append(w.sourceEntries, tsEntry{ts: sourceTS.UnixNano(), pos: pos})
 	}
 	w.count++
 	return nil
@@ -348,7 +385,7 @@ func (w *Writer) emitBlobDirect() (int64, error) {
 
 		IngestTSMonotonic: w.ingestMonotonic,
 
-		RecordsOff: recordsOff,
+		RecordsOff:  recordsOff,
 		RecordsSize: uint32(w.sectionOff), //nolint:gosec // G115: section bounded by chunk policy
 		DictOff:     dictOff,
 		IndexOff:    indexOff,
@@ -449,7 +486,7 @@ func (w *Writer) emitBlobStaging(dst io.Writer) (int64, error) {
 
 		IngestTSMonotonic: w.ingestMonotonic,
 
-		RecordsOff: recordsOff,
+		RecordsOff:  recordsOff,
 		RecordsSize: uint32(w.sectionOff), //nolint:gosec // G115: section bounded by chunk policy
 		DictOff:     dictOff,
 		IndexOff:    indexOff,
@@ -616,16 +653,16 @@ func (w *Writer) Meta() BlobMeta {
 		VaultID:           w.vaultID,
 		RecordCount:       w.count,
 		IngestTSMonotonic: w.ingestMonotonic,
-		RawBytes:        int64(w.sectionOff), //nolint:gosec // G115: section bounded by chunk policy
-		WriteStart:      w.bounds.writeStart,
-		WriteEnd:        w.bounds.writeEnd,
-		IngestStart:     w.bounds.ingestStart,
-		IngestEnd:       w.bounds.ingestEnd,
-		SourceStart:     w.bounds.sourceStart,
-		SourceEnd:       w.bounds.sourceEnd,
-		IngestIdxOffset: w.toc.IngestIdxOffset,
-		IngestIdxSize:   w.toc.IngestIdxSize,
-		SourceIdxOffset: w.toc.SourceIdxOffset,
-		SourceIdxSize:   w.toc.SourceIdxSize,
+		RawBytes:          int64(w.sectionOff), //nolint:gosec // G115: section bounded by chunk policy
+		WriteStart:        w.bounds.writeStart,
+		WriteEnd:          w.bounds.writeEnd,
+		IngestStart:       w.bounds.ingestStart,
+		IngestEnd:         w.bounds.ingestEnd,
+		SourceStart:       w.bounds.sourceStart,
+		SourceEnd:         w.bounds.sourceEnd,
+		IngestIdxOffset:   w.toc.IngestIdxOffset,
+		IngestIdxSize:     w.toc.IngestIdxSize,
+		SourceIdxOffset:   w.toc.SourceIdxOffset,
+		SourceIdxSize:     w.toc.SourceIdxSize,
 	}
 }

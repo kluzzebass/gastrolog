@@ -60,6 +60,59 @@ func encodeFrame(rec *record.Record, writeTS time.Time) ([]byte, error) {
 	return body, nil
 }
 
+// decodeFrameView parses a frame body into a record.View aliasing body —
+// no attrs map, no Raw copy. Same layout and CRC verification as
+// decodeFrameBody; the two must stay in lockstep.
+func decodeFrameView(body []byte) (record.View, error) {
+	minBody := eventIDWireSize + format.SizeU64 + format.SizeU64 + format.SizeU16 + format.SizeU32 + frameCRCSize
+	if len(body) < minBody {
+		return record.View{}, ErrFrameTooSmall
+	}
+	off := 0
+
+	eventID, err := decodeEventID(body[off : off+eventIDWireSize])
+	if err != nil {
+		return record.View{}, err
+	}
+	off += eventIDWireSize
+
+	v := record.View{
+		EventID:  eventID,
+		SourceTS: tsFromNanos(binary.LittleEndian.Uint64(body[off:])),
+		IngestTS: eventID.IngestTS,
+	}
+	off += format.SizeU64
+	v.WriteTS = tsFromNanos(binary.LittleEndian.Uint64(body[off:]))
+	off += format.SizeU64
+
+	attrsLen, err := record.IterEncodedAttributes(body[off:], func(_, _ []byte) bool { return false })
+	if err != nil {
+		return record.View{}, err
+	}
+	v.AttrsWire = body[off : off+attrsLen]
+	off += attrsLen
+
+	if len(body)-off < format.SizeU32 {
+		return record.View{}, ErrTruncatedFrame
+	}
+	rawLen := binary.LittleEndian.Uint32(body[off:])
+	off += format.SizeU32
+	if int(rawLen) > len(body)-off-frameCRCSize {
+		return record.View{}, ErrTruncatedFrame
+	}
+	v.Raw = body[off : off+int(rawLen)]
+	off += int(rawLen)
+
+	if len(body)-off < frameCRCSize {
+		return record.View{}, ErrTruncatedFrame
+	}
+	wantCRC := binary.LittleEndian.Uint32(body[off:])
+	if crc32.ChecksumIEEE(body[:off]) != wantCRC {
+		return record.View{}, ErrFrameCRC
+	}
+	return v, nil
+}
+
 func decodeFrameBody(body []byte) (record.Record, error) {
 	minBody := eventIDWireSize + format.SizeU64 + format.SizeU64 + format.SizeU16 + format.SizeU32 + frameCRCSize
 	if len(body) < minBody {

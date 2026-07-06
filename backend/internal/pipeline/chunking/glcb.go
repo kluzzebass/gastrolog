@@ -114,11 +114,14 @@ func buildGLCBTo(dst io.Writer, workDir string, in BuildGLCBInput) (BuildGLCBRes
 	}
 
 	var recordCount uint32
-	for rec, err := range MergeSpanRefs(in.Refs) {
+	// Views, not Records: the merge is a pure transcode (segment wire ->
+	// dict wire) and materializing an attrs map per record was ~24GB of
+	// garbage per soak run (gastrolog-11y2iv).
+	for v, err := range MergeSpanViews(in.Refs) {
 		if err != nil {
 			return BuildGLCBResult{}, err
 		}
-		if err := w.Add(toChunkRecord(rec)); err != nil {
+		if err := w.AddView(v); err != nil {
 			return BuildGLCBResult{}, fmt.Errorf("encode record: %w", err)
 		}
 		recordCount++

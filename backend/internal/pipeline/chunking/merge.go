@@ -138,25 +138,28 @@ func seedMergeEntries(cursors []spanCursor) ([]mergeEntry, error) {
 	return entries, nil
 }
 
-// MergeSpanRefs yields records from all spans merged in canonical EventID order.
-// The k-way heap compares index entries (EventID + filepos) only; each frame is
-// decoded when its entry wins and is yielded (design-notes §37).
-func MergeSpanRefs(refs []SpanRef) iter.Seq2[record.Record, error] {
-	return func(yield func(record.Record, error) bool) {
+// MergeSpanViews yields record views from all spans merged in canonical
+// EventID order. The k-way heap compares index entries (EventID + filepos)
+// only; each frame is parsed when its entry wins. Views alias the span
+// mappings and are valid only within the yield call — the GLCB build
+// transcodes them immediately, which is the point: no per-record attrs
+// map or Raw copy on the bulk path (gastrolog-11y2iv).
+func MergeSpanViews(refs []SpanRef) iter.Seq2[record.View, error] {
+	return func(yield func(record.View, error) bool) {
 		if len(refs) == 0 {
 			return
 		}
 
 		cursors, closeAll, err := loadSpanCursors(refs)
 		if err != nil {
-			yield(record.Record{}, err)
+			yield(record.View{}, err)
 			return
 		}
 		defer closeAll()
 
 		entries, err := seedMergeEntries(cursors)
 		if err != nil {
-			yield(record.Record{}, err)
+			yield(record.View{}, err)
 			return
 		}
 
@@ -167,21 +170,41 @@ func MergeSpanRefs(refs []SpanRef) iter.Seq2[record.Record, error] {
 
 		for len(h.entries) > 0 {
 			me := h.pop()
-			rec, err := cursors[me.cur].seg.RecordAtFilePos(me.entry.FilePos)
+			v, err := cursors[me.cur].seg.RecordViewAtFilePos(me.entry.FilePos)
 			if err != nil {
-				yield(record.Record{}, err)
+				yield(record.View{}, err)
 				return
 			}
-			if !yield(rec, nil) {
+			if !yield(v, nil) {
 				return
 			}
 			entry, ok, err := cursors[me.cur].popEntry()
 			if err != nil {
-				yield(record.Record{}, err)
+				yield(record.View{}, err)
 				return
 			}
 			if ok {
 				h.push(mergeEntry{entry: entry, cur: me.cur})
+			}
+		}
+	}
+}
+
+// MergeSpanRefs is MergeSpanViews materialized into self-contained Records —
+// the query path assembles results that outlive the mappings.
+func MergeSpanRefs(refs []SpanRef) iter.Seq2[record.Record, error] {
+	return func(yield func(record.Record, error) bool) {
+		for v, err := range MergeSpanViews(refs) {
+			if err != nil {
+				yield(record.Record{}, err)
+				return
+			}
+			rec, err := v.Materialize()
+			if !yield(rec, err) {
+				return
+			}
+			if err != nil {
+				return
 			}
 		}
 	}
