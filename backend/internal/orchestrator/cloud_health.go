@@ -5,6 +5,10 @@ import (
 
 	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
+	"os"
+
+	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline/chunking"
 )
 
 // cloudHealthChecker is an optional interface implemented by chunk managers
@@ -131,8 +135,7 @@ func (o *Orchestrator) backfillCloudUploads(vaultInst *VaultInstance) {
 		if err := o.scheduler.RunOnce(name, func(id chunk.ChunkID) error {
 			err := uploader.UploadToCloud(id)
 			if err != nil {
-				o.cloudHealthLogger.Warn("cloud backfill upload failed",
-					"vault", vaultInst.VaultID, "chunk", id, "error", err)
+				o.logBackfillFailure(vaultInst.VaultID, id, err)
 			}
 			return err
 		}, m.ID); err == nil {
@@ -144,6 +147,32 @@ func (o *Orchestrator) backfillCloudUploads(vaultInst *VaultInstance) {
 		o.cloudHealthLogger.Debug("cloud backfill: scheduled uploads",
 			"vault", vaultInst.VaultID, "count", backfilled)
 	}
+}
+
+// logBackfillFailure reports a failed backfill upload with the signal an
+// operator needs: whether the GLCB exists on disk. Present-but-unuploadable
+// means the chunk manager lost its registration (a bug — the restart
+// registration gap produced 1,500 bare 'chunk not found' warns); absent
+// means the local build simply hasn't finished (normal on followers,
+// Debug). Both throttled per vault: retries every 5s flood otherwise.
+func (o *Orchestrator) logBackfillFailure(vaultID glid.GLID, id chunk.ChunkID, err error) {
+	onDisk := false
+	if root, ok := o.pipelineVaultChunkRoot(vaultID); ok {
+		if _, statErr := os.Stat(chunking.ChunkGLCBPath(root, id)); statErr == nil {
+			onDisk = true
+		}
+	}
+	n, allow := o.backfillLogThrottle.Allow(vaultID.String())
+	if !allow {
+		return
+	}
+	if onDisk {
+		o.cloudHealthLogger.Warn("cloud backfill failed for chunk present on disk — chunk manager registration missing",
+			"vault", vaultID, "chunk", id, "error", err, "suppressed", n)
+		return
+	}
+	o.cloudHealthLogger.Debug("cloud backfill awaiting local build",
+		"vault", vaultID, "chunk", id, "error", err, "suppressed", n)
 }
 
 // chunkIsCloudBacked checks the FSM (single source of truth) for CloudBacked.

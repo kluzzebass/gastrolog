@@ -67,11 +67,26 @@ func (v *vaultChunking) recoverOnce(ctx context.Context) error {
 		pendingID = pending.ChunkID
 	}
 	for _, e := range v.fsm().List() {
-		if e.IsSealed() || e.ID == pendingID {
+		if e.ID == pendingID {
 			continue
 		}
 		glcbPath := ChunkGLCBPath(v.cfg.ChunkRoot, e.ID)
 		if _, err := os.Stat(glcbPath); err != nil {
+			continue
+		}
+		if e.IsSealed() {
+			// Already sealed cluster-wide with our GLCB on disk: nothing to
+			// build or propose, but the in-memory registration (OnBuilt →
+			// external GLCB on the chunk manager) died with the previous
+			// process. Without re-firing it here, this node serves neither
+			// queries nor cloud backfill for the chunk until an
+			// eventually-consistent sweep notices — a restarted node spent
+			// 16 minutes logging 'chunk not found' against 834 chunks it
+			// held complete on disk. OnBuilt is idempotent on the
+			// registration side.
+			if v.cfg.OnBuilt != nil {
+				v.cfg.OnBuilt(e.ID)
+			}
 			continue
 		}
 		manifest := &vaultctlfsm.OpenChunkManifest{ChunkID: e.ID}

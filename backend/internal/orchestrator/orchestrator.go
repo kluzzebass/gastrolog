@@ -181,6 +181,10 @@ type Orchestrator struct {
 	// dumps alone (gastrolog-1ug3rq).
 	mu locktrack.RWMutex
 
+	// backfillLogThrottle spaces cloud-backfill failure logging per vault;
+	// the sweep retries failing chunks every few seconds indefinitely.
+	backfillLogThrottle logging.Throttle
+
 	// Vault registry. Each vault bundles Chunks, Indexes, and Query.
 	vaults map[glid.GLID]*Vault
 
@@ -710,6 +714,7 @@ func New(cfg Config) (*Orchestrator, error) {
 	}
 
 	o := &Orchestrator{
+		backfillLogThrottle:  logging.Throttle{Interval: 30 * time.Second},
 		vaults:               make(map[glid.GLID]*Vault),
 		ingesters:            make(map[glid.GLID]Ingester),
 		ingesterStats:        make(map[glid.GLID]*IngesterStats),
