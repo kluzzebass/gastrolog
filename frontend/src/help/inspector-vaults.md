@@ -38,8 +38,11 @@ member collects and seals its own copy, so their totals count each record
 once *per home* — with a replication factor of 4, one appended record shows
 up as four collection events. Those rows measure replication *work* (real
 bytes moved to each node), not record throughput; the totals row is labeled
-"Σ N homes" as a reminder. Divide by the number of active homes to compare
-against the Append rate.
+"Σ N homes" and its status column says **×N replication** when the sum
+tracks append × homes. **+ catch-up** means the sum is running ahead of
+that — a rejoined node backfilling missed segments or a backlog draining —
+and **catch-up** alone means replication is working with no live ingest.
+Divide by the number of active homes to compare against the Append rate.
 
 Reading the panel: the three rates should track each other at steady state.
 A downstream stage falling away from its upstream is a pipeline stall in
