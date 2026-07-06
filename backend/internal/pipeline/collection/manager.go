@@ -491,16 +491,25 @@ type Manager struct {
 
 	running atomic.Bool
 	wg      sync.WaitGroup
+
+	// passFailLog throttles collect-pass failure warns to one line per
+	// vault per interval with a suppressed count (gastrolog-4elpu1).
+	passFailLog logging.Throttle
 }
 
 // New returns a collection manager.
 func New(cfg Config) *Manager {
 	cfg.Logger = compCollection.Apply(logging.Default(cfg.Logger))
 	return &Manager{
-		cfg:    cfg,
-		vaults: make(map[glid.GLID]*vaultCollect),
+		cfg:         cfg,
+		vaults:      make(map[glid.GLID]*vaultCollect),
+		passFailLog: logging.Throttle{Interval: retryLogInterval},
 	}
 }
+
+// retryLogInterval spaces identical retry-failure warn lines per vault; the
+// retry loop itself is unthrottled (gastrolog-4elpu1).
+const retryLogInterval = 30 * time.Second
 
 func (m *Manager) logger() *slog.Logger {
 	return m.cfg.Logger
@@ -700,17 +709,22 @@ func (m *Manager) triggerCollect(vaultID glid.GLID) {
 	v.wake.Notify()
 }
 
-func (m *Manager) logCollectPassErr(log *slog.Logger, err error) {
+func (m *Manager) logCollectPassErr(v *vaultCollect, log *slog.Logger, err error) {
 	if retryableCollectErr(err) {
 		log.Debug("collect pass deferred", "error", err)
 		return
 	}
-	log.Warn("collect pass failed", "error", err)
+	// One warn per vault per interval; pulls against an unavailable holder
+	// retry for as long as the holder is gone — 62k identical lines during
+	// one node outage (gastrolog-4elpu1).
+	if n, ok := m.passFailLog.Allow(v.vaultID.String()); ok {
+		log.Warn("collect pass failed", "error", err, "suppressed", n)
+	}
 }
 
 func (m *Manager) afterCollectPass(v *vaultCollect, progress bool, err error, log *slog.Logger) {
 	if err != nil {
-		m.logCollectPassErr(log, err)
+		m.logCollectPassErr(v, log, err)
 		if retryableCollectErr(err) {
 			// "Deferred" must actually defer: nothing else retries these
 			// obligations once the burst's publish events are spent.

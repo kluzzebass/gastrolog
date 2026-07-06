@@ -273,16 +273,25 @@ type Manager struct {
 
 	running atomic.Bool
 	wg      sync.WaitGroup
+
+	// buildFailLog throttles the per-retry build-failure warn to one line
+	// per vault per interval with a suppressed count (gastrolog-4elpu1).
+	buildFailLog logging.Throttle
 }
 
 // New returns a chunking manager.
 func New(cfg Config) *Manager {
 	cfg.Logger = compChunking.Apply(logging.Default(cfg.Logger))
 	return &Manager{
-		cfg:    cfg,
-		vaults: make(map[glid.GLID]*vaultChunking),
+		cfg:          cfg,
+		vaults:       make(map[glid.GLID]*vaultChunking),
+		buildFailLog: logging.Throttle{Interval: retryLogInterval},
 	}
 }
+
+// retryLogInterval spaces identical retry-failure warn lines per vault; the
+// retry loop itself is unthrottled (gastrolog-4elpu1).
+const retryLogInterval = 30 * time.Second
 
 func (m *Manager) logger() *slog.Logger {
 	if m.cfg.Logger != nil {
@@ -656,7 +665,11 @@ func (m *Manager) runBuildPass(ctx context.Context, v *vaultChunking, log *slog.
 		err := v.buildOnce(ctx)
 		v.buildMu.Unlock()
 		if err != nil && ctx.Err() == nil {
-			log.Warn("chunking build failed", "error", err)
+			// Retrying is correct; logging every retry is a firehose — a 6h
+			// blocked build once emitted 244k of these (gastrolog-4elpu1).
+			if n, ok := m.buildFailLog.Allow(v.cfg.VaultID.String()); ok {
+				log.Warn("chunking build failed", "error", err, "suppressed", n)
+			}
 		}
 		v.wake.Notify()
 	})

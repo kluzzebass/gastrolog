@@ -739,15 +739,28 @@ func (m *Manager) runPublishIngress(ctx context.Context, completed <-chan segmen
 
 func (m *Manager) rescanStranded(ctx context.Context, publishQ chan<- pendingPublish) {
 	for vaultID, v := range m.vaultsSnapshot() {
+		// Aggregate failures per pass: a rescan racing the release purge can
+		// fail the stat for every listed segment (files legitimately deleted
+		// between ReadDir and stage), and per-segment warns flooded hundreds
+		// of identical lines in seconds (gastrolog-4elpu1). One summary per
+		// vault per pass carries the same signal.
+		var failed int
+		var firstErr error
 		for _, seg := range v.stranded(vaultID) {
 			p, alreadyStaged, err := m.stageForPublish(seg)
 			switch {
 			case err != nil:
-				m.logger().Warn("staging stranded segment for publish failed",
-					"vault", vaultID, "segment", seg.Meta.ID, "error", err)
+				failed++
+				if firstErr == nil {
+					firstErr = err
+				}
 			case !alreadyStaged:
 				m.enqueuePublish(ctx, publishQ, p)
 			}
+		}
+		if failed > 0 {
+			m.logger().Warn("stranded rescan: staging failed for some segments",
+				"vault", vaultID, "failed", failed, "first_error", firstErr)
 		}
 	}
 }
