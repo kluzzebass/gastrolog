@@ -4,6 +4,7 @@ import (
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
+	"sync/atomic"
 )
 
 // flushHeadPurgeForManifest removes head/ copies for manifest segment IDs once
@@ -78,7 +79,7 @@ func (v *vaultChunking) purgeReleasedHead(ids []glid.GLID) {
 		v.logger().Debug("purging head segment after registry release", "segment", id)
 		_ = paths.PurgeHeadStaging(root, id)
 	}
-	v.logger().Info("purged head segments after registry release", "count", len(ids))
+	v.notePurged(&v.purgedReleased, len(ids))
 }
 
 // purgeStaleHeadCatchUp removes head/ files with no completed-segment registry
@@ -118,7 +119,25 @@ func (v *vaultChunking) purgeStaleHeadCatchUp() {
 		_ = paths.PurgeHeadStaging(root, id)
 		purged++
 	}
-	if purged > 0 {
-		v.logger().Info("purged stale head segments with no registry entry", "count", purged)
+	v.notePurged(&v.purgedStale, purged)
+}
+
+// notePurged accumulates purge counts and emits one summary per interval —
+// during a full-vault drain the release wake fires many times per second
+// and a per-pass Info line floods the log with counts of 1-4.
+func (v *vaultChunking) notePurged(counter *atomic.Int64, n int) {
+	if n <= 0 {
+		return
 	}
+	counter.Add(int64(n))
+	if _, ok := v.purgeLogThrottle.Allow(""); !ok {
+		return
+	}
+	released := v.purgedReleased.Swap(0)
+	stale := v.purgedStale.Swap(0)
+	if released+stale == 0 {
+		return
+	}
+	v.logger().Info("head purge summary",
+		"released", released, "stale_no_registry_entry", stale)
 }

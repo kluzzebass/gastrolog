@@ -506,10 +506,6 @@ func (m *Manager) Run(ctx context.Context, completed <-chan segmentation.Complet
 	m.runCtx = ctx
 	m.mu.Unlock()
 
-	m.wg.Go(func() {
-		<-ctx.Done()
-	})
-
 	publishQ := make(chan pendingPublish, publishQueueCap)
 
 	m.wg.Go(func() {
@@ -522,12 +518,16 @@ func (m *Manager) Run(ctx context.Context, completed <-chan segmentation.Complet
 		m.runPublishIngress(ctx, completed, publishQ)
 	})
 
-	m.wg.Wait()
-	m.stopRetryWake()
+	// Quiesce before waiting (see chunking/collection: Wait must not race
+	// a registration's Add).
+	<-ctx.Done()
 
 	m.mu.Lock()
 	m.runCtx = nil
 	m.mu.Unlock()
+
+	m.wg.Wait()
+	m.stopRetryWake()
 	return ctx.Err()
 }
 

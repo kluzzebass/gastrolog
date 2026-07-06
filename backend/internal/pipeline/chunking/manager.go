@@ -124,8 +124,14 @@ type vaultChunking struct {
 	blockedChunk chunk.ChunkID
 	blockedSince time.Time
 	// blockedAlerted makes the blocked-build alert log exactly once per
-	// episode instead of drowning in per-retry lines (gastrolog-4bl9xx).
+	// episode instead of drowning in per-retry lines.
 	blockedAlerted bool
+
+	// Head-purge log aggregation: totals accumulate across passes and one
+	// summary line emits per throttle interval instead of a line per pass.
+	purgedReleased   atomic.Int64
+	purgedStale      atomic.Int64
+	purgeLogThrottle logging.Throttle
 
 	// underReplicatedAlerted tracks the under-replicated-segments alert
 	// state so planner passes log/alert only on transitions
@@ -590,15 +596,17 @@ func (m *Manager) Run(ctx context.Context) error {
 	}
 	m.mu.Unlock()
 
-	m.wg.Go(func() {
-		<-ctx.Done()
-	})
-
-	m.wg.Wait()
+	// Quiesce before waiting: clearing runCtx under m.mu guarantees no
+	// registration can m.wg.Go a new worker after this point, so the Wait
+	// below cannot race a concurrent Add — the WaitGroup misuse the race
+	// detector flagged intermittently across the pipeline managers.
+	<-ctx.Done()
 
 	m.mu.Lock()
 	m.runCtx = nil
 	m.mu.Unlock()
+
+	m.wg.Wait()
 	return ctx.Err()
 }
 

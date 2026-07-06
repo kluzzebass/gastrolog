@@ -709,15 +709,17 @@ func (m *Manager) Run(ctx context.Context) error {
 	}
 	m.mu.Unlock()
 
-	m.wg.Go(func() {
-		<-ctx.Done()
-	})
-
-	m.wg.Wait()
+	// Quiesce before waiting: clearing runCtx under m.mu guarantees no
+	// registration can m.wg.Go a new worker after this point, so the Wait
+	// below cannot race a concurrent Add — the WaitGroup misuse the race
+	// detector flagged intermittently across the pipeline managers.
+	<-ctx.Done()
 
 	m.mu.Lock()
 	m.runCtx = nil
 	m.mu.Unlock()
+
+	m.wg.Wait()
 	return ctx.Err()
 }
 

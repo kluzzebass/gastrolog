@@ -288,19 +288,23 @@ func (m *Manager) Run(ctx context.Context) error {
 	}
 	m.mu.Unlock()
 
-	m.wg.Go(func() {
-		<-ctx.Done()
-	})
 	for _, w := range writers {
 		m.wg.Go(func() {
 			w.run(ctx)
 		})
 	}
 
-	m.wg.Wait()
+	// Quiesce before waiting (see chunking/collection: Wait must not race
+	// a registration's Add). Flush runs after Wait so writers have exited.
+	<-ctx.Done()
 
 	m.mu.Lock()
 	m.runCtx = nil
+	m.mu.Unlock()
+
+	m.wg.Wait()
+
+	m.mu.Lock()
 	for _, w := range m.writers {
 		w.flushAndCloseSegment()
 	}
