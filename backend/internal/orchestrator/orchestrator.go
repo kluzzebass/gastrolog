@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"gastrolog/internal/glid"
 	"log/slog"
+	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -18,6 +20,7 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/lifecycle"
+	"gastrolog/internal/locktrack"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator/pipeline"
@@ -170,7 +173,13 @@ type RemoteTransferrer interface {
 //   - Subcomponents receive child loggers with additional context
 //   - Logging is intentionally sparse; only lifecycle events are logged
 type Orchestrator struct {
-	mu sync.RWMutex
+	// mu guards the registries below. locktrack.RWMutex is a drop-in
+	// sync.RWMutex that, when tracking is on (default; GLOG_LOCK_TRACKING=off
+	// disables), records acquisition stacks so an orphaned hold or a stuck
+	// write waiter is reported with its exact acquisition site — a node-wide
+	// deadlock from a leaked read lock was undiagnosable from goroutine
+	// dumps alone (gastrolog-1ug3rq).
+	mu locktrack.RWMutex
 
 	// Vault registry. Each vault bundles Chunks, Indexes, and Query.
 	vaults map[glid.GLID]*Vault
@@ -824,6 +833,16 @@ func New(cfg Config) (*Orchestrator, error) {
 	// gain, SetDesiredMembers) that may have missed firing.
 	if err := o.startVaultCtlMembershipReconcile(); err != nil {
 		return nil, fmt.Errorf("vault-ctl membership reconcile: %w", err)
+	}
+
+	// Lock diagnostics default ON (gastrolog-1ug3rq): per-acquisition cost
+	// is a few microseconds on per-batch/per-RPC paths, and the payoff is a
+	// leak report naming the exact acquisition site instead of a node-wide
+	// silent wedge. GLOG_LOCK_TRACKING=off|false|0 disables.
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("GLOG_LOCK_TRACKING"))) {
+	case "off", "false", "0":
+	default:
+		o.mu.EnableTracking()
 	}
 
 	return o, nil

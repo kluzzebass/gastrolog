@@ -128,6 +128,12 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	// kubelet's probe stays responsive when o.mu is contended by a
 	// vault-ctl AddVoter burst on K8s scale-out.
 	o.auxWg.Go(func() { o.runReadinessRefresher(ctx, readinessRefreshInterval) })
+
+	// Lock-leak reporter (gastrolog-1ug3rq): names orphaned o.mu holds and
+	// stuck write waiters with their acquisition stacks. Reads only tracker
+	// state — survives an o.mu wedge by construction.
+	o.auxWg.Go(func() { o.runLockLeakReporter(ctx) })
+
 	// Seed the cache synchronously while o.mu is held so /readyz is correct
 	// immediately after Start() — the async refresher's first tick can lag
 	// by up to readinessRefreshInterval and would otherwise leave the
