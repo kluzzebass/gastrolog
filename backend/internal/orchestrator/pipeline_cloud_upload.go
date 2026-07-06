@@ -14,9 +14,13 @@ func (o *Orchestrator) schedulePipelineCloudUpload(vaultID glid.GLID, chunkID ch
 	if !o.isPipelineIngestVault(vaultID) {
 		return
 	}
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-
+	// No o.mu here: findLocalVaultInstance takes its own read lock, and an
+	// outer RLock made this a recursive read acquisition — with a writer
+	// queued between the two, the second RLock parks behind the writer,
+	// the writer waits on the first hold, and the node wedges. This exact
+	// shape deadlocked node-2 (gastrolog-1ug3rq) and node-1; the lock
+	// tracker named this line. Everything below works on the returned
+	// instance and the scheduler, which lock for themselves.
 	vaultInst := o.findLocalVaultInstance(vaultID)
 	if vaultInst == nil {
 		return
