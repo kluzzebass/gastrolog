@@ -70,23 +70,19 @@ func (v *vaultChunking) recoverOnce(ctx context.Context) error {
 		if e.ID == pendingID {
 			continue
 		}
-		glcbPath := ChunkGLCBPath(v.cfg.ChunkRoot, e.ID)
-		if _, err := os.Stat(glcbPath); err != nil {
+		if e.IsSealed() {
+			// Sealed cluster-wide: nothing to build or propose, and
+			// registration is lazy — the chunk manager's on-miss resolver
+			// serves the on-disk GLCB at first lookup (gastrolog-2kmgj6).
+			// Skipping BEFORE the stat keeps recovery O(unsealed), not
+			// O(all chunks): the eager re-registration scan this replaced
+			// was the sub-3s-startup violation, and its ordering hazards
+			// (pre-replay runs, sweep-timing gaps) left restarted nodes
+			// logging 'chunk not found' against bytes they held.
 			continue
 		}
-		if e.IsSealed() {
-			// Already sealed cluster-wide with our GLCB on disk: nothing to
-			// build or propose, but the in-memory registration (OnBuilt →
-			// external GLCB on the chunk manager) died with the previous
-			// process. Without re-firing it here, this node serves neither
-			// queries nor cloud backfill for the chunk until an
-			// eventually-consistent sweep notices — a restarted node spent
-			// 16 minutes logging 'chunk not found' against 834 chunks it
-			// held complete on disk. OnBuilt is idempotent on the
-			// registration side.
-			if v.cfg.OnBuilt != nil {
-				v.cfg.OnBuilt(e.ID)
-			}
+		glcbPath := ChunkGLCBPath(v.cfg.ChunkRoot, e.ID)
+		if _, err := os.Stat(glcbPath); err != nil {
 			continue
 		}
 		manifest := &vaultctlfsm.OpenChunkManifest{ChunkID: e.ID}

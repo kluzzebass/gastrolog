@@ -114,6 +114,9 @@ func (o *Orchestrator) backfillCloudUploads(vaultInst *VaultInstance) {
 	if err != nil {
 		return
 	}
+	// Sealed manifest entries not yet lazily resolved by the manager
+	// (post-restart) still need upload backfill (gastrolog-2kmgj6).
+	metas = appendUnlistedManifestSealed(metas, vaultInst)
 
 	var backfilled int
 	for _, m := range metas {

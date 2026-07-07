@@ -577,6 +577,14 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 		}
 	}
 
+	// Registration is a cache, not a prerequisite (gastrolog-2kmgj6):
+	// sealed FSM entries the chunk manager has not lazily resolved yet
+	// (post-restart, pre-first-lookup) still MUST be retention candidates.
+	// Source them from the manifest directly; the drain/expunge lookups
+	// resolve the bytes on demand. Without this, a restart re-creates the
+	// dead-retention incident with an empty manager list.
+	metas = appendUnlistedManifestSealed(metas, vaultInst)
+
 	// gastrolog-5sywa: the transition-streamed flag and the
 	// destination-receipt set are gone. Phase 4 removed the receipt
 	// protocol entirely — retention firing is synchronous, no chunks
@@ -637,6 +645,43 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 	if totalMatched == 0 {
 		r.noteIdle("rules matched no chunks", len(metas), filtered)
 	}
+}
+
+// appendUnlistedManifestSealed appends synthetic retention candidates for
+// sealed manifest entries absent from the chunk manager's list. Cloud-backed
+// entries are excluded (the cloud index lists them); so are unsealed ones.
+// The synthetic meta carries exactly the fields retention policies read:
+// identity, seal state, SealedAt (TTL anchor), sizes, and time bounds.
+func appendUnlistedManifestSealed(metas []chunk.ChunkMeta, vaultInst *VaultInstance) []chunk.ChunkMeta {
+	if vaultInst == nil || vaultInst.ManifestEntries == nil {
+		return metas
+	}
+	listed := make(map[chunk.ChunkID]bool, len(metas))
+	for i := range metas {
+		listed[metas[i].ID] = true
+	}
+	for _, e := range vaultInst.ManifestEntries() {
+		if listed[e.ID] || e.CloudBacked || !e.IsSealed() {
+			continue
+		}
+		metas = append(metas, chunk.ChunkMeta{
+			ID:                e.ID,
+			WriteStart:        e.WriteStart,
+			WriteEnd:          e.WriteEnd,
+			SealedAt:          e.SealedAt,
+			RecordCount:       e.RecordCount,
+			Bytes:             e.Bytes,
+			Sealed:            true,
+			State:             e.State,
+			DiskBytes:         e.DiskBytes,
+			IngestStart:       e.IngestStart,
+			IngestEnd:         e.IngestEnd,
+			SourceStart:       e.SourceStart,
+			SourceEnd:         e.SourceEnd,
+			IngestTSMonotonic: e.IngestTSMonotonic,
+		})
+	}
+	return metas
 }
 
 // noteIdle reports, throttled, WHY a retention sweep on a vault with rules

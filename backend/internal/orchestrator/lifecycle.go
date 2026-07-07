@@ -207,6 +207,24 @@ func (o *Orchestrator) Stop() error {
 	// passes don't fight retention deletes during shutdown).
 	o.vaultCtlLeaders.StopAll()
 
+	// Stage 3: close every vault instance — releases chunk-manager
+	// directory flocks, mmaps, and file handles. Stop used to leave
+	// managers open until process exit, which production never noticed
+	// (the OS releases flocks with the process) but which made any
+	// in-process restart fail vault init with ErrDirectoryLocked — and a
+	// failed init is skipped, not retried, so the vault stayed dead.
+	o.mu.Lock()
+	vaults := make([]*Vault, 0, len(o.vaults))
+	for _, v := range o.vaults {
+		vaults = append(vaults, v)
+	}
+	o.mu.Unlock()
+	for _, v := range vaults {
+		if err := v.Close(); err != nil {
+			o.logger.Warn("close vault instance at stop", "error", err)
+		}
+	}
+
 	o.mu.Lock()
 	o.cancel = nil
 	o.mu.Unlock()

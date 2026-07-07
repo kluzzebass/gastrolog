@@ -189,6 +189,17 @@ type Manager struct {
 	// Protected by mu. See gastrolog-2kysn (Rubicon E1).
 	externalGLCB map[chunk.ChunkID]string
 
+	// externalResolver resolves a meta-lookup miss to an external pipeline
+	// GLCB on demand: registration is a cache, not a prerequisite. Given a
+	// chunk ID, returns the GLCB path and metadata when the cluster
+	// manifest says the chunk is sealed here and the file exists. Called
+	// under m.mu — implementations must be lock-light (an FSM read and a
+	// stat; never re-enter this manager) and must not do heavy I/O.
+	// Replaces the boot-eager registration scan: a chunk is servable the
+	// moment its manifest entry and file both exist, regardless of process
+	// history or sweep timing. Protected by mu.
+	externalResolver func(chunk.ChunkID) (string, chunk.ExternalGLCBInfo, bool)
+
 	// glcbMapped holds one whole-file mmap per sealed chunk for local data.glcb.
 	// Aliased by OpenCursor, index TS lookups, and histogram paths.
 	glcbMapped sync.Map // chunk.ChunkID → *mappedGLCBEntry
@@ -765,19 +776,36 @@ func (m *Manager) Meta(id chunk.ChunkID) (chunk.ChunkMeta, error) {
 	return meta.toChunkMeta(), nil
 }
 
-// lookupMeta checks the local map first, then the cloud B+ tree index.
-// Must be called with m.mu held.
+// lookupMeta checks the local map first, then the cloud B+ tree index,
+// then the lazy external-GLCB resolver. Must be called with m.mu held.
 func (m *Manager) lookupMeta(id chunk.ChunkID) *chunkMeta {
 	if meta, ok := m.metas[id]; ok {
 		return meta
 	}
-	if m.cloudIdx == nil {
-		return nil
+	if m.cloudIdx != nil {
+		m.cloudIdxMu.Lock()
+		meta, _ := m.cloudIdx.Lookup(id)
+		m.cloudIdxMu.Unlock()
+		if meta != nil {
+			return meta
+		}
 	}
-	m.cloudIdxMu.Lock()
-	meta, _ := m.cloudIdx.Lookup(id)
-	m.cloudIdxMu.Unlock()
-	return meta
+	if m.externalResolver != nil {
+		if glcbPath, info, ok := m.externalResolver(id); ok {
+			// Memoize: subsequent lookups hit m.metas directly.
+			m.registerExternalGLCBLocked(id, glcbPath, info)
+			return m.metas[id]
+		}
+	}
+	return nil
+}
+
+// SetExternalGLCBResolver installs the on-miss resolver for external
+// pipeline GLCBs. See the externalResolver field for the contract.
+func (m *Manager) SetExternalGLCBResolver(fn func(chunk.ChunkID) (string, chunk.ExternalGLCBInfo, bool)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.externalResolver = fn
 }
 
 func (m *Manager) List() ([]chunk.ChunkMeta, error) {
@@ -4514,11 +4542,24 @@ func (m *Manager) RegisterExternalGLCB(id chunk.ChunkID, glcbPath string, info c
 	if m.closed {
 		return ErrManagerClosed
 	}
+	m.registerExternalGLCBLocked(id, glcbPath, info)
+	return nil
+}
+
+// registerExternalGLCBLocked is the registration core shared by the eager
+// path (RegisterExternalGLCB) and the lazy on-miss resolver (lookupMeta).
+// Caller holds m.mu.
+func (m *Manager) registerExternalGLCBLocked(id chunk.ChunkID, glcbPath string, info chunk.ExternalGLCBInfo) {
 	// Re-registering an already-registered external GLCB must not evict the
-	// mapped blob cache or rewrite meta — search/histogram list every FSM
-	// entry and reconciler sweeps call this frequently on the vault leader.
+	// mapped blob cache or rebuild meta — search/histogram list every FSM
+	// entry and event-driven re-registration (onSeal) hits this often. But
+	// a LAZY registration made while the entry was still Sealing lacks the
+	// TS index offsets (the resolver reads no blob header under the
+	// manager lock); upgrade those fields in place when richer info
+	// arrives, without evicting the mapped blob (the file is unchanged).
 	if existing, ok := m.externalGLCB[id]; ok && existing == glcbPath {
-		return nil
+		m.upgradeExternalMetaLocked(id, info)
+		return
 	}
 	// A chunk this manager owns locally (built/sealed here, or cloud-backed)
 	// must not be shadowed by an external registration — its bytes live under
@@ -4526,7 +4567,7 @@ func (m *Manager) RegisterExternalGLCB(id chunk.ChunkID, glcbPath string, info c
 	// external registration may be refreshed.
 	if _, ok := m.metas[id]; ok {
 		if _, external := m.externalGLCB[id]; !external {
-			return nil
+			return
 		}
 	}
 	m.metas[id] = &chunkMeta{
@@ -4551,7 +4592,29 @@ func (m *Manager) RegisterExternalGLCB(id chunk.ChunkID, glcbPath string, info c
 	m.externalGLCB[id] = glcbPath
 	m.logger.Debug("registered external pipeline GLCB",
 		"chunk", id, "path", glcbPath, "records", info.RecordCount)
-	return nil
+}
+
+// upgradeExternalMetaLocked fills fields a lazy Sealing-time registration
+// lacked (TS index offsets, counts) from richer info, in place — no mmap
+// eviction, the data file is unchanged. Caller holds m.mu.
+func (m *Manager) upgradeExternalMetaLocked(id chunk.ChunkID, info chunk.ExternalGLCBInfo) {
+	meta := m.metas[id]
+	if meta == nil {
+		return
+	}
+	if meta.ingestIdxOffset == 0 && info.IngestIdxOffset != 0 {
+		meta.ingestIdxOffset = info.IngestIdxOffset
+		meta.ingestIdxSize = info.IngestIdxSize
+	}
+	if meta.sourceIdxOffset == 0 && info.SourceIdxOffset != 0 {
+		meta.sourceIdxOffset = info.SourceIdxOffset
+		meta.sourceIdxSize = info.SourceIdxSize
+	}
+	if meta.recordCount == 0 && info.RecordCount != 0 {
+		meta.recordCount = info.RecordCount
+		meta.bytes = info.Bytes
+		meta.diskBytes = info.DiskBytes
+	}
 }
 
 // scanAttrsCloud iterates a cloud-backed chunk's attributes via cursor.

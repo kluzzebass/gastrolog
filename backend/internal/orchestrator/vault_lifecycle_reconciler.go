@@ -247,10 +247,9 @@ func (r *VaultLifecycleReconciler) projectAllSealedFromFSM(fsm *vaultctlfsm.FSM)
 				"chunk", e.ID, "error", err)
 		}
 		// Pipeline-built sealed chunks live at the vault ChunkRoot, not the
-		// chunk manager dir, so EnsureSealed is a no-op for them. Register
-		// their GLCB by path so they become queryable after a snapshot
-		// install. No-op for legacy/cloud chunks. See gastrolog-2kysn.
-		r.registerPipelineGLCB(e)
+		// chunk manager dir, so EnsureSealed is a no-op for them. Their
+		// registration is lazy: the chunk manager's on-miss resolver serves
+		// them at first lookup (gastrolog-2kmgj6) — no per-entry work here.
 	}
 }
 
@@ -435,11 +434,10 @@ func (r *VaultLifecycleReconciler) registerPipelineGLCB(e vaultctlfsm.ManifestEn
 		// node is not a holder). Query on a holder node serves it instead.
 		return
 	}
-	if ext, ok := r.vaultInst.Chunks.(interface {
-		IsExternalGLCBAt(chunk.ChunkID, string) bool
-	}); ok && ext.IsExternalGLCBAt(e.ID, glcbPath) {
-		return
-	}
+	// No IsExternalGLCBAt short-circuit here: a lazy on-miss registration
+	// (gastrolog-2kmgj6) records the path without TS index offsets, and
+	// this call's file-enriched info is what upgrades them — the manager's
+	// registration core dedups the no-change case cheaply.
 	info, err := externalGLCBInfoForPipeline(e, glcbPath)
 	if err != nil {
 		r.logger.Warn("registerPipelineGLCB: read GLCB metadata failed",
@@ -943,9 +941,9 @@ func (r *VaultLifecycleReconciler) syncPipelineSealedGLCBs() {
 		if e.CloudBacked {
 			continue
 		}
-		if e.IsSealed() || e.State == chunk.ChunkStateSealing {
-			r.registerPipelineGLCB(e)
-		}
+		// Registration is lazy (the chunk manager's on-miss resolver,
+		// gastrolog-2kmgj6); this sweep no longer registers per entry —
+		// its jobs are replica catch-up and holder-receipt truth.
 		if !e.IsSealed() {
 			continue
 		}

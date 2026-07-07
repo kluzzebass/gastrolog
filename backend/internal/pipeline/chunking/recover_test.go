@@ -143,13 +143,13 @@ func TestRecoverOnceSealsOrphanActiveGLCB(t *testing.T) {
 	}
 }
 
-// TestRecoverOnceRegistersSealedOnDiskGLCB: a chunk already Sealed
-// cluster-wide whose GLCB survives on disk must re-fire OnBuilt at
-// recovery so the chunk manager regains its registration. Recovery used
-// to skip sealed entries entirely — a restarted node held 834 complete
-// GLCBs while its cloud backfill logged 'chunk not found' against every
-// one and queries on this node came up empty.
-func TestRecoverOnceRegistersSealedOnDiskGLCB(t *testing.T) {
+// TestRecoverOnceSkipsSealedEntries: a chunk already Sealed cluster-wide
+// whose GLCB survives on disk needs NO recovery work — registration is
+// lazy (the chunk manager's on-miss resolver, gastrolog-2kmgj6), so
+// recovery must not fire OnBuilt per sealed chunk. The eager re-fire this
+// replaces was O(all chunks) of boot work and raced FSM replay; servability
+// now comes from the resolver at first lookup, independent of recovery.
+func TestRecoverOnceSkipsSealedEntries(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
 	segID := glid.New()
@@ -214,17 +214,18 @@ func TestRecoverOnceRegistersSealedOnDiskGLCB(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(rebuilt) != 1 || rebuilt[0] != chunkID {
-		t.Fatalf("OnBuilt fired for %v, want exactly [%s]", rebuilt, chunkID)
+	if len(rebuilt) != 0 {
+		t.Fatalf("OnBuilt fired for %v; sealed entries must skip recovery (lazy resolution owns servability)", rebuilt)
 	}
 }
 
 // TestRecoveryWaitsForFSMReplay: the worker starts before the vault-ctl
 // FSM has replayed (production boot order). Recovery against the empty
 // FSM must not consume the once-only opportunity — it retries until the
-// FSM is ready and then registers sealed on-disk GLCBs. The unguarded
-// version scanned an empty registry at boot and never ran again,
-// stranding 297 complete GLCBs unregistered.
+// FSM is ready and then completes SEAL recovery: a chunk whose GLCB was
+// built but whose CmdSealChunk never committed (crash mid-PostSealProcess)
+// gets its seal proposed. The unguarded version scanned an empty registry
+// at boot and never ran again.
 func TestRecoveryWaitsForFSMReplay(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
@@ -264,7 +265,9 @@ func TestRecoveryWaitsForFSMReplay(t *testing.T) {
 		FSM:       fsm,
 		Locate:    chunking.HeadSegmentLocator{Root: home},
 		Applier:   &flakyFSMApplier{fsm: fsm},
-		IsLeader:  func() bool { return false },
+		// Seal recovery proposes CmdSealChunk, which only the vault-ctl
+		// leader commits — this scenario is the recovering leader.
+		IsLeader: func() bool { return true },
 		OnBuilt: func(id chunk.ChunkID) {
 			mu.Lock()
 			rebuilt = append(rebuilt, id)
@@ -288,24 +291,23 @@ func TestRecoveryWaitsForFSMReplay(t *testing.T) {
 	}
 	mu.Unlock()
 
-	// "Raft replay" arrives: seal state lands, FSM becomes ready.
+	// "Raft replay" arrives: the manifest lands SEALING (GLCB built, but
+	// CmdSealChunk never committed — the crash-mid-PostSealProcess shape).
+	// FSM becomes ready; recovery must now propose the missing seal.
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalOpenChunkManifest(chunkID, base))
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
 		SegmentID: segID, FirstRecordNumber: 0, LastRecordNumber: 0, SliceBytes: 1024, RefAddedAt: base,
 	}))
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, base.Add(time.Minute)))
-	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealChunk(chunkID, base.Add(time.Minute), 1, 1024, base, base, base, true, base.Add(time.Minute)))
 
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		mu.Lock()
-		n := len(rebuilt)
-		mu.Unlock()
-		if n == 1 && rebuilt[0] == chunkID {
+		if e := fsm.Get(chunkID); e != nil && e.IsSealed() {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("recovery never registered the sealed GLCB after FSM replay: %v", rebuilt)
+			e := fsm.Get(chunkID)
+			t.Fatalf("recovery never proposed CmdSealChunk after FSM replay; entry=%+v", e)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}

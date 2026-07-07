@@ -25,8 +25,10 @@ func markPipelineIngestVault(t *testing.T, o *Orchestrator, vaultID glid.GLID, h
 }
 
 // TestSweepMissingReplicas_PipelineVault_SyncsGLCBNotCatchup verifies pipeline
-// ingest vaults register local pipeline GLCBs instead of requesting record-stream
-// catchup from peers.
+// ingest vaults never request record-stream catchup from peers, and that a
+// sealed chunk with its GLCB on disk resolves LAZILY at first chunk-manager
+// lookup via the on-miss resolver — the sweep registers nothing
+// (gastrolog-2kmgj6).
 func TestSweepMissingReplicas_PipelineVault_SyncsGLCBNotCatchup(t *testing.T) {
 	t.Parallel()
 
@@ -66,6 +68,7 @@ func TestSweepMissingReplicas_PipelineVault_SyncsGLCBNotCatchup(t *testing.T) {
 	vaultInst := &VaultInstance{VaultID: vaultID, Type: "file", Chunks: cm}
 	rec := NewVaultLifecycleReconciler(orch, vaultID, vaultInst, "node-A", slog.Default())
 	rec.Wire(fsm)
+	orch.installLazyGLCBResolverOn(vaultInst, vaultID, true, fsm, chunkRoot)
 
 	rec.SweepMissingReplicas()
 
@@ -73,7 +76,7 @@ func TestSweepMissingReplicas_PipelineVault_SyncsGLCBNotCatchup(t *testing.T) {
 		t.Fatalf("RequestReplicaCatchup calls = %d, want 0 for pipeline vault", fake.calls.Load())
 	}
 	if _, err := cm.Meta(chunkID); err != nil {
-		t.Fatalf("chunk not registered after sync sweep: %v", err)
+		t.Fatalf("sealed on-disk GLCB did not lazily resolve at lookup: %v", err)
 	}
 }
 
