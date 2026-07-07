@@ -8,7 +8,33 @@ Each vault lists its name, type, enabled/disabled status, total chunk count, and
 
 ## Chunks
 
-Each chunk shows its ID, time range, status (active or sealed), record count, and size. The active chunk is the one currently accepting writes — all others are sealed and immutable. Chunks are sealed according to the vault's [rotation policy](help:policy-rotation).
+Each chunk shows its ID, time range, per-node seal pips, record count, and size. The active chunk is the one currently accepting writes — all others are sealed and immutable. Chunks are sealed according to the vault's [rotation policy](help:policy-rotation).
+
+## Seal Pips
+
+The pip row shows one circle per placement node, in the same node order on every row — a sick node reads as a vertical stripe down the table. Fill degree carries the lifecycle; color is secondary.
+
+A **chunk seal** is the cluster-wide fact that a chunk's record membership is frozen — it happens once. A **copy seal** is one node's completed local copy of that sealed chunk. A late copy seal (a node catching up after rejoining) is normal operation.
+
+**Birth fills green:**
+
+- Hollow copper ring — chunk active on this node
+- Half-filled amber, pulsing — copy seal pending or building
+- Solid green — copy sealed on this node
+- Dim green — copy sealed, and the entire row is healthy (the quiet default; bright green appears only when the row diverges)
+
+**Death drains red** (while a delete runs):
+
+- Solid red, pulsing — node still holds bytes and owes its delete acknowledgment; the laggard blocking the delete is the last dot still red
+- Dim hollow red ring — node acknowledged, bytes gone
+
+**Node and anomaly states:**
+
+- Dashed red slashed ring — placement node unreachable (a node condition, not a chunk state)
+- Muted dot after a gap — stale residency: a copy on a node that is no longer in the placement
+- Bordered label instead of pips — cloud-backed chunk; bytes live in the named blob store, not on placement nodes
+
+Expand a chunk row to see the same pips with node names beside them.
 
 ## Indexes
 

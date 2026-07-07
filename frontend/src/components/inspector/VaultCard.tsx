@@ -4,6 +4,7 @@ import { useThemeClass } from "../../hooks/useThemeClass";
 import { clickableProps } from "../../utils";
 import { useChunks, useIndexes, useValidateVault, useConfig, useArchiveChunk, useRestoreChunk } from "../../api/hooks";
 import { useClusterStatus } from "../../api/hooks/useClusterStatus";
+import { useNodeRegistry } from "../../api/hooks";
 import { usePipelineBacklog } from "../../api/hooks";
 import { useToast } from "../Toast";
 import { buildNodeNameMap, resolveNodeName } from "../../utils/nodeNames";
@@ -16,6 +17,8 @@ import { Spark } from "../Spark";
 import { middleTruncate } from "../../utils/middleTruncate";
 import { leaderNodeId, followerNodeIds } from "../../utils/placement";
 import { Badge } from "../Badge";
+import { BlobMark, SealPips } from "./SealPips";
+import { computePips } from "./sealPipState";
 import { CogIcon } from "../icons";
 import { ExpandableCard } from "../settings/ExpandableCard";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
@@ -44,14 +47,12 @@ function chunkStartInstant(chunk: ChunkMeta): Date | undefined {
   return start;
 }
 
-function chunkStatusBadge(chunk: ChunkMeta, dark: boolean) {
-  if (chunk.sealed || chunk.state === ChunkState.SEALED) {
-    return <Badge variant="copper" dark={dark}>sealed</Badge>;
-  }
-  if (chunk.state === ChunkState.SEALING) {
-    return <Badge variant="warn" dark={dark}>sealing</Badge>;
-  }
-  return <Badge variant="info" dark={dark}>active</Badge>;
+// chunkLifecycleState maps the FSM overlay to the pip grammar's cluster-wide
+// chunk lifecycle. Legacy entries without State fall back to the Sealed bool.
+function chunkLifecycleState(chunk: ChunkMeta): "active" | "sealing" | "sealed" {
+  if (chunk.sealed || chunk.state === ChunkState.SEALED) return "sealed";
+  if (chunk.state === ChunkState.SEALING) return "sealing";
+  return "active";
 }
 
 interface VaultCardProps {
@@ -583,7 +584,13 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
   const c = useThemeClass(dark);
   const { data: chunks, isLoading } = useChunks(vaultId);
   const { data: config } = useConfig();
+  const registry = useNodeRegistry();
   const [expandedChunk, setExpandedChunk] = useState<string | null>(null);
+  // Reachable node NAMES for the missing-pip state (dashed red ring).
+  const liveNodes = new Set<string>();
+  for (const n of registry.all) {
+    if (n.isLive) liveNodes.add(n.name);
+  }
 
   const vaultMatches = (config?.vaults ?? []).filter((v) => encode(v.id) === vaultId);
 
@@ -640,7 +647,6 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
       const start = chunkStartInstant(chunk);
       const end = chunkEndInstant(chunk, start);
       const isExpanded = expandedChunk === encode(chunk.id);
-      const replicas = chunk.replicaCount || 1;
       const residentNodes = chunk.replicaNodeIds.map((id) =>
         resolveNodeName(nodeNameMap, id),
       );
@@ -661,11 +667,11 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
           onToggle={() => setExpandedChunk(isExpanded ? null : encode(chunk.id))}
           dark={dark}
           c={c}
-          replicas={replicas}
           rf={rf}
           residentNodes={residentNodes}
           placementNodes={placementNodes}
           pendingAckNodes={pendingAckNodes}
+          liveNodes={liveNodes}
         />
       );
     });
@@ -713,93 +719,47 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
   );
 }
 
-// ChunkReplicaBadges renders one Badge per node in the chunk's
-// placement set, colored to encode that node's relationship to this
-// chunk. Mirrors the per-node-status row used by IngesterCard so
-// operators get a single visual language across the inspector.
-//
-// Variant mapping per node:
-//   info        node holds the replica (healthy)
-//   warn        node is in placement but missing the replica
-//               (replication lag, transition mid-flight, or lost)
-//   error       node owes a receipt-protocol delete ack (laggard
-//               blocking the delete) — overrides info/warn so the
-//               ack-blocker stands out even on a held replica
-//   muted       node is NOT in placement but reports having the
-//               replica anyway (rare: stale follower copy after a
-//               placement change). Surfaces something an operator
-//               would want to clean up.
-function ChunkReplicaBadges({
+// ChunkReplicaPips is the expanded-pane variant of the seal-pip row: the
+// same grammar at larger size, with each node's name beside its pip so the
+// operator can read the row without hovering. Supersedes the old per-node
+// Badge list — one visual language for copy state everywhere.
+function ChunkReplicaPips({
+  chunk,
   placementNodes,
   residentNodes,
   pendingAckNodes,
+  liveNodes,
   dark,
 }: Readonly<{
+  chunk: ChunkMeta;
   placementNodes: string[];
   residentNodes: string[];
   pendingAckNodes: string[];
+  liveNodes: ReadonlySet<string>;
   dark: boolean;
 }>) {
-  const placementSet = new Set(placementNodes);
-  const residentSet = new Set(residentNodes);
-  const ackSet = new Set(pendingAckNodes);
-
-  // Union of (placement ∪ residency ∪ pending-ack) so unexpected
-  // residencies and pending-ack laggards both surface even when they
-  // fall outside placement. Sorted for deterministic display.
-  const seen = new Set<string>();
-  const order: string[] = [];
-  for (const n of placementNodes) {
-    if (!seen.has(n)) {
-      seen.add(n);
-      order.push(n);
-    }
-  }
-  for (const n of residentNodes) {
-    if (!seen.has(n)) {
-      seen.add(n);
-      order.push(n);
-    }
-  }
-  for (const n of pendingAckNodes) {
-    if (!seen.has(n)) {
-      seen.add(n);
-      order.push(n);
-    }
-  }
-  order.sort();
-
-  if (order.length === 0) return null;
-
+  const c = useThemeClass(dark);
+  const { pips, ghosts } = computePips({
+    chunkState: chunkLifecycleState(chunk),
+    placementNodes,
+    residentNodes,
+    pendingAckNodes,
+    deleteInFlight: pendingAckNodes.length > 0,
+    liveNodes,
+  });
+  const all = [...pips, ...ghosts.map((g) => ({ ...g, isGhost: true }))];
+  if (all.length === 0) return null;
   return (
-    <span className="flex items-center gap-1 flex-wrap">
-      {order.map((n) => {
-        const inPlacement = placementSet.has(n);
-        const hasReplica = residentSet.has(n);
-        const owesAck = ackSet.has(n);
-
-        let variant: "info" | "warn" | "error" | "muted";
-        let title: string;
-        if (owesAck) {
-          variant = "error";
-          title = `${n}: pending delete-ack — this node hasn't applied CmdAckDelete yet`;
-        } else if (!inPlacement && hasReplica) {
-          variant = "muted";
-          title = `${n}: stale residency (chunk found here but node is not in placement)`;
-        } else if (inPlacement && !hasReplica) {
-          variant = "warn";
-          title = `${n}: missing replica (placement says yes, no node-local report)`;
-        } else {
-          variant = "info";
-          title = `${n}: replica present`;
-        }
-        return (
-          <Badge key={n} variant={variant} dark={dark} title={title}>
-            {n}
-          </Badge>
-        );
-      })}
-    </span>
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+      {all.map((p) => (
+        <span key={p.node} className="inline-flex items-center gap-1.5" title={p.title}>
+          <SealPips pips={[p]} ghosts={[]} size={14} />
+          <span className={`font-mono text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}>
+            {p.node}
+          </span>
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -812,11 +772,11 @@ function ChunkRow({
   onToggle,
   dark,
   c,
-  replicas,
   rf,
   residentNodes,
   placementNodes,
   pendingAckNodes,
+  liveNodes,
 }: Readonly<{
   chunk: ChunkMeta;
   vaultId: string;
@@ -826,11 +786,11 @@ function ChunkRow({
   onToggle: () => void;
   dark: boolean;
   c: (darkCls: string, lightCls: string) => string;
-  replicas: number;
   rf: number;
   residentNodes: string[];
   placementNodes: string[];
   pendingAckNodes: string[];
+  liveNodes: ReadonlySet<string>;
 }>) {
   return (
     <>
@@ -868,13 +828,24 @@ function ChunkRow({
           </span>
         </td>
         <td className="px-2 py-2">
-          <span className="flex items-center gap-1 whitespace-nowrap">
-            {chunkStatusBadge(chunk, dark)}
+          <span className="flex items-center gap-1.5 whitespace-nowrap">
+            {chunk.cloudBacked ? (
+              <BlobMark label={chunk.storageClass || "blob"} uploading={false} />
+            ) : (
+              (() => {
+                const { pips, ghosts } = computePips({
+                  chunkState: chunkLifecycleState(chunk),
+                  placementNodes,
+                  residentNodes,
+                  pendingAckNodes,
+                  deleteInFlight: pendingAckNodes.length > 0,
+                  liveNodes,
+                });
+                return <SealPips pips={pips} ghosts={ghosts} />;
+              })()
+            )}
             {chunk.compressed && (
               <Badge variant="info" dark={dark}>compr</Badge>
-            )}
-            {chunk.cloudBacked && (
-              <Badge variant="muted" dark={dark}>cloud</Badge>
             )}
             {chunk.archived && (
               <Badge variant="warn" dark={dark}>{chunk.storageClass || "archived"}</Badge>
@@ -886,36 +857,6 @@ function ChunkRow({
                 title="Retention pending — chunk is queued for retention firing"
               >
                 ret
-              </Badge>
-            )}
-            {rf > 1 && (() => {
-              // Compact summary in the row: a single replica-count badge.
-              // Per-node detail lives in the expanded pane (see ChunkDetail).
-              let badgeVariant: "info" | "error" | "warn";
-              if (replicas >= rf) {
-                badgeVariant = "info";
-              } else if (placementNodes.length < rf) {
-                badgeVariant = "error";
-              } else {
-                badgeVariant = "warn";
-              }
-              return (
-                <Badge
-                  variant={badgeVariant}
-                  dark={dark}
-                  title="Expand the chunk row for per-node replica status"
-                >
-                  {String(replicas)}
-                </Badge>
-              );
-            })()}
-            {pendingAckNodes.length > 0 && (
-              <Badge
-                variant="error"
-                dark={dark}
-                title={`Pending delete-ack from: ${pendingAckNodes.join(", ")}`}
-              >
-                pending-ack
               </Badge>
             )}
           </span>
@@ -945,6 +886,7 @@ function ChunkRow({
               residentNodes={residentNodes}
               placementNodes={placementNodes}
               pendingAckNodes={pendingAckNodes}
+              liveNodes={liveNodes}
             />
           </td>
         </tr>
@@ -961,6 +903,7 @@ function ChunkDetail({
   residentNodes,
   placementNodes,
   pendingAckNodes,
+  liveNodes,
 }: Readonly<{
   vaultId: string;
   chunk: ChunkMeta;
@@ -969,6 +912,7 @@ function ChunkDetail({
   residentNodes: string[];
   placementNodes: string[];
   pendingAckNodes: string[];
+  liveNodes: ReadonlySet<string>;
 }>) {
   const c = useThemeClass(dark);
   // Skip index fetch for cloud-backed chunks — they don't have local indexes.
@@ -1005,10 +949,12 @@ function ChunkDetail({
           >
             Replicas
           </div>
-          <ChunkReplicaBadges
+          <ChunkReplicaPips
+            chunk={chunk}
             placementNodes={placementNodes}
             residentNodes={residentNodes}
             pendingAckNodes={pendingAckNodes}
+            liveNodes={liveNodes}
             dark={dark}
           />
           {placementNodes.length < rf && (

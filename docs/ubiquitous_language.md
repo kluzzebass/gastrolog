@@ -84,6 +84,12 @@ for append-heavy write patterns and time-ordered reads.
 
 - **Active** — open for writes; lives only on the vault leader.
 - **Sealed** — immutable; eligible for compression/indexing/replication.
+- **Chunk seal** — the cluster-wide fact: `CmdSealChunk` applied, record
+  membership frozen. Happens exactly once per chunk.
+- **Copy seal** — one home's completed local copy (GLCB build or replica
+  pull) of a sealed chunk. There are up to RF copy seals per chunk, and a
+  LATE copy seal — a rejoining node catching up — is normal operation, not
+  a re-seal. The inspector's per-node seal pips render copy seals.
 - **Compressed** — `raw.log`/`attr.log` encoded zstd; `DiskBytes ≠ Bytes`.
 - **Cloud-backed** — record bytes live in S3/Azure/GCS, not local disk; marked
   with `CloudBacked = true` in `ChunkMeta`. A cloud-backed vault is a file vault
