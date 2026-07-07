@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"slices"
 
 	"gastrolog/internal/system"
 )
@@ -34,10 +35,22 @@ func (o *Orchestrator) placementSweep() {
 	o.mu.RLock()
 	for vaultID, vault := range o.vaults {
 		vaultInst := vault.Instance
-		if vaultInst == nil || vaultInst.IsFollower {
+		if vaultInst == nil {
 			continue
 		}
-		if vaultCfg := findVaultConfig(cfg.Vaults, vaultID); vaultCfg != nil {
+		vaultCfg := findVaultConfig(cfg.Vaults, vaultID)
+		if vaultCfg == nil {
+			continue
+		}
+		// Reconcile the instance ROLE first, every tick, for every
+		// instance. Roles used to change only on config dispatch; a raced
+		// role update during placement flapping left every node believing
+		// it was a follower, and with no further config changes the vault
+		// sat leaderless for hours — retention, backfill scheduling, and
+		// target refreshes all silently stopped. The sweep is the safety
+		// net dispatch never had.
+		o.reconcileInstanceRole(sys, *vaultCfg, vaultInst)
+		if !vaultInst.IsFollower {
 			o.refreshFollowerTargets(sys, *vaultCfg, vaultInst)
 		}
 	}
@@ -76,6 +89,43 @@ func replicationTargetsEqual(a, b []system.ReplicationTarget) bool {
 		}
 	}
 	return true
+}
+
+// reconcileInstanceRole aligns a local instance's leader/follower role with
+// the current placement config — the same computation the config dispatcher
+// runs on vault-put events, re-checked every sweep tick so a missed or
+// raced dispatch cannot leave a vault leaderless (or doubly-led) forever.
+// Membership add/remove stays dispatch-owned; this only corrects the role
+// of an instance that already exists. Called each tick by placementSweep
+// (caller holds o.mu.RLock; role fields are written lock-free by dispatch
+// today, and this follows the same convention).
+func (o *Orchestrator) reconcileInstanceRole(sys *system.System, vaultCfg system.VaultConfig, vaultInst *VaultInstance) {
+	leaderNodeID := system.LeaderNodeID(vaultCfg.Placements, sys.Runtime.NodeStorageConfigs)
+	if leaderNodeID == "" {
+		// Placements resolve to no leader (mid-flap partial state, or a
+		// storage config transiently missing). Never flip roles on
+		// unresolvable state — that is exactly the race that strands
+		// vaults leaderless.
+		return
+	}
+	followerIDs := system.FollowerNodeIDs(vaultCfg.Placements, sys.Runtime.NodeStorageConfigs)
+	isLeader := leaderNodeID == o.localNodeID
+	isFollower := slices.Contains(followerIDs, o.localNodeID)
+	if !isLeader && !isFollower {
+		return // not in placement: instance lifecycle is dispatch-owned
+	}
+	if isFollower {
+		vaultInst.LeaderNodeID = leaderNodeID
+	} else {
+		vaultInst.LeaderNodeID = ""
+	}
+	if vaultInst.IsFollower == isFollower {
+		return
+	}
+	vaultInst.IsFollower = isFollower
+	o.rotationLogger.Info("placement sweep: instance role reconciled",
+		"vault", vaultCfg.ID, "name", vaultCfg.Name, "isFollower", isFollower,
+		"leader", leaderNodeID)
 }
 
 // replicationTargetNodes returns the NodeIDs of a ReplicationTarget slice for
