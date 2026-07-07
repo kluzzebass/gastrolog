@@ -6,23 +6,26 @@ import (
 )
 
 // SliceRecordBounds scans one inclusive EventID-order slice and returns the
-// min/max WriteTS, IngestTS, and SourceTS across its records.
+// min/max WriteTS, IngestTS, and SourceTS across its records. The scan reads
+// views, not records: bounds need three timestamps per record, and the
+// planner runs this constantly — full materialization here was the loaded
+// home's single largest allocation source (gastrolog-11y2iv).
 func SliceRecordBounds(idx *OrderedIndex, first, last uint32) (vaultctlfsm.ManifestTimeBounds, error) {
 	var out vaultctlfsm.ManifestTimeBounds
 	if idx == nil {
 		return out, nil
 	}
 	for pos := first; pos <= last; pos++ {
-		rec, err := idx.RecordAt(pos)
+		v, err := idx.ViewAt(pos)
 		if err != nil {
 			return vaultctlfsm.ManifestTimeBounds{}, err
 		}
-		mergeRecordBounds(&out, rec)
+		mergeRecordBounds(&out, v)
 	}
 	return out, nil
 }
 
-func mergeRecordBounds(b *vaultctlfsm.ManifestTimeBounds, rec record.Record) {
+func mergeRecordBounds(b *vaultctlfsm.ManifestTimeBounds, rec record.View) {
 	if b.WriteStart.IsZero() || rec.WriteTS.Before(b.WriteStart) {
 		b.WriteStart = rec.WriteTS
 	}
