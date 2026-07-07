@@ -18,7 +18,7 @@ import { middleTruncate } from "../../utils/middleTruncate";
 import { leaderNodeId, followerNodeIds } from "../../utils/placement";
 import { Badge } from "../Badge";
 import { BlobMark, SealPips } from "./SealPips";
-import { computePips, pipOrder } from "./sealPipState";
+import { computeCloudPips, computePips } from "./sealPipState";
 import { CogIcon } from "../icons";
 import { ExpandableCard } from "../settings/ExpandableCard";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
@@ -839,19 +839,20 @@ function ChunkRow({
         <td className="px-2 py-2">
           <span className="flex items-center gap-1.5 whitespace-nowrap">
             {chunk.cloudBacked ? (
-              <span className="inline-flex items-center gap-2">
-                <BlobMark label={storeLabel} uploading={false} />
-                {residentNodes.length > 0 && (
-                  <SealPips
-                    pips={pipOrder(residentNodes).map((node) => ({
-                      node,
-                      state: "sealed" as const,
-                      title: `${node}: local copy cached — bytes also durable in ${storeLabel}`,
-                    }))}
-                    ghosts={[]}
-                  />
-                )}
-              </span>
+              (() => {
+                const { pips, ghosts } = computeCloudPips(
+                  { placementNodes, residentNodes, liveNodes },
+                  storeLabel,
+                );
+                // Pips lead so columns align with non-cloud rows; the blob
+                // mark trails on the right.
+                return (
+                  <span className="inline-flex items-center gap-2">
+                    <SealPips pips={pips} ghosts={ghosts} />
+                    <BlobMark label={storeLabel} uploading={false} />
+                  </span>
+                );
+              })()
             ) : (
               (() => {
                 const { pips, ghosts } = computePips({

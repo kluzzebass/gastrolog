@@ -20,6 +20,7 @@ export type PipState =
   | "missing" // dashed red slashed ring + glow — placement node unreachable
   | "holds" // solid red, pulsing — delete requested, node still holds bytes
   | "acked" // dim hollow red — node acked the delete, bytes gone
+  | "uncached" // dim hollow green ring — cloud-backed, no local copy on this node (normal)
   | "ghost"; // muted dot after a gap — copy on a node outside placement
 
 export interface SealPip {
@@ -86,13 +87,43 @@ export function computePips(input: PipInputs): { pips: SealPip[]; ghosts: SealPi
     return { node, state: "sealing", title: `${node}: copy seal pending — building or queued` };
   });
 
-  const ghosts = pipOrder(input.residentNodes.filter((n) => !placementSet.has(n))).map(
+  const ghosts = ghostPips(input.residentNodes, placementSet);
+
+  return { pips, ghosts };
+}
+
+/** computeCloudPips derives the pip row for a cloud-backed chunk: bytes are
+ *  durable in the blob store, so pips report LOCAL CACHE state per placement
+ *  node — calm green for a cached copy, a dim hollow green ring where no
+ *  local copy exists (normal after eviction), dashed red for an unreachable
+ *  node. Same order and column stability as the birth/death row. */
+export function computeCloudPips(
+  input: Pick<PipInputs, "placementNodes" | "residentNodes" | "liveNodes">,
+  storeLabel: string,
+): { pips: SealPip[]; ghosts: SealPip[] } {
+  const resident = new Set(input.residentNodes);
+  const placement = pipOrder(input.placementNodes);
+  const placementSet = new Set(placement);
+
+  const pips = placement.map((node): SealPip => {
+    if (!input.liveNodes.has(node)) {
+      return { node, state: "missing", title: `${node}: unreachable — local cache state unknown` };
+    }
+    if (resident.has(node)) {
+      return { node, state: "sealed", title: `${node}: local copy cached — bytes also durable in ${storeLabel}` };
+    }
+    return { node, state: "uncached", title: `${node}: no local copy — bytes served from ${storeLabel}` };
+  });
+
+  return { pips, ghosts: ghostPips(input.residentNodes, placementSet) };
+}
+
+function ghostPips(residentNodes: readonly string[], placementSet: ReadonlySet<string>): SealPip[] {
+  return pipOrder(residentNodes.filter((n) => !placementSet.has(n))).map(
     (node): SealPip => ({
       node,
       state: "ghost",
       title: `${node}: stale residency — copy present, node not in placement`,
     }),
   );
-
-  return { pips, ghosts };
 }

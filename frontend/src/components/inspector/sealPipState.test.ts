@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { computePips, pipOrder, type PipInputs } from "./sealPipState";
+import { computeCloudPips, computePips, pipOrder, type PipInputs } from "./sealPipState";
 
 const base: PipInputs = {
   chunkState: "sealed",
@@ -70,6 +70,35 @@ describe("computePips — death drains red", () => {
       pendingAckNodes: ["node-1", "node-2", "node-3"],
     });
     expect(pips.every((p) => p.state === "holds")).toBe(true);
+  });
+});
+
+describe("computeCloudPips — local cache per node", () => {
+  test("full placement row: cached, uncached, and unreachable", () => {
+    const { pips, ghosts } = computeCloudPips(
+      {
+        placementNodes: ["node-1", "node-2", "node-3"],
+        residentNodes: ["node-1"],
+        liveNodes: new Set(["node-1", "node-2"]),
+      },
+      "S3",
+    );
+    expect(pips.map((p) => p.state)).toEqual(["sealed", "uncached", "missing"]);
+    expect(pips[0]?.title).toContain("cached");
+    expect(pips[1]?.title).toContain("served from S3");
+    expect(ghosts).toEqual([]);
+  });
+
+  test("stale cache copy outside placement renders as ghost", () => {
+    const { ghosts } = computeCloudPips(
+      {
+        placementNodes: ["node-1"],
+        residentNodes: ["node-1", "node-9"],
+        liveNodes: new Set(["node-1", "node-9"]),
+      },
+      "S3",
+    );
+    expect(ghosts.map((g) => g.node)).toEqual(["node-9"]);
   });
 });
 

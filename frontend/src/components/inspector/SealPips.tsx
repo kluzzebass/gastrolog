@@ -17,6 +17,7 @@ const PIP_CLASSES: Record<PipState, string> = {
   lagging:
     "border-[1.5px] border-amber bg-linear-to-t from-amber from-50% to-transparent to-50% animate-pulse shadow-[0_0_6px_1px] shadow-amber/70",
   sealed: "bg-severity-info/45",
+  uncached: "border-[1.5px] border-severity-info/40",
   missing:
     "border-[1.5px] border-dashed border-severity-error shadow-[0_0_6px_1px] shadow-severity-error/60",
   holds: "bg-severity-error animate-pulse",

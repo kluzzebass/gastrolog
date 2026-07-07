@@ -34,7 +34,7 @@ Sealed pips are deliberately quiet everywhere. Anomalous pips — lagging, unrea
 
 - Dashed red slashed ring, glowing — placement node unreachable (a node condition, not a chunk state)
 - Muted glowing dot after a gap — stale residency: a copy on a node that is no longer in the placement
-- Bordered label instead of pips — cloud-backed chunk; bytes live in the named blob store, not on placement nodes
+- Bordered label after the pips — cloud-backed chunk; bytes are durable in the named blob store. Its pips report the LOCAL CACHE per node: calm green for a cached copy, a dim hollow green ring where no local copy exists (normal once bytes are in the store)
 
 Expand a chunk row to see the same pips with node names beside them.
 
