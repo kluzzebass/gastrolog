@@ -195,23 +195,6 @@ func TestFSMSnapshotPreservesState(t *testing.T) {
 	}
 }
 
-func TestFSMCompress(t *testing.T) {
-	// Not parallel — consistent with other multiraft tests.
-	fsm := New()
-
-	id := testChunkID(3)
-	now := time.Now().Truncate(time.Nanosecond)
-
-	applyCmd(t, fsm, MarshalCreateChunk(id, now, now, now))
-	applyCmd(t, fsm, MarshalSealChunk(id, now, 100, 50000, now, now, now, false, now))
-	applyCmd(t, fsm, MarshalCompressChunk(id, 12000))
-
-	e := fsm.Get(id)
-	if e.DiskBytes != 12000 {
-		t.Errorf("DiskBytes: got %d, want 12000", e.DiskBytes)
-	}
-}
-
 func TestFSMUpload(t *testing.T) {
 	// Not parallel — consistent with other multiraft tests.
 	fsm := New()
@@ -221,7 +204,6 @@ func TestFSMUpload(t *testing.T) {
 
 	applyCmd(t, fsm, MarshalCreateChunk(id, now, now, now))
 	applyCmd(t, fsm, MarshalSealChunk(id, now, 200, 80000, now, now, now, false, now))
-	applyCmd(t, fsm, MarshalCompressChunk(id, 30000))
 	applyCmd(t, fsm, MarshalUploadChunk(id, 25000, 1000, 2000, 3000, 4000, [32]byte{}, glid.GLID{}, 0))
 
 	e := fsm.Get(id)
@@ -280,7 +262,6 @@ func TestFSMSnapshotRestore(t *testing.T) {
 	id2 := testChunkID(20)
 	applyCmd(t, fsm, MarshalCreateChunk(id2, now, now, now))
 	applyCmd(t, fsm, MarshalSealChunk(id2, now.Add(2*time.Second), 200, 80000, now.Add(2*time.Second), now.Add(2*time.Second), now.Add(2*time.Second), false, now.Add(2*time.Second)))
-	applyCmd(t, fsm, MarshalCompressChunk(id2, 30000))
 	applyCmd(t, fsm, MarshalUploadChunk(id2, 25000, 100, 200, 300, 400, [32]byte{}, glid.GLID{}, 0))
 
 	id3 := testChunkID(30)

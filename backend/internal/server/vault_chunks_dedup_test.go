@@ -13,7 +13,7 @@ func TestDedupChunkReportsCollapsesReplicas(t *testing.T) {
 	t.Parallel()
 
 	meta := func(id string, records int64) *apiv1.ChunkMeta {
-		return &apiv1.ChunkMeta{Id: []byte(id), RecordCount: records, Sealed: true, Compressed: true}
+		return &apiv1.ChunkMeta{Id: []byte(id), RecordCount: records, Sealed: true}
 	}
 	input := []chunkReport{
 		{reportingNode: "n1", chunk: meta("chunk-a", 100)},
@@ -47,8 +47,8 @@ func TestDedupChunkReportsSameNodeDoesNotInflateReplicas(t *testing.T) {
 	t.Parallel()
 
 	input := []chunkReport{
-		{reportingNode: "node-a", chunk: &apiv1.ChunkMeta{Id: []byte("c"), RecordCount: 10, Sealed: true, Compressed: true}},
-		{reportingNode: "node-a", chunk: &apiv1.ChunkMeta{Id: []byte("c"), RecordCount: 10, Sealed: true, Compressed: true}},
+		{reportingNode: "node-a", chunk: &apiv1.ChunkMeta{Id: []byte("c"), RecordCount: 10, Sealed: true}},
+		{reportingNode: "node-a", chunk: &apiv1.ChunkMeta{Id: []byte("c"), RecordCount: 10, Sealed: true}},
 	}
 	out := dedupChunkReports(input)
 	if len(out) != 1 {
@@ -68,8 +68,8 @@ func TestDedupChunkReportsPrefersSealedAndCompressed(t *testing.T) {
 	// Order matters: put the partial version first to confirm the
 	// authoritative version replaces it.
 	input := []chunkReport{
-		{reportingNode: "follower", chunk: &apiv1.ChunkMeta{Id: []byte("chunk-x"), RecordCount: 50, Sealed: false, Compressed: false}},
-		{reportingNode: "leader", chunk: &apiv1.ChunkMeta{Id: []byte("chunk-x"), RecordCount: 100, Sealed: true, Compressed: true}},
+		{reportingNode: "follower", chunk: &apiv1.ChunkMeta{Id: []byte("chunk-x"), RecordCount: 50, Sealed: false}},
+		{reportingNode: "leader", chunk: &apiv1.ChunkMeta{Id: []byte("chunk-x"), RecordCount: 100, Sealed: true}},
 	}
 
 	out := dedupChunkReports(input)
@@ -77,9 +77,6 @@ func TestDedupChunkReportsPrefersSealedAndCompressed(t *testing.T) {
 		t.Fatalf("expected 1 chunk, got %d", len(out))
 	}
 	got := out[0]
-	if !got.Sealed || !got.Compressed {
-		t.Errorf("expected sealed+compressed, got sealed=%v compressed=%v", got.Sealed, got.Compressed)
-	}
 	if got.RecordCount != 100 {
 		t.Errorf("expected record count 100 (from the authoritative version), got %d", got.RecordCount)
 	}
@@ -94,8 +91,8 @@ func TestDedupChunkReportsPrefersSealedOverUnsealed(t *testing.T) {
 	t.Parallel()
 
 	input := []chunkReport{
-		{reportingNode: "leader", chunk: &apiv1.ChunkMeta{Id: []byte("chunk-x"), RecordCount: 100, Sealed: true, Compressed: true}},
-		{reportingNode: "follower", chunk: &apiv1.ChunkMeta{Id: []byte("chunk-x"), RecordCount: 50, Sealed: false, Compressed: false}},
+		{reportingNode: "leader", chunk: &apiv1.ChunkMeta{Id: []byte("chunk-x"), RecordCount: 100, Sealed: true}},
+		{reportingNode: "follower", chunk: &apiv1.ChunkMeta{Id: []byte("chunk-x"), RecordCount: 50, Sealed: false}},
 	}
 
 	out := dedupChunkReports(input)
@@ -139,8 +136,8 @@ func TestDedupChunkReportsSingleEntryReplicaCount(t *testing.T) {
 func TestDedupChunkReportsOrsRetentionPending(t *testing.T) {
 	t.Parallel()
 	input := []chunkReport{
-		{reportingNode: "n1", chunk: &apiv1.ChunkMeta{Id: []byte("c"), Sealed: true, Compressed: true, RetentionPending: false}},
-		{reportingNode: "n2", chunk: &apiv1.ChunkMeta{Id: []byte("c"), Sealed: true, Compressed: true, RetentionPending: true}},
+		{reportingNode: "n1", chunk: &apiv1.ChunkMeta{Id: []byte("c"), Sealed: true, RetentionPending: false}},
+		{reportingNode: "n2", chunk: &apiv1.ChunkMeta{Id: []byte("c"), Sealed: true, RetentionPending: true}},
 	}
 	out := dedupChunkReports(input)
 	if len(out) != 1 {

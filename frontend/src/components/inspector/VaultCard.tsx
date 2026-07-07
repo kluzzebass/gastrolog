@@ -866,9 +866,6 @@ function ChunkRow({
                 return <SealPips pips={pips} ghosts={ghosts} />;
               })()
             )}
-            {chunk.compressed && (
-              <Badge variant="info" dark={dark}>compr</Badge>
-            )}
             {chunk.archived && (
               <Badge variant="warn" dark={dark}>{chunk.storageClass || "archived"}</Badge>
             )}
@@ -888,11 +885,11 @@ function ChunkRow({
         </td>
         <td
           className={`px-4 py-2 text-right font-mono whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}
-          title={chunk.compressed && Number(chunk.diskBytes) > 0
+          title={Number(chunk.diskBytes) > 0
             ? `${formatBytes(Number(chunk.bytes))} \u2192 ${formatBytes(Number(chunk.diskBytes))} on disk`
             : undefined}
         >
-          {chunk.compressed && Number(chunk.diskBytes) > 0
+          {Number(chunk.diskBytes) > 0
             ? formatBytes(Number(chunk.diskBytes))
             : formatBytes(Number(chunk.bytes))}
         </td>
@@ -940,12 +937,6 @@ function ChunkDetail({
   // Skip index fetch for cloud-backed chunks — they don't have local indexes.
   const { data, isLoading } = useIndexes(vaultId, chunk.cloudBacked ? "" : encode(chunk.id));
 
-  const logicalBytes = Number(chunk.bytes);
-  const diskBytes = Number(chunk.diskBytes);
-  const showCompression = chunk.compressed && diskBytes > 0 && logicalBytes > 0;
-  const reductionPct = showCompression
-    ? Math.round((1 - diskBytes / logicalBytes) * 100)
-    : 0;
 
   return (
     <div className={`px-4 py-3 ${c("bg-ink-raised", "bg-light-bg")}`}>
@@ -984,29 +975,6 @@ function ChunkDetail({
               Not enough nodes with the required storage class to satisfy RF={String(rf)}
             </div>
           )}
-        </div>
-      )}
-
-      {/* Compression / storage info */}
-      {showCompression && (
-        <div className="mb-3">
-          <div
-            className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-1.5 ${c("text-text-muted", "text-light-text-muted")}`}
-          >
-            Compression
-          </div>
-          <div className={`flex items-center gap-3 text-[0.85em]`}>
-            <span
-              className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}
-            >
-              {formatBytes(logicalBytes)} &rarr; {formatBytes(diskBytes)}
-            </span>
-            <span
-              className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}
-            >
-              {reductionPct}% reduction
-            </span>
-          </div>
         </div>
       )}
 

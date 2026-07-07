@@ -120,7 +120,7 @@ func newGroupCmd(name string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   g.name,
 		Short: g.short,
-		Long: g.short + ".\n\nWithout flags, displays current values.\nWith flags, updates the specified settings.",
+		Long:  g.short + ".\n\nWithout flags, displays current values.\nWith flags, updates the specified settings.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var changed []settingsField
 			for _, f := range g.fields {

@@ -392,16 +392,10 @@ func (s *VaultServer) vaultInfoFromLocal(ctx context.Context, id glid.GLID) *api
 
 func ChunkMetaToProto(meta chunk.ChunkMeta) *apiv1.ChunkMeta {
 	pb := &apiv1.ChunkMeta{
-		Id:          glid.GLID(meta.ID).ToProto(),
-		Sealed:      meta.Sealed,
-		RecordCount: meta.RecordCount,
-		Bytes:       meta.Bytes,
-		// Compressed historically meant "raw.log/attr.log are zstd-compressed",
-		// then "GLCB seekable-zstd" after step 7f. Post-Phase-6 the GLCB is
-		// uncompressed locally and zstd-wrapped only on the cloud transport,
-		// so the flag means "the on-disk bytes carry compression" and is
-		// always false for sealed chunks now (gastrolog-69fd5).
-		Compressed:   false,
+		Id:           glid.GLID(meta.ID).ToProto(),
+		Sealed:       meta.Sealed,
+		RecordCount:  meta.RecordCount,
+		Bytes:        meta.Bytes,
 		DiskBytes:    meta.DiskBytes,
 		CloudBacked:  meta.CloudBacked,
 		Archived:     meta.Archived,

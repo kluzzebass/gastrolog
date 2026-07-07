@@ -439,7 +439,7 @@ type ListChunksRequest struct {
 	// When true, return only unsealed (active) chunks from this node's
 	// local vaults — no cross-node fan-out. Used for lightweight 5-second
 	// polling of active-chunk stats (record count, bytes) while discrete
-	// events (seal, delete, compress) come through the WatchChunks stream.
+	// events (seal, delete, cloud upload) come through the WatchChunks stream.
 	// See gastrolog-1jijm.
 	ActiveOnly    bool `protobuf:"varint,2,opt,name=active_only,json=activeOnly,proto3" json:"active_only,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -545,34 +545,33 @@ type ChunkMeta struct {
 	Sealed           bool                   `protobuf:"varint,4,opt,name=sealed,proto3" json:"sealed,omitempty"`
 	RecordCount      int64                  `protobuf:"varint,5,opt,name=record_count,json=recordCount,proto3" json:"record_count,omitempty"`
 	Bytes            int64                  `protobuf:"varint,6,opt,name=bytes,proto3" json:"bytes,omitempty"`
-	Compressed       bool                   `protobuf:"varint,7,opt,name=compressed,proto3" json:"compressed,omitempty"`                // true if raw.log/attr.log are compressed
-	DiskBytes        int64                  `protobuf:"varint,8,opt,name=disk_bytes,json=diskBytes,proto3" json:"disk_bytes,omitempty"` // actual on-disk size (may differ from bytes if compressed)
-	IngestStart      *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=ingest_start,json=ingestStart,proto3" json:"ingest_start,omitempty"`
-	IngestEnd        *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=ingest_end,json=ingestEnd,proto3" json:"ingest_end,omitempty"`
-	CloudBacked      bool                   `protobuf:"varint,11,opt,name=cloud_backed,json=cloudBacked,proto3" json:"cloud_backed,omitempty"`                // true = chunk lives in cloud storage (S3/Azure/GCS)
-	Archived         bool                   `protobuf:"varint,12,opt,name=archived,proto3" json:"archived,omitempty"`                                         // true = chunk is in offline storage class (Glacier, Azure Archive)
-	VaultId          []byte                 `protobuf:"bytes,13,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`                             // which vault this chunk belongs to
-	VaultType        string                 `protobuf:"bytes,14,opt,name=vault_type,json=vaultType,proto3" json:"vault_type,omitempty"`                       // vault type: "memory", "file", "jsonl"
-	RetentionPending bool                   `protobuf:"varint,15,opt,name=retention_pending,json=retentionPending,proto3" json:"retention_pending,omitempty"` // true = chunk is marked for retention processing
-	StorageClass     string                 `protobuf:"bytes,16,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"`              // current cloud storage class (e.g. "GLACIER", "cold", "Archive")
-	ReplicaCount     int32                  `protobuf:"varint,17,opt,name=replica_count,json=replicaCount,proto3" json:"replica_count,omitempty"`             // how many nodes currently have this chunk (leader + followers that have caught up)
+	DiskBytes        int64                  `protobuf:"varint,7,opt,name=disk_bytes,json=diskBytes,proto3" json:"disk_bytes,omitempty"` // actual on-disk size (differs from bytes: dict-encoded GLCB)
+	IngestStart      *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=ingest_start,json=ingestStart,proto3" json:"ingest_start,omitempty"`
+	IngestEnd        *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=ingest_end,json=ingestEnd,proto3" json:"ingest_end,omitempty"`
+	CloudBacked      bool                   `protobuf:"varint,10,opt,name=cloud_backed,json=cloudBacked,proto3" json:"cloud_backed,omitempty"`                // true = chunk lives in cloud storage (S3/Azure/GCS)
+	Archived         bool                   `protobuf:"varint,11,opt,name=archived,proto3" json:"archived,omitempty"`                                         // true = chunk is in offline storage class (Glacier, Azure Archive)
+	VaultId          []byte                 `protobuf:"bytes,12,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`                             // which vault this chunk belongs to
+	VaultType        string                 `protobuf:"bytes,13,opt,name=vault_type,json=vaultType,proto3" json:"vault_type,omitempty"`                       // vault type: "memory", "file", "jsonl"
+	RetentionPending bool                   `protobuf:"varint,14,opt,name=retention_pending,json=retentionPending,proto3" json:"retention_pending,omitempty"` // true = chunk is marked for retention processing
+	StorageClass     string                 `protobuf:"bytes,15,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"`              // current cloud storage class (e.g. "GLACIER", "cold", "Archive")
+	ReplicaCount     int32                  `protobuf:"varint,16,opt,name=replica_count,json=replicaCount,proto3" json:"replica_count,omitempty"`             // how many nodes currently have this chunk (leader + followers that have caught up)
 	// Cluster-wide replica residency: the set of node IDs that reported having
 	// this chunk locally during the most recent ListChunks fan-out. Lets the
 	// inspector show which nodes physically hold each replica, distinct from
 	// placement (which says where the chunk SHOULD live, not where it does).
 	// See gastrolog-51gme.
-	ReplicaNodeIds []string `protobuf:"bytes,18,rep,name=replica_node_ids,json=replicaNodeIds,proto3" json:"replica_node_ids,omitempty"`
+	ReplicaNodeIds []string `protobuf:"bytes,17,rep,name=replica_node_ids,json=replicaNodeIds,proto3" json:"replica_node_ids,omitempty"`
 	// Receipt-protocol pending acks: when a chunk is in pendingDeletes (i.e. a
 	// CmdRequestDelete has been proposed but the cluster hasn't fully drained
 	// the per-node acks), this is the set of node IDs that still owe an ack.
 	// Empty/absent for chunks not currently in pendingDeletes. Lets the
 	// inspector show which specific node is the laggard holding up a stuck
 	// delete. See gastrolog-51gme.
-	PendingAckNodeIds []string `protobuf:"bytes,19,rep,name=pending_ack_node_ids,json=pendingAckNodeIds,proto3" json:"pending_ack_node_ids,omitempty"`
+	PendingAckNodeIds []string `protobuf:"bytes,18,rep,name=pending_ack_node_ids,json=pendingAckNodeIds,proto3" json:"pending_ack_node_ids,omitempty"`
 	// Three-state lifecycle (gastrolog-1huz5). When unset for replay of
 	// pre-Phase-3 entries, callers derive the state from the legacy
 	// sealed bool: state == SEALED iff sealed == true.
-	State         ChunkState `protobuf:"varint,20,opt,name=state,proto3,enum=gastrolog.v1.ChunkState" json:"state,omitempty"`
+	State         ChunkState `protobuf:"varint,19,opt,name=state,proto3,enum=gastrolog.v1.ChunkState" json:"state,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -647,13 +646,6 @@ func (x *ChunkMeta) GetBytes() int64 {
 		return x.Bytes
 	}
 	return 0
-}
-
-func (x *ChunkMeta) GetCompressed() bool {
-	if x != nil {
-		return x.Compressed
-	}
-	return false
 }
 
 func (x *ChunkMeta) GetDiskBytes() int64 {
@@ -3488,7 +3480,7 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\vactive_only\x18\x02 \x01(\bR\n" +
 	"activeOnly\"E\n" +
 	"\x12ListChunksResponse\x12/\n" +
-	"\x06chunks\x18\x01 \x03(\v2\x17.gastrolog.v1.ChunkMetaR\x06chunks\"\x96\x06\n" +
+	"\x06chunks\x18\x01 \x03(\v2\x17.gastrolog.v1.ChunkMetaR\x06chunks\"\xf6\x05\n" +
 	"\tChunkMeta\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12;\n" +
 	"\vwrite_start\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
@@ -3496,27 +3488,24 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\twrite_end\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\bwriteEnd\x12\x16\n" +
 	"\x06sealed\x18\x04 \x01(\bR\x06sealed\x12!\n" +
 	"\frecord_count\x18\x05 \x01(\x03R\vrecordCount\x12\x14\n" +
-	"\x05bytes\x18\x06 \x01(\x03R\x05bytes\x12\x1e\n" +
+	"\x05bytes\x18\x06 \x01(\x03R\x05bytes\x12\x1d\n" +
 	"\n" +
-	"compressed\x18\a \x01(\bR\n" +
-	"compressed\x12\x1d\n" +
+	"disk_bytes\x18\a \x01(\x03R\tdiskBytes\x12=\n" +
+	"\fingest_start\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\vingestStart\x129\n" +
 	"\n" +
-	"disk_bytes\x18\b \x01(\x03R\tdiskBytes\x12=\n" +
-	"\fingest_start\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\vingestStart\x129\n" +
+	"ingest_end\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\tingestEnd\x12!\n" +
+	"\fcloud_backed\x18\n" +
+	" \x01(\bR\vcloudBacked\x12\x1a\n" +
+	"\barchived\x18\v \x01(\bR\barchived\x12\x19\n" +
+	"\bvault_id\x18\f \x01(\fR\avaultId\x12\x1d\n" +
 	"\n" +
-	"ingest_end\x18\n" +
-	" \x01(\v2\x1a.google.protobuf.TimestampR\tingestEnd\x12!\n" +
-	"\fcloud_backed\x18\v \x01(\bR\vcloudBacked\x12\x1a\n" +
-	"\barchived\x18\f \x01(\bR\barchived\x12\x19\n" +
-	"\bvault_id\x18\r \x01(\fR\avaultId\x12\x1d\n" +
-	"\n" +
-	"vault_type\x18\x0e \x01(\tR\tvaultType\x12+\n" +
-	"\x11retention_pending\x18\x0f \x01(\bR\x10retentionPending\x12#\n" +
-	"\rstorage_class\x18\x10 \x01(\tR\fstorageClass\x12#\n" +
-	"\rreplica_count\x18\x11 \x01(\x05R\freplicaCount\x12(\n" +
-	"\x10replica_node_ids\x18\x12 \x03(\tR\x0ereplicaNodeIds\x12/\n" +
-	"\x14pending_ack_node_ids\x18\x13 \x03(\tR\x11pendingAckNodeIds\x12.\n" +
-	"\x05state\x18\x14 \x01(\x0e2\x18.gastrolog.v1.ChunkStateR\x05state\"B\n" +
+	"vault_type\x18\r \x01(\tR\tvaultType\x12+\n" +
+	"\x11retention_pending\x18\x0e \x01(\bR\x10retentionPending\x12#\n" +
+	"\rstorage_class\x18\x0f \x01(\tR\fstorageClass\x12#\n" +
+	"\rreplica_count\x18\x10 \x01(\x05R\freplicaCount\x12(\n" +
+	"\x10replica_node_ids\x18\x11 \x03(\tR\x0ereplicaNodeIds\x12/\n" +
+	"\x14pending_ack_node_ids\x18\x12 \x03(\tR\x11pendingAckNodeIds\x12.\n" +
+	"\x05state\x18\x13 \x01(\x0e2\x18.gastrolog.v1.ChunkStateR\x05state\"B\n" +
 	"\x0fGetChunkRequest\x12\x14\n" +
 	"\x05vault\x18\x01 \x01(\tR\x05vault\x12\x19\n" +
 	"\bchunk_id\x18\x02 \x01(\fR\achunkId\"A\n" +

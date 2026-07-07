@@ -3511,6 +3511,95 @@ export class PullSegmentChunk extends Message<PullSegmentChunk> {
 }
 
 /**
+ * PullChunkGLCBRequest asks a peer holding a sealed pipeline chunk's GLCB to
+ * stream its bytes. Replica catch-up for homes that missed the build window
+ * and whose source segments are already released — without this, a home that
+ * misses builds can never recover chunk bytes.
+ *
+ * @generated from message gastrolog.v1.PullChunkGLCBRequest
+ */
+export class PullChunkGLCBRequest extends Message<PullChunkGLCBRequest> {
+  /**
+   * @generated from field: bytes vault_id = 1;
+   */
+  vaultId = new Uint8Array(0);
+
+  /**
+   * @generated from field: bytes chunk_id = 2;
+   */
+  chunkId = new Uint8Array(0);
+
+  constructor(data?: PartialMessage<PullChunkGLCBRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PullChunkGLCBRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PullChunkGLCBRequest {
+    return new PullChunkGLCBRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PullChunkGLCBRequest {
+    return new PullChunkGLCBRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PullChunkGLCBRequest {
+    return new PullChunkGLCBRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PullChunkGLCBRequest | PlainMessage<PullChunkGLCBRequest> | undefined, b: PullChunkGLCBRequest | PlainMessage<PullChunkGLCBRequest> | undefined): boolean {
+    return proto3.util.equals(PullChunkGLCBRequest, a, b);
+  }
+}
+
+/**
+ * PullChunkGLCBChunk carries a slice of GLCB bytes during streaming transfer.
+ * The puller verifies the assembled file's seal metadata and size against the
+ * vault-ctl manifest entry before renaming it into place.
+ *
+ * @generated from message gastrolog.v1.PullChunkGLCBChunk
+ */
+export class PullChunkGLCBChunk extends Message<PullChunkGLCBChunk> {
+  /**
+   * @generated from field: bytes data = 1;
+   */
+  data = new Uint8Array(0);
+
+  constructor(data?: PartialMessage<PullChunkGLCBChunk>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PullChunkGLCBChunk";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "data", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PullChunkGLCBChunk {
+    return new PullChunkGLCBChunk().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PullChunkGLCBChunk {
+    return new PullChunkGLCBChunk().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PullChunkGLCBChunk {
+    return new PullChunkGLCBChunk().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PullChunkGLCBChunk | PlainMessage<PullChunkGLCBChunk> | undefined, b: PullChunkGLCBChunk | PlainMessage<PullChunkGLCBChunk> | undefined): boolean {
+    return proto3.util.equals(PullChunkGLCBChunk, a, b);
+  }
+}
+
+/**
  * ListPeerManagedFilesRequest asks a peer which managed files it has on disk.
  *
  * @generated from message gastrolog.v1.ListPeerManagedFilesRequest

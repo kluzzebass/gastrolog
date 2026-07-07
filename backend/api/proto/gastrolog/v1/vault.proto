@@ -60,7 +60,7 @@ service VaultService {
 
   // WatchChunks opens a server-streaming subscription that pushes a
   // notification every time chunk metadata changes on this node (seal,
-  // delete, create, compress, cloud upload). The client uses the
+  // delete, create, cloud upload). The client uses the
   // notification as a signal to refetch via ListChunks — no chunk data
   // is carried in the stream itself. Same pattern as WatchConfig.
   // See gastrolog-1jijm.
@@ -114,7 +114,7 @@ message ListChunksRequest {
   // When true, return only unsealed (active) chunks from this node's
   // local vaults — no cross-node fan-out. Used for lightweight 5-second
   // polling of active-chunk stats (record count, bytes) while discrete
-  // events (seal, delete, compress) come through the WatchChunks stream.
+  // events (seal, delete, cloud upload) come through the WatchChunks stream.
   // See gastrolog-1jijm.
   bool active_only = 2;
 }
@@ -155,34 +155,33 @@ message ChunkMeta {
   bool sealed = 4;
   int64 record_count = 5;
   int64 bytes = 6;
-  bool compressed = 7;    // true if raw.log/attr.log are compressed
-  int64 disk_bytes = 8;   // actual on-disk size (may differ from bytes if compressed)
-  google.protobuf.Timestamp ingest_start = 9;
-  google.protobuf.Timestamp ingest_end = 10;
-  bool cloud_backed = 11; // true = chunk lives in cloud storage (S3/Azure/GCS)
-  bool archived = 12;     // true = chunk is in offline storage class (Glacier, Azure Archive)
-  bytes vault_id = 13;    // which vault this chunk belongs to
-  string vault_type = 14;  // vault type: "memory", "file", "jsonl"
-  bool retention_pending = 15; // true = chunk is marked for retention processing
-  string storage_class = 16;   // current cloud storage class (e.g. "GLACIER", "cold", "Archive")
-  int32 replica_count = 17;    // how many nodes currently have this chunk (leader + followers that have caught up)
+  int64 disk_bytes = 7;   // actual on-disk size (differs from bytes: dict-encoded GLCB)
+  google.protobuf.Timestamp ingest_start = 8;
+  google.protobuf.Timestamp ingest_end = 9;
+  bool cloud_backed = 10; // true = chunk lives in cloud storage (S3/Azure/GCS)
+  bool archived = 11;     // true = chunk is in offline storage class (Glacier, Azure Archive)
+  bytes vault_id = 12;    // which vault this chunk belongs to
+  string vault_type = 13;  // vault type: "memory", "file", "jsonl"
+  bool retention_pending = 14; // true = chunk is marked for retention processing
+  string storage_class = 15;   // current cloud storage class (e.g. "GLACIER", "cold", "Archive")
+  int32 replica_count = 16;    // how many nodes currently have this chunk (leader + followers that have caught up)
   // Cluster-wide replica residency: the set of node IDs that reported having
   // this chunk locally during the most recent ListChunks fan-out. Lets the
   // inspector show which nodes physically hold each replica, distinct from
   // placement (which says where the chunk SHOULD live, not where it does).
   // See gastrolog-51gme.
-  repeated string replica_node_ids = 18;
+  repeated string replica_node_ids = 17;
   // Receipt-protocol pending acks: when a chunk is in pendingDeletes (i.e. a
   // CmdRequestDelete has been proposed but the cluster hasn't fully drained
   // the per-node acks), this is the set of node IDs that still owe an ack.
   // Empty/absent for chunks not currently in pendingDeletes. Lets the
   // inspector show which specific node is the laggard holding up a stuck
   // delete. See gastrolog-51gme.
-  repeated string pending_ack_node_ids = 19;
+  repeated string pending_ack_node_ids = 18;
   // Three-state lifecycle (gastrolog-1huz5). When unset for replay of
   // pre-Phase-3 entries, callers derive the state from the legacy
   // sealed bool: state == SEALED iff sealed == true.
-  ChunkState state = 20;
+  ChunkState state = 19;
 }
 
 message GetChunkRequest {

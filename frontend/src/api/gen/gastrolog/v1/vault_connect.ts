@@ -187,7 +187,7 @@ export const VaultService = {
     /**
      * WatchChunks opens a server-streaming subscription that pushes a
      * notification every time chunk metadata changes on this node (seal,
-     * delete, create, compress, cloud upload). The client uses the
+     * delete, create, cloud upload). The client uses the
      * notification as a signal to refetch via ListChunks — no chunk data
      * is carried in the stream itself. Same pattern as WatchConfig.
      * See gastrolog-1jijm.

@@ -54,7 +54,7 @@ for append-heavy write patterns and time-ordered reads.
 
 - **Chunk** — an immutable, self-contained segment of records. One active chunk
   per vault per node accepts new records; it is **sealed** when a rotation
-  policy fires (or manually). Sealed chunks can be compressed, indexed, and
+  policy fires (or manually). Sealed chunks can be indexed and
   eventually expired. Each chunk has a `ChunkID` (sortable GLID) and metadata
   (`ChunkMeta`). Defined: [`chunk/types.go`](../backend/internal/chunk/types.go).
 
@@ -76,21 +76,20 @@ for append-heavy write patterns and time-ordered reads.
 - **RecordRef** — pointer to a record inside a chunk: `ChunkID + Pos`. Used
   wherever one record needs to refer to another (GetContext anchors, indexes).
 
-- **ChunkMeta** — the stats bag for a chunk: sealed/compressed/cloud-backed
+- **ChunkMeta** — the stats bag for a chunk: sealed/cloud-backed
   flags, record count, byte counts, timestamps (`WriteStart/End`, `IngestStart/End`,
   `SourceStart/End`), retention-pending flag, frame count for cloud chunks.
 
 ### States a chunk passes through
 
 - **Active** — open for writes; lives only on the vault leader.
-- **Sealed** — immutable; eligible for compression/indexing/replication.
+- **Sealed** — immutable; eligible for indexing/replication/cloud upload.
 - **Chunk seal** — the cluster-wide fact: `CmdSealChunk` applied, record
   membership frozen. Happens exactly once per chunk.
 - **Copy seal** — one home's completed local copy (GLCB build or replica
   pull) of a sealed chunk. There are up to RF copy seals per chunk, and a
   LATE copy seal — a rejoining node catching up — is normal operation, not
   a re-seal. The inspector's per-node seal pips render copy seals.
-- **Compressed** — `raw.log`/`attr.log` encoded zstd; `DiskBytes ≠ Bytes`.
 - **Cloud-backed** — record bytes live in S3/Azure/GCS, not local disk; marked
   with `CloudBacked = true` in `ChunkMeta`. A cloud-backed vault is a file vault
   with `CloudServiceID` set; there is no separate "cloud" vault type.
@@ -338,7 +337,7 @@ gRPC transport:
 
 - **Vault chunk FSM** (`vaultctlfsm.FSM`) — the per-vault sub-state-machine
   inside a vault-ctl FSM. Holds the **manifest** of chunks for one vault: each
-  chunk's metadata (sealed? compressed? retention-pending?), tombstones, and
+  chunk's metadata (sealed? retention-pending?), tombstones, and
   pending-delete receipt state.
 
 - **Manifest** — the vault FSM's set of chunk entries. The authoritative
@@ -438,7 +437,7 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
 
 - **Scheduler** — the cron/queue subsystem. Runs scheduled jobs
   (retention sweep, rotation sweep, archival sweep) and one-shot tasks
-  (post-seal compression/indexing, catchup replication).
+  (post-seal indexing, cloud upload, catchup replication).
 
 - **Job** — a scheduled or one-shot unit of work. Proto
   [`Job`](../backend/api/proto/gastrolog/v1/job.proto) tracks
@@ -484,7 +483,7 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
 ### Core state transitions (verbs)
 
 - **Seal** — finalize an active chunk; it becomes immutable and enters the
-  post-seal pipeline (compression → indexing → replication catchup).
+  post-seal pipeline (indexing → replication catchup).
 
 - **Rotate** — open a new active chunk after sealing the old one.
 

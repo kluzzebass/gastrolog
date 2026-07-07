@@ -32,7 +32,7 @@ func TestPrintVaultSegmentStaging(t *testing.T) {
 		HeadBytes:                4096,
 		NodeSegments: []*v1.PipelineNodeSegments{
 			{
-				NodeId:       []byte("node-a"),
+				NodeId:          []byte("node-a"),
 				WorkingSegments: 1,
 				HeadSegments:    2,
 				WorkingBytes:    512,

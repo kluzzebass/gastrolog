@@ -346,7 +346,7 @@ export class ListChunksRequest extends Message<ListChunksRequest> {
    * When true, return only unsealed (active) chunks from this node's
    * local vaults — no cross-node fan-out. Used for lightweight 5-second
    * polling of active-chunk stats (record count, bytes) while discrete
-   * events (seal, delete, compress) come through the WatchChunks stream.
+   * events (seal, delete, cloud upload) come through the WatchChunks stream.
    * See gastrolog-1jijm.
    *
    * @generated from field: bool active_only = 2;
@@ -458,75 +458,68 @@ export class ChunkMeta extends Message<ChunkMeta> {
   bytes = protoInt64.zero;
 
   /**
-   * true if raw.log/attr.log are compressed
+   * actual on-disk size (differs from bytes: dict-encoded GLCB)
    *
-   * @generated from field: bool compressed = 7;
-   */
-  compressed = false;
-
-  /**
-   * actual on-disk size (may differ from bytes if compressed)
-   *
-   * @generated from field: int64 disk_bytes = 8;
+   * @generated from field: int64 disk_bytes = 7;
    */
   diskBytes = protoInt64.zero;
 
   /**
-   * @generated from field: google.protobuf.Timestamp ingest_start = 9;
+   * @generated from field: google.protobuf.Timestamp ingest_start = 8;
    */
   ingestStart?: Timestamp;
 
   /**
-   * @generated from field: google.protobuf.Timestamp ingest_end = 10;
+   * @generated from field: google.protobuf.Timestamp ingest_end = 9;
    */
   ingestEnd?: Timestamp;
 
   /**
    * true = chunk lives in cloud storage (S3/Azure/GCS)
    *
-   * @generated from field: bool cloud_backed = 11;
+   * @generated from field: bool cloud_backed = 10;
    */
   cloudBacked = false;
 
   /**
    * true = chunk is in offline storage class (Glacier, Azure Archive)
    *
-   * @generated from field: bool archived = 12;
+   * @generated from field: bool archived = 11;
    */
   archived = false;
 
   /**
    * which vault this chunk belongs to
    *
-   * @generated from field: bytes vault_id = 13;
+   * @generated from field: bytes vault_id = 12;
    */
   vaultId = new Uint8Array(0);
 
   /**
    * vault type: "memory", "file", "jsonl"
    *
-   * @generated from field: string vault_type = 14;
+   * @generated from field: string vault_type = 13;
    */
   vaultType = "";
 
   /**
    * true = chunk is marked for retention processing
    *
-   * @generated from field: bool retention_pending = 15;
+   * @generated from field: bool retention_pending = 14;
    */
   retentionPending = false;
 
   /**
    * current cloud storage class (e.g. "GLACIER", "cold", "Archive")
    *
-   * @generated from field: string storage_class = 16;
+   * @generated from field: string storage_class = 15;
    */
   storageClass = "";
 
   /**
    * how many nodes currently have this chunk (leader + followers that have caught up)
    *
-   * @generated from field: int32 replica_count = 17;
+   * @generated from field: int32 replica_count = 16;
    */
   replicaCount = 0;
 
@@ -537,7 +530,7 @@ export class ChunkMeta extends Message<ChunkMeta> {
    * placement (which says where the chunk SHOULD live, not where it does).
    * See gastrolog-51gme.
    *
-   * @generated from field: repeated string replica_node_ids = 18;
+   * @generated from field: repeated string replica_node_ids = 17;
    */
   replicaNodeIds: string[] = [];
 
@@ -549,7 +542,7 @@ export class ChunkMeta extends Message<ChunkMeta> {
    * inspector show which specific node is the laggard holding up a stuck
    * delete. See gastrolog-51gme.
    *
-   * @generated from field: repeated string pending_ack_node_ids = 19;
+   * @generated from field: repeated string pending_ack_node_ids = 18;
    */
   pendingAckNodeIds: string[] = [];
 
@@ -558,7 +551,7 @@ export class ChunkMeta extends Message<ChunkMeta> {
    * pre-Phase-3 entries, callers derive the state from the legacy
    * sealed bool: state == SEALED iff sealed == true.
    *
-   * @generated from field: gastrolog.v1.ChunkState state = 20;
+   * @generated from field: gastrolog.v1.ChunkState state = 19;
    */
   state = ChunkState.UNSPECIFIED;
 
@@ -576,20 +569,19 @@ export class ChunkMeta extends Message<ChunkMeta> {
     { no: 4, name: "sealed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 5, name: "record_count", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 6, name: "bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 7, name: "compressed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 8, name: "disk_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 9, name: "ingest_start", kind: "message", T: Timestamp },
-    { no: 10, name: "ingest_end", kind: "message", T: Timestamp },
-    { no: 11, name: "cloud_backed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 12, name: "archived", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 13, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 14, name: "vault_type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 15, name: "retention_pending", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 16, name: "storage_class", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 17, name: "replica_count", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
-    { no: 18, name: "replica_node_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
-    { no: 19, name: "pending_ack_node_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
-    { no: 20, name: "state", kind: "enum", T: proto3.getEnumType(ChunkState) },
+    { no: 7, name: "disk_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 8, name: "ingest_start", kind: "message", T: Timestamp },
+    { no: 9, name: "ingest_end", kind: "message", T: Timestamp },
+    { no: 10, name: "cloud_backed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 11, name: "archived", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 12, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 13, name: "vault_type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 14, name: "retention_pending", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 15, name: "storage_class", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 16, name: "replica_count", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+    { no: 17, name: "replica_node_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 18, name: "pending_ack_node_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 19, name: "state", kind: "enum", T: proto3.getEnumType(ChunkState) },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkMeta {

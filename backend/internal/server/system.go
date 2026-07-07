@@ -72,9 +72,9 @@ type SystemServerConfig struct {
 	OnLookupConfigChange func(system.LookupConfig, system.MaxMindConfig)
 	CloudTesters         map[string]CloudServiceTester
 	Tokens               *auth.TokenService
-	PlacementReconcile   func(ctx context.Context)       // synchronous placement for RPC handlers
-	LogFilter            *logging.ComponentFilterHandler // log-level RPC handlers (gastrolog-3flfp); nil disables them
-	LocalStats           func() *apiv1.NodeStats         // local NodeStats snapshot (rolling-window rates); nil in tests
+	PlacementReconcile   func(ctx context.Context)                             // synchronous placement for RPC handlers
+	LogFilter            *logging.ComponentFilterHandler                       // log-level RPC handlers (gastrolog-3flfp); nil disables them
+	LocalStats           func() *apiv1.NodeStats                               // local NodeStats snapshot (rolling-window rates); nil in tests
 	ClusterRouteRates    func() (*apiv1.ThroughputRate, *apiv1.ThroughputRate) // server-side cluster rate series; nil in single-node/tests
 
 	// Environment banner (gastrolog-4vr0l). Display-only metadata

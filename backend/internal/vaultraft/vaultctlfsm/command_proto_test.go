@@ -60,13 +60,6 @@ func TestCommandRoundTrip(t *testing.T) {
 		}
 	})
 
-	t.Run("compress", func(t *testing.T) {
-		c := decodeCommand(t, MarshalCompressChunk(id, 555))
-		if c.GetCompressChunk().GetDiskBytes() != 555 {
-			t.Errorf("disk bytes: %d", c.GetCompressChunk().GetDiskBytes())
-		}
-	})
-
 	t.Run("upload", func(t *testing.T) {
 		var hash [32]byte
 		hash[0], hash[31] = 0xAB, 0xCD

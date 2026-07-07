@@ -284,8 +284,6 @@ func innerCommandNameAndID(cmd *gastrologv1.VaultCtlCommand) (string, string) {
 		return "CmdCreateChunk", chunkIDStr(c.CreateChunk.GetId())
 	case *gastrologv1.VaultCtlCommand_SealChunk:
 		return "CmdSealChunk", chunkIDStr(c.SealChunk.GetId())
-	case *gastrologv1.VaultCtlCommand_CompressChunk:
-		return "CmdCompressChunk", chunkIDStr(c.CompressChunk.GetId())
 	case *gastrologv1.VaultCtlCommand_UploadChunk:
 		return "CmdUploadChunk", chunkIDStr(c.UploadChunk.GetId())
 	case *gastrologv1.VaultCtlCommand_DeleteChunk:

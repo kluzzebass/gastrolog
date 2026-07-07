@@ -298,12 +298,7 @@ func buildChunkKV(c *v1.ChunkMeta, vaultName string) [][2]string {
 }
 
 func formatDiskSize(c *v1.ChunkMeta) string {
-	s := units.FormatBytesDisplay(c.DiskBytes)
-	if c.Compressed && c.Bytes > 0 && c.DiskBytes > 0 && c.DiskBytes < c.Bytes {
-		pct := 100 - (float64(c.DiskBytes)/float64(c.Bytes))*100
-		s += fmt.Sprintf(" (%.0f%% compression)", pct)
-	}
-	return s
+	return units.FormatBytesDisplay(c.DiskBytes)
 }
 
 func appendTS(pairs [][2]string, label string, ts *timestamppb.Timestamp) [][2]string {

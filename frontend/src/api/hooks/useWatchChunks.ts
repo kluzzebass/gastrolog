@@ -300,7 +300,6 @@ export function mergeMeta(existing: ChunkMeta | undefined, incoming: ChunkMeta):
   if (merged.sealed) {
     merged.state = ChunkState.SEALED;
   }
-  merged.compressed = incoming.compressed;
   merged.storageClass = incoming.storageClass;
   // Monotone time-end fields: take max(existing, incoming). CREATED
   // events have zero-value WriteEnd/IngestEnd (chunk has no records

@@ -47,30 +47,29 @@ message VaultCtlCommand {
   oneof command {
     CreateChunkCommand create_chunk = 1;
     SealChunkCommand seal_chunk = 2;
-    CompressChunkCommand compress_chunk = 3;
-    UploadChunkCommand upload_chunk = 4;
-    // delete_chunk (5) is retained for WAL replay only; no current producer
+    UploadChunkCommand upload_chunk = 3;
+    // delete_chunk (4) is retained for WAL replay only; no current producer
     // emits it (see CmdDeleteChunk in fsm.go).
-    DeleteChunkCommand delete_chunk = 5;
-    RetentionPendingCommand retention_pending = 6;
-    RequestDeleteCommand request_delete = 7;
-    AckDeleteCommand ack_delete = 8;
-    FinalizeDeleteCommand finalize_delete = 9;
-    PruneNodeCommand prune_node = 10;
-    AttachOffsetsCommand attach_offsets = 11;
-    BeginSealCommand begin_seal = 12;
-    RepatriateChunkCommand repatriate_chunk = 13;
-    PublishCompletedSegmentCommand publish_completed_segment = 14;
-    OpenChunkManifestCommand open_chunk_manifest = 15;
-    AddOpenChunkSegmentRefCommand add_open_chunk_segment_ref = 16;
-    SealOpenChunkManifestCommand seal_open_chunk_manifest = 17;
-    ReleaseSegmentsCommand release_segments = 18;
-    AckSegmentHolderCommand ack_segment_holder = 19;
-    DiscardOpenChunkManifestCommand discard_open_chunk_manifest = 20;
-    PublishCompletedSegmentsCommand publish_completed_segments = 21;
-    AddOpenChunkSegmentRefsCommand add_open_chunk_segment_refs = 22;
-    AckChunkHolderCommand ack_chunk_holder = 23;
-    RevokeChunkHolderCommand revoke_chunk_holder = 24;
+    DeleteChunkCommand delete_chunk = 4;
+    RetentionPendingCommand retention_pending = 5;
+    RequestDeleteCommand request_delete = 6;
+    AckDeleteCommand ack_delete = 7;
+    FinalizeDeleteCommand finalize_delete = 8;
+    PruneNodeCommand prune_node = 9;
+    AttachOffsetsCommand attach_offsets = 10;
+    BeginSealCommand begin_seal = 11;
+    RepatriateChunkCommand repatriate_chunk = 12;
+    PublishCompletedSegmentCommand publish_completed_segment = 13;
+    OpenChunkManifestCommand open_chunk_manifest = 14;
+    AddOpenChunkSegmentRefCommand add_open_chunk_segment_ref = 15;
+    SealOpenChunkManifestCommand seal_open_chunk_manifest = 16;
+    ReleaseSegmentsCommand release_segments = 17;
+    AckSegmentHolderCommand ack_segment_holder = 18;
+    DiscardOpenChunkManifestCommand discard_open_chunk_manifest = 19;
+    PublishCompletedSegmentsCommand publish_completed_segments = 20;
+    AddOpenChunkSegmentRefsCommand add_open_chunk_segment_refs = 21;
+    AckChunkHolderCommand ack_chunk_holder = 22;
+    RevokeChunkHolderCommand revoke_chunk_holder = 23;
   }
 }
 
@@ -93,11 +92,6 @@ message SealChunkCommand {
   // Wall-clock sealing completion (leader-chosen, replicated). Retention
   // MaxAge measures age from this timestamp, not WriteEnd.
   int64 sealed_at_nanos = 9;
-}
-
-message CompressChunkCommand {
-  bytes id = 1;
-  int64 disk_bytes = 2;
 }
 
 message UploadChunkCommand {

@@ -27,10 +27,9 @@ import (
 type Command byte
 
 const (
-	CmdCreateChunk   Command = 1
-	CmdSealChunk     Command = 2
-	CmdCompressChunk Command = 3
-	CmdUploadChunk   Command = 4
+	CmdCreateChunk Command = 1
+	CmdSealChunk   Command = 2
+	CmdUploadChunk Command = 3
 
 	// CmdDeleteChunk is retained for WAL replay backward-compat only. The
 	// receipt protocol (CmdRequestDelete + acks + CmdFinalizeDelete) is
@@ -40,9 +39,9 @@ const (
 	// MarshalDeleteChunk callers. The FSM continues to apply
 	// CmdDeleteChunk so pre-migration WAL segments still replay
 	// correctly. See gastrolog-51gme step 11.
-	CmdDeleteChunk Command = 5
+	CmdDeleteChunk Command = 4
 
-	CmdRetentionPending Command = 6
+	CmdRetentionPending Command = 5
 
 	// Receipt-based deletion protocol — gastrolog-51gme step 2. Replaces
 	// single-shot CmdDeleteChunk fan-out with an N-way receipt protocol
@@ -54,9 +53,9 @@ const (
 	// gastrolog-5sywa (Phase 4 follow-up). Per the project's "delete and
 	// renumber, never reserved" rule, the receipt-protocol commands
 	// renumbered down to 7/8/9.
-	CmdRequestDelete  Command = 7 // vault leader proposes a delete; replicates the expected-acks set
-	CmdAckDelete      Command = 8 // each expected node acks after handling its local side
-	CmdFinalizeDelete Command = 9 // leader removes the entry once expectedFrom is empty
+	CmdRequestDelete  Command = 6 // vault leader proposes a delete; replicates the expected-acks set
+	CmdAckDelete      Command = 7 // each expected node acks after handling its local side
+	CmdFinalizeDelete Command = 8 // leader removes the entry once expectedFrom is empty
 
 	// Membership-change cleanup — gastrolog-51gme step 10. After a node
 	// is removed from this vault-ctl Raft group's voter set (decommissioned
@@ -65,7 +64,7 @@ const (
 	// this, deletes proposed before the node left would never finalize:
 	// the leader would hold the entry forever waiting for an ack from a
 	// node that no longer participates.
-	CmdPruneNode Command = 10
+	CmdPruneNode Command = 9
 
 	// CmdAttachOffsets carries the GLCB blob's section-offset/size pairs
 	// (IngestTS index, SourceTS index) once sealToGLCB has produced
@@ -76,7 +75,7 @@ const (
 	// from chunk/file.Manager after sealToGLCB and from the import path
 	// (orchestrator/vault_ops.finalizeImportedChunk) for replicated
 	// chunks. See gastrolog-1dg3i.
-	CmdAttachOffsets Command = 11
+	CmdAttachOffsets Command = 10
 
 	// CmdBeginSeal carries the Active → Sealing transition: the leader
 	// has stopped accepting appends on the chunk and is starting
@@ -85,7 +84,7 @@ const (
 	// retention triggers, and replication-completeness checks gate on
 	// State == Sealed; the Sealing entry is not yet a finished chunk
 	// even though it's no longer accepting writes. See gastrolog-1huz5.
-	CmdBeginSeal Command = 12
+	CmdBeginSeal Command = 11
 
 	// CmdRepatriateChunk re-introduces a sealed chunk's manifest entry
 	// when the FSM has lost it but a local replica still exists on
@@ -94,38 +93,38 @@ const (
 	// reconstructed from the local chunk's idx.log headers. Apply
 	// inserts the entry in Sealed state, refusing if the entry
 	// already exists or is tombstoned. See gastrolog-32bf2.
-	CmdRepatriateChunk Command = 13
+	CmdRepatriateChunk Command = 12
 
 	// CmdPublishCompletedSegment registers completed segment metadata in the
 	// vault-ctl FSM when Segmentation closes a segment. See gastrolog-5pyl3.
-	CmdPublishCompletedSegment Command = 14
+	CmdPublishCompletedSegment Command = 13
 
 	// Open-chunk manifest (direction D). See gastrolog-53ron.
-	CmdOpenChunkManifest      Command = 15
-	CmdAddOpenChunkSegmentRef Command = 16
-	CmdSealOpenChunkManifest  Command = 17
-	CmdReleaseSegments        Command = 18
+	CmdOpenChunkManifest      Command = 14
+	CmdAddOpenChunkSegmentRef Command = 15
+	CmdSealOpenChunkManifest  Command = 16
+	CmdReleaseSegments        Command = 17
 
 	// CmdAckSegmentHolder records that a node now holds a completed segment
 	// (Rubicon C). Appends the node to the segment registry entry's holder
 	// set; idempotent. See gastrolog-2z3oa.
-	CmdAckSegmentHolder Command = 19
+	CmdAckSegmentHolder Command = 18
 
 	// CmdPublishCompletedSegments registers many completed segments in one
 	// vault-ctl apply (burst ingest on origin nodes).
-	CmdPublishCompletedSegments Command = 21
+	CmdPublishCompletedSegments Command = 20
 
 	// CmdAddOpenChunkSegmentRefs appends many open-chunk segment refs in one
 	// vault-ctl apply (chunking planner batching). See gastrolog-3i9nt.
-	CmdAddOpenChunkSegmentRefs Command = 22
+	CmdAddOpenChunkSegmentRefs Command = 21
 
 	// CmdAckChunkHolder records that a node holds a sealed chunk's verified
 	// GLCB bytes (built locally or pulled via replica catch-up). Idempotent.
-	CmdAckChunkHolder Command = 23
+	CmdAckChunkHolder Command = 22
 
 	// CmdRevokeChunkHolder withdraws a holder claim after the node
 	// stat-missed the bytes it was recorded as holding. Idempotent.
-	CmdRevokeChunkHolder Command = 24
+	CmdRevokeChunkHolder Command = 23
 )
 
 // ManifestEntry holds the full metadata for one chunk in this vault's
@@ -986,8 +985,6 @@ func (f *FSM) applyLocked(cmd *gastrologv1.VaultCtlCommand) (any, applyEffects) 
 			idCopy := sealID
 			fx.sealedManifestClearedID = &idCopy
 		}
-	case *gastrologv1.VaultCtlCommand_CompressChunk:
-		result = f.applyCompress(c.CompressChunk)
 	case *gastrologv1.VaultCtlCommand_UploadChunk:
 		result = f.applyUpload(c.UploadChunk)
 		fx.uploadedEntry = f.captureEntry(result, chunkIDFromProto(c.UploadChunk.GetId()))
@@ -1448,22 +1445,6 @@ func (f *FSM) applyRepatriate(c *gastrologv1.RepatriateChunkCommand) error {
 	return nil
 }
 
-// CompressChunk records the on-disk size of a sealed chunk.
-func (f *FSM) applyCompress(c *gastrologv1.CompressChunkCommand) error {
-	id := chunkIDFromProto(c.GetId())
-
-	e := f.chunks[id]
-	if e == nil {
-		return fmt.Errorf("compress chunk: %s not found", id)
-	}
-	// Compressed flag is gone (gastrolog-24m1t step 7f) — sealed chunks
-	// are GLCB which is zstd-compressed by construction. CmdCompressChunk
-	// stays as a no-op apply* handler for WAL-replay backward compat;
-	// only DiskBytes still carries useful information.
-	e.DiskBytes = c.GetDiskBytes()
-	return nil
-}
-
 // AttachOffsets: [16 ChunkID][8 IngestIdxOff][8 IngestIdxSize][8 SourceIdxOff][8 SourceIdxSize]
 //
 // Fired after sealToGLCB on the leader (and after finalizeImportedChunk
@@ -1599,16 +1580,6 @@ func NewBeginSeal(id chunk.ChunkID) *gastrologv1.VaultCtlCommand {
 // MarshalBeginSeal builds the Raft log data for a BeginSeal command.
 func MarshalBeginSeal(id chunk.ChunkID) []byte {
 	return mustMarshalCommand(NewBeginSeal(id))
-}
-
-// NewCompressChunk builds a CompressChunk command message.
-func NewCompressChunk(id chunk.ChunkID, diskBytes int64) *gastrologv1.VaultCtlCommand {
-	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_CompressChunk{CompressChunk: &gastrologv1.CompressChunkCommand{Id: id[:], DiskBytes: diskBytes}}}
-}
-
-// MarshalCompressChunk builds the Raft log data for a CompressChunk command.
-func MarshalCompressChunk(id chunk.ChunkID, diskBytes int64) []byte {
-	return mustMarshalCommand(NewCompressChunk(id, diskBytes))
 }
 
 // NewUploadChunk builds an UploadChunk command message. The integrity

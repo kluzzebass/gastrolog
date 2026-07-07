@@ -100,7 +100,6 @@ All binary files share a common 4-byte header prefix:
 | Bit | Mask   | Meaning                                              |
 |-----|--------|------------------------------------------------------|
 | 0   | `0x01` | Sealed (data files) / Complete (index files)         |
-| 1   | `0x02` | Compressed (data files only)                         |
 
 ---
 

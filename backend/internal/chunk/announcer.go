@@ -27,7 +27,6 @@ type MetadataAnnouncer interface {
 	// monotonic flag is the chunk manager's running observation that's
 	// not preserved in the FSM otherwise.
 	AnnounceSeal(id ChunkID, writeEnd time.Time, recordCount, bytes int64, ingestStart, ingestEnd, sourceEnd time.Time, ingestTSMonotonic bool)
-	AnnounceCompress(id ChunkID, diskBytes int64)
 	// AnnounceAttachOffsets propagates the GLCB blob's section offsets
 	// (IngestTS index, SourceTS index) and frame count into the FSM
 	// after sealToGLCB has produced data.glcb. Without this, FSM

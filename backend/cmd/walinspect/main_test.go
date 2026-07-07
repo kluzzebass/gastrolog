@@ -42,7 +42,6 @@ func TestDecodeFSMCmd_AllCommandTypes(t *testing.T) {
 		{"create", wrap(vaultID, vaultctlfsm.MarshalCreateChunk(cid, now, now, now)), "CmdCreateChunk", cidStr},
 		{"begin_seal", wrap(vaultID, vaultctlfsm.MarshalBeginSeal(cid)), "CmdBeginSeal", cidStr},
 		{"seal", wrap(vaultID, vaultctlfsm.MarshalSealChunk(cid, now, 1, 2, now, now, now, false, now)), "CmdSealChunk", cidStr},
-		{"compress", wrap(vaultID, vaultctlfsm.MarshalCompressChunk(cid, 99)), "CmdCompressChunk", cidStr},
 		{"attach_offsets", wrap(vaultID, vaultctlfsm.MarshalAttachOffsets(cid, 1, 2, 3, 4)), "CmdAttachOffsets", cidStr},
 		{"upload", wrap(vaultID, vaultctlfsm.MarshalUploadChunk(cid, 1, 2, 3, 4, 5, [32]byte{}, glid.GLID{}, 0)), "CmdUploadChunk", cidStr},
 		{"delete", wrap(vaultID, vaultctlfsm.MarshalDeleteChunk(cid)), "CmdDeleteChunk", cidStr},
