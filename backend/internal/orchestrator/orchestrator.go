@@ -218,6 +218,14 @@ type Orchestrator struct {
 	// segmentPuller streams completed segments from peer holders for
 	// collection. Set from factories during ApplyConfig (cluster mode only).
 	segmentPuller *cluster.SegmentPuller
+	// chunkGLCBPuller streams sealed chunk GLCBs from peer homes for
+	// replica catch-up — a home that missed builds (wedged, down) whose
+	// source segments were already released has no other recovery path.
+	chunkGLCBPuller *cluster.ChunkGLCBPuller
+	// glcbPullInflight claims per-chunk pulls so concurrent sweeps never
+	// pull the same GLCB twice. Guarded by glcbPullMu.
+	glcbPullMu       sync.Mutex
+	glcbPullInflight map[chunk.ChunkID]bool
 
 	// Remote transferrer for cross-node chunk migration (nil in single-node mode).
 	transferrer RemoteTransferrer

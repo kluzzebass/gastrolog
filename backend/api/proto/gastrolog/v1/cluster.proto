@@ -588,6 +588,22 @@ message PullSegmentChunk {
   bytes data = 1; // chunk of segment content (up to 64KB)
 }
 
+// PullChunkGLCBRequest asks a peer holding a sealed pipeline chunk's GLCB to
+// stream its bytes. Replica catch-up for homes that missed the build window
+// and whose source segments are already released — without this, a home that
+// misses builds can never recover chunk bytes.
+message PullChunkGLCBRequest {
+  bytes vault_id = 1;
+  bytes chunk_id = 2;
+}
+
+// PullChunkGLCBChunk carries a slice of GLCB bytes during streaming transfer.
+// The puller verifies the assembled file's seal metadata and size against the
+// vault-ctl manifest entry before renaming it into place.
+message PullChunkGLCBChunk {
+  bytes data = 1;
+}
+
 // ListPeerManagedFilesRequest asks a peer which managed files it has on disk.
 message ListPeerManagedFilesRequest {}
 

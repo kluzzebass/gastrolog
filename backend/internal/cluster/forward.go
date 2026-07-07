@@ -219,6 +219,16 @@ func (s *Server) SetSegmentPullServer(fn SegmentPullServer) {
 	s.segmentPullServer = fn
 }
 
+// ChunkGLCBPullServer streams a locally-held sealed chunk GLCB to a peer
+// home performing replica catch-up.
+type ChunkGLCBPullServer func(vaultID glid.GLID, chunkID chunk.ChunkID, w io.Writer) error
+
+// SetChunkGLCBPullServer injects the callback for streaming locally-held
+// GLCBs to peer homes recovering missing chunk replicas.
+func (s *Server) SetChunkGLCBPullServer(fn ChunkGLCBPullServer) {
+	s.chunkGLCBPullServer = fn
+}
+
 // forwardImportRecordsStreamHandler handles the client-streaming
 // ForwardImportRecords RPC. Each message carries a single record; the server
 // wraps the stream as a RecordIterator and feeds it into ImportRecords so at
@@ -865,6 +875,47 @@ func (w *segmentChunkWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// glcbChunkWriter adapts the PullChunkGLCB server stream to an io.Writer —
+// same shape as segmentChunkWriter, same no-copy SendMsg contract.
+type glcbChunkWriter struct {
+	stream grpc.ServerStream
+	chunk  gastrologv1.PullChunkGLCBChunk
+}
+
+func (w *glcbChunkWriter) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	w.chunk.Data = p
+	if err := w.stream.SendMsg(&w.chunk); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+// pullChunkGLCBStreamHandler handles the server-streaming PullChunkGLCB RPC:
+// streams a locally-held sealed GLCB to a home recovering a missing replica.
+func pullChunkGLCBStreamHandler(srv any, stream grpc.ServerStream) error {
+	s := srv.(*Server)
+	if s.chunkGLCBPullServer == nil {
+		return status.Error(codes.Unavailable, "chunk GLCB pull server not configured")
+	}
+	req := &gastrologv1.PullChunkGLCBRequest{}
+	if err := stream.RecvMsg(req); err != nil {
+		return status.Errorf(codes.InvalidArgument, "receive request: %v", err)
+	}
+	vaultID, err := parseVaultID(req.GetVaultId())
+	if err != nil {
+		return status.Errorf(codes.InvalidArgument, "vault id: %v", err)
+	}
+	chunkID := chunk.ChunkID(glid.FromBytes(req.GetChunkId()))
+	w := &glcbChunkWriter{stream: stream}
+	if err := s.chunkGLCBPullServer(vaultID, chunkID, w); err != nil {
+		return status.Errorf(codes.NotFound, "serve GLCB %s/%s: %v", vaultID, chunkID, err)
+	}
+	return nil
+}
+
 // pullSegmentStreamHandler handles the server-streaming PullSegment RPC. Reads
 // the requested completed segment from the local distribution store and
 // streams it back in chunks (Rubicon C).
@@ -1015,6 +1066,11 @@ var clusterServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "PullSegment",
 			Handler:       pullSegmentStreamHandler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "PullChunkGLCB",
+			Handler:       pullChunkGLCBStreamHandler,
 			ServerStreams: true,
 		},
 		{

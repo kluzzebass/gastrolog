@@ -940,6 +940,15 @@ func (r *VaultLifecycleReconciler) syncPipelineSealedGLCBs() {
 		if e.IsSealed() || e.State == chunk.ChunkStateSealing {
 			r.registerPipelineGLCB(e)
 		}
+		if e.IsSealed() {
+			// Replica catch-up: a home missing this sealed chunk's bytes
+			// (missed the build while wedged/down; segments since released)
+			// pulls the GLCB from a peer home. Without this there is NO
+			// recovery path — a placement leader once sat with 1 of ~300
+			// chunks on disk while retention silently starved and the
+			// registry still reported it as a holder.
+			r.orch.pullMissingGLCB(r.vaultID, e)
+		}
 	}
 }
 

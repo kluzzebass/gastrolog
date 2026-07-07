@@ -203,7 +203,8 @@ type Server struct {
 
 	// segmentPullServer streams a locally-held completed segment to a peer
 	// collector (Rubicon C).
-	segmentPullServer SegmentPullServer
+	segmentPullServer   SegmentPullServer
+	chunkGLCBPullServer ChunkGLCBPullServer
 
 	// internalHandler is the Connect mux used for dispatching ForwardRPC
 	// requests. It has no routing interceptor (preventing loops) and uses

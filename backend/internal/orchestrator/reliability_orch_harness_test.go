@@ -440,6 +440,7 @@ func (h *orchRelHarness) startNode(id string) {
 	if h.pipeline != nil {
 		factories.PeerConns = n.peerConns
 		n.clusterSrv.SetSegmentPullServer(orch.ServeSegmentPull)
+		n.clusterSrv.SetChunkGLCBPullServer(orch.ServeChunkGLCBPull)
 		// ForwardVaultApply receiver: applies forwarded vault-ctl commands to
 		// the local Raft group, mirroring wireClusterRaftApplies in app.go.
 		// Without it, origin publishes from non-leader nodes are rejected

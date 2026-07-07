@@ -117,6 +117,7 @@ func (o *Orchestrator) ApplyConfig(sys *system.System, factories Factories) erro
 	o.peerConns = factories.PeerConns
 	if factories.PeerConns != nil && o.segmentPuller == nil {
 		o.segmentPuller = cluster.NewSegmentPuller(factories.PeerConns)
+		o.chunkGLCBPuller = cluster.NewChunkGLCBPuller(factories.PeerConns)
 	}
 
 	// Root the per-vault segment areas under the node home unless already

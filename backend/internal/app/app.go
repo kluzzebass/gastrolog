@@ -52,10 +52,10 @@ import (
 	ingesttail "gastrolog/internal/ingester/tail"
 	"gastrolog/internal/lifecycle"
 	"gastrolog/internal/logging"
+	"gastrolog/internal/multiraft"
 	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/pipeline/digestion"
-	"gastrolog/internal/multiraft"
 	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/raftwal"
 	"gastrolog/internal/schedwatch"
@@ -677,6 +677,7 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 	clusterSrv.SetExplainExecutor(newExplainExecutor(orch, nodeID))
 	clusterSrv.SetFollowExecutor(newFollowExecutor(orch))
 	clusterSrv.SetSegmentPullServer(orch.ServeSegmentPull)
+	clusterSrv.SetChunkGLCBPullServer(orch.ServeChunkGLCBPull)
 
 	return searchForwarder
 }

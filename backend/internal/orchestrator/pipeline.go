@@ -39,6 +39,24 @@ func (o *Orchestrator) ServeSegmentPull(vaultID, segmentID glid.GLID, w io.Write
 	return pl.ServePull(distribution.PullRequest{VaultID: vaultID, SegmentID: segmentID, Dest: w})
 }
 
+// ServeChunkGLCBPull streams a locally-held sealed chunk GLCB to a peer home
+// recovering a missing replica. Serves straight from the pipeline chunk root;
+// the puller verifies seal metadata before promoting, so no integrity work
+// happens here.
+func (o *Orchestrator) ServeChunkGLCBPull(vaultID glid.GLID, chunkID chunk.ChunkID, w io.Writer) error {
+	root, ok := o.pipelineVaultChunkRoot(vaultID)
+	if !ok {
+		return fmt.Errorf("vault %s is not a pipeline home on this node", vaultID)
+	}
+	f, err := os.Open(filepath.Clean(chunking.ChunkGLCBPath(root, chunkID)))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	_, err = io.Copy(w, f)
+	return err
+}
+
 // SubmitRetentionRecord routes a single record ejected from a vault during a
 // retention event (disposition=route) through the pipeline routing stage with a
 // RetentionSource context, so routes matching _source="retention" / _vault=<id>

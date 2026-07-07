@@ -4209,6 +4209,109 @@ func (x *PullSegmentChunk) GetData() []byte {
 	return nil
 }
 
+// PullChunkGLCBRequest asks a peer holding a sealed pipeline chunk's GLCB to
+// stream its bytes. Replica catch-up for homes that missed the build window
+// and whose source segments are already released — without this, a home that
+// misses builds can never recover chunk bytes.
+type PullChunkGLCBRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	VaultId       []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
+	ChunkId       []byte                 `protobuf:"bytes,2,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PullChunkGLCBRequest) Reset() {
+	*x = PullChunkGLCBRequest{}
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[65]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PullChunkGLCBRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PullChunkGLCBRequest) ProtoMessage() {}
+
+func (x *PullChunkGLCBRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[65]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PullChunkGLCBRequest.ProtoReflect.Descriptor instead.
+func (*PullChunkGLCBRequest) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{65}
+}
+
+func (x *PullChunkGLCBRequest) GetVaultId() []byte {
+	if x != nil {
+		return x.VaultId
+	}
+	return nil
+}
+
+func (x *PullChunkGLCBRequest) GetChunkId() []byte {
+	if x != nil {
+		return x.ChunkId
+	}
+	return nil
+}
+
+// PullChunkGLCBChunk carries a slice of GLCB bytes during streaming transfer.
+// The puller verifies the assembled file's seal metadata and size against the
+// vault-ctl manifest entry before renaming it into place.
+type PullChunkGLCBChunk struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Data          []byte                 `protobuf:"bytes,1,opt,name=data,proto3" json:"data,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PullChunkGLCBChunk) Reset() {
+	*x = PullChunkGLCBChunk{}
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[66]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PullChunkGLCBChunk) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PullChunkGLCBChunk) ProtoMessage() {}
+
+func (x *PullChunkGLCBChunk) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[66]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PullChunkGLCBChunk.ProtoReflect.Descriptor instead.
+func (*PullChunkGLCBChunk) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{66}
+}
+
+func (x *PullChunkGLCBChunk) GetData() []byte {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
 // ListPeerManagedFilesRequest asks a peer which managed files it has on disk.
 type ListPeerManagedFilesRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -4218,7 +4321,7 @@ type ListPeerManagedFilesRequest struct {
 
 func (x *ListPeerManagedFilesRequest) Reset() {
 	*x = ListPeerManagedFilesRequest{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[65]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[67]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4230,7 +4333,7 @@ func (x *ListPeerManagedFilesRequest) String() string {
 func (*ListPeerManagedFilesRequest) ProtoMessage() {}
 
 func (x *ListPeerManagedFilesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[65]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[67]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4243,7 +4346,7 @@ func (x *ListPeerManagedFilesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPeerManagedFilesRequest.ProtoReflect.Descriptor instead.
 func (*ListPeerManagedFilesRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{65}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{67}
 }
 
 // ListPeerManagedFilesResponse returns the file IDs present on a peer.
@@ -4256,7 +4359,7 @@ type ListPeerManagedFilesResponse struct {
 
 func (x *ListPeerManagedFilesResponse) Reset() {
 	*x = ListPeerManagedFilesResponse{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[66]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[68]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4268,7 +4371,7 @@ func (x *ListPeerManagedFilesResponse) String() string {
 func (*ListPeerManagedFilesResponse) ProtoMessage() {}
 
 func (x *ListPeerManagedFilesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[66]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[68]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4281,7 +4384,7 @@ func (x *ListPeerManagedFilesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPeerManagedFilesResponse.ProtoReflect.Descriptor instead.
 func (*ListPeerManagedFilesResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{66}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{68}
 }
 
 func (x *ListPeerManagedFilesResponse) GetFileIds() [][]byte {
@@ -4312,7 +4415,7 @@ type ForwardRPCFrame struct {
 
 func (x *ForwardRPCFrame) Reset() {
 	*x = ForwardRPCFrame{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[67]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[69]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4324,7 +4427,7 @@ func (x *ForwardRPCFrame) String() string {
 func (*ForwardRPCFrame) ProtoMessage() {}
 
 func (x *ForwardRPCFrame) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[67]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[69]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4337,7 +4440,7 @@ func (x *ForwardRPCFrame) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ForwardRPCFrame.ProtoReflect.Descriptor instead.
 func (*ForwardRPCFrame) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{67}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{69}
 }
 
 func (x *ForwardRPCFrame) GetProcedure() string {
@@ -4660,6 +4763,11 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\n" +
 	"segment_id\x18\x02 \x01(\fR\tsegmentId\"&\n" +
 	"\x10PullSegmentChunk\x12\x12\n" +
+	"\x04data\x18\x01 \x01(\fR\x04data\"L\n" +
+	"\x14PullChunkGLCBRequest\x12\x19\n" +
+	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12\x19\n" +
+	"\bchunk_id\x18\x02 \x01(\fR\achunkId\"(\n" +
+	"\x12PullChunkGLCBChunk\x12\x12\n" +
 	"\x04data\x18\x01 \x01(\fR\x04data\"\x1d\n" +
 	"\x1bListPeerManagedFilesRequest\"9\n" +
 	"\x1cListPeerManagedFilesResponse\x12\x19\n" +
@@ -4690,7 +4798,7 @@ func file_gastrolog_v1_cluster_proto_rawDescGZIP() []byte {
 }
 
 var file_gastrolog_v1_cluster_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_gastrolog_v1_cluster_proto_msgTypes = make([]protoimpl.MessageInfo, 68)
+var file_gastrolog_v1_cluster_proto_msgTypes = make([]protoimpl.MessageInfo, 70)
 var file_gastrolog_v1_cluster_proto_goTypes = []any{
 	(AlertSeverity)(0),                        // 0: gastrolog.v1.AlertSeverity
 	(*ForwardApplyRequest)(nil),               // 1: gastrolog.v1.ForwardApplyRequest
@@ -4758,66 +4866,68 @@ var file_gastrolog_v1_cluster_proto_goTypes = []any{
 	(*PullManagedFileChunk)(nil),              // 63: gastrolog.v1.PullManagedFileChunk
 	(*PullSegmentRequest)(nil),                // 64: gastrolog.v1.PullSegmentRequest
 	(*PullSegmentChunk)(nil),                  // 65: gastrolog.v1.PullSegmentChunk
-	(*ListPeerManagedFilesRequest)(nil),       // 66: gastrolog.v1.ListPeerManagedFilesRequest
-	(*ListPeerManagedFilesResponse)(nil),      // 67: gastrolog.v1.ListPeerManagedFilesResponse
-	(*ForwardRPCFrame)(nil),                   // 68: gastrolog.v1.ForwardRPCFrame
-	(*timestamppb.Timestamp)(nil),             // 69: google.protobuf.Timestamp
-	(*Job)(nil),                               // 70: gastrolog.v1.Job
-	(*VaultStats)(nil),                        // 71: gastrolog.v1.VaultStats
-	(*VaultRouteStats)(nil),                   // 72: gastrolog.v1.VaultRouteStats
-	(*PerRouteStats)(nil),                     // 73: gastrolog.v1.PerRouteStats
-	(*ThroughputRate)(nil),                    // 74: gastrolog.v1.ThroughputRate
-	(*ExportRecord)(nil),                      // 75: gastrolog.v1.ExportRecord
-	(*TableResult)(nil),                       // 76: gastrolog.v1.TableResult
-	(*HistogramBucket)(nil),                   // 77: gastrolog.v1.HistogramBucket
-	(*ChunkMeta)(nil),                         // 78: gastrolog.v1.ChunkMeta
-	(ChunkChangeOp)(0),                        // 79: gastrolog.v1.ChunkChangeOp
-	(*IndexInfo)(nil),                         // 80: gastrolog.v1.IndexInfo
-	(*ChunkValidation)(nil),                   // 81: gastrolog.v1.ChunkValidation
-	(*ChunkAnalysis)(nil),                     // 82: gastrolog.v1.ChunkAnalysis
-	(*ChunkPlan)(nil),                         // 83: gastrolog.v1.ChunkPlan
+	(*PullChunkGLCBRequest)(nil),              // 66: gastrolog.v1.PullChunkGLCBRequest
+	(*PullChunkGLCBChunk)(nil),                // 67: gastrolog.v1.PullChunkGLCBChunk
+	(*ListPeerManagedFilesRequest)(nil),       // 68: gastrolog.v1.ListPeerManagedFilesRequest
+	(*ListPeerManagedFilesResponse)(nil),      // 69: gastrolog.v1.ListPeerManagedFilesResponse
+	(*ForwardRPCFrame)(nil),                   // 70: gastrolog.v1.ForwardRPCFrame
+	(*timestamppb.Timestamp)(nil),             // 71: google.protobuf.Timestamp
+	(*Job)(nil),                               // 72: gastrolog.v1.Job
+	(*VaultStats)(nil),                        // 73: gastrolog.v1.VaultStats
+	(*VaultRouteStats)(nil),                   // 74: gastrolog.v1.VaultRouteStats
+	(*PerRouteStats)(nil),                     // 75: gastrolog.v1.PerRouteStats
+	(*ThroughputRate)(nil),                    // 76: gastrolog.v1.ThroughputRate
+	(*ExportRecord)(nil),                      // 77: gastrolog.v1.ExportRecord
+	(*TableResult)(nil),                       // 78: gastrolog.v1.TableResult
+	(*HistogramBucket)(nil),                   // 79: gastrolog.v1.HistogramBucket
+	(*ChunkMeta)(nil),                         // 80: gastrolog.v1.ChunkMeta
+	(ChunkChangeOp)(0),                        // 81: gastrolog.v1.ChunkChangeOp
+	(*IndexInfo)(nil),                         // 82: gastrolog.v1.IndexInfo
+	(*ChunkValidation)(nil),                   // 83: gastrolog.v1.ChunkValidation
+	(*ChunkAnalysis)(nil),                     // 84: gastrolog.v1.ChunkAnalysis
+	(*ChunkPlan)(nil),                         // 85: gastrolog.v1.ChunkPlan
 }
 var file_gastrolog_v1_cluster_proto_depIdxs = []int32{
 	7,  // 0: gastrolog.v1.BroadcastRequest.message:type_name -> gastrolog.v1.BroadcastMessage
-	69, // 1: gastrolog.v1.BroadcastMessage.timestamp:type_name -> google.protobuf.Timestamp
+	71, // 1: gastrolog.v1.BroadcastMessage.timestamp:type_name -> google.protobuf.Timestamp
 	10, // 2: gastrolog.v1.BroadcastMessage.node_stats:type_name -> gastrolog.v1.NodeStats
 	9,  // 3: gastrolog.v1.BroadcastMessage.node_jobs:type_name -> gastrolog.v1.NodeJobs
 	8,  // 4: gastrolog.v1.BroadcastMessage.heartbeat:type_name -> gastrolog.v1.Heartbeat
-	70, // 5: gastrolog.v1.NodeJobs.jobs:type_name -> gastrolog.v1.Job
-	71, // 6: gastrolog.v1.NodeStats.vaults:type_name -> gastrolog.v1.VaultStats
+	72, // 5: gastrolog.v1.NodeJobs.jobs:type_name -> gastrolog.v1.Job
+	73, // 6: gastrolog.v1.NodeStats.vaults:type_name -> gastrolog.v1.VaultStats
 	15, // 7: gastrolog.v1.NodeStats.ingesters:type_name -> gastrolog.v1.IngesterNodeStats
-	72, // 8: gastrolog.v1.NodeStats.route_vault_stats:type_name -> gastrolog.v1.VaultRouteStats
-	73, // 9: gastrolog.v1.NodeStats.route_per_route_stats:type_name -> gastrolog.v1.PerRouteStats
+	74, // 8: gastrolog.v1.NodeStats.route_vault_stats:type_name -> gastrolog.v1.VaultRouteStats
+	75, // 9: gastrolog.v1.NodeStats.route_per_route_stats:type_name -> gastrolog.v1.PerRouteStats
 	14, // 10: gastrolog.v1.NodeStats.alerts:type_name -> gastrolog.v1.SystemAlert
 	12, // 11: gastrolog.v1.NodeStats.peer_connections:type_name -> gastrolog.v1.PeerConnStat
 	13, // 12: gastrolog.v1.NodeStats.peer_traffic_totals:type_name -> gastrolog.v1.PeerTrafficTotal
 	11, // 13: gastrolog.v1.NodeStats.vault_pipeline_disk:type_name -> gastrolog.v1.VaultPipelineNodeDisk
-	74, // 14: gastrolog.v1.NodeStats.route_ingested:type_name -> gastrolog.v1.ThroughputRate
-	74, // 15: gastrolog.v1.NodeStats.route_routed:type_name -> gastrolog.v1.ThroughputRate
+	76, // 14: gastrolog.v1.NodeStats.route_ingested:type_name -> gastrolog.v1.ThroughputRate
+	76, // 15: gastrolog.v1.NodeStats.route_routed:type_name -> gastrolog.v1.ThroughputRate
 	0,  // 16: gastrolog.v1.SystemAlert.severity:type_name -> gastrolog.v1.AlertSeverity
-	69, // 17: gastrolog.v1.SystemAlert.first_seen:type_name -> google.protobuf.Timestamp
-	69, // 18: gastrolog.v1.SystemAlert.last_seen:type_name -> google.protobuf.Timestamp
+	71, // 17: gastrolog.v1.SystemAlert.first_seen:type_name -> google.protobuf.Timestamp
+	71, // 18: gastrolog.v1.SystemAlert.last_seen:type_name -> google.protobuf.Timestamp
 	22, // 19: gastrolog.v1.ChunkReplicationCommand.delete_chunk:type_name -> gastrolog.v1.ChunkReplicationDelete
 	19, // 20: gastrolog.v1.ChunkReplicationCommand.import_begin:type_name -> gastrolog.v1.ChunkReplicationImportBegin
 	20, // 21: gastrolog.v1.ChunkReplicationCommand.import_records:type_name -> gastrolog.v1.ChunkReplicationImportRecords
 	21, // 22: gastrolog.v1.ChunkReplicationCommand.import_commit:type_name -> gastrolog.v1.ChunkReplicationImportCommit
-	75, // 23: gastrolog.v1.ChunkReplicationImportRecords.records:type_name -> gastrolog.v1.ExportRecord
-	75, // 24: gastrolog.v1.ForwardSearchResponse.records:type_name -> gastrolog.v1.ExportRecord
-	76, // 25: gastrolog.v1.ForwardSearchResponse.table_result:type_name -> gastrolog.v1.TableResult
-	77, // 26: gastrolog.v1.ForwardSearchResponse.histogram:type_name -> gastrolog.v1.HistogramBucket
-	75, // 27: gastrolog.v1.ForwardGetContextResponse.before:type_name -> gastrolog.v1.ExportRecord
-	75, // 28: gastrolog.v1.ForwardGetContextResponse.anchor:type_name -> gastrolog.v1.ExportRecord
-	75, // 29: gastrolog.v1.ForwardGetContextResponse.after:type_name -> gastrolog.v1.ExportRecord
-	78, // 30: gastrolog.v1.ForwardListChunksResponse.chunks:type_name -> gastrolog.v1.ChunkMeta
-	79, // 31: gastrolog.v1.ForwardWatchChunksResponse.op:type_name -> gastrolog.v1.ChunkChangeOp
-	78, // 32: gastrolog.v1.ForwardWatchChunksResponse.meta:type_name -> gastrolog.v1.ChunkMeta
-	80, // 33: gastrolog.v1.ForwardGetIndexesResponse.indexes:type_name -> gastrolog.v1.IndexInfo
-	81, // 34: gastrolog.v1.ForwardValidateVaultResponse.chunks:type_name -> gastrolog.v1.ChunkValidation
-	78, // 35: gastrolog.v1.ForwardGetChunkResponse.chunk:type_name -> gastrolog.v1.ChunkMeta
-	82, // 36: gastrolog.v1.ForwardAnalyzeChunkResponse.analyses:type_name -> gastrolog.v1.ChunkAnalysis
-	83, // 37: gastrolog.v1.ForwardExplainResponse.chunks:type_name -> gastrolog.v1.ChunkPlan
-	75, // 38: gastrolog.v1.ForwardFollowResponse.records:type_name -> gastrolog.v1.ExportRecord
-	75, // 39: gastrolog.v1.ImportRecordMessage.record:type_name -> gastrolog.v1.ExportRecord
+	77, // 23: gastrolog.v1.ChunkReplicationImportRecords.records:type_name -> gastrolog.v1.ExportRecord
+	77, // 24: gastrolog.v1.ForwardSearchResponse.records:type_name -> gastrolog.v1.ExportRecord
+	78, // 25: gastrolog.v1.ForwardSearchResponse.table_result:type_name -> gastrolog.v1.TableResult
+	79, // 26: gastrolog.v1.ForwardSearchResponse.histogram:type_name -> gastrolog.v1.HistogramBucket
+	77, // 27: gastrolog.v1.ForwardGetContextResponse.before:type_name -> gastrolog.v1.ExportRecord
+	77, // 28: gastrolog.v1.ForwardGetContextResponse.anchor:type_name -> gastrolog.v1.ExportRecord
+	77, // 29: gastrolog.v1.ForwardGetContextResponse.after:type_name -> gastrolog.v1.ExportRecord
+	80, // 30: gastrolog.v1.ForwardListChunksResponse.chunks:type_name -> gastrolog.v1.ChunkMeta
+	81, // 31: gastrolog.v1.ForwardWatchChunksResponse.op:type_name -> gastrolog.v1.ChunkChangeOp
+	80, // 32: gastrolog.v1.ForwardWatchChunksResponse.meta:type_name -> gastrolog.v1.ChunkMeta
+	82, // 33: gastrolog.v1.ForwardGetIndexesResponse.indexes:type_name -> gastrolog.v1.IndexInfo
+	83, // 34: gastrolog.v1.ForwardValidateVaultResponse.chunks:type_name -> gastrolog.v1.ChunkValidation
+	80, // 35: gastrolog.v1.ForwardGetChunkResponse.chunk:type_name -> gastrolog.v1.ChunkMeta
+	84, // 36: gastrolog.v1.ForwardAnalyzeChunkResponse.analyses:type_name -> gastrolog.v1.ChunkAnalysis
+	85, // 37: gastrolog.v1.ForwardExplainResponse.chunks:type_name -> gastrolog.v1.ChunkPlan
+	77, // 38: gastrolog.v1.ForwardFollowResponse.records:type_name -> gastrolog.v1.ExportRecord
+	77, // 39: gastrolog.v1.ImportRecordMessage.record:type_name -> gastrolog.v1.ExportRecord
 	40, // [40:40] is the sub-list for method output_type
 	40, // [40:40] is the sub-list for method input_type
 	40, // [40:40] is the sub-list for extension type_name
@@ -4851,7 +4961,7 @@ func file_gastrolog_v1_cluster_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gastrolog_v1_cluster_proto_rawDesc), len(file_gastrolog_v1_cluster_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   68,
+			NumMessages:   70,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
