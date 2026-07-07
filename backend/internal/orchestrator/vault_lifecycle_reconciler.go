@@ -416,10 +416,16 @@ func (r *VaultLifecycleReconciler) registerPipelineGLCB(e vaultctlfsm.ManifestEn
 	}
 	registrar, ok := r.vaultInst.Chunks.(chunk.ExternalGLCBRegistrar)
 	if !ok {
+		r.orch.noteRegisterSkip(r.vaultID, e.ID, "chunk manager is not an external-GLCB registrar")
 		return
 	}
 	chunkRoot, ok := r.orch.pipelineVaultChunkRoot(r.vaultID)
 	if !ok {
+		// pipelineVaults has no home registration for this vault on this
+		// node — either the pipeline wiring hasn't run yet (boot ordering)
+		// or home resolution went wrong. Every sealed chunk on disk is
+		// unservable until this clears.
+		r.orch.noteRegisterSkip(r.vaultID, e.ID, "no pipeline home registration (pipelineVaultChunkRoot)")
 		return
 	}
 	glcbPath := chunking.ChunkGLCBPath(chunkRoot, e.ID)

@@ -192,6 +192,7 @@ func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, home bool, fsm 
 func (o *Orchestrator) registerBuiltPipelineChunk(vaultID glid.GLID, fsm *vaultctlfsm.FSM, id chunk.ChunkID) {
 	e := fsm.Get(id)
 	if e == nil {
+		o.noteRegisterSkip(vaultID, id, "no FSM entry")
 		return
 	}
 	// Register as soon as the GLCB exists so sealing chunks are queryable
@@ -202,11 +203,26 @@ func (o *Orchestrator) registerBuiltPipelineChunk(vaultID glid.GLID, fsm *vaultc
 	}
 	ti := o.findLocalVaultInstance(vaultID)
 	if ti == nil || ti.Reconciler == nil {
+		// Boot ordering: OnBuilt can fire from chunking recovery before the
+		// vault instance/reconciler exists. The catch-up sweep re-runs
+		// registration, but the skip must be visible — a node once held
+		// 297 complete GLCBs its chunk manager knew nothing about, and
+		// retention/backfill/queries all starved with zero log lines.
+		o.noteRegisterSkip(vaultID, id, "vault instance or reconciler not ready")
 		return
 	}
 	ti.Reconciler.registerPipelineGLCB(*e)
 	if e.State == chunk.ChunkStateSealed {
 		o.schedulePipelineCloudUpload(vaultID, id)
+	}
+}
+
+// noteRegisterSkip surfaces silently-skipped GLCB registrations, throttled
+// per vault: every skip is a chunk this node holds but cannot serve.
+func (o *Orchestrator) noteRegisterSkip(vaultID glid.GLID, id chunk.ChunkID, reason string) {
+	if n, ok := o.registerSkipLog.Allow(vaultID.String()); ok {
+		o.logger.Warn("pipeline GLCB registration skipped",
+			"vault", vaultID, "chunk", id, "reason", reason, "suppressed", n)
 	}
 }
 

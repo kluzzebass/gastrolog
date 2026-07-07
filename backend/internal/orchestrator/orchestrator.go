@@ -184,6 +184,8 @@ type Orchestrator struct {
 	// backfillLogThrottle spaces cloud-backfill failure logging per vault;
 	// the sweep retries failing chunks every few seconds indefinitely.
 	backfillLogThrottle logging.Throttle
+	// registerSkipLog spaces skipped-GLCB-registration warnings per vault.
+	registerSkipLog logging.Throttle
 
 	// Vault registry. Each vault bundles Chunks, Indexes, and Query.
 	vaults map[glid.GLID]*Vault
