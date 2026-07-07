@@ -520,24 +520,54 @@ func readFrameAt(r io.ReaderAt, offset int64, limit uint32) (record.Record, uint
 // returned buffer replaces the caller's (it may have grown); the caller
 // must not retain views into it across calls.
 func readFrameAtBuf(r io.ReaderAt, offset int64, limit uint32, scratch []byte) (record.Record, uint32, []byte, error) {
-	var lenBuf [4]byte
-	if _, err := r.ReadAt(lenBuf[:], offset); err != nil {
-		return record.Record{}, 0, scratch, err
-	}
-	bodyLen := binary.LittleEndian.Uint32(lenBuf[:])
-	if bodyLen == 0 || bodyLen > limit-frameLenPrefixSize {
-		return record.Record{}, 0, scratch, ErrFrameLength
-	}
-	if uint32(cap(scratch)) < bodyLen { //nolint:gosec // G115: cap bounded by segment size
-		scratch = make([]byte, bodyLen)
-	}
-	body := scratch[:bodyLen]
-	if _, err := r.ReadAt(body, offset+frameLenPrefixSize); err != nil {
+	body, scratch, err := readFrameBodyAtBuf(r, offset, limit, scratch)
+	if err != nil {
 		return record.Record{}, 0, scratch, err
 	}
 	rec, err := decodeFrameBody(body)
 	if err != nil {
 		return record.Record{}, 0, scratch, err
 	}
-	return rec, frameLenPrefixSize + bodyLen, scratch, nil
+	return rec, frameLenPrefixSize + uint32(len(body)), scratch, nil //nolint:gosec // G115: bodyLen fits uint32 by construction
+}
+
+// readFrameViewAtBuf is readFrameAtBuf's zero-copy counterpart: the returned
+// view aliases scratch (no attrs map, no Raw copy) and is valid only until
+// the buffer's next reuse. CRC verification is identical.
+func readFrameViewAtBuf(r io.ReaderAt, offset int64, limit uint32, scratch []byte) (record.View, []byte, error) {
+	body, scratch, err := readFrameBodyAtBuf(r, offset, limit, scratch)
+	if err != nil {
+		return record.View{}, scratch, err
+	}
+	v, err := decodeFrameView(body)
+	if err != nil {
+		return record.View{}, scratch, err
+	}
+	return v, scratch, nil
+}
+
+// readFrameBodyAtBuf reads one frame's body bytes into scratch, growing it
+// as needed. Shared by the Record and View decode paths. The length prefix
+// reads through scratch too — a stack byte array escapes via the io.ReaderAt
+// interface call, which cost one heap alloc per record in scan loops.
+func readFrameBodyAtBuf(r io.ReaderAt, offset int64, limit uint32, scratch []byte) ([]byte, []byte, error) {
+	if cap(scratch) < frameLenPrefixSize {
+		scratch = make([]byte, frameLenPrefixSize)
+	}
+	lenBuf := scratch[:frameLenPrefixSize]
+	if _, err := r.ReadAt(lenBuf, offset); err != nil {
+		return nil, scratch, err
+	}
+	bodyLen := binary.LittleEndian.Uint32(lenBuf)
+	if bodyLen == 0 || bodyLen > limit-frameLenPrefixSize {
+		return nil, scratch, ErrFrameLength
+	}
+	if uint32(cap(scratch)) < bodyLen { //nolint:gosec // G115: cap bounded by segment size
+		scratch = make([]byte, bodyLen)
+	}
+	body := scratch[:bodyLen]
+	if _, err := r.ReadAt(body, offset+frameLenPrefixSize); err != nil {
+		return nil, scratch, err
+	}
+	return body, scratch, nil
 }
