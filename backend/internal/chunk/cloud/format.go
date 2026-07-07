@@ -133,11 +133,11 @@ type BlobMeta struct {
 	// derived by touching record frames (gastrolog-699s7p).
 	IngestTSMonotonic bool
 	WriteStart        time.Time
-	WriteEnd    time.Time
-	IngestStart time.Time
-	IngestEnd   time.Time
-	SourceStart time.Time // zero = no source timestamps
-	SourceEnd   time.Time
+	WriteEnd          time.Time
+	IngestStart       time.Time
+	IngestEnd         time.Time
+	SourceStart       time.Time // zero = no source timestamps
+	SourceEnd         time.Time
 
 	// TS index section locations from the TOC tail (0 = section absent).
 	IngestIdxOffset int64 // byte offset from blob start

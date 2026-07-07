@@ -17,7 +17,6 @@ func recordIndexAt(indexBytes []byte, pos uint32) (recordIndex, error) {
 	}, nil
 }
 
-
 func (rd *Reader) recordIndexAt(pos uint32) (recordIndex, error) {
 	if rd.indexBytes != nil {
 		return recordIndexAt(rd.indexBytes, pos)
@@ -27,4 +26,3 @@ func (rd *Reader) recordIndexAt(pos uint32) (recordIndex, error) {
 	}
 	return rd.index[pos], nil
 }
-
