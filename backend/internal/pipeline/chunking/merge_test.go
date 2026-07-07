@@ -33,7 +33,7 @@ func makeRecord(seq uint32, ts time.Time, raw string) record.Record {
 	}
 }
 
-func writeSegment(t *testing.T, segID, vaultID glid.GLID, recs []record.Record) string {
+func writeSegment(t testing.TB, segID, vaultID glid.GLID, recs []record.Record) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), segID.String())
 

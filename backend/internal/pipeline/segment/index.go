@@ -307,6 +307,34 @@ func (sf *File) RecordAtEventOrder(pos uint32) (record.Record, error) {
 	return sf.ReadRecordAtFilePos(entry.FilePos)
 }
 
+// ReadViewAtFilePos decodes the frame at filePos into a record.View aliasing
+// scratch — no attrs map, no Raw copy, same CRC verification as the Record
+// path. The returned buffer replaces the caller's scratch (it may have
+// grown); the view is valid only until the buffer's next reuse. For scan
+// loops that read many records but consume only fixed fields — the planner's
+// bounds pass fully materialized every record for three timestamps, 24GB of
+// cumulative garbage on a loaded home (gastrolog-11y2iv).
+func (sf *File) ReadViewAtFilePos(filePos uint32, scratch []byte) (record.View, []byte, error) {
+	recEnd, err := sf.recordsEnd()
+	if err != nil {
+		return record.View{}, scratch, err
+	}
+	if filePos < HeaderSize || filePos >= recEnd {
+		return record.View{}, scratch, ErrFrameLength
+	}
+	return readFrameViewAtBuf(sf.f, int64(filePos), recEnd-filePos, scratch)
+}
+
+// ViewAtEventOrder is ReadViewAtFilePos addressed by canonical EventID-order
+// position. Same aliasing contract.
+func (sf *File) ViewAtEventOrder(pos uint32, scratch []byte) (record.View, []byte, error) {
+	entry, err := sf.IndexEntryAt(pos)
+	if err != nil {
+		return record.View{}, scratch, err
+	}
+	return sf.ReadViewAtFilePos(entry.FilePos, scratch)
+}
+
 func (sf *File) readIndexEntry(pos uint32) (IndexEntry, error) {
 	off := int64(sf.hdr.IndexOffset) + int64(pos)*IndexEntrySize
 	var buf [IndexEntrySize]byte

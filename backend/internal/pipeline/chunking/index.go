@@ -9,8 +9,13 @@ import (
 )
 
 // OrderedIndex is a finalized segment's records in canonical EventID order.
+// Not safe for concurrent use: ViewAt reuses an internal scratch buffer
+// (matching the planner's single-goroutine access pattern).
 type OrderedIndex struct {
 	sf *segment.File
+	// scratch backs ViewAt frame reads, reused across calls so bounds
+	// scans allocate nothing per record (gastrolog-11y2iv).
+	scratch []byte
 }
 
 // BuildOrderedIndex opens a completed segment and uses its on-disk EventID index.
@@ -45,6 +50,17 @@ func (idx *OrderedIndex) RecordAtFilePos(filePos uint32) (record.Record, error) 
 // RecordAt returns the record at position pos in EventID order.
 func (idx *OrderedIndex) RecordAt(pos uint32) (record.Record, error) {
 	return idx.sf.RecordAtEventOrder(pos)
+}
+
+// ViewAt returns a zero-copy view of the record at position pos in EventID
+// order. The view aliases the index's internal scratch buffer and is valid
+// only until the next ViewAt call. Scan loops that consume fixed fields
+// (bounds passes: three timestamps per record) use this instead of RecordAt
+// to avoid materializing attrs maps and Raw copies they never read.
+func (idx *OrderedIndex) ViewAt(pos uint32) (record.View, error) {
+	v, scratch, err := idx.sf.ViewAtEventOrder(pos, idx.scratch)
+	idx.scratch = scratch
+	return v, err
 }
 
 // FindSourceStartPosition returns the first event-order position at or after start
