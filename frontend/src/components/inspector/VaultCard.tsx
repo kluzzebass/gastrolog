@@ -643,6 +643,12 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
     const rf = vaultCfg?.replicationFactor || 1;
     const secondaries = vaultCfg ? followerNodeIds(vaultCfg, nscs) : [];
     const pnId = vaultCfg ? leaderNodeId(vaultCfg, nscs) : "";
+    // Blob-mark label: the operator-configured cloud store name for this
+    // vault. Vendor words appear only as operator-supplied labels.
+    const cloudSvcId = vaultCfg ? encode(vaultCfg.cloudServiceId) : "";
+    const storeLabel =
+      (cloudSvcId && config?.cloudServices.find((svc) => encode(svc.id) === cloudSvcId)?.name) ||
+      "cloud";
     return sortChunks(group.chunks).map((chunk) => {
       const start = chunkStartInstant(chunk);
       const end = chunkEndInstant(chunk, start);
@@ -672,6 +678,7 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
           placementNodes={placementNodes}
           pendingAckNodes={pendingAckNodes}
           liveNodes={liveNodes}
+          storeLabel={storeLabel}
         />
       );
     });
@@ -777,6 +784,7 @@ function ChunkRow({
   placementNodes,
   pendingAckNodes,
   liveNodes,
+  storeLabel,
 }: Readonly<{
   chunk: ChunkMeta;
   vaultId: string;
@@ -791,6 +799,7 @@ function ChunkRow({
   placementNodes: string[];
   pendingAckNodes: string[];
   liveNodes: ReadonlySet<string>;
+  storeLabel: string;
 }>) {
   return (
     <>
@@ -830,7 +839,7 @@ function ChunkRow({
         <td className="px-2 py-2">
           <span className="flex items-center gap-1.5 whitespace-nowrap">
             {chunk.cloudBacked ? (
-              <BlobMark label={chunk.storageClass || "blob"} uploading={false} />
+              <BlobMark label={storeLabel} uploading={false} />
             ) : (
               (() => {
                 const { pips, ghosts } = computePips({
