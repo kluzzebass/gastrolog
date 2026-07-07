@@ -70,6 +70,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -933,6 +934,11 @@ func (r *VaultLifecycleReconciler) syncPipelineSealedGLCBs() {
 	if r.fsm == nil {
 		return
 	}
+	chunkRoot, hasRoot := "", false
+	if r.orch != nil {
+		chunkRoot, hasRoot = r.orch.pipelineVaultChunkRoot(r.vaultID)
+	}
+	var ack, revoke []chunk.ChunkID
 	for _, e := range r.fsm.List() {
 		if e.CloudBacked {
 			continue
@@ -940,15 +946,62 @@ func (r *VaultLifecycleReconciler) syncPipelineSealedGLCBs() {
 		if e.IsSealed() || e.State == chunk.ChunkStateSealing {
 			r.registerPipelineGLCB(e)
 		}
-		if e.IsSealed() {
-			// Replica catch-up: a home missing this sealed chunk's bytes
-			// (missed the build while wedged/down; segments since released)
-			// pulls the GLCB from a peer home. Without this there is NO
-			// recovery path — a placement leader once sat with 1 of ~300
-			// chunks on disk while retention silently starved and the
-			// registry still reported it as a holder.
-			r.orch.pullMissingGLCB(r.vaultID, e)
+		if !e.IsSealed() {
+			continue
 		}
+		// Replica catch-up: a home missing this sealed chunk's bytes
+		// (missed the build while wedged/down; segments since released)
+		// pulls the GLCB from a peer home. Without this there is NO
+		// recovery path — a placement leader once sat with 1 of ~300
+		// chunks on disk while retention silently starved and the
+		// registry still reported it as a holder.
+		r.orch.pullMissingGLCB(r.vaultID, e)
+
+		// Holder receipts: reconcile this node's residency claim against
+		// the bytes actually on disk. Earn on presence (local build or a
+		// completed pull), revoke on absence — ChunkResidency then reports
+		// bytes truth instead of the placement assumption, and a home that
+		// lost its copy stops being counted the same sweep that schedules
+		// its recovery pull.
+		if !hasRoot {
+			continue
+		}
+		_, statErr := os.Stat(chunking.ChunkGLCBPath(chunkRoot, e.ID))
+		holds := slices.Contains(e.Holders, r.localNodeID)
+		switch {
+		case statErr == nil && !holds:
+			ack = append(ack, e.ID)
+		case os.IsNotExist(statErr) && holds:
+			revoke = append(revoke, e.ID)
+		}
+	}
+	r.commitChunkHolderReceipts(ack, revoke)
+}
+
+// commitChunkHolderReceipts proposes this sweep pass's holder claims and
+// revocations, one batched Raft apply each (per-chunk applies would flood
+// the group behind the publish traffic). Failures retry naturally on the
+// next sweep tick — the diff is recomputed from disk + FSM every pass.
+func (r *VaultLifecycleReconciler) commitChunkHolderReceipts(ack, revoke []chunk.ChunkID) {
+	if r.vaultInst == nil {
+		return
+	}
+	if len(ack) > 0 && r.vaultInst.ApplyRaftAckChunkHolders != nil {
+		if err := r.vaultInst.ApplyRaftAckChunkHolders(ack, r.localNodeID); err != nil {
+			r.logger.Debug("chunk holder ack failed; retrying next sweep",
+				"vault", r.vaultID, "chunks", len(ack), "error", err)
+		}
+	}
+	if len(revoke) > 0 && r.vaultInst.ApplyRaftRevokeChunkHolders != nil {
+		if err := r.vaultInst.ApplyRaftRevokeChunkHolders(revoke, r.localNodeID); err != nil {
+			r.logger.Debug("chunk holder revoke failed; retrying next sweep",
+				"vault", r.vaultID, "chunks", len(revoke), "error", err)
+			return
+		}
+		// Revocations are loud: replica counts just dropped to the truth
+		// for these chunks, and the catch-up pull is now re-earning them.
+		r.logger.Info("chunk holder claims revoked — bytes missing locally; replica catch-up will re-earn",
+			"vault", r.vaultID, "chunks", len(revoke))
 	}
 }
 

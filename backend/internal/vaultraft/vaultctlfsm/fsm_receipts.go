@@ -108,11 +108,16 @@ func (f *FSM) IsExpectedToAck(chunkID chunk.ChunkID, nodeID string) bool {
 // ChunkResidency returns the set of node IDs that currently hold the
 // chunk's bytes, sourced authoritatively from the vault-ctl FSM state.
 //
-// For chunks WITHOUT an in-flight delete: residency = the supplied
-// placement set. Every placement member is expected to hold the chunk
-// once catchup has converged; transient under-replication windows
-// during catchup are bounded by the missing-replica sweep
-// (gastrolog-19241).
+// For chunks WITH holder receipts: residency = the entry's Holders set —
+// nodes that built or pulled verified GLCB bytes (AckChunkHolder), minus
+// revoked claims (RevokeChunkHolder after a stat-miss). This is bytes
+// truth, not placement intent.
+//
+// For chunks WITHOUT receipts and no in-flight delete: residency = the
+// supplied placement set — the pre-receipt assumption, kept as fallback
+// for entries created before receipts existed and for memory-mode. It
+// overstates: a home that lost its bytes keeps being counted until a
+// sweep acks/revokes truth into the entry.
 //
 // For chunks WITH an in-flight delete (entry exists in pendingDeletes):
 // residency = ExpectedFrom — the nodes that still owe a CmdAckDelete.
@@ -130,14 +135,12 @@ func (f *FSM) IsExpectedToAck(chunkID chunk.ChunkID, nodeID string) bool {
 func (f *FSM) ChunkResidency(chunkID chunk.ChunkID, placementNodeIDs []string) []string {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	if _, ok := f.chunks[chunkID]; !ok {
+	e, ok := f.chunks[chunkID]
+	if !ok {
 		// Chunk gone from the FSM — fully deleted or never existed.
 		// pendingDeletes entries are removed by applyFinalizeDelete
 		// before the FSM tombstone, so this branch covers both the
 		// "never existed" and "finalized and tombstoned" cases.
-		if _, tombstoned := f.tombstones[chunkID]; tombstoned {
-			return nil
-		}
 		return nil
 	}
 	if p, ok := f.pendingDeletes[chunkID]; ok {
@@ -145,6 +148,11 @@ func (f *FSM) ChunkResidency(chunkID chunk.ChunkID, placementNodeIDs []string) [
 		for nid := range p.ExpectedFrom {
 			out = append(out, nid)
 		}
+		return out
+	}
+	if len(e.Holders) > 0 {
+		out := make([]string, len(e.Holders))
+		copy(out, e.Holders)
 		return out
 	}
 	if len(placementNodeIDs) == 0 {

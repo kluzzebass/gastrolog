@@ -224,6 +224,8 @@ type VaultCtlCommand struct {
 	//	*VaultCtlCommand_DiscardOpenChunkManifest
 	//	*VaultCtlCommand_PublishCompletedSegments
 	//	*VaultCtlCommand_AddOpenChunkSegmentRefs
+	//	*VaultCtlCommand_AckChunkHolder
+	//	*VaultCtlCommand_RevokeChunkHolder
 	Command       isVaultCtlCommand_Command `protobuf_oneof:"command"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -464,6 +466,24 @@ func (x *VaultCtlCommand) GetAddOpenChunkSegmentRefs() *AddOpenChunkSegmentRefsC
 	return nil
 }
 
+func (x *VaultCtlCommand) GetAckChunkHolder() *AckChunkHolderCommand {
+	if x != nil {
+		if x, ok := x.Command.(*VaultCtlCommand_AckChunkHolder); ok {
+			return x.AckChunkHolder
+		}
+	}
+	return nil
+}
+
+func (x *VaultCtlCommand) GetRevokeChunkHolder() *RevokeChunkHolderCommand {
+	if x != nil {
+		if x, ok := x.Command.(*VaultCtlCommand_RevokeChunkHolder); ok {
+			return x.RevokeChunkHolder
+		}
+	}
+	return nil
+}
+
 type isVaultCtlCommand_Command interface {
 	isVaultCtlCommand_Command()
 }
@@ -558,6 +578,14 @@ type VaultCtlCommand_AddOpenChunkSegmentRefs struct {
 	AddOpenChunkSegmentRefs *AddOpenChunkSegmentRefsCommand `protobuf:"bytes,22,opt,name=add_open_chunk_segment_refs,json=addOpenChunkSegmentRefs,proto3,oneof"`
 }
 
+type VaultCtlCommand_AckChunkHolder struct {
+	AckChunkHolder *AckChunkHolderCommand `protobuf:"bytes,23,opt,name=ack_chunk_holder,json=ackChunkHolder,proto3,oneof"`
+}
+
+type VaultCtlCommand_RevokeChunkHolder struct {
+	RevokeChunkHolder *RevokeChunkHolderCommand `protobuf:"bytes,24,opt,name=revoke_chunk_holder,json=revokeChunkHolder,proto3,oneof"`
+}
+
 func (*VaultCtlCommand_CreateChunk) isVaultCtlCommand_Command() {}
 
 func (*VaultCtlCommand_SealChunk) isVaultCtlCommand_Command() {}
@@ -601,6 +629,10 @@ func (*VaultCtlCommand_DiscardOpenChunkManifest) isVaultCtlCommand_Command() {}
 func (*VaultCtlCommand_PublishCompletedSegments) isVaultCtlCommand_Command() {}
 
 func (*VaultCtlCommand_AddOpenChunkSegmentRefs) isVaultCtlCommand_Command() {}
+
+func (*VaultCtlCommand_AckChunkHolder) isVaultCtlCommand_Command() {}
+
+func (*VaultCtlCommand_RevokeChunkHolder) isVaultCtlCommand_Command() {}
 
 type CreateChunkCommand struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
@@ -2501,6 +2533,119 @@ func (x *AckSegmentHolderCommand) GetNodeId() string {
 	return ""
 }
 
+// AckChunkHolderCommand records that a node holds a sealed chunk's verified
+// GLCB bytes on disk — earned by building it locally or by replica catch-up
+// pull, never assumed from placement. Idempotent per chunk. Chunk residency
+// (operator replica counts, RF-safety gates) reads this holder set instead
+// of reporting the placement list as if it were bytes.
+type AckChunkHolderCommand struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ChunkIds      [][]byte               `protobuf:"bytes,1,rep,name=chunk_ids,json=chunkIds,proto3" json:"chunk_ids,omitempty"`
+	NodeId        string                 `protobuf:"bytes,2,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AckChunkHolderCommand) Reset() {
+	*x = AckChunkHolderCommand{}
+	mi := &file_gastrolog_v1_vaultctlfsm_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AckChunkHolderCommand) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AckChunkHolderCommand) ProtoMessage() {}
+
+func (x *AckChunkHolderCommand) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_vaultctlfsm_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AckChunkHolderCommand.ProtoReflect.Descriptor instead.
+func (*AckChunkHolderCommand) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_vaultctlfsm_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *AckChunkHolderCommand) GetChunkIds() [][]byte {
+	if x != nil {
+		return x.ChunkIds
+	}
+	return nil
+}
+
+func (x *AckChunkHolderCommand) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
+// RevokeChunkHolderCommand withdraws a holder claim: the node stat-missed
+// the GLCB it was recorded as holding (missed builds while wedged, disk
+// swap, operator deletion). Replica counts drop to the truth immediately;
+// the replica catch-up pull re-earns the ack after restoring the bytes.
+type RevokeChunkHolderCommand struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ChunkIds      [][]byte               `protobuf:"bytes,1,rep,name=chunk_ids,json=chunkIds,proto3" json:"chunk_ids,omitempty"`
+	NodeId        string                 `protobuf:"bytes,2,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RevokeChunkHolderCommand) Reset() {
+	*x = RevokeChunkHolderCommand{}
+	mi := &file_gastrolog_v1_vaultctlfsm_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RevokeChunkHolderCommand) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RevokeChunkHolderCommand) ProtoMessage() {}
+
+func (x *RevokeChunkHolderCommand) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_vaultctlfsm_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RevokeChunkHolderCommand.ProtoReflect.Descriptor instead.
+func (*RevokeChunkHolderCommand) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_vaultctlfsm_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *RevokeChunkHolderCommand) GetChunkIds() [][]byte {
+	if x != nil {
+		return x.ChunkIds
+	}
+	return nil
+}
+
+func (x *RevokeChunkHolderCommand) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
 // ManifestEntry is the full metadata for one chunk in a vault's manifest. The
 // proto carries every field of the Go ManifestEntry, including Hash /
 // CloudServiceID / KeyScheme which the legacy 123-byte snapshot codec dropped.
@@ -2530,13 +2675,16 @@ type ManifestEntry struct {
 	KeyScheme         uint32                 `protobuf:"varint,22,opt,name=key_scheme,json=keyScheme,proto3" json:"key_scheme,omitempty"`
 	// Wall-clock time when sealing completed (CmdSealChunk apply).
 	SealedAtNanos int64 `protobuf:"varint,23,opt,name=sealed_at_nanos,json=sealedAtNanos,proto3" json:"sealed_at_nanos,omitempty"`
+	// Node IDs holding verified GLCB bytes for this chunk (AckChunkHolder /
+	// RevokeChunkHolder). Residency truth — placement says who SHOULD hold.
+	Holders       []string `protobuf:"bytes,24,rep,name=holders,proto3" json:"holders,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ManifestEntry) Reset() {
 	*x = ManifestEntry{}
-	mi := &file_gastrolog_v1_vaultctlfsm_proto_msgTypes[31]
+	mi := &file_gastrolog_v1_vaultctlfsm_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2548,7 +2696,7 @@ func (x *ManifestEntry) String() string {
 func (*ManifestEntry) ProtoMessage() {}
 
 func (x *ManifestEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_vaultctlfsm_proto_msgTypes[31]
+	mi := &file_gastrolog_v1_vaultctlfsm_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2561,7 +2709,7 @@ func (x *ManifestEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ManifestEntry.ProtoReflect.Descriptor instead.
 func (*ManifestEntry) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_vaultctlfsm_proto_rawDescGZIP(), []int{31}
+	return file_gastrolog_v1_vaultctlfsm_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *ManifestEntry) GetId() []byte {
@@ -2725,6 +2873,13 @@ func (x *ManifestEntry) GetSealedAtNanos() int64 {
 	return 0
 }
 
+func (x *ManifestEntry) GetHolders() []string {
+	if x != nil {
+		return x.Holders
+	}
+	return nil
+}
+
 // Tombstone records a deleted chunk ID and the apply time of the delete.
 type Tombstone struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
@@ -2736,7 +2891,7 @@ type Tombstone struct {
 
 func (x *Tombstone) Reset() {
 	*x = Tombstone{}
-	mi := &file_gastrolog_v1_vaultctlfsm_proto_msgTypes[32]
+	mi := &file_gastrolog_v1_vaultctlfsm_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2748,7 +2903,7 @@ func (x *Tombstone) String() string {
 func (*Tombstone) ProtoMessage() {}
 
 func (x *Tombstone) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_vaultctlfsm_proto_msgTypes[32]
+	mi := &file_gastrolog_v1_vaultctlfsm_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2761,7 +2916,7 @@ func (x *Tombstone) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Tombstone.ProtoReflect.Descriptor instead.
 func (*Tombstone) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_vaultctlfsm_proto_rawDescGZIP(), []int{32}
+	return file_gastrolog_v1_vaultctlfsm_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *Tombstone) GetChunkId() []byte {
@@ -2791,7 +2946,7 @@ type PendingDelete struct {
 
 func (x *PendingDelete) Reset() {
 	*x = PendingDelete{}
-	mi := &file_gastrolog_v1_vaultctlfsm_proto_msgTypes[33]
+	mi := &file_gastrolog_v1_vaultctlfsm_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2803,7 +2958,7 @@ func (x *PendingDelete) String() string {
 func (*PendingDelete) ProtoMessage() {}
 
 func (x *PendingDelete) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_vaultctlfsm_proto_msgTypes[33]
+	mi := &file_gastrolog_v1_vaultctlfsm_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2816,7 +2971,7 @@ func (x *PendingDelete) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PendingDelete.ProtoReflect.Descriptor instead.
 func (*PendingDelete) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_vaultctlfsm_proto_rawDescGZIP(), []int{33}
+	return file_gastrolog_v1_vaultctlfsm_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *PendingDelete) GetChunkId() []byte {
@@ -2871,7 +3026,7 @@ type VaultCtlSnapshot struct {
 
 func (x *VaultCtlSnapshot) Reset() {
 	*x = VaultCtlSnapshot{}
-	mi := &file_gastrolog_v1_vaultctlfsm_proto_msgTypes[34]
+	mi := &file_gastrolog_v1_vaultctlfsm_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2883,7 +3038,7 @@ func (x *VaultCtlSnapshot) String() string {
 func (*VaultCtlSnapshot) ProtoMessage() {}
 
 func (x *VaultCtlSnapshot) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_vaultctlfsm_proto_msgTypes[34]
+	mi := &file_gastrolog_v1_vaultctlfsm_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2896,7 +3051,7 @@ func (x *VaultCtlSnapshot) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VaultCtlSnapshot.ProtoReflect.Descriptor instead.
 func (*VaultCtlSnapshot) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_vaultctlfsm_proto_rawDescGZIP(), []int{34}
+	return file_gastrolog_v1_vaultctlfsm_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *VaultCtlSnapshot) GetEntries() []*ManifestEntry {
@@ -2967,7 +3122,7 @@ type VaultGroupSnapshot struct {
 
 func (x *VaultGroupSnapshot) Reset() {
 	*x = VaultGroupSnapshot{}
-	mi := &file_gastrolog_v1_vaultctlfsm_proto_msgTypes[35]
+	mi := &file_gastrolog_v1_vaultctlfsm_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2979,7 +3134,7 @@ func (x *VaultGroupSnapshot) String() string {
 func (*VaultGroupSnapshot) ProtoMessage() {}
 
 func (x *VaultGroupSnapshot) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_vaultctlfsm_proto_msgTypes[35]
+	mi := &file_gastrolog_v1_vaultctlfsm_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2992,7 +3147,7 @@ func (x *VaultGroupSnapshot) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VaultGroupSnapshot.ProtoReflect.Descriptor instead.
 func (*VaultGroupSnapshot) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_vaultctlfsm_proto_rawDescGZIP(), []int{35}
+	return file_gastrolog_v1_vaultctlfsm_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *VaultGroupSnapshot) GetVaults() []*VaultGroupSnapshotEntry {
@@ -3012,7 +3167,7 @@ type VaultGroupSnapshotEntry struct {
 
 func (x *VaultGroupSnapshotEntry) Reset() {
 	*x = VaultGroupSnapshotEntry{}
-	mi := &file_gastrolog_v1_vaultctlfsm_proto_msgTypes[36]
+	mi := &file_gastrolog_v1_vaultctlfsm_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3024,7 +3179,7 @@ func (x *VaultGroupSnapshotEntry) String() string {
 func (*VaultGroupSnapshotEntry) ProtoMessage() {}
 
 func (x *VaultGroupSnapshotEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_vaultctlfsm_proto_msgTypes[36]
+	mi := &file_gastrolog_v1_vaultctlfsm_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3037,7 +3192,7 @@ func (x *VaultGroupSnapshotEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VaultGroupSnapshotEntry.ProtoReflect.Descriptor instead.
 func (*VaultGroupSnapshotEntry) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_vaultctlfsm_proto_rawDescGZIP(), []int{36}
+	return file_gastrolog_v1_vaultctlfsm_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *VaultGroupSnapshotEntry) GetVaultId() []byte {
@@ -3066,7 +3221,7 @@ const file_gastrolog_v1_vaultctlfsm_proto_rawDesc = "" +
 	"\vNoopCommand\"h\n" +
 	"\x12VaultScopedCommand\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\x127\n" +
-	"\acommand\x18\x02 \x01(\v2\x1d.gastrolog.v1.VaultCtlCommandR\acommand\"\xe4\x0e\n" +
+	"\acommand\x18\x02 \x01(\v2\x1d.gastrolog.v1.VaultCtlCommandR\acommand\"\x8f\x10\n" +
 	"\x0fVaultCtlCommand\x12E\n" +
 	"\fcreate_chunk\x18\x01 \x01(\v2 .gastrolog.v1.CreateChunkCommandH\x00R\vcreateChunk\x12?\n" +
 	"\n" +
@@ -3094,7 +3249,9 @@ const file_gastrolog_v1_vaultctlfsm_proto_rawDesc = "" +
 	"\x12ack_segment_holder\x18\x13 \x01(\v2%.gastrolog.v1.AckSegmentHolderCommandH\x00R\x10ackSegmentHolder\x12n\n" +
 	"\x1bdiscard_open_chunk_manifest\x18\x14 \x01(\v2-.gastrolog.v1.DiscardOpenChunkManifestCommandH\x00R\x18discardOpenChunkManifest\x12m\n" +
 	"\x1apublish_completed_segments\x18\x15 \x01(\v2-.gastrolog.v1.PublishCompletedSegmentsCommandH\x00R\x18publishCompletedSegments\x12l\n" +
-	"\x1badd_open_chunk_segment_refs\x18\x16 \x01(\v2,.gastrolog.v1.AddOpenChunkSegmentRefsCommandH\x00R\x17addOpenChunkSegmentRefsB\t\n" +
+	"\x1badd_open_chunk_segment_refs\x18\x16 \x01(\v2,.gastrolog.v1.AddOpenChunkSegmentRefsCommandH\x00R\x17addOpenChunkSegmentRefs\x12O\n" +
+	"\x10ack_chunk_holder\x18\x17 \x01(\v2#.gastrolog.v1.AckChunkHolderCommandH\x00R\x0eackChunkHolder\x12X\n" +
+	"\x13revoke_chunk_holder\x18\x18 \x01(\v2&.gastrolog.v1.RevokeChunkHolderCommandH\x00R\x11revokeChunkHolderB\t\n" +
 	"\acommand\"\xac\x01\n" +
 	"\x12CreateChunkCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12*\n" +
@@ -3251,7 +3408,13 @@ const file_gastrolog_v1_vaultctlfsm_proto_rawDesc = "" +
 	"\x17AckSegmentHolderCommand\x12\x1f\n" +
 	"\vsegment_ids\x18\x01 \x03(\fR\n" +
 	"segmentIds\x12\x17\n" +
-	"\anode_id\x18\x02 \x01(\tR\x06nodeId\"\xf4\x06\n" +
+	"\anode_id\x18\x02 \x01(\tR\x06nodeId\"M\n" +
+	"\x15AckChunkHolderCommand\x12\x1b\n" +
+	"\tchunk_ids\x18\x01 \x03(\fR\bchunkIds\x12\x17\n" +
+	"\anode_id\x18\x02 \x01(\tR\x06nodeId\"P\n" +
+	"\x18RevokeChunkHolderCommand\x12\x1b\n" +
+	"\tchunk_ids\x18\x01 \x03(\fR\bchunkIds\x12\x17\n" +
+	"\anode_id\x18\x02 \x01(\tR\x06nodeId\"\x8e\a\n" +
 	"\rManifestEntry\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12*\n" +
 	"\x11write_start_nanos\x18\x02 \x01(\x03R\x0fwriteStartNanos\x12&\n" +
@@ -3278,7 +3441,8 @@ const file_gastrolog_v1_vaultctlfsm_proto_rawDesc = "" +
 	"\x10cloud_service_id\x18\x15 \x01(\fR\x0ecloudServiceId\x12\x1d\n" +
 	"\n" +
 	"key_scheme\x18\x16 \x01(\rR\tkeyScheme\x12&\n" +
-	"\x0fsealed_at_nanos\x18\x17 \x01(\x03R\rsealedAtNanos\"P\n" +
+	"\x0fsealed_at_nanos\x18\x17 \x01(\x03R\rsealedAtNanos\x12\x18\n" +
+	"\aholders\x18\x18 \x03(\tR\aholders\"P\n" +
 	"\tTombstone\x12\x19\n" +
 	"\bchunk_id\x18\x01 \x01(\fR\achunkId\x12(\n" +
 	"\x10deleted_at_nanos\x18\x02 \x01(\x03R\x0edeletedAtNanos\"\x93\x01\n" +
@@ -3317,7 +3481,7 @@ func file_gastrolog_v1_vaultctlfsm_proto_rawDescGZIP() []byte {
 	return file_gastrolog_v1_vaultctlfsm_proto_rawDescData
 }
 
-var file_gastrolog_v1_vaultctlfsm_proto_msgTypes = make([]protoimpl.MessageInfo, 37)
+var file_gastrolog_v1_vaultctlfsm_proto_msgTypes = make([]protoimpl.MessageInfo, 39)
 var file_gastrolog_v1_vaultctlfsm_proto_goTypes = []any{
 	(*VaultRaftCommand)(nil),                // 0: gastrolog.v1.VaultRaftCommand
 	(*NoopCommand)(nil),                     // 1: gastrolog.v1.NoopCommand
@@ -3350,13 +3514,15 @@ var file_gastrolog_v1_vaultctlfsm_proto_goTypes = []any{
 	(*DiscardOpenChunkManifestCommand)(nil), // 28: gastrolog.v1.DiscardOpenChunkManifestCommand
 	(*ReleaseSegmentsCommand)(nil),          // 29: gastrolog.v1.ReleaseSegmentsCommand
 	(*AckSegmentHolderCommand)(nil),         // 30: gastrolog.v1.AckSegmentHolderCommand
-	(*ManifestEntry)(nil),                   // 31: gastrolog.v1.ManifestEntry
-	(*Tombstone)(nil),                       // 32: gastrolog.v1.Tombstone
-	(*PendingDelete)(nil),                   // 33: gastrolog.v1.PendingDelete
-	(*VaultCtlSnapshot)(nil),                // 34: gastrolog.v1.VaultCtlSnapshot
-	(*VaultGroupSnapshot)(nil),              // 35: gastrolog.v1.VaultGroupSnapshot
-	(*VaultGroupSnapshotEntry)(nil),         // 36: gastrolog.v1.VaultGroupSnapshotEntry
-	(ChunkState)(0),                         // 37: gastrolog.v1.ChunkState
+	(*AckChunkHolderCommand)(nil),           // 31: gastrolog.v1.AckChunkHolderCommand
+	(*RevokeChunkHolderCommand)(nil),        // 32: gastrolog.v1.RevokeChunkHolderCommand
+	(*ManifestEntry)(nil),                   // 33: gastrolog.v1.ManifestEntry
+	(*Tombstone)(nil),                       // 34: gastrolog.v1.Tombstone
+	(*PendingDelete)(nil),                   // 35: gastrolog.v1.PendingDelete
+	(*VaultCtlSnapshot)(nil),                // 36: gastrolog.v1.VaultCtlSnapshot
+	(*VaultGroupSnapshot)(nil),              // 37: gastrolog.v1.VaultGroupSnapshot
+	(*VaultGroupSnapshotEntry)(nil),         // 38: gastrolog.v1.VaultGroupSnapshotEntry
+	(ChunkState)(0),                         // 39: gastrolog.v1.ChunkState
 }
 var file_gastrolog_v1_vaultctlfsm_proto_depIdxs = []int32{
 	1,  // 0: gastrolog.v1.VaultRaftCommand.noop:type_name -> gastrolog.v1.NoopCommand
@@ -3384,25 +3550,27 @@ var file_gastrolog_v1_vaultctlfsm_proto_depIdxs = []int32{
 	28, // 22: gastrolog.v1.VaultCtlCommand.discard_open_chunk_manifest:type_name -> gastrolog.v1.DiscardOpenChunkManifestCommand
 	18, // 23: gastrolog.v1.VaultCtlCommand.publish_completed_segments:type_name -> gastrolog.v1.PublishCompletedSegmentsCommand
 	26, // 24: gastrolog.v1.VaultCtlCommand.add_open_chunk_segment_refs:type_name -> gastrolog.v1.AddOpenChunkSegmentRefsCommand
-	31, // 25: gastrolog.v1.RepatriateChunkCommand.entry:type_name -> gastrolog.v1.ManifestEntry
-	17, // 26: gastrolog.v1.PublishCompletedSegmentsCommand.segments:type_name -> gastrolog.v1.PublishCompletedSegmentCommand
-	20, // 27: gastrolog.v1.OpenChunkManifestState.refs:type_name -> gastrolog.v1.OpenChunkSegmentRef
-	25, // 28: gastrolog.v1.AddOpenChunkSegmentRefsCommand.refs:type_name -> gastrolog.v1.AddOpenChunkSegmentRefEntry
-	37, // 29: gastrolog.v1.ManifestEntry.state:type_name -> gastrolog.v1.ChunkState
-	31, // 30: gastrolog.v1.VaultCtlSnapshot.entries:type_name -> gastrolog.v1.ManifestEntry
-	32, // 31: gastrolog.v1.VaultCtlSnapshot.tombstones:type_name -> gastrolog.v1.Tombstone
-	33, // 32: gastrolog.v1.VaultCtlSnapshot.pending_deletes:type_name -> gastrolog.v1.PendingDelete
-	19, // 33: gastrolog.v1.VaultCtlSnapshot.completed_segments:type_name -> gastrolog.v1.CompletedSegmentEntry
-	21, // 34: gastrolog.v1.VaultCtlSnapshot.open_chunk:type_name -> gastrolog.v1.OpenChunkManifestState
-	21, // 35: gastrolog.v1.VaultCtlSnapshot.sealed_manifests:type_name -> gastrolog.v1.OpenChunkManifestState
-	22, // 36: gastrolog.v1.VaultCtlSnapshot.segment_resume:type_name -> gastrolog.v1.SegmentResumeRecordNumber
-	36, // 37: gastrolog.v1.VaultGroupSnapshot.vaults:type_name -> gastrolog.v1.VaultGroupSnapshotEntry
-	34, // 38: gastrolog.v1.VaultGroupSnapshotEntry.snapshot:type_name -> gastrolog.v1.VaultCtlSnapshot
-	39, // [39:39] is the sub-list for method output_type
-	39, // [39:39] is the sub-list for method input_type
-	39, // [39:39] is the sub-list for extension type_name
-	39, // [39:39] is the sub-list for extension extendee
-	0,  // [0:39] is the sub-list for field type_name
+	31, // 25: gastrolog.v1.VaultCtlCommand.ack_chunk_holder:type_name -> gastrolog.v1.AckChunkHolderCommand
+	32, // 26: gastrolog.v1.VaultCtlCommand.revoke_chunk_holder:type_name -> gastrolog.v1.RevokeChunkHolderCommand
+	33, // 27: gastrolog.v1.RepatriateChunkCommand.entry:type_name -> gastrolog.v1.ManifestEntry
+	17, // 28: gastrolog.v1.PublishCompletedSegmentsCommand.segments:type_name -> gastrolog.v1.PublishCompletedSegmentCommand
+	20, // 29: gastrolog.v1.OpenChunkManifestState.refs:type_name -> gastrolog.v1.OpenChunkSegmentRef
+	25, // 30: gastrolog.v1.AddOpenChunkSegmentRefsCommand.refs:type_name -> gastrolog.v1.AddOpenChunkSegmentRefEntry
+	39, // 31: gastrolog.v1.ManifestEntry.state:type_name -> gastrolog.v1.ChunkState
+	33, // 32: gastrolog.v1.VaultCtlSnapshot.entries:type_name -> gastrolog.v1.ManifestEntry
+	34, // 33: gastrolog.v1.VaultCtlSnapshot.tombstones:type_name -> gastrolog.v1.Tombstone
+	35, // 34: gastrolog.v1.VaultCtlSnapshot.pending_deletes:type_name -> gastrolog.v1.PendingDelete
+	19, // 35: gastrolog.v1.VaultCtlSnapshot.completed_segments:type_name -> gastrolog.v1.CompletedSegmentEntry
+	21, // 36: gastrolog.v1.VaultCtlSnapshot.open_chunk:type_name -> gastrolog.v1.OpenChunkManifestState
+	21, // 37: gastrolog.v1.VaultCtlSnapshot.sealed_manifests:type_name -> gastrolog.v1.OpenChunkManifestState
+	22, // 38: gastrolog.v1.VaultCtlSnapshot.segment_resume:type_name -> gastrolog.v1.SegmentResumeRecordNumber
+	38, // 39: gastrolog.v1.VaultGroupSnapshot.vaults:type_name -> gastrolog.v1.VaultGroupSnapshotEntry
+	36, // 40: gastrolog.v1.VaultGroupSnapshotEntry.snapshot:type_name -> gastrolog.v1.VaultCtlSnapshot
+	41, // [41:41] is the sub-list for method output_type
+	41, // [41:41] is the sub-list for method input_type
+	41, // [41:41] is the sub-list for extension type_name
+	41, // [41:41] is the sub-list for extension extendee
+	0,  // [0:41] is the sub-list for field type_name
 }
 
 func init() { file_gastrolog_v1_vaultctlfsm_proto_init() }
@@ -3438,6 +3606,8 @@ func file_gastrolog_v1_vaultctlfsm_proto_init() {
 		(*VaultCtlCommand_DiscardOpenChunkManifest)(nil),
 		(*VaultCtlCommand_PublishCompletedSegments)(nil),
 		(*VaultCtlCommand_AddOpenChunkSegmentRefs)(nil),
+		(*VaultCtlCommand_AckChunkHolder)(nil),
+		(*VaultCtlCommand_RevokeChunkHolder)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -3445,7 +3615,7 @@ func file_gastrolog_v1_vaultctlfsm_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gastrolog_v1_vaultctlfsm_proto_rawDesc), len(file_gastrolog_v1_vaultctlfsm_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   37,
+			NumMessages:   39,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

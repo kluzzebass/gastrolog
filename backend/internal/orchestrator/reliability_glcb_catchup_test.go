@@ -2,6 +2,7 @@ package orchestrator_test
 
 import (
 	"bytes"
+	"gastrolog/internal/chunk"
 	"os"
 	"path/filepath"
 	"strings"
@@ -94,4 +95,92 @@ func TestOrchPipeline_GLCBReplicaCatchup(t *testing.T) {
 			t.Fatalf("peer home %d GLCB changed during catch-up", idx)
 		}
 	}
+
+	// Holder receipts re-earn: with the bytes recovered, the victim's
+	// residency claim must return within a sweep — replica counts report
+	// bytes truth end to end (revoke on loss is asserted separately; here
+	// the pull may complete before the revoke sweep ever observes the gap).
+	h.waitChunkHolders(v, e.ID, homeIdxs)
+}
+
+// waitChunkHolders waits until the FSM's holder receipts for chunkID
+// exactly match the given home indexes.
+func (h *orchRelHarness) waitChunkHolders(v vaultSpec, chunkID chunk.ChunkID, homeIdxs []int) {
+	h.t.Helper()
+	want := make(map[string]bool, len(homeIdxs))
+	for _, idx := range homeIdxs {
+		want[h.nodeIDs[idx]] = true
+	}
+	leader := h.nodes[h.nodeIDs[homeIdxs[0]]]
+	deadline := time.Now().Add(orchHarnessConvWait)
+	var got []string
+	for time.Now().Before(deadline) {
+		got = leader.orch.ChunkResidency(v.id, chunkID, nil)
+		if len(got) == len(want) {
+			all := true
+			for _, n := range got {
+				if !want[n] {
+					all = false
+					break
+				}
+			}
+			if all {
+				return
+			}
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	h.t.Fatalf("holder receipts never converged: got %v, want %d homes", got, len(want))
+}
+
+// TestOrchPipeline_ChunkHolderRevokeOnByteLoss pins the accounting half of
+// the lost-replica incident: a home that loses its GLCB bytes must stop
+// being counted as a holder. The FSM once reported the full placement set
+// as residency for every live sealed chunk — x4 replicas claimed while a
+// wedged node held 1 of ~300 — so the count was an assumption, not truth.
+// Here the victim's pull sources are gone (all peers lose the chunk too),
+// so recovery cannot mask the revocation.
+func TestOrchPipeline_ChunkHolderRevokeOnByteLoss(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node pipeline acceptance test")
+	}
+
+	h := newOrchRelHarness(t, 4,
+		withExtraVault([]int{0, 1, 2}),
+		withMatchAllRoute(1),
+		withPipelineCluster(pipelineTestClosePolicy, pipelineChunkMaxRecords),
+	)
+	v := h.vaults[1]
+	homeIdxs := []int{0, 1, 2}
+
+	h.submitIngestRecords(h.nodeIDs[3], pipelineChunkMaxRecords, "holder-revoke")
+	entries := h.waitSealedRecords(v, h.nodeIDs[0], pipelineChunkMaxRecords)
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 sealed chunk, got %d", len(entries))
+	}
+	e := entries[0]
+	h.waitGLCBsOnHomes(v, homeIdxs, entries)
+
+	// All three homes earn receipts.
+	h.waitChunkHolders(v, e.ID, homeIdxs)
+
+	// Every copy vanishes (disk swap / operator deletion on all homes).
+	// No pull can succeed; the only correct outcome is honest accounting.
+	for _, idx := range homeIdxs {
+		if err := os.Remove(h.pipelineGLCBPath(h.nodeIDs[idx], v, e.ID)); err != nil {
+			t.Fatalf("remove GLCB on home %d: %v", idx, err)
+		}
+	}
+
+	// Receipts must drain to zero as each home's sweep revokes its claim.
+	deadline := time.Now().Add(orchHarnessConvWait)
+	var got []string
+	for time.Now().Before(deadline) {
+		got = h.nodes[h.nodeIDs[0]].orch.ChunkResidency(v.id, e.ID, nil)
+		if len(got) == 0 {
+			return
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	t.Fatalf("holder receipts never revoked after byte loss on every home: still %v", got)
 }

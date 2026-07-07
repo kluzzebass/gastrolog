@@ -39,6 +39,11 @@ type VaultInstance struct {
 	// ApplyRaftRetentionPending marks a chunk as retention-pending in replicated metadata.
 	ApplyRaftRetentionPending func(id chunk.ChunkID) error
 
+	// ApplyRaftAckChunkHolders / ApplyRaftRevokeChunkHolders commit this
+	// node's chunk holder receipts — bytes-earned residency (batched).
+	ApplyRaftAckChunkHolders    func(ids []chunk.ChunkID, nodeID string) error
+	ApplyRaftRevokeChunkHolders func(ids []chunk.ChunkID, nodeID string) error
+
 	// ListRetentionPending returns chunk IDs with RetentionPending=true in the FSM.
 	ListRetentionPending func() []chunk.ChunkID
 
@@ -147,6 +152,8 @@ func (t *VaultInstance) applyRaftCallbacks(cb vaultRaftCallbacks) {
 	t.ApplyRaftPruneNode = cb.applyPruneNode
 	t.ListManifest = cb.listChunks
 	t.ApplyRaftRetentionPending = cb.applyRetPending
+	t.ApplyRaftAckChunkHolders = cb.applyAckChunkHolders
+	t.ApplyRaftRevokeChunkHolders = cb.applyRevokeChunkHolders
 	t.ListRetentionPending = cb.listRetPending
 	t.IsTombstoned = cb.isTombstoned
 	t.IsFSMReady = cb.isFSMReady

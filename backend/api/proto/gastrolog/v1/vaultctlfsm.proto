@@ -69,6 +69,8 @@ message VaultCtlCommand {
     DiscardOpenChunkManifestCommand discard_open_chunk_manifest = 20;
     PublishCompletedSegmentsCommand publish_completed_segments = 21;
     AddOpenChunkSegmentRefsCommand add_open_chunk_segment_refs = 22;
+    AckChunkHolderCommand ack_chunk_holder = 23;
+    RevokeChunkHolderCommand revoke_chunk_holder = 24;
   }
 }
 
@@ -303,6 +305,25 @@ message AckSegmentHolderCommand {
   string node_id = 2;
 }
 
+// AckChunkHolderCommand records that a node holds a sealed chunk's verified
+// GLCB bytes on disk — earned by building it locally or by replica catch-up
+// pull, never assumed from placement. Idempotent per chunk. Chunk residency
+// (operator replica counts, RF-safety gates) reads this holder set instead
+// of reporting the placement list as if it were bytes.
+message AckChunkHolderCommand {
+  repeated bytes chunk_ids = 1;
+  string node_id = 2;
+}
+
+// RevokeChunkHolderCommand withdraws a holder claim: the node stat-missed
+// the GLCB it was recorded as holding (missed builds while wedged, disk
+// swap, operator deletion). Replica counts drop to the truth immediately;
+// the replica catch-up pull re-earns the ack after restoring the bytes.
+message RevokeChunkHolderCommand {
+  repeated bytes chunk_ids = 1;
+  string node_id = 2;
+}
+
 // ---------- Snapshot (replaces the 5 hand-rolled sections) ------------------
 
 // ManifestEntry is the full metadata for one chunk in a vault's manifest. The
@@ -333,6 +354,9 @@ message ManifestEntry {
   uint32 key_scheme = 22;
   // Wall-clock time when sealing completed (CmdSealChunk apply).
   int64 sealed_at_nanos = 23;
+  // Node IDs holding verified GLCB bytes for this chunk (AckChunkHolder /
+  // RevokeChunkHolder). Residency truth — placement says who SHOULD hold.
+  repeated string holders = 24;
 }
 
 // Tombstone records a deleted chunk ID and the apply time of the delete.

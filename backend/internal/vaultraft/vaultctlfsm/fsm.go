@@ -118,6 +118,14 @@ const (
 	// CmdAddOpenChunkSegmentRefs appends many open-chunk segment refs in one
 	// vault-ctl apply (chunking planner batching). See gastrolog-3i9nt.
 	CmdAddOpenChunkSegmentRefs Command = 22
+
+	// CmdAckChunkHolder records that a node holds a sealed chunk's verified
+	// GLCB bytes (built locally or pulled via replica catch-up). Idempotent.
+	CmdAckChunkHolder Command = 23
+
+	// CmdRevokeChunkHolder withdraws a holder claim after the node
+	// stat-missed the bytes it was recorded as holding. Idempotent.
+	CmdRevokeChunkHolder Command = 24
 )
 
 // ManifestEntry holds the full metadata for one chunk in this vault's
@@ -149,6 +157,14 @@ type ManifestEntry struct {
 	SourceEnd   time.Time
 
 	SealedAt time.Time // wall-clock sealing completion (FSM / retention anchor)
+
+	// Holders are node IDs holding verified GLCB bytes for this chunk —
+	// earned via AckChunkHolder (local build or replica catch-up pull),
+	// withdrawn via RevokeChunkHolder (stat-missed bytes). Residency truth;
+	// placement says who SHOULD hold. Treated as immutable once stored:
+	// apply functions copy-on-write so the shallow entry copies handed out
+	// by Get/List never race with later applies.
+	Holders []string
 
 	// IngestTSMonotonic is true when records were appended in IngestTS-
 	// ascending order; the histogram fast path uses position-as-rank only
@@ -1105,6 +1121,12 @@ func (f *FSM) tryApplySegmentPipelineLocked(cmd *gastrologv1.VaultCtlCommand) (a
 		added, result := f.applyAckSegmentHolder(c.AckSegmentHolder)
 		fx.ackedSegmentHolderIDs = added
 		return result, fx, true
+	case *gastrologv1.VaultCtlCommand_AckChunkHolder:
+		_, result := f.applyAckChunkHolder(c.AckChunkHolder)
+		return result, fx, true
+	case *gastrologv1.VaultCtlCommand_RevokeChunkHolder:
+		_, result := f.applyRevokeChunkHolder(c.RevokeChunkHolder)
+		return result, fx, true
 	default:
 		return nil, applyEffects{}, false
 	}
@@ -1688,6 +1710,7 @@ func entryToProto(e *ManifestEntry) *gastrologv1.ManifestEntry {
 		CloudServiceId:    e.CloudServiceID[:],
 		KeyScheme:         uint32(e.KeyScheme),
 		SealedAtNanos:     e.SealedAt.UnixNano(),
+		Holders:           slices.Clone(e.Holders),
 	}
 }
 
@@ -1716,6 +1739,7 @@ func entryFromProto(p *gastrologv1.ManifestEntry) ManifestEntry {
 		SourceIdxSize:     p.GetSourceIdxSize(),
 		CloudServiceID:    glid.FromBytes(p.GetCloudServiceId()),
 		KeyScheme:         uint8(p.GetKeyScheme()), //nolint:gosec // G115: key scheme is a small enum; round-trips a uint8
+		Holders:           slices.Clone(p.GetHolders()),
 	}
 	copy(e.Hash[:], p.GetHash())
 	return e
