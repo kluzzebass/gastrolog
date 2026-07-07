@@ -627,9 +627,31 @@ func (m *Manager) startWorkerLocked(v *vaultChunking) {
 		ch := v.wake.C()
 		log := m.logger().With("vault", v.cfg.VaultID)
 		v.log = log
-		if err := v.recoverOnce(ctx); err != nil && ctx.Err() == nil {
-			log.Warn("chunking recover failed", "error", err)
+		// Recovery must not run before the vault-ctl FSM has replayed: at
+		// process start the registry is briefly empty, and a recovery pass
+		// against an empty FSM registers nothing and never re-runs — a node
+		// once held 297 complete GLCBs its chunk manager knew nothing about
+		// while retention, backfill, and queries silently starved. Retry on
+		// a short ticker until the FSM is ready, then recover exactly once,
+		// in this background worker — never on the serving path (startup
+		// stays sub-3s per the vision).
+		recoverTick := time.NewTicker(time.Second)
+		defer recoverTick.Stop()
+		recovered := false
+		tryRecover := func() {
+			if recovered {
+				return
+			}
+			if f := v.fsm(); f != nil && !f.Ready() {
+				return
+			}
+			recovered = true
+			recoverTick.Stop()
+			if err := v.recoverOnce(ctx); err != nil && ctx.Err() == nil {
+				log.Warn("chunking recover failed", "error", err)
+			}
 		}
+		tryRecover()
 		v.drainReleasedPurge()
 		v.purgeStaleHeadCatchUp()
 		m.runBuildPass(ctx, v, log)
@@ -639,6 +661,9 @@ func (m *Manager) startWorkerLocked(v *vaultChunking) {
 			case <-ctx.Done():
 				v.buildWG.Wait()
 				return
+			case <-recoverTick.C:
+				tryRecover()
+				continue
 			case <-releaseCh:
 				if err := v.releaseOnce(ctx); err != nil && ctx.Err() == nil {
 					log.Warn("chunking release failed", "error", err)

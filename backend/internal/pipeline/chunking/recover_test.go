@@ -218,3 +218,97 @@ func TestRecoverOnceRegistersSealedOnDiskGLCB(t *testing.T) {
 		t.Fatalf("OnBuilt fired for %v, want exactly [%s]", rebuilt, chunkID)
 	}
 }
+
+// TestRecoveryWaitsForFSMReplay: the worker starts before the vault-ctl
+// FSM has replayed (production boot order). Recovery against the empty
+// FSM must not consume the once-only opportunity — it retries until the
+// FSM is ready and then registers sealed on-disk GLCBs. The unguarded
+// version scanned an empty registry at boot and never ran again,
+// stranding 297 complete GLCBs unregistered.
+func TestRecoveryWaitsForFSMReplay(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	segID := glid.New()
+	vaultID := glid.New()
+	chunkID := chunk.NewChunkID()
+	home := t.TempDir()
+	writeHeadSegment(t, home, segID, vaultID, []recordForSeg{{0, base, "one"}})
+
+	fsm := vaultctlfsm.New() // NOT ready: nothing applied yet
+
+	// GLCB already on disk from the previous "process".
+	if _, err := chunking.BuildSealedChunk(chunking.BuildInput{
+		Manifest: chunking.SealedManifest{
+			ChunkID:  chunkID,
+			OpenedAt: base,
+			SealedAt: base.Add(time.Minute),
+			Refs: []chunking.ManifestRefEntry{{
+				SegmentID:         segID,
+				FirstRecordNumber: 0,
+				LastRecordNumber:  0,
+			}},
+		},
+		VaultID:   vaultID,
+		ChunkRoot: filepath.Join(home, "chunks"),
+		Locate:    chunking.HeadSegmentLocator{Root: home},
+	}); err != nil {
+		t.Fatalf("BuildSealedChunk: %v", err)
+	}
+
+	var mu sync.Mutex
+	var rebuilt []chunk.ChunkID
+	mgr := chunking.New(chunking.Config{})
+	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
+		VaultRoot: home,
+		ChunkRoot: filepath.Join(home, "chunks"),
+		FSM:       fsm,
+		Locate:    chunking.HeadSegmentLocator{Root: home},
+		Applier:   &flakyFSMApplier{fsm: fsm},
+		IsLeader:  func() bool { return false },
+		OnBuilt: func(id chunk.ChunkID) {
+			mu.Lock()
+			rebuilt = append(rebuilt, id)
+			mu.Unlock()
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan struct{})
+	go func() { _ = mgr.Run(ctx); close(done) }()
+
+	// Let the worker start and (correctly) find the FSM not ready.
+	time.Sleep(100 * time.Millisecond)
+	mu.Lock()
+	if len(rebuilt) != 0 {
+		mu.Unlock()
+		t.Fatal("recovery ran against an unreplayed FSM")
+	}
+	mu.Unlock()
+
+	// "Raft replay" arrives: seal state lands, FSM becomes ready.
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalOpenChunkManifest(chunkID, base))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
+		SegmentID: segID, FirstRecordNumber: 0, LastRecordNumber: 0, SliceBytes: 1024, RefAddedAt: base,
+	}))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, base.Add(time.Minute)))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealChunk(chunkID, base.Add(time.Minute), 1, 1024, base, base, base, true, base.Add(time.Minute)))
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		mu.Lock()
+		n := len(rebuilt)
+		mu.Unlock()
+		if n == 1 && rebuilt[0] == chunkID {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("recovery never registered the sealed GLCB after FSM replay: %v", rebuilt)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	cancel()
+	<-done
+}
