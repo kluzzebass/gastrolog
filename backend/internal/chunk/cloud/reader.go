@@ -8,7 +8,6 @@ import (
 	"math"
 	"os"
 	"slices"
-	"strings"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/format"
@@ -352,16 +351,14 @@ func decodeDictFromBuf(buf []byte, dictEntries uint32) (*chunk.StringDict, error
 	return dict, nil
 }
 
+// cloneMmapRecord detaches the record's payload from the GLCB mapping. Only
+// Raw aliases frame bytes: the Attrs map and its strings come from
+// DecodeWithDict, and both DictReader implementations return heap strings
+// (MmapStringDict interns; StringDict stores), so cloning them re-copied
+// memory that never touched the mmap (gastrolog-11y2iv).
 func cloneMmapRecord(rec chunk.Record) chunk.Record {
 	if len(rec.Raw) > 0 {
 		rec.Raw = slices.Clone(rec.Raw)
-	}
-	if len(rec.Attrs) > 0 {
-		attrs := make(chunk.Attributes, len(rec.Attrs))
-		for k, v := range rec.Attrs {
-			attrs[strings.Clone(k)] = strings.Clone(v)
-		}
-		rec.Attrs = attrs
 	}
 	return rec
 }
