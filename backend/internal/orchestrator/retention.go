@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/logging"
 	"log/slog"
 	"slices"
 	"strings"
@@ -105,8 +106,11 @@ type retentionRunner struct {
 	cm         chunk.ChunkManager
 	im         index.IndexManager
 	inflight   map[chunk.ChunkID]bool             // chunks currently being processed
-	unreadable map[chunk.ChunkID]*unreadableEntry // chunks that failed to read — retried with exponential backoff (gastrolog-25vur)
+	unreadable map[chunk.ChunkID]*unreadableEntry // chunks that failed to read — retried with exponential backoff
 	orch       *Orchestrator                      // for eject/transition callbacks
+	// idleLog throttles per-reason idle diagnostics (one per interval per
+	// reason) so a silently-idle vault names its gate without flooding.
+	idleLog logging.Throttle
 
 	applyRaftRetentionPending func(id chunk.ChunkID) error
 
@@ -510,6 +514,7 @@ func (o *Orchestrator) retentionTargetForInstance(cfg *system.Config, vaultCfg s
 			orch:    o,
 			now:     o.now,
 			logger:  o.logger,
+			idleLog: logging.Throttle{Interval: 10 * time.Minute},
 		}
 		o.retention[key] = runner
 	}
@@ -537,6 +542,7 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 	// Config followers must not independently evaluate and transition chunks —
 	// that causes N× duplication.
 	if !r.isLeader {
+		r.noteIdle("not placement leader on this node", 0, candidateFilterStats{})
 		return
 	}
 
@@ -593,9 +599,10 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 	manifest, manifestKnown := buildManifestSet(vaultInst)
 
 	now := time.Now()
-	sealed := selectRetentionCandidates(metas, streamed, manifest, manifestKnown, unreadable, now)
+	sealed, filtered := selectRetentionCandidates(metas, streamed, manifest, manifestKnown, unreadable, now)
 
 	if len(sealed) == 0 {
+		r.noteIdle("no eligible chunks", len(metas), filtered)
 		return
 	}
 
@@ -606,8 +613,10 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 
 	processed := make(map[chunk.ChunkID]bool)
 
+	totalMatched := 0
 	for _, b := range rules {
 		matched := b.policy.Apply(state)
+		totalMatched += len(matched)
 		var chunkWG sync.WaitGroup
 		chunkSem := make(chan struct{}, retentionChunkWorkers)
 		for _, id := range matched {
@@ -625,6 +634,23 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 		}
 		chunkWG.Wait()
 	}
+	if totalMatched == 0 {
+		r.noteIdle("rules matched no chunks", len(metas), filtered)
+	}
+}
+
+// noteIdle reports, throttled, WHY a retention sweep on a vault with rules
+// did nothing. A vault that silently stops enforcing retention looked
+// identical to a healthy idle vault for seven hours; the operator (and the
+// next debugging session) need the gate named, not inferred.
+func (r *retentionRunner) noteIdle(reason string, metas int, f candidateFilterStats) {
+	if _, ok := r.idleLog.Allow(reason); !ok {
+		return
+	}
+	r.logger.Info("retention sweep idle",
+		"vault", r.vaultName, "reason", reason, "chunks_listed", metas,
+		"filtered_unsealed", f.unsealed, "filtered_ghosts", f.ghosts,
+		"filtered_unreadable", f.unreadable)
 }
 
 // buildManifestSet returns the FSM-known chunk IDs for the given instance and a
@@ -652,6 +678,15 @@ func buildManifestSet(vaultInst *VaultInstance) (map[chunk.ChunkID]bool, bool) {
 // selectRetentionCandidates filters chunk metas to the set retention can act
 // on right now: sealed, not currently being streamed, recognized by the FSM
 // manifest (when available), and past any unreadable-retry backoff window.
+// candidateFilterStats attributes every chunk a retention sweep declined
+// to consider — a sweep that silently selects nothing is indistinguishable
+// from a dozen different failures without these counts.
+type candidateFilterStats struct {
+	unsealed   int
+	ghosts     int
+	unreadable int
+}
+
 func selectRetentionCandidates(
 	metas []chunk.ChunkMeta,
 	streamed map[chunk.ChunkID]bool,
@@ -659,21 +694,25 @@ func selectRetentionCandidates(
 	manifestKnown bool,
 	unreadable map[chunk.ChunkID]*unreadableEntry,
 	now time.Time,
-) []chunk.ChunkMeta {
+) ([]chunk.ChunkMeta, candidateFilterStats) {
+	var stats candidateFilterStats
 	var sealed []chunk.ChunkMeta
 	for _, meta := range metas {
 		if !meta.Sealed || streamed[meta.ID] {
+			stats.unsealed++
 			continue
 		}
 		if manifestKnown && !manifest[meta.ID] {
+			stats.ghosts++
 			continue // ghost chunk: on disk but no FSM entry
 		}
 		if entry := unreadable[meta.ID]; entry != nil && now.Before(entry.nextRetry) {
+			stats.unreadable++
 			continue
 		}
 		sealed = append(sealed, meta)
 	}
-	return sealed
+	return sealed, stats
 }
 
 // tryRetainChunk attempts to apply a retention action to a single chunk.
