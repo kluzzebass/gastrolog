@@ -339,13 +339,23 @@ func bootstrapAndWaitForLeader(r *hraft.Raft, boltStore io.Closer, transport hra
 
 	singleNode := len(servers) == 1 && string(servers[0].ID) == opts.NodeID
 	if shouldBootstrap || singleNode {
+		// The wait must scale with the configured failure-detector timing:
+		// hashicorp/raft randomizes the first election inside
+		// [ElectionTimeout, 2×ElectionTimeout], so a fixed wait shorter
+		// than that window makes bootstrap fail deterministically once an
+		// operator widens the timeouts (a 5s heartbeat knob broke every
+		// cluster init against the old hardcoded 5s).
+		_, electionTimeout, _ := raftgroup.RaftTimeouts(raftgroup.GroupConfig{
+			GroupID: raftgroup.ClusterControlPlaneGroupID,
+		})
+		wait := max(3*electionTimeout, 5*time.Second)
 		select {
 		case <-r.LeaderCh():
 			logger.Info("leader elected", "node_id", opts.NodeID)
-		case <-time.After(5 * time.Second):
+		case <-time.After(wait):
 			_ = r.Shutdown().Error()
 			_ = boltStore.Close()
-			return errors.New("timed out waiting for raft leadership")
+			return fmt.Errorf("timed out waiting for raft leadership after %s", wait)
 		}
 	}
 
