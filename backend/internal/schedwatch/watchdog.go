@@ -23,8 +23,6 @@ import (
 	"log/slog"
 	"sync/atomic"
 	"time"
-
-	"gastrolog/internal/alert"
 )
 
 const (
@@ -44,32 +42,19 @@ const (
 	// load while consensus stayed healthy).
 	stallDebug = 250 * time.Millisecond
 
-	// stallCritical raises an operator alert: gaps at or beyond the Raft
-	// leader lease manufacture elections. This is the fallback when New is
-	// given no lease; production passes the configured lease so the
-	// critical tier stays lease-lethal by definition (gastrolog-o6plq9).
+	// stallCritical logs at Warn: gaps at or beyond the Raft leader lease
+	// manufacture elections. This is the fallback when New is given no
+	// lease; production passes the configured lease so the critical tier
+	// stays lease-lethal by definition. Critical stalls are a diagnostic —
+	// there is no operator action beyond knowing — so they surface as logs
+	// and health counters, never as alarms (EEMUA 191 actionability test).
 	stallCritical = 1500 * time.Millisecond
-
-	// alertID identifies the scheduler-stall alert; cleared after a clean
-	// window with no critical stalls.
-	alertID = "scheduler-stall"
-
-	// alertClearAfter is how long the node must run without a critical
-	// stall before the alert clears.
-	alertClearAfter = 2 * time.Minute
 )
-
-// AlertSink is the subset of alert.Collector the watchdog raises through.
-type AlertSink interface {
-	Set(id string, severity alert.Severity, source, message string)
-	Clear(id string)
-}
 
 // Watchdog measures scheduler wake-up lag. All counters are cumulative;
 // MaxStallSince is take-once (resets on read) for rolling-window consumers.
 type Watchdog struct {
 	logger *slog.Logger
-	alerts AlertSink
 	// critical is the election-lethal gap threshold — the configured Raft
 	// leader lease (stallCritical when New is given zero).
 	critical time.Duration
@@ -79,18 +64,15 @@ type Watchdog struct {
 	stallsCritical atomic.Uint64 // gaps >= critical (election-lethal)
 
 	maxStallNanos atomic.Int64 // max gap since last TakeMaxStall
-
-	lastCriticalNanos atomic.Int64 // wall time of last critical stall
 }
 
-// New creates a watchdog. logger must be non-nil; alerts may be nil (no
-// operator alerts, counters and logs only — tests). leaderLease sets the
+// New creates a watchdog. logger must be non-nil. leaderLease sets the
 // critical (election-lethal) tier; zero falls back to the 1.5s default.
-func New(logger *slog.Logger, alerts AlertSink, leaderLease time.Duration) *Watchdog {
+func New(logger *slog.Logger, leaderLease time.Duration) *Watchdog {
 	if leaderLease <= 0 {
 		leaderLease = stallCritical
 	}
-	return &Watchdog{logger: logger, alerts: alerts, critical: leaderLease}
+	return &Watchdog{logger: logger, critical: leaderLease}
 }
 
 // Counters returns cumulative stall counts (>=100ms, >=250ms, >=lease).
@@ -122,14 +104,13 @@ func (w *Watchdog) Run(ctx context.Context) {
 		gap := now.Sub(last) - tick
 		last = now
 		if gap < stallNote {
-			w.maybeClearAlert(now)
 			continue
 		}
-		w.record(now, gap)
+		w.record(gap)
 	}
 }
 
-func (w *Watchdog) record(now time.Time, gap time.Duration) {
+func (w *Watchdog) record(gap time.Duration) {
 	w.stalls100.Add(1)
 	for {
 		cur := w.maxStallNanos.Load()
@@ -148,27 +129,7 @@ func (w *Watchdog) record(now time.Time, gap time.Duration) {
 		return
 	}
 	w.stallsCritical.Add(1)
-	w.lastCriticalNanos.Store(now.UnixNano())
 	w.logger.Warn("scheduler stall: no goroutine ran on schedule",
 		"gap", gap.Round(time.Millisecond),
 		"leader_lease", w.critical)
-	if w.alerts != nil {
-		w.alerts.Set(alertID, alert.Error, "runtime",
-			"scheduler stalled "+gap.Round(time.Millisecond).String()+
-				" — longer than the Raft leader lease ("+w.critical.String()+"); heartbeats and election timers did not run, so this node may lose or depose leaders. Usually CPU/GC/disk starvation on this host")
-	}
-}
-
-func (w *Watchdog) maybeClearAlert(now time.Time) {
-	if w.alerts == nil {
-		return
-	}
-	lastCrit := w.lastCriticalNanos.Load()
-	if lastCrit == 0 {
-		return
-	}
-	if now.Sub(time.Unix(0, lastCrit)) >= alertClearAfter {
-		w.alerts.Clear(alertID)
-		w.lastCriticalNanos.Store(0)
-	}
 }

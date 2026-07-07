@@ -68,21 +68,33 @@ func TestStatsCollector_RaftLivenessFieldsAndAlerts(t *testing.T) {
 	if got := stats.RaftWalAppendAvgMs; got < 1.9 || got > 2.1 {
 		t.Fatalf("wal avg = %vms, want ~2ms", got)
 	}
-	if !alertActive(alerts, "raft-liveness-elections") {
-		t.Fatal("election-storm alert should be set at 6/min")
+	// Election churn is a diagnostic, not an alarm (EEMUA 191 actionability
+	// test, gastrolog-29380r): the rate ships in stats, transitions are
+	// logged, and no alert may appear.
+	if alertActive(alerts, "raft-liveness-elections") {
+		t.Fatal("election churn must not raise an alarm; it is log + stats only")
+	}
+	if !collectorStormActive(collector) {
+		t.Fatal("storm hysteresis state should be active at 6/min")
 	}
 	if alertActive(alerts, "raft-wal-latency") {
 		t.Fatal("wal-latency alert should clear once max drops below the clear threshold")
 	}
 
-	// Tick 3: calm — storm alert clears with hysteresis.
+	// Tick 3: calm — storm state clears with hysteresis.
 	stats = collector.CollectLocalTick(t0.Add(120 * time.Second))
 	if stats.RaftElectionsPerMin != 0 {
 		t.Fatalf("elections/min = %v, want 0", stats.RaftElectionsPerMin)
 	}
-	if alertActive(alerts, "raft-liveness-elections") {
-		t.Fatal("election-storm alert should clear when calm")
+	if collectorStormActive(collector) {
+		t.Fatal("storm hysteresis state should clear when calm")
 	}
+}
+
+func collectorStormActive(c *StatsCollector) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.electionStormActive
 }
 
 func alertActive(c *alert.Collector, id string) bool {

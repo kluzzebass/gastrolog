@@ -204,6 +204,9 @@ type StatsCollector struct {
 	// consuming the WAL-side accumulator (gastrolog-1io54g).
 	raftLiveStats map[string]*peerConnStatsWindow
 	walMaxNanos   uint64
+	// electionStormActive is the storm/calm hysteresis state for the
+	// transition-edge logging in collectRaftLiveness. Guarded by mu.
+	electionStormActive bool
 	// lastPublishedPurposeWindows holds purposes_window from the most recent
 	// CollectLocalTick (5s broadcast). CollectLocalSnapshot overlays this onto
 	// read-only snapshots briefly after each tick so WatchSystemStatus still
@@ -755,12 +758,29 @@ func (c *StatsCollector) collectRaftLiveness(stats *gastrologv1.NodeStats, now t
 	if !ok {
 		return
 	}
+	// Election churn is a diagnostic, not an alarm: there is no direct
+	// operator action, and the rate already ships in stats for the health
+	// surfaces (EEMUA 191 actionability test, gastrolog-29380r). Log on the
+	// storm/calm transitions only — the same hysteresis the alert had — so
+	// a sustained storm is one line, not one per tick.
+	c.mu.Lock()
+	stormWas := c.electionStormActive
 	switch {
 	case stats.RaftElectionsPerMin >= raftElectionStormPerMin:
-		alerts.Set("raft-liveness-elections", alert.Error, "raft",
-			fmt.Sprintf("Raft election storm: %.1f elections/min on this node — consensus is churning; check for scheduler stalls, disk saturation, or an overloaded node", stats.RaftElectionsPerMin))
+		c.electionStormActive = true
 	case stats.RaftElectionsPerMin < raftElectionCalmPerMin:
-		alerts.Clear("raft-liveness-elections")
+		c.electionStormActive = false
+	}
+	stormNow := c.electionStormActive
+	c.mu.Unlock()
+	if logger := c.cfg.Logger; logger != nil && stormNow != stormWas {
+		if stormNow {
+			logger.Warn("Raft election storm: consensus is churning on this node",
+				"elections_per_min", stats.RaftElectionsPerMin)
+		} else {
+			logger.Info("Raft election rate back to calm",
+				"elections_per_min", stats.RaftElectionsPerMin)
+		}
 	}
 	switch {
 	case stats.RaftWalAppendMaxMs >= walAppendMaxAlertMs:

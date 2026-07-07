@@ -3,7 +3,9 @@ package orchestrator
 import (
 	"context"
 	"slices"
+	"time"
 
+	"gastrolog/internal/glid"
 	"gastrolog/internal/system"
 )
 
@@ -32,6 +34,7 @@ func (o *Orchestrator) placementSweep() {
 	}
 	cfg := &sys.Config
 
+	leaderless := make(map[glid.GLID]string)
 	o.mu.RLock()
 	for vaultID, vault := range o.vaults {
 		vaultInst := vault.Instance
@@ -49,12 +52,19 @@ func (o *Orchestrator) placementSweep() {
 		// sat leaderless for hours — retention, backfill scheduling, and
 		// target refreshes all silently stopped. The sweep is the safety
 		// net dispatch never had.
-		o.reconcileInstanceRole(sys, *vaultCfg, vaultInst)
+		if !o.reconcileInstanceRole(sys, *vaultCfg, vaultInst) {
+			leaderless[vaultID] = vaultCfg.Name
+		}
 		if !vaultInst.IsFollower {
 			o.refreshFollowerTargets(sys, *vaultCfg, vaultInst)
 		}
 	}
 	o.mu.RUnlock()
+
+	// A vault whose placements resolve to no leader is beyond the sweep's
+	// self-healing — sustained, that is an operator problem (alarm after
+	// the delay-on window; see updateLeaderlessAlarms).
+	o.updateLeaderlessAlarms(time.Now(), leaderless)
 
 	// Reconcile the routing table from routes (safety net — dispatch also
 	// reloads on config changes for immediate effect).
@@ -99,20 +109,21 @@ func replicationTargetsEqual(a, b []system.ReplicationTarget) bool {
 // of an instance that already exists. Called each tick by placementSweep
 // (caller holds o.mu.RLock; role fields are written lock-free by dispatch
 // today, and this follows the same convention).
-func (o *Orchestrator) reconcileInstanceRole(sys *system.System, vaultCfg system.VaultConfig, vaultInst *VaultInstance) {
+func (o *Orchestrator) reconcileInstanceRole(sys *system.System, vaultCfg system.VaultConfig, vaultInst *VaultInstance) (leaderResolved bool) {
 	leaderNodeID := system.LeaderNodeID(vaultCfg.Placements, sys.Runtime.NodeStorageConfigs)
 	if leaderNodeID == "" {
 		// Placements resolve to no leader (mid-flap partial state, or a
 		// storage config transiently missing). Never flip roles on
 		// unresolvable state — that is exactly the race that strands
-		// vaults leaderless.
-		return
+		// vaults leaderless. Sustained, the caller raises the
+		// vault-leaderless alarm.
+		return false
 	}
 	followerIDs := system.FollowerNodeIDs(vaultCfg.Placements, sys.Runtime.NodeStorageConfigs)
 	isLeader := leaderNodeID == o.localNodeID
 	isFollower := slices.Contains(followerIDs, o.localNodeID)
 	if !isLeader && !isFollower {
-		return // not in placement: instance lifecycle is dispatch-owned
+		return true // not in placement: instance lifecycle is dispatch-owned
 	}
 	if isFollower {
 		vaultInst.LeaderNodeID = leaderNodeID
@@ -120,12 +131,13 @@ func (o *Orchestrator) reconcileInstanceRole(sys *system.System, vaultCfg system
 		vaultInst.LeaderNodeID = ""
 	}
 	if vaultInst.IsFollower == isFollower {
-		return
+		return true
 	}
 	vaultInst.IsFollower = isFollower
 	o.rotationLogger.Info("placement sweep: instance role reconciled",
 		"vault", vaultCfg.ID, "name", vaultCfg.Name, "isFollower", isFollower,
 		"leader", leaderNodeID)
+	return true
 }
 
 // replicationTargetNodes returns the NodeIDs of a ReplicationTarget slice for

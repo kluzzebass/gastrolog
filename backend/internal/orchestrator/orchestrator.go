@@ -227,6 +227,12 @@ type Orchestrator struct {
 	glcbPullMu       sync.Mutex
 	glcbPullInflight map[chunk.ChunkID]bool
 
+	// leaderlessSince tracks when each vault's placements began resolving
+	// to no leader, for the vault-leaderless alarm's delay-on window.
+	// Guarded by leaderlessMu.
+	leaderlessMu    sync.Mutex
+	leaderlessSince map[glid.GLID]time.Time
+
 	// Remote transferrer for cross-node chunk migration (nil in single-node mode).
 	transferrer RemoteTransferrer
 
