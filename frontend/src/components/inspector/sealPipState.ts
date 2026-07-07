@@ -8,13 +8,16 @@
 // is normal operation; the pip row exists so it reads as catch-up instead
 // of "resealing already sealed chunks".
 
-/** Lifecycle state of one pip. Birth fills green; death drains red. */
+/** Lifecycle state of one pip. Birth fills green; death drains red.
+ *  Sealed is deliberately calm: attention belongs to the ANOMALOUS pip,
+ *  which renders with a glow in its own color — the eye lands on the node
+ *  that has the problem, not on its healthy neighbors. */
 export type PipState =
   | "active" // hollow copper ring — chunk open on this node
   | "sealing" // half amber, pulsing — copy seal pending/running here
-  | "sealed" // solid green — copy sealed (bytes verified on this node)
-  | "sealedCalm" // dim green — sealed AND the whole row is healthy
-  | "missing" // dashed red slashed ring — placement node unreachable
+  | "lagging" // half amber, pulsing + glow — copy pending on an already-sealed chunk (catch-up)
+  | "sealed" // calm green — copy sealed (bytes verified on this node)
+  | "missing" // dashed red slashed ring + glow — placement node unreachable
   | "holds" // solid red, pulsing — delete requested, node still holds bytes
   | "acked" // dim hollow red — node acked the delete, bytes gone
   | "ghost"; // muted dot after a gap — copy on a node outside placement
@@ -56,13 +59,6 @@ export function computePips(input: PipInputs): { pips: SealPip[]; ghosts: SealPi
   const placement = pipOrder(input.placementNodes);
   const placementSet = new Set(placement);
 
-  const rowHealthy =
-    !input.deleteInFlight &&
-    input.chunkState === "sealed" &&
-    placement.length > 0 &&
-    placement.every((n) => resident.has(n) && input.liveNodes.has(n)) &&
-    input.residentNodes.every((n) => placementSet.has(n));
-
   const pips = placement.map((node): SealPip => {
     if (input.deleteInFlight) {
       // Death drains red: the laggard blocking the receipt protocol is
@@ -76,23 +72,17 @@ export function computePips(input: PipInputs): { pips: SealPip[]; ghosts: SealPi
       return { node, state: "missing", title: `${node}: unreachable — copy state unknown` };
     }
     if (resident.has(node)) {
-      if (rowHealthy) {
-        return { node, state: "sealedCalm", title: `${node}: copy sealed — all copies healthy` };
-      }
-      // Bright green is deliberate: this copy is fine, but the ROW diverges
-      // (a neighbor's copy is pending, a node is unreachable, or a ghost
-      // exists) — brightness marks rows worth a look.
-      return {
-        node,
-        state: "sealed",
-        title: `${node}: copy sealed — highlighted because other copies in this row are pending, missing, or stale`,
-      };
+      return { node, state: "sealed", title: `${node}: copy sealed` };
     }
     if (input.chunkState === "active") {
       return { node, state: "active", title: `${node}: chunk active` };
     }
-    // Chunk seal exists (or is landing) cluster-wide but this home's copy
-    // seal hasn't: building or queued — the rejoin catch-up shape.
+    if (input.chunkState === "sealed") {
+      // The chunk seal already happened cluster-wide but this home's copy
+      // seal hasn't: the rejoin catch-up shape. Glows so the lagging node
+      // is the loudest thing in its row.
+      return { node, state: "lagging", title: `${node}: copy lagging — chunk is sealed, this node's copy is still building or queued` };
+    }
     return { node, state: "sealing", title: `${node}: copy seal pending — building or queued` };
   });
 

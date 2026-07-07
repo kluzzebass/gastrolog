@@ -19,9 +19,11 @@ A **chunk seal** is the cluster-wide fact that a chunk's record membership is fr
 **Birth fills green:**
 
 - Hollow copper ring — chunk active on this node
-- Half-filled amber, pulsing — copy seal pending or building
-- Solid green — copy sealed on this node
-- Dim green — copy sealed, and the entire row is healthy (the quiet default; bright green appears only when the row diverges)
+- Half-filled amber, pulsing — copy seal pending or building (routine while the chunk seals)
+- Half-filled amber with a glow — copy lagging: the chunk is already sealed cluster-wide and this node is catching up
+- Calm green — copy sealed on this node
+
+Sealed pips are deliberately quiet everywhere. Anomalous pips — lagging, unreachable, stale — glow in their own color, so the node with the problem is the loudest thing in its row.
 
 **Death drains red** (while a delete runs):
 
@@ -30,8 +32,8 @@ A **chunk seal** is the cluster-wide fact that a chunk's record membership is fr
 
 **Node and anomaly states:**
 
-- Dashed red slashed ring — placement node unreachable (a node condition, not a chunk state)
-- Muted dot after a gap — stale residency: a copy on a node that is no longer in the placement
+- Dashed red slashed ring, glowing — placement node unreachable (a node condition, not a chunk state)
+- Muted glowing dot after a gap — stale residency: a copy on a node that is no longer in the placement
 - Bordered label instead of pips — cloud-backed chunk; bytes live in the named blob store, not on placement nodes
 
 Expand a chunk row to see the same pips with node names beside them.

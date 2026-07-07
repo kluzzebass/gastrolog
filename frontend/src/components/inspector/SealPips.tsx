@@ -8,16 +8,20 @@ import type { SealPip, PipState } from "./sealPipState";
 // pips (stale residency) append after a small gap. Cloud-backed chunks
 // render a BlobMark instead.
 
+// Anomalous states glow in their own color so the problem NODE is the
+// loudest thing in its row; sealed stays calm everywhere (quiet default).
 const PIP_CLASSES: Record<PipState, string> = {
   active: "border-[1.5px] border-copper",
   sealing:
     "border-[1.5px] border-amber bg-linear-to-t from-amber from-50% to-transparent to-50% animate-pulse",
-  sealed: "bg-severity-info",
-  sealedCalm: "bg-severity-info/45",
-  missing: "border-[1.5px] border-dashed border-severity-error",
+  lagging:
+    "border-[1.5px] border-amber bg-linear-to-t from-amber from-50% to-transparent to-50% animate-pulse shadow-[0_0_6px_1px] shadow-amber/70",
+  sealed: "bg-severity-info/45",
+  missing:
+    "border-[1.5px] border-dashed border-severity-error shadow-[0_0_6px_1px] shadow-severity-error/60",
   holds: "bg-severity-error animate-pulse",
   acked: "border-[1.5px] border-severity-error/45",
-  ghost: "bg-text-muted/55",
+  ghost: "bg-text-muted/55 shadow-[0_0_6px_1px] shadow-text-muted/50",
 };
 
 function Pip({ pip, size }: Readonly<{ pip: SealPip; size: number }>) {

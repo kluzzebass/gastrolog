@@ -17,9 +17,9 @@ describe("pipOrder", () => {
 });
 
 describe("computePips — birth fills green", () => {
-  test("fully sealed healthy row dims to calm", () => {
+  test("fully sealed healthy row is uniformly calm", () => {
     const { pips, ghosts } = computePips(base);
-    expect(pips.map((p) => p.state)).toEqual(["sealedCalm", "sealedCalm", "sealedCalm"]);
+    expect(pips.map((p) => p.state)).toEqual(["sealed", "sealed", "sealed"]);
     expect(ghosts).toEqual([]);
   });
 
@@ -28,20 +28,13 @@ describe("computePips — birth fills green", () => {
     expect(pips.map((p) => p.state)).toEqual(["active", "active", "active"]);
   });
 
-  test("rejoin catch-up: sealed row with one copy pending stays bright", () => {
+  test("rejoin catch-up: the LAGGING node carries the emphasis, neighbors stay calm", () => {
     const { pips } = computePips({ ...base, residentNodes: ["node-1", "node-3"] });
-    expect(pips.map((p) => p.state)).toEqual(["sealed", "sealing", "sealed"]);
+    expect(pips.map((p) => p.state)).toEqual(["sealed", "lagging", "sealed"]);
+    expect(pips[1]?.title).toContain("copy lagging");
   });
 
-  test("tooltips distinguish calm from divergent-row sealed", () => {
-    const calm = computePips(base).pips[0];
-    const divergent = computePips({ ...base, residentNodes: ["node-1", "node-3"] }).pips[0];
-    expect(calm?.title).toContain("all copies healthy");
-    expect(divergent?.title).toContain("highlighted because");
-    expect(calm?.title).not.toEqual(divergent?.title);
-  });
-
-  test("sealing chunk: residents sealed, others building", () => {
+  test("sealing chunk: residents sealed, others building (routine, no lag emphasis)", () => {
     const { pips } = computePips({
       ...base,
       chunkState: "sealing",
@@ -50,7 +43,7 @@ describe("computePips — birth fills green", () => {
     expect(pips.map((p) => p.state)).toEqual(["sealing", "sealed", "sealing"]);
   });
 
-  test("unreachable placement node renders missing, breaks calm", () => {
+  test("unreachable placement node renders missing, neighbors stay calm", () => {
     const { pips } = computePips({
       ...base,
       liveNodes: new Set(["node-1", "node-2"]),
@@ -88,7 +81,7 @@ describe("computePips — ghosts", () => {
     });
     expect(ghosts.map((g) => g.node)).toEqual(["node-4"]);
     expect(ghosts[0]?.state).toBe("ghost");
-    // A ghost is an anomaly: the placement row must not read as calm.
+    // The ghost itself carries the anomaly emphasis; placement pips stay calm.
     expect(pips.every((p) => p.state === "sealed")).toBe(true);
   });
 
