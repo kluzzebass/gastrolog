@@ -3,6 +3,7 @@ package chunk
 import (
 	"encoding/binary"
 	"errors"
+	"sync/atomic"
 )
 
 // DictReader resolves string IDs during attribute decoding.
@@ -17,11 +18,19 @@ type mmapDictEntry struct {
 }
 
 // MmapStringDict reads dictionary strings from a fixed byte region without
-// copying every entry into the heap at open time. Get returns strings that
-// alias the region; the caller must keep the backing storage alive.
+// copying every entry into the heap at open time. Get interns each entry on
+// first access: the returned string is a heap copy shared by every
+// subsequent Get for the same ID, so callers may retain it after the mmap
+// backing store is released, and per-record decoding pays the copy once per
+// unique string instead of once per lookup — the per-lookup copies were a
+// measurable slice of drain/search GC churn (gastrolog-11y2iv).
 type MmapStringDict struct {
 	data    []byte
 	entries []mmapDictEntry
+	// strs holds the interned heap copy per entry, filled lazily. Concurrent
+	// first accesses may each build a copy; both are identical values and
+	// the atomic store keeps the race benign.
+	strs []atomic.Pointer[string]
 }
 
 // NewMmapStringDict parses dictEntries from buf using the GLCB dict wire format:
@@ -41,7 +50,7 @@ func NewMmapStringDict(buf []byte, dictEntries uint32) (*MmapStringDict, error) 
 		entries[i] = mmapDictEntry{off: uint32(off), len: uint16(strLen)} //nolint:gosec // G115: strLen bounded by buffer check
 		off += strLen
 	}
-	return &MmapStringDict{data: buf, entries: entries}, nil
+	return &MmapStringDict{data: buf, entries: entries, strs: make([]atomic.Pointer[string], dictEntries)}, nil
 }
 
 // ScanMmapStringDict parses every complete dict entry in buf, tolerating a
@@ -61,14 +70,18 @@ func ScanMmapStringDict(buf []byte) (*MmapStringDict, error) {
 		entries = append(entries, mmapDictEntry{off: uint32(off), len: uint16(strLen)}) //nolint:gosec // G115: strLen bounded by buffer check
 		off += strLen
 	}
-	return &MmapStringDict{data: buf, entries: entries}, nil
+	return &MmapStringDict{data: buf, entries: entries, strs: make([]atomic.Pointer[string], len(entries))}, nil
 }
 
-// Get returns the string for a dictionary ID. The returned string is a heap
-// copy so callers can retain it after the mmap backing store is released.
+// Get returns the string for a dictionary ID, interned on first access.
+// Safe for concurrent use; the returned string is valid after the mmap
+// backing store is released.
 func (d *MmapStringDict) Get(id uint32) (string, error) {
 	if int(id) >= len(d.entries) {
 		return "", ErrDictEntryNotFound
+	}
+	if p := d.strs[id].Load(); p != nil {
+		return *p, nil
 	}
 	e := d.entries[id]
 	start := int(e.off)
@@ -76,5 +89,7 @@ func (d *MmapStringDict) Get(id uint32) (string, error) {
 	if start < 0 || end > len(d.data) {
 		return "", ErrInvalidAttrsData
 	}
-	return string(append([]byte(nil), d.data[start:end]...)), nil
+	s := string(d.data[start:end])
+	d.strs[id].Store(&s)
+	return s, nil
 }
