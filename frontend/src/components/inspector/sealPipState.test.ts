@@ -33,6 +33,14 @@ describe("computePips — birth fills green", () => {
     expect(pips.map((p) => p.state)).toEqual(["sealed", "sealing", "sealed"]);
   });
 
+  test("tooltips distinguish calm from divergent-row sealed", () => {
+    const calm = computePips(base).pips[0];
+    const divergent = computePips({ ...base, residentNodes: ["node-1", "node-3"] }).pips[0];
+    expect(calm?.title).toContain("all copies healthy");
+    expect(divergent?.title).toContain("highlighted because");
+    expect(calm?.title).not.toEqual(divergent?.title);
+  });
+
   test("sealing chunk: residents sealed, others building", () => {
     const { pips } = computePips({
       ...base,

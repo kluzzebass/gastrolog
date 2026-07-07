@@ -77,9 +77,16 @@ export function computePips(input: PipInputs): { pips: SealPip[]; ghosts: SealPi
     }
     if (resident.has(node)) {
       if (rowHealthy) {
-        return { node, state: "sealedCalm", title: `${node}: copy sealed` };
+        return { node, state: "sealedCalm", title: `${node}: copy sealed — all copies healthy` };
       }
-      return { node, state: "sealed", title: `${node}: copy sealed` };
+      // Bright green is deliberate: this copy is fine, but the ROW diverges
+      // (a neighbor's copy is pending, a node is unreachable, or a ghost
+      // exists) — brightness marks rows worth a look.
+      return {
+        node,
+        state: "sealed",
+        title: `${node}: copy sealed — highlighted because other copies in this row are pending, missing, or stale`,
+      };
     }
     if (input.chunkState === "active") {
       return { node, state: "active", title: `${node}: chunk active` };
