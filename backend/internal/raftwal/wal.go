@@ -29,6 +29,8 @@ import (
 	"time"
 
 	hraft "github.com/hashicorp/raft"
+
+	"gastrolog/internal/diskreserve"
 )
 
 // entryType tags each WAL record so the reader knows how to interpret it.
@@ -618,7 +620,7 @@ func (w *WAL) preallocateSegment(f *os.File) error {
 	if w.cfg.SegmentPreallocate != nil {
 		return w.cfg.SegmentPreallocate(f, w.cfg.SegmentTargetSize)
 	}
-	return preallocate(f, w.cfg.SegmentTargetSize)
+	return diskreserve.Blocks(f, w.cfg.SegmentTargetSize)
 }
 
 // ReserveLost reports whether the WAL's space reserve is currently lost

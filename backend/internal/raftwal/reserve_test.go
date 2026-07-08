@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"gastrolog/internal/diskreserve"
 	"hash/crc32"
 	"os"
 	"path/filepath"
@@ -325,7 +326,7 @@ func TestWALPreallocatePlatform(t *testing.T) {
 	}
 	defer func() { _ = f.Close() }()
 
-	if err := preallocate(f, 1<<20); err != nil {
+	if err := diskreserve.Blocks(f, 1<<20); err != nil {
 		t.Fatalf("platform preallocate: %v", err)
 	}
 	info, err := f.Stat()
