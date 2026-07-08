@@ -28,6 +28,11 @@ describe("computePips — birth fills green", () => {
     expect(pips.map((p) => p.state)).toEqual(["active", "active", "active"]);
   });
 
+  test("active chunk ignores residency (placement fallback is not a copy seal)", () => {
+    const { pips } = computePips({ ...base, chunkState: "active" });
+    expect(pips.map((p) => p.state)).toEqual(["active", "active", "active"]);
+  });
+
   test("rejoin catch-up: the LAGGING node carries the emphasis, neighbors stay calm", () => {
     const { pips } = computePips({ ...base, residentNodes: ["node-1", "node-3"] });
     expect(pips.map((p) => p.state)).toEqual(["sealed", "lagging", "sealed"]);

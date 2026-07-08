@@ -72,11 +72,14 @@ export function computePips(input: PipInputs): { pips: SealPip[]; ghosts: SealPi
     if (!input.liveNodes.has(node)) {
       return { node, state: "missing", title: `${node}: unreachable — copy state unknown` };
     }
+    if (input.chunkState === "active") {
+      // No copy seals exist for an open chunk; residency for actives is
+      // the placement fallback, not bytes — checking it here painted
+      // every active chunk's row calm green.
+      return { node, state: "active", title: `${node}: chunk active` };
+    }
     if (resident.has(node)) {
       return { node, state: "sealed", title: `${node}: copy sealed` };
-    }
-    if (input.chunkState === "active") {
-      return { node, state: "active", title: `${node}: chunk active` };
     }
     if (input.chunkState === "sealed") {
       // The chunk seal already happened cluster-wide but this home's copy
