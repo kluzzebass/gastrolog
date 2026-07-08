@@ -33,6 +33,7 @@ A **File** vault is local-only by default. Selecting a Cloud Storage on it makes
 - **Storage Class** — which [file storages](help:storage-config) this vault uses. For local-only vaults this hosts all chunks; for cloud-backed vaults it hosts the active chunk and warm cache (sealed chunks live in the cloud). The placement manager assigns one file storage per replica.
 - **Disk Free Warn** — free space on the vault's backing volume below which the disk-space alarm raises for this vault. Leave empty to inherit the node default.
 - **Disk Free Floor** — free space below which the cluster stops accepting new records destined to this vault, on every node, until space frees. Records for other vaults keep flowing. Leave empty to inherit the node default. Node defaults scale with volume size and can be overridden with `GLOG_DISK_FREE_WARN_GB` / `GLOG_DISK_FREE_FLOOR_GB`.
+- **Max Size** — a per-node byte budget for the vault's whole local disk claim: sealed chunks, indexes, and pipeline segment backlog. At the budget the cluster **refuses** new records for this vault (cap-and-refuse: everything already accepted is kept, the newest is nacked) until retention or segment releases drain below it. This is the opposite durability trade from a size retention policy, which keeps the newest by destroying the oldest (cap-and-drain) — set a size retention threshold *below* the max size to drain ahead of the cap, with the cap as the hard backstop. A warning alarm raises at 90% of the budget. Leave empty for unlimited.
 
 Cloud-backed vaults also have:
 

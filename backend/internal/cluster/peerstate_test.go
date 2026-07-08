@@ -270,3 +270,20 @@ func TestPeerState_VaultDiskProtected(t *testing.T) {
 		t.Fatal("expired peer's protect verdict must not linger")
 	}
 }
+
+// TestPeerState_VaultSizeCapped mirrors the disk-protect lookup for the
+// max-size budget list.
+func TestPeerState_VaultSizeCapped(t *testing.T) {
+	capped := glid.New()
+	roomy := glid.New()
+	ps := NewPeerState(time.Minute)
+	ps.Update("node-a", &gastrologv1.NodeStats{
+		SizeCappedVaultIds: [][]byte{capped.ToProto()},
+	}, time.Now())
+	if !ps.VaultSizeCapped(capped) {
+		t.Fatal("vault capped on a live peer must read as capped")
+	}
+	if ps.VaultSizeCapped(roomy) {
+		t.Fatal("unlisted vault must not read as capped")
+	}
+}

@@ -593,6 +593,17 @@ export class VaultConfig extends Message<VaultConfig> {
    */
   diskFreeFloorBytes = protoInt64.zero;
 
+  /**
+   * Per-node byte budget for this vault's whole local disk claim (sealed
+   * chunks, indexes, and pipeline segment backlog). 0 = unlimited. At the
+   * budget, admission for records destined to this vault is refused
+   * cluster-wide (cap-and-refuse) until retention or releases drain it —
+   * the hard backstop behind a size retention policy's cap-and-drain.
+   *
+   * @generated from field: uint64 max_size_bytes = 19;
+   */
+  maxSizeBytes = protoInt64.zero;
+
   constructor(data?: PartialMessage<VaultConfig>) {
     super();
     proto3.util.initPartial(data, this);
@@ -619,6 +630,7 @@ export class VaultConfig extends Message<VaultConfig> {
     { no: 16, name: "retention_disposition", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 17, name: "disk_free_warn_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 18, name: "disk_free_floor_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 19, name: "max_size_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultConfig {

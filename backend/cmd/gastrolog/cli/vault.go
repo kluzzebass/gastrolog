@@ -126,6 +126,9 @@ func vaultDetailPairs(v *v1.VaultConfig) [][2]string {
 	if v.DiskFreeFloorBytes > 0 {
 		pairs = append(pairs, [2]string{"Disk Free Floor", units.FormatBytesDisplay(int64(v.DiskFreeFloorBytes))}) //nolint:gosec // display only
 	}
+	if v.MaxSizeBytes > 0 {
+		pairs = append(pairs, [2]string{"Max Size", units.FormatBytesDisplay(int64(v.MaxSizeBytes))}) //nolint:gosec // display only
+	}
 	if v.RetentionDisposition != "" {
 		pairs = append(pairs, [2]string{"Retention Disposition", v.RetentionDisposition})
 	} else {
@@ -214,6 +217,7 @@ shape (memory, file, file+cloud, JSONL) defined by --type, --storage-class
 	cmd.Flags().Uint64("memory-budget", 0, "memory budget in bytes (memory vaults)")
 	cmd.Flags().String("disk-free-warn", "", "free-space warn threshold on the vault's backing volume (e.g. 10GB); empty inherits the node default")
 	cmd.Flags().String("disk-free-floor", "", "free-space floor on the vault's backing volume (e.g. 3GB) — below it, admission for this vault is suspended; empty inherits the node default")
+	cmd.Flags().String("max-size", "", "per-node size budget for the vault's whole local disk claim (e.g. 50GB) — at the budget, new records for this vault are refused until retention drains it; empty means unlimited")
 	_ = cmd.MarkFlagRequired("name")
 	return cmd
 }
@@ -261,19 +265,8 @@ func applyVaultFlags(ctx context.Context, cmd *cobra.Command, client *server.Cli
 	if cmd.Flags().Changed("memory-budget") {
 		cfg.MemoryBudgetBytes, _ = cmd.Flags().GetUint64("memory-budget")
 	}
-	if cmd.Flags().Changed("disk-free-warn") {
-		v, err := parseDiskFreeFlag(cmd, "disk-free-warn")
-		if err != nil {
-			return err
-		}
-		cfg.DiskFreeWarnBytes = v
-	}
-	if cmd.Flags().Changed("disk-free-floor") {
-		v, err := parseDiskFreeFlag(cmd, "disk-free-floor")
-		if err != nil {
-			return err
-		}
-		cfg.DiskFreeFloorBytes = v
+	if err := applyVaultSizeFlags(cmd, cfg); err != nil {
+		return err
 	}
 	if cmd.Flags().Changed("cloud-service") {
 		if err := resolveVaultCloudService(ctx, cmd, client, cfg); err != nil {
@@ -293,8 +286,31 @@ func applyVaultFlags(ctx context.Context, cmd *cobra.Command, client *server.Cli
 	return nil
 }
 
+// applyVaultSizeFlags overlays the byte-size threshold flags (disk-free
+// warn/floor, max-size budget) onto the vault config.
+func applyVaultSizeFlags(cmd *cobra.Command, cfg *v1.VaultConfig) error {
+	for _, f := range []struct {
+		name string
+		dst  *uint64
+	}{
+		{"disk-free-warn", &cfg.DiskFreeWarnBytes},
+		{"disk-free-floor", &cfg.DiskFreeFloorBytes},
+		{"max-size", &cfg.MaxSizeBytes},
+	} {
+		if !cmd.Flags().Changed(f.name) {
+			continue
+		}
+		v, err := parseDiskFreeFlag(cmd, f.name)
+		if err != nil {
+			return err
+		}
+		*f.dst = v
+	}
+	return nil
+}
+
 // parseDiskFreeFlag parses a human-friendly size flag; empty resets to 0
-// (inherit the node default).
+// (inherit the node default / unlimited).
 func parseDiskFreeFlag(cmd *cobra.Command, name string) (uint64, error) {
 	raw, _ := cmd.Flags().GetString(name)
 	if raw == "" {

@@ -732,6 +732,15 @@ export class NodeStats extends Message<NodeStats> {
    */
   diskProtectedVaultIds: Uint8Array[] = [];
 
+  /**
+   * Vaults whose local disk claim on THIS node has reached their per-node
+   * max-size budget. Honored cluster-wide by the same per-vault admission
+   * gate as disk_protected_vault_ids, with a budget-specific error.
+   *
+   * @generated from field: repeated bytes size_capped_vault_ids = 49;
+   */
+  sizeCappedVaultIds: Uint8Array[] = [];
+
   constructor(data?: PartialMessage<NodeStats>) {
     super();
     proto3.util.initPartial(data, this);
@@ -788,6 +797,7 @@ export class NodeStats extends Message<NodeStats> {
     { no: 46, name: "raft_failed_heartbeats_total", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 47, name: "raft_elections_per_min", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
     { no: 48, name: "disk_protected_vault_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
+    { no: 49, name: "size_capped_vault_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): NodeStats {

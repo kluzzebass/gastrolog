@@ -652,8 +652,12 @@ type NodeStats struct {
 	// starved vault volume anywhere in the cluster suspends new records for
 	// that vault at every front door while other vaults keep ingesting.
 	DiskProtectedVaultIds [][]byte `protobuf:"bytes,48,rep,name=disk_protected_vault_ids,json=diskProtectedVaultIds,proto3" json:"disk_protected_vault_ids,omitempty"`
-	unknownFields         protoimpl.UnknownFields
-	sizeCache             protoimpl.SizeCache
+	// Vaults whose local disk claim on THIS node has reached their per-node
+	// max-size budget. Honored cluster-wide by the same per-vault admission
+	// gate as disk_protected_vault_ids, with a budget-specific error.
+	SizeCappedVaultIds [][]byte `protobuf:"bytes,49,rep,name=size_capped_vault_ids,json=sizeCappedVaultIds,proto3" json:"size_capped_vault_ids,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *NodeStats) Reset() {
@@ -1018,6 +1022,13 @@ func (x *NodeStats) GetRaftElectionsPerMin() float64 {
 func (x *NodeStats) GetDiskProtectedVaultIds() [][]byte {
 	if x != nil {
 		return x.DiskProtectedVaultIds
+	}
+	return nil
+}
+
+func (x *NodeStats) GetSizeCappedVaultIds() [][]byte {
+	if x != nil {
+		return x.SizeCappedVaultIds
 	}
 	return nil
 }
@@ -4521,7 +4532,7 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\apayload\"\v\n" +
 	"\tHeartbeat\"1\n" +
 	"\bNodeJobs\x12%\n" +
-	"\x04jobs\x18\x01 \x03(\v2\x11.gastrolog.v1.JobR\x04jobs\"\x90\x12\n" +
+	"\x04jobs\x18\x01 \x03(\v2\x11.gastrolog.v1.JobR\x04jobs\"\xc3\x12\n" +
 	"\tNodeStats\x12\x1f\n" +
 	"\vcpu_percent\x18\x01 \x01(\x01R\n" +
 	"cpuPercent\x12!\n" +
@@ -4578,7 +4589,8 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x18raft_leader_losses_total\x18- \x01(\x04R\x15raftLeaderLossesTotal\x12?\n" +
 	"\x1craft_failed_heartbeats_total\x18. \x01(\x04R\x19raftFailedHeartbeatsTotal\x123\n" +
 	"\x16raft_elections_per_min\x18/ \x01(\x01R\x13raftElectionsPerMin\x127\n" +
-	"\x18disk_protected_vault_ids\x180 \x03(\fR\x15diskProtectedVaultIds\"\xec\x01\n" +
+	"\x18disk_protected_vault_ids\x180 \x03(\fR\x15diskProtectedVaultIds\x121\n" +
+	"\x15size_capped_vault_ids\x181 \x03(\fR\x12sizeCappedVaultIds\"\xec\x01\n" +
 	"\x15VaultPipelineNodeDisk\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12)\n" +
 	"\x10working_segments\x18\x02 \x01(\rR\x0fworkingSegments\x12<\n" +

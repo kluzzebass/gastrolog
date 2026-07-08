@@ -242,6 +242,10 @@ type Orchestrator struct {
 	// gate is cluster-consistent. Installed via SetRemoteVaultDiskProtected.
 	remoteVaultDiskProtected atomic.Pointer[func(glid.GLID) bool]
 
+	// remoteVaultSizeCapped is the same peer lookup for vaults at their
+	// max-size budget elsewhere. Installed via SetRemoteVaultSizeCapped.
+	remoteVaultSizeCapped atomic.Pointer[func(glid.GLID) bool]
+
 	// Remote transferrer for cross-node chunk migration (nil in single-node mode).
 	transferrer RemoteTransferrer
 
@@ -782,6 +786,9 @@ func New(cfg Config) (*Orchestrator, error) {
 		cacheEvictionLogger:  compCacheEviction.Apply(baseLogger),
 		cloudHealthLogger:    compCloudHealth.Apply(baseLogger),
 	}
+
+	// The max-size budget measures the vault's whole local disk claim.
+	o.diskGuard.vaultFootprint = o.localVaultFootprintBytes
 
 	// ingest pipeline. The supervisor owns the durable write path; the
 	// orchestrator publishes its routing table, registers Origin vaults, and

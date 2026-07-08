@@ -78,6 +78,11 @@ type diskGuard struct {
 
 	protect atomic.Bool
 
+	// vaultFootprint measures a vault's whole local disk claim for the
+	// max-size budget. Injected by the orchestrator (chunk + index bytes
+	// plus pipeline segment backlog); injectable for tests.
+	vaultFootprint func(glid.GLID) int64
+
 	mu          sync.Mutex
 	alarmRaised bool
 	// vaults holds per-vault guard state: each vault is evaluated against
@@ -96,6 +101,14 @@ type vaultDiskGuard struct {
 	protect     atomic.Bool
 	alarmRaised bool
 	name        string
+
+	// Max-size budget (cap-and-refuse): the vault's whole local disk claim
+	// — sealed chunks, indexes, pipeline segment backlog — measured against
+	// maxSizeBytes. 0 = unlimited. Distinct from the free-space thresholds:
+	// those protect the VOLUME, the budget bounds the VAULT.
+	maxSizeBytes    uint64
+	capped          atomic.Bool
+	sizeAlarmRaised bool
 }
 
 func newDiskGuardWithLogger(paths []string, logger *slog.Logger) *diskGuard {
@@ -151,9 +164,10 @@ func (g *diskGuard) floorThreshold(total uint64) uint64 {
 
 // SetVaultGuard registers (or updates) a vault's guard entry. paths are the
 // vault's local backing directories (storage chunks dir, segment root);
-// warn/floor of 0 inherit the node defaults with share clamps. Called from
-// the vault reconfig path; removal via RemoveVaultGuard.
-func (g *diskGuard) SetVaultGuard(vaultID glid.GLID, name string, paths []string, warnBytes, floorBytes uint64) {
+// warn/floor of 0 inherit the node defaults with share clamps; maxSizeBytes
+// of 0 means no budget. Called from the discovery refresh; removal via
+// RemoveVaultGuard / retainVaultGuards.
+func (g *diskGuard) SetVaultGuard(vaultID glid.GLID, name string, paths []string, warnBytes, floorBytes, maxSizeBytes uint64) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.vaults == nil {
@@ -168,6 +182,7 @@ func (g *diskGuard) SetVaultGuard(vaultID glid.GLID, name string, paths []string
 	v.name = name
 	v.warnBytes = warnBytes
 	v.floorBytes = floorBytes
+	v.maxSizeBytes = maxSizeBytes
 }
 
 // RemoveVaultGuard drops a vault's guard entry (vault deleted / no longer local).
@@ -192,6 +207,9 @@ func (g *diskGuard) retainVaultGuards(keep map[glid.GLID]bool, alerts AlertColle
 		if v.alarmRaised && alerts != nil {
 			alerts.Clear("disk-space:" + id.String())
 		}
+		if v.sizeAlarmRaised && alerts != nil {
+			alerts.Clear("vault-max-size:" + id.String())
+		}
 		delete(g.vaults, id)
 	}
 }
@@ -203,6 +221,29 @@ func (g *diskGuard) vaultProtectActive(vaultID glid.GLID) bool {
 	v := g.vaults[vaultID]
 	g.mu.Unlock()
 	return v != nil && v.protect.Load()
+}
+
+// vaultSizeCapped reports whether this vault's local disk claim has reached
+// its max-size budget. Lock-free read; false for unknown vaults.
+func (g *diskGuard) vaultSizeCapped(vaultID glid.GLID) bool {
+	g.mu.Lock()
+	v := g.vaults[vaultID]
+	g.mu.Unlock()
+	return v != nil && v.capped.Load()
+}
+
+// sizeCappedVaults lists the vaults currently at their max-size budget.
+// Broadcast in NodeStats so peers' admission gates honor it.
+func (g *diskGuard) sizeCappedVaults() []glid.GLID {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	var out []glid.GLID
+	for id, v := range g.vaults {
+		if v.capped.Load() {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 // protectedVaults lists the vaults currently under local disk protect.
@@ -226,20 +267,91 @@ func (g *diskGuard) evaluateVaults(alerts AlertCollector) {
 	g.mu.Unlock()
 
 	for id, v := range entries {
-		free, total, ok := g.worstFreeOf(v.paths)
-		if !ok {
-			continue
+		if free, total, ok := g.worstFreeOf(v.paths); ok {
+			warnAt := g.warnThreshold(total)
+			if v.warnBytes > 0 {
+				warnAt = v.warnBytes
+			}
+			floorAt := g.floorThreshold(total)
+			if v.floorBytes > 0 {
+				floorAt = v.floorBytes
+			}
+			g.reconcileVaultProtect(id, v, free, floorAt)
+			g.reconcileVaultAlarm(alerts, id, v, free, total, warnAt)
 		}
-		warnAt := g.warnThreshold(total)
-		if v.warnBytes > 0 {
-			warnAt = v.warnBytes
+		if v.maxSizeBytes > 0 && g.vaultFootprint != nil {
+			used := footprintBytes(g.vaultFootprint(id))
+			g.reconcileVaultSizeCap(id, v, used)
+			g.reconcileVaultSizeAlarm(alerts, id, v, used)
 		}
-		floorAt := g.floorThreshold(total)
-		if v.floorBytes > 0 {
-			floorAt = v.floorBytes
+	}
+}
+
+// footprintBytes clamps a measured footprint to unsigned; a negative
+// measurement (unreachable store mid-teardown) reads as empty.
+func footprintBytes(n int64) uint64 {
+	if n < 0 {
+		return 0
+	}
+	return uint64(n)
+}
+
+// sizeApproachThreshold is where the max-size alarm raises: 90% of the
+// budget. Clears with hysteresis one further tenth below, so chunk-granular
+// retention drains don't flap it.
+func sizeApproachThreshold(maxSize uint64) uint64 {
+	return maxSize - maxSize/10
+}
+
+// reconcileVaultSizeCap flips the cap: refuse at the budget, resume as soon
+// as retention or segment releases drain below it. The budget is enforced at
+// ADMISSION only — already-accepted records keep draining through the
+// pipeline into durable chunks (the claim may overshoot modestly; the
+// backlog counts toward the footprint so admission stays shut meanwhile).
+func (g *diskGuard) reconcileVaultSizeCap(id glid.GLID, v *vaultDiskGuard, used uint64) {
+	switch {
+	case v.capped.Load() && used < v.maxSizeBytes:
+		v.capped.Store(false)
+		if g.logger != nil {
+			g.logger.Info("vault max-size cap released — admission resumed for vault",
+				"vault", id, "name", v.name,
+				"used", units.FormatBytesDisplay(int64(used)), "max", units.FormatBytesDisplay(int64(v.maxSizeBytes))) //nolint:gosec // display only
 		}
-		g.reconcileVaultProtect(id, v, free, floorAt)
-		g.reconcileVaultAlarm(alerts, id, v, free, total, warnAt)
+	case !v.capped.Load() && used >= v.maxSizeBytes:
+		v.capped.Store(true)
+		if g.logger != nil {
+			g.logger.Warn("vault max-size cap engaged — admission refused for vault until space drains",
+				"vault", id, "name", v.name,
+				"used", units.FormatBytesDisplay(int64(used)), "max", units.FormatBytesDisplay(int64(v.maxSizeBytes))) //nolint:gosec // display only
+		}
+	}
+}
+
+func (g *diskGuard) reconcileVaultSizeAlarm(alerts AlertCollector, id glid.GLID, v *vaultDiskGuard, used uint64) {
+	if alerts == nil {
+		return
+	}
+	alertID := "vault-max-size:" + id.String()
+	approachAt := sizeApproachThreshold(v.maxSizeBytes)
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	switch {
+	case used >= approachAt:
+		severity := alert.Warning
+		msg := fmt.Sprintf(
+			"Vault %s is approaching its size budget: %s of %s used. Raise the budget, shorten retention, or add a size retention policy to drain ahead of the cap.",
+			v.name, units.FormatBytesDisplay(int64(used)), units.FormatBytesDisplay(int64(v.maxSizeBytes))) //nolint:gosec // display only
+		if v.capped.Load() {
+			severity = alert.Error
+			msg = fmt.Sprintf(
+				"Vault %s is at its size budget: %s of %s used — new records for this vault are REFUSED until retention drains it. Other vaults are unaffected.",
+				v.name, units.FormatBytesDisplay(int64(used)), units.FormatBytesDisplay(int64(v.maxSizeBytes))) //nolint:gosec // display only
+		}
+		alerts.Set(alertID, severity, "storage", msg)
+		v.sizeAlarmRaised = true
+	case v.sizeAlarmRaised && used < approachAt-approachAt/10:
+		alerts.Clear(alertID)
+		v.sizeAlarmRaised = false
 	}
 }
 
@@ -377,10 +489,16 @@ func (o *Orchestrator) diskAdmissionGate() error {
 // healthy volumes keep ingesting.
 var ErrVaultDiskProtect = errors.New("vault's volume is out of disk space: admission for this vault suspended until space is freed")
 
+// ErrVaultMaxSize rejects records destined to a vault whose local disk claim
+// has reached its per-node max-size budget on some node. Cap-and-refuse:
+// everything already accepted is kept; the newest records are nacked as
+// retryable backpressure until retention or releases drain below the budget.
+var ErrVaultMaxSize = errors.New("vault is at its size budget: admission for this vault refused until retention drains it")
+
 // vaultAdmissionGate is the per-destination admission check. It honors both
 // the local guard and — via the NodeStats broadcast — every live peer's:
-// the starved volume backing a vault is usually on a different node than
-// the front door accepting records for it.
+// the starved volume or over-budget claim backing a vault is usually on a
+// different node than the front door accepting records for it.
 func (o *Orchestrator) vaultAdmissionGate(vaultID glid.GLID) error {
 	if o.diskGuard != nil && o.diskGuard.vaultProtectActive(vaultID) {
 		return ErrVaultDiskProtect
@@ -388,7 +506,28 @@ func (o *Orchestrator) vaultAdmissionGate(vaultID glid.GLID) error {
 	if fn := o.remoteVaultDiskProtected.Load(); fn != nil && (*fn)(vaultID) {
 		return ErrVaultDiskProtect
 	}
+	if o.diskGuard != nil && o.diskGuard.vaultSizeCapped(vaultID) {
+		return ErrVaultMaxSize
+	}
+	if fn := o.remoteVaultSizeCapped.Load(); fn != nil && (*fn)(vaultID) {
+		return ErrVaultMaxSize
+	}
 	return nil
+}
+
+// SizeCappedVaults lists vaults at their local max-size budget, for the
+// NodeStats broadcast.
+func (o *Orchestrator) SizeCappedVaults() []glid.GLID {
+	if o.diskGuard == nil {
+		return nil
+	}
+	return o.diskGuard.sizeCappedVaults()
+}
+
+// SetRemoteVaultSizeCapped installs the peer-state lookup for vaults capped
+// on other nodes. Set once at app wiring, after cluster stats exist.
+func (o *Orchestrator) SetRemoteVaultSizeCapped(fn func(glid.GLID) bool) {
+	o.remoteVaultSizeCapped.Store(&fn)
 }
 
 // DiskProtectedVaults lists vaults under local disk protect, for the
@@ -434,11 +573,14 @@ func (o *Orchestrator) refreshVaultDiskGuards(ctx context.Context) {
 				paths = append(paths, fs.Path)
 			}
 		}
-		if len(paths) == 0 {
+		// A vault with no local placement still claims local disk through
+		// its origin segment backlog, so a max-size budget registers it
+		// even when there is no volume to sample here.
+		if len(paths) == 0 && vc.MaxSizeBytes == 0 {
 			continue
 		}
 		keep[vc.ID] = true
-		o.diskGuard.SetVaultGuard(vc.ID, vc.Name, paths, vc.DiskFreeWarnBytes, vc.DiskFreeFloorBytes)
+		o.diskGuard.SetVaultGuard(vc.ID, vc.Name, paths, vc.DiskFreeWarnBytes, vc.DiskFreeFloorBytes, vc.MaxSizeBytes)
 	}
 	o.diskGuard.retainVaultGuards(keep, o.alerts)
 }

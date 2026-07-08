@@ -324,6 +324,20 @@ func (p *PeerState) AggregatePipelineDisk() map[glid.GLID][]PeerVaultPipelineDis
 // this makes per-vault admission cluster-consistent: the starved volume is
 // usually on a different node than the front door taking the records.
 func (p *PeerState) VaultDiskProtected(vaultID glid.GLID) bool {
+	return p.vaultListedByAnyPeer(vaultID, func(ns *gastrologv1.NodeStats) [][]byte {
+		return ns.DiskProtectedVaultIds
+	})
+}
+
+// VaultSizeCapped reports whether any live peer has this vault at its local
+// max-size budget. Same cluster-consistency contract as VaultDiskProtected.
+func (p *PeerState) VaultSizeCapped(vaultID glid.GLID) bool {
+	return p.vaultListedByAnyPeer(vaultID, func(ns *gastrologv1.NodeStats) [][]byte {
+		return ns.SizeCappedVaultIds
+	})
+}
+
+func (p *PeerState) vaultListedByAnyPeer(vaultID glid.GLID, list func(*gastrologv1.NodeStats) [][]byte) bool {
 	want := vaultID.ToProto()
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -332,7 +346,7 @@ func (p *PeerState) VaultDiskProtected(vaultID glid.GLID) bool {
 		if now.Sub(e.received) > p.ttl || e.stats == nil {
 			continue
 		}
-		for _, id := range e.stats.DiskProtectedVaultIds {
+		for _, id := range list(e.stats) {
 			if string(id) == string(want) {
 				return true
 			}

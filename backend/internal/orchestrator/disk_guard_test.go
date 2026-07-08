@@ -174,8 +174,8 @@ func TestVaultDiskGuardLifecycle(t *testing.T) {
 	spy := &alertSpy{}
 
 	vaultA, vaultB := glid.New(), glid.New()
-	g.SetVaultGuard(vaultA, "hot", []string{"volA"}, 0, 0)
-	g.SetVaultGuard(vaultB, "cold", []string{"volB"}, 0, 0)
+	g.SetVaultGuard(vaultA, "hot", []string{"volA"}, 0, 0, 0)
+	g.SetVaultGuard(vaultB, "cold", []string{"volB"}, 0, 0, 0)
 
 	g.evaluateVaults(spy)
 	if g.vaultProtectActive(vaultA) || g.vaultProtectActive(vaultB) || spy.active() != 0 {
@@ -227,7 +227,7 @@ func TestVaultDiskGuardConfigOverridesThresholds(t *testing.T) {
 	vaultA := glid.New()
 
 	// Node default floor would be 12GiB; this vault demands 50GiB free.
-	g.SetVaultGuard(vaultA, "greedy", []string{"volA"}, 100*gib, 50*gib)
+	g.SetVaultGuard(vaultA, "greedy", []string{"volA"}, 100*gib, 50*gib, 0)
 	g.evaluateVaults(spy)
 	if !g.vaultProtectActive(vaultA) {
 		t.Fatal("30GiB free is below the vault's 50GiB floor override")
@@ -235,7 +235,7 @@ func TestVaultDiskGuardConfigOverridesThresholds(t *testing.T) {
 
 	// A modest override in the other direction: 30GiB free clears a 1GiB floor.
 	sampler.free["volA"] = 30 * gib
-	g.SetVaultGuard(vaultA, "modest", []string{"volA"}, 2*gib, gib)
+	g.SetVaultGuard(vaultA, "modest", []string{"volA"}, 2*gib, gib, 0)
 	g.evaluateVaults(spy)
 	if g.vaultProtectActive(vaultA) {
 		t.Fatal("30GiB free must clear a 1GiB floor override (with hysteresis)")
@@ -248,8 +248,8 @@ func TestVaultDiskGuardRetain(t *testing.T) {
 	t.Parallel()
 	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": gib})
 	vaultA, vaultB := glid.New(), glid.New()
-	g.SetVaultGuard(vaultA, "a", []string{"volA"}, 0, 0)
-	g.SetVaultGuard(vaultB, "b", []string{"volA"}, 0, 0)
+	g.SetVaultGuard(vaultA, "a", []string{"volA"}, 0, 0, 0)
+	g.SetVaultGuard(vaultB, "b", []string{"volA"}, 0, 0, 0)
 	g.evaluateVaults(nil)
 	if !g.vaultProtectActive(vaultA) || !g.vaultProtectActive(vaultB) {
 		t.Fatal("both vaults share the starved volume")
@@ -271,7 +271,7 @@ func TestVaultDiskGuardRetainClearsAlarm(t *testing.T) {
 	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": gib})
 	spy := &alertSpy{}
 	vaultA := glid.New()
-	g.SetVaultGuard(vaultA, "a", []string{"volA"}, 0, 0)
+	g.SetVaultGuard(vaultA, "a", []string{"volA"}, 0, 0, 0)
 	g.evaluateVaults(spy)
 	if !spy.has("disk-space:" + vaultA.String()) {
 		t.Fatal("starved vault must alarm before the prune")
@@ -288,8 +288,8 @@ func TestVaultAdmissionGate(t *testing.T) {
 	t.Parallel()
 	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": gib, "volB": 200 * gib})
 	vaultA, vaultB := glid.New(), glid.New()
-	g.SetVaultGuard(vaultA, "a", []string{"volA"}, 0, 0)
-	g.SetVaultGuard(vaultB, "b", []string{"volB"}, 0, 0)
+	g.SetVaultGuard(vaultA, "a", []string{"volA"}, 0, 0, 0)
+	g.SetVaultGuard(vaultB, "b", []string{"volB"}, 0, 0, 0)
 	g.evaluateVaults(nil)
 
 	o := &Orchestrator{diskGuard: g}
@@ -315,5 +315,116 @@ func TestVaultAdmissionGate(t *testing.T) {
 	// No guard, no remote fn: always admit.
 	if err := (&Orchestrator{}).vaultAdmissionGate(vaultA); err != nil {
 		t.Fatalf("guardless orchestrator must admit: %v", err)
+	}
+}
+
+// TestVaultMaxSizeCap pins cap-and-refuse: at the budget the vault refuses
+// admission and alarms at Error severity; approaching it alarms at Warning;
+// draining below the budget resumes admission immediately (retention frees
+// whole chunks — that chunkiness is the natural deadband), and the alarm
+// clears with hysteresis below the approach threshold.
+func TestVaultMaxSizeCap(t *testing.T) {
+	t.Parallel()
+	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": 200 * gib})
+	spy := &alertSpy{}
+	vaultA, vaultB := glid.New(), glid.New()
+
+	footprint := map[glid.GLID]int64{vaultA: int64(gib), vaultB: int64(gib)}
+	g.vaultFootprint = func(id glid.GLID) int64 { return footprint[id] }
+	g.SetVaultGuard(vaultA, "capped", []string{"volA"}, 0, 0, 10*gib)
+	g.SetVaultGuard(vaultB, "roomy", []string{"volA"}, 0, 0, 100*gib)
+
+	g.evaluateVaults(spy)
+	if g.vaultSizeCapped(vaultA) || spy.active() != 0 {
+		t.Fatal("well under budget must be quiet")
+	}
+
+	// Approach (>= 90% of 10GiB): Warning alarm, no cap.
+	footprint[vaultA] = int64(9*gib + gib/2)
+	g.evaluateVaults(spy)
+	if g.vaultSizeCapped(vaultA) {
+		t.Fatal("approach is not the cap: admission must stay open")
+	}
+	if !spy.has("vault-max-size:" + vaultA.String()) {
+		t.Fatal("approaching the budget must raise the vault-max-size alarm")
+	}
+
+	// At the budget: capped, sibling unaffected.
+	footprint[vaultA] = int64(10 * gib)
+	g.evaluateVaults(spy)
+	if !g.vaultSizeCapped(vaultA) {
+		t.Fatal("at the budget the vault must refuse admission")
+	}
+	if g.vaultSizeCapped(vaultB) {
+		t.Fatal("sibling vault under its own budget must be unaffected")
+	}
+
+	// One chunk drains: cap releases at once, alarm stands (still >= 90%).
+	footprint[vaultA] = int64(9*gib + gib/2)
+	g.evaluateVaults(spy)
+	if g.vaultSizeCapped(vaultA) {
+		t.Fatal("below the budget admission must resume")
+	}
+	if !spy.has("vault-max-size:" + vaultA.String()) {
+		t.Fatal("approach alarm must stand until the hysteresis band clears")
+	}
+
+	// Well below approach - 10%: alarm clears.
+	footprint[vaultA] = int64(7 * gib)
+	g.evaluateVaults(spy)
+	if spy.has("vault-max-size:" + vaultA.String()) {
+		t.Fatal("alarm must clear once clear of the approach band")
+	}
+}
+
+// TestVaultMaxSizeBudgetOnlyEntry pins the origin-node case: a vault with a
+// budget but NO local placement (nothing to statfs) is still evaluated —
+// origin segment backlog claims local disk everywhere records are accepted.
+func TestVaultMaxSizeBudgetOnlyEntry(t *testing.T) {
+	t.Parallel()
+	g, _ := newGuardFixture(400*gib, map[string]uint64{})
+	vaultA := glid.New()
+	g.vaultFootprint = func(glid.GLID) int64 { return int64(20 * gib) }
+	g.SetVaultGuard(vaultA, "originy", nil, 0, 0, 10*gib)
+	g.evaluateVaults(nil)
+	if !g.vaultSizeCapped(vaultA) {
+		t.Fatal("budget must be enforced even with no sampleable volume paths")
+	}
+}
+
+// TestVaultAdmissionGateMaxSize pins gate ordering and the remote half for
+// the size cap, mirroring TestVaultAdmissionGate for disk protect.
+func TestVaultAdmissionGateMaxSize(t *testing.T) {
+	t.Parallel()
+	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": 200 * gib})
+	vaultA, vaultB := glid.New(), glid.New()
+	g.vaultFootprint = func(id glid.GLID) int64 {
+		if id == vaultA {
+			return int64(11 * gib)
+		}
+		return int64(gib)
+	}
+	g.SetVaultGuard(vaultA, "a", []string{"volA"}, 0, 0, 10*gib)
+	g.SetVaultGuard(vaultB, "b", []string{"volA"}, 0, 0, 10*gib)
+	g.evaluateVaults(nil)
+
+	o := &Orchestrator{diskGuard: g}
+	if err := o.vaultAdmissionGate(vaultA); !errors.Is(err, ErrVaultMaxSize) {
+		t.Fatalf("capped vault must be refused with ErrVaultMaxSize, got %v", err)
+	}
+	if err := o.vaultAdmissionGate(vaultB); err != nil {
+		t.Fatalf("vault under budget must be admitted: %v", err)
+	}
+
+	// Remote cap (another node's broadcast) refuses vaultB here too.
+	o.SetRemoteVaultSizeCapped(func(id glid.GLID) bool { return id == vaultB })
+	if err := o.vaultAdmissionGate(vaultB); !errors.Is(err, ErrVaultMaxSize) {
+		t.Fatalf("remotely capped vault must be refused, got %v", err)
+	}
+
+	// Broadcast side: only locally capped vaults are published.
+	capped := o.SizeCappedVaults()
+	if len(capped) != 1 || capped[0] != vaultA {
+		t.Fatalf("SizeCappedVaults = %v, want [%s]", capped, vaultA)
 	}
 }

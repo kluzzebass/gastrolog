@@ -454,9 +454,11 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 
 	broadcaster, peerState, peerJobState, localStatsFn, clusterRouteRatesFn := setupClusterStats(ctx, logger, cfgStore, clusterSrv, orch, alertCollector, nodeID, cfg.ServerAddr, cfg.PprofAddr, statsSignal, raftLive)
 	if peerState != nil {
-		// Per-vault disk protect is cluster-consistent: a starved vault
-		// volume on any node suspends admission for that vault everywhere.
+		// Per-vault admission verdicts are cluster-consistent: a starved
+		// vault volume or an over-budget vault claim on any node suspends
+		// admission for that vault everywhere.
 		orch.SetRemoteVaultDiskProtected(peerState.VaultDiskProtected)
+		orch.SetRemoteVaultSizeCapped(peerState.VaultSizeCapped)
 	}
 
 	// Start vault placement manager (cluster mode only).

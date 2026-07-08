@@ -46,6 +46,7 @@ export interface StorageEntry {
   retentionDisposition: string; // "delete" (default) | "route"
   diskFreeWarn: string; // human size ("10GB"); empty inherits the node default
   diskFreeFloor: string; // human size; empty inherits the node default
+  maxSize: string; // human size; per-node budget for the vault's local disk claim; empty = unlimited
   replicationFactor: string;
   path: string;
   nodeId: string;
@@ -66,6 +67,7 @@ export function emptyStorageEntry(type: VaultTypeLabel): StorageEntry {
     retentionDisposition: "delete",
     diskFreeWarn: "",
     diskFreeFloor: "",
+    maxSize: "",
     replicationFactor: "1",
     path: "",
     nodeId: "",
@@ -291,6 +293,20 @@ export function VaultStorageForm({
             )}
           </FormField>
 
+          <FormField
+            label="Max Size"
+            dark={dark}
+            description="Per-node budget for the vault's whole local disk claim (chunks, indexes, pipeline backlog). At the budget, new records for this vault are refused cluster-wide until retention drains it. Leave empty for unlimited."
+          >
+            <TextInput
+              value={storage.maxSize}
+              onChange={(v) => onUpdate({ maxSize: v })}
+              placeholder=""
+              dark={dark}
+              mono
+              examples={["10GB", "50GB", "500GB"]}
+            />
+          </FormField>
           <FormField
             label="Disk Free Warn"
             dark={dark}
@@ -571,6 +587,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
       retentionDisposition: storage.type !== "jsonl" ? (storage.retentionDisposition || "delete") : "",
       diskFreeWarnBytes: storage.type === "file" ? parseBytes(storage.diskFreeWarn) : BigInt(0),
       diskFreeFloorBytes: storage.type === "file" ? parseBytes(storage.diskFreeFloor) : BigInt(0),
+      maxSizeBytes: storage.type === "file" ? parseBytes(storage.maxSize) : BigInt(0),
       replicationFactor: parseInt(storage.replicationFactor, 10) || 1,
       path: storage.type === "jsonl" ? storage.path : "",
     });
