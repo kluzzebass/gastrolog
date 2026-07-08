@@ -646,6 +646,22 @@ func (o *Orchestrator) refreshVaultDiskGuards(ctx context.Context) {
 	o.diskGuard.retainVaultGuards(keep, o.alerts)
 }
 
+// primeDiskGuard runs one synchronous NODE-level guard pass before ingest
+// admission opens, closing the boot blind window: without it, a node
+// restarting into an already-full volume admits and writes for up to one
+// sampling interval (15s) with protect=false — exactly how the second wave of
+// nodes died after restarting into the full volume (gastrolog-67gvjo). Only
+// the node-level evaluate runs here (statfs + guard mutex, no o.mu); the
+// per-vault pass touches o.mu via the footprint probe and would deadlock under
+// Start's lock, so it converges on the first scheduler tick instead — the
+// node-level floor is the hard backstop that matters for the WAL.
+func (o *Orchestrator) primeDiskGuard() {
+	if o.diskGuard == nil || len(o.diskGuard.paths) == 0 {
+		return
+	}
+	o.diskGuard.evaluate(o.alerts)
+}
+
 // startDiskGuard registers the guard's scheduler job. No-op without paths.
 func (o *Orchestrator) startDiskGuard() error {
 	if o.diskGuard == nil || len(o.diskGuard.paths) == 0 {

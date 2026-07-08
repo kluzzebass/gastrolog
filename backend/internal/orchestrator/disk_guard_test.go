@@ -228,6 +228,31 @@ func TestDiskGuardStagedReleaseInvariant(t *testing.T) {
 	}
 }
 
+// TestPrimeDiskGuardClosesBootWindow pins the boot blind-window fix: a node
+// starting on an already-full volume must be in protect BEFORE admission
+// opens, from the synchronous prime pass — not only after the first 15s tick.
+func TestPrimeDiskGuardClosesBootWindow(t *testing.T) {
+	t.Parallel()
+	g, _ := newGuardFixture(400*gib, map[string]uint64{"a": 5 * gib, "b": 5 * gib})
+	o := &Orchestrator{diskGuard: g}
+
+	// Before any pass: admission open (nothing sampled yet).
+	if o.diskProtectActive() {
+		t.Fatal("no pass yet: admission should be open")
+	}
+	// Prime (what Start does before pipeline.Start): full volume must close it.
+	o.primeDiskGuard()
+	if !o.diskProtectActive() {
+		t.Fatal("prime must engage protect on a full volume before admission opens")
+	}
+	if !o.diskDeferWrites() {
+		t.Fatal("prime must also pause the drain tier below the floor")
+	}
+	// Guardless / pathless orchestrators prime to a no-op without panicking.
+	(&Orchestrator{}).primeDiskGuard()
+	(&Orchestrator{diskGuard: newDiskGuard(nil)}).primeDiskGuard()
+}
+
 // TestDiskDeferWritesGate pins the orchestrator accessor the supervisor's
 // drain gate reads.
 func TestDiskDeferWritesGate(t *testing.T) {
