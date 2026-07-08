@@ -55,6 +55,13 @@ var ErrVaultNotRegistered = errors.New("vault not registered as origin on this n
 // Config configures the supervisor and its queue graph. All sizing fields have
 // sane defaults; only Table is effectively required once records flow.
 type Config struct {
+	// AdmissionGate, when non-nil, is consulted before accepting a new
+	// record on any intake (ingester pump, Submit, SubmitToVault). A
+	// non-nil return rejects the record with that error — nacked to the
+	// source, which treats it as retryable backpressure (disk-space
+	// floor, and the coming per-stage backlog watermarks).
+	AdmissionGate func() error
+
 	NodeID glid.GLID
 	Logger *slog.Logger
 	// Alerts raises operator alerts for degraded pipeline components
@@ -353,6 +360,15 @@ func (s *Supervisor) pump(ctx context.Context) {
 				}
 				continue
 			}
+			if err := s.admit(); err != nil {
+				// Admission rejected (disk floor / backlog watermark):
+				// nack so the source retries; an accepted-then-marooned
+				// record would be ours to lose.
+				if out.Ack != nil {
+					out.Ack <- err
+				}
+				continue
+			}
 			in := routing.IngestInput(out.Record)
 			in.Ack = out.Ack
 			if !s.sendRouting(ctx, in) {
@@ -384,6 +400,14 @@ func (s *Supervisor) sendRouting(ctx context.Context, in routing.Input) bool {
 		}
 		return false
 	}
+}
+
+// admit consults the configured admission gate; nil gate admits everything.
+func (s *Supervisor) admit() error {
+	if s.cfg.AdmissionGate == nil {
+		return nil
+	}
+	return s.cfg.AdmissionGate()
 }
 
 // closeRouting closes routingIn exactly once under the write lock, after all
@@ -438,6 +462,9 @@ func (s *Supervisor) Submit(ctx context.Context, in routing.Input) error {
 	if !s.running.Load() {
 		return ErrNotRunning
 	}
+	if err := s.admit(); err != nil {
+		return err
+	}
 	if !s.sendRouting(ctx, in) {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -457,6 +484,9 @@ func (s *Supervisor) Submit(ctx context.Context, in routing.Input) error {
 func (s *Supervisor) SubmitToVault(ctx context.Context, vaultID glid.GLID, rec *record.Record, ack chan<- error) error {
 	if !s.running.Load() {
 		return ErrNotRunning
+	}
+	if err := s.admit(); err != nil {
+		return err
 	}
 	err := s.seg.Submit(ctx, vaultID, segmentation.Input{Record: rec, Ack: ack})
 	if errors.Is(err, segmentation.ErrUnknownVault) {

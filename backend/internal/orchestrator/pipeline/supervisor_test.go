@@ -19,6 +19,7 @@ import (
 	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/pipeline/routing"
 	"gastrolog/internal/pipeline/segmentation"
+	"gastrolog/internal/record"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 
 	hraft "github.com/hashicorp/raft"
@@ -449,5 +450,40 @@ func TestStagingHeadPurgeRootsDedupesSharedRoot(t *testing.T) {
 	got := stagingHeadPurgeRoots(root, root, true, true)
 	if len(got) != 1 || got[0] != root {
 		t.Fatalf("stagingHeadPurgeRoots = %v, want [%s]", got, root)
+	}
+}
+
+// TestSupervisorAdmissionGateRejects pins the admission contract on both
+// external intakes: a gate error rejects the record with that error, and a
+// nil/admitting gate changes nothing. (The ingester-pump intake nacks the
+// same way; it shares admit().)
+func TestSupervisorAdmissionGateRejects(t *testing.T) {
+	rejected := errors.New("node is out of disk space")
+	gateErr := rejected
+	sup := New(Config{
+		NodeID: glid.New(),
+		Table:  allRoute(t, glid.New()),
+		AdmissionGate: func() error {
+			return gateErr
+		},
+	})
+	ctx := context.Background()
+	if err := sup.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer func() { _ = sup.Stop() }()
+
+	rec := &record.Record{Raw: []byte("x")}
+	if err := sup.Submit(ctx, routing.IngestInput(rec)); !errors.Is(err, rejected) {
+		t.Fatalf("Submit under gate = %v, want rejection", err)
+	}
+	if err := sup.SubmitToVault(ctx, glid.New(), rec, nil); !errors.Is(err, rejected) {
+		t.Fatalf("SubmitToVault under gate = %v, want rejection", err)
+	}
+
+	// Gate lifts: intake resumes (vault unknown is fine — admission ran first).
+	gateErr = nil
+	if err := sup.Submit(ctx, routing.IngestInput(rec)); err != nil {
+		t.Fatalf("Submit after gate lift: %v", err)
 	}
 }

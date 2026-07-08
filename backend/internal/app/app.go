@@ -330,6 +330,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		LocalNodeID:       nodeID,
 		Alerts:            alertCollector,
 		SegmentsDir:       hd.SegmentsDir(),
+		DiskGuardPaths:    []string{hd.Root(), hd.SegmentsDir()},
 		Phase:             shutdownPhase,
 		OnIngesterAlive: func(ingesterID glid.GLID, alive bool) {
 			aliveReconciler.Enqueue(ingesterID, alive)
