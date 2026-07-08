@@ -72,6 +72,12 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 		})
 	}
 
+	// Prime the disk guard BEFORE admission opens: a node restarting into an
+	// already-full volume must reject from the first record, not after the
+	// first 15s scheduler tick (gastrolog-67gvjo — the boot blind window that
+	// killed the second wave of nodes).
+	o.primeDiskGuard()
+
 	// Push the bootstrap-registered ingester set into the supervisor, then start
 	// the pipeline (the ingestion manager launches the ingesters).
 	if err := o.pushIngestersToSupervisorLocked(); err != nil {

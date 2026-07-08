@@ -55,6 +55,29 @@ var ErrVaultNotRegistered = errors.New("vault not registered as origin on this n
 // Config configures the supervisor and its queue graph. All sizing fields have
 // sane defaults; only Table is effectively required once records flow.
 type Config struct {
+	// AdmissionGate, when non-nil, is consulted before accepting a new
+	// record on any intake (ingester pump, Submit, SubmitToVault). A
+	// non-nil return rejects the record with that error — nacked to the
+	// source, which treats it as retryable backpressure (disk-space
+	// floor, and the coming per-stage backlog watermarks).
+	AdmissionGate func() error
+
+	// DeferWritesGate, when non-nil, pauses the heavy-write DRAIN stages
+	// (chunking builds, collection pulls) when it returns true. Distinct
+	// from AdmissionGate: the drain tier resumes EARLIER than ingest
+	// admission on disk recovery so the pipeline can seal backlog into
+	// chunks retention frees, rather than deadlocking behind the closed
+	// front door (gastrolog-67gvjo staged release). Falls back to tracking
+	// AdmissionGate when nil.
+	DeferWritesGate func() bool
+
+	// VaultAdmissionGate, when non-nil, is the per-destination admission
+	// check: consulted for each matched vault at routing fan-out and for the
+	// target vault on SubmitToVault. A non-nil return rejects the record for
+	// ALL destinations (partial delivery would be silent loss for the gated
+	// vault). Backed by the per-vault disk guard, local and peer-broadcast.
+	VaultAdmissionGate func(glid.GLID) error
+
 	NodeID glid.GLID
 	Logger *slog.Logger
 	// Alerts raises operator alerts for degraded pipeline components
@@ -229,8 +252,9 @@ func New(cfg Config) *Supervisor {
 		Digesters:   cfg.Digesters,
 	})
 	route := routing.New(routing.Config{
-		Workers: cfg.RoutingWorkers,
-		Table:   cfg.Table,
+		Workers:   cfg.RoutingWorkers,
+		Table:     cfg.Table,
+		VaultGate: cfg.VaultAdmissionGate,
 	})
 	dist, pullIn := distribution.New(distribution.Config{
 		PullQueueCap:     cfg.DistributionPullQueueCap,
@@ -238,9 +262,21 @@ func New(cfg Config) *Supervisor {
 		PublishBatchSize: cfg.DistributionPublishBatchSize,
 		Logger:           cfg.Logger,
 	})
-	chunk := chunking.New(chunking.Config{Logger: cfg.Logger, Alerts: cfg.Alerts})
+	// Heavy-write stages pause whenever admission is rejecting: builds and
+	// inbound pulls create bytes, and under disk protect the last free
+	// megabytes belong to the WAL (gastrolog-38bm9t — builds ENOSPC-looped
+	// while protect held the front door).
+	deferWrites := func() bool {
+		if cfg.DeferWritesGate != nil {
+			return cfg.DeferWritesGate()
+		}
+		// Pre-staged-release fallback: tie drain writes to admission.
+		return cfg.AdmissionGate != nil && cfg.AdmissionGate() != nil
+	}
+	chunk := chunking.New(chunking.Config{Logger: cfg.Logger, Alerts: cfg.Alerts, DeferWrites: deferWrites})
 	col := collection.New(collection.Config{
-		Logger: cfg.Logger,
+		Logger:      cfg.Logger,
+		DeferWrites: deferWrites,
 		OnPassComplete: func(vaultID glid.GLID) {
 			chunk.NotifyVault(vaultID)
 		},
@@ -353,6 +389,15 @@ func (s *Supervisor) pump(ctx context.Context) {
 				}
 				continue
 			}
+			if err := s.admit(); err != nil {
+				// Admission rejected (disk floor / backlog watermark):
+				// nack so the source retries; an accepted-then-marooned
+				// record would be ours to lose.
+				if out.Ack != nil {
+					out.Ack <- err
+				}
+				continue
+			}
 			in := routing.IngestInput(out.Record)
 			in.Ack = out.Ack
 			if !s.sendRouting(ctx, in) {
@@ -384,6 +429,14 @@ func (s *Supervisor) sendRouting(ctx context.Context, in routing.Input) bool {
 		}
 		return false
 	}
+}
+
+// admit consults the configured admission gate; nil gate admits everything.
+func (s *Supervisor) admit() error {
+	if s.cfg.AdmissionGate == nil {
+		return nil
+	}
+	return s.cfg.AdmissionGate()
 }
 
 // closeRouting closes routingIn exactly once under the write lock, after all
@@ -438,6 +491,9 @@ func (s *Supervisor) Submit(ctx context.Context, in routing.Input) error {
 	if !s.running.Load() {
 		return ErrNotRunning
 	}
+	if err := s.admit(); err != nil {
+		return err
+	}
 	if !s.sendRouting(ctx, in) {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -457,6 +513,14 @@ func (s *Supervisor) Submit(ctx context.Context, in routing.Input) error {
 func (s *Supervisor) SubmitToVault(ctx context.Context, vaultID glid.GLID, rec *record.Record, ack chan<- error) error {
 	if !s.running.Load() {
 		return ErrNotRunning
+	}
+	if err := s.admit(); err != nil {
+		return err
+	}
+	if s.cfg.VaultAdmissionGate != nil {
+		if err := s.cfg.VaultAdmissionGate(vaultID); err != nil {
+			return err
+		}
 	}
 	err := s.seg.Submit(ctx, vaultID, segmentation.Input{Record: rec, Ack: ack})
 	if errors.Is(err, segmentation.ErrUnknownVault) {

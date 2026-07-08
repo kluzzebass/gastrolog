@@ -160,6 +160,9 @@ func VaultConfigToProto(v system.VaultConfig) *gastrologv1.VaultConfig {
 		CacheBudget:          v.CacheBudget,
 		CacheTtl:             v.CacheTTL,
 		RetentionDisposition: v.RetentionDisposition,
+		DiskFreeWarnBytes:    v.DiskFreeWarnBytes,
+		DiskFreeFloorBytes:   v.DiskFreeFloorBytes,
+		MaxSizeBytes:         v.MaxSizeBytes,
 	}
 	pb.RotationPolicyId = glid.OptionalToProto(v.RotationPolicyID)
 	pb.CloudServiceId = glid.OptionalToProto(v.CloudServiceID)
@@ -184,6 +187,9 @@ func VaultConfigFromProto(p *gastrologv1.VaultConfig) (system.VaultConfig, error
 		CacheBudget:          p.GetCacheBudget(),
 		CacheTTL:             p.GetCacheTtl(),
 		RetentionDisposition: p.GetRetentionDisposition(),
+		DiskFreeWarnBytes:    p.GetDiskFreeWarnBytes(),
+		DiskFreeFloorBytes:   p.GetDiskFreeFloorBytes(),
+		MaxSizeBytes:         p.GetMaxSizeBytes(),
 		RotationPolicyID:     glid.OptionalFromProto(p.GetRotationPolicyId()),
 		CloudServiceID:       glid.OptionalFromProto(p.GetCloudServiceId()),
 	}

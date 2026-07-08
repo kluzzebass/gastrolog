@@ -31,27 +31,44 @@ func (o *Orchestrator) LocalStorageBytes() int64 {
 func (o *Orchestrator) localChunkStorageBytes() int64 {
 	var total int64
 	for _, vaultID := range o.ListVaults() {
-		metas, err := o.ListLocalChunkMetas(vaultID)
-		if err != nil {
+		total += o.localVaultChunkBytes(vaultID)
+	}
+	return total
+}
+
+// localVaultChunkBytes is one vault's local chunk-store claim: sealed GLCB
+// bytes where recorded, otherwise record bytes plus index sizes. Cloud-backed
+// chunks without a local copy cost nothing here.
+func (o *Orchestrator) localVaultChunkBytes(vaultID glid.GLID) int64 {
+	metas, err := o.ListLocalChunkMetas(vaultID)
+	if err != nil {
+		return 0
+	}
+	var total int64
+	for _, meta := range metas {
+		if meta.CloudBacked && meta.DiskBytes == 0 {
 			continue
 		}
-		for _, meta := range metas {
-			if meta.CloudBacked && meta.DiskBytes == 0 {
-				continue
-			}
-			if meta.DiskBytes > 0 {
-				total += meta.DiskBytes
-				continue
-			}
-			total += meta.Bytes
-			if sizes, err := o.IndexSizes(vaultID, meta.ID); err == nil {
-				for _, sz := range sizes {
-					total += sz
-				}
+		if meta.DiskBytes > 0 {
+			total += meta.DiskBytes
+			continue
+		}
+		total += meta.Bytes
+		if sizes, err := o.IndexSizes(vaultID, meta.ID); err == nil {
+			for _, sz := range sizes {
+				total += sz
 			}
 		}
 	}
 	return total
+}
+
+// localVaultFootprintBytes is the vault's whole local disk claim — chunk
+// store plus pipeline segment backlog — measured against the vault's
+// max-size budget. Backlog counts by design: the budget bounds everything
+// the vault holds on this node, not just its retained data.
+func (o *Orchestrator) localVaultFootprintBytes(vaultID glid.GLID) int64 {
+	return o.localVaultChunkBytes(vaultID) + o.localPipelineSegmentStorageBytes(vaultID)
 }
 
 func (o *Orchestrator) localPipelineSegmentStorageBytes(vaultID glid.GLID) int64 {

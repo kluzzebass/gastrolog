@@ -157,6 +157,17 @@ message NodeStats {
   uint64 raft_leader_losses_total = 45;
   uint64 raft_failed_heartbeats_total = 46;
   double raft_elections_per_min = 47;
+
+  // Vaults whose backing volume on THIS node is below its free-space floor.
+  // Every node's admission gate honors the union across live peers, so a
+  // starved vault volume anywhere in the cluster suspends new records for
+  // that vault at every front door while other vaults keep ingesting.
+  repeated bytes disk_protected_vault_ids = 48;
+
+  // Vaults whose local disk claim on THIS node has reached their per-node
+  // max-size budget. Honored cluster-wide by the same per-vault admission
+  // gate as disk_protected_vault_ids, with a budget-specific error.
+  repeated bytes size_capped_vault_ids = 49;
 }
 
 // VaultPipelineNodeDisk is one vault's local pipeline storage areas on a

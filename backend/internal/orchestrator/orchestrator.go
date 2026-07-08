@@ -233,6 +233,19 @@ type Orchestrator struct {
 	leaderlessMu    sync.Mutex
 	leaderlessSince map[glid.GLID]time.Time
 
+	// diskGuard samples free space and drives the disk-space alarm plus
+	// protect mode (ingest admission suspended below the floor).
+	diskGuard *diskGuard
+
+	// remoteVaultDiskProtected consults peer NodeStats broadcasts for vaults
+	// under disk protect on OTHER nodes, so this node's per-vault admission
+	// gate is cluster-consistent. Installed via SetRemoteVaultDiskProtected.
+	remoteVaultDiskProtected atomic.Pointer[func(glid.GLID) bool]
+
+	// remoteVaultSizeCapped is the same peer lookup for vaults at their
+	// max-size budget elsewhere. Installed via SetRemoteVaultSizeCapped.
+	remoteVaultSizeCapped atomic.Pointer[func(glid.GLID) bool]
+
 	// Remote transferrer for cross-node chunk migration (nil in single-node mode).
 	transferrer RemoteTransferrer
 
@@ -656,6 +669,11 @@ type Config struct {
 	// built. The app supplies the level/timestamp enrichers here.
 	Digesters []digestion.Digester
 
+	// DiskGuardPaths are filesystem paths whose volumes the disk-space
+	// guard samples (node home for the Raft WAL, segments dir for the
+	// pipeline). Empty disables the guard (tests, memory-only setups).
+	DiskGuardPaths []string
+
 	// SegmentsDir is the base directory under which each origin vault's
 	// segmentation working/ and completed/ areas live: a vault's segment
 	// OriginRoot is SegmentsDir/<vaultID>. Set from home.Dir.SegmentsDir() at
@@ -753,6 +771,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		onIngesterAlive:      cfg.OnIngesterAlive,
 		onIngesterCheckpoint: cfg.OnIngesterCheckpoint,
 		segmentsDir:          cfg.SegmentsDir,
+		diskGuard:            newDiskGuardWithLogger(cfg.DiskGuardPaths, cfg.Logger),
 		homeDir:              homeDirFromSegments(cfg.SegmentsDir),
 		pipelineVaults:       make(map[glid.GLID]pipelineVaultReg),
 		now:                  cfg.Now,
@@ -768,6 +787,9 @@ func New(cfg Config) (*Orchestrator, error) {
 		cloudHealthLogger:    compCloudHealth.Apply(baseLogger),
 	}
 
+	// The max-size budget measures the vault's whole local disk claim.
+	o.diskGuard.vaultFootprint = o.localVaultFootprintBytes
+
 	// ingest pipeline. The supervisor owns the durable write path; the
 	// orchestrator publishes its routing table, registers Origin vaults, and
 	// reconciles ingesters into it (see pipeline.go). The pressure gate is injected
@@ -775,6 +797,9 @@ func New(cfg Config) (*Orchestrator, error) {
 	// queue-depth probes in Start.
 	o.pipelineGate = chanwatch.NewPressureGate(chanwatch.DefaultThresholds())
 	o.pipeline = pipeline.New(pipeline.Config{
+		AdmissionGate:        o.diskAdmissionGate,
+		VaultAdmissionGate:   o.vaultAdmissionGate,
+		DeferWritesGate:      o.diskDeferWrites,
 		NodeID:               o.localNodeIDGLID,
 		Logger:               baseLogger,
 		Alerts:               o.alerts,
@@ -836,6 +861,9 @@ func New(cfg Config) (*Orchestrator, error) {
 	// instance (pending obligations, local orphans, missing replicas).
 	// Phase-offset from retention's :00 tick to avoid spikiness. See
 	// gastrolog-51gme (delete-side) and gastrolog-2dgvj (create-side).
+	if err := o.startDiskGuard(); err != nil {
+		return nil, err
+	}
 	if err := o.startInstanceCatchupSweep(); err != nil {
 		return nil, fmt.Errorf("vault catchup sweep: %w", err)
 	}

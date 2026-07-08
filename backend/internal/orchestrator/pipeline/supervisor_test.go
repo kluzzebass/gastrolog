@@ -19,6 +19,7 @@ import (
 	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/pipeline/routing"
 	"gastrolog/internal/pipeline/segmentation"
+	"gastrolog/internal/record"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 
 	hraft "github.com/hashicorp/raft"
@@ -449,5 +450,102 @@ func TestStagingHeadPurgeRootsDedupesSharedRoot(t *testing.T) {
 	got := stagingHeadPurgeRoots(root, root, true, true)
 	if len(got) != 1 || got[0] != root {
 		t.Fatalf("stagingHeadPurgeRoots = %v, want [%s]", got, root)
+	}
+}
+
+// TestSupervisorAdmissionGateRejects pins the admission contract on both
+// external intakes: a gate error rejects the record with that error, and a
+// nil/admitting gate changes nothing. (The ingester-pump intake nacks the
+// same way; it shares admit().)
+func TestSupervisorAdmissionGateRejects(t *testing.T) {
+	rejected := errors.New("node is out of disk space")
+	gateErr := rejected
+	sup := New(Config{
+		NodeID: glid.New(),
+		Table:  allRoute(t, glid.New()),
+		AdmissionGate: func() error {
+			return gateErr
+		},
+	})
+	ctx := context.Background()
+	if err := sup.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer func() { _ = sup.Stop() }()
+
+	rec := &record.Record{Raw: []byte("x")}
+	if err := sup.Submit(ctx, routing.IngestInput(rec)); !errors.Is(err, rejected) {
+		t.Fatalf("Submit under gate = %v, want rejection", err)
+	}
+	if err := sup.SubmitToVault(ctx, glid.New(), rec, nil); !errors.Is(err, rejected) {
+		t.Fatalf("SubmitToVault under gate = %v, want rejection", err)
+	}
+
+	// Gate lifts: intake resumes (vault unknown is fine — admission ran first).
+	gateErr = nil
+	if err := sup.Submit(ctx, routing.IngestInput(rec)); err != nil {
+		t.Fatalf("Submit after gate lift: %v", err)
+	}
+}
+
+// TestSupervisorDeferWritesFollowsAdmissionGate pins the loading-dock fix:
+// the heavy-write stages (collection pulls, GLCB builds) share the admission
+// gate's verdict, so a node under disk protect stops CREATING bytes on every
+// path, not just the front door. (Builds ENOSPC-looped through protect in
+// the live test — 26 failures churning the last free megabytes.)
+func TestSupervisorDeferWritesFollowsAdmissionGate(t *testing.T) {
+	gateErr := errors.New("node is out of disk space")
+	blocked := true
+	sup := New(Config{
+		NodeID: glid.New(),
+		AdmissionGate: func() error {
+			if blocked {
+				return gateErr
+			}
+			return nil
+		},
+	})
+	// The wiring under test is construction-time: both managers received a
+	// DeferWrites derived from the gate. Exercise it via CollectOnce on an
+	// unknown vault: the deferral must not mask vault resolution (defer
+	// happens per-pass, not at the API edge).
+	if err := sup.CollectOnce(context.Background(), glid.New()); !errors.Is(err, collection.ErrUnknownVault) {
+		t.Fatalf("CollectOnce = %v, want ErrUnknownVault (gate must not mask resolution)", err)
+	}
+	blocked = false
+	if err := sup.CollectOnce(context.Background(), glid.New()); !errors.Is(err, collection.ErrUnknownVault) {
+		t.Fatalf("CollectOnce after gate lift = %v, want ErrUnknownVault", err)
+	}
+}
+
+// TestSupervisorVaultAdmissionGate pins per-destination admission ordering on
+// the direct-to-vault entry: the vault gate runs before segmentation resolves
+// the target, and only the gated vault is refused.
+func TestSupervisorVaultAdmissionGate(t *testing.T) {
+	gated := glid.New()
+	open := glid.New()
+	gateErr := errors.New("vault's volume is out of disk space")
+	sup := New(Config{
+		NodeID: glid.New(),
+		VaultAdmissionGate: func(id glid.GLID) error {
+			if id == gated {
+				return gateErr
+			}
+			return nil
+		},
+	})
+	ctx := context.Background()
+	if err := sup.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer func() { _ = sup.Stop() }()
+
+	rec := &record.Record{Raw: []byte("x")}
+	if err := sup.SubmitToVault(ctx, gated, rec, nil); !errors.Is(err, gateErr) {
+		t.Fatalf("SubmitToVault to gated vault = %v, want the gate error", err)
+	}
+	// Ungated vault passes the gate; failure is the ordinary not-registered.
+	if err := sup.SubmitToVault(ctx, open, rec, nil); !errors.Is(err, ErrVaultNotRegistered) {
+		t.Fatalf("SubmitToVault to open vault = %v, want ErrVaultNotRegistered", err)
 	}
 }

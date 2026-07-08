@@ -45,6 +45,11 @@ type Config struct {
 	Table   *Table
 	// Vaults maps vault ID to that vault's segmentation input queue.
 	Vaults map[glid.GLID]chan<- segmentation.Input // wrapped in vaultSink at New
+	// VaultGate, when non-nil, is consulted per matched destination vault
+	// before fan-out. A non-nil return rejects the WHOLE record (nacked to
+	// the source): delivering to the healthy subset while dropping the
+	// gated vault's copy would be silent loss for that vault.
+	VaultGate func(glid.GLID) error
 }
 
 // StatsSnapshot is a point-in-time view of routing counters.
@@ -67,6 +72,9 @@ type Manager struct {
 	vmu    sync.RWMutex
 	vaults map[glid.GLID]*vaultSink
 
+	// vaultGate is the per-destination admission check (see Config.VaultGate).
+	vaultGate func(glid.GLID) error
+
 	matched   atomic.Uint64
 	unmatched atomic.Uint64
 	// perVault / perRoute hold *atomic.Uint64 matched counters keyed by
@@ -88,8 +96,9 @@ func New(cfg Config) *Manager {
 		vaults[id] = newVaultSink(ch)
 	}
 	m := &Manager{
-		workers: cfg.Workers,
-		vaults:  vaults,
+		workers:   cfg.Workers,
+		vaults:    vaults,
+		vaultGate: cfg.VaultGate,
 	}
 	m.table.Store(cfg.Table)
 	return m
@@ -243,6 +252,17 @@ func (m *Manager) route(ctx context.Context, in Input) {
 		// sender is not left hanging.
 		sendAck(in.Ack, nil)
 		return
+	}
+	// Per-destination admission: any gated matched vault rejects the whole
+	// record before it is counted or delivered anywhere. The nack reaches
+	// the source, which retries like any other backpressure signal.
+	if m.vaultGate != nil {
+		for _, vaultID := range vaults {
+			if err := m.vaultGate(vaultID); err != nil {
+				sendAck(in.Ack, err)
+				return
+			}
+		}
 	}
 	m.matched.Add(1)
 	incrCounter(&m.perRoute, matchedRoute.ID)

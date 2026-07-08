@@ -151,6 +151,14 @@ func (a *orchStatsAdapter) LocalStorageBytes() int64 {
 	return a.orch.LocalStorageBytes()
 }
 
+func (a *orchStatsAdapter) DiskProtectedVaults() []glid.GLID {
+	return a.orch.DiskProtectedVaults()
+}
+
+func (a *orchStatsAdapter) SizeCappedVaults() []glid.GLID {
+	return a.orch.SizeCappedVaults()
+}
+
 // jobBroadcastAdapter bridges the scheduler to the cluster.JobsProvider interface.
 type jobBroadcastAdapter struct {
 	scheduler *orchestrator.Scheduler

@@ -1,11 +1,13 @@
 package orchestrator
 
 import (
+	"log/slog"
 	"testing"
 	"time"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/logging"
 	"gastrolog/internal/system"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
@@ -85,4 +87,27 @@ func TestRetentionMootsPull(t *testing.T) {
 			t.Fatal("no anchor, no skip")
 		}
 	})
+}
+
+// TestRetentionFanOutAbortsUnderDiskProtect pins the cardinal-rule fix from
+// the disk-guard live test: with admission rejecting everything, route
+// fan-out must ABORT (chunk retained, retried later) — the old tolerate-
+// per-record-errors path destroyed a chunk after 1.5M rejected records
+// delivered nothing.
+func TestRetentionFanOutAbortsUnderDiskProtect(t *testing.T) {
+	t.Parallel()
+	g, _ := newGuardFixture(400*gib, map[string]uint64{"a": 1 * gib, "b": 1 * gib})
+	g.evaluate(nil) // engages protect
+	o := newTestOrch(t, Config{LocalNodeID: "node-A"})
+	o.diskGuard = g
+
+	r := &retentionRunner{
+		vaultID: glid.New(),
+		orch:    o,
+		logger:  slog.Default(),
+		idleLog: logging.Throttle{Interval: time.Minute},
+	}
+	if done := r.fireRetentionEvent(chunk.NewChunkID()); done {
+		t.Fatal("fan-out under disk protect must abort so the chunk survives for a later sweep")
+	}
 }

@@ -249,6 +249,8 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	// (delete /config/raft/ before starting the pod), not a silent
 	// boot-time decision.
 
+	alertCollector := alert.New()
+
 	configSignal := notify.NewSignal()
 	statsSignal := notify.NewSignal()
 	disp := &configDispatcher{localNodeID: nodeID, logger: compDispatch.Apply(logger), clusterTLS: clusterTLS, tlsFilePath: hd.ClusterTLSPath(), configSignal: configSignal}
@@ -256,6 +258,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		Home: hd, NodeID: nodeID, JoinAddr: cfg.JoinAddr,
 		ClusterSrv: clusterSrv, ClusterTLS: clusterTLS,
 		Logger: logger, FSMOpts: []raftfsm.Option{raftfsm.WithOnApply(disp.Handle)},
+		Alerts: alertCollector,
 	})
 	if err != nil {
 		return fmt.Errorf("open config store: %w", err)
@@ -300,8 +303,6 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		return err
 	}
 
-	alertCollector := alert.New()
-
 	// Scheduler-stall watchdog (gastrolog-1io54g phase 2): measures runtime
 	// starvation — the one resource every Raft group on this node shares.
 	// Stalls past the leader lease raise an operator alert; the WARN log
@@ -330,6 +331,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		LocalNodeID:       nodeID,
 		Alerts:            alertCollector,
 		SegmentsDir:       hd.SegmentsDir(),
+		DiskGuardPaths:    []string{hd.Root(), hd.SegmentsDir()},
 		Phase:             shutdownPhase,
 		OnIngesterAlive: func(ingesterID glid.GLID, alive bool) {
 			aliveReconciler.Enqueue(ingesterID, alive)
@@ -358,7 +360,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		return err
 	}
 
-	groupMgr, vaultWAL, nodeAddrResolver := setupMultiRaft(clusterSrv, rawStore, nodeID, homeDir, logger)
+	groupMgr, vaultWAL, nodeAddrResolver := setupMultiRaft(clusterSrv, rawStore, nodeID, homeDir, logger, alertCollector)
 
 	factories := buildFactories(logger, homeDir, vaultsDir, cfgStore, orch, certMgr, cfg.SlogCapture, cfg.SlogCaptureHandler, alertCollector, groupMgr, nodeAddrResolver, nodeID)
 	if clusterSrv != nil {
@@ -452,6 +454,13 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	}
 
 	broadcaster, peerState, peerJobState, localStatsFn, clusterRouteRatesFn := setupClusterStats(ctx, logger, cfgStore, clusterSrv, orch, alertCollector, nodeID, cfg.ServerAddr, cfg.PprofAddr, statsSignal, raftLive)
+	if peerState != nil {
+		// Per-vault admission verdicts are cluster-consistent: a starved
+		// vault volume or an over-budget vault claim on any node suspends
+		// admission for that vault everywhere.
+		orch.SetRemoteVaultDiskProtected(peerState.VaultDiskProtected)
+		orch.SetRemoteVaultSizeCapped(peerState.VaultSizeCapped)
+	}
 
 	// Start vault placement manager (cluster mode only).
 	var placementReconcileFn func(ctx context.Context)
@@ -1473,7 +1482,7 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 
 // setupMultiRaft creates the GroupManager and node address resolver for vault
 // control-plane multiraft. Returns (nil, nil) in single-node / non-raft mode.
-func setupMultiRaft(clusterSrv *cluster.Server, rawStore system.Store, nodeID, homeDir string, logger *slog.Logger) (*raftgroup.GroupManager, *raftwal.WAL, func(string) (string, bool)) {
+func setupMultiRaft(clusterSrv *cluster.Server, rawStore system.Store, nodeID, homeDir string, logger *slog.Logger, alerts *alert.Collector) (*raftgroup.GroupManager, *raftwal.WAL, func(string) (string, bool)) {
 	if clusterSrv == nil {
 		return nil, nil, nil
 	}
@@ -1484,7 +1493,9 @@ func setupMultiRaft(clusterSrv *cluster.Server, rawStore system.Store, nodeID, h
 
 	hd := home.New(homeDir)
 	walDir := hd.VaultCtlWALDir()
-	wal, err := raftwal.Open(walDir)
+	wal, err := raftwal.Open(walDir, raftwal.Config{
+		OnReserveState: walReserveAlarm(alerts, logger, "vault-ctl"),
+	})
 	if err != nil {
 		logger.Warn("failed to open vault-ctl raft WAL", "dir", walDir, "error", err)
 		return nil, nil, nil

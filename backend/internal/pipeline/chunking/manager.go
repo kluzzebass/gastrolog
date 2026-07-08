@@ -266,6 +266,12 @@ type Config struct {
 	Logger *slog.Logger
 	// Alerts is the default AlertSink for vaults registered without one.
 	Alerts AlertSink
+	// DeferWrites, when non-nil and returning true, pauses GLCB build
+	// passes: builds create bytes and must stop while the node sheds disk
+	// obligations (disk protect). Deferred work re-fires on the next wake
+	// or plan tick once the pressure clears — under protect the last free
+	// megabytes belong to the WAL, not to build attempts that ENOSPC-loop.
+	DeferWrites func() bool
 }
 
 // Manager runs per-home chunking for registered vaults. The vault leader
@@ -681,6 +687,9 @@ func (m *Manager) startWorkerLocked(v *vaultChunking) {
 }
 
 func (m *Manager) runBuildPass(ctx context.Context, v *vaultChunking, log *slog.Logger) {
+	if m.cfg.DeferWrites != nil && m.cfg.DeferWrites() {
+		return // disk protect: builds re-fire on the next wake/plan tick
+	}
 	if err := v.planCatchUp(ctx); err != nil && ctx.Err() == nil {
 		log.Warn("chunking plan catch-up failed", "error", err)
 	}

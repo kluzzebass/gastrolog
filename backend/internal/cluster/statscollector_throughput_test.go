@@ -14,8 +14,10 @@ import (
 
 // stubStatsProvider implements StatsProvider with mutable counters.
 type stubStatsProvider struct {
-	appendStats []StatsVaultAppendSnapshot
-	route       StatsRouteSnapshot
+	appendStats   []StatsVaultAppendSnapshot
+	route         StatsRouteSnapshot
+	diskProtected []glid.GLID
+	sizeCapped    []glid.GLID
 }
 
 func (s *stubStatsProvider) IngestQueueDepth() int    { return 0 }
@@ -37,6 +39,8 @@ func (s *stubStatsProvider) VaultAppendStats() []StatsVaultAppendSnapshot {
 }
 func (s *stubStatsProvider) PipelineDiskSnapshots() []StatsVaultPipelineDiskSnapshot { return nil }
 func (s *stubStatsProvider) LocalStorageBytes() int64                                { return 0 }
+func (s *stubStatsProvider) DiskProtectedVaults() []glid.GLID                        { return s.diskProtected }
+func (s *stubStatsProvider) SizeCappedVaults() []glid.GLID                           { return s.sizeCapped }
 
 func TestStatsCollector_ThroughputRates(t *testing.T) {
 	t.Parallel()

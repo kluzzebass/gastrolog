@@ -40,6 +40,15 @@ func (o *Orchestrator) pullMissingGLCB(vaultID glid.GLID, e vaultctlfsm.Manifest
 	if o.chunkGLCBPuller == nil || o.scheduler == nil {
 		return // single-node: every chunk this node should hold, it built
 	}
+	if o.diskProtectActive() {
+		return // below the free-space floor: recovery writes wait for space
+	}
+	if o.diskGuard != nil && o.diskGuard.vaultProtectActive(vaultID) {
+		return // this vault's own backing volume is below its floor
+	}
+	if o.diskGuard != nil && o.diskGuard.vaultSizeCapped(vaultID) {
+		return // at the max-size budget: replica pulls grow the local claim
+	}
 	root, ok := o.pipelineVaultChunkRoot(vaultID)
 	if !ok {
 		return

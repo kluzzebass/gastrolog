@@ -626,8 +626,21 @@ type VaultConfig struct {
 	CacheBudget          string                 `protobuf:"bytes,14,opt,name=cache_budget,json=cacheBudget,proto3" json:"cache_budget,omitempty"`                            // max cache size (e.g. "1GB", "500MB"; default: "1GiB")
 	CacheTtl             string                 `protobuf:"bytes,15,opt,name=cache_ttl,json=cacheTtl,proto3" json:"cache_ttl,omitempty"`                                     // eviction TTL duration (e.g. "1h", "7d"); only for ttl mode
 	RetentionDisposition string                 `protobuf:"bytes,16,opt,name=retention_disposition,json=retentionDisposition,proto3" json:"retention_disposition,omitempty"` // "delete" (default) or "route" — what retention does with aged-out records
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// Per-vault disk guard thresholds on the vault's backing volume, in
+	// bytes of FREE space. 0 = inherit the node defaults (fraction-based
+	// with share clamps; env-overridable). Warn raises the disk-space
+	// alarm for this vault; floor suspends admission for records destined
+	// to this vault while other vaults keep ingesting.
+	DiskFreeWarnBytes  uint64 `protobuf:"varint,17,opt,name=disk_free_warn_bytes,json=diskFreeWarnBytes,proto3" json:"disk_free_warn_bytes,omitempty"`
+	DiskFreeFloorBytes uint64 `protobuf:"varint,18,opt,name=disk_free_floor_bytes,json=diskFreeFloorBytes,proto3" json:"disk_free_floor_bytes,omitempty"`
+	// Per-node byte budget for this vault's whole local disk claim (sealed
+	// chunks, indexes, and pipeline segment backlog). 0 = unlimited. At the
+	// budget, admission for records destined to this vault is refused
+	// cluster-wide (cap-and-refuse) until retention or releases drain it —
+	// the hard backstop behind a size retention policy's cap-and-drain.
+	MaxSizeBytes  uint64 `protobuf:"varint,19,opt,name=max_size_bytes,json=maxSizeBytes,proto3" json:"max_size_bytes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *VaultConfig) Reset() {
@@ -770,6 +783,27 @@ func (x *VaultConfig) GetRetentionDisposition() string {
 		return x.RetentionDisposition
 	}
 	return ""
+}
+
+func (x *VaultConfig) GetDiskFreeWarnBytes() uint64 {
+	if x != nil {
+		return x.DiskFreeWarnBytes
+	}
+	return 0
+}
+
+func (x *VaultConfig) GetDiskFreeFloorBytes() uint64 {
+	if x != nil {
+		return x.DiskFreeFloorBytes
+	}
+	return 0
+}
+
+func (x *VaultConfig) GetMaxSizeBytes() uint64 {
+	if x != nil {
+		return x.MaxSizeBytes
+	}
+	return 0
 }
 
 type RouteDestination struct {
@@ -8846,7 +8880,7 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x0eVaultPlacement\x12\x1d\n" +
 	"\n" +
 	"storage_id\x18\x01 \x01(\fR\tstorageId\x12\x16\n" +
-	"\x06leader\x18\x02 \x01(\bR\x06leader\"\x88\x05\n" +
+	"\x06leader\x18\x02 \x01(\bR\x06leader\"\x92\x06\n" +
 	"\vVaultConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
@@ -8866,7 +8900,10 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x0ecache_eviction\x18\r \x01(\tR\rcacheEviction\x12!\n" +
 	"\fcache_budget\x18\x0e \x01(\tR\vcacheBudget\x12\x1b\n" +
 	"\tcache_ttl\x18\x0f \x01(\tR\bcacheTtl\x123\n" +
-	"\x15retention_disposition\x18\x10 \x01(\tR\x14retentionDisposition\"-\n" +
+	"\x15retention_disposition\x18\x10 \x01(\tR\x14retentionDisposition\x12/\n" +
+	"\x14disk_free_warn_bytes\x18\x11 \x01(\x04R\x11diskFreeWarnBytes\x121\n" +
+	"\x15disk_free_floor_bytes\x18\x12 \x01(\x04R\x12diskFreeFloorBytes\x12$\n" +
+	"\x0emax_size_bytes\x18\x13 \x01(\x04R\fmaxSizeBytes\"-\n" +
 	"\x10RouteDestination\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\"\x81\x02\n" +
 	"\vRouteConfig\x12\x0e\n" +

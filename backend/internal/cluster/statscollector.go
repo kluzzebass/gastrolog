@@ -110,6 +110,13 @@ type StatsProvider interface {
 	VaultAppendStats() []StatsVaultAppendSnapshot
 	PipelineDiskSnapshots() []StatsVaultPipelineDiskSnapshot
 	LocalStorageBytes() int64
+	// DiskProtectedVaults lists vaults whose local backing volume is below
+	// its free-space floor. Broadcast so every node's admission gate can
+	// honor the cluster-wide union.
+	DiskProtectedVaults() []glid.GLID
+	// SizeCappedVaults lists vaults at their local max-size budget —
+	// broadcast for the same cluster-wide admission union.
+	SizeCappedVaults() []glid.GLID
 }
 
 // RaftLivenessProvider exposes aggregated Raft WAL append latency and
@@ -470,6 +477,8 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 		}
 
 		stats.StorageBytes = c.cfg.Stats.LocalStorageBytes()
+		stats.DiskProtectedVaultIds = glidsToProto(c.cfg.Stats.DiskProtectedVaults())
+		stats.SizeCappedVaultIds = glidsToProto(c.cfg.Stats.SizeCappedVaults())
 	}
 
 	if c.cfg.PeerConns != nil {
@@ -555,6 +564,15 @@ func (c *StatsCollector) appendPeerTrafficTotals(stats *gastrologv1.NodeStats, n
 	sort.Slice(stats.PeerTrafficTotals, func(i, j int) bool {
 		return stats.PeerTrafficTotals[i].Peer < stats.PeerTrafficTotals[j].Peer
 	})
+}
+
+// glidsToProto maps a GLID slice to its broadcast wire form.
+func glidsToProto(ids []glid.GLID) [][]byte {
+	out := make([][]byte, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, id.ToProto())
+	}
+	return out
 }
 
 func peerConnStatsKey(s PeerConnSnapshot) string {
