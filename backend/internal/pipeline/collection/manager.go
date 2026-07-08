@@ -52,6 +52,8 @@ type collectDeps struct {
 type vaultCollect struct {
 	vaultID glid.GLID
 	root    string
+	// deferWrites mirrors Config.DeferWrites (nil = never defer).
+	deferWrites func() bool
 	// deps is the current collaborator bundle; never nil after construction.
 	deps atomic.Pointer[collectDeps]
 	// unsubPublish removes this vault's publish-callback subscription on the
@@ -329,6 +331,12 @@ func (v *vaultCollect) releasePull(id glid.GLID) {
 }
 
 func (v *vaultCollect) collectMissing(ctx context.Context) (bool, error) {
+	if v.deferWrites != nil && v.deferWrites() {
+		// Disk protect: inbound replication pulls create bytes and must
+		// pause while the node sheds obligations. Re-fired by the next
+		// publish wake or periodic pass once pressure clears.
+		return false, nil
+	}
 	v.passMu.Lock()
 	defer v.passMu.Unlock()
 
@@ -498,6 +506,11 @@ type Config struct {
 	// so downstream must be woken for what landed. Wired by the orchestrator
 	// to wake chunking.
 	OnPassComplete func(vaultID glid.GLID)
+	// DeferWrites, when non-nil and returning true, pauses collect passes:
+	// pulls write inbound replication bytes and must stop while the node
+	// sheds disk obligations (disk protect). Deferred pulls re-fire on the
+	// next publish wake or periodic pass once the pressure clears.
+	DeferWrites func() bool
 }
 
 // Manager pulls assigned segments into pre-head, verifies, and promotes to head.
@@ -548,6 +561,7 @@ func (m *Manager) RegisterVault(vaultID glid.GLID, root string, cfg VaultConfig)
 	if err != nil {
 		return err
 	}
+	v.deferWrites = m.cfg.DeferWrites
 	m.vaults[vaultID] = v
 	m.wireVaultFSMCallbacks(v, cfg.FSM)
 	if m.runCtx != nil {

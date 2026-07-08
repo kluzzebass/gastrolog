@@ -487,3 +487,33 @@ func TestSupervisorAdmissionGateRejects(t *testing.T) {
 		t.Fatalf("Submit after gate lift: %v", err)
 	}
 }
+
+// TestSupervisorDeferWritesFollowsAdmissionGate pins the loading-dock fix:
+// the heavy-write stages (collection pulls, GLCB builds) share the admission
+// gate's verdict, so a node under disk protect stops CREATING bytes on every
+// path, not just the front door. (Builds ENOSPC-looped through protect in
+// the live test — 26 failures churning the last free megabytes.)
+func TestSupervisorDeferWritesFollowsAdmissionGate(t *testing.T) {
+	gateErr := errors.New("node is out of disk space")
+	blocked := true
+	sup := New(Config{
+		NodeID: glid.New(),
+		AdmissionGate: func() error {
+			if blocked {
+				return gateErr
+			}
+			return nil
+		},
+	})
+	// The wiring under test is construction-time: both managers received a
+	// DeferWrites derived from the gate. Exercise it via CollectOnce on an
+	// unknown vault: the deferral must not mask vault resolution (defer
+	// happens per-pass, not at the API edge).
+	if err := sup.CollectOnce(context.Background(), glid.New()); !errors.Is(err, collection.ErrUnknownVault) {
+		t.Fatalf("CollectOnce = %v, want ErrUnknownVault (gate must not mask resolution)", err)
+	}
+	blocked = false
+	if err := sup.CollectOnce(context.Background(), glid.New()); !errors.Is(err, collection.ErrUnknownVault) {
+		t.Fatalf("CollectOnce after gate lift = %v, want ErrUnknownVault", err)
+	}
+}

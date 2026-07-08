@@ -245,9 +245,17 @@ func New(cfg Config) *Supervisor {
 		PublishBatchSize: cfg.DistributionPublishBatchSize,
 		Logger:           cfg.Logger,
 	})
-	chunk := chunking.New(chunking.Config{Logger: cfg.Logger, Alerts: cfg.Alerts})
+	// Heavy-write stages pause whenever admission is rejecting: builds and
+	// inbound pulls create bytes, and under disk protect the last free
+	// megabytes belong to the WAL (gastrolog-38bm9t — builds ENOSPC-looped
+	// while protect held the front door).
+	deferWrites := func() bool {
+		return cfg.AdmissionGate != nil && cfg.AdmissionGate() != nil
+	}
+	chunk := chunking.New(chunking.Config{Logger: cfg.Logger, Alerts: cfg.Alerts, DeferWrites: deferWrites})
 	col := collection.New(collection.Config{
-		Logger: cfg.Logger,
+		Logger:      cfg.Logger,
+		DeferWrites: deferWrites,
 		OnPassComplete: func(vaultID glid.GLID) {
 			chunk.NotifyVault(vaultID)
 		},
