@@ -799,6 +799,7 @@ func New(cfg Config) (*Orchestrator, error) {
 	o.pipeline = pipeline.New(pipeline.Config{
 		AdmissionGate:        o.diskAdmissionGate,
 		VaultAdmissionGate:   o.vaultAdmissionGate,
+		DeferWritesGate:      o.diskDeferWrites,
 		NodeID:               o.localNodeIDGLID,
 		Logger:               baseLogger,
 		Alerts:               o.alerts,

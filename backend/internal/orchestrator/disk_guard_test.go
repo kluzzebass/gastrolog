@@ -53,33 +53,52 @@ func TestDiskGuardLifecycle(t *testing.T) {
 		t.Fatal("warn is not the floor: admission must stay open")
 	}
 
-	// Crossing the floor: protect engages, alarm text escalates.
+	// Crossing the floor: both tiers engage, alarm text escalates.
 	sampler.free["b"] = 10 * gib
 	g.evaluate(spy)
 	if !g.protect.Load() {
 		t.Fatal("below the floor the node must stop accepting work")
 	}
+	if !g.deferWrites.Load() {
+		t.Fatal("below the floor the drain tier must pause too")
+	}
 
-	// Just above the floor: hysteresis holds protect on.
+	// Just above the floor: hysteresis holds both tiers on.
 	sampler.free["b"] = 13 * gib
 	g.evaluate(spy)
-	if !g.protect.Load() {
+	if !g.protect.Load() || !g.deferWrites.Load() {
 		t.Fatal("protect must not flap at the boundary")
 	}
 
-	// Clear of the floor band: protect exits, alarm persists (still < warn).
+	// Clear of the FLOOR band but still under WARN: staged release — the
+	// drain tier resumes so the pipeline can seal backlog, but the consumer
+	// tier (admission) stays held so a burst can't re-cross the floor.
 	sampler.free["b"] = 20 * gib
 	g.evaluate(spy)
-	if g.protect.Load() {
-		t.Fatal("protect must release once clear of the floor band")
+	if g.deferWrites.Load() {
+		t.Fatal("drain tier must resume once clear of the floor band")
+	}
+	if !g.protect.Load() {
+		t.Fatal("admission must stay held until free clears the WARN band (ratchet headroom)")
 	}
 	if spy.active() != 1 {
 		t.Fatal("still under warn: alarm must stand")
 	}
 
-	// Recovery past warn hysteresis: alarm clears.
+	// Above the floor band but still inside the WARN band: admission STILL
+	// held — the whole point of the wide asymmetric deadband.
+	sampler.free["b"] = 45 * gib // warn=40GiB, admission resumes above 50GiB
+	g.evaluate(spy)
+	if !g.protect.Load() {
+		t.Fatal("admission must remain held inside the WARN band")
+	}
+
+	// Recovery past the WARN hysteresis band: admission resumes AND alarm clears.
 	sampler.free["b"] = 60 * gib
 	g.evaluate(spy)
+	if g.protect.Load() {
+		t.Fatal("admission must resume once free clears the WARN band")
+	}
 	if spy.active() != 0 {
 		t.Fatal("alarm must clear with hysteresis above warn")
 	}
@@ -161,6 +180,80 @@ func (s *alertSpy) has(id string) bool {
 	defer s.mu.Unlock()
 	_, ok := s.set[id]
 	return ok
+}
+
+// TestDiskGuardStagedReleaseInvariant sweeps free space up from a floor
+// breach and pins the ratchet-avoidance invariant: at NO recovery level is
+// ingest admission open while the drain tier is still paused. Admission always
+// resumes at or after the drain tier, and only above the WARN band — the wide
+// asymmetric deadband that denies the release burst room to re-cross the floor.
+func TestDiskGuardStagedReleaseInvariant(t *testing.T) {
+	t.Parallel()
+	total := 400 * gib // warn 40GiB, floor 12GiB; admission resumes above 50GiB
+	g, sampler := newGuardFixture(total, map[string]uint64{"a": 200 * gib, "b": 200 * gib})
+
+	// Breach the floor so both tiers engage.
+	sampler.free["b"] = 5 * gib
+	g.evaluate(nil)
+	if !g.protect.Load() || !g.deferWrites.Load() {
+		t.Fatal("floor breach must engage both tiers")
+	}
+
+	// Walk recovery upward in 1GiB steps through the whole band.
+	sawDrainResumeWhileAdmissionHeld := false
+	for free := uint64(6); free <= 70; free++ {
+		sampler.free["b"] = free * gib
+		g.evaluate(nil)
+		admissionOpen := !g.protect.Load()
+		drainOpen := !g.deferWrites.Load()
+
+		// The invariant: admission open implies drain already open.
+		if admissionOpen && !drainOpen {
+			t.Fatalf("at %dGiB free admission reopened while the drain tier was still paused", free)
+		}
+		if drainOpen && !admissionOpen {
+			sawDrainResumeWhileAdmissionHeld = true
+		}
+		// Admission must never reopen inside the WARN band (<= 50GiB).
+		if admissionOpen && free*gib <= clearAbove(g.warnThreshold(total)) {
+			t.Fatalf("at %dGiB free admission reopened at or below the WARN resume band", free)
+		}
+	}
+	if !sawDrainResumeWhileAdmissionHeld {
+		t.Fatal("staged release never observed: drain tier should reopen while admission is still held")
+	}
+	// Fully recovered: both open.
+	if g.protect.Load() || g.deferWrites.Load() {
+		t.Fatal("well above the WARN band both tiers must be open")
+	}
+}
+
+// TestDiskDeferWritesGate pins the orchestrator accessor the supervisor's
+// drain gate reads.
+func TestDiskDeferWritesGate(t *testing.T) {
+	t.Parallel()
+	g, sampler := newGuardFixture(400*gib, map[string]uint64{"a": 5 * gib, "b": 5 * gib})
+	o := &Orchestrator{diskGuard: g}
+	if o.diskDeferWrites() {
+		t.Fatal("drain gate must be open before evaluation")
+	}
+	g.evaluate(nil) // below floor
+	if !o.diskDeferWrites() {
+		t.Fatal("below the floor the drain gate must be closed")
+	}
+	// Recover past the floor band but stay under WARN: drain reopens, admission holds.
+	sampler.free["a"], sampler.free["b"] = 20*gib, 20*gib
+	g.evaluate(nil)
+	if o.diskDeferWrites() {
+		t.Fatal("drain gate must reopen once clear of the floor band")
+	}
+	if !o.diskProtectActive() {
+		t.Fatal("admission must still be held inside the WARN band")
+	}
+	// Guardless orchestrator never defers.
+	if (&Orchestrator{}).diskDeferWrites() {
+		t.Fatal("guardless orchestrator must not defer writes")
+	}
 }
 
 // TestVaultDiskGuardLifecycle pins the per-vault arc: a starved vault volume

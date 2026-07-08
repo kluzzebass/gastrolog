@@ -60,6 +60,23 @@ func clearAbove(threshold uint64) uint64 {
 	return threshold + threshold/4
 }
 
+// fmtBytes formats a byte count for log fields. Disk free-space and thresholds
+// are physical quantities always within int64.
+func fmtBytes(b uint64) string {
+	return units.FormatBytesDisplay(int64(b)) //nolint:gosec // disk bytes, display only
+}
+
+// admissionResumeAbove is the free-space level ingest admission must clear to
+// resume after a floor breach: the WARN band plus hysteresis, never below the
+// drain tier's resume level. Admission ENGAGES at the floor but RESUMES only
+// here — the wide asymmetric deadband reserves headroom for the release burst.
+// Reopening the firehose at floor+hysteresis let the deferred backlog re-cross
+// the floor within one 15s sample, walking troughs down (944MB->20MB) until
+// nodes panicked on WAL ENOSPC (gastrolog-67gvjo).
+func admissionResumeAbove(floorAt, warnAt uint64) uint64 {
+	return max(clearAbove(warnAt), clearAbove(floorAt))
+}
+
 // ErrDiskProtect rejects new work while the node is below its free-space
 // floor. Producers treat it as retryable backpressure.
 var ErrDiskProtect = errors.New("node is out of disk space: ingest admission suspended until space is freed")
@@ -76,7 +93,18 @@ type diskGuard struct {
 	warnBytes     uint64
 	floorBytes    uint64
 
+	// protect gates the CONSUMER tier — ingest admission, retention
+	// re-routing, replica catch-up. It engages at the floor and resumes
+	// only above the WARN band (admissionResumeAbove), reserving headroom
+	// for the release burst so the deferred backlog cannot re-cross the
+	// floor in one sampling window (the ratchet, gastrolog-67gvjo).
 	protect atomic.Bool
+	// deferWrites gates the DRAIN tier — chunking builds and the collection
+	// pulls that feed them. It engages at the floor but resumes EARLIER
+	// (floor + hysteresis) than admission: builds seal the backlog into
+	// chunks retention can expunge to free space, so the delete-disposition
+	// drain would deadlock if they waited for the consumer tier.
+	deferWrites atomic.Bool
 
 	// vaultFootprint measures a vault's whole local disk claim for the
 	// max-size budget. Injected by the orchestrator (chunk + index bytes
@@ -276,7 +304,7 @@ func (g *diskGuard) evaluateVaults(alerts AlertCollector) {
 			if v.floorBytes > 0 {
 				floorAt = v.floorBytes
 			}
-			g.reconcileVaultProtect(id, v, free, floorAt)
+			g.reconcileVaultProtect(id, v, free, floorAt, warnAt)
 			g.reconcileVaultAlarm(alerts, id, v, free, total, warnAt)
 		}
 		if v.maxSizeBytes > 0 && g.vaultFootprint != nil {
@@ -355,20 +383,25 @@ func (g *diskGuard) reconcileVaultSizeAlarm(alerts AlertCollector, id glid.GLID,
 	}
 }
 
-func (g *diskGuard) reconcileVaultProtect(id glid.GLID, v *vaultDiskGuard, free, floorAt uint64) {
+// reconcileVaultProtect gates a single vault's per-destination admission. Like
+// the node consumer tier it engages at the vault's floor and resumes only
+// above its WARN band — same ratchet-avoidance headroom. There is no per-vault
+// drain tier: builds and pulls are gated node-globally by deferWrites.
+func (g *diskGuard) reconcileVaultProtect(id glid.GLID, v *vaultDiskGuard, free, floorAt, warnAt uint64) {
+	resumeAt := admissionResumeAbove(floorAt, warnAt)
 	switch {
-	case v.protect.Load() && free > clearAbove(floorAt):
+	case v.protect.Load() && free > resumeAt:
 		v.protect.Store(false)
 		if g.logger != nil {
 			g.logger.Info("vault disk protect released — admission resumed for vault",
-				"vault", id, "name", v.name, "free", units.FormatBytesDisplay(int64(free))) //nolint:gosec // display only
+				"vault", id, "name", v.name, "free", fmtBytes(free), "resumeAbove", fmtBytes(resumeAt))
 		}
 	case !v.protect.Load() && free < floorAt:
 		v.protect.Store(true)
 		if g.logger != nil {
-			g.logger.Warn("vault disk protect engaged — admission suspended for vault until space frees",
+			g.logger.Warn("vault disk protect engaged — admission suspended for vault until free space clears its low-disk alarm band",
 				"vault", id, "name", v.name,
-				"free", units.FormatBytesDisplay(int64(free)), "floor", units.FormatBytesDisplay(int64(floorAt))) //nolint:gosec // display only
+				"free", fmtBytes(free), "floor", fmtBytes(floorAt), "resumeAbove", fmtBytes(resumeAt))
 		}
 	}
 }
@@ -424,7 +457,7 @@ func (g *diskGuard) evaluate(alerts AlertCollector) {
 	warnAt := g.warnThreshold(total)
 	floorAt := g.floorThreshold(total)
 
-	g.reconcileProtect(free, floorAt)
+	g.reconcileProtect(free, floorAt, warnAt)
 
 	if alerts == nil {
 		return
@@ -449,30 +482,58 @@ func (g *diskGuard) evaluate(alerts AlertCollector) {
 	}
 }
 
-// reconcileProtect flips protect mode: enter at the floor, exit with
-// hysteresis. Transitions log — admission nacks are silent in the pump, so
-// without these lines the guard's engagement is invisible in the log record.
-func (g *diskGuard) reconcileProtect(free, floorAt uint64) {
+// reconcileProtect drives the two-tier staged protect. Both tiers engage
+// together at the floor; on recovery the DRAIN tier resumes first (so the
+// pipeline seals backlog and retention frees space) and the CONSUMER tier
+// resumes last, only above the WARN band. Transitions log — admission nacks
+// are silent in the pump, so without these lines the guard's staging is
+// invisible in the log record.
+func (g *diskGuard) reconcileProtect(free, floorAt, warnAt uint64) {
+	// Drain tier: pause at floor, resume just above it.
 	switch {
-	case g.protect.Load() && free > clearAbove(floorAt):
+	case g.deferWrites.Load() && free > clearAbove(floorAt):
+		g.deferWrites.Store(false)
+		if g.logger != nil {
+			g.logger.Info("disk protect: pipeline builds and pulls resumed", "free", fmtBytes(free))
+		}
+	case !g.deferWrites.Load() && free < floorAt:
+		g.deferWrites.Store(true)
+		if g.logger != nil {
+			g.logger.Warn("disk protect: pipeline builds and pulls paused below the floor",
+				"free", fmtBytes(free), "floor", fmtBytes(floorAt))
+		}
+	}
+	// Consumer tier: pause at floor, resume only above the WARN band.
+	resumeAt := admissionResumeAbove(floorAt, warnAt)
+	switch {
+	case g.protect.Load() && free > resumeAt:
 		g.protect.Store(false)
 		if g.logger != nil {
 			g.logger.Info("disk protect released — ingest admission resumed",
-				"free", units.FormatBytesDisplay(int64(free))) //nolint:gosec // display only
+				"free", fmtBytes(free), "resumeAbove", fmtBytes(resumeAt))
 		}
 	case !g.protect.Load() && free < floorAt:
 		g.protect.Store(true)
 		if g.logger != nil {
-			g.logger.Warn("disk protect engaged — ingest admission suspended until space frees",
-				"free", units.FormatBytesDisplay(int64(free)), "floor", units.FormatBytesDisplay(int64(floorAt))) //nolint:gosec // display only
+			g.logger.Warn("disk protect engaged — ingest admission suspended until free space clears the low-disk alarm band",
+				"free", fmtBytes(free), "floor", fmtBytes(floorAt), "resumeAbove", fmtBytes(resumeAt))
 		}
 	}
 }
 
 // diskProtectActive reports whether the node is refusing new work for lack
-// of disk space. Consulted by ingest admission and the catch-up puller.
+// of disk space (the CONSUMER tier). Consulted by ingest admission, the
+// catch-up puller, and retention re-routing — all net consumers that resume
+// only above the WARN band.
 func (o *Orchestrator) diskProtectActive() bool {
 	return o.diskGuard != nil && o.diskGuard.protect.Load()
+}
+
+// diskDeferWrites reports whether the pipeline DRAIN tier (chunking builds and
+// collection pulls) is paused for lack of disk space. Resumes earlier than
+// admission so the pipeline can seal backlog into expungeable chunks.
+func (o *Orchestrator) diskDeferWrites() bool {
+	return o.diskGuard != nil && o.diskGuard.deferWrites.Load()
 }
 
 // diskAdmissionGate is the supervisor's admission check: reject new records

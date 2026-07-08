@@ -62,6 +62,15 @@ type Config struct {
 	// floor, and the coming per-stage backlog watermarks).
 	AdmissionGate func() error
 
+	// DeferWritesGate, when non-nil, pauses the heavy-write DRAIN stages
+	// (chunking builds, collection pulls) when it returns true. Distinct
+	// from AdmissionGate: the drain tier resumes EARLIER than ingest
+	// admission on disk recovery so the pipeline can seal backlog into
+	// chunks retention frees, rather than deadlocking behind the closed
+	// front door (gastrolog-67gvjo staged release). Falls back to tracking
+	// AdmissionGate when nil.
+	DeferWritesGate func() bool
+
 	// VaultAdmissionGate, when non-nil, is the per-destination admission
 	// check: consulted for each matched vault at routing fan-out and for the
 	// target vault on SubmitToVault. A non-nil return rejects the record for
@@ -258,6 +267,10 @@ func New(cfg Config) *Supervisor {
 	// megabytes belong to the WAL (gastrolog-38bm9t — builds ENOSPC-looped
 	// while protect held the front door).
 	deferWrites := func() bool {
+		if cfg.DeferWritesGate != nil {
+			return cfg.DeferWritesGate()
+		}
+		// Pre-staged-release fallback: tie drain writes to admission.
 		return cfg.AdmissionGate != nil && cfg.AdmissionGate() != nil
 	}
 	chunk := chunking.New(chunking.Config{Logger: cfg.Logger, Alerts: cfg.Alerts, DeferWrites: deferWrites})
