@@ -105,6 +105,36 @@ func TestDiskGuardUnsampleablePathsAreInert(t *testing.T) {
 	}
 }
 
+// TestDiskGuardTinyVolumeThresholds pins the clamp: on a 10GB quota volume
+// the absolute byte minimums must not exceed their share ceilings — without
+// the clamp the warn threshold (10GiB) exceeded the whole volume and the
+// alarm latched on from boot, unclearable.
+func TestDiskGuardTinyVolumeThresholds(t *testing.T) {
+	t.Parallel()
+	total := 10 * gib
+	g, sampler := newGuardFixture(total, map[string]uint64{"a": 9 * gib, "b": 9 * gib})
+	spy := &alertSpy{}
+
+	g.evaluate(spy)
+	if spy.active() != 0 || g.protect.Load() {
+		t.Fatalf("near-empty tiny volume must be quiet (warn=%d floor=%d)",
+			g.warnThreshold(total), g.floorThreshold(total))
+	}
+	if w := g.warnThreshold(total); w > total/4 {
+		t.Fatalf("warn threshold %d exceeds 25%% of a %d volume", w, total)
+	}
+
+	// Fill toward the clamped floor (10% of 10GiB = 1GiB): protect trips.
+	sampler.free["b"] = gib / 2
+	g.evaluate(spy)
+	if !g.protect.Load() {
+		t.Fatal("tiny volume below its clamped floor must protect")
+	}
+	if spy.active() != 1 {
+		t.Fatal("alarm must accompany protect")
+	}
+}
+
 // TestDiskAdmissionGate pins the orchestrator-facing contract.
 func TestDiskAdmissionGate(t *testing.T) {
 	t.Parallel()

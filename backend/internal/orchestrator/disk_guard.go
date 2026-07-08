@@ -34,12 +34,17 @@ const (
 
 	diskGuardAlertID = "disk-space"
 
-	// Fractions of the volume, paired with absolute byte floors — small
-	// volumes trip on the fraction, large volumes on the bytes.
+	// Fractions of the volume, paired with absolute byte minimums. The
+	// larger of the two governs — but the absolute minimums are CLAMPED
+	// to a share of the volume so a small (or quota-capped) volume isn't
+	// permanently in alarm: a 10GB test volume must not carry a 10GiB
+	// warn threshold.
 	diskFreeWarnFraction  = 0.10
 	diskFreeFloorFraction = 0.03
 	diskFreeWarnBytes     = uint64(10 << 30) // 10 GiB
 	diskFreeFloorBytes    = uint64(3 << 30)  // 3 GiB
+	diskFreeWarnMaxShare  = 0.25             // warn threshold ≤ 25% of the volume
+	diskFreeFloorMaxShare = 0.10             // floor threshold ≤ 10% of the volume
 
 	// Hysteresis multipliers so the alarm and protect mode don't chatter
 	// at the boundary (EEMUA: deadbands, not flapping).
@@ -114,11 +119,13 @@ func (g *diskGuard) worstFree() (free, total uint64, ok bool) {
 }
 
 func (g *diskGuard) warnThreshold(total uint64) uint64 {
-	return max(uint64(float64(total)*g.warnFraction), g.warnBytes)
+	t := max(uint64(float64(total)*g.warnFraction), g.warnBytes)
+	return min(t, uint64(float64(total)*diskFreeWarnMaxShare))
 }
 
 func (g *diskGuard) floorThreshold(total uint64) uint64 {
-	return max(uint64(float64(total)*g.floorFraction), g.floorBytes)
+	t := max(uint64(float64(total)*g.floorFraction), g.floorBytes)
+	return min(t, uint64(float64(total)*diskFreeFloorMaxShare))
 }
 
 // evaluate runs one guard pass: updates protect mode and raises/clears the
