@@ -2,6 +2,8 @@ package routing_test
 
 import (
 	"context"
+	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -456,5 +458,75 @@ func TestManagerRetentionEjectSamePointerFanOut(t *testing.T) {
 	gotB := <-chB
 	if gotA.Record != rec || gotB.Record != rec {
 		t.Errorf("expected same pointer %p on both vaults, got %p and %p", rec, gotA.Record, gotB.Record)
+	}
+}
+
+// TestManagerVaultGateRejectsWholeRecord pins the per-destination admission
+// semantics: when ANY matched vault is gated, the record is nacked to the
+// source and delivered NOWHERE — a partial fan-out would be silent loss for
+// the gated vault. When the gate lifts, the same record flows to all targets.
+func TestManagerVaultGateRejectsWholeRecord(t *testing.T) {
+	t.Parallel()
+
+	vaultA := glid.New()
+	vaultB := glid.New()
+	chA := make(chan segmentation.Input, 2)
+	chB := make(chan segmentation.Input, 2)
+
+	gateErr := errors.New("vault's volume is out of disk space")
+	var gated atomic.Bool
+	gated.Store(true)
+
+	mgr := routing.New(routing.Config{
+		Workers: 1,
+		Table:   catchAllTable(vaultA, vaultB),
+		Vaults: map[glid.GLID]chan<- segmentation.Input{
+			vaultA: chA,
+			vaultB: chB,
+		},
+		VaultGate: func(id glid.GLID) error {
+			if gated.Load() && id == vaultB {
+				return gateErr
+			}
+			return nil
+		},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	in := make(chan routing.Input, 2)
+	done := make(chan struct{})
+	go func() {
+		_ = mgr.Run(ctx, in)
+		close(done)
+	}()
+
+	rec := &record.Record{Attrs: record.Attributes{"env": "prod"}}
+	ack := make(chan error, 1)
+	in <- routing.Input{Record: rec, Source: routing.IngestSource(rec), Ack: ack}
+
+	if err := <-ack; !errors.Is(err, gateErr) {
+		t.Fatalf("ack = %v, want the vault gate error", err)
+	}
+	select {
+	case got := <-chA:
+		t.Fatalf("healthy vault received %v despite a gated sibling — partial fan-out is loss", got.Record)
+	default:
+	}
+
+	// Gate lifts: the retried record reaches both vaults and counts as matched.
+	gated.Store(false)
+	in <- routing.Input{Record: rec, Source: routing.IngestSource(rec)}
+	close(in)
+	gotA := <-chA
+	gotB := <-chB
+	if gotA.Record != rec || gotB.Record != rec {
+		t.Fatal("record must fan out to both vaults after the gate lifts")
+	}
+	<-done
+	stats := mgr.Stats()
+	if stats.Matched != 1 {
+		t.Fatalf("matched = %d, want 1 — a gated rejection must not count as routed", stats.Matched)
 	}
 }

@@ -12,6 +12,8 @@ import (
 
 	v1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/server"
+	"gastrolog/internal/system"
+	"gastrolog/internal/units"
 )
 
 func newVaultCmd() *cobra.Command {
@@ -118,6 +120,12 @@ func vaultDetailPairs(v *v1.VaultConfig) [][2]string {
 	if v.CacheTtl != "" {
 		pairs = append(pairs, [2]string{"Cache TTL", v.CacheTtl})
 	}
+	if v.DiskFreeWarnBytes > 0 {
+		pairs = append(pairs, [2]string{"Disk Free Warn", units.FormatBytesDisplay(int64(v.DiskFreeWarnBytes))}) //nolint:gosec // display only
+	}
+	if v.DiskFreeFloorBytes > 0 {
+		pairs = append(pairs, [2]string{"Disk Free Floor", units.FormatBytesDisplay(int64(v.DiskFreeFloorBytes))}) //nolint:gosec // display only
+	}
 	if v.RetentionDisposition != "" {
 		pairs = append(pairs, [2]string{"Retention Disposition", v.RetentionDisposition})
 	} else {
@@ -204,6 +212,8 @@ shape (memory, file, file+cloud, JSONL) defined by --type, --storage-class
 	cmd.Flags().String("retention-disposition", "delete", "what retention does with aged-out records: delete (drop) or route (send through routing engine)")
 	cmd.Flags().String("path", "", "direct path for JSONL sinks")
 	cmd.Flags().Uint64("memory-budget", 0, "memory budget in bytes (memory vaults)")
+	cmd.Flags().String("disk-free-warn", "", "free-space warn threshold on the vault's backing volume (e.g. 10GB); empty inherits the node default")
+	cmd.Flags().String("disk-free-floor", "", "free-space floor on the vault's backing volume (e.g. 3GB) — below it, admission for this vault is suspended; empty inherits the node default")
 	_ = cmd.MarkFlagRequired("name")
 	return cmd
 }
@@ -251,6 +261,20 @@ func applyVaultFlags(ctx context.Context, cmd *cobra.Command, client *server.Cli
 	if cmd.Flags().Changed("memory-budget") {
 		cfg.MemoryBudgetBytes, _ = cmd.Flags().GetUint64("memory-budget")
 	}
+	if cmd.Flags().Changed("disk-free-warn") {
+		v, err := parseDiskFreeFlag(cmd, "disk-free-warn")
+		if err != nil {
+			return err
+		}
+		cfg.DiskFreeWarnBytes = v
+	}
+	if cmd.Flags().Changed("disk-free-floor") {
+		v, err := parseDiskFreeFlag(cmd, "disk-free-floor")
+		if err != nil {
+			return err
+		}
+		cfg.DiskFreeFloorBytes = v
+	}
 	if cmd.Flags().Changed("cloud-service") {
 		if err := resolveVaultCloudService(ctx, cmd, client, cfg); err != nil {
 			return err
@@ -267,6 +291,20 @@ func applyVaultFlags(ctx context.Context, cmd *cobra.Command, client *server.Cli
 		}
 	}
 	return nil
+}
+
+// parseDiskFreeFlag parses a human-friendly size flag; empty resets to 0
+// (inherit the node default).
+func parseDiskFreeFlag(cmd *cobra.Command, name string) (uint64, error) {
+	raw, _ := cmd.Flags().GetString(name)
+	if raw == "" {
+		return 0, nil
+	}
+	v, err := system.ParseSize(raw)
+	if err != nil {
+		return 0, fmt.Errorf("invalid --%s %q: %w", name, raw, err)
+	}
+	return v, nil
 }
 
 func resolveVaultCloudService(ctx context.Context, cmd *cobra.Command, client *server.Client, cfg *v1.VaultConfig) error {

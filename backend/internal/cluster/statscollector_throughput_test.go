@@ -37,6 +37,7 @@ func (s *stubStatsProvider) VaultAppendStats() []StatsVaultAppendSnapshot {
 }
 func (s *stubStatsProvider) PipelineDiskSnapshots() []StatsVaultPipelineDiskSnapshot { return nil }
 func (s *stubStatsProvider) LocalStorageBytes() int64                                { return 0 }
+func (s *stubStatsProvider) DiskProtectedVaults() []glid.GLID                        { return nil }
 
 func TestStatsCollector_ThroughputRates(t *testing.T) {
 	t.Parallel()

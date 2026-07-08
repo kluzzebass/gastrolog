@@ -3,6 +3,8 @@ package orchestrator
 import (
 	"errors"
 	"testing"
+
+	"gastrolog/internal/glid"
 )
 
 // fakeSampler returns a controllable free/total per path.
@@ -149,6 +151,169 @@ func TestDiskAdmissionGate(t *testing.T) {
 	}
 	// No guard configured: always admit.
 	if err := (&Orchestrator{}).diskAdmissionGate(); err != nil {
+		t.Fatalf("guardless orchestrator must admit: %v", err)
+	}
+}
+
+// has reports whether an alert with the given ID is currently raised.
+func (s *alertSpy) has(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.set[id]
+	return ok
+}
+
+// TestVaultDiskGuardLifecycle pins the per-vault arc: a starved vault volume
+// trips ONLY that vault's protect and a vault-scoped alarm, while a vault on
+// a healthy volume stays open. Exits are hysteretic like the node guard.
+func TestVaultDiskGuardLifecycle(t *testing.T) {
+	t.Parallel()
+	total := 400 * gib
+	fs := map[string]uint64{"volA": 200 * gib, "volB": 200 * gib}
+	g, sampler := newGuardFixture(total, fs)
+	spy := &alertSpy{}
+
+	vaultA, vaultB := glid.New(), glid.New()
+	g.SetVaultGuard(vaultA, "hot", []string{"volA"}, 0, 0)
+	g.SetVaultGuard(vaultB, "cold", []string{"volB"}, 0, 0)
+
+	g.evaluateVaults(spy)
+	if g.vaultProtectActive(vaultA) || g.vaultProtectActive(vaultB) || spy.active() != 0 {
+		t.Fatal("healthy volumes must raise nothing")
+	}
+
+	// vaultA's volume crosses the floor (node-default 3%% = 12GiB): protect
+	// and alarm for vaultA only.
+	sampler.free["volA"] = 10 * gib
+	g.evaluateVaults(spy)
+	if !g.vaultProtectActive(vaultA) {
+		t.Fatal("starved vault volume must protect that vault")
+	}
+	if g.vaultProtectActive(vaultB) {
+		t.Fatal("vaultB's healthy volume must keep it open")
+	}
+	if !spy.has("disk-space:" + vaultA.String()) {
+		t.Fatal("vault alarm must be scoped to the starved vault's ID")
+	}
+	if spy.has("disk-space:" + vaultB.String()) {
+		t.Fatal("healthy vault must not alarm")
+	}
+
+	// Just above the floor: hysteresis holds protect.
+	sampler.free["volA"] = 13 * gib
+	g.evaluateVaults(spy)
+	if !g.vaultProtectActive(vaultA) {
+		t.Fatal("vault protect must not flap at the boundary")
+	}
+
+	// Clear of both bands: protect releases, then the alarm clears.
+	sampler.free["volA"] = 60 * gib
+	g.evaluateVaults(spy)
+	if g.vaultProtectActive(vaultA) {
+		t.Fatal("vault protect must release once clear of the floor band")
+	}
+	if spy.active() != 0 {
+		t.Fatal("vault alarm must clear with hysteresis above warn")
+	}
+}
+
+// TestVaultDiskGuardConfigOverridesThresholds pins the per-vault override:
+// explicit warn/floor bytes replace the node-default fractions entirely.
+func TestVaultDiskGuardConfigOverridesThresholds(t *testing.T) {
+	t.Parallel()
+	total := 400 * gib
+	g, sampler := newGuardFixture(total, map[string]uint64{"volA": 30 * gib})
+	spy := &alertSpy{}
+	vaultA := glid.New()
+
+	// Node default floor would be 12GiB; this vault demands 50GiB free.
+	g.SetVaultGuard(vaultA, "greedy", []string{"volA"}, 100*gib, 50*gib)
+	g.evaluateVaults(spy)
+	if !g.vaultProtectActive(vaultA) {
+		t.Fatal("30GiB free is below the vault's 50GiB floor override")
+	}
+
+	// A modest override in the other direction: 30GiB free clears a 1GiB floor.
+	sampler.free["volA"] = 30 * gib
+	g.SetVaultGuard(vaultA, "modest", []string{"volA"}, 2*gib, gib)
+	g.evaluateVaults(spy)
+	if g.vaultProtectActive(vaultA) {
+		t.Fatal("30GiB free must clear a 1GiB floor override (with hysteresis)")
+	}
+}
+
+// TestVaultDiskGuardRetain pins the discovery-refresh prune: entries not in
+// the keep set fall out, clearing their protect verdict with them.
+func TestVaultDiskGuardRetain(t *testing.T) {
+	t.Parallel()
+	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": gib})
+	vaultA, vaultB := glid.New(), glid.New()
+	g.SetVaultGuard(vaultA, "a", []string{"volA"}, 0, 0)
+	g.SetVaultGuard(vaultB, "b", []string{"volA"}, 0, 0)
+	g.evaluateVaults(nil)
+	if !g.vaultProtectActive(vaultA) || !g.vaultProtectActive(vaultB) {
+		t.Fatal("both vaults share the starved volume")
+	}
+	g.retainVaultGuards(map[glid.GLID]bool{vaultB: true}, nil)
+	if g.vaultProtectActive(vaultA) {
+		t.Fatal("pruned vault must no longer report protect")
+	}
+	if !g.vaultProtectActive(vaultB) {
+		t.Fatal("retained vault must keep its verdict")
+	}
+}
+
+// TestVaultDiskGuardRetainClearsAlarm pins the prune-side alarm contract: a
+// vault dropped from the guard set takes its standing alarm with it —
+// nothing else would ever clear an alert for an entry no longer evaluated.
+func TestVaultDiskGuardRetainClearsAlarm(t *testing.T) {
+	t.Parallel()
+	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": gib})
+	spy := &alertSpy{}
+	vaultA := glid.New()
+	g.SetVaultGuard(vaultA, "a", []string{"volA"}, 0, 0)
+	g.evaluateVaults(spy)
+	if !spy.has("disk-space:" + vaultA.String()) {
+		t.Fatal("starved vault must alarm before the prune")
+	}
+	g.retainVaultGuards(map[glid.GLID]bool{}, spy)
+	if spy.active() != 0 {
+		t.Fatal("pruning an alarmed vault must clear its alert")
+	}
+}
+
+// TestVaultAdmissionGate pins the orchestrator-facing contract, including the
+// peer-broadcast half: a vault protected on ANY live node is refused here.
+func TestVaultAdmissionGate(t *testing.T) {
+	t.Parallel()
+	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": gib, "volB": 200 * gib})
+	vaultA, vaultB := glid.New(), glid.New()
+	g.SetVaultGuard(vaultA, "a", []string{"volA"}, 0, 0)
+	g.SetVaultGuard(vaultB, "b", []string{"volB"}, 0, 0)
+	g.evaluateVaults(nil)
+
+	o := &Orchestrator{diskGuard: g}
+	if err := o.vaultAdmissionGate(vaultA); !errors.Is(err, ErrVaultDiskProtect) {
+		t.Fatalf("locally protected vault must be refused, got %v", err)
+	}
+	if err := o.vaultAdmissionGate(vaultB); err != nil {
+		t.Fatalf("healthy vault must be admitted: %v", err)
+	}
+
+	// Remote protect (another node's broadcast) refuses vaultB here too.
+	o.SetRemoteVaultDiskProtected(func(id glid.GLID) bool { return id == vaultB })
+	if err := o.vaultAdmissionGate(vaultB); !errors.Is(err, ErrVaultDiskProtect) {
+		t.Fatalf("remotely protected vault must be refused, got %v", err)
+	}
+
+	// Broadcast side: only locally protected vaults are published.
+	prot := o.DiskProtectedVaults()
+	if len(prot) != 1 || prot[0] != vaultA {
+		t.Fatalf("DiskProtectedVaults = %v, want [%s]", prot, vaultA)
+	}
+
+	// No guard, no remote fn: always admit.
+	if err := (&Orchestrator{}).vaultAdmissionGate(vaultA); err != nil {
 		t.Fatalf("guardless orchestrator must admit: %v", err)
 	}
 }

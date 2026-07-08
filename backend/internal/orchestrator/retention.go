@@ -980,6 +980,7 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 				case errors.Is(subErr, pipeline.ErrNotRunning),
 					errors.Is(subErr, context.Canceled),
 					errors.Is(subErr, ErrDiskProtect),
+					errors.Is(subErr, ErrVaultDiskProtect),
 					r.orch.shuttingDown():
 					// ErrDiskProtect is terminal for the whole fan-out: every
 					// subsequent record would be rejected the same way, and

@@ -577,6 +577,22 @@ export class VaultConfig extends Message<VaultConfig> {
    */
   retentionDisposition = "";
 
+  /**
+   * Per-vault disk guard thresholds on the vault's backing volume, in
+   * bytes of FREE space. 0 = inherit the node defaults (fraction-based
+   * with share clamps; env-overridable). Warn raises the disk-space
+   * alarm for this vault; floor suspends admission for records destined
+   * to this vault while other vaults keep ingesting.
+   *
+   * @generated from field: uint64 disk_free_warn_bytes = 17;
+   */
+  diskFreeWarnBytes = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 disk_free_floor_bytes = 18;
+   */
+  diskFreeFloorBytes = protoInt64.zero;
+
   constructor(data?: PartialMessage<VaultConfig>) {
     super();
     proto3.util.initPartial(data, this);
@@ -601,6 +617,8 @@ export class VaultConfig extends Message<VaultConfig> {
     { no: 14, name: "cache_budget", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 15, name: "cache_ttl", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 16, name: "retention_disposition", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 17, name: "disk_free_warn_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 18, name: "disk_free_floor_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultConfig {

@@ -319,6 +319,28 @@ func (p *PeerState) AggregatePipelineDisk() map[glid.GLID][]PeerVaultPipelineDis
 	return out
 }
 
+// VaultDiskProtected reports whether any live peer has this vault's local
+// backing volume below its free-space floor. Combined with the local guard,
+// this makes per-vault admission cluster-consistent: the starved volume is
+// usually on a different node than the front door taking the records.
+func (p *PeerState) VaultDiskProtected(vaultID glid.GLID) bool {
+	want := vaultID.ToProto()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	now := time.Now()
+	for _, e := range p.entries {
+		if now.Sub(e.received) > p.ttl || e.stats == nil {
+			continue
+		}
+		for _, id := range e.stats.DiskProtectedVaultIds {
+			if string(id) == string(want) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // LastSeen returns the timestamp of the most recent broadcast received
 // from the named peer, or the zero time if no broadcast has ever been
 // observed. Used by the stale-voter reaper (gastrolog-6bfwk) to detect

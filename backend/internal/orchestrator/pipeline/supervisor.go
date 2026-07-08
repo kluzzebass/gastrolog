@@ -62,6 +62,13 @@ type Config struct {
 	// floor, and the coming per-stage backlog watermarks).
 	AdmissionGate func() error
 
+	// VaultAdmissionGate, when non-nil, is the per-destination admission
+	// check: consulted for each matched vault at routing fan-out and for the
+	// target vault on SubmitToVault. A non-nil return rejects the record for
+	// ALL destinations (partial delivery would be silent loss for the gated
+	// vault). Backed by the per-vault disk guard, local and peer-broadcast.
+	VaultAdmissionGate func(glid.GLID) error
+
 	NodeID glid.GLID
 	Logger *slog.Logger
 	// Alerts raises operator alerts for degraded pipeline components
@@ -236,8 +243,9 @@ func New(cfg Config) *Supervisor {
 		Digesters:   cfg.Digesters,
 	})
 	route := routing.New(routing.Config{
-		Workers: cfg.RoutingWorkers,
-		Table:   cfg.Table,
+		Workers:   cfg.RoutingWorkers,
+		Table:     cfg.Table,
+		VaultGate: cfg.VaultAdmissionGate,
 	})
 	dist, pullIn := distribution.New(distribution.Config{
 		PullQueueCap:     cfg.DistributionPullQueueCap,
@@ -495,6 +503,11 @@ func (s *Supervisor) SubmitToVault(ctx context.Context, vaultID glid.GLID, rec *
 	}
 	if err := s.admit(); err != nil {
 		return err
+	}
+	if s.cfg.VaultAdmissionGate != nil {
+		if err := s.cfg.VaultAdmissionGate(vaultID); err != nil {
+			return err
+		}
 	}
 	err := s.seg.Submit(ctx, vaultID, segmentation.Input{Record: rec, Ack: ack})
 	if errors.Is(err, segmentation.ErrUnknownVault) {

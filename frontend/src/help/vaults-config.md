@@ -31,6 +31,8 @@ A **File** vault is local-only by default. Selecting a Cloud Storage on it makes
 
 - **Cloud Storage** — optional. Select a [cloud service](help:storage-config) to make the vault cloud-backed; leave as "Local-only" to keep all data on disk. Fixed at vault creation — to change, create a new vault and migrate data.
 - **Storage Class** — which [file storages](help:storage-config) this vault uses. For local-only vaults this hosts all chunks; for cloud-backed vaults it hosts the active chunk and warm cache (sealed chunks live in the cloud). The placement manager assigns one file storage per replica.
+- **Disk Free Warn** — free space on the vault's backing volume below which the disk-space alarm raises for this vault. Leave empty to inherit the node default.
+- **Disk Free Floor** — free space below which the cluster stops accepting new records destined to this vault, on every node, until space frees. Records for other vaults keep flowing. Leave empty to inherit the node default. Node defaults scale with volume size and can be overridden with `GLOG_DISK_FREE_WARN_GB` / `GLOG_DISK_FREE_FLOOR_GB`.
 
 Cloud-backed vaults also have:
 

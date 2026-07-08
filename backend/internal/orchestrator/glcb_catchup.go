@@ -43,6 +43,9 @@ func (o *Orchestrator) pullMissingGLCB(vaultID glid.GLID, e vaultctlfsm.Manifest
 	if o.diskProtectActive() {
 		return // below the free-space floor: recovery writes wait for space
 	}
+	if o.diskGuard != nil && o.diskGuard.vaultProtectActive(vaultID) {
+		return // this vault's own backing volume is below its floor
+	}
 	root, ok := o.pipelineVaultChunkRoot(vaultID)
 	if !ok {
 		return

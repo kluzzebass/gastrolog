@@ -252,6 +252,13 @@ message VaultConfig {
   string cache_budget = 14;                  // max cache size (e.g. "1GB", "500MB"; default: "1GiB")
   string cache_ttl = 15;                     // eviction TTL duration (e.g. "1h", "7d"); only for ttl mode
   string retention_disposition = 16;         // "delete" (default) or "route" — what retention does with aged-out records
+  // Per-vault disk guard thresholds on the vault's backing volume, in
+  // bytes of FREE space. 0 = inherit the node defaults (fraction-based
+  // with share clamps; env-overridable). Warn raises the disk-space
+  // alarm for this vault; floor suspends admission for records destined
+  // to this vault while other vaults keep ingesting.
+  uint64 disk_free_warn_bytes = 17;
+  uint64 disk_free_floor_bytes = 18;
 }
 
 message RouteDestination {

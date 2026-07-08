@@ -1,9 +1,11 @@
 package orchestrator
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"strconv"
 	"sync"
@@ -11,6 +13,8 @@ import (
 	"syscall"
 
 	"gastrolog/internal/alert"
+	"gastrolog/internal/glid"
+	"gastrolog/internal/system"
 	"gastrolog/internal/units"
 )
 
@@ -76,6 +80,22 @@ type diskGuard struct {
 
 	mu          sync.Mutex
 	alarmRaised bool
+	// vaults holds per-vault guard state: each vault is evaluated against
+	// its OWN backing paths and (optionally) config-overridden thresholds,
+	// so one vault's starved volume suspends only that vault's admission
+	// while vaults on healthy volumes keep ingesting. Keyed by vault ID.
+	// Guarded by mu; the per-vault protect flags are read lock-free.
+	vaults map[glid.GLID]*vaultDiskGuard
+}
+
+// vaultDiskGuard is one vault's disk-guard state.
+type vaultDiskGuard struct {
+	paths       []string
+	warnBytes   uint64 // 0 = inherit node defaults
+	floorBytes  uint64 // 0 = inherit node defaults
+	protect     atomic.Bool
+	alarmRaised bool
+	name        string
 }
 
 func newDiskGuardWithLogger(paths []string, logger *slog.Logger) *diskGuard {
@@ -116,18 +136,7 @@ func statfsSample(path string) (uint64, uint64, error) {
 // guarded paths (deduplicating exact repeats is unnecessary — sampling the
 // same volume twice yields the same numbers).
 func (g *diskGuard) worstFree() (free, total uint64, ok bool) {
-	first := true
-	for _, p := range g.paths {
-		f, t, err := g.sample(p)
-		if err != nil || t == 0 {
-			continue
-		}
-		if first || f < free {
-			free, total = f, t
-			first = false
-		}
-	}
-	return free, total, !first
+	return g.worstFreeOf(g.paths)
 }
 
 func (g *diskGuard) warnThreshold(total uint64) uint64 {
@@ -138,6 +147,159 @@ func (g *diskGuard) warnThreshold(total uint64) uint64 {
 func (g *diskGuard) floorThreshold(total uint64) uint64 {
 	t := max(uint64(float64(total)*g.floorFraction), g.floorBytes)
 	return min(t, uint64(float64(total)*diskFreeFloorMaxShare))
+}
+
+// SetVaultGuard registers (or updates) a vault's guard entry. paths are the
+// vault's local backing directories (storage chunks dir, segment root);
+// warn/floor of 0 inherit the node defaults with share clamps. Called from
+// the vault reconfig path; removal via RemoveVaultGuard.
+func (g *diskGuard) SetVaultGuard(vaultID glid.GLID, name string, paths []string, warnBytes, floorBytes uint64) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.vaults == nil {
+		g.vaults = make(map[glid.GLID]*vaultDiskGuard)
+	}
+	v := g.vaults[vaultID]
+	if v == nil {
+		v = &vaultDiskGuard{}
+		g.vaults[vaultID] = v
+	}
+	v.paths = paths
+	v.name = name
+	v.warnBytes = warnBytes
+	v.floorBytes = floorBytes
+}
+
+// RemoveVaultGuard drops a vault's guard entry (vault deleted / no longer local).
+func (g *diskGuard) RemoveVaultGuard(vaultID glid.GLID) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	delete(g.vaults, vaultID)
+}
+
+// retainVaultGuards drops every entry not in keep. Pairs with the
+// discovery-based refresh: vaults removed from config or no longer placed
+// on this node fall out on the next tick. A pruned entry's standing alarm
+// is cleared — nothing would ever clear it once the entry stops being
+// evaluated.
+func (g *diskGuard) retainVaultGuards(keep map[glid.GLID]bool, alerts AlertCollector) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for id, v := range g.vaults {
+		if keep[id] {
+			continue
+		}
+		if v.alarmRaised && alerts != nil {
+			alerts.Clear("disk-space:" + id.String())
+		}
+		delete(g.vaults, id)
+	}
+}
+
+// vaultProtectActive reports whether admission for this vault destination is
+// suspended. Lock-free read; false for unknown vaults.
+func (g *diskGuard) vaultProtectActive(vaultID glid.GLID) bool {
+	g.mu.Lock()
+	v := g.vaults[vaultID]
+	g.mu.Unlock()
+	return v != nil && v.protect.Load()
+}
+
+// protectedVaults lists the vaults currently under local disk protect.
+// Broadcast in NodeStats so peers' admission gates honor it.
+func (g *diskGuard) protectedVaults() []glid.GLID {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	var out []glid.GLID
+	for id, v := range g.vaults {
+		if v.protect.Load() {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// evaluateVaults runs the per-vault guard pass. Caller is the scheduler job.
+func (g *diskGuard) evaluateVaults(alerts AlertCollector) {
+	g.mu.Lock()
+	entries := maps.Clone(g.vaults)
+	g.mu.Unlock()
+
+	for id, v := range entries {
+		free, total, ok := g.worstFreeOf(v.paths)
+		if !ok {
+			continue
+		}
+		warnAt := g.warnThreshold(total)
+		if v.warnBytes > 0 {
+			warnAt = v.warnBytes
+		}
+		floorAt := g.floorThreshold(total)
+		if v.floorBytes > 0 {
+			floorAt = v.floorBytes
+		}
+		g.reconcileVaultProtect(id, v, free, floorAt)
+		g.reconcileVaultAlarm(alerts, id, v, free, total, warnAt)
+	}
+}
+
+func (g *diskGuard) reconcileVaultProtect(id glid.GLID, v *vaultDiskGuard, free, floorAt uint64) {
+	switch {
+	case v.protect.Load() && free > clearAbove(floorAt):
+		v.protect.Store(false)
+		if g.logger != nil {
+			g.logger.Info("vault disk protect released — admission resumed for vault",
+				"vault", id, "name", v.name, "free", units.FormatBytesDisplay(int64(free))) //nolint:gosec // display only
+		}
+	case !v.protect.Load() && free < floorAt:
+		v.protect.Store(true)
+		if g.logger != nil {
+			g.logger.Warn("vault disk protect engaged — admission suspended for vault until space frees",
+				"vault", id, "name", v.name,
+				"free", units.FormatBytesDisplay(int64(free)), "floor", units.FormatBytesDisplay(int64(floorAt))) //nolint:gosec // display only
+		}
+	}
+}
+
+func (g *diskGuard) reconcileVaultAlarm(alerts AlertCollector, id glid.GLID, v *vaultDiskGuard, free, total, warnAt uint64) {
+	if alerts == nil {
+		return
+	}
+	alertID := "disk-space:" + id.String()
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	switch {
+	case free < warnAt:
+		msg := fmt.Sprintf(
+			"Low disk space for vault %s: %s free of %s on its volume. Free space, add capacity, raise the vault's threshold, or shorten its retention.",
+			v.name, units.FormatBytesDisplay(int64(free)), units.FormatBytesDisplay(int64(total))) //nolint:gosec // display only
+		if v.protect.Load() {
+			msg = fmt.Sprintf(
+				"Out of disk space for vault %s: %s free — admission for this vault is SUSPENDED until space frees. Other vaults are unaffected.",
+				v.name, units.FormatBytesDisplay(int64(free))) //nolint:gosec // display only
+		}
+		alerts.Set(alertID, alert.Error, "storage", msg)
+		v.alarmRaised = true
+	case v.alarmRaised && free > clearAbove(warnAt):
+		alerts.Clear(alertID)
+		v.alarmRaised = false
+	}
+}
+
+// worstFreeOf is worstFree over an explicit path set.
+func (g *diskGuard) worstFreeOf(paths []string) (free, total uint64, ok bool) {
+	first := true
+	for _, p := range paths {
+		f, t, err := g.sample(p)
+		if err != nil || t == 0 {
+			continue
+		}
+		if first || f < free {
+			free, total = f, t
+			first = false
+		}
+	}
+	return free, total, !first
 }
 
 // evaluate runs one guard pass: updates protect mode and raises/clears the
@@ -210,6 +372,77 @@ func (o *Orchestrator) diskAdmissionGate() error {
 	return nil
 }
 
+// ErrVaultDiskProtect rejects records destined to a vault whose backing
+// volume is below that vault's free-space floor. Scoped: other vaults on
+// healthy volumes keep ingesting.
+var ErrVaultDiskProtect = errors.New("vault's volume is out of disk space: admission for this vault suspended until space is freed")
+
+// vaultAdmissionGate is the per-destination admission check. It honors both
+// the local guard and — via the NodeStats broadcast — every live peer's:
+// the starved volume backing a vault is usually on a different node than
+// the front door accepting records for it.
+func (o *Orchestrator) vaultAdmissionGate(vaultID glid.GLID) error {
+	if o.diskGuard != nil && o.diskGuard.vaultProtectActive(vaultID) {
+		return ErrVaultDiskProtect
+	}
+	if fn := o.remoteVaultDiskProtected.Load(); fn != nil && (*fn)(vaultID) {
+		return ErrVaultDiskProtect
+	}
+	return nil
+}
+
+// DiskProtectedVaults lists vaults under local disk protect, for the
+// NodeStats broadcast.
+func (o *Orchestrator) DiskProtectedVaults() []glid.GLID {
+	if o.diskGuard == nil {
+		return nil
+	}
+	return o.diskGuard.protectedVaults()
+}
+
+// SetRemoteVaultDiskProtected installs the peer-state lookup consulted by
+// vaultAdmissionGate. Set once at app wiring, after cluster stats exist.
+func (o *Orchestrator) SetRemoteVaultDiskProtected(fn func(glid.GLID) bool) {
+	o.remoteVaultDiskProtected.Store(&fn)
+}
+
+// refreshVaultDiskGuards converges the guard's per-vault entries with the
+// current config: every file vault with a placement on this node is guarded
+// against its local storage volume(s). Discovery-based like the rotation and
+// retention sweeps — vault add/update/remove and placement changes are all
+// picked up on the next tick with no per-callsite lifecycle wiring.
+func (o *Orchestrator) refreshVaultDiskGuards(ctx context.Context) {
+	if o.diskGuard == nil {
+		return
+	}
+	sys, err := o.loadSystem(ctx)
+	if err != nil || sys == nil {
+		return
+	}
+	rt := &sys.Runtime
+	keep := make(map[glid.GLID]bool)
+	for _, vc := range sys.Config.Vaults {
+		if vc.Type != system.VaultTypeFile {
+			continue
+		}
+		var paths []string
+		for _, p := range vc.Placements {
+			if system.NodeIDForStorage(p.StorageID, rt.NodeStorageConfigs) != o.localNodeID {
+				continue
+			}
+			if fs := findFileStorageByID(rt, p.StorageID); fs != nil {
+				paths = append(paths, fs.Path)
+			}
+		}
+		if len(paths) == 0 {
+			continue
+		}
+		keep[vc.ID] = true
+		o.diskGuard.SetVaultGuard(vc.ID, vc.Name, paths, vc.DiskFreeWarnBytes, vc.DiskFreeFloorBytes)
+	}
+	o.diskGuard.retainVaultGuards(keep, o.alerts)
+}
+
 // startDiskGuard registers the guard's scheduler job. No-op without paths.
 func (o *Orchestrator) startDiskGuard() error {
 	if o.diskGuard == nil || len(o.diskGuard.paths) == 0 {
@@ -217,6 +450,8 @@ func (o *Orchestrator) startDiskGuard() error {
 	}
 	if err := o.scheduler.AddJob(diskGuardJobName, diskGuardSchedule, func() {
 		o.diskGuard.evaluate(o.alerts)
+		o.refreshVaultDiskGuards(context.Background())
+		o.diskGuard.evaluateVaults(o.alerts)
 	}); err != nil {
 		return fmt.Errorf("disk guard: %w", err)
 	}

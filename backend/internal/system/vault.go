@@ -67,6 +67,15 @@ type VaultConfig struct {
 	// the next sweep). Operators who want forwarding must opt in
 	// explicitly. See gastrolog-18du3.
 	RetentionDisposition string `json:"retentionDisposition,omitempty"`
+
+	// DiskFreeWarnBytes / DiskFreeFloorBytes are per-vault disk-guard
+	// thresholds on the vault's backing volume, in bytes of free space.
+	// 0 inherits the node defaults (fraction-based with share clamps).
+	// Warn raises the disk-space alarm for this vault; floor suspends
+	// admission for records destined to this vault while vaults on
+	// healthy volumes keep ingesting.
+	DiskFreeWarnBytes  uint64 `json:"diskFreeWarnBytes,omitempty"`
+	DiskFreeFloorBytes uint64 `json:"diskFreeFloorBytes,omitempty"`
 }
 
 // Canonical values for VaultConfig.RetentionDisposition.

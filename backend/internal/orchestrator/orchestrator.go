@@ -237,6 +237,11 @@ type Orchestrator struct {
 	// protect mode (ingest admission suspended below the floor).
 	diskGuard *diskGuard
 
+	// remoteVaultDiskProtected consults peer NodeStats broadcasts for vaults
+	// under disk protect on OTHER nodes, so this node's per-vault admission
+	// gate is cluster-consistent. Installed via SetRemoteVaultDiskProtected.
+	remoteVaultDiskProtected atomic.Pointer[func(glid.GLID) bool]
+
 	// Remote transferrer for cross-node chunk migration (nil in single-node mode).
 	transferrer RemoteTransferrer
 
@@ -786,6 +791,7 @@ func New(cfg Config) (*Orchestrator, error) {
 	o.pipelineGate = chanwatch.NewPressureGate(chanwatch.DefaultThresholds())
 	o.pipeline = pipeline.New(pipeline.Config{
 		AdmissionGate:        o.diskAdmissionGate,
+		VaultAdmissionGate:   o.vaultAdmissionGate,
 		NodeID:               o.localNodeIDGLID,
 		Logger:               baseLogger,
 		Alerts:               o.alerts,

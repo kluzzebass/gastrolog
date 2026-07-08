@@ -517,3 +517,35 @@ func TestSupervisorDeferWritesFollowsAdmissionGate(t *testing.T) {
 		t.Fatalf("CollectOnce after gate lift = %v, want ErrUnknownVault", err)
 	}
 }
+
+// TestSupervisorVaultAdmissionGate pins per-destination admission ordering on
+// the direct-to-vault entry: the vault gate runs before segmentation resolves
+// the target, and only the gated vault is refused.
+func TestSupervisorVaultAdmissionGate(t *testing.T) {
+	gated := glid.New()
+	open := glid.New()
+	gateErr := errors.New("vault's volume is out of disk space")
+	sup := New(Config{
+		NodeID: glid.New(),
+		VaultAdmissionGate: func(id glid.GLID) error {
+			if id == gated {
+				return gateErr
+			}
+			return nil
+		},
+	})
+	ctx := context.Background()
+	if err := sup.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer func() { _ = sup.Stop() }()
+
+	rec := &record.Record{Raw: []byte("x")}
+	if err := sup.SubmitToVault(ctx, gated, rec, nil); !errors.Is(err, gateErr) {
+		t.Fatalf("SubmitToVault to gated vault = %v, want the gate error", err)
+	}
+	// Ungated vault passes the gate; failure is the ordinary not-registered.
+	if err := sup.SubmitToVault(ctx, open, rec, nil); !errors.Is(err, ErrVaultNotRegistered) {
+		t.Fatalf("SubmitToVault to open vault = %v, want ErrVaultNotRegistered", err)
+	}
+}
