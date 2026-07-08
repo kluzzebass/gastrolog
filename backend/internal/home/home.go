@@ -141,15 +141,6 @@ func (d Dir) SocketPath() string {
 	return filepath.Join(d.root, "gastrolog.sock")
 }
 
-// CrashLogPath returns the path to the reserved crash-forensics file. The
-// runtime's panic/fatal traceback is duplicated here (via debug.SetCrashOutput)
-// onto preallocated blocks, so a crash on a full volume still records its
-// stack trace — the disk-full incident lost every trace because the only sink
-// was the shared log on the volume that filled (gastrolog-67gvjo).
-func (d Dir) CrashLogPath() string {
-	return filepath.Join(d.root, "crash.log")
-}
-
 // EnsureExists creates the home directory (and parents) if it doesn't exist.
 func (d Dir) EnsureExists() error {
 	if err := os.MkdirAll(d.root, 0o750); err != nil {

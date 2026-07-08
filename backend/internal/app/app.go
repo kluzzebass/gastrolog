@@ -217,11 +217,6 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		return fmt.Errorf("resolve home directory: %w", err)
 	}
 
-	// Arm crash-forensics capture before anything risky starts (the node_id
-	// WAL opens next). A panic on a full volume records its traceback to a
-	// reserved file instead of vanishing with the volume (gastrolog-67gvjo).
-	armCrashLog(hd, logger)
-
 	nodeID, err := resolveIdentity(logger, cfg, hd)
 	if err != nil {
 		return err
