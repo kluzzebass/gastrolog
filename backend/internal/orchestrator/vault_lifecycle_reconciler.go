@@ -462,7 +462,41 @@ func (r *VaultLifecycleReconciler) registerPipelineGLCB(e vaultctlfsm.ManifestEn
 	if err := registrar.RegisterExternalGLCB(e.ID, glcbPath, info); err != nil {
 		r.logger.Warn("registerPipelineGLCB: RegisterExternalGLCB failed",
 			"chunk", e.ID, "path", glcbPath, "error", err)
+		return
 	}
+	r.ackOwnHolderReceipt(e)
+}
+
+// ackOwnHolderReceipt proposes this home's holder receipt the moment its
+// copy is registered servable — event-driven, covering the build (OnBuilt),
+// seal (onSeal), and replica-pull recovery paths through their shared
+// registration. Without it receipts earned only via the 20s sweep, and
+// replica counts staircased 4→1→2→3→4 after every seal as per-node batches
+// landed (the placement fallback overstates until the first receipt). The
+// sweep remains the reconciliation backstop for missed events and for
+// revocation; a failed proposal here is retried there.
+func (r *VaultLifecycleReconciler) ackOwnHolderReceipt(e vaultctlfsm.ManifestEntry) {
+	if r.vaultInst == nil || r.vaultInst.ApplyRaftAckChunkHolders == nil {
+		return
+	}
+	if slices.Contains(e.Holders, r.localNodeID) {
+		return
+	}
+	ack := r.vaultInst.ApplyRaftAckChunkHolders
+	id := e.ID
+	nodeID := r.localNodeID
+	logger := r.logger
+	// Dispatched off-goroutine: onSeal (one of this function's callers via
+	// registerPipelineGLCB) runs on the Raft apply pump, and proposing from
+	// the pump deadlocks the leader — Apply posts to the very queue the
+	// pump is draining. Same hazard and same remedy as
+	// ReconcileFromSnapshot's obligation dispatch.
+	go func() {
+		if err := ack([]chunk.ChunkID{id}, nodeID); err != nil {
+			logger.Debug("event-driven holder ack failed; catch-up sweep will retry",
+				"chunk", id, "error", err)
+		}
+	}()
 }
 
 // ---------- FSM apply event handlers ----------
