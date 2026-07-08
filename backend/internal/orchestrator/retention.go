@@ -132,6 +132,10 @@ type retentionRunner struct {
 	// chunks. Used to forward chunk deletions after retention expires them.
 	followerTargets []system.ReplicationTarget
 
+	// rules is the most recently resolved rule set for this runner,
+	// cached so other subsystems (the GLCB catch-up pull) can consult
+	// retention cheaply without a config load. Guarded by mu.
+	rules []retentionRule
 	// disposition is the resolved VaultConfig.RetentionDisposition value.
 	// Refreshed on every sweep via retentionTargetForInstance so live config
 	// edits take effect on the next tick. Branches the per-chunk path:
@@ -527,6 +531,9 @@ func (o *Orchestrator) retentionTargetForInstance(cfg *system.Config, vaultCfg s
 	runner.vaultName = vaultCfg.Name
 	runner.vaultType = string(vaultCfg.Type)
 	runner.disposition = vaultCfg.ResolveRetentionDisposition()
+	runner.mu.Lock()
+	runner.rules = rules
+	runner.mu.Unlock()
 	return &sweepTarget{runner: runner, rules: rules}
 }
 

@@ -10,6 +10,7 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/chunking"
+	"gastrolog/internal/system"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
@@ -46,6 +47,20 @@ func (o *Orchestrator) pullMissingGLCB(vaultID glid.GLID, e vaultctlfsm.Manifest
 	glcbPath := chunking.ChunkGLCBPath(root, e.ID)
 	if _, err := os.Stat(glcbPath); err == nil {
 		return // bytes present; registration is the sweep's other half
+	}
+	if o.retentionMootsPull(vaultID, e) {
+		// Already past its age window with a destroy-only disposition:
+		// recovery would stream hundreds of MB for a faster funeral, and
+		// the failed attempts raced retention as log noise during backlog
+		// recovery. Route-disposition vaults never take this branch — the
+		// leader fans records out from its LOCAL copy before destruction,
+		// so a leader missing bytes must still pull or the chunk would be
+		// destroyed unrouted.
+		if n, ok := o.registerSkipLog.Allow(vaultID.String() + ":pull-moot"); ok {
+			o.logger.Debug("GLCB replica pull skipped — chunk already past its retention window",
+				"vault", vaultID, "chunk", e.ID, "sealedAt", e.SealedAt, "suppressed", n)
+		}
+		return
 	}
 
 	o.glcbPullMu.Lock()
@@ -160,6 +175,61 @@ func verifyAndPromoteGLCB(tmp, glcbPath string, e vaultctlfsm.ManifestEntry) err
 		return fmt.Errorf("pulled GLCB record count %d != manifest %d", res.RecordCount, e.RecordCount)
 	}
 	return os.Rename(tmp, glcbPath) //nolint:gosec // G703: both paths derive from the local chunk root, not untrusted input
+}
+
+// retentionMootsPull reports whether pulling a missing GLCB is pointless:
+// some age-based retention rule already has the chunk past its window AND
+// the vault's disposition destroys without routing. Consulted from the
+// catch-up sweep before scheduling a pull. Only TTL policies participate —
+// size/count policies need whole-vault context and cannot be evaluated
+// per-chunk. Any route-disposition runner vetoes the skip: route fan-out
+// reads the leader's local copy, so bytes must be recoverable there.
+func (o *Orchestrator) retentionMootsPull(vaultID glid.GLID, e vaultctlfsm.ManifestEntry) bool {
+	if e.SealedAt.IsZero() {
+		return false
+	}
+	o.mu.RLock()
+	var runners []*retentionRunner
+	for _, r := range o.retention {
+		if r.vaultID == vaultID {
+			runners = append(runners, r)
+		}
+	}
+	o.mu.RUnlock()
+	if len(runners) == 0 {
+		return false
+	}
+
+	state := chunk.VaultState{
+		Chunks: []chunk.ChunkMeta{{
+			ID:       e.ID,
+			Sealed:   true,
+			State:    e.State,
+			SealedAt: e.SealedAt,
+			WriteEnd: e.WriteEnd,
+		}},
+		Now: o.now(),
+	}
+	expired := false
+	for _, r := range runners {
+		r.mu.Lock()
+		rules := r.rules
+		disposition := r.disposition
+		r.mu.Unlock()
+		if disposition != system.RetentionDispositionDelete {
+			return false
+		}
+		for _, rule := range rules {
+			ttl, ok := rule.policy.(*chunk.TTLRetentionPolicy)
+			if !ok {
+				continue
+			}
+			if len(ttl.Apply(state)) > 0 {
+				expired = true
+			}
+		}
+	}
+	return expired
 }
 
 // glcbPullSources lists peer homes to try, placement order, self excluded.
