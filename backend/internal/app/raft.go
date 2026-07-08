@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"gastrolog/internal/alert"
 	"io"
 	"log/slog"
 	"os"
@@ -35,6 +36,9 @@ type raftStoreOpts struct {
 	ClusterTLS *cluster.ClusterTLS
 	Logger     *slog.Logger
 	FSMOpts    []raftfsm.Option
+	// Alerts receives the WAL space-reserve alarm. Optional (nil on the
+	// rejoin/rollback reopen paths, which predate an alert collector).
+	Alerts *alert.Collector
 
 	// transport is an optional pre-created Raft transport (used during rejoin
 	// when the cluster server has already created a fresh transport).
@@ -195,6 +199,35 @@ func (s *raftClusterCtlStore) Close() error {
 	return err
 }
 
+// walReserveAlarm builds the OnReserveState callback for a named WAL: losing
+// the space reserve raises a storage alarm (operator action: free disk space
+// NOW — without the reserve, a full volume panics Raft on the next term or
+// log write), and restoring it clears the alarm. Nil-tolerant on both alerts
+// and logger.
+func walReserveAlarm(alerts *alert.Collector, logger *slog.Logger, walName string) func(lost bool, err error) {
+	id := "wal-reserve:" + walName
+	return func(lost bool, err error) {
+		if !lost {
+			if logger != nil {
+				logger.Info("raft WAL space reserve restored", "wal", walName)
+			}
+			if alerts != nil {
+				alerts.Clear(id)
+			}
+			return
+		}
+		if logger != nil {
+			logger.Warn("raft WAL space reserve lost — consensus has no ENOSPC immunity until space frees",
+				"wal", walName, "error", err)
+		}
+		if alerts != nil {
+			alerts.Set(id, alert.Error, "storage", fmt.Sprintf(
+				"Raft WAL (%s) space reserve lost: %v. Free disk space now — without the reserve, a full volume crashes consensus on this node.",
+				walName, err))
+		}
+	}
+}
+
 // openRaftClusterCtlStore creates a raft-backed system store with WAL persistence.
 func openRaftClusterCtlStore(opts raftStoreOpts) (*raftClusterCtlStore, error) {
 	raftDir := opts.Home.RaftDir()
@@ -203,7 +236,9 @@ func openRaftClusterCtlStore(opts raftStoreOpts) (*raftClusterCtlStore, error) {
 	}
 
 	walDir := opts.Home.ClusterCtlWALDir()
-	wal, err := raftwal.Open(walDir)
+	wal, err := raftwal.Open(walDir, raftwal.Config{
+		OnReserveState: walReserveAlarm(opts.Alerts, opts.Logger, "cluster-ctl"),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("open cluster-ctl raft WAL: %w", err)
 	}

@@ -87,6 +87,18 @@ type Config struct {
 	// Used by tests for deterministic fsync failure injection. Production code
 	// must leave this nil.
 	SegmentSync func(*os.File) error
+
+	// SegmentPreallocate, if non-nil, is called instead of the platform
+	// preallocation syscall when reserving segment blocks. Used by tests for
+	// deterministic reservation failure injection. Production code must
+	// leave this nil.
+	SegmentPreallocate func(*os.File, int64) error
+
+	// OnReserveState, if non-nil, is invoked when the WAL's space reserve is
+	// lost (preallocation failed — the WAL runs on ordinary allocation and a
+	// full volume can panic Raft) or restored. Invoked from the batch-writer
+	// goroutine: must not block. err is nil when lost is false.
+	OnReserveState func(lost bool, err error)
 }
 
 func (c Config) withDefaults() Config {
@@ -128,6 +140,17 @@ type WAL struct {
 	segPath string
 	segSize int64
 	segSeq  int
+
+	// Space reserve (gastrolog-67gvjo): every segment is preallocated to its
+	// full target size (physical blocks only — logical size still marks end
+	// of data for replay), and the NEXT segment is created fully reserved
+	// before it is needed, so rotation at crisis time allocates nothing. A
+	// Raft term bump is ~30 bytes; one reserved segment is effectively
+	// unlimited election-storm runway on a full volume. sparePath is the
+	// already-reserved next segment ("" when the reserve is lost) — consumed
+	// on promotion so darwin's physical-EOF preallocation never doubles.
+	sparePath   string
+	reserveLost atomic.Bool
 
 	// Batch writer: collects writes and fsyncs once per batch.
 	writeCh chan writeOp
@@ -537,13 +560,71 @@ func (w *WAL) rotateSegment() error {
 
 	w.segSeq++
 	w.segPath = filepath.Join(w.dir, fmt.Sprintf("%s%06d%s", walFilePrefix, w.segSeq, walFileSuffix))
+	promotedSpare := w.segPath == w.sparePath
 	f, err := os.OpenFile(w.segPath, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o644) //nolint:gosec // G304: path is constructed internally
 	if err != nil {
 		return fmt.Errorf("open segment %s: %w", w.segPath, err)
 	}
 	w.seg = f
 	w.segSize = 0
+	w.reconcileReserve(promotedSpare)
 	return nil
+}
+
+// reconcileReserve restores the space-reserve invariant after a rotation:
+// the active segment is preallocated to its full target size (skipped when
+// it IS the consumed spare — already reserved; re-reserving would double the
+// claim on darwin) and the next segment exists fully reserved. Reservation
+// failure is DEGRADED, never fatal: the WAL keeps appending on ordinary
+// allocation, and the transition is surfaced via OnReserveState so the
+// operator learns the ENOSPC immunity is gone while there is still runway.
+func (w *WAL) reconcileReserve(promotedSpare bool) {
+	w.sparePath = ""
+	var err error
+	if !promotedSpare {
+		err = w.preallocateSegment(w.seg)
+	}
+	if err == nil {
+		err = w.ensureSpare()
+	}
+	lost := err != nil
+	if w.reserveLost.Swap(lost) != lost && w.cfg.OnReserveState != nil {
+		w.cfg.OnReserveState(lost, err)
+	}
+}
+
+// ensureSpare creates the next segment file fully reserved so the coming
+// rotation allocates nothing. Records the path in sparePath on success.
+func (w *WAL) ensureSpare() error {
+	sparePath := filepath.Join(w.dir, fmt.Sprintf("%s%06d%s", walFilePrefix, w.segSeq+1, walFileSuffix))
+	f, err := os.OpenFile(sparePath, os.O_CREATE|os.O_RDWR, 0o644) //nolint:gosec // G304: path is constructed internally
+	if err != nil {
+		return fmt.Errorf("create spare segment: %w", err)
+	}
+	err = w.preallocateSegment(f)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return fmt.Errorf("reserve spare segment %s: %w", sparePath, err)
+	}
+	w.sparePath = sparePath
+	return nil
+}
+
+// preallocateSegment reserves the segment's full target size;
+// SegmentPreallocate overrides when set.
+func (w *WAL) preallocateSegment(f *os.File) error {
+	if w.cfg.SegmentPreallocate != nil {
+		return w.cfg.SegmentPreallocate(f, w.cfg.SegmentTargetSize)
+	}
+	return preallocate(f, w.cfg.SegmentTargetSize)
+}
+
+// ReserveLost reports whether the WAL's space reserve is currently lost
+// (a preallocation failed and has not yet been restored by a later rotation).
+func (w *WAL) ReserveLost() bool {
+	return w.reserveLost.Load()
 }
 
 // replay reads all existing WAL segments and rebuilds in-memory state.
@@ -566,8 +647,21 @@ func (w *WAL) replay() error {
 		if !ok {
 			continue
 		}
+		path := filepath.Join(w.dir, name)
+		info, err := e.Info()
+		if err != nil {
+			return err
+		}
+		if info.Size() == 0 {
+			// A logically-empty segment is the previous run's reserved
+			// spare (or a never-written rotation). It has nothing to
+			// replay, but its preallocated blocks pin reserve space —
+			// remove it so restarts don't accumulate orphaned reserves.
+			_ = os.Remove(path)
+			continue
+		}
 		segments = append(segments, segmentInfo{
-			path: filepath.Join(w.dir, name),
+			path: path,
 			seq:  seq,
 		})
 	}
@@ -819,6 +913,14 @@ func (w *WAL) replaySegment(path string) error {
 		typ := entryType(hdr[4])
 		length := int(binary.LittleEndian.Uint32(hdr[5:9]))
 		storedCRC := binary.LittleEndian.Uint32(hdr[9:13])
+
+		if typ == 0 {
+			// Valid entry types start at 1. A zero type means a zeroed
+			// region — a preallocated tail or torn write. CRC32 of an
+			// empty payload is 0, so a zero header would otherwise pass
+			// the checksum and replay would walk the whole zero region.
+			return nil
+		}
 
 		payload := make([]byte, length)
 		if _, err := io.ReadFull(f, payload); err != nil {

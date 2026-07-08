@@ -42,13 +42,23 @@ func newestSegmentPath(t *testing.T, dir string) string {
 		if !ok {
 			continue
 		}
+		// Skip the reserved spare: it carries the highest sequence number
+		// but is logically empty (physical blocks preallocated, zero data).
+		// Corruption harnesses want the newest segment that HOLDS data.
+		info, err := e.Info()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Size() == 0 {
+			continue
+		}
 		if seq > bestSeq {
 			bestSeq = seq
 			bestPath = filepath.Join(dir, name)
 		}
 	}
 	if bestPath == "" {
-		t.Fatal("no wal segment files in dir")
+		t.Fatal("no wal segment files with data in dir")
 	}
 	return bestPath
 }
