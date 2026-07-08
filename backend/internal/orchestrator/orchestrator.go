@@ -762,7 +762,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		onIngesterAlive:      cfg.OnIngesterAlive,
 		onIngesterCheckpoint: cfg.OnIngesterCheckpoint,
 		segmentsDir:          cfg.SegmentsDir,
-		diskGuard:            newDiskGuard(cfg.DiskGuardPaths),
+		diskGuard:            newDiskGuardWithLogger(cfg.DiskGuardPaths, cfg.Logger),
 		homeDir:              homeDirFromSegments(cfg.SegmentsDir),
 		pipelineVaults:       make(map[glid.GLID]pipelineVaultReg),
 		now:                  cfg.Now,

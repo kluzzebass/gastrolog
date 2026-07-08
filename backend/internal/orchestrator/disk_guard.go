@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
 	"sync"
@@ -46,10 +47,14 @@ const (
 	diskFreeWarnMaxShare  = 0.25             // warn threshold ≤ 25% of the volume
 	diskFreeFloorMaxShare = 0.10             // floor threshold ≤ 10% of the volume
 
-	// Hysteresis multipliers so the alarm and protect mode don't chatter
-	// at the boundary (EEMUA: deadbands, not flapping).
-	diskGuardClearFactor = 1.25
 )
+
+// clearAbove is the hysteresis exit bound: thresholds release only once
+// free space exceeds them by 25% (integer math — a float factor here
+// crashes gosec's range analyzer, and deadbands shouldn't need floats).
+func clearAbove(threshold uint64) uint64 {
+	return threshold + threshold/4
+}
 
 // ErrDiskProtect rejects new work while the node is below its free-space
 // floor. Producers treat it as retryable backpressure.
@@ -60,6 +65,7 @@ var ErrDiskProtect = errors.New("node is out of disk space: ingest admission sus
 type diskGuard struct {
 	paths  []string
 	sample func(path string) (free, total uint64, err error)
+	logger *slog.Logger
 
 	warnFraction  float64
 	floorFraction float64
@@ -70,6 +76,12 @@ type diskGuard struct {
 
 	mu          sync.Mutex
 	alarmRaised bool
+}
+
+func newDiskGuardWithLogger(paths []string, logger *slog.Logger) *diskGuard {
+	g := newDiskGuard(paths)
+	g.logger = logger
+	return g
 }
 
 func newDiskGuard(paths []string) *diskGuard {
@@ -138,14 +150,7 @@ func (g *diskGuard) evaluate(alerts AlertCollector) {
 	warnAt := g.warnThreshold(total)
 	floorAt := g.floorThreshold(total)
 
-	// Protect mode: enter at the floor, exit with hysteresis.
-	if g.protect.Load() {
-		if free > uint64(float64(floorAt)*diskGuardClearFactor) {
-			g.protect.Store(false)
-		}
-	} else if free < floorAt {
-		g.protect.Store(true)
-	}
+	g.reconcileProtect(free, floorAt)
 
 	if alerts == nil {
 		return
@@ -164,9 +169,29 @@ func (g *diskGuard) evaluate(alerts AlertCollector) {
 		}
 		alerts.Set(diskGuardAlertID, alert.Error, "storage", msg)
 		g.alarmRaised = true
-	case g.alarmRaised && free > uint64(float64(warnAt)*diskGuardClearFactor):
+	case g.alarmRaised && free > clearAbove(warnAt):
 		alerts.Clear(diskGuardAlertID)
 		g.alarmRaised = false
+	}
+}
+
+// reconcileProtect flips protect mode: enter at the floor, exit with
+// hysteresis. Transitions log — admission nacks are silent in the pump, so
+// without these lines the guard's engagement is invisible in the log record.
+func (g *diskGuard) reconcileProtect(free, floorAt uint64) {
+	switch {
+	case g.protect.Load() && free > clearAbove(floorAt):
+		g.protect.Store(false)
+		if g.logger != nil {
+			g.logger.Info("disk protect released — ingest admission resumed",
+				"free", units.FormatBytesDisplay(int64(free))) //nolint:gosec // display only
+		}
+	case !g.protect.Load() && free < floorAt:
+		g.protect.Store(true)
+		if g.logger != nil {
+			g.logger.Warn("disk protect engaged — ingest admission suspended until space frees",
+				"free", units.FormatBytesDisplay(int64(free)), "floor", units.FormatBytesDisplay(int64(floorAt))) //nolint:gosec // display only
+		}
 	}
 }
 

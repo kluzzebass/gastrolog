@@ -917,6 +917,19 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 	if r.orch.shuttingDown() {
 		return false
 	}
+	if r.orch.diskProtectActive() {
+		// Admission is rejecting everything: every routed record would be
+		// refused and the chunk destroyed UNROUTED — the disk-guard test
+		// caught exactly this (1.5M per-record rejections, then the chunk
+		// expunged with zero records delivered). Abort so the chunk
+		// survives and a later sweep retries once space frees. Delete-
+		// disposition retention is unaffected — it never fans out.
+		if n, ok := r.idleLog.Allow("disk-protect"); ok {
+			r.logger.Warn("retention: route fan-out deferred — disk protect active; chunk retained for a later sweep",
+				"vault", r.vaultID, "suppressed", n)
+		}
+		return false
+	}
 	vaultInst := r.findVaultInstance()
 	if vaultInst == nil || vaultInst.Chunks == nil {
 		return true
@@ -966,7 +979,12 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 				case subErr == nil:
 				case errors.Is(subErr, pipeline.ErrNotRunning),
 					errors.Is(subErr, context.Canceled),
+					errors.Is(subErr, ErrDiskProtect),
 					r.orch.shuttingDown():
+					// ErrDiskProtect is terminal for the whole fan-out: every
+					// subsequent record would be rejected the same way, and
+					// tolerating it as a per-record error destroys the chunk
+					// unrouted (and floods a warn per record).
 					abort(subErr)
 				default:
 					// Genuine per-record error — partial fan-out is
