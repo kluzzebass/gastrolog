@@ -735,7 +735,7 @@ func (v *vaultChunking) releaseOnce(ctx context.Context) error {
 	}
 	required := v.requiredHolders()
 	holdersWired := v.cfg.RequiredHolders != nil
-	ready, stillPending := partitionPendingRelease(v.fsm(), pending, required, holdersWired)
+	ready, stillPending := partitionPendingRelease(v.fsm(), pending, required, holdersWired, v.plannerMinHolders())
 	if len(ready) == 0 {
 		v.mu.Lock()
 		v.pendingRelease = append(stillPending, v.pendingRelease...)

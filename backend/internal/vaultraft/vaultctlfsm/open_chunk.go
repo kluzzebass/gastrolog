@@ -171,6 +171,52 @@ func (f *FSM) ResumeRecordNumber(segmentID glid.GLID) (uint32, bool) {
 	return n, ok
 }
 
+// SegmentSuperseded reports whether segID's records now live in chunks
+// replicated to at least minChunkHolders nodes — the release/purge signal that
+// supersedes the raw segment (design-notes 39, refined R3: RF, not home-set, so
+// a dead home never pins the segment; the dead home catches up at the chunk
+// level). True only when the segment has been chunked (≥1 containing chunk) and
+// every containing chunk is sealed and held by ≥ minChunkHolders nodes, or has
+// already aged out (tombstoned/expired — the records are gone by retention, so
+// the segment is equally free to drop). minChunkHolders ≤ 0 means placement
+// wiring is absent (single-node/test); return false so release falls back to
+// the holders⊇homes fast path.
+func (f *FSM) SegmentSuperseded(segID glid.GLID, minChunkHolders int) bool {
+	if minChunkHolders <= 0 {
+		return false
+	}
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.segmentSupersededLocked(segID, minChunkHolders)
+}
+
+func (f *FSM) segmentSupersededLocked(segID glid.GLID, minChunkHolders int) bool {
+	chunkIDs := f.segmentChunks[segID]
+	if len(chunkIDs) == 0 {
+		return false
+	}
+	for _, id := range chunkIDs {
+		if !f.chunkReplicatedLocked(id, minChunkHolders) {
+			return false
+		}
+	}
+	return true
+}
+
+// chunkReplicatedLocked reports whether chunk id is durable enough to supersede
+// a segment: sealed and held by ≥ minChunkHolders nodes, or already gone (its
+// records aged out under retention, which only deletes sealed chunks).
+func (f *FSM) chunkReplicatedLocked(id chunk.ChunkID, minChunkHolders int) bool {
+	entry := f.chunks[id]
+	if entry == nil {
+		return true
+	}
+	if entry.State != chunk.ChunkStateSealed {
+		return false
+	}
+	return len(entry.Holders) >= minChunkHolders
+}
+
 func copyOpenChunkManifest(m *OpenChunkManifest) *OpenChunkManifest {
 	if m == nil {
 		return nil
@@ -273,7 +319,22 @@ func (f *FSM) applyAddOpenChunkSegmentRef(c *gastrologv1.AddOpenChunkSegmentRefC
 		f.segmentResume = make(map[glid.GLID]uint32)
 	}
 	f.segmentResume[segID] = c.GetLastRecordNumber() + 1
+	f.recordSegmentChunkLocked(segID, id)
 	return nil
+}
+
+// recordSegmentChunkLocked notes that segID's records were referenced by chunk
+// chunkID's manifest. Deduped, append-order preserved. Survives the manifest
+// pop at build time so SegmentSuperseded can decide release by chunk
+// replication. Caller MUST hold f.mu.
+func (f *FSM) recordSegmentChunkLocked(segID glid.GLID, chunkID chunk.ChunkID) {
+	if f.segmentChunks == nil {
+		f.segmentChunks = make(map[glid.GLID][]chunk.ChunkID)
+	}
+	if slices.Contains(f.segmentChunks[segID], chunkID) {
+		return
+	}
+	f.segmentChunks[segID] = append(f.segmentChunks[segID], chunkID)
 }
 
 func (f *FSM) applyAddOpenChunkSegmentRefs(c *gastrologv1.AddOpenChunkSegmentRefsCommand) error {
@@ -487,6 +548,7 @@ func (f *FSM) applyReleaseSegments(c *gastrologv1.ReleaseSegmentsCommand) []glid
 		delete(f.completedSegments, segID)
 		f.removeCompletedSegmentOrder(segID)
 		delete(f.segmentResume, segID)
+		delete(f.segmentChunks, segID)
 	}
 	return released
 }
@@ -589,6 +651,28 @@ func (f *FSM) snapshotSegmentResumeLocked() []*gastrologv1.SegmentResumeRecordNu
 	return out
 }
 
+func (f *FSM) snapshotSegmentChunksLocked() []*gastrologv1.SegmentChunkIDs {
+	if len(f.segmentChunks) == 0 {
+		return nil
+	}
+	out := make([]*gastrologv1.SegmentChunkIDs, 0, len(f.segmentChunks))
+	ids := slices.SortedFunc(maps.Keys(f.segmentChunks), glid.Compare)
+	for _, id := range ids {
+		idCopy := id
+		chunkIDs := f.segmentChunks[id]
+		raw := make([][]byte, len(chunkIDs))
+		for i, cid := range chunkIDs {
+			cidCopy := cid
+			raw[i] = cidCopy[:]
+		}
+		out = append(out, &gastrologv1.SegmentChunkIDs{
+			SegmentId: idCopy[:],
+			ChunkIds:  raw,
+		})
+	}
+	return out
+}
+
 func (f *FSM) restoreOpenChunkLocked(snap *gastrologv1.VaultCtlSnapshot) {
 	f.openChunk = openChunkManifestFromProto(snap.GetOpenChunk())
 	f.sealedManifests = nil
@@ -600,6 +684,19 @@ func (f *FSM) restoreOpenChunkLocked(snap *gastrologv1.VaultCtlSnapshot) {
 	f.segmentResume = make(map[glid.GLID]uint32, len(snap.GetSegmentResume()))
 	for _, entry := range snap.GetSegmentResume() {
 		f.segmentResume[glid.FromBytes(entry.GetSegmentId())] = entry.GetNextRecordNumber()
+	}
+	f.segmentChunks = make(map[glid.GLID][]chunk.ChunkID, len(snap.GetSegmentChunks()))
+	for _, entry := range snap.GetSegmentChunks() {
+		segID := glid.FromBytes(entry.GetSegmentId())
+		raw := entry.GetChunkIds()
+		if len(raw) == 0 {
+			continue
+		}
+		chunkIDs := make([]chunk.ChunkID, 0, len(raw))
+		for _, cid := range raw {
+			chunkIDs = append(chunkIDs, chunkIDFromProto(cid))
+		}
+		f.segmentChunks[segID] = chunkIDs
 	}
 }
 

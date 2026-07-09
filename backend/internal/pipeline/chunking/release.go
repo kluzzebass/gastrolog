@@ -51,9 +51,13 @@ func releasableSegmentIDs(fsm *vaultctlfsm.FSM, m *vaultctlfsm.OpenChunkManifest
 }
 
 // segmentReadyForRegistryRelease reports whether a segment may be dropped from
-// the completed-segment registry: fully consumed and every required vault home
-// has committed a holder receipt.
-func segmentReadyForRegistryRelease(fsm *vaultctlfsm.FSM, segmentID glid.GLID, requiredHolders []string) bool {
+// the completed-segment registry. Two independent release signals (design-notes
+// 28/39, R3): the segment is superseded — its records live in RF-replicated
+// chunks (minChunkHolders), which un-pins the dead-holder case because the chunk
+// reaches RF among the live homes — OR the fast path, every required home already
+// holds the raw segment. A segment still referenced by an unbuilt manifest, or
+// not fully consumed, is never released.
+func segmentReadyForRegistryRelease(fsm *vaultctlfsm.FSM, segmentID glid.GLID, requiredHolders []string, minChunkHolders int) bool {
 	if fsm != nil && fsm.SegmentReferencedInManifest(segmentID) {
 		return false
 	}
@@ -63,6 +67,9 @@ func segmentReadyForRegistryRelease(fsm *vaultctlfsm.FSM, segmentID glid.GLID, r
 	}
 	if !segmentExhaustedForPlanning(fsm, *entry) {
 		return false
+	}
+	if fsm.SegmentSuperseded(segmentID, minChunkHolders) {
+		return true
 	}
 	return holdersCover(entry.Holders, requiredHolders)
 }
@@ -77,7 +84,7 @@ func segmentReadyForRegistryRelease(fsm *vaultctlfsm.FSM, segmentID glid.GLID, r
 // fully built. Purging on exhaustion alone deleted segments that later queued
 // chunks still needed, pinning those chunks in Sealing forever
 // (gastrolog-67c9b0).
-func mayPurgeHeadAfterBuild(fsm *vaultctlfsm.FSM, segmentID glid.GLID, requiredHolders []string, holdersWired bool) bool {
+func mayPurgeHeadAfterBuild(fsm *vaultctlfsm.FSM, segmentID glid.GLID, requiredHolders []string, holdersWired bool, minChunkHolders int) bool {
 	if fsm != nil && fsm.SegmentReferencedInManifest(segmentID) {
 		return false
 	}
@@ -86,6 +93,11 @@ func mayPurgeHeadAfterBuild(fsm *vaultctlfsm.FSM, segmentID glid.GLID, requiredH
 		return false
 	}
 	if !holdersWired {
+		return true
+	}
+	// Superseded — records are durable in RF-replicated chunks; drop the local
+	// head copy without waiting on a possibly-dead home (design-notes 39/R3).
+	if fsm.SegmentSuperseded(segmentID, minChunkHolders) {
 		return true
 	}
 	if len(requiredHolders) == 0 {
@@ -98,11 +110,11 @@ func mayPurgeHeadAfterBuild(fsm *vaultctlfsm.FSM, segmentID glid.GLID, requiredH
 // release when placement wiring is present yet unresolved (empty required
 // slice). holdersCover treats empty required as "ready" for single-node tests;
 // that must not drop segments on a multi-home vault when placement lookup fails.
-func mayReleaseFromRegistry(fsm *vaultctlfsm.FSM, segmentID glid.GLID, requiredHolders []string, holdersWired bool) bool {
+func mayReleaseFromRegistry(fsm *vaultctlfsm.FSM, segmentID glid.GLID, requiredHolders []string, holdersWired bool, minChunkHolders int) bool {
 	if holdersWired && len(requiredHolders) == 0 {
 		return false
 	}
-	return segmentReadyForRegistryRelease(fsm, segmentID, requiredHolders)
+	return segmentReadyForRegistryRelease(fsm, segmentID, requiredHolders, minChunkHolders)
 }
 
 func holdersCover(holders, required []string) bool {
@@ -119,9 +131,9 @@ func holdersCover(holders, required []string) bool {
 
 // partitionPendingRelease splits queued segment IDs into those ready for
 // ReleaseSegments now and those still awaiting holder receipts.
-func partitionPendingRelease(fsm *vaultctlfsm.FSM, pending []glid.GLID, requiredHolders []string, holdersWired bool) (ready, stillPending []glid.GLID) {
+func partitionPendingRelease(fsm *vaultctlfsm.FSM, pending []glid.GLID, requiredHolders []string, holdersWired bool, minChunkHolders int) (ready, stillPending []glid.GLID) {
 	for _, id := range pending {
-		if mayReleaseFromRegistry(fsm, id, requiredHolders, holdersWired) {
+		if mayReleaseFromRegistry(fsm, id, requiredHolders, holdersWired, minChunkHolders) {
 			ready = append(ready, id)
 			continue
 		}
@@ -161,9 +173,10 @@ func (v *vaultChunking) enqueueRegistryReleaseCandidates() {
 	fsm := v.fsm()
 	required := v.requiredHolders()
 	holdersWired := v.cfg.RequiredHolders != nil
+	minChunk := v.plannerMinHolders()
 	var candidates []glid.GLID
 	for _, entry := range fsm.ListCompletedSegments() {
-		if mayReleaseFromRegistry(fsm, entry.SegmentID, required, holdersWired) {
+		if mayReleaseFromRegistry(fsm, entry.SegmentID, required, holdersWired, minChunk) {
 			candidates = append(candidates, entry.SegmentID)
 		}
 	}

@@ -294,6 +294,12 @@ type FSM struct {
 	// segmentResume maps segment ID → next EventID-order record number after
 	// a partial manifest ref.
 	segmentResume map[glid.GLID]uint32
+	// segmentChunks maps a completed segment ID → the chunk IDs whose manifests
+	// referenced its records. Unlike openChunk/sealedManifests it survives the
+	// manifest pop at build time, so SegmentSuperseded can decide release from
+	// chunk replication (records live in an RF-replicated chunk) after the build.
+	// Cleared when the segment is released.
+	segmentChunks map[glid.GLID][]chunk.ChunkID
 	// releasedSegments records segment IDs dropped by ReleaseSegments. Stale
 	// PublishCompletedSegment replays after release must not re-add registry
 	// entries without on-disk bytes (distribution publish race).
@@ -341,6 +347,7 @@ func New() *FSM {
 		pendingDeletes:    make(map[chunk.ChunkID]*PendingDelete),
 		completedSegments: make(map[glid.GLID]*CompletedSegmentEntry),
 		segmentResume:     make(map[glid.GLID]uint32),
+		segmentChunks:     make(map[glid.GLID][]chunk.ChunkID),
 		releasedSegments:  make(map[glid.GLID]struct{}),
 	}
 }
@@ -1231,6 +1238,7 @@ func (f *FSM) snapshotProtoLocked() *gastrologv1.VaultCtlSnapshot {
 		OpenChunk:         f.snapshotOpenChunkLocked(),
 		SealedManifests:   f.snapshotSealedManifestsLocked(),
 		SegmentResume:     f.snapshotSegmentResumeLocked(),
+		SegmentChunks:     f.snapshotSegmentChunksLocked(),
 	}
 
 	releasedIDs := slices.SortedFunc(maps.Keys(f.releasedSegments), glid.Compare)

@@ -224,6 +224,14 @@ message SegmentResumeRecordNumber {
   uint32 next_record_number = 2;
 }
 
+// SegmentChunkIDs maps a completed segment to the chunk IDs whose manifests
+// referenced its records. Persisted so SegmentSuperseded survives snapshot
+// restore and decides release from chunk replication after the manifest pops.
+message SegmentChunkIDs {
+  bytes segment_id = 1;
+  repeated bytes chunk_ids = 2;
+}
+
 // OpenChunkManifestCommand opens a new manifest-backed active chunk.
 message OpenChunkManifestCommand {
   bytes chunk_id = 1;
@@ -384,6 +392,9 @@ message VaultCtlSnapshot {
   // release is ignored so a stale distribution publish cannot re-register
   // metadata without bytes (permanent collection/chunking wedge).
   repeated bytes released_segment_ids = 8;
+  // Segment → containing chunk IDs, for release-by-chunk-replication after
+  // the manifest pops at build time.
+  repeated SegmentChunkIDs segment_chunks = 9;
 }
 
 // VaultGroupSnapshot is the snapshot of the whole vault-ctl Raft group: one
