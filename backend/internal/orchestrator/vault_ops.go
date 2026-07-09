@@ -675,7 +675,7 @@ func (o *Orchestrator) rewirePipelineAfterCtlRestore(vaultID glid.GLID) error {
 			}
 			return fsm
 		}
-		cfg.Log = &segmentLogReader{lookup: lookup, localNodeID: o.localNodeID, vaultRoot: root}
+		cfg.Log = &segmentLogReader{lookup: lookup, localNodeID: o.localNodeID, vaultRoot: root, placement: func() []string { return o.vaultPlacementNodeIDs(vaultID) }}
 		cfg.Pull = &segmentPullClient{
 			lookup:      lookup,
 			puller:      o.segmentPuller,

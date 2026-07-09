@@ -186,7 +186,7 @@ func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, home bool, fsm 
 		if o.segmentPuller != nil {
 			spec.Home = true
 			lookup := spec.LookupFSM
-			spec.Log = &segmentLogReader{lookup: lookup, localNodeID: o.localNodeID, vaultRoot: root}
+			spec.Log = &segmentLogReader{lookup: lookup, localNodeID: o.localNodeID, vaultRoot: root, placement: func() []string { return o.vaultPlacementNodeIDs(vaultID) }}
 			spec.Pull = &segmentPullClient{
 				lookup:      lookup,
 				puller:      o.segmentPuller,

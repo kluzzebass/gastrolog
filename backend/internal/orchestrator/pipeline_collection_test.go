@@ -493,6 +493,68 @@ func TestPipelineSegmentLogReaderReassignsHeldWhenLocalMissing(t *testing.T) {
 	}
 }
 
+// TestPipelineSegmentLogReaderSkipsSupersededSegment (R4): a segment whose
+// records live in an RF-replicated chunk is superseded — Roll must not assign
+// it for pull even though this node holds neither the segment nor the chunk.
+// The node catches up at the chunk level, not by re-pulling purged transport.
+func TestPipelineSegmentLogReaderSkipsSupersededSegment(t *testing.T) {
+	fsm := vaultctlfsm.New()
+	applier := &fsmApplier{fsm: fsm}
+	vaultID := glid.New()
+	segID := glid.New()
+	chunkID := chunk.NewChunkID()
+	now := time.Unix(0, 1_700_000_000_000).UTC()
+
+	mustApply := func(data []byte) {
+		t.Helper()
+		if err := applier.Apply(data); err != nil {
+			t.Fatalf("apply: %v", err)
+		}
+	}
+	mustApply(vaultctlfsm.MarshalPublishCompletedSegment(vaultctlfsm.CompletedSegmentEntry{
+		SegmentID: segID, RecordCount: 1, OriginNodeID: testOriginNode,
+	}))
+	mustApply(vaultctlfsm.MarshalOpenChunkManifest(chunkID, now))
+	mustApply(vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
+		SegmentID: segID, FirstRecordNumber: 0, LastRecordNumber: 0, SliceBytes: 1, RefAddedAt: now,
+	}))
+	mustApply(vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, now.Add(time.Minute)))
+	mustApply(vaultctlfsm.MarshalSealChunk(chunkID, now.Add(time.Minute), 1, 1, now, now, now, true, now.Add(time.Minute)))
+	for _, node := range []string{"chunk-holder-a", "chunk-holder-b"} {
+		data, err := vaultctlfsm.MarshalAckChunkHolders([]chunk.ChunkID{chunkID}, node)
+		if err != nil {
+			t.Fatalf("marshal ack chunk holders: %v", err)
+		}
+		mustApply(data)
+	}
+
+	// placement of 3 → RF threshold min(2,3)=2, reached by the two chunk holders.
+	placement := func() []string { return []string{"chunk-holder-a", "chunk-holder-b", testHomeNode} }
+	reader := &segmentLogReader{
+		lookup:      func() *vaultctlfsm.FSM { return fsm },
+		localNodeID: testHomeNode,
+		placement:   placement,
+	}
+	assigned, err := reader.Roll(context.Background(), vaultID)
+	if err != nil {
+		t.Fatalf("Roll: %v", err)
+	}
+	if len(assigned) != 0 {
+		t.Fatalf("Roll = %+v, want empty (superseded segment must not be pulled)", assigned)
+	}
+
+	// Without placement wiring the skip is disabled and the unheld segment is
+	// assigned as before — proves the skip is what suppresses it.
+	reader.placement = nil
+	assigned, err = reader.Roll(context.Background(), vaultID)
+	if err != nil {
+		t.Fatalf("Roll (no placement): %v", err)
+	}
+	if len(assigned) != 1 || assigned[0].SegmentID != segID {
+		t.Fatalf("Roll (no placement) = %+v, want the segment assigned", assigned)
+	}
+}
+
 // TestPipelineSegmentLogReaderReassignsWhenSealedManifestNeedsBytes: when the
 // planner fully consumed a segment but GLCB build still references it in the
 // sealed-pending manifest, Roll must re-assign the segment for re-pull even

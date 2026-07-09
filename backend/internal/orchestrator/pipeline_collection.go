@@ -37,6 +37,12 @@ type segmentLogReader struct {
 	lookup      func() *vaultctlfsm.FSM
 	localNodeID string
 	vaultRoot   string
+	// placement returns the vault's placement node IDs, for the RF supersession
+	// threshold. A waking node must not pull a segment whose records already
+	// live in an RF-replicated chunk — it catches up at the chunk level, not by
+	// re-pulling superseded transport (design-notes R4). nil disables the skip
+	// (single-node / tests with no placement wiring).
+	placement func() []string
 }
 
 var _ collection.LogReader = (*segmentLogReader)(nil)
@@ -48,15 +54,37 @@ func (r *segmentLogReader) fsm() *vaultctlfsm.FSM {
 	return nil
 }
 
+// supersessionThreshold is the chunk-holder count that supersedes a segment:
+// RF = min(2, placement size), the same floor the chunking planner uses. Zero
+// disables the differential skip (no placement wiring — single-node/tests).
+func (r *segmentLogReader) supersessionThreshold() int {
+	if r.placement == nil {
+		return 0
+	}
+	n := len(r.placement())
+	if n <= 0 {
+		return 0
+	}
+	return min(2, n)
+}
+
 func (r *segmentLogReader) Roll(_ context.Context, vaultID glid.GLID) ([]collection.AssignedSegment, error) {
 	fsm := r.fsm()
 	if fsm == nil {
 		return nil, errors.New("vault-ctl FSM required")
 	}
 	entries := fsm.ListCompletedSegments()
+	minChunkHolders := r.supersessionThreshold()
 	var out []collection.AssignedSegment
 	for i := range entries {
 		e := &entries[i]
+		// Differential catch-up (R4): a segment whose records already live in an
+		// RF-replicated chunk is superseded — do not pull the raw transport; the
+		// chunk arrives via chunk replication. Skips regardless of local holder
+		// state, so a waking node never chases a purged segment.
+		if minChunkHolders > 0 && fsm.SegmentSuperseded(e.SegmentID, minChunkHolders) {
+			continue
+		}
 		held := slices.Contains(e.Holders, r.localNodeID)
 		if held && !segmentNeedsLocalRepull(fsm, *e, r.vaultRoot) {
 			continue
