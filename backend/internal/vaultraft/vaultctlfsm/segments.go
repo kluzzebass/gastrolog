@@ -112,6 +112,7 @@ func (f *FSM) GetCompletedSegment(id glid.GLID) *CompletedSegmentEntry {
 // ListCompletedSegments returns all completed segment entries sorted by
 // FirstIngestTS ascending, then SegmentID.
 func (f *FSM) ListCompletedSegments() []CompletedSegmentEntry {
+	f.completedListScans.Add(1)
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	out := make([]CompletedSegmentEntry, 0, len(f.completedSegmentOrder))
@@ -121,6 +122,13 @@ func (f *FSM) ListCompletedSegments() []CompletedSegmentEntry {
 		}
 	}
 	return out
+}
+
+// CompletedListScans returns the cumulative number of ListCompletedSegments
+// calls — one full O(N) registry walk each. Used to observe/guard scan
+// frequency (gastrolog-36ba70).
+func (f *FSM) CompletedListScans() uint64 {
+	return f.completedListScans.Load()
 }
 
 func compareCompletedSegmentOrder(a, b CompletedSegmentEntry) int {

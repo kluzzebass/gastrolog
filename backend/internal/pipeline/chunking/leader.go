@@ -99,39 +99,102 @@ func (v *vaultChunking) now() time.Time {
 // cronDue=true forces a cron rotation trigger for a non-empty open manifest;
 // the planner no-ops for non-leaders regardless.
 func (v *vaultChunking) planOnce(ctx context.Context, cronDue bool) error {
-	return v.planLeaderStep(ctx, cronDue, 1)
+	return v.planLeaderStep(ctx, cronDue, 1, nil)
+}
+
+// plannerPass holds the registry-derived planner inputs for one plan pass,
+// computed ONCE (one O(N) scan of the completed-segment registry) instead of
+// once per step. The eligible set is fixed for the pass; resume advances from
+// the planner's OWN committed decisions, so no step re-scans the FSM registry.
+// Segments that become eligible mid-pass (replication catching up, fresh
+// publishes) are picked up on the next pass — catch-up is iterative. This is
+// what breaks the O(N^2) plan pass (budget ∝ N steps × O(N) scan each) that let
+// completed/ accumulate under sustained load (gastrolog-36ba70 / gastrolog-423tpt;
+// hot paths named in gastrolog-2m0f75).
+type plannerPass struct {
+	eligible   []vaultctlfsm.CompletedSegmentEntry
+	resume     map[glid.GLID]uint32
+	refAddedAt time.Time
+}
+
+// newPlannerPass snapshots the registry once and derives the eligible set,
+// resume cursors (every registered segment, so a fresh manifest never re-chunks
+// consumed records), and the ref-added-at stamp.
+func (v *vaultChunking) newPlannerPass() *plannerPass {
+	entries := v.fsm().ListCompletedSegments()
+	eligible := v.eligibleFromEntries(entries)
+	resume := make(map[glid.GLID]uint32, len(entries))
+	for _, entry := range entries {
+		if n, ok := v.fsm().ResumeRecordNumber(entry.SegmentID); ok {
+			resume[entry.SegmentID] = n
+		}
+	}
+	return &plannerPass{
+		eligible:   eligible,
+		resume:     resume,
+		refAddedAt: plannerRefAddedAtForEligible(entries, eligible),
+	}
+}
+
+// manifestFromOpen builds the planner manifest snapshot from the open chunk.
+// Cheap (O(open refs)); read fresh each step so it reflects prior applies.
+func manifestFromOpen(open *vaultctlfsm.OpenChunkManifest) ManifestSnapshot {
+	if open == nil {
+		return ManifestSnapshot{}
+	}
+	manifest := ManifestSnapshot{
+		OpenedAt:     open.OpenedAt,
+		TotalRecords: open.TotalRecords,
+		TotalBytes:   open.TotalBytes,
+		Bounds:       open.Bounds,
+		Refs:         make([]ManifestRef, len(open.Refs)),
+	}
+	for i, ref := range open.Refs {
+		manifest.Refs[i] = ManifestRef{
+			SegmentID:         ref.SegmentID,
+			FirstRecordNumber: ref.FirstRecordNumber,
+			LastRecordNumber:  ref.LastRecordNumber,
+		}
+	}
+	return manifest
 }
 
 // planLeaderStep proposes open/seal/ref vault-ctl commands. maxRefs caps how
 // many segment refs one apply may carry (1 for planOnce, larger for catch-up).
-func (v *vaultChunking) planLeaderStep(ctx context.Context, cronDue bool, maxRefs int) error {
+func (v *vaultChunking) planLeaderStep(ctx context.Context, cronDue bool, maxRefs int, pass *plannerPass) error {
 	if !v.cfg.IsLeader() || v.applier() == nil {
 		return nil
 	}
 
 	v.planMu.Lock()
 
+	// Standalone callers (planOnce, the sweep) pass nil and get a fresh pass;
+	// the catch-up loop threads ONE pass across its steps to avoid re-scanning
+	// the registry every step.
+	if pass == nil {
+		pass = v.newPlannerPass()
+		v.pruneSegmentIndexCache(pass.eligible)
+	}
 	open := v.fsm().OpenChunk()
-	eligible := v.eligibleRegistrySegments()
-	v.pruneSegmentIndexCache(eligible)
 
-	if open == nil && len(eligible) == 0 {
+	if open == nil && len(pass.eligible) == 0 {
 		v.planMu.Unlock()
 		return nil
 	}
 
-	manifest, resume := plannerStateFromFSM(v.fsm(), open)
-	refAddedAt := plannerRefAddedAtForEligible(v.fsm().ListCompletedSegments(), eligible)
+	manifest := manifestFromOpen(open)
+	resume := pass.resume
+	refAddedAt := pass.refAddedAt
 	evalNow := v.now()
 
 	if open == nil {
-		wire, ready := v.proposeOpenManifestWire(manifest, resume, eligible, refAddedAt, evalNow, cronDue)
+		wire, ready := v.proposeOpenManifestWire(manifest, resume, pass.eligible, refAddedAt, evalNow, cronDue)
 		v.planMu.Unlock()
 		if !ready {
 			// Non-blocking: collection's pass completion re-wakes this
 			// worker (OnPassComplete). Blocking on a full pass here stalled
 			// planning and sealing under backlog (gastrolog-1b51yf).
-			if v.cfg.Collector != nil && len(eligible) > 0 {
+			if v.cfg.Collector != nil && len(pass.eligible) > 0 {
 				v.cfg.Collector.Nudge()
 			}
 			return nil
@@ -144,7 +207,7 @@ func (v *vaultChunking) planLeaderStep(ctx context.Context, cronDue bool, maxRef
 		return v.applySealOpenManifest(open.ChunkID, evalNow)
 	}
 
-	batch := v.collectRefBatch(manifest, resume, eligible, refAddedAt, evalNow, cronDue, maxRefs)
+	batch := v.collectRefBatch(manifest, resume, pass.eligible, refAddedAt, evalNow, cronDue, maxRefs)
 	v.planMu.Unlock()
 
 	if len(batch.refs) > 0 {
@@ -152,7 +215,15 @@ func (v *vaultChunking) planLeaderStep(ctx context.Context, cronDue bool, maxRef
 		for i, ref := range batch.refs {
 			refs[i] = openChunkSegmentRefFromDecision(ref)
 		}
-		return v.applier().Apply(vaultctlfsm.MarshalAddOpenChunkSegmentRefs(open.ChunkID, refs))
+		if err := v.applier().Apply(vaultctlfsm.MarshalAddOpenChunkSegmentRefs(open.ChunkID, refs)); err != nil {
+			return err
+		}
+		// Advance the threaded resume cursor from our OWN committed decisions so
+		// the next step needs no fresh registry scan (the O(N^2) breaker).
+		for _, ref := range batch.refs {
+			pass.resume[ref.SegmentID] = ref.LastRecordNumber + 1
+		}
+		return nil
 	}
 	if batch.rotate {
 		return v.applySealOpenManifest(open.ChunkID, evalNow)
@@ -161,7 +232,7 @@ func (v *vaultChunking) planLeaderStep(ctx context.Context, cronDue bool, maxRef
 		if err := discardStalledEmptyOpen(open, manifest, v.cfg.Policy, evalNow, v.applier()); err != nil {
 			return err
 		}
-		if v.cfg.Collector != nil && len(eligible) > 0 {
+		if v.cfg.Collector != nil && len(pass.eligible) > 0 {
 			v.cfg.Collector.Nudge()
 		}
 	}
@@ -290,7 +361,11 @@ func (v *vaultChunking) planCatchUp(ctx context.Context) error {
 	if !v.cfg.IsLeader() || v.applier() == nil {
 		return nil
 	}
-	budget := catchUpBudget(len(v.eligibleRegistrySegments()), v.cfg.Policy)
+	pass := v.newPlannerPass()
+	v.planMu.Lock()
+	v.pruneSegmentIndexCache(pass.eligible)
+	v.planMu.Unlock()
+	budget := catchUpBudget(len(pass.eligible), v.cfg.Policy)
 	for range budget {
 		open := v.fsm().OpenChunk()
 		refs := 0
@@ -301,7 +376,7 @@ func (v *vaultChunking) planCatchUp(ctx context.Context) error {
 		}
 		hadOpen := open != nil
 
-		if err := v.planLeaderStep(ctx, false, refApplyBatchSize(v.cfg.Policy)); err != nil {
+		if err := v.planLeaderStep(ctx, false, refApplyBatchSize(v.cfg.Policy), pass); err != nil {
 			return err
 		}
 
@@ -313,10 +388,11 @@ func (v *vaultChunking) planCatchUp(ctx context.Context) error {
 			newTotal = open.TotalRecords
 		}
 		if !hadOpen && open == nil {
-			if len(v.eligibleRegistrySegments()) == 0 {
-				return nil
-			}
-			continue
+			// The step could not open a manifest from the fixed eligible set —
+			// nothing plannable remains this pass. Return rather than re-scan
+			// and spin; the next worker wake starts a fresh pass and picks up
+			// any segment that became eligible since.
+			return nil
 		}
 		if !hadOpen && open != nil {
 			continue
@@ -369,7 +445,14 @@ func (v *vaultChunking) closeSegmentIndexCache() {
 // eligibleRegistrySegments returns completed-segment registry entries that still
 // have records to chunk. Does not open on-disk indexes.
 func (v *vaultChunking) eligibleRegistrySegments() []vaultctlfsm.CompletedSegmentEntry {
-	entries := v.fsm().ListCompletedSegments()
+	return v.eligibleFromEntries(v.fsm().ListCompletedSegments())
+}
+
+// eligibleFromEntries filters a registry snapshot to segments that still have
+// records to chunk and are replicated widely enough to plan. Split from
+// eligibleRegistrySegments so a pass can filter its single snapshot without a
+// second ListCompletedSegments scan.
+func (v *vaultChunking) eligibleFromEntries(entries []vaultctlfsm.CompletedSegmentEntry) []vaultctlfsm.CompletedSegmentEntry {
 	minHolders := v.plannerMinHolders()
 	now := v.now()
 	out := make([]vaultctlfsm.CompletedSegmentEntry, 0, len(entries))
@@ -537,38 +620,6 @@ func (v *vaultChunking) lazyPickSegment(manifest ManifestSnapshot, resume map[gl
 		}
 	}
 	return bestView, found
-}
-
-func plannerStateFromFSM(fsm *vaultctlfsm.FSM, open *vaultctlfsm.OpenChunkManifest) (ManifestSnapshot, map[glid.GLID]uint32) {
-	// Resume positions must cover EVERY registered segment, not just refs in
-	// the current open manifest: segmentResume persists across manifests, and
-	// a freshly opened manifest (open == nil after a seal) would otherwise
-	// re-chunk records that previous sealed chunks already consumed —
-	// duplicating data in every subsequent chunk.
-	resume := make(map[glid.GLID]uint32)
-	for _, entry := range fsm.ListCompletedSegments() {
-		if n, ok := fsm.ResumeRecordNumber(entry.SegmentID); ok {
-			resume[entry.SegmentID] = n
-		}
-	}
-	if open == nil {
-		return ManifestSnapshot{}, resume
-	}
-	manifest := ManifestSnapshot{
-		OpenedAt:     open.OpenedAt,
-		TotalRecords: open.TotalRecords,
-		TotalBytes:   open.TotalBytes,
-		Bounds:       open.Bounds,
-		Refs:         make([]ManifestRef, len(open.Refs)),
-	}
-	for i, ref := range open.Refs {
-		manifest.Refs[i] = ManifestRef{
-			SegmentID:         ref.SegmentID,
-			FirstRecordNumber: ref.FirstRecordNumber,
-			LastRecordNumber:  ref.LastRecordNumber,
-		}
-	}
-	return manifest, resume
 }
 
 func plannerRefAddedAtForEligible(entries []vaultctlfsm.CompletedSegmentEntry, eligible []vaultctlfsm.CompletedSegmentEntry) time.Time {

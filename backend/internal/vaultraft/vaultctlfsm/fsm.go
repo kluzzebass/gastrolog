@@ -7,6 +7,7 @@ import (
 	"maps"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
@@ -240,6 +241,13 @@ func (e *ManifestEntry) ToChunkMeta() chunk.ChunkMeta {
 type FSM struct {
 	mu       sync.RWMutex
 	chunks   map[chunk.ChunkID]*ManifestEntry
+
+	// completedListScans counts ListCompletedSegments calls — a full O(N)
+	// registry walk. The chunking-leader plan pass regressed to O(N^2) by
+	// re-scanning per step (gastrolog-36ba70); this makes scan frequency
+	// observable and gives the fix a regression guard.
+	completedListScans atomic.Uint64
+
 	ready    bool // true after first Apply or Restore
 	onDelete func(chunk.ChunkID)
 	onUpload func(ManifestEntry) // called after CmdUploadChunk applies (outside lock)
