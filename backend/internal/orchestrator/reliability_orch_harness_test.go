@@ -1,11 +1,13 @@
 package orchestrator_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime/pprof"
 	"slices"
 	"testing"
 	"time"
@@ -167,8 +169,13 @@ func withMatchAllRoute(vaultIdx int) orchRelOption {
 }
 
 const (
-	orchHarnessReadyWait = 8 * time.Second
-	orchHarnessConvWait  = 60 * time.Second
+	// All harness waits for asynchronous cluster convergence — readiness,
+	// sealing, replication — share one coarse "genuinely stuck" backstop
+	// instead of budgets calibrated to how fast a step "should" complete. A
+	// calibrated readiness budget (the old 8s) raced vault-ctl leader election
+	// and lost under full-suite CPU contention. This backstop only trips on a
+	// real hang; a healthy-but-slow converge never loses a race against it.
+	orchHarnessConvWait = 60 * time.Second
 	// Vault-ctl groups use longer Raft election timeouts than cluster-ctl;
 	// post-failover leader election can exceed the old 5s budget.
 	orchHarnessLeaderWait = 15 * time.Second
@@ -601,7 +608,7 @@ func (h *orchRelHarness) slowPeer(id string, d time.Duration) {
 // ingest RPCs use — regressing it is what gastrolog-5j6eu fixed.
 func (h *orchRelHarness) waitForAllReady() {
 	h.t.Helper()
-	deadline := time.Now().Add(orchHarnessReadyWait)
+	deadline := time.Now().Add(orchHarnessConvWait)
 	var notReady []string
 	for time.Now().Before(deadline) {
 		notReady = notReady[:0]
@@ -621,7 +628,13 @@ func (h *orchRelHarness) waitForAllReady() {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	h.t.Fatalf("vaults not ready after %s on: %v", orchHarnessReadyWait, notReady)
+	// Reaching the coarse backstop means a genuine hang, not a slow converge.
+	// The goroutine profile distinguishes "still electing" from "wedged" — the
+	// same diagnostic waitSealedRecordsAtLeast dumps on timeout.
+	var stacks bytes.Buffer
+	_ = pprof.Lookup("goroutine").WriteTo(&stacks, 1)
+	h.t.Logf("goroutine profile at readiness deadline:\n%s", stacks.String())
+	h.t.Fatalf("vaults not ready after %s on: %v", orchHarnessConvWait, notReady)
 }
 
 // appendOnLeaderForVault appends to a specific vault's vault leader (the
