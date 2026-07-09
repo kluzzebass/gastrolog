@@ -252,6 +252,19 @@ R3. **The release predicate must use all three signals in 28, not just the first
     give-up bound for a segment no home can collect; `holders ⊇ homes` is a fast path,
     not the sole gate. This is the fix for the completed/ leak.
 
+    **Refines 39's "replicated to their home set."** Taken literally that re-pins the
+    dead node one layer down: if segment purge waits for the *chunk* to reach every
+    home, a dead home stalls it exactly as the segment gate does. The purge threshold
+    is **RF, not home-set** — a segment is superseded once every chunk holding its
+    records is sealed and replicated to `min(2, placement)` holders (the same
+    `plannerMinHolders` floor eligibility already uses), reached among the *live*
+    homes. The dead home then catches up at the **chunk** level, whose reconcile (30)
+    tolerates a long absence, not the segment's seconds-to-minutes transport window.
+    The chunk's *desired* holder set is still all homes; only the segment-purge
+    *trigger* is the lower RF threshold. Mechanically this needs a small persistent
+    segment→containing-chunk-IDs map on the vault-ctl FSM (the open/sealed manifest
+    linkage is dropped once a home builds and pops the manifest), cleared on release.
+
 R4. **Catch-up is state-dependent and differential, never event-replay (reaffirms
     29/30; settles chunking-design open Qs #1/#2).** A missing node must never block
     segment replication or chunk construction among the live homes — segments are
