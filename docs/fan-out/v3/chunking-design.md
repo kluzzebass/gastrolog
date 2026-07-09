@@ -356,11 +356,19 @@ state on a timer. Use FSM apply callbacks (`SetOnPublishCompletedSegment`,
 
 ## Open questions ( chew on these )
 
-1. **Eligibility snapshot** — when adding refs, must every required home already hold
-   the segment, or only “some holder has it” with catch-up before seal?
+1. **Eligibility snapshot** — ~~when adding refs, must every required home already hold
+   the segment, or only “some holder has it” with catch-up before seal?~~ **SETTLED
+   (2026-07):** "some holder has it" + catch-up. A missing home must never block the
+   plan; segments are transport (design-notes 29), so eligibility is holder-count ≥
+   build-need, not all-homes. See design-notes "Revised by lived experience" R4.
 
-2. **Seal / purge predicate** — all homes built vs replication RF vs best-effort
-   with available nodes; when can origin wipe segments?
+2. **Seal / purge predicate** — ~~all homes built vs replication RF vs best-effort
+   with available nodes; when can origin wipe segments?~~ **SETTLED (2026-07):**
+   chunk-replication supersession, not all-homes. Purge once the segment's records
+   survive in a replicated chunk (design-notes 39), with retention-elapsed as the
+   give-up bound; `holders ⊇ homes` is a fast path only. The shipped code gated on
+   all-holders and pinned segments on a dead node (the completed/ leak). See
+   design-notes R3.
 
 3. **Ref granularity on Raft** — whole segment vs partial span per command; batch size.
 

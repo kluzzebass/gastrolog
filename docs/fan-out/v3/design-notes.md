@@ -203,6 +203,68 @@ contrast with any earlier design. It states only what V3 *is*, never what it
     purged segment — it gets those records via chunk replication, not a segment
     re-pull.
 
+### Revised by lived experience (implementation + soak, 2026-07)
+
+The leans above were written before the pipeline ran under sustained multi-node load.
+Running it revised four of them. Kept here beside the originals — the gap between what
+was predicted and what was observed is itself design knowledge.
+
+R1. **The first choke point is chunk *build*, not the cross-node paths (revises 35).**
+    Lean 35 predicted Raft commit throughput and segment-transfer bandwidth as the
+    first limits. In the soak neither bound first: the limit is the per-home build
+    chain — k-way merge + GLCB encode + the serial seal→release→purge round-trips
+    through vault-ctl. It sustained on the order of tens of segments per minute per
+    home against ingest of tens of thousands of records per second. So the head/
+    and completed/ backlog is a **steady operating mode, not a transient** — the
+    opposite of what "the record is already durable, so lag only delays chunking"
+    assumed about magnitude.
+
+R2. **The backlog needs its own backpressure; the disk guard is only the backstop
+    (revises 35).** With build as the bottleneck, "bounded by retention" means the
+    backlog can grow to (retention period × ingest rate) before anything trims it —
+    in practice it fills the disk, and only then does the disk guard backpressure at
+    its floor. That is not a bound, it is a cliff: it engages *at* the limit, when the
+    disk is already full of fragile un-chunked segments and the headroom chunks and
+    the WAL also need is gone. The cardinal rule is explicit that every internal limit
+    needs a backpressure path that engages **before** the limit forces a drop — so
+    disk-guard-at-floor is the *backstop*, not the operating bound. The operating
+    bound is a backpressure keyed on the **backlog itself** (depth and/or age),
+    engaging as a gradient well before disk pressure, throttling ingest down to the
+    sustainable build rate. This is cardinal-rule-legal by construction — it costs
+    throughput, never loss. **R3 is its prerequisite:** once release is anchored on
+    records-chunked, backlog depth/age is an honest measure of the build-vs-ingest
+    rate mismatch, so backpressuring on it can never be a single dead holder halting
+    cluster-wide ingest — that failure mode is removed at the anchor, not papered over
+    here. **Remaining sub-question:** the signal axis — age (how far chunking has
+    fallen behind, disk-size-independent), depth (bytes/segments, the direct disk
+    lever), or both (age-primary with a depth ceiling). Global/adjustable to start.
+
+R3. **The release predicate must use all three signals in 28, not just the first
+    (reaffirms 28/39; the code drifted).** Lean 28 already decided the release signal
+    as `holders ⊇ homes` **or** records chunked **or** retention elapsed, and 39 made
+    the load-bearing one explicit: a segment is superseded once its records survive in
+    a replicated chunk. The implementation shipped only the first — release gated on
+    every required home ack'ing the raw segment (`holdersCover`). The genuine necessity
+    it preserved is 39's ordering (never purge before durable); the drift is the
+    *anchor*. Gating on all-holders pins a segment forever on a dead holder, because a
+    dead node never acks — the deadlock R2 warns about. Reconcile to 28/39: the primary
+    signal is **records-chunked** (the 39 supersession), with retention-elapsed as the
+    give-up bound for a segment no home can collect; `holders ⊇ homes` is a fast path,
+    not the sole gate. This is the fix for the completed/ leak.
+
+R4. **Catch-up is state-dependent and differential, never event-replay (reaffirms
+    29/30; settles chunking-design open Qs #1/#2).** A missing node must never block
+    segment replication or chunk construction among the live homes — segments are
+    transport (29), so a home that can't be reached is a fast-path miss, not a barrier.
+    A node waking from dormancy chooses its catch-up by current data state: replicate
+    the **segments** if they still exist, the **chunks** if those segments were already
+    superseded. And it reconciles a **differential** — desired end-state per the
+    current FSM vs. what it already holds — rather than replaying every FSM update it
+    missed while down; a naive replay would chase segments long since purged. FSM
+    events are triggers to re-evaluate the differential, not a command log to execute.
+    This resolves chunking-design #1 (eligibility is "some holder + catch-up", not
+    all-homes) and #2 (the seal/purge predicate is chunk-replication, not all-homes).
+
 ## Phases & managers
 
 The write path is a chain of phases, each separated from the next by a queue. The
