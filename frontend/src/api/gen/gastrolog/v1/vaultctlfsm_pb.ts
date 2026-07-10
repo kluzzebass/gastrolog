@@ -1391,6 +1391,53 @@ export class SegmentResumeRecordNumber extends Message<SegmentResumeRecordNumber
 }
 
 /**
+ * SegmentChunkIDs maps a completed segment to the chunk IDs whose manifests
+ * referenced its records. Persisted so SegmentSuperseded survives snapshot
+ * restore and decides release from chunk replication after the manifest pops.
+ *
+ * @generated from message gastrolog.v1.SegmentChunkIDs
+ */
+export class SegmentChunkIDs extends Message<SegmentChunkIDs> {
+  /**
+   * @generated from field: bytes segment_id = 1;
+   */
+  segmentId = new Uint8Array(0);
+
+  /**
+   * @generated from field: repeated bytes chunk_ids = 2;
+   */
+  chunkIds: Uint8Array[] = [];
+
+  constructor(data?: PartialMessage<SegmentChunkIDs>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.SegmentChunkIDs";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "segment_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "chunk_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SegmentChunkIDs {
+    return new SegmentChunkIDs().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): SegmentChunkIDs {
+    return new SegmentChunkIDs().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): SegmentChunkIDs {
+    return new SegmentChunkIDs().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: SegmentChunkIDs | PlainMessage<SegmentChunkIDs> | undefined, b: SegmentChunkIDs | PlainMessage<SegmentChunkIDs> | undefined): boolean {
+    return proto3.util.equals(SegmentChunkIDs, a, b);
+  }
+}
+
+/**
  * OpenChunkManifestCommand opens a new manifest-backed active chunk.
  *
  * @generated from message gastrolog.v1.OpenChunkManifestCommand
@@ -2301,6 +2348,14 @@ export class VaultCtlSnapshot extends Message<VaultCtlSnapshot> {
    */
   releasedSegmentIds: Uint8Array[] = [];
 
+  /**
+   * Segment → containing chunk IDs, for release-by-chunk-replication after
+   * the manifest pops at build time.
+   *
+   * @generated from field: repeated gastrolog.v1.SegmentChunkIDs segment_chunks = 9;
+   */
+  segmentChunks: SegmentChunkIDs[] = [];
+
   constructor(data?: PartialMessage<VaultCtlSnapshot>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2317,6 +2372,7 @@ export class VaultCtlSnapshot extends Message<VaultCtlSnapshot> {
     { no: 6, name: "sealed_manifests", kind: "message", T: OpenChunkManifestState, repeated: true },
     { no: 7, name: "segment_resume", kind: "message", T: SegmentResumeRecordNumber, repeated: true },
     { no: 8, name: "released_segment_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
+    { no: 9, name: "segment_chunks", kind: "message", T: SegmentChunkIDs, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultCtlSnapshot {

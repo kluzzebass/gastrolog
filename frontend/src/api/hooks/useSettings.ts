@@ -48,6 +48,7 @@ type ServiceTLS = {
 type ServiceCluster = {
   broadcastInterval?: string;
   heartbeatInterval?: string;
+  pipelineBacklogMaxBytes?: bigint;
 };
 
 export type PutServiceSettingsArgs = {

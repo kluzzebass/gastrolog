@@ -3109,6 +3109,17 @@ export class ClusterSettings extends Message<ClusterSettings> {
    */
   heartbeatInterval = "";
 
+  /**
+   * Per-vault pipeline backlog budget in bytes (unreleased completed segments
+   * in the vault-ctl registry). When a vault's backlog reaches the budget,
+   * ingest admission for that vault is refused (retryable backpressure) until
+   * chunking drains it below the budget. The operating bound that engages
+   * BEFORE disk pressure; the disk guard remains the backstop. 0 = unbounded.
+   *
+   * @generated from field: uint64 pipeline_backlog_max_bytes = 3;
+   */
+  pipelineBacklogMaxBytes = protoInt64.zero;
+
   constructor(data?: PartialMessage<ClusterSettings>) {
     super();
     proto3.util.initPartial(data, this);
@@ -3119,6 +3130,7 @@ export class ClusterSettings extends Message<ClusterSettings> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "broadcast_interval", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "heartbeat_interval", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "pipeline_backlog_max_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ClusterSettings {
@@ -3628,6 +3640,11 @@ export class PutClusterSettings extends Message<PutClusterSettings> {
    */
   heartbeatInterval?: string;
 
+  /**
+   * @generated from field: optional uint64 pipeline_backlog_max_bytes = 3;
+   */
+  pipelineBacklogMaxBytes?: bigint;
+
   constructor(data?: PartialMessage<PutClusterSettings>) {
     super();
     proto3.util.initPartial(data, this);
@@ -3638,6 +3655,7 @@ export class PutClusterSettings extends Message<PutClusterSettings> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "broadcast_interval", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
     { no: 2, name: "heartbeat_interval", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
+    { no: 3, name: "pipeline_backlog_max_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */, opt: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutClusterSettings {

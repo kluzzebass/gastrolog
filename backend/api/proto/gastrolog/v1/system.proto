@@ -618,6 +618,12 @@ message StaticLookupRow {
 message ClusterSettings {
   string broadcast_interval = 1; // Go duration string, e.g. "5s". Default: "5s".
   string heartbeat_interval = 2; // Go duration string, e.g. "1s". Default: "1s". Lightweight liveness ping; PeerState TTL is 4× this.
+  // Per-vault pipeline backlog budget in bytes (unreleased completed segments
+  // in the vault-ctl registry). When a vault's backlog reaches the budget,
+  // ingest admission for that vault is refused (retryable backpressure) until
+  // chunking drains it below the budget. The operating bound that engages
+  // BEFORE disk pressure; the disk guard remains the backstop. 0 = unbounded.
+  uint64 pipeline_backlog_max_bytes = 3;
 }
 
 message GetSettingsResponse {
@@ -685,6 +691,7 @@ message PutLookupSettings {
 message PutClusterSettings {
   optional string broadcast_interval = 1;
   optional string heartbeat_interval = 2;
+  optional uint64 pipeline_backlog_max_bytes = 3;
 }
 
 message PutServiceSettingsRequest {

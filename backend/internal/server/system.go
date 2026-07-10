@@ -261,8 +261,9 @@ func (s *SystemServer) buildFullSettingsResponse(ctx context.Context, includeSec
 		},
 		Maxmind: mm,
 		Cluster: &apiv1.ClusterSettings{
-			BroadcastInterval: ss.Cluster.BroadcastInterval,
-			HeartbeatInterval: ss.Cluster.HeartbeatInterval,
+			BroadcastInterval:       ss.Cluster.BroadcastInterval,
+			HeartbeatInterval:       ss.Cluster.HeartbeatInterval,
+			PipelineBacklogMaxBytes: ss.Cluster.PipelineBacklogMaxBytes,
 		},
 		SetupWizardDismissed: func() bool { v, _ := s.sysStore.GetSetupWizardDismissed(ctx); return v }(),
 		NodeId:               []byte(s.localNodeID),
@@ -1252,6 +1253,9 @@ func mergeCluster(c *apiv1.PutClusterSettings, cluster *system.ClusterConfig) *c
 			return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid heartbeat_interval: %w", err))
 		}
 		cluster.HeartbeatInterval = *c.HeartbeatInterval
+	}
+	if c.PipelineBacklogMaxBytes != nil {
+		cluster.PipelineBacklogMaxBytes = *c.PipelineBacklogMaxBytes
 	}
 	return nil
 }

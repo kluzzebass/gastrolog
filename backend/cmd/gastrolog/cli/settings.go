@@ -74,6 +74,11 @@ var settingsGroups = []settingsGroup{
 		{flag: "http-redirect", label: "http_to_https_redirect", getKey: "http_to_https_redirect", setKey: "http_to_https_redirect", desc: "Redirect HTTP to HTTPS"},
 		{flag: "https-port", label: "https_port", getKey: "https_port", setKey: "https_port", desc: "HTTPS port (empty = HTTP port + 1)"},
 	}},
+	{name: "cluster", short: "Configure cluster behavior", putRoot: "service", getPath: []string{"cluster"}, setPath: []string{"cluster"}, fields: []settingsField{
+		{flag: "broadcast-interval", label: "broadcast_interval", getKey: "broadcast_interval", setKey: "broadcast_interval", desc: "Stats broadcast interval (e.g. \"5s\")"},
+		{flag: "heartbeat-interval", label: "heartbeat_interval", getKey: "heartbeat_interval", setKey: "heartbeat_interval", desc: "Liveness heartbeat interval (e.g. \"1s\")"},
+		{flag: "pipeline-backlog-max-bytes", label: "pipeline_backlog_max_bytes", getKey: "pipeline_backlog_max_bytes", setKey: "pipeline_backlog_max_bytes", desc: "Per-vault pipeline backlog budget in bytes; admission for a vault is refused at the budget until chunking drains it (0 = unbounded)"},
+	}},
 	{name: "maxmind", short: "Configure MaxMind database downloads", putRoot: "maxmind", getPath: []string{"maxmind"}, setPath: []string{"maxmind"}, fields: []settingsField{
 		{flag: "auto-download", label: "auto_download", getKey: "auto_download", setKey: "auto_download", desc: "Auto-download MaxMind databases"},
 		{flag: "account-id", label: "account_id", setKey: "account_id", desc: "MaxMind account ID (write-only)"},
@@ -95,6 +100,8 @@ func newSchedulerCmd() *cobra.Command { return newGroupCmd("scheduler") }
 func newTLSCmd() *cobra.Command       { return newGroupCmd("tls") }
 
 func newMaxMindCmd() *cobra.Command { return newGroupCmd("maxmind") }
+
+func newClusterSettingsCmd() *cobra.Command { return newGroupCmd("cluster") }
 
 func putRequestDescriptor(putRoot string) protoreflect.MessageDescriptor {
 	switch putRoot {

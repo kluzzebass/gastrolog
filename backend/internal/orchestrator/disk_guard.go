@@ -111,6 +111,17 @@ type diskGuard struct {
 	// plus pipeline segment backlog); injectable for tests.
 	vaultFootprint func(glid.GLID) int64
 
+	// vaultBacklogBytes measures a vault's pipeline backlog: unreleased
+	// completed-segment bytes in the vault-ctl registry. FSM-replicated, so
+	// every node computes the same value — no peer broadcast needed (unlike
+	// disk state, which only the owning node can sample). Injected by the
+	// orchestrator; injectable for tests.
+	vaultBacklogBytes func(glid.GLID) int64
+	// backlogBudget is the cluster-global per-vault backlog budget
+	// (ClusterSettings.pipeline_backlog_max_bytes). 0 = unbounded. Refreshed
+	// each guard tick from server settings.
+	backlogBudget atomic.Uint64
+
 	mu          sync.Mutex
 	alarmRaised bool
 	// vaults holds per-vault guard state: each vault is evaluated against
@@ -137,6 +148,15 @@ type vaultDiskGuard struct {
 	maxSizeBytes    uint64
 	capped          atomic.Bool
 	sizeAlarmRaised bool
+
+	// Pipeline backlog budget (cap-and-refuse): unreleased registry segment
+	// bytes measured against the cluster-global backlogBudget. The OPERATING
+	// bound — engages well before disk pressure so the backlog is bounded by
+	// policy, not by the volume filling up (design-notes R2). Distinct from
+	// maxSizeBytes: the size budget bounds everything the vault RETAINS, the
+	// backlog budget bounds what chunking has not yet drained.
+	backlogCapped      atomic.Bool
+	backlogAlarmRaised bool
 }
 
 func newDiskGuardWithLogger(paths []string, logger *slog.Logger) *diskGuard {
@@ -238,6 +258,9 @@ func (g *diskGuard) retainVaultGuards(keep map[glid.GLID]bool, alerts AlertColle
 		if v.sizeAlarmRaised && alerts != nil {
 			alerts.Clear("vault-max-size:" + id.String())
 		}
+		if v.backlogAlarmRaised && alerts != nil {
+			alerts.Clear("pipeline-backlog:" + id.String())
+		}
 		delete(g.vaults, id)
 	}
 }
@@ -258,6 +281,15 @@ func (g *diskGuard) vaultSizeCapped(vaultID glid.GLID) bool {
 	v := g.vaults[vaultID]
 	g.mu.Unlock()
 	return v != nil && v.capped.Load()
+}
+
+// vaultBacklogCapped reports whether this vault's pipeline backlog has
+// reached the cluster-global budget. False for unknown vaults.
+func (g *diskGuard) vaultBacklogCapped(vaultID glid.GLID) bool {
+	g.mu.Lock()
+	v := g.vaults[vaultID]
+	g.mu.Unlock()
+	return v != nil && v.backlogCapped.Load()
 }
 
 // sizeCappedVaults lists the vaults currently at their max-size budget.
@@ -312,6 +344,86 @@ func (g *diskGuard) evaluateVaults(alerts AlertCollector) {
 			g.reconcileVaultSizeCap(id, v, used)
 			g.reconcileVaultSizeAlarm(alerts, id, v, used)
 		}
+		if budget := g.backlogBudget.Load(); budget > 0 && g.vaultBacklogBytes != nil {
+			used := footprintBytes(g.vaultBacklogBytes(id))
+			g.reconcileVaultBacklogCap(id, v, used, budget)
+			g.reconcileVaultBacklogAlarm(alerts, id, v, used, budget)
+		} else {
+			g.clearVaultBacklogState(alerts, id, v)
+		}
+	}
+}
+
+// reconcileVaultBacklogCap flips the backlog cap: refuse admission at the
+// budget, resume as soon as chunking drains the registry below it. Like the
+// size cap it is enforced at ADMISSION only — already-accepted records keep
+// draining through the pipeline (the backlog may overshoot modestly while
+// in-flight segments complete; they count toward the measure so admission
+// stays shut meanwhile). Pure state, no clocks: same registry ⇒ same verdict
+// on every node, every evaluation.
+func (g *diskGuard) reconcileVaultBacklogCap(id glid.GLID, v *vaultDiskGuard, used, budget uint64) {
+	switch {
+	case v.backlogCapped.Load() && used < budget:
+		v.backlogCapped.Store(false)
+		if g.logger != nil {
+			g.logger.Info("vault backlog budget released — admission resumed for vault",
+				"vault", id, "name", v.name,
+				"backlog", units.FormatBytesDisplay(int64(used)), "budget", units.FormatBytesDisplay(int64(budget))) //nolint:gosec // display only
+		}
+	case !v.backlogCapped.Load() && used >= budget:
+		v.backlogCapped.Store(true)
+		if g.logger != nil {
+			g.logger.Warn("vault backlog budget engaged — admission refused for vault until chunking drains the backlog",
+				"vault", id, "name", v.name,
+				"backlog", units.FormatBytesDisplay(int64(used)), "budget", units.FormatBytesDisplay(int64(budget))) //nolint:gosec // display only
+		}
+	}
+}
+
+func (g *diskGuard) reconcileVaultBacklogAlarm(alerts AlertCollector, id glid.GLID, v *vaultDiskGuard, used, budget uint64) {
+	if alerts == nil {
+		return
+	}
+	alertID := "pipeline-backlog:" + id.String()
+	approachAt := sizeApproachThreshold(budget)
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	switch {
+	case used >= approachAt:
+		severity := alert.Warning
+		msg := fmt.Sprintf(
+			"Vault %s pipeline backlog is approaching its budget: %s of %s. Chunking is not keeping pace with ingest — check chunking throughput, raise the budget, or reduce the ingest rate.",
+			v.name, units.FormatBytesDisplay(int64(used)), units.FormatBytesDisplay(int64(budget))) //nolint:gosec // display only
+		if v.backlogCapped.Load() {
+			severity = alert.Error
+			msg = fmt.Sprintf(
+				"Vault %s pipeline backlog is at its budget: %s of %s — new records for this vault are REFUSED until chunking drains the backlog. Other vaults are unaffected.",
+				v.name, units.FormatBytesDisplay(int64(used)), units.FormatBytesDisplay(int64(budget))) //nolint:gosec // display only
+		}
+		alerts.Set(alertID, severity, "storage", msg)
+		v.backlogAlarmRaised = true
+	case v.backlogAlarmRaised && used < approachAt-approachAt/10:
+		alerts.Clear(alertID)
+		v.backlogAlarmRaised = false
+	}
+}
+
+// clearVaultBacklogState releases a standing cap/alarm when the budget is
+// unset (0) — otherwise a vault capped under an old budget would refuse
+// admission forever after the operator disables the bound.
+func (g *diskGuard) clearVaultBacklogState(alerts AlertCollector, id glid.GLID, v *vaultDiskGuard) {
+	if v.backlogCapped.Load() {
+		v.backlogCapped.Store(false)
+		if g.logger != nil {
+			g.logger.Info("vault backlog budget disabled — admission resumed for vault", "vault", id, "name", v.name)
+		}
+	}
+	g.mu.Lock()
+	raised := v.backlogAlarmRaised
+	v.backlogAlarmRaised = false
+	g.mu.Unlock()
+	if raised && alerts != nil {
+		alerts.Clear("pipeline-backlog:" + id.String())
 	}
 }
 
@@ -556,6 +668,12 @@ var ErrVaultDiskProtect = errors.New("vault's volume is out of disk space: admis
 // retryable backpressure until retention or releases drain below the budget.
 var ErrVaultMaxSize = errors.New("vault is at its size budget: admission for this vault refused until retention drains it")
 
+// ErrVaultBacklogBudget rejects records destined to a vault whose pipeline
+// backlog (unreleased registry segments) has reached the cluster-global
+// budget. Retryable backpressure: chunking keeps draining, admission resumes
+// below the budget. The operating bound that engages before disk pressure.
+var ErrVaultBacklogBudget = errors.New("vault's pipeline backlog is at its budget: admission refused until chunking drains it")
+
 // vaultAdmissionGate is the per-destination admission check. It honors both
 // the local guard and — via the NodeStats broadcast — every live peer's:
 // the starved volume or over-budget claim backing a vault is usually on a
@@ -572,6 +690,12 @@ func (o *Orchestrator) vaultAdmissionGate(vaultID glid.GLID) error {
 	}
 	if fn := o.remoteVaultSizeCapped.Load(); fn != nil && (*fn)(vaultID) {
 		return ErrVaultMaxSize
+	}
+	// Backlog budget needs no peer lookup: the measure is the vault-ctl FSM
+	// registry, replicated to every node, so the local guard's verdict is the
+	// cluster's verdict.
+	if o.diskGuard != nil && o.diskGuard.vaultBacklogCapped(vaultID) {
+		return ErrVaultBacklogBudget
 	}
 	return nil
 }
@@ -662,6 +786,32 @@ func (o *Orchestrator) primeDiskGuard() {
 	o.diskGuard.evaluate(o.alerts)
 }
 
+// serverSettingsLoader is the optional capability the guard job uses to pick
+// up the cluster-global backlog budget. The system store implements it; test
+// fakes that only implement SystemLoader simply leave the budget at 0
+// (disabled). Same discovery-based shape as refreshVaultDiskGuards — a
+// settings change is honored on the next tick, no mutation-path wiring.
+type serverSettingsLoader interface {
+	LoadServerSettings(ctx context.Context) (system.ServerSettings, error)
+}
+
+// refreshBacklogBudget converges the guard's cluster-global backlog budget
+// with the stored cluster settings.
+func (o *Orchestrator) refreshBacklogBudget(ctx context.Context) {
+	if o.diskGuard == nil {
+		return
+	}
+	loader, ok := o.sysLoader.(serverSettingsLoader)
+	if !ok {
+		return
+	}
+	ss, err := loader.LoadServerSettings(ctx)
+	if err != nil {
+		return
+	}
+	o.diskGuard.backlogBudget.Store(ss.Cluster.PipelineBacklogMaxBytes)
+}
+
 // startDiskGuard registers the guard's scheduler job. No-op without paths.
 func (o *Orchestrator) startDiskGuard() error {
 	if o.diskGuard == nil || len(o.diskGuard.paths) == 0 {
@@ -670,11 +820,12 @@ func (o *Orchestrator) startDiskGuard() error {
 	if err := o.scheduler.AddJob(diskGuardJobName, diskGuardSchedule, func() {
 		o.diskGuard.evaluate(o.alerts)
 		o.refreshVaultDiskGuards(context.Background())
+		o.refreshBacklogBudget(context.Background())
 		o.diskGuard.evaluateVaults(o.alerts)
 	}); err != nil {
 		return fmt.Errorf("disk guard: %w", err)
 	}
 	o.scheduler.Describe(diskGuardJobName,
-		"Free-space guard: raises the disk-space alarm and suspends ingest admission below the floor")
+		"Free-space guard: raises the disk-space alarm and suspends ingest admission below the floor or when a vault's backlog/size budget is reached")
 	return nil
 }

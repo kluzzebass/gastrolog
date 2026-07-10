@@ -789,6 +789,8 @@ func New(cfg Config) (*Orchestrator, error) {
 
 	// The max-size budget measures the vault's whole local disk claim.
 	o.diskGuard.vaultFootprint = o.localVaultFootprintBytes
+	// The backlog budget measures the vault-ctl registry (cluster-wide truth).
+	o.diskGuard.vaultBacklogBytes = o.vaultRegistryBacklogBytes
 
 	// ingest pipeline. The supervisor owns the durable write path; the
 	// orchestrator publishes its routing table, registers Origin vaults, and

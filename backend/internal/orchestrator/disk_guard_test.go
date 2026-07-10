@@ -546,3 +546,128 @@ func TestVaultAdmissionGateMaxSize(t *testing.T) {
 		t.Fatalf("SizeCappedVaults = %v, want [%s]", capped, vaultA)
 	}
 }
+
+// TestVaultBacklogBudget pins the backlog operating bound (the R2 half of the
+// backpressure design): a vault whose unreleased registry bytes reach the
+// cluster-global budget refuses admission at Error severity; approaching it
+// alarms at Warning; chunking draining below the budget resumes admission
+// immediately (releases free whole segments — natural deadband), and the alarm
+// clears with hysteresis below the approach threshold.
+func TestVaultBacklogBudget(t *testing.T) {
+	t.Parallel()
+	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": 200 * gib})
+	spy := &alertSpy{}
+	vaultA, vaultB := glid.New(), glid.New()
+
+	backlog := map[glid.GLID]int64{vaultA: int64(gib), vaultB: int64(gib)}
+	g.vaultBacklogBytes = func(id glid.GLID) int64 { return backlog[id] }
+	g.backlogBudget.Store(10 * gib)
+	g.SetVaultGuard(vaultA, "busy", []string{"volA"}, 0, 0, 0)
+	g.SetVaultGuard(vaultB, "calm", []string{"volA"}, 0, 0, 0)
+
+	g.evaluateVaults(spy)
+	if g.vaultBacklogCapped(vaultA) || spy.active() != 0 {
+		t.Fatal("well under budget must be quiet")
+	}
+
+	// Approach (>= 90% of 10GiB): Warning alarm, no cap.
+	backlog[vaultA] = int64(9*gib + gib/2)
+	g.evaluateVaults(spy)
+	if g.vaultBacklogCapped(vaultA) {
+		t.Fatal("approach is not the cap: admission must stay open")
+	}
+	if !spy.has("pipeline-backlog:" + vaultA.String()) {
+		t.Fatal("approaching the budget must raise the pipeline-backlog alarm")
+	}
+
+	// At the budget: capped, sibling unaffected.
+	backlog[vaultA] = int64(10 * gib)
+	g.evaluateVaults(spy)
+	if !g.vaultBacklogCapped(vaultA) {
+		t.Fatal("at the budget the vault must refuse admission")
+	}
+	if g.vaultBacklogCapped(vaultB) {
+		t.Fatal("sibling vault under budget must be unaffected")
+	}
+
+	// Chunking releases segments: cap releases at once, alarm stands (>= 90%).
+	backlog[vaultA] = int64(9*gib + gib/2)
+	g.evaluateVaults(spy)
+	if g.vaultBacklogCapped(vaultA) {
+		t.Fatal("below the budget admission must resume")
+	}
+	if !spy.has("pipeline-backlog:" + vaultA.String()) {
+		t.Fatal("approach alarm must stand until the hysteresis band clears")
+	}
+
+	// Well below approach - 10%: alarm clears.
+	backlog[vaultA] = int64(7 * gib)
+	g.evaluateVaults(spy)
+	if spy.has("pipeline-backlog:" + vaultA.String()) {
+		t.Fatal("alarm must clear once clear of the approach band")
+	}
+}
+
+// TestVaultBacklogBudgetDisabled pins the 0 = unbounded contract, including
+// the operator turning the budget OFF while a vault is capped: the standing
+// cap and alarm must release on the next pass, or admission would be refused
+// forever under a bound that no longer exists.
+func TestVaultBacklogBudgetDisabled(t *testing.T) {
+	t.Parallel()
+	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": 200 * gib})
+	spy := &alertSpy{}
+	vaultA := glid.New()
+	g.vaultBacklogBytes = func(glid.GLID) int64 { return int64(50 * gib) }
+	g.SetVaultGuard(vaultA, "busy", []string{"volA"}, 0, 0, 0)
+
+	// Budget unset: enormous backlog, no cap, no alarm.
+	g.evaluateVaults(spy)
+	if g.vaultBacklogCapped(vaultA) || spy.active() != 0 {
+		t.Fatal("without a budget the backlog bound must be inert")
+	}
+
+	// Operator sets a budget: caps on the next pass.
+	g.backlogBudget.Store(10 * gib)
+	g.evaluateVaults(spy)
+	if !g.vaultBacklogCapped(vaultA) || !spy.has("pipeline-backlog:"+vaultA.String()) {
+		t.Fatal("setting a budget below the backlog must cap and alarm")
+	}
+
+	// Operator disables it again: cap and alarm release.
+	g.backlogBudget.Store(0)
+	g.evaluateVaults(spy)
+	if g.vaultBacklogCapped(vaultA) {
+		t.Fatal("disabling the budget must release the standing cap")
+	}
+	if spy.has("pipeline-backlog:" + vaultA.String()) {
+		t.Fatal("disabling the budget must clear the standing alarm")
+	}
+}
+
+// TestVaultAdmissionGateBacklog pins the gate: a backlog-capped vault is
+// refused with ErrVaultBacklogBudget while siblings keep ingesting. No remote
+// half — the registry measure is FSM-replicated, so the local verdict IS the
+// cluster verdict.
+func TestVaultAdmissionGateBacklog(t *testing.T) {
+	t.Parallel()
+	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": 200 * gib})
+	vaultA, vaultB := glid.New(), glid.New()
+	g.vaultBacklogBytes = func(id glid.GLID) int64 {
+		if id == vaultA {
+			return int64(11 * gib)
+		}
+		return int64(gib)
+	}
+	g.backlogBudget.Store(10 * gib)
+	g.SetVaultGuard(vaultA, "a", []string{"volA"}, 0, 0, 0)
+	g.SetVaultGuard(vaultB, "b", []string{"volA"}, 0, 0, 0)
+	g.evaluateVaults(nil)
+
+	o := &Orchestrator{diskGuard: g}
+	if err := o.vaultAdmissionGate(vaultA); !errors.Is(err, ErrVaultBacklogBudget) {
+		t.Fatalf("backlog-capped vault must be refused with ErrVaultBacklogBudget, got %v", err)
+	}
+	if err := o.vaultAdmissionGate(vaultB); err != nil {
+		t.Fatalf("vault under budget must be admitted: %v", err)
+	}
+}

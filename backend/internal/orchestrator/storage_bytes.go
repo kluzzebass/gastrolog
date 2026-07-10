@@ -71,6 +71,24 @@ func (o *Orchestrator) localVaultFootprintBytes(vaultID glid.GLID) int64 {
 	return o.localVaultChunkBytes(vaultID) + o.localPipelineSegmentStorageBytes(vaultID)
 }
 
+// vaultRegistryBacklogBytes is the vault's pipeline backlog measured against
+// the cluster-global backlog budget: total bytes of unreleased completed
+// segments in the vault-ctl registry. Unlike the local measures above this is
+// FSM-replicated cluster state — every node computes the same value, so the
+// backlog guard needs no peer broadcast. Zero for non-pipeline vaults and
+// before the FSM is available.
+func (o *Orchestrator) vaultRegistryBacklogBytes(vaultID glid.GLID) int64 {
+	fsm, _, _, ok := o.vaultCtlHandle(vaultID)
+	if !ok || fsm == nil {
+		return 0
+	}
+	var total int64
+	for _, entry := range fsm.ListCompletedSegments() {
+		total += int64(entry.ByteSize) //nolint:gosec // segment sizes are bounded
+	}
+	return total
+}
+
 func (o *Orchestrator) localPipelineSegmentStorageBytes(vaultID glid.GLID) int64 {
 	o.mu.RLock()
 	_, inPipeline := o.pipelineVaults[vaultID]

@@ -24,6 +24,12 @@ type ServerSettings struct {
 type ClusterConfig struct {
 	BroadcastInterval string `json:"broadcast_interval,omitempty"` // Go duration string, e.g. "5s"
 	HeartbeatInterval string `json:"heartbeat_interval,omitempty"` // Go duration string, e.g. "1s"; PeerState TTL is 4× this
+	// PipelineBacklogMaxBytes is the per-vault pipeline backlog budget: when a
+	// vault's unreleased completed-segment bytes (vault-ctl registry) reach it,
+	// ingest admission for that vault is refused until chunking drains below
+	// the budget. The operating bound ahead of the disk-guard backstop.
+	// 0 = unbounded.
+	PipelineBacklogMaxBytes uint64 `json:"pipeline_backlog_max_bytes,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
