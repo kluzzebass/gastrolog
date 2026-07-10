@@ -371,7 +371,7 @@ describe("SearchView", () => {
     });
     const { getByText } = render(<SearchView />, { wrapper: settingsWrapper(qc) });
     expect(getByText("42.5%")).toBeTruthy();
-    expect(getByText("256.0 MB")).toBeTruthy();
+    expect(getByText("256.0 MiB")).toBeTruthy();
   });
 
   test("sort button toggles reverse order", () => {

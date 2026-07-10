@@ -1,10 +1,7 @@
 package system
 
 import (
-	"errors"
 	"gastrolog/internal/glid"
-	"strconv"
-	"strings"
 	"time"
 )
 
@@ -274,43 +271,6 @@ type RefreshToken struct {
 // ---------------------------------------------------------------------------
 // Utilities
 // ---------------------------------------------------------------------------
-
-// ParseBytes parses a byte size string with optional suffix (B, KB, MB, GB).
-func ParseBytes(s string) (uint64, error) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return 0, errors.New("empty value")
-	}
-
-	s = strings.ToUpper(s)
-
-	var multiplier uint64 = 1
-	var numStr string
-
-	switch {
-	case strings.HasSuffix(s, "GB"):
-		multiplier = 1024 * 1024 * 1024
-		numStr = strings.TrimSuffix(s, "GB")
-	case strings.HasSuffix(s, "MB"):
-		multiplier = 1024 * 1024
-		numStr = strings.TrimSuffix(s, "MB")
-	case strings.HasSuffix(s, "KB"):
-		multiplier = 1024
-		numStr = strings.TrimSuffix(s, "KB")
-	case strings.HasSuffix(s, "B"):
-		numStr = strings.TrimSuffix(s, "B")
-	default:
-		numStr = s
-	}
-
-	numStr = strings.TrimSpace(numStr)
-	n, err := strconv.ParseUint(numStr, 10, 64)
-	if err != nil {
-		return 0, err
-	}
-
-	return n * multiplier, nil
-}
 
 // StringPtr returns a pointer to s.
 //

@@ -7,7 +7,10 @@ import (
 	"gastrolog/internal/chunk"
 )
 
-func TestParseBytesValid(t *testing.T) {
+// ParseSize is the single byte-size parser (ParseBytes, which read "GB" as
+// binary, is gone): strict SI/IEC — KB/MB/GB/TB decimal, KiB/MiB/GiB/TiB
+// binary — matching the frontend parseBytes and every display label.
+func TestParseSizeStrictUnits(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		input    string
@@ -16,44 +19,46 @@ func TestParseBytesValid(t *testing.T) {
 		{"100", 100},
 		{"100B", 100},
 		{"100b", 100},
-		{"1KB", 1024},
-		{"1kb", 1024},
-		{"64MB", 64 * 1024 * 1024},
-		{"64mb", 64 * 1024 * 1024},
-		{"1GB", 1024 * 1024 * 1024},
-		{"1gb", 1024 * 1024 * 1024},
-		{" 100 MB ", 100 * 1024 * 1024},
+		{"1KB", 1000},
+		{"1KiB", 1024},
+		{"64MB", 64 * 1000 * 1000},
+		{"64MiB", 64 * 1024 * 1024},
+		{"1GB", 1000 * 1000 * 1000},
+		{"1gib", 1024 * 1024 * 1024},
+		{"1.5GB", 1500 * 1000 * 1000},
+		{"2TB", 2 * 1000 * 1000 * 1000 * 1000},
+		{" 100 MB ", 100 * 1000 * 1000},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.input, func(t *testing.T) {
 			t.Parallel()
-			got, err := ParseBytes(tc.input)
+			got, err := ParseSize(tc.input)
 			if err != nil {
-				t.Fatalf("ParseBytes(%q) error: %v", tc.input, err)
+				t.Fatalf("ParseSize(%q) error: %v", tc.input, err)
 			}
 			if got != tc.expected {
-				t.Errorf("ParseBytes(%q) = %d, want %d", tc.input, got, tc.expected)
+				t.Errorf("ParseSize(%q) = %d, want %d", tc.input, got, tc.expected)
 			}
 		})
 	}
 }
 
-func TestParseBytesInvalid(t *testing.T) {
+func TestParseSizeInvalid(t *testing.T) {
 	t.Parallel()
 	tests := []string{
 		"",
 		"abc",
 		"-100",
-		"100TB",
+		"100XB",
 	}
 
 	for _, input := range tests {
 		t.Run(input, func(t *testing.T) {
 			t.Parallel()
-			_, err := ParseBytes(input)
+			_, err := ParseSize(input)
 			if err == nil {
-				t.Errorf("ParseBytes(%q) expected error, got nil", input)
+				t.Errorf("ParseSize(%q) expected error, got nil", input)
 			}
 		})
 	}

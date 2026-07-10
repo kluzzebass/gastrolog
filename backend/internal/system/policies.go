@@ -89,7 +89,7 @@ func (c RotationPolicyConfig) ToRotationPolicy() (chunk.RotationPolicy, error) {
 	var policies []chunk.RotationPolicy
 
 	if c.MaxBytes != nil {
-		bytes, err := ParseBytes(*c.MaxBytes)
+		bytes, err := ParseSize(*c.MaxBytes)
 		if err != nil {
 			return nil, fmt.Errorf("invalid maxBytes: %w", err)
 		}
@@ -179,7 +179,7 @@ func (c RetentionPolicyConfig) ToRetentionPolicy() (chunk.RetentionPolicy, error
 	}
 
 	if c.MaxBytes != nil {
-		bytes, err := ParseBytes(*c.MaxBytes)
+		bytes, err := ParseSize(*c.MaxBytes)
 		if err != nil {
 			return nil, fmt.Errorf("invalid maxBytes: %w", err)
 		}

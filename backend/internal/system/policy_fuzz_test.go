@@ -74,7 +74,7 @@ func FuzzRetentionPolicyConfigToRetentionPolicy(f *testing.F) {
 	})
 }
 
-func FuzzParseBytes(f *testing.F) {
+func FuzzParseSize(f *testing.F) {
 	f.Add("0B")
 	f.Add("1KB")
 	f.Add("64MB")
@@ -92,6 +92,6 @@ func FuzzParseBytes(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, s string) {
 		// Must not panic on any input.
-		_, _ = ParseBytes(s)
+		_, _ = ParseSize(s)
 	})
 }

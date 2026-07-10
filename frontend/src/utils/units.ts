@@ -1,13 +1,18 @@
 /** Shared unit formatting and parsing utilities. */
 
-/** Format a byte count to a human-readable string (e.g. "1.5 MB"). Accepts number or bigint. */
+/**
+ * Format a byte count to a human-readable string (e.g. "1.5 MiB").
+ * Binary math with honest IEC labels: GB means 10^9 and GiB means 2^30 —
+ * the parsers on both surfaces are strict about it, so dividing by 1024
+ * and printing "MB" would mislabel the quantity. Accepts number or bigint.
+ */
 export function formatBytes(b: bigint | number): string {
   const n = typeof b === "bigint" ? Number(b) : b;
   if (n === 0) return "0 B";
-  if (n >= 1024 ** 4) return `${(n / 1024 ** 4).toFixed(1)} TB`;
-  if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(1)} GB`;
-  if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(1)} MB`;
-  if (n >= 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n >= 1024 ** 4) return `${(n / 1024 ** 4).toFixed(1)} TiB`;
+  if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(1)} GiB`;
+  if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(1)} MiB`;
+  if (n >= 1024) return `${(n / 1024).toFixed(1)} KiB`;
   return `${n} B`;
 }
 
@@ -19,32 +24,55 @@ export function formatRate(n: number): string {
   return n.toFixed(1);
 }
 
-/** Format a bigint byte count to a compact string (e.g. "64MB"). */
+/**
+ * Format a bigint byte count to a compact exact string for form echo
+ * (e.g. "64MB", "2GiB"). Largest unit that divides evenly wins; at each
+ * scale the decimal (SI) unit is preferred so values entered as "2GB"
+ * round-trip verbatim, with the binary (IEC) unit as the exact fallback.
+ * Values divisible by neither render as raw bytes — exactness over brevity.
+ */
 export function formatBytesBigint(b: bigint): string {
   if (b === 0n) return "";
-  if (b >= 1073741824n && b % 1073741824n === 0n) return `${b / 1073741824n}GB`;
-  if (b >= 1048576n && b % 1048576n === 0n) return `${b / 1048576n}MB`;
-  if (b >= 1024n && b % 1024n === 0n) return `${b / 1024n}KB`;
+  const units: Array<[bigint, string]> = [
+    [1_000_000_000_000n, "TB"],
+    [1099511627776n, "TiB"],
+    [1_000_000_000n, "GB"],
+    [1073741824n, "GiB"],
+    [1_000_000n, "MB"],
+    [1048576n, "MiB"],
+    [1_000n, "KB"],
+    [1024n, "KiB"],
+  ];
+  for (const [mult, label] of units) {
+    if (b >= mult && b % mult === 0n) return `${b / mult}${label}`;
+  }
   return `${b}B`;
 }
 
-/** Parse a byte string like "64MB" to bigint. */
+/**
+ * Parse a byte string like "64MB" or "1.5GiB" to bigint. Strict SI/IEC
+ * semantics shared with the backend's system.ParseSize: KB/MB/GB/TB are
+ * decimal (x1000), KiB/MiB/GiB/TiB are binary (x1024). Returns 0n for
+ * empty or unparseable input.
+ */
 export function parseBytes(s: string): bigint {
-  s = s.trim().toUpperCase();
+  s = s.trim();
   if (!s) return 0n;
-  const match = /^(\d+)\s*(GB|MB|KB|B)?$/.exec(s);
+  const match = /^(\d+(?:\.\d+)?)\s*(TIB|GIB|MIB|KIB|TB|GB|MB|KB|B)?$/.exec(s.toUpperCase());
   if (!match) return 0n;
-  const n = BigInt(match[1]!);
-  switch (match[2]) {
-    case "GB":
-      return n * 1073741824n;
-    case "MB":
-      return n * 1048576n;
-    case "KB":
-      return n * 1024n;
-    default:
-      return n;
-  }
+  const n = parseFloat(match[1]!);
+  const mult: Record<string, number> = {
+    B: 1,
+    KB: 1_000,
+    MB: 1_000_000,
+    GB: 1_000_000_000,
+    TB: 1_000_000_000_000,
+    KIB: 1024,
+    MIB: 1024 ** 2,
+    GIB: 1024 ** 3,
+    TIB: 1024 ** 4,
+  };
+  return BigInt(Math.round(n * mult[match[2] ?? "B"]!));
 }
 
 /** Format seconds (bigint) as human-readable duration (e.g. "1h30m"). */

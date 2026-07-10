@@ -342,7 +342,7 @@ func manifestRotationPolicy(c system.RotationPolicyConfig) (chunking.ManifestRot
 		p.MaxRecords = uint64(*c.MaxRecords)
 	}
 	if c.MaxBytes != nil && *c.MaxBytes != "" {
-		if b, err := system.ParseBytes(*c.MaxBytes); err == nil {
+		if b, err := system.ParseSize(*c.MaxBytes); err == nil {
 			p.MaxBytes = b
 		}
 	}

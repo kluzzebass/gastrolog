@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/system"
 
 	"connectrpc.com/connect"
 	"github.com/spf13/cobra"
@@ -131,7 +132,15 @@ func newRetentionPolicyCreateCmd() *cobra.Command {
 				}
 			}
 			if cmd.Flags().Changed("max-bytes") {
-				cfg.MaxBytes, _ = cmd.Flags().GetInt64("max-bytes")
+				raw, _ := cmd.Flags().GetString("max-bytes")
+				cfg.MaxBytes = 0
+				if raw != "" {
+					v, err := system.ParseSize(raw)
+					if err != nil {
+						return fmt.Errorf("invalid --max-bytes: %w", err)
+					}
+					cfg.MaxBytes = int64(v) //nolint:gosec // human sizes are far below int64 max
+				}
 			}
 			if cmd.Flags().Changed("max-chunks") {
 				cfg.MaxChunks, _ = cmd.Flags().GetInt64("max-chunks")
@@ -152,7 +161,7 @@ func newRetentionPolicyCreateCmd() *cobra.Command {
 	}
 	cmd.Flags().String("name", "", "policy name (required)")
 	cmd.Flags().String("max-age", "", "max age (e.g. 3m, 1h, 30s)")
-	cmd.Flags().Int64("max-bytes", 0, "max bytes")
+	cmd.Flags().String("max-bytes", "", "max total size retained (e.g. \"50GB\", \"1GiB\"; empty = no limit)")
 	cmd.Flags().Int64("max-chunks", 0, "max chunks")
 	_ = cmd.MarkFlagRequired("name")
 	return cmd

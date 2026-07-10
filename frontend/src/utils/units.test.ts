@@ -8,41 +8,64 @@ import {
   formatDurationMs,
 } from "./units";
 
+// Binary math, honest IEC labels: GB means 10^9, GiB means 2^30, and the
+// display computes /1024 so it says GiB. Shared semantics with the backend
+// (system.ParseSize, units.FormatBytesDisplay).
 describe("formatBytes", () => {
   test("zero", () => expect(formatBytes(0)).toBe("0 B"));
   test("bytes", () => expect(formatBytes(512)).toBe("512 B"));
-  test("KB", () => expect(formatBytes(1024)).toBe("1.0 KB"));
-  test("KB fractional", () => expect(formatBytes(1536)).toBe("1.5 KB"));
-  test("MB", () => expect(formatBytes(1048576)).toBe("1.0 MB"));
-  test("MB fractional", () => expect(formatBytes(1572864)).toBe("1.5 MB"));
-  test("GB", () => expect(formatBytes(1073741824)).toBe("1.0 GB"));
-  test("GB fractional", () => expect(formatBytes(1610612736)).toBe("1.5 GB"));
-  test("just under KB", () => expect(formatBytes(1023)).toBe("1023 B"));
-  test("just under MB", () =>
-    expect(formatBytes(1048575)).toBe("1024.0 KB"));
+  test("KiB", () => expect(formatBytes(1024)).toBe("1.0 KiB"));
+  test("KiB fractional", () => expect(formatBytes(1536)).toBe("1.5 KiB"));
+  test("MiB", () => expect(formatBytes(1048576)).toBe("1.0 MiB"));
+  test("MiB fractional", () => expect(formatBytes(1572864)).toBe("1.5 MiB"));
+  test("GiB", () => expect(formatBytes(1073741824)).toBe("1.0 GiB"));
+  test("GiB fractional", () => expect(formatBytes(1610612736)).toBe("1.5 GiB"));
+  test("just under KiB", () => expect(formatBytes(1023)).toBe("1023 B"));
+  test("just under MiB", () =>
+    expect(formatBytes(1048575)).toBe("1024.0 KiB"));
+  test("decimal 2GB shows exact binary size", () =>
+    expect(formatBytes(2_000_000_000)).toBe("1.9 GiB"));
 });
 
+// Compact exact echo: largest evenly-dividing unit, decimal preferred so a
+// value entered as "2GB" round-trips verbatim, binary as exact fallback.
 describe("formatBytesBigint", () => {
   test("zero returns empty", () => expect(formatBytesBigint(0n)).toBe(""));
-  test("exact GB", () => expect(formatBytesBigint(1073741824n)).toBe("1GB"));
-  test("exact MB", () => expect(formatBytesBigint(67108864n)).toBe("64MB"));
-  test("exact KB", () => expect(formatBytesBigint(1024n)).toBe("1KB"));
+  test("exact GiB", () => expect(formatBytesBigint(1073741824n)).toBe("1GiB"));
+  test("exact decimal GB", () =>
+    expect(formatBytesBigint(2_000_000_000n)).toBe("2GB"));
+  test("exact MiB", () => expect(formatBytesBigint(67108864n)).toBe("64MiB"));
+  test("exact decimal MB", () =>
+    expect(formatBytesBigint(64_000_000n)).toBe("64MB"));
+  test("exact KiB", () => expect(formatBytesBigint(1024n)).toBe("1KiB"));
+  test("exact decimal KB", () => expect(formatBytesBigint(1000n)).toBe("1KB"));
   test("raw bytes", () => expect(formatBytesBigint(500n)).toBe("500B"));
-  test("non-even MB falls to KB", () =>
-    expect(formatBytesBigint(1049600n)).toBe("1025KB"));
-  test("2GB", () => expect(formatBytesBigint(2147483648n)).toBe("2GB"));
+  test("odd value stays raw bytes", () =>
+    expect(formatBytesBigint(999n)).toBe("999B"));
+  test("2GiB", () => expect(formatBytesBigint(2147483648n)).toBe("2GiB"));
 });
 
+// Strict SI/IEC, same table as backend system.ParseSize: KB/MB/GB/TB are
+// decimal (x1000), KiB/MiB/GiB/TiB binary (x1024).
 describe("parseBytes", () => {
   test("empty string", () => expect(parseBytes("")).toBe(0n));
   test("whitespace only", () => expect(parseBytes("  ")).toBe(0n));
   test("raw number (no unit)", () => expect(parseBytes("1024")).toBe(1024n));
   test("B suffix", () => expect(parseBytes("512B")).toBe(512n));
-  test("KB", () => expect(parseBytes("1KB")).toBe(1024n));
-  test("MB", () => expect(parseBytes("64MB")).toBe(67108864n));
-  test("GB", () => expect(parseBytes("1GB")).toBe(1073741824n));
-  test("case insensitive", () => expect(parseBytes("64mb")).toBe(67108864n));
-  test("with whitespace", () => expect(parseBytes(" 64MB ")).toBe(67108864n));
+  test("KB is decimal", () => expect(parseBytes("1KB")).toBe(1000n));
+  test("KiB is binary", () => expect(parseBytes("1KiB")).toBe(1024n));
+  test("MB is decimal", () => expect(parseBytes("64MB")).toBe(64_000_000n));
+  test("MiB is binary", () => expect(parseBytes("64MiB")).toBe(67108864n));
+  test("GB is decimal", () => expect(parseBytes("1GB")).toBe(1_000_000_000n));
+  test("GiB is binary", () => expect(parseBytes("1GiB")).toBe(1073741824n));
+  test("TB is decimal", () =>
+    expect(parseBytes("2TB")).toBe(2_000_000_000_000n));
+  test("decimals accepted", () =>
+    expect(parseBytes("1.5GB")).toBe(1_500_000_000n));
+  test("case insensitive", () => expect(parseBytes("64mb")).toBe(64_000_000n));
+  test("case insensitive IEC", () =>
+    expect(parseBytes("1gib")).toBe(1073741824n));
+  test("with whitespace", () => expect(parseBytes(" 64MB ")).toBe(64_000_000n));
   test("invalid returns 0", () => expect(parseBytes("abc")).toBe(0n));
   test("negative-like returns 0", () => expect(parseBytes("-1MB")).toBe(0n));
 });
@@ -95,7 +118,7 @@ describe("formatDurationMs", () => {
 });
 
 describe("roundtrip: parseBytes <-> formatBytesBigint", () => {
-  for (const s of ["1KB", "64MB", "1GB", "2GB"]) {
+  for (const s of ["1KB", "64MB", "1GB", "2GB", "1KiB", "64MiB", "2GiB"]) {
     test(s, () => expect(formatBytesBigint(parseBytes(s))).toBe(s));
   }
 });

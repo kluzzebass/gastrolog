@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/system"
 	"strconv"
 	"time"
 
@@ -127,7 +128,15 @@ func newRotationPolicyCreateCmd() *cobra.Command {
 			}
 
 			if cmd.Flags().Changed("max-bytes") {
-				cfg.MaxBytes, _ = cmd.Flags().GetInt64("max-bytes")
+				raw, _ := cmd.Flags().GetString("max-bytes")
+				cfg.MaxBytes = 0
+				if raw != "" {
+					v, err := system.ParseSize(raw)
+					if err != nil {
+						return fmt.Errorf("invalid --max-bytes: %w", err)
+					}
+					cfg.MaxBytes = int64(v) //nolint:gosec // human sizes are far below int64 max
+				}
 			}
 			if cmd.Flags().Changed("max-age") {
 				maxAgeStr, _ := cmd.Flags().GetString("max-age")
@@ -158,7 +167,7 @@ func newRotationPolicyCreateCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().String("name", "", "policy name (required)")
-	cmd.Flags().Int64("max-bytes", 0, "max bytes before rotation")
+	cmd.Flags().String("max-bytes", "", "max size before rotation (e.g. 64MB, 1GiB; empty = no limit)")
 	cmd.Flags().String("max-age", "", "max age before rotation (e.g. 1m, 30s, 2h)")
 	cmd.Flags().Int64("max-records", 0, "max records before rotation")
 	cmd.Flags().String("cron", "", "cron schedule for rotation")
