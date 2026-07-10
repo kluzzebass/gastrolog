@@ -99,7 +99,7 @@ func TestPartitionPendingReleaseWaitsForHolders(t *testing.T) {
 	}
 
 	required := []string{"home-a", "home-b"}
-	ready, pending := partitionPendingRelease(fsm, []glid.GLID{segID}, required, true, 2)
+	ready, pending := partitionPendingRelease(fsm, []glid.GLID{segID}, required, true, 2, 0, time.Time{})
 	if len(ready) != 0 || len(pending) != 1 {
 		t.Fatalf("before ack: ready=%v pending=%v", ready, pending)
 	}
@@ -107,7 +107,7 @@ func TestPartitionPendingReleaseWaitsForHolders(t *testing.T) {
 	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalAckSegmentHolder(segID, "home-a")}); err != nil {
 		t.Fatal(err)
 	}
-	ready, pending = partitionPendingRelease(fsm, []glid.GLID{segID}, required, true, 2)
+	ready, pending = partitionPendingRelease(fsm, []glid.GLID{segID}, required, true, 2, 0, time.Time{})
 	if len(ready) != 0 || len(pending) != 1 {
 		t.Fatalf("after one ack: ready=%v pending=%v", ready, pending)
 	}
@@ -115,7 +115,7 @@ func TestPartitionPendingReleaseWaitsForHolders(t *testing.T) {
 	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalAckSegmentHolder(segID, "home-b")}); err != nil {
 		t.Fatal(err)
 	}
-	ready, pending = partitionPendingRelease(fsm, []glid.GLID{segID}, required, true, 2)
+	ready, pending = partitionPendingRelease(fsm, []glid.GLID{segID}, required, true, 2, 0, time.Time{})
 	if len(ready) != 1 || ready[0] != segID || len(pending) != 0 {
 		t.Fatalf("after all acks: ready=%v pending=%v", ready, pending)
 	}
@@ -182,7 +182,7 @@ func TestReleaseUnpinsDeadHolderViaSupersession(t *testing.T) {
 	required := []string{"live-a", "live-b", "dead-home"}
 
 	// Before RF: neither the fast path (dead-home missing) nor supersession fires.
-	if mayReleaseFromRegistry(fsm, segID, required, true, 2) {
+	if mayReleaseFromRegistry(fsm, segID, required, true, 2, 0, time.Time{}) {
 		t.Fatal("released before chunk reached RF")
 	}
 
@@ -197,7 +197,65 @@ func TestReleaseUnpinsDeadHolderViaSupersession(t *testing.T) {
 	ackChunk("live-a")
 	ackChunk("live-b")
 
-	if !mayReleaseFromRegistry(fsm, segID, required, true, 2) {
+	if !mayReleaseFromRegistry(fsm, segID, required, true, 2, 0, time.Time{}) {
 		t.Fatal("segment not releasable after chunk reached RF among live homes — dead home pins it")
+	}
+}
+
+// TestReleaseGiveUpOnRetentionExpiry pins the counted give-up expiry
+// (design-notes 28): an island-origin segment — never collected, never
+// chunked, holders never satisfied — releases once its records out-age the
+// vault's delete-disposition retention TTL. Had chunking succeeded, retention
+// would already have deleted the records; holding the registry entry forever
+// only leaks. A segment still inside the TTL, or referenced by an unbuilt
+// manifest, never gives up.
+func TestReleaseGiveUpOnRetentionExpiry(t *testing.T) {
+	t.Parallel()
+	ingested := time.Unix(0, 1_700_000_000_000).UTC()
+	segID := glid.New()
+	fsm := vaultctlfsm.New()
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalPublishCompletedSegment(vaultctlfsm.CompletedSegmentEntry{
+		SegmentID: segID, RecordCount: 5, ByteSize: 100,
+		FirstIngestTS: ingested, LastIngestTS: ingested, Checksum: 1, PublishedAt: ingested,
+	})}); err != nil {
+		t.Fatal(err)
+	}
+	required := []string{"live-a", "dead-home"}
+	ttl := 3 * time.Minute
+
+	// Inside the TTL: no give-up, and the normal gates refuse (not exhausted,
+	// holders never acked).
+	if mayReleaseFromRegistry(fsm, segID, required, true, 2, ttl, ingested.Add(time.Minute)) {
+		t.Fatal("segment inside the retention TTL must not give up")
+	}
+
+	// No bound configured: never gives up regardless of age.
+	if mayReleaseFromRegistry(fsm, segID, required, true, 2, 0, ingested.Add(24*time.Hour)) {
+		t.Fatal("without a TTL bound the segment must not give up")
+	}
+
+	// Records out-age the TTL: released even though nothing else is satisfied.
+	if !mayReleaseFromRegistry(fsm, segID, required, true, 2, ttl, ingested.Add(ttl+time.Second)) {
+		t.Fatal("segment past the retention TTL must give up (counted expiry)")
+	}
+
+	// Placement lookup unresolved (holdersWired, empty required): give-up
+	// still fires — that broken state is exactly what it exists for.
+	if !mayReleaseFromRegistry(fsm, segID, nil, true, 2, ttl, ingested.Add(ttl+time.Second)) {
+		t.Fatal("give-up must fire even with unresolved placement")
+	}
+
+	// Referenced by an unbuilt manifest: the build still needs the bytes.
+	chunkID := chunk.NewChunkID()
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalOpenChunkManifest(chunkID, ingested)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
+		SegmentID: segID, FirstRecordNumber: 0, LastRecordNumber: 4, SliceBytes: 100, RefAddedAt: ingested,
+	})}); err != nil {
+		t.Fatal(err)
+	}
+	if mayReleaseFromRegistry(fsm, segID, required, true, 2, ttl, ingested.Add(ttl+time.Second)) {
+		t.Fatal("segment referenced by an unbuilt manifest must never give up")
 	}
 }

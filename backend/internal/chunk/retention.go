@@ -66,6 +66,13 @@ func NewTTLRetentionPolicy(maxAge time.Duration) *TTLRetentionPolicy {
 	return &TTLRetentionPolicy{maxAge: maxAge}
 }
 
+// MaxAge returns the policy's age bound. The pipeline's segment give-up bound
+// derives from it: a segment whose records out-age every delete-disposition
+// TTL would have been expired by retention had it ever been chunked.
+func (p *TTLRetentionPolicy) MaxAge() time.Duration {
+	return p.maxAge
+}
+
 func (p *TTLRetentionPolicy) Apply(state VaultState) []ChunkID {
 	if p.maxAge <= 0 {
 		return nil

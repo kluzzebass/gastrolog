@@ -2,6 +2,7 @@ package chunking
 
 import (
 	"slices"
+	"time"
 
 	"gastrolog/internal/glid"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
@@ -110,11 +111,38 @@ func mayPurgeHeadAfterBuild(fsm *vaultctlfsm.FSM, segmentID glid.GLID, requiredH
 // release when placement wiring is present yet unresolved (empty required
 // slice). holdersCover treats empty required as "ready" for single-node tests;
 // that must not drop segments on a multi-home vault when placement lookup fails.
-func mayReleaseFromRegistry(fsm *vaultctlfsm.FSM, segmentID glid.GLID, requiredHolders []string, holdersWired bool, minChunkHolders int) bool {
+func mayReleaseFromRegistry(fsm *vaultctlfsm.FSM, segmentID glid.GLID, requiredHolders []string, holdersWired bool, minChunkHolders int, giveUpTTL time.Duration, now time.Time) bool {
+	// Give-up bound (design-notes 28): records that out-age the vault's
+	// delete-disposition retention TTL are released even though they were
+	// never chunked — retention would already have deleted them had chunking
+	// succeeded. Bounds registry growth for island-origin segments no holder
+	// can ever collect. Checked first: it must fire even when placement
+	// lookup is unresolved, which is exactly the stuck case it exists for.
+	if segmentGiveUpExpired(fsm, segmentID, giveUpTTL, now) {
+		return true
+	}
 	if holdersWired && len(requiredHolders) == 0 {
 		return false
 	}
 	return segmentReadyForRegistryRelease(fsm, segmentID, requiredHolders, minChunkHolders)
+}
+
+// segmentGiveUpExpired reports whether every record in the segment is older
+// than the vault's retention TTL — the counted give-up expiry. A segment
+// referenced by an unbuilt manifest never gives up: the build still needs its
+// bytes, and its records ARE reaching a chunk.
+func segmentGiveUpExpired(fsm *vaultctlfsm.FSM, segmentID glid.GLID, ttl time.Duration, now time.Time) bool {
+	if ttl <= 0 || now.IsZero() {
+		return false
+	}
+	if fsm.SegmentReferencedInManifest(segmentID) {
+		return false
+	}
+	entry := fsm.GetCompletedSegment(segmentID)
+	if entry == nil || entry.LastIngestTS.IsZero() {
+		return false
+	}
+	return now.Sub(entry.LastIngestTS) > ttl
 }
 
 func holdersCover(holders, required []string) bool {
@@ -131,9 +159,9 @@ func holdersCover(holders, required []string) bool {
 
 // partitionPendingRelease splits queued segment IDs into those ready for
 // ReleaseSegments now and those still awaiting holder receipts.
-func partitionPendingRelease(fsm *vaultctlfsm.FSM, pending []glid.GLID, requiredHolders []string, holdersWired bool, minChunkHolders int) (ready, stillPending []glid.GLID) {
+func partitionPendingRelease(fsm *vaultctlfsm.FSM, pending []glid.GLID, requiredHolders []string, holdersWired bool, minChunkHolders int, giveUpTTL time.Duration, now time.Time) (ready, stillPending []glid.GLID) {
 	for _, id := range pending {
-		if mayReleaseFromRegistry(fsm, id, requiredHolders, holdersWired, minChunkHolders) {
+		if mayReleaseFromRegistry(fsm, id, requiredHolders, holdersWired, minChunkHolders, giveUpTTL, now) {
 			ready = append(ready, id)
 			continue
 		}
@@ -174,11 +202,25 @@ func (v *vaultChunking) enqueueRegistryReleaseCandidates() {
 	required := v.requiredHolders()
 	holdersWired := v.cfg.RequiredHolders != nil
 	minChunk := v.plannerMinHolders()
+	giveUpTTL, now := v.giveUpBound()
 	var candidates []glid.GLID
+	gaveUp := 0
 	for _, entry := range fsm.ListCompletedSegments() {
-		if mayReleaseFromRegistry(fsm, entry.SegmentID, required, holdersWired, minChunk) {
-			candidates = append(candidates, entry.SegmentID)
+		if !mayReleaseFromRegistry(fsm, entry.SegmentID, required, holdersWired, minChunk, giveUpTTL, now) {
+			continue
 		}
+		candidates = append(candidates, entry.SegmentID)
+		if segmentGiveUpExpired(fsm, entry.SegmentID, giveUpTTL, now) &&
+			!segmentReadyForRegistryRelease(fsm, entry.SegmentID, required, minChunk) {
+			gaveUp++
+		}
+	}
+	if gaveUp > 0 {
+		// The counted expiry design-notes 28 demands: deliberate, visible —
+		// never a silent pipeline loss. These records out-aged retention
+		// without ever being chunked (island origin / uncollectable segment).
+		v.logger().Warn("retention give-up: releasing never-chunked segments whose records out-aged the retention TTL",
+			"vault", v.cfg.VaultID, "segments", gaveUp, "ttl", giveUpTTL.String())
 	}
 	if len(candidates) == 0 {
 		return
@@ -186,4 +228,17 @@ func (v *vaultChunking) enqueueRegistryReleaseCandidates() {
 	v.mu.Lock()
 	v.pendingRelease = appendUniqueGLIDs(v.pendingRelease, candidates)
 	v.mu.Unlock()
+}
+
+// giveUpBound resolves the vault's retention give-up TTL and the evaluation
+// clock; (0, zero time) when no bound is configured.
+func (v *vaultChunking) giveUpBound() (time.Duration, time.Time) {
+	if v.cfg.RetentionGiveUpTTL == nil {
+		return 0, time.Time{}
+	}
+	ttl, ok := v.cfg.RetentionGiveUpTTL()
+	if !ok || ttl <= 0 {
+		return 0, time.Time{}
+	}
+	return ttl, v.now()
 }

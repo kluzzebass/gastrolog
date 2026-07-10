@@ -170,6 +170,11 @@ type VaultSpec struct {
 	OnChunkBuilt func(chunk.ChunkID)
 	// OnManifestOpened fires when CmdOpenChunkManifest applies. Optional.
 	OnManifestOpened func(*vaultctlfsm.OpenChunkManifest)
+	// ChunkRetentionGiveUpTTL returns the vault's delete-disposition retention
+	// TTL for the segment give-up bound; ok=false disables it (no TTL rule, or
+	// a route-disposition runner vetoes: those records must be routed, never
+	// dropped). See chunking.VaultConfig.RetentionGiveUpTTL.
+	ChunkRetentionGiveUpTTL func() (time.Duration, bool)
 	// ChunkRequiredHolders returns placement member node IDs that must hold each
 	// segment before the leader proposes ReleaseSegments. Optional.
 	ChunkRequiredHolders func() []string
@@ -707,19 +712,20 @@ func (s *Supervisor) registerHome(spec VaultSpec) error {
 	// independent of the peer collector.
 	if spec.Locate != nil {
 		if err := s.chunk.RegisterVault(spec.VaultID, chunking.VaultConfig{
-			VaultRoot:        spec.HomeRoot,
-			ChunkRoot:        spec.ChunkRoot,
-			FSM:              spec.FSM,
-			LookupFSM:        spec.LookupFSM,
-			Locate:           spec.Locate,
-			Collector:        vaultSegmentCollector{mgr: s.col, vaultID: spec.VaultID},
-			Applier:          spec.Applier,
-			IsLeader:         spec.IsLeader,
-			Policy:           spec.ChunkPolicy,
-			NewChunkID:       spec.NewChunkID,
-			OnBuilt:          spec.OnChunkBuilt,
-			OnManifestOpened: spec.OnManifestOpened,
-			RequiredHolders:  spec.ChunkRequiredHolders,
+			VaultRoot:          spec.HomeRoot,
+			ChunkRoot:          spec.ChunkRoot,
+			FSM:                spec.FSM,
+			LookupFSM:          spec.LookupFSM,
+			Locate:             spec.Locate,
+			Collector:          vaultSegmentCollector{mgr: s.col, vaultID: spec.VaultID},
+			Applier:            spec.Applier,
+			IsLeader:           spec.IsLeader,
+			Policy:             spec.ChunkPolicy,
+			NewChunkID:         spec.NewChunkID,
+			OnBuilt:            spec.OnChunkBuilt,
+			OnManifestOpened:   spec.OnManifestOpened,
+			RequiredHolders:    spec.ChunkRequiredHolders,
+			RetentionGiveUpTTL: spec.ChunkRetentionGiveUpTTL,
 		}); err != nil {
 			if collectionRegistered {
 				s.col.UnregisterVault(spec.VaultID)

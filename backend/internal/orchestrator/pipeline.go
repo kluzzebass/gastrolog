@@ -181,6 +181,9 @@ func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, home bool, fsm 
 		spec.ChunkRequiredHolders = func() []string {
 			return o.vaultPlacementNodeIDs(vaultID)
 		}
+		spec.ChunkRetentionGiveUpTTL = func() (time.Duration, bool) {
+			return o.vaultRetentionGiveUpTTL(vaultID)
+		}
 		// Full collection requires a puller to fetch segments originated on
 		// other nodes; without peers (single-node) there is nothing to pull.
 		if o.segmentPuller != nil {
