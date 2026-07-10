@@ -12,6 +12,8 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	v1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/system"
+	"gastrolog/internal/units"
 )
 
 // settingsField maps a CLI flag to a proto field within a sub-message.
@@ -77,7 +79,7 @@ var settingsGroups = []settingsGroup{
 	{name: "cluster", short: "Configure cluster behavior", putRoot: "service", getPath: []string{"cluster"}, setPath: []string{"cluster"}, fields: []settingsField{
 		{flag: "broadcast-interval", label: "broadcast_interval", getKey: "broadcast_interval", setKey: "broadcast_interval", desc: "Stats broadcast interval (e.g. \"5s\")"},
 		{flag: "heartbeat-interval", label: "heartbeat_interval", getKey: "heartbeat_interval", setKey: "heartbeat_interval", desc: "Liveness heartbeat interval (e.g. \"1s\")"},
-		{flag: "pipeline-backlog-max-bytes", label: "pipeline_backlog_max_bytes", getKey: "pipeline_backlog_max_bytes", setKey: "pipeline_backlog_max_bytes", desc: "Per-vault pipeline backlog budget in bytes; admission for a vault is refused at the budget until chunking drains it (0 = unbounded)"},
+		{flag: "backlog-budget", label: "pipeline_backlog_max_bytes", getKey: "pipeline_backlog_max_bytes", setKey: "pipeline_backlog_max_bytes", desc: "Per-vault pipeline backlog budget (e.g. \"2GB\"); admission for a vault is refused at the budget until chunking drains it; empty = unbounded"},
 	}},
 	{name: "maxmind", short: "Configure MaxMind database downloads", putRoot: "maxmind", getPath: []string{"maxmind"}, setPath: []string{"maxmind"}, fields: []settingsField{
 		{flag: "auto-download", label: "auto_download", getKey: "auto_download", setKey: "auto_download", desc: "Auto-download MaxMind databases"},
@@ -221,13 +223,21 @@ func registerGroupFlags(cmd *cobra.Command, g settingsGroup, putSubDesc protoref
 		if fd == nil {
 			continue
 		}
-		switch fd.Kind() { //nolint:exhaustive // only string/bool/int32 used
+		switch fd.Kind() { //nolint:exhaustive // only string/bool/int32/uint64 used
 		case protoreflect.StringKind:
 			cmd.Flags().String(f.flag, "", f.desc)
 		case protoreflect.BoolKind:
 			cmd.Flags().Bool(f.flag, false, f.desc)
 		case protoreflect.Int32Kind:
 			cmd.Flags().Int32(f.flag, 0, f.desc)
+		case protoreflect.Uint64Kind:
+			// Byte quantities: human-friendly sizes, same convention as the
+			// vault flags (e.g. "2GB"); empty resets to 0.
+			cmd.Flags().String(f.flag, "", f.desc)
+		case protoreflect.BytesKind:
+			// Opaque identifiers carried as proto bytes (MaxMind account ID).
+			// Was silently unregistered before the every-flag-registers guard.
+			cmd.Flags().String(f.flag, "", f.desc)
 		}
 	}
 }
@@ -295,7 +305,7 @@ func applyFlag(cmd *cobra.Command, msg protoreflect.Message, f settingsField) er
 	if fd == nil {
 		return fmt.Errorf("unknown proto field %q", f.setKey)
 	}
-	switch fd.Kind() { //nolint:exhaustive // only string/bool/int32 used
+	switch fd.Kind() { //nolint:exhaustive // only string/bool/int32/uint64 used
 	case protoreflect.StringKind:
 		v, _ := cmd.Flags().GetString(f.flag)
 		msg.Set(fd, protoreflect.ValueOfString(v))
@@ -305,6 +315,20 @@ func applyFlag(cmd *cobra.Command, msg protoreflect.Message, f settingsField) er
 	case protoreflect.Int32Kind:
 		v, _ := cmd.Flags().GetInt32(f.flag)
 		msg.Set(fd, protoreflect.ValueOfInt32(v))
+	case protoreflect.Uint64Kind:
+		raw, _ := cmd.Flags().GetString(f.flag)
+		var v uint64
+		if raw != "" {
+			parsed, err := system.ParseSize(raw)
+			if err != nil {
+				return fmt.Errorf("invalid size for --%s: %w", f.flag, err)
+			}
+			v = parsed
+		}
+		msg.Set(fd, protoreflect.ValueOfUint64(v))
+	case protoreflect.BytesKind:
+		v, _ := cmd.Flags().GetString(f.flag)
+		msg.Set(fd, protoreflect.ValueOfBytes([]byte(v)))
 	}
 	return nil
 }
@@ -328,11 +352,13 @@ func protoGetTyped(msg protoreflect.Message, f settingsField) any {
 		return nil
 	}
 	v := msg.Get(fd)
-	switch fd.Kind() { //nolint:exhaustive // only string/bool/int32 used
+	switch fd.Kind() { //nolint:exhaustive // only string/bool/int32/uint64 used
 	case protoreflect.BoolKind:
 		return v.Bool()
 	case protoreflect.Int32Kind, protoreflect.Int64Kind:
 		return v.Int()
+	case protoreflect.Uint64Kind:
+		return v.Uint()
 	default:
 		return v.String()
 	}
@@ -347,11 +373,18 @@ func protoGetString(msg protoreflect.Message, name string) string {
 		return ""
 	}
 	v := msg.Get(fd)
-	switch fd.Kind() { //nolint:exhaustive // only string/bool/int used
+	switch fd.Kind() { //nolint:exhaustive // only string/bool/int/uint64 used
 	case protoreflect.BoolKind:
 		return strconv.FormatBool(v.Bool())
 	case protoreflect.Int32Kind, protoreflect.Int64Kind:
 		return strconv.FormatInt(v.Int(), 10)
+	case protoreflect.Uint64Kind:
+		// Settings only use uint64 for byte quantities; display human sizes,
+		// mirroring what the set side parses (e.g. "2GB"). 0 = unset/unlimited.
+		if v.Uint() == 0 {
+			return "0"
+		}
+		return units.FormatBytesDisplay(int64(v.Uint())) //nolint:gosec // display only
 	default:
 		return v.String()
 	}
