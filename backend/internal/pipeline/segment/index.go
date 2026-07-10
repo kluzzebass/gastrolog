@@ -335,6 +335,31 @@ func (sf *File) ViewAtEventOrder(pos uint32, scratch []byte) (record.View, []byt
 	return sf.ReadViewAtFilePos(entry.FilePos, scratch)
 }
 
+// IndexFilePositions bulk-reads the frame offset of every index entry in
+// EventID order with a single ReadAt over the contiguous index region.
+// Per-record planner loops previously issued two preads per record
+// (index entry + frame length prefix); frames are appended back-to-back, so
+// callers can derive every frame length from these positions alone
+// (gastrolog-2m0f75).
+func (sf *File) IndexFilePositions() ([]uint32, error) {
+	if sf.hdr.IndexOffset == 0 {
+		return nil, ErrNoIndex
+	}
+	n := int(sf.hdr.RecordCount)
+	if n == 0 {
+		return nil, nil
+	}
+	buf := make([]byte, n*IndexEntrySize)
+	if _, err := sf.f.ReadAt(buf, int64(sf.hdr.IndexOffset)); err != nil {
+		return nil, err
+	}
+	out := make([]uint32, n)
+	for i := range n {
+		out[i] = binary.LittleEndian.Uint32(buf[i*IndexEntrySize+eventIDWireSize:])
+	}
+	return out, nil
+}
+
 func (sf *File) readIndexEntry(pos uint32) (IndexEntry, error) {
 	off := int64(sf.hdr.IndexOffset) + int64(pos)*IndexEntrySize
 	var buf [IndexEntrySize]byte

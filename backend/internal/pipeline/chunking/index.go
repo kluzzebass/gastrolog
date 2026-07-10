@@ -2,6 +2,7 @@ package chunking
 
 import (
 	"fmt"
+	"slices"
 	"time"
 
 	"gastrolog/internal/pipeline/segment"
@@ -16,6 +17,13 @@ type OrderedIndex struct {
 	// scratch backs ViewAt frame reads, reused across calls so bounds
 	// scans allocate nothing per record (gastrolog-11y2iv).
 	scratch []byte
+	// frameLens caches every record's on-disk frame length in EventID order,
+	// derived from one bulk index read: frames are appended back-to-back, so
+	// each length is the gap to the next frame offset (the last runs to the
+	// index region). Built lazily on the first FrameByteLenAt — the planner's
+	// slice-sizing loop previously issued two preads PER RECORD
+	// (gastrolog-2m0f75).
+	frameLens []uint32
 }
 
 // BuildOrderedIndex opens a completed segment and uses its on-disk EventID index.
@@ -103,15 +111,52 @@ func (idx *OrderedIndex) Close() error {
 
 // FrameByteLenAt returns the on-disk frame byte length at EventID-order position pos.
 func (idx *OrderedIndex) FrameByteLenAt(pos uint32) (uint64, error) {
-	entry, err := idx.sf.IndexEntryAt(pos)
-	if err != nil {
+	if err := idx.ensureFrameLens(); err != nil {
 		return 0, err
 	}
-	n, err := idx.sf.FrameByteLen(entry.FilePos)
-	if err != nil {
-		return 0, err
+	if uint64(pos) >= uint64(len(idx.frameLens)) {
+		return 0, segment.ErrIndexBounds
 	}
-	return uint64(n), nil
+	return uint64(idx.frameLens[pos]), nil
+}
+
+// ensureFrameLens builds the frame-length cache from one bulk index read.
+func (idx *OrderedIndex) ensureFrameLens() error {
+	if idx.frameLens != nil {
+		return nil
+	}
+	positions, err := idx.sf.IndexFilePositions()
+	if err != nil {
+		return err
+	}
+	if len(positions) == 0 {
+		idx.frameLens = []uint32{}
+		return nil
+	}
+	// Frames are contiguous: sorted by file offset, each frame ends where the
+	// next begins; the last ends at the index region.
+	sorted := make([]uint32, len(positions))
+	copy(sorted, positions)
+	slices.Sort(sorted)
+	end := idx.sf.Header().IndexOffset
+	next := make(map[uint32]uint32, len(sorted))
+	for i, p := range sorted {
+		if i+1 < len(sorted) {
+			next[p] = sorted[i+1]
+		} else {
+			next[p] = end
+		}
+	}
+	lens := make([]uint32, len(positions))
+	for i, p := range positions {
+		n := next[p]
+		if n <= p {
+			return fmt.Errorf("%w: non-monotonic frame offsets at pos %d", segment.ErrFrameLength, i)
+		}
+		lens[i] = n - p
+	}
+	idx.frameLens = lens
+	return nil
 }
 
 // RecordSliceBytes returns the on-disk frame byte length for the record at pos.
