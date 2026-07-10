@@ -57,12 +57,12 @@ func UnmarshalSnapshot(b []byte) (*gastrologv1.SystemSnapshot, error) {
 
 func putRotationPolicyCmd(cfg system.RotationPolicyConfig) *gastrologv1.PutRotationPolicyCommand {
 	return &gastrologv1.PutRotationPolicyCommand{
-		Id:         cfg.ID.ToProto(),
-		Name:       cfg.Name,
-		MaxBytes:   cfg.MaxBytes,
-		MaxAge:     cfg.MaxAge,
-		MaxRecords: cfg.MaxRecords,
-		Cron:       cfg.Cron,
+		Id:          cfg.ID.ToProto(),
+		Name:        cfg.Name,
+		MaxBytes:    cfg.MaxBytes,
+		MaxAgeNanos: cfg.MaxAgeNanos,
+		MaxRecords:  cfg.MaxRecords,
+		Cron:        cfg.Cron,
 	}
 }
 
@@ -87,12 +87,12 @@ func NewDeleteRotationPolicy(id glid.GLID) *gastrologv1.SystemCommand {
 // ExtractPutRotationPolicy converts a PutRotationPolicyCommand back to a RotationPolicyConfig.
 func ExtractPutRotationPolicy(cmd *gastrologv1.PutRotationPolicyCommand) (system.RotationPolicyConfig, error) {
 	return system.RotationPolicyConfig{
-		ID:         glid.FromBytes(cmd.GetId()),
-		Name:       cmd.GetName(),
-		MaxBytes:   cmd.MaxBytes,
-		MaxAge:     cmd.MaxAge,
-		MaxRecords: cmd.MaxRecords,
-		Cron:       cmd.Cron,
+		ID:          glid.FromBytes(cmd.GetId()),
+		Name:        cmd.GetName(),
+		MaxBytes:    cmd.MaxBytes,
+		MaxAgeNanos: cmd.MaxAgeNanos,
+		MaxRecords:  cmd.MaxRecords,
+		Cron:        cmd.Cron,
 	}, nil
 }
 
@@ -107,11 +107,11 @@ func ExtractDeleteRotationPolicy(cmd *gastrologv1.DeleteRotationPolicyCommand) (
 
 func putRetentionPolicyCmd(cfg system.RetentionPolicyConfig) *gastrologv1.PutRetentionPolicyCommand {
 	return &gastrologv1.PutRetentionPolicyCommand{
-		Id:        cfg.ID.ToProto(),
-		Name:      cfg.Name,
-		MaxAge:    cfg.MaxAge,
-		MaxBytes:  cfg.MaxBytes,
-		MaxChunks: cfg.MaxChunks,
+		Id:          cfg.ID.ToProto(),
+		Name:        cfg.Name,
+		MaxAgeNanos: cfg.MaxAgeNanos,
+		MaxBytes:    cfg.MaxBytes,
+		MaxChunks:   cfg.MaxChunks,
 	}
 }
 
@@ -136,11 +136,11 @@ func NewDeleteRetentionPolicy(id glid.GLID) *gastrologv1.SystemCommand {
 // ExtractPutRetentionPolicy converts a PutRetentionPolicyCommand back to a RetentionPolicyConfig.
 func ExtractPutRetentionPolicy(cmd *gastrologv1.PutRetentionPolicyCommand) (system.RetentionPolicyConfig, error) {
 	return system.RetentionPolicyConfig{
-		ID:        glid.FromBytes(cmd.GetId()),
-		Name:      cmd.GetName(),
-		MaxAge:    cmd.MaxAge,
-		MaxBytes:  cmd.MaxBytes,
-		MaxChunks: cmd.MaxChunks,
+		ID:          glid.FromBytes(cmd.GetId()),
+		Name:        cmd.GetName(),
+		MaxAgeNanos: cmd.MaxAgeNanos,
+		MaxBytes:    cmd.MaxBytes,
+		MaxChunks:   cmd.MaxChunks,
 	}, nil
 }
 

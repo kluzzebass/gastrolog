@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"gastrolog/internal/glid"
-	"gastrolog/internal/system"
 
 	"connectrpc.com/connect"
 	"github.com/spf13/cobra"
@@ -45,12 +44,12 @@ func newRetentionPolicyListCmd() *cobra.Command {
 			for _, rp := range resp.Msg.RetentionPolicies {
 				rows = append(rows, []string{
 					glid.FromBytes(rp.Id).String(), rp.Name,
-					formatInt64(rp.MaxAgeSeconds),
-					formatInt64(rp.MaxBytes),
+					formatDurationCell(rp.MaxAgeNanos),
+					formatBytesCell(rp.MaxBytes),
 					formatInt64(rp.MaxChunks),
 				})
 			}
-			p.table([]string{"ID", "NAME", "MAX AGE (s)", "MAX BYTES", "MAX CHUNKS"}, rows)
+			p.table([]string{"ID", "NAME", "MAX AGE", "MAX BYTES", "MAX CHUNKS"}, rows)
 			return nil
 		},
 	}
@@ -84,8 +83,8 @@ func newRetentionPolicyGetCmd() *cobra.Command {
 					p.kv([][2]string{
 						{"ID", glid.FromBytes(rp.Id).String()},
 						{"Name", rp.Name},
-						{"Max Age (s)", formatInt64(rp.MaxAgeSeconds)},
-						{"Max Bytes", formatInt64(rp.MaxBytes)},
+						{"Max Age", formatDurationCell(rp.MaxAgeNanos)},
+						{"Max Bytes", formatBytesCell(rp.MaxBytes)},
 						{"Max Chunks", formatInt64(rp.MaxChunks)},
 					})
 					return nil
@@ -124,23 +123,18 @@ func newRetentionPolicyCreateCmd() *cobra.Command {
 			}
 
 			if cmd.Flags().Changed("max-age") {
-				maxAgeStr, _ := cmd.Flags().GetString("max-age")
-				if maxAgeStr != "" {
-					cfg.MaxAgeSeconds = parseDurationSeconds(maxAgeStr)
-				} else {
-					cfg.MaxAgeSeconds = 0
+				v, err := maxAgeFlagNanos(cmd)
+				if err != nil {
+					return err
 				}
+				cfg.MaxAgeNanos = v
 			}
 			if cmd.Flags().Changed("max-bytes") {
-				raw, _ := cmd.Flags().GetString("max-bytes")
-				cfg.MaxBytes = 0
-				if raw != "" {
-					v, err := system.ParseSize(raw)
-					if err != nil {
-						return fmt.Errorf("invalid --max-bytes: %w", err)
-					}
-					cfg.MaxBytes = int64(v) //nolint:gosec // human sizes are far below int64 max
+				v, err := maxBytesFlagValue(cmd)
+				if err != nil {
+					return err
 				}
+				cfg.MaxBytes = v
 			}
 			if cmd.Flags().Changed("max-chunks") {
 				cfg.MaxChunks, _ = cmd.Flags().GetInt64("max-chunks")

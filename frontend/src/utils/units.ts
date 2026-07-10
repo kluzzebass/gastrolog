@@ -127,6 +127,50 @@ export function parseDuration(s: string): bigint {
   return total;
 }
 
+/**
+ * Parse a duration string to nanoseconds at full precision. Accepts Go
+ * duration syntax (h/m/s/ms/us/ns, decimals allowed, e.g. "2h3m10s1004ms")
+ * plus "d" (days) as input convenience and a bare integer meaning seconds —
+ * matching the CLI edge. Returns 0n for empty or unparseable input.
+ */
+export function parseDurationNanos(s: string): bigint {
+  s = s.trim().toLowerCase();
+  if (!s) return 0n;
+  if (/^\d+$/.test(s)) return BigInt(s) * 1_000_000_000n;
+  let total = 0n;
+  let rest = s;
+  const mult: Record<string, number> = {
+    d: 86_400e9, h: 3_600e9, m: 60e9, s: 1e9, ms: 1e6, us: 1e3, ns: 1,
+  };
+  while (rest.length > 0) {
+    const m = /^(\d+(?:\.\d+)?)(d|h|ms|m|s|us|ns)/.exec(rest);
+    if (!m) return 0n;
+    total += BigInt(Math.round(parseFloat(m[1]!) * mult[m[2]!]!));
+    rest = rest.slice(m[0].length);
+  }
+  return total;
+}
+
+/**
+ * Format nanoseconds as a canonical exact duration (e.g. "2h3m11.004s",
+ * "720h", "30s"). Value-faithful, not spelling-faithful: the operator's
+ * exact input form is not preserved, its value is — sub-second precision
+ * renders as fractional seconds with trailing zeros trimmed.
+ */
+export function formatDurationNanos(nanos: bigint): string {
+  if (nanos <= 0n) return "";
+  const totalSecs = nanos / 1_000_000_000n;
+  const frac = nanos % 1_000_000_000n;
+  if (frac === 0n) return formatDuration(totalSecs);
+  const hours = totalSecs / 3600n;
+  const mins = (totalSecs % 3600n) / 60n;
+  const secs = totalSecs % 60n;
+  const fracStr = frac.toString().padStart(9, "0").replace(/0+$/, "");
+  const hPart = hours > 0n ? `${hours}h` : "";
+  const mPart = mins > 0n ? `${mins}m` : "";
+  return `${hPart}${mPart}${secs}.${fracStr}s`;
+}
+
 /** Format milliseconds to a human-readable duration (e.g. "2h 15m"). */
 export function formatDurationMs(ms: number): string {
   if (ms < 1_000) return `${ms}ms`;

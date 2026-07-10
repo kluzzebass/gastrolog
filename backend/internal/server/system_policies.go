@@ -5,14 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"gastrolog/internal/glid"
-	"time"
 
 	"connectrpc.com/connect"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/system"
 	"gastrolog/internal/system/raftfsm"
-	"gastrolog/internal/units"
 )
 
 // PutRotationPolicy creates or updates a rotation policy.
@@ -220,16 +218,17 @@ func (s *SystemServer) DeleteRetentionPolicy(
 // --- Proto <-> Config conversion helpers for policies ---
 
 // protoToRotationPolicy converts a proto RotationPolicyConfig to a system.RotationPolicyConfig.
+// Numeric passthrough: quantities stay numbers at rest — the old converters
+// FORMATTED numbers into human strings for storage and parsed them back on
+// every read, so stored config meaning depended on the parser du jour.
 func protoToRotationPolicy(p *apiv1.RotationPolicyConfig) system.RotationPolicyConfig {
 	var cfg system.RotationPolicyConfig
 
 	if p.MaxBytes > 0 {
-		s := units.FormatBytesCompact(uint64(p.MaxBytes))
-		cfg.MaxBytes = &s
+		cfg.MaxBytes = new(uint64(p.MaxBytes))
 	}
-	if p.MaxAgeSeconds > 0 {
-		s := (time.Duration(p.MaxAgeSeconds) * time.Second).String()
-		cfg.MaxAge = &s
+	if p.MaxAgeNanos > 0 {
+		cfg.MaxAgeNanos = new(p.MaxAgeNanos)
 	}
 	if p.MaxRecords > 0 {
 		cfg.MaxRecords = new(p.MaxRecords)
@@ -246,15 +245,10 @@ func rotationPolicyToProto(cfg system.RotationPolicyConfig) *apiv1.RotationPolic
 	p := &apiv1.RotationPolicyConfig{}
 
 	if cfg.MaxBytes != nil {
-		// Parse the human-readable byte string back to raw bytes.
-		if bytes, err := system.ParseSize(*cfg.MaxBytes); err == nil {
-			p.MaxBytes = int64(bytes) //nolint:gosec // G115: parsed byte count is always reasonable
-		}
+		p.MaxBytes = int64(*cfg.MaxBytes) //nolint:gosec // G115: config byte count is always reasonable
 	}
-	if cfg.MaxAge != nil {
-		if d, err := time.ParseDuration(*cfg.MaxAge); err == nil {
-			p.MaxAgeSeconds = int64(d.Seconds())
-		}
+	if cfg.MaxAgeNanos != nil {
+		p.MaxAgeNanos = *cfg.MaxAgeNanos
 	}
 	if cfg.MaxRecords != nil {
 		p.MaxRecords = *cfg.MaxRecords
@@ -270,13 +264,11 @@ func rotationPolicyToProto(cfg system.RotationPolicyConfig) *apiv1.RotationPolic
 func protoToRetentionPolicy(p *apiv1.RetentionPolicyConfig) system.RetentionPolicyConfig {
 	var cfg system.RetentionPolicyConfig
 
-	if p.MaxAgeSeconds > 0 {
-		s := (time.Duration(p.MaxAgeSeconds) * time.Second).String()
-		cfg.MaxAge = &s
+	if p.MaxAgeNanos > 0 {
+		cfg.MaxAgeNanos = new(p.MaxAgeNanos)
 	}
 	if p.MaxBytes > 0 {
-		s := units.FormatBytesCompact(uint64(p.MaxBytes))
-		cfg.MaxBytes = &s
+		cfg.MaxBytes = new(uint64(p.MaxBytes))
 	}
 	if p.MaxChunks > 0 {
 		cfg.MaxChunks = new(p.MaxChunks)
@@ -289,15 +281,11 @@ func protoToRetentionPolicy(p *apiv1.RetentionPolicyConfig) system.RetentionPoli
 func retentionPolicyToProto(cfg system.RetentionPolicyConfig) *apiv1.RetentionPolicyConfig {
 	p := &apiv1.RetentionPolicyConfig{}
 
-	if cfg.MaxAge != nil {
-		if d, err := time.ParseDuration(*cfg.MaxAge); err == nil {
-			p.MaxAgeSeconds = int64(d.Seconds())
-		}
+	if cfg.MaxAgeNanos != nil {
+		p.MaxAgeNanos = *cfg.MaxAgeNanos
 	}
 	if cfg.MaxBytes != nil {
-		if bytes, err := system.ParseSize(*cfg.MaxBytes); err == nil {
-			p.MaxBytes = int64(bytes) //nolint:gosec // G115: parsed byte count is always reasonable
-		}
+		p.MaxBytes = int64(*cfg.MaxBytes) //nolint:gosec // G115: config byte count is always reasonable
 	}
 	if cfg.MaxChunks != nil {
 		p.MaxChunks = *cfg.MaxChunks

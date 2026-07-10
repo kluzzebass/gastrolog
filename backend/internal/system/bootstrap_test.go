@@ -4,6 +4,7 @@ import (
 	"context"
 	"reflect"
 	"testing"
+	"time"
 
 	"gastrolog/internal/system"
 	"gastrolog/internal/system/memory"
@@ -22,8 +23,8 @@ func TestDefaultConfig(t *testing.T) {
 	if rp.Name != "default" {
 		t.Fatalf("expected rotation policy name 'default', got %q", rp.Name)
 	}
-	if rp.MaxAge == nil || *rp.MaxAge != "5m" {
-		t.Errorf("expected MaxAge '5m', got %v", rp.MaxAge)
+	if rp.MaxAgeNanos == nil || *rp.MaxAgeNanos != int64(5*time.Minute) {
+		t.Errorf("expected MaxAgeNanos 5m, got %v", rp.MaxAgeNanos)
 	}
 	if len(cfg.Vaults) != 1 {
 		t.Errorf("expected 1 vault, got %d", len(cfg.Vaults))

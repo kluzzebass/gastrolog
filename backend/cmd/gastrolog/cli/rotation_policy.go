@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/system"
+	"gastrolog/internal/units"
 	"strconv"
 	"time"
 
@@ -47,13 +48,13 @@ func newRotationPolicyListCmd() *cobra.Command {
 			for _, rp := range resp.Msg.RotationPolicies {
 				rows = append(rows, []string{
 					glid.FromBytes(rp.Id).String(), rp.Name,
-					formatInt64(rp.MaxBytes),
-					formatInt64(rp.MaxAgeSeconds),
+					formatBytesCell(rp.MaxBytes),
+					formatDurationCell(rp.MaxAgeNanos),
 					formatInt64(rp.MaxRecords),
 					rp.Cron,
 				})
 			}
-			p.table([]string{"ID", "NAME", "MAX BYTES", "MAX AGE (s)", "MAX RECORDS", "CRON"}, rows)
+			p.table([]string{"ID", "NAME", "MAX BYTES", "MAX AGE", "MAX RECORDS", "CRON"}, rows)
 			return nil
 		},
 	}
@@ -87,8 +88,8 @@ func newRotationPolicyGetCmd() *cobra.Command {
 					p.kv([][2]string{
 						{"ID", glid.FromBytes(rp.Id).String()},
 						{"Name", rp.Name},
-						{"Max Bytes", formatInt64(rp.MaxBytes)},
-						{"Max Age (s)", formatInt64(rp.MaxAgeSeconds)},
+						{"Max Bytes", formatBytesCell(rp.MaxBytes)},
+						{"Max Age", formatDurationCell(rp.MaxAgeNanos)},
 						{"Max Records", formatInt64(rp.MaxRecords)},
 						{"Cron", rp.Cron},
 					})
@@ -128,23 +129,18 @@ func newRotationPolicyCreateCmd() *cobra.Command {
 			}
 
 			if cmd.Flags().Changed("max-bytes") {
-				raw, _ := cmd.Flags().GetString("max-bytes")
-				cfg.MaxBytes = 0
-				if raw != "" {
-					v, err := system.ParseSize(raw)
-					if err != nil {
-						return fmt.Errorf("invalid --max-bytes: %w", err)
-					}
-					cfg.MaxBytes = int64(v) //nolint:gosec // human sizes are far below int64 max
+				v, err := maxBytesFlagValue(cmd)
+				if err != nil {
+					return err
 				}
+				cfg.MaxBytes = v
 			}
 			if cmd.Flags().Changed("max-age") {
-				maxAgeStr, _ := cmd.Flags().GetString("max-age")
-				if maxAgeStr != "" {
-					cfg.MaxAgeSeconds = parseDurationSeconds(maxAgeStr)
-				} else {
-					cfg.MaxAgeSeconds = 0
+				v, err := maxAgeFlagNanos(cmd)
+				if err != nil {
+					return err
 				}
+				cfg.MaxAgeNanos = v
 			}
 			if cmd.Flags().Changed("max-records") {
 				cfg.MaxRecords, _ = cmd.Flags().GetInt64("max-records")
@@ -200,17 +196,46 @@ func newRotationPolicyDeleteCmd() *cobra.Command {
 	}
 }
 
-// parseDurationSeconds parses a duration string (e.g. "1m", "30s", "2h") or
-// a plain integer (seconds) and returns the value in seconds.
-func parseDurationSeconds(s string) int64 {
+// maxBytesFlagValue parses the string --max-bytes flag as a human size
+// ("64MB"); empty resets to 0 = no limit.
+func maxBytesFlagValue(cmd *cobra.Command) (int64, error) {
+	raw, _ := cmd.Flags().GetString("max-bytes")
+	if raw == "" {
+		return 0, nil
+	}
+	v, err := system.ParseSize(raw)
+	if err != nil {
+		return 0, fmt.Errorf("invalid --max-bytes: %w", err)
+	}
+	return int64(v), nil //nolint:gosec // human sizes are far below int64 max
+}
+
+// maxAgeFlagNanos parses the --max-age flag at full precision to nanoseconds;
+// empty resets to 0 = no limit.
+func maxAgeFlagNanos(cmd *cobra.Command) (int64, error) {
+	raw, _ := cmd.Flags().GetString("max-age")
+	if raw == "" {
+		return 0, nil
+	}
+	d, err := parseDurationFlag(raw)
+	if err != nil {
+		return 0, fmt.Errorf("invalid --max-age: %w", err)
+	}
+	return int64(d), nil
+}
+
+// parseDurationFlag parses a duration string at full precision (Go syntax,
+// e.g. "2h3m10s1004ms") or a plain integer (seconds). The old helper returned
+// whole seconds, silently truncating sub-second input.
+func parseDurationFlag(s string) (time.Duration, error) {
 	if d, err := time.ParseDuration(s); err == nil {
-		return int64(d.Seconds())
+		return d, nil
 	}
-	// Fall back to plain integer (seconds).
+	// Plain integer = seconds, for backward-compatible bare-number input.
 	if v, err := strconv.ParseInt(s, 10, 64); err == nil {
-		return v
+		return time.Duration(v) * time.Second, nil
 	}
-	return 0
+	return 0, fmt.Errorf("invalid duration %q (use Go syntax, e.g. \"30s\", \"1h30m\")", s)
 }
 
 func formatInt64(v int64) string {
@@ -218,4 +243,21 @@ func formatInt64(v int64) string {
 		return "-"
 	}
 	return strconv.FormatInt(v, 10)
+}
+
+// formatBytesCell renders a byte quantity for table/kv output, exact and
+// human-readable ("64MB", "2GiB"); zero renders as unset.
+func formatBytesCell(v int64) string {
+	if v <= 0 {
+		return "-"
+	}
+	return units.FormatBytesCompact(uint64(v))
+}
+
+// formatDurationCell renders a nanosecond duration canonically ("2h3m11.004s").
+func formatDurationCell(nanos int64) string {
+	if nanos <= 0 {
+		return "-"
+	}
+	return time.Duration(nanos).String()
 }

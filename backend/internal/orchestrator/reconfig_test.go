@@ -808,7 +808,7 @@ func TestRetentionSingleJobRegistered(t *testing.T) {
 			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 		RetentionPolicies: []system.RetentionPolicyConfig{
-			{ID: retPolicyID, Name: "age-2m", MaxAge: strPtr("2m")},
+			{ID: retPolicyID, Name: "age-2m", MaxAgeNanos: int64Ptr(int64(2 * time.Minute))},
 		},
 		Vaults: []system.VaultConfig{
 			{ID: vaultID, Name: "src"},
@@ -843,6 +843,8 @@ func TestRetentionSingleJobRegistered(t *testing.T) {
 // asserts that a route carrying a bad expression fails ReloadFilters.
 
 func strPtr(s string) *string { return &s }
+
+func int64Ptr(v int64) *int64 { return &v }
 
 // TestReloadRotationPolicies_AppliesSynchronously was removed in Rubicon E2
 // (gastrolog-358ak): ReloadRotationPolicies no longer hot-swaps the per-instance

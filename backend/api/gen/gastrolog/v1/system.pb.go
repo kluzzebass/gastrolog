@@ -1199,13 +1199,15 @@ func (x *IngesterConfig) GetAllNodes() bool {
 }
 
 type RotationPolicyConfig struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	MaxBytes      int64                  `protobuf:"varint,1,opt,name=max_bytes,json=maxBytes,proto3" json:"max_bytes,omitempty"`
-	MaxRecords    int64                  `protobuf:"varint,2,opt,name=max_records,json=maxRecords,proto3" json:"max_records,omitempty"`
-	MaxAgeSeconds int64                  `protobuf:"varint,3,opt,name=max_age_seconds,json=maxAgeSeconds,proto3" json:"max_age_seconds,omitempty"`
-	Cron          string                 `protobuf:"bytes,4,opt,name=cron,proto3" json:"cron,omitempty"`
-	Id            []byte                 `protobuf:"bytes,5,opt,name=id,proto3" json:"id,omitempty"`
-	Name          string                 `protobuf:"bytes,6,opt,name=name,proto3" json:"name,omitempty"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	MaxBytes   int64                  `protobuf:"varint,1,opt,name=max_bytes,json=maxBytes,proto3" json:"max_bytes,omitempty"`
+	MaxRecords int64                  `protobuf:"varint,2,opt,name=max_records,json=maxRecords,proto3" json:"max_records,omitempty"`
+	// Nanoseconds: durations are stored at full precision — a seconds field
+	// silently truncated sub-second input (e.g. "1004ms").
+	MaxAgeNanos   int64  `protobuf:"varint,3,opt,name=max_age_nanos,json=maxAgeNanos,proto3" json:"max_age_nanos,omitempty"`
+	Cron          string `protobuf:"bytes,4,opt,name=cron,proto3" json:"cron,omitempty"`
+	Id            []byte `protobuf:"bytes,5,opt,name=id,proto3" json:"id,omitempty"`
+	Name          string `protobuf:"bytes,6,opt,name=name,proto3" json:"name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1254,9 +1256,9 @@ func (x *RotationPolicyConfig) GetMaxRecords() int64 {
 	return 0
 }
 
-func (x *RotationPolicyConfig) GetMaxAgeSeconds() int64 {
+func (x *RotationPolicyConfig) GetMaxAgeNanos() int64 {
 	if x != nil {
-		return x.MaxAgeSeconds
+		return x.MaxAgeNanos
 	}
 	return 0
 }
@@ -1283,12 +1285,13 @@ func (x *RotationPolicyConfig) GetName() string {
 }
 
 type RetentionPolicyConfig struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	MaxAgeSeconds int64                  `protobuf:"varint,1,opt,name=max_age_seconds,json=maxAgeSeconds,proto3" json:"max_age_seconds,omitempty"`
-	MaxBytes      int64                  `protobuf:"varint,2,opt,name=max_bytes,json=maxBytes,proto3" json:"max_bytes,omitempty"`
-	MaxChunks     int64                  `protobuf:"varint,3,opt,name=max_chunks,json=maxChunks,proto3" json:"max_chunks,omitempty"`
-	Id            []byte                 `protobuf:"bytes,4,opt,name=id,proto3" json:"id,omitempty"`
-	Name          string                 `protobuf:"bytes,5,opt,name=name,proto3" json:"name,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Nanoseconds (see RotationPolicyConfig.max_age_nanos).
+	MaxAgeNanos   int64  `protobuf:"varint,1,opt,name=max_age_nanos,json=maxAgeNanos,proto3" json:"max_age_nanos,omitempty"`
+	MaxBytes      int64  `protobuf:"varint,2,opt,name=max_bytes,json=maxBytes,proto3" json:"max_bytes,omitempty"`
+	MaxChunks     int64  `protobuf:"varint,3,opt,name=max_chunks,json=maxChunks,proto3" json:"max_chunks,omitempty"`
+	Id            []byte `protobuf:"bytes,4,opt,name=id,proto3" json:"id,omitempty"`
+	Name          string `protobuf:"bytes,5,opt,name=name,proto3" json:"name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1323,9 +1326,9 @@ func (*RetentionPolicyConfig) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{11}
 }
 
-func (x *RetentionPolicyConfig) GetMaxAgeSeconds() int64 {
+func (x *RetentionPolicyConfig) GetMaxAgeNanos() int64 {
 	if x != nil {
-		return x.MaxAgeSeconds
+		return x.MaxAgeNanos
 	}
 	return 0
 }
@@ -8956,17 +8959,17 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\tall_nodes\x18\t \x01(\bR\ballNodes\x1a9\n" +
 	"\vParamsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xb4\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xb0\x01\n" +
 	"\x14RotationPolicyConfig\x12\x1b\n" +
 	"\tmax_bytes\x18\x01 \x01(\x03R\bmaxBytes\x12\x1f\n" +
 	"\vmax_records\x18\x02 \x01(\x03R\n" +
-	"maxRecords\x12&\n" +
-	"\x0fmax_age_seconds\x18\x03 \x01(\x03R\rmaxAgeSeconds\x12\x12\n" +
+	"maxRecords\x12\"\n" +
+	"\rmax_age_nanos\x18\x03 \x01(\x03R\vmaxAgeNanos\x12\x12\n" +
 	"\x04cron\x18\x04 \x01(\tR\x04cron\x12\x0e\n" +
 	"\x02id\x18\x05 \x01(\fR\x02id\x12\x12\n" +
-	"\x04name\x18\x06 \x01(\tR\x04name\"\x9f\x01\n" +
-	"\x15RetentionPolicyConfig\x12&\n" +
-	"\x0fmax_age_seconds\x18\x01 \x01(\x03R\rmaxAgeSeconds\x12\x1b\n" +
+	"\x04name\x18\x06 \x01(\tR\x04name\"\x9b\x01\n" +
+	"\x15RetentionPolicyConfig\x12\"\n" +
+	"\rmax_age_nanos\x18\x01 \x01(\x03R\vmaxAgeNanos\x12\x1b\n" +
 	"\tmax_bytes\x18\x02 \x01(\x03R\bmaxBytes\x12\x1d\n" +
 	"\n" +
 	"max_chunks\x18\x03 \x01(\x03R\tmaxChunks\x12\x0e\n" +

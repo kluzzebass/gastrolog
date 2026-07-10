@@ -332,24 +332,19 @@ func (o *Orchestrator) resolveChunkPolicy(sys *system.System, vaultID glid.GLID)
 }
 
 // manifestRotationPolicy maps a system rotation policy config onto the pipeline
-// chunking manifest policy plus its cron expression. It reuses the same parsing
-// as system.RotationPolicyConfig.ToRotationPolicy (the legacy chunk path) so the
-// two agree on byte/duration interpretation. Invalid sub-fields are dropped
-// rather than failing the whole vault — admission already validated the policy.
+// chunking manifest policy plus its cron expression. Quantities are numeric at
+// rest (bytes / nanoseconds), so this is a direct mapping — no parsing, and no
+// possibility of the two rotation paths disagreeing on interpretation.
 func manifestRotationPolicy(c system.RotationPolicyConfig) (chunking.ManifestRotationPolicy, string) {
 	var p chunking.ManifestRotationPolicy
 	if c.MaxRecords != nil && *c.MaxRecords > 0 {
 		p.MaxRecords = uint64(*c.MaxRecords)
 	}
-	if c.MaxBytes != nil && *c.MaxBytes != "" {
-		if b, err := system.ParseSize(*c.MaxBytes); err == nil {
-			p.MaxBytes = b
-		}
+	if c.MaxBytes != nil {
+		p.MaxBytes = *c.MaxBytes
 	}
-	if c.MaxAge != nil && *c.MaxAge != "" {
-		if d, err := time.ParseDuration(*c.MaxAge); err == nil && d > 0 {
-			p.MaxAge = d
-		}
+	if c.MaxAgeNanos != nil && *c.MaxAgeNanos > 0 {
+		p.MaxAge = time.Duration(*c.MaxAgeNanos)
 	}
 	cron := ""
 	if c.Cron != nil {

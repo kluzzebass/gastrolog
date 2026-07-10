@@ -946,8 +946,8 @@ func copyRotationPolicy(rp system.RotationPolicyConfig) system.RotationPolicyCon
 	if rp.MaxBytes != nil {
 		c.MaxBytes = new(*rp.MaxBytes)
 	}
-	if rp.MaxAge != nil {
-		c.MaxAge = new(*rp.MaxAge)
+	if rp.MaxAgeNanos != nil {
+		c.MaxAgeNanos = new(*rp.MaxAgeNanos)
 	}
 	if rp.MaxRecords != nil {
 		c.MaxRecords = new(*rp.MaxRecords)
@@ -963,8 +963,8 @@ func copyRetentionPolicy(rp system.RetentionPolicyConfig) system.RetentionPolicy
 		ID:   rp.ID,
 		Name: rp.Name,
 	}
-	if rp.MaxAge != nil {
-		c.MaxAge = new(*rp.MaxAge)
+	if rp.MaxAgeNanos != nil {
+		c.MaxAgeNanos = new(*rp.MaxAgeNanos)
 	}
 	if rp.MaxBytes != nil {
 		c.MaxBytes = new(*rp.MaxBytes)

@@ -388,7 +388,7 @@ func TestRetentionTargetThreadsDispositionFromVaultConfig(t *testing.T) {
 				}},
 				RetentionPolicies: []system.RetentionPolicyConfig{{
 					ID:     policyID,
-					MaxAge: strPtr("1h"),
+					MaxAgeNanos: int64Ptr(int64(time.Hour)),
 				}},
 			}
 

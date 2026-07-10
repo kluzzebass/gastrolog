@@ -5,6 +5,8 @@ import {
   parseBytes,
   formatDuration,
   parseDuration,
+  parseDurationNanos,
+  formatDurationNanos,
   formatDurationMs,
 } from "./units";
 
@@ -121,6 +123,45 @@ describe("roundtrip: parseBytes <-> formatBytesBigint", () => {
   for (const s of ["1KB", "64MB", "1GB", "2GB", "1KiB", "64MiB", "2GiB"]) {
     test(s, () => expect(formatBytesBigint(parseBytes(s))).toBe(s));
   }
+});
+
+// Full-precision duration helpers for stored config (nanoseconds at rest):
+// value-faithful canonical output, not spelling-faithful — "2h3m10s1004ms"
+// is exactly "2h3m11.004s".
+describe("parseDurationNanos", () => {
+  test("empty", () => expect(parseDurationNanos("")).toBe(0n));
+  test("seconds", () => expect(parseDurationNanos("30s")).toBe(30_000_000_000n));
+  test("bare integer = seconds", () =>
+    expect(parseDurationNanos("300")).toBe(300_000_000_000n));
+  test("milliseconds", () => expect(parseDurationNanos("1004ms")).toBe(1_004_000_000n));
+  test("mixed full precision", () =>
+    expect(parseDurationNanos("2h3m10s1004ms")).toBe(7_391_004_000_000n));
+  test("days convenience", () =>
+    expect(parseDurationNanos("1d")).toBe(86_400_000_000_000n));
+  test("decimals", () => expect(parseDurationNanos("1.5h")).toBe(5_400_000_000_000n));
+  test("junk returns 0", () => expect(parseDurationNanos("abc")).toBe(0n));
+});
+
+describe("formatDurationNanos", () => {
+  test("zero returns empty", () => expect(formatDurationNanos(0n)).toBe(""));
+  test("whole seconds delegate to canonical h/m/s", () =>
+    expect(formatDurationNanos(5_400_000_000_000n)).toBe("1h30m"));
+  test("720h stays 720h", () =>
+    expect(formatDurationNanos(2_592_000_000_000_000n)).toBe("720h"));
+  test("sub-second precision exact", () =>
+    expect(formatDurationNanos(7_391_004_000_000n)).toBe("2h3m11.004s"));
+  test("bare millis", () => expect(formatDurationNanos(1_004_000_000n)).toBe("1.004s"));
+});
+
+describe("roundtrip: parseDurationNanos <-> formatDurationNanos (value-exact)", () => {
+  for (const s of ["30s", "5m", "1h30m", "720h"]) {
+    test(s, () => expect(formatDurationNanos(parseDurationNanos(s))).toBe(s));
+  }
+  test("2h3m10s1004ms normalizes to canonical equivalent", () => {
+    const n = parseDurationNanos("2h3m10s1004ms");
+    expect(formatDurationNanos(n)).toBe("2h3m11.004s");
+    expect(parseDurationNanos(formatDurationNanos(n))).toBe(n);
+  });
 });
 
 describe("roundtrip: parseDuration <-> formatDuration", () => {

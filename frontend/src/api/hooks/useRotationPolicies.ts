@@ -9,7 +9,7 @@ export function usePutRotationPolicy() {
       name: string;
       maxBytes: bigint;
       maxRecords: bigint;
-      maxAgeSeconds: bigint;
+      maxAgeNanos: bigint;
       cron: string;
     }) => {
       return systemClient.putRotationPolicy({
@@ -18,7 +18,7 @@ export function usePutRotationPolicy() {
           name: args.name,
           maxBytes: args.maxBytes,
           maxRecords: args.maxRecords,
-          maxAgeSeconds: args.maxAgeSeconds,
+          maxAgeNanos: args.maxAgeNanos,
           cron: args.cron,
         },
       });

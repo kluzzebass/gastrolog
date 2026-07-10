@@ -506,6 +506,8 @@ func (l testSystemLoader) Load(_ context.Context) (*system.System, error) {
 
 func strPtr(s string) *string { return &s }
 
+func int64Ptr(v int64) *int64 { return &v }
+
 // ==========================================================================
 // Multi-node retention sweep tests
 //
@@ -696,7 +698,7 @@ func TestRetentionTargetRefreshesCmOnExistingRunner(t *testing.T) {
 		}},
 		RetentionPolicies: []system.RetentionPolicyConfig{{
 			ID:     policyID,
-			MaxAge: strPtr("1h"),
+			MaxAgeNanos: int64Ptr(int64(time.Hour)),
 		}},
 	}
 

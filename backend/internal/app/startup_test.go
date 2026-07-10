@@ -202,9 +202,9 @@ func TestEnsureConfig_ConfigWithoutSecret(t *testing.T) {
 	// gastrolog-4kkoo (Phase 5): no FilterConfig — use a rotation policy
 	// to push Load() over the empty-store threshold while keeping server
 	// settings unset.
-	dummyMaxAge := "1h"
+	dummyMaxAge := int64(time.Hour)
 	if err := store.PutRotationPolicy(ctx, system.RotationPolicyConfig{
-		ID: glid.New(), Name: "dummy", MaxAge: &dummyMaxAge,
+		ID: glid.New(), Name: "dummy", MaxAgeNanos: &dummyMaxAge,
 	}); err != nil {
 		t.Fatal(err)
 	}

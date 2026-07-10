@@ -992,9 +992,12 @@ export class RotationPolicyConfig extends Message<RotationPolicyConfig> {
   maxRecords = protoInt64.zero;
 
   /**
-   * @generated from field: int64 max_age_seconds = 3;
+   * Nanoseconds: durations are stored at full precision — a seconds field
+   * silently truncated sub-second input (e.g. "1004ms").
+   *
+   * @generated from field: int64 max_age_nanos = 3;
    */
-  maxAgeSeconds = protoInt64.zero;
+  maxAgeNanos = protoInt64.zero;
 
   /**
    * @generated from field: string cron = 4;
@@ -1021,7 +1024,7 @@ export class RotationPolicyConfig extends Message<RotationPolicyConfig> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "max_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 2, name: "max_records", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 3, name: "max_age_seconds", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 3, name: "max_age_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 4, name: "cron", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 5, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 6, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
@@ -1049,9 +1052,11 @@ export class RotationPolicyConfig extends Message<RotationPolicyConfig> {
  */
 export class RetentionPolicyConfig extends Message<RetentionPolicyConfig> {
   /**
-   * @generated from field: int64 max_age_seconds = 1;
+   * Nanoseconds (see RotationPolicyConfig.max_age_nanos).
+   *
+   * @generated from field: int64 max_age_nanos = 1;
    */
-  maxAgeSeconds = protoInt64.zero;
+  maxAgeNanos = protoInt64.zero;
 
   /**
    * @generated from field: int64 max_bytes = 2;
@@ -1081,7 +1086,7 @@ export class RetentionPolicyConfig extends Message<RetentionPolicyConfig> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.RetentionPolicyConfig";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "max_age_seconds", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 1, name: "max_age_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 2, name: "max_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 3, name: "max_chunks", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 4, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
