@@ -527,6 +527,18 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		}
 	}
 
+	// Ingester convergence sweep (gastrolog-3mnjlo). Event-driven ingester
+	// dispatch is one-shot per FSM notification with silent early returns; a
+	// node that misses its boot dispatch runs no ingesters until the next
+	// config change (a full-cluster restart left one node originating nothing
+	// for 40+ minutes). This periodic safety net re-reconciles
+	// desired-vs-running (idempotent) and raises the ingester-not-running
+	// alert while diverged. Registered unconditionally — single-node deploys
+	// converge the same way.
+	if err := startIngesterReconcileSweep(ctx, orch.Scheduler(), disp, alertCollector); err != nil {
+		logger.Warn("startup: register scheduled job", "job", "ingester-reconcile", "error", err)
+	}
+
 	// For replication cases: block until server settings replicate from the leader.
 	if err := awaitReplication(ctx, appSys, cfg.ConfigType, cfgStore, logger); err != nil {
 		return err

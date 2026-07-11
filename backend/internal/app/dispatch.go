@@ -40,6 +40,7 @@ type orchActions interface {
 	IsDraining(vaultID glid.GLID) bool
 	CancelDrain(ctx context.Context, vaultID glid.GLID) error
 	ListIngesters() []glid.GLID
+	IsIngesterRunning(id glid.GLID) bool
 	ReconcileIngesters(desired []orchestrator.IngesterDesired) error
 	UpdateMaxConcurrentJobs(n int) error
 	MaxConcurrentJobs() int

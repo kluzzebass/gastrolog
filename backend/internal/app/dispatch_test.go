@@ -67,6 +67,7 @@ type mockOrch struct {
 	vaults     []glid.GLID
 	vaultTypes map[glid.GLID]string
 	ingesters  []glid.GLID
+	running    map[glid.GLID]bool
 
 	addVaultErr        error
 	forceRemoveErr     error
@@ -101,6 +102,8 @@ type mockOrch struct {
 
 func (m *mockOrch) ListVaults() []glid.GLID    { return m.vaults }
 func (m *mockOrch) ListIngesters() []glid.GLID { return m.ingesters }
+
+func (m *mockOrch) IsIngesterRunning(id glid.GLID) bool { return m.running[id] }
 func (m *mockOrch) VaultType(id glid.GLID) string {
 	if m.vaultTypes != nil {
 		return m.vaultTypes[id]
