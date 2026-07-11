@@ -20,6 +20,17 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+
+// publishSegForTest registers a completed segment in the FSM registry —
+// required before any manifest ref since the apply-time ghost-ref guard.
+func publishSegForTest(t *testing.T, fsm *vaultctlfsm.FSM, segID glid.GLID, count uint32, ts time.Time) {
+	t.Helper()
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalPublishCompletedSegment(vaultctlfsm.CompletedSegmentEntry{
+		SegmentID: segID, RecordCount: count, ByteSize: 1,
+		FirstIngestTS: ts, LastIngestTS: ts, Checksum: 1, PublishedAt: ts,
+	}))
+}
+
 func TestManagerBuildOnceBuildsGLCBAndAnnouncesSeal(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
@@ -31,6 +42,7 @@ func TestManagerBuildOnceBuildsGLCBAndAnnouncesSeal(t *testing.T) {
 
 	fsm := vaultctlfsm.New()
 	openedAt := base
+	publishSegForTest(t, fsm, segID, 1, openedAt)
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalOpenChunkManifest(chunkID, openedAt))
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
 		SegmentID:         segID,
@@ -57,8 +69,11 @@ func TestManagerBuildOnceBuildsGLCBAndAnnouncesSeal(t *testing.T) {
 	if err := mgr.BuildOnce(t.Context(), vaultID); err != nil {
 		t.Fatalf("BuildOnce: %v", err)
 	}
-	if len(applied) != 1 {
-		t.Fatalf("applied commands = %d, want 1 SealChunk", len(applied))
+	// SealChunk, and — now that the fixture registers its segment like
+	// production — the post-seal ReleaseSegments proposal for the fully
+	// consumed segment.
+	if len(applied) < 1 || len(applied) > 2 {
+		t.Fatalf("applied commands = %d, want SealChunk (+ optional ReleaseSegments)", len(applied))
 	}
 
 	glcbPath := chunking.ChunkGLCBPath(filepath.Join(home, "chunks"), chunkID)
@@ -401,6 +416,8 @@ func TestBuildMaterializesMissingSegments(t *testing.T) {
 
 	fsm := vaultctlfsm.New()
 	openedAt := base
+	publishSegForTest(t, fsm, present, 1, openedAt)
+	publishSegForTest(t, fsm, missing, 1, openedAt)
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalOpenChunkManifest(chunkID, openedAt))
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
 		SegmentID:         present,
@@ -450,6 +467,8 @@ func TestManagerFollowerSkipsQuietlyWhenSegmentsMissing(t *testing.T) {
 
 	fsm := vaultctlfsm.New()
 	openedAt := base
+	publishSegForTest(t, fsm, present, 1, openedAt)
+	publishSegForTest(t, fsm, missing, 1, openedAt)
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalOpenChunkManifest(chunkID, openedAt))
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
 		SegmentID:         present,
@@ -498,6 +517,7 @@ func TestManagerBuildsOnSealEvent(t *testing.T) {
 
 	fsm := vaultctlfsm.New()
 	openedAt := base
+	publishSegForTest(t, fsm, segID, 1, openedAt)
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalOpenChunkManifest(chunkID, openedAt))
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
 		SegmentID:         segID,
@@ -549,6 +569,7 @@ func TestManagerFollowerHomeBuildsWithoutProposingSealChunk(t *testing.T) {
 	fsm := vaultctlfsm.New()
 	openedAt := base
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalOpenChunkManifest(chunkID, openedAt))
+	publishSegForTest(t, fsm, segID, 1, base)
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
 		SegmentID:         segID,
 		FirstRecordNumber: 0,
@@ -644,6 +665,8 @@ func TestBuildMaterializesSpecificSegmentIDs(t *testing.T) {
 	fsm := vaultctlfsm.New()
 	openedAt := base
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalOpenChunkManifest(chunkID, openedAt))
+	publishSegForTest(t, fsm, present, 1, base)
+	publishSegForTest(t, fsm, missing, 1, base)
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
 		SegmentID:         present,
 		FirstRecordNumber: 0,
@@ -732,6 +755,7 @@ func TestManagerBuildOnceFollowerHomeBuildsGLCBWithoutSealing(t *testing.T) {
 	fsm := vaultctlfsm.New()
 	openedAt := base
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalOpenChunkManifest(chunkID, openedAt))
+	publishSegForTest(t, fsm, segID, 1, base)
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
 		SegmentID:         segID,
 		FirstRecordNumber: 0,
@@ -779,6 +803,7 @@ func TestManagerBuildOnceUsesExistingGLCBWithoutSegments(t *testing.T) {
 
 	fsm := vaultctlfsm.New()
 	openedAt := base
+	publishSegForTest(t, fsm, segID, 1, openedAt)
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalOpenChunkManifest(chunkID, openedAt))
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
 		SegmentID:         segID,
@@ -846,6 +871,7 @@ func TestManagerBuildOnceSealsAfterLeadershipTransfer(t *testing.T) {
 	fsm := vaultctlfsm.New()
 	openedAt := base
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalOpenChunkManifest(chunkID, openedAt))
+	publishSegForTest(t, fsm, segID, 1, base)
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
 		SegmentID:         segID,
 		FirstRecordNumber: 0,
@@ -900,6 +926,7 @@ func TestManagerBuildOnceRetriesSealApplyAfterFailure(t *testing.T) {
 	fsm := vaultctlfsm.New()
 	openedAt := base
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalOpenChunkManifest(chunkID, openedAt))
+	publishSegForTest(t, fsm, segID, 1, base)
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
 		SegmentID:         segID,
 		FirstRecordNumber: 0,

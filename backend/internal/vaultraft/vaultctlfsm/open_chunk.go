@@ -23,6 +23,10 @@ var (
 	ErrOpenChunkChunkIDMismatch = errors.New("chunk id does not match open manifest")
 	// ErrInvalidSegmentRef is returned when record numbers are out of order.
 	ErrInvalidSegmentRef = errors.New("invalid open chunk segment ref")
+	// ErrSegmentReleased is returned when a manifest ref names a segment no
+	// longer in the completed-segment registry (released between the
+	// planner's pass snapshot and this apply).
+	ErrSegmentReleased = errors.New("segment no longer in registry")
 )
 
 // OpenChunkSegmentRef names one segment slice in EventID-sorted record numbers.
@@ -358,6 +362,17 @@ func (f *FSM) applyAddOpenChunkSegmentRef(c *gastrologv1.AddOpenChunkSegmentRefC
 	segID := glid.FromBytes(c.GetSegmentId())
 	if segID == glid.Nil {
 		return errors.New("segment id required")
+	}
+	// A ref may only name a segment that still exists in the registry.
+	// The planner proposes refs from a pass snapshot while releases drop
+	// registry entries concurrently; without this apply-time check (the
+	// mirror of applyReleaseSegments' referenced-in-manifest guard) a stale
+	// ref lands after the release and creates a ghost reference: a sealed
+	// manifest no home can ever build — bytes purged everywhere — and no
+	// release can clear, wedging the seal queue permanently. Deterministic:
+	// every node sees identical registry state at this log index.
+	if f.completedSegments[segID] == nil {
+		return fmt.Errorf("%w: %s", ErrSegmentReleased, segID)
 	}
 	ref := OpenChunkSegmentRef{
 		SegmentID:         segID,
@@ -923,4 +938,106 @@ func NewReleaseSegments(segmentIDs []glid.GLID) *gastrologv1.VaultCtlCommand {
 // MarshalReleaseSegments builds Raft log data for ReleaseSegments.
 func MarshalReleaseSegments(segmentIDs []glid.GLID) []byte {
 	return mustMarshalCommand(NewReleaseSegments(segmentIDs))
+}
+
+// ErrManifestNotWedged is returned when DiscardUnbuildableManifests names a
+// manifest that is not the sealed head or has no ghost ref — the recovery
+// command refuses to discard buildable work.
+var ErrManifestNotWedged = errors.New("manifest is not a wedged sealed head")
+
+// applyDiscardUnbuildableManifests recovers a wedged seal queue. Validates
+// that chunk_id is the sealed HEAD manifest and that it references at least
+// one segment absent from the registry (a ghost ref admitted before the
+// apply-time guard); then drops the head, every queued sealed manifest
+// behind it, and the open manifest, rewinding each surviving segment's
+// resume cursor to its lowest discarded record number so all un-built
+// records re-plan. Planning is FIFO per segment, so built chunks sit
+// strictly below the rewound cursors; ghost segments' discarded ranges are
+// stale duplicates of already-chunked records. Deterministic: identical
+// registry and manifest state at this log index on every node.
+// Returns the discarded chunk IDs.
+func (f *FSM) applyDiscardUnbuildableManifests(c *gastrologv1.DiscardUnbuildableManifestsCommand) ([]chunk.ChunkID, error) {
+	id := chunkIDFromProto(c.GetChunkId())
+	head := f.sealedManifestHeadLocked()
+	if head == nil || head.ChunkID != id {
+		return nil, fmt.Errorf("%w: %s is not the sealed head", ErrManifestNotWedged, id)
+	}
+	ghost := false
+	for _, ref := range head.Refs {
+		if f.completedSegments[ref.SegmentID] == nil {
+			ghost = true
+			break
+		}
+	}
+	if !ghost {
+		return nil, fmt.Errorf("%w: %s has no ghost refs", ErrManifestNotWedged, id)
+	}
+
+	discard := make([]*OpenChunkManifest, 0, len(f.sealedManifests)+1)
+	discard = append(discard, f.sealedManifests...)
+	if f.openChunk != nil {
+		discard = append(discard, f.openChunk)
+	}
+
+	f.rewindResumeForDiscardLocked(discard)
+
+	// Drop the manifests, their chunk entries, and their segmentChunks
+	// mappings (a discarded chunk must not count toward supersession).
+	ids := make([]chunk.ChunkID, 0, len(discard))
+	for _, m := range discard {
+		ids = append(ids, m.ChunkID)
+		delete(f.chunks, m.ChunkID)
+		f.scrubSegmentChunksLocked(m)
+	}
+	f.sealedManifests = nil
+	f.openChunk = nil
+	return ids, nil
+}
+
+// rewindResumeForDiscardLocked resets each surviving segment's resume cursor
+// to its lowest record number across the discarded manifests' refs, so every
+// un-built record re-plans. Caller MUST hold f.mu.
+func (f *FSM) rewindResumeForDiscardLocked(discard []*OpenChunkManifest) {
+	rewind := make(map[glid.GLID]uint32)
+	for _, m := range discard {
+		for _, ref := range m.Refs {
+			if f.completedSegments[ref.SegmentID] == nil {
+				continue // ghost: records already durable in built chunks
+			}
+			if cur, ok := rewind[ref.SegmentID]; !ok || ref.FirstRecordNumber < cur {
+				rewind[ref.SegmentID] = ref.FirstRecordNumber
+			}
+		}
+	}
+	maps.Copy(f.segmentResume, rewind)
+}
+
+// scrubSegmentChunksLocked removes a discarded manifest's chunk ID from the
+// supersession mapping of every segment it referenced. Caller MUST hold f.mu.
+func (f *FSM) scrubSegmentChunksLocked(m *OpenChunkManifest) {
+	for _, ref := range m.Refs {
+		list := f.segmentChunks[ref.SegmentID]
+		for i, cid := range list {
+			if cid == m.ChunkID {
+				f.segmentChunks[ref.SegmentID] = append(list[:i], list[i+1:]...)
+				break
+			}
+		}
+		if len(f.segmentChunks[ref.SegmentID]) == 0 {
+			delete(f.segmentChunks, ref.SegmentID)
+		}
+	}
+}
+
+// NewDiscardUnbuildableManifests builds the recovery command for a wedged
+// sealed head.
+func NewDiscardUnbuildableManifests(id chunk.ChunkID) *gastrologv1.VaultCtlCommand {
+	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_DiscardUnbuildableManifests{
+		DiscardUnbuildableManifests: &gastrologv1.DiscardUnbuildableManifestsCommand{ChunkId: id[:]},
+	}}
+}
+
+// MarshalDiscardUnbuildableManifests builds Raft log data for the recovery command.
+func MarshalDiscardUnbuildableManifests(id chunk.ChunkID) []byte {
+	return mustMarshalCommand(NewDiscardUnbuildableManifests(id))
 }

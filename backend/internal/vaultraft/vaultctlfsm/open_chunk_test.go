@@ -22,6 +22,7 @@ func TestOpenChunkManifestLifecycle(t *testing.T) {
 	segID := glid.New()
 	refAddedAt := openedAt.Add(time.Second)
 
+	applyCmd(t, fsm, MarshalPublishCompletedSegment(CompletedSegmentEntry{SegmentID: segID, RecordCount: 1000, ByteSize: 1, Checksum: 1}))
 	applyCmd(t, fsm, MarshalOpenChunkManifest(chunkID, openedAt))
 	open := fsm.OpenChunk()
 	if open == nil || open.ChunkID != chunkID || !open.OpenedAt.Equal(openedAt) {
@@ -89,6 +90,7 @@ func TestAddOpenChunkSegmentRefPartialResume(t *testing.T) {
 	chunkID := testChunkID(0x54)
 	now := time.Unix(0, 1_700_000_000_000).UTC()
 	segID := glid.New()
+	applyCmd(t, fsm, MarshalPublishCompletedSegment(CompletedSegmentEntry{SegmentID: segID, RecordCount: 1000, ByteSize: 1, Checksum: 1}))
 	applyCmd(t, fsm, MarshalOpenChunkManifest(chunkID, now))
 
 	first := OpenChunkSegmentRef{
@@ -124,6 +126,8 @@ func TestAddOpenChunkSegmentRefsBatchApply(t *testing.T) {
 	chunkID := testChunkID(0x56)
 	now := time.Unix(0, 1_700_000_000_000).UTC()
 	segA, segB := glid.New(), glid.New()
+	applyCmd(t, fsm, MarshalPublishCompletedSegment(CompletedSegmentEntry{SegmentID: segA, RecordCount: 1000, ByteSize: 1, Checksum: 1}))
+	applyCmd(t, fsm, MarshalPublishCompletedSegment(CompletedSegmentEntry{SegmentID: segB, RecordCount: 1000, ByteSize: 1, Checksum: 1}))
 	applyCmd(t, fsm, MarshalOpenChunkManifest(chunkID, now))
 	applyCmd(t, fsm, MarshalAddOpenChunkSegmentRefs(chunkID, []OpenChunkSegmentRef{
 		{
@@ -171,8 +175,12 @@ func TestOpenChunkIdempotentReplay(t *testing.T) {
 	applyCmd(t, fsm, openWire)
 	applyCmd(t, fsm, openWire)
 
+	refSeg := glid.New()
+	applyCmd(t, fsm, MarshalPublishCompletedSegment(CompletedSegmentEntry{
+		SegmentID: refSeg, RecordCount: 1000, ByteSize: 1, Checksum: 1,
+	}))
 	ref := OpenChunkSegmentRef{
-		SegmentID:         glid.New(),
+		SegmentID:         refSeg,
 		FirstRecordNumber: 10,
 		LastRecordNumber:  19,
 		SliceBytes:        512,
@@ -305,6 +313,7 @@ func TestOpenChunkSnapshotRoundTrip(t *testing.T) {
 	openedAt := time.Unix(0, 1_700_000_000_000).UTC()
 	sealedAt := openedAt.Add(2 * time.Minute)
 	segID := glid.New()
+	applyCmd(t, src, MarshalPublishCompletedSegment(CompletedSegmentEntry{SegmentID: segID, RecordCount: 1000, ByteSize: 1, Checksum: 1}))
 	applyCmd(t, src, MarshalOpenChunkManifest(chunkID, openedAt))
 	applyCmd(t, src, MarshalAddOpenChunkSegmentRef(chunkID, OpenChunkSegmentRef{
 		SegmentID:         segID,
@@ -394,6 +403,7 @@ func TestSealChunkRepairsMissingManifestEntry(t *testing.T) {
 	chunkID := testChunkID(0x99)
 	segID := glid.New()
 	now := time.Unix(0, 1_700_000_000_000).UTC()
+	applyCmd(t, fsm, MarshalPublishCompletedSegment(CompletedSegmentEntry{SegmentID: segID, RecordCount: 1000, ByteSize: 1, Checksum: 1}))
 	applyCmd(t, fsm, MarshalOpenChunkManifest(chunkID, now))
 	applyCmd(t, fsm, MarshalAddOpenChunkSegmentRef(chunkID, OpenChunkSegmentRef{
 		SegmentID: segID, FirstRecordNumber: 0, LastRecordNumber: 9,
@@ -424,6 +434,7 @@ func TestSealChunkClearsStaleTombstoneForPendingManifest(t *testing.T) {
 	chunkID := testChunkID(0xCC)
 	segID := glid.New()
 	now := time.Unix(0, 1_700_000_000_000).UTC()
+	applyCmd(t, fsm, MarshalPublishCompletedSegment(CompletedSegmentEntry{SegmentID: segID, RecordCount: 1000, ByteSize: 1, Checksum: 1}))
 	applyCmd(t, fsm, MarshalOpenChunkManifest(chunkID, now))
 	applyCmd(t, fsm, MarshalAddOpenChunkSegmentRef(chunkID, OpenChunkSegmentRef{
 		SegmentID: segID, FirstRecordNumber: 0, LastRecordNumber: 9,
@@ -489,6 +500,7 @@ func TestDiscardRejectsNonemptyManifest(t *testing.T) {
 	chunkID := testChunkID(0x62)
 	now := time.Unix(0, 1_700_000_000_000).UTC()
 	segID := glid.New()
+	applyCmd(t, fsm, MarshalPublishCompletedSegment(CompletedSegmentEntry{SegmentID: segID, RecordCount: 1000, ByteSize: 1, Checksum: 1}))
 	applyCmd(t, fsm, MarshalOpenChunkManifest(chunkID, now))
 	applyCmd(t, fsm, MarshalAddOpenChunkSegmentRef(chunkID, OpenChunkSegmentRef{
 		SegmentID: segID, FirstRecordNumber: 0, LastRecordNumber: 0,
@@ -508,6 +520,7 @@ func TestListIncludingPipelineManifestIngestBounds(t *testing.T) {
 	ingestEnd := openedAt.Add(time.Minute)
 	segID := glid.New()
 
+	applyCmd(t, fsm, MarshalPublishCompletedSegment(CompletedSegmentEntry{SegmentID: segID, RecordCount: 1000, ByteSize: 1, Checksum: 1}))
 	applyCmd(t, fsm, MarshalOpenChunkManifest(chunkID, openedAt))
 	applyCmd(t, fsm, MarshalAddOpenChunkSegmentRef(chunkID, OpenChunkSegmentRef{
 		SegmentID:         segID,

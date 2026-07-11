@@ -25,6 +25,7 @@ func TestRecoverOnceSealsFromExistingGLCB(t *testing.T) {
 	fsm := vaultctlfsm.New()
 	openedAt := base
 	sealedAt := base.Add(time.Minute)
+	publishSegForTest(t, fsm, segID, 1, openedAt)
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalOpenChunkManifest(chunkID, openedAt))
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
 		SegmentID:         segID,
@@ -91,6 +92,7 @@ func TestRecoverOnceSealsOrphanActiveGLCB(t *testing.T) {
 
 	fsm := vaultctlfsm.New()
 	openedAt := base
+	publishSegForTest(t, fsm, segID, 1, openedAt)
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalOpenChunkManifest(chunkID, openedAt))
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
 		SegmentID:         segID,
@@ -161,6 +163,7 @@ func TestRecoverOnceSkipsSealedEntries(t *testing.T) {
 	fsm := vaultctlfsm.New()
 	openedAt := base
 	sealedAt := base.Add(time.Minute)
+	publishSegForTest(t, fsm, segID, 1, openedAt)
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalOpenChunkManifest(chunkID, openedAt))
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
 		SegmentID:         segID,
@@ -294,6 +297,7 @@ func TestRecoveryWaitsForFSMReplay(t *testing.T) {
 	// "Raft replay" arrives: the manifest lands SEALING (GLCB built, but
 	// CmdSealChunk never committed — the crash-mid-PostSealProcess shape).
 	// FSM becomes ready; recovery must now propose the missing seal.
+	publishSegForTest(t, fsm, segID, 1, base)
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalOpenChunkManifest(chunkID, base))
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
 		SegmentID: segID, FirstRecordNumber: 0, LastRecordNumber: 0, SliceBytes: 1024, RefAddedAt: base,

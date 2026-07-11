@@ -50,7 +50,11 @@ func buildRichFSM(t *testing.T) *FSM {
 		PublishedAt:   now,
 	}))
 
-	// open-chunk manifest: sealed pending materialization.
+	// open-chunk manifest: sealed pending materialization. The ref'd segment
+	// must exist in the registry (apply-time ghost-ref guard).
+	applyCmd(t, f, MarshalPublishCompletedSegment(CompletedSegmentEntry{
+		SegmentID: glidFromByte(0x66), RecordCount: 1000, ByteSize: 1, Checksum: 1, PublishedAt: now,
+	}))
 	openChunk := testChunkID(0x53)
 	applyCmd(t, f, MarshalOpenChunkManifest(openChunk, now))
 	applyCmd(t, f, MarshalAddOpenChunkSegmentRef(openChunk, OpenChunkSegmentRef{

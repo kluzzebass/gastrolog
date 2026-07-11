@@ -306,6 +306,9 @@ func (v *vaultChunking) materializeManifestSegments(ctx context.Context, manifes
 		v.clearBuildBlocked()
 		return nil
 	}
+	if v.proposeDiscardIfGhostRefs(manifest, missing) {
+		return ErrAwaitingLocalSegments
+	}
 	if v.cfg.Collector == nil {
 		v.noteBuildBlocked(manifest.ChunkID, missing)
 		if !v.cfg.IsLeader() {
@@ -325,11 +328,55 @@ func (v *vaultChunking) materializeManifestSegments(ctx context.Context, manifes
 		v.clearBuildBlocked()
 		return nil
 	}
+	if v.proposeDiscardIfGhostRefs(manifest, stillMissing) {
+		return ErrAwaitingLocalSegments
+	}
 	v.noteBuildBlocked(manifest.ChunkID, stillMissing)
 	if !v.cfg.IsLeader() {
 		return ErrAwaitingLocalSegments
 	}
 	return &MissingSegmentsError{SegmentIDs: stillMissing}
+}
+
+// proposeDiscardIfGhostRefs detects the unbuildable-manifest wedge and, on
+// the leader, proposes the recovery command. A missing segment that is
+// merely absent LOCALLY is normal collection lag; a segment absent from the
+// REGISTRY is a ghost ref (admitted before the apply-time guard): its bytes
+// are purged on every home, no build can ever succeed, and the seal queue is
+// head-of-line blocked — chunking stops, the backlog stops draining, and the
+// backlog budget correctly but permanently refuses ingest. Recovery discards
+// the wedged queue and rewinds resume cursors so every un-built record
+// re-plans; ghost ranges are stale duplicates of already-chunked records
+// (see DiscardUnbuildableManifestsCommand). State-based and immediate.
+func (v *vaultChunking) proposeDiscardIfGhostRefs(manifest SealedManifest, missing []glid.GLID) bool {
+	if !v.cfg.IsLeader() || v.applier() == nil {
+		return false
+	}
+	fsm := v.fsm()
+	var ghost glid.GLID
+	found := false
+	for _, id := range missing {
+		if fsm.GetCompletedSegment(id) == nil {
+			ghost, found = id, true
+			break
+		}
+	}
+	if !found {
+		return false
+	}
+	v.logger().Error("unbuildable sealed manifest — ghost segment ref; discarding wedged seal queue for re-plan",
+		"vault", v.cfg.VaultID, "chunk", manifest.ChunkID, "ghost_segment", ghost)
+	if v.cfg.Alerts != nil {
+		v.cfg.Alerts.Set(v.buildBlockedAlertID(), alert.Warning, "chunking",
+			fmt.Sprintf("vault %s: sealed manifest %s referenced a released segment and could never build; the wedged seal queue was discarded and its records re-plan into fresh chunks. No records were lost, but investigate how the ghost reference was admitted.",
+				v.cfg.VaultID, manifest.ChunkID))
+	}
+	if err := v.applier().Apply(vaultctlfsm.MarshalDiscardUnbuildableManifests(manifest.ChunkID)); err != nil {
+		v.logger().Warn("discard of unbuildable manifest failed; will retry on next build wake",
+			"vault", v.cfg.VaultID, "chunk", manifest.ChunkID, "error", err)
+		return false
+	}
+	return true
 }
 
 // buildBlockedAlertAfter is the grace period before a blocked build raises an

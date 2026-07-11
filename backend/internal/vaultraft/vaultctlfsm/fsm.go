@@ -866,6 +866,7 @@ type applyEffects struct {
 	openChunkRefAdded       *OpenChunkManifest
 	releasedSegmentIDs      []glid.GLID
 	ackedSegmentHolderIDs   []glid.GLID
+	discardedManifestIDs    []chunk.ChunkID
 
 	onCreate                  func(ManifestEntry)
 	onDelete                  func(chunk.ChunkID)
@@ -952,6 +953,15 @@ func (e applyEffects) firePipelineCallbacks() {
 		for _, fn := range e.onReleaseSegments {
 			ids := append([]glid.GLID(nil), e.releasedSegmentIDs...)
 			fn(ids)
+		}
+	}
+	// Discarded (unbuildable) manifests fire the same cleared signal a normal
+	// build completion does: every home's chunking manager drops its pending
+	// build/progress state for the chunk and the planner wakes to re-plan the
+	// rewound records into a fresh manifest.
+	for _, id := range e.discardedManifestIDs {
+		if e.onSealedManifestCleared != nil {
+			e.onSealedManifestCleared(id)
 		}
 	}
 	for _, id := range e.ackedSegmentHolderIDs {
@@ -1128,6 +1138,13 @@ func (f *FSM) tryApplySegmentPipelineLocked(cmd *gastrologv1.VaultCtlCommand) (a
 		if len(released) > 0 {
 			fx.releasedSegmentIDs = released
 		}
+		return nil, fx, true
+	case *gastrologv1.VaultCtlCommand_DiscardUnbuildableManifests:
+		discarded, err := f.applyDiscardUnbuildableManifests(c.DiscardUnbuildableManifests)
+		if err != nil {
+			return err, fx, true
+		}
+		fx.discardedManifestIDs = discarded
 		return nil, fx, true
 	case *gastrologv1.VaultCtlCommand_AckSegmentHolder:
 		added, result := f.applyAckSegmentHolder(c.AckSegmentHolder)

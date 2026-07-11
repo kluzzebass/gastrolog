@@ -310,6 +310,7 @@ func TestOnOpenChunkRefAddedCallbackFires(t *testing.T) {
 		calls++
 	})
 
+	_ = fsm.Apply(&hraft.Log{Data: MarshalPublishCompletedSegment(CompletedSegmentEntry{SegmentID: segID, RecordCount: 1000, ByteSize: 1, Checksum: 1})})
 	fsm.Apply(&hraft.Log{Data: MarshalOpenChunkManifest(chunkID, now)})
 	fsm.Apply(&hraft.Log{Data: MarshalAddOpenChunkSegmentRef(chunkID, OpenChunkSegmentRef{
 		SegmentID:         segID,
