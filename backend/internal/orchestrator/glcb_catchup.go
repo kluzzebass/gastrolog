@@ -49,6 +49,14 @@ func (o *Orchestrator) pullMissingGLCB(vaultID glid.GLID, e vaultctlfsm.Manifest
 	if o.diskGuard != nil && o.diskGuard.vaultSizeCapped(vaultID) {
 		return // at the max-size budget: replica pulls grow the local claim
 	}
+	// A chunk on its way out must not be pulled back in: retention flagged it
+	// (RetentionPending precedes the expunge) or the delete protocol is
+	// mid-flight. The bytes are being deleted on every home, so the pull is
+	// doomed on every peer — at expiry-backlog scale these doomed pulls were a
+	// constant failure stream (gastrolog-423tpt).
+	if chunkOnItsWayOut(e, o.vaultCtlPendingDelete(vaultID, e.ID)) {
+		return
+	}
 	root, ok := o.pipelineVaultChunkRoot(vaultID)
 	if !ok {
 		return
@@ -291,4 +299,20 @@ func (o *Orchestrator) vaultRetentionGiveUpTTL(vaultID glid.GLID) (time.Duration
 		}
 	}
 	return minTTL, minTTL > 0
+}
+
+// chunkOnItsWayOut reports whether the chunk is marked for removal —
+// retention-pending or an in-flight delete — making any replica pull doomed.
+func chunkOnItsWayOut(e vaultctlfsm.ManifestEntry, pd *vaultctlfsm.PendingDelete) bool {
+	return e.RetentionPending || pd != nil
+}
+
+// vaultCtlPendingDelete returns the in-flight delete entry for a chunk, or
+// nil (no vault-ctl handle / no pending delete).
+func (o *Orchestrator) vaultCtlPendingDelete(vaultID glid.GLID, id chunk.ChunkID) *vaultctlfsm.PendingDelete {
+	fsm, _, _, ok := o.vaultCtlHandle(vaultID)
+	if !ok || fsm == nil {
+		return nil
+	}
+	return fsm.PendingDelete(id)
 }

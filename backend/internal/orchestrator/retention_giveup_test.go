@@ -7,6 +7,7 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/system"
+	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
 // TestVaultRetentionGiveUpTTL pins the segment give-up bound's TTL source:
@@ -54,4 +55,24 @@ func TestVaultRetentionGiveUpTTL(t *testing.T) {
 			t.Fatal("vault without retention must not give up segments")
 		}
 	})
+}
+
+// TestChunkOnItsWayOut pins the doomed-pull gate: a sealed chunk flagged
+// retention-pending, or with an in-flight delete, must never be scheduled for
+// a replica catch-up pull — the bytes are being deleted on every home, so the
+// pull fails on every peer (the constant failure stream of gastrolog-423tpt).
+func TestChunkOnItsWayOut(t *testing.T) {
+	t.Parallel()
+	live := vaultctlfsm.ManifestEntry{ID: chunk.NewChunkID(), State: chunk.ChunkStateSealed}
+	if chunkOnItsWayOut(live, nil) {
+		t.Fatal("live sealed chunk must be pullable")
+	}
+	flagged := live
+	flagged.RetentionPending = true
+	if !chunkOnItsWayOut(flagged, nil) {
+		t.Fatal("retention-pending chunk must not be pulled")
+	}
+	if !chunkOnItsWayOut(live, &vaultctlfsm.PendingDelete{ChunkID: live.ID}) {
+		t.Fatal("chunk with in-flight delete must not be pulled")
+	}
 }

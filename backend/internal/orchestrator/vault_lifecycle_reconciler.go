@@ -981,6 +981,13 @@ func (r *VaultLifecycleReconciler) syncPipelineSealedGLCBs() {
 		if !e.IsSealed() {
 			continue
 		}
+		// Skip chunks on their way out (retention-pending or delete protocol
+		// in flight): the sweep tick that lands inside the expunge->finalize
+		// window otherwise schedules a doomed pull on EVERY home, since the
+		// bytes were just deleted everywhere (gastrolog-423tpt).
+		if chunkOnItsWayOut(e, r.fsm.PendingDelete(e.ID)) {
+			continue
+		}
 		// Replica catch-up: a home missing this sealed chunk's bytes
 		// (missed the build while wedged/down; segments since released)
 		// pulls the GLCB from a peer home. Without this there is NO
