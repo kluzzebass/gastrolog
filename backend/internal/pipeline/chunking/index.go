@@ -17,6 +17,13 @@ type OrderedIndex struct {
 	// scratch backs ViewAt frame reads, reused across calls so bounds
 	// scans allocate nothing per record (gastrolog-11y2iv).
 	scratch []byte
+	// filePositions caches every record's frame offset in EventID order from
+	// one bulk index read. Per-record paths (the GLCB build merge's ViewAt,
+	// RecordAt) previously issued an index pread PER RECORD on top of the
+	// frame read — half the build's syscalls, and under the shared-disk dev
+	// cluster those blocking preads park OS threads and starve raft
+	// heartbeat goroutines (gastrolog-5kcq5q / gastrolog-2m0f75).
+	filePositions []uint32
 	// frameLens caches every record's on-disk frame length in EventID order,
 	// derived from one bulk index read: frames are appended back-to-back, so
 	// each length is the gap to the next frame offset (the last runs to the
@@ -57,7 +64,30 @@ func (idx *OrderedIndex) RecordAtFilePos(filePos uint32) (record.Record, error) 
 
 // RecordAt returns the record at position pos in EventID order.
 func (idx *OrderedIndex) RecordAt(pos uint32) (record.Record, error) {
-	return idx.sf.RecordAtEventOrder(pos)
+	filePos, err := idx.filePosAt(pos)
+	if err != nil {
+		return record.Record{}, err
+	}
+	return idx.sf.ReadRecordAtFilePos(filePos)
+}
+
+// filePosAt resolves an EventID-order position to its frame offset from the
+// bulk-loaded cache — no per-record index pread.
+func (idx *OrderedIndex) filePosAt(pos uint32) (uint32, error) {
+	if idx.filePositions == nil {
+		positions, err := idx.sf.IndexFilePositions()
+		if err != nil {
+			return 0, err
+		}
+		if positions == nil {
+			positions = []uint32{}
+		}
+		idx.filePositions = positions
+	}
+	if uint64(pos) >= uint64(len(idx.filePositions)) {
+		return 0, segment.ErrIndexBounds
+	}
+	return idx.filePositions[pos], nil
 }
 
 // ViewAt returns a zero-copy view of the record at position pos in EventID
@@ -66,7 +96,11 @@ func (idx *OrderedIndex) RecordAt(pos uint32) (record.Record, error) {
 // (bounds passes: three timestamps per record) use this instead of RecordAt
 // to avoid materializing attrs maps and Raw copies they never read.
 func (idx *OrderedIndex) ViewAt(pos uint32) (record.View, error) {
-	v, scratch, err := idx.sf.ViewAtEventOrder(pos, idx.scratch)
+	filePos, err := idx.filePosAt(pos)
+	if err != nil {
+		return record.View{}, err
+	}
+	v, scratch, err := idx.sf.ReadViewAtFilePos(filePos, idx.scratch)
 	idx.scratch = scratch
 	return v, err
 }
@@ -125,10 +159,17 @@ func (idx *OrderedIndex) ensureFrameLens() error {
 	if idx.frameLens != nil {
 		return nil
 	}
-	positions, err := idx.sf.IndexFilePositions()
-	if err != nil {
-		return err
+	if idx.filePositions == nil {
+		positions, err := idx.sf.IndexFilePositions()
+		if err != nil {
+			return err
+		}
+		if positions == nil {
+			positions = []uint32{}
+		}
+		idx.filePositions = positions
 	}
+	positions := idx.filePositions
 	if len(positions) == 0 {
 		idx.frameLens = []uint32{}
 		return nil
