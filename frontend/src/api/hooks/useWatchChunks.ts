@@ -93,6 +93,42 @@ export function useWatchChunks() {
 
 export type ChunksCache = ChunkMeta[] | undefined;
 
+/**
+ * mergeChunksSnapshot reconciles a fresh ListChunks snapshot with the
+ * cached, watch-stamped chunk list (gastrolog-68wsli). The snapshot is
+ * authoritative for WHICH chunks exist — cache-only entries drop — and
+ * mergeMeta's monotone rules protect lifecycle/time/size fields from a
+ * stale reporter, but the snapshot's replica set may only GROW the cached
+ * one. ListChunks derives replica_node_ids from which nodes REPORTED the
+ * chunk in that fan-out round — reachability evidence, not bytes truth —
+ * so a slow or catching-up node vanishes for a round and reappears the
+ * next, ping-ponging against the FSM-stamped WatchChunks residency and
+ * flapping the inspector's seal-pip row count. Real residency shrink
+ * (delete acks, holder revokes) always flows through the vault-ctl FSM
+ * and arrives via WatchChunks stamps, which still replace the set
+ * wholesale (see mergeMeta).
+ */
+export function mergeChunksSnapshot(
+  cached: ChunksCache,
+  fresh: ChunkMeta[],
+): ChunkMeta[] {
+  if (!cached || cached.length === 0) return fresh;
+  const byId = new Map<string, ChunkMeta>();
+  for (const c of cached) byId.set(bytesToHex(c.id), c);
+  return fresh.map((incoming) => {
+    const existing = byId.get(bytesToHex(incoming.id));
+    if (!existing) return incoming;
+    const merged = mergeMeta(existing, incoming);
+    const union = new Set([...existing.replicaNodeIds, ...incoming.replicaNodeIds]);
+    if (union.size > merged.replicaNodeIds.length) {
+      // Same sorted-string shape the backend stamps (sort.Strings).
+      merged.replicaNodeIds = [...union].toSorted();
+      merged.replicaCount = union.size;
+    }
+    return merged;
+  });
+}
+
 /** shouldRefetchChunksAfterDelete reports when a DELETED projection
  * emptied the cache but ListChunks may still have entries. */
 export function shouldRefetchChunksAfterDelete(
