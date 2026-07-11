@@ -112,9 +112,16 @@ func (f *FSM) GetCompletedSegment(id glid.GLID) *CompletedSegmentEntry {
 // ListCompletedSegments returns all completed segment entries sorted by
 // FirstIngestTS ascending, then SegmentID.
 func (f *FSM) ListCompletedSegments() []CompletedSegmentEntry {
-	f.completedListScans.Add(1)
 	f.mu.RLock()
 	defer f.mu.RUnlock()
+	return f.listCompletedSegmentsLocked()
+}
+
+// listCompletedSegmentsLocked is ListCompletedSegments for callers already
+// holding f.mu (SnapshotReleaseScan bundles it with the rest of a release
+// pass's reads under one lock).
+func (f *FSM) listCompletedSegmentsLocked() []CompletedSegmentEntry {
+	f.completedListScans.Add(1)
 	out := make([]CompletedSegmentEntry, 0, len(f.completedSegmentOrder))
 	for _, id := range f.completedSegmentOrder {
 		if e := f.completedSegments[id]; e != nil {

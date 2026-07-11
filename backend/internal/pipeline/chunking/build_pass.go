@@ -251,18 +251,20 @@ func (v *vaultChunking) fireOnBuiltOnce(pending *vaultctlfsm.OpenChunkManifest, 
 
 func (v *vaultChunking) finishBuildOnce(ctx context.Context, pending *vaultctlfsm.OpenChunkManifest, key buildKey) {
 	built := v.progress.alreadyBuilt(key)
-	postSeal := v.progress.postSealDone(key)
 	// Follower homes: CmdSealChunk often replicates before local build completes.
 	// OnSealedManifestCleared is a no-op until built; finish the purge here.
-	if built && !postSeal {
+	if built && !v.progress.postSealDone(key) {
 		if entry := v.fsm().Get(pending.ChunkID); entry != nil && entry.State == chunk.ChunkStateSealed {
 			v.afterSealBuild(ctx, pending)
-			postSeal = v.progress.postSealDone(key)
 		}
 	}
-	if postSeal {
-		v.flushHeadPurgeForManifest(pending, releasableSegmentIDs(v.fsm(), pending))
-	}
+	// No flush when postSeal was already done: afterSealBuild's claimPostSeal-
+	// guarded flush is the once-per-key purge, and a purge refused there is
+	// retried by the release-driven path (OnReleaseSegments ->
+	// drainReleasedPurge) and by later manifests referencing the segment.
+	// Re-flushing here doubled the seal tail: a second full purge pass —
+	// including releasableSegmentIDs over the whole manifest — on every build
+	// wake after the post-seal work had already run (gastrolog-2m0f75).
 	// Retain the pending manifest until CmdSealChunk commits so
 	// OnSealedManifestCleared can run afterSealBuild on follower homes.
 	if entry := v.fsm().Get(pending.ChunkID); entry != nil && entry.State == chunk.ChunkStateSealed {
@@ -396,8 +398,8 @@ func (v *vaultChunking) chunkSealCommitted(chunkID chunk.ChunkID) bool {
 	if entry := v.fsm().Get(chunkID); entry != nil && entry.State == chunk.ChunkStateSealed {
 		return true
 	}
-	sm := v.fsm().SealedManifest()
-	return sm == nil || sm.ChunkID != chunkID
+	headID, ok := v.fsm().SealedManifestHeadChunkID()
+	return !ok || headID != chunkID
 }
 
 func sealedManifestFromFSM(m *vaultctlfsm.OpenChunkManifest) SealedManifest {

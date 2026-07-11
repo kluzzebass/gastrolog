@@ -251,3 +251,44 @@ func (o *Orchestrator) glcbPullSources(vaultID glid.GLID) []string {
 	}
 	return out
 }
+
+// vaultRetentionGiveUpTTL resolves the vault's segment give-up bound: the
+// shortest delete-disposition TTL among its retention rules. ok=false when no
+// TTL rule exists or ANY runner has a route disposition — routed records must
+// reach their destinations, so their segments never give up (same veto
+// retentionMootsPull applies to GLCB pulls). Consulted by the chunking leader
+// when proposing ReleaseSegments (design-notes 28: counted expiry).
+func (o *Orchestrator) vaultRetentionGiveUpTTL(vaultID glid.GLID) (time.Duration, bool) {
+	o.mu.RLock()
+	var runners []*retentionRunner
+	for _, r := range o.retention {
+		if r.vaultID == vaultID {
+			runners = append(runners, r)
+		}
+	}
+	o.mu.RUnlock()
+	if len(runners) == 0 {
+		return 0, false
+	}
+
+	var minTTL time.Duration
+	for _, r := range runners {
+		r.mu.Lock()
+		rules := r.rules
+		disposition := r.disposition
+		r.mu.Unlock()
+		if disposition != system.RetentionDispositionDelete {
+			return 0, false
+		}
+		for _, rule := range rules {
+			ttl, ok := rule.policy.(*chunk.TTLRetentionPolicy)
+			if !ok {
+				continue
+			}
+			if age := ttl.MaxAge(); age > 0 && (minTTL == 0 || age < minTTL) {
+				minTTL = age
+			}
+		}
+	}
+	return minTTL, minTTL > 0
+}

@@ -171,6 +171,88 @@ func (f *FSM) ResumeRecordNumber(segmentID glid.GLID) (uint32, bool) {
 	return n, ok
 }
 
+// SealedManifestHeadChunkID returns the pending sealed manifest head's chunk
+// ID without cloning the manifest. SealedManifest() deep-copies every ref;
+// hot-path callers that only compare the ID (chunkSealCommitted, once per
+// build wake) were paying O(refs) allocation for a 16-byte comparison.
+func (f *FSM) SealedManifestHeadChunkID() (chunk.ChunkID, bool) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if len(f.sealedManifests) == 0 || f.sealedManifests[0] == nil {
+		return chunk.ChunkID{}, false
+	}
+	return f.sealedManifests[0].ChunkID, true
+}
+
+// ReleaseScan is a one-lock snapshot of everything the chunking leader's
+// release pass reads. The per-segment gates each took the FSM lock several
+// times (registry copy + referenced-in-manifest walk over ALL refs + resume
+// lookup + supersession walk), making a release pass O(N x refs) in lock
+// round-trips against the Raft apply path (gastrolog-2m0f75). One snapshot
+// per pass; decisions over it are pure.
+type ReleaseScan struct {
+	Entries []CompletedSegmentEntry
+	// byID indexes Entries for pending-queue lookups.
+	byID map[glid.GLID]int
+	// Referenced holds segment IDs appearing in the open or any sealed
+	// manifest — never releasable while a build may still need the bytes.
+	Referenced map[glid.GLID]struct{}
+	// Resume maps segment ID -> next unplanned record number.
+	Resume map[glid.GLID]uint32
+	// Superseded holds segment IDs whose records live entirely in sealed,
+	// RF-replicated chunks (SegmentSuperseded, precomputed for the pass).
+	Superseded map[glid.GLID]struct{}
+}
+
+// Entry returns the scanned registry entry for id, or nil.
+func (s *ReleaseScan) Entry(id glid.GLID) *CompletedSegmentEntry {
+	if s == nil {
+		return nil
+	}
+	i, ok := s.byID[id]
+	if !ok {
+		return nil
+	}
+	return &s.Entries[i]
+}
+
+// SnapshotReleaseScan builds a ReleaseScan under a single read lock.
+// minChunkHolders parameterizes the supersession precompute; <= 0 disables it
+// (placement wiring absent), leaving Superseded empty.
+func (f *FSM) SnapshotReleaseScan(minChunkHolders int) *ReleaseScan {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	scan := &ReleaseScan{
+		Entries:    f.listCompletedSegmentsLocked(),
+		Referenced: make(map[glid.GLID]struct{}),
+		Resume:     make(map[glid.GLID]uint32, len(f.segmentResume)),
+	}
+	scan.byID = make(map[glid.GLID]int, len(scan.Entries))
+	for i := range scan.Entries {
+		scan.byID[scan.Entries[i].SegmentID] = i
+	}
+	for _, m := range append([]*OpenChunkManifest{f.openChunk}, f.sealedManifests...) {
+		if m == nil {
+			continue
+		}
+		for _, ref := range m.Refs {
+			scan.Referenced[ref.SegmentID] = struct{}{}
+		}
+	}
+	maps.Copy(scan.Resume, f.segmentResume)
+	if minChunkHolders > 0 {
+		scan.Superseded = make(map[glid.GLID]struct{})
+		for i := range scan.Entries {
+			id := scan.Entries[i].SegmentID
+			if f.segmentSupersededLocked(id, minChunkHolders) {
+				scan.Superseded[id] = struct{}{}
+			}
+		}
+	}
+	return scan
+}
+
 // SegmentSuperseded reports whether segID's records now live in chunks
 // replicated to at least minChunkHolders nodes — the release/purge signal that
 // supersedes the raw segment (design-notes 39, refined R3: RF, not home-set, so

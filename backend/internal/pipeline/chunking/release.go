@@ -2,6 +2,7 @@ package chunking
 
 import (
 	"slices"
+	"time"
 
 	"gastrolog/internal/glid"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
@@ -50,28 +51,32 @@ func releasableSegmentIDs(fsm *vaultctlfsm.FSM, m *vaultctlfsm.OpenChunkManifest
 	return out
 }
 
-// segmentReadyForRegistryRelease reports whether a segment may be dropped from
-// the completed-segment registry. Two independent release signals (design-notes
+// scanSegmentReady reports whether a segment may be dropped from the
+// completed-segment registry. Two independent release signals (design-notes
 // 28/39, R3): the segment is superseded — its records live in RF-replicated
-// chunks (minChunkHolders), which un-pins the dead-holder case because the chunk
-// reaches RF among the live homes — OR the fast path, every required home already
-// holds the raw segment. A segment still referenced by an unbuilt manifest, or
-// not fully consumed, is never released.
-func segmentReadyForRegistryRelease(fsm *vaultctlfsm.FSM, segmentID glid.GLID, requiredHolders []string, minChunkHolders int) bool {
-	if fsm != nil && fsm.SegmentReferencedInManifest(segmentID) {
+// chunks, which un-pins the dead-holder case because the chunk reaches RF
+// among the live homes — OR the fast path, every required home already holds
+// the raw segment. A segment still referenced by an unbuilt manifest, or not
+// fully consumed, is never released. Pure over the pass's ReleaseScan: the
+// per-segment variant re-took the FSM lock four times per segment, making a
+// release pass O(N x refs) in lock round-trips (gastrolog-2m0f75).
+func scanSegmentReady(scan *vaultctlfsm.ReleaseScan, entry *vaultctlfsm.CompletedSegmentEntry, requiredHolders []string) bool {
+	if _, ok := scan.Referenced[entry.SegmentID]; ok {
 		return false
 	}
-	entry := fsm.GetCompletedSegment(segmentID)
-	if entry == nil {
+	if !scanSegmentExhausted(scan, entry) {
 		return false
 	}
-	if !segmentExhaustedForPlanning(fsm, *entry) {
-		return false
-	}
-	if fsm.SegmentSuperseded(segmentID, minChunkHolders) {
+	if _, ok := scan.Superseded[entry.SegmentID]; ok {
 		return true
 	}
 	return holdersCover(entry.Holders, requiredHolders)
+}
+
+// scanSegmentExhausted mirrors segmentExhaustedForPlanning over the scan.
+func scanSegmentExhausted(scan *vaultctlfsm.ReleaseScan, entry *vaultctlfsm.CompletedSegmentEntry) bool {
+	n, ok := scan.Resume[entry.SegmentID]
+	return ok && n >= entry.RecordCount
 }
 
 // mayPurgeHeadAfterBuild reports whether this home may drop its head/ copy of a
@@ -106,15 +111,42 @@ func mayPurgeHeadAfterBuild(fsm *vaultctlfsm.FSM, segmentID glid.GLID, requiredH
 	return holdersCover(entry.Holders, requiredHolders)
 }
 
-// mayReleaseFromRegistry is like segmentReadyForRegistryRelease but refuses
-// release when placement wiring is present yet unresolved (empty required
-// slice). holdersCover treats empty required as "ready" for single-node tests;
-// that must not drop segments on a multi-home vault when placement lookup fails.
-func mayReleaseFromRegistry(fsm *vaultctlfsm.FSM, segmentID glid.GLID, requiredHolders []string, holdersWired bool, minChunkHolders int) bool {
+// scanMayRelease is the registry-release gate over a pass's ReleaseScan. It
+// refuses release when placement wiring is present yet unresolved (empty
+// required slice): holdersCover treats empty required as "ready" for
+// single-node tests, which must not drop segments on a multi-home vault when
+// placement lookup fails.
+func scanMayRelease(scan *vaultctlfsm.ReleaseScan, entry *vaultctlfsm.CompletedSegmentEntry, requiredHolders []string, holdersWired bool, giveUpTTL time.Duration, now time.Time) bool {
+	// Give-up bound (design-notes 28): records that out-age the vault's
+	// delete-disposition retention TTL are released even though they were
+	// never chunked — retention would already have deleted them had chunking
+	// succeeded. Bounds registry growth for island-origin segments no holder
+	// can ever collect. Checked first: it must fire even when placement
+	// lookup is unresolved, which is exactly the stuck case it exists for.
+	if scanGiveUpExpired(scan, entry, giveUpTTL, now) {
+		return true
+	}
 	if holdersWired && len(requiredHolders) == 0 {
 		return false
 	}
-	return segmentReadyForRegistryRelease(fsm, segmentID, requiredHolders, minChunkHolders)
+	return scanSegmentReady(scan, entry, requiredHolders)
+}
+
+// scanGiveUpExpired reports whether every record in the segment is older
+// than the vault's retention TTL — the counted give-up expiry. A segment
+// referenced by an unbuilt manifest never gives up: the build still needs its
+// bytes, and its records ARE reaching a chunk.
+func scanGiveUpExpired(scan *vaultctlfsm.ReleaseScan, entry *vaultctlfsm.CompletedSegmentEntry, ttl time.Duration, now time.Time) bool {
+	if ttl <= 0 || now.IsZero() {
+		return false
+	}
+	if _, ok := scan.Referenced[entry.SegmentID]; ok {
+		return false
+	}
+	if entry.LastIngestTS.IsZero() {
+		return false
+	}
+	return now.Sub(entry.LastIngestTS) > ttl
 }
 
 func holdersCover(holders, required []string) bool {
@@ -130,16 +162,19 @@ func holdersCover(holders, required []string) bool {
 }
 
 // partitionPendingRelease splits queued segment IDs into those ready for
-// ReleaseSegments now and those still awaiting holder receipts.
-func partitionPendingRelease(fsm *vaultctlfsm.FSM, pending []glid.GLID, requiredHolders []string, holdersWired bool, minChunkHolders int) (ready, stillPending []glid.GLID) {
+// ReleaseSegments now and those still awaiting holder receipts. Pure over the
+// pass's ReleaseScan.
+func partitionPendingRelease(scan *vaultctlfsm.ReleaseScan, pending []glid.GLID, requiredHolders []string, holdersWired bool, giveUpTTL time.Duration, now time.Time) (ready, stillPending []glid.GLID) {
 	for _, id := range pending {
-		if mayReleaseFromRegistry(fsm, id, requiredHolders, holdersWired, minChunkHolders) {
+		entry := scan.Entry(id)
+		if entry == nil {
+			continue
+		}
+		if scanMayRelease(scan, entry, requiredHolders, holdersWired, giveUpTTL, now) {
 			ready = append(ready, id)
 			continue
 		}
-		if fsm.GetCompletedSegment(id) != nil {
-			stillPending = append(stillPending, id)
-		}
+		stillPending = append(stillPending, id)
 	}
 	return ready, stillPending
 }
@@ -170,15 +205,29 @@ func (v *vaultChunking) enqueueRegistryReleaseCandidates() {
 	if !v.cfg.IsLeader() {
 		return
 	}
-	fsm := v.fsm()
 	required := v.requiredHolders()
 	holdersWired := v.cfg.RequiredHolders != nil
-	minChunk := v.plannerMinHolders()
+	giveUpTTL, now := v.giveUpBound()
+	scan := v.fsm().SnapshotReleaseScan(v.plannerMinHolders())
 	var candidates []glid.GLID
-	for _, entry := range fsm.ListCompletedSegments() {
-		if mayReleaseFromRegistry(fsm, entry.SegmentID, required, holdersWired, minChunk) {
-			candidates = append(candidates, entry.SegmentID)
+	gaveUp := 0
+	for i := range scan.Entries {
+		entry := &scan.Entries[i]
+		if !scanMayRelease(scan, entry, required, holdersWired, giveUpTTL, now) {
+			continue
 		}
+		candidates = append(candidates, entry.SegmentID)
+		if scanGiveUpExpired(scan, entry, giveUpTTL, now) &&
+			!scanSegmentReady(scan, entry, required) {
+			gaveUp++
+		}
+	}
+	if gaveUp > 0 {
+		// The counted expiry design-notes 28 demands: deliberate, visible —
+		// never a silent pipeline loss. These records out-aged retention
+		// without ever being chunked (island origin / uncollectable segment).
+		v.logger().Warn("retention give-up: releasing never-chunked segments whose records out-aged the retention TTL",
+			"vault", v.cfg.VaultID, "segments", gaveUp, "ttl", giveUpTTL.String())
 	}
 	if len(candidates) == 0 {
 		return
@@ -186,4 +235,17 @@ func (v *vaultChunking) enqueueRegistryReleaseCandidates() {
 	v.mu.Lock()
 	v.pendingRelease = appendUniqueGLIDs(v.pendingRelease, candidates)
 	v.mu.Unlock()
+}
+
+// giveUpBound resolves the vault's retention give-up TTL and the evaluation
+// clock; (0, zero time) when no bound is configured.
+func (v *vaultChunking) giveUpBound() (time.Duration, time.Time) {
+	if v.cfg.RetentionGiveUpTTL == nil {
+		return 0, time.Time{}
+	}
+	ttl, ok := v.cfg.RetentionGiveUpTTL()
+	if !ok || ttl <= 0 {
+		return 0, time.Time{}
+	}
+	return ttl, v.now()
 }
