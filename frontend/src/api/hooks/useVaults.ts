@@ -4,6 +4,7 @@ import { VaultInfo, ChunkMeta, GetStatsResponse } from "../gen/gastrolog/v1/vaul
 import { VaultConfig } from "../gen/gastrolog/v1/system_pb";
 import { protoSharing, protoArraySharing } from "./protoSharing";
 import { useSystemMutation, useConfig } from "./useSystem";
+import { mergeChunksSnapshot } from "./useWatchChunks";
 import { decode } from "../glid";
 import { Vault } from "../model/vault";
 import { type EntityID, idFromBytes } from "../model/id";
@@ -58,12 +59,20 @@ export function useVault(id: string) {
  */
 export function useChunks(vaultId: string) {
   // Initial fetch only. Subsequent updates arrive via useWatchChunks,
-  // which mutates the per-vault cache directly.
+  // which mutates the per-vault cache directly. Refetches merge with the
+  // cached watch-stamped list instead of replacing it: a fan-out round
+  // that misses a slow or catching-up node must not erase residency the
+  // stream already established, or the seal-pip row flaps
+  // (gastrolog-68wsli; see mergeChunksSnapshot).
+  const qc = useQueryClient();
   return useQuery({
     queryKey: ["chunks", vaultId],
     queryFn: async () => {
       const response = await vaultClient.listChunks({ vault: vaultId });
-      return response.chunks;
+      return mergeChunksSnapshot(
+        qc.getQueryData<ChunkMeta[]>(["chunks", vaultId]),
+        response.chunks,
+      );
     },
     structuralSharing: protoArraySharing(ChunkMeta.equals),
     enabled: !!vaultId,

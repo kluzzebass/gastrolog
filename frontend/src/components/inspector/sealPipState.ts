@@ -53,7 +53,17 @@ export function pipOrder(nodes: readonly string[]): string[] {
 }
 
 /** computePips derives the pip row: placement pips in stable natural-name
- *  order, then ghost pips (residents outside placement) after the gap. */
+ *  order, then out-of-placement pips (nodes referenced by the chunk's
+ *  residency or pending-ack sets) after the gap.
+ *
+ *  The row's node universe is the UNION of all three input sets. Placement
+ *  comes from the config snapshot while residency/pending-ack ride the
+ *  chunk stream — two data paths with different staleness — so during a
+ *  placement transition one source can reference a node the other doesn't
+ *  know yet. A node never vanishes from the row while any source still
+ *  references it: it renders in the grammar-correct state (ghost, or holds
+ *  when it owes a delete ack) instead of flapping the row count
+ *  (gastrolog-68wsli). */
 export function computePips(input: PipInputs): { pips: SealPip[]; ghosts: SealPip[] } {
   const resident = new Set(input.residentNodes);
   const owesAck = new Set(input.pendingAckNodes);
@@ -90,7 +100,7 @@ export function computePips(input: PipInputs): { pips: SealPip[]; ghosts: SealPi
     return { node, state: "sealing", title: `${node}: copy seal pending — building or queued` };
   });
 
-  const ghosts = ghostPips(input.residentNodes, placementSet);
+  const ghosts = outOfPlacementPips(input, placementSet);
 
   return { pips, ghosts };
 }
@@ -129,4 +139,32 @@ function ghostPips(residentNodes: readonly string[], placementSet: ReadonlySet<s
       title: `${node}: stale residency — copy present, node not in placement`,
     }),
   );
+}
+
+/** outOfPlacementPips derives the after-the-gap pips for computePips: every
+ *  node the chunk's residency or pending-ack set references that placement
+ *  doesn't. A node owing a delete ack still holds bytes, so it renders
+ *  "holds" even after placement moved off it — the laggard blocking the
+ *  receipt protocol stays visible instead of vanishing with the placement
+ *  change. Everything else out-of-placement is a ghost. */
+function outOfPlacementPips(
+  input: Pick<PipInputs, "residentNodes" | "pendingAckNodes" | "deleteInFlight">,
+  placementSet: ReadonlySet<string>,
+): SealPip[] {
+  const owesAck = new Set(input.pendingAckNodes);
+  const extras = new Set([...input.residentNodes, ...input.pendingAckNodes]);
+  return pipOrder([...extras].filter((n) => !placementSet.has(n))).map((node): SealPip => {
+    if (input.deleteInFlight && owesAck.has(node)) {
+      return {
+        node,
+        state: "holds",
+        title: `${node}: delete requested — still holds bytes (owes ack, node not in placement)`,
+      };
+    }
+    return {
+      node,
+      state: "ghost",
+      title: `${node}: stale residency — copy present, node not in placement`,
+    };
+  });
 }

@@ -127,3 +127,77 @@ describe("computePips — ghosts", () => {
     expect(ghosts.map((g) => g.node)).toEqual(["node-4", "node-10"]);
   });
 });
+
+const rowNodes = (input: PipInputs): string[] => {
+  const { pips, ghosts } = computePips(input);
+  return [...pips, ...ghosts].map((p) => p.node);
+};
+
+// gastrolog-68wsli: placement rides the config snapshot while residency /
+// pending-ack ride the chunk stream — two data paths with different
+// staleness. The row's node universe is the union of all three sets, so a
+// node referenced by ANY source renders (in the grammar-correct state)
+// instead of vanishing, and the pip count cannot flap while sources
+// converge during a placement transition.
+describe("computePips — union row universe (gastrolog-68wsli)", () => {
+
+  test("row is exactly the union of placement, residency, and pending-ack sets", () => {
+    const input: PipInputs = {
+      ...base,
+      placementNodes: ["node-1", "node-2", "node-3"],
+      residentNodes: ["node-2", "node-4"],
+      pendingAckNodes: ["node-5"],
+      deleteInFlight: true,
+      liveNodes: new Set(["node-1", "node-2", "node-3", "node-4", "node-5"]),
+    };
+    expect(rowNodes(input).toSorted()).toEqual(
+      ["node-1", "node-2", "node-3", "node-4", "node-5"],
+    );
+    // Each node appears exactly once.
+    expect(new Set(rowNodes(input)).size).toBe(5);
+  });
+
+  test("pending-ack node outside placement stays in the row as holds", () => {
+    // Placement moved off node-4 while it still owes a delete ack. The
+    // laggard blocking the receipt protocol must stay visible (red,
+    // pulsing), not vanish with the placement change.
+    const { ghosts } = computePips({
+      ...base,
+      placementNodes: ["node-1", "node-2", "node-3"],
+      residentNodes: ["node-4"],
+      pendingAckNodes: ["node-4"],
+      deleteInFlight: true,
+    });
+    expect(ghosts.map((g) => [g.node, g.state])).toEqual([["node-4", "holds"]]);
+    expect(ghosts[0]?.title).toContain("not in placement");
+  });
+
+  test("placement transition: node count is stable whichever source knows the node", () => {
+    // Node rejoin, placements growing 3→4. Before the config snapshot
+    // catches up, the chunk stream already references node-4 (residency);
+    // after, placement references it. Either way the row has 4 pips —
+    // node-4 changes STATE (ghost → sealed/lagging), never disappears.
+    const staleConfig: PipInputs = {
+      ...base,
+      placementNodes: ["node-1", "node-2", "node-3"],
+      residentNodes: ["node-1", "node-2", "node-3", "node-4"],
+    };
+    const freshConfig: PipInputs = {
+      ...base,
+      placementNodes: ["node-1", "node-2", "node-3", "node-4"],
+      residentNodes: ["node-1", "node-2", "node-3", "node-4"],
+    };
+    expect(rowNodes(staleConfig)).toEqual(["node-1", "node-2", "node-3", "node-4"]);
+    expect(rowNodes(freshConfig)).toEqual(["node-1", "node-2", "node-3", "node-4"]);
+  });
+
+  test("out-of-placement pips keep natural sort after the gap", () => {
+    const { ghosts } = computePips({
+      ...base,
+      residentNodes: [...base.residentNodes, "node-10"],
+      pendingAckNodes: ["node-4"],
+      deleteInFlight: true,
+    });
+    expect(ghosts.map((g) => g.node)).toEqual(["node-4", "node-10"]);
+  });
+});
