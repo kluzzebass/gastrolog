@@ -547,16 +547,18 @@ func (o *Orchestrator) NotifyChunkChange() {
 // for that vault (per gastrolog-292yi every cluster node is a voter in
 // every vault-ctl Raft group).
 //
-// Used by the WatchChunks event-relay path to stamp authoritative
-// replica info on outbound events so clients see correct counts
-// without reconstructing them from per-node event evidence. See
-// gastrolog-66vmg.
+// Used by the WatchChunks event-relay path and the ListChunks overlay
+// to stamp authoritative replica info on outbound chunk metas so clients
+// see correct counts without reconstructing them from per-node event
+// evidence. See gastrolog-66vmg; single-semantic (holder receipts only)
+// per gastrolog-68wsli.
 //
 // Returns nil if the local node has no FSM for the vault (single-node /
 // memory mode), or if the chunk is unknown to the FSM. Callers in that
 // case should leave replica info absent from the outbound event so the
-// client preserves its existing cache value via mergeMeta.
-func (o *Orchestrator) ChunkResidency(vaultID glid.GLID, chunkID chunk.ChunkID, placementNodeIDs []string) []string {
+// client preserves its existing cache value via mergeMeta. Empty means
+// the chunk is known with zero verified copies (no receipts yet).
+func (o *Orchestrator) ChunkResidency(vaultID glid.GLID, chunkID chunk.ChunkID) []string {
 	if o.groupMgr == nil {
 		return nil
 	}
@@ -574,7 +576,7 @@ func (o *Orchestrator) ChunkResidency(vaultID glid.GLID, chunkID chunk.ChunkID, 
 	if fsm == nil {
 		return nil
 	}
-	return fsm.ChunkResidency(chunkID, placementNodeIDs)
+	return fsm.ChunkResidency(chunkID)
 }
 
 // vaultLabel returns the operator-friendly name for an instance as configured,

@@ -1088,14 +1088,13 @@ type vaultRaftCallbacks struct {
 	applyRetPending     func(id chunk.ChunkID) error
 	// applyAckChunkHolders / applyRevokeChunkHolders commit this node's
 	// chunk holder receipts — bytes-earned residency claims (batched, one
-	// Raft apply per sweep pass). See ChunkResidency.
+	// Raft apply per sweep pass). See vaultctlfsm.FSM.ChunkResidency.
 	applyAckChunkHolders    func(ids []chunk.ChunkID, nodeID string) error
 	applyRevokeChunkHolders func(ids []chunk.ChunkID, nodeID string) error
 	isTombstoned            func(id chunk.ChunkID) bool
 	listChunks          func() []chunk.ChunkID
 	listRetPending      func() []chunk.ChunkID
 	overlayFromFSM      func(chunk.ChunkMeta) chunk.ChunkMeta
-	chunkResidency      func(id chunk.ChunkID, placementNodeIDs []string) []string
 	manifestEntries     func() []vaultctlfsm.ManifestEntry
 	manifestEntry       func(id chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool)
 }
@@ -1258,12 +1257,6 @@ func buildVaultRaftCallbacks(r *hraft.Raft, fsm *vaultctlfsm.FSM, applier vaultc
 				m.SealedAt = e.SealedAt
 			}
 			return m
-		},
-		chunkResidency: func(id chunk.ChunkID, placementNodeIDs []string) []string {
-			if fsm == nil {
-				return nil
-			}
-			return fsm.ChunkResidency(id, placementNodeIDs)
 		},
 		manifestEntries: func() []vaultctlfsm.ManifestEntry {
 			if fsm == nil {

@@ -100,7 +100,54 @@ func (s *VaultServer) ListChunks(
 	// set replica_count to how many distinct nodes reported the chunk (not
 	// raw row count — a single node can list the same ID twice when it
 	// hosts multiple local instances).
-	return connect.NewResponse(&apiv1.ListChunksResponse{Chunks: dedupChunkReports(reports)}), nil
+	chunks := dedupChunkReports(reports)
+	s.overlayChunkResidency(vaultID, chunks)
+	return connect.NewResponse(&apiv1.ListChunksResponse{Chunks: chunks}), nil
+}
+
+// overlayChunkResidency replaces the fan-out-derived replica sets with
+// authoritative holder receipts from the vault-ctl FSM, so ListChunks
+// and WatchChunks stamp the SAME residency semantics. The fan-out set
+// (which nodes answered this round) is reachability evidence, not bytes
+// truth — a slow peer vanishing for a round used to ping-pong against
+// the FSM-stamped watch residency and regress sealed pips to amber
+// (gastrolog-68wsli). The reachability set survives only as a fallback
+// where no FSM exists for the vault (memory mode / single-node), where
+// receipts never happen.
+//
+// An empty-but-known residency (chunk in the FSM, zero receipts yet)
+// overwrites too: for a just-sealed chunk it is the truth — the homes'
+// copy-seal receipts haven't landed — and the inspector renders that
+// window honestly as per-node catch-up instead of a false full row.
+func (s *VaultServer) overlayChunkResidency(vaultID glid.GLID, chunks []*apiv1.ChunkMeta) {
+	overlayResidencyWith(chunks, func(cid chunk.ChunkID) []string {
+		return s.orch.ChunkResidency(vaultID, cid)
+	})
+}
+
+// overlayResidencyWith is the pure core of overlayChunkResidency: nil
+// residency (no FSM / chunk unknown) keeps the fan-out-derived set;
+// anything else — including empty — replaces it. Split out so the
+// keep-vs-replace semantics are unit-testable without an orchestrator.
+func overlayResidencyWith(chunks []*apiv1.ChunkMeta, residencyOf func(chunk.ChunkID) []string) {
+	for _, c := range chunks {
+		if len(c.Id) != len(chunk.ChunkID{}) {
+			continue
+		}
+		var cid chunk.ChunkID
+		copy(cid[:], c.Id)
+		residency := residencyOf(cid)
+		if residency == nil {
+			continue
+		}
+		sort.Strings(residency)
+		c.ReplicaNodeIds = residency
+		if len(residency) > math.MaxInt32 {
+			c.ReplicaCount = math.MaxInt32
+		} else {
+			c.ReplicaCount = int32(len(residency)) //nolint:gosec // G115: bounded by branch above
+		}
+	}
 }
 
 // chunkReport pairs a chunk metadata message with the cluster node that
@@ -680,51 +727,27 @@ func (s *VaultServer) stampReplicaInfo(ctx context.Context, msg *apiv1.WatchChun
 		}
 	}
 
-	placement := s.vaultPlacementNodeIDs(ctx, vid)
-	residency := s.orch.ChunkResidency(vid, cid, placement)
-	if residency == nil {
+	applyResidencyStamp(msg.Meta, s.orch.ChunkResidency(vid, cid))
+}
+
+// applyResidencyStamp stamps holder-receipt residency onto an outbound
+// event meta. Empty or nil residency (chunk unknown, or known with zero
+// receipts) stamps nothing: replica_count zero already means "no
+// authoritative value" on the wire, so mergeMeta keeps the client's
+// last authoritative set (or the ListChunks-seeded one). Both sources
+// now carry the same holder-receipt semantics, so there is no
+// cross-source ping-pong (gastrolog-68wsli).
+func applyResidencyStamp(meta *apiv1.ChunkMeta, residency []string) {
+	if len(residency) == 0 {
 		return
 	}
 	sort.Strings(residency)
-	msg.Meta.ReplicaNodeIds = residency
+	meta.ReplicaNodeIds = residency
 	if len(residency) > math.MaxInt32 {
-		msg.Meta.ReplicaCount = math.MaxInt32
+		meta.ReplicaCount = math.MaxInt32
 	} else {
-		msg.Meta.ReplicaCount = int32(len(residency)) //nolint:gosec // G115: bounded by branch above
+		meta.ReplicaCount = int32(len(residency)) //nolint:gosec // G115: bounded by branch above
 	}
-}
-
-// vaultPlacementNodeIDs resolves a vault's placement set to the node
-// IDs that hold (or should hold) its chunks. Mirrors remoteVaultNodes
-// but includes the local node — used by stampReplicaInfo to derive
-// authoritative residency from the FSM. Per-call cfgStore lookup is
-// cheap (in-memory backed by Raft FSM); cache later if it becomes a
-// hot path.
-func (s *VaultServer) vaultPlacementNodeIDs(ctx context.Context, vaultID glid.GLID) []string {
-	cfg, err := s.cfgStore.GetVault(ctx, vaultID)
-	if err != nil || cfg == nil {
-		return nil
-	}
-	if len(cfg.Placements) == 0 {
-		return nil
-	}
-	nscs, err := s.cfgStore.ListNodeStorageConfigs(ctx)
-	if err != nil {
-		return nil
-	}
-	seen := map[string]bool{}
-	var nodes []string
-	if leader := system.LeaderNodeID(cfg.Placements, nscs); leader != "" && !seen[leader] {
-		seen[leader] = true
-		nodes = append(nodes, leader)
-	}
-	for _, nid := range system.FollowerNodeIDs(cfg.Placements, nscs) {
-		if !seen[nid] {
-			seen[nid] = true
-			nodes = append(nodes, nid)
-		}
-	}
-	return nodes
 }
 
 // runLocalChunkEventForwarder drains the local ChunkBus subscription and

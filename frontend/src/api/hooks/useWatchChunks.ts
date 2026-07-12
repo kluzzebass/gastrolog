@@ -99,14 +99,16 @@ export type ChunksCache = ChunkMeta[] | undefined;
  * authoritative for WHICH chunks exist — cache-only entries drop — and
  * mergeMeta's monotone rules protect lifecycle/time/size fields from a
  * stale reporter, but the snapshot's replica set may only GROW the cached
- * one. ListChunks derives replica_node_ids from which nodes REPORTED the
- * chunk in that fan-out round — reachability evidence, not bytes truth —
- * so a slow or catching-up node vanishes for a round and reappears the
- * next, ping-ponging against the FSM-stamped WatchChunks residency and
- * flapping the inspector's seal-pip row count. Real residency shrink
- * (delete acks, holder revokes) always flows through the vault-ctl FSM
- * and arrives via WatchChunks stamps, which still replace the set
- * wholesale (see mergeMeta).
+ * one. ListChunks and WatchChunks now stamp the SAME residency semantics
+ * (FSM holder receipts — bytes truth), so grow-only is a backstop, not a
+ * referee between disagreeing sources: it still matters for vaults with
+ * no FSM (memory mode / single-node), where replica_node_ids falls back
+ * to which nodes ANSWERED the fan-out round and a slow peer would
+ * otherwise flap the seal-pip row, and for the wire's zero-count =
+ * "no authoritative value" convention. Real residency shrink (delete
+ * acks, holder revokes) flows through the vault-ctl FSM and arrives via
+ * WatchChunks stamps, which still replace the set wholesale (see
+ * mergeMeta).
  */
 export function mergeChunksSnapshot(
   cached: ChunksCache,

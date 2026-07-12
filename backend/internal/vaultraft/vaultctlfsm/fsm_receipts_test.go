@@ -324,16 +324,20 @@ func TestChunkResidencyForUnknownChunkReturnsNil(t *testing.T) {
 	f := New()
 	id := chunk.NewChunkID()
 
-	got := f.ChunkResidency(id, []string{"node-A", "node-B", "node-C"})
+	got := f.ChunkResidency(id)
 	if got != nil {
 		t.Errorf("ChunkResidency on unknown chunk should be nil, got %v", got)
 	}
 }
 
-// Sealed chunk with no in-flight delete: residency = the supplied
-// placement set, because every placement member is expected to hold
-// the chunk once catchup has converged.
-func TestChunkResidencyForLiveChunkReturnsPlacement(t *testing.T) {
+// Sealed chunk with no receipts and no in-flight delete: residency is
+// EMPTY (not nil, and never a placement assumption). The window between
+// the cluster-wide seal and the homes' copy-seal receipts is honest
+// catch-up; an optimistic placement default here made residency
+// non-monotonic — full set first, collapsing to the true holders when
+// the first AckChunkHolder landed — which the inspector rendered as
+// sealed pips regressing to amber (gastrolog-68wsli).
+func TestChunkResidencyBeforeReceiptsIsEmptyNotPlacement(t *testing.T) {
 	t.Parallel()
 
 	f := New()
@@ -347,20 +351,25 @@ func TestChunkResidencyForLiveChunkReturnsPlacement(t *testing.T) {
 		t.Fatalf("seal: %v", err)
 	}
 
-	placement := []string{"node-A", "node-B", "node-C"}
-	got := f.ChunkResidency(id, placement)
-	if len(got) != 3 {
-		t.Fatalf("residency len = %d, want 3 (full placement set)", len(got))
+	got := f.ChunkResidency(id)
+	if got == nil {
+		t.Fatal("residency for a known chunk should be non-nil (empty means known, zero verified copies)")
 	}
-	// Compare as sets — ChunkResidency does not promise ordering.
-	gotSet := map[string]bool{}
-	for _, n := range got {
-		gotSet[n] = true
+	if len(got) != 0 {
+		t.Fatalf("residency before any holder receipt = %v, want empty (holders only, no placement fallback)", got)
 	}
-	for _, n := range placement {
-		if !gotSet[n] {
-			t.Errorf("placement member %q missing from residency", n)
-		}
+
+	// Receipts land one home at a time; residency grows monotonically
+	// with each ack and reports exactly the receipted set.
+	applyHolderCmd(t, f, mustMarshalCommand(NewAckChunkHolders([]chunk.ChunkID{id}, "node-B")))
+	got = f.ChunkResidency(id)
+	if len(got) != 1 || got[0] != "node-B" {
+		t.Fatalf("residency after one receipt = %v, want [node-B]", got)
+	}
+	applyHolderCmd(t, f, mustMarshalCommand(NewAckChunkHolders([]chunk.ChunkID{id}, "node-A")))
+	got = f.ChunkResidency(id)
+	if len(got) != 2 {
+		t.Fatalf("residency after two receipts = %v, want two holders", got)
 	}
 }
 
@@ -384,10 +393,8 @@ func TestChunkResidencyForPendingDeleteReturnsExpectedFrom(t *testing.T) {
 		t.Fatalf("request delete: %v", err)
 	}
 
-	placement := []string{"node-A", "node-B", "node-C"}
-
-	// Before any acks: residency = full expected-from = full placement.
-	got := f.ChunkResidency(id, placement)
+	// Before any acks: residency = full expected-from set.
+	got := f.ChunkResidency(id)
 	if len(got) != 3 {
 		t.Errorf("pre-ack residency len = %d, want 3", len(got))
 	}
@@ -396,7 +403,7 @@ func TestChunkResidencyForPendingDeleteReturnsExpectedFrom(t *testing.T) {
 	if err := f.Apply(&hraft.Log{Data: MarshalAckDelete(id, "node-A")}); err != nil {
 		t.Fatalf("ack delete: %v", err)
 	}
-	got = f.ChunkResidency(id, placement)
+	got = f.ChunkResidency(id)
 	if len(got) != 2 {
 		t.Fatalf("post-one-ack residency len = %d, want 2 (node-A acked); got %v", len(got), got)
 	}

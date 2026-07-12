@@ -115,7 +115,7 @@ func (h *orchRelHarness) waitChunkHolders(v vaultSpec, chunkID chunk.ChunkID, ho
 	deadline := time.Now().Add(orchHarnessConvWait)
 	var got []string
 	for time.Now().Before(deadline) {
-		got = leader.orch.ChunkResidency(v.id, chunkID, nil)
+		got = leader.orch.ChunkResidency(v.id, chunkID)
 		if len(got) == len(want) {
 			all := true
 			for _, n := range got {
@@ -176,7 +176,7 @@ func TestOrchPipeline_ChunkHolderRevokeOnByteLoss(t *testing.T) {
 	deadline := time.Now().Add(orchHarnessConvWait)
 	var got []string
 	for time.Now().Before(deadline) {
-		got = h.nodes[h.nodeIDs[0]].orch.ChunkResidency(v.id, e.ID, nil)
+		got = h.nodes[h.nodeIDs[0]].orch.ChunkResidency(v.id, e.ID)
 		if len(got) == 0 {
 			return
 		}

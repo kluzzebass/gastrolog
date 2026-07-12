@@ -107,17 +107,19 @@ func (f *FSM) IsExpectedToAck(chunkID chunk.ChunkID, nodeID string) bool {
 
 // ChunkResidency returns the set of node IDs that currently hold the
 // chunk's bytes, sourced authoritatively from the vault-ctl FSM state.
+// Residency means exactly one thing: holder receipts. It never falls
+// back to placement intent or fan-out reachability — an optimistic
+// placement default made residency non-monotonic (full set before the
+// first receipt, collapsing to the true holders when it landed), which
+// the inspector rendered as sealed pips regressing to amber
+// (gastrolog-68wsli).
 //
-// For chunks WITH holder receipts: residency = the entry's Holders set —
-// nodes that built or pulled verified GLCB bytes (AckChunkHolder), minus
-// revoked claims (RevokeChunkHolder after a stat-miss). This is bytes
-// truth, not placement intent.
-//
-// For chunks WITHOUT receipts and no in-flight delete: residency = the
-// supplied placement set — the pre-receipt assumption, kept as fallback
-// for entries created before receipts existed and for memory-mode. It
-// overstates: a home that lost its bytes keeps being counted until a
-// sweep acks/revokes truth into the entry.
+// For chunks with no in-flight delete: residency = the entry's Holders
+// set — nodes that built or pulled verified GLCB bytes (AckChunkHolder),
+// minus revoked claims (RevokeChunkHolder after a stat-miss). Empty (not
+// nil) when the chunk is known but no copy-seal receipt has landed yet:
+// active chunks, and the honest catch-up window between cluster seal and
+// the homes' build receipts.
 //
 // For chunks WITH an in-flight delete (entry exists in pendingDeletes):
 // residency = ExpectedFrom — the nodes that still owe a CmdAckDelete.
@@ -127,12 +129,15 @@ func (f *FSM) IsExpectedToAck(chunkID chunk.ChunkID, nodeID string) bool {
 // excluded.
 //
 // For chunks not in the FSM at all: returns nil. The chunk either
-// never existed, was tombstoned, or finalized.
+// never existed, was tombstoned, or finalized. Nil (unknown) vs empty
+// (known, zero verified copies) is a meaningful distinction to callers:
+// the ListChunks overlay keeps its availability-derived fallback only
+// for nil.
 //
-// Used by the WatchChunks server handler to stamp authoritative
-// replica info on outbound events so clients never have to reconstruct
-// it from per-node event evidence. See gastrolog-66vmg.
-func (f *FSM) ChunkResidency(chunkID chunk.ChunkID, placementNodeIDs []string) []string {
+// Used by the WatchChunks stamp and the ListChunks overlay so clients
+// never have to reconstruct residency from per-node event evidence.
+// See gastrolog-66vmg.
+func (f *FSM) ChunkResidency(chunkID chunk.ChunkID) []string {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	e, ok := f.chunks[chunkID]
@@ -150,16 +155,8 @@ func (f *FSM) ChunkResidency(chunkID chunk.ChunkID, placementNodeIDs []string) [
 		}
 		return out
 	}
-	if len(e.Holders) > 0 {
-		out := make([]string, len(e.Holders))
-		copy(out, e.Holders)
-		return out
-	}
-	if len(placementNodeIDs) == 0 {
-		return nil
-	}
-	out := make([]string, len(placementNodeIDs))
-	copy(out, placementNodeIDs)
+	out := make([]string, len(e.Holders))
+	copy(out, e.Holders)
 	return out
 }
 

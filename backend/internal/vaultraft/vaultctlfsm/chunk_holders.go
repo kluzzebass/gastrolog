@@ -9,12 +9,14 @@ import (
 )
 
 // Chunk holder receipts: which nodes hold a sealed chunk's verified GLCB
-// bytes. Before these existed, ChunkResidency reported the placement list
-// verbatim for live sealed chunks — replica counts were an assumption, and
-// a home that lost its bytes (missed builds while wedged, disk swap) kept
-// being counted forever while retention starved on chunks it didn't hold.
-// Holders are EARNED (local build, catch-up pull) and REVOKED (stat-miss),
-// so residency reflects bytes, not intent.
+// bytes. Holders are EARNED (local build, catch-up pull) and REVOKED
+// (stat-miss), so residency reflects bytes, not intent. Receipts are the
+// ONLY source of ChunkResidency for live chunks — no placement fallback:
+// an optimistic default both overstated (a home that lost its bytes kept
+// being counted while retention starved on chunks it didn't hold) and
+// made residency non-monotonic (full placement set collapsing to the
+// true holders when the first receipt landed — the sealed-pips-regress-
+// to-amber bug, gastrolog-68wsli).
 
 // applyAckChunkHolder appends nodeID to each chunk's holder set. Idempotent
 // per chunk; unknown chunk IDs are skipped (sealed-then-expunged races).

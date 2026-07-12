@@ -26,7 +26,7 @@ func applyHolderCmd(t *testing.T, f *FSM, data []byte) {
 }
 
 func residency(f *FSM, id chunk.ChunkID) []string {
-	return f.ChunkResidency(id, []string{"placement-a", "placement-b"})
+	return f.ChunkResidency(id)
 }
 
 func TestChunkHolderAckRevokeLifecycle(t *testing.T) {
@@ -34,9 +34,11 @@ func TestChunkHolderAckRevokeLifecycle(t *testing.T) {
 	id := chunk.NewChunkID()
 	f := newHolderTestFSM(t, id)
 
-	// No receipts: residency falls back to the placement assumption.
-	if got := residency(f, id); len(got) != 2 {
-		t.Fatalf("pre-receipt residency = %v, want placement fallback of 2", got)
+	// No receipts: residency is empty — never a placement assumption
+	// (gastrolog-68wsli: the optimistic fallback made residency
+	// non-monotonic and regressed sealed pips to amber).
+	if got := residency(f, id); len(got) != 0 {
+		t.Fatalf("pre-receipt residency = %v, want empty (no placement fallback)", got)
 	}
 
 	// Two homes earn claims; residency switches to receipts.
