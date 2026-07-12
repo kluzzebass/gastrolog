@@ -404,6 +404,118 @@ func TestManagerWorkerReleasesAfterBuildWithoutNewHolderAck(t *testing.T) {
 	t.Fatal("registry entry must release after build without a new holder ack")
 }
 
+// TestManagerReleaseUnpinsDeadHolderWithFixedPlacement pins the supersession
+// un-pin (gastrolog-36ba70) at the MANAGER level — the enqueue/drain release
+// path (enqueueRegistryReleaseCandidates → partitionPendingRelease → applier
+// proposal), not just the pure gates release_test.go covers. The live
+// dead-node cluster test was confounded: the placement manager shrank the
+// placement away from the dead node within ~26s, so the required-holder set
+// stopped containing the dead node and even the old all-holders gate would
+// have released. Here RequiredHolders is FIXED — dead-home stays a required
+// holder for the whole test — so the ONLY way the segment can release is
+// supersession: its records live in a sealed chunk held by
+// RF = min(2, placement) = 2 live homes.
+func TestManagerReleaseUnpinsDeadHolderWithFixedPlacement(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	segID := glid.New()
+	vaultID := glid.New()
+	chunkID := chunk.NewChunkID()
+	home := t.TempDir()
+
+	fsm := vaultctlfsm.New()
+	publishSegForTest(t, fsm, segID, 1, base)
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalOpenChunkManifest(chunkID, base))
+	// Ref covers every record — the segment is fully planned into the chunk.
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
+		SegmentID: segID, FirstRecordNumber: 0, LastRecordNumber: 0,
+		SliceBytes: 1, RefAddedAt: base,
+	}))
+	sealedAt := base.Add(time.Minute)
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, sealedAt))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealChunk(chunkID, sealedAt, 1, 1, base, base, base, true, sealedAt))
+
+	// Only the live homes ever ack the raw SEGMENT — dead-home never does.
+	// Under the old all-required-holders gate this pinned the registry entry
+	// (and the completed/ bytes behind it) forever.
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAckSegmentHolder(segID, "live-a"))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAckSegmentHolder(segID, "live-b"))
+
+	var applied [][]byte
+	mgr := chunking.New(chunking.Config{})
+	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
+		VaultRoot: home,
+		ChunkRoot: filepath.Join(home, "chunks"),
+		FSM:       fsm,
+		Locate:    chunking.HeadSegmentLocator{Root: home},
+		Applier:   &recordingApplier{out: &applied, fsm: fsm},
+		IsLeader:  func() bool { return true },
+		// FIXED placement including the dead node: the placement shrink that
+		// confounded the live-cluster run cannot happen here.
+		RequiredHolders: func() []string {
+			return []string{"live-a", "live-b", "dead-home"}
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Negative control: the sealed chunk has no holder receipts yet (below
+	// RF), so the release pass must not propose ReleaseSegments — neither the
+	// fast path (dead-home missing) nor supersession fires.
+	if err := mgr.ReleaseOnce(t.Context(), vaultID); err != nil {
+		t.Fatalf("ReleaseOnce before chunk RF: %v", err)
+	}
+	if got := releaseSegmentsProposed(t, applied); len(got) != 0 {
+		t.Fatalf("ReleaseSegments proposed before chunk reached RF: %v", got)
+	}
+	if fsm.GetCompletedSegment(segID) == nil {
+		t.Fatal("registry entry must remain while the chunk is below RF")
+	}
+
+	// The two live homes ack the sealed CHUNK — RF=2 reached without
+	// dead-home. The segment's records are now durable in an RF-replicated
+	// chunk; supersession must un-pin it.
+	for _, node := range []string{"live-a", "live-b"} {
+		data, err := vaultctlfsm.MarshalAckChunkHolders([]chunk.ChunkID{chunkID}, node)
+		if err != nil {
+			t.Fatalf("marshal ack chunk holders: %v", err)
+		}
+		applyChunkCmd(t, fsm, data)
+	}
+
+	if err := mgr.ReleaseOnce(t.Context(), vaultID); err != nil {
+		t.Fatalf("ReleaseOnce after chunk RF: %v", err)
+	}
+	got := releaseSegmentsProposed(t, applied)
+	if len(got) != 1 || got[0] != segID {
+		t.Fatalf("ReleaseSegments proposals = %v, want [%s] despite dead-home never acking", got, segID)
+	}
+	if fsm.GetCompletedSegment(segID) != nil {
+		t.Fatal("completed segment registry entry should be released via supersession")
+	}
+}
+
+// releaseSegmentsProposed decodes the segment IDs of every ReleaseSegments
+// command in a recordingApplier stream.
+func releaseSegmentsProposed(t *testing.T, applied [][]byte) []glid.GLID {
+	t.Helper()
+	var out []glid.GLID
+	for _, data := range applied {
+		var cmd gastrologv1.VaultCtlCommand
+		if err := proto.Unmarshal(data, &cmd); err != nil {
+			t.Fatalf("unmarshal applied command: %v", err)
+		}
+		rel := cmd.GetReleaseSegments()
+		if rel == nil {
+			continue
+		}
+		for _, raw := range rel.GetSegmentIds() {
+			out = append(out, glid.FromBytes(raw))
+		}
+	}
+	return out
+}
+
 func TestBuildMaterializesMissingSegments(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
