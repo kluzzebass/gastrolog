@@ -115,3 +115,68 @@ func TestChunkHoldersSurviveSnapshotRestore(t *testing.T) {
 		t.Fatalf("holders lost in snapshot round-trip: %v", e.Holders)
 	}
 }
+
+// onHoldersChanged is the live edge for receipt-only residency
+// (gastrolog-68wsli): the WatchChunks bus subscribes so the inspector
+// sees holder growth without a snapshot refetch. Fires once per chunk
+// whose holder set actually changed; idempotent re-acks stay silent.
+func TestChunkHolderChangeCallbackFiresPerActualChange(t *testing.T) {
+	t.Parallel()
+	id := chunk.NewChunkID()
+	f := newHolderTestFSM(t, id)
+
+	var fired []ManifestEntry
+	f.SetOnHoldersChanged(func(e ManifestEntry) { fired = append(fired, e) })
+
+	applyHolderCmd(t, f, mustMarshalCommand(NewAckChunkHolders([]chunk.ChunkID{id}, "node-1")))
+	if len(fired) != 1 {
+		t.Fatalf("first ack should fire once, fired %d times", len(fired))
+	}
+	if len(fired[0].Holders) != 1 || fired[0].Holders[0] != "node-1" {
+		t.Fatalf("callback entry holders = %v, want [node-1] (post-apply state)", fired[0].Holders)
+	}
+
+	// Idempotent re-ack: holder set unchanged, no fire.
+	applyHolderCmd(t, f, mustMarshalCommand(NewAckChunkHolders([]chunk.ChunkID{id}, "node-1")))
+	if len(fired) != 1 {
+		t.Fatalf("idempotent re-ack must not fire, fired %d times total", len(fired))
+	}
+
+	// Second holder: fires with the grown set.
+	applyHolderCmd(t, f, mustMarshalCommand(NewAckChunkHolders([]chunk.ChunkID{id}, "node-2")))
+	if len(fired) != 2 || len(fired[1].Holders) != 2 {
+		t.Fatalf("second ack should fire with grown holders, fired=%d holders=%v", len(fired), fired[len(fired)-1].Holders)
+	}
+
+	// Revoke: fires with the shrunk set (residency shrink must reach the UI).
+	applyHolderCmd(t, f, mustMarshalCommand(NewRevokeChunkHolders([]chunk.ChunkID{id}, "node-1")))
+	if len(fired) != 3 || len(fired[2].Holders) != 1 || fired[2].Holders[0] != "node-2" {
+		t.Fatalf("revoke should fire with shrunk holders, fired=%d holders=%v", len(fired), fired[len(fired)-1].Holders)
+	}
+
+	// Revoke of an absent claim: no change, no fire. Unknown chunks skip too.
+	applyHolderCmd(t, f, mustMarshalCommand(NewRevokeChunkHolders([]chunk.ChunkID{id}, "node-9")))
+	applyHolderCmd(t, f, mustMarshalCommand(NewAckChunkHolders([]chunk.ChunkID{chunk.NewChunkID()}, "node-1")))
+	if len(fired) != 3 {
+		t.Fatalf("no-op applies must not fire, fired %d times total", len(fired))
+	}
+}
+
+// Batched acks (the sweep shape: one Raft apply covering many chunks)
+// fire once per changed chunk in the batch.
+func TestChunkHolderChangeCallbackBatched(t *testing.T) {
+	t.Parallel()
+	a, b := chunk.NewChunkID(), chunk.NewChunkID()
+	f := newHolderTestFSM(t, a, b)
+
+	// Pre-ack b so the batch is a change for a but a no-op for b.
+	applyHolderCmd(t, f, mustMarshalCommand(NewAckChunkHolders([]chunk.ChunkID{b}, "node-1")))
+
+	var fired []ManifestEntry
+	f.SetOnHoldersChanged(func(e ManifestEntry) { fired = append(fired, e) })
+
+	applyHolderCmd(t, f, mustMarshalCommand(NewAckChunkHolders([]chunk.ChunkID{a, b}, "node-1")))
+	if len(fired) != 1 || fired[0].ID != a {
+		t.Fatalf("batch should fire only for the actually-changed chunk, fired=%d", len(fired))
+	}
+}

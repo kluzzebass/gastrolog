@@ -1516,6 +1516,14 @@ func wireVaultFSMPipelineChunkEvents(o *Orchestrator, vaultID glid.GLID, fsm *va
 		}
 		o.EmitChunkSealed(vaultID, manifestEntryToChunkMeta(e, true))
 	})
+	// Residency is receipt-only (gastrolog-68wsli), so holder-set changes
+	// are chunk-state changes the inspector must see live: emit PROGRESS
+	// so the WatchChunks relay re-stamps the event with the FSM's current
+	// holder set. Without this edge, a sealed chunk's honest pre-receipt
+	// amber pips only turn green on a full snapshot refetch.
+	fsm.SetOnHoldersChanged(func(e vaultctlfsm.ManifestEntry) {
+		o.EmitChunkProgress(vaultID, manifestEntryToChunkMeta(e, e.State == chunk.ChunkStateSealed))
+	})
 }
 
 // wireVaultFSMOnUpload connects the vault-ctl FSM's OnUpload callback to the

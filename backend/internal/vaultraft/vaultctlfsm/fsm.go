@@ -262,6 +262,14 @@ type FSM struct {
 	onSeal             map[int]func(ManifestEntry)
 	onSealSeq          int
 	onRetentionPending func(chunk.ChunkID) // CmdRetentionPending applied
+	// onHoldersChanged fires (outside the FSM lock) once per chunk whose
+	// Holders set actually changed under CmdAckChunkHolder /
+	// CmdRevokeChunkHolder, with the post-apply entry. Residency is
+	// receipt-only (gastrolog-68wsli), so subscribers — the WatchChunks
+	// bus — need an edge when receipts land or revoke; without it the
+	// inspector's honest pre-receipt amber never turns green until a
+	// full snapshot refetch. Idempotent re-acks don't fire.
+	onHoldersChanged func(ManifestEntry)
 
 	// Step-2 receipt-protocol state and hooks for gastrolog-51gme.
 	// pendingDeletes is the queue of chunk deletes awaiting per-node
@@ -440,6 +448,18 @@ func (f *FSM) SetOnUpload(fn func(ManifestEntry)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.onUpload = fn
+}
+
+// SetOnHoldersChanged registers a callback invoked (outside the FSM lock)
+// once per chunk whose holder set actually changed under an
+// AckChunkHolder / RevokeChunkHolder apply, with a copy of the
+// post-apply entry. The orchestrator wires this to the chunk event bus
+// so WatchChunks subscribers see residency grow as copy-seal receipts
+// land (and shrink on revoke) instead of waiting for a snapshot refetch.
+func (f *FSM) SetOnHoldersChanged(fn func(ManifestEntry)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.onHoldersChanged = fn
 }
 
 // SetOnSeal registers a callback invoked (outside the FSM lock) after
@@ -867,6 +887,7 @@ type applyEffects struct {
 	releasedSegmentIDs      []glid.GLID
 	ackedSegmentHolderIDs   []glid.GLID
 	discardedManifestIDs    []chunk.ChunkID
+	holdersChangedEntries   []ManifestEntry
 
 	onCreate                  func(ManifestEntry)
 	onDelete                  func(chunk.ChunkID)
@@ -884,6 +905,7 @@ type applyEffects struct {
 	onAckDelete               func(chunk.ChunkID, string)
 	onFinalizeDelete          func(chunk.ChunkID)
 	onPruneNode               func(string, []chunk.ChunkID)
+	onHoldersChanged          func(ManifestEntry)
 }
 
 func (e applyEffects) fire() {
@@ -967,6 +989,11 @@ func (e applyEffects) firePipelineCallbacks() {
 	for _, id := range e.ackedSegmentHolderIDs {
 		for _, fn := range e.onAckSegmentHolder {
 			fn(id)
+		}
+	}
+	if e.onHoldersChanged != nil {
+		for _, entry := range e.holdersChangedEntries {
+			e.onHoldersChanged(entry)
 		}
 	}
 }
@@ -1151,10 +1178,12 @@ func (f *FSM) tryApplySegmentPipelineLocked(cmd *gastrologv1.VaultCtlCommand) (a
 		fx.ackedSegmentHolderIDs = added
 		return result, fx, true
 	case *gastrologv1.VaultCtlCommand_AckChunkHolder:
-		_, result := f.applyAckChunkHolder(c.AckChunkHolder)
+		changed, result := f.applyAckChunkHolder(c.AckChunkHolder)
+		fx.holdersChangedEntries = f.captureEntries(result, changed)
 		return result, fx, true
 	case *gastrologv1.VaultCtlCommand_RevokeChunkHolder:
-		_, result := f.applyRevokeChunkHolder(c.RevokeChunkHolder)
+		changed, result := f.applyRevokeChunkHolder(c.RevokeChunkHolder)
+		fx.holdersChangedEntries = f.captureEntries(result, changed)
 		return result, fx, true
 	default:
 		return nil, applyEffects{}, false
@@ -1207,6 +1236,7 @@ func (f *FSM) attachApplyCallbacks(fx *applyEffects) {
 	fx.onRetentionPending = f.onRetentionPending
 	fx.onRequestDelete = f.onRequestDelete
 	fx.onAckDelete = f.onAckDelete
+	fx.onHoldersChanged = f.onHoldersChanged
 	fx.onFinalizeDelete = f.onFinalizeDelete
 	fx.onPruneNode = f.onPruneNode
 }
@@ -1230,6 +1260,23 @@ func (f *FSM) captureEntry(applyResult any, id chunk.ChunkID) *ManifestEntry {
 	}
 	cp := *e
 	return &cp
+}
+
+// captureEntries copies the post-apply entries for the given chunk IDs,
+// or nil if the apply errored. Entry copies are safe to hand outside the
+// lock: Holders is copy-on-write (see applyAckChunkHolder). Caller holds
+// f.mu.
+func (f *FSM) captureEntries(applyResult any, ids []chunk.ChunkID) []ManifestEntry {
+	if applyResult != nil || len(ids) == 0 {
+		return nil
+	}
+	out := make([]ManifestEntry, 0, len(ids))
+	for _, id := range ids {
+		if e := f.chunks[id]; e != nil {
+			out = append(out, *e)
+		}
+	}
+	return out
 }
 
 // captureID returns id, or nil if the apply errored. Lock-free.
