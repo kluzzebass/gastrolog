@@ -3108,7 +3108,7 @@ export class ClusterSettings extends Message<ClusterSettings> {
   broadcastInterval = "";
 
   /**
-   * Go duration string, e.g. "1s". Default: "1s". Lightweight liveness ping; PeerState TTL is 4× this.
+   * Go duration string, e.g. "1s". Default: "1s". Lightweight liveness ping; PeerState TTL is 8× this (defaultPeerTTLMultiplier).
    *
    * @generated from field: string heartbeat_interval = 2;
    */

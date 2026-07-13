@@ -1030,14 +1030,20 @@ func TestPlacement_DrainingLeader_RetainsPlacement_NoSoftOfflineAlert(t *testing
 	}
 }
 
-func TestPlacement_LiveLeader_NoStateGuard(t *testing.T) {
+func TestPlacement_LiveLeaderHeartbeatLost_RetainsPlacement(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	// Live peer with NO live heartbeats — existing rotate-on-not-alive
-	// behavior should fire. State guard does not apply.
+	// Live peer with NO live heartbeats — the pre-Unreachable window.
+	// Two-clock inversion (gastrolog-2d35dc): heartbeat loss alone must
+	// never move a leader; only the node lifecycle state machine may.
+	// Before the fix this window rotated leadership ~26s into any blip
+	// (measured live) — the exact transient absence slc6l's soft-offline
+	// gate exists to protect — because the guard read the FSM state
+	// (which the unreachable sweep flips only after its 5-minute grace)
+	// while the rotate path read raw heartbeat liveness.
 	localID := glid.New()
 	peerID := glid.New()
-	pm, store, _ := newTestPlacement(t, localID.String(), nil /* no live peers */)
+	pm, store, alerts := newTestPlacement(t, localID.String(), nil /* no live peers */)
 	now := time.Now()
 	_ = store.PutNode(ctx, system.NodeConfig{ID: localID, Name: "local", State: system.NodeStateLive, StateSince: now})
 	_ = store.PutNode(ctx, system.NodeConfig{ID: peerID, Name: "peer", State: system.NodeStateLive, StateSince: now})
@@ -1045,11 +1051,11 @@ func TestPlacement_LiveLeader_NoStateGuard(t *testing.T) {
 
 	pm.reconcile(ctx)
 
-	// Live + not heartbeating → existing rotate behavior. Until the
-	// auto-trigger sweep (gastrolog-39m2k) transitions this to
-	// Unreachable, the state guard doesn't catch it.
-	if got := vaultNode(t, store, vaultID); got != localID.String() {
-		t.Errorf("Live-but-not-alive leader should have rotated: got %q, want %q", got, localID.String())
+	if got := vaultNode(t, store, vaultID); got != peerID.String() {
+		t.Errorf("Live-but-not-alive leader must retain placement (heartbeat is not the state machine): got %q, want %q", got, peerID.String())
+	}
+	if !hasAlert(alerts, "vault-soft-offline-leader:") {
+		t.Errorf("expected soft-offline-leader alert for heartbeat-lost Live leader, got none")
 	}
 }
 

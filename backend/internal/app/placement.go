@@ -308,7 +308,29 @@ func (pm *placementManager) placeVault(ctx context.Context, v system.VaultConfig
 		case system.NodeStateUnknown, system.NodeStateLive:
 			// Live state (and legacy Unknown which maps to Live via
 			// EffectiveState during nodeStates construction): fall
-			// through to the existing alive/eligible checks below.
+			// through to the eligibility check below — unless the
+			// heartbeat says the node just went quiet.
+			//
+			// Two-clock inversion (gastrolog-2d35dc): heartbeat
+			// liveness (peer TTL, ~8s) must never move a leader — only
+			// the node lifecycle state machine may. A leader that is
+			// state-Live but heartbeat-absent is in the pre-Unreachable
+			// window (the unreachable sweep flips the state after its
+			// 5-minute grace); before this guard, the alive[] check
+			// below reassigned leadership ~26s into any blip — exactly
+			// the transient absence slc6l's soft-offline gate promised
+			// to protect, orphaning the returning node's chunks at
+			// RF=1. Same treatment as Unreachable: retain placement,
+			// alert, reconcile followers only.
+			if !alive[currentLeader] {
+				if pm.alerts != nil {
+					pm.alerts.Set(softOfflineAlertKey, alert.Warning, "placement",
+						fmt.Sprintf("Vault %q leader heartbeat lost on node %s (state still Live) — placement retained, rotation gated until the node lifecycle state changes",
+							v.Name, currentLeader))
+				}
+				pm.placeFollowers(ctx, &v, alive, nscs, vaultCount)
+				return
+			}
 		case system.NodeStateUnreachable, system.NodeStateMaintenance:
 			if pm.alerts != nil {
 				pm.alerts.Set(softOfflineAlertKey, alert.Warning, "placement",
@@ -328,8 +350,11 @@ func (pm *placementManager) placeVault(ctx context.Context, v system.VaultConfig
 		pm.alerts.Clear(softOfflineAlertKey)
 	}
 
-	// Current leader assignment still valid — check followers too.
-	if currentLeader != "" && alive[currentLeader] && pm.nodeEligible(v, currentLeader, nscs) {
+	// Current leader assignment still valid — check followers too. The
+	// leader is guaranteed heartbeat-alive on this path (the two-clock
+	// guard above returned otherwise), so only eligibility (storage
+	// config) can invalidate it here.
+	if currentLeader != "" && pm.nodeEligible(v, currentLeader, nscs) {
 		if pm.alerts != nil {
 			pm.alerts.Clear(alertKey)
 		}

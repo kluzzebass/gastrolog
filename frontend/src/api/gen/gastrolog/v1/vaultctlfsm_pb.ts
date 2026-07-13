@@ -290,6 +290,12 @@ export class VaultCtlCommand extends Message<VaultCtlCommand> {
      */
     value: RevokeChunkHolderCommand;
     case: "revokeChunkHolder";
+  } | {
+    /**
+     * @generated from field: gastrolog.v1.DiscardUnbuildableManifestsCommand discard_unbuildable_manifests = 24;
+     */
+    value: DiscardUnbuildableManifestsCommand;
+    case: "discardUnbuildableManifests";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<VaultCtlCommand>) {
@@ -323,6 +329,7 @@ export class VaultCtlCommand extends Message<VaultCtlCommand> {
     { no: 21, name: "add_open_chunk_segment_refs", kind: "message", T: AddOpenChunkSegmentRefsCommand, oneof: "command" },
     { no: 22, name: "ack_chunk_holder", kind: "message", T: AckChunkHolderCommand, oneof: "command" },
     { no: 23, name: "revoke_chunk_holder", kind: "message", T: RevokeChunkHolderCommand, oneof: "command" },
+    { no: 24, name: "discard_unbuildable_manifests", kind: "message", T: DiscardUnbuildableManifestsCommand, oneof: "command" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultCtlCommand {
@@ -1387,6 +1394,57 @@ export class SegmentResumeRecordNumber extends Message<SegmentResumeRecordNumber
 
   static equals(a: SegmentResumeRecordNumber | PlainMessage<SegmentResumeRecordNumber> | undefined, b: SegmentResumeRecordNumber | PlainMessage<SegmentResumeRecordNumber> | undefined): boolean {
     return proto3.util.equals(SegmentResumeRecordNumber, a, b);
+  }
+}
+
+/**
+ * DiscardUnbuildableManifestsCommand recovers a wedged seal queue: the head
+ * sealed manifest references a segment no longer in the registry (a ghost
+ * ref admitted before the apply-time guard existed), so no home can ever
+ * build it and the queue is head-of-line blocked. Applying drops the head
+ * AND every queued manifest behind it (the open manifest included) and
+ * rewinds each surviving segment's resume cursor to its lowest discarded
+ * record number, so every un-built record re-plans. Built chunks always sit
+ * strictly below that line (planning is FIFO per segment), and ghost
+ * segments' discarded ranges are stale duplicates of already-chunked
+ * records — recovery loses nothing.
+ *
+ * @generated from message gastrolog.v1.DiscardUnbuildableManifestsCommand
+ */
+export class DiscardUnbuildableManifestsCommand extends Message<DiscardUnbuildableManifestsCommand> {
+  /**
+   * The wedged head manifest's chunk ID; the apply validates it is the
+   * sealed head and actually has a ghost ref, refusing otherwise.
+   *
+   * @generated from field: bytes chunk_id = 1;
+   */
+  chunkId = new Uint8Array(0);
+
+  constructor(data?: PartialMessage<DiscardUnbuildableManifestsCommand>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.DiscardUnbuildableManifestsCommand";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DiscardUnbuildableManifestsCommand {
+    return new DiscardUnbuildableManifestsCommand().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): DiscardUnbuildableManifestsCommand {
+    return new DiscardUnbuildableManifestsCommand().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): DiscardUnbuildableManifestsCommand {
+    return new DiscardUnbuildableManifestsCommand().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: DiscardUnbuildableManifestsCommand | PlainMessage<DiscardUnbuildableManifestsCommand> | undefined, b: DiscardUnbuildableManifestsCommand | PlainMessage<DiscardUnbuildableManifestsCommand> | undefined): boolean {
+    return proto3.util.equals(DiscardUnbuildableManifestsCommand, a, b);
   }
 }
 

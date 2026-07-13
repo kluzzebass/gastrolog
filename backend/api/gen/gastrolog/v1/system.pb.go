@@ -3667,7 +3667,7 @@ func (x *StaticLookupRow) GetValues() map[string]string {
 type ClusterSettings struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	BroadcastInterval string                 `protobuf:"bytes,1,opt,name=broadcast_interval,json=broadcastInterval,proto3" json:"broadcast_interval,omitempty"` // Go duration string, e.g. "5s". Default: "5s".
-	HeartbeatInterval string                 `protobuf:"bytes,2,opt,name=heartbeat_interval,json=heartbeatInterval,proto3" json:"heartbeat_interval,omitempty"` // Go duration string, e.g. "1s". Default: "1s". Lightweight liveness ping; PeerState TTL is 4× this.
+	HeartbeatInterval string                 `protobuf:"bytes,2,opt,name=heartbeat_interval,json=heartbeatInterval,proto3" json:"heartbeat_interval,omitempty"` // Go duration string, e.g. "1s". Default: "1s". Lightweight liveness ping; PeerState TTL is 8× this (defaultPeerTTLMultiplier).
 	// Per-vault pipeline backlog budget in bytes (unreleased completed segments
 	// in the vault-ctl registry). When a vault's backlog reaches the budget,
 	// ingest admission for that vault is refused (retryable backpressure) until
