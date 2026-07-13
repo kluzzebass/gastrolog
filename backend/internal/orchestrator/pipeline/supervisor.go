@@ -342,7 +342,7 @@ func (s *Supervisor) Start(ctx context.Context) error {
 	s.wg.Go(func() { _ = s.chunk.Run(runCtx) })
 	s.wg.Go(func() { _ = s.route.Run(runCtx, s.routingIn) })
 	s.wg.Go(func() { _ = s.digest.Run(runCtx, s.ingestOut) })
-	s.wg.Go(func() { s.pump(runCtx) })
+	s.wg.Go(func() { s.pump() })
 
 	if err := s.ingest.Start(runCtx); err != nil {
 		cancel()
@@ -378,44 +378,41 @@ func (s *Supervisor) Stop() error {
 // pump only enqueues and never acks: blocking here per record would serialize the
 // group commit and defeat batching. The ingester's ack channel must be buffered
 // so the segmentation commit loop never stalls releasing it.
-func (s *Supervisor) pump(ctx context.Context) {
+func (s *Supervisor) pump() {
 	defer s.closeRouting()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case out, ok := <-s.digestOut:
-			if !ok {
-				return
+	// Close-driven like the stages it bridges (gastrolog-5kcq5q): drains
+	// digestOut until digestion closes it, then closes routingIn so the
+	// routing workers exit. The pump sends directly — it is the sole
+	// goroutine that closes routingIn, so its own sends can never race
+	// that close; Submit (retention fan-out, the other producer) keeps
+	// the guarded, ctx-bounded sendRouting path.
+	for out := range s.digestOut {
+		if out.Err != nil {
+			if out.Ack != nil {
+				out.Ack <- out.Err
 			}
-			if out.Err != nil {
-				if out.Ack != nil {
-					out.Ack <- out.Err
-				}
-				continue
-			}
-			if err := s.admit(); err != nil {
-				// Admission rejected (disk floor / backlog watermark):
-				// nack so the source retries; an accepted-then-marooned
-				// record would be ours to lose.
-				if out.Ack != nil {
-					out.Ack <- err
-				}
-				continue
-			}
-			in := routing.IngestInput(out.Record)
-			in.Ack = out.Ack
-			if !s.sendRouting(ctx, in) {
-				return
-			}
+			continue
 		}
+		if err := s.admit(); err != nil {
+			// Admission rejected (disk floor / backlog watermark):
+			// nack so the source retries; an accepted-then-marooned
+			// record would be ours to lose.
+			if out.Ack != nil {
+				out.Ack <- err
+			}
+			continue
+		}
+		in := routing.IngestInput(out.Record)
+		in.Ack = out.Ack
+		s.routingIn <- in
 	}
 }
 
 // sendRouting delivers in to the routing queue, coordinating with closeRouting so
-// concurrent senders (pump and Submit) never write to a closed routingIn. It
-// returns false (nacking in.Ack) when the queue is already closed or ctx is
-// cancelled before the send completes.
+// concurrent Submit senders never write to a closed routingIn. (The pump sends
+// directly — it closes routingIn itself, after its last send.) Returns false
+// (nacking in.Ack) when the queue is already closed or ctx is cancelled before
+// the send completes.
 func (s *Supervisor) sendRouting(ctx context.Context, in routing.Input) bool {
 	s.sendMu.RLock()
 	defer s.sendMu.RUnlock()

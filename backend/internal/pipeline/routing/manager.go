@@ -183,54 +183,32 @@ func drainCounterMap(store *sync.Map) map[glid.GLID]uint64 {
 	return out
 }
 
-// Run consumes inputs until in is closed or ctx is cancelled.
+// Run consumes inputs until in is closed.
+//
+// Shutdown is close-driven, not ctx-driven (gastrolog-5kcq5q): the supervisor
+// pump closes in after the digest stage's output drains, so workers receive
+// with a plain range instead of per-record 2-case selects (the sellock hot
+// spot). ctx still bounds the per-delivery sink sends inside route() — that
+// is the one boundary where a stalled consumer (segmentation stopping at
+// shutdown) must be able to abort a blocking send.
 func (m *Manager) Run(ctx context.Context, in <-chan Input) error {
 	if !m.running.CompareAndSwap(false, true) {
 		return ErrNotRunning
 	}
 
-	work := make(chan Input)
-
 	for range m.workers {
 		m.wg.Go(func() {
-			m.worker(ctx, work)
+			m.worker(ctx, in)
 		})
 	}
-
-	m.wg.Go(func() {
-		defer close(work)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case item, ok := <-in:
-				if !ok {
-					return
-				}
-				select {
-				case work <- item:
-				case <-ctx.Done():
-					return
-				}
-			}
-		}
-	})
 
 	m.wg.Wait()
 	return ctx.Err()
 }
 
 func (m *Manager) worker(ctx context.Context, in <-chan Input) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case item, ok := <-in:
-			if !ok {
-				return
-			}
-			m.route(ctx, item)
-		}
+	for item := range in {
+		m.route(ctx, item)
 	}
 }
 

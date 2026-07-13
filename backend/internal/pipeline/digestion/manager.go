@@ -52,61 +52,37 @@ func New(cfg Config) (*Manager, <-chan Output) {
 	return m, out
 }
 
-// Run consumes messages until in is closed or ctx is cancelled. It closes the
-// output channel after all workers exit. Run blocks until completion.
+// Run consumes messages until in is closed, then closes the output channel
+// after all workers exit. Run blocks until completion.
+//
+// Shutdown is close-driven, not ctx-driven (gastrolog-5kcq5q): the producer
+// MUST close in on every exit path — ingestion.Manager guarantees this on
+// both Stop and context cancellation — and downstream MUST drain m.out until
+// it closes. Workers receive and send with plain channel ops: the previous
+// per-record 2-case selects (recv+ctx, send+ctx, twice more in a feeder
+// goroutine bridging an unbuffered hand-off channel) put four select
+// rendezvous on every record and showed up as runtime sellock spin at ~31%
+// of calm-profile CPU. Blocking sends on the bounded out queue are the
+// backpressure mechanism — never bypass them.
 func (m *Manager) Run(ctx context.Context, in <-chan ingestion.Message) error {
 	if !m.running.CompareAndSwap(false, true) {
 		return ErrNotRunning
 	}
 	defer close(m.out)
 
-	work := make(chan ingestion.Message)
-
 	for range m.workers {
 		m.wg.Go(func() {
-			m.worker(ctx, work)
+			m.worker(in)
 		})
 	}
-
-	m.wg.Go(func() {
-		defer close(work)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case msg, ok := <-in:
-				if !ok {
-					return
-				}
-				select {
-				case work <- msg:
-				case <-ctx.Done():
-					return
-				}
-			}
-		}
-	})
 
 	m.wg.Wait()
 	return ctx.Err()
 }
 
-func (m *Manager) worker(ctx context.Context, in <-chan ingestion.Message) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case msg, ok := <-in:
-			if !ok {
-				return
-			}
-			out := m.digest(msg)
-			select {
-			case m.out <- out:
-			case <-ctx.Done():
-				return
-			}
-		}
+func (m *Manager) worker(in <-chan ingestion.Message) {
+	for msg := range in {
+		m.out <- m.digest(msg)
 	}
 }
 
