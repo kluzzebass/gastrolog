@@ -80,6 +80,7 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/chunking"
+	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
@@ -825,6 +826,112 @@ func (r *VaultLifecycleReconciler) alertUnknownOrphan(meta chunk.ChunkMeta) {
 	r.orch.alerts.Set(alertID, alert.Warning, "vault",
 		fmt.Sprintf("Vault %s: chunk %s on disk with %d records but not recognized by FSM; preserved for recovery (do not manually delete without operator review)",
 			r.vaultID, meta.ID, meta.RecordCount))
+}
+
+// SweepStagingOrphans is the pipeline-staging counterpart of
+// SweepLocalOrphans (gastrolog-27czpq). SweepLocalOrphans covers the
+// chunk Manager's store, but V3 keeps its bytes in the pipeline staging
+// areas (<segmentsDir>/<vaultID>/{completed,head,pre-head,chunks}) which
+// the Manager only learns about lazily via FSM activity — files whose
+// release/delete effect this node missed while offline are invisible to
+// it forever. This sweep enumerates the staging directories on DISK and
+// reconciles them against the replicated FSM with positive evidence
+// only:
+//
+//   - segment files (completed/, head/, pre-head/) are purged iff
+//     FSM.SegmentReleased(id) — the release effect this node missed. A
+//     registry entry means the segment is live (keep); registry-absent
+//     WITHOUT release evidence means a completed segment awaiting its
+//     distribution publish (keep — deleting it loses ingested records).
+//   - chunk staging dirs (chunks/<id>/) are removed iff the FSM has no
+//     manifest entry, no pendingDeletes obligation, AND a tombstone —
+//     positive proof a finalize-delete applied while this node was
+//     offline. Unknown dirs are preserved per the
+//     no-auto-delete-of-unknown-orphans invariant.
+//
+// A not-yet-caught-up FSM can therefore only DELAY cleanup (evidence not
+// applied yet), never delete live data. Idempotent; runs on every node's
+// vaultCatchupSweepAll cadence.
+func (r *VaultLifecycleReconciler) SweepStagingOrphans() {
+	if r.fsm == nil || r.orch == nil || !r.fsm.Ready() {
+		return
+	}
+	r.sweepReleasedSegmentStaging()
+	r.sweepTombstonedChunkStaging()
+}
+
+func (r *VaultLifecycleReconciler) sweepReleasedSegmentStaging() {
+	root, ok := r.orch.pipelineVaultStagingRoot(r.vaultID)
+	if !ok {
+		return
+	}
+	candidates := make(map[glid.GLID]struct{})
+	for _, dir := range []string{paths.CompletedDir(root), paths.HeadDir(root), paths.PreHeadDir(root)} {
+		ids, err := paths.ListSegmentIDs(dir)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				r.logger.Warn("staging-orphan sweep: list segment dir failed",
+					"dir", dir, "error", err)
+			}
+			continue
+		}
+		for id := range ids {
+			candidates[id] = struct{}{}
+		}
+	}
+	purged := 0
+	for id := range candidates {
+		if !r.fsm.SegmentReleased(id) {
+			continue
+		}
+		if err := paths.PurgeSegmentStaging(root, id); err != nil {
+			r.logger.Warn("staging-orphan sweep: segment purge failed",
+				"segment", id, "error", err)
+			continue
+		}
+		purged++
+	}
+	if purged > 0 {
+		r.logger.Info("staging-orphan sweep: purged released segments this node missed",
+			"segments", purged)
+	}
+}
+
+func (r *VaultLifecycleReconciler) sweepTombstonedChunkStaging() {
+	chunkRoot, ok := r.orch.pipelineVaultChunkRoot(r.vaultID)
+	if !ok {
+		return
+	}
+	entries, err := os.ReadDir(chunkRoot)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			r.logger.Warn("staging-orphan sweep: list chunk staging failed",
+				"dir", chunkRoot, "error", err)
+		}
+		return
+	}
+	removed := 0
+	for _, ent := range entries {
+		if !ent.IsDir() {
+			continue
+		}
+		id, err := chunk.ParseChunkID(ent.Name())
+		if err != nil {
+			continue
+		}
+		if r.fsm.Get(id) != nil || r.fsm.PendingDelete(id) != nil {
+			continue
+		}
+		if !r.fsm.IsTombstoned(id) {
+			continue
+		}
+		r.deletePipelineChunkDir(id)
+		removed++
+	}
+	if removed > 0 {
+		r.logger.Info("staging-orphan sweep: removed tombstoned chunk dirs this node missed",
+			"chunks", removed)
+	}
 }
 
 // SweepMissingReplicas walks the FSM's sealed-chunk manifest and asks

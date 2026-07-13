@@ -466,6 +466,23 @@ func (o *Orchestrator) pipelineVaultChunkRoot(vaultID glid.GLID) (string, bool) 
 	return "", false
 }
 
+// pipelineVaultStagingRoot returns the segment staging root for a vault
+// when this node runs the pipeline for it in any role
+// (<segmentsDir>/<vaultID> — the parent of working/, completed/, head/,
+// pre-head/ and chunks/). Unlike pipelineVaultChunkRoot it is NOT
+// home-gated: origins hold completed/ files too, and the staging-orphan
+// sweep (gastrolog-27czpq) must purge released segments on every role.
+func (o *Orchestrator) pipelineVaultStagingRoot(vaultID glid.GLID) (string, bool) {
+	o.mu.Lock()
+	segmentsDir := o.segmentsDir
+	_, registered := o.pipelineVaults[vaultID]
+	o.mu.Unlock()
+	if segmentsDir == "" || !registered {
+		return "", false
+	}
+	return filepath.Join(segmentsDir, vaultID.String()), true
+}
+
 // noopPublisher is the distribution publisher used while no vault-ctl handle is
 // available (single-node/memory mode): it accepts and drops publish metadata.
 // With a handle, the VaultCtlPublisher takes over so completed segments are

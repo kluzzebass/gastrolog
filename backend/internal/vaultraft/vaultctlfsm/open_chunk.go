@@ -605,6 +605,20 @@ func (f *FSM) SegmentReferencedInManifest(segmentID glid.GLID) bool {
 	return f.segmentReferencedInManifestLocked(segmentID)
 }
 
+// SegmentReleased reports whether segmentID was dropped from the registry
+// by a ReleaseSegments apply. This is positive, replicated, snapshot-
+// persisted evidence of release — the staging-orphan sweep
+// (gastrolog-27czpq) uses it to delete local segment files whose release
+// effect this node missed while offline. Registry absence alone is NOT
+// evidence: a completed segment awaiting its distribution publish is also
+// registry-absent, and deleting it would lose ingested records.
+func (f *FSM) SegmentReleased(segmentID glid.GLID) bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	_, released := f.releasedSegments[segmentID]
+	return released
+}
+
 // segmentReferencedInManifestLocked is SegmentReferencedInManifest for callers
 // already holding f.mu (the Raft apply path).
 func (f *FSM) segmentReferencedInManifestLocked(segmentID glid.GLID) bool {

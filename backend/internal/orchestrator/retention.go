@@ -284,6 +284,7 @@ func (o *Orchestrator) vaultCatchupSweepAll() {
 	for _, t := range vaultInsts {
 		t.Reconciler.SweepPendingObligations()
 		t.Reconciler.SweepLocalOrphans()
+		t.Reconciler.SweepStagingOrphans()
 		t.Reconciler.SweepMissingReplicas()
 		t.Reconciler.SweepStaleLeaderFSMEntries()
 		t.Reconciler.SweepStalePendingDeleteAcks()
