@@ -89,6 +89,11 @@ type vaultCtlLeaderManager struct {
 	rootCxl       context.CancelFunc
 	logger        *slog.Logger
 
+	// misaligned holds each vault's last-observed wrong-leader sighting
+	// for transferIfNeeded's two-pass damping (gastrolog-5kcq5q). Guarded
+	// by mu; lazily allocated.
+	misaligned map[glid.GLID]misalignedObservation
+
 	// desiredChanged broadcasts to every leader epoch goroutine whenever
 	// SetDesiredMembers updates a vault's target member set OR a reconcile
 	// pass bails partway through a burst with more work to do. Replaces
@@ -453,6 +458,19 @@ func (m *vaultCtlLeaderManager) reconcile(vaultID glid.GLID, group *raftgroup.Gr
 // placement leader. If not, initiates LeadershipTransferToServer so the Raft
 // leader aligns with the node that owns the data. This reduces FSM apply
 // latency (no forwarding hop) and simplifies the operational model.
+//
+// Damped (gastrolog-5kcq5q): the transfer fires only after the SAME
+// misaligned leader is observed on two consecutive passes. The undamped
+// aligner amplified every organic election into a multi-term cascade —
+// the wrong node wins, its epoch callback transfers immediately, the
+// transfer triggers another election that a third node can win, which
+// transfers again (307 commanded transfers logged; term bursts surfaced
+// as WARN-level election storms). One sighting of misalignment right
+// after an election is expected settling noise; misalignment that
+// survives to the NEXT pass is a settled wrong leader worth moving.
+// Observation-count hysteresis, not wall-clock — the pass cadence
+// (leader-epoch events, desiredChanged notifies, the 30s membership
+// reconcile) is the clock.
 func (m *vaultCtlLeaderManager) transferIfNeeded(vaultID glid.GLID, group *raftgroup.Group) {
 	want := m.desiredLeader.Get(vaultID)
 	if want == nil {
@@ -460,10 +478,16 @@ func (m *vaultCtlLeaderManager) transferIfNeeded(vaultID glid.GLID, group *raftg
 	}
 	currentLeader, currentID := group.Raft.LeaderWithID()
 	if currentID == want.ID {
+		m.clearMisalignment(vaultID)
 		return // already aligned
 	}
 	if currentLeader == "" {
-		return // no leader elected yet
+		// No leader elected yet — not evidence of a settled wrong leader.
+		m.clearMisalignment(vaultID)
+		return
+	}
+	if !m.confirmMisalignment(vaultID, currentID, want.ID) {
+		return // first sighting — let the group settle before commanding a move
 	}
 
 	m.logger.Info("transferring vault-ctl Raft leadership",
@@ -476,6 +500,44 @@ func (m *vaultCtlLeaderManager) transferIfNeeded(vaultID glid.GLID, group *raftg
 		m.logger.Warn("leadership transfer failed",
 			"vault", vaultID, "target", want.ID, "error", err)
 	}
+	// The commanded transfer changes leadership again; the next pass
+	// re-observes from scratch either way.
+	m.clearMisalignment(vaultID)
+}
+
+// misalignedObservation records one pass's sighting of a wrong vault-ctl
+// leader: which leader was seen and which target was desired. A repeat
+// sighting of the identical pair on the next pass confirms the
+// misalignment as settled.
+type misalignedObservation struct {
+	currentID hraft.ServerID
+	wantID    hraft.ServerID
+}
+
+// confirmMisalignment reports whether this exact (current, want)
+// misalignment was already observed on a previous pass. First sightings
+// (or sightings where either side changed — an election or a placement
+// change happened in between) record the observation and return false.
+func (m *vaultCtlLeaderManager) confirmMisalignment(vaultID glid.GLID, currentID, wantID hraft.ServerID) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.misaligned == nil {
+		m.misaligned = make(map[glid.GLID]misalignedObservation)
+	}
+	obs := misalignedObservation{currentID: currentID, wantID: wantID}
+	if m.misaligned[vaultID] == obs {
+		return true
+	}
+	m.misaligned[vaultID] = obs
+	return false
+}
+
+// clearMisalignment drops the vault's pending misalignment observation —
+// the group is aligned, leaderless, or a transfer was just commanded.
+func (m *vaultCtlLeaderManager) clearMisalignment(vaultID glid.GLID) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.misaligned, vaultID)
 }
 
 // vaultCtlMembershipMap is a thread-safe map of vaultID → desired member list.

@@ -527,3 +527,74 @@ func TestVaultCtlLeaderManager_BurstYieldsAndResumes(t *testing.T) {
 	}
 	t.Fatal("first synthetic peer did not converge within 3 s after burst")
 }
+
+// transferIfNeeded damping (gastrolog-5kcq5q): a misaligned leader must be
+// observed on two consecutive passes before a transfer is commanded, so a
+// single organic election settles in one term instead of cascading through
+// immediate re-alignment transfers.
+func TestTransferDampingConfirmsOnSecondIdenticalSighting(t *testing.T) {
+	t.Parallel()
+	m := &vaultCtlLeaderManager{}
+	vault := glid.New()
+
+	if m.confirmMisalignment(vault, "node-B", "node-A") {
+		t.Fatal("first sighting must not confirm")
+	}
+	if !m.confirmMisalignment(vault, "node-B", "node-A") {
+		t.Fatal("second identical sighting must confirm")
+	}
+}
+
+func TestTransferDampingResetsWhenLeaderChangesBetweenPasses(t *testing.T) {
+	t.Parallel()
+	m := &vaultCtlLeaderManager{}
+	vault := glid.New()
+
+	_ = m.confirmMisalignment(vault, "node-B", "node-A")
+	// An election happened between passes: different wrong leader now.
+	// That's a NEW misalignment — it must start its own two-pass count.
+	if m.confirmMisalignment(vault, "node-C", "node-A") {
+		t.Fatal("changed current leader must reset the observation, not confirm")
+	}
+	if !m.confirmMisalignment(vault, "node-C", "node-A") {
+		t.Fatal("repeat of the new sighting must confirm")
+	}
+}
+
+func TestTransferDampingResetsWhenDesiredChangesBetweenPasses(t *testing.T) {
+	t.Parallel()
+	m := &vaultCtlLeaderManager{}
+	vault := glid.New()
+
+	_ = m.confirmMisalignment(vault, "node-B", "node-A")
+	// Placement leader changed between passes: different target.
+	if m.confirmMisalignment(vault, "node-B", "node-D") {
+		t.Fatal("changed desired leader must reset the observation, not confirm")
+	}
+}
+
+func TestTransferDampingClearResets(t *testing.T) {
+	t.Parallel()
+	m := &vaultCtlLeaderManager{}
+	vault := glid.New()
+
+	_ = m.confirmMisalignment(vault, "node-B", "node-A")
+	m.clearMisalignment(vault) // group aligned (or transfer commanded) in between
+	if m.confirmMisalignment(vault, "node-B", "node-A") {
+		t.Fatal("sighting after clear must start a fresh two-pass count")
+	}
+}
+
+func TestTransferDampingIsPerVault(t *testing.T) {
+	t.Parallel()
+	m := &vaultCtlLeaderManager{}
+	a, b := glid.New(), glid.New()
+
+	_ = m.confirmMisalignment(a, "node-B", "node-A")
+	if m.confirmMisalignment(b, "node-B", "node-A") {
+		t.Fatal("vault B's first sighting must not be confirmed by vault A's history")
+	}
+	if !m.confirmMisalignment(a, "node-B", "node-A") {
+		t.Fatal("vault A's second sighting must confirm independently")
+	}
+}
