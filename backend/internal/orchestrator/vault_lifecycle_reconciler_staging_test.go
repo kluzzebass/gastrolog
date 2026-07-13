@@ -209,3 +209,44 @@ func TestStagingSweepNoopBeforeFSMReady(t *testing.T) {
 		t.Error("sweep acted before the FSM was Ready")
 	}
 }
+
+// ReconcileTick is the consolidated production entry point
+// (gastrolog-4pq56v): one gathered view, every category run against it.
+// Reuse the staging fixture to prove the tick reaches the categories
+// with the same semantics as the isolated Sweep* wrappers.
+func TestReconcileTickRunsCategoriesAgainstOneView(t *testing.T) {
+	t.Parallel()
+	f := newStagingSweepFixture(t)
+	now := time.Now()
+
+	released := glid.New()
+	f.apply(t, vaultctlfsm.MarshalPublishCompletedSegment(publishEntry(released)))
+	f.apply(t, vaultctlfsm.MarshalReleaseSegments([]glid.GLID{released}))
+	relFile := paths.CompletedSegment(f.root, released)
+	f.writeSegmentFile(t, relFile)
+
+	tombstoned := chunk.NewChunkID()
+	f.apply(t, vaultctlfsm.MarshalCreateChunk(tombstoned, now, now, now))
+	f.apply(t, vaultctlfsm.MarshalSealChunk(tombstoned, now, 1, 1, now, now, now, false, now))
+	f.apply(t, vaultctlfsm.MarshalRequestDelete(tombstoned, now, "test", []string{"node-B"}))
+	f.apply(t, vaultctlfsm.MarshalAckDelete(tombstoned, "node-B"))
+	f.apply(t, vaultctlfsm.MarshalFinalizeDelete(tombstoned))
+	tombstonedDir := f.writeChunkDir(t, tombstoned)
+
+	live := chunk.NewChunkID()
+	f.apply(t, vaultctlfsm.MarshalCreateChunk(live, now, now, now))
+	f.apply(t, vaultctlfsm.MarshalSealChunk(live, now, 1, 1, now, now, now, false, now))
+	liveDir := f.writeChunkDir(t, live)
+
+	f.rec.ReconcileTick()
+
+	if exists(relFile) {
+		t.Error("ReconcileTick did not purge the released segment")
+	}
+	if exists(tombstonedDir) {
+		t.Error("ReconcileTick did not remove the tombstoned chunk dir")
+	}
+	if !exists(liveDir) {
+		t.Error("ReconcileTick deleted a live chunk dir")
+	}
+}

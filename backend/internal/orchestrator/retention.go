@@ -244,34 +244,18 @@ func (o *Orchestrator) retentionSweepAll() {
 
 // vaultCatchupSweepAll runs every 20 seconds (cron 13/33/53s, phase-
 // offset from the retention sweep) on every node. For each (vault,
-// instance) on this node it asks the lifecycle reconciler to run all
-// three local-state catchup sweeps:
+// instance) on this node it runs the lifecycle reconciler's
+// consolidated ReconcileTick: one shared FSM/disk gather per tick, then
+// every reconcile category diffs against it (pending obligations, local
+// orphans, staging orphans, missing replicas, stale leader FSM entries,
+// stale pending-delete acks, idle actives). See
+// VaultLifecycleReconciler.ReconcileTick for the category catalogue and
+// per-category ownership docs (gastrolog-4pq56v).
 //
-//  1. SweepPendingObligations — re-runs fulfillObligation for any
-//     pendingDeletes entry where this node is still in ExpectedFrom.
-//     Covers the case where the steady-state onRequestDelete callback
-//     fired but didn't ack (apply-pump wedge, transient failure, etc.).
-//     gastrolog-51gme.
-//
-//  2. SweepLocalOrphans — deletes local sealed chunks that the FSM has
-//     positively tombstoned but no longer references in the manifest
-//     or pendingDeletes. Covers the case where a delete cycle ran to
-//     completion while this node was offline; snapshot install brings
-//     the FSM forward to the post-finalize state, leaving the local
-//     file orphaned with no receipt obligation to drive cleanup.
-//     gastrolog-51gme.
-//
-//  3. SweepMissingReplicas — asks the placement leader to re-push
-//     sealed chunks present in the FSM but missing locally. Covers
-//     the create-side gap where the leader pushed a sealed chunk
-//     during this node's pause/partition window and the gRPC failed
-//     with no retry. gastrolog-2dgvj.
-//
-// All three sweeps are local-only on the originating side: each node
+// Every category is local-only on the originating side: each node
 // consults its OWN replicated FSM state and decides independently.
-// (1) and (2) take no remote actions. (3) sends a unary RPC to the
-// placement leader, but the *decision* to send is local — the leader
-// is just the transport for the response.
+// The only remote action is missing-replica catchup's unary RPC to a
+// placement peer — and the *decision* to send it is still local.
 func (o *Orchestrator) vaultCatchupSweepAll() {
 	o.mu.RLock()
 	vaultInsts := make([]*VaultInstance, 0)
@@ -282,13 +266,7 @@ func (o *Orchestrator) vaultCatchupSweepAll() {
 	}
 	o.mu.RUnlock()
 	for _, t := range vaultInsts {
-		t.Reconciler.SweepPendingObligations()
-		t.Reconciler.SweepLocalOrphans()
-		t.Reconciler.SweepStagingOrphans()
-		t.Reconciler.SweepMissingReplicas()
-		t.Reconciler.SweepStaleLeaderFSMEntries()
-		t.Reconciler.SweepStalePendingDeleteAcks()
-		t.Reconciler.SweepIdleActiveChunks()
+		t.Reconciler.ReconcileTick()
 	}
 }
 
