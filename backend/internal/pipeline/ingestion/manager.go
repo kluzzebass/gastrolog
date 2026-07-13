@@ -65,6 +65,9 @@ type Manager struct {
 	cancels   map[glid.GLID]context.CancelFunc
 
 	ingesterWg sync.WaitGroup
+	// outOnce guards close(out): both Stop and the Start-installed
+	// context watcher close the queue, whichever exits the run first.
+	outOnce sync.Once
 }
 
 type ingesterMeta struct {
@@ -113,6 +116,17 @@ func (m *Manager) Start(parent context.Context) error {
 	for id, ing := range m.ingesters {
 		m.startLocked(id, ing)
 	}
+
+	// Close-on-exit contract (gastrolog-5kcq5q): the output queue closes on
+	// EVERY run exit — Stop below, or the parent context dying without a
+	// Stop call. Downstream stages (digestion, the pump, routing) shut down
+	// purely by close cascade with plain per-record channel ops; a run exit
+	// that left out open would strand them blocked on receive forever.
+	go func() {
+		<-ctx.Done()
+		m.ingesterWg.Wait()
+		m.outOnce.Do(func() { close(m.out) })
+	}()
 	return nil
 }
 
@@ -132,7 +146,7 @@ func (m *Manager) Stop() error {
 	}
 
 	m.ingesterWg.Wait()
-	close(m.out)
+	m.outOnce.Do(func() { close(m.out) })
 
 	m.mu.Lock()
 	m.runCtx = nil
