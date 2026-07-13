@@ -3,6 +3,7 @@ package sysmetrics
 
 import (
 	"runtime"
+	"runtime/metrics"
 	"sync"
 	"syscall"
 	"time"
@@ -90,25 +91,59 @@ type MemoryStats struct {
 	NumGC uint32
 }
 
+// memSampleNames is the fixed runtime/metrics sample set Memory reads.
+// Index order matters — Memory indexes into the read results positionally.
+var memSampleNames = []string{
+	"/memory/classes/heap/objects:bytes",  // 0: MemStats.HeapAlloc
+	"/memory/classes/heap/unused:bytes",   // 1: HeapInuse = objects + unused
+	"/memory/classes/heap/free:bytes",     // 2: HeapIdle = free + released
+	"/memory/classes/heap/released:bytes", // 3: MemStats.HeapReleased
+	"/memory/classes/heap/stacks:bytes",   // 4: MemStats.StackInuse
+	"/memory/classes/total:bytes",         // 5: MemStats.Sys
+	"/gc/heap/objects:objects",            // 6: MemStats.HeapObjects
+	"/gc/cycles/total:gc-cycles",          // 7: MemStats.NumGC
+}
+
 // Memory returns a detailed memory stats snapshot.
+//
+// Sourced from runtime/metrics, NOT runtime.ReadMemStats: ReadMemStats
+// stops the world, and with the stats collector calling this every
+// broadcast tick the pauses measured 18-512ms per call on an
+// oversubscribed host — long enough to stall Raft heartbeat processing
+// past the election timeout and flap leadership (gastrolog-5kcq5q;
+// execution-trace evidence on the issue). metrics.Read takes no
+// stop-the-world and reads the same accounting. Field equivalences per
+// the runtime/metrics documentation.
 func Memory() MemoryStats {
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
+	samples := make([]metrics.Sample, len(memSampleNames))
+	for i := range samples {
+		samples[i].Name = memSampleNames[i]
+	}
+	metrics.Read(samples)
+	v := func(i int) uint64 {
+		if samples[i].Value.Kind() == metrics.KindUint64 {
+			return samples[i].Value.Uint64()
+		}
+		return 0
+	}
+	heapObjects, heapUnused := v(0), v(1)
+	heapFree, heapReleased := v(2), v(3)
+	stacks, total := v(4), v(5)
 
 	rss := peakRSS()
 
 	//nolint:gosec // G115: memory stats are always positive and well within int64 range
 	return MemoryStats{
-		Inuse:        int64(m.HeapInuse + m.StackInuse),
+		Inuse:        int64(heapObjects + heapUnused + stacks),
 		RSS:          rss,
-		HeapAlloc:    int64(m.HeapAlloc),
-		HeapInuse:    int64(m.HeapInuse),
-		HeapIdle:     int64(m.HeapIdle),
-		HeapReleased: int64(m.HeapReleased),
-		StackInuse:   int64(m.StackInuse),
-		Sys:          int64(m.Sys),
-		HeapObjects:  m.HeapObjects,
-		NumGC:        m.NumGC,
+		HeapAlloc:    int64(heapObjects),
+		HeapInuse:    int64(heapObjects + heapUnused),
+		HeapIdle:     int64(heapFree + heapReleased),
+		HeapReleased: int64(heapReleased),
+		StackInuse:   int64(stacks),
+		Sys:          int64(total),
+		HeapObjects:  v(6),
+		NumGC:        uint32(v(7)),
 	}
 }
 
