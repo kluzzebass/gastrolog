@@ -29,7 +29,10 @@ func TestTOCEntryBinaryLayout(t *testing.T) {
 		Hash:    hash,
 	}
 
-	got := encodeTOCEntry(e)
+	got, err := encodeTOCEntry(e)
+	if err != nil {
+		t.Fatalf("encodeTOCEntry: %v", err)
+	}
 	if len(got) != tocEntrySize {
 		t.Fatalf("encoded length = %d, want %d", len(got), tocEntrySize)
 	}
@@ -75,13 +78,17 @@ func TestTOCEntryRoundTripAllSectionTypes(t *testing.T) {
 	for i, ty := range types {
 		var hash [32]byte
 		hash[0] = byte(i)
-		entryBuf.Write(encodeTOCEntry(TOCEntry{
+		enc, err := encodeTOCEntry(TOCEntry{
 			Type:    ty,
 			Version: 1,
 			Offset:  int64(i) * 100,
 			Size:    int64(i + 1),
 			Hash:    hash,
-		}))
+		})
+		if err != nil {
+			t.Fatalf("encodeTOCEntry type 0x%02x: %v", ty, err)
+		}
+		entryBuf.Write(enc)
 	}
 	footer := encodeTOCFooter(uint32(len(types)), [32]byte{})
 
