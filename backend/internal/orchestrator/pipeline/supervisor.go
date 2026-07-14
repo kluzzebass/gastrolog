@@ -115,6 +115,9 @@ type Config struct {
 	// ingester factory and pressure wiring land in a later slice.
 	OnCheckpoint func(id glid.GLID, data []byte)
 	PressureGate *chanwatch.PressureGate
+	// IngestionRetryDelay overrides the pause before a failed ingester run is
+	// retried. Nil uses the ingestion manager's default jittered 3–5s delay.
+	IngestionRetryDelay func() time.Duration
 }
 
 // VaultSpec describes the roles and per-vault dependencies for one vault on this
@@ -250,6 +253,7 @@ func New(cfg Config) *Supervisor {
 		Logger:       cfg.Logger,
 		OnCheckpoint: cfg.OnCheckpoint,
 		PressureGate: cfg.PressureGate,
+		RetryDelay:   cfg.IngestionRetryDelay,
 	})
 	digest, digestOut := digestion.New(digestion.Config{
 		Workers:     cfg.DigestionWorkers,
