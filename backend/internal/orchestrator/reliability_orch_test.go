@@ -1,6 +1,7 @@
 package orchestrator_test
 
 import (
+	"fmt"
 	"strconv"
 	"sync"
 	"testing"
@@ -249,10 +250,11 @@ func TestOrchRel_FollowerWipe_CatchupRebuilds(t *testing.T) {
 
 	// Post-wipe: the node rejoins the cluster with empty state. Wait
 	// for instance FSMs to converge again; catchup replication rebuilds
-	// the manifest through snapshot install or log replay. Extended
-	// budget: recovery is boot + snapshot install + 20s sweep ticks +
-	// push, which overruns the default wait under full-suite load.
-	h.assertAllNodesSeeWithin(3*time.Minute, baseline)
+	// the manifest through snapshot install or log replay. Recovery is
+	// multi-stage (boot + snapshot install + 20s sweep ticks + push);
+	// the progress-based wait tolerates that — each stage moves the
+	// per-node chunk counts and resets the stall clock.
+	h.assertAllNodesSee(baseline)
 }
 
 // Two independent vaults on the same cluster. Pausing a follower of
@@ -685,14 +687,10 @@ func TestOrchRel_LeaderKilledMidAppend_NoLoss(t *testing.T) {
 
 	// Liveness check on the survivors: their FSMs should have at least
 	// `successCount` entries (matching the committed records).
-	deadline := time.Now().Add(orchHarnessConvWait)
-	for time.Now().Before(deadline) {
+	h.waitProgress("surviving quorum FSM lists a chunk after leader kill", 50*time.Millisecond, func() (string, bool) {
 		ids := h.chunkIDsOnNode(live[0])
-		if len(ids) > 0 {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+		return fmt.Sprintf("chunks=%d", len(ids)), len(ids) > 0
+	}, nil)
 }
 
 // Pump records continuously from multiple goroutines while one peer is
@@ -829,19 +827,11 @@ func TestOrchRel_MultiVault_IsolatedFromPausedPeer(t *testing.T) {
 	}
 	liveForB := []string{h.nodeIDs[0], h.nodeIDs[1], h.nodeIDs[3]}
 	for _, id := range liveForB {
-		deadline := time.Now().Add(orchHarnessConvWait)
-		for time.Now().Before(deadline) {
+		what := fmt.Sprintf("vault B chunks replicating to %s", h.nodes[id].label)
+		h.waitProgress(what, 50*time.Millisecond, func() (string, bool) {
 			got := h.chunkIDsOnNodeForVault(vaultB, id)
-			if len(got) == len(expected) {
-				break
-			}
-			time.Sleep(50 * time.Millisecond)
-		}
-		got := h.chunkIDsOnNodeForVault(vaultB, id)
-		if len(got) != len(expected) {
-			t.Errorf("vault B on node %s: expected %d chunks, got %d",
-				h.nodes[id].label, len(expected), len(got))
-		}
+			return fmt.Sprintf("chunks=%d/%d", len(got), len(expected)), len(got) == len(expected)
+		}, nil)
 	}
 }
 
@@ -850,57 +840,38 @@ func TestOrchRel_MultiVault_IsolatedFromPausedPeer(t *testing.T) {
 // caught up (e.g. one is paused).
 func (h *orchRelHarness) eventuallyLiveNodesSeeSealedChunk(t *testing.T, live []string) {
 	t.Helper()
-	deadline := time.Now().Add(orchHarnessConvWait)
 	var expected map[chunk.ChunkID]bool
-	for time.Now().Before(deadline) {
+	h.waitProgress("sealed chunk appearing on leader", 50*time.Millisecond, func() (string, bool) {
 		expected = h.chunkIDsOnLeader()
-		if len(expected) > 0 {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	if len(expected) == 0 {
-		t.Fatalf("no sealed chunk on leader within %s", orchHarnessConvWait)
-	}
-	// Wait for each live node to match.
+		return fmt.Sprintf("leader_chunks=%d", len(expected)), len(expected) > 0
+	}, nil)
+	// Wait for each live node to match the leader's set.
 	for _, id := range live {
-		dl := time.Now().Add(orchHarnessConvWait)
-		for time.Now().Before(dl) {
+		what := fmt.Sprintf("sealed chunk set replicating to live node %s", h.nodes[id].label)
+		h.waitProgress(what, 50*time.Millisecond, func() (string, bool) {
 			got := h.chunkIDsOnNode(id)
-			if len(got) != len(expected) {
-				time.Sleep(50 * time.Millisecond)
-				continue
-			}
-			mismatch := false
+			matched := 0
 			for cid := range expected {
-				if !got[cid] {
-					mismatch = true
-					break
+				if got[cid] {
+					matched++
 				}
 			}
-			if !mismatch {
-				break
-			}
-			time.Sleep(50 * time.Millisecond)
-		}
+			return fmt.Sprintf("chunks=%d matched=%d/%d", len(got), matched, len(expected)),
+				len(got) == len(expected) && matched == len(expected)
+		}, nil)
 	}
 }
 
-// eventuallyAllSeeSealedChunk polls until the leader reports at least one
-// sealed chunk, then asserts all nodes see the same set. Used by scenarios
-// that append + seal and care about replication success, not specific
-// chunk IDs.
+// eventuallyAllSeeSealedChunk waits until the leader reports at least one
+// sealed chunk, then asserts all nodes converge on the same set. Used by
+// scenarios that append + seal and care about replication success, not
+// specific chunk IDs.
 func (h *orchRelHarness) eventuallyAllSeeSealedChunk(t *testing.T) {
 	t.Helper()
-	deadline := time.Now().Add(orchHarnessConvWait)
-	for time.Now().Before(deadline) {
-		leader := h.chunkIDsOnLeader()
-		if len(leader) == 0 {
-			time.Sleep(50 * time.Millisecond)
-			continue
-		}
-		h.assertAllNodesSee(leader)
-		return
-	}
-	t.Fatalf("no sealed chunk appeared on leader within %s", orchHarnessConvWait)
+	var leader map[chunk.ChunkID]bool
+	h.waitProgress("sealed chunk appearing on leader", 50*time.Millisecond, func() (string, bool) {
+		leader = h.chunkIDsOnLeader()
+		return fmt.Sprintf("leader_chunks=%d", len(leader)), len(leader) > 0
+	}, nil)
+	h.assertAllNodesSee(leader)
 }

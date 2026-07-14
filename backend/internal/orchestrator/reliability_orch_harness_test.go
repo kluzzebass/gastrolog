@@ -169,17 +169,117 @@ func withMatchAllRoute(vaultIdx int) orchRelOption {
 }
 
 const (
-	// All harness waits for asynchronous cluster convergence — readiness,
-	// sealing, replication — share one coarse "genuinely stuck" backstop
-	// instead of budgets calibrated to how fast a step "should" complete. A
-	// calibrated readiness budget (the old 8s) raced vault-ctl leader election
-	// and lost under full-suite CPU contention. This backstop only trips on a
-	// real hang; a healthy-but-slow converge never loses a race against it.
-	orchHarnessConvWait = 60 * time.Second
-	// Vault-ctl groups use longer Raft election timeouts than cluster-ctl;
-	// post-failover leader election can exceed the old 5s budget.
-	orchHarnessLeaderWait = 15 * time.Second
+	// Harness convergence waits are progress-based (see waitProgress), not
+	// wall-clock-bounded: the awaited work is CPU-bound in-process cluster
+	// activity, so under multi-suite contention a fixed wall-clock budget buys
+	// an arbitrary fraction of the compute (gastrolog-5h1uq2). A wait fails
+	// only when its observed progress metric has not changed for this stall
+	// window. The window sits well above the slowest legitimate quiet period
+	// between progress events — the 20s vault catch-up sweep cron — with
+	// headroom for contention stretching a tick.
+	orchHarnessStallWindow = 60 * time.Second
+	// orchHarnessHardBackstop bounds total wait time even while progress
+	// trickles, so a livelocked metric (one that keeps changing without ever
+	// converging — election churn, oscillating counts) still fails with
+	// diagnostics instead of hanging the package. Steady progress toward the
+	// goal finishes far inside this; only a true wedge or livelock reaches it.
+	orchHarnessHardBackstop = 5 * time.Minute
 )
+
+// orchRelHarnessSlots caps how many orchRel harnesses run concurrently in
+// this package. Each harness boots 3-4 full in-process nodes (vault-ctl Raft
+// groups, schedulers, pipelines); the reliability family already dominates
+// package runtime, and unbounded t.Parallel() fan-out multiplies CPU demand
+// until the family starves itself under full-suite load. Progress-based
+// waits tolerate slowness, but bounding intra-package parallelism keeps
+// convergence moving. Tests keep t.Parallel() (they still overlap two at a
+// time and with non-harness tests) and keep running in `go test ./...`.
+var orchRelHarnessSlots = make(chan struct{}, 2)
+
+// progressPoint is one observed change of a wait's progress metric, kept for
+// the trajectory report on failure.
+type progressPoint struct {
+	elapsed time.Duration
+	state   string
+}
+
+// waitProgress is the harness's convergence-wait primitive. It polls sample
+// every interval until sample reports done. The wait fails on STALL — the
+// progress string unchanged for orchHarnessStallWindow — never on total
+// elapsed time alone, so steady progress is never killed mid-convergence
+// under CPU contention. A generous hard backstop (orchHarnessHardBackstop)
+// still bounds the total, catching livelocks where the metric keeps changing
+// without converging.
+//
+// sample returns (progress, done): done=true ends the wait successfully;
+// progress is an opaque human-readable snapshot of the awaited metric — ANY
+// change resets the stall clock and is appended to the trajectory reported
+// on failure. onFail (optional) runs scenario diagnostics (dumpPipelineState,
+// goroutine profiles, ...) before the Fatalf.
+func (h *orchRelHarness) waitProgress(what string, interval time.Duration, sample func() (string, bool), onFail func()) {
+	h.t.Helper()
+	start := time.Now()
+	progress, done := sample()
+	if done {
+		return
+	}
+	trajectory := []progressPoint{{0, progress}}
+	lastChange := start
+	for {
+		time.Sleep(interval)
+		next, done := sample()
+		now := time.Now()
+		if done {
+			return
+		}
+		if next != progress {
+			progress = next
+			lastChange = now
+			trajectory = append(trajectory, progressPoint{now.Sub(start), next})
+		}
+		stalledFor := now.Sub(lastChange)
+		stalled := stalledFor >= orchHarnessStallWindow
+		backstopped := now.Sub(start) >= orchHarnessHardBackstop
+		if !stalled && !backstopped {
+			continue
+		}
+		if onFail != nil {
+			onFail()
+		}
+		reason := "progress stalled"
+		if backstopped && !stalled {
+			reason = "hit hard backstop while still changing (livelock?)"
+		}
+		h.t.Fatalf("%s: %s after %s (no progress for %s; stall window %s, hard backstop %s)\nprogress trajectory (%d changes):\n%s",
+			what, reason, now.Sub(start).Round(time.Millisecond), stalledFor.Round(time.Millisecond),
+			orchHarnessStallWindow, orchHarnessHardBackstop, len(trajectory), formatTrajectory(trajectory))
+	}
+}
+
+// formatTrajectory renders the progress trajectory for a failed wait. Long
+// trajectories are elided in the middle — the head shows the starting state,
+// the tail shows where progress stopped.
+func formatTrajectory(points []progressPoint) string {
+	const headKeep, tailKeep = 8, 24
+	var b []byte
+	appendPoint := func(p progressPoint) {
+		b = append(b, []byte(fmt.Sprintf("  +%-10s %s\n", p.elapsed.Round(time.Millisecond), p.state))...)
+	}
+	if len(points) <= headKeep+tailKeep {
+		for _, p := range points {
+			appendPoint(p)
+		}
+		return string(b)
+	}
+	for _, p := range points[:headKeep] {
+		appendPoint(p)
+	}
+	b = append(b, []byte(fmt.Sprintf("  ... %d changes elided ...\n", len(points)-headKeep-tailKeep))...)
+	for _, p := range points[len(points)-tailKeep:] {
+		appendPoint(p)
+	}
+	return string(b)
+}
 
 // newOrchRelHarness boots n nodes with a shared config store, at least one
 // file-instance vault (the default), and real vault-ctl Raft. Additional vaults
@@ -190,6 +290,12 @@ func newOrchRelHarness(t *testing.T, n int, opts ...orchRelOption) *orchRelHarne
 	if n < 1 {
 		t.Fatal("orch harness requires n >= 1")
 	}
+
+	// Bound intra-package harness concurrency (see orchRelHarnessSlots).
+	// Registered before any other cleanup so the slot is released only after
+	// full node teardown.
+	orchRelHarnessSlots <- struct{}{}
+	t.Cleanup(func() { <-orchRelHarnessSlots })
 
 	sharedCtx, sharedCancel := context.WithCancel(context.Background())
 	// Vault and instance share the same ID — instance ID equals vault ID.
@@ -608,33 +714,41 @@ func (h *orchRelHarness) slowPeer(id string, d time.Duration) {
 // ingest RPCs use — regressing it is what gastrolog-5j6eu fixed.
 func (h *orchRelHarness) waitForAllReady() {
 	h.t.Helper()
-	deadline := time.Now().Add(orchHarnessConvWait)
-	var notReady []string
-	for time.Now().Before(deadline) {
-		notReady = notReady[:0]
-		allReady := true
+	// Progress metric: the set of not-ready nodes plus their vault-ctl Raft
+	// state/term — election activity counts as progress even while readiness
+	// is still false, so a slow-but-live election never reads as a stall.
+	h.waitProgress("vault replication readiness", 50*time.Millisecond, func() (string, bool) {
+		var notReady []string
 		for _, id := range h.nodeIDs {
 			n := h.nodes[id]
 			if n.orch == nil {
 				continue
 			}
 			if !n.orch.LocalVaultsReplicationReady() {
-				notReady = append(notReady, id)
-				allReady = false
+				notReady = append(notReady, fmt.Sprintf("%s(%s)", n.label, h.vaultCtlRaftView(n)))
 			}
 		}
-		if allReady {
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
+		return fmt.Sprintf("not_ready=%v", notReady), len(notReady) == 0
+	}, func() {
+		// A stall here means a genuine hang, not a slow converge. The
+		// goroutine profile distinguishes "still electing" from "wedged".
+		var stacks bytes.Buffer
+		_ = pprof.Lookup("goroutine").WriteTo(&stacks, 1)
+		h.t.Logf("goroutine profile at readiness stall:\n%s", stacks.String())
+	})
+}
+
+// vaultCtlRaftView summarizes a node's default-vault vault-ctl Raft group
+// (state + term) for readiness/leader progress metrics.
+func (h *orchRelHarness) vaultCtlRaftView(n *orchRelNode) string {
+	if n == nil || n.groupMgr == nil {
+		return "down"
 	}
-	// Reaching the coarse backstop means a genuine hang, not a slow converge.
-	// The goroutine profile distinguishes "still electing" from "wedged" — the
-	// same diagnostic waitSealedRecordsAtLeast dumps on timeout.
-	var stacks bytes.Buffer
-	_ = pprof.Lookup("goroutine").WriteTo(&stacks, 1)
-	h.t.Logf("goroutine profile at readiness deadline:\n%s", stacks.String())
-	h.t.Fatalf("vaults not ready after %s on: %v", orchHarnessConvWait, notReady)
+	g := n.groupMgr.GetGroup(raftgroup.VaultControlPlaneGroupID(h.vaultID))
+	if g == nil {
+		return "no-group"
+	}
+	return fmt.Sprintf("%s@t%s", g.Raft.State(), g.Raft.Stats()["term"])
 }
 
 // appendOnLeaderForVault appends to a specific vault's vault leader (the
@@ -657,29 +771,35 @@ func (h *orchRelHarness) sealOnLeaderForVault(v vaultSpec) {
 }
 
 // waitForVaultCtlLeaderForVault returns the node that currently holds
-// leadership of the given vault's vault-ctl Raft group.
+// leadership of the given vault's vault-ctl Raft group. Election activity
+// (state/term changes) counts as progress; only a fully quiescent
+// leaderless group reads as a stall.
 func (h *orchRelHarness) waitForVaultCtlLeaderForVault(v vaultSpec) *orchRelNode {
 	h.t.Helper()
 	gid := raftgroup.VaultControlPlaneGroupID(v.id)
-	deadline := time.Now().Add(orchHarnessLeaderWait)
-	for time.Now().Before(deadline) {
+	var leader *orchRelNode
+	h.waitProgress(fmt.Sprintf("vault %s vault-ctl leader election", v.label), 30*time.Millisecond, func() (string, bool) {
+		var views []string
 		for _, idx := range v.nodeIdxs {
 			n := h.nodes[h.nodeIDs[idx]]
 			if n == nil || n.groupMgr == nil {
+				views = append(views, "down")
 				continue
 			}
 			g := n.groupMgr.GetGroup(gid)
 			if g == nil {
+				views = append(views, "no-group")
 				continue
 			}
 			if g.Raft.State() == hraft.Leader {
-				return n
+				leader = n
+				return "", true
 			}
+			views = append(views, fmt.Sprintf("%s@t%s", g.Raft.State(), g.Raft.Stats()["term"]))
 		}
-		time.Sleep(30 * time.Millisecond)
-	}
-	h.t.Fatalf("vault %s: no leader within %s", v.label, orchHarnessLeaderWait)
-	return nil
+		return fmt.Sprintf("%v", views), false
+	}, nil)
+	return leader
 }
 
 // chunkIDsOnNodeForVault returns the chunk IDs in the given vault's
@@ -750,56 +870,49 @@ func (h *orchRelHarness) chunkIDsOnLeader() map[chunk.ChunkID]bool {
 	return h.chunkIDsOnNode(h.waitForVaultCtlLeader().id)
 }
 
-// assertAllNodesSee polls until every node's chunk ID set contains
-// expected and no unexpected extras, or fails.
+// assertAllNodesSee waits until every node's chunk ID set contains expected
+// and no unexpected extras, or fails on stall. Multi-stage convergence (wipe
+// recovery: node boot + vault-ctl snapshot install + 20s catchup-sweep ticks
+// + chunk push) is fine — each stage moves the per-node counts, and every
+// move resets the stall clock.
 func (h *orchRelHarness) assertAllNodesSee(expected map[chunk.ChunkID]bool) {
 	h.t.Helper()
-	h.assertAllNodesSeeWithin(orchHarnessConvWait, expected)
-}
-
-// assertAllNodesSeeWithin is assertAllNodesSee with an explicit budget, for
-// scenarios whose convergence is inherently multi-stage (wipe recovery: node
-// boot + vault-ctl snapshot install + 20s catchup-sweep ticks + chunk push)
-// and legitimately overruns the default under full-suite load.
-func (h *orchRelHarness) assertAllNodesSeeWithin(wait time.Duration, expected map[chunk.ChunkID]bool) {
-	h.t.Helper()
-	deadline := time.Now().Add(wait)
 	var lastSnapshot map[string]map[chunk.ChunkID]bool
-	for time.Now().Before(deadline) {
+	h.waitProgress("chunk-ID set convergence", 50*time.Millisecond, func() (string, bool) {
 		lastSnapshot = map[string]map[chunk.ChunkID]bool{}
 		converged := true
+		var counts []string
 		for _, id := range h.nodeIDs {
 			seen := h.chunkIDsOnNode(id)
 			lastSnapshot[id] = seen
-			if len(seen) != len(expected) {
-				converged = false
-				continue
-			}
+			matched := 0
 			for cid := range expected {
-				if !seen[cid] {
-					converged = false
-					break
+				if seen[cid] {
+					matched++
 				}
 			}
+			if len(seen) != len(expected) || matched != len(expected) {
+				converged = false
+			}
+			counts = append(counts, fmt.Sprintf("%s=%d/%d(+%d extra)",
+				h.nodes[id].label, matched, len(expected), len(seen)-matched))
 		}
-		if converged {
-			return
+		return fmt.Sprintf("%v", counts), converged
+	}, func() {
+		expectedKeys := make([]chunk.ChunkID, 0, len(expected))
+		for k := range expected {
+			expectedKeys = append(expectedKeys, k)
 		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	expectedKeys := make([]chunk.ChunkID, 0, len(expected))
-	for k := range expected {
-		expectedKeys = append(expectedKeys, k)
-	}
-	slices.SortFunc(expectedKeys, func(a, b chunk.ChunkID) int {
-		return slices.Compare(a[:], b[:])
+		slices.SortFunc(expectedKeys, func(a, b chunk.ChunkID) int {
+			return slices.Compare(a[:], b[:])
+		})
+		var expHex []string
+		for _, k := range expectedKeys {
+			expHex = append(expHex, fmt.Sprintf("%x", k[:]))
+		}
+		h.t.Logf("chunk-ID sets did not converge:\nexpected (%d): %v\nactual:\n%s",
+			len(expected), expHex, formatChunkSnapshot(lastSnapshot))
 	})
-	var expHex []string
-	for _, k := range expectedKeys {
-		expHex = append(expHex, fmt.Sprintf("%x", k[:]))
-	}
-	h.t.Fatalf("chunk-ID sets did not converge within %s:\nexpected (%d): %v\nactual:\n%s",
-		wait, len(expected), expHex, formatChunkSnapshot(lastSnapshot))
 }
 
 func formatChunkSnapshot(m map[string]map[chunk.ChunkID]bool) string {
@@ -852,28 +965,9 @@ func (h *orchRelHarness) sealOnLeader() {
 	}
 }
 
-// waitForVaultCtlLeader polls until the vault-ctl Raft group has elected a
-// leader and returns the node that currently holds leadership.
+// waitForVaultCtlLeader waits until the default vault's vault-ctl Raft group
+// has elected a leader and returns the node that currently holds leadership.
 func (h *orchRelHarness) waitForVaultCtlLeader() *orchRelNode {
 	h.t.Helper()
-	gid := raftgroup.VaultControlPlaneGroupID(h.vaultID)
-	deadline := time.Now().Add(orchHarnessLeaderWait)
-	for time.Now().Before(deadline) {
-		for _, id := range h.nodeIDs {
-			n := h.nodes[id]
-			if n == nil || n.groupMgr == nil {
-				continue
-			}
-			g := n.groupMgr.GetGroup(gid)
-			if g == nil {
-				continue
-			}
-			if g.Raft.State() == hraft.Leader {
-				return n
-			}
-		}
-		time.Sleep(30 * time.Millisecond)
-	}
-	h.t.Fatalf("no vault-ctl Raft leader within %s", orchHarnessLeaderWait)
-	return nil
+	return h.waitForVaultCtlLeaderForVault(h.vaults[0])
 }
