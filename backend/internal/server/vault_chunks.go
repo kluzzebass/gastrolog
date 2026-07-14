@@ -368,8 +368,26 @@ func (s *VaultServer) GetChunk(
 		return nil, mapVaultError(err)
 	}
 
+	// Same overlays ListChunks applies (UI/CLI parity, gastrolog-45ywhx):
+	// retention-pending and pending-ack state from the receipt protocol,
+	// and holder-receipt residency from the vault-ctl FSM. Without these
+	// the single-chunk view showed none of the lifecycle state the vault
+	// listing (and the UI inspector) shows.
+	pb := VaultChunkMetaToProto(meta)
+	if pending := s.orch.RetentionPendingChunks(vaultID); pending != nil {
+		pb.RetentionPending = pending[chunkID]
+	}
+	if acks := s.orch.PendingDeleteAcks(vaultID); acks != nil {
+		if owed := acks[chunkID]; len(owed) > 0 {
+			sortedOwed := append([]string(nil), owed...)
+			sort.Strings(sortedOwed)
+			pb.PendingAckNodeIds = sortedOwed
+		}
+	}
+	s.overlayChunkResidency(vaultID, []*apiv1.ChunkMeta{pb})
+
 	return connect.NewResponse(&apiv1.GetChunkResponse{
-		Chunk: VaultChunkMetaToProto(meta),
+		Chunk: pb,
 	}), nil
 }
 
