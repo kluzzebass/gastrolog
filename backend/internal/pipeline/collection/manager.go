@@ -447,7 +447,7 @@ func (v *vaultCollect) collectSegments(ctx context.Context, segmentIDs []glid.GL
 		if LocalSegmentPresent(v.root, segmentID) {
 			continue
 		}
-		var checksum uint32
+		var checksum uint64
 		if fsm := v.deps.Load().fsm; fsm != nil {
 			if entry := fsm.GetCompletedSegment(segmentID); entry != nil {
 				checksum = entry.Checksum

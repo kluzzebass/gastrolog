@@ -18,7 +18,7 @@ type Metadata struct {
 	ByteSize      uint64
 	FirstIngestTS time.Time
 	LastIngestTS  time.Time
-	Checksum      uint32
+	Checksum      uint64
 }
 
 // Publisher publishes completed segment metadata to the vault-ctl log.

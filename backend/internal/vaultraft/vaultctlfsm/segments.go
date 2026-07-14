@@ -23,7 +23,7 @@ type CompletedSegmentEntry struct {
 	ByteSize      uint64
 	FirstIngestTS time.Time
 	LastIngestTS  time.Time
-	Checksum      uint32
+	Checksum      uint64
 	OriginNodeID  string
 	PublishedAt   time.Time
 	// Holders are node IDs that have pulled, verified, and committed a holder

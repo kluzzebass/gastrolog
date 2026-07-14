@@ -546,8 +546,12 @@ Header — enough to inspect a segment without reading its records:
 - record count (uint32)
 - byte offset of the last written record (uint32)
 - first and last IngestTS (int64 nanos), the order/merge axis
-- segment checksum (uint32 CRC32/IEEE over all committed record bytes —
-  `[HeaderSize:` *end of the frame starting at DataEnd* `)`)
+- segment checksum (uint64 XXH64 over all committed record bytes —
+  `[HeaderSize:` *end of the frame starting at DataEnd* `)`. A non-linear
+  digest, not a CRC: each frame ends with its own CRC32, and rolling a CRC
+  over `lenPrefix ++ body ++ bodyCRC` cancels the content contribution by
+  CRC linearity, leaving the checksum blind to same-length substitution —
+  gastrolog-1vepg0)
 
 The header is fixed-size and lives at the front, and is rewritten in place after
 each record — count incremented, last IngestTS updated (first set on the

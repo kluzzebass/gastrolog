@@ -106,13 +106,12 @@ func ReceiveToPreHead(vaultRoot string, segmentID glid.GLID, src io.Reader) (str
 // collects before the FSM caught up); internal verification alone then gates
 // the promote.
 //
-// Known limitation: the segment record checksum folds each frame's trailing
-// CRC32 into the rolling CRC32, and CRC(M ++ CRC(M)) cancels the content
-// contribution — the published checksum therefore pins the frame-length
-// structure (record count, lengths, truncation, wrong segment served) but
-// not same-length content substitution. Full content sensitivity needs a
-// segment-format checksum change, out of scope here.
-func PromoteVerified(preHeadPath, vaultRoot string, publishedChecksum uint32) (string, segment.Header, error) {
+// The record checksum is XXH64 over the record region — content-sensitive,
+// including same-length substitution. Its rolling-CRC32 predecessor folded
+// each frame's trailing CRC32 into itself, and CRC(M ++ CRC(M)) cancels the
+// content contribution, pinning only frame-length structure
+// (gastrolog-1vepg0).
+func PromoteVerified(preHeadPath, vaultRoot string, publishedChecksum uint64) (string, segment.Header, error) {
 	sf, err := segment.Open(preHeadPath)
 	if err != nil {
 		_ = os.Remove(preHeadPath)
@@ -123,7 +122,7 @@ func PromoteVerified(preHeadPath, vaultRoot string, publishedChecksum uint32) (s
 
 	if publishedChecksum != 0 && hdr.SegmentChecksum != publishedChecksum {
 		_ = os.Remove(preHeadPath)
-		return "", segment.Header{}, fmt.Errorf("%w: segment checksum %08x does not match published checksum %08x",
+		return "", segment.Header{}, fmt.Errorf("%w: segment checksum %016x does not match published checksum %016x",
 			ErrCorruptSegment, hdr.SegmentChecksum, publishedChecksum)
 	}
 

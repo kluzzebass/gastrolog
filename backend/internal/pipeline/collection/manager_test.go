@@ -833,6 +833,62 @@ func TestCollectOnceRejectsPulledChecksumMismatch(t *testing.T) {
 	}
 }
 
+// TestCollectOnceRejectsTamperedHolderBytes: a holder serving a same-length
+// content substitution with fixed-up frame CRCs — identical frame geometry,
+// different record bytes — must be rejected against the published checksum
+// and never promoted or receipted. The content-blind rolling CRC32 passed
+// exactly this substitution through segment.Open, publish, and the
+// published-checksum verify (gastrolog-1vepg0). Convergence once the holder
+// serves authentic bytes is pinned too.
+func TestCollectOnceRejectsTamperedHolderBytes(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	segID := glid.New()
+	root := t.TempDir()
+
+	data := writeSegmentBytes(t, vaultID, segID, "authentic holder bytes")
+	published := segmentChecksumOf(t, data)
+	tampered := tamperFrameSameLength(t, data)
+
+	pull := newMemoryPull()
+	pull.Put(segID, tampered)
+	log := &staticLog{}
+	log.setAssigned(collection.AssignedSegment{VaultID: vaultID, SegmentID: segID, Checksum: published})
+	receipts := &recordingReceipts{}
+
+	mgr := collection.New(collection.Config{})
+	if err := mgr.RegisterVault(vaultID, root, collection.VaultConfig{
+		Log: log, Pull: pull, Receipts: receipts,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	err := mgr.CollectOnce(context.Background(), vaultID)
+	if !errors.Is(err, collection.ErrCorruptSegment) {
+		t.Fatalf("CollectOnce() = %v, want ErrCorruptSegment", err)
+	}
+	if _, statErr := os.Stat(paths.HeadSegment(root, segID)); !os.IsNotExist(statErr) {
+		t.Fatal("tampered segment must not reach head/")
+	}
+	if _, statErr := os.Stat(paths.PreHeadSegment(root, segID)); !os.IsNotExist(statErr) {
+		t.Fatal("tampered pre-head copy must be deleted")
+	}
+	if receipts.count() != 0 {
+		t.Fatalf("receipts = %d, want 0 on tampered holder bytes", receipts.count())
+	}
+
+	// The holder recovers and serves the authentic bytes: re-pull converges.
+	pull.Put(segID, data)
+	if err := mgr.CollectOnce(context.Background(), vaultID); err != nil {
+		t.Fatal(err)
+	}
+	if _, statErr := os.Stat(paths.HeadSegment(root, segID)); statErr != nil {
+		t.Fatalf("segment missing from head/ after holder recovery: %v", statErr)
+	}
+	if receipts.count() != 1 {
+		t.Fatalf("receipts = %d, want 1 after holder recovery", receipts.count())
+	}
+}
+
 // mismatchThenMatchPull serves wrong-but-internally-valid bytes for the first
 // `bad` pulls, then the published bytes — a holder recovering from serving a
 // stale copy.

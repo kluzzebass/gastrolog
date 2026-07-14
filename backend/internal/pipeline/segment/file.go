@@ -3,12 +3,12 @@ package segment
 import (
 	"encoding/binary"
 	"errors"
-	"hash"
-	"hash/crc32"
 	"io"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/cespare/xxhash/v2"
 
 	"gastrolog/internal/format"
 	"gastrolog/internal/record"
@@ -20,12 +20,17 @@ var errSegmentFinalized = errors.New("segment is finalized")
 // each append batch; record data follows the header as
 // [frameLen:u32][frame body] frames.
 type File struct {
-	f         *os.File
-	hdr       Header
-	hdrBuf    [HeaderSize]byte
-	recordCRC hash.Hash32 // rolling CRC32/IEEE over [HeaderSize:recordsEnd)
-	dataEnd   uint32      // exclusive end of committed record bytes (hot-path append anchor)
-	batchBuf  []byte      // reused AppendFrames scratch (gastrolog-1ojsm6)
+	f      *os.File
+	hdr    Header
+	hdrBuf [HeaderSize]byte
+	// recordDigest is a rolling XXH64 over [HeaderSize:recordsEnd). A
+	// non-linear digest, NOT a CRC: each frame carries its own trailing
+	// CRC32, and rolling a CRC over lenPrefix ++ body ++ bodyCRC cancels the
+	// content contribution by CRC linearity, leaving the segment checksum
+	// blind to same-length substitution (gastrolog-1vepg0).
+	recordDigest *xxhash.Digest
+	dataEnd      uint32 // exclusive end of committed record bytes (hot-path append anchor)
+	batchBuf     []byte // reused AppendFrames scratch (gastrolog-1ojsm6)
 	// memEntries captures (EventID, filePos, sourceTS) per appended frame so
 	// Finalize can build both index tails from memory instead of re-reading
 	// the whole file (gastrolog-oin19g). Only writer-created segments have a
@@ -66,8 +71,8 @@ func Create(path string, meta Meta) (*File, error) {
 			VaultID: meta.VaultID,
 			DataEnd: HeaderSize,
 		},
-		recordCRC: crc32.NewIEEE(),
-		dataEnd:   HeaderSize,
+		recordDigest: xxhash.New(),
+		dataEnd:      HeaderSize,
 	}
 	if err := sf.writeHeader(); err != nil {
 		_ = f.Close()
@@ -195,12 +200,12 @@ func (sf *File) AppendFrames(frames []Frame) error {
 		return err
 	}
 
-	if sf.recordCRC == nil {
-		sf.recordCRC = crc32.NewIEEE()
+	if sf.recordDigest == nil {
+		sf.recordDigest = xxhash.New()
 	}
 
-	// Build the batch buffer — [lenPrefix|body]... — feeding the running CRC
-	// in frame order, exactly as sequential single appends would have.
+	// Build the batch buffer — [lenPrefix|body]... — feeding the running
+	// digest in frame order, exactly as sequential single appends would have.
 	// Size it exactly up front: append-doubling growth across batches was
 	// ~10GB of garbage per soak run (gastrolog-11y2iv).
 	need := 0
@@ -221,10 +226,10 @@ func (sf *File) AppendFrames(frames []Frame) error {
 		binary.LittleEndian.PutUint32(lenPrefix[:], uint32(len(frames[i].Body))) //nolint:gosec // G115: frame bounded by encode
 		sf.batchBuf = append(sf.batchBuf, lenPrefix[:]...)
 		sf.batchBuf = append(sf.batchBuf, frames[i].Body...)
-		if _, err := sf.recordCRC.Write(lenPrefix[:]); err != nil {
+		if _, err := sf.recordDigest.Write(lenPrefix[:]); err != nil {
 			return err
 		}
-		if _, err := sf.recordCRC.Write(frames[i].Body); err != nil {
+		if _, err := sf.recordDigest.Write(frames[i].Body); err != nil {
 			return err
 		}
 		if !sf.memCaptureOff {
@@ -250,7 +255,7 @@ func (sf *File) AppendFrames(frames []Frame) error {
 	}
 	sf.hdr.LastIngestTS = frames[len(frames)-1].Rec.EventID.IngestTS
 	sf.hdr.DataEnd = lastFrameStart
-	sf.hdr.SegmentChecksum = sf.recordCRC.Sum32()
+	sf.hdr.SegmentChecksum = sf.recordDigest.Sum64()
 	sf.dataEnd = writeOff + uint32(len(sf.batchBuf)) //nolint:gosec // G115: batch bounded by commit window
 	return sf.writeHeader()
 }
@@ -420,7 +425,7 @@ func (sf *File) reconcileOnOpen() error {
 		sf.hdr.DataEnd = lastStart
 	}
 
-	sum, err := sf.initRecordCRC(validEnd)
+	sum, err := sf.initRecordDigest(validEnd)
 	if err != nil {
 		return err
 	}
@@ -482,25 +487,34 @@ func (sf *File) resyncFromFront(fileSize uint32) (validEnd, lastStart, count uin
 	return sf.scanForward(HeaderSize, fileSize, 0, time.Time{}, time.Time{})
 }
 
-func (sf *File) initRecordCRC(recEnd uint32) (uint32, error) {
-	h := crc32.NewIEEE()
-	if recEnd > HeaderSize {
-		if err := crc32IEEEFeed(h, sf.f, HeaderSize, recEnd); err != nil {
-			return 0, err
-		}
+// initRecordDigest seeds the rolling record digest from on-disk bytes
+// [HeaderSize:recEnd) and returns the checksum to publish: 0 for an empty
+// record region (the "no data / no expectation" sentinel across the publish
+// and collection paths), the XXH64 sum otherwise.
+func (sf *File) initRecordDigest(recEnd uint32) (uint64, error) {
+	h := xxhash.New()
+	sf.recordDigest = h
+	if recEnd <= HeaderSize {
+		return 0, nil
 	}
-	sf.recordCRC = h
-	return h.Sum32(), nil
+	if err := hashFeed(h, sf.f, HeaderSize, recEnd); err != nil {
+		return 0, err
+	}
+	return h.Sum64(), nil
 }
 
 func (sf *File) verifyChecksum() error {
 	if sf.hdr.IndexOffset > 0 {
 		return nil // verifyIndexedLayout in reconcileOnOpen already checked both regions.
 	}
-	if sf.recordCRC == nil {
-		return errors.New("segment record CRC not initialized")
+	if sf.recordDigest == nil {
+		return errors.New("segment record digest not initialized")
 	}
-	if sf.recordCRC.Sum32() != sf.hdr.SegmentChecksum {
+	sum := uint64(0)
+	if sf.dataEnd > HeaderSize {
+		sum = sf.recordDigest.Sum64()
+	}
+	if sum != sf.hdr.SegmentChecksum {
 		return errors.New("segment checksum mismatch")
 	}
 	return nil

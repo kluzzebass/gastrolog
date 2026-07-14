@@ -19,7 +19,7 @@ const (
 	headerLastIngestOff       = headerFirstIngestOff + format.SizeU64
 	headerIndexOffOff         = headerLastIngestOff + format.SizeU64
 	headerChecksumOff         = headerIndexOffOff + format.SizeU32
-	headerIndexCRCOff         = headerChecksumOff + format.SizeU32
+	headerIndexCRCOff         = headerChecksumOff + format.SizeU64
 	headerFirstSourceOff      = headerIndexCRCOff + format.SizeU32
 	headerLastSourceOff       = headerFirstSourceOff + format.SizeU64
 	headerSourceIndexOffOff   = headerLastSourceOff + format.SizeU64
@@ -60,8 +60,13 @@ type Header struct {
 	DataEnd         uint32 // byte offset where the last written record starts
 	FirstIngestTS   time.Time
 	LastIngestTS    time.Time
-	IndexOffset     uint32 // byte offset where the EventID index starts; 0 while working
-	SegmentChecksum uint32 // CRC32(IEEE) of record bytes [HeaderSize:IndexOffset)
+	IndexOffset uint32 // byte offset where the EventID index starts; 0 while working
+	// SegmentChecksum is XXH64 of record bytes [HeaderSize:IndexOffset).
+	// A non-linear digest, NOT a CRC: each frame ends with its own CRC32 and
+	// rolling a CRC over lenPrefix ++ body ++ bodyCRC cancels the content
+	// contribution (CRC(M ++ CRC(M)) is constant), leaving the checksum blind
+	// to same-length substitution (gastrolog-1vepg0). Zero while empty.
+	SegmentChecksum uint64
 	IndexChecksum   uint32 // CRC32(IEEE) of index bytes [IndexOffset:IndexOffset+RecordCount*IndexEntrySize)
 	// Source index tail (format v2); zero/empty while working or on v1 segments.
 	FirstSourceTS       time.Time
@@ -82,7 +87,7 @@ func encodeHeader(h Header, buf []byte) {
 	binary.LittleEndian.PutUint64(buf[headerFirstIngestOff:], tsNanos(h.FirstIngestTS))
 	binary.LittleEndian.PutUint64(buf[headerLastIngestOff:], tsNanos(h.LastIngestTS))
 	binary.LittleEndian.PutUint32(buf[headerIndexOffOff:], h.IndexOffset)
-	binary.LittleEndian.PutUint32(buf[headerChecksumOff:], h.SegmentChecksum)
+	binary.LittleEndian.PutUint64(buf[headerChecksumOff:], h.SegmentChecksum)
 	binary.LittleEndian.PutUint32(buf[headerIndexCRCOff:], h.IndexChecksum)
 	binary.LittleEndian.PutUint64(buf[headerFirstSourceOff:], tsNanos(h.FirstSourceTS))
 	binary.LittleEndian.PutUint64(buf[headerLastSourceOff:], tsNanos(h.LastSourceTS))
@@ -117,7 +122,7 @@ func decodeHeader(buf []byte) (Header, error) {
 	hdr.FirstIngestTS = tsFromNanos(binary.LittleEndian.Uint64(buf[headerFirstIngestOff:]))
 	hdr.LastIngestTS = tsFromNanos(binary.LittleEndian.Uint64(buf[headerLastIngestOff:]))
 	hdr.IndexOffset = binary.LittleEndian.Uint32(buf[headerIndexOffOff:])
-	hdr.SegmentChecksum = binary.LittleEndian.Uint32(buf[headerChecksumOff:])
+	hdr.SegmentChecksum = binary.LittleEndian.Uint64(buf[headerChecksumOff:])
 	hdr.IndexChecksum = binary.LittleEndian.Uint32(buf[headerIndexCRCOff:])
 	if h.Version == formatVersionV2 {
 		hdr.FirstSourceTS = tsFromNanos(binary.LittleEndian.Uint64(buf[headerFirstSourceOff:]))
