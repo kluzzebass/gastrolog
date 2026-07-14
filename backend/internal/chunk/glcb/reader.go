@@ -154,16 +154,32 @@ func (rd *Reader) ReadRecord(pos uint32) (chunk.Record, error) {
 	return rd.readRecordAt(pos)
 }
 
-// PrewarmSequential was meant to warm the page cache for the whole GLCB
-// with pread-style syscalls before a full scan, so cold mmap faults do not
-// pin scheduler Ps inside non-preemptible kernel fault handlers under disk
-// saturation (gastrolog-1io54g). The syscall warm needs a file descriptor,
-// and no mmap-backed Reader ever carried one — MappedBlob closes its fd
-// right after mmap — so the warm loop has been unreachable since it landed.
-// The dead fd plumbing was removed in gastrolog-2v9d67; re-wiring the warm
-// (e.g. reopening MappedBlob.Path()) is a deliberate behavior change that
-// belongs to its own issue.
-func (rd *Reader) PrewarmSequential() {}
+// prewarmMadvise is the page-cache warm applied by PrewarmSequential. It is a
+// package var so tests can observe that the retention SequentialPrewarmer path
+// actually reaches the warm call — the earlier implementation was an
+// unreachable no-op (gastrolog-2v9d67 / gastrolog-5gmb99). Production always
+// uses madviseSequential.
+var prewarmMadvise = madviseSequential
+
+// PrewarmSequential warms the OS page cache for the whole GLCB mapping ahead of
+// a sequential full-chunk scan (retention fan-out drain — gastrolog-1io54g).
+// It advises the kernel of front-to-back access and kicks off asynchronous
+// readahead so the scan's mmap accesses land as minor faults rather than cold
+// major faults that pin scheduler Ps in non-preemptible kernel fault handlers
+// under disk saturation.
+//
+// The warm runs directly on the whole-file mmap (mmapData) rather than the
+// pread-style fd loop the original never had — MappedBlob closes its fd right
+// after mmap, so no Reader ever carried one, which is why the historical warm
+// was unreachable from day one. madvise needs no fd; it operates on the mapping
+// the Reader already holds.
+//
+// Best-effort and idempotent. Safe on a closed/released cursor: Close() nils
+// mmapData, so the warm becomes a no-op instead of touching freed address
+// space.
+func (rd *Reader) PrewarmSequential() {
+	prewarmMadvise(rd.mmapData)
+}
 
 // ReadFanOutRecord reads a record for immediate hand-off to another
 // goroutine (retention fan-out). It is the chunk.RecordFanOutSource

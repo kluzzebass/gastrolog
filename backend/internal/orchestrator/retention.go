@@ -40,15 +40,23 @@ const (
 	// concurrently. Each chunk still routes at most once (!alreadyPending).
 	//
 	// ONE, deliberately (gastrolog-4c72hr): a route-disposition drain reads
-	// the chunk's whole GLCB (hundreds of MB, sequentially prewarmed) and
-	// re-ingests every record. Four concurrent drains interleaved four large
-	// I/O streams with live ingest on the shared volume — the page cache
-	// thrashed (prewarmed pages evicted before the scan reached them, so
-	// mmap major faults returned) and the disk-latency bursts stacked into
-	// Raft heartbeat gaps (election churn synchronized with expiry). One
-	// stream at a time keeps the prewarm effective and the burst flat;
+	// the chunk's whole GLCB (hundreds of MB) and re-ingests every record.
+	// Four concurrent drains interleaved four large sequential I/O streams
+	// with live ingest on the shared volume — the page cache thrashed and the
+	// disk-latency bursts stacked into Raft heartbeat gaps (election churn
+	// synchronized with expiry). One stream at a time keeps the burst flat;
 	// total drain time is unchanged because the disk was the constraint
 	// anyway.
+	//
+	// NOTE (gastrolog-5gmb99): the original 4c72hr note credited the single
+	// worker with keeping a "sequential prewarm" effective — but that prewarm
+	// was an unreachable no-op until 5gmb99 made it real (madvise readahead).
+	// The one-worker decision never actually rested on prewarm behavior; the
+	// standalone reason (concurrent large scans thrash cache and stack disk
+	// latency regardless of warming) holds on its own, so the count is kept
+	// at ONE. With a real prewarm, single-stream also keeps each drain's
+	// readahead from being evicted by a competing drain — a bonus, not the
+	// basis for the count.
 	retentionChunkWorkers = 1
 
 	// Vault catchup sweep — runs every 20 seconds (cron: 13/33/53s of
@@ -999,11 +1007,12 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 }
 
 func (r *retentionRunner) fanOutChunkRecords(ctx context.Context, cur chunk.RecordCursor, id chunk.ChunkID, jobs chan<- chunk.Record) int {
-	// Full-chunk scan ahead: warm the page cache with syscall reads first so
-	// the scan's mmap accesses are minor faults. Cold-faulting a whole GLCB
+	// Full-chunk scan ahead: warm the page cache via madvise readahead first
+	// so the scan's mmap accesses are minor faults. Cold-faulting a whole GLCB
 	// through the mapping pins scheduler Ps and stalls the runtime under
 	// disk saturation — measured as Raft election storms during retention
-	// expiry (gastrolog-1io54g). Skipped when the fan-out already aborted.
+	// expiry (gastrolog-1io54g). Real warm since gastrolog-5gmb99 (was an
+	// unreachable no-op before). Skipped when the fan-out already aborted.
 	if ctx.Err() == nil {
 		if warm, ok := cur.(chunk.SequentialPrewarmer); ok {
 			warm.PrewarmSequential()
