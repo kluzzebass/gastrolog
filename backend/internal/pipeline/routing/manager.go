@@ -59,6 +59,12 @@ type StatsSnapshot struct {
 	Unmatched uint64               // records with no route match (intentional drop, counted)
 	PerVault  map[glid.GLID]uint64 // matched-record count per destination vault
 	PerRoute  map[glid.GLID]uint64 // matched-record count per route ID
+	// PerVaultDropped counts delivery drops per destination vault: records
+	// already counted as matched (in PerVault) whose fan-out delivery to that
+	// vault's segmentation queue failed — the vault sink was revoked mid-flight
+	// (unregister) or the context was cancelled at shutdown. Distinct from
+	// Unmatched, which counts intentional no-route drops.
+	PerVaultDropped map[glid.GLID]uint64
 }
 
 // Manager matches records to vaults and fans out record pointers.
@@ -79,9 +85,11 @@ type Manager struct {
 	unmatched atomic.Uint64
 	// perVault / perRoute hold *atomic.Uint64 matched counters keyed by
 	// destination vault ID and route ID respectively. Lazily populated on the
-	// match path so the hot route() avoids a map write lock.
-	perVault sync.Map
-	perRoute sync.Map
+	// match path so the hot route() avoids a map write lock. perVaultDropped
+	// follows the same pattern for delivery drops (see StatsSnapshot.PerVaultDropped).
+	perVault        sync.Map
+	perRoute        sync.Map
+	perVaultDropped sync.Map
 	running  atomic.Bool
 	wg       sync.WaitGroup
 }
@@ -145,11 +153,12 @@ func (m *Manager) Stats() StatsSnapshot {
 	matched := m.matched.Load()
 	unmatched := m.unmatched.Load()
 	return StatsSnapshot{
-		Ingested:  matched + unmatched,
-		Matched:   matched,
-		Unmatched: unmatched,
-		PerVault:  drainCounterMap(&m.perVault),
-		PerRoute:  drainCounterMap(&m.perRoute),
+		Ingested:        matched + unmatched,
+		Matched:         matched,
+		Unmatched:       unmatched,
+		PerVault:        drainCounterMap(&m.perVault),
+		PerRoute:        drainCounterMap(&m.perRoute),
+		PerVaultDropped: drainCounterMap(&m.perVaultDropped),
 	}
 }
 
@@ -254,42 +263,80 @@ func (m *Manager) route(ctx context.Context, in Input) {
 	// so UnregisterVault can drain in-flight deliveries before segmentation closes
 	// the input channel.
 	m.vmu.RLock()
-	targets := make([]*vaultSink, 0, len(vaults))
+	targets := make([]sinkTarget, 0, len(vaults))
 	for _, vaultID := range vaults {
 		if sink, ok := m.vaults[vaultID]; ok {
-			targets = append(targets, sink)
+			targets = append(targets, sinkTarget{vaultID: vaultID, sink: sink})
 		}
 	}
 	m.vmu.RUnlock()
 
-	n := len(targets)
-	if n == 0 {
+	if len(targets) == 0 {
 		sendAck(in.Ack, nil)
 		return
 	}
 
 	if in.Ack == nil {
-		for _, sink := range targets {
-			if !sink.deliver(ctx, segmentation.Input{Record: rec}) {
-				return
-			}
+		m.fanOut(ctx, rec, targets)
+		return
+	}
+
+	if len(targets) == 1 {
+		t := targets[0]
+		// deliver nacks in.Ack itself on failure; the source retries.
+		if t.sink.deliver(ctx, segmentation.Input{Record: rec, Ack: in.Ack}) != nil {
+			incrCounter(&m.perVaultDropped, t.vaultID)
 		}
 		return
 	}
 
-	if n == 1 {
-		targets[0].deliver(ctx, segmentation.Input{Record: rec, Ack: in.Ack})
-		return
-	}
+	m.fanOutJoined(ctx, rec, targets, in.Ack)
+}
 
-	// Multi-vault fan-out: join the per-vault commit acks into the single source ack.
-	children := newAckJoin(n, in.Ack)
-	for i, sink := range targets {
-		if !sink.deliver(ctx, segmentation.Input{Record: rec, Ack: children[i]}) {
-			// deliver already nacked children[i]; release the still-undelivered
-			// children so the join resolves instead of leaking its collector.
-			for j := i + 1; j < n; j++ {
-				children[j] <- ctx.Err()
+// sinkTarget pairs a matched destination vault with its local vault sink, so
+// the fan-out loops can attribute delivery drops to the right vault.
+type sinkTarget struct {
+	vaultID glid.GLID
+	sink    *vaultSink
+}
+
+// fanOut delivers rec to every target without a source ack (fire-and-forget).
+// A revoked sink (vault unregistered mid-flight) drops only that vault's copy —
+// counted per vault, never silent — and delivery continues to the remaining
+// sinks. Context cancellation stops the fan-out: every subsequent send would
+// fail the same way, so the remaining targets are counted as dropped too.
+func (m *Manager) fanOut(ctx context.Context, rec *record.Record, targets []sinkTarget) {
+	for i, t := range targets {
+		if t.sink.deliver(ctx, segmentation.Input{Record: rec}) == nil {
+			continue
+		}
+		incrCounter(&m.perVaultDropped, t.vaultID)
+		if ctx.Err() != nil {
+			for _, rest := range targets[i+1:] {
+				incrCounter(&m.perVaultDropped, rest.vaultID)
+			}
+			return
+		}
+	}
+}
+
+// fanOutJoined delivers rec to every target, joining the per-vault commit acks
+// into the single source ack. A revoked sink fails only its own child ack
+// (deliver nacks it; the join carries the first error to the source, which
+// retries) — delivery continues to the remaining sinks. Context cancellation
+// stops the fan-out and nacks the still-undelivered children so the join
+// resolves instead of leaking its collector.
+func (m *Manager) fanOutJoined(ctx context.Context, rec *record.Record, targets []sinkTarget, ack chan<- error) {
+	children := newAckJoin(len(targets), ack)
+	for i, t := range targets {
+		if t.sink.deliver(ctx, segmentation.Input{Record: rec, Ack: children[i]}) == nil {
+			continue
+		}
+		incrCounter(&m.perVaultDropped, t.vaultID)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			for j := i + 1; j < len(targets); j++ {
+				incrCounter(&m.perVaultDropped, targets[j].vaultID)
+				children[j] <- ctxErr
 			}
 			return
 		}
