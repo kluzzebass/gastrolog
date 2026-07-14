@@ -76,3 +76,73 @@ describe("CloudServiceFields endpoint validation", () => {
     expect(input.className).not.toContain("border-severity-error");
   });
 });
+
+describe("CloudServiceFields endpoint field per provider", () => {
+  function endpointLabel(container: HTMLElement): HTMLLabelElement | undefined {
+    return Array.from(container.querySelectorAll("label")).find(
+      (l) => l.textContent === "Endpoint",
+    );
+  }
+
+  test("renders for gcs", () => {
+    const { container } = render(
+      <CloudServiceFields
+        values={values({ provider: "gcs" })}
+        onChange={() => {}}
+        dark={true}
+      />,
+    );
+    expect(endpointLabel(container)).toBeTruthy();
+    expect(container.textContent).toContain("default Google endpoint");
+  });
+
+  test("does not render for azure", () => {
+    const { container } = render(
+      <CloudServiceFields
+        values={values({ provider: "azure" })}
+        onChange={() => {}}
+        dark={true}
+      />,
+    );
+    expect(endpointLabel(container)).toBeUndefined();
+  });
+
+  test("gcs scheme-less endpoint shows the inline error state", () => {
+    const { container } = render(
+      <CloudServiceFields
+        values={values({ provider: "gcs", endpoint: "gcs-emulator.local:4443" })}
+        onChange={() => {}}
+        dark={true}
+      />,
+    );
+    const input = endpointInput(container);
+    expect(input.className).toContain("border-severity-error");
+    expect(input.title).toContain("no scheme");
+    expect(input.title).toContain('"https://gcs-emulator.local:4443"');
+  });
+
+  test("gcs https:// endpoint shows no error state", () => {
+    const { container } = render(
+      <CloudServiceFields
+        values={values({ provider: "gcs", endpoint: "https://gcs-emulator.local:4443" })}
+        onChange={() => {}}
+        dark={true}
+      />,
+    );
+    const input = endpointInput(container);
+    expect(input.className).not.toContain("border-severity-error");
+    expect(input.title).toBe("");
+  });
+
+  test("gcs empty endpoint shows no error state (default Google endpoint)", () => {
+    const { container } = render(
+      <CloudServiceFields
+        values={values({ provider: "gcs", endpoint: "" })}
+        onChange={() => {}}
+        dark={true}
+      />,
+    );
+    const input = endpointInput(container);
+    expect(input.className).not.toContain("border-severity-error");
+  });
+});
