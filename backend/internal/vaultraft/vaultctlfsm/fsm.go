@@ -442,7 +442,7 @@ func (f *FSM) SetOnDelete(fn func(chunk.ChunkID)) {
 
 // SetOnUpload registers a callback invoked (outside the FSM lock) after
 // CmdUploadChunk applies. The callback receives a copy of the uploaded
-// entry. Follower nodes use this to register cloud chunks in their local
+// entry. Follower nodes use this to register cloud-backed chunks in their local
 // chunk manager without streaming any records.
 func (f *FSM) SetOnUpload(fn func(ManifestEntry)) {
 	f.mu.Lock()

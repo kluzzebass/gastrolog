@@ -14,7 +14,7 @@ For the node you're connected to, the view includes:
 - **Storage** — total records, size, chunk counts, time span, and a per-vault breakdown
 - **Ingestion** — per-ingester message/byte counts and error rates
 
-## Remote nodes (compact view)
+## Peer nodes (compact view)
 
 For other [cluster](help:clustering) nodes, metrics are collected via [broadcasting](help:clustering-broadcasting) and include:
 
@@ -45,4 +45,4 @@ near capacity while its durable-commit rate lags its append rate is
 experiencing write-path backpressure (usually fsync pressure on that node's
 disk).
 
-Remote node data is refreshed at the [broadcast interval](help:clustering-broadcasting) (default 5 seconds). Nodes that haven't broadcast recently show stale timestamps.
+Peer node data is refreshed at the [broadcast interval](help:clustering-broadcasting) (default 5 seconds). Nodes that haven't broadcast recently show stale timestamps.

@@ -6,7 +6,7 @@
 
 **Acceptance criterion (k1ej7):** A **uniform Raft group model** — system/config and vault groups share **lifecycle and on-disk conventions**. Any exception is a **named compatibility shim** with an explicit **sunset** (no undocumented privileged directory layout).
 
-**Terminal state (5xxbd complete):** There are **no** per-vault-instance metadata Raft groups. **One vault-scoped control-plane Raft** (plus system Raft for cluster-global config) owns every cross-node chunk metadata mutation. **Vault instances** (chunk/index managers) remain the data plane and **do not** host their own Raft groups.
+**Terminal state (5xxbd complete):** There are **no** per-vault-instance metadata Raft groups. **One vault-scoped control-plane Raft** (plus cluster-ctl Raft for cluster-global config) owns every cross-node chunk metadata mutation. **Vault instances** (chunk/index managers) remain the data plane and **do not** host their own Raft groups.
 
 **Vocabulary:** canonical terms follow [`ubiquitous_language.md`](./ubiquitous_language.md). In particular, this architecture uses **vault-ctl Raft** (one group per vault, authoritative for that vault's chunk metadata) and **instance FSM** (the per-vault-instance sub-state-machine inside the vault-ctl FSM, implemented in `vaultctlfsm`).
 
@@ -28,7 +28,7 @@
 
 ## Inventory: today (as implemented)
 
-### System / cluster config Raft
+### Cluster-ctl Raft
 
 | Aspect | Detail |
 |--------|--------|
@@ -76,7 +76,7 @@ The deltas below were the original design questions this spec needed to resolve.
 | **Cache / hint** | Read models that may lag (peer discovery, placement views). **MUST** be labeled as such; **MUST NOT** be the only source for unsafe actions. |
 | **Vault readiness** | Predicate bundle (section D) for whether this node may execute **vault-scoped** control-plane responsibilities for a vault. |
 | **Instance readiness** | Whether this node may operate a **specific vault instance** (local placement) — may depend on vault readiness + local placement + resource state. |
-| **Node readiness** | Process-level (gRPC up, system Raft available, etc.) — orthogonal to vault readiness. |
+| **Node readiness** | Process-level (gRPC up, cluster-ctl Raft available, etc.) — orthogonal to vault readiness. |
 
 ---
 
@@ -85,7 +85,7 @@ The deltas below were the original design questions this spec needed to resolve.
 **MUST**
 
 - Every mutation that changes **cross-node** interpretation of vault/chunk metadata **MUST** go through a **defined Raft group** (system or vault-scoped per target topology), or through an explicitly documented non-Raft path that remains safe under partition (rare; default is “no”).
-- **System Raft** remains the home for **cluster-global** configuration and membership that is not vault-owned (exact list to be enumerated during implementation; default: anything not naturally keyed by vault ID stays system-scoped until moved).
+- **Cluster-ctl Raft** remains the home for **cluster-global** configuration and membership that is not vault-owned (exact list to be enumerated during implementation; default: anything not naturally keyed by vault ID stays system-scoped until moved).
 - **Vault-scoped** control-plane state **MUST** be keyed and replicated under a **vault-scoped Raft identity** in the target architecture (section C), not ad hoc sub-Raft groups for vault-wide invariants.
 
 **MUST NOT**
@@ -147,7 +147,7 @@ Predicate names are illustrative; exact symbols belong in implementation.
 | Predicate | Intent |
 |-----------|--------|
 | **VaultRaft_LocalReplicaReady** | Local process has joined/replayed the vault group far enough that **reads** required for safe local work are valid (define minimum: e.g. snapshot + committed config applied, or stricter). |
-| **Vault_ControlPlaneReady** (node-local) | AND of: node process ready, `VaultRaft_LocalReplicaReady`, and any **dependency** declared mandatory (system Raft catchup, peer resolvability, etc.). |
+| **Vault_ControlPlaneReady** (node-local) | AND of: node process ready, `VaultRaft_LocalReplicaReady`, and any **dependency** declared mandatory (cluster-ctl Raft catchup, peer resolvability, etc.). |
 | **Vault_ServeIngestReady** / **Vault_ServeQueryReady** | **MAY** be stricter than control-plane ready; **MUST** be explicit if ingest is allowed before full FSM catch-up. |
 
 **Consistency**
@@ -220,7 +220,7 @@ These require explicit product/architecture decisions:
 
 1. **One VaultRaft vs multiple raft groups per vault** (e.g. separate hot/cold metadata): pick one default.
 2. **Cutover** to **no per-instance Raft**: ~~move chunk-FSM commands and apply-forwarding onto vault control-plane Raft, then remove the legacy per-instance Raft groups, group store names, and apply-fn split~~ — **done** (gastrolog-5xxbd + gastrolog-2ze8j). `ensureVaultCtlMetadata` is the canonical entry; the single `SetGroupApplyFn` replaces the prior split apply-fns.
-3. **System Raft shrink/grow:** Which config moves to vault Raft vs stays global; backward compatibility for existing clusters.
+3. **Cluster-ctl Raft shrink/grow:** Which config moves to vault Raft vs stays global; backward compatibility for existing clusters.
 4. **Snapshot layout convergence:** Single rule for system and vault snapshots (no legacy on-disk compatibility).
 5. **Feature flags:** Whether vault Raft rolls out behind a flag per vault or cluster-wide.
 
@@ -252,7 +252,7 @@ These require explicit product/architecture decisions:
 
 | Area | Paths |
 |------|--------|
-| System Raft | `backend/internal/app/raft.go` |
+| Cluster-ctl Raft | `backend/internal/app/raft.go` |
 | Multi-Raft setup, unified group apply | `backend/internal/app/app.go` (`setupMultiRaft`, `wireClusterRaftApplies`, `SetGroupApplyFn`) |
 | Vault control-plane Raft | `backend/internal/orchestrator/reconfig_vaults.go` (`ensureVaultControlPlaneRaftGroup`), `backend/internal/orchestrator/vault_ctl_apply.go`, `backend/internal/vaultraft/`, `backend/internal/cluster/vault_apply_forwarder.go`, `backend/internal/cluster/vault_ctl_chunk_apply_forwarder.go` |
 | Vault ctl metadata wiring | `backend/internal/orchestrator/reconfig_vaults.go` (`ensureVaultControlPlaneRaftGroup`, `ensureVaultCtlMetadata`) |

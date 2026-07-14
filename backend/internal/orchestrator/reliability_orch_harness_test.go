@@ -99,7 +99,7 @@ type orchRelHarness struct {
 	// pipeline, when non-nil, enables the full cross-node pipeline wiring
 	// (Rubicon E3): a static-resolver PeerConns pool per node (segment pulls
 	// + vault-ctl apply forwarding), the cluster PullSegment server, a tight
-	// segment close policy, and a record-count chunk rotation policy on every
+	// segment complete policy, and a record-count chunk rotation policy on every
 	// vault so ingest converges to sealed GLCBs quickly in tests.
 	pipeline *pipelineClusterOpts
 	// routeVaultIdxs lists vaults (indexes into h.vaults) that get an

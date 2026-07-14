@@ -734,7 +734,7 @@ func TestPipelineIngestToDistribution(t *testing.T) {
 	msgs := make([]ingestion.IngesterMessage, 8)
 	for i := range msgs {
 		msgs[i] = ingestion.IngesterMessage{
-			Raw:   []byte("line payload for segment close"),
+			Raw:   []byte("line payload for segment complete"),
 			Attrs: map[string]string{"env": "prod"},
 		}
 	}

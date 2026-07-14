@@ -14,7 +14,7 @@ import (
 
 const cloudIndexFile = "cloud.idx"
 
-// cloudMetaValue is the fixed-size encoded form of cloud chunk metadata.
+// cloudMetaValue is the fixed-size encoded form of cloud-backed chunk metadata.
 // Layout (106 bytes):
 //   - 9 × int64 (72 bytes): WriteStart, WriteEnd, RecordCount, Bytes, DiskBytes,
 //     IngestStart, IngestEnd, SourceStart, SourceEnd — all unix nanos or raw int64
@@ -100,14 +100,14 @@ var cloudIndexCodec = btree.Codec[chunk.ChunkID, cloudMetaValue]{
 	Compare: chunk.ChunkID.Compare,
 }
 
-// cloudIndex wraps a B+ tree that caches cloud chunk metadata locally.
+// cloudIndex wraps a B+ tree that caches cloud-backed chunk metadata locally.
 type cloudIndex struct {
 	tree *btree.Tree[chunk.ChunkID, cloudMetaValue]
 }
 
 // openCloudIndex opens an existing cloud index or creates a new one.
 // If the existing index has an incompatible codec (e.g., old value size),
-// it is deleted and recreated — loadCloudChunksFromStore will repopulate it.
+// it is deleted and recreated — loadCloudBackedChunksFromStore will repopulate it.
 func openCloudIndex(dir string) (*cloudIndex, error) {
 	path := filepath.Join(dir, cloudIndexFile)
 
@@ -172,7 +172,7 @@ func (ci *cloudIndex) Close() error {
 	return ci.tree.Close()
 }
 
-// Lookup returns metadata for a single cloud chunk by ID.
+// Lookup returns metadata for a single cloud-backed chunk by ID.
 // Returns (nil, false) if the chunk is not in the index.
 // Does NOT evict pages — B+ tree path pages (root + internals) are shared
 // across lookups and should stay cached for the query's lifetime.

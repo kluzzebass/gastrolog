@@ -79,7 +79,7 @@ for append-heavy write patterns and time-ordered reads.
 
 - **ChunkMeta** — the stats bag for a chunk: sealed/cloud-backed
   flags, record count, byte counts, timestamps (`WriteStart/End`, `IngestStart/End`,
-  `SourceStart/End`), retention-pending flag, frame count for cloud chunks.
+  `SourceStart/End`), retention-pending flag, frame count for cloud-backed chunks.
 
 ### States a chunk passes through
 
@@ -114,8 +114,8 @@ for append-heavy write patterns and time-ordered reads.
 - **CloudService** — a cluster-wide cloud endpoint (S3, Azure, GCS) with
   optional archival lifecycle. [`system.CloudService`](../backend/internal/system/storage.go).
 
-- **Frame** — a seekable zstd block within a cloud chunk. `NumFrames` records
-  how many frames a cloud chunk was uploaded in; range queries seek to a
+- **Frame** — a seekable zstd block within a cloud-backed chunk. `NumFrames` records
+  how many frames a cloud-backed chunk was uploaded in; range queries seek to a
   specific frame to avoid pulling the whole blob.
 
 ### Placement
@@ -173,7 +173,7 @@ a vault's active chunk".
 
 - **Stage** — one step in a route's pipeline (`RouteConfig.Stages`).
   Today's only variant is `MatchStage{expression}`, which gates the route
-  on a boolean filter expression. Future stage kinds (enrich, redact,
+  on a boolean match expression. Future stage kinds (enrich, redact,
   sample, fork, route_by_field — gastrolog-5e85x) plug into the same
   oneof without re-shaping the proto.
 
@@ -297,7 +297,7 @@ Reading records back, filtering, aggregating, and rendering them.
   cross-chunk and cross-node paths. Terminates with `chunk.ErrNoMoreRecords`.
 
 - **collectRemote** — the orchestrator entry point that fans a search out to
-  remote nodes and merges results. Used by Search, Histogram, Explain,
+  peer nodes and merges results. Used by Search, Histogram, Explain,
   GetContext, GetFields.
 
 ---
@@ -323,10 +323,12 @@ Nodes agreeing on what the cluster believes, via Raft.
 GastroLog runs **multiple Raft groups** per node, multiplexed over a single
 gRPC transport:
 
-- **System Raft** (a.k.a. "config Raft", "cluster Raft") — one group per
-  cluster. Replicates `system.Config` (operator-authored) and `system.Runtime`
-  (cluster-managed). Every node is a voter. Leader changes propagate config
-  via FSM apply; dispatcher drives downstream effects.
+- **Cluster-ctl Raft** (formerly "system Raft", "config Raft", "cluster
+  Raft" — all retired) — one group per cluster. Replicates `system.Config`
+  (operator-authored) and `system.Runtime` (cluster-managed). Every node is
+  a voter. Leader changes propagate config via FSM apply; dispatcher drives
+  downstream effects. Wire surface: `cluster_ctl_raft_index` on
+  GetSystem/WatchSystem/SettingsMutationEcho.
 
 - **Vault Control-Plane Raft** (a.k.a. "vault-ctl Raft", "vault-ctl group") —
   one group *per vault*. Replicates that vault's chunk metadata across all
@@ -685,7 +687,7 @@ Live on `Config` directly (not as entities):
 - **JWT** (access token) — short-lived bearer token. Carries claims:
   `sub` (username), `role`, `exp`, `iat`.
 
-- **RefreshToken** — long-lived credential, stored in the config Raft.
+- **RefreshToken** — long-lived credential, stored in the cluster-ctl Raft.
   Used to mint a new JWT without re-entering password. Expires on
   password change or logout via `DeleteUserRefreshTokens`.
 
@@ -928,7 +930,7 @@ Error values that cross bounded contexts:
   Acked by Raft majority; bounded by `ReplicationTimeout`.
 - **Apply forwarding** — follower → leader forwarding of a write command.
   Done by `VaultApplyForwarder`, `VaultCtlChunkApplyForwarder`, or (for
-  config Raft) `Forwarder`. This is not replication; it's routing to the
+  cluster-ctl Raft) `Forwarder`. This is not replication; it's routing to the
   node that CAN do the replication.
 
 When you see "replication" in a log line or a comment, check whether the

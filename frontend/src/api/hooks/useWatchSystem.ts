@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { systemClient, refreshAuth } from "../client";
 import { GetSystemResponse } from "../gen/gastrolog/v1/system_pb";
-import { getSystemRaftIndex, systemRaftIndexScalarToBigInt } from "./useSystem";
+import { getClusterCtlRaftIndex, clusterCtlRaftIndexScalarToBigInt } from "./useSystem";
 
 export function useWatchSystem() {
   const qc = useQueryClient();
@@ -19,18 +19,18 @@ export function useWatchSystem() {
           {},
           { signal: abort.signal },
         )) {
-          const streamVer = systemRaftIndexScalarToBigInt(msg.systemRaftIndex);
-          const memVer = getSystemRaftIndex();
+          const streamVer = clusterCtlRaftIndexScalarToBigInt(msg.clusterCtlRaftIndex);
+          const memVer = getClusterCtlRaftIndex();
           const cached = qc.getQueryData<GetSystemResponse>(["system"]);
           const dataVer = cached
-            ? systemRaftIndexScalarToBigInt(cached.systemRaftIndex)
+            ? clusterCtlRaftIndexScalarToBigInt(cached.clusterCtlRaftIndex)
             : 0n;
           const known = (() => {
             if (memVer > dataVer) return memVer;
             return dataVer;
           })();
 
-          // Only invalidate if the stream's system raft index is newer than
+          // Only invalidate if the stream's cluster-ctl raft index is newer than
           // what we already hold from a mutation response or prior fetch.
           // Compare against both the module global and the React Query cache so
           // we do not re-fire when Put* already applied GetSystem via setQueryData
@@ -38,7 +38,7 @@ export function useWatchSystem() {
           if (streamVer > known) {
             // Don't advance the global index here — only mutation responses
             // should do that. The queryFn compares against the cached data's
-            // systemRaftIndex, so a refetch that returns the new index will be accepted.
+            // clusterCtlRaftIndex, so a refetch that returns the new index will be accepted.
             qc.invalidateQueries({ queryKey: ["system"] });
             // Settings are not on GetSystem; refresh when the raft index advances.
             qc.invalidateQueries({ queryKey: ["settings"] });
@@ -47,7 +47,7 @@ export function useWatchSystem() {
             qc.invalidateQueries({ queryKey: ["log-components"] });
             // Chunks are driven by WatchChunks; not invalidating here so
             // event-applied replica info (additions from catchup) survives
-            // unrelated system raft commits like ingester checkpoints.
+            // unrelated cluster-ctl raft commits like ingester checkpoints.
           }
           nextBackoff = 0; // reset backoff on successful message
         }

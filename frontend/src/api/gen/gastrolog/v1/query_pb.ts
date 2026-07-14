@@ -169,14 +169,14 @@ export class HistogramBucket extends Message<HistogramBucket> {
   groupCounts: { [key: string]: bigint } = {};
 
   /**
-   * True if cloud chunks cover this bucket
+   * True if cloud-backed chunks cover this bucket
    *
    * @generated from field: bool has_cloud_data = 4;
    */
   hasCloudData = false;
 
   /**
-   * Records from cloud chunks in this bucket (subset of count)
+   * Records from cloud-backed chunks in this bucket (subset of count)
    *
    * @generated from field: int64 cloud_count = 5;
    */

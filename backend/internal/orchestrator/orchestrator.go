@@ -341,7 +341,7 @@ type Orchestrator struct {
 	// gastrolog-4y03v.
 	progressTrigger *progressNotifier
 
-	// Suspect tracker for cloud chunks that returned 404.
+	// Suspect tracker for cloud-backed chunks that returned 404.
 	suspects *suspectTracker
 
 	// Per-vault leader loop for vault control-plane Raft (replicated instance
@@ -1115,7 +1115,7 @@ func (o *Orchestrator) VaultSnapshots() []VaultSnapshot {
 // applied index for the given vault. Zero if the vault has no
 // vault-ctl group on this node (e.g. placement excludes it) or the
 // GroupManager isn't wired (single-node test). Read at snapshot time
-// so the value reflects the latest committed-and-applied entry on
+// so the value reflects the latest applied entry on
 // this node.
 func (o *Orchestrator) vaultCtlAppliedIndex(vaultID glid.GLID) uint64 {
 	if o.groupMgr == nil {

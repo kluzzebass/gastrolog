@@ -8,7 +8,7 @@ package orchestrator_test
 // sealed GLCB built on every home → cross-node query.
 //
 // The harness wiring (withPipelineCluster) mirrors production: a shared
-// PeerConns pool per node (static address resolution instead of system Raft),
+// PeerConns pool per node (static address resolution instead of cluster-ctl Raft),
 // the cluster PullSegment server bound to Orchestrator.ServeSegmentPull, and
 // vault-ctl apply forwarding for origin publishes from non-leader nodes.
 

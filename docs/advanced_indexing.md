@@ -240,7 +240,7 @@ The proposed extension:
 - The body retains seekable zstd; index data lives in the footer (also zstd'd or not — the footer is small enough that compression ratio matters less than parse speed)
 - Old chunks (without footer) remain readable; the codec dispatches on the format version in the header
 
-This is the same shape as Quickwit splits (Tantivy index + hotcache footer) and works equally well for local file chunks and S3-backed cloud chunks — the footer is the universal "open me cheaply" entry point.
+This is the same shape as Quickwit splits (Tantivy index + hotcache footer) and works equally well for local file chunks and S3-backed cloud-backed chunks — the footer is the universal "open me cheaply" entry point.
 
 ---
 

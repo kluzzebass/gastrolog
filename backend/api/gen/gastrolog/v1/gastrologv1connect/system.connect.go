@@ -260,7 +260,7 @@ type SystemServiceClient interface {
 	GenerateName(context.Context, *connect.Request[v1.GenerateNameRequest]) (*connect.Response[v1.GenerateNameResponse], error)
 	// ValidateExpression parses and semantically validates a route match
 	// expression. gastrolog-4kkoo (Phase 5): drives live editor feedback in
-	// the route filter UI — distinct from PutRoute's save-time validation.
+	// the route match-expression editor — distinct from PutRoute's save-time validation.
 	// The check is read-only and node-local; no Raft Apply.
 	ValidateExpression(context.Context, *connect.Request[v1.ValidateExpressionRequest]) (*connect.Response[v1.ValidateExpressionResponse], error)
 	// WatchConfig streams a notification whenever configuration changes.
@@ -1008,7 +1008,7 @@ type SystemServiceHandler interface {
 	GenerateName(context.Context, *connect.Request[v1.GenerateNameRequest]) (*connect.Response[v1.GenerateNameResponse], error)
 	// ValidateExpression parses and semantically validates a route match
 	// expression. gastrolog-4kkoo (Phase 5): drives live editor feedback in
-	// the route filter UI — distinct from PutRoute's save-time validation.
+	// the route match-expression editor — distinct from PutRoute's save-time validation.
 	// The check is read-only and node-local; no Raft Apply.
 	ValidateExpression(context.Context, *connect.Request[v1.ValidateExpressionRequest]) (*connect.Response[v1.ValidateExpressionResponse], error)
 	// WatchConfig streams a notification whenever configuration changes.

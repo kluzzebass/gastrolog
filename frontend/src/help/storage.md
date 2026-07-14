@@ -1,6 +1,6 @@
 # Vaults
 
-Once a record has been ingested and digested, [routes](help:routing) direct it into one or more **vaults** based on filter expressions. Each vault is a self-contained storage container — chunks, indexes, rotation, retention, replication — described by a single storage shape.
+Once a record has been ingested and digested, [routes](help:routing) direct it into one or more **vaults** based on match expressions. Each vault is a self-contained storage container — chunks, indexes, rotation, retention, replication — described by a single storage shape.
 
 ## What a vault is
 

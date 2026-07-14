@@ -11,8 +11,8 @@ type HistogramBucket struct {
 	TimestampMs  int64            // Bucket start (milliseconds since epoch)
 	Count        int64            // Total records in this bucket
 	GroupCounts  map[string]int64 // Level → count; records without level → "other"
-	HasCloudData bool             // True if cloud chunks cover this bucket
-	CloudCount   int64            // Records from cloud chunks (subset of Count)
+	HasCloudData bool             // True if cloud-backed chunks cover this bucket
+	CloudCount   int64            // Records from cloud-backed chunks (subset of Count)
 }
 
 const histogramGroupField = "level"

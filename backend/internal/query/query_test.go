@@ -2661,7 +2661,7 @@ func setupWithoutIndexes(t *testing.T, batches ...[]chunk.Record) *query.Engine 
 		}
 	}
 
-	// Deliberately do NOT build indexes — simulates cloud chunks.
+	// Deliberately do NOT build indexes — simulates cloud-backed chunks.
 	return s.QE
 }
 

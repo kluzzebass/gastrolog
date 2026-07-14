@@ -1462,7 +1462,7 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 	}
 
 	if deps.ConfigStore != nil {
-		deps.Logger.Info("shutting down system raft")
+		deps.Logger.Info("shutting down cluster-ctl raft")
 		_ = deps.ConfigStore.Close()
 	}
 
@@ -1525,7 +1525,7 @@ func setupMultiRaft(clusterSrv *cluster.Server, rawStore system.Store, nodeID, h
 		Transport: mrt,
 		NodeID:    nodeID,
 		BaseDir:   filepath.Join(homeDir, "raft", "groups"),
-		// System/config raft is not managed by GroupManager; only vault/.../ctl
+		// The cluster-ctl raft is not managed by GroupManager; only vault/.../ctl
 		// multiraft groups are. Leave ShutdownLast empty so Shutdown does not look for a
 		// non-existent group ID.
 		ShutdownLast:   "",

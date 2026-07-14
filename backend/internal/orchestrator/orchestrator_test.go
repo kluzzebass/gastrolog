@@ -825,7 +825,7 @@ func TestRebuildMissingIndexesCloudBackedWithMissingIndexes(t *testing.T) {
 		})
 	}
 
-	// Do NOT build indexes — simulate a cloud chunk whose local indexes
+	// Do NOT build indexes — simulate a cloud-backed chunk whose local indexes
 	// were deleted by the old uploadToCloud code.
 	tracker := &trackingIndexManager{IndexManager: s.IM}
 	s.CM.(chunk.ChunkPostSealProcessor).SetIndexBuilders([]chunk.ChunkIndexBuilder{tracker.BuildAdapter()})
@@ -869,7 +869,7 @@ type routedTestVaults struct {
 	prod      glid.GLID
 	staging   glid.GLID
 	archive   glid.GLID
-	catchRest glid.GLID
+	catchAll glid.GLID
 	cms       map[glid.GLID]chunk.ChunkManager
 }
 
@@ -881,13 +881,13 @@ func newRoutedTestSetup(t *testing.T) (*orchestrator.Orchestrator, routedTestVau
 		prod:      glid.New(),
 		staging:   glid.New(),
 		archive:   glid.New(),
-		catchRest: glid.New(),
+		catchAll: glid.New(),
 		cms:       make(map[glid.GLID]chunk.ChunkManager),
 	}
 
 	orch := mustNewTestOrch(t, orchestrator.Config{})
 
-	for _, id := range []glid.GLID{vaults.prod, vaults.staging, vaults.archive, vaults.catchRest} {
+	for _, id := range []glid.GLID{vaults.prod, vaults.staging, vaults.archive, vaults.catchAll} {
 		s := memtest.MustNewVault(t, chunkmem.Config{
 			RotationPolicy: recordCountPolicy(10000),
 		})
@@ -908,13 +908,13 @@ func newRoutedTestSetupWithLoader(t *testing.T, loader *fakeSystemLoader) (*orch
 		prod:      glid.New(),
 		staging:   glid.New(),
 		archive:   glid.New(),
-		catchRest: glid.New(),
+		catchAll: glid.New(),
 		cms:       make(map[glid.GLID]chunk.ChunkManager),
 	}
 
 	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
-	for _, id := range []glid.GLID{vaults.prod, vaults.staging, vaults.archive, vaults.catchRest} {
+	for _, id := range []glid.GLID{vaults.prod, vaults.staging, vaults.archive, vaults.catchAll} {
 		s := memtest.MustNewVault(t, chunkmem.Config{
 			RotationPolicy: recordCountPolicy(10000),
 		})

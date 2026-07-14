@@ -112,7 +112,7 @@ type Reader interface {
 type IndexReader interface {
 	// FindIngestRank returns the rank of the first IngestTS-sorted entry
 	// with TS >= ts in the given chunk's IngestTS index. ok=false when the
-	// chunk's index isn't locally resolvable (uncached cloud chunk, missing
+	// chunk's index isn't locally resolvable (uncached cloud-backed chunk, missing
 	// GLCB, or FSM unaware of chunk).
 	FindIngestRank(chunkID chunk.ChunkID, ts time.Time) (rank uint64, ok bool)
 

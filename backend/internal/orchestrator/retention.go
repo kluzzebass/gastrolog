@@ -1225,7 +1225,7 @@ func (r *retentionRunner) retryUnreadableChunks() int {
 }
 
 // expireChunk routes a chunk deletion through the lifecycle reconciler's
-// receipt protocol when cluster Raft is wired, and falls back to a direct
+// receipt protocol when the vault-ctl Raft is wired, and falls back to a direct
 // local delete otherwise. reason ends up in the FSM's pendingDeletes
 // entry and in audit logs — see deleteChunk for the canonical reason
 // catalog.

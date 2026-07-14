@@ -180,15 +180,15 @@ func (s *SystemServer) buildFullSystem(ctx context.Context) (*apiv1.GetSystemRes
 		}
 	}
 	if s.configSignal != nil {
-		resp.SystemRaftIndex = s.configSignal.Version()
+		resp.ClusterCtlRaftIndex = s.configSignal.Version()
 	}
 	resp.EnvironmentLabel = s.environmentLabel
 	resp.EnvironmentColor = s.environmentColor
 	return resp, nil
 }
 
-// currentSystemRaftIndex returns the committed cluster-ctl Raft log index exposed on GetSystem.
-func (s *SystemServer) currentSystemRaftIndex() uint64 {
+// currentClusterCtlRaftIndex returns the committed cluster-ctl Raft log index exposed on GetSystem.
+func (s *SystemServer) currentClusterCtlRaftIndex() uint64 {
 	if s.configSignal == nil {
 		return 0
 	}
@@ -285,7 +285,7 @@ func (s *SystemServer) newSettingsMutationEcho(ctx context.Context) (*apiv1.Sett
 	}
 	return &apiv1.SettingsMutationEcho{
 		Settings:        settings,
-		SystemRaftIndex: s.currentSystemRaftIndex(),
+		ClusterCtlRaftIndex: s.currentClusterCtlRaftIndex(),
 	}, nil
 }
 
@@ -838,7 +838,7 @@ func (s *SystemServer) WatchSystem(
 	if s.configSignal != nil {
 		initialVersion = s.configSignal.Version()
 	}
-	if err := stream.Send(&apiv1.WatchSystemResponse{SystemRaftIndex: initialVersion}); err != nil {
+	if err := stream.Send(&apiv1.WatchSystemResponse{ClusterCtlRaftIndex: initialVersion}); err != nil {
 		return err
 	}
 	if s.configSignal == nil {
@@ -853,7 +853,7 @@ func (s *SystemServer) WatchSystem(
 			return nil
 		case <-ch:
 			if err := stream.Send(&apiv1.WatchSystemResponse{
-				SystemRaftIndex: s.configSignal.Version(),
+				ClusterCtlRaftIndex: s.configSignal.Version(),
 			}); err != nil {
 				return err
 			}

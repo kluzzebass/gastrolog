@@ -1143,7 +1143,7 @@ func (r *recordingSilentDeleter) DeleteSilent(id chunk.ChunkID) error {
 	return nil
 }
 
-// recordingCloudRegistrar adds chunk.CloudChunkRegistrar on top of the
+// recordingCloudRegistrar adds chunk.CloudBackedChunkRegistrar on top of the
 // silent-deleter fake.
 type recordingCloudRegistrar struct {
 	recordingSilentDeleter
@@ -1151,7 +1151,7 @@ type recordingCloudRegistrar struct {
 	registerErr error
 }
 
-func (r *recordingCloudRegistrar) RegisterCloudChunk(id chunk.ChunkID, _ chunk.CloudChunkInfo) error {
+func (r *recordingCloudRegistrar) RegisterCloudBackedChunk(id chunk.ChunkID, _ chunk.CloudBackedChunkInfo) error {
 	r.registered = append(r.registered, id)
 	return r.registerErr
 }
@@ -1422,7 +1422,7 @@ func TestWireInstanceFSMOnUploadFiresNotifyChunkChange(t *testing.T) {
 		t.Fatal("expected chunk signal after CmdUploadChunk apply, got timeout")
 	}
 	if len(cm.registered) != 1 || cm.registered[0] != id {
-		t.Errorf("RegisterCloudChunk = %v, want [%s]", cm.registered, id)
+		t.Errorf("RegisterCloudBackedChunk = %v, want [%s]", cm.registered, id)
 	}
 }
 

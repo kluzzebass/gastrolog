@@ -65,7 +65,7 @@ export enum IngesterMode {
   PASSIVE = 1,
 
   /**
-   * Collectors — actively pull from data sources.
+   * Actively pull from upstream systems (Kafka consumer, file tail, etc.).
    *
    * @generated from enum value: INGESTER_MODE_ACTIVE = 2;
    */
@@ -303,9 +303,9 @@ export class GetSystemResponse extends Message<GetSystemResponse> {
    * Committed log index on the cluster-ctl Raft group (monotonic). Used by clients
    * to avoid regressing cached replicated state with stale reads.
    *
-   * @generated from field: uint64 system_raft_index = 8;
+   * @generated from field: uint64 cluster_ctl_raft_index = 8;
    */
-  systemRaftIndex = protoInt64.zero;
+  clusterCtlRaftIndex = protoInt64.zero;
 
   /**
    * @generated from field: repeated gastrolog.v1.CloudService cloud_services = 9;
@@ -355,7 +355,7 @@ export class GetSystemResponse extends Message<GetSystemResponse> {
     { no: 5, name: "node_configs", kind: "message", T: NodeConfig, repeated: true },
     { no: 6, name: "routes", kind: "message", T: RouteConfig, repeated: true },
     { no: 7, name: "managed_files", kind: "message", T: ManagedFileInfo, repeated: true },
-    { no: 8, name: "system_raft_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 8, name: "cluster_ctl_raft_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 9, name: "cloud_services", kind: "message", T: CloudService, repeated: true },
     { no: 10, name: "node_storage_configs", kind: "message", T: NodeStorageConfig, repeated: true },
     { no: 11, name: "log_levels", kind: "message", T: LogLevelConfig },
@@ -837,7 +837,7 @@ export class RouteStage extends Message<RouteStage> {
 }
 
 /**
- * MatchStage gates the route on a boolean filter expression. The
+ * MatchStage gates the route on a boolean match expression. The
  * expression is evaluated against the record (with system-injected
  * synthetic attributes available via reserved-prefix keys: _source,
  * _ingester, _vault, _reason).
@@ -3743,8 +3743,8 @@ export class PutServiceSettingsRequest extends Message<PutServiceSettingsRequest
 
 /**
  * SettingsMutationEcho is returned after successful server-settings mutations so
- * clients can mirror GetSettings without a follow-up RPC. system_raft_index matches
- * GetSystemResponse.system_raft_index for cache coherence.
+ * clients can mirror GetSettings without a follow-up RPC. cluster_ctl_raft_index matches
+ * GetSystemResponse.cluster_ctl_raft_index for cache coherence.
  *
  * @generated from message gastrolog.v1.SettingsMutationEcho
  */
@@ -3755,9 +3755,9 @@ export class SettingsMutationEcho extends Message<SettingsMutationEcho> {
   settings?: GetSettingsResponse;
 
   /**
-   * @generated from field: uint64 system_raft_index = 2;
+   * @generated from field: uint64 cluster_ctl_raft_index = 2;
    */
-  systemRaftIndex = protoInt64.zero;
+  clusterCtlRaftIndex = protoInt64.zero;
 
   constructor(data?: PartialMessage<SettingsMutationEcho>) {
     super();
@@ -3768,7 +3768,7 @@ export class SettingsMutationEcho extends Message<SettingsMutationEcho> {
   static readonly typeName = "gastrolog.v1.SettingsMutationEcho";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "settings", kind: "message", T: GetSettingsResponse },
-    { no: 2, name: "system_raft_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 2, name: "cluster_ctl_raft_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SettingsMutationEcho {
@@ -5869,11 +5869,11 @@ export class WatchSystemResponse extends Message<WatchSystemResponse> {
   /**
    * Committed log index on the cluster-ctl Raft group when this notification fired.
    * Clients should only invalidate or refetch when this index exceeds the
-   * highest system_raft_index they already hold from a fetch or mutation.
+   * highest cluster_ctl_raft_index they already hold from a fetch or mutation.
    *
-   * @generated from field: uint64 system_raft_index = 1;
+   * @generated from field: uint64 cluster_ctl_raft_index = 1;
    */
-  systemRaftIndex = protoInt64.zero;
+  clusterCtlRaftIndex = protoInt64.zero;
 
   constructor(data?: PartialMessage<WatchSystemResponse>) {
     super();
@@ -5883,7 +5883,7 @@ export class WatchSystemResponse extends Message<WatchSystemResponse> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.WatchSystemResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "system_raft_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 1, name: "cluster_ctl_raft_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): WatchSystemResponse {

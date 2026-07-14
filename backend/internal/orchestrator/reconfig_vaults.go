@@ -763,7 +763,7 @@ func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultCo
 	params := buildVaultParams(sys, vaultCfg, o.localNodeID)
 
 	// Followers keep cloud store access for reads (queries) but skip uploads.
-	// The leader owns the blob; the follower adopts it via RegisterCloudChunk
+	// The leader owns the blob; the follower adopts it via RegisterCloudBackedChunk
 	// when the vault-ctl FSM propagates the upload announcement.
 	if isFollower {
 		params["_cloud_read_only"] = "true"
@@ -1032,20 +1032,20 @@ func (o *Orchestrator) ensureVaultControlPlaneRaftGroup(vaultID glid.GLID, clust
 	}
 	vfsm := vaultraft.NewFSM()
 	vfsm.SetOnAfterRestore(func() { o.afterVaultCtlRestore(vaultID) })
-	_, _ = o.tryStartClusterRaftGroup(gid, vfsm, clusterNodes, factories)
+	_, _ = o.tryStartClusterWideRaftGroup(gid, vfsm, clusterNodes, factories)
 }
 
-// tryStartClusterRaftGroup creates or returns an existing cluster-wide Raft group
+// tryStartClusterWideRaftGroup creates or returns an existing cluster-wide Raft group
 // (symmetric seeding across all resolvable cluster nodes). The second return is
 // the resolved member list when the group is (or will be) active on this node;
 // both are nil when creation is deferred or fails.
-func (o *Orchestrator) tryStartClusterRaftGroup(groupID string, fsm hraft.FSM, clusterNodes []system.NodeConfig, factories Factories) (*raftgroup.Group, []hraft.Server) {
+func (o *Orchestrator) tryStartClusterWideRaftGroup(groupID string, fsm hraft.FSM, clusterNodes []system.NodeConfig, factories Factories) (*raftgroup.Group, []hraft.Server) {
 	if factories.GroupManager == nil {
 		return nil, nil
 	}
 	members := o.buildVaultRaftMembers(clusterNodes, factories)
 	if len(members) < len(clusterNodes) {
-		o.logger.Debug("cluster raft group: not all cluster nodes resolvable, deferring creation",
+		o.logger.Debug("cluster-wide raft group: not all cluster nodes resolvable, deferring creation",
 			"group", groupID,
 			"have", len(members),
 			"want", len(clusterNodes))
@@ -1071,7 +1071,7 @@ func (o *Orchestrator) tryStartClusterRaftGroup(groupID string, fsm hraft.FSM, c
 		SeedMembers: members,
 	})
 	if err != nil {
-		o.logger.Warn("failed to create cluster raft group", "group", groupID, "error", err)
+		o.logger.Warn("failed to create cluster-wide raft group", "group", groupID, "error", err)
 		return nil, nil
 	}
 	return g, members
@@ -1117,7 +1117,7 @@ func (o *Orchestrator) ensureVaultCtlMetadata(vaultCfg system.VaultConfig, clust
 		return nil, nil, vaultRaftCallbacks{}
 	}
 	vaultGID := raftgroup.VaultControlPlaneGroupID(vaultCfg.ID)
-	g, members := o.tryStartClusterRaftGroup(vaultGID, vaultraft.NewFSM(), clusterNodes, factories)
+	g, members := o.tryStartClusterWideRaftGroup(vaultGID, vaultraft.NewFSM(), clusterNodes, factories)
 	if g == nil {
 		return nil, nil, vaultRaftCallbacks{}
 	}
@@ -1527,9 +1527,9 @@ func wireVaultFSMPipelineChunkEvents(o *Orchestrator, vaultID glid.GLID, fsm *va
 }
 
 // wireVaultFSMOnUpload connects the vault-ctl FSM's OnUpload callback to the
-// chunk manager's RegisterCloudChunk method. When the FSM applies CmdUploadChunk
+// chunk manager's RegisterCloudBackedChunk method. When the FSM applies CmdUploadChunk
 // (from the leader's AnnounceUpload), the follower's chunk manager registers
-// the cloud chunk from metadata alone — no record streaming or S3 download.
+// the cloud-backed chunk from metadata alone — no record streaming or S3 download.
 func wireVaultFSMOnUpload(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkManager, o *Orchestrator, logger *slog.Logger) {
 	if g == nil || cm == nil {
 		return
@@ -1543,7 +1543,7 @@ func wireVaultFSMOnUpload(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkM
 	default:
 		return
 	}
-	registrar, ok := cm.(chunk.CloudChunkRegistrar)
+	registrar, ok := cm.(chunk.CloudBackedChunkRegistrar)
 	if !ok {
 		return
 	}
@@ -1562,7 +1562,7 @@ func wireVaultFSMOnUpload(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkM
 			meta.CloudBacked = true
 			o.EmitChunkUploaded(vaultID, meta)
 		}()
-		info := chunk.CloudChunkInfo{
+		info := chunk.CloudBackedChunkInfo{
 			WriteStart:      e.WriteStart,
 			WriteEnd:        e.WriteEnd,
 			IngestStart:     e.IngestStart,
@@ -1577,9 +1577,9 @@ func wireVaultFSMOnUpload(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkM
 			SourceIdxOffset: e.SourceIdxOffset,
 			SourceIdxSize:   e.SourceIdxSize,
 		}
-		if err := registrar.RegisterCloudChunk(e.ID, info); err != nil {
+		if err := registrar.RegisterCloudBackedChunk(e.ID, info); err != nil {
 			if logger != nil {
-				logger.Debug("FSM onUpload: RegisterCloudChunk failed",
+				logger.Debug("FSM onUpload: RegisterCloudBackedChunk failed",
 					"chunk", e.ID, "error", err)
 			}
 		}
@@ -1599,10 +1599,10 @@ func wireVaultFSMOnUpload(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkM
 // chunk catchup and RF expansion. See gastrolog-4zy8a.
 //
 // Partial resolution short-circuits: if any cluster node's address can't
-// be resolved (transient — the cluster Raft config hasn't caught up yet),
+// be resolved (transient — the cluster-ctl Raft config has not caught up yet),
 // the refresh is skipped rather than passing a partial set to the
 // reconciler, which would otherwise RemoveServer the missing entries.
-// The next NotifyNodeConfigPut retries once the address is in cluster Raft.
+// The next NotifyNodeConfigPut retries once the address is in cluster-ctl Raft.
 func (o *Orchestrator) RefreshVaultCtlMembers(clusterNodes []system.NodeConfig, factories Factories) {
 	if o.vaultCtlLeaders == nil {
 		return
@@ -1629,7 +1629,7 @@ func (o *Orchestrator) RefreshVaultCtlMembers(clusterNodes []system.NodeConfig, 
 	for _, vaultID := range vaultIDs {
 		// Joiners can land here with a vault that was registered before
 		// their own NodeConfig had propagated into the cluster FSM —
-		// tryStartClusterRaftGroup returned nil on the original
+		// tryStartClusterWideRaftGroup returned nil on the original
 		// AddVault and the vault-ctl Raft group was never created on
 		// this node. Re-attempt creation now that we have a complete
 		// resolvable member set; the call is idempotent and returns

@@ -505,7 +505,7 @@ func chunkMatchesQuery(m chunk.ChunkMeta, q Query, lower, upper time.Time, chunk
 			return false
 		}
 	}
-	// Skip cloud chunks if requested (histogram local-only scan).
+	// Skip cloud-backed chunks if requested (histogram local-only scan).
 	if q.SkipCloud && m.CloudBacked {
 		return false
 	}
@@ -791,7 +791,7 @@ func seekIngestTS(b *scannerBuilder, lower time.Time, meta chunk.ChunkMeta, cm c
 			b.setMinPosition(pos)
 			return
 		}
-		// Fallback: chunk manager handles cloud chunks with locally-cached TS index.
+		// Fallback: chunk manager handles cloud-backed chunks with locally-cached TS index.
 		if pos, found, err := cm.FindIngestStartPosition(meta.ID, lower); err == nil && found {
 			b.setMinPosition(pos)
 		}
@@ -811,7 +811,7 @@ func seekSourceTS(b *scannerBuilder, sourceStart time.Time, meta chunk.ChunkMeta
 			b.setMinPosition(pos)
 			return
 		}
-		// Fallback: chunk manager handles cloud chunks with locally-cached TS index.
+		// Fallback: chunk manager handles cloud-backed chunks with locally-cached TS index.
 		if pos, found, err := cm.FindSourceStartPosition(meta.ID, sourceStart); err == nil && found {
 			b.setMinPosition(pos)
 		}

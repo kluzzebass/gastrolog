@@ -213,10 +213,10 @@ type Manager struct {
 
 	zstdEnc        *zstd.Encoder
 	zstdEncMu      sync.Mutex                // serializes concurrent CompressChunk calls sharing zstdEnc
-	cloudIdx       *cloudIndex               // local B+ tree cache of cloud chunk metadata (nil if no cloud store)
+	cloudIdx       *cloudIndex               // local B+ tree cache of cloud-backed chunk metadata (nil if no cloud store)
 	cloudIdxMu     sync.Mutex                // serializes cloudIdx Insert/Delete/Sync (B+ tree is not thread-safe)
 	indexBuilders  []chunk.ChunkIndexBuilder // injected post-construction via SetIndexBuilders
-	cloudListCache []chunk.ChunkMeta         // cached List() result for cloud chunks; nil = stale
+	cloudListCache []chunk.ChunkMeta         // cached List() result for cloud-backed chunks; nil = stale
 	storageClasses map[chunk.ChunkID]string  // in-memory cache of cloud storage class per chunk
 	nextChunkID    *chunk.ChunkID            // if set, used instead of NewChunkID() on next open
 
@@ -466,14 +466,14 @@ func NewManager(cfg Config) (*Manager, error) {
 			return nil, fmt.Errorf("open cloud index: %w", err)
 		}
 		manager.cloudIdx = cidx
-		if err := manager.loadCloudChunks(); err != nil {
+		if err := manager.loadCloudBackedChunks(); err != nil {
 			// S3 may be unreachable at startup (e.g. MinIO not started yet).
 			// The cloud index stays empty — the active chunk on local disk
-			// works independently. Existing cloud chunks will be discovered
+			// works independently. Existing cloud-backed chunks will be discovered
 			// on the next reconciliation sweep when S3 comes online. This
 			// prevents the entire vault from being permanently skipped on
 			// this node. See gastrolog-68fqk.
-			logger.Warn("cloud chunk discovery failed, continuing without cloud index",
+			logger.Warn("cloud-backed chunk discovery failed, continuing without cloud index",
 				"error", err)
 			manager.cloudDegraded.Store(true)
 		}
@@ -812,7 +812,7 @@ func (m *Manager) List() ([]chunk.ChunkMeta, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Append cloud chunks first so we can deduplicate local metas that
+	// Append cloud-backed chunks first so we can deduplicate local metas that
 	// are also in the cloud index (e.g. during upload or if adoptCloudBlob
 	// hasn't completed yet). The cloud version is authoritative.
 	var cloudIDs map[chunk.ChunkID]struct{}
@@ -2914,7 +2914,7 @@ func (m *Manager) FindSourceStartPosition(id chunk.ChunkID, ts time.Time) (uint6
 // in gastrolog-1dg3i: the histogram and search-side TS-ordered scanners
 // now read the embedded ITSI/STSI sections directly from data.glcb via
 // filetsidx.OpenIngestMmap / OpenSourceMmap (handled by the IndexManager).
-// Cloud chunks reach the same path through their warm-cache data.glcb;
+// Cloud-backed chunks reach the same path through their warm-cache data.glcb;
 // when the warm cache is cold the histogram falls back to FSM-proportional
 // distribution rather than fetching the index section from S3. Removed:
 // tsCacheDir / tsCachePath / searchTSCacheFile / downloadTSIndex /
@@ -3085,7 +3085,7 @@ func (m *Manager) deleteInternal(id chunk.ChunkID) error {
 		m.mu.Lock()
 		if err != nil {
 			m.mu.Unlock()
-			return fmt.Errorf("delete cloud chunk %s: %w", id, err)
+			return fmt.Errorf("delete cloud-backed chunk %s: %w", id, err)
 		}
 		m.removeFromCloudIndex(id)
 		// Remove the in-tree warm cache copy of the cloud blob — the
@@ -3113,7 +3113,7 @@ func (m *Manager) deleteInternal(id chunk.ChunkID) error {
 			"chunk", id.String(), "dir", dir)
 	}
 
-	delete(m.metas, id)          // no-op for cloud chunks (not in metas)
+	delete(m.metas, id)          // no-op for cloud-backed chunks (not in metas)
 	delete(m.storageClasses, id) // clean up storage class cache
 	delete(m.externalGLCB, id)   // clean up external pipeline GLCB path, if any
 	m.evictMappedGLCB(id)
@@ -3236,7 +3236,7 @@ func (m *Manager) PostSealProcess(ctx context.Context, id chunk.ChunkID) error {
 
 	// 5. Upload to cloud and delete local if cloud-backed.
 	// CloudReadOnly followers skip upload — they adopt the leader's blob
-	// via RegisterCloudChunk when the vault FSM propagates the upload.
+	// via RegisterCloudBackedChunk when the vault FSM propagates the upload.
 	if m.cfg.CloudStore != nil && !m.cfg.CloudReadOnly {
 		if err := m.uploadToCloud(id); err != nil {
 			m.logger.Warn("cloud upload failed, keeping local", "chunk", id, "error", err)
@@ -3764,7 +3764,7 @@ func (m *Manager) setArchivedFlag(id chunk.ChunkID, archived bool, storageClass 
 		delete(m.storageClasses, id)
 	}
 
-	// Local metas (non-cloud chunks or chunks still in both).
+	// Local metas (non-cloud-backed chunks or chunks still in both).
 	if meta, ok := m.metas[id]; ok {
 		meta.archived = archived
 	}
@@ -4000,7 +4000,7 @@ func (m *Manager) cloudIdxHas(id chunk.ChunkID) bool {
 // updated to reflect cloud-backed status.
 // SetCloudStore injects (or replaces) the cloud store on a running Manager.
 // Used for lazy initialization when S3 was unreachable at construction time
-// but becomes available later. Also re-runs cloud chunk discovery if the
+// but becomes available later. Also re-runs cloud-backed chunk discovery if the
 // cloud index is empty. Safe for concurrent use. See gastrolog-68fqk.
 func (m *Manager) SetCloudStore(store blobstore.Store) {
 	m.mu.Lock()
@@ -4009,8 +4009,8 @@ func (m *Manager) SetCloudStore(store blobstore.Store) {
 
 	// Try to populate the cloud index now that we have a connection.
 	if m.cloudIdx != nil {
-		if err := m.loadCloudChunks(); err != nil {
-			m.logger.Warn("cloud chunk discovery failed after SetCloudStore", "error", err)
+		if err := m.loadCloudBackedChunks(); err != nil {
+			m.logger.Warn("cloud-backed chunk discovery failed after SetCloudStore", "error", err)
 			m.trackCloudResult(err)
 		} else {
 			m.trackCloudResult(nil)
@@ -4336,7 +4336,7 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 	if m.cloudIdx != nil && meta != nil {
 		m.cloudIdxMu.Lock()
 		if err := m.cloudIdx.Insert(id, meta); err != nil {
-			m.logger.Warn("failed to index cloud chunk", "chunk", id, "error", err)
+			m.logger.Warn("failed to index cloud-backed chunk", "chunk", id, "error", err)
 		} else if err := m.cloudIdx.Sync(); err != nil {
 			m.logger.Warn("failed to sync cloud index", "chunk", id, "error", err)
 		}
@@ -4433,7 +4433,7 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 	if m.cloudIdx != nil && meta != nil {
 		m.cloudIdxMu.Lock()
 		if err := m.cloudIdx.Insert(id, meta); err != nil {
-			m.logger.Warn("failed to index adopted cloud chunk", "chunk", id, "error", err)
+			m.logger.Warn("failed to index adopted cloud-backed chunk", "chunk", id, "error", err)
 		} else if err := m.cloudIdx.Sync(); err != nil {
 			m.logger.Warn("failed to sync cloud index", "chunk", id, "error", err)
 		}
@@ -4450,7 +4450,7 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 	return nil
 }
 
-// RegisterCloudChunk registers a cloud-backed chunk from metadata alone,
+// RegisterCloudBackedChunk registers a cloud-backed chunk from metadata alone,
 // without streaming any records or downloading from S3. Creates a cloud
 // index entry so the chunk appears in List() and is queryable via
 // openCloudCursor. Used by follower nodes when the vault FSM
@@ -4458,7 +4458,7 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 //
 // Idempotent: if the chunk is already registered (in metas or cloudIdx),
 // this is a no-op.
-func (m *Manager) RegisterCloudChunk(id chunk.ChunkID, info chunk.CloudChunkInfo) error {
+func (m *Manager) RegisterCloudBackedChunk(id chunk.ChunkID, info chunk.CloudBackedChunkInfo) error {
 	if m.cloudIdx == nil {
 		return errors.New("cloud index not available (no cloud store configured)")
 	}
@@ -4500,7 +4500,7 @@ func (m *Manager) RegisterCloudChunk(id chunk.ChunkID, info chunk.CloudChunkInfo
 	m.cloudIdxMu.Lock()
 	if err := m.cloudIdx.Insert(id, meta); err != nil {
 		m.cloudIdxMu.Unlock()
-		return fmt.Errorf("insert cloud chunk %s: %w", id, err)
+		return fmt.Errorf("insert cloud-backed chunk %s: %w", id, err)
 	}
 	if err := m.cloudIdx.Sync(); err != nil {
 		m.cloudIdxMu.Unlock()
@@ -4512,7 +4512,7 @@ func (m *Manager) RegisterCloudChunk(id chunk.ChunkID, info chunk.CloudChunkInfo
 	m.cloudListCache = nil
 	m.mu.Unlock()
 
-	m.logger.Debug("registered cloud chunk from metadata", "chunk", id, "records", info.RecordCount)
+	m.logger.Debug("registered cloud-backed chunk from metadata", "chunk", id, "records", info.RecordCount)
 	return nil
 }
 
@@ -4665,16 +4665,16 @@ func (m *Manager) openCloudCursor(id chunk.ChunkID) (chunk.RecordCursor, error) 
 	return m.downloadCloudBlobToChunkDir(id)
 }
 
-// loadCloudChunks verifies the cloud index is readable and populates it from
-// the cloud store if empty. Cloud chunk metadata is NOT loaded into m.metas —
+// loadCloudBackedChunks verifies the cloud index is readable and populates it from
+// the cloud store if empty. Cloud-backed chunk metadata is NOT loaded into m.metas —
 // it stays in the B+ tree and is served on demand via lookupMeta/ForEach.
 // After loading, pre-warms the TS index cache so the first query doesn't spike.
-func (m *Manager) loadCloudChunks() error {
+func (m *Manager) loadCloudBackedChunks() error {
 	var prevCount uint64
 	if m.cloudIdx != nil {
 		prevCount = m.cloudIdx.Count()
 	}
-	if err := m.loadCloudChunksFromStore(); err != nil {
+	if err := m.loadCloudBackedChunksFromStore(); err != nil {
 		return err
 	}
 	if m.cloudIdx != nil {
@@ -4694,15 +4694,15 @@ func (m *Manager) loadCloudChunks() error {
 		// that masks the cloud-recorded archived flag. The data.glcb file
 		// itself stays put — OpenCursor's local-GLCB fast path picks it
 		// up via hasLocalGLCB. See gastrolog-24m1t step 7j.
-		m.dropLocalMetaForCloudChunks()
+		m.dropLocalMetaForCloudBackedChunks()
 	}
 	return nil
 }
 
-// dropLocalMetaForCloudChunks removes m.metas entries for any chunk also
+// dropLocalMetaForCloudBackedChunks removes m.metas entries for any chunk also
 // present in the cloud index. The on-disk data.glcb is preserved as warm
 // cache; only the duplicated in-memory meta goes.
-func (m *Manager) dropLocalMetaForCloudChunks() {
+func (m *Manager) dropLocalMetaForCloudBackedChunks() {
 	if m.cloudIdx == nil {
 		return
 	}
@@ -4721,9 +4721,9 @@ func (m *Manager) dropLocalMetaForCloudChunks() {
 	m.mu.Unlock()
 }
 
-// loadCloudChunksFromStore iterates blobs from the cloud store and populates
+// loadCloudBackedChunksFromStore iterates blobs from the cloud store and populates
 // the local B+ tree index. Does NOT insert into m.metas.
-func (m *Manager) loadCloudChunksFromStore() error {
+func (m *Manager) loadCloudBackedChunksFromStore() error {
 	var indexed int
 	err := m.cfg.CloudStore.List(context.Background(), m.cloudPrefix(), func(blob blobstore.BlobInfo) error { //nolint:contextcheck // long-lived background scan
 		id, ok := m.chunkIDFromBlobKey(blob.Key)
@@ -4770,7 +4770,7 @@ func (m *Manager) loadCloudChunksFromStore() error {
 			err := m.cloudIdx.Insert(id, meta)
 			m.cloudIdxMu.Unlock()
 			if err != nil {
-				return fmt.Errorf("index cloud chunk %s: %w", id, err)
+				return fmt.Errorf("index cloud-backed chunk %s: %w", id, err)
 			}
 			indexed++
 		}
@@ -4778,7 +4778,7 @@ func (m *Manager) loadCloudChunksFromStore() error {
 	})
 	m.trackCloudResult(err)
 	if err != nil {
-		return fmt.Errorf("list cloud chunks: %w", err)
+		return fmt.Errorf("list cloud-backed chunks: %w", err)
 	}
 	if m.cloudIdx != nil && indexed > 0 {
 		m.cloudIdxMu.Lock()

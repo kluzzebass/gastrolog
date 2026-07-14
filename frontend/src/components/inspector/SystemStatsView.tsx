@@ -11,7 +11,7 @@ import type { ThroughputRate } from "../../api/gen/gastrolog/v1/vault_pb";
 
 /**
  * System stats view for a single node, using gossip-broadcast NodeStats.
- * Used identically for local and remote nodes — no special-casing.
+ * Used identically for the local node and peers — no special-casing.
  */
 interface SystemStatsViewProps {
   nodeStats: NodeStats | null;
