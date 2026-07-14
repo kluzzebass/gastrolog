@@ -24,7 +24,7 @@ func OpenGLCBCursor(glcbPath string, chunkID chunk.ChunkID) (chunk.RecordCursor,
 		return nil, err
 	}
 	blob.Retain()
-	return glcb.NewSeekableCursorWithClose(rd, chunkID, func() {
+	return glcb.NewGLCBCursor(rd, chunkID, func() {
 		_ = rd.Close()
 		blob.Release()
 		_ = blob.Close()

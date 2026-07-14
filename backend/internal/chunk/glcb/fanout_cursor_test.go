@@ -61,7 +61,7 @@ func TestGLCBCursorFanOutSource(t *testing.T) {
 	}
 	defer rd.Close()
 
-	cur := NewSeekableCursorWithClose(rd, chunk.ChunkID{}, nil)
+	cur := NewGLCBCursor(rd, chunk.ChunkID{}, nil)
 	fanout, ok := cur.(chunk.RecordFanOutSource)
 	if !ok {
 		t.Fatal("glcbCursor should implement RecordFanOutSource")

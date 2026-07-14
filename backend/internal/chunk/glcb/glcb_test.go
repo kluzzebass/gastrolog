@@ -204,13 +204,13 @@ func TestRoundTrip(t *testing.T) {
 	assertRecord(t, 0, got, records[0])
 }
 
-func TestSeekableCursor(t *testing.T) {
+func TestGLCBCursor(t *testing.T) {
 	chunkID, vaultID, records := testRecords()
 	tmp := writeBlobToTempFile(t, chunkID, vaultID, records)
 
 	rd := openBlobReader(t, tmp)
 
-	cursor := glcb.NewSeekableCursorWithClose(rd, chunkID, nil)
+	cursor := glcb.NewGLCBCursor(rd, chunkID, nil)
 	defer cursor.Close()
 
 	// Forward iteration.
@@ -334,7 +334,7 @@ func TestLargeRoundTrip(t *testing.T) {
 	}
 
 	// Forward cursor: read all records, verify count.
-	cursor := glcb.NewSeekableCursorWithClose(rd, chunkID, nil)
+	cursor := glcb.NewGLCBCursor(rd, chunkID, nil)
 	defer cursor.Close()
 
 	var fwdCount int

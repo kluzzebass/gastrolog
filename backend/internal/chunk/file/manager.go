@@ -3303,7 +3303,7 @@ func (m *Manager) openLocalGLCBCursor(id chunk.ChunkID) (chunk.RecordCursor, err
 		return nil, err
 	}
 	m.noteGLCBDecoded(id)
-	return glcb.NewSeekableCursorWithClose(rd, id, func() {
+	return glcb.NewGLCBCursor(rd, id, func() {
 		blob.Release()
 		m.releaseGLCBDecodeTables(id, blob)
 		chunkLock.RUnlock()
