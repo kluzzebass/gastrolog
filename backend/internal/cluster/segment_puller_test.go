@@ -3,6 +3,7 @@ package cluster
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -11,6 +12,7 @@ import (
 	"testing"
 
 	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline/collection"
 
 	"google.golang.org/grpc"
 )
@@ -120,17 +122,52 @@ func TestSegmentPullerMultiFrameFromFile(t *testing.T) {
 	}
 }
 
-func TestSegmentPullerMissingSegment(t *testing.T) {
+// TestSegmentPullerTranslatesUnavailableAcrossWire pins the boundary
+// translation end to end (gastrolog-466kq5): a serving side that cannot
+// serve the segment signals collection.ErrSegmentUnavailable, the PullSegment
+// handler encodes it as a NotFound status, and the pulling side's
+// SegmentPuller re-attaches the same sentinel — so retry classification runs
+// on errors.Is regardless of how any message along the way is worded.
+func TestSegmentPullerTranslatesUnavailableAcrossWire(t *testing.T) {
 	t.Parallel()
-	sp, cleanup := startSegmentPullServer(t, func(glid.GLID, glid.GLID, io.Writer) error {
-		return fmt.Errorf("segment not held here")
+	sp, cleanup := startSegmentPullServer(t, func(_, segID glid.GLID, _ io.Writer) error {
+		// Mimic the orchestrator ServePull seam translating a distribution
+		// "segment not found" into the collection sentinel.
+		return fmt.Errorf("%w: segment %s not found", collection.ErrSegmentUnavailable, segID)
 	})
 	defer cleanup()
 
 	var buf bytes.Buffer
 	err := sp.Pull(context.Background(), "node-origin", glid.New(), glid.New(), &buf)
 	if err == nil {
-		t.Fatal("expected error for missing segment, got nil")
+		t.Fatal("expected error for unavailable segment, got nil")
+	}
+	if !errors.Is(err, collection.ErrSegmentUnavailable) {
+		t.Fatalf("error must carry collection.ErrSegmentUnavailable across the wire, got: %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("expected no bytes written on failure, got %d", buf.Len())
+	}
+}
+
+// TestSegmentPullerServingFaultIsNotUnavailable: a serving-side failure that
+// is NOT the unavailable sentinel (open/copy fault mid-stream) must cross the
+// wire as a terminal error — never as collection.ErrSegmentUnavailable, which
+// would bury it at Debug and retry forever.
+func TestSegmentPullerServingFaultIsNotUnavailable(t *testing.T) {
+	t.Parallel()
+	sp, cleanup := startSegmentPullServer(t, func(glid.GLID, glid.GLID, io.Writer) error {
+		return fmt.Errorf("read segment file: input/output error")
+	})
+	defer cleanup()
+
+	var buf bytes.Buffer
+	err := sp.Pull(context.Background(), "node-origin", glid.New(), glid.New(), &buf)
+	if err == nil {
+		t.Fatal("expected error for serving fault, got nil")
+	}
+	if errors.Is(err, collection.ErrSegmentUnavailable) {
+		t.Fatalf("serving fault must not classify as segment-unavailable: %v", err)
 	}
 	if buf.Len() != 0 {
 		t.Fatalf("expected no bytes written on failure, got %d", buf.Len())

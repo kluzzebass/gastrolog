@@ -8,8 +8,11 @@ import (
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline/collection"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const segmentPullerPurpose = PurposeSegmentPull
@@ -67,6 +70,15 @@ func (sp *SegmentPuller) Pull(ctx context.Context, nodeID string, vaultID, segme
 				break
 			}
 			h.Invalidate(err)
+			// Boundary translation (gastrolog-466kq5): the serving side
+			// encodes "segment unknown or not held here" as a NotFound
+			// status; re-attach the collection-owned sentinel so retry
+			// classification runs on errors.Is, never on status types or
+			// message prose. Mirrors chunk/cloud's blob-store-to-chunk
+			// sentinel translation.
+			if status.Code(err) == codes.NotFound {
+				return fmt.Errorf("receive segment chunk from %s: %w: %w", nodeID, collection.ErrSegmentUnavailable, err)
+			}
 			return fmt.Errorf("receive segment chunk from %s: %w", nodeID, err)
 		}
 		if len(chunk.GetData()) > 0 {

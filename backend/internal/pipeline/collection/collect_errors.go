@@ -3,21 +3,40 @@ package collection
 import (
 	"errors"
 	"os"
-	"strings"
 
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
+	erragg "gastrolog/internal/errs"
 )
+
+// ErrSegmentUnavailable marks a pull failure where no source can serve the
+// segment right now: the vault-ctl registry does not (yet) list it, no remote
+// holder is known, or the serving holder no longer has the bytes. These are
+// expected catch-up races at high ingest — the next vault-ctl publish or
+// retry wake resolves them — so they classify as deferred, not failed.
+//
+// Collection owns this sentinel; transport adapters attach it at the
+// boundary. The segment pull client (orchestrator) wraps it around registry
+// and holder-resolution misses, and cluster.SegmentPuller translates the
+// PullSegment RPC's NotFound status into it — mirroring how chunk/cloud
+// translates blob-store sentinels into chunk sentinels. Classification here
+// never inspects transport types or error prose.
+var ErrSegmentUnavailable = errors.New("segment unavailable")
 
 // retryableCollectErr reports whether a collect pass failure is an expected
 // catch-up race at high ingest: the registry still lists a segment but no peer
-// has bytes yet (no holder acks), or a holder already purged head/ after seal.
-// The next vault-ctl publish or leadership wake retries; logging at Warn drowns signal.
+// has bytes yet (no holder acks), a holder already purged head/ after seal, or
+// a pulled copy failed verification and must be re-pulled from another holder.
+// The next vault-ctl publish or leadership wake retries; logging at Warn
+// drowns signal. A pass aggregate (SummaryJoin) is retryable only when every
+// failure it summarizes is — one terminal failure must surface at Warn.
 func retryableCollectErr(err error) bool {
 	if err == nil {
 		return false
 	}
-	for _, sub := range unpackJoinErrors(err) {
+	subs := erragg.Unpack(err)
+	if subs == nil {
+		subs = []error{err}
+	}
+	for _, sub := range subs {
 		if !retryableCollectSuberr(sub) {
 			return false
 		}
@@ -25,22 +44,11 @@ func retryableCollectErr(err error) bool {
 	return true
 }
 
-func unpackJoinErrors(err error) []error {
-	type unwrapper interface {
-		Unwrap() []error
-	}
-	if u, ok := err.(unwrapper); ok {
-		if subs := u.Unwrap(); len(subs) > 0 {
-			return subs
-		}
-	}
-	return []error{err}
-}
-
+// retryableCollectSuberr classifies one failure by collection-owned
+// sentinels via errors.Is — never by transport status types or error prose,
+// so rewording a message elsewhere cannot flip classification
+// (gastrolog-466kq5).
 func retryableCollectSuberr(err error) bool {
-	if err == nil {
-		return true
-	}
 	if errors.Is(err, ErrCorruptSegment) {
 		// Checksum verification failed: the serving holder has wrong bytes.
 		// The pre-head copy is already discarded; the pull must retry on the
@@ -48,26 +56,8 @@ func retryableCollectSuberr(err error) bool {
 		// bytes) — no future publish event exists to retry it otherwise.
 		return true
 	}
-	if errors.Is(err, os.ErrNotExist) {
+	if errors.Is(err, ErrSegmentUnavailable) {
 		return true
 	}
-	if st, ok := status.FromError(err); ok && st.Code() == codes.NotFound {
-		return true
-	}
-	msg := err.Error()
-	if strings.Contains(msg, "no remote holder for segment") {
-		return true
-	}
-	if strings.Contains(msg, "not in vault-ctl registry") {
-		return true
-	}
-	if strings.Contains(msg, "serve segment") && strings.Contains(msg, "segment not found") {
-		return true
-	}
-	if u, ok := err.(interface{ Unwrap() error }); ok {
-		if inner := u.Unwrap(); inner != nil {
-			return retryableCollectSuberr(inner)
-		}
-	}
-	return false
+	return errors.Is(err, os.ErrNotExist)
 }

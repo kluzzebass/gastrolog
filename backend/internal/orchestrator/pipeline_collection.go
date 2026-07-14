@@ -163,7 +163,10 @@ func (c *segmentPullClient) Pull(ctx context.Context, vaultID, segmentID glid.GL
 	}
 	entry := fsm.GetCompletedSegment(segmentID)
 	if entry == nil {
-		return fmt.Errorf("segment %s not in vault-ctl registry", segmentID)
+		// Deferred, not failed: the local FSM has not caught up to the
+		// publish yet; the next apply retries (collection.ErrSegmentUnavailable
+		// drives the retry classification — never this message's prose).
+		return fmt.Errorf("%w: segment %s not in vault-ctl registry", collection.ErrSegmentUnavailable, segmentID)
 	}
 
 	rw, streaming := dest.(rewindableWriter)
@@ -190,7 +193,9 @@ func (c *segmentPullClient) Pull(ctx context.Context, vaultID, segmentID glid.GL
 	}
 	sources := segmentPullSources(entry, c.localNodeID)
 	if len(sources) == 0 {
-		return fmt.Errorf("no remote holder for segment %s", segmentID)
+		// Deferred, not failed: the registry lists the segment before any
+		// holder ack lands; a later publish or retry wake resolves it.
+		return fmt.Errorf("%w: no remote holder for segment %s", collection.ErrSegmentUnavailable, segmentID)
 	}
 	if streaming {
 		return c.pullStreaming(ctx, sources, vaultID, segmentID, rw, start)
