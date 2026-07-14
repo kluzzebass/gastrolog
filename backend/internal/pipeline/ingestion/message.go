@@ -8,9 +8,9 @@ import (
 	"gastrolog/internal/record"
 )
 
-// Message is emitted by IngestionManager after EventID minting. It is the
+// IngestMessage is emitted by IngestionManager after EventID minting. It is the
 // digestion queue element.
-type Message struct {
+type IngestMessage struct {
 	EventID  record.EventID
 	Attrs    map[string]string
 	Raw      []byte
@@ -20,7 +20,7 @@ type Message struct {
 }
 
 // IngesterMessage is what ingesters emit before minting. IngestionManager
-// stamps EventID and forwards a Message to the digestion queue.
+// stamps EventID and forwards an IngestMessage to the digestion queue.
 type IngesterMessage struct {
 	Attrs    map[string]string
 	Raw      []byte

@@ -199,7 +199,7 @@ type slowDigester struct {
 	delay time.Duration
 }
 
-func (d *slowDigester) Digest(_ *ingestion.Message) error {
+func (d *slowDigester) Digest(_ *ingestion.IngestMessage) error {
 	time.Sleep(d.delay)
 	return nil
 }

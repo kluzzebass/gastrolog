@@ -226,7 +226,7 @@ type Supervisor struct {
 	col    *collection.Manager
 	chunk  *chunking.Manager
 
-	ingestOut <-chan ingestion.Message
+	ingestOut <-chan ingestion.IngestMessage
 	digestOut <-chan digestion.Output
 	completed <-chan segmentation.CompletedSegment
 	routingIn chan routing.Input
