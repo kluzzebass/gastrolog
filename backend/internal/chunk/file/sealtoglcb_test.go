@@ -1,6 +1,7 @@
 package file
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -300,5 +301,81 @@ func TestSealToGLCB_RefusesUnsealedChunk(t *testing.T) {
 
 	if _, _, err := m.sealToGLCB(id); err == nil {
 		t.Fatal("expected sealToGLCB to fail on unsealed chunk")
+	}
+}
+
+// TestSealToGLCB_StaleTmpWedgesSealAcrossRestart pins a LATENT BUG
+// (gastrolog-5do8sh gap 7d) — do NOT "fix" this test by changing its
+// assertions; fix the bug in a follow-up and update the test with it.
+//
+// sealToGLCB opens data.glcb.tmp with O_EXCL and its comment claims "the
+// cleanOrphanTempFiles sweep at startup is responsible for tmp removal on
+// crash recovery". But cleanOrphanTempFiles only matches names with a
+// ".compress-" prefix or containing ".tmp." (trailing dot) — "data.glcb.tmp"
+// matches neither. So a tmp left by a crash mid-seal survives restart, and
+// every subsequent sealToGLCB of that chunk fails on O_EXCL: the chunk can
+// never produce its data.glcb until an operator deletes the tmp by hand.
+//
+// This test documents that CURRENT behavior:
+//  1. a stale data.glcb.tmp makes sealToGLCB fail with fs.ErrExist;
+//  2. manager restart (loadExisting → cleanOrphanTempFiles) does NOT remove
+//     the tmp, so the seal stays wedged after recovery.
+func TestSealToGLCB_StaleTmpWedgesSealAcrossRestart(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	m, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+
+	now := time.Now().Truncate(time.Microsecond)
+	const recordCount = 5
+	var chunkID chunk.ChunkID
+	for i := range recordCount {
+		id, _, err := m.Append(chunk.Record{
+			IngestTS: now.Add(time.Duration(i) * time.Millisecond),
+			Attrs:    chunk.Attributes{"level": "info"},
+			Raw:      []byte("payload"),
+		})
+		if err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+		chunkID = id
+	}
+	if err := m.Seal(); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+
+	// Crash mid-seal: a prior sealToGLCB died between creating the tmp and
+	// the rename commit, leaving a stale data.glcb.tmp in the chunk dir.
+	tmpPath := filepath.Join(m.chunkDir(chunkID), dataGLCBTmpFileName)
+	if err := os.WriteFile(tmpPath, []byte("stale tmp from an aborted seal"), 0o600); err != nil {
+		t.Fatalf("plant stale tmp: %v", err)
+	}
+
+	// Pinned latent bug, part 1: the O_EXCL open surfaces the stale tmp as
+	// an error instead of clobbering it — the seal is wedged.
+	if _, _, err := m.sealToGLCB(chunkID); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("sealToGLCB with stale tmp = %v, want fs.ErrExist (O_EXCL wedge)", err)
+	}
+	if err := m.Close(); err != nil {
+		t.Fatalf("close manager: %v", err)
+	}
+
+	// Pinned latent bug, part 2: crash-recovery restart. loadExisting runs
+	// cleanOrphanTempFiles over every chunk dir, but its patterns
+	// (".compress-" prefix, ".tmp." substring) do not match "data.glcb.tmp",
+	// so the sweep the sealToGLCB comment relies on never removes it.
+	m2, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("re-open manager: %v", err)
+	}
+	defer func() { _ = m2.Close() }()
+
+	if _, err := os.Stat(tmpPath); err != nil {
+		t.Fatalf("CURRENT (buggy) behavior changed: data.glcb.tmp no longer survives restart (err=%v) — if a startup sweep now removes it, update this pinned test and close the gap-7d follow-up", err)
+	}
+	if _, _, err := m2.sealToGLCB(chunkID); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("sealToGLCB after restart = %v, want fs.ErrExist (seal stays wedged until the tmp is removed by hand)", err)
 	}
 }

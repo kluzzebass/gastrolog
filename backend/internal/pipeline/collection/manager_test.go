@@ -41,6 +41,12 @@ func (l *staticLog) setAssigned(segs ...collection.AssignedSegment) {
 	l.mu.Unlock()
 }
 
+func (l *staticLog) rollCount() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.rollCalls
+}
+
 type memoryPull struct {
 	mu   sync.Mutex
 	data map[glid.GLID][]byte
@@ -1517,5 +1523,276 @@ func TestCollectOncePullsInParallel(t *testing.T) {
 	}
 	if peak := probe.peakInflight(); peak < 2 {
 		t.Fatalf("peak in-flight pulls = %d, want >= 2 (pulls ran serially)", peak)
+	}
+}
+
+// TestRewireVaultFSMRebindsLiveDeps mirrors chunking's
+// TestRewireVaultFSMRebindsLiveRegistry for collection: after a vault-ctl
+// snapshot Restore swaps the sub-FSM, RewireVaultFSM must rebind the whole
+// collaborator bundle (log reader, pull client, receipt committer, FSM) as
+// one atomic snapshot (gastrolog-50m2vi). A publish applied to the NEW
+// (live) FSM must trigger a collect pass that pulls from the NEW source and
+// receipts to the NEW committer; the OLD bundle must never be consulted.
+func TestRewireVaultFSMRebindsLiveDeps(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	segID := glid.New()
+	root := t.TempDir()
+	now := time.Unix(0, 1_700_000_000_000).UTC()
+
+	data := writeSegmentBytes(t, vaultID, segID, "post-restore segment")
+
+	staleFSM := vaultctlfsm.New()
+	liveFSM := vaultctlfsm.New()
+
+	// The stale pull source ALSO holds the segment bytes: if a torn rewire
+	// left the old pull client behind, the pass would still land the right
+	// bytes in head/ — the counting wrapper, not head/ content, is what
+	// proves which source served the pull (the gastrolog-50m2vi torn-bundle
+	// hazard: fresh FSM with a stale pull client).
+	staleInner := newMemoryPull()
+	staleInner.Put(segID, data)
+	stalePull := &countingSlowPull{inner: staleInner}
+	staleLog := &staticLog{}
+	staleReceipts := &recordingReceipts{}
+
+	liveLog := &staticLog{}
+	livePull := newMemoryPull()
+	liveReceipts := &recordingReceipts{}
+
+	passComplete := make(chan struct{}, 8)
+	mgr := collection.New(collection.Config{
+		OnPassComplete: func(glid.GLID) {
+			select {
+			case passComplete <- struct{}{}:
+			default:
+			}
+		},
+	})
+	if err := mgr.RegisterVault(vaultID, root, collection.VaultConfig{
+		Log: staleLog, Pull: stalePull, Receipts: staleReceipts, FSM: staleFSM,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		_ = mgr.Run(ctx)
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+
+	// Wait for the worker's startup pass (its Roll on the stale log) before
+	// touching the manager: observing the worker's own action is the
+	// happens-before edge the other Run+CollectOnce tests use too.
+	deadline := time.Now().Add(10 * time.Second)
+	for staleLog.rollCount() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("worker startup pass never rolled the stale log")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	if err := mgr.RewireVaultFSM(vaultID, collection.VaultConfig{
+		Log: liveLog, Pull: livePull, Receipts: liveReceipts, FSM: liveFSM,
+	}); err != nil {
+		t.Fatalf("RewireVaultFSM: %v", err)
+	}
+	// Drain the wake RewireVaultFSM itself fires so the collecting pass below
+	// is attributable to the live-FSM publish, not the rewire poke. The live
+	// log is still empty, so this pass observes nothing to collect.
+	if err := mgr.CollectOnce(ctx, vaultID); err != nil {
+		t.Fatal(err)
+	}
+
+	livePull.Put(segID, data)
+	liveLog.setAssigned(collection.AssignedSegment{
+		VaultID:   vaultID,
+		SegmentID: segID,
+		Checksum:  segmentChecksumOf(t, data),
+	})
+	applyPublish(t, liveFSM, vaultctlfsm.CompletedSegmentEntry{
+		SegmentID:     segID,
+		RecordCount:   1,
+		ByteSize:      uint64(len(data)),
+		FirstIngestTS: now,
+		LastIngestTS:  now,
+		Checksum:      segmentChecksumOf(t, data),
+		OriginNodeID:  "origin",
+		PublishedAt:   now,
+	})
+
+	// OnPassComplete fires only for passes that made progress; the empty
+	// pre-publish passes stay silent, so this is the publish-driven pass.
+	select {
+	case <-passComplete:
+	case <-time.After(10 * time.Second):
+		t.Fatal("publish on the rewired (live) FSM never triggered a collect pass")
+	}
+	if _, err := os.Stat(paths.HeadSegment(root, segID)); err != nil {
+		t.Fatalf("segment missing from head/ after live-FSM publish: %v", err)
+	}
+	if liveReceipts.count() != 1 {
+		t.Fatalf("live receipts = %d, want 1", liveReceipts.count())
+	}
+	if staleReceipts.count() != 0 {
+		t.Fatalf("stale receipts = %d, want 0 (receipt committed through the pre-rewire committer)", staleReceipts.count())
+	}
+	if n := stalePull.pulls.Load(); n != 0 {
+		t.Fatalf("stale pull source queried %d times, want 0 (pull went through the pre-rewire client)", n)
+	}
+}
+
+// TestRewireVaultFSMKeepsUnspecifiedDeps pins the partial-rewire merge: a
+// VaultConfig carrying only the FSM keeps the registered log reader, pull
+// client, and receipt committer in the published deps snapshot.
+func TestRewireVaultFSMKeepsUnspecifiedDeps(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	segID := glid.New()
+	root := t.TempDir()
+
+	data := writeSegmentBytes(t, vaultID, segID, "fsm-only rewire")
+	pull := newMemoryPull()
+	pull.Put(segID, data)
+	log := &staticLog{}
+	log.setAssigned(collection.AssignedSegment{
+		VaultID:   vaultID,
+		SegmentID: segID,
+		Checksum:  segmentChecksumOf(t, data),
+	})
+	receipts := &recordingReceipts{}
+
+	mgr := collection.New(collection.Config{})
+	if err := mgr.RegisterVault(vaultID, root, collection.VaultConfig{
+		Log: log, Pull: pull, Receipts: receipts, FSM: vaultctlfsm.New(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.RewireVaultFSM(vaultID, collection.VaultConfig{FSM: vaultctlfsm.New()}); err != nil {
+		t.Fatalf("RewireVaultFSM: %v", err)
+	}
+
+	// No worker is running: CollectOnce runs the pass inline, so the
+	// registered deps must still be live in the post-rewire snapshot.
+	if err := mgr.CollectOnce(context.Background(), vaultID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(paths.HeadSegment(root, segID)); err != nil {
+		t.Fatalf("segment missing from head/ after FSM-only rewire: %v", err)
+	}
+	if receipts.count() != 1 {
+		t.Fatalf("receipts = %d, want 1", receipts.count())
+	}
+}
+
+// TestRewireVaultFSMValidation pins the error edges: rewiring an unknown
+// vault and rewiring without an FSM (the one mandatory field — the rewire
+// exists to swap it) both fail.
+func TestRewireVaultFSMValidation(t *testing.T) {
+	t.Parallel()
+	mgr := collection.New(collection.Config{})
+	if err := mgr.RewireVaultFSM(glid.New(), collection.VaultConfig{FSM: vaultctlfsm.New()}); err != collection.ErrUnknownVault {
+		t.Fatalf("RewireVaultFSM(unknown vault) = %v, want ErrUnknownVault", err)
+	}
+
+	vaultID := glid.New()
+	if err := mgr.RegisterVault(vaultID, t.TempDir(), collection.VaultConfig{
+		Log: &staticLog{}, Pull: newMemoryPull(), Receipts: &recordingReceipts{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.RewireVaultFSM(vaultID, collection.VaultConfig{}); err == nil {
+		t.Fatal("RewireVaultFSM without an FSM must fail")
+	}
+}
+
+// TestCollectOncePullingOrphanPersistsAndRepullOverwrites documents CURRENT
+// behavior for a crash mid-pull: PullToPreHead streams into
+// "<segID>.pulling" (transfer.go preHeadPullSuffix) and a crash before the
+// rename commit leaves that temp file in pre-head/. Nothing sweeps it —
+// unlike FINAL-named pre-head orphans (promoted in place, gastrolog-5zotim),
+// a .pulling file is invisible to collect passes and leaks until the same
+// segment is pulled again. A startup .pulling sweep is a follow-up candidate
+// (gastrolog-5do8sh gap 7); this test pins the status quo so a future sweep
+// changes it deliberately.
+//
+// The second half pins the self-healing edge that makes the leak benign for
+// assigned segments: a real pull of the SAME segment opens the temp path
+// with O_TRUNC and renames over it, so the stale bytes never reach head/.
+func TestCollectOncePullingOrphanPersistsAndRepullOverwrites(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	segID := glid.New()
+	root := t.TempDir()
+
+	if err := paths.EnsurePreHeadDir(root); err != nil {
+		t.Fatal(err)
+	}
+	// preHeadPullSuffix is unexported; the on-disk contract is the ".pulling"
+	// suffix on the pre-head segment path (transfer.go).
+	pullingPath := paths.PreHeadSegment(root, segID) + ".pulling"
+	stale := []byte("torn bytes from a crashed pull")
+	if err := os.WriteFile(pullingPath, stale, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	data := writeSegmentBytes(t, vaultID, segID, "published bytes")
+	pull := newMemoryPull() // empty until the second phase
+	log := &staticLog{}     // nothing assigned yet: the startup pass has no work
+	receipts := &recordingReceipts{}
+
+	mgr := collection.New(collection.Config{})
+	if err := mgr.RegisterVault(vaultID, root, collection.VaultConfig{
+		Log: log, Pull: pull, Receipts: receipts,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Startup/converge pass (the path the gastrolog-5zotim orphan tests
+	// drive): with nothing assigned it must not touch pre-head/, and there
+	// is no sweep — the .pulling orphan persists byte-for-byte.
+	if err := mgr.CollectOnce(context.Background(), vaultID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(pullingPath)
+	if err != nil {
+		t.Fatalf("CURRENT behavior changed: .pulling orphan no longer survives a collect pass: %v", err)
+	}
+	if !bytes.Equal(got, stale) {
+		t.Fatal(".pulling orphan bytes were modified by a pass that had nothing assigned")
+	}
+
+	// The registry now assigns the segment and a holder serves it. The pull
+	// reuses the same temp path: O_TRUNC discards the stale bytes and the
+	// rename commit replaces the orphan with the verified pull.
+	pull.Put(segID, data)
+	log.setAssigned(collection.AssignedSegment{
+		VaultID:   vaultID,
+		SegmentID: segID,
+		Checksum:  segmentChecksumOf(t, data),
+	})
+	if err := mgr.CollectOnce(context.Background(), vaultID); err != nil {
+		t.Fatal(err)
+	}
+	headBytes, err := os.ReadFile(paths.HeadSegment(root, segID))
+	if err != nil {
+		t.Fatalf("segment missing from head/ after re-pull over .pulling orphan: %v", err)
+	}
+	if !bytes.Equal(headBytes, data) {
+		t.Fatal("head/ bytes do not match the published bytes after re-pull")
+	}
+	if _, err := os.Stat(pullingPath); !os.IsNotExist(err) {
+		t.Fatalf(".pulling temp should be renamed away by the successful pull, stat err = %v", err)
+	}
+	if _, err := os.Stat(paths.PreHeadSegment(root, segID)); !os.IsNotExist(err) {
+		t.Fatal("pre-head file should be promoted to head/ after the pull")
+	}
+	if receipts.count() != 1 {
+		t.Fatalf("receipts = %d, want 1", receipts.count())
 	}
 }
