@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -261,6 +262,14 @@ func TestRecoveryWaitsForFSMReplay(t *testing.T) {
 
 	var mu sync.Mutex
 	var rebuilt []chunk.ChunkID
+	// Production ordering: a node cannot hold vault-ctl leadership before its
+	// FSM has replayed — Raft serializes replay ahead of any proposal this
+	// node could make. Model that here: leadership arrives only after the
+	// fake replay below completes. With leadership from the start, the
+	// worker's leader planner raced the direct applies and proposed its OWN
+	// open manifest between publish and open ("open chunk manifest already
+	// exists"), an interleaving real replay forbids (gastrolog-4cxvdi).
+	var leader atomic.Bool
 	mgr := chunking.New(chunking.Config{})
 	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
 		VaultRoot: home,
@@ -270,7 +279,7 @@ func TestRecoveryWaitsForFSMReplay(t *testing.T) {
 		Applier:   &flakyFSMApplier{fsm: fsm},
 		// Seal recovery proposes CmdSealChunk, which only the vault-ctl
 		// leader commits — this scenario is the recovering leader.
-		IsLeader: func() bool { return true },
+		IsLeader: leader.Load,
 		OnBuilt: func(id chunk.ChunkID) {
 			mu.Lock()
 			rebuilt = append(rebuilt, id)
@@ -303,6 +312,11 @@ func TestRecoveryWaitsForFSMReplay(t *testing.T) {
 		SegmentID: segID, FirstRecordNumber: 0, LastRecordNumber: 0, SliceBytes: 1024, RefAddedAt: base,
 	}))
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, base.Add(time.Minute)))
+
+	// Replay complete — the node wins vault-ctl leadership. Wake the worker
+	// so a leader-aware pass (or the ticker recovery) proposes the seal.
+	leader.Store(true)
+	mgr.NotifyVault(vaultID)
 
 	deadline := time.Now().Add(5 * time.Second)
 	for {
