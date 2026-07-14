@@ -106,61 +106,91 @@ func validateEndpoint(ep string) (string, error) {
 	return ep, nil
 }
 
-func createStore(provider string, params map[string]string, log *slog.Logger) (Store, error) {
+// ValidateConfig checks the deterministic config shape for a provider —
+// per-provider required params and the endpoint scheme rule — without
+// constructing a client or touching the network. It is the single source
+// of truth for config-shape rules: createStore runs it before building a
+// store, and the config-mutation RPC handler (PutCloudService) runs it
+// before accepting a cloud-service config, so accept-time and init-time
+// rules cannot drift. Keep it deterministic — no DNS, no probes — so it
+// yields the same verdict on every node; it must never run inside the FSM
+// apply path, where a rejection would break replay of persisted state.
+func ValidateConfig(provider string, params map[string]string) error {
 	switch provider {
 	case "s3":
-		endpoint, err := validateEndpoint(params[ParamEndpoint])
-		if err != nil {
-			return nil, err
+		if _, err := validateEndpoint(params[ParamEndpoint]); err != nil {
+			return err
 		}
-		cfg := S3Config{
+		if params[ParamBucket] == "" {
+			return errors.New("missing required parameter: bucket")
+		}
+		if params[ParamRegion] == "" {
+			return errors.New("missing required parameter: region")
+		}
+		return nil
+
+	case "azure":
+		if params[ParamContainer] == "" {
+			return errors.New("missing required parameter: container")
+		}
+		if params[ParamConnectionString] == "" {
+			return errors.New("missing required parameter: connection_string")
+		}
+		return nil
+
+	case "gcs":
+		if _, err := validateEndpoint(params[ParamEndpoint]); err != nil {
+			return err
+		}
+		if params[ParamBucket] == "" {
+			return errors.New("missing required parameter: bucket")
+		}
+		return nil
+
+	case "memory":
+		return nil
+
+	case "":
+		return ErrMissingProvider
+
+	default:
+		return ErrUnknownProvider
+	}
+}
+
+func createStore(provider string, params map[string]string, log *slog.Logger) (Store, error) {
+	if err := ValidateConfig(provider, params); err != nil {
+		return nil, err
+	}
+	switch provider {
+	case "s3":
+		return NewS3(context.Background(), S3Config{
 			Bucket:    params[ParamBucket],
 			Region:    params[ParamRegion],
-			Endpoint:  endpoint,
+			Endpoint:  params[ParamEndpoint],
 			AccessKey: params[ParamAccessKey],
 			SecretKey: params[ParamSecretKey],
 			Logger:    log,
-		}
-		if cfg.Bucket == "" {
-			return nil, errors.New("missing required parameter: bucket")
-		}
-		if cfg.Region == "" {
-			return nil, errors.New("missing required parameter: region")
-		}
-		return NewS3(context.Background(), cfg)
+		})
 
 	case "azure":
-		cfg := AzureConfig{
+		return NewAzure(AzureConfig{
 			Container:        params[ParamContainer],
 			ConnectionString: params[ParamConnectionString],
-		}
-		if cfg.Container == "" {
-			return nil, errors.New("missing required parameter: container")
-		}
-		if cfg.ConnectionString == "" {
-			return nil, errors.New("missing required parameter: connection_string")
-		}
-		return NewAzure(cfg)
+		})
 
 	case "gcs":
-		endpoint, err := validateEndpoint(params[ParamEndpoint])
-		if err != nil {
-			return nil, err
-		}
-		cfg := GCSConfig{
+		return NewGCS(context.Background(), GCSConfig{
 			Bucket:          params[ParamBucket],
-			Endpoint:        endpoint,
+			Endpoint:        params[ParamEndpoint],
 			CredentialsJSON: params[ParamCredentialsJSON],
-		}
-		if cfg.Bucket == "" {
-			return nil, errors.New("missing required parameter: bucket")
-		}
-		return NewGCS(context.Background(), cfg)
+		})
 
 	case "memory":
 		return NewMemory(), nil
 
 	default:
+		// Unreachable: ValidateConfig rejected every other provider.
 		return nil, ErrUnknownProvider
 	}
 }

@@ -8,8 +8,11 @@ package blobstore
 import (
 	"context"
 	"errors"
+	"maps"
 	"strings"
 	"testing"
+
+	"gastrolog/internal/system"
 )
 
 func TestValidateEndpoint(t *testing.T) {
@@ -139,4 +142,113 @@ func TestConnectionTesterMemoryProvider(t *testing.T) {
 			t.Fatalf("err = %v, want ErrMissingProvider", err)
 		}
 	})
+}
+
+// --- Config-accept validation (gastrolog-7au6u9) ---------------------------
+//
+// ValidateConfig is the shared shape validator: createStore runs it before
+// building a store, and PutCloudService runs it before accepting a config.
+// These tests pin every provider branch and prove the two paths agree.
+
+func TestValidateConfig(t *testing.T) {
+	t.Parallel()
+
+	valid := []struct {
+		name     string
+		provider string
+		params   map[string]string
+	}{
+		{"s3 full", "s3", map[string]string{ParamBucket: "b", ParamRegion: "r", ParamEndpoint: "http://localhost:19000"}},
+		{"s3 empty endpoint ok", "s3", map[string]string{ParamBucket: "b", ParamRegion: "r"}},
+		{"s3 uppercase scheme ok", "s3", map[string]string{ParamBucket: "b", ParamRegion: "r", ParamEndpoint: "HTTPS://s3.example.com"}},
+		{"gcs bucket only", "gcs", map[string]string{ParamBucket: "b"}},
+		{"gcs with endpoint", "gcs", map[string]string{ParamBucket: "b", ParamEndpoint: "https://gcs.example.com"}},
+		{"azure full", "azure", map[string]string{ParamContainer: "c", ParamConnectionString: "cs"}},
+		{"memory no params", "memory", nil},
+	}
+	for _, tc := range valid {
+		t.Run("valid/"+tc.name, func(t *testing.T) {
+			t.Parallel()
+			if err := ValidateConfig(tc.provider, tc.params); err != nil {
+				t.Fatalf("ValidateConfig(%s, %v) = %v, want nil", tc.provider, tc.params, err)
+			}
+		})
+	}
+
+	invalid := []struct {
+		name     string
+		provider string
+		params   map[string]string
+		wantText string
+	}{
+		{"s3 bare endpoint", "s3", map[string]string{ParamBucket: "b", ParamRegion: "r", ParamEndpoint: "localhost:19000"}, "no scheme"},
+		{"s3 missing bucket", "s3", map[string]string{ParamRegion: "r"}, "missing required parameter: bucket"},
+		{"s3 missing region", "s3", map[string]string{ParamBucket: "b"}, "missing required parameter: region"},
+		{"gcs bare endpoint", "gcs", map[string]string{ParamBucket: "b", ParamEndpoint: "minio.internal:9000"}, "no scheme"},
+		{"gcs missing bucket", "gcs", map[string]string{}, "missing required parameter: bucket"},
+		{"azure missing container", "azure", map[string]string{ParamConnectionString: "cs"}, "missing required parameter: container"},
+		{"azure missing connection_string", "azure", map[string]string{ParamContainer: "c"}, "missing required parameter: connection_string"},
+		{"empty provider", "", nil, ErrMissingProvider.Error()},
+		{"unknown provider", "bogus", nil, ErrUnknownProvider.Error()},
+	}
+	for _, tc := range invalid {
+		t.Run("invalid/"+tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := ValidateConfig(tc.provider, tc.params)
+			if err == nil {
+				t.Fatalf("ValidateConfig(%s, %v) = nil, want error containing %q", tc.provider, tc.params, tc.wantText)
+			}
+			if !strings.Contains(err.Error(), tc.wantText) {
+				t.Fatalf("error = %q, want mention of %q", err, tc.wantText)
+			}
+
+			// Single source of truth: CreateStore must reject the same
+			// shape with the same error text — the validator cannot
+			// drift from store creation.
+			_, createErr := CreateStore(tc.provider, tc.params, nil)
+			if createErr == nil {
+				t.Fatalf("CreateStore accepted a shape ValidateConfig rejects: %s %v", tc.provider, tc.params)
+			}
+			if createErr.Error() != err.Error() {
+				t.Fatalf("CreateStore error %q != ValidateConfig error %q", createErr, err)
+			}
+		})
+	}
+}
+
+// TestStoreParamsKeysMatchFactoryConstants pins the string-literal keys in
+// system.CloudService.StoreParams to the blobstore.Param* constants. system
+// cannot import blobstore (provider SDKs would leak into the config
+// package), so this test is the drift guard for the shared mapping.
+func TestStoreParamsKeysMatchFactoryConstants(t *testing.T) {
+	t.Parallel()
+
+	cs := system.CloudService{
+		Bucket:           "b",
+		Region:           "r",
+		Endpoint:         "https://e.example.com",
+		AccessKey:        "ak",
+		SecretKey:        "sk",
+		Container:        "c",
+		ConnectionString: "conn",
+		CredentialsJSON:  "{}",
+	}
+	got := cs.StoreParams()
+	want := map[string]string{
+		ParamBucket:           "b",
+		ParamRegion:           "r",
+		ParamEndpoint:         "https://e.example.com",
+		ParamAccessKey:        "ak",
+		ParamSecretKey:        "sk",
+		ParamContainer:        "c",
+		ParamConnectionString: "conn",
+		ParamCredentialsJSON:  "{}",
+	}
+	if !maps.Equal(got, want) {
+		t.Fatalf("StoreParams() = %v, want %v", got, want)
+	}
+
+	if empty := (system.CloudService{}).StoreParams(); len(empty) != 0 {
+		t.Fatalf("StoreParams() on zero config = %v, want empty (empty fields omitted)", empty)
+	}
 }
