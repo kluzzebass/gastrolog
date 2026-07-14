@@ -148,15 +148,3 @@ export function useGenerateName() {
     },
   });
 }
-
-// gastrolog-4kkoo (Phase 5): live validation for the route filter
-// editor. Read-only — no Raft Apply, no cache invalidation. Callers
-// debounce themselves so per-keystroke RPCs don't pile up.
-export function useValidateExpression() {
-  return useMutation({
-    mutationFn: async (expression: string) => {
-      const response = await systemClient.validateExpression({ expression });
-      return { valid: response.valid, error: response.error };
-    },
-  });
-}

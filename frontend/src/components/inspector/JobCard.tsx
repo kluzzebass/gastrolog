@@ -6,8 +6,6 @@ import { Badge } from "../Badge";
 import { ExpandableCard } from "../settings/ExpandableCard";
 import { NodeBadge } from "../settings/NodeBadge";
 
-export { formatTimestamp, elapsed, countdown } from "../../utils/temporal";
-
 /** Ticks every second, returning Date.now() so time-dependent expressions
  *  have a compiler-visible dependency that changes each tick. */
 export function useTick(): number {
