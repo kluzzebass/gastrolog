@@ -43,7 +43,7 @@ func TestBuildSourceIndexSparseAndBounds(t *testing.T) {
 	hdr := finalizeSegment(t, path, segment.Meta{ID: glid.New(), VaultID: glid.New()}, recs, writeTS)
 
 	if hdr.Version != segment.FormatVersion() {
-		t.Fatalf("version = %d, want v2", hdr.Version)
+		t.Fatalf("version = %d, want %d", hdr.Version, segment.FormatVersion())
 	}
 	if hdr.SourceIndexCount != 3 {
 		t.Fatalf("SourceIndexCount = %d, want 3", hdr.SourceIndexCount)
@@ -198,17 +198,18 @@ func TestOpenRejectsTruncatedSourceTail(t *testing.T) {
 	}
 }
 
-func TestDecodeV1HeaderWithoutSourceFields(t *testing.T) {
+func TestOpenRejectsWrongFormatVersion(t *testing.T) {
 	t.Parallel()
-	path := filepath.Join(t.TempDir(), "seg-v1")
+	path := filepath.Join(t.TempDir(), "seg-badver")
 	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
 	ingester, node := glid.New(), glid.New()
 	recs := []*record.Record{
 		recordWithSource(ingester, node, 0, base, time.Time{}, 'a'),
 	}
 
-	// Build a v1-shaped segment: finalize then downgrade header version on disk.
-	hdr := finalizeSegment(t, path, segment.Meta{ID: glid.New(), VaultID: glid.New()}, recs, base)
+	// Finalize a valid segment, then stamp a version byte that is not the
+	// single supported format version.
+	finalizeSegment(t, path, segment.Meta{ID: glid.New(), VaultID: glid.New()}, recs, base)
 	f, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -217,26 +218,14 @@ func TestDecodeV1HeaderWithoutSourceFields(t *testing.T) {
 	if _, err := f.ReadAt(typeHdr[:], 0); err != nil {
 		t.Fatal(err)
 	}
-	typeHdr[2] = 0x01
+	typeHdr[2] = 0x02
 	if _, err := f.WriteAt(typeHdr[:format.HeaderSize], 0); err != nil {
 		t.Fatal(err)
 	}
 	_ = f.Close()
 
-	sf, err := segment.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer sf.Close()
-	if sf.Header().Version != 0x01 {
-		t.Fatalf("version = %d, want 1", sf.Header().Version)
-	}
-	eventEnd := hdr.IndexOffset + hdr.RecordCount*segment.IndexEntrySize
-	if sf.Header().SourceIndexOffset != eventEnd {
-		t.Fatalf("SourceIndexOffset = %d, want %d", sf.Header().SourceIndexOffset, eventEnd)
-	}
-	if sf.Header().SourceIndexCount != 0 {
-		t.Fatalf("SourceIndexCount = %d, want 0", sf.Header().SourceIndexCount)
+	if _, err := segment.Open(path); !errors.Is(err, format.ErrVersionMismatch) {
+		t.Fatalf("Open() = %v, want format.ErrVersionMismatch", err)
 	}
 }
 

@@ -325,18 +325,14 @@ func (sf *File) readHeader() error {
 	if err != nil {
 		return err
 	}
-	readLen := int64(HeaderSize)
-	if info.Size() < readLen {
-		if info.Size() < int64(HeaderSizeV1) {
-			return ErrHeaderTooSmall
-		}
-		readLen = int64(HeaderSizeV1)
+	if info.Size() < int64(HeaderSize) {
+		return ErrHeaderTooSmall
 	}
-	n, err := sf.f.ReadAt(sf.hdrBuf[:readLen], 0)
+	n, err := sf.f.ReadAt(sf.hdrBuf[:HeaderSize], 0)
 	if err != nil {
 		return err
 	}
-	if int64(n) < readLen {
+	if n < HeaderSize {
 		return ErrHeaderTooSmall
 	}
 	hdr, err := decodeHeader(sf.hdrBuf[:n])

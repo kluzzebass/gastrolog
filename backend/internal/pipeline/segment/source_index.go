@@ -15,9 +15,7 @@ const (
 	// SourceIndexEntrySize is the on-disk byte length of one SourceTS index entry.
 	SourceIndexEntrySize = tsindex.EntrySize
 
-	formatVersionV1 = 0x01
-	formatVersionV2 = 0x02
-	formatVersion   = formatVersionV2
+	formatVersion = 0x01
 )
 
 // FindSourceStartPosition binary-searches the on-disk source index for the first

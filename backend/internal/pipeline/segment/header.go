@@ -26,9 +26,7 @@ const (
 	headerSourceIndexCountOff = headerSourceIndexOffOff + format.SizeU32
 	headerSourceIndexCRCOff   = headerSourceIndexCountOff + format.SizeU32
 
-	// HeaderSizeV1 is the on-disk segment header length for format version 1.
-	HeaderSizeV1 = headerIndexCRCOff + format.SizeU32
-	// HeaderSize is the fixed on-disk segment header length (current format version).
+	// HeaderSize is the fixed on-disk segment header length.
 	HeaderSize = headerSourceIndexCRCOff + format.SizeU32
 
 	// FlagComplete marks a segment that has been renamed to completed/.
@@ -66,7 +64,7 @@ type Header struct {
 	// to same-length substitution (gastrolog-1vepg0). Zero while empty.
 	SegmentChecksum uint64
 	IndexChecksum   uint32 // CRC32(IEEE) of index bytes [IndexOffset:IndexOffset+RecordCount*IndexEntrySize)
-	// Source index tail (format v2); zero/empty while working or on v1 segments.
+	// Source index tail; zero/empty while working.
 	FirstSourceTS       time.Time
 	LastSourceTS        time.Time
 	SourceIndexOffset   uint32 // byte offset where the SourceTS index starts
@@ -105,7 +103,7 @@ func encodeHeader(h Header, buf []byte) {
 }
 
 func decodeHeader(buf []byte) (Header, error) {
-	if len(buf) < HeaderSizeV1 {
+	if len(buf) < HeaderSize {
 		return Header{}, ErrHeaderTooSmall
 	}
 	h, err := format.Decode(buf[:format.HeaderSize])
@@ -115,11 +113,8 @@ func decodeHeader(buf []byte) (Header, error) {
 	if h.Type != format.TypeSegment {
 		return Header{}, format.ErrTypeMismatch
 	}
-	if h.Version != formatVersionV1 && h.Version != formatVersionV2 {
+	if h.Version != formatVersion {
 		return Header{}, format.ErrVersionMismatch
-	}
-	if h.Version == formatVersionV2 && len(buf) < HeaderSize {
-		return Header{}, ErrHeaderTooSmall
 	}
 
 	hdr := Header{Header: h}
@@ -132,15 +127,11 @@ func decodeHeader(buf []byte) (Header, error) {
 	hdr.IndexOffset = binary.LittleEndian.Uint32(buf[headerIndexOffOff:])
 	hdr.SegmentChecksum = binary.LittleEndian.Uint64(buf[headerChecksumOff:])
 	hdr.IndexChecksum = binary.LittleEndian.Uint32(buf[headerIndexCRCOff:])
-	if h.Version == formatVersionV2 {
-		hdr.FirstSourceTS = tsFromNanos(binary.LittleEndian.Uint64(buf[headerFirstSourceOff:]))
-		hdr.LastSourceTS = tsFromNanos(binary.LittleEndian.Uint64(buf[headerLastSourceOff:]))
-		hdr.SourceIndexOffset = binary.LittleEndian.Uint32(buf[headerSourceIndexOffOff:])
-		hdr.SourceIndexCount = binary.LittleEndian.Uint32(buf[headerSourceIndexCountOff:])
-		hdr.SourceIndexChecksum = binary.LittleEndian.Uint32(buf[headerSourceIndexCRCOff:])
-	} else if hdr.IndexOffset > 0 {
-		hdr.SourceIndexOffset = hdr.IndexOffset + hdr.RecordCount*IndexEntrySize
-	}
+	hdr.FirstSourceTS = tsFromNanos(binary.LittleEndian.Uint64(buf[headerFirstSourceOff:]))
+	hdr.LastSourceTS = tsFromNanos(binary.LittleEndian.Uint64(buf[headerLastSourceOff:]))
+	hdr.SourceIndexOffset = binary.LittleEndian.Uint32(buf[headerSourceIndexOffOff:])
+	hdr.SourceIndexCount = binary.LittleEndian.Uint32(buf[headerSourceIndexCountOff:])
+	hdr.SourceIndexChecksum = binary.LittleEndian.Uint32(buf[headerSourceIndexCRCOff:])
 	return hdr, nil
 }
 
