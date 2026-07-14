@@ -7,6 +7,7 @@ import {
 } from "../../api/hooks";
 import { useTestCloudService } from "../../api/hooks/useVaults";
 import { useEditState } from "../../hooks/useEditState";
+import { endpointBlocked } from "../../utils/endpointScheme";
 import { useCrudHandlers } from "../../hooks/useCrudHandlers";
 import { SettingsCard } from "./SettingsCard";
 import { FormField, TextInput, SelectInput } from "./FormField";
@@ -96,6 +97,7 @@ export function CloudServiceCard({
 
   const { getEdit, setEdit, clearEdit, isDirty } = useEditState(defaults);
   const edit = getEdit(encode(service.id));
+  const endpointInvalid = endpointBlocked(edit.provider, edit.endpoint);
 
   const { handleSave, handleDelete } = useCrudHandlers({
     mutation: putCloudService,
@@ -161,7 +163,7 @@ export function CloudServiceCard({
                 },
               );
             }}
-            disabled={testCloud.isPending || !edit.provider}
+            disabled={testCloud.isPending || !edit.provider || endpointInvalid}
           >
             {testCloud.isPending ? "Testing..." : "Test Connection"}
           </Button>
@@ -172,7 +174,7 @@ export function CloudServiceCard({
           )}
           <Button
             onClick={() => handleSave(encode(service.id), edit)}
-            disabled={putCloudService.isPending || !isDirty(encode(service.id))}
+            disabled={putCloudService.isPending || !isDirty(encode(service.id)) || endpointInvalid}
           >
             {putCloudService.isPending ? "Saving..." : "Save"}
           </Button>

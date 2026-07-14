@@ -21,6 +21,7 @@ import { CloudServiceFields } from "./CloudServiceFields";
 import { Button } from "./Buttons";
 import { NodeSelect } from "./NodeSelect";
 import { useTestCloudService } from "../../api/hooks/useVaults";
+import { endpointBlocked } from "../../utils/endpointScheme";
 
 // ─── Cloud Storage Add Form ──────────────────────────────────
 
@@ -374,7 +375,11 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
               onCancel={() => dispatchAdd({ type: "close" })}
               onCreate={handleCreate}
               isPending={putCloudService.isPending}
-              createDisabled={nameConflict || (addForm.provider === "azure" ? !addForm.container.trim() : !addForm.bucket.trim())}
+              createDisabled={
+                nameConflict ||
+                (addForm.provider === "azure" ? !addForm.container.trim() : !addForm.bucket.trim()) ||
+                endpointBlocked(addForm.provider, addForm.endpoint)
+              }
             >
               <FormField label="Name" dark={dark}>
                 <TextInput
@@ -445,7 +450,7 @@ function TestCloudButton({
     <div className="flex items-center gap-3">
       <button
         type="button"
-        disabled={testCloud.isPending || !hasRequired}
+        disabled={testCloud.isPending || !hasRequired || endpointBlocked(provider, values.endpoint)}
         onClick={() => {
           setResult(null);
           testCloud.mutate(

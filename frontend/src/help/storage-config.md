@@ -24,7 +24,7 @@ Cloud storage endpoints are cluster-wide — not tied to any specific node. Clou
 
 **Providers:**
 
-- **S3** — Amazon S3 or S3-compatible services (MinIO, Ceph, DigitalOcean Spaces, etc.). Requires Bucket, Region, and access credentials (Access Key + Secret Key). Set the Endpoint field for non-AWS services.
+- **S3** — Amazon S3 or S3-compatible services (MinIO, Ceph, DigitalOcean Spaces, etc.). Requires Bucket, Region, and access credentials (Access Key + Secret Key). Set the Endpoint field for non-AWS services — it must include an explicit scheme (`https://…`, or `http://…` for a plaintext local/dev endpoint).
 - **GCS** — Google Cloud Storage. Requires Bucket and a service account Credentials JSON.
 - **Azure** — Azure Blob Storage. Requires a Container name and Connection String.
 
