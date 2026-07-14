@@ -234,7 +234,9 @@ func parseMappedBlob(data []byte) (*MappedBlob, error) {
 	if int(layout.IndexOff)+int(layout.IndexSize) > len(data) {
 		return nil, errors.New("record index out of range")
 	}
-	toc, err := parseTOCFromMapped(data)
+	// The whole mapping ends with the TOC tail, so the shared byte-slice
+	// parser applies directly — no mmap-specific bounds math.
+	toc, err := ParseTOC(data)
 	if err != nil {
 		return nil, fmt.Errorf("read TOC: %w", err)
 	}
@@ -243,21 +245,4 @@ func parseMappedBlob(data []byte) (*MappedBlob, error) {
 		meta:   layoutMetaToBlobMeta(layout, toc),
 		toc:    toc,
 	}, nil
-}
-
-func parseTOCFromMapped(data []byte) (BlobTOC, error) {
-	if len(data) < tocFooterSize {
-		return BlobTOC{}, errors.New("blob too small for TOC footer")
-	}
-	footer := data[len(data)-tocFooterSize:]
-	count, _, err := parseTOCFooter(footer)
-	if err != nil {
-		return BlobTOC{}, err
-	}
-	entryBytes := int(count) * tocEntrySize
-	entriesStart := len(data) - tocFooterSize - entryBytes
-	if entriesStart < 0 {
-		return BlobTOC{}, errors.New("blob too small for TOC entries")
-	}
-	return parseTOCRegion(data[entriesStart:len(data)-tocFooterSize], footer)
 }

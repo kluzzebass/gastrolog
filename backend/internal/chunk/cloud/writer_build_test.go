@@ -10,6 +10,7 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/chunk/cloud"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/record"
 )
 
 func TestWriterDirectAndStagingProduceIdenticalBlob(t *testing.T) {
@@ -81,6 +82,115 @@ func TestWriterDirectAndStagingProduceIdenticalBlob(t *testing.T) {
 	if !bytes.Equal(directBytes, stagingBytes) {
 		t.Fatal("direct and staging GLCB bytes differ")
 	}
+}
+
+// TestWriterAddViewMatchesAddByteForByte proves the two frame encoders
+// (Add via appendRecordFrame, AddView via appendRecordFrameView) and the
+// two emit paths (direct, staging) all produce byte-identical GLCBs for
+// the same logical records. GLCB is durable on-disk format: divergence
+// between any of these build paths is a format bug (gastrolog-3ieb26).
+func TestWriterAddViewMatchesAddByteForByte(t *testing.T) {
+	t.Parallel()
+	chunkID, vaultID, records := testRecords()
+	workDir := t.TempDir()
+
+	views := make([]record.View, len(records))
+	for i, rec := range records {
+		attrsWire, err := record.Attributes(rec.Attrs).Encode()
+		if err != nil {
+			t.Fatal(err)
+		}
+		views[i] = record.View{
+			EventID: record.EventID{
+				IngesterID: rec.EventID.IngesterID,
+				NodeID:     rec.EventID.NodeID,
+				IngestTS:   rec.EventID.IngestTS,
+				IngestSeq:  rec.EventID.IngestSeq,
+			},
+			SourceTS:  rec.SourceTS,
+			IngestTS:  rec.IngestTS,
+			WriteTS:   rec.WriteTS,
+			AttrsWire: attrsWire,
+			Raw:       rec.Raw,
+		}
+	}
+
+	addRecords := func(w *cloud.Writer) error {
+		for _, rec := range records {
+			if err := w.Add(rec); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	addViews := func(w *cloud.Writer) error {
+		for _, v := range views {
+			if err := w.AddView(v); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	builds := []struct {
+		name   string
+		direct bool
+		add    func(*cloud.Writer) error
+	}{
+		{"add-direct", true, addRecords},
+		{"add-staging", false, addRecords},
+		{"addview-direct", true, addViews},
+		{"addview-staging", false, addViews},
+	}
+
+	var want []byte
+	for _, b := range builds {
+		got := buildBlobBytes(t, workDir, b.name+".glcb", b.direct, chunkID, vaultID, b.add)
+		if want == nil {
+			want = got
+			continue
+		}
+		if !bytes.Equal(want, got) {
+			t.Fatalf("%s GLCB bytes differ from %s", b.name, builds[0].name)
+		}
+	}
+}
+
+// buildBlobBytes builds one GLCB via the direct (BindOutput) or staging
+// build and returns the finished blob's bytes.
+func buildBlobBytes(t *testing.T, workDir, name string, direct bool, chunkID chunk.ChunkID, vaultID glid.GLID, add func(*cloud.Writer) error) []byte {
+	t.Helper()
+	path := filepath.Join(workDir, name)
+	out, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err := cloud.NewWriter(chunkID, vaultID, workDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if direct {
+		if err := w.BindOutput(out); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := add(w); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.WriteTo(out); err != nil {
+		t.Fatal(err)
+	}
+	if err := out.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
 }
 
 func TestWriterDirectBuildLeavesNoStagingTemp(t *testing.T) {

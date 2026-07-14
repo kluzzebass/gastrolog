@@ -227,13 +227,13 @@ func (w *Writer) Add(rec chunk.Record) error {
 		}
 	}
 
-	// Encode directly into the reused scratch after a 4-byte length
+	// Encode directly into the reused scratch after a frameLenSize length
 	// placeholder — the old flow allocated a fresh frame per record and
 	// immediately copied it here (gastrolog-11y2iv).
-	if cap(w.frameScratch) < 4 {
-		w.frameScratch = make([]byte, 4, 512)
+	if cap(w.frameScratch) < frameLenSize {
+		w.frameScratch = make([]byte, frameLenSize, 512)
 	}
-	scratch, err := appendRecordFrame(w.frameScratch[:4], rec, w.dict)
+	scratch, err := appendRecordFrame(w.frameScratch[:frameLenSize], rec, w.dict)
 	if err != nil {
 		return err
 	}
@@ -259,10 +259,10 @@ func (w *Writer) AddView(v record.View) error {
 		}
 	}
 
-	if cap(w.frameScratch) < 4 {
-		w.frameScratch = make([]byte, 4, 512)
+	if cap(w.frameScratch) < frameLenSize {
+		w.frameScratch = make([]byte, frameLenSize, 512)
 	}
-	scratch, err := appendRecordFrameView(w.frameScratch[:4], v, w.dict)
+	scratch, err := appendRecordFrameView(w.frameScratch[:frameLenSize], v, w.dict)
 	if err != nil {
 		return err
 	}
@@ -272,20 +272,20 @@ func (w *Writer) AddView(v record.View) error {
 }
 
 // commitFrame finishes an Add/AddView after w.frameScratch holds
-// [4-byte placeholder][frame]: stamps the length, updates bounds/indexes,
-// and writes the frame to the active sink.
+// [frameLenSize placeholder][frame]: stamps the length, updates
+// bounds/indexes, and writes the frame to the active sink.
 func (w *Writer) commitFrame(sourceTS, ingestTS, writeTS time.Time) error {
 	pos := w.count
 	w.bounds.update(chunk.Record{SourceTS: sourceTS, IngestTS: ingestTS, WriteTS: writeTS})
 	w.noteIngestTS(ingestTS)
 
-	bodySize := uint32(len(w.frameScratch) - 4) //nolint:gosec // G115: frame size bounded by record limits
+	bodySize := uint32(len(w.frameScratch) - frameLenSize) //nolint:gosec // G115: frame size bounded by record limits
 	w.recordIndex = append(w.recordIndex, recordIndex{
-		Offset: w.sectionOff + 4,
+		Offset: w.sectionOff + frameLenSize,
 		Size:   bodySize,
 	})
-	w.sectionOff += 4 + uint64(bodySize)
-	binary.LittleEndian.PutUint32(w.frameScratch[:4], bodySize)
+	w.sectionOff += frameLenSize + uint64(bodySize)
+	binary.LittleEndian.PutUint32(w.frameScratch[:frameLenSize], bodySize)
 
 	var sink *bufio.Writer
 	if w.direct {
@@ -363,34 +363,7 @@ func (w *Writer) emitBlobDirect() (int64, error) {
 		return 0, fmt.Errorf("flush records: %w", err)
 	}
 
-	dictBuf := encodeDictionary(w.dict)
-	indexBuf := encodeRecordIndex(w.recordIndex)
-
-	recordsOff := uint32(headerSize)
-	dictOff := recordsOff + uint32(w.sectionOff) //nolint:gosec // G115: section bounded by chunk policy
-	indexOff := dictOff + uint32(len(dictBuf))   //nolint:gosec // G115: dict bytes bounded
-
-	layout := encodeBlobLayoutMeta(blobLayoutMeta{
-		ChunkID:     w.chunkID,
-		VaultID:     w.vaultID,
-		RecordCount: w.count,
-		WriteStart:  tsNanos(w.bounds.writeStart),
-		WriteEnd:    tsNanos(w.bounds.writeEnd),
-		IngestStart: tsNanos(w.bounds.ingestStart),
-		IngestEnd:   tsNanos(w.bounds.ingestEnd),
-		SourceStart: tsNanos(w.bounds.sourceStart),
-		SourceEnd:   tsNanos(w.bounds.sourceEnd),
-		DictEntries: uint32(w.dict.Len()), //nolint:gosec // G115: dict bounded
-		DictSize:    uint32(len(dictBuf)), //nolint:gosec // G115: dict bytes bounded
-
-		IngestTSMonotonic: w.ingestMonotonic,
-
-		RecordsOff:  recordsOff,
-		RecordsSize: uint32(w.sectionOff), //nolint:gosec // G115: section bounded by chunk policy
-		DictOff:     dictOff,
-		IndexOff:    indexOff,
-		IndexSize:   uint32(len(indexBuf)), //nolint:gosec // G115: index bounded by record count
-	})
+	dictBuf, indexBuf, layout := w.tailSections()
 	if _, err := w.blobHash.Write(layout); err != nil {
 		return 0, err
 	}
@@ -409,30 +382,7 @@ func (w *Writer) emitBlobDirect() (int64, error) {
 
 	tailBase := int64(headerSize) + int64(w.sectionOff) //nolint:gosec // G115: section bounded by chunk policy
 	cw := &countWriter{w: w.directFile, hash: w.blobHash}
-
-	if _, err := cw.Write(dictBuf); err != nil {
-		return 0, err
-	}
-	if _, err := cw.Write(indexBuf); err != nil {
-		return 0, err
-	}
-
-	sortEntries := w.tsSortFunc()
-	encodeEntries := w.tsEncodeFunc()
-
-	sortEntries(w.ingestEntries)
-	ingestEntry, err := w.writeSectionAt(cw, tailBase, SectionIngestTSIndex, 1, encodeEntries(w.ingestEntries))
-	if err != nil {
-		return 0, err
-	}
-	sortEntries(w.sourceEntries)
-	sourceEntry, err := w.writeSectionAt(cw, tailBase, SectionSourceTSIndex, 1, encodeEntries(w.sourceEntries))
-	if err != nil {
-		return 0, err
-	}
-
-	layoutEntry := makeTOCEntry(SectionBlobLayout, 1, preambleSize, int64(len(layout)), sha256.Sum256(layout))
-	if err := w.finalizeTOC(cw, []TOCEntry{layoutEntry, ingestEntry, sourceEntry}); err != nil {
+	if err := w.emitTail(cw, tailBase, dictBuf, indexBuf, layout); err != nil {
 		return 0, err
 	}
 	info, err := w.directFile.Stat()
@@ -464,14 +414,37 @@ func (w *Writer) emitBlobStaging(dst io.Writer) (int64, error) {
 		return cw.n, err
 	}
 
-	dictBuf := encodeDictionary(w.dict)
-	indexBuf := encodeRecordIndex(w.recordIndex)
+	dictBuf, indexBuf, layout := w.tailSections()
+	if _, err := cw.Write(layout); err != nil {
+		return cw.n, err
+	}
+
+	if w.staging != nil {
+		buf := make([]byte, copyBufferSize)
+		if _, err := io.CopyBuffer(cw, w.staging, buf); err != nil {
+			return cw.n, fmt.Errorf("copy records: %w", err)
+		}
+	}
+	if err := w.emitTail(cw, 0, dictBuf, indexBuf, layout); err != nil {
+		return cw.n, err
+	}
+	return cw.n, nil
+}
+
+// tailSections assembles the encoded dictionary, record index, and the
+// layout-metadata block that describes them. Together with emitTail this
+// is the single source of the GLCB tail format: the direct and staging
+// builds both go through here, so a new layout field lands identically
+// in blobs from either path.
+func (w *Writer) tailSections() (dictBuf, indexBuf, layout []byte) {
+	dictBuf = encodeDictionary(w.dict)
+	indexBuf = encodeRecordIndex(w.recordIndex)
 
 	recordsOff := uint32(headerSize)
 	dictOff := recordsOff + uint32(w.sectionOff) //nolint:gosec // G115: section bounded by chunk policy
 	indexOff := dictOff + uint32(len(dictBuf))   //nolint:gosec // G115: dict bytes bounded
 
-	layout := encodeBlobLayoutMeta(blobLayoutMeta{
+	layout = encodeBlobLayoutMeta(blobLayoutMeta{
 		ChunkID:     w.chunkID,
 		VaultID:     w.vaultID,
 		RecordCount: w.count,
@@ -492,69 +465,62 @@ func (w *Writer) emitBlobStaging(dst io.Writer) (int64, error) {
 		IndexOff:    indexOff,
 		IndexSize:   uint32(len(indexBuf)), //nolint:gosec // G115: index bounded by record count
 	})
-	layoutOff := cw.n
-	if _, err := cw.Write(layout); err != nil {
-		return cw.n, err
-	}
+	return dictBuf, indexBuf, layout
+}
 
-	if w.staging != nil {
-		buf := make([]byte, copyBufferSize)
-		if _, err := io.CopyBuffer(cw, w.staging, buf); err != nil {
-			return cw.n, fmt.Errorf("copy records: %w", err)
-		}
-	}
+// emitTail writes the GLCB tail — dictionary, record index, sorted TS
+// index sections, TOC entries, and footer — through cw and records the
+// resulting TOC on the writer. tailBase is the absolute blob offset
+// where cw started counting: headerSize+records for the direct build
+// (records are already on disk), 0 for the staging build (cw counts
+// from byte 0 of the blob).
+func (w *Writer) emitTail(cw *countWriter, tailBase int64, dictBuf, indexBuf, layout []byte) error {
 	if _, err := cw.Write(dictBuf); err != nil {
-		return cw.n, err
+		return err
 	}
 	if _, err := cw.Write(indexBuf); err != nil {
-		return cw.n, err
+		return err
 	}
 
-	sortEntries := w.tsSortFunc()
-	encodeEntries := w.tsEncodeFunc()
-
-	sortEntries(w.ingestEntries)
-	ingestEntry, err := w.writeSectionAt(cw, 0, SectionIngestTSIndex, 1, encodeEntries(w.ingestEntries))
+	sortTSEntries(w.ingestEntries)
+	ingestEntry, err := writeSectionAt(cw, tailBase, SectionIngestTSIndex, 1, encodeTSEntries(w.ingestEntries))
 	if err != nil {
-		return cw.n, err
+		return err
 	}
-	sortEntries(w.sourceEntries)
-	sourceEntry, err := w.writeSectionAt(cw, 0, SectionSourceTSIndex, 1, encodeEntries(w.sourceEntries))
+	sortTSEntries(w.sourceEntries)
+	sourceEntry, err := writeSectionAt(cw, tailBase, SectionSourceTSIndex, 1, encodeTSEntries(w.sourceEntries))
 	if err != nil {
-		return cw.n, err
+		return err
 	}
 
-	layoutEntry := makeTOCEntry(SectionBlobLayout, 1, layoutOff, int64(len(layout)), sha256.Sum256(layout))
-	if err := w.finalizeTOC(cw, []TOCEntry{layoutEntry, ingestEntry, sourceEntry}); err != nil {
-		return cw.n, err
-	}
-	return cw.n, nil
+	layoutEntry := makeTOCEntry(SectionBlobLayout, 1, preambleSize, int64(len(layout)), sha256.Sum256(layout))
+	return w.finalizeTOC(cw, []TOCEntry{layoutEntry, ingestEntry, sourceEntry})
 }
 
-func (w *Writer) tsSortFunc() func([]tsEntry) {
-	return func(entries []tsEntry) {
-		slices.SortStableFunc(entries, func(a, b tsEntry) int {
-			if a.ts != b.ts {
-				if a.ts < b.ts {
-					return -1
-				}
-				return 1
+// sortTSEntries orders TS index entries by timestamp, breaking ties by
+// record position so equal timestamps keep GLCB record order.
+func sortTSEntries(entries []tsEntry) {
+	slices.SortStableFunc(entries, func(a, b tsEntry) int {
+		if a.ts != b.ts {
+			if a.ts < b.ts {
+				return -1
 			}
-			return int(a.pos) - int(b.pos)
-		})
-	}
+			return 1
+		}
+		return int(a.pos) - int(b.pos)
+	})
 }
 
-func (w *Writer) tsEncodeFunc() func([]tsEntry) []byte {
-	return func(entries []tsEntry) []byte {
-		buf := make([]byte, len(entries)*tsIndexEntrySize)
-		for i, e := range entries {
-			off := i * tsIndexEntrySize
-			binary.LittleEndian.PutUint64(buf[off:], uint64(e.ts)) //nolint:gosec // G115: nanosecond timestamps stored as uint64
-			binary.LittleEndian.PutUint32(buf[off+8:], e.pos)
-		}
-		return buf
+// encodeTSEntries serializes sorted TS index entries to their on-disk
+// [tsNano:i64][pos:u32] form.
+func encodeTSEntries(entries []tsEntry) []byte {
+	buf := make([]byte, len(entries)*tsIndexEntrySize)
+	for i, e := range entries {
+		off := i * tsIndexEntrySize
+		binary.LittleEndian.PutUint64(buf[off:], uint64(e.ts)) //nolint:gosec // G115: nanosecond timestamps stored as uint64
+		binary.LittleEndian.PutUint32(buf[off+8:], e.pos)
 	}
+	return buf
 }
 
 func encodePreamble() ([]byte, error) {
@@ -578,7 +544,9 @@ func (cw *countWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
-func (w *Writer) writeSectionAt(cw *countWriter, base int64, sectionType, version uint8, body []byte) (TOCEntry, error) {
+// writeSectionAt writes one section body through cw and returns its TOC
+// entry; base is the absolute blob offset of cw.n == 0.
+func writeSectionAt(cw *countWriter, base int64, sectionType, version uint8, body []byte) (TOCEntry, error) {
 	offset := base + cw.n
 	if _, err := cw.Write(body); err != nil {
 		return TOCEntry{}, err
@@ -602,21 +570,7 @@ func (w *Writer) finalizeTOC(cw *countWriter, entries []TOCEntry) error {
 	if _, err := cw.Write(footer); err != nil {
 		return err
 	}
-	w.toc = BlobTOC{
-		Entries:    entries,
-		BlobDigest: blobDigest,
-		Version:    tocFooterVersion,
-	}
-	if e, ok := w.toc.Find(SectionIngestTSIndex); ok {
-		w.toc.IngestIdxOffset = e.Offset
-		w.toc.IngestIdxSize = e.Size
-		w.toc.IngestIdxHash = e.Hash
-	}
-	if e, ok := w.toc.Find(SectionSourceTSIndex); ok {
-		w.toc.SourceIdxOffset = e.Offset
-		w.toc.SourceIdxSize = e.Size
-		w.toc.SourceIdxHash = e.Hash
-	}
+	w.toc = newBlobTOC(entries, blobDigest)
 	return nil
 }
 
