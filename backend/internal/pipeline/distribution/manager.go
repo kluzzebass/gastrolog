@@ -408,7 +408,7 @@ func (m *Manager) runPublishIngress(ctx context.Context, completed <-chan segmen
 			switch {
 			case err != nil:
 				m.logger().Warn("staging completed segment for publish failed",
-					"vault", seg.VaultID, "segment", seg.Meta.ID, "error", err)
+					"vault", seg.VaultID, "segment", seg.SegmentID, "error", err)
 			case !alreadyStaged:
 				m.enqueuePublish(ctx, publishQ, p)
 			}
@@ -469,7 +469,7 @@ func (m *Manager) stageForPublish(seg segmentation.CompletedSegment) (pendingPub
 	}
 	return pendingPublish{
 		vaultID: seg.VaultID,
-		segID:   seg.Meta.ID,
+		segID:   seg.SegmentID,
 		path:    path,
 		meta:    meta,
 	}, alreadyStaged, nil

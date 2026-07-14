@@ -99,7 +99,7 @@ func TestPromoteToHeadPurgeOneNameKeepsOther(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := paths.PurgeCompleted(root, seg.Meta.ID); err != nil {
+		if err := paths.PurgeCompleted(root, seg.SegmentID); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := os.Stat(seg.Path); !os.IsNotExist(err) {
@@ -126,7 +126,7 @@ func TestPromoteToHeadPurgeOneNameKeepsOther(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := paths.PurgeHeadStaging(root, seg.Meta.ID); err != nil {
+		if err := paths.PurgeHeadStaging(root, seg.SegmentID); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := os.Stat(dest); !os.IsNotExist(err) {

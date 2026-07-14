@@ -178,7 +178,7 @@ func TestManagerClosesOnSize(t *testing.T) {
 		if _, err := os.Stat(seg.Path); err != nil {
 			t.Fatalf("completed path: %v", err)
 		}
-		if _, err := os.Stat(paths.WorkingSegment(dir, seg.Meta.ID)); !os.IsNotExist(err) {
+		if _, err := os.Stat(paths.WorkingSegment(dir, seg.SegmentID)); !os.IsNotExist(err) {
 			t.Fatalf("working copy should be gone: %v", err)
 		}
 		sf, err := segment.Open(seg.Path)
@@ -510,7 +510,7 @@ func TestRegisterVaultRecoversOrphanedWorkingSegment(t *testing.T) {
 
 	select {
 	case cs := <-completed:
-		if cs.Meta.ID != segID || cs.VaultID != vaultID {
+		if cs.SegmentID != segID || cs.VaultID != vaultID {
 			t.Fatalf("completed notification = %+v, want segment %s vault %s", cs, segID, vaultID)
 		}
 		if cs.Header.RecordCount != 3 {

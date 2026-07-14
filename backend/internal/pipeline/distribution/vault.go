@@ -92,7 +92,7 @@ func newVaultDist(root string, cfg VaultConfig, log *slog.Logger) (*vaultDist, e
 // and only the first staging may enqueue the publish (gastrolog-x5c8ge).
 func (v *vaultDist) prepare(seg segmentation.CompletedSegment) (meta Metadata, path string, alreadyStaged bool, err error) {
 	v.mu.RLock()
-	registered, known := v.segments[seg.Meta.ID]
+	registered, known := v.segments[seg.SegmentID]
 	v.mu.RUnlock()
 	if known {
 		seg.Path = registered
@@ -107,7 +107,7 @@ func (v *vaultDist) prepare(seg segmentation.CompletedSegment) (meta Metadata, p
 	}
 
 	v.mu.Lock()
-	v.segments[seg.Meta.ID] = path
+	v.segments[seg.SegmentID] = path
 	v.mu.Unlock()
 	return meta, path, false, nil
 }
@@ -144,7 +144,7 @@ func metadataForPublish(seg segmentation.CompletedSegment) (Metadata, error) {
 		}
 		hdr = h
 	}
-	return metadataFromPath(seg.Path, seg.VaultID, seg.Meta.ID, hdr)
+	return metadataFromPath(seg.Path, seg.VaultID, seg.SegmentID, hdr)
 }
 
 // stranded returns completed segments on disk that this manager has not
@@ -188,10 +188,10 @@ func (v *vaultDist) stranded(vaultID glid.GLID) []segmentation.CompletedSegment 
 			continue
 		}
 		out = append(out, segmentation.CompletedSegment{
-			VaultID: vaultID,
-			Meta:    segment.Meta{ID: segID, VaultID: vaultID},
-			Path:    path,
-			Header:  hdr,
+			VaultID:   vaultID,
+			SegmentID: segID,
+			Path:      path,
+			Header:    hdr,
 		})
 	}
 	return out
@@ -204,7 +204,7 @@ func (v *vaultDist) publish(ctx context.Context, seg segmentation.CompletedSegme
 	if err != nil {
 		return err
 	}
-	return v.publishStaged(ctx, meta, seg.Meta.ID, path)
+	return v.publishStaged(ctx, meta, seg.SegmentID, path)
 }
 
 func (v *vaultDist) publishStaged(ctx context.Context, meta Metadata, segID glid.GLID, path string) error {
