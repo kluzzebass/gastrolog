@@ -122,7 +122,7 @@ function laneSortOrder(lane: string): number {
 }
 
 /** Extract vault entity id from a vault control-plane raft group id. */
-export function vaultIdFromCtlGroup(groupId: string): EntityID | null {
+function vaultIdFromCtlGroup(groupId: string): EntityID | null {
   if (!groupId.startsWith("vault/") || !groupId.endsWith("/ctl")) {
     return null;
   }

@@ -14,7 +14,7 @@ import { decode } from "../glid";
 let cachedSystemRaftIndex = 0n;
 
 /** Update the cached index. Only advances forward (max wins). */
-export function setSystemRaftIndex(v: unknown) {
+function setSystemRaftIndex(v: unknown) {
   const n = systemRaftIndexScalarToBigInt(v);
   if (n > cachedSystemRaftIndex) cachedSystemRaftIndex = n;
 }
