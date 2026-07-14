@@ -25,7 +25,7 @@ func TestPublishIngressBacklogReadsHeadersOnly(t *testing.T) {
 	want := make(map[glid.GLID]uint64, backlog) // segment ID → header checksum
 	for range backlog {
 		seg := writeCompletedSegment(t, root, vaultID, "restart-backlog")
-		want[seg.Meta.ID] = seg.Header.SegmentChecksum
+		want[seg.SegmentID] = seg.Header.SegmentChecksum
 	}
 
 	mgr, _ := distribution.New(distribution.Config{})
@@ -114,7 +114,7 @@ func TestPublishCompletedZeroHeaderReadsHeaderOnly(t *testing.T) {
 		t.Errorf("zero-header publish performed %d header reads, want 1", d)
 	}
 	meta := pub.last()
-	if meta.SegmentID != seg.Meta.ID || meta.RecordCount != 1 || meta.Checksum != wantChecksum {
+	if meta.SegmentID != seg.SegmentID || meta.RecordCount != 1 || meta.Checksum != wantChecksum {
 		t.Fatalf("published meta = %+v, want checksum %d", meta, wantChecksum)
 	}
 }

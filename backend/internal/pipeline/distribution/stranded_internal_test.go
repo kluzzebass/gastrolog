@@ -76,7 +76,7 @@ func TestStrandedReadsHeadersOnly(t *testing.T) {
 	headerReadsBefore := segment.HeaderReads()
 
 	segs := v.stranded(vaultID)
-	if len(segs) != 1 || segs[0].Meta.ID != goodID {
+	if len(segs) != 1 || segs[0].SegmentID != goodID {
 		t.Fatalf("stranded() = %+v, want the one completed segment", segs)
 	}
 	if segs[0].Header.IsUnpopulated() {
@@ -124,7 +124,7 @@ func TestStrandedCorruptHeaderReadAndWarnedOnce(t *testing.T) {
 	// once about the corrupt one.
 	headerReadsBefore := segment.HeaderReads()
 	segs := v.stranded(vaultID)
-	if len(segs) != 1 || segs[0].Meta.ID != goodID {
+	if len(segs) != 1 || segs[0].SegmentID != goodID {
 		t.Fatalf("stranded() pass 1 = %+v, want only the good segment", segs)
 	}
 	if d := segment.HeaderReads() - headerReadsBefore; d != 2 {
@@ -139,7 +139,7 @@ func TestStrandedCorruptHeaderReadAndWarnedOnce(t *testing.T) {
 	// prepared it), so it is the only header read.
 	headerReadsBefore = segment.HeaderReads()
 	segs = v.stranded(vaultID)
-	if len(segs) != 1 || segs[0].Meta.ID != goodID {
+	if len(segs) != 1 || segs[0].SegmentID != goodID {
 		t.Fatalf("stranded() pass 2 = %+v, want only the good segment", segs)
 	}
 	if d := segment.HeaderReads() - headerReadsBefore; d != 1 {

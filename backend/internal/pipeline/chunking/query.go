@@ -53,7 +53,7 @@ func OpenChunkSpanRefs(m *vaultctlfsm.OpenChunkManifest, locate SegmentLocator) 
 			missing = append(missing, ref.SegmentID)
 			continue
 		}
-		span, err := RefToSpan(ManifestRefEntry{
+		span, err := RefToSpan(ManifestRef{
 			SegmentID:         ref.SegmentID,
 			FirstRecordNumber: ref.FirstRecordNumber,
 			LastRecordNumber:  ref.LastRecordNumber,

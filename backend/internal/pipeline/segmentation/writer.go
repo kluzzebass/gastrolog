@@ -193,10 +193,10 @@ func recoverWorkingSegments(root string, vaultID glid.GLID, completed chan<- Com
 		}
 		select {
 		case completed <- CompletedSegment{
-			VaultID: vaultID,
-			Meta:    segment.Meta{ID: id, VaultID: vaultID},
-			Path:    completedPath,
-			Header:  hdr,
+			VaultID:   vaultID,
+			SegmentID: id,
+			Path:      completedPath,
+			Header:    hdr,
 		}:
 		default:
 			if onCompletedDropped != nil {
@@ -671,7 +671,6 @@ func (w *vaultWriter) completeWorkingSegmentLocked() error {
 		}
 	}
 	hdr := w.seg.Header()
-	meta := segment.Meta{ID: w.segmentID, VaultID: w.vaultID}
 	working := w.workingPath
 	completed := paths.CompletedSegment(w.root, w.segmentID)
 	if err := w.seg.Close(); err != nil {
@@ -689,10 +688,10 @@ func (w *vaultWriter) completeWorkingSegmentLocked() error {
 	if w.completed != nil {
 		select {
 		case w.completed <- CompletedSegment{
-			VaultID: w.vaultID,
-			Meta:    meta,
-			Path:    completed,
-			Header:  hdr,
+			VaultID:   w.vaultID,
+			SegmentID: w.segmentID,
+			Path:      completed,
+			Header:    hdr,
 		}:
 		default:
 			if w.onCompletedDropped != nil {

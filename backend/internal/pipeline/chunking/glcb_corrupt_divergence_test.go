@@ -114,7 +114,7 @@ func setupSealingChunkWithBuiltGLCB(t *testing.T) builtGLCBFixture {
 			ChunkID:  chunkID,
 			OpenedAt: openedAt,
 			SealedAt: sealedAt,
-			Refs: []chunking.ManifestRefEntry{{
+			Refs: []chunking.ManifestRef{{
 				SegmentID:         segID,
 				FirstRecordNumber: 0,
 				LastRecordNumber:  1,

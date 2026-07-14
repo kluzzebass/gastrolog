@@ -134,12 +134,14 @@ func (c Config) syncBatchWindow() time.Duration {
 	return c.SyncBatchWindow
 }
 
-// CompletedSegment is emitted when a segment is renamed from working/ to completed/.
+// CompletedSegment is emitted when a segment is renamed from working/ to
+// completed/. VaultID and SegmentID are the authoritative identity; Header
+// duplicates them only because it mirrors the fixed on-disk header layout.
 type CompletedSegment struct {
-	VaultID glid.GLID
-	Meta    segment.Meta
-	Path    string
-	Header  segment.Header
+	VaultID   glid.GLID
+	SegmentID glid.GLID
+	Path      string
+	Header    segment.Header
 }
 
 // Manager runs one pipelined segment writer per registered vault.

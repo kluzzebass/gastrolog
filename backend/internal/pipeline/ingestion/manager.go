@@ -370,6 +370,10 @@ func (m *Manager) runIngester(
 	}
 }
 
+// runWithCheckpoints dispatches one ingester run to the right pump mode:
+// plain (pumpIngester inline) for ingesters without checkpoint persistence,
+// or pump-on-a-goroutine with a per-run checkpoint save ticker for
+// Checkpointable ingesters.
 func (m *Manager) runWithCheckpoints(
 	ctx context.Context,
 	id glid.GLID,
@@ -377,54 +381,13 @@ func (m *Manager) runWithCheckpoints(
 	minter *Minter,
 	out chan<- Message,
 ) error {
-	emit := func(msg IngesterMessage) error {
-		minted := Message{
-			EventID:  minter.Mint(),
-			Attrs:    msg.Attrs,
-			Raw:      msg.Raw,
-			RawOwned: msg.RawOwned,
-			SourceTS: msg.SourceTS,
-			Ack:      msg.Ack,
-		}
-		select {
-		case out <- minted:
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-
-	run := func() error {
-		ingesterOut := make(chan IngesterMessage)
-		errCh := make(chan error, 1)
-		go func() {
-			defer close(ingesterOut)
-			var runErr error
-			defer func() {
-				if v := recover(); v != nil {
-					m.logger.Error("ingester panicked", "id", id, "panic", v)
-					runErr = fmt.Errorf("ingester panicked: %v", v)
-				}
-				errCh <- runErr
-			}()
-			runErr = ing.Run(ctx, ingesterOut)
-		}()
-
-		for msg := range ingesterOut {
-			if err := emit(msg); err != nil {
-				return err
-			}
-		}
-		return <-errCh
-	}
-
 	cp, isCheckpointable := ing.(Checkpointable)
 	if !isCheckpointable || m.onCheckpoint == nil {
-		return run()
+		return m.pumpIngester(ctx, id, ing, minter, out)
 	}
 
 	errCh := make(chan error, 1)
-	go func() { errCh <- run() }()
+	go func() { errCh <- m.pumpIngester(ctx, id, ing, minter, out) }()
 
 	ticker := time.NewTicker(m.checkpointInterval)
 	defer ticker.Stop()
@@ -438,14 +401,69 @@ func (m *Manager) runWithCheckpoints(
 			m.saveCheckpointFrom(id, cp)
 		case <-ctx.Done():
 			m.saveCheckpointFrom(id, cp)
-			// run() is the sole sender on out; it lives in a separate
+			// pumpIngester is the sole sender on out; it lives in a separate
 			// goroutine here (unlike the non-checkpoint path, which blocks in
-			// run() directly). Wait for it to return before we do, so no sender
-			// outlives runWithCheckpoints — otherwise ingesterWg.Wait() in Stop
-			// unblocks while run() still sends on out, racing close(out).
+			// pumpIngester directly). Wait for it to return before we do, so no
+			// sender outlives runWithCheckpoints — otherwise ingesterWg.Wait()
+			// in Stop unblocks while the pump still sends on out, racing
+			// close(out).
 			<-errCh
 			return ctx.Err()
 		}
+	}
+}
+
+// pumpIngester runs one ingester attempt: it launches ing.Run on its own
+// goroutine (with panic recovery) and pumps every IngesterMessage through the
+// minter onto out until the ingester's output closes, then returns Run's
+// error. Emission is interrupted by ctx, which propagates as the returned
+// error.
+func (m *Manager) pumpIngester(
+	ctx context.Context,
+	id glid.GLID,
+	ing Ingester,
+	minter *Minter,
+	out chan<- Message,
+) error {
+	ingesterOut := make(chan IngesterMessage)
+	errCh := make(chan error, 1)
+	go func() {
+		defer close(ingesterOut)
+		var runErr error
+		defer func() {
+			if v := recover(); v != nil {
+				m.logger.Error("ingester panicked", "id", id, "panic", v)
+				runErr = fmt.Errorf("ingester panicked: %v", v)
+			}
+			errCh <- runErr
+		}()
+		runErr = ing.Run(ctx, ingesterOut)
+	}()
+
+	for msg := range ingesterOut {
+		if err := emitMinted(ctx, minter, out, msg); err != nil {
+			return err
+		}
+	}
+	return <-errCh
+}
+
+// emitMinted mints one ingester message and delivers it to the digestion
+// queue, honoring ctx while the queue is full.
+func emitMinted(ctx context.Context, minter *Minter, out chan<- Message, msg IngesterMessage) error {
+	minted := Message{
+		EventID:  minter.Mint(),
+		Attrs:    msg.Attrs,
+		Raw:      msg.Raw,
+		RawOwned: msg.RawOwned,
+		SourceTS: msg.SourceTS,
+		Ack:      msg.Ack,
+	}
+	select {
+	case out <- minted:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 

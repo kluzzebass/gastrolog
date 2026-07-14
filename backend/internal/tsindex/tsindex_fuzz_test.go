@@ -1,8 +1,8 @@
-package cloud
+package tsindex
 
 import "testing"
 
-func FuzzFindStartPosition(f *testing.F) {
+func FuzzFindStart(f *testing.F) {
 	// Seed corpus: empty, single entry, multiple entries, partial entry.
 	f.Add([]byte{}, int64(0))
 	f.Add(make([]byte, 12), int64(0))                           // one zero entry
@@ -13,6 +13,6 @@ func FuzzFindStartPosition(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, data []byte, tsNano int64) {
 		// Must never panic.
-		_, _ = FindStartPosition(data, tsNano)
+		_, _ = FindStart(data, tsNano)
 	})
 }

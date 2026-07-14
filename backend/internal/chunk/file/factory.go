@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"time"
 
+	"gastrolog/internal/blobstore"
 	"gastrolog/internal/chunk"
-	chunkcloud "gastrolog/internal/chunk/cloud"
 	"gastrolog/internal/system"
 )
 
@@ -124,14 +124,14 @@ func configureSealedBacking(cfg *Config, params map[string]string) error {
 		return nil
 	}
 
-	store, err := chunkcloud.CreateStore(backing, params, cfg.Logger)
+	store, err := blobstore.CreateStore(backing, params, cfg.Logger)
 	if err != nil {
 		return fmt.Errorf("create %s store for sealed backing: %w", backing, err)
 	}
 	if err := store.EnsureBucket(context.Background()); err != nil {
 		return fmt.Errorf("ensure %s bucket for sealed backing: %w", backing, err)
 	}
-	vaultID, err := glid.ParseUUID(params[chunkcloud.ParamVaultID])
+	vaultID, err := glid.ParseUUID(params[blobstore.ParamVaultID])
 	if err != nil {
 		return fmt.Errorf("invalid vault ID for sealed backing: %w", err)
 	}

@@ -34,7 +34,7 @@ type BatchPublisher interface {
 
 // MetadataFrom builds publish metadata from a completed segment on disk.
 func MetadataFrom(seg segmentation.CompletedSegment) (Metadata, error) {
-	return metadataFromPath(seg.Path, seg.VaultID, seg.Meta.ID, seg.Header)
+	return metadataFromPath(seg.Path, seg.VaultID, seg.SegmentID, seg.Header)
 }
 
 func metadataFromPath(path string, vaultID, segID glid.GLID, hdr segment.Header) (Metadata, error) {

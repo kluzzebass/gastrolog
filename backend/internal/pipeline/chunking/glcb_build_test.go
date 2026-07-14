@@ -22,7 +22,7 @@ func TestBuildSealedChunkUsesInlineMetaWithoutRescan(t *testing.T) {
 	result, err := chunking.BuildSealedChunk(chunking.BuildInput{
 		Manifest: chunking.SealedManifest{
 			ChunkID: chunkID,
-			Refs: []chunking.ManifestRefEntry{
+			Refs: []chunking.ManifestRef{
 				{SegmentID: segA, FirstRecordNumber: 0, LastRecordNumber: 0},
 			},
 			SealedAt: base.Add(time.Minute),

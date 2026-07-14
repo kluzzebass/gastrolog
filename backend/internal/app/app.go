@@ -24,10 +24,10 @@ import (
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/alert"
 	"gastrolog/internal/auth"
+	"gastrolog/internal/blobstore"
 	"gastrolog/internal/cert"
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/chunk"
-	chunkcloud "gastrolog/internal/chunk/cloud"
 	chunkfile "gastrolog/internal/chunk/file"
 	chunkjsonl "gastrolog/internal/chunk/jsonl"
 	chunkmem "gastrolog/internal/chunk/memory"
@@ -1412,7 +1412,7 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 			JoinClusterFunc: deps.JoinClusterFunc, RemoveNodeFunc: deps.RemoveNodeFunc,
 			SetNodeSuffrageFunc: deps.SetNodeSuffrageFunc,
 			CloudTesters: map[string]server.CloudServiceTester{
-				"file": chunkcloud.NewConnectionTester(deps.Logger),
+				"file": blobstore.NewConnectionTester(deps.Logger),
 			},
 			PlacementReconcile:        deps.PlacementReconcile,
 			BootstrapTokenServeSecret: deps.BootstrapTokenServeSecret,

@@ -177,14 +177,39 @@ func manifestFromOpen(open *vaultctlfsm.OpenChunkManifest) ManifestSnapshot {
 	return manifest
 }
 
-// planLeaderStep proposes open/seal/ref vault-ctl commands. maxRefs caps how
-// many segment refs one apply may carry (1 for planOnce, larger for catch-up).
-func (v *vaultChunking) planLeaderStep(ctx context.Context, cronDue bool, maxRefs int, pass *plannerPass) error {
-	if !v.cfg.IsLeader() || v.applier() == nil {
-		return nil
-	}
+// planStepAction is the kind of decision one locked planner evaluation returns.
+type planStepAction int
 
+const (
+	planStepIdle planStepAction = iota
+	planStepOpenManifest
+	planStepSeal
+	planStepAddRefs
+	planStepNoSegment
+)
+
+// planStepDecision is the outcome of one planner evaluation under planMu.
+// planLeaderStep runs the Raft apply it names outside the lock.
+type planStepDecision struct {
+	action   planStepAction
+	openWire []byte                         // planStepOpenManifest: marshaled OpenChunkManifest command
+	chunkID  chunk.ChunkID                  // planStepSeal / planStepAddRefs
+	refs     []AddRefDecision               // planStepAddRefs
+	open     *vaultctlfsm.OpenChunkManifest // planStepNoSegment: stall-discard input
+	manifest ManifestSnapshot               // planStepNoSegment: stall-discard input
+	evalNow  time.Time
+	// nudge wakes collection after the lock is released: nothing is plannable
+	// while eligible segments exist, so their bytes are probably not local yet.
+	nudge bool
+}
+
+// planStepLocked evaluates one planner step under planMu and returns the
+// decision plus the (possibly freshly created) pass. Every unlock lives in
+// the single deferred Unlock here; the divergent hand-placed unlocks this
+// replaces were an easy way to leak the lock when a path was added.
+func (v *vaultChunking) planStepLocked(cronDue bool, maxRefs int, pass *plannerPass) (planStepDecision, *plannerPass) {
 	v.planMu.Lock()
+	defer v.planMu.Unlock()
 
 	// Standalone callers (planOnce, the sweep) pass nil and get a fresh pass;
 	// the catch-up loop threads ONE pass across its steps to avoid re-scanning
@@ -196,63 +221,83 @@ func (v *vaultChunking) planLeaderStep(ctx context.Context, cronDue bool, maxRef
 	open := v.fsm().OpenChunk()
 
 	if open == nil && len(pass.eligible) == 0 {
-		v.planMu.Unlock()
-		return nil
+		return planStepDecision{action: planStepIdle}, pass
 	}
 
 	manifest := manifestFromOpen(open)
-	resume := pass.resume
-	refAddedAt := pass.refAddedAt
 	evalNow := v.now()
+	nudge := v.cfg.Collector != nil && len(pass.eligible) > 0
 
 	if open == nil {
-		wire, ready := v.proposeOpenManifestWire(manifest, resume, pass.eligible, refAddedAt, evalNow, cronDue)
-		v.planMu.Unlock()
+		wire, ready := v.proposeOpenManifestWire(manifest, pass.resume, pass.eligible, pass.refAddedAt, evalNow, cronDue)
 		if !ready {
 			// Non-blocking: collection's pass completion re-wakes this
 			// worker (OnPassComplete). Blocking on a full pass here stalled
 			// planning and sealing under backlog (gastrolog-1b51yf).
-			if v.cfg.Collector != nil && len(pass.eligible) > 0 {
-				v.cfg.Collector.Nudge()
-			}
-			return nil
+			return planStepDecision{action: planStepIdle, nudge: nudge}, pass
 		}
-		return v.applier().Apply(wire)
+		return planStepDecision{action: planStepOpenManifest, openWire: wire}, pass
 	}
 
 	if _, ok := v.cfg.Policy.rotateTrigger(manifest, cronDue, evalNow); ok {
-		v.planMu.Unlock()
-		return v.applySealOpenManifest(open.ChunkID, evalNow)
+		return planStepDecision{action: planStepSeal, chunkID: open.ChunkID, evalNow: evalNow}, pass
 	}
 
-	batch := v.collectRefBatch(manifest, resume, pass.eligible, refAddedAt, evalNow, cronDue, maxRefs)
-	v.planMu.Unlock()
+	batch := v.collectRefBatch(manifest, pass.resume, pass.eligible, pass.refAddedAt, evalNow, cronDue, maxRefs)
+	switch {
+	case len(batch.refs) > 0:
+		return planStepDecision{action: planStepAddRefs, chunkID: open.ChunkID, refs: batch.refs}, pass
+	case batch.rotate:
+		return planStepDecision{action: planStepSeal, chunkID: open.ChunkID, evalNow: evalNow}, pass
+	case batch.noSeg:
+		return planStepDecision{action: planStepNoSegment, open: open, manifest: manifest, evalNow: evalNow, nudge: nudge}, pass
+	}
+	return planStepDecision{action: planStepIdle}, pass
+}
 
-	if len(batch.refs) > 0 {
-		refs := make([]vaultctlfsm.OpenChunkSegmentRef, len(batch.refs))
-		for i, ref := range batch.refs {
+// planLeaderStep proposes open/seal/ref vault-ctl commands. maxRefs caps how
+// many segment refs one apply may carry (1 for planOnce, larger for catch-up).
+// The decision is computed under planMu (planStepLocked); the Raft apply runs
+// here, outside the lock.
+func (v *vaultChunking) planLeaderStep(ctx context.Context, cronDue bool, maxRefs int, pass *plannerPass) error {
+	if !v.cfg.IsLeader() || v.applier() == nil {
+		return nil
+	}
+
+	decision, pass := v.planStepLocked(cronDue, maxRefs, pass)
+
+	switch decision.action {
+	case planStepOpenManifest:
+		return v.applier().Apply(decision.openWire)
+
+	case planStepSeal:
+		return v.applySealOpenManifest(decision.chunkID, decision.evalNow)
+
+	case planStepAddRefs:
+		refs := make([]vaultctlfsm.OpenChunkSegmentRef, len(decision.refs))
+		for i, ref := range decision.refs {
 			refs[i] = openChunkSegmentRefFromDecision(ref)
 		}
-		if err := v.applier().Apply(vaultctlfsm.MarshalAddOpenChunkSegmentRefs(open.ChunkID, refs)); err != nil {
+		if err := v.applier().Apply(vaultctlfsm.MarshalAddOpenChunkSegmentRefs(decision.chunkID, refs)); err != nil {
 			return err
 		}
 		// Advance the threaded resume cursor from our OWN committed decisions so
 		// the next step needs no fresh registry scan (the O(N^2) breaker).
-		for _, ref := range batch.refs {
+		for _, ref := range decision.refs {
 			pass.resume[ref.SegmentID] = ref.LastRecordNumber + 1
 		}
 		return nil
-	}
-	if batch.rotate {
-		return v.applySealOpenManifest(open.ChunkID, evalNow)
-	}
-	if batch.noSeg {
-		if err := discardStalledEmptyOpen(open, manifest, v.cfg.Policy, evalNow, v.applier()); err != nil {
+
+	case planStepNoSegment:
+		if err := discardStalledEmptyOpen(decision.open, decision.manifest, v.cfg.Policy, decision.evalNow, v.applier()); err != nil {
 			return err
 		}
-		if v.cfg.Collector != nil && len(pass.eligible) > 0 {
-			v.cfg.Collector.Nudge()
-		}
+
+	case planStepIdle:
+		// Nothing to apply; fall through to the nudge below.
+	}
+	if decision.nudge {
+		v.cfg.Collector.Nudge()
 	}
 	return nil
 }
@@ -372,6 +417,33 @@ func (v *vaultChunking) proposeOpenManifestWire(
 	return vaultctlfsm.MarshalOpenChunkManifest(chunkID, openedAt), true
 }
 
+// manifestProgress is a snapshot of the open manifest's fill state, taken
+// before and after a catch-up step to decide whether the step advanced the
+// chain.
+type manifestProgress struct {
+	hasOpen bool
+	refs    int
+	records uint64
+}
+
+func openManifestProgress(open *vaultctlfsm.OpenChunkManifest) manifestProgress {
+	if open == nil {
+		return manifestProgress{}
+	}
+	return manifestProgress{hasOpen: true, refs: len(open.Refs), records: open.TotalRecords}
+}
+
+// advancedFrom reports whether the manifest moved forward since prev: a
+// manifest was opened, or the open manifest gained refs or records. A step
+// can propose at most one Raft apply, so with both snapshots open the counts
+// can only grow.
+func (p manifestProgress) advancedFrom(prev manifestProgress) bool {
+	if !prev.hasOpen {
+		return p.hasOpen
+	}
+	return p.hasOpen && (p.refs > prev.refs || p.records > prev.records)
+}
+
 // planCatchUp runs planOnce until the manifest stops changing or a sealed
 // manifest is pending. Callbacks from Apply may advance the chain; the loop
 // covers catch-up when Run starts with work already in the FSM.
@@ -385,42 +457,29 @@ func (v *vaultChunking) planCatchUp(ctx context.Context) error {
 	v.planMu.Unlock()
 	budget := catchUpBudget(len(pass.eligible), v.cfg.Policy)
 	for range budget {
-		open := v.fsm().OpenChunk()
-		refs := 0
-		var totalRecords uint64
-		if open != nil {
-			refs = len(open.Refs)
-			totalRecords = open.TotalRecords
-		}
-		hadOpen := open != nil
+		prev := openManifestProgress(v.fsm().OpenChunk())
 
 		if err := v.planLeaderStep(ctx, false, refApplyBatchSize(v.cfg.Policy), pass); err != nil {
 			return err
 		}
 
-		open = v.fsm().OpenChunk()
-		newRefs := 0
-		var newTotal uint64
-		if open != nil {
-			newRefs = len(open.Refs)
-			newTotal = open.TotalRecords
+		cur := openManifestProgress(v.fsm().OpenChunk())
+		if cur.advancedFrom(prev) {
+			continue
 		}
-		if !hadOpen && open == nil {
+		if !prev.hasOpen && !cur.hasOpen {
 			// The step could not open a manifest from the fixed eligible set —
 			// nothing plannable remains this pass. Return rather than re-scan
 			// and spin; the next worker wake starts a fresh pass and picks up
 			// any segment that became eligible since.
 			return nil
 		}
-		if !hadOpen && open != nil {
-			continue
-		}
-		if newRefs > refs || newTotal > totalRecords {
-			continue
-		}
-		if hadOpen && open != nil && newRefs == refs && newTotal == totalRecords {
+		if prev.hasOpen && cur.hasOpen {
+			// Open manifest unchanged: the step made no progress.
 			return nil
 		}
+		// prev open, cur gone: the step sealed the manifest. Keep stepping so
+		// the next iteration opens the follow-up manifest.
 	}
 	return nil
 }

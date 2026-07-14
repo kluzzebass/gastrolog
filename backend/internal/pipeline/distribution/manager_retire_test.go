@@ -57,10 +57,10 @@ func writeCompleted(t *testing.T, root string, vaultID, segID glid.GLID) (segmen
 		t.Fatal(err)
 	}
 	seg := segmentation.CompletedSegment{
-		VaultID: vaultID,
-		Meta:    segment.Meta{ID: segID, VaultID: vaultID},
-		Path:    path,
-		Header:  hdr,
+		VaultID:   vaultID,
+		SegmentID: segID,
+		Path:      path,
+		Header:    hdr,
 	}
 	meta, err := metadataForPublish(seg)
 	if err != nil {

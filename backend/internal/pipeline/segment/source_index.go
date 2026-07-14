@@ -4,91 +4,21 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
-	"slices"
 	"syscall"
 	"time"
 
 	"gastrolog/internal/format"
+	"gastrolog/internal/tsindex"
 )
 
 const (
 	// SourceIndexEntrySize is the on-disk byte length of one SourceTS index entry.
-	SourceIndexEntrySize = format.SizeU64 + format.SizeU32
+	SourceIndexEntrySize = tsindex.EntrySize
 
 	formatVersionV1 = 0x01
 	formatVersionV2 = 0x02
 	formatVersion   = formatVersionV2
 )
-
-type sourceIndexEntry struct {
-	ts  int64
-	pos uint32
-}
-
-func compareSourceIndexEntries(a, b sourceIndexEntry) int {
-	if a.ts != b.ts {
-		if a.ts < b.ts {
-			return -1
-		}
-		return 1
-	}
-	if a.pos < b.pos {
-		return -1
-	}
-	if a.pos > b.pos {
-		return 1
-	}
-	return 0
-}
-
-func decodeSourceIndexEntry(buf []byte) (sourceIndexEntry, error) {
-	if len(buf) < SourceIndexEntrySize {
-		return sourceIndexEntry{}, ErrFrameTooSmall
-	}
-	return sourceIndexEntry{
-		ts:  int64(binary.LittleEndian.Uint64(buf[0:])), //nolint:gosec // G115: nanosecond timestamps fit in int64
-		pos: binary.LittleEndian.Uint32(buf[format.SizeU64:]),
-	}, nil
-}
-
-func encodeSourceIndexEntry(buf []byte, e sourceIndexEntry) {
-	binary.LittleEndian.PutUint64(buf[0:], uint64(e.ts)) //nolint:gosec // G115: nanosecond timestamps stored as uint64
-	binary.LittleEndian.PutUint32(buf[format.SizeU64:], e.pos)
-}
-
-// sortSourceIndexRegion sorts a mmap'd on-disk source index tail in place.
-func sortSourceIndexRegion(data []byte) {
-	n := len(data) / SourceIndexEntrySize
-	if n == 0 {
-		return
-	}
-	entries := make([]sourceIndexEntry, n)
-	for i := range n {
-		e, err := decodeSourceIndexEntry(data[i*SourceIndexEntrySize : (i+1)*SourceIndexEntrySize])
-		if err != nil {
-			return
-		}
-		entries[i] = e
-	}
-	slices.SortStableFunc(entries, compareSourceIndexEntries)
-	for i, e := range entries {
-		encodeSourceIndexEntry(data[i*SourceIndexEntrySize:(i+1)*SourceIndexEntrySize], e)
-	}
-}
-
-type sourceIndexReader struct {
-	r    io.ReaderAt
-	base int64
-}
-
-func (sir sourceIndexReader) readEntry(i int) (sourceIndexEntry, error) {
-	var buf [SourceIndexEntrySize]byte
-	off := sir.base + int64(i)*SourceIndexEntrySize
-	if _, err := sir.r.ReadAt(buf[:], off); err != nil {
-		return sourceIndexEntry{}, err
-	}
-	return decodeSourceIndexEntry(buf[:])
-}
 
 // FindSourceStartPosition binary-searches the on-disk source index for the first
 // entry with SourceTS >= start. Probes the file directly; does not load the tail.
@@ -99,53 +29,7 @@ func (sf *File) FindSourceStartPosition(start time.Time) (uint32, bool, error) {
 	if sf.hdr.SourceIndexCount == 0 {
 		return 0, false, nil
 	}
-	pos, ok, err := findSourceStartOnDisk(sf.f, int64(sf.hdr.SourceIndexOffset), sf.hdr.SourceIndexCount, start.UnixNano())
-	if err != nil {
-		return 0, false, err
-	}
-	return uint32(pos), ok, nil //nolint:gosec // G115: positions bounded by RecordCount
-}
-
-func findSourceStartOnDisk(r io.ReaderAt, base int64, count uint32, tsNano int64) (uint64, bool, error) {
-	n := int(count)
-	if n == 0 {
-		return 0, false, nil
-	}
-	sir := sourceIndexReader{r: r, base: base}
-
-	first, err := sir.readEntry(0)
-	if err != nil {
-		return 0, false, err
-	}
-	last, err := sir.readEntry(n - 1)
-	if err != nil {
-		return 0, false, err
-	}
-	if tsNano > last.ts {
-		return 0, false, nil
-	}
-	if tsNano <= first.ts {
-		return uint64(first.pos), true, nil
-	}
-
-	lo, hi := 0, n
-	for lo < hi {
-		mid := lo + (hi-lo)/2
-		entry, err := sir.readEntry(mid)
-		if err != nil {
-			return 0, false, err
-		}
-		if entry.ts < tsNano {
-			lo = mid + 1
-		} else {
-			hi = mid
-		}
-	}
-	entry, err := sir.readEntry(lo)
-	if err != nil {
-		return 0, false, err
-	}
-	return uint64(entry.pos), true, nil
+	return tsindex.FindStartAt(sf.f, int64(sf.hdr.SourceIndexOffset), int(sf.hdr.SourceIndexCount), start.UnixNano())
 }
 
 func (sf *File) buildSourceIndex(recordEnd uint32) error {
@@ -207,7 +91,7 @@ func (sf *File) buildSourceIndex(recordEnd uint32) error {
 			continue
 		}
 		var buf [SourceIndexEntrySize]byte
-		encodeSourceIndexEntry(buf[:], sourceIndexEntry{ts: ts.UnixNano(), pos: pos})
+		tsindex.Encode(buf[:], tsindex.Entry{TS: ts.UnixNano(), Pos: pos})
 		off := int64(eventIndexEnd) + int64(writeIdx)*SourceIndexEntrySize
 		if _, err := sf.f.WriteAt(buf[:], off); err != nil {
 			return err
@@ -219,7 +103,7 @@ func (sf *File) buildSourceIndex(recordEnd uint32) error {
 	if err != nil {
 		return err
 	}
-	sortSourceIndexRegion(data[eventIndexEnd:sourceEnd])
+	tsindex.SortRegion(data[eventIndexEnd:sourceEnd])
 	if err := syscall.Munmap(data); err != nil {
 		return err
 	}

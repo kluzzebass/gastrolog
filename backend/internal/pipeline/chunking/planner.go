@@ -69,7 +69,7 @@ const (
 // Ref is valid only when Action == PlannerAddRef; Trigger when Action == PlannerRotate.
 type PlannerDecision struct {
 	Action  PlannerAction
-	Trigger string
+	Trigger RotateTrigger
 	Ref     AddRefDecision
 }
 
@@ -145,11 +145,14 @@ func refAddedAtForSegment(seg SegmentView, fallback time.Time) time.Time {
 	return fallback
 }
 
+// RotateTrigger names which rotation-policy bound sealed a manifest.
+type RotateTrigger string
+
 const (
-	rotateTriggerCron    = "cron"
-	rotateTriggerAge     = "age"
-	rotateTriggerRecords = "records"
-	rotateTriggerBytes   = "bytes"
+	rotateTriggerCron    RotateTrigger = "cron"
+	rotateTriggerAge     RotateTrigger = "age"
+	rotateTriggerRecords RotateTrigger = "records"
+	rotateTriggerBytes   RotateTrigger = "bytes"
 )
 
 // manifestMaxAgeStart is the wall-clock anchor for MaxAge rotation. When the
@@ -165,7 +168,7 @@ func manifestMaxAgeStart(m ManifestSnapshot) time.Time {
 	return m.Bounds.WriteStart
 }
 
-func (p ManifestRotationPolicy) rotateTrigger(m ManifestSnapshot, cronDue bool, now time.Time) (string, bool) {
+func (p ManifestRotationPolicy) rotateTrigger(m ManifestSnapshot, cronDue bool, now time.Time) (RotateTrigger, bool) {
 	if cronDue && manifestHasContent(m) {
 		return rotateTriggerCron, true
 	}
@@ -184,7 +187,7 @@ func (p ManifestRotationPolicy) rotateTrigger(m ManifestSnapshot, cronDue bool, 
 	return "", false
 }
 
-func (p ManifestRotationPolicy) wouldExceed(m ManifestSnapshot, addRecords, addBytes uint64) (string, bool) {
+func (p ManifestRotationPolicy) wouldExceed(m ManifestSnapshot, addRecords, addBytes uint64) (RotateTrigger, bool) {
 	if p.MaxRecords > 0 && m.TotalRecords+addRecords > p.MaxRecords {
 		return rotateTriggerRecords, true
 	}
