@@ -7,6 +7,7 @@ import (
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/record"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -391,3 +392,32 @@ func FuzzExportToRecord(f *testing.F) {
 		}
 	})
 }
+
+// BenchmarkChunkToRecordConversion compares the two chunk.Record →
+// record.Record converters on the retention record-move path
+// (gastrolog-33eabj / gastrolog-11y2iv). ChunkToRecord was the converter
+// SubmitRetentionRecord used before the owned-transfer fix: it re-allocates
+// the attrs map per record. ChunkToRecordOwned transfers the freshly
+// materialized map by reference — zero attr allocations per moved record.
+func BenchmarkChunkToRecordConversion(b *testing.B) {
+	rec := fullyPopulatedRecord()
+	b.Run("copied", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			convertBenchSink = ChunkToRecord(rec)
+		}
+	})
+	b.Run("owned", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			convertBenchSink = ChunkToRecordOwned(rec)
+		}
+	})
+	if len(convertBenchSink.Attrs) != len(rec.Attrs) {
+		b.Fatal("attrs dropped")
+	}
+}
+
+// convertBenchSink defeats escape analysis so the benchmarked conversion's
+// map allocation is not elided onto the stack.
+var convertBenchSink record.Record
