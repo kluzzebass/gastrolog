@@ -187,6 +187,11 @@ func (v *vaultCollect) collectOne(ctx context.Context, ref AssignedSegment) erro
 			return nil
 		}
 		if !errors.Is(err, ErrCorruptSegment) {
+			// Includes ErrPreHeadPurged: a concurrent release purge deleted
+			// the file between the stat above and the promote — return the
+			// deferred error instead of pulling a segment the registry may
+			// have just released; the next pass re-reads registry truth
+			// (gastrolog-2as548).
 			return err
 		}
 		// Corrupt orphan discarded — fall through to a fresh pull.

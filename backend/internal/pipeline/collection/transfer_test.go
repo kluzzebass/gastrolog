@@ -230,6 +230,52 @@ func TestPromoteVerifiedRejectsSameLengthSubstitution(t *testing.T) {
 	}
 }
 
+// TestPromoteVerifiedPurgedPreHeadIsNotCorrupt reproduces the release-purge
+// race observed on the soak cluster (gastrolog-2as548): a segment lands in
+// pre-head via a clean pull, then a concurrent release purge
+// (paths.PurgeHeadStaging — the supervisor's OnReleaseSegments hook and
+// chunking's release/stale purges) deletes the file before PromoteVerified
+// opens it. No byte was verified and found wrong, so the result must NOT be
+// ErrCorruptSegment — that label routed 46 benign races per soak run to the
+// data-integrity WARN path as "segment checksum verification failed: open …
+// no such file or directory". It must classify as the deferred
+// ErrPreHeadPurged instead, retryable on the manager's backoff wake.
+func TestPromoteVerifiedPurgedPreHeadIsNotCorrupt(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	root := t.TempDir()
+	segID := glid.New()
+	data := writeSegmentBytes(t, vaultID, segID, "released mid-collect")
+
+	prePath := pullToPreHead(t, root, segID, data)
+	// The concurrent release purge wins the race between the pull's
+	// rename-in and the promote's open.
+	if err := paths.PurgeHeadStaging(root, segID); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err := collection.PromoteVerified(prePath, root, segmentChecksumOf(t, data))
+	if err == nil {
+		t.Fatal("PromoteVerified() on a purged pre-head file must fail")
+	}
+	if errors.Is(err, collection.ErrCorruptSegment) {
+		t.Fatalf("PromoteVerified() = %v; a purged pre-head file is not a data-integrity failure", err)
+	}
+	if !errors.Is(err, collection.ErrPreHeadPurged) {
+		t.Fatalf("PromoteVerified() = %v, want ErrPreHeadPurged", err)
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("PromoteVerified() = %v, want os.ErrNotExist in the chain", err)
+	}
+	head, err := os.ReadDir(paths.HeadDir(root))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	if len(head) != 0 {
+		t.Fatal("head must stay empty when the pre-head file was purged")
+	}
+}
+
 // TestPromoteVerifiedZeroChecksumSkipsPublishedComparison: zero means no
 // published expectation is available; internal verification alone gates the
 // promote.

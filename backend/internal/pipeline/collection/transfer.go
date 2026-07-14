@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -15,6 +16,16 @@ import (
 var (
 	// ErrCorruptSegment is returned when a pre-head file fails verification.
 	ErrCorruptSegment = errors.New("segment checksum verification failed")
+
+	// ErrPreHeadPurged is returned when the pre-head file vanishes between
+	// the pull's rename-in and the promote — a concurrent purge
+	// (paths.PurgeHeadStaging on segment release, via the supervisor's
+	// OnReleaseSegments hook or chunking's release/stale purges) deleted it
+	// because the registry no longer needs the segment. A catch-up race, not
+	// a data-integrity failure: no byte was ever verified and found wrong.
+	// Joining ErrCorruptSegment here instead surfaced every such race as a
+	// "checksum verification failed" data-integrity WARN (gastrolog-2as548).
+	ErrPreHeadPurged = errors.New("pre-head segment purged during collect")
 )
 
 // preHeadPullSuffix marks an in-flight collect temp file under pre-head/.
@@ -84,6 +95,12 @@ func PullToPreHead(ctx context.Context, vaultRoot string, vaultID, segmentID gli
 func PromoteVerified(preHeadPath, vaultRoot string, publishedChecksum uint64) (string, segment.Header, error) {
 	sf, err := segment.Open(preHeadPath)
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			// A concurrent release purge won the race for this file. Only a
+			// verification failure may carry ErrCorruptSegment; a missing
+			// file verified nothing (gastrolog-2as548).
+			return "", segment.Header{}, fmt.Errorf("%w: %w", ErrPreHeadPurged, err)
+		}
 		_ = os.Remove(preHeadPath)
 		return "", segment.Header{}, errors.Join(ErrCorruptSegment, err)
 	}
@@ -102,6 +119,13 @@ func PromoteVerified(preHeadPath, vaultRoot string, publishedChecksum uint64) (s
 	}
 	dest := filepath.Join(paths.HeadDir(vaultRoot), filepath.Base(preHeadPath))
 	if err := os.Rename(filepath.Clean(preHeadPath), dest); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			// Verified fine, then a concurrent release purge removed the
+			// source before the rename (head/ was just ensured, so ENOENT
+			// means the pre-head name is gone). Same race as the open-time
+			// window above (gastrolog-2as548).
+			return "", segment.Header{}, fmt.Errorf("%w: %w", ErrPreHeadPurged, err)
+		}
 		_ = os.Remove(preHeadPath)
 		return "", segment.Header{}, err
 	}

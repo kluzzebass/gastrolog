@@ -59,5 +59,14 @@ func retryableCollectSuberr(err error) bool {
 	if errors.Is(err, ErrSegmentUnavailable) {
 		return true
 	}
+	if errors.Is(err, ErrPreHeadPurged) {
+		// A concurrent release purge deleted the pre-head file mid-promote
+		// (gastrolog-2as548). The next pass re-reads registry truth: a
+		// released segment drops out of Roll; a still-assigned one re-pulls.
+		// Explicit even though the wrapped ENOENT already matches the
+		// os.ErrNotExist arm below — classification must not depend on how
+		// the sentinel is attached.
+		return true
+	}
 	return errors.Is(err, os.ErrNotExist)
 }

@@ -30,6 +30,10 @@ func TestRetryableCollectErr(t *testing.T) {
 		errors.Join(ErrCorruptSegment, errors.New("segment header: bad magic")),
 		fmt.Errorf("%w: segment checksum 0000abcd does not match published checksum 0000ef01", ErrCorruptSegment),
 		fmt.Errorf("pull segment abc: %w", os.ErrNotExist),
+		// …and PromoteVerified losing the pre-head file to a concurrent
+		// release purge (gastrolog-2as548), in both attachment shapes.
+		ErrPreHeadPurged,
+		fmt.Errorf("%w: %w", ErrPreHeadPurged, os.ErrNotExist),
 		// A pass aggregate is retryable when every failure it summarizes is.
 		erragg.SummaryJoin(
 			fmt.Errorf("pull from n1: %w", ErrSegmentUnavailable),
