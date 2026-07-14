@@ -180,15 +180,16 @@ func TestOrchRel_PausedPeer_ClusterStaysHealthy(t *testing.T) {
 		appendDone <- nil
 	}()
 
-	// Budget: much larger than ForwardingTimeout (5s) to tolerate the
-	// first record's backoff ramp, but bounded enough to catch a
-	// regression where the orchestrator deadlocks.
+	// True-deadlock catcher: the phase's inner waits (vault-ctl leader
+	// election in appendOnLeader) are progress-based and may legitimately
+	// run long under CPU contention, so this select uses the shared hard
+	// backstop rather than a budget calibrated to healthy-speed replication.
 	select {
 	case err := <-appendDone:
 		if err != nil {
 			t.Fatalf("append+seal failed under paused peer: %v", err)
 		}
-	case <-time.After(30 * time.Second):
+	case <-time.After(orchHarnessHardBackstop):
 		t.Fatal("append+seal deadlocked with paused peer (gastrolog-5oofa regressed)")
 	}
 
@@ -278,7 +279,8 @@ func TestOrchRel_TwoVaults_Isolated(t *testing.T) {
 	h.pausePeer(victim)
 	t.Cleanup(func() { h.unpausePeer(victim) })
 
-	// Concurrent append+seal must complete within budget.
+	// Concurrent append+seal must complete; the select is a true-deadlock
+	// catcher on the shared hard backstop (inner waits are progress-based).
 	const records = 5
 	now := time.Now()
 	appendDone := make(chan error, 1)
@@ -302,7 +304,7 @@ func TestOrchRel_TwoVaults_Isolated(t *testing.T) {
 		if err != nil {
 			t.Fatalf("append+seal failed with one peer paused: %v", err)
 		}
-	case <-time.After(30 * time.Second):
+	case <-time.After(orchHarnessHardBackstop):
 		t.Fatal("append+seal deadlocked with paused peer")
 	}
 
@@ -356,7 +358,7 @@ func TestOrchRel_ConcurrentAppendAndPause(t *testing.T) {
 
 	select {
 	case <-doneCh:
-	case <-time.After(60 * time.Second):
+	case <-time.After(orchHarnessHardBackstop):
 		t.Fatal("concurrent appends deadlocked under paused peer")
 	}
 	close(errCh)
@@ -606,7 +608,7 @@ func TestOrchRel_SlowPeer_BackoffAbsorbs(t *testing.T) {
 		if err != nil {
 			t.Fatalf("append+seal failed under slow peer: %v", err)
 		}
-	case <-time.After(30 * time.Second):
+	case <-time.After(orchHarnessHardBackstop):
 		t.Fatal("append+seal stalled under slow peer")
 	}
 
@@ -738,7 +740,7 @@ func TestOrchRel_IngestionStressWithPause(t *testing.T) {
 
 	select {
 	case <-doneCh:
-	case <-time.After(120 * time.Second):
+	case <-time.After(orchHarnessHardBackstop):
 		t.Fatal("ingestion stalled under paused peer stress")
 	}
 	close(errCh)
@@ -798,11 +800,18 @@ func TestOrchRel_MultiVault_IsolatedFromPausedPeer(t *testing.T) {
 	bElapsed := time.Since(bStart)
 	t.Logf("vault B (no paused replica): 5 appends + seal in %v", bElapsed)
 
-	// Vault B latency budget: should complete quickly since all of its
-	// replicas are healthy. 5 seconds is very generous — healthy
-	// replication completes in milliseconds.
-	if bElapsed > 5*time.Second {
-		t.Errorf("vault B took %v — paused peer should have had no effect", bElapsed)
+	// Vault B bound: the structural isolation property is that vault B's
+	// append+seal path never blocks on the paused peer — a regression
+	// (gastrolog-5oofa class: orchestrator-wide lock held while waiting on
+	// node2) blocks INDEFINITELY, so the shared stall window catches it.
+	// A fine-grained "milliseconds, not seconds" latency assertion is not
+	// contention-robust: under multi-suite CPU load the same phase
+	// (including vault-ctl leader waits) legitimately takes >10s with no
+	// paused-peer involvement, as vault A's fast appends right after prove.
+	// Latency is logged above for humans; only an indefinite block fails.
+	if bElapsed > orchHarnessStallWindow {
+		t.Errorf("vault B took %v (> stall window %v) — append+seal path blocked on the paused peer",
+			bElapsed, orchHarnessStallWindow)
 	}
 
 	// Exercise vault A. This MAY be slower (first record hits
