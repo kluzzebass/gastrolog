@@ -1711,20 +1711,22 @@ func TestRewireVaultFSMValidation(t *testing.T) {
 	}
 }
 
-// TestCollectOncePullingOrphanPersistsAndRepullOverwrites documents CURRENT
-// behavior for a crash mid-pull: PullToPreHead streams into
-// "<segID>.pulling" (transfer.go preHeadPullSuffix) and a crash before the
-// rename commit leaves that temp file in pre-head/. Nothing sweeps it —
+// TestRegisterVaultSweepsPullingOrphanAndRepullStillOverwrites verifies the
+// gastrolog-66hmx3 fix for gastrolog-5do8sh gap 7: PullToPreHead streams
+// into "<segID>.pulling" (transfer.go preHeadPullSuffix) and a crash before
+// the rename commit used to leave that temp file in pre-head/ forever —
 // unlike FINAL-named pre-head orphans (promoted in place, gastrolog-5zotim),
-// a .pulling file is invisible to collect passes and leaks until the same
-// segment is pulled again. A startup .pulling sweep is a follow-up candidate
-// (gastrolog-5do8sh gap 7); this test pins the status quo so a future sweep
-// changes it deliberately.
+// a .pulling file is invisible to collect passes, so nothing else would
+// ever touch it. RegisterVault now sweeps pre-head/*.pulling orphans before
+// the vault's worker can start (sweepOrphanPullingFiles, called from
+// newVaultCollect) — before any real pull could legitimately be holding
+// that path open.
 //
-// The second half pins the self-healing edge that makes the leak benign for
-// assigned segments: a real pull of the SAME segment opens the temp path
-// with O_TRUNC and renames over it, so the stale bytes never reach head/.
-func TestCollectOncePullingOrphanPersistsAndRepullOverwrites(t *testing.T) {
+// The second half still pins the self-healing edge that makes a
+// still-live .pulling harmless for assigned segments even without the
+// sweep: a real pull of the SAME segment opens the temp path with O_TRUNC
+// and renames over it, so stale bytes never reach head/.
+func TestRegisterVaultSweepsPullingOrphanAndRepullStillOverwrites(t *testing.T) {
 	t.Parallel()
 	vaultID := glid.New()
 	segID := glid.New()
@@ -1753,23 +1755,24 @@ func TestCollectOncePullingOrphanPersistsAndRepullOverwrites(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// RegisterVault's construction-time sweep must have already removed the
+	// orphan, before any CollectOnce pass runs.
+	if _, err := os.Stat(pullingPath); !os.IsNotExist(err) {
+		t.Fatalf(".pulling orphan should be swept by RegisterVault, stat err = %v", err)
+	}
+
 	// Startup/converge pass (the path the gastrolog-5zotim orphan tests
-	// drive): with nothing assigned it must not touch pre-head/, and there
-	// is no sweep — the .pulling orphan persists byte-for-byte.
+	// drive): with nothing assigned it must not touch pre-head/.
 	if err := mgr.CollectOnce(context.Background(), vaultID); err != nil {
 		t.Fatal(err)
 	}
-	got, err := os.ReadFile(pullingPath)
-	if err != nil {
-		t.Fatalf("CURRENT behavior changed: .pulling orphan no longer survives a collect pass: %v", err)
-	}
-	if !bytes.Equal(got, stale) {
-		t.Fatal(".pulling orphan bytes were modified by a pass that had nothing assigned")
+	if _, err := os.Stat(pullingPath); !os.IsNotExist(err) {
+		t.Fatalf(".pulling orphan reappeared after a no-op collect pass, stat err = %v", err)
 	}
 
 	// The registry now assigns the segment and a holder serves it. The pull
-	// reuses the same temp path: O_TRUNC discards the stale bytes and the
-	// rename commit replaces the orphan with the verified pull.
+	// writes a fresh temp path (the sweep already removed the stale one) and
+	// the rename commit lands the verified pull.
 	pull.Put(segID, data)
 	log.setAssigned(collection.AssignedSegment{
 		VaultID:   vaultID,
@@ -1781,10 +1784,10 @@ func TestCollectOncePullingOrphanPersistsAndRepullOverwrites(t *testing.T) {
 	}
 	headBytes, err := os.ReadFile(paths.HeadSegment(root, segID))
 	if err != nil {
-		t.Fatalf("segment missing from head/ after re-pull over .pulling orphan: %v", err)
+		t.Fatalf("segment missing from head/ after pull following swept orphan: %v", err)
 	}
 	if !bytes.Equal(headBytes, data) {
-		t.Fatal("head/ bytes do not match the published bytes after re-pull")
+		t.Fatal("head/ bytes do not match the published bytes after pull")
 	}
 	if _, err := os.Stat(pullingPath); !os.IsNotExist(err) {
 		t.Fatalf(".pulling temp should be renamed away by the successful pull, stat err = %v", err)
@@ -1794,5 +1797,41 @@ func TestCollectOncePullingOrphanPersistsAndRepullOverwrites(t *testing.T) {
 	}
 	if receipts.count() != 1 {
 		t.Fatalf("receipts = %d, want 1", receipts.count())
+	}
+}
+
+// TestRegisterVaultPullingSweepDoesNotTouchLiveOrFinalFiles verifies the
+// construction-time sweep (gastrolog-66hmx3) only removes *.pulling names
+// and leaves a segment mid-pull under a different name (simulated by a
+// plain, non-.pulling pre-head file) and a promoted head/ file alone.
+func TestRegisterVaultPullingSweepDoesNotTouchLiveOrFinalFiles(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	finalSegID := glid.New()
+	root := t.TempDir()
+
+	if err := paths.EnsurePreHeadDir(root); err != nil {
+		t.Fatal(err)
+	}
+	// A FINAL-named pre-head file (gastrolog-5zotim shape) must survive.
+	finalPreHeadPath := paths.PreHeadSegment(root, finalSegID)
+	finalBytes := []byte("already-verified pre-head bytes")
+	if err := os.WriteFile(finalPreHeadPath, finalBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	mgr := collection.New(collection.Config{})
+	if err := mgr.RegisterVault(vaultID, root, collection.VaultConfig{
+		Log: &staticLog{}, Pull: newMemoryPull(), Receipts: &recordingReceipts{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := os.ReadFile(finalPreHeadPath)
+	if err != nil {
+		t.Fatalf("FINAL-named pre-head file was swept away: %v", err)
+	}
+	if !bytes.Equal(got, finalBytes) {
+		t.Fatal("FINAL-named pre-head file bytes were modified by the sweep")
 	}
 }

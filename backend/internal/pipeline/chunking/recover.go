@@ -3,6 +3,8 @@ package chunking
 import (
 	"context"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"gastrolog/internal/chunk"
@@ -52,6 +54,15 @@ func (v *vaultChunking) recoverOnce(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	// Sweep BuildGLCBFile's crash-orphaned staging files before anything
+	// else runs. BuildGLCBFile relies on this happening on the recovery
+	// path it documents ("re-running with the same inputs is safe") but
+	// there was previously no sweep at all — a crash between CreateTemp
+	// and the rename left ".glcb.tmp.*" in the chunk dir forever
+	// (gastrolog-5do8sh gap 7, gastrolog-66hmx3). Best-effort: a failed
+	// sweep must not block the rest of recovery, which is what actually
+	// gets the chunk sealed.
+	v.sweepOrphanGLCBBuildTmp()
 	var lastErr error
 	if pending := v.fsm().SealedManifest(); pending != nil {
 		if len(pending.Refs) == 0 && pending.TotalRecords == 0 {
@@ -91,6 +102,50 @@ func (v *vaultChunking) recoverOnce(ctx context.Context) error {
 		}
 	}
 	return lastErr
+}
+
+// isGLCBBuildTmpName reports whether name matches BuildGLCBFile's exact
+// os.CreateTemp naming contract (glcbBuildTmpPrefix + random suffix). Kept
+// as a standalone predicate so a writer-sweeper contract test can call it
+// directly against BuildGLCBFile's actual produced name rather than a
+// hand-typed pattern guess.
+func isGLCBBuildTmpName(name string) bool {
+	return strings.HasPrefix(name, glcbBuildTmpPrefix)
+}
+
+// sweepOrphanGLCBBuildTmp removes BuildGLCBFile staging files
+// (glcbBuildTmpPrefix*) left behind by a crash between os.CreateTemp and
+// the rename commit. Each chunk lives in its own <ChunkRoot>/<chunkID>/
+// directory (ChunkGLCBPath), so this only needs one level of listing.
+// Best-effort and owner-local: this package is the only writer of this
+// tmp shape, so it is the only package responsible for sweeping it (no
+// global janitor). See gastrolog-66hmx3.
+func (v *vaultChunking) sweepOrphanGLCBBuildTmp() {
+	entries, err := os.ReadDir(v.cfg.ChunkRoot)
+	if err != nil {
+		return
+	}
+	for _, chunkDirEntry := range entries {
+		if !chunkDirEntry.IsDir() {
+			continue
+		}
+		chunkDir := filepath.Join(v.cfg.ChunkRoot, chunkDirEntry.Name())
+		files, err := os.ReadDir(chunkDir)
+		if err != nil {
+			continue
+		}
+		for _, f := range files {
+			if f.IsDir() || !isGLCBBuildTmpName(f.Name()) {
+				continue
+			}
+			path := filepath.Join(chunkDir, f.Name())
+			if err := os.Remove(path); err != nil {
+				v.logger().Warn("failed to remove orphan GLCB build temp file", "path", path, "error", err)
+			} else {
+				v.logger().Info("removed orphan GLCB build temp file", "path", path)
+			}
+		}
+	}
 }
 
 func (v *vaultChunking) recoverBuiltGLCB(ctx context.Context, pending *vaultctlfsm.OpenChunkManifest) error {

@@ -1183,8 +1183,17 @@ func (m *Manager) loadExisting() error {
 }
 
 // cleanOrphanTempFiles removes leftover temp files from a chunk directory.
-// These can be left behind by crashed compression jobs (.compress-*) or
-// index builds (*.tmp.*). Best-effort: errors are logged but not returned.
+// These can be left behind by crashed compression jobs (.compress-*),
+// index builds or cloud-cache downloads (*.tmp.*), a crashed sealToGLCB
+// (the fixed-name dataGLCBTmpFileName, matched exactly rather than by
+// pattern — gastrolog-66hmx3), or a crashed sealToGLCB's glcb.Writer
+// record-staging file (glcb.RecordsStagingPrefix*). Best-effort: errors
+// are logged but not returned.
+//
+// This predicate must track every writer that drops a temp file into a
+// chunk directory in this package — see cleanOrphanTempFiles_test.go for
+// the contract test that pins each writer's exact naming against this
+// match logic.
 func (m *Manager) cleanOrphanTempFiles(chunkDir string) {
 	entries, err := os.ReadDir(chunkDir)
 	if err != nil {
@@ -1195,7 +1204,7 @@ func (m *Manager) cleanOrphanTempFiles(chunkDir string) {
 			continue
 		}
 		name := entry.Name()
-		if strings.HasPrefix(name, ".compress-") || strings.Contains(name, ".tmp.") {
+		if isOrphanTempFileName(name) {
 			path := filepath.Join(chunkDir, name)
 			if err := os.Remove(path); err != nil {
 				m.logger.Warn("failed to remove orphan temp file", "path", path, "error", err)
@@ -1204,6 +1213,17 @@ func (m *Manager) cleanOrphanTempFiles(chunkDir string) {
 			}
 		}
 	}
+}
+
+// isOrphanTempFileName reports whether name matches one of the exact
+// contracts the temp-file writers in this package produce. Kept as a
+// standalone predicate so the writer-sweeper contract test can call it
+// directly against every writer's actual output name.
+func isOrphanTempFileName(name string) bool {
+	return strings.HasPrefix(name, ".compress-") ||
+		strings.Contains(name, ".tmp.") ||
+		name == dataGLCBTmpFileName ||
+		strings.HasPrefix(name, glcb.RecordsStagingPrefix)
 }
 
 // EnsureSealed projects the FSM's sealed state onto local chunk files.
@@ -4103,11 +4123,33 @@ func (m *Manager) sealToGLCB(id chunk.ChunkID) (*glcb.Writer, int64, error) {
 	tmpPath := filepath.Join(dir, dataGLCBTmpFileName)
 	finalPath := filepath.Join(dir, dataGLCBFileName)
 
-	// Open the tmp with O_EXCL so a stale tmp from a prior aborted seal
-	// surfaces as a clear error rather than getting clobbered. The
-	// cleanOrphanTempFiles sweep at startup is responsible for tmp removal
-	// on crash recovery.
+	// Hold the per-chunk write lock across the tmp-file create/write/
+	// rename below — the only phase that touches the fixed tmpPath name.
+	// The cursor read above already released its RLock via cursor.Close(),
+	// so taking the exclusive lock here does not self-deadlock.
+	//
+	// This is what makes the O_EXCL-EEXIST handling below safe: while we
+	// hold chunkLock exclusively, no other in-process goroutine can be
+	// mid-write on this chunk's tmpPath (every other caller of
+	// sealToGLCB/openLocalGLCBCursor/OpenCursor for this id blocks on the
+	// same lock). So if OpenFile still reports the file exists, it can only
+	// be a tmp abandoned by a process that crashed between create and
+	// rename in a PRIOR run — cleanOrphanTempFiles is supposed to remove
+	// that on the next startup (gastrolog-66hmx3), but a process that never
+	// restarted between the crash and this retry would otherwise stay
+	// wedged forever. Remove it and retry the O_EXCL create once so the
+	// seal cannot wedge without a restart either.
+	chunkLock := m.chunkLockFor(id)
+	chunkLock.Lock()
+	defer chunkLock.Unlock()
+
 	f, err := os.OpenFile(filepath.Clean(tmpPath), os.O_RDWR|os.O_CREATE|os.O_EXCL, m.cfg.FileMode)
+	if errors.Is(err, os.ErrExist) {
+		if rmErr := os.Remove(tmpPath); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
+			return nil, 0, fmt.Errorf("remove stale %s before retry: %w", dataGLCBTmpFileName, rmErr)
+		}
+		f, err = os.OpenFile(filepath.Clean(tmpPath), os.O_RDWR|os.O_CREATE|os.O_EXCL, m.cfg.FileMode)
+	}
 	if err != nil {
 		return nil, 0, fmt.Errorf("create %s: %w", dataGLCBTmpFileName, err)
 	}
