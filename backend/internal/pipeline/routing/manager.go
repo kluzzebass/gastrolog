@@ -84,13 +84,13 @@ type Manager struct {
 
 	matched   atomic.Uint64
 	unmatched atomic.Uint64
-	// perVault / perRoute hold *atomic.Uint64 matched counters keyed by
-	// destination vault ID and route ID respectively. Lazily populated on the
-	// match path so the hot route() avoids a map write lock. perVaultDropped
-	// follows the same pattern for delivery drops (see StatsSnapshot.PerVaultDropped).
-	perVault        sync.Map
-	perRoute        sync.Map
-	perVaultDropped sync.Map
+	// perVault / perRoute hold matched counters keyed by destination vault ID
+	// and route ID respectively. Lazily populated on the match path so the hot
+	// route() avoids a map write lock. perVaultDropped follows the same
+	// pattern for delivery drops (see StatsSnapshot.PerVaultDropped).
+	perVault        counterMap
+	perRoute        counterMap
+	perVaultDropped counterMap
 	running         atomic.Bool
 }
 
@@ -156,9 +156,9 @@ func (m *Manager) Stats() StatsSnapshot {
 		Ingested:        matched + unmatched,
 		Matched:         matched,
 		Unmatched:       unmatched,
-		PerVault:        drainCounterMap(&m.perVault),
-		PerRoute:        drainCounterMap(&m.perRoute),
-		PerVaultDropped: drainCounterMap(&m.perVaultDropped),
+		PerVault:        m.perVault.snapshot(),
+		PerRoute:        m.perRoute.snapshot(),
+		PerVaultDropped: m.perVaultDropped.snapshot(),
 	}
 }
 
@@ -174,18 +174,26 @@ func (m *Manager) Table() *Table {
 	return m.table.Load()
 }
 
-func incrCounter(store *sync.Map, id glid.GLID) {
-	if c, ok := store.Load(id); ok {
-		c.(*atomic.Uint64).Add(1)
-		return
-	}
-	c, _ := store.LoadOrStore(id, new(atomic.Uint64))
-	c.(*atomic.Uint64).Add(1)
+// counterMap is a lazily-populated set of per-GLID monotonic counters
+// (sync.Map of glid.GLID → *atomic.Uint64 underneath, so the hot match path
+// increments without a map write lock). The any-type assertions live here
+// instead of at every call site.
+type counterMap struct {
+	m sync.Map
 }
 
-func drainCounterMap(store *sync.Map) map[glid.GLID]uint64 {
+func (c *counterMap) incr(id glid.GLID) {
+	if v, ok := c.m.Load(id); ok {
+		v.(*atomic.Uint64).Add(1)
+		return
+	}
+	v, _ := c.m.LoadOrStore(id, new(atomic.Uint64))
+	v.(*atomic.Uint64).Add(1)
+}
+
+func (c *counterMap) snapshot() map[glid.GLID]uint64 {
 	out := make(map[glid.GLID]uint64)
-	store.Range(func(k, v any) bool {
+	c.m.Range(func(k, v any) bool {
 		out[k.(glid.GLID)] = v.(*atomic.Uint64).Load()
 		return true
 	})
@@ -242,9 +250,9 @@ func (m *Manager) route(ctx context.Context, in Input) {
 		}
 	}
 	m.matched.Add(1)
-	incrCounter(&m.perRoute, matchedRoute.ID)
+	m.perRoute.incr(matchedRoute.ID)
 	for _, vaultID := range vaults {
-		incrCounter(&m.perVault, vaultID)
+		m.perVault.incr(vaultID)
 	}
 
 	// Snapshot fan-out sinks under the read lock. Matched vaults without a local
@@ -275,7 +283,7 @@ func (m *Manager) route(ctx context.Context, in Input) {
 		t := targets[0]
 		// deliver nacks in.Ack itself on failure; the source retries.
 		if t.sink.deliver(ctx, segmentation.Input{Record: rec, Ack: in.Ack}) != nil {
-			incrCounter(&m.perVaultDropped, t.vaultID)
+			m.perVaultDropped.incr(t.vaultID)
 		}
 		return
 	}
@@ -300,10 +308,10 @@ func (m *Manager) fanOut(ctx context.Context, rec *record.Record, targets []sink
 		if t.sink.deliver(ctx, segmentation.Input{Record: rec}) == nil {
 			continue
 		}
-		incrCounter(&m.perVaultDropped, t.vaultID)
+		m.perVaultDropped.incr(t.vaultID)
 		if ctx.Err() != nil {
 			for _, rest := range targets[i+1:] {
-				incrCounter(&m.perVaultDropped, rest.vaultID)
+				m.perVaultDropped.incr(rest.vaultID)
 			}
 			return
 		}
@@ -322,10 +330,10 @@ func (m *Manager) fanOutJoined(ctx context.Context, rec *record.Record, targets 
 		if t.sink.deliver(ctx, segmentation.Input{Record: rec, Ack: children[i]}) == nil {
 			continue
 		}
-		incrCounter(&m.perVaultDropped, t.vaultID)
+		m.perVaultDropped.incr(t.vaultID)
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			for j := i + 1; j < len(targets); j++ {
-				incrCounter(&m.perVaultDropped, targets[j].vaultID)
+				m.perVaultDropped.incr(targets[j].vaultID)
 				children[j] <- ctxErr
 			}
 			return
