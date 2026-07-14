@@ -76,7 +76,7 @@ func MapSection(blobPath string, sectionType byte) ([]byte, func() error, error)
 // LoadSection does not verify the section's SHA-256 against its TOC
 // entry on every call. Local sealed blobs are trusted; corruption is
 // the caller's problem to detect via the per-section hash if needed
-// (see TOCEntry.VerifyHash).
+// (TOCEntry.Hash records each section's SHA-256).
 //
 // Errors:
 //   - ErrSectionNotFound: TOC has no entry for sectionType.

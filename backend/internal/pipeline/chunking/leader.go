@@ -39,11 +39,6 @@ type refBatchResult struct {
 	noSeg  bool
 }
 
-// CatchUpBudget returns how many planner steps to attempt in one wake/tick pass.
-func CatchUpBudget(eligible int, policy ManifestRotationPolicy) int {
-	return catchUpBudget(eligible, policy)
-}
-
 // catchUpBudget returns how many planner steps to attempt in one wake/tick pass.
 // Each step is at most one Raft proposal. Scale with eligible registry depth so
 // a backlog drains in fewer wall-clock passes; cap so one pass cannot monopolize

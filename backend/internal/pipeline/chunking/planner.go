@@ -1,7 +1,6 @@
 package chunking
 
 import (
-	"maps"
 	"time"
 
 	"gastrolog/internal/glid"
@@ -313,14 +312,4 @@ func manifestAfterAddRef(m ManifestSnapshot, ref AddRefDecision) ManifestSnapsho
 		Bounds:       bounds,
 		Refs:         refs,
 	}
-}
-
-// resumeAfterAddRef returns resume cursor state after one ref is committed.
-func resumeAfterAddRef(resume map[glid.GLID]uint32, ref AddRefDecision) map[glid.GLID]uint32 {
-	out := maps.Clone(resume)
-	if out == nil {
-		out = make(map[glid.GLID]uint32)
-	}
-	out[ref.SegmentID] = ref.LastRecordNumber + 1
-	return out
 }

@@ -576,21 +576,16 @@ func (h *harness) waitChunkGLCB(t *testing.T, wantRecords uint32) string {
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if _, err := os.Stat(glcbPath); err == nil {
-			f, err := os.Open(glcbPath)
+			blob, err := chunkcloud.OpenMappedBlob(glcbPath)
 			if err != nil {
 				t.Fatal(err)
 			}
-			rd, err := chunkcloud.NewCacheReader(f)
-			_ = f.Close()
-			if err != nil {
-				t.Fatal(err)
-			}
-			if rd.Meta().RecordCount != wantRecords {
-				rd.Close()
+			count := blob.Meta().RecordCount
+			_ = blob.Close()
+			if count != wantRecords {
 				time.Sleep(10 * time.Millisecond)
 				continue
 			}
-			rd.Close()
 			return glcbPath
 		}
 		if err := h.chunk.PlanOnce(h.ctx, h.vaultID); err != nil {
@@ -912,12 +907,12 @@ func TestPipelineFullPath(t *testing.T) {
 	}
 
 	glcbPath := h.waitChunkGLCB(t, totalRecords)
-	f, err := os.Open(glcbPath)
+	blob, err := chunkcloud.OpenMappedBlob(glcbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
-	rd, err := chunkcloud.NewCacheReader(f)
+	defer blob.Close()
+	rd, err := blob.Reader()
 	if err != nil {
 		t.Fatal(err)
 	}

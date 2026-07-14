@@ -4,111 +4,24 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
 	"math"
 	"os"
 	"slices"
 
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/format"
 )
 
-// Reader provides random-access record reads from a GLCB on local disk.
-// Records are read directly via file.ReadAt — no decompression step.
+// Reader provides random-access record reads from a GLCB. Record frames are
+// sliced straight from the whole-file mapping of the owning MappedBlob —
+// every GLCB open path (warm cache, cloud-download promote, pipeline
+// cursors) goes through OpenMappedBlob + MappedBlob.Reader(); there is no
+// file-descriptor read path (gastrolog-2v9d67).
 type Reader struct {
 	meta           BlobMeta
 	dict           chunk.DictReader
-	index          []recordIndex // heap path when indexBytes is nil
-	indexBytes     []byte
-	indexCount     uint32
-	recordsBaseOff int64    // absolute offset of the records section in the file
-	mmapData       []byte   // when set, record frames are sliced from this mapping
-	dictBuf        []byte   // keeps dict bytes alive for MmapStringDict when not mmap'd
-	file           *os.File // GLCB file; closed (and removed unless keepFile) on Close()
-	mappedOwner    *MappedBlob
-	keepFile       bool // if true, Close() does not remove the file (local cache)
-}
-
-// NewCacheReader opens a GLCB from a local cache file.
-// Unlike NewReader, Close() does NOT remove the file — the cache
-// manages the file's lifecycle.
-func NewCacheReader(f *os.File) (*Reader, error) {
-	path := f.Name()
-	if path != "" {
-		if blob, err := OpenMappedBlob(path); err == nil {
-			_ = f.Close()
-			rd, err := blob.Reader()
-			if err != nil {
-				_ = blob.Close()
-				return nil, err
-			}
-			rd.mappedOwner = blob
-			rd.keepFile = true
-			return rd, nil
-		}
-	}
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return nil, fmt.Errorf("rewind GLCB: %w", err)
-	}
-	rd, err := NewReader(f)
-	if err != nil {
-		return nil, err
-	}
-	rd.keepFile = true
-	return rd, nil
-}
-
-// NewReader opens a GLCB from a local file.
-func NewReader(f *os.File) (*Reader, error) {
-	var pre [preambleSize]byte
-	if _, err := io.ReadFull(f, pre[:]); err != nil {
-		return nil, fmt.Errorf("read preamble: %w", err)
-	}
-	if _, err := format.DecodeAndValidate(pre[:], format.TypeCloudBlob, formatVersion); err != nil {
-		return nil, fmt.Errorf("GLCB preamble: %w", err)
-	}
-
-	layoutBuf := make([]byte, layoutMetaSize)
-	if _, err := f.ReadAt(layoutBuf, preambleSize); err != nil {
-		return nil, fmt.Errorf("read layout meta: %w", err)
-	}
-	layout, err := decodeBlobLayoutMeta(layoutBuf)
-	if err != nil {
-		return nil, err
-	}
-
-	dictBuf := make([]byte, layout.DictSize)
-	if _, err := f.ReadAt(dictBuf, int64(layout.DictOff)); err != nil {
-		return nil, fmt.Errorf("read dict: %w", err)
-	}
-	dict, err := chunk.NewMmapStringDict(dictBuf, layout.DictEntries)
-	if err != nil {
-		return nil, fmt.Errorf("decode dict: %w", err)
-	}
-
-	indexBuf := make([]byte, layout.IndexSize)
-	if _, err := f.ReadAt(indexBuf, int64(layout.IndexOff)); err != nil {
-		return nil, fmt.Errorf("read index: %w", err)
-	}
-
-	fileInfo, err := f.Stat()
-	if err != nil {
-		return nil, fmt.Errorf("stat GLCB: %w", err)
-	}
-	toc, err := ReadTOC(f, fileInfo.Size())
-	if err != nil {
-		return nil, fmt.Errorf("read TOC: %w", err)
-	}
-
-	return &Reader{
-		meta:           layoutMetaToBlobMeta(layout, toc),
-		dict:           dict,
-		indexBytes:     indexBuf,
-		indexCount:     layout.RecordCount,
-		dictBuf:        dictBuf,
-		recordsBaseOff: int64(layout.RecordsOff),
-		file:           f,
-	}, nil
+	indexBytes     []byte // record index slice into the mapping
+	recordsBaseOff int64  // absolute offset of the records section in the file
+	mmapData       []byte // record frames are sliced from this mapping
 }
 
 // ReadTOC reads the TOC footer + entries from the tail of an open blob
@@ -234,50 +147,38 @@ func decodeTOCEntry(raw []byte) TOCEntry {
 // Meta returns the blob metadata.
 func (rd *Reader) Meta() BlobMeta { return rd.meta }
 
-// ReadRecord reads a single record by position (0-based).
-// One file.ReadAt — no decompression step.
+// ReadRecord reads a single record by position (0-based). The frame is
+// decoded straight from the mapping; the payload is detached so the record
+// may outlive the cursor.
 func (rd *Reader) ReadRecord(pos uint32) (chunk.Record, error) {
-	return rd.readRecordAt(pos, true)
+	return rd.readRecordAt(pos)
 }
 
-// ReadFanOutRecord reads a record for immediate hand-off to another goroutine
-// (retention fan-out). On the mmap path the payload is detached once via
-// cloneMmapRecord; callers must not retain references across cursor close.
-// PrewarmSequential warms the page cache for the whole GLCB with
-// pread-style syscalls before a full scan. Frames served from the mmap
-// otherwise cold-fault in scan order, pinning scheduler Ps inside
-// non-preemptible kernel fault handlers — under disk saturation that
-// stalls the entire runtime and manufactures Raft elections
-// (gastrolog-1io54g). Syscall reads release their P, and the scan then
-// hits warm pages as minor faults. No-op for non-mmap readers;
-// best-effort on errors (real I/O problems surface on access).
-func (rd *Reader) PrewarmSequential() {
-	if rd.mmapData == nil || rd.file == nil {
-		return
-	}
-	info, err := rd.file.Stat()
-	if err != nil {
-		return
-	}
-	buf := make([]byte, 1<<20)
-	for off := int64(0); off < info.Size(); off += int64(len(buf)) {
-		n, err := rd.file.ReadAt(buf, off)
-		if n == 0 && err != nil {
-			return
-		}
-	}
-}
+// PrewarmSequential was meant to warm the page cache for the whole GLCB
+// with pread-style syscalls before a full scan, so cold mmap faults do not
+// pin scheduler Ps inside non-preemptible kernel fault handlers under disk
+// saturation (gastrolog-1io54g). The syscall warm needs a file descriptor,
+// and no mmap-backed Reader ever carried one — MappedBlob closes its fd
+// right after mmap — so the warm loop has been unreachable since it landed.
+// The dead fd plumbing was removed in gastrolog-2v9d67; re-wiring the warm
+// (e.g. reopening MappedBlob.Path()) is a deliberate behavior change that
+// belongs to its own issue.
+func (rd *Reader) PrewarmSequential() {}
 
+// ReadFanOutRecord reads a record for immediate hand-off to another
+// goroutine (retention fan-out). It is the chunk.RecordFanOutSource
+// interface seam; the read itself is identical to ReadRecord — the payload
+// is always detached from the mapping via cloneMmapRecord.
 func (rd *Reader) ReadFanOutRecord(pos uint32) (chunk.Record, error) {
-	return rd.readRecordAt(pos, true)
+	return rd.readRecordAt(pos)
 }
 
-func (rd *Reader) readRecordAt(pos uint32, detach bool) (chunk.Record, error) {
+func (rd *Reader) readRecordAt(pos uint32) (chunk.Record, error) {
 	if pos >= rd.meta.RecordCount {
 		return chunk.Record{}, chunk.ErrNoMoreRecords
 	}
 
-	idx, err := rd.recordIndexAt(pos)
+	idx, err := recordIndexAt(rd.indexBytes, pos)
 	if err != nil {
 		return chunk.Record{}, err
 	}
@@ -286,79 +187,28 @@ func (rd *Reader) readRecordAt(pos uint32, detach bool) (chunk.Record, error) {
 	}
 	absOff := rd.recordsBaseOff + int64(idx.Offset)
 	frameEnd := absOff + int64(idx.Size)
-	if rd.mmapData != nil {
-		if absOff < 0 || frameEnd > int64(len(rd.mmapData)) {
-			return chunk.Record{}, fmt.Errorf("record %d: frame [%d,%d) out of mmap bounds %d", pos, absOff, frameEnd, len(rd.mmapData))
-		}
-		rec, err := decodeFrame(rd.mmapData[absOff:frameEnd], rd.dict)
-		if err != nil {
-			return chunk.Record{}, err
-		}
-		// Records may outlive this cursor (search batching, export queues).
-		// Detach payload bytes from the GLCB mmap before the mapping is evicted.
-		if detach {
-			return cloneMmapRecord(rec), nil
-		}
-		return rec, nil
+	if absOff < 0 || frameEnd > int64(len(rd.mmapData)) {
+		return chunk.Record{}, fmt.Errorf("record %d: frame [%d,%d) out of mmap bounds %d", pos, absOff, frameEnd, len(rd.mmapData))
 	}
-	buf := make([]byte, idx.Size)
-	if _, err := rd.file.ReadAt(buf, absOff); err != nil {
-		return chunk.Record{}, fmt.Errorf("read record %d: %w", pos, err)
+	rec, err := decodeFrame(rd.mmapData[absOff:frameEnd], rd.dict)
+	if err != nil {
+		return chunk.Record{}, err
 	}
-
-	return decodeFrame(buf, rd.dict)
+	// Records may outlive this cursor (search batching, export queues).
+	// Detach payload bytes from the GLCB mmap before the mapping is evicted.
+	return cloneMmapRecord(rec), nil
 }
 
-// Close closes the file and (unless keepFile is set) removes it.
+// Close drops the Reader's references into the mapping. The mmap's lifetime
+// is owned by the MappedBlob that produced this Reader.
 func (rd *Reader) Close() error {
-	if rd.mappedOwner != nil {
-		owner := rd.mappedOwner
-		rd.mappedOwner = nil
-		rd.mmapData = nil
-		rd.dict = nil
-		rd.indexBytes = nil
-		return owner.Close()
-	}
-	if rd.mmapData != nil {
-		// Mapping lifetime is owned by MappedBlob, not this Reader.
-		rd.mmapData = nil
-		return nil
-	}
-	var errs []error
-	if rd.file != nil {
-		name := rd.file.Name()
-		if err := rd.file.Close(); err != nil {
-			errs = append(errs, err)
-		}
-		if !rd.keepFile {
-			_ = os.Remove(name) //nolint:gosec // name is from os.CreateTemp via rd.file
-		}
-	}
-	return errors.Join(errs...)
+	rd.mmapData = nil
+	rd.dict = nil
+	rd.indexBytes = nil
+	return nil
 }
 
 // --- Shared helpers ---
-
-// decodeDictFromBuf decodes dictionary entries from a byte buffer.
-func decodeDictFromBuf(buf []byte, dictEntries uint32) (*chunk.StringDict, error) {
-	dict := chunk.NewStringDict()
-	off := 0
-	for range dictEntries {
-		if off+2 > len(buf) {
-			return nil, errors.New("truncated dict buffer")
-		}
-		strLen := int(binary.LittleEndian.Uint16(buf[off:]))
-		off += 2
-		if off+strLen > len(buf) {
-			return nil, errors.New("truncated dict entry")
-		}
-		if _, err := dict.Add(string(buf[off : off+strLen])); err != nil {
-			return nil, fmt.Errorf("add dict entry: %w", err)
-		}
-		off += strLen
-	}
-	return dict, nil
-}
 
 // cloneMmapRecord detaches the record's payload from the GLCB mapping. Only
 // Raw aliases frame bytes: the Attrs map and its strings come from

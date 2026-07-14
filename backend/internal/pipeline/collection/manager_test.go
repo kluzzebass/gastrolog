@@ -168,11 +168,8 @@ func TestCollectOnceReceiptsSegmentAlreadyInHead(t *testing.T) {
 	root := t.TempDir()
 
 	segBytes := writeSegmentBytes(t, vaultID, segID, "already there")
-	prePath, err := collection.ReceiveToPreHead(root, segID, bytes.NewReader(segBytes))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err = collection.PromoteVerified(prePath, root, 0); err != nil {
+	prePath := pullToPreHead(t, root, segID, segBytes)
+	if _, _, err := collection.PromoteVerified(prePath, root, 0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -248,11 +245,8 @@ func TestCollectOnceReceiptsSegmentPromotedAfterLayoutWarm(t *testing.T) {
 
 	// Simulate LocalHolder: segment B lands in head/ after the layout cache warmed.
 	segBBytes := writeSegmentBytes(t, vaultID, segB, "local-b")
-	prePath, err := collection.ReceiveToPreHead(root, segB, bytes.NewReader(segBBytes))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err = collection.PromoteVerified(prePath, root, 0); err != nil {
+	prePath := pullToPreHead(t, root, segB, segBBytes)
+	if _, _, err := collection.PromoteVerified(prePath, root, 0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -592,9 +586,7 @@ func TestCollectOncePromotesPreHeadOrphan(t *testing.T) {
 	segID := glid.New()
 	root := t.TempDir()
 	data := writeSegmentBytes(t, vaultID, segID, "pre-head orphan")
-	if _, err := collection.ReceiveToPreHead(root, segID, bytes.NewReader(data)); err != nil {
-		t.Fatal(err)
-	}
+	pullToPreHead(t, root, segID, data)
 
 	pull := newMemoryPull() // intentionally empty: promote-in-place needs no pull
 	log := &staticLog{}
@@ -634,9 +626,7 @@ func TestRunConvergesPreHeadOrphanAtStartup(t *testing.T) {
 	segID := glid.New()
 	root := t.TempDir()
 	data := writeSegmentBytes(t, vaultID, segID, "startup orphan")
-	if _, err := collection.ReceiveToPreHead(root, segID, bytes.NewReader(data)); err != nil {
-		t.Fatal(err)
-	}
+	pullToPreHead(t, root, segID, data)
 
 	log := &staticLog{}
 	log.setAssigned(collection.AssignedSegment{
@@ -734,9 +724,7 @@ func TestCollectOnceReplacesStaleOrphanWithPulledBytes(t *testing.T) {
 	root := t.TempDir()
 
 	stale := writeSegmentBytes(t, vaultID, segID, "stale orphan bytes")
-	if _, err := collection.ReceiveToPreHead(root, segID, bytes.NewReader(stale)); err != nil {
-		t.Fatal(err)
-	}
+	pullToPreHead(t, root, segID, stale)
 	published := writeSegmentBytes(t, vaultID, segID, "published bytes")
 	// Same-frame-length segments share a record checksum (frame-CRC
 	// self-cancellation); the fixtures must differ in length to differ in

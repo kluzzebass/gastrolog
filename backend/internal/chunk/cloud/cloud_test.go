@@ -107,6 +107,27 @@ func writeBlobToTempFile(t *testing.T, chunkID chunk.ChunkID, vaultID glid.GLID,
 	return tmp
 }
 
+// openBlobReader mmaps the written blob and returns a record reader — the
+// production GLCB open path (OpenMappedBlob + Reader). The fd-based reader
+// constructors were deleted in gastrolog-2v9d67.
+func openBlobReader(t *testing.T, tmp *os.File) *cloud.Reader {
+	t.Helper()
+	path := tmp.Name()
+	if err := tmp.Close(); err != nil {
+		t.Fatalf("close blob file: %v", err)
+	}
+	blob, err := cloud.OpenMappedBlob(path)
+	if err != nil {
+		t.Fatalf("OpenMappedBlob: %v", err)
+	}
+	t.Cleanup(func() { _ = blob.Close() })
+	rd, err := blob.Reader()
+	if err != nil {
+		t.Fatalf("Reader: %v", err)
+	}
+	return rd
+}
+
 func TestRoundTrip(t *testing.T) {
 	chunkID, vaultID, records := testRecords()
 
@@ -136,10 +157,7 @@ func TestRoundTrip(t *testing.T) {
 
 	tmp := writeBlobToTempFile(t, chunkID, vaultID, records)
 
-	rd, err := cloud.NewReader(tmp)
-	if err != nil {
-		t.Fatalf("NewReader: %v", err)
-	}
+	rd := openBlobReader(t, tmp)
 	defer rd.Close()
 
 	// Verify reader metadata.
@@ -190,12 +208,9 @@ func TestSeekableCursor(t *testing.T) {
 	chunkID, vaultID, records := testRecords()
 	tmp := writeBlobToTempFile(t, chunkID, vaultID, records)
 
-	rd, err := cloud.NewReader(tmp)
-	if err != nil {
-		t.Fatalf("NewReader: %v", err)
-	}
+	rd := openBlobReader(t, tmp)
 
-	cursor := cloud.NewSeekableCursor(rd, chunkID)
+	cursor := cloud.NewSeekableCursorWithClose(rd, chunkID, nil)
 	defer cursor.Close()
 
 	// Forward iteration.
@@ -210,7 +225,7 @@ func TestSeekableCursor(t *testing.T) {
 		assertRecord(t, i, got, want)
 	}
 
-	_, _, err = cursor.Next()
+	_, _, err := cursor.Next()
 	if err != chunk.ErrNoMoreRecords {
 		t.Errorf("expected ErrNoMoreRecords, got %v", err)
 	}
@@ -277,17 +292,14 @@ func TestEmptyBlob(t *testing.T) {
 
 	tmp := writeBlobToTempFile(t, chunkID, vaultID, nil)
 
-	rd, err := cloud.NewReader(tmp)
-	if err != nil {
-		t.Fatalf("NewReader: %v", err)
-	}
+	rd := openBlobReader(t, tmp)
 	defer rd.Close()
 
 	if rd.Meta().RecordCount != 0 {
 		t.Errorf("expected 0 records, got %d", rd.Meta().RecordCount)
 	}
 
-	_, err = rd.ReadRecord(0)
+	_, err := rd.ReadRecord(0)
 	if err != chunk.ErrNoMoreRecords {
 		t.Errorf("expected ErrNoMoreRecords, got %v", err)
 	}
@@ -315,17 +327,14 @@ func TestLargeRoundTrip(t *testing.T) {
 
 	tmp := writeBlobToTempFile(t, chunkID, vaultID, records)
 
-	rd, err := cloud.NewReader(tmp)
-	if err != nil {
-		t.Fatalf("NewReader: %v", err)
-	}
+	rd := openBlobReader(t, tmp)
 
 	if rd.Meta().RecordCount != n {
 		t.Fatalf("meta.RecordCount = %d, want %d", rd.Meta().RecordCount, n)
 	}
 
 	// Forward cursor: read all records, verify count.
-	cursor := cloud.NewSeekableCursor(rd, chunkID)
+	cursor := cloud.NewSeekableCursorWithClose(rd, chunkID, nil)
 	defer cursor.Close()
 
 	var fwdCount int

@@ -14,14 +14,16 @@ import (
 	"gastrolog/internal/record"
 )
 
+// openGLCB opens a built GLCB via the production open path
+// (OpenMappedBlob + Reader) and returns its record reader.
 func openGLCB(t *testing.T, path string) *chunkcloud.Reader {
 	t.Helper()
-	f, err := os.Open(path)
+	blob, err := chunkcloud.OpenMappedBlob(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = f.Close() })
-	rd, err := chunkcloud.NewCacheReader(f)
+	t.Cleanup(func() { _ = blob.Close() })
+	rd, err := blob.Reader()
 	if err != nil {
 		t.Fatal(err)
 	}

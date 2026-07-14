@@ -404,7 +404,7 @@ func TestPlannerCronDueRotates(t *testing.T) {
 	}
 }
 
-func TestRecordSliceBytesMatchesFrameDelta(t *testing.T) {
+func TestFrameByteLenAtMatchesFrameDelta(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
 	segID := glid.New()
@@ -419,15 +419,15 @@ func TestRecordSliceBytesMatchesFrameDelta(t *testing.T) {
 	}
 	defer idx.Close()
 
-	b0, err := idx.RecordSliceBytes(0)
+	b0, err := idx.FrameByteLenAt(0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b1, err := idx.RecordSliceBytes(1)
+	b1, err := idx.FrameByteLenAt(1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if b0 == 0 || b1 == 0 || b0 == b1 {
-		t.Fatalf("slice bytes = %d %d", b0, b1)
+		t.Fatalf("frame byte lengths = %d %d", b0, b1)
 	}
 }

@@ -52,7 +52,7 @@ var errPublishBytesMissing = errors.New("segment bytes missing for publish")
 
 // VaultConfig is per-vault distribution state.
 type VaultConfig struct {
-	// Root is the vault storage root (contains segmentation completed/).
+	// Publisher commits completed-segment metadata to vault-ctl.
 	Publisher Publisher
 	// LocalHolder reports whether this node holds the vault locally (completed→head rename).
 	LocalHolder func() bool
@@ -799,21 +799,6 @@ func (m *Manager) stageForPublish(seg segmentation.CompletedSegment) (pendingPub
 	}, alreadyStaged, nil
 }
 
-// onCompleted stages and publishes one completed segment. Returns metadata, the
-// durable path (completed/ until publish succeeds), and retryable=true when
-// staging succeeded but vault-ctl publish failed — the file stays in completed/
-// for local holders until a retry commits the registry entry.
-func (m *Manager) onCompleted(ctx context.Context, seg segmentation.CompletedSegment) (Metadata, string, bool, error) {
-	p, _, err := m.stageForPublish(seg)
-	if err != nil {
-		return Metadata{}, "", false, err
-	}
-	if err := m.publishMeta(ctx, p.vaultID, p.meta, p.segID, p.path); err != nil {
-		return p.meta, p.path, true, err
-	}
-	return p.meta, p.path, false, nil
-}
-
 // vaultsSnapshot copies the vault map for iteration outside m.mu.
 func (m *Manager) vaultsSnapshot() map[glid.GLID]*vaultDist {
 	m.mu.Lock()
@@ -833,16 +818,6 @@ func (m *Manager) publishVaultBatch(ctx context.Context, vaultID glid.GLID, item
 		return ErrUnknownVault
 	}
 	return v.publishStagedBatch(ctx, items)
-}
-
-// publishMeta re-attempts vault-ctl publish and promotes to head/ on success.
-func (m *Manager) publishMeta(ctx context.Context, vaultID glid.GLID, meta Metadata, segID glid.GLID, path string) error {
-	return m.publishVaultBatch(ctx, vaultID, []pendingPublish{{
-		vaultID: vaultID,
-		segID:   segID,
-		path:    path,
-		meta:    meta,
-	}})
 }
 
 func (m *Manager) onPull(req PullRequest) {

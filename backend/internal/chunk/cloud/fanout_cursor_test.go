@@ -50,17 +50,18 @@ func TestGLCBCursorFanOutSource(t *testing.T) {
 
 	const recordCount = 8
 	path := writeFanOutTestGLCB(t, recordCount)
-	f, err := os.Open(path)
+	blob, err := OpenMappedBlob(path)
 	if err != nil {
-		t.Fatalf("open: %v", err)
+		t.Fatalf("OpenMappedBlob: %v", err)
 	}
-	rd, err := NewCacheReader(f)
+	defer blob.Close()
+	rd, err := blob.Reader()
 	if err != nil {
-		t.Fatalf("NewCacheReader: %v", err)
+		t.Fatalf("Reader: %v", err)
 	}
 	defer rd.Close()
 
-	cur := NewSeekableCursor(rd, chunk.ChunkID{})
+	cur := NewSeekableCursorWithClose(rd, chunk.ChunkID{}, nil)
 	fanout, ok := cur.(chunk.RecordFanOutSource)
 	if !ok {
 		t.Fatal("glcbCursor should implement RecordFanOutSource")

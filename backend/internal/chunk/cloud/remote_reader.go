@@ -13,14 +13,14 @@ import (
 	"gastrolog/internal/chunk"
 )
 
-// DownloadAndUnwrap fetches a zstd-wrapped GLCB from the blob store,
-// decompresses it into the given destination file, and returns the
-// destination file (positioned at offset 0) ready to be passed to
-// NewReader.
+// DownloadAndUnwrap fetches a zstd-wrapped GLCB from the blob store and
+// decompresses it into the given destination file, leaving dst positioned
+// at offset 0. The caller then promotes the plain GLCB into place and
+// opens it via OpenMappedBlob like any local blob (see
+// downloadCloudBlobToChunkDir in internal/chunk/file/manager.go).
 //
-// The destination file is the caller's responsibility — typically a
-// temp file or a local cache file. The caller closes / removes it via
-// the returned Reader's Close().
+// The destination file is the caller's responsibility — typically a temp
+// file promoted into the chunk dir on success, removed on failure.
 //
 // Cloud transport contract: cloud blobs are zstd-compressed wrappers
 // around GLCBs (see docs/obsoleted/vault_redesign.md decisions 6 and 9). The

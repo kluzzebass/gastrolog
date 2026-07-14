@@ -26,7 +26,6 @@ type MappedBlob struct {
 	meta           BlobMeta
 	dict           chunk.DictReader
 	indexBytes     []byte
-	indexCount     uint32
 	recordsBaseOff int64
 	toc            BlobTOC
 	recordMu       sync.Mutex
@@ -39,7 +38,7 @@ type MappedBlob struct {
 // OpenMappedBlob memory-maps path and parses the GLCB in place.
 func OpenMappedBlob(path string) (*MappedBlob, error) {
 	path = filepath.Clean(path)
-	f, err := os.Open(path) //nolint:gosec // G703: path cleaned above
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +96,6 @@ func (b *MappedBlob) TryReleaseRecordTables() bool {
 	}
 	b.dict = nil
 	b.indexBytes = nil
-	b.indexCount = 0
 	b.recordsBaseOff = 0
 	b.recordLoaded = false
 	b.recordInitErr = nil
@@ -170,10 +168,8 @@ func (b *MappedBlob) Reader() (*Reader, error) {
 		meta:           meta,
 		dict:           dict,
 		indexBytes:     indexBytes,
-		indexCount:     b.layout.RecordCount,
 		recordsBaseOff: base,
 		mmapData:       data,
-		keepFile:       true,
 	}, nil
 }
 
@@ -191,12 +187,6 @@ func (b *MappedBlob) ensureRecordTables() error {
 	return err
 }
 
-func (b *MappedBlob) loadRecordTables() error {
-	b.recordMu.Lock()
-	defer b.recordMu.Unlock()
-	return b.loadRecordTablesLocked()
-}
-
 func (b *MappedBlob) loadRecordTablesLocked() error {
 	layout := b.layout
 	if int(layout.DictOff)+int(layout.DictSize) > len(b.data) {
@@ -212,7 +202,6 @@ func (b *MappedBlob) loadRecordTablesLocked() error {
 	}
 	b.dict = dict
 	b.indexBytes = b.data[int(layout.IndexOff) : int(layout.IndexOff)+int(layout.IndexSize)]
-	b.indexCount = layout.RecordCount
 	b.recordsBaseOff = int64(layout.RecordsOff)
 	return nil
 }

@@ -48,7 +48,6 @@
 package cloud
 
 import (
-	"crypto/sha256"
 	"gastrolog/internal/glid"
 	"time"
 
@@ -110,6 +109,12 @@ const (
 // the section's offset+size+hash without caring about positional order.
 // Reuses format.Type so a section's type byte matches the type byte that
 // would appear in the same kind of standalone file.
+//
+// Only the two TS-index sections are emitted by the writer today (emitTail,
+// writer.go). The remaining type bytes are forward declarations for the
+// standalone index kinds under internal/index/file (token, JSON, KV, attr)
+// that are planned to embed as blob sections; they stay declared so the
+// type-byte ↔ index-kind mapping is pinned in one place.
 const (
 	SectionIngestTSIndex  = format.TypeIngestIndex
 	SectionSourceTSIndex  = format.TypeSourceIndex
@@ -207,13 +212,6 @@ type TOCEntry struct {
 	Offset  int64
 	Size    int64
 	Hash    [32]byte
-}
-
-// VerifyHash reports whether the given bytes hash to this entry's
-// recorded SHA-256. Used by callers (cache fills, byte-range downloads)
-// to detect corruption against the FSM-replicated truth.
-func (e *TOCEntry) VerifyHash(data []byte) bool {
-	return sha256.Sum256(data) == e.Hash
 }
 
 // newBlobTOC assembles a BlobTOC from its entries and whole-blob digest,

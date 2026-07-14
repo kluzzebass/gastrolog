@@ -85,12 +85,12 @@ func ObjectMetadata(bm BlobMeta) map[string]string {
 	return md
 }
 
-// --- glcbCursor: random-access cursor backed by direct ReadAt on a GLCB ---
+// --- glcbCursor: random-access cursor over a mmap-backed GLCB Reader ---
 //
 // Used for both local-only and cloud-backed paths. Cloud-backed callers
-// download + unwrap the GLCB into a local file (see DownloadAndUnwrap)
-// and then construct the cursor against that local file. There is no
-// "remote" mode — every read is a direct file.ReadAt.
+// download + unwrap the GLCB into a local file (see DownloadAndUnwrap),
+// promote it into the chunk dir, and open it via OpenMappedBlob like any
+// local blob. There is no "remote" mode — every read slices the mapping.
 
 type glcbCursor struct {
 	reader      *Reader
@@ -107,15 +107,9 @@ type glcbCursor struct {
 	onClose func()
 }
 
-// NewSeekableCursor creates a cursor over a local GLCB Reader.
-// Renamed from "seekable" — the cursor seeks via direct ReadAt now,
-// no zstd seekable-frame machinery involved (gastrolog-69fd5).
-func NewSeekableCursor(rd *Reader, id chunk.ChunkID) chunk.RecordCursor {
-	return NewSeekableCursorWithClose(rd, id, nil)
-}
-
-// NewSeekableCursorWithClose is like NewSeekableCursor but runs onClose once
-// when the cursor is closed (typically chunkLock.RUnlock + blob.release).
+// NewSeekableCursorWithClose creates a cursor over a local GLCB Reader and
+// runs onClose (when non-nil) exactly once when the cursor is closed
+// (typically chunkLock.RUnlock + blob.release).
 func NewSeekableCursorWithClose(rd *Reader, id chunk.ChunkID, onClose func()) chunk.RecordCursor {
 	return &glcbCursor{
 		reader:      rd,

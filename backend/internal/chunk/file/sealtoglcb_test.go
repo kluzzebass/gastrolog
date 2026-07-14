@@ -72,19 +72,14 @@ func TestSealToGLCB_ProducesValidBlob(t *testing.T) {
 		t.Fatalf("ingest TS index missing in TOC: offset=%d size=%d", toc.IngestIdxOffset, toc.IngestIdxSize)
 	}
 
-	// The blob should be readable via the chunkcloud reader; the metadata
-	// it returns should match what we appended.
-	f, err := os.Open(filepath.Clean(glcbPath))
+	// The blob should be readable via the production GLCB open path
+	// (OpenMappedBlob); the metadata it returns should match what we appended.
+	blob, err := chunkcloud.OpenMappedBlob(glcbPath)
 	if err != nil {
-		t.Fatalf("open data.glcb: %v", err)
+		t.Fatalf("open GLCB blob: %v", err)
 	}
-	defer func() { _ = f.Close() }()
-	rd, err := chunkcloud.NewReader(f)
-	if err != nil {
-		t.Fatalf("open GLCB reader: %v", err)
-	}
-	defer func() { _ = rd.Close() }()
-	if got := rd.Meta().RecordCount; got != recordCount {
+	defer func() { _ = blob.Close() }()
+	if got := blob.Meta().RecordCount; got != recordCount {
 		t.Fatalf("record count: got %d want %d", got, recordCount)
 	}
 }

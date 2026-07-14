@@ -38,11 +38,9 @@ const (
 // FormatVersion returns the on-disk segment format version for newly created files.
 func FormatVersion() byte { return formatVersion }
 
-var (
-	ErrHeaderTooSmall = errors.New("segment header too small")
-	ErrBadHeader      = errors.New("invalid segment header")
-	ErrDataEnd        = errors.New("segment data end out of range")
-)
+// ErrHeaderTooSmall is returned when a segment file is shorter than the
+// fixed header.
+var ErrHeaderTooSmall = errors.New("segment header too small")
 
 // Meta identifies a segment file on disk.
 type Meta struct {

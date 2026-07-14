@@ -34,13 +34,13 @@ func TestOpenWriterRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rf, err := os.Open(path)
+	blob, err := cloud.OpenMappedBlob(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rf.Close()
+	defer blob.Close()
 
-	rd, err := cloud.NewCacheReader(rf)
+	rd, err := blob.Reader()
 	if err != nil {
 		t.Fatal(err)
 	}

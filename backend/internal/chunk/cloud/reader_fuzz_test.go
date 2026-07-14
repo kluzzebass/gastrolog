@@ -2,12 +2,17 @@ package cloud
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"gastrolog/internal/chunk"
 )
 
-func FuzzNewReader(f *testing.F) {
+// FuzzOpenMappedBlob throws arbitrary bytes at the production GLCB open
+// path (OpenMappedBlob + Reader + first record read); it must reject
+// garbage with errors, never panic. Replaces the fuzz over the deleted
+// fd-based NewReader (gastrolog-2v9d67).
+func FuzzOpenMappedBlob(f *testing.F) {
 	// Seed corpus: empty, tiny, header-sized, and slightly larger blobs.
 	f.Add([]byte{})
 	f.Add(make([]byte, 4))
@@ -22,24 +27,20 @@ func FuzzNewReader(f *testing.F) {
 	f.Add(hdr)
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		tmp, err := os.CreateTemp(t.TempDir(), "fuzz-blob-*.glcb")
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer tmp.Close()
-
-		if _, err := tmp.Write(data); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := tmp.Seek(0, 0); err != nil {
+		path := filepath.Join(t.TempDir(), "fuzz-blob.glcb")
+		if err := os.WriteFile(path, data, 0o600); err != nil {
 			t.Fatal(err)
 		}
 
-		rd, err := NewReader(tmp)
+		blob, err := OpenMappedBlob(path)
 		if err != nil {
 			return // errors are expected
 		}
-		rd.Close()
+		if rd, err := blob.Reader(); err == nil {
+			_, _ = rd.ReadRecord(0)
+			_ = rd.Close()
+		}
+		_ = blob.Close()
 	})
 }
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 
@@ -61,35 +60,6 @@ func PullToPreHead(ctx context.Context, vaultRoot string, vaultID, segmentID gli
 		return "", err
 	}
 	return finalPath, nil
-}
-
-// ReceiveToPreHead writes pulled segment bytes into the vault pre-head area.
-func ReceiveToPreHead(vaultRoot string, segmentID glid.GLID, src io.Reader) (string, error) {
-	if err := paths.EnsurePreHeadDir(vaultRoot); err != nil {
-		return "", err
-	}
-	path := paths.PreHeadSegment(vaultRoot, segmentID)
-	f, err := os.OpenFile(filepath.Clean(path), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
-		return "", err
-	}
-	_, copyErr := io.Copy(f, src)
-	if copyErr == nil {
-		copyErr = f.Sync()
-	}
-	closeErr := f.Close()
-	if copyErr != nil {
-		_ = os.Remove(path)
-		return "", copyErr
-	}
-	if closeErr != nil {
-		_ = os.Remove(path)
-		return "", closeErr
-	}
-	if err := paths.SyncDir(paths.PreHeadDir(vaultRoot)); err != nil {
-		return "", err
-	}
-	return path, nil
 }
 
 // PromoteVerified opens the pre-head segment, verifies its checksum, and atomically

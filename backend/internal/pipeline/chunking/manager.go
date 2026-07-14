@@ -15,7 +15,6 @@ import (
 	"gastrolog/internal/glid"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/notify"
-	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
@@ -777,15 +776,6 @@ func (v *vaultChunking) requiredHolders() []string {
 		return nil
 	}
 	return v.cfg.RequiredHolders()
-}
-
-// HeadSegmentLocator resolves segments present under vaultRoot/head/.
-type HeadSegmentLocator struct {
-	Root string
-}
-
-func (l HeadSegmentLocator) SegmentPath(segmentID glid.GLID) (string, bool) {
-	return paths.FindSegment(l.Root, segmentID, paths.AreaHead)
 }
 
 // ErrUnknownVault is returned for an unregistered vault.

@@ -77,18 +77,13 @@ func TestManagerBuildOnceBuildsGLCBAndAnnouncesSeal(t *testing.T) {
 	}
 
 	glcbPath := chunking.ChunkGLCBPath(filepath.Join(home, "chunks"), chunkID)
-	f, err := os.Open(glcbPath)
+	blob, err := chunkcloud.OpenMappedBlob(glcbPath)
 	if err != nil {
 		t.Fatalf("open GLCB: %v", err)
 	}
-	defer f.Close()
-	rd, err := chunkcloud.NewReader(f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rd.Close()
-	if rd.Meta().RecordCount != 2 {
-		t.Fatalf("GLCB records = %d, want 2", rd.Meta().RecordCount)
+	defer blob.Close()
+	if blob.Meta().RecordCount != 2 {
+		t.Fatalf("GLCB records = %d, want 2", blob.Meta().RecordCount)
 	}
 
 	entry := fsm.Get(chunkID)
