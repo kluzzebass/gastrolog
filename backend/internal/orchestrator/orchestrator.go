@@ -698,28 +698,28 @@ type Config struct {
 	// shutting down alongside this node. See gastrolog-1e5ke.
 	Phase *lifecycle.Phase
 
-	// SegmentClosePolicy controls when a vault's working segment is closed,
-	// renamed to completed/, and published for collection/chunking. A zero
-	// value selects the production defaults (defaultSegmentCloseMaxBytes /
-	// defaultSegmentCloseMaxAge). Without a close policy the pipeline never
+	// SegmentCompletePolicy controls when a vault's working segment is completed —
+	// finalized, renamed to completed/, and published for collection/chunking. A zero
+	// value selects the production defaults (defaultSegmentCompleteMaxBytes /
+	// defaultSegmentCompleteMaxAge). Without a complete policy the pipeline never
 	// completes a segment, so records would stay in working/ forever and
 	// never reach a sealed GLCB (gastrolog-18f9r, Rubicon E3).
-	SegmentClosePolicy segmentation.ClosePolicy
+	SegmentCompletePolicy segmentation.CompletePolicy
 
 	// SegmentDisableFsync skips fsync on segmentation group-commit flushes
-	// (dev/load testing only). Segment close still syncs before rename.
+	// (dev/load testing only). Segment completion still syncs before rename.
 	// Wired from --segment-hot-path-fsync / GLOG_SEGMENT_HOT_PATH_FSYNC.
 	SegmentDisableFsync bool
 }
 
-// Production segment close defaults: a segment completes once it reaches
+// Production segment complete defaults: a segment completes once it reaches
 // 8 MiB or 10 seconds of age, whichever comes first. MaxAge bounds the
 // ingest→queryable latency on low-throughput vaults (age is evaluated on
-// each commit, so a trickle still closes its segment on the next record
+// each commit, so a trickle still completes its segment on the next record
 // after the window); MaxBytes bounds segment size under load.
 const (
-	defaultSegmentCloseMaxBytes = uint64(8 << 20)
-	defaultSegmentCloseMaxAge   = 10 * time.Second
+	defaultSegmentCompleteMaxBytes = uint64(8 << 20)
+	defaultSegmentCompleteMaxAge   = 10 * time.Second
 )
 
 // AlertCollector is the interface for raising and clearing system alerts.
@@ -737,10 +737,10 @@ func New(cfg Config) (*Orchestrator, error) {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	if cfg.SegmentClosePolicy == (segmentation.ClosePolicy{}) {
-		cfg.SegmentClosePolicy = segmentation.ClosePolicy{
-			MaxBytes: defaultSegmentCloseMaxBytes,
-			MaxAge:   defaultSegmentCloseMaxAge,
+	if cfg.SegmentCompletePolicy == (segmentation.CompletePolicy{}) {
+		cfg.SegmentCompletePolicy = segmentation.CompletePolicy{
+			MaxBytes: defaultSegmentCompleteMaxBytes,
+			MaxAge:   defaultSegmentCompleteMaxAge,
 		}
 	}
 
@@ -809,19 +809,19 @@ func New(cfg Config) (*Orchestrator, error) {
 	// queue-depth probes in Start.
 	o.pipelineGate = chanwatch.NewPressureGate(chanwatch.DefaultThresholds())
 	o.pipeline = pipeline.New(pipeline.Config{
-		AdmissionGate:        o.diskAdmissionGate,
-		VaultAdmissionGate:   o.vaultAdmissionGate,
-		DeferWritesGate:      o.diskDeferWrites,
-		NodeID:               o.localNodeIDGLID,
-		Logger:               baseLogger,
-		Alerts:               o.alerts,
-		Digesters:            cfg.Digesters,
-		OnCheckpoint:         cfg.OnIngesterCheckpoint,
-		PressureGate:         o.pipelineGate,
-		IngestionOutCapacity: cfg.IngestChannelSize,
-		IngestionRetryDelay:  cfg.IngesterRetryDelay,
-		SegmentClosePolicy:   cfg.SegmentClosePolicy,
-		SegmentDisableFsync:  cfg.SegmentDisableFsync,
+		AdmissionGate:         o.diskAdmissionGate,
+		VaultAdmissionGate:    o.vaultAdmissionGate,
+		DeferWritesGate:       o.diskDeferWrites,
+		NodeID:                o.localNodeIDGLID,
+		Logger:                baseLogger,
+		Alerts:                o.alerts,
+		Digesters:             cfg.Digesters,
+		OnCheckpoint:          cfg.OnIngesterCheckpoint,
+		PressureGate:          o.pipelineGate,
+		IngestionOutCapacity:  cfg.IngestChannelSize,
+		IngestionRetryDelay:   cfg.IngesterRetryDelay,
+		SegmentCompletePolicy: cfg.SegmentCompletePolicy,
+		SegmentDisableFsync:   cfg.SegmentDisableFsync,
 	})
 	if cfg.SegmentDisableFsync {
 		logger.Warn("segmentation hot-path fsync disabled — group-commit flushes are not durable until segment close; dev/load testing only")

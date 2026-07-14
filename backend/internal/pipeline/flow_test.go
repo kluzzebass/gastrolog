@@ -122,7 +122,7 @@ func (p *recordingPublisher) all() []distribution.Metadata {
 }
 
 type harnessOpts struct {
-	closePolicy    segmentation.ClosePolicy
+	completePolicy segmentation.CompletePolicy
 	localHolder    bool
 	withCollection bool // remote home: collection on a separate storage root
 	withChunking   bool // ChunkingManager on homeRoot via shared vault-ctl FSM
@@ -266,7 +266,7 @@ func newHarness(t *testing.T, nodeID, ingesterID, vaultID glid.GLID, route *rout
 	distMgr, _ := distribution.New(distribution.Config{})
 
 	segMgr, completed := segmentation.New(segmentation.Config{
-		ClosePolicy:        opts.closePolicy,
+		CompletePolicy:     opts.completePolicy,
 		SyncBatchSize:      1,
 		SyncBatchWindow:    time.Millisecond,
 		OnSync:             func() { h.syncs.Add(1) },
@@ -729,7 +729,7 @@ func TestPipelineIngestToDistribution(t *testing.T) {
 	}
 
 	h := newHarness(t, nodeID, ingesterID, vaultID, route, harnessOpts{
-		closePolicy: segmentation.ClosePolicy{MaxBytes: 256},
+		completePolicy: segmentation.CompletePolicy{MaxBytes: 256},
 	})
 	msgs := make([]ingestion.IngesterMessage, 8)
 	for i := range msgs {
@@ -786,8 +786,8 @@ func TestPipelineIngestToDistributionLocalHolder(t *testing.T) {
 	}
 
 	h := newHarness(t, nodeID, ingesterID, vaultID, route, harnessOpts{
-		closePolicy: segmentation.ClosePolicy{MaxBytes: 256},
-		localHolder: true,
+		completePolicy: segmentation.CompletePolicy{MaxBytes: 256},
+		localHolder:    true,
 	})
 	msgs := make([]ingestion.IngesterMessage, 8)
 	for i := range msgs {
@@ -824,7 +824,7 @@ func TestPipelineFullPath(t *testing.T) {
 	}
 
 	h := newHarness(t, nodeID, ingesterID, vaultID, route, harnessOpts{
-		closePolicy:    segmentation.ClosePolicy{MaxBytes: 256},
+		completePolicy: segmentation.CompletePolicy{MaxBytes: 256},
 		withCollection: true,
 		withChunking:   true,
 		// MaxRecords stays above the published record count so the event-driven
@@ -955,7 +955,7 @@ func TestPipelineOpenChunkQueryBeforeSeal(t *testing.T) {
 	}
 
 	h := newHarness(t, nodeID, ingesterID, vaultID, route, harnessOpts{
-		closePolicy:    segmentation.ClosePolicy{MaxBytes: 256},
+		completePolicy: segmentation.CompletePolicy{MaxBytes: 256},
 		withCollection: true,
 		withChunking:   true,
 		chunkPolicy:    chunking.ManifestRotationPolicy{MaxRecords: 100},
@@ -1035,7 +1035,7 @@ func TestPipelineRemotePullFailureThenRecovery(t *testing.T) {
 	}
 
 	h := newHarness(t, nodeID, ingesterID, vaultID, route, harnessOpts{
-		closePolicy:    segmentation.ClosePolicy{MaxBytes: 256},
+		completePolicy: segmentation.CompletePolicy{MaxBytes: 256},
 		withCollection: true,
 		pullFails:      1,
 	})
@@ -1069,7 +1069,7 @@ func TestPipelineRemoteHomeFollowerBuildsGLCBWithoutSealing(t *testing.T) {
 	}
 
 	h := newHarness(t, nodeID, ingesterID, vaultID, route, harnessOpts{
-		closePolicy:    segmentation.ClosePolicy{MaxBytes: 256},
+		completePolicy: segmentation.CompletePolicy{MaxBytes: 256},
 		withCollection: true,
 		withChunking:   true,
 		chunkLeader:    func() bool { return false },
@@ -1127,7 +1127,7 @@ func TestPipelineRemoteHomePlannerRequiresLocalHead(t *testing.T) {
 	}
 
 	h := newHarness(t, nodeID, ingesterID, vaultID, route, harnessOpts{
-		closePolicy:    segmentation.ClosePolicy{MaxBytes: 256},
+		completePolicy: segmentation.CompletePolicy{MaxBytes: 256},
 		withCollection: true,
 		withChunking:   true,
 		chunkPolicy:    chunking.ManifestRotationPolicy{MaxRecords: 100},
@@ -1391,7 +1391,7 @@ func TestPipelineRecoversOrphanedWorkingSegmentAcrossNodes(t *testing.T) {
 
 	var orphanID glid.GLID
 	h := newHarness(t, nodeID, ingesterID, vaultID, route, harnessOpts{
-		closePolicy:    segmentation.ClosePolicy{MaxBytes: 1 << 20},
+		completePolicy: segmentation.CompletePolicy{MaxBytes: 1 << 20},
 		withCollection: true,
 		seedOriginRoot: func(root string) {
 			orphanID = seedCrashedWorkingSegment(t, root, vaultID, 3)

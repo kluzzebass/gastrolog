@@ -37,10 +37,10 @@ import (
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
-// pipelineTestClosePolicy completes a working segment on every commit (any
+// pipelineTestCompletePolicy completes a working segment on every commit (any
 // non-empty segment exceeds 1 byte), so a finite ingest batch fully drains
 // into published segments without waiting on size/age thresholds.
-var pipelineTestClosePolicy = segmentation.ClosePolicy{MaxBytes: 1}
+var pipelineTestCompletePolicy = segmentation.CompletePolicy{MaxBytes: 1}
 
 // pipelineChunkMaxRecords seals the open-chunk manifest at exactly this many
 // records (the planner splits segment refs so a manifest never overshoots),
@@ -307,7 +307,7 @@ func TestOrchPipeline_ClusterIngestToSealedGLCB(t *testing.T) {
 	h := newOrchRelHarness(t, 4,
 		withExtraVault([]int{0, 1, 2}),
 		withMatchAllRoute(1),
-		withPipelineCluster(pipelineTestClosePolicy, pipelineChunkMaxRecords),
+		withPipelineCluster(pipelineTestCompletePolicy, pipelineChunkMaxRecords),
 	)
 	v := h.vaults[1]
 	homeIdxs := []int{0, 1, 2}
@@ -376,7 +376,7 @@ func TestOrchPipeline_PlacementChurnConverges(t *testing.T) {
 	h := newOrchRelHarness(t, 4,
 		withExtraVault([]int{0, 1, 2}),
 		withMatchAllRoute(1),
-		withPipelineCluster(pipelineTestClosePolicy, pipelineChunkMaxRecords),
+		withPipelineCluster(pipelineTestCompletePolicy, pipelineChunkMaxRecords),
 	)
 	v := h.vaults[1]
 	ingestNode := h.nodeIDs[3]
@@ -468,7 +468,7 @@ func TestOrchPipeline_IngesterReassignmentKeepsFlowing(t *testing.T) {
 	h := newOrchRelHarness(t, 4,
 		withExtraVault([]int{0, 1, 2}),
 		withMatchAllRoute(1),
-		withPipelineCluster(pipelineTestClosePolicy, pipelineChunkMaxRecords),
+		withPipelineCluster(pipelineTestCompletePolicy, pipelineChunkMaxRecords),
 	)
 	v := h.vaults[1]
 
@@ -574,7 +574,7 @@ func TestOrchPipeline_SustainedIngestManifestKeepsPace(t *testing.T) {
 	h := newOrchRelHarness(t, 4,
 		withExtraVault([]int{0, 1, 2}),
 		withMatchAllRoute(1),
-		withPipelineCluster(pipelineTestClosePolicy, pipelineChunkMaxRecords),
+		withPipelineCluster(pipelineTestCompletePolicy, pipelineChunkMaxRecords),
 	)
 	v := h.vaults[1]
 	leaderNode := h.nodeIDs[0]

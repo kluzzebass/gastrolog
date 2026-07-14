@@ -127,7 +127,7 @@ func TestOrchPipeline_ReleaseDrainsRegistryAndHead(t *testing.T) {
 	h := newOrchRelHarness(t, 4,
 		withExtraVault([]int{0, 1, 2}),
 		withMatchAllRoute(1),
-		withPipelineCluster(pipelineTestClosePolicy, pipelineChunkMaxRecords),
+		withPipelineCluster(pipelineTestCompletePolicy, pipelineChunkMaxRecords),
 	)
 	v := h.vaults[1]
 	homeIdxs := []int{0, 1, 2}
@@ -174,7 +174,7 @@ func TestOrchPipeline_HomeDownDuringIngestCatchesUpOnRestart(t *testing.T) {
 	h := newOrchRelHarness(t, 4,
 		withExtraVault([]int{0, 1, 2}),
 		withMatchAllRoute(1),
-		withPipelineCluster(pipelineTestClosePolicy, pipelineChunkMaxRecords),
+		withPipelineCluster(pipelineTestCompletePolicy, pipelineChunkMaxRecords),
 	)
 	v := h.vaults[1]
 	homeIdxs := []int{0, 1, 2}

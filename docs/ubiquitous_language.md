@@ -752,7 +752,7 @@ the collector.
 
 - **working/** — the segment currently being appended by Segmentation. Its
   header is provisional; the segment is not yet eligible for anything.
-- **completed/** — closed segments, renamed from `working/`. Published to
+- **completed/** — completed segments, renamed from `working/`. Published to
   vault-ctl and served for pulls; retained until release.
 - **pre-head/** — in-flight transfers on a collecting home; invisible to
   queries and Chunking. A failed or corrupt transfer is discarded here and
@@ -773,7 +773,7 @@ the collector.
   Collection on each home can pull it. Metadata only — bytes move by pull.
 
 - **Promote** — atomic rename moving a segment into the next staging area:
-  `working/` → `completed/` at segment close (Segmentation),
+  `working/` → `completed/` at segment completion (Segmentation, `CompletePolicy`),
   `pre-head/` → `head/` after verification (Collection, `PromoteVerified`),
   and `completed/` → `head/` directly when the origin is itself a holder
   (Distribution; a local move, never a stream to self).
@@ -863,6 +863,7 @@ Three verbs cover segment end-of-life, one per layer — they are not synonyms:
 | synthetic attribute | source predicate, RouteSource | Source/content predicates unify via `_source`/`_ingester`/`_vault`/`_reason` overlays at routing-eval time. |
 | retire (segment, distribution) | forget | Distribution's node-local drop of segment tracking was called `forgetSegment` while the exported entry point was `RetireSegments`; one verb per meaning (gastrolog-34zx9y). See [Pipeline](#9-pipeline) for the release / retire / purge distinction. |
 | glcb (container-format package) | chunk/cloud | The GLCB container package lived at `chunk/cloud`, but GLCB is universal — local-only vaults seal into it too. The package is `chunk/glcb`; "cloud" names only genuine object-storage interaction (blobstore, cloud-backed cache, cloud upload) (gastrolog-34zx9y). |
+| complete (segment lifecycle) | close | "Close" is overloaded: writer shutdown vs the segment lifecycle event (working/ → completed/). The rotation trigger is `segmentation.CompletePolicy` and a segment COMPLETES; reserve Close for genuine resource shutdown (`Close()` methods, closed writers) (gastrolog-34zx9y). |
 
 ### Timestamp conventions
 
