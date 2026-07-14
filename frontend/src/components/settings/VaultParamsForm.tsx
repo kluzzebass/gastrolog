@@ -2,6 +2,7 @@ import { useState } from "react";
 import { FormField, TextInput, TextArea, SelectInput } from "./FormField";
 import { useTestCloudService } from "../../api/hooks/useVaults";
 import { useThemeClass } from "../../hooks/useThemeClass";
+import { endpointBlocked, endpointSchemeError } from "../../utils/endpointScheme";
 
 interface VaultParamsFormProps {
   vaultType: string;
@@ -139,15 +140,17 @@ export function VaultParamsForm({
         {(backing === "s3" || backing === "gcs") && (
           <FormField
             label="Endpoint"
-            description={backing === "s3"
+            description={`${backing === "s3"
               ? "Custom endpoint for S3-compatible services (MinIO, R2, B2, etc.)"
-              : "Custom endpoint for GCS-compatible services"}
+              : "Custom endpoint for GCS-compatible services"} — must include the scheme (https:// or http://)`}
             dark={dark}
           >
             <TextInput
               value={get("endpoint")}
               onChange={(v) => set("endpoint", v)}
               placeholder=""
+              error={endpointSchemeError(get("endpoint")) !== null}
+              title={endpointSchemeError(get("endpoint")) ?? undefined}
               dark={dark}
               mono
             />
@@ -196,7 +199,7 @@ function TestCloudServiceButton({
     <div className="flex items-center gap-3">
       <button
         type="button"
-        disabled={testCloud.isPending || !hasRequired}
+        disabled={testCloud.isPending || !hasRequired || endpointBlocked(provider, params.endpoint ?? "")}
         onClick={() => {
           setTestResult(null);
           testCloud.mutate(

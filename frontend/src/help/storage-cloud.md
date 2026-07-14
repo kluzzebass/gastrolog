@@ -27,9 +27,9 @@ Supports Amazon S3, MinIO, Cloudflare R2, Backblaze B2, Wasabi, Hetzner, Digital
 | Region | No | AWS region (e.g. `us-east-1`) |
 | Access Key | Depends | Leave empty for IAM roles / default credential chain |
 | Secret Key | Depends | |
-| Endpoint | Depends | Required for non-AWS S3-compatible services |
+| Endpoint | Depends | Required for non-AWS S3-compatible services. Must include an explicit scheme: `https://…`, or `http://…` for a plaintext local/dev endpoint — a bare `host:port` is rejected. |
 
-When credentials are left empty, the AWS SDK resolves them automatically: environment variables, shared credentials file (`~/.aws/credentials`), and IAM instance roles. For S3-compatible services, set **Endpoint** and provide explicit credentials.
+When credentials are left empty, the AWS SDK resolves them automatically: environment variables, shared credentials file (`~/.aws/credentials`), and IAM instance roles. For S3-compatible services, set **Endpoint** (with its scheme, e.g. `https://minio.example.com:9000`) and provide explicit credentials.
 
 ### Azure Blob Storage
 
@@ -44,7 +44,7 @@ When credentials are left empty, the AWS SDK resolves them automatically: enviro
 |-------|----------|-------|
 | Bucket | Yes | |
 | Credentials JSON | Depends | Leave empty for Application Default Credentials |
-| Endpoint | No | Custom endpoint URL |
+| Endpoint | No | Custom endpoint URL. Must include an explicit scheme (`https://` or `http://`) — a bare `host:port` is rejected. |
 
 When Credentials JSON is empty, the GCS client uses ADC: the `GOOGLE_APPLICATION_CREDENTIALS` environment variable, attached service accounts on GCE/GKE, or `gcloud auth application-default login`.
 
