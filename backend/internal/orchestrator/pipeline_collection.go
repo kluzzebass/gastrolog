@@ -263,7 +263,7 @@ func copyLocalSegmentFile(vaultRoot string, segmentID glid.GLID, dest io.Writer)
 	}{
 		{paths.HeadSegment(vaultRoot, segmentID), 0},
 		{paths.CompletedSegment(vaultRoot, segmentID), 0},
-		{paths.PreHeadSegment(vaultRoot, segmentID), segment.HeaderSizeV1},
+		{paths.PreHeadSegment(vaultRoot, segmentID), segment.HeaderSize},
 	} {
 		f, err := os.Open(filepath.Clean(spec.path))
 		if err != nil {
