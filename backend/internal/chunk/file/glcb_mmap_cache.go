@@ -5,17 +5,17 @@ import (
 	"os"
 
 	"gastrolog/internal/chunk"
-	chunkcloud "gastrolog/internal/chunk/cloud"
+	"gastrolog/internal/chunk/glcb"
 )
 
 type mappedGLCBEntry struct {
 	path string
-	blob *chunkcloud.MappedBlob
+	blob *glcb.MappedBlob
 }
 
 var _ chunk.GLCBSectionReader = (*Manager)(nil)
 
-func (m *Manager) mappedGLCB(id chunk.ChunkID) (*chunkcloud.MappedBlob, error) {
+func (m *Manager) mappedGLCB(id chunk.ChunkID) (*glcb.MappedBlob, error) {
 	path := m.glcbPath(id)
 	if v, ok := m.glcbMapped.Load(id); ok {
 		e := v.(*mappedGLCBEntry)
@@ -32,7 +32,7 @@ func (m *Manager) mappedGLCB(id chunk.ChunkID) (*chunkcloud.MappedBlob, error) {
 	if _, err := os.Stat(path); err != nil {
 		return nil, err
 	}
-	blob, err := chunkcloud.OpenMappedBlob(path)
+	blob, err := glcb.OpenMappedBlob(path)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +68,7 @@ func (m *Manager) WithGLCBSection(id chunk.ChunkID, sectionType byte, fn func([]
 
 	section, ok := blob.Section(sectionType)
 	if !ok || len(section) == 0 {
-		return fmt.Errorf("%w: type=0x%02x in %s", chunkcloud.ErrSectionNotFound, sectionType, blob.Path())
+		return fmt.Errorf("%w: type=0x%02x in %s", glcb.ErrSectionNotFound, sectionType, blob.Path())
 	}
 	return fn(section)
 }

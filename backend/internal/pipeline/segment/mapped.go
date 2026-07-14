@@ -1,8 +1,8 @@
 package segment
 
 import (
-	"encoding/binary"
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"gastrolog/internal/record"
@@ -59,6 +59,7 @@ func warmPageCache(f *os.File, size int64) {
 
 // OpenMapped maps a finalized segment read-only.
 func OpenMapped(path string) (*MappedSegment, error) {
+	mappedOpens.Add(1)
 	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		return nil, err
@@ -76,7 +77,7 @@ func OpenMapped(path string) (*MappedSegment, error) {
 
 	warmPageCache(f, size)
 
-	data, err := syscall.Mmap(int(f.Fd()), 0, int(size), syscall.PROT_READ, syscall.MAP_SHARED) //nolint:gosec // G115: fd is a small non-negative int; size bounded by segment close policy
+	data, err := syscall.Mmap(int(f.Fd()), 0, int(size), syscall.PROT_READ, syscall.MAP_SHARED) //nolint:gosec // G115: fd is a small non-negative int; size bounded by segment complete policy
 	if err != nil {
 		_ = f.Close()
 		return nil, fmt.Errorf("mmap segment: %w", err)

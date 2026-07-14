@@ -67,7 +67,7 @@ type ChunkManager interface {
 	// sorted index) of the first entry with IngestTS >= ts. Distinct from
 	// FindIngestStartPosition which returns the physical record position;
 	// the two differ for chunks where physical layout doesn't match
-	// IngestTS order (cloud chunks built via ImportRecords). Histogram
+	// IngestTS order (cloud-backed chunks built via ImportRecords). Histogram
 	// bucket counting must use rank arithmetic. Returns (0, false, nil)
 	// when the chunk has no in-manager TS index (sealed local file
 	// chunks — caller falls through to IndexManager.FindIngestEntryIndex).
@@ -76,8 +76,8 @@ type ChunkManager interface {
 
 	// HasLocalContent reports whether the chunk's record content is fully
 	// available on local disk — true for sealed local file chunks and for
-	// cloud chunks whose GLCB blob is already in the warm cache. False for
-	// cloud chunks that would require an S3 download. Callers that perform
+	// cloud-backed chunks whose GLCB blob is already in the warm cache. False for
+	// cloud-backed chunks that would require an S3 download. Callers that perform
 	// content-bearing reads purely as a side-effect (notably histogram
 	// level breakdowns) gate on this so that a histogram refresh never
 	// triggers cloud blob downloads. See gastrolog-66b7x.
@@ -271,10 +271,10 @@ type ChunkCacheEvictor interface {
 	EvictCache()
 }
 
-// CloudChunkInfo carries the metadata needed to register a cloud-backed chunk
+// CloudBackedChunkInfo carries the metadata needed to register a cloud-backed chunk
 // on a follower without streaming any records. All fields come from the vault
 // Raft FSM entry (populated by AnnounceSeal + AnnounceUpload on the leader).
-type CloudChunkInfo struct {
+type CloudBackedChunkInfo struct {
 	WriteStart      time.Time
 	WriteEnd        time.Time
 	IngestStart     time.Time
@@ -292,12 +292,12 @@ type CloudChunkInfo struct {
 	IngestTSMonotonic bool // see ChunkMeta.IngestTSMonotonic
 }
 
-// CloudChunkRegistrar extends ChunkManager with the ability to register a
+// CloudBackedChunkRegistrar extends ChunkManager with the ability to register a
 // cloud-backed chunk from metadata alone — no local files, no record streaming.
 // Used by follower nodes to adopt chunks from the shared S3 bucket after the
 // vault FSM propagates the leader's AnnounceUpload.
-type CloudChunkRegistrar interface {
-	RegisterCloudChunk(id ChunkID, info CloudChunkInfo) error
+type CloudBackedChunkRegistrar interface {
+	RegisterCloudBackedChunk(id ChunkID, info CloudBackedChunkInfo) error
 }
 
 // ExternalGLCBInfo carries the metadata needed to register a sealed chunk

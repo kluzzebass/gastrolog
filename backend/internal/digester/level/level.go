@@ -21,7 +21,7 @@ type Digester struct{}
 // New creates a level digester.
 func New() *Digester { return &Digester{} }
 
-func (d *Digester) Digest(msg *ingestion.Message) error {
+func (d *Digester) Digest(msg *ingestion.IngestMessage) error {
 	// Skip if level/severity already set by ingester.
 	if _, ok := msg.Attrs["level"]; ok {
 		return nil

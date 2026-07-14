@@ -26,7 +26,7 @@ type Digester struct{}
 // New creates a timestamp digester.
 func New() *Digester { return &Digester{} }
 
-func (d *Digester) Digest(msg *ingestion.Message) error {
+func (d *Digester) Digest(msg *ingestion.IngestMessage) error {
 	if !msg.SourceTS.IsZero() {
 		return nil
 	}

@@ -10,7 +10,7 @@ File storages are locally-attached disk resources declared per node. Each file s
 - **Path** — where chunk data is stored, relative to the node's home directory. Absolute paths (starting with /) are also supported. Defaults to `storage/<name>`.
 - **Storage Class** — a numeric rank that indicates speed. Lower numbers mean faster storage (e.g. 1 for NVMe, 2 for SSD, 3 for HDD). Multiple file storages can share the same class to form a pool.
 
-File storages on the local node can be added, edited, or removed. Remote node file storages are displayed read-only.
+File storages on the local node can be added, edited, or removed. Peer node file storages are displayed read-only.
 
 ### How vaults use file storages
 
@@ -24,7 +24,7 @@ Cloud storage endpoints are cluster-wide — not tied to any specific node. Clou
 
 **Providers:**
 
-- **S3** — Amazon S3 or S3-compatible services (MinIO, Ceph, DigitalOcean Spaces, etc.). Requires Bucket, Region, and access credentials (Access Key + Secret Key). Set the Endpoint field for non-AWS services.
+- **S3** — Amazon S3 or S3-compatible services (MinIO, Ceph, DigitalOcean Spaces, etc.). Requires Bucket, Region, and access credentials (Access Key + Secret Key). Set the Endpoint field for non-AWS services — it must include an explicit scheme (`https://…`, or `http://…` for a plaintext local/dev endpoint).
 - **GCS** — Google Cloud Storage. Requires Bucket and a service account Credentials JSON.
 - **Azure** — Azure Blob Storage. Requires a Container name and Connection String.
 

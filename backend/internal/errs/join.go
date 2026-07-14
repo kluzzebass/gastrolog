@@ -1,6 +1,7 @@
 package errs
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -52,6 +53,19 @@ func SummaryJoin(errs ...error) error {
 		parts = append(parts, b.err.Error())
 	}
 	return &joined{msg: strings.Join(parts, "; "), unwrap: unwrap}
+}
+
+// Unpack returns the sub-errors of the SummaryJoin aggregate in err's chain,
+// or nil when there is none. Callers classifying a pass-level error use this
+// to walk the independent failures it summarizes without also tearing apart
+// annotation wraps (fmt.Errorf %w chains, errors.Join sentinel attachments),
+// which stay whole for errors.Is.
+func Unpack(err error) []error {
+	var j *joined
+	if errors.As(err, &j) {
+		return j.unwrap
+	}
+	return nil
 }
 
 func compact(errs []error) []error {

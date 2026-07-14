@@ -8,7 +8,7 @@ import (
 )
 
 // TestDistributeChunkRecordsByOverlap covers the fallback used when a
-// cloud chunk's local IngestTS index isn't cached — without this, the
+// cloud-backed chunk's local IngestTS index isn't cached — without this, the
 // histogram silently undercounts the chunk's records (vault inspector
 // shows N records, histogram shows N/2).
 func TestDistributeChunkRecordsByOverlap(t *testing.T) {
@@ -123,15 +123,15 @@ func TestDistributeChunkRecordsByOverlap(t *testing.T) {
 		}
 	})
 
-	// Regression: non-monotonic cloud chunks (IngestEnd < IngestStart) used
+	// Regression: non-monotonic cloud-backed chunks (IngestEnd < IngestStart) used
 	// to dump RecordCount into the IngestStart bucket via the span≤0
-	// branch — but for a cloud chunk built from out-of-order records,
+	// branch — but for a cloud-backed chunk built from out-of-order records,
 	// IngestStart is the last-APPENDED record's TS (which can be recent),
 	// not the chunk's actual TS upper bound. Result: histogram attributed
 	// records to local-only recent buckets every ~rotation interval.
 	// The fix sorts the bounds before computing span/overlap so records
 	// distribute across the chunk's actual [min, max] TS envelope.
-	t.Run("non-monotonic cloud chunk distributes across sorted [min,max] envelope", func(t *testing.T) {
+	t.Run("non-monotonic cloud-backed chunk distributes across sorted [min,max] envelope", func(t *testing.T) {
 		counts := make([]int64, numBuckets)
 		cloudFlags := make([]bool, numBuckets)
 		// Reversed: IngestStart later than IngestEnd. After sorting, the
@@ -173,7 +173,7 @@ func TestDistributeChunkRecordsByOverlap(t *testing.T) {
 		}
 	})
 
-	t.Run("monotonic cloud chunk marks cloudFlags only on overlapping buckets", func(t *testing.T) {
+	t.Run("monotonic cloud-backed chunk marks cloudFlags only on overlapping buckets", func(t *testing.T) {
 		counts := make([]int64, numBuckets)
 		cloudFlags := make([]bool, numBuckets)
 		// Chunk spans bucket 3 + bucket 4 only; firstBucket/lastBucket of

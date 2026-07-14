@@ -27,7 +27,13 @@ func newVaultSink(ch chan<- segmentation.Input) *vaultSink {
 	return &vaultSink{ch: ch}
 }
 
-func (s *vaultSink) deliver(ctx context.Context, item segmentation.Input) bool {
+// deliver hands item to the vault's segmentation queue. It returns nil on
+// success, errVaultUnwired when the sink was revoked (vault unregistered
+// mid-flight — the caller should keep fanning out to its remaining sinks), or
+// the context error when ctx is done (the caller should stop: every subsequent
+// send would fail the same way). On failure the item's ack, if any, is nacked
+// here so the caller never owes it a result.
+func (s *vaultSink) deliver(ctx context.Context, item segmentation.Input) error {
 	s.inflight.Add(1)
 	defer s.inflight.Done()
 
@@ -38,15 +44,15 @@ func (s *vaultSink) deliver(ctx context.Context, item segmentation.Input) bool {
 
 	if dead {
 		sendAck(item.Ack, errVaultUnwired)
-		return false
+		return errVaultUnwired
 	}
 
 	select {
 	case ch <- item:
-		return true
+		return nil
 	case <-ctx.Done():
 		sendAck(item.Ack, ctx.Err())
-		return false
+		return ctx.Err()
 	}
 }
 

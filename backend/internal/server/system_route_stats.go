@@ -18,10 +18,10 @@ func (s *SystemServer) GetRouteStats(
 ) (*connect.Response[apiv1.GetRouteStatsResponse], error) {
 	// Start with local node stats.
 	rs := s.orch.GetRouteStats()
-	totalIngested := rs.Ingested
-	totalDropped := rs.Dropped
 	totalRouted := rs.Routed
-	filterActive := s.orch.IsFilterSetActive()
+	totalUnmatched := rs.Unmatched
+	totalMatched := rs.Matched
+	routeTableActive := s.orch.IsRouteTableActive()
 
 	// Merge per-vault stats into a map for dedup across nodes.
 	vaultMap := make(map[string]*apiv1.VaultRouteStats)
@@ -43,12 +43,12 @@ func (s *SystemServer) GetRouteStats(
 
 	// Add peer stats if in cluster mode.
 	if s.peerRouteStats != nil {
-		pIngested, pDropped, pRouted, pFilterActive, pVaultStats, pRouteStats := s.peerRouteStats.AggregateRouteStats()
-		totalIngested += pIngested
-		totalDropped += pDropped
+		pRouted, pUnmatched, pMatched, pRouteTableActive, pVaultStats, pRouteStats := s.peerRouteStats.AggregateRouteStats()
 		totalRouted += pRouted
-		if pFilterActive {
-			filterActive = true
+		totalUnmatched += pUnmatched
+		totalMatched += pMatched
+		if pRouteTableActive {
+			routeTableActive = true
 		}
 		mergeVaultRouteStats(vaultMap, pVaultStats)
 		mergePerRouteStats(routeMap, pRouteStats)
@@ -59,20 +59,20 @@ func (s *SystemServer) GetRouteStats(
 	// instant/30s/1m AND spark history, so the UI never fabricates history
 	// client-side. Fallback (single-node, tests): sum local + peer
 	// per-horizon rates, sparkless (gastrolog-4eh5ns).
-	var ingestedRate, routedRate *apiv1.ThroughputRate
+	var routedRate, matchedRate *apiv1.ThroughputRate
 	if s.clusterRouteRates != nil {
-		ingestedRate, routedRate = s.clusterRouteRates()
+		routedRate, matchedRate = s.clusterRouteRates()
 	} else {
-		ingestedRate, routedRate = clusterRouteRates(s.localStats, s.peerRouteStats)
+		routedRate, matchedRate = clusterRouteRates(s.localStats, s.peerRouteStats)
 	}
 
 	resp := &apiv1.GetRouteStatsResponse{
-		TotalIngested:   totalIngested,
-		TotalDropped:    totalDropped,
 		TotalRouted:     totalRouted,
-		FilterSetActive: filterActive,
-		IngestedRate:    ingestedRate,
+		TotalUnmatched:    totalUnmatched,
+		TotalMatched:    totalMatched,
+		RouteTableActive: routeTableActive,
 		RoutedRate:      routedRate,
+		MatchedRate:     matchedRate,
 	}
 	for _, vs := range vaultMap {
 		resp.VaultStats = append(resp.VaultStats, vs)
@@ -116,19 +116,19 @@ func mergePerRouteStats(m map[string]*apiv1.PerRouteStats, stats []*apiv1.PerRou
 // overwritten with 0/s while the RPC reported correct rates
 // (gastrolog-4eh5ns). Sparks stay per-node (phase-skewed sums would
 // fabricate a series no node observed).
-func clusterRouteRates(localStats func() *apiv1.NodeStats, peers PeerRouteStatsProvider) (ingested, routed *apiv1.ThroughputRate) {
-	ingested = &apiv1.ThroughputRate{}
+func clusterRouteRates(localStats func() *apiv1.NodeStats, peers PeerRouteStatsProvider) (routed, matched *apiv1.ThroughputRate) {
 	routed = &apiv1.ThroughputRate{}
+	matched = &apiv1.ThroughputRate{}
 	if peers != nil {
-		ingested, routed = peers.AggregateRouteRates()
+		routed, matched = peers.AggregateRouteRates()
 	}
 	if localStats != nil {
 		if ls := localStats(); ls != nil {
-			addRate(ingested, ls.RouteIngested)
 			addRate(routed, ls.RouteRouted)
+			addRate(matched, ls.RouteMatched)
 		}
 	}
-	return ingested, routed
+	return routed, matched
 }
 
 func addRate(dst, src *apiv1.ThroughputRate) {

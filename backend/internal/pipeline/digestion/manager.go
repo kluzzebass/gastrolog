@@ -4,15 +4,15 @@ import (
 	"context"
 	"errors"
 	"maps"
-	"sync"
 	"sync/atomic"
 
+	"gastrolog/internal/pipeline"
 	"gastrolog/internal/pipeline/ingestion"
 	"gastrolog/internal/record"
 )
 
-// ErrNotRunning is returned when Run is called twice.
-var ErrNotRunning = errors.New("digestion manager not running")
+// ErrAlreadyRunning is returned when Run is called twice.
+var ErrAlreadyRunning = errors.New("digestion manager already running")
 
 // Config configures a DigestionManager worker pool.
 type Config struct {
@@ -32,7 +32,6 @@ type Manager struct {
 	digesters []Digester
 
 	running atomic.Bool
-	wg      sync.WaitGroup
 }
 
 // New returns a manager and the read-only routing queue of digested outputs.
@@ -64,29 +63,19 @@ func New(cfg Config) (*Manager, <-chan Output) {
 // rendezvous on every record and showed up as runtime sellock spin at ~31%
 // of calm-profile CPU. Blocking sends on the bounded out queue are the
 // backpressure mechanism — never bypass them.
-func (m *Manager) Run(ctx context.Context, in <-chan ingestion.Message) error {
+func (m *Manager) Run(ctx context.Context, in <-chan ingestion.IngestMessage) error {
 	if !m.running.CompareAndSwap(false, true) {
-		return ErrNotRunning
+		return ErrAlreadyRunning
 	}
 	defer close(m.out)
 
-	for range m.workers {
-		m.wg.Go(func() {
-			m.worker(in)
-		})
-	}
-
-	m.wg.Wait()
+	pipeline.RunWorkerPool(m.workers, in, func(msg ingestion.IngestMessage) {
+		m.out <- m.digest(msg)
+	})
 	return ctx.Err()
 }
 
-func (m *Manager) worker(in <-chan ingestion.Message) {
-	for msg := range in {
-		m.out <- m.digest(msg)
-	}
-}
-
-func (m *Manager) digest(msg ingestion.Message) Output {
+func (m *Manager) digest(msg ingestion.IngestMessage) Output {
 	work := msg
 	for _, d := range m.digesters {
 		if err := d.Digest(&work); err != nil {
@@ -97,7 +86,7 @@ func (m *Manager) digest(msg ingestion.Message) Output {
 	return Output{Record: rec, Ack: msg.Ack}
 }
 
-func buildRecord(msg ingestion.Message) *record.Record {
+func buildRecord(msg ingestion.IngestMessage) *record.Record {
 	raw := msg.Raw
 	if msg.Ack != nil || !msg.RawOwned {
 		raw = append([]byte(nil), msg.Raw...)

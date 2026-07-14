@@ -611,21 +611,31 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 	for _, b := range rules {
 		matched := b.policy.Apply(state)
 		totalMatched += len(matched)
+		// Bounded worker pool (gastrolog-33eabj): retentionChunkWorkers
+		// goroutines pull chunk IDs off a channel. The previous shape spawned
+		// one goroutine per matched chunk BEFORE acquiring a semaphore, so a
+		// sweep matching N chunks parked N-workers goroutines on the semaphore
+		// for the whole (serialized, disk-bound) drain — 668 were observed
+		// waiting on a live profile. Concurrency was already bounded; now the
+		// goroutine count is too. pendingFlag is read-only after construction,
+		// so workers may read it without locking.
+		jobs := make(chan chunk.ChunkID)
 		var chunkWG sync.WaitGroup
-		chunkSem := make(chan struct{}, retentionChunkWorkers)
+		for range min(retentionChunkWorkers, len(matched)) {
+			chunkWG.Go(func() {
+				for id := range jobs {
+					r.tryRetainChunk(id, b, pendingFlag[id])
+				}
+			})
+		}
 		for _, id := range matched {
 			if processed[id] {
 				continue
 			}
 			processed[id] = true
-			chunkWG.Add(1)
-			go func(id chunk.ChunkID, rule retentionRule, alreadyPending bool) {
-				defer chunkWG.Done()
-				chunkSem <- struct{}{}
-				defer func() { <-chunkSem }()
-				r.tryRetainChunk(id, rule, alreadyPending)
-			}(id, b, pendingFlag[id])
+			jobs <- id
 		}
+		close(jobs)
 		chunkWG.Wait()
 	}
 	if totalMatched == 0 {
@@ -1215,7 +1225,7 @@ func (r *retentionRunner) retryUnreadableChunks() int {
 }
 
 // expireChunk routes a chunk deletion through the lifecycle reconciler's
-// receipt protocol when cluster Raft is wired, and falls back to a direct
+// receipt protocol when the vault-ctl Raft is wired, and falls back to a direct
 // local delete otherwise. reason ends up in the FSM's pendingDeletes
 // entry and in audit logs — see deleteChunk for the canonical reason
 // catalog.

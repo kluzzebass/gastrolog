@@ -199,8 +199,3 @@ func (idx *OrderedIndex) ensureFrameLens() error {
 	idx.frameLens = lens
 	return nil
 }
-
-// RecordSliceBytes returns the on-disk frame byte length for the record at pos.
-func (idx *OrderedIndex) RecordSliceBytes(pos uint32) (uint64, error) {
-	return idx.FrameByteLenAt(pos)
-}

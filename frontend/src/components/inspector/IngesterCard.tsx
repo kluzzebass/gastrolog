@@ -100,8 +100,8 @@ function IngesterDetail({ ingester, nodeStatus, liveNodeIds, dark }: Readonly<{
     },
     { label: "Bytes ingested", value: formatBytes(Number(data.bytesIngested)) },
     {
-      label: "Dropped",
-      hint: "No vault filter matched, or storage I/O failed",
+      label: "Errors",
+      hint: "Failed ingester runs — the ingester exited with an error and was restarted",
       value: Number(data.errors).toLocaleString(),
       isError: Number(data.errors) > 0,
     },

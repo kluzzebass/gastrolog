@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"maps"
-	"os"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -16,12 +15,11 @@ import (
 	"gastrolog/internal/glid"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/notify"
-	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
-// ErrNotRunning is returned when Run is called twice.
-var ErrNotRunning = errors.New("chunking manager not running")
+// ErrAlreadyRunning is returned when Run is called twice.
+var ErrAlreadyRunning = errors.New("chunking manager already running")
 
 // sealRetryInterval removed — seal/build retries wake on FSM events and
 // vault-ctl leadership changes, not timed polls.
@@ -145,6 +143,15 @@ type vaultChunking struct {
 	// state so planner passes log/alert only on transitions
 	// (gastrolog-4bl9xx). Guarded by planMu like the planner pass itself.
 	underReplicatedAlerted bool
+	// planFailures tracks segments whose on-disk index cannot be opened or
+	// read (corrupt index, unreadable file). Without it a corrupt segment
+	// was skipped silently forever: never planned into a sealed manifest,
+	// head purge blocked (gastrolog-6wwdos). Guarded by planMu like the
+	// planner pass itself.
+	planFailures map[glid.GLID]*planFailure
+	// planFailureAlerted tracks the unplannable-segment alert state so
+	// planner passes raise/clear only on transitions. Guarded by planMu.
+	planFailureAlerted bool
 	// pendingRelease holds segment IDs awaiting ReleaseSegments once every
 	// required vault home has committed a holder receipt.
 	pendingRelease []glid.GLID
@@ -601,7 +608,7 @@ func (m *Manager) ReleaseOnce(ctx context.Context, vaultID glid.GLID) error {
 // wake signal.
 func (m *Manager) Run(ctx context.Context) error {
 	if !m.running.CompareAndSwap(false, true) {
-		return ErrNotRunning
+		return ErrAlreadyRunning
 	}
 
 	m.mu.Lock()
@@ -769,19 +776,6 @@ func (v *vaultChunking) requiredHolders() []string {
 		return nil
 	}
 	return v.cfg.RequiredHolders()
-}
-
-// HeadSegmentLocator resolves segments present under vaultRoot/head/.
-type HeadSegmentLocator struct {
-	Root string
-}
-
-func (l HeadSegmentLocator) SegmentPath(segmentID glid.GLID) (string, bool) {
-	path := paths.HeadSegment(l.Root, segmentID)
-	if _, err := os.Stat(path); err != nil {
-		return "", false
-	}
-	return path, true
 }
 
 // ErrUnknownVault is returned for an unregistered vault.

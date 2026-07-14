@@ -142,14 +142,14 @@ func TestManagerGroupSyncBatchesFsync(t *testing.T) {
 	}
 }
 
-func TestManagerClosesOnSize(t *testing.T) {
+func TestManagerCompletesOnSize(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	vaultID := glid.New()
 
 	var in chan<- segmentation.Input
 	_, completed := startManager(t, segmentation.Config{
-		ClosePolicy:     segmentation.ClosePolicy{MaxBytes: 256},
+		CompletePolicy:  segmentation.CompletePolicy{MaxBytes: 256},
 		SyncBatchSize:   1,
 		SyncBatchWindow: time.Hour,
 		CompletedCap:    4,
@@ -178,7 +178,7 @@ func TestManagerClosesOnSize(t *testing.T) {
 		if _, err := os.Stat(seg.Path); err != nil {
 			t.Fatalf("completed path: %v", err)
 		}
-		if _, err := os.Stat(paths.WorkingSegment(dir, seg.Meta.ID)); !os.IsNotExist(err) {
+		if _, err := os.Stat(paths.WorkingSegment(dir, seg.SegmentID)); !os.IsNotExist(err) {
 			t.Fatalf("working copy should be gone: %v", err)
 		}
 		sf, err := segment.Open(seg.Path)
@@ -197,7 +197,7 @@ func TestManagerClosesOnSize(t *testing.T) {
 	}
 }
 
-func TestManagerClosesOnAge(t *testing.T) {
+func TestManagerCompletesOnAge(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	vaultID := glid.New()
@@ -208,7 +208,7 @@ func TestManagerClosesOnAge(t *testing.T) {
 
 	var in chan<- segmentation.Input
 	_, completed := startManager(t, segmentation.Config{
-		ClosePolicy:     segmentation.ClosePolicy{MaxAge: time.Minute},
+		CompletePolicy:  segmentation.CompletePolicy{MaxAge: time.Minute},
 		SyncBatchSize:   1,
 		SyncBatchWindow: time.Hour,
 		CompletedCap:    4,
@@ -233,7 +233,7 @@ func TestManagerClosesOnAge(t *testing.T) {
 	select {
 	case <-completed:
 	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for age-based close")
+		t.Fatal("timed out waiting for age-based completion")
 	}
 }
 
@@ -279,13 +279,13 @@ func TestManagerPerVaultIsolation(t *testing.T) {
 	}
 }
 
-func TestManagerDoesNotCloseEmptySegment(t *testing.T) {
+func TestManagerDoesNotCompleteEmptySegment(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	vaultID := glid.New()
 
 	_, completed := startManager(t, segmentation.Config{
-		ClosePolicy:     segmentation.ClosePolicy{MaxBytes: 64},
+		CompletePolicy:  segmentation.CompletePolicy{MaxBytes: 64},
 		SyncBatchSize:   1,
 		SyncBatchWindow: time.Hour,
 		CompletedCap:    1,
@@ -325,8 +325,8 @@ func TestManagerRunTwice(t *testing.T) {
 	cancel()
 	<-done
 
-	if err := mgr.Run(ctx); err != segmentation.ErrNotRunning {
-		t.Fatalf("Run() = %v, want ErrNotRunning", err)
+	if err := mgr.Run(ctx); err != segmentation.ErrAlreadyRunning {
+		t.Fatalf("Run() = %v, want ErrAlreadyRunning", err)
 	}
 }
 
@@ -455,7 +455,7 @@ func TestManagerUnregisterVaultDuringRun(t *testing.T) {
 // --- working/ restart recovery (gastrolog-1sylj7) ---
 
 // seedWorkingSegment simulates a crashed writer: records appended and fsynced
-// (and therefore ACKED) into working/<segID>, process killed before the close
+// (and therefore ACKED) into working/<segID>, process killed before the complete
 // policy fired. The file is deliberately left unclosed and unfinalized — the
 // exact on-disk state a crash leaves behind.
 func seedWorkingSegment(t *testing.T, root string, vaultID glid.GLID, n int) glid.GLID {
@@ -510,7 +510,7 @@ func TestRegisterVaultRecoversOrphanedWorkingSegment(t *testing.T) {
 
 	select {
 	case cs := <-completed:
-		if cs.Meta.ID != segID || cs.VaultID != vaultID {
+		if cs.SegmentID != segID || cs.VaultID != vaultID {
 			t.Fatalf("completed notification = %+v, want segment %s vault %s", cs, segID, vaultID)
 		}
 		if cs.Header.RecordCount != 3 {

@@ -100,12 +100,13 @@ type Config struct {
 	SegmentationCompletedCap     int
 	SegmentationEncodeCap        int
 	DistributionPullQueueCap     int
+	DistributionPublishQueueCap  int
 	DistributionPublishWorkers   int
 	DistributionPublishBatchSize int
 
-	// Segmentation close policy and node-global commit/fsync defaults. Per-vault
+	// Segmentation complete policy and node-global commit/fsync defaults. Per-vault
 	// overrides ride on VaultSpec.Commit.
-	SegmentClosePolicy     segmentation.ClosePolicy
+	SegmentCompletePolicy  segmentation.CompletePolicy
 	SegmentSyncBatchSize   int
 	SegmentSyncBatchWindow time.Duration
 	SegmentMaxCommitDelay  time.Duration
@@ -115,6 +116,15 @@ type Config struct {
 	// ingester factory and pressure wiring land in a later slice.
 	OnCheckpoint func(id glid.GLID, data []byte)
 	PressureGate *chanwatch.PressureGate
+	// IngestionRetryDelay overrides the pause before a failed ingester run is
+	// retried; consecutiveFailures counts error exits since the last clean
+	// run. Nil uses the ingestion manager's default jittered exponential
+	// backoff (3–5s first retry).
+	IngestionRetryDelay func(consecutiveFailures int) time.Duration
+	// IngestionCheckpointInterval overrides the period between checkpoint
+	// saves for Checkpointable ingesters. Zero uses the ingestion manager's
+	// default (5s).
+	IngestionCheckpointInterval time.Duration
 }
 
 // VaultSpec describes the roles and per-vault dependencies for one vault on this
@@ -216,7 +226,7 @@ type Supervisor struct {
 	col    *collection.Manager
 	chunk  *chunking.Manager
 
-	ingestOut <-chan ingestion.Message
+	ingestOut <-chan ingestion.IngestMessage
 	digestOut <-chan digestion.Output
 	completed <-chan segmentation.CompletedSegment
 	routingIn chan routing.Input
@@ -245,11 +255,13 @@ func New(cfg Config) *Supervisor {
 	}
 
 	ingest, ingestOut := ingestion.New(ingestion.Config{
-		NodeID:       cfg.NodeID,
-		OutCapacity:  cfg.IngestionOutCapacity,
-		Logger:       cfg.Logger,
-		OnCheckpoint: cfg.OnCheckpoint,
-		PressureGate: cfg.PressureGate,
+		NodeID:             cfg.NodeID,
+		OutCapacity:        cfg.IngestionOutCapacity,
+		Logger:             cfg.Logger,
+		OnCheckpoint:       cfg.OnCheckpoint,
+		PressureGate:       cfg.PressureGate,
+		RetryDelay:         cfg.IngestionRetryDelay,
+		CheckpointInterval: cfg.IngestionCheckpointInterval,
 	})
 	digest, digestOut := digestion.New(digestion.Config{
 		Workers:     cfg.DigestionWorkers,
@@ -263,6 +275,7 @@ func New(cfg Config) *Supervisor {
 	})
 	dist, pullIn := distribution.New(distribution.Config{
 		PullQueueCap:     cfg.DistributionPullQueueCap,
+		PublishQueueCap:  cfg.DistributionPublishQueueCap,
 		PublishWorkers:   cfg.DistributionPublishWorkers,
 		PublishBatchSize: cfg.DistributionPublishBatchSize,
 		Logger:           cfg.Logger,
@@ -289,7 +302,7 @@ func New(cfg Config) *Supervisor {
 	seg, completed := segmentation.New(segmentation.Config{
 		Logger:             cfg.Logger,
 		Alerts:             cfg.Alerts,
-		ClosePolicy:        cfg.SegmentClosePolicy,
+		CompletePolicy:     cfg.SegmentCompletePolicy,
 		SyncBatchSize:      cfg.SegmentSyncBatchSize,
 		SyncBatchWindow:    cfg.SegmentSyncBatchWindow,
 		MaxCommitDelay:     cfg.SegmentMaxCommitDelay,
@@ -532,14 +545,14 @@ func (s *Supervisor) SubmitToVault(ctx context.Context, vaultID glid.GLID, rec *
 }
 
 // RouteStats returns a snapshot of the routing manager's counters (global
-// ingested/matched/unmatched totals plus per-vault and per-route matched counts).
+// routed/matched/unmatched totals plus per-vault and per-route matched counts).
 // It is the pipeline source for the node's route-stats observability surface.
 func (s *Supervisor) RouteStats() routing.StatsSnapshot {
 	return s.route.Stats()
 }
 
-// RoutingActive reports whether a routing table is currently published, the
-// pipeline analogue of the legacy "filter set active" flag.
+// RoutingActive reports whether a route table is currently published. It backs
+// the route_table_active flag in route stats.
 func (s *Supervisor) RoutingActive() bool {
 	return s.route.TableActive()
 }

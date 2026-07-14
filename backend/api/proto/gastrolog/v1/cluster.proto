@@ -110,10 +110,10 @@ message NodeStats {
   string pprof_address = 27;      // pprof HTTP address, empty if disabled
 
   // Route stats (aggregated cluster-wide by GetRouteStats RPC)
-  int64 route_stats_ingested = 28;
-  int64 route_stats_dropped = 29;
-  int64 route_stats_routed = 30;
-  bool route_stats_filter_active = 31;
+  int64 route_stats_routed = 28;
+  int64 route_stats_unmatched = 29;
+  int64 route_stats_matched = 30;
+  bool route_stats_route_table_active = 31;
   repeated gastrolog.v1.VaultRouteStats route_vault_stats = 32;
   repeated gastrolog.v1.PerRouteStats route_per_route_stats = 33;
 
@@ -141,8 +141,8 @@ message NodeStats {
   // Routing throughput on this node, from the stats collector's rolling
   // windows over the cumulative route counters (fields 28/30). Cluster
   // totals are the sum across nodes (gastrolog-4eh5ns).
-  gastrolog.v1.ThroughputRate route_ingested = 39;
-  gastrolog.v1.ThroughputRate route_routed = 40;
+  gastrolog.v1.ThroughputRate route_routed = 39;
+  gastrolog.v1.ThroughputRate route_matched = 40;
 
   // Raft liveness / WAL health (gastrolog-1io54g). Append latency covers
   // every Raft WAL on the node (vault groups share one WAL; cluster-ctl has

@@ -7,25 +7,25 @@ import { protoSharing } from "./protoSharing";
 import { decode } from "../glid";
 
 /**
- * Tracks the highest system Raft log index seen from authoritative sources
+ * Tracks the highest cluster-ctl Raft log index seen from authoritative sources
  * (GetSystem, mutation responses, setQueryData). useWatchSystem compares the
  * stream against this to avoid redundant invalidation.
  */
-let cachedSystemRaftIndex = 0n;
+let cachedClusterCtlRaftIndex = 0n;
 
 /** Update the cached index. Only advances forward (max wins). */
-export function setSystemRaftIndex(v: unknown) {
-  const n = systemRaftIndexScalarToBigInt(v);
-  if (n > cachedSystemRaftIndex) cachedSystemRaftIndex = n;
+function setClusterCtlRaftIndex(v: unknown) {
+  const n = clusterCtlRaftIndexScalarToBigInt(v);
+  if (n > cachedClusterCtlRaftIndex) cachedClusterCtlRaftIndex = n;
 }
 
-/** Read the cached system raft index for comparison by useWatchSystem. */
-export function getSystemRaftIndex(): bigint {
-  return cachedSystemRaftIndex;
+/** Read the cached cluster-ctl raft index for comparison by useWatchSystem. */
+export function getClusterCtlRaftIndex(): bigint {
+  return cachedClusterCtlRaftIndex;
 }
 
 /** Coerce protobuf uint64 scalars to bigint for index comparisons. */
-export function systemRaftIndexScalarToBigInt(v: unknown): bigint {
+export function clusterCtlRaftIndexScalarToBigInt(v: unknown): bigint {
   try {
     if (typeof v === "bigint") return v;
     if (typeof v === "string") return BigInt(v);
@@ -37,7 +37,7 @@ export function systemRaftIndexScalarToBigInt(v: unknown): bigint {
 }
 
 /**
- * After server-settings mutations, mirror GetSettings and advance system_raft_index without
+ * After server-settings mutations, mirror GetSettings and advance cluster_ctl_raft_index without
  * invalidating (avoids follower-lag refetch races). Patches cached GetSystem when the echo
  * index is newer than what is already in the React Query cache.
  */
@@ -47,14 +47,14 @@ export function applySettingsMutationEcho(
 ) {
   if (!echo?.settings) return;
   qc.setQueryData(["settings"], echo.settings);
-  const ver = systemRaftIndexScalarToBigInt(echo.systemRaftIndex);
+  const ver = clusterCtlRaftIndexScalarToBigInt(echo.clusterCtlRaftIndex);
   if (ver === 0n) return;
-  setSystemRaftIndex(ver);
+  setClusterCtlRaftIndex(ver);
   const cached = qc.getQueryData<GetSystemResponse>(["system"]);
   if (!cached) return;
-  if (ver <= systemRaftIndexScalarToBigInt(cached.systemRaftIndex)) return;
+  if (ver <= clusterCtlRaftIndexScalarToBigInt(cached.clusterCtlRaftIndex)) return;
   const next = cached.clone();
-  next.systemRaftIndex = echo.systemRaftIndex;
+  next.clusterCtlRaftIndex = echo.clusterCtlRaftIndex;
   qc.cancelQueries({ queryKey: ["system"] });
   qc.setQueryData(["system"], next);
 }
@@ -83,13 +83,13 @@ export function useSystemMutation<TArgs, TResult>(
       if (cfg) {
         const prev = qc.getQueryData<GetSystemResponse>(["system"]);
         const prevBig = prev
-          ? systemRaftIndexScalarToBigInt(prev.systemRaftIndex)
+          ? clusterCtlRaftIndexScalarToBigInt(prev.clusterCtlRaftIndex)
           : -1n;
-        const nextBig = systemRaftIndexScalarToBigInt(cfg.systemRaftIndex);
+        const nextBig = clusterCtlRaftIndexScalarToBigInt(cfg.clusterCtlRaftIndex);
         // Ignore stale/equal mutation payloads to avoid UI regressing to an
         // older snapshot and then jumping forward again when WatchSystem refetches.
         if (nextBig > prevBig) {
-          setSystemRaftIndex(cfg.systemRaftIndex);
+          setClusterCtlRaftIndex(cfg.clusterCtlRaftIndex);
           qc.cancelQueries({ queryKey: ["system"] });
           qc.setQueryData(["system"], cfg);
         }
@@ -116,14 +116,14 @@ export function useConfig() {
       // than what's already in the cache (from a mutation or earlier fetch),
       // keep the cached data instead of regressing.
       const cached = qc.getQueryData<GetSystemResponse>(["system"]);
-      const respBig = systemRaftIndexScalarToBigInt(response.systemRaftIndex);
+      const respBig = clusterCtlRaftIndexScalarToBigInt(response.clusterCtlRaftIndex);
       const cacheBig = cached
-        ? systemRaftIndexScalarToBigInt(cached.systemRaftIndex)
+        ? clusterCtlRaftIndexScalarToBigInt(cached.clusterCtlRaftIndex)
         : 0n;
       if (cached && respBig <= cacheBig) {
         return cached;
       }
-      setSystemRaftIndex(response.systemRaftIndex);
+      setClusterCtlRaftIndex(response.clusterCtlRaftIndex);
       return response;
     },
     structuralSharing: protoSharing(GetSystemResponse.equals),
@@ -145,18 +145,6 @@ export function useGenerateName() {
     mutationFn: async () => {
       const response = await systemClient.generateName({});
       return response.name;
-    },
-  });
-}
-
-// gastrolog-4kkoo (Phase 5): live validation for the route filter
-// editor. Read-only — no Raft Apply, no cache invalidation. Callers
-// debounce themselves so per-keystroke RPCs don't pile up.
-export function useValidateExpression() {
-  return useMutation({
-    mutationFn: async (expression: string) => {
-      const response = await systemClient.validateExpression({ expression });
-      return { valid: response.valid, error: response.error };
     },
   });
 }

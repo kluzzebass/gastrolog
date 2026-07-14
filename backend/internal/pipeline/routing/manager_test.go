@@ -198,7 +198,7 @@ func TestManagerCountsUnmatched(t *testing.T) {
 	}
 }
 
-func TestManagerErrNotRunning(t *testing.T) {
+func TestManagerErrAlreadyRunning(t *testing.T) {
 	t.Parallel()
 
 	mgr := routing.New(routing.Config{
@@ -213,8 +213,8 @@ func TestManagerErrNotRunning(t *testing.T) {
 	if err := mgr.Run(ctx, in); err != nil {
 		t.Fatalf("first Run: %v", err)
 	}
-	if err := mgr.Run(ctx, in); err != routing.ErrNotRunning {
-		t.Errorf("second Run err = %v, want ErrNotRunning", err)
+	if err := mgr.Run(ctx, in); err != routing.ErrAlreadyRunning {
+		t.Errorf("second Run err = %v, want ErrAlreadyRunning", err)
 	}
 }
 

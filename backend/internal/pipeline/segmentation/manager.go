@@ -16,17 +16,22 @@ import (
 	"gastrolog/internal/record"
 )
 
-// ErrNotRunning is returned when Run is called twice.
+// ErrAlreadyRunning is returned when Run is called twice.
+var ErrAlreadyRunning = errors.New("segmentation manager already running")
+
+// ErrNotRunning is returned when an operation requires a running manager
+// (e.g. RegisterVault after Run has exited).
 var ErrNotRunning = errors.New("segmentation manager not running")
 
 // ErrUnknownVault is returned when a vault was never registered.
 var ErrUnknownVault = errors.New("unknown vault")
 
-// ClosePolicy configures when a working segment is closed and renamed.
-type ClosePolicy struct {
-	// MaxBytes closes the segment once the on-disk file reaches this size.
+// CompletePolicy configures when a working segment is completed — finalized
+// and renamed working/ → completed/.
+type CompletePolicy struct {
+	// MaxBytes completes the segment once the on-disk file reaches this size.
 	MaxBytes uint64
-	// MaxAge closes the segment once this long has elapsed since it was opened.
+	// MaxAge completes the segment once this long has elapsed since it was opened.
 	MaxAge time.Duration
 }
 
@@ -34,7 +39,7 @@ type ClosePolicy struct {
 // node-global defaults; each vault may override them via VaultConfig at
 // RegisterVault time.
 type Config struct {
-	ClosePolicy ClosePolicy
+	CompletePolicy CompletePolicy
 	// SyncBatchSize is the max appended frames between fsync calls for
 	// fire-and-forget (no-ack) records. Defaults to 8192. This is a memory
 	// bound (~2.5MB of frame bodies at typical record sizes), not the
@@ -130,12 +135,14 @@ func (c Config) syncBatchWindow() time.Duration {
 	return c.SyncBatchWindow
 }
 
-// CompletedSegment is emitted when a segment is renamed from working/ to completed/.
+// CompletedSegment is emitted when a segment is renamed from working/ to
+// completed/. VaultID and SegmentID are the authoritative identity; Header
+// duplicates them only because it mirrors the fixed on-disk header layout.
 type CompletedSegment struct {
-	VaultID glid.GLID
-	Meta    segment.Meta
-	Path    string
-	Header  segment.Header
+	VaultID   glid.GLID
+	SegmentID glid.GLID
+	Path      string
+	Header    segment.Header
 }
 
 // Manager runs one pipelined segment writer per registered vault.
@@ -277,7 +284,7 @@ func (m *Manager) UnregisterVault(vaultID glid.GLID) {
 // Run starts all registered vault writers until ctx is cancelled.
 func (m *Manager) Run(ctx context.Context) error {
 	if !m.running.CompareAndSwap(false, true) {
-		return ErrNotRunning
+		return ErrAlreadyRunning
 	}
 
 	m.mu.Lock()
@@ -306,7 +313,7 @@ func (m *Manager) Run(ctx context.Context) error {
 
 	m.mu.Lock()
 	for _, w := range m.writers {
-		w.flushAndCloseSegment()
+		w.flushAndCompleteSegment()
 	}
 	m.mu.Unlock()
 

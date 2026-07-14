@@ -7,8 +7,6 @@ import { FileLookupAddForm, FileLookupCards, yamlFormatSpec } from "./FileLookup
 import type { YAMLFileLookupDraft, LookupSectionProps } from "./types";
 import type { YAMLFileLookupEntry } from "../../../api/gen/gastrolog/v1/system_pb";
 
-export { serializeFileLookups as serializeYamlLookups } from "./FileLookupSection";
-
 export function YamlAddForm(props: LookupSectionProps & {
   onCreated: (draft: YAMLFileLookupDraft) => void;
   onCancel: () => void;

@@ -60,10 +60,10 @@ type StatsVaultAppendSnapshot struct {
 
 // StatsRouteSnapshot captures route stats for broadcast.
 type StatsRouteSnapshot struct {
-	Ingested     int64
-	Dropped      int64
 	Routed       int64
-	FilterActive bool
+	Unmatched    int64
+	Matched      int64
+	RouteTableActive bool
 	VaultStats   []StatsVaultRouteSnapshot
 	RouteStats   []StatsPerRouteSnapshot
 }
@@ -172,7 +172,7 @@ type StatsCollectorConfig struct {
 	// sums (sorted live-peer IDs + self). The summed window re-anchors on
 	// any change so contributors entering/leaving the sum can never read
 	// as traffic (gastrolog-mliwrd).
-	ClusterRouteTotals func() (ingested, routed int64, membership string)
+	ClusterRouteTotals func() (routed, matched int64, membership string)
 	Alerts             AlertProvider // optional; nil if no alert collector
 	Jobs               JobsProvider  // optional; nil in single-node mode
 	NodeID             string
@@ -198,13 +198,13 @@ type StatsCollector struct {
 	// vaultAppendStats holds per-vault append-rate windows, two entries per
 	// vault ("append:<id>" records+bytes, "durable:<id>" durable records).
 	// routeRateStats holds the single node-level routing window ("route"
-	// ingested+routed). Same mechanics as the peer traffic windows.
+	// routed+matched). Same mechanics as the peer traffic windows.
 	vaultAppendStats map[string]*peerConnStatsWindow
 	routeRateStats   map[string]*peerConnStatsWindow
-	// clusterIngested/clusterRouted cache the latest cluster-total route
+	// clusterRouted/clusterMatched cache the latest cluster-total route
 	// rate series for the RPC/stream builders (gastrolog-4eh5ns).
-	clusterIngested *gastrologv1.ThroughputRate
-	clusterRouted   *gastrologv1.ThroughputRate
+	clusterRouted  *gastrologv1.ThroughputRate
+	clusterMatched *gastrologv1.ThroughputRate
 	// raftLiveStats windows: "wal" (tx=append count, rx=append nanos) and
 	// "live" (tx=elections, rx=failed heartbeats). walMaxNanos caches the
 	// last tick's max so snapshot reads between ticks see it without
@@ -438,19 +438,19 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 
 		// Route stats.
 		rs := c.cfg.Stats.RouteStats()
-		stats.RouteStatsIngested = rs.Ingested
-		stats.RouteStatsDropped = rs.Dropped
 		stats.RouteStatsRouted = rs.Routed
-		stats.RouteStatsFilterActive = rs.FilterActive
+		stats.RouteStatsUnmatched = rs.Unmatched
+		stats.RouteStatsMatched = rs.Matched
+		stats.RouteStatsRouteTableActive = rs.RouteTableActive
 		c.collectClusterRouteRates(now, stepWindows)
 
 		// Node-level routing throughput windows (gastrolog-4eh5ns).
 		rr := c.observeTrafficWindowRates(now, "route",
-			rs.Ingested, rs.Routed, "", stepWindows, c.routeRateStats)
-		stats.RouteIngested = &gastrologv1.ThroughputRate{
+			rs.Routed, rs.Matched, "", stepWindows, c.routeRateStats)
+		stats.RouteRouted = &gastrologv1.ThroughputRate{
 			InstantPerSec: rr.txPerSec, Avg_1MPerSec: rr.txEwma[0], Avg_5MPerSec: rr.txEwma[1], Avg_15MPerSec: rr.txEwma[2], Spark: rr.txSpark,
 		}
-		stats.RouteRouted = &gastrologv1.ThroughputRate{
+		stats.RouteMatched = &gastrologv1.ThroughputRate{
 			InstantPerSec: rr.rxPerSec, Avg_1MPerSec: rr.rxEwma[0], Avg_5MPerSec: rr.rxEwma[1], Avg_15MPerSec: rr.rxEwma[2], Spark: rr.rxSpark,
 		}
 		for _, vs := range rs.VaultStats {
@@ -847,14 +847,14 @@ func (c *StatsCollector) collectClusterRouteRates(now time.Time, stepWindows boo
 	if c.cfg.ClusterRouteTotals == nil {
 		return
 	}
-	cin, crouted, membership := c.cfg.ClusterRouteTotals()
+	crouted, cmatched, membership := c.cfg.ClusterRouteTotals()
 	cr := c.observeTrafficWindowRates(now, "clusterroute",
-		cin, crouted, membership, stepWindows, c.routeRateStats)
+		crouted, cmatched, membership, stepWindows, c.routeRateStats)
 	c.mu.Lock()
-	c.clusterIngested = &gastrologv1.ThroughputRate{
+	c.clusterRouted = &gastrologv1.ThroughputRate{
 		InstantPerSec: cr.txPerSec, Avg_1MPerSec: cr.txEwma[0], Avg_5MPerSec: cr.txEwma[1], Avg_15MPerSec: cr.txEwma[2], Spark: cr.txSpark,
 	}
-	c.clusterRouted = &gastrologv1.ThroughputRate{
+	c.clusterMatched = &gastrologv1.ThroughputRate{
 		InstantPerSec: cr.rxPerSec, Avg_1MPerSec: cr.rxEwma[0], Avg_5MPerSec: cr.rxEwma[1], Avg_15MPerSec: cr.rxEwma[2], Spark: cr.rxSpark,
 	}
 	c.mu.Unlock()
@@ -865,13 +865,13 @@ func (c *StatsCollector) collectClusterRouteRates(now time.Time, stepWindows boo
 // at each stats tick. Safe between ticks; returns empty rates before the
 // first tick. Proto messages carry an internal mutex, so the copies are
 // rebuilt field-by-field rather than dereferenced (gastrolog-4eh5ns).
-func (c *StatsCollector) ClusterRouteRates() (ingested, routed *gastrologv1.ThroughputRate) {
+func (c *StatsCollector) ClusterRouteRates() (routed, matched *gastrologv1.ThroughputRate) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.clusterIngested == nil {
+	if c.clusterRouted == nil {
 		return &gastrologv1.ThroughputRate{}, &gastrologv1.ThroughputRate{}
 	}
-	return copyThroughputRate(c.clusterIngested), copyThroughputRate(c.clusterRouted)
+	return copyThroughputRate(c.clusterRouted), copyThroughputRate(c.clusterMatched)
 }
 
 func copyThroughputRate(r *gastrologv1.ThroughputRate) *gastrologv1.ThroughputRate {

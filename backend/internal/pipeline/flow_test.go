@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
-	chunkcloud "gastrolog/internal/chunk/cloud"
+	"gastrolog/internal/chunk/glcb"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/chunking"
 	"gastrolog/internal/pipeline/collection"
@@ -122,7 +122,7 @@ func (p *recordingPublisher) all() []distribution.Metadata {
 }
 
 type harnessOpts struct {
-	closePolicy    segmentation.ClosePolicy
+	completePolicy segmentation.CompletePolicy
 	localHolder    bool
 	withCollection bool // remote home: collection on a separate storage root
 	withChunking   bool // ChunkingManager on homeRoot via shared vault-ctl FSM
@@ -266,7 +266,7 @@ func newHarness(t *testing.T, nodeID, ingesterID, vaultID glid.GLID, route *rout
 	distMgr, _ := distribution.New(distribution.Config{})
 
 	segMgr, completed := segmentation.New(segmentation.Config{
-		ClosePolicy:        opts.closePolicy,
+		CompletePolicy:     opts.completePolicy,
 		SyncBatchSize:      1,
 		SyncBatchWindow:    time.Millisecond,
 		OnSync:             func() { h.syncs.Add(1) },
@@ -576,21 +576,16 @@ func (h *harness) waitChunkGLCB(t *testing.T, wantRecords uint32) string {
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if _, err := os.Stat(glcbPath); err == nil {
-			f, err := os.Open(glcbPath)
+			blob, err := glcb.OpenMappedBlob(glcbPath)
 			if err != nil {
 				t.Fatal(err)
 			}
-			rd, err := chunkcloud.NewCacheReader(f)
-			_ = f.Close()
-			if err != nil {
-				t.Fatal(err)
-			}
-			if rd.Meta().RecordCount != wantRecords {
-				rd.Close()
+			count := blob.Meta().RecordCount
+			_ = blob.Close()
+			if count != wantRecords {
 				time.Sleep(10 * time.Millisecond)
 				continue
 			}
-			rd.Close()
 			return glcbPath
 		}
 		if err := h.chunk.PlanOnce(h.ctx, h.vaultID); err != nil {
@@ -734,12 +729,12 @@ func TestPipelineIngestToDistribution(t *testing.T) {
 	}
 
 	h := newHarness(t, nodeID, ingesterID, vaultID, route, harnessOpts{
-		closePolicy: segmentation.ClosePolicy{MaxBytes: 256},
+		completePolicy: segmentation.CompletePolicy{MaxBytes: 256},
 	})
 	msgs := make([]ingestion.IngesterMessage, 8)
 	for i := range msgs {
 		msgs[i] = ingestion.IngesterMessage{
-			Raw:   []byte("line payload for segment close"),
+			Raw:   []byte("line payload for segment complete"),
 			Attrs: map[string]string{"env": "prod"},
 		}
 	}
@@ -791,8 +786,8 @@ func TestPipelineIngestToDistributionLocalHolder(t *testing.T) {
 	}
 
 	h := newHarness(t, nodeID, ingesterID, vaultID, route, harnessOpts{
-		closePolicy: segmentation.ClosePolicy{MaxBytes: 256},
-		localHolder: true,
+		completePolicy: segmentation.CompletePolicy{MaxBytes: 256},
+		localHolder:    true,
 	})
 	msgs := make([]ingestion.IngesterMessage, 8)
 	for i := range msgs {
@@ -829,7 +824,7 @@ func TestPipelineFullPath(t *testing.T) {
 	}
 
 	h := newHarness(t, nodeID, ingesterID, vaultID, route, harnessOpts{
-		closePolicy:    segmentation.ClosePolicy{MaxBytes: 256},
+		completePolicy: segmentation.CompletePolicy{MaxBytes: 256},
 		withCollection: true,
 		withChunking:   true,
 		// MaxRecords stays above the published record count so the event-driven
@@ -912,12 +907,12 @@ func TestPipelineFullPath(t *testing.T) {
 	}
 
 	glcbPath := h.waitChunkGLCB(t, totalRecords)
-	f, err := os.Open(glcbPath)
+	blob, err := glcb.OpenMappedBlob(glcbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
-	rd, err := chunkcloud.NewCacheReader(f)
+	defer blob.Close()
+	rd, err := blob.Reader()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -960,7 +955,7 @@ func TestPipelineOpenChunkQueryBeforeSeal(t *testing.T) {
 	}
 
 	h := newHarness(t, nodeID, ingesterID, vaultID, route, harnessOpts{
-		closePolicy:    segmentation.ClosePolicy{MaxBytes: 256},
+		completePolicy: segmentation.CompletePolicy{MaxBytes: 256},
 		withCollection: true,
 		withChunking:   true,
 		chunkPolicy:    chunking.ManifestRotationPolicy{MaxRecords: 100},
@@ -1040,7 +1035,7 @@ func TestPipelineRemotePullFailureThenRecovery(t *testing.T) {
 	}
 
 	h := newHarness(t, nodeID, ingesterID, vaultID, route, harnessOpts{
-		closePolicy:    segmentation.ClosePolicy{MaxBytes: 256},
+		completePolicy: segmentation.CompletePolicy{MaxBytes: 256},
 		withCollection: true,
 		pullFails:      1,
 	})
@@ -1074,7 +1069,7 @@ func TestPipelineRemoteHomeFollowerBuildsGLCBWithoutSealing(t *testing.T) {
 	}
 
 	h := newHarness(t, nodeID, ingesterID, vaultID, route, harnessOpts{
-		closePolicy:    segmentation.ClosePolicy{MaxBytes: 256},
+		completePolicy: segmentation.CompletePolicy{MaxBytes: 256},
 		withCollection: true,
 		withChunking:   true,
 		chunkLeader:    func() bool { return false },
@@ -1132,7 +1127,7 @@ func TestPipelineRemoteHomePlannerRequiresLocalHead(t *testing.T) {
 	}
 
 	h := newHarness(t, nodeID, ingesterID, vaultID, route, harnessOpts{
-		closePolicy:    segmentation.ClosePolicy{MaxBytes: 256},
+		completePolicy: segmentation.CompletePolicy{MaxBytes: 256},
 		withCollection: true,
 		withChunking:   true,
 		chunkPolicy:    chunking.ManifestRotationPolicy{MaxRecords: 100},
@@ -1396,7 +1391,7 @@ func TestPipelineRecoversOrphanedWorkingSegmentAcrossNodes(t *testing.T) {
 
 	var orphanID glid.GLID
 	h := newHarness(t, nodeID, ingesterID, vaultID, route, harnessOpts{
-		closePolicy:    segmentation.ClosePolicy{MaxBytes: 1 << 20},
+		completePolicy: segmentation.CompletePolicy{MaxBytes: 1 << 20},
 		withCollection: true,
 		seedOriginRoot: func(root string) {
 			orphanID = seedCrashedWorkingSegment(t, root, vaultID, 3)

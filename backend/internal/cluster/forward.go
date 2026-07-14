@@ -8,9 +8,11 @@ import (
 	"iter"
 	"os"
 	"strings"
+	"sync"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/convert"
+	"gastrolog/internal/pipeline/collection"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 
@@ -89,7 +91,10 @@ type ManagedFileIDsLister func() []string
 
 // SegmentPullServer streams a completed segment held locally (by the origin or
 // another holder) to w. Returns an error if the segment is unknown or not held
-// here. Wired to the orchestrator's ServePull seam (Rubicon C).
+// here — implementations signal that case with collection.ErrSegmentUnavailable
+// so the PullSegment handler encodes it as a NotFound status (which the
+// pulling side's SegmentPuller translates back into the same sentinel).
+// Wired to the orchestrator's ServePull seam (Rubicon C).
 type SegmentPullServer func(vaultID, segmentID glid.GLID, w io.Writer) error
 
 // ── ID parse helpers ────────────────────────────────────────────────
@@ -848,10 +853,57 @@ func pullManagedFileStreamHandler(srv any, stream grpc.ServerStream) error {
 	return nil
 }
 
+// pullFrameSize is the Data payload per streamed pull frame when the serve
+// seam copies through ReadFrom (io.Copy from an *os.File lands there). Sized
+// just under 1MB so the marshaled frame (payload + a few bytes of proto
+// framing) still fits grpc-go's largest pooled marshal-buffer tier (1MB in
+// mem.defaultBufferPoolSizes) instead of spilling to the fallback pool, and
+// stays far under the 4MB default client receive limit. Large frames
+// amortize per-frame SendMsg/flow-control/stats overhead ~32x versus the
+// 32KB io.Copy scratch that set the frame size before (gastrolog-47jm3m).
+const pullFrameSize = 1<<20 - 1<<10
+
+// pullFrameBufPool recycles the per-transfer frame buffer across pulls. The
+// recycle point is the end of ReadFrom: every SendMsg has returned by then,
+// and SendMsg fully marshals the frame into grpc's own pooled wire buffer
+// before returning (grpc-go stream.go serverStream.SendMsg -> prepareMsg ->
+// codecV2.Marshal), so nothing in the transport references the buffer after
+// the copy loop finishes.
+var pullFrameBufPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, pullFrameSize)
+		return &b
+	},
+}
+
+// copyFrames streams r through w in len(buf)-sized writes, reusing buf for
+// every frame. Only valid for writers whose Write fully consumes p before
+// returning — the no-copy SendMsg contract documented on
+// segmentChunkWriter.Write.
+func copyFrames(w io.Writer, r io.Reader, buf []byte) (int64, error) {
+	var total int64
+	for {
+		n, rerr := r.Read(buf)
+		if n > 0 {
+			if _, werr := w.Write(buf[:n]); werr != nil {
+				return total, werr
+			}
+			total += int64(n)
+		}
+		if rerr == io.EOF {
+			return total, nil
+		}
+		if rerr != nil {
+			return total, rerr
+		}
+	}
+}
+
 // segmentChunkWriter adapts the PullSegment server stream to an io.Writer so
 // the orchestrator's ServePull seam can stream segment bytes through it. Each
-// Write becomes one PullSegmentChunk frame; io.Copy's 32KB buffer keeps frames
-// comfortably under the gRPC message limit.
+// Write becomes one PullSegmentChunk frame. ReadFrom makes io.Copy stream
+// pullFrameSize frames through one reused buffer instead of its own 32KB
+// scratch (*os.File sources reach it via the generic WriteTo fallback).
 type segmentChunkWriter struct {
 	stream grpc.ServerStream
 	chunk  gastrologv1.PullSegmentChunk
@@ -875,8 +927,20 @@ func (w *segmentChunkWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// ReadFrom streams r to the client in pullFrameSize frames through one
+// pooled buffer per transfer. io.Copy prefers this over allocating its own
+// 32KB scratch, so a segment pull sends ~32x fewer frames with no per-frame
+// garbage. Reusing the buffer across SendMsg calls is safe under the same
+// contract as Write: SendMsg fully marshals the frame before returning.
+func (w *segmentChunkWriter) ReadFrom(r io.Reader) (int64, error) {
+	buf := pullFrameBufPool.Get().(*[]byte)
+	defer pullFrameBufPool.Put(buf)
+	return copyFrames(w, r, *buf)
+}
+
 // glcbChunkWriter adapts the PullChunkGLCB server stream to an io.Writer —
-// same shape as segmentChunkWriter, same no-copy SendMsg contract.
+// same shape as segmentChunkWriter, same no-copy SendMsg contract, same
+// pullFrameSize ReadFrom framing.
 type glcbChunkWriter struct {
 	stream grpc.ServerStream
 	chunk  gastrologv1.PullChunkGLCBChunk
@@ -891,6 +955,13 @@ func (w *glcbChunkWriter) Write(p []byte) (int, error) {
 		return 0, err
 	}
 	return len(p), nil
+}
+
+// ReadFrom mirrors segmentChunkWriter.ReadFrom for GLCB replica pulls.
+func (w *glcbChunkWriter) ReadFrom(r io.Reader) (int64, error) {
+	buf := pullFrameBufPool.Get().(*[]byte)
+	defer pullFrameBufPool.Put(buf)
+	return copyFrames(w, r, *buf)
 }
 
 // pullChunkGLCBStreamHandler handles the server-streaming PullChunkGLCB RPC:
@@ -937,7 +1008,15 @@ func pullSegmentStreamHandler(srv any, stream grpc.ServerStream) error {
 
 	w := &segmentChunkWriter{stream: stream}
 	if err := s.segmentPullServer(vaultID, segmentID, w); err != nil {
-		return status.Errorf(codes.NotFound, "serve segment %s/%s: %v", vaultID, segmentID, err)
+		// Encode the seam's typed sentinel as a status code the pulling side
+		// can translate back into collection.ErrSegmentUnavailable — the wire
+		// carries a machine-readable code, never classification-bearing prose
+		// (gastrolog-466kq5). Anything else (open/copy failure mid-stream) is
+		// a real serving fault, not "try another holder later".
+		if errors.Is(err, collection.ErrSegmentUnavailable) {
+			return status.Errorf(codes.NotFound, "serve segment %s/%s: %v", vaultID, segmentID, err)
+		}
+		return status.Errorf(codes.Internal, "serve segment %s/%s: %v", vaultID, segmentID, err)
 	}
 	return nil
 }

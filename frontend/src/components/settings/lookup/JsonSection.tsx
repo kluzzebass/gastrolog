@@ -7,8 +7,6 @@ import { FileLookupAddForm, FileLookupCards, jsonFormatSpec } from "./FileLookup
 import type { JSONFileLookupDraft, LookupSectionProps } from "./types";
 import type { JSONFileLookupEntry } from "../../../api/gen/gastrolog/v1/system_pb";
 
-export { serializeFileLookups as serializeJsonLookups } from "./FileLookupSection";
-
 export function JsonAddForm(props: LookupSectionProps & {
   onCreated: (draft: JSONFileLookupDraft) => void;
   onCancel: () => void;

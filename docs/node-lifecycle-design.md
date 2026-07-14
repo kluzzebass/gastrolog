@@ -135,14 +135,14 @@ Cluster overview shows per-node state with color/icon coding. The two soft-offli
 
 New nodes joining via `JoinCluster` are added as **non-voting learners** in two layers:
 
-1. **System Raft** — `JoinCluster` calls `AddNonvoter` (was `AddVoter` today).
+1. **Cluster-ctl Raft** — `JoinCluster` calls `AddNonvoter` (was `AddVoter` today).
 2. **Every vault-ctl Raft group** — `RefreshVaultCtlMembers` adds new nodes as non-voters in each per-vault group.
 
 The new node receives replicated state via Raft log replication (and snapshots if far behind). It does NOT count toward quorum during this phase.
 
 ### Promotion: per-group, FSM apply-index match
 
-A new background sweep runs per vault-ctl group **on the group's leader**. When the learner's `appliedIndex` matches the leader's `commitIndex` AND has remained matched for one full heartbeat interval, the leader proposes a config change to promote the learner to voter. System Raft has the same sweep on its leader.
+A new background sweep runs per vault-ctl group **on the group's leader**. When the learner's `appliedIndex` matches the leader's `commitIndex` AND has remained matched for one full heartbeat interval, the leader proposes a config change to promote the learner to voter. Cluster-ctl Raft has the same sweep on its leader.
 
 **Why per-group:** vault-ctl groups are independent. A learner caught up in vault A can be promoted there even while still catching up on vault B. Convergence is incremental.
 

@@ -34,7 +34,7 @@ describe("usePutServiceSettings", () => {
           auth: {},
           query: { timeout: "60s", maxFollowDuration: "", maxResultCount: 500 },
         },
-        systemRaftIndex: 2n,
+        clusterCtlRaftIndex: 2n,
       },
     });
     const qc = createTestQueryClient();

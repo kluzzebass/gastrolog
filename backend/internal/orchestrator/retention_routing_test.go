@@ -151,7 +151,7 @@ func TestFireRetentionEventStreamsThroughPipeline(t *testing.T) {
 	r.fireRetentionEvent(fx.sealedID)
 
 	waitForRouteStats(t, fx.orch, "3 matched retention records", func(s *RouteStats) bool {
-		return s.Routed == 3
+		return s.Matched == 3
 	})
 	if got := fx.orch.VaultRouteStatsList()[fx.archiveID]; got == nil || got.Matched != 3 {
 		t.Errorf("archive vault should have matched 3 retention records, got %+v", got)
@@ -214,10 +214,10 @@ func TestFireRetentionEventDropsWhenNoRouteMatches(t *testing.T) {
 
 	// All submitted records ingested but unmatched; none routed.
 	waitForRouteStats(t, orch, "2 unmatched retention records", func(s *RouteStats) bool {
-		return s.Dropped == 2
+		return s.Unmatched == 2
 	})
-	if s := orch.GetRouteStats(); s.Routed != 0 {
-		t.Errorf("no records should have matched the ingest-only route, got Routed=%d", s.Routed)
+	if s := orch.GetRouteStats(); s.Matched != 0 {
+		t.Errorf("no records should have matched the ingest-only route, got Matched=%d", s.Matched)
 	}
 	if got := orch.VaultRouteStatsList()[archiveID]; got != nil && got.Matched != 0 {
 		t.Errorf("archive vault should have matched 0 records, got %+v", got)
@@ -241,7 +241,7 @@ func TestRetentionDispositionRouteFiresFanOut(t *testing.T) {
 	r.applyRetentionDispositionToChunk(fx.sealedID)
 
 	waitForRouteStats(t, fx.orch, "3 matched records (route disposition fires fan-out)", func(s *RouteStats) bool {
-		return s.Routed == 3
+		return s.Matched == 3
 	})
 }
 
@@ -290,8 +290,8 @@ func TestRetentionDispositionEmptyTreatedAsDelete(t *testing.T) {
 func assertNoRetentionFanOut(t *testing.T, orch *Orchestrator, what string) {
 	t.Helper()
 	time.Sleep(50 * time.Millisecond)
-	if s := orch.GetRouteStats(); s.Ingested != 0 {
-		t.Errorf("%s must skip pipeline fan-out, but %d records were ingested", what, s.Ingested)
+	if s := orch.GetRouteStats(); s.Routed != 0 {
+		t.Errorf("%s must skip pipeline fan-out, but %d records were ingested", what, s.Routed)
 	}
 }
 
@@ -330,7 +330,7 @@ func TestTryRetainChunkSkipsDispositionWhenAlreadyPending(t *testing.T) {
 	}()
 
 	waitForRouteStats(t, fx.orch, "first sweep routes 3 records", func(s *RouteStats) bool {
-		return s.Routed == 3
+		return s.Matched == 3
 	})
 
 	// Re-arm inflight for the second call.
@@ -346,8 +346,8 @@ func TestTryRetainChunkSkipsDispositionWhenAlreadyPending(t *testing.T) {
 
 	// Give the pipeline a grace window; the matched count must stay at 3.
 	time.Sleep(50 * time.Millisecond)
-	if s := fx.orch.GetRouteStats(); s.Routed != 3 {
-		t.Errorf("second sweep (alreadyPending=true) MUST NOT re-route; matched grew from 3 to %d (the storage-eating cascade bug)", s.Routed)
+	if s := fx.orch.GetRouteStats(); s.Matched != 3 {
+		t.Errorf("second sweep (alreadyPending=true) MUST NOT re-route; matched grew from 3 to %d (the storage-eating cascade bug)", s.Matched)
 	}
 }
 
@@ -387,7 +387,7 @@ func TestRetentionTargetThreadsDispositionFromVaultConfig(t *testing.T) {
 					}},
 				}},
 				RetentionPolicies: []system.RetentionPolicyConfig{{
-					ID:     policyID,
+					ID:          policyID,
 					MaxAgeNanos: int64Ptr(int64(time.Hour)),
 				}},
 			}

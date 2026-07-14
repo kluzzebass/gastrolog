@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/chunk/cloud"
+	"gastrolog/internal/chunk/glcb"
 	"gastrolog/internal/format"
 )
 
@@ -31,7 +31,7 @@ type Entry struct {
 
 // blobPath returns the GLCB blob path for the given chunk under dir.
 func blobPath(dir string, chunkID chunk.ChunkID) string {
-	return filepath.Join(dir, chunkID.String(), cloud.BlobFilename)
+	return filepath.Join(dir, chunkID.String(), glcb.BlobFilename)
 }
 
 // decodeRawEntries decodes a raw tail of `[ts:i64][pos:u32] × N`
@@ -108,7 +108,7 @@ func FindStartPosition(entries []Entry, ts int64) (uint64, bool) {
 
 // LoadIngestIndex loads the ingest TS index for a sealed chunk by reading
 // the embedded ITSI section from the chunk's data.glcb blob. Returns
-// ErrIndexNotFound-equivalent (cloud.ErrSectionNotFound or os.IsNotExist)
+// ErrIndexNotFound-equivalent (glcb.ErrSectionNotFound or os.IsNotExist)
 // when the chunk has no embedded ITSI section.
 func LoadIngestIndex(dir string, chunkID chunk.ChunkID) ([]Entry, error) {
 	return loadFromBlob(blobPath(dir, chunkID), format.TypeIngestIndex)
@@ -120,7 +120,7 @@ func LoadSourceIndex(dir string, chunkID chunk.ChunkID) ([]Entry, error) {
 }
 
 func loadFromBlob(path string, sectionType byte) ([]Entry, error) {
-	entries, err := cloud.LoadSection(path, sectionType, decodeRawEntries)
+	entries, err := glcb.LoadSection(path, sectionType, decodeRawEntries)
 	if err != nil {
 		return nil, err
 	}
@@ -187,7 +187,7 @@ func ViewFromSection(data []byte) (MmapView, error) {
 }
 
 func openSectionMmap(path string, sectionType byte) (MmapView, error) {
-	data, closer, err := cloud.MapSection(path, sectionType)
+	data, closer, err := glcb.MapSection(path, sectionType)
 	if err != nil {
 		return MmapView{}, err
 	}

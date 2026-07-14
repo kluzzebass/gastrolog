@@ -585,10 +585,10 @@ func (s *LifecycleServer) listLiveNodes(ctx context.Context) map[string]struct{}
 // buildRouteStats aggregates route statistics from local + peer sources.
 func (s *LifecycleServer) buildRouteStats() *apiv1.GetRouteStatsResponse {
 	rs := s.orch.GetRouteStats()
-	totalIngested := rs.Ingested
-	totalDropped := rs.Dropped
 	totalRouted := rs.Routed
-	filterActive := s.orch.IsFilterSetActive()
+	totalUnmatched := rs.Unmatched
+	totalMatched := rs.Matched
+	routeTableActive := s.orch.IsRouteTableActive()
 
 	vaultMap := make(map[string]*apiv1.VaultRouteStats)
 	for vaultID, vs := range s.orch.VaultRouteStatsList() {
@@ -607,31 +607,31 @@ func (s *LifecycleServer) buildRouteStats() *apiv1.GetRouteStatsResponse {
 	}
 
 	if s.peerRouteStats != nil {
-		pIngested, pDropped, pRouted, pFilterActive, pVaultStats, pRouteStats := s.peerRouteStats.AggregateRouteStats()
-		totalIngested += pIngested
-		totalDropped += pDropped
+		pRouted, pUnmatched, pMatched, pRouteTableActive, pVaultStats, pRouteStats := s.peerRouteStats.AggregateRouteStats()
 		totalRouted += pRouted
-		if pFilterActive {
-			filterActive = true
+		totalUnmatched += pUnmatched
+		totalMatched += pMatched
+		if pRouteTableActive {
+			routeTableActive = true
 		}
 		mergeVaultRouteStats(vaultMap, pVaultStats)
 		mergePerRouteStats(routeMap, pRouteStats)
 	}
 
-	var ingestedRate, routedRate *apiv1.ThroughputRate
+	var routedRate, matchedRate *apiv1.ThroughputRate
 	if s.clusterRouteRates != nil {
-		ingestedRate, routedRate = s.clusterRouteRates()
+		routedRate, matchedRate = s.clusterRouteRates()
 	} else {
-		ingestedRate, routedRate = clusterRouteRates(s.localStats, s.peerRouteStats)
+		routedRate, matchedRate = clusterRouteRates(s.localStats, s.peerRouteStats)
 	}
 
 	resp := &apiv1.GetRouteStatsResponse{
-		TotalIngested:   totalIngested,
-		TotalDropped:    totalDropped,
 		TotalRouted:     totalRouted,
-		FilterSetActive: filterActive,
-		IngestedRate:    ingestedRate,
+		TotalUnmatched:    totalUnmatched,
+		TotalMatched:    totalMatched,
+		RouteTableActive: routeTableActive,
 		RoutedRate:      routedRate,
+		MatchedRate:     matchedRate,
 	}
 	for _, vs := range vaultMap {
 		resp.VaultStats = append(resp.VaultStats, vs)

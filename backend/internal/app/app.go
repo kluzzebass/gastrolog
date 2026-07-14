@@ -24,10 +24,10 @@ import (
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/alert"
 	"gastrolog/internal/auth"
+	"gastrolog/internal/blobstore"
 	"gastrolog/internal/cert"
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/chunk"
-	chunkcloud "gastrolog/internal/chunk/cloud"
 	chunkfile "gastrolog/internal/chunk/file"
 	chunkjsonl "gastrolog/internal/chunk/jsonl"
 	chunkmem "gastrolog/internal/chunk/memory"
@@ -844,11 +844,11 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 		// system data, not client-side accumulation (gastrolog-4eh5ns).
 		ClusterRouteTotals: func() (int64, int64, string) {
 			rs := statsAdapter.RouteStats()
-			pIngested, pRouted, members := peerState.AggregateRouteTotals()
+			pRouted, pMatched, members := peerState.AggregateRouteTotals()
 			// "self" + sorted live peers: the summed window re-anchors on
 			// any change so peers entering/leaving the sum never read as
 			// traffic (gastrolog-mliwrd).
-			return rs.Ingested + pIngested, rs.Routed + pRouted,
+			return rs.Routed + pRouted, rs.Matched + pMatched,
 				"self," + strings.Join(members, ",")
 		},
 		Alerts: alerts,
@@ -1412,7 +1412,7 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 			JoinClusterFunc: deps.JoinClusterFunc, RemoveNodeFunc: deps.RemoveNodeFunc,
 			SetNodeSuffrageFunc: deps.SetNodeSuffrageFunc,
 			CloudTesters: map[string]server.CloudServiceTester{
-				"file": chunkcloud.NewConnectionTester(deps.Logger),
+				"file": blobstore.NewConnectionTester(deps.Logger),
 			},
 			PlacementReconcile:        deps.PlacementReconcile,
 			BootstrapTokenServeSecret: deps.BootstrapTokenServeSecret,
@@ -1462,7 +1462,7 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 	}
 
 	if deps.ConfigStore != nil {
-		deps.Logger.Info("shutting down system raft")
+		deps.Logger.Info("shutting down cluster-ctl raft")
 		_ = deps.ConfigStore.Close()
 	}
 
@@ -1525,7 +1525,7 @@ func setupMultiRaft(clusterSrv *cluster.Server, rawStore system.Store, nodeID, h
 		Transport: mrt,
 		NodeID:    nodeID,
 		BaseDir:   filepath.Join(homeDir, "raft", "groups"),
-		// System/config raft is not managed by GroupManager; only vault/.../ctl
+		// The cluster-ctl raft is not managed by GroupManager; only vault/.../ctl
 		// multiraft groups are. Leave ShutdownLast empty so Shutdown does not look for a
 		// non-existent group ID.
 		ShutdownLast:   "",

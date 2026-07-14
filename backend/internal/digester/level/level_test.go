@@ -30,7 +30,7 @@ func TestDigest_KVFormat(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			msg := &ingestion.Message{
+			msg := &ingestion.IngestMessage{
 				Raw:   []byte(tt.raw),
 				Attrs: make(map[string]string),
 			}
@@ -62,7 +62,7 @@ func TestDigest_JSONFormat(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			msg := &ingestion.Message{
+			msg := &ingestion.IngestMessage{
 				Raw:   []byte(tt.raw),
 				Attrs: make(map[string]string),
 			}
@@ -96,7 +96,7 @@ func TestDigest_SyslogPriority(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			msg := &ingestion.Message{
+			msg := &ingestion.IngestMessage{
 				Raw:   []byte(tt.raw),
 				Attrs: make(map[string]string),
 			}
@@ -125,7 +125,7 @@ func TestDigest_NoMatch(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			msg := &ingestion.Message{
+			msg := &ingestion.IngestMessage{
 				Raw:   []byte(tt.raw),
 				Attrs: make(map[string]string),
 			}
@@ -144,7 +144,7 @@ func TestDigest_SkipsExistingAttr(t *testing.T) {
 	for _, key := range []string{"level", "severity", "severity_name"} {
 		t.Run(key, func(t *testing.T) {
 			t.Parallel()
-			msg := &ingestion.Message{
+			msg := &ingestion.IngestMessage{
 				Raw:   []byte(`level=ERROR msg="fail"`),
 				Attrs: map[string]string{key: "custom"},
 			}
@@ -164,7 +164,7 @@ func TestDigest_SkipsExistingAttr(t *testing.T) {
 func TestDigest_NilAttrs(t *testing.T) {
 	t.Parallel()
 	d := New()
-	msg := &ingestion.Message{
+	msg := &ingestion.IngestMessage{
 		Raw: []byte(`level=ERROR msg="fail"`),
 	}
 	_ = d.Digest(msg)
@@ -253,7 +253,7 @@ func TestNoFalsePositives(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			msg := &ingestion.Message{
+			msg := &ingestion.IngestMessage{
 				Raw:   []byte(tt.raw),
 				Attrs: make(map[string]string),
 			}

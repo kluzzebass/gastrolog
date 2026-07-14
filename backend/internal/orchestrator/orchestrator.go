@@ -47,9 +47,9 @@ type IngesterStats struct {
 // RouteStats is a point-in-time snapshot of global routing counters sourced
 // from the pipeline routing manager.
 type RouteStats struct {
-	Ingested int64 // total records that entered routing (matched + unmatched)
-	Dropped  int64 // records matching no route (intentional, counted drop)
-	Routed   int64 // records that matched a route and were fanned out
+	Routed  int64 // total records that entered routing (matched + unmatched)
+	Unmatched int64 // records that matched no route (intentional, counted drop)
+	Matched int64 // records that matched a route and were fanned out
 }
 
 // VaultRouteStats is a point-in-time snapshot of per-vault routing counters.
@@ -341,7 +341,7 @@ type Orchestrator struct {
 	// gastrolog-4y03v.
 	progressTrigger *progressNotifier
 
-	// Suspect tracker for cloud chunks that returned 404.
+	// Suspect tracker for cloud-backed chunks that returned 404.
 	suspects *suspectTracker
 
 	// Per-vault leader loop for vault control-plane Raft (replicated instance
@@ -667,6 +667,14 @@ type Config struct {
 	// The app layer wires this to Raft to replicate checkpoints cluster-wide.
 	OnIngesterCheckpoint func(ingesterID glid.GLID, data []byte)
 
+	// IngesterRetryDelay overrides the pause before an ingester run is
+	// retried (any passive listener exit, or a non-passive run that returned
+	// an error). consecutiveFailures counts error exits since the last clean
+	// run. Nil uses the ingestion manager's default jittered exponential
+	// backoff (3–5s first retry, doubling to a 5m cap); tests inject a short
+	// delay to observe retries without wall-clock waits.
+	IngesterRetryDelay func(consecutiveFailures int) time.Duration
+
 	// Digesters run in order on each ingestion message before the record is
 	// built. The app supplies the level/timestamp enrichers here.
 	Digesters []digestion.Digester
@@ -690,28 +698,28 @@ type Config struct {
 	// shutting down alongside this node. See gastrolog-1e5ke.
 	Phase *lifecycle.Phase
 
-	// SegmentClosePolicy controls when a vault's working segment is closed,
-	// renamed to completed/, and published for collection/chunking. A zero
-	// value selects the production defaults (defaultSegmentCloseMaxBytes /
-	// defaultSegmentCloseMaxAge). Without a close policy the pipeline never
+	// SegmentCompletePolicy controls when a vault's working segment is completed —
+	// finalized, renamed to completed/, and published for collection/chunking. A zero
+	// value selects the production defaults (defaultSegmentCompleteMaxBytes /
+	// defaultSegmentCompleteMaxAge). Without a complete policy the pipeline never
 	// completes a segment, so records would stay in working/ forever and
 	// never reach a sealed GLCB (gastrolog-18f9r, Rubicon E3).
-	SegmentClosePolicy segmentation.ClosePolicy
+	SegmentCompletePolicy segmentation.CompletePolicy
 
 	// SegmentDisableFsync skips fsync on segmentation group-commit flushes
-	// (dev/load testing only). Segment close still syncs before rename.
+	// (dev/load testing only). Segment completion still syncs before rename.
 	// Wired from --segment-hot-path-fsync / GLOG_SEGMENT_HOT_PATH_FSYNC.
 	SegmentDisableFsync bool
 }
 
-// Production segment close defaults: a segment completes once it reaches
+// Production segment complete defaults: a segment completes once it reaches
 // 8 MiB or 10 seconds of age, whichever comes first. MaxAge bounds the
 // ingest→queryable latency on low-throughput vaults (age is evaluated on
-// each commit, so a trickle still closes its segment on the next record
+// each commit, so a trickle still completes its segment on the next record
 // after the window); MaxBytes bounds segment size under load.
 const (
-	defaultSegmentCloseMaxBytes = uint64(8 << 20)
-	defaultSegmentCloseMaxAge   = 10 * time.Second
+	defaultSegmentCompleteMaxBytes = uint64(8 << 20)
+	defaultSegmentCompleteMaxAge   = 10 * time.Second
 )
 
 // AlertCollector is the interface for raising and clearing system alerts.
@@ -729,10 +737,10 @@ func New(cfg Config) (*Orchestrator, error) {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	if cfg.SegmentClosePolicy == (segmentation.ClosePolicy{}) {
-		cfg.SegmentClosePolicy = segmentation.ClosePolicy{
-			MaxBytes: defaultSegmentCloseMaxBytes,
-			MaxAge:   defaultSegmentCloseMaxAge,
+	if cfg.SegmentCompletePolicy == (segmentation.CompletePolicy{}) {
+		cfg.SegmentCompletePolicy = segmentation.CompletePolicy{
+			MaxBytes: defaultSegmentCompleteMaxBytes,
+			MaxAge:   defaultSegmentCompleteMaxAge,
 		}
 	}
 
@@ -801,18 +809,19 @@ func New(cfg Config) (*Orchestrator, error) {
 	// queue-depth probes in Start.
 	o.pipelineGate = chanwatch.NewPressureGate(chanwatch.DefaultThresholds())
 	o.pipeline = pipeline.New(pipeline.Config{
-		AdmissionGate:        o.diskAdmissionGate,
-		VaultAdmissionGate:   o.vaultAdmissionGate,
-		DeferWritesGate:      o.diskDeferWrites,
-		NodeID:               o.localNodeIDGLID,
-		Logger:               baseLogger,
-		Alerts:               o.alerts,
-		Digesters:            cfg.Digesters,
-		OnCheckpoint:         cfg.OnIngesterCheckpoint,
-		PressureGate:         o.pipelineGate,
-		IngestionOutCapacity: cfg.IngestChannelSize,
-		SegmentClosePolicy:   cfg.SegmentClosePolicy,
-		SegmentDisableFsync:  cfg.SegmentDisableFsync,
+		AdmissionGate:         o.diskAdmissionGate,
+		VaultAdmissionGate:    o.vaultAdmissionGate,
+		DeferWritesGate:       o.diskDeferWrites,
+		NodeID:                o.localNodeIDGLID,
+		Logger:                baseLogger,
+		Alerts:                o.alerts,
+		Digesters:             cfg.Digesters,
+		OnCheckpoint:          cfg.OnIngesterCheckpoint,
+		PressureGate:          o.pipelineGate,
+		IngestionOutCapacity:  cfg.IngestChannelSize,
+		IngestionRetryDelay:   cfg.IngesterRetryDelay,
+		SegmentCompletePolicy: cfg.SegmentCompletePolicy,
+		SegmentDisableFsync:   cfg.SegmentDisableFsync,
 	})
 	if cfg.SegmentDisableFsync {
 		logger.Warn("segmentation hot-path fsync disabled — group-commit flushes are not durable until segment close; dev/load testing only")
@@ -938,8 +947,10 @@ func (o *Orchestrator) IngesterName(id glid.GLID) string {
 	return o.ingesterMeta[id].Name
 }
 
-// IsIngesterRunning reports whether the given ingester has an active cancel function,
-// meaning its goroutine was launched and hasn't been stopped.
+// IsIngesterRunning reports whether the given ingester's run is currently
+// executing, backed by the Alive flag the pipeline adapter toggles around each
+// run. A crashed or retry-waiting ingester reports false — this is the signal
+// the ingester convergence sweep alerts on (gastrolog-3mnjlo).
 func (o *Orchestrator) IsIngesterRunning(id glid.GLID) bool {
 	o.mu.RLock()
 	stats := o.ingesterStats[id]
@@ -948,21 +959,21 @@ func (o *Orchestrator) IsIngesterRunning(id glid.GLID) bool {
 }
 
 // GetRouteStats returns a snapshot of the global routing counters, sourced from
-// the pipeline routing manager (records that entered routing, were dropped as
-// unmatched, or matched a route and were fanned out).
+// the pipeline routing manager (records that entered routing, went unmatched,
+// or matched a route and were fanned out).
 func (o *Orchestrator) GetRouteStats() *RouteStats {
 	snap := o.pipeline.RouteStats()
 	return &RouteStats{
-		Ingested: int64(snap.Ingested),  //nolint:gosec // G115: counter bounded in practice
-		Dropped:  int64(snap.Unmatched), //nolint:gosec // G115
-		Routed:   int64(snap.Matched),   //nolint:gosec // G115
+		Routed:  int64(snap.Routed),    //nolint:gosec // G115: counter bounded in practice
+		Unmatched: int64(snap.Unmatched), //nolint:gosec // G115
+		Matched: int64(snap.Matched),   //nolint:gosec // G115
 	}
 }
 
-// IsFilterSetActive reports whether a routing table is currently published to
-// the pipeline. When false, all ingested records are silently dropped. Name
-// kept for proto/RPC stability.
-func (o *Orchestrator) IsFilterSetActive() bool {
+// IsRouteTableActive reports whether a route table is currently published to
+// the pipeline. When false, every ingested record goes unmatched (a counted
+// drop).
+func (o *Orchestrator) IsRouteTableActive() bool {
 	return o.pipeline.RoutingActive()
 }
 
@@ -1104,7 +1115,7 @@ func (o *Orchestrator) VaultSnapshots() []VaultSnapshot {
 // applied index for the given vault. Zero if the vault has no
 // vault-ctl group on this node (e.g. placement excludes it) or the
 // GroupManager isn't wired (single-node test). Read at snapshot time
-// so the value reflects the latest committed-and-applied entry on
+// so the value reflects the latest applied entry on
 // this node.
 func (o *Orchestrator) vaultCtlAppliedIndex(vaultID glid.GLID) uint64 {
 	if o.groupMgr == nil {

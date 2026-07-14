@@ -309,7 +309,7 @@ configure() {
   echo ">>> Creating cloud service..."
   $GLOG config cloud-service create --addr "$S" \
     --name "S3" --provider s3 --bucket gastrolog --region gastrolog \
-    --endpoint "localhost:19000" --access-key gastrolog --secret-key gastrolog 2>&1 | sed 's/^/  /'
+    --endpoint "http://localhost:19000" --access-key gastrolog --secret-key gastrolog 2>&1 | sed 's/^/  /'
 
   echo ">>> Creating policies..."
   $GLOG config rotation-policy create --addr "$S" --name "1m-rotate" --max-age 1m 2>&1 | sed 's/^/  /'

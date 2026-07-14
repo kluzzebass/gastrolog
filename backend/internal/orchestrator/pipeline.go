@@ -16,6 +16,7 @@ import (
 	"gastrolog/internal/glid"
 	"gastrolog/internal/orchestrator/pipeline"
 	"gastrolog/internal/pipeline/chunking"
+	"gastrolog/internal/pipeline/collection"
 	"gastrolog/internal/pipeline/distribution"
 	"gastrolog/internal/pipeline/routing"
 	"gastrolog/internal/raftgroup"
@@ -36,7 +37,25 @@ func (o *Orchestrator) ServeSegmentPull(vaultID, segmentID glid.GLID, w io.Write
 	if pl == nil {
 		return errors.New("pipeline not initialized")
 	}
-	return pl.ServePull(distribution.PullRequest{VaultID: vaultID, SegmentID: segmentID, Dest: w})
+	return translateServePullError(pl.ServePull(distribution.PullRequest{VaultID: vaultID, SegmentID: segmentID, Dest: w}))
+}
+
+// translateServePullError maps the distribution store's "cannot serve this
+// segment here" sentinels onto collection.ErrSegmentUnavailable — the seam
+// contract the cluster PullSegment handler encodes as a NotFound status so
+// the pulling home's SegmentPuller can re-attach the same sentinel. Every
+// other error (open/copy failures mid-stream) passes through and reaches the
+// puller as a terminal failure (gastrolog-466kq5).
+func translateServePullError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, distribution.ErrSegmentNotFound) ||
+		errors.Is(err, distribution.ErrSegmentGone) ||
+		errors.Is(err, distribution.ErrUnknownVault) {
+		return fmt.Errorf("%w: %w", collection.ErrSegmentUnavailable, err)
+	}
+	return err
 }
 
 // ServeChunkGLCBPull streams a locally-held sealed chunk GLCB to a peer home

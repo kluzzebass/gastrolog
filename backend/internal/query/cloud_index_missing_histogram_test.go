@@ -72,7 +72,7 @@ func (im *indexMissingIM) FindIngestStartPosition(_ chunk.ChunkID, _ time.Time) 
 }
 
 // TestCloudIndexMissingHistogramIncludesAllRecords reproduces the
-// production gap: 1800+ cloud chunks each with 100 records exist in the
+// production gap: 1800+ cloud-backed chunks each with 100 records exist in the
 // FSM, but timechartChunkByIndex's rank-arithmetic path can't resolve
 // per-bucket ranks because the local cache is empty. The histogram total
 // must still equal RecordCount × chunks (within distribution rounding).

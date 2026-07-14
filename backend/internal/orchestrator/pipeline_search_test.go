@@ -11,6 +11,7 @@ import (
 	"gastrolog/internal/index"
 	"gastrolog/internal/manifest"
 	"gastrolog/internal/pipeline/chunking"
+	"gastrolog/internal/pipeline/segment"
 	"gastrolog/internal/query"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
@@ -116,16 +117,14 @@ func (r *pipelineSearchRegistry) OpenPipelineChunkCursor(vaultID glid.GLID, chun
 	if err != nil {
 		return nil, err
 	}
-	readAt := func(pos uint64) (chunk.Record, error) {
-		rec, err := chunking.ReadManifestRecordAt(open, locate, pos)
-		if err != nil {
-			return chunk.Record{}, err
-		}
-		cr := chunking.RecordToChunk(rec)
-		cr.Ref = chunk.RecordRef{ChunkID: chunkID, Pos: pos}
-		return cr, nil
+	openReader := func() (*chunking.OpenChunkReader, error) {
+		reader, _, err := chunking.NewOpenChunkReader(chunking.OpenChunkQueryInput{
+			Manifest: open,
+			Locate:   locate,
+		})
+		return reader, err
 	}
-	return newManifestRecordCursor(chunkID, seq, open.TotalRecords, readAt), nil
+	return newManifestRecordCursor(chunkID, seq, open.TotalRecords, openReader), nil
 }
 
 func (r *pipelineSearchRegistry) ScanPipelineChunkIngestTS(vaultID glid.GLID, chunkID chunk.ChunkID, cb func(tsNanos int64) bool) error {
@@ -219,6 +218,95 @@ func TestManifestRecordCursorReverseSeek(t *testing.T) {
 	}
 	if len(rec.Raw) == 0 {
 		t.Fatal("expected non-empty first record")
+	}
+}
+
+// TestManifestRecordCursorReverseNoReopenAndForwardParity asserts, via
+// open-count instrumentation (not timing), that a full reverse scan over an
+// active pipeline chunk performs ZERO full-verify segment opens and exactly
+// one mapped open per distinct manifest segment for the whole cursor lifetime
+// (gastrolog-54mjat) — and that reverse reads return the same record at the
+// same position as forward iteration.
+func TestManifestRecordCursorReverseNoReopenAndForwardParity(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	vaultID, fsm, home, chunkID, wantRecords := buildOpenPipelineManifest(t, ctx)
+	open := fsm.OpenChunk()
+	if wantRecords < 2 {
+		t.Fatalf("need >= 2 records for reverse test, got %d", wantRecords)
+	}
+	distinctSegs := map[glid.GLID]struct{}{}
+	for _, ref := range open.Refs {
+		distinctSegs[ref.SegmentID] = struct{}{}
+	}
+
+	reg := &pipelineSearchRegistry{vaultID: vaultID, home: home, fsm: fsm}
+
+	// Forward pass: position -> record via Next.
+	fwdCursor, err := reg.OpenPipelineChunkCursor(vaultID, chunkID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var forward []chunk.Record
+	for {
+		rec, _, err := fwdCursor.Next()
+		if errors.Is(err, chunk.ErrNoMoreRecords) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("Next: %v", err)
+		}
+		forward = append(forward, rec)
+	}
+	if err := fwdCursor.Close(); err != nil {
+		t.Fatalf("close forward cursor: %v", err)
+	}
+	if uint64(len(forward)) != wantRecords {
+		t.Fatalf("forward records = %d, want %d", len(forward), wantRecords)
+	}
+
+	cursor, err := reg.OpenPipelineChunkCursor(vaultID, chunkID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cursor.Close() }()
+
+	opensBefore := segment.Opens()
+	mappedBefore := segment.MappedOpens()
+
+	if err := cursor.Seek(chunk.RecordRef{ChunkID: chunkID, Pos: open.TotalRecords}); err != nil {
+		t.Fatalf("Seek: %v", err)
+	}
+	var reverse []chunk.Record
+	for {
+		rec, _, err := cursor.Prev()
+		if errors.Is(err, chunk.ErrNoMoreRecords) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("Prev: %v", err)
+		}
+		reverse = append(reverse, rec)
+	}
+
+	if delta := segment.Opens() - opensBefore; delta != 0 {
+		t.Fatalf("reverse scan made %d full-verify segment.Open calls, want 0", delta)
+	}
+	if delta := segment.MappedOpens() - mappedBefore; delta != uint64(len(distinctSegs)) {
+		t.Fatalf("reverse scan made %d OpenMapped calls, want %d (one per distinct segment)",
+			delta, len(distinctSegs))
+	}
+
+	if len(reverse) != len(forward) {
+		t.Fatalf("reverse records = %d, want %d", len(reverse), len(forward))
+	}
+	for i, rec := range reverse {
+		want := forward[len(forward)-1-i]
+		if rec.Ref != want.Ref || string(rec.Raw) != string(want.Raw) {
+			t.Fatalf("reverse[%d] = ref %+v raw %q, forward has ref %+v raw %q",
+				i, rec.Ref, rec.Raw, want.Ref, want.Raw)
+		}
 	}
 }
 

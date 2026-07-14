@@ -42,7 +42,7 @@ func memVaultCfg(vaultID glid.GLID, loader *fakeSystemLoader) system.VaultConfig
 func TestReloadFilters(t *testing.T) {
 	t.Parallel()
 	loader := &fakeSystemLoader{}
-	orch, vaults := newFilteredTestSetupWithLoader(t, loader)
+	orch, vaults := newRoutedTestSetupWithLoader(t, loader)
 
 	// gastrolog-4kkoo (Phase 5): explicit priorities so the prod route
 	// fires before the archive catch-all under first-match-wins.
@@ -107,7 +107,7 @@ func TestReloadFilters(t *testing.T) {
 func TestReloadFiltersInvalidExpression(t *testing.T) {
 	t.Parallel()
 	loader := &fakeSystemLoader{}
-	orch, vaults := newFilteredTestSetupWithLoader(t, loader)
+	orch, vaults := newRoutedTestSetupWithLoader(t, loader)
 
 	loader.cfg = &system.Config{
 		Routes: []system.RouteConfig{
@@ -116,14 +116,14 @@ func TestReloadFiltersInvalidExpression(t *testing.T) {
 	}
 	err := orch.ReloadFilters(context.Background())
 	if err == nil {
-		t.Fatal("expected error for invalid filter expression")
+		t.Fatal("expected error for invalid match expression")
 	}
 }
 
 func TestReloadFiltersIgnoresUnknownVaults(t *testing.T) {
 	t.Parallel()
 	loader := &fakeSystemLoader{}
-	orch, vaults := newFilteredTestSetupWithLoader(t, loader)
+	orch, vaults := newRoutedTestSetupWithLoader(t, loader)
 
 	nonexistentVaultID := glid.New()
 

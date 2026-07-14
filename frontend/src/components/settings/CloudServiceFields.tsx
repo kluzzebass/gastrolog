@@ -1,4 +1,5 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
+import { endpointSchemeError } from "../../utils/endpointScheme";
 import { FormField, TextInput, TextArea, SelectInput, NumberInput } from "./FormField";
 import { Button } from "./Buttons";
 
@@ -43,6 +44,7 @@ export function CloudServiceFields({
   const isS3 = values.provider === "s3";
   const isGCS = values.provider === "gcs";
   const isAzure = values.provider === "azure";
+  const endpointError = endpointSchemeError(values.endpoint);
 
   return (
     <>
@@ -76,16 +78,22 @@ export function CloudServiceFields({
         </FormField>
       )}
 
-      {/* Endpoint (S3 only — for S3-compatible like MinIO) */}
-      {isS3 && (
+      {/* Endpoint (S3: S3-compatible like MinIO; GCS: emulators/local dev) */}
+      {(isS3 || isGCS) && (
         <FormField
           label="Endpoint"
           dark={dark}
-          description="For S3-compatible services (e.g. MinIO). Leave empty for AWS S3."
+          description={
+            isS3
+              ? "For S3-compatible services (e.g. MinIO). Must include the scheme — https:// or http://. Leave empty for AWS S3."
+              : "For emulators and local dev (e.g. fake-gcs-server). Must include the scheme — https:// or http://. Leave empty for the default Google endpoint."
+          }
         >
           <TextInput
             value={values.endpoint}
             onChange={(v) => onChange({ endpoint: v })}
+            error={endpointError !== null}
+            title={endpointError ?? undefined}
             dark={dark}
           />
         </FormField>

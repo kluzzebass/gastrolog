@@ -7,29 +7,32 @@ The Routes view shows live routing statistics aggregated across the whole
 
 Counters since process start, summed across nodes:
 
-- **Ingested** — records that entered the routing stage (after ingest and
+- **Routed** — records that entered the routing stage (after ingest and
   [digestion](help:digesters)).
-- **Routed** — records that matched at least one [route](help:routing) and
+- **Matched** — records that matched at least one [route](help:routing) and
   were delivered to a destination vault. A record fanned out to several
   vaults still counts once.
-- **Dropped** — records that matched **no** route. These are silently
-  discarded; a nonzero value usually means a producer is sending data no
-  route claims.
-- **Drop rate** — dropped as a percentage of ingested.
+- **Unmatched** — records that matched **no** route. These are discarded
+  (an intentional, counted drop); a nonzero value usually means a producer
+  is sending data no route claims.
+- **Unmatched rate** — unmatched as a percentage of routed.
 
-The three counters always satisfy `ingested = routed + dropped`.
+The three counters always satisfy `routed = matched + unmatched`.
+Delivery failures are a separate quantity: a record already counted as
+matched whose fan-out delivery to one destination vault failed is counted
+per vault by the routing stage, never folded into unmatched.
 
 ## Throughput
 
 Live rates computed from rolling windows on each node and summed across the
 cluster:
 
-- **Ingest rate** — records per second entering the routing stage.
-- **Route rate** — records per second matching at least one route.
+- **Routed rate** — records per second entering the routing stage.
+- **Matched rate** — records per second matching at least one route.
 
-On a cluster where every record matches a route (zero drops), the two rates
-are identical by construction — the gap between them is the *drop rate as it
-happens*, which is the misconfiguration this pair is designed to surface.
+On a cluster where every record matches a route, the two rates are identical
+by construction — the gap between them is the *unmatched rate as it happens*,
+which is the misconfiguration this pair is designed to surface.
 
 Each rate shows three horizons:
 

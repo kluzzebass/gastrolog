@@ -110,7 +110,7 @@ func (e *Engine) runTimechartStrategy(
 	groupCounts := acc.groupCounts
 
 	if hasFilter || hasPreOps {
-		// Compute unfiltered counts for cloud chunks.
+		// Compute unfiltered counts for cloud-backed chunks.
 		hasCloud := e.timechartCloudCounts(selectedVaults, start, end, bucketWidth, numBuckets, cloudCounts, cloudFlags)
 
 		// Scan LOCAL chunks only with the filter applied (skip cloud blobs).
@@ -153,7 +153,7 @@ func (e *Engine) runTimechartStrategy(
 		return false, nil
 	}
 
-	// Group breakdown for sealed local + cached cloud chunks via per-bucket
+	// Group breakdown for sealed local + cached cloud-backed chunks via per-bucket
 	// sampling — O(buckets × 1000). Active non-monotonic chunks already
 	// contributed via the unified pass above and are skipped here.
 	e.timechartAttrScanGroups(selectedVaults, start, end, bucketWidth, numBuckets, groupField, groupCounts)
@@ -295,7 +295,7 @@ func (e *Engine) timechartFastPath(selectedVaults []glid.GLID, start time.Time, 
 
 // timechartCloudCounts fills cloudCounts with unfiltered record counts from
 // cloud-backed chunks only (via TS index binary search). Sets cloudFlags for
-// buckets with cloud data. Returns true if any cloud chunks were found.
+// buckets with cloud data. Returns true if any cloud-backed chunks were found.
 func (e *Engine) timechartCloudCounts(selectedVaults []glid.GLID, start, end time.Time, bucketWidth time.Duration, numBuckets int, cloudCounts []int64, cloudFlags []bool) bool {
 	ir := e.indexReader()
 	found := false
@@ -520,7 +520,7 @@ func attrScanGroupCandidateOK(cm chunk.ChunkManager, meta chunk.ChunkMeta, start
 	// chunks that means "blob is not in the warm cache." We never
 	// trigger an S3 download just to compute the level breakdown;
 	// histogram refreshes that span 30d would otherwise pull
-	// hundreds of cloud blobs. Cloud chunks still contribute
+	// hundreds of cloud blobs. Cloud-backed chunks still contribute
 	// accurate counts via the TS index, and the bucket renders as
 	// a hatched "data here, breakdown not loaded" ghost via the
 	// cloudFlags overlay. If the same chunk gets cached later
@@ -1165,13 +1165,13 @@ func chunkBucketTotals(
 // via ImportRecords are scattered relative to IngestTS order. See
 // gastrolog-66b7x.
 //
-// Cloud chunks whose local IngestTS index isn't cached fall through to a
+// Cloud-backed chunks whose local IngestTS index isn't cached fall through to a
 // proportional FSM-based estimate: distribute meta.RecordCount across the
 // buckets the chunk overlaps in proportion to (bucket overlap / chunk span).
-// Without this fallback, cloud chunks on follower nodes that haven't pulled
+// Without this fallback, cloud-backed chunks on follower nodes that haven't pulled
 // the index file silently contribute zero to the histogram even though the
 // search itself can stream the records — the vault inspector reports N
-// records but the histogram shows N/2 because every cloud chunk drops out.
+// records but the histogram shows N/2 because every cloud-backed chunk drops out.
 // Local chunks never use overlap — it smears by chunk metadata bounds rather
 // than per-record ingest_ts, producing phantom counts in quiet periods.
 //
@@ -1268,7 +1268,7 @@ func timechartChunkByIndex(
 // distributeChunkRecordsByOverlap spreads meta.RecordCount across the
 // histogram buckets the chunk overlaps, in proportion to the time overlap
 // between each bucket and [meta.IngestStart, meta.IngestEnd]. Used when the
-// IngestTS rank index isn't locally resolvable (typically cloud chunks on
+// IngestTS rank index isn't locally resolvable (typically cloud-backed chunks on
 // followers without a cached index file) — without this, the chunk silently
 // contributes zero, breaking the invariant "histogram total ≈ vault total".
 func distributeChunkRecordsByOverlap(
@@ -1284,7 +1284,7 @@ func distributeChunkRecordsByOverlap(
 		return
 	}
 	// Sort bounds so non-monotonic chunks (IngestEnd < IngestStart, common
-	// for cloud chunks built via ImportRecords) distribute records across
+	// for cloud-backed chunks built via ImportRecords) distribute records across
 	// their actual TS envelope rather than collapsing to a single bucket.
 	// Without the sort, a non-monotonic chunk hits the span≤0 branch and
 	// dumps RecordCount into the IngestStart bucket — which can be RECENT

@@ -3,7 +3,7 @@ package collection
 import (
 	"context"
 	"errors"
-	"io"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -62,40 +62,26 @@ func PullToPreHead(ctx context.Context, vaultRoot string, vaultID, segmentID gli
 	return finalPath, nil
 }
 
-// ReceiveToPreHead writes pulled segment bytes into the vault pre-head area.
-func ReceiveToPreHead(vaultRoot string, segmentID glid.GLID, src io.Reader) (string, error) {
-	if err := paths.EnsurePreHeadDir(vaultRoot); err != nil {
-		return "", err
-	}
-	path := paths.PreHeadSegment(vaultRoot, segmentID)
-	f, err := os.OpenFile(filepath.Clean(path), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
-		return "", err
-	}
-	_, copyErr := io.Copy(f, src)
-	if copyErr == nil {
-		copyErr = f.Sync()
-	}
-	closeErr := f.Close()
-	if copyErr != nil {
-		_ = os.Remove(path)
-		return "", copyErr
-	}
-	if closeErr != nil {
-		_ = os.Remove(path)
-		return "", closeErr
-	}
-	if err := paths.SyncDir(paths.PreHeadDir(vaultRoot)); err != nil {
-		return "", err
-	}
-	return path, nil
-}
-
 // PromoteVerified opens the pre-head segment, verifies its checksum, and atomically
 // renames it into head. A corrupt transfer is discarded from pre-head. The
 // verified header is returned so callers can count arrivals without a
 // re-read (gastrolog-10n6k8).
-func PromoteVerified(preHeadPath, vaultRoot string) (string, segment.Header, error) {
+//
+// publishedChecksum is the record checksum the origin published to the
+// vault-ctl registry (CompletedSegmentEntry.Checksum). segment.Open only
+// proves the file is consistent with its OWN header — a holder serving stale
+// or wrong-but-internally-valid bytes would still pass, get receipted, and
+// merge divergent bytes into this home's GLCB (gastrolog-5zotim). Zero means
+// no published expectation is available (no registry entry — tests, targeted
+// collects before the FSM caught up); internal verification alone then gates
+// the promote.
+//
+// The record checksum is XXH64 over the record region — content-sensitive,
+// including same-length substitution. Its rolling-CRC32 predecessor folded
+// each frame's trailing CRC32 into itself, and CRC(M ++ CRC(M)) cancels the
+// content contribution, pinning only frame-length structure
+// (gastrolog-1vepg0).
+func PromoteVerified(preHeadPath, vaultRoot string, publishedChecksum uint64) (string, segment.Header, error) {
 	sf, err := segment.Open(preHeadPath)
 	if err != nil {
 		_ = os.Remove(preHeadPath)
@@ -103,6 +89,12 @@ func PromoteVerified(preHeadPath, vaultRoot string) (string, segment.Header, err
 	}
 	hdr := sf.Header()
 	_ = sf.Close()
+
+	if publishedChecksum != 0 && hdr.SegmentChecksum != publishedChecksum {
+		_ = os.Remove(preHeadPath)
+		return "", segment.Header{}, fmt.Errorf("%w: segment checksum %016x does not match published checksum %016x",
+			ErrCorruptSegment, hdr.SegmentChecksum, publishedChecksum)
+	}
 
 	if err := paths.EnsureHeadDir(vaultRoot); err != nil {
 		_ = os.Remove(preHeadPath)

@@ -7,18 +7,19 @@ import (
 	"sync/atomic"
 
 	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline"
 	"gastrolog/internal/pipeline/segmentation"
 	"gastrolog/internal/record"
 )
 
-// ErrNotRunning is returned when Run is called twice.
-var ErrNotRunning = errors.New("routing manager not running")
+// ErrAlreadyRunning is returned when Run is called twice.
+var ErrAlreadyRunning = errors.New("routing manager already running")
 
 // Input is one record entering the routing stage with its origin context.
 //
 // Two entry paths:
 //   - Ingest→digest: Source from IngestSource(rec) (or zero Source, same default)
-//   - Vault retention eject: Source from RetentionSource(sourceVaultID, reason)
+//   - Retention event (disposition = route): Source from RetentionSource(sourceVaultID, reason)
 //
 // Source is routing-time metadata only — it is not stored on the record.
 //
@@ -54,11 +55,17 @@ type Config struct {
 
 // StatsSnapshot is a point-in-time view of routing counters.
 type StatsSnapshot struct {
-	Ingested  uint64               // records that entered routing (matched + unmatched)
+	Routed    uint64               // records that entered routing (matched + unmatched)
 	Matched   uint64               // records that matched a route and were fanned out
 	Unmatched uint64               // records with no route match (intentional drop, counted)
 	PerVault  map[glid.GLID]uint64 // matched-record count per destination vault
 	PerRoute  map[glid.GLID]uint64 // matched-record count per route ID
+	// PerVaultDropped counts delivery drops per destination vault: records
+	// already counted as matched (in PerVault) whose fan-out delivery to that
+	// vault's segmentation queue failed — the vault sink was revoked mid-flight
+	// (unregister) or the context was cancelled at shutdown. Distinct from
+	// Unmatched, which counts intentional no-route drops.
+	PerVaultDropped map[glid.GLID]uint64
 }
 
 // Manager matches records to vaults and fans out record pointers.
@@ -77,13 +84,14 @@ type Manager struct {
 
 	matched   atomic.Uint64
 	unmatched atomic.Uint64
-	// perVault / perRoute hold *atomic.Uint64 matched counters keyed by
-	// destination vault ID and route ID respectively. Lazily populated on the
-	// match path so the hot route() avoids a map write lock.
-	perVault sync.Map
-	perRoute sync.Map
-	running  atomic.Bool
-	wg       sync.WaitGroup
+	// perVault / perRoute hold matched counters keyed by destination vault ID
+	// and route ID respectively. Lazily populated on the match path so the hot
+	// route() avoids a map write lock. perVaultDropped follows the same
+	// pattern for delivery drops (see StatsSnapshot.PerVaultDropped).
+	perVault        counterMap
+	perRoute        counterMap
+	perVaultDropped counterMap
+	running         atomic.Bool
 }
 
 // New returns a routing manager.
@@ -145,16 +153,17 @@ func (m *Manager) Stats() StatsSnapshot {
 	matched := m.matched.Load()
 	unmatched := m.unmatched.Load()
 	return StatsSnapshot{
-		Ingested:  matched + unmatched,
-		Matched:   matched,
-		Unmatched: unmatched,
-		PerVault:  drainCounterMap(&m.perVault),
-		PerRoute:  drainCounterMap(&m.perRoute),
+		Routed:          matched + unmatched,
+		Matched:         matched,
+		Unmatched:       unmatched,
+		PerVault:        m.perVault.snapshot(),
+		PerRoute:        m.perRoute.snapshot(),
+		PerVaultDropped: m.perVaultDropped.snapshot(),
 	}
 }
 
-// TableActive reports whether a routing table is currently published. It is the
-// pipeline analogue of the legacy "filter set active" flag.
+// TableActive reports whether a route table is currently published. It backs
+// the route_table_active flag in route stats.
 func (m *Manager) TableActive() bool {
 	return m.table.Load() != nil
 }
@@ -165,18 +174,26 @@ func (m *Manager) Table() *Table {
 	return m.table.Load()
 }
 
-func incrCounter(store *sync.Map, id glid.GLID) {
-	if c, ok := store.Load(id); ok {
-		c.(*atomic.Uint64).Add(1)
-		return
-	}
-	c, _ := store.LoadOrStore(id, new(atomic.Uint64))
-	c.(*atomic.Uint64).Add(1)
+// counterMap is a lazily-populated set of per-GLID monotonic counters
+// (sync.Map of glid.GLID → *atomic.Uint64 underneath, so the hot match path
+// increments without a map write lock). The any-type assertions live here
+// instead of at every call site.
+type counterMap struct {
+	m sync.Map
 }
 
-func drainCounterMap(store *sync.Map) map[glid.GLID]uint64 {
+func (c *counterMap) incr(id glid.GLID) {
+	if v, ok := c.m.Load(id); ok {
+		v.(*atomic.Uint64).Add(1)
+		return
+	}
+	v, _ := c.m.LoadOrStore(id, new(atomic.Uint64))
+	v.(*atomic.Uint64).Add(1)
+}
+
+func (c *counterMap) snapshot() map[glid.GLID]uint64 {
 	out := make(map[glid.GLID]uint64)
-	store.Range(func(k, v any) bool {
+	c.m.Range(func(k, v any) bool {
 		out[k.(glid.GLID)] = v.(*atomic.Uint64).Load()
 		return true
 	})
@@ -193,23 +210,13 @@ func drainCounterMap(store *sync.Map) map[glid.GLID]uint64 {
 // shutdown) must be able to abort a blocking send.
 func (m *Manager) Run(ctx context.Context, in <-chan Input) error {
 	if !m.running.CompareAndSwap(false, true) {
-		return ErrNotRunning
+		return ErrAlreadyRunning
 	}
 
-	for range m.workers {
-		m.wg.Go(func() {
-			m.worker(ctx, in)
-		})
-	}
-
-	m.wg.Wait()
-	return ctx.Err()
-}
-
-func (m *Manager) worker(ctx context.Context, in <-chan Input) {
-	for item := range in {
+	pipeline.RunWorkerPool(m.workers, in, func(item Input) {
 		m.route(ctx, item)
-	}
+	})
+	return ctx.Err()
 }
 
 func resolveSource(in Input) SourceContext {
@@ -243,9 +250,9 @@ func (m *Manager) route(ctx context.Context, in Input) {
 		}
 	}
 	m.matched.Add(1)
-	incrCounter(&m.perRoute, matchedRoute.ID)
+	m.perRoute.incr(matchedRoute.ID)
 	for _, vaultID := range vaults {
-		incrCounter(&m.perVault, vaultID)
+		m.perVault.incr(vaultID)
 	}
 
 	// Snapshot fan-out sinks under the read lock. Matched vaults without a local
@@ -254,42 +261,80 @@ func (m *Manager) route(ctx context.Context, in Input) {
 	// so UnregisterVault can drain in-flight deliveries before segmentation closes
 	// the input channel.
 	m.vmu.RLock()
-	targets := make([]*vaultSink, 0, len(vaults))
+	targets := make([]sinkTarget, 0, len(vaults))
 	for _, vaultID := range vaults {
 		if sink, ok := m.vaults[vaultID]; ok {
-			targets = append(targets, sink)
+			targets = append(targets, sinkTarget{vaultID: vaultID, sink: sink})
 		}
 	}
 	m.vmu.RUnlock()
 
-	n := len(targets)
-	if n == 0 {
+	if len(targets) == 0 {
 		sendAck(in.Ack, nil)
 		return
 	}
 
 	if in.Ack == nil {
-		for _, sink := range targets {
-			if !sink.deliver(ctx, segmentation.Input{Record: rec}) {
-				return
-			}
+		m.fanOut(ctx, rec, targets)
+		return
+	}
+
+	if len(targets) == 1 {
+		t := targets[0]
+		// deliver nacks in.Ack itself on failure; the source retries.
+		if t.sink.deliver(ctx, segmentation.Input{Record: rec, Ack: in.Ack}) != nil {
+			m.perVaultDropped.incr(t.vaultID)
 		}
 		return
 	}
 
-	if n == 1 {
-		targets[0].deliver(ctx, segmentation.Input{Record: rec, Ack: in.Ack})
-		return
-	}
+	m.fanOutJoined(ctx, rec, targets, in.Ack)
+}
 
-	// Multi-vault fan-out: join the per-vault commit acks into the single source ack.
-	children := newAckJoin(n, in.Ack)
-	for i, sink := range targets {
-		if !sink.deliver(ctx, segmentation.Input{Record: rec, Ack: children[i]}) {
-			// deliver already nacked children[i]; release the still-undelivered
-			// children so the join resolves instead of leaking its collector.
-			for j := i + 1; j < n; j++ {
-				children[j] <- ctx.Err()
+// sinkTarget pairs a matched destination vault with its local vault sink, so
+// the fan-out loops can attribute delivery drops to the right vault.
+type sinkTarget struct {
+	vaultID glid.GLID
+	sink    *vaultSink
+}
+
+// fanOut delivers rec to every target without a source ack (fire-and-forget).
+// A revoked sink (vault unregistered mid-flight) drops only that vault's copy —
+// counted per vault, never silent — and delivery continues to the remaining
+// sinks. Context cancellation stops the fan-out: every subsequent send would
+// fail the same way, so the remaining targets are counted as dropped too.
+func (m *Manager) fanOut(ctx context.Context, rec *record.Record, targets []sinkTarget) {
+	for i, t := range targets {
+		if t.sink.deliver(ctx, segmentation.Input{Record: rec}) == nil {
+			continue
+		}
+		m.perVaultDropped.incr(t.vaultID)
+		if ctx.Err() != nil {
+			for _, rest := range targets[i+1:] {
+				m.perVaultDropped.incr(rest.vaultID)
+			}
+			return
+		}
+	}
+}
+
+// fanOutJoined delivers rec to every target, joining the per-vault commit acks
+// into the single source ack. A revoked sink fails only its own child ack
+// (deliver nacks it; the join carries the first error to the source, which
+// retries) — delivery continues to the remaining sinks. Context cancellation
+// stops the fan-out and nacks the still-undelivered children so the join
+// resolves instead of leaking its collector.
+func (m *Manager) fanOutJoined(ctx context.Context, rec *record.Record, targets []sinkTarget, ack chan<- error) {
+	children := newAckJoin(len(targets), ack)
+	for i, t := range targets {
+		if t.sink.deliver(ctx, segmentation.Input{Record: rec, Ack: children[i]}) == nil {
+			continue
+		}
+		m.perVaultDropped.incr(t.vaultID)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			for j := i + 1; j < len(targets); j++ {
+				m.perVaultDropped.incr(targets[j].vaultID)
+				children[j] <- ctxErr
 			}
 			return
 		}

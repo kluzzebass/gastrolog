@@ -41,6 +41,12 @@ func (l *staticLog) setAssigned(segs ...collection.AssignedSegment) {
 	l.mu.Unlock()
 }
 
+func (l *staticLog) rollCount() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.rollCalls
+}
+
 type memoryPull struct {
 	mu   sync.Mutex
 	data map[glid.GLID][]byte
@@ -168,11 +174,8 @@ func TestCollectOnceReceiptsSegmentAlreadyInHead(t *testing.T) {
 	root := t.TempDir()
 
 	segBytes := writeSegmentBytes(t, vaultID, segID, "already there")
-	prePath, err := collection.ReceiveToPreHead(root, segID, bytes.NewReader(segBytes))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err = collection.PromoteVerified(prePath, root); err != nil {
+	prePath := pullToPreHead(t, root, segID, segBytes)
+	if _, _, err := collection.PromoteVerified(prePath, root, 0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -248,11 +251,8 @@ func TestCollectOnceReceiptsSegmentPromotedAfterLayoutWarm(t *testing.T) {
 
 	// Simulate LocalHolder: segment B lands in head/ after the layout cache warmed.
 	segBBytes := writeSegmentBytes(t, vaultID, segB, "local-b")
-	prePath, err := collection.ReceiveToPreHead(root, segB, bytes.NewReader(segBBytes))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err = collection.PromoteVerified(prePath, root); err != nil {
+	prePath := pullToPreHead(t, root, segB, segBBytes)
+	if _, _, err := collection.PromoteVerified(prePath, root, 0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -579,20 +579,28 @@ func TestCollectOncePullFailure(t *testing.T) {
 	}
 }
 
-func TestCollectOnceSkipsSegmentInPreHead(t *testing.T) {
+// TestCollectOncePromotesPreHeadOrphan is restart survival for the crash
+// window between the pull's rename commit and promote (gastrolog-5zotim): a
+// fresh manager finds the assigned segment already sitting in pre-head/. It
+// must verify the file against the published checksum, promote it in place —
+// no pull; the empty pull client fails any pull attempt — and commit the
+// holder receipt. The old behavior skipped the segment forever: the receipt
+// never committed and the release gate stalled for its manifest.
+func TestCollectOncePromotesPreHeadOrphan(t *testing.T) {
 	t.Parallel()
 	vaultID := glid.New()
 	segID := glid.New()
 	root := t.TempDir()
-	data := writeSegmentBytes(t, vaultID, segID, "pre-head only")
-	if _, err := collection.ReceiveToPreHead(root, segID, bytes.NewReader(data)); err != nil {
-		t.Fatal(err)
-	}
+	data := writeSegmentBytes(t, vaultID, segID, "pre-head orphan")
+	pullToPreHead(t, root, segID, data)
 
-	pull := newMemoryPull()
-	pull.Put(segID, data)
+	pull := newMemoryPull() // intentionally empty: promote-in-place needs no pull
 	log := &staticLog{}
-	log.setAssigned(collection.AssignedSegment{VaultID: vaultID, SegmentID: segID})
+	log.setAssigned(collection.AssignedSegment{
+		VaultID:   vaultID,
+		SegmentID: segID,
+		Checksum:  segmentChecksumOf(t, data),
+	})
 	receipts := &recordingReceipts{}
 
 	mgr := collection.New(collection.Config{})
@@ -604,8 +612,401 @@ func TestCollectOnceSkipsSegmentInPreHead(t *testing.T) {
 	if err := mgr.CollectOnce(context.Background(), vaultID); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := os.Stat(paths.HeadSegment(root, segID)); err != nil {
+		t.Fatalf("orphan not promoted to head/: %v", err)
+	}
+	if _, err := os.Stat(paths.PreHeadSegment(root, segID)); !os.IsNotExist(err) {
+		t.Fatal("pre-head orphan should be gone after promote")
+	}
+	if receipts.count() != 1 {
+		t.Fatalf("receipts = %d, want 1 (promoted orphan must be receipted)", receipts.count())
+	}
+}
+
+// TestRunConvergesPreHeadOrphanAtStartup asserts the worker's startup pass —
+// with no Notify, no publish event — promotes and receipts a crash-orphaned
+// pre-head segment (gastrolog-5zotim restart survival).
+func TestRunConvergesPreHeadOrphanAtStartup(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	segID := glid.New()
+	root := t.TempDir()
+	data := writeSegmentBytes(t, vaultID, segID, "startup orphan")
+	pullToPreHead(t, root, segID, data)
+
+	log := &staticLog{}
+	log.setAssigned(collection.AssignedSegment{
+		VaultID:   vaultID,
+		SegmentID: segID,
+		Checksum:  segmentChecksumOf(t, data),
+	})
+	receipts := &recordingReceipts{}
+
+	mgr := collection.New(collection.Config{})
+	if err := mgr.RegisterVault(vaultID, root, collection.VaultConfig{
+		Log: log, Pull: newMemoryPull(), Receipts: receipts,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		_ = mgr.Run(ctx)
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := os.Stat(paths.HeadSegment(root, segID)); err == nil && receipts.count() == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("startup pass never converged pre-head orphan: receipts = %d", receipts.count())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestCollectOnceRepullsCorruptPreHeadOrphan: a crash-orphaned pre-head file
+// that fails verification must be discarded and re-pulled in the same pass —
+// pre-head files are never the only copy (the holder keeps completed/ bytes
+// until release), so deletion is safe and re-pull restores the segment.
+func TestCollectOnceRepullsCorruptPreHeadOrphan(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	segID := glid.New()
+	root := t.TempDir()
+	if err := paths.EnsurePreHeadDir(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.PreHeadSegment(root, segID), []byte("torn garbage"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	data := writeSegmentBytes(t, vaultID, segID, "holder copy")
+	pull := newMemoryPull()
+	pull.Put(segID, data)
+	log := &staticLog{}
+	log.setAssigned(collection.AssignedSegment{
+		VaultID:   vaultID,
+		SegmentID: segID,
+		Checksum:  segmentChecksumOf(t, data),
+	})
+	receipts := &recordingReceipts{}
+
+	mgr := collection.New(collection.Config{})
+	if err := mgr.RegisterVault(vaultID, root, collection.VaultConfig{
+		Log: log, Pull: pull, Receipts: receipts,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.CollectOnce(context.Background(), vaultID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(paths.HeadSegment(root, segID))
+	if err != nil {
+		t.Fatalf("re-pulled segment missing from head/: %v", err)
+	}
+	if !bytes.Equal(got, data) {
+		t.Fatal("head/ bytes do not match the holder copy after re-pull")
+	}
+	if receipts.count() != 1 {
+		t.Fatalf("receipts = %d, want 1", receipts.count())
+	}
+}
+
+// TestCollectOnceReplacesStaleOrphanWithPulledBytes covers a stale but
+// internally-valid pre-head orphan: its own header checksum passes, but it
+// does not match the published checksum. The orphan must be discarded and
+// the segment re-pulled from the holder in the same pass.
+func TestCollectOnceReplacesStaleOrphanWithPulledBytes(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	segID := glid.New()
+	root := t.TempDir()
+
+	stale := writeSegmentBytes(t, vaultID, segID, "stale orphan bytes")
+	pullToPreHead(t, root, segID, stale)
+	published := writeSegmentBytes(t, vaultID, segID, "published bytes")
+	// Same-frame-length segments share a record checksum (frame-CRC
+	// self-cancellation); the fixtures must differ in length to differ in
+	// published checksum.
+	if segmentChecksumOf(t, stale) == segmentChecksumOf(t, published) {
+		t.Fatal("fixtures must have distinct published checksums")
+	}
+	pull := newMemoryPull()
+	pull.Put(segID, published)
+
+	log := &staticLog{}
+	log.setAssigned(collection.AssignedSegment{
+		VaultID:   vaultID,
+		SegmentID: segID,
+		Checksum:  segmentChecksumOf(t, published),
+	})
+	receipts := &recordingReceipts{}
+
+	mgr := collection.New(collection.Config{})
+	if err := mgr.RegisterVault(vaultID, root, collection.VaultConfig{
+		Log: log, Pull: pull, Receipts: receipts,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.CollectOnce(context.Background(), vaultID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(paths.HeadSegment(root, segID))
+	if err != nil {
+		t.Fatalf("segment missing from head/: %v", err)
+	}
+	if !bytes.Equal(got, published) {
+		t.Fatal("head/ holds the stale orphan bytes, not the published bytes")
+	}
+	if receipts.count() != 1 {
+		t.Fatalf("receipts = %d, want 1", receipts.count())
+	}
+}
+
+// TestCollectOnceRejectsPulledChecksumMismatch: pulled bytes that are
+// internally valid but do not match the published checksum must not be
+// promoted or receipted — a holder serving wrong-but-valid bytes would merge
+// divergent segments into this home's GLCB (gastrolog-5zotim). The discarded
+// pull must converge once the holder serves matching bytes.
+func TestCollectOnceRejectsPulledChecksumMismatch(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	segID := glid.New()
+	root := t.TempDir()
+
+	data := writeSegmentBytes(t, vaultID, segID, "served bytes")
+	pull := newMemoryPull()
+	pull.Put(segID, data)
+	want := segmentChecksumOf(t, data)
+	wrong := want + 1
+	if wrong == 0 {
+		wrong = 1
+	}
+
+	log := &staticLog{}
+	log.setAssigned(collection.AssignedSegment{VaultID: vaultID, SegmentID: segID, Checksum: wrong})
+	receipts := &recordingReceipts{}
+
+	mgr := collection.New(collection.Config{})
+	if err := mgr.RegisterVault(vaultID, root, collection.VaultConfig{
+		Log: log, Pull: pull, Receipts: receipts,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	err := mgr.CollectOnce(context.Background(), vaultID)
+	if !errors.Is(err, collection.ErrCorruptSegment) {
+		t.Fatalf("CollectOnce() = %v, want ErrCorruptSegment", err)
+	}
+	if _, statErr := os.Stat(paths.HeadSegment(root, segID)); !os.IsNotExist(statErr) {
+		t.Fatal("mismatching segment must not reach head/")
+	}
+	if _, statErr := os.Stat(paths.PreHeadSegment(root, segID)); !os.IsNotExist(statErr) {
+		t.Fatal("mismatching pre-head copy must be deleted")
+	}
 	if receipts.count() != 0 {
-		t.Fatalf("receipts = %d, want 0 while segment still in pre-head", receipts.count())
+		t.Fatalf("receipts = %d, want 0 on checksum mismatch", receipts.count())
+	}
+
+	// The published checksum now matches the served bytes: re-pull converges.
+	log.setAssigned(collection.AssignedSegment{VaultID: vaultID, SegmentID: segID, Checksum: want})
+	if err := mgr.CollectOnce(context.Background(), vaultID); err != nil {
+		t.Fatal(err)
+	}
+	if _, statErr := os.Stat(paths.HeadSegment(root, segID)); statErr != nil {
+		t.Fatalf("segment missing from head/ after re-pull: %v", statErr)
+	}
+	if receipts.count() != 1 {
+		t.Fatalf("receipts = %d, want 1 after re-pull", receipts.count())
+	}
+}
+
+// TestCollectOnceRejectsTamperedHolderBytes: a holder serving a same-length
+// content substitution with fixed-up frame CRCs — identical frame geometry,
+// different record bytes — must be rejected against the published checksum
+// and never promoted or receipted. The content-blind rolling CRC32 passed
+// exactly this substitution through segment.Open, publish, and the
+// published-checksum verify (gastrolog-1vepg0). Convergence once the holder
+// serves authentic bytes is pinned too.
+func TestCollectOnceRejectsTamperedHolderBytes(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	segID := glid.New()
+	root := t.TempDir()
+
+	data := writeSegmentBytes(t, vaultID, segID, "authentic holder bytes")
+	published := segmentChecksumOf(t, data)
+	tampered := tamperFrameSameLength(t, data)
+
+	pull := newMemoryPull()
+	pull.Put(segID, tampered)
+	log := &staticLog{}
+	log.setAssigned(collection.AssignedSegment{VaultID: vaultID, SegmentID: segID, Checksum: published})
+	receipts := &recordingReceipts{}
+
+	mgr := collection.New(collection.Config{})
+	if err := mgr.RegisterVault(vaultID, root, collection.VaultConfig{
+		Log: log, Pull: pull, Receipts: receipts,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	err := mgr.CollectOnce(context.Background(), vaultID)
+	if !errors.Is(err, collection.ErrCorruptSegment) {
+		t.Fatalf("CollectOnce() = %v, want ErrCorruptSegment", err)
+	}
+	if _, statErr := os.Stat(paths.HeadSegment(root, segID)); !os.IsNotExist(statErr) {
+		t.Fatal("tampered segment must not reach head/")
+	}
+	if _, statErr := os.Stat(paths.PreHeadSegment(root, segID)); !os.IsNotExist(statErr) {
+		t.Fatal("tampered pre-head copy must be deleted")
+	}
+	if receipts.count() != 0 {
+		t.Fatalf("receipts = %d, want 0 on tampered holder bytes", receipts.count())
+	}
+
+	// The holder recovers and serves the authentic bytes: re-pull converges.
+	pull.Put(segID, data)
+	if err := mgr.CollectOnce(context.Background(), vaultID); err != nil {
+		t.Fatal(err)
+	}
+	if _, statErr := os.Stat(paths.HeadSegment(root, segID)); statErr != nil {
+		t.Fatalf("segment missing from head/ after holder recovery: %v", statErr)
+	}
+	if receipts.count() != 1 {
+		t.Fatalf("receipts = %d, want 1 after holder recovery", receipts.count())
+	}
+}
+
+// mismatchThenMatchPull serves wrong-but-internally-valid bytes for the first
+// `bad` pulls, then the published bytes — a holder recovering from serving a
+// stale copy.
+type mismatchThenMatchPull struct {
+	wrong []byte
+	right []byte
+	bad   atomic.Int32
+}
+
+func (p *mismatchThenMatchPull) Pull(_ context.Context, _, _ glid.GLID, dest io.Writer) error {
+	data := p.right
+	if p.bad.Add(-1) >= 0 {
+		data = p.wrong
+	}
+	_, err := dest.Write(data)
+	return err
+}
+
+// TestRunRepullsAfterChecksumMismatch pins retryability: a checksum mismatch
+// must re-arm the manager's own backoff wake (like any deferred pull) — the
+// publish event that assigned the segment already fired, so nothing else
+// retries it (gastrolog-5zotim).
+func TestRunRepullsAfterChecksumMismatch(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	segID := glid.New()
+	root := t.TempDir()
+
+	right := writeSegmentBytes(t, vaultID, segID, "right bytes")
+	wrong := writeSegmentBytes(t, vaultID, segID, "stale bytes from before a rewrite")
+	// The segment record checksum folds each frame's trailing CRC into the
+	// rolling CRC, which cancels the content contribution — segments with
+	// identical frame lengths share a checksum. Distinct-length fixtures keep
+	// this test meaningful; guard against fixture drift.
+	if segmentChecksumOf(t, right) == segmentChecksumOf(t, wrong) {
+		t.Fatal("fixtures must have distinct published checksums")
+	}
+	pull := &mismatchThenMatchPull{wrong: wrong, right: right}
+	pull.bad.Store(2)
+
+	log := &staticLog{}
+	log.setAssigned(collection.AssignedSegment{
+		VaultID:   vaultID,
+		SegmentID: segID,
+		Checksum:  segmentChecksumOf(t, right),
+	})
+	receipts := &recordingReceipts{}
+
+	mgr := collection.New(collection.Config{})
+	if err := mgr.RegisterVault(vaultID, root, collection.VaultConfig{
+		Log: log, Pull: pull, Receipts: receipts,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		_ = mgr.Run(ctx)
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if got, err := os.ReadFile(paths.HeadSegment(root, segID)); err == nil && bytes.Equal(got, right) && receipts.count() == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("checksum-mismatch pull never retried to convergence: receipts = %d", receipts.count())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestCollectSegmentsVerifiesPublishedChecksum: the targeted path (chunking
+// build re-fetching manifest refs) reads the published checksum from the
+// vault-ctl registry and must reject mismatching bytes too.
+func TestCollectSegmentsVerifiesPublishedChecksum(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	segID := glid.New()
+	root := t.TempDir()
+	now := time.Unix(0, 1_700_000_000_000).UTC()
+
+	data := writeSegmentBytes(t, vaultID, segID, "targeted mismatch")
+	want := segmentChecksumOf(t, data)
+	wrong := want + 1
+	if wrong == 0 {
+		wrong = 1
+	}
+	fsm := vaultctlfsm.New()
+	applyPublish(t, fsm, vaultctlfsm.CompletedSegmentEntry{
+		SegmentID:     segID,
+		RecordCount:   1,
+		ByteSize:      uint64(len(data)),
+		FirstIngestTS: now,
+		LastIngestTS:  now,
+		Checksum:      wrong,
+		OriginNodeID:  "origin",
+		PublishedAt:   now,
+	})
+
+	pull := newMemoryPull()
+	pull.Put(segID, data)
+	receipts := &recordingReceipts{}
+
+	mgr := collection.New(collection.Config{})
+	if err := mgr.RegisterVault(vaultID, root, collection.VaultConfig{
+		Log: &staticLog{}, Pull: pull, Receipts: receipts, FSM: fsm,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	err := mgr.CollectSegments(context.Background(), vaultID, []glid.GLID{segID})
+	if !errors.Is(err, collection.ErrCorruptSegment) {
+		t.Fatalf("CollectSegments() = %v, want ErrCorruptSegment", err)
+	}
+	if _, statErr := os.Stat(paths.HeadSegment(root, segID)); !os.IsNotExist(statErr) {
+		t.Fatal("mismatching segment must not reach head/")
+	}
+	if receipts.count() != 0 {
+		t.Fatalf("receipts = %d, want 0 on checksum mismatch", receipts.count())
 	}
 }
 
@@ -626,7 +1027,7 @@ func TestUnregisterVaultStopsCollection(t *testing.T) {
 	}
 }
 
-func TestRunTwiceReturnsErrNotRunning(t *testing.T) {
+func TestRunTwiceReturnsErrAlreadyRunning(t *testing.T) {
 	t.Parallel()
 	mgr := collection.New(collection.Config{})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -636,8 +1037,8 @@ func TestRunTwiceReturnsErrNotRunning(t *testing.T) {
 		close(done)
 	}()
 	time.Sleep(20 * time.Millisecond)
-	if err := mgr.Run(ctx); err != collection.ErrNotRunning {
-		t.Fatalf("Run() = %v, want ErrNotRunning", err)
+	if err := mgr.Run(ctx); err != collection.ErrAlreadyRunning {
+		t.Fatalf("Run() = %v, want ErrAlreadyRunning", err)
 	}
 	cancel()
 	<-done
@@ -813,6 +1214,159 @@ func (p *missingSegmentPull) Pull(ctx context.Context, nodeID glid.GLID, segment
 	return p.inner.Pull(ctx, nodeID, segmentID, dest)
 }
 
+// failingPull fails every pull retryably (os.ErrNotExist) and closes started
+// on the first attempt, so tests can tell the worker's startup pass is running.
+type failingPull struct {
+	once    sync.Once
+	started chan struct{}
+}
+
+func (p *failingPull) Pull(_ context.Context, _ glid.GLID, segmentID glid.GLID, _ io.Writer) error {
+	p.once.Do(func() { close(p.started) })
+	return fmt.Errorf("pull segment %s: %w", segmentID, os.ErrNotExist)
+}
+
+// TestPartialPassFiresOnPassCompleteOnce pins the gastrolog-3fv0dt acceptance:
+// a pass that lands 2 of 3 segments while the 3rd keeps failing retryably
+// fires OnPassComplete exactly once. The joined pull error must not suppress
+// the chunking wake for the segments that DID land, and the no-progress
+// retry passes that follow must not fire it again.
+func TestPartialPassFiresOnPassCompleteOnce(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	ok1 := glid.New()
+	ok2 := glid.New()
+	bad := glid.New()
+	root := t.TempDir()
+
+	inner := newMemoryPull()
+	inner.Put(ok1, writeSegmentBytes(t, vaultID, ok1, "lands-1"))
+	inner.Put(ok2, writeSegmentBytes(t, vaultID, ok2, "lands-2"))
+
+	log := &staticLog{}
+	log.setAssigned(
+		collection.AssignedSegment{VaultID: vaultID, SegmentID: ok1},
+		collection.AssignedSegment{VaultID: vaultID, SegmentID: ok2},
+		collection.AssignedSegment{VaultID: vaultID, SegmentID: bad},
+	)
+	receipts := &recordingReceipts{}
+
+	var passComplete atomic.Int32
+	fired := make(chan struct{}, 1)
+	mgr := collection.New(collection.Config{
+		OnPassComplete: func(glid.GLID) {
+			passComplete.Add(1)
+			select {
+			case fired <- struct{}{}:
+			default:
+			}
+		},
+	})
+	if err := mgr.RegisterVault(vaultID, root, collection.VaultConfig{
+		Log:      log,
+		Pull:     &missingSegmentPull{inner: inner, missing: bad},
+		Receipts: receipts,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		_ = mgr.Run(ctx)
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+
+	// The pass that landed ok1/ok2 must wake chunking despite the joined
+	// pull error for bad.
+	select {
+	case <-fired:
+	case <-time.After(10 * time.Second):
+		t.Fatal("OnPassComplete suppressed for a pass that made partial progress")
+	}
+	// Force one more full pass and wait for its afterCollectPass: ok1/ok2
+	// are receipted and present (skip), bad still fails, so the pass makes
+	// no progress and must NOT re-fire the wake. CollectOnce completes only
+	// after a pass that started after it registered, so the counter check
+	// below needs no sleep.
+	if err := mgr.CollectOnce(ctx, vaultID); err == nil {
+		t.Fatal("follow-up pass reported success while a segment is still missing")
+	}
+	if got := passComplete.Load(); got != 1 {
+		t.Fatalf("OnPassComplete fired %d times, want exactly 1", got)
+	}
+	for _, id := range []glid.GLID{ok1, ok2} {
+		if _, err := os.Stat(paths.HeadSegment(root, id)); err != nil {
+			t.Fatalf("collected segment missing from head/: %v", err)
+		}
+	}
+	if receipts.count() != 2 {
+		t.Fatalf("receipts = %d, want 2", receipts.count())
+	}
+}
+
+// TestFullyFailedPassDoesNotFireOnPassComplete pins the zero-progress side of
+// gastrolog-3fv0dt: a pass in which every pull fails must not wake chunking —
+// OnPassComplete means "something landed in head/", not "a pass ran".
+func TestFullyFailedPassDoesNotFireOnPassComplete(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	root := t.TempDir()
+
+	log := &staticLog{}
+	log.setAssigned(
+		collection.AssignedSegment{VaultID: vaultID, SegmentID: glid.New()},
+		collection.AssignedSegment{VaultID: vaultID, SegmentID: glid.New()},
+	)
+	receipts := &recordingReceipts{}
+	pull := &failingPull{started: make(chan struct{})}
+
+	var passComplete atomic.Int32
+	mgr := collection.New(collection.Config{
+		OnPassComplete: func(glid.GLID) { passComplete.Add(1) },
+	})
+	if err := mgr.RegisterVault(vaultID, root, collection.VaultConfig{
+		Log:      log,
+		Pull:     pull,
+		Receipts: receipts,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		_ = mgr.Run(ctx)
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+
+	// The first pull attempt proves the worker's startup pass is running, so
+	// CollectOnce below takes the worker-pass path (afterCollectPass runs
+	// before its waiter completes).
+	select {
+	case <-pull.started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("startup collect pass never attempted a pull")
+	}
+	if err := mgr.CollectOnce(ctx, vaultID); err == nil {
+		t.Fatal("fully-failed pass reported success")
+	}
+	if got := passComplete.Load(); got != 0 {
+		t.Fatalf("OnPassComplete fired %d times for zero-progress passes, want 0", got)
+	}
+	if receipts.count() != 0 {
+		t.Fatalf("receipts = %d, want 0", receipts.count())
+	}
+}
+
 // segGatedPull blocks pulls of one specific segment until release is closed;
 // pulls of other segments pass straight through.
 type segGatedPull struct {
@@ -969,5 +1523,276 @@ func TestCollectOncePullsInParallel(t *testing.T) {
 	}
 	if peak := probe.peakInflight(); peak < 2 {
 		t.Fatalf("peak in-flight pulls = %d, want >= 2 (pulls ran serially)", peak)
+	}
+}
+
+// TestRewireVaultFSMRebindsLiveDeps mirrors chunking's
+// TestRewireVaultFSMRebindsLiveRegistry for collection: after a vault-ctl
+// snapshot Restore swaps the sub-FSM, RewireVaultFSM must rebind the whole
+// collaborator bundle (log reader, pull client, receipt committer, FSM) as
+// one atomic snapshot (gastrolog-50m2vi). A publish applied to the NEW
+// (live) FSM must trigger a collect pass that pulls from the NEW source and
+// receipts to the NEW committer; the OLD bundle must never be consulted.
+func TestRewireVaultFSMRebindsLiveDeps(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	segID := glid.New()
+	root := t.TempDir()
+	now := time.Unix(0, 1_700_000_000_000).UTC()
+
+	data := writeSegmentBytes(t, vaultID, segID, "post-restore segment")
+
+	staleFSM := vaultctlfsm.New()
+	liveFSM := vaultctlfsm.New()
+
+	// The stale pull source ALSO holds the segment bytes: if a torn rewire
+	// left the old pull client behind, the pass would still land the right
+	// bytes in head/ — the counting wrapper, not head/ content, is what
+	// proves which source served the pull (the gastrolog-50m2vi torn-bundle
+	// hazard: fresh FSM with a stale pull client).
+	staleInner := newMemoryPull()
+	staleInner.Put(segID, data)
+	stalePull := &countingSlowPull{inner: staleInner}
+	staleLog := &staticLog{}
+	staleReceipts := &recordingReceipts{}
+
+	liveLog := &staticLog{}
+	livePull := newMemoryPull()
+	liveReceipts := &recordingReceipts{}
+
+	passComplete := make(chan struct{}, 8)
+	mgr := collection.New(collection.Config{
+		OnPassComplete: func(glid.GLID) {
+			select {
+			case passComplete <- struct{}{}:
+			default:
+			}
+		},
+	})
+	if err := mgr.RegisterVault(vaultID, root, collection.VaultConfig{
+		Log: staleLog, Pull: stalePull, Receipts: staleReceipts, FSM: staleFSM,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		_ = mgr.Run(ctx)
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+
+	// Wait for the worker's startup pass (its Roll on the stale log) before
+	// touching the manager: observing the worker's own action is the
+	// happens-before edge the other Run+CollectOnce tests use too.
+	deadline := time.Now().Add(10 * time.Second)
+	for staleLog.rollCount() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("worker startup pass never rolled the stale log")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	if err := mgr.RewireVaultFSM(vaultID, collection.VaultConfig{
+		Log: liveLog, Pull: livePull, Receipts: liveReceipts, FSM: liveFSM,
+	}); err != nil {
+		t.Fatalf("RewireVaultFSM: %v", err)
+	}
+	// Drain the wake RewireVaultFSM itself fires so the collecting pass below
+	// is attributable to the live-FSM publish, not the rewire poke. The live
+	// log is still empty, so this pass observes nothing to collect.
+	if err := mgr.CollectOnce(ctx, vaultID); err != nil {
+		t.Fatal(err)
+	}
+
+	livePull.Put(segID, data)
+	liveLog.setAssigned(collection.AssignedSegment{
+		VaultID:   vaultID,
+		SegmentID: segID,
+		Checksum:  segmentChecksumOf(t, data),
+	})
+	applyPublish(t, liveFSM, vaultctlfsm.CompletedSegmentEntry{
+		SegmentID:     segID,
+		RecordCount:   1,
+		ByteSize:      uint64(len(data)),
+		FirstIngestTS: now,
+		LastIngestTS:  now,
+		Checksum:      segmentChecksumOf(t, data),
+		OriginNodeID:  "origin",
+		PublishedAt:   now,
+	})
+
+	// OnPassComplete fires only for passes that made progress; the empty
+	// pre-publish passes stay silent, so this is the publish-driven pass.
+	select {
+	case <-passComplete:
+	case <-time.After(10 * time.Second):
+		t.Fatal("publish on the rewired (live) FSM never triggered a collect pass")
+	}
+	if _, err := os.Stat(paths.HeadSegment(root, segID)); err != nil {
+		t.Fatalf("segment missing from head/ after live-FSM publish: %v", err)
+	}
+	if liveReceipts.count() != 1 {
+		t.Fatalf("live receipts = %d, want 1", liveReceipts.count())
+	}
+	if staleReceipts.count() != 0 {
+		t.Fatalf("stale receipts = %d, want 0 (receipt committed through the pre-rewire committer)", staleReceipts.count())
+	}
+	if n := stalePull.pulls.Load(); n != 0 {
+		t.Fatalf("stale pull source queried %d times, want 0 (pull went through the pre-rewire client)", n)
+	}
+}
+
+// TestRewireVaultFSMKeepsUnspecifiedDeps pins the partial-rewire merge: a
+// VaultConfig carrying only the FSM keeps the registered log reader, pull
+// client, and receipt committer in the published deps snapshot.
+func TestRewireVaultFSMKeepsUnspecifiedDeps(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	segID := glid.New()
+	root := t.TempDir()
+
+	data := writeSegmentBytes(t, vaultID, segID, "fsm-only rewire")
+	pull := newMemoryPull()
+	pull.Put(segID, data)
+	log := &staticLog{}
+	log.setAssigned(collection.AssignedSegment{
+		VaultID:   vaultID,
+		SegmentID: segID,
+		Checksum:  segmentChecksumOf(t, data),
+	})
+	receipts := &recordingReceipts{}
+
+	mgr := collection.New(collection.Config{})
+	if err := mgr.RegisterVault(vaultID, root, collection.VaultConfig{
+		Log: log, Pull: pull, Receipts: receipts, FSM: vaultctlfsm.New(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.RewireVaultFSM(vaultID, collection.VaultConfig{FSM: vaultctlfsm.New()}); err != nil {
+		t.Fatalf("RewireVaultFSM: %v", err)
+	}
+
+	// No worker is running: CollectOnce runs the pass inline, so the
+	// registered deps must still be live in the post-rewire snapshot.
+	if err := mgr.CollectOnce(context.Background(), vaultID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(paths.HeadSegment(root, segID)); err != nil {
+		t.Fatalf("segment missing from head/ after FSM-only rewire: %v", err)
+	}
+	if receipts.count() != 1 {
+		t.Fatalf("receipts = %d, want 1", receipts.count())
+	}
+}
+
+// TestRewireVaultFSMValidation pins the error edges: rewiring an unknown
+// vault and rewiring without an FSM (the one mandatory field — the rewire
+// exists to swap it) both fail.
+func TestRewireVaultFSMValidation(t *testing.T) {
+	t.Parallel()
+	mgr := collection.New(collection.Config{})
+	if err := mgr.RewireVaultFSM(glid.New(), collection.VaultConfig{FSM: vaultctlfsm.New()}); err != collection.ErrUnknownVault {
+		t.Fatalf("RewireVaultFSM(unknown vault) = %v, want ErrUnknownVault", err)
+	}
+
+	vaultID := glid.New()
+	if err := mgr.RegisterVault(vaultID, t.TempDir(), collection.VaultConfig{
+		Log: &staticLog{}, Pull: newMemoryPull(), Receipts: &recordingReceipts{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.RewireVaultFSM(vaultID, collection.VaultConfig{}); err == nil {
+		t.Fatal("RewireVaultFSM without an FSM must fail")
+	}
+}
+
+// TestCollectOncePullingOrphanPersistsAndRepullOverwrites documents CURRENT
+// behavior for a crash mid-pull: PullToPreHead streams into
+// "<segID>.pulling" (transfer.go preHeadPullSuffix) and a crash before the
+// rename commit leaves that temp file in pre-head/. Nothing sweeps it —
+// unlike FINAL-named pre-head orphans (promoted in place, gastrolog-5zotim),
+// a .pulling file is invisible to collect passes and leaks until the same
+// segment is pulled again. A startup .pulling sweep is a follow-up candidate
+// (gastrolog-5do8sh gap 7); this test pins the status quo so a future sweep
+// changes it deliberately.
+//
+// The second half pins the self-healing edge that makes the leak benign for
+// assigned segments: a real pull of the SAME segment opens the temp path
+// with O_TRUNC and renames over it, so the stale bytes never reach head/.
+func TestCollectOncePullingOrphanPersistsAndRepullOverwrites(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	segID := glid.New()
+	root := t.TempDir()
+
+	if err := paths.EnsurePreHeadDir(root); err != nil {
+		t.Fatal(err)
+	}
+	// preHeadPullSuffix is unexported; the on-disk contract is the ".pulling"
+	// suffix on the pre-head segment path (transfer.go).
+	pullingPath := paths.PreHeadSegment(root, segID) + ".pulling"
+	stale := []byte("torn bytes from a crashed pull")
+	if err := os.WriteFile(pullingPath, stale, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	data := writeSegmentBytes(t, vaultID, segID, "published bytes")
+	pull := newMemoryPull() // empty until the second phase
+	log := &staticLog{}     // nothing assigned yet: the startup pass has no work
+	receipts := &recordingReceipts{}
+
+	mgr := collection.New(collection.Config{})
+	if err := mgr.RegisterVault(vaultID, root, collection.VaultConfig{
+		Log: log, Pull: pull, Receipts: receipts,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Startup/converge pass (the path the gastrolog-5zotim orphan tests
+	// drive): with nothing assigned it must not touch pre-head/, and there
+	// is no sweep — the .pulling orphan persists byte-for-byte.
+	if err := mgr.CollectOnce(context.Background(), vaultID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(pullingPath)
+	if err != nil {
+		t.Fatalf("CURRENT behavior changed: .pulling orphan no longer survives a collect pass: %v", err)
+	}
+	if !bytes.Equal(got, stale) {
+		t.Fatal(".pulling orphan bytes were modified by a pass that had nothing assigned")
+	}
+
+	// The registry now assigns the segment and a holder serves it. The pull
+	// reuses the same temp path: O_TRUNC discards the stale bytes and the
+	// rename commit replaces the orphan with the verified pull.
+	pull.Put(segID, data)
+	log.setAssigned(collection.AssignedSegment{
+		VaultID:   vaultID,
+		SegmentID: segID,
+		Checksum:  segmentChecksumOf(t, data),
+	})
+	if err := mgr.CollectOnce(context.Background(), vaultID); err != nil {
+		t.Fatal(err)
+	}
+	headBytes, err := os.ReadFile(paths.HeadSegment(root, segID))
+	if err != nil {
+		t.Fatalf("segment missing from head/ after re-pull over .pulling orphan: %v", err)
+	}
+	if !bytes.Equal(headBytes, data) {
+		t.Fatal("head/ bytes do not match the published bytes after re-pull")
+	}
+	if _, err := os.Stat(pullingPath); !os.IsNotExist(err) {
+		t.Fatalf(".pulling temp should be renamed away by the successful pull, stat err = %v", err)
+	}
+	if _, err := os.Stat(paths.PreHeadSegment(root, segID)); !os.IsNotExist(err) {
+		t.Fatal("pre-head file should be promoted to head/ after the pull")
+	}
+	if receipts.count() != 1 {
+		t.Fatalf("receipts = %d, want 1", receipts.count())
 	}
 }

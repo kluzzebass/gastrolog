@@ -112,10 +112,10 @@ func writeCompletedSegment(t *testing.T, vaultRoot string, vaultID glid.GLID, ra
 		t.Fatal(err)
 	}
 	return segmentation.CompletedSegment{
-		VaultID: vaultID,
-		Meta:    segment.Meta{ID: segID, VaultID: vaultID},
-		Path:    path,
-		Header:  hdr,
+		VaultID:   vaultID,
+		SegmentID: segID,
+		Path:      path,
+		Header:    hdr,
 	}
 }
 
@@ -129,7 +129,7 @@ func TestMetadataFromCompletedSegment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if meta.SegmentID != seg.Meta.ID || meta.VaultID != vaultID {
+	if meta.SegmentID != seg.SegmentID || meta.VaultID != vaultID {
 		t.Fatalf("meta = %+v", meta)
 	}
 	if meta.RecordCount != 1 || meta.Checksum != seg.Header.SegmentChecksum {
@@ -178,7 +178,7 @@ func TestPublishOnCompleted(t *testing.T) {
 	}
 
 	meta := pub.last()
-	if meta.SegmentID != seg.Meta.ID || meta.RecordCount != 1 {
+	if meta.SegmentID != seg.SegmentID || meta.RecordCount != 1 {
 		t.Fatalf("published = %+v", meta)
 	}
 	if _, err := os.Stat(seg.Path); err != nil {
@@ -208,14 +208,14 @@ func TestLocalHolderPromotesToHead(t *testing.T) {
 	if err := mgr.PublishCompleted(context.Background(), seg); err != nil {
 		t.Fatal(err)
 	}
-	if len(promoted) != 1 || promoted[0] != seg.Meta.ID {
-		t.Fatalf("OnLocalHeadPromoted = %v, want [%s]", promoted, seg.Meta.ID)
+	if len(promoted) != 1 || promoted[0] != seg.SegmentID {
+		t.Fatalf("OnLocalHeadPromoted = %v, want [%s]", promoted, seg.SegmentID)
 	}
-	completedPath := paths.CompletedSegment(root, seg.Meta.ID)
+	completedPath := paths.CompletedSegment(root, seg.SegmentID)
 	if _, err := os.Stat(completedPath); err != nil {
 		t.Fatalf("completed/ should remain after local promote: %v", err)
 	}
-	headPath := paths.HeadSegment(root, seg.Meta.ID)
+	headPath := paths.HeadSegment(root, seg.SegmentID)
 	if _, err := os.Stat(headPath); err != nil {
 		t.Fatalf("head copy should exist after local promote: %v", err)
 	}
@@ -239,7 +239,7 @@ func TestLocalHolderStaysInCompletedOnPublishFailure(t *testing.T) {
 	if _, err := os.Stat(seg.Path); err != nil {
 		t.Fatalf("completed/ file should remain: %v", err)
 	}
-	headPath := paths.HeadSegment(root, seg.Meta.ID)
+	headPath := paths.HeadSegment(root, seg.SegmentID)
 	if _, err := os.Stat(headPath); !os.IsNotExist(err) {
 		t.Fatal("head/ must be empty until publish succeeds")
 	}
@@ -266,7 +266,7 @@ func TestServePullStreamsBytes(t *testing.T) {
 	var buf bytes.Buffer
 	if err := mgr.ServePull(distribution.PullRequest{
 		VaultID:   vaultID,
-		SegmentID: seg.Meta.ID,
+		SegmentID: seg.SegmentID,
 		Dest:      &buf,
 	}); err != nil {
 		t.Fatal(err)
@@ -367,14 +367,14 @@ func TestRescanPublishesStrandedSegments(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	if got := pub.last(); got.SegmentID != seg.Meta.ID || got.RecordCount != 1 {
+	if got := pub.last(); got.SegmentID != seg.SegmentID || got.RecordCount != 1 {
 		t.Fatalf("published meta = %+v", got)
 	}
 
 	// The rescanned segment must serve pulls like a channel-delivered one.
 	var buf bytes.Buffer
 	if err := mgr.ServePull(distribution.PullRequest{
-		VaultID: vaultID, SegmentID: seg.Meta.ID, Dest: &buf,
+		VaultID: vaultID, SegmentID: seg.SegmentID, Dest: &buf,
 	}); err != nil {
 		t.Fatalf("ServePull after rescan: %v", err)
 	}
@@ -508,7 +508,7 @@ func TestPublishCompletedKeepsSegmentOnPublisherError(t *testing.T) {
 	}
 	var buf bytes.Buffer
 	err = mgr.ServePull(distribution.PullRequest{
-		VaultID: vaultID, SegmentID: seg.Meta.ID, Dest: &buf,
+		VaultID: vaultID, SegmentID: seg.SegmentID, Dest: &buf,
 	})
 	if err != nil {
 		t.Fatalf("ServePull after failed publish = %v, want segment still registered for retry", err)
@@ -528,9 +528,9 @@ func TestPublishCompletedUnknownVault(t *testing.T) {
 func TestMetadataFromMissingFile(t *testing.T) {
 	t.Parallel()
 	seg := segmentation.CompletedSegment{
-		VaultID: glid.New(),
-		Meta:    segment.Meta{ID: glid.New(), VaultID: glid.New()},
-		Path:    filepath.Join(t.TempDir(), "missing"),
+		VaultID:   glid.New(),
+		SegmentID: glid.New(),
+		Path:      filepath.Join(t.TempDir(), "missing"),
 	}
 	if _, err := distribution.MetadataFrom(seg); err == nil {
 		t.Fatal("expected stat error")
@@ -574,14 +574,14 @@ func TestUnregisterVaultStopsServingPull(t *testing.T) {
 	}
 	mgr.UnregisterVault(vaultID)
 	err := mgr.ServePull(distribution.PullRequest{
-		VaultID: vaultID, SegmentID: seg.Meta.ID, Dest: &bytes.Buffer{},
+		VaultID: vaultID, SegmentID: seg.SegmentID, Dest: &bytes.Buffer{},
 	})
 	if !errors.Is(err, distribution.ErrUnknownVault) {
 		t.Fatalf("ServePull() = %v, want ErrUnknownVault", err)
 	}
 }
 
-func TestRunTwiceReturnsErrNotRunning(t *testing.T) {
+func TestRunTwiceReturnsErrAlreadyRunning(t *testing.T) {
 	t.Parallel()
 	mgr, _ := distribution.New(distribution.Config{})
 	completed := make(chan segmentation.CompletedSegment)
@@ -592,8 +592,8 @@ func TestRunTwiceReturnsErrNotRunning(t *testing.T) {
 		close(done)
 	}()
 	time.Sleep(20 * time.Millisecond)
-	if err := mgr.Run(ctx, completed); !errors.Is(err, distribution.ErrNotRunning) {
-		t.Fatalf("Run() = %v, want ErrNotRunning", err)
+	if err := mgr.Run(ctx, completed); !errors.Is(err, distribution.ErrAlreadyRunning) {
+		t.Fatalf("Run() = %v, want ErrAlreadyRunning", err)
 	}
 	cancel()
 	<-done
@@ -626,7 +626,7 @@ func TestRunPullViaChannel(t *testing.T) {
 
 	var buf syncBuffer
 	pullIn <- distribution.PullRequest{
-		VaultID: vaultID, SegmentID: seg.Meta.ID, Dest: &buf,
+		VaultID: vaultID, SegmentID: seg.SegmentID, Dest: &buf,
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -695,7 +695,7 @@ func TestStreamSegmentGoneDuringPull(t *testing.T) {
 		t.Fatal(err)
 	}
 	err := mgr.ServePull(distribution.PullRequest{
-		VaultID: vaultID, SegmentID: seg.Meta.ID, Dest: &bytes.Buffer{},
+		VaultID: vaultID, SegmentID: seg.SegmentID, Dest: &bytes.Buffer{},
 	})
 	if !errors.Is(err, distribution.ErrSegmentNotFound) {
 		t.Fatalf("ServePull() = %v, want ErrSegmentNotFound after file removed", err)
@@ -748,7 +748,7 @@ func TestPullServedWhilePublishBlocked(t *testing.T) {
 
 	var buf bytes.Buffer
 	if err := mgr.ServePull(distribution.PullRequest{
-		VaultID: vaultID, SegmentID: seg.Meta.ID, Dest: &buf,
+		VaultID: vaultID, SegmentID: seg.SegmentID, Dest: &buf,
 	}); err != nil {
 		t.Fatalf("ServePull while publish blocked: %v", err)
 	}

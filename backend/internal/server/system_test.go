@@ -1157,12 +1157,12 @@ func TestGetRouteStats(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRouteStats: %v", err)
 	}
-	if resp.Msg.TotalIngested != 0 {
-		t.Errorf("expected 0 ingested, got %d", resp.Msg.TotalIngested)
+	if resp.Msg.TotalRouted != 0 {
+		t.Errorf("expected 0 routed, got %d", resp.Msg.TotalRouted)
 	}
-	// No filter set configured yet.
-	if resp.Msg.FilterSetActive {
-		t.Error("expected filterSetActive=false before routes configured")
+	// No route table published yet.
+	if resp.Msg.RouteTableActive {
+		t.Error("expected routeTableActive=false before routes configured")
 	}
 
 	// Configure a vault and route. gastrolog-4kkoo (Phase 5): expression
@@ -1205,19 +1205,19 @@ func TestGetRouteStats(t *testing.T) {
 
 	// Counters increment asynchronously as records flow through routing.
 	resp = waitForRouteStats(t, client, func(m *gastrologv1.GetRouteStatsResponse) bool {
-		return m.TotalIngested == 5
+		return m.TotalRouted == 5
 	})
-	if resp.Msg.TotalIngested != 5 {
-		t.Errorf("expected 5 ingested, got %d", resp.Msg.TotalIngested)
+	if resp.Msg.TotalRouted != 5 {
+		t.Errorf("expected 5 routed, got %d", resp.Msg.TotalRouted)
 	}
 	if resp.Msg.TotalRouted != 5 {
 		t.Errorf("expected 5 routed, got %d", resp.Msg.TotalRouted)
 	}
-	if resp.Msg.TotalDropped != 0 {
-		t.Errorf("expected 0 dropped, got %d", resp.Msg.TotalDropped)
+	if resp.Msg.TotalUnmatched != 0 {
+		t.Errorf("expected 0 unmatched, got %d", resp.Msg.TotalUnmatched)
 	}
-	if !resp.Msg.FilterSetActive {
-		t.Error("expected filterSetActive=true")
+	if !resp.Msg.RouteTableActive {
+		t.Error("expected routeTableActive=true")
 	}
 	if len(resp.Msg.VaultStats) != 1 {
 		t.Fatalf("expected 1 vault stat, got %d", len(resp.Msg.VaultStats))

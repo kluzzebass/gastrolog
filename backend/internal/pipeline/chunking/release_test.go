@@ -11,7 +11,6 @@ import (
 	hraft "github.com/hashicorp/raft"
 )
 
-
 // releaseScanFor snapshots the FSM the way a release pass does.
 func releaseScanFor(fsm *vaultctlfsm.FSM, minChunkHolders int) *vaultctlfsm.ReleaseScan {
 	return fsm.SnapshotReleaseScan(minChunkHolders)

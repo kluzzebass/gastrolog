@@ -18,7 +18,7 @@ type enrichDigester struct {
 	value string
 }
 
-func (d *enrichDigester) Digest(msg *ingestion.Message) error {
+func (d *enrichDigester) Digest(msg *ingestion.IngestMessage) error {
 	if msg.Attrs == nil {
 		msg.Attrs = map[string]string{}
 	}
@@ -30,7 +30,7 @@ type failDigester struct {
 	failRaw []byte
 }
 
-func (d *failDigester) Digest(msg *ingestion.Message) error {
+func (d *failDigester) Digest(msg *ingestion.IngestMessage) error {
 	if string(msg.Raw) == string(d.failRaw) {
 		return errors.New("parse failed")
 	}
@@ -42,7 +42,7 @@ type slowDigester struct {
 	slowRaw []byte
 }
 
-func (d *slowDigester) Digest(msg *ingestion.Message) error {
+func (d *slowDigester) Digest(msg *ingestion.IngestMessage) error {
 	if len(d.slowRaw) > 0 && string(msg.Raw) != string(d.slowRaw) {
 		return nil
 	}
@@ -57,14 +57,14 @@ func TestManagerBuildsRecord(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	in := make(chan ingestion.Message, 1)
+	in := make(chan ingestion.IngestMessage, 1)
 	eventID := record.EventID{
 		IngesterID: glid.New(),
 		NodeID:     glid.New(),
 		IngestTS:   time.Now().UTC(),
 		IngestSeq:  0,
 	}
-	in <- ingestion.Message{
+	in <- ingestion.IngestMessage{
 		EventID:  eventID,
 		Attrs:    map[string]string{"k": "v"},
 		Raw:      []byte("line"),
@@ -118,8 +118,8 @@ func TestManagerDigesterChain(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	in := make(chan ingestion.Message, 1)
-	in <- ingestion.Message{EventID: record.EventID{IngestSeq: 0}, Raw: []byte("x")}
+	in := make(chan ingestion.IngestMessage, 1)
+	in <- ingestion.IngestMessage{EventID: record.EventID{IngestSeq: 0}, Raw: []byte("x")}
 	close(in)
 
 	go func() { _ = mgr.Run(ctx, in) }()
@@ -143,10 +143,10 @@ func TestManagerParseErrorDoesNotBlockPeers(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	in := make(chan ingestion.Message, 3)
-	in <- ingestion.Message{EventID: record.EventID{IngestSeq: 0}, Raw: []byte("good")}
-	in <- ingestion.Message{EventID: record.EventID{IngestSeq: 1}, Raw: []byte("bad")}
-	in <- ingestion.Message{EventID: record.EventID{IngestSeq: 2}, Raw: []byte("good2")}
+	in := make(chan ingestion.IngestMessage, 3)
+	in <- ingestion.IngestMessage{EventID: record.EventID{IngestSeq: 0}, Raw: []byte("good")}
+	in <- ingestion.IngestMessage{EventID: record.EventID{IngestSeq: 1}, Raw: []byte("bad")}
+	in <- ingestion.IngestMessage{EventID: record.EventID{IngestSeq: 2}, Raw: []byte("good2")}
 	close(in)
 
 	go func() { _ = mgr.Run(ctx, in) }()
@@ -175,9 +175,9 @@ func TestManagerOutOfOrderCompletion(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	in := make(chan ingestion.Message, 2)
-	in <- ingestion.Message{EventID: record.EventID{IngestSeq: 0}, Raw: []byte("slow")}
-	in <- ingestion.Message{EventID: record.EventID{IngestSeq: 1}, Raw: []byte("fast")}
+	in := make(chan ingestion.IngestMessage, 2)
+	in <- ingestion.IngestMessage{EventID: record.EventID{IngestSeq: 0}, Raw: []byte("slow")}
+	in <- ingestion.IngestMessage{EventID: record.EventID{IngestSeq: 1}, Raw: []byte("fast")}
 	close(in)
 
 	go func() { _ = mgr.Run(ctx, in) }()
@@ -197,8 +197,8 @@ func TestManagerRecordImmutableAfterDigest(t *testing.T) {
 
 	raw := []byte("mutable")
 	attrs := map[string]string{"k": "v"}
-	in := make(chan ingestion.Message, 1)
-	in <- ingestion.Message{
+	in := make(chan ingestion.IngestMessage, 1)
+	in <- ingestion.IngestMessage{
 		EventID: record.EventID{IngestSeq: 0},
 		Attrs:   attrs,
 		Raw:     raw,
@@ -227,8 +227,8 @@ func TestManagerPreservesAck(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	in := make(chan ingestion.Message, 1)
-	in <- ingestion.Message{EventID: record.EventID{IngestSeq: 0}, Raw: []byte("x"), Ack: ack}
+	in := make(chan ingestion.IngestMessage, 1)
+	in <- ingestion.IngestMessage{EventID: record.EventID{IngestSeq: 0}, Raw: []byte("x"), Ack: ack}
 	close(in)
 
 	go func() { _ = mgr.Run(ctx, in) }()
@@ -247,9 +247,9 @@ func TestManagerConcurrentWorkers(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	in := make(chan ingestion.Message, n)
+	in := make(chan ingestion.IngestMessage, n)
 	for i := range n {
-		in <- ingestion.Message{
+		in <- ingestion.IngestMessage{
 			EventID: record.EventID{IngestSeq: uint32(i)},
 			Raw:     []byte("x"),
 		}
@@ -278,10 +278,10 @@ func TestManagerBackpressure(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	in := make(chan ingestion.Message, 3)
-	in <- ingestion.Message{EventID: record.EventID{IngestSeq: 0}, Raw: []byte("1")}
-	in <- ingestion.Message{EventID: record.EventID{IngestSeq: 1}, Raw: []byte("2")}
-	in <- ingestion.Message{EventID: record.EventID{IngestSeq: 2}, Raw: []byte("3")}
+	in := make(chan ingestion.IngestMessage, 3)
+	in <- ingestion.IngestMessage{EventID: record.EventID{IngestSeq: 0}, Raw: []byte("1")}
+	in <- ingestion.IngestMessage{EventID: record.EventID{IngestSeq: 1}, Raw: []byte("2")}
+	in <- ingestion.IngestMessage{EventID: record.EventID{IngestSeq: 2}, Raw: []byte("3")}
 
 	go func() { _ = mgr.Run(ctx, in) }()
 
@@ -312,13 +312,13 @@ func TestManagerRunTwice(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	in := make(chan ingestion.Message)
+	in := make(chan ingestion.IngestMessage)
 	close(in)
 	if err := mgr.Run(ctx, in); err != nil {
 		t.Fatalf("first Run: %v", err)
 	}
-	if err := mgr.Run(ctx, in); !errors.Is(err, digestion.ErrNotRunning) {
-		t.Fatalf("second Run = %v, want ErrNotRunning", err)
+	if err := mgr.Run(ctx, in); !errors.Is(err, digestion.ErrAlreadyRunning) {
+		t.Fatalf("second Run = %v, want ErrAlreadyRunning", err)
 	}
 }
 
@@ -329,9 +329,9 @@ func TestManagerWaitForReplica(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	in := make(chan ingestion.Message, 2)
-	in <- ingestion.Message{EventID: record.EventID{IngestSeq: 0}, Raw: []byte("plain")}
-	in <- ingestion.Message{EventID: record.EventID{IngestSeq: 1}, Raw: []byte("ack"), Ack: make(chan error, 1)}
+	in := make(chan ingestion.IngestMessage, 2)
+	in <- ingestion.IngestMessage{EventID: record.EventID{IngestSeq: 0}, Raw: []byte("plain")}
+	in <- ingestion.IngestMessage{EventID: record.EventID{IngestSeq: 1}, Raw: []byte("ack"), Ack: make(chan error, 1)}
 	close(in)
 
 	go func() { _ = mgr.Run(ctx, in) }()
@@ -357,7 +357,7 @@ func TestManagerParallelLoad(t *testing.T) {
 	defer cancel()
 
 	const n = 40
-	in := make(chan ingestion.Message, n)
+	in := make(chan ingestion.IngestMessage, n)
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -366,7 +366,7 @@ func TestManagerParallelLoad(t *testing.T) {
 	}()
 
 	for i := range n {
-		in <- ingestion.Message{EventID: record.EventID{IngestSeq: uint32(i)}, Raw: []byte("x")}
+		in <- ingestion.IngestMessage{EventID: record.EventID{IngestSeq: uint32(i)}, Raw: []byte("x")}
 	}
 	close(in)
 	wg.Wait()

@@ -206,7 +206,7 @@ type orchestratorIndexReader struct {
 var _ manifest.IndexReader = (*orchestratorIndexReader)(nil)
 
 // FindIngestRank returns the rank of the first IngestTS-sorted entry with
-// TS >= ts. Tries the chunk manager (active chunk B+ tree, cloud chunk
+// TS >= ts. Tries the chunk manager (active chunk B+ tree, cloud-backed chunk
 // cached index) first; falls back to the index manager (sealed local
 // chunk sidecar). Returns (0, false) when neither serves the lookup.
 func (r *orchestratorIndexReader) FindIngestRank(chunkID chunk.ChunkID, ts time.Time) (uint64, bool) {

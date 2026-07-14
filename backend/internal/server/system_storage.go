@@ -9,6 +9,7 @@ import (
 	"connectrpc.com/connect"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/blobstore"
 	"gastrolog/internal/convert"
 	"gastrolog/internal/system"
 	"gastrolog/internal/system/raftfsm"
@@ -47,6 +48,18 @@ func (s *SystemServer) PutCloudService(
 
 	cfg := convert.CloudServiceFromProto(req.Msg.Config)
 	cfg.ID = id
+
+	// Config-accept validation (gastrolog-7au6u9): reject configs that
+	// would fail blobstore store creation at vault init, so a bad
+	// provider config (bare endpoint, missing bucket, …) errors here —
+	// visible to the CLI/UI/API caller — instead of persisting and
+	// killing vault init on every node. Deterministic shape checks only
+	// (blobstore.ValidateConfig): same verdict on every node, no network,
+	// and it runs before the Raft apply — never inside the FSM apply
+	// path, where a rejection would break replay of persisted state.
+	if err := blobstore.ValidateConfig(cfg.Provider, cfg.StoreParams()); err != nil {
+		return nil, errInvalidArg(fmt.Errorf("cloud service %q: %w", cfg.Name, err))
+	}
 
 	if err := s.sysStore.PutCloudService(ctx, cfg); err != nil {
 		return nil, errInternal(err)

@@ -55,15 +55,3 @@ export function levelLabel(l: LogLevel): string {
     default: return "";
   }
 }
-
-/** parseLevelLabel parses operator input into a LogLevel enum value. */
-export function parseLevelLabel(s: string): LogLevel | null {
-  switch (s.toLowerCase().trim()) {
-    case "debug": return LogLevel.DEBUG;
-    case "info": return LogLevel.INFO;
-    case "warn":
-    case "warning": return LogLevel.WARN;
-    case "error": return LogLevel.ERROR;
-    default: return null;
-  }
-}

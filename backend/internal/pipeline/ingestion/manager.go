@@ -42,17 +42,83 @@ type Config struct {
 	// PressureGate throttles PressureAware ingesters when the digestion queue
 	// (and any other registered probes) is backed up. Nil disables throttling.
 	PressureGate *chanwatch.PressureGate
+
+	// RetryDelay returns the pause before re-running an ingester whose run
+	// ended and is eligible for retry (any passive listener exit, or a
+	// non-passive run that returned an error). consecutiveFailures counts
+	// error exits since the last clean run exit (0 when the previous run
+	// ended cleanly). Nil uses the default jittered exponential backoff.
+	// Injectable so tests synchronize on attempts instead of waiting out
+	// wall-clock delays.
+	RetryDelay func(consecutiveFailures int) time.Duration
+
+	// CheckpointInterval is the period between checkpoint saves while a
+	// Checkpointable ingester runs (see defaultCheckpointInterval for why
+	// this is a per-run ticker and what the interval bounds). Zero or
+	// negative selects the default.
+	CheckpointInterval time.Duration
 }
 
+// Retry backoff for ingester re-runs. The first retry keeps the historical
+// jittered 3–5s window (base 3s plus up to 2/3 jitter): long enough not to
+// spin on a persistent failure, short enough that a recovered dependency
+// (released port, reachable endpoint) is picked up promptly. Each further
+// consecutive failure doubles the pre-jitter delay up to the cap, so a
+// permanently failing ingester settles at one warn every ~5–8 minutes instead
+// of flooding the log every few seconds. The counter resets on any clean run
+// exit, so an ingester that recovers and later fails again starts back at the
+// base delay. Operator visibility does not ride on the log line: the
+// convergence sweep's ingester-not-running alert (gastrolog-3mnjlo) stays
+// raised between attempts and clears once a retry holds.
+const (
+	retryBackoffBase   = 3 * time.Second
+	retryBackoffFactor = 2
+	retryBackoffCap    = 5 * time.Minute
+)
+
+// retryBackoffDelay returns the pre-jitter delay for a retry after
+// consecutiveFailures error exits (0 or 1 → base). Pure, so tests exercise
+// the backoff curve without sleeping.
+func retryBackoffDelay(consecutiveFailures int) time.Duration {
+	d := retryBackoffBase
+	for i := 1; i < consecutiveFailures && d < retryBackoffCap; i++ {
+		d *= retryBackoffFactor
+	}
+	return min(d, retryBackoffCap)
+}
+
+// defaultRetryDelay jitters retryBackoffDelay by up to 2/3 of the pre-jitter
+// value so co-failing ingesters (e.g. after a shared dependency outage) do
+// not retry in lockstep. At the base delay this reproduces the historical
+// 3–5s window.
+func defaultRetryDelay(consecutiveFailures int) time.Duration {
+	d := retryBackoffDelay(consecutiveFailures)
+	return d + time.Duration(rand.Int64N(int64(d)*2/3)) //nolint:gosec // G404: jitter for retry delay, not security-sensitive
+}
+
+// defaultCheckpointInterval is the period between checkpoint saves for
+// Checkpointable ingesters. This is deliberately a per-run ticker inside
+// runWithCheckpoints, NOT an orchestrator scheduler job: the save loop is
+// scoped to one ingester's run — created and torn down with the run, under
+// the ingester's own context — whereas scheduler jobs are node-global work
+// that outlives ingester reconciliation. The interval bounds the
+// crash-redelivery window: after a hard crash, at most this much
+// already-emitted input since the last saved checkpoint is re-read and
+// re-minted on restart. (A save also happens on run exit and on shutdown, so
+// clean stops carry no window.)
+const defaultCheckpointInterval = 5 * time.Second
+
 // Manager starts and stops ingesters from assignment snapshots and emits minted
-// Messages on a bounded channel.
+// IngestMessages on a bounded channel.
 type Manager struct {
 	nodeID glid.GLID
-	out    chan Message
+	out    chan IngestMessage
 	logger *slog.Logger
 
-	onCheckpoint func(id glid.GLID, data []byte)
-	pressureGate *chanwatch.PressureGate
+	onCheckpoint       func(id glid.GLID, data []byte)
+	pressureGate       *chanwatch.PressureGate
+	retryDelay         func(consecutiveFailures int) time.Duration
+	checkpointInterval time.Duration
 
 	mu      sync.Mutex
 	running atomic.Bool
@@ -77,24 +143,32 @@ type ingesterMeta struct {
 }
 
 // New returns a manager and the read-only digestion queue fed by minted messages.
-func New(cfg Config) (*Manager, <-chan Message) {
+func New(cfg Config) (*Manager, <-chan IngestMessage) {
 	if cfg.OutCapacity <= 0 {
 		cfg.OutCapacity = 1000
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
-	out := make(chan Message, cfg.OutCapacity)
+	if cfg.RetryDelay == nil {
+		cfg.RetryDelay = defaultRetryDelay
+	}
+	if cfg.CheckpointInterval <= 0 {
+		cfg.CheckpointInterval = defaultCheckpointInterval
+	}
+	out := make(chan IngestMessage, cfg.OutCapacity)
 	m := &Manager{
-		nodeID:       cfg.NodeID,
-		out:          out,
-		logger:       cfg.Logger,
-		onCheckpoint: cfg.OnCheckpoint,
-		pressureGate: cfg.PressureGate,
-		ingesters:    make(map[glid.GLID]Ingester),
-		meta:         make(map[glid.GLID]ingesterMeta),
-		minters:      make(map[glid.GLID]*Minter),
-		cancels:      make(map[glid.GLID]context.CancelFunc),
+		nodeID:             cfg.NodeID,
+		out:                out,
+		logger:             cfg.Logger,
+		onCheckpoint:       cfg.OnCheckpoint,
+		pressureGate:       cfg.PressureGate,
+		retryDelay:         cfg.RetryDelay,
+		checkpointInterval: cfg.CheckpointInterval,
+		ingesters:          make(map[glid.GLID]Ingester),
+		meta:               make(map[glid.GLID]ingesterMeta),
+		minters:            make(map[glid.GLID]*Minter),
+		cancels:            make(map[glid.GLID]context.CancelFunc),
 	}
 	return m, out
 }
@@ -237,13 +311,28 @@ func (m *Manager) stopLocked(id glid.GLID) {
 	m.logger.Info("ingester stopped", "id", id, "name", meta.name, "type", meta.typ)
 }
 
+// runIngester executes a single ingester with panic recovery so that a
+// misbehaving ingester cannot crash the entire process.
+//
+// Runs are re-armed with a delay from RetryDelay (default: jittered
+// exponential backoff, 3–5s first retry — see retryBackoffBase and friends):
+//   - Passive (listener) ingesters retry on EVERY exit — port-bind errors are
+//     recoverable when another process releases the port or a co-located node
+//     dies.
+//   - Non-passive ingesters retry only when the run returned an error; a clean
+//     exit means a finite source completed. Before gastrolog-fjwhbr an error
+//     exit was logged once and the goroutine returned: ingest for that source
+//     stopped until a config change rebuilt the spec. Between failing attempts
+//     the ingester's alive state stays down, so the convergence sweep's
+//     ingester-not-running alert (gastrolog-3mnjlo) surfaces the degraded
+//     condition and clears it once a retry holds.
 func (m *Manager) runIngester(
 	id glid.GLID,
 	ing Ingester,
 	minter *Minter,
 	meta ingesterMeta,
 	ctx context.Context,
-	out chan<- Message,
+	out chan<- IngestMessage,
 ) {
 	defer func() {
 		if v := recover(); v != nil {
@@ -251,18 +340,28 @@ func (m *Manager) runIngester(
 		}
 	}()
 
+	failures := 0
 	for {
 		err := m.runWithCheckpoints(ctx, id, ing, minter, out)
-		if err != nil && ctx.Err() == nil && !meta.passive {
-			m.logger.Warn("ingester exited with error",
-				"id", id, "name", meta.name, "type", meta.typ, "error", err)
-		}
-		if ctx.Err() != nil || !meta.passive {
+		if ctx.Err() != nil {
 			return
 		}
-		delay := 3*time.Second + time.Duration(rand.Int64N(int64(2*time.Second))) //nolint:gosec // G404: jitter for retry delay, not security-sensitive
-		m.logger.Warn("passive ingester failed, retrying",
-			"id", id, "name", meta.name, "error", err, "retry_in", delay)
+		if err == nil && !meta.passive {
+			// A finite non-passive ingester completed its input; re-running
+			// it would mint the same input again.
+			return
+		}
+		if err != nil {
+			failures++
+		} else {
+			// Clean passive exit (listener served and closed normally):
+			// reset the backoff so the re-listen happens at the base delay.
+			failures = 0
+		}
+		delay := m.retryDelay(failures)
+		m.logger.Warn("ingester exited, retrying",
+			"id", id, "name", meta.name, "type", meta.typ,
+			"passive", meta.passive, "error", err, "retry_in", delay)
 		select {
 		case <-ctx.Done():
 			return
@@ -271,63 +370,26 @@ func (m *Manager) runIngester(
 	}
 }
 
+// runWithCheckpoints dispatches one ingester run to the right pump mode:
+// plain (pumpIngester inline) for ingesters without checkpoint persistence,
+// or pump-on-a-goroutine with a per-run checkpoint save ticker for
+// Checkpointable ingesters.
 func (m *Manager) runWithCheckpoints(
 	ctx context.Context,
 	id glid.GLID,
 	ing Ingester,
 	minter *Minter,
-	out chan<- Message,
+	out chan<- IngestMessage,
 ) error {
-	emit := func(msg IngesterMessage) error {
-		minted := Message{
-			EventID:  minter.Mint(),
-			Attrs:    msg.Attrs,
-			Raw:      msg.Raw,
-			RawOwned: msg.RawOwned,
-			SourceTS: msg.SourceTS,
-			Ack:      msg.Ack,
-		}
-		select {
-		case out <- minted:
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-
-	run := func() error {
-		ingesterOut := make(chan IngesterMessage)
-		errCh := make(chan error, 1)
-		go func() {
-			defer close(ingesterOut)
-			var runErr error
-			defer func() {
-				if v := recover(); v != nil {
-					m.logger.Error("ingester panicked", "id", id, "panic", v)
-					runErr = fmt.Errorf("ingester panicked: %v", v)
-				}
-				errCh <- runErr
-			}()
-			runErr = ing.Run(ctx, ingesterOut)
-		}()
-
-		for msg := range ingesterOut {
-			if err := emit(msg); err != nil {
-				return err
-			}
-		}
-		return <-errCh
-	}
-
 	cp, isCheckpointable := ing.(Checkpointable)
 	if !isCheckpointable || m.onCheckpoint == nil {
-		return run()
+		return m.pumpIngester(ctx, id, ing, minter, out)
 	}
 
 	errCh := make(chan error, 1)
-	go func() { errCh <- run() }()
+	go func() { errCh <- m.pumpIngester(ctx, id, ing, minter, out) }()
 
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(m.checkpointInterval)
 	defer ticker.Stop()
 
 	for {
@@ -339,14 +401,69 @@ func (m *Manager) runWithCheckpoints(
 			m.saveCheckpointFrom(id, cp)
 		case <-ctx.Done():
 			m.saveCheckpointFrom(id, cp)
-			// run() is the sole sender on out; it lives in a separate
+			// pumpIngester is the sole sender on out; it lives in a separate
 			// goroutine here (unlike the non-checkpoint path, which blocks in
-			// run() directly). Wait for it to return before we do, so no sender
-			// outlives runWithCheckpoints — otherwise ingesterWg.Wait() in Stop
-			// unblocks while run() still sends on out, racing close(out).
+			// pumpIngester directly). Wait for it to return before we do, so no
+			// sender outlives runWithCheckpoints — otherwise ingesterWg.Wait()
+			// in Stop unblocks while the pump still sends on out, racing
+			// close(out).
 			<-errCh
 			return ctx.Err()
 		}
+	}
+}
+
+// pumpIngester runs one ingester attempt: it launches ing.Run on its own
+// goroutine (with panic recovery) and pumps every IngesterMessage through the
+// minter onto out until the ingester's output closes, then returns Run's
+// error. Emission is interrupted by ctx, which propagates as the returned
+// error.
+func (m *Manager) pumpIngester(
+	ctx context.Context,
+	id glid.GLID,
+	ing Ingester,
+	minter *Minter,
+	out chan<- IngestMessage,
+) error {
+	ingesterOut := make(chan IngesterMessage)
+	errCh := make(chan error, 1)
+	go func() {
+		defer close(ingesterOut)
+		var runErr error
+		defer func() {
+			if v := recover(); v != nil {
+				m.logger.Error("ingester panicked", "id", id, "panic", v)
+				runErr = fmt.Errorf("ingester panicked: %v", v)
+			}
+			errCh <- runErr
+		}()
+		runErr = ing.Run(ctx, ingesterOut)
+	}()
+
+	for msg := range ingesterOut {
+		if err := emitMinted(ctx, minter, out, msg); err != nil {
+			return err
+		}
+	}
+	return <-errCh
+}
+
+// emitMinted mints one ingester message and delivers it to the digestion
+// queue, honoring ctx while the queue is full.
+func emitMinted(ctx context.Context, minter *Minter, out chan<- IngestMessage, msg IngesterMessage) error {
+	minted := IngestMessage{
+		EventID:  minter.Mint(),
+		Attrs:    msg.Attrs,
+		Raw:      msg.Raw,
+		RawOwned: msg.RawOwned,
+		SourceTS: msg.SourceTS,
+		Ack:      msg.Ack,
+	}
+	select {
+	case out <- minted:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 

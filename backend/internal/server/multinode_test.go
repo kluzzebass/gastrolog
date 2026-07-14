@@ -283,16 +283,16 @@ type mnPeerRouteStats struct {
 	nodes map[string]*orchestrator.Orchestrator // remote node orchs
 }
 
-func (p *mnPeerRouteStats) AggregateRouteStats() (ingested, dropped, routed int64, filterActive bool, vaultStats []*gastrologv1.VaultRouteStats, routeStats []*gastrologv1.PerRouteStats) {
+func (p *mnPeerRouteStats) AggregateRouteStats() (routed, unmatched, matched int64, routeTableActive bool, vaultStats []*gastrologv1.VaultRouteStats, routeStats []*gastrologv1.PerRouteStats) {
 	vaultMap := make(map[string]*gastrologv1.VaultRouteStats)
 	routeMap := make(map[string]*gastrologv1.PerRouteStats)
 	for _, orch := range p.nodes {
 		rs := orch.GetRouteStats()
-		ingested += rs.Ingested
-		dropped += rs.Dropped
 		routed += rs.Routed
-		if orch.IsFilterSetActive() {
-			filterActive = true
+		unmatched += rs.Unmatched
+		matched += rs.Matched
+		if orch.IsRouteTableActive() {
+			routeTableActive = true
 		}
 		for vaultID, vs := range orch.VaultRouteStatsList() {
 			id := vaultID.String()
@@ -1994,20 +1994,20 @@ func TestMultiNode_RouteStatsAggregated(t *testing.T) {
 
 	// Query route stats via the coordinator — should aggregate both data nodes.
 	msg := waitForMNRouteStats(t, h.configClient, func(m *gastrologv1.GetRouteStatsResponse) bool {
-		return m.TotalIngested == 10
+		return m.TotalRouted == 10
 	})
 
-	if msg.TotalIngested != 10 {
-		t.Errorf("TotalIngested = %d, want 10 (3+7)", msg.TotalIngested)
-	}
 	if msg.TotalRouted != 10 {
-		t.Errorf("TotalRouted = %d, want 10", msg.TotalRouted)
+		t.Errorf("TotalRouted = %d, want 10 (3+7)", msg.TotalRouted)
 	}
-	if msg.TotalDropped != 0 {
-		t.Errorf("TotalDropped = %d, want 0", msg.TotalDropped)
+	if msg.TotalMatched != 10 {
+		t.Errorf("TotalMatched = %d, want 10", msg.TotalMatched)
 	}
-	if !msg.FilterSetActive {
-		t.Error("expected FilterSetActive=true")
+	if msg.TotalUnmatched != 0 {
+		t.Errorf("TotalUnmatched = %d, want 0", msg.TotalUnmatched)
+	}
+	if !msg.RouteTableActive {
+		t.Error("expected RouteTableActive=true")
 	}
 	if len(msg.VaultStats) != 2 {
 		t.Fatalf("expected 2 vault stats, got %d", len(msg.VaultStats))
@@ -2108,11 +2108,11 @@ func TestMultiNode_PerRouteStatsAggregated(t *testing.T) {
 	submitMNRouteRecords(t, d2, "node", "data-2", "from-d2", 8)
 
 	msg := waitForMNRouteStats(t, h.configClient, func(m *gastrologv1.GetRouteStatsResponse) bool {
-		return m.TotalIngested == 13
+		return m.TotalRouted == 13
 	})
 
-	if msg.TotalIngested != 13 {
-		t.Errorf("TotalIngested = %d, want 13", msg.TotalIngested)
+	if msg.TotalRouted != 13 {
+		t.Errorf("TotalRouted = %d, want 13", msg.TotalRouted)
 	}
 
 	// Should have 2 per-route entries.

@@ -142,12 +142,12 @@ func newVaultWriter(vaultID glid.GLID, root string, cfg Config, vc VaultConfig, 
 }
 
 // recoverWorkingSegments finalizes working/ segments a previous process left
-// behind (crash or kill before the close policy fired). Records in them were
+// behind (crash or kill before the complete policy fired). Records in them were
 // fsynced and ACKED — dropping them is post-accept loss, a cardinal-rule
 // violation. Non-empty orphans are finalized (segment.Open reconciles a torn
 // tail down to the synced prefix) and moved to completed/, where the
 // completed channel — or distribution's stranded rescan when the channel is
-// full — publishes them like any freshly-closed segment. Empty orphans are
+// full — publishes them like any freshly-completed segment. Empty orphans are
 // deleted. Files that fail to open or finalize are left in place and logged:
 // recovery must never destroy bytes it cannot prove empty.
 func recoverWorkingSegments(root string, vaultID glid.GLID, completed chan<- CompletedSegment, onCompletedDropped func(), log *slog.Logger) error {
@@ -193,10 +193,10 @@ func recoverWorkingSegments(root string, vaultID glid.GLID, completed chan<- Com
 		}
 		select {
 		case completed <- CompletedSegment{
-			VaultID: vaultID,
-			Meta:    segment.Meta{ID: id, VaultID: vaultID},
-			Path:    completedPath,
-			Header:  hdr,
+			VaultID:   vaultID,
+			SegmentID: id,
+			Path:      completedPath,
+			Header:    hdr,
 		}:
 		default:
 			if onCompletedDropped != nil {
@@ -233,11 +233,11 @@ func (w *vaultWriter) stop() {
 	// Wait when register/unregister flap). Otherwise run() owns the flag and we
 	// wait for it to drain the closed input and exit.
 	if w.started.CompareAndSwap(false, true) {
-		w.flushAndCloseSegment()
+		w.flushAndCompleteSegment()
 		return
 	}
 	<-w.done
-	w.flushAndCloseSegment()
+	w.flushAndCompleteSegment()
 }
 
 func (w *vaultWriter) recordLoop(ctx context.Context) {
@@ -437,8 +437,20 @@ type commitBatch struct {
 	hasAck      bool
 }
 
+// syncTimerPark is the arbitrary far-future duration the commit batch's sync
+// timer is constructed with: time.NewTimer requires some duration, and the
+// timer is stopped (channel drained) immediately after creation, so it never
+// fires at this value. armTimer gives it its real deadline per batch.
+const syncTimerPark = time.Hour
+
+// syncTimerArmFloor clamps non-positive arm requests (an already-due or zero
+// commit window) to a minimal real duration, so a due batch still flows
+// through the timer channel in the select loop instead of needing a separate
+// fire-immediately branch.
+const syncTimerArmFloor = time.Millisecond
+
 func newCommitBatch(w *vaultWriter) *commitBatch {
-	timer := time.NewTimer(time.Hour)
+	timer := time.NewTimer(syncTimerPark)
 	if !timer.Stop() {
 		<-timer.C
 	}
@@ -447,7 +459,7 @@ func newCommitBatch(w *vaultWriter) *commitBatch {
 
 func (b *commitBatch) armTimer(d time.Duration) {
 	if d <= 0 {
-		d = time.Millisecond
+		d = syncTimerArmFloor
 	}
 	resetSyncTimer(b.timer, d)
 	b.timerArmed = true
@@ -492,9 +504,9 @@ func (b *commitBatch) commit() error {
 		b.w.recordsAppended.Add(uint64(b.pendingSync)) //nolint:gosec // pendingSync >= 0
 		b.w.bytesAppended.Add(b.frameBytes)
 		if b.w.disableFsync {
-			err = b.w.maybeCloseNoSync()
+			err = b.w.maybeCompleteNoSync()
 		} else {
-			err = b.w.syncAndMaybeClose()
+			err = b.w.syncAndMaybeComplete()
 		}
 	}
 	b.releaseParked(err)
@@ -558,9 +570,9 @@ func (w *vaultWriter) appendFrames(frames []segment.Frame) error {
 	return w.seg.AppendFrames(frames)
 }
 
-// syncAndMaybeClose fsyncs the open segment, notifies OnSync, and rotates the
-// segment if the close policy is met.
-func (w *vaultWriter) syncAndMaybeClose() error {
+// syncAndMaybeComplete fsyncs the open segment, notifies OnSync, and rotates the
+// segment if the complete policy is met.
+func (w *vaultWriter) syncAndMaybeComplete() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.seg == nil {
@@ -572,31 +584,31 @@ func (w *vaultWriter) syncAndMaybeClose() error {
 	if w.onSync != nil {
 		w.onSync()
 	}
-	return w.maybeCloseLocked()
+	return w.maybeCompleteLocked()
 }
 
-// maybeCloseNoSync rotates the segment on the close policy without any fsync
+// maybeCompleteNoSync rotates the segment on the complete policy without any fsync
 // (DisableFsync vaults).
-func (w *vaultWriter) maybeCloseNoSync() error {
+func (w *vaultWriter) maybeCompleteNoSync() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.seg == nil {
 		return errWriterClosed
 	}
-	return w.maybeCloseLocked()
+	return w.maybeCompleteLocked()
 }
 
-func (w *vaultWriter) maybeCloseLocked() error {
+func (w *vaultWriter) maybeCompleteLocked() error {
 	// In-memory append anchor: the per-commit Stat syscall bought nothing
 	// (gastrolog-1ojsm6).
-	if w.shouldClose(w.seg.DataSize()) {
-		return w.closeSegmentLocked()
+	if w.shouldComplete(w.seg.DataSize()) {
+		return w.rotateSegmentLocked()
 	}
 	return nil
 }
 
-func (w *vaultWriter) shouldClose(size int64) bool {
-	policy := w.cfg.ClosePolicy
+func (w *vaultWriter) shouldComplete(size int64) bool {
+	policy := w.cfg.CompletePolicy
 	if policy.MaxBytes > 0 && size >= 0 && uint64(size) >= policy.MaxBytes {
 		return true
 	}
@@ -606,7 +618,7 @@ func (w *vaultWriter) shouldClose(size int64) bool {
 	return false
 }
 
-func (w *vaultWriter) closeSegmentLocked() error {
+func (w *vaultWriter) rotateSegmentLocked() error {
 	if w.seg == nil {
 		return nil
 	}
@@ -659,7 +671,6 @@ func (w *vaultWriter) completeWorkingSegmentLocked() error {
 		}
 	}
 	hdr := w.seg.Header()
-	meta := segment.Meta{ID: w.segmentID, VaultID: w.vaultID}
 	working := w.workingPath
 	completed := paths.CompletedSegment(w.root, w.segmentID)
 	if err := w.seg.Close(); err != nil {
@@ -677,10 +688,10 @@ func (w *vaultWriter) completeWorkingSegmentLocked() error {
 	if w.completed != nil {
 		select {
 		case w.completed <- CompletedSegment{
-			VaultID: w.vaultID,
-			Meta:    meta,
-			Path:    completed,
-			Header:  hdr,
+			VaultID:   w.vaultID,
+			SegmentID: w.segmentID,
+			Path:      completed,
+			Header:    hdr,
 		}:
 		default:
 			if w.onCompletedDropped != nil {
@@ -725,7 +736,7 @@ func (w *vaultWriter) openNewSegmentLocked() error {
 	return nil
 }
 
-func (w *vaultWriter) flushAndCloseSegment() {
+func (w *vaultWriter) flushAndCompleteSegment() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.seg == nil {

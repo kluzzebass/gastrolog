@@ -145,7 +145,7 @@ func TestTryRetainChunkMarksPendingAfterSuccessfulRoute(t *testing.T) {
 	}()
 
 	waitForRouteStats(t, fx.orch, "3 routed records before mark", func(s *RouteStats) bool {
-		return s.Routed == 3
+		return s.Matched == 3
 	})
 	mu.Lock()
 	defer mu.Unlock()
@@ -183,8 +183,8 @@ func TestTryRetainChunkSkipsEverythingDuringShutdown(t *testing.T) {
 	r.tryRetainChunk(fx.sealedID, retentionRule{}, false)
 
 	time.Sleep(50 * time.Millisecond)
-	if s := fx.orch.GetRouteStats(); s.Ingested != 0 {
-		t.Errorf("shutdown sweep must not fan out records; ingested=%d", s.Ingested)
+	if s := fx.orch.GetRouteStats(); s.Routed != 0 {
+		t.Errorf("shutdown sweep must not fan out records; ingested=%d", s.Routed)
 	}
 	if markCalls != 0 {
 		t.Errorf("shutdown sweep must not apply retention-pending; markCalls=%d", markCalls)

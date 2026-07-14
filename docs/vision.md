@@ -238,7 +238,7 @@ The receiving vault's leader appends records to its active chunk; durability com
 
 ### Resolved: chunk metadata in Raft
 
-Each vault has its own Raft group (**vault-ctl Raft**). The config Raft stores cluster-wide configuration; each vault-ctl Raft group stores the chunk manifest for that vault — which chunks exist, their sealed/deleted state, replication metadata, and the receipt-protocol state for cluster-wide deletes. Leader and followers for the vault are determined by that group's election.
+Each vault has its own Raft group (**vault-ctl Raft**). The cluster-ctl Raft stores cluster-wide configuration; each vault-ctl Raft group stores the chunk manifest for that vault — which chunks exist, their sealed/deleted state, replication metadata, and the receipt-protocol state for cluster-wide deletes. Leader and followers for the vault are determined by that group's election.
 
 ### Retention triggers
 
@@ -512,7 +512,7 @@ A snapshot of where GastroLog is today against each pillar of the vision. This s
 | Replication | Done | Leader replicates to followers via ChunkReplicator; ack-gated durability |
 | Inter-vault record routing on retention | Done | Vault `disposition=route` re-emits expiring chunks' records through the routing engine for delivery to the next vault |
 | Budget-driven retention | Not started | Retention is time/count/size-based only |
-| Cloud chunk cache eviction | Done | LRU and TTL eviction on warm cache, gated by `CacheBudget` and `CacheTTL` |
+| Cloud-backed chunk cache eviction | Done | LRU and TTL eviction on warm cache, gated by `CacheBudget` and `CacheTTL` |
 | Memory budget enforcement | Done | Total budget per memory vault; retention triggers when over |
 
 ### Anomaly Detection
@@ -556,7 +556,7 @@ A snapshot of where GastroLog is today against each pillar of the vision. This s
 
 | Capability | Status | Notes |
 |---|---|---|
-| Raft consensus | Done | Config Raft + per-vault vault-ctl Raft groups (chunk-FSM sub-state per vault) |
+| Raft consensus | Done | Cluster-ctl Raft + per-vault vault-ctl Raft groups (chunk-FSM sub-state per vault) |
 | Cross-node query fan-out | Done | ForwardSearch, collectRemote, GetFields, GetContext |
 | Config push (WatchConfig) | Done | Real-time config propagation via server stream |
 | Chunk push (WatchChunks) | Done | Real-time chunk metadata notifications via server stream |

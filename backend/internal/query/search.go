@@ -481,10 +481,10 @@ func (e *Engine) lazyOpenOne(ctx context.Context, q Query, ms *mergeState) error
 	return err
 }
 
-// primeCloudChunk primes a cloud-backed chunk, skipping it with a warning
+// primeCloudBackedChunk primes a cloud-backed chunk, skipping it with a warning
 // if the S3 blob is unreadable (corrupt, truncated, etc.). Context errors
 // still propagate.
-func (e *Engine) primeCloudChunk(ctx context.Context, q Query, sc vaultChunk, ms *mergeState) error {
+func (e *Engine) primeCloudBackedChunk(ctx context.Context, q Query, sc vaultChunk, ms *mergeState) error {
 	if err := e.openAndPrimeScanner(ctx, q, sc, nil, ms); err != nil {
 		return e.handleCloudPrimeError(ctx, err, sc, ms)
 	}
@@ -501,7 +501,7 @@ func (e *Engine) handleCloudPrimeError(ctx context.Context, err error, sc vaultC
 	var cre *chunkReadError
 	if errors.As(err, &cre) {
 		if e.logger != nil {
-			e.logger.Warn("search: skipping unreadable cloud chunk",
+			e.logger.Warn("search: skipping unreadable cloud-backed chunk",
 				"vault", cre.vaultID, "chunk", cre.chunkID, "error", cre.err)
 		}
 		ms.chunkPositions[mergeKey{vaultID: sc.vaultID, chunkID: sc.meta.ID}] = positionExhausted

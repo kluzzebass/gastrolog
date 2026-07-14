@@ -967,7 +967,7 @@ func TestCloudClusterGracePeriodBoundary(t *testing.T) {
 		}
 	}
 	if cloudRemaining > 0 {
-		t.Errorf("expected cloud chunks removed after grace period, %d remain", cloudRemaining)
+		t.Errorf("expected cloud-backed chunks removed after grace period, %d remain", cloudRemaining)
 	}
 }
 
@@ -1102,7 +1102,7 @@ func TestCloudClusterReconcileSkipsTombstoned(t *testing.T) {
 	leaderNode := h.nodes["leader"]
 	leaderCM := leaderNode.instances[0].Chunks.(*chunkfile.Manager)
 
-	// Produce some sealed + uploaded cloud chunks.
+	// Produce some sealed + uploaded cloud-backed chunks.
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range 200 {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)

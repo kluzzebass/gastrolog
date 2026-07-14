@@ -53,7 +53,7 @@ type GroupConfig struct {
 	SeedMembers []hraft.Server
 
 	// SnapshotThreshold is the number of log entries before a snapshot is taken.
-	// Defaults to 4 if zero (matches config Raft behavior).
+	// Defaults to 4 if zero (matches cluster-ctl Raft behavior).
 	SnapshotThreshold uint64
 
 	// SnapshotInterval is how often the snapshot check runs.

@@ -3,7 +3,9 @@ package collection_test
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
+	"hash/crc32"
 	"io"
 	"os"
 	"path/filepath"
@@ -58,6 +60,33 @@ func writeSegmentBytes(t *testing.T, vaultID, segID glid.GLID, raw string) []byt
 	return data
 }
 
+// segmentChecksumOf reads the record checksum a segment's origin would
+// publish to the vault-ctl registry (CompletedSegmentEntry.Checksum).
+func segmentChecksumOf(t *testing.T, data []byte) uint64 {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "seg")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	hdr, err := segment.ReadHeader(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return hdr.SegmentChecksum
+}
+
+// pullToPreHead lands segment bytes in the vault pre-head area through the
+// production transfer path (PullToPreHead), standing in for the deleted
+// ReceiveToPreHead (gastrolog-2v9d67).
+func pullToPreHead(t *testing.T, root string, segID glid.GLID, data []byte) string {
+	t.Helper()
+	path, err := collection.PullToPreHead(context.Background(), root, glid.New(), segID, stubPull{data: data})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func TestReceiveAndPromoteVerified(t *testing.T) {
 	t.Parallel()
 	vaultID := glid.New()
@@ -65,11 +94,8 @@ func TestReceiveAndPromoteVerified(t *testing.T) {
 	segID := glid.New()
 	data := writeSegmentBytes(t, vaultID, segID, "verified payload")
 
-	prePath, err := collection.ReceiveToPreHead(root, segID, bytes.NewReader(data))
-	if err != nil {
-		t.Fatal(err)
-	}
-	headPath, _, err := collection.PromoteVerified(prePath, root)
+	prePath := pullToPreHead(t, root, segID, data)
+	headPath, _, err := collection.PromoteVerified(prePath, root, segmentChecksumOf(t, data))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +134,7 @@ func TestPromoteVerifiedRejectsCorruptTransfer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, err := collection.PromoteVerified(prePath, root)
+	_, _, err := collection.PromoteVerified(prePath, root, 0)
 	if !errors.Is(err, collection.ErrCorruptSegment) {
 		t.Fatalf("PromoteVerified() = %v, want ErrCorruptSegment", err)
 	}
@@ -124,22 +150,126 @@ func TestPromoteVerifiedRejectsCorruptTransfer(t *testing.T) {
 	}
 }
 
-func TestReceiveToPreHeadCopyError(t *testing.T) {
+// TestPromoteVerifiedRejectsPublishedChecksumMismatch: internally-valid
+// segment bytes whose record checksum does not match the published checksum
+// must be discarded, not promoted — internal consistency alone lets a holder
+// serving stale-but-valid bytes into this home's GLCB (gastrolog-5zotim).
+func TestPromoteVerifiedRejectsPublishedChecksumMismatch(t *testing.T) {
 	t.Parallel()
+	vaultID := glid.New()
 	root := t.TempDir()
 	segID := glid.New()
-	_, err := collection.ReceiveToPreHead(root, segID, &failReader{err: errors.New("transfer interrupted")})
-	if err == nil {
-		t.Fatal("expected copy error")
+	data := writeSegmentBytes(t, vaultID, segID, "internally valid")
+
+	prePath := pullToPreHead(t, root, segID, data)
+	wrong := segmentChecksumOf(t, data) + 1
+	if wrong == 0 {
+		wrong = 1
 	}
-	if _, err := os.Stat(paths.PreHeadSegment(root, segID)); !os.IsNotExist(err) {
-		t.Fatal("partial pre-head file should be removed")
+	_, _, err := collection.PromoteVerified(prePath, root, wrong)
+	if !errors.Is(err, collection.ErrCorruptSegment) {
+		t.Fatalf("PromoteVerified() = %v, want ErrCorruptSegment", err)
+	}
+	if _, err := os.Stat(prePath); !os.IsNotExist(err) {
+		t.Fatal("mismatching pre-head file should be removed")
+	}
+	head, err := os.ReadDir(paths.HeadDir(root))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	if len(head) != 0 {
+		t.Fatal("head must stay empty when the published checksum does not match")
 	}
 }
 
-type failReader struct{ err error }
+// tamperFrameSameLength substitutes content inside the first record frame
+// WITHOUT changing any frame length, and fixes up the frame's embedded CRC32
+// so the frame stays internally valid — a holder serving corrupted-in-place
+// or substituted bytes with matching frame geometry (gastrolog-1vepg0).
+func tamperFrameSameLength(t *testing.T, data []byte) []byte {
+	t.Helper()
+	out := append([]byte(nil), data...)
+	bodyStart := segment.HeaderSize + 4
+	bodyLen := int(binary.LittleEndian.Uint32(out[segment.HeaderSize:]))
+	if bodyStart+bodyLen > len(out) {
+		t.Fatalf("frame body out of range: start %d len %d file %d", bodyStart, bodyLen, len(out))
+	}
+	body := out[bodyStart : bodyStart+bodyLen]
+	body[bodyLen-5] ^= 0xFF // flip the last raw payload byte
+	binary.LittleEndian.PutUint32(body[bodyLen-4:], crc32.ChecksumIEEE(body[:bodyLen-4]))
+	return out
+}
 
-func (r *failReader) Read([]byte) (int, error) { return 0, r.err }
+// TestPromoteVerifiedRejectsSameLengthSubstitution: a same-length content
+// substitution with fixed-up frame CRCs must be rejected against the
+// published checksum — the previous content-blind rolling CRC32 let it pass
+// every verify and merge divergent bytes into home GLCBs (gastrolog-1vepg0).
+func TestPromoteVerifiedRejectsSameLengthSubstitution(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	root := t.TempDir()
+	segID := glid.New()
+	data := writeSegmentBytes(t, vaultID, segID, "authentic payload")
+	published := segmentChecksumOf(t, data)
+	tampered := tamperFrameSameLength(t, data)
+
+	prePath := pullToPreHead(t, root, segID, tampered)
+	_, _, err := collection.PromoteVerified(prePath, root, published)
+	if !errors.Is(err, collection.ErrCorruptSegment) {
+		t.Fatalf("PromoteVerified() = %v, want ErrCorruptSegment", err)
+	}
+	if _, err := os.Stat(prePath); !os.IsNotExist(err) {
+		t.Fatal("substituted pre-head file should be removed")
+	}
+	head, err := os.ReadDir(paths.HeadDir(root))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	if len(head) != 0 {
+		t.Fatal("head must stay empty when substituted content is served")
+	}
+}
+
+// TestPromoteVerifiedZeroChecksumSkipsPublishedComparison: zero means no
+// published expectation is available; internal verification alone gates the
+// promote.
+func TestPromoteVerifiedZeroChecksumSkipsPublishedComparison(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	root := t.TempDir()
+	segID := glid.New()
+	data := writeSegmentBytes(t, vaultID, segID, "no published checksum")
+
+	prePath := pullToPreHead(t, root, segID, data)
+	headPath, _, err := collection.PromoteVerified(prePath, root, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(headPath); err != nil {
+		t.Fatalf("head file: %v", err)
+	}
+}
+
+func TestPullToPreHeadPullErrorCleansUp(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	segID := glid.New()
+	_, err := collection.PullToPreHead(context.Background(), root, glid.New(), segID,
+		stubPull{err: errors.New("transfer interrupted")})
+	if err == nil {
+		t.Fatal("expected pull error")
+	}
+	if _, err := os.Stat(paths.PreHeadSegment(root, segID)); !os.IsNotExist(err) {
+		t.Fatal("failed pull must not leave a pre-head segment file")
+	}
+	entries, err := os.ReadDir(paths.PreHeadDir(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("pre-head must be empty after failed pull, got %d entries", len(entries))
+	}
+}
 
 func TestPreHeadDoesNotSatisfyHeadInvariant(t *testing.T) {
 	t.Parallel()
@@ -148,9 +278,7 @@ func TestPreHeadDoesNotSatisfyHeadInvariant(t *testing.T) {
 	segID := glid.New()
 	data := writeSegmentBytes(t, vaultID, segID, "still in pre-head")
 
-	if _, err := collection.ReceiveToPreHead(root, segID, bytes.NewReader(data)); err != nil {
-		t.Fatal(err)
-	}
+	pullToPreHead(t, root, segID, data)
 	headEntries, err := os.ReadDir(paths.HeadDir(root))
 	if err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)

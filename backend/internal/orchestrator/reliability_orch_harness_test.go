@@ -99,7 +99,7 @@ type orchRelHarness struct {
 	// pipeline, when non-nil, enables the full cross-node pipeline wiring
 	// (Rubicon E3): a static-resolver PeerConns pool per node (segment pulls
 	// + vault-ctl apply forwarding), the cluster PullSegment server, a tight
-	// segment close policy, and a record-count chunk rotation policy on every
+	// segment complete policy, and a record-count chunk rotation policy on every
 	// vault so ingest converges to sealed GLCBs quickly in tests.
 	pipeline *pipelineClusterOpts
 	// routeVaultIdxs lists vaults (indexes into h.vaults) that get an
@@ -109,7 +109,7 @@ type orchRelHarness struct {
 
 // pipelineClusterOpts carries the pipeline tuning for withPipelineCluster.
 type pipelineClusterOpts struct {
-	closePolicy     segmentation.ClosePolicy
+	completePolicy  segmentation.CompletePolicy
 	chunkMaxRecords int64
 }
 
@@ -148,12 +148,12 @@ func withExtraVault(nodeIdxs []int) orchRelOption {
 
 // withPipelineCluster wires the real cross-node pipeline transport on every
 // node and tunes segment close / chunk rotation for fast test convergence.
-// closePolicy controls when working segments complete; chunkMaxRecords seals
+// completePolicy controls when working segments complete; chunkMaxRecords seals
 // the open-chunk manifest once it references that many records.
-func withPipelineCluster(closePolicy segmentation.ClosePolicy, chunkMaxRecords int64) orchRelOption {
+func withPipelineCluster(completePolicy segmentation.CompletePolicy, chunkMaxRecords int64) orchRelOption {
 	return func(h *orchRelHarness) {
 		h.pipeline = &pipelineClusterOpts{
-			closePolicy:     closePolicy,
+			completePolicy:  completePolicy,
 			chunkMaxRecords: chunkMaxRecords,
 		}
 	}
@@ -416,7 +416,7 @@ func (h *orchRelHarness) startNode(id string) {
 		SegmentsDir: filepath.Join(n.home, "segments"),
 	}
 	if h.pipeline != nil {
-		orchCfg.SegmentClosePolicy = h.pipeline.closePolicy
+		orchCfg.SegmentCompletePolicy = h.pipeline.completePolicy
 		// Hot-reload paths (ReloadFilters, AddVaultInstance, placement
 		// sweep) need read access to the shared config store, exactly as
 		// production wires the system store.

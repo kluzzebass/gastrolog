@@ -10,6 +10,7 @@ import (
 
 	"gastrolog/internal/format"
 	"gastrolog/internal/record"
+	"gastrolog/internal/tsindex"
 )
 
 const (
@@ -150,12 +151,12 @@ func (sf *File) BuildIndex() error {
 	sf.hdr.IndexOffset = recordEnd
 	sf.hdr.IndexChecksum = sum
 	sf.dataEnd = recordEnd
-	var recSum uint32
-	if sf.recordCRC != nil {
-		recSum = sf.recordCRC.Sum32()
+	var recSum uint64
+	if sf.recordDigest != nil {
+		recSum = sf.recordDigest.Sum64()
 	} else {
 		var err error
-		recSum, err = sf.initRecordCRC(recordEnd)
+		recSum, err = sf.initRecordDigest(recordEnd)
 		if err != nil {
 			return err
 		}
@@ -189,7 +190,7 @@ func (sf *File) buildIndexFromMemory(recordEnd uint32) error {
 
 	// Source index entries reference EventID-order positions; walk the sorted
 	// entries so pos matches what readIndexEntry(pos) would return.
-	var srcEntries []sourceIndexEntry
+	var srcEntries []tsindex.Entry
 	var first, last time.Time
 	for pos, e := range entries {
 		if e.sourceNS == 0 {
@@ -206,9 +207,9 @@ func (sf *File) buildIndexFromMemory(recordEnd uint32) error {
 				last = ts
 			}
 		}
-		srcEntries = append(srcEntries, sourceIndexEntry{ts: int64(e.sourceNS), pos: uint32(pos)}) //nolint:gosec // G115: pos bounded by RecordCount; nanos fit int64
+		srcEntries = append(srcEntries, tsindex.Entry{TS: int64(e.sourceNS), Pos: uint32(pos)}) //nolint:gosec // G115: pos bounded by RecordCount; nanos fit int64
 	}
-	slices.SortStableFunc(srcEntries, compareSourceIndexEntries)
+	tsindex.Sort(srcEntries)
 
 	sf.hdr.SourceIndexOffset = eventIndexEnd
 	sf.hdr.SourceIndexCount = uint32(len(srcEntries)) //nolint:gosec // G115: bounded by RecordCount
@@ -217,10 +218,7 @@ func (sf *File) buildIndexFromMemory(recordEnd uint32) error {
 	sf.hdr.SourceIndexChecksum = 0
 	fileEnd := int64(eventIndexEnd)
 	if len(srcEntries) > 0 {
-		srcBuf := make([]byte, len(srcEntries)*SourceIndexEntrySize)
-		for i, e := range srcEntries {
-			encodeSourceIndexEntry(srcBuf[i*SourceIndexEntrySize:], e)
-		}
+		srcBuf := tsindex.EncodeAll(srcEntries)
 		if _, err := sf.f.WriteAt(srcBuf, int64(eventIndexEnd)); err != nil {
 			return err
 		}
@@ -237,8 +235,8 @@ func (sf *File) buildIndexFromMemory(recordEnd uint32) error {
 	sf.hdr.IndexOffset = recordEnd
 	sf.hdr.IndexChecksum = crc32.ChecksumIEEE(idxBuf)
 	sf.dataEnd = recordEnd
-	if sf.recordCRC != nil {
-		sf.hdr.SegmentChecksum = sf.recordCRC.Sum32()
+	if sf.recordDigest != nil {
+		sf.hdr.SegmentChecksum = sf.recordDigest.Sum64()
 	}
 	sf.memEntries = nil
 	return sf.writeHeader()
@@ -385,7 +383,7 @@ func (sf *File) verifyIndexedLayout() error {
 	if info.Size() < indexEnd {
 		return errors.New("segment index tail truncated")
 	}
-	recSum, err := sf.initRecordCRC(sf.hdr.IndexOffset)
+	recSum, err := sf.initRecordDigest(sf.hdr.IndexOffset)
 	if err != nil {
 		return err
 	}
@@ -399,16 +397,7 @@ func (sf *File) verifyIndexedLayout() error {
 	if idxSum != sf.hdr.IndexChecksum {
 		return errors.New("segment index checksum mismatch")
 	}
-	if sf.hdr.Version == formatVersionV2 || sf.hdr.SourceIndexCount > 0 {
-		return sf.verifySourceIndexLayout(info.Size())
-	}
-	if sf.hdr.IndexOffset > 0 {
-		eventIndexEnd := int64(sf.hdr.IndexOffset) + int64(sf.hdr.RecordCount)*IndexEntrySize
-		if info.Size() != eventIndexEnd {
-			return errors.New("segment trailing bytes after EventID index")
-		}
-	}
-	return nil
+	return sf.verifySourceIndexLayout(info.Size())
 }
 
 func (sf *File) checksumRange(start, end uint32) (uint32, error) {

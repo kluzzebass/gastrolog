@@ -454,10 +454,10 @@ func sealedManifestFromFSM(m *vaultctlfsm.OpenChunkManifest) SealedManifest {
 		ChunkID:  m.ChunkID,
 		OpenedAt: m.OpenedAt,
 		SealedAt: m.SealedAt,
-		Refs:     make([]ManifestRefEntry, len(m.Refs)),
+		Refs:     make([]ManifestRef, len(m.Refs)),
 	}
 	for i, ref := range m.Refs {
-		out.Refs[i] = ManifestRefEntry{
+		out.Refs[i] = ManifestRef{
 			SegmentID:         ref.SegmentID,
 			FirstRecordNumber: ref.FirstRecordNumber,
 			LastRecordNumber:  ref.LastRecordNumber,

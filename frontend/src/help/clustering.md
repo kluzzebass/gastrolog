@@ -1,6 +1,6 @@
 # Clustering
 
-GastroLog uses [Raft consensus](https://raft.github.io/) to replicate configuration across multiple nodes, providing high availability and fault tolerance. Every GastroLog server automatically starts as a single-node cluster — no special setup is needed to run standalone, and adding nodes later requires no restart.
+GastroLog uses [Raft consensus](https://raft.github.io/) to replicate configuration across multiple nodes, providing high availability and fault tolerance. Every GastroLog node automatically starts as a single-node cluster — no special setup is needed to run standalone, and adding nodes later requires no restart.
 
 ## How It Works
 

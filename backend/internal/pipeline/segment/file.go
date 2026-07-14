@@ -3,12 +3,12 @@ package segment
 import (
 	"encoding/binary"
 	"errors"
-	"hash"
-	"hash/crc32"
 	"io"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/cespare/xxhash/v2"
 
 	"gastrolog/internal/format"
 	"gastrolog/internal/record"
@@ -20,12 +20,17 @@ var errSegmentFinalized = errors.New("segment is finalized")
 // each append batch; record data follows the header as
 // [frameLen:u32][frame body] frames.
 type File struct {
-	f         *os.File
-	hdr       Header
-	hdrBuf    [HeaderSize]byte
-	recordCRC hash.Hash32 // rolling CRC32/IEEE over [HeaderSize:recordsEnd)
-	dataEnd   uint32      // exclusive end of committed record bytes (hot-path append anchor)
-	batchBuf  []byte      // reused AppendFrames scratch (gastrolog-1ojsm6)
+	f      *os.File
+	hdr    Header
+	hdrBuf [HeaderSize]byte
+	// recordDigest is a rolling XXH64 over [HeaderSize:recordsEnd). A
+	// non-linear digest, NOT a CRC: each frame carries its own trailing
+	// CRC32, and rolling a CRC over lenPrefix ++ body ++ bodyCRC cancels the
+	// content contribution by CRC linearity, leaving the segment checksum
+	// blind to same-length substitution (gastrolog-1vepg0).
+	recordDigest *xxhash.Digest
+	dataEnd      uint32 // exclusive end of committed record bytes (hot-path append anchor)
+	batchBuf     []byte // reused AppendFrames scratch (gastrolog-1ojsm6)
 	// memEntries captures (EventID, filePos, sourceTS) per appended frame so
 	// Finalize can build both index tails from memory instead of re-reading
 	// the whole file (gastrolog-oin19g). Only writer-created segments have a
@@ -34,14 +39,14 @@ type File struct {
 	// past the cap the capture is dropped (memCaptureOff) and Finalize uses
 	// the disk scan — the capture is an optimization, never a correctness
 	// requirement or a memory liability. The bound holds regardless of the
-	// caller's close policy.
+	// caller's complete policy.
 	memEntries    []memIndexEntry
 	memCaptureOff bool
 }
 
 // memIndexEntryCap bounds the in-memory index capture (~80B/entry → ~21 MiB
-// worst case). The production close policy (8 MiB segments) yields ~30K
-// entries, ~8x under the cap; a missing or misconfigured close policy hits
+// worst case). The production complete policy (8 MiB segments) yields ~30K
+// entries, ~8x under the cap; a missing or misconfigured complete policy hits
 // the cap and degrades to the disk-scan finalize instead of growing RAM with
 // the file (gastrolog-oin19g). Var, not const, so tests can exercise the
 // overflow path without 262K appends.
@@ -66,8 +71,8 @@ func Create(path string, meta Meta) (*File, error) {
 			VaultID: meta.VaultID,
 			DataEnd: HeaderSize,
 		},
-		recordCRC: crc32.NewIEEE(),
-		dataEnd:   HeaderSize,
+		recordDigest: xxhash.New(),
+		dataEnd:      HeaderSize,
 	}
 	if err := sf.writeHeader(); err != nil {
 		_ = f.Close()
@@ -78,9 +83,11 @@ func Create(path string, meta Meta) (*File, error) {
 
 // ReadHeader decodes just the fixed header of a segment file without opening,
 // reconciling, or checksum-verifying it. For cheap metadata reads (record
-// counts for stage throughput counters — gastrolog-10n6k8); NOT a validity
+// counts for stage throughput counters — gastrolog-10n6k8; distribution
+// publish staging and stranded rescans — gastrolog-faj2yv); NOT a validity
 // check.
 func ReadHeader(path string) (Header, error) {
+	headerReads.Add(1)
 	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		return Header{}, err
@@ -95,6 +102,7 @@ func ReadHeader(path string) (Header, error) {
 
 // Open opens an existing segment and reconciles the header against on-disk frames.
 func Open(path string) (*File, error) {
+	opens.Add(1)
 	f, err := os.OpenFile(filepath.Clean(path), os.O_RDWR, 0)
 	if err != nil {
 		return nil, err
@@ -194,12 +202,12 @@ func (sf *File) AppendFrames(frames []Frame) error {
 		return err
 	}
 
-	if sf.recordCRC == nil {
-		sf.recordCRC = crc32.NewIEEE()
+	if sf.recordDigest == nil {
+		sf.recordDigest = xxhash.New()
 	}
 
-	// Build the batch buffer — [lenPrefix|body]... — feeding the running CRC
-	// in frame order, exactly as sequential single appends would have.
+	// Build the batch buffer — [lenPrefix|body]... — feeding the running
+	// digest in frame order, exactly as sequential single appends would have.
 	// Size it exactly up front: append-doubling growth across batches was
 	// ~10GB of garbage per soak run (gastrolog-11y2iv).
 	need := 0
@@ -220,10 +228,10 @@ func (sf *File) AppendFrames(frames []Frame) error {
 		binary.LittleEndian.PutUint32(lenPrefix[:], uint32(len(frames[i].Body))) //nolint:gosec // G115: frame bounded by encode
 		sf.batchBuf = append(sf.batchBuf, lenPrefix[:]...)
 		sf.batchBuf = append(sf.batchBuf, frames[i].Body...)
-		if _, err := sf.recordCRC.Write(lenPrefix[:]); err != nil {
+		if _, err := sf.recordDigest.Write(lenPrefix[:]); err != nil {
 			return err
 		}
-		if _, err := sf.recordCRC.Write(frames[i].Body); err != nil {
+		if _, err := sf.recordDigest.Write(frames[i].Body); err != nil {
 			return err
 		}
 		if !sf.memCaptureOff {
@@ -249,7 +257,7 @@ func (sf *File) AppendFrames(frames []Frame) error {
 	}
 	sf.hdr.LastIngestTS = frames[len(frames)-1].Rec.EventID.IngestTS
 	sf.hdr.DataEnd = lastFrameStart
-	sf.hdr.SegmentChecksum = sf.recordCRC.Sum32()
+	sf.hdr.SegmentChecksum = sf.recordDigest.Sum64()
 	sf.dataEnd = writeOff + uint32(len(sf.batchBuf)) //nolint:gosec // G115: batch bounded by commit window
 	return sf.writeHeader()
 }
@@ -317,18 +325,14 @@ func (sf *File) readHeader() error {
 	if err != nil {
 		return err
 	}
-	readLen := int64(HeaderSize)
-	if info.Size() < readLen {
-		if info.Size() < int64(HeaderSizeV1) {
-			return ErrHeaderTooSmall
-		}
-		readLen = int64(HeaderSizeV1)
+	if info.Size() < int64(HeaderSize) {
+		return ErrHeaderTooSmall
 	}
-	n, err := sf.f.ReadAt(sf.hdrBuf[:readLen], 0)
+	n, err := sf.f.ReadAt(sf.hdrBuf[:HeaderSize], 0)
 	if err != nil {
 		return err
 	}
-	if int64(n) < readLen {
+	if n < HeaderSize {
 		return ErrHeaderTooSmall
 	}
 	hdr, err := decodeHeader(sf.hdrBuf[:n])
@@ -399,64 +403,73 @@ func (sf *File) reconcileOnOpen() error {
 	}
 	fileSize := uint32(info.Size()) //nolint:gosec // G115: segment file size bounded
 
-	validEnd, lastStart, count, firstTS, lastTS, err := sf.reconcileFromAnchor(fileSize)
+	res, err := sf.reconcileFromAnchor(fileSize)
 	if err != nil {
-		validEnd, lastStart, count, firstTS, lastTS = sf.resyncFromFront(fileSize)
+		res = sf.resyncFromFront(fileSize)
 	}
 
-	if int64(validEnd) < info.Size() {
-		if err := sf.f.Truncate(int64(validEnd)); err != nil {
+	if int64(res.validEnd) < info.Size() {
+		if err := sf.f.Truncate(int64(res.validEnd)); err != nil {
 			return err
 		}
 	}
 
-	sf.hdr.RecordCount = count
-	sf.hdr.FirstIngestTS = firstTS
-	sf.hdr.LastIngestTS = lastTS
-	if count == 0 {
+	sf.hdr.RecordCount = res.count
+	sf.hdr.FirstIngestTS = res.firstTS
+	sf.hdr.LastIngestTS = res.lastTS
+	if res.count == 0 {
 		sf.hdr.DataEnd = HeaderSize
 	} else {
-		sf.hdr.DataEnd = lastStart
+		sf.hdr.DataEnd = res.lastStart
 	}
 
-	sum, err := sf.initRecordCRC(validEnd)
+	sum, err := sf.initRecordDigest(res.validEnd)
 	if err != nil {
 		return err
 	}
 	sf.hdr.SegmentChecksum = sum
-	sf.dataEnd = validEnd
+	sf.dataEnd = res.validEnd
 	return sf.writeHeader()
 }
 
-func (sf *File) reconcileFromAnchor(fileSize uint32) (validEnd, lastStart, count uint32, firstTS, lastTS time.Time, err error) {
+// scanResult is the header state a torn-tail recovery scan rebuilds: where
+// valid data ends, where the last whole frame starts, and the record count
+// and IngestTS extrema confirmed so far.
+type scanResult struct {
+	validEnd  uint32    // byte offset just past the last whole frame
+	lastStart uint32    // byte offset where the last whole frame starts
+	count     uint32    // records confirmed so far
+	firstTS   time.Time // IngestTS of the first record
+	lastTS    time.Time // IngestTS of the last record
+}
+
+func (sf *File) reconcileFromAnchor(fileSize uint32) (scanResult, error) {
 	if sf.hdr.RecordCount == 0 {
-		validEnd, lastStart, count, firstTS, lastTS = sf.scanForward(HeaderSize, fileSize, 0, time.Time{}, time.Time{})
-		return validEnd, lastStart, count, firstTS, lastTS, nil
+		return sf.scanForward(HeaderSize, fileSize, scanResult{}), nil
 	}
 
 	rec, n, err := sf.frameAt(sf.hdr.DataEnd)
 	if err != nil {
-		return 0, 0, 0, time.Time{}, time.Time{}, err
+		return scanResult{}, err
 	}
 
-	validEnd = sf.hdr.DataEnd + n
-	count = sf.hdr.RecordCount
-	firstTS = sf.hdr.FirstIngestTS
-	lastTS = rec.EventID.IngestTS
-	validEnd, lastStart, count, firstTS, lastTS = sf.scanForward(validEnd, fileSize, count, firstTS, lastTS)
-	return validEnd, lastStart, count, firstTS, lastTS, nil
+	return sf.scanForward(sf.hdr.DataEnd+n, fileSize, scanResult{
+		count:   sf.hdr.RecordCount,
+		firstTS: sf.hdr.FirstIngestTS,
+		lastTS:  rec.EventID.IngestTS,
+	}), nil
 }
 
-func (sf *File) scanForward(off, fileSize, count uint32, firstTS, lastTS time.Time) (validEnd, lastStart, outCount uint32, outFirst, outLast time.Time) {
-	validEnd = off
-	if count == 0 {
-		lastStart = HeaderSize
+// scanForward extends prior with whole frames read from off until the first
+// torn or unreadable frame, and returns the combined result.
+func (sf *File) scanForward(off, fileSize uint32, prior scanResult) scanResult {
+	res := prior
+	res.validEnd = off
+	if prior.count == 0 {
+		res.lastStart = HeaderSize
 	} else {
-		lastStart = sf.hdr.DataEnd
+		res.lastStart = sf.hdr.DataEnd
 	}
-	outCount = count
-	outFirst = firstTS
-	outLast = lastTS
 
 	var scanScratch []byte
 	for off < fileSize {
@@ -465,41 +478,50 @@ func (sf *File) scanForward(off, fileSize, count uint32, firstTS, lastTS time.Ti
 		if readErr != nil {
 			break
 		}
-		outCount++
-		if outCount == 1 {
-			outFirst = rec.EventID.IngestTS
+		res.count++
+		if res.count == 1 {
+			res.firstTS = rec.EventID.IngestTS
 		}
-		lastStart = off
-		outLast = rec.EventID.IngestTS
-		validEnd = off + n
+		res.lastStart = off
+		res.lastTS = rec.EventID.IngestTS
+		res.validEnd = off + n
 		off += n
 	}
-	return validEnd, lastStart, outCount, outFirst, outLast
+	return res
 }
 
-func (sf *File) resyncFromFront(fileSize uint32) (validEnd, lastStart, count uint32, firstTS, lastTS time.Time) {
-	return sf.scanForward(HeaderSize, fileSize, 0, time.Time{}, time.Time{})
+func (sf *File) resyncFromFront(fileSize uint32) scanResult {
+	return sf.scanForward(HeaderSize, fileSize, scanResult{})
 }
 
-func (sf *File) initRecordCRC(recEnd uint32) (uint32, error) {
-	h := crc32.NewIEEE()
-	if recEnd > HeaderSize {
-		if err := crc32IEEEFeed(h, sf.f, HeaderSize, recEnd); err != nil {
-			return 0, err
-		}
+// initRecordDigest seeds the rolling record digest from on-disk bytes
+// [HeaderSize:recEnd) and returns the checksum to publish: 0 for an empty
+// record region (the "no data / no expectation" sentinel across the publish
+// and collection paths), the XXH64 sum otherwise.
+func (sf *File) initRecordDigest(recEnd uint32) (uint64, error) {
+	h := xxhash.New()
+	sf.recordDigest = h
+	if recEnd <= HeaderSize {
+		return 0, nil
 	}
-	sf.recordCRC = h
-	return h.Sum32(), nil
+	if err := hashFeed(h, sf.f, HeaderSize, recEnd); err != nil {
+		return 0, err
+	}
+	return h.Sum64(), nil
 }
 
 func (sf *File) verifyChecksum() error {
 	if sf.hdr.IndexOffset > 0 {
 		return nil // verifyIndexedLayout in reconcileOnOpen already checked both regions.
 	}
-	if sf.recordCRC == nil {
-		return errors.New("segment record CRC not initialized")
+	if sf.recordDigest == nil {
+		return errors.New("segment record digest not initialized")
 	}
-	if sf.recordCRC.Sum32() != sf.hdr.SegmentChecksum {
+	sum := uint64(0)
+	if sf.dataEnd > HeaderSize {
+		sum = sf.recordDigest.Sum64()
+	}
+	if sum != sf.hdr.SegmentChecksum {
 		return errors.New("segment checksum mismatch")
 	}
 	return nil

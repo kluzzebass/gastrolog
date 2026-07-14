@@ -205,7 +205,7 @@ func NewPeerConnManager(cfg PeerConnManagerConfig) *PeerConnManager {
 	return m
 }
 
-// NewPeerConns creates a manager backed by system Raft membership resolution.
+// NewPeerConns creates a manager backed by cluster-ctl Raft membership resolution.
 func NewPeerConns(r *hraft.Raft, clusterTLS *ClusterTLS, nodeID string) *PeerConnManager {
 	return NewPeerConnManager(PeerConnManagerConfig{
 		Raft:       r,

@@ -201,9 +201,9 @@ For Phase 3 (gastrolog-1huz5) Sealing chunks, the query engine branches on the *
 Memory vaults hold records in Go slices. `OpenCursor()` returns a cursor backed
 by direct slice indexing — no disk I/O, no file formats.
 
-### Cloud Chunk Read Path
+### Cloud-Backed Chunk Read Path
 
-Cloud chunks are deferred during heap priming — if local chunks satisfy the
+Cloud-backed chunks are deferred during heap priming — if local chunks satisfy the
 query's limit, cloud cursors are never opened and zero cloud I/O occurs.
 Cloud cursors are opened when the query needs more records than local
 chunks can provide — typically for longer time ranges or unbounded queries.
@@ -286,7 +286,7 @@ flowchart TD
     MergeAll --> Client
 ```
 
-The coordinator determines which vaults live on remote nodes via
+The coordinator determines which vaults live on peer nodes via
 `remoteVaultsByNode()`. For each remote vault, a streaming `ForwardSearch` RPC
 is opened. Results flow back without buffering — `kWayMerge()` performs
 selection-based merging across N streams (N is typically 1–3 vaults per node).

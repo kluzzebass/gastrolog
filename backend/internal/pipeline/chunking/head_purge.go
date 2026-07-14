@@ -37,6 +37,8 @@ func (v *vaultChunking) flushHeadPurgeForManifest(pending *vaultctlfsm.OpenChunk
 	minChunk := v.plannerMinHolders()
 	fsm := v.fsm()
 	purged := 0
+	failed := 0
+	var firstErr error
 	for _, id := range segmentIDs {
 		if !mayPurgeHeadAfterBuild(fsm, id, required, holdersWired, minChunk) {
 			continue
@@ -47,8 +49,20 @@ func (v *vaultChunking) flushHeadPurgeForManifest(pending *vaultctlfsm.OpenChunk
 		// trail when purge behavior is in question).
 		v.logger().Debug("purging head segment after build",
 			"segment", id, "chunk", pending.ChunkID)
-		_ = paths.PurgeHeadStaging(v.cfg.VaultRoot, id)
+		if err := paths.PurgeHeadStaging(v.cfg.VaultRoot, id); err != nil {
+			failed++
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
 		purged++
+	}
+	if failed > 0 {
+		// One line per batch, not per segment (gastrolog-67c9b0 precedent):
+		// head copies that fail to purge stay on disk and grow head/.
+		v.logger().Warn("head purge failed after build — head copies remain on disk",
+			"chunk", pending.ChunkID, "failed", failed, "error", firstErr)
 	}
 	if purged > 0 {
 		v.logger().Info("purged head segments after build",
@@ -76,11 +90,25 @@ func (v *vaultChunking) purgeReleasedHead(ids []glid.GLID) {
 	if root == "" || len(ids) == 0 {
 		return
 	}
+	purged := 0
+	failed := 0
+	var firstErr error
 	for _, id := range ids {
 		v.logger().Debug("purging head segment after registry release", "segment", id)
-		_ = paths.PurgeHeadStaging(root, id)
+		if err := paths.PurgeHeadStaging(root, id); err != nil {
+			failed++
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		purged++
 	}
-	v.notePurged(&v.purgedReleased, len(ids))
+	if failed > 0 {
+		v.logger().Warn("head purge failed after registry release — head copies remain on disk",
+			"failed", failed, "error", firstErr)
+	}
+	v.notePurged(&v.purgedReleased, purged)
 }
 
 // purgeStaleHeadCatchUp removes head/ files with no completed-segment registry
@@ -101,11 +129,17 @@ func (v *vaultChunking) purgeStaleHeadCatchUp() {
 		return
 	}
 	ids, err := paths.ListSegmentIDs(paths.HeadDir(root))
-	if err != nil || len(ids) == 0 {
+	if err != nil {
+		v.logger().Warn("listing head segments for stale-purge catch-up failed", "error", err)
+		return
+	}
+	if len(ids) == 0 {
 		return
 	}
 	fsm := v.fsm()
 	purged := 0
+	failed := 0
+	var firstErr error
 	for id := range ids {
 		if fsm.GetCompletedSegment(id) != nil {
 			continue
@@ -117,8 +151,18 @@ func (v *vaultChunking) purgeStaleHeadCatchUp() {
 			continue
 		}
 		v.logger().Debug("purging stale head segment with no registry entry", "segment", id)
-		_ = paths.PurgeHeadStaging(root, id)
+		if err := paths.PurgeHeadStaging(root, id); err != nil {
+			failed++
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
 		purged++
+	}
+	if failed > 0 {
+		v.logger().Warn("stale head purge failed — head copies remain on disk",
+			"failed", failed, "error", firstErr)
 	}
 	v.notePurged(&v.purgedStale, purged)
 }

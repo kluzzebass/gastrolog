@@ -25,7 +25,7 @@ func TestOrchPipeline_GLCBReplicaCatchup(t *testing.T) {
 	h := newOrchRelHarness(t, 4,
 		withExtraVault([]int{0, 1, 2}),
 		withMatchAllRoute(1),
-		withPipelineCluster(pipelineTestClosePolicy, pipelineChunkMaxRecords),
+		withPipelineCluster(pipelineTestCompletePolicy, pipelineChunkMaxRecords),
 	)
 	v := h.vaults[1]
 
@@ -148,7 +148,7 @@ func TestOrchPipeline_ChunkHolderRevokeOnByteLoss(t *testing.T) {
 	h := newOrchRelHarness(t, 4,
 		withExtraVault([]int{0, 1, 2}),
 		withMatchAllRoute(1),
-		withPipelineCluster(pipelineTestClosePolicy, pipelineChunkMaxRecords),
+		withPipelineCluster(pipelineTestCompletePolicy, pipelineChunkMaxRecords),
 	)
 	v := h.vaults[1]
 	homeIdxs := []int{0, 1, 2}
