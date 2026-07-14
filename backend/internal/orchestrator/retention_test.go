@@ -2,9 +2,11 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"gastrolog/internal/glid"
 	"log/slog"
+	"runtime"
 	"slices"
 	"sync"
 	"testing"
@@ -336,6 +338,69 @@ func TestSweepWithNoBindings(t *testing.T) {
 	}
 	if len(im.deleted) != 0 {
 		t.Errorf("expected no index deletions with no rules, got %d", len(im.deleted))
+	}
+}
+
+// TestSweepGoroutineCountBounded pins the gastrolog-33eabj fix: a sweep
+// matching many chunks must process them through a worker pool of
+// retentionChunkWorkers goroutines pulling from a channel — NOT spawn one
+// goroutine per matched chunk parked on a semaphore (668 were observed
+// waiting on chunkSem in a live profile). All synchronization is by channel
+// handshake; there are no timing assertions.
+func TestSweepGoroutineCountBounded(t *testing.T) {
+	const total = 65 // keep-1 policy matches 64 chunks
+
+	base := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	metas := make([]chunk.ChunkMeta, total)
+	for i := range metas {
+		metas[i] = chunk.ChunkMeta{
+			ID:         chunk.NewChunkID(),
+			WriteStart: base.Add(time.Duration(i) * time.Minute),
+			WriteEnd:   base.Add(time.Duration(i)*time.Minute + 30*time.Second),
+			Sealed:     true,
+		}
+	}
+	cm := &retentionFakeChunkManager{chunks: metas}
+	im := &retentionFakeIndexManager{}
+
+	r, rules := newRetentionRunner(cm, im, chunk.NewCountRetentionPolicy(1))
+
+	// Block the first worker inside tryRetainChunk (in the retention-pending
+	// apply, before any delete machinery) and take a goroutine census while
+	// it is provably parked. In the new shape every goroutine the sweep will
+	// ever spawn for the rule already exists at that point — the pool spawns
+	// before the first job is sent. Returning an error skips expireChunk.
+	entered := make(chan struct{}, total)
+	release := make(chan struct{})
+	r.applyRaftRetentionPending = func(chunk.ChunkID) error {
+		entered <- struct{}{}
+		<-release
+		return errors.New("held for goroutine census")
+	}
+
+	baseline := runtime.NumGoroutine()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		r.sweep(rules)
+	}()
+
+	<-entered // a worker is inside the blocked apply
+
+	during := runtime.NumGoroutine()
+	// Budget: the pool workers, the sweep goroutine itself, and a little
+	// slack for unrelated runtime goroutines. The old spawn-per-chunk shape
+	// measured baseline+matched (~64) here and must fail this bound.
+	if limit := baseline + retentionChunkWorkers + 4; during > limit {
+		t.Fatalf("sweep goroutine count unbounded: %d during sweep (baseline %d, limit %d, workers %d, matched %d)",
+			during, baseline, limit, retentionChunkWorkers, total-1)
+	}
+
+	close(release)
+	<-done
+
+	if len(cm.deleted) != 0 {
+		t.Fatalf("failed retention-pending apply must not delete chunks; deleted=%v", cm.deleted)
 	}
 }
 
