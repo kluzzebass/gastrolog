@@ -145,6 +145,15 @@ type vaultChunking struct {
 	// state so planner passes log/alert only on transitions
 	// (gastrolog-4bl9xx). Guarded by planMu like the planner pass itself.
 	underReplicatedAlerted bool
+	// planFailures tracks segments whose on-disk index cannot be opened or
+	// read (corrupt index, unreadable file). Without it a corrupt segment
+	// was skipped silently forever: never planned into a sealed manifest,
+	// head purge blocked (gastrolog-6wwdos). Guarded by planMu like the
+	// planner pass itself.
+	planFailures map[glid.GLID]*planFailure
+	// planFailureAlerted tracks the unplannable-segment alert state so
+	// planner passes raise/clear only on transitions. Guarded by planMu.
+	planFailureAlerted bool
 	// pendingRelease holds segment IDs awaiting ReleaseSegments once every
 	// required vault home has committed a holder receipt.
 	pendingRelease []glid.GLID

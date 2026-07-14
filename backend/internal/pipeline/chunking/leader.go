@@ -549,6 +549,113 @@ func (v *vaultChunking) pruneSegmentIndexCache(eligible []vaultctlfsm.CompletedS
 			delete(v.segmentIndexCache, id)
 		}
 	}
+	v.prunePlanFailures(active)
+}
+
+// planFailure tracks one segment whose on-disk index cannot be opened or read.
+// Log rate limiting is state-based (gastrolog-6wwdos): the Warn line emits when
+// the failure message changes (first failure included), never once per retry.
+type planFailure struct {
+	count   int
+	lastMsg string
+}
+
+// unplannableAlertFailures is how many failed plan attempts a segment
+// accumulates before the operator alert fires. An index that fails twice is
+// deterministic corruption, not a transient read; counting attempts keeps the
+// trigger state-based instead of wall-clock-gated.
+const unplannableAlertFailures = 2
+
+func (v *vaultChunking) unplannableAlertID() string {
+	return "chunking-unplannable-segment-" + v.cfg.VaultID.String()
+}
+
+// notePlanFailure records that a segment's on-disk index could not be opened
+// or read. Such a segment is skipped by every planner pass: its records are
+// never planned into a sealed manifest, never queryable via the chunk path,
+// and its head copy is never purged — previously with zero diagnostics
+// (gastrolog-6wwdos). Caller holds planMu.
+func (v *vaultChunking) notePlanFailure(id glid.GLID, stage string, err error) {
+	if v.planFailures == nil {
+		v.planFailures = make(map[glid.GLID]*planFailure)
+	}
+	f := v.planFailures[id]
+	if f == nil {
+		f = &planFailure{}
+		v.planFailures[id] = f
+	}
+	f.count++
+	msg := stage + ": " + err.Error()
+	if f.lastMsg != msg {
+		f.lastMsg = msg
+		v.logger().Warn("segment index unreadable — segment cannot be planned into a sealed manifest",
+			"segment", id, "stage", stage, "error", err)
+	}
+	v.updateUnplannableAlert()
+}
+
+// clearPlanFailure drops a segment's plan-failure state once its index opens
+// and reads again. Caller holds planMu.
+func (v *vaultChunking) clearPlanFailure(id glid.GLID) {
+	f := v.planFailures[id]
+	if f == nil {
+		return
+	}
+	delete(v.planFailures, id)
+	v.logger().Info("segment index readable again — planning resumed",
+		"segment", id, "failures", f.count)
+	v.updateUnplannableAlert()
+}
+
+// prunePlanFailures drops failure state for segments that left the eligible
+// set (released, retention give-up expiry, exhausted) so a segment that can
+// never plan does not hold the alert after the registry lets it go. Caller
+// holds planMu.
+func (v *vaultChunking) prunePlanFailures(active map[glid.GLID]struct{}) {
+	changed := false
+	for id := range v.planFailures {
+		if _, ok := active[id]; !ok {
+			delete(v.planFailures, id)
+			changed = true
+		}
+	}
+	if changed {
+		v.updateUnplannableAlert()
+	}
+}
+
+// updateUnplannableAlert raises/clears the unplannable-segment operator alert
+// on state transitions. A single failure may be a transient read; a segment at
+// the repeat threshold is deterministically unplannable and needs an operator
+// — left alone its records either sit unchunked forever or, when a retention
+// give-up bound is configured, are eventually released unchunked as a counted
+// expiry. Caller holds planMu.
+func (v *vaultChunking) updateUnplannableAlert() {
+	repeated := 0
+	var example glid.GLID
+	for id, f := range v.planFailures {
+		if f.count >= unplannableAlertFailures {
+			if repeated == 0 {
+				example = id
+			}
+			repeated++
+		}
+	}
+	stuck := repeated > 0
+	if stuck == v.planFailureAlerted {
+		return
+	}
+	v.planFailureAlerted = stuck
+	if v.cfg.Alerts == nil {
+		return
+	}
+	if stuck {
+		v.cfg.Alerts.Set(v.unplannableAlertID(), alert.Error, "chunking",
+			fmt.Sprintf("vault %s: %d segment(s) have unreadable on-disk indexes and cannot be planned into sealed manifests (e.g. %s) — their records stay unchunked and their head copies cannot be purged. Investigate segment file corruption on this node; if the vault has a delete-disposition retention TTL, the records will eventually be released unchunked as a counted expiry",
+				v.cfg.VaultID, repeated, example))
+		return
+	}
+	v.cfg.Alerts.Clear(v.unplannableAlertID())
 }
 
 // segmentViewForEntry opens the segment index at most once per cache generation.
@@ -558,14 +665,23 @@ func (v *vaultChunking) segmentViewForEntry(entry vaultctlfsm.CompletedSegmentEn
 	if idx == nil {
 		path, ok := v.cfg.Locate.SegmentPath(entry.SegmentID)
 		if !ok {
+			// Not a failure: the segment file is not on this node yet
+			// (collection lag). The planner nudges the collector when
+			// nothing is plannable.
 			return SegmentView{}, false
 		}
 		var err error
 		idx, err = v.openOrderedIndex(path)
 		if err != nil {
+			// A registry segment whose index cannot be built is never
+			// planned into any sealed manifest: its records stay
+			// unchunked and its head copy cannot be purged. Silent
+			// skipping hid that condition entirely (gastrolog-6wwdos).
+			v.notePlanFailure(entry.SegmentID, "open segment index", err)
 			return SegmentView{}, false
 		}
 		v.segmentIndexCache[entry.SegmentID] = idx
+		v.clearPlanFailure(entry.SegmentID)
 	}
 	return SegmentView{
 		ID:            entry.SegmentID,
@@ -611,8 +727,10 @@ func (v *vaultChunking) lazyPickSegment(manifest ManifestSnapshot, resume map[gl
 		}
 		entryAt, err := seg.Index.EntryAt(start)
 		if err != nil {
+			v.notePlanFailure(seg.ID, "read segment index entry", err)
 			continue
 		}
+		v.clearPlanFailure(seg.ID)
 		if !found || segmentPrecedes(seg, entryAt.EventID, bestView, bestEvent) {
 			bestView = seg
 			bestEvent = entryAt.EventID
