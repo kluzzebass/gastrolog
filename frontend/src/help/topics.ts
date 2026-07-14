@@ -39,7 +39,7 @@ export const helpTopics: HelpTopic[] = [
       { id: 'digester-timestamp', title: 'Timestamp', load: md(() => import('./digester-timestamp.md?raw')) },
     ],
   },
-  { id: 'routing', title: 'Routes & Filtering', load: md(() => import('./routing.md?raw')) },
+  { id: 'routing', title: 'Routes', load: md(() => import('./routing.md?raw')) },
   {
     id: 'storage', title: 'Vaults', load: md(() => import('./storage.md?raw')),
     children: [

@@ -79,7 +79,7 @@ for append-heavy write patterns and time-ordered reads.
 
 - **ChunkMeta** — the stats bag for a chunk: sealed/cloud-backed
   flags, record count, byte counts, timestamps (`WriteStart/End`, `IngestStart/End`,
-  `SourceStart/End`), retention-pending flag, frame count for cloud chunks.
+  `SourceStart/End`), retention-pending flag, frame count for cloud-backed chunks.
 
 ### States a chunk passes through
 
@@ -114,8 +114,8 @@ for append-heavy write patterns and time-ordered reads.
 - **CloudService** — a cluster-wide cloud endpoint (S3, Azure, GCS) with
   optional archival lifecycle. [`system.CloudService`](../backend/internal/system/storage.go).
 
-- **Frame** — a seekable zstd block within a cloud chunk. `NumFrames` records
-  how many frames a cloud chunk was uploaded in; range queries seek to a
+- **Frame** — a seekable zstd block within a cloud-backed chunk. `NumFrames` records
+  how many frames a cloud-backed chunk was uploaded in; range queries seek to a
   specific frame to avoid pulling the whole blob.
 
 ### Placement
@@ -173,7 +173,7 @@ a vault's active chunk".
 
 - **Stage** — one step in a route's pipeline (`RouteConfig.Stages`).
   Today's only variant is `MatchStage{expression}`, which gates the route
-  on a boolean filter expression. Future stage kinds (enrich, redact,
+  on a boolean match expression. Future stage kinds (enrich, redact,
   sample, fork, route_by_field — gastrolog-5e85x) plug into the same
   oneof without re-shaping the proto.
 
@@ -297,7 +297,7 @@ Reading records back, filtering, aggregating, and rendering them.
   cross-chunk and cross-node paths. Terminates with `chunk.ErrNoMoreRecords`.
 
 - **collectRemote** — the orchestrator entry point that fans a search out to
-  remote nodes and merges results. Used by Search, Histogram, Explain,
+  peer nodes and merges results. Used by Search, Histogram, Explain,
   GetContext, GetFields.
 
 ---
@@ -323,10 +323,12 @@ Nodes agreeing on what the cluster believes, via Raft.
 GastroLog runs **multiple Raft groups** per node, multiplexed over a single
 gRPC transport:
 
-- **System Raft** (a.k.a. "config Raft", "cluster Raft") — one group per
-  cluster. Replicates `system.Config` (operator-authored) and `system.Runtime`
-  (cluster-managed). Every node is a voter. Leader changes propagate config
-  via FSM apply; dispatcher drives downstream effects.
+- **Cluster-ctl Raft** (formerly "system Raft", "config Raft", "cluster
+  Raft" — all retired) — one group per cluster. Replicates `system.Config`
+  (operator-authored) and `system.Runtime` (cluster-managed). Every node is
+  a voter. Leader changes propagate config via FSM apply; dispatcher drives
+  downstream effects. Wire surface: `cluster_ctl_raft_index` on
+  GetSystem/WatchSystem/SettingsMutationEcho.
 
 - **Vault Control-Plane Raft** (a.k.a. "vault-ctl Raft", "vault-ctl group") —
   one group *per vault*. Replicates that vault's chunk metadata across all
@@ -617,10 +619,14 @@ How the cluster reports what it's doing to itself, to operators, and to the UI.
 
 - **RouteStats** / **VaultRouteStats** / **PerRouteStats** — routing
   counters: global `Routed` (records that entered routing), `Matched`
-  (matched a route and were fanned out), `Dropped` (no route matched;
+  (matched a route and were fanned out), `Unmatched` (no route matched;
   intentional, counted drop), plus per-vault and per-route `Matched`.
-  `Routed = Matched + Dropped`. Surfaced in `NodeStats` and aggregated
-  cluster-wide.
+  `Routed = Matched + Unmatched`. Surfaced in `NodeStats` and aggregated
+  cluster-wide. Delivery drops are a distinct quantity: the routing
+  manager's `PerVaultDropped` counts records *already counted as Matched*
+  whose fan-out delivery to one vault's segmentation queue failed (sink
+  revoked mid-flight, or shutdown). They are a per-vault sub-account of
+  `Matched`, never part of the `Routed = Matched + Unmatched` sum.
 
 - **AlertCollector** — per-node bounded store of alerts (`AlertSeverity`:
   `WARNING`, `ERROR`). Alerts have a stable key for dedup and auto-clear;
@@ -681,7 +687,7 @@ Live on `Config` directly (not as entities):
 - **JWT** (access token) — short-lived bearer token. Carries claims:
   `sub` (username), `role`, `exp`, `iat`.
 
-- **RefreshToken** — long-lived credential, stored in the config Raft.
+- **RefreshToken** — long-lived credential, stored in the cluster-ctl Raft.
   Used to mint a new JWT without re-entering password. Expires on
   password change or logout via `DeleteUserRefreshTokens`.
 
@@ -862,12 +868,13 @@ Three verbs cover segment end-of-life, one per layer — they are not synonyms:
 | peer             | remote node       | "Peer" is relative; there is no absolute "remote".                 |
 | retention event  | retention action, expire/eject/transition | A fired retention event destroys the chunk and (per the vault's retention disposition, gastrolog-18du3) optionally streams the records through the routing engine first. The "what" lives on routes; the "whether to invoke routes at all" lives on the disposition. |
 | match expression | filter, FilterConfig | Match expressions are inlined on `RouteConfig.Stages`; the named-`Filter` entity is gone (gastrolog-4kkoo Phase 5). UI label: "Match expression" on the route editor. |
-| route table      | filter set        | The runtime structure is a priority-ordered `RouteSet`, not a per-vault `FilterSet`. First-match-wins, no catch-the-rest. |
+| route table      | filter set        | The runtime structure is a priority-ordered `RouteSet`, not a per-vault `FilterSet`. First-match-wins, no catch-the-rest. Renamed through the whole stack in gastrolog-5sdzfv: proto `route_table_active` / NodeStats `route_stats_route_table_active`, `Orchestrator.IsRouteTableActive`, UI banner "Route table is inactive". |
 | synthetic attribute | source predicate, RouteSource | Source/content predicates unify via `_source`/`_ingester`/`_vault`/`_reason` overlays at routing-eval time. |
 | retire (segment, distribution) | forget | Distribution's node-local drop of segment tracking was called `forgetSegment` while the exported entry point was `RetireSegments`; one verb per meaning (gastrolog-34zx9y). See [Pipeline](#9-pipeline) for the release / retire / purge distinction. |
 | glcb (container-format package) | chunk/cloud | The GLCB container package lived at `chunk/cloud`, but GLCB is universal — local-only vaults seal into it too. The package is `chunk/glcb`; "cloud" names only genuine object-storage interaction (blobstore, cloud-backed cache, cloud upload) (gastrolog-34zx9y). |
 | complete (segment lifecycle) | close | "Close" is overloaded: writer shutdown vs the segment lifecycle event (working/ → completed/). The rotation trigger is `segmentation.CompletePolicy` and a segment COMPLETES; reserve Close for genuine resource shutdown (`Close()` methods, closed writers) (gastrolog-34zx9y). |
-| routed (routing counter) | ingested (at routing) | The counter that was `Ingested` on routing stats counts records ENTERING ROUTING, not ingestion — counter provenance matters when proving loss. Whole chain renamed: `Routed` = entered routing, `Matched` = matched a route and fanned out, `Dropped` unchanged (proto `total_routed`/`total_matched`, NodeStats `route_stats_*`, UI labels) (gastrolog-34zx9y). "Ingested" stays only on genuine ingester counters (`MessagesIngested`, `BytesIngested`). |
+| routed (routing counter) | ingested (at routing) | The counter that was `Ingested` on routing stats counts records ENTERING ROUTING, not ingestion — counter provenance matters when proving loss. Whole chain renamed: `Routed` = entered routing, `Matched` = matched a route and fanned out (proto `total_routed`/`total_matched`, NodeStats `route_stats_*`, UI labels) (gastrolog-34zx9y). "Ingested" stays only on genuine ingester counters (`MessagesIngested`, `BytesIngested`). |
+| unmatched (routing counter) | dropped (at routing) | "Dropped" named two different quantities. `Unmatched` = matched no route, an intentional counted drop (proto `total_unmatched`, NodeStats `route_stats_unmatched`, UI label "Unmatched"); the invariant is `Routed = Matched + Unmatched`. "Dropped" is reserved for delivery drops: `StatsSnapshot.PerVaultDropped` counts already-matched records whose fan-out delivery to a vault failed — a per-vault sub-account of `Matched`, never part of the routed sum (gastrolog-5sdzfv). |
 
 ### Timestamp conventions
 
@@ -923,7 +930,7 @@ Error values that cross bounded contexts:
   Acked by Raft majority; bounded by `ReplicationTimeout`.
 - **Apply forwarding** — follower → leader forwarding of a write command.
   Done by `VaultApplyForwarder`, `VaultCtlChunkApplyForwarder`, or (for
-  config Raft) `Forwarder`. This is not replication; it's routing to the
+  cluster-ctl Raft) `Forwarder`. This is not replication; it's routing to the
   node that CAN do the replication.
 
 When you see "replication" in a log line or a comment, check whether the

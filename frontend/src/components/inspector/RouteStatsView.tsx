@@ -29,9 +29,9 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
     routeLabelById.set(r.id, r.displayLabel);
   }
 
-  const dropRate =
+  const unmatchedRate =
     stats.totalRouted > 0
-      ? ((Number(stats.totalDropped) / Number(stats.totalRouted)) * 100).toFixed(1)
+      ? ((Number(stats.totalUnmatched) / Number(stats.totalRouted)) * 100).toFixed(1)
       : "0.0";
 
   const sorted = [...stats.vaultStats].sort(
@@ -50,12 +50,12 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
       <div
         className={`rounded-lg border p-4 ${c("border-ink-border bg-ink-well", "border-light-border bg-light-well")}`}
       >
-        {!stats.filterSetActive && (
+        {!stats.routeTableActive && (
           <div
             className={`mb-3 px-3 py-2 rounded text-[0.85em] font-medium ${c("bg-severity-error/15 text-severity-error border border-severity-error/30", "bg-severity-error/10 text-severity-error border border-severity-error/20")}`}
           >
-            Filter set is inactive — no routes compiled. All ingested records are
-            being dropped silently.
+            Route table is inactive — no routes compiled. All ingested records go
+            unmatched and are discarded.
           </div>
         )}
 
@@ -74,26 +74,26 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
             title="Records that matched at least one route and were delivered to a vault (fan-out counts once)"
           />
           <StatBox
-            label="Dropped"
-            value={formatCount(stats.totalDropped)}
+            label="Unmatched"
+            value={formatCount(stats.totalUnmatched)}
             dark={dark}
-            variant={Number(stats.totalDropped) > 0 ? "error" : undefined}
-            title="Records that matched no route and were silently discarded — routed = matched + dropped"
+            variant={Number(stats.totalUnmatched) > 0 ? "error" : undefined}
+            title="Records that matched no route and were discarded (intentional, counted drop) — routed = matched + unmatched"
           />
-          <StatBox label="Drop rate" value={`${dropRate}%`} dark={dark} />
+          <StatBox label="Unmatched rate" value={`${unmatchedRate}%`} dark={dark} />
         </div>
         <div className={`mt-4 pt-3 border-t grid grid-cols-2 gap-4 ${c("border-ink-border-subtle", "border-light-border-subtle")}`}>
           <RateBox
             label="Routed rate"
             rate={stats.routedRate}
             dark={dark}
-            title="Records/s entering the routing stage, summed across all nodes. The gap between this and the matched rate is the live drop rate."
+            title="Records/s entering the routing stage, summed across all nodes. The gap between this and the matched rate is the live unmatched rate."
           />
           <RateBox
             label="Matched rate"
             rate={stats.matchedRate}
             dark={dark}
-            title="Records/s matched to at least one route, summed across all nodes. Equal to the routed rate when nothing is dropped."
+            title="Records/s matched to at least one route, summed across all nodes. Equal to the routed rate when every record matches a route."
           />
         </div>
       </div>
@@ -180,7 +180,7 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
         </div>
       )}
 
-      {sorted.length === 0 && stats.filterSetActive && (
+      {sorted.length === 0 && stats.routeTableActive && (
         <div
           className={`text-center text-[0.9em] py-4 ${c("text-text-muted", "text-light-text-muted")}`}
         >

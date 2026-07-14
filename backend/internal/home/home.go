@@ -103,7 +103,7 @@ func (d Dir) VaultCtlWALDir() string {
 }
 
 // RaftGroupDir returns the per-group directory under raft/groups/<groupID>/.
-// Used for file snapshot stores: "system" for cluster config raft, vault-instance GLID
+// Used for file snapshot stores: "cluster-ctl" for the cluster-ctl Raft, vault-instance GLID
 // strings for vault metadata raft (see raftgroup.GroupManager BaseDir).
 func (d Dir) RaftGroupDir(groupID string) string {
 	return filepath.Join(d.RaftDir(), "groups", groupID)

@@ -220,11 +220,11 @@ func (s *VaultServer) accumulateRemoteVaultStats(ctx context.Context, localVault
 	}
 
 	// If a filter was provided, only include those specific remote vaults.
-	var filterSet map[glid.GLID]struct{}
+	var wantedSet map[glid.GLID]struct{}
 	if len(filter) > 0 {
-		filterSet = make(map[glid.GLID]struct{}, len(filter))
+		wantedSet = make(map[glid.GLID]struct{}, len(filter))
 		for _, id := range filter {
-			filterSet[id] = struct{}{}
+			wantedSet[id] = struct{}{}
 		}
 	}
 
@@ -232,8 +232,8 @@ func (s *VaultServer) accumulateRemoteVaultStats(ctx context.Context, localVault
 		if _, local := localSet[vc.ID]; local {
 			continue
 		}
-		if filterSet != nil {
-			if _, wanted := filterSet[vc.ID]; !wanted {
+		if wantedSet != nil {
+			if _, wanted := wantedSet[vc.ID]; !wanted {
 				continue
 			}
 		}

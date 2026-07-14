@@ -117,7 +117,7 @@ service SystemService {
 
   // ValidateExpression parses and semantically validates a route match
   // expression. gastrolog-4kkoo (Phase 5): drives live editor feedback in
-  // the route filter UI — distinct from PutRoute's save-time validation.
+  // the route match-expression editor — distinct from PutRoute's save-time validation.
   // The check is read-only and node-local; no Raft Apply.
   rpc ValidateExpression(ValidateExpressionRequest) returns (ValidateExpressionResponse);
 
@@ -187,7 +187,7 @@ message GetSystemResponse {
   repeated ManagedFileInfo managed_files = 7;
   // Committed log index on the cluster-ctl Raft group (monotonic). Used by clients
   // to avoid regressing cached replicated state with stale reads.
-  uint64 system_raft_index = 8;
+  uint64 cluster_ctl_raft_index = 8;
   repeated CloudService cloud_services = 9;
   repeated NodeStorageConfig node_storage_configs = 10;
   // Per-component log level configuration. Empty default_level means
@@ -312,7 +312,7 @@ message RouteStage {
   }
 }
 
-// MatchStage gates the route on a boolean filter expression. The
+// MatchStage gates the route on a boolean match expression. The
 // expression is evaluated against the record (with system-injected
 // synthetic attributes available via reserved-prefix keys: _source,
 // _ingester, _vault, _reason).
@@ -324,7 +324,7 @@ message MatchStage {
 enum IngesterMode {
   INGESTER_MODE_UNSPECIFIED = 0;
   INGESTER_MODE_PASSIVE = 1;  // Listeners — bind a port, passively accept incoming data.
-  INGESTER_MODE_ACTIVE = 2;   // Collectors — actively pull from data sources.
+  INGESTER_MODE_ACTIVE = 2;   // Actively pull from upstream systems (Kafka consumer, file tail, etc.).
 }
 
 message IngesterConfig {
@@ -706,11 +706,11 @@ message PutServiceSettingsRequest {
 }
 
 // SettingsMutationEcho is returned after successful server-settings mutations so
-// clients can mirror GetSettings without a follow-up RPC. system_raft_index matches
-// GetSystemResponse.system_raft_index for cache coherence.
+// clients can mirror GetSettings without a follow-up RPC. cluster_ctl_raft_index matches
+// GetSystemResponse.cluster_ctl_raft_index for cache coherence.
 message SettingsMutationEcho {
   GetSettingsResponse settings = 1;
-  uint64 system_raft_index = 2;
+  uint64 cluster_ctl_raft_index = 2;
 }
 
 message PutServiceSettingsResponse {
@@ -980,18 +980,18 @@ message WatchSystemRequest {}
 message WatchSystemResponse {
   // Committed log index on the cluster-ctl Raft group when this notification fired.
   // Clients should only invalidate or refetch when this index exceeds the
-  // highest system_raft_index they already hold from a fetch or mutation.
-  uint64 system_raft_index = 1;
+  // highest cluster_ctl_raft_index they already hold from a fetch or mutation.
+  uint64 cluster_ctl_raft_index = 1;
 }
 
 message GetRouteStatsRequest {}
 
 message GetRouteStatsResponse {
   // Global counters since process start.
-  int64 total_routed = 1;     // total records entering routing (matched + dropped)
-  int64 total_dropped = 2;    // records matching no filter (silently lost)
+  int64 total_routed = 1;     // total records entering routing (matched + unmatched)
+  int64 total_unmatched = 2;  // records that matched no route (intentional, counted drop)
   int64 total_matched = 3;    // records that matched a route and were delivered to at least one vault
-  bool filter_set_active = 4; // false = no routes compiled, all records dropped
+  bool route_table_active = 4; // false = no route table published; every record goes unmatched
 
   // Per-vault destination counters.
   repeated VaultRouteStats vault_stats = 5;

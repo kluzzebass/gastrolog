@@ -20,7 +20,6 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-
 // publishSegForTest registers a completed segment in the FSM registry —
 // required before any manifest ref since the apply-time ghost-ref guard.
 func publishSegForTest(t *testing.T, fsm *vaultctlfsm.FSM, segID glid.GLID, count uint32, ts time.Time) {

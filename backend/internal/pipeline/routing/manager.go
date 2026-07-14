@@ -162,8 +162,8 @@ func (m *Manager) Stats() StatsSnapshot {
 	}
 }
 
-// TableActive reports whether a routing table is currently published. It is the
-// pipeline analogue of the legacy "filter set active" flag.
+// TableActive reports whether a route table is currently published. It backs
+// the route_table_active flag in route stats.
 func (m *Manager) TableActive() bool {
 	return m.table.Load() != nil
 }

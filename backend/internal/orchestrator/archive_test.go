@@ -136,9 +136,9 @@ func TestArchiveChunkViaRetentionSweep(t *testing.T) {
 	}
 }
 
-// TestArchiveNonCloudChunkFails verifies that archiving a non-cloud-backed
-// chunk returns an error (only cloud chunks can be archived).
-func TestArchiveNonCloudChunkFails(t *testing.T) {
+// TestArchiveNonCloudBackedChunkFails verifies that archiving a non-cloud-backed
+// chunk returns an error (only cloud-backed chunks can be archived).
+func TestArchiveNonCloudBackedChunkFails(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -161,7 +161,7 @@ func TestArchiveNonCloudChunkFails(t *testing.T) {
 	// Should fail — no cloud store.
 	err = cm.ArchiveChunk(context.Background(), metas[0].ID, "GLACIER")
 	if err == nil {
-		t.Error("expected error when archiving non-cloud chunk")
+		t.Error("expected error when archiving non-cloud-backed chunk")
 	}
 }
 

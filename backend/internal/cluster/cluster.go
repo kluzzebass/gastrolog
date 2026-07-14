@@ -306,7 +306,9 @@ func (s *Server) recvOrShutdown(stream grpc.ServerStream, msg any) error {
 	}
 }
 
-// ConfigGroupID is the well-known group ID for the cluster config Raft group.
+// ConfigGroupID is the well-known multiraft transport group ID for the
+// cluster-ctl Raft group (the on-disk directory is "cluster-ctl"; this is the
+// transport routing key).
 const ConfigGroupID = "config"
 
 // Transport creates the multi-raft transport and returns a raft.Transport

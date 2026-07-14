@@ -48,7 +48,7 @@ type IngesterStats struct {
 // from the pipeline routing manager.
 type RouteStats struct {
 	Routed  int64 // total records that entered routing (matched + unmatched)
-	Dropped int64 // records matching no route (intentional, counted drop)
+	Unmatched int64 // records that matched no route (intentional, counted drop)
 	Matched int64 // records that matched a route and were fanned out
 }
 
@@ -341,7 +341,7 @@ type Orchestrator struct {
 	// gastrolog-4y03v.
 	progressTrigger *progressNotifier
 
-	// Suspect tracker for cloud chunks that returned 404.
+	// Suspect tracker for cloud-backed chunks that returned 404.
 	suspects *suspectTracker
 
 	// Per-vault leader loop for vault control-plane Raft (replicated instance
@@ -959,21 +959,21 @@ func (o *Orchestrator) IsIngesterRunning(id glid.GLID) bool {
 }
 
 // GetRouteStats returns a snapshot of the global routing counters, sourced from
-// the pipeline routing manager (records that entered routing, were dropped as
-// unmatched, or matched a route and were fanned out).
+// the pipeline routing manager (records that entered routing, went unmatched,
+// or matched a route and were fanned out).
 func (o *Orchestrator) GetRouteStats() *RouteStats {
 	snap := o.pipeline.RouteStats()
 	return &RouteStats{
 		Routed:  int64(snap.Routed),    //nolint:gosec // G115: counter bounded in practice
-		Dropped: int64(snap.Unmatched), //nolint:gosec // G115
+		Unmatched: int64(snap.Unmatched), //nolint:gosec // G115
 		Matched: int64(snap.Matched),   //nolint:gosec // G115
 	}
 }
 
-// IsFilterSetActive reports whether a routing table is currently published to
-// the pipeline. When false, all ingested records are silently dropped. Name
-// kept for proto/RPC stability.
-func (o *Orchestrator) IsFilterSetActive() bool {
+// IsRouteTableActive reports whether a route table is currently published to
+// the pipeline. When false, every ingested record goes unmatched (a counted
+// drop).
+func (o *Orchestrator) IsRouteTableActive() bool {
 	return o.pipeline.RoutingActive()
 }
 
@@ -1115,7 +1115,7 @@ func (o *Orchestrator) VaultSnapshots() []VaultSnapshot {
 // applied index for the given vault. Zero if the vault has no
 // vault-ctl group on this node (e.g. placement excludes it) or the
 // GroupManager isn't wired (single-node test). Read at snapshot time
-// so the value reflects the latest committed-and-applied entry on
+// so the value reflects the latest applied entry on
 // this node.
 func (o *Orchestrator) vaultCtlAppliedIndex(vaultID glid.GLID) uint64 {
 	if o.groupMgr == nil {

@@ -140,7 +140,7 @@ func TestCacheHitAvoidsCloudDownload(t *testing.T) {
 }
 
 // TestColdCacheDownloadsToChunkDir simulates an evicted / never-cached
-// cloud chunk: deleting the in-tree data.glcb forces openCloudCursor to
+// cloud-backed chunk: deleting the in-tree data.glcb forces openCloudCursor to
 // download the blob fresh, which post step 7k lands at <chunkDir>/data.glcb
 // so the next read goes through the warm-cache fast path.
 func TestColdCacheDownloadsToChunkDir(t *testing.T) {

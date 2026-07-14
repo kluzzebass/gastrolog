@@ -316,7 +316,7 @@ function IngesterCard({
       onDelete={onDelete}
       headerRight={
         <span className="flex items-center gap-2">
-          <Badge variant="muted" dark={dark}>{mode === IngesterMode.PASSIVE ? "listener" : "collector"}</Badge>
+          <Badge variant="muted" dark={dark}>{mode === IngesterMode.PASSIVE ? "listener" : "active"}</Badge>
           <IngesterNodeBadge nodeIds={ing.nodeIds} allNodes={ing.allNodes} mode={mode} dark={dark} />
           {!ing.enabled && (
             <Badge variant="muted" dark={dark}>disabled</Badge>

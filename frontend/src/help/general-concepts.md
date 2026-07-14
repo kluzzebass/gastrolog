@@ -32,10 +32,12 @@ Records are stored in **chunks** — bounded, append-only segments that hold a b
 A **vault** groups chunks under a single namespace with shared configuration:
 
 - **Type**: The storage engine (`file` or `memory`)
-- **Filter**: An expression controlling which ingested records are routed to this vault
 - **Rotation policy**: Rules for when to seal the active chunk and start a new one
 - **Retention policy**: Rules for when to delete old sealed chunks
 - **Params**: Engine-specific configuration (e.g., home directory path)
+
+Which records land in a vault is decided by the cluster-wide
+[route table](help:routing), not by the vault itself.
 
 You can have multiple vaults for different purposes — production logs in one, debug logs in another, each with independent rotation and retention.
 
@@ -46,7 +48,7 @@ Every log message follows the same pipeline:
 ```mermaid
 flowchart TD
     A[Ingest] --> B[Digest]
-    B --> C[Filter]
+    B --> C[Route]
     C --> D[Vault]
     D --> E[Index]
     D --> F[Expire]
@@ -56,27 +58,27 @@ flowchart TD
 
 [**Digest**](help:digesters) — Digesters scan the message and add attributes the ingester couldn't — a normalized `level` from the log content, and a source timestamp parsed from embedded date patterns.
 
-[**Filter**](help:routing) — Each vault has a filter expression evaluated against the message attributes. A message can match multiple vaults, or be caught by a catch-rest filter so nothing is silently dropped.
+[**Route**](help:routing) — The cluster-wide route table is evaluated against the record's attributes in priority order; the first matching route wins and delivers the record to its destination vaults. A record matching no route is discarded as a counted, intentional drop — add a catch-all route (`*`) at the lowest priority so nothing goes unmatched.
 
-[**Vault**](help:storage) — Matching vaults append the record to their active chunk. When a chunk hits its rotation policy limits, it is sealed and a new one begins.
+[**Vault**](help:storage) — Destination vaults append the record to their active chunk. When a chunk hits its rotation policy limits, it is sealed and a new one begins.
 
 [**Index**](help:indexers) — Sealed chunks are indexed in the background so the query engine can search without scanning every record.
 
 **Expire** — [Retention policies](help:policy-retention) periodically delete sealed chunks that are too old, too numerous, or pushing the vault over its size budget.
 
-## Multi-Vault Filtering
+## Routing
 
-Filters control which vaults receive which records. A single ingested message can match multiple vaults and will be written to all of them. Adding a new vault doesn't require reconfiguring ingesters — filtering is purely a configuration change.
+[Routes](help:routing) control which vaults receive which records. A route binds a match expression to one or more destination vaults; a single route can fan a record out to several vaults (fanout distribution). Adding a new vault doesn't require reconfiguring ingesters — routing is purely a configuration change.
 
-Special filter values:
+Special match expressions:
 
-- `*` (catch-all): Receives every message
-- `+` (catch-rest): Receives messages that matched no other filter — ensures nothing is silently dropped
-- An expression like `env=prod AND level=error`: Receives only matching messages
+- `*` (catch-all): Matches every record — place one at the lowest priority as a safety net
+- Empty: Matches nothing — parks a route without deleting it
+- An expression like `env=prod AND level=error`: Matches only those records
 
 ## Configuration
 
-GastroLog stores its configuration (vaults, ingesters, filters, policies, users, certificates) in a replicated config store. Two backends are available:
+GastroLog stores its configuration (vaults, ingesters, routes, policies, users, certificates) in a replicated config store. Two backends are available:
 
 - **Raft** (default): Persistent storage with WAL, snapshot recovery, and [multi-node replication](help:clustering)
 - **Memory**: In-process only, useful for testing and ephemeral instances
@@ -85,4 +87,4 @@ All configuration is managed through the [Settings](help:settings) dialog or the
 
 ## Clustering
 
-Every GastroLog server automatically starts as a single-node [Raft cluster](help:clustering). Additional nodes can join at any time — either at startup via CLI flags or at runtime from the [Nodes settings tab](settings:nodes) [![icon:help]()](help:clustering-nodes). Clustering replicates configuration across all nodes; log data is stored independently on each node, with queries automatically forwarded to the relevant peers.
+Every GastroLog node automatically starts as a single-node [Raft cluster](help:clustering). Additional nodes can join at any time — either at startup via CLI flags or at runtime from the [Nodes settings tab](settings:nodes) [![icon:help]()](help:clustering-nodes). Clustering replicates configuration across all nodes; log data is stored independently on each node, with queries automatically forwarded to the relevant peers.

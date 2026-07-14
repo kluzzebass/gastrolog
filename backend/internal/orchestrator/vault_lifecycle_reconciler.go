@@ -353,21 +353,21 @@ func (r *VaultLifecycleReconciler) resumeSealingFromFSM(fsm *vaultctlfsm.FSM) {
 
 // projectAllCloudBackedFromFSM iterates every cloud-backed entry in the
 // FSM and registers the chunk in the local chunk Manager's cloud index
-// via RegisterCloudChunk. Used by ReconcileFromSnapshot after Restore —
-// the per-apply onUpload effect (which fires the same RegisterCloudChunk
+// via RegisterCloudBackedChunk. Used by ReconcileFromSnapshot after Restore —
+// the per-apply onUpload effect (which fires the same RegisterCloudBackedChunk
 // for live CmdUploadChunk replication) does NOT fire during snapshot
 // install (Restore replaces f.chunks wholesale, no per-entry effects),
-// so cloud chunks that arrived during snapshot install would otherwise
+// so cloud-backed chunks that arrived during snapshot install would otherwise
 // be present in the FSM but absent from cm.cloudIdx — making
 // cm.OpenCursor return ErrChunkNotFound and aborting search streams.
-// RegisterCloudChunk is idempotent (skips if already in m.metas or
+// RegisterCloudBackedChunk is idempotent (skips if already in m.metas or
 // m.cloudIdx), so calling it for every cloud-backed entry is safe.
 // See gastrolog-3ukgz.
 func (r *VaultLifecycleReconciler) projectAllCloudBackedFromFSM(fsm *vaultctlfsm.FSM) {
 	if r.vaultInst == nil || r.vaultInst.Chunks == nil {
 		return
 	}
-	registrar, ok := r.vaultInst.Chunks.(chunk.CloudChunkRegistrar)
+	registrar, ok := r.vaultInst.Chunks.(chunk.CloudBackedChunkRegistrar)
 	if !ok {
 		return
 	}
@@ -375,7 +375,7 @@ func (r *VaultLifecycleReconciler) projectAllCloudBackedFromFSM(fsm *vaultctlfsm
 		if !e.CloudBacked {
 			continue
 		}
-		info := chunk.CloudChunkInfo{
+		info := chunk.CloudBackedChunkInfo{
 			WriteStart:        e.WriteStart,
 			WriteEnd:          e.WriteEnd,
 			IngestStart:       e.IngestStart,
@@ -391,8 +391,8 @@ func (r *VaultLifecycleReconciler) projectAllCloudBackedFromFSM(fsm *vaultctlfsm
 			SourceIdxSize:     e.SourceIdxSize,
 			IngestTSMonotonic: e.IngestTSMonotonic,
 		}
-		if err := registrar.RegisterCloudChunk(e.ID, info); err != nil {
-			r.logger.Warn("reconcile-from-snapshot: RegisterCloudChunk failed",
+		if err := registrar.RegisterCloudBackedChunk(e.ID, info); err != nil {
+			r.logger.Warn("reconcile-from-snapshot: RegisterCloudBackedChunk failed",
 				"chunk", e.ID, "error", err)
 		}
 	}
@@ -550,7 +550,7 @@ func (r *VaultLifecycleReconciler) onSeal(e vaultctlfsm.ManifestEntry) {
 	// Pipeline-built sealed chunks live at the vault ChunkRoot, not the chunk
 	// manager dir, so EnsureSealed is a no-op for them. Register their GLCB by
 	// path so a freshly-sealed pipeline chunk is queryable on this home node
-	// immediately. No-op for legacy/cloud chunks. See gastrolog-2kysn.
+	// immediately. No-op for legacy/cloud-backed chunks. See gastrolog-2kysn.
 	r.registerPipelineGLCB(e)
 	if r.orch != nil && r.orch.isPipelineIngestVault(r.vaultID) {
 		r.orch.schedulePipelineCloudUpload(r.vaultID, e.ID)
@@ -1300,7 +1300,6 @@ const staleLeaderFSMGracePeriod = 1 * time.Hour
 // vault-ctl leadership churn and backlog catch-up.
 //
 // See gastrolog-5nhwe.
-//
 func (r *VaultLifecycleReconciler) SweepStaleLeaderFSMEntries() {
 	if v := r.gatherReconcileView(); v != nil {
 		r.reconcileStaleLeaderFSMEntries(v)

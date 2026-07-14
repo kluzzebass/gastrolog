@@ -33,8 +33,8 @@ func TestFormatBytesCompactExactRoundTrip(t *testing.T) {
 		want string
 	}{
 		{0, "0B"},
-		{2_000_000_000, "2GB"},  // decimal preferred: entered "2GB" echoes back verbatim
-		{2 << 30, "2GiB"},       // exact binary falls back to IEC
+		{2_000_000_000, "2GB"}, // decimal preferred: entered "2GB" echoes back verbatim
+		{2 << 30, "2GiB"},      // exact binary falls back to IEC
 		{64_000_000, "64MB"},
 		{64 << 20, "64MiB"},
 		{1_000, "1KB"},

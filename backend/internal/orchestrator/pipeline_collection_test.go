@@ -135,7 +135,7 @@ func newOriginFixture(t *testing.T, ctx context.Context, vaultID glid.GLID, fsm 
 	root := t.TempDir()
 
 	segMgr, completed := segmentation.New(segmentation.Config{
-		CompletePolicy:     segmentation.CompletePolicy{MaxBytes: 256},
+		CompletePolicy:  segmentation.CompletePolicy{MaxBytes: 256},
 		SyncBatchSize:   1,
 		SyncBatchWindow: time.Millisecond,
 	})
@@ -170,7 +170,7 @@ func newOriginFixture(t *testing.T, ctx context.Context, vaultID glid.GLID, fsm 
 }
 
 // ingestAndPublish feeds an 8-record batch that closes and publishes one or
-// more segments (the 256-byte close policy typically yields several), waits
+// more segments (the 256-byte complete policy typically yields several), waits
 // for the first to appear in the FSM registry, and returns that segment's ID.
 // Callers that assert on pull counts must quiesce until every published
 // segment is collected — waiting on just the returned ID races the remaining
@@ -279,7 +279,7 @@ func TestPipelineCollectionReplicatesToRemoteHome(t *testing.T) {
 		return segmentHolds(fsm, segID, testHomeNode)
 	})
 
-	// The close policy publishes several segments for the 8-record batch;
+	// The complete policy publishes several segments for the 8-record batch;
 	// quiesce until the home holds every one of them before snapshotting pull
 	// attempts, or a late segment's first pull reads as a "re-pull".
 	waitTrue(t, "every published segment collected and receipted", func() bool {

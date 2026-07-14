@@ -157,7 +157,7 @@ func newClusterThroughputCmd() *cobra.Command {
 				{"Matched Rate", formatRateTriple(rs.Msg.MatchedRate)},
 				{"Total Routed", strconv.FormatInt(rs.Msg.TotalRouted, 10)},
 				{"Total Matched", strconv.FormatInt(rs.Msg.TotalMatched, 10)},
-				{"Total Dropped", strconv.FormatInt(rs.Msg.TotalDropped, 10)},
+				{"Total Unmatched", strconv.FormatInt(rs.Msg.TotalUnmatched, 10)},
 			})
 
 			var rows [][]string

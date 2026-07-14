@@ -85,7 +85,7 @@ type IngesterMode int32
 const (
 	IngesterMode_INGESTER_MODE_UNSPECIFIED IngesterMode = 0
 	IngesterMode_INGESTER_MODE_PASSIVE     IngesterMode = 1 // Listeners — bind a port, passively accept incoming data.
-	IngesterMode_INGESTER_MODE_ACTIVE      IngesterMode = 2 // Collectors — actively pull from data sources.
+	IngesterMode_INGESTER_MODE_ACTIVE      IngesterMode = 2 // Actively pull from upstream systems (Kafka consumer, file tail, etc.).
 )
 
 // Enum value maps for IngesterMode.
@@ -363,9 +363,9 @@ type GetSystemResponse struct {
 	ManagedFiles      []*ManagedFileInfo       `protobuf:"bytes,7,rep,name=managed_files,json=managedFiles,proto3" json:"managed_files,omitempty"`
 	// Committed log index on the cluster-ctl Raft group (monotonic). Used by clients
 	// to avoid regressing cached replicated state with stale reads.
-	SystemRaftIndex    uint64               `protobuf:"varint,8,opt,name=system_raft_index,json=systemRaftIndex,proto3" json:"system_raft_index,omitempty"`
-	CloudServices      []*CloudService      `protobuf:"bytes,9,rep,name=cloud_services,json=cloudServices,proto3" json:"cloud_services,omitempty"`
-	NodeStorageConfigs []*NodeStorageConfig `protobuf:"bytes,10,rep,name=node_storage_configs,json=nodeStorageConfigs,proto3" json:"node_storage_configs,omitempty"`
+	ClusterCtlRaftIndex uint64               `protobuf:"varint,8,opt,name=cluster_ctl_raft_index,json=clusterCtlRaftIndex,proto3" json:"cluster_ctl_raft_index,omitempty"`
+	CloudServices       []*CloudService      `protobuf:"bytes,9,rep,name=cloud_services,json=cloudServices,proto3" json:"cloud_services,omitempty"`
+	NodeStorageConfigs  []*NodeStorageConfig `protobuf:"bytes,10,rep,name=node_storage_configs,json=nodeStorageConfigs,proto3" json:"node_storage_configs,omitempty"`
 	// Per-component log level configuration. Empty default_level means
 	// "use the binary's startup default" (typically INFO).
 	LogLevels *LogLevelConfig `protobuf:"bytes,11,opt,name=log_levels,json=logLevels,proto3" json:"log_levels,omitempty"`
@@ -458,9 +458,9 @@ func (x *GetSystemResponse) GetManagedFiles() []*ManagedFileInfo {
 	return nil
 }
 
-func (x *GetSystemResponse) GetSystemRaftIndex() uint64 {
+func (x *GetSystemResponse) GetClusterCtlRaftIndex() uint64 {
 	if x != nil {
-		return x.SystemRaftIndex
+		return x.ClusterCtlRaftIndex
 	}
 	return 0
 }
@@ -1033,7 +1033,7 @@ type RouteStage_Match struct {
 
 func (*RouteStage_Match) isRouteStage_Stage() {}
 
-// MatchStage gates the route on a boolean filter expression. The
+// MatchStage gates the route on a boolean match expression. The
 // expression is evaluated against the record (with system-injected
 // synthetic attributes available via reserved-prefix keys: _source,
 // _ingester, _vault, _reason).
@@ -4442,14 +4442,14 @@ func (x *PutServiceSettingsRequest) GetCluster() *PutClusterSettings {
 }
 
 // SettingsMutationEcho is returned after successful server-settings mutations so
-// clients can mirror GetSettings without a follow-up RPC. system_raft_index matches
-// GetSystemResponse.system_raft_index for cache coherence.
+// clients can mirror GetSettings without a follow-up RPC. cluster_ctl_raft_index matches
+// GetSystemResponse.cluster_ctl_raft_index for cache coherence.
 type SettingsMutationEcho struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	Settings        *GetSettingsResponse   `protobuf:"bytes,1,opt,name=settings,proto3" json:"settings,omitempty"`
-	SystemRaftIndex uint64                 `protobuf:"varint,2,opt,name=system_raft_index,json=systemRaftIndex,proto3" json:"system_raft_index,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	Settings            *GetSettingsResponse   `protobuf:"bytes,1,opt,name=settings,proto3" json:"settings,omitempty"`
+	ClusterCtlRaftIndex uint64                 `protobuf:"varint,2,opt,name=cluster_ctl_raft_index,json=clusterCtlRaftIndex,proto3" json:"cluster_ctl_raft_index,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *SettingsMutationEcho) Reset() {
@@ -4489,9 +4489,9 @@ func (x *SettingsMutationEcho) GetSettings() *GetSettingsResponse {
 	return nil
 }
 
-func (x *SettingsMutationEcho) GetSystemRaftIndex() uint64 {
+func (x *SettingsMutationEcho) GetClusterCtlRaftIndex() uint64 {
 	if x != nil {
-		return x.SystemRaftIndex
+		return x.ClusterCtlRaftIndex
 	}
 	return 0
 }
@@ -6957,10 +6957,10 @@ type WatchSystemResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Committed log index on the cluster-ctl Raft group when this notification fired.
 	// Clients should only invalidate or refetch when this index exceeds the
-	// highest system_raft_index they already hold from a fetch or mutation.
-	SystemRaftIndex uint64 `protobuf:"varint,1,opt,name=system_raft_index,json=systemRaftIndex,proto3" json:"system_raft_index,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// highest cluster_ctl_raft_index they already hold from a fetch or mutation.
+	ClusterCtlRaftIndex uint64 `protobuf:"varint,1,opt,name=cluster_ctl_raft_index,json=clusterCtlRaftIndex,proto3" json:"cluster_ctl_raft_index,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *WatchSystemResponse) Reset() {
@@ -6993,9 +6993,9 @@ func (*WatchSystemResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{116}
 }
 
-func (x *WatchSystemResponse) GetSystemRaftIndex() uint64 {
+func (x *WatchSystemResponse) GetClusterCtlRaftIndex() uint64 {
 	if x != nil {
-		return x.SystemRaftIndex
+		return x.ClusterCtlRaftIndex
 	}
 	return 0
 }
@@ -7039,10 +7039,10 @@ func (*GetRouteStatsRequest) Descriptor() ([]byte, []int) {
 type GetRouteStatsResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Global counters since process start.
-	TotalRouted     int64 `protobuf:"varint,1,opt,name=total_routed,json=totalRouted,proto3" json:"total_routed,omitempty"`               // total records entering routing (matched + dropped)
-	TotalDropped    int64 `protobuf:"varint,2,opt,name=total_dropped,json=totalDropped,proto3" json:"total_dropped,omitempty"`            // records matching no filter (silently lost)
-	TotalMatched    int64 `protobuf:"varint,3,opt,name=total_matched,json=totalMatched,proto3" json:"total_matched,omitempty"`            // records that matched a route and were delivered to at least one vault
-	FilterSetActive bool  `protobuf:"varint,4,opt,name=filter_set_active,json=filterSetActive,proto3" json:"filter_set_active,omitempty"` // false = no routes compiled, all records dropped
+	TotalRouted      int64 `protobuf:"varint,1,opt,name=total_routed,json=totalRouted,proto3" json:"total_routed,omitempty"`                  // total records entering routing (matched + unmatched)
+	TotalUnmatched   int64 `protobuf:"varint,2,opt,name=total_unmatched,json=totalUnmatched,proto3" json:"total_unmatched,omitempty"`         // records that matched no route (intentional, counted drop)
+	TotalMatched     int64 `protobuf:"varint,3,opt,name=total_matched,json=totalMatched,proto3" json:"total_matched,omitempty"`               // records that matched a route and were delivered to at least one vault
+	RouteTableActive bool  `protobuf:"varint,4,opt,name=route_table_active,json=routeTableActive,proto3" json:"route_table_active,omitempty"` // false = no route table published; every record goes unmatched
 	// Per-vault destination counters.
 	VaultStats []*VaultRouteStats `protobuf:"bytes,5,rep,name=vault_stats,json=vaultStats,proto3" json:"vault_stats,omitempty"`
 	// Per-route counters.
@@ -7094,9 +7094,9 @@ func (x *GetRouteStatsResponse) GetTotalRouted() int64 {
 	return 0
 }
 
-func (x *GetRouteStatsResponse) GetTotalDropped() int64 {
+func (x *GetRouteStatsResponse) GetTotalUnmatched() int64 {
 	if x != nil {
-		return x.TotalDropped
+		return x.TotalUnmatched
 	}
 	return 0
 }
@@ -7108,9 +7108,9 @@ func (x *GetRouteStatsResponse) GetTotalMatched() int64 {
 	return 0
 }
 
-func (x *GetRouteStatsResponse) GetFilterSetActive() bool {
+func (x *GetRouteStatsResponse) GetRouteTableActive() bool {
 	if x != nil {
-		return x.FilterSetActive
+		return x.RouteTableActive
 	}
 	return false
 }
@@ -8882,7 +8882,7 @@ var File_gastrolog_v1_system_proto protoreflect.FileDescriptor
 const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\n" +
 	"\x19gastrolog/v1/system.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1agastrolog/v1/storage.proto\x1a\x18gastrolog/v1/vault.proto\"\x12\n" +
-	"\x10GetSystemRequest\"\xb4\x06\n" +
+	"\x10GetSystemRequest\"\xbd\x06\n" +
 	"\x11GetSystemResponse\x121\n" +
 	"\x06vaults\x18\x01 \x03(\v2\x19.gastrolog.v1.VaultConfigR\x06vaults\x12:\n" +
 	"\tingesters\x18\x02 \x03(\v2\x1c.gastrolog.v1.IngesterConfigR\tingesters\x12O\n" +
@@ -8890,8 +8890,8 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x12retention_policies\x18\x04 \x03(\v2#.gastrolog.v1.RetentionPolicyConfigR\x11retentionPolicies\x12;\n" +
 	"\fnode_configs\x18\x05 \x03(\v2\x18.gastrolog.v1.NodeConfigR\vnodeConfigs\x121\n" +
 	"\x06routes\x18\x06 \x03(\v2\x19.gastrolog.v1.RouteConfigR\x06routes\x12B\n" +
-	"\rmanaged_files\x18\a \x03(\v2\x1d.gastrolog.v1.ManagedFileInfoR\fmanagedFiles\x12*\n" +
-	"\x11system_raft_index\x18\b \x01(\x04R\x0fsystemRaftIndex\x12A\n" +
+	"\rmanaged_files\x18\a \x03(\v2\x1d.gastrolog.v1.ManagedFileInfoR\fmanagedFiles\x123\n" +
+	"\x16cluster_ctl_raft_index\x18\b \x01(\x04R\x13clusterCtlRaftIndex\x12A\n" +
 	"\x0ecloud_services\x18\t \x03(\v2\x1a.gastrolog.v1.CloudServiceR\rcloudServices\x12Q\n" +
 	"\x14node_storage_configs\x18\n" +
 	" \x03(\v2\x1f.gastrolog.v1.NodeStorageConfigR\x12nodeStorageConfigs\x12;\n" +
@@ -9227,10 +9227,10 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x05query\x18\x02 \x01(\v2\x1e.gastrolog.v1.PutQuerySettingsR\x05query\x12@\n" +
 	"\tscheduler\x18\x03 \x01(\v2\".gastrolog.v1.PutSchedulerSettingsR\tscheduler\x12.\n" +
 	"\x03tls\x18\x04 \x01(\v2\x1c.gastrolog.v1.PutTLSSettingsR\x03tls\x12:\n" +
-	"\acluster\x18\x05 \x01(\v2 .gastrolog.v1.PutClusterSettingsR\acluster\"\x81\x01\n" +
+	"\acluster\x18\x05 \x01(\v2 .gastrolog.v1.PutClusterSettingsR\acluster\"\x8a\x01\n" +
 	"\x14SettingsMutationEcho\x12=\n" +
-	"\bsettings\x18\x01 \x01(\v2!.gastrolog.v1.GetSettingsResponseR\bsettings\x12*\n" +
-	"\x11system_raft_index\x18\x02 \x01(\x04R\x0fsystemRaftIndex\"T\n" +
+	"\bsettings\x18\x01 \x01(\v2!.gastrolog.v1.GetSettingsResponseR\bsettings\x123\n" +
+	"\x16cluster_ctl_raft_index\x18\x02 \x01(\x04R\x13clusterCtlRaftIndex\"T\n" +
 	"\x1aPutServiceSettingsResponse\x126\n" +
 	"\x04echo\x18\x01 \x01(\v2\".gastrolog.v1.SettingsMutationEchoR\x04echo\"S\n" +
 	"\x18PutLookupSettingsRequest\x127\n" +
@@ -9377,15 +9377,15 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x1aValidateExpressionResponse\x12\x14\n" +
 	"\x05valid\x18\x01 \x01(\bR\x05valid\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\"\x14\n" +
-	"\x12WatchSystemRequest\"A\n" +
-	"\x13WatchSystemResponse\x12*\n" +
-	"\x11system_raft_index\x18\x01 \x01(\x04R\x0fsystemRaftIndex\"\x16\n" +
-	"\x14GetRouteStatsRequest\"\xae\x03\n" +
+	"\x12WatchSystemRequest\"J\n" +
+	"\x13WatchSystemResponse\x123\n" +
+	"\x16cluster_ctl_raft_index\x18\x01 \x01(\x04R\x13clusterCtlRaftIndex\"\x16\n" +
+	"\x14GetRouteStatsRequest\"\xb4\x03\n" +
 	"\x15GetRouteStatsResponse\x12!\n" +
-	"\ftotal_routed\x18\x01 \x01(\x03R\vtotalRouted\x12#\n" +
-	"\rtotal_dropped\x18\x02 \x01(\x03R\ftotalDropped\x12#\n" +
-	"\rtotal_matched\x18\x03 \x01(\x03R\ftotalMatched\x12*\n" +
-	"\x11filter_set_active\x18\x04 \x01(\bR\x0ffilterSetActive\x12>\n" +
+	"\ftotal_routed\x18\x01 \x01(\x03R\vtotalRouted\x12'\n" +
+	"\x0ftotal_unmatched\x18\x02 \x01(\x03R\x0etotalUnmatched\x12#\n" +
+	"\rtotal_matched\x18\x03 \x01(\x03R\ftotalMatched\x12,\n" +
+	"\x12route_table_active\x18\x04 \x01(\bR\x10routeTableActive\x12>\n" +
 	"\vvault_stats\x18\x05 \x03(\v2\x1d.gastrolog.v1.VaultRouteStatsR\n" +
 	"vaultStats\x12<\n" +
 	"\vroute_stats\x18\x06 \x03(\v2\x1b.gastrolog.v1.PerRouteStatsR\n" +

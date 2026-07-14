@@ -545,14 +545,14 @@ func (s *Supervisor) SubmitToVault(ctx context.Context, vaultID glid.GLID, rec *
 }
 
 // RouteStats returns a snapshot of the routing manager's counters (global
-// ingested/matched/unmatched totals plus per-vault and per-route matched counts).
+// routed/matched/unmatched totals plus per-vault and per-route matched counts).
 // It is the pipeline source for the node's route-stats observability surface.
 func (s *Supervisor) RouteStats() routing.StatsSnapshot {
 	return s.route.Stats()
 }
 
-// RoutingActive reports whether a routing table is currently published, the
-// pipeline analogue of the legacy "filter set active" flag.
+// RoutingActive reports whether a route table is currently published. It backs
+// the route_table_active flag in route stats.
 func (s *Supervisor) RoutingActive() bool {
 	return s.route.TableActive()
 }

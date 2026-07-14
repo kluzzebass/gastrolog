@@ -71,7 +71,7 @@ describe("Job display + ids", () => {
 
   test("scheduleLabel uses job name, not long description", () => {
     expect(
-      mkJob({ description: "Archive cloud chunks per lifecycle policy", name: "archival-sweep" }).scheduleLabel,
+      mkJob({ description: "Archive cloud-backed chunks per lifecycle policy", name: "archival-sweep" }).scheduleLabel,
     ).toBe("archival-sweep");
     expect(mkJob({ description: "", name: "" }).scheduleLabel).toBe(mkJob({ description: "", name: "" }).id);
   });

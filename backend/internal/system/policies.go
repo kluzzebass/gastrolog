@@ -15,8 +15,8 @@ import (
 
 // gastrolog-4kkoo (Phase 5): FilterConfig type removed. Filters are now
 // inlined as RouteConfig.Stages[].Match.Expression — no separate entity.
-// The expression syntax (including the "*" catch-all and "+" catch-rest
-// wildcards) lives on RouteConfig.MatchStage.Expression.
+// The expression syntax (including the "*" catch-all and the empty-string
+// match-nothing form) lives on RouteConfig.MatchStage.Expression.
 
 // RotationPolicyConfig defines when chunks should be rotated.
 // Multiple conditions can be specified; rotation occurs when ANY condition is met.

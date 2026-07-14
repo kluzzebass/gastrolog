@@ -239,8 +239,8 @@ func (e *ManifestEntry) ToChunkMeta() chunk.ChunkMeta {
 // FSM is a Raft FSM that maintains chunk metadata for a single vault.
 // All reads are local (no Raft round-trip). Writes go through Raft.Apply().
 type FSM struct {
-	mu       sync.RWMutex
-	chunks   map[chunk.ChunkID]*ManifestEntry
+	mu     sync.RWMutex
+	chunks map[chunk.ChunkID]*ManifestEntry
 
 	// completedListScans counts ListCompletedSegments calls — a full O(N)
 	// registry walk. The chunking-leader plan pass regressed to O(N^2) by
@@ -442,7 +442,7 @@ func (f *FSM) SetOnDelete(fn func(chunk.ChunkID)) {
 
 // SetOnUpload registers a callback invoked (outside the FSM lock) after
 // CmdUploadChunk applies. The callback receives a copy of the uploaded
-// entry. Follower nodes use this to register cloud chunks in their local
+// entry. Follower nodes use this to register cloud-backed chunks in their local
 // chunk manager without streaming any records.
 func (f *FSM) SetOnUpload(fn func(ManifestEntry)) {
 	f.mu.Lock()

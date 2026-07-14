@@ -10,7 +10,7 @@ File storages are locally-attached disk resources declared per node. Each file s
 - **Path** — where chunk data is stored, relative to the node's home directory. Absolute paths (starting with /) are also supported. Defaults to `storage/<name>`.
 - **Storage Class** — a numeric rank that indicates speed. Lower numbers mean faster storage (e.g. 1 for NVMe, 2 for SSD, 3 for HDD). Multiple file storages can share the same class to form a pool.
 
-File storages on the local node can be added, edited, or removed. Remote node file storages are displayed read-only.
+File storages on the local node can be added, edited, or removed. Peer node file storages are displayed read-only.
 
 ### How vaults use file storages
 

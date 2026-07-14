@@ -607,12 +607,12 @@ type NodeStats struct {
 	ApiAddress   string `protobuf:"bytes,26,opt,name=api_address,json=apiAddress,proto3" json:"api_address,omitempty"`       // HTTP API address (e.g. ":4564")
 	PprofAddress string `protobuf:"bytes,27,opt,name=pprof_address,json=pprofAddress,proto3" json:"pprof_address,omitempty"` // pprof HTTP address, empty if disabled
 	// Route stats (aggregated cluster-wide by GetRouteStats RPC)
-	RouteStatsRouted       int64              `protobuf:"varint,28,opt,name=route_stats_routed,json=routeStatsRouted,proto3" json:"route_stats_routed,omitempty"`
-	RouteStatsDropped      int64              `protobuf:"varint,29,opt,name=route_stats_dropped,json=routeStatsDropped,proto3" json:"route_stats_dropped,omitempty"`
-	RouteStatsMatched      int64              `protobuf:"varint,30,opt,name=route_stats_matched,json=routeStatsMatched,proto3" json:"route_stats_matched,omitempty"`
-	RouteStatsFilterActive bool               `protobuf:"varint,31,opt,name=route_stats_filter_active,json=routeStatsFilterActive,proto3" json:"route_stats_filter_active,omitempty"`
-	RouteVaultStats        []*VaultRouteStats `protobuf:"bytes,32,rep,name=route_vault_stats,json=routeVaultStats,proto3" json:"route_vault_stats,omitempty"`
-	RoutePerRouteStats     []*PerRouteStats   `protobuf:"bytes,33,rep,name=route_per_route_stats,json=routePerRouteStats,proto3" json:"route_per_route_stats,omitempty"`
+	RouteStatsRouted           int64              `protobuf:"varint,28,opt,name=route_stats_routed,json=routeStatsRouted,proto3" json:"route_stats_routed,omitempty"`
+	RouteStatsUnmatched        int64              `protobuf:"varint,29,opt,name=route_stats_unmatched,json=routeStatsUnmatched,proto3" json:"route_stats_unmatched,omitempty"`
+	RouteStatsMatched          int64              `protobuf:"varint,30,opt,name=route_stats_matched,json=routeStatsMatched,proto3" json:"route_stats_matched,omitempty"`
+	RouteStatsRouteTableActive bool               `protobuf:"varint,31,opt,name=route_stats_route_table_active,json=routeStatsRouteTableActive,proto3" json:"route_stats_route_table_active,omitempty"`
+	RouteVaultStats            []*VaultRouteStats `protobuf:"bytes,32,rep,name=route_vault_stats,json=routeVaultStats,proto3" json:"route_vault_stats,omitempty"`
+	RoutePerRouteStats         []*PerRouteStats   `protobuf:"bytes,33,rep,name=route_per_route_stats,json=routePerRouteStats,proto3" json:"route_per_route_stats,omitempty"`
 	// Active system alerts on this node.
 	Alerts []*SystemAlert `protobuf:"bytes,34,rep,name=alerts,proto3" json:"alerts,omitempty"`
 	// Per-node outbound peer connection catalog (service pools + raft singletons).
@@ -886,9 +886,9 @@ func (x *NodeStats) GetRouteStatsRouted() int64 {
 	return 0
 }
 
-func (x *NodeStats) GetRouteStatsDropped() int64 {
+func (x *NodeStats) GetRouteStatsUnmatched() int64 {
 	if x != nil {
-		return x.RouteStatsDropped
+		return x.RouteStatsUnmatched
 	}
 	return 0
 }
@@ -900,9 +900,9 @@ func (x *NodeStats) GetRouteStatsMatched() int64 {
 	return 0
 }
 
-func (x *NodeStats) GetRouteStatsFilterActive() bool {
+func (x *NodeStats) GetRouteStatsRouteTableActive() bool {
 	if x != nil {
-		return x.RouteStatsFilterActive
+		return x.RouteStatsRouteTableActive
 	}
 	return false
 }
@@ -4532,7 +4532,7 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\apayload\"\v\n" +
 	"\tHeartbeat\"1\n" +
 	"\bNodeJobs\x12%\n" +
-	"\x04jobs\x18\x01 \x03(\v2\x11.gastrolog.v1.JobR\x04jobs\"\xbf\x12\n" +
+	"\x04jobs\x18\x01 \x03(\v2\x11.gastrolog.v1.JobR\x04jobs\"\xcc\x12\n" +
 	"\tNodeStats\x12\x1f\n" +
 	"\vcpu_percent\x18\x01 \x01(\x01R\n" +
 	"cpuPercent\x12!\n" +
@@ -4569,10 +4569,10 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\vapi_address\x18\x1a \x01(\tR\n" +
 	"apiAddress\x12#\n" +
 	"\rpprof_address\x18\x1b \x01(\tR\fpprofAddress\x12,\n" +
-	"\x12route_stats_routed\x18\x1c \x01(\x03R\x10routeStatsRouted\x12.\n" +
-	"\x13route_stats_dropped\x18\x1d \x01(\x03R\x11routeStatsDropped\x12.\n" +
-	"\x13route_stats_matched\x18\x1e \x01(\x03R\x11routeStatsMatched\x129\n" +
-	"\x19route_stats_filter_active\x18\x1f \x01(\bR\x16routeStatsFilterActive\x12I\n" +
+	"\x12route_stats_routed\x18\x1c \x01(\x03R\x10routeStatsRouted\x122\n" +
+	"\x15route_stats_unmatched\x18\x1d \x01(\x03R\x13routeStatsUnmatched\x12.\n" +
+	"\x13route_stats_matched\x18\x1e \x01(\x03R\x11routeStatsMatched\x12B\n" +
+	"\x1eroute_stats_route_table_active\x18\x1f \x01(\bR\x1arouteStatsRouteTableActive\x12I\n" +
 	"\x11route_vault_stats\x18  \x03(\v2\x1d.gastrolog.v1.VaultRouteStatsR\x0frouteVaultStats\x12N\n" +
 	"\x15route_per_route_stats\x18! \x03(\v2\x1b.gastrolog.v1.PerRouteStatsR\x12routePerRouteStats\x121\n" +
 	"\x06alerts\x18\" \x03(\v2\x19.gastrolog.v1.SystemAlertR\x06alerts\x12E\n" +

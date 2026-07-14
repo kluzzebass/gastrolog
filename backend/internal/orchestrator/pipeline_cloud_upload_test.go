@@ -159,7 +159,7 @@ func TestSchedulePipelineCloudUpload_SkipsPlacementFollower(t *testing.T) {
 
 	vaultID := glid.New()
 	chunkID := chunk.NewChunkID()
-	mock := &mockCloudChunkManager{
+	mock := &mockCloudBackedChunkManager{
 		chunks: []chunk.ChunkMeta{{ID: chunkID, Sealed: true}},
 	}
 	mock.cloudStoreConfigured.Store(false)

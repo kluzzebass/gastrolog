@@ -38,7 +38,7 @@ The last remaining voter cannot be demoted — at least one voter must always ex
 
 ## Removing Nodes
 
-Removing a node evicts it from the cluster entirely. The removed node stops receiving replicated state and must re-join with a fresh token if needed. You cannot remove the local node — only remote nodes can be evicted.
+Removing a node evicts it from the cluster entirely. The removed node stops receiving replicated state and must re-join with a fresh token if needed. You cannot remove the local node — only peer nodes can be evicted.
 
 ## Offline Nodes
 

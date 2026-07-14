@@ -68,7 +68,7 @@ func (c *cloudBackedCM) FindIngestTSRank(id chunk.ChunkID, ts time.Time) (uint64
 
 // TestCloudBackedChunksIncludedInSearch verifies that cloud-backed chunks
 // participate in search results. This is the regression test for the bug
-// where cloud chunks were "deferred" during heap priming but the lazy
+// where cloud-backed chunks were "deferred" during heap priming but the lazy
 // priming was never implemented — deferredChunks was written but never read.
 func TestCloudBackedChunksIncludedInSearch(t *testing.T) {
 	reg := &testRegistry{
@@ -194,7 +194,7 @@ func TestCloudBackedTimestampOrdering(t *testing.T) {
 	eng := query.NewWithRegistry(reg, nil)
 
 	// Limit=3: the first 3 records should all be from the cloud-backed
-	// vault (they have earlier timestamps). If cloud chunks were skipped,
+	// vault (they have earlier timestamps). If cloud-backed chunks were skipped,
 	// we'd get local records instead — wrong ordering.
 	iter, _ := eng.Search(context.Background(), query.Query{Limit: 3}, nil)
 	var raws []string

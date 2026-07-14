@@ -39,14 +39,14 @@ type File struct {
 	// past the cap the capture is dropped (memCaptureOff) and Finalize uses
 	// the disk scan — the capture is an optimization, never a correctness
 	// requirement or a memory liability. The bound holds regardless of the
-	// caller's close policy.
+	// caller's complete policy.
 	memEntries    []memIndexEntry
 	memCaptureOff bool
 }
 
 // memIndexEntryCap bounds the in-memory index capture (~80B/entry → ~21 MiB
-// worst case). The production close policy (8 MiB segments) yields ~30K
-// entries, ~8x under the cap; a missing or misconfigured close policy hits
+// worst case). The production complete policy (8 MiB segments) yields ~30K
+// entries, ~8x under the cap; a missing or misconfigured complete policy hits
 // the cap and degrades to the disk-scan finalize instead of growing RAM with
 // the file (gastrolog-oin19g). Var, not const, so tests can exercise the
 // overflow path without 262K appends.

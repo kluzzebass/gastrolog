@@ -19,7 +19,7 @@ All multi-byte integers are **little-endian**. GLIDs are stored as raw 16-byte v
   stores/                   Per-vault data ("stores" for backward compat)
     <vault-id>/
       .lock                 Exclusive lock file for vault directory
-      cloud.idx             B+ tree cache of cloud chunk metadata (if cloud enabled)
+      cloud.idx             B+ tree cache of cloud-backed chunk metadata (if cloud enabled)
 
       <chunk-id>/
         raw.log             Raw log bytes (append-only)

@@ -601,9 +601,9 @@ export class NodeStats extends Message<NodeStats> {
   routeStatsRouted = protoInt64.zero;
 
   /**
-   * @generated from field: int64 route_stats_dropped = 29;
+   * @generated from field: int64 route_stats_unmatched = 29;
    */
-  routeStatsDropped = protoInt64.zero;
+  routeStatsUnmatched = protoInt64.zero;
 
   /**
    * @generated from field: int64 route_stats_matched = 30;
@@ -611,9 +611,9 @@ export class NodeStats extends Message<NodeStats> {
   routeStatsMatched = protoInt64.zero;
 
   /**
-   * @generated from field: bool route_stats_filter_active = 31;
+   * @generated from field: bool route_stats_route_table_active = 31;
    */
-  routeStatsFilterActive = false;
+  routeStatsRouteTableActive = false;
 
   /**
    * @generated from field: repeated gastrolog.v1.VaultRouteStats route_vault_stats = 32;
@@ -777,9 +777,9 @@ export class NodeStats extends Message<NodeStats> {
     { no: 26, name: "api_address", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 27, name: "pprof_address", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 28, name: "route_stats_routed", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 29, name: "route_stats_dropped", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 29, name: "route_stats_unmatched", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 30, name: "route_stats_matched", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 31, name: "route_stats_filter_active", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 31, name: "route_stats_route_table_active", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 32, name: "route_vault_stats", kind: "message", T: VaultRouteStats, repeated: true },
     { no: 33, name: "route_per_route_stats", kind: "message", T: PerRouteStats, repeated: true },
     { no: 34, name: "alerts", kind: "message", T: SystemAlert, repeated: true },

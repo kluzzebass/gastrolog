@@ -586,9 +586,9 @@ func (s *LifecycleServer) listLiveNodes(ctx context.Context) map[string]struct{}
 func (s *LifecycleServer) buildRouteStats() *apiv1.GetRouteStatsResponse {
 	rs := s.orch.GetRouteStats()
 	totalRouted := rs.Routed
-	totalDropped := rs.Dropped
+	totalUnmatched := rs.Unmatched
 	totalMatched := rs.Matched
-	filterActive := s.orch.IsFilterSetActive()
+	routeTableActive := s.orch.IsRouteTableActive()
 
 	vaultMap := make(map[string]*apiv1.VaultRouteStats)
 	for vaultID, vs := range s.orch.VaultRouteStatsList() {
@@ -607,12 +607,12 @@ func (s *LifecycleServer) buildRouteStats() *apiv1.GetRouteStatsResponse {
 	}
 
 	if s.peerRouteStats != nil {
-		pRouted, pDropped, pMatched, pFilterActive, pVaultStats, pRouteStats := s.peerRouteStats.AggregateRouteStats()
+		pRouted, pUnmatched, pMatched, pRouteTableActive, pVaultStats, pRouteStats := s.peerRouteStats.AggregateRouteStats()
 		totalRouted += pRouted
-		totalDropped += pDropped
+		totalUnmatched += pUnmatched
 		totalMatched += pMatched
-		if pFilterActive {
-			filterActive = true
+		if pRouteTableActive {
+			routeTableActive = true
 		}
 		mergeVaultRouteStats(vaultMap, pVaultStats)
 		mergePerRouteStats(routeMap, pRouteStats)
@@ -627,9 +627,9 @@ func (s *LifecycleServer) buildRouteStats() *apiv1.GetRouteStatsResponse {
 
 	resp := &apiv1.GetRouteStatsResponse{
 		TotalRouted:     totalRouted,
-		TotalDropped:    totalDropped,
+		TotalUnmatched:    totalUnmatched,
 		TotalMatched:    totalMatched,
-		FilterSetActive: filterActive,
+		RouteTableActive: routeTableActive,
 		RoutedRate:      routedRate,
 		MatchedRate:     matchedRate,
 	}
