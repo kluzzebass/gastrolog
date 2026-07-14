@@ -18,12 +18,30 @@ const (
 	maxRefApplyBatchSize     = 256
 )
 
+// Planner chunk-fill heuristic: a completed segment holds roughly
+// plannerRecordsPerRef records under typical close policies (8 MiB / 10 s),
+// so MaxRecords/plannerRecordsPerRef approximates the segment refs needed to
+// fill one chunk; plannerRefHeadroom pads that estimate for undersized
+// trickle segments closed by age rather than size.
+const (
+	plannerRecordsPerRef = 5000
+	plannerRefHeadroom   = 8
+)
+
+// estimatedRefsPerChunk is the shared sizing input for refApplyBatchSize and
+// catchUpBudget: the rough number of segment refs one chunk absorbs under the
+// rotation policy. A policy without MaxRecords falls back to the default
+// apply batch size.
+func estimatedRefsPerChunk(policy ManifestRotationPolicy) int64 {
+	if policy.MaxRecords == 0 {
+		return defaultRefApplyBatchSize
+	}
+	return int64(policy.MaxRecords)/plannerRecordsPerRef + plannerRefHeadroom //nolint:gosec // G115: MaxRecords bounded by rotation policy
+}
+
 // refApplyBatchSize is how many segment refs one planner apply may carry.
 func refApplyBatchSize(policy ManifestRotationPolicy) int {
-	perChunk := int64(defaultRefApplyBatchSize)
-	if policy.MaxRecords > 0 {
-		perChunk = int64(policy.MaxRecords)/5000 + 8 //nolint:gosec // G115: MaxRecords bounded by rotation policy
-	}
+	perChunk := estimatedRefsPerChunk(policy)
 	if perChunk < defaultRefApplyBatchSize {
 		return defaultRefApplyBatchSize
 	}
@@ -47,13 +65,9 @@ func catchUpBudget(eligible int, policy ManifestRotationPolicy) int {
 	const minBudget = 32
 	const maxBudget = 4096
 
-	// Rough refs needed to fill one chunk at typical ~5–10k records/segment/ref,
-	// plus backlog proportional to eligible segments still holding records.
-	perChunk := int64(64)
-	if policy.MaxRecords > 0 {
-		perChunk = int64(policy.MaxRecords)/5000 + 8 //nolint:gosec // G115: MaxRecords bounded by rotation policy
-	}
-	backlog := int64(eligible)/4 + perChunk
+	// Rough refs needed to fill one chunk (estimatedRefsPerChunk), plus
+	// backlog proportional to eligible segments still holding records.
+	backlog := int64(eligible)/4 + estimatedRefsPerChunk(policy)
 	if backlog < minBudget {
 		return minBudget
 	}
@@ -62,6 +76,15 @@ func catchUpBudget(eligible int, policy ManifestRotationPolicy) int {
 	}
 	return int(backlog)
 }
+
+// emptyManifestStallFallback is the stall threshold for zero-ref open
+// manifests when the rotation policy carries no MaxAge. 30s is several
+// segment-close windows (default 10s MaxAge), so a manifest opened just
+// before a lull is not churned while refs may still be in flight, while an
+// idle vault still sheds its empty open manifest promptly. Do not change the
+// value: chunking soak behavior was validated against it, and policies that
+// care set MaxAge explicitly.
+const emptyManifestStallFallback = 30 * time.Second
 
 // discardStalledEmptyOpen drops an open manifest that has stayed at zero refs
 // longer than the rotation MaxAge stall threshold. Empty manifests must not be
@@ -72,7 +95,7 @@ func discardStalledEmptyOpen(open *vaultctlfsm.OpenChunkManifest, manifest Manif
 	}
 	stall := policy.MaxAge
 	if stall <= 0 {
-		stall = 30 * time.Second
+		stall = emptyManifestStallFallback
 	}
 	if now.IsZero() {
 		now = time.Now()

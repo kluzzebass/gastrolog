@@ -16,6 +16,12 @@ import (
 // copy-fallback dispatch without a link-refusing filesystem.
 var linkHead = os.Link
 
+// headPromoteSuffix marks an in-flight byte copy into head/ on the
+// link-unsupported fallback path, mirroring collection's preHeadPullSuffix
+// under pre-head/: a head/ name only ever appears complete, because the copy
+// lands under the suffixed temp name and is renamed in after fsync.
+const headPromoteSuffix = ".promote"
+
 // PromoteToHead gives a completed segment a second name under head/ for local
 // chunking. The completed/ name must remain so peer collectors can pull until
 // ReleaseSegments purges it — a rename would destroy the only on-disk copy
@@ -76,7 +82,7 @@ func copyToHead(completedPath, dest, vaultRoot string) (string, error) {
 		return "", err
 	}
 	defer func() { _ = src.Close() }()
-	tmp := dest + ".promote"
+	tmp := dest + headPromoteSuffix
 	out, err := os.OpenFile(filepath.Clean(tmp), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return "", err

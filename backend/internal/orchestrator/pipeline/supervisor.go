@@ -100,6 +100,7 @@ type Config struct {
 	SegmentationCompletedCap     int
 	SegmentationEncodeCap        int
 	DistributionPullQueueCap     int
+	DistributionPublishQueueCap  int
 	DistributionPublishWorkers   int
 	DistributionPublishBatchSize int
 
@@ -116,8 +117,14 @@ type Config struct {
 	OnCheckpoint func(id glid.GLID, data []byte)
 	PressureGate *chanwatch.PressureGate
 	// IngestionRetryDelay overrides the pause before a failed ingester run is
-	// retried. Nil uses the ingestion manager's default jittered 3–5s delay.
-	IngestionRetryDelay func() time.Duration
+	// retried; consecutiveFailures counts error exits since the last clean
+	// run. Nil uses the ingestion manager's default jittered exponential
+	// backoff (3–5s first retry).
+	IngestionRetryDelay func(consecutiveFailures int) time.Duration
+	// IngestionCheckpointInterval overrides the period between checkpoint
+	// saves for Checkpointable ingesters. Zero uses the ingestion manager's
+	// default (5s).
+	IngestionCheckpointInterval time.Duration
 }
 
 // VaultSpec describes the roles and per-vault dependencies for one vault on this
@@ -248,12 +255,13 @@ func New(cfg Config) *Supervisor {
 	}
 
 	ingest, ingestOut := ingestion.New(ingestion.Config{
-		NodeID:       cfg.NodeID,
-		OutCapacity:  cfg.IngestionOutCapacity,
-		Logger:       cfg.Logger,
-		OnCheckpoint: cfg.OnCheckpoint,
-		PressureGate: cfg.PressureGate,
-		RetryDelay:   cfg.IngestionRetryDelay,
+		NodeID:             cfg.NodeID,
+		OutCapacity:        cfg.IngestionOutCapacity,
+		Logger:             cfg.Logger,
+		OnCheckpoint:       cfg.OnCheckpoint,
+		PressureGate:       cfg.PressureGate,
+		RetryDelay:         cfg.IngestionRetryDelay,
+		CheckpointInterval: cfg.IngestionCheckpointInterval,
 	})
 	digest, digestOut := digestion.New(digestion.Config{
 		Workers:     cfg.DigestionWorkers,
@@ -267,6 +275,7 @@ func New(cfg Config) *Supervisor {
 	})
 	dist, pullIn := distribution.New(distribution.Config{
 		PullQueueCap:     cfg.DistributionPullQueueCap,
+		PublishQueueCap:  cfg.DistributionPublishQueueCap,
 		PublishWorkers:   cfg.DistributionPublishWorkers,
 		PublishBatchSize: cfg.DistributionPublishBatchSize,
 		Logger:           cfg.Logger,

@@ -45,19 +45,68 @@ type Config struct {
 
 	// RetryDelay returns the pause before re-running an ingester whose run
 	// ended and is eligible for retry (any passive listener exit, or a
-	// non-passive run that returned an error). Nil uses the default jittered
-	// 3–5s delay. Injectable so tests synchronize on attempts instead of
-	// waiting out wall-clock delays.
-	RetryDelay func() time.Duration
+	// non-passive run that returned an error). consecutiveFailures counts
+	// error exits since the last clean run exit (0 when the previous run
+	// ended cleanly). Nil uses the default jittered exponential backoff.
+	// Injectable so tests synchronize on attempts instead of waiting out
+	// wall-clock delays.
+	RetryDelay func(consecutiveFailures int) time.Duration
+
+	// CheckpointInterval is the period between checkpoint saves while a
+	// Checkpointable ingester runs (see defaultCheckpointInterval for why
+	// this is a per-run ticker and what the interval bounds). Zero or
+	// negative selects the default.
+	CheckpointInterval time.Duration
 }
 
-// defaultRetryDelay is the jittered 3–5s pause between ingester run retries:
-// long enough not to spin on a persistent failure, short enough that a
-// recovered dependency (released port, reachable endpoint) is picked up
-// promptly.
-func defaultRetryDelay() time.Duration {
-	return 3*time.Second + time.Duration(rand.Int64N(int64(2*time.Second))) //nolint:gosec // G404: jitter for retry delay, not security-sensitive
+// Retry backoff for ingester re-runs. The first retry keeps the historical
+// jittered 3–5s window (base 3s plus up to 2/3 jitter): long enough not to
+// spin on a persistent failure, short enough that a recovered dependency
+// (released port, reachable endpoint) is picked up promptly. Each further
+// consecutive failure doubles the pre-jitter delay up to the cap, so a
+// permanently failing ingester settles at one warn every ~5–8 minutes instead
+// of flooding the log every few seconds. The counter resets on any clean run
+// exit, so an ingester that recovers and later fails again starts back at the
+// base delay. Operator visibility does not ride on the log line: the
+// convergence sweep's ingester-not-running alert (gastrolog-3mnjlo) stays
+// raised between attempts and clears once a retry holds.
+const (
+	retryBackoffBase   = 3 * time.Second
+	retryBackoffFactor = 2
+	retryBackoffCap    = 5 * time.Minute
+)
+
+// retryBackoffDelay returns the pre-jitter delay for a retry after
+// consecutiveFailures error exits (0 or 1 → base). Pure, so tests exercise
+// the backoff curve without sleeping.
+func retryBackoffDelay(consecutiveFailures int) time.Duration {
+	d := retryBackoffBase
+	for i := 1; i < consecutiveFailures && d < retryBackoffCap; i++ {
+		d *= retryBackoffFactor
+	}
+	return min(d, retryBackoffCap)
 }
+
+// defaultRetryDelay jitters retryBackoffDelay by up to 2/3 of the pre-jitter
+// value so co-failing ingesters (e.g. after a shared dependency outage) do
+// not retry in lockstep. At the base delay this reproduces the historical
+// 3–5s window.
+func defaultRetryDelay(consecutiveFailures int) time.Duration {
+	d := retryBackoffDelay(consecutiveFailures)
+	return d + time.Duration(rand.Int64N(int64(d)*2/3)) //nolint:gosec // G404: jitter for retry delay, not security-sensitive
+}
+
+// defaultCheckpointInterval is the period between checkpoint saves for
+// Checkpointable ingesters. This is deliberately a per-run ticker inside
+// runWithCheckpoints, NOT an orchestrator scheduler job: the save loop is
+// scoped to one ingester's run — created and torn down with the run, under
+// the ingester's own context — whereas scheduler jobs are node-global work
+// that outlives ingester reconciliation. The interval bounds the
+// crash-redelivery window: after a hard crash, at most this much
+// already-emitted input since the last saved checkpoint is re-read and
+// re-minted on restart. (A save also happens on run exit and on shutdown, so
+// clean stops carry no window.)
+const defaultCheckpointInterval = 5 * time.Second
 
 // Manager starts and stops ingesters from assignment snapshots and emits minted
 // Messages on a bounded channel.
@@ -66,9 +115,10 @@ type Manager struct {
 	out    chan Message
 	logger *slog.Logger
 
-	onCheckpoint func(id glid.GLID, data []byte)
-	pressureGate *chanwatch.PressureGate
-	retryDelay   func() time.Duration
+	onCheckpoint       func(id glid.GLID, data []byte)
+	pressureGate       *chanwatch.PressureGate
+	retryDelay         func(consecutiveFailures int) time.Duration
+	checkpointInterval time.Duration
 
 	mu      sync.Mutex
 	running atomic.Bool
@@ -103,18 +153,22 @@ func New(cfg Config) (*Manager, <-chan Message) {
 	if cfg.RetryDelay == nil {
 		cfg.RetryDelay = defaultRetryDelay
 	}
+	if cfg.CheckpointInterval <= 0 {
+		cfg.CheckpointInterval = defaultCheckpointInterval
+	}
 	out := make(chan Message, cfg.OutCapacity)
 	m := &Manager{
-		nodeID:       cfg.NodeID,
-		out:          out,
-		logger:       cfg.Logger,
-		onCheckpoint: cfg.OnCheckpoint,
-		pressureGate: cfg.PressureGate,
-		retryDelay:   cfg.RetryDelay,
-		ingesters:    make(map[glid.GLID]Ingester),
-		meta:         make(map[glid.GLID]ingesterMeta),
-		minters:      make(map[glid.GLID]*Minter),
-		cancels:      make(map[glid.GLID]context.CancelFunc),
+		nodeID:             cfg.NodeID,
+		out:                out,
+		logger:             cfg.Logger,
+		onCheckpoint:       cfg.OnCheckpoint,
+		pressureGate:       cfg.PressureGate,
+		retryDelay:         cfg.RetryDelay,
+		checkpointInterval: cfg.CheckpointInterval,
+		ingesters:          make(map[glid.GLID]Ingester),
+		meta:               make(map[glid.GLID]ingesterMeta),
+		minters:            make(map[glid.GLID]*Minter),
+		cancels:            make(map[glid.GLID]context.CancelFunc),
 	}
 	return m, out
 }
@@ -260,7 +314,8 @@ func (m *Manager) stopLocked(id glid.GLID) {
 // runIngester executes a single ingester with panic recovery so that a
 // misbehaving ingester cannot crash the entire process.
 //
-// Runs are re-armed with a jittered delay (RetryDelay, default 3–5s):
+// Runs are re-armed with a delay from RetryDelay (default: jittered
+// exponential backoff, 3–5s first retry — see retryBackoffBase and friends):
 //   - Passive (listener) ingesters retry on EVERY exit — port-bind errors are
 //     recoverable when another process releases the port or a co-located node
 //     dies.
@@ -285,6 +340,7 @@ func (m *Manager) runIngester(
 		}
 	}()
 
+	failures := 0
 	for {
 		err := m.runWithCheckpoints(ctx, id, ing, minter, out)
 		if ctx.Err() != nil {
@@ -295,7 +351,14 @@ func (m *Manager) runIngester(
 			// it would mint the same input again.
 			return
 		}
-		delay := m.retryDelay()
+		if err != nil {
+			failures++
+		} else {
+			// Clean passive exit (listener served and closed normally):
+			// reset the backoff so the re-listen happens at the base delay.
+			failures = 0
+		}
+		delay := m.retryDelay(failures)
 		m.logger.Warn("ingester exited, retrying",
 			"id", id, "name", meta.name, "type", meta.typ,
 			"passive", meta.passive, "error", err, "retry_in", delay)
@@ -363,7 +426,7 @@ func (m *Manager) runWithCheckpoints(
 	errCh := make(chan error, 1)
 	go func() { errCh <- run() }()
 
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(m.checkpointInterval)
 	defer ticker.Stop()
 
 	for {

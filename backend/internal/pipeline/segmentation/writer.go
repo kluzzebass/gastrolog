@@ -437,8 +437,20 @@ type commitBatch struct {
 	hasAck      bool
 }
 
+// syncTimerPark is the arbitrary far-future duration the commit batch's sync
+// timer is constructed with: time.NewTimer requires some duration, and the
+// timer is stopped (channel drained) immediately after creation, so it never
+// fires at this value. armTimer gives it its real deadline per batch.
+const syncTimerPark = time.Hour
+
+// syncTimerArmFloor clamps non-positive arm requests (an already-due or zero
+// commit window) to a minimal real duration, so a due batch still flows
+// through the timer channel in the select loop instead of needing a separate
+// fire-immediately branch.
+const syncTimerArmFloor = time.Millisecond
+
 func newCommitBatch(w *vaultWriter) *commitBatch {
-	timer := time.NewTimer(time.Hour)
+	timer := time.NewTimer(syncTimerPark)
 	if !timer.Stop() {
 		<-timer.C
 	}
@@ -447,7 +459,7 @@ func newCommitBatch(w *vaultWriter) *commitBatch {
 
 func (b *commitBatch) armTimer(d time.Duration) {
 	if d <= 0 {
-		d = time.Millisecond
+		d = syncTimerArmFloor
 	}
 	resetSyncTimer(b.timer, d)
 	b.timerArmed = true

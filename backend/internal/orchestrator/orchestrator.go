@@ -669,10 +669,11 @@ type Config struct {
 
 	// IngesterRetryDelay overrides the pause before an ingester run is
 	// retried (any passive listener exit, or a non-passive run that returned
-	// an error). Nil uses the ingestion manager's default jittered 3–5s
-	// delay; tests inject a short delay to observe retries without
-	// wall-clock waits.
-	IngesterRetryDelay func() time.Duration
+	// an error). consecutiveFailures counts error exits since the last clean
+	// run. Nil uses the ingestion manager's default jittered exponential
+	// backoff (3–5s first retry, doubling to a 5m cap); tests inject a short
+	// delay to observe retries without wall-clock waits.
+	IngesterRetryDelay func(consecutiveFailures int) time.Duration
 
 	// Digesters run in order on each ingestion message before the record is
 	// built. The app supplies the level/timestamp enrichers here.

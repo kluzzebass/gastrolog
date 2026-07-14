@@ -269,7 +269,7 @@ func TestManagerPassiveRetry(t *testing.T) {
 	mgr, out := ingestion.New(ingestion.Config{
 		NodeID:      nodeID,
 		OutCapacity: 1,
-		RetryDelay:  func() time.Duration { return 0 },
+		RetryDelay:  func(int) time.Duration { return 0 },
 	})
 	if err := mgr.Reconcile([]ingestion.IngesterSpec{
 		{ID: id, Ingester: ing, Passive: true, Name: "listener", Type: "mock"},
@@ -566,7 +566,7 @@ func TestManagerActiveIngesterErrorRetry(t *testing.T) {
 	mgr, out := ingestion.New(ingestion.Config{
 		NodeID:      nodeID,
 		OutCapacity: 1,
-		RetryDelay:  func() time.Duration { return 0 },
+		RetryDelay:  func(int) time.Duration { return 0 },
 	})
 	if err := mgr.Reconcile([]ingestion.IngesterSpec{
 		{ID: id, Ingester: ing, Passive: false, Name: "tail", Type: "mock"},
@@ -629,7 +629,7 @@ func TestManagerActiveIngesterCleanExitNoRetry(t *testing.T) {
 	mgr, out := ingestion.New(ingestion.Config{
 		NodeID:      nodeID,
 		OutCapacity: 1,
-		RetryDelay:  func() time.Duration { return 0 },
+		RetryDelay:  func(int) time.Duration { return 0 },
 	})
 	if err := mgr.Reconcile([]ingestion.IngesterSpec{
 		{ID: id, Ingester: ing, Passive: false, Name: "import", Type: "mock"},
@@ -862,4 +862,147 @@ func TestManagerCheckpointSaveError(t *testing.T) {
 	if saved {
 		t.Fatal("OnCheckpoint called despite SaveCheckpoint error")
 	}
+}
+
+// scriptedPassiveIngester returns one scripted result per run attempt; the
+// last script entry blocks until ctx is done. Each run entry is signalled on
+// attemptCh.
+type scriptedPassiveIngester struct {
+	script    []error
+	attempts  atomic.Int32
+	attemptCh chan int32
+}
+
+func (s *scriptedPassiveIngester) Run(ctx context.Context, _ chan<- ingestion.IngesterMessage) error {
+	n := s.attempts.Add(1)
+	s.attemptCh <- n
+	if int(n) < len(s.script) {
+		return s.script[n-1]
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+// TestManagerRetryFailureCountResets pins the RetryDelay seam contract
+// (gastrolog-3nfvo1 backoff): consecutiveFailures counts error exits since
+// the last clean run — it increments across failures and resets to 0 when a
+// passive run exits cleanly, so a recovered listener that later fails again
+// backs off from the base delay, not from its old streak. Observed entirely
+// through the injected seam with zero delays; no sleeps.
+func TestManagerRetryFailureCountResets(t *testing.T) {
+	t.Parallel()
+
+	nodeID := glid.New()
+	id := glid.New()
+	boom := errors.New("bind failed")
+	// Attempts: fail, fail, clean exit, fail, then block (healthy).
+	ing := &scriptedPassiveIngester{
+		script:    []error{boom, boom, nil, boom, nil /* sentinel: block */},
+		attemptCh: make(chan int32, 8),
+	}
+
+	var mu sync.Mutex
+	var observed []int
+	mgr, out := ingestion.New(ingestion.Config{
+		NodeID:      nodeID,
+		OutCapacity: 1,
+		RetryDelay: func(consecutiveFailures int) time.Duration {
+			mu.Lock()
+			observed = append(observed, consecutiveFailures)
+			mu.Unlock()
+			return 0
+		},
+	})
+	if err := mgr.Reconcile([]ingestion.IngesterSpec{
+		{ID: id, Ingester: ing, Passive: true, Name: "listener", Type: "mock"},
+	}); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := mgr.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	for want := int32(1); want <= 5; want++ {
+		select {
+		case got := <-ing.attemptCh:
+			if got != want {
+				t.Fatalf("attempt = %d, want %d", got, want)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("passive ingester was not retried (waiting for attempt %d)", want)
+		}
+	}
+
+	mu.Lock()
+	got := append([]int(nil), observed...)
+	mu.Unlock()
+	// Retries before attempts 2..5: failures 1, 2, then clean-exit reset to 0,
+	// then a fresh streak at 1.
+	want := []int{1, 2, 0, 1}
+	if len(got) != len(want) {
+		t.Fatalf("RetryDelay calls = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("RetryDelay call %d = %d, want %d (all calls: %v)", i, got[i], want[i], got)
+		}
+	}
+
+	go func() {
+		for range out {
+		}
+	}()
+	_ = mgr.Stop()
+}
+
+// TestManagerCheckpointPeriodicSave exercises the CheckpointInterval knob
+// (gastrolog-3nfvo1): a running Checkpointable ingester is saved on the
+// configured cadence, not only at run exit. A tiny interval keeps the test
+// event-driven — it waits for saves to arrive, never for wall-clock margins.
+func TestManagerCheckpointPeriodicSave(t *testing.T) {
+	t.Parallel()
+
+	nodeID := glid.New()
+	id := glid.New()
+	ing := &checkpointIngester{}
+
+	saves := make(chan struct{}, 16)
+	mgr, out := ingestion.New(ingestion.Config{
+		NodeID:             nodeID,
+		OutCapacity:        1,
+		CheckpointInterval: 5 * time.Millisecond,
+		OnCheckpoint: func(_ glid.GLID, _ []byte) {
+			select {
+			case saves <- struct{}{}:
+			default:
+			}
+		},
+	})
+	if err := mgr.Reconcile([]ingestion.IngesterSpec{{ID: id, Ingester: ing}}); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := mgr.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Two periodic saves while the run is still alive (stop not called yet).
+	for i := range 2 {
+		select {
+		case <-saves:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("periodic checkpoint save %d did not happen", i+1)
+		}
+	}
+
+	go func() {
+		for range out {
+		}
+	}()
+	_ = mgr.Stop()
 }

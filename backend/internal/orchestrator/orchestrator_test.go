@@ -473,7 +473,7 @@ func TestIngesterAliveTracksErrorRetry(t *testing.T) {
 		OnIngesterAlive: func(id glid.GLID, alive bool) {
 			events <- aliveEvent{id: id, alive: alive}
 		},
-		IngesterRetryDelay: func() time.Duration { return 0 },
+		IngesterRetryDelay: func(int) time.Duration { return 0 },
 	})
 
 	id := glid.New()

@@ -18,10 +18,10 @@ import (
 	"gastrolog/internal/pipeline/segmentation"
 )
 
-// publishQueueCap bounds staged publishes waiting for the vault-ctl worker.
-// Ingress only enqueues; a dedicated worker issues Raft applies so pull serving
-// never blocks behind a publish backlog.
-const publishQueueCap = 512
+// defaultPublishQueueCap bounds staged publishes waiting for the vault-ctl
+// worker. Ingress only enqueues; a dedicated worker issues Raft applies so
+// pull serving never blocks behind a publish backlog.
+const defaultPublishQueueCap = 512
 
 const (
 	defaultPublishWorkers   = 4
@@ -378,6 +378,9 @@ func (v *vaultDist) retireSegment(segID glid.GLID) {
 type Config struct {
 	// PullQueueCap bounds incoming pull requests. Defaults to 16.
 	PullQueueCap int
+	// PublishQueueCap bounds staged publishes waiting for a vault-ctl publish
+	// worker. Defaults to 512.
+	PublishQueueCap int
 	// PublishWorkers is the number of vault-ctl publish workers. Defaults to 4.
 	// Workers on different vaults apply in parallel; batches for the same vault
 	// are serialized by the per-vault publisher path.
@@ -386,6 +389,13 @@ type Config struct {
 	// single vault-ctl apply when the publisher supports batching. Defaults to 32.
 	PublishBatchSize int
 	Logger           *slog.Logger
+}
+
+func (c Config) publishQueueCap() int {
+	if c.PublishQueueCap <= 0 {
+		return defaultPublishQueueCap
+	}
+	return c.PublishQueueCap
 }
 
 func (c Config) publishWorkers() int {
@@ -512,7 +522,7 @@ func (m *Manager) Run(ctx context.Context, completed <-chan segmentation.Complet
 	m.runCtx = ctx
 	m.mu.Unlock()
 
-	publishQ := make(chan pendingPublish, publishQueueCap)
+	publishQ := make(chan pendingPublish, m.cfg.publishQueueCap())
 
 	m.wg.Go(func() {
 		m.runPullLoop(ctx)

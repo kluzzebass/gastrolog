@@ -21,12 +21,17 @@ const (
 	ParamContainer        = "container"         // Azure container name
 	ParamConnectionString = "connection_string" // Azure connection string
 	ParamCredentialsJSON  = "credentials_json"  // GCS service account JSON
+	ParamSealedBacking    = "sealed_backing"    // file-vault sealed-backing provider; accepted as a provider alias
 	ParamVaultID          = "_vault_id"         // Injected by orchestrator
 )
 
+// connectionProbeKey is the throwaway object key the connection tester writes,
+// reads, lists, and deletes to prove the credentials and bucket work.
+const connectionProbeKey = ".gastrolog-connection-test"
+
 var (
 	ErrMissingProvider = errors.New("missing required parameter: provider")
-	ErrUnknownProvider = errors.New("unknown provider (must be s3, azure, or gcs)")
+	ErrUnknownProvider = errors.New("unknown provider (must be s3, azure, gcs, or memory)")
 )
 
 // NewConnectionTester returns a function that validates cloud storage connectivity
@@ -37,7 +42,7 @@ func NewConnectionTester(log *slog.Logger) func(ctx context.Context, params map[
 	return func(ctx context.Context, params map[string]string) (string, error) {
 		provider := params[ParamProvider]
 		if provider == "" {
-			provider = params["sealed_backing"]
+			provider = params[ParamSealedBacking]
 		}
 		if provider == "" {
 			return "", ErrMissingProvider
@@ -53,7 +58,7 @@ func NewConnectionTester(log *slog.Logger) func(ctx context.Context, params map[
 		}
 
 		// 2. Upload a probe object.
-		probeKey := ".gastrolog-connection-test"
+		probeKey := connectionProbeKey
 		probeData := strings.NewReader("ok")
 		if err := store.Upload(ctx, probeKey, probeData, nil); err != nil {
 			return "", fmt.Errorf("upload probe: %w", err)
@@ -87,25 +92,33 @@ func CreateStore(provider string, params map[string]string, log *slog.Logger) (b
 	return createStore(provider, params, log)
 }
 
-// normalizeEndpoint ensures a custom endpoint has a scheme.
-// The AWS SDK rejects bare host:port like "localhost:9000".
-func normalizeEndpoint(ep string) string {
+// validateEndpoint requires an explicit scheme on a custom endpoint. A bare
+// host:port used to be silently upgraded to plaintext "http://", which pointed
+// data-plane credentials at an unencrypted endpoint whenever an operator
+// merely forgot the scheme. Misconfiguration now fails loudly at config time,
+// naming both accepted forms, instead of quietly downgrading transport
+// security.
+func validateEndpoint(ep string) (string, error) {
 	if ep == "" {
-		return ""
+		return "", nil
 	}
 	if !strings.Contains(ep, "://") {
-		return "http://" + ep
+		return "", fmt.Errorf("endpoint %q has no scheme: use \"https://%s\", or \"http://%s\" for a plaintext local/dev endpoint", ep, ep, ep)
 	}
-	return ep
+	return ep, nil
 }
 
 func createStore(provider string, params map[string]string, log *slog.Logger) (blobstore.Store, error) {
 	switch provider {
 	case "s3":
+		endpoint, err := validateEndpoint(params[ParamEndpoint])
+		if err != nil {
+			return nil, err
+		}
 		cfg := blobstore.S3Config{
 			Bucket:    params[ParamBucket],
 			Region:    params[ParamRegion],
-			Endpoint:  normalizeEndpoint(params[ParamEndpoint]),
+			Endpoint:  endpoint,
 			AccessKey: params[ParamAccessKey],
 			SecretKey: params[ParamSecretKey],
 			Logger:    log,
@@ -132,9 +145,13 @@ func createStore(provider string, params map[string]string, log *slog.Logger) (b
 		return blobstore.NewAzure(cfg)
 
 	case "gcs":
+		endpoint, err := validateEndpoint(params[ParamEndpoint])
+		if err != nil {
+			return nil, err
+		}
 		cfg := blobstore.GCSConfig{
 			Bucket:          params[ParamBucket],
-			Endpoint:        normalizeEndpoint(params[ParamEndpoint]),
+			Endpoint:        endpoint,
 			CredentialsJSON: params[ParamCredentialsJSON],
 		}
 		if cfg.Bucket == "" {
