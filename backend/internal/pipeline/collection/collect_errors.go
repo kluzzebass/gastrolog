@@ -41,6 +41,13 @@ func retryableCollectSuberr(err error) bool {
 	if err == nil {
 		return true
 	}
+	if errors.Is(err, ErrCorruptSegment) {
+		// Checksum verification failed: the serving holder has wrong bytes.
+		// The pre-head copy is already discarded; the pull must retry on the
+		// manager's own backoff wake (another holder can serve correct
+		// bytes) — no future publish event exists to retry it otherwise.
+		return true
+	}
 	if errors.Is(err, os.ErrNotExist) {
 		return true
 	}
