@@ -588,7 +588,11 @@ func (w *Writer) writeSectionAt(cw *countWriter, base int64, sectionType, versio
 
 func (w *Writer) finalizeTOC(cw *countWriter, entries []TOCEntry) error {
 	for _, e := range entries {
-		if _, err := cw.Write(encodeTOCEntry(e)); err != nil {
+		buf, err := encodeTOCEntry(e)
+		if err != nil {
+			return fmt.Errorf("finalize TOC: %w", err)
+		}
+		if _, err := cw.Write(buf); err != nil {
 			return err
 		}
 	}
@@ -620,12 +624,19 @@ func makeTOCEntry(sectionType, version uint8, offset, size int64, hash [32]byte)
 	return TOCEntry{Type: sectionType, Version: version, Offset: offset, Size: size, Hash: hash}
 }
 
-func encodeTOCEntry(e TOCEntry) []byte {
+// encodeTOCEntry serializes a TOCEntry to its tocEntrySize-byte on-disk
+// form. Layout: [type:u8][version:u8][offset:u32][size:u32][hash:32].
+//
+// Offset and Size are stored on disk as u32; chunk policy bounds blobs
+// well below 4 GiB so the narrowing is safe. The MaxUint32 guards return
+// an error — not a panic — so a pathological oversized blob fails the
+// seal with a propagated error instead of crashing the node.
+func encodeTOCEntry(e TOCEntry) ([]byte, error) {
 	if e.Offset < 0 || e.Offset > math.MaxUint32 {
-		panic(fmt.Sprintf("TOC offset %d outside u32 range", e.Offset))
+		return nil, fmt.Errorf("TOC entry type 0x%02x: offset %d outside u32 range", e.Type, e.Offset)
 	}
 	if e.Size < 0 || e.Size > math.MaxUint32 {
-		panic(fmt.Sprintf("TOC size %d outside u32 range", e.Size))
+		return nil, fmt.Errorf("TOC entry type 0x%02x: size %d outside u32 range", e.Type, e.Size)
 	}
 	buf := make([]byte, tocEntrySize)
 	buf[0] = e.Type
@@ -633,7 +644,7 @@ func encodeTOCEntry(e TOCEntry) []byte {
 	binary.LittleEndian.PutUint32(buf[2:6], uint32(e.Offset))
 	binary.LittleEndian.PutUint32(buf[6:10], uint32(e.Size))
 	copy(buf[10:42], e.Hash[:])
-	return buf
+	return buf, nil
 }
 
 func encodeTOCFooter(entryCount uint32, blobDigest [32]byte) []byte {

@@ -112,11 +112,16 @@ func NewReader(f *os.File) (*Reader, error) {
 }
 
 // ReadTOC reads the TOC footer + entries from the tail of an open blob
-// file. The footer is a fixed 44 bytes at the very end; it announces how
-// many entries precede it. Each entry is 56 bytes. Exported for callers
-// that need to verify a downloaded blob's whole-blob digest without
-// constructing a full Reader (e.g. cache-populate integrity checks —
-// gastrolog-grnc3).
+// file. The footer is a fixed tocFooterSize (44) bytes at the very end;
+// it announces how many entries precede it. Each entry is tocEntrySize
+// (42) bytes. Exported for callers that need to verify a downloaded
+// blob's whole-blob digest without constructing a full Reader (e.g.
+// cache-populate integrity checks — gastrolog-grnc3).
+//
+// Every entry's section range is validated against fileSize: an entry
+// with Offset+Size past EOF (corrupt or truncated blob) is rejected here
+// so downstream mmap windows (MapSection, LoadSection) never map past
+// EOF and SIGBUS on first access.
 func ReadTOC(f *os.File, fileSize int64) (BlobTOC, error) {
 	if fileSize < int64(tocFooterSize) {
 		return BlobTOC{}, errors.New("blob too small for TOC footer")
@@ -138,14 +143,27 @@ func ReadTOC(f *os.File, fileSize int64) (BlobTOC, error) {
 	if _, err := f.ReadAt(entryBuf, entriesStart); err != nil {
 		return BlobTOC{}, fmt.Errorf("read TOC entries: %w", err)
 	}
-	return parseTOCRegion(entryBuf, footer[:])
+	toc, err := parseTOCRegion(entryBuf, footer[:])
+	if err != nil {
+		return BlobTOC{}, err
+	}
+	// Reject sections that extend past EOF. Offset and Size decode from
+	// u32 so both are non-negative and the sum cannot overflow int64.
+	for _, e := range toc.Entries {
+		if e.Offset+e.Size > fileSize {
+			return BlobTOC{}, fmt.Errorf(
+				"TOC entry type 0x%02x: section [%d, %d) exceeds blob size %d",
+				e.Type, e.Offset, e.Offset+e.Size, fileSize)
+		}
+	}
+	return toc, nil
 }
 
 // ParseTOC parses a contiguous tail buffer that includes both the TOC
-// entries and the 44-byte footer. Exported for use by remote readers that
-// download the blob's tail by byte range. The buffer must be exactly
-// `entryCount × 56 + 44` bytes long; the entry count is read from the
-// footer.
+// entries and the tocFooterSize (44) byte footer. Exported for use by
+// remote readers that download the blob's tail by byte range. The buffer
+// must be at least `entryCount × tocEntrySize + tocFooterSize` bytes
+// long; the entry count is read from the footer.
 func ParseTOC(buf []byte) (BlobTOC, error) {
 	if len(buf) < tocFooterSize {
 		return BlobTOC{}, errors.New("TOC buffer too small for footer")
