@@ -73,27 +73,30 @@ func (o *Orchestrator) OpenPipelineChunkCursor(vaultID glid.GLID, chunkID chunk.
 	if err != nil {
 		return nil, err
 	}
-	readAt := func(pos uint64) (chunk.Record, error) {
-		rec, err := chunking.ReadManifestRecordAt(manifest, locate, pos)
-		if err != nil {
-			return chunk.Record{}, err
-		}
-		cr := chunking.RecordToChunk(rec)
-		cr.Ref = chunk.RecordRef{ChunkID: chunkID, Pos: pos}
-		return cr, nil
+	openReader := func() (*chunking.OpenChunkReader, error) {
+		reader, _, err := chunking.NewOpenChunkReader(chunking.OpenChunkQueryInput{
+			Manifest: manifest,
+			Locate:   locate,
+		})
+		return reader, err
 	}
-	return newManifestRecordCursor(chunkID, seq, manifest.TotalRecords, readAt), nil
+	return newManifestRecordCursor(chunkID, seq, manifest.TotalRecords, openReader), nil
 }
 
 // manifestRecordCursor adapts QueryOpenChunk's forward iterator to RecordCursor.
-// When readAt is set, reverse seeks and Prev avoid materializing the full chunk.
+// When openReader is set, reverse seeks and Prev use a positional reader that
+// shares QueryOpenChunk's span resolution and merge order — opened lazily on
+// the first positional read, with its segment mappings cached for the cursor
+// lifetime and released in Close (gastrolog-54mjat).
 type manifestRecordCursor struct {
 	chunkID      chunk.ChunkID
 	pull         func() (chunk.Record, error, bool)
 	stop         func()
 	pos          uint64
 	totalRecords uint64
-	readAt       func(pos uint64) (chunk.Record, error)
+	openReader   func() (*chunking.OpenChunkReader, error)
+	reader       *chunking.OpenChunkReader
+	readerErr    error
 	revPos       uint64
 	fwdExhausted bool
 	buf          []chunk.Record
@@ -105,14 +108,14 @@ func newManifestRecordCursor(
 	chunkID chunk.ChunkID,
 	seq iter.Seq2[record.Record, error],
 	totalRecords uint64,
-	readAt func(pos uint64) (chunk.Record, error),
+	openReader func() (*chunking.OpenChunkReader, error),
 ) *manifestRecordCursor {
 	pull, stop := iter.Pull2(seq)
 	c := &manifestRecordCursor{
 		chunkID:      chunkID,
 		stop:         stop,
 		totalRecords: totalRecords,
-		readAt:       readAt,
+		openReader:   openReader,
 	}
 	c.pull = func() (chunk.Record, error, bool) {
 		rec, err, ok := pull()
@@ -136,16 +139,63 @@ func (c *manifestRecordCursor) Close() error {
 		c.stop()
 		c.stop = nil
 	}
+	if c.reader != nil {
+		_ = c.reader.Close()
+		c.reader = nil
+	}
 	return nil
 }
 
+// ensureReader opens the positional reader on first use and caches it (or the
+// open error) for the cursor lifetime. The manifest's TotalRecords counts ref
+// records; the served merge order can be shorter (missing local segments,
+// EventID dedup), so clamp end-relative positioning to what the reader
+// actually serves.
+func (c *manifestRecordCursor) ensureReader() (*chunking.OpenChunkReader, error) {
+	if c.reader != nil {
+		return c.reader, nil
+	}
+	if c.readerErr != nil {
+		return nil, c.readerErr
+	}
+	reader, err := c.openReader()
+	if err != nil {
+		c.readerErr = err
+		return nil, err
+	}
+	c.reader = reader
+	if reader.Len() < c.totalRecords {
+		c.totalRecords = reader.Len()
+	}
+	if c.revPos > c.totalRecords {
+		c.revPos = c.totalRecords
+	}
+	return reader, nil
+}
+
+// readAtPos reads the record at 1-based merged-order position pos through the
+// cached positional reader.
+func (c *manifestRecordCursor) readAtPos(reader *chunking.OpenChunkReader, pos uint64) (chunk.Record, error) {
+	rec, err := reader.ReadAt(pos)
+	if err != nil {
+		return chunk.Record{}, err
+	}
+	cr := chunking.RecordToChunk(rec)
+	cr.Ref = chunk.RecordRef{ChunkID: c.chunkID, Pos: pos}
+	return cr, nil
+}
+
 func (c *manifestRecordCursor) Next() (chunk.Record, chunk.RecordRef, error) {
-	if c.fwdExhausted && c.readAt != nil {
+	if c.fwdExhausted && c.openReader != nil {
+		reader, err := c.ensureReader()
+		if err != nil {
+			return chunk.Record{}, chunk.RecordRef{}, err
+		}
 		nextPos := c.revPos + 1
 		if nextPos == 0 || nextPos > c.totalRecords {
 			return chunk.Record{}, chunk.RecordRef{}, chunk.ErrNoMoreRecords
 		}
-		rec, err := c.readAt(nextPos)
+		rec, err := c.readAtPos(reader, nextPos)
 		if err != nil {
 			return chunk.Record{}, chunk.RecordRef{}, err
 		}
@@ -171,18 +221,26 @@ func (c *manifestRecordCursor) Next() (chunk.Record, chunk.RecordRef, error) {
 }
 
 func (c *manifestRecordCursor) Prev() (chunk.Record, chunk.RecordRef, error) {
-	if c.readAt != nil && c.revPos > 0 {
-		rec, err := c.readAt(c.revPos)
+	if c.openReader != nil {
+		// Match the canonical cursor contract (mmapCursor/stdioCursor): Prev
+		// at position 0 is exhaustion — never fall through to bufferAll,
+		// which would re-pull and re-map the whole chunk.
+		if c.revPos == 0 {
+			return chunk.Record{}, chunk.RecordRef{}, chunk.ErrNoMoreRecords
+		}
+		reader, err := c.ensureReader()
 		if err != nil {
 			return chunk.Record{}, chunk.RecordRef{}, err
 		}
-		ref := rec.Ref
-		if ref.Pos == 0 {
-			ref = chunk.RecordRef{ChunkID: c.chunkID, Pos: c.revPos}
-			rec.Ref = ref
+		if c.revPos == 0 { // ensureReader clamped an end seek to an empty view
+			return chunk.Record{}, chunk.RecordRef{}, chunk.ErrNoMoreRecords
+		}
+		rec, err := c.readAtPos(reader, c.revPos)
+		if err != nil {
+			return chunk.Record{}, chunk.RecordRef{}, err
 		}
 		c.revPos--
-		return rec, ref, nil
+		return rec, rec.Ref, nil
 	}
 	if err := c.bufferAll(); err != nil {
 		return chunk.Record{}, chunk.RecordRef{}, err
@@ -205,7 +263,7 @@ func (c *manifestRecordCursor) Seek(ref chunk.RecordRef) error {
 		}
 		return nil
 	}
-	if c.readAt != nil && c.totalRecords > 0 {
+	if c.openReader != nil && c.totalRecords > 0 {
 		if ref.Pos >= c.totalRecords {
 			c.revPos = c.totalRecords
 			c.fwdExhausted = true
