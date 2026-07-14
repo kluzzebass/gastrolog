@@ -407,64 +407,73 @@ func (sf *File) reconcileOnOpen() error {
 	}
 	fileSize := uint32(info.Size()) //nolint:gosec // G115: segment file size bounded
 
-	validEnd, lastStart, count, firstTS, lastTS, err := sf.reconcileFromAnchor(fileSize)
+	res, err := sf.reconcileFromAnchor(fileSize)
 	if err != nil {
-		validEnd, lastStart, count, firstTS, lastTS = sf.resyncFromFront(fileSize)
+		res = sf.resyncFromFront(fileSize)
 	}
 
-	if int64(validEnd) < info.Size() {
-		if err := sf.f.Truncate(int64(validEnd)); err != nil {
+	if int64(res.validEnd) < info.Size() {
+		if err := sf.f.Truncate(int64(res.validEnd)); err != nil {
 			return err
 		}
 	}
 
-	sf.hdr.RecordCount = count
-	sf.hdr.FirstIngestTS = firstTS
-	sf.hdr.LastIngestTS = lastTS
-	if count == 0 {
+	sf.hdr.RecordCount = res.count
+	sf.hdr.FirstIngestTS = res.firstTS
+	sf.hdr.LastIngestTS = res.lastTS
+	if res.count == 0 {
 		sf.hdr.DataEnd = HeaderSize
 	} else {
-		sf.hdr.DataEnd = lastStart
+		sf.hdr.DataEnd = res.lastStart
 	}
 
-	sum, err := sf.initRecordDigest(validEnd)
+	sum, err := sf.initRecordDigest(res.validEnd)
 	if err != nil {
 		return err
 	}
 	sf.hdr.SegmentChecksum = sum
-	sf.dataEnd = validEnd
+	sf.dataEnd = res.validEnd
 	return sf.writeHeader()
 }
 
-func (sf *File) reconcileFromAnchor(fileSize uint32) (validEnd, lastStart, count uint32, firstTS, lastTS time.Time, err error) {
+// scanResult is the header state a torn-tail recovery scan rebuilds: where
+// valid data ends, where the last whole frame starts, and the record count
+// and IngestTS extrema confirmed so far.
+type scanResult struct {
+	validEnd  uint32    // byte offset just past the last whole frame
+	lastStart uint32    // byte offset where the last whole frame starts
+	count     uint32    // records confirmed so far
+	firstTS   time.Time // IngestTS of the first record
+	lastTS    time.Time // IngestTS of the last record
+}
+
+func (sf *File) reconcileFromAnchor(fileSize uint32) (scanResult, error) {
 	if sf.hdr.RecordCount == 0 {
-		validEnd, lastStart, count, firstTS, lastTS = sf.scanForward(HeaderSize, fileSize, 0, time.Time{}, time.Time{})
-		return validEnd, lastStart, count, firstTS, lastTS, nil
+		return sf.scanForward(HeaderSize, fileSize, scanResult{}), nil
 	}
 
 	rec, n, err := sf.frameAt(sf.hdr.DataEnd)
 	if err != nil {
-		return 0, 0, 0, time.Time{}, time.Time{}, err
+		return scanResult{}, err
 	}
 
-	validEnd = sf.hdr.DataEnd + n
-	count = sf.hdr.RecordCount
-	firstTS = sf.hdr.FirstIngestTS
-	lastTS = rec.EventID.IngestTS
-	validEnd, lastStart, count, firstTS, lastTS = sf.scanForward(validEnd, fileSize, count, firstTS, lastTS)
-	return validEnd, lastStart, count, firstTS, lastTS, nil
+	return sf.scanForward(sf.hdr.DataEnd+n, fileSize, scanResult{
+		count:   sf.hdr.RecordCount,
+		firstTS: sf.hdr.FirstIngestTS,
+		lastTS:  rec.EventID.IngestTS,
+	}), nil
 }
 
-func (sf *File) scanForward(off, fileSize, count uint32, firstTS, lastTS time.Time) (validEnd, lastStart, outCount uint32, outFirst, outLast time.Time) {
-	validEnd = off
-	if count == 0 {
-		lastStart = HeaderSize
+// scanForward extends prior with whole frames read from off until the first
+// torn or unreadable frame, and returns the combined result.
+func (sf *File) scanForward(off, fileSize uint32, prior scanResult) scanResult {
+	res := prior
+	res.validEnd = off
+	if prior.count == 0 {
+		res.lastStart = HeaderSize
 	} else {
-		lastStart = sf.hdr.DataEnd
+		res.lastStart = sf.hdr.DataEnd
 	}
-	outCount = count
-	outFirst = firstTS
-	outLast = lastTS
 
 	var scanScratch []byte
 	for off < fileSize {
@@ -473,20 +482,20 @@ func (sf *File) scanForward(off, fileSize, count uint32, firstTS, lastTS time.Ti
 		if readErr != nil {
 			break
 		}
-		outCount++
-		if outCount == 1 {
-			outFirst = rec.EventID.IngestTS
+		res.count++
+		if res.count == 1 {
+			res.firstTS = rec.EventID.IngestTS
 		}
-		lastStart = off
-		outLast = rec.EventID.IngestTS
-		validEnd = off + n
+		res.lastStart = off
+		res.lastTS = rec.EventID.IngestTS
+		res.validEnd = off + n
 		off += n
 	}
-	return validEnd, lastStart, outCount, outFirst, outLast
+	return res
 }
 
-func (sf *File) resyncFromFront(fileSize uint32) (validEnd, lastStart, count uint32, firstTS, lastTS time.Time) {
-	return sf.scanForward(HeaderSize, fileSize, 0, time.Time{}, time.Time{})
+func (sf *File) resyncFromFront(fileSize uint32) scanResult {
+	return sf.scanForward(HeaderSize, fileSize, scanResult{})
 }
 
 // initRecordDigest seeds the rolling record digest from on-disk bytes
