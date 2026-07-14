@@ -25,7 +25,7 @@ func appendRecordFrame(dst []byte, rec chunk.Record, dict *chunk.StringDict) ([]
 		return dst, fmt.Errorf("encode attrs: %w", err)
 	}
 
-	frameSize := 3*8 + 16 + 16 + 4 + len(attrData) + 4 + len(rec.Raw)
+	frameSize := frameFixedHeaderSize + len(attrData) + frameRawLenSize + len(rec.Raw)
 	base := len(dst)
 	if cap(dst)-base < frameSize {
 		grown := make([]byte, base, base+frameSize)
@@ -37,21 +37,21 @@ func appendRecordFrame(dst []byte, rec chunk.Record, dict *chunk.StringDict) ([]
 	off := 0
 
 	binary.LittleEndian.PutUint64(frame[off:], tsNanos(rec.SourceTS))
-	off += 8
+	off += frameTSSize
 	binary.LittleEndian.PutUint64(frame[off:], tsNanos(rec.IngestTS))
-	off += 8
+	off += frameTSSize
 	binary.LittleEndian.PutUint64(frame[off:], tsNanos(rec.WriteTS))
-	off += 8
+	off += frameTSSize
 	copy(frame[off:], rec.EventID.IngesterID[:])
-	off += 16
+	off += frameGLIDSize
 	copy(frame[off:], rec.EventID.NodeID[:])
-	off += 16
+	off += frameGLIDSize
 	binary.LittleEndian.PutUint32(frame[off:], rec.EventID.IngestSeq)
-	off += 4
+	off += frameIngestSeqSize
 	copy(frame[off:], attrData)
 	off += len(attrData)
 	binary.LittleEndian.PutUint32(frame[off:], uint32(len(rec.Raw))) //nolint:gosec // G115: raw bounded by chunk limits
-	off += 4
+	off += frameRawLenSize
 	copy(frame[off:], rec.Raw)
 	return dst, nil
 }
@@ -61,9 +61,9 @@ func appendRecordFrame(dst []byte, rec chunk.Record, dict *chunk.StringDict) ([]
 // without materializing a map; header fields and Raw come from the view.
 func appendRecordFrameView(dst []byte, v record.View, dict *chunk.StringDict) ([]byte, error) {
 	base := len(dst)
-	fixed := 3*8 + 16 + 16 + 4
+	fixed := frameFixedHeaderSize
 	if cap(dst)-base < fixed {
-		grown := make([]byte, base, base+fixed+len(v.AttrsWire)*2+4+len(v.Raw))
+		grown := make([]byte, base, base+fixed+len(v.AttrsWire)*2+frameRawLenSize+len(v.Raw))
 		copy(grown, dst)
 		dst = grown
 	}
@@ -72,15 +72,15 @@ func appendRecordFrameView(dst []byte, v record.View, dict *chunk.StringDict) ([
 	off := 0
 
 	binary.LittleEndian.PutUint64(frame[off:], tsNanos(v.SourceTS))
-	off += 8
+	off += frameTSSize
 	binary.LittleEndian.PutUint64(frame[off:], tsNanos(v.IngestTS))
-	off += 8
+	off += frameTSSize
 	binary.LittleEndian.PutUint64(frame[off:], tsNanos(v.WriteTS))
-	off += 8
+	off += frameTSSize
 	copy(frame[off:], v.EventID.IngesterID[:])
-	off += 16
+	off += frameGLIDSize
 	copy(frame[off:], v.EventID.NodeID[:])
-	off += 16
+	off += frameGLIDSize
 	binary.LittleEndian.PutUint32(frame[off:], v.EventID.IngestSeq)
 
 	out, _, err := chunk.AppendWithDictWire(dst, v.AttrsWire, dict)
@@ -90,7 +90,7 @@ func appendRecordFrameView(dst []byte, v record.View, dict *chunk.StringDict) ([
 	dst = out
 
 	rawPrefix := len(dst)
-	need := 4 + len(v.Raw)
+	need := frameRawLenSize + len(v.Raw)
 	if cap(dst)-rawPrefix < need {
 		grown := make([]byte, rawPrefix, rawPrefix+need)
 		copy(grown, dst)
@@ -98,7 +98,7 @@ func appendRecordFrameView(dst []byte, v record.View, dict *chunk.StringDict) ([
 	}
 	dst = dst[:rawPrefix+need]
 	binary.LittleEndian.PutUint32(dst[rawPrefix:], uint32(len(v.Raw))) //nolint:gosec // G115: raw bounded by chunk limits
-	copy(dst[rawPrefix+4:], v.Raw)
+	copy(dst[rawPrefix+frameRawLenSize:], v.Raw)
 	return dst, nil
 }
 

@@ -83,41 +83,10 @@ func MapSection(blobPath string, sectionType byte) ([]byte, func() error, error)
 //   - underlying os/syscall errors for open/stat/mmap failures.
 func LoadSection[T any](blobPath string, sectionType byte, decode func(data []byte) (T, error)) (T, error) {
 	var zero T
-
-	f, err := os.Open(filepath.Clean(blobPath))
+	data, closeMapping, err := MapSection(blobPath, sectionType)
 	if err != nil {
-		return zero, fmt.Errorf("open %s: %w", blobPath, err)
+		return zero, err
 	}
-	defer func() { _ = f.Close() }()
-
-	info, err := f.Stat()
-	if err != nil {
-		return zero, fmt.Errorf("stat %s: %w", blobPath, err)
-	}
-
-	toc, err := ReadTOC(f, info.Size())
-	if err != nil {
-		return zero, fmt.Errorf("read TOC of %s: %w", blobPath, err)
-	}
-
-	entry, ok := toc.Find(sectionType)
-	if !ok {
-		return zero, fmt.Errorf("%w: type=0x%02x in %s", ErrSectionNotFound, sectionType, blobPath)
-	}
-
-	// mmap requires a page-aligned offset. Compute the largest page
-	// boundary at or before the section start, mmap from there, and
-	// return a sub-slice that begins at the section's actual offset.
-	pageSize := int64(syscall.Getpagesize())
-	pageOffset := entry.Offset - (entry.Offset % pageSize)
-	mapStart := entry.Offset - pageOffset
-	mapLen := mapStart + entry.Size
-
-	data, err := syscall.Mmap(int(f.Fd()), pageOffset, int(mapLen), syscall.PROT_READ, syscall.MAP_SHARED) //nolint:gosec // G115: int64→int safe on 64-bit
-	if err != nil {
-		return zero, fmt.Errorf("mmap section 0x%02x in %s: %w", sectionType, blobPath, err)
-	}
-	defer func() { _ = syscall.Munmap(data) }()
-
-	return decode(data[mapStart : mapStart+entry.Size])
+	defer func() { _ = closeMapping() }()
+	return decode(data)
 }

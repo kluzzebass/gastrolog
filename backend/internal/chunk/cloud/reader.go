@@ -213,31 +213,22 @@ func parseTOCRegion(entryBuf, footerBuf []byte) (BlobTOC, error) {
 	entries := make([]TOCEntry, count)
 	for i := range entries {
 		off := i * tocEntrySize
-		raw := entryBuf[off : off+tocEntrySize]
-		var e TOCEntry
-		e.Type = raw[0]
-		e.Version = raw[1]
-		e.Offset = int64(binary.LittleEndian.Uint32(raw[2:6]))
-		e.Size = int64(binary.LittleEndian.Uint32(raw[6:10]))
-		copy(e.Hash[:], raw[10:42])
-		entries[i] = e
+		entries[i] = decodeTOCEntry(entryBuf[off : off+tocEntrySize])
 	}
-	toc := BlobTOC{
-		Entries:    entries,
-		BlobDigest: digest,
-		Version:    tocFooterVersion,
-	}
-	if e, ok := toc.Find(SectionIngestTSIndex); ok {
-		toc.IngestIdxOffset = e.Offset
-		toc.IngestIdxSize = e.Size
-		toc.IngestIdxHash = e.Hash
-	}
-	if e, ok := toc.Find(SectionSourceTSIndex); ok {
-		toc.SourceIdxOffset = e.Offset
-		toc.SourceIdxSize = e.Size
-		toc.SourceIdxHash = e.Hash
-	}
-	return toc, nil
+	return newBlobTOC(entries, digest), nil
+}
+
+// decodeTOCEntry deserializes one tocEntrySize-byte on-disk TOC entry;
+// the inverse of encodeTOCEntry (writer.go). raw must be exactly
+// tocEntrySize bytes.
+func decodeTOCEntry(raw []byte) TOCEntry {
+	var e TOCEntry
+	e.Type = raw[0]
+	e.Version = raw[1]
+	e.Offset = int64(binary.LittleEndian.Uint32(raw[2:6]))
+	e.Size = int64(binary.LittleEndian.Uint32(raw[6:10]))
+	copy(e.Hash[:], raw[10:42])
+	return e
 }
 
 // Meta returns the blob metadata.
@@ -388,48 +379,48 @@ func decodeFrame(frame []byte, dict chunk.DictReader) (chunk.Record, error) {
 	off := 0
 	var rec chunk.Record
 
-	if off+8 > len(frame) {
+	if off+frameTSSize > len(frame) {
 		return chunk.Record{}, errors.New("truncated sourceTS")
 	}
 	rec.SourceTS = tsFromNanos(binary.LittleEndian.Uint64(frame[off:]))
-	off += 8
+	off += frameTSSize
 
-	if off+8 > len(frame) {
+	if off+frameTSSize > len(frame) {
 		return chunk.Record{}, errors.New("truncated ingestTS")
 	}
 	rec.IngestTS = tsFromNanos(binary.LittleEndian.Uint64(frame[off:]))
-	off += 8
+	off += frameTSSize
 
-	if off+8 > len(frame) {
+	if off+frameTSSize > len(frame) {
 		return chunk.Record{}, errors.New("truncated writeTS")
 	}
 	rec.WriteTS = tsFromNanos(binary.LittleEndian.Uint64(frame[off:]))
-	off += 8
+	off += frameTSSize
 
-	if off+16 > len(frame) {
+	if off+frameGLIDSize > len(frame) {
 		return chunk.Record{}, errors.New("truncated ingesterID")
 	}
-	copy(rec.EventID.IngesterID[:], frame[off:off+16])
-	off += 16
+	copy(rec.EventID.IngesterID[:], frame[off:off+frameGLIDSize])
+	off += frameGLIDSize
 
-	if off+16 > len(frame) {
+	if off+frameGLIDSize > len(frame) {
 		return chunk.Record{}, errors.New("truncated nodeID")
 	}
-	copy(rec.EventID.NodeID[:], frame[off:off+16])
-	off += 16
+	copy(rec.EventID.NodeID[:], frame[off:off+frameGLIDSize])
+	off += frameGLIDSize
 
-	if off+4 > len(frame) {
+	if off+frameIngestSeqSize > len(frame) {
 		return chunk.Record{}, errors.New("truncated ingestSeq")
 	}
 	rec.EventID.IngestSeq = binary.LittleEndian.Uint32(frame[off:])
-	off += 4
+	off += frameIngestSeqSize
 	rec.EventID.IngestTS = rec.IngestTS
 
-	if off+2 > len(frame) {
+	if off+frameAttrCountSize > len(frame) {
 		return chunk.Record{}, errors.New("truncated attr count")
 	}
 	attrCount := int(binary.LittleEndian.Uint16(frame[off:]))
-	attrDataLen := 2 + attrCount*8
+	attrDataLen := frameAttrCountSize + attrCount*frameAttrPairSize
 	if off+attrDataLen > len(frame) {
 		return chunk.Record{}, errors.New("truncated attrs")
 	}
@@ -440,11 +431,11 @@ func decodeFrame(frame []byte, dict chunk.DictReader) (chunk.Record, error) {
 	rec.Attrs = attrs
 	off += attrDataLen
 
-	if off+4 > len(frame) {
+	if off+frameRawLenSize > len(frame) {
 		return chunk.Record{}, errors.New("truncated raw length")
 	}
 	rawLen := binary.LittleEndian.Uint32(frame[off:])
-	off += 4
+	off += frameRawLenSize
 	if off+int(rawLen) > len(frame) {
 		return chunk.Record{}, errors.New("truncated raw body")
 	}

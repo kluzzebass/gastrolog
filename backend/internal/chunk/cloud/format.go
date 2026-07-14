@@ -79,6 +79,32 @@ const (
 	tocFooterVersion = uint32(1)
 )
 
+// Record frame layout (see the package comment for the full frame shape).
+// The encoders (appendRecordFrame / appendRecordFrameView, encode.go) and
+// the decoder (decodeFrame, reader.go) both derive sizes and offsets from
+// these constants so the durable byte layout is named exactly once.
+const (
+	// frameLenSize is the u32 frame-length prefix that precedes each
+	// frame in the records section; it is not part of the frame itself.
+	frameLenSize = 4
+
+	frameTSSize        = 8  // sourceTS / ingestTS / writeTS: i64 nanoseconds
+	frameGLIDSize      = 16 // ingesterID / nodeID
+	frameIngestSeqSize = 4  // ingestSeq: u32
+
+	// frameFixedHeaderSize covers every fixed-width field before the
+	// attrs block: three timestamps, two GLIDs, and ingestSeq.
+	frameFixedHeaderSize = 3*frameTSSize + 2*frameGLIDSize + frameIngestSeqSize
+
+	// Attrs block wire form, mirroring chunk.EncodeWithDict:
+	// [attrCount:u16] then attrCount × [keyID:u32][valID:u32].
+	frameAttrCountSize = 2
+	frameAttrPairSize  = 8
+
+	// frameRawLenSize is the u32 raw-payload length following the attrs.
+	frameRawLenSize = 4
+)
+
 // Section type bytes for entries in the TOC. Each type identifies a kind
 // of section the blob can carry; readers look up entries by type to find
 // the section's offset+size+hash without caring about positional order.
@@ -188,6 +214,29 @@ type TOCEntry struct {
 // to detect corruption against the FSM-replicated truth.
 func (e *TOCEntry) VerifyHash(data []byte) bool {
 	return sha256.Sum256(data) == e.Hash
+}
+
+// newBlobTOC assembles a BlobTOC from its entries and whole-blob digest,
+// populating the convenience accessors for the well-known sections. The
+// writer (finalizeTOC) and the readers (parseTOCRegion) both construct
+// TOCs through here so the well-known-section population cannot drift.
+func newBlobTOC(entries []TOCEntry, digest [32]byte) BlobTOC {
+	toc := BlobTOC{
+		Entries:    entries,
+		BlobDigest: digest,
+		Version:    tocFooterVersion,
+	}
+	if e, ok := toc.Find(SectionIngestTSIndex); ok {
+		toc.IngestIdxOffset = e.Offset
+		toc.IngestIdxSize = e.Size
+		toc.IngestIdxHash = e.Hash
+	}
+	if e, ok := toc.Find(SectionSourceTSIndex); ok {
+		toc.SourceIdxOffset = e.Offset
+		toc.SourceIdxSize = e.Size
+		toc.SourceIdxHash = e.Hash
+	}
+	return toc
 }
 
 // Find returns the entry with the given section type, or false if no
