@@ -54,13 +54,13 @@ type Meta struct {
 // Merge bounds use IngestTS only; full EventID order lives in the index tail (see index.go).
 type Header struct {
 	format.Header
-	ID              glid.GLID
-	VaultID         glid.GLID
-	RecordCount     uint32
-	DataEnd         uint32 // byte offset where the last written record starts
-	FirstIngestTS   time.Time
-	LastIngestTS    time.Time
-	IndexOffset uint32 // byte offset where the EventID index starts; 0 while working
+	ID            glid.GLID
+	VaultID       glid.GLID
+	RecordCount   uint32
+	DataEnd       uint32 // byte offset where the last written record starts
+	FirstIngestTS time.Time
+	LastIngestTS  time.Time
+	IndexOffset   uint32 // byte offset where the EventID index starts; 0 while working
 	// SegmentChecksum is XXH64 of record bytes [HeaderSize:IndexOffset).
 	// A non-linear digest, NOT a CRC: each frame ends with its own CRC32 and
 	// rolling a CRC over lenPrefix ++ body ++ bodyCRC cancels the content
@@ -74,6 +74,16 @@ type Header struct {
 	SourceIndexOffset   uint32 // byte offset where the SourceTS index starts
 	SourceIndexCount    uint32 // sparse entries (non-zero SourceTS only)
 	SourceIndexChecksum uint32 // CRC32(IEEE) of source index bytes
+}
+
+// IsUnpopulated reports the zero-header sentinel: the struct carries no
+// decoded segment stats (RecordCount and SegmentChecksum both zero), either
+// because the caller never read the header from disk or because the segment
+// is genuinely empty — re-reading the header from disk is the correct move in
+// both cases. Publish paths use this to decide whether metadata must come
+// from a header-only disk read (gastrolog-faj2yv).
+func (h Header) IsUnpopulated() bool {
+	return h.RecordCount == 0 && h.SegmentChecksum == 0
 }
 
 func encodeHeader(h Header, buf []byte) {
