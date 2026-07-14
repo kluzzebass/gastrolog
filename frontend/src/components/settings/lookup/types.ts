@@ -230,10 +230,6 @@ export function jsonFileLookupEqual(draft: JSONFileLookupDraft, saved: JSONFileL
 // semantics are identical; only the on-disk file format differs.
 export type YAMLFileLookupDraft = JSONFileLookupDraft;
 
-export function emptyYamlDraft(): YAMLFileLookupDraft {
-  return emptyJsonDraft();
-}
-
 export function yamlFileLookupEqual(draft: YAMLFileLookupDraft, saved: YAMLFileLookupEntry): boolean {
   return jsonFileLookupEqual(draft, saved);
 }

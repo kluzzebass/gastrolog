@@ -17,13 +17,3 @@ export const PEER_PURPOSE_SLOTS = [
   { id: "file-xfer", emoji: "📁", label: "file transfer" },
   { id: "raft", emoji: "⚓", label: "raft" },
 ] as const;
-
-export type PeerPurposeId = (typeof PEER_PURPOSE_SLOTS)[number]["id"];
-
-const slotById = new Map<string, (typeof PEER_PURPOSE_SLOTS)[number]>(
-  PEER_PURPOSE_SLOTS.map((slot) => [slot.id, slot]),
-);
-
-export function peerPurposeSlot(purposeId: string) {
-  return slotById.get(purposeId);
-}

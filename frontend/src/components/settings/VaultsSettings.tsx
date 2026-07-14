@@ -52,7 +52,7 @@ export interface StorageEntry {
   nodeId: string;
 }
 
-export function emptyStorageEntry(type: VaultTypeLabel): StorageEntry {
+function emptyStorageEntry(type: VaultTypeLabel): StorageEntry {
   return {
     key: crypto.randomUUID(),
     type,
