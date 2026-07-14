@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"maps"
 	"os"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -75,6 +76,11 @@ type vaultDist struct {
 	mu                  sync.RWMutex
 	segments            map[glid.GLID]string   // segment ID → on-disk path
 	retired             map[glid.GLID]struct{} // released from vault-ctl; skip rescan republish
+	// badHeader remembers completed/ files whose fixed header failed to
+	// decode, keyed by segment ID (state, not time): each corrupt file is
+	// read and warned about exactly once, not on every rescan wake
+	// (gastrolog-faj2yv).
+	badHeader map[glid.GLID]struct{}
 }
 
 func newVaultDist(root string, cfg VaultConfig, log *slog.Logger) (*vaultDist, error) {
@@ -96,6 +102,7 @@ func newVaultDist(root string, cfg VaultConfig, log *slog.Logger) (*vaultDist, e
 		onPublishCommitted:  cfg.OnPublishCommitted,
 		segments:            make(map[glid.GLID]string),
 		retired:             make(map[glid.GLID]struct{}),
+		badHeader:           make(map[glid.GLID]struct{}),
 	}, nil
 }
 
@@ -150,51 +157,60 @@ func (v *vaultDist) finalizeAfterPublish(segID glid.GLID, path string) error {
 
 func metadataForPublish(seg segmentation.CompletedSegment) (Metadata, error) {
 	hdr := seg.Header
-	if seg.Path != "" && hdr.RecordCount == 0 && hdr.SegmentChecksum == 0 {
-		sf, err := segment.Open(seg.Path)
+	if seg.Path != "" && hdr.IsUnpopulated() {
+		// Header-only read: this node finalized and fsynced the file, so a
+		// full segment.Open here re-verified every record byte just to fetch
+		// counts; the checksum travels in the header for downstream
+		// verification instead (gastrolog-faj2yv).
+		h, err := segment.ReadHeader(seg.Path)
 		if err != nil {
 			return Metadata{}, err
 		}
-		hdr = sf.Header()
-		_ = sf.Close()
+		hdr = h
 	}
 	return metadataFromPath(seg.Path, seg.VaultID, seg.Meta.ID, hdr)
 }
 
 // stranded returns completed segments on disk that this manager has not
 // prepared yet — segments whose channel notification was dropped (burst) or
-// that predate this process (restart).
+// that predate this process (restart). Cost is one directory listing plus one
+// fixed-header read per unknown segment: a restart backlog must not re-verify
+// every byte of every completed file before the first publish
+// (gastrolog-faj2yv).
 func (v *vaultDist) stranded(vaultID glid.GLID) []segmentation.CompletedSegment {
-	entries, err := os.ReadDir(paths.CompletedDir(v.root))
+	ids, err := paths.ListSegmentIDs(paths.CompletedDir(v.root))
 	if err != nil {
 		v.log.Warn("stranded rescan: reading completed/ failed", "vault", vaultID, "error", err)
 		return nil
 	}
+	// Publish in segment-ID order (GLIDs are time-ordered), matching the old
+	// name-sorted directory walk.
+	sorted := slices.SortedFunc(maps.Keys(ids), glid.GLID.Compare)
 	var out []segmentation.CompletedSegment
-	for _, ent := range entries {
-		if ent.IsDir() {
-			continue
-		}
-		segID, err := glid.Parse(ent.Name())
-		if err != nil {
-			continue
-		}
+	for _, segID := range sorted {
 		v.mu.RLock()
 		_, known := v.segments[segID]
 		_, retired := v.retired[segID]
+		_, badHeader := v.badHeader[segID]
 		v.mu.RUnlock()
-		if known || retired {
+		if known || retired || badHeader {
 			continue
 		}
 		path := paths.CompletedSegment(v.root, segID)
-		sf, err := segment.Open(path)
+		hdr, err := segment.ReadHeader(path)
 		if err != nil {
-			v.log.Warn("stranded rescan: completed segment unreadable; skipping",
+			if os.IsNotExist(err) {
+				// Raced a release purge between the listing and the read; the
+				// ID drops out of the next listing on its own.
+				continue
+			}
+			v.mu.Lock()
+			v.badHeader[segID] = struct{}{}
+			v.mu.Unlock()
+			v.log.Warn("stranded rescan: completed segment header unreadable; skipping",
 				"vault", vaultID, "segment", segID, "path", path, "error", err)
 			continue
 		}
-		hdr := sf.Header()
-		_ = sf.Close()
 		out = append(out, segmentation.CompletedSegment{
 			VaultID: vaultID,
 			Meta:    segment.Meta{ID: segID, VaultID: vaultID},
