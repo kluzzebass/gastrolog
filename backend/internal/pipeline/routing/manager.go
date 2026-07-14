@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 
 	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline"
 	"gastrolog/internal/pipeline/segmentation"
 	"gastrolog/internal/record"
 )
@@ -90,8 +91,7 @@ type Manager struct {
 	perVault        sync.Map
 	perRoute        sync.Map
 	perVaultDropped sync.Map
-	running  atomic.Bool
-	wg       sync.WaitGroup
+	running         atomic.Bool
 }
 
 // New returns a routing manager.
@@ -205,20 +205,10 @@ func (m *Manager) Run(ctx context.Context, in <-chan Input) error {
 		return ErrAlreadyRunning
 	}
 
-	for range m.workers {
-		m.wg.Go(func() {
-			m.worker(ctx, in)
-		})
-	}
-
-	m.wg.Wait()
-	return ctx.Err()
-}
-
-func (m *Manager) worker(ctx context.Context, in <-chan Input) {
-	for item := range in {
+	pipeline.RunWorkerPool(m.workers, in, func(item Input) {
 		m.route(ctx, item)
-	}
+	})
+	return ctx.Err()
 }
 
 func resolveSource(in Input) SourceContext {

@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"maps"
-	"sync"
 	"sync/atomic"
 
+	"gastrolog/internal/pipeline"
 	"gastrolog/internal/pipeline/ingestion"
 	"gastrolog/internal/record"
 )
@@ -32,7 +32,6 @@ type Manager struct {
 	digesters []Digester
 
 	running atomic.Bool
-	wg      sync.WaitGroup
 }
 
 // New returns a manager and the read-only routing queue of digested outputs.
@@ -70,20 +69,10 @@ func (m *Manager) Run(ctx context.Context, in <-chan ingestion.Message) error {
 	}
 	defer close(m.out)
 
-	for range m.workers {
-		m.wg.Go(func() {
-			m.worker(in)
-		})
-	}
-
-	m.wg.Wait()
-	return ctx.Err()
-}
-
-func (m *Manager) worker(in <-chan ingestion.Message) {
-	for msg := range in {
+	pipeline.RunWorkerPool(m.workers, in, func(msg ingestion.Message) {
 		m.out <- m.digest(msg)
-	}
+	})
+	return ctx.Err()
 }
 
 func (m *Manager) digest(msg ingestion.Message) Output {
