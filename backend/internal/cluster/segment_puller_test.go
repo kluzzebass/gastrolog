@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"gastrolog/internal/glid"
@@ -68,6 +70,53 @@ func TestSegmentPullerRoundTrip(t *testing.T) {
 	}
 	if !bytes.Equal(buf.Bytes(), payload) {
 		t.Fatalf("pulled %d bytes, want %d", buf.Len(), len(payload))
+	}
+}
+
+// TestSegmentPullerMultiFrameFromFile exercises the production serve shape:
+// distribution.StreamSegment io.Copies from an *os.File, which routes through
+// segmentChunkWriter.ReadFrom — pullFrameSize frames through ONE buffer
+// reused across SendMsg calls (gastrolog-47jm3m). The payload spans more than
+// two frames and every byte is position-dependent, so any stale-buffer
+// retention by the transport, frame reordering, or aliasing corrupts the
+// reassembled bytes and fails the comparison. Run under -race this also
+// guards the no-copy SendMsg contract.
+func TestSegmentPullerMultiFrameFromFile(t *testing.T) {
+	t.Parallel()
+	const size = 2*pullFrameSize + 12345
+	payload := make([]byte, size)
+	for i := range payload {
+		payload[i] = byte(i) ^ byte(i>>9) ^ byte(i>>17)
+	}
+	path := filepath.Join(t.TempDir(), "segment.seg")
+	if err := os.WriteFile(path, payload, 0o600); err != nil {
+		t.Fatalf("write segment file: %v", err)
+	}
+
+	sp, cleanup := startSegmentPullServer(t, func(_, _ glid.GLID, w io.Writer) error {
+		// Mirror distribution.StreamSegment exactly.
+		f, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer f.Close() //nolint:errcheck // read-only
+		_, err = io.Copy(w, f)
+		return err
+	})
+	defer cleanup()
+
+	var buf bytes.Buffer
+	if err := sp.Pull(context.Background(), "node-origin", glid.New(), glid.New(), &buf); err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+	got := buf.Bytes()
+	if len(got) != len(payload) {
+		t.Fatalf("pulled %d bytes, want %d", len(got), len(payload))
+	}
+	for i := range got {
+		if got[i] != payload[i] {
+			t.Fatalf("pulled bytes diverge at offset %d: got %#x want %#x", i, got[i], payload[i])
+		}
 	}
 }
 
