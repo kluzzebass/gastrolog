@@ -61,6 +61,41 @@ func TestCreateStoreBareEndpointFailsAtConfigTime(t *testing.T) {
 	}
 }
 
+// TestCreateStoreMissingParams pins the per-provider required-parameter
+// guards in createStore: each missing param fails at config time, naming
+// the parameter, before any provider SDK or network is touched.
+func TestCreateStoreMissingParams(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		provider  string
+		params    map[string]string
+		wantParam string
+	}{
+		{"s3 missing bucket", "s3", map[string]string{ParamRegion: "eu-north-1"}, "bucket"},
+		{"s3 missing region", "s3", map[string]string{ParamBucket: "b"}, "region"},
+		{"azure missing container", "azure", map[string]string{ParamConnectionString: "cs"}, "container"},
+		{"azure missing connection_string", "azure", map[string]string{ParamContainer: "c"}, "connection_string"},
+		{"gcs missing bucket", "gcs", map[string]string{}, "bucket"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := CreateStore(tc.provider, tc.params, nil)
+			if err == nil {
+				t.Fatalf("CreateStore(%s, %v): expected error, got nil", tc.provider, tc.params)
+			}
+			if !strings.Contains(err.Error(), "missing required parameter") {
+				t.Fatalf("error = %q, want mention of missing required parameter", err)
+			}
+			if !strings.Contains(err.Error(), tc.wantParam) {
+				t.Fatalf("error = %q, want mention of %q", err, tc.wantParam)
+			}
+		})
+	}
+}
+
 func TestCreateStoreUnknownProviderNamesAllProviders(t *testing.T) {
 	t.Parallel()
 
