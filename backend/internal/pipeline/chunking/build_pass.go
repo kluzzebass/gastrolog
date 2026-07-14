@@ -57,9 +57,23 @@ func (v *vaultChunking) afterSealBuild(ctx context.Context, pending *vaultctlfsm
 	key := buildKey{chunkID: pending.ChunkID, sealedAt: pending.SealedAt}
 	// claimPostSeal refuses until the local build is marked done — see the
 	// sealProgress method comment (gastrolog-3vlse).
-	if !v.progress.claimPostSeal(key) {
+	claimed, done := v.progress.claimPostSeal(key)
+	if !claimed {
+		// Another caller owns this cycle's post-seal work — typically the
+		// goroutine the OnSealedManifestCleared callback spawned, racing the
+		// synchronous seal-commit path for the exactly-once claim. Wait for
+		// the claimant to FINISH: callers rely on "afterSealBuild returns ⇒
+		// head purge + release enqueue done", and returning while the
+		// claimant was mid-purge let BuildOnce return before the head copy
+		// was gone (gastrolog-4cxvdi). A nil channel means no claim exists
+		// for this cycle yet (build not marked); a later build pass runs the
+		// work, and there is nothing to wait for.
+		if done != nil {
+			<-done
+		}
 		return
 	}
+	defer v.progress.finishPostSeal(key)
 
 	segmentIDs := releasableSegmentIDs(v.fsm(), pending)
 	v.flushHeadPurgeForManifest(pending, segmentIDs)
