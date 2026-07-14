@@ -44,7 +44,7 @@ When credentials are left empty, the AWS SDK resolves them automatically: enviro
 |-------|----------|-------|
 | Bucket | Yes | |
 | Credentials JSON | Depends | Leave empty for Application Default Credentials |
-| Endpoint | No | Custom endpoint URL. Must include an explicit scheme (`https://` or `http://`) — a bare `host:port` is rejected. |
+| Endpoint | No | For emulators and local dev (e.g. `fake-gcs-server`). Must include an explicit scheme: `https://…`, or `http://…` for a plaintext local/dev endpoint — a bare `host:port` is rejected. Leave empty for the default Google endpoint. |
 
 When Credentials JSON is empty, the GCS client uses ADC: the `GOOGLE_APPLICATION_CREDENTIALS` environment variable, attached service accounts on GCE/GKE, or `gcloud auth application-default login`.
 
