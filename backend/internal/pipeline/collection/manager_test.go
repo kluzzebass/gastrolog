@@ -1220,6 +1220,159 @@ func (p *missingSegmentPull) Pull(ctx context.Context, nodeID glid.GLID, segment
 	return p.inner.Pull(ctx, nodeID, segmentID, dest)
 }
 
+// failingPull fails every pull retryably (os.ErrNotExist) and closes started
+// on the first attempt, so tests can tell the worker's startup pass is running.
+type failingPull struct {
+	once    sync.Once
+	started chan struct{}
+}
+
+func (p *failingPull) Pull(_ context.Context, _ glid.GLID, segmentID glid.GLID, _ io.Writer) error {
+	p.once.Do(func() { close(p.started) })
+	return fmt.Errorf("pull segment %s: %w", segmentID, os.ErrNotExist)
+}
+
+// TestPartialPassFiresOnPassCompleteOnce pins the gastrolog-3fv0dt acceptance:
+// a pass that lands 2 of 3 segments while the 3rd keeps failing retryably
+// fires OnPassComplete exactly once. The joined pull error must not suppress
+// the chunking wake for the segments that DID land, and the no-progress
+// retry passes that follow must not fire it again.
+func TestPartialPassFiresOnPassCompleteOnce(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	ok1 := glid.New()
+	ok2 := glid.New()
+	bad := glid.New()
+	root := t.TempDir()
+
+	inner := newMemoryPull()
+	inner.Put(ok1, writeSegmentBytes(t, vaultID, ok1, "lands-1"))
+	inner.Put(ok2, writeSegmentBytes(t, vaultID, ok2, "lands-2"))
+
+	log := &staticLog{}
+	log.setAssigned(
+		collection.AssignedSegment{VaultID: vaultID, SegmentID: ok1},
+		collection.AssignedSegment{VaultID: vaultID, SegmentID: ok2},
+		collection.AssignedSegment{VaultID: vaultID, SegmentID: bad},
+	)
+	receipts := &recordingReceipts{}
+
+	var passComplete atomic.Int32
+	fired := make(chan struct{}, 1)
+	mgr := collection.New(collection.Config{
+		OnPassComplete: func(glid.GLID) {
+			passComplete.Add(1)
+			select {
+			case fired <- struct{}{}:
+			default:
+			}
+		},
+	})
+	if err := mgr.RegisterVault(vaultID, root, collection.VaultConfig{
+		Log:      log,
+		Pull:     &missingSegmentPull{inner: inner, missing: bad},
+		Receipts: receipts,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		_ = mgr.Run(ctx)
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+
+	// The pass that landed ok1/ok2 must wake chunking despite the joined
+	// pull error for bad.
+	select {
+	case <-fired:
+	case <-time.After(10 * time.Second):
+		t.Fatal("OnPassComplete suppressed for a pass that made partial progress")
+	}
+	// Force one more full pass and wait for its afterCollectPass: ok1/ok2
+	// are receipted and present (skip), bad still fails, so the pass makes
+	// no progress and must NOT re-fire the wake. CollectOnce completes only
+	// after a pass that started after it registered, so the counter check
+	// below needs no sleep.
+	if err := mgr.CollectOnce(ctx, vaultID); err == nil {
+		t.Fatal("follow-up pass reported success while a segment is still missing")
+	}
+	if got := passComplete.Load(); got != 1 {
+		t.Fatalf("OnPassComplete fired %d times, want exactly 1", got)
+	}
+	for _, id := range []glid.GLID{ok1, ok2} {
+		if _, err := os.Stat(paths.HeadSegment(root, id)); err != nil {
+			t.Fatalf("collected segment missing from head/: %v", err)
+		}
+	}
+	if receipts.count() != 2 {
+		t.Fatalf("receipts = %d, want 2", receipts.count())
+	}
+}
+
+// TestFullyFailedPassDoesNotFireOnPassComplete pins the zero-progress side of
+// gastrolog-3fv0dt: a pass in which every pull fails must not wake chunking —
+// OnPassComplete means "something landed in head/", not "a pass ran".
+func TestFullyFailedPassDoesNotFireOnPassComplete(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	root := t.TempDir()
+
+	log := &staticLog{}
+	log.setAssigned(
+		collection.AssignedSegment{VaultID: vaultID, SegmentID: glid.New()},
+		collection.AssignedSegment{VaultID: vaultID, SegmentID: glid.New()},
+	)
+	receipts := &recordingReceipts{}
+	pull := &failingPull{started: make(chan struct{})}
+
+	var passComplete atomic.Int32
+	mgr := collection.New(collection.Config{
+		OnPassComplete: func(glid.GLID) { passComplete.Add(1) },
+	})
+	if err := mgr.RegisterVault(vaultID, root, collection.VaultConfig{
+		Log:      log,
+		Pull:     pull,
+		Receipts: receipts,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		_ = mgr.Run(ctx)
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+
+	// The first pull attempt proves the worker's startup pass is running, so
+	// CollectOnce below takes the worker-pass path (afterCollectPass runs
+	// before its waiter completes).
+	select {
+	case <-pull.started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("startup collect pass never attempted a pull")
+	}
+	if err := mgr.CollectOnce(ctx, vaultID); err == nil {
+		t.Fatal("fully-failed pass reported success")
+	}
+	if got := passComplete.Load(); got != 0 {
+		t.Fatalf("OnPassComplete fired %d times for zero-progress passes, want 0", got)
+	}
+	if receipts.count() != 0 {
+		t.Fatalf("receipts = %d, want 0", receipts.count())
+	}
+}
+
 // segGatedPull blocks pulls of one specific segment until release is closed;
 // pulls of other segments pass straight through.
 type segGatedPull struct {
