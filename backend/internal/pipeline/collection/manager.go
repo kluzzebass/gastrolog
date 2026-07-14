@@ -128,7 +128,7 @@ type collectWaiter struct {
 	done chan error
 }
 
-func newVaultCollect(vaultID glid.GLID, root string, cfg VaultConfig) (*vaultCollect, error) {
+func newVaultCollect(vaultID glid.GLID, root string, cfg VaultConfig, logger *slog.Logger) (*vaultCollect, error) {
 	if cfg.Log == nil {
 		return nil, errors.New("log reader required")
 	}
@@ -150,6 +150,13 @@ func newVaultCollect(vaultID glid.GLID, root string, cfg VaultConfig) (*vaultCol
 		receipts: cfg.Receipts,
 		fsm:      cfg.FSM,
 	})
+	// Sweep pre-head/*.pulling orphans left by a crash mid-pull before this
+	// vault's worker can start (gastrolog-66hmx3 / gastrolog-5do8sh gap 7).
+	// This must happen here, at construction, and not later from a
+	// CollectOnce pass: once the worker is running, a live in-flight pull
+	// may legitimately hold the exact same tmp path open, and this sweep
+	// has no way to distinguish that from a crash orphan.
+	sweepOrphanPullingFiles(root, logger)
 	return v, nil
 }
 
@@ -569,7 +576,7 @@ func (m *Manager) RegisterVault(vaultID glid.GLID, root string, cfg VaultConfig)
 	if _, ok := m.vaults[vaultID]; ok {
 		return errors.New("vault already registered")
 	}
-	v, err := newVaultCollect(vaultID, root, cfg)
+	v, err := newVaultCollect(vaultID, root, cfg, m.logger())
 	if err != nil {
 		return err
 	}

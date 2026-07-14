@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/paths"
@@ -60,6 +62,48 @@ func PullToPreHead(ctx context.Context, vaultRoot string, vaultID, segmentID gli
 		return "", err
 	}
 	return finalPath, nil
+}
+
+// isPreHeadPullingName reports whether name matches PullToPreHead's exact
+// tmp-file naming contract (a segment ID suffixed with preHeadPullSuffix).
+// Kept as a standalone predicate so a writer-sweeper contract test can
+// assert against this package's actual naming contract, not a guessed
+// pattern.
+func isPreHeadPullingName(name string) bool {
+	return strings.HasSuffix(name, preHeadPullSuffix)
+}
+
+// sweepOrphanPullingFiles removes pre-head/*.pulling files left behind by a
+// pull that crashed between PullToPreHead's O_TRUNC open and its rename
+// commit (gastrolog-5do8sh gap 7, gastrolog-66hmx3). Unlike the
+// data.glcb.tmp wedge, this leak is hygiene rather than correctness: a
+// FINAL-named pre-head orphan blocks nothing (a later collect pass reads
+// through it and a real re-pull of the same segment reuses the exact same
+// tmp path with O_TRUNC, discarding the stale bytes on rename — see
+// TestRegisterVaultSweepsPullingOrphanAndRepullStillOverwrites). The sweep
+// only exists so an unassigned segment's crash orphan does not sit in
+// pre-head/ forever if that segment is never pulled again.
+//
+// Must run before any pull can start (i.e. at vault registration, before
+// the worker goroutine is started) — the per-segment `pulling` exclusivity
+// set only guards against two pulls of the SAME segment racing each other,
+// not against this sweep racing a live in-flight pull.
+func sweepOrphanPullingFiles(vaultRoot string, logger *slog.Logger) {
+	entries, err := os.ReadDir(paths.PreHeadDir(vaultRoot))
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !isPreHeadPullingName(entry.Name()) {
+			continue
+		}
+		path := filepath.Join(paths.PreHeadDir(vaultRoot), entry.Name())
+		if err := os.Remove(path); err != nil {
+			logger.Warn("failed to remove orphan pre-head pulling temp file", "path", path, "error", err)
+		} else {
+			logger.Info("removed orphan pre-head pulling temp file", "path", path)
+		}
+	}
 }
 
 // PromoteVerified opens the pre-head segment, verifies its checksum, and atomically
