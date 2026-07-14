@@ -333,17 +333,13 @@ func (v *vaultDist) segmentPathForPull(segmentID glid.GLID) (string, bool) {
 			return registered, true
 		}
 	}
-	for _, path := range []string{
-		paths.HeadSegment(v.root, segmentID),
-		paths.CompletedSegment(v.root, segmentID),
-		paths.PreHeadSegment(v.root, segmentID),
-	} {
-		if _, err := os.Stat(path); err == nil {
-			v.mu.Lock()
-			v.segments[segmentID] = path
-			v.mu.Unlock()
-			return path, true
-		}
+	// Probe order: head/, completed/, pre-head/.
+	if path, ok := paths.FindSegment(v.root, segmentID,
+		paths.AreaHead, paths.AreaCompleted, paths.AreaPreHead); ok {
+		v.mu.Lock()
+		v.segments[segmentID] = path
+		v.mu.Unlock()
+		return path, true
 	}
 	return "", false
 }
@@ -365,16 +361,10 @@ func (v *vaultDist) segmentBytesPresent(segID glid.GLID, path string) bool {
 			return true
 		}
 	}
-	for _, p := range []string{
-		paths.HeadSegment(v.root, segID),
-		paths.CompletedSegment(v.root, segID),
-		paths.PreHeadSegment(v.root, segID),
-	} {
-		if _, err := os.Stat(p); err == nil {
-			return true
-		}
-	}
-	return false
+	// Probe order: head/, completed/, pre-head/.
+	_, ok := paths.FindSegment(v.root, segID,
+		paths.AreaHead, paths.AreaCompleted, paths.AreaPreHead)
+	return ok
 }
 
 func (v *vaultDist) forgetSegment(segID glid.GLID) {

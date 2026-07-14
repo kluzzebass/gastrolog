@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"maps"
-	"os"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -786,11 +785,7 @@ type HeadSegmentLocator struct {
 }
 
 func (l HeadSegmentLocator) SegmentPath(segmentID glid.GLID) (string, bool) {
-	path := paths.HeadSegment(l.Root, segmentID)
-	if _, err := os.Stat(path); err != nil {
-		return "", false
-	}
-	return path, true
+	return paths.FindSegment(l.Root, segmentID, paths.AreaHead)
 }
 
 // ErrUnknownVault is returned for an unregistered vault.

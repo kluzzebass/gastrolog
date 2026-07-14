@@ -95,6 +95,77 @@ func TestListSegmentIDs(t *testing.T) {
 	}
 }
 
+func writeSegmentFile(t *testing.T, root string, area paths.Area, segID glid.GLID) string {
+	t.Helper()
+	path := area.Segment(root, segID)
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestFindSegmentEachArea(t *testing.T) {
+	t.Parallel()
+	for _, area := range []paths.Area{
+		paths.AreaWorking, paths.AreaCompleted, paths.AreaPreHead, paths.AreaHead,
+	} {
+		t.Run(string(area), func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			segID := glid.New()
+			want := writeSegmentFile(t, root, area, segID)
+
+			got, ok := paths.FindSegment(root, segID,
+				paths.AreaHead, paths.AreaCompleted, paths.AreaPreHead, paths.AreaWorking)
+			if !ok || got != want {
+				t.Fatalf("FindSegment() = (%q, %v), want (%q, true)", got, ok, want)
+			}
+		})
+	}
+}
+
+func TestFindSegmentPrecedence(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	segID := glid.New()
+	headPath := writeSegmentFile(t, root, paths.AreaHead, segID)
+	completedPath := writeSegmentFile(t, root, paths.AreaCompleted, segID)
+
+	// Area order is search preference: first listed area wins.
+	if got, ok := paths.FindSegment(root, segID, paths.AreaHead, paths.AreaCompleted); !ok || got != headPath {
+		t.Fatalf("FindSegment(head, completed) = (%q, %v), want (%q, true)", got, ok, headPath)
+	}
+	if got, ok := paths.FindSegment(root, segID, paths.AreaCompleted, paths.AreaHead); !ok || got != completedPath {
+		t.Fatalf("FindSegment(completed, head) = (%q, %v), want (%q, true)", got, ok, completedPath)
+	}
+}
+
+func TestFindSegmentNotFound(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	segID := glid.New()
+
+	if path, ok := paths.FindSegment(root, segID,
+		paths.AreaHead, paths.AreaCompleted, paths.AreaPreHead); ok {
+		t.Fatalf("FindSegment() = (%q, true), want not found", path)
+	}
+
+	// An unlisted area must not be probed: bytes in working/ are invisible to
+	// a head/completed probe.
+	writeSegmentFile(t, root, paths.AreaWorking, segID)
+	if path, ok := paths.FindSegment(root, segID, paths.AreaHead, paths.AreaCompleted); ok {
+		t.Fatalf("FindSegment() = (%q, true), want not found for unlisted area", path)
+	}
+
+	// No areas: never found.
+	if path, ok := paths.FindSegment(root, segID); ok {
+		t.Fatalf("FindSegment() with no areas = (%q, true), want not found", path)
+	}
+}
+
 func TestSyncDir(t *testing.T) {
 	dir := t.TempDir()
 	if err := paths.SyncDir(dir); err != nil {

@@ -15,6 +15,39 @@ const (
 	Head      = "head"
 )
 
+// Area is a typed storage-area name for segment presence probes. New staging
+// areas must be added here so FindSegment callers can probe them.
+type Area string
+
+// Typed counterparts of the storage-area name constants.
+const (
+	AreaWorking   Area = Working
+	AreaCompleted Area = Completed
+	AreaPreHead   Area = PreHead
+	AreaHead      Area = Head
+)
+
+// Segment returns the path a segment would occupy in this area under root.
+func (a Area) Segment(root string, segmentID glid.GLID) string {
+	return filepath.Join(root, string(a), segmentID.String())
+}
+
+// FindSegment probes the given storage areas in order and returns the path of
+// the first one holding segment bytes. Area order is search preference: each
+// caller passes its explicit order, and changing an order changes that
+// caller's behavior. This is the single byte-presence probe backing
+// publish-without-bytes prevention, re-pull skipping, and build eligibility —
+// do not re-implement it with ad-hoc os.Stat loops.
+func FindSegment(root string, segmentID glid.GLID, areas ...Area) (string, bool) {
+	for _, a := range areas {
+		path := a.Segment(root, segmentID)
+		if _, err := os.Stat(path); err == nil {
+			return path, true
+		}
+	}
+	return "", false
+}
+
 func WorkingDir(root string) string {
 	return filepath.Join(root, Working)
 }

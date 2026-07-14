@@ -1,26 +1,17 @@
 package collection
 
 import (
-	"os"
-
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/paths"
 )
 
 // LocalSegmentPresent reports whether segment bytes exist under this home's
-// head/, completed/, or pre-head/ layout.
+// head/, completed/, or pre-head/ layout (probed in that order).
 func LocalSegmentPresent(vaultRoot string, segmentID glid.GLID) bool {
 	if vaultRoot == "" {
 		return false
 	}
-	for _, path := range []string{
-		paths.HeadSegment(vaultRoot, segmentID),
-		paths.CompletedSegment(vaultRoot, segmentID),
-		paths.PreHeadSegment(vaultRoot, segmentID),
-	} {
-		if _, err := os.Stat(path); err == nil {
-			return true
-		}
-	}
-	return false
+	_, ok := paths.FindSegment(vaultRoot, segmentID,
+		paths.AreaHead, paths.AreaCompleted, paths.AreaPreHead)
+	return ok
 }
