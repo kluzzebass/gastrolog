@@ -25,12 +25,12 @@ func ptr[T any](v T) *T { return &v }
 func TestPutRotationPolicy(t *testing.T) {
 	t.Parallel()
 	want := system.RotationPolicyConfig{
-		ID:         glid.New(),
-		Name:       "default-rotation",
+		ID:          glid.New(),
+		Name:        "default-rotation",
 		MaxBytes:    ptr(uint64(64_000_000)),
 		MaxAgeNanos: ptr(int64(time.Hour)),
-		MaxRecords: ptr(int64(100000)),
-		Cron:       ptr("0 * * * *"),
+		MaxRecords:  ptr(int64(100000)),
+		Cron:        ptr("0 * * * *"),
 	}
 	got := roundTripCommand(t, NewPutRotationPolicy(want), func(cmd *gastrologv1.SystemCommand) (system.RotationPolicyConfig, error) {
 		return ExtractPutRotationPolicy(cmd.GetPutRotationPolicy())
@@ -57,11 +57,11 @@ func TestPutRotationPolicyNilOptionals(t *testing.T) {
 func TestPutRetentionPolicy(t *testing.T) {
 	t.Parallel()
 	want := system.RetentionPolicyConfig{
-		ID:        glid.New(),
-		Name:      "long-term",
+		ID:          glid.New(),
+		Name:        "long-term",
 		MaxAgeNanos: ptr(int64(720 * time.Hour)),
 		MaxBytes:    ptr(uint64(10_000_000_000)),
-		MaxChunks: ptr(int64(500)),
+		MaxChunks:   ptr(int64(500)),
 	}
 	got := roundTripCommand(t, NewPutRetentionPolicy(want), func(cmd *gastrologv1.SystemCommand) (system.RetentionPolicyConfig, error) {
 		return ExtractPutRetentionPolicy(cmd.GetPutRetentionPolicy())

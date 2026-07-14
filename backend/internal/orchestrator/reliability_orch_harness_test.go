@@ -109,7 +109,7 @@ type orchRelHarness struct {
 
 // pipelineClusterOpts carries the pipeline tuning for withPipelineCluster.
 type pipelineClusterOpts struct {
-	completePolicy     segmentation.CompletePolicy
+	completePolicy  segmentation.CompletePolicy
 	chunkMaxRecords int64
 }
 
@@ -153,7 +153,7 @@ func withExtraVault(nodeIdxs []int) orchRelOption {
 func withPipelineCluster(completePolicy segmentation.CompletePolicy, chunkMaxRecords int64) orchRelOption {
 	return func(h *orchRelHarness) {
 		h.pipeline = &pipelineClusterOpts{
-			completePolicy:     completePolicy,
+			completePolicy:  completePolicy,
 			chunkMaxRecords: chunkMaxRecords,
 		}
 	}

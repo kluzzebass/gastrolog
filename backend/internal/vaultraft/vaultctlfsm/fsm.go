@@ -239,8 +239,8 @@ func (e *ManifestEntry) ToChunkMeta() chunk.ChunkMeta {
 // FSM is a Raft FSM that maintains chunk metadata for a single vault.
 // All reads are local (no Raft round-trip). Writes go through Raft.Apply().
 type FSM struct {
-	mu       sync.RWMutex
-	chunks   map[chunk.ChunkID]*ManifestEntry
+	mu     sync.RWMutex
+	chunks map[chunk.ChunkID]*ManifestEntry
 
 	// completedListScans counts ListCompletedSegments calls — a full O(N)
 	// registry walk. The chunking-leader plan pass regressed to O(N^2) by

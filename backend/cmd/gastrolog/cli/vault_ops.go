@@ -119,4 +119,3 @@ func NewResumeCommand() *cobra.Command {
 		},
 	}
 }
-

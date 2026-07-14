@@ -135,7 +135,7 @@ func newOriginFixture(t *testing.T, ctx context.Context, vaultID glid.GLID, fsm 
 	root := t.TempDir()
 
 	segMgr, completed := segmentation.New(segmentation.Config{
-		CompletePolicy:     segmentation.CompletePolicy{MaxBytes: 256},
+		CompletePolicy:  segmentation.CompletePolicy{MaxBytes: 256},
 		SyncBatchSize:   1,
 		SyncBatchWindow: time.Millisecond,
 	})

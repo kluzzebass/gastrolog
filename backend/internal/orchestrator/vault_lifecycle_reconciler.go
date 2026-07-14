@@ -1300,7 +1300,6 @@ const staleLeaderFSMGracePeriod = 1 * time.Hour
 // vault-ctl leadership churn and backlog catch-up.
 //
 // See gastrolog-5nhwe.
-//
 func (r *VaultLifecycleReconciler) SweepStaleLeaderFSMEntries() {
 	if v := r.gatherReconcileView(); v != nil {
 		r.reconcileStaleLeaderFSMEntries(v)

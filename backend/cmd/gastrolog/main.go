@@ -131,21 +131,21 @@ func main() {
 				return err
 			}
 			cfg := app.RunConfig{
-				HomeFlag:    mustString(cmd, "home"),
-				VaultsFlag:  mustString(cmd, "vaults"),
-				ConfigType:  mustString(cmd, "config-type"),
-				ServerAddr:  mustString(cmd, "listen"),
-				NoAuth:      mustBool(cmd, "no-auth"),
+				HomeFlag:         mustString(cmd, "home"),
+				VaultsFlag:       mustString(cmd, "vaults"),
+				ConfigType:       mustString(cmd, "config-type"),
+				ServerAddr:       mustString(cmd, "listen"),
+				NoAuth:           mustBool(cmd, "no-auth"),
 				ClusterAddr:      mustString(cmd, "cluster-addr"),
 				ClusterAdvertise: mustString(cmd, "cluster-advertise"),
 				ServicePoolMaxPerPeer: func() int {
 					v, _ := cmd.Flags().GetInt("service-pool-max-per-peer")
 					return v
 				}(),
-				JoinAddr:         mustString(cmd, "join-addr"),
-				JoinToken:   mustString(cmd, "join-token"),
-				NodeName:    mustString(cmd, "name"),
-				PprofAddr:   mustString(cmd, "pprof"),
+				JoinAddr:  mustString(cmd, "join-addr"),
+				JoinToken: mustString(cmd, "join-token"),
+				NodeName:  mustString(cmd, "name"),
+				PprofAddr: mustString(cmd, "pprof"),
 
 				WriteBootstrapToken:       mustString(cmd, "write-bootstrap-token"),
 				BootstrapTokenFile:        mustString(cmd, "bootstrap-token-file"),
@@ -157,8 +157,8 @@ func main() {
 				InitialAdminUser:     mustString(cmd, "initial-admin-user"),
 				InitialAdminPassword: mustString(cmd, "initial-admin-password"),
 
-				EnvironmentLabel: mustString(cmd, "environment-label"),
-				EnvironmentColor: mustString(cmd, "environment-color"),
+				EnvironmentLabel:    mustString(cmd, "environment-label"),
+				EnvironmentColor:    mustString(cmd, "environment-color"),
 				SegmentHotPathFsync: resolveSegmentHotPathFsync(cmd),
 
 				RaftHeartbeatTimeout: raftHeartbeat,

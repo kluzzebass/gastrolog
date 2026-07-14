@@ -47,12 +47,12 @@ func testRotationPolicies(t *testing.T, newStore func(t *testing.T) system.Store
 
 		id := newID()
 		rp := system.RotationPolicyConfig{
-			ID:         id,
-			Name:       "default",
+			ID:          id,
+			Name:        "default",
 			MaxBytes:    new(uint64(64_000_000)),
 			MaxAgeNanos: new(int64(time.Hour)),
-			MaxRecords: new(int64(1000)),
-			Cron:       new("0 * * * *"),
+			MaxRecords:  new(int64(1000)),
+			Cron:        new("0 * * * *"),
 		}
 
 		if err := s.PutRotationPolicy(ctx, rp); err != nil {
@@ -209,11 +209,11 @@ func testRetentionPolicies(t *testing.T, newStore func(t *testing.T) system.Stor
 
 		id := newID()
 		rp := system.RetentionPolicyConfig{
-			ID:        id,
-			Name:      "default",
+			ID:          id,
+			Name:        "default",
 			MaxAgeNanos: new(int64(720 * time.Hour)),
 			MaxBytes:    new(uint64(10_000_000_000)),
-			MaxChunks: new(int64(100)),
+			MaxChunks:   new(int64(100)),
 		}
 
 		if err := s.PutRetentionPolicy(ctx, rp); err != nil {

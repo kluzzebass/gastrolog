@@ -1092,11 +1092,11 @@ type vaultRaftCallbacks struct {
 	applyAckChunkHolders    func(ids []chunk.ChunkID, nodeID string) error
 	applyRevokeChunkHolders func(ids []chunk.ChunkID, nodeID string) error
 	isTombstoned            func(id chunk.ChunkID) bool
-	listChunks          func() []chunk.ChunkID
-	listRetPending      func() []chunk.ChunkID
-	overlayFromFSM      func(chunk.ChunkMeta) chunk.ChunkMeta
-	manifestEntries     func() []vaultctlfsm.ManifestEntry
-	manifestEntry       func(id chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool)
+	listChunks              func() []chunk.ChunkID
+	listRetPending          func() []chunk.ChunkID
+	overlayFromFSM          func(chunk.ChunkMeta) chunk.ChunkMeta
+	manifestEntries         func() []vaultctlfsm.ManifestEntry
+	manifestEntry           func(id chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool)
 }
 
 // ensureVaultCtlMetadata joins this node to the vault control-plane

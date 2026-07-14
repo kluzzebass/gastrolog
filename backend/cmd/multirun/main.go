@@ -60,7 +60,7 @@ type childProc struct {
 	name     string
 	color    string
 	proc     *os.Process   // nil if start failed
-	done     chan struct{}  // closed after exit + output flush
+	done     chan struct{} // closed after exit + output flush
 	exitCode int           // valid after done is closed
 }
 

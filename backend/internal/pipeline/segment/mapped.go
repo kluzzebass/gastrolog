@@ -1,8 +1,8 @@
 package segment
 
 import (
-	"encoding/binary"
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"gastrolog/internal/record"

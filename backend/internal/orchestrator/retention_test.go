@@ -762,7 +762,7 @@ func TestRetentionTargetRefreshesCmOnExistingRunner(t *testing.T) {
 			}},
 		}},
 		RetentionPolicies: []system.RetentionPolicyConfig{{
-			ID:     policyID,
+			ID:          policyID,
 			MaxAgeNanos: int64Ptr(int64(time.Hour)),
 		}},
 	}
