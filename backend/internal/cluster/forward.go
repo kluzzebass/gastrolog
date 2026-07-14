@@ -11,6 +11,7 @@ import (
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/convert"
+	"gastrolog/internal/pipeline/collection"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 
@@ -89,7 +90,10 @@ type ManagedFileIDsLister func() []string
 
 // SegmentPullServer streams a completed segment held locally (by the origin or
 // another holder) to w. Returns an error if the segment is unknown or not held
-// here. Wired to the orchestrator's ServePull seam (Rubicon C).
+// here — implementations signal that case with collection.ErrSegmentUnavailable
+// so the PullSegment handler encodes it as a NotFound status (which the
+// pulling side's SegmentPuller translates back into the same sentinel).
+// Wired to the orchestrator's ServePull seam (Rubicon C).
 type SegmentPullServer func(vaultID, segmentID glid.GLID, w io.Writer) error
 
 // ── ID parse helpers ────────────────────────────────────────────────
@@ -937,7 +941,15 @@ func pullSegmentStreamHandler(srv any, stream grpc.ServerStream) error {
 
 	w := &segmentChunkWriter{stream: stream}
 	if err := s.segmentPullServer(vaultID, segmentID, w); err != nil {
-		return status.Errorf(codes.NotFound, "serve segment %s/%s: %v", vaultID, segmentID, err)
+		// Encode the seam's typed sentinel as a status code the pulling side
+		// can translate back into collection.ErrSegmentUnavailable — the wire
+		// carries a machine-readable code, never classification-bearing prose
+		// (gastrolog-466kq5). Anything else (open/copy failure mid-stream) is
+		// a real serving fault, not "try another holder later".
+		if errors.Is(err, collection.ErrSegmentUnavailable) {
+			return status.Errorf(codes.NotFound, "serve segment %s/%s: %v", vaultID, segmentID, err)
+		}
+		return status.Errorf(codes.Internal, "serve segment %s/%s: %v", vaultID, segmentID, err)
 	}
 	return nil
 }

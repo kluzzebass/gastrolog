@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -845,4 +846,71 @@ func waitTrue(t *testing.T, what string, fn func() bool) {
 		time.Sleep(2 * time.Millisecond)
 	}
 	t.Fatalf("timeout waiting for: %s", what)
+}
+
+// TestSegmentPullClientAttachesUnavailableSentinel pins the boundary
+// translation in the segment pull client (gastrolog-466kq5): registry and
+// holder-resolution misses carry collection.ErrSegmentUnavailable so retry
+// classification runs on errors.Is — never on these messages' prose.
+func TestSegmentPullClientAttachesUnavailableSentinel(t *testing.T) {
+	t.Parallel()
+	fsm := vaultctlfsm.New()
+	applier := &fsmApplier{fsm: fsm}
+	vaultID := glid.New()
+	client := &segmentPullClient{lookup: func() *vaultctlfsm.FSM { return fsm }, puller: &recordingPuller{}, localNodeID: testHomeNode}
+
+	// Segment not yet in the vault-ctl registry (local FSM behind the publish).
+	var dest writeCounter
+	err := client.Pull(context.Background(), vaultID, glid.New(), &dest)
+	if !errors.Is(err, collection.ErrSegmentUnavailable) {
+		t.Fatalf("registry miss must carry ErrSegmentUnavailable, got: %v", err)
+	}
+
+	// Registered segment whose only known source is the local node itself:
+	// no remote holder to pull from until another ack lands.
+	segID := glid.New()
+	if err := applier.Apply(vaultctlfsm.MarshalPublishCompletedSegment(vaultctlfsm.CompletedSegmentEntry{
+		SegmentID:    segID,
+		RecordCount:  1,
+		OriginNodeID: testHomeNode,
+	})); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	err = client.Pull(context.Background(), vaultID, segID, &dest)
+	if !errors.Is(err, collection.ErrSegmentUnavailable) {
+		t.Fatalf("no-remote-holder must carry ErrSegmentUnavailable, got: %v", err)
+	}
+}
+
+// TestTranslateServePullError pins the server-side boundary mapping against
+// the real distribution sentinels it must translate (gastrolog-466kq5):
+// "cannot serve this segment here" becomes collection.ErrSegmentUnavailable
+// (encoded as NotFound on the wire); genuine serving faults pass through
+// unchanged so the pulling home logs them at Warn instead of deferring.
+func TestTranslateServePullError(t *testing.T) {
+	t.Parallel()
+
+	if translateServePullError(nil) != nil {
+		t.Fatal("nil must stay nil")
+	}
+	unavailable := []error{
+		distribution.ErrSegmentNotFound,
+		distribution.ErrSegmentGone,
+		distribution.ErrUnknownVault,
+		fmt.Errorf("serve pull: %w", distribution.ErrSegmentNotFound),
+	}
+	for _, err := range unavailable {
+		got := translateServePullError(err)
+		if !errors.Is(got, collection.ErrSegmentUnavailable) {
+			t.Errorf("translate(%v) must carry ErrSegmentUnavailable, got: %v", err, got)
+		}
+		if !errors.Is(got, err) {
+			t.Errorf("translate(%v) must keep the cause in the chain, got: %v", err, got)
+		}
+	}
+
+	fault := errors.New("read segment file: input/output error")
+	if got := translateServePullError(fault); got != fault {
+		t.Errorf("serving fault must pass through unchanged, got: %v", got)
+	}
 }
