@@ -165,6 +165,53 @@ func (p *retireOnPublish) Publish(ctx context.Context, meta Metadata) error {
 	return nil
 }
 
+// TestRetireSegmentsMatchesRetireSegment asserts the manager's batch
+// RetireSegments entry point and vaultDist.retireSegment's direct per-ID entry
+// point (the one publishStaged/publishStagedBatch use for the bytes-missing
+// path) leave identical bookkeeping: dropped from v.segments, added to
+// v.retired. RetireSegments is a thin loop over retireSegment
+// (gastrolog-2zvfp2) — this pins that the two entry points cannot diverge.
+func TestRetireSegmentsMatchesRetireSegment(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	root := t.TempDir()
+
+	mgr, _ := New(Config{})
+	if err := mgr.RegisterVault(vaultID, root, VaultConfig{Publisher: &countPublisher{}}); err != nil {
+		t.Fatal(err)
+	}
+	mgr.mu.Lock()
+	v := mgr.vaults[vaultID]
+	mgr.mu.Unlock()
+
+	batchA, batchB := glid.New(), glid.New()
+	direct := glid.New()
+
+	// Seed all three as known (as prepare() would have during staging).
+	v.mu.Lock()
+	v.segments[batchA] = paths.CompletedSegment(root, batchA)
+	v.segments[batchB] = paths.CompletedSegment(root, batchB)
+	v.segments[direct] = paths.CompletedSegment(root, direct)
+	v.mu.Unlock()
+
+	// Retire two through the manager's batch entry point...
+	mgr.RetireSegments(vaultID, []glid.GLID{batchA, batchB})
+	// ...and one directly through vaultDist.retireSegment, as the
+	// bytes-missing path in publishStaged/publishStagedBatch does.
+	v.retireSegment(direct)
+
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	for _, id := range []glid.GLID{batchA, batchB, direct} {
+		if _, known := v.segments[id]; known {
+			t.Errorf("segment %s still in v.segments after retirement", id)
+		}
+		if _, retired := v.retired[id]; !retired {
+			t.Errorf("segment %s missing from v.retired after retirement", id)
+		}
+	}
+}
+
 func TestSegmentPathForPullMissingFile(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
