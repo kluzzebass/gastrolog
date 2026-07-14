@@ -1,4 +1,4 @@
-package cloud
+package glcb
 
 import (
 	"errors"
@@ -10,7 +10,7 @@ import (
 
 // ErrSectionNotFound is returned when LoadSection is asked for a section
 // type whose entry is not present in the blob's TOC.
-var ErrSectionNotFound = errors.New("cloud: section not found in TOC")
+var ErrSectionNotFound = errors.New("glcb: section not found in TOC")
 
 // MapSection opens the GLCB blob at blobPath, locates the section with
 // the given type byte via the blob's TOC, and returns a long-lived

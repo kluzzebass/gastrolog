@@ -1,4 +1,4 @@
-package cloud_test
+package glcb_test
 
 import (
 	"gastrolog/internal/glid"
@@ -10,7 +10,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/chunk/cloud"
+	"gastrolog/internal/chunk/glcb"
 )
 
 func testRecords() (chunk.ChunkID, glid.GLID, []chunk.Record) {
@@ -83,7 +83,7 @@ func writeBlobToTempFile(t *testing.T, chunkID chunk.ChunkID, vaultID glid.GLID,
 	t.Helper()
 
 	dir := t.TempDir()
-	w, err := cloud.NewWriter(chunkID, vaultID, dir)
+	w, err := glcb.NewWriter(chunkID, vaultID, dir)
 	if err != nil {
 		t.Fatalf("NewWriter: %v", err)
 	}
@@ -110,13 +110,13 @@ func writeBlobToTempFile(t *testing.T, chunkID chunk.ChunkID, vaultID glid.GLID,
 // openBlobReader mmaps the written blob and returns a record reader — the
 // production GLCB open path (OpenMappedBlob + Reader). The fd-based reader
 // constructors were deleted in gastrolog-2v9d67.
-func openBlobReader(t *testing.T, tmp *os.File) *cloud.Reader {
+func openBlobReader(t *testing.T, tmp *os.File) *glcb.Reader {
 	t.Helper()
 	path := tmp.Name()
 	if err := tmp.Close(); err != nil {
 		t.Fatalf("close blob file: %v", err)
 	}
-	blob, err := cloud.OpenMappedBlob(path)
+	blob, err := glcb.OpenMappedBlob(path)
 	if err != nil {
 		t.Fatalf("OpenMappedBlob: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestRoundTrip(t *testing.T) {
 
 	enc, _ := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedDefault))
 	defer enc.Close()
-	w, err := cloud.NewWriter(chunkID, vaultID, t.TempDir())
+	w, err := glcb.NewWriter(chunkID, vaultID, t.TempDir())
 	if err != nil {
 		t.Fatalf("NewWriter: %v", err)
 	}
@@ -204,13 +204,13 @@ func TestRoundTrip(t *testing.T) {
 	assertRecord(t, 0, got, records[0])
 }
 
-func TestSeekableCursor(t *testing.T) {
+func TestGLCBCursor(t *testing.T) {
 	chunkID, vaultID, records := testRecords()
 	tmp := writeBlobToTempFile(t, chunkID, vaultID, records)
 
 	rd := openBlobReader(t, tmp)
 
-	cursor := cloud.NewSeekableCursorWithClose(rd, chunkID, nil)
+	cursor := glcb.NewGLCBCursor(rd, chunkID, nil)
 	defer cursor.Close()
 
 	// Forward iteration.
@@ -334,7 +334,7 @@ func TestLargeRoundTrip(t *testing.T) {
 	}
 
 	// Forward cursor: read all records, verify count.
-	cursor := cloud.NewSeekableCursorWithClose(rd, chunkID, nil)
+	cursor := glcb.NewGLCBCursor(rd, chunkID, nil)
 	defer cursor.Close()
 
 	var fwdCount int

@@ -241,9 +241,9 @@ func TestSupervisorOriginIngestToPublish(t *testing.T) {
 	vaultID := glid.New()
 
 	sup := New(Config{
-		NodeID:             nodeID,
-		Table:              allRoute(t, vaultID),
-		SegmentClosePolicy: segmentation.ClosePolicy{MaxBytes: 256},
+		NodeID:                nodeID,
+		Table:                 allRoute(t, vaultID),
+		SegmentCompletePolicy: segmentation.CompletePolicy{MaxBytes: 256},
 	})
 	if err := sup.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -278,9 +278,9 @@ func TestSupervisorFullVaultHome(t *testing.T) {
 	homeRoot := t.TempDir()
 
 	sup := New(Config{
-		NodeID:             nodeID,
-		Table:              allRoute(t, vaultID),
-		SegmentClosePolicy: segmentation.ClosePolicy{MaxBytes: 256},
+		NodeID:                nodeID,
+		Table:                 allRoute(t, vaultID),
+		SegmentCompletePolicy: segmentation.CompletePolicy{MaxBytes: 256},
 	})
 	if err := sup.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)

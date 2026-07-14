@@ -1,4 +1,4 @@
-package cloud
+package glcb
 
 import (
 	"os"
@@ -22,7 +22,7 @@ func FuzzOpenMappedBlob(f *testing.F) {
 	// A plausible but still invalid header (correct signature + type + version).
 	hdr := make([]byte, 200)
 	hdr[0] = 'i'  // signature
-	hdr[1] = 'g'  // TypeCloudBlob
+	hdr[1] = 'g'  // TypeGLCB
 	hdr[2] = 0x01 // formatVersion
 	f.Add(hdr)
 

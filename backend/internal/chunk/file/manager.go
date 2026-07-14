@@ -22,7 +22,7 @@ import (
 	"gastrolog/internal/blobstore"
 	"gastrolog/internal/btree"
 	"gastrolog/internal/chunk"
-	chunkcloud "gastrolog/internal/chunk/cloud"
+	"gastrolog/internal/chunk/glcb"
 	"gastrolog/internal/format"
 	"gastrolog/internal/logging"
 
@@ -1584,7 +1584,7 @@ func (m *Manager) rebuildBTrees(id chunk.ChunkID, idxFile *os.File, recordCount 
 // path still goes through loadChunkMeta (idx.log-based).
 func (m *Manager) loadChunkMetaFromGLCB(id chunk.ChunkID) (*chunkMeta, error) {
 	path := filepath.Join(m.chunkDir(id), dataGLCBFileName)
-	blob, err := chunkcloud.OpenMappedBlob(filepath.Clean(path))
+	blob, err := glcb.OpenMappedBlob(filepath.Clean(path))
 	if err != nil {
 		return nil, err
 	}
@@ -3303,7 +3303,7 @@ func (m *Manager) openLocalGLCBCursor(id chunk.ChunkID) (chunk.RecordCursor, err
 		return nil, err
 	}
 	m.noteGLCBDecoded(id)
-	return chunkcloud.NewSeekableCursorWithClose(rd, id, func() {
+	return glcb.NewGLCBCursor(rd, id, func() {
 		blob.Release()
 		m.releaseGLCBDecodeTables(id, blob)
 		chunkLock.RUnlock()
@@ -3609,7 +3609,7 @@ func (m *Manager) downloadCloudBlobToChunkDir(id chunk.ChunkID) (chunk.RecordCur
 
 	// Download the zstd-wrapped blob and decompress in one streaming pass
 	// into the tmp file. The unwrap happens inside DownloadAndUnwrap.
-	if err := chunkcloud.DownloadAndUnwrap(context.Background(), m.cfg.CloudStore, m.blobKey(id), tmp); err != nil {
+	if err := glcb.DownloadAndUnwrap(context.Background(), m.cfg.CloudStore, m.blobKey(id), tmp); err != nil {
 		m.trackCloudResult(err)
 		_ = tmp.Close()
 		_ = os.Remove(tmpPath) //nolint:gosec // G703: tmpPath from CreateTemp in chunkDir
@@ -3671,7 +3671,7 @@ func (m *Manager) verifyDownloadedBlob(id chunk.ChunkID, path string) error {
 	if err != nil {
 		return fmt.Errorf("stat downloaded blob for verify: %w", err)
 	}
-	toc, err := chunkcloud.ReadTOC(f, info.Size())
+	toc, err := glcb.ReadTOC(f, info.Size())
 	if err != nil {
 		return fmt.Errorf("read TOC for digest verify: %w", err)
 	}
@@ -4051,7 +4051,7 @@ func (m *Manager) CloudStoreConfigured() bool {
 //
 // On success returns the GLCB writer so callers can read TOC offsets
 // and NumFrames without a second pass over the file.
-func (m *Manager) sealToGLCB(id chunk.ChunkID) (*chunkcloud.Writer, int64, error) {
+func (m *Manager) sealToGLCB(id chunk.ChunkID) (*glcb.Writer, int64, error) {
 	m.mu.Lock()
 	if m.closed {
 		m.mu.Unlock()
@@ -4078,7 +4078,7 @@ func (m *Manager) sealToGLCB(id chunk.ChunkID) (*chunkcloud.Writer, int64, error
 		return nil, 0, fmt.Errorf("open cursor for GLCB seal: %w", err)
 	}
 
-	w, err := chunkcloud.NewWriter(id, m.cfg.VaultID, dir)
+	w, err := glcb.NewWriter(id, m.cfg.VaultID, dir)
 	if err != nil {
 		_ = cursor.Close()
 		return nil, 0, err
@@ -4177,7 +4177,7 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		m.mu.Unlock()
 		return chunk.ErrChunkNotSealed
 	}
-	bm := chunkcloud.BlobMeta{
+	bm := glcb.BlobMeta{
 		ChunkID:         id,
 		VaultID:         m.cfg.VaultID,
 		RecordCount:     uint32(meta.recordCount), //nolint:gosec // G115: sealed chunk record count fits in uint32 by rotation policy
@@ -4193,7 +4193,7 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		SourceIdxOffset: meta.sourceIdxOffset,
 		SourceIdxSize:   meta.sourceIdxSize,
 	}
-	toc := chunkcloud.BlobTOC{
+	toc := glcb.BlobTOC{
 		IngestIdxOffset: meta.ingestIdxOffset,
 		IngestIdxSize:   meta.ingestIdxSize,
 		SourceIdxOffset: meta.sourceIdxOffset,
@@ -4250,7 +4250,7 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		uploadCtx,
 		key,
 		pr,
-		chunkcloud.ObjectMetadata(bm),
+		glcb.ObjectMetadata(bm),
 	)
 	uploadCancel()
 	_ = pr.Close()
@@ -4742,7 +4742,7 @@ func (m *Manager) loadCloudChunksFromStore() error {
 		// place as cache and will be picked up by OpenCursor's local-GLCB
 		// fast path. See gastrolog-24m1t step 7j.
 		delete(m.metas, id)
-		cm := chunkcloud.BlobMetaToChunkMeta(id, blob)
+		cm := glcb.BlobMetaToChunkMeta(id, blob)
 		meta := &chunkMeta{
 			id:          id,
 			writeStart:  cm.WriteStart,

@@ -1,11 +1,11 @@
-package cloud_test
+package glcb_test
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
 
-	"gastrolog/internal/chunk/cloud"
+	"gastrolog/internal/chunk/glcb"
 )
 
 func TestOpenWriterRoundTrip(t *testing.T) {
@@ -18,7 +18,7 @@ func TestOpenWriterRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	w, err := cloud.OpenWriter(f, chunkID, vaultID)
+	w, err := glcb.OpenWriter(f, chunkID, vaultID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +34,7 @@ func TestOpenWriterRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	blob, err := cloud.OpenMappedBlob(path)
+	blob, err := glcb.OpenMappedBlob(path)
 	if err != nil {
 		t.Fatal(err)
 	}

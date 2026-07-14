@@ -74,7 +74,7 @@ func (sp *SegmentPuller) Pull(ctx context.Context, nodeID string, vaultID, segme
 			// encodes "segment unknown or not held here" as a NotFound
 			// status; re-attach the collection-owned sentinel so retry
 			// classification runs on errors.Is, never on status types or
-			// message prose. Mirrors chunk/cloud's blob-store-to-chunk
+			// message prose. Mirrors chunk/glcb's blob-store-to-chunk
 			// sentinel translation.
 			if status.Code(err) == codes.NotFound {
 				return fmt.Errorf("receive segment chunk from %s: %w: %w", nodeID, collection.ErrSegmentUnavailable, err)

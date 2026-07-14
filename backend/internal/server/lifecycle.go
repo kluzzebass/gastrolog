@@ -585,9 +585,9 @@ func (s *LifecycleServer) listLiveNodes(ctx context.Context) map[string]struct{}
 // buildRouteStats aggregates route statistics from local + peer sources.
 func (s *LifecycleServer) buildRouteStats() *apiv1.GetRouteStatsResponse {
 	rs := s.orch.GetRouteStats()
-	totalIngested := rs.Ingested
-	totalDropped := rs.Dropped
 	totalRouted := rs.Routed
+	totalDropped := rs.Dropped
+	totalMatched := rs.Matched
 	filterActive := s.orch.IsFilterSetActive()
 
 	vaultMap := make(map[string]*apiv1.VaultRouteStats)
@@ -607,10 +607,10 @@ func (s *LifecycleServer) buildRouteStats() *apiv1.GetRouteStatsResponse {
 	}
 
 	if s.peerRouteStats != nil {
-		pIngested, pDropped, pRouted, pFilterActive, pVaultStats, pRouteStats := s.peerRouteStats.AggregateRouteStats()
-		totalIngested += pIngested
-		totalDropped += pDropped
+		pRouted, pDropped, pMatched, pFilterActive, pVaultStats, pRouteStats := s.peerRouteStats.AggregateRouteStats()
 		totalRouted += pRouted
+		totalDropped += pDropped
+		totalMatched += pMatched
 		if pFilterActive {
 			filterActive = true
 		}
@@ -618,20 +618,20 @@ func (s *LifecycleServer) buildRouteStats() *apiv1.GetRouteStatsResponse {
 		mergePerRouteStats(routeMap, pRouteStats)
 	}
 
-	var ingestedRate, routedRate *apiv1.ThroughputRate
+	var routedRate, matchedRate *apiv1.ThroughputRate
 	if s.clusterRouteRates != nil {
-		ingestedRate, routedRate = s.clusterRouteRates()
+		routedRate, matchedRate = s.clusterRouteRates()
 	} else {
-		ingestedRate, routedRate = clusterRouteRates(s.localStats, s.peerRouteStats)
+		routedRate, matchedRate = clusterRouteRates(s.localStats, s.peerRouteStats)
 	}
 
 	resp := &apiv1.GetRouteStatsResponse{
-		TotalIngested:   totalIngested,
-		TotalDropped:    totalDropped,
 		TotalRouted:     totalRouted,
+		TotalDropped:    totalDropped,
+		TotalMatched:    totalMatched,
 		FilterSetActive: filterActive,
-		IngestedRate:    ingestedRate,
 		RoutedRate:      routedRate,
+		MatchedRate:     matchedRate,
 	}
 	for _, vs := range vaultMap {
 		resp.VaultStats = append(resp.VaultStats, vs)

@@ -109,10 +109,10 @@ func defaultRetryDelay(consecutiveFailures int) time.Duration {
 const defaultCheckpointInterval = 5 * time.Second
 
 // Manager starts and stops ingesters from assignment snapshots and emits minted
-// Messages on a bounded channel.
+// IngestMessages on a bounded channel.
 type Manager struct {
 	nodeID glid.GLID
-	out    chan Message
+	out    chan IngestMessage
 	logger *slog.Logger
 
 	onCheckpoint       func(id glid.GLID, data []byte)
@@ -143,7 +143,7 @@ type ingesterMeta struct {
 }
 
 // New returns a manager and the read-only digestion queue fed by minted messages.
-func New(cfg Config) (*Manager, <-chan Message) {
+func New(cfg Config) (*Manager, <-chan IngestMessage) {
 	if cfg.OutCapacity <= 0 {
 		cfg.OutCapacity = 1000
 	}
@@ -156,7 +156,7 @@ func New(cfg Config) (*Manager, <-chan Message) {
 	if cfg.CheckpointInterval <= 0 {
 		cfg.CheckpointInterval = defaultCheckpointInterval
 	}
-	out := make(chan Message, cfg.OutCapacity)
+	out := make(chan IngestMessage, cfg.OutCapacity)
 	m := &Manager{
 		nodeID:             cfg.NodeID,
 		out:                out,
@@ -332,7 +332,7 @@ func (m *Manager) runIngester(
 	minter *Minter,
 	meta ingesterMeta,
 	ctx context.Context,
-	out chan<- Message,
+	out chan<- IngestMessage,
 ) {
 	defer func() {
 		if v := recover(); v != nil {
@@ -379,7 +379,7 @@ func (m *Manager) runWithCheckpoints(
 	id glid.GLID,
 	ing Ingester,
 	minter *Minter,
-	out chan<- Message,
+	out chan<- IngestMessage,
 ) error {
 	cp, isCheckpointable := ing.(Checkpointable)
 	if !isCheckpointable || m.onCheckpoint == nil {
@@ -423,7 +423,7 @@ func (m *Manager) pumpIngester(
 	id glid.GLID,
 	ing Ingester,
 	minter *Minter,
-	out chan<- Message,
+	out chan<- IngestMessage,
 ) error {
 	ingesterOut := make(chan IngesterMessage)
 	errCh := make(chan error, 1)
@@ -450,8 +450,8 @@ func (m *Manager) pumpIngester(
 
 // emitMinted mints one ingester message and delivers it to the digestion
 // queue, honoring ctx while the queue is full.
-func emitMinted(ctx context.Context, minter *Minter, out chan<- Message, msg IngesterMessage) error {
-	minted := Message{
+func emitMinted(ctx context.Context, minter *Minter, out chan<- IngestMessage, msg IngesterMessage) error {
+	minted := IngestMessage{
 		EventID:  minter.Mint(),
 		Attrs:    msg.Attrs,
 		Raw:      msg.Raw,

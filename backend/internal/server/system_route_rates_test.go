@@ -46,8 +46,8 @@ func TestGetRouteStatsSumsLocalAndPeerRates(t *testing.T) {
 		PeerRouteStats: &stubPeerRouteRates{in: 75, routed: 60},
 		LocalStats: func() *gastrologv1.NodeStats {
 			return &gastrologv1.NodeStats{
-				RouteIngested: &gastrologv1.ThroughputRate{InstantPerSec: 25, Avg_1MPerSec: 20, Avg_5MPerSec: 10},
-				RouteRouted:   &gastrologv1.ThroughputRate{InstantPerSec: 15},
+				RouteRouted:  &gastrologv1.ThroughputRate{InstantPerSec: 25, Avg_1MPerSec: 20, Avg_5MPerSec: 10},
+				RouteMatched: &gastrologv1.ThroughputRate{InstantPerSec: 15},
 			}
 		},
 	})
@@ -56,16 +56,16 @@ func TestGetRouteStatsSumsLocalAndPeerRates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRouteStats: %v", err)
 	}
-	if got := resp.Msg.IngestedRate.GetInstantPerSec(); got != 100 {
-		t.Fatalf("ingested instant = %v, want 100 (25 local + 75 peers)", got)
+	if got := resp.Msg.RoutedRate.GetInstantPerSec(); got != 100 {
+		t.Fatalf("routed instant = %v, want 100 (25 local + 75 peers)", got)
 	}
-	if got := resp.Msg.IngestedRate.GetAvg_1MPerSec(); got != 57.5 {
-		t.Fatalf("ingested 1m = %v, want 57.5 (20 local + 37.5 peers)", got)
+	if got := resp.Msg.RoutedRate.GetAvg_1MPerSec(); got != 57.5 {
+		t.Fatalf("routed 1m = %v, want 57.5 (20 local + 37.5 peers)", got)
 	}
-	if got := resp.Msg.IngestedRate.GetAvg_5MPerSec(); got != 28.75 {
-		t.Fatalf("ingested 5m = %v, want 28.75 (10 local + 18.75 peers)", got)
+	if got := resp.Msg.RoutedRate.GetAvg_5MPerSec(); got != 28.75 {
+		t.Fatalf("routed 5m = %v, want 28.75 (10 local + 18.75 peers)", got)
 	}
-	if got := resp.Msg.RoutedRate.GetInstantPerSec(); got != 75 {
+	if got := resp.Msg.MatchedRate.GetInstantPerSec(); got != 75 {
 		t.Fatalf("routed instant = %v, want 75 (15 local + 60 peers)", got)
 	}
 }

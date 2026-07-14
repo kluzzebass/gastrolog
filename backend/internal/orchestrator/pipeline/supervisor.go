@@ -104,9 +104,9 @@ type Config struct {
 	DistributionPublishWorkers   int
 	DistributionPublishBatchSize int
 
-	// Segmentation close policy and node-global commit/fsync defaults. Per-vault
+	// Segmentation complete policy and node-global commit/fsync defaults. Per-vault
 	// overrides ride on VaultSpec.Commit.
-	SegmentClosePolicy     segmentation.ClosePolicy
+	SegmentCompletePolicy  segmentation.CompletePolicy
 	SegmentSyncBatchSize   int
 	SegmentSyncBatchWindow time.Duration
 	SegmentMaxCommitDelay  time.Duration
@@ -226,7 +226,7 @@ type Supervisor struct {
 	col    *collection.Manager
 	chunk  *chunking.Manager
 
-	ingestOut <-chan ingestion.Message
+	ingestOut <-chan ingestion.IngestMessage
 	digestOut <-chan digestion.Output
 	completed <-chan segmentation.CompletedSegment
 	routingIn chan routing.Input
@@ -302,7 +302,7 @@ func New(cfg Config) *Supervisor {
 	seg, completed := segmentation.New(segmentation.Config{
 		Logger:             cfg.Logger,
 		Alerts:             cfg.Alerts,
-		ClosePolicy:        cfg.SegmentClosePolicy,
+		CompletePolicy:     cfg.SegmentCompletePolicy,
 		SyncBatchSize:      cfg.SegmentSyncBatchSize,
 		SyncBatchWindow:    cfg.SegmentSyncBatchWindow,
 		MaxCommitDelay:     cfg.SegmentMaxCommitDelay,

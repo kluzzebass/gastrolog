@@ -1,4 +1,4 @@
-package cloud
+package glcb
 
 import (
 	"errors"
@@ -107,10 +107,10 @@ type glcbCursor struct {
 	onClose func()
 }
 
-// NewSeekableCursorWithClose creates a cursor over a local GLCB Reader and
+// NewGLCBCursor creates a cursor over a local GLCB Reader and
 // runs onClose (when non-nil) exactly once when the cursor is closed
 // (typically chunkLock.RUnlock + blob.release).
-func NewSeekableCursorWithClose(rd *Reader, id chunk.ChunkID, onClose func()) chunk.RecordCursor {
+func NewGLCBCursor(rd *Reader, id chunk.ChunkID, onClose func()) chunk.RecordCursor {
 	return &glcbCursor{
 		reader:      rd,
 		id:          id,

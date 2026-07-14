@@ -16,7 +16,7 @@ import (
 // Collection owns this sentinel; transport adapters attach it at the
 // boundary. The segment pull client (orchestrator) wraps it around registry
 // and holder-resolution misses, and cluster.SegmentPuller translates the
-// PullSegment RPC's NotFound status into it — mirroring how chunk/cloud
+// PullSegment RPC's NotFound status into it — mirroring how chunk/glcb
 // translates blob-store sentinels into chunk sentinels. Classification here
 // never inspects transport types or error prose.
 var ErrSegmentUnavailable = errors.New("segment unavailable")

@@ -1,4 +1,4 @@
-package cloud
+package glcb
 
 import (
 	"errors"
@@ -210,7 +210,7 @@ func parseMappedBlob(data []byte) (*MappedBlob, error) {
 	if len(data) < headerSize+int(tocFooterSize) {
 		return nil, fmt.Errorf("GLCB too small: %d bytes", len(data))
 	}
-	if _, err := format.DecodeAndValidate(data[:preambleSize], format.TypeCloudBlob, formatVersion); err != nil {
+	if _, err := format.DecodeAndValidate(data[:preambleSize], format.TypeGLCB, formatVersion); err != nil {
 		return nil, fmt.Errorf("GLCB preamble: %w", err)
 	}
 	layout, err := decodeBlobLayoutMeta(data[preambleSize:headerSize])

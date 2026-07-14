@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
-	chunkcloud "gastrolog/internal/chunk/cloud"
+	"gastrolog/internal/chunk/glcb"
 	"gastrolog/internal/glid"
 )
 
@@ -146,7 +146,7 @@ func BuildSealedChunk(in BuildInput) (BuildResult, error) {
 
 // ChunkGLCBPath returns <chunkRoot>/<chunkID>/data.glcb.
 func ChunkGLCBPath(chunkRoot string, id chunk.ChunkID) string {
-	return filepath.Join(chunkRoot, id.String(), chunkcloud.BlobFilename)
+	return filepath.Join(chunkRoot, id.String(), glcb.BlobFilename)
 }
 
 // MissingSegmentsError lists segment IDs absent from the local head.
@@ -166,16 +166,16 @@ func (e *MissingSegmentsError) Is(target error) bool {
 // IngestTSMonotonic is persisted in the layout meta at build time, never
 // derived by touching record frames (gastrolog-699s7p: the old frame scan
 // cost minutes per large chunk on slow volumes).
-func readGLCBSealMeta(path string) (chunkcloud.BlobMeta, int64, error) {
-	blob, err := chunkcloud.OpenMappedBlob(filepath.Clean(path))
+func readGLCBSealMeta(path string) (glcb.BlobMeta, int64, error) {
+	blob, err := glcb.OpenMappedBlob(filepath.Clean(path))
 	if err != nil {
-		return chunkcloud.BlobMeta{}, 0, err
+		return glcb.BlobMeta{}, 0, err
 	}
 	defer func() { _ = blob.Close() }()
 
 	info, err := os.Stat(filepath.Clean(path))
 	if err != nil {
-		return chunkcloud.BlobMeta{}, 0, err
+		return glcb.BlobMeta{}, 0, err
 	}
 	return blob.Meta(), info.Size(), nil
 }

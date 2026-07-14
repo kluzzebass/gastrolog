@@ -4,7 +4,7 @@ import (
 	"slices"
 
 	"gastrolog/internal/chunk"
-	chunkcloud "gastrolog/internal/chunk/cloud"
+	"gastrolog/internal/chunk/glcb"
 )
 
 // defaultGLCBDecodedTablesCap bounds how many sealed chunks may hold
@@ -29,7 +29,7 @@ func (m *Manager) noteGLCBDecoded(id chunk.ChunkID) {
 
 // releaseGLCBDecodeTables drops decode state after the last cursor pin on id
 // closes and removes id from the decode LRU.
-func (m *Manager) releaseGLCBDecodeTables(id chunk.ChunkID, blob *chunkcloud.MappedBlob) {
+func (m *Manager) releaseGLCBDecodeTables(id chunk.ChunkID, blob *glcb.MappedBlob) {
 	blob.TryReleaseRecordTables()
 	m.glcbDecodeMu.Lock()
 	m.glcbDecodeLRU = slices.DeleteFunc(m.glcbDecodeLRU, func(c chunk.ChunkID) bool {
@@ -65,7 +65,7 @@ func (m *Manager) enforceGLCBDecodeLRULocked() {
 	}
 }
 
-func (m *Manager) mappedGLCBBlob(id chunk.ChunkID) *chunkcloud.MappedBlob {
+func (m *Manager) mappedGLCBBlob(id chunk.ChunkID) *glcb.MappedBlob {
 	v, ok := m.glcbMapped.Load(id)
 	if !ok {
 		return nil

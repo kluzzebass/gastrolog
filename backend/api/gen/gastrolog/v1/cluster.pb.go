@@ -607,9 +607,9 @@ type NodeStats struct {
 	ApiAddress   string `protobuf:"bytes,26,opt,name=api_address,json=apiAddress,proto3" json:"api_address,omitempty"`       // HTTP API address (e.g. ":4564")
 	PprofAddress string `protobuf:"bytes,27,opt,name=pprof_address,json=pprofAddress,proto3" json:"pprof_address,omitempty"` // pprof HTTP address, empty if disabled
 	// Route stats (aggregated cluster-wide by GetRouteStats RPC)
-	RouteStatsIngested     int64              `protobuf:"varint,28,opt,name=route_stats_ingested,json=routeStatsIngested,proto3" json:"route_stats_ingested,omitempty"`
+	RouteStatsRouted       int64              `protobuf:"varint,28,opt,name=route_stats_routed,json=routeStatsRouted,proto3" json:"route_stats_routed,omitempty"`
 	RouteStatsDropped      int64              `protobuf:"varint,29,opt,name=route_stats_dropped,json=routeStatsDropped,proto3" json:"route_stats_dropped,omitempty"`
-	RouteStatsRouted       int64              `protobuf:"varint,30,opt,name=route_stats_routed,json=routeStatsRouted,proto3" json:"route_stats_routed,omitempty"`
+	RouteStatsMatched      int64              `protobuf:"varint,30,opt,name=route_stats_matched,json=routeStatsMatched,proto3" json:"route_stats_matched,omitempty"`
 	RouteStatsFilterActive bool               `protobuf:"varint,31,opt,name=route_stats_filter_active,json=routeStatsFilterActive,proto3" json:"route_stats_filter_active,omitempty"`
 	RouteVaultStats        []*VaultRouteStats `protobuf:"bytes,32,rep,name=route_vault_stats,json=routeVaultStats,proto3" json:"route_vault_stats,omitempty"`
 	RoutePerRouteStats     []*PerRouteStats   `protobuf:"bytes,33,rep,name=route_per_route_stats,json=routePerRouteStats,proto3" json:"route_per_route_stats,omitempty"`
@@ -632,8 +632,8 @@ type NodeStats struct {
 	// Routing throughput on this node, from the stats collector's rolling
 	// windows over the cumulative route counters (fields 28/30). Cluster
 	// totals are the sum across nodes (gastrolog-4eh5ns).
-	RouteIngested *ThroughputRate `protobuf:"bytes,39,opt,name=route_ingested,json=routeIngested,proto3" json:"route_ingested,omitempty"`
-	RouteRouted   *ThroughputRate `protobuf:"bytes,40,opt,name=route_routed,json=routeRouted,proto3" json:"route_routed,omitempty"`
+	RouteRouted  *ThroughputRate `protobuf:"bytes,39,opt,name=route_routed,json=routeRouted,proto3" json:"route_routed,omitempty"`
+	RouteMatched *ThroughputRate `protobuf:"bytes,40,opt,name=route_matched,json=routeMatched,proto3" json:"route_matched,omitempty"`
 	// Raft liveness / WAL health (gastrolog-1io54g). Append latency covers
 	// every Raft WAL on the node (vault groups share one WAL; cluster-ctl has
 	// its own): count/total are cumulative, avg is the rolling-window average
@@ -879,9 +879,9 @@ func (x *NodeStats) GetPprofAddress() string {
 	return ""
 }
 
-func (x *NodeStats) GetRouteStatsIngested() int64 {
+func (x *NodeStats) GetRouteStatsRouted() int64 {
 	if x != nil {
-		return x.RouteStatsIngested
+		return x.RouteStatsRouted
 	}
 	return 0
 }
@@ -893,9 +893,9 @@ func (x *NodeStats) GetRouteStatsDropped() int64 {
 	return 0
 }
 
-func (x *NodeStats) GetRouteStatsRouted() int64 {
+func (x *NodeStats) GetRouteStatsMatched() int64 {
 	if x != nil {
-		return x.RouteStatsRouted
+		return x.RouteStatsMatched
 	}
 	return 0
 }
@@ -956,16 +956,16 @@ func (x *NodeStats) GetStorageBytes() int64 {
 	return 0
 }
 
-func (x *NodeStats) GetRouteIngested() *ThroughputRate {
+func (x *NodeStats) GetRouteRouted() *ThroughputRate {
 	if x != nil {
-		return x.RouteIngested
+		return x.RouteRouted
 	}
 	return nil
 }
 
-func (x *NodeStats) GetRouteRouted() *ThroughputRate {
+func (x *NodeStats) GetRouteMatched() *ThroughputRate {
 	if x != nil {
-		return x.RouteRouted
+		return x.RouteMatched
 	}
 	return nil
 }
@@ -4532,7 +4532,7 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\apayload\"\v\n" +
 	"\tHeartbeat\"1\n" +
 	"\bNodeJobs\x12%\n" +
-	"\x04jobs\x18\x01 \x03(\v2\x11.gastrolog.v1.JobR\x04jobs\"\xc3\x12\n" +
+	"\x04jobs\x18\x01 \x03(\v2\x11.gastrolog.v1.JobR\x04jobs\"\xbf\x12\n" +
 	"\tNodeStats\x12\x1f\n" +
 	"\vcpu_percent\x18\x01 \x01(\x01R\n" +
 	"cpuPercent\x12!\n" +
@@ -4568,10 +4568,10 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x10raft_fsm_pending\x18\x19 \x01(\x04R\x0eraftFsmPending\x12\x1f\n" +
 	"\vapi_address\x18\x1a \x01(\tR\n" +
 	"apiAddress\x12#\n" +
-	"\rpprof_address\x18\x1b \x01(\tR\fpprofAddress\x120\n" +
-	"\x14route_stats_ingested\x18\x1c \x01(\x03R\x12routeStatsIngested\x12.\n" +
-	"\x13route_stats_dropped\x18\x1d \x01(\x03R\x11routeStatsDropped\x12,\n" +
-	"\x12route_stats_routed\x18\x1e \x01(\x03R\x10routeStatsRouted\x129\n" +
+	"\rpprof_address\x18\x1b \x01(\tR\fpprofAddress\x12,\n" +
+	"\x12route_stats_routed\x18\x1c \x01(\x03R\x10routeStatsRouted\x12.\n" +
+	"\x13route_stats_dropped\x18\x1d \x01(\x03R\x11routeStatsDropped\x12.\n" +
+	"\x13route_stats_matched\x18\x1e \x01(\x03R\x11routeStatsMatched\x129\n" +
 	"\x19route_stats_filter_active\x18\x1f \x01(\bR\x16routeStatsFilterActive\x12I\n" +
 	"\x11route_vault_stats\x18  \x03(\v2\x1d.gastrolog.v1.VaultRouteStatsR\x0frouteVaultStats\x12N\n" +
 	"\x15route_per_route_stats\x18! \x03(\v2\x1b.gastrolog.v1.PerRouteStatsR\x12routePerRouteStats\x121\n" +
@@ -4579,9 +4579,9 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x10peer_connections\x18# \x03(\v2\x1a.gastrolog.v1.PeerConnStatR\x0fpeerConnections\x12N\n" +
 	"\x13peer_traffic_totals\x18& \x03(\v2\x1e.gastrolog.v1.PeerTrafficTotalR\x11peerTrafficTotals\x12S\n" +
 	"\x13vault_pipeline_disk\x18$ \x03(\v2#.gastrolog.v1.VaultPipelineNodeDiskR\x11vaultPipelineDisk\x12#\n" +
-	"\rstorage_bytes\x18% \x01(\x03R\fstorageBytes\x12C\n" +
-	"\x0eroute_ingested\x18' \x01(\v2\x1c.gastrolog.v1.ThroughputRateR\rrouteIngested\x12?\n" +
-	"\froute_routed\x18( \x01(\v2\x1c.gastrolog.v1.ThroughputRateR\vrouteRouted\x123\n" +
+	"\rstorage_bytes\x18% \x01(\x03R\fstorageBytes\x12?\n" +
+	"\froute_routed\x18' \x01(\v2\x1c.gastrolog.v1.ThroughputRateR\vrouteRouted\x12A\n" +
+	"\rroute_matched\x18( \x01(\v2\x1c.gastrolog.v1.ThroughputRateR\frouteMatched\x123\n" +
 	"\x16raft_wal_appends_total\x18) \x01(\x04R\x13raftWalAppendsTotal\x122\n" +
 	"\x16raft_wal_append_avg_ms\x18* \x01(\x01R\x12raftWalAppendAvgMs\x122\n" +
 	"\x16raft_wal_append_max_ms\x18+ \x01(\x01R\x12raftWalAppendMaxMs\x120\n" +
@@ -4927,8 +4927,8 @@ var file_gastrolog_v1_cluster_proto_depIdxs = []int32{
 	12, // 11: gastrolog.v1.NodeStats.peer_connections:type_name -> gastrolog.v1.PeerConnStat
 	13, // 12: gastrolog.v1.NodeStats.peer_traffic_totals:type_name -> gastrolog.v1.PeerTrafficTotal
 	11, // 13: gastrolog.v1.NodeStats.vault_pipeline_disk:type_name -> gastrolog.v1.VaultPipelineNodeDisk
-	76, // 14: gastrolog.v1.NodeStats.route_ingested:type_name -> gastrolog.v1.ThroughputRate
-	76, // 15: gastrolog.v1.NodeStats.route_routed:type_name -> gastrolog.v1.ThroughputRate
+	76, // 14: gastrolog.v1.NodeStats.route_routed:type_name -> gastrolog.v1.ThroughputRate
+	76, // 15: gastrolog.v1.NodeStats.route_matched:type_name -> gastrolog.v1.ThroughputRate
 	0,  // 16: gastrolog.v1.SystemAlert.severity:type_name -> gastrolog.v1.AlertSeverity
 	71, // 17: gastrolog.v1.SystemAlert.first_seen:type_name -> google.protobuf.Timestamp
 	71, // 18: gastrolog.v1.SystemAlert.last_seen:type_name -> google.protobuf.Timestamp

@@ -1,7 +1,7 @@
-package cloud
+package glcb
 
 // glcbCursor boundary tests (gastrolog-5do8sh): Seek past the end and a
-// zero-record GLCB. Complements TestSeekableCursor (cloud_test.go), which
+// zero-record GLCB. Complements TestGLCBCursor (glcb_test.go), which
 // pins Seek within range + Prev and Prev-past-start.
 
 import (
@@ -24,7 +24,7 @@ func openBoundaryCursor(t *testing.T, path string) chunk.RecordCursor {
 	if err != nil {
 		t.Fatalf("Reader: %v", err)
 	}
-	cur := NewSeekableCursorWithClose(rd, chunk.ChunkID{}, nil)
+	cur := NewGLCBCursor(rd, chunk.ChunkID{}, nil)
 	t.Cleanup(func() { _ = cur.Close() })
 	return cur
 }

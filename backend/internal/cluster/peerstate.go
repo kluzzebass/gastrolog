@@ -179,7 +179,7 @@ func (p *PeerState) CollectIngesterAlive(ingesterID string) map[string]bool {
 // The stats collector's summed window re-anchors when the fingerprint
 // changes, so a peer's stats expiring and later resuming can never read as
 // a throughput spike (gastrolog-mliwrd).
-func (p *PeerState) AggregateRouteTotals() (ingested, routed int64, members []string) {
+func (p *PeerState) AggregateRouteTotals() (routed, matched int64, members []string) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	now := time.Now()
@@ -187,15 +187,15 @@ func (p *PeerState) AggregateRouteTotals() (ingested, routed int64, members []st
 		if now.Sub(e.received) > p.ttl || e.stats == nil {
 			continue
 		}
-		ingested += e.stats.RouteStatsIngested
 		routed += e.stats.RouteStatsRouted
+		matched += e.stats.RouteStatsMatched
 		members = append(members, id)
 	}
 	sort.Strings(members)
-	return ingested, routed, members
+	return routed, matched, members
 }
 
-func (p *PeerState) AggregateRouteStats() (ingested, dropped, routed int64, filterActive bool, vaultStats []*gastrologv1.VaultRouteStats, routeStats []*gastrologv1.PerRouteStats) {
+func (p *PeerState) AggregateRouteStats() (routed, dropped, matched int64, filterActive bool, vaultStats []*gastrologv1.VaultRouteStats, routeStats []*gastrologv1.PerRouteStats) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	now := time.Now()
@@ -208,9 +208,9 @@ func (p *PeerState) AggregateRouteStats() (ingested, dropped, routed int64, filt
 		if now.Sub(e.received) > p.ttl || e.stats == nil {
 			continue
 		}
-		ingested += e.stats.RouteStatsIngested
-		dropped += e.stats.RouteStatsDropped
 		routed += e.stats.RouteStatsRouted
+		dropped += e.stats.RouteStatsDropped
+		matched += e.stats.RouteStatsMatched
 		if e.stats.RouteStatsFilterActive {
 			filterActive = true
 		}
@@ -253,9 +253,9 @@ func (p *PeerState) AggregateRouteStats() (ingested, dropped, routed int64, filt
 // their NodeStats broadcasts, per horizon. Sparks are omitted: per-node tick
 // phases differ, so an element-wise sum would fabricate a series no node
 // observed. The caller adds the local node's own rates (gastrolog-4eh5ns).
-func (p *PeerState) AggregateRouteRates() (ingested, routed *gastrologv1.ThroughputRate) {
-	ingested = &gastrologv1.ThroughputRate{}
+func (p *PeerState) AggregateRouteRates() (routed, matched *gastrologv1.ThroughputRate) {
 	routed = &gastrologv1.ThroughputRate{}
+	matched = &gastrologv1.ThroughputRate{}
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	now := time.Now()
@@ -263,10 +263,10 @@ func (p *PeerState) AggregateRouteRates() (ingested, routed *gastrologv1.Through
 		if now.Sub(e.received) > p.ttl || e.stats == nil {
 			continue
 		}
-		addThroughput(ingested, e.stats.RouteIngested)
 		addThroughput(routed, e.stats.RouteRouted)
+		addThroughput(matched, e.stats.RouteMatched)
 	}
-	return ingested, routed
+	return routed, matched
 }
 
 // addThroughput accumulates src's per-horizon rates into dst (nil src is a

@@ -3,7 +3,7 @@ package segment
 // Internal test for the in-memory index capture's hard cap
 // (gastrolog-oin19g): past memIndexEntryCap the capture is dropped and
 // Finalize degrades to the disk-scan build — the capture must never grow
-// RAM with the file, regardless of the caller's close policy.
+// RAM with the file, regardless of the caller's complete policy.
 
 import (
 	"bytes"

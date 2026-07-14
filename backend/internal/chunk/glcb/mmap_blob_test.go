@@ -1,4 +1,4 @@
-package cloud_test
+package glcb_test
 
 import (
 	"os"
@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/chunk/cloud"
+	"gastrolog/internal/chunk/glcb"
 )
 
 func TestMappedBlobRoundTrip(t *testing.T) {
@@ -18,7 +18,7 @@ func TestMappedBlobRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w, err := cloud.OpenWriter(f, chunkID, vaultID)
+	w, err := glcb.OpenWriter(f, chunkID, vaultID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +34,7 @@ func TestMappedBlobRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	blob, err := cloud.OpenMappedBlob(path)
+	blob, err := glcb.OpenMappedBlob(path)
 	if err != nil {
 		t.Fatalf("OpenMappedBlob: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestMappedBlobRoundTrip(t *testing.T) {
 		assertRecord(t, i, got, records[i])
 	}
 
-	ingest, ok := blob.Section(cloud.SectionIngestTSIndex)
+	ingest, ok := blob.Section(glcb.SectionIngestTSIndex)
 	if !ok || len(ingest) == 0 {
 		t.Fatal("expected non-empty ingest TS section")
 	}
@@ -74,7 +74,7 @@ func TestMappedBlobRecordsSurviveUnmap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w, err := cloud.OpenWriter(f, chunkID, vaultID)
+	w, err := glcb.OpenWriter(f, chunkID, vaultID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestMappedBlobRecordsSurviveUnmap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	blob, err := cloud.OpenMappedBlob(path)
+	blob, err := glcb.OpenMappedBlob(path)
 	if err != nil {
 		t.Fatalf("OpenMappedBlob: %v", err)
 	}
@@ -127,7 +127,7 @@ func BenchmarkMappedBlobReadRecord(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	w, err := cloud.OpenWriter(f, chunkID, vaultID)
+	w, err := glcb.OpenWriter(f, chunkID, vaultID)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func BenchmarkMappedBlobReadRecord(b *testing.B) {
 		b.Fatal(err)
 	}
 
-	blob, err := cloud.OpenMappedBlob(path)
+	blob, err := glcb.OpenMappedBlob(path)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -175,7 +175,7 @@ func TestMappedBlobRetainDefersUnmap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w, err := cloud.OpenWriter(f, chunkID, vaultID)
+	w, err := glcb.OpenWriter(f, chunkID, vaultID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +191,7 @@ func TestMappedBlobRetainDefersUnmap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	blob, err := cloud.OpenMappedBlob(path)
+	blob, err := glcb.OpenMappedBlob(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,12 +199,12 @@ func TestMappedBlobRetainDefersUnmap(t *testing.T) {
 	if err := blob.Close(); err != nil {
 		t.Fatal(err)
 	}
-	section, ok := blob.Section(cloud.SectionIngestTSIndex)
+	section, ok := blob.Section(glcb.SectionIngestTSIndex)
 	if !ok || len(section) == 0 {
 		t.Fatal("expected section to remain readable while retained")
 	}
 	blob.Release()
-	section, ok = blob.Section(cloud.SectionIngestTSIndex)
+	section, ok = blob.Section(glcb.SectionIngestTSIndex)
 	if ok && len(section) > 0 {
 		t.Fatal("expected section unavailable after release following eviction")
 	}

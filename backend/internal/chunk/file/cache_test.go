@@ -13,7 +13,7 @@ import (
 
 	"gastrolog/internal/blobstore"
 	"gastrolog/internal/chunk"
-	chunkcloud "gastrolog/internal/chunk/cloud"
+	"gastrolog/internal/chunk/glcb"
 	"gastrolog/internal/glid"
 )
 
@@ -305,7 +305,7 @@ func readBlobDigest(t *testing.T, path string) [32]byte {
 	if err != nil {
 		t.Fatalf("stat data.glcb: %v", err)
 	}
-	toc, err := chunkcloud.ReadTOC(f, info.Size())
+	toc, err := glcb.ReadTOC(f, info.Size())
 	if err != nil {
 		t.Fatalf("read TOC: %v", err)
 	}

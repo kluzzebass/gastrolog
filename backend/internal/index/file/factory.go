@@ -47,7 +47,7 @@ func NewFactory() index.ManagerFactory {
 
 		// tsidx (ingest/source) no longer has its own indexer: the
 		// embedded ITSI/STSI sections inside data.glcb are written by
-		// chunk/cloud.Writer.writeTSIndexes during seal, and read via
+		// chunk/glcb.Writer.writeTSIndexes during seal, and read via
 		// tsidx.OpenIngestMmap / OpenSourceMmap which point at those
 		// embedded sections. The sidecar ingest.idx / source.idx files
 		// are gone.

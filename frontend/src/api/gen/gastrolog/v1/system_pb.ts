@@ -5941,11 +5941,11 @@ export class GetRouteStatsResponse extends Message<GetRouteStatsResponse> {
   /**
    * Global counters since process start.
    *
-   * total records entering ingest()
+   * total records entering routing (matched + dropped)
    *
-   * @generated from field: int64 total_ingested = 1;
+   * @generated from field: int64 total_routed = 1;
    */
-  totalIngested = protoInt64.zero;
+  totalRouted = protoInt64.zero;
 
   /**
    * records matching no filter (silently lost)
@@ -5955,11 +5955,11 @@ export class GetRouteStatsResponse extends Message<GetRouteStatsResponse> {
   totalDropped = protoInt64.zero;
 
   /**
-   * records delivered to at least one vault
+   * records that matched a route and were delivered to at least one vault
    *
-   * @generated from field: int64 total_routed = 3;
+   * @generated from field: int64 total_matched = 3;
    */
-  totalRouted = protoInt64.zero;
+  totalMatched = protoInt64.zero;
 
   /**
    * false = no routes compiled, all records dropped
@@ -5988,14 +5988,14 @@ export class GetRouteStatsResponse extends Message<GetRouteStatsResponse> {
    * at cluster level — per-node tick phases differ, so element-wise sums
    * would fabricate a series no node observed (gastrolog-4eh5ns).
    *
-   * @generated from field: gastrolog.v1.ThroughputRate ingested_rate = 7;
-   */
-  ingestedRate?: ThroughputRate;
-
-  /**
-   * @generated from field: gastrolog.v1.ThroughputRate routed_rate = 8;
+   * @generated from field: gastrolog.v1.ThroughputRate routed_rate = 7;
    */
   routedRate?: ThroughputRate;
+
+  /**
+   * @generated from field: gastrolog.v1.ThroughputRate matched_rate = 8;
+   */
+  matchedRate?: ThroughputRate;
 
   constructor(data?: PartialMessage<GetRouteStatsResponse>) {
     super();
@@ -6005,14 +6005,14 @@ export class GetRouteStatsResponse extends Message<GetRouteStatsResponse> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.GetRouteStatsResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "total_ingested", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 1, name: "total_routed", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 2, name: "total_dropped", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 3, name: "total_routed", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 3, name: "total_matched", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 4, name: "filter_set_active", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 5, name: "vault_stats", kind: "message", T: VaultRouteStats, repeated: true },
     { no: 6, name: "route_stats", kind: "message", T: PerRouteStats, repeated: true },
-    { no: 7, name: "ingested_rate", kind: "message", T: ThroughputRate },
-    { no: 8, name: "routed_rate", kind: "message", T: ThroughputRate },
+    { no: 7, name: "routed_rate", kind: "message", T: ThroughputRate },
+    { no: 8, name: "matched_rate", kind: "message", T: ThroughputRate },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetRouteStatsResponse {
@@ -6042,7 +6042,7 @@ export class VaultRouteStats extends Message<VaultRouteStats> {
   vaultId = new Uint8Array(0);
 
   /**
-   * records routed to this vault
+   * records that matched a route targeting this vault
    *
    * @generated from field: int64 records_matched = 2;
    */

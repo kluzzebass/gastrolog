@@ -1,4 +1,4 @@
-// Package cloud defines the GLCB (GastroLog Chunk Blob) on-disk format —
+// Package glcb defines the GLCB (GastroLog Chunk Blob) on-disk format —
 // a self-describing single-file representation of a sealed chunk.
 //
 // GLCB is used universally — local-only vaults store a `data.glcb` file
@@ -45,7 +45,7 @@
 // Random access: ReadRecord(pos) is one ReadAt against the file at
 // recordsSectionOffset + recordIndex[pos].Offset for recordIndex[pos].Size
 // bytes. No decompression step.
-package cloud
+package glcb
 
 import (
 	"gastrolog/internal/glid"

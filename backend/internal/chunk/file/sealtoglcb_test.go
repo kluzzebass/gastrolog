@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
-	chunkcloud "gastrolog/internal/chunk/cloud"
+	"gastrolog/internal/chunk/glcb"
 )
 
 // TestSealToGLCB_ProducesValidBlob verifies that sealToGLCB writes a
@@ -75,7 +75,7 @@ func TestSealToGLCB_ProducesValidBlob(t *testing.T) {
 
 	// The blob should be readable via the production GLCB open path
 	// (OpenMappedBlob); the metadata it returns should match what we appended.
-	blob, err := chunkcloud.OpenMappedBlob(glcbPath)
+	blob, err := glcb.OpenMappedBlob(glcbPath)
 	if err != nil {
 		t.Fatalf("open GLCB blob: %v", err)
 	}

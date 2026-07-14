@@ -77,7 +77,7 @@ func OpenMapped(path string) (*MappedSegment, error) {
 
 	warmPageCache(f, size)
 
-	data, err := syscall.Mmap(int(f.Fd()), 0, int(size), syscall.PROT_READ, syscall.MAP_SHARED) //nolint:gosec // G115: fd is a small non-negative int; size bounded by segment close policy
+	data, err := syscall.Mmap(int(f.Fd()), 0, int(size), syscall.PROT_READ, syscall.MAP_SHARED) //nolint:gosec // G115: fd is a small non-negative int; size bounded by segment complete policy
 	if err != nil {
 		_ = f.Close()
 		return nil, fmt.Errorf("mmap segment: %w", err)

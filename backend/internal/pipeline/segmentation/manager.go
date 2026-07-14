@@ -26,11 +26,12 @@ var ErrNotRunning = errors.New("segmentation manager not running")
 // ErrUnknownVault is returned when a vault was never registered.
 var ErrUnknownVault = errors.New("unknown vault")
 
-// ClosePolicy configures when a working segment is closed and renamed.
-type ClosePolicy struct {
-	// MaxBytes closes the segment once the on-disk file reaches this size.
+// CompletePolicy configures when a working segment is completed — finalized
+// and renamed working/ → completed/.
+type CompletePolicy struct {
+	// MaxBytes completes the segment once the on-disk file reaches this size.
 	MaxBytes uint64
-	// MaxAge closes the segment once this long has elapsed since it was opened.
+	// MaxAge completes the segment once this long has elapsed since it was opened.
 	MaxAge time.Duration
 }
 
@@ -38,7 +39,7 @@ type ClosePolicy struct {
 // node-global defaults; each vault may override them via VaultConfig at
 // RegisterVault time.
 type Config struct {
-	ClosePolicy ClosePolicy
+	CompletePolicy CompletePolicy
 	// SyncBatchSize is the max appended frames between fsync calls for
 	// fire-and-forget (no-ack) records. Defaults to 8192. This is a memory
 	// bound (~2.5MB of frame bodies at typical record sizes), not the
@@ -312,7 +313,7 @@ func (m *Manager) Run(ctx context.Context) error {
 
 	m.mu.Lock()
 	for _, w := range m.writers {
-		w.flushAndCloseSegment()
+		w.flushAndCompleteSegment()
 	}
 	m.mu.Unlock()
 

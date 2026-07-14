@@ -599,7 +599,7 @@ does not apply to wire layouts and cannot be used in `const` expressions anyway.
 
 **Status:** the new V3 segment package (`backend/internal/pipeline/segment`)
 follows this pattern. Legacy writers — especially GLCB in
-`backend/internal/chunk/cloud` — still use raw `off += 4` / `8` / `16`. That
+`backend/internal/chunk/glcb` — still use raw `off += 4` / `8` / `16`. That
 cleanup is **deferred**: most of those paths will be replaced or bypassed as the
 V3 pipeline lands, so polishing them now would be wasted churn. Revisit when
 touching each format for V3 (segmentation, chunk build, distribution) or when

@@ -39,18 +39,18 @@ func TestBuildRouteStatsIncludesThroughputRates(t *testing.T) {
 
 	localStats := func() *gastrologv1.NodeStats {
 		return &gastrologv1.NodeStats{
-			RouteIngested: &gastrologv1.ThroughputRate{InstantPerSec: 40},
-			RouteRouted:   &gastrologv1.ThroughputRate{InstantPerSec: 30},
+			RouteRouted:  &gastrologv1.ThroughputRate{InstantPerSec: 40},
+			RouteMatched: &gastrologv1.ThroughputRate{InstantPerSec: 30},
 		}
 	}
 	srv := NewLifecycleServer(orch, nil, nil, cfgStore, "node-a", "", nil, localStats, nil)
 	srv.SetPeerRouteStats(&stubStreamPeerRates{in: 10, routed: 5})
 
 	resp := srv.buildRouteStats()
-	if got := resp.IngestedRate.GetInstantPerSec(); got != 50 {
-		t.Fatalf("stream ingested instant = %v, want 50 (40 local + 10 peers)", got)
+	if got := resp.RoutedRate.GetInstantPerSec(); got != 50 {
+		t.Fatalf("stream routed instant = %v, want 50 (40 local + 10 peers)", got)
 	}
-	if got := resp.RoutedRate.GetInstantPerSec(); got != 35 {
+	if got := resp.MatchedRate.GetInstantPerSec(); got != 35 {
 		t.Fatalf("stream routed instant = %v, want 35 (30 local + 5 peers)", got)
 	}
 }

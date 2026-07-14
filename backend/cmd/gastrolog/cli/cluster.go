@@ -153,10 +153,10 @@ func newClusterThroughputCmd() *cobra.Command {
 			}
 
 			p.kv([][2]string{
-				{"Ingest Rate", formatRateTriple(rs.Msg.IngestedRate)},
-				{"Route Rate", formatRateTriple(rs.Msg.RoutedRate)},
-				{"Total Ingested", strconv.FormatInt(rs.Msg.TotalIngested, 10)},
+				{"Routed Rate", formatRateTriple(rs.Msg.RoutedRate)},
+				{"Matched Rate", formatRateTriple(rs.Msg.MatchedRate)},
 				{"Total Routed", strconv.FormatInt(rs.Msg.TotalRouted, 10)},
+				{"Total Matched", strconv.FormatInt(rs.Msg.TotalMatched, 10)},
 				{"Total Dropped", strconv.FormatInt(rs.Msg.TotalDropped, 10)},
 			})
 

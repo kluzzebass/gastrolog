@@ -63,19 +63,19 @@ func New(cfg Config) (*Manager, <-chan Output) {
 // rendezvous on every record and showed up as runtime sellock spin at ~31%
 // of calm-profile CPU. Blocking sends on the bounded out queue are the
 // backpressure mechanism — never bypass them.
-func (m *Manager) Run(ctx context.Context, in <-chan ingestion.Message) error {
+func (m *Manager) Run(ctx context.Context, in <-chan ingestion.IngestMessage) error {
 	if !m.running.CompareAndSwap(false, true) {
 		return ErrAlreadyRunning
 	}
 	defer close(m.out)
 
-	pipeline.RunWorkerPool(m.workers, in, func(msg ingestion.Message) {
+	pipeline.RunWorkerPool(m.workers, in, func(msg ingestion.IngestMessage) {
 		m.out <- m.digest(msg)
 	})
 	return ctx.Err()
 }
 
-func (m *Manager) digest(msg ingestion.Message) Output {
+func (m *Manager) digest(msg ingestion.IngestMessage) Output {
 	work := msg
 	for _, d := range m.digesters {
 		if err := d.Digest(&work); err != nil {
@@ -86,7 +86,7 @@ func (m *Manager) digest(msg ingestion.Message) Output {
 	return Output{Record: rec, Ack: msg.Ack}
 }
 
-func buildRecord(msg ingestion.Message) *record.Record {
+func buildRecord(msg ingestion.IngestMessage) *record.Record {
 	raw := msg.Raw
 	if msg.Ack != nil || !msg.RawOwned {
 		raw = append([]byte(nil), msg.Raw...)

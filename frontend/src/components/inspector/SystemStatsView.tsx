@@ -99,13 +99,13 @@ function CompactView({
       {/* Pipeline throughput: rolling-window rates from the stats broadcast
           (gastrolog-4eh5ns). Section appears once the node has routing
           activity or a local segmentation writer. */}
-      {(Number(stats.routeStatsIngested) > 0 || stats.vaults.some((v) => v.appendQueueCapacity > 0)) && (
+      {(Number(stats.routeStatsRouted) > 0 || stats.vaults.some((v) => v.appendQueueCapacity > 0)) && (
         <section>
           <CompactDivider dark={dark} />
           <CompactSectionLabel label="Throughput" dark={dark} />
           <div className="grid grid-cols-2 gap-x-6 gap-y-1">
-            <CompactRateRow label="Ingested" rate={stats.routeIngested} dark={dark} />
             <CompactRateRow label="Routed" rate={stats.routeRouted} dark={dark} />
+            <CompactRateRow label="Matched" rate={stats.routeMatched} dark={dark} />
           </div>
           {stats.vaults.filter((v) => v.appendQueueCapacity > 0).map((v) => (
             <div key={encode(v.id)} className="grid grid-cols-2 gap-x-6 gap-y-1 mt-1">
@@ -288,8 +288,8 @@ export function ClusterSummaryView({
   let totalGoroutines = 0;
   let totalQueueDepth = 0;
   let totalQueueCapacity = 0;
-  let totalIngestRate = 0;
-  let totalRouteRate = 0;
+  let totalRoutedRate = 0;
+  let totalMatchedRate = 0;
   let totalAppendRate = 0;
   let totalAppendBytesRate = 0;
   let leaderName = "";
@@ -304,8 +304,8 @@ export function ClusterSummaryView({
     totalGoroutines += s.goroutines;
     totalQueueDepth += s.ingestQueueDepth;
     totalQueueCapacity += s.ingestQueueCapacity;
-    totalIngestRate += s.routeIngested?.instantPerSec ?? 0;
-    totalRouteRate += s.routeRouted?.instantPerSec ?? 0;
+    totalRoutedRate += s.routeRouted?.instantPerSec ?? 0;
+    totalMatchedRate += s.routeMatched?.instantPerSec ?? 0;
     for (const v of s.vaults) {
       totalVaults++;
       totalRecords += Number(v.recordCount);
@@ -336,8 +336,8 @@ export function ClusterSummaryView({
       <section>
         <CompactSectionLabel label="Throughput" dark={dark} />
         <div className="grid grid-cols-2 gap-x-6 gap-y-1">
-          <CompactStatRow label="Ingested" value={`${formatRate(totalIngestRate)}/s`} mono dark={dark} />
-          <CompactStatRow label="Routed" value={`${formatRate(totalRouteRate)}/s`} mono dark={dark} />
+          <CompactStatRow label="Routed" value={`${formatRate(totalRoutedRate)}/s`} mono dark={dark} />
+          <CompactStatRow label="Matched" value={`${formatRate(totalMatchedRate)}/s`} mono dark={dark} />
           <CompactStatRow label="Appended" value={`${formatRate(totalAppendRate)}/s`} mono dark={dark} />
           <CompactStatRow label="Append data" value={`${formatBytes(totalAppendBytesRate)}/s`} mono dark={dark} />
         </div>

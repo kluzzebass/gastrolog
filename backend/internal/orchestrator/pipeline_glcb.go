@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
-	chunkcloud "gastrolog/internal/chunk/cloud"
+	"gastrolog/internal/chunk/glcb"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/chunking"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
@@ -135,18 +135,18 @@ func overlayPipelineGLCBIndexFromTOC(info *chunk.ExternalGLCBInfo, f *os.File, f
 	if info.IngestIdxOffset != 0 && info.SourceIdxOffset != 0 {
 		return
 	}
-	toc, err := chunkcloud.ReadTOC(f, fileSize)
+	toc, err := glcb.ReadTOC(f, fileSize)
 	if err != nil {
 		return
 	}
 	if info.IngestIdxOffset == 0 {
-		if ingest, ok := toc.Find(chunkcloud.SectionIngestTSIndex); ok {
+		if ingest, ok := toc.Find(glcb.SectionIngestTSIndex); ok {
 			info.IngestIdxOffset = ingest.Offset
 			info.IngestIdxSize = ingest.Size
 		}
 	}
 	if info.SourceIdxOffset == 0 {
-		if source, ok := toc.Find(chunkcloud.SectionSourceTSIndex); ok {
+		if source, ok := toc.Find(glcb.SectionSourceTSIndex); ok {
 			info.SourceIdxOffset = source.Offset
 			info.SourceIdxSize = source.Size
 		}

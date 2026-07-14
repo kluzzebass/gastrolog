@@ -7,5 +7,5 @@ import "gastrolog/internal/pipeline/ingestion"
 // They must not modify Raw. Errors are surfaced on the output stream without
 // blocking other workers.
 type Digester interface {
-	Digest(msg *ingestion.Message) error
+	Digest(msg *ingestion.IngestMessage) error
 }
