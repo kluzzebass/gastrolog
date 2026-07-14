@@ -1,4 +1,4 @@
-package cloud
+package blobstore
 
 import (
 	"context"
@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-
-	"gastrolog/internal/blobstore"
 )
 
 // Factory parameter keys.
@@ -72,8 +70,8 @@ func NewConnectionTester(log *slog.Logger) func(ctx context.Context, params map[
 		_ = rc.Close()
 
 		// 4. List to verify iteration works.
-		if err := store.List(ctx, probeKey, func(_ blobstore.BlobInfo) error {
-			return blobstore.ErrStopIteration
+		if err := store.List(ctx, probeKey, func(_ BlobInfo) error {
+			return ErrStopIteration
 		}); err != nil {
 			return "", fmt.Errorf("list: %w", err)
 		}
@@ -85,10 +83,10 @@ func NewConnectionTester(log *slog.Logger) func(ctx context.Context, params map[
 	}
 }
 
-// CreateStore creates a blobstore.Store for the given provider and params.
+// CreateStore creates a Store for the given provider and params.
 // Exported for use by the file vault's sealed backing integration. log
 // receives provider-SDK diagnostics via the blobstore component tree.
-func CreateStore(provider string, params map[string]string, log *slog.Logger) (blobstore.Store, error) {
+func CreateStore(provider string, params map[string]string, log *slog.Logger) (Store, error) {
 	return createStore(provider, params, log)
 }
 
@@ -108,14 +106,14 @@ func validateEndpoint(ep string) (string, error) {
 	return ep, nil
 }
 
-func createStore(provider string, params map[string]string, log *slog.Logger) (blobstore.Store, error) {
+func createStore(provider string, params map[string]string, log *slog.Logger) (Store, error) {
 	switch provider {
 	case "s3":
 		endpoint, err := validateEndpoint(params[ParamEndpoint])
 		if err != nil {
 			return nil, err
 		}
-		cfg := blobstore.S3Config{
+		cfg := S3Config{
 			Bucket:    params[ParamBucket],
 			Region:    params[ParamRegion],
 			Endpoint:  endpoint,
@@ -129,10 +127,10 @@ func createStore(provider string, params map[string]string, log *slog.Logger) (b
 		if cfg.Region == "" {
 			return nil, errors.New("missing required parameter: region")
 		}
-		return blobstore.NewS3(context.Background(), cfg)
+		return NewS3(context.Background(), cfg)
 
 	case "azure":
-		cfg := blobstore.AzureConfig{
+		cfg := AzureConfig{
 			Container:        params[ParamContainer],
 			ConnectionString: params[ParamConnectionString],
 		}
@@ -142,14 +140,14 @@ func createStore(provider string, params map[string]string, log *slog.Logger) (b
 		if cfg.ConnectionString == "" {
 			return nil, errors.New("missing required parameter: connection_string")
 		}
-		return blobstore.NewAzure(cfg)
+		return NewAzure(cfg)
 
 	case "gcs":
 		endpoint, err := validateEndpoint(params[ParamEndpoint])
 		if err != nil {
 			return nil, err
 		}
-		cfg := blobstore.GCSConfig{
+		cfg := GCSConfig{
 			Bucket:          params[ParamBucket],
 			Endpoint:        endpoint,
 			CredentialsJSON: params[ParamCredentialsJSON],
@@ -157,10 +155,10 @@ func createStore(provider string, params map[string]string, log *slog.Logger) (b
 		if cfg.Bucket == "" {
 			return nil, errors.New("missing required parameter: bucket")
 		}
-		return blobstore.NewGCS(context.Background(), cfg)
+		return NewGCS(context.Background(), cfg)
 
 	case "memory":
-		return blobstore.NewMemory(), nil
+		return NewMemory(), nil
 
 	default:
 		return nil, ErrUnknownProvider

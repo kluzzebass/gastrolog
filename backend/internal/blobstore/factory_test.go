@@ -1,4 +1,4 @@
-package cloud
+package blobstore
 
 // Factory config-time validation (gastrolog-3nfvo1): endpoint scheme
 // enforcement, provider dispatch, and the sealed_backing provider alias.
