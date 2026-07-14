@@ -65,9 +65,6 @@ const (
 	// Record index entry: byte offset (u64) + frame size (u32).
 	indexEntrySize = 12
 
-	// TS index entry: [tsNano:i64][pos:u32] = 12 bytes, sorted by TS.
-	tsIndexEntrySize = 12
-
 	// TOC entry: [type:u8][version:u8][offset:u32][size:u32][hash:32].
 	tocEntrySize = 42
 

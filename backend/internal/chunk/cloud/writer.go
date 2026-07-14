@@ -11,25 +11,19 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"slices"
 	"time"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/format"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/record"
+	"gastrolog/internal/tsindex"
 )
 
 const (
 	stagingBufferSize = 256 << 10
 	copyBufferSize    = 1024 << 10
 )
-
-// tsEntry is a (timestamp, position) pair for the embedded TS index.
-type tsEntry struct {
-	ts  int64
-	pos uint32
-}
 
 // Writer encodes GLCB. When bound to an output file in workDir, record frames
 // stream directly into the blob after the fixed header (no staging copy). Otherwise
@@ -58,8 +52,8 @@ type Writer struct {
 	count       uint32
 	bounds      blobBounds
 
-	ingestEntries []tsEntry
-	sourceEntries []tsEntry
+	ingestEntries []tsindex.Entry
+	sourceEntries []tsindex.Entry
 	toc           BlobTOC
 
 	ingestMonotonic bool
@@ -92,8 +86,8 @@ func (w *Writer) ReserveRecords(n uint32) {
 		return
 	}
 	w.recordIndex = make([]recordIndexEntry, 0, n)
-	w.ingestEntries = make([]tsEntry, 0, n)
-	w.sourceEntries = make([]tsEntry, 0, n)
+	w.ingestEntries = make([]tsindex.Entry, 0, n)
+	w.sourceEntries = make([]tsindex.Entry, 0, n)
 }
 
 // IngestTSMonotonic reports whether IngestTS was non-decreasing in GLCB record
@@ -297,9 +291,9 @@ func (w *Writer) commitFrame(sourceTS, ingestTS, writeTS time.Time) error {
 		return fmt.Errorf("write record frame: %w", err)
 	}
 
-	w.ingestEntries = append(w.ingestEntries, tsEntry{ts: ingestTS.UnixNano(), pos: pos})
+	w.ingestEntries = append(w.ingestEntries, tsindex.Entry{TS: ingestTS.UnixNano(), Pos: pos})
 	if !sourceTS.IsZero() {
-		w.sourceEntries = append(w.sourceEntries, tsEntry{ts: sourceTS.UnixNano(), pos: pos})
+		w.sourceEntries = append(w.sourceEntries, tsindex.Entry{TS: sourceTS.UnixNano(), Pos: pos})
 	}
 	w.count++
 	return nil
@@ -482,45 +476,19 @@ func (w *Writer) emitTail(cw *countWriter, tailBase int64, dictBuf, indexBuf, la
 		return err
 	}
 
-	sortTSEntries(w.ingestEntries)
-	ingestEntry, err := writeSectionAt(cw, tailBase, SectionIngestTSIndex, 1, encodeTSEntries(w.ingestEntries))
+	tsindex.Sort(w.ingestEntries)
+	ingestEntry, err := writeSectionAt(cw, tailBase, SectionIngestTSIndex, 1, tsindex.EncodeAll(w.ingestEntries))
 	if err != nil {
 		return err
 	}
-	sortTSEntries(w.sourceEntries)
-	sourceEntry, err := writeSectionAt(cw, tailBase, SectionSourceTSIndex, 1, encodeTSEntries(w.sourceEntries))
+	tsindex.Sort(w.sourceEntries)
+	sourceEntry, err := writeSectionAt(cw, tailBase, SectionSourceTSIndex, 1, tsindex.EncodeAll(w.sourceEntries))
 	if err != nil {
 		return err
 	}
 
 	layoutEntry := makeTOCEntry(SectionBlobLayout, 1, preambleSize, int64(len(layout)), sha256.Sum256(layout))
 	return w.finalizeTOC(cw, []TOCEntry{layoutEntry, ingestEntry, sourceEntry})
-}
-
-// sortTSEntries orders TS index entries by timestamp, breaking ties by
-// record position so equal timestamps keep GLCB record order.
-func sortTSEntries(entries []tsEntry) {
-	slices.SortStableFunc(entries, func(a, b tsEntry) int {
-		if a.ts != b.ts {
-			if a.ts < b.ts {
-				return -1
-			}
-			return 1
-		}
-		return int(a.pos) - int(b.pos)
-	})
-}
-
-// encodeTSEntries serializes sorted TS index entries to their on-disk
-// [tsNano:i64][pos:u32] form.
-func encodeTSEntries(entries []tsEntry) []byte {
-	buf := make([]byte, len(entries)*tsIndexEntrySize)
-	for i, e := range entries {
-		off := i * tsIndexEntrySize
-		binary.LittleEndian.PutUint64(buf[off:], uint64(e.ts)) //nolint:gosec // G115: nanosecond timestamps stored as uint64
-		binary.LittleEndian.PutUint32(buf[off+8:], e.pos)
-	}
-	return buf
 }
 
 func encodePreamble() ([]byte, error) {

@@ -10,6 +10,7 @@ import (
 
 	"gastrolog/internal/format"
 	"gastrolog/internal/record"
+	"gastrolog/internal/tsindex"
 )
 
 const (
@@ -189,7 +190,7 @@ func (sf *File) buildIndexFromMemory(recordEnd uint32) error {
 
 	// Source index entries reference EventID-order positions; walk the sorted
 	// entries so pos matches what readIndexEntry(pos) would return.
-	var srcEntries []sourceIndexEntry
+	var srcEntries []tsindex.Entry
 	var first, last time.Time
 	for pos, e := range entries {
 		if e.sourceNS == 0 {
@@ -206,9 +207,9 @@ func (sf *File) buildIndexFromMemory(recordEnd uint32) error {
 				last = ts
 			}
 		}
-		srcEntries = append(srcEntries, sourceIndexEntry{ts: int64(e.sourceNS), pos: uint32(pos)}) //nolint:gosec // G115: pos bounded by RecordCount; nanos fit int64
+		srcEntries = append(srcEntries, tsindex.Entry{TS: int64(e.sourceNS), Pos: uint32(pos)}) //nolint:gosec // G115: pos bounded by RecordCount; nanos fit int64
 	}
-	slices.SortStableFunc(srcEntries, compareSourceIndexEntries)
+	tsindex.Sort(srcEntries)
 
 	sf.hdr.SourceIndexOffset = eventIndexEnd
 	sf.hdr.SourceIndexCount = uint32(len(srcEntries)) //nolint:gosec // G115: bounded by RecordCount
@@ -217,10 +218,7 @@ func (sf *File) buildIndexFromMemory(recordEnd uint32) error {
 	sf.hdr.SourceIndexChecksum = 0
 	fileEnd := int64(eventIndexEnd)
 	if len(srcEntries) > 0 {
-		srcBuf := make([]byte, len(srcEntries)*SourceIndexEntrySize)
-		for i, e := range srcEntries {
-			encodeSourceIndexEntry(srcBuf[i*SourceIndexEntrySize:], e)
-		}
+		srcBuf := tsindex.EncodeAll(srcEntries)
 		if _, err := sf.f.WriteAt(srcBuf, int64(eventIndexEnd)); err != nil {
 			return err
 		}
