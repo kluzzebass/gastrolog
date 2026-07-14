@@ -29,7 +29,7 @@ For other [cluster](help:clustering) nodes, metrics are collected via [broadcast
 Nodes with routing activity or a local vault writer show a **Throughput**
 section:
 
-- **Ingested / Routed** — this node's routing rates: records per second
+- **Routed / Matched** — this node's routing rates: records per second
   entering the routing stage, and records per second matched to at least one
   [route](help:routing). The difference is this node's live drop rate.
 - **Per-vault rows** — for each vault this node writes locally: the append

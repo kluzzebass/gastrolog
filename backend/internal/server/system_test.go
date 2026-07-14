@@ -1157,8 +1157,8 @@ func TestGetRouteStats(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRouteStats: %v", err)
 	}
-	if resp.Msg.TotalIngested != 0 {
-		t.Errorf("expected 0 ingested, got %d", resp.Msg.TotalIngested)
+	if resp.Msg.TotalRouted != 0 {
+		t.Errorf("expected 0 routed, got %d", resp.Msg.TotalRouted)
 	}
 	// No filter set configured yet.
 	if resp.Msg.FilterSetActive {
@@ -1205,10 +1205,10 @@ func TestGetRouteStats(t *testing.T) {
 
 	// Counters increment asynchronously as records flow through routing.
 	resp = waitForRouteStats(t, client, func(m *gastrologv1.GetRouteStatsResponse) bool {
-		return m.TotalIngested == 5
+		return m.TotalRouted == 5
 	})
-	if resp.Msg.TotalIngested != 5 {
-		t.Errorf("expected 5 ingested, got %d", resp.Msg.TotalIngested)
+	if resp.Msg.TotalRouted != 5 {
+		t.Errorf("expected 5 routed, got %d", resp.Msg.TotalRouted)
 	}
 	if resp.Msg.TotalRouted != 5 {
 		t.Errorf("expected 5 routed, got %d", resp.Msg.TotalRouted)

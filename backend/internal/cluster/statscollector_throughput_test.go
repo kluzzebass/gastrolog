@@ -54,7 +54,7 @@ func TestStatsCollector_ThroughputRates(t *testing.T) {
 			QueueDepth:      3,
 			QueueCap:        64,
 		}},
-		route: StatsRouteSnapshot{Ingested: 5000, Routed: 4000},
+		route: StatsRouteSnapshot{Routed: 5000, Matched: 4000},
 	}
 	collector := NewStatsCollector(StatsCollectorConfig{
 		Stats:      provider,
@@ -66,9 +66,9 @@ func TestStatsCollector_ThroughputRates(t *testing.T) {
 	stats := collector.CollectLocalTick(t0)
 	// First tick initializes the windows: rates zero, totals pass through.
 	v := findVaultStats(t, stats, vaultID)
-	if v.AppendRecords.GetInstantPerSec() != 0 || stats.RouteIngested.GetInstantPerSec() != 0 {
+	if v.AppendRecords.GetInstantPerSec() != 0 || stats.RouteRouted.GetInstantPerSec() != 0 {
 		t.Fatalf("first tick rates = %v/%v, want 0 (window init)",
-			v.AppendRecords.GetInstantPerSec(), stats.RouteIngested.GetInstantPerSec())
+			v.AppendRecords.GetInstantPerSec(), stats.RouteRouted.GetInstantPerSec())
 	}
 	if v.AppendRecordsTotal != 1000 || v.AppendBytesTotal != 10000 {
 		t.Fatalf("totals = %d/%d, want 1000/10000", v.AppendRecordsTotal, v.AppendBytesTotal)
@@ -81,18 +81,18 @@ func TestStatsCollector_ThroughputRates(t *testing.T) {
 	provider.appendStats[0].RecordsAppended = 1300
 	provider.appendStats[0].BytesAppended = 13000
 	provider.appendStats[0].RecordsDurable = 1100
-	provider.route.Ingested = 5100
-	provider.route.Routed = 4050
+	provider.route.Routed = 5100
+	provider.route.Matched = 4050
 
 	stats = collector.CollectLocalTick(t0.Add(2 * time.Second))
 	v = findVaultStats(t, stats, vaultID)
 	assertRate(t, "append_records instant", v.AppendRecords.GetInstantPerSec(), 150)
 	assertRate(t, "append_bytes instant", v.AppendBytes.GetInstantPerSec(), 1500)
 	assertRate(t, "append_durable instant", v.AppendDurable.GetInstantPerSec(), 100)
-	assertRate(t, "route_ingested instant", stats.RouteIngested.GetInstantPerSec(), 50)
-	assertRate(t, "route_routed instant", stats.RouteRouted.GetInstantPerSec(), 25)
-	if len(stats.RouteIngested.Spark) != 1 {
-		t.Fatalf("route spark len = %d, want 1 after one stepped tick", len(stats.RouteIngested.Spark))
+	assertRate(t, "route_routed instant", stats.RouteRouted.GetInstantPerSec(), 50)
+	assertRate(t, "route_matched instant", stats.RouteMatched.GetInstantPerSec(), 25)
+	if len(stats.RouteRouted.Spark) != 1 {
+		t.Fatalf("route spark len = %d, want 1 after one stepped tick", len(stats.RouteRouted.Spark))
 	}
 }
 
@@ -102,7 +102,7 @@ func TestStatsCollector_ThroughputRates(t *testing.T) {
 // exponentially with the 15m horizon barely moving.
 func TestStatsCollector_EwmaAverages(t *testing.T) {
 	t.Parallel()
-	provider := &stubStatsProvider{route: StatsRouteSnapshot{Ingested: 0, Routed: 0}}
+	provider := &stubStatsProvider{route: StatsRouteSnapshot{Routed: 0, Matched: 0}}
 	collector := NewStatsCollector(StatsCollectorConfig{
 		Stats:      provider,
 		NodeID:     "node-a",
@@ -116,30 +116,30 @@ func TestStatsCollector_EwmaAverages(t *testing.T) {
 	tick := 0
 	step := func() {
 		tick++
-		provider.route.Ingested += 1000 * 5
+		provider.route.Routed += 1000 * 5
 		stats = collector.CollectLocalTick(t0.Add(time.Duration(tick) * 5 * time.Second))
 	}
 	_ = collector.CollectLocalTick(t0) // window init
 	for range 60 {
 		step()
 	}
-	if got := stats.RouteIngested.GetAvg_1MPerSec(); got < 980 || got > 1000 {
+	if got := stats.RouteRouted.GetAvg_1MPerSec(); got < 980 || got > 1000 {
 		t.Fatalf("1m EWMA after 5 tau of constant input = %v, want ~1000", got)
 	}
-	got15 := stats.RouteIngested.GetAvg_15MPerSec()
+	got15 := stats.RouteRouted.GetAvg_15MPerSec()
 	if got15 < 250 || got15 > 320 {
 		t.Fatalf("15m EWMA after 300s = %v, want ~283 (1-e^(-1/3))", got15)
 	}
 
 	// Silence: one 60s-later tick with no new records. The 1m EWMA decays
 	// by e^(-60/60) ≈ 0.368; instant drops straight to 0.
-	before := stats.RouteIngested.GetAvg_1MPerSec()
+	before := stats.RouteRouted.GetAvg_1MPerSec()
 	stats = collector.CollectLocalTick(t0.Add(time.Duration(tick)*5*time.Second + 60*time.Second))
-	if got := stats.RouteIngested.GetInstantPerSec(); got != 0 {
+	if got := stats.RouteRouted.GetInstantPerSec(); got != 0 {
 		t.Fatalf("instant after silence = %v, want 0", got)
 	}
 	want := before * 0.3679
-	if got := stats.RouteIngested.GetAvg_1MPerSec(); got < want*0.98 || got > want*1.02 {
+	if got := stats.RouteRouted.GetAvg_1MPerSec(); got < want*0.98 || got > want*1.02 {
 		t.Fatalf("1m EWMA after 60s silence = %v, want ~%.1f (e^-1 decay)", got, want)
 	}
 }
@@ -167,23 +167,23 @@ func TestPeerState_AggregateRouteRates(t *testing.T) {
 	t.Parallel()
 	ps := NewPeerState(time.Minute)
 	ps.Update("node-b", &gastrologv1.NodeStats{
-		RouteIngested: &gastrologv1.ThroughputRate{InstantPerSec: 100, Avg_1MPerSec: 90, Avg_15MPerSec: 85},
-		RouteRouted:   &gastrologv1.ThroughputRate{InstantPerSec: 80},
+		RouteRouted:  &gastrologv1.ThroughputRate{InstantPerSec: 100, Avg_1MPerSec: 90, Avg_15MPerSec: 85},
+		RouteMatched: &gastrologv1.ThroughputRate{InstantPerSec: 80},
 	}, time.Now())
 	ps.Update("node-c", &gastrologv1.NodeStats{
-		RouteIngested: &gastrologv1.ThroughputRate{InstantPerSec: 25, Avg_1MPerSec: 10, Avg_15MPerSec: 5},
-		RouteRouted:   &gastrologv1.ThroughputRate{InstantPerSec: 20},
+		RouteRouted:  &gastrologv1.ThroughputRate{InstantPerSec: 25, Avg_1MPerSec: 10, Avg_15MPerSec: 5},
+		RouteMatched: &gastrologv1.ThroughputRate{InstantPerSec: 20},
 	}, time.Now())
 	// Expired entries must not count.
 	ps.Update("node-dead", &gastrologv1.NodeStats{
-		RouteIngested: &gastrologv1.ThroughputRate{InstantPerSec: 999},
+		RouteRouted: &gastrologv1.ThroughputRate{InstantPerSec: 999},
 	}, time.Now().Add(-2*time.Minute))
 
-	in, routed := ps.AggregateRouteRates()
-	assertRate(t, "aggregate ingested instant", in.InstantPerSec, 125)
-	assertRate(t, "aggregate ingested 1m", in.Avg_1MPerSec, 100)
-	assertRate(t, "aggregate ingested 15m", in.Avg_15MPerSec, 90)
-	assertRate(t, "aggregate routed instant", routed.InstantPerSec, 100)
+	routed, matched := ps.AggregateRouteRates()
+	assertRate(t, "aggregate routed instant", routed.InstantPerSec, 125)
+	assertRate(t, "aggregate routed 1m", routed.Avg_1MPerSec, 100)
+	assertRate(t, "aggregate routed 15m", routed.Avg_15MPerSec, 90)
+	assertRate(t, "aggregate matched instant", matched.InstantPerSec, 100)
 }
 
 // TestStatsCollector_ClusterRouteRates: the cluster-total series (including
@@ -191,38 +191,38 @@ func TestPeerState_AggregateRouteRates(t *testing.T) {
 // cluster counters — never accumulated client-side (gastrolog-4eh5ns).
 func TestStatsCollector_ClusterRouteRates(t *testing.T) {
 	t.Parallel()
-	var clusterIngested, clusterRouted int64 = 10000, 8000
+	var clusterRouted, clusterMatched int64 = 10000, 8000
 	collector := NewStatsCollector(StatsCollectorConfig{
 		Stats:      &stubStatsProvider{},
 		NodeID:     "node-a",
 		NodeNameFn: func() string { return "node-a" },
 		ClusterRouteTotals: func() (int64, int64, string) {
-			return clusterIngested, clusterRouted, "self"
+			return clusterRouted, clusterMatched, "self"
 		},
 	})
 
 	t0 := time.Now()
 	_ = collector.CollectLocalTick(t0)
-	in, _ := collector.ClusterRouteRates()
-	if in.InstantPerSec != 0 || len(in.Spark) != 0 {
-		t.Fatalf("first tick = %v/%d sparks, want 0/none (window init)", in.InstantPerSec, len(in.Spark))
+	routed0, _ := collector.ClusterRouteRates()
+	if routed0.InstantPerSec != 0 || len(routed0.Spark) != 0 {
+		t.Fatalf("first tick = %v/%d sparks, want 0/none (window init)", routed0.InstantPerSec, len(routed0.Spark))
 	}
 
-	clusterIngested += 500 // +500 over 5s → 100/s
-	clusterRouted += 250
+	clusterRouted += 500 // +500 over 5s → 100/s
+	clusterMatched += 250
 	_ = collector.CollectLocalTick(t0.Add(5 * time.Second))
-	in, routed := collector.ClusterRouteRates()
-	assertRate(t, "cluster ingested instant", in.InstantPerSec, 100)
-	assertRate(t, "cluster routed instant", routed.InstantPerSec, 50)
-	if len(in.Spark) != 1 {
-		t.Fatalf("spark len = %d, want 1 (server-side history)", len(in.Spark))
+	routed1, matched1 := collector.ClusterRouteRates()
+	assertRate(t, "cluster routed instant", routed1.InstantPerSec, 100)
+	assertRate(t, "cluster matched instant", matched1.InstantPerSec, 50)
+	if len(routed1.Spark) != 1 {
+		t.Fatalf("spark len = %d, want 1 (server-side history)", len(routed1.Spark))
 	}
 
 	// A peer expiring (summed counter drops) re-anchors instead of going negative.
-	clusterIngested -= 5000
+	clusterRouted -= 5000
 	_ = collector.CollectLocalTick(t0.Add(10 * time.Second))
-	in, _ = collector.ClusterRouteRates()
-	if in.InstantPerSec != 0 {
-		t.Fatalf("post-drop instant = %v, want 0 (reset guard)", in.InstantPerSec)
+	routed2, _ := collector.ClusterRouteRates()
+	if routed2.InstantPerSec != 0 {
+		t.Fatalf("post-drop instant = %v, want 0 (reset guard)", routed2.InstantPerSec)
 	}
 }

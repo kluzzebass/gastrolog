@@ -55,7 +55,7 @@ type Config struct {
 
 // StatsSnapshot is a point-in-time view of routing counters.
 type StatsSnapshot struct {
-	Ingested  uint64               // records that entered routing (matched + unmatched)
+	Routed    uint64               // records that entered routing (matched + unmatched)
 	Matched   uint64               // records that matched a route and were fanned out
 	Unmatched uint64               // records with no route match (intentional drop, counted)
 	PerVault  map[glid.GLID]uint64 // matched-record count per destination vault
@@ -153,7 +153,7 @@ func (m *Manager) Stats() StatsSnapshot {
 	matched := m.matched.Load()
 	unmatched := m.unmatched.Load()
 	return StatsSnapshot{
-		Ingested:        matched + unmatched,
+		Routed:          matched + unmatched,
 		Matched:         matched,
 		Unmatched:       unmatched,
 		PerVault:        m.perVault.snapshot(),

@@ -71,30 +71,30 @@ func TestStatsCollectorRouteRatesEndToEnd(t *testing.T) {
 		}
 	}
 	deadline := time.Now().Add(5 * time.Second)
-	for orch.GetRouteStats().Ingested < n {
+	for orch.GetRouteStats().Routed < n {
 		if time.Now().After(deadline) {
-			t.Fatalf("routing counters never reached %d (ingested=%d)", n, orch.GetRouteStats().Ingested)
+			t.Fatalf("routing counters never reached %d (routed=%d)", n, orch.GetRouteStats().Routed)
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
 
 	// Tick 2, nominally 5s later: rate must be n/5 records per second.
 	tick := collector.CollectLocalTick(t0.Add(5 * time.Second))
-	if tick.RouteIngested.GetInstantPerSec() <= 0 {
-		t.Fatalf("tick route ingested = %v after %d records, want > 0", tick.RouteIngested.GetInstantPerSec(), n)
+	if tick.RouteRouted.GetInstantPerSec() <= 0 {
+		t.Fatalf("tick route routed = %v after %d records, want > 0", tick.RouteRouted.GetInstantPerSec(), n)
 	}
 
 	// The snapshot path (what GetRouteStats reads via LocalStats) must report
 	// the last stepped rates — instant AND trailing averages.
 	snap := collector.CollectLocalSnapshot()
-	if snap.RouteIngested.GetInstantPerSec() <= 0 {
-		t.Fatalf("snapshot route ingested = %v, want > 0 (last stepped rate)", snap.RouteIngested.GetInstantPerSec())
-	}
 	if snap.RouteRouted.GetInstantPerSec() <= 0 {
-		t.Fatalf("snapshot route routed = %v, want > 0", snap.RouteRouted.GetInstantPerSec())
+		t.Fatalf("snapshot route routed = %v, want > 0 (last stepped rate)", snap.RouteRouted.GetInstantPerSec())
 	}
-	if snap.RouteIngested.GetAvg_1MPerSec() <= 0 || snap.RouteIngested.GetAvg_15MPerSec() <= 0 {
+	if snap.RouteMatched.GetInstantPerSec() <= 0 {
+		t.Fatalf("snapshot route routed = %v, want > 0", snap.RouteMatched.GetInstantPerSec())
+	}
+	if snap.RouteRouted.GetAvg_1MPerSec() <= 0 || snap.RouteRouted.GetAvg_15MPerSec() <= 0 {
 		t.Fatalf("snapshot EWMAs = %v/%v, want > 0",
-			snap.RouteIngested.GetAvg_1MPerSec(), snap.RouteIngested.GetAvg_15MPerSec())
+			snap.RouteRouted.GetAvg_1MPerSec(), snap.RouteRouted.GetAvg_15MPerSec())
 	}
 }

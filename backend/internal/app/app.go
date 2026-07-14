@@ -844,11 +844,11 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 		// system data, not client-side accumulation (gastrolog-4eh5ns).
 		ClusterRouteTotals: func() (int64, int64, string) {
 			rs := statsAdapter.RouteStats()
-			pIngested, pRouted, members := peerState.AggregateRouteTotals()
+			pRouted, pMatched, members := peerState.AggregateRouteTotals()
 			// "self" + sorted live peers: the summed window re-anchors on
 			// any change so peers entering/leaving the sum never read as
 			// traffic (gastrolog-mliwrd).
-			return rs.Ingested + pIngested, rs.Routed + pRouted,
+			return rs.Routed + pRouted, rs.Matched + pMatched,
 				"self," + strings.Join(members, ",")
 		},
 		Alerts: alerts,

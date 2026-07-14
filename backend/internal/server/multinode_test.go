@@ -283,14 +283,14 @@ type mnPeerRouteStats struct {
 	nodes map[string]*orchestrator.Orchestrator // remote node orchs
 }
 
-func (p *mnPeerRouteStats) AggregateRouteStats() (ingested, dropped, routed int64, filterActive bool, vaultStats []*gastrologv1.VaultRouteStats, routeStats []*gastrologv1.PerRouteStats) {
+func (p *mnPeerRouteStats) AggregateRouteStats() (routed, dropped, matched int64, filterActive bool, vaultStats []*gastrologv1.VaultRouteStats, routeStats []*gastrologv1.PerRouteStats) {
 	vaultMap := make(map[string]*gastrologv1.VaultRouteStats)
 	routeMap := make(map[string]*gastrologv1.PerRouteStats)
 	for _, orch := range p.nodes {
 		rs := orch.GetRouteStats()
-		ingested += rs.Ingested
-		dropped += rs.Dropped
 		routed += rs.Routed
+		dropped += rs.Dropped
+		matched += rs.Matched
 		if orch.IsFilterSetActive() {
 			filterActive = true
 		}
@@ -1994,14 +1994,14 @@ func TestMultiNode_RouteStatsAggregated(t *testing.T) {
 
 	// Query route stats via the coordinator — should aggregate both data nodes.
 	msg := waitForMNRouteStats(t, h.configClient, func(m *gastrologv1.GetRouteStatsResponse) bool {
-		return m.TotalIngested == 10
+		return m.TotalRouted == 10
 	})
 
-	if msg.TotalIngested != 10 {
-		t.Errorf("TotalIngested = %d, want 10 (3+7)", msg.TotalIngested)
-	}
 	if msg.TotalRouted != 10 {
-		t.Errorf("TotalRouted = %d, want 10", msg.TotalRouted)
+		t.Errorf("TotalRouted = %d, want 10 (3+7)", msg.TotalRouted)
+	}
+	if msg.TotalMatched != 10 {
+		t.Errorf("TotalMatched = %d, want 10", msg.TotalMatched)
 	}
 	if msg.TotalDropped != 0 {
 		t.Errorf("TotalDropped = %d, want 0", msg.TotalDropped)
@@ -2108,11 +2108,11 @@ func TestMultiNode_PerRouteStatsAggregated(t *testing.T) {
 	submitMNRouteRecords(t, d2, "node", "data-2", "from-d2", 8)
 
 	msg := waitForMNRouteStats(t, h.configClient, func(m *gastrologv1.GetRouteStatsResponse) bool {
-		return m.TotalIngested == 13
+		return m.TotalRouted == 13
 	})
 
-	if msg.TotalIngested != 13 {
-		t.Errorf("TotalIngested = %d, want 13", msg.TotalIngested)
+	if msg.TotalRouted != 13 {
+		t.Errorf("TotalRouted = %d, want 13", msg.TotalRouted)
 	}
 
 	// Should have 2 per-route entries.

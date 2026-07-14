@@ -74,7 +74,7 @@ func TestFireRetentionEventFansOutManyRecords(t *testing.T) {
 	r.fireRetentionEvent(sealedID)
 
 	waitForRouteStats(t, orch, "all records routed", func(s *RouteStats) bool {
-		return s.Routed == recordCount
+		return s.Matched == recordCount
 	})
 }
 
@@ -111,7 +111,7 @@ func TestSweepParallelChunkRouteFanOut(t *testing.T) {
 	r.sweep(rules)
 
 	waitForRouteStats(t, orch, "parallel chunk fan-out", func(s *RouteStats) bool {
-		return s.Routed == expectedRouted
+		return s.Matched == expectedRouted
 	})
 }
 
@@ -131,8 +131,8 @@ func TestFireRetentionEventPipelineStopped(t *testing.T) {
 	r.fireRetentionEvent(fx.sealedID)
 
 	time.Sleep(20 * time.Millisecond)
-	if s := fx.orch.GetRouteStats(); s.Ingested != 0 {
-		t.Errorf("stopped pipeline should not ingest records, got Ingested=%d", s.Ingested)
+	if s := fx.orch.GetRouteStats(); s.Routed != 0 {
+		t.Errorf("stopped pipeline should not ingest records, got Routed=%d", s.Routed)
 	}
 }
 
@@ -194,6 +194,6 @@ func TestFireRetentionEventFileBackedGLCBParallel(t *testing.T) {
 	r.fireRetentionEvent(sealedID)
 
 	waitForRouteStats(t, orch, "file GLCB parallel fan-out", func(s *RouteStats) bool {
-		return s.Routed == recordCount
+		return s.Matched == recordCount
 	})
 }

@@ -596,9 +596,9 @@ export class NodeStats extends Message<NodeStats> {
   /**
    * Route stats (aggregated cluster-wide by GetRouteStats RPC)
    *
-   * @generated from field: int64 route_stats_ingested = 28;
+   * @generated from field: int64 route_stats_routed = 28;
    */
-  routeStatsIngested = protoInt64.zero;
+  routeStatsRouted = protoInt64.zero;
 
   /**
    * @generated from field: int64 route_stats_dropped = 29;
@@ -606,9 +606,9 @@ export class NodeStats extends Message<NodeStats> {
   routeStatsDropped = protoInt64.zero;
 
   /**
-   * @generated from field: int64 route_stats_routed = 30;
+   * @generated from field: int64 route_stats_matched = 30;
    */
-  routeStatsRouted = protoInt64.zero;
+  routeStatsMatched = protoInt64.zero;
 
   /**
    * @generated from field: bool route_stats_filter_active = 31;
@@ -671,14 +671,14 @@ export class NodeStats extends Message<NodeStats> {
    * windows over the cumulative route counters (fields 28/30). Cluster
    * totals are the sum across nodes (gastrolog-4eh5ns).
    *
-   * @generated from field: gastrolog.v1.ThroughputRate route_ingested = 39;
-   */
-  routeIngested?: ThroughputRate;
-
-  /**
-   * @generated from field: gastrolog.v1.ThroughputRate route_routed = 40;
+   * @generated from field: gastrolog.v1.ThroughputRate route_routed = 39;
    */
   routeRouted?: ThroughputRate;
+
+  /**
+   * @generated from field: gastrolog.v1.ThroughputRate route_matched = 40;
+   */
+  routeMatched?: ThroughputRate;
 
   /**
    * Raft liveness / WAL health (gastrolog-1io54g). Append latency covers
@@ -776,9 +776,9 @@ export class NodeStats extends Message<NodeStats> {
     { no: 25, name: "raft_fsm_pending", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 26, name: "api_address", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 27, name: "pprof_address", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 28, name: "route_stats_ingested", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 28, name: "route_stats_routed", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 29, name: "route_stats_dropped", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 30, name: "route_stats_routed", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 30, name: "route_stats_matched", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 31, name: "route_stats_filter_active", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 32, name: "route_vault_stats", kind: "message", T: VaultRouteStats, repeated: true },
     { no: 33, name: "route_per_route_stats", kind: "message", T: PerRouteStats, repeated: true },
@@ -787,8 +787,8 @@ export class NodeStats extends Message<NodeStats> {
     { no: 38, name: "peer_traffic_totals", kind: "message", T: PeerTrafficTotal, repeated: true },
     { no: 36, name: "vault_pipeline_disk", kind: "message", T: VaultPipelineNodeDisk, repeated: true },
     { no: 37, name: "storage_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 39, name: "route_ingested", kind: "message", T: ThroughputRate },
-    { no: 40, name: "route_routed", kind: "message", T: ThroughputRate },
+    { no: 39, name: "route_routed", kind: "message", T: ThroughputRate },
+    { no: 40, name: "route_matched", kind: "message", T: ThroughputRate },
     { no: 41, name: "raft_wal_appends_total", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 42, name: "raft_wal_append_avg_ms", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
     { no: 43, name: "raft_wal_append_max_ms", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },

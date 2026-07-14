@@ -30,8 +30,8 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
   }
 
   const dropRate =
-    stats.totalIngested > 0
-      ? ((Number(stats.totalDropped) / Number(stats.totalIngested)) * 100).toFixed(1)
+    stats.totalRouted > 0
+      ? ((Number(stats.totalDropped) / Number(stats.totalRouted)) * 100).toFixed(1)
       : "0.0";
 
   const sorted = [...stats.vaultStats].sort(
@@ -61,16 +61,16 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
 
         <div className="grid grid-cols-4 gap-4">
           <StatBox
-            label="Ingested"
-            value={formatCount(stats.totalIngested)}
+            label="Routed"
+            value={formatCount(stats.totalRouted)}
             dark={dark}
             title="Records that entered the routing stage since process start, cluster-wide"
           />
           <StatBox
-            label="Routed"
-            value={formatCount(stats.totalRouted)}
+            label="Matched"
+            value={formatCount(stats.totalMatched)}
             dark={dark}
-            variant={Number(stats.totalRouted) > 0 ? "ok" : undefined}
+            variant={Number(stats.totalMatched) > 0 ? "ok" : undefined}
             title="Records that matched at least one route and were delivered to a vault (fan-out counts once)"
           />
           <StatBox
@@ -78,22 +78,22 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
             value={formatCount(stats.totalDropped)}
             dark={dark}
             variant={Number(stats.totalDropped) > 0 ? "error" : undefined}
-            title="Records that matched no route and were silently discarded — ingested = routed + dropped"
+            title="Records that matched no route and were silently discarded — routed = matched + dropped"
           />
           <StatBox label="Drop rate" value={`${dropRate}%`} dark={dark} />
         </div>
         <div className={`mt-4 pt-3 border-t grid grid-cols-2 gap-4 ${c("border-ink-border-subtle", "border-light-border-subtle")}`}>
           <RateBox
-            label="Ingest rate"
-            rate={stats.ingestedRate}
-            dark={dark}
-            title="Records/s entering the routing stage, summed across all nodes. The gap between this and the route rate is the live drop rate."
-          />
-          <RateBox
-            label="Route rate"
+            label="Routed rate"
             rate={stats.routedRate}
             dark={dark}
-            title="Records/s matched to at least one route, summed across all nodes. Equal to the ingest rate when nothing is dropped."
+            title="Records/s entering the routing stage, summed across all nodes. The gap between this and the matched rate is the live drop rate."
+          />
+          <RateBox
+            label="Matched rate"
+            rate={stats.matchedRate}
+            dark={dark}
+            title="Records/s matched to at least one route, summed across all nodes. Equal to the routed rate when nothing is dropped."
           />
         </div>
       </div>

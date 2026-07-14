@@ -47,9 +47,9 @@ type IngesterStats struct {
 // RouteStats is a point-in-time snapshot of global routing counters sourced
 // from the pipeline routing manager.
 type RouteStats struct {
-	Ingested int64 // total records that entered routing (matched + unmatched)
-	Dropped  int64 // records matching no route (intentional, counted drop)
-	Routed   int64 // records that matched a route and were fanned out
+	Routed  int64 // total records that entered routing (matched + unmatched)
+	Dropped int64 // records matching no route (intentional, counted drop)
+	Matched int64 // records that matched a route and were fanned out
 }
 
 // VaultRouteStats is a point-in-time snapshot of per-vault routing counters.
@@ -964,9 +964,9 @@ func (o *Orchestrator) IsIngesterRunning(id glid.GLID) bool {
 func (o *Orchestrator) GetRouteStats() *RouteStats {
 	snap := o.pipeline.RouteStats()
 	return &RouteStats{
-		Ingested: int64(snap.Ingested),  //nolint:gosec // G115: counter bounded in practice
-		Dropped:  int64(snap.Unmatched), //nolint:gosec // G115
-		Routed:   int64(snap.Matched),   //nolint:gosec // G115
+		Routed:  int64(snap.Routed),    //nolint:gosec // G115: counter bounded in practice
+		Dropped: int64(snap.Unmatched), //nolint:gosec // G115
+		Matched: int64(snap.Matched),   //nolint:gosec // G115
 	}
 }
 

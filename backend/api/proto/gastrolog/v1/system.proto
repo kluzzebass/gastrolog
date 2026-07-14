@@ -988,9 +988,9 @@ message GetRouteStatsRequest {}
 
 message GetRouteStatsResponse {
   // Global counters since process start.
-  int64 total_ingested = 1;   // total records entering ingest()
+  int64 total_routed = 1;     // total records entering routing (matched + dropped)
   int64 total_dropped = 2;    // records matching no filter (silently lost)
-  int64 total_routed = 3;     // records delivered to at least one vault
+  int64 total_matched = 3;    // records that matched a route and were delivered to at least one vault
   bool filter_set_active = 4; // false = no routes compiled, all records dropped
 
   // Per-vault destination counters.
@@ -1003,13 +1003,13 @@ message GetRouteStatsResponse {
   // rolling-window rates from the NodeStats broadcast. Sparks are omitted
   // at cluster level — per-node tick phases differ, so element-wise sums
   // would fabricate a series no node observed (gastrolog-4eh5ns).
-  gastrolog.v1.ThroughputRate ingested_rate = 7;
-  gastrolog.v1.ThroughputRate routed_rate = 8;
+  gastrolog.v1.ThroughputRate routed_rate = 7;
+  gastrolog.v1.ThroughputRate matched_rate = 8;
 }
 
 message VaultRouteStats {
   bytes vault_id = 1;
-  int64 records_matched = 2; // records routed to this vault
+  int64 records_matched = 2; // records that matched a route targeting this vault
 }
 
 message PerRouteStats {
