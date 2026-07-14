@@ -16,6 +16,13 @@ import (
 
 var ErrNoMergeRecords = errors.New("merge produced no records")
 
+// glcbBuildTmpPrefix is the os.CreateTemp pattern prefix BuildGLCBFile uses
+// for its atomic-rename staging file. Exported as a constant (rather than
+// re-typing the literal at each call site) so the startup orphan sweep in
+// recover.go matches this writer's exact naming contract instead of
+// guessing a pattern — see gastrolog-66hmx3 / gastrolog-5do8sh gap 7.
+const glcbBuildTmpPrefix = ".glcb.tmp."
+
 // BuildGLCBInput names the chunk identity and span plan for a GLCB build.
 type BuildGLCBInput struct {
 	ChunkID chunk.ChunkID
@@ -56,7 +63,7 @@ func glcbWorkDir(dst io.Writer) (string, error) {
 // Records stream into the temp file after the fixed header; no staging copy.
 func BuildGLCBFile(path string, in BuildGLCBInput) (BuildGLCBResult, error) {
 	workDir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(workDir, ".glcb.tmp.*")
+	tmp, err := os.CreateTemp(workDir, glcbBuildTmpPrefix+"*")
 	if err != nil {
 		return BuildGLCBResult{}, err
 	}
