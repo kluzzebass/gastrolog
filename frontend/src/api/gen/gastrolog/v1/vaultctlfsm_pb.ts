@@ -996,9 +996,9 @@ export class PublishCompletedSegmentCommand extends Message<PublishCompletedSegm
   lastIngestTsNanos = protoInt64.zero;
 
   /**
-   * @generated from field: uint32 checksum = 6;
+   * @generated from field: uint64 checksum = 6;
    */
-  checksum = 0;
+  checksum = protoInt64.zero;
 
   /**
    * Node that completed the segment (holder hint for Collection).
@@ -1027,7 +1027,7 @@ export class PublishCompletedSegmentCommand extends Message<PublishCompletedSegm
     { no: 3, name: "byte_size", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 4, name: "first_ingest_ts_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 5, name: "last_ingest_ts_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 6, name: "checksum", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 6, name: "checksum", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 7, name: "origin_node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 8, name: "published_at_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
   ]);
@@ -1122,9 +1122,9 @@ export class CompletedSegmentEntry extends Message<CompletedSegmentEntry> {
   lastIngestTsNanos = protoInt64.zero;
 
   /**
-   * @generated from field: uint32 checksum = 6;
+   * @generated from field: uint64 checksum = 6;
    */
-  checksum = 0;
+  checksum = protoInt64.zero;
 
   /**
    * @generated from field: string origin_node_id = 7;
@@ -1157,7 +1157,7 @@ export class CompletedSegmentEntry extends Message<CompletedSegmentEntry> {
     { no: 3, name: "byte_size", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 4, name: "first_ingest_ts_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 5, name: "last_ingest_ts_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 6, name: "checksum", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 6, name: "checksum", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 7, name: "origin_node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 8, name: "published_at_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 9, name: "holders", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },

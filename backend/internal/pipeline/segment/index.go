@@ -150,12 +150,12 @@ func (sf *File) BuildIndex() error {
 	sf.hdr.IndexOffset = recordEnd
 	sf.hdr.IndexChecksum = sum
 	sf.dataEnd = recordEnd
-	var recSum uint32
-	if sf.recordCRC != nil {
-		recSum = sf.recordCRC.Sum32()
+	var recSum uint64
+	if sf.recordDigest != nil {
+		recSum = sf.recordDigest.Sum64()
 	} else {
 		var err error
-		recSum, err = sf.initRecordCRC(recordEnd)
+		recSum, err = sf.initRecordDigest(recordEnd)
 		if err != nil {
 			return err
 		}
@@ -237,8 +237,8 @@ func (sf *File) buildIndexFromMemory(recordEnd uint32) error {
 	sf.hdr.IndexOffset = recordEnd
 	sf.hdr.IndexChecksum = crc32.ChecksumIEEE(idxBuf)
 	sf.dataEnd = recordEnd
-	if sf.recordCRC != nil {
-		sf.hdr.SegmentChecksum = sf.recordCRC.Sum32()
+	if sf.recordDigest != nil {
+		sf.hdr.SegmentChecksum = sf.recordDigest.Sum64()
 	}
 	sf.memEntries = nil
 	return sf.writeHeader()
@@ -385,7 +385,7 @@ func (sf *File) verifyIndexedLayout() error {
 	if info.Size() < indexEnd {
 		return errors.New("segment index tail truncated")
 	}
-	recSum, err := sf.initRecordCRC(sf.hdr.IndexOffset)
+	recSum, err := sf.initRecordDigest(sf.hdr.IndexOffset)
 	if err != nil {
 		return err
 	}

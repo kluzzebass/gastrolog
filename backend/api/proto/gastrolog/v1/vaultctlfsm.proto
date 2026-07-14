@@ -162,7 +162,7 @@ message PublishCompletedSegmentCommand {
   uint64 byte_size = 3;
   int64 first_ingest_ts_nanos = 4;
   int64 last_ingest_ts_nanos = 5;
-  uint32 checksum = 6;
+  uint64 checksum = 6;
   // Node that completed the segment (holder hint for Collection).
   string origin_node_id = 7;
   // Wall time carried in the command for deterministic replay (Unix nanos).
@@ -183,7 +183,7 @@ message CompletedSegmentEntry {
   uint64 byte_size = 3;
   int64 first_ingest_ts_nanos = 4;
   int64 last_ingest_ts_nanos = 5;
-  uint32 checksum = 6;
+  uint64 checksum = 6;
   string origin_node_id = 7;
   int64 published_at_nanos = 8;
   // Node IDs that have pulled, verified, and committed a holder receipt for

@@ -1392,7 +1392,7 @@ type PublishCompletedSegmentCommand struct {
 	ByteSize           uint64                 `protobuf:"varint,3,opt,name=byte_size,json=byteSize,proto3" json:"byte_size,omitempty"`
 	FirstIngestTsNanos int64                  `protobuf:"varint,4,opt,name=first_ingest_ts_nanos,json=firstIngestTsNanos,proto3" json:"first_ingest_ts_nanos,omitempty"`
 	LastIngestTsNanos  int64                  `protobuf:"varint,5,opt,name=last_ingest_ts_nanos,json=lastIngestTsNanos,proto3" json:"last_ingest_ts_nanos,omitempty"`
-	Checksum           uint32                 `protobuf:"varint,6,opt,name=checksum,proto3" json:"checksum,omitempty"`
+	Checksum           uint64                 `protobuf:"varint,6,opt,name=checksum,proto3" json:"checksum,omitempty"`
 	// Node that completed the segment (holder hint for Collection).
 	OriginNodeId string `protobuf:"bytes,7,opt,name=origin_node_id,json=originNodeId,proto3" json:"origin_node_id,omitempty"`
 	// Wall time carried in the command for deterministic replay (Unix nanos).
@@ -1466,7 +1466,7 @@ func (x *PublishCompletedSegmentCommand) GetLastIngestTsNanos() int64 {
 	return 0
 }
 
-func (x *PublishCompletedSegmentCommand) GetChecksum() uint32 {
+func (x *PublishCompletedSegmentCommand) GetChecksum() uint64 {
 	if x != nil {
 		return x.Checksum
 	}
@@ -1542,7 +1542,7 @@ type CompletedSegmentEntry struct {
 	ByteSize           uint64                 `protobuf:"varint,3,opt,name=byte_size,json=byteSize,proto3" json:"byte_size,omitempty"`
 	FirstIngestTsNanos int64                  `protobuf:"varint,4,opt,name=first_ingest_ts_nanos,json=firstIngestTsNanos,proto3" json:"first_ingest_ts_nanos,omitempty"`
 	LastIngestTsNanos  int64                  `protobuf:"varint,5,opt,name=last_ingest_ts_nanos,json=lastIngestTsNanos,proto3" json:"last_ingest_ts_nanos,omitempty"`
-	Checksum           uint32                 `protobuf:"varint,6,opt,name=checksum,proto3" json:"checksum,omitempty"`
+	Checksum           uint64                 `protobuf:"varint,6,opt,name=checksum,proto3" json:"checksum,omitempty"`
 	OriginNodeId       string                 `protobuf:"bytes,7,opt,name=origin_node_id,json=originNodeId,proto3" json:"origin_node_id,omitempty"`
 	PublishedAtNanos   int64                  `protobuf:"varint,8,opt,name=published_at_nanos,json=publishedAtNanos,proto3" json:"published_at_nanos,omitempty"`
 	// Node IDs that have pulled, verified, and committed a holder receipt for
@@ -1617,7 +1617,7 @@ func (x *CompletedSegmentEntry) GetLastIngestTsNanos() int64 {
 	return 0
 }
 
-func (x *CompletedSegmentEntry) GetChecksum() uint32 {
+func (x *CompletedSegmentEntry) GetChecksum() uint64 {
 	if x != nil {
 		return x.Checksum
 	}
@@ -3382,7 +3382,7 @@ const file_gastrolog_v1_vaultctlfsm_proto_rawDesc = "" +
 	"\tbyte_size\x18\x03 \x01(\x04R\bbyteSize\x121\n" +
 	"\x15first_ingest_ts_nanos\x18\x04 \x01(\x03R\x12firstIngestTsNanos\x12/\n" +
 	"\x14last_ingest_ts_nanos\x18\x05 \x01(\x03R\x11lastIngestTsNanos\x12\x1a\n" +
-	"\bchecksum\x18\x06 \x01(\rR\bchecksum\x12$\n" +
+	"\bchecksum\x18\x06 \x01(\x04R\bchecksum\x12$\n" +
 	"\x0eorigin_node_id\x18\a \x01(\tR\foriginNodeId\x12,\n" +
 	"\x12published_at_nanos\x18\b \x01(\x03R\x10publishedAtNanos\"k\n" +
 	"\x1fPublishCompletedSegmentsCommand\x12H\n" +
@@ -3394,7 +3394,7 @@ const file_gastrolog_v1_vaultctlfsm_proto_rawDesc = "" +
 	"\tbyte_size\x18\x03 \x01(\x04R\bbyteSize\x121\n" +
 	"\x15first_ingest_ts_nanos\x18\x04 \x01(\x03R\x12firstIngestTsNanos\x12/\n" +
 	"\x14last_ingest_ts_nanos\x18\x05 \x01(\x03R\x11lastIngestTsNanos\x12\x1a\n" +
-	"\bchecksum\x18\x06 \x01(\rR\bchecksum\x12$\n" +
+	"\bchecksum\x18\x06 \x01(\x04R\bchecksum\x12$\n" +
 	"\x0eorigin_node_id\x18\a \x01(\tR\foriginNodeId\x12,\n" +
 	"\x12published_at_nanos\x18\b \x01(\x03R\x10publishedAtNanos\x12\x18\n" +
 	"\aholders\x18\t \x03(\tR\aholders\"\xe0\x01\n" +

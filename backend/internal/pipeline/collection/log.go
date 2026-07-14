@@ -10,7 +10,7 @@ import (
 type AssignedSegment struct {
 	VaultID   glid.GLID
 	SegmentID glid.GLID
-	Checksum  uint32
+	Checksum  uint64
 }
 
 // LogReader rolls the vault-ctl log and returns segments assigned to this home.
