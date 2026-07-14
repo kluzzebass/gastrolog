@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
+	"strings"
 
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/ingestion"
@@ -77,8 +79,19 @@ func (o *Orchestrator) reconcileIngestersLocked(desired []IngesterDesired) error
 			Passive: d.Passive,
 			Params:  cloneIngesterParams(d.Params),
 		}
-		if _, had := o.ingesters[id]; had && o.ingesterMeta[id].equal(meta) {
-			continue // unchanged — keep the running instance and cached adapter
+		if _, had := o.ingesters[id]; had {
+			old := o.ingesterMeta[id]
+			if old.equal(meta) {
+				continue // unchanged — keep the running instance and cached adapter
+			}
+			// A rebuild stops and restarts a running ingester, so the
+			// reason must be operator-visible: the 3mnjlo boot-window
+			// flap (started at boot, stop/started on the first sweep
+			// tick) was undiagnosable because nothing recorded WHAT the
+			// reconcile considered changed. Field names and param KEYS
+			// only — params may hold credentials, never log values.
+			o.logger.Info("ingester config changed; rebuilding",
+				"id", id, "name", meta.Name, "changed", old.diff(meta))
 		}
 		ing, err := d.Build()
 		if err != nil {
@@ -106,6 +119,41 @@ func (i ingesterInfo) equal(other ingesterInfo) bool {
 		i.Type == other.Type &&
 		i.Passive == other.Passive &&
 		maps.Equal(i.Params, other.Params)
+}
+
+// diff names the fields that differ between two ingesterInfo values, for
+// the rebuild log line. Param VALUES are never included (they may hold
+// credentials); changed params are reported by key, e.g.
+// "params[rate,token]".
+func (i ingesterInfo) diff(other ingesterInfo) string {
+	var parts []string
+	if i.Name != other.Name {
+		parts = append(parts, "name")
+	}
+	if i.Type != other.Type {
+		parts = append(parts, "type")
+	}
+	if i.Passive != other.Passive {
+		parts = append(parts, "passive")
+	}
+	if !maps.Equal(i.Params, other.Params) {
+		keys := make(map[string]bool)
+		for k, v := range i.Params {
+			if ov, ok := other.Params[k]; !ok || ov != v {
+				keys[k] = true
+			}
+		}
+		for k, v := range other.Params {
+			if iv, ok := i.Params[k]; !ok || iv != v {
+				keys[k] = true
+			}
+		}
+		parts = append(parts, "params["+strings.Join(slices.Sorted(maps.Keys(keys)), ",")+"]")
+	}
+	if len(parts) == 0 {
+		return "none"
+	}
+	return strings.Join(parts, ",")
 }
 
 // setIngesterLocked installs (or replaces) an ingester in the desired set and
