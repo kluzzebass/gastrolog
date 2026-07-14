@@ -18,7 +18,7 @@ import (
 func TestRefToSpanPartialSlice(t *testing.T) {
 	t.Parallel()
 	segID := glid.New()
-	span, err := chunking.RefToSpan(chunking.ManifestRefEntry{
+	span, err := chunking.RefToSpan(chunking.ManifestRef{
 		SegmentID:         segID,
 		FirstRecordNumber: 10,
 		LastRecordNumber:  24,
@@ -57,7 +57,7 @@ func TestBuildSealedChunkIdenticalDigestAcrossHomes(t *testing.T) {
 
 	manifest := chunking.SealedManifest{
 		ChunkID: chunkID,
-		Refs: []chunking.ManifestRefEntry{
+		Refs: []chunking.ManifestRef{
 			{SegmentID: segA, FirstRecordNumber: 0, LastRecordNumber: 1},
 			{SegmentID: segB, FirstRecordNumber: 0, LastRecordNumber: 1},
 		},
@@ -102,7 +102,7 @@ func TestBuildSealedChunkMissingSegment(t *testing.T) {
 	_, err := chunking.BuildSealedChunk(chunking.BuildInput{
 		Manifest: chunking.SealedManifest{
 			ChunkID: chunk.NewChunkID(),
-			Refs: []chunking.ManifestRefEntry{
+			Refs: []chunking.ManifestRef{
 				{SegmentID: present, FirstRecordNumber: 0, LastRecordNumber: 0},
 				{SegmentID: missing, FirstRecordNumber: 0, LastRecordNumber: 0},
 			},

@@ -41,7 +41,7 @@ func TestRecoverOnceSealsFromExistingGLCB(t *testing.T) {
 			ChunkID:  chunkID,
 			OpenedAt: openedAt,
 			SealedAt: sealedAt,
-			Refs: []chunking.ManifestRefEntry{{
+			Refs: []chunking.ManifestRef{{
 				SegmentID:         segID,
 				FirstRecordNumber: 0,
 				LastRecordNumber:  1,
@@ -108,7 +108,7 @@ func TestRecoverOnceSealsOrphanActiveGLCB(t *testing.T) {
 			ChunkID:  chunkID,
 			OpenedAt: openedAt,
 			SealedAt: sealedAt,
-			Refs: []chunking.ManifestRefEntry{{
+			Refs: []chunking.ManifestRef{{
 				SegmentID:         segID,
 				FirstRecordNumber: 0,
 				LastRecordNumber:  0,
@@ -179,7 +179,7 @@ func TestRecoverOnceSkipsSealedEntries(t *testing.T) {
 			ChunkID:  chunkID,
 			OpenedAt: openedAt,
 			SealedAt: sealedAt,
-			Refs: []chunking.ManifestRefEntry{{
+			Refs: []chunking.ManifestRef{{
 				SegmentID:         segID,
 				FirstRecordNumber: 0,
 				LastRecordNumber:  1,
@@ -246,7 +246,7 @@ func TestRecoveryWaitsForFSMReplay(t *testing.T) {
 			ChunkID:  chunkID,
 			OpenedAt: base,
 			SealedAt: base.Add(time.Minute),
-			Refs: []chunking.ManifestRefEntry{{
+			Refs: []chunking.ManifestRef{{
 				SegmentID:         segID,
 				FirstRecordNumber: 0,
 				LastRecordNumber:  0,
