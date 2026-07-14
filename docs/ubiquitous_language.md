@@ -842,6 +842,15 @@ Three verbs cover segment end-of-life, one per layer — they are not synonyms:
   on vault-ctl awaiting per-home GLCB build (`sealed_manifest` in FSM snapshot).
   Not the same word as V2 sequenced-write **materialization** (spool → chunk).
 
+- **GLCB quarantine** — an existing-but-unreadable sealed GLCB is renamed
+  aside to a `data.glcb.corrupt` sibling (never silently deleted or silently
+  rebuilt over) so the canonical path reads as **missing** and the ordinary
+  missing-GLCB machinery heals the chunk: rebuild from source segments when
+  they are still available, otherwise a peer re-pull via the GLCB catch-up
+  sweep. A per-vault operator alert stays up until every quarantined chunk
+  heals; healing removes the quarantine file
+  (`chunking/glcb_corrupt.go`, gastrolog-687m11).
+
 ---
 
 ## Consistency rules

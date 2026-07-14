@@ -801,6 +801,16 @@ func (s *Supervisor) ChunkingRegistered(vaultID glid.GLID) bool {
 	return s.chunk != nil && s.chunk.HasVault(vaultID)
 }
 
+// NoteGLCBRestored clears a chunk's corrupt-GLCB state (quarantine file +
+// operator alert) after its canonical GLCB was restored outside chunking —
+// the orchestrator's GLCB catch-up sweep re-pulled a verified copy from a
+// peer home (gastrolog-687m11).
+func (s *Supervisor) NoteGLCBRestored(vaultID glid.GLID, chunkID chunk.ChunkID) {
+	if s.chunk != nil {
+		s.chunk.NoteGLCBRestored(vaultID, chunkID)
+	}
+}
+
 // RewireVaultAfterCtlRestore rebinds chunking and collection to the live vault-ctl
 // sub-FSM after a group-level snapshot Restore. Returns ErrUnknownVault when the
 // vault is not registered on this home yet (transient during startup).
