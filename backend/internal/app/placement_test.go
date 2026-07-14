@@ -4,9 +4,11 @@ import (
 	"context"
 	"gastrolog/internal/glid"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
+	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/alert"
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/orchestrator"
@@ -1133,5 +1135,121 @@ func TestStartPlacementReconcile_PropagatesAddJobError(t *testing.T) {
 
 	if err := startPlacementReconcile(context.Background(), sched, pm); err == nil {
 		t.Fatal("expected AddJob error to propagate")
+	}
+}
+
+// ---------- Degraded-home alarm (gastrolog-38bm9t) ----------
+
+func alertMessage(alerts *alert.Collector, prefix string) string {
+	for _, a := range alerts.Active() {
+		if strings.HasPrefix(a.ID, prefix) {
+			return a.Message
+		}
+	}
+	return ""
+}
+
+func protectStats(vaultID glid.GLID) *gastrologv1.NodeStats {
+	return &gastrologv1.NodeStats{DiskProtectedVaultIds: [][]byte{vaultID.ToProto()}}
+}
+
+// A placement member whose volume for the vault is under disk protect is a
+// degraded holder: the alarm must name the node and enumerate eligible
+// replacement candidates (alive, eligible, not in placement, not degraded).
+func TestDegradedHomeAlarm_RaisedWithCandidates_ClearedOnRecovery(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pm, store, alerts := newTestPlacement(t, "node-1", []string{"node-2", "node-3"})
+	_ = store.PutNode(ctx, system.NodeConfig{ID: glid.New(), Name: "node-2"})
+	vaultID := seedVaultWithLeader(t, store, "node-2")
+
+	// node-2 (the home) reports the vault's volume under disk protect.
+	pm.peerState.Update("node-2", protectStats(vaultID), time.Now())
+	pm.reconcile(ctx)
+
+	msg := alertMessage(alerts, "vault-home-cannot-store:")
+	if msg == "" {
+		t.Fatal("expected vault-home-cannot-store alert for degraded home")
+	}
+	if !strings.Contains(msg, "node-2") {
+		t.Errorf("alarm must name the degraded home; got %q", msg)
+	}
+	if !strings.Contains(msg, "node-3") {
+		t.Errorf("alarm must enumerate eligible replacement candidates (node-3); got %q", msg)
+	}
+	if strings.Contains(msg, "no eligible replacement") {
+		t.Errorf("candidates exist; got no-replacement message %q", msg)
+	}
+
+	// Space frees: node-2's next broadcast no longer lists the vault.
+	pm.peerState.Update("node-2", &gastrologv1.NodeStats{}, time.Now())
+	pm.reconcile(ctx)
+	if hasAlert(alerts, "vault-home-cannot-store:") {
+		t.Error("alarm must clear once the home's volume recovers")
+	}
+}
+
+// With no eligible replacement (the degraded home is the only candidate),
+// the alarm says so instead of listing candidates — admission throttling
+// at the source is the only remedy until space frees.
+func TestDegradedHomeAlarm_NoCandidates(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	// Only node-2 besides local; local is the leader's peer... keep it
+	// minimal: home node-2, no third node.
+	pm, store, alerts := newTestPlacement(t, "node-1", []string{"node-2"})
+	vaultID := seedVaultWithLeader(t, store, "node-2")
+	pm.peerState.Update("node-2", protectStats(vaultID), time.Now())
+
+	pm.reconcile(ctx)
+
+	msg := alertMessage(alerts, "vault-home-cannot-store:")
+	if msg == "" {
+		t.Fatal("expected vault-home-cannot-store alert")
+	}
+	// node-1 (local) is alive and eligible for a memory vault, so it IS a
+	// candidate here; degrade it too via the local lookup to force the
+	// no-candidate branch.
+	pm.localVaultDiskProtected = func(id glid.GLID) bool { return id == vaultID }
+	pm.reconcile(ctx)
+	msg = alertMessage(alerts, "vault-home-cannot-store:")
+	if !strings.Contains(msg, "no eligible replacement") {
+		t.Errorf("want no-eligible-replacement message, got %q", msg)
+	}
+}
+
+// The local node's own protect state comes from the orchestrator lookup
+// (it is absent from its own peer table); a degraded LOCAL home must raise
+// the alarm too.
+func TestDegradedHomeAlarm_LocalHome(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pm, store, alerts := newTestPlacement(t, "node-1", []string{"node-2"})
+	vaultID := seedVaultWithLeader(t, store, "node-1")
+	pm.localVaultDiskProtected = func(id glid.GLID) bool { return id == vaultID }
+
+	pm.reconcile(ctx)
+
+	msg := alertMessage(alerts, "vault-home-cannot-store:")
+	if msg == "" {
+		t.Fatal("expected alarm for degraded local home")
+	}
+	if !strings.Contains(msg, "node-1") {
+		t.Errorf("alarm must name the local degraded home; got %q", msg)
+	}
+}
+
+// A healthy placement raises nothing.
+func TestDegradedHomeAlarm_HealthyHomeSilent(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pm, store, alerts := newTestPlacement(t, "node-1", []string{"node-2"})
+	seedVaultWithLeader(t, store, "node-2")
+	pm.peerState.Update("node-2", &gastrologv1.NodeStats{}, time.Now())
+
+	pm.reconcile(ctx)
+
+	if hasAlert(alerts, "vault-home-cannot-store:") {
+		t.Error("healthy home must not raise vault-home-cannot-store")
 	}
 }

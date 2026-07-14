@@ -337,6 +337,30 @@ func (p *PeerState) VaultSizeCapped(vaultID glid.GLID) bool {
 	})
 }
 
+// VaultDiskProtectedNodes returns the live peers currently reporting this
+// vault's local backing volume under disk protect — the WHO to
+// VaultDiskProtected's whether. The placement manager uses it to name the
+// degraded home in the vault-home-cannot-store alarm (gastrolog-38bm9t).
+func (p *PeerState) VaultDiskProtectedNodes(vaultID glid.GLID) []string {
+	want := vaultID.ToProto()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	now := time.Now()
+	var nodes []string
+	for nodeID, e := range p.entries {
+		if now.Sub(e.received) > p.ttl || e.stats == nil {
+			continue
+		}
+		for _, id := range e.stats.DiskProtectedVaultIds {
+			if string(id) == string(want) {
+				nodes = append(nodes, nodeID)
+				break
+			}
+		}
+	}
+	return nodes
+}
+
 func (p *PeerState) vaultListedByAnyPeer(vaultID glid.GLID, list func(*gastrologv1.NodeStats) [][]byte) bool {
 	want := vaultID.ToProto()
 	p.mu.RLock()

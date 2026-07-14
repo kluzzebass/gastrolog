@@ -6,10 +6,12 @@ import (
 	"log/slog"
 	"math/rand"
 	"slices"
+	"sort"
 	"strings"
 
 	"gastrolog/internal/alert"
 	"gastrolog/internal/cluster"
+	"gastrolog/internal/glid"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/system"
 
@@ -41,6 +43,14 @@ type placementManager struct {
 	localNodeID string
 	logger      *slog.Logger
 	triggerCh   chan struct{} // poked to run reconcile immediately
+
+	// localVaultDiskProtected reports whether THIS node's backing volume
+	// for the vault is under disk protect. Peers' protect state arrives
+	// via the NodeStats broadcast (PeerState.VaultDiskProtectedNodes);
+	// the local node does not appear in its own peer table, so the
+	// degraded-home alarm needs this direct orchestrator lookup. Nil in
+	// tests that don't exercise the local-degraded case.
+	localVaultDiskProtected func(glid.GLID) bool
 }
 
 // Run blocks until ctx is cancelled. Handles the two event-driven
@@ -167,11 +177,98 @@ func (pm *placementManager) reconcile(ctx context.Context) {
 		}
 	}
 
+	nodeNames := make(map[string]string, len(nodeConfigs))
+	for _, n := range nodeConfigs {
+		id := n.ID.String()
+		if n.Name != "" {
+			nodeNames[id] = n.Name
+		} else {
+			nodeNames[id] = id
+		}
+	}
+
 	for _, v := range vaults {
 		pm.placeVault(ctx, v, alive, nodeStates, nscs, vaultCount)
+		pm.reportDegradedHomes(ctx, v, alive, nscs, nodeNames)
 	}
 
 	pm.reconcileSingletonIngesters(ctx, alive)
+}
+
+// reportDegradedHomes raises (or clears) the vault-home-cannot-store alarm
+// (gastrolog-38bm9t): a placement member whose local backing volume for
+// this vault is under disk protect is a degraded holder — it can't take
+// collection writes or build GLCBs, so releases stall and the vault's
+// admission throttles at the source. The alarm names the degraded node and
+// enumerates eligible replacement candidates (storage-class match, alive,
+// not already in the placement) so the operator can decide on a placement
+// swap — deliberately operator-initiated, never automatic (disk-pressure
+// auto-migration risks flap and cascade; see the issue's refinement).
+func (pm *placementManager) reportDegradedHomes(ctx context.Context, v system.VaultConfig, alive map[string]bool, nscs []system.NodeStorageConfig, nodeNames map[string]string) {
+	if pm.alerts == nil {
+		return
+	}
+	alertKey := fmt.Sprintf("vault-home-cannot-store:%s", v.ID)
+
+	placements, _ := pm.cfgStore.GetVaultPlacements(ctx, v.ID)
+	homes := make(map[string]bool)
+	if leader := system.LeaderNodeID(placements, nscs); leader != "" {
+		homes[leader] = true
+	}
+	for _, nid := range system.FollowerNodeIDs(placements, nscs) {
+		if nid != "" {
+			homes[nid] = true
+		}
+	}
+	if len(homes) == 0 {
+		pm.alerts.Clear(alertKey)
+		return
+	}
+
+	protectedBy := make(map[string]bool)
+	if pm.peerState != nil {
+		for _, nid := range pm.peerState.VaultDiskProtectedNodes(v.ID) {
+			protectedBy[nid] = true
+		}
+	}
+	if pm.localVaultDiskProtected != nil && pm.localVaultDiskProtected(v.ID) {
+		protectedBy[pm.localNodeID] = true
+	}
+
+	var degraded []string
+	for nid := range homes {
+		if protectedBy[nid] {
+			degraded = append(degraded, nameOrID(nodeNames, nid))
+		}
+	}
+	if len(degraded) == 0 {
+		pm.alerts.Clear(alertKey)
+		return
+	}
+	sort.Strings(degraded)
+
+	var candidates []string
+	for _, nid := range pm.eligibleNodes(v, alive, nscs) {
+		if !homes[nid] && !protectedBy[nid] {
+			candidates = append(candidates, nameOrID(nodeNames, nid))
+		}
+	}
+	sort.Strings(candidates)
+
+	remedy := "no eligible replacement node — admission for this vault throttles at the source until space frees"
+	if len(candidates) > 0 {
+		remedy = "eligible replacements: " + strings.Join(candidates, ", ") + " (placement swap is operator-initiated)"
+	}
+	pm.alerts.Set(alertKey, alert.Warning, "placement",
+		fmt.Sprintf("Vault %q: home %s cannot store (disk protect) — collection and builds are paused there and releases stall; %s",
+			v.Name, strings.Join(degraded, ", "), remedy))
+}
+
+func nameOrID(names map[string]string, id string) string {
+	if n, ok := names[id]; ok && n != "" {
+		return n
+	}
+	return id
 }
 
 // reconcileSingletonIngesters assigns each singleton ingester to exactly one

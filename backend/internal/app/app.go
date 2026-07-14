@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -474,6 +475,12 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 			localNodeID: nodeID,
 			logger:      compPlacement.Apply(logger),
 			triggerCh:   make(chan struct{}, 1),
+			// Local half of the degraded-home check (gastrolog-38bm9t):
+			// peers report their vault protect state via NodeStats, but
+			// the local node isn't in its own peer table.
+			localVaultDiskProtected: func(id glid.GLID) bool {
+				return slices.Contains(orch.DiskProtectedVaults(), id)
+			},
 		}
 		disp.placementTrigger = pm.Trigger
 		placementReconcileFn = pm.Reconcile
