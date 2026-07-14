@@ -4,6 +4,7 @@ import (
 	"context"
 	"gastrolog/internal/glid"
 	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1174,18 +1175,72 @@ func TestDegradedHomeAlarm_RaisedWithCandidates_ClearedOnRecovery(t *testing.T) 
 	if !strings.Contains(msg, "node-2") {
 		t.Errorf("alarm must name the degraded home; got %q", msg)
 	}
-	if !strings.Contains(msg, "node-3") {
-		t.Errorf("alarm must enumerate eligible replacement candidates (node-3); got %q", msg)
+	if !strings.Contains(msg, "backfilled automatically") {
+		t.Errorf("with an eligible node the backfill is automatic; got %q", msg)
 	}
-	if strings.Contains(msg, "no eligible replacement") {
-		t.Errorf("candidates exist; got no-replacement message %q", msg)
+	// The degraded leader is retained AND an eligible node became a
+	// replica automatically (the user rule: eligible node exists -> it
+	// becomes a replica, no operator action).
+	if got := vaultNode(t, store, vaultID); got != "node-2" {
+		t.Errorf("degraded leader must be retained, got %q", got)
+	}
+	if got := len(followerNodes(t, store, vaultID)); got != 1 {
+		t.Errorf("expected 1 backfilled follower, got %d", got)
 	}
 
 	// Space frees: node-2's next broadcast no longer lists the vault.
+	// The alarm clears and the backfilled surplus trims back to RF.
 	pm.peerState.Update("node-2", &gastrologv1.NodeStats{}, time.Now())
 	pm.reconcile(ctx)
 	if hasAlert(alerts, "vault-home-cannot-store:") {
 		t.Error("alarm must clear once the home's volume recovers")
+	}
+	if got := len(followerNodes(t, store, vaultID)); got != 0 {
+		t.Errorf("backfilled follower must trim after recovery (RF=1), got %d", got)
+	}
+}
+
+func followerNodes(t *testing.T, store *sysmem.Store, vaultID glid.GLID) []string {
+	t.Helper()
+	ctx := context.Background()
+	nscs, _ := store.ListNodeStorageConfigs(ctx)
+	placements, _ := store.GetVaultPlacements(ctx, vaultID)
+	return system.FollowerNodeIDs(placements, nscs)
+}
+
+// A degraded FOLLOWER on an RF=2 vault: retained in the placement (bytes
+// may recover) but no longer counted — an eligible node backfills
+// automatically; recovery trims the surplus back to RF.
+func TestDegradedFollowerBackfillAndTrim(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pm, store, _ := newTestPlacement(t, "node-1", []string{"node-2", "node-3"})
+	vaultID := glid.New()
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "rf2", Type: system.VaultTypeMemory, ReplicationFactor: 2})
+
+	pm.reconcile(ctx)
+	if got := len(followerNodes(t, store, vaultID)); got != 1 {
+		t.Fatalf("RF=2 placement should have 1 follower, got %d", got)
+	}
+	follower := followerNodes(t, store, vaultID)[0]
+
+	// The follower's volume for this vault goes under disk protect.
+	pm.peerState.Update(follower, protectStats(vaultID), time.Now())
+	pm.reconcile(ctx)
+
+	fs := followerNodes(t, store, vaultID)
+	if len(fs) != 2 {
+		t.Fatalf("degraded follower must be retained AND backfilled: got %v", fs)
+	}
+	if !slices.Contains(fs, follower) {
+		t.Errorf("degraded follower %s must be retained, got %v", follower, fs)
+	}
+
+	// Recovery: surplus trims back to one follower.
+	pm.peerState.Update(follower, &gastrologv1.NodeStats{}, time.Now())
+	pm.reconcile(ctx)
+	if got := len(followerNodes(t, store, vaultID)); got != 1 {
+		t.Errorf("placement must trim back to RF after recovery, got %d followers", got)
 	}
 }
 
