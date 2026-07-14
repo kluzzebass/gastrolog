@@ -53,7 +53,7 @@ type Writer struct {
 	directBuf  *bufio.Writer
 	blobHash   hash.Hash
 
-	recordIndex []recordIndex
+	recordIndex []recordIndexEntry
 	sectionOff  uint64
 	count       uint32
 	bounds      blobBounds
@@ -91,7 +91,7 @@ func (w *Writer) ReserveRecords(n uint32) {
 	if n == 0 {
 		return
 	}
-	w.recordIndex = make([]recordIndex, 0, n)
+	w.recordIndex = make([]recordIndexEntry, 0, n)
 	w.ingestEntries = make([]tsEntry, 0, n)
 	w.sourceEntries = make([]tsEntry, 0, n)
 }
@@ -280,7 +280,7 @@ func (w *Writer) commitFrame(sourceTS, ingestTS, writeTS time.Time) error {
 	w.noteIngestTS(ingestTS)
 
 	bodySize := uint32(len(w.frameScratch) - frameLenSize) //nolint:gosec // G115: frame size bounded by record limits
-	w.recordIndex = append(w.recordIndex, recordIndex{
+	w.recordIndex = append(w.recordIndex, recordIndexEntry{
 		Offset: w.sectionOff + frameLenSize,
 		Size:   bodySize,
 	})

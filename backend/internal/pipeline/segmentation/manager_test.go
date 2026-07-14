@@ -325,8 +325,8 @@ func TestManagerRunTwice(t *testing.T) {
 	cancel()
 	<-done
 
-	if err := mgr.Run(ctx); err != segmentation.ErrNotRunning {
-		t.Fatalf("Run() = %v, want ErrNotRunning", err)
+	if err := mgr.Run(ctx); err != segmentation.ErrAlreadyRunning {
+		t.Fatalf("Run() = %v, want ErrAlreadyRunning", err)
 	}
 }
 

@@ -38,8 +38,8 @@ const (
 	publishRetryMaxDelay  = 2 * time.Second
 )
 
-// ErrNotRunning is returned when Run is called twice.
-var ErrNotRunning = errors.New("distribution manager not running")
+// ErrAlreadyRunning is returned when Run is called twice.
+var ErrAlreadyRunning = errors.New("distribution manager already running")
 
 // ErrUnknownVault is returned for an unregistered vault.
 var ErrUnknownVault = errors.New("unknown vault")
@@ -236,8 +236,8 @@ func (v *vaultDist) publishStaged(ctx context.Context, meta Metadata, segID glid
 		return nil
 	}
 	if !v.segmentBytesPresent(segID, path) {
-		v.forgetSegment(segID)
-		v.log.Warn("segment bytes missing at publish; forgetting segment",
+		v.retireSegment(segID)
+		v.log.Warn("segment bytes missing at publish; retiring segment",
 			"segment", segID, "path", path)
 		return errPublishBytesMissing
 	}
@@ -263,13 +263,13 @@ func (v *vaultDist) publishStagedBatch(ctx context.Context, items []pendingPubli
 			continue
 		}
 		if !v.segmentBytesPresent(p.segID, p.path) {
-			// Forget THIS item only. Failing the whole coalesced batch here
+			// Retire THIS item only. Failing the whole coalesced batch here
 			// stranded the surviving batchmates permanently: the batch error
 			// was classified non-retryable, the items stayed in v.segments,
 			// and the stranded rescan skipped them as known — durable
 			// segments invisible to vault-ctl until restart (gastrolog-353kwm).
-			v.forgetSegment(p.segID)
-			v.log.Warn("segment bytes missing at publish; forgetting segment",
+			v.retireSegment(p.segID)
+			v.log.Warn("segment bytes missing at publish; retiring segment",
 				"segment", p.segID, "path", p.path)
 			continue
 		}
@@ -367,7 +367,7 @@ func (v *vaultDist) segmentBytesPresent(segID glid.GLID, path string) bool {
 	return ok
 }
 
-func (v *vaultDist) forgetSegment(segID glid.GLID) {
+func (v *vaultDist) retireSegment(segID glid.GLID) {
 	v.mu.Lock()
 	delete(v.segments, segID)
 	v.retired[segID] = struct{}{}
@@ -505,7 +505,7 @@ func (m *Manager) RetireSegments(vaultID glid.GLID, segmentIDs []glid.GLID) {
 // Run consumes completed segments and pull requests until ctx is cancelled.
 func (m *Manager) Run(ctx context.Context, completed <-chan segmentation.CompletedSegment) error {
 	if !m.running.CompareAndSwap(false, true) {
-		return ErrNotRunning
+		return ErrAlreadyRunning
 	}
 
 	m.mu.Lock()

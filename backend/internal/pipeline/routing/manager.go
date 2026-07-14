@@ -11,14 +11,14 @@ import (
 	"gastrolog/internal/record"
 )
 
-// ErrNotRunning is returned when Run is called twice.
-var ErrNotRunning = errors.New("routing manager not running")
+// ErrAlreadyRunning is returned when Run is called twice.
+var ErrAlreadyRunning = errors.New("routing manager already running")
 
 // Input is one record entering the routing stage with its origin context.
 //
 // Two entry paths:
 //   - Ingest→digest: Source from IngestSource(rec) (or zero Source, same default)
-//   - Vault retention eject: Source from RetentionSource(sourceVaultID, reason)
+//   - Retention event (disposition = route): Source from RetentionSource(sourceVaultID, reason)
 //
 // Source is routing-time metadata only — it is not stored on the record.
 //
@@ -202,7 +202,7 @@ func drainCounterMap(store *sync.Map) map[glid.GLID]uint64 {
 // shutdown) must be able to abort a blocking send.
 func (m *Manager) Run(ctx context.Context, in <-chan Input) error {
 	if !m.running.CompareAndSwap(false, true) {
-		return ErrNotRunning
+		return ErrAlreadyRunning
 	}
 
 	for range m.workers {

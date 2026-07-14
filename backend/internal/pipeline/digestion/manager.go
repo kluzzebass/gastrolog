@@ -11,8 +11,8 @@ import (
 	"gastrolog/internal/record"
 )
 
-// ErrNotRunning is returned when Run is called twice.
-var ErrNotRunning = errors.New("digestion manager not running")
+// ErrAlreadyRunning is returned when Run is called twice.
+var ErrAlreadyRunning = errors.New("digestion manager already running")
 
 // Config configures a DigestionManager worker pool.
 type Config struct {
@@ -66,7 +66,7 @@ func New(cfg Config) (*Manager, <-chan Output) {
 // backpressure mechanism — never bypass them.
 func (m *Manager) Run(ctx context.Context, in <-chan ingestion.Message) error {
 	if !m.running.CompareAndSwap(false, true) {
-		return ErrNotRunning
+		return ErrAlreadyRunning
 	}
 	defer close(m.out)
 

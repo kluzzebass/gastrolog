@@ -18,8 +18,8 @@ import (
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
-// ErrNotRunning is returned when Run is called twice.
-var ErrNotRunning = errors.New("chunking manager not running")
+// ErrAlreadyRunning is returned when Run is called twice.
+var ErrAlreadyRunning = errors.New("chunking manager already running")
 
 // sealRetryInterval removed — seal/build retries wake on FSM events and
 // vault-ctl leadership changes, not timed polls.
@@ -608,7 +608,7 @@ func (m *Manager) ReleaseOnce(ctx context.Context, vaultID glid.GLID) error {
 // wake signal.
 func (m *Manager) Run(ctx context.Context) error {
 	if !m.running.CompareAndSwap(false, true) {
-		return ErrNotRunning
+		return ErrAlreadyRunning
 	}
 
 	m.mu.Lock()

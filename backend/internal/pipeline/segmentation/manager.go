@@ -16,7 +16,11 @@ import (
 	"gastrolog/internal/record"
 )
 
-// ErrNotRunning is returned when Run is called twice.
+// ErrAlreadyRunning is returned when Run is called twice.
+var ErrAlreadyRunning = errors.New("segmentation manager already running")
+
+// ErrNotRunning is returned when an operation requires a running manager
+// (e.g. RegisterVault after Run has exited).
 var ErrNotRunning = errors.New("segmentation manager not running")
 
 // ErrUnknownVault is returned when a vault was never registered.
@@ -277,7 +281,7 @@ func (m *Manager) UnregisterVault(vaultID glid.GLID) {
 // Run starts all registered vault writers until ctx is cancelled.
 func (m *Manager) Run(ctx context.Context) error {
 	if !m.running.CompareAndSwap(false, true) {
-		return ErrNotRunning
+		return ErrAlreadyRunning
 	}
 
 	m.mu.Lock()

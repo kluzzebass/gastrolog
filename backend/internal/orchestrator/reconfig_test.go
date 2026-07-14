@@ -116,7 +116,7 @@ func TestReloadFiltersInvalidExpression(t *testing.T) {
 	}
 	err := orch.ReloadFilters(context.Background())
 	if err == nil {
-		t.Fatal("expected error for invalid filter expression")
+		t.Fatal("expected error for invalid match expression")
 	}
 }
 

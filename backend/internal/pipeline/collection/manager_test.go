@@ -1021,7 +1021,7 @@ func TestUnregisterVaultStopsCollection(t *testing.T) {
 	}
 }
 
-func TestRunTwiceReturnsErrNotRunning(t *testing.T) {
+func TestRunTwiceReturnsErrAlreadyRunning(t *testing.T) {
 	t.Parallel()
 	mgr := collection.New(collection.Config{})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1031,8 +1031,8 @@ func TestRunTwiceReturnsErrNotRunning(t *testing.T) {
 		close(done)
 	}()
 	time.Sleep(20 * time.Millisecond)
-	if err := mgr.Run(ctx); err != collection.ErrNotRunning {
-		t.Fatalf("Run() = %v, want ErrNotRunning", err)
+	if err := mgr.Run(ctx); err != collection.ErrAlreadyRunning {
+		t.Fatalf("Run() = %v, want ErrAlreadyRunning", err)
 	}
 	cancel()
 	<-done

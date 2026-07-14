@@ -581,7 +581,7 @@ func TestUnregisterVaultStopsServingPull(t *testing.T) {
 	}
 }
 
-func TestRunTwiceReturnsErrNotRunning(t *testing.T) {
+func TestRunTwiceReturnsErrAlreadyRunning(t *testing.T) {
 	t.Parallel()
 	mgr, _ := distribution.New(distribution.Config{})
 	completed := make(chan segmentation.CompletedSegment)
@@ -592,8 +592,8 @@ func TestRunTwiceReturnsErrNotRunning(t *testing.T) {
 		close(done)
 	}()
 	time.Sleep(20 * time.Millisecond)
-	if err := mgr.Run(ctx, completed); !errors.Is(err, distribution.ErrNotRunning) {
-		t.Fatalf("Run() = %v, want ErrNotRunning", err)
+	if err := mgr.Run(ctx, completed); !errors.Is(err, distribution.ErrAlreadyRunning) {
+		t.Fatalf("Run() = %v, want ErrAlreadyRunning", err)
 	}
 	cancel()
 	<-done

@@ -15,7 +15,7 @@ term used inconsistently in the code, open an issue or fix it in-place.
 
 ## Reading map
 
-GastroLog is split into **eight bounded contexts**. The boundaries are not arbitrary;
+GastroLog is split into **nine bounded contexts**. The boundaries are not arbitrary;
 each one corresponds to a package tree with its own abstractions and its own lexicon.
 A term that crosses a boundary (e.g. "Record") may look the same but can carry subtly
 different guarantees on each side — those crossings are called out explicitly below.
@@ -28,6 +28,7 @@ different guarantees on each side — those crossings are called out explicitly 
 6. [Replication & Forwarding](#6-replication--forwarding) — cross-node data movement.
 7. [Observability](#7-observability) — visibility into the system at runtime.
 8. [Identity & Config](#8-identity--config) — operator-controlled state + auth.
+9. [Pipeline](#9-pipeline) — the fan-out write path from ingest to sealed chunk.
 
 At the end, a [Consistency rules](#consistency-rules) section names every known
 synonym pair and picks the canonical side, plus conventions for timestamps, IDs,
@@ -705,6 +706,135 @@ Live on `Config` directly (not as entities):
 
 ---
 
+## 9. Pipeline
+
+The fan-out write path (`backend/internal/pipeline`, supervised by
+`backend/internal/orchestrator/pipeline`): ingest → digest → route → segment →
+distribute → collect → chunk. One manager per phase, each separated from the
+next by a queue. Design rationale in
+[the fan-out design notes](./fan-out/v3/design-notes.md); everything below
+describes what the code does today.
+
+### Roles
+
+- **Origin** — the node whose segmentation writer produced a segment. The
+  origin serves pull requests for the segment's bytes and never forwards:
+  the leader publishes intent, not bytes.
+
+- **Home** — a node in a vault's placement (the **home set**): a node that
+  *should* hold the vault's segments and chunks. Homes run Collection and
+  Chunking for the vault. "Home" is desired state; "holder" is observed state.
+
+- **Holder** — a node that actually holds verified bytes for a segment or
+  chunk. Residency truth, recorded in the vault-ctl FSM (`holders` on the
+  segment registry entry and on chunk state). Placement says who *should*
+  hold; the holder set says who *does*. `holders ⊇ homes` is a release fast
+  path, never the sole gate (a dead home must not pin a segment forever).
+
+- **Holder receipt** — the vault-ctl commit a node makes after it has pulled
+  and verified bytes (`AckSegmentHolderCommand` for segments,
+  `AckChunkHolderCommand` / `RevokeChunkHolderCommand` for chunks). Receipts
+  are what grow the holder set — durability is proven by receipt, never
+  inferred from optimistic counters.
+
+- **RequiredHolders** — chunking's callback returning the placement member
+  node IDs that must hold data before release gates open
+  (`chunking.VaultConfig.RequiredHolders`, wired from the supervisor's
+  `ChunkRequiredHolders`). The planner floor for chunk-holder eligibility is
+  `min(2, placement size)` (`plannerMinHolders`).
+
+### Staging areas
+
+Per-vault on-disk directories (`backend/internal/pipeline/paths`) — roles
+bound to storage. Rename-paired areas co-locate so promotion is an atomic
+`rename(2)`: `working` ↔ `completed` on the origin, `pre-head` ↔ `head` on
+the collector.
+
+- **working/** — the segment currently being appended by Segmentation. Its
+  header is provisional; the segment is not yet eligible for anything.
+- **completed/** — closed segments, renamed from `working/`. Published to
+  vault-ctl and served for pulls; retained until release.
+- **pre-head/** — in-flight transfers on a collecting home; invisible to
+  queries and Chunking. A failed or corrupt transfer is discarded here and
+  re-pulled from another holder.
+- **head/** — whole, checksum-verified, immutable segments awaiting chunking.
+  Where the recent, queryable records live (the role active chunks fill in
+  the pre-pipeline architecture).
+
+### Verbs
+
+- **Mint** — Ingestion assigns the EventID
+  (`IngesterID + NodeID + IngestTS + IngestSeq`) to an incoming message
+  (`ingestion.Minter`). Identity, dedup, and order are carried by EventID
+  from that point on.
+
+- **Publish** — Distribution commits a completed segment's *metadata* to the
+  vault-ctl log (`PublishCompletedSegment`), making it cluster-visible so
+  Collection on each home can pull it. Metadata only — bytes move by pull.
+
+- **Promote** — atomic rename moving a segment into the next staging area:
+  `working/` → `completed/` at segment close (Segmentation),
+  `pre-head/` → `head/` after verification (Collection, `PromoteVerified`),
+  and `completed/` → `head/` directly when the origin is itself a holder
+  (Distribution; a local move, never a stream to self).
+
+Three verbs cover segment end-of-life, one per layer — they are not synonyms:
+
+- **Release** (vault-ctl / chunking) — drop a segment's completed-registry
+  entry from the vault-ctl FSM (`ReleaseSegmentsCommand`), proposed by the
+  chunking leader once the segment's records are superseded by replicated
+  chunks (holder-gated). The FSM-level end of a segment's registry life;
+  bytes may still exist on disk.
+
+- **Retire** (distribution) — drop a node's in-memory tracking of a segment
+  and mark it so the stranded rescan does not republish still-on-disk
+  `completed/` bytes (`Manager.RetireSegments`, `vaultDist.retireSegment`).
+  Node-local bookkeeping, downstream of release.
+
+- **Purge** (paths / disk) — delete the segment's bytes from staging areas
+  (`paths.PurgeCompleted` on the origin after release; `paths.PurgeHeadStaging`
+  after a home materializes the sealed GLCB; `paths.PurgeSegmentStaging` for
+  all three areas). The physical end of a segment's life, ordered strictly
+  after its records survive in a replicated chunk — a returning node gets
+  those records via chunk replication, never a segment re-pull.
+
+### Chunk build
+
+- **GLCB** — GastroLog Chunk Blob: the sealed-chunk container format
+  (`backend/internal/chunk/cloud`, `data.glcb`). The universal sealed-chunk
+  artifact — local-only file vaults seal into GLCB, and the same blob is the
+  cloud upload unit for cloud-backed vaults.
+
+- **Assignment log** — the vault-ctl log view Collection rolls
+  (`collection.LogReader.Roll` → `AssignedSegment`) to learn which published
+  segments this home should hold; it then pulls the ones it lacks and
+  commits holder receipts.
+
+- **Chunk build cursor** — per-segment progress in EventID order: how far
+  prior chunks consumed that segment's index. Vault-ctl holds cursors + chunk
+  budget; the next build k-way-merges from those positions until the budget
+  is reached, then commits updated cursors.
+
+- **Segment span** — `(segmentID, startRecord, count)` naming a slice in
+  EventID order. Equivalent to cursor deltas for one build; **discovered during
+  merge**, not precomputed from segment metadata alone.
+
+- **Chunk record budget** — stop the merge after N records (rotation-policy
+  `MaxRecords` shape). Deterministic cut axis over the merge walk.
+
+- **Chunk byte budget** — stop when accumulated bytes (pinned unit) reach the
+  limit (`MaxBytes` shape). Same category as record count over the merge walk.
+
+- **Chunk time cut** — schedule-based (`Cron`) can work for chunking when
+  committed on vault-ctl; age-since-chunk-open (`MaxAge` on active chunks) does
+  not map to the segment→chunk build model.
+
+- **Sealed manifest** — after `SealOpenChunkManifest`, the frozen segment-ref list
+  on vault-ctl awaiting per-home GLCB build (`sealed_manifest` in FSM snapshot).
+  Not the same word as V2 sequenced-write **materialization** (spool → chunk).
+
+---
+
 ## Consistency rules
 
 ### Canonical terms (and the variants to phase out)
@@ -731,6 +861,7 @@ Live on `Config` directly (not as entities):
 | match expression | filter, FilterConfig | Match expressions are inlined on `RouteConfig.Stages`; the named-`Filter` entity is gone (gastrolog-4kkoo Phase 5). UI label: "Match expression" on the route editor. |
 | route table      | filter set        | The runtime structure is a priority-ordered `RouteSet`, not a per-vault `FilterSet`. First-match-wins, no catch-the-rest. |
 | synthetic attribute | source predicate, RouteSource | Source/content predicates unify via `_source`/`_ingester`/`_vault`/`_reason` overlays at routing-eval time. |
+| retire (segment, distribution) | forget | Distribution's node-local drop of segment tracking was called `forgetSegment` while the exported entry point was `RetireSegments`; one verb per meaning (gastrolog-34zx9y). See [Pipeline](#9-pipeline) for the release / retire / purge distinction. |
 
 ### Timestamp conventions
 
@@ -770,6 +901,11 @@ Error values that cross bounded contexts:
 - `ErrChunkNotFound` / `ErrActiveChunk` / `ErrChunkTombstoned` — chunk
   manager errors with specific meanings. Never conflate.
 - `ErrNoChunkManagers` — this node hosts no vaults.
+- `ErrAlreadyRunning` — Run/Start was called on a component that is already
+  running (every pipeline manager, the pipeline supervisor, the orchestrator).
+- `ErrNotRunning` — the operation requires a running component (Stop before
+  Start, submit after stop). Strictly means not-running; the Run-called-twice
+  case is `ErrAlreadyRunning`, never this (gastrolog-34zx9y).
 
 ### What "replication" means in which context
 
@@ -786,28 +922,6 @@ Error values that cross bounded contexts:
 
 When you see "replication" in a log line or a comment, check whether the
 subject is bytes or metadata — the operational consequences are different.
-
-### Pipeline
-
-Terms for the fan-out write path; see [the fan-out design notes](./fan-out/v3/design-notes.md).
-
-- **Chunk build cursor** — per-segment progress in EventID order: how far
-  prior chunks consumed that segment's index. Vault-ctl holds cursors + chunk
-  budget; the next build k-way-merges from those positions until the budget
-  is reached, then commits updated cursors.
-- **Segment span** — `(segmentID, startRecord, count)` naming a slice in
-  EventID order. Equivalent to cursor deltas for one build; **discovered during
-  merge**, not precomputed from segment metadata alone.
-- **Chunk record budget** — stop the merge after N records (rotation-policy
-  `MaxRecords` shape). Deterministic cut axis over the merge walk.
-- **Chunk byte budget** — stop when accumulated bytes (pinned unit) reach the
-  limit (`MaxBytes` shape). Same category as record count over the merge walk.
-- **Chunk time cut** — schedule-based (`Cron`) can work for chunking when
-  committed on vault-ctl; age-since-chunk-open (`MaxAge` on active chunks) does
-  not map to the segment→chunk build model.
-- **Sealed manifest** — after `SealOpenChunkManifest`, the frozen segment-ref list
-  on vault-ctl awaiting per-home GLCB build (`sealed_manifest` in FSM snapshot).
-  Not the same word as V2 sequenced-write **materialization** (spool → chunk).
 
 ---
 

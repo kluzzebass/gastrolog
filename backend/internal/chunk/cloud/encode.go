@@ -111,7 +111,7 @@ func encodeDictionary(dict *chunk.StringDict) []byte {
 	return buf
 }
 
-func encodeRecordIndex(index []recordIndex) []byte {
+func encodeRecordIndex(index []recordIndexEntry) []byte {
 	buf := make([]byte, len(index)*indexEntrySize)
 	for i, idx := range index {
 		off := i * indexEntrySize

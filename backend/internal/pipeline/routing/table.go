@@ -97,7 +97,7 @@ func CompileRoute(id glid.GLID, name string, priority int32, expression string, 
 
 	parsed, err := querylang.Parse(expr)
 	if err != nil {
-		return nil, fmt.Errorf("invalid filter expression: %w", err)
+		return nil, fmt.Errorf("invalid match expression: %w", err)
 	}
 	if err := querylang.ValidateAttrFilter(parsed); err != nil {
 		return nil, err
@@ -231,7 +231,7 @@ func IngestSource(rec *record.Record) SourceContext {
 	}
 }
 
-// RetentionSource builds SourceContext for records ejected from a vault during a
+// RetentionSource builds SourceContext for records fed back through routing by a
 // retention event (disposition=route). The source vault ID and optional reason
 // (`age`, `size`, `count`) overlay as `_vault` and `_reason` during matching.
 func RetentionSource(vaultID glid.GLID, reason string) SourceContext {

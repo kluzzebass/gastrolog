@@ -20,8 +20,8 @@ import (
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
-// ErrNotRunning is returned when Run is called twice.
-var ErrNotRunning = errors.New("collection manager not running")
+// ErrAlreadyRunning is returned when Run is called twice.
+var ErrAlreadyRunning = errors.New("collection manager already running")
 
 // ErrUnknownVault is returned for an unregistered vault.
 var ErrUnknownVault = errors.New("unknown vault")
@@ -725,7 +725,7 @@ func (m *Manager) CollectOnce(ctx context.Context, vaultID glid.GLID) error {
 // after Raft replay) and then collects on every wake signal.
 func (m *Manager) Run(ctx context.Context) error {
 	if !m.running.CompareAndSwap(false, true) {
-		return ErrNotRunning
+		return ErrAlreadyRunning
 	}
 
 	m.mu.Lock()

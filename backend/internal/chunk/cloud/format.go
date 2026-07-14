@@ -248,8 +248,8 @@ func (t *BlobTOC) Find(sectionType byte) (TOCEntry, bool) {
 	return TOCEntry{}, false
 }
 
-// recordIndex is one entry in the record offset index.
-type recordIndex struct {
+// recordIndexEntry is one entry in the record offset index.
+type recordIndexEntry struct {
 	Offset uint64 // byte offset into decompressed record data
 	Size   uint32 // frame size (excluding the u32 frameLen prefix)
 }

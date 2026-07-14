@@ -317,8 +317,8 @@ func TestManagerRunTwice(t *testing.T) {
 	if err := mgr.Run(ctx, in); err != nil {
 		t.Fatalf("first Run: %v", err)
 	}
-	if err := mgr.Run(ctx, in); !errors.Is(err, digestion.ErrNotRunning) {
-		t.Fatalf("second Run = %v, want ErrNotRunning", err)
+	if err := mgr.Run(ctx, in); !errors.Is(err, digestion.ErrAlreadyRunning) {
+		t.Fatalf("second Run = %v, want ErrAlreadyRunning", err)
 	}
 }
 
