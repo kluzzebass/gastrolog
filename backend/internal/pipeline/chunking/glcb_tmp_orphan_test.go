@@ -29,7 +29,7 @@ func TestRecoverOnceSweepsGLCBTempOrphan(t *testing.T) {
 		t.Fatalf("plant orphan temp file: %v", err)
 	}
 
-	mgr := registerFixtureVault(t, fx)
+	mgr := registerFixtureVault(t, fx, nil)
 
 	// Successful recovery path (same shape as TestRecoverOnceSealsFromExistingGLCB):
 	// the orphan must not block it.

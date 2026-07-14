@@ -128,6 +128,12 @@ func (o *Orchestrator) runGLCBPull(vaultID glid.GLID, e vaultctlfsm.ManifestEntr
 		}
 		o.logger.Info("GLCB replica recovered from peer",
 			"vault", vaultID, "chunk", e.ID, "from", node)
+		// A verified copy is back on the canonical path: clear any
+		// corrupt-GLCB quarantine + alert chunking raised for this chunk
+		// (gastrolog-687m11). No-op when the miss was a plain byte loss.
+		if o.pipeline != nil {
+			o.pipeline.NoteGLCBRestored(vaultID, e.ID)
+		}
 		o.mu.RLock()
 		var rec *VaultLifecycleReconciler
 		if vault := o.vaults[vaultID]; vault != nil && vault.Instance != nil {

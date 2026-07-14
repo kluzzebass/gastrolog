@@ -152,6 +152,18 @@ type vaultChunking struct {
 	// planFailureAlerted tracks the unplannable-segment alert state so
 	// planner passes raise/clear only on transitions. Guarded by planMu.
 	planFailureAlerted bool
+	// corruptMu guards corruptGLCBs/corruptGLCBAlerted. Its own lock:
+	// corruption is flagged from the build pass (under buildMu) and restart
+	// recovery, and cleared from those plus the orchestrator's peer re-pull
+	// (Manager.NoteGLCBRestored) — see glcb_corrupt.go (gastrolog-687m11).
+	corruptMu sync.Mutex
+	// corruptGLCBs maps chunks whose existing sealed GLCB was detected
+	// unreadable (and quarantined) to the read-error detail, feeding the
+	// corrupt-GLCB operator alert until every flagged chunk heals.
+	corruptGLCBs map[chunk.ChunkID]string
+	// corruptGLCBAlerted tracks the corrupt-GLCB alert state so raise/clear
+	// happen only on transitions. Guarded by corruptMu.
+	corruptGLCBAlerted bool
 	// pendingRelease holds segment IDs awaiting ReleaseSegments once every
 	// required vault home has committed a holder receipt.
 	pendingRelease []glid.GLID

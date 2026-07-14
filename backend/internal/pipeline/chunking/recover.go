@@ -63,6 +63,7 @@ func (v *vaultChunking) recoverOnce(ctx context.Context) error {
 	// sweep must not block the rest of recovery, which is what actually
 	// gets the chunk sealed.
 	v.sweepOrphanGLCBBuildTmp()
+	v.pruneCorruptGLCBs()
 	var lastErr error
 	if pending := v.fsm().SealedManifest(); pending != nil {
 		if len(pending.Refs) == 0 && pending.TotalRecords == 0 {
@@ -172,8 +173,20 @@ func (v *vaultChunking) recoverBuiltGLCB(ctx context.Context, pending *vaultctlf
 	}
 	result, err := BuildResultFromExistingGLCB(glcbPath, sealedAt)
 	if err != nil {
-		return err
+		// Unified corrupt-GLCB story (gastrolog-687m11, glcb_corrupt.go):
+		// quarantine + alert, then degrade to EXACTLY the missing-GLCB case
+		// this function already handles (return nil, nothing recovered here).
+		// The pre-687m11 behavior propagated the error and never rebuilt —
+		// the chunk starved until operator action. Now the worker's build
+		// pass rebuilds the pending sealed manifest from source segments
+		// (collection pulls any this home lacks), and a chunk sealed
+		// cluster-wide whose segments are long released is re-pulled from a
+		// peer home by the orchestrator's GLCB catch-up sweep on stat-miss.
+		v.quarantineCorruptGLCB(pending.ChunkID, glcbPath, err)
+		return nil
 	}
+	// Readable existing GLCB: heals any corrupt flag from a prior pass.
+	v.clearCorruptGLCB(pending.ChunkID, "existing GLCB readable")
 	key := buildKey{chunkID: pending.ChunkID, sealedAt: sealedAt}
 	if key.sealedAt.IsZero() {
 		key.sealedAt = result.WriteEnd
