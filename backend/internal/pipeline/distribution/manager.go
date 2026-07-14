@@ -160,6 +160,16 @@ func (m *Manager) UnregisterVault(vaultID glid.GLID) {
 // RetireSegments marks segments released from the vault-ctl registry so rescan
 // does not republish completed/ files that still exist on disk. Also drops
 // in-memory pull paths.
+//
+// Retirement goes through vaultDist.retireSegment per ID — the same primitive
+// publishStaged/publishStagedBatch already use for the bytes-missing path —
+// instead of reaching into v.mu/v.segments/v.retired directly. This trades one
+// v.mu acquisition covering all N segments for N acquisitions, but nothing
+// depends on the batch being atomic: retirement is monotonic per segment ID
+// (delete from segments, add to retired) and the one caller (the FSM release
+// callback in orchestrator/pipeline/supervisor.go) never inspects retired
+// state between two IDs of the same release batch — it just purges files by
+// ID in a separate loop afterward.
 func (m *Manager) RetireSegments(vaultID glid.GLID, segmentIDs []glid.GLID) {
 	if len(segmentIDs) == 0 {
 		return
@@ -170,12 +180,9 @@ func (m *Manager) RetireSegments(vaultID glid.GLID, segmentIDs []glid.GLID) {
 	if v == nil {
 		return
 	}
-	v.mu.Lock()
 	for _, id := range segmentIDs {
-		delete(v.segments, id)
-		v.retired[id] = struct{}{}
+		v.retireSegment(id)
 	}
-	v.mu.Unlock()
 }
 
 // Run consumes completed segments and pull requests until ctx is cancelled.
