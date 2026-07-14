@@ -1,4 +1,4 @@
-package cloud
+package glcb
 
 // TOC hardening tests (gastrolog-3wrb9m): oversized TOC entries fail the
 // seal with an error instead of panicking, and corrupt/truncated blob

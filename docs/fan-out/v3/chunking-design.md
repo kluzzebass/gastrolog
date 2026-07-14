@@ -403,7 +403,7 @@ state on a timer. Use FSM apply callbacks (`SetOnPublishCompletedSegment`,
 
 - [`design-notes.md`](./design-notes.md) — overall V3 pipeline (chunking bullets may be stale).
 - [`../../ubiquitous_language.md`](../../ubiquitous_language.md) — canonical terms (pending chunking update).
-- Implementation: `backend/internal/pipeline/chunking/`, `backend/internal/chunk/cloud/`.
+- Implementation: `backend/internal/pipeline/chunking/`, `backend/internal/chunk/glcb/`.
 - Tracker: `gastrolog-3mndj` (parent). Children (open):
   - `gastrolog-53ron` — vault-ctl open-chunk manifest FSM
   - `gastrolog-uffcg` — chunking planner (next ref / rotate)

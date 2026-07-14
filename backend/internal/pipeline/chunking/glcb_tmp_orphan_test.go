@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"gastrolog/internal/chunk"
-	chunkcloud "gastrolog/internal/chunk/cloud"
+	"gastrolog/internal/chunk/glcb"
 )
 
 // TestRecoverOnceLeavesGLCBTempOrphan pins CURRENT restart behavior for
@@ -50,7 +50,7 @@ func TestRecoverOnceLeavesGLCBTempOrphan(t *testing.T) {
 	}
 
 	// The built GLCB itself is untouched by the orphan's presence.
-	blob, err := chunkcloud.OpenMappedBlob(fx.glcbPath)
+	blob, err := glcb.OpenMappedBlob(fx.glcbPath)
 	if err != nil {
 		t.Fatalf("open GLCB alongside orphan: %v", err)
 	}

@@ -1,4 +1,4 @@
-package cloud_test
+package glcb_test
 
 // IngestTSMonotonic is a build-time fact persisted in the blob layout meta
 // (gastrolog-699s7p) — the old design re-derived it after the fact by
@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/chunk/cloud"
+	"gastrolog/internal/chunk/glcb"
 	"gastrolog/internal/glid"
 )
 
@@ -28,7 +28,7 @@ func writeBlobWithIngestOrder(t *testing.T, ingestOffsets []time.Duration) strin
 	if err != nil {
 		t.Fatal(err)
 	}
-	w, err := cloud.OpenWriter(f, chunkID, vaultID)
+	w, err := glcb.OpenWriter(f, chunkID, vaultID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestIngestMonotonicFlagPersistsInLayoutMeta(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			path := writeBlobWithIngestOrder(t, tc.offsets)
-			blob, err := cloud.OpenMappedBlob(path)
+			blob, err := glcb.OpenMappedBlob(path)
 			if err != nil {
 				t.Fatal(err)
 			}

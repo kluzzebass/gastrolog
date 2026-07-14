@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
-	chunkcloud "gastrolog/internal/chunk/cloud"
+	"gastrolog/internal/chunk/glcb"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/chunking"
 	"gastrolog/internal/record"
@@ -16,9 +16,9 @@ import (
 
 // openGLCB opens a built GLCB via the production open path
 // (OpenMappedBlob + Reader) and returns its record reader.
-func openGLCB(t *testing.T, path string) *chunkcloud.Reader {
+func openGLCB(t *testing.T, path string) *glcb.Reader {
 	t.Helper()
-	blob, err := chunkcloud.OpenMappedBlob(path)
+	blob, err := glcb.OpenMappedBlob(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestBuildGLCBSingleSegmentRoundTrip(t *testing.T) {
 		Span: chunking.Span{SegmentID: segID, Start: 0, Count: 2},
 	}}
 
-	glcbPath := filepath.Join(t.TempDir(), chunkcloud.BlobFilename)
+	glcbPath := filepath.Join(t.TempDir(), glcb.BlobFilename)
 	result, err := chunking.BuildGLCBFile(glcbPath, chunking.BuildGLCBInput{
 		ChunkID: chunkID,
 		VaultID: vaultID,
@@ -102,7 +102,7 @@ func TestBuildGLCBKWayMergeRoundTrip(t *testing.T) {
 		{Path: pathA, Span: chunking.Span{SegmentID: segA, Start: 0, Count: 2}},
 		{Path: pathB, Span: chunking.Span{SegmentID: segB, Start: 0, Count: 2}},
 	}
-	glcbPath := filepath.Join(t.TempDir(), chunkcloud.BlobFilename)
+	glcbPath := filepath.Join(t.TempDir(), glcb.BlobFilename)
 	result, err := chunking.BuildGLCBFile(glcbPath, chunking.BuildGLCBInput{
 		ChunkID: chunk.NewChunkID(),
 		VaultID: vaultID,
@@ -192,7 +192,7 @@ func TestBuildGLCBDeterministic(t *testing.T) {
 
 func TestBuildGLCBRejectsEmptyMerge(t *testing.T) {
 	t.Parallel()
-	glcbPath := filepath.Join(t.TempDir(), chunkcloud.BlobFilename)
+	glcbPath := filepath.Join(t.TempDir(), glcb.BlobFilename)
 	_, err := chunking.BuildGLCBFile(glcbPath, chunking.BuildGLCBInput{
 		ChunkID: chunk.NewChunkID(),
 		VaultID: glid.New(),

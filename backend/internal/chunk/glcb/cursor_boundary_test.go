@@ -1,4 +1,4 @@
-package cloud
+package glcb
 
 // glcbCursor boundary tests (gastrolog-5do8sh): Seek past the end and a
 // zero-record GLCB. Complements TestSeekableCursor (cloud_test.go), which

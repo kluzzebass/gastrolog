@@ -1,4 +1,4 @@
-package cloud_test
+package glcb_test
 
 import (
 	"bytes"
@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/chunk/cloud"
+	"gastrolog/internal/chunk/glcb"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/record"
 )
@@ -23,7 +23,7 @@ func TestWriterDirectAndStagingProduceIdenticalBlob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wDirect, err := cloud.NewWriter(chunkID, vaultID, workDir)
+	wDirect, err := glcb.NewWriter(chunkID, vaultID, workDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestWriterDirectAndStagingProduceIdenticalBlob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wStaging, err := cloud.NewWriter(chunkID, vaultID, workDir)
+	wStaging, err := glcb.NewWriter(chunkID, vaultID, workDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestWriterAddViewMatchesAddByteForByte(t *testing.T) {
 		}
 	}
 
-	addRecords := func(w *cloud.Writer) error {
+	addRecords := func(w *glcb.Writer) error {
 		for _, rec := range records {
 			if err := w.Add(rec); err != nil {
 				return err
@@ -123,7 +123,7 @@ func TestWriterAddViewMatchesAddByteForByte(t *testing.T) {
 		}
 		return nil
 	}
-	addViews := func(w *cloud.Writer) error {
+	addViews := func(w *glcb.Writer) error {
 		for _, v := range views {
 			if err := w.AddView(v); err != nil {
 				return err
@@ -135,7 +135,7 @@ func TestWriterAddViewMatchesAddByteForByte(t *testing.T) {
 	builds := []struct {
 		name   string
 		direct bool
-		add    func(*cloud.Writer) error
+		add    func(*glcb.Writer) error
 	}{
 		{"add-direct", true, addRecords},
 		{"add-staging", false, addRecords},
@@ -158,14 +158,14 @@ func TestWriterAddViewMatchesAddByteForByte(t *testing.T) {
 
 // buildBlobBytes builds one GLCB via the direct (BindOutput) or staging
 // build and returns the finished blob's bytes.
-func buildBlobBytes(t *testing.T, workDir, name string, direct bool, chunkID chunk.ChunkID, vaultID glid.GLID, add func(*cloud.Writer) error) []byte {
+func buildBlobBytes(t *testing.T, workDir, name string, direct bool, chunkID chunk.ChunkID, vaultID glid.GLID, add func(*glcb.Writer) error) []byte {
 	t.Helper()
 	path := filepath.Join(workDir, name)
 	out, err := os.Create(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	w, err := cloud.NewWriter(chunkID, vaultID, workDir)
+	w, err := glcb.NewWriter(chunkID, vaultID, workDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +203,7 @@ func TestWriterDirectBuildLeavesNoStagingTemp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w, err := cloud.NewWriter(chunkID, vaultID, workDir)
+	w, err := glcb.NewWriter(chunkID, vaultID, workDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +234,7 @@ func TestWriterIngestTSNonMonotonicDetected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w, err := cloud.NewWriter(chunkID, vaultID, workDir)
+	w, err := glcb.NewWriter(chunkID, vaultID, workDir)
 	if err != nil {
 		t.Fatal(err)
 	}

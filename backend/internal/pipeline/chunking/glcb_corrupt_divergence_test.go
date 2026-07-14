@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
-	chunkcloud "gastrolog/internal/chunk/cloud"
+	"gastrolog/internal/chunk/glcb"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/chunking"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
@@ -29,7 +29,7 @@ import (
 
 // glcbCorruptions are the on-disk shapes a damaged data.glcb can take. Each
 // mutation keeps the file present (os.Stat succeeds) but makes
-// chunkcloud.OpenMappedBlob fail: truncation trips the minimum-size check,
+// glcb.OpenMappedBlob fail: truncation trips the minimum-size check,
 // a garbaged header fails preamble validation, and a zero-length file is
 // rejected as "empty GLCB" before parsing.
 var glcbCorruptions = []struct {
@@ -179,7 +179,7 @@ func TestRecoverOnceErrorsOnCorruptExistingGLCB(t *testing.T) {
 			}
 
 			// No rebuild either: the corrupt blob is still unreadable on disk.
-			if _, err := chunkcloud.OpenMappedBlob(fx.glcbPath); err == nil {
+			if _, err := glcb.OpenMappedBlob(fx.glcbPath); err == nil {
 				t.Fatal("GLCB opened cleanly after RecoverOnce; recover path must not have rebuilt it")
 			}
 		})
@@ -206,7 +206,7 @@ func TestBuildOnceRebuildsCorruptExistingGLCB(t *testing.T) {
 
 			// The rebuild replaced the corrupt blob atomically: it opens and
 			// carries every manifest record.
-			blob, err := chunkcloud.OpenMappedBlob(fx.glcbPath)
+			blob, err := glcb.OpenMappedBlob(fx.glcbPath)
 			if err != nil {
 				t.Fatalf("open rebuilt GLCB: %v", err)
 			}

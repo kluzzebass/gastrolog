@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 
 	"gastrolog/internal/chunk"
-	chunkcloud "gastrolog/internal/chunk/cloud"
+	"gastrolog/internal/chunk/glcb"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/record"
@@ -27,7 +27,7 @@ type BuildGLCBInput struct {
 type BuildGLCBResult struct {
 	RecordCount       uint32
 	BlobDigest        [32]byte
-	Meta              chunkcloud.BlobMeta
+	Meta              glcb.BlobMeta
 	IngestTSMonotonic bool
 	Bytes             int64
 }
@@ -47,7 +47,7 @@ func BuildGLCB(dst io.Writer, in BuildGLCBInput) (BuildGLCBResult, error) {
 func glcbWorkDir(dst io.Writer) (string, error) {
 	f, ok := dst.(*os.File)
 	if ok {
-		return chunkcloud.WorkDirForFile(f)
+		return glcb.WorkDirForFile(f)
 	}
 	return "", errors.New("BuildGLCB requires a file in its final directory; use BuildGLCBFile")
 }
@@ -99,7 +99,7 @@ func BuildGLCBFile(path string, in BuildGLCBInput) (BuildGLCBResult, error) {
 }
 
 func buildGLCBTo(dst io.Writer, workDir string, in BuildGLCBInput) (BuildGLCBResult, error) {
-	w, err := chunkcloud.NewWriter(in.ChunkID, in.VaultID, workDir)
+	w, err := glcb.NewWriter(in.ChunkID, in.VaultID, workDir)
 	if err != nil {
 		return BuildGLCBResult{}, err
 	}

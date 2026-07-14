@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
-	chunkcloud "gastrolog/internal/chunk/cloud"
+	"gastrolog/internal/chunk/glcb"
 	"gastrolog/internal/glid"
 	filetsidx "gastrolog/internal/index/file/tsidx"
 	"gastrolog/internal/pipeline/chunking"
@@ -40,7 +40,7 @@ func (o *Orchestrator) withPipelineChunkIngestIndex(vaultID glid.GLID, chunkID c
 	if _, err := os.Stat(glcbPath); err != nil {
 		return err
 	}
-	blob, err := chunkcloud.OpenMappedBlob(glcbPath)
+	blob, err := glcb.OpenMappedBlob(glcbPath)
 	if err != nil {
 		return err
 	}
@@ -48,7 +48,7 @@ func (o *Orchestrator) withPipelineChunkIngestIndex(vaultID glid.GLID, chunkID c
 	blob.Retain()
 	defer blob.Release()
 
-	section, ok := blob.Section(chunkcloud.SectionIngestTSIndex)
+	section, ok := blob.Section(glcb.SectionIngestTSIndex)
 	if !ok || len(section) == 0 {
 		return os.ErrNotExist
 	}

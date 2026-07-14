@@ -40,7 +40,7 @@ func TestFactoryDefaultValues(t *testing.T) {
 
 	// Should have 4 indexers: token, attr, kv, json. tsidx (ingest/source)
 	// no longer has its own indexer — the embedded ITSI/STSI sections
-	// inside data.glcb are written by chunk/cloud.Writer at seal time and
+	// inside data.glcb are written by chunk/glcb.Writer at seal time and
 	// read via tsidx.OpenIngestMmap / OpenSourceMmap.
 	if len(mgr.indexers) != 4 {
 		t.Errorf("expected 4 indexers, got %d", len(mgr.indexers))

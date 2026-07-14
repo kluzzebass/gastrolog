@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/chunk/cloud"
+	"gastrolog/internal/chunk/glcb"
 	"gastrolog/internal/glid"
 
 	"github.com/klauspost/compress/zstd"
@@ -47,7 +47,7 @@ func TestFindStartPosition(t *testing.T) {
 
 // TestDecodeRawEntries pins the embedded ITSI/STSI section format —
 // raw `[ts:i64][pos:u32]` × N with no header, count derived from
-// section size. The writer in chunk/cloud emits this exact layout.
+// section size. The writer in chunk/glcb emits this exact layout.
 func TestDecodeRawEntries(t *testing.T) {
 	t.Parallel()
 	// Three entries: (ts=100, pos=5), (ts=200, pos=2), (ts=300, pos=9).
@@ -89,7 +89,7 @@ func writeTestGLCB(t *testing.T, dir string, chunkID chunk.ChunkID) {
 	enc, _ := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedDefault))
 	defer enc.Close()
 
-	w, err := cloud.NewWriter(chunkID, glid.New(), chunkDir)
+	w, err := glcb.NewWriter(chunkID, glid.New(), chunkDir)
 	if err != nil {
 		t.Fatalf("NewWriter: %v", err)
 	}
@@ -110,7 +110,7 @@ func writeTestGLCB(t *testing.T, dir string, chunkID chunk.ChunkID) {
 	if _, err := w.WriteTo(&buf); err != nil {
 		t.Fatalf("WriteTo: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(chunkDir, cloud.BlobFilename), buf.Bytes(), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(chunkDir, glcb.BlobFilename), buf.Bytes(), 0o644); err != nil {
 		t.Fatalf("write blob: %v", err)
 	}
 }

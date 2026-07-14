@@ -1,4 +1,4 @@
-package cloud_test
+package glcb_test
 
 import (
 	"crypto/sha256"
@@ -6,7 +6,7 @@ import (
 	"errors"
 	"testing"
 
-	"gastrolog/internal/chunk/cloud"
+	"gastrolog/internal/chunk/glcb"
 )
 
 // TestLoadSection_ReadsITSIAndSTSI verifies that LoadSection finds the
@@ -31,13 +31,13 @@ func TestLoadSection_ReadsITSIAndSTSI(t *testing.T) {
 	if _, err := tmp.ReadAt(tail, stat.Size()-tailLen); err != nil {
 		t.Fatalf("read TOC tail: %v", err)
 	}
-	parsed, err := cloud.ParseTOC(tail)
+	parsed, err := glcb.ParseTOC(tail)
 	if err != nil {
 		t.Fatalf("ParseTOC: %v", err)
 	}
 
-	for _, ty := range []byte{cloud.SectionIngestTSIndex, cloud.SectionSourceTSIndex} {
-		gotHash, err := cloud.LoadSection(tmp.Name(), ty,
+	for _, ty := range []byte{glcb.SectionIngestTSIndex, glcb.SectionSourceTSIndex} {
+		gotHash, err := glcb.LoadSection(tmp.Name(), ty,
 			func(data []byte) ([32]byte, error) { return sha256.Sum256(data), nil })
 		if err != nil {
 			t.Fatalf("LoadSection 0x%02x: %v", ty, err)
@@ -88,9 +88,9 @@ func TestLoadSection_NotFound(t *testing.T) {
 
 	// Token index isn't emitted by the writer yet — its TOC entry doesn't
 	// exist in this blob, so LoadSection must report ErrSectionNotFound.
-	_, err := cloud.LoadSection(tmp.Name(), cloud.SectionTokenIndex,
+	_, err := glcb.LoadSection(tmp.Name(), glcb.SectionTokenIndex,
 		func(data []byte) (int, error) { return len(data), nil })
-	if !errors.Is(err, cloud.ErrSectionNotFound) {
+	if !errors.Is(err, glcb.ErrSectionNotFound) {
 		t.Fatalf("LoadSection: err = %v, want ErrSectionNotFound", err)
 	}
 }

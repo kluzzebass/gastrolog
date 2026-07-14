@@ -801,7 +801,7 @@ Three verbs cover segment end-of-life, one per layer — they are not synonyms:
 ### Chunk build
 
 - **GLCB** — GastroLog Chunk Blob: the sealed-chunk container format
-  (`backend/internal/chunk/cloud`, `data.glcb`). The universal sealed-chunk
+  (`backend/internal/chunk/glcb`, `data.glcb`). The universal sealed-chunk
   artifact — local-only file vaults seal into GLCB, and the same blob is the
   cloud upload unit for cloud-backed vaults.
 
@@ -862,6 +862,7 @@ Three verbs cover segment end-of-life, one per layer — they are not synonyms:
 | route table      | filter set        | The runtime structure is a priority-ordered `RouteSet`, not a per-vault `FilterSet`. First-match-wins, no catch-the-rest. |
 | synthetic attribute | source predicate, RouteSource | Source/content predicates unify via `_source`/`_ingester`/`_vault`/`_reason` overlays at routing-eval time. |
 | retire (segment, distribution) | forget | Distribution's node-local drop of segment tracking was called `forgetSegment` while the exported entry point was `RetireSegments`; one verb per meaning (gastrolog-34zx9y). See [Pipeline](#9-pipeline) for the release / retire / purge distinction. |
+| glcb (container-format package) | chunk/cloud | The GLCB container package lived at `chunk/cloud`, but GLCB is universal — local-only vaults seal into it too. The package is `chunk/glcb`; "cloud" names only genuine object-storage interaction (blobstore, cloud-backed cache, cloud upload) (gastrolog-34zx9y). |
 
 ### Timestamp conventions
 

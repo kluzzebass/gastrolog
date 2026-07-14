@@ -13,7 +13,7 @@
 | `backend/ROADMAP.md` L5 | Says "Go 1.25+"; `go.mod` is **1.26.0** | P2 |
 | `backend/ROADMAP.md` L9–17 | "store filters", "rotation policies" — pre-v3 vocabulary; omits vault-ctl FSM, pipeline v3, cloud-backed chunks | P2 stale |
 | `backend/ROADMAP.md` L34–36 | OTLP, Fluent Forward, Kafka listed `[ ]` — **implemented** in `ingester/` | P2 stale |
-| `backend/go.mod` | Query hot path: no direct heavy deps; **zstd** enters via `chunk/file` + `chunk/cloud` on every sealed read | note |
+| `backend/go.mod` | Query hot path: no direct heavy deps; **zstd** enters via `chunk/file` + `chunk/glcb` on every sealed read | note |
 | `backend/go.mod` | **gojq**, **maxminddb**, **fsnotify** on lookup pipe path only (audit-query-017) | note |
 
 ## Import layering (top violations)

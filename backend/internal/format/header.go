@@ -13,7 +13,7 @@ import "errors"
 // Type codes:
 //
 //	'b' = B+ tree index
-//	'g' = cloud blob (GLCB)
+//	'g' = GLCB (GastroLog Chunk Blob)
 //	't' = time index
 //	's' = source index (SourceTS)
 //	'I' = ingest index (IngestTS)
@@ -51,7 +51,7 @@ const (
 	TypeJSONIndex      = 'J' // Structural JSON index (GIN-style)
 	TypeAttrDict       = 'd' // Attribute key dictionary
 	TypeBTree          = 'b' // B+ tree index
-	TypeCloudBlob      = 'g' // GLCB cloud blob
+	TypeGLCB           = 'g' // GLCB (GastroLog Chunk Blob)
 	TypeLookupTable    = 'L' // Binary lookup table (sorted key index + value data)
 	TypeSegment        = 'S' // vault segment file (working/ or completed/)
 

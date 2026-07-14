@@ -1,4 +1,4 @@
-package cloud
+package glcb
 
 // GLCB mmap-open corruption tests (gastrolog-5do8sh): deterministic
 // patched/truncated copies of a valid blob exercise every rejection

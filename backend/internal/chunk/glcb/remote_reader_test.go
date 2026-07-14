@@ -1,4 +1,4 @@
-package cloud
+package glcb
 
 // DownloadAndUnwrap tests (gastrolog-5do8sh): the canonical download-side
 // unwrap against the in-memory blob store — happy path, both blob-store

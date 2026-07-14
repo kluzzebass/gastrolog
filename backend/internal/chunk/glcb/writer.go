@@ -1,4 +1,4 @@
-package cloud
+package glcb
 
 import (
 	"bufio"
@@ -493,7 +493,7 @@ func (w *Writer) emitTail(cw *countWriter, tailBase int64, dictBuf, indexBuf, la
 
 func encodePreamble() ([]byte, error) {
 	var pre [preambleSize]byte
-	format.Header{Type: format.TypeCloudBlob, Version: formatVersion, Flags: 0}.EncodeInto(pre[:])
+	format.Header{Type: format.TypeGLCB, Version: formatVersion, Flags: 0}.EncodeInto(pre[:])
 	return pre[:], nil
 }
 

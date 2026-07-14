@@ -11,7 +11,7 @@ import (
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
-	chunkcloud "gastrolog/internal/chunk/cloud"
+	"gastrolog/internal/chunk/glcb"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/chunking"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
@@ -77,7 +77,7 @@ func TestManagerBuildOnceBuildsGLCBAndAnnouncesSeal(t *testing.T) {
 	}
 
 	glcbPath := chunking.ChunkGLCBPath(filepath.Join(home, "chunks"), chunkID)
-	blob, err := chunkcloud.OpenMappedBlob(glcbPath)
+	blob, err := glcb.OpenMappedBlob(glcbPath)
 	if err != nil {
 		t.Fatalf("open GLCB: %v", err)
 	}

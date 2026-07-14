@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 
 	"gastrolog/internal/chunk"
-	chunkcloud "gastrolog/internal/chunk/cloud"
+	"gastrolog/internal/chunk/glcb"
 )
 
 // OpenGLCBCursor opens a seekable record cursor over a local pipeline GLCB.
@@ -14,7 +14,7 @@ func OpenGLCBCursor(glcbPath string, chunkID chunk.ChunkID) (chunk.RecordCursor,
 	if glcbPath == "" {
 		return nil, errors.New("GLCB path required")
 	}
-	blob, err := chunkcloud.OpenMappedBlob(filepath.Clean(glcbPath))
+	blob, err := glcb.OpenMappedBlob(filepath.Clean(glcbPath))
 	if err != nil {
 		return nil, err
 	}
@@ -24,7 +24,7 @@ func OpenGLCBCursor(glcbPath string, chunkID chunk.ChunkID) (chunk.RecordCursor,
 		return nil, err
 	}
 	blob.Retain()
-	return chunkcloud.NewSeekableCursorWithClose(rd, chunkID, func() {
+	return glcb.NewSeekableCursorWithClose(rd, chunkID, func() {
 		_ = rd.Close()
 		blob.Release()
 		_ = blob.Close()

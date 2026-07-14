@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
-	chunkcloud "gastrolog/internal/chunk/cloud"
+	"gastrolog/internal/chunk/glcb"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/chunking"
 	"gastrolog/internal/pipeline/collection"
@@ -576,7 +576,7 @@ func (h *harness) waitChunkGLCB(t *testing.T, wantRecords uint32) string {
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if _, err := os.Stat(glcbPath); err == nil {
-			blob, err := chunkcloud.OpenMappedBlob(glcbPath)
+			blob, err := glcb.OpenMappedBlob(glcbPath)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -907,7 +907,7 @@ func TestPipelineFullPath(t *testing.T) {
 	}
 
 	glcbPath := h.waitChunkGLCB(t, totalRecords)
-	blob, err := chunkcloud.OpenMappedBlob(glcbPath)
+	blob, err := glcb.OpenMappedBlob(glcbPath)
 	if err != nil {
 		t.Fatal(err)
 	}

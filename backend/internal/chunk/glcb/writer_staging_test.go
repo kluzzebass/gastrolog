@@ -1,4 +1,4 @@
-package cloud_test
+package glcb_test
 
 import (
 	"bytes"
@@ -6,13 +6,13 @@ import (
 	"path/filepath"
 	"testing"
 
-	"gastrolog/internal/chunk/cloud"
+	"gastrolog/internal/chunk/glcb"
 )
 
 func TestNewWriterRejectsEmptyWorkDir(t *testing.T) {
 	t.Parallel()
 	chunkID, vaultID, _ := testRecords()
-	if _, err := cloud.NewWriter(chunkID, vaultID, ""); err == nil {
+	if _, err := glcb.NewWriter(chunkID, vaultID, ""); err == nil {
 		t.Fatal("expected error for empty workDir")
 	}
 }
@@ -23,7 +23,7 @@ func TestWriterWorkFilesLiveInWorkDirNotTMPDIR(t *testing.T) {
 	t.Setenv("TMPDIR", tmpRoot)
 
 	chunkID, vaultID, records := testRecords()
-	w, err := cloud.NewWriter(chunkID, vaultID, workDir)
+	w, err := glcb.NewWriter(chunkID, vaultID, workDir)
 	if err != nil {
 		t.Fatalf("NewWriter: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestWriterRejectsOutputInDifferentDirectory(t *testing.T) {
 	otherDir := t.TempDir()
 
 	chunkID, vaultID, records := testRecords()
-	w, err := cloud.NewWriter(chunkID, vaultID, workDir)
+	w, err := glcb.NewWriter(chunkID, vaultID, workDir)
 	if err != nil {
 		t.Fatalf("NewWriter: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestWriterCloseWithoutWriteToRemovesWorkFile(t *testing.T) {
 	workDir := t.TempDir()
 
 	chunkID, vaultID, records := testRecords()
-	w, err := cloud.NewWriter(chunkID, vaultID, workDir)
+	w, err := glcb.NewWriter(chunkID, vaultID, workDir)
 	if err != nil {
 		t.Fatalf("NewWriter: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestWriterAbandonedStagingFilePersists(t *testing.T) {
 	// First writer: Add creates the staging file, then the writer is
 	// abandoned without Close/Finish/WriteTo — the in-process shape of a
 	// crash mid-stream.
-	abandoned, err := cloud.NewWriter(chunkID, vaultID, workDir)
+	abandoned, err := glcb.NewWriter(chunkID, vaultID, workDir)
 	if err != nil {
 		t.Fatalf("NewWriter (abandoned): %v", err)
 	}
@@ -134,7 +134,7 @@ func TestWriterAbandonedStagingFilePersists(t *testing.T) {
 
 	// Second writer in the same workDir completes normally; its own
 	// staging file is cleaned up by WriteTo.
-	w, err := cloud.NewWriter(chunkID, vaultID, workDir)
+	w, err := glcb.NewWriter(chunkID, vaultID, workDir)
 	if err != nil {
 		t.Fatalf("NewWriter: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestWriterAllowsWriteToMemoryAfterDiskBuild(t *testing.T) {
 	workDir := t.TempDir()
 
 	chunkID, vaultID, records := testRecords()
-	w, err := cloud.NewWriter(chunkID, vaultID, workDir)
+	w, err := glcb.NewWriter(chunkID, vaultID, workDir)
 	if err != nil {
 		t.Fatalf("NewWriter: %v", err)
 	}
