@@ -5962,11 +5962,11 @@ export class GetRouteStatsResponse extends Message<GetRouteStatsResponse> {
   totalMatched = protoInt64.zero;
 
   /**
-   * false = no routes compiled, all records dropped
+   * false = no route table published; every record goes unmatched
    *
-   * @generated from field: bool filter_set_active = 4;
+   * @generated from field: bool route_table_active = 4;
    */
-  filterSetActive = false;
+  routeTableActive = false;
 
   /**
    * Per-vault destination counters.
@@ -6008,7 +6008,7 @@ export class GetRouteStatsResponse extends Message<GetRouteStatsResponse> {
     { no: 1, name: "total_routed", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 2, name: "total_unmatched", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 3, name: "total_matched", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 4, name: "filter_set_active", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 4, name: "route_table_active", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 5, name: "vault_stats", kind: "message", T: VaultRouteStats, repeated: true },
     { no: 6, name: "route_stats", kind: "message", T: PerRouteStats, repeated: true },
     { no: 7, name: "routed_rate", kind: "message", T: ThroughputRate },

@@ -50,12 +50,12 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
       <div
         className={`rounded-lg border p-4 ${c("border-ink-border bg-ink-well", "border-light-border bg-light-well")}`}
       >
-        {!stats.filterSetActive && (
+        {!stats.routeTableActive && (
           <div
             className={`mb-3 px-3 py-2 rounded text-[0.85em] font-medium ${c("bg-severity-error/15 text-severity-error border border-severity-error/30", "bg-severity-error/10 text-severity-error border border-severity-error/20")}`}
           >
-            Filter set is inactive — no routes compiled. All ingested records are
-            being dropped silently.
+            Route table is inactive — no routes compiled. All ingested records go
+            unmatched and are discarded.
           </div>
         )}
 
@@ -180,7 +180,7 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
         </div>
       )}
 
-      {sorted.length === 0 && stats.filterSetActive && (
+      {sorted.length === 0 && stats.routeTableActive && (
         <div
           className={`text-center text-[0.9em] py-4 ${c("text-text-muted", "text-light-text-muted")}`}
         >

@@ -588,7 +588,7 @@ func (s *LifecycleServer) buildRouteStats() *apiv1.GetRouteStatsResponse {
 	totalRouted := rs.Routed
 	totalUnmatched := rs.Unmatched
 	totalMatched := rs.Matched
-	filterActive := s.orch.IsFilterSetActive()
+	routeTableActive := s.orch.IsRouteTableActive()
 
 	vaultMap := make(map[string]*apiv1.VaultRouteStats)
 	for vaultID, vs := range s.orch.VaultRouteStatsList() {
@@ -607,12 +607,12 @@ func (s *LifecycleServer) buildRouteStats() *apiv1.GetRouteStatsResponse {
 	}
 
 	if s.peerRouteStats != nil {
-		pRouted, pUnmatched, pMatched, pFilterActive, pVaultStats, pRouteStats := s.peerRouteStats.AggregateRouteStats()
+		pRouted, pUnmatched, pMatched, pRouteTableActive, pVaultStats, pRouteStats := s.peerRouteStats.AggregateRouteStats()
 		totalRouted += pRouted
 		totalUnmatched += pUnmatched
 		totalMatched += pMatched
-		if pFilterActive {
-			filterActive = true
+		if pRouteTableActive {
+			routeTableActive = true
 		}
 		mergeVaultRouteStats(vaultMap, pVaultStats)
 		mergePerRouteStats(routeMap, pRouteStats)
@@ -629,7 +629,7 @@ func (s *LifecycleServer) buildRouteStats() *apiv1.GetRouteStatsResponse {
 		TotalRouted:     totalRouted,
 		TotalUnmatched:    totalUnmatched,
 		TotalMatched:    totalMatched,
-		FilterSetActive: filterActive,
+		RouteTableActive: routeTableActive,
 		RoutedRate:      routedRate,
 		MatchedRate:     matchedRate,
 	}

@@ -7039,10 +7039,10 @@ func (*GetRouteStatsRequest) Descriptor() ([]byte, []int) {
 type GetRouteStatsResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Global counters since process start.
-	TotalRouted     int64 `protobuf:"varint,1,opt,name=total_routed,json=totalRouted,proto3" json:"total_routed,omitempty"`               // total records entering routing (matched + unmatched)
-	TotalUnmatched  int64 `protobuf:"varint,2,opt,name=total_unmatched,json=totalUnmatched,proto3" json:"total_unmatched,omitempty"`      // records that matched no route (intentional, counted drop)
-	TotalMatched    int64 `protobuf:"varint,3,opt,name=total_matched,json=totalMatched,proto3" json:"total_matched,omitempty"`            // records that matched a route and were delivered to at least one vault
-	FilterSetActive bool  `protobuf:"varint,4,opt,name=filter_set_active,json=filterSetActive,proto3" json:"filter_set_active,omitempty"` // false = no routes compiled, all records dropped
+	TotalRouted      int64 `protobuf:"varint,1,opt,name=total_routed,json=totalRouted,proto3" json:"total_routed,omitempty"`                  // total records entering routing (matched + unmatched)
+	TotalUnmatched   int64 `protobuf:"varint,2,opt,name=total_unmatched,json=totalUnmatched,proto3" json:"total_unmatched,omitempty"`         // records that matched no route (intentional, counted drop)
+	TotalMatched     int64 `protobuf:"varint,3,opt,name=total_matched,json=totalMatched,proto3" json:"total_matched,omitempty"`               // records that matched a route and were delivered to at least one vault
+	RouteTableActive bool  `protobuf:"varint,4,opt,name=route_table_active,json=routeTableActive,proto3" json:"route_table_active,omitempty"` // false = no route table published; every record goes unmatched
 	// Per-vault destination counters.
 	VaultStats []*VaultRouteStats `protobuf:"bytes,5,rep,name=vault_stats,json=vaultStats,proto3" json:"vault_stats,omitempty"`
 	// Per-route counters.
@@ -7108,9 +7108,9 @@ func (x *GetRouteStatsResponse) GetTotalMatched() int64 {
 	return 0
 }
 
-func (x *GetRouteStatsResponse) GetFilterSetActive() bool {
+func (x *GetRouteStatsResponse) GetRouteTableActive() bool {
 	if x != nil {
-		return x.FilterSetActive
+		return x.RouteTableActive
 	}
 	return false
 }
@@ -9380,12 +9380,12 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x12WatchSystemRequest\"A\n" +
 	"\x13WatchSystemResponse\x12*\n" +
 	"\x11system_raft_index\x18\x01 \x01(\x04R\x0fsystemRaftIndex\"\x16\n" +
-	"\x14GetRouteStatsRequest\"\xb2\x03\n" +
+	"\x14GetRouteStatsRequest\"\xb4\x03\n" +
 	"\x15GetRouteStatsResponse\x12!\n" +
 	"\ftotal_routed\x18\x01 \x01(\x03R\vtotalRouted\x12'\n" +
 	"\x0ftotal_unmatched\x18\x02 \x01(\x03R\x0etotalUnmatched\x12#\n" +
-	"\rtotal_matched\x18\x03 \x01(\x03R\ftotalMatched\x12*\n" +
-	"\x11filter_set_active\x18\x04 \x01(\bR\x0ffilterSetActive\x12>\n" +
+	"\rtotal_matched\x18\x03 \x01(\x03R\ftotalMatched\x12,\n" +
+	"\x12route_table_active\x18\x04 \x01(\bR\x10routeTableActive\x12>\n" +
 	"\vvault_stats\x18\x05 \x03(\v2\x1d.gastrolog.v1.VaultRouteStatsR\n" +
 	"vaultStats\x12<\n" +
 	"\vroute_stats\x18\x06 \x03(\v2\x1b.gastrolog.v1.PerRouteStatsR\n" +

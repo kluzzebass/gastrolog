@@ -50,7 +50,7 @@ func resolveVaultDir(params map[string]string, vaultsDir, vaultID string) map[st
 	return out
 }
 
-// AddVault adds a new vault (chunk manager, index manager, query engine) and updates the filter set.
+// AddVault adds a new vault (chunk manager, index manager, query engine) and updates the route table.
 // Loads the full config internally to resolve the vault's vault IDs to vault configs.
 // Returns ErrDuplicateID if a vault with this ID already exists.
 func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg system.VaultConfig, factories Factories) error {

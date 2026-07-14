@@ -864,8 +864,8 @@ func TestSearchWithContextUnknownRegistry(t *testing.T) {
 	}
 }
 
-// filteredTestVaults holds the vault IDs and chunk managers for the filtered test setup.
-type filteredTestVaults struct {
+// routedTestVaults holds the vault IDs and chunk managers for the filtered test setup.
+type routedTestVaults struct {
 	prod      glid.GLID
 	staging   glid.GLID
 	archive   glid.GLID
@@ -873,11 +873,11 @@ type filteredTestVaults struct {
 	cms       map[glid.GLID]chunk.ChunkManager
 }
 
-// newFilteredTestSetup creates an orchestrator with multiple vaults and a filter set.
-func newFilteredTestSetup(t *testing.T) (*orchestrator.Orchestrator, filteredTestVaults) {
+// newRoutedTestSetup creates an orchestrator with multiple vaults and a route table.
+func newRoutedTestSetup(t *testing.T) (*orchestrator.Orchestrator, routedTestVaults) {
 	t.Helper()
 
-	vaults := filteredTestVaults{
+	vaults := routedTestVaults{
 		prod:      glid.New(),
 		staging:   glid.New(),
 		archive:   glid.New(),
@@ -899,12 +899,12 @@ func newFilteredTestSetup(t *testing.T) (*orchestrator.Orchestrator, filteredTes
 	return orch, vaults
 }
 
-// newFilteredTestSetupWithLoader is like newFilteredTestSetup but accepts a
+// newRoutedTestSetupWithLoader is like newRoutedTestSetup but accepts a
 // *fakeSystemLoader and passes it as the SystemLoader in orchestrator.Config.
-func newFilteredTestSetupWithLoader(t *testing.T, loader *fakeSystemLoader) (*orchestrator.Orchestrator, filteredTestVaults) {
+func newRoutedTestSetupWithLoader(t *testing.T, loader *fakeSystemLoader) (*orchestrator.Orchestrator, routedTestVaults) {
 	t.Helper()
 
-	vaults := filteredTestVaults{
+	vaults := routedTestVaults{
 		prod:      glid.New(),
 		staging:   glid.New(),
 		archive:   glid.New(),
@@ -980,8 +980,8 @@ func getRecordMessages(t *testing.T, cm chunk.ChunkManager) []string {
 	return msgs
 }
 
-func TestFilteringIntegration(t *testing.T) {
-	orch, vaults := newFilteredTestSetup(t)
+func TestRoutingIntegration(t *testing.T) {
+	orch, vaults := newRoutedTestSetup(t)
 
 	// gastrolog-4kkoo (Phase 5): priority-ordered first-match-wins.
 	// Specific routes at priority 10 (env=prod, env=staging) fire first;
@@ -1083,10 +1083,10 @@ func TestFilteringIntegration(t *testing.T) {
 	}
 }
 
-func TestFilteringNoFilterSetDropsRecords(t *testing.T) {
-	orch, vaults := newFilteredTestSetup(t)
+func TestRoutingNoRouteTableDropsRecords(t *testing.T) {
+	orch, vaults := newRoutedTestSetup(t)
 
-	// No filter set — records should be silently dropped.
+	// No route table — records go unmatched (a counted drop).
 	rec := chunk.Record{
 		IngestTS: time.Now(),
 		Attrs:    chunk.Attributes{"env": "test"},
@@ -1105,8 +1105,8 @@ func TestFilteringNoFilterSetDropsRecords(t *testing.T) {
 	}
 }
 
-func TestFilteringEmptyFilterReceivesNothing(t *testing.T) {
-	orch, vaults := newFilteredTestSetup(t)
+func TestRoutingEmptyMatchExpressionReceivesNothing(t *testing.T) {
+	orch, vaults := newRoutedTestSetup(t)
 
 	// gastrolog-4kkoo (Phase 5): a route with an empty match expression
 	// (MatchNone) is enrolled but never fires — useful as a temporary
@@ -1135,8 +1135,8 @@ func TestFilteringEmptyFilterReceivesNothing(t *testing.T) {
 	}
 }
 
-func TestFilteringComplexExpression(t *testing.T) {
-	orch, vaults := newFilteredTestSetup(t)
+func TestRoutingComplexMatchExpression(t *testing.T) {
+	orch, vaults := newRoutedTestSetup(t)
 
 	// gastrolog-4kkoo (Phase 5): prod route at priority 10 with a complex
 	// expression; archive catch-all at priority 100.

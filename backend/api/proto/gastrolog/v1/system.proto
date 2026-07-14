@@ -991,7 +991,7 @@ message GetRouteStatsResponse {
   int64 total_routed = 1;     // total records entering routing (matched + unmatched)
   int64 total_unmatched = 2;  // records that matched no route (intentional, counted drop)
   int64 total_matched = 3;    // records that matched a route and were delivered to at least one vault
-  bool filter_set_active = 4; // false = no routes compiled, all records dropped
+  bool route_table_active = 4; // false = no route table published; every record goes unmatched
 
   // Per-vault destination counters.
   repeated VaultRouteStats vault_stats = 5;

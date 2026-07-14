@@ -970,10 +970,10 @@ func (o *Orchestrator) GetRouteStats() *RouteStats {
 	}
 }
 
-// IsFilterSetActive reports whether a routing table is currently published to
-// the pipeline. When false, all ingested records are silently dropped. Name
-// kept for proto/RPC stability.
-func (o *Orchestrator) IsFilterSetActive() bool {
+// IsRouteTableActive reports whether a route table is currently published to
+// the pipeline. When false, every ingested record goes unmatched (a counted
+// drop).
+func (o *Orchestrator) IsRouteTableActive() bool {
 	return o.pipeline.RoutingActive()
 }
 

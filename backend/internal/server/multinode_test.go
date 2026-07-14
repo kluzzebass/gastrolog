@@ -283,7 +283,7 @@ type mnPeerRouteStats struct {
 	nodes map[string]*orchestrator.Orchestrator // remote node orchs
 }
 
-func (p *mnPeerRouteStats) AggregateRouteStats() (routed, unmatched, matched int64, filterActive bool, vaultStats []*gastrologv1.VaultRouteStats, routeStats []*gastrologv1.PerRouteStats) {
+func (p *mnPeerRouteStats) AggregateRouteStats() (routed, unmatched, matched int64, routeTableActive bool, vaultStats []*gastrologv1.VaultRouteStats, routeStats []*gastrologv1.PerRouteStats) {
 	vaultMap := make(map[string]*gastrologv1.VaultRouteStats)
 	routeMap := make(map[string]*gastrologv1.PerRouteStats)
 	for _, orch := range p.nodes {
@@ -291,8 +291,8 @@ func (p *mnPeerRouteStats) AggregateRouteStats() (routed, unmatched, matched int
 		routed += rs.Routed
 		unmatched += rs.Unmatched
 		matched += rs.Matched
-		if orch.IsFilterSetActive() {
-			filterActive = true
+		if orch.IsRouteTableActive() {
+			routeTableActive = true
 		}
 		for vaultID, vs := range orch.VaultRouteStatsList() {
 			id := vaultID.String()
@@ -2006,8 +2006,8 @@ func TestMultiNode_RouteStatsAggregated(t *testing.T) {
 	if msg.TotalUnmatched != 0 {
 		t.Errorf("TotalUnmatched = %d, want 0", msg.TotalUnmatched)
 	}
-	if !msg.FilterSetActive {
-		t.Error("expected FilterSetActive=true")
+	if !msg.RouteTableActive {
+		t.Error("expected RouteTableActive=true")
 	}
 	if len(msg.VaultStats) != 2 {
 		t.Fatalf("expected 2 vault stats, got %d", len(msg.VaultStats))

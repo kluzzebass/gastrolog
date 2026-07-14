@@ -195,7 +195,7 @@ func (p *PeerState) AggregateRouteTotals() (routed, matched int64, members []str
 
 // AggregateRouteStats sums route stats from all live peers.
 // Returns per-peer totals merged into a single snapshot.
-func (p *PeerState) AggregateRouteStats() (routed, unmatched, matched int64, filterActive bool, vaultStats []*gastrologv1.VaultRouteStats, routeStats []*gastrologv1.PerRouteStats) {
+func (p *PeerState) AggregateRouteStats() (routed, unmatched, matched int64, routeTableActive bool, vaultStats []*gastrologv1.VaultRouteStats, routeStats []*gastrologv1.PerRouteStats) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	now := time.Now()
@@ -211,8 +211,8 @@ func (p *PeerState) AggregateRouteStats() (routed, unmatched, matched int64, fil
 		routed += e.stats.RouteStatsRouted
 		unmatched += e.stats.RouteStatsUnmatched
 		matched += e.stats.RouteStatsMatched
-		if e.stats.RouteStatsFilterActive {
-			filterActive = true
+		if e.stats.RouteStatsRouteTableActive {
+			routeTableActive = true
 		}
 		for _, vs := range e.stats.RouteVaultStats {
 			key := string(vs.VaultId)

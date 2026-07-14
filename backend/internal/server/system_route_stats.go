@@ -21,7 +21,7 @@ func (s *SystemServer) GetRouteStats(
 	totalRouted := rs.Routed
 	totalUnmatched := rs.Unmatched
 	totalMatched := rs.Matched
-	filterActive := s.orch.IsFilterSetActive()
+	routeTableActive := s.orch.IsRouteTableActive()
 
 	// Merge per-vault stats into a map for dedup across nodes.
 	vaultMap := make(map[string]*apiv1.VaultRouteStats)
@@ -43,12 +43,12 @@ func (s *SystemServer) GetRouteStats(
 
 	// Add peer stats if in cluster mode.
 	if s.peerRouteStats != nil {
-		pRouted, pUnmatched, pMatched, pFilterActive, pVaultStats, pRouteStats := s.peerRouteStats.AggregateRouteStats()
+		pRouted, pUnmatched, pMatched, pRouteTableActive, pVaultStats, pRouteStats := s.peerRouteStats.AggregateRouteStats()
 		totalRouted += pRouted
 		totalUnmatched += pUnmatched
 		totalMatched += pMatched
-		if pFilterActive {
-			filterActive = true
+		if pRouteTableActive {
+			routeTableActive = true
 		}
 		mergeVaultRouteStats(vaultMap, pVaultStats)
 		mergePerRouteStats(routeMap, pRouteStats)
@@ -70,7 +70,7 @@ func (s *SystemServer) GetRouteStats(
 		TotalRouted:     totalRouted,
 		TotalUnmatched:    totalUnmatched,
 		TotalMatched:    totalMatched,
-		FilterSetActive: filterActive,
+		RouteTableActive: routeTableActive,
 		RoutedRate:      routedRate,
 		MatchedRate:     matchedRate,
 	}

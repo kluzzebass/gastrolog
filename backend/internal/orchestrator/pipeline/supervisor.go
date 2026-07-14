@@ -551,8 +551,8 @@ func (s *Supervisor) RouteStats() routing.StatsSnapshot {
 	return s.route.Stats()
 }
 
-// RoutingActive reports whether a routing table is currently published, the
-// pipeline analogue of the legacy "filter set active" flag.
+// RoutingActive reports whether a route table is currently published. It backs
+// the route_table_active flag in route stats.
 func (s *Supervisor) RoutingActive() bool {
 	return s.route.TableActive()
 }

@@ -25,7 +25,7 @@ A single record can match multiple routes and be written to multiple vaults. Thi
 | **Filter** | A named filter expression (configured in [Settings → Filters](settings:filters)). Determines which records match this route. |
 | **Destinations** | One or more vaults that receive matching records. |
 | **Distribution** | How records are distributed across destinations: **fanout** (all destinations, default), **round-robin**, or **failover**. |
-| **Sources** | A multi-select set of source-predicate kinds. **Match live ingest** (default) keeps the route on the live FilterSet; **Match retention events** has the route consulted when retention fires on a vault. Both can be on at once. Each kind has an optional narrower list (specific ingesters / specific source vaults; empty = any). |
+| **Sources** | A multi-select set of source-predicate kinds. **Match live ingest** (default) keeps the route in the live route table; **Match retention events** has the route consulted when retention fires on a vault. Both can be on at once. Each kind has an optional narrower list (specific ingesters / specific source vaults; empty = any). |
 
 ## Filter Types
 

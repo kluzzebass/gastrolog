@@ -1160,9 +1160,9 @@ func TestGetRouteStats(t *testing.T) {
 	if resp.Msg.TotalRouted != 0 {
 		t.Errorf("expected 0 routed, got %d", resp.Msg.TotalRouted)
 	}
-	// No filter set configured yet.
-	if resp.Msg.FilterSetActive {
-		t.Error("expected filterSetActive=false before routes configured")
+	// No route table published yet.
+	if resp.Msg.RouteTableActive {
+		t.Error("expected routeTableActive=false before routes configured")
 	}
 
 	// Configure a vault and route. gastrolog-4kkoo (Phase 5): expression
@@ -1216,8 +1216,8 @@ func TestGetRouteStats(t *testing.T) {
 	if resp.Msg.TotalUnmatched != 0 {
 		t.Errorf("expected 0 unmatched, got %d", resp.Msg.TotalUnmatched)
 	}
-	if !resp.Msg.FilterSetActive {
-		t.Error("expected filterSetActive=true")
+	if !resp.Msg.RouteTableActive {
+		t.Error("expected routeTableActive=true")
 	}
 	if len(resp.Msg.VaultStats) != 1 {
 		t.Fatalf("expected 1 vault stat, got %d", len(resp.Msg.VaultStats))

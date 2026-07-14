@@ -111,7 +111,7 @@ func (a *orchStatsAdapter) RouteStats() cluster.StatsRouteSnapshot {
 		Routed:       rs.Routed,
 		Unmatched:    rs.Unmatched,
 		Matched:      rs.Matched,
-		FilterActive: a.orch.IsFilterSetActive(),
+		RouteTableActive: a.orch.IsRouteTableActive(),
 	}
 	for vaultID, vs := range a.orch.VaultRouteStatsList() {
 		snap.VaultStats = append(snap.VaultStats, cluster.StatsVaultRouteSnapshot{
