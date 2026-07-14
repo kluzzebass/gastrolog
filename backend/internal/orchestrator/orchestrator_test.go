@@ -2,6 +2,7 @@ package orchestrator_test
 
 import (
 	"context"
+	"errors"
 	"gastrolog/internal/glid"
 	"path/filepath"
 	"slices"
@@ -438,6 +439,69 @@ func (r *blockingIngester) Run(ctx context.Context, out chan<- orchestrator.Inge
 	defer close(r.stopped)
 	<-ctx.Done()
 	return ctx.Err()
+}
+
+// failOnceIngester fails its first run, then blocks until ctx is done — a
+// source that recovers on the pipeline's retry.
+type failOnceIngester struct {
+	attempts atomic.Int32
+}
+
+func (f *failOnceIngester) Run(ctx context.Context, _ chan<- orchestrator.IngestMessage) error {
+	if f.attempts.Add(1) == 1 {
+		return errors.New("source unavailable")
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+// TestIngesterAliveTracksErrorRetry pins the observability chain behind the
+// gastrolog-fjwhbr fix: a non-passive ingester whose run returns an error
+// drops its alive state (OnIngesterAlive false, IsIngesterRunning false — the
+// trigger for the ingester convergence sweep's ingester-not-running alert,
+// gastrolog-3mnjlo), and the pipeline retry re-arms the run so the alive state
+// comes back up, which is what lets the sweep clear the alert on recovery.
+func TestIngesterAliveTracksErrorRetry(t *testing.T) {
+	t.Parallel()
+
+	type aliveEvent struct {
+		id    glid.GLID
+		alive bool
+	}
+	events := make(chan aliveEvent, 16)
+	orch := mustNewTestOrch(t, orchestrator.Config{
+		OnIngesterAlive: func(id glid.GLID, alive bool) {
+			events <- aliveEvent{id: id, alive: alive}
+		},
+		IngesterRetryDelay: func() time.Duration { return 0 },
+	})
+
+	id := glid.New()
+	orch.RegisterIngester(id, "flaky", "mock", &failOnceIngester{})
+
+	if err := orch.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer orch.Stop()
+
+	next := func(want bool) {
+		t.Helper()
+		select {
+		case ev := <-events:
+			if ev.id != id || ev.alive != want {
+				t.Fatalf("alive event = %+v, want id=%v alive=%v", ev, id, want)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("timed out waiting for alive=%v event", want)
+		}
+	}
+
+	next(true)  // first run attempt
+	next(false) // run returned an error — the sweep would alert here
+	next(true)  // retry re-armed the run — the sweep clears on this
+	if !orch.IsIngesterRunning(id) {
+		t.Fatal("IsIngesterRunning must report true once the retried run holds")
+	}
 }
 
 func newIngesterTestSetup(t *testing.T) (*orchestrator.Orchestrator, chunk.ChunkManager) {

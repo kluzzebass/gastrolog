@@ -42,6 +42,21 @@ type Config struct {
 	// PressureGate throttles PressureAware ingesters when the digestion queue
 	// (and any other registered probes) is backed up. Nil disables throttling.
 	PressureGate *chanwatch.PressureGate
+
+	// RetryDelay returns the pause before re-running an ingester whose run
+	// ended and is eligible for retry (any passive listener exit, or a
+	// non-passive run that returned an error). Nil uses the default jittered
+	// 3–5s delay. Injectable so tests synchronize on attempts instead of
+	// waiting out wall-clock delays.
+	RetryDelay func() time.Duration
+}
+
+// defaultRetryDelay is the jittered 3–5s pause between ingester run retries:
+// long enough not to spin on a persistent failure, short enough that a
+// recovered dependency (released port, reachable endpoint) is picked up
+// promptly.
+func defaultRetryDelay() time.Duration {
+	return 3*time.Second + time.Duration(rand.Int64N(int64(2*time.Second))) //nolint:gosec // G404: jitter for retry delay, not security-sensitive
 }
 
 // Manager starts and stops ingesters from assignment snapshots and emits minted
@@ -53,6 +68,7 @@ type Manager struct {
 
 	onCheckpoint func(id glid.GLID, data []byte)
 	pressureGate *chanwatch.PressureGate
+	retryDelay   func() time.Duration
 
 	mu      sync.Mutex
 	running atomic.Bool
@@ -84,6 +100,9 @@ func New(cfg Config) (*Manager, <-chan Message) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
+	if cfg.RetryDelay == nil {
+		cfg.RetryDelay = defaultRetryDelay
+	}
 	out := make(chan Message, cfg.OutCapacity)
 	m := &Manager{
 		nodeID:       cfg.NodeID,
@@ -91,6 +110,7 @@ func New(cfg Config) (*Manager, <-chan Message) {
 		logger:       cfg.Logger,
 		onCheckpoint: cfg.OnCheckpoint,
 		pressureGate: cfg.PressureGate,
+		retryDelay:   cfg.RetryDelay,
 		ingesters:    make(map[glid.GLID]Ingester),
 		meta:         make(map[glid.GLID]ingesterMeta),
 		minters:      make(map[glid.GLID]*Minter),
@@ -237,6 +257,20 @@ func (m *Manager) stopLocked(id glid.GLID) {
 	m.logger.Info("ingester stopped", "id", id, "name", meta.name, "type", meta.typ)
 }
 
+// runIngester executes a single ingester with panic recovery so that a
+// misbehaving ingester cannot crash the entire process.
+//
+// Runs are re-armed with a jittered delay (RetryDelay, default 3–5s):
+//   - Passive (listener) ingesters retry on EVERY exit — port-bind errors are
+//     recoverable when another process releases the port or a co-located node
+//     dies.
+//   - Non-passive ingesters retry only when the run returned an error; a clean
+//     exit means a finite source completed. Before gastrolog-fjwhbr an error
+//     exit was logged once and the goroutine returned: ingest for that source
+//     stopped until a config change rebuilt the spec. Between failing attempts
+//     the ingester's alive state stays down, so the convergence sweep's
+//     ingester-not-running alert (gastrolog-3mnjlo) surfaces the degraded
+//     condition and clears it once a retry holds.
 func (m *Manager) runIngester(
 	id glid.GLID,
 	ing Ingester,
@@ -253,16 +287,18 @@ func (m *Manager) runIngester(
 
 	for {
 		err := m.runWithCheckpoints(ctx, id, ing, minter, out)
-		if err != nil && ctx.Err() == nil && !meta.passive {
-			m.logger.Warn("ingester exited with error",
-				"id", id, "name", meta.name, "type", meta.typ, "error", err)
-		}
-		if ctx.Err() != nil || !meta.passive {
+		if ctx.Err() != nil {
 			return
 		}
-		delay := 3*time.Second + time.Duration(rand.Int64N(int64(2*time.Second))) //nolint:gosec // G404: jitter for retry delay, not security-sensitive
-		m.logger.Warn("passive ingester failed, retrying",
-			"id", id, "name", meta.name, "error", err, "retry_in", delay)
+		if err == nil && !meta.passive {
+			// A finite non-passive ingester completed its input; re-running
+			// it would mint the same input again.
+			return
+		}
+		delay := m.retryDelay()
+		m.logger.Warn("ingester exited, retrying",
+			"id", id, "name", meta.name, "type", meta.typ,
+			"passive", meta.passive, "error", err, "retry_in", delay)
 		select {
 		case <-ctx.Done():
 			return

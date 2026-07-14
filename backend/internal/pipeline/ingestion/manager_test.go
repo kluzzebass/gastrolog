@@ -266,7 +266,11 @@ func TestManagerPassiveRetry(t *testing.T) {
 	id := glid.New()
 	ing := &failOncePassiveIngester{}
 
-	mgr, out := ingestion.New(ingestion.Config{NodeID: nodeID, OutCapacity: 1})
+	mgr, out := ingestion.New(ingestion.Config{
+		NodeID:      nodeID,
+		OutCapacity: 1,
+		RetryDelay:  func() time.Duration { return 0 },
+	})
 	if err := mgr.Reconcile([]ingestion.IngesterSpec{
 		{ID: id, Ingester: ing, Passive: true, Name: "listener", Type: "mock"},
 	}); err != nil {
@@ -522,23 +526,48 @@ func TestManagerReconcileNoOp(t *testing.T) {
 	_ = mgr.Stop()
 }
 
-type failActiveIngester struct {
-	attempts atomic.Int32
+// failNTimesIngester fails its first `failures` runs, then blocks until ctx is
+// done — a recovered long-running source. Every run entry is signalled on
+// attemptCh; entering the healthy run closes recovered.
+type failNTimesIngester struct {
+	failures  int32
+	attempts  atomic.Int32
+	attemptCh chan int32
+	recovered chan struct{}
 }
 
-func (f *failActiveIngester) Run(context.Context, chan<- ingestion.IngesterMessage) error {
-	f.attempts.Add(1)
-	return errors.New("active fatal")
+func (f *failNTimesIngester) Run(ctx context.Context, _ chan<- ingestion.IngesterMessage) error {
+	n := f.attempts.Add(1)
+	f.attemptCh <- n
+	if n <= f.failures {
+		return errors.New("source unavailable")
+	}
+	close(f.recovered)
+	<-ctx.Done()
+	return ctx.Err()
 }
 
-func TestManagerActiveIngesterErrorExit(t *testing.T) {
+// TestManagerActiveIngesterErrorRetry pins the gastrolog-fjwhbr fix: a
+// non-passive ingester whose run returns an error is retried (with the
+// configured delay) until a run holds, instead of being logged once and
+// abandoned. Attempts are observed via channel sends from the fake — no
+// wall-clock assertions.
+func TestManagerActiveIngesterErrorRetry(t *testing.T) {
 	t.Parallel()
 
 	nodeID := glid.New()
 	id := glid.New()
-	ing := &failActiveIngester{}
+	ing := &failNTimesIngester{
+		failures:  2,
+		attemptCh: make(chan int32, 4),
+		recovered: make(chan struct{}),
+	}
 
-	mgr, out := ingestion.New(ingestion.Config{NodeID: nodeID, OutCapacity: 1})
+	mgr, out := ingestion.New(ingestion.Config{
+		NodeID:      nodeID,
+		OutCapacity: 1,
+		RetryDelay:  func() time.Duration { return 0 },
+	})
 	if err := mgr.Reconcile([]ingestion.IngesterSpec{
 		{ID: id, Ingester: ing, Passive: false, Name: "tail", Type: "mock"},
 	}); err != nil {
@@ -551,18 +580,78 @@ func TestManagerActiveIngesterErrorExit(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
-	deadline := time.After(2 * time.Second)
-	for ing.attempts.Load() < 1 {
+	for want := int32(1); want <= 3; want++ {
 		select {
-		case <-deadline:
-			t.Fatal("active ingester did not run")
-		case <-time.After(20 * time.Millisecond):
+		case got := <-ing.attemptCh:
+			if got != want {
+				t.Fatalf("attempt = %d, want %d", got, want)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("non-passive ingester was not retried (waiting for attempt %d)", want)
 		}
 	}
+	select {
+	case <-ing.recovered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("ingester did not reach its recovered run")
+	}
 
-	time.Sleep(200 * time.Millisecond)
-	if ing.attempts.Load() != 1 {
-		t.Fatalf("attempts = %d, want 1 (no passive retry)", ing.attempts.Load())
+	go func() {
+		for range out {
+		}
+	}()
+	_ = mgr.Stop()
+}
+
+// cleanExitIngester returns nil immediately: a finite non-passive source that
+// completed its input.
+type cleanExitIngester struct {
+	attemptCh chan struct{}
+}
+
+func (c *cleanExitIngester) Run(context.Context, chan<- ingestion.IngesterMessage) error {
+	c.attemptCh <- struct{}{}
+	return nil
+}
+
+// TestManagerActiveIngesterCleanExitNoRetry guards the other half of the
+// non-passive contract: a clean (nil) exit is completion, not failure, and must
+// NOT be re-run — retrying would mint the same input again. RetryDelay is zero,
+// so a wrongly-scheduled re-run would land within microseconds of the first
+// exit; the bounded negative window is conservative.
+func TestManagerActiveIngesterCleanExitNoRetry(t *testing.T) {
+	t.Parallel()
+
+	nodeID := glid.New()
+	id := glid.New()
+	ing := &cleanExitIngester{attemptCh: make(chan struct{}, 2)}
+
+	mgr, out := ingestion.New(ingestion.Config{
+		NodeID:      nodeID,
+		OutCapacity: 1,
+		RetryDelay:  func() time.Duration { return 0 },
+	})
+	if err := mgr.Reconcile([]ingestion.IngesterSpec{
+		{ID: id, Ingester: ing, Passive: false, Name: "import", Type: "mock"},
+	}); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := mgr.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	select {
+	case <-ing.attemptCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("ingester did not run")
+	}
+	select {
+	case <-ing.attemptCh:
+		t.Fatal("clean-exit non-passive ingester must not be re-run")
+	case <-time.After(100 * time.Millisecond):
 	}
 
 	go func() {

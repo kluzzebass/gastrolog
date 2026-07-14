@@ -667,6 +667,13 @@ type Config struct {
 	// The app layer wires this to Raft to replicate checkpoints cluster-wide.
 	OnIngesterCheckpoint func(ingesterID glid.GLID, data []byte)
 
+	// IngesterRetryDelay overrides the pause before an ingester run is
+	// retried (any passive listener exit, or a non-passive run that returned
+	// an error). Nil uses the ingestion manager's default jittered 3–5s
+	// delay; tests inject a short delay to observe retries without
+	// wall-clock waits.
+	IngesterRetryDelay func() time.Duration
+
 	// Digesters run in order on each ingestion message before the record is
 	// built. The app supplies the level/timestamp enrichers here.
 	Digesters []digestion.Digester
@@ -811,6 +818,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		OnCheckpoint:         cfg.OnIngesterCheckpoint,
 		PressureGate:         o.pipelineGate,
 		IngestionOutCapacity: cfg.IngestChannelSize,
+		IngestionRetryDelay:  cfg.IngesterRetryDelay,
 		SegmentClosePolicy:   cfg.SegmentClosePolicy,
 		SegmentDisableFsync:  cfg.SegmentDisableFsync,
 	})
@@ -938,8 +946,10 @@ func (o *Orchestrator) IngesterName(id glid.GLID) string {
 	return o.ingesterMeta[id].Name
 }
 
-// IsIngesterRunning reports whether the given ingester has an active cancel function,
-// meaning its goroutine was launched and hasn't been stopped.
+// IsIngesterRunning reports whether the given ingester's run is currently
+// executing, backed by the Alive flag the pipeline adapter toggles around each
+// run. A crashed or retry-waiting ingester reports false — this is the signal
+// the ingester convergence sweep alerts on (gastrolog-3mnjlo).
 func (o *Orchestrator) IsIngesterRunning(id glid.GLID) bool {
 	o.mu.RLock()
 	stats := o.ingesterStats[id]
