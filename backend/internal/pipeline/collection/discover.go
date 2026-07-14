@@ -5,14 +5,10 @@ import (
 	"gastrolog/internal/pipeline/paths"
 )
 
-func vaultSegmentLayout(root string) (head, preHead map[glid.GLID]struct{}, err error) {
-	head, err = paths.ListSegmentIDs(paths.HeadDir(root))
-	if err != nil {
-		return nil, nil, err
-	}
-	preHead, err = paths.ListSegmentIDs(paths.PreHeadDir(root))
-	if err != nil {
-		return nil, nil, err
-	}
-	return head, preHead, nil
+// vaultHeadLayout lists the segment IDs present in head/. Pre-head/ is not
+// mirrored: a pre-head file is either owned by an in-flight pull (claimPull)
+// or a crash orphan that collectOne promotes in place (gastrolog-5zotim), so
+// no planning decision reads it.
+func vaultHeadLayout(root string) (map[glid.GLID]struct{}, error) {
+	return paths.ListSegmentIDs(paths.HeadDir(root))
 }

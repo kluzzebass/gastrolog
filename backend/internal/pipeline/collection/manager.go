@@ -99,13 +99,10 @@ type vaultCollect struct {
 	// concurrently (pre-head file collision). Guarded by collectMu.
 	pulling map[glid.GLID]struct{}
 
-	// layout mirrors head/ and pre-head/ segment IDs. Refreshed at the start of
+	// headLayout mirrors head/ segment IDs. Refreshed at the start of
 	// every collect pass so a segment promoted to head/ by distribution
 	// (LocalHolder) after an earlier pass is visible for receipt-without-pull.
-	layout struct {
-		head    map[glid.GLID]struct{}
-		preHead map[glid.GLID]struct{}
-	}
+	headLayout map[glid.GLID]struct{}
 
 	// receipted tracks segment IDs this manager has already committed a holder
 	// receipt for, so repeated passes (the production LogReader keeps assigning
@@ -157,49 +154,63 @@ func newVaultCollect(vaultID glid.GLID, root string, cfg VaultConfig) (*vaultCol
 }
 
 func (v *vaultCollect) refreshLayout() error {
-	head, preHead, err := vaultSegmentLayout(v.root)
+	head, err := vaultHeadLayout(v.root)
 	if err != nil {
 		return err
 	}
-	v.layout.head = head
-	v.layout.preHead = preHead
+	v.headLayout = head
 	return nil
 }
 
-func (v *vaultCollect) notePreHead(segmentID glid.GLID) {
-	if v.layout.preHead == nil {
-		v.layout.preHead = make(map[glid.GLID]struct{})
-	}
-	v.layout.preHead[segmentID] = struct{}{}
-}
-
 func (v *vaultCollect) noteHead(segmentID glid.GLID) {
-	if v.layout.head == nil {
-		v.layout.head = make(map[glid.GLID]struct{})
+	if v.headLayout == nil {
+		v.headLayout = make(map[glid.GLID]struct{})
 	}
-	v.layout.head[segmentID] = struct{}{}
-	delete(v.layout.preHead, segmentID)
+	v.headLayout[segmentID] = struct{}{}
 }
 
+// collectOne lands one assigned segment in head/. A file already sitting at
+// the segment's pre-head path is a crash orphan — the previous process died
+// after the pull's rename commit but before promote (per-segment pull
+// exclusivity via claimPull means no live pull owns it). Verify and promote
+// it in place instead of skipping: skipping wedged the segment forever — the
+// holder receipt never committed and the release gate stalled for its
+// manifest (gastrolog-5zotim). Corrupt orphan bytes are discarded by
+// PromoteVerified and re-pulled fresh; pre-head files are never the only
+// copy (the holder keeps completed/ bytes until release).
 func (v *vaultCollect) collectOne(ctx context.Context, ref AssignedSegment) error {
+	prePath := paths.PreHeadSegment(v.root, ref.SegmentID)
+	if _, statErr := os.Stat(prePath); statErr == nil {
+		dest, hdr, err := PromoteVerified(prePath, v.root, ref.Checksum)
+		if err == nil {
+			v.finishCollect(ref.SegmentID, dest, hdr)
+			return nil
+		}
+		if !errors.Is(err, ErrCorruptSegment) {
+			return err
+		}
+		// Corrupt orphan discarded — fall through to a fresh pull.
+	}
 	prePath, err := PullToPreHead(ctx, v.root, ref.VaultID, ref.SegmentID, v.deps.Load().pull)
 	if err != nil {
 		return err
 	}
-	v.collectMu.Lock()
-	v.notePreHead(ref.SegmentID)
-	v.collectMu.Unlock()
-	dest, hdr, err := PromoteVerified(prePath, v.root)
+	dest, hdr, err := PromoteVerified(prePath, v.root, ref.Checksum)
 	if err != nil {
 		return err
 	}
+	v.finishCollect(ref.SegmentID, dest, hdr)
+	return nil
+}
+
+// finishCollect records a promoted segment: stage-throughput counters plus
+// the head layout mirror. The holder receipt is committed by the caller's
+// end-of-pass batch (commitReceipts), never per segment.
+func (v *vaultCollect) finishCollect(segmentID glid.GLID, dest string, hdr segment.Header) {
 	v.noteHeadArrival(dest, hdr)
 	v.collectMu.Lock()
-	v.noteHead(ref.SegmentID)
+	v.noteHead(segmentID)
 	v.collectMu.Unlock()
-	// The holder receipt is committed by the caller's end-of-pass batch
-	// (commitReceipts), never per segment.
-	return nil
 }
 
 // noteHeadArrival counts a segment's records/bytes as home-side ingress for
@@ -263,17 +274,18 @@ func (v *vaultCollect) planCollectAction(ref AssignedSegment) collectAction {
 	v.collectMu.Lock()
 	defer v.collectMu.Unlock()
 	if _, done := v.receipted[ref.SegmentID]; done {
-		if _, ok := v.layout.head[ref.SegmentID]; ok {
+		if _, ok := v.headLayout[ref.SegmentID]; ok {
 			return collectSkip
 		}
 		// Holder receipt recorded but head/ was purged after a partial
 		// chunking pass — re-pull so the planner can resume the segment.
-	} else if _, ok := v.layout.head[ref.SegmentID]; ok {
+	} else if _, ok := v.headLayout[ref.SegmentID]; ok {
 		return collectReceiptOnly
 	}
-	if _, ok := v.layout.preHead[ref.SegmentID]; ok {
-		return collectSkip
-	}
+	// A segment already sitting in pre-head/ is NOT skipped: an un-receipted
+	// pre-head file is a crash orphan and collectOne promotes it in place
+	// (or discards and re-pulls when corrupt). Skipping wedged the segment
+	// forever (gastrolog-5zotim).
 	return collectPull
 }
 
@@ -748,7 +760,10 @@ func (m *Manager) triggerCollect(vaultID glid.GLID) {
 }
 
 func (m *Manager) logCollectPassErr(v *vaultCollect, log *slog.Logger, err error) {
-	if retryableCollectErr(err) {
+	// Checksum failures retry like any deferred pull, but a holder serving
+	// corrupt or divergent bytes is a data-integrity signal — never bury it
+	// at Debug (gastrolog-5zotim).
+	if retryableCollectErr(err) && !errors.Is(err, ErrCorruptSegment) {
 		log.Debug("collect pass deferred", "error", err)
 		return
 	}

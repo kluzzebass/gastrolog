@@ -58,6 +58,21 @@ func writeSegmentBytes(t *testing.T, vaultID, segID glid.GLID, raw string) []byt
 	return data
 }
 
+// segmentChecksumOf reads the record checksum a segment's origin would
+// publish to the vault-ctl registry (CompletedSegmentEntry.Checksum).
+func segmentChecksumOf(t *testing.T, data []byte) uint32 {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "seg")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	hdr, err := segment.ReadHeader(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return hdr.SegmentChecksum
+}
+
 func TestReceiveAndPromoteVerified(t *testing.T) {
 	t.Parallel()
 	vaultID := glid.New()
@@ -69,7 +84,7 @@ func TestReceiveAndPromoteVerified(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	headPath, _, err := collection.PromoteVerified(prePath, root)
+	headPath, _, err := collection.PromoteVerified(prePath, root, segmentChecksumOf(t, data))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +123,7 @@ func TestPromoteVerifiedRejectsCorruptTransfer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, err := collection.PromoteVerified(prePath, root)
+	_, _, err := collection.PromoteVerified(prePath, root, 0)
 	if !errors.Is(err, collection.ErrCorruptSegment) {
 		t.Fatalf("PromoteVerified() = %v, want ErrCorruptSegment", err)
 	}
@@ -121,6 +136,64 @@ func TestPromoteVerifiedRejectsCorruptTransfer(t *testing.T) {
 	}
 	if len(head) != 0 {
 		t.Fatal("head must stay empty when verification fails")
+	}
+}
+
+// TestPromoteVerifiedRejectsPublishedChecksumMismatch: internally-valid
+// segment bytes whose record checksum does not match the published checksum
+// must be discarded, not promoted — internal consistency alone lets a holder
+// serving stale-but-valid bytes into this home's GLCB (gastrolog-5zotim).
+func TestPromoteVerifiedRejectsPublishedChecksumMismatch(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	root := t.TempDir()
+	segID := glid.New()
+	data := writeSegmentBytes(t, vaultID, segID, "internally valid")
+
+	prePath, err := collection.ReceiveToPreHead(root, segID, bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrong := segmentChecksumOf(t, data) + 1
+	if wrong == 0 {
+		wrong = 1
+	}
+	_, _, err = collection.PromoteVerified(prePath, root, wrong)
+	if !errors.Is(err, collection.ErrCorruptSegment) {
+		t.Fatalf("PromoteVerified() = %v, want ErrCorruptSegment", err)
+	}
+	if _, err := os.Stat(prePath); !os.IsNotExist(err) {
+		t.Fatal("mismatching pre-head file should be removed")
+	}
+	head, err := os.ReadDir(paths.HeadDir(root))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	if len(head) != 0 {
+		t.Fatal("head must stay empty when the published checksum does not match")
+	}
+}
+
+// TestPromoteVerifiedZeroChecksumSkipsPublishedComparison: zero means no
+// published expectation is available; internal verification alone gates the
+// promote.
+func TestPromoteVerifiedZeroChecksumSkipsPublishedComparison(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	root := t.TempDir()
+	segID := glid.New()
+	data := writeSegmentBytes(t, vaultID, segID, "no published checksum")
+
+	prePath, err := collection.ReceiveToPreHead(root, segID, bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	headPath, _, err := collection.PromoteVerified(prePath, root, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(headPath); err != nil {
+		t.Fatalf("head file: %v", err)
 	}
 }
 
