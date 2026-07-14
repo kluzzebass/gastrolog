@@ -1715,6 +1715,10 @@ func buildVaultParams(sys *system.System, vaultCfg system.VaultConfig, localNode
 // onto every CmdUploadChunk via gastrolog-grnc3); no-op for the rest if the
 // referenced cloud service entry is missing — the chunk manager will start
 // without a CloudStore wired but still knows which service it would pin to.
+//
+// The provider fields come from CloudService.StoreParams — the same mapping
+// PutCloudService validates against at config-accept time (gastrolog-7au6u9),
+// so an accepted config carries exactly the params store creation needs.
 func addCloudParams(params map[string]string, cfg *system.Config, vaultCfg system.VaultConfig) {
 	params["cloud_service_id"] = vaultCfg.CloudServiceID.String()
 	cs := findCloudService(cfg, *vaultCfg.CloudServiceID)
@@ -1722,19 +1726,7 @@ func addCloudParams(params map[string]string, cfg *system.Config, vaultCfg syste
 		return
 	}
 	params["sealed_backing"] = cs.Provider
-	params["bucket"] = cs.Bucket
-	if cs.Region != "" {
-		params["region"] = cs.Region
-	}
-	if cs.Endpoint != "" {
-		params["endpoint"] = cs.Endpoint
-	}
-	if cs.AccessKey != "" {
-		params["access_key"] = cs.AccessKey
-	}
-	if cs.SecretKey != "" {
-		params["secret_key"] = cs.SecretKey
-	}
+	maps.Copy(params, cs.StoreParams())
 }
 
 // findLocalFileStorage finds a FileStorage on the given node with the given storage class.

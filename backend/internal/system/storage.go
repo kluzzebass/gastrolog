@@ -162,6 +162,36 @@ type CloudService struct {
 	ReconcileSchedule string                   `json:"reconcileSchedule,omitempty"` // default "0 3 * * *"
 }
 
+// StoreParams returns this cloud service's blobstore factory params — the
+// exact key/value shape blobstore.CreateStore and blobstore.ValidateConfig
+// consume. Empty fields are omitted. This is the single mapping from the
+// persisted CloudService config to store params: both vault init
+// (orchestrator addCloudParams) and config-accept validation
+// (PutCloudService) go through it, so a config that passes validation
+// cannot fail store creation on shape.
+//
+// Keys mirror the blobstore.Param* constants; system cannot import
+// blobstore without dragging provider SDKs into the config package, so
+// the literals here are pinned against those constants by blobstore's
+// factory tests.
+func (cs CloudService) StoreParams() map[string]string {
+	params := make(map[string]string)
+	set := func(k, v string) {
+		if v != "" {
+			params[k] = v
+		}
+	}
+	set("bucket", cs.Bucket)
+	set("region", cs.Region)
+	set("endpoint", cs.Endpoint)
+	set("access_key", cs.AccessKey)
+	set("secret_key", cs.SecretKey)
+	set("container", cs.Container)
+	set("connection_string", cs.ConnectionString)
+	set("credentials_json", cs.CredentialsJSON)
+	return params
+}
+
 // VaultType identifies the storage medium for a vault.
 //
 // "cloud" is no longer a distinct type: a cloud-backed vault is a file vault
