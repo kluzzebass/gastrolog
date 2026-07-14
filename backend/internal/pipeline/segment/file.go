@@ -95,6 +95,7 @@ func ReadHeader(path string) (Header, error) {
 
 // Open opens an existing segment and reconciles the header against on-disk frames.
 func Open(path string) (*File, error) {
+	opens.Add(1)
 	f, err := os.OpenFile(filepath.Clean(path), os.O_RDWR, 0)
 	if err != nil {
 		return nil, err

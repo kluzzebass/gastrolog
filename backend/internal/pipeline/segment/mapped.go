@@ -59,6 +59,7 @@ func warmPageCache(f *os.File, size int64) {
 
 // OpenMapped maps a finalized segment read-only.
 func OpenMapped(path string) (*MappedSegment, error) {
+	mappedOpens.Add(1)
 	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		return nil, err

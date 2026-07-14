@@ -138,6 +138,48 @@ func seedMergeEntries(cursors []spanCursor) ([]mergeEntry, error) {
 	return entries, nil
 }
 
+// mergeStep is one pop of the k-way merge: the winning cursor and its entry.
+type mergeStep struct {
+	cur   int
+	entry segment.IndexEntry
+}
+
+// mergeSpanEntries drives the k-way heap over already-loaded span cursors,
+// yielding index entries in canonical EventID order without parsing frames.
+// This is the single ordering authority for open-chunk reads: the forward
+// view stream (MergeSpanViews) and the positional reader (OpenChunkReader)
+// both consume it, so record-at-position can never disagree with iteration
+// order (gastrolog-54mjat).
+func mergeSpanEntries(cursors []spanCursor) iter.Seq2[mergeStep, error] {
+	return func(yield func(mergeStep, error) bool) {
+		entries, err := seedMergeEntries(cursors)
+		if err != nil {
+			yield(mergeStep{}, err)
+			return
+		}
+
+		h := &mergeHeap{entries: entries}
+		for i := len(h.entries)/2 - 1; i >= 0; i-- {
+			h.siftDown(i)
+		}
+
+		for len(h.entries) > 0 {
+			me := h.pop()
+			if !yield(mergeStep{cur: me.cur, entry: me.entry}, nil) {
+				return
+			}
+			entry, ok, err := cursors[me.cur].popEntry()
+			if err != nil {
+				yield(mergeStep{}, err)
+				return
+			}
+			if ok {
+				h.push(mergeEntry{entry: entry, cur: me.cur})
+			}
+		}
+	}
+}
+
 // MergeSpanViews yields record views from all spans merged in canonical
 // EventID order. The k-way heap compares index entries (EventID + filepos)
 // only; each frame is parsed when its entry wins. Views alias the span
@@ -157,34 +199,18 @@ func MergeSpanViews(refs []SpanRef) iter.Seq2[record.View, error] {
 		}
 		defer closeAll()
 
-		entries, err := seedMergeEntries(cursors)
-		if err != nil {
-			yield(record.View{}, err)
-			return
-		}
-
-		h := &mergeHeap{entries: entries}
-		for i := len(h.entries)/2 - 1; i >= 0; i-- {
-			h.siftDown(i)
-		}
-
-		for len(h.entries) > 0 {
-			me := h.pop()
-			v, err := cursors[me.cur].seg.RecordViewAtFilePos(me.entry.FilePos)
+		for step, err := range mergeSpanEntries(cursors) {
+			if err != nil {
+				yield(record.View{}, err)
+				return
+			}
+			v, err := cursors[step.cur].seg.RecordViewAtFilePos(step.entry.FilePos)
 			if err != nil {
 				yield(record.View{}, err)
 				return
 			}
 			if !yield(v, nil) {
 				return
-			}
-			entry, ok, err := cursors[me.cur].popEntry()
-			if err != nil {
-				yield(record.View{}, err)
-				return
-			}
-			if ok {
-				h.push(mergeEntry{entry: entry, cur: me.cur})
 			}
 		}
 	}
