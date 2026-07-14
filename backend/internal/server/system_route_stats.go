@@ -19,7 +19,7 @@ func (s *SystemServer) GetRouteStats(
 	// Start with local node stats.
 	rs := s.orch.GetRouteStats()
 	totalRouted := rs.Routed
-	totalDropped := rs.Dropped
+	totalUnmatched := rs.Unmatched
 	totalMatched := rs.Matched
 	filterActive := s.orch.IsFilterSetActive()
 
@@ -43,9 +43,9 @@ func (s *SystemServer) GetRouteStats(
 
 	// Add peer stats if in cluster mode.
 	if s.peerRouteStats != nil {
-		pRouted, pDropped, pMatched, pFilterActive, pVaultStats, pRouteStats := s.peerRouteStats.AggregateRouteStats()
+		pRouted, pUnmatched, pMatched, pFilterActive, pVaultStats, pRouteStats := s.peerRouteStats.AggregateRouteStats()
 		totalRouted += pRouted
-		totalDropped += pDropped
+		totalUnmatched += pUnmatched
 		totalMatched += pMatched
 		if pFilterActive {
 			filterActive = true
@@ -68,7 +68,7 @@ func (s *SystemServer) GetRouteStats(
 
 	resp := &apiv1.GetRouteStatsResponse{
 		TotalRouted:     totalRouted,
-		TotalDropped:    totalDropped,
+		TotalUnmatched:    totalUnmatched,
 		TotalMatched:    totalMatched,
 		FilterSetActive: filterActive,
 		RoutedRate:      routedRate,

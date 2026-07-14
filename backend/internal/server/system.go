@@ -51,7 +51,7 @@ type PeerIngesterStatsProvider interface {
 // PeerRouteStatsProvider aggregates route stats from all cluster peer broadcasts.
 // Implemented by cluster.PeerState; nil in single-node mode.
 type PeerRouteStatsProvider interface {
-	AggregateRouteStats() (routed, dropped, matched int64, filterActive bool, vaultStats []*apiv1.VaultRouteStats, routeStats []*apiv1.PerRouteStats)
+	AggregateRouteStats() (routed, unmatched, matched int64, filterActive bool, vaultStats []*apiv1.VaultRouteStats, routeStats []*apiv1.PerRouteStats)
 	AggregateRouteRates() (routed, matched *apiv1.ThroughputRate)
 }
 

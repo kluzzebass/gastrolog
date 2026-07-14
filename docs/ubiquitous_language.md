@@ -617,10 +617,14 @@ How the cluster reports what it's doing to itself, to operators, and to the UI.
 
 - **RouteStats** / **VaultRouteStats** / **PerRouteStats** — routing
   counters: global `Routed` (records that entered routing), `Matched`
-  (matched a route and were fanned out), `Dropped` (no route matched;
+  (matched a route and were fanned out), `Unmatched` (no route matched;
   intentional, counted drop), plus per-vault and per-route `Matched`.
-  `Routed = Matched + Dropped`. Surfaced in `NodeStats` and aggregated
-  cluster-wide.
+  `Routed = Matched + Unmatched`. Surfaced in `NodeStats` and aggregated
+  cluster-wide. Delivery drops are a distinct quantity: the routing
+  manager's `PerVaultDropped` counts records *already counted as Matched*
+  whose fan-out delivery to one vault's segmentation queue failed (sink
+  revoked mid-flight, or shutdown). They are a per-vault sub-account of
+  `Matched`, never part of the `Routed = Matched + Unmatched` sum.
 
 - **AlertCollector** — per-node bounded store of alerts (`AlertSeverity`:
   `WARNING`, `ERROR`). Alerts have a stable key for dedup and auto-clear;
@@ -867,7 +871,8 @@ Three verbs cover segment end-of-life, one per layer — they are not synonyms:
 | retire (segment, distribution) | forget | Distribution's node-local drop of segment tracking was called `forgetSegment` while the exported entry point was `RetireSegments`; one verb per meaning (gastrolog-34zx9y). See [Pipeline](#9-pipeline) for the release / retire / purge distinction. |
 | glcb (container-format package) | chunk/cloud | The GLCB container package lived at `chunk/cloud`, but GLCB is universal — local-only vaults seal into it too. The package is `chunk/glcb`; "cloud" names only genuine object-storage interaction (blobstore, cloud-backed cache, cloud upload) (gastrolog-34zx9y). |
 | complete (segment lifecycle) | close | "Close" is overloaded: writer shutdown vs the segment lifecycle event (working/ → completed/). The rotation trigger is `segmentation.CompletePolicy` and a segment COMPLETES; reserve Close for genuine resource shutdown (`Close()` methods, closed writers) (gastrolog-34zx9y). |
-| routed (routing counter) | ingested (at routing) | The counter that was `Ingested` on routing stats counts records ENTERING ROUTING, not ingestion — counter provenance matters when proving loss. Whole chain renamed: `Routed` = entered routing, `Matched` = matched a route and fanned out, `Dropped` unchanged (proto `total_routed`/`total_matched`, NodeStats `route_stats_*`, UI labels) (gastrolog-34zx9y). "Ingested" stays only on genuine ingester counters (`MessagesIngested`, `BytesIngested`). |
+| routed (routing counter) | ingested (at routing) | The counter that was `Ingested` on routing stats counts records ENTERING ROUTING, not ingestion — counter provenance matters when proving loss. Whole chain renamed: `Routed` = entered routing, `Matched` = matched a route and fanned out (proto `total_routed`/`total_matched`, NodeStats `route_stats_*`, UI labels) (gastrolog-34zx9y). "Ingested" stays only on genuine ingester counters (`MessagesIngested`, `BytesIngested`). |
+| unmatched (routing counter) | dropped (at routing) | "Dropped" named two different quantities. `Unmatched` = matched no route, an intentional counted drop (proto `total_unmatched`, NodeStats `route_stats_unmatched`, UI label "Unmatched"); the invariant is `Routed = Matched + Unmatched`. "Dropped" is reserved for delivery drops: `StatsSnapshot.PerVaultDropped` counts already-matched records whose fan-out delivery to a vault failed — a per-vault sub-account of `Matched`, never part of the routed sum (gastrolog-5sdzfv). |
 
 ### Timestamp conventions
 

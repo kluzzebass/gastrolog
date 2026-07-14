@@ -7039,8 +7039,8 @@ func (*GetRouteStatsRequest) Descriptor() ([]byte, []int) {
 type GetRouteStatsResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Global counters since process start.
-	TotalRouted     int64 `protobuf:"varint,1,opt,name=total_routed,json=totalRouted,proto3" json:"total_routed,omitempty"`               // total records entering routing (matched + dropped)
-	TotalDropped    int64 `protobuf:"varint,2,opt,name=total_dropped,json=totalDropped,proto3" json:"total_dropped,omitempty"`            // records matching no filter (silently lost)
+	TotalRouted     int64 `protobuf:"varint,1,opt,name=total_routed,json=totalRouted,proto3" json:"total_routed,omitempty"`               // total records entering routing (matched + unmatched)
+	TotalUnmatched  int64 `protobuf:"varint,2,opt,name=total_unmatched,json=totalUnmatched,proto3" json:"total_unmatched,omitempty"`      // records that matched no route (intentional, counted drop)
 	TotalMatched    int64 `protobuf:"varint,3,opt,name=total_matched,json=totalMatched,proto3" json:"total_matched,omitempty"`            // records that matched a route and were delivered to at least one vault
 	FilterSetActive bool  `protobuf:"varint,4,opt,name=filter_set_active,json=filterSetActive,proto3" json:"filter_set_active,omitempty"` // false = no routes compiled, all records dropped
 	// Per-vault destination counters.
@@ -7094,9 +7094,9 @@ func (x *GetRouteStatsResponse) GetTotalRouted() int64 {
 	return 0
 }
 
-func (x *GetRouteStatsResponse) GetTotalDropped() int64 {
+func (x *GetRouteStatsResponse) GetTotalUnmatched() int64 {
 	if x != nil {
-		return x.TotalDropped
+		return x.TotalUnmatched
 	}
 	return 0
 }
@@ -9380,10 +9380,10 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x12WatchSystemRequest\"A\n" +
 	"\x13WatchSystemResponse\x12*\n" +
 	"\x11system_raft_index\x18\x01 \x01(\x04R\x0fsystemRaftIndex\"\x16\n" +
-	"\x14GetRouteStatsRequest\"\xae\x03\n" +
+	"\x14GetRouteStatsRequest\"\xb2\x03\n" +
 	"\x15GetRouteStatsResponse\x12!\n" +
-	"\ftotal_routed\x18\x01 \x01(\x03R\vtotalRouted\x12#\n" +
-	"\rtotal_dropped\x18\x02 \x01(\x03R\ftotalDropped\x12#\n" +
+	"\ftotal_routed\x18\x01 \x01(\x03R\vtotalRouted\x12'\n" +
+	"\x0ftotal_unmatched\x18\x02 \x01(\x03R\x0etotalUnmatched\x12#\n" +
 	"\rtotal_matched\x18\x03 \x01(\x03R\ftotalMatched\x12*\n" +
 	"\x11filter_set_active\x18\x04 \x01(\bR\x0ffilterSetActive\x12>\n" +
 	"\vvault_stats\x18\x05 \x03(\v2\x1d.gastrolog.v1.VaultRouteStatsR\n" +

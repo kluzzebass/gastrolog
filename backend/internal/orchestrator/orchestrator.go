@@ -48,7 +48,7 @@ type IngesterStats struct {
 // from the pipeline routing manager.
 type RouteStats struct {
 	Routed  int64 // total records that entered routing (matched + unmatched)
-	Dropped int64 // records matching no route (intentional, counted drop)
+	Unmatched int64 // records that matched no route (intentional, counted drop)
 	Matched int64 // records that matched a route and were fanned out
 }
 
@@ -959,13 +959,13 @@ func (o *Orchestrator) IsIngesterRunning(id glid.GLID) bool {
 }
 
 // GetRouteStats returns a snapshot of the global routing counters, sourced from
-// the pipeline routing manager (records that entered routing, were dropped as
-// unmatched, or matched a route and were fanned out).
+// the pipeline routing manager (records that entered routing, went unmatched,
+// or matched a route and were fanned out).
 func (o *Orchestrator) GetRouteStats() *RouteStats {
 	snap := o.pipeline.RouteStats()
 	return &RouteStats{
 		Routed:  int64(snap.Routed),    //nolint:gosec // G115: counter bounded in practice
-		Dropped: int64(snap.Unmatched), //nolint:gosec // G115
+		Unmatched: int64(snap.Unmatched), //nolint:gosec // G115
 		Matched: int64(snap.Matched),   //nolint:gosec // G115
 	}
 }

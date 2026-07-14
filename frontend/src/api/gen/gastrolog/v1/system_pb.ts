@@ -5941,18 +5941,18 @@ export class GetRouteStatsResponse extends Message<GetRouteStatsResponse> {
   /**
    * Global counters since process start.
    *
-   * total records entering routing (matched + dropped)
+   * total records entering routing (matched + unmatched)
    *
    * @generated from field: int64 total_routed = 1;
    */
   totalRouted = protoInt64.zero;
 
   /**
-   * records matching no filter (silently lost)
+   * records that matched no route (intentional, counted drop)
    *
-   * @generated from field: int64 total_dropped = 2;
+   * @generated from field: int64 total_unmatched = 2;
    */
-  totalDropped = protoInt64.zero;
+  totalUnmatched = protoInt64.zero;
 
   /**
    * records that matched a route and were delivered to at least one vault
@@ -6006,7 +6006,7 @@ export class GetRouteStatsResponse extends Message<GetRouteStatsResponse> {
   static readonly typeName = "gastrolog.v1.GetRouteStatsResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "total_routed", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 2, name: "total_dropped", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 2, name: "total_unmatched", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 3, name: "total_matched", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 4, name: "filter_set_active", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 5, name: "vault_stats", kind: "message", T: VaultRouteStats, repeated: true },

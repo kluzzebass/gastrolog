@@ -111,7 +111,7 @@ message NodeStats {
 
   // Route stats (aggregated cluster-wide by GetRouteStats RPC)
   int64 route_stats_routed = 28;
-  int64 route_stats_dropped = 29;
+  int64 route_stats_unmatched = 29;
   int64 route_stats_matched = 30;
   bool route_stats_filter_active = 31;
   repeated gastrolog.v1.VaultRouteStats route_vault_stats = 32;

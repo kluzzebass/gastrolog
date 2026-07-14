@@ -601,9 +601,9 @@ export class NodeStats extends Message<NodeStats> {
   routeStatsRouted = protoInt64.zero;
 
   /**
-   * @generated from field: int64 route_stats_dropped = 29;
+   * @generated from field: int64 route_stats_unmatched = 29;
    */
-  routeStatsDropped = protoInt64.zero;
+  routeStatsUnmatched = protoInt64.zero;
 
   /**
    * @generated from field: int64 route_stats_matched = 30;
@@ -777,7 +777,7 @@ export class NodeStats extends Message<NodeStats> {
     { no: 26, name: "api_address", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 27, name: "pprof_address", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 28, name: "route_stats_routed", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 29, name: "route_stats_dropped", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 29, name: "route_stats_unmatched", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 30, name: "route_stats_matched", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 31, name: "route_stats_filter_active", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 32, name: "route_vault_stats", kind: "message", T: VaultRouteStats, repeated: true },

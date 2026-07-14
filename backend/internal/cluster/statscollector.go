@@ -61,7 +61,7 @@ type StatsVaultAppendSnapshot struct {
 // StatsRouteSnapshot captures route stats for broadcast.
 type StatsRouteSnapshot struct {
 	Routed       int64
-	Dropped      int64
+	Unmatched    int64
 	Matched      int64
 	FilterActive bool
 	VaultStats   []StatsVaultRouteSnapshot
@@ -439,7 +439,7 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 		// Route stats.
 		rs := c.cfg.Stats.RouteStats()
 		stats.RouteStatsRouted = rs.Routed
-		stats.RouteStatsDropped = rs.Dropped
+		stats.RouteStatsUnmatched = rs.Unmatched
 		stats.RouteStatsMatched = rs.Matched
 		stats.RouteStatsFilterActive = rs.FilterActive
 		c.collectClusterRouteRates(now, stepWindows)

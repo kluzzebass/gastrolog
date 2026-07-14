@@ -545,7 +545,7 @@ func (s *Supervisor) SubmitToVault(ctx context.Context, vaultID glid.GLID, rec *
 }
 
 // RouteStats returns a snapshot of the routing manager's counters (global
-// ingested/matched/unmatched totals plus per-vault and per-route matched counts).
+// routed/matched/unmatched totals plus per-vault and per-route matched counts).
 // It is the pipeline source for the node's route-stats observability surface.
 func (s *Supervisor) RouteStats() routing.StatsSnapshot {
 	return s.route.Stats()

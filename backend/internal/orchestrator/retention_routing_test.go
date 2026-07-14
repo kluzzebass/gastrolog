@@ -214,7 +214,7 @@ func TestFireRetentionEventDropsWhenNoRouteMatches(t *testing.T) {
 
 	// All submitted records ingested but unmatched; none routed.
 	waitForRouteStats(t, orch, "2 unmatched retention records", func(s *RouteStats) bool {
-		return s.Dropped == 2
+		return s.Unmatched == 2
 	})
 	if s := orch.GetRouteStats(); s.Matched != 0 {
 		t.Errorf("no records should have matched the ingest-only route, got Matched=%d", s.Matched)

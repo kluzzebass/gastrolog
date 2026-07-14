@@ -283,13 +283,13 @@ type mnPeerRouteStats struct {
 	nodes map[string]*orchestrator.Orchestrator // remote node orchs
 }
 
-func (p *mnPeerRouteStats) AggregateRouteStats() (routed, dropped, matched int64, filterActive bool, vaultStats []*gastrologv1.VaultRouteStats, routeStats []*gastrologv1.PerRouteStats) {
+func (p *mnPeerRouteStats) AggregateRouteStats() (routed, unmatched, matched int64, filterActive bool, vaultStats []*gastrologv1.VaultRouteStats, routeStats []*gastrologv1.PerRouteStats) {
 	vaultMap := make(map[string]*gastrologv1.VaultRouteStats)
 	routeMap := make(map[string]*gastrologv1.PerRouteStats)
 	for _, orch := range p.nodes {
 		rs := orch.GetRouteStats()
 		routed += rs.Routed
-		dropped += rs.Dropped
+		unmatched += rs.Unmatched
 		matched += rs.Matched
 		if orch.IsFilterSetActive() {
 			filterActive = true
@@ -2003,8 +2003,8 @@ func TestMultiNode_RouteStatsAggregated(t *testing.T) {
 	if msg.TotalMatched != 10 {
 		t.Errorf("TotalMatched = %d, want 10", msg.TotalMatched)
 	}
-	if msg.TotalDropped != 0 {
-		t.Errorf("TotalDropped = %d, want 0", msg.TotalDropped)
+	if msg.TotalUnmatched != 0 {
+		t.Errorf("TotalUnmatched = %d, want 0", msg.TotalUnmatched)
 	}
 	if !msg.FilterSetActive {
 		t.Error("expected FilterSetActive=true")

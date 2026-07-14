@@ -1213,8 +1213,8 @@ func TestGetRouteStats(t *testing.T) {
 	if resp.Msg.TotalRouted != 5 {
 		t.Errorf("expected 5 routed, got %d", resp.Msg.TotalRouted)
 	}
-	if resp.Msg.TotalDropped != 0 {
-		t.Errorf("expected 0 dropped, got %d", resp.Msg.TotalDropped)
+	if resp.Msg.TotalUnmatched != 0 {
+		t.Errorf("expected 0 unmatched, got %d", resp.Msg.TotalUnmatched)
 	}
 	if !resp.Msg.FilterSetActive {
 		t.Error("expected filterSetActive=true")

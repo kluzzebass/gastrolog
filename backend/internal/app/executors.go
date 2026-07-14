@@ -109,7 +109,7 @@ func (a *orchStatsAdapter) RouteStats() cluster.StatsRouteSnapshot {
 	rs := a.orch.GetRouteStats()
 	snap := cluster.StatsRouteSnapshot{
 		Routed:       rs.Routed,
-		Dropped:      rs.Dropped,
+		Unmatched:    rs.Unmatched,
 		Matched:      rs.Matched,
 		FilterActive: a.orch.IsFilterSetActive(),
 	}
