@@ -14,8 +14,18 @@ import (
 
 // externalGLCBResolverSetter is the chunk-manager seam for lazy on-miss
 // external-GLCB resolution (registration as a cache, not a prerequisite).
+//
+// The resolver answers targeted by-ID lookups (Meta/OpenCursor). The lister
+// answers ENUMERATION (List): it returns the sealed chunk IDs the resolver
+// would accept, so a match-all search or holder-scope gate — which enumerate
+// the manager rather than looking a chunk up by ID — discovers sealed chunks
+// that live only as an FSM entry plus an on-disk GLCB. Without the lister,
+// lazy resolution serves a chunk you already name but hides it from
+// enumeration, so a restarted home answers a match-all with zero records
+// until some other path happens to register the chunk (gastrolog-3s26vr).
 type externalGLCBResolverSetter interface {
 	SetExternalGLCBResolver(func(chunk.ChunkID) (string, chunk.ExternalGLCBInfo, bool))
+	SetExternalGLCBLister(func() []chunk.ChunkID)
 }
 
 // installLazyGLCBResolver installs (or, when disabled, clears) the on-miss
@@ -54,6 +64,7 @@ func (o *Orchestrator) installLazyGLCBResolverOn(inst *VaultInstance, vaultID gl
 	}
 	if !enabled || chunkRoot == "" {
 		setter.SetExternalGLCBResolver(nil)
+		setter.SetExternalGLCBLister(nil)
 		return
 	}
 	lookupFSM := func() *vaultctlfsm.FSM {
@@ -81,6 +92,26 @@ func (o *Orchestrator) installLazyGLCBResolverOn(inst *VaultInstance, vaultID gl
 		// has (the register sweep's file overlay remains the enrichment
 		// path for those).
 		return glcbPath, externalGLCBInfoFromFSM(*e), true
+	})
+	// Enumeration companion to the resolver: the sealed chunk IDs of this
+	// vault's committed manifest. List() calls the resolver on each ID it
+	// does not already hold, so enumeration surfaces exactly the chunks the
+	// by-ID resolver would serve — no separate registration sweep. Only
+	// sealed entries participate; Sealing/Active chunks are served through
+	// the pipeline manifest-cursor path, not manager enumeration.
+	setter.SetExternalGLCBLister(func() []chunk.ChunkID {
+		f := lookupFSM()
+		if f == nil {
+			return nil
+		}
+		entries := f.List()
+		ids := make([]chunk.ChunkID, 0, len(entries))
+		for i := range entries {
+			if entries[i].IsSealed() {
+				ids = append(ids, entries[i].ID)
+			}
+		}
+		return ids
 	})
 }
 
