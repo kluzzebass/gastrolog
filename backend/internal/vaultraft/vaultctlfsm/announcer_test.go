@@ -23,6 +23,9 @@ const bufSize = 1 << 20
 // TestAnnouncerReplicatesMetadata verifies the full loop:
 // file.Manager (with Announcer) → Raft.Apply → FSM on all nodes.
 func TestAnnouncerReplicatesMetadata(t *testing.T) {
+	if testing.Short() {
+		t.Skip("spins up a real 3-node raft group and waits out election + replication timing; -short skips")
+	}
 	// Not parallel — Raft instances need clean sequential lifecycle.
 
 	const nodeCount = 3
@@ -267,6 +270,9 @@ func (a *recordingApplier) Apply(_ []byte) error {
 // followers thinking the chunk is still Active, and any catchup
 // replication of the chunk would be misclassified.
 func TestAnnouncerSealingStateVisibleAcrossReplicas(t *testing.T) {
+	if testing.Short() {
+		t.Skip("spins up a real 3-node raft group and waits out election + replication timing; -short skips")
+	}
 	// Not parallel — same Raft sequencing constraints as the sibling
 	// TestAnnouncerReplicatesMetadata above.
 

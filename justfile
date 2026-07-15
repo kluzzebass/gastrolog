@@ -41,9 +41,17 @@ clean:
 docker tag="gastrolog:latest":
     docker build --build-arg VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo dev) -t {{tag}} .
 
-# Run all tests (backend + frontend)
+# Run all tests (backend + frontend) — fast tier (backend runs -short).
+# gastrolog-3241bv: ~48s wall for backend alone on a 16-core dev box.
 test:
     just backend test
+    just frontend test
+
+# Run all tests (backend + frontend) — full acceptance gate (backend runs
+# every test, including what -short skips). gastrolog-3241bv: ~90s+ wall for
+# backend alone. Run once before declaring work done / before handoff.
+test-full:
+    just backend test-full
     just frontend test
 
 # Run full quality audit (backend + frontend)
