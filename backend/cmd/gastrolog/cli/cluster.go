@@ -161,15 +161,20 @@ func newClusterThroughputCmd() *cobra.Command {
 			})
 
 			var rows [][]string
+			var stageRows [][]string
 			for _, n := range cs.Msg.Nodes {
 				if n.Stats == nil {
 					continue
 				}
 				for _, vs := range n.Stats.Vaults {
 					hasHome := len(vs.CollectedRecords.GetSpark()) > 0 || len(vs.SealedRecords.GetSpark()) > 0
-					if vs.AppendQueueCapacity == 0 && !hasHome {
+					hasStage := vaultHasStageActivity(vs)
+					if vs.AppendQueueCapacity == 0 && !hasHome && !hasStage {
 						continue // vault has no pipeline role on this node
 					}
+					// APPEND (ingest) vs BUILD (chunk build) are the two ends of
+					// the "did the consume side keep up?" question — kept side by
+					// side so the answer is one glance (gastrolog-423tpt).
 					rows = append(rows, []string{
 						n.Name,
 						vs.Name,
@@ -179,16 +184,56 @@ func newClusterThroughputCmd() *cobra.Command {
 						fmt.Sprintf("%d/%d", vs.AppendQueueDepth, vs.AppendQueueCapacity),
 						fmt.Sprintf("%.1f/s", vs.CollectedRecords.GetInstantPerSec()),
 						fmt.Sprintf("%.1f/s", vs.SealedRecords.GetInstantPerSec()),
+						fmt.Sprintf("%.1f/s", vs.ChunksBuiltRate.GetInstantPerSec()),
 					})
+					if hasStage {
+						stageRows = append(stageRows, []string{
+							n.Name,
+							vs.Name,
+							strconv.FormatUint(vs.SegmentsCompletedTotal, 10),
+							strconv.FormatUint(vs.SegmentsPublishedTotal, 10),
+							strconv.FormatUint(vs.SegmentsReleasedTotal, 10),
+							strconv.FormatUint(vs.ChunksPlannedTotal, 10),
+							strconv.FormatUint(vs.ChunksBuiltTotal, 10),
+							strconv.FormatUint(vs.ChunksSealedTotal, 10),
+							strconv.FormatUint(vs.HeadPurgesTotal, 10),
+							fmt.Sprintf("%d/%d", vs.GlcbPullsAttemptedTotal, vs.GlcbPullsFailedTotal),
+							strconv.FormatUint(vs.RetentionDeletesTotal, 10),
+						})
+					}
 				}
 			}
 			if len(rows) > 0 {
 				fmt.Println()
-				p.table([]string{"NODE", "VAULT", "APPEND", "DURABLE", "BYTES", "QUEUE", "COLLECT", "SEAL"}, rows)
+				p.table([]string{"NODE", "VAULT", "APPEND", "DURABLE", "BYTES", "QUEUE", "COLLECT", "SEAL", "BUILD"}, rows)
+			}
+			if len(stageRows) > 0 {
+				fmt.Println()
+				p.table([]string{"NODE", "VAULT", "COMPLETED", "PUBLISHED", "RELEASED", "PLANNED", "BUILT", "SEALED", "PURGES", "PULLS(A/F)", "RET.DEL"}, stageRows)
 			}
 			return nil
 		},
 	}
+}
+
+// vaultHasStageActivity reports whether a vault has any non-zero discrete
+// pipeline stage-count milestone on this node, so the stage-counter table only
+// lists vaults that actually reached a stage here (gastrolog-4r784a). Pure so
+// the row-inclusion rule is unit-testable without a live cluster.
+func vaultHasStageActivity(vs *v1.VaultStats) bool {
+	if vs == nil {
+		return false
+	}
+	return vs.SegmentsCompletedTotal > 0 ||
+		vs.SegmentsPublishedTotal > 0 ||
+		vs.SegmentsReleasedTotal > 0 ||
+		vs.ChunksPlannedTotal > 0 ||
+		vs.ChunksBuiltTotal > 0 ||
+		vs.ChunksSealedTotal > 0 ||
+		vs.HeadPurgesTotal > 0 ||
+		vs.GlcbPullsAttemptedTotal > 0 ||
+		vs.GlcbPullsFailedTotal > 0 ||
+		vs.RetentionDeletesTotal > 0
 }
 
 // formatRateTriple renders the instant rate with Unix-load-style 1m/5m/15m

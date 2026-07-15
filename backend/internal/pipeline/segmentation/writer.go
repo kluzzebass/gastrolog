@@ -66,6 +66,10 @@ type vaultWriter struct {
 	recordsAppended atomic.Uint64 // frames appended to the working segment
 	bytesAppended   atomic.Uint64 // frame body bytes appended
 	recordsDurable  atomic.Uint64 // records released by a successful group commit
+	// segmentsCompleted counts working/ → completed/ promotions (the first
+	// pipeline stage-count milestone, gastrolog-4r784a). Includes segments
+	// recovered from an orphaned working/ file at startup.
+	segmentsCompleted atomic.Uint64
 
 	// Resolved per-vault commit/fsync tuning (Config default + VaultConfig override).
 	syncEvery    int
@@ -685,6 +689,7 @@ func (w *vaultWriter) completeWorkingSegmentLocked() error {
 			return err
 		}
 	}
+	w.segmentsCompleted.Add(1)
 	if w.completed != nil {
 		select {
 		case w.completed <- CompletedSegment{

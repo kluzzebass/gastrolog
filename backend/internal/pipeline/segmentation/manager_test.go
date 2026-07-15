@@ -197,6 +197,57 @@ func TestManagerCompletesOnSize(t *testing.T) {
 	}
 }
 
+// TestManagerCountsSegmentsCompleted (gastrolog-4r784a): AppendStats reports
+// the segments-completed stage counter, incremented once per working/ →
+// completed/ promotion.
+func TestManagerCountsSegmentsCompleted(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	vaultID := glid.New()
+
+	var in chan<- segmentation.Input
+	mgr, completed := startManager(t, segmentation.Config{
+		CompletePolicy:  segmentation.CompletePolicy{MaxBytes: 128},
+		SyncBatchSize:   1,
+		SyncBatchWindow: time.Hour,
+		CompletedCap:    8,
+	}, func(t *testing.T, mgr *segmentation.Manager) {
+		t.Helper()
+		var err error
+		in, err = mgr.RegisterVault(vaultID, dir, segmentation.VaultConfig{})
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	ts := time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC)
+	// Enough records to force at least two rotations (MaxBytes=128).
+	for i := range 64 {
+		in <- segmentation.Input{Record: sampleRecord(uint32(i), ts.Add(time.Duration(i)*time.Millisecond))}
+	}
+	// Drain two completions to know rotation happened.
+	for range 2 {
+		select {
+		case <-completed:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for completed segments")
+		}
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		stats := mgr.AppendStats()
+		if len(stats) == 1 && stats[0].SegmentsCompleted >= 2 {
+			if stats[0].VaultID != vaultID {
+				t.Fatalf("stats vault = %s, want %s", stats[0].VaultID, vaultID)
+			}
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("SegmentsCompleted never reached 2: %+v", mgr.AppendStats())
+}
+
 func TestManagerCompletesOnAge(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

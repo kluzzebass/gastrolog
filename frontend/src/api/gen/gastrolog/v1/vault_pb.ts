@@ -1490,6 +1490,113 @@ export class VaultStats extends Message<VaultStats> {
    */
   sealedBytes?: ThroughputRate;
 
+  /**
+   * Discrete pipeline stage-count milestones on THIS node, monotonic per vault
+   * (gastrolog-4r784a). These are the counters operators previously grepped
+   * from cluster.log — now first-class, cross-node observable. Each milestone
+   * is counted exactly once by its owner (origin/home/leader), so cluster
+   * totals are the plain sum across nodes. Rates are computed by the stats
+   * collector's rolling windows over these totals (fields 35-38) just like
+   * append/collected/sealed — never accumulated client-side.
+   *
+   * Records ingested (append_records_total, field 17) and sealed
+   * (sealed_records, field 23) already cover the record-throughput ends of the
+   * pipeline; these add the segment- and chunk-lifecycle event counts between.
+   *
+   * working/ → completed/ promotions (origin)
+   *
+   * @generated from field: uint64 segments_completed_total = 25;
+   */
+  segmentsCompletedTotal = protoInt64.zero;
+
+  /**
+   * committed to the vault-ctl registry (origin)
+   *
+   * @generated from field: uint64 segments_published_total = 26;
+   */
+  segmentsPublishedTotal = protoInt64.zero;
+
+  /**
+   * released from the registry (leader)
+   *
+   * @generated from field: uint64 segments_released_total = 27;
+   */
+  segmentsReleasedTotal = protoInt64.zero;
+
+  /**
+   * open manifests opened (leader)
+   *
+   * @generated from field: uint64 chunks_planned_total = 28;
+   */
+  chunksPlannedTotal = protoInt64.zero;
+
+  /**
+   * sealed GLCBs materialized (home)
+   *
+   * @generated from field: uint64 chunks_built_total = 29;
+   */
+  chunksBuiltTotal = protoInt64.zero;
+
+  /**
+   * CmdSealChunk commits (leader)
+   *
+   * @generated from field: uint64 chunks_sealed_total = 30;
+   */
+  chunksSealedTotal = protoInt64.zero;
+
+  /**
+   * segments purged from head/ (home)
+   *
+   * @generated from field: uint64 head_purges_total = 31;
+   */
+  headPurgesTotal = protoInt64.zero;
+
+  /**
+   * GLCB replica catch-up pulls started
+   *
+   * @generated from field: uint64 glcb_pulls_attempted_total = 32;
+   */
+  glcbPullsAttemptedTotal = protoInt64.zero;
+
+  /**
+   * catch-up pulls that no peer could satisfy
+   *
+   * @generated from field: uint64 glcb_pulls_failed_total = 33;
+   */
+  glcbPullsFailedTotal = protoInt64.zero;
+
+  /**
+   * chunks deleted by retention (leader)
+   *
+   * @generated from field: uint64 retention_deletes_total = 34;
+   */
+  retentionDeletesTotal = protoInt64.zero;
+
+  /**
+   * Server-windowed per-second rates for the discrete stage milestones, from
+   * the stats collector's rolling windows over the cumulative totals above.
+   * Same mechanism as append_records/collected_records/sealed_records — the UI
+   * renders them directly and never differentiates counters itself.
+   *
+   * @generated from field: gastrolog.v1.ThroughputRate segments_completed_rate = 35;
+   */
+  segmentsCompletedRate?: ThroughputRate;
+
+  /**
+   * @generated from field: gastrolog.v1.ThroughputRate segments_published_rate = 36;
+   */
+  segmentsPublishedRate?: ThroughputRate;
+
+  /**
+   * @generated from field: gastrolog.v1.ThroughputRate chunks_built_rate = 37;
+   */
+  chunksBuiltRate?: ThroughputRate;
+
+  /**
+   * @generated from field: gastrolog.v1.ThroughputRate chunks_sealed_rate = 38;
+   */
+  chunksSealedRate?: ThroughputRate;
+
   constructor(data?: PartialMessage<VaultStats>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1522,6 +1629,20 @@ export class VaultStats extends Message<VaultStats> {
     { no: 22, name: "collected_bytes", kind: "message", T: ThroughputRate },
     { no: 23, name: "sealed_records", kind: "message", T: ThroughputRate },
     { no: 24, name: "sealed_bytes", kind: "message", T: ThroughputRate },
+    { no: 25, name: "segments_completed_total", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 26, name: "segments_published_total", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 27, name: "segments_released_total", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 28, name: "chunks_planned_total", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 29, name: "chunks_built_total", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 30, name: "chunks_sealed_total", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 31, name: "head_purges_total", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 32, name: "glcb_pulls_attempted_total", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 33, name: "glcb_pulls_failed_total", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 34, name: "retention_deletes_total", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 35, name: "segments_completed_rate", kind: "message", T: ThroughputRate },
+    { no: 36, name: "segments_published_rate", kind: "message", T: ThroughputRate },
+    { no: 37, name: "chunks_built_rate", kind: "message", T: ThroughputRate },
+    { no: 38, name: "chunks_sealed_rate", kind: "message", T: ThroughputRate },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultStats {

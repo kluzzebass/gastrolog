@@ -103,6 +103,16 @@ func TestManagerBuildOnceBuildsGLCBAndAnnouncesSeal(t *testing.T) {
 		t.Fatalf("sealed = %d records / %d bytes, want 2 records and > 0 bytes",
 			stats[0].SealedRecords, stats[0].SealedBytes)
 	}
+
+	// Chunk-lifecycle stage counters (gastrolog-4r784a): this leader-home
+	// materialized the GLCB (built) and committed CmdSealChunk (sealed).
+	stage := mgr.StageStats()
+	if len(stage) != 1 || stage[0].VaultID != vaultID {
+		t.Fatalf("StageStats = %+v, want one entry for %s", stage, vaultID)
+	}
+	if stage[0].ChunksBuilt != 1 || stage[0].ChunksSealed != 1 {
+		t.Fatalf("stage built/sealed = %d/%d, want 1/1", stage[0].ChunksBuilt, stage[0].ChunksSealed)
+	}
 }
 
 func TestManagerBuildOnceReleasesCompletedRegistry(t *testing.T) {
@@ -201,6 +211,11 @@ func TestManagerBuildOncePurgesHeadStaging(t *testing.T) {
 	}
 	if _, err := os.Stat(headPath); !os.IsNotExist(err) {
 		t.Fatalf("head segment should be purged after build+seal, stat err=%v", err)
+	}
+	// gastrolog-4r784a: the head purge is reflected in the stage counter.
+	stage := mgr.StageStats()
+	if len(stage) != 1 || stage[0].HeadPurges == 0 {
+		t.Fatalf("StageStats head purges = %+v, want > 0", stage)
 	}
 }
 

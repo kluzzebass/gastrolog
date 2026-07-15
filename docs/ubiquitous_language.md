@@ -851,6 +851,35 @@ Three verbs cover segment end-of-life, one per layer — they are not synonyms:
   heals; healing removes the quarantine file
   (`chunking/glcb_corrupt.go`, gastrolog-687m11).
 
+### Stage counters
+
+Per-vault, per-node **monotonic** counters for the discrete pipeline-stage
+milestones — the events operators used to grep from `cluster.log`, now
+first-class and cross-node (`VaultStats` fields, `NodeStats` broadcast; the
+inspector's *Pipeline stages* panel and `gastrolog cluster throughput` render
+them; gastrolog-4r784a). Each milestone is counted **exactly once by its
+owner** (origin / home / leader) on the node where it happened, so cluster
+totals are the plain sum across nodes — never double-counted, never inferred
+from optimistic route/ingest counters. Rates (segments completed/published,
+chunks built/sealed) come from the stats collector's rolling windows over the
+totals, the same server-side mechanism as append/collected/sealed throughput —
+never accumulated client-side.
+
+Canonical milestone verbs (reuse these names; do not coin synonyms):
+
+- **Completed** — a working segment promoted `working/` → `completed/` (origin).
+- **Published** — a completed segment's metadata committed to vault-ctl (origin).
+- **Released** — a segment dropped from the vault-ctl registry (leader),
+  superseded by replicated chunks. Distinct from **Retire** and **Purge**
+  (see §9 Verbs).
+- **Planned** — an open chunk manifest opened by the chunking leader.
+- **Built** — a sealed GLCB materialized on a home.
+- **Sealed** — a `CmdSealChunk` commit landed by the leader.
+- **Head purge** — a segment copy deleted from `head/` after materialization.
+- **GLCB pull (attempted / failed)** — a replica catch-up pull a home started to
+  recover a missing chunk blob, and the ones no peer could satisfy.
+- **Retention delete** — a chunk expired by the retention engine (leader).
+
 ---
 
 ## Consistency rules

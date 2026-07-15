@@ -56,6 +56,23 @@ type StatsVaultAppendSnapshot struct {
 	CollectedBytes   uint64
 	SealedRecords    uint64
 	SealedBytes      uint64
+
+	// Discrete pipeline stage-count milestones (gastrolog-4r784a), monotonic
+	// per vault. Origin-owned: SegmentsCompleted, SegmentsPublished. Home-owned:
+	// ChunksBuilt, HeadPurges, GLCBPullsAttempted/Failed, RetentionDeletes.
+	// Leader-owned: ChunksPlanned, ChunksSealed, SegmentsReleased. Cluster
+	// totals are the sum across nodes (each milestone counted once by its
+	// owner, so summing never double-counts).
+	SegmentsCompleted  uint64
+	SegmentsPublished  uint64
+	SegmentsReleased   uint64
+	ChunksPlanned      uint64
+	ChunksBuilt        uint64
+	ChunksSealed       uint64
+	HeadPurges         uint64
+	GLCBPullsAttempted uint64
+	GLCBPullsFailed    uint64
+	RetentionDeletes   uint64
 }
 
 // StatsRouteSnapshot captures route stats for broadcast.
@@ -421,6 +438,30 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 				int64(as.SealedRecords), int64(as.SealedBytes), "", stepWindows, c.vaultAppendStats) //nolint:gosec // counters < 2^63
 			v.SealedRecords = throughputRateProto(sr, true)
 			v.SealedBytes = throughputRateProto(sr, false)
+
+			// Discrete pipeline stage-count milestones (gastrolog-4r784a):
+			// cumulative totals pass through as-is; rates for the throughput
+			// milestones come from the collector's rolling windows over the
+			// totals, paired two-per-window like every other rate here.
+			v.SegmentsCompletedTotal = as.SegmentsCompleted
+			v.SegmentsPublishedTotal = as.SegmentsPublished
+			v.SegmentsReleasedTotal = as.SegmentsReleased
+			v.ChunksPlannedTotal = as.ChunksPlanned
+			v.ChunksBuiltTotal = as.ChunksBuilt
+			v.ChunksSealedTotal = as.ChunksSealed
+			v.HeadPurgesTotal = as.HeadPurges
+			v.GlcbPullsAttemptedTotal = as.GLCBPullsAttempted
+			v.GlcbPullsFailedTotal = as.GLCBPullsFailed
+			v.RetentionDeletesTotal = as.RetentionDeletes
+
+			segStage := c.observeTrafficWindowRates(now, "segstage:"+as.VaultID.String(),
+				int64(as.SegmentsCompleted), int64(as.SegmentsPublished), "", stepWindows, c.vaultAppendStats) //nolint:gosec // counters < 2^63
+			v.SegmentsCompletedRate = throughputRateProto(segStage, true)
+			v.SegmentsPublishedRate = throughputRateProto(segStage, false)
+			chunkStage := c.observeTrafficWindowRates(now, "chunkstage:"+as.VaultID.String(),
+				int64(as.ChunksBuilt), int64(as.ChunksSealed), "", stepWindows, c.vaultAppendStats) //nolint:gosec // counters < 2^63
+			v.ChunksBuiltRate = throughputRateProto(chunkStage, true)
+			v.ChunksSealedRate = throughputRateProto(chunkStage, false)
 		}
 
 		// Ingester stats.
