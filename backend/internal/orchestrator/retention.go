@@ -1267,6 +1267,11 @@ func (r *retentionRunner) expireChunk(id chunk.ChunkID, reason string) {
 			// follower delete-cascade applications.
 			r.orch.retentionRates.Record(r.vaultID, r.orch.now())
 		}
+		if r.orch != nil && r.orch.stageEvents != nil {
+			// First-class retention-delete stage counter (gastrolog-4r784a),
+			// leader-only for the same reason as the rate alert above.
+			r.orch.stageEvents.recordRetentionDelete(r.vaultID)
+		}
 		r.logger.Debug("retention: requested chunk delete via reconciler",
 			"vault", r.vaultID, "chunk", id.String(), "reason", reason)
 		return
@@ -1293,6 +1298,9 @@ func (r *retentionRunner) expireChunk(id chunk.ChunkID, reason string) {
 	if r.orch != nil {
 		if r.orch.retentionRates != nil {
 			r.orch.retentionRates.Record(r.vaultID, r.orch.now())
+		}
+		if r.orch.stageEvents != nil {
+			r.orch.stageEvents.recordRetentionDelete(r.vaultID)
 		}
 		r.orch.logChunkExpunged(r.vaultID, id, reason)
 		r.orch.EmitChunkDeleted(r.vaultID, id)

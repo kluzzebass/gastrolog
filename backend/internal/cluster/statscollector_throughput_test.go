@@ -144,6 +144,71 @@ func TestStatsCollector_EwmaAverages(t *testing.T) {
 	}
 }
 
+// TestStatsCollector_StageCounters (gastrolog-4r784a): the discrete pipeline
+// stage-count milestones pass through as cumulative totals, and the four
+// rate-bearing milestones (segments completed/published, chunks built/sealed)
+// get windowed rates from the same rolling-window mechanism as append/seal.
+func TestStatsCollector_StageCounters(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	provider := &stubStatsProvider{
+		appendStats: []StatsVaultAppendSnapshot{{
+			VaultID:            vaultID,
+			SegmentsCompleted:  10,
+			SegmentsPublished:  8,
+			SegmentsReleased:   3,
+			ChunksPlanned:      4,
+			ChunksBuilt:        2,
+			ChunksSealed:       2,
+			HeadPurges:         5,
+			GLCBPullsAttempted: 7,
+			GLCBPullsFailed:    1,
+			RetentionDeletes:   6,
+		}},
+	}
+	collector := NewStatsCollector(StatsCollectorConfig{
+		Stats:      provider,
+		NodeID:     "node-a",
+		NodeNameFn: func() string { return "node-a" },
+	})
+
+	t0 := time.Now()
+	stats := collector.CollectLocalTick(t0)
+	v := findVaultStats(t, stats, vaultID)
+	// Totals pass through on the first tick; rates initialize to zero.
+	if v.SegmentsCompletedTotal != 10 || v.SegmentsPublishedTotal != 8 || v.SegmentsReleasedTotal != 3 {
+		t.Fatalf("segment totals = %d/%d/%d, want 10/8/3",
+			v.SegmentsCompletedTotal, v.SegmentsPublishedTotal, v.SegmentsReleasedTotal)
+	}
+	if v.ChunksPlannedTotal != 4 || v.ChunksBuiltTotal != 2 || v.ChunksSealedTotal != 2 {
+		t.Fatalf("chunk totals = %d/%d/%d, want 4/2/2",
+			v.ChunksPlannedTotal, v.ChunksBuiltTotal, v.ChunksSealedTotal)
+	}
+	if v.HeadPurgesTotal != 5 || v.GlcbPullsAttemptedTotal != 7 || v.GlcbPullsFailedTotal != 1 || v.RetentionDeletesTotal != 6 {
+		t.Fatalf("recovery totals = %d/%d/%d/%d, want 5/7/1/6",
+			v.HeadPurgesTotal, v.GlcbPullsAttemptedTotal, v.GlcbPullsFailedTotal, v.RetentionDeletesTotal)
+	}
+	if v.SegmentsCompletedRate.GetInstantPerSec() != 0 || v.ChunksBuiltRate.GetInstantPerSec() != 0 {
+		t.Fatalf("first-tick rates non-zero: completed=%v built=%v",
+			v.SegmentsCompletedRate.GetInstantPerSec(), v.ChunksBuiltRate.GetInstantPerSec())
+	}
+
+	// 2s later: +20 completed, +16 published, +4 built, +6 sealed.
+	provider.appendStats[0].SegmentsCompleted = 30
+	provider.appendStats[0].SegmentsPublished = 24
+	provider.appendStats[0].ChunksBuilt = 6
+	provider.appendStats[0].ChunksSealed = 8
+	stats = collector.CollectLocalTick(t0.Add(2 * time.Second))
+	v = findVaultStats(t, stats, vaultID)
+	assertRate(t, "segments_completed instant", v.SegmentsCompletedRate.GetInstantPerSec(), 10)
+	assertRate(t, "segments_published instant", v.SegmentsPublishedRate.GetInstantPerSec(), 8)
+	assertRate(t, "chunks_built instant", v.ChunksBuiltRate.GetInstantPerSec(), 2)
+	assertRate(t, "chunks_sealed instant", v.ChunksSealedRate.GetInstantPerSec(), 3)
+	if v.SegmentsCompletedTotal != 30 {
+		t.Fatalf("completed total after step = %d, want 30", v.SegmentsCompletedTotal)
+	}
+}
+
 func findVaultStats(t *testing.T, stats *gastrologv1.NodeStats, vaultID glid.GLID) *gastrologv1.VaultStats {
 	t.Helper()
 	want := string(vaultID.ToProto())

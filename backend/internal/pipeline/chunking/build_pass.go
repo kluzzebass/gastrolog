@@ -112,9 +112,11 @@ func (v *vaultChunking) buildOnce(ctx context.Context) error {
 	}
 	if builtNow {
 		// Stage throughput (gastrolog-10n6k8): this home just materialized
-		// the sealed GLCB locally.
+		// the sealed GLCB locally. chunksBuilt is the per-chunk milestone
+		// counterpart (gastrolog-4r784a).
 		v.sealedRecords.Add(uint64(result.RecordCount))
 		v.sealedBytes.Add(uint64(result.Bytes)) //nolint:gosec // sizes are non-negative
+		v.chunksBuilt.Add(1)
 	}
 
 	if _, err := v.proposeSealOnce(ctx, pending, key, result); err != nil {
@@ -258,6 +260,10 @@ func (v *vaultChunking) proposeSealOnce(ctx context.Context, pending *vaultctlfs
 	if !v.chunkSealCommitted(pending.ChunkID) {
 		return false, fmt.Errorf("chunking: CmdSealChunk did not commit seal for %s", pending.ChunkID)
 	}
+	// Leader-owned chunk-seal milestone (gastrolog-4r784a): count once here,
+	// after the seal is confirmed committed, so cluster totals never
+	// double-count follower materializations.
+	v.chunksSealed.Add(1)
 	v.progress.markProposed(key)
 	v.afterSealBuild(ctx, pending)
 	return true, nil

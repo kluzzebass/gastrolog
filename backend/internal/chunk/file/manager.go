@@ -200,6 +200,16 @@ type Manager struct {
 	// history or sweep timing. Protected by mu.
 	externalResolver func(chunk.ChunkID) (string, chunk.ExternalGLCBInfo, bool)
 
+	// externalLister enumerates the external-GLCB chunk IDs the resolver would
+	// accept (the vault-ctl manifest's sealed entries). List() consults it so
+	// enumeration surfaces the same chunks the by-ID resolver serves: a
+	// match-all search or holder-scope gate walks the manager rather than
+	// naming a chunk, so without this a restarted home's sealed chunks stay
+	// invisible to enumeration until some other path registers them
+	// (gastrolog-3s26vr). Same lock contract as externalResolver: called under
+	// m.mu, must be lock-light and never re-enter this manager. Protected by mu.
+	externalLister func() []chunk.ChunkID
+
 	// glcbMapped holds one whole-file mmap per sealed chunk for local data.glcb.
 	// Aliased by OpenCursor, index TS lookups, and histogram paths.
 	glcbMapped sync.Map // chunk.ChunkID → *mappedGLCBEntry
@@ -808,6 +818,14 @@ func (m *Manager) SetExternalGLCBResolver(fn func(chunk.ChunkID) (string, chunk.
 	m.externalResolver = fn
 }
 
+// SetExternalGLCBLister installs the enumeration companion to the resolver.
+// See the externalLister field for the contract.
+func (m *Manager) SetExternalGLCBLister(fn func() []chunk.ChunkID) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.externalLister = fn
+}
+
 func (m *Manager) List() ([]chunk.ChunkMeta, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -839,11 +857,46 @@ func (m *Manager) List() ([]chunk.ChunkMeta, error) {
 		out = append(out, m.cloudListCache...)
 	}
 
+	out = m.appendExternalListedMetasLocked(out, cloudIDs)
+
 	// Sort by WriteStart to ensure consistent ordering.
 	slices.SortFunc(out, func(a, b chunk.ChunkMeta) int {
 		return a.WriteStart.Compare(b.WriteStart)
 	})
 	return out, nil
+}
+
+// appendExternalListedMetasLocked surfaces external-GLCB chunks the resolver
+// would serve but that no path has registered into m.metas yet. Enumeration
+// (match-all search, holder scope) walks the manager rather than naming a
+// chunk, so a restarted home's sealed chunks would otherwise be invisible to
+// List even though the by-ID resolver serves them — the total-resolution
+// stall of gastrolog-3s26vr. Resolving memoizes into m.metas, so this scan
+// pays its per-chunk cost once after (re)start, not on every List. Caller
+// holds m.mu.
+func (m *Manager) appendExternalListedMetasLocked(out []chunk.ChunkMeta, cloudIDs map[chunk.ChunkID]struct{}) []chunk.ChunkMeta {
+	if m.externalLister == nil || m.externalResolver == nil {
+		return out
+	}
+	for _, id := range m.externalLister() {
+		if _, have := m.metas[id]; have {
+			continue
+		}
+		if cloudIDs != nil {
+			if _, dup := cloudIDs[id]; dup {
+				continue
+			}
+		}
+		glcbPath, info, ok := m.externalResolver(id)
+		if !ok {
+			continue // file not on this node, or entry no longer sealed
+		}
+		m.registerExternalGLCBLocked(id, glcbPath, info)
+		if meta, registered := m.metas[id]; registered {
+			out = append(out, meta.toChunkMeta())
+		}
+	}
+	return out
 }
 
 func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
@@ -4314,7 +4367,7 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		uploadCtx,
 		key,
 		pr,
-		glcb.ObjectMetadata(bm),
+		glcb.EncodeObjectMetadata(bm),
 	)
 	uploadCancel()
 	_ = pr.Close()
@@ -4806,7 +4859,27 @@ func (m *Manager) loadCloudBackedChunksFromStore() error {
 		// place as cache and will be picked up by OpenCursor's local-GLCB
 		// fast path. See gastrolog-24m1t step 7j.
 		delete(m.metas, id)
-		cm := glcb.BlobMetaToChunkMeta(id, blob)
+		cm, decErr := glcb.DecodeObjectMetadata(id, blob)
+		if decErr != nil {
+			// The object metadata is only a CACHE of the sealed GLCB's own
+			// footer, which is the source of truth for record count and
+			// bounds. A malformed cache must never be indexed as a
+			// zero-record / zero-time ChunkMeta — that would feed wrong
+			// retention sweeps and query pruning (gastrolog-5opw43). Fall
+			// back to the authoritative footer.
+			authoritative, fbErr := m.chunkMetaFromCloudBlobFooter(id, blob)
+			if fbErr != nil {
+				// Even the footer is unreadable. Skip indexing this blob
+				// (the bytes stay in the cloud store, so nothing is lost)
+				// rather than present fabricated zeros as authoritative.
+				m.logger.Error("skipping cloud-backed chunk: object metadata unreadable and footer fallback failed",
+					"chunk", id, "key", blob.Key, "meta_error", decErr, "footer_error", fbErr)
+				return nil
+			}
+			m.logger.Warn("cloud-backed chunk object metadata unreadable; recovered from authoritative GLCB footer",
+				"chunk", id, "key", blob.Key, "meta_error", decErr)
+			cm = authoritative
+		}
 		meta := &chunkMeta{
 			id:          id,
 			writeStart:  cm.WriteStart,
@@ -4855,4 +4928,39 @@ func (m *Manager) loadCloudBackedChunksFromStore() error {
 		m.logger.Info("populated cloud index from store", "count", indexed)
 	}
 	return nil
+}
+
+// chunkMetaFromCloudBlobFooter reads the authoritative ChunkMeta straight from
+// a cloud blob's sealed GLCB footer, bypassing its (unreadable) object
+// metadata. It downloads and unwraps the blob into a transient temp file,
+// mmaps it just long enough to read the layout/TOC meta, and discards it — no
+// warm-cache promotion, no locking side effects. This is the fallback for
+// loadCloudBackedChunksFromStore when DecodeObjectMetadata fails; the footer is
+// the source of truth, the object metadata is only a cache (gastrolog-5opw43).
+func (m *Manager) chunkMetaFromCloudBlobFooter(id chunk.ChunkID, blob blobstore.BlobInfo) (chunk.ChunkMeta, error) {
+	tmp, err := os.CreateTemp("", "glcb-footer-*.glcb")
+	if err != nil {
+		return chunk.ChunkMeta{}, fmt.Errorf("create temp for footer read: %w", err)
+	}
+	tmpPath := filepath.Clean(tmp.Name())
+	defer func() { _ = os.Remove(tmpPath) }()
+
+	if err := glcb.DownloadAndUnwrap(context.Background(), m.cfg.CloudStore, blob.Key, tmp); err != nil { //nolint:contextcheck // background recovery read
+		_ = tmp.Close()
+		m.trackCloudResult(err)
+		return chunk.ChunkMeta{}, fmt.Errorf("download blob for footer read: %w", err)
+	}
+	m.trackCloudResult(nil)
+	if err := tmp.Close(); err != nil {
+		return chunk.ChunkMeta{}, fmt.Errorf("close temp footer file: %w", err)
+	}
+
+	mb, err := glcb.OpenMappedBlob(tmpPath)
+	if err != nil {
+		return chunk.ChunkMeta{}, fmt.Errorf("open blob footer: %w", err)
+	}
+	bm := mb.Meta()
+	_ = mb.Close()
+
+	return glcb.BlobMetaToChunkMeta(bm, blob.Size), nil
 }

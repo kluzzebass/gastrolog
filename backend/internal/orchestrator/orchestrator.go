@@ -26,6 +26,7 @@ import (
 	"gastrolog/internal/orchestrator/pipeline"
 	"gastrolog/internal/pipeline/chunking"
 	"gastrolog/internal/pipeline/collection"
+	"gastrolog/internal/pipeline/distribution"
 	"gastrolog/internal/pipeline/digestion"
 	"gastrolog/internal/pipeline/ingestion"
 	"gastrolog/internal/pipeline/segmentation"
@@ -301,6 +302,11 @@ type Orchestrator struct {
 	// configurations as operator-visible alerts. See gastrolog-47qyw.
 	// Initialized in New() and evaluated by a periodic goroutine in Start().
 	retentionRates *RateAlerter
+
+	// Orchestrator-owned per-vault pipeline stage counters (GLCB catch-up
+	// pulls, retention deletes) surfaced as first-class throughput metrics
+	// (gastrolog-4r784a).
+	stageEvents *stageEventCounters
 
 	// Clock for testing.
 	now func() time.Time
@@ -855,6 +861,8 @@ func New(cfg Config) (*Orchestrator, error) {
 		VaultName: o.vaultLabel,
 	})
 
+	o.stageEvents = newStageEventCounters()
+
 	// Register the single retention sweep that discovers all vault instances
 	// each tick. No per-vault lifecycle management needed.
 	if err := o.startRetentionSweep(); err != nil {
@@ -1028,7 +1036,11 @@ func (o *Orchestrator) PressureGate() *chanwatch.PressureGate {
 
 // VaultSnapshot is a point-in-time summary of a vault's state.
 type VaultSnapshot struct {
-	ID           glid.GLID
+	ID glid.GLID
+	// Name is the operator-facing vault name from system config. Broadcast
+	// in NodeStats so every stats consumer (inspector throughput rows, CLI)
+	// can label vaults by name instead of falling back to GLID prefixes.
+	Name         string
 	RecordCount  int64
 	ChunkCount   int
 	SealedChunks int
@@ -1070,6 +1082,34 @@ func (o *Orchestrator) VaultSealStats() []chunking.VaultSealStats {
 	return o.pipeline.SealStats()
 }
 
+// VaultPublishStats returns per-vault segment-publish counters from the
+// pipeline supervisor's distribution manager (gastrolog-4r784a).
+func (o *Orchestrator) VaultPublishStats() []distribution.VaultPublishStats {
+	if o.pipeline == nil {
+		return nil
+	}
+	return o.pipeline.PublishStats()
+}
+
+// VaultChunkStageStats returns per-vault chunk-lifecycle stage counters
+// (planned/built/sealed/released/head-purges) from the pipeline supervisor's
+// chunking manager (gastrolog-4r784a).
+func (o *Orchestrator) VaultChunkStageStats() []chunking.VaultStageStats {
+	if o.pipeline == nil {
+		return nil
+	}
+	return o.pipeline.ChunkStageStats()
+}
+
+// VaultStageEventStats returns per-vault orchestrator-owned stage-event
+// counters (GLCB catch-up pulls, retention deletes) — gastrolog-4r784a.
+func (o *Orchestrator) VaultStageEventStats() []VaultStageEventSnapshot {
+	if o.stageEvents == nil {
+		return nil
+	}
+	return o.stageEvents.snapshot()
+}
+
 // VaultSnapshots returns a snapshot of stats for all registered vaults.
 // Vaults without a local chunk instance (e.g. placement excludes this
 // node) are still reported with zero chunk/byte counts so consumers
@@ -1083,6 +1123,7 @@ func (o *Orchestrator) VaultSnapshots() []VaultSnapshot {
 	for _, id := range vaultIDs {
 		snap := VaultSnapshot{
 			ID:               id,
+			Name:             o.vaultLabel(id),
 			Enabled:          o.IsVaultEnabled(id),
 			RaftAppliedIndex: o.vaultCtlAppliedIndex(id),
 		}

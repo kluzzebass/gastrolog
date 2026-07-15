@@ -35,6 +35,7 @@ func (a *orchStatsAdapter) VaultSnapshots() []cluster.StatsVaultSnapshot {
 	for i, s := range snaps {
 		out[i] = cluster.StatsVaultSnapshot{
 			ID:               s.ID,
+			Name:             s.Name,
 			RecordCount:      s.RecordCount,
 			ChunkCount:       s.ChunkCount,
 			SealedChunks:     s.SealedChunks,
@@ -84,6 +85,7 @@ func (a *orchStatsAdapter) VaultAppendStats() []cluster.StatsVaultAppendSnapshot
 		snap.RecordsDurable = s.RecordsDurable
 		snap.QueueDepth = s.QueueDepth
 		snap.QueueCap = s.QueueCap
+		snap.SegmentsCompleted = s.SegmentsCompleted
 	}
 	for _, s := range a.orch.VaultCollectStats() {
 		snap := get(s.VaultID)
@@ -94,6 +96,24 @@ func (a *orchStatsAdapter) VaultAppendStats() []cluster.StatsVaultAppendSnapshot
 		snap := get(s.VaultID)
 		snap.SealedRecords = s.SealedRecords
 		snap.SealedBytes = s.SealedBytes
+	}
+	for _, s := range a.orch.VaultPublishStats() {
+		snap := get(s.VaultID)
+		snap.SegmentsPublished = s.Published
+	}
+	for _, s := range a.orch.VaultChunkStageStats() {
+		snap := get(s.VaultID)
+		snap.ChunksPlanned = s.ChunksPlanned
+		snap.ChunksBuilt = s.ChunksBuilt
+		snap.ChunksSealed = s.ChunksSealed
+		snap.SegmentsReleased = s.SegmentsReleased
+		snap.HeadPurges = s.HeadPurges
+	}
+	for _, s := range a.orch.VaultStageEventStats() {
+		snap := get(s.VaultID)
+		snap.GLCBPullsAttempted = s.GLCBPullsAttempted
+		snap.GLCBPullsFailed = s.GLCBPullsFailed
+		snap.RetentionDeletes = s.RetentionDeletes
 	}
 	out := make([]cluster.StatsVaultAppendSnapshot, 0, len(byVault))
 	for _, s := range byVault {

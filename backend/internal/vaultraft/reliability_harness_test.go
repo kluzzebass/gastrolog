@@ -53,13 +53,128 @@ const (
 	harnessElectionTimeout  = 300 * time.Millisecond
 	harnessHeartbeatTimeout = 300 * time.Millisecond
 	harnessLeaseTimeout     = 150 * time.Millisecond
-	harnessLeaderWait       = 5 * time.Second
-	harnessConvergeWait     = 5 * time.Second
-	// harnessApplyRetryWait bounds retries across leadership transitions in
-	// applyInstanceCreate; several election rounds at 300ms timeouts fit
-	// comfortably, so exhausting it means quorum is genuinely gone.
-	harnessApplyRetryWait = 10 * time.Second
+
+	// Harness convergence waits are progress-based (see waitProgress), not
+	// wall-clock-bounded: the awaited work (election, log replication, FSM
+	// apply) is CPU-bound in-process activity, so under multi-suite
+	// contention a fixed wall-clock budget buys an arbitrary fraction of the
+	// compute — TestReliability_ConcurrentWrites_NoDivergence starved and
+	// failed at 10.5s under full-suite load despite passing solo in ~1s
+	// (gastrolog-1pqndk). A wait fails only when its observed progress
+	// metric has not changed for this stall window. The window sits well
+	// above any legitimate quiet period in this harness — the raft config
+	// above uses 300ms election/heartbeat timeouts, so even several stalled
+	// election rounds under contention fit comfortably inside it.
+	harnessStallWindow = 60 * time.Second
+	// harnessHardBackstop bounds total wait time even while progress
+	// trickles, so a livelocked metric (one that keeps changing without ever
+	// converging — election churn, oscillating counts) still fails with
+	// diagnostics instead of hanging the package. Steady progress toward the
+	// goal finishes far inside this; only a true wedge or livelock reaches it.
+	harnessHardBackstop = 5 * time.Minute
 )
+
+// progressPoint is one observed change of a wait's progress metric, kept for
+// the trajectory report on failure.
+type progressPoint struct {
+	elapsed time.Duration
+	state   string
+}
+
+// pollUntilStall polls sample every interval until it reports done, or its
+// progress string stops changing for harnessStallWindow, or
+// harnessHardBackstop elapses. It never touches *testing.T, so it is safe to
+// call from any goroutine — unlike waitProgress below, which Fatalfs and so
+// must only run on the goroutine executing the test (applyWithLeaderRetry in
+// reliability_test.go runs inside writer goroutines and builds on this
+// directly for that reason).
+//
+// sample returns (progress, done): done=true ends the wait successfully;
+// progress is an opaque human-readable snapshot of the awaited metric — ANY
+// change resets the stall clock and is appended to the returned trajectory.
+// Returns whether sample reported done, a human-readable reason when it
+// didn't, and the full trajectory for diagnostics.
+func pollUntilStall(interval time.Duration, sample func() (string, bool)) (done bool, reason string, trajectory []progressPoint) {
+	start := time.Now()
+	state, ok := sample()
+	trajectory = []progressPoint{{0, state}}
+	if ok {
+		return true, "", trajectory
+	}
+	lastChange := start
+	for {
+		time.Sleep(interval)
+		next, ok := sample()
+		now := time.Now()
+		if ok {
+			trajectory = append(trajectory, progressPoint{now.Sub(start), next})
+			return true, "", trajectory
+		}
+		if next != state {
+			state = next
+			lastChange = now
+			trajectory = append(trajectory, progressPoint{now.Sub(start), next})
+		}
+		stalledFor := now.Sub(lastChange)
+		if stalledFor >= harnessStallWindow {
+			return false, fmt.Sprintf("progress stalled (no change for %s; stall window %s)",
+				stalledFor.Round(time.Millisecond), harnessStallWindow), trajectory
+		}
+		if now.Sub(start) >= harnessHardBackstop {
+			return false, fmt.Sprintf("hit hard backstop %s while still changing (livelock?)", harnessHardBackstop), trajectory
+		}
+	}
+}
+
+// formatTrajectory renders a progress trajectory for a failed wait. Long
+// trajectories are elided in the middle — the head shows the starting state,
+// the tail shows where progress stopped.
+func formatTrajectory(points []progressPoint) string {
+	const headKeep, tailKeep = 8, 24
+	var b []byte
+	appendPoint := func(p progressPoint) {
+		b = append(b, []byte(fmt.Sprintf("  +%-10s %s\n", p.elapsed.Round(time.Millisecond), p.state))...)
+	}
+	if len(points) <= headKeep+tailKeep {
+		for _, p := range points {
+			appendPoint(p)
+		}
+		return string(b)
+	}
+	for _, p := range points[:headKeep] {
+		appendPoint(p)
+	}
+	b = append(b, []byte(fmt.Sprintf("  ... %d changes elided ...\n", len(points)-headKeep-tailKeep))...)
+	for _, p := range points[len(points)-tailKeep:] {
+		appendPoint(p)
+	}
+	return string(b)
+}
+
+// waitProgress is the harness's convergence-wait primitive for waits that
+// run on the main test goroutine (it calls h.t.Fatalf on failure — unsafe
+// from any other goroutine; see pollUntilStall). onFail (optional) runs
+// scenario diagnostics before the Fatalf.
+func (h *reliabilityHarness) waitProgress(what string, interval time.Duration, sample func() (string, bool), onFail func()) {
+	h.t.Helper()
+	start := time.Now()
+	done, reason, trajectory := pollUntilStall(interval, sample)
+	if done {
+		// Slow-but-successful waits log their trajectory so a wait that
+		// nearly stalled (legitimate quiet period approaching the window)
+		// is visible without failing.
+		if elapsed := time.Since(start); elapsed >= harnessStallWindow/2 {
+			h.t.Logf("%s: converged after %s (%d progress changes)\n%s",
+				what, elapsed.Round(time.Millisecond), len(trajectory), formatTrajectory(trajectory))
+		}
+		return
+	}
+	if onFail != nil {
+		onFail()
+	}
+	h.t.Fatalf("%s: %s after %s\nprogress trajectory (%d changes):\n%s",
+		what, reason, time.Since(start).Round(time.Millisecond), len(trajectory), formatTrajectory(trajectory))
+}
 
 // newReliabilityHarness boots an N-node cluster, bootstraps the first node,
 // and waits for a leader. All nodes start connected. Cleanup is automatic
@@ -183,19 +298,33 @@ func (h *reliabilityHarness) bootstrap(nodeID string) {
 	}
 }
 
-// waitForLeader blocks until any node reports itself as leader (or times
-// out). Returns the leader's node ID.
+// waitForLeader blocks until any node reports itself as leader, or the
+// progress wait stalls. Returns the leader's node ID. Election activity
+// (raft state/term changing on any node) counts as progress, so a slow-but-
+// live election under CPU contention is never mistaken for a stall.
 func (h *reliabilityHarness) waitForLeader() string {
 	h.t.Helper()
-	deadline := time.Now().Add(harnessLeaderWait)
-	for time.Now().Before(deadline) {
+	var leader string
+	h.waitProgress("leader election", 20*time.Millisecond, func() (string, bool) {
 		if id := h.leaderID(); id != "" {
-			return id
+			leader = id
+			return "", true
 		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	h.t.Fatal("no leader elected within timeout")
-	return ""
+		var views []string
+		for _, id := range h.nodeIDs {
+			n := h.nodes[id]
+			n.mu.Lock()
+			r := n.raft
+			n.mu.Unlock()
+			if r == nil {
+				views = append(views, id+"=down")
+				continue
+			}
+			views = append(views, fmt.Sprintf("%s=%s@t%s", id, r.State(), r.Stats()["term"]))
+		}
+		return fmt.Sprintf("%v", views), false
+	}, nil)
+	return leader
 }
 
 // leaderID returns the ID of the current leader among live nodes, or ""
@@ -216,7 +345,8 @@ func (h *reliabilityHarness) leaderID() string {
 	return ""
 }
 
-// leader returns the current leader node (blocks up to harnessLeaderWait).
+// leader returns the current leader node (blocks until progress stalls; see
+// waitForLeader).
 func (h *reliabilityHarness) leader() *reliabilityNode {
 	h.t.Helper()
 	return h.nodes[h.waitForLeader()]
@@ -231,7 +361,7 @@ func (h *reliabilityHarness) leader() *reliabilityNode {
 // documented retryable transients, not quorum failures; re-applying the same
 // command bytes is safe because the FSM apply is convergent (applyCreate
 // overwrites with identical values). A real quorum loss still fails: the
-// retries exhaust harnessApplyRetryWait.
+// retries stall out against the shared progress-wait window.
 func (h *reliabilityHarness) applyInstanceCreate(vaultID glid.GLID, chunkID chunk.ChunkID, at time.Time) {
 	h.t.Helper()
 	wire := vaultctlfsm.MarshalCreateChunk(chunkID, at, at, at)
@@ -242,10 +372,13 @@ func (h *reliabilityHarness) applyInstanceCreate(vaultID glid.GLID, chunkID chun
 // currently leads, with the same transient-retry policy as
 // applyInstanceCreate. Stopped nodes can't win elections, so following
 // h.leader() never resurrects a downed leader in failover scenarios.
+// Progress-based (gastrolog-1pqndk): retries across leadership transitions
+// are themselves expected under contention, so this only fails when the
+// same (leader, error) pair repeats for the stall window — genuinely no
+// forward motion — rather than a fixed retry deadline.
 func (h *reliabilityHarness) applyCommand(cmd []byte, what string) {
 	h.t.Helper()
-	deadline := time.Now().Add(harnessApplyRetryWait)
-	for {
+	h.waitProgress(what, 50*time.Millisecond, func() (string, bool) {
 		leader := h.leader()
 		fut := leader.raft.Apply(cmd, 2*time.Second)
 		err := fut.Error()
@@ -253,13 +386,13 @@ func (h *reliabilityHarness) applyCommand(cmd []byte, what string) {
 			if r, ok := fut.Response().(error); ok && r != nil {
 				h.t.Fatalf("%s FSM error: %v", what, r)
 			}
-			return
+			return "", true
 		}
-		if !isLeadershipTransient(err) || time.Now().After(deadline) {
+		if !isLeadershipTransient(err) {
 			h.t.Fatalf("%s: %v", what, err)
 		}
-		time.Sleep(50 * time.Millisecond)
-	}
+		return fmt.Sprintf("leader=%s err=%v", leader.id, err), false
+	}, nil)
 }
 
 // isLeadershipTransient reports whether an Apply error only means "the
@@ -415,24 +548,22 @@ func vaultFSMFingerprint(f *FSM) string {
 // crash+restart, before replay has done its work.
 func (h *reliabilityHarness) assertAllFSMsConverged() {
 	h.t.Helper()
-	deadline := time.Now().Add(harnessConvergeWait)
 	var lastPrints map[string]string
-	for time.Now().Before(deadline) {
+	h.waitProgress("FSM convergence", 20*time.Millisecond, func() (string, bool) {
 		leaderID := h.leaderID()
 		if leaderID == "" {
-			time.Sleep(20 * time.Millisecond)
-			continue
+			return "no-leader", false
 		}
 		leaderNode := h.nodes[leaderID]
 		leaderLast := leaderNode.raft.LastIndex()
 		if leaderNode.raft.AppliedIndex() < leaderLast {
-			time.Sleep(20 * time.Millisecond)
-			continue
+			return fmt.Sprintf("leader=%s applied=%d/%d", leaderID, leaderNode.raft.AppliedIndex(), leaderLast), false
 		}
 		leaderPrint := vaultFSMFingerprint(leaderNode.fsm)
 		lastPrints = map[string]string{leaderID: leaderPrint}
 
 		converged := true
+		var views []string
 		for _, id := range h.nodeIDs {
 			n := h.nodes[id]
 			n.mu.Lock()
@@ -446,21 +577,22 @@ func (h *reliabilityHarness) assertAllFSMsConverged() {
 				converged = false
 				lastPrints[id] = fmt.Sprintf("<behind: applied=%d leaderLast=%d>",
 					r.AppliedIndex(), leaderLast)
+				views = append(views, fmt.Sprintf("%s=behind(%d/%d)", id, r.AppliedIndex(), leaderLast))
 				continue
 			}
 			p := vaultFSMFingerprint(fsm)
 			lastPrints[id] = p
-			if p != leaderPrint {
+			if p == leaderPrint {
+				views = append(views, id+"=match")
+			} else {
 				converged = false
+				views = append(views, id+"=diverged")
 			}
 		}
-		if converged {
-			return
-		}
-		time.Sleep(30 * time.Millisecond)
-	}
-	h.t.Fatalf("FSMs did not converge within %s. Fingerprints:\n%s",
-		harnessConvergeWait, formatPrints(lastPrints))
+		return fmt.Sprintf("%v", views), converged
+	}, func() {
+		h.t.Logf("FSM fingerprints at stall:\n%s", formatPrints(lastPrints))
+	})
 }
 
 func formatPrints(m map[string]string) string {

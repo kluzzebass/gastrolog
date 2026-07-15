@@ -21,6 +21,51 @@ import (
 	"time"
 )
 
+// stageCounterTotals is the cluster-wide sum of the per-vault discrete
+// pipeline stage counters, gathered by reading each node's orchestrator (each
+// node counts only its own events) — the same sum NodeStats/GetClusterStatus
+// produces for the inspector (gastrolog-4r784a).
+type stageCounterTotals struct {
+	segmentsCompleted uint64
+	segmentsPublished uint64
+	segmentsReleased  uint64
+	chunksPlanned     uint64
+	chunksBuilt       uint64
+	chunksSealed      uint64
+	headPurges        uint64
+}
+
+func (h *orchRelHarness) aggregateStageCounters(v vaultSpec) stageCounterTotals {
+	h.t.Helper()
+	var agg stageCounterTotals
+	for _, id := range h.nodeIDs {
+		orch := h.nodes[id].orch
+		if orch == nil {
+			continue
+		}
+		for _, s := range orch.VaultAppendStats() {
+			if s.VaultID == v.id {
+				agg.segmentsCompleted += s.SegmentsCompleted
+			}
+		}
+		for _, s := range orch.VaultPublishStats() {
+			if s.VaultID == v.id {
+				agg.segmentsPublished += s.Published
+			}
+		}
+		for _, s := range orch.VaultChunkStageStats() {
+			if s.VaultID == v.id {
+				agg.segmentsReleased += s.SegmentsReleased
+				agg.chunksPlanned += s.ChunksPlanned
+				agg.chunksBuilt += s.ChunksBuilt
+				agg.chunksSealed += s.ChunksSealed
+				agg.headPurges += s.HeadPurges
+			}
+		}
+	}
+	return agg
+}
+
 // waitRegistryDrained waits until the vault's completed-segment registry is
 // empty on every given node's FSM — i.e. every published segment has been
 // released via CmdReleaseSegments after its records reached RF in sealed
@@ -147,6 +192,31 @@ func TestOrchPipeline_ReleaseDrainsRegistryAndHead(t *testing.T) {
 	// Record integrity after release: a follower home serves every ingested
 	// record exactly once from the sealed GLCBs.
 	h.assertSearchBodiesExactly(v, h.nodeIDs[1], bodies)
+
+	// Stage counters end to end (gastrolog-4r784a): the discrete pipeline
+	// milestones populated on their owning nodes. Each node counts only its
+	// own events, so the cluster picture is the sum across nodes — exactly the
+	// aggregation NodeStats/GetClusterStatus performs for the UI. Assert the
+	// cluster totals reflect the flow: segments completed+published on the
+	// origin, chunks planned/built/sealed and segments released across the
+	// homes, and head/ purged.
+	agg := h.aggregateStageCounters(v)
+	if agg.segmentsCompleted == 0 || agg.segmentsPublished == 0 {
+		t.Fatalf("segment stage counters: completed=%d published=%d, want > 0",
+			agg.segmentsCompleted, agg.segmentsPublished)
+	}
+	// Two chunks, three homes each build a GLCB → 6 builds cluster-wide;
+	// the leader plans and seals each chunk once.
+	if agg.chunksBuilt < 2 || agg.chunksPlanned < 2 || agg.chunksSealed < 2 {
+		t.Fatalf("chunk stage counters: planned=%d built=%d sealed=%d, want planned/sealed>=2, built>=2 (3 homes)",
+			agg.chunksPlanned, agg.chunksBuilt, agg.chunksSealed)
+	}
+	if agg.segmentsReleased == 0 {
+		t.Fatalf("segments released = 0, want > 0 after registry drain")
+	}
+	if agg.headPurges == 0 {
+		t.Fatalf("head purges = 0, want > 0 after head drain")
+	}
 }
 
 // TestOrchPipeline_HomeDownDuringIngestCatchesUpOnRestart injects a home

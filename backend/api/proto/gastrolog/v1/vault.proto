@@ -327,6 +327,37 @@ message VaultStats {
   ThroughputRate collected_bytes = 22;
   ThroughputRate sealed_records = 23;
   ThroughputRate sealed_bytes = 24;
+
+  // Discrete pipeline stage-count milestones on THIS node, monotonic per vault
+  // (gastrolog-4r784a). These are the counters operators previously grepped
+  // from cluster.log — now first-class, cross-node observable. Each milestone
+  // is counted exactly once by its owner (origin/home/leader), so cluster
+  // totals are the plain sum across nodes. Rates are computed by the stats
+  // collector's rolling windows over these totals (fields 35-38) just like
+  // append/collected/sealed — never accumulated client-side.
+  //
+  // Records ingested (append_records_total, field 17) and sealed
+  // (sealed_records, field 23) already cover the record-throughput ends of the
+  // pipeline; these add the segment- and chunk-lifecycle event counts between.
+  uint64 segments_completed_total = 25;   // working/ → completed/ promotions (origin)
+  uint64 segments_published_total = 26;   // committed to the vault-ctl registry (origin)
+  uint64 segments_released_total = 27;    // released from the registry (leader)
+  uint64 chunks_planned_total = 28;       // open manifests opened (leader)
+  uint64 chunks_built_total = 29;         // sealed GLCBs materialized (home)
+  uint64 chunks_sealed_total = 30;        // CmdSealChunk commits (leader)
+  uint64 head_purges_total = 31;          // segments purged from head/ (home)
+  uint64 glcb_pulls_attempted_total = 32; // GLCB replica catch-up pulls started
+  uint64 glcb_pulls_failed_total = 33;    // catch-up pulls that no peer could satisfy
+  uint64 retention_deletes_total = 34;    // chunks deleted by retention (leader)
+
+  // Server-windowed per-second rates for the discrete stage milestones, from
+  // the stats collector's rolling windows over the cumulative totals above.
+  // Same mechanism as append_records/collected_records/sealed_records — the UI
+  // renders them directly and never differentiates counters itself.
+  ThroughputRate segments_completed_rate = 35;
+  ThroughputRate segments_published_rate = 36;
+  ThroughputRate chunks_built_rate = 37;
+  ThroughputRate chunks_sealed_rate = 38;
 }
 
 message ReindexVaultRequest {
