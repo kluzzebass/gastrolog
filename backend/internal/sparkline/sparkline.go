@@ -76,6 +76,19 @@ func (s *Sparkline[T]) Values() []T {
 	return out
 }
 
+// Last returns the most recently pushed sample and true, or the zero value
+// and false when the sparkline is empty.
+func (s *Sparkline[T]) Last() (T, bool) {
+	if s.count == 0 {
+		var zero T
+		return zero, false
+	}
+	if s.cap <= 0 {
+		return s.buf[len(s.buf)-1], true
+	}
+	return s.buf[(s.head+s.count-1)%s.cap], true
+}
+
 // Len is the number of live samples.
 func (s *Sparkline[T]) Len() int { return s.count }
 

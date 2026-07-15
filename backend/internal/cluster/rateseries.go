@@ -6,13 +6,17 @@ import (
 	"time"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/sparkline"
 )
 
 // ewmaTaus are the Unix-load-average horizons for sustained rates.
 var ewmaTaus = [3]time.Duration{time.Minute, 5 * time.Minute, 15 * time.Minute}
 
-// rateSeriesSparkPoints caps the spark ring buffer.
-const rateSeriesSparkPoints = 20
+// rateSparkPoints is how many per-tick rate samples a series keeps for its
+// spark history. Broadcast ticks are ~5s apart (StatsCollector.Interval), so
+// 20 points is ~100s of burst shape — enough to read a spike or a stall
+// without an unbounded buffer.
+const rateSparkPoints = 20
 
 // rateSeries is the rolling rate/spark window for ONE cumulative counter. It
 // encapsulates the whole "cumulative counter in, per-second rate + sustained
@@ -43,7 +47,11 @@ type rateSeries struct {
 	// step folds the instantaneous rate in with e^(-dt/tau) decay, tau =
 	// 1m/5m/15m (gastrolog-4eh5ns).
 	ewma [3]float64
-	ring []float64
+	// ring is the per-tick rate history rendered as the wire spark. It is a
+	// generic sparkline.Sparkline[float64] — the same domain-free bounded-history
+	// primitive a gauge would compose — created lazily so the zero rateSeries is
+	// still usable (seriesLocked never has to pre-size it).
+	ring *sparkline.Sparkline[float64]
 	// curInstant is the instantaneous per-second rate this series emits right
 	// now. observe() recomputes it every call so emit()/instant() reproduce the
 	// old fused observe-and-return exactly: a normal step emits the freshly
@@ -109,10 +117,10 @@ func (s *rateSeries) observe(now time.Time, counter int64, membership string, st
 	}
 	s.last = counter
 	s.lastAt = now
-	s.ring = append(s.ring, perSec)
-	if len(s.ring) > rateSeriesSparkPoints {
-		s.ring = s.ring[len(s.ring)-rateSeriesSparkPoints:]
+	if s.ring == nil {
+		s.ring = sparkline.New[float64](rateSparkPoints)
 	}
+	s.ring.Push(perSec)
 	s.curInstant = perSec
 }
 
@@ -120,11 +128,13 @@ func (s *rateSeries) observe(now time.Time, counter int64, membership string, st
 // advancing the window (the old snapshotRates instant semantics for reads
 // between broadcast ticks).
 func (s *rateSeries) readOnly() {
-	if len(s.ring) > 0 {
-		s.curInstant = s.ring[len(s.ring)-1]
-	} else {
-		s.curInstant = 0
+	if s.ring != nil {
+		if last, ok := s.ring.Last(); ok {
+			s.curInstant = last
+			return
+		}
 	}
+	s.curInstant = 0
 }
 
 // emit encodes the current window to the wire. This is the ONLY site that
@@ -132,12 +142,16 @@ func (s *rateSeries) readOnly() {
 // current window without advancing it. Spark is copied so callers cannot mutate
 // the ring.
 func (s *rateSeries) emit() *gastrologv1.ThroughputRate {
+	var spark []float64
+	if s.ring != nil {
+		spark = s.ring.Values() // already a defensive copy
+	}
 	return &gastrologv1.ThroughputRate{
 		InstantPerSec: s.curInstant,
 		Avg_1MPerSec:  s.ewma[0],
 		Avg_5MPerSec:  s.ewma[1],
 		Avg_15MPerSec: s.ewma[2],
-		Spark:         append([]float64(nil), s.ring...),
+		Spark:         spark,
 	}
 }
 
