@@ -66,10 +66,10 @@ func TestReliability_FreshCluster_AppliedIndexNonZero(t *testing.T) {
 	h := newReliabilityHarness(t, 3)
 
 	// Wait for full replication of bootstrap + post-election entries.
-	deadline := time.Now().Add(2 * time.Second)
-	var lastApplied map[string]uint64
-	for time.Now().Before(deadline) {
-		lastApplied = map[string]uint64{}
+	// Progress-based (gastrolog-1pqndk): per-node AppliedIndex is the metric,
+	// so a slow-but-live catch-up under contention isn't mistaken for a stall.
+	h.waitProgress("bootstrap AppliedIndex advance", 20*time.Millisecond, func() (string, bool) {
+		lastApplied := map[string]uint64{}
 		allReady := true
 		for _, id := range h.nodeIDs {
 			n := h.nodes[id]
@@ -82,12 +82,8 @@ func TestReliability_FreshCluster_AppliedIndexNonZero(t *testing.T) {
 				allReady = false
 			}
 		}
-		if allReady {
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatalf("not all nodes advanced past AppliedIndex=0: %v", lastApplied)
+		return fmt.Sprintf("%v", lastApplied), allReady
+	}, nil)
 }
 
 // A fresh cluster with no commands must have empty but convergent FSMs
@@ -158,20 +154,16 @@ func TestReliability_Failover_LeaderDown_NewLeaderElected(t *testing.T) {
 	oldLeader := h.leaderID()
 	h.stopNode(oldLeader)
 
-	// Wait for a new leader among remaining nodes.
-	deadline := time.Now().Add(harnessLeaderWait)
-	var newLeader string
-	for time.Now().Before(deadline) {
+	// Wait for a new leader among remaining nodes. Progress-based
+	// (gastrolog-1pqndk): the current leader view is the metric, so election
+	// churn among survivors counts as progress.
+	h.waitProgress("new leader after failover", 20*time.Millisecond, func() (string, bool) {
 		id := h.leaderID()
 		if id != "" && id != oldLeader {
-			newLeader = id
-			break
+			return "", true
 		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if newLeader == "" {
-		t.Fatalf("no new leader elected after %s went down", oldLeader)
-	}
+		return fmt.Sprintf("current=%q", id), false
+	}, nil)
 
 	// A post-failover leader accepts writes. Leadership can churn again right
 	// after the first new winner emerges (300ms election timeouts), so retry
@@ -187,7 +179,7 @@ func TestReliability_Failover_LeaderDown_NewLeaderElected(t *testing.T) {
 			liveIDs = append(liveIDs, id)
 		}
 	}
-	assertSubsetConverged(t, h, liveIDs)
+	assertSubsetConverged(h, liveIDs)
 }
 
 // Follower shutdown must not stall writes: 2/3 is still quorum.
@@ -219,7 +211,7 @@ func TestReliability_Failover_FollowerDown_QuorumHolds(t *testing.T) {
 			liveIDs = append(liveIDs, id)
 		}
 	}
-	assertSubsetConverged(t, h, liveIDs)
+	assertSubsetConverged(h, liveIDs)
 }
 
 // TestReliability_ApplyRetriesAcrossLeadershipTransfer forces leadership
@@ -370,7 +362,7 @@ func TestReliability_ConcurrentWrites_NoDivergence(t *testing.T) {
 				cid[1] = byte(c)
 				wire := vaultctlfsm.MarshalCreateChunk(cid, now, now, now)
 				cmd := MarshalVaultChunkCommand(vaultID, wire)
-				if err := applyWithLeaderRetry(h, cmd, 5, 3*time.Second); err != nil {
+				if err := applyWithLeaderRetry(h, cmd, 3*time.Second); err != nil {
 					errCh <- fmt.Errorf("writer %d cmd %d: %w", writerIdx, c, err)
 					return
 				}
@@ -570,20 +562,17 @@ func TestReliability_PipelinedApplies_SurviveLeaderKill(t *testing.T) {
 		}
 	}
 
-	// Wait for new leadership on the surviving pair.
-	deadline := time.Now().Add(harnessLeaderWait)
+	// Wait for new leadership on the surviving pair. Progress-based
+	// (gastrolog-1pqndk): the current leader view is the metric.
 	var newLeader string
-	for time.Now().Before(deadline) {
+	h.waitProgress("new leader after leader kill", 20*time.Millisecond, func() (string, bool) {
 		id := h.leaderID()
 		if id != "" && id != oldLeader {
 			newLeader = id
-			break
+			return "", true
 		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if newLeader == "" {
-		t.Fatalf("no new leader after killing %s", oldLeader)
-	}
+		return fmt.Sprintf("current=%q", id), false
+	}, nil)
 
 	liveIDs := []string{}
 	for _, id := range h.nodeIDs {
@@ -591,7 +580,7 @@ func TestReliability_PipelinedApplies_SurviveLeaderKill(t *testing.T) {
 			liveIDs = append(liveIDs, id)
 		}
 	}
-	assertSubsetConverged(t, h, liveIDs)
+	assertSubsetConverged(h, liveIDs)
 
 	// Every chunk that Apply confirmed must be in the surviving leader's FSM.
 	surviving := h.nodes[newLeader].fsm.VaultFSM(vaultID)
@@ -850,29 +839,45 @@ func (r *readBytesCloser) Close() error { return nil }
 // Used by the concurrent-writes scenario where leader flap under contention
 // is expected; production code has the same retry shape in
 // cluster.VaultCtlChunkApplyForwarder.
-func applyWithLeaderRetry(h *reliabilityHarness, cmd []byte, maxAttempts int, timeout time.Duration) error {
-	var lastErr error
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		leaderID := h.waitForLeader()
+//
+// Progress-based (gastrolog-1pqndk), like applyCommand, but built directly on
+// pollUntilStall rather than h.waitProgress/h.waitForLeader: this function
+// runs inside the scenario's writer goroutines (TestReliability_
+// ConcurrentWrites_NoDivergence), and *testing.T.Fatal(f) is documented as
+// unsafe to call from any goroutine but the one running the test — it must
+// return an error for the caller to surface via t.Fatal on the right
+// goroutine, never fail the test itself.
+func applyWithLeaderRetry(h *reliabilityHarness, cmd []byte, timeout time.Duration) error {
+	var applyErr error
+	done, reason, trajectory := pollUntilStall(20*time.Millisecond, func() (string, bool) {
+		leaderID := h.leaderID()
+		if leaderID == "" {
+			return "no-leader", false
+		}
 		h.nodes[leaderID].mu.Lock()
 		r := h.nodes[leaderID].raft
 		h.nodes[leaderID].mu.Unlock()
 		if r == nil {
-			lastErr = fmt.Errorf("attempt %d: leader %s disappeared", attempt, leaderID)
-			time.Sleep(20 * time.Millisecond)
-			continue
+			return fmt.Sprintf("leader=%s disappeared", leaderID), false
 		}
 		err := r.Apply(cmd, timeout).Error()
 		if err == nil {
-			return nil
+			return "", true
 		}
 		if !isTransientLeaderErr(err) {
-			return fmt.Errorf("attempt %d: %w", attempt, err)
+			applyErr = fmt.Errorf("leader=%s: %w", leaderID, err)
+			return "", true
 		}
-		lastErr = err
-		time.Sleep(20 * time.Millisecond)
+		return fmt.Sprintf("leader=%s err=%v", leaderID, err), false
+	})
+	if applyErr != nil {
+		return applyErr
 	}
-	return fmt.Errorf("after %d attempts: %w", maxAttempts, lastErr)
+	if !done {
+		return fmt.Errorf("apply with leader retry: %s\nprogress trajectory (%d changes):\n%s",
+			reason, len(trajectory), formatTrajectory(trajectory))
+	}
+	return nil
 }
 
 // isTransientLeaderErr reports whether err is one of hraft's retryable
@@ -916,15 +921,15 @@ func chunkIDWithPrefix(b byte) chunk.ChunkID {
 // assertSubsetConverged polls until every named node's FSM fingerprint
 // matches, with AppliedIndex caught up to the leader's LastIndex. Used
 // when part of the cluster is stopped and the full-cluster assertion
-// would hang.
-func assertSubsetConverged(t *testing.T, h *reliabilityHarness, ids []string) {
-	t.Helper()
+// would hang. Always called from the main test goroutine (never a writer
+// goroutine), so it may use h.waitProgress directly (Fatalf on stall).
+func assertSubsetConverged(h *reliabilityHarness, ids []string) {
+	h.t.Helper()
 	if len(ids) == 0 {
-		t.Fatal("subset is empty")
+		h.t.Fatal("subset is empty")
 	}
-	deadline := time.Now().Add(harnessConvergeWait)
 	var lastPrints map[string]string
-	for time.Now().Before(deadline) {
+	h.waitProgress("subset FSM convergence", 20*time.Millisecond, func() (string, bool) {
 		// Find the leader among the subset.
 		var leaderLast uint64
 		leaderPrint := ""
@@ -948,14 +953,15 @@ func assertSubsetConverged(t *testing.T, h *reliabilityHarness, ids []string) {
 			}
 		}
 		if leaderID == "" || leaderPrint == "" && leaderLast > 0 {
-			time.Sleep(20 * time.Millisecond)
-			continue
+			return fmt.Sprintf("no-subset-leader(last=%d)", leaderLast), false
 		}
 
 		lastPrints = map[string]string{leaderID: leaderPrint}
 		allMatch := true
+		var views []string
 		for _, id := range ids {
 			if id == leaderID {
+				views = append(views, id+"=leader")
 				continue
 			}
 			n := h.nodes[id]
@@ -965,27 +971,29 @@ func assertSubsetConverged(t *testing.T, h *reliabilityHarness, ids []string) {
 			n.mu.Unlock()
 			if r == nil || fsm == nil {
 				allMatch = false
+				views = append(views, id+"=down")
 				continue
 			}
 			if r.AppliedIndex() < leaderLast {
 				allMatch = false
 				lastPrints[id] = fmt.Sprintf("<behind: applied=%d leaderLast=%d>",
 					r.AppliedIndex(), leaderLast)
+				views = append(views, fmt.Sprintf("%s=behind(%d/%d)", id, r.AppliedIndex(), leaderLast))
 				continue
 			}
 			p := vaultFSMFingerprint(fsm)
 			lastPrints[id] = p
-			if p != leaderPrint {
+			if p == leaderPrint {
+				views = append(views, id+"=match")
+			} else {
 				allMatch = false
+				views = append(views, id+"=diverged")
 			}
 		}
-		if allMatch && len(lastPrints) == len(ids) {
-			return
-		}
-		time.Sleep(30 * time.Millisecond)
-	}
-	t.Fatalf("subset did not converge within %s:\n%s",
-		harnessConvergeWait, formatPrints(lastPrints))
+		return fmt.Sprintf("%v", views), allMatch && len(lastPrints) == len(ids)
+	}, func() {
+		h.t.Logf("subset FSM fingerprints at stall:\n%s", formatPrints(lastPrints))
+	})
 }
 
 // Compile-time check: hraft.Raft exposes the methods the harness depends
