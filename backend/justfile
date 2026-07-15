@@ -62,8 +62,17 @@ build-all:
 gen:
   cd api/proto && buf generate
 
-# Runs all Go tests.
+# Fast developer-loop tests: skips multi-second convergence/stress/large-I/O
+# tests behind testing.Short() (down from ~93s unsharded — gastrolog-3241bv).
+# Run this during development. ~48s wall on a 16-core dev box.
 test *args:
+  go test -short ./... {{args}}
+
+# Full acceptance gate: runs every test, including the ones -short skips
+# (multi-node raft convergence, WAL stress/large-segment I/O, restart-survival
+# cycles — gastrolog-3241bv). Run once before declaring work done / handoff.
+# ~90s+ wall on a 16-core dev box.
+test-full *args:
   go test ./... {{args}}
 
 # Runs the reliability-matrix tests: vaultraft FSM scenarios, orchestrator-
