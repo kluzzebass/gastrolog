@@ -85,6 +85,105 @@ func TestLazyExternalResolveOnMiss(t *testing.T) {
 	}
 }
 
+// TestLazyExternalListerSurfacesUnregistered pins the enumeration contract
+// (gastrolog-3s26vr): List must surface an external chunk that has NEVER been
+// looked up by ID — no prior Meta/OpenCursor to memoize it. A match-all search
+// and the holder-scope gate enumerate the manager rather than naming a chunk,
+// so lazy on-miss-by-ID resolution alone left a restarted home answering
+// match-all with zero records until some other path registered the chunk. The
+// lister closes that gap: List resolves each enumerated ID it does not already
+// hold, then memoizes it.
+func TestLazyExternalListerSurfacesUnregistered(t *testing.T) {
+	t.Parallel()
+	m := newLazyTestManager(t)
+	id := chunk.NewChunkID()
+	glcbPath := filepath.Join(t.TempDir(), "data.glcb")
+
+	var resolverCalls atomic.Int64
+	m.SetExternalGLCBResolver(func(got chunk.ChunkID) (string, chunk.ExternalGLCBInfo, bool) {
+		resolverCalls.Add(1)
+		if got != id {
+			return "", chunk.ExternalGLCBInfo{}, false
+		}
+		return glcbPath, lazyInfo(10), true
+	})
+	m.SetExternalGLCBLister(func() []chunk.ChunkID { return []chunk.ChunkID{id} })
+
+	// No Meta/OpenCursor first: the chunk is unregistered, exactly the
+	// post-restart state. List alone must surface it.
+	metas, err := m.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, mm := range metas {
+		if mm.ID == id {
+			found = true
+			if mm.RecordCount != 10 || !mm.Sealed {
+				t.Fatalf("listed meta = %+v, want sealed with 10 records", mm)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("external chunk absent from List despite an installed lister — enumeration gap")
+	}
+
+	// Memoized: a second List does not re-resolve.
+	before := resolverCalls.Load()
+	if _, err := m.List(); err != nil {
+		t.Fatal(err)
+	}
+	if got := resolverCalls.Load(); got != before {
+		t.Fatalf("List re-resolved a memoized chunk: %d calls after, %d before", got, before)
+	}
+}
+
+// TestLazyExternalListerGatesOnResolver: the lister enumerates candidate IDs,
+// but List must include one only when the resolver accepts it (the file is on
+// this node and the entry is still sealed). A declined ID stays out of List
+// and is not memoized.
+func TestLazyExternalListerGatesOnResolver(t *testing.T) {
+	t.Parallel()
+	m := newLazyTestManager(t)
+	present := chunk.NewChunkID()
+	absent := chunk.NewChunkID()
+	glcbPath := filepath.Join(t.TempDir(), "data.glcb")
+
+	m.SetExternalGLCBResolver(func(got chunk.ChunkID) (string, chunk.ExternalGLCBInfo, bool) {
+		if got == present {
+			return glcbPath, lazyInfo(5), true
+		}
+		return "", chunk.ExternalGLCBInfo{}, false // absent: no bytes on this node
+	})
+	m.SetExternalGLCBLister(func() []chunk.ChunkID {
+		return []chunk.ChunkID{present, absent}
+	})
+
+	metas, err := m.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sawPresent, sawAbsent := false, false
+	for _, mm := range metas {
+		switch mm.ID {
+		case present:
+			sawPresent = true
+		case absent:
+			sawAbsent = true
+		}
+	}
+	if !sawPresent {
+		t.Fatal("resolvable chunk missing from List")
+	}
+	if sawAbsent {
+		t.Fatal("declined chunk leaked into List — the resolver gate was bypassed")
+	}
+	// The declined ID must remain unregistered so it can resolve later.
+	if _, err := m.Meta(absent); !errors.Is(err, chunk.ErrChunkNotFound) {
+		t.Fatalf("declined chunk memoized by List: Meta err = %v, want ErrChunkNotFound", err)
+	}
+}
+
 // TestLazyExternalResolverMissStaysNotFound: a resolver that declines must
 // leave the lookup as ErrChunkNotFound, and the decline is NOT memoized —
 // the chunk may become resolvable later (seal commits, file appears).

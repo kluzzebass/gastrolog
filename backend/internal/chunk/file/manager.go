@@ -200,6 +200,16 @@ type Manager struct {
 	// history or sweep timing. Protected by mu.
 	externalResolver func(chunk.ChunkID) (string, chunk.ExternalGLCBInfo, bool)
 
+	// externalLister enumerates the external-GLCB chunk IDs the resolver would
+	// accept (the vault-ctl manifest's sealed entries). List() consults it so
+	// enumeration surfaces the same chunks the by-ID resolver serves: a
+	// match-all search or holder-scope gate walks the manager rather than
+	// naming a chunk, so without this a restarted home's sealed chunks stay
+	// invisible to enumeration until some other path registers them
+	// (gastrolog-3s26vr). Same lock contract as externalResolver: called under
+	// m.mu, must be lock-light and never re-enter this manager. Protected by mu.
+	externalLister func() []chunk.ChunkID
+
 	// glcbMapped holds one whole-file mmap per sealed chunk for local data.glcb.
 	// Aliased by OpenCursor, index TS lookups, and histogram paths.
 	glcbMapped sync.Map // chunk.ChunkID → *mappedGLCBEntry
@@ -808,6 +818,14 @@ func (m *Manager) SetExternalGLCBResolver(fn func(chunk.ChunkID) (string, chunk.
 	m.externalResolver = fn
 }
 
+// SetExternalGLCBLister installs the enumeration companion to the resolver.
+// See the externalLister field for the contract.
+func (m *Manager) SetExternalGLCBLister(fn func() []chunk.ChunkID) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.externalLister = fn
+}
+
 func (m *Manager) List() ([]chunk.ChunkMeta, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -839,11 +857,46 @@ func (m *Manager) List() ([]chunk.ChunkMeta, error) {
 		out = append(out, m.cloudListCache...)
 	}
 
+	out = m.appendExternalListedMetasLocked(out, cloudIDs)
+
 	// Sort by WriteStart to ensure consistent ordering.
 	slices.SortFunc(out, func(a, b chunk.ChunkMeta) int {
 		return a.WriteStart.Compare(b.WriteStart)
 	})
 	return out, nil
+}
+
+// appendExternalListedMetasLocked surfaces external-GLCB chunks the resolver
+// would serve but that no path has registered into m.metas yet. Enumeration
+// (match-all search, holder scope) walks the manager rather than naming a
+// chunk, so a restarted home's sealed chunks would otherwise be invisible to
+// List even though the by-ID resolver serves them — the total-resolution
+// stall of gastrolog-3s26vr. Resolving memoizes into m.metas, so this scan
+// pays its per-chunk cost once after (re)start, not on every List. Caller
+// holds m.mu.
+func (m *Manager) appendExternalListedMetasLocked(out []chunk.ChunkMeta, cloudIDs map[chunk.ChunkID]struct{}) []chunk.ChunkMeta {
+	if m.externalLister == nil || m.externalResolver == nil {
+		return out
+	}
+	for _, id := range m.externalLister() {
+		if _, have := m.metas[id]; have {
+			continue
+		}
+		if cloudIDs != nil {
+			if _, dup := cloudIDs[id]; dup {
+				continue
+			}
+		}
+		glcbPath, info, ok := m.externalResolver(id)
+		if !ok {
+			continue // file not on this node, or entry no longer sealed
+		}
+		m.registerExternalGLCBLocked(id, glcbPath, info)
+		if meta, registered := m.metas[id]; registered {
+			out = append(out, meta.toChunkMeta())
+		}
+	}
+	return out
 }
 
 func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
