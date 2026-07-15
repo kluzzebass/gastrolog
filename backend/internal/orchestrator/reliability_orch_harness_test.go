@@ -230,6 +230,13 @@ func (h *orchRelHarness) waitProgress(what string, interval time.Duration, sampl
 		next, done := sample()
 		now := time.Now()
 		if done {
+			// Slow-but-successful waits log their trajectory so a wait that
+			// nearly stalled (legitimate quiet period approaching the window)
+			// is visible without failing.
+			if now.Sub(start) >= orchHarnessStallWindow/2 {
+				h.t.Logf("%s: converged after %s (%d progress changes)\n%s",
+					what, now.Sub(start).Round(time.Millisecond), len(trajectory), formatTrajectory(trajectory))
+			}
 			return
 		}
 		if next != progress {
