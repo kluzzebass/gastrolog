@@ -4367,7 +4367,7 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		uploadCtx,
 		key,
 		pr,
-		glcb.ObjectMetadata(bm),
+		glcb.EncodeObjectMetadata(bm),
 	)
 	uploadCancel()
 	_ = pr.Close()
@@ -4859,7 +4859,27 @@ func (m *Manager) loadCloudBackedChunksFromStore() error {
 		// place as cache and will be picked up by OpenCursor's local-GLCB
 		// fast path. See gastrolog-24m1t step 7j.
 		delete(m.metas, id)
-		cm := glcb.BlobMetaToChunkMeta(id, blob)
+		cm, decErr := glcb.DecodeObjectMetadata(id, blob)
+		if decErr != nil {
+			// The object metadata is only a CACHE of the sealed GLCB's own
+			// footer, which is the source of truth for record count and
+			// bounds. A malformed cache must never be indexed as a
+			// zero-record / zero-time ChunkMeta — that would feed wrong
+			// retention sweeps and query pruning (gastrolog-5opw43). Fall
+			// back to the authoritative footer.
+			authoritative, fbErr := m.chunkMetaFromCloudBlobFooter(id, blob)
+			if fbErr != nil {
+				// Even the footer is unreadable. Skip indexing this blob
+				// (the bytes stay in the cloud store, so nothing is lost)
+				// rather than present fabricated zeros as authoritative.
+				m.logger.Error("skipping cloud-backed chunk: object metadata unreadable and footer fallback failed",
+					"chunk", id, "key", blob.Key, "meta_error", decErr, "footer_error", fbErr)
+				return nil
+			}
+			m.logger.Warn("cloud-backed chunk object metadata unreadable; recovered from authoritative GLCB footer",
+				"chunk", id, "key", blob.Key, "meta_error", decErr)
+			cm = authoritative
+		}
 		meta := &chunkMeta{
 			id:          id,
 			writeStart:  cm.WriteStart,
@@ -4908,4 +4928,39 @@ func (m *Manager) loadCloudBackedChunksFromStore() error {
 		m.logger.Info("populated cloud index from store", "count", indexed)
 	}
 	return nil
+}
+
+// chunkMetaFromCloudBlobFooter reads the authoritative ChunkMeta straight from
+// a cloud blob's sealed GLCB footer, bypassing its (unreadable) object
+// metadata. It downloads and unwraps the blob into a transient temp file,
+// mmaps it just long enough to read the layout/TOC meta, and discards it — no
+// warm-cache promotion, no locking side effects. This is the fallback for
+// loadCloudBackedChunksFromStore when DecodeObjectMetadata fails; the footer is
+// the source of truth, the object metadata is only a cache (gastrolog-5opw43).
+func (m *Manager) chunkMetaFromCloudBlobFooter(id chunk.ChunkID, blob blobstore.BlobInfo) (chunk.ChunkMeta, error) {
+	tmp, err := os.CreateTemp("", "glcb-footer-*.glcb")
+	if err != nil {
+		return chunk.ChunkMeta{}, fmt.Errorf("create temp for footer read: %w", err)
+	}
+	tmpPath := filepath.Clean(tmp.Name())
+	defer func() { _ = os.Remove(tmpPath) }()
+
+	if err := glcb.DownloadAndUnwrap(context.Background(), m.cfg.CloudStore, blob.Key, tmp); err != nil { //nolint:contextcheck // background recovery read
+		_ = tmp.Close()
+		m.trackCloudResult(err)
+		return chunk.ChunkMeta{}, fmt.Errorf("download blob for footer read: %w", err)
+	}
+	m.trackCloudResult(nil)
+	if err := tmp.Close(); err != nil {
+		return chunk.ChunkMeta{}, fmt.Errorf("close temp footer file: %w", err)
+	}
+
+	mb, err := glcb.OpenMappedBlob(tmpPath)
+	if err != nil {
+		return chunk.ChunkMeta{}, fmt.Errorf("open blob footer: %w", err)
+	}
+	bm := mb.Meta()
+	_ = mb.Close()
+
+	return glcb.BlobMetaToChunkMeta(bm, blob.Size), nil
 }
