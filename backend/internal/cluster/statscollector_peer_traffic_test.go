@@ -60,8 +60,10 @@ func TestStatsCollector_PeerTrafficTotals_Delete(t *testing.T) {
 	_ = collector.CollectLocalTick(time.Now())
 	collector.Delete("node-b")
 	collector.mu.Lock()
-	if len(collector.peerTrafficStats) != 0 {
-		t.Fatalf("expected peerTrafficStats cleared, got %d", len(collector.peerTrafficStats))
+	for k := range collector.rates {
+		if p, ok := rateSeriesPeerID(k); ok && p == "node-b" {
+			t.Fatalf("expected node-b series cleared, still have %q", k)
+		}
 	}
 	collector.mu.Unlock()
 }
