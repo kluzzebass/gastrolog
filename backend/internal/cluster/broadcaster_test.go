@@ -234,6 +234,9 @@ func TestSend_AllPeersReceive(t *testing.T) {
 // fix is to make Send fire-and-forget. Callers (StatsCollector) push
 // their local state; they don't wait for peer acknowledgment.
 func TestSend_ReturnsImmediatelyEvenWithSlowPeer(t *testing.T) {
+	if testing.Short() {
+		t.Skip("waits out a real 2s broadcast timeout for the slow peer; -short skips")
+	}
 	fp := newFakePeerSource()
 
 	fastDone := make(chan string, 3)
