@@ -3,6 +3,8 @@ package cluster
 import (
 	"testing"
 	"time"
+
+	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 )
 
 // gastrolog-mliwrd: the cluster ingest/route series sums counters across
@@ -13,16 +15,16 @@ import (
 // contributor-set change, exactly like the counter-reset branch.
 func TestSummedWindowReanchorsOnMembershipChange(t *testing.T) {
 	t.Parallel()
-	c := &StatsCollector{}
-	store := make(map[string]*peerConnStatsWindow)
+	s := &rateSeries{}
 	now := time.Unix(1_700_000_000, 0)
-	tick := func(sum int64, membership string) trafficRates {
+	tick := func(sum int64, membership string) *gastrologv1.ThroughputRate {
 		now = now.Add(5 * time.Second)
-		return c.observeTrafficWindowRates(now, "clusterroute", sum, sum, membership, true, store)
+		s.observe(now, sum, membership, true)
+		return s.emit()
 	}
 
 	// Steady state: 3 contributors, true rate 40K/s.
-	c.observeTrafficWindowRates(now, "clusterroute", 0, 0, "self,a,b", true, store)
+	s.observe(now, 0, "self,a,b", true) // seed
 	var sum int64
 	for range 24 { // 2 minutes of ticks
 		sum += 200_000 // 40K/s * 5s
@@ -32,8 +34,8 @@ func TestSummedWindowReanchorsOnMembershipChange(t *testing.T) {
 	// Peer b's stats expire: its 10M-record contribution leaves the sum.
 	sum -= 10_000_000
 	r := tick(sum, "self,a")
-	if r.txPerSec != 0 {
-		t.Fatalf("expiry tick instant = %v, want 0 (re-anchor, no sample)", r.txPerSec)
+	if r.InstantPerSec != 0 {
+		t.Fatalf("expiry tick instant = %v, want 0 (re-anchor, no sample)", r.InstantPerSec)
 	}
 
 	// One quiet tick with the smaller set.
@@ -43,10 +45,10 @@ func TestSummedWindowReanchorsOnMembershipChange(t *testing.T) {
 	// Peer b resumes broadcasting: its cumulative counter rejoins the sum.
 	sum += 10_000_000 + 200_000
 	r = tick(sum, "self,a,b")
-	if r.txPerSec != 0 {
-		t.Fatalf("reappearance tick instant = %v/s, want 0 — the jump must not read as traffic", r.txPerSec)
+	if r.InstantPerSec != 0 {
+		t.Fatalf("reappearance tick instant = %v/s, want 0 — the jump must not read as traffic", r.InstantPerSec)
 	}
-	for i, ew := range r.txEwma {
+	for i, ew := range []float64{r.Avg_1MPerSec, r.Avg_5MPerSec, r.Avg_15MPerSec} {
 		if ew > 45_000 {
 			t.Fatalf("EWMA[%d] = %.0f/s after reappearance — exceeds the 40K/s source max (gastrolog-mliwrd regression)", i, ew)
 		}
