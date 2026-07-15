@@ -268,7 +268,13 @@ func (v *vaultChunking) planLeaderStep(ctx context.Context, cronDue bool, maxRef
 
 	switch decision.action {
 	case planStepOpenManifest:
-		return v.applier().Apply(decision.openWire)
+		if err := v.applier().Apply(decision.openWire); err != nil {
+			return err
+		}
+		// Leader-owned chunk-planned milestone (gastrolog-4r784a): one open
+		// manifest opened.
+		v.chunksPlanned.Add(1)
+		return nil
 
 	case planStepSeal:
 		return v.applySealOpenManifest(decision.chunkID, decision.evalNow)

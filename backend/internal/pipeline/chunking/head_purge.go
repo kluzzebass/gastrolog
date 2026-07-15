@@ -65,6 +65,7 @@ func (v *vaultChunking) flushHeadPurgeForManifest(pending *vaultctlfsm.OpenChunk
 			"chunk", pending.ChunkID, "failed", failed, "error", firstErr)
 	}
 	if purged > 0 {
+		v.headPurged.Add(uint64(purged))
 		v.logger().Info("purged head segments after build",
 			"chunk", pending.ChunkID, "count", purged)
 	}
@@ -108,6 +109,7 @@ func (v *vaultChunking) purgeReleasedHead(ids []glid.GLID) {
 		v.logger().Warn("head purge failed after registry release — head copies remain on disk",
 			"failed", failed, "error", firstErr)
 	}
+	v.headPurged.Add(uint64(purged))
 	v.notePurged(&v.purgedReleased, purged)
 }
 
@@ -164,6 +166,7 @@ func (v *vaultChunking) purgeStaleHeadCatchUp() {
 		v.logger().Warn("stale head purge failed — head copies remain on disk",
 			"failed", failed, "error", firstErr)
 	}
+	v.headPurged.Add(uint64(purged))
 	v.notePurged(&v.purgedStale, purged)
 }
 

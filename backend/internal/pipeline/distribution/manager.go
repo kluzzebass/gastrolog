@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"maps"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -183,6 +184,28 @@ func (m *Manager) RetireSegments(vaultID glid.GLID, segmentIDs []glid.GLID) {
 	for _, id := range segmentIDs {
 		v.retireSegment(id)
 	}
+}
+
+// VaultPublishStats is one vault's cumulative segment-publish counter on this
+// origin — segments committed to the vault-ctl registry (gastrolog-4r784a).
+type VaultPublishStats struct {
+	VaultID   glid.GLID
+	Published uint64
+}
+
+// PublishStats returns the cumulative segment-publish counter for every vault
+// with a distribution role on this node.
+func (m *Manager) PublishStats() []VaultPublishStats {
+	m.mu.Lock()
+	vaults := make(map[glid.GLID]*vaultDist, len(m.vaults))
+	maps.Copy(vaults, m.vaults)
+	m.mu.Unlock()
+	out := make([]VaultPublishStats, 0, len(vaults))
+	for vaultID, v := range vaults {
+		out = append(out, VaultPublishStats{VaultID: vaultID, Published: v.published.Load()})
+	}
+	slices.SortFunc(out, func(a, b VaultPublishStats) int { return a.VaultID.Compare(b.VaultID) })
+	return out
 }
 
 // Run consumes completed segments and pull requests until ctx is cancelled.

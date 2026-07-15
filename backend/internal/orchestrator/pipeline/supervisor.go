@@ -591,6 +591,26 @@ func (s *Supervisor) SealStats() []chunking.VaultSealStats {
 	return s.chunk.SealStats()
 }
 
+// PublishStats returns per-vault cumulative segment-publish counters from the
+// distribution manager (gastrolog-4r784a). Empty on nodes without a
+// distribution role for any vault.
+func (s *Supervisor) PublishStats() []distribution.VaultPublishStats {
+	if s.dist == nil {
+		return nil
+	}
+	return s.dist.PublishStats()
+}
+
+// ChunkStageStats returns per-vault cumulative chunk-lifecycle stage counters
+// from the chunking manager (gastrolog-4r784a). Empty on nodes without a home
+// role for any vault.
+func (s *Supervisor) ChunkStageStats() []chunking.VaultStageStats {
+	if s.chunk == nil {
+		return nil
+	}
+	return s.chunk.StageStats()
+}
+
 // RegisterVault starts the managers for the roles the vault holds on this node.
 // Safe before or during Start. It is idempotent only in the sense that a second
 // registration of the same vault returns ErrVaultRegistered.

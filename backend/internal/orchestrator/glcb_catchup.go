@@ -116,6 +116,9 @@ func (o *Orchestrator) runGLCBPull(vaultID glid.GLID, e vaultctlfsm.ManifestEntr
 	if len(sources) == 0 {
 		return
 	}
+	if o.stageEvents != nil {
+		o.stageEvents.recordGLCBPullAttempt(vaultID)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), glcbPullTimeout)
 	defer cancel()
@@ -148,6 +151,9 @@ func (o *Orchestrator) runGLCBPull(vaultID glid.GLID, e vaultctlfsm.ManifestEntr
 	// Every peer failed. Transient causes (peer down, connection warming)
 	// heal on the next sweep tick; a chunk NO home can supply is a durability
 	// incident that shows up here repeatedly until someone restores a copy.
+	if o.stageEvents != nil {
+		o.stageEvents.recordGLCBPullFailed(vaultID)
+	}
 	if n, ok := o.registerSkipLog.Allow(vaultID.String() + ":glcb-pull"); ok {
 		o.logger.Warn("GLCB replica pull failed from every peer",
 			"vault", vaultID, "chunk", e.ID, "peers", len(sources),

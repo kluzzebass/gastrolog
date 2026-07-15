@@ -186,6 +186,40 @@ func TestPublishOnCompleted(t *testing.T) {
 	}
 }
 
+// TestPublishStatsCountsPublishes (gastrolog-4r784a): PublishStats reports the
+// per-vault segment-publish stage counter, one per successful publish.
+func TestPublishStatsCountsPublishes(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	root := t.TempDir()
+	pub := &recordingPublisher{}
+
+	mgr, _ := distribution.New(distribution.Config{})
+	if err := mgr.RegisterVault(vaultID, root, distribution.VaultConfig{
+		Publisher:   pub,
+		LocalHolder: func() bool { return false },
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := mgr.PublishStats(); len(got) != 1 || got[0].Published != 0 {
+		t.Fatalf("initial PublishStats = %+v, want one vault at 0", got)
+	}
+
+	for i := range 3 {
+		seg := writeCompletedSegment(t, root, vaultID, "published")
+		_ = i
+		if err := mgr.PublishCompleted(context.Background(), seg); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got := mgr.PublishStats()
+	if len(got) != 1 || got[0].VaultID != vaultID || got[0].Published != 3 {
+		t.Fatalf("PublishStats after 3 publishes = %+v, want vault %s at 3", got, vaultID)
+	}
+}
+
 func TestLocalHolderPromotesToHead(t *testing.T) {
 	t.Parallel()
 	vaultID := glid.New()

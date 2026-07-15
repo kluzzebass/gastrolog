@@ -1660,8 +1660,37 @@ type VaultStats struct {
 	CollectedBytes   *ThroughputRate `protobuf:"bytes,22,opt,name=collected_bytes,json=collectedBytes,proto3" json:"collected_bytes,omitempty"`
 	SealedRecords    *ThroughputRate `protobuf:"bytes,23,opt,name=sealed_records,json=sealedRecords,proto3" json:"sealed_records,omitempty"`
 	SealedBytes      *ThroughputRate `protobuf:"bytes,24,opt,name=sealed_bytes,json=sealedBytes,proto3" json:"sealed_bytes,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Discrete pipeline stage-count milestones on THIS node, monotonic per vault
+	// (gastrolog-4r784a). These are the counters operators previously grepped
+	// from cluster.log — now first-class, cross-node observable. Each milestone
+	// is counted exactly once by its owner (origin/home/leader), so cluster
+	// totals are the plain sum across nodes. Rates are computed by the stats
+	// collector's rolling windows over these totals (fields 35-38) just like
+	// append/collected/sealed — never accumulated client-side.
+	//
+	// Records ingested (append_records_total, field 17) and sealed
+	// (sealed_records, field 23) already cover the record-throughput ends of the
+	// pipeline; these add the segment- and chunk-lifecycle event counts between.
+	SegmentsCompletedTotal  uint64 `protobuf:"varint,25,opt,name=segments_completed_total,json=segmentsCompletedTotal,proto3" json:"segments_completed_total,omitempty"`      // working/ → completed/ promotions (origin)
+	SegmentsPublishedTotal  uint64 `protobuf:"varint,26,opt,name=segments_published_total,json=segmentsPublishedTotal,proto3" json:"segments_published_total,omitempty"`      // committed to the vault-ctl registry (origin)
+	SegmentsReleasedTotal   uint64 `protobuf:"varint,27,opt,name=segments_released_total,json=segmentsReleasedTotal,proto3" json:"segments_released_total,omitempty"`         // released from the registry (leader)
+	ChunksPlannedTotal      uint64 `protobuf:"varint,28,opt,name=chunks_planned_total,json=chunksPlannedTotal,proto3" json:"chunks_planned_total,omitempty"`                  // open manifests opened (leader)
+	ChunksBuiltTotal        uint64 `protobuf:"varint,29,opt,name=chunks_built_total,json=chunksBuiltTotal,proto3" json:"chunks_built_total,omitempty"`                        // sealed GLCBs materialized (home)
+	ChunksSealedTotal       uint64 `protobuf:"varint,30,opt,name=chunks_sealed_total,json=chunksSealedTotal,proto3" json:"chunks_sealed_total,omitempty"`                     // CmdSealChunk commits (leader)
+	HeadPurgesTotal         uint64 `protobuf:"varint,31,opt,name=head_purges_total,json=headPurgesTotal,proto3" json:"head_purges_total,omitempty"`                           // segments purged from head/ (home)
+	GlcbPullsAttemptedTotal uint64 `protobuf:"varint,32,opt,name=glcb_pulls_attempted_total,json=glcbPullsAttemptedTotal,proto3" json:"glcb_pulls_attempted_total,omitempty"` // GLCB replica catch-up pulls started
+	GlcbPullsFailedTotal    uint64 `protobuf:"varint,33,opt,name=glcb_pulls_failed_total,json=glcbPullsFailedTotal,proto3" json:"glcb_pulls_failed_total,omitempty"`          // catch-up pulls that no peer could satisfy
+	RetentionDeletesTotal   uint64 `protobuf:"varint,34,opt,name=retention_deletes_total,json=retentionDeletesTotal,proto3" json:"retention_deletes_total,omitempty"`         // chunks deleted by retention (leader)
+	// Server-windowed per-second rates for the discrete stage milestones, from
+	// the stats collector's rolling windows over the cumulative totals above.
+	// Same mechanism as append_records/collected_records/sealed_records — the UI
+	// renders them directly and never differentiates counters itself.
+	SegmentsCompletedRate *ThroughputRate `protobuf:"bytes,35,opt,name=segments_completed_rate,json=segmentsCompletedRate,proto3" json:"segments_completed_rate,omitempty"`
+	SegmentsPublishedRate *ThroughputRate `protobuf:"bytes,36,opt,name=segments_published_rate,json=segmentsPublishedRate,proto3" json:"segments_published_rate,omitempty"`
+	ChunksBuiltRate       *ThroughputRate `protobuf:"bytes,37,opt,name=chunks_built_rate,json=chunksBuiltRate,proto3" json:"chunks_built_rate,omitempty"`
+	ChunksSealedRate      *ThroughputRate `protobuf:"bytes,38,opt,name=chunks_sealed_rate,json=chunksSealedRate,proto3" json:"chunks_sealed_rate,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *VaultStats) Reset() {
@@ -1858,6 +1887,104 @@ func (x *VaultStats) GetSealedRecords() *ThroughputRate {
 func (x *VaultStats) GetSealedBytes() *ThroughputRate {
 	if x != nil {
 		return x.SealedBytes
+	}
+	return nil
+}
+
+func (x *VaultStats) GetSegmentsCompletedTotal() uint64 {
+	if x != nil {
+		return x.SegmentsCompletedTotal
+	}
+	return 0
+}
+
+func (x *VaultStats) GetSegmentsPublishedTotal() uint64 {
+	if x != nil {
+		return x.SegmentsPublishedTotal
+	}
+	return 0
+}
+
+func (x *VaultStats) GetSegmentsReleasedTotal() uint64 {
+	if x != nil {
+		return x.SegmentsReleasedTotal
+	}
+	return 0
+}
+
+func (x *VaultStats) GetChunksPlannedTotal() uint64 {
+	if x != nil {
+		return x.ChunksPlannedTotal
+	}
+	return 0
+}
+
+func (x *VaultStats) GetChunksBuiltTotal() uint64 {
+	if x != nil {
+		return x.ChunksBuiltTotal
+	}
+	return 0
+}
+
+func (x *VaultStats) GetChunksSealedTotal() uint64 {
+	if x != nil {
+		return x.ChunksSealedTotal
+	}
+	return 0
+}
+
+func (x *VaultStats) GetHeadPurgesTotal() uint64 {
+	if x != nil {
+		return x.HeadPurgesTotal
+	}
+	return 0
+}
+
+func (x *VaultStats) GetGlcbPullsAttemptedTotal() uint64 {
+	if x != nil {
+		return x.GlcbPullsAttemptedTotal
+	}
+	return 0
+}
+
+func (x *VaultStats) GetGlcbPullsFailedTotal() uint64 {
+	if x != nil {
+		return x.GlcbPullsFailedTotal
+	}
+	return 0
+}
+
+func (x *VaultStats) GetRetentionDeletesTotal() uint64 {
+	if x != nil {
+		return x.RetentionDeletesTotal
+	}
+	return 0
+}
+
+func (x *VaultStats) GetSegmentsCompletedRate() *ThroughputRate {
+	if x != nil {
+		return x.SegmentsCompletedRate
+	}
+	return nil
+}
+
+func (x *VaultStats) GetSegmentsPublishedRate() *ThroughputRate {
+	if x != nil {
+		return x.SegmentsPublishedRate
+	}
+	return nil
+}
+
+func (x *VaultStats) GetChunksBuiltRate() *ThroughputRate {
+	if x != nil {
+		return x.ChunksBuiltRate
+	}
+	return nil
+}
+
+func (x *VaultStats) GetChunksSealedRate() *ThroughputRate {
+	if x != nil {
+		return x.ChunksSealedRate
 	}
 	return nil
 }
@@ -3577,7 +3704,7 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\x0eavg_1m_per_sec\x18\x02 \x01(\x01R\vavg1mPerSec\x12#\n" +
 	"\x0eavg_5m_per_sec\x18\x03 \x01(\x01R\vavg5mPerSec\x12%\n" +
 	"\x0favg_15m_per_sec\x18\x04 \x01(\x01R\favg15mPerSec\x12\x14\n" +
-	"\x05spark\x18\x05 \x03(\x01R\x05spark\"\x81\t\n" +
+	"\x05spark\x18\x05 \x03(\x01R\x05spark\"\xd7\x0f\n" +
 	"\n" +
 	"VaultStats\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
@@ -3607,7 +3734,21 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\x11collected_records\x18\x15 \x01(\v2\x1c.gastrolog.v1.ThroughputRateR\x10collectedRecords\x12E\n" +
 	"\x0fcollected_bytes\x18\x16 \x01(\v2\x1c.gastrolog.v1.ThroughputRateR\x0ecollectedBytes\x12C\n" +
 	"\x0esealed_records\x18\x17 \x01(\v2\x1c.gastrolog.v1.ThroughputRateR\rsealedRecords\x12?\n" +
-	"\fsealed_bytes\x18\x18 \x01(\v2\x1c.gastrolog.v1.ThroughputRateR\vsealedBytes\"+\n" +
+	"\fsealed_bytes\x18\x18 \x01(\v2\x1c.gastrolog.v1.ThroughputRateR\vsealedBytes\x128\n" +
+	"\x18segments_completed_total\x18\x19 \x01(\x04R\x16segmentsCompletedTotal\x128\n" +
+	"\x18segments_published_total\x18\x1a \x01(\x04R\x16segmentsPublishedTotal\x126\n" +
+	"\x17segments_released_total\x18\x1b \x01(\x04R\x15segmentsReleasedTotal\x120\n" +
+	"\x14chunks_planned_total\x18\x1c \x01(\x04R\x12chunksPlannedTotal\x12,\n" +
+	"\x12chunks_built_total\x18\x1d \x01(\x04R\x10chunksBuiltTotal\x12.\n" +
+	"\x13chunks_sealed_total\x18\x1e \x01(\x04R\x11chunksSealedTotal\x12*\n" +
+	"\x11head_purges_total\x18\x1f \x01(\x04R\x0fheadPurgesTotal\x12;\n" +
+	"\x1aglcb_pulls_attempted_total\x18  \x01(\x04R\x17glcbPullsAttemptedTotal\x125\n" +
+	"\x17glcb_pulls_failed_total\x18! \x01(\x04R\x14glcbPullsFailedTotal\x126\n" +
+	"\x17retention_deletes_total\x18\" \x01(\x04R\x15retentionDeletesTotal\x12T\n" +
+	"\x17segments_completed_rate\x18# \x01(\v2\x1c.gastrolog.v1.ThroughputRateR\x15segmentsCompletedRate\x12T\n" +
+	"\x17segments_published_rate\x18$ \x01(\v2\x1c.gastrolog.v1.ThroughputRateR\x15segmentsPublishedRate\x12H\n" +
+	"\x11chunks_built_rate\x18% \x01(\v2\x1c.gastrolog.v1.ThroughputRateR\x0fchunksBuiltRate\x12J\n" +
+	"\x12chunks_sealed_rate\x18& \x01(\v2\x1c.gastrolog.v1.ThroughputRateR\x10chunksSealedRate\"+\n" +
 	"\x13ReindexVaultRequest\x12\x14\n" +
 	"\x05vault\x18\x01 \x01(\tR\x05vault\"-\n" +
 	"\x14ReindexVaultResponse\x12\x15\n" +
@@ -3851,60 +3992,64 @@ var file_gastrolog_v1_vault_proto_depIdxs = []int32{
 	22, // 23: gastrolog.v1.VaultStats.collected_bytes:type_name -> gastrolog.v1.ThroughputRate
 	22, // 24: gastrolog.v1.VaultStats.sealed_records:type_name -> gastrolog.v1.ThroughputRate
 	22, // 25: gastrolog.v1.VaultStats.sealed_bytes:type_name -> gastrolog.v1.ThroughputRate
-	28, // 26: gastrolog.v1.ValidateVaultResponse.chunks:type_name -> gastrolog.v1.ChunkValidation
-	31, // 27: gastrolog.v1.ExportVaultResponse.records:type_name -> gastrolog.v1.ExportRecord
-	52, // 28: gastrolog.v1.ExportRecord.source_ts:type_name -> google.protobuf.Timestamp
-	52, // 29: gastrolog.v1.ExportRecord.ingest_ts:type_name -> google.protobuf.Timestamp
-	51, // 30: gastrolog.v1.ExportRecord.attrs:type_name -> gastrolog.v1.ExportRecord.AttrsEntry
-	52, // 31: gastrolog.v1.ExportRecord.write_ts:type_name -> google.protobuf.Timestamp
-	31, // 32: gastrolog.v1.ImportRecordsRequest.records:type_name -> gastrolog.v1.ExportRecord
-	1,  // 33: gastrolog.v1.WatchChunksResponse.op:type_name -> gastrolog.v1.ChunkChangeOp
-	9,  // 34: gastrolog.v1.WatchChunksResponse.meta:type_name -> gastrolog.v1.ChunkMeta
-	48, // 35: gastrolog.v1.GetPipelineBacklogResponse.backlog:type_name -> gastrolog.v1.VaultPipelineBacklog
-	52, // 36: gastrolog.v1.VaultPipelineBacklog.open_manifest_ingest_end:type_name -> google.protobuf.Timestamp
-	52, // 37: gastrolog.v1.VaultPipelineBacklog.oldest_eligible_last_ingest:type_name -> google.protobuf.Timestamp
-	49, // 38: gastrolog.v1.VaultPipelineBacklog.node_segments:type_name -> gastrolog.v1.PipelineNodeSegments
-	2,  // 39: gastrolog.v1.VaultService.ListVaults:input_type -> gastrolog.v1.ListVaultsRequest
-	5,  // 40: gastrolog.v1.VaultService.GetVault:input_type -> gastrolog.v1.GetVaultRequest
-	7,  // 41: gastrolog.v1.VaultService.ListChunks:input_type -> gastrolog.v1.ListChunksRequest
-	10, // 42: gastrolog.v1.VaultService.GetChunk:input_type -> gastrolog.v1.GetChunkRequest
-	12, // 43: gastrolog.v1.VaultService.GetIndexes:input_type -> gastrolog.v1.GetIndexesRequest
-	15, // 44: gastrolog.v1.VaultService.AnalyzeChunk:input_type -> gastrolog.v1.AnalyzeChunkRequest
-	19, // 45: gastrolog.v1.VaultService.GetStats:input_type -> gastrolog.v1.GetStatsRequest
-	24, // 46: gastrolog.v1.VaultService.ReindexVault:input_type -> gastrolog.v1.ReindexVaultRequest
-	26, // 47: gastrolog.v1.VaultService.ValidateVault:input_type -> gastrolog.v1.ValidateVaultRequest
-	29, // 48: gastrolog.v1.VaultService.ExportVault:input_type -> gastrolog.v1.ExportVaultRequest
-	32, // 49: gastrolog.v1.VaultService.ImportRecords:input_type -> gastrolog.v1.ImportRecordsRequest
-	34, // 50: gastrolog.v1.VaultService.SealVault:input_type -> gastrolog.v1.SealVaultRequest
-	36, // 51: gastrolog.v1.VaultService.RetryUnreadableChunks:input_type -> gastrolog.v1.RetryUnreadableChunksRequest
-	38, // 52: gastrolog.v1.VaultService.ArchiveChunk:input_type -> gastrolog.v1.ArchiveChunkRequest
-	40, // 53: gastrolog.v1.VaultService.RestoreChunk:input_type -> gastrolog.v1.RestoreChunkRequest
-	42, // 54: gastrolog.v1.VaultService.WatchChunks:input_type -> gastrolog.v1.WatchChunksRequest
-	44, // 55: gastrolog.v1.VaultService.RepatriateOrphan:input_type -> gastrolog.v1.RepatriateOrphanRequest
-	46, // 56: gastrolog.v1.VaultService.GetPipelineBacklog:input_type -> gastrolog.v1.GetPipelineBacklogRequest
-	3,  // 57: gastrolog.v1.VaultService.ListVaults:output_type -> gastrolog.v1.ListVaultsResponse
-	6,  // 58: gastrolog.v1.VaultService.GetVault:output_type -> gastrolog.v1.GetVaultResponse
-	8,  // 59: gastrolog.v1.VaultService.ListChunks:output_type -> gastrolog.v1.ListChunksResponse
-	11, // 60: gastrolog.v1.VaultService.GetChunk:output_type -> gastrolog.v1.GetChunkResponse
-	13, // 61: gastrolog.v1.VaultService.GetIndexes:output_type -> gastrolog.v1.GetIndexesResponse
-	16, // 62: gastrolog.v1.VaultService.AnalyzeChunk:output_type -> gastrolog.v1.AnalyzeChunkResponse
-	20, // 63: gastrolog.v1.VaultService.GetStats:output_type -> gastrolog.v1.GetStatsResponse
-	25, // 64: gastrolog.v1.VaultService.ReindexVault:output_type -> gastrolog.v1.ReindexVaultResponse
-	27, // 65: gastrolog.v1.VaultService.ValidateVault:output_type -> gastrolog.v1.ValidateVaultResponse
-	30, // 66: gastrolog.v1.VaultService.ExportVault:output_type -> gastrolog.v1.ExportVaultResponse
-	33, // 67: gastrolog.v1.VaultService.ImportRecords:output_type -> gastrolog.v1.ImportRecordsResponse
-	35, // 68: gastrolog.v1.VaultService.SealVault:output_type -> gastrolog.v1.SealVaultResponse
-	37, // 69: gastrolog.v1.VaultService.RetryUnreadableChunks:output_type -> gastrolog.v1.RetryUnreadableChunksResponse
-	39, // 70: gastrolog.v1.VaultService.ArchiveChunk:output_type -> gastrolog.v1.ArchiveChunkResponse
-	41, // 71: gastrolog.v1.VaultService.RestoreChunk:output_type -> gastrolog.v1.RestoreChunkResponse
-	43, // 72: gastrolog.v1.VaultService.WatchChunks:output_type -> gastrolog.v1.WatchChunksResponse
-	45, // 73: gastrolog.v1.VaultService.RepatriateOrphan:output_type -> gastrolog.v1.RepatriateOrphanResponse
-	47, // 74: gastrolog.v1.VaultService.GetPipelineBacklog:output_type -> gastrolog.v1.GetPipelineBacklogResponse
-	57, // [57:75] is the sub-list for method output_type
-	39, // [39:57] is the sub-list for method input_type
-	39, // [39:39] is the sub-list for extension type_name
-	39, // [39:39] is the sub-list for extension extendee
-	0,  // [0:39] is the sub-list for field type_name
+	22, // 26: gastrolog.v1.VaultStats.segments_completed_rate:type_name -> gastrolog.v1.ThroughputRate
+	22, // 27: gastrolog.v1.VaultStats.segments_published_rate:type_name -> gastrolog.v1.ThroughputRate
+	22, // 28: gastrolog.v1.VaultStats.chunks_built_rate:type_name -> gastrolog.v1.ThroughputRate
+	22, // 29: gastrolog.v1.VaultStats.chunks_sealed_rate:type_name -> gastrolog.v1.ThroughputRate
+	28, // 30: gastrolog.v1.ValidateVaultResponse.chunks:type_name -> gastrolog.v1.ChunkValidation
+	31, // 31: gastrolog.v1.ExportVaultResponse.records:type_name -> gastrolog.v1.ExportRecord
+	52, // 32: gastrolog.v1.ExportRecord.source_ts:type_name -> google.protobuf.Timestamp
+	52, // 33: gastrolog.v1.ExportRecord.ingest_ts:type_name -> google.protobuf.Timestamp
+	51, // 34: gastrolog.v1.ExportRecord.attrs:type_name -> gastrolog.v1.ExportRecord.AttrsEntry
+	52, // 35: gastrolog.v1.ExportRecord.write_ts:type_name -> google.protobuf.Timestamp
+	31, // 36: gastrolog.v1.ImportRecordsRequest.records:type_name -> gastrolog.v1.ExportRecord
+	1,  // 37: gastrolog.v1.WatchChunksResponse.op:type_name -> gastrolog.v1.ChunkChangeOp
+	9,  // 38: gastrolog.v1.WatchChunksResponse.meta:type_name -> gastrolog.v1.ChunkMeta
+	48, // 39: gastrolog.v1.GetPipelineBacklogResponse.backlog:type_name -> gastrolog.v1.VaultPipelineBacklog
+	52, // 40: gastrolog.v1.VaultPipelineBacklog.open_manifest_ingest_end:type_name -> google.protobuf.Timestamp
+	52, // 41: gastrolog.v1.VaultPipelineBacklog.oldest_eligible_last_ingest:type_name -> google.protobuf.Timestamp
+	49, // 42: gastrolog.v1.VaultPipelineBacklog.node_segments:type_name -> gastrolog.v1.PipelineNodeSegments
+	2,  // 43: gastrolog.v1.VaultService.ListVaults:input_type -> gastrolog.v1.ListVaultsRequest
+	5,  // 44: gastrolog.v1.VaultService.GetVault:input_type -> gastrolog.v1.GetVaultRequest
+	7,  // 45: gastrolog.v1.VaultService.ListChunks:input_type -> gastrolog.v1.ListChunksRequest
+	10, // 46: gastrolog.v1.VaultService.GetChunk:input_type -> gastrolog.v1.GetChunkRequest
+	12, // 47: gastrolog.v1.VaultService.GetIndexes:input_type -> gastrolog.v1.GetIndexesRequest
+	15, // 48: gastrolog.v1.VaultService.AnalyzeChunk:input_type -> gastrolog.v1.AnalyzeChunkRequest
+	19, // 49: gastrolog.v1.VaultService.GetStats:input_type -> gastrolog.v1.GetStatsRequest
+	24, // 50: gastrolog.v1.VaultService.ReindexVault:input_type -> gastrolog.v1.ReindexVaultRequest
+	26, // 51: gastrolog.v1.VaultService.ValidateVault:input_type -> gastrolog.v1.ValidateVaultRequest
+	29, // 52: gastrolog.v1.VaultService.ExportVault:input_type -> gastrolog.v1.ExportVaultRequest
+	32, // 53: gastrolog.v1.VaultService.ImportRecords:input_type -> gastrolog.v1.ImportRecordsRequest
+	34, // 54: gastrolog.v1.VaultService.SealVault:input_type -> gastrolog.v1.SealVaultRequest
+	36, // 55: gastrolog.v1.VaultService.RetryUnreadableChunks:input_type -> gastrolog.v1.RetryUnreadableChunksRequest
+	38, // 56: gastrolog.v1.VaultService.ArchiveChunk:input_type -> gastrolog.v1.ArchiveChunkRequest
+	40, // 57: gastrolog.v1.VaultService.RestoreChunk:input_type -> gastrolog.v1.RestoreChunkRequest
+	42, // 58: gastrolog.v1.VaultService.WatchChunks:input_type -> gastrolog.v1.WatchChunksRequest
+	44, // 59: gastrolog.v1.VaultService.RepatriateOrphan:input_type -> gastrolog.v1.RepatriateOrphanRequest
+	46, // 60: gastrolog.v1.VaultService.GetPipelineBacklog:input_type -> gastrolog.v1.GetPipelineBacklogRequest
+	3,  // 61: gastrolog.v1.VaultService.ListVaults:output_type -> gastrolog.v1.ListVaultsResponse
+	6,  // 62: gastrolog.v1.VaultService.GetVault:output_type -> gastrolog.v1.GetVaultResponse
+	8,  // 63: gastrolog.v1.VaultService.ListChunks:output_type -> gastrolog.v1.ListChunksResponse
+	11, // 64: gastrolog.v1.VaultService.GetChunk:output_type -> gastrolog.v1.GetChunkResponse
+	13, // 65: gastrolog.v1.VaultService.GetIndexes:output_type -> gastrolog.v1.GetIndexesResponse
+	16, // 66: gastrolog.v1.VaultService.AnalyzeChunk:output_type -> gastrolog.v1.AnalyzeChunkResponse
+	20, // 67: gastrolog.v1.VaultService.GetStats:output_type -> gastrolog.v1.GetStatsResponse
+	25, // 68: gastrolog.v1.VaultService.ReindexVault:output_type -> gastrolog.v1.ReindexVaultResponse
+	27, // 69: gastrolog.v1.VaultService.ValidateVault:output_type -> gastrolog.v1.ValidateVaultResponse
+	30, // 70: gastrolog.v1.VaultService.ExportVault:output_type -> gastrolog.v1.ExportVaultResponse
+	33, // 71: gastrolog.v1.VaultService.ImportRecords:output_type -> gastrolog.v1.ImportRecordsResponse
+	35, // 72: gastrolog.v1.VaultService.SealVault:output_type -> gastrolog.v1.SealVaultResponse
+	37, // 73: gastrolog.v1.VaultService.RetryUnreadableChunks:output_type -> gastrolog.v1.RetryUnreadableChunksResponse
+	39, // 74: gastrolog.v1.VaultService.ArchiveChunk:output_type -> gastrolog.v1.ArchiveChunkResponse
+	41, // 75: gastrolog.v1.VaultService.RestoreChunk:output_type -> gastrolog.v1.RestoreChunkResponse
+	43, // 76: gastrolog.v1.VaultService.WatchChunks:output_type -> gastrolog.v1.WatchChunksResponse
+	45, // 77: gastrolog.v1.VaultService.RepatriateOrphan:output_type -> gastrolog.v1.RepatriateOrphanResponse
+	47, // 78: gastrolog.v1.VaultService.GetPipelineBacklog:output_type -> gastrolog.v1.GetPipelineBacklogResponse
+	61, // [61:79] is the sub-list for method output_type
+	43, // [43:61] is the sub-list for method input_type
+	43, // [43:43] is the sub-list for extension type_name
+	43, // [43:43] is the sub-list for extension extendee
+	0,  // [0:43] is the sub-list for field type_name
 }
 
 func init() { file_gastrolog_v1_vault_proto_init() }

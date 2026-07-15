@@ -24,6 +24,7 @@ import { ExpandableCard } from "../settings/ExpandableCard";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
 import { CrossLinkBadge } from "./CrossLinkBadge";
 import { PipelineBacklogView } from "./PipelineBacklogView";
+import { VaultStageCountersSection } from "./VaultStageCounters";
 
 // chunkEndInstant returns the ingest/write end for display, omitting unset or
 // sentinel epoch timestamps that proto encodes for zero-value Go times.
@@ -107,6 +108,7 @@ export function VaultCard({
       <div className="flex flex-col gap-4 pt-2">
         <VaultLeaderSummary vaultId={vault.id} vaultTypeLabel={vault.typeLabel} dark={dark} />
         <VaultThroughputSection vaultId={vault.id} dark={dark} />
+        <VaultStageCountersSection vaultId={vault.id} dark={dark} />
         <PipelineBacklogView vaultId={vault.id} dark={dark} />
         <ChunkList vaultId={vault.id} dark={dark} />
       </div>

@@ -110,6 +110,21 @@ type vaultChunking struct {
 	sealedRecords atomic.Uint64
 	sealedBytes   atomic.Uint64
 
+	// Chunk-lifecycle stage counters (gastrolog-4r784a), monotonic per vault:
+	//   chunksPlanned  — open manifests the leader opened (leader-owned).
+	//   chunksBuilt    — GLCBs this home materialized (home-owned).
+	//   chunksSealed   — CmdSealChunk commits the leader landed (leader-owned).
+	//   segmentsReleased — segments the leader released from the registry.
+	//   headPurged     — head/ segment copies purged (home-owned). A dedicated
+	//     monotonic total; purgedReleased/purgedStale below are transient
+	//     log-aggregation accumulators reset via Swap and cannot serve as a
+	//     cumulative counter.
+	chunksPlanned    atomic.Uint64
+	chunksBuilt      atomic.Uint64
+	chunksSealed     atomic.Uint64
+	segmentsReleased atomic.Uint64
+	headPurged       atomic.Uint64
+
 	mu     sync.Mutex
 	planMu sync.Mutex
 	// segmentIndexCache holds open EventID indexes for segments the planner has
@@ -574,6 +589,40 @@ func (m *Manager) SealStats() []VaultSealStats {
 	return out
 }
 
+// VaultStageStats is one vault's cumulative chunk-lifecycle stage counters on
+// this node (gastrolog-4r784a). Planned/Sealed/Released are leader-owned;
+// Built and HeadPurges are home-owned. HeadPurges reuses the existing
+// released+stale head-purge accumulators.
+type VaultStageStats struct {
+	VaultID          glid.GLID
+	ChunksPlanned    uint64
+	ChunksBuilt      uint64
+	ChunksSealed     uint64
+	SegmentsReleased uint64
+	HeadPurges       uint64
+}
+
+// StageStats returns per-vault cumulative chunk-lifecycle stage counters.
+func (m *Manager) StageStats() []VaultStageStats {
+	m.mu.Lock()
+	vaults := make(map[glid.GLID]*vaultChunking, len(m.vaults))
+	maps.Copy(vaults, m.vaults)
+	m.mu.Unlock()
+	out := make([]VaultStageStats, 0, len(vaults))
+	for vaultID, v := range vaults {
+		out = append(out, VaultStageStats{
+			VaultID:          vaultID,
+			ChunksPlanned:    v.chunksPlanned.Load(),
+			ChunksBuilt:      v.chunksBuilt.Load(),
+			ChunksSealed:     v.chunksSealed.Load(),
+			SegmentsReleased: v.segmentsReleased.Load(),
+			HeadPurges:       v.headPurged.Load(),
+		})
+	}
+	slices.SortFunc(out, func(a, b VaultStageStats) int { return a.VaultID.Compare(b.VaultID) })
+	return out
+}
+
 func (m *Manager) NotifyVault(vaultID glid.GLID) {
 	m.mu.Lock()
 	v, ok := m.vaults[vaultID]
@@ -777,6 +826,8 @@ func (v *vaultChunking) releaseOnce(ctx context.Context) error {
 		v.mu.Unlock()
 		return err
 	}
+	// Leader-owned segment-release milestone (gastrolog-4r784a).
+	v.segmentsReleased.Add(uint64(len(ready)))
 	v.mu.Lock()
 	v.pendingRelease = append(stillPending, v.pendingRelease...)
 	v.mu.Unlock()

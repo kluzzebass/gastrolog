@@ -188,6 +188,9 @@ type AppendStats struct {
 	RecordsDurable  uint64
 	QueueDepth      int
 	QueueCap        int
+	// SegmentsCompleted counts working/ → completed/ promotions for this vault
+	// — the first pipeline stage-count milestone (gastrolog-4r784a).
+	SegmentsCompleted uint64
 }
 
 // AppendStats returns cumulative throughput counters for every registered
@@ -200,12 +203,13 @@ func (m *Manager) AppendStats() []AppendStats {
 	out := make([]AppendStats, 0, len(writers))
 	for vaultID, w := range writers {
 		out = append(out, AppendStats{
-			VaultID:         vaultID,
-			RecordsAppended: w.recordsAppended.Load(),
-			BytesAppended:   w.bytesAppended.Load(),
-			RecordsDurable:  w.recordsDurable.Load(),
-			QueueDepth:      len(w.in),
-			QueueCap:        cap(w.in),
+			VaultID:           vaultID,
+			RecordsAppended:   w.recordsAppended.Load(),
+			BytesAppended:     w.bytesAppended.Load(),
+			RecordsDurable:    w.recordsDurable.Load(),
+			QueueDepth:        len(w.in),
+			QueueCap:          cap(w.in),
+			SegmentsCompleted: w.segmentsCompleted.Load(),
 		})
 	}
 	slices.SortFunc(out, func(a, b AppendStats) int { return a.VaultID.Compare(b.VaultID) })

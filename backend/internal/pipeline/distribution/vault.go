@@ -13,6 +13,7 @@ import (
 	"os"
 	"slices"
 	"sync"
+	"sync/atomic"
 
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/paths"
@@ -57,6 +58,10 @@ type vaultDist struct {
 	// read and warned about exactly once, not on every rescan wake
 	// (gastrolog-faj2yv).
 	badHeader map[glid.GLID]struct{}
+	// published counts segments this origin committed to the vault-ctl
+	// registry (one per successful publish) — the segment-publish stage
+	// counter (gastrolog-4r784a). Origin-owned: the leader publishes intent.
+	published atomic.Uint64
 }
 
 func newVaultDist(root string, cfg VaultConfig, log *slog.Logger) (*vaultDist, error) {
@@ -226,6 +231,7 @@ func (v *vaultDist) publishStaged(ctx context.Context, meta Metadata, segID glid
 	if err := v.finalizeAfterPublish(segID, path); err != nil {
 		return err
 	}
+	v.published.Add(1)
 	if v.onPublishCommitted != nil {
 		v.onPublishCommitted(segID)
 	}
@@ -283,6 +289,7 @@ func (v *vaultDist) publishStagedBatch(ctx context.Context, items []pendingPubli
 		if err := v.finalizeAfterPublish(p.segID, p.path); err != nil {
 			return err
 		}
+		v.published.Add(1)
 		if v.onPublishCommitted != nil {
 			v.onPublishCommitted(p.segID)
 		}
