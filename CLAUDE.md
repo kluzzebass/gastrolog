@@ -87,7 +87,7 @@ Do not open PRs for routine issue closes on a stack branch — merge the feature
 
 Before starting work, confirm which **stack branch** the issue belongs to (epic description, issue text, or ask the user). **Never assume `main`.**
 
-**Updating `main`:** open a PR **`<stack-branch>` → `main`** (or the relevant branch → `main`), get review approval, merge on GitHub. No direct push — GitHub requires a PR with ≥1 approval; **`enforce_admins`** applies.
+**Updating `main`:** open a PR **`<stack-branch>` → `main`** (or the relevant branch → `main`) and merge it on GitHub. No direct push — `main` requires a PR. This is a **single-developer repo**: `main` protection requires a PR and blocks direct/force pushes, but requires **0 approvals** (a 1-approval rule would deadlock a solo dev — GitHub forbids self-approval). Do not re-add an approval requirement.
 
 **Agents MUST NOT:**
 
@@ -98,7 +98,7 @@ Before starting work, confirm which **stack branch** the issue belongs to (epic 
 
 **On issue close:** `git checkout <stack-branch> && git merge <feature-branch> && git push origin <stack-branch>`.
 
-**Enforcement:** GitHub branch protection on `main` — direct push blocked; PR with ≥1 approval required; `enforce_admins` on. Cursor hook blocks `gh pr merge` (merge in the GitHub UI).
+**Enforcement:** GitHub branch protection on `main` — direct push blocked, force-push/deletion blocked, PR required, **0 approvals** (solo repo); `enforce_admins` on (the PR gate applies to the owner too). Merge via the GitHub UI. NEVER configure an approval-count requirement on this repo — it cannot be satisfied by a single developer.
 
 ## Cluster-First: Every Feature Must Work on Every Node
 
