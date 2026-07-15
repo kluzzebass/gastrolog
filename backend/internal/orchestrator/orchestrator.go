@@ -1036,7 +1036,11 @@ func (o *Orchestrator) PressureGate() *chanwatch.PressureGate {
 
 // VaultSnapshot is a point-in-time summary of a vault's state.
 type VaultSnapshot struct {
-	ID           glid.GLID
+	ID glid.GLID
+	// Name is the operator-facing vault name from system config. Broadcast
+	// in NodeStats so every stats consumer (inspector throughput rows, CLI)
+	// can label vaults by name instead of falling back to GLID prefixes.
+	Name         string
 	RecordCount  int64
 	ChunkCount   int
 	SealedChunks int
@@ -1119,6 +1123,7 @@ func (o *Orchestrator) VaultSnapshots() []VaultSnapshot {
 	for _, id := range vaultIDs {
 		snap := VaultSnapshot{
 			ID:               id,
+			Name:             o.vaultLabel(id),
 			Enabled:          o.IsVaultEnabled(id),
 			RaftAppliedIndex: o.vaultCtlAppliedIndex(id),
 		}

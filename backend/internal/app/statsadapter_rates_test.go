@@ -98,3 +98,41 @@ func TestStatsCollectorRouteRatesEndToEnd(t *testing.T) {
 			snap.RouteRouted.GetAvg_1MPerSec(), snap.RouteRouted.GetAvg_15MPerSec())
 	}
 }
+
+// TestStatsAdapterVaultSnapshotsCarryNames pins the vault-name passthrough:
+// the inspector's per-vault throughput rows label vaults by name and fall
+// back to a GLID prefix when the broadcast carries an empty name — which is
+// exactly what shipped when orchStatsAdapter dropped the field (user-visible
+// as "06FMA5GB"-style labels in the System panel).
+func TestStatsAdapterVaultSnapshotsCarryNames(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	cfgStore := sysmem.NewStore()
+	orch, err := orchestrator.New(orchestrator.Config{
+		SystemLoader: cfgStore,
+		SegmentsDir:  filepath.Join(t.TempDir(), "segments"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	vaultID := glid.New()
+	if err := cfgStore.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "named-vault", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	orch.RegisterVault(orchestrator.NewVault(vaultID, nil))
+
+	adapter := &orchStatsAdapter{orch: orch}
+	snaps := adapter.VaultSnapshots()
+	if len(snaps) == 0 {
+		t.Fatal("expected at least one vault snapshot")
+	}
+	for _, s := range snaps {
+		if s.ID == vaultID && s.Name != "named-vault" {
+			t.Fatalf("snapshot name = %q, want %q — stats broadcast must carry vault names", s.Name, "named-vault")
+		}
+		if s.ID == vaultID {
+			return
+		}
+	}
+	t.Fatalf("vault %s not found in snapshots", vaultID)
+}

@@ -35,6 +35,7 @@ func (a *orchStatsAdapter) VaultSnapshots() []cluster.StatsVaultSnapshot {
 	for i, s := range snaps {
 		out[i] = cluster.StatsVaultSnapshot{
 			ID:               s.ID,
+			Name:             s.Name,
 			RecordCount:      s.RecordCount,
 			ChunkCount:       s.ChunkCount,
 			SealedChunks:     s.SealedChunks,

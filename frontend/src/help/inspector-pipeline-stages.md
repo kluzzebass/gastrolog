@@ -26,11 +26,14 @@ see the **per-node breakdown**.
 
 - **Chunks planned** — open chunk manifests the leader opened to gather segment
   references.
-- **Chunks built** — sealed GLCB blobs a home materialized on disk. Compare
-  this rate against the **Append** rate in *Throughput* above: if build falls
-  behind ingest, the consume side is not keeping up.
-- **Chunks sealed** — chunk seals the leader committed. Built ≈ sealed in a calm
-  cluster; a persistent gap means homes are building but the seal is not landing.
+- **GLCB builds** — build operations across all homes. Every home materializes
+  its own copy of each sealed chunk's GLCB, so the cluster total counts
+  *builds*, not chunks: expect roughly chunks sealed × replication factor.
+  Compare this rate against the **Append** rate in *Throughput* above: if
+  builds fall behind ingest, the consume side is not keeping up.
+- **Chunks sealed** — chunk seals the leader committed; counted once per chunk
+  cluster-wide. In a calm cluster, GLCB builds ≈ sealed × RF; builds lagging
+  that ratio means one or more homes are not materializing their copies.
 
 **Recovery & retention**
 

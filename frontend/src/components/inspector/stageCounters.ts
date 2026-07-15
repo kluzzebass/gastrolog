@@ -14,9 +14,17 @@ export interface StageCountersNode {
 }
 
 // perNode is one node's contribution to one milestone; total is the cluster
-// sum. Cluster totals are a plain sum: every milestone is counted exactly once
-// by its owner (origin/home/leader) on the node where it happened, so summing
-// across nodes never double-counts.
+// sum. Two ownership classes share this shape, and the LABEL must match the
+// unit the sum produces:
+//   - counted-once milestones (segments completed/published/released, chunks
+//     planned/sealed, retention deletes): exactly one node — the origin or the
+//     vault-ctl leader — records each event, so the sum is a true object
+//     count.
+//   - per-home operations (GLCB builds, head purges, GLCB pulls): every home
+//     performs its own copy of the work, so the sum counts OPERATIONS, not
+//     objects — expect roughly objects × replication factor. Labels for these
+//     use operation nouns; presenting them as object counts would show
+//     chunks×RF next to chunks (user-rejected).
 export interface StageMilestone {
   key: string;
   label: string;
@@ -68,7 +76,9 @@ const specs: MilestoneSpec[] = [
   },
   {
     key: "chunksBuilt",
-    label: "Chunks built",
+    // Operation noun, deliberately not "Chunks built": every home builds its
+    // own GLCB, so the cluster sum is builds (≈ chunks × RF), not chunks.
+    label: "GLCB builds",
     group: "chunks",
     total: (vs) => vs.chunksBuiltTotal,
     rate: (vs) => vs.chunksBuiltRate,
