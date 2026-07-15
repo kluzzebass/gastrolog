@@ -147,6 +147,8 @@ Every feature must have tests across ALL of these dimensions:
 
 Single-node happy-path tests are NOT sufficient. A feature is not done until all dimensions are covered. This applies to every new feature, every bug fix, every refactor that changes behavior.
 
+**Two test tiers, not one.** `just test` (backend: `go test -short ./...`) is the fast developer loop — multi-second convergence/stress/large-I/O tests are skipped via `testing.Short()`. `just backend test-full` (`go test ./...`, no `-short`) is the full acceptance gate and remains mandatory once before declaring work done or handing off — it is not optional just because the fast loop was green. New slow tests (multi-node raft convergence, WAL segment stress, restart-survival cycles) get a `testing.Short()` skip with a one-line reason, never deletion or weakened coverage.
+
 ## Renaming: Always Rename Through the Entire Stack
 
 When renaming a concept, type, field, or variable, rename it consistently across the entire stack: proto definitions, generated code (re-run `buf generate`), Go backend types, frontend TypeScript types, UI labels, and tests. Never leave a partial rename.
