@@ -89,10 +89,10 @@ func NewRestoreCommand() *cobra.Command {
 			}
 			_, err = client.Vault.RestoreChunk(context.Background(),
 				connect.NewRequest(&v1.RestoreChunkRequest{
-					Vault:       vaultID,
-					ChunkId:     glid.GLID(chunkID).ToProto(),
+					Vault:        vaultID,
+					ChunkId:      glid.GLID(chunkID).ToProto(),
 					RestoreSpeed: restoreSpeed,
-					RestoreDays: restoreDays,
+					RestoreDays:  restoreDays,
 				}))
 			if err != nil {
 				return err

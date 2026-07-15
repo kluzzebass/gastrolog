@@ -47,19 +47,30 @@ message VaultCtlCommand {
   oneof command {
     CreateChunkCommand create_chunk = 1;
     SealChunkCommand seal_chunk = 2;
-    CompressChunkCommand compress_chunk = 3;
-    UploadChunkCommand upload_chunk = 4;
-    // delete_chunk (5) is retained for WAL replay only; no current producer
+    UploadChunkCommand upload_chunk = 3;
+    // delete_chunk (4) is retained for WAL replay only; no current producer
     // emits it (see CmdDeleteChunk in fsm.go).
-    DeleteChunkCommand delete_chunk = 5;
-    RetentionPendingCommand retention_pending = 6;
-    RequestDeleteCommand request_delete = 7;
-    AckDeleteCommand ack_delete = 8;
-    FinalizeDeleteCommand finalize_delete = 9;
-    PruneNodeCommand prune_node = 10;
-    AttachOffsetsCommand attach_offsets = 11;
-    BeginSealCommand begin_seal = 12;
-    RepatriateChunkCommand repatriate_chunk = 13;
+    DeleteChunkCommand delete_chunk = 4;
+    RetentionPendingCommand retention_pending = 5;
+    RequestDeleteCommand request_delete = 6;
+    AckDeleteCommand ack_delete = 7;
+    FinalizeDeleteCommand finalize_delete = 8;
+    PruneNodeCommand prune_node = 9;
+    AttachOffsetsCommand attach_offsets = 10;
+    BeginSealCommand begin_seal = 11;
+    RepatriateChunkCommand repatriate_chunk = 12;
+    PublishCompletedSegmentCommand publish_completed_segment = 13;
+    OpenChunkManifestCommand open_chunk_manifest = 14;
+    AddOpenChunkSegmentRefCommand add_open_chunk_segment_ref = 15;
+    SealOpenChunkManifestCommand seal_open_chunk_manifest = 16;
+    ReleaseSegmentsCommand release_segments = 17;
+    AckSegmentHolderCommand ack_segment_holder = 18;
+    DiscardOpenChunkManifestCommand discard_open_chunk_manifest = 19;
+    PublishCompletedSegmentsCommand publish_completed_segments = 20;
+    AddOpenChunkSegmentRefsCommand add_open_chunk_segment_refs = 21;
+    AckChunkHolderCommand ack_chunk_holder = 22;
+    RevokeChunkHolderCommand revoke_chunk_holder = 23;
+    DiscardUnbuildableManifestsCommand discard_unbuildable_manifests = 24;
   }
 }
 
@@ -79,11 +90,9 @@ message SealChunkCommand {
   int64 source_end_nanos = 6;
   int64 ingest_start_nanos = 7;
   bool ingest_ts_monotonic = 8;
-}
-
-message CompressChunkCommand {
-  bytes id = 1;
-  int64 disk_bytes = 2;
+  // Wall-clock sealing completion (leader-chosen, replicated). Retention
+  // MaxAge measures age from this timestamp, not WriteEnd.
+  int64 sealed_at_nanos = 9;
 }
 
 message UploadChunkCommand {
@@ -145,6 +154,195 @@ message RepatriateChunkCommand {
   ManifestEntry entry = 1;
 }
 
+// PublishCompletedSegmentCommand registers a completed segment in the vault-ctl
+// FSM. Origin publishes when Segmentation closes a segment.
+message PublishCompletedSegmentCommand {
+  bytes segment_id = 1;
+  uint32 record_count = 2;
+  uint64 byte_size = 3;
+  int64 first_ingest_ts_nanos = 4;
+  int64 last_ingest_ts_nanos = 5;
+  uint64 checksum = 6;
+  // Node that completed the segment (holder hint for Collection).
+  string origin_node_id = 7;
+  // Wall time carried in the command for deterministic replay (Unix nanos).
+  int64 published_at_nanos = 8;
+}
+
+// PublishCompletedSegmentsCommand registers many completed segments in one
+// vault-ctl apply so origin nodes amortize a single Raft round-trip under burst
+// ingest.
+message PublishCompletedSegmentsCommand {
+  repeated PublishCompletedSegmentCommand segments = 1;
+}
+
+// CompletedSegmentEntry is replicated registry state for one completed segment.
+message CompletedSegmentEntry {
+  bytes segment_id = 1;
+  uint32 record_count = 2;
+  uint64 byte_size = 3;
+  int64 first_ingest_ts_nanos = 4;
+  int64 last_ingest_ts_nanos = 5;
+  uint64 checksum = 6;
+  string origin_node_id = 7;
+  int64 published_at_nanos = 8;
+  // Node IDs that have pulled, verified, and committed a holder receipt for
+  // this segment (Rubicon C). Grows toward the vault home set.
+  repeated string holders = 9;
+}
+
+// OpenChunkSegmentRef names a partial or whole slice of one segment in the
+// open-chunk manifest (EventID-sorted record numbers, inclusive last).
+message OpenChunkSegmentRef {
+  bytes segment_id = 1;
+  uint32 first_record_number = 2;
+  uint32 last_record_number = 3;
+  uint64 slice_bytes = 4;
+  int64 ref_added_at_nanos = 5;
+}
+
+// OpenChunkManifestState is the replicated open or sealed manifest awaiting build.
+message OpenChunkManifestState {
+  bytes chunk_id = 1;
+  int64 opened_at_nanos = 2;
+  repeated OpenChunkSegmentRef refs = 3;
+  uint64 total_records = 4;
+  uint64 total_bytes = 5;
+  int64 sealed_at_nanos = 6;
+  // Running min/max record timestamps across all refs (inspector / query bounds).
+  int64 write_start_nanos = 7;
+  int64 write_end_nanos = 8;
+  int64 ingest_start_nanos = 9;
+  int64 ingest_end_nanos = 10;
+  int64 source_start_nanos = 11;
+  int64 source_end_nanos = 12;
+}
+
+// SegmentResumeRecordNumber is the next EventID-order record number to chunk
+// from a segment after partial inclusion.
+message SegmentResumeRecordNumber {
+  bytes segment_id = 1;
+  uint32 next_record_number = 2;
+}
+
+// DiscardUnbuildableManifestsCommand recovers a wedged seal queue: the head
+// sealed manifest references a segment no longer in the registry (a ghost
+// ref admitted before the apply-time guard existed), so no home can ever
+// build it and the queue is head-of-line blocked. Applying drops the head
+// AND every queued manifest behind it (the open manifest included) and
+// rewinds each surviving segment's resume cursor to its lowest discarded
+// record number, so every un-built record re-plans. Built chunks always sit
+// strictly below that line (planning is FIFO per segment), and ghost
+// segments' discarded ranges are stale duplicates of already-chunked
+// records — recovery loses nothing.
+message DiscardUnbuildableManifestsCommand {
+  // The wedged head manifest's chunk ID; the apply validates it is the
+  // sealed head and actually has a ghost ref, refusing otherwise.
+  bytes chunk_id = 1;
+}
+
+// SegmentChunkIDs maps a completed segment to the chunk IDs whose manifests
+// referenced its records. Persisted so SegmentSuperseded survives snapshot
+// restore and decides release from chunk replication after the manifest pops.
+message SegmentChunkIDs {
+  bytes segment_id = 1;
+  repeated bytes chunk_ids = 2;
+}
+
+// OpenChunkManifestCommand opens a new manifest-backed active chunk.
+message OpenChunkManifestCommand {
+  bytes chunk_id = 1;
+  int64 opened_at_nanos = 2;
+}
+
+// AddOpenChunkSegmentRefCommand appends one segment slice to the open manifest.
+message AddOpenChunkSegmentRefCommand {
+  bytes chunk_id = 1;
+  bytes segment_id = 2;
+  uint32 first_record_number = 3;
+  uint32 last_record_number = 4;
+  uint64 slice_bytes = 5;
+  int64 ref_added_at_nanos = 6;
+  // Min/max timestamps across this ref slice (from segment indexes at plan time).
+  int64 write_start_nanos = 7;
+  int64 write_end_nanos = 8;
+  int64 ingest_start_nanos = 9;
+  int64 ingest_end_nanos = 10;
+  int64 source_start_nanos = 11;
+  int64 source_end_nanos = 12;
+}
+
+// AddOpenChunkSegmentRefEntry is one ref payload inside AddOpenChunkSegmentRefs.
+message AddOpenChunkSegmentRefEntry {
+  bytes segment_id = 1;
+  uint32 first_record_number = 2;
+  uint32 last_record_number = 3;
+  uint64 slice_bytes = 4;
+  int64 ref_added_at_nanos = 5;
+  int64 write_start_nanos = 6;
+  int64 write_end_nanos = 7;
+  int64 ingest_start_nanos = 8;
+  int64 ingest_end_nanos = 9;
+  int64 source_start_nanos = 10;
+  int64 source_end_nanos = 11;
+}
+
+// AddOpenChunkSegmentRefsCommand appends many segment slices in one vault-ctl
+// apply so the chunking planner amortizes a single Raft quorum round-trip.
+message AddOpenChunkSegmentRefsCommand {
+  bytes chunk_id = 1;
+  repeated AddOpenChunkSegmentRefEntry refs = 2;
+}
+
+// SealOpenChunkManifestCommand closes the open manifest for materialization.
+message SealOpenChunkManifestCommand {
+  bytes chunk_id = 1;
+  int64 sealed_at_nanos = 2;
+}
+
+// DiscardOpenChunkManifestCommand drops an empty open or sealed-pending
+// manifest without creating a chunk. Used when the planner opened a manifest
+// but never planned any segment refs (stall timeout).
+message DiscardOpenChunkManifestCommand {
+  bytes chunk_id = 1;
+}
+
+// ReleaseSegmentsCommand drops completed segment registry entries after chunk
+// replication (purge signaling). See chunking-design direction D.
+message ReleaseSegmentsCommand {
+  repeated bytes segment_ids = 1;
+}
+
+// AckSegmentHolderCommand records that a node has pulled, verified, and now
+// holds one or more completed segments (Rubicon C). Appends node_id to each
+// segment registry entry's holder set; idempotent per segment. Batched so a
+// collect pass commits every receipt in one Raft apply — per-segment applies
+// serialized whole passes behind the publish flood and starved GLCB builds
+// (gastrolog-38snf4).
+message AckSegmentHolderCommand {
+  repeated bytes segment_ids = 1;
+  string node_id = 2;
+}
+
+// AckChunkHolderCommand records that a node holds a sealed chunk's verified
+// GLCB bytes on disk — earned by building it locally or by replica catch-up
+// pull, never assumed from placement. Idempotent per chunk. Chunk residency
+// (operator replica counts, RF-safety gates) reads this holder set instead
+// of reporting the placement list as if it were bytes.
+message AckChunkHolderCommand {
+  repeated bytes chunk_ids = 1;
+  string node_id = 2;
+}
+
+// RevokeChunkHolderCommand withdraws a holder claim: the node stat-missed
+// the GLCB it was recorded as holding (missed builds while wedged, disk
+// swap, operator deletion). Replica counts drop to the truth immediately;
+// the replica catch-up pull re-earns the ack after restoring the bytes.
+message RevokeChunkHolderCommand {
+  repeated bytes chunk_ids = 1;
+  string node_id = 2;
+}
+
 // ---------- Snapshot (replaces the 5 hand-rolled sections) ------------------
 
 // ManifestEntry is the full metadata for one chunk in a vault's manifest. The
@@ -173,6 +371,11 @@ message ManifestEntry {
   bytes hash = 20;
   bytes cloud_service_id = 21;
   uint32 key_scheme = 22;
+  // Wall-clock time when sealing completed (CmdSealChunk apply).
+  int64 sealed_at_nanos = 23;
+  // Node IDs holding verified GLCB bytes for this chunk (AckChunkHolder /
+  // RevokeChunkHolder). Residency truth — placement says who SHOULD hold.
+  repeated string holders = 24;
 }
 
 // Tombstone records a deleted chunk ID and the apply time of the delete.
@@ -195,6 +398,20 @@ message VaultCtlSnapshot {
   repeated ManifestEntry entries = 1;
   repeated Tombstone tombstones = 2;
   repeated PendingDelete pending_deletes = 3;
+  repeated CompletedSegmentEntry completed_segments = 4;
+  OpenChunkManifestState open_chunk = 5;
+  // FIFO queue of sealed manifests awaiting local GLCB build on each home.
+  // Multiple entries let the leader rotate the open chunk while earlier
+  // chunks are still building without freezing ingest at rotation limits.
+  repeated OpenChunkManifestState sealed_manifests = 6;
+  repeated SegmentResumeRecordNumber segment_resume = 7;
+  // Segment IDs dropped by ReleaseSegments. PublishCompletedSegment after
+  // release is ignored so a stale distribution publish cannot re-register
+  // metadata without bytes (permanent collection/chunking wedge).
+  repeated bytes released_segment_ids = 8;
+  // Segment → containing chunk IDs, for release-by-chunk-replication after
+  // the manifest pops at build time.
+  repeated SegmentChunkIDs segment_chunks = 9;
 }
 
 // VaultGroupSnapshot is the snapshot of the whole vault-ctl Raft group: one

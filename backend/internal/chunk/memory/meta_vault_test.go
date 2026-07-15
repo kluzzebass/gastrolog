@@ -10,8 +10,8 @@ import (
 func testMeta() chunk.ChunkMeta {
 	return chunk.ChunkMeta{
 		ID:          chunk.NewChunkID(),
-		WriteStart:     time.UnixMicro(1000),
-		WriteEnd:       time.UnixMicro(2000),
+		WriteStart:  time.UnixMicro(1000),
+		WriteEnd:    time.UnixMicro(2000),
 		RecordCount: 4096,
 		Sealed:      true,
 	}

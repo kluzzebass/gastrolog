@@ -13,7 +13,9 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,10 +24,10 @@ import (
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/alert"
 	"gastrolog/internal/auth"
+	"gastrolog/internal/blobstore"
 	"gastrolog/internal/cert"
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/chunk"
-	chunkcloud "gastrolog/internal/chunk/cloud"
 	chunkfile "gastrolog/internal/chunk/file"
 	chunkjsonl "gastrolog/internal/chunk/jsonl"
 	chunkmem "gastrolog/internal/chunk/memory"
@@ -51,10 +53,13 @@ import (
 	ingesttail "gastrolog/internal/ingester/tail"
 	"gastrolog/internal/lifecycle"
 	"gastrolog/internal/logging"
+	"gastrolog/internal/multiraft"
 	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/pipeline/digestion"
 	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/raftwal"
+	"gastrolog/internal/schedwatch"
 	"gastrolog/internal/server"
 	"gastrolog/internal/server/routing"
 	"gastrolog/internal/system"
@@ -81,9 +86,12 @@ type RunConfig struct {
 	// (DNS name) so peers reconnect after IP changes without manual
 	// reconfiguration. See gastrolog-4zy8a.
 	ClusterAdvertise string
-	JoinAddr         string
-	JoinToken        string
-	NodeName         string
+	// ServicePoolMaxPerPeer caps parallel outbound service-lane gRPC
+	// connections per peer (0 = default 4).
+	ServicePoolMaxPerPeer int
+	JoinAddr              string
+	JoinToken             string
+	NodeName              string
 
 	// PprofAddr is the pprof HTTP server address (e.g. "localhost:6060").
 	// Empty if pprof is disabled. Advertised to cluster peers via broadcast.
@@ -136,6 +144,18 @@ type RunConfig struct {
 	EnvironmentLabel string
 	EnvironmentColor string
 
+	// SegmentHotPathFsync controls segmentation group-commit fsync. When false,
+	// the pipeline supervisor sets SegmentDisableFsync (load testing only).
+	SegmentHotPathFsync bool
+
+	// RaftHeartbeatTimeout and RaftLeaderLease override the node-wide base
+	// Raft failure-detector timing when > 0 (gastrolog-o6plq9). Zero keeps
+	// the raftgroup defaults. The operator lever for substrates whose
+	// scheduler-stall tail exceeds the shipped detector window; boot fails
+	// if lease > heartbeat.
+	RaftHeartbeatTimeout time.Duration
+	RaftLeaderLease      time.Duration
+
 	// SlogCapture receives copies of slog records for the "self" ingester.
 	// Created by main and shared with the CaptureHandler. Nil disables capture.
 	SlogCapture <-chan logging.CapturedRecord
@@ -164,13 +184,35 @@ func (c RunConfig) advertisedClusterAddr() string {
 // Run starts the gastrolog server. It wires all components, starts the
 // orchestrator and HTTP server, and blocks until ctx is cancelled.
 //
-//nolint:gocognit,gocyclo // composition root: wires every subsystem at
 // boot. Splitting this into helpers per subsystem has been tried in
 // past passes and produced worse readability — each subsystem's
 // wiring depends on every earlier one and threading 15+ parameters
 // into helpers obscures the dataflow. Accept the linear complexity
 // here; individual subsystem logic lives in dedicated files.
+//
+//nolint:gocognit,gocyclo // composition root: wires every subsystem at
 func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
+	// Raft failure-detector timing must be installed before ANY group or
+	// transport exists — openConfigStore below already starts cluster-ctl.
+	// Partial operator input resolves against the shipped defaults so
+	// setting only the lease (or only the heartbeat) validates correctly.
+	raftHeartbeat := cfg.RaftHeartbeatTimeout
+	if raftHeartbeat <= 0 {
+		raftHeartbeat = raftgroup.DefaultHeartbeatTimeout
+	}
+	raftLease := cfg.RaftLeaderLease
+	if raftLease <= 0 {
+		raftLease = raftgroup.DefaultLeaderLeaseTimeout
+	}
+	if err := raftgroup.ConfigureTimeouts(raftHeartbeat, raftLease); err != nil {
+		return fmt.Errorf("raft timing (--raft-heartbeat-timeout / --raft-leader-lease): %w", err)
+	}
+	multiraft.ConfigureRPCTimeouts(raftHeartbeat, raftHeartbeat)
+	if cfg.RaftHeartbeatTimeout > 0 || cfg.RaftLeaderLease > 0 {
+		logger.Info("raft failure-detector timing configured",
+			"heartbeat_timeout", raftHeartbeat, "leader_lease", raftLease)
+	}
+
 	hd, err := resolveHome(cfg.HomeFlag)
 	if err != nil {
 		return fmt.Errorf("resolve home directory: %w", err)
@@ -208,6 +250,8 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	// (delete /config/raft/ before starting the pod), not a silent
 	// boot-time decision.
 
+	alertCollector := alert.New()
+
 	configSignal := notify.NewSignal()
 	statsSignal := notify.NewSignal()
 	disp := &configDispatcher{localNodeID: nodeID, logger: compDispatch.Apply(logger), clusterTLS: clusterTLS, tlsFilePath: hd.ClusterTLSPath(), configSignal: configSignal}
@@ -215,7 +259,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		Home: hd, NodeID: nodeID, JoinAddr: cfg.JoinAddr,
 		ClusterSrv: clusterSrv, ClusterTLS: clusterTLS,
 		Logger: logger, FSMOpts: []raftfsm.Option{raftfsm.WithOnApply(disp.Handle)},
-		VaultCtlRaftSharesWAL: clusterSrv != nil,
+		Alerts: alertCollector,
 	})
 	if err != nil {
 		return fmt.Errorf("open config store: %w", err)
@@ -260,7 +304,12 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		return err
 	}
 
-	alertCollector := alert.New()
+	// Scheduler-stall watchdog (gastrolog-1io54g phase 2): measures runtime
+	// starvation — the one resource every Raft group on this node shares.
+	// Stalls past the leader lease raise an operator alert; the WARN log
+	// timestamps correlate against election events to pin the liveness leak.
+	schedWatch := schedwatch.New(logger, raftLease)
+	go schedWatch.Run(ctx)
 
 	// Shared shutdown phase. Constructed once per process and threaded into
 	// every subsystem that needs to short-circuit work during drain — the
@@ -269,10 +318,10 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	shutdownPhase := lifecycle.New()
 
 	// Async reconciler for SetIngesterAlive Raft applies. Decouples the
-	// orchestrator's runIngester goroutine from Raft latency and retries
-	// transient failures (gastrolog-1ox8z). Without this, an unlucky
-	// startup race drops the apply, the error is silently swallowed, and
-	// the FSM alive map stays empty for the lifetime of the goroutine.
+	// per-ingester run goroutine (which toggles alive state) from Raft
+	// latency and retries transient failures (gastrolog-1ox8z). Without
+	// this, an unlucky startup race drops the apply, the error is silently
+	// swallowed, and the FSM alive map stays empty for the goroutine's life.
 	aliveReconciler := NewAliveReconciler(cfgStore, nodeID, logger)
 	go aliveReconciler.Run(ctx)
 
@@ -282,6 +331,8 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		SystemLoader:      cfgStore,
 		LocalNodeID:       nodeID,
 		Alerts:            alertCollector,
+		SegmentsDir:       hd.SegmentsDir(),
+		DiskGuardPaths:    []string{hd.Root(), hd.SegmentsDir()},
 		Phase:             shutdownPhase,
 		OnIngesterAlive: func(ingesterID glid.GLID, alive bool) {
 			aliveReconciler.Enqueue(ingesterID, alive)
@@ -291,12 +342,14 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 			defer cancel()
 			_ = cfgStore.SetIngesterCheckpoint(ctx, ingesterID, data)
 		},
+		// digestion enrichers: extract log level and parse source
+		// timestamps from raw bodies when the ingester didn't supply them.
+		Digesters:           []digestion.Digester{digestlevel.New(), digesttimestamp.New()},
+		SegmentDisableFsync: !cfg.SegmentHotPathFsync,
 	})
 	if err != nil {
 		return fmt.Errorf("create orchestrator: %w", err)
 	}
-	orch.RegisterDigester(digestlevel.New())
-	orch.RegisterDigester(digesttimestamp.New())
 
 	vaultsDir := cfg.VaultsFlag
 	if vaultsDir == "" {
@@ -308,7 +361,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		return err
 	}
 
-	groupMgr, vaultWAL, nodeAddrResolver := setupMultiRaft(clusterSrv, rawStore, nodeID, homeDir, logger)
+	groupMgr, vaultWAL, nodeAddrResolver := setupMultiRaft(clusterSrv, rawStore, nodeID, homeDir, logger, alertCollector)
 
 	factories := buildFactories(logger, homeDir, vaultsDir, cfgStore, orch, certMgr, cfg.SlogCapture, cfg.SlogCaptureHandler, alertCollector, groupMgr, nodeAddrResolver, nodeID)
 	if clusterSrv != nil {
@@ -320,10 +373,9 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	// records block (instead of failing) while vaults are being registered.
 	orchReady := make(chan struct{})
 	var searchForwarder *cluster.SearchForwarder
-	var recordForwarder *cluster.RecordForwarder
 	var routingForwarder *routing.Forwarder
 	if _, ok := rawStore.(*raftClusterCtlStore); ok && clusterSrv != nil {
-		searchForwarder, recordForwarder = wireClusterForwarding(clusterSrv, orch, orchReady, nodeID, logger, alertCollector)
+		searchForwarder = wireClusterForwarding(clusterSrv, orch, orchReady, nodeID, logger, alertCollector)
 		routingForwarder = routing.NewForwarder(clusterSrv.PeerConns())
 	}
 
@@ -382,7 +434,34 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		go slogCW.Run(ctx)
 	}
 
-	broadcaster, peerState, peerJobState, localStatsFn := setupClusterStats(ctx, logger, cfgStore, clusterSrv, orch, recordForwarder, alertCollector, nodeID, cfg.ServerAddr, cfg.PprofAddr, statsSignal)
+	// Aggregate Raft liveness sources: the vault-group WAL + GroupManager
+	// counters, and the cluster-ctl store's own WAL + counters
+	// (gastrolog-1io54g). Nil-tolerant: single-node mode may lack any.
+	raftLive := &raftLivenessAdapter{}
+	if vaultWAL != nil {
+		raftLive.wals = append(raftLive.wals, vaultWAL)
+	}
+	if groupMgr != nil {
+		raftLive.counters = append(raftLive.counters, groupMgr.Liveness())
+	}
+	if src, ok := rawStore.(interface {
+		RaftLivenessSources() (*raftgroup.LivenessCounters, *raftwal.WAL)
+	}); ok {
+		ctlCounters, ctlWAL := src.RaftLivenessSources()
+		raftLive.counters = append(raftLive.counters, ctlCounters)
+		if ctlWAL != nil {
+			raftLive.wals = append(raftLive.wals, ctlWAL)
+		}
+	}
+
+	broadcaster, peerState, peerJobState, localStatsFn, clusterRouteRatesFn := setupClusterStats(ctx, logger, cfgStore, clusterSrv, orch, alertCollector, nodeID, cfg.ServerAddr, cfg.PprofAddr, statsSignal, raftLive)
+	if peerState != nil {
+		// Per-vault admission verdicts are cluster-consistent: a starved
+		// vault volume or an over-budget vault claim on any node suspends
+		// admission for that vault everywhere.
+		orch.SetRemoteVaultDiskProtected(peerState.VaultDiskProtected)
+		orch.SetRemoteVaultSizeCapped(peerState.VaultSizeCapped)
+	}
 
 	// Start vault placement manager (cluster mode only).
 	var placementReconcileFn func(ctx context.Context)
@@ -396,27 +475,15 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 			localNodeID: nodeID,
 			logger:      compPlacement.Apply(logger),
 			triggerCh:   make(chan struct{}, 1),
+			// Local half of the degraded-home check (gastrolog-38bm9t):
+			// peers report their vault protect state via NodeStats, but
+			// the local node isn't in its own peer table.
+			localVaultDiskProtected: func(id glid.GLID) bool {
+				return slices.Contains(orch.DiskProtectedVaults(), id)
+			},
 		}
 		disp.placementTrigger = pm.Trigger
 		placementReconcileFn = pm.Reconcile
-		if recordForwarder != nil {
-			recordForwarder.SetOnNodeUnreachable(func(nodeID string) {
-				// gastrolog-4vz40: a single forwarder EOF is NOT proof that
-				// the peer is dead. Transient conn-level teardowns (e.g.
-				// peers.Invalidate fired by a neighboring subsystem on a
-				// per-RPC error — see peer_conns.go:Invalidate) kill every
-				// persistent stream on the shared grpc.ClientConn, which
-				// the forwarder observes as EOF. Expiring the peer from
-				// LivePeers() on that signal causes placement to evict
-				// the node from its vaults, which in turn triggers
-				// RemoveVaultInstance → sealAndDeleteAllChunks — the
-				// cluster-wide data wipe. Raft heartbeats and PeerState's
-				// stats-broadcast TTL remain the canonical liveness
-				// signals; pm.Trigger() alone is idempotent when inputs
-				// have not changed, so it is harmless to keep.
-				pm.Trigger()
-			})
-		}
 		go pm.Run(ctx)
 
 		// register flattens the standard register-or-warn pattern so
@@ -465,6 +532,18 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 			vaultLearnerPromoter := newVaultCtlLearnerPromoter(cfgStore, groupMgr, peerState, nodeID, compCluster.Apply(logger))
 			register("vault-ctl-learner-promoter", startVaultCtlLearnerPromoter(ctx, orch.Scheduler(), vaultLearnerPromoter))
 		}
+	}
+
+	// Ingester convergence sweep (gastrolog-3mnjlo). Event-driven ingester
+	// dispatch is one-shot per FSM notification with silent early returns; a
+	// node that misses its boot dispatch runs no ingesters until the next
+	// config change (a full-cluster restart left one node originating nothing
+	// for 40+ minutes). This periodic safety net re-reconciles
+	// desired-vs-running (idempotent) and raises the ingester-not-running
+	// alert while diverged. Registered unconditionally — single-node deploys
+	// converge the same way.
+	if err := startIngesterReconcileSweep(ctx, orch.Scheduler(), disp, alertCollector); err != nil {
+		logger.Warn("startup: register scheduled job", "job", "ingester-reconcile", "error", err)
 	}
 
 	// For replication cases: block until server settings replicate from the leader.
@@ -537,6 +616,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		PeerState:           peerState,
 		PeerJobState:        peerJobState,
 		LocalStats:          localStatsFn,
+		ClusterRouteRates:   clusterRouteRatesFn,
 		SearchForwarder:     searchForwarder,
 		RoutingForwarder:    routingForwarder,
 		JoinClusterFunc:     joinClusterFn,
@@ -561,23 +641,13 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 // wireClusterForwarding sets up cross-node record, search, context, vault,
 // and explain forwarding on the cluster server. Returns the search forwarder
 // for the HTTP server to use.
-func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, orchReady <-chan struct{}, nodeID string, logger *slog.Logger, alerts *alert.Collector) (*cluster.SearchForwarder, *cluster.RecordForwarder) {
+func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, orchReady <-chan struct{}, nodeID string, logger *slog.Logger, alerts *alert.Collector) *cluster.SearchForwarder {
 	peerConns := clusterSrv.PeerConns()
 
-	recordForwarder := cluster.NewRecordForwarder(
-		peerConns,
-		compRecordForwarder.Apply(logger),
-		alerts,
-	)
-	orch.SetRecordForwarder(recordForwarder)
-	// NOTE: recordForwarder.Close() is not deferred here because the caller
-	// manages shutdown order. The forwarder is closed when the orchestrator stops.
-
-	// The record appender waits for the orchestrator to be ready (vaults
-	// registered) before writing. Without this gate, forwarded records
+	// The record importer waits for the orchestrator to be ready (vaults
+	// registered) before writing. Without this gate, sealed-chunk imports
 	// arriving during startup hit ErrVaultNotFound, causing the sending
-	// node's forwarder to enter exponential backoff and silently buffer
-	// records for up to 2 minutes.
+	// node to enter exponential backoff.
 	var gateLogOnce sync.Once
 	waitForOrch := func(ctx context.Context) error {
 		select {
@@ -595,27 +665,6 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 			return ctx.Err()
 		}
 	}
-
-	clusterSrv.SetRecordAppender(func(ctx context.Context, vaultID glid.GLID, rec chunk.Record) error {
-		if err := waitForOrch(ctx); err != nil {
-			return err
-		}
-		_, _, err := orch.Append(vaultID, rec)
-		if err != nil && errors.Is(err, orchestrator.ErrVaultNotReady) {
-			return errors.Join(cluster.ErrForwardTargetNotReady, err)
-		}
-		return err
-	})
-	clusterSrv.SetVaultRecordAppender(func(ctx context.Context, vaultID glid.GLID, leaderChunkID chunk.ChunkID, rec chunk.Record) error {
-		if err := waitForOrch(ctx); err != nil {
-			return err
-		}
-		err := orch.AppendToVault(vaultID, leaderChunkID, rec)
-		if err != nil && errors.Is(err, orchestrator.ErrVaultNotReady) {
-			return errors.Join(cluster.ErrForwardTargetNotReady, err)
-		}
-		return err
-	})
 
 	// Wire cross-node chunk migration and replication.
 	chunkTransferrer := cluster.NewChunkTransferrer(peerConns)
@@ -642,23 +691,23 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 	clusterSrv.SetSearchExecutor(newSearchExecutor(orch))
 	clusterSrv.SetContextExecutor(newContextExecutor(orch))
 	clusterSrv.SetListChunksExecutor(newListChunksExecutor(orch))
+	clusterSrv.SetPipelineBacklogDiskExecutor(newPipelineBacklogDiskExecutor(orch))
 	clusterSrv.SetGetIndexesExecutor(newGetIndexesExecutor(orch))
 	clusterSrv.SetValidateVaultExecutor(newValidateVaultExecutor(orch))
 	clusterSrv.SetGetChunkExecutor(newGetChunkExecutor(orch))
 	clusterSrv.SetAnalyzeChunkExecutor(newAnalyzeChunkExecutor(orch))
 	clusterSrv.SetChunkEventSubscriber(newChunkEventSubscriber(orch))
 	clusterSrv.SetSealVaultExecutor(newSealVaultExecutor(orch))
-	clusterSrv.SetChunkSealExecutor(func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID) error {
-		return orch.SealActiveChunk(vaultID, chunkID)
-	})
 	clusterSrv.SetDeleteChunkExecutor(func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID) error {
 		return orch.DeleteChunk(vaultID, chunkID)
 	})
 	clusterSrv.SetReindexVaultExecutor(newReindexVaultExecutor(orch))
 	clusterSrv.SetExplainExecutor(newExplainExecutor(orch, nodeID))
 	clusterSrv.SetFollowExecutor(newFollowExecutor(orch))
+	clusterSrv.SetSegmentPullServer(orch.ServeSegmentPull)
+	clusterSrv.SetChunkGLCBPullServer(orch.ServeChunkGLCBPull)
 
-	return searchForwarder, recordForwarder
+	return searchForwarder
 }
 
 // wireManagedFileTransfer sets up cluster-side handlers for streaming managed
@@ -710,13 +759,49 @@ func startOrchestrator(ctx context.Context, logger *slog.Logger, orch *orchestra
 
 // setupClusterStats creates the broadcaster, peer state tracker, and stats
 // collector. Returns nils for single-node mode.
-func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system.Store, clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, recordForwarder *cluster.RecordForwarder, alerts *alert.Collector, nodeID string, apiAddr string, pprofAddr string, statsSignal *notify.Signal) (*cluster.Broadcaster, *cluster.PeerState, *cluster.PeerJobState, func() *gastrologv1.NodeStats) {
+// raftLivenessAdapter sums WAL append latency and liveness counters across
+// every Raft instance on this node for the stats collector
+// (gastrolog-1io54g).
+type raftLivenessAdapter struct {
+	wals     []*raftwal.WAL
+	counters []*raftgroup.LivenessCounters
+}
+
+func (a *raftLivenessAdapter) WALAppendTotals() (count, totalNanos uint64) {
+	for _, w := range a.wals {
+		c, n := w.AppendTotals()
+		count += c
+		totalNanos += n
+	}
+	return count, totalNanos
+}
+
+func (a *raftLivenessAdapter) TakeWALAppendMax() (maxNanos uint64) {
+	for _, w := range a.wals {
+		if m := w.TakeMaxAppendLatency(); m > maxNanos {
+			maxNanos = m
+		}
+	}
+	return maxNanos
+}
+
+func (a *raftLivenessAdapter) RaftLiveness() (elections, leaderLosses, failedHeartbeats uint64) {
+	for _, c := range a.counters {
+		e, l, f := c.Snapshot()
+		elections += e
+		leaderLosses += l
+		failedHeartbeats += f
+	}
+	return elections, leaderLosses, failedHeartbeats
+}
+
+func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system.Store, clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, alerts *alert.Collector, nodeID string, apiAddr string, pprofAddr string, statsSignal *notify.Signal, raftLive cluster.RaftLivenessProvider) (*cluster.Broadcaster, *cluster.PeerState, *cluster.PeerJobState, func() *gastrologv1.NodeStats, func() (*gastrologv1.ThroughputRate, *gastrologv1.ThroughputRate)) {
 	var broadcaster *cluster.Broadcaster
 	if clusterSrv != nil && clusterSrv.PeerConns() != nil {
 		broadcaster = cluster.NewBroadcaster(clusterSrv.PeerConns(), compBroadcast.Apply(logger))
 	}
 	if broadcaster == nil || clusterSrv == nil {
-		return nil, nil, nil, nil
+		return nil, nil, nil, nil, nil
 	}
 
 	broadcastInterval, heartbeatInterval := loadClusterIntervals(ctx, cfgStore)
@@ -747,15 +832,28 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 	// preferred value (e.g. pod hostname).
 	observePeerAdditions(ctx, clusterSrv, cfgStore, logger)
 
+	statsAdapter := &orchStatsAdapter{orch: orch}
 	collector := cluster.NewStatsCollector(cluster.StatsCollectorConfig{
-		Broadcaster: broadcaster,
-		RaftStats:   clusterSrv,
-		Stats:       &orchStatsAdapter{orch: orch},
-		Forwarding:  &forwardingStatsAdapter{srv: clusterSrv, fwd: recordForwarder},
-		PeerBytes:   clusterSrv.ByteMetrics(),
-		Alerts:      alerts,
-		Jobs:        &jobBroadcastAdapter{scheduler: orch.Scheduler(), nodeID: nodeID},
-		NodeID:      nodeID,
+		Broadcaster:  broadcaster,
+		RaftStats:    clusterSrv,
+		Stats:        statsAdapter,
+		PeerConns:    clusterSrv.PeerConns(),
+		RaftLiveness: raftLive,
+		// Cluster-total route counters: local + live peers' cumulative
+		// broadcast totals. Windowed server-side so cluster rate history is
+		// system data, not client-side accumulation (gastrolog-4eh5ns).
+		ClusterRouteTotals: func() (int64, int64, string) {
+			rs := statsAdapter.RouteStats()
+			pRouted, pMatched, members := peerState.AggregateRouteTotals()
+			// "self" + sorted live peers: the summed window re-anchors on
+			// any change so peers entering/leaving the sum never read as
+			// traffic (gastrolog-mliwrd).
+			return rs.Routed + pRouted, rs.Matched + pMatched,
+				"self," + strings.Join(members, ",")
+		},
+		Alerts: alerts,
+		Jobs:   &jobBroadcastAdapter{scheduler: orch.Scheduler(), nodeID: nodeID},
+		NodeID: nodeID,
 		NodeNameFn: func() string {
 			nid, err := glid.ParseAny(nodeID)
 			if err != nil {
@@ -781,7 +879,9 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 		go collector.BroadcastJobs(ctx)
 	})
 
-	go collector.Run(ctx)
+	if err := startStatsCollectorJobs(orch.Scheduler(), collector, ctx, broadcastInterval, heartbeatInterval); err != nil {
+		logger.Error("register stats collector scheduler jobs", "error", err)
+	}
 
 	// Evict per-peer satellite state the moment a node is removed
 	// from the Raft configuration. Without this the various caches
@@ -794,7 +894,6 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 		clusterSrv.ByteMetrics(),
 		broadcaster,
 		collector,
-		recordForwarder,
 	)
 	// Belt-and-suspenders: periodic reconcile against current Raft
 	// membership covers the edge case where a follower receives the
@@ -810,12 +909,11 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 		clusterSrv.ByteMetrics(),
 		broadcaster,
 		collector,
-		recordForwarder,
 	); err != nil {
 		logger.Warn("schedule peer-cache reconcile job", "error", err)
 	}
 
-	return broadcaster, peerState, peerJobState, collector.CollectLocalSnapshot
+	return broadcaster, peerState, peerJobState, collector.CollectLocalSnapshot, collector.ClusterRouteRates
 }
 
 // resolveIdentity ensures the home directory exists and resolves the node ID.
@@ -868,15 +966,12 @@ func loadLocalConfig(ctx context.Context, logger *slog.Logger, cfg RunConfig, cf
 		// vault configs or a bootstrapped server-settings JWT secret,
 		// this is a restart — use the local state directly. Otherwise
 		// fall through to the fresh-join return.
-		if cfg.ConfigType == "raft" {
+		if cfg.ConfigType == "raft" && isRestartOfVoter(ctx, cfg, cfgStore) {
 			localCfg, _ := cfgStore.Load(ctx)
-			ss, _ := cfgStore.LoadServerSettings(ctx)
-			if localCfg != nil && (len(localCfg.Config.Vaults) > 0 || ss.Auth.JWTSecret != "") {
-				logger.Info("restart of existing voter detected; using local FSM config",
-					"vaults", len(localCfg.Config.Vaults),
-					"ingesters", len(localCfg.Config.Ingesters))
-				return localCfg, true, nil
-			}
+			logger.Info("restart of existing voter detected; using local FSM config",
+				"vaults", len(localCfg.Config.Vaults),
+				"ingesters", len(localCfg.Config.Ingesters))
+			return localCfg, true, nil
 		}
 		logger.Info("joining cluster, config will replicate from leader")
 		return nil, false, nil
@@ -890,8 +985,21 @@ func loadLocalConfig(ctx context.Context, logger *slog.Logger, cfg RunConfig, cf
 		// after either a Barrier on the leader or a few AppendEntries rounds
 		// on a follower. Without this wait, the orchestrator reads stale
 		// state and creates vault-ctl Raft groups with incomplete member lists.
+		//
+		// cluster.sh run restarts nodes without --join-addr; a returning voter
+		// still has a snapshot-restored FSM and must take the same restart
+		// shortcut as the JoinAddr path (gastrolog-1gh5s) instead of blocking
+		// on WaitForFSMCatchup — under load the stability window may not
+		// complete within 10s while vault-ctl snapshots stream.
 		if err := waitForQuorum(ctx, cfgStore, logger); err != nil {
 			return nil, false, err
+		}
+		if isRestartOfVoter(ctx, cfg, cfgStore) {
+			localCfg, _ := cfgStore.Load(ctx)
+			logger.Info("restart of existing voter detected; using local FSM config",
+				"vaults", len(localCfg.Config.Vaults),
+				"ingesters", len(localCfg.Config.Ingesters))
+			return localCfg, true, nil
 		}
 		if err := waitForFSMCatchup(ctx, cfgStore, 10*time.Second, logger); err != nil {
 			return nil, false, err
@@ -1259,6 +1367,7 @@ type serverDeps struct {
 	PeerState           *cluster.PeerState
 	PeerJobState        *cluster.PeerJobState
 	LocalStats          func() *gastrologv1.NodeStats
+	ClusterRouteRates   func() (*gastrologv1.ThroughputRate, *gastrologv1.ThroughputRate)
 	SearchForwarder     *cluster.SearchForwarder
 	RoutingForwarder    routing.UnaryForwarder
 	JoinClusterFunc     func(ctx context.Context, leaderAddr, joinToken string) error
@@ -1266,7 +1375,7 @@ type serverDeps struct {
 	SetNodeSuffrageFunc func(ctx context.Context, nodeID string, voter bool) error
 	Dispatcher          *configDispatcher
 	GroupMgr            *raftgroup.GroupManager
-	WAL                 *raftwal.WAL // vault-group WAL (same file as system raft when cluster mode); nil = per-group boltdb
+	WAL                 *raftwal.WAL // vault-ctl raftwal at raft/groups/wal; closed after cluster-ctl raft
 	ConfigStore         io.Closer    // rawStore — closed before gRPC for clean Raft shutdown
 	PlacementReconcile  func(ctx context.Context)
 
@@ -1293,17 +1402,19 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 			AfterConfigApply: deps.AfterConfigApply, ConfigSignal: deps.ConfigSignal, StatsSignal: deps.StatsSignal,
 			Cluster: deps.ClusterSrv, PeerStats: deps.PeerState,
 			PeerVaultStats: deps.PeerState, PeerIngesterStats: deps.PeerState, PeerRouteStats: deps.PeerState,
-			PeerJobs:   deps.PeerJobState,
-			LocalStats: deps.LocalStats, RemoteSearcher: deps.SearchForwarder, RemoteChunkLister: deps.SearchForwarder,
-			RemoteChunkWatcher: deps.SearchForwarder,
-			RemoteIndexer:      deps.SearchForwarder,
-			RoutingForwarder: deps.RoutingForwarder, ClusterAddress: deps.ClusterAddr,
+			PeerPipelineDisk: deps.PeerState,
+			PeerJobs:         deps.PeerJobState,
+			LocalStats:       deps.LocalStats, ClusterRouteRates: deps.ClusterRouteRates, RemoteSearcher: deps.SearchForwarder, RemoteChunkLister: deps.SearchForwarder,
+			RemotePipelineBacklog: deps.SearchForwarder,
+			RemoteChunkWatcher:    deps.SearchForwarder,
+			RemoteIndexer:         deps.SearchForwarder,
+			RoutingForwarder:      deps.RoutingForwarder, ClusterAddress: deps.ClusterAddr,
 			JoinClusterFunc: deps.JoinClusterFunc, RemoveNodeFunc: deps.RemoveNodeFunc,
 			SetNodeSuffrageFunc: deps.SetNodeSuffrageFunc,
 			CloudTesters: map[string]server.CloudServiceTester{
-				"file": chunkcloud.NewConnectionTester(),
+				"file": blobstore.NewConnectionTester(deps.Logger),
 			},
-			PlacementReconcile: deps.PlacementReconcile,
+			PlacementReconcile:        deps.PlacementReconcile,
 			BootstrapTokenServeSecret: deps.BootstrapTokenServeSecret,
 			BootstrapTokenFn:          deps.BootstrapTokenFn,
 			EnvironmentLabel:          deps.EnvironmentLabel,
@@ -1341,10 +1452,9 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 		_ = deps.Broadcaster.Close()
 	}
 
-	// Shutdown order: vault multiraft (control-plane) → cluster-ctl Raft → WAL → gRPC server.
-	// Vault multiraft and system raft both use the same raftwal when cluster mode is on;
-	// system raft must stop before WAL.Close. Raft must shut down WHILE the
-	// transport is alive, otherwise the leader's replication goroutines block
+	// Shutdown order: vault multiraft → cluster-ctl Raft → vault WAL → cluster WAL (via ConfigStore) → gRPC.
+	// Cluster-ctl and vault groups use separate raftwal directories (gastrolog-3tp89). Raft must
+	// shut down WHILE the transport is alive, otherwise the leader's replication goroutines block
 	// on dead gRPC connections.
 	if deps.GroupMgr != nil {
 		deps.Logger.Info("shutting down vault multiraft groups")
@@ -1352,13 +1462,13 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 	}
 
 	if deps.ConfigStore != nil {
-		deps.Logger.Info("shutting down system raft")
+		deps.Logger.Info("shutting down cluster-ctl raft")
 		_ = deps.ConfigStore.Close()
 	}
 
 	if deps.WAL != nil {
 		if err := deps.WAL.Close(); err != nil {
-			deps.Logger.Error("raftwal close failed", "error", err)
+			deps.Logger.Error("vault-ctl raftwal close failed", "error", err)
 		}
 	}
 
@@ -1391,7 +1501,7 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 
 // setupMultiRaft creates the GroupManager and node address resolver for vault
 // control-plane multiraft. Returns (nil, nil) in single-node / non-raft mode.
-func setupMultiRaft(clusterSrv *cluster.Server, rawStore system.Store, nodeID, homeDir string, logger *slog.Logger) (*raftgroup.GroupManager, *raftwal.WAL, func(string) (string, bool)) {
+func setupMultiRaft(clusterSrv *cluster.Server, rawStore system.Store, nodeID, homeDir string, logger *slog.Logger, alerts *alert.Collector) (*raftgroup.GroupManager, *raftwal.WAL, func(string) (string, bool)) {
 	if clusterSrv == nil {
 		return nil, nil, nil
 	}
@@ -1400,32 +1510,30 @@ func setupMultiRaft(clusterSrv *cluster.Server, rawStore system.Store, nodeID, h
 		return nil, nil, nil
 	}
 
-	// Prefer the system store's WAL (opened first in Run) so we never attach
-	// two raftwal instances to the same on-disk directory.
-	var wal *raftwal.WAL
-	if rcs, ok := rawStore.(*raftClusterCtlStore); ok && !rcs.ownsWAL {
-		wal = rcs.wal
+	hd := home.New(homeDir)
+	walDir := hd.VaultCtlWALDir()
+	wal, err := raftwal.Open(walDir, raftwal.Config{
+		OnReserveState: walReserveAlarm(alerts, logger, "vault-ctl"),
+	})
+	if err != nil {
+		logger.Warn("failed to open vault-ctl raft WAL", "dir", walDir, "error", err)
+		return nil, nil, nil
 	}
-	if wal == nil {
-		walDir := filepath.Join(homeDir, "raft", "wal")
-		var err error
-		wal, err = raftwal.Open(walDir)
-		if err != nil {
-			logger.Warn("failed to open shared WAL, falling back to per-group boltdb", "error", err)
-			wal = nil
-		}
-	}
+	logger.Info("vault-ctl raft WAL ready", "dir", walDir)
 
 	groupMgr := raftgroup.NewGroupManager(raftgroup.GroupManagerConfig{
 		Transport: mrt,
 		NodeID:    nodeID,
 		BaseDir:   filepath.Join(homeDir, "raft", "groups"),
-		// System/config raft is not managed by GroupManager; only vault/.../ctl
+		// The cluster-ctl raft is not managed by GroupManager; only vault/.../ctl
 		// multiraft groups are. Leave ShutdownLast empty so Shutdown does not look for a
 		// non-existent group ID.
-		ShutdownLast: "",
-		WAL:          wal,
-		Logger:       logger,
+		ShutdownLast:   "",
+		WAL:            wal,
+		PeerConns:      clusterSrv.PeerConns(),
+		EnsureRaftLane: clusterSrv.EnsureRaftGroupLane,
+		RemoveRaftLane: clusterSrv.RemoveRaftGroupLane,
+		Logger:         logger,
 	})
 
 	var resolver func(string) (string, bool)

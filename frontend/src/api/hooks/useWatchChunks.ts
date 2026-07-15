@@ -6,6 +6,7 @@ import { Timestamp } from "@bufbuild/protobuf";
 import {
   ChunkChangeOp,
   ChunkMeta,
+  ChunkState,
   WatchChunksResponse,
 } from "../gen/gastrolog/v1/vault_pb";
 import { encode } from "../glid";
@@ -93,6 +94,53 @@ export function useWatchChunks() {
 export type ChunksCache = ChunkMeta[] | undefined;
 
 /**
+ * mergeChunksSnapshot reconciles a fresh ListChunks snapshot with the
+ * cached, watch-stamped chunk list (gastrolog-68wsli). The snapshot is
+ * authoritative for WHICH chunks exist — cache-only entries drop — and
+ * mergeMeta's monotone rules protect lifecycle/time/size fields from a
+ * stale reporter, but the snapshot's replica set may only GROW the cached
+ * one. ListChunks and WatchChunks now stamp the SAME residency semantics
+ * (FSM holder receipts — bytes truth), so grow-only is a backstop, not a
+ * referee between disagreeing sources: it still matters for vaults with
+ * no FSM (memory mode / single-node), where replica_node_ids falls back
+ * to which nodes ANSWERED the fan-out round and a slow peer would
+ * otherwise flap the seal-pip row, and for the wire's zero-count =
+ * "no authoritative value" convention. Real residency shrink (delete
+ * acks, holder revokes) flows through the vault-ctl FSM and arrives via
+ * WatchChunks stamps, which still replace the set wholesale (see
+ * mergeMeta).
+ */
+export function mergeChunksSnapshot(
+  cached: ChunksCache,
+  fresh: ChunkMeta[],
+): ChunkMeta[] {
+  if (!cached || cached.length === 0) return fresh;
+  const byId = new Map<string, ChunkMeta>();
+  for (const c of cached) byId.set(bytesToHex(c.id), c);
+  return fresh.map((incoming) => {
+    const existing = byId.get(bytesToHex(incoming.id));
+    if (!existing) return incoming;
+    const merged = mergeMeta(existing, incoming);
+    const union = new Set([...existing.replicaNodeIds, ...incoming.replicaNodeIds]);
+    if (union.size > merged.replicaNodeIds.length) {
+      // Same sorted-string shape the backend stamps (sort.Strings).
+      merged.replicaNodeIds = [...union].toSorted();
+      merged.replicaCount = union.size;
+    }
+    return merged;
+  });
+}
+
+/** shouldRefetchChunksAfterDelete reports when a DELETED projection
+ * emptied the cache but ListChunks may still have entries. */
+export function shouldRefetchChunksAfterDelete(
+  prev: ChunksCache,
+  next: ChunksCache,
+): boolean {
+  return !!prev && prev.length > 0 && !!next && next.length === 0;
+}
+
+/**
  * handleEvent applies a single WatchChunksResponse to the React Query
  * cache. Each op patches the per-vault chunk list via setQueryData;
  * dropped events (per-node version gap) trigger an invalidate of the
@@ -114,24 +162,44 @@ function handleEvent(
     return;
   }
 
+  const vaultId = encode(msg.vaultId);
+  const key = nodeKey(msg.nodeId);
+
+  // Don't patch the cache until the cold-start ListChunks snapshot has
+  // landed. Watch events that arrive during the initial fan-out only know
+  // about locally-replicated chunks and would replace the full list with a
+  // handful of recent seals.
+  const state = qc.getQueryState<ChunksCache>(["chunks", vaultId]);
+  if (state?.status !== "success") {
+    lastVersionByNode.set(key, msg.version);
+    return;
+  }
+
   // Version-gap drop detection per producing node: any non-contiguous
   // version step means the backend bus dropped events to this
   // subscriber for that node. Cold-start the affected vault so we
   // don't trust our local projection.
-  const key = nodeKey(msg.nodeId);
   const prevVer = lastVersionByNode.get(key) ?? 0n;
   if (prevVer > 0n && msg.version > prevVer + 1n) {
-    const vaultId = encode(msg.vaultId);
     qc.invalidateQueries({ queryKey: ["chunks", vaultId] });
     lastVersionByNode.set(key, msg.version);
     return;
   }
   lastVersionByNode.set(key, msg.version);
 
-  const vaultId = encode(msg.vaultId);
-  qc.setQueryData<ChunksCache>(["chunks", vaultId], (prev) =>
-    mutateCache(prev, msg),
-  );
+  qc.setQueryData<ChunksCache>(["chunks", vaultId], (prev) => {
+    const next = mutateCache(prev, msg);
+    // Sequential DELETED events drain the stream projection without
+    // tripping version-gap invalidation. After a bulk delete (e.g.
+    // retention during restart) the cache can sit at [] while
+    // ListChunks still returns the authoritative manifest.
+    if (msg.op === ChunkChangeOp.DELETED && shouldRefetchChunksAfterDelete(prev, next)) {
+      queueMicrotask(() => {
+        qc.invalidateQueries({ queryKey: ["chunks", vaultId] });
+      });
+    }
+    return next;
+  });
 
   // Indexes for a chunk are built by a post-seal background job on the
   // backend and surfaced via the separate GetIndexes RPC (sibling query
@@ -199,11 +267,17 @@ export function mutateCache(
       // WriteEnd / IngestEnd / Bytes flow through to the inspector, not
       // just record_count.
       const idx = findIdx();
-      if (idx < 0) return prev;
       if (msg.meta) {
-        next[idx] = mergeMeta(next[idx], msg.meta);
+        if (idx >= 0) {
+          next[idx] = mergeMeta(next[idx], msg.meta);
+          return next;
+        }
+        // Pipeline manifest ref updates can arrive before the CREATED event
+        // is applied on this subscriber; upsert so the chunk list converges.
+        next.push(msg.meta);
         return next;
       }
+      if (idx < 0) return prev;
       // Backward-compat for events without an inline meta — record_count
       // update only.
       const existing = next[idx];
@@ -237,16 +311,10 @@ function bytesToHex(bytes: Uint8Array): string {
  * mergeMeta returns a ChunkMeta with the event's authoritative fields
  * (Sealed, RecordCount, Bytes, DiskBytes, CloudBacked, etc. — every
  * field ChunkMetaToProto knows about on the backend) overlaid on top
- * of the existing cache entry. The merge preserves fields that the
- * event does NOT carry — replica_count, replica_node_ids, retention_
- * pending, pending_ack_node_ids — which are populated by ListChunks'
- * cluster-side dedup pass, not by the chunk manager's per-chunk
- * snapshot.
- *
- * Without this merge, the first event for an existing chunk would
- * zero out those server-computed fields, hiding important operator
- * signal (replica count, retention-pending) from the inspector until
- * the next ListChunks refetch.
+ * of the existing cache entry. Replica info uses the gastrolog-66vmg
+ * trust model (incoming replicaCount > 0 is authoritative). Retention_
+ * pending and pending_ack_node_ids are merged when stamped on WatchChunks
+ * events; ListChunks still seeds them on cold start.
  *
  * If there's no existing entry to merge against, returns the event
  * meta unchanged — fresh chunks won't have replica info yet anyway.
@@ -266,7 +334,10 @@ export function mergeMeta(existing: ChunkMeta | undefined, incoming: ChunkMeta):
   if (incoming.sealed) merged.sealed = true;
   if (incoming.cloudBacked) merged.cloudBacked = true;
   if (incoming.archived) merged.archived = true;
-  merged.compressed = incoming.compressed;
+  merged.state = pickChunkState(merged.state, merged.sealed, incoming.state, incoming.sealed);
+  if (merged.sealed) {
+    merged.state = ChunkState.SEALED;
+  }
   merged.storageClass = incoming.storageClass;
   // Monotone time-end fields: take max(existing, incoming). CREATED
   // events have zero-value WriteEnd/IngestEnd (chunk has no records
@@ -299,9 +370,16 @@ export function mergeMeta(existing: ChunkMeta | undefined, incoming: ChunkMeta):
     merged.replicaCount = incoming.replicaCount;
     merged.replicaNodeIds = incoming.replicaNodeIds;
   }
-  // Fields NOT carried by the event — preserved from existing:
-  // - retentionPending (set by retention runner via FSM apply)
-  // - pendingAckNodeIds (set by retention runner during fan-out)
+  // Retention lifecycle flags: authoritative when stamped on WatchChunks
+  // events (same FSM overlay as ListChunks). retentionPending is monotone
+  // true — the flag is set before routing/expunge and cleared only by
+  // DELETED.
+  if (incoming.retentionPending) {
+    merged.retentionPending = true;
+  }
+  if (incoming.pendingAckNodeIds.length > 0) {
+    merged.pendingAckNodeIds = incoming.pendingAckNodeIds.slice();
+  }
   return merged;
 }
 
@@ -328,4 +406,27 @@ function tsZero(t: Timestamp): boolean {
 function tsLess(a: Timestamp, b: Timestamp): boolean {
   if (a.seconds !== b.seconds) return a.seconds < b.seconds;
   return a.nanos < b.nanos;
+}
+
+/** pickChunkState advances lifecycle state monotonically (active → sealing → sealed). */
+function pickChunkState(
+  existing: ChunkState,
+  existingSealed: boolean,
+  incoming: ChunkState,
+  incomingSealed: boolean,
+): ChunkState {
+  const rank = (s: ChunkState, sealed: boolean): number => {
+    if (sealed || s === ChunkState.SEALED) return 3;
+    switch (s) {
+      case ChunkState.SEALING:
+        return 2;
+      case ChunkState.ACTIVE:
+        return 1;
+      default:
+        return 0;
+    }
+  };
+  const existingRank = rank(existing, existingSealed);
+  const incomingRank = rank(incoming, incomingSealed);
+  return incomingRank > existingRank ? incoming : existing;
 }

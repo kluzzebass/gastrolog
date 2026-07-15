@@ -80,11 +80,11 @@ func NewAuthInterceptor(tokens *TokenService, counter UserCounter, validator Tok
 		counter:   counter,
 		validator: validator,
 		public: map[string]bool{
-			gastrologv1connect.LifecycleServiceHealthProcedure:       true,
-			gastrologv1connect.AuthServiceGetAuthStatusProcedure:     true,
-			gastrologv1connect.AuthServiceLoginProcedure:             true,
-			gastrologv1connect.AuthServiceRegisterProcedure:          true, // self-guards after first user
-			gastrologv1connect.AuthServiceRefreshTokenProcedure:      true, // uses opaque token, not JWT
+			gastrologv1connect.LifecycleServiceHealthProcedure:   true,
+			gastrologv1connect.AuthServiceGetAuthStatusProcedure: true,
+			gastrologv1connect.AuthServiceLoginProcedure:         true,
+			gastrologv1connect.AuthServiceRegisterProcedure:      true, // self-guards after first user
+			gastrologv1connect.AuthServiceRefreshTokenProcedure:  true, // uses opaque token, not JWT
 			gastrologv1connect.SystemServiceGetSettingsProcedure: true, // password policy needed on register page
 		},
 		admin: map[string]bool{
@@ -96,11 +96,11 @@ func NewAuthInterceptor(tokens *TokenService, counter UserCounter, validator Tok
 			gastrologv1connect.AuthServiceDeleteUserProcedure:     true,
 			gastrologv1connect.AuthServiceRenameUserProcedure:     true,
 			// Lifecycle + cluster
-			gastrologv1connect.LifecycleServiceShutdownProcedure:        true,
-			gastrologv1connect.LifecycleServiceGetClusterStatusProcedure: true,
-			gastrologv1connect.LifecycleServiceSetNodeSuffrageProcedure: true,
-			gastrologv1connect.LifecycleServiceJoinClusterProcedure:     true,
-			gastrologv1connect.LifecycleServiceRemoveNodeProcedure:          true,
+			gastrologv1connect.LifecycleServiceShutdownProcedure:          true,
+			gastrologv1connect.LifecycleServiceGetClusterStatusProcedure:  true,
+			gastrologv1connect.LifecycleServiceSetNodeSuffrageProcedure:   true,
+			gastrologv1connect.LifecycleServiceJoinClusterProcedure:       true,
+			gastrologv1connect.LifecycleServiceRemoveNodeProcedure:        true,
 			gastrologv1connect.LifecycleServiceWatchSystemStatusProcedure: true,
 			// VaultService (inspector + operations)
 			gastrologv1connect.VaultServiceListVaultsProcedure:    true,
@@ -126,10 +126,10 @@ func NewAuthInterceptor(tokens *TokenService, counter UserCounter, validator Tok
 			gastrologv1connect.SystemServiceDeleteVaultProcedure:           true,
 			gastrologv1connect.SystemServicePutIngesterProcedure:           true,
 			gastrologv1connect.SystemServiceDeleteIngesterProcedure:        true,
-			gastrologv1connect.SystemServicePutServiceSettingsProcedure:   true,
-			gastrologv1connect.SystemServicePutLookupSettingsProcedure:    true,
-			gastrologv1connect.SystemServicePutMaxMindSettingsProcedure:   true,
-			gastrologv1connect.SystemServicePutSetupSettingsProcedure:     true,
+			gastrologv1connect.SystemServicePutServiceSettingsProcedure:    true,
+			gastrologv1connect.SystemServicePutLookupSettingsProcedure:     true,
+			gastrologv1connect.SystemServicePutMaxMindSettingsProcedure:    true,
+			gastrologv1connect.SystemServicePutSetupSettingsProcedure:      true,
 			gastrologv1connect.SystemServiceRegenerateJwtSecretProcedure:   true,
 			gastrologv1connect.SystemServicePutNodeConfigProcedure:         true,
 			gastrologv1connect.SystemServicePutRouteProcedure:              true,

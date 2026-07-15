@@ -135,25 +135,22 @@ func httpStatusToConnectCode(httpStatus int) uint32 {
 	}
 }
 
+const forwardRPCPurpose = PurposeFwdRPC
+
 // ForwardRPC opens a ForwardRPC bidirectional stream to a remote node and
 // sends a single request, returning the serialized response payload(s).
 // Used by the routing interceptor's Forwarder.
 //
 // For unary RPCs, returns a single payload. For server-streaming RPCs,
 // the caller should use ForwardRPCStream instead.
-func ForwardRPC(ctx context.Context, peers *PeerConns, nodeID, procedure string, reqPayload []byte) ([]byte, uint32, string, error) {
+func ForwardRPC(ctx context.Context, peers *PeerConnManager, nodeID, procedure string, reqPayload []byte) ([]byte, uint32, string, error) {
 	// Bound the call so a paused remote (SIGSTOP, GC stall, …) can't wedge
 	// the caller forever. Forwarded unary RPCs are small request/response
 	// pairs; unaryCallTimeout is plenty of headroom. See gastrolog-4rp6i.
 	ctx, cancel := context.WithTimeout(ctx, unaryCallTimeout)
 	defer cancel()
 
-	conn, err := peers.Conn(nodeID)
-	if err != nil {
-		return nil, 14, "", fmt.Errorf("dial node %s: %w", nodeID, err)
-	}
-
-	stream, err := conn.NewStream(ctx,
+	h, stream, err := peers.OpenServiceStream(ctx, nodeID, forwardRPCPurpose,
 		&grpc.StreamDesc{
 			StreamName:    "ForwardRPC",
 			ServerStreams: true,
@@ -162,9 +159,9 @@ func ForwardRPC(ctx context.Context, peers *PeerConns, nodeID, procedure string,
 		"/gastrolog.v1.ClusterService/ForwardRPC",
 	)
 	if err != nil {
-		peers.Invalidate(nodeID, err)
 		return nil, 14, "", fmt.Errorf("open ForwardRPC stream to %s: %w", nodeID, err)
 	}
+	defer h.Release()
 
 	// Send the request frame.
 	frame := &gastrologv1.ForwardRPCFrame{
@@ -172,7 +169,7 @@ func ForwardRPC(ctx context.Context, peers *PeerConns, nodeID, procedure string,
 		Payload:   reqPayload,
 	}
 	if err := stream.SendMsg(frame); err != nil {
-		peers.Invalidate(nodeID, err)
+		h.Invalidate(err)
 		return nil, 14, "", fmt.Errorf("send request to %s: %w", nodeID, err)
 	}
 	if err := stream.CloseSend(); err != nil {
@@ -182,7 +179,7 @@ func ForwardRPC(ctx context.Context, peers *PeerConns, nodeID, procedure string,
 	// Read the response frame(s) — for unary, just one.
 	resp := &gastrologv1.ForwardRPCFrame{}
 	if err := stream.RecvMsg(resp); err != nil {
-		peers.Invalidate(nodeID, err)
+		h.Invalidate(err)
 		return nil, 14, "", fmt.Errorf("recv response from %s: %w", nodeID, err)
 	}
 
@@ -196,8 +193,7 @@ func ForwardRPC(ctx context.Context, peers *PeerConns, nodeID, procedure string,
 // server-streaming response frames.
 type ForwardRPCStreamSender struct {
 	stream grpc.ClientStream
-	peers  *PeerConns
-	nodeID string
+	handle PeerConnHandle
 }
 
 // Recv reads the next response frame from the stream. Returns io.EOF when
@@ -205,8 +201,8 @@ type ForwardRPCStreamSender struct {
 func (s *ForwardRPCStreamSender) Recv() (*gastrologv1.ForwardRPCFrame, error) {
 	frame := &gastrologv1.ForwardRPCFrame{}
 	if err := s.stream.RecvMsg(frame); err != nil {
-		if !errors.Is(err, io.EOF) {
-			s.peers.Invalidate(s.nodeID, err)
+		if !errors.Is(err, io.EOF) && s.handle != nil {
+			s.handle.Invalidate(err)
 		}
 		return nil, err
 	}
@@ -219,20 +215,18 @@ func (s *ForwardRPCStreamSender) Recv() (*gastrologv1.ForwardRPCFrame, error) {
 	return frame, nil
 }
 
-// Close signals we are done reading (the gRPC stream will be cancelled).
+// Close releases the service-lane connection lease held for this stream.
 func (s *ForwardRPCStreamSender) Close() {
-	// Context cancellation handles cleanup; nothing explicit needed.
+	if s.handle != nil {
+		s.handle.Release()
+		s.handle = nil
+	}
 }
 
 // ForwardRPCStream opens a ForwardRPC stream for a server-streaming RPC.
 // Returns a ForwardRPCStreamSender that yields response frames.
-func ForwardRPCStream(ctx context.Context, peers *PeerConns, nodeID, procedure string, reqPayload []byte) (*ForwardRPCStreamSender, error) {
-	conn, err := peers.Conn(nodeID)
-	if err != nil {
-		return nil, fmt.Errorf("dial node %s: %w", nodeID, err)
-	}
-
-	stream, err := conn.NewStream(ctx,
+func ForwardRPCStream(ctx context.Context, peers *PeerConnManager, nodeID, procedure string, reqPayload []byte) (*ForwardRPCStreamSender, error) {
+	h, stream, err := peers.OpenServiceStream(ctx, nodeID, forwardRPCPurpose,
 		&grpc.StreamDesc{
 			StreamName:    "ForwardRPC",
 			ServerStreams: true,
@@ -241,7 +235,6 @@ func ForwardRPCStream(ctx context.Context, peers *PeerConns, nodeID, procedure s
 		"/gastrolog.v1.ClusterService/ForwardRPC",
 	)
 	if err != nil {
-		peers.Invalidate(nodeID, err)
 		return nil, fmt.Errorf("open ForwardRPC stream to %s: %w", nodeID, err)
 	}
 
@@ -250,16 +243,17 @@ func ForwardRPCStream(ctx context.Context, peers *PeerConns, nodeID, procedure s
 		Payload:   reqPayload,
 	}
 	if err := stream.SendMsg(frame); err != nil {
-		peers.Invalidate(nodeID, err)
+		h.Invalidate(err)
+		h.Release()
 		return nil, fmt.Errorf("send request to %s: %w", nodeID, err)
 	}
 	if err := stream.CloseSend(); err != nil {
+		h.Release()
 		return nil, fmt.Errorf("close send to %s: %w", nodeID, err)
 	}
 
 	return &ForwardRPCStreamSender{
 		stream: stream,
-		peers:  peers,
-		nodeID: nodeID,
+		handle: h,
 	}, nil
 }

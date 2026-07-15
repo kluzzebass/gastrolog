@@ -3,6 +3,7 @@ import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { lifecycleClient, refreshAuth } from "../client";
 import type { WatchSystemStatusResponse } from "../gen/gastrolog/v1/lifecycle_pb";
+import { idFromBytes } from "../model/id";
 import { ingesterAliveListToMap } from "./useIngesterAlive";
 
 /** Apply a single WatchSystemStatus message to the query cache. */
@@ -25,6 +26,11 @@ function applyStatusMessage(qc: QueryClient, msg: WatchSystemStatusResponse) {
   // inspector's per-card running/selected badges and per-node ingester
   // filters stay coherent with config edits without a separate refetch.
   qc.setQueryData(["ingester-alive"], ingesterAliveListToMap(msg.ingesterAlive));
+  for (const backlog of msg.pipelineBacklog) {
+    if (backlog.vaultId.length === 0) continue;
+    const vaultId = idFromBytes(backlog.vaultId);
+    qc.setQueryData(["pipeline-backlog", vaultId], backlog);
+  }
 }
 
 /**

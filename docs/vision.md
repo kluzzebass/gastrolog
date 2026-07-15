@@ -178,7 +178,7 @@ Each vault has an **elected leader node** via the vault-ctl Raft group. The lead
 The leader replicates to its followers per vault. How replication works depends on the vault type:
 
 - **Memory vaults**: the leader mirrors writes to follower nodes' memory buffers. Followers receive records tagged with chunk assignment. If the leader dies, a follower is promoted — it has identical data.
-- **File vaults**: the leader replicates sealed chunks (post-compression, post-indexing) to followers. A sealed chunk is stable and self-contained, so replication is a file copy.
+- **File vaults**: the leader replicates sealed chunks (post-indexing) to followers. A sealed chunk is stable and self-contained, so replication is a file copy.
 - **Cloud-backed file vaults**: no cluster-level replication of sealed chunks needed — the cloud provider handles AZ redundancy. Only chunk metadata is shared via the vault-ctl Raft so every node knows what exists. The active chunk (on local disk) is replicated the same way as a non-cloud file vault.
 
 ### The golden thread
@@ -238,7 +238,7 @@ The receiving vault's leader appends records to its active chunk; durability com
 
 ### Resolved: chunk metadata in Raft
 
-Each vault has its own Raft group (**vault-ctl Raft**). The config Raft stores cluster-wide configuration; each vault-ctl Raft group stores the chunk manifest for that vault — which chunks exist, their sealed/deleted state, replication metadata, and the receipt-protocol state for cluster-wide deletes. Leader and followers for the vault are determined by that group's election.
+Each vault has its own Raft group (**vault-ctl Raft**). The cluster-ctl Raft stores cluster-wide configuration; each vault-ctl Raft group stores the chunk manifest for that vault — which chunks exist, their sealed/deleted state, replication metadata, and the receipt-protocol state for cluster-wide deletes. Leader and followers for the vault are determined by that group's election.
 
 ### Retention triggers
 
@@ -279,7 +279,7 @@ flowchart LR
 
 ### Per-vault chunk shapes
 
-Different vaults produce different chunks from the same records. A memory vault might have dozens of small 5-minute chunks. A file vault might have a few large hourly chunks. A cloud-backed vault might have even fewer, multi-GB chunks. Same records, different containers, each optimized for its access pattern. Chunk size, rotation schedule, and compression strategy are tuned per vault.
+Different vaults produce different chunks from the same records. A memory vault might have dozens of small 5-minute chunks. A file vault might have a few large hourly chunks. A cloud-backed vault might have even fewer, multi-GB chunks. Same records, different containers, each optimized for its access pattern. Chunk size and rotation schedule are tuned per vault.
 
 ```mermaid
 flowchart LR
@@ -290,7 +290,7 @@ flowchart LR
     MT -->|retention=route| LT
 
     subgraph node3local [Node-3: local vault leader]
-        LT[Active chunk<br/>seals every ~1h or ~500MB] -->|seal| LTS[Sealed chunks<br/>compressed · indexed]
+        LT[Active chunk<br/>seals every ~1h or ~500MB] -->|seal| LTS[Sealed chunks<br/>indexed]
     end
 
     LTS -->|retention=route| CT
@@ -512,7 +512,7 @@ A snapshot of where GastroLog is today against each pillar of the vision. This s
 | Replication | Done | Leader replicates to followers via ChunkReplicator; ack-gated durability |
 | Inter-vault record routing on retention | Done | Vault `disposition=route` re-emits expiring chunks' records through the routing engine for delivery to the next vault |
 | Budget-driven retention | Not started | Retention is time/count/size-based only |
-| Cloud chunk cache eviction | Done | LRU and TTL eviction on warm cache, gated by `CacheBudget` and `CacheTTL` |
+| Cloud-backed chunk cache eviction | Done | LRU and TTL eviction on warm cache, gated by `CacheBudget` and `CacheTTL` |
 | Memory budget enforcement | Done | Total budget per memory vault; retention triggers when over |
 
 ### Anomaly Detection
@@ -556,7 +556,7 @@ A snapshot of where GastroLog is today against each pillar of the vision. This s
 
 | Capability | Status | Notes |
 |---|---|---|
-| Raft consensus | Done | Config Raft + per-vault vault-ctl Raft groups (chunk-FSM sub-state per vault) |
+| Raft consensus | Done | Cluster-ctl Raft + per-vault vault-ctl Raft groups (chunk-FSM sub-state per vault) |
 | Cross-node query fan-out | Done | ForwardSearch, collectRemote, GetFields, GetContext |
 | Config push (WatchConfig) | Done | Real-time config propagation via server stream |
 | Chunk push (WatchChunks) | Done | Real-time chunk metadata notifications via server stream |

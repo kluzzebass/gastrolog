@@ -107,12 +107,19 @@ func (f *FSM) IsExpectedToAck(chunkID chunk.ChunkID, nodeID string) bool {
 
 // ChunkResidency returns the set of node IDs that currently hold the
 // chunk's bytes, sourced authoritatively from the vault-ctl FSM state.
+// Residency means exactly one thing: holder receipts. It never falls
+// back to placement intent or fan-out reachability — an optimistic
+// placement default made residency non-monotonic (full set before the
+// first receipt, collapsing to the true holders when it landed), which
+// the inspector rendered as sealed pips regressing to amber
+// (gastrolog-68wsli).
 //
-// For chunks WITHOUT an in-flight delete: residency = the supplied
-// placement set. Every placement member is expected to hold the chunk
-// once catchup has converged; transient under-replication windows
-// during catchup are bounded by the missing-replica sweep
-// (gastrolog-19241).
+// For chunks with no in-flight delete: residency = the entry's Holders
+// set — nodes that built or pulled verified GLCB bytes (AckChunkHolder),
+// minus revoked claims (RevokeChunkHolder after a stat-miss). Empty (not
+// nil) when the chunk is known but no copy-seal receipt has landed yet:
+// active chunks, and the honest catch-up window between cluster seal and
+// the homes' build receipts.
 //
 // For chunks WITH an in-flight delete (entry exists in pendingDeletes):
 // residency = ExpectedFrom — the nodes that still owe a CmdAckDelete.
@@ -122,22 +129,23 @@ func (f *FSM) IsExpectedToAck(chunkID chunk.ChunkID, nodeID string) bool {
 // excluded.
 //
 // For chunks not in the FSM at all: returns nil. The chunk either
-// never existed, was tombstoned, or finalized.
+// never existed, was tombstoned, or finalized. Nil (unknown) vs empty
+// (known, zero verified copies) is a meaningful distinction to callers:
+// the ListChunks overlay keeps its availability-derived fallback only
+// for nil.
 //
-// Used by the WatchChunks server handler to stamp authoritative
-// replica info on outbound events so clients never have to reconstruct
-// it from per-node event evidence. See gastrolog-66vmg.
-func (f *FSM) ChunkResidency(chunkID chunk.ChunkID, placementNodeIDs []string) []string {
+// Used by the WatchChunks stamp and the ListChunks overlay so clients
+// never have to reconstruct residency from per-node event evidence.
+// See gastrolog-66vmg.
+func (f *FSM) ChunkResidency(chunkID chunk.ChunkID) []string {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	if _, ok := f.chunks[chunkID]; !ok {
+	e, ok := f.chunks[chunkID]
+	if !ok {
 		// Chunk gone from the FSM — fully deleted or never existed.
 		// pendingDeletes entries are removed by applyFinalizeDelete
 		// before the FSM tombstone, so this branch covers both the
 		// "never existed" and "finalized and tombstoned" cases.
-		if _, tombstoned := f.tombstones[chunkID]; tombstoned {
-			return nil
-		}
 		return nil
 	}
 	if p, ok := f.pendingDeletes[chunkID]; ok {
@@ -147,11 +155,8 @@ func (f *FSM) ChunkResidency(chunkID chunk.ChunkID, placementNodeIDs []string) [
 		}
 		return out
 	}
-	if len(placementNodeIDs) == 0 {
-		return nil
-	}
-	out := make([]string, len(placementNodeIDs))
-	copy(out, placementNodeIDs)
+	out := make([]string, len(e.Holders))
+	copy(out, e.Holders)
 	return out
 }
 
@@ -223,6 +228,7 @@ func (f *FSM) applyAckDelete(c *gastrologv1.AckDeleteCommand) (*chunk.ChunkID, s
 	// chunk, remove the pendingDeletes entry, and remove the manifest
 	// entry. Matches applyFinalizeDelete's mutation exactly.
 	f.tombstones[id] = time.Now()
+	f.clearOpenManifestStateIfChunkIDLocked(id)
 	delete(f.pendingDeletes, id)
 	delete(f.chunks, id)
 	return &id, nodeID, true, nil
@@ -251,6 +257,7 @@ func (f *FSM) applyFinalizeDelete(c *gastrologv1.FinalizeDeleteCommand) (*chunk.
 	}
 	_, hadEntry := f.chunks[id]
 	if hadEntry {
+		f.clearOpenManifestStateIfChunkIDLocked(id)
 		delete(f.chunks, id)
 	}
 
@@ -304,6 +311,7 @@ func (f *FSM) applyPruneNode(c *gastrologv1.PruneNodeCommand) (string, []chunk.C
 	now := time.Now()
 	for _, chunkID := range finalizable {
 		f.tombstones[chunkID] = now
+		f.clearOpenManifestStateIfChunkIDLocked(chunkID)
 		delete(f.pendingDeletes, chunkID)
 		delete(f.chunks, chunkID)
 	}

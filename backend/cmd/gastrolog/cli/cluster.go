@@ -22,6 +22,7 @@ func newClusterCmd() *cobra.Command {
 	}
 	cmd.AddCommand(
 		newClusterStatusCmd(),
+		newClusterThroughputCmd(),
 		newClusterHealthCmd(),
 		newClusterJoinTokenCmd(),
 		newClusterShutdownCmd(),
@@ -57,8 +58,8 @@ func newClusterStatusCmd() *cobra.Command {
 
 			pairs := [][2]string{
 				{"Cluster Enabled", strconv.FormatBool(msg.ClusterEnabled)},
-				{"Local Node", string(msg.LocalNodeId)},
-				{"Leader", string(msg.LeaderId)},
+				{"Local Node", formatIDBytes(msg.LocalNodeId)},
+				{"Leader", formatIDBytes(msg.LeaderId)},
 				{"Leader Address", msg.LeaderAddress},
 			}
 			if msg.ClusterAddress != "" {
@@ -85,6 +86,27 @@ func newClusterStatusCmd() *cobra.Command {
 				p.table([]string{"ID", "NAME", "ADDRESS", "ROLE", "SUFFRAGE"}, rows)
 			}
 
+			// Raft liveness per node (gastrolog-1io54g) — parity with the
+			// inspector's Raft section.
+			var liveRows [][]string
+			for _, n := range msg.Nodes {
+				if n.Stats == nil || n.Stats.RaftWalAppendsTotal == 0 {
+					continue
+				}
+				liveRows = append(liveRows, []string{
+					n.Name,
+					fmt.Sprintf("%.1fms", n.Stats.RaftWalAppendAvgMs),
+					fmt.Sprintf("%.0fms", n.Stats.RaftWalAppendMaxMs),
+					fmt.Sprintf("%d (%.1f/min)", n.Stats.RaftElectionsTotal, n.Stats.RaftElectionsPerMin),
+					strconv.FormatUint(n.Stats.RaftLeaderLossesTotal, 10),
+					strconv.FormatUint(n.Stats.RaftFailedHeartbeatsTotal, 10),
+				})
+			}
+			if len(liveRows) > 0 {
+				fmt.Println()
+				p.table([]string{"NODE", "WAL AVG", "WAL MAX", "ELECTIONS", "LEADER LOSSES", "FAILED HBS"}, liveRows)
+			}
+
 			if msg.LocalStats != nil {
 				fmt.Println()
 				s := msg.LocalStats
@@ -101,6 +123,139 @@ func newClusterStatusCmd() *cobra.Command {
 			}
 			return nil
 		},
+	}
+}
+
+// newClusterThroughputCmd shows the pipeline throughput rates the inspector
+// displays: cluster-total routing rates from GetRouteStats and per-node,
+// per-vault segmentation append rates from the NodeStats broadcast
+// (gastrolog-4eh5ns).
+func newClusterThroughputCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "throughput",
+		Short: "Show pipeline throughput (routing and per-vault append rates)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client := clientFromCmd(cmd)
+			rs, err := client.System.GetRouteStats(context.Background(), connect.NewRequest(&v1.GetRouteStatsRequest{}))
+			if err != nil {
+				return err
+			}
+			cs, err := client.Lifecycle.GetClusterStatus(context.Background(), connect.NewRequest(&v1.GetClusterStatusRequest{}))
+			if err != nil {
+				return err
+			}
+			p := newPrinter(outputFormat(cmd))
+			if outputFormat(cmd) == "json" {
+				return p.json(map[string]any{
+					"route_stats": rs.Msg,
+					"nodes":       cs.Msg.Nodes,
+				})
+			}
+
+			p.kv([][2]string{
+				{"Routed Rate", formatRateTriple(rs.Msg.RoutedRate)},
+				{"Matched Rate", formatRateTriple(rs.Msg.MatchedRate)},
+				{"Total Routed", strconv.FormatInt(rs.Msg.TotalRouted, 10)},
+				{"Total Matched", strconv.FormatInt(rs.Msg.TotalMatched, 10)},
+				{"Total Unmatched", strconv.FormatInt(rs.Msg.TotalUnmatched, 10)},
+			})
+
+			var rows [][]string
+			var stageRows [][]string
+			for _, n := range cs.Msg.Nodes {
+				if n.Stats == nil {
+					continue
+				}
+				for _, vs := range n.Stats.Vaults {
+					hasHome := len(vs.CollectedRecords.GetSpark()) > 0 || len(vs.SealedRecords.GetSpark()) > 0
+					hasStage := vaultHasStageActivity(vs)
+					if vs.AppendQueueCapacity == 0 && !hasHome && !hasStage {
+						continue // vault has no pipeline role on this node
+					}
+					// APPEND (ingest) vs BUILD (chunk build) are the two ends of
+					// the "did the consume side keep up?" question — kept side by
+					// side so the answer is one glance (gastrolog-423tpt).
+					rows = append(rows, []string{
+						n.Name,
+						vs.Name,
+						fmt.Sprintf("%.1f/s", vs.AppendRecords.GetInstantPerSec()),
+						fmt.Sprintf("%.1f/s", vs.AppendDurable.GetInstantPerSec()),
+						formatBytesCLI(vs.AppendBytes.GetInstantPerSec()) + "/s",
+						fmt.Sprintf("%d/%d", vs.AppendQueueDepth, vs.AppendQueueCapacity),
+						fmt.Sprintf("%.1f/s", vs.CollectedRecords.GetInstantPerSec()),
+						fmt.Sprintf("%.1f/s", vs.SealedRecords.GetInstantPerSec()),
+						fmt.Sprintf("%.1f/s", vs.ChunksBuiltRate.GetInstantPerSec()),
+					})
+					if hasStage {
+						stageRows = append(stageRows, []string{
+							n.Name,
+							vs.Name,
+							strconv.FormatUint(vs.SegmentsCompletedTotal, 10),
+							strconv.FormatUint(vs.SegmentsPublishedTotal, 10),
+							strconv.FormatUint(vs.SegmentsReleasedTotal, 10),
+							strconv.FormatUint(vs.ChunksPlannedTotal, 10),
+							strconv.FormatUint(vs.ChunksBuiltTotal, 10),
+							strconv.FormatUint(vs.ChunksSealedTotal, 10),
+							strconv.FormatUint(vs.HeadPurgesTotal, 10),
+							fmt.Sprintf("%d/%d", vs.GlcbPullsAttemptedTotal, vs.GlcbPullsFailedTotal),
+							strconv.FormatUint(vs.RetentionDeletesTotal, 10),
+						})
+					}
+				}
+			}
+			if len(rows) > 0 {
+				fmt.Println()
+				p.table([]string{"NODE", "VAULT", "APPEND", "DURABLE", "BYTES", "QUEUE", "COLLECT", "SEAL", "BUILD"}, rows)
+			}
+			if len(stageRows) > 0 {
+				fmt.Println()
+				p.table([]string{"NODE", "VAULT", "COMPLETED", "PUBLISHED", "RELEASED", "PLANNED", "BUILT", "SEALED", "PURGES", "PULLS(A/F)", "RET.DEL"}, stageRows)
+			}
+			return nil
+		},
+	}
+}
+
+// vaultHasStageActivity reports whether a vault has any non-zero discrete
+// pipeline stage-count milestone on this node, so the stage-counter table only
+// lists vaults that actually reached a stage here (gastrolog-4r784a). Pure so
+// the row-inclusion rule is unit-testable without a live cluster.
+func vaultHasStageActivity(vs *v1.VaultStats) bool {
+	if vs == nil {
+		return false
+	}
+	return vs.SegmentsCompletedTotal > 0 ||
+		vs.SegmentsPublishedTotal > 0 ||
+		vs.SegmentsReleasedTotal > 0 ||
+		vs.ChunksPlannedTotal > 0 ||
+		vs.ChunksBuiltTotal > 0 ||
+		vs.ChunksSealedTotal > 0 ||
+		vs.HeadPurgesTotal > 0 ||
+		vs.GlcbPullsAttemptedTotal > 0 ||
+		vs.GlcbPullsFailedTotal > 0 ||
+		vs.RetentionDeletesTotal > 0
+}
+
+// formatRateTriple renders the instant rate with Unix-load-style 1m/5m/15m
+// EWMAs, uptime-style.
+func formatRateTriple(r *v1.ThroughputRate) string {
+	if r == nil {
+		return "0.0 rec/s"
+	}
+	return fmt.Sprintf("%.1f rec/s (1m: %.1f, 5m: %.1f, 15m: %.1f)",
+		r.InstantPerSec, r.Avg_1MPerSec, r.Avg_5MPerSec, r.Avg_15MPerSec)
+}
+
+func formatBytesCLI(b float64) string {
+	switch {
+	case b >= 1<<30:
+		return fmt.Sprintf("%.1f GB", b/(1<<30))
+	case b >= 1<<20:
+		return fmt.Sprintf("%.1f MB", b/(1<<20))
+	case b >= 1<<10:
+		return fmt.Sprintf("%.1f KB", b/(1<<10))
+	default:
+		return fmt.Sprintf("%.0f B", b)
 	}
 }
 
@@ -234,7 +389,7 @@ func newClusterDemoteSelfCmd() *cobra.Command {
 			"change has committed. Intended as a Kubernetes preStop lifecycle " +
 			"hook so pods leaving via `kubectl scale` / rolling restart / " +
 			"voluntary eviction take themselves out of the Raft voter set " +
-			"before SIGTERM. See gastrolog-24iv4.",
+			"before SIGTERM.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			hostname, err := os.Hostname()
 			if err != nil {
@@ -304,7 +459,7 @@ func newClusterYieldLeadershipCmd() *cobra.Command {
 		Long: "Asks the local node to hand off Raft leadership if it currently " +
 			"holds it; no-op if it's already a follower. Designed for Kubernetes " +
 			"preStop hooks so a pod restart triggers a clean leadership transfer " +
-			"without removing the node from cluster membership. See gastrolog-2yeie.",
+			"without removing the node from cluster membership.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := clientFromCmd(cmd)
 			resp, err := client.Lifecycle.YieldLeadership(context.Background(), connect.NewRequest(&v1.YieldLeadershipRequest{}))

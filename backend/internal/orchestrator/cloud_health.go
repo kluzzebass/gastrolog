@@ -5,6 +5,10 @@ import (
 
 	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
+	"os"
+
+	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline/chunking"
 )
 
 // cloudHealthChecker is an optional interface implemented by chunk managers
@@ -28,11 +32,30 @@ func (o *Orchestrator) evaluateCloudHealth() {
 
 	for _, vault := range o.vaults {
 		vaultInst := vault.Instance
-		if vaultInst == nil || vaultInst.Type != "cloud" {
+		if vaultInst == nil || !vaultInstanceHasCloudBacking(vaultInst) {
 			continue
 		}
 		o.evaluateVaultCloudHealth(vaultInst)
 	}
+}
+
+// vaultInstanceHasCloudBacking reports whether this instance participates in
+// cloud upload / health monitoring: dedicated cloud vaults, or file vaults with
+// a wired CloudStore on the placement leader. Followers (CloudReadOnly) are excluded.
+func vaultInstanceHasCloudBacking(vi *VaultInstance) bool {
+	return vaultInstCanUploadToCloud(vi) || (vi != nil && vi.Type == "cloud")
+}
+
+// vaultInstCanUploadToCloud reports whether this node's vault instance can
+// perform S3 uploads (placement leader with CloudStore). Vault-ctl Raft
+// leadership alone is insufficient — followers keep CloudReadOnly even when
+// they are the ctl leader. See gastrolog-34azvz.
+func vaultInstCanUploadToCloud(vi *VaultInstance) bool {
+	if vi == nil || vi.Chunks == nil {
+		return false
+	}
+	cs, ok := vi.Chunks.(interface{ CloudStoreConfigured() bool })
+	return ok && cs.CloudStoreConfigured()
 }
 
 // evaluateVaultCloudHealth checks a single cloud instance's health and runs
@@ -51,9 +74,23 @@ func (o *Orchestrator) evaluateVaultCloudHealth(vaultInst *VaultInstance) {
 	} else {
 		o.alerts.Clear(alertID)
 	}
-	if vaultInst.IsRaftLeader != nil && vaultInst.IsRaftLeader() {
+	if vaultInstRunsCloudBackfill(vaultInst) {
 		o.backfillCloudUploads(vaultInst)
 	}
+}
+
+// vaultInstRunsCloudBackfill reports whether this node should schedule cloud
+// upload backfill for a vault. File/cloud-backed pipeline vaults upload from
+// the placement leader (CloudStore configured). Legacy type=cloud vaults keep
+// the vault-ctl Raft leader gate.
+func vaultInstRunsCloudBackfill(vi *VaultInstance) bool {
+	if vi == nil {
+		return false
+	}
+	if vi.Type == "cloud" {
+		return vi.IsRaftLeader == nil || vi.IsRaftLeader()
+	}
+	return vaultInstCanUploadToCloud(vi)
 }
 
 // backfillCloudUploads reconciles sealed chunks against the vault-ctl FSM
@@ -65,6 +102,9 @@ func (o *Orchestrator) evaluateVaultCloudHealth(vaultInst *VaultInstance) {
 // The local CloudBacked flag from List() is intentionally ignored — only
 // the FSM decides whether a chunk needs work. See gastrolog-68fqk.
 func (o *Orchestrator) backfillCloudUploads(vaultInst *VaultInstance) {
+	if !vaultInstRunsCloudBackfill(vaultInst) {
+		return
+	}
 	uploader, ok := vaultInst.Chunks.(chunk.ChunkCloudUploader)
 	if !ok {
 		return
@@ -74,6 +114,9 @@ func (o *Orchestrator) backfillCloudUploads(vaultInst *VaultInstance) {
 	if err != nil {
 		return
 	}
+	// Sealed manifest entries not yet lazily resolved by the manager
+	// (post-restart) still need upload backfill (gastrolog-2kmgj6).
+	metas = appendUnlistedManifestSealed(metas, vaultInst)
 
 	var backfilled int
 	for _, m := range metas {
@@ -93,7 +136,11 @@ func (o *Orchestrator) backfillCloudUploads(vaultInst *VaultInstance) {
 			continue
 		}
 		if err := o.scheduler.RunOnce(name, func(id chunk.ChunkID) error {
-			return uploader.UploadToCloud(id)
+			err := uploader.UploadToCloud(id)
+			if err != nil {
+				o.logBackfillFailure(vaultInst.VaultID, id, err)
+			}
+			return err
 		}, m.ID); err == nil {
 			backfilled++
 		}
@@ -103,6 +150,32 @@ func (o *Orchestrator) backfillCloudUploads(vaultInst *VaultInstance) {
 		o.cloudHealthLogger.Debug("cloud backfill: scheduled uploads",
 			"vault", vaultInst.VaultID, "count", backfilled)
 	}
+}
+
+// logBackfillFailure reports a failed backfill upload with the signal an
+// operator needs: whether the GLCB exists on disk. Present-but-unuploadable
+// means the chunk manager lost its registration (a bug — the restart
+// registration gap produced 1,500 bare 'chunk not found' warns); absent
+// means the local build simply hasn't finished (normal on followers,
+// Debug). Both throttled per vault: retries every 5s flood otherwise.
+func (o *Orchestrator) logBackfillFailure(vaultID glid.GLID, id chunk.ChunkID, err error) {
+	onDisk := false
+	if root, ok := o.pipelineVaultChunkRoot(vaultID); ok {
+		if _, statErr := os.Stat(chunking.ChunkGLCBPath(root, id)); statErr == nil {
+			onDisk = true
+		}
+	}
+	n, allow := o.backfillLogThrottle.Allow(vaultID.String())
+	if !allow {
+		return
+	}
+	if onDisk {
+		o.cloudHealthLogger.Warn("cloud backfill failed for chunk present on disk — chunk manager registration missing",
+			"vault", vaultID, "chunk", id, "error", err, "suppressed", n)
+		return
+	}
+	o.cloudHealthLogger.Debug("cloud backfill awaiting local build",
+		"vault", vaultID, "chunk", id, "error", err, "suppressed", n)
 }
 
 // chunkIsCloudBacked checks the FSM (single source of truth) for CloudBacked.

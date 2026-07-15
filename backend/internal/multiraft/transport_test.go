@@ -10,9 +10,10 @@ import (
 	"testing"
 	"time"
 
+	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
+
 	"github.com/hashicorp/raft"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 )
 
@@ -22,6 +23,7 @@ const bufSize = 1 << 20
 // a Transport, and a bufconn listener.
 type testNode struct {
 	transport *Transport[string]
+	pool      *DialerPeerPool
 	server    *grpc.Server
 	lis       *bufconn.Listener
 }
@@ -37,7 +39,7 @@ func makeTestCluster(t *testing.T, n int) []*testNode {
 		addr := raft.ServerAddress(lis.Addr().String())
 		srv := grpc.NewServer()
 
-		tp := New[string](addr, []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
+		tp := New[string](addr,
 			func(s string) []byte { return []byte(s) },
 			func(b []byte) string { return string(b) },
 		)
@@ -47,29 +49,23 @@ func makeTestCluster(t *testing.T, n int) []*testNode {
 		go func() { _ = srv.Serve(lis) }()
 	}
 
-	// Override dial options so nodes dial each other via bufconn.
+	// Wire shared dialers into each node's peer pool.
 	dialers := make(map[string]func() (net.Conn, error))
 	for _, node := range nodes {
 		addr := string(node.transport.localAddress)
 		l := node.lis
 		dialers[addr] = func() (net.Conn, error) { return l.Dial() }
 	}
-
 	for _, node := range nodes {
-		node.transport.dialOptions = []grpc.DialOption{
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithContextDialer(func(_ context.Context, addr string) (net.Conn, error) {
-				d, ok := dialers[addr]
-				if !ok {
-					return nil, net.UnknownNetworkError("no dialer for " + addr)
-				}
-				return d()
-			}),
-		}
+		node.pool = NewSimpleDialerPeerPool(dialers)
+		node.transport.SetPeerConnPool(node.pool)
 	}
 
 	t.Cleanup(func() {
 		for _, node := range nodes {
+			if node.pool != nil {
+				node.pool.Close()
+			}
 			node.server.Stop()
 			_ = node.transport.Close()
 		}
@@ -77,8 +73,6 @@ func makeTestCluster(t *testing.T, n int) []*testNode {
 
 	return nodes
 }
-
-// ---------- Tests ----------
 
 func TestAppendEntriesRoundTrip(t *testing.T) {
 	// Not parallel — gRPC servers + bufconn need clean sequential lifecycle.
@@ -485,11 +479,9 @@ func TestNonStringGroupID(t *testing.T) {
 	srv2 := grpc.NewServer()
 
 	tp1 := New[groupID](raft.ServerAddress(lis1.Addr().String()),
-		[]grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
 		encodeGroupID, decodeGroupID,
 	)
 	tp2 := New[groupID](raft.ServerAddress(lis2.Addr().String()),
-		[]grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
 		encodeGroupID, decodeGroupID,
 	)
 	tp1.Register(srv1)
@@ -497,23 +489,20 @@ func TestNonStringGroupID(t *testing.T) {
 	go func() { _ = srv1.Serve(lis1) }()
 	go func() { _ = srv2.Serve(lis2) }()
 
-	// Cross-connect via bufconn.
 	dialers := map[string]func() (net.Conn, error){
 		lis1.Addr().String(): func() (net.Conn, error) { return lis1.Dial() },
 		lis2.Addr().String(): func() (net.Conn, error) { return lis2.Dial() },
 	}
-	dialOpts := []grpc.DialOption{
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithContextDialer(func(_ context.Context, addr string) (net.Conn, error) {
-			return dialers[addr]()
-		}),
-	}
-	tp1.SetDialOptions(dialOpts)
-	tp2.SetDialOptions(dialOpts)
+	pool1 := NewSimpleDialerPeerPool(dialers)
+	pool2 := NewSimpleDialerPeerPool(dialers)
+	tp1.SetPeerConnPool(pool1)
+	tp2.SetPeerConnPool(pool2)
 
 	t.Cleanup(func() {
 		srv1.Stop()
 		srv2.Stop()
+		pool1.Close()
+		pool2.Close()
 		_ = tp1.Close()
 		_ = tp2.Close()
 	})
@@ -672,15 +661,13 @@ func TestPipelineCloseWaitsForReceiver(t *testing.T) {
 	}
 }
 
-// --- Heartbeat coalescing tests ---
+// --- Concurrent heartbeat tests ---
 
-func TestHeartbeatCoalescing(t *testing.T) {
+func TestConcurrentMultiGroupHeartbeats(t *testing.T) {
 	// Not parallel — gRPC servers + bufconn need clean sequential lifecycle.
 	nodes := makeTestCluster(t, 2)
 	_ = nodes // cleanup via t.Cleanup
 
-	// Create 10 groups on both nodes. Set a heartbeat handler on the
-	// receiver so heartbeats don't block on the unread rpcChan.
 	const numGroups = 10
 	groups := make([]raft.Transport, numGroups)
 	for i := range numGroups {
@@ -692,13 +679,11 @@ func TestHeartbeatCoalescing(t *testing.T) {
 		})
 	}
 
-	// Send heartbeats from all groups concurrently.
-	// They should coalesce into fewer RPCs than numGroups.
 	var wg sync.WaitGroup
 	errs := make(chan error, numGroups)
 	for i := range numGroups {
 		wg.Add(1)
-		go func() {
+		go func(i int) {
 			defer wg.Done()
 			var resp raft.AppendEntriesResponse
 			err := groups[i].AppendEntries(
@@ -718,13 +703,118 @@ func TestHeartbeatCoalescing(t *testing.T) {
 			if err != nil {
 				errs <- err
 			}
-		}()
+		}(i)
 	}
 	wg.Wait()
 	close(errs)
 
 	for err := range errs {
 		t.Errorf("heartbeat failed: %v", err)
+	}
+}
+
+func TestConcurrentHeartbeatsNotSerialized(t *testing.T) {
+	// A slow heartbeat handler on one group must not block other groups'
+	// concurrent AppendEntries RPCs (each on its own HTTP/2 stream).
+	nodes := makeTestCluster(t, 2)
+
+	const (
+		numGroups   = 5
+		slowDelay   = 150 * time.Millisecond
+		parallelMax = 400 * time.Millisecond
+	)
+
+	groups := make([]raft.Transport, numGroups)
+	for i := range numGroups {
+		gid := "parallel-hb-" + string(rune('A'+i))
+		groups[i] = nodes[0].transport.GroupTransport(gid)
+		recvGT := nodes[1].transport.GroupTransport(gid)
+		delay := slowDelay
+		if i != 0 {
+			delay = 0
+		}
+		recvGT.SetHeartbeatHandler(func(rpc raft.RPC) {
+			if delay > 0 {
+				time.Sleep(delay)
+			}
+			rpc.Respond(&raft.AppendEntriesResponse{Success: true}, nil)
+		})
+	}
+
+	start := time.Now()
+	var wg sync.WaitGroup
+	for i := range numGroups {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			var resp raft.AppendEntriesResponse
+			if err := groups[i].AppendEntries("node-1", nodes[1].transport.LocalAddr(),
+				&raft.AppendEntriesRequest{
+					RPCHeader: raft.RPCHeader{ProtocolVersion: 3, ID: []byte("node-0"), Addr: []byte(nodes[0].transport.LocalAddr())},
+					Term:      1,
+				}, &resp); err != nil {
+				t.Errorf("group %d: %v", i, err)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	if elapsed := time.Since(start); elapsed > parallelMax {
+		t.Errorf("heartbeats took %v (want <%v); likely serialized on one stream", elapsed, parallelMax)
+	}
+}
+
+func TestBatchHeartbeatParallelInbound(t *testing.T) {
+	// BatchHeartbeat remains for compatibility; inbound dispatch is parallel.
+	nodes := makeTestCluster(t, 2)
+
+	const (
+		numGroups   = 4
+		slowDelay   = 150 * time.Millisecond
+		parallelMax = 400 * time.Millisecond
+	)
+
+	heartbeats := make([]*gastrologv1.MultiRaftAppendEntriesRequest, numGroups)
+	for i := range numGroups {
+		gid := "batch-in-" + string(rune('A'+i))
+		nodes[0].transport.GroupTransport(gid)
+		recvGT := nodes[1].transport.GroupTransport(gid)
+		delay := slowDelay
+		if i != 0 {
+			delay = 0
+		}
+		recvGT.SetHeartbeatHandler(func(rpc raft.RPC) {
+			if delay > 0 {
+				time.Sleep(delay)
+			}
+			rpc.Respond(&raft.AppendEntriesResponse{Success: true}, nil)
+		})
+		heartbeats[i] = encodeAppendEntriesRequest([]byte(gid), &raft.AppendEntriesRequest{
+			RPCHeader: raft.RPCHeader{ProtocolVersion: 3, ID: []byte("node-0"), Addr: []byte(nodes[0].transport.LocalAddr())},
+			Term:      1,
+		})
+	}
+
+	lease, cc, err := nodes[0].transport.acquireRaft(nodes[1].transport.LocalAddr(), "batch-in-A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Release()
+
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	resp, err := cc.BatchHeartbeat(ctx, &gastrologv1.MultiRaftBatchHeartbeatRequest{
+		Heartbeats: heartbeats,
+	})
+	if err != nil {
+		t.Fatalf("BatchHeartbeat: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > parallelMax {
+		t.Errorf("batch took %v (want <%v); inbound dispatch likely serial", elapsed, parallelMax)
+	}
+	if len(resp.Responses) != numGroups {
+		t.Fatalf("responses: got %d, want %d", len(resp.Responses), numGroups)
 	}
 }
 
@@ -746,7 +836,7 @@ func TestHeartbeatCoalescingWithDataAppend(t *testing.T) {
 		}
 	}()
 
-	// Send a heartbeat (empty entries) — should be batched.
+	// Send a heartbeat (empty entries) — direct AppendEntries RPC.
 	var hbResp raft.AppendEntriesResponse
 	err := gt0.AppendEntries("node-1", nodes[1].transport.LocalAddr(),
 		&raft.AppendEntriesRequest{
@@ -757,7 +847,7 @@ func TestHeartbeatCoalescingWithDataAppend(t *testing.T) {
 		t.Fatalf("heartbeat: %v", err)
 	}
 
-	// Send a data append (non-empty entries) — should go direct, not batched.
+	// Send a data append (non-empty entries) — same direct path.
 	var dataResp raft.AppendEntriesResponse
 	err = gt0.AppendEntries("node-1", nodes[1].transport.LocalAddr(),
 		&raft.AppendEntriesRequest{
@@ -829,11 +919,8 @@ func TestHeartbeatToUnregisteredGroup(t *testing.T) {
 			Term:      1,
 		}, &resp)
 
-	// In batch mode, individual group failures are absorbed — the caller
-	// gets an empty (zeroed) response, not an error. This is by design:
-	// one bad group shouldn't kill the whole batch.
-	if err != nil {
-		t.Fatalf("unregistered group heartbeat should not return error (batch absorbs), got: %v", err)
+	if err == nil {
+		t.Fatal("expected error for unknown group on receiver, got nil")
 	}
 }
 
@@ -877,12 +964,11 @@ func TestHeartbeatBatchMixedValidAndInvalid(t *testing.T) {
 	}()
 	wg.Wait()
 
-	// Valid group should succeed even though the batch contains an invalid one.
+	// Valid group should succeed; invalid group gets its own RPC error.
 	if validErr != nil {
 		t.Errorf("valid group heartbeat failed: %v", validErr)
 	}
-	// Invalid group gets an error but doesn't crash.
-	// (The server returns an empty response for failed groups, which the
-	// client interprets as success with zero fields — not ideal but safe.)
-	_ = invalidErr
+	if invalidErr == nil {
+		t.Error("invalid group heartbeat should return error")
+	}
 }

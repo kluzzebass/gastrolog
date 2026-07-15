@@ -33,10 +33,10 @@ func FuzzReadMultiplexed(f *testing.F) {
 
 	// Edge cases.
 	f.Add([]byte{})
-	f.Add([]byte{0, 0, 0, 0, 0, 0, 0, 0})                         // all zeros
-	f.Add([]byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}) // all 0xFF
+	f.Add([]byte{0, 0, 0, 0, 0, 0, 0, 0})                          // all zeros
+	f.Add([]byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF})  // all 0xFF
 	f.Add([]byte{1, 0, 0, 0, 0, 0, 0, 5, 'h', 'e', 'l', 'l', 'o'}) // no newline (partial)
-	f.Add([]byte{1, 0, 0, 0, 0, 0, 0, 1, '\n'})                     // just newline
+	f.Add([]byte{1, 0, 0, 0, 0, 0, 0, 1, '\n'})                    // just newline
 
 	// Header claims huge payload but data is short.
 	hugeHeader := make([]byte, 8)

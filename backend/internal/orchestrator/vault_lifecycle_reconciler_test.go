@@ -23,13 +23,13 @@ import (
 // the leader to push. Other ChunkReplicator methods are no-ops — the
 // missing-replica sweep only exercises the one inverse method.
 type captureCatchupReplicator struct {
-	calls          atomic.Int32
-	lastLeader     string
-	lastVault      glid.GLID
-	lastChunks     []chunk.ChunkID
-	lastRequester  string
-	scheduledRet   uint32
-	failNextWith   error
+	calls         atomic.Int32
+	lastLeader    string
+	lastVault     glid.GLID
+	lastChunks    []chunk.ChunkID
+	lastRequester string
+	scheduledRet  uint32
+	failNextWith  error
 }
 
 func (c *captureCatchupReplicator) AppendRecords(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
@@ -96,7 +96,7 @@ func TestReconcilerOnRequestDeleteDeletesLocalAndAcks(t *testing.T) {
 	var ackCount atomic.Int32
 	vaultInst := &VaultInstance{
 		VaultID: glid.New(),
-		Chunks: cm,
+		Chunks:  cm,
 		ApplyRaftAckDelete: func(id chunk.ChunkID, nodeID string) error {
 			ackedID = id
 			ackedNode = nodeID
@@ -150,7 +150,7 @@ func TestReconcilerOnRequestDeleteIgnoresNotInExpectedFrom(t *testing.T) {
 	var ackCount atomic.Int32
 	vaultInst := &VaultInstance{
 		VaultID: glid.New(),
-		Chunks: cm,
+		Chunks:  cm,
 		ApplyRaftAckDelete: func(_ chunk.ChunkID, _ string) error {
 			ackCount.Add(1)
 			return nil
@@ -219,7 +219,7 @@ func TestReconcilerOnAckDeleteAutoFinalizesInsideApply(t *testing.T) {
 	chunkID := chunk.NewChunkID()
 	now := time.Now()
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(chunkID, now, now, now)})
-	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(chunkID, now, 1, 1, now, now, now, false)})
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(chunkID, now, 1, 1, now, now, now, false, now)})
 	_ = fsm.Apply(&hraft.Log{
 		Data: vaultctlfsm.MarshalRequestDelete(chunkID, now, "retention-ttl",
 			[]string{"node-A", "node-B"}),
@@ -262,7 +262,7 @@ func TestReconcilerDeleteChunkSingleNodeFallback(t *testing.T) {
 	cm := &reconcilerFakeChunkManager{}
 	vaultInst := &VaultInstance{
 		VaultID: glid.New(),
-		Chunks: cm,
+		Chunks:  cm,
 		// ApplyRaftRequestDelete deliberately nil — single-node mode.
 	}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
@@ -296,7 +296,7 @@ func TestReconcilerOnPruneNodeAutoFinalizesInsideApply(t *testing.T) {
 	idUntouched := chunk.NewChunkID()
 	for _, id := range []chunk.ChunkID{idStillOwed, idEmptied, idUntouched} {
 		_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(id, now, now, now)})
-		_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(id, now, 1, 1, now, now, now, false)})
+		_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(id, now, 1, 1, now, now, now, false, now)})
 	}
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalRequestDelete(idStillOwed, now, "test", []string{"node-A", "node-B"})})
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalRequestDelete(idEmptied, now, "test", []string{"node-A"})})
@@ -368,7 +368,7 @@ func TestReconcilerOnSealProjectsToLocalManager(t *testing.T) {
 	cm := &reconcilerFakeSealEnsurerChunkManager{}
 	vaultInst := &VaultInstance{
 		VaultID: glid.New(),
-		Chunks: cm,
+		Chunks:  cm,
 	}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
 	rec.Wire(fsm)
@@ -378,7 +378,7 @@ func TestReconcilerOnSealProjectsToLocalManager(t *testing.T) {
 	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(id, now, now, now)}); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(id, now, 100, 1234, now, now, now, false)}); err != nil {
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(id, now, 100, 1234, now, now, now, false, now)}); err != nil {
 		t.Fatalf("seal: %v", err)
 	}
 
@@ -405,13 +405,13 @@ func TestReconcileFromSnapshotProjectsAllSealedEntries(t *testing.T) {
 	for _, id := range []chunk.ChunkID{idSealed1, idSealed2, idActive} {
 		_ = src.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(id, now, now, now)})
 	}
-	_ = src.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idSealed1, now, 1, 1, now, now, now, false)})
-	_ = src.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idSealed2, now, 1, 1, now, now, now, false)})
+	_ = src.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idSealed1, now, 1, 1, now, now, now, false, now)})
+	_ = src.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idSealed2, now, 1, 1, now, now, now, false, now)})
 
 	cm := &reconcilerFakeSealEnsurerChunkManager{}
 	vaultInst := &VaultInstance{
 		VaultID: glid.New(),
-		Chunks: cm,
+		Chunks:  cm,
 	}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
 
@@ -453,7 +453,7 @@ func TestReconcileFromSnapshotProcessesPendingObligations(t *testing.T) {
 	ackCh := make(chan chunk.ChunkID, 4)
 	vaultInst := &VaultInstance{
 		VaultID: glid.New(),
-		Chunks: cm,
+		Chunks:  cm,
 		ApplyRaftAckDelete: func(id chunk.ChunkID, _ string) error {
 			ackCh <- id
 			return nil
@@ -519,7 +519,7 @@ func TestSweepLocalOrphansDeletesOnlyTombstonedAbsentEntries(t *testing.T) {
 	// protocol to commit a tombstone, then leave the local file behind.
 	idTombstoned := chunk.NewChunkID()
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idTombstoned, now, now, now)})
-	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idTombstoned, now, 1, 1, now, now, now, false)})
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idTombstoned, now, 1, 1, now, now, now, false, now)})
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalRequestDelete(idTombstoned, now, "test", []string{"node-A"})})
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalAckDelete(idTombstoned, "node-A")})
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalFinalizeDelete(idTombstoned)})
@@ -527,12 +527,12 @@ func TestSweepLocalOrphansDeletesOnlyTombstonedAbsentEntries(t *testing.T) {
 	// Case 2 (negative): live in manifest. Created + sealed, no deletes.
 	idLiveSealed := chunk.NewChunkID()
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idLiveSealed, now, now, now)})
-	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idLiveSealed, now, 1, 1, now, now, now, false)})
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idLiveSealed, now, 1, 1, now, now, now, false, now)})
 
 	// Case 3 (negative): pendingDeletes — receipt protocol owns it.
 	idPending := chunk.NewChunkID()
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idPending, now, now, now)})
-	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idPending, now, 1, 1, now, now, now, false)})
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idPending, now, 1, 1, now, now, now, false, now)})
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalRequestDelete(idPending, now, "test", []string{"node-A"})})
 
 	// Case 4 (negative): on disk, FSM has nothing about it (no tombstone,
@@ -600,8 +600,8 @@ func TestSweepLocalOrphansPreservesDataBearingUnknownOrphans(t *testing.T) {
 		{
 			ID:          idUnknown,
 			Sealed:      true,
-			RecordCount: 42,                       // load-bearing: > 0 triggers the preserve path
-			WriteEnd:    now.Add(-1 * time.Hour),  // old enough to be a "ghost" if records were 0
+			RecordCount: 42,                      // load-bearing: > 0 triggers the preserve path
+			WriteEnd:    now.Add(-1 * time.Hour), // old enough to be a "ghost" if records were 0
 		},
 	}
 
@@ -675,12 +675,12 @@ func TestSweepMissingReplicasRequestsOnlySealedAndAbsentEntries(t *testing.T) {
 	// Case 1 (positive): sealed in FSM, missing on disk → must be requested.
 	idMissing := chunk.NewChunkID()
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idMissing, now, now, now)})
-	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idMissing, now, 1, 1, now, now, now, false)})
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idMissing, now, 1, 1, now, now, now, false, now)})
 
 	// Case 2 (negative): sealed in FSM, present locally → must NOT be requested.
 	idPresent := chunk.NewChunkID()
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idPresent, now, now, now)})
-	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idPresent, now, 1, 1, now, now, now, false)})
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idPresent, now, 1, 1, now, now, now, false, now)})
 
 	// Case 3 (negative): in FSM but unsealed (active) → must NOT be requested.
 	idActive := chunk.NewChunkID()
@@ -690,7 +690,7 @@ func TestSweepMissingReplicasRequestsOnlySealedAndAbsentEntries(t *testing.T) {
 	// (lives in shared bucket; not a local-replica concern).
 	idCloud := chunk.NewChunkID()
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idCloud, now, now, now)})
-	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idCloud, now, 1, 1, now, now, now, false)})
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idCloud, now, 1, 1, now, now, now, false, now)})
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalUploadChunk(idCloud, 1, 0, 0, 0, 0, [32]byte{}, glid.GLID{}, 0)})
 
 	cm.chunks = []chunk.ChunkMeta{
@@ -702,7 +702,7 @@ func TestSweepMissingReplicasRequestsOnlySealedAndAbsentEntries(t *testing.T) {
 	orch.SetChunkReplicator(fake)
 
 	vaultInst := &VaultInstance{
-		VaultID:       glid.New(),
+		VaultID:      glid.New(),
 		Type:         "memory",
 		Chunks:       cm,
 		IsFollower:   true,
@@ -728,6 +728,52 @@ func TestSweepMissingReplicasRequestsOnlySealedAndAbsentEntries(t *testing.T) {
 	}
 }
 
+// SweepMissingReplicas must not request the entire missing set in one tick —
+// batching keeps catchup from storming the replication streams.
+func TestSweepMissingReplicasBatchesCatchupRequests(t *testing.T) {
+	t.Parallel()
+
+	fsm := vaultctlfsm.New()
+	cm := &reconcilerFakeChunkManager{}
+	base := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+
+	const total = maxMissingReplicaCatchupPerSweep + 4
+	ids := make([]chunk.ChunkID, total)
+	for i := range total {
+		id := chunk.NewChunkID()
+		ids[i] = id
+		sealedAt := base.Add(time.Duration(i) * time.Minute)
+		_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(id, sealedAt, sealedAt, sealedAt)})
+		_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(id, sealedAt, 1, 1, sealedAt, sealedAt, sealedAt, false, sealedAt)})
+	}
+
+	orch := newTestOrch(t, Config{LocalNodeID: "node-A"})
+	fake := &captureCatchupReplicator{scheduledRet: 1}
+	orch.SetChunkReplicator(fake)
+
+	vaultInst := &VaultInstance{
+		VaultID:      glid.New(),
+		Type:         "memory",
+		Chunks:       cm,
+		IsFollower:   true,
+		LeaderNodeID: "node-leader",
+	}
+	rec := NewVaultLifecycleReconciler(orch, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
+	rec.Wire(fsm)
+
+	rec.SweepMissingReplicas()
+
+	if got := len(fake.lastChunks); got != maxMissingReplicaCatchupPerSweep {
+		t.Fatalf("requested %d chunks, want batch cap %d", got, maxMissingReplicaCatchupPerSweep)
+	}
+	wantOldest := ids[:maxMissingReplicaCatchupPerSweep]
+	for i, id := range wantOldest {
+		if fake.lastChunks[i] != id {
+			t.Errorf("batch[%d] = %s, want oldest %s", i, fake.lastChunks[i], id)
+		}
+	}
+}
+
 // gastrolog-19241: when leadership transfers to a node that doesn't
 // have historical sealed chunks (e.g. a scale-out joiner that became
 // leader), SweepMissingReplicas on the LEADER must ask its follower
@@ -747,7 +793,7 @@ func TestSweepMissingReplicasFromLeaderAsksEveryFollower(t *testing.T) {
 
 	idMissing := chunk.NewChunkID()
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idMissing, now, now, now)})
-	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idMissing, now, 1, 1, now, now, now, false)})
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idMissing, now, 1, 1, now, now, now, false, now)})
 
 	orch := newTestOrch(t, Config{LocalNodeID: "node-leader"})
 	fake := &captureCatchupReplicator{scheduledRet: 1}
@@ -794,7 +840,7 @@ func TestSweepMissingReplicasFromLeaderWithNoFollowersIsNoOp(t *testing.T) {
 
 	idMissing := chunk.NewChunkID()
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idMissing, now, now, now)})
-	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idMissing, now, 1, 1, now, now, now, false)})
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idMissing, now, 1, 1, now, now, now, false, now)})
 
 	orch := newTestOrch(t, Config{LocalNodeID: "node-leader"})
 	fake := &captureCatchupReplicator{}
@@ -830,7 +876,7 @@ func TestSweepMissingReplicasFromLeaderContinuesPastPeerError(t *testing.T) {
 
 	idMissing := chunk.NewChunkID()
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idMissing, now, now, now)})
-	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idMissing, now, 1, 1, now, now, now, false)})
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idMissing, now, 1, 1, now, now, now, false, now)})
 
 	orch := newTestOrch(t, Config{LocalNodeID: "node-leader"})
 	fake := &captureCatchupReplicator{scheduledRet: 1, failNextWith: errors.New("transient")}
@@ -868,7 +914,7 @@ func TestSweepMissingReplicasFromLeaderSkipsSelfInFollowerTargets(t *testing.T) 
 
 	idMissing := chunk.NewChunkID()
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idMissing, now, now, now)})
-	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idMissing, now, 1, 1, now, now, now, false)})
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idMissing, now, 1, 1, now, now, now, false, now)})
 
 	orch := newTestOrch(t, Config{LocalNodeID: "node-leader"})
 	fake := &captureCatchupReplicator{scheduledRet: 1}
@@ -908,14 +954,14 @@ func TestSweepMissingReplicasSkipsWhenLeaderUnknown(t *testing.T) {
 
 	idMissing := chunk.NewChunkID()
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idMissing, now, now, now)})
-	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idMissing, now, 1, 1, now, now, now, false)})
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idMissing, now, 1, 1, now, now, now, false, now)})
 
 	orch := newTestOrch(t, Config{LocalNodeID: "node-A"})
 	fake := &captureCatchupReplicator{}
 	orch.SetChunkReplicator(fake)
 
 	vaultInst := &VaultInstance{
-		VaultID:       glid.New(),
+		VaultID:      glid.New(),
 		Type:         "memory",
 		Chunks:       cm,
 		IsFollower:   true,
@@ -990,7 +1036,7 @@ func TestFulfillObligationDemotesLocalActiveBeforeDelete(t *testing.T) {
 	var ackCount atomic.Int32
 	vaultInst := &VaultInstance{
 		VaultID: glid.New(),
-		Chunks: cm,
+		Chunks:  cm,
 		ApplyRaftAckDelete: func(id chunk.ChunkID, _ string) error {
 			ackedID = id
 			ackCount.Add(1)
@@ -1043,7 +1089,7 @@ func TestSweepLocalOrphansDemotesActiveTombstonedChunk(t *testing.T) {
 	// tombstone (no manifest entry, no pendingDeletes entry).
 	idTombstoned := chunk.NewChunkID()
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idTombstoned, now, now, now)})
-	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idTombstoned, now, 1, 1, now, now, now, false)})
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idTombstoned, now, 1, 1, now, now, now, false, now)})
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalRequestDelete(idTombstoned, now, "test", []string{"node-A"})})
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalAckDelete(idTombstoned, "node-A")})
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalFinalizeDelete(idTombstoned)})
@@ -1097,15 +1143,15 @@ func (r *recordingSilentDeleter) DeleteSilent(id chunk.ChunkID) error {
 	return nil
 }
 
-// recordingCloudRegistrar adds chunk.CloudChunkRegistrar on top of the
+// recordingCloudRegistrar adds chunk.CloudBackedChunkRegistrar on top of the
 // silent-deleter fake.
 type recordingCloudRegistrar struct {
 	recordingSilentDeleter
-	registered []chunk.ChunkID
+	registered  []chunk.ChunkID
 	registerErr error
 }
 
-func (r *recordingCloudRegistrar) RegisterCloudChunk(id chunk.ChunkID, _ chunk.CloudChunkInfo) error {
+func (r *recordingCloudRegistrar) RegisterCloudBackedChunk(id chunk.ChunkID, _ chunk.CloudBackedChunkInfo) error {
 	r.registered = append(r.registered, id)
 	return r.registerErr
 }
@@ -1160,7 +1206,7 @@ func TestReconcilerOnSealNotifiesChunkChange(t *testing.T) {
 	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(id, now, now, now)}); err != nil {
 		t.Fatalf("apply create: %v", err)
 	}
-	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(id, now, 100, 1234, now, now, now, false)}); err != nil {
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(id, now, 100, 1234, now, now, now, false, now)}); err != nil {
 		t.Fatalf("apply seal: %v", err)
 	}
 
@@ -1210,7 +1256,7 @@ func TestReconcilerOnSealNotifiesEvenWhenEnsureSealedFails(t *testing.T) {
 	id := chunk.NewChunkID()
 	now := time.Now()
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(id, now, now, now)})
-	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(id, now, 1, 1, now, now, now, false)})
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(id, now, 1, 1, now, now, now, false, now)})
 
 	if !waitForChunkSignal(signalCh, time.Second) {
 		t.Fatal("expected chunk signal even when EnsureSealed errors, got timeout")
@@ -1253,6 +1299,62 @@ func TestWireInstanceFSMOnDeleteFiresNotifyChunkChange(t *testing.T) {
 	}
 	if len(cm.silentDeleted) != 1 || cm.silentDeleted[0] != id {
 		t.Errorf("DeleteSilent = %v, want [%s]", cm.silentDeleted, id)
+	}
+}
+
+// TestReconcilerOnFinalizeDeleteEmitsChunkDeleted pins that the receipt-
+// protocol finalize path (CmdAckDelete draining ExpectedFrom) emits a
+// typed DELETED event on every node, not just nodes that ran
+// deleteLocalCopy. Without this, inspector clients connected to a node that
+// only saw the chunk via ListChunks fan-out keep stale retention-pending
+// rows until reload.
+func TestReconcilerOnFinalizeDeleteEmitsChunkDeleted(t *testing.T) {
+	t.Parallel()
+
+	orch, err := New(Config{LocalNodeID: "node-A"})
+	if err != nil {
+		t.Fatalf("orchestrator.New: %v", err)
+	}
+	fsm := vaultctlfsm.New()
+	vaultID := glid.New()
+	vaultInst := &VaultInstance{
+		VaultID:            vaultID,
+		Chunks:             &reconcilerFakeChunkManager{},
+		IsRaftLeader:       func() bool { return true },
+		ApplyRaftAckDelete: func(_ chunk.ChunkID, _ string) error { return nil },
+	}
+	rec := NewVaultLifecycleReconciler(orch, vaultID, vaultInst, "node-A", slog.Default())
+	rec.Wire(fsm)
+
+	chunkID := chunk.NewChunkID()
+	now := time.Now()
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(chunkID, now, now, now)})
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(chunkID, now, 1, 1, now, now, now, false, now)})
+	_ = fsm.Apply(&hraft.Log{
+		Data: vaultctlfsm.MarshalRequestDelete(chunkID, now, "retention-ttl", []string{"node-B"}),
+	})
+
+	bus := orch.ChunkBus()
+	subID, events, _ := bus.Subscribe()
+	defer bus.Unsubscribe(subID)
+
+	// node-A is not in ExpectedFrom — simulates a node that only rendered
+	// the chunk via cluster-wide ListChunks, not local storage.
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalAckDelete(chunkID, "node-B")})
+
+	select {
+	case msg := <-events:
+		if msg.Event.Op != ChunkChangeOpDeleted {
+			t.Fatalf("event op = %v, want Deleted", msg.Event.Op)
+		}
+		if msg.Event.ChunkID != chunkID {
+			t.Fatalf("event chunk = %s, want %s", msg.Event.ChunkID, chunkID)
+		}
+		if msg.Event.VaultID != vaultID {
+			t.Fatalf("event vault = %s, want %s", msg.Event.VaultID, vaultID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for DELETED event on finalize")
 	}
 }
 
@@ -1311,7 +1413,7 @@ func TestWireInstanceFSMOnUploadFiresNotifyChunkChange(t *testing.T) {
 	id := chunk.NewChunkID()
 	now := time.Now()
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(id, now, now, now)})
-	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(id, now, 1, 1, now, now, now, false)})
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(id, now, 1, 1, now, now, now, false, now)})
 	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalUploadChunk(id, 1024, 0, 0, 0, 0, [32]byte{}, glid.GLID{}, 0)}); err != nil {
 		t.Fatalf("apply upload: %v", err)
 	}
@@ -1320,7 +1422,7 @@ func TestWireInstanceFSMOnUploadFiresNotifyChunkChange(t *testing.T) {
 		t.Fatal("expected chunk signal after CmdUploadChunk apply, got timeout")
 	}
 	if len(cm.registered) != 1 || cm.registered[0] != id {
-		t.Errorf("RegisterCloudChunk = %v, want [%s]", cm.registered, id)
+		t.Errorf("RegisterCloudBackedChunk = %v, want [%s]", cm.registered, id)
 	}
 }
 
@@ -1363,7 +1465,7 @@ func TestReconcileFromSnapshotResumesSealingChunks(t *testing.T) {
 	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalBeginSeal(idSealed)}); err != nil {
 		t.Fatalf("begin-seal sealed: %v", err)
 	}
-	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idSealed, now, 1, 1, now, now, now, false)}); err != nil {
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idSealed, now, 1, 1, now, now, now, false, now)}); err != nil {
 		t.Fatalf("seal-chunk sealed: %v", err)
 	}
 
@@ -1376,7 +1478,7 @@ func TestReconcileFromSnapshotResumesSealingChunks(t *testing.T) {
 
 	vaultInst := &VaultInstance{
 		VaultID: glid.New(),
-		Chunks: cm,
+		Chunks:  cm,
 	}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
 
@@ -1419,7 +1521,7 @@ func TestReconcileFromSnapshotSkipsSealingWithNoLocalChunk(t *testing.T) {
 	cm := &reconcilerFakeChunkManager{}
 	vaultInst := &VaultInstance{
 		VaultID: glid.New(),
-		Chunks: cm,
+		Chunks:  cm,
 	}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
 
@@ -1458,7 +1560,7 @@ func TestReconcileFromSnapshotSkipsSealingWithUnsealedLocalChunk(t *testing.T) {
 	cm.chunks = []chunk.ChunkMeta{{ID: idSealing, Sealed: false}}
 	vaultInst := &VaultInstance{
 		VaultID: glid.New(),
-		Chunks: cm,
+		Chunks:  cm,
 	}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
 
@@ -1505,7 +1607,7 @@ func TestSweepStaleLeaderFSMEntriesProposesDeleteForStrandedSealingChunk(t *test
 	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idSealedFresh, now, now, now)}); err != nil {
 		t.Fatalf("create fresh sealed: %v", err)
 	}
-	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idSealedFresh, now, 1, 1, now, now, now, false)}); err != nil {
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idSealedFresh, now, 1, 1, now, now, now, false, now)}); err != nil {
 		t.Fatalf("seal fresh: %v", err)
 	}
 
@@ -1513,7 +1615,7 @@ func TestSweepStaleLeaderFSMEntriesProposesDeleteForStrandedSealingChunk(t *test
 	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idSealedStale, old, old, old)}); err != nil {
 		t.Fatalf("create stale sealed: %v", err)
 	}
-	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idSealedStale, old, 1, 1, old, old, old, false)}); err != nil {
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idSealedStale, old, 1, 1, old, old, old, false, old)}); err != nil {
 		t.Fatalf("seal stale: %v", err)
 	}
 
@@ -1539,7 +1641,7 @@ func TestSweepStaleLeaderFSMEntriesProposesDeleteForStrandedSealingChunk(t *test
 	var deletedRequests []chunk.ChunkID
 	var deleteReasons []string
 	vaultInst := &VaultInstance{
-		VaultID:     glid.New(),
+		VaultID:    glid.New(),
 		Chunks:     cm,
 		IsFollower: false, // leader-only sweep
 		ApplyRaftRequestDelete: func(id chunk.ChunkID, reason string, _ []string) error {
@@ -1578,6 +1680,81 @@ func TestSweepStaleLeaderFSMEntriesProposesDeleteForStrandedSealingChunk(t *test
 	}
 }
 
+func TestSweepStaleLeaderFSMEntriesSkipsPipelineVault(t *testing.T) {
+	t.Parallel()
+
+	fsm := vaultctlfsm.New()
+	old := time.Now().Add(-2 * time.Hour)
+	id := chunk.NewChunkID()
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(id, old, old, old)}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(id, old, 1, 1, old, old, old, false, old)}); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+
+	vaultID := glid.New()
+	orch := &Orchestrator{
+		segmentsDir:    t.TempDir(),
+		pipelineVaults: map[glid.GLID]pipelineVaultReg{vaultID: {home: true, hasHandle: true}},
+	}
+	var deleted []chunk.ChunkID
+	vaultInst := &VaultInstance{
+		VaultID:       vaultID,
+		Chunks:        &reconcilerFakeChunkManager{},
+		IsFollower:    false,
+		HasRaftLeader: func() bool { return true },
+		ApplyRaftRequestDelete: func(id chunk.ChunkID, _ string, _ []string) error {
+			deleted = append(deleted, id)
+			return nil
+		},
+	}
+	rec := NewVaultLifecycleReconciler(orch, vaultID, vaultInst, "node-A", slog.Default())
+	rec.fsm = fsm
+
+	rec.SweepStaleLeaderFSMEntries()
+
+	if len(deleted) != 0 {
+		t.Fatalf("pipeline vault must skip stale-fsm sweep; got deletes %v", deleted)
+	}
+}
+
+func TestSweepStaleLeaderFSMEntriesRespectsSealedAtGrace(t *testing.T) {
+	t.Parallel()
+
+	fsm := vaultctlfsm.New()
+	now := time.Now()
+	oldWrite := now.Add(-3 * time.Hour)
+	recentSeal := now.Add(-10 * time.Minute)
+	id := chunk.NewChunkID()
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(id, oldWrite, oldWrite, oldWrite)}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(id, oldWrite, 1, 1, oldWrite, oldWrite, oldWrite, false, recentSeal)}); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+
+	var deleted []chunk.ChunkID
+	vaultInst := &VaultInstance{
+		VaultID:       glid.New(),
+		Chunks:        &reconcilerFakeChunkManager{},
+		IsFollower:    false,
+		HasRaftLeader: func() bool { return true },
+		ApplyRaftRequestDelete: func(id chunk.ChunkID, _ string, _ []string) error {
+			deleted = append(deleted, id)
+			return nil
+		},
+	}
+	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
+	rec.fsm = fsm
+
+	rec.SweepStaleLeaderFSMEntries()
+
+	if len(deleted) != 0 {
+		t.Fatalf("recent SealedAt must keep chunk within grace despite old WriteEnd; deleted=%v", deleted)
+	}
+}
+
 // TestSweepStalePendingDeleteAcksPrunesNonPlacementNodes pins the
 // self-healing receipt-protocol-unstick path: after a vault placement
 // change (kubectl scale, vault rebalance), pendingDelete entries can
@@ -1588,7 +1765,7 @@ func TestSweepStaleLeaderFSMEntriesProposesDeleteForStrandedSealingChunk(t *test
 // atomically finalizes any entries whose ExpectedFrom drained.
 //
 // Setup mirrors the live K8s incident from gastrolog-2eclw-cascade-fix
-// follow-up: local-vault has chunks stuck retention-pending with
+// follow-up: first-vault has chunks stuck retention-pending with
 // ExpectedFrom containing only stale-node, while current placement is
 // {leader-node + follower-node}.
 func TestSweepStalePendingDeleteAcksPrunesNonPlacementNodes(t *testing.T) {
@@ -1719,11 +1896,11 @@ func TestSweepStalePendingDeleteAcksFollowersAreNoOp(t *testing.T) {
 type idleActiveSweepFakeManager struct {
 	retentionFakeChunkManager
 
-	metas       map[chunk.ChunkID]chunk.ChunkMeta
-	active      *chunk.ChunkMeta
-	sealCalls   []chunk.ChunkID
-	ensured     []chunk.ChunkID
-	announcer   *captureAnnouncer
+	metas     map[chunk.ChunkID]chunk.ChunkMeta
+	active    *chunk.ChunkMeta
+	sealCalls []chunk.ChunkID
+	ensured   []chunk.ChunkID
+	announcer *captureAnnouncer
 }
 
 func (f *idleActiveSweepFakeManager) Meta(id chunk.ChunkID) (chunk.ChunkMeta, error) {
@@ -1768,7 +1945,7 @@ type capturedSeal struct {
 }
 
 func (a *captureAnnouncer) AnnounceCreate(chunk.ChunkID, time.Time, time.Time, time.Time) {}
-func (a *captureAnnouncer) AnnounceBeginSeal(chunk.ChunkID)                                {}
+func (a *captureAnnouncer) AnnounceBeginSeal(chunk.ChunkID)                               {}
 func (a *captureAnnouncer) AnnounceSeal(id chunk.ChunkID, writeEnd time.Time, recordCount, bytes int64, _ time.Time, _ time.Time, _ time.Time, _ bool) {
 	a.sealed = append(a.sealed, capturedSeal{id: id, writeEnd: writeEnd, recordCount: recordCount, bytes: bytes})
 }
@@ -2023,7 +2200,7 @@ func TestSweepIdleActiveSkipsSealingAndSealedEntries(t *testing.T) {
 	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idSealed, idleStart, idleStart, idleStart)}); err != nil {
 		t.Fatalf("create sealed: %v", err)
 	}
-	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idSealed, idleStart, 1, 1, idleStart, idleStart, idleStart, false)}); err != nil {
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idSealed, idleStart, 1, 1, idleStart, idleStart, idleStart, false, idleStart)}); err != nil {
 		t.Fatalf("seal: %v", err)
 	}
 

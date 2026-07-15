@@ -332,7 +332,7 @@ func TestHTTPLookup_ResponsePath(t *testing.T) {
 	defer srv.Close()
 
 	h := NewHTTP(HTTPConfig{
-		URLTemplate:  srv.URL + "/{value}",
+		URLTemplate:   srv.URL + "/{value}",
 		ResponsePaths: []string{"$.data.user"},
 	})
 	result := h.LookupValues(context.Background(), map[string]string{"value": "x"})
@@ -356,7 +356,7 @@ func TestHTTPLookup_ResponsePathArray(t *testing.T) {
 	defer srv.Close()
 
 	h := NewHTTP(HTTPConfig{
-		URLTemplate:  srv.URL + "/{value}",
+		URLTemplate:   srv.URL + "/{value}",
 		ResponsePaths: []string{"$.results[0]"},
 	})
 	result := h.LookupValues(context.Background(), map[string]string{"value": "x"})
@@ -377,7 +377,7 @@ func TestHTTPLookup_ResponsePathMiss(t *testing.T) {
 	defer srv.Close()
 
 	h := NewHTTP(HTTPConfig{
-		URLTemplate:  srv.URL + "/{value}",
+		URLTemplate:   srv.URL + "/{value}",
 		ResponsePaths: []string{"$.data.user"},
 	})
 	result := h.LookupValues(context.Background(), map[string]string{"value": "x"})

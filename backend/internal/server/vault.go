@@ -48,31 +48,33 @@ type RemoteIndexer interface {
 
 // VaultServer implements the VaultService.
 type VaultServer struct {
-	orch              *orchestrator.Orchestrator
-	cfgStore           system.Store
-	factories          orchestrator.Factories
-	peerStats          PeerVaultStatsProvider
-	remoteChunkLister  RemoteChunkLister
-	remoteChunkWatcher RemoteChunkWatcher
-	remoteIndexer      RemoteIndexer
-	localNodeID        string
-	logger             *slog.Logger
+	orch                  *orchestrator.Orchestrator
+	cfgStore              system.Store
+	factories             orchestrator.Factories
+	peerStats             PeerVaultStatsProvider
+	remoteChunkLister     RemoteChunkLister
+	remotePipelineBacklog RemotePipelineBacklogGetter
+	remoteChunkWatcher    RemoteChunkWatcher
+	remoteIndexer         RemoteIndexer
+	localNodeID           string
+	logger                *slog.Logger
 }
 
 var _ gastrologv1connect.VaultServiceHandler = (*VaultServer)(nil)
 
 // NewVaultServer creates a new VaultServer.
-func NewVaultServer(orch *orchestrator.Orchestrator, cfgStore system.Store, factories orchestrator.Factories, peerStats PeerVaultStatsProvider, remoteChunkLister RemoteChunkLister, remoteChunkWatcher RemoteChunkWatcher, remoteIndexer RemoteIndexer, localNodeID string, logger *slog.Logger) *VaultServer {
+func NewVaultServer(orch *orchestrator.Orchestrator, cfgStore system.Store, factories orchestrator.Factories, peerStats PeerVaultStatsProvider, remoteChunkLister RemoteChunkLister, remotePipelineBacklog RemotePipelineBacklogGetter, remoteChunkWatcher RemoteChunkWatcher, remoteIndexer RemoteIndexer, localNodeID string, logger *slog.Logger) *VaultServer {
 	return &VaultServer{
-		orch:               orch,
-		cfgStore:           cfgStore,
-		factories:          factories,
-		peerStats:          peerStats,
-		remoteChunkLister:  remoteChunkLister,
-		remoteChunkWatcher: remoteChunkWatcher,
-		remoteIndexer:      remoteIndexer,
-		localNodeID:        localNodeID,
-		logger:             compVaultServer.Apply(logging.Default(logger)),
+		orch:                  orch,
+		cfgStore:              cfgStore,
+		factories:             factories,
+		peerStats:             peerStats,
+		remoteChunkLister:     remoteChunkLister,
+		remotePipelineBacklog: remotePipelineBacklog,
+		remoteChunkWatcher:    remoteChunkWatcher,
+		remoteIndexer:         remoteIndexer,
+		localNodeID:           localNodeID,
+		logger:                compVaultServer.Apply(logging.Default(logger)),
 	}
 }
 

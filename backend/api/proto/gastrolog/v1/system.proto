@@ -6,6 +6,7 @@ option go_package = "gastrolog/api/gen/gastrolog/v1;gastrologv1";
 
 import "google/protobuf/timestamp.proto";
 import "gastrolog/v1/storage.proto";
+import "gastrolog/v1/vault.proto";
 
 // SystemService provides configuration management.
 service SystemService {
@@ -116,7 +117,7 @@ service SystemService {
 
   // ValidateExpression parses and semantically validates a route match
   // expression. gastrolog-4kkoo (Phase 5): drives live editor feedback in
-  // the route filter UI — distinct from PutRoute's save-time validation.
+  // the route match-expression editor — distinct from PutRoute's save-time validation.
   // The check is read-only and node-local; no Raft Apply.
   rpc ValidateExpression(ValidateExpressionRequest) returns (ValidateExpressionResponse);
 
@@ -186,7 +187,7 @@ message GetSystemResponse {
   repeated ManagedFileInfo managed_files = 7;
   // Committed log index on the cluster-ctl Raft group (monotonic). Used by clients
   // to avoid regressing cached replicated state with stale reads.
-  uint64 system_raft_index = 8;
+  uint64 cluster_ctl_raft_index = 8;
   repeated CloudService cloud_services = 9;
   repeated NodeStorageConfig node_storage_configs = 10;
   // Per-component log level configuration. Empty default_level means
@@ -251,6 +252,19 @@ message VaultConfig {
   string cache_budget = 14;                  // max cache size (e.g. "1GB", "500MB"; default: "1GiB")
   string cache_ttl = 15;                     // eviction TTL duration (e.g. "1h", "7d"); only for ttl mode
   string retention_disposition = 16;         // "delete" (default) or "route" — what retention does with aged-out records
+  // Per-vault disk guard thresholds on the vault's backing volume, in
+  // bytes of FREE space. 0 = inherit the node defaults (fraction-based
+  // with share clamps; env-overridable). Warn raises the disk-space
+  // alarm for this vault; floor suspends admission for records destined
+  // to this vault while other vaults keep ingesting.
+  uint64 disk_free_warn_bytes = 17;
+  uint64 disk_free_floor_bytes = 18;
+  // Per-node byte budget for this vault's whole local disk claim (sealed
+  // chunks, indexes, and pipeline segment backlog). 0 = unlimited. At the
+  // budget, admission for records destined to this vault is refused
+  // cluster-wide (cap-and-refuse) until retention or releases drain it —
+  // the hard backstop behind a size retention policy's cap-and-drain.
+  uint64 max_size_bytes = 19;
 }
 
 message RouteDestination {
@@ -298,7 +312,7 @@ message RouteStage {
   }
 }
 
-// MatchStage gates the route on a boolean filter expression. The
+// MatchStage gates the route on a boolean match expression. The
 // expression is evaluated against the record (with system-injected
 // synthetic attributes available via reserved-prefix keys: _source,
 // _ingester, _vault, _reason).
@@ -310,7 +324,7 @@ message MatchStage {
 enum IngesterMode {
   INGESTER_MODE_UNSPECIFIED = 0;
   INGESTER_MODE_PASSIVE = 1;  // Listeners — bind a port, passively accept incoming data.
-  INGESTER_MODE_ACTIVE = 2;   // Collectors — actively pull from data sources.
+  INGESTER_MODE_ACTIVE = 2;   // Actively pull from upstream systems (Kafka consumer, file tail, etc.).
 }
 
 message IngesterConfig {
@@ -335,14 +349,17 @@ message IngesterConfig {
 message RotationPolicyConfig {
   int64 max_bytes = 1;
   int64 max_records = 2;
-  int64 max_age_seconds = 3;
+  // Nanoseconds: durations are stored at full precision — a seconds field
+  // silently truncated sub-second input (e.g. "1004ms").
+  int64 max_age_nanos = 3;
   string cron = 4;
   bytes id = 5;
   string name = 6;
 }
 
 message RetentionPolicyConfig {
-  int64 max_age_seconds = 1;
+  // Nanoseconds (see RotationPolicyConfig.max_age_nanos).
+  int64 max_age_nanos = 1;
   int64 max_bytes = 2;
   int64 max_chunks = 3;
   bytes id = 4;
@@ -603,7 +620,13 @@ message StaticLookupRow {
 
 message ClusterSettings {
   string broadcast_interval = 1; // Go duration string, e.g. "5s". Default: "5s".
-  string heartbeat_interval = 2; // Go duration string, e.g. "1s". Default: "1s". Lightweight liveness ping; PeerState TTL is 4× this.
+  string heartbeat_interval = 2; // Go duration string, e.g. "1s". Default: "1s". Lightweight liveness ping; PeerState TTL is 8× this (defaultPeerTTLMultiplier).
+  // Per-vault pipeline backlog budget in bytes (unreleased completed segments
+  // in the vault-ctl registry). When a vault's backlog reaches the budget,
+  // ingest admission for that vault is refused (retryable backpressure) until
+  // chunking drains it below the budget. The operating bound that engages
+  // BEFORE disk pressure; the disk guard remains the backstop. 0 = unbounded.
+  uint64 pipeline_backlog_max_bytes = 3;
 }
 
 message GetSettingsResponse {
@@ -671,6 +694,7 @@ message PutLookupSettings {
 message PutClusterSettings {
   optional string broadcast_interval = 1;
   optional string heartbeat_interval = 2;
+  optional uint64 pipeline_backlog_max_bytes = 3;
 }
 
 message PutServiceSettingsRequest {
@@ -682,11 +706,11 @@ message PutServiceSettingsRequest {
 }
 
 // SettingsMutationEcho is returned after successful server-settings mutations so
-// clients can mirror GetSettings without a follow-up RPC. system_raft_index matches
-// GetSystemResponse.system_raft_index for cache coherence.
+// clients can mirror GetSettings without a follow-up RPC. cluster_ctl_raft_index matches
+// GetSystemResponse.cluster_ctl_raft_index for cache coherence.
 message SettingsMutationEcho {
   GetSettingsResponse settings = 1;
-  uint64 system_raft_index = 2;
+  uint64 cluster_ctl_raft_index = 2;
 }
 
 message PutServiceSettingsResponse {
@@ -956,36 +980,41 @@ message WatchSystemRequest {}
 message WatchSystemResponse {
   // Committed log index on the cluster-ctl Raft group when this notification fired.
   // Clients should only invalidate or refetch when this index exceeds the
-  // highest system_raft_index they already hold from a fetch or mutation.
-  uint64 system_raft_index = 1;
+  // highest cluster_ctl_raft_index they already hold from a fetch or mutation.
+  uint64 cluster_ctl_raft_index = 1;
 }
 
 message GetRouteStatsRequest {}
 
 message GetRouteStatsResponse {
   // Global counters since process start.
-  int64 total_ingested = 1;   // total records entering ingest()
-  int64 total_dropped = 2;    // records matching no filter (silently lost)
-  int64 total_routed = 3;     // records delivered to at least one vault
-  bool filter_set_active = 4; // false = no routes compiled, all records dropped
+  int64 total_routed = 1;     // total records entering routing (matched + unmatched)
+  int64 total_unmatched = 2;  // records that matched no route (intentional, counted drop)
+  int64 total_matched = 3;    // records that matched a route and were delivered to at least one vault
+  bool route_table_active = 4; // false = no route table published; every record goes unmatched
 
   // Per-vault destination counters.
   repeated VaultRouteStats vault_stats = 5;
 
   // Per-route counters.
   repeated PerRouteStats route_stats = 6;
+
+  // Cluster-total routing throughput: per-horizon sums of every node's
+  // rolling-window rates from the NodeStats broadcast. Sparks are omitted
+  // at cluster level — per-node tick phases differ, so element-wise sums
+  // would fabricate a series no node observed (gastrolog-4eh5ns).
+  gastrolog.v1.ThroughputRate routed_rate = 7;
+  gastrolog.v1.ThroughputRate matched_rate = 8;
 }
 
 message VaultRouteStats {
   bytes vault_id = 1;
-  int64 records_matched = 2;   // records routed to this vault
-  int64 records_forwarded = 3; // subset sent to a remote node
+  int64 records_matched = 2; // records that matched a route targeting this vault
 }
 
 message PerRouteStats {
   bytes route_id = 1;
-  int64 records_matched = 2;   // records matched by this route
-  int64 records_forwarded = 3; // subset sent to remote nodes
+  int64 records_matched = 2; // records matched by this route
 }
 
 // --- Managed Files ---

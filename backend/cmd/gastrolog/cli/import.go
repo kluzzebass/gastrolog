@@ -282,7 +282,7 @@ func importServerSettings(ctx context.Context, client *server.Client, doc *expor
 }
 
 func buildPutServiceSettingsRequest(doc *exportDoc) *v1.PutServiceSettingsRequest {
-	if doc.Auth == nil && doc.Query == nil && doc.Scheduler == nil && doc.TLS == nil {
+	if doc.Auth == nil && doc.Query == nil && doc.Scheduler == nil && doc.TLS == nil && doc.Cluster == nil {
 		return nil
 	}
 	req := &v1.PutServiceSettingsRequest{}
@@ -298,7 +298,24 @@ func buildPutServiceSettingsRequest(doc *exportDoc) *v1.PutServiceSettingsReques
 	if doc.TLS != nil {
 		req.Tls = buildTLSSettings(doc.TLS)
 	}
+	if doc.Cluster != nil {
+		req.Cluster = buildClusterSettings(doc.Cluster)
+	}
 	return req
+}
+
+func buildClusterSettings(c *clusterExport) *v1.PutClusterSettings {
+	pc := &v1.PutClusterSettings{}
+	if c.BroadcastInterval != "" {
+		pc.BroadcastInterval = &c.BroadcastInterval
+	}
+	if c.HeartbeatInterval != "" {
+		pc.HeartbeatInterval = &c.HeartbeatInterval
+	}
+	if c.PipelineBacklogMaxBytes != 0 {
+		pc.PipelineBacklogMaxBytes = &c.PipelineBacklogMaxBytes
+	}
+	return pc
 }
 
 func buildPutMaxMindSettingsRequest(doc *exportDoc) *v1.PutMaxMindSettingsRequest {

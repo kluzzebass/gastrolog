@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/pipeline/ingestion"
 )
 
 func TestDigest_RFC3339(t *testing.T) {
@@ -27,7 +27,7 @@ func TestDigest_RFC3339(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			msg := &orchestrator.IngestMessage{
+			msg := &ingestion.IngestMessage{
 				Raw: []byte(tt.raw),
 			}
 			d.Digest(msg)
@@ -78,7 +78,7 @@ func TestDigest_AppleUnified(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			msg := &orchestrator.IngestMessage{
+			msg := &ingestion.IngestMessage{
 				Raw: []byte(tt.raw),
 			}
 			d.Digest(msg)
@@ -116,7 +116,7 @@ func TestDigest_SyslogBSD(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			msg := &orchestrator.IngestMessage{
+			msg := &ingestion.IngestMessage{
 				Raw: []byte(tt.raw),
 			}
 			d.Digest(msg)
@@ -164,7 +164,7 @@ func TestDigest_CLF(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			msg := &orchestrator.IngestMessage{
+			msg := &ingestion.IngestMessage{
 				Raw: []byte(tt.raw),
 			}
 			d.Digest(msg)
@@ -205,7 +205,7 @@ func TestDigest_GoRuby(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			msg := &orchestrator.IngestMessage{
+			msg := &ingestion.IngestMessage{
 				Raw: []byte(tt.raw),
 			}
 			d.Digest(msg)
@@ -244,7 +244,7 @@ func TestDigest_Ctime(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			msg := &orchestrator.IngestMessage{
+			msg := &ingestion.IngestMessage{
 				Raw: []byte(tt.raw),
 			}
 			d.Digest(msg)
@@ -275,7 +275,7 @@ func TestDigest_SkipsNonZeroSourceTS(t *testing.T) {
 	t.Parallel()
 	d := New()
 	existing := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
-	msg := &orchestrator.IngestMessage{
+	msg := &ingestion.IngestMessage{
 		Raw:      []byte("2024-01-15T10:30:45Z some log"),
 		SourceTS: existing,
 	}
@@ -302,7 +302,7 @@ func TestDigest_NoMatch(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			msg := &orchestrator.IngestMessage{
+			msg := &ingestion.IngestMessage{
 				Raw: []byte(tt.raw),
 			}
 			d.Digest(msg)
@@ -319,7 +319,7 @@ func TestDigest_EarliestPositionWins(t *testing.T) {
 	// Syslog starts earlier, so it should win.
 	d := New()
 	raw := "Jan 15 10:30:45 host app: got event at 2099-06-01T12:00:00Z"
-	msg := &orchestrator.IngestMessage{
+	msg := &ingestion.IngestMessage{
 		Raw: []byte(raw),
 	}
 	d.Digest(msg)
@@ -337,7 +337,7 @@ func TestDigest_RFC3339BeforeSyslog(t *testing.T) {
 	// RFC 3339 at position 0, syslog BSD later — RFC 3339 should win.
 	d := New()
 	raw := "2024-06-01T12:00:00Z Jan 15 10:30:45 host msg"
-	msg := &orchestrator.IngestMessage{
+	msg := &ingestion.IngestMessage{
 		Raw: []byte(raw),
 	}
 	d.Digest(msg)

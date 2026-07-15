@@ -25,8 +25,8 @@ func FuzzExtractLevel(f *testing.F) {
 	f.Add([]byte("level="))
 	f.Add([]byte(`level="`))
 	f.Add([]byte("level=UNKNOWN_VALUE"))
-	f.Add([]byte("alevel=error"))   // mid-word, should not match
-	f.Add([]byte("xlevelx=error"))  // surrounded by word chars
+	f.Add([]byte("alevel=error"))  // mid-word, should not match
+	f.Add([]byte("xlevelx=error")) // surrounded by word chars
 
 	f.Fuzz(func(t *testing.T, raw []byte) {
 		result := extractLevel(raw)

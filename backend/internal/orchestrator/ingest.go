@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"gastrolog/internal/glid"
@@ -11,274 +10,10 @@ import (
 	"gastrolog/internal/system"
 )
 
-// Ingest filters a record to matching chunk managers.
-// If a chunk is sealed as a result of the append, compression and index
-// builds are scheduled asynchronously via appendRecord.
-//
-// This is the direct ingestion API for pre-constructed records.
-// For ingester-based ingestion, use Start() which runs an ingest loop
-// that receives IngestMessages, resolves identity, and calls this internally.
-//
-// All record writes (local ingest, cluster-forwarded, and import) flow
-// through appendRecord, which handles seal detection and post-seal work.
-//
-// Error semantics: This is fan-out with partial failure. If CM A succeeds
-// and CM B fails, the record is persisted in A but not B, and the error
-// from B is returned. There is no rollback.
-func (o *Orchestrator) Ingest(rec chunk.Record) error {
-	return o.IngestWithSource(rec, SourceContext{Kind: SourceIngest})
-}
-
-// IngestWithSource ingests a record while tagging it with the given
-// SourceContext. The synthetic attrs (`_source`, `_ingester`, etc.) are
-// overlaid on rec.Attrs only at routing-evaluation time — they don't
-// persist with the record.
-//
-// gastrolog-4kkoo (Phase 5): callers that have the ingester or
-// retention-source identity should use this entry point. Direct
-// callers without source context fall through to Ingest with
-// {Kind: SourceIngest, IngesterID: zero}.
-func (o *Orchestrator) IngestWithSource(rec chunk.Record, src SourceContext) error {
-	pa, err := o.ingestWithSource(rec, src)
-	if err != nil {
-		return err
-	}
-	return o.flushRecordRouteForwards(context.Background(), pa, rec)
-}
-
-// ingest is the internal ingest implementation. Backwards-compatible
-// shim — defaults source to {Kind: SourceIngest} for callers that
-// haven't migrated to ingestWithSource.
-func (o *Orchestrator) ingest(rec chunk.Record) (*pendingAcks, error) {
-	return o.ingestWithSource(rec, SourceContext{Kind: SourceIngest})
-}
-
-// ingestWithSource is the source-aware ingest path. It threads a
-// SourceContext through to ingestLocked so synthetic attributes
-// (_source, _ingester, _vault, _reason) drive route evaluation.
-//
-// Returns pendingAcks bundling the sync work an ack-gated record triggers:
-// local instance replication to followers, plus cross-node forwarding of
-// records matched to remote vaults. Both task kinds must complete before
-// the ack is delivered to the ingester. For non-ack-gated records that
-// match a remote vault, syncForwards is populated; the caller must run
-// flushRecordRouteForwards (outside o.mu) so the forward buffer can apply
-// backpressure instead of dropping. See gastrolog-27zvt.
-func (o *Orchestrator) ingestWithSource(rec chunk.Record, src SourceContext) (*pendingAcks, error) {
-	pa, deferredRemotes, err := o.ingestLocked(rec, src)
-	// Fire-and-forget remote replication happens OUTSIDE the orchestrator
-	// lock so a slow or paused follower cannot starve writers (retention,
-	// reconfig). See gastrolog-5oofa.
-	for _, remotes := range deferredRemotes {
-		o.fireAndForgetRemote(remotes, rec)
-	}
-	return pa, err
-}
-
-// ingestLocked is the mu-protected portion of ingest. It returns the
-// pendingAcks for ack-gated sync work and a list of remote-target sets
-// (one per local vault append) that the caller must dispatch via
-// fireAndForgetRemote AFTER releasing the lock.
-//
-// gastrolog-4kkoo (Phase 5): src carries the synthetic-attribute fields
-// (_source, _ingester, _vault, _reason) that route expressions can
-// match against. The synthetic overlay is applied per match call —
-// rec.Attrs itself is not mutated.
-func (o *Orchestrator) ingestLocked(rec chunk.Record, src SourceContext) (*pendingAcks, [][]remoteForwardTarget, error) {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-
-	o.routeStats.Ingested.Add(1)
-
-	if len(o.vaults) == 0 && o.forwarder == nil {
-		o.routeStats.Dropped.Add(1)
-		return nil, nil, ErrNoChunkManagers
-	}
-
-	if o.routeSet == nil {
-		o.routeStats.Dropped.Add(1)
-		return nil, nil, nil // No routes configured — drop the record.
-	}
-
-	matches := o.routeSet.MatchWithSource(rec.Attrs, src)
-	if len(matches) == 0 {
-		o.routeStats.Dropped.Add(1)
-		return nil, nil, nil
-	}
-
-	// Write records first, then update stats only on success.
-	routed := false
-	var pa *pendingAcks
-	var deferredRemotes [][]remoteForwardTarget
-	for _, t := range matches {
-		if t.NodeID != "" {
-			var err error
-			pa, err = o.handleRemoteVaultMatch(pa, t, rec)
-			if err != nil {
-				return pa, deferredRemotes, err
-			}
-			routed = true
-			continue
-		}
-		task, remotes, err := o.appendLocal(t.VaultID, rec)
-		if err != nil {
-			if errors.Is(err, ErrVaultDisabled) {
-				continue // Skip disabled vaults during ingestion.
-			}
-			return pa, deferredRemotes, err
-		}
-		if task != nil {
-			pa = pa.addReplication(*task)
-		}
-		if len(remotes) > 0 {
-			deferredRemotes = append(deferredRemotes, remotes)
-		}
-		vs := o.getOrCreateVaultRouteStats(t.VaultID)
-		vs.Matched.Add(1)
-		if t.RouteID != glid.Nil {
-			rs := o.getOrCreatePerRouteStats(t.RouteID)
-			rs.Matched.Add(1)
-		}
-		routed = true
-	}
-	if routed {
-		o.routeStats.Routed.Add(1)
-	}
-	return pa, deferredRemotes, nil
-}
-
-// handleRemoteVaultMatch updates route stats and queues cross-node forwarding
-// for a filter match whose vault lives on another node. Caller holds o.mu.RLock.
-func (o *Orchestrator) handleRemoteVaultMatch(pa *pendingAcks, t MatchResult, rec chunk.Record) (*pendingAcks, error) {
-	if rec.WaitForReplica {
-		pa = pa.addForward(forwardTask{nodeID: t.NodeID, vaultID: t.VaultID})
-	} else {
-		if o.forwarder == nil {
-			o.routeStats.Dropped.Add(1)
-			return pa, errors.New("remote vault route requires record forwarder")
-		}
-		pa = pa.addSyncForward(forwardTask{nodeID: t.NodeID, vaultID: t.VaultID})
-	}
-	vs := o.getOrCreateVaultRouteStats(t.VaultID)
-	vs.Matched.Add(1)
-	vs.Forwarded.Add(1)
-	if t.RouteID != glid.Nil {
-		rs := o.getOrCreatePerRouteStats(t.RouteID)
-		rs.Matched.Add(1)
-		rs.Forwarded.Add(1)
-	}
-	return pa, nil
-}
-
-// pendingAcks bundles the sync work that an ack-gated record triggers —
-// local instance replication to followers and cross-node forwarding of
-// records matched to remote vaults. Both must complete before the ack
-// is delivered to the ingester.
-//
-// Nil receiver is treated as empty; addReplication/addForward lazy-init
-// so callers don't have to check before appending.
-type pendingAcks struct {
-	replication  []replicationTask
-	forwards     []forwardTask // ack-gated cross-node; ackAfterReplication
-	syncForwards []forwardTask // non-ack cross-node; flushRecordRouteForwards
-}
-
-func (p *pendingAcks) addReplication(t replicationTask) *pendingAcks {
-	if p == nil {
-		p = &pendingAcks{}
-	}
-	p.replication = append(p.replication, t)
-	return p
-}
-
-func (p *pendingAcks) addForward(t forwardTask) *pendingAcks {
-	if p == nil {
-		p = &pendingAcks{}
-	}
-	p.forwards = append(p.forwards, t)
-	return p
-}
-
-func (p *pendingAcks) addSyncForward(t forwardTask) *pendingAcks {
-	if p == nil {
-		p = &pendingAcks{}
-	}
-	p.syncForwards = append(p.syncForwards, t)
-	return p
-}
-
-// isEmpty reports whether there is any sync work to wait on before acking.
-func (p *pendingAcks) isEmpty() bool {
-	return p == nil || (len(p.replication) == 0 && len(p.forwards) == 0)
-}
-
-// forwardTask is a pending cross-node forward for a record that matched
-// a filter targeting a vault on another node. Ack-gated: ackAfterReplication
-// runs ForwardSync. Non-ack: flushRecordRouteForwards runs ForwardSync.
-type forwardTask struct {
-	nodeID  string
-	vaultID glid.GLID
-}
-
-// getOrCreateVaultRouteStats returns the per-vault route stats, creating if needed.
-func (o *Orchestrator) getOrCreateVaultRouteStats(vaultID glid.GLID) *VaultRouteStats {
-	if v, ok := o.vaultRouteStats.Load(vaultID); ok {
-		return v.(*VaultRouteStats)
-	}
-	v, _ := o.vaultRouteStats.LoadOrStore(vaultID, &VaultRouteStats{})
-	return v.(*VaultRouteStats)
-}
-
-// getOrCreatePerRouteStats returns the per-route stats, creating if needed.
-func (o *Orchestrator) getOrCreatePerRouteStats(routeID glid.GLID) *PerRouteStats {
-	if v, ok := o.perRouteStats.Load(routeID); ok {
-		return v.(*PerRouteStats)
-	}
-	v, _ := o.perRouteStats.LoadOrStore(routeID, &PerRouteStats{})
-	return v.(*PerRouteStats)
-}
-
-// appendLocal appends a record to a local vault. Returns the task (non-nil
-// when an ack-gated record needs sync forwarding) and the remote targets
-// that must be notified via fireAndForgetRemote.
-//
-// MUST be called with o.mu held. The caller is responsible for dispatching
-// remotes AFTER releasing o.mu (fireAndForgetRemote waits for per-target
-// RPCs to complete and must not starve writers). See gastrolog-5oofa.
-func (o *Orchestrator) appendLocal(vaultID glid.GLID, rec chunk.Record) (*replicationTask, []remoteForwardTarget, error) {
-	_, _, task, remotes, err := o.appendRecord(vaultID, rec)
-	if err != nil {
-		o.logger.Error("append to vault failed", "vault", vaultID, "error", err)
-	}
-	return task, remotes, err
-}
-
-// flushRecordRouteForwards delivers non-ack-gated cross-node vault routes
-// queued in pa.syncForwards. Must run outside o.mu (after ingest returns).
-// Blocks until each record is accepted by the per-node forward buffer or
-// ctx / forwarder shutdown. Skips silently during drain shutdown (same
-// rationale as fireAndForgetRemote — local durability is already settled).
-func (o *Orchestrator) flushRecordRouteForwards(ctx context.Context, pa *pendingAcks, rec chunk.Record) error {
-	if pa == nil || len(pa.syncForwards) == 0 || o.forwarder == nil {
-		return nil
-	}
-	if o.shuttingDown() {
-		return nil
-	}
-	for _, f := range pa.syncForwards {
-		if err := o.forwarder.ForwardSync(ctx, f.nodeID, f.vaultID, []chunk.Record{rec}); err != nil {
-			return fmt.Errorf("forward to %s: %w", f.nodeID, err)
-		}
-	}
-	return nil
-}
-
 // postSealWork schedules the post-seal pipeline for a newly sealed chunk.
-// Safe to call from any context (cron rotation, background sweep, etc.) —
-// acquires the orchestrator lock internally.
+// Safe to call from any context (sealed-chunk import, lifecycle reconciler,
+// leader-triggered SealActive) — acquires the orchestrator lock internally.
 func (o *Orchestrator) postSealWork(vaultID glid.GLID, cm chunk.ChunkManager, chunkID chunk.ChunkID) {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
 	o.schedulePostSeal(vaultID, cm, chunkID)
 	// Notify WatchChunks subscribers: the chunk's sealed flag has changed.
 	// Fetch the post-seal meta so the event carries the final state instead
@@ -294,8 +29,24 @@ func (o *Orchestrator) postSealWork(vaultID glid.GLID, cm chunk.ChunkManager, ch
 // If the chunk manager implements ChunkPostSealProcessor, the entire pipeline runs
 // as one sequential job. Otherwise falls back to compress-only for non-file managers.
 // After the pipeline completes, sealed-chunk replication is triggered for leader vaults.
+//
+// Self-locking: callers must NOT hold o.mu. The old contract (callers wrap in
+// RLock for the vault-map read, while isPipelineIngestVault re-RLocked
+// internally) deadlocked the node whenever a writer (DrainVault, retention
+// sweep, config reload) queued between the two acquisitions — RWMutex blocks
+// recursive RLock behind a waiting writer. Found via the gastrolog-38snf4
+// gate forensics (TestDrainConcurrentWithIngestion 10-minute hang).
 func (o *Orchestrator) schedulePostSeal(vaultID glid.GLID, cm chunk.ChunkManager, chunkID chunk.ChunkID) {
-	followerTargets := o.followerReplicationTargets(vaultID, cm)
+	o.mu.RLock()
+	_, pipeline := o.pipelineVaults[vaultID]
+	var followerTargets []system.ReplicationTarget
+	if !pipeline {
+		followerTargets = o.followerReplicationTargetsLocked(vaultID, cm)
+	}
+	o.mu.RUnlock()
+	if pipeline {
+		return
+	}
 
 	processor, ok := cm.(chunk.ChunkPostSealProcessor)
 	if ok {
@@ -331,10 +82,10 @@ func (o *Orchestrator) schedulePostSeal(vaultID glid.GLID, cm chunk.ChunkManager
 	o.scheduleReplication(vaultID, chunkID, followerTargets)
 }
 
-// followerReplicationTargets returns the follower targets for the vault that
-// owns the given ChunkManager. Returns nil if not found or if the vault is a
-// follower (followers don't replicate further).
-func (o *Orchestrator) followerReplicationTargets(vaultID glid.GLID, cm chunk.ChunkManager) []system.ReplicationTarget {
+// followerReplicationTargetsLocked returns the follower targets for the vault
+// that owns the given ChunkManager. Returns nil if not found or if the vault
+// is a follower (followers don't replicate further). Caller holds o.mu.
+func (o *Orchestrator) followerReplicationTargetsLocked(vaultID glid.GLID, cm chunk.ChunkManager) []system.ReplicationTarget {
 	vault := o.vaults[vaultID]
 	if vault == nil {
 		return nil

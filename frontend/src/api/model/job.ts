@@ -8,6 +8,7 @@ import type { Job as JobProto } from "../gen/gastrolog/v1/job_pb";
 import { JobKind, JobStatus } from "../gen/gastrolog/v1/job_pb";
 import type { Timestamp } from "@bufbuild/protobuf";
 import { type EntityID, idFromBytes } from "./id";
+import { formatJobSchedule } from "../../utils/jobSchedule";
 
 /** Badge variant used for the per-job status pill. */
 export type JobStatusVariant = "muted" | "info" | "copper" | "error";
@@ -49,9 +50,19 @@ export class Job {
     this.nextRun = proto.nextRun;
   }
 
-  /** Description → name → id. */
+  /** Description → name → id (tasks and expandable headers). */
   get displayLabel(): string {
     return this.description || this.name || this.id;
+  }
+
+  /** Short cron-job row label — name only; see help for what each job does. */
+  get scheduleLabel(): string {
+    return this.name || this.id;
+  }
+
+  /** Canonical 6-field cron for inspector display. */
+  get displaySchedule(): string {
+    return formatJobSchedule(this.schedule);
   }
 
   get isTask(): boolean {

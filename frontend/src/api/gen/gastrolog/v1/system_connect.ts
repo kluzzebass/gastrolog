@@ -394,7 +394,7 @@ export const SystemService = {
     /**
      * ValidateExpression parses and semantically validates a route match
      * expression. gastrolog-4kkoo (Phase 5): drives live editor feedback in
-     * the route filter UI — distinct from PutRoute's save-time validation.
+     * the route match-expression editor — distinct from PutRoute's save-time validation.
      * The check is read-only and node-local; no Raft Apply.
      *
      * @generated from rpc gastrolog.v1.SystemService.ValidateExpression

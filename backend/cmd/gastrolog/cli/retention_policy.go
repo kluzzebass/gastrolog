@@ -44,12 +44,12 @@ func newRetentionPolicyListCmd() *cobra.Command {
 			for _, rp := range resp.Msg.RetentionPolicies {
 				rows = append(rows, []string{
 					glid.FromBytes(rp.Id).String(), rp.Name,
-					formatInt64(rp.MaxAgeSeconds),
-					formatInt64(rp.MaxBytes),
+					formatDurationCell(rp.MaxAgeNanos),
+					formatBytesCell(rp.MaxBytes),
 					formatInt64(rp.MaxChunks),
 				})
 			}
-			p.table([]string{"ID", "NAME", "MAX AGE (s)", "MAX BYTES", "MAX CHUNKS"}, rows)
+			p.table([]string{"ID", "NAME", "MAX AGE", "MAX BYTES", "MAX CHUNKS"}, rows)
 			return nil
 		},
 	}
@@ -83,8 +83,8 @@ func newRetentionPolicyGetCmd() *cobra.Command {
 					p.kv([][2]string{
 						{"ID", glid.FromBytes(rp.Id).String()},
 						{"Name", rp.Name},
-						{"Max Age (s)", formatInt64(rp.MaxAgeSeconds)},
-						{"Max Bytes", formatInt64(rp.MaxBytes)},
+						{"Max Age", formatDurationCell(rp.MaxAgeNanos)},
+						{"Max Bytes", formatBytesCell(rp.MaxBytes)},
 						{"Max Chunks", formatInt64(rp.MaxChunks)},
 					})
 					return nil
@@ -123,15 +123,18 @@ func newRetentionPolicyCreateCmd() *cobra.Command {
 			}
 
 			if cmd.Flags().Changed("max-age") {
-				maxAgeStr, _ := cmd.Flags().GetString("max-age")
-				if maxAgeStr != "" {
-					cfg.MaxAgeSeconds = parseDurationSeconds(maxAgeStr)
-				} else {
-					cfg.MaxAgeSeconds = 0
+				v, err := maxAgeFlagNanos(cmd)
+				if err != nil {
+					return err
 				}
+				cfg.MaxAgeNanos = v
 			}
 			if cmd.Flags().Changed("max-bytes") {
-				cfg.MaxBytes, _ = cmd.Flags().GetInt64("max-bytes")
+				v, err := maxBytesFlagValue(cmd)
+				if err != nil {
+					return err
+				}
+				cfg.MaxBytes = v
 			}
 			if cmd.Flags().Changed("max-chunks") {
 				cfg.MaxChunks, _ = cmd.Flags().GetInt64("max-chunks")
@@ -152,7 +155,7 @@ func newRetentionPolicyCreateCmd() *cobra.Command {
 	}
 	cmd.Flags().String("name", "", "policy name (required)")
 	cmd.Flags().String("max-age", "", "max age (e.g. 3m, 1h, 30s)")
-	cmd.Flags().Int64("max-bytes", 0, "max bytes")
+	cmd.Flags().String("max-bytes", "", "max total size retained (e.g. \"50GB\", \"1GiB\"; empty = no limit)")
 	cmd.Flags().Int64("max-chunks", 0, "max chunks")
 	_ = cmd.MarkFlagRequired("name")
 	return cmd

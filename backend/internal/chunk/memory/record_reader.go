@@ -1,6 +1,10 @@
 package memory
 
-import "gastrolog/internal/chunk"
+import (
+	"errors"
+
+	"gastrolog/internal/chunk"
+)
 
 type recordReader struct {
 	records  []chunk.Record
@@ -41,8 +45,44 @@ func (r *recordReader) Seek(ref chunk.RecordRef) error {
 	return nil
 }
 
+func (r *recordReader) RecordCount() uint64 {
+	return uint64(len(r.records))
+}
+
+func (r *recordReader) ReadFanOutRecord(pos uint32) (chunk.Record, error) {
+	if int(pos) >= len(r.records) {
+		return chunk.Record{}, chunk.ErrNoMoreRecords
+	}
+	return r.records[pos], nil
+}
+
+func (r *recordReader) NextBatch(limit int) ([]chunk.Record, error) {
+	if limit <= 0 {
+		limit = 1
+	}
+	batch := make([]chunk.Record, 0, limit)
+	for len(batch) < limit {
+		rec, _, err := r.Next()
+		if errors.Is(err, chunk.ErrNoMoreRecords) {
+			if len(batch) == 0 {
+				return nil, chunk.ErrNoMoreRecords
+			}
+			return batch, nil
+		}
+		if err != nil {
+			return batch, err
+		}
+		batch = append(batch, rec)
+	}
+	return batch, nil
+}
+
 func (r *recordReader) Close() error {
 	return nil
 }
 
-var _ chunk.RecordCursor = (*recordReader)(nil)
+var (
+	_ chunk.RecordCursor       = (*recordReader)(nil)
+	_ chunk.RecordFanOutSource = (*recordReader)(nil)
+	_ chunk.RecordBatchReader  = (*recordReader)(nil)
+)

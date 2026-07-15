@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"gastrolog/internal/alert"
 	"io"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strconv"
 	"time"
 
@@ -15,12 +15,14 @@ import (
 	"gastrolog/internal/glid"
 	"gastrolog/internal/home"
 	"gastrolog/internal/logging"
+	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/raftwal"
 	"gastrolog/internal/system"
 	"gastrolog/internal/system/raftfsm"
 	"gastrolog/internal/system/raftstore"
 
 	petname "github.com/dustinkirkland/golang-petname"
+	"github.com/hashicorp/go-hclog"
 	hraft "github.com/hashicorp/raft"
 )
 
@@ -34,17 +36,14 @@ type raftStoreOpts struct {
 	ClusterTLS *cluster.ClusterTLS
 	Logger     *slog.Logger
 	FSMOpts    []raftfsm.Option
+	// Alerts receives the WAL space-reserve alarm. Optional (nil on the
+	// rejoin/rollback reopen paths, which predate an alert collector).
+	Alerts *alert.Collector
 
 	// transport is an optional pre-created Raft transport (used during rejoin
 	// when the cluster server has already created a fresh transport).
 	// When nil, a new transport is obtained from ClusterSrv.Transport().
 	transport hraft.Transport
-
-	// VaultCtlRaftSharesWAL is set only from the main Run path when cluster mode
-	// is enabled: vault-ctl Raft groups use the same raftwal instance as the
-	// system store, and serveAndAwaitShutdown closes it after system raft.
-	// Rejoin / rollback paths omit this so each store owns its WAL again.
-	VaultCtlRaftSharesWAL bool
 }
 
 // raftClusterCtlStore wraps a raftstore.Store with cleanup logic for the
@@ -54,8 +53,17 @@ type raftClusterCtlStore struct {
 	raftStore *raftstore.Store
 	raft      *hraft.Raft
 	wal       *raftwal.WAL
-	ownsWAL   bool
 	forwarder io.Closer // *cluster.Forwarder; nil for single-node
+	// liveness accumulates cluster-ctl Raft liveness events for the
+	// NodeStats broadcast (gastrolog-1io54g); vault groups have their own
+	// counters on the GroupManager.
+	liveness raftgroup.LivenessCounters
+}
+
+// RaftLivenessSources exposes the cluster-ctl group's liveness counters and
+// WAL for the node-level Raft liveness aggregation (gastrolog-1io54g).
+func (s *raftClusterCtlStore) RaftLivenessSources() (*raftgroup.LivenessCounters, *raftwal.WAL) {
+	return &s.liveness, s.wal
 }
 
 // WaitForLeader polls until any node in the cluster becomes leader or the
@@ -183,12 +191,41 @@ func (s *raftClusterCtlStore) Close() error {
 	// 4 entries) provide recovery; the log replay on restart is minimal.
 	future := s.raft.Shutdown()
 	err := future.Error()
-	if s.ownsWAL && s.wal != nil {
+	if s.wal != nil {
 		if cerr := s.wal.Close(); cerr != nil && err == nil {
 			err = cerr
 		}
 	}
 	return err
+}
+
+// walReserveAlarm builds the OnReserveState callback for a named WAL: losing
+// the space reserve raises a storage alarm (operator action: free disk space
+// NOW — without the reserve, a full volume panics Raft on the next term or
+// log write), and restoring it clears the alarm. Nil-tolerant on both alerts
+// and logger.
+func walReserveAlarm(alerts *alert.Collector, logger *slog.Logger, walName string) func(lost bool, err error) {
+	id := "wal-reserve:" + walName
+	return func(lost bool, err error) {
+		if !lost {
+			if logger != nil {
+				logger.Info("raft WAL space reserve restored", "wal", walName)
+			}
+			if alerts != nil {
+				alerts.Clear(id)
+			}
+			return
+		}
+		if logger != nil {
+			logger.Warn("raft WAL space reserve lost — consensus has no ENOSPC immunity until space frees",
+				"wal", walName, "error", err)
+		}
+		if alerts != nil {
+			alerts.Set(id, alert.Error, "storage", fmt.Sprintf(
+				"Raft WAL (%s) space reserve lost: %v. Free disk space now — without the reserve, a full volume crashes consensus on this node.",
+				walName, err))
+		}
+	}
 }
 
 // openRaftClusterCtlStore creates a raft-backed system store with WAL persistence.
@@ -198,9 +235,12 @@ func openRaftClusterCtlStore(opts raftStoreOpts) (*raftClusterCtlStore, error) {
 		return nil, fmt.Errorf("create raft directory: %w", err)
 	}
 
-	wal, err := raftwal.Open(filepath.Join(raftDir, "wal"))
+	walDir := opts.Home.ClusterCtlWALDir()
+	wal, err := raftwal.Open(walDir, raftwal.Config{
+		OnReserveState: walReserveAlarm(opts.Alerts, opts.Logger, "cluster-ctl"),
+	})
 	if err != nil {
-		return nil, fmt.Errorf("open system raft WAL: %w", err)
+		return nil, fmt.Errorf("open cluster-ctl raft WAL: %w", err)
 	}
 	gs := wal.GroupStore("cluster-ctl")
 
@@ -229,13 +269,15 @@ func openRaftClusterCtlStore(opts raftStoreOpts) (*raftClusterCtlStore, error) {
 		return nil, fmt.Errorf("create raft: %w", err)
 	}
 
-	observeLeaderChanges(r, opts.Logger)
+	ctlStore := &raftClusterCtlStore{raft: r, wal: wal}
+	clusterCtlLogger := logging.NewRaftGroupSlog(compRaft.Apply(opts.Logger), raftgroup.ClusterControlPlaneGroupID)
+	raftgroup.ObserveRaftDiagnostics(r, clusterCtlLogger, conf.LeaderLeaseTimeout, &ctlStore.liveness)
 
-	if err := bootstrapAndWaitForLeader(r, wal, tp, opts); err != nil {
+	if err := bootstrapAndWaitForLeader(r, wal, tp, opts, clusterCtlLogger); err != nil {
 		return nil, err
 	}
 
-	opts.Logger.Info("raft system store ready", "wal_dir", filepath.Join(raftDir, "wal"), "snapshots", clusterCtlSnapDir)
+	clusterCtlLogger.Info("raft system store ready", "wal_dir", walDir, "snapshots", clusterCtlSnapDir)
 
 	store := raftstore.New(r, fsm, 10*time.Second)
 
@@ -243,18 +285,13 @@ func openRaftClusterCtlStore(opts raftStoreOpts) (*raftClusterCtlStore, error) {
 	opts.ClusterSrv.SetApplyFn(func(ctx context.Context, data []byte) (uint64, error) {
 		return store.ApplyRaw(data)
 	})
-	fwd := cluster.NewForwarder(r, opts.ClusterTLS)
+	fwd := cluster.NewForwarder(r, opts.ClusterSrv.PeerConns())
 	store.SetForwarder(fwd)
 
-	ownsWAL := !opts.VaultCtlRaftSharesWAL
-	return &raftClusterCtlStore{
-		Store:     store,
-		raftStore: store,
-		raft:      r,
-		wal:       wal,
-		ownsWAL:   ownsWAL,
-		forwarder: fwd,
-	}, nil
+	ctlStore.Store = store
+	ctlStore.raftStore = store
+	ctlStore.forwarder = fwd
+	return ctlStore, nil
 }
 
 // newRaftConfig creates a hashicorp/raft config with cluster-ready timeouts.
@@ -265,40 +302,46 @@ func newRaftConfig(nodeID string, logger *slog.Logger) *hraft.Config {
 	// Wire Raft's internal hclog logger to the application's slog pipeline.
 	// This makes election events, heartbeat timeouts, and state transitions
 	// visible through the normal logging system (component "raft").
-	raftLogger := logging.NewHclogAdapter(compRaft.Apply(logger))
+	raftLogger := logging.NewRaftGroupHclog(compRaft.Apply(logger), raftgroup.ClusterControlPlaneGroupID)
 	// Suppress the noisy "entering follower state" log that fires on every
 	// heartbeat timeout cycle, even when the node remains a follower.
 	filtered := logging.FilterHclogMessages(raftLogger, "entering follower state")
-	// Downgrade noisy Raft messages to DEBUG: heartbeat/replication failures
-	// fire constantly when peers are unreachable, and snapshot lifecycle
-	// messages are routine housekeeping.
-	conf.Logger = logging.DowngradeHclogToDebug(filtered,
-		"failed to heartbeat",
-		"failed to appendEntries",
+	// Downgrade routine snapshot/pipeline noise. Do NOT downgrade
+	// "failed to contact" — that substring also matches the quorum
+	// step-down message and hides the primary leader-loss signal.
+	downgraded := logging.DowngradeHclogToDebug(
+		logging.EnsureHclogMinLevel(filtered, hclog.Warn,
+			"failed to contact quorum of nodes, stepping down",
+			"failed to contact",
+			"failed to heartbeat to",
+			"failed to appendEntries to",
+			"new leader elected, stepping down",
+		),
 		"failed to take snapshot",
 		"starting snapshot up to",
 		"snapshot complete up to",
 		"compacting logs",
+		"no logs to truncate",
 		"pipelining replication",
 		"aborting pipeline replication",
-		"failed to contact",
 		"failed to make requestVote RPC",
 	)
+	conf.Logger = downgraded
 	conf.LogOutput = nil
 
 	conf.SnapshotThreshold = 4
 	conf.SnapshotInterval = 30 * time.Second
 	conf.TrailingLogs = 64
 
-	conf.HeartbeatTimeout = 1000 * time.Millisecond
-	conf.ElectionTimeout = 1000 * time.Millisecond
-	conf.LeaderLeaseTimeout = 500 * time.Millisecond
+	conf.HeartbeatTimeout, conf.ElectionTimeout, conf.LeaderLeaseTimeout = raftgroup.RaftTimeouts(raftgroup.GroupConfig{
+		GroupID: raftgroup.ClusterControlPlaneGroupID,
+	})
 	return conf
 }
 
 // bootstrapAndWaitForLeader handles state-based Raft bootstrap and waits for
 // leadership when this node should become leader.
-func bootstrapAndWaitForLeader(r *hraft.Raft, boltStore io.Closer, transport hraft.Transport, opts raftStoreOpts) error {
+func bootstrapAndWaitForLeader(r *hraft.Raft, boltStore io.Closer, transport hraft.Transport, opts raftStoreOpts, logger *slog.Logger) error {
 	existing := r.GetConfiguration()
 	if err := existing.Error(); err != nil {
 		_ = r.Shutdown().Error()
@@ -312,7 +355,7 @@ func bootstrapAndWaitForLeader(r *hraft.Raft, boltStore io.Closer, transport hra
 	shouldBootstrap := needsBootstrap && !joining
 
 	if needsBootstrap && !shouldBootstrap {
-		opts.Logger.Info("raft: waiting to be added to cluster by leader")
+		logger.Info("waiting to be added to cluster by leader")
 	}
 
 	if shouldBootstrap {
@@ -326,52 +369,38 @@ func bootstrapAndWaitForLeader(r *hraft.Raft, boltStore io.Closer, transport hra
 			_ = boltStore.Close()
 			return fmt.Errorf("bootstrap raft: %w", err)
 		}
-		opts.Logger.Info("raft cluster bootstrapped", "node_id", opts.NodeID)
+		logger.Info("cluster bootstrapped", "node_id", opts.NodeID)
 	}
 
 	singleNode := len(servers) == 1 && string(servers[0].ID) == opts.NodeID
 	if shouldBootstrap || singleNode {
+		// The wait must scale with the configured failure-detector timing:
+		// hashicorp/raft randomizes the first election inside
+		// [ElectionTimeout, 2×ElectionTimeout], so a fixed wait shorter
+		// than that window makes bootstrap fail deterministically once an
+		// operator widens the timeouts (a 5s heartbeat knob broke every
+		// cluster init against the old hardcoded 5s).
+		_, electionTimeout, _ := raftgroup.RaftTimeouts(raftgroup.GroupConfig{
+			GroupID: raftgroup.ClusterControlPlaneGroupID,
+		})
+		wait := max(3*electionTimeout, 5*time.Second)
 		select {
 		case <-r.LeaderCh():
-			opts.Logger.Info("raft: leader elected", "node_id", opts.NodeID)
-		case <-time.After(5 * time.Second):
+			logger.Info("leader elected", "node_id", opts.NodeID)
+		case <-time.After(wait):
 			_ = r.Shutdown().Error()
 			_ = boltStore.Close()
-			return errors.New("timed out waiting for raft leadership")
+			return fmt.Errorf("timed out waiting for raft leadership after %s", wait)
 		}
 	}
 
 	return nil
 }
 
-// observeLeaderChanges registers a Raft observer that logs leader elections.
-// Uses blocking mode to guarantee observations are never silently dropped.
-func observeLeaderChanges(r *hraft.Raft, logger *slog.Logger) {
-	ch := make(chan hraft.Observation, 16)
-	r.RegisterObserver(hraft.NewObserver(ch, true, func(o *hraft.Observation) bool {
-		_, ok := o.Data.(hraft.LeaderObservation)
-		return ok
-	}))
-	go func() {
-		for obs := range ch {
-			if lo, ok := obs.Data.(hraft.LeaderObservation); ok {
-				if lo.LeaderID == "" {
-					logger.Info("cluster lost leader")
-				} else {
-					logger.Info("cluster leader elected",
-						"node_id", string(lo.LeaderID),
-						"addr", string(lo.LeaderAddr))
-				}
-			}
-		}
-	}()
-}
-
 // peerEvictor is the minimal contract the peer-removal observer needs —
 // anything with a Delete(nodeID string) method. Many cluster-local caches
 // satisfy it: PeerState, PeerJobState, PeerByteMetrics, Broadcaster (the
-// failure-suppression map), StatsCollector (per-peer rate windows), and
-// RecordForwarder (per-node goroutine + channel + alert).
+// failure-suppression map), and StatsCollector (per-peer rate windows).
 type peerEvictor interface {
 	Delete(nodeID string)
 }
@@ -417,8 +446,7 @@ func runPeerRemovalLoop(ctx context.Context, ch <-chan hraft.Observation, logger
 // peerCacheReconciler is the contract the periodic peer-cache
 // reconciler needs — a cache that can purge its own entries against
 // an authoritative membership set. Implementations: PeerState,
-// PeerJobState, PeerByteMetrics, Broadcaster, StatsCollector,
-// RecordForwarder.
+// PeerJobState, PeerByteMetrics, Broadcaster, StatsCollector.
 type peerCacheReconciler interface {
 	ReconcilePeers(keep map[string]struct{})
 }

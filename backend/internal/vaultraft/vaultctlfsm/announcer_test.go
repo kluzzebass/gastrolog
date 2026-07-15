@@ -1,7 +1,6 @@
 package vaultctlfsm
 
 import (
-	"context"
 	"net"
 	"testing"
 	"time"
@@ -16,7 +15,6 @@ import (
 
 	hraft "github.com/hashicorp/raft"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 )
 
@@ -25,6 +23,9 @@ const bufSize = 1 << 20
 // TestAnnouncerReplicatesMetadata verifies the full loop:
 // file.Manager (with Announcer) → Raft.Apply → FSM on all nodes.
 func TestAnnouncerReplicatesMetadata(t *testing.T) {
+	if testing.Short() {
+		t.Skip("spins up a real 3-node raft group and waits out election + replication timing; -short skips")
+	}
 	// Not parallel — Raft instances need clean sequential lifecycle.
 
 	const nodeCount = 3
@@ -33,6 +34,7 @@ func TestAnnouncerReplicatesMetadata(t *testing.T) {
 	// Set up transport + gRPC for each node.
 	type testNode struct {
 		transport *multiraft.Transport[string]
+		pool      *multiraft.DialerPeerPool
 		server    *grpc.Server
 		lis       *bufconn.Listener
 		manager   *raftgroup.GroupManager
@@ -45,7 +47,6 @@ func TestAnnouncerReplicatesMetadata(t *testing.T) {
 		srv := grpc.NewServer()
 		tp := multiraft.New(
 			hraft.ServerAddress(nodeIDs[i]),
-			[]grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
 			func(s string) []byte { return []byte(s) },
 			func(b []byte) string { return string(b) },
 		)
@@ -54,19 +55,15 @@ func TestAnnouncerReplicatesMetadata(t *testing.T) {
 		nodes[i] = testNode{transport: tp, server: srv, lis: lis}
 	}
 
-	// Wire bufconn dialers.
 	dialers := make(map[string]func() (net.Conn, error))
 	for i, n := range nodes {
 		l := n.lis
 		dialers[nodeIDs[i]] = func() (net.Conn, error) { return l.Dial() }
 	}
 	for i := range nodes {
-		nodes[i].transport.SetDialOptions([]grpc.DialOption{
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithContextDialer(func(_ context.Context, addr string) (net.Conn, error) {
-				return dialers[addr]()
-			}),
-		})
+		pool := multiraft.NewSimpleDialerPeerPool(dialers)
+		nodes[i].pool = pool
+		nodes[i].transport.SetPeerConnPool(pool)
 	}
 
 	// Create group managers and a 3-node Raft group with FSM.
@@ -107,6 +104,9 @@ func TestAnnouncerReplicatesMetadata(t *testing.T) {
 	t.Cleanup(func() {
 		for _, n := range nodes {
 			n.manager.Shutdown()
+			if n.pool != nil {
+				n.pool.Close()
+			}
 			n.server.Stop()
 			_ = n.transport.Close()
 		}
@@ -270,6 +270,9 @@ func (a *recordingApplier) Apply(_ []byte) error {
 // followers thinking the chunk is still Active, and any catchup
 // replication of the chunk would be misclassified.
 func TestAnnouncerSealingStateVisibleAcrossReplicas(t *testing.T) {
+	if testing.Short() {
+		t.Skip("spins up a real 3-node raft group and waits out election + replication timing; -short skips")
+	}
 	// Not parallel — same Raft sequencing constraints as the sibling
 	// TestAnnouncerReplicatesMetadata above.
 
@@ -278,6 +281,7 @@ func TestAnnouncerSealingStateVisibleAcrossReplicas(t *testing.T) {
 
 	type testNode struct {
 		transport *multiraft.Transport[string]
+		pool      *multiraft.DialerPeerPool
 		server    *grpc.Server
 		lis       *bufconn.Listener
 		manager   *raftgroup.GroupManager
@@ -290,7 +294,6 @@ func TestAnnouncerSealingStateVisibleAcrossReplicas(t *testing.T) {
 		srv := grpc.NewServer()
 		tp := multiraft.New(
 			hraft.ServerAddress(nodeIDs[i]),
-			[]grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
 			func(s string) []byte { return []byte(s) },
 			func(b []byte) string { return string(b) },
 		)
@@ -305,12 +308,9 @@ func TestAnnouncerSealingStateVisibleAcrossReplicas(t *testing.T) {
 		dialers[nodeIDs[i]] = func() (net.Conn, error) { return l.Dial() }
 	}
 	for i := range nodes {
-		nodes[i].transport.SetDialOptions([]grpc.DialOption{
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithContextDialer(func(_ context.Context, addr string) (net.Conn, error) {
-				return dialers[addr]()
-			}),
-		})
+		pool := multiraft.NewSimpleDialerPeerPool(dialers)
+		nodes[i].pool = pool
+		nodes[i].transport.SetPeerConnPool(pool)
 	}
 
 	members := make([]hraft.Server, nodeCount)
@@ -348,6 +348,9 @@ func TestAnnouncerSealingStateVisibleAcrossReplicas(t *testing.T) {
 	t.Cleanup(func() {
 		for _, n := range nodes {
 			n.manager.Shutdown()
+			if n.pool != nil {
+				n.pool.Close()
+			}
 			n.server.Stop()
 			_ = n.transport.Close()
 		}

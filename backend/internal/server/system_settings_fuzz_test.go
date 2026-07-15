@@ -12,14 +12,14 @@ func FuzzValidateTokenDurations(f *testing.F) {
 	f.Add("15m", "168h")
 	f.Add("1h", "24h")
 	f.Add("1m", "1h")
-	f.Add("30s", "1h")         // token too short
-	f.Add("2h", "1h")          // refresh shorter than token
-	f.Add("1h", "1h")          // equal durations
+	f.Add("30s", "1h")          // token too short
+	f.Add("2h", "1h")           // refresh shorter than token
+	f.Add("1h", "1h")           // equal durations
 	f.Add("not-a-duration", "") // invalid token duration
-	f.Add("", "bad")           // invalid refresh duration
-	f.Add("1h", "30m")         // refresh shorter than 1h minimum
-	f.Add("5m", "")            // only token set
-	f.Add("", "48h")           // only refresh set
+	f.Add("", "bad")            // invalid refresh duration
+	f.Add("1h", "30m")          // refresh shorter than 1h minimum
+	f.Add("5m", "")             // only token set
+	f.Add("", "48h")            // only refresh set
 	f.Add("999999h", "9999999h")
 
 	f.Fuzz(func(t *testing.T, tokenDur, refreshDur string) {
@@ -37,9 +37,9 @@ func FuzzValidateLookupNames(f *testing.F) {
 	f.Add("geo", "hosts", "city", "ips")
 	f.Add("dup", "dup", "", "")   // duplicate name across types
 	f.Add("", "", "", "")         // all empty — no lookups
-	f.Add("a", "b", "c", "d")    // all unique
+	f.Add("a", "b", "c", "d")     // all unique
 	f.Add("same", "", "", "same") // duplicate http + csv
-	f.Add("x", "x", "x", "x")   // all four the same
+	f.Add("x", "x", "x", "x")     // all four the same
 
 	f.Fuzz(func(t *testing.T, httpName, jsonName, mmdbName, csvName string) {
 		lc := system.LookupConfig{}

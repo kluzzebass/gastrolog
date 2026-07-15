@@ -2,8 +2,9 @@ package orchestrator_test
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"gastrolog/internal/glid"
+	"path/filepath"
 	"slices"
 	"sync/atomic"
 	"testing"
@@ -15,8 +16,23 @@ import (
 	indexmem "gastrolog/internal/index/memory"
 	"gastrolog/internal/memtest"
 	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/pipeline/routing"
 	"gastrolog/internal/query"
 )
+
+// mustNewTestOrch creates an orchestrator for external-package tests with a
+// segments directory under t.TempDir(), matching production's home.SegmentsDir().
+func mustNewTestOrch(t *testing.T, cfg orchestrator.Config) *orchestrator.Orchestrator {
+	t.Helper()
+	if cfg.SegmentsDir == "" {
+		cfg.SegmentsDir = filepath.Join(t.TempDir(), "segments")
+	}
+	orch, err := orchestrator.New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return orch
+}
 
 // recordCountPolicy creates a rotation policy for testing that rotates at maxRecords.
 func recordCountPolicy(maxRecords int64) chunk.RotationPolicy {
@@ -54,16 +70,12 @@ func newTestSetup(t *testing.T, maxRecords int64) (*orchestrator.Orchestrator, c
 	tracker := &trackingIndexManager{IndexManager: s.IM}
 
 	defaultID := glid.New()
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{})
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, tracker, s.QE))
 
 	// Set up a catch-all route so records are delivered to the vault.
-	cr, _ := orchestrator.CompileRoute(glid.New(), "all", 0, "*",
-		[]orchestrator.RouteDestination{{VaultID: defaultID}}, "fanout")
-	orch.SetRouteSet(orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{cr}))
+	cr, _ := routing.CompileRoute(glid.New(), "all", 0, "*", []glid.GLID{defaultID})
+	orch.SetTestRoutingTable(routing.NewTable([]*routing.Route{cr}))
 
 	return orch, s.CM, tracker, defaultID
 }
@@ -308,25 +320,19 @@ func TestSearchUnknownRegistry(t *testing.T) {
 }
 
 func TestIngestNoChunkManagers(t *testing.T) {
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{})
 
 	rec := chunk.Record{IngestTS: t1, Attrs: attrsA, Raw: []byte("test")}
-	err = orch.Ingest(rec)
+	err := orch.Ingest(rec)
 	if err != orchestrator.ErrNoChunkManagers {
 		t.Errorf("expected ErrNoChunkManagers, got %v", err)
 	}
 }
 
 func TestSearchNoQueryEngines(t *testing.T) {
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{})
 
-	_, _, err = orch.Search(context.Background(), glid.New(), query.Query{}, nil)
+	_, _, err := orch.Search(context.Background(), glid.New(), query.Query{}, nil)
 	if err != orchestrator.ErrNoQueryEngines {
 		t.Errorf("expected ErrNoQueryEngines, got %v", err)
 	}
@@ -415,40 +421,6 @@ func TestSearchWithContextViaOrchestrator(t *testing.T) {
 	}
 }
 
-// mockIngester is a test ingester that emits fixed messages.
-type mockIngester struct {
-	messages []orchestrator.IngestMessage
-	started  chan struct{}
-	stopped  chan struct{}
-}
-
-func newMockIngester(messages []orchestrator.IngestMessage) *mockIngester {
-	return &mockIngester{
-		messages: messages,
-		started:  make(chan struct{}),
-		stopped:  make(chan struct{}),
-	}
-}
-
-func (r *mockIngester) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
-	close(r.started)
-	defer close(r.stopped)
-
-	for _, msg := range r.messages {
-		// Set IngestTS to now, simulating when the ingester received the message.
-		msg.IngestTS = time.Now()
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case out <- msg:
-		}
-	}
-
-	// Wait for context cancellation.
-	<-ctx.Done()
-	return ctx.Err()
-}
-
 // blockingIngester blocks until context is cancelled.
 type blockingIngester struct {
 	started chan struct{}
@@ -469,6 +441,69 @@ func (r *blockingIngester) Run(ctx context.Context, out chan<- orchestrator.Inge
 	return ctx.Err()
 }
 
+// failOnceIngester fails its first run, then blocks until ctx is done — a
+// source that recovers on the pipeline's retry.
+type failOnceIngester struct {
+	attempts atomic.Int32
+}
+
+func (f *failOnceIngester) Run(ctx context.Context, _ chan<- orchestrator.IngestMessage) error {
+	if f.attempts.Add(1) == 1 {
+		return errors.New("source unavailable")
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+// TestIngesterAliveTracksErrorRetry pins the observability chain behind the
+// gastrolog-fjwhbr fix: a non-passive ingester whose run returns an error
+// drops its alive state (OnIngesterAlive false, IsIngesterRunning false — the
+// trigger for the ingester convergence sweep's ingester-not-running alert,
+// gastrolog-3mnjlo), and the pipeline retry re-arms the run so the alive state
+// comes back up, which is what lets the sweep clear the alert on recovery.
+func TestIngesterAliveTracksErrorRetry(t *testing.T) {
+	t.Parallel()
+
+	type aliveEvent struct {
+		id    glid.GLID
+		alive bool
+	}
+	events := make(chan aliveEvent, 16)
+	orch := mustNewTestOrch(t, orchestrator.Config{
+		OnIngesterAlive: func(id glid.GLID, alive bool) {
+			events <- aliveEvent{id: id, alive: alive}
+		},
+		IngesterRetryDelay: func(int) time.Duration { return 0 },
+	})
+
+	id := glid.New()
+	orch.RegisterIngester(id, "flaky", "mock", &failOnceIngester{})
+
+	if err := orch.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer orch.Stop()
+
+	next := func(want bool) {
+		t.Helper()
+		select {
+		case ev := <-events:
+			if ev.id != id || ev.alive != want {
+				t.Fatalf("alive event = %+v, want id=%v alive=%v", ev, id, want)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("timed out waiting for alive=%v event", want)
+		}
+	}
+
+	next(true)  // first run attempt
+	next(false) // run returned an error — the sweep would alert here
+	next(true)  // retry re-armed the run — the sweep clears on this
+	if !orch.IsIngesterRunning(id) {
+		t.Fatal("IsIngesterRunning must report true once the retried run holds")
+	}
+}
+
 func newIngesterTestSetup(t *testing.T) (*orchestrator.Orchestrator, chunk.ChunkManager) {
 	t.Helper()
 	s, _ := memtest.NewVault(chunkmem.Config{
@@ -476,107 +511,14 @@ func newIngesterTestSetup(t *testing.T) (*orchestrator.Orchestrator, chunk.Chunk
 	})
 
 	defaultID := glid.New()
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{})
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, s.IM, s.QE))
 
 	// Set up a catch-all route so records are delivered to the vault.
-	cr, _ := orchestrator.CompileRoute(glid.New(), "all", 0, "*",
-		[]orchestrator.RouteDestination{{VaultID: defaultID}}, "fanout")
-	orch.SetRouteSet(orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{cr}))
+	cr, _ := routing.CompileRoute(glid.New(), "all", 0, "*", []glid.GLID{defaultID})
+	orch.SetTestRoutingTable(routing.NewTable([]*routing.Route{cr}))
 
 	return orch, s.CM
-}
-
-func TestIngesterMessageReachesChunkManager(t *testing.T) {
-	orch, cm := newIngesterTestSetup(t)
-
-	recv := newMockIngester([]orchestrator.IngestMessage{
-		{Attrs: map[string]string{"host": "server1"}, Raw: []byte("test message")},
-	})
-	orch.RegisterIngester(glid.New(), "test", "mock", recv)
-
-	if err := orch.Start(context.Background()); err != nil {
-		t.Fatalf("Start failed: %v", err)
-	}
-
-	// Wait for ingester to start and message to be processed.
-	<-recv.started
-	time.Sleep(50 * time.Millisecond)
-
-	// Stop orchestrator.
-	if err := orch.Stop(); err != nil {
-		t.Fatalf("Stop failed: %v", err)
-	}
-
-	// Verify record reached chunk manager.
-	cursor, err := cm.OpenCursor(cm.Active().ID)
-	if err != nil {
-		t.Fatalf("OpenCursor failed: %v", err)
-	}
-	defer cursor.Close()
-
-	got, _, err := cursor.Next()
-	if err != nil {
-		t.Fatalf("Next failed: %v", err)
-	}
-
-	if string(got.Raw) != "test message" {
-		t.Errorf("got %q, want %q", got.Raw, "test message")
-	}
-}
-
-func TestRouteStatsThroughLifecycle(t *testing.T) {
-	t.Parallel()
-	orch, _ := newIngesterTestSetup(t)
-
-	msgs := make([]orchestrator.IngestMessage, 5)
-	for i := range msgs {
-		msgs[i] = orchestrator.IngestMessage{
-			Attrs: map[string]string{"host": "server1"},
-			Raw:   fmt.Appendf(nil, "msg-%d", i),
-		}
-	}
-
-	recv := newMockIngester(msgs)
-	orch.RegisterIngester(glid.New(), "test", "mock", recv)
-
-	if err := orch.Start(context.Background()); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-
-	<-recv.started
-	time.Sleep(100 * time.Millisecond)
-
-	if err := orch.Stop(); err != nil {
-		t.Fatalf("Stop: %v", err)
-	}
-
-	rs := orch.GetRouteStats()
-	if got := rs.Ingested.Load(); got != 5 {
-		t.Errorf("Ingested = %d, want 5", got)
-	}
-	if got := rs.Routed.Load(); got != 5 {
-		t.Errorf("Routed = %d, want 5", got)
-	}
-	if got := rs.Dropped.Load(); got != 0 {
-		t.Errorf("Dropped = %d, want 0", got)
-	}
-	if !orch.IsFilterSetActive() {
-		t.Error("expected filterSet active")
-	}
-
-	vaultStats := orch.VaultRouteStatsList()
-	if len(vaultStats) != 1 {
-		t.Fatalf("expected 1 vault stat entry, got %d", len(vaultStats))
-	}
-	for _, vs := range vaultStats {
-		if got := vs.Matched.Load(); got != 5 {
-			t.Errorf("Matched = %d, want 5", got)
-		}
-	}
 }
 
 func TestIngesterContextCancellation(t *testing.T) {
@@ -606,52 +548,6 @@ func TestIngesterContextCancellation(t *testing.T) {
 	}
 }
 
-func TestMultipleIngesters(t *testing.T) {
-	orch, cm := newIngesterTestSetup(t)
-
-	recv1 := newMockIngester([]orchestrator.IngestMessage{
-		{Attrs: map[string]string{"source": "recv1"}, Raw: []byte("from recv1")},
-	})
-	recv2 := newMockIngester([]orchestrator.IngestMessage{
-		{Attrs: map[string]string{"source": "recv2"}, Raw: []byte("from recv2")},
-	})
-
-	orch.RegisterIngester(glid.New(), "test-1", "mock", recv1)
-	orch.RegisterIngester(glid.New(), "test-2", "mock", recv2)
-
-	if err := orch.Start(context.Background()); err != nil {
-		t.Fatalf("Start failed: %v", err)
-	}
-
-	<-recv1.started
-	<-recv2.started
-	time.Sleep(50 * time.Millisecond)
-
-	if err := orch.Stop(); err != nil {
-		t.Fatalf("Stop failed: %v", err)
-	}
-
-	// Verify both messages reached chunk manager.
-	cursor, _ := cm.OpenCursor(cm.Active().ID)
-	defer cursor.Close()
-
-	var messages []string
-	for {
-		rec, _, err := cursor.Next()
-		if err == chunk.ErrNoMoreRecords {
-			break
-		}
-		if err != nil {
-			t.Fatalf("Next failed: %v", err)
-		}
-		messages = append(messages, string(rec.Raw))
-	}
-
-	if len(messages) != 2 {
-		t.Errorf("expected 2 messages, got %d", len(messages))
-	}
-}
-
 func TestStartAlreadyRunning(t *testing.T) {
 	orch, _ := newIngesterTestSetup(t)
 
@@ -672,57 +568,6 @@ func TestStopNotRunning(t *testing.T) {
 	err := orch.Stop()
 	if err != orchestrator.ErrNotRunning {
 		t.Errorf("expected ErrNotRunning, got %v", err)
-	}
-}
-
-func TestIngesterSealOnChunkFull(t *testing.T) {
-	// Set up with small chunk size to trigger seal.
-	s, _ := memtest.NewVault(chunkmem.Config{
-		RotationPolicy: recordCountPolicy(2), // 2 records per chunk
-	})
-
-	defaultID := glid.New()
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, s.IM, s.QE))
-	cr, _ := orchestrator.CompileRoute(glid.New(), "all", 0, "*",
-		[]orchestrator.RouteDestination{{VaultID: defaultID}}, "fanout")
-	orch.SetRouteSet(orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{cr}))
-
-	// Create ingester with 3 messages to trigger seal.
-	recv := newMockIngester([]orchestrator.IngestMessage{
-		{Attrs: map[string]string{"host": "s1"}, Raw: []byte("one")},
-		{Attrs: map[string]string{"host": "s1"}, Raw: []byte("two")},
-		{Attrs: map[string]string{"host": "s1"}, Raw: []byte("three")},
-	})
-	orch.RegisterIngester(glid.New(), "test", "mock", recv)
-
-	if err := orch.Start(context.Background()); err != nil {
-		t.Fatalf("Start failed: %v", err)
-	}
-
-	<-recv.started
-	time.Sleep(100 * time.Millisecond)
-
-	if err := orch.Stop(); err != nil {
-		t.Fatalf("Stop failed: %v", err)
-	}
-
-	// Should have at least one sealed chunk.
-	metas, err := s.CM.List()
-	if err != nil {
-		t.Fatal(err)
-	}
-	sealed := 0
-	for _, m := range metas {
-		if m.Sealed {
-			sealed++
-		}
-	}
-	if sealed == 0 {
-		t.Error("expected at least one sealed chunk")
 	}
 }
 
@@ -752,76 +597,6 @@ func TestUnregisterIngester(t *testing.T) {
 		t.Error("ingester should not have been started after unregister")
 	default:
 		// Good.
-	}
-}
-
-// countingIngester counts how many messages it sends.
-type countingIngester struct {
-	count   int
-	started chan struct{}
-}
-
-func newCountingIngester(count int) *countingIngester {
-	return &countingIngester{
-		count:   count,
-		started: make(chan struct{}),
-	}
-}
-
-func (r *countingIngester) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
-	close(r.started)
-
-	for i := 0; i < r.count; i++ {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case out <- orchestrator.IngestMessage{
-			Attrs:    map[string]string{"index": string(rune('a' + i))},
-			Raw:      []byte("message"),
-			IngestTS: time.Now(),
-		}:
-		}
-	}
-
-	<-ctx.Done()
-	return ctx.Err()
-}
-
-func TestHighVolumeIngestion(t *testing.T) {
-	orch, cm := newIngesterTestSetup(t)
-
-	recv := newCountingIngester(100)
-	orch.RegisterIngester(glid.New(), "test", "mock", recv)
-
-	if err := orch.Start(context.Background()); err != nil {
-		t.Fatalf("Start failed: %v", err)
-	}
-
-	<-recv.started
-	time.Sleep(100 * time.Millisecond) // Wait for all messages.
-
-	if err := orch.Stop(); err != nil {
-		t.Fatalf("Stop failed: %v", err)
-	}
-
-	// Count records in chunk manager.
-	cursor, _ := cm.OpenCursor(cm.Active().ID)
-	defer cursor.Close()
-
-	count := 0
-	for {
-		_, _, err := cursor.Next()
-		if err == chunk.ErrNoMoreRecords {
-			break
-		}
-		if err != nil {
-			t.Fatalf("Next failed: %v", err)
-		}
-		count++
-	}
-
-	if count != 100 {
-		t.Errorf("expected 100 records, got %d", count)
 	}
 }
 
@@ -954,10 +729,7 @@ func TestRebuildMissingIndexes(t *testing.T) {
 	s.CM.(chunk.ChunkPostSealProcessor).SetIndexBuilders([]chunk.ChunkIndexBuilder{tracker.BuildAdapter()})
 
 	defaultID := glid.New()
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{})
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, tracker, nil))
 
 	// RebuildMissingIndexes should find the sealed chunk and build indexes.
@@ -1020,10 +792,7 @@ func TestRebuildMissingIndexesCloudBackedWithCompleteIndexes(t *testing.T) {
 	overlay := &cloudOverlayCM{ChunkManager: s.CM}
 
 	defaultID := glid.New()
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{})
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, overlay, tracker, nil))
 
 	if err := orch.RebuildMissingIndexes(context.Background()); err != nil {
@@ -1056,17 +825,14 @@ func TestRebuildMissingIndexesCloudBackedWithMissingIndexes(t *testing.T) {
 		})
 	}
 
-	// Do NOT build indexes — simulate a cloud chunk whose local indexes
+	// Do NOT build indexes — simulate a cloud-backed chunk whose local indexes
 	// were deleted by the old uploadToCloud code.
 	tracker := &trackingIndexManager{IndexManager: s.IM}
 	s.CM.(chunk.ChunkPostSealProcessor).SetIndexBuilders([]chunk.ChunkIndexBuilder{tracker.BuildAdapter()})
 	overlay := &cloudOverlayCM{ChunkManager: s.CM}
 
 	defaultID := glid.New()
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{})
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, overlay, tracker, nil))
 
 	if err := orch.RebuildMissingIndexes(context.Background()); err != nil {
@@ -1098,33 +864,30 @@ func TestSearchWithContextUnknownRegistry(t *testing.T) {
 	}
 }
 
-// filteredTestVaults holds the vault IDs and chunk managers for the filtered test setup.
-type filteredTestVaults struct {
+// routedTestVaults holds the vault IDs and chunk managers for the filtered test setup.
+type routedTestVaults struct {
 	prod      glid.GLID
 	staging   glid.GLID
 	archive   glid.GLID
-	catchRest glid.GLID
+	catchAll glid.GLID
 	cms       map[glid.GLID]chunk.ChunkManager
 }
 
-// newFilteredTestSetup creates an orchestrator with multiple vaults and a filter set.
-func newFilteredTestSetup(t *testing.T) (*orchestrator.Orchestrator, filteredTestVaults) {
+// newRoutedTestSetup creates an orchestrator with multiple vaults and a route table.
+func newRoutedTestSetup(t *testing.T) (*orchestrator.Orchestrator, routedTestVaults) {
 	t.Helper()
 
-	vaults := filteredTestVaults{
+	vaults := routedTestVaults{
 		prod:      glid.New(),
 		staging:   glid.New(),
 		archive:   glid.New(),
-		catchRest: glid.New(),
+		catchAll: glid.New(),
 		cms:       make(map[glid.GLID]chunk.ChunkManager),
 	}
 
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{})
 
-	for _, id := range []glid.GLID{vaults.prod, vaults.staging, vaults.archive, vaults.catchRest} {
+	for _, id := range []glid.GLID{vaults.prod, vaults.staging, vaults.archive, vaults.catchAll} {
 		s := memtest.MustNewVault(t, chunkmem.Config{
 			RotationPolicy: recordCountPolicy(10000),
 		})
@@ -1136,25 +899,22 @@ func newFilteredTestSetup(t *testing.T) (*orchestrator.Orchestrator, filteredTes
 	return orch, vaults
 }
 
-// newFilteredTestSetupWithLoader is like newFilteredTestSetup but accepts a
+// newRoutedTestSetupWithLoader is like newRoutedTestSetup but accepts a
 // *fakeSystemLoader and passes it as the SystemLoader in orchestrator.Config.
-func newFilteredTestSetupWithLoader(t *testing.T, loader *fakeSystemLoader) (*orchestrator.Orchestrator, filteredTestVaults) {
+func newRoutedTestSetupWithLoader(t *testing.T, loader *fakeSystemLoader) (*orchestrator.Orchestrator, routedTestVaults) {
 	t.Helper()
 
-	vaults := filteredTestVaults{
+	vaults := routedTestVaults{
 		prod:      glid.New(),
 		staging:   glid.New(),
 		archive:   glid.New(),
-		catchRest: glid.New(),
+		catchAll: glid.New(),
 		cms:       make(map[glid.GLID]chunk.ChunkManager),
 	}
 
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
-	for _, id := range []glid.GLID{vaults.prod, vaults.staging, vaults.archive, vaults.catchRest} {
+	for _, id := range []glid.GLID{vaults.prod, vaults.staging, vaults.archive, vaults.catchAll} {
 		s := memtest.MustNewVault(t, chunkmem.Config{
 			RotationPolicy: recordCountPolicy(10000),
 		})
@@ -1220,36 +980,33 @@ func getRecordMessages(t *testing.T, cm chunk.ChunkManager) []string {
 	return msgs
 }
 
-func TestFilteringIntegration(t *testing.T) {
-	orch, vaults := newFilteredTestSetup(t)
+func TestRoutingIntegration(t *testing.T) {
+	orch, vaults := newRoutedTestSetup(t)
 
 	// gastrolog-4kkoo (Phase 5): priority-ordered first-match-wins.
 	// Specific routes at priority 10 (env=prod, env=staging) fire first;
 	// the catch-all sits at priority 100 and absorbs everything else.
 	// Each record reaches exactly one vault (no multi-fan-out unless a
 	// single route lists multiple destinations).
-	prodRoute, err := orchestrator.CompileRoute(glid.New(), "prod", 10, "env=prod",
-		[]orchestrator.RouteDestination{{VaultID: vaults.prod}}, "fanout")
+	prodRoute, err := routing.CompileRoute(glid.New(), "prod", 10, "env=prod", []glid.GLID{vaults.prod})
 	if err != nil {
 		t.Fatalf("CompileRoute prod: %v", err)
 	}
-	stagingRoute, err := orchestrator.CompileRoute(glid.New(), "staging", 10, "env=staging",
-		[]orchestrator.RouteDestination{{VaultID: vaults.staging}}, "fanout")
+	stagingRoute, err := routing.CompileRoute(glid.New(), "staging", 10, "env=staging", []glid.GLID{vaults.staging})
 	if err != nil {
 		t.Fatalf("CompileRoute staging: %v", err)
 	}
-	archiveRoute, err := orchestrator.CompileRoute(glid.New(), "archive", 100, "*",
-		[]orchestrator.RouteDestination{{VaultID: vaults.archive}}, "fanout")
+	archiveRoute, err := routing.CompileRoute(glid.New(), "archive", 100, "*", []glid.GLID{vaults.archive})
 	if err != nil {
 		t.Fatalf("CompileRoute archive: %v", err)
 	}
 
-	rs := orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{
+	rs := routing.NewTable([]*routing.Route{
 		prodRoute,
 		stagingRoute,
 		archiveRoute,
 	})
-	orch.SetRouteSet(rs)
+	orch.SetTestRoutingTable(rs)
 
 	// Test cases: message attrs -> expected vault (first-match-wins).
 	testCases := []struct {
@@ -1326,61 +1083,10 @@ func TestFilteringIntegration(t *testing.T) {
 	}
 }
 
-func TestFilteringWithIngesters(t *testing.T) {
-	orch, vaults := newFilteredTestSetup(t)
+func TestRoutingNoRouteTableDropsRecords(t *testing.T) {
+	orch, vaults := newRoutedTestSetup(t)
 
-	// gastrolog-4kkoo (Phase 5): prod route at priority 10, archive
-	// catch-all at priority 100. First-match-wins so env=prod records
-	// fire only the prod route; everything else falls through to archive.
-	prodRoute, _ := orchestrator.CompileRoute(glid.New(), "prod", 10, "env=prod",
-		[]orchestrator.RouteDestination{{VaultID: vaults.prod}}, "fanout")
-	archiveRoute, _ := orchestrator.CompileRoute(glid.New(), "archive", 100, "*",
-		[]orchestrator.RouteDestination{{VaultID: vaults.archive}}, "fanout")
-
-	rs := orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{prodRoute, archiveRoute})
-	orch.SetRouteSet(rs)
-
-	// Create a ingester that emits messages with different attrs.
-	recv := newMockIngester([]orchestrator.IngestMessage{
-		{Attrs: map[string]string{"env": "prod"}, Raw: []byte("prod msg 1")},
-		{Attrs: map[string]string{"env": "prod"}, Raw: []byte("prod msg 2")},
-		{Attrs: map[string]string{"env": "staging"}, Raw: []byte("staging msg")},
-	})
-	orch.RegisterIngester(glid.New(), "test", "mock", recv)
-
-	if err := orch.Start(context.Background()); err != nil {
-		t.Fatalf("Start failed: %v", err)
-	}
-
-	<-recv.started
-	time.Sleep(50 * time.Millisecond)
-
-	if err := orch.Stop(); err != nil {
-		t.Fatalf("Stop failed: %v", err)
-	}
-
-	// Verify routing: prod fires for the two prod messages, archive
-	// catches the staging fallthrough only. (Phase 5 first-match-wins
-	// — prod records do NOT also reach archive.)
-	prodMsgs := getRecordMessages(t, vaults.cms[vaults.prod])
-	archiveMsgs := getRecordMessages(t, vaults.cms[vaults.archive])
-	stagingMsgs := getRecordMessages(t, vaults.cms[vaults.staging])
-
-	if len(prodMsgs) != 2 {
-		t.Errorf("prod vault: expected 2 messages, got %d: %v", len(prodMsgs), prodMsgs)
-	}
-	if len(archiveMsgs) != 1 {
-		t.Errorf("archive vault: expected 1 message (staging fallthrough), got %d: %v", len(archiveMsgs), archiveMsgs)
-	}
-	if len(stagingMsgs) != 0 {
-		t.Errorf("staging vault: expected 0 messages, got %d: %v", len(stagingMsgs), stagingMsgs)
-	}
-}
-
-func TestFilteringNoFilterSetDropsRecords(t *testing.T) {
-	orch, vaults := newFilteredTestSetup(t)
-
-	// No filter set — records should be silently dropped.
+	// No route table — records go unmatched (a counted drop).
 	rec := chunk.Record{
 		IngestTS: time.Now(),
 		Attrs:    chunk.Attributes{"env": "test"},
@@ -1399,19 +1105,17 @@ func TestFilteringNoFilterSetDropsRecords(t *testing.T) {
 	}
 }
 
-func TestFilteringEmptyFilterReceivesNothing(t *testing.T) {
-	orch, vaults := newFilteredTestSetup(t)
+func TestRoutingEmptyMatchExpressionReceivesNothing(t *testing.T) {
+	orch, vaults := newRoutedTestSetup(t)
 
 	// gastrolog-4kkoo (Phase 5): a route with an empty match expression
 	// (MatchNone) is enrolled but never fires — useful as a temporary
 	// "muted" state. prod is muted at priority 10, archive catches at 100.
-	prodRoute, _ := orchestrator.CompileRoute(glid.New(), "prod", 10, "",
-		[]orchestrator.RouteDestination{{VaultID: vaults.prod}}, "fanout")
-	archiveRoute, _ := orchestrator.CompileRoute(glid.New(), "archive", 100, "*",
-		[]orchestrator.RouteDestination{{VaultID: vaults.archive}}, "fanout")
+	prodRoute, _ := routing.CompileRoute(glid.New(), "prod", 10, "", []glid.GLID{vaults.prod})
+	archiveRoute, _ := routing.CompileRoute(glid.New(), "archive", 100, "*", []glid.GLID{vaults.archive})
 
-	rs := orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{prodRoute, archiveRoute})
-	orch.SetRouteSet(rs)
+	rs := routing.NewTable([]*routing.Route{prodRoute, archiveRoute})
+	orch.SetTestRoutingTable(rs)
 
 	rec := chunk.Record{
 		IngestTS: time.Now(),
@@ -1431,22 +1135,21 @@ func TestFilteringEmptyFilterReceivesNothing(t *testing.T) {
 	}
 }
 
-func TestFilteringComplexExpression(t *testing.T) {
-	orch, vaults := newFilteredTestSetup(t)
+func TestRoutingComplexMatchExpression(t *testing.T) {
+	orch, vaults := newRoutedTestSetup(t)
 
 	// gastrolog-4kkoo (Phase 5): prod route at priority 10 with a complex
 	// expression; archive catch-all at priority 100.
-	prodRoute, err := orchestrator.CompileRoute(glid.New(), "prod", 10,
+	prodRoute, err := routing.CompileRoute(glid.New(), "prod", 10,
 		"(env=prod AND level=error) OR (env=prod AND level=critical)",
-		[]orchestrator.RouteDestination{{VaultID: vaults.prod}}, "fanout")
+		[]glid.GLID{vaults.prod})
 	if err != nil {
 		t.Fatalf("CompileRoute failed: %v", err)
 	}
-	archiveRoute, _ := orchestrator.CompileRoute(glid.New(), "archive", 100, "*",
-		[]orchestrator.RouteDestination{{VaultID: vaults.archive}}, "fanout")
+	archiveRoute, _ := routing.CompileRoute(glid.New(), "archive", 100, "*", []glid.GLID{vaults.archive})
 
-	rs := orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{prodRoute, archiveRoute})
-	orch.SetRouteSet(rs)
+	rs := routing.NewTable([]*routing.Route{prodRoute, archiveRoute})
+	orch.SetTestRoutingTable(rs)
 
 	testCases := []struct {
 		attrs        chunk.Attributes
@@ -1485,276 +1188,5 @@ func TestFilteringComplexExpression(t *testing.T) {
 	// staging+error), so archive sees 2.
 	if count := countRecords(t, vaults.cms[vaults.archive]); count != 2 {
 		t.Errorf("archive: expected 2 fall-through messages, got %d", count)
-	}
-}
-
-func TestIngestAckSuccess(t *testing.T) {
-	orch, _ := newIngesterTestSetup(t)
-
-	// Create ack channel and message with ack.
-	ackCh := make(chan error, 1)
-	msg := orchestrator.IngestMessage{
-		Attrs:    map[string]string{"host": "server1"},
-		Raw:      []byte("test message with ack"),
-		IngestTS: time.Now(),
-		Ack:      ackCh,
-	}
-
-	// Register ingester before starting.
-	recv := &ackTestIngester{
-		msg:     msg,
-		started: make(chan struct{}),
-	}
-	orch.RegisterIngester(glid.New(), "test", "mock", recv)
-
-	if err := orch.Start(context.Background()); err != nil {
-		t.Fatalf("Start failed: %v", err)
-	}
-	defer orch.Stop()
-
-	// Wait for ingester to start and send message.
-	<-recv.started
-	time.Sleep(50 * time.Millisecond)
-
-	// Check that ack was received with nil error (success).
-	select {
-	case err := <-ackCh:
-		if err != nil {
-			t.Errorf("expected nil ack, got error: %v", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for ack")
-	}
-}
-
-func TestIngestAckNotSentWhenNil(t *testing.T) {
-	orch, _ := newIngesterTestSetup(t)
-
-	// Message without ack channel (fire-and-forget).
-	recv := newMockIngester([]orchestrator.IngestMessage{
-		{Attrs: map[string]string{"host": "server1"}, Raw: []byte("no ack message")},
-	})
-	orch.RegisterIngester(glid.New(), "test", "mock", recv)
-
-	if err := orch.Start(context.Background()); err != nil {
-		t.Fatalf("Start failed: %v", err)
-	}
-	defer orch.Stop()
-
-	<-recv.started
-	time.Sleep(50 * time.Millisecond)
-
-	// If we got here without panic/deadlock, the nil ack channel was handled correctly.
-}
-
-// ackTestIngester sends a single message with an ack channel.
-type ackTestIngester struct {
-	msg     orchestrator.IngestMessage
-	started chan struct{}
-}
-
-func (r *ackTestIngester) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
-	close(r.started)
-
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case out <- r.msg:
-	}
-
-	<-ctx.Done()
-	return ctx.Err()
-}
-
-// slowDigester adds a fixed delay to simulate CPU-bound digestion work.
-type slowDigester struct {
-	delay time.Duration
-}
-
-func (d *slowDigester) Digest(_ *orchestrator.IngestMessage) {
-	time.Sleep(d.delay)
-}
-
-// slowChunkManager wraps a ChunkManager and adds a fixed delay to Append.
-type slowChunkManager struct {
-	chunk.ChunkManager
-	delay time.Duration
-}
-
-func (s *slowChunkManager) Append(rec chunk.Record) (chunk.ChunkID, uint64, error) {
-	time.Sleep(s.delay)
-	return s.ChunkManager.Append(rec)
-}
-
-func TestPipelineOverlap(t *testing.T) {
-	const (
-		n            = 10
-		digestDelay  = 10 * time.Millisecond
-		writeDelay   = 10 * time.Millisecond
-		perRecordSeq = digestDelay + writeDelay // 20ms sequential per record
-	)
-
-	s, _ := memtest.NewVault(chunkmem.Config{
-		RotationPolicy: recordCountPolicy(1 << 20),
-	})
-
-	slowCM := &slowChunkManager{ChunkManager: s.CM, delay: writeDelay}
-	vaultID := glid.New()
-
-	orch, err := orchestrator.New(orchestrator.Config{IngestChannelSize: n})
-	if err != nil {
-		t.Fatal(err)
-	}
-	orch.RegisterVault(orchestrator.NewVaultFromComponents(vaultID, slowCM, s.IM, s.QE))
-	cr, _ := orchestrator.CompileRoute(glid.New(), "all", 0, "*",
-		[]orchestrator.RouteDestination{{VaultID: vaultID}}, "fanout")
-	orch.SetRouteSet(orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{cr}))
-	orch.RegisterDigester(&slowDigester{delay: digestDelay})
-
-	// Ingester that sends n messages then waits for cancellation.
-	msgs := make([]orchestrator.IngestMessage, n)
-	for i := range n {
-		msgs[i] = orchestrator.IngestMessage{
-			Attrs:    map[string]string{"i": fmt.Sprintf("%d", i)},
-			Raw:      []byte("msg"),
-			IngestTS: time.Now(),
-		}
-	}
-
-	// Use ack on the last message to know when everything is done.
-	ackCh := make(chan error, 1)
-	msgs[n-1].Ack = ackCh
-
-	recv := newMockIngester(msgs)
-	orch.RegisterIngester(glid.New(), "test", "mock", recv)
-
-	start := time.Now()
-
-	if err := orch.Start(context.Background()); err != nil {
-		t.Fatalf("Start failed: %v", err)
-	}
-
-	// Wait for last message to be acked (all records written).
-	select {
-	case err := <-ackCh:
-		if err != nil {
-			t.Fatalf("ack error: %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for pipeline to finish")
-	}
-
-	elapsed := time.Since(start)
-
-	if err := orch.Stop(); err != nil {
-		t.Fatalf("Stop failed: %v", err)
-	}
-
-	// Verify all records were written.
-	cursor, err := slowCM.OpenCursor(slowCM.Active().ID)
-	if err != nil {
-		t.Fatalf("OpenCursor failed: %v", err)
-	}
-	defer cursor.Close()
-
-	count := 0
-	for {
-		_, _, err := cursor.Next()
-		if err == chunk.ErrNoMoreRecords {
-			break
-		}
-		if err != nil {
-			t.Fatalf("Next failed: %v", err)
-		}
-		count++
-	}
-	if count != n {
-		t.Fatalf("expected %d records, got %d", n, count)
-	}
-
-	// Sequential would take n * (digestDelay + writeDelay) = 200ms.
-	// Pipelined should be roughly n * max(digestDelay, writeDelay) + min = ~110ms.
-	// Use 80% of sequential as the threshold to prove overlap.
-	seqTime := time.Duration(n) * perRecordSeq
-	threshold := seqTime * 80 / 100
-	t.Logf("elapsed=%v, sequential=%v, threshold=%v", elapsed, seqTime, threshold)
-
-	if elapsed >= threshold {
-		t.Errorf("pipeline did not overlap: elapsed %v >= threshold %v (sequential %v)", elapsed, threshold, seqTime)
-	}
-}
-
-// panickingIngester emits one message then panics.
-type panickingIngester struct {
-	started chan struct{}
-}
-
-func (r *panickingIngester) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
-	close(r.started)
-
-	out <- orchestrator.IngestMessage{
-		Raw:      []byte("before-panic"),
-		IngestTS: time.Now(),
-	}
-	panic("intentional test panic")
-}
-
-func TestIngesterPanicRecovery(t *testing.T) {
-	orch, cm := newIngesterTestSetup(t)
-
-	panicker := &panickingIngester{started: make(chan struct{})}
-	normalMsg := orchestrator.IngestMessage{
-		Raw:      []byte("normal-message"),
-		IngestTS: time.Now(),
-	}
-	normal := newMockIngester([]orchestrator.IngestMessage{normalMsg})
-
-	panickerID := glid.New()
-	normalID := glid.New()
-
-	if err := orch.AddIngester(panickerID, "panicker", "test", false, panicker); err != nil {
-		t.Fatal(err)
-	}
-	if err := orch.AddIngester(normalID, "normal", "test", false, normal); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := orch.Start(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-
-	// Wait for both ingesters to start.
-	select {
-	case <-panicker.started:
-	case <-time.After(2 * time.Second):
-		t.Fatal("panicking ingester did not start")
-	}
-	select {
-	case <-normal.started:
-	case <-time.After(2 * time.Second):
-		t.Fatal("normal ingester did not start")
-	}
-
-	// Give the pipeline time to process messages.
-	time.Sleep(200 * time.Millisecond)
-
-	// Stop should complete without hanging — the panicking ingester's
-	// goroutine has already exited via recover().
-	if err := orch.Stop(); err != nil {
-		t.Fatal(err)
-	}
-
-	// The normal ingester's message should have been written.
-	records, err := cm.List()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	totalRecords := int64(0)
-	for _, meta := range records {
-		totalRecords += meta.RecordCount
-	}
-	if totalRecords == 0 {
-		t.Error("expected at least one record from the normal ingester")
 	}
 }

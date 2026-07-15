@@ -275,6 +275,7 @@ func (ing *ingester) readNewLines(tf *tailedFile, out chan<- orchestrator.Ingest
 				"file":          tf.path,
 			},
 			Raw:        raw,
+			RawOwned:   true,
 			IngestTS:   now,
 			IngesterID: ing.id,
 		}

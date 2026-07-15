@@ -61,7 +61,7 @@ func TestFSMSeal(t *testing.T) {
 	end := now.Add(5 * time.Second)
 
 	applyCmd(t, fsm, MarshalCreateChunk(id, now, now, now))
-	applyCmd(t, fsm, MarshalSealChunk(id, end, 500, 1024*1024, end, end, end, false))
+	applyCmd(t, fsm, MarshalSealChunk(id, end, 500, 1024*1024, end, end, end, false, end))
 
 	e := fsm.Get(id)
 	if !e.IsSealed() {
@@ -108,7 +108,7 @@ func TestFSMChunkStateTransitions(t *testing.T) {
 	}
 
 	// Sealed after seal.
-	applyCmd(t, fsm, MarshalSealChunk(id, end, 100, 1024, end, end, end, true))
+	applyCmd(t, fsm, MarshalSealChunk(id, end, 100, 1024, end, end, end, true, end))
 	e = fsm.Get(id)
 	if got := e.State; got != chunk.ChunkStateSealed {
 		t.Fatalf("after seal: state = %s, want sealed", got)
@@ -129,7 +129,7 @@ func TestFSMBeginSealIdempotent(t *testing.T) {
 
 	applyCmd(t, fsm, MarshalCreateChunk(id, now, now, now))
 	applyCmd(t, fsm, MarshalBeginSeal(id))
-	applyCmd(t, fsm, MarshalSealChunk(id, end, 1, 1, end, end, end, false))
+	applyCmd(t, fsm, MarshalSealChunk(id, end, 1, 1, end, end, end, false, end))
 	// Replay an older BeginSeal — must not regress.
 	applyCmd(t, fsm, MarshalBeginSeal(id))
 
@@ -161,7 +161,7 @@ func TestFSMSnapshotPreservesState(t *testing.T) {
 
 	applyCmd(t, fsm, MarshalCreateChunk(idSealed, now, now, now))
 	applyCmd(t, fsm, MarshalBeginSeal(idSealed))
-	applyCmd(t, fsm, MarshalSealChunk(idSealed, end, 1, 1, end, end, end, false))
+	applyCmd(t, fsm, MarshalSealChunk(idSealed, end, 1, 1, end, end, end, false, end))
 
 	snap, err := fsm.Snapshot()
 	if err != nil {
@@ -195,23 +195,6 @@ func TestFSMSnapshotPreservesState(t *testing.T) {
 	}
 }
 
-func TestFSMCompress(t *testing.T) {
-	// Not parallel — consistent with other multiraft tests.
-	fsm := New()
-
-	id := testChunkID(3)
-	now := time.Now().Truncate(time.Nanosecond)
-
-	applyCmd(t, fsm, MarshalCreateChunk(id, now, now, now))
-	applyCmd(t, fsm, MarshalSealChunk(id, now, 100, 50000, now, now, now, false))
-	applyCmd(t, fsm, MarshalCompressChunk(id, 12000))
-
-	e := fsm.Get(id)
-	if e.DiskBytes != 12000 {
-		t.Errorf("DiskBytes: got %d, want 12000", e.DiskBytes)
-	}
-}
-
 func TestFSMUpload(t *testing.T) {
 	// Not parallel — consistent with other multiraft tests.
 	fsm := New()
@@ -220,8 +203,7 @@ func TestFSMUpload(t *testing.T) {
 	now := time.Now().Truncate(time.Nanosecond)
 
 	applyCmd(t, fsm, MarshalCreateChunk(id, now, now, now))
-	applyCmd(t, fsm, MarshalSealChunk(id, now, 200, 80000, now, now, now, false))
-	applyCmd(t, fsm, MarshalCompressChunk(id, 30000))
+	applyCmd(t, fsm, MarshalSealChunk(id, now, 200, 80000, now, now, now, false, now))
 	applyCmd(t, fsm, MarshalUploadChunk(id, 25000, 1000, 2000, 3000, 4000, [32]byte{}, glid.GLID{}, 0))
 
 	e := fsm.Get(id)
@@ -275,12 +257,11 @@ func TestFSMSnapshotRestore(t *testing.T) {
 	// Create a mix of chunk states.
 	id1 := testChunkID(10)
 	applyCmd(t, fsm, MarshalCreateChunk(id1, now, now, now))
-	applyCmd(t, fsm, MarshalSealChunk(id1, now.Add(time.Second), 100, 50000, now.Add(time.Second), now.Add(time.Second), now.Add(time.Second), false))
+	applyCmd(t, fsm, MarshalSealChunk(id1, now.Add(time.Second), 100, 50000, now.Add(time.Second), now.Add(time.Second), now.Add(time.Second), false, now.Add(time.Second)))
 
 	id2 := testChunkID(20)
 	applyCmd(t, fsm, MarshalCreateChunk(id2, now, now, now))
-	applyCmd(t, fsm, MarshalSealChunk(id2, now.Add(2*time.Second), 200, 80000, now.Add(2*time.Second), now.Add(2*time.Second), now.Add(2*time.Second), false))
-	applyCmd(t, fsm, MarshalCompressChunk(id2, 30000))
+	applyCmd(t, fsm, MarshalSealChunk(id2, now.Add(2*time.Second), 200, 80000, now.Add(2*time.Second), now.Add(2*time.Second), now.Add(2*time.Second), false, now.Add(2*time.Second)))
 	applyCmd(t, fsm, MarshalUploadChunk(id2, 25000, 100, 200, 300, 400, [32]byte{}, glid.GLID{}, 0))
 
 	id3 := testChunkID(30)
@@ -339,7 +320,7 @@ func TestFSMSnapshotRestoreTombstones(t *testing.T) {
 	// One live chunk, two deleted chunks (tombstoned).
 	live := testChunkID(1)
 	applyCmd(t, fsm, MarshalCreateChunk(live, now, now, now))
-	applyCmd(t, fsm, MarshalSealChunk(live, now.Add(time.Second), 10, 100, now.Add(time.Second), now.Add(time.Second), now.Add(time.Second), false))
+	applyCmd(t, fsm, MarshalSealChunk(live, now.Add(time.Second), 10, 100, now.Add(time.Second), now.Add(time.Second), now.Add(time.Second), false, now.Add(time.Second)))
 
 	dead1 := testChunkID(2)
 	applyCmd(t, fsm, MarshalCreateChunk(dead1, now, now, now))
@@ -424,7 +405,7 @@ func TestFSMToChunkMeta(t *testing.T) {
 	now := time.Now().Truncate(time.Nanosecond)
 
 	applyCmd(t, fsm, MarshalCreateChunk(id, now, now, now))
-	applyCmd(t, fsm, MarshalSealChunk(id, now.Add(time.Second), 42, 1234, now.Add(time.Second), now.Add(time.Second), now.Add(time.Second), false))
+	applyCmd(t, fsm, MarshalSealChunk(id, now.Add(time.Second), 42, 1234, now.Add(time.Second), now.Add(time.Second), now.Add(time.Second), false, now.Add(time.Second)))
 
 	e := fsm.Get(id)
 	meta := e.ToChunkMeta()
@@ -460,7 +441,7 @@ func TestFSMSealNonexistentReturnsError(t *testing.T) {
 	fsm := New()
 
 	now := time.Now()
-	result := fsm.Apply(&hraft.Log{Data: MarshalSealChunk(testChunkID(0xFF), now, 0, 0, now, now, now, false)})
+	result := fsm.Apply(&hraft.Log{Data: MarshalSealChunk(testChunkID(0xFF), now, 0, 0, now, now, now, false, now)})
 	if result == nil {
 		t.Fatal("expected error for sealing nonexistent chunk")
 	}

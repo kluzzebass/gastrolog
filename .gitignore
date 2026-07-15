@@ -8,8 +8,12 @@
 *.so
 *.dylib
 
-# Repo-root build of the gastrolog binary
+# Local build output (`just build` → build/gastrolog)
+build/
 /gastrolog
+backend/gastrolog
+backend/gastrolog-*
+backend/bin/
 
 # Test binary, built with `go test -c`
 *.test

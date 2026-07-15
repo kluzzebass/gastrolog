@@ -1,7 +1,6 @@
 package raftgroup
 
 import (
-	"context"
 	"io"
 	"net"
 	"path/filepath"
@@ -14,7 +13,6 @@ import (
 
 	hraft "github.com/hashicorp/raft"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 )
 
@@ -67,6 +65,7 @@ func (s *counterSnapshot) Release() {}
 type managerTestNode struct {
 	manager   *GroupManager
 	transport *multiraft.Transport[string]
+	pool      *multiraft.DialerPeerPool
 	server    *grpc.Server
 	lis       *bufconn.Listener
 }
@@ -93,7 +92,6 @@ func makeManagerCluster(t *testing.T, nodeIDs []string) []*managerTestNode {
 		// the node ID as the Raft address to ensure uniqueness.
 		tp := multiraft.New(
 			hraft.ServerAddress(nodeIDs[i]),
-			[]grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
 			func(s string) []byte { return []byte(s) },
 			func(b []byte) string { return string(b) },
 		)
@@ -110,24 +108,22 @@ func makeManagerCluster(t *testing.T, nodeIDs []string) []*managerTestNode {
 		nodes[i] = &managerTestNode{manager: mgr, transport: tp, server: srv, lis: lis}
 	}
 
-	// Wire up bufconn dialers — keyed by node ID (= Raft address).
 	dialers := make(map[string]func() (net.Conn, error))
 	for i, node := range nodes {
-		_ = node // suppress unused
-		l := nodes[i].lis
+		l := node.lis
 		dialers[nodeIDs[i]] = func() (net.Conn, error) { return l.Dial() }
 	}
 	for _, node := range nodes {
-		node.transport.SetDialOptions([]grpc.DialOption{
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithContextDialer(func(_ context.Context, addr string) (net.Conn, error) {
-				return dialers[addr]()
-			}),
-		})
+		pool := multiraft.NewSimpleDialerPeerPool(dialers)
+		node.transport.SetPeerConnPool(pool)
+		node.pool = pool
 	}
 
 	t.Cleanup(func() {
 		for _, node := range nodes {
+			if node.pool != nil {
+				node.pool.Close()
+			}
 			node.manager.Shutdown()
 			node.server.Stop()
 			_ = node.transport.Close()
@@ -161,6 +157,9 @@ func waitForLeader(t *testing.T, g *Group, timeout time.Duration) {
 }
 
 func TestCreateGroupSingleNode(t *testing.T) {
+	if testing.Short() {
+		t.Skip("spins up a real raft group and waits out election timing; -short skips")
+	}
 	// Not parallel — Raft instances + gRPC servers need clean sequential lifecycle.
 	nodes := makeManagerCluster(t, []string{"node-1"})
 
@@ -187,6 +186,9 @@ func TestCreateGroupSingleNode(t *testing.T) {
 }
 
 func TestCreateGroupThreeNode(t *testing.T) {
+	if testing.Short() {
+		t.Skip("spins up a real 3-node raft group and waits out election + replication timing; -short skips")
+	}
 	// Not parallel — Raft instances + gRPC servers need clean sequential lifecycle.
 	nodes := makeManagerCluster(t, []string{"node-1", "node-2", "node-3"})
 
@@ -257,6 +259,9 @@ func TestCreateGroupThreeNode(t *testing.T) {
 }
 
 func TestMultipleGroupsSameNode(t *testing.T) {
+	if testing.Short() {
+		t.Skip("spins up two real raft groups and waits out election timing; -short skips")
+	}
 	// Not parallel — Raft instances + gRPC servers need clean sequential lifecycle.
 	nodes := makeManagerCluster(t, []string{"node-1"})
 
@@ -338,6 +343,9 @@ func TestDuplicateGroupReturnsError(t *testing.T) {
 }
 
 func TestVoterNonvoterAutoEnforcement(t *testing.T) {
+	if testing.Short() {
+		t.Skip("spins up a real 3-node raft group and waits out membership-change convergence; -short skips")
+	}
 	// Not parallel — Raft instances + gRPC servers need clean sequential lifecycle.
 	nodes := makeManagerCluster(t, []string{"node-1", "node-2", "node-3"})
 
@@ -384,6 +392,9 @@ func TestVoterNonvoterAutoEnforcement(t *testing.T) {
 }
 
 func TestGroupRecoveryAfterRestart(t *testing.T) {
+	if testing.Short() {
+		t.Skip("spins up a real raft group twice (restart) and waits out election timing; -short skips")
+	}
 	// Not parallel — Raft instances + gRPC servers need clean sequential lifecycle.
 
 	// Use a persistent temp dir for the group so we can restart.
@@ -396,14 +407,13 @@ func TestGroupRecoveryAfterRestart(t *testing.T) {
 	srv := grpc.NewServer()
 	tp := multiraft.New(
 		hraft.ServerAddress(stableAddr),
-		[]grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
 		func(s string) []byte { return []byte(s) },
 		func(b []byte) string { return string(b) },
 	)
-	tp.SetDialOptions([]grpc.DialOption{
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithContextDialer(func(_ context.Context, _ string) (net.Conn, error) { return lis.Dial() }),
+	pool := multiraft.NewSimpleDialerPeerPool(map[string]func() (net.Conn, error){
+		stableAddr: func() (net.Conn, error) { return lis.Dial() },
 	})
+	tp.SetPeerConnPool(pool)
 	tp.Register(srv)
 	go func() { _ = srv.Serve(lis) }()
 
@@ -443,6 +453,7 @@ func TestGroupRecoveryAfterRestart(t *testing.T) {
 	// Shutdown.
 	mgr.Shutdown()
 	_ = wal1.Close()
+	pool.Close()
 	srv.Stop()
 	_ = tp.Close()
 
@@ -451,14 +462,13 @@ func TestGroupRecoveryAfterRestart(t *testing.T) {
 	srv2 := grpc.NewServer()
 	tp2 := multiraft.New(
 		hraft.ServerAddress(stableAddr),
-		[]grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
 		func(s string) []byte { return []byte(s) },
 		func(b []byte) string { return string(b) },
 	)
-	tp2.SetDialOptions([]grpc.DialOption{
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithContextDialer(func(_ context.Context, _ string) (net.Conn, error) { return lis2.Dial() }),
+	pool2 := multiraft.NewSimpleDialerPeerPool(map[string]func() (net.Conn, error){
+		stableAddr: func() (net.Conn, error) { return lis2.Dial() },
 	})
+	tp2.SetPeerConnPool(pool2)
 	tp2.Register(srv2)
 	go func() { _ = srv2.Serve(lis2) }()
 
@@ -503,6 +513,7 @@ func TestGroupRecoveryAfterRestart(t *testing.T) {
 	}
 
 	mgr2.Shutdown()
+	pool2.Close()
 	srv2.Stop()
 	_ = tp2.Close()
 }

@@ -12,12 +12,13 @@ export {
   useArchiveChunk,
   useRestoreChunk,
 } from "./useVaults";
+export { usePipelineBacklog } from "./usePipelineBacklog";
 export { useSearch, extractTokens } from "./useSearch";
 export { useFollow } from "./useFollow";
 export { useExplain } from "./useExplain";
 export { useLiveHistogram } from "./useLiveHistogram";
 export { useRecordContext } from "./useContext";
-export { useConfig, useGenerateName, useValidateExpression } from "./useSystem";
+export { useConfig, useGenerateName } from "./useSystem";
 // gastrolog-4kkoo (Phase 5): useFilters removed; expressions live inline on routes.
 export { usePutRotationPolicy, useDeleteRotationPolicy } from "./useRotationPolicies";
 export { usePutRetentionPolicy, useDeleteRetentionPolicy } from "./useRetentionPolicies";
@@ -47,7 +48,6 @@ export type { NodeRegistry } from "./useNodes";
 export { useJob, useWatchJobs } from "./useJobs";
 export { useWatchSystem } from "./useWatchSystem";
 export { useWatchChunks } from "./useWatchChunks";
-export { useHealth } from "./useHealth";
 export { useSyntax } from "./useSyntax";
 export type { SyntaxKeywords } from "./useSyntax";
 export { useIngesterDefaults } from "./useIngesterDefaults";

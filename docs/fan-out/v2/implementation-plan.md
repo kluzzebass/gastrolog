@@ -275,7 +275,7 @@ Deliver:
 
 - Settings UI for write model and sequencing visibility:
   - [frontend/src/components/settings/VaultsSettings.tsx](/Users/kluzz/Code/gastrolog/frontend/src/components/settings/VaultsSettings.tsx)
-  - [frontend/src/components/settings/VaultParamsForm.tsx](/Users/kluzz/Code/gastrolog/frontend/src/components/settings/VaultParamsForm.tsx)
+  - vault-params form surface (the old `VaultParamsForm.tsx` was unreferenced and deleted in gastrolog-57warp; Phase 9 builds its replacement where the vault settings live)
 - Inspector UI for `H`, fences, replica watermarks, convergence:
   - [frontend/src/components/inspector/VaultCard.tsx](/Users/kluzz/Code/gastrolog/frontend/src/components/inspector/VaultCard.tsx)
   - [frontend/src/components/inspector/SystemStatsView.tsx](/Users/kluzz/Code/gastrolog/frontend/src/components/inspector/SystemStatsView.tsx)

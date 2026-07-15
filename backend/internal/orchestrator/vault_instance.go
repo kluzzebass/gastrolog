@@ -39,6 +39,11 @@ type VaultInstance struct {
 	// ApplyRaftRetentionPending marks a chunk as retention-pending in replicated metadata.
 	ApplyRaftRetentionPending func(id chunk.ChunkID) error
 
+	// ApplyRaftAckChunkHolders / ApplyRaftRevokeChunkHolders commit this
+	// node's chunk holder receipts — bytes-earned residency (batched).
+	ApplyRaftAckChunkHolders    func(ids []chunk.ChunkID, nodeID string) error
+	ApplyRaftRevokeChunkHolders func(ids []chunk.ChunkID, nodeID string) error
+
 	// ListRetentionPending returns chunk IDs with RetentionPending=true in the FSM.
 	ListRetentionPending func() []chunk.ChunkID
 
@@ -122,19 +127,6 @@ type VaultInstance struct {
 	// Nil when no Raft group exists (single-node / memory mode), in which
 	// case the local chunk manager view is already authoritative.
 	OverlayFromFSM func(chunk.ChunkMeta) chunk.ChunkMeta
-
-	// ChunkResidency returns the node IDs that currently hold a chunk's
-	// bytes, computed authoritatively from the FSM (placement set minus
-	// in-flight delete-acks). Used by the WatchChunks event-relay path to
-	// stamp authoritative replica info on outbound events so clients
-	// don't have to reconstruct it from per-node event accumulation,
-	// which drifts on leadership transfer and active-chunk catchup.
-	// See gastrolog-66vmg.
-	//
-	// Nil for memory-mode vaults (no FSM); callers fall back to omitting
-	// the replica info, which the client treats as "preserve existing"
-	// in mergeMeta.
-	ChunkResidency func(id chunk.ChunkID, placementNodeIDs []string) []string
 }
 
 // applyRaftCallbacks wires raft-backed metadata operations from a vaultRaftCallbacks.
@@ -147,11 +139,12 @@ func (t *VaultInstance) applyRaftCallbacks(cb vaultRaftCallbacks) {
 	t.ApplyRaftPruneNode = cb.applyPruneNode
 	t.ListManifest = cb.listChunks
 	t.ApplyRaftRetentionPending = cb.applyRetPending
+	t.ApplyRaftAckChunkHolders = cb.applyAckChunkHolders
+	t.ApplyRaftRevokeChunkHolders = cb.applyRevokeChunkHolders
 	t.ListRetentionPending = cb.listRetPending
 	t.IsTombstoned = cb.isTombstoned
 	t.IsFSMReady = cb.isFSMReady
 	t.OverlayFromFSM = cb.overlayFromFSM
-	t.ChunkResidency = cb.chunkResidency
 	t.ManifestEntries = cb.manifestEntries
 	t.ManifestEntry = cb.manifestEntry
 }

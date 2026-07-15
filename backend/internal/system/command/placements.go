@@ -18,7 +18,7 @@ func NewSetVaultPlacements(vaultID glid.GLID, placements []system.VaultPlacement
 	return &gastrologv1.SystemCommand{
 		Command: &gastrologv1.SystemCommand_SetVaultPlacements{
 			SetVaultPlacements: &gastrologv1.SetVaultPlacementsCommand{
-				VaultId:     vaultID.ToProto(),
+				VaultId:    vaultID.ToProto(),
 				Placements: pbPlacements,
 			},
 		},

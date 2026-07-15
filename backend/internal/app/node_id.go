@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 
 	"gastrolog/internal/glid"
 	"gastrolog/internal/home"
@@ -25,14 +24,14 @@ const nodeIDKey = "gastrolog:node_id"
 // There is no silent regeneration path — once StableStore has the key, it
 // wins; a corrupt value is an error, not an excuse to mint new identity.
 func resolveNodeID(hd home.Dir, logger *slog.Logger) (glid.GLID, error) {
-	walDir := filepath.Join(hd.RaftDir(), "wal")
+	walDir := hd.ClusterCtlWALDir()
 	if err := os.MkdirAll(walDir, 0o750); err != nil {
-		return glid.GLID{}, fmt.Errorf("create raft wal dir: %w", err)
+		return glid.GLID{}, fmt.Errorf("create cluster-ctl raft wal dir: %w", err)
 	}
 
 	wal, err := raftwal.Open(walDir)
 	if err != nil {
-		return glid.GLID{}, fmt.Errorf("open system raft WAL for node_id peek: %w", err)
+		return glid.GLID{}, fmt.Errorf("open cluster-ctl raft WAL for node_id peek: %w", err)
 	}
 	defer func() { _ = wal.Close() }()
 

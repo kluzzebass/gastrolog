@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"gastrolog/internal/glid"
 	"iter"
+	"slices"
 	"time"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -34,6 +35,7 @@ func (a *orchStatsAdapter) VaultSnapshots() []cluster.StatsVaultSnapshot {
 	for i, s := range snaps {
 		out[i] = cluster.StatsVaultSnapshot{
 			ID:               s.ID,
+			Name:             s.Name,
 			RecordCount:      s.RecordCount,
 			ChunkCount:       s.ChunkCount,
 			SealedChunks:     s.SealedChunks,
@@ -66,46 +68,115 @@ func (a *orchStatsAdapter) IngesterStats(id string) (name string, messages, byte
 	return a.orch.IngesterName(uid), s.MessagesIngested.Load(), s.BytesIngested.Load(), s.Errors.Load(), a.orch.IsIngesterRunning(uid)
 }
 
+func (a *orchStatsAdapter) VaultAppendStats() []cluster.StatsVaultAppendSnapshot {
+	byVault := make(map[glid.GLID]*cluster.StatsVaultAppendSnapshot)
+	get := func(id glid.GLID) *cluster.StatsVaultAppendSnapshot {
+		if s, ok := byVault[id]; ok {
+			return s
+		}
+		s := &cluster.StatsVaultAppendSnapshot{VaultID: id}
+		byVault[id] = s
+		return s
+	}
+	for _, s := range a.orch.VaultAppendStats() {
+		snap := get(s.VaultID)
+		snap.RecordsAppended = s.RecordsAppended
+		snap.BytesAppended = s.BytesAppended
+		snap.RecordsDurable = s.RecordsDurable
+		snap.QueueDepth = s.QueueDepth
+		snap.QueueCap = s.QueueCap
+		snap.SegmentsCompleted = s.SegmentsCompleted
+	}
+	for _, s := range a.orch.VaultCollectStats() {
+		snap := get(s.VaultID)
+		snap.CollectedRecords = s.CollectedRecords
+		snap.CollectedBytes = s.CollectedBytes
+	}
+	for _, s := range a.orch.VaultSealStats() {
+		snap := get(s.VaultID)
+		snap.SealedRecords = s.SealedRecords
+		snap.SealedBytes = s.SealedBytes
+	}
+	for _, s := range a.orch.VaultPublishStats() {
+		snap := get(s.VaultID)
+		snap.SegmentsPublished = s.Published
+	}
+	for _, s := range a.orch.VaultChunkStageStats() {
+		snap := get(s.VaultID)
+		snap.ChunksPlanned = s.ChunksPlanned
+		snap.ChunksBuilt = s.ChunksBuilt
+		snap.ChunksSealed = s.ChunksSealed
+		snap.SegmentsReleased = s.SegmentsReleased
+		snap.HeadPurges = s.HeadPurges
+	}
+	for _, s := range a.orch.VaultStageEventStats() {
+		snap := get(s.VaultID)
+		snap.GLCBPullsAttempted = s.GLCBPullsAttempted
+		snap.GLCBPullsFailed = s.GLCBPullsFailed
+		snap.RetentionDeletes = s.RetentionDeletes
+	}
+	out := make([]cluster.StatsVaultAppendSnapshot, 0, len(byVault))
+	for _, s := range byVault {
+		out = append(out, *s)
+	}
+	slices.SortFunc(out, func(a, b cluster.StatsVaultAppendSnapshot) int {
+		return a.VaultID.Compare(b.VaultID)
+	})
+	return out
+}
+
 func (a *orchStatsAdapter) RouteStats() cluster.StatsRouteSnapshot {
 	rs := a.orch.GetRouteStats()
 	snap := cluster.StatsRouteSnapshot{
-		Ingested:     rs.Ingested.Load(),
-		Dropped:      rs.Dropped.Load(),
-		Routed:       rs.Routed.Load(),
-		FilterActive: a.orch.IsFilterSetActive(),
+		Routed:       rs.Routed,
+		Unmatched:    rs.Unmatched,
+		Matched:      rs.Matched,
+		RouteTableActive: a.orch.IsRouteTableActive(),
 	}
 	for vaultID, vs := range a.orch.VaultRouteStatsList() {
 		snap.VaultStats = append(snap.VaultStats, cluster.StatsVaultRouteSnapshot{
-			VaultID:   vaultID,
-			Matched:   vs.Matched.Load(),
-			Forwarded: vs.Forwarded.Load(),
+			VaultID: vaultID,
+			Matched: vs.Matched,
 		})
 	}
 	for routeID, rs := range a.orch.PerRouteStatsList() {
 		snap.RouteStats = append(snap.RouteStats, cluster.StatsPerRouteSnapshot{
-			RouteID:   routeID,
-			Matched:   rs.Matched.Load(),
-			Forwarded: rs.Forwarded.Load(),
+			RouteID: routeID,
+			Matched: rs.Matched,
 		})
 	}
 	return snap
 }
 
-// forwardingStatsAdapter combines the sending and receiving sides of record
-// forwarding into a single ForwardingStatsProvider.
-type forwardingStatsAdapter struct {
-	srv *cluster.Server
-	fwd *cluster.RecordForwarder // nil when forwarding is not wired
+func (a *orchStatsAdapter) PipelineDiskSnapshots() []cluster.StatsVaultPipelineDiskSnapshot {
+	vaultIDs := a.orch.ListVaults()
+	out := make([]cluster.StatsVaultPipelineDiskSnapshot, 0, len(vaultIDs))
+	for _, vaultID := range vaultIDs {
+		disk, err := a.orch.LocalPipelineDiskSegmentCounts(vaultID)
+		if err != nil {
+			continue
+		}
+		out = append(out, cluster.StatsVaultPipelineDiskSnapshot{
+			VaultID:          vaultID,
+			Working:          disk.Working,
+			CompletedStaging: disk.CompletedStaging,
+			Head:             disk.Head,
+			PreHead:          disk.PreHead,
+		})
+	}
+	return out
 }
 
-func (a *forwardingStatsAdapter) ForwardingStats() (sent, received int64) {
-	if a.fwd != nil {
-		sent = a.fwd.Sent()
-	}
-	if a.srv != nil {
-		received = a.srv.ForwardedReceived()
-	}
-	return
+func (a *orchStatsAdapter) LocalStorageBytes() int64 {
+	return a.orch.LocalStorageBytes()
+}
+
+func (a *orchStatsAdapter) DiskProtectedVaults() []glid.GLID {
+	return a.orch.DiskProtectedVaults()
+}
+
+func (a *orchStatsAdapter) SizeCappedVaults() []glid.GLID {
+	return a.orch.SizeCappedVaults()
 }
 
 // jobBroadcastAdapter bridges the scheduler to the cluster.JobsProvider interface.
@@ -131,8 +202,16 @@ func forwardSearchAfterParse(
 	q query.Query,
 	pipeline *querylang.Pipeline,
 	resumeTokenData []byte,
+	includeHistogram bool,
 ) (iter.Seq2[chunk.Record, error], func() []byte, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, error) {
-	histogram := server.HistogramToProto(eng.ComputeHistogram(ctx, q, 50))
+	// Filtered forward searches already pay a full lazy-prime record scan in
+	// Search below. Skip the histogram pre-pass (timechartScanPath → Search)
+	// which would duplicate that work and spike RSS on scatterbox nodes.
+	// Unfiltered legacy full-vault forwards keep the fast binary-search path.
+	var histogram []*gastrologv1.HistogramBucket
+	if includeHistogram {
+		histogram = server.HistogramToProto(eng.ComputeSearchPageHistogram(ctx, q, 50))
+	}
 
 	if pipeline != nil && len(pipeline.Pipes) > 0 && !query.CanStreamPipeline(pipeline) {
 		result, err := eng.RunPipeline(ctx, q, pipeline)
@@ -178,24 +257,25 @@ func forwardSearchAfterParse(
 // TableResult instead of individual records. For regular searches, returns
 // the iterator directly — the streaming handler sends records as it iterates.
 func newSearchExecutor(o *orchestrator.Orchestrator) cluster.SearchExecutor {
-	return func(ctx context.Context, vaultID glid.GLID, queryExpr string, resumeTokenData []byte) (iter.Seq2[chunk.Record, error], func() []byte, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, error) {
-		// Don't add vault_id= scope — the engine is already scoped to this
-		// vault's leader instances. Adding vault_id= would fail because the
-		// engine uses vault IDs, not vault IDs.
-		q, pipeline, err := server.ParseExpression(queryExpr)
+	return func(ctx context.Context, req *gastrologv1.ForwardSearchRequest) (iter.Seq2[chunk.Record, error], func() []byte, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, error) {
+		if glid.FromBytes(req.GetVaultId()).IsZero() {
+			return nil, nil, nil, nil, errors.New("invalid vault_id")
+		}
+		q, pipeline, err := server.ParseExpression(req.GetQuery())
 		if err != nil {
 			return nil, nil, nil, nil, fmt.Errorf("parse query: %w", err)
 		}
 
-		eng, err := o.LeaderQueryEngineForVault(vaultID)
+		eng, err := server.ForwardSearchEngine(o, req)
 		if err != nil {
 			return nil, nil, nil, nil, err
 		}
 		if eng == nil {
-			return nil, nil, nil, nil, nil // no leader instance for this vault
+			return nil, nil, nil, nil, nil
 		}
 
-		return forwardSearchAfterParse(ctx, eng, q, pipeline, resumeTokenData)
+		includeHist := server.ForwardSearchIncludesHistogram(req, q)
+		return forwardSearchAfterParse(ctx, eng, q, pipeline, req.GetResumeToken(), includeHist)
 	}
 }
 
@@ -330,6 +410,25 @@ func newListChunksExecutor(o *orchestrator.Orchestrator) cluster.ListChunksExecu
 			out = append(out, pb)
 		}
 		return out, nil
+	}
+}
+
+func newPipelineBacklogDiskExecutor(o *orchestrator.Orchestrator) cluster.PipelineBacklogDiskExecutor {
+	return func(ctx context.Context, vaultID glid.GLID) (*gastrologv1.ForwardGetPipelineBacklogResponse, error) {
+		disk, err := o.LocalPipelineDiskSegmentCounts(vaultID)
+		if err != nil {
+			return nil, err
+		}
+		return &gastrologv1.ForwardGetPipelineBacklogResponse{
+			WorkingSegments:          uint32(disk.Working),               //nolint:gosec
+			CompletedStagingSegments: uint32(disk.CompletedStaging),      //nolint:gosec
+			HeadSegments:             uint32(disk.Head),                  //nolint:gosec
+			PreHeadSegments:          uint32(disk.PreHead),               //nolint:gosec
+			WorkingBytes:             uint64(disk.WorkingBytes),          //nolint:gosec
+			CompletedStagingBytes:    uint64(disk.CompletedStagingBytes), //nolint:gosec
+			HeadBytes:                uint64(disk.HeadBytes),             //nolint:gosec
+			PreHeadBytes:             uint64(disk.PreHeadBytes),          //nolint:gosec
+		}, nil
 	}
 }
 

@@ -5,6 +5,7 @@
 package glid
 
 import (
+	"bytes"
 	"encoding/base32"
 	"encoding/json"
 	"errors"
@@ -135,18 +136,17 @@ func (g *GLID) UnmarshalText(data []byte) error {
 	return nil
 }
 
+// Compare orders two GLIDs by raw byte order (-1, 0, 1). Use with
+// slices.SortedFunc(keys, glid.Compare). UUIDv7 GLIDs are naturally
+// ordered by creation time.
+func Compare(a, b GLID) int {
+	return bytes.Compare(a[:], b[:])
+}
+
 // Compare returns -1, 0, or 1 for ordering. UUIDv7 GLIDs are naturally
 // ordered by creation time.
 func (g GLID) Compare(other GLID) int {
-	for i := range Size {
-		if g[i] < other[i] {
-			return -1
-		}
-		if g[i] > other[i] {
-			return 1
-		}
-	}
-	return 0
+	return Compare(g, other)
 }
 
 // ParseOptional parses a base32hex string, returning a pointer.

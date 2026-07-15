@@ -23,8 +23,8 @@ var (
 // --- LogStore ---
 
 func (g *GroupStore) FirstIndex() (uint64, error) {
-	g.wal.mu.Lock()
-	defer g.wal.mu.Unlock()
+	g.wal.stateMu.RLock()
+	defer g.wal.stateMu.RUnlock()
 	gs := g.wal.groups[g.groupID]
 	if gs == nil {
 		return 0, nil
@@ -33,8 +33,8 @@ func (g *GroupStore) FirstIndex() (uint64, error) {
 }
 
 func (g *GroupStore) LastIndex() (uint64, error) {
-	g.wal.mu.Lock()
-	defer g.wal.mu.Unlock()
+	g.wal.stateMu.RLock()
+	defer g.wal.stateMu.RUnlock()
 	gs := g.wal.groups[g.groupID]
 	if gs == nil {
 		return 0, nil
@@ -43,8 +43,8 @@ func (g *GroupStore) LastIndex() (uint64, error) {
 }
 
 func (g *GroupStore) GetLog(index uint64, log *hraft.Log) error {
-	g.wal.mu.Lock()
-	defer g.wal.mu.Unlock()
+	g.wal.stateMu.RLock()
+	defer g.wal.stateMu.RUnlock()
 	gs := g.wal.groups[g.groupID]
 	if gs == nil {
 		return hraft.ErrLogNotFound
@@ -93,8 +93,8 @@ func (g *GroupStore) Set(key []byte, val []byte) error {
 }
 
 func (g *GroupStore) Get(key []byte) ([]byte, error) {
-	g.wal.mu.Lock()
-	defer g.wal.mu.Unlock()
+	g.wal.stateMu.RLock()
+	defer g.wal.stateMu.RUnlock()
 	gs := g.wal.groups[g.groupID]
 	if gs == nil {
 		return nil, nil
@@ -117,8 +117,8 @@ func (g *GroupStore) SetUint64(key []byte, val uint64) error {
 }
 
 func (g *GroupStore) GetUint64(key []byte) (uint64, error) {
-	g.wal.mu.Lock()
-	defer g.wal.mu.Unlock()
+	g.wal.stateMu.RLock()
+	defer g.wal.stateMu.RUnlock()
 	gs := g.wal.groups[g.groupID]
 	if gs == nil {
 		return 0, nil

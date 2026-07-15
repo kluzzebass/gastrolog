@@ -11,12 +11,12 @@ import (
 // Forwarder sends requests to remote cluster nodes via the ForwardRPC
 // bidirectional gRPC stream. It uses the shared PeerConns pool.
 type Forwarder struct {
-	peers *cluster.PeerConns
+	peers *cluster.PeerConnManager
 }
 
 // NewForwarder creates a Forwarder using the shared PeerConns pool.
 // Returns nil if peers is nil (single-node mode).
-func NewForwarder(peers *cluster.PeerConns) *Forwarder {
+func NewForwarder(peers *cluster.PeerConnManager) *Forwarder {
 	if peers == nil {
 		return nil
 	}

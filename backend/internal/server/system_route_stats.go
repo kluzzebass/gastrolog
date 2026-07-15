@@ -10,25 +10,25 @@ import (
 )
 
 // GetRouteStats returns live routing statistics aggregated across the cluster.
-// Local node stats come from atomic counters; peer stats from broadcasts.
+// Local node stats come from the pipeline routing counters; peer stats from
+// broadcasts.
 func (s *SystemServer) GetRouteStats(
 	_ context.Context,
 	_ *connect.Request[apiv1.GetRouteStatsRequest],
 ) (*connect.Response[apiv1.GetRouteStatsResponse], error) {
 	// Start with local node stats.
 	rs := s.orch.GetRouteStats()
-	totalIngested := rs.Ingested.Load()
-	totalDropped := rs.Dropped.Load()
-	totalRouted := rs.Routed.Load()
-	filterActive := s.orch.IsFilterSetActive()
+	totalRouted := rs.Routed
+	totalUnmatched := rs.Unmatched
+	totalMatched := rs.Matched
+	routeTableActive := s.orch.IsRouteTableActive()
 
 	// Merge per-vault stats into a map for dedup across nodes.
 	vaultMap := make(map[string]*apiv1.VaultRouteStats)
 	for vaultID, vs := range s.orch.VaultRouteStatsList() {
 		vaultMap[vaultID.String()] = &apiv1.VaultRouteStats{
-			VaultId:          vaultID.ToProto(),
-			RecordsMatched:   vs.Matched.Load(),
-			RecordsForwarded: vs.Forwarded.Load(),
+			VaultId:        vaultID.ToProto(),
+			RecordsMatched: vs.Matched,
 		}
 	}
 
@@ -36,30 +36,43 @@ func (s *SystemServer) GetRouteStats(
 	routeMap := make(map[string]*apiv1.PerRouteStats)
 	for routeID, ps := range s.orch.PerRouteStatsList() {
 		routeMap[routeID.String()] = &apiv1.PerRouteStats{
-			RouteId:          routeID.ToProto(),
-			RecordsMatched:   ps.Matched.Load(),
-			RecordsForwarded: ps.Forwarded.Load(),
+			RouteId:        routeID.ToProto(),
+			RecordsMatched: ps.Matched,
 		}
 	}
 
 	// Add peer stats if in cluster mode.
 	if s.peerRouteStats != nil {
-		pIngested, pDropped, pRouted, pFilterActive, pVaultStats, pRouteStats := s.peerRouteStats.AggregateRouteStats()
-		totalIngested += pIngested
-		totalDropped += pDropped
+		pRouted, pUnmatched, pMatched, pRouteTableActive, pVaultStats, pRouteStats := s.peerRouteStats.AggregateRouteStats()
 		totalRouted += pRouted
-		if pFilterActive {
-			filterActive = true
+		totalUnmatched += pUnmatched
+		totalMatched += pMatched
+		if pRouteTableActive {
+			routeTableActive = true
 		}
 		mergeVaultRouteStats(vaultMap, pVaultStats)
 		mergePerRouteStats(routeMap, pRouteStats)
 	}
 
+	// Cluster-total throughput. Preferred source: the stats collector's
+	// window over SUMMED cluster counters — one server-side series carrying
+	// instant/30s/1m AND spark history, so the UI never fabricates history
+	// client-side. Fallback (single-node, tests): sum local + peer
+	// per-horizon rates, sparkless (gastrolog-4eh5ns).
+	var routedRate, matchedRate *apiv1.ThroughputRate
+	if s.clusterRouteRates != nil {
+		routedRate, matchedRate = s.clusterRouteRates()
+	} else {
+		routedRate, matchedRate = clusterRouteRates(s.localStats, s.peerRouteStats)
+	}
+
 	resp := &apiv1.GetRouteStatsResponse{
-		TotalIngested:   totalIngested,
-		TotalDropped:    totalDropped,
 		TotalRouted:     totalRouted,
-		FilterSetActive: filterActive,
+		TotalUnmatched:    totalUnmatched,
+		TotalMatched:    totalMatched,
+		RouteTableActive: routeTableActive,
+		RoutedRate:      routedRate,
+		MatchedRate:     matchedRate,
 	}
 	for _, vs := range vaultMap {
 		resp.VaultStats = append(resp.VaultStats, vs)
@@ -80,7 +93,6 @@ func mergeVaultRouteStats(m map[string]*apiv1.VaultRouteStats, stats []*apiv1.Va
 			continue
 		}
 		existing.RecordsMatched += vs.RecordsMatched
-		existing.RecordsForwarded += vs.RecordsForwarded
 	}
 }
 
@@ -93,6 +105,38 @@ func mergePerRouteStats(m map[string]*apiv1.PerRouteStats, stats []*apiv1.PerRou
 			continue
 		}
 		existing.RecordsMatched += rs.RecordsMatched
-		existing.RecordsForwarded += rs.RecordsForwarded
 	}
+}
+
+// clusterRouteRates returns cluster-total routing throughput per horizon:
+// the local node's rolling-window rates (stats collector snapshot) plus the
+// sum of live peers' broadcast rates. Shared by the GetRouteStats RPC and
+// the WatchSystemStatus stream builder — the stream previously shipped a
+// response without the rate fields, so the UI cache was continuously
+// overwritten with 0/s while the RPC reported correct rates
+// (gastrolog-4eh5ns). Sparks stay per-node (phase-skewed sums would
+// fabricate a series no node observed).
+func clusterRouteRates(localStats func() *apiv1.NodeStats, peers PeerRouteStatsProvider) (routed, matched *apiv1.ThroughputRate) {
+	routed = &apiv1.ThroughputRate{}
+	matched = &apiv1.ThroughputRate{}
+	if peers != nil {
+		routed, matched = peers.AggregateRouteRates()
+	}
+	if localStats != nil {
+		if ls := localStats(); ls != nil {
+			addRate(routed, ls.RouteRouted)
+			addRate(matched, ls.RouteMatched)
+		}
+	}
+	return routed, matched
+}
+
+func addRate(dst, src *apiv1.ThroughputRate) {
+	if src == nil {
+		return
+	}
+	dst.InstantPerSec += src.InstantPerSec
+	dst.Avg_1MPerSec += src.Avg_1MPerSec
+	dst.Avg_5MPerSec += src.Avg_5MPerSec
+	dst.Avg_15MPerSec += src.Avg_15MPerSec
 }

@@ -14,7 +14,7 @@ import (
 
 const cloudIndexFile = "cloud.idx"
 
-// cloudMetaValue is the fixed-size encoded form of cloud chunk metadata.
+// cloudMetaValue is the fixed-size encoded form of cloud-backed chunk metadata.
 // Layout (106 bytes):
 //   - 9 × int64 (72 bytes): WriteStart, WriteEnd, RecordCount, Bytes, DiskBytes,
 //     IngestStart, IngestEnd, SourceStart, SourceEnd — all unix nanos or raw int64
@@ -31,9 +31,9 @@ type cloudMetaValue [106]byte
 
 const (
 	cloudMetaValSize = 106
-	flagSealed     = 1 << 0
-	flagCompressed = 1 << 1
-	flagArchived   = 1 << 2
+	flagSealed       = 1 << 0
+	flagCompressed   = 1 << 1
+	flagArchived     = 1 << 2
 )
 
 func encodeCloudMeta(m *chunkMeta) cloudMetaValue {
@@ -58,29 +58,29 @@ func encodeCloudMeta(m *chunkMeta) cloudMetaValue {
 		flags |= flagArchived
 	}
 	binary.LittleEndian.PutUint16(v[72:74], flags)
-	binary.LittleEndian.PutUint64(v[74:82], uint64(m.ingestIdxOffset))  //nolint:gosec // offset is always non-negative
-	binary.LittleEndian.PutUint64(v[82:90], uint64(m.ingestIdxSize))    //nolint:gosec // size is always non-negative
-	binary.LittleEndian.PutUint64(v[90:98], uint64(m.sourceIdxOffset))  //nolint:gosec // offset is always non-negative
-	binary.LittleEndian.PutUint64(v[98:106], uint64(m.sourceIdxSize))   //nolint:gosec // size is always non-negative
+	binary.LittleEndian.PutUint64(v[74:82], uint64(m.ingestIdxOffset)) //nolint:gosec // offset is always non-negative
+	binary.LittleEndian.PutUint64(v[82:90], uint64(m.ingestIdxSize))   //nolint:gosec // size is always non-negative
+	binary.LittleEndian.PutUint64(v[90:98], uint64(m.sourceIdxOffset)) //nolint:gosec // offset is always non-negative
+	binary.LittleEndian.PutUint64(v[98:106], uint64(m.sourceIdxSize))  //nolint:gosec // size is always non-negative
 	return v
 }
 
 func decodeCloudMeta(id chunk.ChunkID, v cloudMetaValue) *chunkMeta {
 	flags := binary.LittleEndian.Uint16(v[72:74])
 	return &chunkMeta{
-		id:              id,
-		writeStart:      time.Unix(0, int64(binary.LittleEndian.Uint64(v[0:8]))),   //nolint:gosec // nano timestamp round-trip
-		writeEnd:        time.Unix(0, int64(binary.LittleEndian.Uint64(v[8:16]))),   //nolint:gosec // nano timestamp round-trip
-		recordCount:     int64(binary.LittleEndian.Uint64(v[16:24])),                //nolint:gosec // count round-trip
-		bytes:           int64(binary.LittleEndian.Uint64(v[24:32])),                //nolint:gosec // round-trip
-		diskBytes:       int64(binary.LittleEndian.Uint64(v[32:40])),                //nolint:gosec // round-trip
-		ingestStart:     time.Unix(0, int64(binary.LittleEndian.Uint64(v[40:48]))),  //nolint:gosec // round-trip
-		ingestEnd:       time.Unix(0, int64(binary.LittleEndian.Uint64(v[48:56]))),  //nolint:gosec // round-trip
-		sourceStart:     time.Unix(0, int64(binary.LittleEndian.Uint64(v[56:64]))),  //nolint:gosec // round-trip
-		sourceEnd:       time.Unix(0, int64(binary.LittleEndian.Uint64(v[64:72]))),  //nolint:gosec // round-trip
-		sealed: flags&flagSealed != 0,
+		id:          id,
+		writeStart:  time.Unix(0, int64(binary.LittleEndian.Uint64(v[0:8]))),   //nolint:gosec // nano timestamp round-trip
+		writeEnd:    time.Unix(0, int64(binary.LittleEndian.Uint64(v[8:16]))),  //nolint:gosec // nano timestamp round-trip
+		recordCount: int64(binary.LittleEndian.Uint64(v[16:24])),               //nolint:gosec // count round-trip
+		bytes:       int64(binary.LittleEndian.Uint64(v[24:32])),               //nolint:gosec // round-trip
+		diskBytes:   int64(binary.LittleEndian.Uint64(v[32:40])),               //nolint:gosec // round-trip
+		ingestStart: time.Unix(0, int64(binary.LittleEndian.Uint64(v[40:48]))), //nolint:gosec // round-trip
+		ingestEnd:   time.Unix(0, int64(binary.LittleEndian.Uint64(v[48:56]))), //nolint:gosec // round-trip
+		sourceStart: time.Unix(0, int64(binary.LittleEndian.Uint64(v[56:64]))), //nolint:gosec // round-trip
+		sourceEnd:   time.Unix(0, int64(binary.LittleEndian.Uint64(v[64:72]))), //nolint:gosec // round-trip
+		sealed:      flags&flagSealed != 0,
 		// flagCompressed (1<<1) reserved — see Phase 6 (gastrolog-69fd5).
-		archived: flags&flagArchived != 0,
+		archived:        flags&flagArchived != 0,
 		cloudBacked:     true,
 		ingestIdxOffset: int64(binary.LittleEndian.Uint64(v[74:82])),  //nolint:gosec // round-trip
 		ingestIdxSize:   int64(binary.LittleEndian.Uint64(v[82:90])),  //nolint:gosec // round-trip
@@ -97,17 +97,17 @@ var cloudIndexCodec = btree.Codec[chunk.ChunkID, cloudMetaValue]{
 	Key:     func(b []byte) chunk.ChunkID { var id chunk.ChunkID; copy(id[:], b); return id },
 	PutVal:  func(b []byte, v cloudMetaValue) { copy(b, v[:]) },
 	Val:     func(b []byte) cloudMetaValue { var v cloudMetaValue; copy(v[:], b); return v },
-	Compare: func(a, b chunk.ChunkID) int { return bytes.Compare(a[:], b[:]) },
+	Compare: chunk.ChunkID.Compare,
 }
 
-// cloudIndex wraps a B+ tree that caches cloud chunk metadata locally.
+// cloudIndex wraps a B+ tree that caches cloud-backed chunk metadata locally.
 type cloudIndex struct {
 	tree *btree.Tree[chunk.ChunkID, cloudMetaValue]
 }
 
 // openCloudIndex opens an existing cloud index or creates a new one.
 // If the existing index has an incompatible codec (e.g., old value size),
-// it is deleted and recreated — loadCloudChunksFromStore will repopulate it.
+// it is deleted and recreated — loadCloudBackedChunksFromStore will repopulate it.
 func openCloudIndex(dir string) (*cloudIndex, error) {
 	path := filepath.Join(dir, cloudIndexFile)
 
@@ -172,7 +172,7 @@ func (ci *cloudIndex) Close() error {
 	return ci.tree.Close()
 }
 
-// Lookup returns metadata for a single cloud chunk by ID.
+// Lookup returns metadata for a single cloud-backed chunk by ID.
 // Returns (nil, false) if the chunk is not in the index.
 // Does NOT evict pages — B+ tree path pages (root + internals) are shared
 // across lookups and should stay cached for the query's lifetime.

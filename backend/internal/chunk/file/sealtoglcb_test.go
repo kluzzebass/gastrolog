@@ -1,13 +1,14 @@
 package file
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"gastrolog/internal/chunk"
-	chunkcloud "gastrolog/internal/chunk/cloud"
+	"gastrolog/internal/chunk/glcb"
 )
 
 // TestSealToGLCB_ProducesValidBlob verifies that sealToGLCB writes a
@@ -72,19 +73,14 @@ func TestSealToGLCB_ProducesValidBlob(t *testing.T) {
 		t.Fatalf("ingest TS index missing in TOC: offset=%d size=%d", toc.IngestIdxOffset, toc.IngestIdxSize)
 	}
 
-	// The blob should be readable via the chunkcloud reader; the metadata
-	// it returns should match what we appended.
-	f, err := os.Open(filepath.Clean(glcbPath))
+	// The blob should be readable via the production GLCB open path
+	// (OpenMappedBlob); the metadata it returns should match what we appended.
+	blob, err := glcb.OpenMappedBlob(glcbPath)
 	if err != nil {
-		t.Fatalf("open data.glcb: %v", err)
+		t.Fatalf("open GLCB blob: %v", err)
 	}
-	defer func() { _ = f.Close() }()
-	rd, err := chunkcloud.NewReader(f)
-	if err != nil {
-		t.Fatalf("open GLCB reader: %v", err)
-	}
-	defer func() { _ = rd.Close() }()
-	if got := rd.Meta().RecordCount; got != recordCount {
+	defer func() { _ = blob.Close() }()
+	if got := blob.Meta().RecordCount; got != recordCount {
 		t.Fatalf("record count: got %d want %d", got, recordCount)
 	}
 }
@@ -305,5 +301,131 @@ func TestSealToGLCB_RefusesUnsealedChunk(t *testing.T) {
 
 	if _, _, err := m.sealToGLCB(id); err == nil {
 		t.Fatal("expected sealToGLCB to fail on unsealed chunk")
+	}
+}
+
+// TestSealToGLCB_StaleTmpAcrossRestartSweptAndSealSucceeds verifies the
+// gastrolog-66hmx3 fix for the gastrolog-5do8sh gap 7d wedge: a stale
+// data.glcb.tmp left by a crash mid-seal must not permanently block the
+// chunk from ever producing its data.glcb.
+//
+// Before the fix: cleanOrphanTempFiles only matched a ".compress-" prefix
+// or a ".tmp." substring — "data.glcb.tmp" matched neither, so it survived
+// every restart and every retry failed O_EXCL forever.
+//
+// After the fix: cleanOrphanTempFiles matches the dataGLCBTmpFileName
+// constant explicitly, so a restart's loadExisting sweep removes the
+// stale tmp and the next sealToGLCB succeeds.
+func TestSealToGLCB_StaleTmpAcrossRestartSweptAndSealSucceeds(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	m, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+
+	now := time.Now().Truncate(time.Microsecond)
+	const recordCount = 5
+	var chunkID chunk.ChunkID
+	for i := range recordCount {
+		id, _, err := m.Append(chunk.Record{
+			IngestTS: now.Add(time.Duration(i) * time.Millisecond),
+			Attrs:    chunk.Attributes{"level": "info"},
+			Raw:      []byte("payload"),
+		})
+		if err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+		chunkID = id
+	}
+	if err := m.Seal(); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+
+	// Crash mid-seal: a prior sealToGLCB died between creating the tmp and
+	// the rename commit, leaving a stale data.glcb.tmp in the chunk dir.
+	tmpPath := filepath.Join(m.chunkDir(chunkID), dataGLCBTmpFileName)
+	if err := os.WriteFile(tmpPath, []byte("stale tmp from an aborted seal"), 0o600); err != nil {
+		t.Fatalf("plant stale tmp: %v", err)
+	}
+	if err := m.Close(); err != nil {
+		t.Fatalf("close manager: %v", err)
+	}
+
+	// Crash-recovery restart. loadExisting runs cleanOrphanTempFiles over
+	// every chunk dir; it must now remove data.glcb.tmp by its exact name.
+	m2, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("re-open manager: %v", err)
+	}
+	defer func() { _ = m2.Close() }()
+
+	if _, err := os.Stat(tmpPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stale data.glcb.tmp should be swept by loadExisting on restart, stat err = %v", err)
+	}
+	if _, _, err := m2.sealToGLCB(chunkID); err != nil {
+		t.Fatalf("sealToGLCB after restart sweep: %v, want success (wedge must not survive a restart)", err)
+	}
+}
+
+// TestSealToGLCB_StaleTmpWithoutRestartUnlinksAndRetries verifies the
+// gastrolog-66hmx3 in-process resilience half of the fix: sealToGLCB does
+// not need a process restart to recover from a stale tmp. Holding the
+// per-chunk write lock across the tmp-file section (see sealToGLCB) makes
+// any O_EXCL "file exists" it observes provably a leftover from a run that
+// already exited — no other in-process caller can be mid-write on the
+// tmpPath while the lock is held — so it is always safe to unlink and
+// retry once within the same call.
+func TestSealToGLCB_StaleTmpWithoutRestartUnlinksAndRetries(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	m, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	defer func() { _ = m.Close() }()
+
+	now := time.Now().Truncate(time.Microsecond)
+	const recordCount = 5
+	var chunkID chunk.ChunkID
+	for i := range recordCount {
+		id, _, err := m.Append(chunk.Record{
+			IngestTS: now.Add(time.Duration(i) * time.Millisecond),
+			Attrs:    chunk.Attributes{"level": "info"},
+			Raw:      []byte("payload"),
+		})
+		if err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+		chunkID = id
+	}
+	if err := m.Seal(); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+
+	// Plant a stale tmp without ever restarting the manager — simulates a
+	// prior process's aborted seal whose tmp is still sitting there when
+	// this process's sealToGLCB runs, with no restart/sweep in between.
+	tmpPath := filepath.Join(m.chunkDir(chunkID), dataGLCBTmpFileName)
+	if err := os.WriteFile(tmpPath, []byte("stale tmp from an aborted seal"), 0o600); err != nil {
+		t.Fatalf("plant stale tmp: %v", err)
+	}
+
+	w, written, err := m.sealToGLCB(chunkID)
+	if err != nil {
+		t.Fatalf("sealToGLCB with stale tmp and no restart: %v, want success via unlink+retry", err)
+	}
+	if w == nil || written <= 0 {
+		t.Fatalf("sealToGLCB returned w=%v written=%d, want a valid writer and non-zero bytes", w, written)
+	}
+
+	glcbPath := filepath.Join(m.chunkDir(chunkID), dataGLCBFileName)
+	blob, err := glcb.OpenMappedBlob(glcbPath)
+	if err != nil {
+		t.Fatalf("open GLCB blob after unlink+retry seal: %v", err)
+	}
+	defer func() { _ = blob.Close() }()
+	if got := blob.Meta().RecordCount; got != recordCount {
+		t.Fatalf("record count: got %d want %d", got, recordCount)
 	}
 }

@@ -371,7 +371,6 @@ func (f *FSM) applyPutVault(ctx context.Context, pb *gastrologv1.PutVaultCommand
 	return &Notification{Kind: NotifyVaultPut, ID: cfg.ID}, nil
 }
 
-
 func (f *FSM) applyDeleteVault(ctx context.Context, pb *gastrologv1.DeleteVaultCommand) (*Notification, error) {
 	id, err := command.ExtractDeleteVault(pb)
 	if err != nil {

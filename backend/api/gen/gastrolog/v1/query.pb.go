@@ -183,8 +183,8 @@ type HistogramBucket struct {
 	TimestampMs   int64                  `protobuf:"varint,1,opt,name=timestamp_ms,json=timestampMs,proto3" json:"timestamp_ms,omitempty"`                                                                           // Bucket start time (milliseconds since epoch)
 	Count         int64                  `protobuf:"varint,2,opt,name=count,proto3" json:"count,omitempty"`                                                                                                          // Total records in this bucket
 	GroupCounts   map[string]int64       `protobuf:"bytes,3,rep,name=group_counts,json=groupCounts,proto3" json:"group_counts,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"` // Level → count; records without level → "other"
-	HasCloudData  bool                   `protobuf:"varint,4,opt,name=has_cloud_data,json=hasCloudData,proto3" json:"has_cloud_data,omitempty"`                                                                      // True if cloud chunks cover this bucket
-	CloudCount    int64                  `protobuf:"varint,5,opt,name=cloud_count,json=cloudCount,proto3" json:"cloud_count,omitempty"`                                                                              // Records from cloud chunks in this bucket (subset of count)
+	HasCloudData  bool                   `protobuf:"varint,4,opt,name=has_cloud_data,json=hasCloudData,proto3" json:"has_cloud_data,omitempty"`                                                                      // True if cloud-backed chunks cover this bucket
+	CloudCount    int64                  `protobuf:"varint,5,opt,name=cloud_count,json=cloudCount,proto3" json:"cloud_count,omitempty"`                                                                              // Records from cloud-backed chunks in this bucket (subset of count)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }

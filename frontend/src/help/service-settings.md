@@ -19,6 +19,12 @@ Controls how [cluster nodes](settings:nodes) [![icon:help]()](help:clustering-no
 | **Broadcast Interval** | How often each node sends its full stats payload (vault stats, ingester stats, alerts) to peers | `5s` |
 | **Heartbeat Interval** | How often each node sends a lightweight liveness ping. Detection of frozen or paused peers takes ~4× this interval | `1s` |
 
+## Pipeline
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| **Backlog Budget** | Per-vault budget for the pipeline backlog (completed segments awaiting chunking). At the budget, new records for that vault are refused cluster-wide — retryable backpressure — until chunking drains it below the budget. Bounds the backlog by policy before disk pressure; the [disk-space guard](help:storage-config) remains the backstop. Applies to every vault | Unbounded |
+
 ## TLS Configuration
 
 When a [certificate](help:certificates) is configured as the default, additional TLS options appear:

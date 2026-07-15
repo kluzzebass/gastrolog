@@ -140,6 +140,47 @@ func TestClusterCtlLearnerPromoter_CaughtUpLearnerPromotedAfterStabilityWindow(t
 	}
 }
 
+func TestClusterCtlLearnerPromoter_OnePromotionPerTick(t *testing.T) {
+	t.Parallel()
+	srv := &mockRaftMembership{
+		isLeader:     true,
+		appliedIndex: 100,
+		servers: []cluster.RaftServer{
+			{ID: "leader", Address: "addr-l", Suffrage: "Voter"},
+			{ID: "learner-a", Address: "addr-a", Suffrage: "Nonvoter"},
+			{ID: "learner-b", Address: "addr-b", Suffrage: "Nonvoter"},
+			{ID: "learner-c", Address: "addr-c", Suffrage: "Nonvoter"},
+		},
+	}
+	ps := &mockPeerStats{byNode: map[string]uint64{
+		"learner-a": 100,
+		"learner-b": 100,
+		"learner-c": 100,
+	}}
+	p := newPromoterForTest(srv, ps)
+
+	for range p.stabilityRequired {
+		p.tick(context.Background())
+	}
+	if len(srv.addVoterCalls) != 1 {
+		t.Fatalf("first stable tick: expected exactly one AddVoter, got %v", srv.addVoterCalls)
+	}
+	first := srv.addVoterCalls[0].id
+
+	p.tick(context.Background())
+	if len(srv.addVoterCalls) != 2 {
+		t.Fatalf("second stable tick: expected two AddVoter calls total, got %v", srv.addVoterCalls)
+	}
+	if srv.addVoterCalls[1].id == first {
+		t.Fatalf("second tick promoted same learner again: %q", first)
+	}
+
+	p.tick(context.Background())
+	if len(srv.addVoterCalls) != 3 {
+		t.Fatalf("third stable tick: expected three AddVoter calls total, got %v", srv.addVoterCalls)
+	}
+}
+
 func TestClusterCtlLearnerPromoter_LaggingLearnerHeldOff(t *testing.T) {
 	t.Parallel()
 	srv := &mockRaftMembership{

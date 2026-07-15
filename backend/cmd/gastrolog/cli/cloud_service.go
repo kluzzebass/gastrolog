@@ -127,7 +127,7 @@ func newCloudServiceCreateCmd() *cobra.Command {
 	cmd.Flags().String("provider", "", "provider: s3, gcs, azure")
 	cmd.Flags().String("bucket", "", "bucket name (S3/GCS)")
 	cmd.Flags().String("region", "", "region")
-	cmd.Flags().String("endpoint", "", "endpoint URL (for S3-compatible services)")
+	cmd.Flags().String("endpoint", "", "endpoint URL including scheme, e.g. http://localhost:19000 (for S3-compatible services)")
 	cmd.Flags().String("access-key", "", "access key (S3)")
 	cmd.Flags().String("secret-key", "", "secret key (S3)")
 	cmd.Flags().String("container", "", "container name (Azure)")

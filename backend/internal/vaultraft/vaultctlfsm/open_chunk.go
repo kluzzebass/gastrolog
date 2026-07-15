@@ -1,0 +1,1057 @@
+package vaultctlfsm
+
+import (
+	"errors"
+	"fmt"
+	"maps"
+	"slices"
+	"time"
+
+	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/chunk"
+	"gastrolog/internal/glid"
+)
+
+var (
+	// ErrOpenChunkExists is returned when OpenChunkManifest is applied while
+	// a manifest is already open.
+	ErrOpenChunkExists = errors.New("open chunk manifest already exists")
+	// ErrNoOpenChunkManifest is returned when a command requires an open manifest.
+	ErrNoOpenChunkManifest = errors.New("no open chunk manifest")
+	// ErrOpenChunkChunkIDMismatch is returned when a command chunk_id does not
+	// match the open manifest.
+	ErrOpenChunkChunkIDMismatch = errors.New("chunk id does not match open manifest")
+	// ErrInvalidSegmentRef is returned when record numbers are out of order.
+	ErrInvalidSegmentRef = errors.New("invalid open chunk segment ref")
+	// ErrSegmentReleased is returned when a manifest ref names a segment no
+	// longer in the completed-segment registry (released between the
+	// planner's pass snapshot and this apply).
+	ErrSegmentReleased = errors.New("segment no longer in registry")
+)
+
+// OpenChunkSegmentRef names one segment slice in EventID-sorted record numbers.
+type OpenChunkSegmentRef struct {
+	SegmentID         glid.GLID
+	FirstRecordNumber uint32
+	LastRecordNumber  uint32
+	SliceBytes        uint64
+	RefAddedAt        time.Time
+	Bounds            ManifestTimeBounds
+}
+
+// OpenChunkManifest is the replicated manifest of segment refs for one chunk.
+type OpenChunkManifest struct {
+	ChunkID      chunk.ChunkID
+	OpenedAt     time.Time
+	Refs         []OpenChunkSegmentRef
+	TotalRecords uint64
+	TotalBytes   uint64
+	SealedAt     time.Time
+	Bounds       ManifestTimeBounds
+}
+
+// RecordCount returns the number of records in one ref.
+func (r OpenChunkSegmentRef) RecordCount() uint32 {
+	if r.LastRecordNumber < r.FirstRecordNumber {
+		return 0
+	}
+	return r.LastRecordNumber - r.FirstRecordNumber + 1
+}
+
+func validateSegmentRef(first, last uint32) error {
+	if last < first {
+		return fmt.Errorf("%w: first=%d last=%d", ErrInvalidSegmentRef, first, last)
+	}
+	return nil
+}
+
+func refRecordCount(first, last uint32) (uint64, error) {
+	if err := validateSegmentRef(first, last); err != nil {
+		return 0, err
+	}
+	return uint64(last - first + 1), nil
+}
+
+// OpenChunkSummary holds manifest totals without copying all segment refs.
+type OpenChunkSummary struct {
+	ChunkID      chunk.ChunkID
+	OpenedAt     time.Time
+	TotalRecords uint64
+	TotalBytes   uint64
+	RefCount     int
+}
+
+// OpenChunkSummary returns running manifest totals for the open chunk, or false
+// when no manifest is open.
+func (f *FSM) OpenChunkSummary() (OpenChunkSummary, bool) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if f.openChunk == nil {
+		return OpenChunkSummary{}, false
+	}
+	m := f.openChunk
+	return OpenChunkSummary{
+		ChunkID:      m.ChunkID,
+		OpenedAt:     m.OpenedAt,
+		TotalRecords: m.TotalRecords,
+		TotalBytes:   m.TotalBytes,
+		RefCount:     len(m.Refs),
+	}, true
+}
+
+// OpenChunk returns a copy of the current open manifest, or nil.
+func (f *FSM) OpenChunk() *OpenChunkManifest {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return copyOpenChunkManifest(f.openChunk)
+}
+
+// SealedManifest returns a copy of the oldest sealed manifest awaiting local
+// GLCB build, or nil when the queue is empty.
+func (f *FSM) SealedManifest() *OpenChunkManifest {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return copyOpenChunkManifest(f.sealedManifestHeadLocked())
+}
+
+// SealedManifestCount returns how many manifests are awaiting local GLCB build.
+func (f *FSM) SealedManifestCount() int {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return len(f.sealedManifests)
+}
+
+func (f *FSM) sealedManifestHeadLocked() *OpenChunkManifest {
+	if len(f.sealedManifests) == 0 {
+		return nil
+	}
+	return f.sealedManifests[0]
+}
+
+func (f *FSM) sealedManifestByIDLocked(id chunk.ChunkID) *OpenChunkManifest {
+	for _, m := range f.sealedManifests {
+		if m != nil && m.ChunkID == id {
+			return m
+		}
+	}
+	return nil
+}
+
+func (f *FSM) sealedManifestQueuedLocked(id chunk.ChunkID, sealedAt time.Time) bool {
+	for _, m := range f.sealedManifests {
+		if m != nil && m.ChunkID == id && m.SealedAt.Equal(sealedAt) {
+			return true
+		}
+	}
+	return false
+}
+
+func (f *FSM) appendSealedManifestLocked(m *OpenChunkManifest) {
+	f.sealedManifests = append(f.sealedManifests, m)
+}
+
+func (f *FSM) popSealedManifestHeadIfIDLocked(id chunk.ChunkID) bool {
+	if len(f.sealedManifests) == 0 || f.sealedManifests[0].ChunkID != id {
+		return false
+	}
+	f.sealedManifests = f.sealedManifests[1:]
+	return true
+}
+
+func (f *FSM) removeSealedManifestByIDLocked(id chunk.ChunkID) {
+	for i, m := range f.sealedManifests {
+		if m != nil && m.ChunkID == id {
+			f.sealedManifests = append(f.sealedManifests[:i], f.sealedManifests[i+1:]...)
+			return
+		}
+	}
+}
+
+// ResumeRecordNumber returns the next record number to chunk from segmentID.
+func (f *FSM) ResumeRecordNumber(segmentID glid.GLID) (uint32, bool) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	n, ok := f.segmentResume[segmentID]
+	return n, ok
+}
+
+// SealedManifestHeadChunkID returns the pending sealed manifest head's chunk
+// ID without cloning the manifest. SealedManifest() deep-copies every ref;
+// hot-path callers that only compare the ID (chunkSealCommitted, once per
+// build wake) were paying O(refs) allocation for a 16-byte comparison.
+func (f *FSM) SealedManifestHeadChunkID() (chunk.ChunkID, bool) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if len(f.sealedManifests) == 0 || f.sealedManifests[0] == nil {
+		return chunk.ChunkID{}, false
+	}
+	return f.sealedManifests[0].ChunkID, true
+}
+
+// ReleaseScan is a one-lock snapshot of everything the chunking leader's
+// release pass reads. The per-segment gates each took the FSM lock several
+// times (registry copy + referenced-in-manifest walk over ALL refs + resume
+// lookup + supersession walk), making a release pass O(N x refs) in lock
+// round-trips against the Raft apply path (gastrolog-2m0f75). One snapshot
+// per pass; decisions over it are pure.
+type ReleaseScan struct {
+	Entries []CompletedSegmentEntry
+	// byID indexes Entries for pending-queue lookups.
+	byID map[glid.GLID]int
+	// Referenced holds segment IDs appearing in the open or any sealed
+	// manifest — never releasable while a build may still need the bytes.
+	Referenced map[glid.GLID]struct{}
+	// Resume maps segment ID -> next unplanned record number.
+	Resume map[glid.GLID]uint32
+	// Superseded holds segment IDs whose records live entirely in sealed,
+	// RF-replicated chunks (SegmentSuperseded, precomputed for the pass).
+	Superseded map[glid.GLID]struct{}
+}
+
+// Entry returns the scanned registry entry for id, or nil.
+func (s *ReleaseScan) Entry(id glid.GLID) *CompletedSegmentEntry {
+	if s == nil {
+		return nil
+	}
+	i, ok := s.byID[id]
+	if !ok {
+		return nil
+	}
+	return &s.Entries[i]
+}
+
+// SnapshotReleaseScan builds a ReleaseScan under a single read lock.
+// minChunkHolders parameterizes the supersession precompute; <= 0 disables it
+// (placement wiring absent), leaving Superseded empty.
+func (f *FSM) SnapshotReleaseScan(minChunkHolders int) *ReleaseScan {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	scan := &ReleaseScan{
+		Entries:    f.listCompletedSegmentsLocked(),
+		Referenced: make(map[glid.GLID]struct{}),
+		Resume:     make(map[glid.GLID]uint32, len(f.segmentResume)),
+	}
+	scan.byID = make(map[glid.GLID]int, len(scan.Entries))
+	for i := range scan.Entries {
+		scan.byID[scan.Entries[i].SegmentID] = i
+	}
+	for _, m := range append([]*OpenChunkManifest{f.openChunk}, f.sealedManifests...) {
+		if m == nil {
+			continue
+		}
+		for _, ref := range m.Refs {
+			scan.Referenced[ref.SegmentID] = struct{}{}
+		}
+	}
+	maps.Copy(scan.Resume, f.segmentResume)
+	if minChunkHolders > 0 {
+		scan.Superseded = make(map[glid.GLID]struct{})
+		for i := range scan.Entries {
+			id := scan.Entries[i].SegmentID
+			if f.segmentSupersededLocked(id, minChunkHolders) {
+				scan.Superseded[id] = struct{}{}
+			}
+		}
+	}
+	return scan
+}
+
+// SegmentSuperseded reports whether segID's records now live in chunks
+// replicated to at least minChunkHolders nodes — the release/purge signal that
+// supersedes the raw segment (design-notes 39, refined R3: RF, not home-set, so
+// a dead home never pins the segment; the dead home catches up at the chunk
+// level). True only when the segment has been chunked (≥1 containing chunk) and
+// every containing chunk is sealed and held by ≥ minChunkHolders nodes, or has
+// already aged out (tombstoned/expired — the records are gone by retention, so
+// the segment is equally free to drop). minChunkHolders ≤ 0 means placement
+// wiring is absent (single-node/test); return false so release falls back to
+// the holders⊇homes fast path.
+func (f *FSM) SegmentSuperseded(segID glid.GLID, minChunkHolders int) bool {
+	if minChunkHolders <= 0 {
+		return false
+	}
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.segmentSupersededLocked(segID, minChunkHolders)
+}
+
+func (f *FSM) segmentSupersededLocked(segID glid.GLID, minChunkHolders int) bool {
+	chunkIDs := f.segmentChunks[segID]
+	if len(chunkIDs) == 0 {
+		return false
+	}
+	for _, id := range chunkIDs {
+		if !f.chunkReplicatedLocked(id, minChunkHolders) {
+			return false
+		}
+	}
+	return true
+}
+
+// chunkReplicatedLocked reports whether chunk id is durable enough to supersede
+// a segment: sealed and held by ≥ minChunkHolders nodes, or already gone (its
+// records aged out under retention, which only deletes sealed chunks).
+func (f *FSM) chunkReplicatedLocked(id chunk.ChunkID, minChunkHolders int) bool {
+	entry := f.chunks[id]
+	if entry == nil {
+		return true
+	}
+	if entry.State != chunk.ChunkStateSealed {
+		return false
+	}
+	return len(entry.Holders) >= minChunkHolders
+}
+
+func copyOpenChunkManifest(m *OpenChunkManifest) *OpenChunkManifest {
+	if m == nil {
+		return nil
+	}
+	cp := *m
+	if len(m.Refs) > 0 {
+		cp.Refs = append([]OpenChunkSegmentRef(nil), m.Refs...)
+	}
+	return &cp
+}
+
+func openChunkSegmentRefEqual(a, b OpenChunkSegmentRef) bool {
+	return a.SegmentID == b.SegmentID &&
+		a.FirstRecordNumber == b.FirstRecordNumber &&
+		a.LastRecordNumber == b.LastRecordNumber &&
+		a.SliceBytes == b.SliceBytes &&
+		a.RefAddedAt.Equal(b.RefAddedAt)
+}
+
+func (f *FSM) applyOpenChunkManifest(c *gastrologv1.OpenChunkManifestCommand) error {
+	id := chunkIDFromProto(c.GetChunkId())
+	if id == chunk.ChunkID(glid.Nil) {
+		return errors.New("chunk id required")
+	}
+	if f.openChunk != nil {
+		if f.openChunk.ChunkID == id {
+			return nil
+		}
+		return ErrOpenChunkExists
+	}
+	if _, dead := f.tombstones[id]; dead {
+		return nil
+	}
+	if existing := f.chunks[id]; existing != nil && existing.State != chunk.ChunkStateActive {
+		return fmt.Errorf("chunk %s already exists in state %s", id, existing.State)
+	}
+	openedAt := time.Unix(0, c.GetOpenedAtNanos())
+	f.openChunk = &OpenChunkManifest{
+		ChunkID:  id,
+		OpenedAt: openedAt,
+	}
+	return nil
+}
+
+func (f *FSM) applyAddOpenChunkSegmentRef(c *gastrologv1.AddOpenChunkSegmentRefCommand) error {
+	if f.openChunk == nil {
+		return ErrNoOpenChunkManifest
+	}
+	id := chunkIDFromProto(c.GetChunkId())
+	if id != f.openChunk.ChunkID {
+		return ErrOpenChunkChunkIDMismatch
+	}
+	count, err := refRecordCount(c.GetFirstRecordNumber(), c.GetLastRecordNumber())
+	if err != nil {
+		return err
+	}
+	segID := glid.FromBytes(c.GetSegmentId())
+	if segID == glid.Nil {
+		return errors.New("segment id required")
+	}
+	// A ref may only name a segment that still exists in the registry.
+	// The planner proposes refs from a pass snapshot while releases drop
+	// registry entries concurrently; without this apply-time check (the
+	// mirror of applyReleaseSegments' referenced-in-manifest guard) a stale
+	// ref lands after the release and creates a ghost reference: a sealed
+	// manifest no home can ever build — bytes purged everywhere — and no
+	// release can clear, wedging the seal queue permanently. Deterministic:
+	// every node sees identical registry state at this log index.
+	if f.completedSegments[segID] == nil {
+		return fmt.Errorf("%w: %s", ErrSegmentReleased, segID)
+	}
+	ref := OpenChunkSegmentRef{
+		SegmentID:         segID,
+		FirstRecordNumber: c.GetFirstRecordNumber(),
+		LastRecordNumber:  c.GetLastRecordNumber(),
+		SliceBytes:        c.GetSliceBytes(),
+		RefAddedAt:        time.Unix(0, c.GetRefAddedAtNanos()),
+		Bounds:            boundsFromAddRefCommand(c),
+	}
+	if n := len(f.openChunk.Refs); n > 0 {
+		if openChunkSegmentRefEqual(f.openChunk.Refs[n-1], ref) {
+			return nil
+		}
+	}
+	f.openChunk.Refs = append(f.openChunk.Refs, ref)
+	f.openChunk.TotalRecords += count
+	f.openChunk.TotalBytes += c.GetSliceBytes()
+	sliceBounds := boundsFromAddRefCommand(c)
+	mergeManifestTimeBounds(&f.openChunk.Bounds,
+		sliceBounds.WriteStart, sliceBounds.WriteEnd,
+		sliceBounds.IngestStart, sliceBounds.IngestEnd,
+		sliceBounds.SourceStart, sliceBounds.SourceEnd,
+	)
+	if e := f.chunks[id]; e == nil {
+		openedAt := f.openChunk.OpenedAt
+		e = &ManifestEntry{
+			ID:          id,
+			WriteStart:  openedAt,
+			IngestStart: openedAt,
+			SourceStart: openedAt,
+			State:       chunk.ChunkStateActive,
+		}
+		f.chunks[id] = e
+	}
+	if e := f.chunks[id]; e != nil {
+		e.RecordCount = int64(f.openChunk.TotalRecords) //nolint:gosec // G115: manifest totals fit in int64 for chunk metadata
+		e.Bytes = int64(f.openChunk.TotalBytes)         //nolint:gosec // G115: manifest totals fit in int64 for chunk metadata
+		applyManifestBoundsToEntry(e, f.openChunk.Bounds)
+	}
+	if f.segmentResume == nil {
+		f.segmentResume = make(map[glid.GLID]uint32)
+	}
+	f.segmentResume[segID] = c.GetLastRecordNumber() + 1
+	f.recordSegmentChunkLocked(segID, id)
+	return nil
+}
+
+// recordSegmentChunkLocked notes that segID's records were referenced by chunk
+// chunkID's manifest. Deduped, append-order preserved. Survives the manifest
+// pop at build time so SegmentSuperseded can decide release by chunk
+// replication. Caller MUST hold f.mu.
+func (f *FSM) recordSegmentChunkLocked(segID glid.GLID, chunkID chunk.ChunkID) {
+	if f.segmentChunks == nil {
+		f.segmentChunks = make(map[glid.GLID][]chunk.ChunkID)
+	}
+	if slices.Contains(f.segmentChunks[segID], chunkID) {
+		return
+	}
+	f.segmentChunks[segID] = append(f.segmentChunks[segID], chunkID)
+}
+
+func (f *FSM) applyAddOpenChunkSegmentRefs(c *gastrologv1.AddOpenChunkSegmentRefsCommand) error {
+	if c == nil || len(c.GetRefs()) == 0 {
+		return errors.New("open chunk segment refs required")
+	}
+	id := chunkIDFromProto(c.GetChunkId())
+	for _, entry := range c.GetRefs() {
+		cmd := addOpenChunkSegmentRefCommandFromEntry(id, entry)
+		if err := f.applyAddOpenChunkSegmentRef(cmd); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (f *FSM) applySealOpenChunkManifest(c *gastrologv1.SealOpenChunkManifestCommand) error {
+	id := chunkIDFromProto(c.GetChunkId())
+	sealedAt := time.Unix(0, c.GetSealedAtNanos())
+	if f.openChunk == nil {
+		if f.sealedManifestQueuedLocked(id, sealedAt) {
+			return nil
+		}
+		return ErrNoOpenChunkManifest
+	}
+	if id != f.openChunk.ChunkID {
+		return ErrOpenChunkChunkIDMismatch
+	}
+	f.openChunk.SealedAt = sealedAt
+	f.appendSealedManifestLocked(f.openChunk)
+	f.openChunk = nil
+	sealed := f.sealedManifests[len(f.sealedManifests)-1]
+	f.clearStaleSealTombstoneLocked(sealed.ChunkID)
+	f.ensureManifestChunkEntryLocked(sealed, chunk.ChunkStateSealing)
+	return nil
+}
+
+func (f *FSM) applyDiscardOpenChunkManifest(c *gastrologv1.DiscardOpenChunkManifestCommand) (*chunk.ChunkID, error) {
+	id := chunkIDFromProto(c.GetChunkId())
+	if id == chunk.ChunkID(glid.Nil) {
+		return nil, errors.New("chunk id required")
+	}
+	var m *OpenChunkManifest
+	switch {
+	case f.openChunk != nil && f.openChunk.ChunkID == id:
+		m = f.openChunk
+	default:
+		m = f.sealedManifestByIDLocked(id)
+	}
+	if m == nil {
+		return nil, nil
+	}
+	if len(m.Refs) != 0 || m.TotalRecords != 0 {
+		return nil, fmt.Errorf("discard open chunk manifest: %s has content", id)
+	}
+	f.clearOpenManifestStateIfChunkIDLocked(id)
+	if _, existed := f.chunks[id]; !existed {
+		return nil, nil
+	}
+	delete(f.chunks, id)
+	return &id, nil
+}
+
+// clearStaleSealTombstoneLocked removes a delete-protocol tombstone that blocks
+// pipeline seal completion while a sealed manifest is still pending for the same
+// chunk ID. Caller MUST hold f.mu.
+func (f *FSM) clearStaleSealTombstoneLocked(id chunk.ChunkID) {
+	if f.sealedManifestByIDLocked(id) != nil {
+		delete(f.tombstones, id)
+	}
+}
+
+// ensureManifestChunkEntryLocked guarantees f.chunks[id] exists for a chunk
+// on the open-manifest seal path. Caller MUST hold f.mu.
+func (f *FSM) ensureManifestChunkEntryLocked(m *OpenChunkManifest, state chunk.ChunkState) {
+	if m == nil {
+		return
+	}
+	id := m.ChunkID
+	f.clearStaleSealTombstoneLocked(id)
+	if e := f.chunks[id]; e != nil {
+		if e.State != chunk.ChunkStateSealed {
+			e.State = state
+		}
+		e.RecordCount = int64(m.TotalRecords) //nolint:gosec // G115: manifest totals fit in int64 for chunk metadata
+		e.Bytes = int64(m.TotalBytes)         //nolint:gosec // G115: manifest totals fit in int64 for chunk metadata
+		applyManifestBoundsToEntry(e, m.Bounds)
+		return
+	}
+	entry := manifestEntryFromOpenChunk(m, state)
+	f.chunks[id] = &entry
+}
+
+// clearOpenManifestStateIfChunkIDLocked drops open/sealed manifest state for id.
+// Caller MUST hold f.mu.
+func (f *FSM) clearOpenManifestStateIfChunkIDLocked(id chunk.ChunkID) {
+	f.removeSealedManifestByIDLocked(id)
+	if f.openChunk != nil && f.openChunk.ChunkID == id {
+		f.openChunk = nil
+	}
+}
+
+// repairSealedManifestChunkEntryLocked recreates a missing manifest entry for a
+// pending sealed manifest after snapshot restore or a delete race.
+// Caller MUST hold f.mu.
+func (f *FSM) repairSealedManifestChunkEntryLocked() {
+	for _, sm := range f.sealedManifests {
+		if sm == nil {
+			continue
+		}
+		f.clearStaleSealTombstoneLocked(sm.ChunkID)
+		f.ensureManifestChunkEntryLocked(sm, chunk.ChunkStateSealing)
+	}
+}
+
+// applyOpenChunkManifestLocked applies OpenChunkManifest and returns a callback
+// effect when a new manifest was created. Caller MUST hold f.mu.
+func (f *FSM) applyOpenChunkManifestLocked(c *gastrologv1.OpenChunkManifestCommand) (any, *OpenChunkManifest) {
+	hadOpen := f.openChunk != nil
+	result := f.applyOpenChunkManifest(c)
+	if result == nil && !hadOpen && f.openChunk != nil {
+		return result, copyOpenChunkManifest(f.openChunk)
+	}
+	return result, nil
+}
+
+// applyAddOpenChunkSegmentRefLocked applies AddOpenChunkSegmentRef and returns
+// a callback effect when a new ref was appended. Caller MUST hold f.mu.
+func (f *FSM) applyAddOpenChunkSegmentRefLocked(c *gastrologv1.AddOpenChunkSegmentRefCommand) (any, *OpenChunkManifest) {
+	refCount := 0
+	if f.openChunk != nil {
+		refCount = len(f.openChunk.Refs)
+	}
+	result := f.applyAddOpenChunkSegmentRef(c)
+	if result == nil && f.openChunk != nil && len(f.openChunk.Refs) > refCount {
+		return result, copyOpenChunkManifest(f.openChunk)
+	}
+	return result, nil
+}
+
+// applyAddOpenChunkSegmentRefsLocked applies AddOpenChunkSegmentRefs and returns
+// a callback effect when any new ref was appended. Caller MUST hold f.mu.
+func (f *FSM) applyAddOpenChunkSegmentRefsLocked(c *gastrologv1.AddOpenChunkSegmentRefsCommand) (any, *OpenChunkManifest) {
+	refCount := 0
+	if f.openChunk != nil {
+		refCount = len(f.openChunk.Refs)
+	}
+	result := f.applyAddOpenChunkSegmentRefs(c)
+	if result == nil && f.openChunk != nil && len(f.openChunk.Refs) > refCount {
+		return result, copyOpenChunkManifest(f.openChunk)
+	}
+	return result, nil
+}
+
+// applySealOpenChunkManifestLocked applies SealOpenChunkManifest and returns a
+// callback effect when the open manifest was sealed. Caller MUST hold f.mu.
+func (f *FSM) applySealOpenChunkManifestLocked(c *gastrologv1.SealOpenChunkManifestCommand) (any, *OpenChunkManifest) {
+	hadOpen := f.openChunk != nil
+	result := f.applySealOpenChunkManifest(c)
+	if result == nil && hadOpen && len(f.sealedManifests) > 0 {
+		return result, copyOpenChunkManifest(f.sealedManifests[len(f.sealedManifests)-1])
+	}
+	return result, nil
+}
+
+// SegmentReferencedInManifest reports whether segmentID appears in the open
+// or sealed (awaiting build) chunk manifest.
+func (f *FSM) SegmentReferencedInManifest(segmentID glid.GLID) bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.segmentReferencedInManifestLocked(segmentID)
+}
+
+// SegmentReleased reports whether segmentID was dropped from the registry
+// by a ReleaseSegments apply. This is positive, replicated, snapshot-
+// persisted evidence of release — the staging-orphan sweep
+// (gastrolog-27czpq) uses it to delete local segment files whose release
+// effect this node missed while offline. Registry absence alone is NOT
+// evidence: a completed segment awaiting its distribution publish is also
+// registry-absent, and deleting it would lose ingested records.
+func (f *FSM) SegmentReleased(segmentID glid.GLID) bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	_, released := f.releasedSegments[segmentID]
+	return released
+}
+
+// segmentReferencedInManifestLocked is SegmentReferencedInManifest for callers
+// already holding f.mu (the Raft apply path).
+func (f *FSM) segmentReferencedInManifestLocked(segmentID glid.GLID) bool {
+	for _, m := range append([]*OpenChunkManifest{f.openChunk}, f.sealedManifests...) {
+		if m == nil {
+			continue
+		}
+		for _, ref := range m.Refs {
+			if ref.SegmentID == segmentID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (f *FSM) applyReleaseSegments(c *gastrologv1.ReleaseSegmentsCommand) []glid.GLID {
+	var released []glid.GLID
+	for _, raw := range c.GetSegmentIds() {
+		segID := glid.FromBytes(raw)
+		if segID == glid.Nil {
+			continue
+		}
+		// Apply-time re-check: a proposal raced ahead of a plan command that
+		// referenced this segment. Releasing here would purge the head/ copy
+		// every home still needs to build the queued chunk (gastrolog-67c9b0).
+		// Deterministic — every node sees identical state at this log index.
+		if f.segmentReferencedInManifestLocked(segID) {
+			continue
+		}
+		if f.completedSegments[segID] != nil {
+			released = append(released, segID)
+		}
+		if f.releasedSegments == nil {
+			f.releasedSegments = make(map[glid.GLID]struct{})
+		}
+		f.releasedSegments[segID] = struct{}{}
+		delete(f.completedSegments, segID)
+		f.removeCompletedSegmentOrder(segID)
+		delete(f.segmentResume, segID)
+		delete(f.segmentChunks, segID)
+	}
+	return released
+}
+
+func openChunkManifestToProto(m *OpenChunkManifest) *gastrologv1.OpenChunkManifestState {
+	if m == nil {
+		return nil
+	}
+	out := &gastrologv1.OpenChunkManifestState{
+		ChunkId:       m.ChunkID[:],
+		OpenedAtNanos: m.OpenedAt.UnixNano(),
+		Refs:          make([]*gastrologv1.OpenChunkSegmentRef, len(m.Refs)),
+		TotalRecords:  m.TotalRecords,
+		TotalBytes:    m.TotalBytes,
+	}
+	if !m.SealedAt.IsZero() {
+		out.SealedAtNanos = m.SealedAt.UnixNano()
+	}
+	ws, we, is, ie, ss, se := manifestBoundsToProto(m.Bounds)
+	out.WriteStartNanos = ws
+	out.WriteEndNanos = we
+	out.IngestStartNanos = is
+	out.IngestEndNanos = ie
+	out.SourceStartNanos = ss
+	out.SourceEndNanos = se
+	for i := range m.Refs {
+		ref := &m.Refs[i]
+		out.Refs[i] = &gastrologv1.OpenChunkSegmentRef{
+			SegmentId:         ref.SegmentID[:],
+			FirstRecordNumber: ref.FirstRecordNumber,
+			LastRecordNumber:  ref.LastRecordNumber,
+			SliceBytes:        ref.SliceBytes,
+			RefAddedAtNanos:   ref.RefAddedAt.UnixNano(),
+		}
+	}
+	return out
+}
+
+func openChunkManifestFromProto(p *gastrologv1.OpenChunkManifestState) *OpenChunkManifest {
+	if p == nil {
+		return nil
+	}
+	m := &OpenChunkManifest{
+		ChunkID:      chunkIDFromProto(p.GetChunkId()),
+		OpenedAt:     time.Unix(0, p.GetOpenedAtNanos()),
+		TotalRecords: p.GetTotalRecords(),
+		TotalBytes:   p.GetTotalBytes(),
+	}
+	if p.GetSealedAtNanos() != 0 {
+		m.SealedAt = time.Unix(0, p.GetSealedAtNanos())
+	}
+	m.Bounds = manifestBoundsFromProto(
+		p.GetWriteStartNanos(),
+		p.GetWriteEndNanos(),
+		p.GetIngestStartNanos(),
+		p.GetIngestEndNanos(),
+		p.GetSourceStartNanos(),
+		p.GetSourceEndNanos(),
+	)
+	for _, pr := range p.GetRefs() {
+		m.Refs = append(m.Refs, OpenChunkSegmentRef{
+			SegmentID:         glid.FromBytes(pr.GetSegmentId()),
+			FirstRecordNumber: pr.GetFirstRecordNumber(),
+			LastRecordNumber:  pr.GetLastRecordNumber(),
+			SliceBytes:        pr.GetSliceBytes(),
+			RefAddedAt:        time.Unix(0, pr.GetRefAddedAtNanos()),
+		})
+	}
+	return m
+}
+
+func (f *FSM) snapshotOpenChunkLocked() *gastrologv1.OpenChunkManifestState {
+	return openChunkManifestToProto(f.openChunk)
+}
+
+func (f *FSM) snapshotSealedManifestsLocked() []*gastrologv1.OpenChunkManifestState {
+	if len(f.sealedManifests) == 0 {
+		return nil
+	}
+	out := make([]*gastrologv1.OpenChunkManifestState, 0, len(f.sealedManifests))
+	for _, m := range f.sealedManifests {
+		out = append(out, openChunkManifestToProto(m))
+	}
+	return out
+}
+
+func (f *FSM) snapshotSegmentResumeLocked() []*gastrologv1.SegmentResumeRecordNumber {
+	if len(f.segmentResume) == 0 {
+		return nil
+	}
+	out := make([]*gastrologv1.SegmentResumeRecordNumber, 0, len(f.segmentResume))
+	ids := slices.SortedFunc(maps.Keys(f.segmentResume), glid.Compare)
+	for _, id := range ids {
+		idCopy := id
+		out = append(out, &gastrologv1.SegmentResumeRecordNumber{
+			SegmentId:        idCopy[:],
+			NextRecordNumber: f.segmentResume[id],
+		})
+	}
+	return out
+}
+
+func (f *FSM) snapshotSegmentChunksLocked() []*gastrologv1.SegmentChunkIDs {
+	if len(f.segmentChunks) == 0 {
+		return nil
+	}
+	out := make([]*gastrologv1.SegmentChunkIDs, 0, len(f.segmentChunks))
+	ids := slices.SortedFunc(maps.Keys(f.segmentChunks), glid.Compare)
+	for _, id := range ids {
+		idCopy := id
+		chunkIDs := f.segmentChunks[id]
+		raw := make([][]byte, len(chunkIDs))
+		for i, cid := range chunkIDs {
+			cidCopy := cid
+			raw[i] = cidCopy[:]
+		}
+		out = append(out, &gastrologv1.SegmentChunkIDs{
+			SegmentId: idCopy[:],
+			ChunkIds:  raw,
+		})
+	}
+	return out
+}
+
+func (f *FSM) restoreOpenChunkLocked(snap *gastrologv1.VaultCtlSnapshot) {
+	f.openChunk = openChunkManifestFromProto(snap.GetOpenChunk())
+	f.sealedManifests = nil
+	for _, sm := range snap.GetSealedManifests() {
+		if m := openChunkManifestFromProto(sm); m != nil {
+			f.sealedManifests = append(f.sealedManifests, m)
+		}
+	}
+	f.segmentResume = make(map[glid.GLID]uint32, len(snap.GetSegmentResume()))
+	for _, entry := range snap.GetSegmentResume() {
+		f.segmentResume[glid.FromBytes(entry.GetSegmentId())] = entry.GetNextRecordNumber()
+	}
+	f.segmentChunks = make(map[glid.GLID][]chunk.ChunkID, len(snap.GetSegmentChunks()))
+	for _, entry := range snap.GetSegmentChunks() {
+		segID := glid.FromBytes(entry.GetSegmentId())
+		raw := entry.GetChunkIds()
+		if len(raw) == 0 {
+			continue
+		}
+		chunkIDs := make([]chunk.ChunkID, 0, len(raw))
+		for _, cid := range raw {
+			chunkIDs = append(chunkIDs, chunkIDFromProto(cid))
+		}
+		f.segmentChunks[segID] = chunkIDs
+	}
+}
+
+// NewOpenChunkManifest builds an OpenChunkManifest VaultCtlCommand.
+func NewOpenChunkManifest(id chunk.ChunkID, openedAt time.Time) *gastrologv1.VaultCtlCommand {
+	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_OpenChunkManifest{
+		OpenChunkManifest: &gastrologv1.OpenChunkManifestCommand{
+			ChunkId:       id[:],
+			OpenedAtNanos: openedAt.UnixNano(),
+		},
+	}}
+}
+
+// MarshalOpenChunkManifest builds Raft log data for OpenChunkManifest.
+func MarshalOpenChunkManifest(id chunk.ChunkID, openedAt time.Time) []byte {
+	return mustMarshalCommand(NewOpenChunkManifest(id, openedAt))
+}
+
+// NewAddOpenChunkSegmentRef builds an AddOpenChunkSegmentRef command.
+func NewAddOpenChunkSegmentRef(chunkID chunk.ChunkID, ref OpenChunkSegmentRef) *gastrologv1.VaultCtlCommand {
+	ws, we, is, ie, ss, se := manifestBoundsToProto(ref.Bounds)
+	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_AddOpenChunkSegmentRef{
+		AddOpenChunkSegmentRef: &gastrologv1.AddOpenChunkSegmentRefCommand{
+			ChunkId:           chunkID[:],
+			SegmentId:         ref.SegmentID[:],
+			FirstRecordNumber: ref.FirstRecordNumber,
+			LastRecordNumber:  ref.LastRecordNumber,
+			SliceBytes:        ref.SliceBytes,
+			RefAddedAtNanos:   ref.RefAddedAt.UnixNano(),
+			WriteStartNanos:   ws,
+			WriteEndNanos:     we,
+			IngestStartNanos:  is,
+			IngestEndNanos:    ie,
+			SourceStartNanos:  ss,
+			SourceEndNanos:    se,
+		},
+	}}
+}
+
+// MarshalAddOpenChunkSegmentRef builds Raft log data for AddOpenChunkSegmentRef.
+func MarshalAddOpenChunkSegmentRef(chunkID chunk.ChunkID, ref OpenChunkSegmentRef) []byte {
+	return mustMarshalCommand(NewAddOpenChunkSegmentRef(chunkID, ref))
+}
+
+func addOpenChunkSegmentRefCommandFromEntry(chunkID chunk.ChunkID, entry *gastrologv1.AddOpenChunkSegmentRefEntry) *gastrologv1.AddOpenChunkSegmentRefCommand {
+	if entry == nil {
+		return nil
+	}
+	return &gastrologv1.AddOpenChunkSegmentRefCommand{
+		ChunkId:           chunkID[:],
+		SegmentId:         entry.GetSegmentId(),
+		FirstRecordNumber: entry.GetFirstRecordNumber(),
+		LastRecordNumber:  entry.GetLastRecordNumber(),
+		SliceBytes:        entry.GetSliceBytes(),
+		RefAddedAtNanos:   entry.GetRefAddedAtNanos(),
+		WriteStartNanos:   entry.GetWriteStartNanos(),
+		WriteEndNanos:     entry.GetWriteEndNanos(),
+		IngestStartNanos:  entry.GetIngestStartNanos(),
+		IngestEndNanos:    entry.GetIngestEndNanos(),
+		SourceStartNanos:  entry.GetSourceStartNanos(),
+		SourceEndNanos:    entry.GetSourceEndNanos(),
+	}
+}
+
+func openChunkSegmentRefEntryFromRef(ref OpenChunkSegmentRef) *gastrologv1.AddOpenChunkSegmentRefEntry {
+	ws, we, is, ie, ss, se := manifestBoundsToProto(ref.Bounds)
+	return &gastrologv1.AddOpenChunkSegmentRefEntry{
+		SegmentId:         ref.SegmentID[:],
+		FirstRecordNumber: ref.FirstRecordNumber,
+		LastRecordNumber:  ref.LastRecordNumber,
+		SliceBytes:        ref.SliceBytes,
+		RefAddedAtNanos:   ref.RefAddedAt.UnixNano(),
+		WriteStartNanos:   ws,
+		WriteEndNanos:     we,
+		IngestStartNanos:  is,
+		IngestEndNanos:    ie,
+		SourceStartNanos:  ss,
+		SourceEndNanos:    se,
+	}
+}
+
+// NewAddOpenChunkSegmentRefs builds an AddOpenChunkSegmentRefs command.
+func NewAddOpenChunkSegmentRefs(chunkID chunk.ChunkID, refs []OpenChunkSegmentRef) *gastrologv1.VaultCtlCommand {
+	entries := make([]*gastrologv1.AddOpenChunkSegmentRefEntry, len(refs))
+	for i, ref := range refs {
+		entries[i] = openChunkSegmentRefEntryFromRef(ref)
+	}
+	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_AddOpenChunkSegmentRefs{
+		AddOpenChunkSegmentRefs: &gastrologv1.AddOpenChunkSegmentRefsCommand{
+			ChunkId: chunkID[:],
+			Refs:    entries,
+		},
+	}}
+}
+
+// MarshalAddOpenChunkSegmentRefs builds Raft log data for AddOpenChunkSegmentRefs.
+func MarshalAddOpenChunkSegmentRefs(chunkID chunk.ChunkID, refs []OpenChunkSegmentRef) []byte {
+	return mustMarshalCommand(NewAddOpenChunkSegmentRefs(chunkID, refs))
+}
+
+// NewSealOpenChunkManifest builds a SealOpenChunkManifest command.
+func NewSealOpenChunkManifest(id chunk.ChunkID, sealedAt time.Time) *gastrologv1.VaultCtlCommand {
+	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_SealOpenChunkManifest{
+		SealOpenChunkManifest: &gastrologv1.SealOpenChunkManifestCommand{
+			ChunkId:       id[:],
+			SealedAtNanos: sealedAt.UnixNano(),
+		},
+	}}
+}
+
+// MarshalSealOpenChunkManifest builds Raft log data for SealOpenChunkManifest.
+func MarshalSealOpenChunkManifest(id chunk.ChunkID, sealedAt time.Time) []byte {
+	return mustMarshalCommand(NewSealOpenChunkManifest(id, sealedAt))
+}
+
+// NewDiscardOpenChunkManifest builds a DiscardOpenChunkManifest command.
+func NewDiscardOpenChunkManifest(id chunk.ChunkID) *gastrologv1.VaultCtlCommand {
+	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_DiscardOpenChunkManifest{
+		DiscardOpenChunkManifest: &gastrologv1.DiscardOpenChunkManifestCommand{
+			ChunkId: id[:],
+		},
+	}}
+}
+
+// MarshalDiscardOpenChunkManifest builds Raft log data for DiscardOpenChunkManifest.
+func MarshalDiscardOpenChunkManifest(id chunk.ChunkID) []byte {
+	return mustMarshalCommand(NewDiscardOpenChunkManifest(id))
+}
+
+// NewReleaseSegments builds a ReleaseSegments command.
+func NewReleaseSegments(segmentIDs []glid.GLID) *gastrologv1.VaultCtlCommand {
+	ids := make([][]byte, len(segmentIDs))
+	for i, id := range segmentIDs {
+		idCopy := id
+		ids[i] = idCopy[:]
+	}
+	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_ReleaseSegments{
+		ReleaseSegments: &gastrologv1.ReleaseSegmentsCommand{SegmentIds: ids},
+	}}
+}
+
+// MarshalReleaseSegments builds Raft log data for ReleaseSegments.
+func MarshalReleaseSegments(segmentIDs []glid.GLID) []byte {
+	return mustMarshalCommand(NewReleaseSegments(segmentIDs))
+}
+
+// ErrManifestNotWedged is returned when DiscardUnbuildableManifests names a
+// manifest that is not the sealed head or has no ghost ref — the recovery
+// command refuses to discard buildable work.
+var ErrManifestNotWedged = errors.New("manifest is not a wedged sealed head")
+
+// applyDiscardUnbuildableManifests recovers a wedged seal queue. Validates
+// that chunk_id is the sealed HEAD manifest and that it references at least
+// one segment absent from the registry (a ghost ref admitted before the
+// apply-time guard); then drops the head, every queued sealed manifest
+// behind it, and the open manifest, rewinding each surviving segment's
+// resume cursor to its lowest discarded record number so all un-built
+// records re-plan. Planning is FIFO per segment, so built chunks sit
+// strictly below the rewound cursors; ghost segments' discarded ranges are
+// stale duplicates of already-chunked records. Deterministic: identical
+// registry and manifest state at this log index on every node.
+// Returns the discarded chunk IDs.
+func (f *FSM) applyDiscardUnbuildableManifests(c *gastrologv1.DiscardUnbuildableManifestsCommand) ([]chunk.ChunkID, error) {
+	id := chunkIDFromProto(c.GetChunkId())
+	head := f.sealedManifestHeadLocked()
+	if head == nil || head.ChunkID != id {
+		return nil, fmt.Errorf("%w: %s is not the sealed head", ErrManifestNotWedged, id)
+	}
+	ghost := false
+	for _, ref := range head.Refs {
+		if f.completedSegments[ref.SegmentID] == nil {
+			ghost = true
+			break
+		}
+	}
+	if !ghost {
+		return nil, fmt.Errorf("%w: %s has no ghost refs", ErrManifestNotWedged, id)
+	}
+
+	discard := make([]*OpenChunkManifest, 0, len(f.sealedManifests)+1)
+	discard = append(discard, f.sealedManifests...)
+	if f.openChunk != nil {
+		discard = append(discard, f.openChunk)
+	}
+
+	f.rewindResumeForDiscardLocked(discard)
+
+	// Drop the manifests, their chunk entries, and their segmentChunks
+	// mappings (a discarded chunk must not count toward supersession).
+	ids := make([]chunk.ChunkID, 0, len(discard))
+	for _, m := range discard {
+		ids = append(ids, m.ChunkID)
+		delete(f.chunks, m.ChunkID)
+		f.scrubSegmentChunksLocked(m)
+	}
+	f.sealedManifests = nil
+	f.openChunk = nil
+	return ids, nil
+}
+
+// rewindResumeForDiscardLocked resets each surviving segment's resume cursor
+// to its lowest record number across the discarded manifests' refs, so every
+// un-built record re-plans. Caller MUST hold f.mu.
+func (f *FSM) rewindResumeForDiscardLocked(discard []*OpenChunkManifest) {
+	rewind := make(map[glid.GLID]uint32)
+	for _, m := range discard {
+		for _, ref := range m.Refs {
+			if f.completedSegments[ref.SegmentID] == nil {
+				continue // ghost: records already durable in built chunks
+			}
+			if cur, ok := rewind[ref.SegmentID]; !ok || ref.FirstRecordNumber < cur {
+				rewind[ref.SegmentID] = ref.FirstRecordNumber
+			}
+		}
+	}
+	maps.Copy(f.segmentResume, rewind)
+}
+
+// scrubSegmentChunksLocked removes a discarded manifest's chunk ID from the
+// supersession mapping of every segment it referenced. Caller MUST hold f.mu.
+func (f *FSM) scrubSegmentChunksLocked(m *OpenChunkManifest) {
+	for _, ref := range m.Refs {
+		list := f.segmentChunks[ref.SegmentID]
+		for i, cid := range list {
+			if cid == m.ChunkID {
+				f.segmentChunks[ref.SegmentID] = append(list[:i], list[i+1:]...)
+				break
+			}
+		}
+		if len(f.segmentChunks[ref.SegmentID]) == 0 {
+			delete(f.segmentChunks, ref.SegmentID)
+		}
+	}
+}
+
+// NewDiscardUnbuildableManifests builds the recovery command for a wedged
+// sealed head.
+func NewDiscardUnbuildableManifests(id chunk.ChunkID) *gastrologv1.VaultCtlCommand {
+	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_DiscardUnbuildableManifests{
+		DiscardUnbuildableManifests: &gastrologv1.DiscardUnbuildableManifestsCommand{ChunkId: id[:]},
+	}}
+}
+
+// MarshalDiscardUnbuildableManifests builds Raft log data for the recovery command.
+func MarshalDiscardUnbuildableManifests(id chunk.ChunkID) []byte {
+	return mustMarshalCommand(NewDiscardUnbuildableManifests(id))
+}

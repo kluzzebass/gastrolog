@@ -13,7 +13,7 @@ import "errors"
 // Type codes:
 //
 //	'b' = B+ tree index
-//	'g' = cloud blob (GLCB)
+//	'g' = GLCB (GastroLog Chunk Blob)
 //	't' = time index
 //	's' = source index (SourceTS)
 //	'I' = ingest index (IngestTS)
@@ -26,6 +26,11 @@ import "errors"
 const (
 	Signature  = 'i'
 	HeaderSize = 4
+
+	// On-disk primitive field sizes (little-endian wire layouts).
+	SizeU16 = 2
+	SizeU32 = 4
+	SizeU64 = 8
 
 	TypeTimeIndex      = 't'
 	TypeSourceIndex    = 's' // SourceTS timestamp index
@@ -46,12 +51,12 @@ const (
 	TypeJSONIndex      = 'J' // Structural JSON index (GIN-style)
 	TypeAttrDict       = 'd' // Attribute key dictionary
 	TypeBTree          = 'b' // B+ tree index
-	TypeCloudBlob      = 'g' // GLCB cloud blob
+	TypeGLCB           = 'g' // GLCB (GastroLog Chunk Blob)
 	TypeLookupTable    = 'L' // Binary lookup table (sorted key index + value data)
+	TypeSegment        = 'S' // vault segment file (working/ or completed/)
 
 	// Flag bits for raw.log, idx.log, and attr.log headers.
-	FlagSealed     = 0x01
-	FlagCompressed = 0x02
+	FlagSealed = 0x01
 
 	// Flag bits for index file headers.
 	// FlagComplete indicates the index was fully written (not a partial/crashed write).

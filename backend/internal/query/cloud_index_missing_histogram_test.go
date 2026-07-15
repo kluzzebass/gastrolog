@@ -19,9 +19,9 @@ import (
 // indexMissingCM wraps a ChunkManager so that List()/Meta() report
 // CloudBacked=true and FindIngestEntryIndex returns (0, false). This
 // reproduces the production setup where a cloud-backed chunk is in the
-// FSM manifest but the local IngestTS rank index isn't cached on this
-// node — search can still stream the records from the blob, but the
-// histogram path can't resolve per-bucket ranks.
+// FSM manifest but the local IngestTS rank index isn't reachable on this
+// node — sealed-chunk search fails loudly; histogram falls back to
+// proportional distribution.
 type indexMissingCM struct {
 	chunk.ChunkManager
 }
@@ -72,7 +72,7 @@ func (im *indexMissingIM) FindIngestStartPosition(_ chunk.ChunkID, _ time.Time) 
 }
 
 // TestCloudIndexMissingHistogramIncludesAllRecords reproduces the
-// production gap: 1800+ cloud chunks each with 100 records exist in the
+// production gap: 1800+ cloud-backed chunks each with 100 records exist in the
 // FSM, but timechartChunkByIndex's rank-arithmetic path can't resolve
 // per-bucket ranks because the local cache is empty. The histogram total
 // must still equal RecordCount × chunks (within distribution rounding).

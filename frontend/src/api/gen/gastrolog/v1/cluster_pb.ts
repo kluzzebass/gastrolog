@@ -6,7 +6,7 @@
 import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialMessage, PlainMessage } from "@bufbuild/protobuf";
 import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
 import { Job } from "./job_pb.js";
-import { ChunkAnalysis, ChunkChangeOp, ChunkMeta, ChunkValidation, ExportRecord, IndexInfo, VaultStats } from "./vault_pb.js";
+import { ChunkAnalysis, ChunkChangeOp, ChunkMeta, ChunkValidation, ExportRecord, IndexInfo, ThroughputRate, VaultStats } from "./vault_pb.js";
 import { PerRouteStats, VaultRouteStats } from "./system_pb.js";
 import { ChunkPlan, HistogramBucket, TableResult } from "./query_pb.js";
 
@@ -596,24 +596,24 @@ export class NodeStats extends Message<NodeStats> {
   /**
    * Route stats (aggregated cluster-wide by GetRouteStats RPC)
    *
-   * @generated from field: int64 route_stats_ingested = 28;
-   */
-  routeStatsIngested = protoInt64.zero;
-
-  /**
-   * @generated from field: int64 route_stats_dropped = 29;
-   */
-  routeStatsDropped = protoInt64.zero;
-
-  /**
-   * @generated from field: int64 route_stats_routed = 30;
+   * @generated from field: int64 route_stats_routed = 28;
    */
   routeStatsRouted = protoInt64.zero;
 
   /**
-   * @generated from field: bool route_stats_filter_active = 31;
+   * @generated from field: int64 route_stats_unmatched = 29;
    */
-  routeStatsFilterActive = false;
+  routeStatsUnmatched = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 route_stats_matched = 30;
+   */
+  routeStatsMatched = protoInt64.zero;
+
+  /**
+   * @generated from field: bool route_stats_route_table_active = 31;
+   */
+  routeStatsRouteTableActive = false;
 
   /**
    * @generated from field: repeated gastrolog.v1.VaultRouteStats route_vault_stats = 32;
@@ -626,33 +626,120 @@ export class NodeStats extends Message<NodeStats> {
   routePerRouteStats: PerRouteStats[] = [];
 
   /**
-   * Forwarding stats — records sent and received via ForwardRecords RPCs.
-   *
-   * @generated from field: int64 forwarded_sent = 34;
-   */
-  forwardedSent = protoInt64.zero;
-
-  /**
-   * @generated from field: int64 forwarded_received = 35;
-   */
-  forwardedReceived = protoInt64.zero;
-
-  /**
    * Active system alerts on this node.
    *
-   * @generated from field: repeated gastrolog.v1.SystemAlert alerts = 36;
+   * @generated from field: repeated gastrolog.v1.SystemAlert alerts = 34;
    */
   alerts: SystemAlert[] = [];
 
   /**
-   * Per-peer inter-node gRPC transport bytes, from this node's perspective.
-   * Populated from the cluster transport stats handlers — includes Raft,
-   * broadcast, vault replication, query forwarding, chunk streaming, etc.
-   * See gastrolog-47u85.
+   * Per-node outbound peer connection catalog (service pools + raft singletons).
+   * Populated from PeerConnManager on each broadcast tick. See gastrolog-1dg8z.
    *
-   * @generated from field: repeated gastrolog.v1.PeerBytesStat peer_bytes = 37;
+   * @generated from field: repeated gastrolog.v1.PeerConnStat peer_connections = 35;
    */
-  peerBytes: PeerBytesStat[] = [];
+  peerConnections: PeerConnStat[] = [];
+
+  /**
+   * Per-peer sum of this node's peer_connections. Inspector merges both peers'
+   * lane rows client-side for the full link view. See gastrolog-5uyy6.
+   *
+   * @generated from field: repeated gastrolog.v1.PeerTrafficTotal peer_traffic_totals = 38;
+   */
+  peerTrafficTotals: PeerTrafficTotal[] = [];
+
+  /**
+   * Per-vault on-disk pipeline segment counts on this node (working/completed
+   * at origins; head/pre-head on homes). Aggregated cluster-wide by
+   * WatchSystemStatus for the inspector.
+   *
+   * @generated from field: repeated gastrolog.v1.VaultPipelineNodeDisk vault_pipeline_disk = 36;
+   */
+  vaultPipelineDisk: VaultPipelineNodeDisk[] = [];
+
+  /**
+   * Total on-disk bytes on this node: local chunk/index stores, pipeline
+   * segments (FSM ByteSize where published, otherwise file stat), raft
+   * persistence, and managed files. Distinct from per-vault data_bytes.
+   *
+   * @generated from field: int64 storage_bytes = 37;
+   */
+  storageBytes = protoInt64.zero;
+
+  /**
+   * Routing throughput on this node, from the stats collector's rolling
+   * windows over the cumulative route counters (fields 28/30). Cluster
+   * totals are the sum across nodes (gastrolog-4eh5ns).
+   *
+   * @generated from field: gastrolog.v1.ThroughputRate route_routed = 39;
+   */
+  routeRouted?: ThroughputRate;
+
+  /**
+   * @generated from field: gastrolog.v1.ThroughputRate route_matched = 40;
+   */
+  routeMatched?: ThroughputRate;
+
+  /**
+   * Raft liveness / WAL health (gastrolog-1io54g). Append latency covers
+   * every Raft WAL on the node (vault groups share one WAL; cluster-ctl has
+   * its own): count/total are cumulative, avg is the rolling-window average
+   * between stats ticks, max is the worst single append since the previous
+   * tick. Election counters aggregate hashicorp/raft observer events across
+   * all groups — elections_per_min > ~3 sustained is a storm.
+   *
+   * @generated from field: uint64 raft_wal_appends_total = 41;
+   */
+  raftWalAppendsTotal = protoInt64.zero;
+
+  /**
+   * @generated from field: double raft_wal_append_avg_ms = 42;
+   */
+  raftWalAppendAvgMs = 0;
+
+  /**
+   * @generated from field: double raft_wal_append_max_ms = 43;
+   */
+  raftWalAppendMaxMs = 0;
+
+  /**
+   * @generated from field: uint64 raft_elections_total = 44;
+   */
+  raftElectionsTotal = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 raft_leader_losses_total = 45;
+   */
+  raftLeaderLossesTotal = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 raft_failed_heartbeats_total = 46;
+   */
+  raftFailedHeartbeatsTotal = protoInt64.zero;
+
+  /**
+   * @generated from field: double raft_elections_per_min = 47;
+   */
+  raftElectionsPerMin = 0;
+
+  /**
+   * Vaults whose backing volume on THIS node is below its free-space floor.
+   * Every node's admission gate honors the union across live peers, so a
+   * starved vault volume anywhere in the cluster suspends new records for
+   * that vault at every front door while other vaults keep ingesting.
+   *
+   * @generated from field: repeated bytes disk_protected_vault_ids = 48;
+   */
+  diskProtectedVaultIds: Uint8Array[] = [];
+
+  /**
+   * Vaults whose local disk claim on THIS node has reached their per-node
+   * max-size budget. Honored cluster-wide by the same per-vault admission
+   * gate as disk_protected_vault_ids, with a budget-specific error.
+   *
+   * @generated from field: repeated bytes size_capped_vault_ids = 49;
+   */
+  sizeCappedVaultIds: Uint8Array[] = [];
 
   constructor(data?: PartialMessage<NodeStats>) {
     super();
@@ -689,16 +776,28 @@ export class NodeStats extends Message<NodeStats> {
     { no: 25, name: "raft_fsm_pending", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 26, name: "api_address", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 27, name: "pprof_address", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 28, name: "route_stats_ingested", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 29, name: "route_stats_dropped", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 30, name: "route_stats_routed", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 31, name: "route_stats_filter_active", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 28, name: "route_stats_routed", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 29, name: "route_stats_unmatched", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 30, name: "route_stats_matched", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 31, name: "route_stats_route_table_active", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 32, name: "route_vault_stats", kind: "message", T: VaultRouteStats, repeated: true },
     { no: 33, name: "route_per_route_stats", kind: "message", T: PerRouteStats, repeated: true },
-    { no: 34, name: "forwarded_sent", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 35, name: "forwarded_received", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 36, name: "alerts", kind: "message", T: SystemAlert, repeated: true },
-    { no: 37, name: "peer_bytes", kind: "message", T: PeerBytesStat, repeated: true },
+    { no: 34, name: "alerts", kind: "message", T: SystemAlert, repeated: true },
+    { no: 35, name: "peer_connections", kind: "message", T: PeerConnStat, repeated: true },
+    { no: 38, name: "peer_traffic_totals", kind: "message", T: PeerTrafficTotal, repeated: true },
+    { no: 36, name: "vault_pipeline_disk", kind: "message", T: VaultPipelineNodeDisk, repeated: true },
+    { no: 37, name: "storage_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 39, name: "route_routed", kind: "message", T: ThroughputRate },
+    { no: 40, name: "route_matched", kind: "message", T: ThroughputRate },
+    { no: 41, name: "raft_wal_appends_total", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 42, name: "raft_wal_append_avg_ms", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
+    { no: 43, name: "raft_wal_append_max_ms", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
+    { no: 44, name: "raft_elections_total", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 45, name: "raft_leader_losses_total", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 46, name: "raft_failed_heartbeats_total", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 47, name: "raft_elections_per_min", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
+    { no: 48, name: "disk_protected_vault_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
+    { no: 49, name: "size_capped_vault_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): NodeStats {
@@ -719,39 +818,213 @@ export class NodeStats extends Message<NodeStats> {
 }
 
 /**
- * PeerBytesStat reports cumulative gRPC wire bytes sent to and received from
- * a single peer, since the emitting node started. Rate is left to the
- * consumer (UI / PromQL-equivalent delta) — these are monotonic counters.
+ * VaultPipelineNodeDisk is one vault's local pipeline storage areas on a
+ * single node, included in the periodic NodeStats broadcast.
  *
- * @generated from message gastrolog.v1.PeerBytesStat
+ * @generated from message gastrolog.v1.VaultPipelineNodeDisk
  */
-export class PeerBytesStat extends Message<PeerBytesStat> {
+export class VaultPipelineNodeDisk extends Message<VaultPipelineNodeDisk> {
   /**
-   * target node ID
-   *
+   * @generated from field: bytes vault_id = 1;
+   */
+  vaultId = new Uint8Array(0);
+
+  /**
+   * @generated from field: uint32 working_segments = 2;
+   */
+  workingSegments = 0;
+
+  /**
+   * @generated from field: uint32 completed_staging_segments = 3;
+   */
+  completedStagingSegments = 0;
+
+  /**
+   * @generated from field: uint32 head_segments = 4;
+   */
+  headSegments = 0;
+
+  /**
+   * @generated from field: uint32 pre_head_segments = 5;
+   */
+  preHeadSegments = 0;
+
+  constructor(data?: PartialMessage<VaultPipelineNodeDisk>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.VaultPipelineNodeDisk";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "working_segments", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 3, name: "completed_staging_segments", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 4, name: "head_segments", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 5, name: "pre_head_segments", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultPipelineNodeDisk {
+    return new VaultPipelineNodeDisk().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): VaultPipelineNodeDisk {
+    return new VaultPipelineNodeDisk().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): VaultPipelineNodeDisk {
+    return new VaultPipelineNodeDisk().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: VaultPipelineNodeDisk | PlainMessage<VaultPipelineNodeDisk> | undefined, b: VaultPipelineNodeDisk | PlainMessage<VaultPipelineNodeDisk> | undefined): boolean {
+    return proto3.util.equals(VaultPipelineNodeDisk, a, b);
+  }
+}
+
+/**
+ * PeerConnStat reports one managed outbound cluster gRPC connection on this node.
+ *
+ * @generated from message gastrolog.v1.PeerConnStat
+ */
+export class PeerConnStat extends Message<PeerConnStat> {
+  /**
    * @generated from field: string peer = 1;
    */
   peer = "";
 
   /**
-   * bytes this node has sent to peer
+   * "service" | "raft"
    *
+   * @generated from field: string lane = 2;
+   */
+  lane = "";
+
+  /**
+   * empty for service lane
+   *
+   * @generated from field: string group_id = 3;
+   */
+  groupId = "";
+
+  /**
+   * active subsystem labels
+   *
+   * @generated from field: repeated string purposes = 4;
+   */
+  purposes: string[] = [];
+
+  /**
+   * @generated from field: string connectivity = 5;
+   */
+  connectivity = "";
+
+  /**
+   * 0 for raft singletons
+   *
+   * @generated from field: int32 pool_index = 6;
+   */
+  poolIndex = 0;
+
+  /**
+   * @generated from field: int64 bytes_sent = 7;
+   */
+  bytesSent = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 bytes_received = 8;
+   */
+  bytesReceived = protoInt64.zero;
+
+  /**
+   * @generated from field: double tx_bytes_per_sec = 9;
+   */
+  txBytesPerSec = 0;
+
+  /**
+   * @generated from field: double rx_bytes_per_sec = 10;
+   */
+  rxBytesPerSec = 0;
+
+  /**
+   * @generated from field: repeated double tx_spark = 11;
+   */
+  txSpark: number[] = [];
+
+  /**
+   * @generated from field: repeated double rx_spark = 12;
+   */
+  rxSpark: number[] = [];
+
+  /**
+   * Subsystems that acquired this connection since the previous stats snapshot
+   * (union of brief holds that may not appear in purposes at tick time).
+   *
+   * @generated from field: repeated string purposes_window = 13;
+   */
+  purposesWindow: string[] = [];
+
+  constructor(data?: PartialMessage<PeerConnStat>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PeerConnStat";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "peer", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "lane", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "group_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "purposes", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 5, name: "connectivity", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 6, name: "pool_index", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+    { no: 7, name: "bytes_sent", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 8, name: "bytes_received", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 9, name: "tx_bytes_per_sec", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
+    { no: 10, name: "rx_bytes_per_sec", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
+    { no: 11, name: "tx_spark", kind: "scalar", T: 1 /* ScalarType.DOUBLE */, repeated: true },
+    { no: 12, name: "rx_spark", kind: "scalar", T: 1 /* ScalarType.DOUBLE */, repeated: true },
+    { no: 13, name: "purposes_window", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PeerConnStat {
+    return new PeerConnStat().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PeerConnStat {
+    return new PeerConnStat().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PeerConnStat {
+    return new PeerConnStat().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PeerConnStat | PlainMessage<PeerConnStat> | undefined, b: PeerConnStat | PlainMessage<PeerConnStat> | undefined): boolean {
+    return proto3.util.equals(PeerConnStat, a, b);
+  }
+}
+
+/**
+ * PeerTrafficTotal is the per-peer sum of this node's peer_connections.
+ *
+ * @generated from message gastrolog.v1.PeerTrafficTotal
+ */
+export class PeerTrafficTotal extends Message<PeerTrafficTotal> {
+  /**
+   * @generated from field: string peer = 1;
+   */
+  peer = "";
+
+  /**
    * @generated from field: int64 bytes_sent = 2;
    */
   bytesSent = protoInt64.zero;
 
   /**
-   * bytes this node has received from peer
-   *
    * @generated from field: int64 bytes_received = 3;
    */
   bytesReceived = protoInt64.zero;
 
   /**
-   * Backend-derived rates (bytes/sec) computed by differencing consecutive
-   * monotonic samples on the node. These exist to avoid UI cold-start and to
-   * make the inspector immediately useful after mount.
-   *
    * @generated from field: double tx_bytes_per_sec = 4;
    */
   txBytesPerSec = 0;
@@ -762,9 +1035,6 @@ export class PeerBytesStat extends Message<PeerBytesStat> {
   rxBytesPerSec = 0;
 
   /**
-   * Rolling sparkline windows (bytes/sec), oldest → newest.
-   * Kept short (e.g. 20 points) so inspector renders quickly.
-   *
    * @generated from field: repeated double tx_spark = 6;
    */
   txSpark: number[] = [];
@@ -774,13 +1044,13 @@ export class PeerBytesStat extends Message<PeerBytesStat> {
    */
   rxSpark: number[] = [];
 
-  constructor(data?: PartialMessage<PeerBytesStat>) {
+  constructor(data?: PartialMessage<PeerTrafficTotal>) {
     super();
     proto3.util.initPartial(data, this);
   }
 
   static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.PeerBytesStat";
+  static readonly typeName = "gastrolog.v1.PeerTrafficTotal";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "peer", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "bytes_sent", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
@@ -791,20 +1061,20 @@ export class PeerBytesStat extends Message<PeerBytesStat> {
     { no: 7, name: "rx_spark", kind: "scalar", T: 1 /* ScalarType.DOUBLE */, repeated: true },
   ]);
 
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PeerBytesStat {
-    return new PeerBytesStat().fromBinary(bytes, options);
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PeerTrafficTotal {
+    return new PeerTrafficTotal().fromBinary(bytes, options);
   }
 
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PeerBytesStat {
-    return new PeerBytesStat().fromJson(jsonValue, options);
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PeerTrafficTotal {
+    return new PeerTrafficTotal().fromJson(jsonValue, options);
   }
 
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PeerBytesStat {
-    return new PeerBytesStat().fromJsonString(jsonString, options);
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PeerTrafficTotal {
+    return new PeerTrafficTotal().fromJsonString(jsonString, options);
   }
 
-  static equals(a: PeerBytesStat | PlainMessage<PeerBytesStat> | undefined, b: PeerBytesStat | PlainMessage<PeerBytesStat> | undefined): boolean {
-    return proto3.util.equals(PeerBytesStat, a, b);
+  static equals(a: PeerTrafficTotal | PlainMessage<PeerTrafficTotal> | undefined, b: PeerTrafficTotal | PlainMessage<PeerTrafficTotal> | undefined): boolean {
+    return proto3.util.equals(PeerTrafficTotal, a, b);
   }
 }
 
@@ -954,91 +1224,6 @@ export class IngesterNodeStats extends Message<IngesterNodeStats> {
 }
 
 /**
- * ForwardRecordsRequest ships a batch of records to the node that owns
- * the destination vault. Sent by retention eject to route records to a
- * remote vault. Records are appended to the destination vault's active
- * chunk.
- *
- * @generated from message gastrolog.v1.ForwardRecordsRequest
- */
-export class ForwardRecordsRequest extends Message<ForwardRecordsRequest> {
-  /**
-   * @generated from field: bytes vault_id = 1;
-   */
-  vaultId = new Uint8Array(0);
-
-  /**
-   * @generated from field: repeated gastrolog.v1.ExportRecord records = 2;
-   */
-  records: ExportRecord[] = [];
-
-  constructor(data?: PartialMessage<ForwardRecordsRequest>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.ForwardRecordsRequest";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 2, name: "records", kind: "message", T: ExportRecord, repeated: true },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardRecordsRequest {
-    return new ForwardRecordsRequest().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardRecordsRequest {
-    return new ForwardRecordsRequest().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardRecordsRequest {
-    return new ForwardRecordsRequest().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: ForwardRecordsRequest | PlainMessage<ForwardRecordsRequest> | undefined, b: ForwardRecordsRequest | PlainMessage<ForwardRecordsRequest> | undefined): boolean {
-    return proto3.util.equals(ForwardRecordsRequest, a, b);
-  }
-}
-
-/**
- * @generated from message gastrolog.v1.ForwardRecordsResponse
- */
-export class ForwardRecordsResponse extends Message<ForwardRecordsResponse> {
-  /**
-   * @generated from field: int64 records_written = 1;
-   */
-  recordsWritten = protoInt64.zero;
-
-  constructor(data?: PartialMessage<ForwardRecordsResponse>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.ForwardRecordsResponse";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "records_written", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardRecordsResponse {
-    return new ForwardRecordsResponse().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardRecordsResponse {
-    return new ForwardRecordsResponse().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardRecordsResponse {
-    return new ForwardRecordsResponse().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: ForwardRecordsResponse | PlainMessage<ForwardRecordsResponse> | undefined, b: ForwardRecordsResponse | PlainMessage<ForwardRecordsResponse> | undefined): boolean {
-    return proto3.util.equals(ForwardRecordsResponse, a, b);
-  }
-}
-
-/**
  * ForwardVaultApplyRequest carries a pre-marshaled vault control-plane Raft
  * command for the leader to apply. group_id is the vault-ctl group
  * (vault/<vaultGLID>/ctl); command is the marshaled FSM command bytes
@@ -1138,19 +1323,7 @@ export class ChunkReplicationCommand extends Message<ChunkReplicationCommand> {
    */
   command: {
     /**
-     * @generated from field: gastrolog.v1.ChunkReplicationAppend append = 10;
-     */
-    value: ChunkReplicationAppend;
-    case: "append";
-  } | {
-    /**
-     * @generated from field: gastrolog.v1.ChunkReplicationSeal seal = 11;
-     */
-    value: ChunkReplicationSeal;
-    case: "seal";
-  } | {
-    /**
-     * @generated from field: gastrolog.v1.ChunkReplicationDelete delete_chunk = 12;
+     * @generated from field: gastrolog.v1.ChunkReplicationDelete delete_chunk = 10;
      */
     value: ChunkReplicationDelete;
     case: "deleteChunk";
@@ -1162,19 +1335,19 @@ export class ChunkReplicationCommand extends Message<ChunkReplicationCommand> {
      * chunk into one message; chunks past the gRPC receive cap wedged
      * the catchup path forever. See gastrolog-4yvhh.
      *
-     * @generated from field: gastrolog.v1.ChunkReplicationImportBegin import_begin = 13;
+     * @generated from field: gastrolog.v1.ChunkReplicationImportBegin import_begin = 11;
      */
     value: ChunkReplicationImportBegin;
     case: "importBegin";
   } | {
     /**
-     * @generated from field: gastrolog.v1.ChunkReplicationImportRecords import_records = 14;
+     * @generated from field: gastrolog.v1.ChunkReplicationImportRecords import_records = 12;
      */
     value: ChunkReplicationImportRecords;
     case: "importRecords";
   } | {
     /**
-     * @generated from field: gastrolog.v1.ChunkReplicationImportCommit import_commit = 15;
+     * @generated from field: gastrolog.v1.ChunkReplicationImportCommit import_commit = 13;
      */
     value: ChunkReplicationImportCommit;
     case: "importCommit";
@@ -1189,12 +1362,10 @@ export class ChunkReplicationCommand extends Message<ChunkReplicationCommand> {
   static readonly typeName = "gastrolog.v1.ChunkReplicationCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 10, name: "append", kind: "message", T: ChunkReplicationAppend, oneof: "command" },
-    { no: 11, name: "seal", kind: "message", T: ChunkReplicationSeal, oneof: "command" },
-    { no: 12, name: "delete_chunk", kind: "message", T: ChunkReplicationDelete, oneof: "command" },
-    { no: 13, name: "import_begin", kind: "message", T: ChunkReplicationImportBegin, oneof: "command" },
-    { no: 14, name: "import_records", kind: "message", T: ChunkReplicationImportRecords, oneof: "command" },
-    { no: 15, name: "import_commit", kind: "message", T: ChunkReplicationImportCommit, oneof: "command" },
+    { no: 10, name: "delete_chunk", kind: "message", T: ChunkReplicationDelete, oneof: "command" },
+    { no: 11, name: "import_begin", kind: "message", T: ChunkReplicationImportBegin, oneof: "command" },
+    { no: 12, name: "import_records", kind: "message", T: ChunkReplicationImportRecords, oneof: "command" },
+    { no: 13, name: "import_commit", kind: "message", T: ChunkReplicationImportCommit, oneof: "command" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkReplicationCommand {
@@ -1211,94 +1382,6 @@ export class ChunkReplicationCommand extends Message<ChunkReplicationCommand> {
 
   static equals(a: ChunkReplicationCommand | PlainMessage<ChunkReplicationCommand> | undefined, b: ChunkReplicationCommand | PlainMessage<ChunkReplicationCommand> | undefined): boolean {
     return proto3.util.equals(ChunkReplicationCommand, a, b);
-  }
-}
-
-/**
- * ChunkReplicationAppend forwards records to the follower's active chunk.
- *
- * @generated from message gastrolog.v1.ChunkReplicationAppend
- */
-export class ChunkReplicationAppend extends Message<ChunkReplicationAppend> {
-  /**
-   * leader's active chunk ID
-   *
-   * @generated from field: bytes chunk_id = 1;
-   */
-  chunkId = new Uint8Array(0);
-
-  /**
-   * @generated from field: repeated gastrolog.v1.ExportRecord records = 2;
-   */
-  records: ExportRecord[] = [];
-
-  constructor(data?: PartialMessage<ChunkReplicationAppend>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.ChunkReplicationAppend";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 2, name: "records", kind: "message", T: ExportRecord, repeated: true },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkReplicationAppend {
-    return new ChunkReplicationAppend().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ChunkReplicationAppend {
-    return new ChunkReplicationAppend().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ChunkReplicationAppend {
-    return new ChunkReplicationAppend().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: ChunkReplicationAppend | PlainMessage<ChunkReplicationAppend> | undefined, b: ChunkReplicationAppend | PlainMessage<ChunkReplicationAppend> | undefined): boolean {
-    return proto3.util.equals(ChunkReplicationAppend, a, b);
-  }
-}
-
-/**
- * ChunkReplicationSeal tells the follower to seal its active chunk.
- *
- * @generated from message gastrolog.v1.ChunkReplicationSeal
- */
-export class ChunkReplicationSeal extends Message<ChunkReplicationSeal> {
-  /**
-   * expected active chunk ID
-   *
-   * @generated from field: bytes chunk_id = 1;
-   */
-  chunkId = new Uint8Array(0);
-
-  constructor(data?: PartialMessage<ChunkReplicationSeal>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.ChunkReplicationSeal";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkReplicationSeal {
-    return new ChunkReplicationSeal().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ChunkReplicationSeal {
-    return new ChunkReplicationSeal().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ChunkReplicationSeal {
-    return new ChunkReplicationSeal().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: ChunkReplicationSeal | PlainMessage<ChunkReplicationSeal> | undefined, b: ChunkReplicationSeal | PlainMessage<ChunkReplicationSeal> | undefined): boolean {
-    return proto3.util.equals(ChunkReplicationSeal, a, b);
   }
 }
 
@@ -1631,8 +1714,10 @@ export class RequestReplicaCatchupResponse extends Message<RequestReplicaCatchup
 }
 
 /**
- * ForwardSearchRequest is sent to the node that owns a remote vault,
- * asking it to execute a search locally and return matching records.
+ * ForwardSearchRequest is sent to a replica holder node to execute a
+ * scoped search locally and return matching records. When sealed_chunk_ids
+ * is empty and search_pipeline_chunks is false, the holder runs a legacy
+ * leader-only full-vault search (backward compatible).
  *
  * @generated from message gastrolog.v1.ForwardSearchRequest
  */
@@ -1654,6 +1739,20 @@ export class ForwardSearchRequest extends Message<ForwardSearchRequest> {
    */
   resumeToken = new Uint8Array(0);
 
+  /**
+   * sealed chunks this holder should scan
+   *
+   * @generated from field: repeated bytes sealed_chunk_ids = 4;
+   */
+  sealedChunkIds: Uint8Array[] = [];
+
+  /**
+   * include active/sealing chunks (leader only)
+   *
+   * @generated from field: bool search_pipeline_chunks = 5;
+   */
+  searchPipelineChunks = false;
+
   constructor(data?: PartialMessage<ForwardSearchRequest>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1665,6 +1764,8 @@ export class ForwardSearchRequest extends Message<ForwardSearchRequest> {
     { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "query", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "resume_token", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 4, name: "sealed_chunk_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
+    { no: 5, name: "search_pipeline_chunks", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardSearchRequest {
@@ -1937,6 +2038,125 @@ export class ForwardListChunksResponse extends Message<ForwardListChunksResponse
 
   static equals(a: ForwardListChunksResponse | PlainMessage<ForwardListChunksResponse> | undefined, b: ForwardListChunksResponse | PlainMessage<ForwardListChunksResponse> | undefined): boolean {
     return proto3.util.equals(ForwardListChunksResponse, a, b);
+  }
+}
+
+/**
+ * ForwardGetPipelineBacklogRequest asks a remote node for its local
+ * on-disk pipeline segment counts for one vault.
+ *
+ * @generated from message gastrolog.v1.ForwardGetPipelineBacklogRequest
+ */
+export class ForwardGetPipelineBacklogRequest extends Message<ForwardGetPipelineBacklogRequest> {
+  /**
+   * @generated from field: bytes vault_id = 1;
+   */
+  vaultId = new Uint8Array(0);
+
+  constructor(data?: PartialMessage<ForwardGetPipelineBacklogRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardGetPipelineBacklogRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardGetPipelineBacklogRequest {
+    return new ForwardGetPipelineBacklogRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardGetPipelineBacklogRequest {
+    return new ForwardGetPipelineBacklogRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardGetPipelineBacklogRequest {
+    return new ForwardGetPipelineBacklogRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardGetPipelineBacklogRequest | PlainMessage<ForwardGetPipelineBacklogRequest> | undefined, b: ForwardGetPipelineBacklogRequest | PlainMessage<ForwardGetPipelineBacklogRequest> | undefined): boolean {
+    return proto3.util.equals(ForwardGetPipelineBacklogRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ForwardGetPipelineBacklogResponse
+ */
+export class ForwardGetPipelineBacklogResponse extends Message<ForwardGetPipelineBacklogResponse> {
+  /**
+   * @generated from field: uint32 working_segments = 1;
+   */
+  workingSegments = 0;
+
+  /**
+   * @generated from field: uint32 completed_staging_segments = 2;
+   */
+  completedStagingSegments = 0;
+
+  /**
+   * @generated from field: uint32 head_segments = 3;
+   */
+  headSegments = 0;
+
+  /**
+   * @generated from field: uint32 pre_head_segments = 4;
+   */
+  preHeadSegments = 0;
+
+  /**
+   * @generated from field: uint64 working_bytes = 5;
+   */
+  workingBytes = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 completed_staging_bytes = 6;
+   */
+  completedStagingBytes = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 head_bytes = 7;
+   */
+  headBytes = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 pre_head_bytes = 8;
+   */
+  preHeadBytes = protoInt64.zero;
+
+  constructor(data?: PartialMessage<ForwardGetPipelineBacklogResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardGetPipelineBacklogResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "working_segments", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 2, name: "completed_staging_segments", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 3, name: "head_segments", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 4, name: "pre_head_segments", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 5, name: "working_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 6, name: "completed_staging_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 7, name: "head_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 8, name: "pre_head_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardGetPipelineBacklogResponse {
+    return new ForwardGetPipelineBacklogResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardGetPipelineBacklogResponse {
+    return new ForwardGetPipelineBacklogResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardGetPipelineBacklogResponse {
+    return new ForwardGetPipelineBacklogResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardGetPipelineBacklogResponse | PlainMessage<ForwardGetPipelineBacklogResponse> | undefined, b: ForwardGetPipelineBacklogResponse | PlainMessage<ForwardGetPipelineBacklogResponse> | undefined): boolean {
+    return proto3.util.equals(ForwardGetPipelineBacklogResponse, a, b);
   }
 }
 
@@ -3085,6 +3305,47 @@ export class ImportRecordMessage extends Message<ImportRecordMessage> {
 }
 
 /**
+ * ForwardImportRecordsResponse reports how many records the client-streaming
+ * ForwardImportRecords RPC committed into the destination vault's sealed-chunk
+ * store.
+ *
+ * @generated from message gastrolog.v1.ForwardImportRecordsResponse
+ */
+export class ForwardImportRecordsResponse extends Message<ForwardImportRecordsResponse> {
+  /**
+   * @generated from field: int64 records_written = 1;
+   */
+  recordsWritten = protoInt64.zero;
+
+  constructor(data?: PartialMessage<ForwardImportRecordsResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardImportRecordsResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "records_written", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardImportRecordsResponse {
+    return new ForwardImportRecordsResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardImportRecordsResponse {
+    return new ForwardImportRecordsResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardImportRecordsResponse {
+    return new ForwardImportRecordsResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardImportRecordsResponse | PlainMessage<ForwardImportRecordsResponse> | undefined, b: ForwardImportRecordsResponse | PlainMessage<ForwardImportRecordsResponse> | undefined): boolean {
+    return proto3.util.equals(ForwardImportRecordsResponse, a, b);
+  }
+}
+
+/**
  * PullManagedFileRequest asks a peer to stream a managed file's contents.
  *
  * @generated from message gastrolog.v1.PullManagedFileRequest
@@ -3178,6 +3439,184 @@ export class PullManagedFileChunk extends Message<PullManagedFileChunk> {
 
   static equals(a: PullManagedFileChunk | PlainMessage<PullManagedFileChunk> | undefined, b: PullManagedFileChunk | PlainMessage<PullManagedFileChunk> | undefined): boolean {
     return proto3.util.equals(PullManagedFileChunk, a, b);
+  }
+}
+
+/**
+ * PullSegmentRequest asks a peer (segment origin or another holder) to stream a
+ * completed segment's raw bytes for collection into a home node's head/.
+ *
+ * @generated from message gastrolog.v1.PullSegmentRequest
+ */
+export class PullSegmentRequest extends Message<PullSegmentRequest> {
+  /**
+   * @generated from field: bytes vault_id = 1;
+   */
+  vaultId = new Uint8Array(0);
+
+  /**
+   * @generated from field: bytes segment_id = 2;
+   */
+  segmentId = new Uint8Array(0);
+
+  constructor(data?: PartialMessage<PullSegmentRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PullSegmentRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "segment_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PullSegmentRequest {
+    return new PullSegmentRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PullSegmentRequest {
+    return new PullSegmentRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PullSegmentRequest {
+    return new PullSegmentRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PullSegmentRequest | PlainMessage<PullSegmentRequest> | undefined, b: PullSegmentRequest | PlainMessage<PullSegmentRequest> | undefined): boolean {
+    return proto3.util.equals(PullSegmentRequest, a, b);
+  }
+}
+
+/**
+ * PullSegmentChunk carries a chunk of completed-segment bytes during streaming
+ * transfer. Unlike PullManagedFileChunk it carries no filename/hash: the
+ * collector verifies against the vault-ctl registry checksum after promotion.
+ *
+ * @generated from message gastrolog.v1.PullSegmentChunk
+ */
+export class PullSegmentChunk extends Message<PullSegmentChunk> {
+  /**
+   * chunk of segment content (up to 64KB)
+   *
+   * @generated from field: bytes data = 1;
+   */
+  data = new Uint8Array(0);
+
+  constructor(data?: PartialMessage<PullSegmentChunk>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PullSegmentChunk";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "data", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PullSegmentChunk {
+    return new PullSegmentChunk().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PullSegmentChunk {
+    return new PullSegmentChunk().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PullSegmentChunk {
+    return new PullSegmentChunk().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PullSegmentChunk | PlainMessage<PullSegmentChunk> | undefined, b: PullSegmentChunk | PlainMessage<PullSegmentChunk> | undefined): boolean {
+    return proto3.util.equals(PullSegmentChunk, a, b);
+  }
+}
+
+/**
+ * PullChunkGLCBRequest asks a peer holding a sealed pipeline chunk's GLCB to
+ * stream its bytes. Replica catch-up for homes that missed the build window
+ * and whose source segments are already released — without this, a home that
+ * misses builds can never recover chunk bytes.
+ *
+ * @generated from message gastrolog.v1.PullChunkGLCBRequest
+ */
+export class PullChunkGLCBRequest extends Message<PullChunkGLCBRequest> {
+  /**
+   * @generated from field: bytes vault_id = 1;
+   */
+  vaultId = new Uint8Array(0);
+
+  /**
+   * @generated from field: bytes chunk_id = 2;
+   */
+  chunkId = new Uint8Array(0);
+
+  constructor(data?: PartialMessage<PullChunkGLCBRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PullChunkGLCBRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PullChunkGLCBRequest {
+    return new PullChunkGLCBRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PullChunkGLCBRequest {
+    return new PullChunkGLCBRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PullChunkGLCBRequest {
+    return new PullChunkGLCBRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PullChunkGLCBRequest | PlainMessage<PullChunkGLCBRequest> | undefined, b: PullChunkGLCBRequest | PlainMessage<PullChunkGLCBRequest> | undefined): boolean {
+    return proto3.util.equals(PullChunkGLCBRequest, a, b);
+  }
+}
+
+/**
+ * PullChunkGLCBChunk carries a slice of GLCB bytes during streaming transfer.
+ * The puller verifies the assembled file's seal metadata and size against the
+ * vault-ctl manifest entry before renaming it into place.
+ *
+ * @generated from message gastrolog.v1.PullChunkGLCBChunk
+ */
+export class PullChunkGLCBChunk extends Message<PullChunkGLCBChunk> {
+  /**
+   * @generated from field: bytes data = 1;
+   */
+  data = new Uint8Array(0);
+
+  constructor(data?: PartialMessage<PullChunkGLCBChunk>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PullChunkGLCBChunk";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "data", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PullChunkGLCBChunk {
+    return new PullChunkGLCBChunk().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PullChunkGLCBChunk {
+    return new PullChunkGLCBChunk().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PullChunkGLCBChunk {
+    return new PullChunkGLCBChunk().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PullChunkGLCBChunk | PlainMessage<PullChunkGLCBChunk> | undefined, b: PullChunkGLCBChunk | PlainMessage<PullChunkGLCBChunk> | undefined): boolean {
+    return proto3.util.equals(PullChunkGLCBChunk, a, b);
   }
 }
 

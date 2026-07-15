@@ -3,11 +3,15 @@ package system
 import (
 	"gastrolog/internal/glid"
 	"testing"
+	"time"
 
 	"gastrolog/internal/chunk"
 )
 
-func TestParseBytesValid(t *testing.T) {
+// ParseSize is the single byte-size parser (ParseBytes, which read "GB" as
+// binary, is gone): strict SI/IEC — KB/MB/GB/TB decimal, KiB/MiB/GiB/TiB
+// binary — matching the frontend parseBytes and every display label.
+func TestParseSizeStrictUnits(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		input    string
@@ -16,44 +20,46 @@ func TestParseBytesValid(t *testing.T) {
 		{"100", 100},
 		{"100B", 100},
 		{"100b", 100},
-		{"1KB", 1024},
-		{"1kb", 1024},
-		{"64MB", 64 * 1024 * 1024},
-		{"64mb", 64 * 1024 * 1024},
-		{"1GB", 1024 * 1024 * 1024},
-		{"1gb", 1024 * 1024 * 1024},
-		{" 100 MB ", 100 * 1024 * 1024},
+		{"1KB", 1000},
+		{"1KiB", 1024},
+		{"64MB", 64 * 1000 * 1000},
+		{"64MiB", 64 * 1024 * 1024},
+		{"1GB", 1000 * 1000 * 1000},
+		{"1gib", 1024 * 1024 * 1024},
+		{"1.5GB", 1500 * 1000 * 1000},
+		{"2TB", 2 * 1000 * 1000 * 1000 * 1000},
+		{" 100 MB ", 100 * 1000 * 1000},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.input, func(t *testing.T) {
 			t.Parallel()
-			got, err := ParseBytes(tc.input)
+			got, err := ParseSize(tc.input)
 			if err != nil {
-				t.Fatalf("ParseBytes(%q) error: %v", tc.input, err)
+				t.Fatalf("ParseSize(%q) error: %v", tc.input, err)
 			}
 			if got != tc.expected {
-				t.Errorf("ParseBytes(%q) = %d, want %d", tc.input, got, tc.expected)
+				t.Errorf("ParseSize(%q) = %d, want %d", tc.input, got, tc.expected)
 			}
 		})
 	}
 }
 
-func TestParseBytesInvalid(t *testing.T) {
+func TestParseSizeInvalid(t *testing.T) {
 	t.Parallel()
 	tests := []string{
 		"",
 		"abc",
 		"-100",
-		"100TB",
+		"100XB",
 	}
 
 	for _, input := range tests {
 		t.Run(input, func(t *testing.T) {
 			t.Parallel()
-			_, err := ParseBytes(input)
+			_, err := ParseSize(input)
 			if err == nil {
-				t.Errorf("ParseBytes(%q) expected error, got nil", input)
+				t.Errorf("ParseSize(%q) expected error, got nil", input)
 			}
 		})
 	}
@@ -75,7 +81,7 @@ func TestRotationPolicyConfigToPolicy(t *testing.T) {
 
 	t.Run("maxBytes only", func(t *testing.T) {
 		t.Parallel()
-		cfg := RotationPolicyConfig{MaxBytes: new("64MB")}
+		cfg := RotationPolicyConfig{MaxBytes: new(uint64(64 << 20))}
 		policy, err := cfg.ToRotationPolicy()
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -123,7 +129,7 @@ func TestRotationPolicyConfigToPolicy(t *testing.T) {
 	t.Run("composite", func(t *testing.T) {
 		t.Parallel()
 		cfg := RotationPolicyConfig{
-			MaxBytes:   new("1MB"),
+			MaxBytes:   new(uint64(1 << 20)),
 			MaxRecords: new(int64(100)),
 		}
 		policy, err := cfg.ToRotationPolicy()
@@ -155,27 +161,12 @@ func TestRotationPolicyConfigToPolicy(t *testing.T) {
 		}
 	})
 
-	t.Run("invalid maxBytes", func(t *testing.T) {
-		t.Parallel()
-		cfg := RotationPolicyConfig{MaxBytes: new("invalid")}
-		_, err := cfg.ToRotationPolicy()
-		if err == nil {
-			t.Error("expected error for invalid maxBytes")
-		}
-	})
-
-	t.Run("invalid maxAge", func(t *testing.T) {
-		t.Parallel()
-		cfg := RotationPolicyConfig{MaxAge: new("invalid")}
-		_, err := cfg.ToRotationPolicy()
-		if err == nil {
-			t.Error("expected error for invalid maxAge")
-		}
-	})
-
+	// "invalid maxBytes/maxAge string" cases are gone with string storage:
+	// unparseable values cannot exist at rest — parsing (and rejection)
+	// happens once at the input surface. Sign remains the only invalid state.
 	t.Run("negative maxAge", func(t *testing.T) {
 		t.Parallel()
-		cfg := RotationPolicyConfig{MaxAge: new("-1h")}
+		cfg := RotationPolicyConfig{MaxAgeNanos: new(int64(-time.Hour))}
 		_, err := cfg.ToRotationPolicy()
 		if err == nil {
 			t.Error("expected error for negative maxAge")
@@ -273,7 +264,7 @@ func TestToRetentionPolicy(t *testing.T) {
 
 	t.Run("maxAge only", func(t *testing.T) {
 		t.Parallel()
-		cfg := RetentionPolicyConfig{MaxAge: new("24h")}
+		cfg := RetentionPolicyConfig{MaxAgeNanos: new(int64(24 * time.Hour))}
 		policy, err := cfg.ToRetentionPolicy()
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -285,7 +276,7 @@ func TestToRetentionPolicy(t *testing.T) {
 
 	t.Run("maxBytes only", func(t *testing.T) {
 		t.Parallel()
-		cfg := RetentionPolicyConfig{MaxBytes: new("10GB")}
+		cfg := RetentionPolicyConfig{MaxBytes: new(uint64(10_000_000_000))}
 		policy, err := cfg.ToRetentionPolicy()
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -310,8 +301,8 @@ func TestToRetentionPolicy(t *testing.T) {
 	t.Run("composite age and chunks", func(t *testing.T) {
 		t.Parallel()
 		cfg := RetentionPolicyConfig{
-			MaxAge:    new("720h"),
-			MaxChunks: new(int64(100)),
+			MaxAgeNanos: new(int64(720 * time.Hour)),
+			MaxChunks:   new(int64(100)),
 		}
 		policy, err := cfg.ToRetentionPolicy()
 		if err != nil {
@@ -325,9 +316,9 @@ func TestToRetentionPolicy(t *testing.T) {
 	t.Run("all three conditions", func(t *testing.T) {
 		t.Parallel()
 		cfg := RetentionPolicyConfig{
-			MaxAge:    new("720h"),
-			MaxBytes:  new("10GB"),
-			MaxChunks: new(int64(50)),
+			MaxAgeNanos: new(int64(720 * time.Hour)),
+			MaxBytes:    new(uint64(10_000_000_000)),
+			MaxChunks:   new(int64(50)),
 		}
 		policy, err := cfg.ToRetentionPolicy()
 		if err != nil {
@@ -338,18 +329,10 @@ func TestToRetentionPolicy(t *testing.T) {
 		}
 	})
 
-	t.Run("invalid maxAge", func(t *testing.T) {
-		t.Parallel()
-		cfg := RetentionPolicyConfig{MaxAge: new("not-a-duration")}
-		_, err := cfg.ToRetentionPolicy()
-		if err == nil {
-			t.Error("expected error for invalid maxAge")
-		}
-	})
-
+	// Unparseable-string cases are gone with string storage; sign/zero remain.
 	t.Run("negative maxAge", func(t *testing.T) {
 		t.Parallel()
-		cfg := RetentionPolicyConfig{MaxAge: new("-1h")}
+		cfg := RetentionPolicyConfig{MaxAgeNanos: new(int64(-time.Hour))}
 		_, err := cfg.ToRetentionPolicy()
 		if err == nil {
 			t.Error("expected error for negative maxAge")
@@ -358,19 +341,10 @@ func TestToRetentionPolicy(t *testing.T) {
 
 	t.Run("zero maxAge", func(t *testing.T) {
 		t.Parallel()
-		cfg := RetentionPolicyConfig{MaxAge: new("0s")}
+		cfg := RetentionPolicyConfig{MaxAgeNanos: new(int64(0))}
 		_, err := cfg.ToRetentionPolicy()
 		if err == nil {
 			t.Error("expected error for zero maxAge")
-		}
-	})
-
-	t.Run("invalid maxBytes", func(t *testing.T) {
-		t.Parallel()
-		cfg := RetentionPolicyConfig{MaxBytes: new("not-bytes")}
-		_, err := cfg.ToRetentionPolicy()
-		if err == nil {
-			t.Error("expected error for invalid maxBytes")
 		}
 	})
 
@@ -405,12 +379,12 @@ func TestRotationPolicyConfigIsEmpty(t *testing.T) {
 		want bool
 	}{
 		{"zero value", RotationPolicyConfig{}, true},
-		{"empty MaxBytes string", RotationPolicyConfig{MaxBytes: &empty}, true},
-		{"empty MaxAge string", RotationPolicyConfig{MaxAge: &empty}, true},
+		{"zero MaxBytes", RotationPolicyConfig{MaxBytes: new(uint64(0))}, true},
+		{"zero MaxAgeNanos", RotationPolicyConfig{MaxAgeNanos: new(int64(0))}, true},
 		{"empty Cron string", RotationPolicyConfig{Cron: &empty}, true},
-		{"all empty strings", RotationPolicyConfig{MaxBytes: &empty, MaxAge: &empty, Cron: &empty}, true},
-		{"MaxBytes set", RotationPolicyConfig{MaxBytes: new("64MB")}, false},
-		{"MaxAge set", RotationPolicyConfig{MaxAge: new("1h")}, false},
+		{"all zero", RotationPolicyConfig{MaxBytes: new(uint64(0)), MaxAgeNanos: new(int64(0)), Cron: &empty}, true},
+		{"MaxBytes set", RotationPolicyConfig{MaxBytes: new(uint64(64 << 20))}, false},
+		{"MaxAgeNanos set", RotationPolicyConfig{MaxAgeNanos: new(int64(time.Hour))}, false},
 		{"MaxRecords set", RotationPolicyConfig{MaxRecords: new(int64(1000))}, false},
 		{"Cron set", RotationPolicyConfig{Cron: new("0 * * * *")}, false},
 	}
@@ -427,18 +401,17 @@ func TestRotationPolicyConfigIsEmpty(t *testing.T) {
 // gastrolog-1rbuf regression: same shape for retention policies.
 func TestRetentionPolicyConfigIsEmpty(t *testing.T) {
 	t.Parallel()
-	empty := ""
 	cases := []struct {
 		name string
 		cfg  RetentionPolicyConfig
 		want bool
 	}{
 		{"zero value", RetentionPolicyConfig{}, true},
-		{"empty MaxAge string", RetentionPolicyConfig{MaxAge: &empty}, true},
-		{"empty MaxBytes string", RetentionPolicyConfig{MaxBytes: &empty}, true},
-		{"all empty strings", RetentionPolicyConfig{MaxAge: &empty, MaxBytes: &empty}, true},
-		{"MaxAge set", RetentionPolicyConfig{MaxAge: new("24h")}, false},
-		{"MaxBytes set", RetentionPolicyConfig{MaxBytes: new("10GB")}, false},
+		{"zero MaxAgeNanos", RetentionPolicyConfig{MaxAgeNanos: new(int64(0))}, true},
+		{"zero MaxBytes", RetentionPolicyConfig{MaxBytes: new(uint64(0))}, true},
+		{"all zero", RetentionPolicyConfig{MaxAgeNanos: new(int64(0)), MaxBytes: new(uint64(0))}, true},
+		{"MaxAgeNanos set", RetentionPolicyConfig{MaxAgeNanos: new(int64(24 * time.Hour))}, false},
+		{"MaxBytes set", RetentionPolicyConfig{MaxBytes: new(uint64(10_000_000_000))}, false},
 		{"MaxChunks set", RetentionPolicyConfig{MaxChunks: new(int64(10))}, false},
 	}
 	for _, tc := range cases {

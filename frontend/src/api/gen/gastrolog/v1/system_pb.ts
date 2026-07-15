@@ -6,6 +6,7 @@
 import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialMessage, PlainMessage } from "@bufbuild/protobuf";
 import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
 import { CloudService, NodeStorageConfig } from "./storage_pb.js";
+import { ThroughputRate } from "./vault_pb.js";
 
 /**
  * VaultType identifies the storage shape of a vault.
@@ -64,7 +65,7 @@ export enum IngesterMode {
   PASSIVE = 1,
 
   /**
-   * Collectors — actively pull from data sources.
+   * Actively pull from upstream systems (Kafka consumer, file tail, etc.).
    *
    * @generated from enum value: INGESTER_MODE_ACTIVE = 2;
    */
@@ -302,9 +303,9 @@ export class GetSystemResponse extends Message<GetSystemResponse> {
    * Committed log index on the cluster-ctl Raft group (monotonic). Used by clients
    * to avoid regressing cached replicated state with stale reads.
    *
-   * @generated from field: uint64 system_raft_index = 8;
+   * @generated from field: uint64 cluster_ctl_raft_index = 8;
    */
-  systemRaftIndex = protoInt64.zero;
+  clusterCtlRaftIndex = protoInt64.zero;
 
   /**
    * @generated from field: repeated gastrolog.v1.CloudService cloud_services = 9;
@@ -354,7 +355,7 @@ export class GetSystemResponse extends Message<GetSystemResponse> {
     { no: 5, name: "node_configs", kind: "message", T: NodeConfig, repeated: true },
     { no: 6, name: "routes", kind: "message", T: RouteConfig, repeated: true },
     { no: 7, name: "managed_files", kind: "message", T: ManagedFileInfo, repeated: true },
-    { no: 8, name: "system_raft_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 8, name: "cluster_ctl_raft_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 9, name: "cloud_services", kind: "message", T: CloudService, repeated: true },
     { no: 10, name: "node_storage_configs", kind: "message", T: NodeStorageConfig, repeated: true },
     { no: 11, name: "log_levels", kind: "message", T: LogLevelConfig },
@@ -576,6 +577,33 @@ export class VaultConfig extends Message<VaultConfig> {
    */
   retentionDisposition = "";
 
+  /**
+   * Per-vault disk guard thresholds on the vault's backing volume, in
+   * bytes of FREE space. 0 = inherit the node defaults (fraction-based
+   * with share clamps; env-overridable). Warn raises the disk-space
+   * alarm for this vault; floor suspends admission for records destined
+   * to this vault while other vaults keep ingesting.
+   *
+   * @generated from field: uint64 disk_free_warn_bytes = 17;
+   */
+  diskFreeWarnBytes = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 disk_free_floor_bytes = 18;
+   */
+  diskFreeFloorBytes = protoInt64.zero;
+
+  /**
+   * Per-node byte budget for this vault's whole local disk claim (sealed
+   * chunks, indexes, and pipeline segment backlog). 0 = unlimited. At the
+   * budget, admission for records destined to this vault is refused
+   * cluster-wide (cap-and-refuse) until retention or releases drain it —
+   * the hard backstop behind a size retention policy's cap-and-drain.
+   *
+   * @generated from field: uint64 max_size_bytes = 19;
+   */
+  maxSizeBytes = protoInt64.zero;
+
   constructor(data?: PartialMessage<VaultConfig>) {
     super();
     proto3.util.initPartial(data, this);
@@ -600,6 +628,9 @@ export class VaultConfig extends Message<VaultConfig> {
     { no: 14, name: "cache_budget", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 15, name: "cache_ttl", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 16, name: "retention_disposition", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 17, name: "disk_free_warn_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 18, name: "disk_free_floor_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 19, name: "max_size_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultConfig {
@@ -806,7 +837,7 @@ export class RouteStage extends Message<RouteStage> {
 }
 
 /**
- * MatchStage gates the route on a boolean filter expression. The
+ * MatchStage gates the route on a boolean match expression. The
  * expression is evaluated against the record (with system-injected
  * synthetic attributes available via reserved-prefix keys: _source,
  * _ingester, _vault, _reason).
@@ -961,9 +992,12 @@ export class RotationPolicyConfig extends Message<RotationPolicyConfig> {
   maxRecords = protoInt64.zero;
 
   /**
-   * @generated from field: int64 max_age_seconds = 3;
+   * Nanoseconds: durations are stored at full precision — a seconds field
+   * silently truncated sub-second input (e.g. "1004ms").
+   *
+   * @generated from field: int64 max_age_nanos = 3;
    */
-  maxAgeSeconds = protoInt64.zero;
+  maxAgeNanos = protoInt64.zero;
 
   /**
    * @generated from field: string cron = 4;
@@ -990,7 +1024,7 @@ export class RotationPolicyConfig extends Message<RotationPolicyConfig> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "max_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 2, name: "max_records", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 3, name: "max_age_seconds", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 3, name: "max_age_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 4, name: "cron", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 5, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 6, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
@@ -1018,9 +1052,11 @@ export class RotationPolicyConfig extends Message<RotationPolicyConfig> {
  */
 export class RetentionPolicyConfig extends Message<RetentionPolicyConfig> {
   /**
-   * @generated from field: int64 max_age_seconds = 1;
+   * Nanoseconds (see RotationPolicyConfig.max_age_nanos).
+   *
+   * @generated from field: int64 max_age_nanos = 1;
    */
-  maxAgeSeconds = protoInt64.zero;
+  maxAgeNanos = protoInt64.zero;
 
   /**
    * @generated from field: int64 max_bytes = 2;
@@ -1050,7 +1086,7 @@ export class RetentionPolicyConfig extends Message<RetentionPolicyConfig> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.RetentionPolicyConfig";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "max_age_seconds", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 1, name: "max_age_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 2, name: "max_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 3, name: "max_chunks", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 4, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
@@ -3072,11 +3108,22 @@ export class ClusterSettings extends Message<ClusterSettings> {
   broadcastInterval = "";
 
   /**
-   * Go duration string, e.g. "1s". Default: "1s". Lightweight liveness ping; PeerState TTL is 4× this.
+   * Go duration string, e.g. "1s". Default: "1s". Lightweight liveness ping; PeerState TTL is 8× this (defaultPeerTTLMultiplier).
    *
    * @generated from field: string heartbeat_interval = 2;
    */
   heartbeatInterval = "";
+
+  /**
+   * Per-vault pipeline backlog budget in bytes (unreleased completed segments
+   * in the vault-ctl registry). When a vault's backlog reaches the budget,
+   * ingest admission for that vault is refused (retryable backpressure) until
+   * chunking drains it below the budget. The operating bound that engages
+   * BEFORE disk pressure; the disk guard remains the backstop. 0 = unbounded.
+   *
+   * @generated from field: uint64 pipeline_backlog_max_bytes = 3;
+   */
+  pipelineBacklogMaxBytes = protoInt64.zero;
 
   constructor(data?: PartialMessage<ClusterSettings>) {
     super();
@@ -3088,6 +3135,7 @@ export class ClusterSettings extends Message<ClusterSettings> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "broadcast_interval", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "heartbeat_interval", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "pipeline_backlog_max_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ClusterSettings {
@@ -3597,6 +3645,11 @@ export class PutClusterSettings extends Message<PutClusterSettings> {
    */
   heartbeatInterval?: string;
 
+  /**
+   * @generated from field: optional uint64 pipeline_backlog_max_bytes = 3;
+   */
+  pipelineBacklogMaxBytes?: bigint;
+
   constructor(data?: PartialMessage<PutClusterSettings>) {
     super();
     proto3.util.initPartial(data, this);
@@ -3607,6 +3660,7 @@ export class PutClusterSettings extends Message<PutClusterSettings> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "broadcast_interval", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
     { no: 2, name: "heartbeat_interval", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
+    { no: 3, name: "pipeline_backlog_max_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */, opt: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutClusterSettings {
@@ -3689,8 +3743,8 @@ export class PutServiceSettingsRequest extends Message<PutServiceSettingsRequest
 
 /**
  * SettingsMutationEcho is returned after successful server-settings mutations so
- * clients can mirror GetSettings without a follow-up RPC. system_raft_index matches
- * GetSystemResponse.system_raft_index for cache coherence.
+ * clients can mirror GetSettings without a follow-up RPC. cluster_ctl_raft_index matches
+ * GetSystemResponse.cluster_ctl_raft_index for cache coherence.
  *
  * @generated from message gastrolog.v1.SettingsMutationEcho
  */
@@ -3701,9 +3755,9 @@ export class SettingsMutationEcho extends Message<SettingsMutationEcho> {
   settings?: GetSettingsResponse;
 
   /**
-   * @generated from field: uint64 system_raft_index = 2;
+   * @generated from field: uint64 cluster_ctl_raft_index = 2;
    */
-  systemRaftIndex = protoInt64.zero;
+  clusterCtlRaftIndex = protoInt64.zero;
 
   constructor(data?: PartialMessage<SettingsMutationEcho>) {
     super();
@@ -3714,7 +3768,7 @@ export class SettingsMutationEcho extends Message<SettingsMutationEcho> {
   static readonly typeName = "gastrolog.v1.SettingsMutationEcho";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "settings", kind: "message", T: GetSettingsResponse },
-    { no: 2, name: "system_raft_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 2, name: "cluster_ctl_raft_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SettingsMutationEcho {
@@ -5815,11 +5869,11 @@ export class WatchSystemResponse extends Message<WatchSystemResponse> {
   /**
    * Committed log index on the cluster-ctl Raft group when this notification fired.
    * Clients should only invalidate or refetch when this index exceeds the
-   * highest system_raft_index they already hold from a fetch or mutation.
+   * highest cluster_ctl_raft_index they already hold from a fetch or mutation.
    *
-   * @generated from field: uint64 system_raft_index = 1;
+   * @generated from field: uint64 cluster_ctl_raft_index = 1;
    */
-  systemRaftIndex = protoInt64.zero;
+  clusterCtlRaftIndex = protoInt64.zero;
 
   constructor(data?: PartialMessage<WatchSystemResponse>) {
     super();
@@ -5829,7 +5883,7 @@ export class WatchSystemResponse extends Message<WatchSystemResponse> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.WatchSystemResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "system_raft_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 1, name: "cluster_ctl_raft_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): WatchSystemResponse {
@@ -5887,32 +5941,32 @@ export class GetRouteStatsResponse extends Message<GetRouteStatsResponse> {
   /**
    * Global counters since process start.
    *
-   * total records entering ingest()
+   * total records entering routing (matched + unmatched)
    *
-   * @generated from field: int64 total_ingested = 1;
-   */
-  totalIngested = protoInt64.zero;
-
-  /**
-   * records matching no filter (silently lost)
-   *
-   * @generated from field: int64 total_dropped = 2;
-   */
-  totalDropped = protoInt64.zero;
-
-  /**
-   * records delivered to at least one vault
-   *
-   * @generated from field: int64 total_routed = 3;
+   * @generated from field: int64 total_routed = 1;
    */
   totalRouted = protoInt64.zero;
 
   /**
-   * false = no routes compiled, all records dropped
+   * records that matched no route (intentional, counted drop)
    *
-   * @generated from field: bool filter_set_active = 4;
+   * @generated from field: int64 total_unmatched = 2;
    */
-  filterSetActive = false;
+  totalUnmatched = protoInt64.zero;
+
+  /**
+   * records that matched a route and were delivered to at least one vault
+   *
+   * @generated from field: int64 total_matched = 3;
+   */
+  totalMatched = protoInt64.zero;
+
+  /**
+   * false = no route table published; every record goes unmatched
+   *
+   * @generated from field: bool route_table_active = 4;
+   */
+  routeTableActive = false;
 
   /**
    * Per-vault destination counters.
@@ -5928,6 +5982,21 @@ export class GetRouteStatsResponse extends Message<GetRouteStatsResponse> {
    */
   routeStats: PerRouteStats[] = [];
 
+  /**
+   * Cluster-total routing throughput: per-horizon sums of every node's
+   * rolling-window rates from the NodeStats broadcast. Sparks are omitted
+   * at cluster level — per-node tick phases differ, so element-wise sums
+   * would fabricate a series no node observed (gastrolog-4eh5ns).
+   *
+   * @generated from field: gastrolog.v1.ThroughputRate routed_rate = 7;
+   */
+  routedRate?: ThroughputRate;
+
+  /**
+   * @generated from field: gastrolog.v1.ThroughputRate matched_rate = 8;
+   */
+  matchedRate?: ThroughputRate;
+
   constructor(data?: PartialMessage<GetRouteStatsResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -5936,12 +6005,14 @@ export class GetRouteStatsResponse extends Message<GetRouteStatsResponse> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.GetRouteStatsResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "total_ingested", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 2, name: "total_dropped", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 3, name: "total_routed", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 4, name: "filter_set_active", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 1, name: "total_routed", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 2, name: "total_unmatched", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 3, name: "total_matched", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 4, name: "route_table_active", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 5, name: "vault_stats", kind: "message", T: VaultRouteStats, repeated: true },
     { no: 6, name: "route_stats", kind: "message", T: PerRouteStats, repeated: true },
+    { no: 7, name: "routed_rate", kind: "message", T: ThroughputRate },
+    { no: 8, name: "matched_rate", kind: "message", T: ThroughputRate },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetRouteStatsResponse {
@@ -5971,18 +6042,11 @@ export class VaultRouteStats extends Message<VaultRouteStats> {
   vaultId = new Uint8Array(0);
 
   /**
-   * records routed to this vault
+   * records that matched a route targeting this vault
    *
    * @generated from field: int64 records_matched = 2;
    */
   recordsMatched = protoInt64.zero;
-
-  /**
-   * subset sent to a remote node
-   *
-   * @generated from field: int64 records_forwarded = 3;
-   */
-  recordsForwarded = protoInt64.zero;
 
   constructor(data?: PartialMessage<VaultRouteStats>) {
     super();
@@ -5994,7 +6058,6 @@ export class VaultRouteStats extends Message<VaultRouteStats> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "records_matched", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 3, name: "records_forwarded", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultRouteStats {
@@ -6030,13 +6093,6 @@ export class PerRouteStats extends Message<PerRouteStats> {
    */
   recordsMatched = protoInt64.zero;
 
-  /**
-   * subset sent to remote nodes
-   *
-   * @generated from field: int64 records_forwarded = 3;
-   */
-  recordsForwarded = protoInt64.zero;
-
   constructor(data?: PartialMessage<PerRouteStats>) {
     super();
     proto3.util.initPartial(data, this);
@@ -6047,7 +6103,6 @@ export class PerRouteStats extends Message<PerRouteStats> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "route_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "records_matched", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 3, name: "records_forwarded", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PerRouteStats {

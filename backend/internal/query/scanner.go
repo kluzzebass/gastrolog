@@ -35,6 +35,14 @@ func prunePositions(positions []uint64, minPos uint64) []uint64 {
 	return positions[idx:]
 }
 
+// pruneMaxPositions returns positions < maxPos from a sorted slice.
+func pruneMaxPositions(positions []uint64, maxPos uint64) []uint64 {
+	idx := sort.Search(len(positions), func(i int) bool {
+		return positions[i] >= maxPos
+	})
+	return positions[:idx]
+}
+
 // intersectPositions returns positions present in both sorted slices.
 func intersectPositions(a, b []uint64) []uint64 {
 	var result []uint64
@@ -93,9 +101,32 @@ type scannerBuilder struct {
 	chunkID        chunk.ChunkID
 	positions      []uint64       // nil = sequential, empty = no matches, non-empty = seek positions
 	filters        []recordFilter // applied in order; cheap filters should be added first
-	minPos         uint64         // prune positions below this (from time index or resume)
+	minPos         uint64         // prune positions below this (from time index or forward resume)
 	hasMinPos      bool
+	maxPos         uint64 // exclusive; prune positions at or above this (from reverse resume)
+	hasMaxPos      bool
 	skipTimeBounds bool // when true, position scanners skip IngestTS bounds checking (already pruned by TS index)
+}
+
+// posWindow is the half-open position window [min, max) a scan may yield.
+type posWindow struct {
+	min, max       uint64
+	hasMin, hasMax bool
+}
+
+func (w posWindow) contains(pos uint64) bool {
+	if w.hasMin && pos < w.min {
+		return false
+	}
+	if w.hasMax && pos >= w.max {
+		return false
+	}
+	return true
+}
+
+// window snapshots the builder's position bounds for scan-time checks.
+func (b *scannerBuilder) window() posWindow {
+	return posWindow{min: b.minPos, max: b.maxPos, hasMin: b.hasMinPos, hasMax: b.hasMaxPos}
 }
 
 // newScannerBuilder creates a builder for the given chunk.
@@ -104,7 +135,8 @@ func newScannerBuilder(chunkID chunk.ChunkID) *scannerBuilder {
 }
 
 // setMinPosition sets the minimum position for pruning posting lists.
-// Positions below this are excluded. Used for time-based start bounds and resume.
+// Positions below this are excluded. Used for time-based start bounds and
+// forward resume.
 func (b *scannerBuilder) setMinPosition(pos uint64) {
 	if !b.hasMinPos || pos > b.minPos {
 		b.minPos = pos
@@ -112,13 +144,28 @@ func (b *scannerBuilder) setMinPosition(pos uint64) {
 	}
 }
 
+// setMaxPosition sets the exclusive maximum position for pruning posting
+// lists. Positions at or above this are excluded. Used for reverse resume:
+// in a reverse scan over a monotonic chunk the records already returned are
+// those at positions >= the resume position, so the resume position is an
+// exclusive upper bound on what remains.
+func (b *scannerBuilder) setMaxPosition(pos uint64) {
+	if !b.hasMaxPos || pos < b.maxPos {
+		b.maxPos = pos
+		b.hasMaxPos = true
+	}
+}
+
 // addPositions intersects the given positions with existing positions.
 // If this is the first position source, it sets positions directly.
 // Returns false if the intersection is empty (no matches possible).
 func (b *scannerBuilder) addPositions(positions []uint64) bool {
-	// Prune positions below minPos.
+	// Prune positions outside the [minPos, maxPos) window.
 	if b.hasMinPos {
 		positions = prunePositions(positions, b.minPos)
+	}
+	if b.hasMaxPos {
+		positions = pruneMaxPositions(positions, b.maxPos)
 	}
 	if len(positions) == 0 {
 		b.positions = []uint64{} // empty, not nil
@@ -1600,97 +1647,4 @@ func matchJSONPathExists(raw []byte, key string) bool {
 		}
 	}, nil)
 	return found
-}
-
-// reorderByTS buffers all records from inner, sorts by the chosen TS field,
-// and yields in sorted order. Used for active (unsealed) chunks and fallback
-// when TS indexes are unavailable. Safe because active chunks are bounded
-// by rotation policy.
-func reorderByTS(inner iter.Seq2[recordWithRef, error], orderBy OrderBy, reverse bool) iter.Seq2[recordWithRef, error] {
-	return func(yield func(recordWithRef, error) bool) {
-		var buf []recordWithRef
-		for rr, err := range inner {
-			if err != nil {
-				yield(rr, err)
-				return
-			}
-			buf = append(buf, rr)
-		}
-
-		slices.SortStableFunc(buf, func(a, b recordWithRef) int {
-			at := orderBy.RecordTS(a.Record)
-			bt := orderBy.RecordTS(b.Record)
-			if reverse {
-				return bt.Compare(at)
-			}
-			return at.Compare(bt)
-		})
-
-		for _, rr := range buf {
-			if !yield(rr, nil) {
-				return
-			}
-		}
-	}
-}
-
-// reorderByTSWithBounds buffers all records, sorts by the given TS field,
-// applies time bounds AFTER sorting, and yields in order. Used when the inner
-// scanner reads in physical (WriteTS) order and IngestTS bounds can't be
-// applied during the scan without skipping records.
-func reorderByTSWithBounds(inner iter.Seq2[recordWithRef, error], orderBy OrderBy, reverse bool, lower, upper time.Time, resumeTS ...time.Time) iter.Seq2[recordWithRef, error] {
-	var skipPast time.Time
-	if len(resumeTS) > 0 {
-		skipPast = resumeTS[0]
-	}
-	return func(yield func(recordWithRef, error) bool) {
-		var buf []recordWithRef
-		for rr, err := range inner {
-			if err != nil {
-				yield(rr, err)
-				return
-			}
-			buf = append(buf, rr)
-		}
-
-		slices.SortStableFunc(buf, func(a, b recordWithRef) int {
-			at := orderBy.RecordTS(a.Record)
-			bt := orderBy.RecordTS(b.Record)
-			if reverse {
-				return bt.Compare(at)
-			}
-			return at.Compare(bt)
-		})
-
-		for _, rr := range buf {
-			if !reorderRecordVisible(orderBy.RecordTS(rr.Record), lower, upper, skipPast, reverse) {
-				continue
-			}
-			rr.Reordered = true
-			if !yield(rr, nil) {
-				return
-			}
-		}
-	}
-}
-
-// reorderRecordVisible checks whether a record should be included in reordered output.
-// Applies time bounds and resume-skip logic.
-func reorderRecordVisible(ts, lower, upper, skipPast time.Time, reverse bool) bool {
-	if !lower.IsZero() && ts.Before(lower) {
-		return false
-	}
-	if !upper.IsZero() && !ts.Before(upper) {
-		return false
-	}
-	// Resume skip: records already yielded on previous pages.
-	if !skipPast.IsZero() {
-		if reverse && !ts.Before(skipPast) {
-			return false
-		}
-		if !reverse && !skipPast.Before(ts) {
-			return false
-		}
-	}
-	return true
 }

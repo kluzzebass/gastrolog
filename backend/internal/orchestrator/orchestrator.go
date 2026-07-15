@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"gastrolog/internal/glid"
 	"log/slog"
+	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -18,8 +20,16 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/lifecycle"
+	"gastrolog/internal/locktrack"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/notify"
+	"gastrolog/internal/orchestrator/pipeline"
+	"gastrolog/internal/pipeline/chunking"
+	"gastrolog/internal/pipeline/collection"
+	"gastrolog/internal/pipeline/distribution"
+	"gastrolog/internal/pipeline/digestion"
+	"gastrolog/internal/pipeline/ingestion"
+	"gastrolog/internal/pipeline/segmentation"
 	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/system"
 	"gastrolog/internal/vaultraft"
@@ -35,32 +45,34 @@ type IngesterStats struct {
 	Alive            atomic.Bool // true while Run() is executing, false during retry sleep
 }
 
-// RouteStats tracks routing metrics using atomic counters.
-// Safe for concurrent reads (from API handlers) and writes (from ingest loop).
+// RouteStats is a point-in-time snapshot of global routing counters sourced
+// from the pipeline routing manager.
 type RouteStats struct {
-	Ingested atomic.Int64 // total records entering ingest()
-	Dropped  atomic.Int64 // records matching no filter
-	Routed   atomic.Int64 // records delivered to at least one vault
+	Routed  int64 // total records that entered routing (matched + unmatched)
+	Unmatched int64 // records that matched no route (intentional, counted drop)
+	Matched int64 // records that matched a route and were fanned out
 }
 
-// VaultRouteStats tracks per-vault routing metrics.
+// VaultRouteStats is a point-in-time snapshot of per-vault routing counters.
 type VaultRouteStats struct {
-	Matched   atomic.Int64 // records routed to this vault
-	Forwarded atomic.Int64 // records sent to remote node for this vault
+	Matched int64 // records routed to this vault
 }
 
-// PerRouteStats tracks per-route routing metrics.
+// PerRouteStats is a point-in-time snapshot of per-route routing counters.
 type PerRouteStats struct {
-	Matched   atomic.Int64 // records matched by this route
-	Forwarded atomic.Int64 // records forwarded to remote node by this route
+	Matched int64 // records matched by this route
 }
 
-// ingesterInfo holds metadata about an ingester for logging purposes.
-// The Ingester interface is a bare Run() — metadata lives alongside it.
+// ingesterInfo holds metadata about an ingester for logging and reconcile
+// diffing. The Ingester interface is a bare Run() — metadata lives alongside it.
 type ingesterInfo struct {
 	Name    string
 	Type    string
 	Passive bool // true for listener ingesters that should retry on failure
+	// Params is the config-store parameter snapshot last used to build the
+	// running instance. Compared on reconcile so param edits restart the
+	// ingester without a disable/enable toggle.
+	Params map[string]string
 }
 
 var (
@@ -83,28 +95,6 @@ type drainState struct {
 	Cancel       context.CancelFunc
 }
 
-// RecordForwarder ships records to remote cluster nodes for vault routes
-// that target a vault on another node.
-//
-// Forward is a best-effort enqueue (drop on full) — used only for ancillary
-// paths such as placement redirect replays, not the ingestion hot path.
-//
-// ForwardSync blocks until each record is accepted by the per-node buffer
-// or ctx / forwarder shutdown fires. Ingestion uses this (outside o.mu) so
-// a full forward buffer applies backpressure through digestedCh instead of
-// dropping records. Ack-gated ingestion also uses ForwardSync from
-// ackAfterReplication.
-//
-// RegisterPressureGate wires the per-node forward channels as probes on
-// the orchestrator's shared pressure gate so ingesters throttle upstream
-// when cross-node forwarding is backed up (gastrolog-27zvt).
-type RecordForwarder interface {
-	Forward(ctx context.Context, nodeID string, vaultID glid.GLID, records []chunk.Record) error
-	ForwardSync(ctx context.Context, nodeID string, vaultID glid.GLID, records []chunk.Record) error
-	RegisterPressureGate(gate *chanwatch.PressureGate)
-	RedirectNode(fromNodeID, toNodeID string)
-}
-
 // ChunkReplicator sequences all replication commands for an instance on a single
 // ordered stream per follower. Nil in single-node mode.
 //
@@ -124,8 +114,6 @@ type RecordForwarder interface {
 // its own concern; transient follower-not-ready errors are retried by
 // higher-level catchup scheduling (see ScheduleCatchup).
 type ChunkReplicator interface {
-	AppendRecords(ctx context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error
-	SealVault(ctx context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID) error
 	ImportSealedChunk(ctx context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error
 	DeleteChunk(ctx context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID) error
 
@@ -139,21 +127,13 @@ type ChunkReplicator interface {
 }
 
 // RemoteTransferrer sends records to a remote node for cross-node chunk
-// migration. Unlike RecordForwarder (fire-and-forget for ingestion), this
-// is synchronous and reliable — the caller blocks until the remote node
-// confirms delivery.
+// migration. Synchronous and reliable — the caller blocks until the remote
+// node confirms delivery.
 type RemoteTransferrer interface {
 	// TransferRecords streams records to a remote node, which imports them
 	// as a new sealed chunk. Used by MoveChunk and DrainVault where
 	// preserving chunk boundaries is desired.
 	TransferRecords(ctx context.Context, nodeID string, vaultID glid.GLID, next chunk.RecordIterator) error
-
-	// ForwardAppend sends records to a remote node, which appends them to
-	// the destination vault's active chunk (same as live ingestion).
-	// Synchronous — blocks until the remote node confirms the append.
-	// Used by retention eject where records should flow through the
-	// destination's normal rotation lifecycle.
-	ForwardAppend(ctx context.Context, nodeID string, vaultID glid.GLID, records []chunk.Record) error
 
 	// WaitVaultReady blocks until the vault is registered and accepting
 	// records on the given node, or ctx expires. Used by DrainVault to
@@ -194,31 +174,78 @@ type RemoteTransferrer interface {
 //   - Subcomponents receive child loggers with additional context
 //   - Logging is intentionally sparse; only lifecycle events are logged
 type Orchestrator struct {
-	mu sync.RWMutex
+	// mu guards the registries below. locktrack.RWMutex is a drop-in
+	// sync.RWMutex that, when tracking is on (default; GLOG_LOCK_TRACKING=off
+	// disables), records acquisition stacks so an orphaned hold or a stuck
+	// write waiter is reported with its exact acquisition site — a node-wide
+	// deadlock from a leaked read lock was undiagnosable from goroutine
+	// dumps alone (gastrolog-1ug3rq).
+	mu locktrack.RWMutex
+
+	// backfillLogThrottle spaces cloud-backfill failure logging per vault;
+	// the sweep retries failing chunks every few seconds indefinitely.
+	backfillLogThrottle logging.Throttle
+	// registerSkipLog spaces skipped-GLCB-registration warnings per vault.
+	registerSkipLog logging.Throttle
 
 	// Vault registry. Each vault bundles Chunks, Indexes, and Query.
 	vaults map[glid.GLID]*Vault
 
 	// Ingester management.
-	ingesters       map[glid.GLID]Ingester
-	ingesterCancels map[glid.GLID]context.CancelFunc // per-ingester cancel functions
-	ingesterStats   map[glid.GLID]*IngesterStats     // per-ingester metrics
-	ingesterMeta    map[glid.GLID]ingesterInfo       // per-ingester name/type for logging
+	ingesters        map[glid.GLID]Ingester
+	ingesterStats    map[glid.GLID]*IngesterStats     // per-ingester metrics
+	ingesterMeta     map[glid.GLID]ingesterInfo       // per-ingester name/type for logging
+	ingesterAdapters map[glid.GLID]ingestion.Ingester // stable pipeline adapters (no-flap reconcile identity)
 
-	// Digesters (message enrichment pipeline).
-	digesters []Digester
+	// pipeline is the ingest pipeline supervisor: it owns the durable write path
+	// (ingest→digest→route→segment→distribute). The orchestrator drives its
+	// routing table, Origin vault registrations, and ingester reconcile, and
+	// starts/stops it alongside itself.
+	pipeline *pipeline.Supervisor
+	// pipelineGate is the ingest-pipeline pressure signal injected into
+	// PressureAware ingesters by the supervisor's ingestion manager.
+	pipelineGate *chanwatch.PressureGate
+	// segmentsDir is the base directory for per-vault segment roots
+	// (OriginRoot = segmentsDir/<vaultID>).
+	segmentsDir string
+	// homeDir is the gastrolog home directory (stores, segments, raft, …).
+	homeDir string
+	// pipelineVaults tracks which vaults are currently registered in the pipeline
+	// supervisor and whether each is registered as a Home (collection) on this
+	// node, so a route/placement reload registers/unregisters/re-registers only
+	// the delta. Guarded by o.mu.
+	pipelineVaults map[glid.GLID]pipelineVaultReg
 
-	// Routing table — gastrolog-4kkoo (Phase 5): per-route, priority-ordered,
-	// first-match-wins. Replaces the Phase-4 per-vault FilterSet.
-	routeSet *RouteSet
+	// segmentPuller streams completed segments from peer holders for
+	// collection. Set from factories during ApplyConfig (cluster mode only).
+	segmentPuller *cluster.SegmentPuller
+	// chunkGLCBPuller streams sealed chunk GLCBs from peer homes for
+	// replica catch-up — a home that missed builds (wedged, down) whose
+	// source segments were already released has no other recovery path.
+	chunkGLCBPuller *cluster.ChunkGLCBPuller
+	// glcbPullInflight claims per-chunk pulls so concurrent sweeps never
+	// pull the same GLCB twice. Guarded by glcbPullMu.
+	glcbPullMu       sync.Mutex
+	glcbPullInflight map[chunk.ChunkID]bool
 
-	// Route stats (atomic, no lock needed for reads/writes).
-	routeStats      RouteStats
-	vaultRouteStats sync.Map // glid.GLID → *VaultRouteStats
-	perRouteStats   sync.Map // glid.GLID → *PerRouteStats
+	// leaderlessSince tracks when each vault's placements began resolving
+	// to no leader, for the vault-leaderless alarm's delay-on window.
+	// Guarded by leaderlessMu.
+	leaderlessMu    sync.Mutex
+	leaderlessSince map[glid.GLID]time.Time
 
-	// Record forwarder for cross-node delivery (nil in single-node mode).
-	forwarder RecordForwarder
+	// diskGuard samples free space and drives the disk-space alarm plus
+	// protect mode (ingest admission suspended below the floor).
+	diskGuard *diskGuard
+
+	// remoteVaultDiskProtected consults peer NodeStats broadcasts for vaults
+	// under disk protect on OTHER nodes, so this node's per-vault admission
+	// gate is cluster-consistent. Installed via SetRemoteVaultDiskProtected.
+	remoteVaultDiskProtected atomic.Pointer[func(glid.GLID) bool]
+
+	// remoteVaultSizeCapped is the same peer lookup for vaults at their
+	// max-size budget elsewhere. Installed via SetRemoteVaultSizeCapped.
+	remoteVaultSizeCapped atomic.Pointer[func(glid.GLID) bool]
 
 	// Remote transferrer for cross-node chunk migration (nil in single-node mode).
 	transferrer RemoteTransferrer
@@ -226,26 +253,26 @@ type Orchestrator struct {
 	// Vault replicator: ordered stream per instance per follower (nil in single-node mode).
 	chunkReplicator ChunkReplicator
 
-	// replicaCircuit tracks per-node backoff for follower replication.
-	// After consecutive failures, the node is skipped until the backoff
-	// expires. Prevents log spam when a follower is down.
-	replicaCircuit sync.Map // nodeID (string) → *replicaBackoff
-
 	// groupMgr is the shared multi-group Raft manager (system, vault ctl, …).
 	// Set from factories during ApplyConfig; used to tear down vault ctl groups.
 	groupMgr *raftgroup.GroupManager
 
 	// peerConns is the shared gRPC pool for cluster peers. Set from factories
 	// during ApplyConfig; used by ApplyVaultControlPlane forwarding.
-	peerConns *cluster.PeerConns
+	peerConns *cluster.PeerConnManager
 
-	// Ingest channel and lifecycle.
-	ingestCh     chan IngestMessage
-	digestedCh   chan digestedRecord
-	ingestSize   int
-	pressureGate *chanwatch.PressureGate // shared signal for ingester throttling
-	cancel       context.CancelFunc
-	done         chan struct{}
+	// vaultCtlPipelineChunkEvents tracks vaults whose vault-ctl FSM already has
+	// pipeline manifest → chunk-bus wiring (AddOn* subscribers).
+	vaultCtlPipelineChunkEvents sync.Map
+
+	// pipelineChunkBoundsCache memoizes ingest bounds overlaid from GLCB/manifest
+	// for sealing chunks. Search lists every FSM entry per query; without this
+	// each list re-reads data.glcb for entries whose FSM bounds are still empty.
+	pipelineChunkBoundsCache sync.Map // chunk.ChunkID → pipelineChunkBoundsOverlay
+
+	// Pipeline lifecycle. The durable write path lives in the pipeline supervisor
+	// (o.pipeline); cancel stops the orchestrator's aux goroutines.
+	cancel context.CancelFunc
 	// running is an atomic so IsRunning() — read by the /readyz HTTP
 	// handler on every probe — never blocks on o.mu. Holding it as a
 	// plain bool guarded by o.mu reintroduced the original gastrolog-5n6xz
@@ -253,12 +280,8 @@ type Orchestrator struct {
 	// which starved behind any long-held o.mu.Lock writer regardless of
 	// the cached replication-ready flag. Start/Stop use CompareAndSwap
 	// to preserve the prior check-then-set mutual exclusion.
-	running      atomic.Bool
-	ingesterWg   sync.WaitGroup // tracks ingester goroutines
-	digestWg     sync.WaitGroup // tracks digest goroutine
-	writeWg      sync.WaitGroup // tracks write goroutine
-	ackWg        sync.WaitGroup // tracks in-flight ack-gated replication goroutines
-	auxWg        sync.WaitGroup // tracks auxiliary goroutines (watchdog, etc.)
+	running atomic.Bool
+	auxWg   sync.WaitGroup // tracks auxiliary goroutines (rate alerts, progress emitters, etc.)
 
 	// Per-instance import mutex for serializing SetNextChunkID + ImportRecords.
 	importMu sync.Map // vaultID → *sync.Mutex
@@ -272,18 +295,18 @@ type Orchestrator struct {
 	// Retention runners (keyed by vaultID:storageID, invoked by the shared scheduler).
 	retention map[string]*retentionRunner
 
-	// Shared scheduler for all periodic tasks (cron rotation, retention, etc.).
+	// Shared scheduler for all periodic tasks (retention, placement reconcile, etc.).
 	scheduler *Scheduler
 
-	// Cron rotation lifecycle.
-	cronRotation *cronRotationManager
-
-	// Per-instance rate alerters that surface pathological rotation or
-	// retention configurations as operator-visible alerts. See
-	// gastrolog-47qyw. Both are initialized in New() and evaluated by
-	// a periodic goroutine in Start().
-	rotationRates  *RateAlerter
+	// Per-instance retention rate alerter that surfaces pathological retention
+	// configurations as operator-visible alerts. See gastrolog-47qyw.
+	// Initialized in New() and evaluated by a periodic goroutine in Start().
 	retentionRates *RateAlerter
+
+	// Orchestrator-owned per-vault pipeline stage counters (GLCB catch-up
+	// pulls, retention deletes) surfaced as first-class throughput metrics
+	// (gastrolog-4r784a).
+	stageEvents *stageEventCounters
 
 	// Clock for testing.
 	now func() time.Time
@@ -293,14 +316,11 @@ type Orchestrator struct {
 
 	// Local node identity for multi-node filtering.
 	localNodeID string
-	// localNodeIDGLID is the parsed GLID form of localNodeID, pre-computed
-	// at construction for the hot EventID-stamping path in digestAndForward.
+	// localNodeIDGLID is the parsed GLID form of localNodeID, pre-computed at
+	// construction. Supplied to the pipeline supervisor as the node ID used by the
+	// ingestion minter to stamp EventID.NodeID.
 	// Empty (zero GLID) for memory-config / no-node-id orchestrators.
 	localNodeIDGLID glid.GLID
-
-	// Per-ingester rolling sequence counter for EventID assignment.
-	// Only accessed from digestLoop (single goroutine), no lock needed.
-	ingestSeqs map[string]uint32
 
 	// Alert collector for runtime system alerts.
 	alerts AlertCollector
@@ -327,13 +347,28 @@ type Orchestrator struct {
 	// gastrolog-4y03v.
 	progressTrigger *progressNotifier
 
-	// Suspect tracker for cloud chunks that returned 404.
+	// Suspect tracker for cloud-backed chunks that returned 404.
 	suspects *suspectTracker
 
 	// Per-vault leader loop for vault control-plane Raft (replicated instance
 	// chunk metadata when multiraft is enabled). Membership reconciliation
 	// runs on the vault ctl Raft leader inside its leader epoch.
 	vaultCtlLeaders *vaultCtlLeaderManager
+
+	// ctlRestorePending coalesces deferred after-vault-ctl-restore passes
+	// (see scheduleAfterVaultCtlRestore). Keyed by vault ID.
+	ctlRestorePending sync.Map
+
+	// pendingPipelineCtlRestore holds vault IDs whose vault-ctl FSM restored
+	// before pipeline chunking registered on this home. finishPendingPipelineCtlRestore
+	// runs rewire+recover when RegisterVault completes (startup ordering).
+	pendingPipelineCtlRestore sync.Map
+
+	// catchupPushInFlight tracks async replica-catchup push batches keyed by
+	// (vault, requester). Prevents SweepMissingReplicas from stacking
+	// hundreds of overlapping CatchupSelectedChunks goroutines on the same
+	// sender→requester stream (gastrolog-2o9e9).
+	catchupPushInFlight sync.Map // catchupPushKey → struct{}
 
 	// cachedReplicationReady mirrors liveReplicationReady, updated by the
 	// readiness refresher goroutine (~500 ms cadence). LocalVaultsReplicationReady
@@ -436,6 +471,7 @@ func (o *Orchestrator) EmitChunkChange(ev ChunkChangeEvent) {
 
 // EmitChunkCreated emits a CREATED event with full post-open metadata.
 func (o *Orchestrator) EmitChunkCreated(vault glid.GLID, meta chunk.ChunkMeta) {
+	o.logChunkCreated(vault, meta.ID)
 	m := meta
 	o.EmitChunkChange(ChunkChangeEvent{
 		VaultID: vault, ChunkID: meta.ID, Op: ChunkChangeOpCreated, Meta: &m,
@@ -449,6 +485,22 @@ func (o *Orchestrator) EmitChunkCreated(vault glid.GLID, meta chunk.ChunkMeta) {
 // to the running record count. Producer paths must coalesce
 // (runChunkProgressEmitter) so emission stays bounded.
 func (o *Orchestrator) EmitChunkProgress(vault glid.GLID, meta chunk.ChunkMeta) {
+	m := meta
+	o.EmitChunkChange(ChunkChangeEvent{
+		VaultID:     vault,
+		ChunkID:     meta.ID,
+		Op:          ChunkChangeOpProgress,
+		Meta:        &m,
+		RecordCount: uint64(meta.RecordCount), //nolint:gosec // G115: record count bounded by rotation policy
+	})
+}
+
+// EmitChunkSealing marks a pipeline chunk entering the sealing phase after
+// SealOpenChunkManifest (rotation triggered, GLCB build pending). Logs
+// "chunk sealed" for operators and emits PROGRESS with sealing-state meta
+// so WatchChunks clients advance active → sealing without a spurious CREATED.
+func (o *Orchestrator) EmitChunkSealing(vault glid.GLID, meta chunk.ChunkMeta) {
+	o.logChunkSealed(vault, meta.ID)
 	m := meta
 	o.EmitChunkChange(ChunkChangeEvent{
 		VaultID:     vault,
@@ -501,16 +553,18 @@ func (o *Orchestrator) NotifyChunkChange() {
 // for that vault (per gastrolog-292yi every cluster node is a voter in
 // every vault-ctl Raft group).
 //
-// Used by the WatchChunks event-relay path to stamp authoritative
-// replica info on outbound events so clients see correct counts
-// without reconstructing them from per-node event evidence. See
-// gastrolog-66vmg.
+// Used by the WatchChunks event-relay path and the ListChunks overlay
+// to stamp authoritative replica info on outbound chunk metas so clients
+// see correct counts without reconstructing them from per-node event
+// evidence. See gastrolog-66vmg; single-semantic (holder receipts only)
+// per gastrolog-68wsli.
 //
 // Returns nil if the local node has no FSM for the vault (single-node /
 // memory mode), or if the chunk is unknown to the FSM. Callers in that
 // case should leave replica info absent from the outbound event so the
-// client preserves its existing cache value via mergeMeta.
-func (o *Orchestrator) ChunkResidency(vaultID glid.GLID, chunkID chunk.ChunkID, placementNodeIDs []string) []string {
+// client preserves its existing cache value via mergeMeta. Empty means
+// the chunk is known with zero verified copies (no receipts yet).
+func (o *Orchestrator) ChunkResidency(vaultID glid.GLID, chunkID chunk.ChunkID) []string {
 	if o.groupMgr == nil {
 		return nil
 	}
@@ -528,7 +582,7 @@ func (o *Orchestrator) ChunkResidency(vaultID glid.GLID, chunkID chunk.ChunkID, 
 	if fsm == nil {
 		return nil
 	}
-	return fsm.ChunkResidency(chunkID, placementNodeIDs)
+	return fsm.ChunkResidency(chunkID)
 }
 
 // vaultLabel returns the operator-friendly name for an instance as configured,
@@ -551,6 +605,24 @@ func (o *Orchestrator) vaultLabel(vaultID glid.GLID) string {
 	return ""
 }
 
+// nodeLabel returns the operator-friendly name for a cluster node ID, or ""
+// when unknown. Safe to call from any goroutine.
+func (o *Orchestrator) nodeLabel(nodeID string) string {
+	if nodeID == "" || o.sysLoader == nil {
+		return ""
+	}
+	sys, err := o.sysLoader.Load(context.Background())
+	if err != nil || sys == nil {
+		return ""
+	}
+	for _, n := range sys.Runtime.Nodes {
+		if n.ID.String() == nodeID {
+			return n.Name
+		}
+	}
+	return ""
+}
+
 // SystemLoader provides read access to the full system state.
 // The orchestrator uses this during hot-update operations (ReloadFilters,
 // ReloadRotationPolicies, etc.) to resolve references like filter IDs
@@ -563,8 +635,8 @@ type SystemLoader interface {
 
 // Config configures an Orchestrator.
 type Config struct {
-	// IngestChannelSize is the buffer size for the ingest channel.
-	// Defaults to 1000 if not set.
+	// IngestChannelSize is the buffer size for the ingestion→digestion queue
+	// (minted messages awaiting digestion). Defaults to 1000 if not set.
 	IngestChannelSize int
 
 	// MaxConcurrentJobs limits how many scheduler jobs (index builds,
@@ -601,13 +673,60 @@ type Config struct {
 	// The app layer wires this to Raft to replicate checkpoints cluster-wide.
 	OnIngesterCheckpoint func(ingesterID glid.GLID, data []byte)
 
+	// IngesterRetryDelay overrides the pause before an ingester run is
+	// retried (any passive listener exit, or a non-passive run that returned
+	// an error). consecutiveFailures counts error exits since the last clean
+	// run. Nil uses the ingestion manager's default jittered exponential
+	// backoff (3–5s first retry, doubling to a 5m cap); tests inject a short
+	// delay to observe retries without wall-clock waits.
+	IngesterRetryDelay func(consecutiveFailures int) time.Duration
+
+	// Digesters run in order on each ingestion message before the record is
+	// built. The app supplies the level/timestamp enrichers here.
+	Digesters []digestion.Digester
+
+	// DiskGuardPaths are filesystem paths whose volumes the disk-space
+	// guard samples (node home for the Raft WAL, segments dir for the
+	// pipeline). Empty disables the guard (tests, memory-only setups).
+	DiskGuardPaths []string
+
+	// SegmentsDir is the base directory under which each origin vault's
+	// segmentation working/ and completed/ areas live: a vault's segment
+	// OriginRoot is SegmentsDir/<vaultID>. Set from home.Dir.SegmentsDir() at
+	// process startup; tests may point it at t.TempDir(). There is no default
+	// under $TMPDIR or the working directory.
+	SegmentsDir string
+
 	// Phase is the shared shutdown signal. When non-nil, the orchestrator
 	// consults phase.ShuttingDown() in hot-path replication helpers so that
 	// during the drain window (after BeginShutdown) remote forwards no-op
 	// instead of spamming "connection refused" against peers that are
 	// shutting down alongside this node. See gastrolog-1e5ke.
 	Phase *lifecycle.Phase
+
+	// SegmentCompletePolicy controls when a vault's working segment is completed —
+	// finalized, renamed to completed/, and published for collection/chunking. A zero
+	// value selects the production defaults (defaultSegmentCompleteMaxBytes /
+	// defaultSegmentCompleteMaxAge). Without a complete policy the pipeline never
+	// completes a segment, so records would stay in working/ forever and
+	// never reach a sealed GLCB (gastrolog-18f9r, Rubicon E3).
+	SegmentCompletePolicy segmentation.CompletePolicy
+
+	// SegmentDisableFsync skips fsync on segmentation group-commit flushes
+	// (dev/load testing only). Segment completion still syncs before rename.
+	// Wired from --segment-hot-path-fsync / GLOG_SEGMENT_HOT_PATH_FSYNC.
+	SegmentDisableFsync bool
 }
+
+// Production segment complete defaults: a segment completes once it reaches
+// 8 MiB or 10 seconds of age, whichever comes first. MaxAge bounds the
+// ingest→queryable latency on low-throughput vaults (age is evaluated on
+// each commit, so a trickle still completes its segment on the next record
+// after the window); MaxBytes bounds segment size under load.
+const (
+	defaultSegmentCompleteMaxBytes = uint64(8 << 20)
+	defaultSegmentCompleteMaxAge   = 10 * time.Second
+)
 
 // AlertCollector is the interface for raising and clearing system alerts.
 // Satisfied by *alert.Collector.
@@ -624,6 +743,12 @@ func New(cfg Config) (*Orchestrator, error) {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
+	if cfg.SegmentCompletePolicy == (segmentation.CompletePolicy{}) {
+		cfg.SegmentCompletePolicy = segmentation.CompletePolicy{
+			MaxBytes: defaultSegmentCompleteMaxBytes,
+			MaxAge:   defaultSegmentCompleteMaxAge,
+		}
+	}
 
 	// Scope logger with component identity. Each subsystem-scoped
 	// logger is derived from the unscoped base, NOT from the orchestrator
@@ -639,21 +764,19 @@ func New(cfg Config) (*Orchestrator, error) {
 	}
 
 	o := &Orchestrator{
+		backfillLogThrottle:  logging.Throttle{Interval: 30 * time.Second},
 		vaults:               make(map[glid.GLID]*Vault),
 		ingesters:            make(map[glid.GLID]Ingester),
-		ingesterCancels:      make(map[glid.GLID]context.CancelFunc),
 		ingesterStats:        make(map[glid.GLID]*IngesterStats),
 		ingesterMeta:         make(map[glid.GLID]ingesterInfo),
+		ingesterAdapters:     make(map[glid.GLID]ingestion.Ingester),
 		draining:             make(map[glid.GLID]*drainState),
-		vaultDraining:         make(map[string]*vaultDrainState),
+		vaultDraining:        make(map[string]*vaultDrainState),
 		retention:            make(map[string]*retentionRunner),
 		scheduler:            sched,
-		cronRotation:         newCronRotationManager(sched, logger),
-		ingestSize:           cfg.IngestChannelSize,
 		sysLoader:            cfg.SystemLoader,
 		localNodeID:          cfg.LocalNodeID,
 		localNodeIDGLID:      parseNodeGLID(cfg.LocalNodeID),
-		ingestSeqs:           make(map[string]uint32),
 		alerts:               cfg.Alerts,
 		suspects:             newSuspectTracker(),
 		chunkSignal:          notify.NewSignal(),
@@ -663,17 +786,51 @@ func New(cfg Config) (*Orchestrator, error) {
 		phase:                cfg.Phase,
 		onIngesterAlive:      cfg.OnIngesterAlive,
 		onIngesterCheckpoint: cfg.OnIngesterCheckpoint,
+		segmentsDir:          cfg.SegmentsDir,
+		diskGuard:            newDiskGuardWithLogger(cfg.DiskGuardPaths, cfg.Logger),
+		homeDir:              homeDirFromSegments(cfg.SegmentsDir),
+		pipelineVaults:       make(map[glid.GLID]pipelineVaultReg),
 		now:                  cfg.Now,
 		logger:               logger,
-		baseLogger:          baseLogger,
-		replicationLogger:   compReplication.Apply(baseLogger),
-		drainLogger:         compDrain.Apply(baseLogger),
-		retentionLogger:     compRetention.Apply(baseLogger),
-		rotationLogger:      compRotation.Apply(baseLogger),
-		schedulerLogger:     compScheduler.Apply(baseLogger),
-		vaultOpsLogger:      compVaultOps.Apply(baseLogger),
-		cacheEvictionLogger: compCacheEviction.Apply(baseLogger),
-		cloudHealthLogger:   compCloudHealth.Apply(baseLogger),
+		baseLogger:           baseLogger,
+		replicationLogger:    compReplication.Apply(baseLogger),
+		drainLogger:          compDrain.Apply(baseLogger),
+		retentionLogger:      compRetention.Apply(baseLogger),
+		rotationLogger:       compRotation.Apply(baseLogger),
+		schedulerLogger:      compScheduler.Apply(baseLogger),
+		vaultOpsLogger:       compVaultOps.Apply(baseLogger),
+		cacheEvictionLogger:  compCacheEviction.Apply(baseLogger),
+		cloudHealthLogger:    compCloudHealth.Apply(baseLogger),
+	}
+
+	// The max-size budget measures the vault's whole local disk claim.
+	o.diskGuard.vaultFootprint = o.localVaultFootprintBytes
+	// The backlog budget measures the vault-ctl registry (cluster-wide truth).
+	o.diskGuard.vaultBacklogBytes = o.vaultRegistryBacklogBytes
+
+	// ingest pipeline. The supervisor owns the durable write path; the
+	// orchestrator publishes its routing table, registers Origin vaults, and
+	// reconciles ingesters into it (see pipeline.go). The pressure gate is injected
+	// into PressureAware ingesters; the orchestrator runs it and attaches
+	// queue-depth probes in Start.
+	o.pipelineGate = chanwatch.NewPressureGate(chanwatch.DefaultThresholds())
+	o.pipeline = pipeline.New(pipeline.Config{
+		AdmissionGate:         o.diskAdmissionGate,
+		VaultAdmissionGate:    o.vaultAdmissionGate,
+		DeferWritesGate:       o.diskDeferWrites,
+		NodeID:                o.localNodeIDGLID,
+		Logger:                baseLogger,
+		Alerts:                o.alerts,
+		Digesters:             cfg.Digesters,
+		OnCheckpoint:          cfg.OnIngesterCheckpoint,
+		PressureGate:          o.pipelineGate,
+		IngestionOutCapacity:  cfg.IngestChannelSize,
+		IngestionRetryDelay:   cfg.IngesterRetryDelay,
+		SegmentCompletePolicy: cfg.SegmentCompletePolicy,
+		SegmentDisableFsync:   cfg.SegmentDisableFsync,
+	})
+	if cfg.SegmentDisableFsync {
+		logger.Warn("segmentation hot-path fsync disabled — group-commit flushes are not durable until segment close; dev/load testing only")
 	}
 
 	// Seed the cached readiness flag so /readyz reports true while the
@@ -682,10 +839,6 @@ func New(cfg Config) (*Orchestrator, error) {
 	// refresher starts in Start() and overwrites this on its first pass.
 	o.cachedReplicationReady.Store(true)
 
-	// Wire up post-seal callback for cron rotation so sealed chunks
-	// get compressed and indexed (same pipeline as ingest-triggered seals).
-	o.cronRotation.onSeal = o.postSealWork
-
 	// gastrolog-51gme step 10: when the vault-ctl Raft leader removes a
 	// node from the voter set, propose CmdPruneNode on every instance
 	// sub-FSM in that vault so pendingDeletes ExpectedFrom obligations
@@ -693,21 +846,11 @@ func New(cfg Config) (*Orchestrator, error) {
 	// reconciler's onPruneNode handler will then propose
 	// CmdFinalizeDelete for any chunk whose ExpectedFrom became empty.
 	o.vaultCtlLeaders.SetOnMemberRemoved(o.proposePruneNodeForVault)
+	o.vaultCtlLeaders.SetOnLeadGained(o.onVaultCtlLeadGained)
 
-	// Per-instance rate alerters. Thresholds are taken from gastrolog-47qyw:
-	//   rotation: warn at >1/sec, error at >5/sec, sustained over 30s
-	//   retention: warn at >10/sec sustained over 30s
-	// The orchestrator's vaultName closure looks up the human label from
-	// the current vault registry; "" is returned if the instance is unknown.
-	o.rotationRates = newRateAlerter(rateAlerterConfig{
-		Window:    30 * time.Second,
-		Kind:      "rotation",
-		Source:    "rotation",
-		WarningAt: 1.0,
-		ErrorAt:   5.0,
-		Alerts:    o.alerts,
-		VaultName:  o.vaultLabel,
-	})
+	// Per-instance retention rate alerter (gastrolog-47qyw): warn at >10/sec
+	// sustained over 30s. The orchestrator's vaultName closure looks up the
+	// human label from the current vault registry; "" if the instance is unknown.
 	o.retentionRates = newRateAlerter(rateAlerterConfig{
 		Window:    30 * time.Second,
 		Kind:      "retention",
@@ -715,16 +858,10 @@ func New(cfg Config) (*Orchestrator, error) {
 		WarningAt: 10.0,
 		ErrorAt:   0, // no error escalation per issue scope
 		Alerts:    o.alerts,
-		VaultName:  o.vaultLabel,
+		VaultName: o.vaultLabel,
 	})
 
-	// Cron rotation completes its work outside the post-seal pipeline,
-	// so the rotation rate counter must be hooked from the cron manager
-	// directly. The age-based rotationsweep path increments the counter
-	// inline at its seal-trigger site.
-	o.cronRotation.onRotation = func(vaultID glid.GLID) {
-		o.rotationRates.Record(vaultID, o.now())
-	}
+	o.stageEvents = newStageEventCounters()
 
 	// Register the single retention sweep that discovers all vault instances
 	// each tick. No per-vault lifecycle management needed.
@@ -745,6 +882,9 @@ func New(cfg Config) (*Orchestrator, error) {
 	// instance (pending obligations, local orphans, missing replicas).
 	// Phase-offset from retention's :00 tick to avoid spikiness. See
 	// gastrolog-51gme (delete-side) and gastrolog-2dgvj (create-side).
+	if err := o.startDiskGuard(); err != nil {
+		return nil, err
+	}
 	if err := o.startInstanceCatchupSweep(); err != nil {
 		return nil, fmt.Errorf("vault catchup sweep: %w", err)
 	}
@@ -765,13 +905,17 @@ func New(cfg Config) (*Orchestrator, error) {
 		return nil, fmt.Errorf("vault-ctl membership reconcile: %w", err)
 	}
 
-	return o, nil
-}
+	// Lock diagnostics default ON (gastrolog-1ug3rq): per-acquisition cost
+	// is a few microseconds on per-batch/per-RPC paths, and the payoff is a
+	// leak report naming the exact acquisition site instead of a node-wide
+	// silent wedge. GLOG_LOCK_TRACKING=off|false|0 disables.
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("GLOG_LOCK_TRACKING"))) {
+	case "off", "false", "0":
+	default:
+		o.mu.EnableTracking()
+	}
 
-// SetRecordForwarder injects the cross-node record forwarder.
-// Must be called before Start(). Safe to leave nil for single-node mode.
-func (o *Orchestrator) SetRecordForwarder(f RecordForwarder) {
-	o.forwarder = f
+	return o, nil
 }
 
 // SetRemoteTransferrer injects the cross-node chunk transferrer.
@@ -811,8 +955,10 @@ func (o *Orchestrator) IngesterName(id glid.GLID) string {
 	return o.ingesterMeta[id].Name
 }
 
-// IsIngesterRunning reports whether the given ingester has an active cancel function,
-// meaning its goroutine was launched and hasn't been stopped.
+// IsIngesterRunning reports whether the given ingester's run is currently
+// executing, backed by the Alive flag the pipeline adapter toggles around each
+// run. A crashed or retry-waiting ingester reports false — this is the signal
+// the ingester convergence sweep alerts on (gastrolog-3mnjlo).
 func (o *Orchestrator) IsIngesterRunning(id glid.GLID) bool {
 	o.mu.RLock()
 	stats := o.ingesterStats[id]
@@ -820,74 +966,81 @@ func (o *Orchestrator) IsIngesterRunning(id glid.GLID) bool {
 	return stats != nil && stats.Alive.Load()
 }
 
-// GetRouteStats returns the global route stats.
+// GetRouteStats returns a snapshot of the global routing counters, sourced from
+// the pipeline routing manager (records that entered routing, went unmatched,
+// or matched a route and were fanned out).
 func (o *Orchestrator) GetRouteStats() *RouteStats {
-	return &o.routeStats
+	snap := o.pipeline.RouteStats()
+	return &RouteStats{
+		Routed:  int64(snap.Routed),    //nolint:gosec // G115: counter bounded in practice
+		Unmatched: int64(snap.Unmatched), //nolint:gosec // G115
+		Matched: int64(snap.Matched),   //nolint:gosec // G115
+	}
 }
 
-// IsFilterSetActive reports whether a routing table is currently
-// loaded. When false, all ingested records are silently dropped.
-// gastrolog-4kkoo (Phase 5): name kept for proto/RPC stability — the
-// underlying state is now a RouteSet, not a per-vault FilterSet.
-func (o *Orchestrator) IsFilterSetActive() bool {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	return o.routeSet != nil
+// IsRouteTableActive reports whether a route table is currently published to
+// the pipeline. When false, every ingested record goes unmatched (a counted
+// drop).
+func (o *Orchestrator) IsRouteTableActive() bool {
+	return o.pipeline.RoutingActive()
 }
 
-// VaultRouteStatsList returns per-vault routing stats for all vaults
-// that have received at least one record.
+// VaultRouteStatsList returns per-vault matched-record counts from the pipeline
+// routing manager (one entry per destination vault that has matched a route).
 func (o *Orchestrator) VaultRouteStatsList() map[glid.GLID]*VaultRouteStats {
-	result := make(map[glid.GLID]*VaultRouteStats)
-	o.vaultRouteStats.Range(func(key, value any) bool {
-		result[key.(glid.GLID)] = value.(*VaultRouteStats)
-		return true
-	})
+	snap := o.pipeline.RouteStats()
+	result := make(map[glid.GLID]*VaultRouteStats, len(snap.PerVault))
+	for vaultID, matched := range snap.PerVault {
+		result[vaultID] = &VaultRouteStats{Matched: int64(matched)} //nolint:gosec // G115
+	}
 	return result
 }
 
-// PerRouteStatsList returns per-route routing stats for all routes
-// that have matched at least one record.
+// PerRouteStatsList returns per-route matched-record counts from the pipeline
+// routing manager (one entry per route that has matched at least one record).
 func (o *Orchestrator) PerRouteStatsList() map[glid.GLID]*PerRouteStats {
-	result := make(map[glid.GLID]*PerRouteStats)
-	o.perRouteStats.Range(func(key, value any) bool {
-		result[key.(glid.GLID)] = value.(*PerRouteStats)
-		return true
-	})
+	snap := o.pipeline.RouteStats()
+	result := make(map[glid.GLID]*PerRouteStats, len(snap.PerRoute))
+	for routeID, matched := range snap.PerRoute {
+		result[routeID] = &PerRouteStats{Matched: int64(matched)} //nolint:gosec // G115
+	}
 	return result
 }
 
-// IngestQueueDepth returns the current number of messages in the ingest channel.
+// IngestQueueDepth returns the current depth of the ingestion→digestion
+// queue (minted-but-not-yet-digested messages).
 func (o *Orchestrator) IngestQueueDepth() int {
-	return len(o.ingestCh)
+	return o.pipeline.IngestQueueDepth()
 }
 
-// IngestQueueCapacity returns the capacity of the ingest channel.
+// IngestQueueCapacity returns the capacity of the ingestion→digestion queue.
 func (o *Orchestrator) IngestQueueCapacity() int {
-	return cap(o.ingestCh)
+	return o.pipeline.IngestQueueCapacity()
 }
 
 // IngestQueueNearFull returns true if the ingest queue is at or above 90% capacity.
 func (o *Orchestrator) IngestQueueNearFull() bool {
-	c := cap(o.ingestCh)
+	c := o.pipeline.IngestQueueCapacity()
 	if c == 0 {
 		return false
 	}
-	return len(o.ingestCh) >= c*9/10
+	return o.pipeline.IngestQueueDepth() >= c*9/10
 }
 
-// PressureGate exposes the ingest pipeline pressure signal for ingesters to
-// consult before emitting records. Returns nil if the orchestrator has not
-// been Started yet; ingesters should treat nil as "no throttling".
+// PressureGate exposes the ingest-pipeline pressure signal for ingesters to
+// consult before emitting records. It is non-nil for the orchestrator's whole
+// lifetime; it only begins ticking (and elevating) once Start runs.
 func (o *Orchestrator) PressureGate() *chanwatch.PressureGate {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	return o.pressureGate
+	return o.pipelineGate
 }
 
 // VaultSnapshot is a point-in-time summary of a vault's state.
 type VaultSnapshot struct {
-	ID           glid.GLID
+	ID glid.GLID
+	// Name is the operator-facing vault name from system config. Broadcast
+	// in NodeStats so every stats consumer (inspector throughput rows, CLI)
+	// can label vaults by name instead of falling back to GLID prefixes.
+	Name         string
 	RecordCount  int64
 	ChunkCount   int
 	SealedChunks int
@@ -899,6 +1052,62 @@ type VaultSnapshot struct {
 	// NodeStats so the per-vault-ctl learner promoter
 	// (gastrolog-gcbx7) can observe each follower's catchup progress.
 	RaftAppliedIndex uint64
+}
+
+// VaultAppendStats returns per-vault cumulative segmentation throughput
+// counters from the pipeline supervisor. Empty when the pipeline is not
+// running (gastrolog-4eh5ns).
+func (o *Orchestrator) VaultAppendStats() []segmentation.AppendStats {
+	if o.pipeline == nil {
+		return nil
+	}
+	return o.pipeline.AppendStats()
+}
+
+// VaultCollectStats returns per-vault home-side collection counters from the
+// pipeline supervisor (gastrolog-10n6k8).
+func (o *Orchestrator) VaultCollectStats() []collection.VaultCollectStats {
+	if o.pipeline == nil {
+		return nil
+	}
+	return o.pipeline.CollectStats()
+}
+
+// VaultSealStats returns per-vault GLCB seal counters from the pipeline
+// supervisor (gastrolog-10n6k8).
+func (o *Orchestrator) VaultSealStats() []chunking.VaultSealStats {
+	if o.pipeline == nil {
+		return nil
+	}
+	return o.pipeline.SealStats()
+}
+
+// VaultPublishStats returns per-vault segment-publish counters from the
+// pipeline supervisor's distribution manager (gastrolog-4r784a).
+func (o *Orchestrator) VaultPublishStats() []distribution.VaultPublishStats {
+	if o.pipeline == nil {
+		return nil
+	}
+	return o.pipeline.PublishStats()
+}
+
+// VaultChunkStageStats returns per-vault chunk-lifecycle stage counters
+// (planned/built/sealed/released/head-purges) from the pipeline supervisor's
+// chunking manager (gastrolog-4r784a).
+func (o *Orchestrator) VaultChunkStageStats() []chunking.VaultStageStats {
+	if o.pipeline == nil {
+		return nil
+	}
+	return o.pipeline.ChunkStageStats()
+}
+
+// VaultStageEventStats returns per-vault orchestrator-owned stage-event
+// counters (GLCB catch-up pulls, retention deletes) — gastrolog-4r784a.
+func (o *Orchestrator) VaultStageEventStats() []VaultStageEventSnapshot {
+	if o.stageEvents == nil {
+		return nil
+	}
+	return o.stageEvents.snapshot()
 }
 
 // VaultSnapshots returns a snapshot of stats for all registered vaults.
@@ -914,6 +1123,7 @@ func (o *Orchestrator) VaultSnapshots() []VaultSnapshot {
 	for _, id := range vaultIDs {
 		snap := VaultSnapshot{
 			ID:               id,
+			Name:             o.vaultLabel(id),
 			Enabled:          o.IsVaultEnabled(id),
 			RaftAppliedIndex: o.vaultCtlAppliedIndex(id),
 		}
@@ -946,7 +1156,7 @@ func (o *Orchestrator) VaultSnapshots() []VaultSnapshot {
 // applied index for the given vault. Zero if the vault has no
 // vault-ctl group on this node (e.g. placement excludes it) or the
 // GroupManager isn't wired (single-node test). Read at snapshot time
-// so the value reflects the latest committed-and-applied entry on
+// so the value reflects the latest applied entry on
 // this node.
 func (o *Orchestrator) vaultCtlAppliedIndex(vaultID glid.GLID) uint64 {
 	if o.groupMgr == nil {

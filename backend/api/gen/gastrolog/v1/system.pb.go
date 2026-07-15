@@ -85,7 +85,7 @@ type IngesterMode int32
 const (
 	IngesterMode_INGESTER_MODE_UNSPECIFIED IngesterMode = 0
 	IngesterMode_INGESTER_MODE_PASSIVE     IngesterMode = 1 // Listeners — bind a port, passively accept incoming data.
-	IngesterMode_INGESTER_MODE_ACTIVE      IngesterMode = 2 // Collectors — actively pull from data sources.
+	IngesterMode_INGESTER_MODE_ACTIVE      IngesterMode = 2 // Actively pull from upstream systems (Kafka consumer, file tail, etc.).
 )
 
 // Enum value maps for IngesterMode.
@@ -363,9 +363,9 @@ type GetSystemResponse struct {
 	ManagedFiles      []*ManagedFileInfo       `protobuf:"bytes,7,rep,name=managed_files,json=managedFiles,proto3" json:"managed_files,omitempty"`
 	// Committed log index on the cluster-ctl Raft group (monotonic). Used by clients
 	// to avoid regressing cached replicated state with stale reads.
-	SystemRaftIndex    uint64               `protobuf:"varint,8,opt,name=system_raft_index,json=systemRaftIndex,proto3" json:"system_raft_index,omitempty"`
-	CloudServices      []*CloudService      `protobuf:"bytes,9,rep,name=cloud_services,json=cloudServices,proto3" json:"cloud_services,omitempty"`
-	NodeStorageConfigs []*NodeStorageConfig `protobuf:"bytes,10,rep,name=node_storage_configs,json=nodeStorageConfigs,proto3" json:"node_storage_configs,omitempty"`
+	ClusterCtlRaftIndex uint64               `protobuf:"varint,8,opt,name=cluster_ctl_raft_index,json=clusterCtlRaftIndex,proto3" json:"cluster_ctl_raft_index,omitempty"`
+	CloudServices       []*CloudService      `protobuf:"bytes,9,rep,name=cloud_services,json=cloudServices,proto3" json:"cloud_services,omitempty"`
+	NodeStorageConfigs  []*NodeStorageConfig `protobuf:"bytes,10,rep,name=node_storage_configs,json=nodeStorageConfigs,proto3" json:"node_storage_configs,omitempty"`
 	// Per-component log level configuration. Empty default_level means
 	// "use the binary's startup default" (typically INFO).
 	LogLevels *LogLevelConfig `protobuf:"bytes,11,opt,name=log_levels,json=logLevels,proto3" json:"log_levels,omitempty"`
@@ -458,9 +458,9 @@ func (x *GetSystemResponse) GetManagedFiles() []*ManagedFileInfo {
 	return nil
 }
 
-func (x *GetSystemResponse) GetSystemRaftIndex() uint64 {
+func (x *GetSystemResponse) GetClusterCtlRaftIndex() uint64 {
 	if x != nil {
-		return x.SystemRaftIndex
+		return x.ClusterCtlRaftIndex
 	}
 	return 0
 }
@@ -626,8 +626,21 @@ type VaultConfig struct {
 	CacheBudget          string                 `protobuf:"bytes,14,opt,name=cache_budget,json=cacheBudget,proto3" json:"cache_budget,omitempty"`                            // max cache size (e.g. "1GB", "500MB"; default: "1GiB")
 	CacheTtl             string                 `protobuf:"bytes,15,opt,name=cache_ttl,json=cacheTtl,proto3" json:"cache_ttl,omitempty"`                                     // eviction TTL duration (e.g. "1h", "7d"); only for ttl mode
 	RetentionDisposition string                 `protobuf:"bytes,16,opt,name=retention_disposition,json=retentionDisposition,proto3" json:"retention_disposition,omitempty"` // "delete" (default) or "route" — what retention does with aged-out records
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// Per-vault disk guard thresholds on the vault's backing volume, in
+	// bytes of FREE space. 0 = inherit the node defaults (fraction-based
+	// with share clamps; env-overridable). Warn raises the disk-space
+	// alarm for this vault; floor suspends admission for records destined
+	// to this vault while other vaults keep ingesting.
+	DiskFreeWarnBytes  uint64 `protobuf:"varint,17,opt,name=disk_free_warn_bytes,json=diskFreeWarnBytes,proto3" json:"disk_free_warn_bytes,omitempty"`
+	DiskFreeFloorBytes uint64 `protobuf:"varint,18,opt,name=disk_free_floor_bytes,json=diskFreeFloorBytes,proto3" json:"disk_free_floor_bytes,omitempty"`
+	// Per-node byte budget for this vault's whole local disk claim (sealed
+	// chunks, indexes, and pipeline segment backlog). 0 = unlimited. At the
+	// budget, admission for records destined to this vault is refused
+	// cluster-wide (cap-and-refuse) until retention or releases drain it —
+	// the hard backstop behind a size retention policy's cap-and-drain.
+	MaxSizeBytes  uint64 `protobuf:"varint,19,opt,name=max_size_bytes,json=maxSizeBytes,proto3" json:"max_size_bytes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *VaultConfig) Reset() {
@@ -770,6 +783,27 @@ func (x *VaultConfig) GetRetentionDisposition() string {
 		return x.RetentionDisposition
 	}
 	return ""
+}
+
+func (x *VaultConfig) GetDiskFreeWarnBytes() uint64 {
+	if x != nil {
+		return x.DiskFreeWarnBytes
+	}
+	return 0
+}
+
+func (x *VaultConfig) GetDiskFreeFloorBytes() uint64 {
+	if x != nil {
+		return x.DiskFreeFloorBytes
+	}
+	return 0
+}
+
+func (x *VaultConfig) GetMaxSizeBytes() uint64 {
+	if x != nil {
+		return x.MaxSizeBytes
+	}
+	return 0
 }
 
 type RouteDestination struct {
@@ -999,7 +1033,7 @@ type RouteStage_Match struct {
 
 func (*RouteStage_Match) isRouteStage_Stage() {}
 
-// MatchStage gates the route on a boolean filter expression. The
+// MatchStage gates the route on a boolean match expression. The
 // expression is evaluated against the record (with system-injected
 // synthetic attributes available via reserved-prefix keys: _source,
 // _ingester, _vault, _reason).
@@ -1165,13 +1199,15 @@ func (x *IngesterConfig) GetAllNodes() bool {
 }
 
 type RotationPolicyConfig struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	MaxBytes      int64                  `protobuf:"varint,1,opt,name=max_bytes,json=maxBytes,proto3" json:"max_bytes,omitempty"`
-	MaxRecords    int64                  `protobuf:"varint,2,opt,name=max_records,json=maxRecords,proto3" json:"max_records,omitempty"`
-	MaxAgeSeconds int64                  `protobuf:"varint,3,opt,name=max_age_seconds,json=maxAgeSeconds,proto3" json:"max_age_seconds,omitempty"`
-	Cron          string                 `protobuf:"bytes,4,opt,name=cron,proto3" json:"cron,omitempty"`
-	Id            []byte                 `protobuf:"bytes,5,opt,name=id,proto3" json:"id,omitempty"`
-	Name          string                 `protobuf:"bytes,6,opt,name=name,proto3" json:"name,omitempty"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	MaxBytes   int64                  `protobuf:"varint,1,opt,name=max_bytes,json=maxBytes,proto3" json:"max_bytes,omitempty"`
+	MaxRecords int64                  `protobuf:"varint,2,opt,name=max_records,json=maxRecords,proto3" json:"max_records,omitempty"`
+	// Nanoseconds: durations are stored at full precision — a seconds field
+	// silently truncated sub-second input (e.g. "1004ms").
+	MaxAgeNanos   int64  `protobuf:"varint,3,opt,name=max_age_nanos,json=maxAgeNanos,proto3" json:"max_age_nanos,omitempty"`
+	Cron          string `protobuf:"bytes,4,opt,name=cron,proto3" json:"cron,omitempty"`
+	Id            []byte `protobuf:"bytes,5,opt,name=id,proto3" json:"id,omitempty"`
+	Name          string `protobuf:"bytes,6,opt,name=name,proto3" json:"name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1220,9 +1256,9 @@ func (x *RotationPolicyConfig) GetMaxRecords() int64 {
 	return 0
 }
 
-func (x *RotationPolicyConfig) GetMaxAgeSeconds() int64 {
+func (x *RotationPolicyConfig) GetMaxAgeNanos() int64 {
 	if x != nil {
-		return x.MaxAgeSeconds
+		return x.MaxAgeNanos
 	}
 	return 0
 }
@@ -1249,12 +1285,13 @@ func (x *RotationPolicyConfig) GetName() string {
 }
 
 type RetentionPolicyConfig struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	MaxAgeSeconds int64                  `protobuf:"varint,1,opt,name=max_age_seconds,json=maxAgeSeconds,proto3" json:"max_age_seconds,omitempty"`
-	MaxBytes      int64                  `protobuf:"varint,2,opt,name=max_bytes,json=maxBytes,proto3" json:"max_bytes,omitempty"`
-	MaxChunks     int64                  `protobuf:"varint,3,opt,name=max_chunks,json=maxChunks,proto3" json:"max_chunks,omitempty"`
-	Id            []byte                 `protobuf:"bytes,4,opt,name=id,proto3" json:"id,omitempty"`
-	Name          string                 `protobuf:"bytes,5,opt,name=name,proto3" json:"name,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Nanoseconds (see RotationPolicyConfig.max_age_nanos).
+	MaxAgeNanos   int64  `protobuf:"varint,1,opt,name=max_age_nanos,json=maxAgeNanos,proto3" json:"max_age_nanos,omitempty"`
+	MaxBytes      int64  `protobuf:"varint,2,opt,name=max_bytes,json=maxBytes,proto3" json:"max_bytes,omitempty"`
+	MaxChunks     int64  `protobuf:"varint,3,opt,name=max_chunks,json=maxChunks,proto3" json:"max_chunks,omitempty"`
+	Id            []byte `protobuf:"bytes,4,opt,name=id,proto3" json:"id,omitempty"`
+	Name          string `protobuf:"bytes,5,opt,name=name,proto3" json:"name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1289,9 +1326,9 @@ func (*RetentionPolicyConfig) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{11}
 }
 
-func (x *RetentionPolicyConfig) GetMaxAgeSeconds() int64 {
+func (x *RetentionPolicyConfig) GetMaxAgeNanos() int64 {
 	if x != nil {
-		return x.MaxAgeSeconds
+		return x.MaxAgeNanos
 	}
 	return 0
 }
@@ -3630,9 +3667,15 @@ func (x *StaticLookupRow) GetValues() map[string]string {
 type ClusterSettings struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	BroadcastInterval string                 `protobuf:"bytes,1,opt,name=broadcast_interval,json=broadcastInterval,proto3" json:"broadcast_interval,omitempty"` // Go duration string, e.g. "5s". Default: "5s".
-	HeartbeatInterval string                 `protobuf:"bytes,2,opt,name=heartbeat_interval,json=heartbeatInterval,proto3" json:"heartbeat_interval,omitempty"` // Go duration string, e.g. "1s". Default: "1s". Lightweight liveness ping; PeerState TTL is 4× this.
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	HeartbeatInterval string                 `protobuf:"bytes,2,opt,name=heartbeat_interval,json=heartbeatInterval,proto3" json:"heartbeat_interval,omitempty"` // Go duration string, e.g. "1s". Default: "1s". Lightweight liveness ping; PeerState TTL is 8× this (defaultPeerTTLMultiplier).
+	// Per-vault pipeline backlog budget in bytes (unreleased completed segments
+	// in the vault-ctl registry). When a vault's backlog reaches the budget,
+	// ingest admission for that vault is refused (retryable backpressure) until
+	// chunking drains it below the budget. The operating bound that engages
+	// BEFORE disk pressure; the disk guard remains the backstop. 0 = unbounded.
+	PipelineBacklogMaxBytes uint64 `protobuf:"varint,3,opt,name=pipeline_backlog_max_bytes,json=pipelineBacklogMaxBytes,proto3" json:"pipeline_backlog_max_bytes,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
 }
 
 func (x *ClusterSettings) Reset() {
@@ -3677,6 +3720,13 @@ func (x *ClusterSettings) GetHeartbeatInterval() string {
 		return x.HeartbeatInterval
 	}
 	return ""
+}
+
+func (x *ClusterSettings) GetPipelineBacklogMaxBytes() uint64 {
+	if x != nil {
+		return x.PipelineBacklogMaxBytes
+	}
+	return 0
 }
 
 type GetSettingsResponse struct {
@@ -4256,11 +4306,12 @@ func (x *PutLookupSettings) GetYamlFileLookups() []*YAMLFileLookupEntry {
 }
 
 type PutClusterSettings struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	BroadcastInterval *string                `protobuf:"bytes,1,opt,name=broadcast_interval,json=broadcastInterval,proto3,oneof" json:"broadcast_interval,omitempty"`
-	HeartbeatInterval *string                `protobuf:"bytes,2,opt,name=heartbeat_interval,json=heartbeatInterval,proto3,oneof" json:"heartbeat_interval,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	state                   protoimpl.MessageState `protogen:"open.v1"`
+	BroadcastInterval       *string                `protobuf:"bytes,1,opt,name=broadcast_interval,json=broadcastInterval,proto3,oneof" json:"broadcast_interval,omitempty"`
+	HeartbeatInterval       *string                `protobuf:"bytes,2,opt,name=heartbeat_interval,json=heartbeatInterval,proto3,oneof" json:"heartbeat_interval,omitempty"`
+	PipelineBacklogMaxBytes *uint64                `protobuf:"varint,3,opt,name=pipeline_backlog_max_bytes,json=pipelineBacklogMaxBytes,proto3,oneof" json:"pipeline_backlog_max_bytes,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
 }
 
 func (x *PutClusterSettings) Reset() {
@@ -4305,6 +4356,13 @@ func (x *PutClusterSettings) GetHeartbeatInterval() string {
 		return *x.HeartbeatInterval
 	}
 	return ""
+}
+
+func (x *PutClusterSettings) GetPipelineBacklogMaxBytes() uint64 {
+	if x != nil && x.PipelineBacklogMaxBytes != nil {
+		return *x.PipelineBacklogMaxBytes
+	}
+	return 0
 }
 
 type PutServiceSettingsRequest struct {
@@ -4384,14 +4442,14 @@ func (x *PutServiceSettingsRequest) GetCluster() *PutClusterSettings {
 }
 
 // SettingsMutationEcho is returned after successful server-settings mutations so
-// clients can mirror GetSettings without a follow-up RPC. system_raft_index matches
-// GetSystemResponse.system_raft_index for cache coherence.
+// clients can mirror GetSettings without a follow-up RPC. cluster_ctl_raft_index matches
+// GetSystemResponse.cluster_ctl_raft_index for cache coherence.
 type SettingsMutationEcho struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	Settings        *GetSettingsResponse   `protobuf:"bytes,1,opt,name=settings,proto3" json:"settings,omitempty"`
-	SystemRaftIndex uint64                 `protobuf:"varint,2,opt,name=system_raft_index,json=systemRaftIndex,proto3" json:"system_raft_index,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	Settings            *GetSettingsResponse   `protobuf:"bytes,1,opt,name=settings,proto3" json:"settings,omitempty"`
+	ClusterCtlRaftIndex uint64                 `protobuf:"varint,2,opt,name=cluster_ctl_raft_index,json=clusterCtlRaftIndex,proto3" json:"cluster_ctl_raft_index,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *SettingsMutationEcho) Reset() {
@@ -4431,9 +4489,9 @@ func (x *SettingsMutationEcho) GetSettings() *GetSettingsResponse {
 	return nil
 }
 
-func (x *SettingsMutationEcho) GetSystemRaftIndex() uint64 {
+func (x *SettingsMutationEcho) GetClusterCtlRaftIndex() uint64 {
 	if x != nil {
-		return x.SystemRaftIndex
+		return x.ClusterCtlRaftIndex
 	}
 	return 0
 }
@@ -6899,10 +6957,10 @@ type WatchSystemResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Committed log index on the cluster-ctl Raft group when this notification fired.
 	// Clients should only invalidate or refetch when this index exceeds the
-	// highest system_raft_index they already hold from a fetch or mutation.
-	SystemRaftIndex uint64 `protobuf:"varint,1,opt,name=system_raft_index,json=systemRaftIndex,proto3" json:"system_raft_index,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// highest cluster_ctl_raft_index they already hold from a fetch or mutation.
+	ClusterCtlRaftIndex uint64 `protobuf:"varint,1,opt,name=cluster_ctl_raft_index,json=clusterCtlRaftIndex,proto3" json:"cluster_ctl_raft_index,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *WatchSystemResponse) Reset() {
@@ -6935,9 +6993,9 @@ func (*WatchSystemResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{116}
 }
 
-func (x *WatchSystemResponse) GetSystemRaftIndex() uint64 {
+func (x *WatchSystemResponse) GetClusterCtlRaftIndex() uint64 {
 	if x != nil {
-		return x.SystemRaftIndex
+		return x.ClusterCtlRaftIndex
 	}
 	return 0
 }
@@ -6981,14 +7039,20 @@ func (*GetRouteStatsRequest) Descriptor() ([]byte, []int) {
 type GetRouteStatsResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Global counters since process start.
-	TotalIngested   int64 `protobuf:"varint,1,opt,name=total_ingested,json=totalIngested,proto3" json:"total_ingested,omitempty"`         // total records entering ingest()
-	TotalDropped    int64 `protobuf:"varint,2,opt,name=total_dropped,json=totalDropped,proto3" json:"total_dropped,omitempty"`            // records matching no filter (silently lost)
-	TotalRouted     int64 `protobuf:"varint,3,opt,name=total_routed,json=totalRouted,proto3" json:"total_routed,omitempty"`               // records delivered to at least one vault
-	FilterSetActive bool  `protobuf:"varint,4,opt,name=filter_set_active,json=filterSetActive,proto3" json:"filter_set_active,omitempty"` // false = no routes compiled, all records dropped
+	TotalRouted      int64 `protobuf:"varint,1,opt,name=total_routed,json=totalRouted,proto3" json:"total_routed,omitempty"`                  // total records entering routing (matched + unmatched)
+	TotalUnmatched   int64 `protobuf:"varint,2,opt,name=total_unmatched,json=totalUnmatched,proto3" json:"total_unmatched,omitempty"`         // records that matched no route (intentional, counted drop)
+	TotalMatched     int64 `protobuf:"varint,3,opt,name=total_matched,json=totalMatched,proto3" json:"total_matched,omitempty"`               // records that matched a route and were delivered to at least one vault
+	RouteTableActive bool  `protobuf:"varint,4,opt,name=route_table_active,json=routeTableActive,proto3" json:"route_table_active,omitempty"` // false = no route table published; every record goes unmatched
 	// Per-vault destination counters.
 	VaultStats []*VaultRouteStats `protobuf:"bytes,5,rep,name=vault_stats,json=vaultStats,proto3" json:"vault_stats,omitempty"`
 	// Per-route counters.
-	RouteStats    []*PerRouteStats `protobuf:"bytes,6,rep,name=route_stats,json=routeStats,proto3" json:"route_stats,omitempty"`
+	RouteStats []*PerRouteStats `protobuf:"bytes,6,rep,name=route_stats,json=routeStats,proto3" json:"route_stats,omitempty"`
+	// Cluster-total routing throughput: per-horizon sums of every node's
+	// rolling-window rates from the NodeStats broadcast. Sparks are omitted
+	// at cluster level — per-node tick phases differ, so element-wise sums
+	// would fabricate a series no node observed (gastrolog-4eh5ns).
+	RoutedRate    *ThroughputRate `protobuf:"bytes,7,opt,name=routed_rate,json=routedRate,proto3" json:"routed_rate,omitempty"`
+	MatchedRate   *ThroughputRate `protobuf:"bytes,8,opt,name=matched_rate,json=matchedRate,proto3" json:"matched_rate,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -7023,20 +7087,6 @@ func (*GetRouteStatsResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{118}
 }
 
-func (x *GetRouteStatsResponse) GetTotalIngested() int64 {
-	if x != nil {
-		return x.TotalIngested
-	}
-	return 0
-}
-
-func (x *GetRouteStatsResponse) GetTotalDropped() int64 {
-	if x != nil {
-		return x.TotalDropped
-	}
-	return 0
-}
-
 func (x *GetRouteStatsResponse) GetTotalRouted() int64 {
 	if x != nil {
 		return x.TotalRouted
@@ -7044,9 +7094,23 @@ func (x *GetRouteStatsResponse) GetTotalRouted() int64 {
 	return 0
 }
 
-func (x *GetRouteStatsResponse) GetFilterSetActive() bool {
+func (x *GetRouteStatsResponse) GetTotalUnmatched() int64 {
 	if x != nil {
-		return x.FilterSetActive
+		return x.TotalUnmatched
+	}
+	return 0
+}
+
+func (x *GetRouteStatsResponse) GetTotalMatched() int64 {
+	if x != nil {
+		return x.TotalMatched
+	}
+	return 0
+}
+
+func (x *GetRouteStatsResponse) GetRouteTableActive() bool {
+	if x != nil {
+		return x.RouteTableActive
 	}
 	return false
 }
@@ -7065,13 +7129,26 @@ func (x *GetRouteStatsResponse) GetRouteStats() []*PerRouteStats {
 	return nil
 }
 
+func (x *GetRouteStatsResponse) GetRoutedRate() *ThroughputRate {
+	if x != nil {
+		return x.RoutedRate
+	}
+	return nil
+}
+
+func (x *GetRouteStatsResponse) GetMatchedRate() *ThroughputRate {
+	if x != nil {
+		return x.MatchedRate
+	}
+	return nil
+}
+
 type VaultRouteStats struct {
-	state            protoimpl.MessageState `protogen:"open.v1"`
-	VaultId          []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
-	RecordsMatched   int64                  `protobuf:"varint,2,opt,name=records_matched,json=recordsMatched,proto3" json:"records_matched,omitempty"`       // records routed to this vault
-	RecordsForwarded int64                  `protobuf:"varint,3,opt,name=records_forwarded,json=recordsForwarded,proto3" json:"records_forwarded,omitempty"` // subset sent to a remote node
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	VaultId        []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
+	RecordsMatched int64                  `protobuf:"varint,2,opt,name=records_matched,json=recordsMatched,proto3" json:"records_matched,omitempty"` // records that matched a route targeting this vault
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *VaultRouteStats) Reset() {
@@ -7118,20 +7195,12 @@ func (x *VaultRouteStats) GetRecordsMatched() int64 {
 	return 0
 }
 
-func (x *VaultRouteStats) GetRecordsForwarded() int64 {
-	if x != nil {
-		return x.RecordsForwarded
-	}
-	return 0
-}
-
 type PerRouteStats struct {
-	state            protoimpl.MessageState `protogen:"open.v1"`
-	RouteId          []byte                 `protobuf:"bytes,1,opt,name=route_id,json=routeId,proto3" json:"route_id,omitempty"`
-	RecordsMatched   int64                  `protobuf:"varint,2,opt,name=records_matched,json=recordsMatched,proto3" json:"records_matched,omitempty"`       // records matched by this route
-	RecordsForwarded int64                  `protobuf:"varint,3,opt,name=records_forwarded,json=recordsForwarded,proto3" json:"records_forwarded,omitempty"` // subset sent to remote nodes
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	RouteId        []byte                 `protobuf:"bytes,1,opt,name=route_id,json=routeId,proto3" json:"route_id,omitempty"`
+	RecordsMatched int64                  `protobuf:"varint,2,opt,name=records_matched,json=recordsMatched,proto3" json:"records_matched,omitempty"` // records matched by this route
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *PerRouteStats) Reset() {
@@ -7174,13 +7243,6 @@ func (x *PerRouteStats) GetRouteId() []byte {
 func (x *PerRouteStats) GetRecordsMatched() int64 {
 	if x != nil {
 		return x.RecordsMatched
-	}
-	return 0
-}
-
-func (x *PerRouteStats) GetRecordsForwarded() int64 {
-	if x != nil {
-		return x.RecordsForwarded
 	}
 	return 0
 }
@@ -8819,8 +8881,8 @@ var File_gastrolog_v1_system_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\n" +
-	"\x19gastrolog/v1/system.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1agastrolog/v1/storage.proto\"\x12\n" +
-	"\x10GetSystemRequest\"\xb4\x06\n" +
+	"\x19gastrolog/v1/system.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1agastrolog/v1/storage.proto\x1a\x18gastrolog/v1/vault.proto\"\x12\n" +
+	"\x10GetSystemRequest\"\xbd\x06\n" +
 	"\x11GetSystemResponse\x121\n" +
 	"\x06vaults\x18\x01 \x03(\v2\x19.gastrolog.v1.VaultConfigR\x06vaults\x12:\n" +
 	"\tingesters\x18\x02 \x03(\v2\x1c.gastrolog.v1.IngesterConfigR\tingesters\x12O\n" +
@@ -8828,8 +8890,8 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x12retention_policies\x18\x04 \x03(\v2#.gastrolog.v1.RetentionPolicyConfigR\x11retentionPolicies\x12;\n" +
 	"\fnode_configs\x18\x05 \x03(\v2\x18.gastrolog.v1.NodeConfigR\vnodeConfigs\x121\n" +
 	"\x06routes\x18\x06 \x03(\v2\x19.gastrolog.v1.RouteConfigR\x06routes\x12B\n" +
-	"\rmanaged_files\x18\a \x03(\v2\x1d.gastrolog.v1.ManagedFileInfoR\fmanagedFiles\x12*\n" +
-	"\x11system_raft_index\x18\b \x01(\x04R\x0fsystemRaftIndex\x12A\n" +
+	"\rmanaged_files\x18\a \x03(\v2\x1d.gastrolog.v1.ManagedFileInfoR\fmanagedFiles\x123\n" +
+	"\x16cluster_ctl_raft_index\x18\b \x01(\x04R\x13clusterCtlRaftIndex\x12A\n" +
 	"\x0ecloud_services\x18\t \x03(\v2\x1a.gastrolog.v1.CloudServiceR\rcloudServices\x12Q\n" +
 	"\x14node_storage_configs\x18\n" +
 	" \x03(\v2\x1f.gastrolog.v1.NodeStorageConfigR\x12nodeStorageConfigs\x12;\n" +
@@ -8842,7 +8904,7 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x0eVaultPlacement\x12\x1d\n" +
 	"\n" +
 	"storage_id\x18\x01 \x01(\fR\tstorageId\x12\x16\n" +
-	"\x06leader\x18\x02 \x01(\bR\x06leader\"\x88\x05\n" +
+	"\x06leader\x18\x02 \x01(\bR\x06leader\"\x92\x06\n" +
 	"\vVaultConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
@@ -8862,7 +8924,10 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x0ecache_eviction\x18\r \x01(\tR\rcacheEviction\x12!\n" +
 	"\fcache_budget\x18\x0e \x01(\tR\vcacheBudget\x12\x1b\n" +
 	"\tcache_ttl\x18\x0f \x01(\tR\bcacheTtl\x123\n" +
-	"\x15retention_disposition\x18\x10 \x01(\tR\x14retentionDisposition\"-\n" +
+	"\x15retention_disposition\x18\x10 \x01(\tR\x14retentionDisposition\x12/\n" +
+	"\x14disk_free_warn_bytes\x18\x11 \x01(\x04R\x11diskFreeWarnBytes\x121\n" +
+	"\x15disk_free_floor_bytes\x18\x12 \x01(\x04R\x12diskFreeFloorBytes\x12$\n" +
+	"\x0emax_size_bytes\x18\x13 \x01(\x04R\fmaxSizeBytes\"-\n" +
 	"\x10RouteDestination\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\"\x81\x02\n" +
 	"\vRouteConfig\x12\x0e\n" +
@@ -8894,17 +8959,17 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\tall_nodes\x18\t \x01(\bR\ballNodes\x1a9\n" +
 	"\vParamsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xb4\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xb0\x01\n" +
 	"\x14RotationPolicyConfig\x12\x1b\n" +
 	"\tmax_bytes\x18\x01 \x01(\x03R\bmaxBytes\x12\x1f\n" +
 	"\vmax_records\x18\x02 \x01(\x03R\n" +
-	"maxRecords\x12&\n" +
-	"\x0fmax_age_seconds\x18\x03 \x01(\x03R\rmaxAgeSeconds\x12\x12\n" +
+	"maxRecords\x12\"\n" +
+	"\rmax_age_nanos\x18\x03 \x01(\x03R\vmaxAgeNanos\x12\x12\n" +
 	"\x04cron\x18\x04 \x01(\tR\x04cron\x12\x0e\n" +
 	"\x02id\x18\x05 \x01(\fR\x02id\x12\x12\n" +
-	"\x04name\x18\x06 \x01(\tR\x04name\"\x9f\x01\n" +
-	"\x15RetentionPolicyConfig\x12&\n" +
-	"\x0fmax_age_seconds\x18\x01 \x01(\x03R\rmaxAgeSeconds\x12\x1b\n" +
+	"\x04name\x18\x06 \x01(\tR\x04name\"\x9b\x01\n" +
+	"\x15RetentionPolicyConfig\x12\"\n" +
+	"\rmax_age_nanos\x18\x01 \x01(\x03R\vmaxAgeNanos\x12\x1b\n" +
 	"\tmax_bytes\x18\x02 \x01(\x03R\bmaxBytes\x12\x1d\n" +
 	"\n" +
 	"max_chunks\x18\x03 \x01(\x03R\tmaxChunks\x12\x0e\n" +
@@ -9074,10 +9139,11 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x06values\x18\x01 \x03(\v2).gastrolog.v1.StaticLookupRow.ValuesEntryR\x06values\x1a9\n" +
 	"\vValuesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"o\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xac\x01\n" +
 	"\x0fClusterSettings\x12-\n" +
 	"\x12broadcast_interval\x18\x01 \x01(\tR\x11broadcastInterval\x12-\n" +
-	"\x12heartbeat_interval\x18\x02 \x01(\tR\x11heartbeatInterval\"\xf8\x03\n" +
+	"\x12heartbeat_interval\x18\x02 \x01(\tR\x11heartbeatInterval\x12;\n" +
+	"\x1apipeline_backlog_max_bytes\x18\x03 \x01(\x04R\x17pipelineBacklogMaxBytes\"\xf8\x03\n" +
 	"\x13GetSettingsResponse\x12.\n" +
 	"\x04auth\x18\x01 \x01(\v2\x1a.gastrolog.v1.AuthSettingsR\x04auth\x121\n" +
 	"\x05query\x18\x02 \x01(\v2\x1b.gastrolog.v1.QuerySettingsR\x05query\x12=\n" +
@@ -9148,21 +9214,23 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\vcsv_lookups\x18\x04 \x03(\v2\x1c.gastrolog.v1.CSVLookupEntryR\n" +
 	"csvLookups\x12F\n" +
 	"\x0estatic_lookups\x18\x05 \x03(\v2\x1f.gastrolog.v1.StaticLookupEntryR\rstaticLookups\x12M\n" +
-	"\x11yaml_file_lookups\x18\x06 \x03(\v2!.gastrolog.v1.YAMLFileLookupEntryR\x0fyamlFileLookups\"\xaa\x01\n" +
+	"\x11yaml_file_lookups\x18\x06 \x03(\v2!.gastrolog.v1.YAMLFileLookupEntryR\x0fyamlFileLookups\"\x8b\x02\n" +
 	"\x12PutClusterSettings\x122\n" +
 	"\x12broadcast_interval\x18\x01 \x01(\tH\x00R\x11broadcastInterval\x88\x01\x01\x122\n" +
-	"\x12heartbeat_interval\x18\x02 \x01(\tH\x01R\x11heartbeatInterval\x88\x01\x01B\x15\n" +
+	"\x12heartbeat_interval\x18\x02 \x01(\tH\x01R\x11heartbeatInterval\x88\x01\x01\x12@\n" +
+	"\x1apipeline_backlog_max_bytes\x18\x03 \x01(\x04H\x02R\x17pipelineBacklogMaxBytes\x88\x01\x01B\x15\n" +
 	"\x13_broadcast_intervalB\x15\n" +
-	"\x13_heartbeat_interval\"\xb2\x02\n" +
+	"\x13_heartbeat_intervalB\x1d\n" +
+	"\x1b_pipeline_backlog_max_bytes\"\xb2\x02\n" +
 	"\x19PutServiceSettingsRequest\x121\n" +
 	"\x04auth\x18\x01 \x01(\v2\x1d.gastrolog.v1.PutAuthSettingsR\x04auth\x124\n" +
 	"\x05query\x18\x02 \x01(\v2\x1e.gastrolog.v1.PutQuerySettingsR\x05query\x12@\n" +
 	"\tscheduler\x18\x03 \x01(\v2\".gastrolog.v1.PutSchedulerSettingsR\tscheduler\x12.\n" +
 	"\x03tls\x18\x04 \x01(\v2\x1c.gastrolog.v1.PutTLSSettingsR\x03tls\x12:\n" +
-	"\acluster\x18\x05 \x01(\v2 .gastrolog.v1.PutClusterSettingsR\acluster\"\x81\x01\n" +
+	"\acluster\x18\x05 \x01(\v2 .gastrolog.v1.PutClusterSettingsR\acluster\"\x8a\x01\n" +
 	"\x14SettingsMutationEcho\x12=\n" +
-	"\bsettings\x18\x01 \x01(\v2!.gastrolog.v1.GetSettingsResponseR\bsettings\x12*\n" +
-	"\x11system_raft_index\x18\x02 \x01(\x04R\x0fsystemRaftIndex\"T\n" +
+	"\bsettings\x18\x01 \x01(\v2!.gastrolog.v1.GetSettingsResponseR\bsettings\x123\n" +
+	"\x16cluster_ctl_raft_index\x18\x02 \x01(\x04R\x13clusterCtlRaftIndex\"T\n" +
 	"\x1aPutServiceSettingsResponse\x126\n" +
 	"\x04echo\x18\x01 \x01(\v2\".gastrolog.v1.SettingsMutationEchoR\x04echo\"S\n" +
 	"\x18PutLookupSettingsRequest\x127\n" +
@@ -9309,27 +9377,28 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x1aValidateExpressionResponse\x12\x14\n" +
 	"\x05valid\x18\x01 \x01(\bR\x05valid\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\"\x14\n" +
-	"\x12WatchSystemRequest\"A\n" +
-	"\x13WatchSystemResponse\x12*\n" +
-	"\x11system_raft_index\x18\x01 \x01(\x04R\x0fsystemRaftIndex\"\x16\n" +
-	"\x14GetRouteStatsRequest\"\xb0\x02\n" +
-	"\x15GetRouteStatsResponse\x12%\n" +
-	"\x0etotal_ingested\x18\x01 \x01(\x03R\rtotalIngested\x12#\n" +
-	"\rtotal_dropped\x18\x02 \x01(\x03R\ftotalDropped\x12!\n" +
-	"\ftotal_routed\x18\x03 \x01(\x03R\vtotalRouted\x12*\n" +
-	"\x11filter_set_active\x18\x04 \x01(\bR\x0ffilterSetActive\x12>\n" +
+	"\x12WatchSystemRequest\"J\n" +
+	"\x13WatchSystemResponse\x123\n" +
+	"\x16cluster_ctl_raft_index\x18\x01 \x01(\x04R\x13clusterCtlRaftIndex\"\x16\n" +
+	"\x14GetRouteStatsRequest\"\xb4\x03\n" +
+	"\x15GetRouteStatsResponse\x12!\n" +
+	"\ftotal_routed\x18\x01 \x01(\x03R\vtotalRouted\x12'\n" +
+	"\x0ftotal_unmatched\x18\x02 \x01(\x03R\x0etotalUnmatched\x12#\n" +
+	"\rtotal_matched\x18\x03 \x01(\x03R\ftotalMatched\x12,\n" +
+	"\x12route_table_active\x18\x04 \x01(\bR\x10routeTableActive\x12>\n" +
 	"\vvault_stats\x18\x05 \x03(\v2\x1d.gastrolog.v1.VaultRouteStatsR\n" +
 	"vaultStats\x12<\n" +
 	"\vroute_stats\x18\x06 \x03(\v2\x1b.gastrolog.v1.PerRouteStatsR\n" +
-	"routeStats\"\x82\x01\n" +
+	"routeStats\x12=\n" +
+	"\vrouted_rate\x18\a \x01(\v2\x1c.gastrolog.v1.ThroughputRateR\n" +
+	"routedRate\x12?\n" +
+	"\fmatched_rate\x18\b \x01(\v2\x1c.gastrolog.v1.ThroughputRateR\vmatchedRate\"U\n" +
 	"\x0fVaultRouteStats\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12'\n" +
-	"\x0frecords_matched\x18\x02 \x01(\x03R\x0erecordsMatched\x12+\n" +
-	"\x11records_forwarded\x18\x03 \x01(\x03R\x10recordsForwarded\"\x80\x01\n" +
+	"\x0frecords_matched\x18\x02 \x01(\x03R\x0erecordsMatched\"S\n" +
 	"\rPerRouteStats\x12\x19\n" +
 	"\broute_id\x18\x01 \x01(\fR\arouteId\x12'\n" +
-	"\x0frecords_matched\x18\x02 \x01(\x03R\x0erecordsMatched\x12+\n" +
-	"\x11records_forwarded\x18\x03 \x01(\x03R\x10recordsForwarded\"\x82\x01\n" +
+	"\x0frecords_matched\x18\x02 \x01(\x03R\x0erecordsMatched\"\x82\x01\n" +
 	"\x0fManagedFileInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
@@ -9718,6 +9787,7 @@ var file_gastrolog_v1_system_proto_goTypes = []any{
 	(*CloudService)(nil),                  // 168: gastrolog.v1.CloudService
 	(*NodeStorageConfig)(nil),             // 169: gastrolog.v1.NodeStorageConfig
 	(*timestamppb.Timestamp)(nil),         // 170: google.protobuf.Timestamp
+	(*ThroughputRate)(nil),                // 171: gastrolog.v1.ThroughputRate
 }
 var file_gastrolog_v1_system_proto_depIdxs = []int32{
 	9,   // 0: gastrolog.v1.GetSystemResponse.vaults:type_name -> gastrolog.v1.VaultConfig
@@ -9812,136 +9882,138 @@ var file_gastrolog_v1_system_proto_depIdxs = []int32{
 	6,   // 89: gastrolog.v1.PutNodeConfigResponse.system:type_name -> gastrolog.v1.GetSystemResponse
 	124, // 90: gastrolog.v1.GetRouteStatsResponse.vault_stats:type_name -> gastrolog.v1.VaultRouteStats
 	125, // 91: gastrolog.v1.GetRouteStatsResponse.route_stats:type_name -> gastrolog.v1.PerRouteStats
-	126, // 92: gastrolog.v1.ListManagedFilesResponse.files:type_name -> gastrolog.v1.ManagedFileInfo
-	52,  // 93: gastrolog.v1.TestHTTPLookupRequest.config:type_name -> gastrolog.v1.HTTPLookupEntry
-	164, // 94: gastrolog.v1.TestHTTPLookupRequest.values:type_name -> gastrolog.v1.TestHTTPLookupRequest.ValuesEntry
-	133, // 95: gastrolog.v1.TestHTTPLookupResponse.results:type_name -> gastrolog.v1.TestHTTPLookupResult
-	165, // 96: gastrolog.v1.TestHTTPLookupResult.fields:type_name -> gastrolog.v1.TestHTTPLookupResult.FieldsEntry
-	136, // 97: gastrolog.v1.PreviewCSVLookupResponse.rows:type_name -> gastrolog.v1.CSVPreviewRow
-	166, // 98: gastrolog.v1.PreviewJSONLookupRequest.parameters:type_name -> gastrolog.v1.PreviewJSONLookupRequest.ParametersEntry
-	167, // 99: gastrolog.v1.PreviewYAMLLookupRequest.parameters:type_name -> gastrolog.v1.PreviewYAMLLookupRequest.ParametersEntry
-	168, // 100: gastrolog.v1.PutCloudServiceRequest.config:type_name -> gastrolog.v1.CloudService
-	6,   // 101: gastrolog.v1.PutCloudServiceResponse.system:type_name -> gastrolog.v1.GetSystemResponse
-	6,   // 102: gastrolog.v1.DeleteCloudServiceResponse.system:type_name -> gastrolog.v1.GetSystemResponse
-	169, // 103: gastrolog.v1.SetNodeStorageConfigRequest.config:type_name -> gastrolog.v1.NodeStorageConfig
-	6,   // 104: gastrolog.v1.SetNodeStorageConfigResponse.system:type_name -> gastrolog.v1.GetSystemResponse
-	69,  // 105: gastrolog.v1.DeleteLookupResponse.echo:type_name -> gastrolog.v1.SettingsMutationEcho
-	3,   // 106: gastrolog.v1.LogLevelRule.level:type_name -> gastrolog.v1.LogLevel
-	3,   // 107: gastrolog.v1.LogLevelConfig.default_level:type_name -> gastrolog.v1.LogLevel
-	149, // 108: gastrolog.v1.LogLevelConfig.rules:type_name -> gastrolog.v1.LogLevelRule
-	150, // 109: gastrolog.v1.PutLogLevelsRequest.config:type_name -> gastrolog.v1.LogLevelConfig
-	69,  // 110: gastrolog.v1.PutLogLevelsResponse.echo:type_name -> gastrolog.v1.SettingsMutationEcho
-	3,   // 111: gastrolog.v1.LogComponentInfo.effective_level:type_name -> gastrolog.v1.LogLevel
-	4,   // 112: gastrolog.v1.LogComponentInfo.source:type_name -> gastrolog.v1.LogComponentLevelSource
-	153, // 113: gastrolog.v1.ListLogComponentsResponse.components:type_name -> gastrolog.v1.LogComponentInfo
-	111, // 114: gastrolog.v1.GetIngesterDefaultsResponse.TypesEntry.value:type_name -> gastrolog.v1.IngesterTypeDefaults
-	5,   // 115: gastrolog.v1.SystemService.GetSystem:input_type -> gastrolog.v1.GetSystemRequest
-	18,  // 116: gastrolog.v1.SystemService.GetIngesterStatus:input_type -> gastrolog.v1.GetIngesterStatusRequest
-	22,  // 117: gastrolog.v1.SystemService.PutRotationPolicy:input_type -> gastrolog.v1.PutRotationPolicyRequest
-	24,  // 118: gastrolog.v1.SystemService.DeleteRotationPolicy:input_type -> gastrolog.v1.DeleteRotationPolicyRequest
-	26,  // 119: gastrolog.v1.SystemService.PutRetentionPolicy:input_type -> gastrolog.v1.PutRetentionPolicyRequest
-	28,  // 120: gastrolog.v1.SystemService.DeleteRetentionPolicy:input_type -> gastrolog.v1.DeleteRetentionPolicyRequest
-	30,  // 121: gastrolog.v1.SystemService.PutVault:input_type -> gastrolog.v1.PutVaultRequest
-	32,  // 122: gastrolog.v1.SystemService.DeleteVault:input_type -> gastrolog.v1.DeleteVaultRequest
-	38,  // 123: gastrolog.v1.SystemService.PutIngester:input_type -> gastrolog.v1.PutIngesterRequest
-	40,  // 124: gastrolog.v1.SystemService.DeleteIngester:input_type -> gastrolog.v1.DeleteIngesterRequest
-	42,  // 125: gastrolog.v1.SystemService.GetSettings:input_type -> gastrolog.v1.GetSettingsRequest
-	68,  // 126: gastrolog.v1.SystemService.PutServiceSettings:input_type -> gastrolog.v1.PutServiceSettingsRequest
-	71,  // 127: gastrolog.v1.SystemService.PutLookupSettings:input_type -> gastrolog.v1.PutLookupSettingsRequest
-	73,  // 128: gastrolog.v1.SystemService.PutMaxMindSettings:input_type -> gastrolog.v1.PutMaxMindSettingsRequest
-	75,  // 129: gastrolog.v1.SystemService.PutSetupSettings:input_type -> gastrolog.v1.PutSetupSettingsRequest
-	77,  // 130: gastrolog.v1.SystemService.RegenerateJwtSecret:input_type -> gastrolog.v1.RegenerateJwtSecretRequest
-	80,  // 131: gastrolog.v1.SystemService.GetPreferences:input_type -> gastrolog.v1.GetPreferencesRequest
-	82,  // 132: gastrolog.v1.SystemService.PutPreferences:input_type -> gastrolog.v1.PutPreferencesRequest
-	85,  // 133: gastrolog.v1.SystemService.GetSavedQueries:input_type -> gastrolog.v1.GetSavedQueriesRequest
-	87,  // 134: gastrolog.v1.SystemService.PutSavedQuery:input_type -> gastrolog.v1.PutSavedQueryRequest
-	89,  // 135: gastrolog.v1.SystemService.DeleteSavedQuery:input_type -> gastrolog.v1.DeleteSavedQueryRequest
-	91,  // 136: gastrolog.v1.SystemService.ListCertificates:input_type -> gastrolog.v1.ListCertificatesRequest
-	94,  // 137: gastrolog.v1.SystemService.GetCertificate:input_type -> gastrolog.v1.GetCertificateRequest
-	96,  // 138: gastrolog.v1.SystemService.PutCertificate:input_type -> gastrolog.v1.PutCertificateRequest
-	98,  // 139: gastrolog.v1.SystemService.DeleteCertificate:input_type -> gastrolog.v1.DeleteCertificateRequest
-	100, // 140: gastrolog.v1.SystemService.PauseVault:input_type -> gastrolog.v1.PauseVaultRequest
-	102, // 141: gastrolog.v1.SystemService.ResumeVault:input_type -> gastrolog.v1.ResumeVaultRequest
-	104, // 142: gastrolog.v1.SystemService.TestIngester:input_type -> gastrolog.v1.TestIngesterRequest
-	110, // 143: gastrolog.v1.SystemService.GetIngesterDefaults:input_type -> gastrolog.v1.GetIngesterDefaultsRequest
-	106, // 144: gastrolog.v1.SystemService.TriggerIngester:input_type -> gastrolog.v1.TriggerIngesterRequest
-	114, // 145: gastrolog.v1.SystemService.PutNodeConfig:input_type -> gastrolog.v1.PutNodeConfigRequest
-	34,  // 146: gastrolog.v1.SystemService.PutRoute:input_type -> gastrolog.v1.PutRouteRequest
-	36,  // 147: gastrolog.v1.SystemService.DeleteRoute:input_type -> gastrolog.v1.DeleteRouteRequest
-	116, // 148: gastrolog.v1.SystemService.GenerateName:input_type -> gastrolog.v1.GenerateNameRequest
-	118, // 149: gastrolog.v1.SystemService.ValidateExpression:input_type -> gastrolog.v1.ValidateExpressionRequest
-	120, // 150: gastrolog.v1.SystemService.WatchSystem:input_type -> gastrolog.v1.WatchSystemRequest
-	122, // 151: gastrolog.v1.SystemService.GetRouteStats:input_type -> gastrolog.v1.GetRouteStatsRequest
-	127, // 152: gastrolog.v1.SystemService.ListManagedFiles:input_type -> gastrolog.v1.ListManagedFilesRequest
-	129, // 153: gastrolog.v1.SystemService.DeleteManagedFile:input_type -> gastrolog.v1.DeleteManagedFileRequest
-	108, // 154: gastrolog.v1.SystemService.TestCloudService:input_type -> gastrolog.v1.TestCloudServiceRequest
-	131, // 155: gastrolog.v1.SystemService.TestHTTPLookup:input_type -> gastrolog.v1.TestHTTPLookupRequest
-	134, // 156: gastrolog.v1.SystemService.PreviewCSVLookup:input_type -> gastrolog.v1.PreviewCSVLookupRequest
-	137, // 157: gastrolog.v1.SystemService.PreviewJSONLookup:input_type -> gastrolog.v1.PreviewJSONLookupRequest
-	139, // 158: gastrolog.v1.SystemService.PreviewYAMLLookup:input_type -> gastrolog.v1.PreviewYAMLLookupRequest
-	20,  // 159: gastrolog.v1.SystemService.WatchIngesterStatus:input_type -> gastrolog.v1.WatchIngesterStatusRequest
-	141, // 160: gastrolog.v1.SystemService.PutCloudService:input_type -> gastrolog.v1.PutCloudServiceRequest
-	143, // 161: gastrolog.v1.SystemService.DeleteCloudService:input_type -> gastrolog.v1.DeleteCloudServiceRequest
-	145, // 162: gastrolog.v1.SystemService.SetNodeStorageConfig:input_type -> gastrolog.v1.SetNodeStorageConfigRequest
-	147, // 163: gastrolog.v1.SystemService.DeleteLookup:input_type -> gastrolog.v1.DeleteLookupRequest
-	151, // 164: gastrolog.v1.SystemService.PutLogLevels:input_type -> gastrolog.v1.PutLogLevelsRequest
-	154, // 165: gastrolog.v1.SystemService.ListLogComponents:input_type -> gastrolog.v1.ListLogComponentsRequest
-	6,   // 166: gastrolog.v1.SystemService.GetSystem:output_type -> gastrolog.v1.GetSystemResponse
-	19,  // 167: gastrolog.v1.SystemService.GetIngesterStatus:output_type -> gastrolog.v1.GetIngesterStatusResponse
-	23,  // 168: gastrolog.v1.SystemService.PutRotationPolicy:output_type -> gastrolog.v1.PutRotationPolicyResponse
-	25,  // 169: gastrolog.v1.SystemService.DeleteRotationPolicy:output_type -> gastrolog.v1.DeleteRotationPolicyResponse
-	27,  // 170: gastrolog.v1.SystemService.PutRetentionPolicy:output_type -> gastrolog.v1.PutRetentionPolicyResponse
-	29,  // 171: gastrolog.v1.SystemService.DeleteRetentionPolicy:output_type -> gastrolog.v1.DeleteRetentionPolicyResponse
-	31,  // 172: gastrolog.v1.SystemService.PutVault:output_type -> gastrolog.v1.PutVaultResponse
-	33,  // 173: gastrolog.v1.SystemService.DeleteVault:output_type -> gastrolog.v1.DeleteVaultResponse
-	39,  // 174: gastrolog.v1.SystemService.PutIngester:output_type -> gastrolog.v1.PutIngesterResponse
-	41,  // 175: gastrolog.v1.SystemService.DeleteIngester:output_type -> gastrolog.v1.DeleteIngesterResponse
-	59,  // 176: gastrolog.v1.SystemService.GetSettings:output_type -> gastrolog.v1.GetSettingsResponse
-	70,  // 177: gastrolog.v1.SystemService.PutServiceSettings:output_type -> gastrolog.v1.PutServiceSettingsResponse
-	72,  // 178: gastrolog.v1.SystemService.PutLookupSettings:output_type -> gastrolog.v1.PutLookupSettingsResponse
-	74,  // 179: gastrolog.v1.SystemService.PutMaxMindSettings:output_type -> gastrolog.v1.PutMaxMindSettingsResponse
-	76,  // 180: gastrolog.v1.SystemService.PutSetupSettings:output_type -> gastrolog.v1.PutSetupSettingsResponse
-	78,  // 181: gastrolog.v1.SystemService.RegenerateJwtSecret:output_type -> gastrolog.v1.RegenerateJwtSecretResponse
-	81,  // 182: gastrolog.v1.SystemService.GetPreferences:output_type -> gastrolog.v1.GetPreferencesResponse
-	83,  // 183: gastrolog.v1.SystemService.PutPreferences:output_type -> gastrolog.v1.PutPreferencesResponse
-	86,  // 184: gastrolog.v1.SystemService.GetSavedQueries:output_type -> gastrolog.v1.GetSavedQueriesResponse
-	88,  // 185: gastrolog.v1.SystemService.PutSavedQuery:output_type -> gastrolog.v1.PutSavedQueryResponse
-	90,  // 186: gastrolog.v1.SystemService.DeleteSavedQuery:output_type -> gastrolog.v1.DeleteSavedQueryResponse
-	92,  // 187: gastrolog.v1.SystemService.ListCertificates:output_type -> gastrolog.v1.ListCertificatesResponse
-	95,  // 188: gastrolog.v1.SystemService.GetCertificate:output_type -> gastrolog.v1.GetCertificateResponse
-	97,  // 189: gastrolog.v1.SystemService.PutCertificate:output_type -> gastrolog.v1.PutCertificateResponse
-	99,  // 190: gastrolog.v1.SystemService.DeleteCertificate:output_type -> gastrolog.v1.DeleteCertificateResponse
-	101, // 191: gastrolog.v1.SystemService.PauseVault:output_type -> gastrolog.v1.PauseVaultResponse
-	103, // 192: gastrolog.v1.SystemService.ResumeVault:output_type -> gastrolog.v1.ResumeVaultResponse
-	105, // 193: gastrolog.v1.SystemService.TestIngester:output_type -> gastrolog.v1.TestIngesterResponse
-	112, // 194: gastrolog.v1.SystemService.GetIngesterDefaults:output_type -> gastrolog.v1.GetIngesterDefaultsResponse
-	107, // 195: gastrolog.v1.SystemService.TriggerIngester:output_type -> gastrolog.v1.TriggerIngesterResponse
-	115, // 196: gastrolog.v1.SystemService.PutNodeConfig:output_type -> gastrolog.v1.PutNodeConfigResponse
-	35,  // 197: gastrolog.v1.SystemService.PutRoute:output_type -> gastrolog.v1.PutRouteResponse
-	37,  // 198: gastrolog.v1.SystemService.DeleteRoute:output_type -> gastrolog.v1.DeleteRouteResponse
-	117, // 199: gastrolog.v1.SystemService.GenerateName:output_type -> gastrolog.v1.GenerateNameResponse
-	119, // 200: gastrolog.v1.SystemService.ValidateExpression:output_type -> gastrolog.v1.ValidateExpressionResponse
-	121, // 201: gastrolog.v1.SystemService.WatchSystem:output_type -> gastrolog.v1.WatchSystemResponse
-	123, // 202: gastrolog.v1.SystemService.GetRouteStats:output_type -> gastrolog.v1.GetRouteStatsResponse
-	128, // 203: gastrolog.v1.SystemService.ListManagedFiles:output_type -> gastrolog.v1.ListManagedFilesResponse
-	130, // 204: gastrolog.v1.SystemService.DeleteManagedFile:output_type -> gastrolog.v1.DeleteManagedFileResponse
-	109, // 205: gastrolog.v1.SystemService.TestCloudService:output_type -> gastrolog.v1.TestCloudServiceResponse
-	132, // 206: gastrolog.v1.SystemService.TestHTTPLookup:output_type -> gastrolog.v1.TestHTTPLookupResponse
-	135, // 207: gastrolog.v1.SystemService.PreviewCSVLookup:output_type -> gastrolog.v1.PreviewCSVLookupResponse
-	138, // 208: gastrolog.v1.SystemService.PreviewJSONLookup:output_type -> gastrolog.v1.PreviewJSONLookupResponse
-	140, // 209: gastrolog.v1.SystemService.PreviewYAMLLookup:output_type -> gastrolog.v1.PreviewYAMLLookupResponse
-	21,  // 210: gastrolog.v1.SystemService.WatchIngesterStatus:output_type -> gastrolog.v1.WatchIngesterStatusResponse
-	142, // 211: gastrolog.v1.SystemService.PutCloudService:output_type -> gastrolog.v1.PutCloudServiceResponse
-	144, // 212: gastrolog.v1.SystemService.DeleteCloudService:output_type -> gastrolog.v1.DeleteCloudServiceResponse
-	146, // 213: gastrolog.v1.SystemService.SetNodeStorageConfig:output_type -> gastrolog.v1.SetNodeStorageConfigResponse
-	148, // 214: gastrolog.v1.SystemService.DeleteLookup:output_type -> gastrolog.v1.DeleteLookupResponse
-	152, // 215: gastrolog.v1.SystemService.PutLogLevels:output_type -> gastrolog.v1.PutLogLevelsResponse
-	155, // 216: gastrolog.v1.SystemService.ListLogComponents:output_type -> gastrolog.v1.ListLogComponentsResponse
-	166, // [166:217] is the sub-list for method output_type
-	115, // [115:166] is the sub-list for method input_type
-	115, // [115:115] is the sub-list for extension type_name
-	115, // [115:115] is the sub-list for extension extendee
-	0,   // [0:115] is the sub-list for field type_name
+	171, // 92: gastrolog.v1.GetRouteStatsResponse.routed_rate:type_name -> gastrolog.v1.ThroughputRate
+	171, // 93: gastrolog.v1.GetRouteStatsResponse.matched_rate:type_name -> gastrolog.v1.ThroughputRate
+	126, // 94: gastrolog.v1.ListManagedFilesResponse.files:type_name -> gastrolog.v1.ManagedFileInfo
+	52,  // 95: gastrolog.v1.TestHTTPLookupRequest.config:type_name -> gastrolog.v1.HTTPLookupEntry
+	164, // 96: gastrolog.v1.TestHTTPLookupRequest.values:type_name -> gastrolog.v1.TestHTTPLookupRequest.ValuesEntry
+	133, // 97: gastrolog.v1.TestHTTPLookupResponse.results:type_name -> gastrolog.v1.TestHTTPLookupResult
+	165, // 98: gastrolog.v1.TestHTTPLookupResult.fields:type_name -> gastrolog.v1.TestHTTPLookupResult.FieldsEntry
+	136, // 99: gastrolog.v1.PreviewCSVLookupResponse.rows:type_name -> gastrolog.v1.CSVPreviewRow
+	166, // 100: gastrolog.v1.PreviewJSONLookupRequest.parameters:type_name -> gastrolog.v1.PreviewJSONLookupRequest.ParametersEntry
+	167, // 101: gastrolog.v1.PreviewYAMLLookupRequest.parameters:type_name -> gastrolog.v1.PreviewYAMLLookupRequest.ParametersEntry
+	168, // 102: gastrolog.v1.PutCloudServiceRequest.config:type_name -> gastrolog.v1.CloudService
+	6,   // 103: gastrolog.v1.PutCloudServiceResponse.system:type_name -> gastrolog.v1.GetSystemResponse
+	6,   // 104: gastrolog.v1.DeleteCloudServiceResponse.system:type_name -> gastrolog.v1.GetSystemResponse
+	169, // 105: gastrolog.v1.SetNodeStorageConfigRequest.config:type_name -> gastrolog.v1.NodeStorageConfig
+	6,   // 106: gastrolog.v1.SetNodeStorageConfigResponse.system:type_name -> gastrolog.v1.GetSystemResponse
+	69,  // 107: gastrolog.v1.DeleteLookupResponse.echo:type_name -> gastrolog.v1.SettingsMutationEcho
+	3,   // 108: gastrolog.v1.LogLevelRule.level:type_name -> gastrolog.v1.LogLevel
+	3,   // 109: gastrolog.v1.LogLevelConfig.default_level:type_name -> gastrolog.v1.LogLevel
+	149, // 110: gastrolog.v1.LogLevelConfig.rules:type_name -> gastrolog.v1.LogLevelRule
+	150, // 111: gastrolog.v1.PutLogLevelsRequest.config:type_name -> gastrolog.v1.LogLevelConfig
+	69,  // 112: gastrolog.v1.PutLogLevelsResponse.echo:type_name -> gastrolog.v1.SettingsMutationEcho
+	3,   // 113: gastrolog.v1.LogComponentInfo.effective_level:type_name -> gastrolog.v1.LogLevel
+	4,   // 114: gastrolog.v1.LogComponentInfo.source:type_name -> gastrolog.v1.LogComponentLevelSource
+	153, // 115: gastrolog.v1.ListLogComponentsResponse.components:type_name -> gastrolog.v1.LogComponentInfo
+	111, // 116: gastrolog.v1.GetIngesterDefaultsResponse.TypesEntry.value:type_name -> gastrolog.v1.IngesterTypeDefaults
+	5,   // 117: gastrolog.v1.SystemService.GetSystem:input_type -> gastrolog.v1.GetSystemRequest
+	18,  // 118: gastrolog.v1.SystemService.GetIngesterStatus:input_type -> gastrolog.v1.GetIngesterStatusRequest
+	22,  // 119: gastrolog.v1.SystemService.PutRotationPolicy:input_type -> gastrolog.v1.PutRotationPolicyRequest
+	24,  // 120: gastrolog.v1.SystemService.DeleteRotationPolicy:input_type -> gastrolog.v1.DeleteRotationPolicyRequest
+	26,  // 121: gastrolog.v1.SystemService.PutRetentionPolicy:input_type -> gastrolog.v1.PutRetentionPolicyRequest
+	28,  // 122: gastrolog.v1.SystemService.DeleteRetentionPolicy:input_type -> gastrolog.v1.DeleteRetentionPolicyRequest
+	30,  // 123: gastrolog.v1.SystemService.PutVault:input_type -> gastrolog.v1.PutVaultRequest
+	32,  // 124: gastrolog.v1.SystemService.DeleteVault:input_type -> gastrolog.v1.DeleteVaultRequest
+	38,  // 125: gastrolog.v1.SystemService.PutIngester:input_type -> gastrolog.v1.PutIngesterRequest
+	40,  // 126: gastrolog.v1.SystemService.DeleteIngester:input_type -> gastrolog.v1.DeleteIngesterRequest
+	42,  // 127: gastrolog.v1.SystemService.GetSettings:input_type -> gastrolog.v1.GetSettingsRequest
+	68,  // 128: gastrolog.v1.SystemService.PutServiceSettings:input_type -> gastrolog.v1.PutServiceSettingsRequest
+	71,  // 129: gastrolog.v1.SystemService.PutLookupSettings:input_type -> gastrolog.v1.PutLookupSettingsRequest
+	73,  // 130: gastrolog.v1.SystemService.PutMaxMindSettings:input_type -> gastrolog.v1.PutMaxMindSettingsRequest
+	75,  // 131: gastrolog.v1.SystemService.PutSetupSettings:input_type -> gastrolog.v1.PutSetupSettingsRequest
+	77,  // 132: gastrolog.v1.SystemService.RegenerateJwtSecret:input_type -> gastrolog.v1.RegenerateJwtSecretRequest
+	80,  // 133: gastrolog.v1.SystemService.GetPreferences:input_type -> gastrolog.v1.GetPreferencesRequest
+	82,  // 134: gastrolog.v1.SystemService.PutPreferences:input_type -> gastrolog.v1.PutPreferencesRequest
+	85,  // 135: gastrolog.v1.SystemService.GetSavedQueries:input_type -> gastrolog.v1.GetSavedQueriesRequest
+	87,  // 136: gastrolog.v1.SystemService.PutSavedQuery:input_type -> gastrolog.v1.PutSavedQueryRequest
+	89,  // 137: gastrolog.v1.SystemService.DeleteSavedQuery:input_type -> gastrolog.v1.DeleteSavedQueryRequest
+	91,  // 138: gastrolog.v1.SystemService.ListCertificates:input_type -> gastrolog.v1.ListCertificatesRequest
+	94,  // 139: gastrolog.v1.SystemService.GetCertificate:input_type -> gastrolog.v1.GetCertificateRequest
+	96,  // 140: gastrolog.v1.SystemService.PutCertificate:input_type -> gastrolog.v1.PutCertificateRequest
+	98,  // 141: gastrolog.v1.SystemService.DeleteCertificate:input_type -> gastrolog.v1.DeleteCertificateRequest
+	100, // 142: gastrolog.v1.SystemService.PauseVault:input_type -> gastrolog.v1.PauseVaultRequest
+	102, // 143: gastrolog.v1.SystemService.ResumeVault:input_type -> gastrolog.v1.ResumeVaultRequest
+	104, // 144: gastrolog.v1.SystemService.TestIngester:input_type -> gastrolog.v1.TestIngesterRequest
+	110, // 145: gastrolog.v1.SystemService.GetIngesterDefaults:input_type -> gastrolog.v1.GetIngesterDefaultsRequest
+	106, // 146: gastrolog.v1.SystemService.TriggerIngester:input_type -> gastrolog.v1.TriggerIngesterRequest
+	114, // 147: gastrolog.v1.SystemService.PutNodeConfig:input_type -> gastrolog.v1.PutNodeConfigRequest
+	34,  // 148: gastrolog.v1.SystemService.PutRoute:input_type -> gastrolog.v1.PutRouteRequest
+	36,  // 149: gastrolog.v1.SystemService.DeleteRoute:input_type -> gastrolog.v1.DeleteRouteRequest
+	116, // 150: gastrolog.v1.SystemService.GenerateName:input_type -> gastrolog.v1.GenerateNameRequest
+	118, // 151: gastrolog.v1.SystemService.ValidateExpression:input_type -> gastrolog.v1.ValidateExpressionRequest
+	120, // 152: gastrolog.v1.SystemService.WatchSystem:input_type -> gastrolog.v1.WatchSystemRequest
+	122, // 153: gastrolog.v1.SystemService.GetRouteStats:input_type -> gastrolog.v1.GetRouteStatsRequest
+	127, // 154: gastrolog.v1.SystemService.ListManagedFiles:input_type -> gastrolog.v1.ListManagedFilesRequest
+	129, // 155: gastrolog.v1.SystemService.DeleteManagedFile:input_type -> gastrolog.v1.DeleteManagedFileRequest
+	108, // 156: gastrolog.v1.SystemService.TestCloudService:input_type -> gastrolog.v1.TestCloudServiceRequest
+	131, // 157: gastrolog.v1.SystemService.TestHTTPLookup:input_type -> gastrolog.v1.TestHTTPLookupRequest
+	134, // 158: gastrolog.v1.SystemService.PreviewCSVLookup:input_type -> gastrolog.v1.PreviewCSVLookupRequest
+	137, // 159: gastrolog.v1.SystemService.PreviewJSONLookup:input_type -> gastrolog.v1.PreviewJSONLookupRequest
+	139, // 160: gastrolog.v1.SystemService.PreviewYAMLLookup:input_type -> gastrolog.v1.PreviewYAMLLookupRequest
+	20,  // 161: gastrolog.v1.SystemService.WatchIngesterStatus:input_type -> gastrolog.v1.WatchIngesterStatusRequest
+	141, // 162: gastrolog.v1.SystemService.PutCloudService:input_type -> gastrolog.v1.PutCloudServiceRequest
+	143, // 163: gastrolog.v1.SystemService.DeleteCloudService:input_type -> gastrolog.v1.DeleteCloudServiceRequest
+	145, // 164: gastrolog.v1.SystemService.SetNodeStorageConfig:input_type -> gastrolog.v1.SetNodeStorageConfigRequest
+	147, // 165: gastrolog.v1.SystemService.DeleteLookup:input_type -> gastrolog.v1.DeleteLookupRequest
+	151, // 166: gastrolog.v1.SystemService.PutLogLevels:input_type -> gastrolog.v1.PutLogLevelsRequest
+	154, // 167: gastrolog.v1.SystemService.ListLogComponents:input_type -> gastrolog.v1.ListLogComponentsRequest
+	6,   // 168: gastrolog.v1.SystemService.GetSystem:output_type -> gastrolog.v1.GetSystemResponse
+	19,  // 169: gastrolog.v1.SystemService.GetIngesterStatus:output_type -> gastrolog.v1.GetIngesterStatusResponse
+	23,  // 170: gastrolog.v1.SystemService.PutRotationPolicy:output_type -> gastrolog.v1.PutRotationPolicyResponse
+	25,  // 171: gastrolog.v1.SystemService.DeleteRotationPolicy:output_type -> gastrolog.v1.DeleteRotationPolicyResponse
+	27,  // 172: gastrolog.v1.SystemService.PutRetentionPolicy:output_type -> gastrolog.v1.PutRetentionPolicyResponse
+	29,  // 173: gastrolog.v1.SystemService.DeleteRetentionPolicy:output_type -> gastrolog.v1.DeleteRetentionPolicyResponse
+	31,  // 174: gastrolog.v1.SystemService.PutVault:output_type -> gastrolog.v1.PutVaultResponse
+	33,  // 175: gastrolog.v1.SystemService.DeleteVault:output_type -> gastrolog.v1.DeleteVaultResponse
+	39,  // 176: gastrolog.v1.SystemService.PutIngester:output_type -> gastrolog.v1.PutIngesterResponse
+	41,  // 177: gastrolog.v1.SystemService.DeleteIngester:output_type -> gastrolog.v1.DeleteIngesterResponse
+	59,  // 178: gastrolog.v1.SystemService.GetSettings:output_type -> gastrolog.v1.GetSettingsResponse
+	70,  // 179: gastrolog.v1.SystemService.PutServiceSettings:output_type -> gastrolog.v1.PutServiceSettingsResponse
+	72,  // 180: gastrolog.v1.SystemService.PutLookupSettings:output_type -> gastrolog.v1.PutLookupSettingsResponse
+	74,  // 181: gastrolog.v1.SystemService.PutMaxMindSettings:output_type -> gastrolog.v1.PutMaxMindSettingsResponse
+	76,  // 182: gastrolog.v1.SystemService.PutSetupSettings:output_type -> gastrolog.v1.PutSetupSettingsResponse
+	78,  // 183: gastrolog.v1.SystemService.RegenerateJwtSecret:output_type -> gastrolog.v1.RegenerateJwtSecretResponse
+	81,  // 184: gastrolog.v1.SystemService.GetPreferences:output_type -> gastrolog.v1.GetPreferencesResponse
+	83,  // 185: gastrolog.v1.SystemService.PutPreferences:output_type -> gastrolog.v1.PutPreferencesResponse
+	86,  // 186: gastrolog.v1.SystemService.GetSavedQueries:output_type -> gastrolog.v1.GetSavedQueriesResponse
+	88,  // 187: gastrolog.v1.SystemService.PutSavedQuery:output_type -> gastrolog.v1.PutSavedQueryResponse
+	90,  // 188: gastrolog.v1.SystemService.DeleteSavedQuery:output_type -> gastrolog.v1.DeleteSavedQueryResponse
+	92,  // 189: gastrolog.v1.SystemService.ListCertificates:output_type -> gastrolog.v1.ListCertificatesResponse
+	95,  // 190: gastrolog.v1.SystemService.GetCertificate:output_type -> gastrolog.v1.GetCertificateResponse
+	97,  // 191: gastrolog.v1.SystemService.PutCertificate:output_type -> gastrolog.v1.PutCertificateResponse
+	99,  // 192: gastrolog.v1.SystemService.DeleteCertificate:output_type -> gastrolog.v1.DeleteCertificateResponse
+	101, // 193: gastrolog.v1.SystemService.PauseVault:output_type -> gastrolog.v1.PauseVaultResponse
+	103, // 194: gastrolog.v1.SystemService.ResumeVault:output_type -> gastrolog.v1.ResumeVaultResponse
+	105, // 195: gastrolog.v1.SystemService.TestIngester:output_type -> gastrolog.v1.TestIngesterResponse
+	112, // 196: gastrolog.v1.SystemService.GetIngesterDefaults:output_type -> gastrolog.v1.GetIngesterDefaultsResponse
+	107, // 197: gastrolog.v1.SystemService.TriggerIngester:output_type -> gastrolog.v1.TriggerIngesterResponse
+	115, // 198: gastrolog.v1.SystemService.PutNodeConfig:output_type -> gastrolog.v1.PutNodeConfigResponse
+	35,  // 199: gastrolog.v1.SystemService.PutRoute:output_type -> gastrolog.v1.PutRouteResponse
+	37,  // 200: gastrolog.v1.SystemService.DeleteRoute:output_type -> gastrolog.v1.DeleteRouteResponse
+	117, // 201: gastrolog.v1.SystemService.GenerateName:output_type -> gastrolog.v1.GenerateNameResponse
+	119, // 202: gastrolog.v1.SystemService.ValidateExpression:output_type -> gastrolog.v1.ValidateExpressionResponse
+	121, // 203: gastrolog.v1.SystemService.WatchSystem:output_type -> gastrolog.v1.WatchSystemResponse
+	123, // 204: gastrolog.v1.SystemService.GetRouteStats:output_type -> gastrolog.v1.GetRouteStatsResponse
+	128, // 205: gastrolog.v1.SystemService.ListManagedFiles:output_type -> gastrolog.v1.ListManagedFilesResponse
+	130, // 206: gastrolog.v1.SystemService.DeleteManagedFile:output_type -> gastrolog.v1.DeleteManagedFileResponse
+	109, // 207: gastrolog.v1.SystemService.TestCloudService:output_type -> gastrolog.v1.TestCloudServiceResponse
+	132, // 208: gastrolog.v1.SystemService.TestHTTPLookup:output_type -> gastrolog.v1.TestHTTPLookupResponse
+	135, // 209: gastrolog.v1.SystemService.PreviewCSVLookup:output_type -> gastrolog.v1.PreviewCSVLookupResponse
+	138, // 210: gastrolog.v1.SystemService.PreviewJSONLookup:output_type -> gastrolog.v1.PreviewJSONLookupResponse
+	140, // 211: gastrolog.v1.SystemService.PreviewYAMLLookup:output_type -> gastrolog.v1.PreviewYAMLLookupResponse
+	21,  // 212: gastrolog.v1.SystemService.WatchIngesterStatus:output_type -> gastrolog.v1.WatchIngesterStatusResponse
+	142, // 213: gastrolog.v1.SystemService.PutCloudService:output_type -> gastrolog.v1.PutCloudServiceResponse
+	144, // 214: gastrolog.v1.SystemService.DeleteCloudService:output_type -> gastrolog.v1.DeleteCloudServiceResponse
+	146, // 215: gastrolog.v1.SystemService.SetNodeStorageConfig:output_type -> gastrolog.v1.SetNodeStorageConfigResponse
+	148, // 216: gastrolog.v1.SystemService.DeleteLookup:output_type -> gastrolog.v1.DeleteLookupResponse
+	152, // 217: gastrolog.v1.SystemService.PutLogLevels:output_type -> gastrolog.v1.PutLogLevelsResponse
+	155, // 218: gastrolog.v1.SystemService.ListLogComponents:output_type -> gastrolog.v1.ListLogComponentsResponse
+	168, // [168:219] is the sub-list for method output_type
+	117, // [117:168] is the sub-list for method input_type
+	117, // [117:117] is the sub-list for extension type_name
+	117, // [117:117] is the sub-list for extension extendee
+	0,   // [0:117] is the sub-list for field type_name
 }
 
 func init() { file_gastrolog_v1_system_proto_init() }
@@ -9950,6 +10022,7 @@ func file_gastrolog_v1_system_proto_init() {
 		return
 	}
 	file_gastrolog_v1_storage_proto_init()
+	file_gastrolog_v1_vault_proto_init()
 	file_gastrolog_v1_system_proto_msgTypes[7].OneofWrappers = []any{
 		(*RouteStage_Match)(nil),
 	}

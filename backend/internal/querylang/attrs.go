@@ -67,9 +67,40 @@ func ValidateAttrFilter(expr Expr) error {
 	}
 }
 
+// AttrSource is a read view over record attributes for filter evaluation.
+// It exists so hot paths can evaluate filters against layered or wire-form
+// attribute views without materializing a map[string]string per record —
+// per-record enrichment copies alone were ~10GB of garbage per soak run
+// (gastrolog-11y2iv). Get is an exact-key lookup; All iterates every
+// key/value pair (used by case-insensitive fallbacks and glob scans) and
+// must not yield duplicate keys.
+type AttrSource interface {
+	Get(key string) (string, bool)
+	All(yield func(key, value string) bool)
+}
+
+// mapSource adapts a plain attributes map to AttrSource.
+type mapSource map[string]string
+
+func (m mapSource) Get(key string) (string, bool) { v, ok := m[key]; return v, ok }
+
+func (m mapSource) All(yield func(key, value string) bool) {
+	for k, v := range m {
+		if !yield(k, v) {
+			return
+		}
+	}
+}
+
 // MatchAttrs checks if attributes match a DNF expression.
 // A nil DNF matches everything (no filter configured).
 func MatchAttrs(dnf *DNF, attrs map[string]string) bool {
+	return MatchAttrSource(dnf, mapSource(attrs))
+}
+
+// MatchAttrSource is MatchAttrs over any AttrSource. Generic so concrete
+// sources evaluate without interface boxing on the per-record path.
+func MatchAttrSource[S AttrSource](dnf *DNF, attrs S) bool {
 	if dnf == nil {
 		return true
 	}
@@ -82,14 +113,14 @@ func MatchAttrs(dnf *DNF, attrs map[string]string) bool {
 }
 
 // matchBranchAttrs checks if attributes match a single DNF branch.
-func matchBranchAttrs(branch *Conjunction, attrs map[string]string) bool {
+func matchBranchAttrs[S AttrSource](branch *Conjunction, attrs S) bool {
 	for _, p := range branch.Positive {
-		if !EvalAttrPredicate(p, attrs) {
+		if !evalAttrPredicate(p, attrs) {
 			return false
 		}
 	}
 	for _, p := range branch.Negative {
-		if EvalAttrPredicate(p, attrs) {
+		if evalAttrPredicate(p, attrs) {
 			return false
 		}
 	}
@@ -99,6 +130,10 @@ func matchBranchAttrs(branch *Conjunction, attrs map[string]string) bool {
 // EvalAttrPredicate evaluates a predicate against attributes.
 // Supports glob patterns in key and value positions via KeyPat/ValuePat.
 func EvalAttrPredicate(pred *PredicateExpr, attrs map[string]string) bool {
+	return evalAttrPredicate(pred, mapSource(attrs))
+}
+
+func evalAttrPredicate[S AttrSource](pred *PredicateExpr, attrs S) bool {
 	switch pred.Kind {
 	case PredKV:
 		return evalKV(pred, attrs)
@@ -115,69 +150,83 @@ func EvalAttrPredicate(pred *PredicateExpr, attrs map[string]string) bool {
 }
 
 // evalKV evaluates a key=value predicate against attributes.
-func evalKV(pred *PredicateExpr, attrs map[string]string) bool {
+func evalKV[S AttrSource](pred *PredicateExpr, attrs S) bool {
 	if pred.KeyPat != nil {
 		return evalKVGlobKey(pred, attrs)
 	}
 	// Exact key lookup (case-insensitive).
-	if v, ok := attrs[pred.Key]; ok && matchValue(pred, v) {
+	if v, ok := attrs.Get(pred.Key); ok && matchValue(pred, v) {
 		return true
 	}
-	for k, v := range attrs {
+	found := false
+	attrs.All(func(k, v string) bool {
 		if strings.EqualFold(k, pred.Key) && matchValue(pred, v) {
-			return true
+			found = true
+			return false
 		}
-	}
-	return false
+		return true
+	})
+	return found
 }
 
 // evalKVGlobKey evaluates a KV predicate with a glob key pattern.
-func evalKVGlobKey(pred *PredicateExpr, attrs map[string]string) bool {
-	for k, v := range attrs {
+func evalKVGlobKey[S AttrSource](pred *PredicateExpr, attrs S) bool {
+	found := false
+	attrs.All(func(k, v string) bool {
 		if pred.KeyPat.MatchString(k) && matchValue(pred, v) {
-			return true
+			found = true
+			return false
 		}
-	}
-	return false
+		return true
+	})
+	return found
 }
 
 // evalKeyExists evaluates a key-exists predicate against attributes.
-func evalKeyExists(pred *PredicateExpr, attrs map[string]string) bool {
+func evalKeyExists[S AttrSource](pred *PredicateExpr, attrs S) bool {
 	if pred.KeyPat != nil {
-		for k := range attrs {
+		found := false
+		attrs.All(func(k, _ string) bool {
 			if pred.KeyPat.MatchString(k) {
-				return true
+				found = true
+				return false
 			}
-		}
-		return false
+			return true
+		})
+		return found
 	}
-	if _, ok := attrs[pred.Key]; ok {
+	if _, ok := attrs.Get(pred.Key); ok {
 		return true
 	}
-	for k := range attrs {
+	found := false
+	attrs.All(func(k, _ string) bool {
 		if strings.EqualFold(k, pred.Key) {
-			return true
+			found = true
+			return false
 		}
-	}
-	return false
+		return true
+	})
+	return found
 }
 
 // evalValueExists evaluates a value-exists predicate against attributes.
-func evalValueExists(pred *PredicateExpr, attrs map[string]string) bool {
-	if pred.ValuePat != nil {
-		for _, v := range attrs {
+func evalValueExists[S AttrSource](pred *PredicateExpr, attrs S) bool {
+	found := false
+	attrs.All(func(_, v string) bool {
+		if pred.ValuePat != nil {
 			if pred.ValuePat.MatchString(v) {
-				return true
+				found = true
+				return false
 			}
-		}
-		return false
-	}
-	for _, v := range attrs {
-		if strings.EqualFold(v, pred.Value) {
 			return true
 		}
-	}
-	return false
+		if strings.EqualFold(v, pred.Value) {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
 }
 
 // matchValue checks if a value matches a predicate's value, using glob pattern

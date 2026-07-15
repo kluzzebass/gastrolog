@@ -19,33 +19,38 @@ var (
 	ErrMmapEmpty = errors.New("cannot mmap empty file")
 )
 
-// loadDict reads attr_dict.log via mmap, validates its header, and returns a StringDict.
-// DecodeDictData copies strings so the mmap region is released immediately after decoding.
-func loadDict(dictPath string) (*chunk.StringDict, error) {
+// loadDict mmap's attr_dict.log and returns a dictionary view that aliases the
+// mapping. The caller must munmap dictMmap when the dictionary is no longer needed.
+func loadDict(dictPath string) (chunk.DictReader, []byte, error) {
 	f, err := os.Open(filepath.Clean(dictPath))
 	if err != nil {
-		return nil, fmt.Errorf("open attr_dict %s: %w", dictPath, err)
+		return nil, nil, fmt.Errorf("open attr_dict %s: %w", dictPath, err)
 	}
 	defer func() { _ = f.Close() }()
 
 	info, err := f.Stat()
 	if err != nil {
-		return nil, fmt.Errorf("stat attr_dict %s: %w", dictPath, err)
+		return nil, nil, fmt.Errorf("stat attr_dict %s: %w", dictPath, err)
 	}
 	fileSize := info.Size()
 	if fileSize < int64(format.HeaderSize) {
-		return nil, fmt.Errorf("attr_dict %s too small (%d bytes)", dictPath, fileSize)
+		return nil, nil, fmt.Errorf("attr_dict %s too small (%d bytes)", dictPath, fileSize)
 	}
 	data, err := syscall.Mmap(int(f.Fd()), 0, int(fileSize), syscall.PROT_READ, syscall.MAP_SHARED) //nolint:gosec // G115: int64→int safe on 64-bit
 	if err != nil {
-		return nil, fmt.Errorf("mmap attr_dict %s: %w", dictPath, err)
+		return nil, nil, fmt.Errorf("mmap attr_dict %s: %w", dictPath, err)
 	}
-	defer func() { _ = syscall.Munmap(data) }()
 
 	if _, err := format.DecodeAndValidate(data[:format.HeaderSize], format.TypeAttrDict, AttrDictVersion); err != nil {
-		return nil, fmt.Errorf("invalid attr_dict header in %s: %w", dictPath, err)
+		_ = syscall.Munmap(data)
+		return nil, nil, fmt.Errorf("invalid attr_dict header in %s: %w", dictPath, err)
 	}
-	return chunk.DecodeDictData(data[format.HeaderSize:])
+	dict, err := chunk.ScanMmapStringDict(data[format.HeaderSize:])
+	if err != nil {
+		_ = syscall.Munmap(data)
+		return nil, nil, err
+	}
+	return dict, data, nil
 }
 
 // mmapCursor is a RecordCursor backed by mmap'd raw.log, idx.log, and attr.log files.
@@ -70,7 +75,8 @@ type mmapCursor struct {
 	attrFile *os.File        // underlying file for mmap or seekable source
 	rawSeek  seekable.Reader // seekable reader for compressed raw; nil if mmap'd
 	attrSeek seekable.Reader // seekable reader for compressed attr; nil if mmap'd
-	dict     *chunk.StringDict
+	dict     chunk.DictReader
+	dictMmap []byte
 
 	// onClose, when non-nil, is invoked exactly once at the end of
 	// Close() (after munmap + file-close). Used by Manager.OpenCursor
@@ -90,7 +96,7 @@ type mmapCursor struct {
 
 func newMmapCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath, dictPath string) (*mmapCursor, error) {
 	// Load dictionary from attr_dict.log.
-	dict, err := loadDict(dictPath)
+	dict, dictMmap, err := loadDict(dictPath)
 	if err != nil {
 		return nil, fmt.Errorf("chunk %s: %w", chunkID, err)
 	}
@@ -113,6 +119,7 @@ func newMmapCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath, dictPath s
 		return &mmapCursor{
 			chunkID:     chunkID,
 			dict:        dict,
+			dictMmap:    dictMmap,
 			recordCount: 0,
 			fwdDone:     true,
 			revDone:     true,
@@ -125,7 +132,7 @@ func newMmapCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath, dictPath s
 		return nil, fmt.Errorf("mmap idx.log for chunk %s: %w", chunkID, err)
 	}
 
-	rawData, rawMmap, rawFile, rawSeek, err := openDataFile(rawPath)
+	rawData, rawMmap, rawFile, err := openDataFile(rawPath)
 	if err != nil {
 		_ = syscall.Munmap(idxData)
 		_ = idxFile.Close()
@@ -133,9 +140,6 @@ func newMmapCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath, dictPath s
 	}
 
 	cleanupRaw := func() {
-		if rawSeek != nil {
-			_ = rawSeek.Close()
-		}
 		if rawMmap != nil {
 			_ = syscall.Munmap(rawMmap)
 		}
@@ -146,7 +150,7 @@ func newMmapCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath, dictPath s
 		_ = idxFile.Close()
 	}
 
-	attrData, attrMmap, attrFile, attrSeek, err := openDataFile(attrPath)
+	attrData, attrMmap, attrFile, err := openDataFile(attrPath)
 	if err != nil {
 		cleanupRaw()
 		return nil, fmt.Errorf("open attr.log for chunk %s: %w", chunkID, err)
@@ -162,9 +166,8 @@ func newMmapCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath, dictPath s
 		rawFile:     rawFile,
 		idxFile:     idxFile,
 		attrFile:    attrFile,
-		rawSeek:     rawSeek,
-		attrSeek:    attrSeek,
 		dict:        dict,
+		dictMmap:    dictMmap,
 		recordCount: recordCount,
 		fwdIndex:    0,
 		revIndex:    recordCount, // Start past end for reverse iteration
@@ -222,62 +225,36 @@ func (c *mmapCursor) readRecord(index uint64) (chunk.Record, error) {
 	entry := DecodeIdxEntry(c.idxData[idxOffset : idxOffset+IdxEntrySize])
 
 	// Read raw data. Offsets are relative to the data section (after header).
-	var raw []byte
-	if c.rawSeek != nil {
-		raw = make([]byte, entry.RawSize)
-		if _, err := c.rawSeek.ReadAt(raw, int64(entry.RawOffset)); err != nil {
-			return chunk.Record{}, err
-		}
-	} else {
-		rawStart := int(entry.RawOffset)
-		rawEnd := rawStart + int(entry.RawSize)
-		if rawEnd > len(c.rawData) {
-			return chunk.Record{}, fmt.Errorf("%w: chunk %s record %d: raw range [%d:%d] exceeds mmap size %d",
-				ErrInvalidEntry, c.chunkID, c.fwdIndex, rawStart, rawEnd, len(c.rawData))
-		}
-		raw = c.rawData[rawStart:rawEnd]
+	rawStart := int(entry.RawOffset)
+	rawEnd := rawStart + int(entry.RawSize)
+	if rawEnd > len(c.rawData) {
+		return chunk.Record{}, fmt.Errorf("%w: chunk %s record %d: raw range [%d:%d] exceeds mmap size %d",
+			ErrInvalidEntry, c.chunkID, c.fwdIndex, rawStart, rawEnd, len(c.rawData))
 	}
+	raw := c.rawData[rawStart:rawEnd]
 
 	// Read and decode attributes using dictionary.
-	var attrBuf []byte
-	if c.attrSeek != nil {
-		attrBuf = make([]byte, entry.AttrSize)
-		if _, err := c.attrSeek.ReadAt(attrBuf, int64(entry.AttrOffset)); err != nil {
-			return chunk.Record{}, err
-		}
-	} else {
-		attrStart := int(entry.AttrOffset)
-		attrEnd := attrStart + int(entry.AttrSize)
-		if attrEnd > len(c.attrData) {
-			return chunk.Record{}, fmt.Errorf("%w: chunk %s record %d: attr range [%d:%d] exceeds mmap size %d",
-				ErrInvalidEntry, c.chunkID, c.fwdIndex, attrStart, attrEnd, len(c.attrData))
-		}
-		attrBuf = c.attrData[attrStart:attrEnd]
+	attrStart := int(entry.AttrOffset)
+	attrEnd := attrStart + int(entry.AttrSize)
+	if attrEnd > len(c.attrData) {
+		return chunk.Record{}, fmt.Errorf("%w: chunk %s record %d: attr range [%d:%d] exceeds mmap size %d",
+			ErrInvalidEntry, c.chunkID, c.fwdIndex, attrStart, attrEnd, len(c.attrData))
 	}
+	attrBuf := c.attrData[attrStart:attrEnd]
 
 	attrs, err := chunk.DecodeWithDict(attrBuf, c.dict)
 	if err != nil {
 		return chunk.Record{}, err
 	}
 
-	// For compressed chunks, raw and attrs are freshly allocated — use them
-	// directly. For mmap'd chunks, raw and attrBuf reference mmap'd memory
-	// so we must copy to ensure the record outlives the cursor.
-	if c.rawSeek != nil {
-		return BuildRecord(entry, raw, attrs), nil
-	}
+	// raw and attrBuf reference mmap'd memory — copy so the record
+	// outlives the cursor.
 	return BuildRecordCopy(entry, raw, attrs), nil
 }
 
 func (c *mmapCursor) Close() error {
 	var errs []error
 
-	if c.rawSeek != nil {
-		if err := c.rawSeek.Close(); err != nil {
-			errs = append(errs, err)
-		}
-		c.rawSeek = nil
-	}
 	if c.rawMmap != nil {
 		if err := syscall.Munmap(c.rawMmap); err != nil {
 			errs = append(errs, err)
@@ -293,12 +270,6 @@ func (c *mmapCursor) Close() error {
 		c.idxData = nil
 	}
 
-	if c.attrSeek != nil {
-		if err := c.attrSeek.Close(); err != nil {
-			errs = append(errs, err)
-		}
-		c.attrSeek = nil
-	}
 	if c.attrMmap != nil {
 		if err := syscall.Munmap(c.attrMmap); err != nil {
 			errs = append(errs, err)
@@ -306,6 +277,14 @@ func (c *mmapCursor) Close() error {
 		c.attrMmap = nil
 	}
 	c.attrData = nil
+
+	if c.dictMmap != nil {
+		if err := syscall.Munmap(c.dictMmap); err != nil {
+			errs = append(errs, err)
+		}
+		c.dictMmap = nil
+	}
+	c.dict = nil
 
 	if c.rawFile != nil {
 		if err := c.rawFile.Close(); err != nil {
@@ -343,7 +322,8 @@ type stdioCursor struct {
 	rawFile  *os.File
 	idxFile  *os.File
 	attrFile *os.File
-	dict     *chunk.StringDict
+	dict     chunk.DictReader
+	dictMmap []byte
 	dictPath string // path to attr_dict.log for reloading
 
 	// onClose mirrors mmapCursor.onClose — invoked exactly once at the
@@ -362,7 +342,7 @@ type stdioCursor struct {
 
 func newStdioCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath, dictPath string) (*stdioCursor, error) {
 	// Load dictionary from attr_dict.log.
-	dict, err := loadDict(dictPath)
+	dict, dictMmap, err := loadDict(dictPath)
 	if err != nil {
 		return nil, fmt.Errorf("chunk %s: %w", chunkID, err)
 	}
@@ -401,6 +381,7 @@ func newStdioCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath, dictPath 
 		idxFile:  idxFile,
 		attrFile: attrFile,
 		dict:     dict,
+		dictMmap: dictMmap,
 		dictPath: dictPath,
 		fwdIndex: 0,
 		revIndex: recordCount,
@@ -485,8 +466,12 @@ func (c *stdioCursor) readRecord(index uint64) (chunk.Record, error) {
 	attrs, err := chunk.DecodeWithDict(attrBuf, c.dict)
 	if errors.Is(err, chunk.ErrInvalidAttrsData) {
 		// Dict may be stale — reload from disk and retry once.
-		if fresh, loadErr := loadDict(c.dictPath); loadErr == nil {
+		if fresh, freshMmap, loadErr := loadDict(c.dictPath); loadErr == nil {
+			if c.dictMmap != nil {
+				_ = syscall.Munmap(c.dictMmap)
+			}
 			c.dict = fresh
+			c.dictMmap = freshMmap
 			attrs, err = chunk.DecodeWithDict(attrBuf, c.dict)
 		}
 	}
@@ -535,10 +520,11 @@ var _ chunk.RecordCursor = (*stdioCursor)(nil)
 // and attr.log (skipping raw.log entirely). For uncompressed chunks, idx and attr
 // are mmap'd; for compressed chunks, attr uses seekable zstd.
 func scanAttrsSealed(idxPath, attrPath, dictPath string, startPos uint64, fn func(writeTS time.Time, attrs chunk.Attributes) bool) error {
-	dict, err := loadDict(dictPath)
+	dict, dictMmap, err := loadDict(dictPath)
 	if err != nil {
 		return err
 	}
+	defer func() { _ = syscall.Munmap(dictMmap) }()
 
 	// Mmap idx.log (always uncompressed).
 	idxFile, err := os.Open(filepath.Clean(idxPath))
@@ -562,15 +548,12 @@ func scanAttrsSealed(idxPath, attrPath, dictPath string, startPos uint64, fn fun
 	}
 	defer func() { _ = syscall.Munmap(idxData) }()
 
-	// Open attr.log (may be compressed or mmap'd).
-	attrData, attrMmap, attrFile, attrSeek, err := openDataFile(attrPath)
+	// Open and mmap attr.log.
+	attrData, attrMmap, attrFile, err := openDataFile(attrPath)
 	if err != nil {
 		return err
 	}
 	defer func() {
-		if attrSeek != nil {
-			_ = attrSeek.Close()
-		}
 		if attrMmap != nil {
 			_ = syscall.Munmap(attrMmap)
 		}
@@ -586,20 +569,12 @@ func scanAttrsSealed(idxPath, attrPath, dictPath string, startPos uint64, fn fun
 		}
 		entry := DecodeIdxEntry(idxData[idxOffset : idxOffset+IdxEntrySize])
 
-		var attrBuf []byte
-		if attrSeek != nil {
-			attrBuf = make([]byte, entry.AttrSize)
-			if _, err := attrSeek.ReadAt(attrBuf, int64(entry.AttrOffset)); err != nil {
-				return fmt.Errorf("read compressed attr at record %d: %w", i, err)
-			}
-		} else {
-			attrStart := int(entry.AttrOffset)
-			attrEnd := attrStart + int(entry.AttrSize)
-			if attrEnd > len(attrData) {
-				return ErrInvalidEntry
-			}
-			attrBuf = attrData[attrStart:attrEnd]
+		attrStart := int(entry.AttrOffset)
+		attrEnd := attrStart + int(entry.AttrSize)
+		if attrEnd > len(attrData) {
+			return ErrInvalidEntry
 		}
+		attrBuf := attrData[attrStart:attrEnd]
 
 		attrs, err := chunk.DecodeWithDict(attrBuf, dict)
 		if err != nil {
@@ -622,10 +597,11 @@ func scanAttrsSealed(idxPath, attrPath, dictPath string, startPos uint64, fn fun
 // region per record range. Used by the histogram path on non-monotonic
 // active chunks. See gastrolog-66b7x.
 func scanIngestAttrsActive(idxPath, attrPath, dictPath string, fn func(ingestTS time.Time, attrs chunk.Attributes) bool) error {
-	dict, err := loadDict(dictPath)
+	dict, dictMmap, err := loadDict(dictPath)
 	if err != nil {
 		return err
 	}
+	defer func() { _ = syscall.Munmap(dictMmap) }()
 	idxFile, err := os.Open(filepath.Clean(idxPath))
 	if err != nil {
 		return fmt.Errorf("open idx.log %s: %w", idxPath, err)
@@ -672,10 +648,11 @@ func scanIngestAttrsActive(idxPath, attrPath, dictPath string, fn func(ingestTS 
 }
 
 func scanAttrsActive(idxPath, attrPath, dictPath string, startPos uint64, fn func(writeTS time.Time, attrs chunk.Attributes) bool) error {
-	dict, err := loadDict(dictPath)
+	dict, dictMmap, err := loadDict(dictPath)
 	if err != nil {
 		return err
 	}
+	defer func() { _ = syscall.Munmap(dictMmap) }()
 
 	idxFile, err := os.Open(filepath.Clean(idxPath))
 	if err != nil {
@@ -723,24 +700,23 @@ func scanAttrsActive(idxPath, attrPath, dictPath string, startPos uint64, fn fun
 	return nil
 }
 
-func openDataFile(path string) (data []byte, mmapRegion []byte, file *os.File, seek seekable.Reader, err error) {
+func openDataFile(path string) (data []byte, mmapRegion []byte, file *os.File, err error) {
 	// Multi-file path is now exclusively the unsealed-active fallback
 	// (sealed chunks live as data.glcb — gastrolog-24m1t). Active raw.log
-	// is always uncompressed, so there's no FlagCompressed branch
-	// anymore: open, header-read for validation, then mmap.
+	// is always uncompressed: open, header-read for validation, then mmap.
 	file, err = os.Open(filepath.Clean(path))
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("open %s: %w", path, err)
+		return nil, nil, nil, fmt.Errorf("open %s: %w", path, err)
 	}
 
 	var hdr [format.HeaderSize]byte
 	if _, err := io.ReadFull(file, hdr[:]); err != nil {
 		_ = file.Close()
-		return nil, nil, nil, nil, fmt.Errorf("read header for %s: %w", path, err)
+		return nil, nil, nil, fmt.Errorf("read header for %s: %w", path, err)
 	}
 	if _, err := format.Decode(hdr[:]); err != nil {
 		_ = file.Close()
-		return nil, nil, nil, nil, fmt.Errorf("decode header for %s: %w", path, err)
+		return nil, nil, nil, fmt.Errorf("decode header for %s: %w", path, err)
 	}
 
 	// stat and mmap the file we already have open. Our fd pins us to
@@ -748,12 +724,12 @@ func openDataFile(path string) (data []byte, mmapRegion []byte, file *os.File, s
 	info, err := file.Stat()
 	if err != nil {
 		_ = file.Close()
-		return nil, nil, nil, nil, fmt.Errorf("stat %s: %w", path, err)
+		return nil, nil, nil, fmt.Errorf("stat %s: %w", path, err)
 	}
 	mmapRegion, err = syscall.Mmap(int(file.Fd()), 0, int(info.Size()), syscall.PROT_READ, syscall.MAP_SHARED) //nolint:gosec // G115: uintptr->int and int64->int are safe on 64-bit
 	if err != nil {
 		_ = file.Close()
-		return nil, nil, nil, nil, fmt.Errorf("mmap %s: %w", path, err)
+		return nil, nil, nil, fmt.Errorf("mmap %s: %w", path, err)
 	}
-	return mmapRegion[format.HeaderSize:], mmapRegion, file, nil, nil
+	return mmapRegion[format.HeaderSize:], mmapRegion, file, nil
 }

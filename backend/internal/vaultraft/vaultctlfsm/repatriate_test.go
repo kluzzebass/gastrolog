@@ -62,7 +62,7 @@ func TestApplyRepatriate_RefusesIfAlreadyPresent(t *testing.T) {
 	if got := applyLog(f, MarshalCreateChunk(id, time.Unix(100, 0), time.Unix(100, 0), time.Unix(100, 0))); got != nil {
 		t.Fatalf("seed Create: %v", got)
 	}
-	if got := applyLog(f, MarshalSealChunk(id, time.Unix(200, 0), 10, 1024, time.Unix(100, 0), time.Unix(200, 0), time.Unix(200, 0), true)); got != nil {
+	if got := applyLog(f, MarshalSealChunk(id, time.Unix(200, 0), 10, 1024, time.Unix(100, 0), time.Unix(200, 0), time.Unix(200, 0), true, time.Unix(200, 0))); got != nil {
 		t.Fatalf("seed Seal: %v", got)
 	}
 

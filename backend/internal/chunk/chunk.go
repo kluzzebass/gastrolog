@@ -18,7 +18,7 @@ var (
 	ErrVaultNotFound  = errors.New("vault not found")
 	ErrActiveChunk    = errors.New("cannot delete active chunk")
 	ErrChunkArchived  = errors.New("chunk is archived and not immediately readable")
-	ErrChunkSuspect = errors.New("chunk blob not found in cloud storage — may be transient")
+	ErrChunkSuspect   = errors.New("chunk blob not found in cloud storage — may be transient")
 	// ErrChunkSealed signals that an Append targeted a chunk the
 	// cluster (via vault-ctl Raft FSM) considers sealed. Returned by
 	// the Manager's append-side gate so the caller can rotate to a
@@ -67,7 +67,7 @@ type ChunkManager interface {
 	// sorted index) of the first entry with IngestTS >= ts. Distinct from
 	// FindIngestStartPosition which returns the physical record position;
 	// the two differ for chunks where physical layout doesn't match
-	// IngestTS order (cloud chunks built via ImportRecords). Histogram
+	// IngestTS order (cloud-backed chunks built via ImportRecords). Histogram
 	// bucket counting must use rank arithmetic. Returns (0, false, nil)
 	// when the chunk has no in-manager TS index (sealed local file
 	// chunks — caller falls through to IndexManager.FindIngestEntryIndex).
@@ -76,8 +76,8 @@ type ChunkManager interface {
 
 	// HasLocalContent reports whether the chunk's record content is fully
 	// available on local disk — true for sealed local file chunks and for
-	// cloud chunks whose GLCB blob is already in the warm cache. False for
-	// cloud chunks that would require an S3 download. Callers that perform
+	// cloud-backed chunks whose GLCB blob is already in the warm cache. False for
+	// cloud-backed chunks that would require an S3 download. Callers that perform
 	// content-bearing reads purely as a side-effect (notably histogram
 	// level breakdowns) gate on this so that a histogram refresh never
 	// triggers cloud blob downloads. See gastrolog-66b7x.
@@ -144,6 +144,36 @@ type ChunkManager interface {
 	// Close releases resources held by the manager (file locks, mmap regions, etc).
 	// After Close, the manager must not be used.
 	Close() error
+}
+
+// GLCBBlobPathProvider is implemented by chunk managers that can resolve
+// the on-disk data.glcb path for sealed chunks (canonical dir layout or
+// external pipeline registration). IndexManager uses this to mmap embedded
+// ITSI/STSI without assuming dir/<chunkID>/data.glcb.
+type GLCBBlobPathProvider interface {
+	GLCBBlobPath(id ChunkID) (string, bool)
+}
+
+// GLCBSectionReader extends GLCBBlobPathProvider with mmap-backed section
+// access into a sealed chunk's data.glcb. WithGLCBSection holds the chunk
+// lifetime read lock and a mapping pin for the duration of fn; section bytes
+// are only valid inside fn.
+type GLCBSectionReader interface {
+	GLCBBlobPathProvider
+	WithGLCBSection(id ChunkID, sectionType byte, fn func(section []byte) error) error
+}
+
+// ErrIngestTSRankIndex is returned when an ingest TS rank index is unavailable.
+var ErrIngestTSRankIndex = errors.New("ingest TS rank index not found")
+
+// IngestTSRankView exposes rank-based ingest TS index lookups without
+// materializing the full index on the Go heap. Sealed production GLCB chunks
+// are served via index.IndexManager + GLCBSectionReader; active file chunks
+// via in-manager B+ trees; in-memory test vaults read ranks from record state.
+type IngestTSRankView interface {
+	IngestTSRankLen(id ChunkID) (uint64, error)
+	IngestTSRankAt(id ChunkID, rank uint64) (tsNano int64, pos uint32, err error)
+	FindIngestTSRank(id ChunkID, ts time.Time) (rank uint64, found bool, err error)
 }
 
 // ChunkMover extends ChunkManager with filesystem-level chunk movement.
@@ -241,33 +271,66 @@ type ChunkCacheEvictor interface {
 	EvictCache()
 }
 
-// CloudChunkInfo carries the metadata needed to register a cloud-backed chunk
+// CloudBackedChunkInfo carries the metadata needed to register a cloud-backed chunk
 // on a follower without streaming any records. All fields come from the vault
 // Raft FSM entry (populated by AnnounceSeal + AnnounceUpload on the leader).
-type CloudChunkInfo struct {
-	WriteStart        time.Time
-	WriteEnd          time.Time
-	IngestStart       time.Time
-	IngestEnd         time.Time
-	SourceStart       time.Time
-	SourceEnd         time.Time
-	RecordCount       int64
-	Bytes             int64
-	DiskBytes         int64
-	IngestIdxOffset   int64
-	IngestIdxSize     int64
-	SourceIdxOffset   int64
-	SourceIdxSize     int64
+type CloudBackedChunkInfo struct {
+	WriteStart      time.Time
+	WriteEnd        time.Time
+	IngestStart     time.Time
+	IngestEnd       time.Time
+	SourceStart     time.Time
+	SourceEnd       time.Time
+	RecordCount     int64
+	Bytes           int64
+	DiskBytes       int64
+	IngestIdxOffset int64
+	IngestIdxSize   int64
+	SourceIdxOffset int64
+	SourceIdxSize   int64
 
 	IngestTSMonotonic bool // see ChunkMeta.IngestTSMonotonic
 }
 
-// CloudChunkRegistrar extends ChunkManager with the ability to register a
+// CloudBackedChunkRegistrar extends ChunkManager with the ability to register a
 // cloud-backed chunk from metadata alone — no local files, no record streaming.
 // Used by follower nodes to adopt chunks from the shared S3 bucket after the
 // vault FSM propagates the leader's AnnounceUpload.
-type CloudChunkRegistrar interface {
-	RegisterCloudChunk(id ChunkID, info CloudChunkInfo) error
+type CloudBackedChunkRegistrar interface {
+	RegisterCloudBackedChunk(id ChunkID, info CloudBackedChunkInfo) error
+}
+
+// ExternalGLCBInfo carries the metadata needed to register a sealed chunk
+// whose data.glcb bytes live OUTSIDE the chunk manager's own directory —
+// the pipeline-built case, where the GLCB is owned by the vault's
+// segmentation ChunkRoot (<homeRoot>/chunks/<id>/data.glcb). All fields come
+// from the vault-ctl FSM sealed-chunk entry. See gastrolog-2kysn (Rubicon E1).
+type ExternalGLCBInfo struct {
+	WriteStart      time.Time
+	WriteEnd        time.Time
+	IngestStart     time.Time
+	IngestEnd       time.Time
+	SourceStart     time.Time
+	SourceEnd       time.Time
+	RecordCount     int64
+	Bytes           int64
+	DiskBytes       int64
+	IngestIdxOffset int64
+	IngestIdxSize   int64
+	SourceIdxOffset int64
+	SourceIdxSize   int64
+
+	IngestTSMonotonic bool // see ChunkMeta.IngestTSMonotonic
+}
+
+// ExternalGLCBRegistrar extends ChunkManager with the ability to register a
+// sealed chunk built by the pipeline, whose data.glcb lives at an absolute
+// path under the vault's segmentation ChunkRoot rather than the manager's own
+// chunk dir. The bytes are NOT copied: the read path resolves the registered
+// path directly. Used by the orchestrator on seal and on reconcile so
+// pipeline-built chunks become queryable. See gastrolog-2kysn (Rubicon E1).
+type ExternalGLCBRegistrar interface {
+	RegisterExternalGLCB(id ChunkID, glcbPath string, info ExternalGLCBInfo) error
 }
 
 // RecordCursor provides bidirectional iteration over records in a chunk.
@@ -276,6 +339,31 @@ type RecordCursor interface {
 	Prev() (Record, RecordRef, error)
 	Seek(ref RecordRef) error
 	Close() error
+}
+
+// RecordFanOutSource supports concurrent retention-style fan-out by record
+// position. Records from ReadFanOutRecord are detached from any mmap backing
+// and safe to hand to other goroutines without Copy().
+type RecordFanOutSource interface {
+	RecordCount() uint64
+	ReadFanOutRecord(pos uint32) (Record, error)
+}
+
+// SequentialPrewarmer is implemented by cursors whose backing store benefits
+// from a sequential page-cache warm before a full scan. mmap major faults pin
+// scheduler Ps inside non-preemptible kernel fault handlers; a full-chunk
+// scan (retention fan-out) cold-faulting through a mapping stalls the whole
+// runtime under disk saturation (gastrolog-1io54g). PrewarmSequential moves
+// that I/O onto P-releasing syscalls; best-effort and idempotent.
+type SequentialPrewarmer interface {
+	PrewarmSequential()
+}
+
+// RecordBatchReader extends RecordCursor with batched forward reads for
+// sequential scans (retention fan-out fallback, export).
+type RecordBatchReader interface {
+	RecordCursor
+	NextBatch(limit int) ([]Record, error)
 }
 
 // RecordIterator yields records one at a time. Returns ErrNoMoreRecords when

@@ -57,12 +57,13 @@ func setupCluster(ctx context.Context, logger *slog.Logger, cfg RunConfig, hd ho
 	}
 
 	clusterSrv, err := cluster.New(cluster.Config{
-		ClusterAddr: cfg.ClusterAddr,
-		LocalAddr:   cfg.ClusterAdvertise,
-		NodeID:      nodeID,
-		TLS:         clusterTLS,
-		ByteMetrics: cluster.NewPeerByteMetrics(),
-		Logger:      compCluster.Apply(logger),
+		ClusterAddr:           cfg.ClusterAddr,
+		LocalAddr:             cfg.ClusterAdvertise,
+		NodeID:                nodeID,
+		TLS:                   clusterTLS,
+		ByteMetrics:           cluster.NewPeerByteMetrics(),
+		ServicePoolMaxPerPeer: cfg.ServicePoolMaxPerPeer,
+		Logger:                compCluster.Apply(logger),
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("create cluster server: %w", err)
@@ -130,7 +131,7 @@ func bootstrapClusterTLS(ctx context.Context, cfgStore system.Store, ctls *clust
 	if err != nil {
 		return fmt.Errorf("generate CA: %w", err)
 	}
-	cert, err := tlsutil.GenerateClusterCert(ca.CertPEM, ca.KeyPEM, nil)
+	cert, err := tlsutil.GenerateClusterCert(ca.CertPEM, ca.KeyPEM, cluster.LaneSANs)
 	if err != nil {
 		return fmt.Errorf("generate cluster cert: %w", err)
 	}
@@ -270,10 +271,9 @@ func cleanOrchestrator(orch *orchestrator.Orchestrator, logger *slog.Logger) {
 			logger.Warn("join cleanup: remove vault failed", "vault_id", vaultID, "error", err)
 		}
 	}
-	for _, ingesterID := range orch.ListIngesters() {
-		if err := orch.RemoveIngester(ingesterID); err != nil {
-			logger.Warn("join cleanup: remove ingester failed", "ingester_id", ingesterID, "error", err)
-		}
+	// Drop every ingester by reconciling to an empty desired set.
+	if err := orch.ReconcileIngesters(nil); err != nil {
+		logger.Warn("join cleanup: reconcile ingesters to empty failed", "error", err)
 	}
 }
 
@@ -526,11 +526,12 @@ func makeEvictionHandler(
 // (gastrolog-2ch9y): if removing the target would leave any vault with
 // zero placements, the call fails with an operator-actionable error
 // listing the affected vaults. force=true skips the gate.
-//nolint:gocognit // composition root for remove-node: holds the
 // leader-side orphan gate, eviction notification, FSM cleanup, and
 // follower-forward fallback in one function. Splitting them would
 // require threading clusterSrv, cfgStore, and logger through three
 // helpers without any reuse — net negative readability.
+//
+//nolint:gocognit // composition root for remove-node: holds the
 func makeRemoveNodeFunc(
 	clusterSrv *cluster.Server,
 	cfgStore system.Store,
@@ -551,10 +552,10 @@ func makeRemoveNodeFunc(
 		}
 
 		peerConns := clusterSrv.PeerConns()
-		var evictConn *cluster.NotifyEvictionClient
+		var evictHandle cluster.PeerConnHandle
 		if peerConns != nil {
-			if c, err := peerConns.Conn(targetNodeID); err == nil {
-				evictConn = cluster.NewNotifyEvictionClient(c)
+			if h, err := peerConns.AcquireService(targetNodeID, cluster.PurposeEviction); err == nil {
+				evictHandle = h
 			} else {
 				logger.Warn("cannot pre-connect to evicted node for notification", "error", err)
 			}
@@ -580,11 +581,13 @@ func makeRemoveNodeFunc(
 			}
 		}
 
-		if evictConn != nil {
+		if evictHandle != nil {
 			go func() {
+				defer evictHandle.Release()
 				notifyCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
-				if err := evictConn.NotifyEviction(notifyCtx, "removed from cluster by leader"); err != nil {
+				client := cluster.NewNotifyEvictionClient(evictHandle.GRPC())
+				if err := client.NotifyEviction(notifyCtx, "removed from cluster by leader"); err != nil {
 					logger.Warn("failed to notify evicted node", "node_id", targetNodeID, "error", err)
 				} else {
 					logger.Info("eviction notification sent", "node_id", targetNodeID)
@@ -612,13 +615,17 @@ func makeRemoveNodeFunc(
 		if peerConns == nil {
 			return errors.New("peer connections not available")
 		}
-		conn, err := peerConns.Conn(leaderID)
-		if err != nil {
-			return fmt.Errorf("connect to leader %s: %w", leaderID, err)
-		}
 		logger.Info("forwarding node removal to leader", "leader_id", leaderID, "target_node_id", targetNodeID, "force", force)
-		client := cluster.NewForwardRemoveNodeClient(conn)
-		return client.ForwardRemoveNode(ctx, targetNodeID, force)
+		req := &gastrologv1.ForwardRemoveNodeRequest{
+			NodeId: []byte(targetNodeID),
+			Force:  force,
+		}
+		resp := &gastrologv1.ForwardRemoveNodeResponse{}
+		if err := peerConns.InvokeService(ctx, leaderID, cluster.PurposeRemoveNode,
+			"/gastrolog.v1.ClusterService/ForwardRemoveNode", req, resp); err != nil {
+			return fmt.Errorf("forward remove node to leader %s: %w", leaderID, err)
+		}
+		return nil
 	}
 }
 
@@ -775,16 +782,21 @@ func forwardSuffrage(clusterSrv *cluster.Server, leaderID, targetNodeID string, 
 	if peerConns == nil {
 		return errors.New("peer connections not available")
 	}
-	conn, err := peerConns.Conn(leaderID)
-	if err != nil {
-		return fmt.Errorf("connect to leader %s: %w", leaderID, err)
-	}
 	nodeAddr, err := lookupNodeAddr(clusterSrv, targetNodeID)
 	if err != nil {
 		return err
 	}
-	client := cluster.NewForwardSetNodeSuffrageClient(conn)
-	return client.ForwardSetNodeSuffrage(context.Background(), targetNodeID, nodeAddr, voter)
+	req := &gastrologv1.ForwardSetNodeSuffrageRequest{
+		NodeId:   []byte(targetNodeID),
+		NodeAddr: nodeAddr,
+		Voter:    voter,
+	}
+	resp := &gastrologv1.ForwardSetNodeSuffrageResponse{}
+	if err := peerConns.InvokeService(context.Background(), leaderID, cluster.PurposeSuffrage,
+		"/gastrolog.v1.ClusterService/ForwardSetNodeSuffrage", req, resp); err != nil {
+		return fmt.Errorf("forward suffrage to leader %s: %w", leaderID, err)
+	}
+	return nil
 }
 
 // submitSelfDemotion runs leader self-demotion as a background job.

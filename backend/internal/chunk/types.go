@@ -124,6 +124,11 @@ func (id ChunkID) String() string {
 	return strings.ToLower(chunkIDEncoding.EncodeToString(id[:]))
 }
 
+// Compare orders two chunk IDs by raw byte order (-1, 0, 1).
+func (id ChunkID) Compare(other ChunkID) int {
+	return glid.Compare(glid.GLID(id), glid.GLID(other))
+}
+
 // Time returns the creation time encoded in the UUIDv7 ChunkID.
 // UUIDv7 stores millisecond Unix timestamp in bytes 0-5 (48 bits, big-endian).
 func (id ChunkID) Time() time.Time {
@@ -181,6 +186,7 @@ type ChunkMeta struct {
 	ID          ChunkID
 	WriteStart  time.Time // min WriteTS in chunk
 	WriteEnd    time.Time // max WriteTS in chunk
+	SealedAt    time.Time // wall-clock sealing completion; retention MaxAge anchor
 	RecordCount int64
 	Bytes       int64 // Total logical bytes (raw + attr + idx)
 	// Sealed is the legacy two-state flag. Equivalent to State == Sealed
@@ -197,10 +203,10 @@ type ChunkMeta struct {
 	// IngestTS and SourceTS bounds (zero = unknown).
 	// Used to filter chunks by ingest_start/ingest_end and source_start/source_end
 	// without scanning records.
-	IngestStart  time.Time // min IngestTS in chunk
-	IngestEnd    time.Time // max IngestTS in chunk
-	SourceStart  time.Time // min SourceTS (excluding zero)
-	SourceEnd    time.Time // max SourceTS in chunk
+	IngestStart time.Time // min IngestTS in chunk
+	IngestEnd   time.Time // max IngestTS in chunk
+	SourceStart time.Time // min SourceTS (excluding zero)
+	SourceEnd   time.Time // max SourceTS in chunk
 
 	// IngestTSMonotonic is true when records were appended in
 	// IngestTS-monotonic order (typical edge ingest path). False when
@@ -211,9 +217,9 @@ type ChunkMeta struct {
 	// this to pick between fast O(buckets × log N) rank arithmetic
 	// and the slower full-scan bucketize path. See gastrolog-66b7x.
 	IngestTSMonotonic bool
-	CloudBacked  bool      // true = chunk lives in cloud storage, not local disk
-	Archived     bool      // true = chunk is in an offline storage class (Glacier, Azure Archive)
-	StorageClass string    // cloud storage class (e.g. "GLACIER", "cold", "Archive"); empty = standard
+	CloudBacked       bool   // true = chunk lives in cloud storage, not local disk
+	Archived          bool   // true = chunk is in an offline storage class (Glacier, Azure Archive)
+	StorageClass      string // cloud storage class (e.g. "GLACIER", "cold", "Archive"); empty = standard
 }
 
 // EventID uniquely identifies a record across the cluster.
@@ -231,6 +237,33 @@ type EventID struct {
 	NodeID     glid.GLID
 	IngestTS   time.Time
 	IngestSeq  uint32
+}
+
+// Compare returns -1, 0, or +1 comparing e to o in canonical EventID order:
+// IngestTS, then NodeID, then IngesterID, then IngestSeq. This is a total
+// order suitable for merge and dedup keys.
+func (e EventID) Compare(o EventID) int {
+	if c := e.IngestTS.Compare(o.IngestTS); c != 0 {
+		return c
+	}
+	if c := e.NodeID.Compare(o.NodeID); c != 0 {
+		return c
+	}
+	if c := e.IngesterID.Compare(o.IngesterID); c != 0 {
+		return c
+	}
+	if e.IngestSeq < o.IngestSeq {
+		return -1
+	}
+	if e.IngestSeq > o.IngestSeq {
+		return 1
+	}
+	return 0
+}
+
+// Less reports whether e precedes o in canonical EventID order.
+func (e EventID) Less(o EventID) bool {
+	return e.Compare(o) < 0
 }
 
 // Record is a single log entry.

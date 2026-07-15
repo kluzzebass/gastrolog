@@ -29,10 +29,10 @@ func brCompress(t *testing.T, data []byte) []byte {
 func testFS(t *testing.T) fstest.MapFS {
 	t.Helper()
 	return fstest.MapFS{
-		"index.html.br":                 {Data: brCompress(t, []byte("<html>hello</html>"))},
-		"assets/app-abc123.js.br":       {Data: brCompress(t, []byte("console.log('app')"))},
-		"assets/style-def456.css.br":    {Data: brCompress(t, []byte("body{color:red}"))},
-		"favicon.svg.br":                {Data: brCompress(t, []byte("<svg/>"))},
+		"index.html.br":              {Data: brCompress(t, []byte("<html>hello</html>"))},
+		"assets/app-abc123.js.br":    {Data: brCompress(t, []byte("console.log('app')"))},
+		"assets/style-def456.css.br": {Data: brCompress(t, []byte("body{color:red}"))},
+		"favicon.svg.br":             {Data: brCompress(t, []byte("<svg/>"))},
 	}
 }
 

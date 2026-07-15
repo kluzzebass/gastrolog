@@ -17,7 +17,7 @@ const (
 // Default values.
 const (
 	DefaultMaxRecords   = 10000 // 10k records per chunk
-	DefaultChunkDivisor = 10   // budget / 10 = per-chunk size limit
+	DefaultChunkDivisor = 10    // budget / 10 = per-chunk size limit
 )
 
 // NewFactory returns a factory function that creates in-memory ChunkManagers.

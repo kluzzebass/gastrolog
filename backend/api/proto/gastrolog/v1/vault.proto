@@ -60,7 +60,7 @@ service VaultService {
 
   // WatchChunks opens a server-streaming subscription that pushes a
   // notification every time chunk metadata changes on this node (seal,
-  // delete, create, compress, cloud upload). The client uses the
+  // delete, create, cloud upload). The client uses the
   // notification as a signal to refetch via ListChunks — no chunk data
   // is carried in the stream itself. Same pattern as WatchConfig.
   // See gastrolog-1jijm.
@@ -74,6 +74,12 @@ service VaultService {
   // proposes CmdRepatriateChunk to the vault-ctl FSM. Refuses if the
   // chunk is already FSM-tracked or tombstoned. See gastrolog-32bf2.
   rpc RepatriateOrphan(RepatriateOrphanRequest) returns (RepatriateOrphanResponse);
+
+  // GetPipelineBacklog returns vault-ctl registry/manifest state plus
+  // cluster-wide on-disk segment counts (working, completed, head,
+  // pre-head) so operators can see chunking pipeline depth in the
+  // inspector without shell access.
+  rpc GetPipelineBacklog(GetPipelineBacklogRequest) returns (GetPipelineBacklogResponse);
 }
 
 message ListVaultsRequest {}
@@ -108,7 +114,7 @@ message ListChunksRequest {
   // When true, return only unsealed (active) chunks from this node's
   // local vaults — no cross-node fan-out. Used for lightweight 5-second
   // polling of active-chunk stats (record count, bytes) while discrete
-  // events (seal, delete, compress) come through the WatchChunks stream.
+  // events (seal, delete, cloud upload) come through the WatchChunks stream.
   // See gastrolog-1jijm.
   bool active_only = 2;
 }
@@ -149,34 +155,33 @@ message ChunkMeta {
   bool sealed = 4;
   int64 record_count = 5;
   int64 bytes = 6;
-  bool compressed = 7;    // true if raw.log/attr.log are compressed
-  int64 disk_bytes = 8;   // actual on-disk size (may differ from bytes if compressed)
-  google.protobuf.Timestamp ingest_start = 9;
-  google.protobuf.Timestamp ingest_end = 10;
-  bool cloud_backed = 11; // true = chunk lives in cloud storage (S3/Azure/GCS)
-  bool archived = 12;     // true = chunk is in offline storage class (Glacier, Azure Archive)
-  bytes vault_id = 13;    // which vault this chunk belongs to
-  string vault_type = 14;  // vault type: "memory", "file", "jsonl"
-  bool retention_pending = 15; // true = chunk is marked for retention processing
-  string storage_class = 16;   // current cloud storage class (e.g. "GLACIER", "cold", "Archive")
-  int32 replica_count = 17;    // how many nodes currently have this chunk (leader + followers that have caught up)
+  int64 disk_bytes = 7;   // actual on-disk size (differs from bytes: dict-encoded GLCB)
+  google.protobuf.Timestamp ingest_start = 8;
+  google.protobuf.Timestamp ingest_end = 9;
+  bool cloud_backed = 10; // true = chunk lives in cloud storage (S3/Azure/GCS)
+  bool archived = 11;     // true = chunk is in offline storage class (Glacier, Azure Archive)
+  bytes vault_id = 12;    // which vault this chunk belongs to
+  string vault_type = 13;  // vault type: "memory", "file", "jsonl"
+  bool retention_pending = 14; // true = chunk is marked for retention processing
+  string storage_class = 15;   // current cloud storage class (e.g. "GLACIER", "cold", "Archive")
+  int32 replica_count = 16;    // how many nodes currently have this chunk (leader + followers that have caught up)
   // Cluster-wide replica residency: the set of node IDs that reported having
   // this chunk locally during the most recent ListChunks fan-out. Lets the
   // inspector show which nodes physically hold each replica, distinct from
   // placement (which says where the chunk SHOULD live, not where it does).
   // See gastrolog-51gme.
-  repeated string replica_node_ids = 18;
+  repeated string replica_node_ids = 17;
   // Receipt-protocol pending acks: when a chunk is in pendingDeletes (i.e. a
   // CmdRequestDelete has been proposed but the cluster hasn't fully drained
   // the per-node acks), this is the set of node IDs that still owe an ack.
   // Empty/absent for chunks not currently in pendingDeletes. Lets the
   // inspector show which specific node is the laggard holding up a stuck
   // delete. See gastrolog-51gme.
-  repeated string pending_ack_node_ids = 19;
+  repeated string pending_ack_node_ids = 18;
   // Three-state lifecycle (gastrolog-1huz5). When unset for replay of
   // pre-Phase-3 entries, callers derive the state from the legacy
   // sealed bool: state == SEALED iff sealed == true.
-  ChunkState state = 20;
+  ChunkState state = 19;
 }
 
 message GetChunkRequest {
@@ -262,6 +267,20 @@ message ProcessMemoryStats {
 }
 
 // VaultStats provides per-vault statistics.
+// ThroughputRate is one rate series: the instantaneous rate (delta over the
+// ~5s between stats ticks) with its per-tick spark history for reading burst
+// shape, plus Unix-load-style exponentially weighted moving averages at
+// 1m/5m/15m for sustained rates. EWMAs keep one number per horizon — no
+// history buffer — folding each tick's sample in with e^(-dt/tau) decay,
+// exactly the kernel's load-average technique (gastrolog-4eh5ns).
+message ThroughputRate {
+  double instant_per_sec = 1;
+  double avg_1m_per_sec = 2;
+  double avg_5m_per_sec = 3;
+  double avg_15m_per_sec = 4;
+  repeated double spark = 5;
+}
+
 message VaultStats {
   bytes id = 1;
   string type = 2;
@@ -282,6 +301,63 @@ message VaultStats {
   // has no vault-ctl group for this vault (e.g. vault placed
   // elsewhere) or Raft is not yet initialized.
   uint64 raft_applied_index = 13;
+
+  // Segmentation append throughput on THIS node (origin side), from the
+  // stats collector's rolling windows over the writer's cumulative
+  // counters. Zero when the vault has no local segmentation writer.
+  // append_records counts frames appended to the working segment;
+  // append_durable counts records released by a successful group commit —
+  // the gap between them plus the queue depth is the write-path
+  // backpressure picture (gastrolog-4eh5ns).
+  ThroughputRate append_records = 14;
+  ThroughputRate append_bytes = 15;
+  ThroughputRate append_durable = 16;
+  uint64 append_records_total = 17;
+  uint64 append_bytes_total = 18;
+  uint32 append_queue_depth = 19;
+  uint32 append_queue_capacity = 20;
+
+  // Downstream pipeline stage throughput on THIS node (home side):
+  // collected = records/bytes arriving in head/ (remote pull or local
+  // promotion); sealed = records/bytes materialized into sealed GLCBs.
+  // Together with append (origin side) these give the three-stage
+  // append -> collected -> sealed readout; a downstream rate falling away
+  // from its upstream is a pipeline stall in progress (gastrolog-10n6k8).
+  ThroughputRate collected_records = 21;
+  ThroughputRate collected_bytes = 22;
+  ThroughputRate sealed_records = 23;
+  ThroughputRate sealed_bytes = 24;
+
+  // Discrete pipeline stage-count milestones on THIS node, monotonic per vault
+  // (gastrolog-4r784a). These are the counters operators previously grepped
+  // from cluster.log — now first-class, cross-node observable. Each milestone
+  // is counted exactly once by its owner (origin/home/leader), so cluster
+  // totals are the plain sum across nodes. Rates are computed by the stats
+  // collector's rolling windows over these totals (fields 35-38) just like
+  // append/collected/sealed — never accumulated client-side.
+  //
+  // Records ingested (append_records_total, field 17) and sealed
+  // (sealed_records, field 23) already cover the record-throughput ends of the
+  // pipeline; these add the segment- and chunk-lifecycle event counts between.
+  uint64 segments_completed_total = 25;   // working/ → completed/ promotions (origin)
+  uint64 segments_published_total = 26;   // committed to the vault-ctl registry (origin)
+  uint64 segments_released_total = 27;    // released from the registry (leader)
+  uint64 chunks_planned_total = 28;       // open manifests opened (leader)
+  uint64 chunks_built_total = 29;         // sealed GLCBs materialized (home)
+  uint64 chunks_sealed_total = 30;        // CmdSealChunk commits (leader)
+  uint64 head_purges_total = 31;          // segments purged from head/ (home)
+  uint64 glcb_pulls_attempted_total = 32; // GLCB replica catch-up pulls started
+  uint64 glcb_pulls_failed_total = 33;    // catch-up pulls that no peer could satisfy
+  uint64 retention_deletes_total = 34;    // chunks deleted by retention (leader)
+
+  // Server-windowed per-second rates for the discrete stage milestones, from
+  // the stats collector's rolling windows over the cumulative totals above.
+  // Same mechanism as append_records/collected_records/sealed_records — the UI
+  // renders them directly and never differentiates counters itself.
+  ThroughputRate segments_completed_rate = 35;
+  ThroughputRate segments_published_rate = 36;
+  ThroughputRate chunks_built_rate = 37;
+  ThroughputRate chunks_sealed_rate = 38;
 }
 
 message ReindexVaultRequest {
@@ -450,3 +526,70 @@ message RepatriateOrphanRequest {
 }
 
 message RepatriateOrphanResponse {}
+
+message GetPipelineBacklogRequest {
+  string vault = 1;
+}
+
+message GetPipelineBacklogResponse {
+  VaultPipelineBacklog backlog = 1;
+}
+
+// VaultPipelineBacklog surfaces chunking pipeline depth for one vault.
+// Registry and manifest fields come from the replicated vault-ctl FSM
+// (identical on every voter). Segment counts are summed across all
+// cluster nodes — every node is an ingest origin, and home nodes hold
+// head/pre-head copies after distribution.
+message VaultPipelineBacklog {
+  bytes vault_id = 1;
+
+  // vault-ctl completed-segment registry (replicated).
+  uint32 registry_segments = 2;
+  uint32 eligible_segments = 3;
+  uint64 registry_records = 4;
+
+  // Open manifest being filled by the chunking planner.
+  uint32 open_manifest_refs = 5;
+  uint64 open_manifest_records = 6;
+  google.protobuf.Timestamp open_manifest_ingest_end = 7;
+
+  // Sealed manifest awaiting local GLCB build on homes.
+  bool sealed_manifest_pending = 8;
+
+  // On-disk segment file counts (cluster-wide sum).
+  uint32 working_segments = 10;
+  uint32 completed_staging_segments = 11;
+  uint32 head_segments = 12;
+  uint32 pre_head_segments = 13;
+
+  // Oldest LastIngestTS among registry segments still eligible for
+  // planning — how far behind wall clock unchunked data may be.
+  google.protobuf.Timestamp oldest_eligible_last_ingest = 14;
+
+  // vault-ctl Raft leader for this vault (chunking planner runs here).
+  bytes vault_ctl_leader_node_id = 15;
+  bool connected_node_is_vault_ctl_leader = 16;
+
+  // Per-node on-disk segment counts. Every cluster node may act as an ingest
+  // origin (working/completed); home nodes also hold head/pre-head copies.
+  repeated PipelineNodeSegments node_segments = 17;
+
+  // Cluster-wide on-disk segment byte totals (summed across nodes).
+  uint64 working_bytes = 18;
+  uint64 completed_staging_bytes = 19;
+  uint64 head_bytes = 20;
+  uint64 pre_head_bytes = 21;
+}
+
+// PipelineNodeSegments is one node's pipeline storage areas for a vault.
+message PipelineNodeSegments {
+  bytes node_id = 1;
+  uint32 working_segments = 2;
+  uint32 completed_staging_segments = 3;
+  uint32 head_segments = 4;
+  uint32 pre_head_segments = 5;
+  uint64 working_bytes = 6;
+  uint64 completed_staging_bytes = 7;
+  uint64 head_bytes = 8;
+  uint64 pre_head_bytes = 9;
+}

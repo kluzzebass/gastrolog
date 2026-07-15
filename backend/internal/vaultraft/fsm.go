@@ -4,7 +4,6 @@
 package vaultraft
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -139,7 +138,7 @@ func (f *FSM) EnsureVaultFSM(vaultID glid.GLID) *vaultctlfsm.FSM {
 func (f *FSM) Snapshot() (hraft.FSMSnapshot, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	ids := slices.SortedFunc(maps.Keys(f.vaults), compareGLID)
+	ids := slices.SortedFunc(maps.Keys(f.vaults), glid.Compare)
 	group := &gastrologv1.VaultGroupSnapshot{
 		Vaults: make([]*gastrologv1.VaultGroupSnapshotEntry, 0, len(ids)),
 	}
@@ -193,10 +192,6 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 		hook()
 	}
 	return nil
-}
-
-func compareGLID(a, b glid.GLID) int {
-	return bytes.Compare(a[:], b[:])
 }
 
 type vaultCtlSnapshot struct {

@@ -9,7 +9,12 @@ import (
 	"time"
 
 	"gastrolog/internal/chanwatch"
+	chunkmem "gastrolog/internal/chunk/memory"
+	"gastrolog/internal/memtest"
 	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/pipeline/digestion"
+	"gastrolog/internal/pipeline/ingestion"
+	"gastrolog/internal/pipeline/routing"
 )
 
 // pressureAwareIngester is a test ingester that implements
@@ -185,5 +190,131 @@ func TestPressureGateFiresTransitionCallbacks(t *testing.T) {
 	}
 	if transitions[0].From != chanwatch.PressureNormal {
 		t.Errorf("first transition: From got %v, want normal", transitions[0].From)
+	}
+}
+
+// slowDigester adds per-message latency so the ingestion→digestion queue can
+// fill faster than workers drain it.
+type slowDigester struct {
+	delay time.Duration
+}
+
+func (d *slowDigester) Digest(_ *ingestion.IngestMessage) error {
+	time.Sleep(d.delay)
+	return nil
+}
+
+// floodIngester emits a fixed number of messages as fast as the bounded
+// digestion queue accepts them.
+type floodIngester struct {
+	started chan struct{}
+	n       int
+}
+
+func (f *floodIngester) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
+	close(f.started)
+	for range f.n {
+		select {
+		case out <- orchestrator.IngestMessage{Raw: []byte("x")}:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func newPressureQueueFillSetup(t *testing.T) *orchestrator.Orchestrator {
+	t.Helper()
+
+	s, _ := memtest.NewVault(chunkmem.Config{
+		RotationPolicy: recordCountPolicy(10000),
+	})
+	defaultID := glid.New()
+	orch := mustNewTestOrch(t, orchestrator.Config{
+		IngestChannelSize: 10,
+		Digesters:         []digestion.Digester{&slowDigester{delay: 200 * time.Millisecond}},
+	})
+	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, s.IM, s.QE))
+	cr, _ := routing.CompileRoute(glid.New(), "all", 0, "*", []glid.GLID{defaultID})
+	orch.SetTestRoutingTable(routing.NewTable([]*routing.Route{cr}))
+	return orch
+}
+
+// TestPressureGateElevatesOnSupervisorQueueFill verifies the orchestrator wires
+// the supervisor's ingestion→digestion queue as a gate probe and that
+// artificial queue saturation raises pressure above normal.
+func TestPressureGateElevatesOnSupervisorQueueFill(t *testing.T) {
+	orch := newPressureQueueFillSetup(t)
+
+	flood := &floodIngester{n: 80, started: make(chan struct{})}
+	orch.RegisterIngester(glid.New(), "flood", "test", flood)
+
+	if err := orch.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer func() { _ = orch.Stop() }()
+
+	select {
+	case <-flood.started:
+	case <-time.After(time.Second):
+		t.Fatal("flood ingester did not start")
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if orch.PressureGate().Level() > chanwatch.PressureNormal {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	t.Fatalf("gate level = %v at depth %d/%d, want elevated or critical",
+		orch.PressureGate().Level(), orch.IngestQueueDepth(), orch.IngestQueueCapacity())
+}
+
+// TestPressureGateBlocksIngesterUnderSupervisorQueueFill verifies gate.Wait
+// blocks while the wired supervisor queue probe reports elevated pressure.
+func TestPressureGateBlocksIngesterUnderSupervisorQueueFill(t *testing.T) {
+	orch := newPressureQueueFillSetup(t)
+
+	pa := newPressureAwareIngester()
+	flood := &floodIngester{n: 80, started: make(chan struct{})}
+	orch.RegisterIngester(glid.New(), "pressure-aware", "test", pa)
+	orch.RegisterIngester(glid.New(), "flood", "test", flood)
+
+	if err := orch.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer func() { _ = orch.Stop() }()
+
+	select {
+	case <-pa.gateSetCh:
+	case <-time.After(time.Second):
+		t.Fatal("SetPressureGate was not called")
+	}
+	select {
+	case <-flood.started:
+	case <-time.After(time.Second):
+		t.Fatal("flood ingester did not start")
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if orch.PressureGate().Level() > chanwatch.PressureNormal {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if orch.PressureGate().Level() <= chanwatch.PressureNormal {
+		t.Fatalf("gate never elevated; depth %d/%d",
+			orch.IngestQueueDepth(), orch.IngestQueueCapacity())
+	}
+
+	gate := orch.PressureGate()
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
+	defer waitCancel()
+	if err := gate.Wait(waitCtx); err == nil {
+		t.Fatal("gate.Wait returned while supervisor queue probe reports elevated pressure")
 	}
 }

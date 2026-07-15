@@ -197,4 +197,7 @@ message WatchSystemStatusResponse {
   // stats tick so the inspector's per-card "running/selected" badge can
   // derive node_status without a separate ListIngesters round-trip.
   repeated IngesterAlive ingester_alive = 6;
+  // Per-vault chunking pipeline depth (vault-ctl FSM + aggregated segment
+  // disk counts from NodeStats broadcasts). Push-updated on each stats tick.
+  repeated VaultPipelineBacklog pipeline_backlog = 7;
 }

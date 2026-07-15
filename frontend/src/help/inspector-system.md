@@ -14,7 +14,7 @@ For the node you're connected to, the view includes:
 - **Storage** — total records, size, chunk counts, time span, and a per-vault breakdown
 - **Ingestion** — per-ingester message/byte counts and error rates
 
-## Remote nodes (compact view)
+## Peer nodes (compact view)
 
 For other [cluster](help:clustering) nodes, metrics are collected via [broadcasting](help:clustering-broadcasting) and include:
 
@@ -24,4 +24,25 @@ For other [cluster](help:clustering) nodes, metrics are collected via [broadcast
 - **Raft state** — current role (leader/follower/candidate), term, and applied log index
 - **Per-ingester** message and byte count summaries
 
-Remote node data is refreshed at the [broadcast interval](help:clustering-broadcasting) (default 5 seconds). Nodes that haven't broadcast recently show stale timestamps.
+## Throughput
+
+Nodes with routing activity or a local vault writer show a **Throughput**
+section:
+
+- **Routed / Matched** — this node's routing rates: records per second
+  entering the routing stage, and records per second matched to at least one
+  [route](help:routing). The difference is this node's live drop rate.
+- **Per-vault rows** — for each vault this node writes locally: the append
+  rate (records per second written to the vault's working segment) with a
+  sparkline of recent history, and the segmentation **queue** depth against
+  its capacity.
+
+The number shown is the instantaneous rate over the last stats tick
+(~5 seconds) with its sparkline; hovering a row reveals the 1m/5m/15m
+exponentially weighted moving averages (the Unix load-average technique) —
+the sustained-rate figures for before/after comparisons. A vault whose queue stays
+near capacity while its durable-commit rate lags its append rate is
+experiencing write-path backpressure (usually fsync pressure on that node's
+disk).
+
+Peer node data is refreshed at the [broadcast interval](help:clustering-broadcasting) (default 5 seconds). Nodes that haven't broadcast recently show stale timestamps.

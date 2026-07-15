@@ -40,8 +40,8 @@ type orchActions interface {
 	IsDraining(vaultID glid.GLID) bool
 	CancelDrain(ctx context.Context, vaultID glid.GLID) error
 	ListIngesters() []glid.GLID
-	AddIngester(id glid.GLID, name, ingType string, passive bool, r orchestrator.Ingester) error
-	RemoveIngester(id glid.GLID) error
+	IsIngesterRunning(id glid.GLID) bool
+	ReconcileIngesters(desired []orchestrator.IngesterDesired) error
 	UpdateMaxConcurrentJobs(n int) error
 	MaxConcurrentJobs() int
 	FindLocalVaultInstance(vaultID glid.GLID) *orchestrator.VaultInstance
@@ -67,12 +67,12 @@ type configDispatcher struct {
 	factories          orchestrator.Factories
 	localNodeID        string
 	logger             *slog.Logger
-	clusterTLS         *cluster.ClusterTLS                              // nil for single-node or memory mode
-	tlsFilePath        string                                           // path to persist cluster TLS on rotation
-	configSignal       *notify.Signal                                   // broadcasts config changes to WatchConfig streams
-	managedFileHandler ManagedFileHandler                               // nil for single-node or before wiring
+	clusterTLS         *cluster.ClusterTLS                               // nil for single-node or memory mode
+	tlsFilePath        string                                            // path to persist cluster TLS on rotation
+	configSignal       *notify.Signal                                    // broadcasts config changes to WatchConfig streams
+	managedFileHandler ManagedFileHandler                                // nil for single-node or before wiring
 	catchupScheduler   func(vaultID glid.GLID, followerNodeIDs []string) // nil until orch is wired
-	placementTrigger   func()                                           // triggers immediate placement reconcile; nil for single-node
+	placementTrigger   func()                                            // triggers immediate placement reconcile; nil for single-node
 }
 
 // Handle dispatches a single FSM notification to the appropriate orchestrator
@@ -97,9 +97,9 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 	case raftfsm.NotifyRetentionPolicyPut, raftfsm.NotifyRetentionPolicyDeleted:
 		d.reloadRetentionPolicies(ctx)
 	case raftfsm.NotifyIngesterPut:
-		d.handleIngesterPut(ctx, n.ID)
+		d.reconcileIngesters(ctx)
 	case raftfsm.NotifyIngesterDeleted:
-		d.handleIngesterDeleted(n)
+		d.reconcileIngesters(ctx)
 	case raftfsm.NotifySettingPut:
 		d.handleSettingPut(ctx, n.Key)
 	case raftfsm.NotifyClusterTLSPut:
@@ -132,7 +132,7 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 			d.managedFileHandler.OnDelete(n.ID)
 		}
 	case raftfsm.NotifyIngesterAssignmentSet:
-		d.handleIngesterAssignment(ctx, n.ID)
+		d.reconcileIngesters(ctx)
 	case raftfsm.NotifyVaultPlacementsSet:
 		// Re-fire handleInstancePut so applyInstanceMembershipChange can pick
 		// up the now-complete placements. Without this re-trigger, a
@@ -328,68 +328,73 @@ func (d *configDispatcher) reloadRetentionPolicies(ctx context.Context) {
 	}
 }
 
-func (d *configDispatcher) handleIngesterPut(ctx context.Context, id glid.GLID) {
-	ingCfg, err := d.cfgStore.GetIngester(ctx, id)
-	if err != nil || ingCfg == nil {
-		d.logger.Error("dispatch: read ingester config", "id", id, "error", err)
-		return
-	}
-
-	reg, ok := d.factories.IngesterTypes[ingCfg.Type]
-	isPassive := ok && reg.ListenAddrs != nil
-	isSingleton := ok && reg.SingletonSupported && ingCfg.Singleton
-
-	if !d.shouldRunIngester(ctx, *ingCfg, isSingleton) {
-		if slices.Contains(d.orch.ListIngesters(), id) {
-			if err := d.orch.RemoveIngester(id); err != nil && !errors.Is(err, orchestrator.ErrIngesterNotFound) {
-				d.logger.Error("dispatch: remove ingester not assigned to this node", "id", id, "name", ingCfg.Name, "error", err)
-			} else {
-				d.logger.Info("dispatch: ingester removed, not assigned to this node", "id", id, "name", ingCfg.Name)
-			}
-		}
-		return
-	}
-
-	if slices.Contains(d.orch.ListIngesters(), id) {
-		if err := d.orch.RemoveIngester(id); err != nil && !errors.Is(err, orchestrator.ErrIngesterNotFound) {
-			d.logger.Error("dispatch: remove existing ingester", "id", id, "name", ingCfg.Name, "type", ingCfg.Type, "error", err)
-		}
-	}
-
-	if !ingCfg.Enabled {
-		return
-	}
-
-	if !ok {
-		d.logger.Error("dispatch: unknown ingester type", "id", id, "name", ingCfg.Name, "type", ingCfg.Type)
-		return
-	}
-
-	params := ingCfg.Params
-	if d.factories.HomeDir != "" {
-		params = make(map[string]string, len(ingCfg.Params)+1)
-		maps.Copy(params, ingCfg.Params)
-		params["_state_dir"] = d.factories.HomeDir
-	}
-
-	ing, err := reg.Factory(ingCfg.ID, params, d.factories.Logger)
+// reconcileIngesters recomputes the full set of ingesters that should run on
+// this node from the config store and drives the orchestrator toward it. It is
+// the single entry point for every ingester-related FSM notification (put,
+// delete, singleton assignment): the orchestrator diffs the snapshot and only
+// (re)builds changed ingesters, so unchanged ingesters never flap their alive
+// state.
+func (d *configDispatcher) reconcileIngesters(ctx context.Context) {
+	cfgs, err := d.cfgStore.ListIngesters(ctx)
 	if err != nil {
-		d.logger.Error("dispatch: create ingester", "id", id, "name", ingCfg.Name, "type", ingCfg.Type, "error", err)
+		d.logger.Error("dispatch: list ingesters", "error", err)
 		return
 	}
 
-	// Restore Raft-replicated checkpoint if the ingester supports it.
-	if cp, ok := ing.(orchestrator.Checkpointable); ok {
-		data, cpErr := d.cfgStore.GetIngesterCheckpoint(ctx, ingCfg.ID)
-		if cpErr == nil && len(data) > 0 {
-			if loadErr := cp.LoadCheckpoint(data); loadErr != nil {
-				d.logger.Warn("dispatch: checkpoint load failed, starting fresh", "id", id, "error", loadErr)
-			}
+	desired := make([]orchestrator.IngesterDesired, 0, len(cfgs))
+	for _, cfg := range cfgs {
+		if !cfg.Enabled {
+			continue
 		}
+		reg, ok := d.factories.IngesterTypes[cfg.Type]
+		if !ok {
+			d.logger.Error("dispatch: unknown ingester type", "id", cfg.ID, "name", cfg.Name, "type", cfg.Type)
+			continue
+		}
+		isSingleton := reg.SingletonSupported && cfg.Singleton
+		if !d.shouldRunIngester(ctx, cfg, isSingleton) {
+			continue
+		}
+		desired = append(desired, d.ingesterDesired(ctx, cfg, reg))
 	}
 
-	if err := d.orch.AddIngester(ingCfg.ID, ingCfg.Name, ingCfg.Type, isPassive, ing); err != nil {
-		d.logger.Error("dispatch: add ingester", "id", id, "name", ingCfg.Name, "type", ingCfg.Type, "error", err)
+	if err := d.orch.ReconcileIngesters(desired); err != nil {
+		d.logger.Error("dispatch: reconcile ingesters", "error", err)
+	}
+}
+
+// ingesterDesired builds the desired-ingester entry for cfg. The Build closure
+// is invoked lazily by the orchestrator — only when the ingester must be
+// (re)constructed — and restores any Raft-replicated checkpoint before
+// returning so a resuming ingester continues where it left off.
+func (d *configDispatcher) ingesterDesired(ctx context.Context, cfg system.IngesterConfig, reg orchestrator.IngesterRegistration) orchestrator.IngesterDesired {
+	return orchestrator.IngesterDesired{
+		ID:      cfg.ID,
+		Name:    cfg.Name,
+		Type:    cfg.Type,
+		Passive: reg.ListenAddrs != nil,
+		Params:  maps.Clone(cfg.Params),
+		Build: func() (orchestrator.Ingester, error) {
+			params := cfg.Params
+			if d.factories.HomeDir != "" {
+				params = make(map[string]string, len(cfg.Params)+1)
+				maps.Copy(params, cfg.Params)
+				params["_state_dir"] = d.factories.HomeDir
+			}
+			ing, err := reg.Factory(cfg.ID, params, d.factories.Logger)
+			if err != nil {
+				return nil, err
+			}
+			// Restore Raft-replicated checkpoint if the ingester supports it.
+			if cp, ok := ing.(orchestrator.Checkpointable); ok {
+				if data, cpErr := d.cfgStore.GetIngesterCheckpoint(ctx, cfg.ID); cpErr == nil && len(data) > 0 {
+					if loadErr := cp.LoadCheckpoint(data); loadErr != nil {
+						d.logger.Warn("dispatch: checkpoint load failed, starting fresh", "id", cfg.ID, "error", loadErr)
+					}
+				}
+			}
+			return ing, nil
+		},
 	}
 }
 
@@ -423,57 +428,6 @@ func (d *configDispatcher) shouldRunIngester(ctx context.Context, cfg system.Ing
 	// next reconcile cycle and cause the other nodes to stop via
 	// NotifyIngesterAssignmentSet.
 	return assigned == "" || assigned == d.localNodeID
-}
-
-// handleIngesterAssignment reacts to a Raft-replicated assignment change.
-// Only meaningful for singleton ingesters — parallel ingesters ignore
-// assignments (they run on every selected node). A stale assignment from
-// a prior singleton era must not tear down a now-parallel ingester.
-func (d *configDispatcher) handleIngesterAssignment(ctx context.Context, id glid.GLID) {
-	ingCfg, err := d.cfgStore.GetIngester(ctx, id)
-	if err != nil || ingCfg == nil {
-		return
-	}
-	reg, ok := d.factories.IngesterTypes[ingCfg.Type]
-	if !ok {
-		return
-	}
-	isSingleton := reg.SingletonSupported && ingCfg.Singleton
-	if !isSingleton {
-		return // parallel — assignment is irrelevant
-	}
-
-	assigned, err := d.cfgStore.GetIngesterAssignment(ctx, id)
-	if err != nil {
-		d.logger.Error("dispatch: read ingester assignment", "id", id, "error", err)
-		return
-	}
-
-	isRunningLocally := slices.Contains(d.orch.ListIngesters(), id)
-
-	if assigned != d.localNodeID {
-		// Not assigned to this node — stop it if running.
-		if isRunningLocally {
-			if err := d.orch.RemoveIngester(id); err != nil && !errors.Is(err, orchestrator.ErrIngesterNotFound) {
-				d.logger.Error("dispatch: remove reassigned ingester", "id", id, "error", err)
-			} else {
-				d.logger.Info("dispatch: ingester reassigned away, stopped locally", "id", id, "new_node", assigned)
-			}
-		}
-		return
-	}
-
-	// Assigned to this node — start it if not already running.
-	if isRunningLocally {
-		return
-	}
-	d.handleIngesterPut(ctx, id)
-}
-
-func (d *configDispatcher) handleIngesterDeleted(n raftfsm.Notification) {
-	if err := d.orch.RemoveIngester(n.ID); err != nil && !errors.Is(err, orchestrator.ErrIngesterNotFound) {
-		d.logger.Error("dispatch: remove ingester", "id", n.ID, "name", n.Name, "error", err)
-	}
 }
 
 func (d *configDispatcher) handleSettingPut(ctx context.Context, key string) {
@@ -760,20 +714,15 @@ func (d *configDispatcher) handleNodeConfigChange(ctx context.Context) {
 // arrived purely via snapshot would otherwise see an empty
 // vault/ingester registry. See gastrolog-3hcfm.
 //
-// Crucially, we only call the per-entity handler for entities the
-// orchestrator does NOT already have. A joiner whose state arrived via
-// post-snapshot Apply (chatterbox PUT after a snapshot, but log entries
-// covered the rest) ALREADY received the notification through the live
-// dispatcher; re-firing handleIngesterPut for it would trip the
-// orchestrator's remove+re-add idempotent-replace path. That path
-// races the new ingester goroutine's setIngesterAlive(true) against
-// the old goroutine's setIngesterAlive(false): when the stale false
-// lands in Raft after the new true, the FSM ends up showing the node
-// as not-alive even though chatterbox is happily running. The
-// dashboard then displays "7/10" instead of "10/10".
+// For vaults we only call the per-entity handler for those the orchestrator
+// does NOT already have (a joiner whose state arrived via post-snapshot Apply
+// already received the live notification). Ingesters reconcile as a whole set
+// via reconcileIngesters, which is idempotent and does not flap the alive state
+// of an already-running ingester (the orchestrator keeps unchanged ingester
+// instances untouched), so it runs unconditionally.
 //
-// Routes / rotation / retention reload as a whole set per call —
-// idempotent and goroutine-free — so they run unconditionally.
+// Routes / rotation / retention reload as a whole set per call — idempotent and
+// goroutine-free — so they run unconditionally.
 func (d *configDispatcher) ReplayConfigFromStore(ctx context.Context) {
 	if d.orch == nil || d.cfgStore == nil {
 		return
@@ -794,20 +743,7 @@ func (d *configDispatcher) ReplayConfigFromStore(ctx context.Context) {
 		d.handleVaultPut(ctx, v.ID)
 	}
 
-	registeredIngesters := make(map[glid.GLID]bool)
-	for _, id := range d.orch.ListIngesters() {
-		registeredIngesters[id] = true
-	}
-	ingesters, err := d.cfgStore.ListIngesters(ctx)
-	if err != nil {
-		d.logger.Error("dispatch: list ingesters for replay", "error", err)
-	}
-	for _, ing := range ingesters {
-		if registeredIngesters[ing.ID] {
-			continue
-		}
-		d.handleIngesterPut(ctx, ing.ID)
-	}
+	d.reconcileIngesters(ctx)
 
 	d.reloadFilters(ctx)
 	d.reloadRotationPolicies(ctx)

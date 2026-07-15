@@ -269,10 +269,10 @@ func TestValidateExpressionOffsetMappingMultipleDirectives(t *testing.T) {
 func TestStripDirectives(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
-		input    string
-		wantStr  string
-		wantN    int // number of removed ranges
+		name    string
+		input   string
+		wantStr string
+		wantN   int // number of removed ranges
 	}{
 		{"no directives", "error timeout", "error timeout", 0},
 		{"last=5m prefix", "last=5m error", " error", 1},

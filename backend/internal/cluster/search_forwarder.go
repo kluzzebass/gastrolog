@@ -5,53 +5,52 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 
 	"google.golang.org/grpc"
 )
 
+const searchForwarderPurpose = PurposeSearch
+
 // SearchForwarder sends search requests to remote cluster nodes.
-// Unlike RecordForwarder (fire-and-forget batching), this is synchronous
-// request-response — the caller blocks until the remote node responds.
 type SearchForwarder struct {
-	peers *PeerConns
+	peers *PeerConnManager
 }
 
-// NewSearchForwarder creates a SearchForwarder using the shared PeerConns pool.
-func NewSearchForwarder(peers *PeerConns) *SearchForwarder {
+// NewSearchForwarder creates a SearchForwarder using the peer connection manager.
+func NewSearchForwarder(peers *PeerConnManager) *SearchForwarder {
 	return &SearchForwarder{peers: peers}
 }
 
-// Search sends a ForwardSearch RPC to the given node and collects the full
-// streamed response into a single ForwardSearchResponse. Used by
-// collectRemotePipeline which needs the complete TableResult.
-func (sf *SearchForwarder) Search(ctx context.Context, nodeID string, req *gastrologv1.ForwardSearchRequest) (*gastrologv1.ForwardSearchResponse, error) {
-	conn, err := sf.peers.Conn(nodeID)
-	if err != nil {
-		return nil, fmt.Errorf("dial node %s: %w", nodeID, err)
+func (sf *SearchForwarder) invoke(ctx context.Context, nodeID, method string, req, resp any, action string) error {
+	if err := sf.peers.InvokeService(ctx, nodeID, searchForwarderPurpose, method, req, resp); err != nil {
+		return fmt.Errorf("%s to %s: %w", action, nodeID, err)
 	}
+	return nil
+}
 
-	stream, err := conn.NewStream(ctx,
-		&grpc.StreamDesc{
-			StreamName:    "ForwardSearch",
-			ServerStreams: true,
-		},
+// Search sends a ForwardSearch RPC to the given node and collects the full
+// streamed response into a single ForwardSearchResponse.
+func (sf *SearchForwarder) Search(ctx context.Context, nodeID string, req *gastrologv1.ForwardSearchRequest) (*gastrologv1.ForwardSearchResponse, error) {
+	h, stream, err := sf.peers.OpenServiceStream(ctx, nodeID, searchForwarderPurpose,
+		&grpc.StreamDesc{StreamName: "ForwardSearch", ServerStreams: true},
 		"/gastrolog.v1.ClusterService/ForwardSearch",
 	)
 	if err != nil {
-		sf.peers.Invalidate(nodeID, err)
 		return nil, fmt.Errorf("open search stream to %s: %w", nodeID, err)
 	}
+	defer h.Release()
+
 	if err := stream.SendMsg(req); err != nil {
-		sf.peers.Invalidate(nodeID, err)
+		h.Invalidate(err)
 		return nil, fmt.Errorf("send search request to %s: %w", nodeID, err)
 	}
 	if err := stream.CloseSend(); err != nil {
 		return nil, fmt.Errorf("close send to %s: %w", nodeID, err)
 	}
 
-	// Collect the full stream into a single response.
 	merged := &gastrologv1.ForwardSearchResponse{}
 	for {
 		msg := &gastrologv1.ForwardSearchResponse{}
@@ -59,7 +58,7 @@ func (sf *SearchForwarder) Search(ctx context.Context, nodeID string, req *gastr
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			sf.peers.Invalidate(nodeID, err)
+			h.Invalidate(err)
 			return nil, fmt.Errorf("search stream from %s: %w", nodeID, err)
 		}
 		merged.Records = append(merged.Records, msg.GetRecords()...)
@@ -74,245 +73,202 @@ func (sf *SearchForwarder) Search(ctx context.Context, nodeID string, req *gastr
 }
 
 // SearchStream opens a server-streaming ForwardSearch RPC and returns the
-// results via channels. The histogram and tableResult are extracted from the
-// first message (blocks until available). Record batches arrive on the
-// records channel. The channel is closed when the stream ends or ctx is
-// cancelled.
+// results via channels. The call returns before the first remote batch arrives
+// so coordinators can start k-way merge while slow holders are still seeking.
 func (sf *SearchForwarder) SearchStream(ctx context.Context, nodeID string, req *gastrologv1.ForwardSearchRequest) (
 	records <-chan []*gastrologv1.ExportRecord,
-	histogram []*gastrologv1.HistogramBucket,
 	tableResult *gastrologv1.TableResult,
 	errCh <-chan error,
 	getResumeToken func() []byte,
+	getHistogram func() []*gastrologv1.HistogramBucket,
 ) {
 	var resumeToken []byte
 	getResumeToken = func() []byte { return resumeToken }
+
+	var histogram []*gastrologv1.HistogramBucket
+	var histOnce sync.Once
+	histReady := make(chan struct{})
+	getHistogram = func() []*gastrologv1.HistogramBucket {
+		histOnce.Do(func() { <-histReady })
+		return histogram
+	}
+
 	recCh := make(chan []*gastrologv1.ExportRecord, 16)
 	eCh := make(chan error, 1)
 
-	conn, err := sf.peers.Conn(nodeID)
-	if err != nil {
-		eCh <- fmt.Errorf("dial node %s: %w", nodeID, err)
-		close(recCh)
-		close(eCh)
-		return recCh, nil, nil, eCh, getResumeToken
-	}
-
-	stream, err := conn.NewStream(ctx,
-		&grpc.StreamDesc{
-			StreamName:    "ForwardSearch",
-			ServerStreams: true,
-		},
+	h, stream, err := sf.peers.OpenServiceStream(ctx, nodeID, searchForwarderPurpose,
+		&grpc.StreamDesc{StreamName: "ForwardSearch", ServerStreams: true},
 		"/gastrolog.v1.ClusterService/ForwardSearch",
 	)
 	if err != nil {
-		sf.peers.Invalidate(nodeID, err)
 		eCh <- fmt.Errorf("open search stream to %s: %w", nodeID, err)
 		close(recCh)
 		close(eCh)
-		return recCh, nil, nil, eCh, getResumeToken
+		close(histReady)
+		return recCh, nil, eCh, getResumeToken, getHistogram
 	}
+
 	if err := stream.SendMsg(req); err != nil {
-		sf.peers.Invalidate(nodeID, err)
+		h.Invalidate(err)
+		h.Release()
 		eCh <- fmt.Errorf("send search request to %s: %w", nodeID, err)
 		close(recCh)
 		close(eCh)
-		return recCh, nil, nil, eCh, getResumeToken
+		close(histReady)
+		return recCh, nil, eCh, getResumeToken, getHistogram
 	}
 	if err := stream.CloseSend(); err != nil {
+		h.Release()
 		eCh <- fmt.Errorf("close send to %s: %w", nodeID, err)
 		close(recCh)
 		close(eCh)
-		return recCh, nil, nil, eCh, getResumeToken
+		close(histReady)
+		return recCh, nil, eCh, getResumeToken, getHistogram
 	}
 
-	// Read the first message synchronously to extract histogram + tableResult.
+	go sf.drainSearchStream(ctx, nodeID, stream, h, recCh, eCh, histReady, &histogram, &resumeToken)
+
+	return recCh, nil, eCh, getResumeToken, getHistogram
+}
+
+func (sf *SearchForwarder) drainSearchStream(
+	ctx context.Context,
+	nodeID string,
+	stream grpc.ClientStream,
+	h PeerConnHandle,
+	recCh chan<- []*gastrologv1.ExportRecord,
+	eCh chan<- error,
+	histReady chan struct{},
+	histogram *[]*gastrologv1.HistogramBucket,
+	resumeToken *[]byte,
+) {
+	defer h.Release()
+	defer close(recCh)
+	defer close(eCh)
+	defer close(histReady)
+
 	first := &gastrologv1.ForwardSearchResponse{}
 	if err := stream.RecvMsg(first); err != nil {
 		if !errors.Is(err, io.EOF) {
-			sf.peers.Invalidate(nodeID, err)
+			h.Invalidate(err)
 			eCh <- fmt.Errorf("search stream from %s: %w", nodeID, err)
 		}
-		close(recCh)
-		close(eCh)
-		return recCh, nil, nil, eCh, getResumeToken
+		return
 	}
-	histogram = first.GetHistogram()
-	tableResult = first.GetTableResult()
-
-	// Pipeline response: single message, no records to stream.
-	if tableResult != nil {
-		close(recCh)
-		close(eCh)
-		return recCh, histogram, tableResult, eCh, getResumeToken
+	*histogram = first.GetHistogram()
+	if first.GetTableResult() != nil {
+		return
 	}
 
-	// Send the first batch of records, then start goroutine for the rest.
 	if len(first.GetRecords()) > 0 {
 		recCh <- first.GetRecords()
 	}
 	if len(first.GetResumeToken()) > 0 {
-		resumeToken = first.GetResumeToken()
+		*resumeToken = first.GetResumeToken()
 	}
 
-	go func() {
-		defer close(recCh)
-		defer close(eCh)
-		for {
-			msg := &gastrologv1.ForwardSearchResponse{}
-			if err := stream.RecvMsg(msg); err != nil {
-				if !errors.Is(err, io.EOF) {
-					sf.peers.Invalidate(nodeID, err)
-					eCh <- fmt.Errorf("search stream from %s: %w", nodeID, err)
-				}
+	for {
+		msg := &gastrologv1.ForwardSearchResponse{}
+		if err := stream.RecvMsg(msg); err != nil {
+			if !errors.Is(err, io.EOF) {
+				h.Invalidate(err)
+				eCh <- fmt.Errorf("search stream from %s: %w", nodeID, err)
+			}
+			return
+		}
+		if len(msg.GetRecords()) > 0 {
+			select {
+			case recCh <- msg.GetRecords():
+			case <-ctx.Done():
 				return
 			}
-			if len(msg.GetRecords()) > 0 {
-				select {
-				case recCh <- msg.GetRecords():
-				case <-ctx.Done():
-					return
-				}
-			}
-			// Capture resume token from each message (last one wins).
-			if len(msg.GetResumeToken()) > 0 {
-				resumeToken = msg.GetResumeToken()
-			}
 		}
-	}()
-
-	return recCh, histogram, tableResult, eCh, getResumeToken
+		if len(msg.GetResumeToken()) > 0 {
+			*resumeToken = msg.GetResumeToken()
+		}
+	}
 }
 
-// GetContext sends a ForwardGetContext RPC to the given node.
 func (sf *SearchForwarder) GetContext(ctx context.Context, nodeID string, req *gastrologv1.ForwardGetContextRequest) (*gastrologv1.ForwardGetContextResponse, error) {
-	conn, err := sf.peers.Conn(nodeID)
-	if err != nil {
-		return nil, fmt.Errorf("dial node %s: %w", nodeID, err)
-	}
 	resp := &gastrologv1.ForwardGetContextResponse{}
-	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardGetContext", req, resp); err != nil {
-		sf.peers.Invalidate(nodeID, err)
-		return nil, fmt.Errorf("forward get context to %s: %w", nodeID, err)
+	if err := sf.invoke(ctx, nodeID, "/gastrolog.v1.ClusterService/ForwardGetContext", req, resp, "forward get context"); err != nil {
+		return nil, err
 	}
 	return resp, nil
 }
 
-// ListChunks sends a ForwardListChunks RPC to the given node.
 func (sf *SearchForwarder) ListChunks(ctx context.Context, nodeID string, req *gastrologv1.ForwardListChunksRequest) (*gastrologv1.ForwardListChunksResponse, error) {
-	conn, err := sf.peers.Conn(nodeID)
-	if err != nil {
-		return nil, fmt.Errorf("dial node %s: %w", nodeID, err)
-	}
 	resp := &gastrologv1.ForwardListChunksResponse{}
-	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardListChunks", req, resp); err != nil {
-		sf.peers.Invalidate(nodeID, err)
-		return nil, fmt.Errorf("forward list chunks to %s: %w", nodeID, err)
+	if err := sf.invoke(ctx, nodeID, "/gastrolog.v1.ClusterService/ForwardListChunks", req, resp, "forward list chunks"); err != nil {
+		return nil, err
 	}
 	return resp, nil
 }
 
-// GetChunk sends a ForwardGetChunk RPC to the given node.
+func (sf *SearchForwarder) GetPipelineBacklogDisk(ctx context.Context, nodeID string, req *gastrologv1.ForwardGetPipelineBacklogRequest) (*gastrologv1.ForwardGetPipelineBacklogResponse, error) {
+	resp := &gastrologv1.ForwardGetPipelineBacklogResponse{}
+	if err := sf.invoke(ctx, nodeID, "/gastrolog.v1.ClusterService/ForwardGetPipelineBacklog", req, resp, "forward pipeline backlog"); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
 func (sf *SearchForwarder) GetChunk(ctx context.Context, nodeID string, req *gastrologv1.ForwardGetChunkRequest) (*gastrologv1.ForwardGetChunkResponse, error) {
-	conn, err := sf.peers.Conn(nodeID)
-	if err != nil {
-		return nil, fmt.Errorf("dial node %s: %w", nodeID, err)
-	}
 	resp := &gastrologv1.ForwardGetChunkResponse{}
-	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardGetChunk", req, resp); err != nil {
-		sf.peers.Invalidate(nodeID, err)
-		return nil, fmt.Errorf("forward get chunk to %s: %w", nodeID, err)
+	if err := sf.invoke(ctx, nodeID, "/gastrolog.v1.ClusterService/ForwardGetChunk", req, resp, "forward get chunk"); err != nil {
+		return nil, err
 	}
 	return resp, nil
 }
 
-// GetIndexes sends a ForwardGetIndexes RPC to the given node.
 func (sf *SearchForwarder) GetIndexes(ctx context.Context, nodeID string, req *gastrologv1.ForwardGetIndexesRequest) (*gastrologv1.ForwardGetIndexesResponse, error) {
-	conn, err := sf.peers.Conn(nodeID)
-	if err != nil {
-		return nil, fmt.Errorf("dial node %s: %w", nodeID, err)
-	}
 	resp := &gastrologv1.ForwardGetIndexesResponse{}
-	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardGetIndexes", req, resp); err != nil {
-		sf.peers.Invalidate(nodeID, err)
-		return nil, fmt.Errorf("forward get indexes to %s: %w", nodeID, err)
+	if err := sf.invoke(ctx, nodeID, "/gastrolog.v1.ClusterService/ForwardGetIndexes", req, resp, "forward get indexes"); err != nil {
+		return nil, err
 	}
 	return resp, nil
 }
 
-// AnalyzeChunk sends a ForwardAnalyzeChunk RPC to the given node.
 func (sf *SearchForwarder) AnalyzeChunk(ctx context.Context, nodeID string, req *gastrologv1.ForwardAnalyzeChunkRequest) (*gastrologv1.ForwardAnalyzeChunkResponse, error) {
-	conn, err := sf.peers.Conn(nodeID)
-	if err != nil {
-		return nil, fmt.Errorf("dial node %s: %w", nodeID, err)
-	}
 	resp := &gastrologv1.ForwardAnalyzeChunkResponse{}
-	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardAnalyzeChunk", req, resp); err != nil {
-		sf.peers.Invalidate(nodeID, err)
-		return nil, fmt.Errorf("forward analyze chunk to %s: %w", nodeID, err)
+	if err := sf.invoke(ctx, nodeID, "/gastrolog.v1.ClusterService/ForwardAnalyzeChunk", req, resp, "forward analyze chunk"); err != nil {
+		return nil, err
 	}
 	return resp, nil
 }
 
-// ValidateVault sends a ForwardValidateVault RPC to the given node.
 func (sf *SearchForwarder) ValidateVault(ctx context.Context, nodeID string, req *gastrologv1.ForwardValidateVaultRequest) (*gastrologv1.ForwardValidateVaultResponse, error) {
-	conn, err := sf.peers.Conn(nodeID)
-	if err != nil {
-		return nil, fmt.Errorf("dial node %s: %w", nodeID, err)
-	}
 	resp := &gastrologv1.ForwardValidateVaultResponse{}
-	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardValidateVault", req, resp); err != nil {
-		sf.peers.Invalidate(nodeID, err)
-		return nil, fmt.Errorf("forward validate vault to %s: %w", nodeID, err)
+	if err := sf.invoke(ctx, nodeID, "/gastrolog.v1.ClusterService/ForwardValidateVault", req, resp, "forward validate vault"); err != nil {
+		return nil, err
 	}
 	return resp, nil
 }
 
-// SealVault sends a ForwardSealVault RPC to the given node.
 func (sf *SearchForwarder) SealVault(ctx context.Context, nodeID string, req *gastrologv1.ForwardSealVaultRequest) (*gastrologv1.ForwardSealVaultResponse, error) {
-	conn, err := sf.peers.Conn(nodeID)
-	if err != nil {
-		return nil, fmt.Errorf("dial node %s: %w", nodeID, err)
-	}
 	resp := &gastrologv1.ForwardSealVaultResponse{}
-	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardSealVault", req, resp); err != nil {
-		sf.peers.Invalidate(nodeID, err)
-		return nil, fmt.Errorf("forward seal vault to %s: %w", nodeID, err)
+	if err := sf.invoke(ctx, nodeID, "/gastrolog.v1.ClusterService/ForwardSealVault", req, resp, "forward seal vault"); err != nil {
+		return nil, err
 	}
 	return resp, nil
 }
 
-// ReindexVault sends a ForwardReindexVault RPC to the given node.
 func (sf *SearchForwarder) ReindexVault(ctx context.Context, nodeID string, req *gastrologv1.ForwardReindexVaultRequest) (*gastrologv1.ForwardReindexVaultResponse, error) {
-	conn, err := sf.peers.Conn(nodeID)
-	if err != nil {
-		return nil, fmt.Errorf("dial node %s: %w", nodeID, err)
-	}
 	resp := &gastrologv1.ForwardReindexVaultResponse{}
-	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardReindexVault", req, resp); err != nil {
-		sf.peers.Invalidate(nodeID, err)
-		return nil, fmt.Errorf("forward reindex vault to %s: %w", nodeID, err)
+	if err := sf.invoke(ctx, nodeID, "/gastrolog.v1.ClusterService/ForwardReindexVault", req, resp, "forward reindex vault"); err != nil {
+		return nil, err
 	}
 	return resp, nil
 }
 
-// Explain sends a ForwardExplain RPC to the given node and returns the response.
 func (sf *SearchForwarder) Explain(ctx context.Context, nodeID string, req *gastrologv1.ForwardExplainRequest) (*gastrologv1.ForwardExplainResponse, error) {
-	conn, err := sf.peers.Conn(nodeID)
-	if err != nil {
-		return nil, fmt.Errorf("dial node %s: %w", nodeID, err)
-	}
 	resp := &gastrologv1.ForwardExplainResponse{}
-	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardExplain", req, resp); err != nil {
-		sf.peers.Invalidate(nodeID, err)
-		return nil, fmt.Errorf("forward explain to %s: %w", nodeID, err)
+	if err := sf.invoke(ctx, nodeID, "/gastrolog.v1.ClusterService/ForwardExplain", req, resp, "forward explain"); err != nil {
+		return nil, err
 	}
 	return resp, nil
 }
 
-// Follow opens a server-streaming ForwardFollow RPC to the given node.
-// Returns a channel that yields ExportRecords as they arrive from the remote.
-// The channel is closed when the stream ends or ctx is cancelled.
 func (sf *SearchForwarder) Follow(ctx context.Context, nodeID string, req *gastrologv1.ForwardFollowRequest) (<-chan *gastrologv1.ExportRecord, <-chan error) {
 	recCh := make(chan *gastrologv1.ExportRecord, 64)
 	errCh := make(chan error, 1)
@@ -321,26 +277,18 @@ func (sf *SearchForwarder) Follow(ctx context.Context, nodeID string, req *gastr
 		defer close(recCh)
 		defer close(errCh)
 
-		conn, err := sf.peers.Conn(nodeID)
-		if err != nil {
-			errCh <- fmt.Errorf("dial node %s: %w", nodeID, err)
-			return
-		}
-
-		stream, err := conn.NewStream(ctx,
-			&grpc.StreamDesc{
-				StreamName:    "ForwardFollow",
-				ServerStreams: true,
-			},
+		h, stream, err := sf.peers.OpenServiceStream(ctx, nodeID, searchForwarderPurpose,
+			&grpc.StreamDesc{StreamName: "ForwardFollow", ServerStreams: true},
 			"/gastrolog.v1.ClusterService/ForwardFollow",
 		)
 		if err != nil {
-			sf.peers.Invalidate(nodeID, err)
 			errCh <- fmt.Errorf("open follow stream to %s: %w", nodeID, err)
 			return
 		}
+		defer h.Release()
+
 		if err := stream.SendMsg(req); err != nil {
-			sf.peers.Invalidate(nodeID, err)
+			h.Invalidate(err)
 			errCh <- fmt.Errorf("send follow request to %s: %w", nodeID, err)
 			return
 		}
@@ -353,6 +301,7 @@ func (sf *SearchForwarder) Follow(ctx context.Context, nodeID string, req *gastr
 			resp := &gastrologv1.ForwardFollowResponse{}
 			if err := stream.RecvMsg(resp); err != nil {
 				if !errors.Is(err, io.EOF) {
+					h.Invalidate(err)
 					errCh <- fmt.Errorf("follow stream from %s: %w", nodeID, err)
 				}
 				return
@@ -370,43 +319,26 @@ func (sf *SearchForwarder) Follow(ctx context.Context, nodeID string, req *gastr
 	return recCh, errCh
 }
 
-// ExportToVault sends a ForwardExportToVault RPC to the given node.
 func (sf *SearchForwarder) ExportToVault(ctx context.Context, nodeID string, req *gastrologv1.ForwardExportToVaultRequest) (*gastrologv1.ForwardExportToVaultResponse, error) {
-	conn, err := sf.peers.Conn(nodeID)
-	if err != nil {
-		return nil, fmt.Errorf("dial node %s: %w", nodeID, err)
-	}
 	resp := &gastrologv1.ForwardExportToVaultResponse{}
-	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardExportToVault", req, resp); err != nil {
-		sf.peers.Invalidate(nodeID, err)
-		return nil, fmt.Errorf("forward export to vault to %s: %w", nodeID, err)
+	if err := sf.invoke(ctx, nodeID, "/gastrolog.v1.ClusterService/ForwardExportToVault", req, resp, "forward export to vault"); err != nil {
+		return nil, err
 	}
 	return resp, nil
 }
 
-// WatchChunks opens a peer-to-peer streaming subscription to the given
-// node's ChunkBus and invokes onEvent for each received event. Blocks
-// until ctx is cancelled, the peer closes the stream, or onEvent returns
-// an error. The caller is responsible for any reconnect logic — this
-// function returns once on each fault. See gastrolog-3pf9w.
 func (sf *SearchForwarder) WatchChunks(ctx context.Context, nodeID string, onEvent func(*gastrologv1.ForwardWatchChunksResponse) error) error {
-	conn, err := sf.peers.Conn(nodeID)
-	if err != nil {
-		return fmt.Errorf("dial node %s: %w", nodeID, err)
-	}
-	stream, err := conn.NewStream(ctx,
-		&grpc.StreamDesc{
-			StreamName:    "ForwardWatchChunks",
-			ServerStreams: true,
-		},
+	h, stream, err := sf.peers.OpenServiceStream(ctx, nodeID, searchForwarderPurpose,
+		&grpc.StreamDesc{StreamName: "ForwardWatchChunks", ServerStreams: true},
 		"/gastrolog.v1.ClusterService/ForwardWatchChunks",
 	)
 	if err != nil {
-		sf.peers.Invalidate(nodeID, err)
 		return fmt.Errorf("open watchchunks stream to %s: %w", nodeID, err)
 	}
+	defer h.Release()
+
 	if err := stream.SendMsg(&gastrologv1.ForwardWatchChunksRequest{}); err != nil {
-		sf.peers.Invalidate(nodeID, err)
+		h.Invalidate(err)
 		return fmt.Errorf("send watchchunks request to %s: %w", nodeID, err)
 	}
 	if err := stream.CloseSend(); err != nil {
@@ -421,7 +353,7 @@ func (sf *SearchForwarder) WatchChunks(ctx context.Context, nodeID string, onEve
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			sf.peers.Invalidate(nodeID, err)
+			h.Invalidate(err)
 			return fmt.Errorf("watchchunks stream from %s: %w", nodeID, err)
 		}
 		if err := onEvent(msg); err != nil {
@@ -430,5 +362,4 @@ func (sf *SearchForwarder) WatchChunks(ctx context.Context, nodeID string, onEve
 	}
 }
 
-// Close is a no-op — connection lifecycle is managed by PeerConns.
 func (sf *SearchForwarder) Close() error { return nil }

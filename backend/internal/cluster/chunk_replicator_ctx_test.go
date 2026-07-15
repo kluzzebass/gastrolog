@@ -77,9 +77,10 @@ func TestRunWithCtx_ZeroDeadline(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancelled before call
 
-	fnCalled := false
+	// fn may or may not run depending on the scheduler — the key property is
+	// that runWithCtx returns promptly regardless. No flag: fn runs on a
+	// goroutine that outlives the call, so any test-visible write races.
 	fn := func() error {
-		fnCalled = true
 		time.Sleep(100 * time.Millisecond)
 		return nil
 	}
@@ -94,7 +95,4 @@ func TestRunWithCtx_ZeroDeadline(t *testing.T) {
 	if elapsed > 50*time.Millisecond {
 		t.Errorf("runWithCtx blocked after ctx was already cancelled: %v", elapsed)
 	}
-	// fnCalled may be true or false depending on scheduler — the key
-	// property is that runWithCtx returned promptly regardless.
-	_ = fnCalled
 }

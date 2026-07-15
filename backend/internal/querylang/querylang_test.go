@@ -821,10 +821,10 @@ func TestParseGlobStandalone(t *testing.T) {
 func TestParseGlobKV(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		input    string
-		kind     PredicateKind
-		key      string
-		value    string
+		input     string
+		kind      PredicateKind
+		key       string
+		value     string
 		hasKeyPat bool
 		hasValPat bool
 	}{

@@ -21,20 +21,32 @@ contrast with any earlier design. It states only what V3 *is*, never what it
    `Ack chan<- error` on the ingest message — non-nil for only one or two ingester
    types like RELP, not the norm) and a **replication ack** (internal, about
    durability across nodes).
-3. The pipeline is: ingest → digest → route → per-vault segment write →
-   complete + publish. Replication is downstream and pull-driven, not part of it.
+3. The live-ingest pipeline is: ingest → digest → route → per-vault segment write →
+   complete + publish. Retention eject (when a vault's disposition is `route`) re-enters
+   at **route** — records are already parsed, read from the chunk being destroyed, and
+   skip ingest and digest. Both paths share one routing input channel. Replication is
+   downstream and pull-driven, not part of either path.
 4. Ingest mints the EventID; EventID is cluster-unique from
    `(IngesterID, NodeID, IngestTS, IngestSeq)`. IngestSeq is a per-ingester monotonic
    counter, so uniqueness and the total order (16) hold regardless of clock movement.
 5. Digestion (raw → record) is a worker pool. Processing out of order is fine
    because order is carried by EventID, not by processing order.
-6. Digest workers put record pointers on a routing queue; routing workers consume
-   from the other end. Pointers only — the record is allocated once and never
-   copied between stages.
-7. A record is immutable after digestion, so one pointer can fan out to several
-   vault writers with no copy and no lock.
+6. Digest workers hand record pointers to the routing queue; routing workers consume
+   from the other end. The queue item is `{Record, Source}` — record pointer plus
+   routing-time origin metadata (not stored on the record). Two producers merge on
+   the same bounded channel: digest output (`Source = ingest`, ingester from
+   EventID) and retention eject (`Source = retention`, source vault ID and optional
+   reason). Pointers only — the record is allocated once and never copied between
+   stages.
+7. A record is immutable before it enters routing (after digestion for live ingest,
+   or when read from a chunk cursor on retention eject), so one pointer can fan out
+   to several vault writers with no copy and no lock.
 8. Routing is a separate stage from digestion: per-record, in-memory rule match,
-   record → vault IDs. Routing never defers.
+   record → vault IDs. Routing never defers. Match evaluation overlays synthetic
+   attrs (`_source`, `_ingester`, `_vault`, `_reason`) from `Source` for the
+   duration of the match only — same mechanism for live ingest and retention eject.
+   Routes that target retention match on `_source = "retention"` (and often
+   `_vault`); live-ingest routes match on record attrs and/or `_source = "ingest"`.
 9. The router's only target concept is the vault: a rule match yields vault IDs and
    nothing more — no RF, no storage class, no node placement. Which nodes hold a
    vault is the vault leader's call, made from live cluster state and committed to
@@ -75,9 +87,9 @@ contrast with any earlier design. It states only what V3 *is*, never what it
     not need to be canonical; EventID restores order at read.
 18. Query order (by `IngestTS` or `SourceTS`) is an index choice, independent of
     storage order. `SourceTS` is carried on the record but not part of EventID.
-19. Within the ingest→segment path, local disk write is the only throughput
-    governor. Group commit is the lever; everything above the write is parallel and
-    lock-free.
+19. Within the route→segment path (live ingest and retention eject), local disk
+    write is the only throughput governor. Group commit is the lever; everything
+    above the write is parallel and lock-free.
 20. If the disk ever fails to keep up, the bounded channels backpressure rather
     than drop, so the cardinal rule holds under load with no special mechanism. In
     practice sequential segment appends far outrun log ingestion rates, so this is
@@ -89,25 +101,45 @@ contrast with any earlier design. It states only what V3 *is*, never what it
     ingest. The only backpressure is slow local disk.
 22. Segments are ephemeral build inputs; the chunk is the durable artifact.
     Durability responsibility moves at that boundary.
-23. Two roles, paired: the vault-ctl plans chunks from segment metadata
-    alone (vault, record count, byte size, first/last IngestTS, holder); a
-    per-home vault manager executes — it owns that vault's chunk store and head,
-    and builds chunks in place. Segment bodies move lazily, only once a vault
-    manager is ready to build.
+23. Two roles, paired: vault-ctl tracks completed segment metadata and **chunk-build
+    state** (record/size budget, per-segment **EventID-order cursors** — how far each
+    segment was consumed by prior chunks); the per-home ChunkingManager executes —
+    k-way merge from those cursors until the budget is reached, encodes GLCB, and
+    commits updated cursors. Segment metadata alone (count, bytes, IngestTS bounds,
+    holder) names what is *eligible*; it does not predict how records from different
+    segments interleave under the budget. Segment bodies move lazily, only once a home
+    is ready to build.
 24. A segment closes on size or age, whichever comes first (both configurable).
     Closure is the working→completed rename, at which point its metadata is published;
     a still-growing segment's header is provisional and not yet eligible.
-25. A chunk is a deterministic, ordered list of segment spans
-    `(segmentID, startRecord, count)`, sliced on a record/size budget; a
-    partial-segment cut resumes in the next chunk. The offsets are positions in the
-    segment's EventID order (see 36), not on-disk positions.
-26. Builds are reproducible: the same plan over the same immutable segments yields
-    a byte-identical chunk on every builder. So every home builds its own chunk
-    independently — no designated builder, no build-then-replicate, no
-    leader-dies-mid-build failover (a crash just re-runs the fixed plan).
-27. Completeness is binary: a builder either holds the named segments or it does
-    not. No time-window closure, and no straggler can belong inside an
-    already-built chunk.
+25. A chunk is the records yielded by a **budget-limited k-way merge** starting from
+    committed cursors. Equivalently: a deterministic list of segment spans
+    `(segmentID, startRecord, count)` in EventID order — but those spans are
+    **discovered during the build**, not precomputed from segment metadata before
+    merge. A partial-segment cut leaves a cursor inside that segment; the next chunk
+    resumes from there. Offsets are positions in the segment's EventID order (see 36),
+    not on-disk byte positions.
+    **Chunk budget (provisional lean):** **record count and byte size** are
+    deterministic cut axes — monotonic accumulators over the merged EventID stream,
+    identical on every replica given shared cursors, segment snapshot, and segment
+    bytes (pin the byte unit consistently). Segment metadata totals do not predict
+    either limit once segments interleave; the merge walk discovers the stop.
+    **Time can be deterministic too** (same segments, same merge inputs, same
+    committed cut rule) — the issue is which time semantics fit the
+    segment→chunk flow, not replayability. Today's rotation **Cron** ("switch at
+    noon") still maps: a vault-ctl-scheduled cut all replicas observe. **MaxAge**
+    ("active chunk has been open for 10 minutes") does not: V3 chunks are built
+    complete in one merge pass, not incrementally appended on each home — there is
+    no growing chunk `CreatedAt` to measure. Age/size at **segment** closure on the
+    origin (§24) stays valid; age-since-chunk-open is legacy active-chunk semantics.
+26. Builds are reproducible: the same **starting cursors**, eligible segments, and
+    budget over the same immutable segment bytes yield a byte-identical chunk on every
+    builder. So every home builds its own chunk independently — no designated builder,
+    no build-then-replicate, no leader-dies-mid-build failover (a crash just re-runs
+    from the last committed cursors).
+27. Completeness is binary: a builder either holds every segment the merge needs
+    (including any segment with a partial tail not yet fully chunked) or it does not.
+    No time-window closure, and no straggler can belong inside an already-built chunk.
 28. Replication is pull/reconcile, not push: a home rolls the log, pulls segments
     it lacks from any holder, and adds itself to the holder-set. The desired-vs-
     holder gap is the replicate signal; `holders ⊇ homes`, records chunked, or a
@@ -120,8 +152,8 @@ contrast with any earlier design. It states only what V3 *is*, never what it
 30. Chunk replication is the same reconciliation — desired placement vs. holder-set,
     driven to zero by copy or delete — so segments and chunks share one model. It
     must exist anyway for RF changes, node loss, decommission, and placement changes.
-31. Determinism (single origin per segment + dictated spans) makes replicas
-    identical by construction — no merge, read-repair, vector clocks, or
+31. Determinism (single origin per segment + shared build state + merge walk) makes
+    replicas identical by construction — no merge, read-repair, vector clocks, or
     anti-entropy. Verification is a chunk-ID/hash equality check.
 32. Checksums are mandatory, not optional: they guard against physical faults and
     gate transfer acceptance (the head invariant verifies a pulled segment before
@@ -145,14 +177,14 @@ contrast with any earlier design. It states only what V3 *is*, never what it
     retention; no ingest backpressure).
 36. A segment's on-disk order is arbitrary (concurrent digestion), so each carries
     an EventID-ordered index (the head B+ tree) and chunk building is a k-way
-    merge over it; span offsets (25) are positions in this order. Order by the full
-    EventID so equal timestamps resolve identically. Because IngestTS leads the key,
+    merge over it; span offsets and cursors (25) are positions in this order. Order by
+    the full EventID so equal timestamps resolve identically. Because IngestTS leads the key,
     the same index serves IngestTS range search — one structure, not two.
 37. Chunk building is key-only for ordering: the merge reads just the frame length
     and EventID fields to order records, and copies `raw` verbatim. Attributes are
     inline (denormalized) in segments and normalized into the chunk's string
     dictionary at build — a deterministic remap (the dictionary is a deterministic
-    function of the planned records), so chunks stay byte-identical across builders
+    function of the merged records), so chunks stay byte-identical across builders
     while ingest stays free of interning. The dictionary is normalization (a real
     space saver on repetitive log attributes), not indexing, and is kept — and being
     the canonical string table, it is the natural substrate the deferred index types
@@ -171,6 +203,81 @@ contrast with any earlier design. It states only what V3 *is*, never what it
     purged segment — it gets those records via chunk replication, not a segment
     re-pull.
 
+### Revised by lived experience (implementation + soak, 2026-07)
+
+The leans above were written before the pipeline ran under sustained multi-node load.
+Running it revised four of them. Kept here beside the originals — the gap between what
+was predicted and what was observed is itself design knowledge.
+
+R1. **The first choke point is chunk *build*, not the cross-node paths (revises 35).**
+    Lean 35 predicted Raft commit throughput and segment-transfer bandwidth as the
+    first limits. In the soak neither bound first: the limit is the per-home build
+    chain — k-way merge + GLCB encode + the serial seal→release→purge round-trips
+    through vault-ctl. It sustained on the order of tens of segments per minute per
+    home against ingest of tens of thousands of records per second. So the head/
+    and completed/ backlog is a **steady operating mode, not a transient** — the
+    opposite of what "the record is already durable, so lag only delays chunking"
+    assumed about magnitude.
+
+R2. **The backlog needs its own backpressure; the disk guard is only the backstop
+    (revises 35).** With build as the bottleneck, "bounded by retention" means the
+    backlog can grow to (retention period × ingest rate) before anything trims it —
+    in practice it fills the disk, and only then does the disk guard backpressure at
+    its floor. That is not a bound, it is a cliff: it engages *at* the limit, when the
+    disk is already full of fragile un-chunked segments and the headroom chunks and
+    the WAL also need is gone. The cardinal rule is explicit that every internal limit
+    needs a backpressure path that engages **before** the limit forces a drop — so
+    disk-guard-at-floor is the *backstop*, not the operating bound. The operating
+    bound is a backpressure keyed on the **backlog itself** (depth and/or age),
+    engaging as a gradient well before disk pressure, throttling ingest down to the
+    sustainable build rate. This is cardinal-rule-legal by construction — it costs
+    throughput, never loss. **R3 is its prerequisite:** once release is anchored on
+    records-chunked, backlog depth/age is an honest measure of the build-vs-ingest
+    rate mismatch, so backpressuring on it can never be a single dead holder halting
+    cluster-wide ingest — that failure mode is removed at the anchor, not papered over
+    here. **Remaining sub-question:** the signal axis — age (how far chunking has
+    fallen behind, disk-size-independent), depth (bytes/segments, the direct disk
+    lever), or both (age-primary with a depth ceiling). Global/adjustable to start.
+
+R3. **The release predicate must use all three signals in 28, not just the first
+    (reaffirms 28/39; the code drifted).** Lean 28 already decided the release signal
+    as `holders ⊇ homes` **or** records chunked **or** retention elapsed, and 39 made
+    the load-bearing one explicit: a segment is superseded once its records survive in
+    a replicated chunk. The implementation shipped only the first — release gated on
+    every required home ack'ing the raw segment (`holdersCover`). The genuine necessity
+    it preserved is 39's ordering (never purge before durable); the drift is the
+    *anchor*. Gating on all-holders pins a segment forever on a dead holder, because a
+    dead node never acks — the deadlock R2 warns about. Reconcile to 28/39: the primary
+    signal is **records-chunked** (the 39 supersession), with retention-elapsed as the
+    give-up bound for a segment no home can collect; `holders ⊇ homes` is a fast path,
+    not the sole gate. This is the fix for the completed/ leak.
+
+    **Refines 39's "replicated to their home set."** Taken literally that re-pins the
+    dead node one layer down: if segment purge waits for the *chunk* to reach every
+    home, a dead home stalls it exactly as the segment gate does. The purge threshold
+    is **RF, not home-set** — a segment is superseded once every chunk holding its
+    records is sealed and replicated to `min(2, placement)` holders (the same
+    `plannerMinHolders` floor eligibility already uses), reached among the *live*
+    homes. The dead home then catches up at the **chunk** level, whose reconcile (30)
+    tolerates a long absence, not the segment's seconds-to-minutes transport window.
+    The chunk's *desired* holder set is still all homes; only the segment-purge
+    *trigger* is the lower RF threshold. Mechanically this needs a small persistent
+    segment→containing-chunk-IDs map on the vault-ctl FSM (the open/sealed manifest
+    linkage is dropped once a home builds and pops the manifest), cleared on release.
+
+R4. **Catch-up is state-dependent and differential, never event-replay (reaffirms
+    29/30; settles chunking-design open Qs #1/#2).** A missing node must never block
+    segment replication or chunk construction among the live homes — segments are
+    transport (29), so a home that can't be reached is a fast-path miss, not a barrier.
+    A node waking from dormancy chooses its catch-up by current data state: replicate
+    the **segments** if they still exist, the **chunks** if those segments were already
+    superseded. And it reconciles a **differential** — desired end-state per the
+    current FSM vs. what it already holds — rather than replaying every FSM update it
+    missed while down; a naive replay would chase segments long since purged. FSM
+    events are triggers to re-evaluate the differential, not a command log to execute.
+    This resolves chunking-design #1 (eligibility is "some holder + catch-up", not
+    all-homes) and #2 (the seal/purge predicate is chunk-replication, not all-homes).
+
 ## Phases & managers
 
 The write path is a chain of phases, each separated from the next by a queue. The
@@ -182,7 +289,9 @@ Phases, in order; each name is also the manager (`<Phase>Manager`):
 
 1. **Ingestion** — receive bytes, mint the EventID (the ingesters).
 2. **Digestion** — parse raw → record.
-3. **Routing** — match rules → vault IDs.
+3. **Routing** — match rules → vault IDs. One static worker pool and one input
+   queue; digest and retention eject are both producers (`Input{Record, Source}` in
+   `backend/internal/pipeline/routing`).
 4. **Segmentation** — write records into per-vault segments.
 5. **Distribution** — make completed segments available: publish metadata to the
    vault-ctl log and answer pull requests for segment bytes (origin/holder side).
@@ -216,13 +325,30 @@ build discards. ChunkingManager is a fresh build, not an extension of it.
 **Collection and Chunking are the proactive and reactive halves of one pull.**
 Collection runs ahead — rolling the vault-ctl log, it pulls segments this home
 should hold into the head before any build needs them, which also grows the
-holder-set (durability) and backfills a returning node (catch-up). Chunking decides
-*what* to build from a vault-ctl plan and consumes the head. If the plan's named
-segments are not all present, Chunking does not build (binary completeness — never a
+holder-set (durability) and backfills a returning node (catch-up). Chunking runs
+merge+encode from vault-ctl **cursors and budget**; on success it commits build
+progress (updated cursors, chunk identity/digest). If required segments are not
+all present locally, Chunking does not build (binary completeness — never a
 short chunk): it nudges Collection with the missing IDs and waits. The wait is safe
 and terminating — the origin retains a segment until its records are chunked
-(release/purge rules), so a planned segment stays collectable from some holder until
+(release/purge rules), so a needed segment stays collectable from some holder until
 the build succeeds; an unreachable holder only delays chunking, never drops data.
+
+### Do not poll vault-ctl FSM state on a timer
+
+Collection and Chunking both read durable vault-ctl state, but that state changes only
+when Raft applies a command. **Do not** copy ingester-style tick loops or poll
+`SealedManifest()`, completed-segment registry, or assignment logs every N ms.
+
+Wire **`SetOnPublishCompletedSegment`** (Collection rolls the log and pulls when new
+segment metadata lands), **`SetOnSealedManifest`** (Chunking builds at seal), explicit
+**`Notify` / `CollectOnce` nudges** (Chunking when a manifest ref is missing locally),
+and a **one-shot catch-up on `Run` start** (manager started after replay). When holder
+assignment gets its own apply callback, hook that too — still not a blind timer.
+
+The leader chunking planner (`gastrolog-5i9e6`) must follow the same rule: react to
+segment publish, manifest edits, rotation policy inputs, and leadership changes — not
+a periodic “read FSM and maybe propose” tick. See [`chunking-design.md`](./chunking-design.md).
 
 **Storage areas are roles bound to storage.** The phases own on-disk areas —
 Segmentation's `working/` and `completed/`, Collection's **pre-head**, and the
@@ -241,14 +367,17 @@ the node's available storages (default). Two constraints:
 ## Pipeline at a glance
 
 ```
-Ingestion → Digestion → Routing → Segmentation → Distribution → Collection → Chunking
+Ingestion → Digestion ──┐
+                        ├── Routing → Segmentation → Distribution → Collection → Chunking
+Retention eject ────────┘
 ```
 
-The first four phases are one in-process pipeline: a record is allocated once at
-Digestion and only its pointer travels the channels through Routing into a
-per-vault Segmentation writer. This is the durable-capture path — by the end of
-Segmentation the record is durable in its segment, so the cardinal rule holds by
-construction.
+The first four phases are one in-process pipeline for live ingest: a record is
+allocated once at Digestion and only its pointer travels the channels through
+Routing into a per-vault Segmentation writer. Retention eject sideloads already-built
+records onto the same routing queue with `Source = retention` (source vault ID on
+the overlay). This is the durable-capture path — by the end of Segmentation the
+record is durable in its segment, so the cardinal rule holds by construction.
 
 A boundary falls after Segmentation. Distribution publishes the completed segment's
 metadata to the vault-ctl log and answers pull requests for its bytes; Collection and
@@ -284,9 +413,14 @@ flowchart TB
   dch --> D2
   dch --> Dn
 
-  D1 --> rch[/"routing queue · chan *Record"/]
+  D1 --> rch[/"routing queue · chan Input"/]
   D2 --> rch
   Dn --> rch
+
+  subgraph retain["Retention eject — vault sweep when disposition = route"]
+    EJ(["read records from chunk cursor"])
+  end
+  EJ --> rch
 
   subgraph route["Routing — M goroutines"]
     R1(["match rules to vault IDs"])
@@ -357,6 +491,16 @@ flowchart TB
 A record that matches multiple vaults is sent to each vault's in channel
 (fan-out); the same immutable record pointer is reused, never copied.
 
+Each routing-queue item carries a `Source` tag used only at match time: digest
+hands off `Source = ingest` (ingester ID from EventID); retention eject hands off
+`Source = retention` with the source vault ID and optional reason (`age`, `size`,
+`count`). Both producers block on the same bounded channel, so eject backpressure
+is unified with live ingest — neither path drops when the queue or downstream
+writers are slow.
+
+Cluster lifecycle for eject (who runs it, when the source chunk may be deleted)
+is **not** designed here — see [Open questions — retention eject](#open-questions--retention-eject).
+
 The segment writer's only job is to write records into a durable segment file.
 Completing a segment can be as crude as moving the file from a working directory
 to a completed directory, then publishing its metadata to the vault-ctl log.
@@ -400,21 +544,26 @@ Header — enough to inspect a segment without reading its records:
 - SegmentID (GLID, 16 bytes)
 - vault ID (GLID, 16 bytes)
 - record count (uint32)
-- byte offset of the last written record (uint32), which also marks the end of
-  valid data
+- byte offset of the last written record (uint32)
 - first and last IngestTS (int64 nanos), the order/merge axis
-- optionally the first and last EventID
+- segment checksum (uint64 XXH64 over all committed record bytes —
+  `[HeaderSize:` *end of the frame starting at DataEnd* `)`. A non-linear
+  digest, not a CRC: each frame ends with its own CRC32, and rolling a CRC
+  over `lenPrefix ++ body ++ bodyCRC` cancels the content contribution by
+  CRC linearity, leaving the checksum blind to same-length substitution —
+  gastrolog-1vepg0)
 
 The header is fixed-size and lives at the front, and is rewritten in place after
-each record — count incremented, last IngestTS/EventID updated (first set on the
+each record — count incremented, last IngestTS updated (first set on the
 first record). So the header is always current: the segment is valid and
 inspectable at any point, and completion needs no finalization step — it is just
 the working→completed rename. The record is appended first, then the header
-rewritten, so the header is never ahead of the data. The recorded last-record
-position is the recovery anchor: on reopen, valid data ends at that record's
-frame, so any torn bytes from an interrupted final append are discarded and the
-writer resumes from there. Readers get the full segment metadata — and the exact
-valid extent — from the front without scanning records.
+rewritten, so the header is never ahead of the data. The recorded `DataEnd`
+offset is the recovery anchor: on reopen, read the frame that starts at
+`DataEnd`; valid data ends at the end of that frame, so any torn bytes from an
+interrupted *next* append are discarded and the writer resumes after that
+frame. Readers get segment metadata from the header; the anchor locates the
+last committed record without scanning from the front.
 
 Records: each record is `[frameLen:u32][frame body]`, frame after frame — the
 same framing as the GLCB records section. The frame body leads with the
@@ -438,6 +587,92 @@ encode → append pipeline.
 Key-based query access needs a side index over the records; the head
 supplies one (see the head points above), reusing the generic
 `backend/internal/btree`.
+
+### Wire layout coding conventions (deferred cleanup)
+
+On-disk encode/decode should use **named wire sizes**, not bare literals in
+offset arithmetic: `glid.Size` for GLIDs, shared primitives in
+`backend/internal/format` (`SizeU16`, `SizeU32`, `SizeU64`), and composite
+sizes/offsets **derived** from those (e.g. segment `HeaderSize` computed from
+field layout, not a magic number). Go has no C-style `sizeof`; `unsafe.Sizeof`
+does not apply to wire layouts and cannot be used in `const` expressions anyway.
+
+**Status:** the new V3 segment package (`backend/internal/pipeline/segment`)
+follows this pattern. Legacy writers — especially GLCB in
+`backend/internal/chunk/glcb` — still use raw `off += 4` / `8` / `16`. That
+cleanup is **deferred**: most of those paths will be replaced or bypassed as the
+V3 pipeline lands, so polishing them now would be wasted churn. Revisit when
+touching each format for V3 (segmentation, chunk build, distribution) or when
+adding a new on-disk layout — pick up the named-size convention then, and fold
+legacy callers in as they are retired.
+
+## Open questions — retention eject
+
+The routing stage already accepts retention eject on the shared input
+channel (`Source = retention`). What is **not** designed yet is the
+cluster lifecycle around it: who fires eject, and when the source chunk
+(or its V3 equivalent) may be destroyed. Notes only — nothing here is
+decided.
+
+### Who runs eject?
+
+Today (`backend/internal/orchestrator/retention.go`) the retention sweep
+runs on the **config placement leader** for the vault instance (not
+necessarily the vault-ctl Raft leader). That node reads records from a
+local chunk cursor and pushes them through routing, then requests chunk
+deletion via the lifecycle reconciler.
+
+V3 will need an explicit owner per vault (or per chunk) so eject fires
+**exactly once** — the current `retention-pending` flag and
+`!alreadyPending` routing gate exist precisely because re-running eject
+on every sweep duplicates records at route targets. Candidates:
+
+- **Vault leader** (vault-ctl elected leader for that vault's group) —
+  aligns with other vault-scoped decisions (holder set, chunk plans).
+  Lean, but the leader may not hold the chunk bytes locally; eject still
+  needs a defined way to read the records (local holder, pull, or
+  forward-to-leader).
+- **Any holder** with a lease/FSM flag — simpler locally, harder to
+  prove single-fire cluster-wide without vault-ctl coordination.
+- **Placement leader** (status quo) — works in the current architecture
+  but couples retention to a role that V3 is trying to move toward
+  vault-ctl.
+
+Open: which role owns the sweep, who may open the cursor, and how a
+follower learns eject already ran for chunk *C* without re-streaming.
+
+### Chunk deletion after eject
+
+Disposition `route` means: stream records through routing, **then**
+destroy the source chunk. Deletion is already coordinated cluster-wide
+today: `CmdRequestDelete` → each node in `expectedFrom` deletes its
+local copy and acks → `CmdFinalizeDelete` when the set is empty. That
+receipt protocol lives outside the routing hot path.
+
+V3 adds tension with the cardinal rule (1): routing must not drop
+**matched** records, yet today's eject path destroys the source chunk
+regardless of whether every ejected record reached a durable destination
+segment. Open questions:
+
+- **Delete gate:** may the source chunk/segment be purged only after
+  ejected records are durably captured on their destination vaults (per
+  vault segment append), or is best-effort route-then-delete acceptable
+  for retention (matching current `disposition = route` semantics)?
+- **Partial eject:** if fan-out sends to vaults A and B and B's writer
+  is slow or fails, does deletion wait, retry unrouted slots, or proceed
+  and count drops?
+- **Cross-node destinations:** eject runs on one node; matched records
+  may land in segments on other nodes. What ack or vault-ctl receipt
+  proves "safe to delete source" — per-destination, or a single
+  retention receipt on the source vault group?
+- **Idempotency vs retry:** `retention-pending` prevents re-routing on
+  delete retry; if routing succeeded but delete stalled, how does a
+  retry distinguish "already ejected, finish delete" from "never
+  ejected"?
+
+These interact with segment purge (39) and chunk replication (28–30):
+the source artifact must not disappear until downstream durability is
+either proven or explicitly abandoned (counted drop, not silent loss).
 
 ## Out of scope (for now)
 

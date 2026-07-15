@@ -8,9 +8,11 @@ import (
 	"iter"
 	"os"
 	"strings"
+	"sync"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/convert"
+	"gastrolog/internal/pipeline/collection"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 
@@ -19,24 +21,16 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// RecordAppender appends a single record to a local vault.
-// Used by the ForwardRecords handler to write received records.
-type RecordAppender func(ctx context.Context, vaultID glid.GLID, rec chunk.Record) error
-
-// VaultRecordAppender appends a single record to a local vault, preserving
-// the leader's chunk-ID assignment. Used by the ForwardRecords handler for
-// per-record replication from a leader to its followers.
-type VaultRecordAppender func(ctx context.Context, vaultID glid.GLID, leaderChunkID chunk.ChunkID, rec chunk.Record) error
-
 // SearchExecutor runs a search on a local vault and returns results.
 // For regular searches, it returns an iterator over records (the caller
 // streams them as they arrive). For pipeline queries (stats, timechart),
 // it returns a TableResult with a nil iterator. The histogram slice (if
 // non-nil) provides an approximate volume histogram for the searched vault.
 // Used by the ForwardSearch handler to serve remote search requests.
-// The resumeToken parameter allows resuming a paginated search. The returned
-// getToken function returns a resume token for the next page (nil if exhausted).
-type SearchExecutor func(ctx context.Context, vaultID glid.GLID, queryExpr string, resumeToken []byte) (iter.Seq2[chunk.Record, error], func() []byte, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, error)
+// The request may carry sealed-chunk subset fields for distributed search
+// (gastrolog-2qj7m). The returned getToken function returns a resume token
+// for the next page (nil if exhausted).
+type SearchExecutor func(ctx context.Context, req *gastrologv1.ForwardSearchRequest) (iter.Seq2[chunk.Record, error], func() []byte, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, error)
 
 // ContextExecutor fetches records surrounding a specific position in a local vault.
 // Used by the ForwardGetContext handler to serve remote context requests.
@@ -44,6 +38,10 @@ type ContextExecutor func(ctx context.Context, vaultID glid.GLID, chunkID chunk.
 
 // ListChunksExecutor lists chunks in a local vault for remote requests.
 type ListChunksExecutor func(ctx context.Context, vaultID glid.GLID) ([]*gastrologv1.ChunkMeta, error)
+
+// PipelineBacklogDiskExecutor returns local on-disk segment counts for remote
+// GetPipelineBacklog fan-out.
+type PipelineBacklogDiskExecutor func(ctx context.Context, vaultID glid.GLID) (*gastrologv1.ForwardGetPipelineBacklogResponse, error)
 
 // GetIndexesExecutor returns index status for a chunk in a local vault.
 type GetIndexesExecutor func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID) (*gastrologv1.GetIndexesResponse, error)
@@ -91,6 +89,14 @@ type ManagedFileReader func(fileID string) (name string, rc io.ReadCloser, sha25
 // ManagedFileIDsLister returns the IDs of managed files present on this node's disk.
 type ManagedFileIDsLister func() []string
 
+// SegmentPullServer streams a completed segment held locally (by the origin or
+// another holder) to w. Returns an error if the segment is unknown or not held
+// here — implementations signal that case with collection.ErrSegmentUnavailable
+// so the PullSegment handler encodes it as a NotFound status (which the
+// pulling side's SegmentPuller translates back into the same sentinel).
+// Wired to the orchestrator's ServePull seam (Rubicon C).
+type SegmentPullServer func(vaultID, segmentID glid.GLID, w io.Writer) error
+
 // ── ID parse helpers ────────────────────────────────────────────────
 
 func parseVaultID(raw []byte) (glid.GLID, error) {
@@ -105,17 +111,6 @@ func parseChunkID(raw []byte) (chunk.ChunkID, error) {
 		return chunk.ChunkID{}, status.Error(codes.InvalidArgument, "invalid chunk_id: too short")
 	}
 	return chunk.ChunkID(glid.FromBytes(raw)), nil
-}
-
-// SetRecordAppender injects the callback for writing forwarded records.
-// Must be called before the cluster server receives ForwardRecords RPCs.
-func (s *Server) SetRecordAppender(fn RecordAppender) {
-	s.recordAppender = fn
-}
-
-// SetVaultRecordAppender injects the callback for chunk-ID-preserving forwarding.
-func (s *Server) SetVaultRecordAppender(fn VaultRecordAppender) {
-	s.recordAppenderForVault = fn
 }
 
 // SetRecordImporter injects the callback for importing transferred records.
@@ -161,6 +156,11 @@ func (s *Server) SetContextExecutor(fn ContextExecutor) {
 // SetListChunksExecutor injects the callback for handling remote ListChunks requests.
 func (s *Server) SetListChunksExecutor(fn ListChunksExecutor) {
 	s.listChunksExecutor = fn
+}
+
+// SetPipelineBacklogDiskExecutor injects the callback for remote pipeline backlog disk counts.
+func (s *Server) SetPipelineBacklogDiskExecutor(fn PipelineBacklogDiskExecutor) {
+	s.pipelineBacklogDiskExecutor = fn
 }
 
 // SetGetIndexesExecutor injects the callback for handling remote GetIndexes requests.
@@ -218,91 +218,20 @@ func (s *Server) SetManagedFileIDs(fn ManagedFileIDsLister) {
 	s.managedFileIDs = fn
 }
 
-// forwardRecords handles the unary ForwardRecords RPC. Used by retention
-// routing to send records to the node owning the destination vault.
-// Records are appended to the vault's active chunk.
-func (s *Server) forwardRecords(ctx context.Context, req *gastrologv1.ForwardRecordsRequest) (*gastrologv1.ForwardRecordsResponse, error) {
-	if s.recordAppender == nil {
-		return nil, status.Error(codes.Unavailable, "record appender not configured")
-	}
-	vaultID, err := parseVaultID(req.GetVaultId())
-	if err != nil {
-		return nil, err
-	}
-
-	var written int64
-	for _, exportRec := range req.GetRecords() {
-		rec := convert.ExportToRecord(exportRec)
-		if appendErr := s.recordAppender(ctx, vaultID, rec); appendErr != nil {
-			if errors.Is(appendErr, ErrForwardTargetNotReady) {
-				s.cfg.Logger.Debug("forward: append failed (target not ready)",
-					"vault", vaultID, "error", appendErr)
-			} else {
-				s.cfg.Logger.Warn("forward: append failed",
-					"vault", vaultID, "error", appendErr)
-			}
-			return nil, status.Errorf(codes.Internal, "append record: %v", appendErr)
-		}
-		written++
-	}
-	s.forwardedReceived.Add(written)
-
-	return &gastrologv1.ForwardRecordsResponse{RecordsWritten: written}, nil
+// SetSegmentPullServer injects the callback for streaming locally-held
+// completed segments to peer collectors (Rubicon C).
+func (s *Server) SetSegmentPullServer(fn SegmentPullServer) {
+	s.segmentPullServer = fn
 }
 
-// streamForwardRecordsHandler handles the client-streaming StreamForwardRecords
-// RPC. Each message is a ForwardRecordsRequest (vault_id + batch of records).
-// This is the same payload as the unary ForwardRecords RPC, but on a persistent
-// stream — eliminating per-RPC connection overhead.
-func streamForwardRecordsHandler(srv any, stream grpc.ServerStream) error {
-	s := srv.(*Server)
-	if s.recordAppender == nil {
-		return status.Error(codes.Unavailable, "record appender not configured")
-	}
+// ChunkGLCBPullServer streams a locally-held sealed chunk GLCB to a peer
+// home performing replica catch-up.
+type ChunkGLCBPullServer func(vaultID glid.GLID, chunkID chunk.ChunkID, w io.Writer) error
 
-	var written int64
-	for {
-		var msg gastrologv1.ForwardRecordsRequest
-		err := s.recvOrShutdown(stream, &msg)
-		if errors.Is(err, io.EOF) {
-			return stream.SendMsg(&gastrologv1.ForwardRecordsResponse{
-				RecordsWritten: written,
-			})
-		}
-		// Cluster server is shutting down — return cleanly so GracefulStop
-		// can unblock. See gastrolog-1e5ke.
-		if errors.Is(err, errShuttingDown) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-
-		vaultID, err := parseVaultID(msg.GetVaultId())
-		if err != nil {
-			continue
-		}
-
-		// StreamForwardRecords is exclusively the cross-node vault routing
-		// path since gastrolog-5c6fp — chunk-ID-preserving replication goes
-		// through ChunkReplication instead. Always append as a regular
-		// vault record.
-		for _, exportRec := range msg.GetRecords() {
-			rec := convert.ExportToRecord(exportRec)
-			if appendErr := s.recordAppender(stream.Context(), vaultID, rec); appendErr != nil {
-				if errors.Is(appendErr, ErrForwardTargetNotReady) {
-					s.logger.Debug("stream forward: append failed (target not ready)",
-						"vault", vaultID, "error", appendErr)
-				} else {
-					s.logger.Warn("stream forward: append failed",
-						"vault", vaultID, "error", appendErr)
-				}
-				continue
-			}
-			written++
-		}
-		s.forwardedReceived.Add(int64(len(msg.GetRecords())))
-	}
+// SetChunkGLCBPullServer injects the callback for streaming locally-held
+// GLCBs to peer homes recovering missing chunk replicas.
+func (s *Server) SetChunkGLCBPullServer(fn ChunkGLCBPullServer) {
+	s.chunkGLCBPullServer = fn
 }
 
 // forwardImportRecordsStreamHandler handles the client-streaming
@@ -320,7 +249,7 @@ func forwardImportRecordsStreamHandler(srv any, stream grpc.ServerStream) error 
 	err := s.recvOrShutdown(stream, first)
 	if errors.Is(err, io.EOF) {
 		// Empty stream — send zero-record response.
-		return stream.SendMsg(&gastrologv1.ForwardRecordsResponse{})
+		return stream.SendMsg(&gastrologv1.ForwardImportRecordsResponse{})
 	}
 	// Cluster server is shutting down — return cleanly. The iterator
 	// was never entered so no partial chunk state to worry about.
@@ -367,7 +296,7 @@ func forwardImportRecordsStreamHandler(srv any, stream grpc.ServerStream) error 
 		return status.Errorf(codes.Internal, "import records: %v", err)
 	}
 
-	return stream.SendMsg(&gastrologv1.ForwardRecordsResponse{RecordsWritten: count})
+	return stream.SendMsg(&gastrologv1.ForwardImportRecordsResponse{RecordsWritten: count})
 }
 
 // forwardFollowStreamHandler handles the server-streaming ForwardFollow RPC.
@@ -447,8 +376,9 @@ func forwardSearchStreamHandler(srv any, stream grpc.ServerStream) error {
 	if err != nil {
 		return err
 	}
+	_ = vaultID // validated; executor reads vault_id from req
 
-	searchIter, getToken, tableResult, histogram, err := s.searchExecutor(stream.Context(), vaultID, req.GetQuery(), req.GetResumeToken())
+	searchIter, getToken, tableResult, histogram, err := s.searchExecutor(stream.Context(), req)
 	if err != nil {
 		return status.Errorf(codes.Internal, "search: %v", err)
 	}
@@ -570,6 +500,18 @@ func (s *Server) forwardListChunks(ctx context.Context, req *gastrologv1.Forward
 	return &gastrologv1.ForwardListChunksResponse{Chunks: chunks}, nil
 }
 
+// forwardGetPipelineBacklog handles ForwardGetPipelineBacklog RPCs.
+func (s *Server) forwardGetPipelineBacklog(ctx context.Context, req *gastrologv1.ForwardGetPipelineBacklogRequest) (*gastrologv1.ForwardGetPipelineBacklogResponse, error) {
+	if s.pipelineBacklogDiskExecutor == nil {
+		return nil, status.Error(codes.Unavailable, "pipeline backlog executor not configured")
+	}
+	vaultID, err := parseVaultID(req.GetVaultId())
+	if err != nil {
+		return nil, err
+	}
+	return s.pipelineBacklogDiskExecutor(ctx, vaultID)
+}
+
 // forwardGetIndexes handles the ForwardGetIndexes RPC. Returns index status
 // for a chunk in a local vault.
 func (s *Server) forwardGetIndexes(ctx context.Context, req *gastrologv1.ForwardGetIndexesRequest) (*gastrologv1.ForwardGetIndexesResponse, error) {
@@ -666,15 +608,6 @@ func (s *Server) forwardSealVault(ctx context.Context, req *gastrologv1.ForwardS
 		return nil, status.Errorf(codes.Internal, "seal vault: %v", err)
 	}
 	return &gastrologv1.ForwardSealVaultResponse{}, nil
-}
-
-// ChunkSealExecutor seals a specific chunk on this node, gated on the
-// expected chunk ID. Invoked by the ChunkReplication stream handler.
-type ChunkSealExecutor func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID) error
-
-// SetChunkSealExecutor injects the callback for handling ChunkReplicationSeal commands.
-func (s *Server) SetChunkSealExecutor(fn ChunkSealExecutor) {
-	s.chunkSealExecutor = fn
 }
 
 // DeleteChunkExecutor deletes a specific sealed chunk from a vault on this
@@ -920,6 +853,174 @@ func pullManagedFileStreamHandler(srv any, stream grpc.ServerStream) error {
 	return nil
 }
 
+// pullFrameSize is the Data payload per streamed pull frame when the serve
+// seam copies through ReadFrom (io.Copy from an *os.File lands there). Sized
+// just under 1MB so the marshaled frame (payload + a few bytes of proto
+// framing) still fits grpc-go's largest pooled marshal-buffer tier (1MB in
+// mem.defaultBufferPoolSizes) instead of spilling to the fallback pool, and
+// stays far under the 4MB default client receive limit. Large frames
+// amortize per-frame SendMsg/flow-control/stats overhead ~32x versus the
+// 32KB io.Copy scratch that set the frame size before (gastrolog-47jm3m).
+const pullFrameSize = 1<<20 - 1<<10
+
+// pullFrameBufPool recycles the per-transfer frame buffer across pulls. The
+// recycle point is the end of ReadFrom: every SendMsg has returned by then,
+// and SendMsg fully marshals the frame into grpc's own pooled wire buffer
+// before returning (grpc-go stream.go serverStream.SendMsg -> prepareMsg ->
+// codecV2.Marshal), so nothing in the transport references the buffer after
+// the copy loop finishes.
+var pullFrameBufPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, pullFrameSize)
+		return &b
+	},
+}
+
+// copyFrames streams r through w in len(buf)-sized writes, reusing buf for
+// every frame. Only valid for writers whose Write fully consumes p before
+// returning — the no-copy SendMsg contract documented on
+// segmentChunkWriter.Write.
+func copyFrames(w io.Writer, r io.Reader, buf []byte) (int64, error) {
+	var total int64
+	for {
+		n, rerr := r.Read(buf)
+		if n > 0 {
+			if _, werr := w.Write(buf[:n]); werr != nil {
+				return total, werr
+			}
+			total += int64(n)
+		}
+		if rerr == io.EOF {
+			return total, nil
+		}
+		if rerr != nil {
+			return total, rerr
+		}
+	}
+}
+
+// segmentChunkWriter adapts the PullSegment server stream to an io.Writer so
+// the orchestrator's ServePull seam can stream segment bytes through it. Each
+// Write becomes one PullSegmentChunk frame. ReadFrom makes io.Copy stream
+// pullFrameSize frames through one reused buffer instead of its own 32KB
+// scratch (*os.File sources reach it via the generic WriteTo fallback).
+type segmentChunkWriter struct {
+	stream grpc.ServerStream
+	chunk  gastrologv1.PullSegmentChunk
+}
+
+func (w *segmentChunkWriter) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	// No per-frame copy: SendMsg marshals the message into the transport's
+	// wire buffer before returning, so p is fully consumed by the time
+	// io.Copy reuses its scratch. The copy this replaced was 17GB/run of
+	// garbage feeding GC sweep stalls (gastrolog-1xee1s). Constraint:
+	// nothing on the internode server may retain the message past SendMsg —
+	// serverStatsHandler reads only WireLength; a payload-retaining
+	// StatsHandler or codec would need the copy back.
+	w.chunk.Data = p
+	if err := w.stream.SendMsg(&w.chunk); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+// ReadFrom streams r to the client in pullFrameSize frames through one
+// pooled buffer per transfer. io.Copy prefers this over allocating its own
+// 32KB scratch, so a segment pull sends ~32x fewer frames with no per-frame
+// garbage. Reusing the buffer across SendMsg calls is safe under the same
+// contract as Write: SendMsg fully marshals the frame before returning.
+func (w *segmentChunkWriter) ReadFrom(r io.Reader) (int64, error) {
+	buf := pullFrameBufPool.Get().(*[]byte)
+	defer pullFrameBufPool.Put(buf)
+	return copyFrames(w, r, *buf)
+}
+
+// glcbChunkWriter adapts the PullChunkGLCB server stream to an io.Writer —
+// same shape as segmentChunkWriter, same no-copy SendMsg contract, same
+// pullFrameSize ReadFrom framing.
+type glcbChunkWriter struct {
+	stream grpc.ServerStream
+	chunk  gastrologv1.PullChunkGLCBChunk
+}
+
+func (w *glcbChunkWriter) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	w.chunk.Data = p
+	if err := w.stream.SendMsg(&w.chunk); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+// ReadFrom mirrors segmentChunkWriter.ReadFrom for GLCB replica pulls.
+func (w *glcbChunkWriter) ReadFrom(r io.Reader) (int64, error) {
+	buf := pullFrameBufPool.Get().(*[]byte)
+	defer pullFrameBufPool.Put(buf)
+	return copyFrames(w, r, *buf)
+}
+
+// pullChunkGLCBStreamHandler handles the server-streaming PullChunkGLCB RPC:
+// streams a locally-held sealed GLCB to a home recovering a missing replica.
+func pullChunkGLCBStreamHandler(srv any, stream grpc.ServerStream) error {
+	s := srv.(*Server)
+	if s.chunkGLCBPullServer == nil {
+		return status.Error(codes.Unavailable, "chunk GLCB pull server not configured")
+	}
+	req := &gastrologv1.PullChunkGLCBRequest{}
+	if err := stream.RecvMsg(req); err != nil {
+		return status.Errorf(codes.InvalidArgument, "receive request: %v", err)
+	}
+	vaultID, err := parseVaultID(req.GetVaultId())
+	if err != nil {
+		return status.Errorf(codes.InvalidArgument, "vault id: %v", err)
+	}
+	chunkID := chunk.ChunkID(glid.FromBytes(req.GetChunkId()))
+	w := &glcbChunkWriter{stream: stream}
+	if err := s.chunkGLCBPullServer(vaultID, chunkID, w); err != nil {
+		return status.Errorf(codes.NotFound, "serve GLCB %s/%s: %v", vaultID, chunkID, err)
+	}
+	return nil
+}
+
+// pullSegmentStreamHandler handles the server-streaming PullSegment RPC. Reads
+// the requested completed segment from the local distribution store and
+// streams it back in chunks (Rubicon C).
+func pullSegmentStreamHandler(srv any, stream grpc.ServerStream) error {
+	s := srv.(*Server)
+	if s.segmentPullServer == nil {
+		return status.Error(codes.Unavailable, "segment pull server not configured")
+	}
+
+	req := &gastrologv1.PullSegmentRequest{}
+	if err := stream.RecvMsg(req); err != nil {
+		return status.Errorf(codes.InvalidArgument, "receive request: %v", err)
+	}
+	vaultID, err := parseVaultID(req.GetVaultId())
+	if err != nil {
+		return status.Errorf(codes.InvalidArgument, "vault id: %v", err)
+	}
+	segmentID := glid.FromBytes(req.GetSegmentId())
+
+	w := &segmentChunkWriter{stream: stream}
+	if err := s.segmentPullServer(vaultID, segmentID, w); err != nil {
+		// Encode the seam's typed sentinel as a status code the pulling side
+		// can translate back into collection.ErrSegmentUnavailable — the wire
+		// carries a machine-readable code, never classification-bearing prose
+		// (gastrolog-466kq5). Anything else (open/copy failure mid-stream) is
+		// a real serving fault, not "try another holder later".
+		if errors.Is(err, collection.ErrSegmentUnavailable) {
+			return status.Errorf(codes.NotFound, "serve segment %s/%s: %v", vaultID, segmentID, err)
+		}
+		return status.Errorf(codes.Internal, "serve segment %s/%s: %v", vaultID, segmentID, err)
+	}
+	return nil
+}
+
 // clusterServiceDesc is a manually-defined gRPC ServiceDesc for
 // gastrolog.v1.ClusterService. We register this manually rather than using
 // protoc-gen-go-grpc to avoid generating unused gRPC stubs for all services
@@ -941,16 +1042,16 @@ var clusterServiceDesc = grpc.ServiceDesc{
 			Handler:    broadcastHandler,
 		},
 		{
-			MethodName: "ForwardRecords",
-			Handler:    forwardRecordsHandler,
-		},
-		{
 			MethodName: "ForwardGetContext",
 			Handler:    forwardGetContextHandler,
 		},
 		{
 			MethodName: "ForwardListChunks",
 			Handler:    forwardListChunksHandler,
+		},
+		{
+			MethodName: "ForwardGetPipelineBacklog",
+			Handler:    forwardGetPipelineBacklogHandler,
 		},
 		{
 			MethodName: "ForwardGetIndexes",
@@ -1042,9 +1143,14 @@ var clusterServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 		{
-			StreamName:    "StreamForwardRecords",
-			Handler:       streamForwardRecordsHandler,
-			ClientStreams: true,
+			StreamName:    "PullSegment",
+			Handler:       pullSegmentStreamHandler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "PullChunkGLCB",
+			Handler:       pullChunkGLCBStreamHandler,
+			ServerStreams: true,
 		},
 		{
 			StreamName:    "ForwardRPC",
@@ -1060,9 +1166,9 @@ type clusterServiceServer interface {
 	forwardApply(context.Context, *gastrologv1.ForwardApplyRequest) (*gastrologv1.ForwardApplyResponse, error)
 	enroll(context.Context, *gastrologv1.EnrollRequest) (*gastrologv1.EnrollResponse, error)
 	broadcast(context.Context, *gastrologv1.BroadcastRequest) (*gastrologv1.BroadcastResponse, error)
-	forwardRecords(context.Context, *gastrologv1.ForwardRecordsRequest) (*gastrologv1.ForwardRecordsResponse, error)
 	forwardGetContext(context.Context, *gastrologv1.ForwardGetContextRequest) (*gastrologv1.ForwardGetContextResponse, error)
 	forwardListChunks(context.Context, *gastrologv1.ForwardListChunksRequest) (*gastrologv1.ForwardListChunksResponse, error)
+	forwardGetPipelineBacklog(context.Context, *gastrologv1.ForwardGetPipelineBacklogRequest) (*gastrologv1.ForwardGetPipelineBacklogResponse, error)
 	forwardGetIndexes(context.Context, *gastrologv1.ForwardGetIndexesRequest) (*gastrologv1.ForwardGetIndexesResponse, error)
 	forwardValidateVault(context.Context, *gastrologv1.ForwardValidateVaultRequest) (*gastrologv1.ForwardValidateVaultResponse, error)
 	notifyEviction(context.Context, *gastrologv1.NotifyEvictionRequest) (*gastrologv1.NotifyEvictionResponse, error)
@@ -1115,25 +1221,6 @@ func forwardVaultApplyHandler(srv any, ctx context.Context, dec func(any) error,
 	return interceptor(ctx, req, info, handler)
 }
 
-func forwardRecordsHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	req := &gastrologv1.ForwardRecordsRequest{}
-	if err := dec(req); err != nil {
-		return nil, err
-	}
-	s := srv.(*Server)
-	if interceptor == nil {
-		return s.forwardRecords(ctx, req)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/gastrolog.v1.ClusterService/ForwardRecords",
-	}
-	handler := func(ctx context.Context, req any) (any, error) {
-		return s.forwardRecords(ctx, req.(*gastrologv1.ForwardRecordsRequest))
-	}
-	return interceptor(ctx, req, info, handler)
-}
-
 func forwardGetContextHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
 	req := &gastrologv1.ForwardGetContextRequest{}
 	if err := dec(req); err != nil {
@@ -1168,6 +1255,25 @@ func forwardListChunksHandler(srv any, ctx context.Context, dec func(any) error,
 	}
 	handler := func(ctx context.Context, req any) (any, error) {
 		return s.forwardListChunks(ctx, req.(*gastrologv1.ForwardListChunksRequest))
+	}
+	return interceptor(ctx, req, info, handler)
+}
+
+func forwardGetPipelineBacklogHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	req := &gastrologv1.ForwardGetPipelineBacklogRequest{}
+	if err := dec(req); err != nil {
+		return nil, err
+	}
+	s := srv.(*Server)
+	if interceptor == nil {
+		return s.forwardGetPipelineBacklog(ctx, req)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/gastrolog.v1.ClusterService/ForwardGetPipelineBacklog",
+	}
+	handler := func(ctx context.Context, req any) (any, error) {
+		return s.forwardGetPipelineBacklog(ctx, req.(*gastrologv1.ForwardGetPipelineBacklogRequest))
 	}
 	return interceptor(ctx, req, info, handler)
 }

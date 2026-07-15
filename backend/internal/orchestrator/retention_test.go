@@ -2,21 +2,33 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"gastrolog/internal/glid"
 	"log/slog"
+	"runtime"
+	"slices"
+	"sync"
 	"testing"
 	"time"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
 	"gastrolog/internal/system"
+	"gastrolog/internal/vaultraft/vaultctlfsm"
+
+	hraft "github.com/hashicorp/raft"
 )
 
 // ---------- fake chunk manager ----------
 
 type retentionFakeChunkManager struct {
-	chunks  []chunk.ChunkMeta
+	chunks []chunk.ChunkMeta
+
+	// mu guards deleted: the retention sweep deletes matched chunks from
+	// retentionChunkWorkers goroutines concurrently. Reads after sweep() are
+	// safe without locking (the sweep joins its workers before returning).
+	mu      sync.Mutex
 	deleted []chunk.ChunkID
 }
 
@@ -32,6 +44,8 @@ func (f *retentionFakeChunkManager) List() ([]chunk.ChunkMeta, error) {
 	return f.chunks, nil
 }
 func (f *retentionFakeChunkManager) Delete(id chunk.ChunkID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.deleted = append(f.deleted, id)
 	return nil
 }
@@ -74,6 +88,8 @@ func (f *retentionFakeChunkManager) Close() error                   { return nil
 // ---------- fake index manager ----------
 
 type retentionFakeIndexManager struct {
+	// mu guards deleted; see retentionFakeChunkManager.mu.
+	mu      sync.Mutex
 	deleted []chunk.ChunkID
 }
 
@@ -81,6 +97,8 @@ func (f *retentionFakeIndexManager) BuildIndexes(ctx context.Context, chunkID ch
 	return nil
 }
 func (f *retentionFakeIndexManager) DeleteIndexes(chunkID chunk.ChunkID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.deleted = append(f.deleted, chunkID)
 	return nil
 }
@@ -120,17 +138,23 @@ func (f *retentionFakeIndexManager) FindIngestEntryIndex(chunkID chunk.ChunkID, 
 func (f *retentionFakeIndexManager) FindSourceEntryIndex(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error) {
 	return 0, false, index.ErrIndexNotFound
 }
+func (f *retentionFakeIndexManager) IngestIndexLen(chunkID chunk.ChunkID) (uint64, error) {
+	return 0, index.ErrIndexNotFound
+}
+func (f *retentionFakeIndexManager) IngestIndexEntryAt(chunkID chunk.ChunkID, rank uint64) (index.TSEntry, error) {
+	return index.TSEntry{}, index.ErrIndexNotFound
+}
+func (f *retentionFakeIndexManager) SourceIndexLen(chunkID chunk.ChunkID) (uint64, error) {
+	return 0, index.ErrIndexNotFound
+}
+func (f *retentionFakeIndexManager) SourceIndexEntryAt(chunkID chunk.ChunkID, rank uint64) (index.TSEntry, error) {
+	return index.TSEntry{}, index.ErrIndexNotFound
+}
 func (f *retentionFakeIndexManager) OpenJSONPathIndex(chunkID chunk.ChunkID) (*index.Index[index.JSONPathIndexEntry], index.JSONIndexStatus, error) {
 	return nil, index.JSONComplete, nil
 }
 func (f *retentionFakeIndexManager) OpenJSONPVIndex(chunkID chunk.ChunkID) (*index.Index[index.JSONPVIndexEntry], index.JSONIndexStatus, error) {
 	return nil, index.JSONComplete, nil
-}
-func (f *retentionFakeIndexManager) LoadIngestEntries(chunkID chunk.ChunkID) ([]index.TSEntry, error) {
-	return nil, index.ErrIndexNotFound
-}
-func (f *retentionFakeIndexManager) LoadSourceEntries(chunkID chunk.ChunkID) ([]index.TSEntry, error) {
-	return nil, index.ErrIndexNotFound
 }
 func (f *retentionFakeIndexManager) IndexSizes(chunkID chunk.ChunkID) map[string]int64 {
 	return map[string]int64{}
@@ -161,6 +185,50 @@ func newRetentionRunner(cm chunk.ChunkManager, im index.IndexManager, policy chu
 	return r, rules
 }
 
+func TestSweepTTLAnchorsOnOverlaySealedAt(t *testing.T) {
+	now := time.Date(2026, 6, 24, 23, 0, 0, 0, time.UTC)
+	writeEnd := now.Add(-4 * time.Hour)
+	sealedAt := now.Add(-10 * time.Minute)
+
+	chunkID := chunk.NewChunkID()
+	fsm := vaultctlfsm.New()
+	opened := writeEnd.Add(-time.Hour)
+	if result := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(chunkID, opened, opened, opened)}); result != nil {
+		t.Fatalf("create: %v", result)
+	}
+	if result := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(
+		chunkID, writeEnd, 1000, 100, opened, writeEnd, writeEnd, true, sealedAt,
+	)}); result != nil {
+		t.Fatalf("seal: %v", result)
+	}
+
+	cm := &retentionFakeChunkManager{
+		chunks: []chunk.ChunkMeta{{
+			ID: chunkID, WriteEnd: writeEnd, Sealed: true,
+		}},
+	}
+	vaultID := glid.New()
+	inst := &VaultInstance{VaultID: vaultID}
+	inst.applyRaftCallbacks(buildVaultRaftCallbacks(nil, fsm, nil))
+	orch := &Orchestrator{vaults: map[glid.GLID]*Vault{vaultID: {ID: vaultID, Instance: inst}}}
+
+	r := &retentionRunner{
+		isLeader: true,
+		vaultID:  vaultID,
+		cm:       cm,
+		im:       &retentionFakeIndexManager{},
+		orch:     orch,
+		now:      func() time.Time { return now },
+		logger:   slog.Default(),
+	}
+	r.sweep([]retentionRule{{policy: chunk.NewTTLRetentionPolicy(time.Hour)}})
+
+	if len(cm.deleted) != 0 {
+		t.Fatalf("chunk sealed %v ago must survive 1h TTL; deleted=%v writeEnd=%v",
+			now.Sub(sealedAt), cm.deleted, writeEnd)
+	}
+}
+
 // ---------- tests ----------
 
 func TestSweepDeletesExpiredChunks(t *testing.T) {
@@ -186,26 +254,25 @@ func TestSweepDeletesExpiredChunks(t *testing.T) {
 
 	r.sweep(rules)
 
-	// With max 2, the 2 oldest (id0, id1) should be deleted.
+	// With max 2, the 2 oldest (id0, id1) should be deleted. Parallel chunk
+	// workers may complete in any order.
+	wantDeleted := []chunk.ChunkID{id0, id1}
 	if len(cm.deleted) != 2 {
 		t.Fatalf("expected 2 chunk deletions, got %d", len(cm.deleted))
 	}
-	if cm.deleted[0] != id0 {
-		t.Errorf("expected first deleted chunk %s, got %s", id0, cm.deleted[0])
-	}
-	if cm.deleted[1] != id1 {
-		t.Errorf("expected second deleted chunk %s, got %s", id1, cm.deleted[1])
+	for _, id := range wantDeleted {
+		if !slices.Contains(cm.deleted, id) {
+			t.Errorf("expected deleted chunk %s, got %v", id, cm.deleted)
+		}
 	}
 
-	// Indexes should be deleted first (same IDs, same order).
 	if len(im.deleted) != 2 {
 		t.Fatalf("expected 2 index deletions, got %d", len(im.deleted))
 	}
-	if im.deleted[0] != id0 {
-		t.Errorf("expected first deleted index %s, got %s", id0, im.deleted[0])
-	}
-	if im.deleted[1] != id1 {
-		t.Errorf("expected second deleted index %s, got %s", id1, im.deleted[1])
+	for _, id := range wantDeleted {
+		if !slices.Contains(im.deleted, id) {
+			t.Errorf("expected deleted index %s, got %v", id, im.deleted)
+		}
 	}
 }
 
@@ -274,6 +341,69 @@ func TestSweepWithNoBindings(t *testing.T) {
 	}
 }
 
+// TestSweepGoroutineCountBounded pins the gastrolog-33eabj fix: a sweep
+// matching many chunks must process them through a worker pool of
+// retentionChunkWorkers goroutines pulling from a channel — NOT spawn one
+// goroutine per matched chunk parked on a semaphore (668 were observed
+// waiting on chunkSem in a live profile). All synchronization is by channel
+// handshake; there are no timing assertions.
+func TestSweepGoroutineCountBounded(t *testing.T) {
+	const total = 65 // keep-1 policy matches 64 chunks
+
+	base := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	metas := make([]chunk.ChunkMeta, total)
+	for i := range metas {
+		metas[i] = chunk.ChunkMeta{
+			ID:         chunk.NewChunkID(),
+			WriteStart: base.Add(time.Duration(i) * time.Minute),
+			WriteEnd:   base.Add(time.Duration(i)*time.Minute + 30*time.Second),
+			Sealed:     true,
+		}
+	}
+	cm := &retentionFakeChunkManager{chunks: metas}
+	im := &retentionFakeIndexManager{}
+
+	r, rules := newRetentionRunner(cm, im, chunk.NewCountRetentionPolicy(1))
+
+	// Block the first worker inside tryRetainChunk (in the retention-pending
+	// apply, before any delete machinery) and take a goroutine census while
+	// it is provably parked. In the new shape every goroutine the sweep will
+	// ever spawn for the rule already exists at that point — the pool spawns
+	// before the first job is sent. Returning an error skips expireChunk.
+	entered := make(chan struct{}, total)
+	release := make(chan struct{})
+	r.applyRaftRetentionPending = func(chunk.ChunkID) error {
+		entered <- struct{}{}
+		<-release
+		return errors.New("held for goroutine census")
+	}
+
+	baseline := runtime.NumGoroutine()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		r.sweep(rules)
+	}()
+
+	<-entered // a worker is inside the blocked apply
+
+	during := runtime.NumGoroutine()
+	// Budget: the pool workers, the sweep goroutine itself, and a little
+	// slack for unrelated runtime goroutines. The old spawn-per-chunk shape
+	// measured baseline+matched (~64) here and must fail this bound.
+	if limit := baseline + retentionChunkWorkers + 4; during > limit {
+		t.Fatalf("sweep goroutine count unbounded: %d during sweep (baseline %d, limit %d, workers %d, matched %d)",
+			during, baseline, limit, retentionChunkWorkers, total-1)
+	}
+
+	close(release)
+	<-done
+
+	if len(cm.deleted) != 0 {
+		t.Fatalf("failed retention-pending apply must not delete chunks; deleted=%v", cm.deleted)
+	}
+}
+
 func TestSetBindingsHotSwap(t *testing.T) {
 	base := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 
@@ -309,11 +439,12 @@ func TestSetBindingsHotSwap(t *testing.T) {
 	if len(cm.deleted) != 2 {
 		t.Fatalf("expected 2 chunk deletions after rule swap, got %d", len(cm.deleted))
 	}
-	if cm.deleted[0] != id0 {
-		t.Errorf("expected first deleted chunk %s, got %s", id0, cm.deleted[0])
-	}
-	if cm.deleted[1] != id1 {
-		t.Errorf("expected second deleted chunk %s, got %s", id1, cm.deleted[1])
+	// The sweep deletes matched chunks from parallel workers; inter-chunk
+	// order is intentionally unspecified (gastrolog-2fvcb5).
+	for _, id := range []chunk.ChunkID{id0, id1} {
+		if !slices.Contains(cm.deleted, id) {
+			t.Errorf("expected deleted chunk %s, got %v", id, cm.deleted)
+		}
 	}
 }
 
@@ -339,7 +470,7 @@ func TestExpireChunkProposesRequestDelete(t *testing.T) {
 	)
 	vaultInst := &VaultInstance{
 		VaultID: vaultID,
-		Chunks: cm,
+		Chunks:  cm,
 		Indexes: im,
 		FollowerTargets: []system.ReplicationTarget{
 			{NodeID: "node-B", StorageID: "s-B"},
@@ -403,7 +534,7 @@ func TestExpireChunkSkipsLocalOnRequestDeleteFailure(t *testing.T) {
 
 	vaultID := glid.New()
 	vaultInst := &VaultInstance{
-		VaultID:  vaultID,
+		VaultID: vaultID,
 		Chunks:  cm,
 		Indexes: im,
 		ApplyRaftRequestDelete: func(_ chunk.ChunkID, _ string, _ []string) error {
@@ -418,8 +549,8 @@ func TestExpireChunkSkipsLocalOnRequestDeleteFailure(t *testing.T) {
 		cm:         cm,
 		im:         im,
 		reconciler: rec,
-		now:    time.Now,
-		logger: slog.Default(),
+		now:        time.Now,
+		logger:     slog.Default(),
 	}
 
 	r.expireChunk(id, "retention-ttl")
@@ -440,6 +571,8 @@ func (l testSystemLoader) Load(_ context.Context) (*system.System, error) {
 
 func strPtr(s string) *string { return &s }
 
+func int64Ptr(v int64) *int64 { return &v }
+
 // ==========================================================================
 // Multi-node retention sweep tests
 //
@@ -455,6 +588,9 @@ func strPtr(s string) *string { return &s }
 //   - Retained chunks (3 newest) still readable on leader AND all followers
 //   - Expired chunk directories removed from disk on ALL nodes
 func TestClusterRetentionSweepDeletesOnAllNodes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node convergence test")
+	}
 	if raceEnabled {
 		t.Skip("flaky under -race: same root cause as TestClusterRetentionSweepWithTTLOnAllNodes — manual replicateSealedChunk calls race with fire-and-forget peer forwards under parallel load, producing over-replication (1100 records when 1000 were ingested). Production doesn't hit this path (no synchronous replicateSealedChunk after ingestion).")
 	}
@@ -509,7 +645,6 @@ func TestClusterRetentionSweepDeletesOnAllNodes(t *testing.T) {
 	const keepN = 3
 	rules := []retentionRule{{
 		policy: chunk.NewCountRetentionPolicy(keepN),
-		
 	}}
 	runner := newClusterRetentionRunner(leaderNode.orch, h.vaultID, leaderInst)
 	runner.sweep(rules)
@@ -551,6 +686,9 @@ func TestClusterRetentionSweepDeletesOnAllNodes(t *testing.T) {
 // TestClusterRetentionSweepWithTTLOnAllNodes uses a TTL policy (expire chunks
 // older than 1 minute) with a frozen clock. Verifies cross-node cleanup.
 func TestClusterRetentionSweepWithTTLOnAllNodes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node convergence test")
+	}
 	t.Parallel()
 	h := setupCluster(t, []string{"leader", "f1", "f2", "f3"}, 1, 50)
 
@@ -588,7 +726,6 @@ func TestClusterRetentionSweepWithTTLOnAllNodes(t *testing.T) {
 	frozenNow := time.Now().Add(5 * time.Minute)
 	rules := []retentionRule{{
 		policy: chunk.NewTTLRetentionPolicy(1 * time.Minute),
-		
 	}}
 	runner := newClusterRetentionRunner(leaderNode.orch, h.vaultID, leaderInst)
 	runner.now = func() time.Time { return frozenNow }
@@ -614,7 +751,7 @@ func TestRetentionTargetRefreshesCmOnExistingRunner(t *testing.T) {
 
 	// Vault and instance share the same ID.
 	vaultID := glid.New()
-	
+
 	policyID := glid.New()
 
 	cm1 := &retentionFakeChunkManager{}
@@ -631,8 +768,8 @@ func TestRetentionTargetRefreshesCmOnExistingRunner(t *testing.T) {
 			}},
 		}},
 		RetentionPolicies: []system.RetentionPolicyConfig{{
-			ID:     policyID,
-			MaxAge: strPtr("1h"),
+			ID:          policyID,
+			MaxAgeNanos: int64Ptr(int64(time.Hour)),
 		}},
 	}
 
@@ -647,7 +784,7 @@ func TestRetentionTargetRefreshesCmOnExistingRunner(t *testing.T) {
 
 	// First call: creates a new runner with cm1/im1.
 	vaultA := &VaultInstance{
-		VaultID:  vaultID,
+		VaultID: vaultID,
 		Chunks:  cm1,
 		Indexes: im1,
 	}
@@ -666,7 +803,7 @@ func TestRetentionTargetRefreshesCmOnExistingRunner(t *testing.T) {
 
 	// Second call with different chunk manager: runner is reused, cm/im refreshed.
 	vaultB := &VaultInstance{
-		VaultID:  vaultID,
+		VaultID: vaultID,
 		Chunks:  cm2,
 		Indexes: im2,
 	}

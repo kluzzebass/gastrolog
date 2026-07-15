@@ -17,13 +17,13 @@ import (
 func FuzzNodeStatsDeserialize(f *testing.F) {
 	// Seed with a valid NodeStats message.
 	valid := &gastrologv1.NodeStats{
-		NodeName:    "node-1",
-		Version:     "1.0.0",
-		CpuPercent:  42.5,
-		MemoryRss:   1024 * 1024 * 512,
-		Goroutines:  100,
-		RaftState:   "Leader",
-		ApiAddress:  ":4564",
+		NodeName:   "node-1",
+		Version:    "1.0.0",
+		CpuPercent: 42.5,
+		MemoryRss:  1024 * 1024 * 512,
+		Goroutines: 100,
+		RaftState:  "Leader",
+		ApiAddress: ":4564",
 		Vaults: []*gastrologv1.VaultStats{
 			{Id: []byte("abc"), Name: "default", RecordCount: 1000, DataBytes: 999},
 		},

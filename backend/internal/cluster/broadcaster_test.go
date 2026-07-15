@@ -22,12 +22,12 @@ import (
 
 // fakePeerSource implements broadcastPeerSource without touching Raft.
 type fakePeerSource struct {
-	mu             sync.Mutex
-	peers          []hraft.Server // ordered list; returned by Peers()
-	conns          map[string]*grpc.ClientConn
-	connErrors     map[string]error // dial errors by node ID
-	invalidated    map[string]int   // count of Invalidate calls per node
-	peersErr       error            // set to simulate Peers() failure
+	mu          sync.Mutex
+	peers       []hraft.Server // ordered list; returned by Peers()
+	conns       map[string]*grpc.ClientConn
+	connErrors  map[string]error // dial errors by node ID
+	invalidated map[string]int   // count of Invalidate calls per node
+	peersErr    error            // set to simulate Peers() failure
 }
 
 func newFakePeerSource() *fakePeerSource {
@@ -47,6 +47,18 @@ func (f *fakePeerSource) Peers() ([]hraft.Server, error) {
 	out := make([]hraft.Server, len(f.peers))
 	copy(out, f.peers)
 	return out, nil
+}
+
+func (f *fakePeerSource) InvokeService(ctx context.Context, id, purpose, method string, req, resp any) error {
+	conn, err := f.Conn(id)
+	if err != nil {
+		return err
+	}
+	if err := conn.Invoke(ctx, method, req, resp); err != nil {
+		f.Invalidate(id, err)
+		return err
+	}
+	return nil
 }
 
 func (f *fakePeerSource) Conn(id string) (*grpc.ClientConn, error) {
@@ -222,6 +234,9 @@ func TestSend_AllPeersReceive(t *testing.T) {
 // fix is to make Send fire-and-forget. Callers (StatsCollector) push
 // their local state; they don't wait for peer acknowledgment.
 func TestSend_ReturnsImmediatelyEvenWithSlowPeer(t *testing.T) {
+	if testing.Short() {
+		t.Skip("waits out a real 2s broadcast timeout for the slow peer; -short skips")
+	}
 	fp := newFakePeerSource()
 
 	fastDone := make(chan string, 3)

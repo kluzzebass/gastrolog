@@ -187,4 +187,3 @@ func queryLeader(ctx context.Context, addr string, creds credentials.TransportCr
 	}
 	return resp.GetAddress(), nil
 }
-

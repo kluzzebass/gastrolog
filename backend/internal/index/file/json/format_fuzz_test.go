@@ -17,11 +17,11 @@ func FuzzDecodeJSONIndex(f *testing.F) {
 	// Offsets: dict at fileHeaderSize, 0 entries for everything, blob at fileHeaderSize
 	off := format.HeaderSize + statusSize
 	binary.LittleEndian.PutUint32(valid[off:], uint32(fileHeaderSize))    // dictOffset
-	binary.LittleEndian.PutUint32(valid[off+4:], 0)                      // dictCount
+	binary.LittleEndian.PutUint32(valid[off+4:], 0)                       // dictCount
 	binary.LittleEndian.PutUint32(valid[off+8:], uint32(fileHeaderSize))  // pathOffset
-	binary.LittleEndian.PutUint32(valid[off+12:], 0)                     // pathCount
+	binary.LittleEndian.PutUint32(valid[off+12:], 0)                      // pathCount
 	binary.LittleEndian.PutUint32(valid[off+16:], uint32(fileHeaderSize)) // pvOffset
-	binary.LittleEndian.PutUint32(valid[off+20:], 0)                     // pvCount
+	binary.LittleEndian.PutUint32(valid[off+20:], 0)                      // pvCount
 	binary.LittleEndian.PutUint32(valid[off+24:], uint32(fileHeaderSize)) // blobOffset
 	f.Add(valid)
 
@@ -39,7 +39,7 @@ func FuzzDecodeJSONIndex(f *testing.F) {
 	blobOff := pvOff
 	o := format.HeaderSize + statusSize
 	binary.LittleEndian.PutUint32(buf[o:], dictOff)
-	binary.LittleEndian.PutUint32(buf[o+4:], 1)  // dictCount=1
+	binary.LittleEndian.PutUint32(buf[o+4:], 1) // dictCount=1
 	binary.LittleEndian.PutUint32(buf[o+8:], pathOff)
 	binary.LittleEndian.PutUint32(buf[o+12:], 1) // pathCount=1
 	binary.LittleEndian.PutUint32(buf[o+16:], pvOff)

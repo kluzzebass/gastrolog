@@ -15,6 +15,7 @@ import (
 type IngestMessage struct {
 	Attrs      map[string]string
 	Raw        []byte
+	RawOwned   bool         // true when Raw is a fresh allocation safe to transfer
 	SourceTS   time.Time    // when the log was generated at the source (zero if unknown)
 	IngestTS   time.Time    // when the ingester received this message
 	IngesterID string       // identity of the ingester that produced this message

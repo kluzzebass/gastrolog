@@ -6,10 +6,12 @@ import (
 	"log/slog"
 	"math/rand"
 	"slices"
+	"sort"
 	"strings"
 
 	"gastrolog/internal/alert"
 	"gastrolog/internal/cluster"
+	"gastrolog/internal/glid"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/system"
 
@@ -41,6 +43,14 @@ type placementManager struct {
 	localNodeID string
 	logger      *slog.Logger
 	triggerCh   chan struct{} // poked to run reconcile immediately
+
+	// localVaultDiskProtected reports whether THIS node's backing volume
+	// for the vault is under disk protect. Peers' protect state arrives
+	// via the NodeStats broadcast (PeerState.VaultDiskProtectedNodes);
+	// the local node does not appear in its own peer table, so the
+	// degraded-home alarm needs this direct orchestrator lookup. Nil in
+	// tests that don't exercise the local-degraded case.
+	localVaultDiskProtected func(glid.GLID) bool
 }
 
 // Run blocks until ctx is cancelled. Handles the two event-driven
@@ -167,11 +177,88 @@ func (pm *placementManager) reconcile(ctx context.Context) {
 		}
 	}
 
+	nodeNames := make(map[string]string, len(nodeConfigs))
+	for _, n := range nodeConfigs {
+		id := n.ID.String()
+		if n.Name != "" {
+			nodeNames[id] = n.Name
+		} else {
+			nodeNames[id] = id
+		}
+	}
+
 	for _, v := range vaults {
 		pm.placeVault(ctx, v, alive, nodeStates, nscs, vaultCount)
+		pm.reportDegradedHomes(ctx, v, alive, nscs, nodeNames)
 	}
 
 	pm.reconcileSingletonIngesters(ctx, alive)
+}
+
+// reportDegradedHomes raises (or clears) the vault-home-cannot-store alarm
+// (gastrolog-38bm9t): a placement member whose local backing volume for
+// this vault is under disk protect is a degraded holder — it can't take
+// collection writes or build GLCBs. selectFollowers backfills a healthy
+// eligible replica AUTOMATICALLY (the degraded member stops counting
+// toward RF but is retained), so the alarm's job is visibility: name the
+// degraded home and say whether the backfill restored RF storable members
+// or the topology has no spare and admission is throttling at the source.
+// Runs after placeVault, so it reports the post-backfill placement.
+func (pm *placementManager) reportDegradedHomes(ctx context.Context, v system.VaultConfig, alive map[string]bool, nscs []system.NodeStorageConfig, nodeNames map[string]string) {
+	if pm.alerts == nil {
+		return
+	}
+	alertKey := fmt.Sprintf("vault-home-cannot-store:%s", v.ID)
+
+	placements, _ := pm.cfgStore.GetVaultPlacements(ctx, v.ID)
+	homes := make(map[string]bool)
+	if leader := system.LeaderNodeID(placements, nscs); leader != "" {
+		homes[leader] = true
+	}
+	for _, nid := range system.FollowerNodeIDs(placements, nscs) {
+		if nid != "" {
+			homes[nid] = true
+		}
+	}
+	if len(homes) == 0 {
+		pm.alerts.Clear(alertKey)
+		return
+	}
+
+	protected := pm.vaultDiskProtectedSet(v.ID)
+	var degraded []string
+	healthy := 0
+	for nid := range homes {
+		if protected[nid] {
+			degraded = append(degraded, nameOrID(nodeNames, nid))
+		} else {
+			healthy++
+		}
+	}
+	if len(degraded) == 0 {
+		pm.alerts.Clear(alertKey)
+		return
+	}
+	sort.Strings(degraded)
+
+	rf := int(v.ReplicationFactor)
+	if rf <= 0 {
+		rf = 1
+	}
+	remedy := fmt.Sprintf("healthy replicas backfilled automatically (%d storable members)", healthy)
+	if healthy < rf {
+		remedy = fmt.Sprintf("no eligible replacement node — %d of %d storable members; admission for this vault throttles at the source until space frees", healthy, rf)
+	}
+	pm.alerts.Set(alertKey, alert.Warning, "placement",
+		fmt.Sprintf("Vault %q: home %s cannot store (disk protect) — collection and builds are paused there; %s",
+			v.Name, strings.Join(degraded, ", "), remedy))
+}
+
+func nameOrID(names map[string]string, id string) string {
+	if n, ok := names[id]; ok && n != "" {
+		return n
+	}
+	return id
 }
 
 // reconcileSingletonIngesters assigns each singleton ingester to exactly one
@@ -308,7 +395,29 @@ func (pm *placementManager) placeVault(ctx context.Context, v system.VaultConfig
 		case system.NodeStateUnknown, system.NodeStateLive:
 			// Live state (and legacy Unknown which maps to Live via
 			// EffectiveState during nodeStates construction): fall
-			// through to the existing alive/eligible checks below.
+			// through to the eligibility check below — unless the
+			// heartbeat says the node just went quiet.
+			//
+			// Two-clock inversion (gastrolog-2d35dc): heartbeat
+			// liveness (peer TTL, ~8s) must never move a leader — only
+			// the node lifecycle state machine may. A leader that is
+			// state-Live but heartbeat-absent is in the pre-Unreachable
+			// window (the unreachable sweep flips the state after its
+			// 5-minute grace); before this guard, the alive[] check
+			// below reassigned leadership ~26s into any blip — exactly
+			// the transient absence slc6l's soft-offline gate promised
+			// to protect, orphaning the returning node's chunks at
+			// RF=1. Same treatment as Unreachable: retain placement,
+			// alert, reconcile followers only.
+			if !alive[currentLeader] {
+				if pm.alerts != nil {
+					pm.alerts.Set(softOfflineAlertKey, alert.Warning, "placement",
+						fmt.Sprintf("Vault %q leader heartbeat lost on node %s (state still Live) — placement retained, rotation gated until the node lifecycle state changes",
+							v.Name, currentLeader))
+				}
+				pm.placeFollowers(ctx, &v, alive, nscs, vaultCount)
+				return
+			}
 		case system.NodeStateUnreachable, system.NodeStateMaintenance:
 			if pm.alerts != nil {
 				pm.alerts.Set(softOfflineAlertKey, alert.Warning, "placement",
@@ -328,8 +437,11 @@ func (pm *placementManager) placeVault(ctx context.Context, v system.VaultConfig
 		pm.alerts.Clear(softOfflineAlertKey)
 	}
 
-	// Current leader assignment still valid — check followers too.
-	if currentLeader != "" && alive[currentLeader] && pm.nodeEligible(v, currentLeader, nscs) {
+	// Current leader assignment still valid — check followers too. The
+	// leader is guaranteed heartbeat-alive on this path (the two-clock
+	// guard above returned otherwise), so only eligibility (storage
+	// config) can invalidate it here.
+	if currentLeader != "" && pm.nodeEligible(v, currentLeader, nscs) {
 		if pm.alerts != nil {
 			pm.alerts.Clear(alertKey)
 		}
@@ -350,9 +462,22 @@ func (pm *placementManager) placeVault(ctx context.Context, v system.VaultConfig
 	}
 
 	old := currentLeader
-	// Replace the leader placement.
+	// Replace the leader placement. StorageIDForNode is strict: "" means the
+	// selected node lost its matching storage class since the eligibility
+	// check — refuse the placement loudly rather than land the leader on the
+	// wrong disk class (gastrolog-2bv1x).
+	storageID := system.StorageIDForNode(best, v, nscs)
+	if storageID == "" {
+		pm.logger.Error("placement: no storage of required class on selected node; refusing leader placement",
+			"vault", v.ID, "name", v.Name, "node", best, "class", v.StorageClass)
+		if pm.alerts != nil {
+			pm.alerts.Set(alertKey, alert.Error, "placement",
+				fmt.Sprintf("Vault %q: selected node %s has no storage of class %d", v.Name, best, v.StorageClass))
+		}
+		return
+	}
 	oldP, _ := pm.cfgStore.GetVaultPlacements(context.Background(), v.ID)
-	newP := replaceLeaderPlacement(oldP, system.StorageIDForNode(best, v, nscs))
+	newP := replaceLeaderPlacement(oldP, storageID)
 	if err := pm.cfgStore.SetVaultPlacements(ctx, v.ID, newP); err != nil {
 		pm.logger.Error("placement: assign vault", "vault", v.ID, "name", v.Name, "node", best, "error", err)
 		return
@@ -392,19 +517,34 @@ func replaceLeaderPlacement(placements []system.VaultPlacement, storageID string
 // Prefers storages on different nodes (availability), falls back to different storages on
 // the same node (redundancy). Never places two replicas on the same file storage.
 func (pm *placementManager) placeFollowers(ctx context.Context, v *system.VaultConfig, alive map[string]bool, nscs []system.NodeStorageConfig, vaultCount map[string]int) {
-	desired := int(v.ReplicationFactor) - 1
-	if desired <= 0 {
-		pm.clearStaleFollowers(ctx, v, nscs, vaultCount)
-		return
-	}
-
 	leaderStorageID := system.LeaderStorageID(func() []system.VaultPlacement {
 		p, _ := pm.cfgStore.GetVaultPlacements(context.Background(), v.ID)
 		return p
 	}())
 	leaderNodeID := system.NodeIDForStorage(leaderStorageID, nscs)
+
+	// Degraded-home backfill (gastrolog-38bm9t): members whose local
+	// volume for this vault is under disk protect stop counting toward
+	// RF; the healthy-follower target grows so an eligible node becomes
+	// a replica automatically. A degraded LEADER raises the target even
+	// for RF=1 vaults — the state guards retain its leadership, but the
+	// vault still needs one member that can actually store.
+	degraded := pm.vaultDiskProtectedSet(v.ID)
+	rf := int(v.ReplicationFactor)
+	if rf <= 0 {
+		rf = 1 // unset RF means a single copy
+	}
+	target := rf - 1
+	if degraded[leaderNodeID] {
+		target++
+	}
+	if target <= 0 {
+		pm.clearStaleFollowers(ctx, v, nscs, vaultCount)
+		return
+	}
+
 	candidates := pm.followerCandidates(*v, leaderStorageID, leaderNodeID, alive, nscs, vaultCount)
-	kept := pm.selectFollowers(v, desired, leaderStorageID, leaderNodeID, candidates, nscs, alive, vaultCount)
+	kept, healthy := pm.selectFollowers(v, target, leaderStorageID, leaderNodeID, degraded, candidates, nscs, alive, vaultCount)
 
 	// Build new placements.
 	newPlacements := []system.VaultPlacement{{StorageID: leaderStorageID, Leader: true}}
@@ -422,7 +562,7 @@ func (pm *placementManager) placeFollowers(ctx context.Context, v *system.VaultC
 			"vault", v.ID, "name", v.Name, "placements", len(newPlacements))
 	}
 
-	pm.alertReplication(v, len(kept), desired)
+	pm.alertReplication(v, healthy, target)
 }
 
 // clearStaleFollowers removes leftover follower placements when RF <= 1.
@@ -472,39 +612,88 @@ func (pm *placementManager) followerCandidates(v system.VaultConfig, leaderStora
 
 // selectFollowers picks follower placements: retains existing valid ones first,
 // then fills from sorted candidates.
-func (pm *placementManager) selectFollowers(v *system.VaultConfig, desired int, leaderStorageID, leaderNodeID string, candidates []eligibleStorage, nscs []system.NodeStorageConfig, alive map[string]bool, vaultCount map[string]int) []system.VaultPlacement {
+// selectFollowers picks the follower placements: existing healthy members
+// up to target (the cap trims surplus after recovery or an RF decrease),
+// degraded members unconditionally retained, and healthy eligible
+// candidates backfilled until target healthy followers exist. Returns the
+// placements and the healthy-follower count.
+//
+// Degraded-home backfill (gastrolog-38bm9t): a placement member whose
+// local volume for this vault is under disk protect cannot take
+// collection writes or build GLCBs, so it stops COUNTING toward the
+// replication factor — but it is never dropped here (its bytes may
+// recover when space frees; removal is the operator's call). Healthy
+// eligible candidates backfill automatically so the vault keeps RF
+// storable members and the release gate keeps moving. When the degraded
+// member recovers it counts again, and the healthy cap trims the
+// placement back on a later pass.
+func (pm *placementManager) selectFollowers(v *system.VaultConfig, target int, leaderStorageID, leaderNodeID string, degraded map[string]bool, candidates []eligibleStorage, nscs []system.NodeStorageConfig, alive map[string]bool, vaultCount map[string]int) ([]system.VaultPlacement, int) {
 	var kept []system.VaultPlacement
 	usedStorages := map[string]bool{leaderStorageID: true}
 	usedNodes := map[string]bool{leaderNodeID: true} // 1:1:1: one store per vault per node
 
-	// Keep existing valid follower placements.
+	healthy := 0
+	// Keep existing valid follower placements: healthy ones up to the
+	// target (the cap is what trims surplus after recovery or an RF
+	// decrease), degraded ones unconditionally.
 	current, _ := pm.cfgStore.GetVaultPlacements(context.Background(), v.ID)
 	for _, p := range current {
-		if p.Leader || len(kept) >= desired {
+		if p.Leader {
 			continue
 		}
 		nid := system.NodeIDForStorage(p.StorageID, nscs)
-		if nid != "" && alive[nid] && !usedStorages[p.StorageID] && !usedNodes[nid] && pm.storageEligible(p.StorageID, *v, nscs) {
+		if nid == "" || !alive[nid] || usedStorages[p.StorageID] || usedNodes[nid] || !pm.storageEligible(p.StorageID, *v, nscs) {
+			continue
+		}
+		if degraded[nid] {
 			kept = append(kept, p)
 			usedStorages[p.StorageID] = true
 			usedNodes[nid] = true
+			continue
 		}
+		if healthy >= target {
+			continue
+		}
+		kept = append(kept, p)
+		usedStorages[p.StorageID] = true
+		usedNodes[nid] = true
+		healthy++
 	}
 
-	// Fill remaining from candidates, preferring cross-node.
+	// Fill remaining from candidates, preferring cross-node. Degraded
+	// nodes are not candidates — adding a member that cannot store
+	// defeats the backfill.
 	for _, ea := range candidates {
-		if len(kept) >= desired {
+		if healthy >= target {
 			break
 		}
-		if usedStorages[ea.storageID] || usedNodes[ea.nodeID] {
+		if usedStorages[ea.storageID] || usedNodes[ea.nodeID] || degraded[ea.nodeID] {
 			continue
 		}
 		kept = append(kept, system.VaultPlacement{StorageID: ea.storageID, Leader: false})
 		usedStorages[ea.storageID] = true
 		usedNodes[ea.nodeID] = true
 		vaultCount[ea.nodeID]++
+		healthy++
 	}
-	return kept
+	return kept, healthy
+}
+
+// vaultDiskProtectedSet returns the node IDs currently reporting this
+// vault's local backing volume under disk protect: live peers via the
+// NodeStats broadcast, the local node via the orchestrator lookup (it is
+// absent from its own peer table).
+func (pm *placementManager) vaultDiskProtectedSet(vaultID glid.GLID) map[string]bool {
+	protected := make(map[string]bool)
+	if pm.peerState != nil {
+		for _, nid := range pm.peerState.VaultDiskProtectedNodes(vaultID) {
+			protected[nid] = true
+		}
+	}
+	if pm.localVaultDiskProtected != nil && pm.localVaultDiskProtected(vaultID) {
+		protected[pm.localNodeID] = true
+	}
+	return protected
 }
 
 // alertReplication sets or clears the under-replicated vault alert.

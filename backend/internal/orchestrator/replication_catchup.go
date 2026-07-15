@@ -12,6 +12,28 @@ import (
 	"gastrolog/internal/cluster"
 )
 
+// catchupPushKey identifies one in-flight async push batch: all chunks
+// scheduled by CatchupSelectedChunks for a single (vault, requester).
+type catchupPushKey struct {
+	vaultID   glid.GLID
+	requester string
+}
+
+// maxMissingReplicaCatchupPerSweep caps how many sealed chunks a single
+// missing-replica sweep tick asks each peer to push. Without a cap the
+// sweep requests the entire FSM-vs-disk gap every 20s from every peer,
+// spawning overlapping catchup goroutines that abort each other's imports.
+const maxMissingReplicaCatchupPerSweep = 16
+
+func (o *Orchestrator) tryBeginCatchupPush(key catchupPushKey) bool {
+	_, loaded := o.catchupPushInFlight.LoadOrStore(key, struct{}{})
+	return !loaded
+}
+
+func (o *Orchestrator) endCatchupPush(key catchupPushKey) {
+	o.catchupPushInFlight.Delete(key)
+}
+
 // ScheduleCatchup schedules catchup replication for newly added followers of
 // the given vault. Must be called on the node that holds the vault leader
 // replica — no-op if this node is a follower or does not host the vault.
@@ -24,6 +46,9 @@ func (o *Orchestrator) ScheduleCatchup(vaultID glid.GLID, followerNodeIDs []stri
 	}
 	o.mu.RUnlock()
 	if found == nil || found.IsFollower {
+		return
+	}
+	if o.isPipelineIngestVault(vaultID) {
 		return
 	}
 	o.scheduleCatchup(vaultID, followerNodeIDs)
@@ -73,6 +98,9 @@ func (o *Orchestrator) scheduleCatchupForNode(vaultID glid.GLID, nodeID string, 
 // to a follower node. Each chunk's records are streamed via TransferRecords,
 // producing an identical sealed chunk on the follower.
 func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID glid.GLID, nodeID string) error {
+	if o.isPipelineIngestVault(vaultID) {
+		return nil
+	}
 	vaultInst := o.findLocalVaultInstance(vaultID)
 	if vaultInst == nil {
 		return fmt.Errorf("vault %s not found", vaultID)
@@ -178,6 +206,9 @@ func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID glid.GLID, n
 // sweep to declare the chunks unrecoverable. See gastrolog-2dgvj for
 // the original (follower→leader) design.
 func (o *Orchestrator) CatchupSelectedChunks(ctx context.Context, vaultID glid.GLID, requesterNodeID string, chunkIDs []chunk.ChunkID) (uint32, error) {
+	if o.isPipelineIngestVault(vaultID) {
+		return 0, nil
+	}
 	o.mu.RLock()
 	vault := o.vaults[vaultID]
 	o.mu.RUnlock()
@@ -237,9 +268,17 @@ func (o *Orchestrator) CatchupSelectedChunks(ctx context.Context, vaultID glid.G
 	}
 
 	if len(eligible) == 0 {
-		o.replicationLogger.Info("replica catchup: no eligible chunks to push",
+		o.replicationLogger.Debug("replica catchup: no eligible chunks to push",
 			"vault", vaultID, "requester", requesterNodeID,
 			"requested", len(chunkIDs))
+		return 0, nil
+	}
+
+	pushKey := catchupPushKey{vaultID: vaultID, requester: requesterNodeID}
+	if !o.tryBeginCatchupPush(pushKey) {
+		o.replicationLogger.Debug("replica catchup: push already in flight, skipping duplicate request",
+			"vault", vaultID, "requester", requesterNodeID,
+			"eligible", len(eligible), "requested", len(chunkIDs))
 		return 0, nil
 	}
 
@@ -252,6 +291,7 @@ func (o *Orchestrator) CatchupSelectedChunks(ctx context.Context, vaultID glid.G
 	// as scheduleCatchupForNode — the RPC's caller-supplied ctx ends as
 	// soon as we return, which would abort transfers mid-stream.
 	go func() {
+		defer o.endCatchupPush(pushKey)
 		ctxBg, cancel := context.WithTimeout(context.Background(), cluster.CatchupTimeout)
 		defer cancel()
 		transferred := 0
@@ -269,7 +309,7 @@ func (o *Orchestrator) CatchupSelectedChunks(ctx context.Context, vaultID glid.G
 			"transferred", transferred, "scheduled", len(eligible))
 	}()
 
-	_ = ctx // unused — async path uses its own timeout context
+	_ = ctx                           // unused — async path uses its own timeout context
 	return uint32(len(eligible)), nil //nolint:gosec // G115: bounded by chunkIDs slice length
 }
 
@@ -282,7 +322,7 @@ func catchupCandidates(metas []chunk.ChunkMeta, _ string, manifestSet map[chunk.
 			continue
 		}
 		if m.CloudBacked {
-			continue // cloud-backed chunks replicate via FSM (RegisterCloudChunk), not record streaming
+			continue // cloud-backed chunks replicate via FSM (RegisterCloudBackedChunk), not record streaming
 		}
 		if manifestSet != nil && !manifestSet[m.ID] {
 			continue // FSM has retired this chunk — don't ship orphans

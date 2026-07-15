@@ -92,12 +92,17 @@ type Config struct {
 	// Nil in single-node mode. Typically the same *cluster.PeerState as PeerStats.
 	PeerRouteStats PeerRouteStatsProvider
 
+	// PeerPipelineDisk aggregates per-node pipeline disk counts from peer broadcasts.
+	// Nil in single-node mode. Typically the same *cluster.PeerState as PeerRouteStats.
+	PeerPipelineDisk PeerPipelineDiskProvider
+
 	// RemoteSearcher forwards search requests to remote cluster nodes.
 	// Nil in single-node mode.
-	RemoteSearcher     RemoteSearcher
-	RemoteChunkLister  RemoteChunkLister
-	RemoteChunkWatcher RemoteChunkWatcher
-	RemoteIndexer      RemoteIndexer
+	RemoteSearcher        RemoteSearcher
+	RemoteChunkLister     RemoteChunkLister
+	RemotePipelineBacklog RemotePipelineBacklogGetter
+	RemoteChunkWatcher    RemoteChunkWatcher
+	RemoteIndexer         RemoteIndexer
 
 	// PeerJobs provides active jobs from peer cluster nodes.
 	// Nil in single-node mode.
@@ -105,6 +110,10 @@ type Config struct {
 
 	// LocalStats returns real-time stats for the local node.
 	LocalStats func() *apiv1.NodeStats
+	// ClusterRouteRates returns the server-side cluster-total route rate
+	// series (instant/30s/1m + spark) windowed over summed cluster counters
+	// by the stats collector. Nil in single-node mode (gastrolog-4eh5ns).
+	ClusterRouteRates func() (*apiv1.ThroughputRate, *apiv1.ThroughputRate)
 
 	// ConfigSignal broadcasts config changes to WatchConfig streams.
 	// May be nil in tests.
@@ -178,39 +187,42 @@ type CertManager interface {
 // Server is the Connect RPC server for GastroLog.
 // HTTP is always on; HTTPS is added when TLS enabled and default cert exists.
 type Server struct {
-	orch               *orchestrator.Orchestrator
-	cfgStore           system.Store
-	factories          orchestrator.Factories
-	tokens             *auth.TokenService
-	certManager        CertManager
-	noAuth             bool
-	logger             *slog.Logger
-	cluster            ClusterStatusProvider
-	peerStats          NodeStatsProvider
-	peerVaultStats     PeerVaultStatsProvider
-	peerIngesterStats  PeerIngesterStatsProvider
-	peerRouteStats     PeerRouteStatsProvider
-	remoteSearcher     RemoteSearcher
-	remoteChunkLister  RemoteChunkLister
-	remoteChunkWatcher RemoteChunkWatcher
-	remoteIndexer      RemoteIndexer
-	peerJobs           PeerJobsProvider
-	localStatsFn       func() *apiv1.NodeStats
-	localNodeID        string
-	clusterAddress     string
-	joinClusterFn      func(ctx context.Context, leaderAddr, joinToken string) error
-	removeNodeFn       func(ctx context.Context, nodeID string, force bool) error
-	setNodeSuffrageFn  func(ctx context.Context, nodeID string, voter bool) error
-	startTime          time.Time
-	homeDir            string                     // gastrolog home directory; empty for in-memory config
-	afterConfigApply   func(raftfsm.Notification) // non-raft dispatch hook
-	configSignal       *notify.Signal             // broadcasts config changes to WatchConfig streams
-	statsSignal        *notify.Signal             // broadcasts stats updates to WatchSystemStatus streams
-	cloudTesters       map[string]CloudServiceTester
-	repairManagedFile  func(fileID string) bool  // on-demand pull from peer; set by app wiring
-	queryServer        *QueryServer              // stored for ExportToVault executor wiring
-	routingForwarder   routing.UnaryForwarder    // forwards requests to remote nodes; nil in single-node
-	placementReconcile func(ctx context.Context) // synchronous placement; nil in non-cluster mode
+	orch                  *orchestrator.Orchestrator
+	cfgStore              system.Store
+	factories             orchestrator.Factories
+	tokens                *auth.TokenService
+	certManager           CertManager
+	noAuth                bool
+	logger                *slog.Logger
+	cluster               ClusterStatusProvider
+	peerStats             NodeStatsProvider
+	peerVaultStats        PeerVaultStatsProvider
+	peerIngesterStats     PeerIngesterStatsProvider
+	peerRouteStats        PeerRouteStatsProvider
+	peerPipelineDisk      PeerPipelineDiskProvider
+	remoteSearcher        RemoteSearcher
+	remoteChunkLister     RemoteChunkLister
+	remotePipelineBacklog RemotePipelineBacklogGetter
+	remoteChunkWatcher    RemoteChunkWatcher
+	remoteIndexer         RemoteIndexer
+	peerJobs              PeerJobsProvider
+	localStatsFn          func() *apiv1.NodeStats
+	clusterRouteRatesFn   func() (*apiv1.ThroughputRate, *apiv1.ThroughputRate)
+	localNodeID           string
+	clusterAddress        string
+	joinClusterFn         func(ctx context.Context, leaderAddr, joinToken string) error
+	removeNodeFn          func(ctx context.Context, nodeID string, force bool) error
+	setNodeSuffrageFn     func(ctx context.Context, nodeID string, voter bool) error
+	startTime             time.Time
+	homeDir               string                     // gastrolog home directory; empty for in-memory config
+	afterConfigApply      func(raftfsm.Notification) // non-raft dispatch hook
+	configSignal          *notify.Signal             // broadcasts config changes to WatchConfig streams
+	statsSignal           *notify.Signal             // broadcasts stats updates to WatchSystemStatus streams
+	cloudTesters          map[string]CloudServiceTester
+	repairManagedFile     func(fileID string) bool  // on-demand pull from peer; set by app wiring
+	queryServer           *QueryServer              // stored for ExportToVault executor wiring
+	routingForwarder      routing.UnaryForwarder    // forwards requests to remote nodes; nil in single-node
+	placementReconcile    func(ctx context.Context) // synchronous placement; nil in non-cluster mode
 
 	// gastrolog-o9z6o: bootstrap-token endpoint configuration. When the
 	// secret is non-empty, /cluster/bootstrap-token is registered and
@@ -224,13 +236,13 @@ type Server struct {
 	environmentLabel string
 	environmentColor string
 
-	mu                 sync.Mutex
-	listener           net.Listener
-	server             *http.Server
-	handler            http.Handler // core handler (mux + CORS + tracking), shared by HTTP and HTTPS
-	shutdown           chan struct{}
-	inFlight           sync.WaitGroup // tracks in-flight requests for graceful drain
-	draining           atomic.Bool    // true when server is draining (rejecting new requests)
+	mu       sync.Mutex
+	listener net.Listener
+	server   *http.Server
+	handler  http.Handler // core handler (mux + CORS + tracking), shared by HTTP and HTTPS
+	shutdown chan struct{}
+	inFlight sync.WaitGroup // tracks in-flight requests for graceful drain
+	draining atomic.Bool    // true when server is draining (rejecting new requests)
 
 	rl       *rateLimiter // per-IP rate limiter for auth endpoints
 	rlCancel context.CancelFunc
@@ -252,45 +264,48 @@ type Server struct {
 // New creates a new Server.
 func New(orch *orchestrator.Orchestrator, cfgStore system.Store, factories orchestrator.Factories, tokens *auth.TokenService, cfg Config) *Server {
 	return &Server{
-		orch:               orch,
-		cfgStore:           cfgStore,
-		factories:          factories,
-		tokens:             tokens,
-		certManager:        cfg.CertManager,
-		noAuth:             cfg.NoAuth,
-		logger:             compServer.Apply(logging.Default(cfg.Logger)),
-		cluster:            cfg.Cluster,
-		peerStats:          cfg.PeerStats,
-		peerVaultStats:     cfg.PeerVaultStats,
-		peerIngesterStats:  cfg.PeerIngesterStats,
-		peerRouteStats:     cfg.PeerRouteStats,
-		remoteSearcher:     cfg.RemoteSearcher,
-		remoteChunkLister:  cfg.RemoteChunkLister,
-		remoteChunkWatcher: cfg.RemoteChunkWatcher,
-		remoteIndexer:      cfg.RemoteIndexer,
-		peerJobs:           cfg.PeerJobs,
-		localStatsFn:       cfg.LocalStats,
-		localNodeID:        cfg.NodeID,
-		clusterAddress:     cfg.ClusterAddress,
-		joinClusterFn:      cfg.JoinClusterFunc,
-		removeNodeFn:       cfg.RemoveNodeFunc,
-		setNodeSuffrageFn:  cfg.SetNodeSuffrageFunc,
-		startTime:          time.Now(),
-		homeDir:            cfg.HomeDir,
-		unixSocketConfig:   cfg.UnixSocket,
-		cloudTesters:       cfg.CloudTesters,
-		afterConfigApply:   cfg.AfterConfigApply,
-		configSignal:       cfg.ConfigSignal,
-		statsSignal:        cfg.StatsSignal,
-		routingForwarder:   cfg.RoutingForwarder,
-		placementReconcile: cfg.PlacementReconcile,
+		orch:                      orch,
+		cfgStore:                  cfgStore,
+		factories:                 factories,
+		tokens:                    tokens,
+		certManager:               cfg.CertManager,
+		noAuth:                    cfg.NoAuth,
+		logger:                    compServer.Apply(logging.Default(cfg.Logger)),
+		cluster:                   cfg.Cluster,
+		peerStats:                 cfg.PeerStats,
+		peerVaultStats:            cfg.PeerVaultStats,
+		peerIngesterStats:         cfg.PeerIngesterStats,
+		peerRouteStats:            cfg.PeerRouteStats,
+		peerPipelineDisk:          cfg.PeerPipelineDisk,
+		remoteSearcher:            cfg.RemoteSearcher,
+		remoteChunkLister:         cfg.RemoteChunkLister,
+		remotePipelineBacklog:     cfg.RemotePipelineBacklog,
+		remoteChunkWatcher:        cfg.RemoteChunkWatcher,
+		remoteIndexer:             cfg.RemoteIndexer,
+		peerJobs:                  cfg.PeerJobs,
+		localStatsFn:              cfg.LocalStats,
+		clusterRouteRatesFn:       cfg.ClusterRouteRates,
+		localNodeID:               cfg.NodeID,
+		clusterAddress:            cfg.ClusterAddress,
+		joinClusterFn:             cfg.JoinClusterFunc,
+		removeNodeFn:              cfg.RemoveNodeFunc,
+		setNodeSuffrageFn:         cfg.SetNodeSuffrageFunc,
+		startTime:                 time.Now(),
+		homeDir:                   cfg.HomeDir,
+		unixSocketConfig:          cfg.UnixSocket,
+		cloudTesters:              cfg.CloudTesters,
+		afterConfigApply:          cfg.AfterConfigApply,
+		configSignal:              cfg.ConfigSignal,
+		statsSignal:               cfg.StatsSignal,
+		routingForwarder:          cfg.RoutingForwarder,
+		placementReconcile:        cfg.PlacementReconcile,
 		bootstrapTokenServeSecret: cfg.BootstrapTokenServeSecret,
 		bootstrapTokenFn:          cfg.BootstrapTokenFn,
-		logFilter:          cfg.LogFilter,
-		environmentLabel:   cfg.EnvironmentLabel,
-		environmentColor:   cfg.EnvironmentColor,
-		shutdown:           make(chan struct{}),
-		rl:                 newRateLimiter(5.0/60.0, 5), // 5 req/min per IP, burst of 5
+		logFilter:                 cfg.LogFilter,
+		environmentLabel:          cfg.EnvironmentLabel,
+		environmentColor:          cfg.EnvironmentColor,
+		shutdown:                  make(chan struct{}),
+		rl:                        newRateLimiter(5.0/60.0, 5), // 5 req/min per IP, burst of 5
 	}
 }
 
@@ -505,7 +520,7 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 
 	queryServer := NewQueryServer(s.orch, s.cfgStore, s.remoteSearcher, s.localNodeID, lookupRegistry.Resolve, lookupRegistry.Names(), queryTimeout, maxFollowDuration, maxResultCount, compQuery.Apply(s.logger))
 	s.queryServer = queryServer
-	vaultServer := NewVaultServer(s.orch, s.cfgStore, s.factories, s.peerVaultStats, s.remoteChunkLister, s.remoteChunkWatcher, s.remoteIndexer, s.localNodeID, s.logger)
+	vaultServer := NewVaultServer(s.orch, s.cfgStore, s.factories, s.peerVaultStats, s.remoteChunkLister, s.remotePipelineBacklog, s.remoteChunkWatcher, s.remoteIndexer, s.localNodeID, s.logger)
 	configServer := NewSystemServer(SystemServerConfig{
 		Orch:               s.orch,
 		CfgStore:           s.cfgStore,
@@ -513,6 +528,8 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 		CertManager:        s.certManager,
 		PeerStats:          s.peerIngesterStats,
 		PeerRouteStats:     s.peerRouteStats,
+		LocalStats:         s.localStatsFn,
+		ClusterRouteRates:  s.clusterRouteRatesFn,
 		LocalNodeID:        s.localNodeID,
 		AfterConfigApply:   s.afterConfigApply,
 		ConfigSignal:       s.configSignal,
@@ -544,6 +561,8 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 	}
 	if s.peerRouteStats != nil {
 		lifecycleServer.SetPeerRouteStats(s.peerRouteStats)
+		lifecycleServer.SetClusterRouteRates(s.clusterRouteRatesFn)
+		lifecycleServer.SetPeerPipelineDisk(s.peerPipelineDisk)
 	}
 	lifecycleServer.SetVaultFuncs(vaultServer.allVaultInfos, func(ctx context.Context) *apiv1.GetStatsResponse {
 		resp, _ := vaultServer.GetStats(ctx, connect.NewRequest(&apiv1.GetStatsRequest{}))

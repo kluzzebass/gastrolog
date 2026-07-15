@@ -123,7 +123,7 @@ func startVaultCtlLearnerPromoter(ctx context.Context, scheduler scheduledJobReg
 		return err
 	}
 	scheduler.Describe(vaultCtlLearnerPromoterJobName,
-		"Per-vault-ctl learner promotion. Runs on every node and iterates every vault-ctl group; the per-group leader gate inside the tick body only proposes AddVoter for groups this node currently leads. Each learner must hold its broadcast RaftAppliedIndex within tolerance of the group leader's applied index for a stability window before promotion. Companion to gastrolog-2czh9 (cluster-ctl promoter) and gastrolog-41sut (JoinCluster-as-learner). Original implementation gastrolog-gcbx7.")
+		"Per-vault-ctl learner promotion. Runs on every node and iterates every vault-ctl group; the per-group leader gate inside the tick body only proposes AddVoter for groups this node currently leads. Each learner must hold its broadcast RaftAppliedIndex within tolerance of the group leader's applied index for a stability window before promotion.")
 	return nil
 }
 
@@ -176,6 +176,7 @@ func (p *vaultCtlLearnerPromoter) evaluateVault(vaultID glid.GLID, seen map[catc
 		return
 	}
 
+	promotionUsed := false
 	for _, srv := range cfgFuture.Configuration().Servers {
 		if srv.Suffrage != hraft.Nonvoter && srv.Suffrage != hraft.Staging {
 			continue
@@ -183,16 +184,17 @@ func (p *vaultCtlLearnerPromoter) evaluateVault(vaultID glid.GLID, seen map[catc
 		nodeID := string(srv.ID)
 		key := catchupKey{vaultID: vaultID, nodeID: nodeID}
 		seen[key] = true
-		p.evaluateLearner(g, vaultID, nodeID, string(srv.Address), leaderApplied, key)
+		allowPromote := !promotionUsed
+		if p.evaluateLearner(g, vaultID, nodeID, string(srv.Address), leaderApplied, key, allowPromote) {
+			promotionUsed = true
+		}
 	}
 }
 
-// evaluateLearner advances or resets the per-learner stability
-// counter for one vault-ctl group's learner. Promotes via AddVoter
-// when the counter reaches stabilityRequired. AddVoter failure
-// preserves the counter so the next tick retries without forcing
-// another full window — same rationale as the cluster-ctl promoter.
-func (p *vaultCtlLearnerPromoter) evaluateLearner(g *raftgroup.Group, vaultID glid.GLID, nodeID, addr string, leaderApplied uint64, key catchupKey) {
+// evaluateLearner advances or resets the per-learner stability counter
+// for one vault-ctl group's learner. Promotes via AddVoter when the
+// counter reaches stabilityRequired and allowPromote is true.
+func (p *vaultCtlLearnerPromoter) evaluateLearner(g *raftgroup.Group, vaultID glid.GLID, nodeID, addr string, leaderApplied uint64, key catchupKey, allowPromote bool) bool {
 	obs := observePeerVault(p.peerState, nodeID, vaultID)
 	if !obs.hasVaultEntry {
 		p.logger.Info("vault_ctl_learner_promoter: peer not yet reporting this vault",
@@ -200,7 +202,7 @@ func (p *vaultCtlLearnerPromoter) evaluateLearner(g *raftgroup.Group, vaultID gl
 			"has_peer_stats", obs.hasPeerStats,
 			"vaults_in_peer_broadcast", obs.totalVaults)
 		p.catchupTicks[key] = 0
-		return
+		return false
 	}
 	applied := obs.appliedIndex
 	// Tolerance: an active vault-ctl group commits entries faster
@@ -218,7 +220,7 @@ func (p *vaultCtlLearnerPromoter) evaluateLearner(g *raftgroup.Group, vaultID gl
 			"learner_applied", applied, "leader_applied", leaderApplied,
 			"lag", leaderApplied-applied, "tolerance", vaultCtlLearnerCatchupTolerance)
 		p.catchupTicks[key] = 0
-		return
+		return false
 	}
 	p.logger.Info("vault_ctl_learner_promoter: learner caught up",
 		"vault", vaultID, "node", nodeID,
@@ -229,7 +231,10 @@ func (p *vaultCtlLearnerPromoter) evaluateLearner(g *raftgroup.Group, vaultID gl
 		p.logger.Debug("vault_ctl_learner_promoter: learner caught up, awaiting stability",
 			"vault", vaultID, "node", nodeID,
 			"ticks", p.catchupTicks[key], "needed", p.stabilityRequired)
-		return
+		return false
+	}
+	if !allowPromote {
+		return false
 	}
 
 	future := g.Raft.AddVoter(hraft.ServerID(nodeID), hraft.ServerAddress(addr), 0, vaultCtlLearnerPromoteTimeout)
@@ -237,22 +242,23 @@ func (p *vaultCtlLearnerPromoter) evaluateLearner(g *raftgroup.Group, vaultID gl
 		p.logger.Warn("vault_ctl_learner_promoter: AddVoter failed",
 			"vault", vaultID, "node", nodeID, "addr", addr, "error", err)
 		// Leave counter intact for retry.
-		return
+		return true
 	}
 	p.logger.Info("vault_ctl_learner_promoter: promoted learner to voter",
 		"vault", vaultID, "node", nodeID, "addr", addr,
 		"leader_applied", leaderApplied)
 	delete(p.catchupTicks, key)
+	return true
 }
 
 // peerVaultObservation describes what the leader knows about a peer's
 // vault-ctl state from broadcasts. Used by the promoter to choose
 // between "wait" (no evidence) and "evaluate catchup" (have evidence).
 type peerVaultObservation struct {
-	hasPeerStats   bool   // PeerState had an entry at all
-	hasVaultEntry  bool   // peer's NodeStats included this vault
-	totalVaults    int    // number of vault entries the peer broadcast (diagnostic)
-	appliedIndex   uint64 // raft applied index for this vault (only valid when hasVaultEntry)
+	hasPeerStats  bool   // PeerState had an entry at all
+	hasVaultEntry bool   // peer's NodeStats included this vault
+	totalVaults   int    // number of vault entries the peer broadcast (diagnostic)
+	appliedIndex  uint64 // raft applied index for this vault (only valid when hasVaultEntry)
 }
 
 // observePeerVault looks up the named peer's broadcast vault-ctl

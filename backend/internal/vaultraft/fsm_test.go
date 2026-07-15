@@ -82,7 +82,7 @@ func TestFSM_SnapshotRestore_twoInstances(t *testing.T) {
 	t.Parallel()
 	f := NewFSM()
 	vaultA, vaultB := glid.New(), glid.New()
-	if bytes.Compare(vaultA[:], vaultB[:]) > 0 {
+	if vaultA.Compare(vaultB) > 0 {
 		vaultA, vaultB = vaultB, vaultA
 	}
 	now := time.Now().Truncate(time.Nanosecond)
@@ -152,4 +152,3 @@ func TestFSM_OnAfterRestoreFires(t *testing.T) {
 		t.Errorf("post-restore Instances() = %d, want 2", len(got))
 	}
 }
-

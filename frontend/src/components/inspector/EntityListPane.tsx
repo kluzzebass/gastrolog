@@ -312,7 +312,7 @@ function JobRow({ job, dark }: Readonly<{ job: Job; dark: boolean }>) {
   );
 }
 
-const scheduledGrid = "grid grid-cols-[1fr_8rem_7rem_7rem] gap-3";
+const scheduledGrid = "grid grid-cols-[minmax(0,1fr)_8rem_7rem_7rem] gap-3";
 
 function ScheduledHeader({ dark }: Readonly<{ dark: boolean }>) {
   const c = useThemeClass(dark);
@@ -320,7 +320,7 @@ function ScheduledHeader({ dark }: Readonly<{ dark: boolean }>) {
     <div
       className={`${scheduledGrid} px-4 py-1.5 text-[0.7em] font-medium uppercase tracking-[0.15em] ${c("text-text-muted", "text-light-text-muted")}`}
     >
-      <span>Description</span>
+      <span>Job</span>
       <span>Schedule</span>
       <span className="text-right">Last run</span>
       <span className="text-right">Next run</span>
@@ -334,13 +334,16 @@ function ScheduledRow({ job, dark }: Readonly<{ job: Job; dark: boolean }>) {
   return (
     <div className={`${scheduledGrid} px-4 py-2 text-[0.85em]`}>
       <span
-        className={`font-mono truncate ${c("text-text-bright", "text-light-text-bright")}`}
-        title={job.displayLabel}
+        className={`font-mono truncate min-w-0 ${c("text-text-bright", "text-light-text-bright")}`}
+        title={job.scheduleLabel}
       >
-        {job.displayLabel}
+        {job.scheduleLabel}
       </span>
-      <span className={`font-mono text-[0.9em] ${c("text-text-muted", "text-light-text-muted")}`}>
-        {job.schedule}
+      <span
+        className={`font-mono text-[0.9em] whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}
+        title={job.displaySchedule ? `Schedule: ${job.displaySchedule}` : undefined}
+      >
+        {job.displaySchedule}
       </span>
       <span
         className={`font-mono text-[0.9em] text-right ${c("text-text-muted", "text-light-text-muted")}`}

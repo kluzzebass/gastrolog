@@ -24,7 +24,7 @@ const (
 type Alert struct {
 	ID        string
 	Severity  Severity
-	Source    string   // component name (e.g. "orchestrator", "forwarder")
+	Source    string // component name (e.g. "orchestrator", "forwarder")
 	Message   string
 	FirstSeen time.Time
 	LastSeen  time.Time

@@ -57,6 +57,9 @@ fi
 [ -n "$GASTROLOG_JOIN_ADDR" ]    && args="$args --join-addr $GASTROLOG_JOIN_ADDR"
 [ -n "$GASTROLOG_JOIN_TOKEN" ]   && args="$args --join-token $GASTROLOG_JOIN_TOKEN"
 [ -n "$GASTROLOG_PPROF" ]        && args="$args --pprof $GASTROLOG_PPROF"
+is_truthy "$GASTROLOG_PPROF_DEBUG" && args="$args --pprof-debug"
+[ -n "$GASTROLOG_PPROF_MUTEX_FRACTION" ] && args="$args --pprof-mutex-fraction $GASTROLOG_PPROF_MUTEX_FRACTION"
+[ -n "$GASTROLOG_PPROF_BLOCK_RATE" ]     && args="$args --pprof-block-rate $GASTROLOG_PPROF_BLOCK_RATE"
 [ -n "$GASTROLOG_CONFIG_TYPE" ]  && args="$args --config-type $GASTROLOG_CONFIG_TYPE"
 
 # Non-interactive cluster bootstrap (gastrolog-o9z6o).

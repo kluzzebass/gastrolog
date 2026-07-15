@@ -40,9 +40,35 @@ func (c *cloudBackedCM) Meta(id chunk.ChunkID) (chunk.ChunkMeta, error) {
 	return m, nil
 }
 
+func (c *cloudBackedCM) ingestRankView() (chunk.IngestTSRankView, bool) {
+	rankCM, ok := c.ChunkManager.(chunk.IngestTSRankView)
+	return rankCM, ok
+}
+
+func (c *cloudBackedCM) IngestTSRankLen(id chunk.ChunkID) (uint64, error) {
+	if rankCM, ok := c.ingestRankView(); ok {
+		return rankCM.IngestTSRankLen(id)
+	}
+	return 0, chunk.ErrIngestTSRankIndex
+}
+
+func (c *cloudBackedCM) IngestTSRankAt(id chunk.ChunkID, rank uint64) (int64, uint32, error) {
+	if rankCM, ok := c.ingestRankView(); ok {
+		return rankCM.IngestTSRankAt(id, rank)
+	}
+	return 0, 0, chunk.ErrIngestTSRankIndex
+}
+
+func (c *cloudBackedCM) FindIngestTSRank(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
+	if rankCM, ok := c.ingestRankView(); ok {
+		return rankCM.FindIngestTSRank(id, ts)
+	}
+	return 0, false, nil
+}
+
 // TestCloudBackedChunksIncludedInSearch verifies that cloud-backed chunks
 // participate in search results. This is the regression test for the bug
-// where cloud chunks were "deferred" during heap priming but the lazy
+// where cloud-backed chunks were "deferred" during heap priming but the lazy
 // priming was never implemented — deferredChunks was written but never read.
 func TestCloudBackedChunksIncludedInSearch(t *testing.T) {
 	reg := &testRegistry{
@@ -168,7 +194,7 @@ func TestCloudBackedTimestampOrdering(t *testing.T) {
 	eng := query.NewWithRegistry(reg, nil)
 
 	// Limit=3: the first 3 records should all be from the cloud-backed
-	// vault (they have earlier timestamps). If cloud chunks were skipped,
+	// vault (they have earlier timestamps). If cloud-backed chunks were skipped,
 	// we'd get local records instead — wrong ordering.
 	iter, _ := eng.Search(context.Background(), query.Query{Limit: 3}, nil)
 	var raws []string
@@ -185,6 +211,87 @@ func TestCloudBackedTimestampOrdering(t *testing.T) {
 		expected := fmt.Sprintf("cloud-%d", i)
 		if raw != expected {
 			t.Errorf("record %d: got %q, want %q (cloud records should sort first)", i, raw, expected)
+		}
+	}
+}
+
+// orderedRegistry pins ListVaults order. The multi-vault merge must not
+// depend on registry enumeration order (gastrolog-33bkl7).
+type orderedRegistry struct {
+	*testRegistry
+	order []glid.GLID
+}
+
+func (r *orderedRegistry) ListVaults() []glid.GLID {
+	return append([]glid.GLID(nil), r.order...)
+}
+
+// TestMultiVaultLimitOrderingIndependentOfRegistryOrder pins gastrolog-33bkl7
+// deterministically: with the LATER-timestamped vault enumerating first, the
+// lazy-prime merge treated the concatenated per-vault chunk lists as
+// non-overlapping planner order, opened the later vault, satisfied Limit,
+// and never opened the earlier cloud-backed vault — silently dropping the
+// earliest records from search results.
+func TestMultiVaultLimitOrderingIndependentOfRegistryOrder(t *testing.T) {
+	base := &testRegistry{
+		vaults: make(map[glid.GLID]struct {
+			cm chunk.ChunkManager
+			im index.IndexManager
+		}),
+	}
+	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+
+	cloudVaultID := glid.New()
+	cloud := memtest.MustNewVault(t, chunkmem.Config{
+		RotationPolicy: chunk.NewRecordCountPolicy(1000),
+	})
+	for i := range 3 {
+		cloud.CM.Append(chunk.Record{
+			IngestTS: t0.Add(time.Duration(i) * time.Second),
+			Raw:      fmt.Appendf(nil, "cloud-%d", i),
+		})
+	}
+	cloud.CM.Seal()
+	base.vaults[cloudVaultID] = struct {
+		cm chunk.ChunkManager
+		im index.IndexManager
+	}{&cloudBackedCM{cloud.CM}, cloud.IM}
+
+	localVaultID := glid.New()
+	local := memtest.MustNewVault(t, chunkmem.Config{
+		RotationPolicy: chunk.NewRecordCountPolicy(1000),
+	})
+	for i := range 3 {
+		local.CM.Append(chunk.Record{
+			IngestTS: t0.Add(time.Duration(i+3) * time.Second),
+			Raw:      fmt.Appendf(nil, "local-%d", i),
+		})
+	}
+	local.CM.Seal()
+	base.vaults[localVaultID] = struct {
+		cm chunk.ChunkManager
+		im index.IndexManager
+	}{local.CM, local.IM}
+
+	// Pathological enumeration order: later-timestamped vault first.
+	reg := &orderedRegistry{testRegistry: base, order: []glid.GLID{localVaultID, cloudVaultID}}
+	eng := query.NewWithRegistry(reg, nil)
+
+	iter, _ := eng.Search(context.Background(), query.Query{Limit: 3}, nil)
+	var raws []string
+	for rec, err := range iter {
+		if err != nil {
+			t.Fatalf("search error: %v", err)
+		}
+		raws = append(raws, string(rec.Raw))
+	}
+	if len(raws) != 3 {
+		t.Fatalf("expected 3 records, got %d", len(raws))
+	}
+	for i, raw := range raws {
+		expected := fmt.Sprintf("cloud-%d", i)
+		if raw != expected {
+			t.Errorf("record %d: got %q, want %q (earliest records must win regardless of vault order)", i, raw, expected)
 		}
 	}
 }

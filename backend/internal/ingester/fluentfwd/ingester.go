@@ -407,6 +407,7 @@ func (ing *Ingester) processRecord(ctx context.Context, tag string, ts time.Time
 	msg := orchestrator.IngestMessage{
 		Attrs:      attrs,
 		Raw:        []byte(raw),
+		RawOwned:   true,
 		SourceTS:   ts,
 		IngestTS:   time.Now(),
 		IngesterID: ing.id,

@@ -39,7 +39,7 @@ func archivalTestSetup(t *testing.T, transitions []system.CloudStorageTransition
 	if err != nil {
 		t.Fatal(err)
 	}
-	im := indexfile.NewManager(dir, nil, nil)
+	im := indexfile.NewManager(dir, nil, nil, cm)
 
 	store := sysmem.NewStore()
 	_ = store.PutVault(context.Background(), system.VaultConfig{
@@ -52,7 +52,7 @@ func archivalTestSetup(t *testing.T, transitions []system.CloudStorageTransition
 		Provider:     "memory",
 		ArchivalMode: "active",
 		Transitions:  transitions,
-		RestoreSpeed:  "Standard",
+		RestoreSpeed: "Standard",
 		RestoreDays:  7,
 	})
 
@@ -433,7 +433,7 @@ func TestCloudServiceArchivalConfigRoundTrip(t *testing.T) {
 			{After: "90d", StorageClass: "deep-freeze"},
 			{After: "365d", StorageClass: ""},
 		},
-		RestoreSpeed:       "Expedited",
+		RestoreSpeed:      "Expedited",
 		RestoreDays:       14,
 		SuspectGraceDays:  3,
 		ReconcileSchedule: "0 */6 * * *",
@@ -545,7 +545,7 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 	}
 	_ = store.SetVaultPlacements(context.Background(), vaultID, placements)
 	_ = store.PutVault(context.Background(), system.VaultConfig{
-		ID: vaultID, Name: "cloud-vault", Type: system.VaultTypeFile, CloudServiceID: &csID,
+		ID: vaultID, Name: "second-vault", Type: system.VaultTypeFile, CloudServiceID: &csID,
 	})
 	_ = store.PutCloudService(context.Background(), system.CloudService{
 		ID:           csID,
@@ -553,7 +553,7 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 		Provider:     "memory",
 		ArchivalMode: "active",
 		Transitions:  transitions,
-		RestoreSpeed:  "Standard",
+		RestoreSpeed: "Standard",
 		RestoreDays:  7,
 	})
 
@@ -589,7 +589,7 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 		if err != nil {
 			t.Fatal(err)
 		}
-		im := indexfile.NewManager(dir, nil, nil)
+		im := indexfile.NewManager(dir, nil, nil, cm)
 
 		vaultInst := &VaultInstance{
 			VaultID: vaultID, Type: "cloud",
@@ -603,8 +603,8 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 
 		orch.RegisterVault(NewVault(vaultID, vaultInst))
 		nodes[nid] = &clusterTestNode{
-			nodeID:   nid,
-			orch:     orch,
+			nodeID:       nid,
+			orch:         orch,
 			instances:    []*VaultInstance{vaultInst},
 			instanceDirs: []string{dir},
 		}
@@ -967,7 +967,7 @@ func TestCloudClusterGracePeriodBoundary(t *testing.T) {
 		}
 	}
 	if cloudRemaining > 0 {
-		t.Errorf("expected cloud chunks removed after grace period, %d remain", cloudRemaining)
+		t.Errorf("expected cloud-backed chunks removed after grace period, %d remain", cloudRemaining)
 	}
 }
 
@@ -1102,7 +1102,7 @@ func TestCloudClusterReconcileSkipsTombstoned(t *testing.T) {
 	leaderNode := h.nodes["leader"]
 	leaderCM := leaderNode.instances[0].Chunks.(*chunkfile.Manager)
 
-	// Produce some sealed + uploaded cloud chunks.
+	// Produce some sealed + uploaded cloud-backed chunks.
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range 200 {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)

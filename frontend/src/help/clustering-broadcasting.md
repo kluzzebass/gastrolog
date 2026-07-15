@@ -30,4 +30,4 @@ Lowering this gives faster paused-node detection. Raising it reduces RPC cadence
 
 ## Staleness
 
-A peer's last-seen timestamp is refreshed by either signal — heartbeat or stats broadcast. If neither arrives within the offline threshold (4× heartbeat interval), the peer drops from the live-peer set. The [Inspector](help:inspector-system) shows remote node metrics with their last-seen timestamp so you can tell how fresh the data is.
+A peer's last-seen timestamp is refreshed by either signal — heartbeat or stats broadcast. If neither arrives within the offline threshold (4× heartbeat interval), the peer drops from the live-peer set. The [Inspector](help:inspector-system) shows peer node metrics with their last-seen timestamp so you can tell how fresh the data is.

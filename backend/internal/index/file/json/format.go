@@ -54,13 +54,13 @@ var (
 
 // fileOffsets holds the decoded offset table from the file header.
 type fileOffsets struct {
-	dictOffset  uint32
-	dictCount   uint32
-	pathOffset  uint32
-	pathCount   uint32
-	pvOffset    uint32
-	pvCount     uint32
-	blobOffset  uint32
+	dictOffset uint32
+	dictCount  uint32
+	pathOffset uint32
+	pathCount  uint32
+	pvOffset   uint32
+	pvCount    uint32
+	blobOffset uint32
 }
 
 // encodeIndex encodes the JSON index into binary format.
@@ -99,8 +99,8 @@ func encodeIndex(
 	// Offsets.
 	dictOff := uint32(fileHeaderSize)
 	pathOff := dictOff + uint32(dictSize)
-	pvOff := pathOff + uint32(pathTableSize)   //nolint:gosec // G115: sizes bounded by index budget
-	blobOff := pvOff + uint32(pvTableSize) //nolint:gosec // G115: sizes bounded by index budget
+	pvOff := pathOff + uint32(pathTableSize) //nolint:gosec // G115: sizes bounded by index budget
+	blobOff := pvOff + uint32(pvTableSize)   //nolint:gosec // G115: sizes bounded by index budget
 
 	binary.LittleEndian.PutUint32(buf[cursor:], dictOff)
 	cursor += 4

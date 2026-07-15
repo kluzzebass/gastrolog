@@ -11,18 +11,18 @@ func FuzzExtractKeyValues(f *testing.F) {
 	f.Add([]byte(`level=ERROR status=500 msg="request failed"`))
 	f.Add([]byte("host=server-1,env=prod;region=us-east"))
 	f.Add([]byte("nested.key.path=deep_value"))
-	f.Add([]byte("=value"))            // missing key
-	f.Add([]byte("key="))              // empty value
-	f.Add([]byte("==="))               // degenerate
-	f.Add([]byte("a=b=c=d"))           // chained equals
+	f.Add([]byte("=value"))  // missing key
+	f.Add([]byte("key="))    // empty value
+	f.Add([]byte("==="))     // degenerate
+	f.Add([]byte("a=b=c=d")) // chained equals
 	f.Add([]byte(`key="quoted value"`))
 	f.Add([]byte(`key='single quoted'`))
 	f.Add([]byte(`key="unclosed`))
-	f.Add([]byte("k=v&a=b"))           // URL params
-	f.Add([]byte("k={json}"))          // structured value
+	f.Add([]byte("k=v&a=b"))  // URL params
+	f.Add([]byte("k={json}")) // structured value
 	f.Add([]byte("k=[array]"))
-	f.Add([]byte("\x00=\x01"))         // binary
-	f.Add([]byte("_private=true"))     // underscore-prefixed key
+	f.Add([]byte("\x00=\x01"))     // binary
+	f.Add([]byte("_private=true")) // underscore-prefixed key
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		result := ExtractKeyValues(data)

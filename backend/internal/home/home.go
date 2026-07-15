@@ -9,12 +9,15 @@
 //	  node_id                          (advisory cache — see app.resolveNodeID; the raft StableStore is canonical)
 //	  node_name                        (human-readable petname, mirrors config store)
 //	  raft/
-//	    wal/                           (raftwal: log + stable store; system group + vault-ctl groups)
+//	    wal/                           (cluster-ctl raftwal: log + stable store only)
 //	    groups/
-//	      system/                      (system/config raft file snapshots — same layout as vault-ctl groups)
+//	      wal/                         (vault-ctl multiraft raftwal: batched fsync across vault groups)
+//	      cluster-ctl/                 (cluster-ctl raft file snapshots)
 //	      <vault-ctl-group-id>/        (vault metadata raft snapshots)
 //	  stores/
 //	    <vault-id>/                    (per-vault chunk + index data)
+//	  segments/
+//	    <vault-id>/                    (pipeline segment working + completed areas)
 //	  managed-files/
 //	    <file-id>/                     (managed file entity: lookups, etc.)
 package home
@@ -75,13 +78,32 @@ func (d Dir) VaultDir(vaultID string) string {
 	return filepath.Join(d.root, "stores", vaultID)
 }
 
+// SegmentsDir returns the base directory for pipeline segment storage.
+// Each vault's origin root is SegmentsDir/<vault-id>/ (working/, completed/, chunks/).
+func (d Dir) SegmentsDir() string {
+	return filepath.Join(d.root, "segments")
+}
+
 // RaftDir returns the directory for Raft persistent state (log store, snapshots).
 func (d Dir) RaftDir() string {
 	return filepath.Join(d.root, "raft")
 }
 
+// ClusterCtlWALDir returns the on-disk directory for the cluster-ctl raftwal.
+// Isolated from vault groups so cluster heartbeats are not coupled to vault
+// append/fsync batching (gastrolog-3tp89).
+func (d Dir) ClusterCtlWALDir() string {
+	return filepath.Join(d.RaftDir(), "wal")
+}
+
+// VaultCtlWALDir returns the on-disk directory for vault control-plane raftwal.
+// All vault/…/ctl groups on this node share this WAL (coalesced fsync).
+func (d Dir) VaultCtlWALDir() string {
+	return filepath.Join(d.RaftDir(), "groups", "wal")
+}
+
 // RaftGroupDir returns the per-group directory under raft/groups/<groupID>/.
-// Used for file snapshot stores: "system" for cluster config raft, vault-instance GLID
+// Used for file snapshot stores: "cluster-ctl" for the cluster-ctl Raft, vault-instance GLID
 // strings for vault metadata raft (see raftgroup.GroupManager BaseDir).
 func (d Dir) RaftGroupDir(groupID string) string {
 	return filepath.Join(d.RaftDir(), "groups", groupID)

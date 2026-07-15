@@ -11,6 +11,9 @@ import (
 // fires the OnLead callback once, and cancelling the context cleanly tears
 // it down.
 func TestLeaderLoop_HappyPath(t *testing.T) {
+	if testing.Short() {
+		t.Skip("spins up a real raft group and waits out election timing; -short skips")
+	}
 	nodes := makeManagerCluster(t, []string{"node-1"})
 
 	fsm := &counterFSM{}
@@ -81,6 +84,9 @@ func TestLeaderLoop_HappyPath(t *testing.T) {
 // immediately, but the structural property (callback after barrier, never
 // before) is what we're verifying.
 func TestLeaderLoop_BarrierWait(t *testing.T) {
+	if testing.Short() {
+		t.Skip("spins up a real raft group and waits out election timing; -short skips")
+	}
 	nodes := makeManagerCluster(t, []string{"node-1"})
 
 	fsm := &counterFSM{}
@@ -128,6 +134,9 @@ func TestLeaderLoop_BarrierWait(t *testing.T) {
 // TestLeaderLoop_NilOnLead: a loop with no OnLead callback should not panic
 // and should still tear down cleanly.
 func TestLeaderLoop_NilOnLead(t *testing.T) {
+	if testing.Short() {
+		t.Skip("spins up a real raft group and waits out election timing; -short skips")
+	}
 	nodes := makeManagerCluster(t, []string{"node-1"})
 
 	fsm := &counterFSM{}
@@ -169,6 +178,9 @@ func TestLeaderLoop_NilOnLead(t *testing.T) {
 // then return from Run. This verifies the dispatch loop waits for OnLead
 // to drain before returning.
 func TestLeaderLoop_ShutdownDuringEpoch(t *testing.T) {
+	if testing.Short() {
+		t.Skip("spins up a real raft group and waits out election timing; -short skips")
+	}
 	nodes := makeManagerCluster(t, []string{"node-1"})
 
 	fsm := &counterFSM{}

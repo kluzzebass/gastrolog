@@ -3,9 +3,15 @@ import { Timestamp } from "@bufbuild/protobuf";
 import {
   ChunkChangeOp,
   ChunkMeta,
+  ChunkState,
   WatchChunksResponse,
 } from "../gen/gastrolog/v1/vault_pb";
-import { mergeMeta, mutateCache } from "./useWatchChunks";
+import {
+  mergeChunksSnapshot,
+  mergeMeta,
+  mutateCache,
+  shouldRefetchChunksAfterDelete,
+} from "./useWatchChunks";
 
 function bytes(b: number): Uint8Array<ArrayBuffer> {
   const out = new Uint8Array(new ArrayBuffer(16));
@@ -65,6 +71,21 @@ describe("mergeMeta — replica info trust model (gastrolog-66vmg)", () => {
     expect(merged.replicaNodeIds).toEqual(["node-a", "node-b", "node-c"]);
   });
 
+  test("incoming retentionPending stamps the ret badge live", () => {
+    const existing = new ChunkMeta({
+      id: bytes(20),
+      sealed: true,
+      retentionPending: false,
+    });
+    const incoming = new ChunkMeta({
+      id: bytes(20),
+      sealed: true,
+      retentionPending: true,
+    });
+    const merged = mergeMeta(existing, incoming);
+    expect(merged.retentionPending).toBe(true);
+  });
+
   test("incoming replicaCount can shrink the existing value (e.g. after RF decrease)", () => {
     // Pre-fix the only way to shrink replicaCount was a cold-start
     // ListChunks refetch. Now the server's authoritative stamp shrinks
@@ -82,6 +103,39 @@ describe("mergeMeta — replica info trust model (gastrolog-66vmg)", () => {
     const merged = mergeMeta(existing, incoming);
     expect(merged.replicaCount).toBe(2);
     expect(merged.replicaNodeIds).toEqual(["node-a", "node-b"]);
+  });
+
+  test("advances chunk state active → sealing and never rolls back", () => {
+    const existing = new ChunkMeta({
+      id: bytes(5),
+      state: ChunkState.ACTIVE,
+    });
+    const sealing = new ChunkMeta({
+      id: bytes(5),
+      state: ChunkState.SEALING,
+    });
+    expect(mergeMeta(existing, sealing).state).toBe(ChunkState.SEALING);
+
+    const staleActive = new ChunkMeta({
+      id: bytes(5),
+      state: ChunkState.ACTIVE,
+    });
+    expect(mergeMeta(sealing, staleActive).state).toBe(ChunkState.SEALING);
+  });
+
+  test("sealing → sealed when SEALED event carries sealed=true", () => {
+    const sealing = new ChunkMeta({
+      id: bytes(6),
+      state: ChunkState.SEALING,
+    });
+    const sealedPayload = new ChunkMeta({
+      id: bytes(6),
+      state: ChunkState.SEALING, // backend may still carry sealing enum
+      sealed: true,
+    });
+    const merged = mergeMeta(sealing, sealedPayload);
+    expect(merged.sealed).toBe(true);
+    expect(merged.state).toBe(ChunkState.SEALED);
   });
 
   test("preserves monotonic fields (writeEnd, recordCount) from existing on stale incoming", () => {
@@ -163,5 +217,135 @@ describe("mutateCache — server-authoritative replica info", () => {
     if (!got) throw new Error("expected entry");
     expect(got.replicaCount).toBe(2);
     expect(got.replicaNodeIds).toEqual(["node-a", "node-b"]);
+  });
+});
+
+// gastrolog-68wsli: ListChunks refetches derive replica_node_ids from
+// which nodes REPORTED the chunk in that fan-out round (reachability
+// evidence), while WatchChunks stamps residency from the vault-ctl FSM
+// (bytes truth). During a node rejoin the two ping-ponged the cache —
+// the seal-pip row count flapped as the rejoining node vanished from
+// one snapshot and reappeared on the next stamp. A snapshot may only
+// GROW the cached replica set; real shrink (delete acks, holder
+// revokes) still arrives via watch stamps, which replace it wholesale.
+describe("mergeChunksSnapshot — snapshots cannot shrink residency (gastrolog-68wsli)", () => {
+  test("snapshot missing a node keeps the watch-established replica set", () => {
+    const cached = [
+      new ChunkMeta({
+        id: bytes(30),
+        sealed: true,
+        replicaCount: 4,
+        replicaNodeIds: ["node-a", "node-b", "node-c", "node-d"],
+      }),
+    ];
+    const fresh = [
+      new ChunkMeta({
+        id: bytes(30),
+        sealed: true,
+        replicaCount: 3,
+        // node-d timed out of this fan-out round — must not vanish.
+        replicaNodeIds: ["node-a", "node-b", "node-c"],
+      }),
+    ];
+    const merged = mergeChunksSnapshot(cached, fresh);
+    expect(merged[0]?.replicaNodeIds).toEqual(["node-a", "node-b", "node-c", "node-d"]);
+    expect(merged[0]?.replicaCount).toBe(4);
+  });
+
+  test("snapshot can grow the replica set (new copy pulled during catch-up)", () => {
+    const cached = [
+      new ChunkMeta({
+        id: bytes(31),
+        sealed: true,
+        replicaCount: 3,
+        replicaNodeIds: ["node-a", "node-b", "node-c"],
+      }),
+    ];
+    const fresh = [
+      new ChunkMeta({
+        id: bytes(31),
+        sealed: true,
+        replicaCount: 4,
+        replicaNodeIds: ["node-a", "node-b", "node-c", "node-d"],
+      }),
+    ];
+    const merged = mergeChunksSnapshot(cached, fresh);
+    expect(merged[0]?.replicaNodeIds).toEqual(["node-a", "node-b", "node-c", "node-d"]);
+    expect(merged[0]?.replicaCount).toBe(4);
+  });
+
+  test("disjoint sets union in sorted order", () => {
+    const cached = [
+      new ChunkMeta({ id: bytes(32), replicaCount: 1, replicaNodeIds: ["node-d"] }),
+    ];
+    const fresh = [
+      new ChunkMeta({ id: bytes(32), replicaCount: 2, replicaNodeIds: ["node-a", "node-b"] }),
+    ];
+    const merged = mergeChunksSnapshot(cached, fresh);
+    expect(merged[0]?.replicaNodeIds).toEqual(["node-a", "node-b", "node-d"]);
+    expect(merged[0]?.replicaCount).toBe(3);
+  });
+
+  test("snapshot is authoritative for which chunks exist", () => {
+    // A chunk deleted while the watch stream was down must drop when the
+    // resync snapshot lands — the union rule applies to replica sets, not
+    // to chunk existence.
+    const cached = [
+      new ChunkMeta({ id: bytes(33), replicaCount: 3 }),
+      new ChunkMeta({ id: bytes(34), replicaCount: 3 }),
+    ];
+    const fresh = [new ChunkMeta({ id: bytes(33), replicaCount: 3 })];
+    const merged = mergeChunksSnapshot(cached, fresh);
+    expect(merged.map((c) => c.id[0])).toEqual([33]);
+  });
+
+  test("cold start (no cache) passes the snapshot through", () => {
+    const fresh = [new ChunkMeta({ id: bytes(35), replicaCount: 2 })];
+    expect(mergeChunksSnapshot(undefined, fresh)).toBe(fresh);
+    expect(mergeChunksSnapshot([], fresh)).toBe(fresh);
+  });
+
+  test("monotone lifecycle fields survive a stale reporter's snapshot", () => {
+    // The fan-out can elect a lagging node's view of the chunk meta;
+    // mergeMeta's monotone rules apply to snapshots the same way they
+    // apply to watch events.
+    const cached = [
+      new ChunkMeta({
+        id: bytes(36),
+        sealed: true,
+        recordCount: BigInt(500),
+        replicaCount: 3,
+        replicaNodeIds: ["node-a", "node-b", "node-c"],
+      }),
+    ];
+    const fresh = [
+      new ChunkMeta({
+        id: bytes(36),
+        sealed: false,
+        recordCount: BigInt(100),
+        replicaCount: 3,
+        replicaNodeIds: ["node-a", "node-b", "node-c"],
+      }),
+    ];
+    const merged = mergeChunksSnapshot(cached, fresh);
+    expect(merged[0]?.sealed).toBe(true);
+    expect(merged[0]?.recordCount).toBe(BigInt(500));
+  });
+});
+
+describe("shouldRefetchChunksAfterDelete", () => {
+  test("true when bulk delete drains a non-empty cache", () => {
+    const prev = [new ChunkMeta({ id: bytes(1) })];
+    expect(shouldRefetchChunksAfterDelete(prev, [])).toBe(true);
+  });
+
+  test("false when cache was already empty", () => {
+    expect(shouldRefetchChunksAfterDelete([], [])).toBe(false);
+    expect(shouldRefetchChunksAfterDelete(undefined, [])).toBe(false);
+  });
+
+  test("false when chunks remain", () => {
+    const prev = [new ChunkMeta({ id: bytes(1) }), new ChunkMeta({ id: bytes(2) })];
+    expect(shouldRefetchChunksAfterDelete(prev, [prev[0]!])).toBe(false);
   });
 });

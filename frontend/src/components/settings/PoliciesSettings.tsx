@@ -23,10 +23,10 @@ import { sortByName } from "../../lib/sort";
 type NavigateTo = (tab: SettingsTab, entityName?: string) => void;
 import { validateCron, describeCron } from "../../utils/cron";
 import {
-  formatBytesBigint as formatBytes,
-  formatDuration,
+  formatBytesBigint,
+  formatDurationNanos,
   parseBytes,
-  parseDuration,
+  parseDurationNanos,
 } from "../../utils/units";
 
 interface PolicyEdit {
@@ -162,9 +162,9 @@ export function PoliciesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly
     if (!pol) return { name: "", maxBytes: "", maxRecords: "", maxAge: "", cron: "" };
     return {
       name: pol.name,
-      maxBytes: formatBytes(pol.maxBytes),
+      maxBytes: formatBytesBigint(pol.maxBytes),
       maxRecords: pol.maxRecords > BigInt(0) ? pol.maxRecords.toString() : "",
-      maxAge: formatDuration(pol.maxAgeSeconds),
+      maxAge: formatDurationNanos(pol.maxAgeNanos),
       cron: pol.cron,
     };
   };
@@ -186,7 +186,7 @@ export function PoliciesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly
         name: edit.name,
         maxBytes: parseBytes(edit.maxBytes),
         maxRecords: maxRecordsValue,
-        maxAgeSeconds: parseDuration(edit.maxAge),
+        maxAgeNanos: parseDurationNanos(edit.maxAge),
         cron: edit.cron,
       };
     },
@@ -223,7 +223,7 @@ export function PoliciesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly
         name,
         maxBytes: parseBytes(newMaxBytes),
         maxRecords: maxRecordsValue,
-        maxAgeSeconds: parseDuration(newMaxAge),
+        maxAgeNanos: parseDurationNanos(newMaxAge),
         cron: newCron,
       });
       addToast(`Policy "${name}" created`, "info");

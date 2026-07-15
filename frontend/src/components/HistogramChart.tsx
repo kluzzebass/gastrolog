@@ -188,7 +188,7 @@ export function HistogramChart({
 
   let countTitle: string | undefined;
   if (truncated) countTitle = "Approximate — scan limit reached";
-  else if (hasCloud) countTitle = "Approximate — cloud chunk counts are interpolated";
+  else if (hasCloud) countTitle = "Approximate — cloud-backed chunk counts are interpolated";
 
   return (
     <div className="relative">

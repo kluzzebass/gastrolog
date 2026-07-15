@@ -300,7 +300,7 @@ func TestSettingsGroupsFieldMappings(t *testing.T) {
 }
 
 func TestFindGroup(t *testing.T) {
-	for _, name := range []string{"auth", "password-policy", "query", "scheduler", "tls", "maxmind"} {
+	for _, name := range []string{"auth", "password-policy", "query", "scheduler", "tls", "maxmind", "cluster"} {
 		g, err := findGroup(name)
 		if err != nil {
 			t.Fatalf("findGroup(%q): %v", name, err)
@@ -314,6 +314,68 @@ func TestFindGroup(t *testing.T) {
 	_, err := findGroup("nonexistent")
 	if err == nil {
 		t.Error("expected error for unknown group")
+	}
+}
+
+// TestEveryFlagRegisters guards against the silent dead-flag failure mode:
+// registerGroupFlags switches on proto field kind, so a field whose kind the
+// switch does not handle gets NO cobra flag at all — the CLI accepts the
+// group but the option simply does not exist (this shipped once, for the
+// uint64 backlog budget). Every settingsField that declares a flag must
+// actually register one.
+func TestEveryFlagRegisters(t *testing.T) {
+	for _, g := range settingsGroups {
+		cmd := newGroupCmd(g.name)
+		for _, f := range g.fields {
+			if f.flag == "" {
+				continue
+			}
+			if cmd.Flags().Lookup(f.flag) == nil {
+				t.Errorf("group %q: field %q declares flag --%s but registerGroupFlags did not register it (unhandled proto kind?)",
+					g.name, f.displayLabel(), f.flag)
+			}
+		}
+	}
+}
+
+// TestApplyFlagBytes pins the uint64 byte-quantity path: human sizes parse
+// (vault --max-size convention), empty resets to 0 = unbounded, junk errors.
+func TestApplyFlagBytes(t *testing.T) {
+	run := func(raw string) (*v1.PutServiceSettingsRequest, error) {
+		cmd := newGroupCmd("cluster")
+		if err := cmd.Flags().Set("backlog-budget", raw); err != nil {
+			t.Fatalf("set flag: %v", err)
+		}
+		req := &v1.PutServiceSettingsRequest{}
+		sub := ensureSubMessage(req.ProtoReflect(), []string{"cluster"})
+		f, _ := findGroup("cluster")
+		var field settingsField
+		for _, ff := range f.fields {
+			if ff.flag == "backlog-budget" {
+				field = ff
+			}
+		}
+		return req, applyFlag(cmd, sub, field)
+	}
+
+	req, err := run("2GB")
+	if err != nil {
+		t.Fatalf("apply 2GB: %v", err)
+	}
+	if got := req.GetCluster().GetPipelineBacklogMaxBytes(); got != 2_000_000_000 {
+		t.Fatalf("2GB parsed to %d, want %d (system.ParseSize is decimal SI)", got, uint64(2_000_000_000))
+	}
+
+	req, err = run("")
+	if err != nil {
+		t.Fatalf("apply empty: %v", err)
+	}
+	if got := req.GetCluster().GetPipelineBacklogMaxBytes(); got != 0 {
+		t.Fatalf("empty must reset to 0 (unbounded), got %d", got)
+	}
+
+	if _, err = run("garbage"); err == nil {
+		t.Fatal("junk size must error, not silently zero")
 	}
 }
 

@@ -2,6 +2,17 @@
 
 The role of this file is to describe common mistakes and confusion points that agents might encounter as they work in this project. If you ever encounter something in the project that surprises you, please alert the developer working with you and indicate that this is the case in the CLAUDE.md file to help prevent future agents from having the same issue.
 
+# DO
+# NOT
+# FUCKING
+# TOUCH
+# THE
+# CLUSTER!
+
+**Unless the user explicitly tells you to in that message — not a plan todo, not “validation,” not “finish the task.”**
+
+Never run `cluster-kill`, `cluster-run`, `pkill` on gastrolog servers, start/stop/restart nodes, or bounce the live cluster to “validate” or “recover.” Use in-process `go test` only. The user’s cluster (e.g. `/Volumes/Storage/Gastrolog`, `data/node*`) is theirs; killing it wastes soak state and trust. See [`MEMORY.md`](./MEMORY.md).
+
 ## Vocabulary
 
 Read [`docs/ubiquitous_language.md`](./docs/ubiquitous_language.md) before writing prose (commit messages, issue titles, comments, code identifiers) that names domain concepts. It defines 8 bounded contexts and ~75 canonical terms, plus a consistency-rules table naming the synonyms to phase out (`primary` → leader, `cloud chunk` → cloud-backed chunk, etc.). Use the canonical terms. Extend the doc in the same PR when introducing a new concept.
@@ -19,9 +30,20 @@ Agents lose this in fresh context; **keep it in this file** so it survives compa
 - Applies to **docs, config, and generated output** as much as code: unrelated moves, renames, and restores are especially harmful because they look intentional in history.
 - **Exception: pre-existing issues that block your progress.** If a hook, lint rule, or compile error on unrelated code in the same file stops you from landing your change, fix it — do not punt. Mention the unrelated fix in the commit body so it is not hidden. The rule against drive-by edits is about avoiding noise in history, not about leaving yourself stuck.
 
+### Building the backend binary
+
+**Never** run ad-hoc `go build -o …` to random paths (`backend/`, repo root, `/tmp`, etc.). Local builds go to **`build/gastrolog`** at the repo root only:
+
+- **`just build`** or **`just backend build`** — canonical
+- **`go run ./cmd/gastrolog …`** from `backend/` — when you do not need a binary on disk (cluster dev, CLI against a socket)
+
+To remove artifacts: **`just clean`**. Do not commit binaries; `build/` is gitignored.
+
 ### Issue tracking (dcat)
 
 This project uses **dcat** for issue tracking. Run `dcat prime --opinionated` for instructions, then `dcat list --agent-only` for the issue list. Work on bugs first, high priority first.
+
+**Issue context is live, not memorized.** Before diagnosing, planning, or citing “what’s open” / “what epic owns this” / “what’s done,” run `dcat list --agent-only` and `dcat show` on the issues you are actually working. Do **not** reason from closed, tombstoned, or superseded tracker entries, old audit deliverables, or `docs/**/obsoleted/` design docs — they describe history, not current scope. The active epic, stack branch, and spec path live on the **open** issue you are on; if unsure, ask the user or read the issue text. **Do not embed specific issue IDs in CLAUDE.md or other long-lived agent docs** — they go stale and mislead the next session.
 
 **ALWAYS** run `dcat update --status in_progress $issueId` when starting work.
 
@@ -39,7 +61,7 @@ When creating a **question** issue, always draft the title and description first
 
 **Always create new branches before picking up issues.** Branch names **must** include the issue ID.
 
-**Stacked branches are allowed** when a follow-up issue naturally builds on an in-review branch (e.g. you discover a related bug while validating the parent fix and don't want to wait for merge). Branch the child off the parent's HEAD, keep each branch single-issue, and either (a) merge the stack as one when both close together, or (b) merge the parent first and rebase the child onto main. What is NOT allowed is **lumping** — multiple issues' commits intermixed on a single branch with no clean revertable history. Stacking ≠ lumping: each branch still owns exactly one issue's work.
+**Stacked branches are allowed** when a follow-up issue naturally builds on an in-review branch (e.g. you discover a related bug while validating the parent fix and don't want to wait for merge). Branch the child off the parent's HEAD, keep each branch single-issue, and either (a) merge the stack as one when both close together, or (b) merge the parent into the stack branch first and rebase the child onto that stack tip. What is NOT allowed is **lumping** — multiple issues' commits intermixed on a single branch with no clean revertable history. Stacking ≠ lumping: each branch still owns exactly one issue's work.
 
 ### Closing issues
 
@@ -49,9 +71,34 @@ When creating a **question** issue, always draft the title and description first
 2. Ask the user to test
 3. Ask if we can close it
 4. Only run `dcat close` after user confirms
-5. **Upon closing:** commit (including tracker), **merge**, and **push** — in that order after `dcat close`. Do not merge to the default branch or push the merge **before** the issue is closed.
+5. **Upon closing:** commit (including tracker), **merge to the issue’s stack branch**, and **push that branch** — in that order after `dcat close`. Do not merge to the default branch or push the merge **before** the issue is closed.
 
-Do not suggest creating PRs.
+Do not open PRs for routine issue closes on a stack branch — merge the feature branch into its **stack branch** directly. PRs are **only** for landing work on **`main`**.
+
+### Main branch protection
+
+**`main` is the stable line.** Feature and stack work does **not** merge to `main` on issue close. **`main` updates only via PR** on GitHub (review + merge there).
+
+| Branch kind | Role | Examples |
+|-------------|------|----------|
+| **`main`** | Released/stable baseline. Direct push blocked. | — |
+| **Stack / integration branch** | Epic or program integration tip; **merge target on issue close** for work in that stack. | `pipeline-v3`, `feat/gastrolog-4ecqt-fan-out-v2` |
+| **Feature branch** | Single-issue work (`<type>/gastrolog-<id>-…`). Branch off the stack branch (or its parent feature branch when stacked). | `feat/gastrolog-5u73c-chunking-materialize-at-seal` |
+
+Before starting work, confirm which **stack branch** the issue belongs to (epic description, issue text, or ask the user). **Never assume `main`.**
+
+**Updating `main`:** open a PR **`<stack-branch>` → `main`** (or the relevant branch → `main`) and merge it on GitHub. No direct push — `main` requires a PR. This is a **single-developer repo**: `main` protection requires a PR and blocks direct/force pushes, but requires **0 approvals** (a 1-approval rule would deadlock a solo dev — GitHub forbids self-approval). Do not re-add an approval requirement.
+
+**Agents MUST NOT:**
+
+- `git push origin main`
+- `git merge` into `main` locally and push
+- `gh pr merge` without explicit user instruction to complete a PR **they** opened for `main`
+- Use `main` as the default merge target on `dcat close`
+
+**On issue close:** `git checkout <stack-branch> && git merge <feature-branch> && git push origin <stack-branch>`.
+
+**Enforcement:** GitHub branch protection on `main` — direct push blocked, force-push/deletion blocked, PR required, **0 approvals** (solo repo); `enforce_admins` on (the PR gate applies to the owner too). Merge via the GitHub UI. NEVER configure an approval-count requirement on this repo — it cannot be satisfied by a single developer.
 
 ## Cluster-First: Every Feature Must Work on Every Node
 
@@ -60,6 +107,8 @@ GastroLog is a fully distributed system. No node has cluster-wide authority — 
 When implementing anything new, ask: **"Does this work if the user is on a different node than the data?"** If the answer is no, redesign before proceeding.
 
 ### Local cluster nodes: Unix sockets and repo-local data
+
+**Agents: DO NOT run `cluster-kill`, `cluster-run`, or restart nodes unless the user explicitly asked. See top of this file.**
 
 When talking to **local** GastroLog processes (dev cluster, `just cluster-run`, etc.), **prefer the Unix socket**, not HTTP + JWT on `--listen`.
 
@@ -97,6 +146,8 @@ Every feature must have tests across ALL of these dimensions:
 - **Edge cases**: boundary conditions, concurrent access, restart survival, empty inputs
 
 Single-node happy-path tests are NOT sufficient. A feature is not done until all dimensions are covered. This applies to every new feature, every bug fix, every refactor that changes behavior.
+
+**Two test tiers, not one.** `just test` (backend: `go test -short ./...`) is the fast developer loop — multi-second convergence/stress/large-I/O tests are skipped via `testing.Short()`. `just backend test-full` (`go test ./...`, no `-short`) is the full acceptance gate and remains mandatory once before declaring work done or handing off — it is not optional just because the fast loop was green. New slow tests (multi-node raft convergence, WAL segment stress, restart-survival cycles) get a `testing.Short()` skip with a one-line reason, never deletion or weakened coverage.
 
 ## Renaming: Always Rename Through the Entire Stack
 

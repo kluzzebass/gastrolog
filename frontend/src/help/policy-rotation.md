@@ -15,9 +15,9 @@ The size limit is a **soft limit** — it checks the projected size (current siz
 
 ## Value Formats
 
-**Size** fields accept values with suffixes: `B`, `KB`, `MB`, `GB` (case-insensitive). A bare number is treated as bytes.
+**Size** fields accept values with suffixes (case-insensitive): decimal `KB`, `MB`, `GB`, `TB` (×1000) or binary `KiB`, `MiB`, `GiB`, `TiB` (×1024) — `2GB` is exactly 2,000,000,000 bytes, `2GiB` is 2,147,483,648. A bare number is bytes. Values are stored as exact byte counts.
 
-**Duration** fields accept Go duration syntax: `30s`, `5m`, `1h`, `24h`, `720h`. The age is measured from wall-clock time when the chunk was opened, not from the first record's timestamp.
+**Duration** fields accept Go duration syntax at full precision: `30s`, `5m`, `1h`, `720h`, down to `ms`/`us`/`ns` (e.g. `1s500ms`); `d` is accepted as a convenience for days. Values are stored as exact nanosecond counts and display in canonical form (`1h30m`, `2h3m11.004s`). The age is measured from wall-clock time when the chunk was opened, not from the first record's timestamp.
 
 **Cron** expressions use either 5-field (minute-level) or 6-field (second-level) syntax. Cron rotation only fires if the active chunk has at least one record.
 

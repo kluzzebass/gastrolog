@@ -10,6 +10,7 @@ import { Button } from "./Buttons";
 import { Checkbox } from "./Checkbox";
 import { ExpandableCard } from "./ExpandableCard";
 import { useExpandedCards } from "../../hooks/useExpandedCards";
+import { formatBytesBigint, parseBytes } from "../../utils/units";
 import { extractMessage } from "../../utils/errors";
 import type { GetSettingsResponse } from "../../api/gen/gastrolog/v1/system_pb";
 
@@ -34,6 +35,7 @@ interface ServiceFormState {
   maxResultCount: string;
   broadcastInterval: string;
   heartbeatInterval: string;
+  pipelineBacklogMax: string; // human size; per-vault pipeline backlog budget; empty = unbounded
   initialized: boolean;
 }
 
@@ -67,6 +69,10 @@ function fieldsFromData(data: GetSettingsResponse): ServiceFormState {
     maxResultCount: query?.maxResultCount ? String(query.maxResultCount) : "10000",
     broadcastInterval: data.cluster?.broadcastInterval || "5s",
     heartbeatInterval: data.cluster?.heartbeatInterval || "1s",
+    pipelineBacklogMax:
+      data.cluster && data.cluster.pipelineBacklogMaxBytes > BigInt(0)
+        ? formatBytesBigint(data.cluster.pipelineBacklogMaxBytes)
+        : "",
     initialized: true,
   };
 }
@@ -77,7 +83,8 @@ const INITIAL_STATE: ServiceFormState = {
   httpsPort: "", requireMixedCase: false, requireDigit: false,
   requireSpecial: false, maxConsecutiveRepeats: "", forbidAnimalNoise: false,
   refreshTokenDuration: "", maxFollowDuration: "", queryTimeout: "",
-  maxResultCount: "", broadcastInterval: "", heartbeatInterval: "", initialized: false,
+  maxResultCount: "", broadcastInterval: "", heartbeatInterval: "",
+  pipelineBacklogMax: "", initialized: false,
 };
 
 function serviceReducer(state: ServiceFormState, action: ServiceFormAction): ServiceFormState {
@@ -153,7 +160,11 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
       s.queryTimeout !== (data.query?.timeout ?? "") ||
       s.maxResultCount !== String(data.query?.maxResultCount || 10000) ||
       s.broadcastInterval !== (data.cluster?.broadcastInterval || "5s") ||
-      s.heartbeatInterval !== (data.cluster?.heartbeatInterval || "1s"));
+      s.heartbeatInterval !== (data.cluster?.heartbeatInterval || "1s") ||
+      s.pipelineBacklogMax !==
+        (data.cluster && data.cluster.pipelineBacklogMaxBytes > BigInt(0)
+          ? formatBytesBigint(data.cluster.pipelineBacklogMaxBytes)
+          : ""));
 
   const handleSave = async () => {
     const hasCert = certIdSet.has(s.tlsDefaultCert);
@@ -196,6 +207,9 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
         cluster: {
           broadcastInterval: effectiveBroadcast,
           heartbeatInterval: effectiveHeartbeat,
+          // Always sent: clearing the field means 0 = unbounded, which must
+          // reach the store (undefined would merge-skip and keep the old budget).
+          pipelineBacklogMaxBytes: parseBytes(s.pipelineBacklogMax),
         },
       });
       addToast("Server configuration updated", "info");
@@ -215,6 +229,7 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
     query: false,
     tls: false,
     cluster: false,
+    pipeline: false,
   });
 
   return (
@@ -588,6 +603,31 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
                     return <p className="text-[0.75em] text-severity-warn mt-1">Must be at least 100ms</p>;
                   return null;
                 })()}
+              </FormField>
+            </div>
+          </ExpandableCard>
+
+          <ExpandableCard
+            id="Pipeline"
+            dark={dark}
+            expanded={isExpanded("pipeline")}
+            onToggle={() => toggle("pipeline")}
+            monoTitle={false}
+          >
+            <div className="flex flex-col gap-4">
+              <FormField
+                label="Backlog Budget"
+                description="Per-vault budget for the pipeline backlog (completed segments awaiting chunking). At the budget, new records for that vault are refused cluster-wide — retryable backpressure — until chunking drains it. Bounds the backlog before disk pressure; the disk-space guard remains the backstop. Applies to every vault. Leave empty for unbounded."
+                dark={dark}
+              >
+                <TextInput
+                  value={s.pipelineBacklogMax}
+                  onChange={set("pipelineBacklogMax")}
+                  placeholder=""
+                  dark={dark}
+                  mono
+                  examples={["2GB", "10GB", "50GB"]}
+                />
               </FormField>
             </div>
           </ExpandableCard>

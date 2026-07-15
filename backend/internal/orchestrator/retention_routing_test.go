@@ -1,75 +1,41 @@
 package orchestrator
 
 import (
+	"context"
 	"log/slog"
 	"testing"
+	"time"
 
 	"gastrolog/internal/chunk"
 	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline/routing"
 	"gastrolog/internal/system"
 )
 
-// dispositionFixture wires a source vault, an archive vault, and a
-// retention-source route that would forward records source → archive
-// when the routing engine fires. Used by both disposition tests below.
-//
-// The two tests assert opposite behaviors at the same fan-out point —
-// the route exists in both fixtures, but only the "route" disposition
-// path is supposed to actually invoke it.
+// dispositionFixture wires a source vault holding a sealed chunk plus a started
+// pipeline whose published routing table forwards retention output
+// (_source="retention" AND _vault=<source>) to an archive vault. Tests fire
+// retention and observe the pipeline routing counters to verify the disposition
+// gate (route vs delete) — the routing/segmentation mechanics themselves are
+// covered by the routing and pipeline packages' own tests.
 type dispositionFixture struct {
 	orch      *Orchestrator
 	sourceCM  chunk.ChunkManager
-	archiveCM chunk.ChunkManager
 	sourceID  glid.GLID
+	archiveID glid.GLID
 	sealedID  chunk.ChunkID
 }
 
+// newDispositionFixture registers a source vault seeded with 3 sealed records
+// and starts a pipeline routing retention output to a separate archive vault.
 func newDispositionFixture(t *testing.T) dispositionFixture {
 	t.Helper()
 	sourceID := glid.New()
 	archiveID := glid.New()
 
-	sourceCM, err := chunkmem.NewManager(chunkmem.Config{
-		RotationPolicy: chunk.NewRecordCountPolicy(100),
-	})
-	if err != nil {
-		t.Fatalf("source CM: %v", err)
-	}
-	archiveCM, err := chunkmem.NewManager(chunkmem.Config{
-		RotationPolicy: chunk.NewRecordCountPolicy(100),
-	})
-	if err != nil {
-		t.Fatalf("archive CM: %v", err)
-	}
-
-	orch, err := New(Config{LocalNodeID: "node-A"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	orch.RegisterVault(NewVaultFromComponents(sourceID, sourceCM, nil, nil))
-	orch.RegisterVault(NewVaultFromComponents(archiveID, archiveCM, nil, nil))
-
-	expr := `_source="retention" AND _vault="` + sourceID.String() + `"`
-	cr, err := CompileRoute(glid.New(), "retain-source-to-archive", 0, expr,
-		[]RouteDestination{{VaultID: archiveID}}, "fanout")
-	if err != nil {
-		t.Fatalf("CompileRoute: %v", err)
-	}
-	orch.SetRouteSet(NewRouteSet([]*CompiledRoute{cr}))
-
-	for i := range 3 {
-		rec := chunk.Record{
-			Attrs: chunk.Attributes{"i": string(rune('0' + i))},
-			Raw:   []byte{byte('a' + i)},
-		}
-		if _, _, err := sourceCM.Append(rec); err != nil {
-			t.Fatalf("Append %d: %v", i, err)
-		}
-	}
-	if err := sourceCM.Seal(); err != nil {
-		t.Fatalf("Seal: %v", err)
-	}
+	orch := newRoutingOrch(t, retentionRouteTable(t, sourceID, archiveID))
+	sourceCM := seedSealedSourceVault(t, orch, sourceID, 3)
 
 	metas, err := sourceCM.List()
 	if err != nil {
@@ -89,158 +55,112 @@ func newDispositionFixture(t *testing.T) dispositionFixture {
 	return dispositionFixture{
 		orch:      orch,
 		sourceCM:  sourceCM,
-		archiveCM: archiveCM,
 		sourceID:  sourceID,
+		archiveID: archiveID,
 		sealedID:  sealedID,
 	}
 }
 
-// countArchiveRecords walks every chunk in the archive and returns the
-// total record count. Used to assert whether the routing engine
-// forwarded retention output through the source→archive route.
-func countArchiveRecords(t *testing.T, cm chunk.ChunkManager) int {
+// newRoutingOrch builds an orchestrator with a started pipeline and (optionally)
+// a published routing table. The pipeline routing workers consume submitted
+// records asynchronously, incrementing the counters tests assert against.
+func newRoutingOrch(t *testing.T, table *routing.Table) *Orchestrator {
 	t.Helper()
-	metas, err := cm.List()
+	orch, err := New(Config{LocalNodeID: "node-A"})
 	if err != nil {
-		t.Fatalf("archive List: %v", err)
+		t.Fatal(err)
 	}
-	count := 0
-	for _, m := range metas {
-		cur, err := cm.OpenCursor(m.ID)
-		if err != nil {
-			t.Fatalf("archive OpenCursor: %v", err)
-		}
-		for {
-			_, _, err := cur.Next()
-			if err != nil {
-				break
-			}
-			count++
-		}
-		cur.Close()
+	if table != nil {
+		orch.pipeline.SetRoutingTable(table)
 	}
-	return count
+	if err := orch.pipeline.Start(context.Background()); err != nil {
+		t.Fatalf("pipeline Start: %v", err)
+	}
+	t.Cleanup(func() { _ = orch.pipeline.Stop() })
+	return orch
 }
 
-// TestFireRetentionEventStreamsThroughRoutingEngine verifies that
-// retention firing in Phase 5 (gastrolog-4kkoo) feeds expired records
-// back into the routing engine with synthetic _source="retention" and
-// _vault="<id>" attributes, and that a route matching those synthetics
-// fans the records out to a different vault.
-func TestFireRetentionEventStreamsThroughRoutingEngine(t *testing.T) {
-	t.Parallel()
+// retentionRouteTable returns a table routing retention output from sourceID to
+// archiveID via the synthetic attributes RetentionSource injects.
+func retentionRouteTable(t *testing.T, sourceID, archiveID glid.GLID) *routing.Table {
+	t.Helper()
+	expr := `_source="retention" AND _vault="` + sourceID.String() + `"`
+	r, err := routing.CompileRoute(glid.New(), "retain-source-to-archive", 0, expr, []glid.GLID{archiveID})
+	if err != nil {
+		t.Fatalf("CompileRoute: %v", err)
+	}
+	return routing.NewTable([]*routing.Route{r})
+}
 
-	sourceID := glid.New()
-	archiveID := glid.New()
-
-	sourceCM, err := chunkmem.NewManager(chunkmem.Config{
+// seedSealedSourceVault registers a memory-backed source vault, appends n
+// records, and seals them into a readable sealed chunk.
+func seedSealedSourceVault(t *testing.T, orch *Orchestrator, sourceID glid.GLID, n int) chunk.ChunkManager {
+	t.Helper()
+	cm, err := chunkmem.NewManager(chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(100),
 	})
 	if err != nil {
 		t.Fatalf("source CM: %v", err)
 	}
-	archiveCM, err := chunkmem.NewManager(chunkmem.Config{
-		RotationPolicy: chunk.NewRecordCountPolicy(100),
-	})
-	if err != nil {
-		t.Fatalf("archive CM: %v", err)
-	}
+	orch.RegisterVault(NewVaultFromComponents(sourceID, cm, nil, nil))
 
-	orch, err := New(Config{LocalNodeID: "node-A"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	orch.RegisterVault(NewVaultFromComponents(sourceID, sourceCM, nil, nil))
-	orch.RegisterVault(NewVaultFromComponents(archiveID, archiveCM, nil, nil))
-
-	// Phase 5 route: retention from source → archive. Express the
-	// vault narrowing via _vault so a separate retention sweep on a
-	// different vault wouldn't accidentally fire this route.
-	expr := `_source="retention" AND _vault="` + sourceID.String() + `"`
-	cr, err := CompileRoute(glid.New(), "retain-source-to-archive", 0, expr,
-		[]RouteDestination{{VaultID: archiveID}}, "fanout")
-	if err != nil {
-		t.Fatalf("CompileRoute: %v", err)
-	}
-	orch.SetRouteSet(NewRouteSet([]*CompiledRoute{cr}))
-
-	// Append three records into the source vault and seal so they are
-	// readable via OpenCursor.
-	for i := range 3 {
+	for i := range n {
 		rec := chunk.Record{
 			Attrs: chunk.Attributes{"i": string(rune('0' + i))},
 			Raw:   []byte{byte('a' + i)},
 		}
-		if _, _, err := sourceCM.Append(rec); err != nil {
+		if _, _, err := cm.Append(rec); err != nil {
 			t.Fatalf("Append %d: %v", i, err)
 		}
 	}
-	if err := sourceCM.Seal(); err != nil {
+	if err := cm.Seal(); err != nil {
 		t.Fatalf("Seal: %v", err)
 	}
+	return cm
+}
 
-	// Pull the sealed chunk's ID.
-	metas, err := sourceCM.List()
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	if len(metas) == 0 {
-		t.Fatal("no chunks after seal")
-	}
-	var sealedID chunk.ChunkID
-	for _, m := range metas {
-		if m.Sealed {
-			sealedID = m.ID
-			break
+// waitForRouteStats polls the orchestrator's pipeline routing counters until
+// cond is satisfied or the deadline elapses (the routing workers process
+// submitted records asynchronously).
+func waitForRouteStats(t *testing.T, orch *Orchestrator, what string, cond func(*RouteStats) bool) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond(orch.GetRouteStats()) {
+			return
 		}
+		time.Sleep(time.Millisecond)
 	}
-	if sealedID == (chunk.ChunkID{}) {
-		t.Fatal("no sealed chunk found")
-	}
+	t.Fatalf("timed out waiting for %s (stats=%+v)", what, orch.GetRouteStats())
+}
 
-	// Construct a retentionRunner pointed at the source vault. We don't
-	// need the full sweep machinery for this test — just the fan-out
-	// path that fireRetentionEvent exercises.
+// TestFireRetentionEventStreamsThroughPipeline verifies that firing a retention
+// event submits the chunk's records into the pipeline with synthetic
+// _source="retention" / _vault="<id>" attributes, and that a matching route
+// fans them out to its destination vault (matched counter advances).
+func TestFireRetentionEventStreamsThroughPipeline(t *testing.T) {
+	t.Parallel()
+
+	fx := newDispositionFixture(t)
+
 	r := &retentionRunner{
-		vaultID: sourceID,
-		orch:    orch,
+		vaultID: fx.sourceID,
+		orch:    fx.orch,
 		logger:  slog.Default(),
 	}
+	r.fireRetentionEvent(fx.sealedID)
 
-	// Fire retention. Records should stream through the routing engine
-	// and land in the archive vault.
-	r.fireRetentionEvent(sealedID)
-
-	// Verify archive received them. Walk all archive chunks and count
-	// records — they may be split across active + sealed depending on
-	// rotation, but the per-record count should equal 3.
-	archiveMetas, err := archiveCM.List()
-	if err != nil {
-		t.Fatalf("archive List: %v", err)
-	}
-	count := 0
-	for _, m := range archiveMetas {
-		cur, err := archiveCM.OpenCursor(m.ID)
-		if err != nil {
-			t.Fatalf("archive OpenCursor: %v", err)
-		}
-		for {
-			_, _, err := cur.Next()
-			if err != nil {
-				break
-			}
-			count++
-		}
-		cur.Close()
-	}
-	if count != 3 {
-		t.Errorf("archive vault should have 3 records (fanned from retention), got %d", count)
+	waitForRouteStats(t, fx.orch, "3 matched retention records", func(s *RouteStats) bool {
+		return s.Matched == 3
+	})
+	if got := fx.orch.VaultRouteStatsList()[fx.archiveID]; got == nil || got.Matched != 3 {
+		t.Errorf("archive vault should have matched 3 retention records, got %+v", got)
 	}
 
 	// Sanity: source vault still has its records — destruction is the
 	// caller's job, not fireRetentionEvent's.
 	srcCount := 0
-	cur, err := sourceCM.OpenCursor(sealedID)
+	cur, err := fx.sourceCM.OpenCursor(fx.sealedID)
 	if err != nil {
 		t.Fatalf("source OpenCursor: %v", err)
 	}
@@ -257,58 +177,24 @@ func TestFireRetentionEventStreamsThroughRoutingEngine(t *testing.T) {
 	}
 }
 
-// TestFireRetentionEventDropsWhenNoRouteMatches verifies that a
-// retention sweep with no matching route silently drops records — the
-// same observable behavior as the legacy expire action. This is the
-// load-bearing default: operators who haven't set up retention routes
-// see chunks expire as before.
+// TestFireRetentionEventDropsWhenNoRouteMatches verifies that a retention sweep
+// whose records match no route is a counted, silent drop — the same observable
+// behavior as the legacy expire action. Operators who haven't set up retention
+// routes see chunks expire without fan-out.
 func TestFireRetentionEventDropsWhenNoRouteMatches(t *testing.T) {
 	t.Parallel()
 
 	sourceID := glid.New()
 	archiveID := glid.New()
 
-	sourceCM, err := chunkmem.NewManager(chunkmem.Config{
-		RotationPolicy: chunk.NewRecordCountPolicy(100),
-	})
-	if err != nil {
-		t.Fatalf("source CM: %v", err)
-	}
-	archiveCM, err := chunkmem.NewManager(chunkmem.Config{
-		RotationPolicy: chunk.NewRecordCountPolicy(100),
-	})
-	if err != nil {
-		t.Fatalf("archive CM: %v", err)
-	}
-
-	orch, err := New(Config{LocalNodeID: "node-A"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	orch.RegisterVault(NewVaultFromComponents(sourceID, sourceCM, nil, nil))
-	orch.RegisterVault(NewVaultFromComponents(archiveID, archiveCM, nil, nil))
-
 	// Route only matches live ingest, not retention. Records fired by
-	// retention should drop silently.
-	cr, err := CompileRoute(glid.New(), "ingest-only", 0, `_source="ingest"`,
-		[]RouteDestination{{VaultID: archiveID}}, "fanout")
+	// retention should be counted as unmatched drops.
+	ingestOnly, err := routing.CompileRoute(glid.New(), "ingest-only", 0, `_source="ingest"`, []glid.GLID{archiveID})
 	if err != nil {
 		t.Fatalf("CompileRoute: %v", err)
 	}
-	orch.SetRouteSet(NewRouteSet([]*CompiledRoute{cr}))
-
-	for i := range 2 {
-		rec := chunk.Record{
-			Attrs: chunk.Attributes{"i": string(rune('0' + i))},
-			Raw:   []byte{byte('a' + i)},
-		}
-		if _, _, err := sourceCM.Append(rec); err != nil {
-			t.Fatalf("Append %d: %v", i, err)
-		}
-	}
-	if err := sourceCM.Seal(); err != nil {
-		t.Fatalf("Seal: %v", err)
-	}
+	orch := newRoutingOrch(t, routing.NewTable([]*routing.Route{ingestOnly}))
+	sourceCM := seedSealedSourceVault(t, orch, sourceID, 2)
 
 	metas, _ := sourceCM.List()
 	var sealedID chunk.ChunkID
@@ -326,33 +212,21 @@ func TestFireRetentionEventDropsWhenNoRouteMatches(t *testing.T) {
 	}
 	r.fireRetentionEvent(sealedID)
 
-	// Archive must be empty — the route only matched _source="ingest".
-	archiveMetas, _ := archiveCM.List()
-	count := 0
-	for _, m := range archiveMetas {
-		cur, err := archiveCM.OpenCursor(m.ID)
-		if err != nil {
-			continue
-		}
-		for {
-			_, _, err := cur.Next()
-			if err != nil {
-				break
-			}
-			count++
-		}
-		cur.Close()
+	// All submitted records ingested but unmatched; none routed.
+	waitForRouteStats(t, orch, "2 unmatched retention records", func(s *RouteStats) bool {
+		return s.Unmatched == 2
+	})
+	if s := orch.GetRouteStats(); s.Matched != 0 {
+		t.Errorf("no records should have matched the ingest-only route, got Matched=%d", s.Matched)
 	}
-	if count != 0 {
-		t.Errorf("archive should be empty (no retention route matched), got %d records", count)
+	if got := orch.VaultRouteStatsList()[archiveID]; got != nil && got.Matched != 0 {
+		t.Errorf("archive vault should have matched 0 records, got %+v", got)
 	}
 }
 
 // TestRetentionDispositionRouteFiresFanOut verifies that with
-// disposition="route", the runner streams records through the routing
-// engine — so a configured retention-source route forwards them to its
-// destination. Mirrors the "Phase 5 default" behavior preserved by the
-// opt-in route disposition.
+// disposition="route", the runner streams records through the pipeline — so a
+// configured retention-source route forwards them to its destination.
 func TestRetentionDispositionRouteFiresFanOut(t *testing.T) {
 	t.Parallel()
 
@@ -366,16 +240,15 @@ func TestRetentionDispositionRouteFiresFanOut(t *testing.T) {
 	}
 	r.applyRetentionDispositionToChunk(fx.sealedID)
 
-	if got := countArchiveRecords(t, fx.archiveCM); got != 3 {
-		t.Errorf("archive should have 3 records (route disposition fires fan-out), got %d", got)
-	}
+	waitForRouteStats(t, fx.orch, "3 matched records (route disposition fires fan-out)", func(s *RouteStats) bool {
+		return s.Matched == 3
+	})
 }
 
 // TestRetentionDispositionDeleteSkipsFanOut verifies that with
-// disposition="delete", the runner does NOT stream records through the
-// routing engine — even when a retention-source route is configured
-// that would otherwise forward them. This is the safe-default behavior
-// that prevents accidental cascades.
+// disposition="delete", the runner does NOT submit records to the pipeline —
+// even when a retention-source route is configured that would otherwise forward
+// them. This is the safe-default behavior that prevents accidental cascades.
 func TestRetentionDispositionDeleteSkipsFanOut(t *testing.T) {
 	t.Parallel()
 
@@ -389,15 +262,13 @@ func TestRetentionDispositionDeleteSkipsFanOut(t *testing.T) {
 	}
 	r.applyRetentionDispositionToChunk(fx.sealedID)
 
-	if got := countArchiveRecords(t, fx.archiveCM); got != 0 {
-		t.Errorf("archive should be empty (delete disposition skips fan-out), got %d records", got)
-	}
+	assertNoRetentionFanOut(t, fx.orch, "delete disposition")
 }
 
 // TestRetentionDispositionEmptyTreatedAsDelete verifies that an empty
-// disposition string (the natural state for vaults that haven't had
-// the field set) behaves as "delete". This is the load-bearing
-// fail-safe — a vault with no explicit disposition must NOT cascade.
+// disposition string (the natural state for vaults that haven't had the field
+// set) behaves as "delete" — the load-bearing fail-safe so a vault with no
+// explicit disposition must NOT cascade.
 func TestRetentionDispositionEmptyTreatedAsDelete(t *testing.T) {
 	t.Parallel()
 
@@ -411,23 +282,25 @@ func TestRetentionDispositionEmptyTreatedAsDelete(t *testing.T) {
 	}
 	r.applyRetentionDispositionToChunk(fx.sealedID)
 
-	if got := countArchiveRecords(t, fx.archiveCM); got != 0 {
-		t.Errorf("archive should be empty (empty disposition defaults to delete), got %d records", got)
+	assertNoRetentionFanOut(t, fx.orch, "empty disposition")
+}
+
+// assertNoRetentionFanOut gives the pipeline a brief grace window then asserts
+// that nothing was submitted to routing (no ingest, no match).
+func assertNoRetentionFanOut(t *testing.T, orch *Orchestrator, what string) {
+	t.Helper()
+	time.Sleep(50 * time.Millisecond)
+	if s := orch.GetRouteStats(); s.Routed != 0 {
+		t.Errorf("%s must skip pipeline fan-out, but %d records were ingested", what, s.Routed)
 	}
 }
 
-// TestTryRetainChunkSkipsDispositionWhenAlreadyPending pins the
-// regression fix from the gastrolog-2eclw-follow-up live incident: when
-// retention sweeps re-evaluate a chunk that's already retention-pending
-// (because the source delete is stuck — receipt protocol stalled,
-// destination unreachable, etc.), the disposition action MUST NOT fire
-// again. Otherwise every sweep re-streams the same records to the
-// route destination, multiplying storage at the target each cycle.
-//
-// In the K8s test cluster this manifested as 11 stuck local-vault
-// chunks re-routing through `_source="retention"` → cloud-vault on
-// every 60s sweep, growing cloud-vault by ~50-100 MB/s with zero
-// active ingesters.
+// TestTryRetainChunkSkipsDispositionWhenAlreadyPending pins the regression fix
+// from the gastrolog-2eclw-follow-up live incident: when retention sweeps
+// re-evaluate a chunk that's already retention-pending (because the source
+// delete is stuck), the disposition action MUST NOT fire again. Otherwise every
+// sweep re-streams the same records to the route destination, multiplying
+// storage at the target each cycle.
 func TestTryRetainChunkSkipsDispositionWhenAlreadyPending(t *testing.T) {
 	t.Parallel()
 
@@ -445,22 +318,20 @@ func TestTryRetainChunkSkipsDispositionWhenAlreadyPending(t *testing.T) {
 		// FSM-mark gate, so this is sufficient to exercise it.
 		// No reconciler / no im / no cm — expireChunk will hit nil
 		// derefs in the reconciler-less fallback, which is fine: the
-		// gate runs BEFORE expireChunk, so the assertions complete
-		// before any nil-deref. We recover the panic to prove the
-		// gate ran.
+		// gate runs BEFORE expireChunk, so the fan-out completes before
+		// any nil-deref. We recover the panic to prove the gate ran.
 	}
 
 	// First call: alreadyPending=false → must fire routing (3 records
-	// into archive). expireChunk panics from nil cm — caught.
+	// into the pipeline). expireChunk panics from nil cm — caught.
 	func() {
 		defer func() { _ = recover() }()
 		r.tryRetainChunk(fx.sealedID, retentionRule{}, false)
 	}()
 
-	got := countArchiveRecords(t, fx.archiveCM)
-	if got != 3 {
-		t.Fatalf("first sweep (alreadyPending=false) must route 3 records to archive, got %d", got)
-	}
+	waitForRouteStats(t, fx.orch, "first sweep routes 3 records", func(s *RouteStats) bool {
+		return s.Matched == 3
+	})
 
 	// Re-arm inflight for the second call.
 	r.mu.Lock()
@@ -468,30 +339,31 @@ func TestTryRetainChunkSkipsDispositionWhenAlreadyPending(t *testing.T) {
 	r.mu.Unlock()
 
 	// Second call: alreadyPending=true → must NOT fire routing.
-	// Archive count stays at 3.
 	func() {
 		defer func() { _ = recover() }()
 		r.tryRetainChunk(fx.sealedID, retentionRule{}, true)
 	}()
 
-	if got := countArchiveRecords(t, fx.archiveCM); got != 3 {
-		t.Errorf("second sweep (alreadyPending=true) MUST NOT re-route; archive grew from 3 to %d records (the storage-eating cascade bug)", got)
+	// Give the pipeline a grace window; the matched count must stay at 3.
+	time.Sleep(50 * time.Millisecond)
+	if s := fx.orch.GetRouteStats(); s.Matched != 3 {
+		t.Errorf("second sweep (alreadyPending=true) MUST NOT re-route; matched grew from 3 to %d (the storage-eating cascade bug)", s.Matched)
 	}
 }
 
 // TestRetentionTargetThreadsDispositionFromVaultConfig verifies that
 // retentionTargetForInstance reads VaultConfig.RetentionDisposition (via
-// ResolveRetentionDisposition) and writes the resolved value to the
-// runner. This is the load-bearing plumbing — without it, the per-chunk
-// gate in tryRetainChunk always sees an empty string and defaults to
-// "delete" regardless of operator intent. Refreshes on every sweep
-// tick so live config edits propagate without restart.
+// ResolveRetentionDisposition) and writes the resolved value to the runner.
+// This is the load-bearing plumbing — without it, the per-chunk gate in
+// tryRetainChunk always sees an empty string and defaults to "delete"
+// regardless of operator intent. Refreshes on every sweep tick so live config
+// edits propagate without restart.
 func TestRetentionTargetThreadsDispositionFromVaultConfig(t *testing.T) {
 	t.Parallel()
 
 	// Vault and instance share the same ID.
 	vaultID := glid.New()
-	
+
 	policyID := glid.New()
 
 	cases := []struct {
@@ -515,8 +387,8 @@ func TestRetentionTargetThreadsDispositionFromVaultConfig(t *testing.T) {
 					}},
 				}},
 				RetentionPolicies: []system.RetentionPolicyConfig{{
-					ID:     policyID,
-					MaxAge: strPtr("1h"),
+					ID:          policyID,
+					MaxAgeNanos: int64Ptr(int64(time.Hour)),
 				}},
 			}
 
@@ -530,7 +402,7 @@ func TestRetentionTargetThreadsDispositionFromVaultConfig(t *testing.T) {
 			defer orch.Stop()
 
 			vaultInst := &VaultInstance{
-				VaultID:  vaultID,
+				VaultID: vaultID,
 				Chunks:  &retentionFakeChunkManager{},
 				Indexes: &retentionFakeIndexManager{},
 			}
@@ -546,10 +418,10 @@ func TestRetentionTargetThreadsDispositionFromVaultConfig(t *testing.T) {
 	}
 }
 
-// TestResolveRetentionDispositionDefaults locks the resolver behavior
-// for empty + unrecognized values. The retention runner uses the
-// resolved value, so anything not "route" must coerce to "delete" —
-// no silent passthrough that could let a typo become a cascade.
+// TestResolveRetentionDispositionDefaults locks the resolver behavior for empty
+// + unrecognized values. The retention runner uses the resolved value, so
+// anything not "route" must coerce to "delete" — no silent passthrough that
+// could let a typo become a cascade.
 func TestResolveRetentionDispositionDefaults(t *testing.T) {
 	t.Parallel()
 

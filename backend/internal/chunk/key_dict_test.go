@@ -107,9 +107,9 @@ func TestStringDictSharedKeyValueNamespace(t *testing.T) {
 	// a key and a value, it gets the same ID.
 	d := NewStringDict()
 
-	id1, _ := d.Add("host")     // used as key
-	id2, _ := d.Add("srv-001")  // used as value
-	id3, _ := d.Add("host")     // same string, used as value this time
+	id1, _ := d.Add("host")    // used as key
+	id2, _ := d.Add("srv-001") // used as value
+	id3, _ := d.Add("host")    // same string, used as value this time
 
 	if id1 != id3 {
 		t.Fatalf("same string should get same ID: %d vs %d", id1, id3)
@@ -360,7 +360,7 @@ func TestEncodeDecodeWithDictBinaryFormat(t *testing.T) {
 	// [2:6]   keyID = 0 (first entry: "ab")
 	// [6:10]  valID = 1 (second entry: "cd")
 	expected := []byte{
-		0x01, 0x00,             // count = 1
+		0x01, 0x00, // count = 1
 		0x00, 0x00, 0x00, 0x00, // keyID = 0
 		0x01, 0x00, 0x00, 0x00, // valID = 1
 	}
@@ -396,7 +396,7 @@ func TestDecodeWithDictInvalidData(t *testing.T) {
 		{"empty", []byte{}},
 		{"one_byte", []byte{0x00}},
 		{"count_but_no_data", []byte{0x01, 0x00}},
-		{"truncated_val_id", []byte{0x01, 0x00, 0x00, 0x00, 0x00, 0x00}}, // count=1, keyID=0, no valID
+		{"truncated_val_id", []byte{0x01, 0x00, 0x00, 0x00, 0x00, 0x00}},                   // count=1, keyID=0, no valID
 		{"bad_key_id", []byte{0x01, 0x00, 0x05, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00}}, // keyID=5 doesn't exist
 		{"bad_val_id", []byte{0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00}}, // valID=5 doesn't exist
 	}

@@ -12,30 +12,34 @@ import (
 	"gastrolog/internal/chunk"
 )
 
-// mockCloudChunkManager is a minimal ChunkManager that also implements
+// mockCloudBackedChunkManager is a minimal ChunkManager that also implements
 // cloudHealthChecker and ChunkCloudUploader for testing cloud health
 // evaluation and backfill scheduling.
-type mockCloudChunkManager struct {
-	chunk.ChunkManager // embedded nil — only List/UploadToCloud used
-	degraded           atomic.Bool
-	degradedErr        atomic.Value // string
-	chunks             []chunk.ChunkMeta
+type mockCloudBackedChunkManager struct {
+	chunk.ChunkManager   // embedded nil — only List/UploadToCloud used
+	degraded             atomic.Bool
+	degradedErr          atomic.Value // string
+	cloudStoreConfigured atomic.Bool
+	chunks               []chunk.ChunkMeta
 
 	mu          sync.Mutex
 	uploadCalls []chunk.ChunkID
 }
 
-func (m *mockCloudChunkManager) CloudDegraded() bool { return m.degraded.Load() }
-func (m *mockCloudChunkManager) CloudDegradedError() string {
+func (m *mockCloudBackedChunkManager) CloudDegraded() bool { return m.degraded.Load() }
+func (m *mockCloudBackedChunkManager) CloudDegradedError() string {
 	if v := m.degradedErr.Load(); v != nil {
 		return v.(string)
 	}
 	return ""
 }
-func (m *mockCloudChunkManager) List() ([]chunk.ChunkMeta, error) {
+func (m *mockCloudBackedChunkManager) CloudStoreConfigured() bool {
+	return m.cloudStoreConfigured.Load()
+}
+func (m *mockCloudBackedChunkManager) List() ([]chunk.ChunkMeta, error) {
 	return m.chunks, nil
 }
-func (m *mockCloudChunkManager) UploadToCloud(id chunk.ChunkID) error {
+func (m *mockCloudBackedChunkManager) UploadToCloud(id chunk.ChunkID) error {
 	m.mu.Lock()
 	m.uploadCalls = append(m.uploadCalls, id)
 	m.mu.Unlock()
@@ -43,14 +47,14 @@ func (m *mockCloudChunkManager) UploadToCloud(id chunk.ChunkID) error {
 }
 
 // uploadCallCount returns the number of upload calls under lock.
-func (m *mockCloudChunkManager) uploadCallCount() int {
+func (m *mockCloudBackedChunkManager) uploadCallCount() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return len(m.uploadCalls)
 }
 
 // uploadCallsCopy returns a snapshot of upload calls under lock.
-func (m *mockCloudChunkManager) uploadCallsCopy() []chunk.ChunkID {
+func (m *mockCloudBackedChunkManager) uploadCallsCopy() []chunk.ChunkID {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := make([]chunk.ChunkID, len(m.uploadCalls))
@@ -60,7 +64,7 @@ func (m *mockCloudChunkManager) uploadCallsCopy() []chunk.ChunkID {
 
 // waitUploadCount polls until uploadCalls reaches the expected count or the
 // deadline passes. Returns the final count.
-func waitUploadCount(m *mockCloudChunkManager, want int, timeout time.Duration) int {
+func waitUploadCount(m *mockCloudBackedChunkManager, want int, timeout time.Duration) int {
 	deadline := time.Now().Add(timeout)
 	for {
 		if got := m.uploadCallCount(); got >= want || time.Now().After(deadline) {
@@ -77,7 +81,7 @@ func TestEvaluateCloudHealth_SetsAlertWhenDegraded(t *testing.T) {
 
 	ac := alert.New()
 	vaultID := glid.New()
-	mock := &mockCloudChunkManager{}
+	mock := &mockCloudBackedChunkManager{}
 	mock.degraded.Store(true)
 	mock.degradedErr.Store("connection refused")
 
@@ -106,7 +110,7 @@ func TestEvaluateCloudHealth_ClearsAlertWhenHealthy(t *testing.T) {
 
 	ac := alert.New()
 	vaultID := glid.New()
-	mock := &mockCloudChunkManager{}
+	mock := &mockCloudBackedChunkManager{}
 
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = ac
@@ -125,25 +129,52 @@ func TestEvaluateCloudHealth_ClearsAlertWhenHealthy(t *testing.T) {
 	}
 }
 
-func TestEvaluateCloudHealth_SkipsNonCloudVaults(t *testing.T) {
+func TestEvaluateCloudHealth_SkipsFileVaultWithoutCloudStore(t *testing.T) {
 	t.Parallel()
 
 	ac := alert.New()
-	mock := &mockCloudChunkManager{}
+	mock := &mockCloudBackedChunkManager{}
 	mock.degraded.Store(true)
 	mock.degradedErr.Store("boom")
 
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = ac
 
-	// Type is "file", not "cloud" — should be skipped.
+	// File vault without cloud store configured — should be skipped.
 	vaultInst := &VaultInstance{VaultID: glid.New(), Type: "file", Chunks: mock}
 	orch.RegisterVault(NewVault(glid.New(), vaultInst))
 
 	orch.evaluateCloudHealth()
 
 	if alerts := ac.Active(); len(alerts) != 0 {
-		t.Fatalf("expected 0 alerts for non-cloud vaultInst, got %d", len(alerts))
+		t.Fatalf("expected 0 alerts for file vault without cloud store, got %d", len(alerts))
+	}
+}
+
+func TestEvaluateCloudHealth_FileVaultWithCloudStore(t *testing.T) {
+	t.Parallel()
+
+	ac := alert.New()
+	vaultID := glid.New()
+	mock := &mockCloudBackedChunkManager{}
+	mock.cloudStoreConfigured.Store(true)
+	mock.degraded.Store(true)
+	mock.degradedErr.Store("connection refused")
+
+	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
+	orch.alerts = ac
+	vaultInst := &VaultInstance{VaultID: vaultID, Type: "file", Chunks: mock}
+	orch.RegisterVault(NewVault(glid.New(), vaultInst))
+
+	orch.evaluateCloudHealth()
+
+	alerts := ac.Active()
+	if len(alerts) != 1 {
+		t.Fatalf("expected 1 alert, got %d", len(alerts))
+	}
+	wantID := fmt.Sprintf("cloud-store:%s", vaultID)
+	if alerts[0].ID != wantID {
+		t.Errorf("alert ID = %q, want %q", alerts[0].ID, wantID)
 	}
 }
 
@@ -163,7 +194,7 @@ func TestBackfillCloudUploads_SchedulesSealedNonCloudBacked(t *testing.T) {
 	t.Parallel()
 
 	chunkID := chunk.NewChunkID()
-	mock := &mockCloudChunkManager{
+	mock := &mockCloudBackedChunkManager{
 		chunks: []chunk.ChunkMeta{
 			{ID: chunkID, Sealed: true, CloudBacked: false,
 				WriteStart: time.Now(), WriteEnd: time.Now()},
@@ -174,7 +205,7 @@ func TestBackfillCloudUploads_SchedulesSealedNonCloudBacked(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = alert.New()
 	vaultInst := &VaultInstance{
-		VaultID:       vaultID,
+		VaultID:      vaultID,
 		Type:         "cloud",
 		Chunks:       mock,
 		IsRaftLeader: func() bool { return true },
@@ -195,10 +226,71 @@ func TestBackfillCloudUploads_SchedulesSealedNonCloudBacked(t *testing.T) {
 	}
 }
 
+func TestBackfillCloudUploads_FileVaultWithCloudStore(t *testing.T) {
+	t.Parallel()
+
+	chunkID := chunk.NewChunkID()
+	mock := &mockCloudBackedChunkManager{
+		chunks: []chunk.ChunkMeta{
+			{ID: chunkID, Sealed: true, CloudBacked: false,
+				WriteStart: time.Now(), WriteEnd: time.Now()},
+		},
+	}
+	mock.cloudStoreConfigured.Store(true)
+
+	vaultID := glid.New()
+	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
+	vaultInst := &VaultInstance{
+		VaultID:      vaultID,
+		Type:         "file",
+		Chunks:       mock,
+		IsRaftLeader: func() bool { return true },
+	}
+
+	orch.backfillCloudUploads(vaultInst)
+	orch.Scheduler().Start()
+	defer func() { _ = orch.Scheduler().Stop() }()
+
+	if got := waitUploadCount(mock, 1, 5*time.Second); got != 1 {
+		t.Fatalf("expected 1 upload call, got %d", got)
+	}
+}
+
+func TestBackfillCloudUploads_SkipsPlacementFollower(t *testing.T) {
+	t.Parallel()
+
+	chunkID := chunk.NewChunkID()
+	mock := &mockCloudBackedChunkManager{
+		chunks: []chunk.ChunkMeta{
+			{ID: chunkID, Sealed: true, CloudBacked: false,
+				WriteStart: time.Now(), WriteEnd: time.Now()},
+		},
+	}
+	// Placement follower: no cloud store write access.
+	mock.cloudStoreConfigured.Store(false)
+
+	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
+	vaultInst := &VaultInstance{
+		VaultID:      glid.New(),
+		Type:         "file",
+		Chunks:       mock,
+		IsRaftLeader: func() bool { return true }, // ctl leader, but not uploader
+	}
+
+	orch.backfillCloudUploads(vaultInst)
+	orch.Scheduler().Start()
+	defer func() { _ = orch.Scheduler().Stop() }()
+	time.Sleep(100 * time.Millisecond)
+
+	if mock.uploadCallCount() != 0 {
+		t.Fatalf("expected 0 uploads on placement follower, got %d", mock.uploadCallCount())
+	}
+}
+
 func TestBackfillCloudUploads_SkipsCloudBacked(t *testing.T) {
 	t.Parallel()
 
-	mock := &mockCloudChunkManager{
+	mock := &mockCloudBackedChunkManager{
 		chunks: []chunk.ChunkMeta{
 			{ID: chunk.NewChunkID(), Sealed: true, CloudBacked: true,
 				WriteStart: time.Now(), WriteEnd: time.Now()},
@@ -208,7 +300,7 @@ func TestBackfillCloudUploads_SkipsCloudBacked(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = alert.New()
 	vaultInst := &VaultInstance{
-		VaultID:       glid.New(),
+		VaultID:      glid.New(),
 		Type:         "cloud",
 		Chunks:       mock,
 		IsRaftLeader: func() bool { return true },
@@ -228,7 +320,7 @@ func TestBackfillCloudUploads_SkipsCloudBacked(t *testing.T) {
 func TestBackfillCloudUploads_SkipsUnsealed(t *testing.T) {
 	t.Parallel()
 
-	mock := &mockCloudChunkManager{
+	mock := &mockCloudBackedChunkManager{
 		chunks: []chunk.ChunkMeta{
 			{ID: chunk.NewChunkID(), Sealed: false, CloudBacked: false,
 				WriteStart: time.Now()},
@@ -238,7 +330,7 @@ func TestBackfillCloudUploads_SkipsUnsealed(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = alert.New()
 	vaultInst := &VaultInstance{
-		VaultID:       glid.New(),
+		VaultID:      glid.New(),
 		Type:         "cloud",
 		Chunks:       mock,
 		IsRaftLeader: func() bool { return true },
@@ -259,7 +351,7 @@ func TestBackfillCloudUploads_SkipsWhenFSMOverlaySaysCloudBacked(t *testing.T) {
 	t.Parallel()
 
 	chunkID := chunk.NewChunkID()
-	mock := &mockCloudChunkManager{
+	mock := &mockCloudBackedChunkManager{
 		chunks: []chunk.ChunkMeta{
 			{ID: chunkID, Sealed: true, CloudBacked: false,
 				WriteStart: time.Now(), WriteEnd: time.Now()},
@@ -269,7 +361,7 @@ func TestBackfillCloudUploads_SkipsWhenFSMOverlaySaysCloudBacked(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = alert.New()
 	vaultInst := &VaultInstance{
-		VaultID:       glid.New(),
+		VaultID:      glid.New(),
 		Type:         "cloud",
 		Chunks:       mock,
 		IsRaftLeader: func() bool { return true },
@@ -299,7 +391,7 @@ func TestBackfillCloudUploadsLeaderOnly(t *testing.T) {
 
 	ac := alert.New()
 	chunkID := chunk.NewChunkID()
-	mock := &mockCloudChunkManager{
+	mock := &mockCloudBackedChunkManager{
 		chunks: []chunk.ChunkMeta{
 			{ID: chunkID, Sealed: true, CloudBacked: false,
 				WriteStart: time.Now(), WriteEnd: time.Now()},
@@ -311,7 +403,7 @@ func TestBackfillCloudUploadsLeaderOnly(t *testing.T) {
 	orch.alerts = ac
 
 	vaultInst := &VaultInstance{
-		VaultID:       vaultID,
+		VaultID:      vaultID,
 		Type:         "cloud",
 		Chunks:       mock,
 		IsRaftLeader: func() bool { return true },
@@ -344,7 +436,7 @@ func TestBackfillCloudUploadsSkippedOnFollower(t *testing.T) {
 
 	ac := alert.New()
 	chunkID := chunk.NewChunkID()
-	mock := &mockCloudChunkManager{
+	mock := &mockCloudBackedChunkManager{
 		chunks: []chunk.ChunkMeta{
 			{ID: chunkID, Sealed: true, CloudBacked: false,
 				WriteStart: time.Now(), WriteEnd: time.Now()},
@@ -355,7 +447,7 @@ func TestBackfillCloudUploadsSkippedOnFollower(t *testing.T) {
 	orch.alerts = ac
 
 	vaultInst := &VaultInstance{
-		VaultID:       glid.New(),
+		VaultID:      glid.New(),
 		Type:         "cloud",
 		Chunks:       mock,
 		IsRaftLeader: func() bool { return false },
@@ -379,7 +471,7 @@ func TestBackfillCloudUploads_DeduplicatesPendingJobs(t *testing.T) {
 	t.Parallel()
 
 	chunkID := chunk.NewChunkID()
-	mock := &mockCloudChunkManager{
+	mock := &mockCloudBackedChunkManager{
 		chunks: []chunk.ChunkMeta{
 			{ID: chunkID, Sealed: true, CloudBacked: false,
 				WriteStart: time.Now(), WriteEnd: time.Now()},
@@ -390,7 +482,7 @@ func TestBackfillCloudUploads_DeduplicatesPendingJobs(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = alert.New()
 	vaultInst := &VaultInstance{
-		VaultID:       vaultID,
+		VaultID:      vaultID,
 		Type:         "cloud",
 		Chunks:       mock,
 		IsRaftLeader: func() bool { return true },

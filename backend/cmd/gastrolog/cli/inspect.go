@@ -35,15 +35,22 @@ func NewInspectCommand() *cobra.Command {
 }
 
 func newInspectVaultCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "vault <name-or-id>",
 		Short: "Show vault details and chunks with status badges",
 		Args:  cobra.ExactArgs(1),
 		RunE:  runInspectVault,
 	}
+	cmd.Flags().Bool("segments", false, inspectSegmentsFlagHelp)
+	return cmd
 }
 
 func runInspectVault(cmd *cobra.Command, args []string) error {
+	segments, _ := cmd.Flags().GetBool("segments")
+	if segments {
+		return runInspectVaultSegments(cmd, args[0])
+	}
+
 	client := clientFromCmd(cmd)
 	r, err := newResolver(context.Background(), client)
 	if err != nil {
@@ -131,7 +138,7 @@ func printVaultSection(vault *v1.VaultConfig, chunks []*v1.ChunkMeta, nodeNames 
 	var totalRecords, totalBytes int64
 	for _, c := range chunks {
 		totalRecords += c.RecordCount
-		totalBytes += c.DiskBytes
+		totalBytes += chunkSizeBytes(c)
 	}
 
 	fmt.Printf("  STORAGE: %s  %q  %d chunks  %d records  %s\n",
@@ -149,7 +156,7 @@ func printVaultSection(vault *v1.VaultConfig, chunks []*v1.ChunkMeta, nodeNames 
 			short = short[:12]
 		}
 		fmt.Printf("    %s...  %-40s  %5d records  %s  on %s%s\n",
-			short, chunkBadges(c), c.RecordCount, units.FormatBytesDisplay(c.DiskBytes),
+			short, chunkBadges(c), c.RecordCount, units.FormatBytesDisplay(chunkSizeBytes(c)),
 			renderReplicaResidency(c.ReplicaNodeIds, nodeNames),
 			renderPendingAcks(c.PendingAckNodeIds, nodeNames))
 	}
@@ -241,7 +248,11 @@ func runInspectChunk(cmd *cobra.Command, args []string) error {
 	}
 
 	vaultName := lookupVaultLabel(client, glid.FromBytes(c.VaultId).String())
-	pairs := buildChunkKV(c, vaultName)
+	nodeNames := map[string]string{}
+	if cfgResp, err := client.System.GetSystem(context.Background(), connect.NewRequest(&v1.GetSystemRequest{})); err == nil {
+		nodeNames = nodeIDToNameMap(cfgResp.Msg.NodeConfigs)
+	}
+	pairs := buildChunkKV(c, vaultName, nodeNames)
 	newPrinter(outputFormat(cmd)).kv(pairs)
 	return nil
 }
@@ -266,7 +277,7 @@ func lookupVaultLabel(client *server.Client, vaultID string) string {
 	return vaultID
 }
 
-func buildChunkKV(c *v1.ChunkMeta, vaultName string) [][2]string {
+func buildChunkKV(c *v1.ChunkMeta, vaultName string, nodeNames map[string]string) [][2]string {
 	pairs := [][2]string{
 		{"Chunk ID", glid.FromBytes(c.Id).String()},
 		{"Vault", vaultName},
@@ -275,6 +286,13 @@ func buildChunkKV(c *v1.ChunkMeta, vaultName string) [][2]string {
 		{"Logical Size", units.FormatBytesDisplay(c.Bytes)},
 		{"Disk Size", formatDiskSize(c)},
 		{"Replicas", strconv.Itoa(int(c.ReplicaCount))},
+		// Holder-receipt residency, same truth the UI's seal pips render
+		// (gastrolog-45ywhx parity). "—" = zero verified copies.
+		{"Resident On", renderReplicaResidency(c.ReplicaNodeIds, nodeNames)},
+	}
+	if len(c.PendingAckNodeIds) > 0 {
+		pairs = append(pairs, [2]string{"Pending Acks",
+			strings.TrimPrefix(renderPendingAcks(c.PendingAckNodeIds, nodeNames), "  pending-ack: ")})
 	}
 
 	if c.CloudBacked {
@@ -291,12 +309,19 @@ func buildChunkKV(c *v1.ChunkMeta, vaultName string) [][2]string {
 }
 
 func formatDiskSize(c *v1.ChunkMeta) string {
-	s := units.FormatBytesDisplay(c.DiskBytes)
-	if c.Compressed && c.Bytes > 0 && c.DiskBytes > 0 && c.DiskBytes < c.Bytes {
-		pct := 100 - (float64(c.DiskBytes)/float64(c.Bytes))*100
-		s += fmt.Sprintf(" (%.0f%% compression)", pct)
+	return units.FormatBytesDisplay(chunkSizeBytes(c))
+}
+
+// chunkSizeBytes prefers the on-disk size, falling back to the logical
+// record bytes when DiskBytes is unset — pipeline GLCB chunks never
+// populate DiskBytes (the manager store holds no local copy; bytes live
+// in the staging GLCB), and rendering their size as "0 B" while the UI
+// shows the logical size was a parity bug (gastrolog-45ywhx).
+func chunkSizeBytes(c *v1.ChunkMeta) int64 {
+	if c.DiskBytes > 0 {
+		return c.DiskBytes
 	}
-	return s
+	return c.Bytes
 }
 
 func appendTS(pairs [][2]string, label string, ts *timestamppb.Timestamp) [][2]string {

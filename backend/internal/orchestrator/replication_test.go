@@ -5,6 +5,7 @@ import (
 	"errors"
 	"gastrolog/internal/glid"
 	"log/slog"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,38 +19,12 @@ import (
 	"gastrolog/internal/system"
 )
 
-// ---------- fake forwarder ----------
-
-type replicationFakeForwarder struct{}
-
-func (f *replicationFakeForwarder) Forward(_ context.Context, _ string, _ glid.GLID, _ []chunk.Record) error {
-	return nil
-}
-
 // ---------- fake instance replicator that records operations ----------
 
 type replicationFakeReplicator struct {
-	sealCalls        []sealCall
-	sealErr          error
 	replicatedChunks []chunk.ChunkID
 }
 
-type sealCall struct {
-	nodeID  string
-	vaultID glid.GLID
-	chunkID chunk.ChunkID
-}
-
-func (m *replicationFakeReplicator) AppendRecords(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
-	return nil
-}
-func (m *replicationFakeReplicator) SealVault(_ context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID) error {
-	if m.sealErr != nil {
-		return m.sealErr
-	}
-	m.sealCalls = append(m.sealCalls, sealCall{nodeID: nodeID, vaultID: vaultID, chunkID: chunkID})
-	return nil
-}
 func (m *replicationFakeReplicator) ImportSealedChunk(_ context.Context, _ string, _ glid.GLID, chunkID chunk.ChunkID, _ chunk.RecordIterator) error {
 	m.replicatedChunks = append(m.replicatedChunks, chunkID)
 	return nil
@@ -74,7 +49,7 @@ func newReplicationInstance(t *testing.T, vaultID glid.GLID, followers []system.
 		t.Fatal(err)
 	}
 	return &VaultInstance{
-		VaultID:          vaultID,
+		VaultID:         vaultID,
 		Type:            "memory",
 		Chunks:          cm,
 		Indexes:         im,
@@ -107,7 +82,7 @@ func TestSealActiveChunk(t *testing.T) {
 	vault.Name = "seal-test"
 	orch.RegisterVault(vault)
 
-	if _, _, err := orch.Append(vaultID, testRecord("seal-me")); err != nil {
+	if err := orch.AppendToVault(vaultID, chunk.ChunkID{}, testRecord("seal-me")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -137,7 +112,7 @@ func TestSealActiveChunkMismatchSkipsSeal(t *testing.T) {
 	vault.Name = "mismatch"
 	orch.RegisterVault(vault)
 
-	if _, _, err := orch.Append(vaultID, testRecord("data")); err != nil {
+	if err := orch.AppendToVault(vaultID, chunk.ChunkID{}, testRecord("data")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -257,7 +232,7 @@ func TestCatchupSkipsFSMRetiredChunks(t *testing.T) {
 	// Append + seal three chunks, capturing each chunk ID.
 	var ids []chunk.ChunkID
 	for i := 0; i < 3; i++ {
-		if _, _, err := orch.Append(vaultID, testRecord(fmt.Sprintf("rec-%d", i))); err != nil {
+		if err := orch.AppendToVault(vaultID, chunk.ChunkID{}, testRecord(fmt.Sprintf("rec-%d", i))); err != nil {
 			t.Fatalf("append %d: %v", i, err)
 		}
 		active := vaultInst.Chunks.Active()
@@ -341,7 +316,7 @@ func TestCatchupNilManifestUsesAllChunks(t *testing.T) {
 
 	// Append + seal two chunks.
 	for i := 0; i < 2; i++ {
-		if _, _, err := orch.Append(vaultID, testRecord(fmt.Sprintf("rec-%d", i))); err != nil {
+		if err := orch.AppendToVault(vaultID, chunk.ChunkID{}, testRecord(fmt.Sprintf("rec-%d", i))); err != nil {
 			t.Fatalf("append %d: %v", i, err)
 		}
 		active := vaultInst.Chunks.Active()
@@ -385,7 +360,7 @@ func TestCatchupSelectedChunksFromFollowerSucceeds(t *testing.T) {
 	mock := &replicationFakeReplicator{}
 	orch.SetChunkReplicator(mock)
 
-	if _, _, err := orch.Append(vaultID, testRecord("rec-0")); err != nil {
+	if err := orch.AppendToVault(vaultID, chunk.ChunkID{}, testRecord("rec-0")); err != nil {
 		t.Fatalf("append: %v", err)
 	}
 	active := vaultInst.Chunks.Active()
@@ -403,6 +378,81 @@ func TestCatchupSelectedChunksFromFollowerSucceeds(t *testing.T) {
 	}
 }
 
+// blockingCatchupReplicator blocks ImportSealedChunk until release is closed
+// so tests can observe in-flight catchup deduplication.
+type blockingCatchupReplicator struct {
+	release chan struct{}
+	imports atomic.Int32
+}
+
+func (b *blockingCatchupReplicator) ImportSealedChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ chunk.RecordIterator) error {
+	b.imports.Add(1)
+	<-b.release
+	return nil
+}
+func (b *blockingCatchupReplicator) DeleteChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID) error {
+	return nil
+}
+func (b *blockingCatchupReplicator) RequestReplicaCatchup(_ context.Context, _ string, _ glid.GLID, _ []chunk.ChunkID, _ string) (uint32, error) {
+	return 0, nil
+}
+
+// CatchupSelectedChunks must not stack a second async push batch for the
+// same (vault, requester) while the first is still importing.
+func TestCatchupSelectedChunksSkipsDuplicateWhileInFlight(t *testing.T) {
+	t.Parallel()
+	orch := newTestOrch(t, Config{LocalNodeID: "node-peer"})
+	orch.logger = slog.Default()
+
+	vaultID := glid.New()
+	vaultInst := newReplicationInstance(t, vaultID, nil, false, "")
+	vault := NewVault(vaultID, vaultInst)
+	orch.RegisterVault(vault)
+
+	if err := orch.AppendToVault(vaultID, chunk.ChunkID{}, testRecord("rec-0")); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	active := vaultInst.Chunks.Active()
+	if err := orch.SealActiveChunk(vaultID, active.ID); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+
+	block := make(chan struct{})
+	mock := &blockingCatchupReplicator{release: block}
+	orch.SetChunkReplicator(mock)
+
+	requester := "node-requester"
+	scheduled1, err := orch.CatchupSelectedChunks(
+		context.Background(), vaultID, requester, []chunk.ChunkID{active.ID})
+	if err != nil {
+		t.Fatalf("first catchup: %v", err)
+	}
+	if scheduled1 != 1 {
+		t.Fatalf("scheduled1 = %d, want 1", scheduled1)
+	}
+
+	deadline := time.After(2 * time.Second)
+	for mock.imports.Load() == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for catchup import to start")
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	scheduled2, err := orch.CatchupSelectedChunks(
+		context.Background(), vaultID, requester, []chunk.ChunkID{active.ID})
+	if err != nil {
+		t.Fatalf("second catchup: %v", err)
+	}
+	if scheduled2 != 0 {
+		t.Errorf("scheduled2 = %d, want 0 while first batch in flight", scheduled2)
+	}
+
+	close(block)
+}
+
 // ==========================================================================
 // Multi-node file-backed replication tests
 //
@@ -415,6 +465,9 @@ func TestCatchupSelectedChunksFromFollowerSucceeds(t *testing.T) {
 // replicateSealedChunk delivers the chunks to all follower nodes. Verified
 // via cursor reads AND filesystem directory checks on each follower.
 func TestClusterReplicationSealedChunksArriveOnFollowers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node convergence test")
+	}
 	t.Parallel()
 	h := setupCluster(t, []string{"leader", "f1", "f2", "f3"}, 1, 100)
 
@@ -606,85 +659,13 @@ type recordTimestamps struct {
 	WriteTS  time.Time
 }
 
-// TestClusterReplicationSealSync verifies that ChunkReplicator.SealVault causes
-// the follower to seal its active chunk at the same boundary as the leader.
-func TestClusterReplicationSealSync(t *testing.T) {
-	t.Parallel()
-	h := setupCluster(t, []string{"leader", "f1", "f2"}, 1, 10000) // high rotation so we control seal manually
-
-	leaderNode := h.nodes["leader"]
-	leaderInst := leaderNode.instances[0]
-
-	// Ingest 50 records on leader. With chunkReplicator wired, AppendToVault
-	// auto-forwards to followers via AppendRecords, so the followers end up
-	// with synchronized active chunk IDs and record counts.
-	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
-	for i := range 50 {
-		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		if err := leaderNode.orch.AppendToVault(h.vaultID, chunk.ChunkID{}, chunk.Record{
-			IngestTS: ts,
-			WriteTS:  ts,
-			Raw:      fmt.Appendf(nil, "seal-sync-%d", i),
-		}); err != nil {
-			t.Fatalf("append %d: %v", i, err)
-		}
-	}
-
-	leaderActive := leaderInst.Chunks.Active()
-	if leaderActive == nil {
-		t.Fatal("expected active chunk on leader after append")
-	}
-	leaderChunkID := leaderActive.ID
-
-	// Verify followers have the same active chunk ID as the leader.
-	for _, fid := range []string{"f1", "f2"} {
-		active := h.nodes[fid].instances[0].Chunks.Active()
-		if active == nil || active.ID != leaderChunkID {
-			t.Fatalf("follower %s: active chunk ID mismatch — sync failed", fid)
-		}
-	}
-
-	// Seal on leader.
-	if err := leaderInst.Chunks.Seal(); err != nil {
-		t.Fatal(err)
-	}
-
-	// Forward seal to followers via the instance replicator (uses SealActiveChunk
-	// which checks the expected chunk ID matches the follower's active chunk).
-	for _, fid := range []string{"f1", "f2"} {
-		if err := leaderNode.orch.chunkReplicator.SealVault(
-			context.Background(), fid, h.vaultID, leaderChunkID,
-		); err != nil {
-			t.Fatalf("SealVault to %s: %v", fid, err)
-		}
-	}
-
-	// Verify: followers have sealed the chunk.
-	for _, fid := range []string{"f1", "f2"} {
-		followerCM := h.nodes[fid].instances[0].Chunks
-		metas, _ := followerCM.List()
-		sealed := 0
-		for _, m := range metas {
-			if m.Sealed {
-				sealed++
-			}
-		}
-		if sealed == 0 {
-			t.Errorf("follower %s: expected at least 1 sealed chunk after SealVault, got 0", fid)
-		}
-
-		// Verify follower records via cursor.
-		count := cursorCountRecords(t, followerCM)
-		if count != 50 {
-			t.Errorf("follower %s: cursor read %d records, expected 50", fid, count)
-		}
-	}
-}
-
 // TestClusterReplicationDeletePropagation verifies that ChunkReplicator.DeleteChunk
 // removes the chunk from the follower's chunk manager AND its filesystem
 // directory.
 func TestClusterReplicationDeletePropagation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node convergence test")
+	}
 	t.Parallel()
 	h := setupCluster(t, []string{"leader", "f1", "f2", "f3"}, 1, 100)
 

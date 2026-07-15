@@ -100,7 +100,7 @@ func newJobGetCmd() *cobra.Command {
 				pairs = append(pairs, [2]string{"Next Run", j.NextRun.AsTime().String()})
 			}
 			if len(j.NodeId) != 0 {
-				pairs = append(pairs, [2]string{"Node", string(j.NodeId)})
+				pairs = append(pairs, [2]string{"Node", formatIDBytes(j.NodeId)})
 			}
 			p.kv(pairs)
 			return nil

@@ -100,7 +100,54 @@ func (s *VaultServer) ListChunks(
 	// set replica_count to how many distinct nodes reported the chunk (not
 	// raw row count — a single node can list the same ID twice when it
 	// hosts multiple local instances).
-	return connect.NewResponse(&apiv1.ListChunksResponse{Chunks: dedupChunkReports(reports)}), nil
+	chunks := dedupChunkReports(reports)
+	s.overlayChunkResidency(vaultID, chunks)
+	return connect.NewResponse(&apiv1.ListChunksResponse{Chunks: chunks}), nil
+}
+
+// overlayChunkResidency replaces the fan-out-derived replica sets with
+// authoritative holder receipts from the vault-ctl FSM, so ListChunks
+// and WatchChunks stamp the SAME residency semantics. The fan-out set
+// (which nodes answered this round) is reachability evidence, not bytes
+// truth — a slow peer vanishing for a round used to ping-pong against
+// the FSM-stamped watch residency and regress sealed pips to amber
+// (gastrolog-68wsli). The reachability set survives only as a fallback
+// where no FSM exists for the vault (memory mode / single-node), where
+// receipts never happen.
+//
+// An empty-but-known residency (chunk in the FSM, zero receipts yet)
+// overwrites too: for a just-sealed chunk it is the truth — the homes'
+// copy-seal receipts haven't landed — and the inspector renders that
+// window honestly as per-node catch-up instead of a false full row.
+func (s *VaultServer) overlayChunkResidency(vaultID glid.GLID, chunks []*apiv1.ChunkMeta) {
+	overlayResidencyWith(chunks, func(cid chunk.ChunkID) []string {
+		return s.orch.ChunkResidency(vaultID, cid)
+	})
+}
+
+// overlayResidencyWith is the pure core of overlayChunkResidency: nil
+// residency (no FSM / chunk unknown) keeps the fan-out-derived set;
+// anything else — including empty — replaces it. Split out so the
+// keep-vs-replace semantics are unit-testable without an orchestrator.
+func overlayResidencyWith(chunks []*apiv1.ChunkMeta, residencyOf func(chunk.ChunkID) []string) {
+	for _, c := range chunks {
+		if len(c.Id) != len(chunk.ChunkID{}) {
+			continue
+		}
+		var cid chunk.ChunkID
+		copy(cid[:], c.Id)
+		residency := residencyOf(cid)
+		if residency == nil {
+			continue
+		}
+		sort.Strings(residency)
+		c.ReplicaNodeIds = residency
+		if len(residency) > math.MaxInt32 {
+			c.ReplicaCount = math.MaxInt32
+		} else {
+			c.ReplicaCount = int32(len(residency)) //nolint:gosec // G115: bounded by branch above
+		}
+	}
 }
 
 // chunkReport pairs a chunk metadata message with the cluster node that
@@ -197,10 +244,71 @@ func dedupChunkReports(reports []chunkReport) []*apiv1.ChunkMeta {
 // inspector UI as successive ticks flip between leader-wins and
 // follower-wins rounds. See gastrolog-1bgvm.
 func moreAuthoritative(a, b *apiv1.ChunkMeta) bool {
-	if a.Sealed != b.Sealed {
-		return a.Sealed
+	ra, rb := chunkLifecycleRank(a), chunkLifecycleRank(b)
+	if ra != rb {
+		return ra > rb
 	}
-	return a.RecordCount > b.RecordCount
+	if a.RecordCount != b.RecordCount {
+		return a.RecordCount > b.RecordCount
+	}
+	return hasBetterTimeRange(a, b)
+}
+
+func chunkLifecycleRank(c *apiv1.ChunkMeta) int {
+	if c == nil {
+		return 0
+	}
+	if c.Sealed || c.State == apiv1.ChunkState_CHUNK_STATE_SEALED {
+		return 3
+	}
+	switch c.State {
+	case apiv1.ChunkState_CHUNK_STATE_SEALING:
+		return 2
+	case apiv1.ChunkState_CHUNK_STATE_ACTIVE:
+		return 1
+	case apiv1.ChunkState_CHUNK_STATE_UNSPECIFIED:
+		return 1
+	case apiv1.ChunkState_CHUNK_STATE_SEALED:
+		return 3
+	}
+	return 1
+}
+
+func hasBetterTimeRange(a, b *apiv1.ChunkMeta) bool {
+	aEnd := chunkMetaEndNanos(a)
+	bEnd := chunkMetaEndNanos(b)
+	if aEnd != bEnd {
+		return aEnd > bEnd
+	}
+	aStart := chunkMetaStartNanos(a)
+	bStart := chunkMetaStartNanos(b)
+	return aStart > bStart
+}
+
+func chunkMetaEndNanos(c *apiv1.ChunkMeta) int64 {
+	if c == nil {
+		return 0
+	}
+	if ts := c.IngestEnd; ts != nil && ts.IsValid() && ts.AsTime().Year() >= 2000 {
+		return ts.AsTime().UnixNano()
+	}
+	if ts := c.WriteEnd; ts != nil && ts.IsValid() && ts.AsTime().Year() >= 2000 {
+		return ts.AsTime().UnixNano()
+	}
+	return 0
+}
+
+func chunkMetaStartNanos(c *apiv1.ChunkMeta) int64 {
+	if c == nil {
+		return 0
+	}
+	if ts := c.IngestStart; ts != nil && ts.IsValid() && ts.AsTime().Year() >= 2000 {
+		return ts.AsTime().UnixNano()
+	}
+	if ts := c.WriteStart; ts != nil && ts.IsValid() && ts.AsTime().Year() >= 2000 {
+		return ts.AsTime().UnixNano()
+	}
+	return 0
 }
 
 // remoteVaultNodes returns node IDs of ALL remote nodes that host this
@@ -260,8 +368,26 @@ func (s *VaultServer) GetChunk(
 		return nil, mapVaultError(err)
 	}
 
+	// Same overlays ListChunks applies (UI/CLI parity, gastrolog-45ywhx):
+	// retention-pending and pending-ack state from the receipt protocol,
+	// and holder-receipt residency from the vault-ctl FSM. Without these
+	// the single-chunk view showed none of the lifecycle state the vault
+	// listing (and the UI inspector) shows.
+	pb := VaultChunkMetaToProto(meta)
+	if pending := s.orch.RetentionPendingChunks(vaultID); pending != nil {
+		pb.RetentionPending = pending[chunkID]
+	}
+	if acks := s.orch.PendingDeleteAcks(vaultID); acks != nil {
+		if owed := acks[chunkID]; len(owed) > 0 {
+			sortedOwed := append([]string(nil), owed...)
+			sort.Strings(sortedOwed)
+			pb.PendingAckNodeIds = sortedOwed
+		}
+	}
+	s.overlayChunkResidency(vaultID, []*apiv1.ChunkMeta{pb})
+
 	return connect.NewResponse(&apiv1.GetChunkResponse{
-		Chunk: VaultChunkMetaToProto(meta),
+		Chunk: pb,
 	}), nil
 }
 
@@ -581,20 +707,17 @@ func (s *VaultServer) WatchChunks(
 	}
 }
 
-// stampReplicaInfo overlays authoritative cluster-wide replica info on
-// the outbound event's chunk meta, sourced from the vault-ctl FSM
-// (placement set minus in-flight delete-acks). Without this, the
-// client has to reconstruct replica counts from per-node event
-// attribution, which drifts on leadership transfer and during the
-// active-chunk catchup window because the accumulator only grows. See
-// gastrolog-66vmg.
+// stampReplicaInfo overlays authoritative cluster-wide replica and
+// retention state on the outbound event's chunk meta, sourced from the
+// vault-ctl FSM. Without this, the client has to reconstruct replica
+// counts from per-node event attribution (which drifts — gastrolog-66vmg)
+// and never sees retention_pending flip live (ListChunks-only overlay).
 //
-// Silently no-ops when the FSM doesn't know about the chunk (single-
-// node mode, memory vault, or the chunk has been finalized between
-// event emit and relay): leaving the fields zero on the wire signals
-// "no authoritative value" to the client, which preserves whatever it
-// already has cached via mergeMeta. The cold-start ListChunks fetch
-// still produces correct counts on first observation.
+// Replica fields silently no-op when the FSM doesn't know about the chunk
+// (single-node mode, memory vault, or the chunk has been finalized between
+// event emit and relay): leaving replica_count zero on the wire signals
+// "no authoritative value" to the client. Retention and pending-ack
+// fields are stamped whenever the vault is known to the orchestrator.
 func (s *VaultServer) stampReplicaInfo(ctx context.Context, msg *apiv1.WatchChunksResponse) {
 	if msg == nil || msg.Meta == nil {
 		return
@@ -609,51 +732,40 @@ func (s *VaultServer) stampReplicaInfo(ctx context.Context, msg *apiv1.WatchChun
 	var cid chunk.ChunkID
 	copy(cid[:], msg.ChunkId)
 
-	placement := s.vaultPlacementNodeIDs(ctx, vid)
-	residency := s.orch.ChunkResidency(vid, cid, placement)
-	if residency == nil {
+	if pending := s.orch.RetentionPendingChunks(vid); pending != nil {
+		msg.Meta.RetentionPending = pending[cid]
+	}
+	if acks := s.orch.PendingDeleteAcks(vid); acks != nil {
+		if owed := acks[cid]; len(owed) > 0 {
+			sortedOwed := append([]string(nil), owed...)
+			sort.Strings(sortedOwed)
+			msg.Meta.PendingAckNodeIds = sortedOwed
+		} else {
+			msg.Meta.PendingAckNodeIds = nil
+		}
+	}
+
+	applyResidencyStamp(msg.Meta, s.orch.ChunkResidency(vid, cid))
+}
+
+// applyResidencyStamp stamps holder-receipt residency onto an outbound
+// event meta. Empty or nil residency (chunk unknown, or known with zero
+// receipts) stamps nothing: replica_count zero already means "no
+// authoritative value" on the wire, so mergeMeta keeps the client's
+// last authoritative set (or the ListChunks-seeded one). Both sources
+// now carry the same holder-receipt semantics, so there is no
+// cross-source ping-pong (gastrolog-68wsli).
+func applyResidencyStamp(meta *apiv1.ChunkMeta, residency []string) {
+	if len(residency) == 0 {
 		return
 	}
 	sort.Strings(residency)
-	msg.Meta.ReplicaNodeIds = residency
+	meta.ReplicaNodeIds = residency
 	if len(residency) > math.MaxInt32 {
-		msg.Meta.ReplicaCount = math.MaxInt32
+		meta.ReplicaCount = math.MaxInt32
 	} else {
-		msg.Meta.ReplicaCount = int32(len(residency)) //nolint:gosec // G115: bounded by branch above
+		meta.ReplicaCount = int32(len(residency)) //nolint:gosec // G115: bounded by branch above
 	}
-}
-
-// vaultPlacementNodeIDs resolves a vault's placement set to the node
-// IDs that hold (or should hold) its chunks. Mirrors remoteVaultNodes
-// but includes the local node — used by stampReplicaInfo to derive
-// authoritative residency from the FSM. Per-call cfgStore lookup is
-// cheap (in-memory backed by Raft FSM); cache later if it becomes a
-// hot path.
-func (s *VaultServer) vaultPlacementNodeIDs(ctx context.Context, vaultID glid.GLID) []string {
-	cfg, err := s.cfgStore.GetVault(ctx, vaultID)
-	if err != nil || cfg == nil {
-		return nil
-	}
-	if len(cfg.Placements) == 0 {
-		return nil
-	}
-	nscs, err := s.cfgStore.ListNodeStorageConfigs(ctx)
-	if err != nil {
-		return nil
-	}
-	seen := map[string]bool{}
-	var nodes []string
-	if leader := system.LeaderNodeID(cfg.Placements, nscs); leader != "" && !seen[leader] {
-		seen[leader] = true
-		nodes = append(nodes, leader)
-	}
-	for _, nid := range system.FollowerNodeIDs(cfg.Placements, nscs) {
-		if !seen[nid] {
-			seen[nid] = true
-			nodes = append(nodes, nid)
-		}
-	}
-	return nodes
 }
 
 // runLocalChunkEventForwarder drains the local ChunkBus subscription and

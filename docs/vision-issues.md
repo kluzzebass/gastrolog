@@ -12,7 +12,7 @@ The foundation most other epics depend on. The model: each vault owns one storag
 |---|-------|-----------|----------------|
 | 1.1 | Vault as the storage unit (storage shape on `VaultConfig`) | — | Layered Storage: the vault as the storage unit |
 | 1.2 | Memory vault | 1.1 | Layered Storage: vault types |
-| 1.3 | File vault (local SSD, mmap'd, sealed-chunk compression) | 1.1 | Layered Storage: vault types |
+| 1.3 | File vault (local SSD, mmap'd sealed chunks) | 1.1 | Layered Storage: vault types |
 | 1.4 | Cloud-backed file vault (active chunk on local disk, sealed chunks in S3/GCS/Azure) | 1.3 | Layered Storage: vault types |
 | 1.5 | Archival storage class transitions (Glacier/Archive) | 1.4 | Layered Storage: per-vault chunk shapes |
 | 1.6 | Per-vault leader election | 1.1 | Layered Storage: per-vault leader nodes |

@@ -19,8 +19,6 @@ var (
 	// ErrVaultNotFound so log lines don't suggest the vault was deleted
 	// during legitimate placement churn. See gastrolog-2t48z.
 	ErrInstanceNotLocal = errors.New("vault instance not registered on this node")
-	// ErrIngesterNotFound is returned when attempting to operate on a non-existent ingester.
-	ErrIngesterNotFound = errors.New("ingester not found")
 	// ErrVaultDisabled is returned when attempting to append to a disabled vault.
 	ErrVaultDisabled = errors.New("vault disabled")
 	// ErrDuplicateID is returned when attempting to add a component with an existing ID.

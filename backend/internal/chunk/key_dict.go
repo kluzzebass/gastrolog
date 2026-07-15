@@ -1,6 +1,8 @@
 package chunk
 
 import (
+	"gastrolog/internal/record"
+
 	"encoding/binary"
 	"errors"
 	"slices"
@@ -40,6 +42,24 @@ func (d *StringDict) Add(s string) (uint32, error) {
 	d.strings = append(d.strings, s)
 	d.lookup[s] = id
 	return id, nil
+}
+
+// AddBytes is Add for a []byte key without allocating on the lookup path:
+// the map index converts without escape, and the string materializes only
+// when the entry is new (dict growth is bounded and rare in steady state).
+// isNew reports whether the entry was inserted.
+func (d *StringDict) AddBytes(b []byte) (id uint32, isNew bool, err error) {
+	if id, ok := d.lookup[string(b)]; ok {
+		return id, false, nil
+	}
+	if len(d.strings) >= 1<<32-1 {
+		return 0, false, ErrDictFull
+	}
+	s := string(b)
+	id = uint32(len(d.strings)) //nolint:gosec // G115: bounded by 1<<32-1 check above
+	d.strings = append(d.strings, s)
+	d.lookup[s] = id
+	return id, true, nil
 }
 
 // Lookup returns the ID for a string, or false if not present.
@@ -134,9 +154,70 @@ func EncodeWithDict(attrs Attributes, dict *StringDict) (encoded []byte, newEntr
 	return buf, newEntries, nil
 }
 
+// AppendWithDictWire dict-encodes attributes directly from their segment
+// wire form ([count][klen k vlen v]..., key-sorted at encode) and appends
+// the result to dst — no intermediate map. The GLCB merge transcodes every
+// record segment-wire -> dict-wire; the map it used to build in between
+// was pure garbage (gastrolog-11y2iv). newEntries lists dict strings this
+// call inserted, in insertion order, exactly as EncodeWithDict reports.
+// Determinism: input pair order is the segment encoder's sorted order and
+// segments are byte-identical on every home, so dict ID assignment matches
+// across homes.
+func AppendWithDictWire(dst []byte, attrsWire []byte, dict *StringDict) (out []byte, newEntries []string, err error) {
+	count, cErr := record.EncodedAttributesCount(attrsWire)
+	if cErr != nil {
+		return dst, nil, cErr
+	}
+	size := 2 + count*8
+	if size > 65535 {
+		return dst, nil, ErrAttrsTooLarge
+	}
+	base := len(dst)
+	if cap(dst)-base < size {
+		grown := make([]byte, base, base+size)
+		copy(grown, dst)
+		dst = grown
+	}
+	dst = dst[:base+size]
+	buf := dst[base:]
+	binary.LittleEndian.PutUint16(buf[0:2], uint16(count)) //nolint:gosec // G115: bounded by size check above
+
+	offset := 2
+	var iterErr error
+	if _, err := record.IterEncodedAttributes(attrsWire, func(k, v []byte) bool {
+		kid, kNew, aErr := dict.AddBytes(k)
+		if aErr != nil {
+			iterErr = aErr
+			return false
+		}
+		if kNew {
+			newEntries = append(newEntries, dict.strings[kid])
+		}
+		vid, vNew, aErr := dict.AddBytes(v)
+		if aErr != nil {
+			iterErr = aErr
+			return false
+		}
+		if vNew {
+			newEntries = append(newEntries, dict.strings[vid])
+		}
+		binary.LittleEndian.PutUint32(buf[offset:], kid)
+		offset += 4
+		binary.LittleEndian.PutUint32(buf[offset:], vid)
+		offset += 4
+		return true
+	}); err != nil {
+		return dst[:base], nil, err
+	}
+	if iterErr != nil {
+		return dst[:base], nil, iterErr
+	}
+	return dst, newEntries, nil
+}
+
 // DecodeWithDict decodes attributes that were encoded with EncodeWithDict.
 // Format: [count:u16][keyID:u32][valID:u32]...
-func DecodeWithDict(data []byte, dict *StringDict) (Attributes, error) {
+func DecodeWithDict(data []byte, dict DictReader) (Attributes, error) {
 	if len(data) < 2 {
 		return nil, ErrInvalidAttrsData
 	}

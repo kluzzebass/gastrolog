@@ -172,8 +172,7 @@ func SplitKV(kv string) (key, value string) {
 	return kv, ""
 }
 
-// TSEntry is a (timestamp, position) pair from a timestamp index.
-// Used by LoadIngestEntries/LoadSourceEntries for TS-ordered scanning.
+// TSEntry is a (timestamp, position) pair from a mmap'd TS index section.
 type TSEntry struct {
 	TS  int64  // nanoseconds since Unix epoch
 	Pos uint32 // record position within chunk
@@ -242,15 +241,21 @@ type IndexManager interface {
 	// FindSourceEntryIndex is the SourceTS equivalent of FindIngestEntryIndex.
 	FindSourceEntryIndex(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error)
 
-	// LoadIngestEntries returns all (IngestTS, position) entries from the ingest index,
-	// sorted by IngestTS. Used for TS-ordered scanning.
+	// IngestIndexLen returns the number of entries in the ingest TS index.
 	// Returns ErrIndexNotFound if the ingest index does not exist.
-	LoadIngestEntries(chunkID chunk.ChunkID) ([]TSEntry, error)
+	IngestIndexLen(chunkID chunk.ChunkID) (uint64, error)
 
-	// LoadSourceEntries returns all (SourceTS, position) entries from the source index,
-	// sorted by SourceTS. Used for TS-ordered scanning.
+	// IngestIndexEntryAt returns the (IngestTS, position) pair at the given rank
+	// in the ingest TS-sorted index. Returns ErrIndexNotFound if the index does
+	// not exist.
+	IngestIndexEntryAt(chunkID chunk.ChunkID, rank uint64) (TSEntry, error)
+
+	// SourceIndexLen returns the number of entries in the source TS index.
 	// Returns ErrIndexNotFound if the source index does not exist.
-	LoadSourceEntries(chunkID chunk.ChunkID) ([]TSEntry, error)
+	SourceIndexLen(chunkID chunk.ChunkID) (uint64, error)
+
+	// SourceIndexEntryAt returns the (SourceTS, position) pair at the given rank.
+	SourceIndexEntryAt(chunkID chunk.ChunkID, rank uint64) (TSEntry, error)
 
 	// IndexSizes returns the size in bytes for each index.
 	// For file-backed indexes this is the on-disk file size.

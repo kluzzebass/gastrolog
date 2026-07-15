@@ -24,7 +24,7 @@ import { JobProgress } from "./VaultHelpers";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { leaderNodeId, followerNodeIds } from "../../utils/placement";
 import { buildNodeNameMap, resolveNodeName } from "../../utils/nodeNames";
-import { formatBytes } from "../../utils/units";
+import { formatBytes, formatBytesBigint, parseBytes } from "../../utils/units";
 
 import {
   VaultStorageForm,
@@ -80,6 +80,9 @@ function vaultToEntry(v: VaultConfig): StorageEntry {
     rotationPolicyId: v.rotationPolicyId.length > 0 ? encode(v.rotationPolicyId) : "",
     retentionPolicyId: v.retentionRules[0] ? encode(v.retentionRules[0].retentionPolicyId) : "",
     retentionDisposition: v.retentionDisposition || "delete",
+    diskFreeWarn: v.diskFreeWarnBytes > 0 ? formatBytesBigint(v.diskFreeWarnBytes) : "",
+    diskFreeFloor: v.diskFreeFloorBytes > 0 ? formatBytesBigint(v.diskFreeFloorBytes) : "",
+    maxSize: v.maxSizeBytes > 0 ? formatBytesBigint(v.maxSizeBytes) : "",
     replicationFactor: String(v.replicationFactor || 1),
     path: v.path || "",
     nodeId: "",
@@ -112,6 +115,9 @@ function entryToVault(
       ? [new RetentionRule({ retentionPolicyId: decode(entry.retentionPolicyId) })]
       : [],
     retentionDisposition: entry.type !== "jsonl" ? (entry.retentionDisposition || "delete") : "",
+    diskFreeWarnBytes: entry.type === "file" ? parseBytes(entry.diskFreeWarn) : BigInt(0),
+    diskFreeFloorBytes: entry.type === "file" ? parseBytes(entry.diskFreeFloor) : BigInt(0),
+    maxSizeBytes: entry.type === "file" ? parseBytes(entry.maxSize) : BigInt(0),
     replicationFactor: entry.type === "jsonl" ? 1 : parseInt(entry.replicationFactor, 10) || 1,
     path: entry.type === "jsonl" ? entry.path : "",
     placements: vault.placements,

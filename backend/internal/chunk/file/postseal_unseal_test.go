@@ -29,7 +29,7 @@ func TestPostSealProcessRejectsUnsealedChunk(t *testing.T) {
 	defer func() { _ = cm.Close() }()
 
 	tokenIndexer := filetoken.NewIndexer(dir, cm, nil)
-	im := indexfile.NewManager(dir, []index.Indexer{tokenIndexer}, nil)
+	im := indexfile.NewManager(dir, []index.Indexer{tokenIndexer}, nil, cm)
 	cm.SetIndexBuilders([]chunk.ChunkIndexBuilder{im.BuildAdapter()})
 
 	// Append records but do NOT seal.
@@ -71,7 +71,7 @@ func TestPostSealProcessSealedChunkSucceeds(t *testing.T) {
 	defer func() { _ = cm.Close() }()
 
 	tokenIndexer := filetoken.NewIndexer(dir, cm, nil)
-	im := indexfile.NewManager(dir, []index.Indexer{tokenIndexer}, nil)
+	im := indexfile.NewManager(dir, []index.Indexer{tokenIndexer}, nil, cm)
 	cm.SetIndexBuilders([]chunk.ChunkIndexBuilder{im.BuildAdapter()})
 
 	for i := range 5 {

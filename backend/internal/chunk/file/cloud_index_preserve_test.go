@@ -38,7 +38,7 @@ func newCloudManagerWithIndexes(t *testing.T) (*Manager, string, *blobstore.Memo
 
 	// Wire file-based token indexer using the same dir as the chunk manager.
 	tokenIndexer := filetoken.NewIndexer(dir, cm, nil)
-	im := indexfile.NewManager(dir, []index.Indexer{tokenIndexer}, nil)
+	im := indexfile.NewManager(dir, []index.Indexer{tokenIndexer}, nil, cm)
 	cm.SetIndexBuilders([]chunk.ChunkIndexBuilder{im.BuildAdapter()})
 
 	t.Cleanup(func() { _ = cm.Close() })
@@ -263,7 +263,7 @@ func TestLoadExistingRemovesEmptyLeftoverDirs(t *testing.T) {
 
 // TestRestartPreservesCloudIndexes is an integration test: append records,
 // seal, upload to cloud, close the manager, reopen it, and verify the
-// cloud chunk's index directory survived the restart.
+// cloud-backed chunk's index directory survived the restart.
 func TestRestartPreservesCloudIndexes(t *testing.T) {
 	t.Parallel()
 
@@ -284,7 +284,7 @@ func TestRestartPreservesCloudIndexes(t *testing.T) {
 	}
 
 	tokenIndexer := filetoken.NewIndexer(dir, cm, nil)
-	im := indexfile.NewManager(dir, []index.Indexer{tokenIndexer}, nil)
+	im := indexfile.NewManager(dir, []index.Indexer{tokenIndexer}, nil, cm)
 	cm.SetIndexBuilders([]chunk.ChunkIndexBuilder{im.BuildAdapter()})
 
 	chunkID := appendSealAndUpload(t, cm, 50)
@@ -312,21 +312,21 @@ func TestRestartPreservesCloudIndexes(t *testing.T) {
 
 	// Cloud index directory and its files must survive the restart.
 	if _, err := os.Stat(chunkDir); os.IsNotExist(err) {
-		t.Fatal("cloud chunk index directory should survive manager restart")
+		t.Fatal("cloud-backed chunk index directory should survive manager restart")
 	}
 	if !chunkDirHasFiles(chunkDir) {
 		t.Fatal("index files should survive manager restart")
 	}
 }
 
-// TestRegisterCloudChunk verifies that RegisterCloudChunk creates a cloud
+// TestRegisterCloudBackedChunk verifies that RegisterCloudBackedChunk creates a cloud
 // index entry from metadata alone, making the chunk visible in List().
-func TestRegisterCloudChunk(t *testing.T) {
+func TestRegisterCloudBackedChunk(t *testing.T) {
 	t.Parallel()
 	cm, _, _ := newCloudManagerWithIndexes(t)
 
 	id := chunk.NewChunkID()
-	info := chunk.CloudChunkInfo{
+	info := chunk.CloudBackedChunkInfo{
 		WriteStart:  time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC),
 		WriteEnd:    time.Date(2025, 6, 1, 0, 1, 0, 0, time.UTC),
 		RecordCount: 100,
@@ -334,8 +334,8 @@ func TestRegisterCloudChunk(t *testing.T) {
 		DiskBytes:   30000,
 	}
 
-	if err := cm.RegisterCloudChunk(id, info); err != nil {
-		t.Fatalf("RegisterCloudChunk: %v", err)
+	if err := cm.RegisterCloudBackedChunk(id, info); err != nil {
+		t.Fatalf("RegisterCloudBackedChunk: %v", err)
 	}
 
 	// Chunk should appear in List().
@@ -357,30 +357,30 @@ func TestRegisterCloudChunk(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Error("registered cloud chunk not found in List()")
+		t.Error("registered cloud-backed chunk not found in List()")
 	}
 }
 
-// TestRegisterCloudChunkIdempotent verifies that calling RegisterCloudChunk
+// TestRegisterCloudBackedChunkIdempotent verifies that calling RegisterCloudBackedChunk
 // twice for the same chunk ID is a no-op.
-func TestRegisterCloudChunkIdempotent(t *testing.T) {
+func TestRegisterCloudBackedChunkIdempotent(t *testing.T) {
 	t.Parallel()
 	cm, _, _ := newCloudManagerWithIndexes(t)
 
 	id := chunk.NewChunkID()
-	info := chunk.CloudChunkInfo{RecordCount: 50, Bytes: 1000, DiskBytes: 500}
+	info := chunk.CloudBackedChunkInfo{RecordCount: 50, Bytes: 1000, DiskBytes: 500}
 
-	if err := cm.RegisterCloudChunk(id, info); err != nil {
-		t.Fatalf("first RegisterCloudChunk: %v", err)
+	if err := cm.RegisterCloudBackedChunk(id, info); err != nil {
+		t.Fatalf("first RegisterCloudBackedChunk: %v", err)
 	}
-	if err := cm.RegisterCloudChunk(id, info); err != nil {
-		t.Fatalf("second RegisterCloudChunk should be no-op: %v", err)
+	if err := cm.RegisterCloudBackedChunk(id, info); err != nil {
+		t.Fatalf("second RegisterCloudBackedChunk should be no-op: %v", err)
 	}
 }
 
-// TestRegisterCloudChunkRequiresCloudStore verifies that RegisterCloudChunk
+// TestRegisterCloudBackedChunkRequiresCloudStore verifies that RegisterCloudBackedChunk
 // fails if the manager has no cloud store configured.
-func TestRegisterCloudChunkRequiresCloudStore(t *testing.T) {
+func TestRegisterCloudBackedChunkRequiresCloudStore(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -391,8 +391,8 @@ func TestRegisterCloudChunkRequiresCloudStore(t *testing.T) {
 	defer func() { _ = cm.Close() }()
 
 	id := chunk.NewChunkID()
-	info := chunk.CloudChunkInfo{RecordCount: 10}
-	if err := cm.RegisterCloudChunk(id, info); err == nil {
+	info := chunk.CloudBackedChunkInfo{RecordCount: 10}
+	if err := cm.RegisterCloudBackedChunk(id, info); err == nil {
 		t.Error("expected error without cloud store, got nil")
 	}
 }

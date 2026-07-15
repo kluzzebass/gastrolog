@@ -5,7 +5,7 @@ package level
 import (
 	"bytes"
 
-	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/pipeline/ingestion"
 )
 
 // Digester extracts severity from message text and sets a "level" attr.
@@ -21,27 +21,28 @@ type Digester struct{}
 // New creates a level digester.
 func New() *Digester { return &Digester{} }
 
-func (d *Digester) Digest(msg *orchestrator.IngestMessage) {
+func (d *Digester) Digest(msg *ingestion.IngestMessage) error {
 	// Skip if level/severity already set by ingester.
 	if _, ok := msg.Attrs["level"]; ok {
-		return
+		return nil
 	}
 	if _, ok := msg.Attrs["severity"]; ok {
-		return
+		return nil
 	}
 	if _, ok := msg.Attrs["severity_name"]; ok {
-		return
+		return nil
 	}
 
 	lvl := extractLevel(msg.Raw)
 	if lvl == "" {
-		return
+		return nil
 	}
 
 	if msg.Attrs == nil {
 		msg.Attrs = make(map[string]string)
 	}
 	msg.Attrs["level"] = lvl
+	return nil
 }
 
 // extractLevel tries multiple strategies to find a severity level in raw.

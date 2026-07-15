@@ -26,7 +26,10 @@ operator-facing flag reference.
 | `GASTROLOG_JOIN_ADDR` | `--join-addr` | string | Bootstrap node's cluster address — set on joiners. Omit on the bootstrap node. |
 | `GASTROLOG_JOIN_TOKEN` | `--join-token` | string | Cluster join token — set on joiners. Pair with `GASTROLOG_JOIN_ADDR`. |
 | `GASTROLOG_NO_AUTH` | `--no-auth` | bool | Disable authentication. Truthy values: `1`, `true`, `yes`, `y`, `on` (case-insensitive). Anything else (including `false`, `0`, empty) is off. **Use only for testing.** |
-| `GASTROLOG_PPROF` | `--pprof` | string | pprof HTTP server address (e.g. `localhost:6060`). Empty/unset = disabled. |
+| `GASTROLOG_PPROF` | `--pprof` | string | pprof HTTP server address (e.g. `localhost:6060`). Empty/unset = disabled. Serves `/debug/pprof/{profile,trace,heap,goroutine,mutex,block}`. |
+| `GASTROLOG_PPROF_DEBUG` | `--pprof-debug` | bool | Enable mutex (1/5) and block (10ms) sampling for pprof. Dev/incident use only. |
+| `GASTROLOG_PPROF_MUTEX_FRACTION` | `--pprof-mutex-fraction` | int | Mutex contention sample rate (`0`=off, `1`=all, `5`=one in five). Overrides `--pprof-debug` default when set. |
+| `GASTROLOG_PPROF_BLOCK_RATE` | `--pprof-block-rate` | int | Block profile sample period in nanoseconds (`0`=off, `1`=all events, `10000000`≈one per 10ms blocked). Overrides `--pprof-debug` default when set. |
 | `GASTROLOG_CONFIG_TYPE` | `--config-type` | string | Config store: `raft` (default) or `memory`. Use `memory` only for tests / ephemeral demos. |
 | `GASTROLOG_WRITE_BOOTSTRAP_TOKEN` | `--write-bootstrap-token` | string | Bootstrap node only: atomically write the join token to this path (mode 0600) so joiners can read it via `GASTROLOG_BOOTSTRAP_TOKEN_FILE`. |
 | `GASTROLOG_BOOTSTRAP_TOKEN_FILE` | `--bootstrap-token-file` | string | Joiner only: read the join token from this path, polling with backoff (1s → 30s, 10min total) until present. Alternative to `GASTROLOG_JOIN_TOKEN`. |

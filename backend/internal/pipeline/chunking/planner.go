@@ -1,0 +1,318 @@
+package chunking
+
+import (
+	"time"
+
+	"gastrolog/internal/glid"
+	"gastrolog/internal/record"
+	"gastrolog/internal/vaultraft/vaultctlfsm"
+)
+
+// ManifestSnapshot is the open-chunk manifest state the planner reads.
+type ManifestSnapshot struct {
+	OpenedAt     time.Time
+	TotalRecords uint64
+	TotalBytes   uint64
+	// Bounds carries running WriteTS/IngestTS/SourceTS extrema committed on
+	// the vault-ctl manifest. MaxAge rotation uses manifestMaxAgeStart (see
+	// rotateTrigger): wall clock since OpenedAt when set, else WriteStart for
+	// tests and legacy snapshots without OpenedAt.
+	Bounds vaultctlfsm.ManifestTimeBounds
+	Refs   []ManifestRef
+}
+
+// ManifestRef names one segment slice in EventID order (inclusive last).
+type ManifestRef struct {
+	SegmentID         glid.GLID
+	FirstRecordNumber uint32
+	LastRecordNumber  uint32
+}
+
+// SegmentView is one eligible segment's EventID index and pick-order metadata.
+type SegmentView struct {
+	ID            glid.GLID
+	FirstIngestTS time.Time
+	PublishedAt   time.Time
+	Index         *OrderedIndex
+}
+
+// ManifestRotationPolicy limits open-chunk growth before seal (manifest model).
+type ManifestRotationPolicy struct {
+	MaxRecords uint64
+	MaxBytes   uint64
+	MaxAge     time.Duration
+}
+
+// PlannerInput pins every input for a deterministic Plan call.
+type PlannerInput struct {
+	Manifest   ManifestSnapshot
+	Resume     map[glid.GLID]uint32
+	Segments   []SegmentView
+	Policy     ManifestRotationPolicy
+	RefAddedAt time.Time
+	// EvalNow is the leader wall clock for MaxAge rotation. Zero skips
+	// age-based rotation so pure Plan() replay stays deterministic.
+	EvalNow time.Time
+	CronDue bool
+}
+
+// PlannerAction is the kind of decision Plan returns.
+type PlannerAction int
+
+const (
+	PlannerIdle PlannerAction = iota
+	PlannerRotate
+	PlannerAddRef
+)
+
+// PlannerDecision is the next manifest step for the vault leader.
+// Ref is valid only when Action == PlannerAddRef; Trigger when Action == PlannerRotate.
+type PlannerDecision struct {
+	Action  PlannerAction
+	Trigger RotateTrigger
+	Ref     AddRefDecision
+}
+
+// AddRefDecision appends one segment slice to the open manifest.
+type AddRefDecision struct {
+	SegmentID         glid.GLID
+	FirstRecordNumber uint32
+	LastRecordNumber  uint32
+	SliceBytes        uint64
+	RefAddedAt        time.Time
+	Bounds            vaultctlfsm.ManifestTimeBounds
+}
+
+// Plan chooses the next AddSegmentRef or rotate-now decision.
+func Plan(input PlannerInput) PlannerDecision {
+	if trig, ok := input.Policy.rotateTrigger(input.Manifest, input.CronDue, input.EvalNow); ok {
+		return PlannerDecision{Action: PlannerRotate, Trigger: trig}
+	}
+
+	segIdx, start, ok := pickSegment(input)
+	if !ok {
+		return PlannerDecision{Action: PlannerIdle}
+	}
+	seg := input.Segments[segIdx]
+
+	first := start
+	var sliceBytes uint64
+	var count uint64
+	pos := start
+	for pos < seg.Index.Len() {
+		frameBytes, err := seg.Index.FrameByteLenAt(pos)
+		if err != nil {
+			return PlannerDecision{Action: PlannerIdle}
+		}
+		if _, ok := input.Policy.wouldExceed(input.Manifest, count+1, sliceBytes+frameBytes); ok {
+			break
+		}
+		count++
+		sliceBytes += frameBytes
+		pos++
+	}
+
+	if count == 0 {
+		if trig, ok := input.Policy.rotateTrigger(input.Manifest, input.CronDue, input.EvalNow); ok {
+			return PlannerDecision{Action: PlannerRotate, Trigger: trig}
+		}
+		return PlannerDecision{Action: PlannerIdle}
+	}
+
+	last := pos - 1
+	bounds, err := SliceRecordBounds(seg.Index, first, last)
+	if err != nil {
+		return PlannerDecision{Action: PlannerIdle}
+	}
+
+	return PlannerDecision{
+		Action: PlannerAddRef,
+		Ref: AddRefDecision{
+			SegmentID:         seg.ID,
+			FirstRecordNumber: first,
+			LastRecordNumber:  last,
+			SliceBytes:        sliceBytes,
+			RefAddedAt:        refAddedAtForSegment(seg, input.RefAddedAt),
+			Bounds:            bounds,
+		},
+	}
+}
+
+func refAddedAtForSegment(seg SegmentView, fallback time.Time) time.Time {
+	if !seg.PublishedAt.IsZero() {
+		return seg.PublishedAt
+	}
+	return fallback
+}
+
+// RotateTrigger names which rotation-policy bound sealed a manifest.
+type RotateTrigger string
+
+const (
+	rotateTriggerCron    RotateTrigger = "cron"
+	rotateTriggerAge     RotateTrigger = "age"
+	rotateTriggerRecords RotateTrigger = "records"
+	rotateTriggerBytes   RotateTrigger = "bytes"
+)
+
+// manifestMaxAgeStart is the wall-clock anchor for MaxAge rotation. When the
+// manifest has OpenedAt (always true for FSM-driven pipeline chunks), age is
+// measured from manifest open time so backlog catch-up does not instantly seal
+// slivers just because the first planned records carry old WriteTS. When
+// OpenedAt is unset (unit tests), fall back to Bounds.WriteStart so age still
+// reflects data span rather than WriteEnd on the latest ref.
+func manifestMaxAgeStart(m ManifestSnapshot) time.Time {
+	if !m.OpenedAt.IsZero() {
+		return m.OpenedAt
+	}
+	return m.Bounds.WriteStart
+}
+
+func (p ManifestRotationPolicy) rotateTrigger(m ManifestSnapshot, cronDue bool, now time.Time) (RotateTrigger, bool) {
+	if cronDue && manifestHasContent(m) {
+		return rotateTriggerCron, true
+	}
+	if p.MaxAge > 0 && !now.IsZero() && manifestHasContent(m) {
+		ageStart := manifestMaxAgeStart(m)
+		if !ageStart.IsZero() && now.Sub(ageStart) >= p.MaxAge {
+			return rotateTriggerAge, true
+		}
+	}
+	if p.MaxRecords > 0 && m.TotalRecords >= p.MaxRecords {
+		return rotateTriggerRecords, true
+	}
+	if p.MaxBytes > 0 && m.TotalBytes >= p.MaxBytes {
+		return rotateTriggerBytes, true
+	}
+	return "", false
+}
+
+func (p ManifestRotationPolicy) wouldExceed(m ManifestSnapshot, addRecords, addBytes uint64) (RotateTrigger, bool) {
+	if p.MaxRecords > 0 && m.TotalRecords+addRecords > p.MaxRecords {
+		return rotateTriggerRecords, true
+	}
+	if p.MaxBytes > 0 && m.TotalBytes+addBytes > p.MaxBytes {
+		return rotateTriggerBytes, true
+	}
+	return "", false
+}
+
+func manifestHasContent(m ManifestSnapshot) bool {
+	return m.TotalRecords > 0 || len(m.Refs) > 0
+}
+
+func pickSegment(input PlannerInput) (segIdx int, start uint32, ok bool) {
+	if partialID, isPartial := partialSegmentID(input); isPartial {
+		for i, seg := range input.Segments {
+			if seg.ID != partialID {
+				continue
+			}
+			start := resumeStart(input.Resume, seg.ID)
+			if start < seg.Index.Len() {
+				return i, start, true
+			}
+			return 0, 0, false
+		}
+		return 0, 0, false
+	}
+
+	bestIdx := -1
+	var bestStart uint32
+	var bestEvent record.EventID
+	for i := range input.Segments {
+		seg := &input.Segments[i]
+		start := resumeStart(input.Resume, seg.ID)
+		if start >= seg.Index.Len() {
+			continue
+		}
+		entry, err := seg.Index.EntryAt(start)
+		if err != nil {
+			continue
+		}
+		if bestIdx < 0 || segmentPrecedes(*seg, entry.EventID, input.Segments[bestIdx], bestEvent) {
+			bestIdx = i
+			bestStart = start
+			bestEvent = entry.EventID
+		}
+	}
+	if bestIdx < 0 {
+		return 0, 0, false
+	}
+	return bestIdx, bestStart, true
+}
+
+func resumeStart(resume map[glid.GLID]uint32, id glid.GLID) uint32 {
+	if resume == nil {
+		return 0
+	}
+	return resume[id]
+}
+
+func partialSegmentID(input PlannerInput) (glid.GLID, bool) {
+	if len(input.Manifest.Refs) == 0 {
+		return glid.Nil, false
+	}
+	last := input.Manifest.Refs[len(input.Manifest.Refs)-1]
+	for _, seg := range input.Segments {
+		if seg.ID != last.SegmentID {
+			continue
+		}
+		start, hasResume := input.Resume[last.SegmentID]
+		if !hasResume {
+			start = last.LastRecordNumber + 1
+		}
+		if start < seg.Index.Len() {
+			return last.SegmentID, true
+		}
+		return glid.Nil, false
+	}
+	return glid.Nil, false
+}
+
+// partialSegmentTarget reports whether the open manifest's last ref still has
+// unconsumed records in segmentID, using registry record counts so the leader
+// planner need not open every segment index to decide.
+func partialSegmentTarget(m ManifestSnapshot, resume map[glid.GLID]uint32, recordCount uint32, segmentID glid.GLID) bool {
+	if len(m.Refs) == 0 {
+		return false
+	}
+	last := m.Refs[len(m.Refs)-1]
+	if last.SegmentID != segmentID {
+		return false
+	}
+	start, hasResume := resume[last.SegmentID]
+	if !hasResume {
+		start = last.LastRecordNumber + 1
+	}
+	return start < recordCount
+}
+
+func segmentPrecedes(a SegmentView, aEvent record.EventID, b SegmentView, bEvent record.EventID) bool {
+	if cmp := aEvent.Compare(bEvent); cmp != 0 {
+		return cmp < 0
+	}
+	if cmp := a.FirstIngestTS.Compare(b.FirstIngestTS); cmp != 0 {
+		return cmp < 0
+	}
+	return a.ID.Compare(b.ID) < 0
+}
+
+// manifestAfterAddRef returns the manifest snapshot after appending one planned
+// ref (for leader-side batch simulation before a single vault-ctl apply).
+func manifestAfterAddRef(m ManifestSnapshot, ref AddRefDecision) ManifestSnapshot {
+	count := uint64(ref.LastRecordNumber - ref.FirstRecordNumber + 1)
+	refs := append(append([]ManifestRef(nil), m.Refs...), ManifestRef{
+		SegmentID:         ref.SegmentID,
+		FirstRecordNumber: ref.FirstRecordNumber,
+		LastRecordNumber:  ref.LastRecordNumber,
+	})
+	bounds := m.Bounds
+	vaultctlfsm.MergeManifestTimeBounds(&bounds, ref.Bounds)
+	return ManifestSnapshot{
+		OpenedAt:     m.OpenedAt,
+		TotalRecords: m.TotalRecords + count,
+		TotalBytes:   m.TotalBytes + ref.SliceBytes,
+		Bounds:       bounds,
+		Refs:         refs,
+	}
+}

@@ -113,6 +113,7 @@ func (r *Ingester) generateMessages() []orchestrator.IngestMessage {
 		msgs = append(msgs, orchestrator.IngestMessage{
 			Attrs:      attrs,
 			Raw:        d.Raw,
+			RawOwned:   true,
 			SourceTS:   d.SourceTS,
 			IngestTS:   ingestTS,
 			IngesterID: r.id,

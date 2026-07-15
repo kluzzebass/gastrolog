@@ -98,6 +98,9 @@ func (r *refLogStore) assertEqual(t *testing.T, gs *GroupStore) {
 
 // Random interleaved append + prefix delete must match an independent reference model.
 func TestHarnessRandomAppendPrefixDeleteMatchesReference(t *testing.T) {
+	if testing.Short() {
+		t.Skip("600-step randomized append/prefix-delete fuzz-adjacent harness; -short skips")
+	}
 	t.Parallel()
 	dir := t.TempDir()
 	w, err := Open(dir, harnessWalConfig())
@@ -133,8 +136,8 @@ func TestHarnessRandomAppendPrefixDeleteMatchesReference(t *testing.T) {
 		// Delete a contiguous prefix of the *current* live suffix [first..last],
 		// leaving at least one entry so append indices stay aligned with Raft.
 		span := int(ref.lastIndex - ref.firstIndex) // >= 1
-		extra := rng.IntN(span)                      // 0 .. span-1
-		kEnd := ref.firstIndex + uint64(extra)       // first .. last-1
+		extra := rng.IntN(span)                     // 0 .. span-1
+		kEnd := ref.firstIndex + uint64(extra)      // first .. last-1
 		if err := gs.DeleteRange(ref.firstIndex, kEnd); err != nil {
 			t.Fatalf("step %d DeleteRange(%d,%d): %v", s, ref.firstIndex, kEnd, err)
 		}
@@ -149,6 +152,9 @@ func TestHarnessRandomAppendPrefixDeleteMatchesReference(t *testing.T) {
 
 // Every index in [FirstIndex, LastIndex] must be readable after compaction + reopen.
 func TestHarnessFullIndexScanAfterCompactionAndReopen(t *testing.T) {
+	if testing.Short() {
+		t.Skip("compaction + reopen full-index-scan harness; -short skips")
+	}
 	t.Parallel()
 	dir := t.TempDir()
 	cfg := harnessWalConfig()
@@ -197,6 +203,9 @@ func TestHarnessFullIndexScanAfterCompactionAndReopen(t *testing.T) {
 // Concurrent writers on multiple groups interleaved with stable keys; verify
 // final durable state after quiesce (no races on committed values).
 func TestHarnessConcurrentStableLogMultiGroup(t *testing.T) {
+	if testing.Short() {
+		t.Skip("concurrency stress across 12 groups x 80 log+stable writes; -short skips")
+	}
 	t.Parallel()
 	dir := t.TempDir()
 	cfg := harnessWalConfig()

@@ -1,13 +1,13 @@
 package vaultctlfsm
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"maps"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
@@ -28,10 +28,9 @@ import (
 type Command byte
 
 const (
-	CmdCreateChunk   Command = 1
-	CmdSealChunk     Command = 2
-	CmdCompressChunk Command = 3
-	CmdUploadChunk   Command = 4
+	CmdCreateChunk Command = 1
+	CmdSealChunk   Command = 2
+	CmdUploadChunk Command = 3
 
 	// CmdDeleteChunk is retained for WAL replay backward-compat only. The
 	// receipt protocol (CmdRequestDelete + acks + CmdFinalizeDelete) is
@@ -41,9 +40,9 @@ const (
 	// MarshalDeleteChunk callers. The FSM continues to apply
 	// CmdDeleteChunk so pre-migration WAL segments still replay
 	// correctly. See gastrolog-51gme step 11.
-	CmdDeleteChunk Command = 5
+	CmdDeleteChunk Command = 4
 
-	CmdRetentionPending Command = 6
+	CmdRetentionPending Command = 5
 
 	// Receipt-based deletion protocol — gastrolog-51gme step 2. Replaces
 	// single-shot CmdDeleteChunk fan-out with an N-way receipt protocol
@@ -55,9 +54,9 @@ const (
 	// gastrolog-5sywa (Phase 4 follow-up). Per the project's "delete and
 	// renumber, never reserved" rule, the receipt-protocol commands
 	// renumbered down to 7/8/9.
-	CmdRequestDelete  Command = 7 // vault leader proposes a delete; replicates the expected-acks set
-	CmdAckDelete      Command = 8 // each expected node acks after handling its local side
-	CmdFinalizeDelete Command = 9 // leader removes the entry once expectedFrom is empty
+	CmdRequestDelete  Command = 6 // vault leader proposes a delete; replicates the expected-acks set
+	CmdAckDelete      Command = 7 // each expected node acks after handling its local side
+	CmdFinalizeDelete Command = 8 // leader removes the entry once expectedFrom is empty
 
 	// Membership-change cleanup — gastrolog-51gme step 10. After a node
 	// is removed from this vault-ctl Raft group's voter set (decommissioned
@@ -66,7 +65,7 @@ const (
 	// this, deletes proposed before the node left would never finalize:
 	// the leader would hold the entry forever waiting for an ack from a
 	// node that no longer participates.
-	CmdPruneNode Command = 10
+	CmdPruneNode Command = 9
 
 	// CmdAttachOffsets carries the GLCB blob's section-offset/size pairs
 	// (IngestTS index, SourceTS index) once sealToGLCB has produced
@@ -77,7 +76,7 @@ const (
 	// from chunk/file.Manager after sealToGLCB and from the import path
 	// (orchestrator/vault_ops.finalizeImportedChunk) for replicated
 	// chunks. See gastrolog-1dg3i.
-	CmdAttachOffsets Command = 11
+	CmdAttachOffsets Command = 10
 
 	// CmdBeginSeal carries the Active → Sealing transition: the leader
 	// has stopped accepting appends on the chunk and is starting
@@ -86,7 +85,7 @@ const (
 	// retention triggers, and replication-completeness checks gate on
 	// State == Sealed; the Sealing entry is not yet a finished chunk
 	// even though it's no longer accepting writes. See gastrolog-1huz5.
-	CmdBeginSeal Command = 12
+	CmdBeginSeal Command = 11
 
 	// CmdRepatriateChunk re-introduces a sealed chunk's manifest entry
 	// when the FSM has lost it but a local replica still exists on
@@ -95,7 +94,38 @@ const (
 	// reconstructed from the local chunk's idx.log headers. Apply
 	// inserts the entry in Sealed state, refusing if the entry
 	// already exists or is tombstoned. See gastrolog-32bf2.
-	CmdRepatriateChunk Command = 13
+	CmdRepatriateChunk Command = 12
+
+	// CmdPublishCompletedSegment registers completed segment metadata in the
+	// vault-ctl FSM when Segmentation closes a segment. See gastrolog-5pyl3.
+	CmdPublishCompletedSegment Command = 13
+
+	// Open-chunk manifest (direction D). See gastrolog-53ron.
+	CmdOpenChunkManifest      Command = 14
+	CmdAddOpenChunkSegmentRef Command = 15
+	CmdSealOpenChunkManifest  Command = 16
+	CmdReleaseSegments        Command = 17
+
+	// CmdAckSegmentHolder records that a node now holds a completed segment
+	// (Rubicon C). Appends the node to the segment registry entry's holder
+	// set; idempotent. See gastrolog-2z3oa.
+	CmdAckSegmentHolder Command = 18
+
+	// CmdPublishCompletedSegments registers many completed segments in one
+	// vault-ctl apply (burst ingest on origin nodes).
+	CmdPublishCompletedSegments Command = 20
+
+	// CmdAddOpenChunkSegmentRefs appends many open-chunk segment refs in one
+	// vault-ctl apply (chunking planner batching). See gastrolog-3i9nt.
+	CmdAddOpenChunkSegmentRefs Command = 21
+
+	// CmdAckChunkHolder records that a node holds a sealed chunk's verified
+	// GLCB bytes (built locally or pulled via replica catch-up). Idempotent.
+	CmdAckChunkHolder Command = 22
+
+	// CmdRevokeChunkHolder withdraws a holder claim after the node
+	// stat-missed the bytes it was recorded as holding. Idempotent.
+	CmdRevokeChunkHolder Command = 23
 )
 
 // ManifestEntry holds the full metadata for one chunk in this vault's
@@ -125,6 +155,16 @@ type ManifestEntry struct {
 	IngestEnd   time.Time
 	SourceStart time.Time
 	SourceEnd   time.Time
+
+	SealedAt time.Time // wall-clock sealing completion (FSM / retention anchor)
+
+	// Holders are node IDs holding verified GLCB bytes for this chunk —
+	// earned via AckChunkHolder (local build or replica catch-up pull),
+	// withdrawn via RevokeChunkHolder (stat-missed bytes). Residency truth;
+	// placement says who SHOULD hold. Treated as immutable once stored:
+	// apply functions copy-on-write so the shallow entry copies handed out
+	// by Get/List never race with later applies.
+	Holders []string
 
 	// IngestTSMonotonic is true when records were appended in IngestTS-
 	// ascending order; the histogram fast path uses position-as-rank only
@@ -180,6 +220,7 @@ func (e *ManifestEntry) ToChunkMeta() chunk.ChunkMeta {
 		ID:                e.ID,
 		WriteStart:        e.WriteStart,
 		WriteEnd:          e.WriteEnd,
+		SealedAt:          e.SealedAt,
 		RecordCount:       e.RecordCount,
 		Bytes:             e.Bytes,
 		Sealed:            state == chunk.ChunkStateSealed,
@@ -198,8 +239,15 @@ func (e *ManifestEntry) ToChunkMeta() chunk.ChunkMeta {
 // FSM is a Raft FSM that maintains chunk metadata for a single vault.
 // All reads are local (no Raft round-trip). Writes go through Raft.Apply().
 type FSM struct {
-	mu       sync.RWMutex
-	chunks   map[chunk.ChunkID]*ManifestEntry
+	mu     sync.RWMutex
+	chunks map[chunk.ChunkID]*ManifestEntry
+
+	// completedListScans counts ListCompletedSegments calls — a full O(N)
+	// registry walk. The chunking-leader plan pass regressed to O(N^2) by
+	// re-scanning per step (gastrolog-36ba70); this makes scan frequency
+	// observable and gives the fix a regression guard.
+	completedListScans atomic.Uint64
+
 	ready    bool // true after first Apply or Restore
 	onDelete func(chunk.ChunkID)
 	onUpload func(ManifestEntry) // called after CmdUploadChunk applies (outside lock)
@@ -209,9 +257,19 @@ type FSM struct {
 	// reconciler can project FSM state changes into local Manager state
 	// without polling. No callers wired yet — adding the surface here
 	// unblocks subsequent steps without requiring an FSM API churn.
-	onCreate           func(ManifestEntry) // CmdCreateChunk applied; passes the freshly-created entry
-	onSeal             func(ManifestEntry) // CmdSealChunk applied; passes the now-sealed entry
+	onCreate func(ManifestEntry) // CmdCreateChunk applied; passes the freshly-created entry
+	// onSeal fan-out: slot 0 is SetOnSeal (reconciler); AddOnSeal uses ids ≥ 1.
+	onSeal             map[int]func(ManifestEntry)
+	onSealSeq          int
 	onRetentionPending func(chunk.ChunkID) // CmdRetentionPending applied
+	// onHoldersChanged fires (outside the FSM lock) once per chunk whose
+	// Holders set actually changed under CmdAckChunkHolder /
+	// CmdRevokeChunkHolder, with the post-apply entry. Residency is
+	// receipt-only (gastrolog-68wsli), so subscribers — the WatchChunks
+	// bus — need an edge when receipts land or revoke; without it the
+	// inspector's honest pre-receipt amber never turns green until a
+	// full snapshot refetch. Idempotent re-acks don't fire.
+	onHoldersChanged func(ManifestEntry)
 
 	// Step-2 receipt-protocol state and hooks for gastrolog-51gme.
 	// pendingDeletes is the queue of chunk deletes awaiting per-node
@@ -236,14 +294,77 @@ type FSM struct {
 	// replication-job deadline, typically a few minutes, cannot still be
 	// in flight and are safe to drop).
 	tombstones map[chunk.ChunkID]time.Time
+
+	// completedSegments is the pipeline registry of closed segments awaiting
+	// chunking. Populated by CmdPublishCompletedSegment; see segments.go.
+	completedSegments map[glid.GLID]*CompletedSegmentEntry
+	// completedSegmentOrder is FirstIngestTS-then-ID sort order; kept in sync
+	// with completedSegments so ListCompletedSegments avoids re-sorting.
+	completedSegmentOrder []glid.GLID
+
+	// openChunk is the in-progress manifest-backed active chunk. See open_chunk.go.
+	openChunk *OpenChunkManifest
+	// sealedManifests is the FIFO queue of sealed open-chunk manifests awaiting
+	// local GLCB build. SealedManifest() returns the queue head.
+	sealedManifests []*OpenChunkManifest
+	// segmentResume maps segment ID → next EventID-order record number after
+	// a partial manifest ref.
+	segmentResume map[glid.GLID]uint32
+	// segmentChunks maps a completed segment ID → the chunk IDs whose manifests
+	// referenced its records. Unlike openChunk/sealedManifests it survives the
+	// manifest pop at build time, so SegmentSuperseded can decide release from
+	// chunk replication (records live in an RF-replicated chunk) after the build.
+	// Cleared when the segment is released.
+	segmentChunks map[glid.GLID][]chunk.ChunkID
+	// releasedSegments records segment IDs dropped by ReleaseSegments. Stale
+	// PublishCompletedSegment replays after release must not re-add registry
+	// entries without on-disk bytes (distribution publish race).
+	releasedSegments map[glid.GLID]struct{}
+
+	// onSealedManifest fires after SealOpenChunkManifest transitions open →
+	// sealed manifest awaiting local GLCB build (outside the FSM lock).
+	// Slot 0 is reserved for SetOnSealedManifest; AddOnSealedManifest uses
+	// monotonic ids ≥ 1 so orchestrator chunk-bus wiring can coexist with
+	// the chunking manager's primary callback.
+	onSealedManifest    map[int]func(*OpenChunkManifest)
+	onSealedManifestSeq int
+	// onSealedManifestCleared fires after CmdSealChunk clears the pending
+	// sealed manifest, signalling the build cycle finished (outside the FSM
+	// lock). The chunking planner uses it to start the next manifest.
+	onSealedManifestCleared func(chunk.ChunkID)
+	// onPublishCompletedSegment fan-out: each registered callback fires after a
+	// new completed segment is registered (outside the FSM lock). Idempotent
+	// replays do not fire. Keyed by a monotonic id so Collection and Chunking
+	// can subscribe and unsubscribe independently (gastrolog-2z3oa).
+	onPublishCompletedSegment map[int]func(CompletedSegmentEntry)
+	onPublishSeq              int
+	// onOpenChunkManifest fires after a new open-chunk manifest is created.
+	// Slot 0 is reserved for SetOnOpenChunkManifest; AddOnOpenChunkManifest
+	// uses monotonic ids ≥ 1.
+	onOpenChunkManifest    map[int]func(*OpenChunkManifest)
+	onOpenChunkManifestSeq int
+	// onOpenChunkRefAdded fires after a new segment ref is appended to the open manifest.
+	onOpenChunkRefAdded    map[int]func(*OpenChunkManifest)
+	onOpenChunkRefAddedSeq int
+	// onReleaseSegments fan-out: each subscriber fires after ReleaseSegments drops
+	// registry entries (outside the FSM lock).
+	onReleaseSegments map[int]func([]glid.GLID)
+	onReleaseSeq      int
+	// onAckSegmentHolder fan-out: fires after a new holder is recorded for a segment.
+	onAckSegmentHolder map[int]func(glid.GLID)
+	onAckHolderSeq     int
 }
 
 // New creates an empty chunk metadata FSM.
 func New() *FSM {
 	return &FSM{
-		chunks:         make(map[chunk.ChunkID]*ManifestEntry),
-		tombstones:     make(map[chunk.ChunkID]time.Time),
-		pendingDeletes: make(map[chunk.ChunkID]*PendingDelete),
+		chunks:            make(map[chunk.ChunkID]*ManifestEntry),
+		tombstones:        make(map[chunk.ChunkID]time.Time),
+		pendingDeletes:    make(map[chunk.ChunkID]*PendingDelete),
+		completedSegments: make(map[glid.GLID]*CompletedSegmentEntry),
+		segmentResume:     make(map[glid.GLID]uint32),
+		segmentChunks:     make(map[glid.GLID][]chunk.ChunkID),
+		releasedSegments:  make(map[glid.GLID]struct{}),
 	}
 }
 
@@ -321,12 +442,24 @@ func (f *FSM) SetOnDelete(fn func(chunk.ChunkID)) {
 
 // SetOnUpload registers a callback invoked (outside the FSM lock) after
 // CmdUploadChunk applies. The callback receives a copy of the uploaded
-// entry. Follower nodes use this to register cloud chunks in their local
+// entry. Follower nodes use this to register cloud-backed chunks in their local
 // chunk manager without streaming any records.
 func (f *FSM) SetOnUpload(fn func(ManifestEntry)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.onUpload = fn
+}
+
+// SetOnHoldersChanged registers a callback invoked (outside the FSM lock)
+// once per chunk whose holder set actually changed under an
+// AckChunkHolder / RevokeChunkHolder apply, with a copy of the
+// post-apply entry. The orchestrator wires this to the chunk event bus
+// so WatchChunks subscribers see residency grow as copy-seal receipts
+// land (and shrink on revoke) instead of waiting for a snapshot refetch.
+func (f *FSM) SetOnHoldersChanged(fn func(ManifestEntry)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.onHoldersChanged = fn
 }
 
 // SetOnSeal registers a callback invoked (outside the FSM lock) after
@@ -343,7 +476,237 @@ func (f *FSM) SetOnUpload(fn func(ManifestEntry)) {
 func (f *FSM) SetOnSeal(fn func(ManifestEntry)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.onSeal = fn
+	if f.onSeal == nil {
+		f.onSeal = make(map[int]func(ManifestEntry))
+	}
+	if fn == nil {
+		delete(f.onSeal, 0)
+		return
+	}
+	f.onSeal[0] = fn
+}
+
+// AddOnSeal registers an additional callback invoked (outside the FSM lock)
+// after CmdSealChunk applies. The returned closure removes this subscriber
+// without disturbing SetOnSeal's slot-0 callback (reconciler).
+func (f *FSM) AddOnSeal(fn func(ManifestEntry)) (remove func()) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.onSeal == nil {
+		f.onSeal = make(map[int]func(ManifestEntry))
+	}
+	id := f.onSealSeq
+	if id == 0 {
+		id = 1
+	}
+	f.onSealSeq++
+	if f.onSealSeq == 0 {
+		f.onSealSeq = 1
+	}
+	f.onSeal[id] = fn
+	return func() {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		delete(f.onSeal, id)
+	}
+}
+
+// SetOnSealedManifest registers a callback invoked (outside the FSM lock)
+// after SealOpenChunkManifest transitions the open manifest into
+// sealedManifest awaiting local GLCB build. Idempotent replays of an
+// already-sealed manifest do not fire the callback.
+func (f *FSM) SetOnSealedManifest(fn func(*OpenChunkManifest)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.onSealedManifest == nil {
+		f.onSealedManifest = make(map[int]func(*OpenChunkManifest))
+	}
+	if fn == nil {
+		delete(f.onSealedManifest, 0)
+		return
+	}
+	f.onSealedManifest[0] = fn
+}
+
+// AddOnSealedManifest registers an additional callback invoked (outside the
+// FSM lock) after SealOpenChunkManifest transitions the open manifest into
+// sealedManifest. Idempotent replays do not fire. The returned closure
+// removes this subscriber without disturbing SetOnSealedManifest's slot-0
+// callback (chunking manager).
+func (f *FSM) AddOnSealedManifest(fn func(*OpenChunkManifest)) (remove func()) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.onSealedManifest == nil {
+		f.onSealedManifest = make(map[int]func(*OpenChunkManifest))
+	}
+	id := f.onSealedManifestSeq
+	if id == 0 {
+		id = 1
+	}
+	f.onSealedManifestSeq++
+	if f.onSealedManifestSeq == 0 {
+		f.onSealedManifestSeq = 1
+	}
+	f.onSealedManifest[id] = fn
+	return func() {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		delete(f.onSealedManifest, id)
+	}
+}
+
+// SetOnSealedManifestCleared registers a callback invoked (outside the FSM
+// lock) after CmdSealChunk clears the pending sealed manifest (GLCB build
+// completed cluster-wide). The chunking planner uses this to wake and open
+// the next manifest; without it, remaining published segments are only
+// picked up when a future segment publish happens to arrive.
+func (f *FSM) SetOnSealedManifestCleared(fn func(chunk.ChunkID)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.onSealedManifestCleared = fn
+}
+
+// AddOnAckSegmentHolder registers a callback invoked (outside the FSM lock)
+// after AckSegmentHolder appends a new node to a segment's holder set.
+// Idempotent replays for an already-recorded holder do not fire.
+func (f *FSM) AddOnAckSegmentHolder(fn func(glid.GLID)) (remove func()) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.onAckSegmentHolder == nil {
+		f.onAckSegmentHolder = make(map[int]func(glid.GLID))
+	}
+	id := f.onAckHolderSeq
+	f.onAckHolderSeq++
+	f.onAckSegmentHolder[id] = fn
+	return func() {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		delete(f.onAckSegmentHolder, id)
+	}
+}
+
+// AddOnReleaseSegments registers a callback invoked (outside the FSM lock)
+// after ReleaseSegments drops completed-segment registry entries. The
+// callback receives the segment IDs that were present and removed.
+// Idempotent replays for already-released segments do not fire.
+func (f *FSM) AddOnReleaseSegments(fn func([]glid.GLID)) (remove func()) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.onReleaseSegments == nil {
+		f.onReleaseSegments = make(map[int]func([]glid.GLID))
+	}
+	id := f.onReleaseSeq
+	f.onReleaseSeq++
+	f.onReleaseSegments[id] = fn
+	return func() {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		delete(f.onReleaseSegments, id)
+	}
+}
+
+// AddOnPublishCompletedSegment registers a callback invoked (outside the FSM
+// lock) after PublishCompletedSegment registers new segment metadata. Idempotent
+// replays of an already-present entry do not fire the callback. Multiple
+// subscribers (Collection, Chunking) may register independently; the returned
+// closure removes this one. See gastrolog-2z3oa.
+func (f *FSM) AddOnPublishCompletedSegment(fn func(CompletedSegmentEntry)) (remove func()) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.onPublishCompletedSegment == nil {
+		f.onPublishCompletedSegment = make(map[int]func(CompletedSegmentEntry))
+	}
+	id := f.onPublishSeq
+	f.onPublishSeq++
+	f.onPublishCompletedSegment[id] = fn
+	return func() {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		delete(f.onPublishCompletedSegment, id)
+	}
+}
+
+// SetOnOpenChunkManifest registers a callback invoked (outside the FSM lock)
+// after OpenChunkManifest creates a new open manifest. Idempotent replays do
+// not fire the callback.
+func (f *FSM) SetOnOpenChunkManifest(fn func(*OpenChunkManifest)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.onOpenChunkManifest == nil {
+		f.onOpenChunkManifest = make(map[int]func(*OpenChunkManifest))
+	}
+	if fn == nil {
+		delete(f.onOpenChunkManifest, 0)
+		return
+	}
+	f.onOpenChunkManifest[0] = fn
+}
+
+// AddOnOpenChunkManifest registers an additional callback invoked (outside the
+// FSM lock) after OpenChunkManifest creates a new open manifest. Idempotent
+// replays do not fire. The returned closure removes this subscriber without
+// disturbing SetOnOpenChunkManifest's slot-0 callback (chunking manager).
+func (f *FSM) AddOnOpenChunkManifest(fn func(*OpenChunkManifest)) (remove func()) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.onOpenChunkManifest == nil {
+		f.onOpenChunkManifest = make(map[int]func(*OpenChunkManifest))
+	}
+	id := f.onOpenChunkManifestSeq
+	if id == 0 {
+		id = 1
+	}
+	f.onOpenChunkManifestSeq++
+	if f.onOpenChunkManifestSeq == 0 {
+		f.onOpenChunkManifestSeq = 1
+	}
+	f.onOpenChunkManifest[id] = fn
+	return func() {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		delete(f.onOpenChunkManifest, id)
+	}
+}
+
+// SetOnOpenChunkRefAdded registers a callback invoked (outside the FSM lock)
+// after AddOpenChunkSegmentRef appends a new ref. Idempotent replays of the
+// same ref do not fire the callback.
+func (f *FSM) SetOnOpenChunkRefAdded(fn func(*OpenChunkManifest)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.onOpenChunkRefAdded == nil {
+		f.onOpenChunkRefAdded = make(map[int]func(*OpenChunkManifest))
+	}
+	if fn == nil {
+		delete(f.onOpenChunkRefAdded, 0)
+		return
+	}
+	f.onOpenChunkRefAdded[0] = fn
+}
+
+// AddOnOpenChunkRefAdded registers an additional ref-added callback. The
+// returned closure removes this subscriber without disturbing
+// SetOnOpenChunkRefAdded's slot-0 callback.
+func (f *FSM) AddOnOpenChunkRefAdded(fn func(*OpenChunkManifest)) (remove func()) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.onOpenChunkRefAdded == nil {
+		f.onOpenChunkRefAdded = make(map[int]func(*OpenChunkManifest))
+	}
+	id := f.onOpenChunkRefAddedSeq
+	if id == 0 {
+		id = 1
+	}
+	f.onOpenChunkRefAddedSeq++
+	if f.onOpenChunkRefAddedSeq == 0 {
+		f.onOpenChunkRefAddedSeq = 1
+	}
+	f.onOpenChunkRefAdded[id] = fn
+	return func() {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		delete(f.onOpenChunkRefAdded, id)
+	}
 }
 
 // SetOnRetentionPending registers a callback invoked (outside the FSM
@@ -417,6 +780,40 @@ func (f *FSM) Get(id chunk.ChunkID) *ManifestEntry {
 	return &cp
 }
 
+// ListIncludingPipelineManifest returns manifest entries plus synthetic
+// Active/Sealing entries from open or pending sealed manifests when the chunk
+// map is missing them (inspector / cross-node reads).
+func (f *FSM) ListIncludingPipelineManifest() []ManifestEntry {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	out := make([]ManifestEntry, 0, len(f.chunks)+2)
+	indexByID := make(map[chunk.ChunkID]int, len(f.chunks))
+	for _, e := range f.chunks {
+		cp := *e
+		out = append(out, cp)
+		indexByID[e.ID] = len(out) - 1
+	}
+	overlayManifest := func(m *OpenChunkManifest, state chunk.ChunkState) {
+		if m == nil {
+			return
+		}
+		entry := manifestEntryFromOpenChunk(m, state)
+		if i, ok := indexByID[m.ChunkID]; ok {
+			out[i] = entry
+			return
+		}
+		out = append(out, entry)
+		indexByID[m.ChunkID] = len(out) - 1
+	}
+	if oc := f.openChunk; oc != nil {
+		overlayManifest(oc, chunk.ChunkStateActive)
+	}
+	for _, sm := range f.sealedManifests {
+		overlayManifest(sm, chunk.ChunkStateSealing)
+	}
+	return out
+}
+
 // List returns all chunk metadata, sorted by WriteStart ascending.
 func (f *FSM) List() []ManifestEntry {
 	f.mu.RLock()
@@ -470,27 +867,45 @@ func (f *FSM) ApplyCommand(cmd *gastrologv1.VaultCtlCommand) any {
 // produced the IDs/entries, so a concurrent SetOn... after Apply
 // returns can never observe a stale binding.
 type applyEffects struct {
-	createdEntry       *ManifestEntry
-	deletedID          *chunk.ChunkID
-	uploadedEntry      *ManifestEntry
-	sealedEntry        *ManifestEntry
-	retentionPendingID *chunk.ChunkID
-	requestedDelete    *PendingDelete
-	ackedDeleteID      *chunk.ChunkID
-	ackedDeleteNodeID  string
-	finalizedDeleteID  *chunk.ChunkID
-	prunedNode         string
-	prunedFinalizable  []chunk.ChunkID
+	createdEntry            *ManifestEntry
+	deletedID               *chunk.ChunkID
+	uploadedEntry           *ManifestEntry
+	sealedEntry             *ManifestEntry
+	retentionPendingID      *chunk.ChunkID
+	requestedDelete         *PendingDelete
+	ackedDeleteID           *chunk.ChunkID
+	ackedDeleteNodeID       string
+	finalizedDeleteID       *chunk.ChunkID
+	prunedNode              string
+	prunedFinalizable       []chunk.ChunkID
+	sealedManifest          *OpenChunkManifest
+	sealedManifestClearedID *chunk.ChunkID
+	publishedSegment        *CompletedSegmentEntry
+	publishedSegments       []CompletedSegmentEntry
+	openChunkOpened         *OpenChunkManifest
+	openChunkRefAdded       *OpenChunkManifest
+	releasedSegmentIDs      []glid.GLID
+	ackedSegmentHolderIDs   []glid.GLID
+	discardedManifestIDs    []chunk.ChunkID
+	holdersChangedEntries   []ManifestEntry
 
-	onCreate           func(ManifestEntry)
-	onDelete           func(chunk.ChunkID)
-	onUpload           func(ManifestEntry)
-	onSeal             func(ManifestEntry)
-	onRetentionPending func(chunk.ChunkID)
-	onRequestDelete    func(PendingDelete)
-	onAckDelete        func(chunk.ChunkID, string)
-	onFinalizeDelete   func(chunk.ChunkID)
-	onPruneNode        func(string, []chunk.ChunkID)
+	onCreate                  func(ManifestEntry)
+	onDelete                  func(chunk.ChunkID)
+	onUpload                  func(ManifestEntry)
+	onSeal                    []func(ManifestEntry)
+	onSealedManifest          []func(*OpenChunkManifest)
+	onSealedManifestCleared   func(chunk.ChunkID)
+	onPublishCompletedSegment []func(CompletedSegmentEntry)
+	onOpenChunkManifest       []func(*OpenChunkManifest)
+	onOpenChunkRefAdded       []func(*OpenChunkManifest)
+	onReleaseSegments         map[int]func([]glid.GLID)
+	onAckSegmentHolder        map[int]func(glid.GLID)
+	onRetentionPending        func(chunk.ChunkID)
+	onRequestDelete           func(PendingDelete)
+	onAckDelete               func(chunk.ChunkID, string)
+	onFinalizeDelete          func(chunk.ChunkID)
+	onPruneNode               func(string, []chunk.ChunkID)
+	onHoldersChanged          func(ManifestEntry)
 }
 
 func (e applyEffects) fire() {
@@ -503,9 +918,12 @@ func (e applyEffects) fire() {
 	if e.uploadedEntry != nil && e.onUpload != nil {
 		e.onUpload(*e.uploadedEntry)
 	}
-	if e.sealedEntry != nil && e.onSeal != nil {
-		e.onSeal(*e.sealedEntry)
+	if e.sealedEntry != nil {
+		for _, fn := range e.onSeal {
+			fn(*e.sealedEntry)
+		}
 	}
+	e.firePipelineCallbacks()
 	if e.retentionPendingID != nil && e.onRetentionPending != nil {
 		e.onRetentionPending(*e.retentionPendingID)
 	}
@@ -521,16 +939,77 @@ func (e applyEffects) fire() {
 	if e.prunedNode != "" && e.onPruneNode != nil {
 		e.onPruneNode(e.prunedNode, e.prunedFinalizable)
 	}
+	e.firePruneFinalizeCallbacks()
+}
+
+func (e applyEffects) firePipelineCallbacks() {
+	if e.sealedManifest != nil {
+		for _, fn := range e.onSealedManifest {
+			fn(e.sealedManifest)
+		}
+	}
+	if e.sealedManifestClearedID != nil && e.onSealedManifestCleared != nil {
+		e.onSealedManifestCleared(*e.sealedManifestClearedID)
+	}
+	if e.publishedSegment != nil {
+		for _, fn := range e.onPublishCompletedSegment {
+			fn(*e.publishedSegment)
+		}
+	}
+	for _, seg := range e.publishedSegments {
+		for _, fn := range e.onPublishCompletedSegment {
+			fn(seg)
+		}
+	}
+	if e.openChunkOpened != nil {
+		for _, fn := range e.onOpenChunkManifest {
+			fn(e.openChunkOpened)
+		}
+	}
+	if e.openChunkRefAdded != nil {
+		for _, fn := range e.onOpenChunkRefAdded {
+			fn(e.openChunkRefAdded)
+		}
+	}
+	if len(e.releasedSegmentIDs) > 0 {
+		for _, fn := range e.onReleaseSegments {
+			ids := append([]glid.GLID(nil), e.releasedSegmentIDs...)
+			fn(ids)
+		}
+	}
+	// Discarded (unbuildable) manifests fire the same cleared signal a normal
+	// build completion does: every home's chunking manager drops its pending
+	// build/progress state for the chunk and the planner wakes to re-plan the
+	// rewound records into a fresh manifest.
+	for _, id := range e.discardedManifestIDs {
+		if e.onSealedManifestCleared != nil {
+			e.onSealedManifestCleared(id)
+		}
+	}
+	for _, id := range e.ackedSegmentHolderIDs {
+		for _, fn := range e.onAckSegmentHolder {
+			fn(id)
+		}
+	}
+	if e.onHoldersChanged != nil {
+		for _, entry := range e.holdersChangedEntries {
+			e.onHoldersChanged(entry)
+		}
+	}
+}
+
+func (e applyEffects) firePruneFinalizeCallbacks() {
 	// gastrolog-15fm8: applyPruneNode now finalizes drained-ExpectedFrom
 	// chunks atomically inside the same apply. Fire onFinalizeDelete
 	// per chunk so audit / cache-eviction subscribers see the same
 	// stream of finalize signals they would have if a CmdFinalizeDelete
 	// had applied per chunk. Skip if onPruneNode was the subscriber's
 	// only hook (they get the same information through the slice).
-	if e.onFinalizeDelete != nil {
-		for _, id := range e.prunedFinalizable {
-			e.onFinalizeDelete(id)
-		}
+	if e.onFinalizeDelete == nil {
+		return
+	}
+	for _, id := range e.prunedFinalizable {
+		e.onFinalizeDelete(id)
 	}
 }
 
@@ -549,10 +1028,15 @@ func (f *FSM) applyLocked(cmd *gastrologv1.VaultCtlCommand) (any, applyEffects) 
 		result = f.applyCreate(c.CreateChunk)
 		fx.createdEntry = f.captureEntry(result, chunkIDFromProto(c.CreateChunk.GetId()))
 	case *gastrologv1.VaultCtlCommand_SealChunk:
+		sealID := chunkIDFromProto(c.SealChunk.GetId())
+		head := f.sealedManifestHeadLocked()
+		hadSealedManifest := head != nil && head.ChunkID == sealID
 		result = f.applySeal(c.SealChunk)
-		fx.sealedEntry = f.captureEntry(result, chunkIDFromProto(c.SealChunk.GetId()))
-	case *gastrologv1.VaultCtlCommand_CompressChunk:
-		result = f.applyCompress(c.CompressChunk)
+		fx.sealedEntry = f.captureEntry(result, sealID)
+		if result == nil && hadSealedManifest {
+			idCopy := sealID
+			fx.sealedManifestClearedID = &idCopy
+		}
 	case *gastrologv1.VaultCtlCommand_UploadChunk:
 		result = f.applyUpload(c.UploadChunk)
 		fx.uploadedEntry = f.captureEntry(result, chunkIDFromProto(c.UploadChunk.GetId()))
@@ -602,20 +1086,159 @@ func (f *FSM) applyLocked(cmd *gastrologv1.VaultCtlCommand) (any, applyEffects) 
 		// CmdCreateChunk path.
 		fx.createdEntry = f.captureEntry(result, chunkIDFromProto(c.RepatriateChunk.GetEntry().GetId()))
 	default:
-		result = fmt.Errorf("unknown chunk FSM command: %T", cmd.GetCommand())
+		var ok bool
+		result, fx, ok = f.tryApplySegmentPipelineLocked(cmd)
+		if !ok {
+			result = fmt.Errorf("unknown chunk FSM command: %T", cmd.GetCommand())
+		}
 	}
-	fx.onCreate = f.onCreate
-	fx.onDelete = f.onDelete
-	fx.onUpload = f.onUpload
-	fx.onSeal = f.onSeal
-	fx.onRetentionPending = f.onRetentionPending
-	fx.onRequestDelete = f.onRequestDelete
-	fx.onAckDelete = f.onAckDelete
-	fx.onFinalizeDelete = f.onFinalizeDelete
-	fx.onPruneNode = f.onPruneNode
+	f.attachApplyCallbacks(&fx)
 	f.mu.Unlock()
 
 	return result, fx
+}
+
+// tryApplySegmentPipelineLocked dispatches completed-segment registry and
+// open-chunk manifest commands. Caller holds f.mu.
+func (f *FSM) applyPublishCompletedSegmentsBatch(c *gastrologv1.PublishCompletedSegmentsCommand) (any, applyEffects, bool) {
+	var fx applyEffects
+	var newOnes []CompletedSegmentEntry
+	for _, seg := range c.GetSegments() {
+		segID := glid.FromBytes(seg.GetSegmentId())
+		had := f.completedSegments[segID] != nil
+		if err := f.applyPublishCompletedSegment(seg); err != nil {
+			return err, fx, true
+		}
+		if !had {
+			if e := f.completedSegments[segID]; e != nil {
+				cp := *e
+				newOnes = append(newOnes, cp)
+			}
+		}
+	}
+	if len(newOnes) > 0 {
+		fx.publishedSegments = newOnes
+	}
+	return nil, fx, true
+}
+
+func (f *FSM) tryApplySegmentPipelineLocked(cmd *gastrologv1.VaultCtlCommand) (any, applyEffects, bool) {
+	var fx applyEffects
+	switch c := cmd.GetCommand().(type) {
+	case *gastrologv1.VaultCtlCommand_PublishCompletedSegment:
+		segID := glid.FromBytes(c.PublishCompletedSegment.GetSegmentId())
+		had := f.completedSegments[segID] != nil
+		result := f.applyPublishCompletedSegment(c.PublishCompletedSegment)
+		if result == nil && !had {
+			if e := f.completedSegments[segID]; e != nil {
+				cp := *e
+				fx.publishedSegment = &cp
+			}
+		}
+		return result, fx, true
+	case *gastrologv1.VaultCtlCommand_PublishCompletedSegments:
+		return f.applyPublishCompletedSegmentsBatch(c.PublishCompletedSegments)
+	case *gastrologv1.VaultCtlCommand_OpenChunkManifest:
+		result, opened := f.applyOpenChunkManifestLocked(c.OpenChunkManifest)
+		fx.openChunkOpened = opened
+		return result, fx, true
+	case *gastrologv1.VaultCtlCommand_AddOpenChunkSegmentRef:
+		result, refAdded := f.applyAddOpenChunkSegmentRefLocked(c.AddOpenChunkSegmentRef)
+		fx.openChunkRefAdded = refAdded
+		return result, fx, true
+	case *gastrologv1.VaultCtlCommand_AddOpenChunkSegmentRefs:
+		result, refAdded := f.applyAddOpenChunkSegmentRefsLocked(c.AddOpenChunkSegmentRefs)
+		fx.openChunkRefAdded = refAdded
+		return result, fx, true
+	case *gastrologv1.VaultCtlCommand_SealOpenChunkManifest:
+		result, sealed := f.applySealOpenChunkManifestLocked(c.SealOpenChunkManifest)
+		fx.sealedManifest = sealed
+		return result, fx, true
+	case *gastrologv1.VaultCtlCommand_DiscardOpenChunkManifest:
+		deleted, result := f.applyDiscardOpenChunkManifest(c.DiscardOpenChunkManifest)
+		if deleted != nil {
+			fx.deletedID = deleted
+		}
+		return result, fx, true
+	case *gastrologv1.VaultCtlCommand_ReleaseSegments:
+		released := f.applyReleaseSegments(c.ReleaseSegments)
+		if len(released) > 0 {
+			fx.releasedSegmentIDs = released
+		}
+		return nil, fx, true
+	case *gastrologv1.VaultCtlCommand_DiscardUnbuildableManifests:
+		discarded, err := f.applyDiscardUnbuildableManifests(c.DiscardUnbuildableManifests)
+		if err != nil {
+			return err, fx, true
+		}
+		fx.discardedManifestIDs = discarded
+		return nil, fx, true
+	case *gastrologv1.VaultCtlCommand_AckSegmentHolder:
+		added, result := f.applyAckSegmentHolder(c.AckSegmentHolder)
+		fx.ackedSegmentHolderIDs = added
+		return result, fx, true
+	case *gastrologv1.VaultCtlCommand_AckChunkHolder:
+		changed, result := f.applyAckChunkHolder(c.AckChunkHolder)
+		fx.holdersChangedEntries = f.captureEntries(result, changed)
+		return result, fx, true
+	case *gastrologv1.VaultCtlCommand_RevokeChunkHolder:
+		changed, result := f.applyRevokeChunkHolder(c.RevokeChunkHolder)
+		fx.holdersChangedEntries = f.captureEntries(result, changed)
+		return result, fx, true
+	default:
+		return nil, applyEffects{}, false
+	}
+}
+
+// attachApplyCallbacks copies subscriber hooks into fx for post-apply firing.
+// Caller holds f.mu.
+func (f *FSM) attachApplyCallbacks(fx *applyEffects) {
+	fx.onCreate = f.onCreate
+	fx.onDelete = f.onDelete
+	fx.onUpload = f.onUpload
+	if len(f.onSeal) > 0 {
+		fx.onSeal = make([]func(ManifestEntry), 0, len(f.onSeal))
+		for _, fn := range f.onSeal {
+			fx.onSeal = append(fx.onSeal, fn)
+		}
+	}
+	if len(f.onSealedManifest) > 0 {
+		fx.onSealedManifest = make([]func(*OpenChunkManifest), 0, len(f.onSealedManifest))
+		for _, fn := range f.onSealedManifest {
+			fx.onSealedManifest = append(fx.onSealedManifest, fn)
+		}
+	}
+	fx.onSealedManifestCleared = f.onSealedManifestCleared
+	if len(f.onPublishCompletedSegment) > 0 {
+		fx.onPublishCompletedSegment = make([]func(CompletedSegmentEntry), 0, len(f.onPublishCompletedSegment))
+		for _, fn := range f.onPublishCompletedSegment {
+			fx.onPublishCompletedSegment = append(fx.onPublishCompletedSegment, fn)
+		}
+	}
+	if len(f.onOpenChunkManifest) > 0 {
+		fx.onOpenChunkManifest = make([]func(*OpenChunkManifest), 0, len(f.onOpenChunkManifest))
+		for _, fn := range f.onOpenChunkManifest {
+			fx.onOpenChunkManifest = append(fx.onOpenChunkManifest, fn)
+		}
+	}
+	if len(f.onOpenChunkRefAdded) > 0 {
+		fx.onOpenChunkRefAdded = make([]func(*OpenChunkManifest), 0, len(f.onOpenChunkRefAdded))
+		for _, fn := range f.onOpenChunkRefAdded {
+			fx.onOpenChunkRefAdded = append(fx.onOpenChunkRefAdded, fn)
+		}
+	}
+	if len(f.onReleaseSegments) > 0 {
+		fx.onReleaseSegments = maps.Clone(f.onReleaseSegments)
+	}
+	if len(f.onAckSegmentHolder) > 0 {
+		fx.onAckSegmentHolder = maps.Clone(f.onAckSegmentHolder)
+	}
+	fx.onRetentionPending = f.onRetentionPending
+	fx.onRequestDelete = f.onRequestDelete
+	fx.onAckDelete = f.onAckDelete
+	fx.onHoldersChanged = f.onHoldersChanged
+	fx.onFinalizeDelete = f.onFinalizeDelete
+	fx.onPruneNode = f.onPruneNode
 }
 
 // chunkIDFromProto converts a 16-byte proto field to a chunk.ChunkID. A
@@ -637,6 +1260,23 @@ func (f *FSM) captureEntry(applyResult any, id chunk.ChunkID) *ManifestEntry {
 	}
 	cp := *e
 	return &cp
+}
+
+// captureEntries copies the post-apply entries for the given chunk IDs,
+// or nil if the apply errored. Entry copies are safe to hand outside the
+// lock: Holders is copy-on-write (see applyAckChunkHolder). Caller holds
+// f.mu.
+func (f *FSM) captureEntries(applyResult any, ids []chunk.ChunkID) []ManifestEntry {
+	if applyResult != nil || len(ids) == 0 {
+		return nil
+	}
+	out := make([]ManifestEntry, 0, len(ids))
+	for _, id := range ids {
+		if e := f.chunks[id]; e != nil {
+			out = append(out, *e)
+		}
+	}
+	return out
 }
 
 // captureID returns id, or nil if the apply errored. Lock-free.
@@ -663,17 +1303,28 @@ func (f *FSM) SnapshotProto() *gastrologv1.VaultCtlSnapshot {
 // and round-trip equality checks sane (gastrolog-5lrg7).
 func (f *FSM) snapshotProtoLocked() *gastrologv1.VaultCtlSnapshot {
 	snap := &gastrologv1.VaultCtlSnapshot{
-		Entries:        make([]*gastrologv1.ManifestEntry, 0, len(f.chunks)),
-		Tombstones:     make([]*gastrologv1.Tombstone, 0, len(f.tombstones)),
-		PendingDeletes: make([]*gastrologv1.PendingDelete, 0, len(f.pendingDeletes)),
+		Entries:           make([]*gastrologv1.ManifestEntry, 0, len(f.chunks)),
+		Tombstones:        make([]*gastrologv1.Tombstone, 0, len(f.tombstones)),
+		PendingDeletes:    make([]*gastrologv1.PendingDelete, 0, len(f.pendingDeletes)),
+		CompletedSegments: f.snapshotCompletedSegmentsLocked(),
+		OpenChunk:         f.snapshotOpenChunkLocked(),
+		SealedManifests:   f.snapshotSealedManifestsLocked(),
+		SegmentResume:     f.snapshotSegmentResumeLocked(),
+		SegmentChunks:     f.snapshotSegmentChunksLocked(),
 	}
 
-	entryIDs := slices.SortedFunc(maps.Keys(f.chunks), compareChunkID)
+	releasedIDs := slices.SortedFunc(maps.Keys(f.releasedSegments), glid.Compare)
+	for _, id := range releasedIDs {
+		idCopy := id
+		snap.ReleasedSegmentIds = append(snap.ReleasedSegmentIds, idCopy[:])
+	}
+
+	entryIDs := slices.SortedFunc(maps.Keys(f.chunks), chunk.ChunkID.Compare)
 	for _, id := range entryIDs {
 		snap.Entries = append(snap.Entries, entryToProto(f.chunks[id]))
 	}
 
-	tombIDs := slices.SortedFunc(maps.Keys(f.tombstones), compareChunkID)
+	tombIDs := slices.SortedFunc(maps.Keys(f.tombstones), chunk.ChunkID.Compare)
 	for _, id := range tombIDs {
 		idCopy := id
 		snap.Tombstones = append(snap.Tombstones, &gastrologv1.Tombstone{
@@ -682,18 +1333,12 @@ func (f *FSM) snapshotProtoLocked() *gastrologv1.VaultCtlSnapshot {
 		})
 	}
 
-	pdIDs := slices.SortedFunc(maps.Keys(f.pendingDeletes), compareChunkID)
+	pdIDs := slices.SortedFunc(maps.Keys(f.pendingDeletes), chunk.ChunkID.Compare)
 	for _, id := range pdIDs {
 		snap.PendingDeletes = append(snap.PendingDeletes, pendingDeleteToProto(f.pendingDeletes[id]))
 	}
 
 	return snap
-}
-
-// compareChunkID orders chunk IDs by their raw bytes for deterministic
-// snapshot section ordering.
-func compareChunkID(a, b chunk.ChunkID) int {
-	return bytes.Compare(a[:], b[:])
 }
 
 // Snapshot returns a point-in-time snapshot of all chunk metadata.
@@ -712,7 +1357,7 @@ func (f *FSM) RestoreProto(snap *gastrologv1.VaultCtlSnapshot) {
 func (f *FSM) Restore(rc io.ReadCloser) error {
 	defer func() { _ = rc.Close() }()
 
-	raw, err := io.ReadAll(rc)
+	raw, err := io.ReadAll(rc) //ok:io-readall proto.Unmarshal needs the full buffer; vault-ctl snapshots are bounded metadata (manifest+registry), not record data
 	if err != nil {
 		return fmt.Errorf("restore chunk FSM: read: %w", err)
 	}
@@ -741,6 +1386,13 @@ func (f *FSM) restoreFromProtoLocked(snap *gastrologv1.VaultCtlSnapshot) {
 		p := pendingDeleteFromProto(pp)
 		f.pendingDeletes[p.ChunkID] = &p
 	}
+	f.restoreCompletedSegmentsLocked(snap.GetCompletedSegments())
+	f.releasedSegments = make(map[glid.GLID]struct{}, len(snap.GetReleasedSegmentIds()))
+	for _, raw := range snap.GetReleasedSegmentIds() {
+		f.releasedSegments[glid.FromBytes(raw)] = struct{}{}
+	}
+	f.restoreOpenChunkLocked(snap)
+	f.repairSealedManifestChunkEntryLocked()
 	f.ready = true
 }
 
@@ -788,6 +1440,13 @@ func (f *FSM) applySeal(c *gastrologv1.SealChunkCommand) error {
 
 	e := f.chunks[id]
 	if e == nil {
+		if sm := f.sealedManifestByIDLocked(id); sm != nil {
+			f.clearStaleSealTombstoneLocked(id)
+			f.ensureManifestChunkEntryLocked(sm, chunk.ChunkStateSealing)
+			e = f.chunks[id]
+		}
+	}
+	if e == nil {
 		return fmt.Errorf("seal chunk: %s not found", id)
 	}
 	e.WriteEnd = time.Unix(0, c.GetWriteEndNanos())
@@ -798,6 +1457,12 @@ func (f *FSM) applySeal(c *gastrologv1.SealChunkCommand) error {
 	e.IngestStart = time.Unix(0, c.GetIngestStartNanos())
 	e.IngestTSMonotonic = c.GetIngestTsMonotonic()
 	e.State = chunk.ChunkStateSealed
+	sealedAt := time.Unix(0, c.GetSealedAtNanos())
+	if sealedAt.IsZero() {
+		sealedAt = e.WriteEnd
+	}
+	e.SealedAt = sealedAt
+	f.popSealedManifestHeadIfIDLocked(id)
 	return nil
 }
 
@@ -860,22 +1525,6 @@ func (f *FSM) applyRepatriate(c *gastrologv1.RepatriateChunkCommand) error {
 	return nil
 }
 
-// CompressChunk records the on-disk size of a sealed chunk.
-func (f *FSM) applyCompress(c *gastrologv1.CompressChunkCommand) error {
-	id := chunkIDFromProto(c.GetId())
-
-	e := f.chunks[id]
-	if e == nil {
-		return fmt.Errorf("compress chunk: %s not found", id)
-	}
-	// Compressed flag is gone (gastrolog-24m1t step 7f) — sealed chunks
-	// are GLCB which is zstd-compressed by construction. CmdCompressChunk
-	// stays as a no-op apply* handler for WAL-replay backward compat;
-	// only DiskBytes still carries useful information.
-	e.DiskBytes = c.GetDiskBytes()
-	return nil
-}
-
 // AttachOffsets: [16 ChunkID][8 IngestIdxOff][8 IngestIdxSize][8 SourceIdxOff][8 SourceIdxSize]
 //
 // Fired after sealToGLCB on the leader (and after finalizeImportedChunk
@@ -934,6 +1583,7 @@ func (f *FSM) applyDelete(c *gastrologv1.DeleteChunkCommand) (*chunk.ChunkID, er
 	// same log entry at the same logical time and the tombstone is only
 	// used locally to short-circuit replication receivers.
 	f.tombstones[id] = time.Now()
+	f.clearOpenManifestStateIfChunkIDLocked(id)
 	if _, existed := f.chunks[id]; !existed {
 		return nil, nil
 	}
@@ -983,7 +1633,7 @@ func MarshalCreateChunk(id chunk.ChunkID, writeStart, ingestStart, sourceStart t
 }
 
 // NewSealChunk builds a SealChunk command message.
-func NewSealChunk(id chunk.ChunkID, writeEnd time.Time, recordCount, bytes int64, ingestStart, ingestEnd, sourceEnd time.Time, ingestTSMonotonic bool) *gastrologv1.VaultCtlCommand {
+func NewSealChunk(id chunk.ChunkID, writeEnd time.Time, recordCount, bytes int64, ingestStart, ingestEnd, sourceEnd time.Time, ingestTSMonotonic bool, sealedAt time.Time) *gastrologv1.VaultCtlCommand {
 	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_SealChunk{SealChunk: &gastrologv1.SealChunkCommand{
 		Id:                id[:],
 		WriteEndNanos:     writeEnd.UnixNano(),
@@ -993,12 +1643,13 @@ func NewSealChunk(id chunk.ChunkID, writeEnd time.Time, recordCount, bytes int64
 		SourceEndNanos:    sourceEnd.UnixNano(),
 		IngestStartNanos:  ingestStart.UnixNano(),
 		IngestTsMonotonic: ingestTSMonotonic,
+		SealedAtNanos:     sealedAt.UnixNano(),
 	}}}
 }
 
 // MarshalSealChunk builds the Raft log data for a SealChunk command.
-func MarshalSealChunk(id chunk.ChunkID, writeEnd time.Time, recordCount, bytes int64, ingestStart, ingestEnd, sourceEnd time.Time, ingestTSMonotonic bool) []byte {
-	return mustMarshalCommand(NewSealChunk(id, writeEnd, recordCount, bytes, ingestStart, ingestEnd, sourceEnd, ingestTSMonotonic))
+func MarshalSealChunk(id chunk.ChunkID, writeEnd time.Time, recordCount, bytes int64, ingestStart, ingestEnd, sourceEnd time.Time, ingestTSMonotonic bool, sealedAt time.Time) []byte {
+	return mustMarshalCommand(NewSealChunk(id, writeEnd, recordCount, bytes, ingestStart, ingestEnd, sourceEnd, ingestTSMonotonic, sealedAt))
 }
 
 // NewBeginSeal builds a BeginSeal command message. gastrolog-1huz5.
@@ -1009,16 +1660,6 @@ func NewBeginSeal(id chunk.ChunkID) *gastrologv1.VaultCtlCommand {
 // MarshalBeginSeal builds the Raft log data for a BeginSeal command.
 func MarshalBeginSeal(id chunk.ChunkID) []byte {
 	return mustMarshalCommand(NewBeginSeal(id))
-}
-
-// NewCompressChunk builds a CompressChunk command message.
-func NewCompressChunk(id chunk.ChunkID, diskBytes int64) *gastrologv1.VaultCtlCommand {
-	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_CompressChunk{CompressChunk: &gastrologv1.CompressChunkCommand{Id: id[:], DiskBytes: diskBytes}}}
-}
-
-// MarshalCompressChunk builds the Raft log data for a CompressChunk command.
-func MarshalCompressChunk(id chunk.ChunkID, diskBytes int64) []byte {
-	return mustMarshalCommand(NewCompressChunk(id, diskBytes))
 }
 
 // NewUploadChunk builds an UploadChunk command message. The integrity
@@ -1119,6 +1760,8 @@ func entryToProto(e *ManifestEntry) *gastrologv1.ManifestEntry {
 		Hash:              e.Hash[:],
 		CloudServiceId:    e.CloudServiceID[:],
 		KeyScheme:         uint32(e.KeyScheme),
+		SealedAtNanos:     e.SealedAt.UnixNano(),
+		Holders:           slices.Clone(e.Holders),
 	}
 }
 
@@ -1137,6 +1780,7 @@ func entryFromProto(p *gastrologv1.ManifestEntry) ManifestEntry {
 		SourceStart:       time.Unix(0, p.GetSourceStartNanos()),
 		SourceEnd:         time.Unix(0, p.GetSourceEndNanos()),
 		IngestTSMonotonic: p.GetIngestTsMonotonic(),
+		SealedAt:          time.Unix(0, p.GetSealedAtNanos()),
 		CloudBacked:       p.GetCloudBacked(),
 		Archived:          p.GetArchived(),
 		RetentionPending:  p.GetRetentionPending(),
@@ -1146,6 +1790,7 @@ func entryFromProto(p *gastrologv1.ManifestEntry) ManifestEntry {
 		SourceIdxSize:     p.GetSourceIdxSize(),
 		CloudServiceID:    glid.FromBytes(p.GetCloudServiceId()),
 		KeyScheme:         uint8(p.GetKeyScheme()), //nolint:gosec // G115: key scheme is a small enum; round-trips a uint8
+		Holders:           slices.Clone(p.GetHolders()),
 	}
 	copy(e.Hash[:], p.GetHash())
 	return e

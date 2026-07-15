@@ -42,7 +42,7 @@ func memVaultCfg(vaultID glid.GLID, loader *fakeSystemLoader) system.VaultConfig
 func TestReloadFilters(t *testing.T) {
 	t.Parallel()
 	loader := &fakeSystemLoader{}
-	orch, vaults := newFilteredTestSetupWithLoader(t, loader)
+	orch, vaults := newRoutedTestSetupWithLoader(t, loader)
 
 	// gastrolog-4kkoo (Phase 5): explicit priorities so the prod route
 	// fires before the archive catch-all under first-match-wins.
@@ -107,7 +107,7 @@ func TestReloadFilters(t *testing.T) {
 func TestReloadFiltersInvalidExpression(t *testing.T) {
 	t.Parallel()
 	loader := &fakeSystemLoader{}
-	orch, vaults := newFilteredTestSetupWithLoader(t, loader)
+	orch, vaults := newRoutedTestSetupWithLoader(t, loader)
 
 	loader.cfg = &system.Config{
 		Routes: []system.RouteConfig{
@@ -116,14 +116,14 @@ func TestReloadFiltersInvalidExpression(t *testing.T) {
 	}
 	err := orch.ReloadFilters(context.Background())
 	if err == nil {
-		t.Fatal("expected error for invalid filter expression")
+		t.Fatal("expected error for invalid match expression")
 	}
 }
 
 func TestReloadFiltersIgnoresUnknownVaults(t *testing.T) {
 	t.Parallel()
 	loader := &fakeSystemLoader{}
-	orch, vaults := newFilteredTestSetupWithLoader(t, loader)
+	orch, vaults := newRoutedTestSetupWithLoader(t, loader)
 
 	nonexistentVaultID := glid.New()
 
@@ -148,10 +148,7 @@ func TestAddVault(t *testing.T) {
 			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "env=test"}}}, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 	}}
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -198,10 +195,7 @@ func TestAddVaultDuplicate(t *testing.T) {
 			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 	}}
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -219,7 +213,7 @@ func TestAddVaultDuplicate(t *testing.T) {
 	}
 
 	// Adding again should fail.
-	err = orch.AddVault(context.Background(), vaultCfg, factories)
+	err := orch.AddVault(context.Background(), vaultCfg, factories)
 	if err == nil {
 		t.Fatal("expected error for duplicate vault")
 	}
@@ -234,10 +228,7 @@ func TestRemoveVaultEmpty(t *testing.T) {
 			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 	}}
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -274,10 +265,7 @@ func TestRemoveVaultNotEmpty(t *testing.T) {
 			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 	}}
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -305,7 +293,7 @@ func TestRemoveVaultNotEmpty(t *testing.T) {
 	}
 
 	// Remove should fail.
-	err = orch.RemoveVault(vaultID)
+	err := orch.RemoveVault(vaultID)
 	if err == nil {
 		t.Fatal("expected error for non-empty vault")
 	}
@@ -314,12 +302,9 @@ func TestRemoveVaultNotEmpty(t *testing.T) {
 func TestRemoveVaultNotFound(t *testing.T) {
 	t.Parallel()
 	loader := &fakeSystemLoader{cfg: &system.Config{}}
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
-	err = orch.RemoveVault(glid.New())
+	err := orch.RemoveVault(glid.New())
 	if err == nil {
 		t.Fatal("expected error for nonexistent vault")
 	}
@@ -334,10 +319,7 @@ func TestForceRemoveVault(t *testing.T) {
 			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 	}}
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -397,12 +379,9 @@ func TestForceRemoveVault(t *testing.T) {
 func TestForceRemoveVaultNotFound(t *testing.T) {
 	t.Parallel()
 	loader := &fakeSystemLoader{cfg: &system.Config{}}
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
-	err = orch.ForceRemoveVault(glid.New())
+	err := orch.ForceRemoveVault(glid.New())
 	if err == nil {
 		t.Fatal("expected error for nonexistent vault")
 	}
@@ -417,10 +396,7 @@ func TestForceRemoveEmptyVault(t *testing.T) {
 			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 	}}
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -447,120 +423,51 @@ func TestForceRemoveEmptyVault(t *testing.T) {
 	}
 }
 
-func TestAddIngesterWhileRunning(t *testing.T) {
-	s := memtest.MustNewVault(t, chunkmem.Config{
-		RotationPolicy: chunk.NewRecordCountPolicy(10000),
-	})
-
-	defaultID := glid.New()
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, s.IM, s.QE))
-
-	// gastrolog-4kkoo (Phase 5): catch-all route into the vault.
-	cr, _ := orchestrator.CompileRoute(glid.New(), "all", 0, "*",
-		[]orchestrator.RouteDestination{{VaultID: defaultID}}, "fanout")
-	orch.SetRouteSet(orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{cr}))
-
-	// Start orchestrator.
-	if err := orch.Start(context.Background()); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	defer orch.Stop()
-
-	// Add ingester while running.
-	recv := newMockIngester([]orchestrator.IngestMessage{
-		{Attrs: map[string]string{"source": "dynamic"}, Raw: []byte("dynamic message")},
-	})
-
-	ingesterID := glid.New()
-	if err := orch.AddIngester(ingesterID, "test", "mock", false, recv); err != nil {
-		t.Fatalf("AddIngester: %v", err)
-	}
-
-	// Wait for message to be processed.
-	<-recv.started
-	time.Sleep(50 * time.Millisecond)
-
-	// Verify message was received.
-	msgs := getRecordMessages(t, s.CM)
-	found := slices.Contains(msgs, "dynamic message")
-	if !found {
-		t.Error("dynamic message not found")
-	}
-}
-
-func TestAddIngesterReplacesDuplicate(t *testing.T) {
+func TestRegisterIngesterReplacesDuplicate(t *testing.T) {
 	t.Parallel()
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{})
 
 	ingesterID := glid.New()
 	recv1 := newBlockingIngester()
 	recv2 := newBlockingIngester()
 
-	if err := orch.AddIngester(ingesterID, "test-1", "mock", false, recv1); err != nil {
-		t.Fatalf("AddIngester: %v", err)
-	}
-
-	// Adding with the same ID should replace, not error.
-	if err := orch.AddIngester(ingesterID, "test-2", "mock", false, recv2); err != nil {
-		t.Fatalf("AddIngester (replace): %v", err)
-	}
+	orch.RegisterIngester(ingesterID, "test-1", "mock", recv1)
+	// Registering with the same ID replaces in place, it does not duplicate.
+	orch.RegisterIngester(ingesterID, "test-2", "mock", recv2)
 
 	if ids := orch.ListIngesters(); len(ids) != 1 {
 		t.Fatalf("expected 1 ingester, got %d", len(ids))
 	}
 }
 
-func TestRemoveIngesterNotRunning(t *testing.T) {
+func TestUnregisterIngesterNotRunning(t *testing.T) {
 	t.Parallel()
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{})
 
 	ingesterID := glid.New()
 	recv := newBlockingIngester()
-	if err := orch.AddIngester(ingesterID, "test", "mock", false, recv); err != nil {
-		t.Fatalf("AddIngester: %v", err)
-	}
+	orch.RegisterIngester(ingesterID, "test", "mock", recv)
 
-	// Remove while not running should succeed.
-	if err := orch.RemoveIngester(ingesterID); err != nil {
-		t.Fatalf("RemoveIngester: %v", err)
-	}
+	// Unregister while not running just removes it from the desired set.
+	orch.UnregisterIngester(ingesterID)
 
-	// Verify removed.
-	ingesters := orch.ListIngesters()
-	for _, id := range ingesters {
-		if id == ingesterID {
-			t.Error("ingester should have been removed")
-		}
+	if slices.Contains(orch.ListIngesters(), ingesterID) {
+		t.Error("ingester should have been removed")
 	}
 }
 
-func TestRemoveIngesterWhileRunning(t *testing.T) {
+func TestUnregisterIngesterWhileRunning(t *testing.T) {
 	cm, _ := chunkmem.NewManager(chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(10000),
 	})
 
 	defaultID := glid.New()
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{})
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, cm, nil, nil))
 
 	ingesterID := glid.New()
 	recv := newBlockingIngester()
-	if err := orch.AddIngester(ingesterID, "test", "mock", false, recv); err != nil {
-		t.Fatalf("AddIngester: %v", err)
-	}
+	orch.RegisterIngester(ingesterID, "test", "mock", recv)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -570,38 +477,30 @@ func TestRemoveIngesterWhileRunning(t *testing.T) {
 	// Wait for ingester to start.
 	<-recv.started
 
-	// Remove while running should succeed and stop the ingester.
-	if err := orch.RemoveIngester(ingesterID); err != nil {
-		t.Fatalf("RemoveIngester: %v", err)
-	}
+	// Unregister while running stops the ingester via the pipeline reconcile.
+	orch.UnregisterIngester(ingesterID)
 
 	// Verify ingester was stopped.
 	select {
 	case <-recv.stopped:
 		// Good - ingester stopped.
 	case <-time.After(time.Second):
-		t.Fatal("ingester did not stop after RemoveIngester")
+		t.Fatal("ingester did not stop after UnregisterIngester")
 	}
 
-	// Verify removed from list.
-	ingesters := orch.ListIngesters()
-	for _, id := range ingesters {
-		if id == ingesterID {
-			t.Error("ingester should have been removed from list")
-		}
+	if slices.Contains(orch.ListIngesters(), ingesterID) {
+		t.Error("ingester should have been removed from list")
 	}
 }
 
-func TestRemoveIngesterNotFound(t *testing.T) {
+func TestUnregisterIngesterUnknownIsNoOp(t *testing.T) {
 	t.Parallel()
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{})
 
-	err = orch.RemoveIngester(glid.New())
-	if err == nil {
-		t.Fatal("expected error for nonexistent ingester")
+	// Unregistering an unknown ID is a no-op (no panic, list stays empty).
+	orch.UnregisterIngester(glid.New())
+	if ids := orch.ListIngesters(); len(ids) != 0 {
+		t.Fatalf("expected 0 ingesters, got %d", len(ids))
 	}
 }
 
@@ -614,10 +513,7 @@ func TestVaultConfig(t *testing.T) {
 			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "env=prod AND level=error"}}}, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 	}}
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -647,12 +543,9 @@ func TestVaultConfig(t *testing.T) {
 
 func TestVaultConfigNotFound(t *testing.T) {
 	t.Parallel()
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{})
 
-	_, err = orch.VaultConfig(glid.New())
+	_, err := orch.VaultConfig(glid.New())
 	if err == nil {
 		t.Fatal("expected error for nonexistent vault")
 	}
@@ -674,10 +567,7 @@ func TestSetRotationPolicyOnVaultDirectly(t *testing.T) {
 			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 	}}
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
 	// Create a vault with default rotation policy (10000 records).
 	factories := orchestrator.Factories{
@@ -730,10 +620,7 @@ func TestPauseVault(t *testing.T) {
 			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 	}}
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -797,10 +684,7 @@ func TestResumeVault(t *testing.T) {
 			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 	}}
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -846,10 +730,7 @@ func TestResumeVault(t *testing.T) {
 
 func TestDisableVaultNotFound(t *testing.T) {
 	t.Parallel()
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{})
 
 	if err := orch.DisableVault(glid.New()); err == nil {
 		t.Fatal("expected error for nonexistent vault")
@@ -868,10 +749,7 @@ func TestDisableVaultDoesNotAffectQuery(t *testing.T) {
 			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 	}}
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -930,17 +808,14 @@ func TestRetentionSingleJobRegistered(t *testing.T) {
 			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 		RetentionPolicies: []system.RetentionPolicyConfig{
-			{ID: retPolicyID, Name: "age-2m", MaxAge: strPtr("2m")},
+			{ID: retPolicyID, Name: "age-2m", MaxAgeNanos: int64Ptr(int64(2 * time.Minute))},
 		},
 		Vaults: []system.VaultConfig{
 			{ID: vaultID, Name: "src"},
 		},
 	}}
 
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{"memory": chunkmem.NewFactory()},
@@ -969,91 +844,15 @@ func TestRetentionSingleJobRegistered(t *testing.T) {
 
 func strPtr(s string) *string { return &s }
 
-// TestReloadRotationPolicies_AppliesSynchronously is the regression test for
-// gastrolog-1rj63: the dispatcher must hot-swap the active chunk manager's
-// rotation policy the moment the FSM commits a change, not 15 seconds later
-// on the next rotationSweep tick.
-//
-// Setup: a vault is configured with a 1000-record rotation policy and has
-// accumulated 100 records. The user then assigns a different policy with
-// max=50, which the current state already exceeds. Without the fix, the
-// chunk manager keeps the 1000-record policy and the next Append does not
-// rotate; with the fix, ReloadRotationPolicies sets the new policy and the
-// next Append seals the chunk + opens a fresh one.
-func TestReloadRotationPolicies_AppliesSynchronously(t *testing.T) {
-	t.Parallel()
+func int64Ptr(v int64) *int64 { return &v }
 
-	vaultID := glid.New()
-	oldPolicyID := glid.New()
-	newPolicyID := glid.New()
-	oldMax := int64(1000)
-	newMax := int64(50)
-
-	loader := &fakeSystemLoader{cfg: &system.Config{
-		Vaults: []system.VaultConfig{
-			{ID: vaultID, Name: "test", Type: system.VaultTypeMemory, RotationPolicyID: &oldPolicyID, Enabled: true},
-		},
-		RotationPolicies: []system.RotationPolicyConfig{
-			{ID: oldPolicyID, Name: "loose", MaxRecords: &oldMax},
-			{ID: newPolicyID, Name: "tight", MaxRecords: &newMax},
-		},
-	}}
-
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
-	s := memtest.MustNewVault(t, chunkmem.Config{RotationPolicy: recordCountPolicy(oldMax)})
-	orch.RegisterVault(orchestrator.NewVaultFromComponents(vaultID, s.CM, s.IM, s.QE))
-
-	// Fill the chunk with 100 records — well under the 1000-record bound.
-	for i := 0; i < 100; i++ {
-		if _, _, err := s.CM.Append(chunk.Record{
-			IngestTS: time.Now(),
-			Attrs:    chunk.Attributes{},
-			Raw:      []byte("x"),
-		}); err != nil {
-			t.Fatalf("append %d: %v", i, err)
-		}
-	}
-	active := s.CM.Active()
-	if active == nil {
-		t.Fatal("expected an active chunk after 100 appends")
-	}
-	firstChunkID := active.ID
-	if active.RecordCount != 100 {
-		t.Fatalf("expected 100 records in active chunk, got %d", active.RecordCount)
-	}
-
-	// Reassign the vault to the tighter policy (max=50). Current state of
-	// 100 records already exceeds the new bound.
-	loader.cfg.Vaults[0].RotationPolicyID = &newPolicyID
-	if err := orch.ReloadRotationPolicies(context.Background()); err != nil {
-		t.Fatalf("ReloadRotationPolicies: %v", err)
-	}
-
-	// One more append must trigger rotation: ShouldRotate sees
-	// state.Records+1 = 101 > newMax (50) and seals before appending.
-	if _, _, err := s.CM.Append(chunk.Record{
-		IngestTS: time.Now(),
-		Attrs:    chunk.Attributes{},
-		Raw:      []byte("x"),
-	}); err != nil {
-		t.Fatalf("append after policy switch: %v", err)
-	}
-
-	active = s.CM.Active()
-	if active == nil {
-		t.Fatal("expected an active chunk after policy switch")
-	}
-	if active.ID == firstChunkID {
-		t.Errorf("expected rotation after policy switch; active chunk is still %s with %d records — new policy not applied",
-			active.ID, active.RecordCount)
-	}
-	if active.RecordCount != 1 {
-		t.Errorf("expected new chunk to have 1 record, got %d", active.RecordCount)
-	}
-}
+// TestReloadRotationPolicies_AppliesSynchronously was removed in Rubicon E2
+// (gastrolog-358ak): ReloadRotationPolicies no longer hot-swaps the per-instance
+// chunk manager's rotation policy (the active-chunk append path is gone). Chunk
+// rotation is now governed by the pipeline chunking manifest policy, applied at
+// pipeline vault (re)registration via reloadPipelineFromConfig. The reload path's
+// remaining effect (republish routing table + reconcile pipeline vaults) is
+// covered by the route/reconfig tests.
 
 // TestReloadRotationPolicies_SkipsFollowers verifies the reload path does not
 // stomp on follower replicas — the rotationSweep is the sole authority for
@@ -1075,10 +874,7 @@ func TestReloadRotationPolicies_SkipsFollowers(t *testing.T) {
 		},
 	}}
 
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
 	// Build a follower vault: NeverRotatePolicy at the chunk manager, IsFollower
 	// flag on the orchestrator's VaultInstance.
@@ -1132,10 +928,7 @@ func TestReloadRotationPolicies_NilPolicyID(t *testing.T) {
 		},
 	}}
 
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 	s := memtest.MustNewVault(t, chunkmem.Config{RotationPolicy: recordCountPolicy(10)})
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(vaultID, s.CM, s.IM, s.QE))
 
@@ -1161,118 +954,12 @@ func TestReloadRotationPolicies_NilPolicyID(t *testing.T) {
 	}
 }
 
-// TestApplyRotationPolicyForRole_LeaderAppliesUserPolicy is the regression
-// test for gastrolog-50n4b on the follower→leader transition. After a node
-// flips from follower to leader, its chunk manager carries
-// NeverRotatePolicy (set previously by the sweep); the dispatcher now
-// calls ApplyRotationPolicyForRole to switch it to the user-configured
-// policy immediately, instead of waiting up to 15 s for the next
-// rotationSweep tick.
-func TestApplyRotationPolicyForRole_LeaderAppliesUserPolicy(t *testing.T) {
-	t.Parallel()
-
-	vaultID := glid.New()
-	policyID := glid.New()
-	maxRecs := int64(50)
-
-	loader := &fakeSystemLoader{cfg: &system.Config{
-		Vaults: []system.VaultConfig{
-			{ID: vaultID, Name: "test", Type: system.VaultTypeMemory, RotationPolicyID: &policyID, Enabled: true},
-		},
-		RotationPolicies: []system.RotationPolicyConfig{
-			{ID: policyID, Name: "tight", MaxRecords: &maxRecs},
-		},
-	}}
-
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Build a leader vault instance whose chunk manager still has
-	// NeverRotatePolicy — simulating just after a follower→leader flip
-	// (IsFollower set to false but chunk manager not yet updated).
-	s := memtest.MustNewVault(t, chunkmem.Config{RotationPolicy: chunk.NeverRotatePolicy{}})
-	orch.RegisterVault(orchestrator.NewVaultFromComponents(vaultID, s.CM, s.IM, s.QE))
-
-	if err := orch.ApplyRotationPolicyForRole(context.Background(), vaultID); err != nil {
-		t.Fatalf("ApplyRotationPolicyForRole: %v", err)
-	}
-
-	// Append 51 records; the 51st must trigger rotation (state.Records+1 > maxRecs=50).
-	for i := 0; i < 51; i++ {
-		if _, _, err := s.CM.Append(chunk.Record{
-			IngestTS: time.Now(),
-			Attrs:    chunk.Attributes{},
-			Raw:      []byte("x"),
-		}); err != nil {
-			t.Fatalf("append %d: %v", i, err)
-		}
-	}
-	active := s.CM.Active()
-	if active == nil {
-		t.Fatal("expected active chunk")
-	}
-	if active.RecordCount != 1 {
-		t.Errorf("expected rotation after 51 appends with maxRecords=50; new chunk should have 1 record, got %d — user policy not applied",
-			active.RecordCount)
-	}
-}
-
-// TestApplyRotationPolicyForRole_FollowerStampsNeverRotate is the
-// regression test for gastrolog-50n4b on the leader→follower transition.
-// After a node flips from leader to follower, its chunk manager still
-// carries the user policy until the next sweep tick (~15 s). The
-// dispatcher now stamps NeverRotatePolicy immediately so the follower's
-// manager can't rotate independently during the gap.
-func TestApplyRotationPolicyForRole_FollowerStampsNeverRotate(t *testing.T) {
-	t.Parallel()
-
-	vaultID := glid.New()
-	policyID := glid.New()
-	maxRecs := int64(50)
-
-	loader := &fakeSystemLoader{cfg: &system.Config{
-		Vaults: []system.VaultConfig{
-			{ID: vaultID, Name: "test", Type: system.VaultTypeMemory, RotationPolicyID: &policyID, Enabled: true},
-		},
-		RotationPolicies: []system.RotationPolicyConfig{
-			{ID: policyID, Name: "tight", MaxRecords: &maxRecs},
-		},
-	}}
-
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Build a follower vault instance whose chunk manager still has the
-	// user policy — simulating just after a leader→follower flip.
-	s := memtest.MustNewVault(t, chunkmem.Config{RotationPolicy: recordCountPolicy(maxRecs)})
-	v := orchestrator.NewVaultFromComponents(vaultID, s.CM, s.IM, s.QE)
-	v.Instance.IsFollower = true
-	orch.RegisterVault(v)
-
-	if err := orch.ApplyRotationPolicyForRole(context.Background(), vaultID); err != nil {
-		t.Fatalf("ApplyRotationPolicyForRole: %v", err)
-	}
-
-	// Append 101 records; with NeverRotatePolicy, none should rotate.
-	for i := 0; i < 101; i++ {
-		if _, _, err := s.CM.Append(chunk.Record{
-			IngestTS: time.Now(),
-			Attrs:    chunk.Attributes{},
-			Raw:      []byte("x"),
-		}); err != nil {
-			t.Fatalf("append %d: %v", i, err)
-		}
-	}
-	active := s.CM.Active()
-	if active.RecordCount != 101 {
-		t.Errorf("expected single chunk with 101 records (NeverRotatePolicy in effect), got %d — follower chunk manager still rotating under user policy",
-			active.RecordCount)
-	}
-}
+// The per-CM role-based rotation regression tests (gastrolog-50n4b) were
+// removed in Rubicon E2 (gastrolog-358ak): the per-instance chunk manager no
+// longer performs active-chunk rotation under a user/never policy. Chunk
+// rotation is now governed by the pipeline chunking manifest policy
+// (resolveChunkPolicy / manifestRotationPolicy), and ApplyRotationPolicyForRole
+// is a retained no-op (see TestApplyRotationPolicyForRole_NoInstanceIsNoop).
 
 // TestApplyRotationPolicyForRole_NoInstanceIsNoop covers the warm-up case
 // where a vault is registered but its Instance is still nil — the call
@@ -1287,10 +974,7 @@ func TestApplyRotationPolicyForRole_NoInstanceIsNoop(t *testing.T) {
 		},
 	}}
 
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 	orch.RegisterVault(orchestrator.NewVault(vaultID, nil))
 
 	if err := orch.ApplyRotationPolicyForRole(context.Background(), vaultID); err != nil {

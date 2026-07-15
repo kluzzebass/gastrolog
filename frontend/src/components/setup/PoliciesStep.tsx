@@ -30,43 +30,6 @@ interface RetentionPolicyStepProps {
   retentionNamePlaceholder?: string;
 }
 
-/** Parse a human-friendly byte size like "3GB", "512MB", "100KB" to bytes. */
-export function parseBytesToBigInt(s: string): bigint {
-  const trimmed = s.trim();
-  if (!trimmed) return BigInt(0);
-  const match = /^(\d+)\s*(b|kb|mb|gb|tb)?$/i.exec(trimmed);
-  if (!match) return BigInt(0);
-  const num = BigInt(match[1]!);
-  switch ((match[2] ?? "b").toLowerCase()) {
-    case "b": return num;
-    case "kb": return num * BigInt(1024);
-    case "mb": return num * BigInt(1024 * 1024);
-    case "gb": return num * BigInt(1024 * 1024 * 1024);
-    case "tb": return num * BigInt(1024) * BigInt(1024 * 1024 * 1024);
-    default: return num;
-  }
-}
-
-/** Parse a human-friendly duration like "1h", "30m", "5m" to seconds. */
-export function parseDurationToSeconds(s: string): bigint {
-  const trimmed = s.trim();
-  if (!trimmed) return BigInt(0);
-  const match = /^(\d+)\s*([smhd])$/i.exec(trimmed);
-  if (!match) {
-    // Try parsing as raw seconds.
-    const n = parseInt(trimmed, 10);
-    return isNaN(n) ? BigInt(0) : BigInt(n);
-  }
-  const num = parseInt(match[1]!, 10);
-  switch (match[2]!.toLowerCase()) {
-    case "s": return BigInt(num);
-    case "m": return BigInt(num * 60);
-    case "h": return BigInt(num * 3600);
-    case "d": return BigInt(num * 86400);
-    default: return BigInt(num);
-  }
-}
-
 export function RotationPolicyStep({
   dark,
   rotation,

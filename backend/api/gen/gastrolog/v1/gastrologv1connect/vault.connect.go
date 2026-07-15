@@ -77,6 +77,9 @@ const (
 	// VaultServiceRepatriateOrphanProcedure is the fully-qualified name of the VaultService's
 	// RepatriateOrphan RPC.
 	VaultServiceRepatriateOrphanProcedure = "/gastrolog.v1.VaultService/RepatriateOrphan"
+	// VaultServiceGetPipelineBacklogProcedure is the fully-qualified name of the VaultService's
+	// GetPipelineBacklog RPC.
+	VaultServiceGetPipelineBacklogProcedure = "/gastrolog.v1.VaultService/GetPipelineBacklog"
 )
 
 // VaultServiceClient is a client for the gastrolog.v1.VaultService service.
@@ -118,7 +121,7 @@ type VaultServiceClient interface {
 	RestoreChunk(context.Context, *connect.Request[v1.RestoreChunkRequest]) (*connect.Response[v1.RestoreChunkResponse], error)
 	// WatchChunks opens a server-streaming subscription that pushes a
 	// notification every time chunk metadata changes on this node (seal,
-	// delete, create, compress, cloud upload). The client uses the
+	// delete, create, cloud upload). The client uses the
 	// notification as a signal to refetch via ListChunks — no chunk data
 	// is carried in the stream itself. Same pattern as WatchConfig.
 	// See gastrolog-1jijm.
@@ -131,6 +134,11 @@ type VaultServiceClient interface {
 	// proposes CmdRepatriateChunk to the vault-ctl FSM. Refuses if the
 	// chunk is already FSM-tracked or tombstoned. See gastrolog-32bf2.
 	RepatriateOrphan(context.Context, *connect.Request[v1.RepatriateOrphanRequest]) (*connect.Response[v1.RepatriateOrphanResponse], error)
+	// GetPipelineBacklog returns vault-ctl registry/manifest state plus
+	// cluster-wide on-disk segment counts (working, completed, head,
+	// pre-head) so operators can see chunking pipeline depth in the
+	// inspector without shell access.
+	GetPipelineBacklog(context.Context, *connect.Request[v1.GetPipelineBacklogRequest]) (*connect.Response[v1.GetPipelineBacklogResponse], error)
 }
 
 // NewVaultServiceClient constructs a client for the gastrolog.v1.VaultService service. By default,
@@ -246,6 +254,12 @@ func NewVaultServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(vaultServiceMethods.ByName("RepatriateOrphan")),
 			connect.WithClientOptions(opts...),
 		),
+		getPipelineBacklog: connect.NewClient[v1.GetPipelineBacklogRequest, v1.GetPipelineBacklogResponse](
+			httpClient,
+			baseURL+VaultServiceGetPipelineBacklogProcedure,
+			connect.WithSchema(vaultServiceMethods.ByName("GetPipelineBacklog")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -268,6 +282,7 @@ type vaultServiceClient struct {
 	restoreChunk          *connect.Client[v1.RestoreChunkRequest, v1.RestoreChunkResponse]
 	watchChunks           *connect.Client[v1.WatchChunksRequest, v1.WatchChunksResponse]
 	repatriateOrphan      *connect.Client[v1.RepatriateOrphanRequest, v1.RepatriateOrphanResponse]
+	getPipelineBacklog    *connect.Client[v1.GetPipelineBacklogRequest, v1.GetPipelineBacklogResponse]
 }
 
 // ListVaults calls gastrolog.v1.VaultService.ListVaults.
@@ -355,6 +370,11 @@ func (c *vaultServiceClient) RepatriateOrphan(ctx context.Context, req *connect.
 	return c.repatriateOrphan.CallUnary(ctx, req)
 }
 
+// GetPipelineBacklog calls gastrolog.v1.VaultService.GetPipelineBacklog.
+func (c *vaultServiceClient) GetPipelineBacklog(ctx context.Context, req *connect.Request[v1.GetPipelineBacklogRequest]) (*connect.Response[v1.GetPipelineBacklogResponse], error) {
+	return c.getPipelineBacklog.CallUnary(ctx, req)
+}
+
 // VaultServiceHandler is an implementation of the gastrolog.v1.VaultService service.
 type VaultServiceHandler interface {
 	// ListVaults returns all registered vaults.
@@ -394,7 +414,7 @@ type VaultServiceHandler interface {
 	RestoreChunk(context.Context, *connect.Request[v1.RestoreChunkRequest]) (*connect.Response[v1.RestoreChunkResponse], error)
 	// WatchChunks opens a server-streaming subscription that pushes a
 	// notification every time chunk metadata changes on this node (seal,
-	// delete, create, compress, cloud upload). The client uses the
+	// delete, create, cloud upload). The client uses the
 	// notification as a signal to refetch via ListChunks — no chunk data
 	// is carried in the stream itself. Same pattern as WatchConfig.
 	// See gastrolog-1jijm.
@@ -407,6 +427,11 @@ type VaultServiceHandler interface {
 	// proposes CmdRepatriateChunk to the vault-ctl FSM. Refuses if the
 	// chunk is already FSM-tracked or tombstoned. See gastrolog-32bf2.
 	RepatriateOrphan(context.Context, *connect.Request[v1.RepatriateOrphanRequest]) (*connect.Response[v1.RepatriateOrphanResponse], error)
+	// GetPipelineBacklog returns vault-ctl registry/manifest state plus
+	// cluster-wide on-disk segment counts (working, completed, head,
+	// pre-head) so operators can see chunking pipeline depth in the
+	// inspector without shell access.
+	GetPipelineBacklog(context.Context, *connect.Request[v1.GetPipelineBacklogRequest]) (*connect.Response[v1.GetPipelineBacklogResponse], error)
 }
 
 // NewVaultServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -518,6 +543,12 @@ func NewVaultServiceHandler(svc VaultServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(vaultServiceMethods.ByName("RepatriateOrphan")),
 		connect.WithHandlerOptions(opts...),
 	)
+	vaultServiceGetPipelineBacklogHandler := connect.NewUnaryHandler(
+		VaultServiceGetPipelineBacklogProcedure,
+		svc.GetPipelineBacklog,
+		connect.WithSchema(vaultServiceMethods.ByName("GetPipelineBacklog")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gastrolog.v1.VaultService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case VaultServiceListVaultsProcedure:
@@ -554,6 +585,8 @@ func NewVaultServiceHandler(svc VaultServiceHandler, opts ...connect.HandlerOpti
 			vaultServiceWatchChunksHandler.ServeHTTP(w, r)
 		case VaultServiceRepatriateOrphanProcedure:
 			vaultServiceRepatriateOrphanHandler.ServeHTTP(w, r)
+		case VaultServiceGetPipelineBacklogProcedure:
+			vaultServiceGetPipelineBacklogHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -629,4 +662,8 @@ func (UnimplementedVaultServiceHandler) WatchChunks(context.Context, *connect.Re
 
 func (UnimplementedVaultServiceHandler) RepatriateOrphan(context.Context, *connect.Request[v1.RepatriateOrphanRequest]) (*connect.Response[v1.RepatriateOrphanResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.VaultService.RepatriateOrphan is not implemented"))
+}
+
+func (UnimplementedVaultServiceHandler) GetPipelineBacklog(context.Context, *connect.Request[v1.GetPipelineBacklogRequest]) (*connect.Response[v1.GetPipelineBacklogResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.VaultService.GetPipelineBacklog is not implemented"))
 }

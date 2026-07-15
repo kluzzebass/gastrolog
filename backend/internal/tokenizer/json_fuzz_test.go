@@ -16,13 +16,13 @@ func FuzzExtractJSON(f *testing.F) {
 	f.Add([]byte(`{"mixed":[1,"two",true,null,{"k":"v"}]}`))
 	f.Add([]byte(`  { "spaced" : "value" }  `))
 	f.Add([]byte(`{"":"empty_key"}`)) // JSON allows empty string keys
-	f.Add([]byte(`{"k":""}`))        // empty value — filtered by ExtractJSON
+	f.Add([]byte(`{"k":""}`))         // empty value — filtered by ExtractJSON
 	f.Add([]byte(`{"dup":"a","dup":"b"}`))
 	f.Add([]byte(`{"float":3.14159265358979323846}`))
 	f.Add([]byte(`{"big":99999999999999999}`))
 	f.Add([]byte(`{"escape":"hello\nworld"}`))
 	f.Add([]byte(`{"unicode":"\u0041\u0042"}`))
-	f.Add([]byte("[1,2,3]")) // array, not object
+	f.Add([]byte("[1,2,3]"))                              // array, not object
 	f.Add([]byte(`{"a":{"b":{"c":{"d":{"e":"deep"}}}}}`)) // exceeds maxJSONDepth
 
 	f.Fuzz(func(t *testing.T, data []byte) {

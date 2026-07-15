@@ -184,6 +184,9 @@ func TestMultipleGroupsIsolated(t *testing.T) {
 }
 
 func TestConcurrentGroups(t *testing.T) {
+	if testing.Short() {
+		t.Skip("concurrency stress across 10 groups x 100 logs; -short skips")
+	}
 	t.Parallel()
 	dir := t.TempDir()
 	w, err := Open(dir)
@@ -316,6 +319,9 @@ func TestCrashRecoveryBadCRC(t *testing.T) {
 }
 
 func TestConcurrentStoreLogsStress(t *testing.T) {
+	if testing.Short() {
+		t.Skip("concurrency stress across 20 groups x 500 logs; -short skips")
+	}
 	t.Parallel()
 	dir := t.TempDir()
 	w, err := Open(dir)
@@ -903,6 +909,9 @@ func TestGroupStoreGetLogDoesNotReturnInternalReference(t *testing.T) {
 // --- Segment rotation ---
 
 func TestSegmentRotation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("writes ~70MB (1100x64KB) to trigger segment rotation; -short skips")
+	}
 	t.Parallel()
 	dir := t.TempDir()
 	w, err := Open(dir)
@@ -945,6 +954,9 @@ func TestSegmentRotation(t *testing.T) {
 // --- Multiple reopen cycles ---
 
 func TestMultipleReopenCycles(t *testing.T) {
+	if testing.Short() {
+		t.Skip("5 open/close restart-survival cycles; -short skips")
+	}
 	t.Parallel()
 	dir := t.TempDir()
 
@@ -984,7 +996,59 @@ func TestMultipleReopenCycles(t *testing.T) {
 
 // --- Concurrent read/write ---
 
+// TestReadsNotBlockedDuringFsync verifies GetLog does not wait on segment fsync.
+// Before the stateMu/fsync split, batchWriter held the exclusive lock through
+// syncActiveSegment and blocked all readers for the full fsync duration.
+func TestReadsNotBlockedDuringFsync(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	const fsyncDelay = 200 * time.Millisecond
+	cfg := Config{
+		SyncBatchWindow: 1 * time.Millisecond,
+		SegmentSync: func(*os.File) error {
+			time.Sleep(fsyncDelay)
+			return nil
+		},
+	}
+	w, err := Open(dir, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+
+	gs := w.GroupStore("vault-1")
+	if err := gs.StoreLog(&hraft.Log{Index: 1, Term: 1, Data: []byte("seed")}); err != nil {
+		t.Fatal(err)
+	}
+
+	writeStarted := make(chan struct{})
+	go func() {
+		close(writeStarted)
+		_ = gs.StoreLog(&hraft.Log{Index: 2, Term: 1, Data: []byte("slow-fsync")})
+	}()
+
+	<-writeStarted
+	time.Sleep(10 * time.Millisecond) // let batchWriter reach fsync
+
+	const readBudget = 50 * time.Millisecond
+	start := time.Now()
+	var log hraft.Log
+	if err := gs.GetLog(1, &log); err != nil {
+		t.Fatalf("GetLog during fsync: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > readBudget {
+		t.Fatalf("GetLog blocked %v during fsync, want <%v", elapsed, readBudget)
+	}
+	if string(log.Data) != "seed" {
+		t.Fatalf("GetLog data=%q want seed", log.Data)
+	}
+}
+
 func TestConcurrentReadWrite(t *testing.T) {
+	if testing.Short() {
+		t.Skip("sustained concurrent reader/writer/stable-writer stress window; -short skips")
+	}
 	t.Parallel()
 	dir := t.TempDir()
 	w, err := Open(dir)
@@ -1012,7 +1076,10 @@ func TestConcurrentReadWrite(t *testing.T) {
 		}
 	}
 
-	// Writer: keeps appending.
+	// Writer: keeps appending. Signals its first append so the timed window
+	// cannot start before this goroutine has run (the LastIndex > 100
+	// assertion below false-fails if scheduling starves it).
+	logWritten := make(chan struct{})
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -1025,6 +1092,9 @@ func TestConcurrentReadWrite(t *testing.T) {
 			if err := gs.StoreLog(&hraft.Log{Index: i, Term: 1, Data: []byte("new")}); err != nil {
 				recordErr(err)
 				return
+			}
+			if i == 101 {
+				close(logWritten)
 			}
 		}
 	}()
@@ -1055,11 +1125,16 @@ func TestConcurrentReadWrite(t *testing.T) {
 		}
 	}()
 
-	// Stable writer.
+	// Stable writer. Starts at 1 (a single write of 0 would be
+	// indistinguishable from no write in the final assertion) and signals
+	// its first write so the timed window below cannot start before the
+	// goroutine has been scheduled — full-suite load starved it past the
+	// whole window and false-failed the "written at least once" check.
+	counterWritten := make(chan struct{})
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		for i := uint64(0); ; i++ {
+		for i := uint64(1); ; i++ {
 			select {
 			case <-done:
 				return
@@ -1069,8 +1144,23 @@ func TestConcurrentReadWrite(t *testing.T) {
 				recordErr(err)
 				return
 			}
+			if i == 1 {
+				close(counterWritten)
+			}
 		}
 	}()
+
+	for name, ch := range map[string]chan struct{}{"stable writer": counterWritten, "log writer": logWritten} {
+		select {
+		case <-ch:
+		case <-time.After(30 * time.Second):
+			close(done)
+			wg.Wait()
+			errMu.Lock()
+			defer errMu.Unlock()
+			t.Fatalf("%s never completed a write; goroutine errors: %v", name, goroutineErrs)
+		}
+	}
 
 	// Run for 200ms then stop.
 	time.Sleep(200 * time.Millisecond)

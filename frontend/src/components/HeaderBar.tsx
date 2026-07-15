@@ -31,6 +31,15 @@ function sortNodesByName(nodes: readonly ClusterNode[]) {
   );
 }
 
+/** Per-node disk usage from NodeStats.storageBytes, with vault sum fallback for older peers. */
+function nodeStorageBytes(node: ClusterNode): number {
+  const direct = Number(node.stats?.storageBytes ?? 0);
+  if (direct > 0) return direct;
+  let bytes = 0;
+  for (const v of node.stats?.vaults ?? []) bytes += Number(v.dataBytes);
+  return bytes;
+}
+
 function sumClusterStats(nodes: readonly ClusterNode[]) {
   let totalCpu = 0;
   let totalMemory = 0;
@@ -39,10 +48,8 @@ function sumClusterStats(nodes: readonly ClusterNode[]) {
     const s = node.stats;
     if (!s) continue;
     totalCpu += s.cpuPercent;
-    totalMemory += Number(s.memoryRss);
-    for (const v of s.vaults) {
-      totalStorage += Number(v.dataBytes);
-    }
+    totalMemory += Number(s.memoryInuse);
+    totalStorage += nodeStorageBytes(node);
   }
   return { totalCpu, totalMemory, totalStorage };
 }
@@ -157,7 +164,7 @@ export function HeaderBar({
             value={loading ? "..." : formatBytes(totalMemory)}
             dark={dark}
             nodes={nodes}
-            renderNodeValue={(n) => formatBytes(Number(n.stats?.memoryRss ?? 0))}
+            renderNodeValue={(n) => formatBytes(Number(n.stats?.memoryInuse ?? 0))}
           />
           <span className={`text-xs ${c("text-ink-border", "text-light-border")}`}>|</span>
           <HoverStat
@@ -165,11 +172,7 @@ export function HeaderBar({
             value={loading ? "..." : formatBytes(totalStorage)}
             dark={dark}
             nodes={nodes}
-            renderNodeValue={(n) => {
-              let bytes = 0;
-              for (const v of n.stats?.vaults ?? []) bytes += Number(v.dataBytes);
-              return formatBytes(bytes);
-            }}
+            renderNodeValue={(n) => formatBytes(nodeStorageBytes(n))}
           />
         </div>
 

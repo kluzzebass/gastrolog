@@ -19,10 +19,11 @@ import (
 // from an explicit signal rather than from mTLS.
 const NodeIDMetadataKey = "x-gastrolog-node-id"
 
-// PeerByteMetrics tracks cumulative gRPC wire bytes sent to and received
-// from each cluster peer. Aggregates traffic across ALL inter-node RPCs —
-// Raft, broadcast, vault replication, query forwarding, chunk streaming,
-// and anything else that goes through the cluster transport.
+// PeerByteMetrics tracks cumulative per-peer gRPC wire bytes on the cluster
+// port. Inbound RPCs are attributed via the server stats handler and
+// x-gastrolog-node-id metadata. Outbound bytes are mirrored from
+// PeerConnManager (service and raft lanes) when ByteMetrics is wired on the
+// manager config.
 //
 // Counters are monotonic and reset only on process restart. Rate derivation
 // is left to consumers (UI delta between broadcast ticks, or an external
@@ -122,6 +123,40 @@ func (m *PeerByteMetrics) Snapshot() []PeerByteCounter {
 	m.mu.Unlock()
 	sort.Slice(out, func(i, j int) bool { return out[i].Peer < out[j].Peer })
 	return out
+}
+
+func newManagedConnStatsHandler(mc *managedConn, agg *PeerByteMetrics) *managedConnStatsHandler {
+	return &managedConnStatsHandler{mc: mc, agg: agg, peer: mc.spec.PeerNodeID}
+}
+
+type managedConnStatsHandler struct {
+	mc   *managedConn
+	agg  *PeerByteMetrics // optional cluster-wide per-peer aggregate
+	peer string
+}
+
+func (h *managedConnStatsHandler) TagConn(ctx context.Context, _ *stats.ConnTagInfo) context.Context {
+	return ctx
+}
+func (*managedConnStatsHandler) HandleConn(context.Context, stats.ConnStats) {}
+
+func (h *managedConnStatsHandler) TagRPC(ctx context.Context, _ *stats.RPCTagInfo) context.Context {
+	return ctx
+}
+
+func (h *managedConnStatsHandler) HandleRPC(_ context.Context, rs stats.RPCStats) {
+	switch s := rs.(type) {
+	case *stats.OutPayload:
+		h.mc.bytesSent.Add(int64(s.WireLength))
+		if h.agg != nil {
+			h.agg.TrackSent(h.peer, s.WireLength)
+		}
+	case *stats.InPayload:
+		h.mc.bytesRecv.Add(int64(s.WireLength))
+		if h.agg != nil {
+			h.agg.TrackReceived(h.peer, s.WireLength)
+		}
+	}
 }
 
 // clientStatsHandler is a grpc/stats.Handler installed on each outbound

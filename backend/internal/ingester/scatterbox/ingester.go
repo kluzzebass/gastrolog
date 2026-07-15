@@ -7,7 +7,8 @@
 // are all detectable from the record body alone.
 //
 // Modes:
-//   - Continuous (interval > 0): emits burst records every interval
+//   - Continuous (interval > 0): emits burst records on wall-clock-aligned
+//     boundaries (epoch-anchored), so multi-node clusters fire in phase
 //   - One-shot (interval = 0): waits for Trigger() calls, emits burst records each time
 package scatterbox
 
@@ -46,7 +47,7 @@ func (s *Ingester) SetPressureGate(gate *chanwatch.PressureGate) {
 }
 
 // Run emits records until ctx is cancelled.
-// In continuous mode (interval > 0), emits on a timer.
+// In continuous mode (interval > 0), emits on aligned wall-clock boundaries.
 // In one-shot mode (interval = 0), waits for Trigger() calls.
 func (s *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
 	if s.interval == 0 {
@@ -56,24 +57,16 @@ func (s *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessag
 }
 
 func (s *Ingester) runContinuous(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
-	// Ticker, not Timer+Reset: keeps cadence on wall-clock phase regardless
-	// of emitBurst duration or pressure-gate waits. A Timer+Reset pattern
-	// drifts by `emitBurst_duration + gate_wait` every cycle, which makes
-	// the "deterministic test signal" not actually deterministic. Missed
-	// ticks coalesce (Ticker.C is a 1-slot channel), so long stalls don't
-	// produce a thundering-herd catch-up.
-	ticker := time.NewTicker(s.interval)
-	defer ticker.Stop()
-
 	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-ticker.C:
-		case <-s.trigger:
+		scheduled, triggered, err := waitForEmission(ctx, s.interval, s.trigger)
+		if err != nil {
+			return err
 		}
-
-		s.emitBurst(ctx, out)
+		at := scheduled
+		if triggered {
+			at = time.Time{}
+		}
+		s.emitBurst(ctx, out, at)
 	}
 }
 
@@ -83,12 +76,12 @@ func (s *Ingester) runOneShot(ctx context.Context, out chan<- orchestrator.Inges
 		case <-ctx.Done():
 			return nil
 		case <-s.trigger:
-			s.emitBurst(ctx, out)
+			s.emitBurst(ctx, out, time.Time{})
 		}
 	}
 }
 
-func (s *Ingester) emitBurst(ctx context.Context, out chan<- orchestrator.IngestMessage) {
+func (s *Ingester) emitBurst(ctx context.Context, out chan<- orchestrator.IngestMessage, at time.Time) {
 	// Backpressure: pause before emitting if the pipeline is elevated/critical.
 	// Returns silently on ctx cancel so the caller's loop can exit.
 	if s.pressureGate != nil {
@@ -97,7 +90,7 @@ func (s *Ingester) emitBurst(ctx context.Context, out chan<- orchestrator.Ingest
 		}
 	}
 	for range s.burst {
-		msg := s.generate()
+		msg := s.generate(at)
 		select {
 		case out <- msg:
 		case <-ctx.Done():
@@ -124,9 +117,12 @@ func (s *Ingester) Trigger() {
 // field is the only thing that tells records from different nodes apart
 // (seq is per-instance-monotonic but per-node, so two nodes will produce
 // overlapping seq ranges).
-func (s *Ingester) generate() orchestrator.IngestMessage {
+func (s *Ingester) generate(at time.Time) orchestrator.IngestMessage {
 	seq := s.seq.Add(1)
-	now := time.Now()
+	now := at
+	if now.IsZero() {
+		now = time.Now()
+	}
 
 	body := fmt.Sprintf(
 		`{"seq":%d,"generated_at":"%s","ingester":"%s","node":"%s"}`,
@@ -142,7 +138,8 @@ func (s *Ingester) generate() orchestrator.IngestMessage {
 			"seq":           strconv.FormatUint(seq, 10),
 			"node":          s.node,
 		},
-		Raw: []byte(body),
+		Raw:      []byte(body),
+		RawOwned: true,
 		// Scatterbox synthesizes its own logs, so SourceTS and IngestTS
 		// coincide — there's no upstream timestamp to preserve. Setting
 		// SourceTS matches chatterbox's behavior and keeps pipeline

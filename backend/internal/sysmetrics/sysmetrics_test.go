@@ -2,6 +2,7 @@ package sysmetrics
 
 import (
 	"math"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -176,5 +177,36 @@ func TestCPUPercentPackageLevel(t *testing.T) {
 	pct := CPUPercent()
 	if pct < 0 {
 		t.Errorf("CPUPercent should be non-negative, got %.2f", pct)
+	}
+}
+
+// Memory sources from runtime/metrics (never ReadMemStats — its
+// stop-the-world stalls Raft heartbeats, gastrolog-5kcq5q). A mistyped
+// metric name yields KindBad and silently reads zero, so pin that every
+// mapped field is populated on a live runtime.
+func TestMemoryFieldsPopulated(t *testing.T) {
+	// Force at least one GC cycle so NumGC and released/free classes exist.
+	runtime.GC()
+	m := Memory()
+	if m.HeapAlloc <= 0 {
+		t.Errorf("HeapAlloc = %d, want > 0", m.HeapAlloc)
+	}
+	if m.HeapInuse < m.HeapAlloc {
+		t.Errorf("HeapInuse (%d) < HeapAlloc (%d) — unused-class mapping broken", m.HeapInuse, m.HeapAlloc)
+	}
+	if m.Sys <= 0 || m.Sys < m.HeapInuse {
+		t.Errorf("Sys = %d (HeapInuse %d) — total-class mapping broken", m.Sys, m.HeapInuse)
+	}
+	if m.StackInuse <= 0 {
+		t.Errorf("StackInuse = %d, want > 0", m.StackInuse)
+	}
+	if m.HeapObjects == 0 {
+		t.Error("HeapObjects = 0 — objects mapping broken")
+	}
+	if m.NumGC == 0 {
+		t.Error("NumGC = 0 after runtime.GC() — gc-cycles mapping broken")
+	}
+	if m.Inuse != m.HeapInuse+m.StackInuse {
+		t.Errorf("Inuse (%d) != HeapInuse+StackInuse (%d)", m.Inuse, m.HeapInuse+m.StackInuse)
 	}
 }

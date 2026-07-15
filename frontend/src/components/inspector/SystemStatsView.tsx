@@ -4,11 +4,14 @@ import { useThemeClass } from "../../hooks/useThemeClass";
 import type { ClusterNode } from "../../api/gen/gastrolog/v1/lifecycle_pb";
 // eslint-disable-next-line no-restricted-imports -- NodeStats is a passthrough type from Node.stats; no model wrap planned
 import type { NodeStats } from "../../api/gen/gastrolog/v1/cluster_pb";
-import { formatBytes } from "../../utils/units";
+import { formatBytes, formatRate } from "../../utils/units";
+import { Spark } from "../Spark";
+// eslint-disable-next-line no-restricted-imports -- ThroughputRate is a passthrough stats type; no model wrap planned
+import type { ThroughputRate } from "../../api/gen/gastrolog/v1/vault_pb";
 
 /**
  * System stats view for a single node, using gossip-broadcast NodeStats.
- * Used identically for local and remote nodes — no special-casing.
+ * Used identically for the local node and peers — no special-casing.
  */
 interface SystemStatsViewProps {
   nodeStats: NodeStats | null;
@@ -93,15 +96,34 @@ function CompactView({
         </section>
       )}
 
-      {/* Forwarding stats */}
-      <section>
-        <CompactDivider dark={dark} />
-        <CompactSectionLabel label="Forwarding" dark={dark} />
-        <div className="grid grid-cols-2 gap-x-6 gap-y-1">
-          <CompactStatRow label="Sent" value={Number(stats.forwardedSent).toLocaleString()} mono dark={dark} />
-          <CompactStatRow label="Received" value={Number(stats.forwardedReceived).toLocaleString()} mono dark={dark} />
-        </div>
-      </section>
+      {/* Pipeline throughput: rolling-window rates from the stats broadcast
+          (gastrolog-4eh5ns). Section appears once the node has routing
+          activity or a local segmentation writer. */}
+      {(Number(stats.routeStatsRouted) > 0 || stats.vaults.some((v) => v.appendQueueCapacity > 0)) && (
+        <section>
+          <CompactDivider dark={dark} />
+          <CompactSectionLabel label="Throughput" dark={dark} />
+          <div className="grid grid-cols-2 gap-x-6 gap-y-1">
+            <CompactRateRow label="Routed" rate={stats.routeRouted} dark={dark} />
+            <CompactRateRow label="Matched" rate={stats.routeMatched} dark={dark} />
+          </div>
+          {stats.vaults.filter((v) => v.appendQueueCapacity > 0).map((v) => (
+            <div key={encode(v.id)} className="grid grid-cols-2 gap-x-6 gap-y-1 mt-1">
+              <CompactRateRow
+                label={v.name || encode(v.id).slice(0, 8)}
+                rate={v.appendRecords}
+                dark={dark}
+              />
+              <CompactStatRow
+                label="Queue"
+                value={`${v.appendQueueDepth} / ${v.appendQueueCapacity}`}
+                mono
+                dark={dark}
+              />
+            </div>
+          ))}
+        </section>
+      )}
 
       {/* Raft stats */}
       {stats.raftState && (
@@ -116,6 +138,38 @@ function CompactView({
             <CompactStatRow label="FSM Pending" value={stats.raftFsmPending.toString()} mono dark={dark} />
             <CompactStatRow label="Last Contact" value={stats.raftLastContact || "never"} dark={dark} />
           </div>
+          {/* Raft liveness (gastrolog-1io54g): WAL append health and election
+              churn across every group on this node. Elections/min above ~3
+              sustained is a storm; WAL max latency near 1s means bulk I/O is
+              starving consensus. */}
+          {stats.raftWalAppendsTotal > 0 && (
+            <div className="grid grid-cols-2 gap-x-6 gap-y-1 mt-1">
+              <CompactStatRow
+                label="WAL Append"
+                value={`avg ${stats.raftWalAppendAvgMs.toFixed(1)}ms · max ${stats.raftWalAppendMaxMs.toFixed(0)}ms`}
+                mono
+                dark={dark}
+              />
+              <CompactStatRow
+                label="Elections"
+                value={`${stats.raftElectionsTotal.toString()} (${stats.raftElectionsPerMin.toFixed(1)}/min)`}
+                mono
+                dark={dark}
+              />
+              <CompactStatRow
+                label="Leader Losses"
+                value={stats.raftLeaderLossesTotal.toString()}
+                mono
+                dark={dark}
+              />
+              <CompactStatRow
+                label="Failed HBs"
+                value={stats.raftFailedHeartbeatsTotal.toString()}
+                mono
+                dark={dark}
+              />
+            </div>
+          )}
         </section>
       )}
 
@@ -124,6 +178,35 @@ function CompactView({
 }
 
 // ---- Compact view building blocks ----
+
+// CompactRateRow renders one throughput series: instant rate, sparkline of
+// the server-side per-tick history, and ~30s/~1m trailing averages on hover.
+function CompactRateRow({
+  label,
+  rate,
+  dark,
+}: Readonly<{ label: string; rate?: ThroughputRate; dark: boolean }>) {
+  const c = useThemeClass(dark);
+  const instant = rate?.instantPerSec ?? 0;
+  return (
+    <div
+      className="flex items-baseline justify-between gap-4"
+      title={`1m ${formatRate(rate?.avg1mPerSec ?? 0)}/s · 5m ${formatRate(rate?.avg5mPerSec ?? 0)}/s · 15m ${formatRate(rate?.avg15mPerSec ?? 0)}/s (EWMA)`}
+    >
+      <span
+        className={`text-[0.75em] font-medium uppercase tracking-wider shrink-0 ${c("text-text-muted", "text-light-text-muted")}`}
+      >
+        {label}
+      </span>
+      <span className={`flex items-center gap-2 text-[0.8em] font-mono ${c("text-text-muted", "text-light-text-muted")}`}>
+        <span className={c("text-copper/70", "text-copper/60")}>
+          <Spark values={rate?.spark ?? []} width={40} height={12} />
+        </span>
+        {formatRate(instant)}/s
+      </span>
+    </div>
+  );
+}
 
 function CompactStatRow({
   label,
@@ -205,6 +288,10 @@ export function ClusterSummaryView({
   let totalGoroutines = 0;
   let totalQueueDepth = 0;
   let totalQueueCapacity = 0;
+  let totalRoutedRate = 0;
+  let totalMatchedRate = 0;
+  let totalAppendRate = 0;
+  let totalAppendBytesRate = 0;
   let leaderName = "";
 
   for (const node of nodes) {
@@ -217,11 +304,15 @@ export function ClusterSummaryView({
     totalGoroutines += s.goroutines;
     totalQueueDepth += s.ingestQueueDepth;
     totalQueueCapacity += s.ingestQueueCapacity;
+    totalRoutedRate += s.routeRouted?.instantPerSec ?? 0;
+    totalMatchedRate += s.routeMatched?.instantPerSec ?? 0;
     for (const v of s.vaults) {
       totalVaults++;
       totalRecords += Number(v.recordCount);
       totalBytes += Number(v.dataBytes);
       totalChunks += Number(v.chunkCount);
+      totalAppendRate += v.appendRecords?.instantPerSec ?? 0;
+      totalAppendBytesRate += v.appendBytes?.instantPerSec ?? 0;
     }
   }
 
@@ -237,6 +328,18 @@ export function ClusterSummaryView({
           <CompactStatRow label="Records" value={totalRecords.toLocaleString()} mono dark={dark} />
           <CompactStatRow label="Data" value={formatBytes(totalBytes)} mono dark={dark} />
           <CompactStatRow label="Chunks" value={totalChunks.toLocaleString()} mono dark={dark} />
+        </div>
+      </section>
+
+      {/* Cluster throughput: summed rolling-window rates (gastrolog-4eh5ns) */}
+      <CompactDivider dark={dark} />
+      <section>
+        <CompactSectionLabel label="Throughput" dark={dark} />
+        <div className="grid grid-cols-2 gap-x-6 gap-y-1">
+          <CompactStatRow label="Routed" value={`${formatRate(totalRoutedRate)}/s`} mono dark={dark} />
+          <CompactStatRow label="Matched" value={`${formatRate(totalMatchedRate)}/s`} mono dark={dark} />
+          <CompactStatRow label="Appended" value={`${formatRate(totalAppendRate)}/s`} mono dark={dark} />
+          <CompactStatRow label="Append data" value={`${formatBytes(totalAppendBytesRate)}/s`} mono dark={dark} />
         </div>
       </section>
 
@@ -272,3 +375,4 @@ export function ClusterSummaryView({
     </div>
   );
 }
+

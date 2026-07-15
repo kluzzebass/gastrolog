@@ -29,17 +29,17 @@ func TestChunkBadges(t *testing.T) {
 			// sealed chunks are GLCB and GLCB is zstd-compressed by
 			// construction, so the flag carried no information.
 			name:   "sealed (GLCB is implicitly compressed)",
-			chunk:  &v1.ChunkMeta{Sealed: true, Compressed: true},
+			chunk:  &v1.ChunkMeta{Sealed: true},
 			expect: "sealed",
 		},
 		{
 			name:   "sealed cloud",
-			chunk:  &v1.ChunkMeta{Sealed: true, Compressed: true, CloudBacked: true},
+			chunk:  &v1.ChunkMeta{Sealed: true, CloudBacked: true},
 			expect: "sealed cloud",
 		},
 		{
 			name:   "full cloud archived",
-			chunk:  &v1.ChunkMeta{Sealed: true, Compressed: true, CloudBacked: true, Archived: true},
+			chunk:  &v1.ChunkMeta{Sealed: true, CloudBacked: true, Archived: true},
 			expect: "sealed cloud archived",
 		},
 		{

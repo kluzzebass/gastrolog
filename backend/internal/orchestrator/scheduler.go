@@ -322,7 +322,7 @@ func (s *Scheduler) AddJob(name, cronExpr string, taskFn any, args ...any) error
 	}
 
 	j, err := s.scheduler.NewJob(
-		gocron.CronJob(cronExpr, true),
+		gocron.CronJob(NormalizeCronSchedule(cronExpr), true),
 		gocron.NewTask(taskFn, args...),
 		gocron.WithName(name),
 		gocron.WithSingletonMode(gocron.LimitModeReschedule),
@@ -332,8 +332,8 @@ func (s *Scheduler) AddJob(name, cronExpr string, taskFn any, args ...any) error
 	}
 
 	s.jobs[name] = j
-	s.schedules[name] = cronExpr
-	s.cronEntries[name] = cronEntry{name: name, cron: cronExpr, taskFn: taskFn, args: args}
+	s.schedules[name] = NormalizeCronSchedule(cronExpr)
+	s.cronEntries[name] = cronEntry{name: name, cron: NormalizeCronSchedule(cronExpr), taskFn: taskFn, args: args}
 	s.logger.Info("scheduled job added", "name", name, "cron", cronExpr)
 	return nil
 }

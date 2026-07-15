@@ -196,7 +196,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
           </FormField>
           <FormField
             label="Match expression"
-            description='Filter expression evaluated against each record. "*" matches everything. The lean editor with autocomplete and live validation lands later in this epic.'
+            description='Match expression evaluated against each record. "*" matches everything. The lean editor with autocomplete and live validation lands later in this epic.'
             dark={dark}
           >
             <TextInput
@@ -291,7 +291,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
               </FormField>
               <FormField
                 label="Match expression"
-                description='Filter expression evaluated against each record. "*" matches everything. The lean editor with autocomplete and live validation lands later in this epic.'
+                description='Match expression evaluated against each record. "*" matches everything. The lean editor with autocomplete and live validation lands later in this epic.'
                 dark={dark}
               >
                 <TextInput

@@ -1,7 +1,6 @@
 package orchestrator
 
 import (
-	"bytes"
 	"fmt"
 	"gastrolog/internal/glid"
 	"slices"
@@ -19,17 +18,9 @@ func (o *Orchestrator) RegisterVault(vault *Vault) {
 	o.vaults[vault.ID] = vault
 }
 
-// RegisterDigester appends a digester to the processing pipeline.
-// Digesters run in registration order on each message before storage.
-// Must be called before Start().
-func (o *Orchestrator) RegisterDigester(d Digester) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	o.digesters = append(o.digesters, d)
-}
-
-// RegisterIngester adds an ingester to the registry.
-// Must be called before Start().
+// RegisterIngester adds an ingester to the registry. When the orchestrator is
+// already running the ingester is reconciled into the pipeline immediately;
+// otherwise it starts when Start runs.
 func (o *Orchestrator) RegisterIngester(id glid.GLID, name, ingType string, r Ingester) {
 	o.registerIngester(id, name, ingType, false, r)
 }
@@ -37,31 +28,28 @@ func (o *Orchestrator) RegisterIngester(id glid.GLID, name, ingType string, r In
 func (o *Orchestrator) registerIngester(id glid.GLID, name, ingType string, passive bool, r Ingester) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.ingesters[id] = r
-	o.ingesterMeta[id] = ingesterInfo{Name: name, Type: ingType, Passive: passive}
-	if o.ingesterStats[id] == nil {
-		o.ingesterStats[id] = &IngesterStats{}
+	o.setIngesterLocked(id, ingesterInfo{Name: name, Type: ingType, Passive: passive}, r)
+	if o.running.Load() {
+		if err := o.pushIngestersToSupervisorLocked(); err != nil {
+			o.logger.Error("reconcile ingesters after register", "id", id, "error", err)
+		}
 	}
 }
 
-// SetRouteSet installs the routing table directly. Tests use this to
-// bypass config-driven reload; production wires it through ReloadFilters.
-// gastrolog-4kkoo (Phase 5): replaces the Phase-4 SetFilterSet — the
-// hot path now walks routes in priority order with first-match-wins
-// semantics instead of fanning out across per-vault filters.
-func (o *Orchestrator) SetRouteSet(rs *RouteSet) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	o.routeSet = rs
-}
-
-// UnregisterIngester removes a ingester from the registry.
-// Must be called before Start() or after Stop().
+// UnregisterIngester removes an ingester from the registry. When the
+// orchestrator is running the ingester is stopped via a reconcile into the
+// pipeline; otherwise it simply leaves the desired set.
 func (o *Orchestrator) UnregisterIngester(id glid.GLID) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	delete(o.ingesters, id)
 	delete(o.ingesterMeta, id)
+	delete(o.ingesterAdapters, id)
+	if o.running.Load() {
+		if err := o.pushIngestersToSupervisorLocked(); err != nil {
+			o.logger.Error("reconcile ingesters after unregister", "id", id, "error", err)
+		}
+	}
 }
 
 // ChunkManager implements manifest.VaultRegistry: returns the vault's
@@ -119,7 +107,7 @@ func (o *Orchestrator) ListVaults() []glid.GLID {
 	for k := range o.vaults {
 		keys = append(keys, k)
 	}
-	slices.SortFunc(keys, func(a, b glid.GLID) int { return bytes.Compare(a[:], b[:]) })
+	slices.SortFunc(keys, glid.Compare)
 	return keys
 }
 
@@ -167,7 +155,7 @@ func (o *Orchestrator) ListIngesters() []glid.GLID {
 	for k := range o.ingesters {
 		keys = append(keys, k)
 	}
-	slices.SortFunc(keys, func(a, b glid.GLID) int { return bytes.Compare(a[:], b[:]) })
+	slices.SortFunc(keys, glid.Compare)
 	return keys
 }
 
@@ -209,7 +197,7 @@ func (r *searchReadyRegistry) ListVaults() []glid.GLID {
 		}
 		keys = append(keys, k)
 	}
-	slices.SortFunc(keys, func(a, b glid.GLID) int { return bytes.Compare(a[:], b[:]) })
+	slices.SortFunc(keys, glid.Compare)
 	return keys
 }
 
@@ -234,6 +222,18 @@ func (r *searchReadyRegistry) IndexManager(key glid.GLID) index.IndexManager {
 }
 
 func (r *searchReadyRegistry) Reader() manifest.Reader { return r.o.ManifestReader() }
+
+func (r *searchReadyRegistry) SearchChunkMetas(vaultID glid.GLID) []chunk.ChunkMeta {
+	return r.o.SearchChunkMetasForVault(vaultID)
+}
+
+func (r *searchReadyRegistry) OpenPipelineChunkCursor(vaultID glid.GLID, chunkID chunk.ChunkID) (chunk.RecordCursor, error) {
+	return r.o.OpenPipelineChunkCursor(vaultID, chunkID)
+}
+
+func (r *searchReadyRegistry) ScanPipelineChunkIngestTS(vaultID glid.GLID, chunkID chunk.ChunkID, cb func(tsNanos int64) bool) error {
+	return r.o.ScanPipelineChunkIngestTS(vaultID, chunkID, cb)
+}
 
 func (r *searchReadyRegistry) IndexReader() manifest.IndexReader { return r.o.IndexReader() }
 
@@ -316,6 +316,18 @@ func (r *localVaultRegistry) QueryEngine(_ glid.GLID) *query.Engine { return nil
 
 func (r *localVaultRegistry) Reader() manifest.Reader { return r.o.ManifestReader() }
 
+func (r *localVaultRegistry) SearchChunkMetas(vaultID glid.GLID) []chunk.ChunkMeta {
+	return r.o.SearchChunkMetasForVault(vaultID)
+}
+
+func (r *localVaultRegistry) OpenPipelineChunkCursor(vaultID glid.GLID, chunkID chunk.ChunkID) (chunk.RecordCursor, error) {
+	return r.o.OpenPipelineChunkCursor(vaultID, chunkID)
+}
+
+func (r *localVaultRegistry) ScanPipelineChunkIngestTS(vaultID glid.GLID, chunkID chunk.ChunkID, cb func(tsNanos int64) bool) error {
+	return r.o.ScanPipelineChunkIngestTS(vaultID, chunkID, cb)
+}
+
 func (r *localVaultRegistry) IndexReader() manifest.IndexReader { return r.o.IndexReader() }
 
 // leaderVaultRegistry provides a flat view of all leader vaults. Each
@@ -378,6 +390,18 @@ func (r *leaderVaultRegistry) QueryEngine(_ glid.GLID) *query.Engine { return ni
 
 func (r *leaderVaultRegistry) Reader() manifest.Reader { return r.o.ManifestReader() }
 
+func (r *leaderVaultRegistry) SearchChunkMetas(vaultID glid.GLID) []chunk.ChunkMeta {
+	return r.o.SearchChunkMetasForVault(vaultID)
+}
+
+func (r *leaderVaultRegistry) OpenPipelineChunkCursor(vaultID glid.GLID, chunkID chunk.ChunkID) (chunk.RecordCursor, error) {
+	return r.o.OpenPipelineChunkCursor(vaultID, chunkID)
+}
+
+func (r *leaderVaultRegistry) ScanPipelineChunkIngestTS(vaultID glid.GLID, chunkID chunk.ChunkID, cb func(tsNanos int64) bool) error {
+	return r.o.ScanPipelineChunkIngestTS(vaultID, chunkID, cb)
+}
+
 func (r *leaderVaultRegistry) IndexReader() manifest.IndexReader { return r.o.IndexReader() }
 
 // LeaderQueryEngineForVault returns a query engine scoped to the
@@ -435,5 +459,26 @@ func (r *singleVaultRegistry) IndexManager(key glid.GLID) index.IndexManager {
 func (r *singleVaultRegistry) QueryEngine(_ glid.GLID) *query.Engine { return nil }
 
 func (r *singleVaultRegistry) Reader() manifest.Reader { return r.o.ManifestReader() }
+
+func (r *singleVaultRegistry) SearchChunkMetas(vaultID glid.GLID) []chunk.ChunkMeta {
+	if vaultID == r.vaultID {
+		return r.o.SearchChunkMetasForVault(vaultID)
+	}
+	return nil
+}
+
+func (r *singleVaultRegistry) OpenPipelineChunkCursor(vaultID glid.GLID, chunkID chunk.ChunkID) (chunk.RecordCursor, error) {
+	if vaultID == r.vaultID {
+		return r.o.OpenPipelineChunkCursor(vaultID, chunkID)
+	}
+	return nil, chunk.ErrChunkNotFound
+}
+
+func (r *singleVaultRegistry) ScanPipelineChunkIngestTS(vaultID glid.GLID, chunkID chunk.ChunkID, cb func(tsNanos int64) bool) error {
+	if vaultID == r.vaultID {
+		return r.o.ScanPipelineChunkIngestTS(vaultID, chunkID, cb)
+	}
+	return chunk.ErrChunkNotFound
+}
 
 func (r *singleVaultRegistry) IndexReader() manifest.IndexReader { return r.o.IndexReader() }

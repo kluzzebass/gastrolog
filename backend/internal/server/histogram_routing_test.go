@@ -90,7 +90,7 @@ func mustVaultInstance(t *testing.T, vaultID glid.GLID, isFollower bool) *orches
 		t.Fatalf("indexmem factory: %v", err)
 	}
 	return &orchestrator.VaultInstance{
-		VaultID:     vaultID,
+		VaultID:    vaultID,
 		Type:       "memory",
 		Chunks:     cm,
 		Indexes:    im,

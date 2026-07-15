@@ -360,9 +360,9 @@ func (s *Server) manageMaxMindJob(mm system.MaxMindConfig, registry lookup.Regis
 	updateFn := func() { s.runMaxMindUpdate(registry) }
 
 	// Add recurring cron job: 03:00 on Tuesdays and Fridays.
-	if err := scheduler.AddJob("maxmind-update", "0 3 * * 2,5", updateFn); err != nil {
+	if err := scheduler.AddJob("maxmind-update", "0 0 3 * * 2,5", updateFn); err != nil {
 		// Job may already exist (e.g. config re-applied). Update it.
-		if err := scheduler.UpdateJob("maxmind-update", "0 3 * * 2,5", updateFn); err != nil {
+		if err := scheduler.UpdateJob("maxmind-update", "0 0 3 * * 2,5", updateFn); err != nil {
 			s.logger.Warn("failed to update maxmind-update job", "error", err)
 		}
 	}

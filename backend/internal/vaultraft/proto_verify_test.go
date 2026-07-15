@@ -54,7 +54,7 @@ func TestProtoVerify_FiveNode_InstallSnapshotAllSections(t *testing.T) {
 	// the non-deprecated path), and an in-flight pending delete.
 	h.applyInstanceCreate(v1, sealedID, now)
 	h.applyVaultCommand(v1, vaultctlfsm.MarshalBeginSeal(sealedID))
-	h.applyVaultCommand(v1, vaultctlfsm.MarshalSealChunk(sealedID, now, 5, 500, now, now, now, false))
+	h.applyVaultCommand(v1, vaultctlfsm.MarshalSealChunk(sealedID, now, 5, 500, now, now, now, false, now))
 	h.applyInstanceCreate(v1, activeID, now)
 	h.applyVaultCommand(v1, vaultctlfsm.MarshalFinalizeDelete(deadID))
 	h.applyVaultCommand(v1, vaultctlfsm.MarshalRequestDelete(pendID, now, "retention-ttl", expectedAcks))
@@ -124,7 +124,7 @@ func protoCmdStream(v1 glid.GLID, now time.Time) [][]byte {
 	return [][]byte{
 		MarshalVaultChunkCommand(v1, vaultctlfsm.MarshalCreateChunk(a, now, now, now)),
 		MarshalVaultChunkCommand(v1, vaultctlfsm.MarshalBeginSeal(a)),
-		MarshalVaultChunkCommand(v1, vaultctlfsm.MarshalSealChunk(a, now, 7, 700, now, now, now, true)),
+		MarshalVaultChunkCommand(v1, vaultctlfsm.MarshalSealChunk(a, now, 7, 700, now, now, now, true, now)),
 		MarshalVaultChunkCommand(v1, vaultctlfsm.MarshalCreateChunk(c, now, now, now)),
 		MarshalVaultChunkCommand(v1, vaultctlfsm.MarshalRequestDelete(chunkIDWithPrefix(0x13), now, "ttl", []string{"node-3", "node-1", "node-2"})),
 	}

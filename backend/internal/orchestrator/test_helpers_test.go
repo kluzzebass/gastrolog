@@ -97,6 +97,9 @@ func makeRecord(raw string) chunk.Record {
 // detector overhead (168 orchestrators × background cron jobs).
 func newTestOrch(t *testing.T, cfg Config) *Orchestrator {
 	t.Helper()
+	if cfg.SegmentsDir == "" {
+		cfg.SegmentsDir = filepath.Join(t.TempDir(), "segments")
+	}
 	orch, err := New(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -116,7 +119,7 @@ func newMemoryInstance(t *testing.T, vaultID glid.GLID) *VaultInstance {
 		t.Fatal(err)
 	}
 	return &VaultInstance{
-		VaultID:  vaultID,
+		VaultID: vaultID,
 		Type:    "memory",
 		Chunks:  cm,
 		Indexes: im,
@@ -136,7 +139,6 @@ func setupTestStoreRuntime(store *sysmem.Store, nodeID string, vaultIDs ...glid.
 	}
 }
 
-
 func newTestRetentionRunner(orch *Orchestrator, vaultID glid.GLID, cm chunk.ChunkManager, im index.IndexManager) *retentionRunner {
 	return &retentionRunner{
 		isLeader: true,
@@ -148,13 +150,6 @@ func newTestRetentionRunner(orch *Orchestrator, vaultID glid.GLID, cm chunk.Chun
 		logger:   slog.Default(),
 	}
 }
-
-
-
-
-
-
-
 
 // ---------- cross-node tests (mock transferrer) ----------
 
@@ -185,10 +180,6 @@ func (m *transitionFakeTransferrer) ForwardAppend(_ context.Context, _ string, _
 func (m *transitionFakeTransferrer) WaitVaultReady(_ context.Context, _ string, _ glid.GLID) error {
 	return nil
 }
-
-
-
-
 
 func testIterFromRecords(recs []chunk.Record) chunk.RecordIterator {
 	i := 0
@@ -235,9 +226,9 @@ func newCloudFileInstance(t *testing.T, vaultID glid.GLID, store blobstore.Store
 	if err != nil {
 		t.Fatal(err)
 	}
-	im := indexfile.NewManager(dir, nil, nil)
+	im := indexfile.NewManager(dir, nil, nil, cm)
 	return &VaultInstance{
-		VaultID:  vaultID,
+		VaultID: vaultID,
 		Type:    "cloud",
 		Chunks:  cm,
 		Indexes: im,
@@ -260,9 +251,9 @@ func newFileInstance(t *testing.T, vaultID glid.GLID) (*VaultInstance, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	im := indexfile.NewManager(dir, nil, nil)
+	im := indexfile.NewManager(dir, nil, nil, cm)
 	return &VaultInstance{
-		VaultID:  vaultID,
+		VaultID: vaultID,
 		Type:    "file",
 		Chunks:  cm,
 		Indexes: im,
@@ -387,19 +378,6 @@ type directTransferrer struct {
 	nodes map[string]*Orchestrator
 }
 
-func (d *directTransferrer) ForwardAppend(_ context.Context, nodeID string, vaultID glid.GLID, records []chunk.Record) error {
-	orch, ok := d.nodes[nodeID]
-	if !ok {
-		return fmt.Errorf("directTransferrer: unknown node %q", nodeID)
-	}
-	for _, rec := range records {
-		if _, _, err := orch.Append(vaultID, rec); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func (d *directTransferrer) TransferRecords(ctx context.Context, nodeID string, vaultID glid.GLID, next chunk.RecordIterator) error {
 	orch, ok := d.nodes[nodeID]
 	if !ok {
@@ -413,7 +391,7 @@ func (d *directTransferrer) TransferRecords(ctx context.Context, nodeID string, 
 		if err != nil {
 			return err
 		}
-		if _, _, err := orch.Append(vaultID, rec); err != nil {
+		if err := orch.AppendToVault(vaultID, chunk.ChunkID{}, rec); err != nil {
 			return err
 		}
 	}
@@ -498,10 +476,10 @@ func newClusterRetentionRunner(orch *Orchestrator, vaultID glid.GLID, vaultInst 
 
 // clusterTestNode is one node in a multi-node cluster test.
 type clusterTestNode struct {
-	nodeID   string
-	orch     *Orchestrator
+	nodeID       string
+	orch         *Orchestrator
 	instances    []*VaultInstance // all vault instances on this node
-	instanceDirs []string        // filesystem directories, one per instance
+	instanceDirs []string         // filesystem directories, one per instance
 }
 
 // clusterHarness holds the full multi-node cluster.
@@ -509,7 +487,7 @@ type clusterHarness struct {
 	nodes    map[string]*clusterTestNode
 	cfgStore *sysmem.Store
 	vaultID  glid.GLID
-	vaultIDs  []glid.GLID
+	vaultIDs []glid.GLID
 }
 
 // allNodeIDs returns sorted node IDs.
@@ -664,9 +642,9 @@ func setupCluster(t *testing.T, nodeIDs []string, vaultCount int, rotationRecord
 			if cmErr != nil {
 				t.Fatal(cmErr)
 			}
-			im := indexfile.NewManager(dir, nil, nil)
+			im := indexfile.NewManager(dir, nil, nil, cm)
 			vaultInst := &VaultInstance{
-				VaultID:  vaultIDs[i],
+				VaultID: vaultIDs[i],
 				Type:    "file",
 				Chunks:  cm,
 				Indexes: im,
@@ -689,8 +667,8 @@ func setupCluster(t *testing.T, nodeIDs []string, vaultCount int, rotationRecord
 		orch.RegisterVault(vault)
 
 		nodes[nid] = &clusterTestNode{
-			nodeID:   nid,
-			orch:     orch,
+			nodeID:       nid,
+			orch:         orch,
 			instances:    instances,
 			instanceDirs: instanceDirs,
 		}
@@ -725,7 +703,7 @@ func setupCluster(t *testing.T, nodeIDs []string, vaultCount int, rotationRecord
 		nodes:    nodes,
 		cfgStore: store,
 		vaultID:  vaultID,
-		vaultIDs:  vaultIDs,
+		vaultIDs: vaultIDs,
 	}
 }
 
@@ -868,9 +846,6 @@ func waitForDrainJob(t *testing.T, orch *Orchestrator, vaultID glid.GLID, timeou
 //   - Source chunk directories removed from disk
 
 // --- Memory budget enforcement ---
-
-
-
 
 // TestExplicitStorageLeaderGetsRotationPolicy verifies that an instance built via
 // buildInstanceForStorage (explicit placement path) applies the rotation

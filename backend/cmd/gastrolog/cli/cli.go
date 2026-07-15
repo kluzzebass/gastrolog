@@ -48,6 +48,7 @@ func NewConfigCommand() *cobra.Command {
 		newSchedulerCmd(),
 		newTLSCmd(),
 		newMaxMindCmd(),
+		newClusterSettingsCmd(),
 		newExportCmd(),
 		newImportCmd(),
 		newLogLevelCmd(),

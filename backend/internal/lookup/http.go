@@ -148,9 +148,9 @@ type HTTP struct {
 	responsePaths []httpPath // parsed JSONPath expressions; nil/empty = use root object
 	parameters    []string   // ordered parameter names; empty = legacy {value} mode
 	client        *http.Client
-	headers      map[string]string
-	cacheTTL     time.Duration
-	cacheSize    int
+	headers       map[string]string
+	cacheTTL      time.Duration
+	cacheSize     int
 
 	mu       sync.Mutex
 	cache    map[string]httpEntry
@@ -191,10 +191,10 @@ func NewHTTP(cfg HTTPConfig) *HTTP {
 		responsePaths: paths,
 		parameters:    params,
 		client:        &http.Client{Timeout: timeout},
-		headers:      cfg.Headers,
-		cacheTTL:     cacheTTL,
-		cacheSize:    cacheSize,
-		cache:        make(map[string]httpEntry),
+		headers:       cfg.Headers,
+		cacheTTL:      cacheTTL,
+		cacheSize:     cacheSize,
+		cache:         make(map[string]httpEntry),
 	}
 }
 

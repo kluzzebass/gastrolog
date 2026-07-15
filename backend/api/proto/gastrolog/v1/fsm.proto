@@ -63,8 +63,11 @@ message SystemCommand {
 message PutRotationPolicyCommand {
   bytes id = 1;
   string name = 2;
-  optional string max_bytes = 3;
-  optional string max_age = 4;
+  // Quantities are numeric at rest: replicated state must mean the same
+  // thing on every node regardless of code version — strings re-parsed at
+  // read time change meaning when the parser does.
+  optional uint64 max_bytes = 3;
+  optional int64 max_age_nanos = 4;
   optional int64 max_records = 5;
   optional string cron = 6;
 }
@@ -78,8 +81,8 @@ message DeleteRotationPolicyCommand {
 message PutRetentionPolicyCommand {
   bytes id = 1;
   string name = 2;
-  optional string max_age = 3;
-  optional string max_bytes = 4;
+  optional int64 max_age_nanos = 3;
+  optional uint64 max_bytes = 4;
   optional int64 max_chunks = 5;
 }
 

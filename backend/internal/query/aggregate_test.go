@@ -525,9 +525,9 @@ func TestAggregatorMissingFields(t *testing.T) {
 	}
 
 	agg.Add(makeRec(baseTime, chunk.Attributes{"duration": "100"}, ""))
-	agg.Add(makeRec(baseTime, nil, ""))                                  // missing
+	agg.Add(makeRec(baseTime, nil, "")) // missing
 	agg.Add(makeRec(baseTime, chunk.Attributes{"duration": "200"}, ""))
-	agg.Add(makeRec(baseTime, chunk.Attributes{"other": "foo"}, ""))     // missing
+	agg.Add(makeRec(baseTime, chunk.Attributes{"other": "foo"}, "")) // missing
 
 	result := agg.Result(time.Time{}, time.Time{})
 	// avg should only count records with duration: (100+200)/2 = 150
@@ -914,7 +914,7 @@ func TestAggregatorFirstLast(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	agg.Add(makeRec(baseTime, nil, ""))                                 // missing
+	agg.Add(makeRec(baseTime, nil, "")) // missing
 	agg.Add(makeRec(baseTime, chunk.Attributes{"val": "alpha"}, ""))
 	agg.Add(makeRec(baseTime, chunk.Attributes{"val": "beta"}, ""))
 	agg.Add(makeRec(baseTime, chunk.Attributes{"val": "gamma"}, ""))
@@ -943,8 +943,8 @@ func TestAggregatorValues(t *testing.T) {
 
 	agg.Add(makeRec(baseTime, chunk.Attributes{"method": "GET"}, ""))
 	agg.Add(makeRec(baseTime, chunk.Attributes{"method": "POST"}, ""))
-	agg.Add(makeRec(baseTime, chunk.Attributes{"method": "GET"}, ""))  // duplicate
-	agg.Add(makeRec(baseTime, nil, ""))                                 // missing
+	agg.Add(makeRec(baseTime, chunk.Attributes{"method": "GET"}, "")) // duplicate
+	agg.Add(makeRec(baseTime, nil, ""))                               // missing
 
 	result := agg.Result(time.Time{}, time.Time{})
 	if result.Rows[0][0] != "GET, POST" {

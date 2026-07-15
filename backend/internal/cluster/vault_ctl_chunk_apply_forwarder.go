@@ -25,8 +25,8 @@ var ErrNoRaftLeader = errors.New("no raft leader")
 type VaultCtlChunkApplyForwarder struct {
 	raft            *hraft.Raft
 	vaultCtlGroupID string
-	vaultID          glid.GLID
-	peers           *PeerConns
+	vaultID         glid.GLID
+	peers           *PeerConnManager
 	timeout         time.Duration
 }
 
@@ -34,11 +34,11 @@ type VaultCtlChunkApplyForwarder struct {
 // commands to the vault control-plane Raft group, wrapping each payload
 // with OpVaultChunkFSM + instance ID. ForwardVaultApply uses the vault-ctl
 // group_id.
-func NewVaultCtlChunkApplyForwarder(r *hraft.Raft, vaultCtlGroupID string, vaultID glid.GLID, peers *PeerConns, timeout time.Duration) *VaultCtlChunkApplyForwarder {
+func NewVaultCtlChunkApplyForwarder(r *hraft.Raft, vaultCtlGroupID string, vaultID glid.GLID, peers *PeerConnManager, timeout time.Duration) *VaultCtlChunkApplyForwarder {
 	return &VaultCtlChunkApplyForwarder{
 		raft:            r,
 		vaultCtlGroupID: vaultCtlGroupID,
-		vaultID:          vaultID,
+		vaultID:         vaultID,
 		peers:           peers,
 		timeout:         timeout,
 	}
@@ -55,6 +55,11 @@ func (f *VaultCtlChunkApplyForwarder) Apply(data []byte) error {
 		}
 		return err
 	}
+	if resp := future.Response(); resp != nil {
+		if err, ok := resp.(error); ok && err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -62,11 +67,6 @@ func (f *VaultCtlChunkApplyForwarder) forwardToLeader(data []byte) error {
 	_, leaderID := f.raft.LeaderWithID()
 	if leaderID == "" {
 		return ErrNoRaftLeader
-	}
-
-	conn, err := f.peers.Conn(string(leaderID))
-	if err != nil {
-		return fmt.Errorf("dial raft leader %s: %w", leaderID, err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), f.timeout)
@@ -77,8 +77,8 @@ func (f *VaultCtlChunkApplyForwarder) forwardToLeader(data []byte) error {
 		Command: data,
 	}
 	resp := &gastrologv1.ForwardVaultApplyResponse{}
-	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardVaultApply", req, resp); err != nil {
-		f.peers.Invalidate(string(leaderID), err)
+	if err := f.peers.InvokeService(ctx, string(leaderID), PurposeChunkApply,
+		"/gastrolog.v1.ClusterService/ForwardVaultApply", req, resp); err != nil {
 		return fmt.Errorf("forward vault-ctl chunk apply RPC to %s: %w", leaderID, err)
 	}
 	return nil

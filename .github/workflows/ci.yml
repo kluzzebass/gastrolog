@@ -25,5 +25,13 @@ jobs:
       - name: Build
         run: go build -v ./...
 
-      - name: Test
-        run: go test -v ./...
+      # Fast tier only. ubuntu-latest is a 2-core shared runner; the
+      # reliability/soak family (multi-node sustained-ingest, restart
+      # convergence, election timing) needs real hardware and starves here —
+      # they gate themselves behind testing.Short() (gastrolog-3241bv). This
+      # runs everything else. The full tier is the developer's pre-handoff
+      # gate (`just backend test-full`) and would need a self-hosted/beefy
+      # runner to automate; do NOT drop -short here to "run everything" — it
+      # only produces false reds.
+      - name: Test (fast tier)
+        run: go test -short -v ./...

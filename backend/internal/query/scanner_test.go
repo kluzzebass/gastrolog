@@ -297,6 +297,99 @@ func TestScannerBuilderMinPosition(t *testing.T) {
 	}
 }
 
+func TestScannerBuilderMaxPosition(t *testing.T) {
+	chunkID := chunk.NewChunkID()
+	b := newScannerBuilder(chunkID)
+
+	// Reverse resume at position 30: 30 and above are already returned.
+	b.setMaxPosition(30)
+	b.addPositions([]uint64{10, 20, 30, 40})
+
+	// Positions at or above 30 should be pruned (exclusive bound).
+	if !slices.Equal(b.positions, []uint64{10, 20}) {
+		t.Errorf("expected [10, 20], got %v", b.positions)
+	}
+}
+
+func TestScannerBuilderMaxPositionKeepsSmallest(t *testing.T) {
+	chunkID := chunk.NewChunkID()
+	b := newScannerBuilder(chunkID)
+
+	b.setMaxPosition(50)
+	b.setMaxPosition(30)
+	b.setMaxPosition(40) // larger: ignored
+	if b.maxPos != 30 || !b.hasMaxPos {
+		t.Errorf("expected maxPos 30, got %d (hasMaxPos %v)", b.maxPos, b.hasMaxPos)
+	}
+}
+
+func TestPruneMaxPositions(t *testing.T) {
+	tests := []struct {
+		name      string
+		positions []uint64
+		maxPos    uint64
+		want      []uint64
+	}{
+		{
+			name:      "prunes at and above max",
+			positions: []uint64{10, 20, 30, 40},
+			maxPos:    30,
+			want:      []uint64{10, 20},
+		},
+		{
+			name:      "all below max",
+			positions: []uint64{10, 20, 30},
+			maxPos:    100,
+			want:      []uint64{10, 20, 30},
+		},
+		{
+			name:      "all at or above max",
+			positions: []uint64{10, 20, 30},
+			maxPos:    10,
+			want:      []uint64{},
+		},
+		{
+			name:      "max equals last position",
+			positions: []uint64{10, 20, 30},
+			maxPos:    30,
+			want:      []uint64{10, 20},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := pruneMaxPositions(tc.positions, tc.maxPos)
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("pruneMaxPositions(%v, %d) = %v, want %v", tc.positions, tc.maxPos, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPosWindowContains(t *testing.T) {
+	tests := []struct {
+		name   string
+		window posWindow
+		pos    uint64
+		want   bool
+	}{
+		{name: "unbounded contains everything", window: posWindow{}, pos: 42, want: true},
+		{name: "below min excluded", window: posWindow{min: 10, hasMin: true}, pos: 9, want: false},
+		{name: "at min included", window: posWindow{min: 10, hasMin: true}, pos: 10, want: true},
+		{name: "at max excluded", window: posWindow{max: 30, hasMax: true}, pos: 30, want: false},
+		{name: "below max included", window: posWindow{max: 30, hasMax: true}, pos: 29, want: true},
+		{name: "inside both bounds", window: posWindow{min: 10, max: 30, hasMin: true, hasMax: true}, pos: 20, want: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.window.contains(tc.pos); got != tc.want {
+				t.Errorf("window %+v contains(%d) = %v, want %v", tc.window, tc.pos, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestMatchesSingleToken(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -659,7 +752,7 @@ func makePositions(n int, start, step uint64) []uint64 {
 
 // BenchmarkIntersectPositions_Dense benchmarks intersection where ~50% of elements overlap.
 func BenchmarkIntersectPositions_Dense(b *testing.B) {
-	a := makePositions(10000, 0, 2)  // 0, 2, 4, ..., 19998
+	a := makePositions(10000, 0, 2)      // 0, 2, 4, ..., 19998
 	bSlice := makePositions(10000, 0, 3) // 0, 3, 6, ..., 29997
 	for b.Loop() {
 		_ = intersectPositions(a, bSlice)
@@ -677,7 +770,7 @@ func BenchmarkIntersectPositions_Sparse(b *testing.B) {
 
 // BenchmarkUnionPositions benchmarks union of two large position lists.
 func BenchmarkUnionPositions(b *testing.B) {
-	a := makePositions(10000, 0, 3) // 0, 3, 6, ...
+	a := makePositions(10000, 0, 3)      // 0, 3, 6, ...
 	bSlice := makePositions(10000, 0, 5) // 0, 5, 10, ...
 	for b.Loop() {
 		_ = unionPositions(a, bSlice)

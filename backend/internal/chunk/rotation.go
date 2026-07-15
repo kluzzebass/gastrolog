@@ -118,7 +118,7 @@ func (p *RecordCountPolicy) ShouldRotate(state ActiveChunkState, next Record) *s
 }
 
 // AgePolicy triggers rotation when chunk age exceeds maxAge.
-// Age is measured from CreatedAt (wall-clock time when chunk was opened).
+// Age is measured from WriteStart (WriteTS of the first record in the chunk).
 type AgePolicy struct {
 	maxAge time.Duration
 	now    func() time.Time
@@ -137,10 +137,10 @@ func (p *AgePolicy) ShouldRotate(state ActiveChunkState, next Record) *string {
 	if p.maxAge == 0 {
 		return nil
 	}
-	if state.CreatedAt.IsZero() {
+	if state.WriteStart.IsZero() {
 		return nil
 	}
-	if p.now().Sub(state.CreatedAt) > p.maxAge {
+	if p.now().Sub(state.WriteStart) >= p.maxAge {
 		return new("age")
 	}
 	return nil

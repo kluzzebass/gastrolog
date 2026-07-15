@@ -5,11 +5,15 @@
 package convert
 
 import (
-	"gastrolog/internal/glid"
 	"maps"
+	"slices"
+	"strings"
+
+	"gastrolog/internal/glid"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/record"
 	"gastrolog/internal/safeutf8"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -26,7 +30,7 @@ import (
 // ExportToRecord), and zero timestamps become nil proto fields.
 func RecordToExport(rec chunk.Record) *gastrologv1.ExportRecord {
 	er := &gastrologv1.ExportRecord{
-		Raw:        rec.Raw,
+		Raw:        slices.Clone(rec.Raw),
 		VaultId:    rec.VaultID.ToProto(),
 		ChunkId:    glid.GLID(rec.Ref.ChunkID).ToProto(),
 		Pos:        rec.Ref.Pos,
@@ -47,11 +51,13 @@ func RecordToExport(rec chunk.Record) *gastrologv1.ExportRecord {
 		// Attrs are proto3 map<string,string>; invalid UTF-8 would fail
 		// marshal. Ingesters normally produce clean attrs, but raw
 		// message bytes sometimes leak in — sanitize at the wire
-		// boundary. safeutf8.Attrs returns the input unchanged when
-		// already clean; we then copy so the export is detached from
-		// the source record.
-		er.Attrs = make(map[string]string, len(rec.Attrs))
-		maps.Copy(er.Attrs, safeutf8.Attrs(rec.Attrs))
+		// boundary. Clone every key/value so the export is detached
+		// from mmap-backed dict strings in the source record.
+		sanitized := safeutf8.Attrs(rec.Attrs)
+		er.Attrs = make(map[string]string, len(sanitized))
+		for k, v := range sanitized {
+			er.Attrs[strings.Clone(k)] = strings.Clone(v)
+		}
 	}
 	return er
 }
@@ -92,4 +98,50 @@ func ExportToRecord(er *gastrologv1.ExportRecord) chunk.Record {
 	}
 	rec.EventID.IngestTS = rec.IngestTS
 	return rec
+}
+
+// ChunkToRecord converts a chunk.Record (the legacy storage/query type) to a
+// record.Record (the pipeline write type), dropping the query-only Ref/VaultID
+// fields. This is the single canonical chunk.Record → record.Record converter,
+// used by non-ingester writers (retention fan-out, ImportRecords,
+// export-to-vault) that inject records into the pipeline submit API while
+// preserving the original EventID.
+func ChunkToRecord(rec chunk.Record) record.Record {
+	out := record.Record{
+		SourceTS: rec.SourceTS,
+		IngestTS: rec.IngestTS,
+		WriteTS:  rec.WriteTS,
+		EventID: record.EventID{
+			IngesterID: rec.EventID.IngesterID,
+			NodeID:     rec.EventID.NodeID,
+			IngestTS:   rec.EventID.IngestTS,
+			IngestSeq:  rec.EventID.IngestSeq,
+		},
+		Raw:            rec.Raw,
+		WaitForReplica: rec.WaitForReplica,
+	}
+	if len(rec.Attrs) > 0 {
+		out.Attrs = make(record.Attributes, len(rec.Attrs))
+		maps.Copy(out.Attrs, rec.Attrs)
+	}
+	return out
+}
+
+// ChunkToRecordOwned is ChunkToRecord for callers that exclusively own
+// rec.Attrs (freshly materialized per record, e.g. a retention drain
+// cursor): the map transfers without a defensive copy. Raw already
+// transfers by reference in both variants; this extends the same
+// ownership contract to Attrs. Per-record attrs copies on the drain
+// path were a measurable slice of GC churn (gastrolog-11y2iv).
+func ChunkToRecordOwned(rec chunk.Record) record.Record {
+	out := ChunkToRecord(chunk.Record{
+		SourceTS:       rec.SourceTS,
+		IngestTS:       rec.IngestTS,
+		WriteTS:        rec.WriteTS,
+		EventID:        rec.EventID,
+		Raw:            rec.Raw,
+		WaitForReplica: rec.WaitForReplica,
+	})
+	out.Attrs = record.Attributes(rec.Attrs)
+	return out
 }

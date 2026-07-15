@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "hooks": {
+    "beforeShellExecution": [
+      {
+        "command": ".cursor/hooks/block-gh-pr-merge.sh",
+        "matcher": "gh pr merge",
+        "failClosed": true
+      }
+    ]
+  }
+}

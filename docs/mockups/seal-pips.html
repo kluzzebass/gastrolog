@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Per-node seal pips — final design</title>
+<style>
+  :root {
+    --bg: #141210; --bg-raised: #1c1916; --bg-row: #191613; --border: #2b2620;
+    --fg-bright: #e8e0d4; --fg: #b8ac9c; --fg-muted: #6e6558;
+    --copper: #c98a4b; --amber: #d9a441; --green: #7fa661; --red: #c25e50; --track: #2e2922;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--fg); font: 13px/1.5 "SF Pro Text", "Segoe UI", system-ui, sans-serif; margin: 0; padding: 44px 52px 80px; }
+  h1 { color: var(--fg-bright); font-size: 17px; font-weight: 600; margin: 0 0 4px; }
+  .sub { color: var(--fg-muted); margin-bottom: 30px; font-size: 12px; }
+  .panel { background: var(--bg-raised); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; max-width: 880px; }
+  .hdr, .row { display: grid; grid-template-columns: 22ch 9ch 9ch 1fr 12ch; gap: 16px; align-items: center; padding: 9px 18px; }
+  .hdr { color: var(--fg-muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em; border-bottom: 1px solid var(--border); }
+  .row { border-bottom: 1px solid var(--border); }
+  .row:last-child { border-bottom: none; }
+  .row:hover { background: var(--bg-row); }
+  .id { font-family: "SF Mono", ui-monospace, monospace; font-size: 12px; color: var(--fg-bright); }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .scenario { color: var(--fg-muted); font-size: 11.5px; }
+  .cell { display: flex; justify-content: flex-end; }
+
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+
+  .orbs { display: inline-flex; gap: 6px; align-items: center; }
+  .orb { width: 11px; height: 11px; border-radius: 50%; position: relative; }
+  .orb.active  { border: 1.5px solid var(--copper); }
+  .orb.sealing { border: 1.5px solid var(--amber); background: linear-gradient(to top, var(--amber) 50%, transparent 50%); animation: pulse 1.4s ease-in-out infinite; }
+  .orb.sealed  { background: var(--green); }
+  .orb.sealed.calm { background: color-mix(in srgb, var(--green) 45%, var(--track)); }
+  .orb.missing { border: 1.5px dashed var(--red); }
+  .orb.missing::after { content: ""; position: absolute; left: 0.2px; top: 3.9px; width: 10px; height: 1.3px; background: var(--red); transform: rotate(-45deg); }
+
+  .legend { display: flex; gap: 26px; margin-top: 14px; color: var(--fg-muted); font-size: 11.5px; align-items: center; max-width: 880px; }
+  .legend .orbs { transform: translateY(1px); }
+
+  h2 { color: var(--copper); font-size: 12.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; margin: 42px 0 6px; }
+  .note { color: var(--fg-muted); font-size: 12px; margin: 0 0 12px; max-width: 82ch; }
+
+  /* deletion: the death lifecycle drains in red */
+  .orb.acked { border: 1.5px solid color-mix(in srgb, var(--red) 45%, var(--track)); }        /* bytes gone here: hollow, dim red */
+  .orb.holds { background: var(--red); animation: pulse 1.4s ease-in-out infinite; }           /* still holds bytes / owes ack */
+  .orb.draining { border: 1.5px solid var(--red); background: linear-gradient(to bottom, var(--red) 50%, transparent 50%); animation: pulse 1.4s ease-in-out infinite; }
+
+  /* stale residency: ghost pip beyond placement, separated */
+  .ghost-gap { width: 8px; }
+  .orb.ghost { background: color-mix(in srgb, var(--fg-muted) 55%, transparent); }
+
+  /* cloud-backed: residency is the blob store, not homes */
+  .cloudmark {
+    display: inline-flex; align-items: center; justify-content: center;
+    height: 13px; padding: 0 7px; border-radius: 7px;
+    border: 1.5px solid var(--copper); color: var(--copper);
+    font-size: 9px; font-weight: 700; letter-spacing: .05em;
+  }
+  .cloudmark.uploading { border-style: dashed; animation: pulse 1.4s ease-in-out infinite; }
+</style>
+</head>
+<body>
+  <h1>Chunk rows — per-node seal pips</h1>
+  <div class="sub">One circle per placement node. Fill degree = lifecycle (hollow → half → solid); dashed red = node missing. No badge, no fractions.</div>
+
+  <div class="panel">
+    <div class="hdr"><span>chunk</span><span class="num">records</span><span class="num">size</span><span>scenario</span><span class="cell">nodes</span></div>
+
+    <div class="row">
+      <span class="id">06fj6qh2a01kkur9vv3c</span><span class="num">412K</span><span class="num">118 MB</span>
+      <span class="scenario">active on all four nodes</span>
+      <span class="cell"><span class="orbs"><span class="orb active"></span><span class="orb active"></span><span class="orb active"></span><span class="orb active"></span></span></span>
+    </div>
+
+    <div class="row">
+      <span class="id">06fj6qe0edqr9dt2u6u1</span><span class="num">1.0M</span><span class="num">291 MB</span>
+      <span class="scenario">sealing — 2 copies done, node-3 building, node-2 still active</span>
+      <span class="cell"><span class="orbs"><span class="orb sealed"></span><span class="orb sealed"></span><span class="orb sealing"></span><span class="orb active"></span></span></span>
+    </div>
+
+    <div class="row">
+      <span class="id">06fj6q30uloipabubi8v</span><span class="num">1.0M</span><span class="num">288 MB</span>
+      <span class="scenario">fully sealed — the quiet default</span>
+      <span class="cell"><span class="orbs"><span class="orb sealed calm"></span><span class="orb sealed calm"></span><span class="orb sealed calm"></span><span class="orb sealed calm"></span></span></span>
+    </div>
+
+    <div class="row">
+      <span class="id">06fj6q5re5rrp979pc2o</span><span class="num">1.0M</span><span class="num">286 MB</span>
+      <span class="scenario">sealed, node-2 unreachable — copy debt, recoverable</span>
+      <span class="cell"><span class="orbs"><span class="orb sealed"></span><span class="orb sealed"></span><span class="orb sealed"></span><span class="orb missing"></span></span></span>
+    </div>
+
+    <div class="row">
+      <span class="id">06fj6q19ehv0r02je012</span><span class="num">1.0M</span><span class="num">289 MB</span>
+      <span class="scenario">two placement nodes gone — replication factor unmeetable</span>
+      <span class="cell"><span class="orbs"><span class="orb sealed"></span><span class="orb sealed"></span><span class="orb missing"></span><span class="orb missing"></span></span></span>
+    </div>
+
+    <div class="row">
+      <span class="id">06fj6qj77s0m41vv0q88</span><span class="num">655K</span><span class="num">187 MB</span>
+      <span class="scenario">rejoin catch-up — node-2 sealing its copy of an already-sealed chunk</span>
+      <span class="cell"><span class="orbs"><span class="orb sealed"></span><span class="orb sealed"></span><span class="orb sealed"></span><span class="orb sealing"></span></span></span>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span class="orbs"><span class="orb active"></span></span> active
+    <span class="orbs"><span class="orb sealing"></span></span> sealing now
+    <span class="orbs"><span class="orb sealed"></span></span> copy sealed
+    <span class="orbs"><span class="orb sealed calm"></span></span> sealed (all healthy)
+    <span class="orbs"><span class="orb missing"></span></span> node missing
+  </div>
+
+  <h2>Proposal 1 — deletion drains in red</h2>
+  <div class="note">Birth fills green (hollow → half → solid); death drains red (solid → half → hollow). A deleting chunk's pips flip to the red hue: still-holding nodes pulse solid, mid-purge shows half-drained, an acked node leaves a dim hollow ring. The laggard blocking the receipt protocol is the one still burning red. Row disappears entirely on finalize.</div>
+  <div class="panel">
+    <div class="row">
+      <span class="id">06fj4a2b9potr55dhq10</span><span class="num">31K</span><span class="num">9 MB</span>
+      <span class="scenario">delete requested — all four nodes still hold bytes</span>
+      <span class="cell"><span class="orbs"><span class="orb holds"></span><span class="orb holds"></span><span class="orb holds"></span><span class="orb holds"></span></span></span>
+    </div>
+    <div class="row">
+      <span class="id">06fj4a2b9potr55dhq10</span><span class="num">31K</span><span class="num">9 MB</span>
+      <span class="scenario">deleting — two acked, node-3 purging, node-2 owes the ack</span>
+      <span class="cell"><span class="orbs"><span class="orb acked"></span><span class="orb acked"></span><span class="orb draining"></span><span class="orb holds"></span></span></span>
+    </div>
+  </div>
+
+  <h2>Proposal 2 — stale residency: the ghost pip</h2>
+  <div class="note">A node outside placement reporting a copy renders as an extra muted dot, set off by a gap: the anomaly is literally a dot that should not exist. Tooltip names the node and says "stale residency — copy present, node not in placement".</div>
+  <div class="panel">
+    <div class="row">
+      <span class="id">06fj6q5re5rrp979pc2o</span><span class="num">1.0M</span><span class="num">286 MB</span>
+      <span class="scenario">sealed ×4, plus a leftover copy on a node that left the placement</span>
+      <span class="cell"><span class="orbs"><span class="orb sealed calm"></span><span class="orb sealed calm"></span><span class="orb sealed calm"></span><span class="orb sealed calm"></span><span class="ghost-gap"></span><span class="orb ghost"></span></span></span>
+    </div>
+  </div>
+
+  <h2>Proposal 3 — cloud-backed chunks: the blob mark</h2>
+  <div class="note">Per-home pips are the wrong story once bytes live in a blob store. Cloud-backed chunks swap the pip row for a single blob mark; dashed + pulsing while the upload runs. If a local cache copy exists it can render as one calm pip beside the mark (shown in row 3) — or we drop that and keep the mark alone.</div>
+  <div class="panel">
+    <div class="row">
+      <span class="id">06fj5n0aq2f9e77s01mm</span><span class="num">4.0M</span><span class="num">1.1 GB</span>
+      <span class="scenario">uploading to the blob store</span>
+      <span class="cell"><span class="cloudmark uploading">S3</span></span>
+    </div>
+    <div class="row">
+      <span class="id">06fj5n0aq2f9e77s01mm</span><span class="num">4.0M</span><span class="num">1.1 GB</span>
+      <span class="scenario">cloud-backed — bytes durable in the blob store</span>
+      <span class="cell"><span class="cloudmark">S3</span></span>
+    </div>
+    <div class="row">
+      <span class="id">06fj5n0aq2f9e77s01mm</span><span class="num">4.0M</span><span class="num">1.1 GB</span>
+      <span class="scenario">cloud-backed with one local cache copy</span>
+      <span class="cell"><span class="orbs"><span class="cloudmark">S3</span><span class="ghost-gap"></span><span class="orb sealed calm"></span></span></span>
+    </div>
+  </div>
+</body>
+</html>

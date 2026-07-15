@@ -6,6 +6,34 @@ import (
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
+func (o *Orchestrator) logChunkCreated(vaultID glid.GLID, chunkID chunk.ChunkID) {
+	if o == nil || o.vaultOpsLogger == nil {
+		return
+	}
+	o.vaultOpsLogger.Info("chunk created", "vault", vaultID, "chunk", chunkID)
+}
+
+func (o *Orchestrator) logChunkDeleted(vaultID glid.GLID, chunkID chunk.ChunkID) {
+	if o == nil || o.vaultOpsLogger == nil {
+		return
+	}
+	o.vaultOpsLogger.Info("chunk deleted", "vault", vaultID, "chunk", chunkID)
+}
+
+func (o *Orchestrator) logChunkExpunged(vaultID glid.GLID, chunkID chunk.ChunkID, reason string) {
+	if o == nil || o.vaultOpsLogger == nil {
+		return
+	}
+	o.vaultOpsLogger.Info("chunk expunged", "vault", vaultID, "chunk", chunkID, "reason", reason)
+}
+
+func (o *Orchestrator) logChunkSealed(vaultID glid.GLID, chunkID chunk.ChunkID) {
+	if o == nil || o.vaultOpsLogger == nil {
+		return
+	}
+	o.vaultOpsLogger.Info("chunk sealed", "vault", vaultID, "chunk", chunkID)
+}
+
 // manifestEntryToChunkMeta builds a chunk.ChunkMeta from the FSM's
 // authoritative ManifestEntry. Used by the vault-ctl FSM callbacks
 // (OnCreate / OnSeal / OnUpload) to emit ChunkChangeEvents that carry
@@ -30,10 +58,33 @@ func manifestEntryToChunkMeta(e vaultctlfsm.ManifestEntry, sealed bool) chunk.Ch
 		RecordCount: e.RecordCount,
 		Bytes:       e.Bytes,
 		DiskBytes:   e.DiskBytes,
+		SealedAt:    e.SealedAt,
 		Sealed:      sealed,
+		State:       e.State,
 		CloudBacked: e.CloudBacked,
 		Archived:    e.Archived,
 	}
+}
+
+// openChunkManifestToChunkMeta projects a pipeline open/sealed manifest into
+// chunk metadata for WatchChunks events. Every vault-ctl voter applies the
+// same manifest commands, so events derived here are cluster-wide.
+func openChunkManifestToChunkMeta(m *vaultctlfsm.OpenChunkManifest, state chunk.ChunkState) chunk.ChunkMeta {
+	if m == nil {
+		return chunk.ChunkMeta{}
+	}
+	meta := chunk.ChunkMeta{
+		ID:          m.ChunkID,
+		WriteStart:  m.OpenedAt,
+		IngestStart: m.OpenedAt,
+		SourceStart: m.OpenedAt,
+		State:       state,
+		RecordCount: int64(m.TotalRecords), //nolint:gosec // G115: manifest totals fit in int64 for chunk metadata
+		Bytes:       int64(m.TotalBytes),   //nolint:gosec // G115: manifest totals fit in int64 for chunk metadata
+		Sealed:      state == chunk.ChunkStateSealed,
+	}
+	vaultctlfsm.ApplyManifestBoundsToChunkMeta(&meta, m.Bounds)
+	return meta
 }
 
 // ChunkChangeOp identifies what changed about a chunk in a ChunkChangeEvent.

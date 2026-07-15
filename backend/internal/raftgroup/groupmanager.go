@@ -53,7 +53,7 @@ type GroupConfig struct {
 	SeedMembers []hraft.Server
 
 	// SnapshotThreshold is the number of log entries before a snapshot is taken.
-	// Defaults to 4 if zero (matches config Raft behavior).
+	// Defaults to 4 if zero (matches cluster-ctl Raft behavior).
 	SnapshotThreshold uint64
 
 	// SnapshotInterval is how often the snapshot check runs.
@@ -63,6 +63,57 @@ type GroupConfig struct {
 	// TrailingLogs is the number of log entries kept after a snapshot.
 	// Defaults to 64 if zero.
 	TrailingLogs uint64
+
+	// HeartbeatTimeout, ElectionTimeout, and LeaderLeaseTimeout override Raft
+	// timing when > 0. When unset, the node-wide base applies (defaults
+	// below, operator-adjustable via ConfigureTimeouts); vault control-plane
+	// groups (vault/*/ctl) get vaultCtlTimeoutSlack on top of the base.
+	HeartbeatTimeout   time.Duration
+	ElectionTimeout    time.Duration
+	LeaderLeaseTimeout time.Duration
+}
+
+// Default Raft timing for cluster-ctl and other non-vault-ctl groups.
+// LeaderLeaseTimeout must not exceed HeartbeatTimeout (hashicorp/raft).
+// Exported so boot code can resolve partially-configured operator input
+// against the shipped defaults before calling ConfigureTimeouts.
+const (
+	DefaultHeartbeatTimeout   = 2 * time.Second
+	DefaultLeaderLeaseTimeout = 1500 * time.Millisecond
+
+	// vaultCtlTimeoutSlack widens the vault control-plane detector over the
+	// base: those groups run heavier FSM work and share the node with
+	// chunking GLCB builds, so they tolerate longer scheduling pauses than
+	// data-plane groups.
+	vaultCtlTimeoutSlack = 1 * time.Second
+)
+
+// Node-wide base failure-detector timing, overridable once at boot via
+// ConfigureTimeouts (--raft-heartbeat-timeout / --raft-leader-lease,
+// gastrolog-o6plq9). The election timeout always equals the heartbeat
+// timeout, as the previous per-profile constants had it; per-group
+// GroupConfig overrides still win over the base.
+var (
+	baseHeartbeatTimeout = DefaultHeartbeatTimeout
+	baseLeaderLease      = DefaultLeaderLeaseTimeout
+)
+
+// ConfigureTimeouts sets the node-wide base Raft failure-detector timing.
+// Call once at boot, before any group starts — running groups do not pick
+// up changes. The lease must not exceed the heartbeat timeout:
+// hashicorp/raft rejects that configuration, and a lease outliving the
+// detector window would let a deposed leader keep serving lease-gated
+// reads.
+func ConfigureTimeouts(heartbeat, lease time.Duration) error {
+	if heartbeat <= 0 || lease <= 0 {
+		return fmt.Errorf("raft timeouts must be positive: heartbeat %v, leader lease %v", heartbeat, lease)
+	}
+	if lease > heartbeat {
+		return fmt.Errorf("raft leader lease (%v) must not exceed the heartbeat timeout (%v)", lease, heartbeat)
+	}
+	baseHeartbeatTimeout = heartbeat
+	baseLeaderLease = lease
+	return nil
 }
 
 // Group is a running Raft group managed by the GroupManager.
@@ -78,12 +129,24 @@ type GroupManager struct {
 	mu     sync.RWMutex
 	groups map[string]*Group
 
-	transport    *multiraft.Transport[string]
-	nodeID       string
-	baseDir      string       // <home>/raft/groups/
-	shutdownLast string       // group ID to shut down last (e.g. config group)
-	wal          *raftwal.WAL // optional shared WAL; nil = per-group boltdb
-	logger       *slog.Logger
+	transport      *multiraft.Transport[string]
+	peerConns      GroupConnCloser
+	ensureRaftLane func(groupID string) error
+	removeRaftLane func(groupID string)
+	nodeID         string
+	baseDir        string       // <home>/raft/groups/
+	shutdownLast   string       // group ID to shut down last (e.g. config group)
+	wal            *raftwal.WAL // optional shared WAL; nil = per-group boltdb
+	logger         *slog.Logger
+	// liveness accumulates Raft liveness events across all groups on this
+	// node for the NodeStats broadcast (gastrolog-1io54g).
+	liveness LivenessCounters
+}
+
+// GroupConnCloser closes outbound raft-lane peer connections when a group is
+// destroyed. Optional; production nodes pass cluster.PeerConns.
+type GroupConnCloser interface {
+	CloseGroupConns(groupID string)
 }
 
 // GroupManagerConfig holds configuration for creating a GroupManager.
@@ -110,17 +173,30 @@ type GroupManagerConfig struct {
 	// Writes from all groups are batched into a single fsync, reducing disk
 	// I/O at high group counts. When nil, each group gets its own boltdb.
 	WAL *raftwal.WAL
+
+	// PeerConns closes per-group outbound raft-lane connections on DestroyGroup.
+	PeerConns GroupConnCloser
+
+	// EnsureRaftLane starts the inbound per-group gRPC stack for groupID.
+	// Required in TLS cluster mode before the group receives raft RPCs.
+	EnsureRaftLane func(groupID string) error
+
+	// RemoveRaftLane tears down the inbound per-group gRPC stack for groupID.
+	RemoveRaftLane func(groupID string)
 }
 
 // NewGroupManager creates a manager for Raft group lifecycle.
 func NewGroupManager(cfg GroupManagerConfig) *GroupManager {
 	return &GroupManager{
-		groups:       make(map[string]*Group),
-		transport:    cfg.Transport,
-		nodeID:       cfg.NodeID,
-		baseDir:      cfg.BaseDir,
-		shutdownLast: cfg.ShutdownLast,
-		wal:          cfg.WAL,
+		groups:         make(map[string]*Group),
+		transport:      cfg.Transport,
+		peerConns:      cfg.PeerConns,
+		ensureRaftLane: cfg.EnsureRaftLane,
+		removeRaftLane: cfg.RemoveRaftLane,
+		nodeID:         cfg.NodeID,
+		baseDir:        cfg.BaseDir,
+		shutdownLast:   cfg.ShutdownLast,
+		wal:            cfg.WAL,
 		logger: comp.Root("raft-group-manager").Desc(
 			"Per-vault Raft group manager — opens, closes, and supervises the per-vault control-plane Raft groups.",
 		).Apply(logging.Default(cfg.Logger)),
@@ -146,6 +222,13 @@ func (m *GroupManager) CreateGroup(cfg GroupConfig) (*Group, error) {
 	if m.wal == nil {
 		return nil, fmt.Errorf("WAL required for group %q", cfg.GroupID)
 	}
+
+	if m.ensureRaftLane != nil {
+		if err := m.ensureRaftLane(cfg.GroupID); err != nil {
+			return nil, fmt.Errorf("ensure raft lane for group %q: %w", cfg.GroupID, err)
+		}
+	}
+
 	gs := m.wal.GroupStore(cfg.GroupID)
 
 	snapStore, err := hraft.NewFileSnapshotStore(groupDir, 2, io.Discard)
@@ -174,6 +257,9 @@ func (m *GroupManager) CreateGroup(cfg GroupConfig) (*Group, error) {
 		dir:  groupDir,
 	}
 	m.groups[cfg.GroupID] = g
+
+	_, _, leaseTimeout := raftTimeouts(cfg)
+	ObserveRaftDiagnostics(r, logging.NewRaftGroupSlog(m.logger, cfg.GroupID), leaseTimeout, &m.liveness)
 
 	m.logger.Info("raft group created",
 		"group", cfg.GroupID,
@@ -216,6 +302,12 @@ func (m *GroupManager) DestroyGroup(groupID string) error {
 		m.logger.Error("raft shutdown failed", "group", groupID, "error", err)
 	}
 	m.transport.RemoveGroup(groupID)
+	if m.peerConns != nil {
+		m.peerConns.CloseGroupConns(groupID)
+	}
+	if m.removeRaftLane != nil {
+		m.removeRaftLane(groupID)
+	}
 
 	m.logger.Info("raft group destroyed", "group", groupID)
 	return nil
@@ -261,6 +353,12 @@ func (m *GroupManager) RemoveMember(groupID string, serverID hraft.ServerID) err
 // Groups are shut down concurrently to avoid sequential election timeout
 // delays on follower nodes. If shutdownLast is set, that group is stopped after
 // all others complete.
+// Liveness returns the node-level Raft liveness counters accumulated across
+// every group this manager observes (gastrolog-1io54g).
+func (m *GroupManager) Liveness() *LivenessCounters {
+	return &m.liveness
+}
+
 func (m *GroupManager) Shutdown() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -323,7 +421,7 @@ func (m *GroupManager) newRaftConfig(cfg GroupConfig) *hraft.Config {
 	conf := hraft.DefaultConfig()
 	conf.LocalID = hraft.ServerID(m.nodeID)
 
-	raftLogger := logging.NewHclogAdapter(m.logger.With("group", cfg.GroupID))
+	raftLogger := logging.NewRaftGroupHclog(m.logger, cfg.GroupID)
 	filtered := logging.FilterHclogMessages(raftLogger, "entering follower state")
 	conf.Logger = logging.DowngradeHclogToDebug(filtered,
 		"failed to heartbeat",
@@ -337,6 +435,7 @@ func (m *GroupManager) newRaftConfig(cfg GroupConfig) *hraft.Config {
 		"starting snapshot up to",
 		"snapshot complete up to",
 		"compacting logs",
+		"no logs to truncate",
 		"pipelining replication",
 		"aborting pipeline replication",
 		"failed to contact",
@@ -357,11 +456,34 @@ func (m *GroupManager) newRaftConfig(cfg GroupConfig) *hraft.Config {
 		conf.TrailingLogs = cfg.TrailingLogs
 	}
 
-	conf.HeartbeatTimeout = 1000 * time.Millisecond
-	conf.ElectionTimeout = 1000 * time.Millisecond
-	conf.LeaderLeaseTimeout = 500 * time.Millisecond
+	conf.HeartbeatTimeout, conf.ElectionTimeout, conf.LeaderLeaseTimeout = raftTimeouts(cfg)
 
 	return conf
+}
+
+// RaftTimeouts returns HeartbeatTimeout, ElectionTimeout, and LeaderLeaseTimeout
+// for a group, honoring per-field overrides on cfg when > 0.
+func RaftTimeouts(cfg GroupConfig) (heartbeat, election, lease time.Duration) {
+	return raftTimeouts(cfg)
+}
+
+func raftTimeouts(cfg GroupConfig) (heartbeat, election, lease time.Duration) {
+	heartbeat = baseHeartbeatTimeout
+	lease = baseLeaderLease
+	if IsVaultControlPlaneGroupID(cfg.GroupID) {
+		heartbeat += vaultCtlTimeoutSlack
+	}
+	election = heartbeat
+	if cfg.HeartbeatTimeout > 0 {
+		heartbeat = cfg.HeartbeatTimeout
+	}
+	if cfg.ElectionTimeout > 0 {
+		election = cfg.ElectionTimeout
+	}
+	if cfg.LeaderLeaseTimeout > 0 {
+		lease = cfg.LeaderLeaseTimeout
+	}
+	return heartbeat, election, lease
 }
 
 // seedGroup gives a fresh Raft instance its initial member configuration via

@@ -13,7 +13,6 @@ import (
 	"log/slog"
 	"regexp"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
@@ -317,7 +316,7 @@ type recordWithRef struct {
 	VaultID   glid.GLID
 	Record    chunk.Record
 	Ref       chunk.RecordRef
-	Reordered bool // true when yielded from reorder fallback (resume by IngestTS, not position)
+	Reordered bool // true when yielded from rank-based TS index scanning (resume by TS, not position)
 }
 
 // record returns the Record with Ref and VaultID populated.
@@ -361,7 +360,7 @@ func New(chunks chunk.ChunkManager, indexes index.IndexManager, logger *slog.Log
 	return &Engine{
 		chunks:  chunks,
 		indexes: indexes,
-		logger:  comp.Root("query-engine").Desc(
+		logger: comp.Root("query-engine").Desc(
 			"Local query execution engine — record/iterator pipeline that runs Search/Histogram/Explain against the local chunk and index managers.",
 		).Apply(logging.Default(logger)),
 	}
@@ -374,7 +373,7 @@ func New(chunks chunk.ChunkManager, indexes index.IndexManager, logger *slog.Log
 func NewWithRegistry(registry manifest.VaultRegistry, logger *slog.Logger) *Engine {
 	return &Engine{
 		registry: registry,
-		logger:   comp.Root("query-engine").Desc(
+		logger: comp.Root("query-engine").Desc(
 			"Local query execution engine — record/iterator pipeline that runs Search/Histogram/Explain against the local chunk and index managers.",
 		).Apply(logging.Default(logger)),
 	}
@@ -506,7 +505,7 @@ func chunkMatchesQuery(m chunk.ChunkMeta, q Query, lower, upper time.Time, chunk
 			return false
 		}
 	}
-	// Skip cloud chunks if requested (histogram local-only scan).
+	// Skip cloud-backed chunks if requested (histogram local-only scan).
 	if q.SkipCloud && m.CloudBacked {
 		return false
 	}
@@ -532,28 +531,51 @@ func chunkMatchesQuery(m chunk.ChunkMeta, q Query, lower, upper time.Time, chunk
 		return false
 	}
 
+	// Time-bounded queries must not treat missing bounds as "matches everything".
+	// Sealed/sealing entries whose IngestTS range could not be resolved would
+	// otherwise pass the overlap test and pull the entire sealing backlog into
+	// a narrow last=5m search.
+	if (!lower.IsZero() || !upper.IsZero()) && m.IngestStart.IsZero() && m.IngestEnd.IsZero() {
+		if m.Sealed || m.State == chunk.ChunkStateSealing {
+			return false
+		}
+	}
+
 	return true
+}
+
+// chunkCmp returns the planner sort comparator for chunk metas: forward =
+// ascending start, reverse = live chunks first, then descending end. The
+// lazy-prime merge (vaultChunksOverlap, one-scanner-at-a-time opening)
+// assumes this order holds GLOBALLY across the chunk list it receives —
+// per-vault sorted runs concatenated in registry order are not enough
+// (gastrolog-33bkl7).
+func chunkCmp(orderBy OrderBy, reverse bool) func(a, b chunk.ChunkMeta) int {
+	startTS, endTS := chunkTimeBounds(orderBy)
+	if reverse {
+		return func(a, b chunk.ChunkMeta) int {
+			// Live (unsealed) chunks may hold records newer than their
+			// IngestStart meta; rank them first when scanning backward.
+			if a.Sealed != b.Sealed {
+				if !a.Sealed {
+					return -1
+				}
+				return 1
+			}
+			if c := endTS(b).Compare(endTS(a)); c != 0 {
+				return c
+			}
+			return startTS(b).Compare(startTS(a))
+		}
+	}
+	return func(a, b chunk.ChunkMeta) int {
+		return startTS(a).Compare(startTS(b))
+	}
 }
 
 // sortChunks sorts chunks by the appropriate timestamp bounds based on OrderBy.
 func sortChunks(out []chunk.ChunkMeta, orderBy OrderBy, reverse bool) {
-	startTS := func(m chunk.ChunkMeta) time.Time {
-		switch orderBy { //nolint:exhaustive // IngestTS is the default
-		case OrderBySourceTS:
-			return m.SourceStart
-		default:
-			return m.IngestStart
-		}
-	}
-	if reverse {
-		slices.SortFunc(out, func(a, b chunk.ChunkMeta) int {
-			return startTS(b).Compare(startTS(a)) // descending
-		})
-	} else {
-		slices.SortFunc(out, func(a, b chunk.ChunkMeta) int {
-			return startTS(a).Compare(startTS(b)) // ascending
-		})
-	}
+	slices.SortFunc(out, chunkCmp(orderBy, reverse))
 }
 
 // searchChunkWithRef returns an iterator over records in a single chunk, including their refs.
@@ -562,28 +584,9 @@ func sortChunks(out []chunk.ChunkMeta, orderBy OrderBy, reverse bool) {
 // Unsealed chunks are scanned sequentially without indexes.
 func (e *Engine) searchChunkWithRef(ctx context.Context, q Query, vaultID glid.GLID, meta chunk.ChunkMeta, startPos *uint64) iter.Seq2[recordWithRef, error] {
 	return func(yield func(recordWithRef, error) bool) {
-		cm, im := e.getVaultManagers(vaultID)
-		if cm == nil {
-			yield(recordWithRef{}, errors.New("vault not found: "+vaultID.String()))
-			return
-		}
-
-		cursor, err := cm.OpenCursor(meta.ID)
+		cursor, err := e.openSearchChunkCursor(vaultID, meta)
 		if err != nil {
-			// FSM-vs-local-cm divergence is a real consistency issue
-			// (gastrolog-3ukgz) but not a per-query failure: the cluster
-			// fan-out asks every node, so peers that DO have the chunk
-			// fill in the records. Streaming a stream-fatal error from
-			// one node would abort the whole client query (records +
-			// histogram), which is worse than missing records from
-			// chunks no node has. Log every skip so operators see the
-			// stale FSM state accumulating, and surface it via metrics
-			// rather than killing the user's query.
-			if errors.Is(err, chunk.ErrChunkNotFound) {
-				if e.logger != nil {
-					e.logger.Warn("chunk in FSM but missing from local cm — skipping (gastrolog-3ukgz)",
-						"vault", vaultID, "chunk", meta.ID, "sealed", meta.Sealed, "cloud_backed", meta.CloudBacked)
-				}
+			if errors.Is(err, errSkipMissingLocalChunk) {
 				return
 			}
 			yield(recordWithRef{}, err)
@@ -596,8 +599,7 @@ func (e *Engine) searchChunkWithRef(ctx context.Context, q Query, vaultID glid.G
 			return
 		}
 
-		// Try to use indexes for sealed chunks, fall back to sequential scan
-		// if indexes aren't available yet (chunk sealed but not yet indexed).
+		cm, im := e.getVaultManagers(vaultID)
 		scanner, err := e.buildScannerWithManagers(ctx, cursor, q, vaultID, meta, startPos, cm, im)
 		if err != nil {
 			yield(recordWithRef{}, err)
@@ -616,6 +618,35 @@ func (e *Engine) searchChunkWithRef(ctx context.Context, q Query, vaultID glid.G
 			}
 		}
 	}
+}
+
+var errSkipMissingLocalChunk = errors.New("chunk in cluster manifest but not readable on this node")
+
+func (e *Engine) openSearchChunkCursor(vaultID glid.GLID, meta chunk.ChunkMeta) (chunk.RecordCursor, error) {
+	cm, _ := e.getVaultManagers(vaultID)
+	if cm == nil {
+		return nil, errors.New("vault not found: " + vaultID.String())
+	}
+
+	cursor, err := cm.OpenCursor(meta.ID)
+	if err != nil {
+		if errors.Is(err, chunk.ErrChunkNotFound) && e.registry != nil {
+			if pco, ok := e.registry.(manifest.PipelineChunkOpener); ok {
+				cursor, err = pco.OpenPipelineChunkCursor(vaultID, meta.ID)
+			}
+		}
+	}
+	if err != nil {
+		if errors.Is(err, chunk.ErrChunkNotFound) {
+			if e.logger != nil {
+				e.logger.Warn("chunk in cluster manifest but not readable on this node — skipping",
+					"vault", vaultID, "chunk", meta.ID, "sealed", meta.Sealed, "cloud_backed", meta.CloudBacked)
+			}
+			return nil, errSkipMissingLocalChunk
+		}
+		return nil, err
+	}
+	return cursor, nil
 }
 
 // positionCursor sets the cursor to the correct starting position for the query.
@@ -648,18 +679,36 @@ func positionCursor(cursor chunk.RecordCursor, q Query, meta chunk.ChunkMeta, st
 // It tries to use indexes when available, falling back to runtime filters when not.
 // vaultID is included in the returned recordWithRef for multi-vault queries.
 //
-// When OrderBy != OrderByWriteTS, sealed chunks use TS-index-ordered scanning:
-// the TS index is walked in timestamp order, producing positions in TS order
-// rather than physical order. For active chunks, results are buffered and sorted.
+// When OrderBy != OrderByWriteTS, chunks use TS-index-ordered scanning: the TS
+// index is walked rank-by-rank in timestamp order. There is no heap fallback.
+func chunkLocallyMaterialized(cm chunk.ChunkManager, meta chunk.ChunkMeta) bool {
+	if meta.Sealed {
+		return true
+	}
+	type localContent interface {
+		HasLocalContent(chunk.ChunkID) bool
+	}
+	lc, ok := cm.(localContent)
+	return ok && lc.HasLocalContent(meta.ID)
+}
+
 func (e *Engine) buildScannerWithManagers(ctx context.Context, cursor chunk.RecordCursor, q Query, vaultID glid.GLID, meta chunk.ChunkMeta, startPos *uint64, cm chunk.ChunkManager, im index.IndexManager) (iter.Seq2[recordWithRef, error], error) {
 	b := newScannerBuilder(meta.ID)
 	b.vaultID = vaultID
 
 	setMinPositionsFromBounds(b, q, meta, cm, im)
 
-	// Resume position takes precedence over time-based start.
+	// Resume position takes precedence over time-based start. Direction
+	// decides which bound it is: forward has already returned everything
+	// below the resume position, reverse everything at or above it. Using
+	// minPos for a reverse resume would exclude every remaining record and
+	// silently truncate pagination (gastrolog-i2uman).
 	if startPos != nil {
-		b.setMinPosition(*startPos)
+		if q.Reverse() {
+			b.setMaxPosition(*startPos)
+		} else {
+			b.setMinPosition(*startPos)
+		}
 	}
 
 	// Exact position filter: seek directly to one record.
@@ -686,137 +735,42 @@ func (e *Engine) buildScannerWithManagers(ctx context.Context, cursor chunk.Reco
 		b.addFilter(sourceTimeFilter(q.SourceStart, q.SourceEnd))
 	}
 
+	// Active/sealing FSM entries without a local GLCB fall back to manifest
+	// segment scans. Once data.glcb is on disk (registered with the chunk
+	// manager), use the embedded ITSI like a sealed chunk.
+	if !chunkLocallyMaterialized(cm, meta) {
+		view := tsIndexViewForChunk(cm, im, q.OrderBy)
+		if !chunkHasTSIndex(view, meta.ID) {
+			return b.build(ctx, cursor, q), nil
+		}
+	}
+
 	// Records are stored in physical write order but must be yielded in
-	// IngestTS or SourceTS order. Always go through TS-ordered scanning.
+	// IngestTS or SourceTS order. Sealed chunks and actives with a TS index
+	// go through rank-ordered scanning.
 	return e.buildTSOrderedScanner(ctx, cursor, q, b, meta, startPos, cm, im)
 }
 
 // buildTSOrderedScanner creates a scanner that yields records in TS-index order.
-// For sealed chunks with a TS index, it walks the index to produce positions in
-// timestamp order. For active chunks (or when the index is unavailable), it falls
-// back to buffering and sorting.
-func (e *Engine) buildTSOrderedScanner(ctx context.Context, cursor chunk.RecordCursor, q Query, b *scannerBuilder, meta chunk.ChunkMeta, startPos *uint64, cm chunk.ChunkManager, im index.IndexManager) (iter.Seq2[recordWithRef, error], error) {
-	if meta.Sealed {
-		// IndexManager handles all sealed chunks — local and cloud-warm-cached
-		// alike — by mmapping the embedded ITSI/STSI section out of data.glcb.
-		// When the cloud blob isn't in the warm cache we fall through to the
-		// reorder buffer rather than fetching the index from S3 (gastrolog-1dg3i).
-		tsEntries, err := loadTSEntries(im, meta.ID, q.OrderBy)
-		if err == nil {
-			e.logger.Debug("TS index scanner activated", "chunk", meta.ID, "entries", len(tsEntries), "cloud", meta.CloudBacked)
-			return buildTSIndexScanner(ctx, cursor, q, b, meta, tsEntries)
+// Chunks must expose a rank-based TS index (mmap'd ITSI/STSI or CM IngestTSRankView).
+// There is no heap fallback.
+func (e *Engine) buildTSOrderedScanner(ctx context.Context, cursor chunk.RecordCursor, q Query, b *scannerBuilder, meta chunk.ChunkMeta, _ *uint64, cm chunk.ChunkManager, im index.IndexManager) (iter.Seq2[recordWithRef, error], error) {
+	scan, err := buildMmapTSIndexScanner(ctx, cursor, q, b, meta, cm, im)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
 		}
-		e.logger.Debug("TS index unavailable, falling back to reorder buffer", "chunk", meta.ID, "cloud", meta.CloudBacked, "error", err, "isNotFound", errors.Is(err, index.ErrIndexNotFound))
-		// Fall through to buffer-and-sort if index unavailable.
+		e.logger.Error("chunk TS index required",
+			"chunk", meta.ID,
+			"vault", b.vaultID,
+			"sealed", meta.Sealed,
+			"cloud", meta.CloudBacked,
+			"error", err,
+		)
+		return nil, fmt.Errorf("chunk %s: TS index required: %w", meta.ID, err)
 	}
-
-	// Active chunk or index unavailable: build normal scanner then buffer & sort.
-	innerQ := q
-	if meta.Sealed {
-		// For sealed chunks without a TS index, the sequential scanner reads
-		// in WriteTS order and applies IngestTS time bounds — stopping early
-		// when it hits a record with IngestTS before the lower bound. But
-		// WriteTS and IngestTS can differ (forwarded records), so the scanner
-		// misses records that are within the time range but out of WriteTS
-		// order. Strip time bounds from the inner scanner and apply them
-		// after sorting by the correct TS field.
-		// Preserve the reverse flag explicitly since Reverse() has a legacy
-		// fallback that inspects Start/End ordering.
-		innerQ.IsReverse = q.Reverse()
-		innerQ.Start = time.Time{}
-		innerQ.End = time.Time{}
-	}
-
-	if b.isSequential() && b.hasMinPos && startPos == nil && !q.Reverse() {
-		if err := cursor.Seek(chunk.RecordRef{ChunkID: meta.ID, Pos: b.minPos}); err != nil {
-			return nil, err
-		}
-	}
-	inner := b.build(ctx, cursor, innerQ)
-	if meta.Sealed {
-		lower, upper := q.TimeBounds()
-		return reorderByTSWithBounds(inner, q.OrderBy, q.Reverse(), lower, upper, q.ResumeTS), nil
-	}
-	return reorderByTS(inner, q.OrderBy, q.Reverse()), nil
-}
-
-// loadTSEntries loads the appropriate TS index entries based on OrderBy.
-func loadTSEntries(im index.IndexManager, chunkID chunk.ChunkID, orderBy OrderBy) ([]index.TSEntry, error) {
-	switch orderBy { //nolint:exhaustive // IngestTS is the default
-	case OrderBySourceTS:
-		return im.LoadSourceEntries(chunkID)
-	default:
-		return im.LoadIngestEntries(chunkID)
-	}
-}
-
-// buildTSIndexScanner creates a position scanner from TS-index-ordered entries.
-// It prunes entries by time bounds, intersects with any existing index positions
-// (using a set to preserve TS order), and builds a position scanner with time
-// bounds checking disabled (pruning already handled).
-func buildTSIndexScanner(ctx context.Context, cursor chunk.RecordCursor, q Query, b *scannerBuilder, meta chunk.ChunkMeta, tsEntries []index.TSEntry) (iter.Seq2[recordWithRef, error], error) {
-	// Prune by time bounds (entries are sorted by TS, use binary search).
-	tsEntries = pruneTSEntriesByBounds(tsEntries, q)
-
-	if len(tsEntries) == 0 {
-		return emptyScanner(), nil
-	}
-
-	// If we have index-narrowed positions from token/KV lookups, intersect
-	// using a set (not sorted merge) to preserve TS order.
-	var tsPositions []uint64
-	if b.positions != nil {
-		posSet := make(map[uint64]struct{}, len(b.positions))
-		for _, p := range b.positions {
-			posSet[p] = struct{}{}
-		}
-		for _, e := range tsEntries {
-			if _, ok := posSet[uint64(e.Pos)]; ok {
-				tsPositions = append(tsPositions, uint64(e.Pos))
-			}
-		}
-	} else {
-		tsPositions = make([]uint64, len(tsEntries))
-		for i, e := range tsEntries {
-			tsPositions[i] = uint64(e.Pos)
-		}
-	}
-
-	if len(tsPositions) == 0 {
-		return emptyScanner(), nil
-	}
-
-	// Replace positions with TS-ordered ones and disable time bounds checking
-	// (already handled by pruneTSEntriesByBounds).
-	b.positions = tsPositions
-	b.skipTimeBounds = true
-	return b.build(ctx, cursor, q), nil
-}
-
-// pruneTSEntriesByBounds filters TS index entries to those within the query time bounds.
-// The entries are sorted by TS, so we use binary search for lower and upper bounds.
-func pruneTSEntriesByBounds(entries []index.TSEntry, q Query) []index.TSEntry {
-	lower, upper := q.TimeBounds()
-
-	// Binary search for lower bound.
-	if !lower.IsZero() {
-		lowerNano := lower.UnixNano()
-		lo := sort.Search(len(entries), func(i int) bool {
-			return entries[i].TS >= lowerNano
-		})
-		entries = entries[lo:]
-	}
-
-	// Binary search for upper bound (exclusive).
-	if !upper.IsZero() {
-		upperNano := upper.UnixNano()
-		hi := sort.Search(len(entries), func(i int) bool {
-			return entries[i].TS >= upperNano
-		})
-		entries = entries[:hi]
-	}
-
-	return entries
+	e.logger.Debug("mmap TS index scanner activated", "chunk", meta.ID, "sealed", meta.Sealed, "cloud", meta.CloudBacked)
+	return scan, nil
 }
 
 // setMinPositionsFromBounds sets the scanner builder's minimum position from time bounds
@@ -837,7 +791,7 @@ func seekIngestTS(b *scannerBuilder, lower time.Time, meta chunk.ChunkMeta, cm c
 			b.setMinPosition(pos)
 			return
 		}
-		// Fallback: chunk manager handles cloud chunks with locally-cached TS index.
+		// Fallback: chunk manager handles cloud-backed chunks with locally-cached TS index.
 		if pos, found, err := cm.FindIngestStartPosition(meta.ID, lower); err == nil && found {
 			b.setMinPosition(pos)
 		}
@@ -857,7 +811,7 @@ func seekSourceTS(b *scannerBuilder, sourceStart time.Time, meta chunk.ChunkMeta
 			b.setMinPosition(pos)
 			return
 		}
-		// Fallback: chunk manager handles cloud chunks with locally-cached TS index.
+		// Fallback: chunk manager handles cloud-backed chunks with locally-cached TS index.
 		if pos, found, err := cm.FindSourceStartPosition(meta.ID, sourceStart); err == nil && found {
 			b.setMinPosition(pos)
 		}
@@ -1000,6 +954,9 @@ func collectBranchPositions(parent *scannerBuilder, branch *querylang.Conjunctio
 	bb := newScannerBuilder(meta.ID)
 	if parent.hasMinPos {
 		bb.setMinPosition(parent.minPos)
+	}
+	if parent.hasMaxPos {
+		bb.setMaxPosition(parent.maxPos)
 	}
 
 	tokens, kv, globs, _ := ConjunctionToFilters(branch)

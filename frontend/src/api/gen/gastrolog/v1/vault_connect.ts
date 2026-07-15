@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { AnalyzeChunkRequest, AnalyzeChunkResponse, ArchiveChunkRequest, ArchiveChunkResponse, ExportVaultRequest, ExportVaultResponse, GetChunkRequest, GetChunkResponse, GetIndexesRequest, GetIndexesResponse, GetStatsRequest, GetStatsResponse, GetVaultRequest, GetVaultResponse, ImportRecordsRequest, ImportRecordsResponse, ListChunksRequest, ListChunksResponse, ListVaultsRequest, ListVaultsResponse, ReindexVaultRequest, ReindexVaultResponse, RepatriateOrphanRequest, RepatriateOrphanResponse, RestoreChunkRequest, RestoreChunkResponse, RetryUnreadableChunksRequest, RetryUnreadableChunksResponse, SealVaultRequest, SealVaultResponse, ValidateVaultRequest, ValidateVaultResponse, WatchChunksRequest, WatchChunksResponse } from "./vault_pb.js";
+import { AnalyzeChunkRequest, AnalyzeChunkResponse, ArchiveChunkRequest, ArchiveChunkResponse, ExportVaultRequest, ExportVaultResponse, GetChunkRequest, GetChunkResponse, GetIndexesRequest, GetIndexesResponse, GetPipelineBacklogRequest, GetPipelineBacklogResponse, GetStatsRequest, GetStatsResponse, GetVaultRequest, GetVaultResponse, ImportRecordsRequest, ImportRecordsResponse, ListChunksRequest, ListChunksResponse, ListVaultsRequest, ListVaultsResponse, ReindexVaultRequest, ReindexVaultResponse, RepatriateOrphanRequest, RepatriateOrphanResponse, RestoreChunkRequest, RestoreChunkResponse, RetryUnreadableChunksRequest, RetryUnreadableChunksResponse, SealVaultRequest, SealVaultResponse, ValidateVaultRequest, ValidateVaultResponse, WatchChunksRequest, WatchChunksResponse } from "./vault_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -187,7 +187,7 @@ export const VaultService = {
     /**
      * WatchChunks opens a server-streaming subscription that pushes a
      * notification every time chunk metadata changes on this node (seal,
-     * delete, create, compress, cloud upload). The client uses the
+     * delete, create, cloud upload). The client uses the
      * notification as a signal to refetch via ListChunks — no chunk data
      * is carried in the stream itself. Same pattern as WatchConfig.
      * See gastrolog-1jijm.
@@ -215,6 +215,20 @@ export const VaultService = {
       name: "RepatriateOrphan",
       I: RepatriateOrphanRequest,
       O: RepatriateOrphanResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * GetPipelineBacklog returns vault-ctl registry/manifest state plus
+     * cluster-wide on-disk segment counts (working, completed, head,
+     * pre-head) so operators can see chunking pipeline depth in the
+     * inspector without shell access.
+     *
+     * @generated from rpc gastrolog.v1.VaultService.GetPipelineBacklog
+     */
+    getPipelineBacklog: {
+      name: "GetPipelineBacklog",
+      I: GetPipelineBacklogRequest,
+      O: GetPipelineBacklogResponse,
       kind: MethodKind.Unary,
     },
   }

@@ -302,3 +302,66 @@ func (d *downgradingHclog) Named(name string) hclog.Logger {
 func (d *downgradingHclog) ResetNamed(name string) hclog.Logger {
 	return &downgradingHclog{base: d.base.ResetNamed(name), patterns: d.patterns}
 }
+
+// EnsureHclogMinLevel upgrades messages matching patterns to at least minLevel.
+// Wrap outside DowngradeHclogToDebug so critical diagnostics stay visible.
+func EnsureHclogMinLevel(base hclog.Logger, minLevel hclog.Level, patterns ...string) hclog.Logger {
+	return &ensureMinLevelHclog{base: base, minLevel: minLevel, patterns: patterns}
+}
+
+type ensureMinLevelHclog struct {
+	base     hclog.Logger
+	minLevel hclog.Level
+	patterns []string
+}
+
+func (e *ensureMinLevelHclog) matches(msg string) bool {
+	for _, p := range e.patterns {
+		if strings.Contains(msg, p) {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *ensureMinLevelHclog) log(level hclog.Level, msg string, args ...any) {
+	if e.matches(msg) && level < e.minLevel {
+		level = e.minLevel
+	}
+	e.base.Log(level, msg, args...)
+}
+
+func (e *ensureMinLevelHclog) Log(level hclog.Level, msg string, args ...any) {
+	e.log(level, msg, args...)
+}
+func (e *ensureMinLevelHclog) Trace(msg string, args ...any) { e.base.Trace(msg, args...) }
+func (e *ensureMinLevelHclog) Debug(msg string, args ...any) { e.base.Debug(msg, args...) }
+func (e *ensureMinLevelHclog) Info(msg string, args ...any)  { e.log(hclog.Info, msg, args...) }
+func (e *ensureMinLevelHclog) Warn(msg string, args ...any)  { e.log(hclog.Warn, msg, args...) }
+func (e *ensureMinLevelHclog) Error(msg string, args ...any) { e.log(hclog.Error, msg, args...) }
+
+func (e *ensureMinLevelHclog) IsTrace() bool              { return e.base.IsTrace() }
+func (e *ensureMinLevelHclog) IsDebug() bool              { return e.base.IsDebug() }
+func (e *ensureMinLevelHclog) IsInfo() bool               { return e.base.IsInfo() }
+func (e *ensureMinLevelHclog) IsWarn() bool               { return e.base.IsWarn() }
+func (e *ensureMinLevelHclog) IsError() bool              { return e.base.IsError() }
+func (e *ensureMinLevelHclog) ImpliedArgs() []any         { return e.base.ImpliedArgs() }
+func (e *ensureMinLevelHclog) Name() string               { return e.base.Name() }
+func (e *ensureMinLevelHclog) SetLevel(level hclog.Level) { e.base.SetLevel(level) }
+func (e *ensureMinLevelHclog) GetLevel() hclog.Level      { return e.base.GetLevel() }
+func (e *ensureMinLevelHclog) StandardLogger(o *hclog.StandardLoggerOptions) *log.Logger {
+	return e.base.StandardLogger(o)
+}
+func (e *ensureMinLevelHclog) StandardWriter(o *hclog.StandardLoggerOptions) io.Writer {
+	return e.base.StandardWriter(o)
+}
+
+func (e *ensureMinLevelHclog) With(args ...any) hclog.Logger {
+	return &ensureMinLevelHclog{base: e.base.With(args...), minLevel: e.minLevel, patterns: e.patterns}
+}
+func (e *ensureMinLevelHclog) Named(name string) hclog.Logger {
+	return &ensureMinLevelHclog{base: e.base.Named(name), minLevel: e.minLevel, patterns: e.patterns}
+}
+func (e *ensureMinLevelHclog) ResetNamed(name string) hclog.Logger {
+	return &ensureMinLevelHclog{base: e.base.ResetNamed(name), minLevel: e.minLevel, patterns: e.patterns}
+}

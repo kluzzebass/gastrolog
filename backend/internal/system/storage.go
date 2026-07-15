@@ -156,10 +156,40 @@ type CloudService struct {
 	// Archival lifecycle.
 	ArchivalMode      string                   `json:"archivalMode,omitempty"`      // "none" or "active"
 	Transitions       []CloudStorageTransition `json:"transitions,omitempty"`       // ordered by After duration
-	RestoreSpeed       string                   `json:"restoreSpeed,omitempty"`       // default restore speed
+	RestoreSpeed      string                   `json:"restoreSpeed,omitempty"`      // default restore speed
 	RestoreDays       uint32                   `json:"restoreDays,omitempty"`       // S3 restore window
 	SuspectGraceDays  uint32                   `json:"suspectGraceDays,omitempty"`  // default 7
 	ReconcileSchedule string                   `json:"reconcileSchedule,omitempty"` // default "0 3 * * *"
+}
+
+// StoreParams returns this cloud service's blobstore factory params — the
+// exact key/value shape blobstore.CreateStore and blobstore.ValidateConfig
+// consume. Empty fields are omitted. This is the single mapping from the
+// persisted CloudService config to store params: both vault init
+// (orchestrator addCloudParams) and config-accept validation
+// (PutCloudService) go through it, so a config that passes validation
+// cannot fail store creation on shape.
+//
+// Keys mirror the blobstore.Param* constants; system cannot import
+// blobstore without dragging provider SDKs into the config package, so
+// the literals here are pinned against those constants by blobstore's
+// factory tests.
+func (cs CloudService) StoreParams() map[string]string {
+	params := make(map[string]string)
+	set := func(k, v string) {
+		if v != "" {
+			params[k] = v
+		}
+	}
+	set("bucket", cs.Bucket)
+	set("region", cs.Region)
+	set("endpoint", cs.Endpoint)
+	set("access_key", cs.AccessKey)
+	set("secret_key", cs.SecretKey)
+	set("container", cs.Container)
+	set("connection_string", cs.ConnectionString)
+	set("credentials_json", cs.CredentialsJSON)
+	return params
 }
 
 // VaultType identifies the storage medium for a vault.
@@ -243,43 +273,58 @@ func NodeIDForStorage(storageID string, nscs []NodeStorageConfig) string {
 }
 
 // StorageIDForNode returns the best storage ID on a given node for a vault.
-// For file/cloud vaults, matches the required storage class.
-// Returns a synthetic storage ID for memory vaults on nodes without matching file storages.
+// For file vaults it requires an exact storage-class match and returns ""
+// when the node has none — the caller must fail placement loudly. The old
+// silent FileStorages[0] fallback placed leaders on the wrong disk class
+// while follower placement (eligibleStorages/storageEligible) stayed strict
+// (gastrolog-2bv1x). Memory/JSONL vaults have no class requirement and fall
+// back to a synthetic storage ID.
 func StorageIDForNode(nodeID string, v VaultConfig, nscs []NodeStorageConfig) string {
 	idx := slices.IndexFunc(nscs, func(n NodeStorageConfig) bool { return n.NodeID == nodeID })
-	if idx < 0 {
-		// Node has no storage config — use synthetic storage ID.
-		return SyntheticStorageID(nodeID)
-	}
 
-	nsc := nscs[idx]
-	var requiredClass uint32
 	switch v.Type {
+	case VaultTypeMemory, VaultTypeJSONL:
+		// No storage class — pick any storage, or synthetic if none.
+		if idx >= 0 && len(nscs[idx].FileStorages) > 0 {
+			return nscs[idx].FileStorages[0].ID.String()
+		}
+		return SyntheticStorageID(nodeID)
 	case VaultTypeFile:
+		if idx < 0 {
+			return ""
+		}
 		// Single storage class for all file vaults (local-only and
 		// cloud-backed alike). After step 7k, the active chunk and
 		// the warm cache live at the same path under chunkDir, so
 		// distinguishing "active" and "cache" classes serves no
 		// purpose. See gastrolog-4k5mg.
-		requiredClass = v.StorageClass
-	case VaultTypeMemory, VaultTypeJSONL:
-		// No storage class — pick any storage, or synthetic if none.
-		if len(nsc.FileStorages) > 0 {
-			return nsc.FileStorages[0].ID.String()
+		for _, fs := range nscs[idx].FileStorages {
+			if fs.StorageClass == v.StorageClass {
+				return fs.ID.String()
+			}
 		}
-		return SyntheticStorageID(nodeID)
+		return ""
+	default:
+		return ""
 	}
+}
 
-	for _, fs := range nsc.FileStorages {
-		if fs.StorageClass == requiredClass {
-			return fs.ID.String()
+// PlacementNodeIDs returns the unique node ID of every vault placement member.
+func PlacementNodeIDs(placements []VaultPlacement, nscs []NodeStorageConfig) []string {
+	seen := make(map[string]struct{})
+	var out []string
+	for _, p := range placements {
+		nid := NodeIDForStorage(p.StorageID, nscs)
+		if nid == "" {
+			continue
 		}
+		if _, ok := seen[nid]; ok {
+			continue
+		}
+		seen[nid] = struct{}{}
+		out = append(out, nid)
 	}
-	// Fallback for follower replicas on nodes without exact class match.
-	if len(nsc.FileStorages) > 0 {
-		return nsc.FileStorages[0].ID.String()
-	}
-	return SyntheticStorageID(nodeID)
+	return out
 }
 
 // LeaderNodeID derives the leader node from placements + storage configs.

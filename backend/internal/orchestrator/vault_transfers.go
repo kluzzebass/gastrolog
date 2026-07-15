@@ -216,9 +216,10 @@ func (o *Orchestrator) moveChunkFS(ctx context.Context, chunkID chunk.ChunkID, s
 // --- Vault drain (cross-node migration on reassignment) ---
 
 // DrainVault starts an async migration of a vault's sealed chunks to a target
-// node. The vault remains registered locally (for search) but the filter set
-// routes new records to the target node via RecordForwarder. Once all sealed
-// chunks are transferred, the vault is unregistered locally.
+// node. The vault remains registered locally (for search) while the pipeline
+// routing table directs new records to the target node's home (segment
+// distribution/collection). Once all sealed chunks are transferred, the vault
+// is unregistered locally.
 //
 // Role: runs on whichever node is losing the vault (source node). Dispatch
 // invokes this after config reassignment via CmdPutVault / routing changes
@@ -312,9 +313,8 @@ func (o *Orchestrator) drainWorker(ctx context.Context, vaultID glid.GLID, targe
 		return // drainSealed already called job.Fail
 	}
 
-	// Final seal: catch any records that were appended between
-	// DrainVault's SealActiveChunk and the worker starting (e.g. from
-	// ForwardRecords RPCs from nodes with stale filter sets).
+	// Final seal: flush any residual active chunk on the per-instance
+	// chunk manager before the last sealed-chunk transfer sweep.
 	if _, err := o.SealActive(vaultID); err != nil {
 		o.drainLogger.Warn("drain: final seal", "vault", vaultID, "error", err)
 	}
@@ -392,7 +392,6 @@ func (o *Orchestrator) finishDrain(vaultID glid.GLID) {
 	}
 
 	delete(o.vaults, vaultID)
-	o.rebuildRouteSetLocked()
 
 	o.drainLogger.Info("vault drain completed, vault unregistered", "vault", vaultID)
 }
@@ -430,4 +429,3 @@ func (o *Orchestrator) IsDraining(vaultID glid.GLID) bool {
 	_, ok := o.draining[vaultID]
 	return ok
 }
-

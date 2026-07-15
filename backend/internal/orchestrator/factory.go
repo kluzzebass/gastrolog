@@ -11,6 +11,7 @@ import (
 	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/cluster"
+	"gastrolog/internal/home"
 	"gastrolog/internal/index"
 	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/system"
@@ -93,7 +94,7 @@ type Factories struct {
 	// Used by the instance apply forwarder to forward Raft applies when
 	// the config placement leader is not the vault-ctl Raft leader.
 	// Nil in single-node mode.
-	PeerConns *cluster.PeerConns
+	PeerConns *cluster.PeerConnManager
 
 	// Note: No QueryEngineFactory is needed because QueryEngine construction
 	// is trivial and uniform (query.New(cm, im, logger)). If QueryEngine ever
@@ -114,6 +115,20 @@ func (o *Orchestrator) ApplyConfig(sys *system.System, factories Factories) erro
 
 	o.groupMgr = factories.GroupManager
 	o.peerConns = factories.PeerConns
+	if factories.PeerConns != nil && o.segmentPuller == nil {
+		o.segmentPuller = cluster.NewSegmentPuller(factories.PeerConns)
+		o.chunkGLCBPuller = cluster.NewChunkGLCBPuller(factories.PeerConns)
+	}
+
+	// Root the per-vault segment areas under the node home unless already
+	// configured. Origin vaults are registered during applyVaults→route reload,
+	// so this must be set first. See originRoot.
+	if o.segmentsDir == "" && factories.HomeDir != "" {
+		o.homeDir = factories.HomeDir
+		o.segmentsDir = home.New(factories.HomeDir).SegmentsDir()
+	} else if factories.HomeDir != "" {
+		o.homeDir = factories.HomeDir
+	}
 
 	if err := o.applyVaults(sys, factories); err != nil {
 		return err
@@ -124,13 +139,14 @@ func (o *Orchestrator) ApplyConfig(sys *system.System, factories Factories) erro
 		return err
 	}
 
-	// Schedule the rotation sweep so time-based policies (e.g., maxAge)
-	// trigger even when no records are flowing to a vault.
-	if !o.scheduler.HasJob(rotationSweepJobName) {
-		if err := o.scheduler.AddJob(rotationSweepJobName, rotationSweepSchedule, o.rotationSweep); err != nil {
-			o.logger.Warn("failed to add rotation sweep job", "error", err)
+	// Schedule the placement-reconcile sweep so sealed-chunk replication
+	// targets and the routing table self-heal even between config-change
+	// notifications.
+	if !o.scheduler.HasJob(placementSweepJobName) {
+		if err := o.scheduler.AddJob(placementSweepJobName, placementSweepSchedule, o.placementSweep); err != nil {
+			o.logger.Warn("failed to add placement-reconcile sweep job", "error", err)
 		}
-		o.scheduler.Describe(rotationSweepJobName, "Check active chunks for time-based rotation")
+		o.scheduler.Describe(placementSweepJobName, "Refresh replication targets and routing table")
 	}
 
 	return nil
@@ -155,7 +171,17 @@ func (o *Orchestrator) applyVaults(sys *system.System, factories Factories) erro
 
 	// Compile filters at startup so vaults can receive records immediately.
 	// The rotation sweep also reconciles every 15s as a safety net.
-	if err := o.reloadRoutesFromConfig(sys); err != nil {
+	//
+	// Under o.mu like every other reloadRoutesFromConfig caller: startup is
+	// NOT single-threaded — raft config replay drives the dispatcher
+	// (handleInstancePut → ReloadFilters, locked) concurrently with
+	// ApplyConfig, and the unlocked reload here raced it into a fatal
+	// concurrent map write on o.pipelineVaults during a rolling restart
+	// with live placement changes (gastrolog-2xog2h, node crash).
+	o.mu.Lock()
+	err := o.reloadRoutesFromConfig(sys)
+	o.mu.Unlock()
+	if err != nil {
 		return err
 	}
 	return nil

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/glid"
 )
 
 func TestPeerState_Delete(t *testing.T) {
@@ -139,7 +140,7 @@ func TestPeerState_PausedPeerDetectedWithinTTL(t *testing.T) {
 	const (
 		heartbeatTick = 100 * time.Millisecond
 		ttl           = 400 * time.Millisecond // 4× heartbeat
-		detectBudget  = ttl + 2*heartbeatTick   // TTL + 2 ticks of polling slack
+		detectBudget  = ttl + 2*heartbeatTick  // TTL + 2 ticks of polling slack
 	)
 	ps := NewPeerState(ttl)
 
@@ -238,4 +239,51 @@ func TestPeerJobState_Delete(t *testing.T) {
 func TestPeerJobState_Delete_Missing(t *testing.T) {
 	pjs := NewPeerJobState(time.Minute)
 	pjs.Delete("never-existed") // must not panic
+}
+
+// TestPeerState_VaultDiskProtected pins the broadcast half of per-vault disk
+// protect: a vault listed in any LIVE peer's DiskProtectedVaultIds reads as
+// protected here; an expired peer's verdict does not linger.
+func TestPeerState_VaultDiskProtected(t *testing.T) {
+	starved := glid.New()
+	healthy := glid.New()
+
+	ps := NewPeerState(time.Minute)
+	ps.Update("node-a", &gastrologv1.NodeStats{
+		DiskProtectedVaultIds: [][]byte{starved.ToProto()},
+	}, time.Now())
+	ps.Update("node-b", &gastrologv1.NodeStats{}, time.Now())
+
+	if !ps.VaultDiskProtected(starved) {
+		t.Fatal("vault protected on a live peer must read as protected")
+	}
+	if ps.VaultDiskProtected(healthy) {
+		t.Fatal("unlisted vault must not read as protected")
+	}
+
+	// The reporting peer's entry expires: its verdict expires with it —
+	// a dead node must not suspend a vault's admission forever.
+	ps.Update("node-a", &gastrologv1.NodeStats{
+		DiskProtectedVaultIds: [][]byte{starved.ToProto()},
+	}, time.Now().Add(-2*time.Minute))
+	if ps.VaultDiskProtected(starved) {
+		t.Fatal("expired peer's protect verdict must not linger")
+	}
+}
+
+// TestPeerState_VaultSizeCapped mirrors the disk-protect lookup for the
+// max-size budget list.
+func TestPeerState_VaultSizeCapped(t *testing.T) {
+	capped := glid.New()
+	roomy := glid.New()
+	ps := NewPeerState(time.Minute)
+	ps.Update("node-a", &gastrologv1.NodeStats{
+		SizeCappedVaultIds: [][]byte{capped.ToProto()},
+	}, time.Now())
+	if !ps.VaultSizeCapped(capped) {
+		t.Fatal("vault capped on a live peer must read as capped")
+	}
+	if ps.VaultSizeCapped(roomy) {
+		t.Fatal("unlisted vault must not read as capped")
+	}
 }

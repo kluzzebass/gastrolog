@@ -29,14 +29,15 @@ type RemoteSearcher interface {
 	// collectRemotePipeline which needs the complete TableResult.
 	Search(ctx context.Context, nodeID string, req *apiv1.ForwardSearchRequest) (*apiv1.ForwardSearchResponse, error)
 	// SearchStream opens a streaming ForwardSearch.
-	// Returns record batches channel, histogram, tableResult, error channel,
-	// and a function to retrieve the resume token after draining records.
+	// Returns record batches channel, tableResult, error channel, resume-token
+	// getter, and histogram getter. The stream opens without blocking on the
+	// first remote batch so the coordinator can merge as holders produce data.
 	SearchStream(ctx context.Context, nodeID string, req *apiv1.ForwardSearchRequest) (
 		records <-chan []*apiv1.ExportRecord,
-		histogram []*apiv1.HistogramBucket,
 		tableResult *apiv1.TableResult,
 		errCh <-chan error,
 		getResumeToken func() []byte,
+		getHistogram func() []*apiv1.HistogramBucket,
 	)
 	GetContext(ctx context.Context, nodeID string, req *apiv1.ForwardGetContextRequest) (*apiv1.ForwardGetContextResponse, error)
 	Explain(ctx context.Context, nodeID string, req *apiv1.ForwardExplainRequest) (*apiv1.ForwardExplainResponse, error)
@@ -177,37 +178,49 @@ func (s *QueryServer) searchDirect(
 		narrowQueryByHighwater(&q, resume.HighwaterTS)
 	}
 
-	localResume, remoteTokens := s.splitResumeToken(resume)
+	selectedVaults := s.selectedOrAllVaults(ctx, q)
 
-	// Collect remote results as a streaming iterator. The remote also
-	// computes a histogram inside its forwardSearchAfterParse, but on
-	// resume pages we discard it — the histogram is computed once on
-	// page 1 and the client keeps it across pagination.
-	remoteIter, remoteHist, _ := s.collectRemote(ctx, q, remoteTokens)
+	var partitionTargets []searchPartitionTarget
+	distributed := false
+	if s.hasMultiHolderVaultsInScope(ctx, selectedVaults) {
+		partitionTargets = s.buildSearchPartitionTargets(ctx, selectedVaults)
+		distributed = usesDistributedSearchTargets(partitionTargets) && shouldUseDistributedSealedSearch(q)
+	}
 
-	// Histogram is computed only on the FIRST page of a paginated search.
-	// Subsequent pages return an empty histogram; the client keeps the
-	// page-1 histogram unchanged for the lifetime of the scroll. This is
-	// correct (the histogram is a function of the frozen window, which
-	// doesn't change between pages) and avoids two thorny problems:
-	//   1. Recomputing on every page burns CPU on large windows.
-	//   2. The narrowed search window would otherwise leak into the
-	//      histogram, making it report fewer records as the user scrolls.
-	var histogram []*apiv1.HistogramBucket
-	if resume == nil {
-		if s.histogramFullyLocal(ctx, histogramQ) {
-			localEng := s.orch.LocalVaultQueryEngine()
-			if s.lookupResolver != nil {
-				localEng.SetLookupResolver(s.lookupResolver)
-			}
-			histogram = HistogramToProto(localEng.ComputeHistogram(ctx, histogramQ, 50))
+	localResume, remoteTokens := s.splitResumeToken(resume, localVaultIDsFromPartitionTargets(partitionTargets, s.localNodeID))
+
+	var localTargets, remoteTargets []searchPartitionTarget
+	for _, t := range partitionTargets {
+		if t.nodeID == s.localNodeID {
+			localTargets = append(localTargets, t)
 		} else {
-			localHist := HistogramToProto(eng.ComputeHistogram(ctx, histogramQ, 50))
-			histogram = mergeHistogramBuckets(localHist, remoteHist)
+			remoteTargets = append(remoteTargets, t)
 		}
 	}
 
-	localIter, getLocalToken := eng.Search(ctx, q, localResume)
+	var localIter iter.Seq2[chunk.Record, error]
+	var getLocalToken func() *query.ResumeToken
+	if distributed {
+		localIter, getLocalToken = s.searchPartitionTargets(ctx, q, localResume, localTargets)
+	} else {
+		localIter, getLocalToken = eng.Search(ctx, q, localResume)
+	}
+	var remoteIter iter.Seq2[chunk.Record, error]
+	var remoteHist []*apiv1.HistogramBucket
+	if distributed {
+		remoteIter, remoteHist, _ = s.collectPartitionRemote(ctx, q, remoteTargets, remoteTokens)
+	} else {
+		remoteIter, remoteHist, _ = s.collectRemote(ctx, q, remoteTokens)
+	}
+
+	// Histogram is computed only on the FIRST page of a paginated search.
+	var histCh chan []*apiv1.HistogramBucket
+	if resume == nil {
+		histCh = make(chan []*apiv1.HistogramBucket, 1)
+		go func() {
+			histCh <- s.computePageHistogram(ctx, eng, histogramQ, remoteHist, distributed, selectedVaults)
+		}()
+	}
 
 	// Build the resume token from LOCAL positions + the merge-level highwater
 	// only. Remote opaque position tokens are deliberately not propagated: a
@@ -235,21 +248,43 @@ func (s *QueryServer) searchDirect(
 		return token
 	}
 
-	return s.mergeAndStream(ctx, localIter, getToken, remoteIter, q.OrderBy, q.Reverse(), q.Limit, transform, histogram, serverStart, stream)
+	return s.mergeAndStream(ctx, localIter, getToken, remoteIter, q.OrderBy, q.Reverse(), q.Limit, transform, nil, serverStart, stream, histCh)
+}
+
+// computePageHistogram builds the page-1 volume histogram for a search.
+// Counts only — level breakdown is omitted so histogram work stays on the
+// ITSI fast path and cannot block search completion.
+func (s *QueryServer) computePageHistogram(ctx context.Context, eng *query.Engine, histogramQ query.Query, remoteHist []*apiv1.HistogramBucket, distributed bool, selectedVaults []glid.GLID) []*apiv1.HistogramBucket {
+	if s.histogramFullyLocal(ctx, histogramQ) {
+		localEng := s.orch.LocalVaultQueryEngine()
+		if s.lookupResolver != nil {
+			localEng.SetLookupResolver(s.lookupResolver)
+		}
+		return HistogramToProto(localEng.ComputeSearchPageHistogram(ctx, histogramQ, 50))
+	}
+	if distributed {
+		// Partitioned holder forwards skip per-slice histograms. Use the leader
+		// engine only — LocalVaultQueryEngine scanned every local replica chunk
+		// in parallel with holder partition search and dominated CPU (pprof).
+		if s.lookupResolver != nil {
+			eng.SetLookupResolver(s.lookupResolver)
+		}
+		return HistogramToProto(eng.ComputeSearchPageHistogram(ctx, histogramQ, 50))
+	}
+	localHist := HistogramToProto(eng.ComputeSearchPageHistogram(ctx, histogramQ, 50))
+	return mergeHistogramBuckets(localHist, remoteHist)
 }
 
 // splitResumeToken separates a unified resume token into local positions
 // (for eng.Search) and remote opaque blobs (for collectRemote).
-//
-// All keys in VaultTokens are vault IDs — the local query engine emits
-// positions tagged by vault ID. The split is a straight membership
-// check against the local-leader vault set.
-func (s *QueryServer) splitResumeToken(resume *query.ResumeToken) (*query.ResumeToken, map[glid.GLID][]byte) {
+func (s *QueryServer) splitResumeToken(resume *query.ResumeToken, localVaults map[glid.GLID]bool) (*query.ResumeToken, map[glid.GLID][]byte) {
 	if resume == nil || len(resume.VaultTokens) == 0 {
 		return nil, nil
 	}
 
-	localVaults := s.orch.LocalLeaderVaultIDs()
+	if len(localVaults) == 0 {
+		localVaults = s.orch.LocalLeaderVaultIDs()
+	}
 
 	remoteTokens := make(map[glid.GLID][]byte)
 	var localPositions []query.MultiVaultPosition
@@ -394,6 +429,7 @@ func (s *QueryServer) mergeAndStream(
 	histogram []*apiv1.HistogramBucket,
 	serverStart time.Time,
 	stream *connect.ServerStream[apiv1.SearchResponse],
+	histCh chan []*apiv1.HistogramBucket,
 ) error {
 	sb := newStreamBatcher(stream, 100)
 	// Track the IngestTS of the last record actually emitted by this server
@@ -457,13 +493,31 @@ func (s *QueryServer) mergeAndStream(
 	synthOK := mergeInvolved && limitHit
 	tokenBytes := buildResumeTokenBytes(transform, getToken, mergeHighwater, reverse, lastLocalSet, lastLocalRec, synthOK)
 
-	return stream.Send(&apiv1.SearchResponse{
+	// Attach histogram from the page-1 goroutine. Records are already
+	// streamed — waiting here only delays the trailing empty batch, not
+	// first-row delivery. Do not use a non-blocking receive: a slow
+	// histogram (pipeline open-chunk scan, remote merge) would otherwise
+	// be discarded and the UI shows no chart at all.
+	if histCh != nil {
+		select {
+		case h := <-histCh:
+			histogram = h
+		case <-ctx.Done():
+			go func(ch chan []*apiv1.HistogramBucket) { <-ch }(histCh)
+		}
+	}
+
+	if err := stream.Send(&apiv1.SearchResponse{
 		Records:         sb.pending(),
 		ResumeToken:     tokenBytes,
 		HasMore:         len(tokenBytes) > 0,
 		Histogram:       histogram,
 		ServerElapsedMs: time.Since(serverStart).Milliseconds(),
-	})
+	}); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // dedupWindow is the streaming cross-vault dedup state. Two copies of
@@ -481,7 +535,6 @@ func (s *QueryServer) mergeAndStream(
 // Histogram counts are deliberately NOT deduped: cross-vault fanout
 // double-counts in the histogram by design (documented in the UI as
 // approximate / "~"). The record list shows unique events.
-//
 type dedupWindow struct {
 	ts      time.Time
 	seen    map[chunk.EventID]struct{}

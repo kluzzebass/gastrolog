@@ -115,7 +115,7 @@ func startClusterCtlLearnerPromoter(ctx context.Context, scheduler scheduledJobR
 		return err
 	}
 	scheduler.Describe(clusterCtlLearnerPromoterJobName,
-		"Cluster-ctl learner promotion. Leader-only: scans the Raft configuration for Nonvoter / Staging members and promotes them to Voter once their broadcast RaftAppliedIndex has matched the leader's for a stability window. Companion to gastrolog-41sut (JoinCluster-as-learner) and gastrolog-gcbx7 (per-vault-ctl promoter). Original implementation gastrolog-2czh9.")
+		"Cluster-ctl learner promotion. Leader-only: scans the Raft configuration for Nonvoter / Staging members and promotes them to Voter once their broadcast RaftAppliedIndex has matched the leader's for a stability window.")
 	return nil
 }
 
@@ -140,12 +140,16 @@ func (p *clusterCtlLearnerPromoter) tick(ctx context.Context) {
 	}
 
 	seen := make(map[string]bool, len(servers))
+	promotionUsed := false
 	for _, srv := range servers {
 		if srv.Suffrage != "Nonvoter" && srv.Suffrage != "Staging" {
 			continue
 		}
 		seen[srv.ID] = true
-		p.evaluateLearner(ctx, srv, leaderApplied)
+		allowPromote := !promotionUsed
+		if p.evaluateLearner(ctx, srv, leaderApplied, allowPromote) {
+			promotionUsed = true
+		}
 	}
 
 	// Drop tick counters for nodes that have left the configuration
@@ -162,18 +166,25 @@ func (p *clusterCtlLearnerPromoter) tick(ctx context.Context) {
 // evaluateLearner inspects one learner's catchup state and either
 // advances the stability counter or promotes the learner. Split out
 // of tick() so the inner block is readable without a deeply nested
-// switch.
-func (p *clusterCtlLearnerPromoter) evaluateLearner(ctx context.Context, srv cluster.RaftServer, leaderApplied uint64) {
+// switch. When allowPromote is false the counter still advances but
+// AddVoter is deferred — tick promotes at most one learner per pass
+// because Raft commits membership changes one at a time; bursting
+// several AddVoter calls in one tick stalls the leader and triggers
+// cluster-wide elections on a fresh cluster.
+func (p *clusterCtlLearnerPromoter) evaluateLearner(ctx context.Context, srv cluster.RaftServer, leaderApplied uint64, allowPromote bool) bool {
 	stats := p.peerState.Get(srv.ID)
 	if stats == nil || stats.RaftAppliedIndex < leaderApplied {
 		p.catchupTicks[srv.ID] = 0
-		return
+		return false
 	}
 	p.catchupTicks[srv.ID]++
 	if p.catchupTicks[srv.ID] < p.stabilityRequired {
 		p.logger.Debug("cluster_ctl_learner_promoter: learner caught up, awaiting stability",
 			"node", srv.ID, "ticks", p.catchupTicks[srv.ID], "needed", p.stabilityRequired)
-		return
+		return false
+	}
+	if !allowPromote {
+		return false
 	}
 
 	promoteCtx, cancel := context.WithTimeout(ctx, clusterCtlLearnerPromoteTimeout)
@@ -187,11 +198,12 @@ func (p *clusterCtlLearnerPromoter) evaluateLearner(ctx context.Context, srv clu
 		// if the learner is still caught up. Resetting would force
 		// the operator to wait another stability window after a
 		// transient Raft hiccup.
-		return
+		return true
 	}
 	p.logger.Info("cluster_ctl_learner_promoter: promoted learner to voter",
 		"node", srv.ID, "addr", srv.Address, "leader_applied", leaderApplied)
 	delete(p.catchupTicks, srv.ID)
+	return true
 }
 
 // localAppliedIndex reads the local node's Raft applied_index from

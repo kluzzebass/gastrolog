@@ -110,43 +110,102 @@ message NodeStats {
   string pprof_address = 27;      // pprof HTTP address, empty if disabled
 
   // Route stats (aggregated cluster-wide by GetRouteStats RPC)
-  int64 route_stats_ingested = 28;
-  int64 route_stats_dropped = 29;
-  int64 route_stats_routed = 30;
-  bool route_stats_filter_active = 31;
+  int64 route_stats_routed = 28;
+  int64 route_stats_unmatched = 29;
+  int64 route_stats_matched = 30;
+  bool route_stats_route_table_active = 31;
   repeated gastrolog.v1.VaultRouteStats route_vault_stats = 32;
   repeated gastrolog.v1.PerRouteStats route_per_route_stats = 33;
 
-  // Forwarding stats — records sent and received via ForwardRecords RPCs.
-  int64 forwarded_sent = 34;
-  int64 forwarded_received = 35;
-
   // Active system alerts on this node.
-  repeated SystemAlert alerts = 36;
+  repeated SystemAlert alerts = 34;
 
-  // Per-peer inter-node gRPC transport bytes, from this node's perspective.
-  // Populated from the cluster transport stats handlers — includes Raft,
-  // broadcast, vault replication, query forwarding, chunk streaming, etc.
-  // See gastrolog-47u85.
-  repeated PeerBytesStat peer_bytes = 37;
+  // Per-node outbound peer connection catalog (service pools + raft singletons).
+  // Populated from PeerConnManager on each broadcast tick. See gastrolog-1dg8z.
+  repeated PeerConnStat peer_connections = 35;
+
+  // Per-peer sum of this node's peer_connections. Inspector merges both peers'
+  // lane rows client-side for the full link view. See gastrolog-5uyy6.
+  repeated PeerTrafficTotal peer_traffic_totals = 38;
+
+  // Per-vault on-disk pipeline segment counts on this node (working/completed
+  // at origins; head/pre-head on homes). Aggregated cluster-wide by
+  // WatchSystemStatus for the inspector.
+  repeated VaultPipelineNodeDisk vault_pipeline_disk = 36;
+
+  // Total on-disk bytes on this node: local chunk/index stores, pipeline
+  // segments (FSM ByteSize where published, otherwise file stat), raft
+  // persistence, and managed files. Distinct from per-vault data_bytes.
+  int64 storage_bytes = 37;
+
+  // Routing throughput on this node, from the stats collector's rolling
+  // windows over the cumulative route counters (fields 28/30). Cluster
+  // totals are the sum across nodes (gastrolog-4eh5ns).
+  gastrolog.v1.ThroughputRate route_routed = 39;
+  gastrolog.v1.ThroughputRate route_matched = 40;
+
+  // Raft liveness / WAL health (gastrolog-1io54g). Append latency covers
+  // every Raft WAL on the node (vault groups share one WAL; cluster-ctl has
+  // its own): count/total are cumulative, avg is the rolling-window average
+  // between stats ticks, max is the worst single append since the previous
+  // tick. Election counters aggregate hashicorp/raft observer events across
+  // all groups — elections_per_min > ~3 sustained is a storm.
+  uint64 raft_wal_appends_total = 41;
+  double raft_wal_append_avg_ms = 42;
+  double raft_wal_append_max_ms = 43;
+  uint64 raft_elections_total = 44;
+  uint64 raft_leader_losses_total = 45;
+  uint64 raft_failed_heartbeats_total = 46;
+  double raft_elections_per_min = 47;
+
+  // Vaults whose backing volume on THIS node is below its free-space floor.
+  // Every node's admission gate honors the union across live peers, so a
+  // starved vault volume anywhere in the cluster suspends new records for
+  // that vault at every front door while other vaults keep ingesting.
+  repeated bytes disk_protected_vault_ids = 48;
+
+  // Vaults whose local disk claim on THIS node has reached their per-node
+  // max-size budget. Honored cluster-wide by the same per-vault admission
+  // gate as disk_protected_vault_ids, with a budget-specific error.
+  repeated bytes size_capped_vault_ids = 49;
 }
 
-// PeerBytesStat reports cumulative gRPC wire bytes sent to and received from
-// a single peer, since the emitting node started. Rate is left to the
-// consumer (UI / PromQL-equivalent delta) — these are monotonic counters.
-message PeerBytesStat {
-  string peer = 1;        // target node ID
-  int64 bytes_sent = 2;   // bytes this node has sent to peer
-  int64 bytes_received = 3; // bytes this node has received from peer
+// VaultPipelineNodeDisk is one vault's local pipeline storage areas on a
+// single node, included in the periodic NodeStats broadcast.
+message VaultPipelineNodeDisk {
+  bytes vault_id = 1;
+  uint32 working_segments = 2;
+  uint32 completed_staging_segments = 3;
+  uint32 head_segments = 4;
+  uint32 pre_head_segments = 5;
+}
 
-  // Backend-derived rates (bytes/sec) computed by differencing consecutive
-  // monotonic samples on the node. These exist to avoid UI cold-start and to
-  // make the inspector immediately useful after mount.
+// PeerConnStat reports one managed outbound cluster gRPC connection on this node.
+message PeerConnStat {
+  string peer = 1;
+  string lane = 2;              // "service" | "raft"
+  string group_id = 3;          // empty for service lane
+  repeated string purposes = 4; // active subsystem labels
+  string connectivity = 5;
+  int32 pool_index = 6;         // 0 for raft singletons
+  int64 bytes_sent = 7;
+  int64 bytes_received = 8;
+  double tx_bytes_per_sec = 9;
+  double rx_bytes_per_sec = 10;
+  repeated double tx_spark = 11;
+  repeated double rx_spark = 12;
+  // Subsystems that acquired this connection since the previous stats snapshot
+  // (union of brief holds that may not appear in purposes at tick time).
+  repeated string purposes_window = 13;
+}
+
+// PeerTrafficTotal is the per-peer sum of this node's peer_connections.
+message PeerTrafficTotal {
+  string peer = 1;
+  int64 bytes_sent = 2;
+  int64 bytes_received = 3;
   double tx_bytes_per_sec = 4;
   double rx_bytes_per_sec = 5;
-
-  // Rolling sparkline windows (bytes/sec), oldest → newest.
-  // Kept short (e.g. 20 points) so inspector renders quickly.
   repeated double tx_spark = 6;
   repeated double rx_spark = 7;
 }
@@ -180,19 +239,6 @@ message IngesterNodeStats {
   string name = 6;
 }
 
-// ForwardRecordsRequest ships a batch of records to the node that owns
-// the destination vault. Sent by retention eject to route records to a
-// remote vault. Records are appended to the destination vault's active
-// chunk.
-message ForwardRecordsRequest {
-  bytes vault_id = 1;
-  repeated ExportRecord records = 2;
-}
-
-message ForwardRecordsResponse {
-  int64 records_written = 1;
-}
-
 // ForwardVaultApplyRequest carries a pre-marshaled vault control-plane Raft
 // command for the leader to apply. group_id is the vault-ctl group
 // (vault/<vaultGLID>/ctl); command is the marshaled FSM command bytes
@@ -221,29 +267,16 @@ message ChunkReplicationCommand {
   bytes vault_id = 1;
 
   oneof command {
-    ChunkReplicationAppend append = 10;
-    ChunkReplicationSeal seal = 11;
-    ChunkReplicationDelete delete_chunk = 12;
+    ChunkReplicationDelete delete_chunk = 10;
     // Sealed-chunk import is a three-phase sequence on the same stream:
     // ImportBegin → 1..N ImportRecords frames → ImportCommit. Replaces
     // a legacy single-frame ChunkReplicationImport that packed the whole
     // chunk into one message; chunks past the gRPC receive cap wedged
     // the catchup path forever. See gastrolog-4yvhh.
-    ChunkReplicationImportBegin import_begin = 13;
-    ChunkReplicationImportRecords import_records = 14;
-    ChunkReplicationImportCommit import_commit = 15;
+    ChunkReplicationImportBegin import_begin = 11;
+    ChunkReplicationImportRecords import_records = 12;
+    ChunkReplicationImportCommit import_commit = 13;
   }
-}
-
-// ChunkReplicationAppend forwards records to the follower's active chunk.
-message ChunkReplicationAppend {
-  bytes chunk_id = 1;               // leader's active chunk ID
-  repeated ExportRecord records = 2;
-}
-
-// ChunkReplicationSeal tells the follower to seal its active chunk.
-message ChunkReplicationSeal {
-  bytes chunk_id = 1; // expected active chunk ID
 }
 
 // ChunkReplicationImportBegin opens a streaming sealed-chunk import.
@@ -308,12 +341,16 @@ message RequestReplicaCatchupResponse {
   uint32 scheduled = 1; // number of chunk pushes scheduled (after leader-side filtering)
 }
 
-// ForwardSearchRequest is sent to the node that owns a remote vault,
-// asking it to execute a search locally and return matching records.
+// ForwardSearchRequest is sent to a replica holder node to execute a
+// scoped search locally and return matching records. When sealed_chunk_ids
+// is empty and search_pipeline_chunks is false, the holder runs a legacy
+// leader-only full-vault search (backward compatible).
 message ForwardSearchRequest {
   bytes vault_id = 1;
   string query = 2;
   bytes resume_token = 3; // resume token for pagination across pages
+  repeated bytes sealed_chunk_ids = 4; // sealed chunks this holder should scan
+  bool search_pipeline_chunks = 5; // include active/sealing chunks (leader only)
 }
 
 message ForwardSearchResponse {
@@ -349,6 +386,23 @@ message ForwardListChunksRequest {
 
 message ForwardListChunksResponse {
   repeated ChunkMeta chunks = 1;
+}
+
+// ForwardGetPipelineBacklogRequest asks a remote node for its local
+// on-disk pipeline segment counts for one vault.
+message ForwardGetPipelineBacklogRequest {
+  bytes vault_id = 1;
+}
+
+message ForwardGetPipelineBacklogResponse {
+  uint32 working_segments = 1;
+  uint32 completed_staging_segments = 2;
+  uint32 head_segments = 3;
+  uint32 pre_head_segments = 4;
+  uint64 working_bytes = 5;
+  uint64 completed_staging_bytes = 6;
+  uint64 head_bytes = 7;
+  uint64 pre_head_bytes = 8;
 }
 
 // ForwardWatchChunksRequest opens a peer-to-peer server-streaming
@@ -507,6 +561,13 @@ message ImportRecordMessage {
   ExportRecord record = 2;
 }
 
+// ForwardImportRecordsResponse reports how many records the client-streaming
+// ForwardImportRecords RPC committed into the destination vault's sealed-chunk
+// store.
+message ForwardImportRecordsResponse {
+  int64 records_written = 1;
+}
+
 // --- Managed file distribution ---
 
 // PullManagedFileRequest asks a peer to stream a managed file's contents.
@@ -520,6 +581,38 @@ message PullManagedFileChunk {
   bytes data = 1;            // chunk of file content (up to 64KB)
   string name = 2;           // original filename (first chunk only)
   string sha256 = 3;         // expected hash (first chunk only)
+}
+
+// --- Segment distribution (Rubicon C) ---
+
+// PullSegmentRequest asks a peer (segment origin or another holder) to stream a
+// completed segment's raw bytes for collection into a home node's head/.
+message PullSegmentRequest {
+  bytes vault_id = 1;
+  bytes segment_id = 2;
+}
+
+// PullSegmentChunk carries a chunk of completed-segment bytes during streaming
+// transfer. Unlike PullManagedFileChunk it carries no filename/hash: the
+// collector verifies against the vault-ctl registry checksum after promotion.
+message PullSegmentChunk {
+  bytes data = 1; // chunk of segment content (up to 64KB)
+}
+
+// PullChunkGLCBRequest asks a peer holding a sealed pipeline chunk's GLCB to
+// stream its bytes. Replica catch-up for homes that missed the build window
+// and whose source segments are already released — without this, a home that
+// misses builds can never recover chunk bytes.
+message PullChunkGLCBRequest {
+  bytes vault_id = 1;
+  bytes chunk_id = 2;
+}
+
+// PullChunkGLCBChunk carries a slice of GLCB bytes during streaming transfer.
+// The puller verifies the assembled file's seal metadata and size against the
+// vault-ctl manifest entry before renaming it into place.
+message PullChunkGLCBChunk {
+  bytes data = 1;
 }
 
 // ListPeerManagedFilesRequest asks a peer which managed files it has on disk.

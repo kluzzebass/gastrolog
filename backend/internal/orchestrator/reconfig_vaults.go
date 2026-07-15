@@ -22,8 +22,8 @@ import (
 	"gastrolog/internal/query"
 	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/system"
-	"gastrolog/internal/vaultraft/vaultctlfsm"
 	"gastrolog/internal/vaultraft"
+	"gastrolog/internal/vaultraft/vaultctlfsm"
 
 	hraft "github.com/hashicorp/raft"
 )
@@ -50,7 +50,7 @@ func resolveVaultDir(params map[string]string, vaultsDir, vaultID string) map[st
 	return out
 }
 
-// AddVault adds a new vault (chunk manager, index manager, query engine) and updates the filter set.
+// AddVault adds a new vault (chunk manager, index manager, query engine) and updates the route table.
 // Loads the full config internally to resolve the vault's vault IDs to vault configs.
 // Returns ErrDuplicateID if a vault with this ID already exists.
 func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg system.VaultConfig, factories Factories) error {
@@ -225,17 +225,18 @@ func (o *Orchestrator) listClusterChunkMetasLocked(vaultID glid.GLID) ([]chunk.C
 	return out, nil
 }
 
-// removeVaultJobs removes retention runners and cron rotation jobs for a vault
-// without closing managers or unregistering. Used by UnregisterVault and drain.
-func (o *Orchestrator) removeVaultJobs(id glid.GLID, vault *Vault) {
+// removeVaultJobs removes the retention runner for a vault without closing
+// managers or unregistering. Used by UnregisterVault and drain.
+func (o *Orchestrator) removeVaultJobs(_ glid.GLID, vault *Vault) {
 	if vaultInst := vault.Instance; vaultInst != nil {
 		delete(o.retention, retentionKey(vaultInst.VaultID, vaultInst.StorageID))
 	}
-	o.cronRotation.removeAllForVault(id)
 }
 
 // teardownVault performs the common cleanup for all vault removal paths:
-// cancels pending jobs, closes managers, removes from registry, rebuilds filters.
+// cancels pending jobs, closes managers, and removes from the registry. The
+// pipeline routing table and Origin registrations are reconciled separately by
+// ReloadFilters / placementSweep when the deletion lands in config.
 func (o *Orchestrator) teardownVault(id glid.GLID, vault *Vault) {
 	o.destroyVaultControlPlaneRaftGroup(id)
 
@@ -245,11 +246,10 @@ func (o *Orchestrator) teardownVault(id glid.GLID, vault *Vault) {
 	o.scheduler.RemoveJobsByPrefix("compress:" + vaultPrefix)
 	o.scheduler.RemoveJobsByPrefix("index-build:" + vaultPrefix)
 
-	// Remove per-instance retention runner and cron rotation jobs.
+	// Remove the per-instance retention runner.
 	if vaultInst := vault.Instance; vaultInst != nil {
 		delete(o.retention, retentionKey(vaultInst.VaultID, vaultInst.StorageID))
 	}
-	o.cronRotation.removeAllForVault(id)
 
 	// Close chunk/index managers to release file locks.
 	if err := vault.Close(); err != nil {
@@ -257,7 +257,6 @@ func (o *Orchestrator) teardownVault(id glid.GLID, vault *Vault) {
 	}
 
 	delete(o.vaults, id)
-	o.rebuildRouteSetLocked()
 }
 
 // DisableVault disables ingestion for a vault.
@@ -475,9 +474,8 @@ func (o *Orchestrator) removeVaultInstance(vaultID glid.GLID, deleteData bool) b
 		}
 	}
 
-	// Remove retention runner and cron rotation for this vault.
+	// Remove the retention runner for this vault.
 	delete(o.retention, retentionKey(vaultInst.VaultID, vaultInst.StorageID))
-	o.cronRotation.removeAllForVault(vaultID)
 
 	// Drop the instance from the vault.
 	vault.Instance = nil
@@ -487,7 +485,6 @@ func (o *Orchestrator) removeVaultInstance(vaultID glid.GLID, deleteData bool) b
 	// subsequent AddVaultInstance can rehydrate.
 	if deleteData {
 		delete(o.vaults, vaultID)
-		o.rebuildRouteSetLocked()
 		o.logger.Info("vault removed", "vault", vaultID)
 	}
 
@@ -618,12 +615,11 @@ func (o *Orchestrator) UnregisterVault(id glid.GLID) error {
 			"vault", id, "error", err)
 	}
 
-	// Remove per-vault retention and rotation jobs.
+	// Remove the per-vault retention runner.
 	o.removeVaultJobs(id, vault)
 
 	// Remove from registry.
 	delete(o.vaults, id)
-	o.rebuildRouteSetLocked()
 
 	o.logger.Info("vault unregistered (data preserved)", "id", id, "name", vault.Name, "type", vault.Type())
 	return nil
@@ -767,7 +763,7 @@ func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultCo
 	params := buildVaultParams(sys, vaultCfg, o.localNodeID)
 
 	// Followers keep cloud store access for reads (queries) but skip uploads.
-	// The leader owns the blob; the follower adopts it via RegisterCloudChunk
+	// The leader owns the blob; the follower adopts it via RegisterCloudBackedChunk
 	// when the vault-ctl FSM propagates the upload announcement.
 	if isFollower {
 		params["_cloud_read_only"] = "true"
@@ -844,9 +840,9 @@ func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultCo
 	}
 	qe := query.New(cm, im, qeLogger)
 
-	// Inject index builders into the chunk manager's post-seal pipeline.
+	// Post-seal index builds disabled for pipeline soak — re-enable before shipping.
 	if processor, ok := cm.(chunk.ChunkPostSealProcessor); ok {
-		processor.SetIndexBuilders([]chunk.ChunkIndexBuilder{im.BuildAdapter()})
+		processor.SetIndexBuilders(nil)
 	}
 
 	ti := &VaultInstance{
@@ -957,7 +953,7 @@ func (o *Orchestrator) buildInstanceForStorage(sys *system.System, vaultCfg syst
 	qe := query.New(cm, im, qeLogger)
 
 	if processor, ok := cm.(chunk.ChunkPostSealProcessor); ok {
-		processor.SetIndexBuilders([]chunk.ChunkIndexBuilder{im.BuildAdapter()})
+		processor.SetIndexBuilders(nil)
 	}
 
 	ti := &VaultInstance{
@@ -1025,20 +1021,31 @@ func (o *Orchestrator) destroyVaultControlPlaneRaftGroup(vaultID glid.GLID) {
 // Idempotent; safe on every reconfigure sweep.
 func (o *Orchestrator) ensureVaultControlPlaneRaftGroup(vaultID glid.GLID, clusterNodes []system.NodeConfig, factories Factories) {
 	gid := raftgroup.VaultControlPlaneGroupID(vaultID)
-	_, _ = o.tryStartClusterRaftGroup(gid, vaultraft.NewFSM(), clusterNodes, factories)
+	if factories.GroupManager == nil {
+		return
+	}
+	if g := factories.GroupManager.GetGroup(gid); g != nil {
+		if vfsm, ok := g.FSM.(*vaultraft.FSM); ok && vfsm != nil {
+			vfsm.SetOnAfterRestore(func() { o.afterVaultCtlRestore(vaultID) })
+		}
+		return
+	}
+	vfsm := vaultraft.NewFSM()
+	vfsm.SetOnAfterRestore(func() { o.afterVaultCtlRestore(vaultID) })
+	_, _ = o.tryStartClusterWideRaftGroup(gid, vfsm, clusterNodes, factories)
 }
 
-// tryStartClusterRaftGroup creates or returns an existing cluster-wide Raft group
+// tryStartClusterWideRaftGroup creates or returns an existing cluster-wide Raft group
 // (symmetric seeding across all resolvable cluster nodes). The second return is
 // the resolved member list when the group is (or will be) active on this node;
 // both are nil when creation is deferred or fails.
-func (o *Orchestrator) tryStartClusterRaftGroup(groupID string, fsm hraft.FSM, clusterNodes []system.NodeConfig, factories Factories) (*raftgroup.Group, []hraft.Server) {
+func (o *Orchestrator) tryStartClusterWideRaftGroup(groupID string, fsm hraft.FSM, clusterNodes []system.NodeConfig, factories Factories) (*raftgroup.Group, []hraft.Server) {
 	if factories.GroupManager == nil {
 		return nil, nil
 	}
 	members := o.buildVaultRaftMembers(clusterNodes, factories)
 	if len(members) < len(clusterNodes) {
-		o.logger.Debug("cluster raft group: not all cluster nodes resolvable, deferring creation",
+		o.logger.Debug("cluster-wide raft group: not all cluster nodes resolvable, deferring creation",
 			"group", groupID,
 			"have", len(members),
 			"want", len(clusterNodes))
@@ -1064,7 +1071,7 @@ func (o *Orchestrator) tryStartClusterRaftGroup(groupID string, fsm hraft.FSM, c
 		SeedMembers: members,
 	})
 	if err != nil {
-		o.logger.Warn("failed to create cluster raft group", "group", groupID, "error", err)
+		o.logger.Warn("failed to create cluster-wide raft group", "group", groupID, "error", err)
 		return nil, nil
 	}
 	return g, members
@@ -1079,13 +1086,17 @@ type vaultRaftCallbacks struct {
 	applyFinalizeDelete func(id chunk.ChunkID) error
 	applyPruneNode      func(nodeID string) error
 	applyRetPending     func(id chunk.ChunkID) error
-	isTombstoned        func(id chunk.ChunkID) bool
-	listChunks          func() []chunk.ChunkID
-	listRetPending      func() []chunk.ChunkID
-	overlayFromFSM      func(chunk.ChunkMeta) chunk.ChunkMeta
-	chunkResidency      func(id chunk.ChunkID, placementNodeIDs []string) []string
-	manifestEntries     func() []vaultctlfsm.ManifestEntry
-	manifestEntry       func(id chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool)
+	// applyAckChunkHolders / applyRevokeChunkHolders commit this node's
+	// chunk holder receipts — bytes-earned residency claims (batched, one
+	// Raft apply per sweep pass). See vaultctlfsm.FSM.ChunkResidency.
+	applyAckChunkHolders    func(ids []chunk.ChunkID, nodeID string) error
+	applyRevokeChunkHolders func(ids []chunk.ChunkID, nodeID string) error
+	isTombstoned            func(id chunk.ChunkID) bool
+	listChunks              func() []chunk.ChunkID
+	listRetPending          func() []chunk.ChunkID
+	overlayFromFSM          func(chunk.ChunkMeta) chunk.ChunkMeta
+	manifestEntries         func() []vaultctlfsm.ManifestEntry
+	manifestEntry           func(id chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool)
 }
 
 // ensureVaultCtlMetadata joins this node to the vault control-plane
@@ -1106,7 +1117,7 @@ func (o *Orchestrator) ensureVaultCtlMetadata(vaultCfg system.VaultConfig, clust
 		return nil, nil, vaultRaftCallbacks{}
 	}
 	vaultGID := raftgroup.VaultControlPlaneGroupID(vaultCfg.ID)
-	g, members := o.tryStartClusterRaftGroup(vaultGID, vaultraft.NewFSM(), clusterNodes, factories)
+	g, members := o.tryStartClusterWideRaftGroup(vaultGID, vaultraft.NewFSM(), clusterNodes, factories)
 	if g == nil {
 		return nil, nil, vaultRaftCallbacks{}
 	}
@@ -1128,6 +1139,7 @@ func (o *Orchestrator) ensureVaultCtlMetadata(vaultCfg system.VaultConfig, clust
 	vaultID := vaultCfg.ID
 	vfsm.SetOnAfterRestore(func() { o.afterVaultCtlRestore(vaultID) })
 	vaultFSM := vfsm.EnsureVaultFSM(vaultCfg.ID)
+	wireVaultFSMPipelineChunkEvents(o, vaultID, vaultFSM)
 	r := g.Raft
 	timeout := cluster.ReplicationTimeout
 
@@ -1182,6 +1194,20 @@ func buildVaultRaftCallbacks(r *hraft.Raft, fsm *vaultctlfsm.FSM, applier vaultc
 		applyRetPending: func(id chunk.ChunkID) error {
 			return applier.Apply(vaultctlfsm.MarshalRetentionPending(id))
 		},
+		applyAckChunkHolders: func(ids []chunk.ChunkID, nodeID string) error {
+			data, err := vaultctlfsm.MarshalAckChunkHolders(ids, nodeID)
+			if err != nil {
+				return err
+			}
+			return applier.Apply(data)
+		},
+		applyRevokeChunkHolders: func(ids []chunk.ChunkID, nodeID string) error {
+			data, err := vaultctlfsm.MarshalRevokeChunkHolders(ids, nodeID)
+			if err != nil {
+				return err
+			}
+			return applier.Apply(data)
+		},
 		isTombstoned: func(id chunk.ChunkID) bool {
 			if fsm == nil {
 				return false
@@ -1223,13 +1249,14 @@ func buildVaultRaftCallbacks(r *hraft.Raft, fsm *vaultctlfsm.FSM, applier vaultc
 			// codebase) still behave correctly: Sealing reads as
 			// not-yet-sealed.
 			m.Sealed = e.State == chunk.ChunkStateSealed
-			return m
-		},
-		chunkResidency: func(id chunk.ChunkID, placementNodeIDs []string) []string {
-			if fsm == nil {
-				return nil
+			// Retention TTL anchors on SealedAt (wall-clock seal completion).
+			// Pipeline/file managers often leave local meta.SealedAt zero and
+			// only populate record-span WriteEnd — backlog catch-up then
+			// looks instantly expired without the FSM anchor.
+			if !e.SealedAt.IsZero() {
+				m.SealedAt = e.SealedAt
 			}
-			return fsm.ChunkResidency(id, placementNodeIDs)
+			return m
 		},
 		manifestEntries: func() []vaultctlfsm.ManifestEntry {
 			if fsm == nil {
@@ -1295,6 +1322,43 @@ func setVaultRaftAnnouncer(cm chunk.ChunkManager, applier vaultctlfsm.Applier, p
 		return
 	}
 	setter.SetAnnouncer(vaultctlfsm.NewAnnouncer(applier, phase, logger))
+}
+
+// rewireVaultInstanceAfterCtlRestore rebinds the vault instance's reconciler
+// and Raft-backed metadata callbacks to the live vault-ctl sub-FSM after a
+// group-level snapshot Restore. vaultraft.FSM.Restore replaces the entire
+// vaults map with freshly allocated sub-FSMs; any reconciler or callback
+// closure still pointing at the pre-restore object reads a frozen manifest
+// (SweepMissingReplicas sees missing=0 forever, overlay/tombstone checks
+// go stale). Returns the live sub-FSM, or nil when nothing to rewire.
+func (o *Orchestrator) rewireVaultInstanceAfterCtlRestore(vaultID glid.GLID, t *VaultInstance) *vaultctlfsm.FSM {
+	if o.groupMgr == nil || t == nil {
+		return nil
+	}
+	g := o.groupMgr.GetGroup(raftgroup.VaultControlPlaneGroupID(vaultID))
+	if g == nil {
+		return nil
+	}
+	vfsm, ok := g.FSM.(*vaultraft.FSM)
+	if !ok || vfsm == nil {
+		return nil
+	}
+	live := vfsm.VaultFSM(vaultID)
+	if live == nil {
+		return nil
+	}
+	vaultGID := raftgroup.VaultControlPlaneGroupID(vaultID)
+	var applier vaultctlfsm.Applier
+	if o.peerConns != nil {
+		applier = cluster.NewVaultCtlChunkApplyForwarder(g.Raft, vaultGID, vaultID, o.peerConns, cluster.ReplicationTimeout)
+	} else {
+		applier = &vaultCtlApplier{o: o, vaultID: vaultID}
+	}
+	t.applyRaftCallbacks(buildVaultRaftCallbacks(g.Raft, live, applier))
+	if t.Reconciler != nil {
+		t.Reconciler.Wire(live)
+	}
+	return live
 }
 
 // clearVaultFSMChunkCallbacks clears OnDelete/OnUpload for a vault's FSM slice
@@ -1366,7 +1430,7 @@ func wireVaultFSMOnDelete(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkM
 		if o == nil {
 			return
 		}
-		o.EmitChunkCreated(vaultID, manifestEntryToChunkMeta(e, false))
+		o.EmitChunkCreated(vaultID, manifestEntryToChunkMeta(e, false)) // logs + event bus
 	})
 	silent, ok := cm.(chunk.SilentDeleter)
 	if !ok {
@@ -1380,6 +1444,7 @@ func wireVaultFSMOnDelete(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkM
 		// the chunk locally — they may have rendered it via the
 		// cluster-wide ListChunks fan-out. See gastrolog-2ob86.
 		if o != nil {
+			o.logChunkDeleted(vaultID, id)
 			defer o.EmitChunkDeleted(vaultID, id)
 		}
 		// Delete indexes first (they're metadata about the chunk).
@@ -1408,10 +1473,63 @@ func wireVaultFSMOnDelete(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkM
 	})
 }
 
+// wireVaultFSMPipelineChunkEvents connects vault-ctl pipeline manifest
+// lifecycle callbacks to the WatchChunks event bus. Legacy CmdCreateChunk
+// already emits CREATED via SetOnCreate; open/sealing pipeline chunks use
+// OpenChunkManifest / SealOpenChunkManifest instead and need their own
+// path so the inspector chunk list shows active and sealing chunks without
+// polling ListChunks. Uses AddOn* so the chunking manager's SetOn* slot-0
+// callbacks are not disturbed. Idempotent per vaultID.
+func wireVaultFSMPipelineChunkEvents(o *Orchestrator, vaultID glid.GLID, fsm *vaultctlfsm.FSM) {
+	if o == nil || fsm == nil {
+		return
+	}
+	if _, loaded := o.vaultCtlPipelineChunkEvents.LoadOrStore(vaultID, struct{}{}); loaded {
+		return
+	}
+	fsm.AddOnOpenChunkManifest(func(m *vaultctlfsm.OpenChunkManifest) {
+		if m == nil || len(m.Refs) == 0 {
+			return
+		}
+		o.EmitChunkCreated(vaultID, openChunkManifestToChunkMeta(m, chunk.ChunkStateActive))
+	})
+	fsm.AddOnOpenChunkRefAdded(func(m *vaultctlfsm.OpenChunkManifest) {
+		if m == nil {
+			return
+		}
+		meta := openChunkManifestToChunkMeta(m, chunk.ChunkStateActive)
+		if len(m.Refs) == 1 {
+			o.EmitChunkCreated(vaultID, meta)
+			return
+		}
+		o.EmitChunkProgress(vaultID, meta)
+	})
+	fsm.AddOnSealedManifest(func(m *vaultctlfsm.OpenChunkManifest) {
+		if m == nil {
+			return
+		}
+		o.EmitChunkSealing(vaultID, openChunkManifestToChunkMeta(m, chunk.ChunkStateSealing))
+	})
+	fsm.AddOnSeal(func(e vaultctlfsm.ManifestEntry) {
+		if e.State != chunk.ChunkStateSealed {
+			return
+		}
+		o.EmitChunkSealed(vaultID, manifestEntryToChunkMeta(e, true))
+	})
+	// Residency is receipt-only (gastrolog-68wsli), so holder-set changes
+	// are chunk-state changes the inspector must see live: emit PROGRESS
+	// so the WatchChunks relay re-stamps the event with the FSM's current
+	// holder set. Without this edge, a sealed chunk's honest pre-receipt
+	// amber pips only turn green on a full snapshot refetch.
+	fsm.SetOnHoldersChanged(func(e vaultctlfsm.ManifestEntry) {
+		o.EmitChunkProgress(vaultID, manifestEntryToChunkMeta(e, e.State == chunk.ChunkStateSealed))
+	})
+}
+
 // wireVaultFSMOnUpload connects the vault-ctl FSM's OnUpload callback to the
-// chunk manager's RegisterCloudChunk method. When the FSM applies CmdUploadChunk
+// chunk manager's RegisterCloudBackedChunk method. When the FSM applies CmdUploadChunk
 // (from the leader's AnnounceUpload), the follower's chunk manager registers
-// the cloud chunk from metadata alone — no record streaming or S3 download.
+// the cloud-backed chunk from metadata alone — no record streaming or S3 download.
 func wireVaultFSMOnUpload(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkManager, o *Orchestrator, logger *slog.Logger) {
 	if g == nil || cm == nil {
 		return
@@ -1425,7 +1543,7 @@ func wireVaultFSMOnUpload(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkM
 	default:
 		return
 	}
-	registrar, ok := cm.(chunk.CloudChunkRegistrar)
+	registrar, ok := cm.(chunk.CloudBackedChunkRegistrar)
 	if !ok {
 		return
 	}
@@ -1444,7 +1562,7 @@ func wireVaultFSMOnUpload(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkM
 			meta.CloudBacked = true
 			o.EmitChunkUploaded(vaultID, meta)
 		}()
-		info := chunk.CloudChunkInfo{
+		info := chunk.CloudBackedChunkInfo{
 			WriteStart:      e.WriteStart,
 			WriteEnd:        e.WriteEnd,
 			IngestStart:     e.IngestStart,
@@ -1459,9 +1577,9 @@ func wireVaultFSMOnUpload(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkM
 			SourceIdxOffset: e.SourceIdxOffset,
 			SourceIdxSize:   e.SourceIdxSize,
 		}
-		if err := registrar.RegisterCloudChunk(e.ID, info); err != nil {
+		if err := registrar.RegisterCloudBackedChunk(e.ID, info); err != nil {
 			if logger != nil {
-				logger.Debug("FSM onUpload: RegisterCloudChunk failed",
+				logger.Debug("FSM onUpload: RegisterCloudBackedChunk failed",
 					"chunk", e.ID, "error", err)
 			}
 		}
@@ -1481,10 +1599,10 @@ func wireVaultFSMOnUpload(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkM
 // chunk catchup and RF expansion. See gastrolog-4zy8a.
 //
 // Partial resolution short-circuits: if any cluster node's address can't
-// be resolved (transient — the cluster Raft config hasn't caught up yet),
+// be resolved (transient — the cluster-ctl Raft config has not caught up yet),
 // the refresh is skipped rather than passing a partial set to the
 // reconciler, which would otherwise RemoveServer the missing entries.
-// The next NotifyNodeConfigPut retries once the address is in cluster Raft.
+// The next NotifyNodeConfigPut retries once the address is in cluster-ctl Raft.
 func (o *Orchestrator) RefreshVaultCtlMembers(clusterNodes []system.NodeConfig, factories Factories) {
 	if o.vaultCtlLeaders == nil {
 		return
@@ -1511,7 +1629,7 @@ func (o *Orchestrator) RefreshVaultCtlMembers(clusterNodes []system.NodeConfig, 
 	for _, vaultID := range vaultIDs {
 		// Joiners can land here with a vault that was registered before
 		// their own NodeConfig had propagated into the cluster FSM —
-		// tryStartClusterRaftGroup returned nil on the original
+		// tryStartClusterWideRaftGroup returned nil on the original
 		// AddVault and the vault-ctl Raft group was never created on
 		// this node. Re-attempt creation now that we have a complete
 		// resolvable member set; the call is idempotent and returns
@@ -1597,6 +1715,10 @@ func buildVaultParams(sys *system.System, vaultCfg system.VaultConfig, localNode
 // onto every CmdUploadChunk via gastrolog-grnc3); no-op for the rest if the
 // referenced cloud service entry is missing — the chunk manager will start
 // without a CloudStore wired but still knows which service it would pin to.
+//
+// The provider fields come from CloudService.StoreParams — the same mapping
+// PutCloudService validates against at config-accept time (gastrolog-7au6u9),
+// so an accepted config carries exactly the params store creation needs.
 func addCloudParams(params map[string]string, cfg *system.Config, vaultCfg system.VaultConfig) {
 	params["cloud_service_id"] = vaultCfg.CloudServiceID.String()
 	cs := findCloudService(cfg, *vaultCfg.CloudServiceID)
@@ -1604,19 +1726,7 @@ func addCloudParams(params map[string]string, cfg *system.Config, vaultCfg syste
 		return
 	}
 	params["sealed_backing"] = cs.Provider
-	params["bucket"] = cs.Bucket
-	if cs.Region != "" {
-		params["region"] = cs.Region
-	}
-	if cs.Endpoint != "" {
-		params["endpoint"] = cs.Endpoint
-	}
-	if cs.AccessKey != "" {
-		params["access_key"] = cs.AccessKey
-	}
-	if cs.SecretKey != "" {
-		params["secret_key"] = cs.SecretKey
-	}
+	maps.Copy(params, cs.StoreParams())
 }
 
 // findLocalFileStorage finds a FileStorage on the given node with the given storage class.

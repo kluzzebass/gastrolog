@@ -175,14 +175,14 @@ func TestS3Store(t *testing.T) {
 	skipIfNoEmulators(t)
 	ctx := context.Background()
 
-	if err := ensureS3Bucket(ctx, "http://localhost:9000", "blobstore-test", "gastrolog", "gastrolog"); err != nil {
+	if err := ensureS3Bucket(ctx, "http://localhost:19000", "blobstore-test", "gastrolog", "gastrolog"); err != nil {
 		t.Fatalf("ensure bucket: %v", err)
 	}
 
 	s, err := blobstore.NewS3(ctx, blobstore.S3Config{
 		Bucket:    "blobstore-test",
 		Region:    "us-east-1",
-		Endpoint:  "http://localhost:9000",
+		Endpoint:  "http://localhost:19000",
 		AccessKey: "gastrolog",
 		SecretKey: "gastrolog",
 	})

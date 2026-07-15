@@ -254,6 +254,7 @@ func (ing *Ingester) logRecordToMessage(lr *logspb.LogRecord, resourceAttrs, sco
 	return orchestrator.IngestMessage{
 		Attrs:      attrs,
 		Raw:        []byte(anyValueToString(lr.GetBody())),
+		RawOwned:   true,
 		SourceTS:   sourceTS,
 		IngestTS:   now,
 		IngesterID: ing.id,

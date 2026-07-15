@@ -1459,11 +1459,11 @@ func TestBTreeRecoveryPreservesCorrectness(t *testing.T) {
 
 	// Collect pre-crash seek results for 50 random targets.
 	type seekResult struct {
-		target  time.Time
-		iPos    uint64
-		iFound  bool
-		sPos    uint64
-		sFound  bool
+		target time.Time
+		iPos   uint64
+		iFound bool
+		sPos   uint64
+		sFound bool
 	}
 	var preResults []seekResult
 	for range 50 {

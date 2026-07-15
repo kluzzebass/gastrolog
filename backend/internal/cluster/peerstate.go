@@ -1,10 +1,12 @@
 package cluster
 
 import (
+	"sort"
 	"sync"
 	"time"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/glid"
 )
 
 type peerEntry struct {
@@ -169,9 +171,31 @@ func (p *PeerState) CollectIngesterAlive(ingesterID string) map[string]bool {
 	return result
 }
 
+// AggregateRouteTotals returns the summed cumulative route counters across
+// TTL-live peers plus a fingerprint of exactly which peers contributed —
+// taken under one lock so the sums and the fingerprint can never disagree.
+// The stats collector's summed window re-anchors when the fingerprint
+// changes, so a peer's stats expiring and later resuming can never read as
+// a throughput spike (gastrolog-mliwrd).
+func (p *PeerState) AggregateRouteTotals() (routed, matched int64, members []string) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	now := time.Now()
+	for id, e := range p.entries {
+		if now.Sub(e.received) > p.ttl || e.stats == nil {
+			continue
+		}
+		routed += e.stats.RouteStatsRouted
+		matched += e.stats.RouteStatsMatched
+		members = append(members, id)
+	}
+	sort.Strings(members)
+	return routed, matched, members
+}
+
 // AggregateRouteStats sums route stats from all live peers.
 // Returns per-peer totals merged into a single snapshot.
-func (p *PeerState) AggregateRouteStats() (ingested, dropped, routed int64, filterActive bool, vaultStats []*gastrologv1.VaultRouteStats, routeStats []*gastrologv1.PerRouteStats) {
+func (p *PeerState) AggregateRouteStats() (routed, unmatched, matched int64, routeTableActive bool, vaultStats []*gastrologv1.VaultRouteStats, routeStats []*gastrologv1.PerRouteStats) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	now := time.Now()
@@ -184,24 +208,22 @@ func (p *PeerState) AggregateRouteStats() (ingested, dropped, routed int64, filt
 		if now.Sub(e.received) > p.ttl || e.stats == nil {
 			continue
 		}
-		ingested += e.stats.RouteStatsIngested
-		dropped += e.stats.RouteStatsDropped
 		routed += e.stats.RouteStatsRouted
-		if e.stats.RouteStatsFilterActive {
-			filterActive = true
+		unmatched += e.stats.RouteStatsUnmatched
+		matched += e.stats.RouteStatsMatched
+		if e.stats.RouteStatsRouteTableActive {
+			routeTableActive = true
 		}
 		for _, vs := range e.stats.RouteVaultStats {
 			key := string(vs.VaultId)
 			existing, ok := vaultMap[key]
 			if !ok {
 				vaultMap[key] = &gastrologv1.VaultRouteStats{
-					VaultId:          vs.VaultId,
-					RecordsMatched:   vs.RecordsMatched,
-					RecordsForwarded: vs.RecordsForwarded,
+					VaultId:        vs.VaultId,
+					RecordsMatched: vs.RecordsMatched,
 				}
 			} else {
 				existing.RecordsMatched += vs.RecordsMatched
-				existing.RecordsForwarded += vs.RecordsForwarded
 			}
 		}
 		for _, rs := range e.stats.RoutePerRouteStats {
@@ -209,13 +231,11 @@ func (p *PeerState) AggregateRouteStats() (ingested, dropped, routed int64, filt
 			existing, ok := routeMap[rkey]
 			if !ok {
 				routeMap[rkey] = &gastrologv1.PerRouteStats{
-					RouteId:          rs.RouteId,
-					RecordsMatched:   rs.RecordsMatched,
-					RecordsForwarded: rs.RecordsForwarded,
+					RouteId:        rs.RouteId,
+					RecordsMatched: rs.RecordsMatched,
 				}
 			} else {
 				existing.RecordsMatched += rs.RecordsMatched
-				existing.RecordsForwarded += rs.RecordsForwarded
 			}
 		}
 	}
@@ -227,6 +247,136 @@ func (p *PeerState) AggregateRouteStats() (ingested, dropped, routed int64, filt
 		routeStats = append(routeStats, rs)
 	}
 	return
+}
+
+// AggregateRouteRates sums live peers' rolling-window routing rates from
+// their NodeStats broadcasts, per horizon. Sparks are omitted: per-node tick
+// phases differ, so an element-wise sum would fabricate a series no node
+// observed. The caller adds the local node's own rates (gastrolog-4eh5ns).
+func (p *PeerState) AggregateRouteRates() (routed, matched *gastrologv1.ThroughputRate) {
+	routed = &gastrologv1.ThroughputRate{}
+	matched = &gastrologv1.ThroughputRate{}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	now := time.Now()
+	for _, e := range p.entries {
+		if now.Sub(e.received) > p.ttl || e.stats == nil {
+			continue
+		}
+		addThroughput(routed, e.stats.RouteRouted)
+		addThroughput(matched, e.stats.RouteMatched)
+	}
+	return routed, matched
+}
+
+// addThroughput accumulates src's per-horizon rates into dst (nil src is a
+// node that has not broadcast rate fields yet).
+func addThroughput(dst, src *gastrologv1.ThroughputRate) {
+	if src == nil {
+		return
+	}
+	dst.InstantPerSec += src.InstantPerSec
+	dst.Avg_1MPerSec += src.Avg_1MPerSec
+	dst.Avg_5MPerSec += src.Avg_5MPerSec
+	dst.Avg_15MPerSec += src.Avg_15MPerSec
+}
+
+// PeerVaultPipelineDisk is one peer node's broadcast pipeline disk counts for a vault.
+type PeerVaultPipelineDisk struct {
+	NodeID                string
+	Working               int
+	CompletedStaging      int
+	Head                  int
+	PreHead               int
+	WorkingBytes          int64
+	CompletedStagingBytes int64
+	HeadBytes             int64
+	PreHeadBytes          int64
+}
+
+// AggregatePipelineDisk collects per-vault pipeline disk counts from all live peers.
+func (p *PeerState) AggregatePipelineDisk() map[glid.GLID][]PeerVaultPipelineDisk {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	now := time.Now()
+
+	out := make(map[glid.GLID][]PeerVaultPipelineDisk)
+	for nodeID, e := range p.entries {
+		if now.Sub(e.received) > p.ttl || e.stats == nil {
+			continue
+		}
+		for _, vd := range e.stats.VaultPipelineDisk {
+			vid := glid.FromBytes(vd.GetVaultId())
+			out[vid] = append(out[vid], PeerVaultPipelineDisk{
+				NodeID:           nodeID,
+				Working:          int(vd.GetWorkingSegments()),
+				CompletedStaging: int(vd.GetCompletedStagingSegments()),
+				Head:             int(vd.GetHeadSegments()),
+				PreHead:          int(vd.GetPreHeadSegments()),
+			})
+		}
+	}
+	return out
+}
+
+// VaultDiskProtected reports whether any live peer has this vault's local
+// backing volume below its free-space floor. Combined with the local guard,
+// this makes per-vault admission cluster-consistent: the starved volume is
+// usually on a different node than the front door taking the records.
+func (p *PeerState) VaultDiskProtected(vaultID glid.GLID) bool {
+	return p.vaultListedByAnyPeer(vaultID, func(ns *gastrologv1.NodeStats) [][]byte {
+		return ns.DiskProtectedVaultIds
+	})
+}
+
+// VaultSizeCapped reports whether any live peer has this vault at its local
+// max-size budget. Same cluster-consistency contract as VaultDiskProtected.
+func (p *PeerState) VaultSizeCapped(vaultID glid.GLID) bool {
+	return p.vaultListedByAnyPeer(vaultID, func(ns *gastrologv1.NodeStats) [][]byte {
+		return ns.SizeCappedVaultIds
+	})
+}
+
+// VaultDiskProtectedNodes returns the live peers currently reporting this
+// vault's local backing volume under disk protect — the WHO to
+// VaultDiskProtected's whether. The placement manager uses it to name the
+// degraded home in the vault-home-cannot-store alarm (gastrolog-38bm9t).
+func (p *PeerState) VaultDiskProtectedNodes(vaultID glid.GLID) []string {
+	want := vaultID.ToProto()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	now := time.Now()
+	var nodes []string
+	for nodeID, e := range p.entries {
+		if now.Sub(e.received) > p.ttl || e.stats == nil {
+			continue
+		}
+		for _, id := range e.stats.DiskProtectedVaultIds {
+			if string(id) == string(want) {
+				nodes = append(nodes, nodeID)
+				break
+			}
+		}
+	}
+	return nodes
+}
+
+func (p *PeerState) vaultListedByAnyPeer(vaultID glid.GLID, list func(*gastrologv1.NodeStats) [][]byte) bool {
+	want := vaultID.ToProto()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	now := time.Now()
+	for _, e := range p.entries {
+		if now.Sub(e.received) > p.ttl || e.stats == nil {
+			continue
+		}
+		for _, id := range list(e.stats) {
+			if string(id) == string(want) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // LastSeen returns the timestamp of the most recent broadcast received

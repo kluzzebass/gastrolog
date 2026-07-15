@@ -68,6 +68,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"slices"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -75,6 +79,8 @@ import (
 	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline/chunking"
+	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
@@ -88,7 +94,7 @@ import (
 // outside a small allow-list (vault teardown, replaceForwardedChunk).
 type VaultLifecycleReconciler struct {
 	vaultID     glid.GLID
-	vaultInst        *VaultInstance
+	vaultInst   *VaultInstance
 	localNodeID string
 	logger      *slog.Logger
 
@@ -129,7 +135,7 @@ type VaultLifecycleReconciler struct {
 func NewVaultLifecycleReconciler(orch *Orchestrator, vaultID glid.GLID, vaultInst *VaultInstance, localNodeID string, logger *slog.Logger) *VaultLifecycleReconciler {
 	return &VaultLifecycleReconciler{
 		vaultID:     vaultID,
-		vaultInst:        vaultInst,
+		vaultInst:   vaultInst,
 		localNodeID: localNodeID,
 		orch:        orch,
 		logger:      compVaultLifecycle.Apply(logger).With("vault", vaultID),
@@ -241,6 +247,10 @@ func (r *VaultLifecycleReconciler) projectAllSealedFromFSM(fsm *vaultctlfsm.FSM)
 			r.logger.Warn("reconcile-from-snapshot: EnsureSealed failed",
 				"chunk", e.ID, "error", err)
 		}
+		// Pipeline-built sealed chunks live at the vault ChunkRoot, not the
+		// chunk manager dir, so EnsureSealed is a no-op for them. Their
+		// registration is lazy: the chunk manager's on-miss resolver serves
+		// them at first lookup (gastrolog-2kmgj6) — no per-entry work here.
 	}
 }
 
@@ -271,6 +281,15 @@ func (r *VaultLifecycleReconciler) projectAllSealedFromFSM(fsm *vaultctlfsm.FSM)
 // placement the leader holding the FSM Sealing entry is the only node
 // that ever held the chunk locally, so this is the right place).
 func (r *VaultLifecycleReconciler) resumeSealingFromFSM(fsm *vaultctlfsm.FSM) {
+	if r.orch != nil && r.orch.isPipelineIngestVault(r.vaultID) {
+		if _, ok := r.orch.pipelineVaultChunkRoot(r.vaultID); ok {
+			if err := r.orch.pipeline.RecoverVault(context.Background(), r.vaultID); err != nil {
+				r.logger.Warn("reconcile-from-snapshot: pipeline recover failed",
+					"error", err)
+			}
+		}
+		return
+	}
 	if r.vaultInst == nil || r.vaultInst.Chunks == nil {
 		return
 	}
@@ -334,21 +353,21 @@ func (r *VaultLifecycleReconciler) resumeSealingFromFSM(fsm *vaultctlfsm.FSM) {
 
 // projectAllCloudBackedFromFSM iterates every cloud-backed entry in the
 // FSM and registers the chunk in the local chunk Manager's cloud index
-// via RegisterCloudChunk. Used by ReconcileFromSnapshot after Restore —
-// the per-apply onUpload effect (which fires the same RegisterCloudChunk
+// via RegisterCloudBackedChunk. Used by ReconcileFromSnapshot after Restore —
+// the per-apply onUpload effect (which fires the same RegisterCloudBackedChunk
 // for live CmdUploadChunk replication) does NOT fire during snapshot
 // install (Restore replaces f.chunks wholesale, no per-entry effects),
-// so cloud chunks that arrived during snapshot install would otherwise
+// so cloud-backed chunks that arrived during snapshot install would otherwise
 // be present in the FSM but absent from cm.cloudIdx — making
 // cm.OpenCursor return ErrChunkNotFound and aborting search streams.
-// RegisterCloudChunk is idempotent (skips if already in m.metas or
+// RegisterCloudBackedChunk is idempotent (skips if already in m.metas or
 // m.cloudIdx), so calling it for every cloud-backed entry is safe.
 // See gastrolog-3ukgz.
 func (r *VaultLifecycleReconciler) projectAllCloudBackedFromFSM(fsm *vaultctlfsm.FSM) {
 	if r.vaultInst == nil || r.vaultInst.Chunks == nil {
 		return
 	}
-	registrar, ok := r.vaultInst.Chunks.(chunk.CloudChunkRegistrar)
+	registrar, ok := r.vaultInst.Chunks.(chunk.CloudBackedChunkRegistrar)
 	if !ok {
 		return
 	}
@@ -356,7 +375,7 @@ func (r *VaultLifecycleReconciler) projectAllCloudBackedFromFSM(fsm *vaultctlfsm
 		if !e.CloudBacked {
 			continue
 		}
-		info := chunk.CloudChunkInfo{
+		info := chunk.CloudBackedChunkInfo{
 			WriteStart:        e.WriteStart,
 			WriteEnd:          e.WriteEnd,
 			IngestStart:       e.IngestStart,
@@ -372,11 +391,113 @@ func (r *VaultLifecycleReconciler) projectAllCloudBackedFromFSM(fsm *vaultctlfsm
 			SourceIdxSize:     e.SourceIdxSize,
 			IngestTSMonotonic: e.IngestTSMonotonic,
 		}
-		if err := registrar.RegisterCloudChunk(e.ID, info); err != nil {
-			r.logger.Warn("reconcile-from-snapshot: RegisterCloudChunk failed",
+		if err := registrar.RegisterCloudBackedChunk(e.ID, info); err != nil {
+			r.logger.Warn("reconcile-from-snapshot: RegisterCloudBackedChunk failed",
 				"chunk", e.ID, "error", err)
 		}
 	}
+}
+
+// registerPipelineGLCB makes a pipeline-built sealed chunk queryable on this
+// node by registering its data.glcb — which lives under the vault's
+// segmentation ChunkRoot, not the chunk manager's own dir — with the local
+// chunk Manager. Discovery of pipeline chunks already works (query lists them
+// from the vault-ctl FSM); this closes the byte-access gap so OpenCursor
+// resolves the GLCB instead of returning ErrChunkNotFound.
+//
+// No-op unless: the local chunk Manager implements ExternalGLCBRegistrar, this
+// node runs the pipeline as a home for the vault (so a ChunkRoot exists), and
+// the GLCB file is present locally. A node that holds the FSM entry but not the
+// bytes (non-home, or a home that has not built this chunk yet) skips silently —
+// query there falls back to other holders. The registrar itself leaves
+// locally-owned (legacy / cloud-backed) chunks untouched. See gastrolog-2kysn.
+func (r *VaultLifecycleReconciler) registerPipelineGLCB(e vaultctlfsm.ManifestEntry) {
+	if r.vaultInst == nil || r.vaultInst.Chunks == nil || r.orch == nil {
+		return
+	}
+	registrar, ok := r.vaultInst.Chunks.(chunk.ExternalGLCBRegistrar)
+	if !ok {
+		r.orch.noteRegisterSkip(r.vaultID, e.ID, "chunk manager is not an external-GLCB registrar")
+		return
+	}
+	chunkRoot, ok := r.orch.pipelineVaultChunkRoot(r.vaultID)
+	if !ok {
+		// pipelineVaults has no home registration for this vault on this
+		// node — either the pipeline wiring hasn't run yet (boot ordering)
+		// or home resolution went wrong. Every sealed chunk on disk is
+		// unservable until this clears.
+		r.orch.noteRegisterSkip(r.vaultID, e.ID, "no pipeline home registration (pipelineVaultChunkRoot)")
+		return
+	}
+	glcbPath := chunking.ChunkGLCBPath(chunkRoot, e.ID)
+	if _, err := os.Stat(glcbPath); err != nil {
+		// Bytes absent locally: this home has not built the chunk (or this
+		// node is not a holder). Query on a holder node serves it instead.
+		return
+	}
+	// No IsExternalGLCBAt short-circuit here: a lazy on-miss registration
+	// (gastrolog-2kmgj6) records the path without TS index offsets, and
+	// this call's file-enriched info is what upgrades them — the manager's
+	// registration core dedups the no-change case cheaply.
+	info, err := externalGLCBInfoForPipeline(e, glcbPath)
+	if err != nil {
+		r.logger.Warn("registerPipelineGLCB: read GLCB metadata failed",
+			"chunk", e.ID, "path", glcbPath, "error", err)
+		info = chunk.ExternalGLCBInfo{
+			WriteStart:        e.WriteStart,
+			WriteEnd:          e.WriteEnd,
+			IngestStart:       e.IngestStart,
+			IngestEnd:         e.IngestEnd,
+			SourceStart:       e.SourceStart,
+			SourceEnd:         e.SourceEnd,
+			RecordCount:       e.RecordCount,
+			Bytes:             e.Bytes,
+			DiskBytes:         e.DiskBytes,
+			IngestIdxOffset:   e.IngestIdxOffset,
+			IngestIdxSize:     e.IngestIdxSize,
+			SourceIdxOffset:   e.SourceIdxOffset,
+			SourceIdxSize:     e.SourceIdxSize,
+			IngestTSMonotonic: e.IngestTSMonotonic,
+		}
+	}
+	if err := registrar.RegisterExternalGLCB(e.ID, glcbPath, info); err != nil {
+		r.logger.Warn("registerPipelineGLCB: RegisterExternalGLCB failed",
+			"chunk", e.ID, "path", glcbPath, "error", err)
+		return
+	}
+	r.ackOwnHolderReceipt(e)
+}
+
+// ackOwnHolderReceipt proposes this home's holder receipt the moment its
+// copy is registered servable — event-driven, covering the build (OnBuilt),
+// seal (onSeal), and replica-pull recovery paths through their shared
+// registration. Without it receipts earned only via the 20s sweep, and
+// replica counts staircased 4→1→2→3→4 after every seal as per-node batches
+// landed (the placement fallback overstates until the first receipt). The
+// sweep remains the reconciliation backstop for missed events and for
+// revocation; a failed proposal here is retried there.
+func (r *VaultLifecycleReconciler) ackOwnHolderReceipt(e vaultctlfsm.ManifestEntry) {
+	if r.vaultInst == nil || r.vaultInst.ApplyRaftAckChunkHolders == nil {
+		return
+	}
+	if slices.Contains(e.Holders, r.localNodeID) {
+		return
+	}
+	ack := r.vaultInst.ApplyRaftAckChunkHolders
+	id := e.ID
+	nodeID := r.localNodeID
+	logger := r.logger
+	// Dispatched off-goroutine: onSeal (one of this function's callers via
+	// registerPipelineGLCB) runs on the Raft apply pump, and proposing from
+	// the pump deadlocks the leader — Apply posts to the very queue the
+	// pump is draining. Same hazard and same remedy as
+	// ReconcileFromSnapshot's obligation dispatch.
+	go func() {
+		if err := ack([]chunk.ChunkID{id}, nodeID); err != nil {
+			logger.Debug("event-driven holder ack failed; catch-up sweep will retry",
+				"chunk", id, "error", err)
+		}
+	}()
 }
 
 // ---------- FSM apply event handlers ----------
@@ -426,6 +547,14 @@ func (r *VaultLifecycleReconciler) onSeal(e vaultctlfsm.ManifestEntry) {
 		r.logger.Warn("onSeal: EnsureSealed failed",
 			"chunk", e.ID, "error", err)
 	}
+	// Pipeline-built sealed chunks live at the vault ChunkRoot, not the chunk
+	// manager dir, so EnsureSealed is a no-op for them. Register their GLCB by
+	// path so a freshly-sealed pipeline chunk is queryable on this home node
+	// immediately. No-op for legacy/cloud-backed chunks. See gastrolog-2kysn.
+	r.registerPipelineGLCB(e)
+	if r.orch != nil && r.orch.isPipelineIngestVault(r.vaultID) {
+		r.orch.schedulePipelineCloudUpload(r.vaultID, e.ID)
+	}
 }
 
 func (r *VaultLifecycleReconciler) onRetentionPending(id chunk.ChunkID) {
@@ -469,8 +598,15 @@ func (r *VaultLifecycleReconciler) onAckDelete(chunkID chunk.ChunkID, ackingNode
 
 func (r *VaultLifecycleReconciler) onFinalizeDelete(chunkID chunk.ChunkID) {
 	r.logger.Debug("onFinalizeDelete", "chunk", chunkID)
-	// Audit-only. The pending entry was removed inside applyFinalizeDelete
-	// before this callback fired.
+	// Emit DELETED on every node where the FSM entry was removed, even
+	// when this node never held local bytes and never ran deleteLocalCopy.
+	// Without this, the WatchChunks projection on nodes that only learned
+	// about the chunk via ListChunks fan-out keeps showing retention-pending
+	// rows until a manual reload. Mirrors wireVaultFSMOnDelete / gastrolog-2ob86.
+	if r.orch != nil {
+		r.orch.logChunkDeleted(r.vaultID, chunkID)
+		r.orch.EmitChunkDeleted(r.vaultID, chunkID)
+	}
 }
 
 // onPruneNode fires on every node when CmdPruneNode commits.
@@ -507,10 +643,94 @@ func (r *VaultLifecycleReconciler) onPruneNode(prunedNodeID string, finalizable 
 // PendingDeletes() (which already returns copies) and fire
 // fulfillObligation in a goroutine to avoid blocking the cron
 // scheduler if the leader's apply queue is slow.
-func (r *VaultLifecycleReconciler) SweepPendingObligations() {
+// reconcileView is one tick's point-in-time gather of everything the
+// reconcile categories diff against: the FSM's manifest entries and
+// pending deletes (each a snapshot copy), and the local chunk manager's
+// meta list. Before consolidation (gastrolog-4pq56v) the seven Sweep*
+// methods each re-read these independently — fsm.List() three times,
+// Chunks.List() three times, PendingDeletes() twice per 20s tick. One
+// view per tick gives every category the same coherent inputs and one
+// lock-acquisition profile.
+//
+// Point queries that are cheap and per-candidate (IsTombstoned,
+// SegmentReleased, SealedManifest, Chunks.Meta) stay live — copying
+// whole tombstone/release histories into the view would cost more than
+// it saves.
+type reconcileView struct {
+	ready       bool
+	entries     []vaultctlfsm.ManifestEntry
+	entryByID   map[chunk.ChunkID]*vaultctlfsm.ManifestEntry
+	pending     []vaultctlfsm.PendingDelete
+	pendingByID map[chunk.ChunkID]*vaultctlfsm.PendingDelete
+	// localMetas/have are populated only when the vault instance has a
+	// chunk manager; localListErr records a failed list so categories
+	// that need the local view skip this tick instead of acting on an
+	// empty one.
+	localMetas   []chunk.ChunkMeta
+	localListErr error
+	have         map[chunk.ChunkID]bool
+}
+
+// gatherReconcileView snapshots the tick's shared inputs. Returns nil
+// when there is no FSM to reconcile against.
+func (r *VaultLifecycleReconciler) gatherReconcileView() *reconcileView {
 	if r.fsm == nil {
+		return nil
+	}
+	v := &reconcileView{
+		ready:   r.fsm.Ready(),
+		entries: r.fsm.List(),
+		pending: r.fsm.PendingDeletes(),
+	}
+	v.entryByID = make(map[chunk.ChunkID]*vaultctlfsm.ManifestEntry, len(v.entries))
+	for i := range v.entries {
+		v.entryByID[v.entries[i].ID] = &v.entries[i]
+	}
+	v.pendingByID = make(map[chunk.ChunkID]*vaultctlfsm.PendingDelete, len(v.pending))
+	for i := range v.pending {
+		v.pendingByID[v.pending[i].ChunkID] = &v.pending[i]
+	}
+	if r.vaultInst != nil && r.vaultInst.Chunks != nil {
+		v.localMetas, v.localListErr = r.vaultInst.Chunks.List()
+		if v.localListErr != nil {
+			r.logger.Warn("reconcile tick: list local chunks failed", "error", v.localListErr)
+		} else {
+			v.have = make(map[chunk.ChunkID]bool, len(v.localMetas))
+			for _, m := range v.localMetas {
+				v.have[m.ID] = true
+			}
+		}
+	}
+	return v
+}
+
+// ReconcileTick runs every reconcile category against one shared view.
+// This is THE level-triggered pass: every 20s, each node diffs its own
+// disk and obligations against the replicated FSM, in both directions.
+// The per-category Sweep* methods remain as isolated entry points
+// (tests, targeted recovery) — each gathers its own view — but the
+// production cadence goes through here (gastrolog-4pq56v).
+func (r *VaultLifecycleReconciler) ReconcileTick() {
+	v := r.gatherReconcileView()
+	if v == nil {
 		return
 	}
+	r.reconcilePendingObligations(v)
+	r.reconcileLocalOrphans(v)
+	r.reconcileStagingOrphans(v)
+	r.reconcileMissingReplicas(v)
+	r.reconcileStaleLeaderFSMEntries(v)
+	r.reconcileStalePendingDeleteAcks(v)
+	r.reconcileIdleActiveChunks(v)
+}
+
+func (r *VaultLifecycleReconciler) SweepPendingObligations() {
+	if v := r.gatherReconcileView(); v != nil {
+		r.reconcilePendingObligations(v)
+	}
+}
+
+func (r *VaultLifecycleReconciler) reconcilePendingObligations(v *reconcileView) {
 	// Skip if a previous sweep is still in flight. Prevents goroutine
 	// pile-up when the leader's apply queue is slow — better to lose a
 	// tick than have multiple concurrent sweeps fighting for the same
@@ -519,7 +739,7 @@ func (r *VaultLifecycleReconciler) SweepPendingObligations() {
 		r.logger.Debug("pending-delete sweep: previous sweep still in flight, skipping")
 		return
 	}
-	pending := r.fsm.PendingDeletes()
+	pending := v.pending
 	if len(pending) == 0 {
 		r.sweepInFlight.Store(0)
 		return
@@ -579,29 +799,31 @@ func (r *VaultLifecycleReconciler) SweepPendingObligations() {
 // without per-component log-level overrides — the whole point of this
 // sweep is operator-visible recovery.
 func (r *VaultLifecycleReconciler) SweepLocalOrphans() {
-	if r.fsm == nil || r.vaultInst == nil || r.vaultInst.Chunks == nil {
+	if v := r.gatherReconcileView(); v != nil {
+		r.reconcileLocalOrphans(v)
+	}
+}
+
+func (r *VaultLifecycleReconciler) reconcileLocalOrphans(v *reconcileView) {
+	if r.vaultInst == nil || r.vaultInst.Chunks == nil || v.localListErr != nil {
 		return
 	}
-	metas, err := r.vaultInst.Chunks.List()
-	if err != nil {
-		r.logger.Warn("local-orphan sweep: list chunks failed", "error", err)
-		return
-	}
+	metas := v.localMetas
 	ensurer, _ := r.vaultInst.Chunks.(chunk.SealEnsurer) // optional
 	// Chunks freshly created on this node but whose CmdCreateChunk hasn't
-	// applied yet would also fail fsm.Get / IsTombstoned. We don't want to
-	// race-delete them. Use seal age as a coarse "old enough that announce
-	// would have applied by now" guard for the no-tombstone branch — if a
-	// chunk has been sealed for longer than this, the Create-then-Delete
-	// pair on the FSM has had ample time to converge.
+	// applied yet would also fail the manifest / IsTombstoned lookups. We
+	// don't want to race-delete them. Use seal age as a coarse "old enough
+	// that announce would have applied by now" guard for the no-tombstone
+	// branch — if a chunk has been sealed for longer than this, the
+	// Create-then-Delete pair on the FSM has had ample time to converge.
 	const ghostAgeThreshold = 5 * time.Minute
 	now := time.Now()
 	var deleted int
 	for _, meta := range metas {
-		if r.fsm.Get(meta.ID) != nil {
+		if v.entryByID[meta.ID] != nil {
 			continue
 		}
-		if r.fsm.PendingDelete(meta.ID) != nil {
+		if v.pendingByID[meta.ID] != nil {
 			continue
 		}
 		// Two paths to deletion eligibility:
@@ -651,9 +873,7 @@ func (r *VaultLifecycleReconciler) SweepLocalOrphans() {
 				continue
 			}
 		}
-		r.logger.Info("local-orphan sweep: deleting tombstoned local chunk",
-			"chunk", meta.ID)
-		if err := r.deleteLocalCopy(meta.ID); err != nil {
+		if err := r.deleteLocalCopy(meta.ID, "local-orphan-sweep"); err != nil {
 			r.logger.Warn("local-orphan sweep: delete failed",
 				"chunk", meta.ID, "error", err)
 			continue
@@ -694,6 +914,118 @@ func (r *VaultLifecycleReconciler) alertUnknownOrphan(meta chunk.ChunkMeta) {
 			r.vaultID, meta.ID, meta.RecordCount))
 }
 
+// SweepStagingOrphans is the pipeline-staging counterpart of
+// SweepLocalOrphans (gastrolog-27czpq). SweepLocalOrphans covers the
+// chunk Manager's store, but V3 keeps its bytes in the pipeline staging
+// areas (<segmentsDir>/<vaultID>/{completed,head,pre-head,chunks}) which
+// the Manager only learns about lazily via FSM activity — files whose
+// release/delete effect this node missed while offline are invisible to
+// it forever. This sweep enumerates the staging directories on DISK and
+// reconciles them against the replicated FSM with positive evidence
+// only:
+//
+//   - segment files (completed/, head/, pre-head/) are purged iff
+//     FSM.SegmentReleased(id) — the release effect this node missed. A
+//     registry entry means the segment is live (keep); registry-absent
+//     WITHOUT release evidence means a completed segment awaiting its
+//     distribution publish (keep — deleting it loses ingested records).
+//   - chunk staging dirs (chunks/<id>/) are removed iff the FSM has no
+//     manifest entry, no pendingDeletes obligation, AND a tombstone —
+//     positive proof a finalize-delete applied while this node was
+//     offline. Unknown dirs are preserved per the
+//     no-auto-delete-of-unknown-orphans invariant.
+//
+// A not-yet-caught-up FSM can therefore only DELAY cleanup (evidence not
+// applied yet), never delete live data. Idempotent; runs on every node's
+// vaultCatchupSweepAll cadence.
+func (r *VaultLifecycleReconciler) SweepStagingOrphans() {
+	if v := r.gatherReconcileView(); v != nil {
+		r.reconcileStagingOrphans(v)
+	}
+}
+
+func (r *VaultLifecycleReconciler) reconcileStagingOrphans(v *reconcileView) {
+	if r.orch == nil || !v.ready {
+		return
+	}
+	r.sweepReleasedSegmentStaging()
+	r.sweepTombstonedChunkStaging(v)
+}
+
+func (r *VaultLifecycleReconciler) sweepReleasedSegmentStaging() {
+	root, ok := r.orch.pipelineVaultStagingRoot(r.vaultID)
+	if !ok {
+		return
+	}
+	candidates := make(map[glid.GLID]struct{})
+	for _, dir := range []string{paths.CompletedDir(root), paths.HeadDir(root), paths.PreHeadDir(root)} {
+		ids, err := paths.ListSegmentIDs(dir)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				r.logger.Warn("staging-orphan sweep: list segment dir failed",
+					"dir", dir, "error", err)
+			}
+			continue
+		}
+		for id := range ids {
+			candidates[id] = struct{}{}
+		}
+	}
+	purged := 0
+	for id := range candidates {
+		if !r.fsm.SegmentReleased(id) {
+			continue
+		}
+		if err := paths.PurgeSegmentStaging(root, id); err != nil {
+			r.logger.Warn("staging-orphan sweep: segment purge failed",
+				"segment", id, "error", err)
+			continue
+		}
+		purged++
+	}
+	if purged > 0 {
+		r.logger.Info("staging-orphan sweep: purged released segments this node missed",
+			"segments", purged)
+	}
+}
+
+func (r *VaultLifecycleReconciler) sweepTombstonedChunkStaging(v *reconcileView) {
+	chunkRoot, ok := r.orch.pipelineVaultChunkRoot(r.vaultID)
+	if !ok {
+		return
+	}
+	entries, err := os.ReadDir(chunkRoot)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			r.logger.Warn("staging-orphan sweep: list chunk staging failed",
+				"dir", chunkRoot, "error", err)
+		}
+		return
+	}
+	removed := 0
+	for _, ent := range entries {
+		if !ent.IsDir() {
+			continue
+		}
+		id, err := chunk.ParseChunkID(ent.Name())
+		if err != nil {
+			continue
+		}
+		if v.entryByID[id] != nil || v.pendingByID[id] != nil {
+			continue
+		}
+		if !r.fsm.IsTombstoned(id) {
+			continue
+		}
+		r.deletePipelineChunkDir(id)
+		removed++
+	}
+	if removed > 0 {
+		r.logger.Info("staging-orphan sweep: removed tombstoned chunk dirs this node missed",
+			"chunks", removed)
+	}
+}
+
 // SweepMissingReplicas walks the FSM's sealed-chunk manifest and asks
 // every placement peer to re-push any sealed chunks this node should
 // have but doesn't. This is the create-side mirror of SweepLocalOrphans:
@@ -726,7 +1058,18 @@ func (r *VaultLifecycleReconciler) alertUnknownOrphan(meta chunk.ChunkMeta) {
 // (FollowerTargets enumerates them). Cloud-backed chunks live in shared
 // object storage and are skipped — they are not a local-replica concern.
 func (r *VaultLifecycleReconciler) SweepMissingReplicas() {
-	if r.fsm == nil || r.vaultInst == nil || r.vaultInst.Chunks == nil {
+	if v := r.gatherReconcileView(); v != nil {
+		r.reconcileMissingReplicas(v)
+	}
+}
+
+func (r *VaultLifecycleReconciler) reconcileMissingReplicas(v *reconcileView) {
+	if r.vaultInst == nil || r.vaultInst.Chunks == nil {
+		return
+	}
+	// Pipeline vaults: register local GLCBs by path; never record-stream catchup.
+	if r.orch != nil && r.orch.isPipelineIngestVault(r.vaultID) {
+		r.syncPipelineSealedGLCBs(v)
 		return
 	}
 	if r.orch == nil || r.orch.chunkReplicator == nil {
@@ -739,37 +1082,53 @@ func (r *VaultLifecycleReconciler) SweepMissingReplicas() {
 	}
 
 	// Local index of what's on disk so the diff is O(N+M) not O(N×M).
-	localMetas, err := r.vaultInst.Chunks.List()
-	if err != nil {
-		r.logger.Warn("missing-replica sweep: list chunks failed", "error", err)
+	if v.localListErr != nil {
 		return
-	}
-	have := make(map[chunk.ChunkID]bool, len(localMetas))
-	for _, m := range localMetas {
-		have[m.ID] = true
 	}
 
 	// Walk the FSM manifest and collect the missing-locally subset.
-	var missing []chunk.ChunkID
-	for _, e := range r.fsm.List() {
+	type missingEntry struct {
+		id       chunk.ChunkID
+		writeEnd time.Time
+	}
+	var missing []missingEntry
+	for _, e := range v.entries {
 		if !e.IsSealed() {
 			continue
 		}
 		if e.CloudBacked {
 			continue // shared bucket; no local replica needed
 		}
-		if have[e.ID] {
+		if v.have[e.ID] {
 			continue
 		}
-		missing = append(missing, e.ID)
+		missing = append(missing, missingEntry{id: e.ID, writeEnd: e.WriteEnd})
 	}
 
 	if len(missing) == 0 {
 		return
 	}
 
-	r.logger.Info("missing-replica sweep: requesting catchup",
-		"peers", peers, "missing", len(missing))
+	// Oldest-first so search/catchup converges on the historical tail
+	// before chasing the freshest seals still in flight on the wire.
+	sort.Slice(missing, func(i, j int) bool {
+		return missing[i].writeEnd.Before(missing[j].writeEnd)
+	})
+
+	totalMissing := len(missing)
+	if totalMissing > maxMissingReplicaCatchupPerSweep {
+		missing = missing[:maxMissingReplicaCatchupPerSweep]
+		r.logger.Debug("missing-replica sweep: batching catchup request",
+			"missing_total", totalMissing, "batch", len(missing))
+	}
+
+	chunkIDs := make([]chunk.ChunkID, len(missing))
+	for i, m := range missing {
+		chunkIDs[i] = m.id
+	}
+
+	r.logger.Debug("missing-replica sweep: requesting catchup",
+		"peers", peers, "missing", len(chunkIDs), "missing_total", totalMissing)
 
 	// Ask every peer. Whichever peer has a given chunk schedules the
 	// push; peers that don't have it return scheduled=0 silently. The
@@ -778,7 +1137,7 @@ func (r *VaultLifecycleReconciler) SweepMissingReplicas() {
 	for _, peerNodeID := range peers {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		scheduled, err := r.orch.chunkReplicator.RequestReplicaCatchup(
-			ctx, peerNodeID, r.vaultID, missing, r.localNodeID)
+			ctx, peerNodeID, r.vaultID, chunkIDs, r.localNodeID)
 		cancel()
 		if err != nil {
 			// The next sweep tick will retry. Causes: peer changed after
@@ -786,11 +1145,98 @@ func (r *VaultLifecycleReconciler) SweepMissingReplicas() {
 			// warming up. None terminal — the FSM diff is local state, so
 			// we converge on the next tick.
 			r.logger.Warn("missing-replica sweep: request failed",
-				"peer", peerNodeID, "missing", len(missing), "error", err)
+				"peer", peerNodeID, "missing", len(chunkIDs), "error", err)
 			continue
 		}
-		r.logger.Info("missing-replica sweep: peer scheduled pushes",
-			"peer", peerNodeID, "scheduled", scheduled, "requested", len(missing))
+		if scheduled > 0 {
+			r.logger.Info("missing-replica sweep: peer scheduled pushes",
+				"peer", peerNodeID, "scheduled", scheduled, "requested", len(chunkIDs))
+		}
+	}
+}
+
+// syncPipelineSealedGLCBs registers pipeline-built GLCBs that exist locally
+// under the vault ChunkRoot so query/OpenCursor resolve them via
+// RegisterExternalGLCB. Includes Sealing entries (GLCB built, CmdSealChunk
+// not yet committed) so search can use embedded ITSI instead of scanning
+// manifest segments. Replaces the legacy missing-replica catchup sweep for
+// pipeline ingest vaults.
+func (r *VaultLifecycleReconciler) syncPipelineSealedGLCBs(v *reconcileView) {
+	chunkRoot, hasRoot := "", false
+	if r.orch != nil {
+		chunkRoot, hasRoot = r.orch.pipelineVaultChunkRoot(r.vaultID)
+	}
+	var ack, revoke []chunk.ChunkID
+	for _, e := range v.entries {
+		if e.CloudBacked {
+			continue
+		}
+		// Registration is lazy (the chunk manager's on-miss resolver,
+		// gastrolog-2kmgj6); this sweep no longer registers per entry —
+		// its jobs are replica catch-up and holder-receipt truth.
+		if !e.IsSealed() {
+			continue
+		}
+		// Skip chunks on their way out (retention-pending or delete protocol
+		// in flight): the sweep tick that lands inside the expunge->finalize
+		// window otherwise schedules a doomed pull on EVERY home, since the
+		// bytes were just deleted everywhere (gastrolog-423tpt).
+		if chunkOnItsWayOut(e, v.pendingByID[e.ID]) {
+			continue
+		}
+		// Replica catch-up: a home missing this sealed chunk's bytes
+		// (missed the build while wedged/down; segments since released)
+		// pulls the GLCB from a peer home. Without this there is NO
+		// recovery path — a placement leader once sat with 1 of ~300
+		// chunks on disk while retention silently starved and the
+		// registry still reported it as a holder.
+		r.orch.pullMissingGLCB(r.vaultID, e)
+
+		// Holder receipts: reconcile this node's residency claim against
+		// the bytes actually on disk. Earn on presence (local build or a
+		// completed pull), revoke on absence — ChunkResidency then reports
+		// bytes truth instead of the placement assumption, and a home that
+		// lost its copy stops being counted the same sweep that schedules
+		// its recovery pull.
+		if !hasRoot {
+			continue
+		}
+		_, statErr := os.Stat(chunking.ChunkGLCBPath(chunkRoot, e.ID))
+		holds := slices.Contains(e.Holders, r.localNodeID)
+		switch {
+		case statErr == nil && !holds:
+			ack = append(ack, e.ID)
+		case os.IsNotExist(statErr) && holds:
+			revoke = append(revoke, e.ID)
+		}
+	}
+	r.commitChunkHolderReceipts(ack, revoke)
+}
+
+// commitChunkHolderReceipts proposes this sweep pass's holder claims and
+// revocations, one batched Raft apply each (per-chunk applies would flood
+// the group behind the publish traffic). Failures retry naturally on the
+// next sweep tick — the diff is recomputed from disk + FSM every pass.
+func (r *VaultLifecycleReconciler) commitChunkHolderReceipts(ack, revoke []chunk.ChunkID) {
+	if r.vaultInst == nil {
+		return
+	}
+	if len(ack) > 0 && r.vaultInst.ApplyRaftAckChunkHolders != nil {
+		if err := r.vaultInst.ApplyRaftAckChunkHolders(ack, r.localNodeID); err != nil {
+			r.logger.Debug("chunk holder ack failed; retrying next sweep",
+				"vault", r.vaultID, "chunks", len(ack), "error", err)
+		}
+	}
+	if len(revoke) > 0 && r.vaultInst.ApplyRaftRevokeChunkHolders != nil {
+		if err := r.vaultInst.ApplyRaftRevokeChunkHolders(revoke, r.localNodeID); err != nil {
+			r.logger.Debug("chunk holder revoke failed; retrying next sweep",
+				"vault", r.vaultID, "chunks", len(revoke), "error", err)
+			return
+		}
+		// Revocations are loud: replica counts just dropped to the truth
+		// for these chunks, and the catch-up pull is now re-earning them.
+		r.logger.Info("chunk holder claims revoked — bytes missing locally; replica catch-up will re-earn",
+			"vault", r.vaultID, "chunks", len(revoke))
 	}
 }
 
@@ -847,32 +1293,44 @@ const staleLeaderFSMGracePeriod = 1 * time.Hour
 // shouldn't trigger delete. Skips chunks already in pendingDeletes:
 // the receipt protocol is already running.
 //
+// Skips pipeline ingest vaults entirely: every home builds GLCB under
+// segments/<vault>/chunks locally. This sweep assumes the placement
+// leader is the sole byte authority and fans deletes cluster-wide via
+// the receipt protocol — that races GLCB builds on other homes during
+// vault-ctl leadership churn and backlog catch-up.
+//
 // See gastrolog-5nhwe.
 func (r *VaultLifecycleReconciler) SweepStaleLeaderFSMEntries() {
-	if r.fsm == nil || r.vaultInst == nil || r.vaultInst.Chunks == nil {
+	if v := r.gatherReconcileView(); v != nil {
+		r.reconcileStaleLeaderFSMEntries(v)
+	}
+}
+
+//nolint:gocognit // compares FSM entries against local chunk manager per idle-active rule
+func (r *VaultLifecycleReconciler) reconcileStaleLeaderFSMEntries(v *reconcileView) {
+	if r.vaultInst == nil || r.vaultInst.Chunks == nil {
 		return
 	}
 	if r.vaultInst.IsFollower {
-		return // followers use SweepMissingReplicas to pull from leader
+		return // followers use the missing-replicas pass to pull from leader
 	}
 	if r.vaultInst.ApplyRaftRequestDelete == nil {
 		return // single-node / no Raft; no receipt protocol
 	}
-
-	localMetas, err := r.vaultInst.Chunks.List()
-	if err != nil {
-		r.logger.Warn("stale-fsm sweep: list chunks failed", "error", err)
+	if r.orch != nil && r.orch.isPipelineIngestVault(r.vaultID) {
 		return
 	}
-	have := make(map[chunk.ChunkID]bool, len(localMetas))
-	for _, m := range localMetas {
-		have[m.ID] = true
+	if r.vaultInst.HasRaftLeader != nil && !r.vaultInst.HasRaftLeader() {
+		return
+	}
+	if v.localListErr != nil {
+		return
 	}
 
 	now := time.Now()
 	expectedFrom := r.placementMembership()
 	stale := 0
-	for _, e := range r.fsm.List() {
+	for _, e := range v.entries {
 		// Sealed and Sealing chunks are both candidates here. A Sealing
 		// entry whose chunk this leader doesn't have locally is the
 		// classic "leader transferred mid-PostSealProcess and the new
@@ -888,15 +1346,30 @@ func (r *VaultLifecycleReconciler) SweepStaleLeaderFSMEntries() {
 		if e.CloudBacked {
 			continue
 		}
-		if have[e.ID] {
+		if v.have[e.ID] {
 			continue
 		}
-		// Grace period anchored on WriteEnd (the seal completion time)
-		// for Sealed entries. Sealing entries don't have a WriteEnd yet
-		// (CmdSealChunk never applied), so anchor on WriteStart instead
-		// — the only timestamp the FSM has — to give the same "is this
-		// genuinely stuck?" signal.
-		anchor := e.WriteEnd
+		if pending := r.fsm.SealedManifest(); pending != nil && pending.ChunkID == e.ID {
+			continue
+		}
+		// Pipeline GLCB builds materialize under segments/<vault>/chunks/<id>/
+		// before the chunk registers locally. Do not delete while that work is
+		// in flight — stale-fsm would remove the directory mid-GLCB write.
+		if r.orch != nil {
+			if chunkRoot, ok := r.orch.pipelineVaultChunkRoot(r.vaultID); ok {
+				if _, err := os.Stat(filepath.Join(chunkRoot, e.ID.String())); err == nil {
+					continue
+				}
+			}
+		}
+		// Grace period anchored on SealedAt (wall-clock seal completion) when
+		// present. WriteEnd reflects record span and can predate the seal by
+		// hours during backlog catch-up. Sealing entries without WriteEnd fall
+		// back to WriteStart.
+		anchor := e.SealedAt
+		if anchor.IsZero() {
+			anchor = e.WriteEnd
+		}
 		if anchor.IsZero() {
 			anchor = e.WriteStart
 		}
@@ -956,7 +1429,13 @@ func (r *VaultLifecycleReconciler) SweepStaleLeaderFSMEntries() {
 // former placement member with no current vault instance. This sweep
 // is the self-healing path.
 func (r *VaultLifecycleReconciler) SweepStalePendingDeleteAcks() {
-	if r.fsm == nil || r.vaultInst == nil {
+	if v := r.gatherReconcileView(); v != nil {
+		r.reconcileStalePendingDeleteAcks(v)
+	}
+}
+
+func (r *VaultLifecycleReconciler) reconcileStalePendingDeleteAcks(v *reconcileView) {
+	if r.vaultInst == nil {
 		return
 	}
 	if r.vaultInst.IsFollower {
@@ -981,7 +1460,7 @@ func (r *VaultLifecycleReconciler) SweepStalePendingDeleteAcks() {
 	}
 
 	staleNodes := make(map[string]bool)
-	for _, p := range r.fsm.PendingDeletes() {
+	for _, p := range v.pending {
 		for nodeID := range p.ExpectedFrom {
 			if !placement[nodeID] {
 				staleNodes[nodeID] = true
@@ -1061,8 +1540,21 @@ const idleActiveThreshold = 10 * time.Minute
 //
 // See gastrolog-2eclw / gastrolog-3qr8z.
 func (r *VaultLifecycleReconciler) SweepIdleActiveChunks() {
-	if r.fsm == nil || r.vaultInst == nil || r.vaultInst.Chunks == nil {
+	if v := r.gatherReconcileView(); v != nil {
+		r.reconcileIdleActiveChunks(v)
+	}
+}
+
+func (r *VaultLifecycleReconciler) reconcileIdleActiveChunks(v *reconcileView) {
+	if r.vaultInst == nil || r.vaultInst.Chunks == nil {
 		return
+	}
+	if r.orch != nil {
+		if _, ok := r.orch.pipelineVaultChunkRoot(r.vaultID); ok {
+			if err := r.orch.pipeline.RecoverVault(context.Background(), r.vaultID); err != nil {
+				r.logger.Warn("idle-active sweep: pipeline recover failed", "error", err)
+			}
+		}
 	}
 	announcerGetter, ok := r.vaultInst.Chunks.(chunk.AnnouncerGetter)
 	if !ok {
@@ -1079,7 +1571,7 @@ func (r *VaultLifecycleReconciler) SweepIdleActiveChunks() {
 	}
 
 	sealed := 0
-	for _, e := range r.fsm.List() {
+	for _, e := range v.entries {
 		if r.sealIfIdleActive(e, localActiveID, announcer) {
 			sealed++
 		}
@@ -1240,7 +1732,7 @@ func (r *VaultLifecycleReconciler) fulfillObligation(chunkID chunk.ChunkID, reas
 			}
 		}
 	}
-	if err := r.deleteLocalCopy(chunkID); err != nil {
+	if err := r.deleteLocalCopy(chunkID, reason); err != nil {
 		// Don't ack: the FSM keeps the obligation, and we'll retry on
 		// the next observation. Logging at warn lets retry storms show
 		// up in operator dashboards.
@@ -1263,6 +1755,10 @@ func (r *VaultLifecycleReconciler) fulfillObligation(chunkID chunk.ChunkID, reas
 // node. ErrChunkNotFound is treated as success — the chunk was already
 // gone (concurrent OnDelete cascade, or this node never had it).
 //
+// When local chunk or index state existed, logs chunk expunged at INFO
+// with reason so operators see bytes leaving disk, not just a delete
+// request on the leader.
+//
 // No same-node sibling fan-out: in the receipt protocol every node
 // runs its own per-TI reconciler, so each TI self-cleans via its own
 // r.instance.Chunks. The legacy `deleteFromFollowers` walk only made sense
@@ -1272,10 +1768,11 @@ func (r *VaultLifecycleReconciler) fulfillObligation(chunkID chunk.ChunkID, reas
 // deleteFromFollowers here would re-visit the same TI we just deleted
 // from and log a spurious "chunk not found" warning. See the cluster
 // log storm fixed alongside this change.
-func (r *VaultLifecycleReconciler) deleteLocalCopy(chunkID chunk.ChunkID) error {
+func (r *VaultLifecycleReconciler) deleteLocalCopy(chunkID chunk.ChunkID, reason string) error {
 	if r.vaultInst == nil {
 		return nil
 	}
+	hadLocal := r.hadLocalChunkState(chunkID)
 	if r.vaultInst.Indexes != nil {
 		if err := r.vaultInst.Indexes.DeleteIndexes(chunkID); err != nil && !errors.Is(err, chunk.ErrChunkNotFound) {
 			return fmt.Errorf("delete indexes: %w", err)
@@ -1286,11 +1783,55 @@ func (r *VaultLifecycleReconciler) deleteLocalCopy(chunkID chunk.ChunkID) error 
 			return fmt.Errorf("delete chunk: %w", err)
 		}
 	}
+	// Best-effort cleanup of pipeline-built GLCB dirs at the vault ChunkRoot.
+	// Covers deletes that ran before RegisterExternalGLCB or when the chunk
+	// manager had no local registration (gastrolog-358ak, Rubicon E2).
+	r.deletePipelineChunkDir(chunkID)
 	if r.orch != nil {
+		if hadLocal {
+			r.orch.logChunkExpunged(r.vaultID, chunkID, reason)
+		}
 		// Carry the DELETED op so subscribers remove the cache entry.
 		r.orch.EmitChunkDeleted(r.vaultID, chunkID)
 	}
 	return nil
+}
+
+func (r *VaultLifecycleReconciler) hadLocalChunkState(chunkID chunk.ChunkID) bool {
+	if r.vaultInst == nil {
+		return false
+	}
+	if r.vaultInst.Chunks != nil {
+		if _, err := r.vaultInst.Chunks.Meta(chunkID); err == nil {
+			return true
+		}
+	}
+	if r.orch != nil {
+		if chunkRoot, ok := r.orch.pipelineVaultChunkRoot(r.vaultID); ok {
+			chunkDir := filepath.Dir(chunking.ChunkGLCBPath(chunkRoot, chunkID))
+			if _, err := os.Stat(chunkDir); err == nil {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// deletePipelineChunkDir removes <ChunkRoot>/<chunkID>/ on this node's vault
+// home when the pipeline built the sealed GLCB there. Idempotent and best-effort.
+func (r *VaultLifecycleReconciler) deletePipelineChunkDir(chunkID chunk.ChunkID) {
+	if r.orch == nil {
+		return
+	}
+	chunkRoot, ok := r.orch.pipelineVaultChunkRoot(r.vaultID)
+	if !ok {
+		return
+	}
+	chunkDir := filepath.Dir(chunking.ChunkGLCBPath(chunkRoot, chunkID))
+	if err := os.RemoveAll(chunkDir); err != nil && !os.IsNotExist(err) {
+		r.logger.Warn("deletePipelineChunkDir: RemoveAll failed",
+			"vault", r.vaultID, "chunk", chunkID, "dir", chunkDir, "error", err)
+	}
 }
 
 // ---------- Single deletion entry point ----------
@@ -1300,12 +1841,12 @@ func (r *VaultLifecycleReconciler) deleteLocalCopy(chunkID chunk.ChunkID) error 
 // over steps 4-8. reason is a short free-form label that ends up in the
 // FSM's pendingDeletes entry and in audit logs:
 //
-//   "retention-ttl"             retention rule fired
-//   "transition-source-expire"  source after destination receipt
-//   "manual-delete-rpc"         operator-initiated via CLI/UI
-//   "archived-to-glacier"       archival sweep on cloud instance
-//   "unreadable"                chunk classified as corrupt
-//   "crash-recovery-orphan"     local-only orphan with no FSM entry
+//	"retention-ttl"             retention rule fired
+//	"transition-source-expire"  source after destination receipt
+//	"manual-delete-rpc"         operator-initiated via CLI/UI
+//	"archived-to-glacier"       archival sweep on cloud instance
+//	"unreadable"                chunk classified as corrupt
+//	"crash-recovery-orphan"     local-only orphan with no FSM entry
 //
 // expectedFrom is the set of node IDs that must ack before the entry
 // finalizes. For cluster-wide deletes, pass placement-membership-at-
@@ -1334,7 +1875,7 @@ func (r *VaultLifecycleReconciler) deleteChunk(chunkID chunk.ChunkID, reason str
 		// delete locally and notify chunk-change subscribers.
 		r.logger.Debug("deleteChunk: single-node fallback",
 			"chunk", chunkID, "reason", reason)
-		return r.deleteLocalCopy(chunkID)
+		return r.deleteLocalCopy(chunkID, reason)
 	}
 	if r.fsm != nil && r.fsm.PendingDelete(chunkID) != nil {
 		r.logger.Debug("deleteChunk: pendingDelete entry already exists, skipping propose",

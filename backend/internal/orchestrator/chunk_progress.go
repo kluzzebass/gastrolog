@@ -8,21 +8,18 @@ import (
 	"gastrolog/internal/glid"
 )
 
-// runChunkProgressEmitter walks every leader vault's active chunk on a
-// fixed cadence and emits a PROGRESS event when the chunk's record count
-// has advanced since the last tick. One event per active chunk per
-// window, regardless of append rate — bounds the typed-event volume so
-// busy clusters don't drown the WatchChunks bus.
+// runChunkProgressEmitter walks every vault homed on this node on a fixed
+// cadence and emits a PROGRESS event when the open chunk's record count has
+// advanced since the last tick. One event per open chunk per window, regardless
+// of ingest rate — bounds the typed-event volume so busy clusters don't drown
+// the WatchChunks bus.
 //
-// Coalescing is implicit: each tick reads the current count and compares
-// to the last-emitted value per (vault, chunk). Inflight records
-// between ticks are reflected in the next tick's count; no events are
-// emitted for chunks whose count hasn't changed. Sealed chunks are
-// skipped — their final count is carried by the SEALED event.
-//
-// Followers are skipped: only the leader has appending records; follower
-// chunk managers' counts grow via sealed-chunk replication which fires
-// its own CREATED / SEALED events. See gastrolog-3pf9w.
+// The record count is read from the vault-ctl FSM's open-chunk manifest
+// (OpenChunkSummary().TotalRecords), the pipeline's source of truth for the
+// chunk currently accumulating segments. Only the vault-ctl leader emits, so a
+// given open chunk produces one PROGRESS stream cluster-wide; followers apply
+// the same manifest but stay quiet to avoid duplicate events. Sealed manifests
+// carry their final count via the SEALED event and are not re-emitted here.
 func (o *Orchestrator) runChunkProgressEmitter(ctx context.Context, interval time.Duration) {
 	last := make(map[glid.GLID]lastSeen)
 
@@ -34,54 +31,61 @@ func (o *Orchestrator) runChunkProgressEmitter(ctx context.Context, interval tim
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			o.emitActiveChunkProgress(last)
+			o.emitOpenChunkProgress(last)
 		}
 	}
 }
 
-// emitActiveChunkProgress is the per-tick body of runChunkProgressEmitter,
-// extracted so the iteration order (read lock + per-vault Active()
-// lookups) is easy to reason about and the goroutine body stays compact.
-func (o *Orchestrator) emitActiveChunkProgress(last map[glid.GLID]lastSeen) {
+// emitOpenChunkProgress is the per-tick body of runChunkProgressEmitter,
+// extracted so the iteration order is easy to reason about and the goroutine
+// body stays compact.
+func (o *Orchestrator) emitOpenChunkProgress(last map[glid.GLID]lastSeen) {
+	o.mu.RLock()
+	vaultIDs := make([]glid.GLID, 0, len(o.vaults))
+	for vaultID := range o.vaults {
+		vaultIDs = append(vaultIDs, vaultID)
+	}
+	o.mu.RUnlock()
+
 	type snapshot struct {
 		VaultID glid.GLID
 		Meta    chunk.ChunkMeta
 	}
 	var snapshots []snapshot
 
-	o.mu.RLock()
-	for vaultID, vault := range o.vaults {
-		vaultInst := vault.Instance
-		if vaultInst == nil || vaultInst.IsFollower || vaultInst.Chunks == nil {
+	for _, vaultID := range vaultIDs {
+		fsm, _, isLeader, ok := o.vaultCtlHandle(vaultID)
+		if !ok || fsm == nil || isLeader == nil || !isLeader() {
 			continue
 		}
-		active := vaultInst.Chunks.Active()
-		if active == nil || active.Sealed {
+		summary, open := fsm.OpenChunkSummary()
+		if !open || summary.TotalRecords == 0 {
 			continue
 		}
 		snapshots = append(snapshots, snapshot{
 			VaultID: vaultID,
-			Meta:    *active,
+			Meta: chunk.ChunkMeta{
+				ID:          summary.ChunkID,
+				RecordCount: int64(summary.TotalRecords), //nolint:gosec // G115: bounded by rotation policy
+				Bytes:       int64(summary.TotalBytes),   //nolint:gosec // G115
+			},
 		})
 	}
-	o.mu.RUnlock()
 
 	for _, s := range snapshots {
-		count := uint64(s.Meta.RecordCount) //nolint:gosec // G115: bounded by rotation policy
+		count := uint64(s.Meta.RecordCount) //nolint:gosec // G115: non-negative record count
 		prev, hadPrev := last[s.VaultID]
-		// First sighting of a new active chunk for this vault, or the
-		// chunk ID changed since the last tick (rotation happened): reset
-		// the high-watermark and emit a fresh PROGRESS so the inspector
-		// sees the post-rotation count immediately.
+		// First sighting of a new open chunk for this vault, or the chunk ID
+		// changed since the last tick (rotation happened): reset the
+		// high-watermark and emit a fresh PROGRESS so the inspector sees the
+		// post-rotation count immediately.
 		if !hadPrev || prev.ChunkID != s.Meta.ID {
 			last[s.VaultID] = lastSeen{ChunkID: s.Meta.ID, Count: count}
-			if count > 0 {
-				o.EmitChunkProgress(s.VaultID, s.Meta)
-			}
+			o.EmitChunkProgress(s.VaultID, s.Meta)
 			continue
 		}
-		// Same active chunk: only emit when the count advanced. No
-		// emit for unchanged counts — idle vaults stay quiet.
+		// Same open chunk: only emit when the count advanced. No emit for
+		// unchanged counts — idle vaults stay quiet.
 		if count > prev.Count {
 			last[s.VaultID] = lastSeen{ChunkID: s.Meta.ID, Count: count}
 			o.EmitChunkProgress(s.VaultID, s.Meta)

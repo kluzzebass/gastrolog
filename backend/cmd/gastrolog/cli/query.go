@@ -15,6 +15,7 @@ import (
 	"golang.org/x/term"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/glid"
 	"gastrolog/internal/server"
 )
 
@@ -331,8 +332,8 @@ func recordToMap(rec *gastrologv1.Record) map[string]any {
 		obj["attrs"] = rec.Attrs
 	}
 	if rec.Ref != nil {
-		obj["vault_id"] = rec.Ref.VaultId
-		obj["chunk_id"] = rec.Ref.ChunkId
+		obj["vault_id"] = formatIDBytes(rec.Ref.VaultId)
+		obj["chunk_id"] = formatIDBytes(rec.Ref.ChunkId)
 		obj["pos"] = rec.Ref.Pos
 	}
 	return obj
@@ -361,8 +362,15 @@ func runExplain(client *server.Client, expr string) error {
 	fmt.Fprintf(os.Stderr, "Total chunks: %d, matching: %d\n\n", plan.TotalChunks, len(plan.Chunks))
 
 	for _, cp := range plan.Chunks {
-		fmt.Fprintf(os.Stderr, "  Chunk %s  records=%d  mode=%s\n",
-			cp.ChunkId, cp.RecordCount, cp.ScanMode)
+		chunkLine := fmt.Sprintf("  Chunk %s  records=%d  mode=%s",
+			glid.FromBytes(cp.ChunkId), cp.RecordCount, cp.ScanMode)
+		if vault := formatIDBytes(cp.VaultId); vault != "" {
+			chunkLine += "  vault=" + vault
+		}
+		if node := formatIDBytes(cp.NodeId); node != "" {
+			chunkLine += "  node=" + node
+		}
+		fmt.Fprintln(os.Stderr, chunkLine)
 		for _, step := range cp.Steps {
 			fmt.Fprintf(os.Stderr, "    %s %s: %d → %d  (%s)\n",
 				step.Action, step.Name, step.InputEstimate, step.OutputEstimate, step.Detail)

@@ -47,7 +47,7 @@ func TestCommandRoundTrip(t *testing.T) {
 	})
 
 	t.Run("seal", func(t *testing.T) {
-		c := decodeCommand(t, MarshalSealChunk(id, now, 42, 99, now, now, now, true))
+		c := decodeCommand(t, MarshalSealChunk(id, now, 42, 99, now, now, now, true, now))
 		got := c.GetSealChunk()
 		if got == nil {
 			t.Fatalf("wrong case: %T", c.GetCommand())
@@ -57,13 +57,6 @@ func TestCommandRoundTrip(t *testing.T) {
 		}
 		if !got.GetIngestTsMonotonic() {
 			t.Errorf("monotonic flag lost")
-		}
-	})
-
-	t.Run("compress", func(t *testing.T) {
-		c := decodeCommand(t, MarshalCompressChunk(id, 555))
-		if c.GetCompressChunk().GetDiskBytes() != 555 {
-			t.Errorf("disk bytes: %d", c.GetCompressChunk().GetDiskBytes())
 		}
 	})
 
@@ -156,6 +149,95 @@ func TestCommandRoundTrip(t *testing.T) {
 	t.Run("prune_node", func(t *testing.T) {
 		if decodeCommand(t, MarshalPruneNode("node-x")).GetPruneNode().GetNodeId() != "node-x" {
 			t.Errorf("node id lost")
+		}
+	})
+
+	t.Run("publish_completed_segment", func(t *testing.T) {
+		segID := glidFromByte(0xAB)
+		c := decodeCommand(t, MarshalPublishCompletedSegment(CompletedSegmentEntry{
+			SegmentID:     segID,
+			RecordCount:   12,
+			ByteSize:      345,
+			FirstIngestTS: now,
+			LastIngestTS:  now.Add(time.Second),
+			Checksum:      0x1234,
+			OriginNodeID:  "node-origin",
+			PublishedAt:   now,
+		}))
+		got := c.GetPublishCompletedSegment()
+		if got == nil {
+			t.Fatalf("wrong case: %T", c.GetCommand())
+		}
+		if string(got.GetSegmentId()) != string(segID[:]) {
+			t.Errorf("segment id mismatch")
+		}
+		if got.GetRecordCount() != 12 || got.GetOriginNodeId() != "node-origin" {
+			t.Errorf("fields = %+v", got)
+		}
+	})
+
+	t.Run("open_chunk_manifest", func(t *testing.T) {
+		c := decodeCommand(t, MarshalOpenChunkManifest(id, now))
+		got := c.GetOpenChunkManifest()
+		if got == nil || string(got.GetChunkId()) != string(id[:]) {
+			t.Errorf("open chunk manifest: %+v", got)
+		}
+	})
+
+	t.Run("add_open_chunk_segment_ref", func(t *testing.T) {
+		segID := glidFromByte(0xCC)
+		ref := OpenChunkSegmentRef{
+			SegmentID:         segID,
+			FirstRecordNumber: 1,
+			LastRecordNumber:  10,
+			SliceBytes:        2048,
+			RefAddedAt:        now,
+		}
+		c := decodeCommand(t, MarshalAddOpenChunkSegmentRef(id, ref))
+		got := c.GetAddOpenChunkSegmentRef()
+		if got == nil {
+			t.Fatalf("wrong case: %T", c.GetCommand())
+		}
+		if got.GetFirstRecordNumber() != 1 || got.GetLastRecordNumber() != 10 || got.GetSliceBytes() != 2048 {
+			t.Errorf("ref fields = %+v", got)
+		}
+	})
+
+	t.Run("add_open_chunk_segment_refs", func(t *testing.T) {
+		segA := glidFromByte(0xCE)
+		segB := glidFromByte(0xCF)
+		c := decodeCommand(t, MarshalAddOpenChunkSegmentRefs(id, []OpenChunkSegmentRef{
+			{SegmentID: segA, FirstRecordNumber: 0, LastRecordNumber: 1, SliceBytes: 10, RefAddedAt: now},
+			{SegmentID: segB, FirstRecordNumber: 0, LastRecordNumber: 2, SliceBytes: 20, RefAddedAt: now},
+		}))
+		got := c.GetAddOpenChunkSegmentRefs()
+		if got == nil {
+			t.Fatalf("wrong case: %T", c.GetCommand())
+		}
+		if string(got.GetChunkId()) != string(id[:]) {
+			t.Errorf("chunk id mismatch")
+		}
+		if len(got.GetRefs()) != 2 {
+			t.Fatalf("refs = %d, want 2", len(got.GetRefs()))
+		}
+		if got.GetRefs()[1].GetSliceBytes() != 20 {
+			t.Errorf("second ref bytes = %d", got.GetRefs()[1].GetSliceBytes())
+		}
+	})
+
+	t.Run("seal_open_chunk_manifest", func(t *testing.T) {
+		c := decodeCommand(t, MarshalSealOpenChunkManifest(id, now))
+		if c.GetSealOpenChunkManifest().GetSealedAtNanos() != now.UnixNano() {
+			t.Errorf("sealed at lost")
+		}
+	})
+
+	t.Run("release_segments", func(t *testing.T) {
+		seg := glidFromByte(0xDD)
+		c := decodeCommand(t, MarshalReleaseSegments([]glid.GLID{seg}))
+		got := c.GetReleaseSegments()
+		if len(got.GetSegmentIds()) != 1 || string(got.GetSegmentIds()[0]) != string(seg[:]) {
+			t.Errorf("release segments = %+v", got)
 		}
 	})
 }

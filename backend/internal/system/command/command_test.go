@@ -25,12 +25,12 @@ func ptr[T any](v T) *T { return &v }
 func TestPutRotationPolicy(t *testing.T) {
 	t.Parallel()
 	want := system.RotationPolicyConfig{
-		ID:         glid.New(),
-		Name:       "default-rotation",
-		MaxBytes:   ptr("64MB"),
-		MaxAge:     ptr("1h"),
-		MaxRecords: ptr(int64(100000)),
-		Cron:       ptr("0 * * * *"),
+		ID:          glid.New(),
+		Name:        "default-rotation",
+		MaxBytes:    ptr(uint64(64_000_000)),
+		MaxAgeNanos: ptr(int64(time.Hour)),
+		MaxRecords:  ptr(int64(100000)),
+		Cron:        ptr("0 * * * *"),
 	}
 	got := roundTripCommand(t, NewPutRotationPolicy(want), func(cmd *gastrologv1.SystemCommand) (system.RotationPolicyConfig, error) {
 		return ExtractPutRotationPolicy(cmd.GetPutRotationPolicy())
@@ -57,11 +57,11 @@ func TestPutRotationPolicyNilOptionals(t *testing.T) {
 func TestPutRetentionPolicy(t *testing.T) {
 	t.Parallel()
 	want := system.RetentionPolicyConfig{
-		ID:        glid.New(),
-		Name:      "long-term",
-		MaxAge:    ptr("720h"),
-		MaxBytes:  ptr("10GB"),
-		MaxChunks: ptr(int64(500)),
+		ID:          glid.New(),
+		Name:        "long-term",
+		MaxAgeNanos: ptr(int64(720 * time.Hour)),
+		MaxBytes:    ptr(uint64(10_000_000_000)),
+		MaxChunks:   ptr(int64(500)),
 	}
 	got := roundTripCommand(t, NewPutRetentionPolicy(want), func(cmd *gastrologv1.SystemCommand) (system.RetentionPolicyConfig, error) {
 		return ExtractPutRetentionPolicy(cmd.GetPutRetentionPolicy())
@@ -412,10 +412,10 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	retPolicyID := glid.New()
 	cfg := &system.Config{
 		RotationPolicies: []system.RotationPolicyConfig{
-			{ID: policyID, Name: "hourly", MaxAge: ptr("1h"), MaxBytes: ptr("64MB")},
+			{ID: policyID, Name: "hourly", MaxAgeNanos: ptr(int64(time.Hour)), MaxBytes: ptr(uint64(64_000_000))},
 		},
 		RetentionPolicies: []system.RetentionPolicyConfig{
-			{ID: retPolicyID, Name: "30d", MaxAge: ptr("720h")},
+			{ID: retPolicyID, Name: "30d", MaxAgeNanos: ptr(int64(720 * time.Hour))},
 		},
 		Vaults: []system.VaultConfig{
 			{

@@ -52,11 +52,13 @@ type LifecycleServer struct {
 	clusterAddress    string
 	peerStats         NodeStatsProvider
 	localStats        func() *apiv1.NodeStats
+	clusterRouteRates func() (*apiv1.ThroughputRate, *apiv1.ThroughputRate)
 	joinClusterFn     func(ctx context.Context, leaderAddr, joinToken string) error
 	removeNodeFn      func(ctx context.Context, nodeID string, force bool) error
 	setNodeSuffrageFn func(ctx context.Context, nodeID string, voter bool) error
 	statsSignal       *notify.Signal         // fired by stats collector on each broadcast tick
 	peerRouteStats    PeerRouteStatsProvider // for aggregating route stats across cluster
+	peerPipelineDisk  PeerPipelineDiskProvider
 	listVaultsFn      func(ctx context.Context) []*apiv1.VaultInfo
 	getStatsFn        func(ctx context.Context) *apiv1.GetStatsResponse
 	logger            *slog.Logger
@@ -106,6 +108,17 @@ func (s *LifecycleServer) SetStatsSignal(sig *notify.Signal) {
 // SetPeerRouteStats wires the peer route stats provider for cluster aggregation.
 func (s *LifecycleServer) SetPeerRouteStats(p PeerRouteStatsProvider) {
 	s.peerRouteStats = p
+}
+
+// SetClusterRouteRates wires the collector's server-side cluster route rate
+// series (gastrolog-4eh5ns).
+func (s *LifecycleServer) SetClusterRouteRates(fn func() (*apiv1.ThroughputRate, *apiv1.ThroughputRate)) {
+	s.clusterRouteRates = fn
+}
+
+// SetPeerPipelineDisk wires peer pipeline disk aggregation for WatchSystemStatus.
+func (s *LifecycleServer) SetPeerPipelineDisk(p PeerPipelineDiskProvider) {
+	s.peerPipelineDisk = p
 }
 
 // SetVaultFuncs wires vault data providers for the WatchSystemStatus stream.
@@ -480,6 +493,11 @@ func (s *LifecycleServer) buildSystemStatus(ctx context.Context) *apiv1.WatchSys
 	// Route stats.
 	routeStats := s.buildRouteStats()
 
+	pipelineBacklog, err := BuildAllPipelineBacklogs(s.orch, s.nodeID, s.peerPipelineDisk)
+	if err != nil {
+		s.logger.Warn("build pipeline backlog for WatchSystemStatus", "error", err)
+	}
+
 	var vaults []*apiv1.VaultInfo
 	if s.listVaultsFn != nil {
 		vaults = s.listVaultsFn(ctx)
@@ -490,12 +508,13 @@ func (s *LifecycleServer) buildSystemStatus(ctx context.Context) *apiv1.WatchSys
 	}
 
 	return &apiv1.WatchSystemStatusResponse{
-		Cluster:       cluster,
-		Health:        health,
-		RouteStats:    routeStats,
-		Vaults:        vaults,
-		Stats:         stats,
-		IngesterAlive: s.buildIngesterAlive(ctx),
+		Cluster:         cluster,
+		Health:          health,
+		RouteStats:      routeStats,
+		Vaults:          vaults,
+		Stats:           stats,
+		IngesterAlive:   s.buildIngesterAlive(ctx),
+		PipelineBacklog: pipelineBacklog,
 	}
 }
 
@@ -566,46 +585,53 @@ func (s *LifecycleServer) listLiveNodes(ctx context.Context) map[string]struct{}
 // buildRouteStats aggregates route statistics from local + peer sources.
 func (s *LifecycleServer) buildRouteStats() *apiv1.GetRouteStatsResponse {
 	rs := s.orch.GetRouteStats()
-	totalIngested := rs.Ingested.Load()
-	totalDropped := rs.Dropped.Load()
-	totalRouted := rs.Routed.Load()
-	filterActive := s.orch.IsFilterSetActive()
+	totalRouted := rs.Routed
+	totalUnmatched := rs.Unmatched
+	totalMatched := rs.Matched
+	routeTableActive := s.orch.IsRouteTableActive()
 
 	vaultMap := make(map[string]*apiv1.VaultRouteStats)
 	for vaultID, vs := range s.orch.VaultRouteStatsList() {
 		vaultMap[vaultID.String()] = &apiv1.VaultRouteStats{
-			VaultId:          vaultID.ToProto(),
-			RecordsMatched:   vs.Matched.Load(),
-			RecordsForwarded: vs.Forwarded.Load(),
+			VaultId:        vaultID.ToProto(),
+			RecordsMatched: vs.Matched,
 		}
 	}
 
 	routeMap := make(map[string]*apiv1.PerRouteStats)
 	for routeID, ps := range s.orch.PerRouteStatsList() {
 		routeMap[routeID.String()] = &apiv1.PerRouteStats{
-			RouteId:          routeID.ToProto(),
-			RecordsMatched:   ps.Matched.Load(),
-			RecordsForwarded: ps.Forwarded.Load(),
+			RouteId:        routeID.ToProto(),
+			RecordsMatched: ps.Matched,
 		}
 	}
 
 	if s.peerRouteStats != nil {
-		pIngested, pDropped, pRouted, pFilterActive, pVaultStats, pRouteStats := s.peerRouteStats.AggregateRouteStats()
-		totalIngested += pIngested
-		totalDropped += pDropped
+		pRouted, pUnmatched, pMatched, pRouteTableActive, pVaultStats, pRouteStats := s.peerRouteStats.AggregateRouteStats()
 		totalRouted += pRouted
-		if pFilterActive {
-			filterActive = true
+		totalUnmatched += pUnmatched
+		totalMatched += pMatched
+		if pRouteTableActive {
+			routeTableActive = true
 		}
 		mergeVaultRouteStats(vaultMap, pVaultStats)
 		mergePerRouteStats(routeMap, pRouteStats)
 	}
 
+	var routedRate, matchedRate *apiv1.ThroughputRate
+	if s.clusterRouteRates != nil {
+		routedRate, matchedRate = s.clusterRouteRates()
+	} else {
+		routedRate, matchedRate = clusterRouteRates(s.localStats, s.peerRouteStats)
+	}
+
 	resp := &apiv1.GetRouteStatsResponse{
-		TotalIngested:   totalIngested,
-		TotalDropped:    totalDropped,
 		TotalRouted:     totalRouted,
-		FilterSetActive: filterActive,
+		TotalUnmatched:    totalUnmatched,
+		TotalMatched:    totalMatched,
+		RouteTableActive: routeTableActive,
+		RoutedRate:      routedRate,
+		MatchedRate:     matchedRate,
 	}
 	for _, vs := range vaultMap {
 		resp.VaultStats = append(resp.VaultStats, vs)

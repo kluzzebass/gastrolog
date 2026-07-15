@@ -15,7 +15,7 @@ import { PreviewTable, parseTabularResult } from "./PreviewTable";
 
 // FileLookupFormat tags which structured format a section instance serves.
 // Drives preview hook, file-picker extension, type badge, and payload key.
-export type FileLookupFormat = "json" | "yaml";
+type FileLookupFormat = "json" | "yaml";
 
 interface FormatSpec {
   format: FileLookupFormat;
@@ -161,7 +161,7 @@ function FilePreviewPanel({ dark, fileId, query, keyColumn, onColumnsAvailable, 
   );
 }
 
-export function serializeFileLookups(lookups: JSONFileLookupDraft[]) {
+function serializeFileLookups(lookups: JSONFileLookupDraft[]) {
   return lookups
     .filter((j) => j.name && j.fileId)
     .map((j) => ({

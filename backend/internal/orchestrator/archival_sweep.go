@@ -14,13 +14,13 @@ import (
 
 const (
 	archivalSweepJobName     = "archival-sweep"
-	archivalSweepSchedule    = "0 * * * *" // every hour, at minute 0
+	archivalSweepSchedule    = "0 0 * * * *" // every hour, at minute 0
 	reconcileSweepJobName    = "cloud-reconcile"
-	defaultReconcileSchedule = "0 3 * * *" // daily at 3 AM
+	defaultReconcileSchedule = "0 0 3 * * *" // daily at 3 AM
 	defaultSuspectGraceDays  = 7
 )
 
-// suspectTracker records when cloud chunks were first observed missing.
+// suspectTracker records when cloud-backed chunks were first observed missing.
 // In-memory only — resets on restart (conservative: forces re-verification).
 type suspectTracker struct {
 	mu      sync.Mutex
@@ -57,11 +57,11 @@ func (o *Orchestrator) startArchivalSweep() error {
 	if err := o.scheduler.AddJob(archivalSweepJobName, archivalSweepSchedule, o.archivalSweepAll); err != nil {
 		return err
 	}
-	o.scheduler.Describe(archivalSweepJobName, "Archive cloud chunks per lifecycle policy")
+	o.scheduler.Describe(archivalSweepJobName, "Archive cloud-backed chunks per lifecycle policy")
 	return nil
 }
 
-// archivalSweepAll is the hourly job that transitions cloud chunks to
+// archivalSweepAll is the hourly job that transitions cloud-backed chunks to
 // archive storage classes based on age and the cloud service's transition chain.
 func (o *Orchestrator) archivalSweepAll() {
 	sys, err := o.loadSystem(context.Background())
@@ -107,7 +107,7 @@ func (o *Orchestrator) archivalSweepAll() {
 	}
 }
 
-// archivalSweepVault evaluates one vault's cloud chunks against the transition chain.
+// archivalSweepVault evaluates one vault's cloud-backed chunks against the transition chain.
 //
 // Iteration domain: the vault-ctl FSM manifest (cluster-coordinated
 // truth). The local Chunks.List() view is the per-chunk routing
@@ -207,7 +207,7 @@ func (o *Orchestrator) archivalSweepVault(vaultInst *VaultInstance, cs *system.C
 	}
 }
 
-// archivalExpire deletes a cloud chunk that has aged past its lifecycle's
+// archivalExpire deletes a cloud-backed chunk that has aged past its lifecycle's
 // terminal "delete" transition. Routes through the receipt protocol when a
 // reconciler is wired (every node drops its index entry symmetrically);
 // falls back to the local Manager.Delete path for memory-mode vaults without
@@ -219,7 +219,7 @@ func (o *Orchestrator) archivalExpire(vaultInst *VaultInstance, id chunk.ChunkID
 				"chunk", id.String(), "error", err)
 			return
 		}
-		o.retentionLogger.Info("archival sweep: expired chunk",
+		o.retentionLogger.Debug("archival sweep: expired chunk",
 			"chunk", id.String(), "age", age)
 		return
 	}
@@ -228,7 +228,7 @@ func (o *Orchestrator) archivalExpire(vaultInst *VaultInstance, id chunk.ChunkID
 			"chunk", id.String(), "error", err)
 		return
 	}
-	o.retentionLogger.Info("archival sweep: expired chunk",
+	o.retentionLogger.Debug("archival sweep: expired chunk",
 		"chunk", id.String(), "age", age)
 }
 
@@ -292,7 +292,7 @@ func (o *Orchestrator) reconcileSweepAll() {
 	}
 }
 
-// reconcileVault checks one vault's cloud chunks against the blob store.
+// reconcileVault checks one vault's cloud-backed chunks against the blob store.
 func (o *Orchestrator) reconcileVault(vaultInst *VaultInstance, cs *system.CloudService, now time.Time) {
 	metas, err := vaultInst.Chunks.List()
 	if err != nil {
@@ -317,17 +317,17 @@ func (o *Orchestrator) reconcileVault(vaultInst *VaultInstance, cs *system.Cloud
 		if vaultInst.IsTombstoned != nil && vaultInst.IsTombstoned(m.ID) {
 			continue
 		}
-		o.reconcileCloudChunk(vaultInst, m.ID, graceDays, now)
+		o.reconcileCloudBackedChunk(vaultInst, m.ID, graceDays, now)
 	}
 }
 
-// reconcileCloudChunk probes one cloud chunk against the blob store and
+// reconcileCloudBackedChunk probes one cloud-backed chunk against the blob store and
 // advances its suspect-tracking state. Uses HeadCloudBlob so the probe hits
 // the authoritative copy in S3 — OpenCursor would happily serve from the
 // in-tree warm cache (gastrolog-24m1t step 7j) and miss out-of-band lifecycle
 // deletions. Falls back to OpenCursor for managers that don't implement
 // CloudBlobChecker (no cloud store configured / non-file backends).
-func (o *Orchestrator) reconcileCloudChunk(vaultInst *VaultInstance, id chunk.ChunkID, graceDays uint32, now time.Time) {
+func (o *Orchestrator) reconcileCloudBackedChunk(vaultInst *VaultInstance, id chunk.ChunkID, graceDays uint32, now time.Time) {
 	var readErr error
 	if checker, ok := vaultInst.Chunks.(chunk.CloudBlobChecker); ok {
 		readErr = checker.HeadCloudBlob(id)
@@ -384,7 +384,7 @@ func (o *Orchestrator) markSuspect(vaultInst *VaultInstance, id chunk.ChunkID, n
 			"chunk-suspect:"+id.String(),
 			1, // Warning
 			"cloud-reconcile",
-			"Cloud chunk "+id.String()+" not found in blob store — monitoring",
+			"Cloud-backed chunk "+id.String()+" not found in blob store — monitoring",
 		)
 	}
 	o.retentionLogger.Warn("reconcile: chunk not found, marking suspect",
@@ -414,7 +414,7 @@ func (o *Orchestrator) expireSuspect(vaultInst *VaultInstance, id chunk.ChunkID,
 			"chunk-suspect:"+id.String(),
 			2, // Error
 			"cloud-reconcile",
-			fmt.Sprintf("Cloud chunk %s removed from index after %d days missing", id, suspectDays),
+			fmt.Sprintf("Cloud-backed chunk %s removed from index after %d days missing", id, suspectDays),
 		)
 	}
 	o.retentionLogger.Warn("reconcile: removed chunk from index after grace period",

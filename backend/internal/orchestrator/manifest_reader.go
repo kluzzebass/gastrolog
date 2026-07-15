@@ -111,9 +111,26 @@ func (o *Orchestrator) VaultManifestEntriesFromCtlFSM(vaultID glid.GLID) []vault
 	}
 	var out []vaultctlfsm.ManifestEntry
 	for _, t := range vfsm.Vaults() {
-		out = append(out, t.List()...)
+		out = append(out, t.ListIncludingPipelineManifest()...)
 	}
 	return out
+}
+
+// vaultCtlFSMForVault returns the vault-ctl chunk FSM for vaultID when this
+// node has joined the vault control-plane Raft group.
+func (o *Orchestrator) vaultCtlFSMForVault(vaultID glid.GLID) *vaultctlfsm.FSM {
+	if o.groupMgr == nil {
+		return nil
+	}
+	g := o.groupMgr.GetGroup(raftgroup.VaultControlPlaneGroupID(vaultID))
+	if g == nil {
+		return nil
+	}
+	vfsm, ok := g.FSM.(*vaultraft.FSM)
+	if !ok || vfsm == nil {
+		return nil
+	}
+	return vfsm.VaultFSM(vaultID)
 }
 
 func collectSealedEntries(vaultInst *VaultInstance) []vaultctlfsm.ManifestEntry {
@@ -181,9 +198,7 @@ func (o *Orchestrator) IndexReader() manifest.IndexReader {
 // orchestratorIndexReader implements manifest.IndexReader by walking the
 // orchestrator's local vault instances to find the chunk's owning instance,
 // then dispatching to that instance's chunk manager (and index manager) for
-// the actual rank/pos lookup. Same fallback logic as the legacy
-// findIngestRank/findIngestPos helpers in internal/query/histogram.go,
-// just behind the manifest.IndexReader interface.
+// the actual rank/pos lookup.
 type orchestratorIndexReader struct {
 	o *Orchestrator
 }
@@ -191,7 +206,7 @@ type orchestratorIndexReader struct {
 var _ manifest.IndexReader = (*orchestratorIndexReader)(nil)
 
 // FindIngestRank returns the rank of the first IngestTS-sorted entry with
-// TS >= ts. Tries the chunk manager (active chunk B+ tree, cloud chunk
+// TS >= ts. Tries the chunk manager (active chunk B+ tree, cloud-backed chunk
 // cached index) first; falls back to the index manager (sealed local
 // chunk sidecar). Returns (0, false) when neither serves the lookup.
 func (r *orchestratorIndexReader) FindIngestRank(chunkID chunk.ChunkID, ts time.Time) (uint64, bool) {
@@ -205,6 +220,9 @@ func (r *orchestratorIndexReader) FindIngestRank(chunkID chunk.ChunkID, ts time.
 		if rank, found, err := im.FindIngestEntryIndex(chunkID, ts); err == nil && found {
 			return rank, true
 		}
+	}
+	if rank, ok := r.o.PipelineFindIngestRank(chunkID, ts); ok {
+		return rank, true
 	}
 	return 0, false
 }

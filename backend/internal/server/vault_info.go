@@ -220,11 +220,11 @@ func (s *VaultServer) accumulateRemoteVaultStats(ctx context.Context, localVault
 	}
 
 	// If a filter was provided, only include those specific remote vaults.
-	var filterSet map[glid.GLID]struct{}
+	var wantedSet map[glid.GLID]struct{}
 	if len(filter) > 0 {
-		filterSet = make(map[glid.GLID]struct{}, len(filter))
+		wantedSet = make(map[glid.GLID]struct{}, len(filter))
 		for _, id := range filter {
-			filterSet[id] = struct{}{}
+			wantedSet[id] = struct{}{}
 		}
 	}
 
@@ -232,8 +232,8 @@ func (s *VaultServer) accumulateRemoteVaultStats(ctx context.Context, localVault
 		if _, local := localSet[vc.ID]; local {
 			continue
 		}
-		if filterSet != nil {
-			if _, wanted := filterSet[vc.ID]; !wanted {
+		if wantedSet != nil {
+			if _, wanted := wantedSet[vc.ID]; !wanted {
 				continue
 			}
 		}
@@ -393,29 +393,53 @@ func (s *VaultServer) vaultInfoFromLocal(ctx context.Context, id glid.GLID) *api
 func ChunkMetaToProto(meta chunk.ChunkMeta) *apiv1.ChunkMeta {
 	pb := &apiv1.ChunkMeta{
 		Id:           glid.GLID(meta.ID).ToProto(),
-		WriteStart:   timestamppb.New(meta.WriteStart),
-		WriteEnd:     timestamppb.New(meta.WriteEnd),
 		Sealed:       meta.Sealed,
 		RecordCount:  meta.RecordCount,
 		Bytes:        meta.Bytes,
-		// Compressed historically meant "raw.log/attr.log are zstd-compressed",
-		// then "GLCB seekable-zstd" after step 7f. Post-Phase-6 the GLCB is
-		// uncompressed locally and zstd-wrapped only on the cloud transport,
-		// so the flag means "the on-disk bytes carry compression" and is
-		// always false for sealed chunks now (gastrolog-69fd5).
-		Compressed:   false,
 		DiskBytes:    meta.DiskBytes,
 		CloudBacked:  meta.CloudBacked,
 		Archived:     meta.Archived,
 		StorageClass: meta.StorageClass,
+		State:        chunkStateToProto(meta.State, meta.Sealed),
 	}
-	if !meta.IngestStart.IsZero() {
+	if saneRecordTime(meta.WriteStart) {
+		pb.WriteStart = timestamppb.New(meta.WriteStart)
+	}
+	if saneRecordTime(meta.WriteEnd) {
+		pb.WriteEnd = timestamppb.New(meta.WriteEnd)
+	}
+	if saneRecordTime(meta.IngestStart) {
 		pb.IngestStart = timestamppb.New(meta.IngestStart)
 	}
-	if !meta.IngestEnd.IsZero() {
+	if saneRecordTime(meta.IngestEnd) {
 		pb.IngestEnd = timestamppb.New(meta.IngestEnd)
 	}
 	return pb
+}
+
+func saneRecordTime(t time.Time) bool {
+	return !t.IsZero() && t.Year() >= 2000
+}
+
+func chunkStateToProto(state chunk.ChunkState, sealed bool) apiv1.ChunkState {
+	switch state {
+	case chunk.ChunkStateActive:
+		return apiv1.ChunkState_CHUNK_STATE_ACTIVE
+	case chunk.ChunkStateSealing:
+		return apiv1.ChunkState_CHUNK_STATE_SEALING
+	case chunk.ChunkStateSealed:
+		return apiv1.ChunkState_CHUNK_STATE_SEALED
+	case chunk.ChunkStateUnknown:
+		if sealed {
+			return apiv1.ChunkState_CHUNK_STATE_SEALED
+		}
+		return apiv1.ChunkState_CHUNK_STATE_UNSPECIFIED
+	default:
+		if sealed {
+			return apiv1.ChunkState_CHUNK_STATE_SEALED
+		}
+		return apiv1.ChunkState_CHUNK_STATE_UNSPECIFIED
+	}
 }
 
 // VaultChunkMetaToProto converts a VaultChunkMeta to a proto ChunkMeta.

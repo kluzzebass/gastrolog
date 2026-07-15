@@ -48,6 +48,28 @@ type VaultRegistry interface {
 	IndexReader() IndexReader
 }
 
+// SearchChunkLister supplies the chunk metadata set for query and histogram
+// discovery. When implemented by the registry, the query engine includes
+// pipeline active and sealing chunks (manifest-backed, no GLCB yet) in
+// addition to sealed manifest entries. File/memory vaults also append the
+// chunk-manager active head (m.active). Reader() remains sealed-only for
+// retention and integrity surfaces.
+type SearchChunkLister interface {
+	SearchChunkMetas(vaultID glid.GLID) []chunk.ChunkMeta
+}
+
+// PipelineChunkOpener opens a record cursor for pipeline active or sealing
+// chunks that have no registered GLCB yet (manifest segment-span reads).
+type PipelineChunkOpener interface {
+	OpenPipelineChunkCursor(vaultID glid.GLID, chunkID chunk.ChunkID) (chunk.RecordCursor, error)
+}
+
+// PipelineIngestScanner scans IngestTS from pipeline active/sealing chunks
+// via the open-chunk manifest (segment spans / partial GLCB).
+type PipelineIngestScanner interface {
+	ScanPipelineChunkIngestTS(vaultID glid.GLID, chunkID chunk.ChunkID, cb func(tsNanos int64) bool) error
+}
+
 // Reader exposes the FSM-projected view of chunk manifests. Every caller
 // that needs sealed-chunk metadata routes through this interface instead
 // of reaching into chunk.Manager.metas / cloudIdx / chunkMeta — the FSM
@@ -90,7 +112,7 @@ type Reader interface {
 type IndexReader interface {
 	// FindIngestRank returns the rank of the first IngestTS-sorted entry
 	// with TS >= ts in the given chunk's IngestTS index. ok=false when the
-	// chunk's index isn't locally resolvable (uncached cloud chunk, missing
+	// chunk's index isn't locally resolvable (uncached cloud-backed chunk, missing
 	// GLCB, or FSM unaware of chunk).
 	FindIngestRank(chunkID chunk.ChunkID, ts time.Time) (rank uint64, ok bool)
 

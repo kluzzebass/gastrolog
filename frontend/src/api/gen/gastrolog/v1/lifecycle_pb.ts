@@ -7,7 +7,7 @@ import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialM
 import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
 import { NodeStats } from "./cluster_pb.js";
 import { GetRouteStatsResponse, IngesterAlive, NodeState } from "./system_pb.js";
-import { GetStatsResponse, VaultInfo } from "./vault_pb.js";
+import { GetStatsResponse, VaultInfo, VaultPipelineBacklog } from "./vault_pb.js";
 
 /**
  * @generated from enum gastrolog.v1.Status
@@ -1055,6 +1055,14 @@ export class WatchSystemStatusResponse extends Message<WatchSystemStatusResponse
    */
   ingesterAlive: IngesterAlive[] = [];
 
+  /**
+   * Per-vault chunking pipeline depth (vault-ctl FSM + aggregated segment
+   * disk counts from NodeStats broadcasts). Push-updated on each stats tick.
+   *
+   * @generated from field: repeated gastrolog.v1.VaultPipelineBacklog pipeline_backlog = 7;
+   */
+  pipelineBacklog: VaultPipelineBacklog[] = [];
+
   constructor(data?: PartialMessage<WatchSystemStatusResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1069,6 +1077,7 @@ export class WatchSystemStatusResponse extends Message<WatchSystemStatusResponse
     { no: 4, name: "vaults", kind: "message", T: VaultInfo, repeated: true },
     { no: 5, name: "stats", kind: "message", T: GetStatsResponse },
     { no: 6, name: "ingester_alive", kind: "message", T: IngesterAlive, repeated: true },
+    { no: 7, name: "pipeline_backlog", kind: "message", T: VaultPipelineBacklog, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): WatchSystemStatusResponse {

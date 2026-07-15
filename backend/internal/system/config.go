@@ -1,10 +1,7 @@
 package system
 
 import (
-	"errors"
 	"gastrolog/internal/glid"
-	"strconv"
-	"strings"
 	"time"
 )
 
@@ -24,6 +21,12 @@ type ServerSettings struct {
 type ClusterConfig struct {
 	BroadcastInterval string `json:"broadcast_interval,omitempty"` // Go duration string, e.g. "5s"
 	HeartbeatInterval string `json:"heartbeat_interval,omitempty"` // Go duration string, e.g. "1s"; PeerState TTL is 4× this
+	// PipelineBacklogMaxBytes is the per-vault pipeline backlog budget: when a
+	// vault's unreleased completed-segment bytes (vault-ctl registry) reach it,
+	// ingest admission for that vault is refused until chunking drains below
+	// the budget. The operating bound ahead of the disk-guard backstop.
+	// 0 = unbounded.
+	PipelineBacklogMaxBytes uint64 `json:"pipeline_backlog_max_bytes,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -49,7 +52,7 @@ type System struct {
 type Config struct {
 	// Entity collections.
 	// gastrolog-4kkoo (Phase 5): Filters removed; expressions inlined on Routes.
-	RotationPolicies []RotationPolicyConfig `json:"rotationPolicies,omitempty"`
+	RotationPolicies  []RotationPolicyConfig  `json:"rotationPolicies,omitempty"`
 	RetentionPolicies []RetentionPolicyConfig `json:"retentionPolicies,omitempty"`
 	Ingesters         []IngesterConfig        `json:"ingesters,omitempty"`
 	Vaults            []VaultConfig           `json:"vaults,omitempty"`
@@ -268,43 +271,6 @@ type RefreshToken struct {
 // ---------------------------------------------------------------------------
 // Utilities
 // ---------------------------------------------------------------------------
-
-// ParseBytes parses a byte size string with optional suffix (B, KB, MB, GB).
-func ParseBytes(s string) (uint64, error) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return 0, errors.New("empty value")
-	}
-
-	s = strings.ToUpper(s)
-
-	var multiplier uint64 = 1
-	var numStr string
-
-	switch {
-	case strings.HasSuffix(s, "GB"):
-		multiplier = 1024 * 1024 * 1024
-		numStr = strings.TrimSuffix(s, "GB")
-	case strings.HasSuffix(s, "MB"):
-		multiplier = 1024 * 1024
-		numStr = strings.TrimSuffix(s, "MB")
-	case strings.HasSuffix(s, "KB"):
-		multiplier = 1024
-		numStr = strings.TrimSuffix(s, "KB")
-	case strings.HasSuffix(s, "B"):
-		numStr = strings.TrimSuffix(s, "B")
-	default:
-		numStr = s
-	}
-
-	numStr = strings.TrimSpace(numStr)
-	n, err := strconv.ParseUint(numStr, 10, 64)
-	if err != nil {
-		return 0, err
-	}
-
-	return n * multiplier, nil
-}
 
 // StringPtr returns a pointer to s.
 //

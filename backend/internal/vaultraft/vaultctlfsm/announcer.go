@@ -56,11 +56,8 @@ func (a *Announcer) AnnounceBeginSeal(id chunk.ChunkID) {
 }
 
 func (a *Announcer) AnnounceSeal(id chunk.ChunkID, writeEnd time.Time, recordCount, bytes int64, ingestStart, ingestEnd, sourceEnd time.Time, ingestTSMonotonic bool) {
-	a.apply("seal", id, MarshalSealChunk(id, writeEnd, recordCount, bytes, ingestStart, ingestEnd, sourceEnd, ingestTSMonotonic))
-}
-
-func (a *Announcer) AnnounceCompress(id chunk.ChunkID, diskBytes int64) {
-	a.apply("compress", id, MarshalCompressChunk(id, diskBytes))
+	sealedAt := time.Now()
+	a.apply("seal", id, MarshalSealChunk(id, writeEnd, recordCount, bytes, ingestStart, ingestEnd, sourceEnd, ingestTSMonotonic, sealedAt))
 }
 
 func (a *Announcer) AnnounceAttachOffsets(id chunk.ChunkID, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64) {

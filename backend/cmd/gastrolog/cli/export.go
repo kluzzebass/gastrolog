@@ -2,9 +2,7 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"os"
 
 	"connectrpc.com/connect"
 	"github.com/spf13/cobra"
@@ -33,6 +31,7 @@ type exportDoc struct {
 	Scheduler            *schedulerExport `json:"scheduler,omitempty"`
 	TLS                  *tlsExport       `json:"tls,omitempty"`
 	MaxMind              *maxmindExport   `json:"maxmind,omitempty"`
+	Cluster              *clusterExport   `json:"cluster,omitempty"`
 	SetupWizardDismissed bool             `json:"setup_wizard_dismissed,omitempty"`
 }
 
@@ -92,9 +91,15 @@ type maxmindExport struct {
 	LastUpdate   string `json:"last_update,omitempty"`
 }
 
+type clusterExport struct {
+	BroadcastInterval       string `json:"broadcast_interval,omitempty"`
+	HeartbeatInterval       string `json:"heartbeat_interval,omitempty"`
+	PipelineBacklogMaxBytes uint64 `json:"pipeline_backlog_max_bytes,omitempty"`
+}
+
 // settingsToExport converts the nested proto GetSettingsResponse into
 // the hierarchical export types. Zero-value sub-objects are returned as nil.
-func settingsToExport(sc *v1.GetSettingsResponse) (auth *authExport, query *queryExport, sched *schedulerExport, tls *tlsExport, maxmind *maxmindExport, setupDismissed bool) {
+func settingsToExport(sc *v1.GetSettingsResponse) (auth *authExport, query *queryExport, sched *schedulerExport, tls *tlsExport, maxmind *maxmindExport, cluster *clusterExport, setupDismissed bool) {
 	// Auth + PasswordPolicy
 	if a := sc.GetAuth(); a != nil {
 		auth = &authExport{
@@ -167,6 +172,18 @@ func settingsToExport(sc *v1.GetSettingsResponse) (auth *authExport, query *quer
 		}
 	}
 
+	// Cluster
+	if cl := sc.GetCluster(); cl != nil {
+		ce := clusterExport{
+			BroadcastInterval:       cl.GetBroadcastInterval(),
+			HeartbeatInterval:       cl.GetHeartbeatInterval(),
+			PipelineBacklogMaxBytes: cl.GetPipelineBacklogMaxBytes(),
+		}
+		if ce != (clusterExport{}) {
+			cluster = &ce
+		}
+	}
+
 	setupDismissed = sc.GetSetupWizardDismissed()
 	return
 }
@@ -221,7 +238,7 @@ func newExportCmd() *cobra.Command {
 				})
 			}
 
-			auth, query, sched, tls, maxmind, setupDismissed := settingsToExport(scResp.Msg)
+			auth, query, sched, tls, maxmind, cluster, setupDismissed := settingsToExport(scResp.Msg)
 
 			doc := &exportDoc{
 				RotationPolicies:     cfgResp.Msg.RotationPolicies,
@@ -236,12 +253,11 @@ func newExportCmd() *cobra.Command {
 				Scheduler:            sched,
 				TLS:                  tls,
 				MaxMind:              maxmind,
+				Cluster:              cluster,
 				SetupWizardDismissed: setupDismissed,
 			}
 
-			enc := json.NewEncoder(os.Stdout)
-			enc.SetIndent("", "  ")
-			return enc.Encode(doc)
+			return newPrinter("json").json(doc)
 		},
 	}
 }

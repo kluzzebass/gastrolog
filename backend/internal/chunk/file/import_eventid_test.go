@@ -22,15 +22,15 @@ import (
 // landed; this commit moves it to main and pins it with the test.
 //
 // Test flow:
-//   1. Append a record into Manager A with an explicit non-zero
-//      EventID. Seal.
-//   2. Open the sealed chunk via cursor and verify its EventID
-//      survives the encode/decode round-trip on the source.
-//   3. ImportRecords into Manager B (a fresh manager) using the
-//      cursor as the iterator. This is the cross-node-style
-//      transfer path.
-//   4. Open Manager B's imported chunk via cursor; assert the
-//      record's EventID matches the original.
+//  1. Append a record into Manager A with an explicit non-zero
+//     EventID. Seal.
+//  2. Open the sealed chunk via cursor and verify its EventID
+//     survives the encode/decode round-trip on the source.
+//  3. ImportRecords into Manager B (a fresh manager) using the
+//     cursor as the iterator. This is the cross-node-style
+//     transfer path.
+//  4. Open Manager B's imported chunk via cursor; assert the
+//     record's EventID matches the original.
 //
 // Pre-fix: step 4's EventID would be all zeros. Post-fix: it
 // matches the original.

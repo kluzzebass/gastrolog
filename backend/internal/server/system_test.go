@@ -2,13 +2,14 @@ package server_test
 
 import (
 	"context"
-	"errors"
 	"gastrolog/internal/glid"
 	"maps"
 	"net"
 	"net/http"
+	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
@@ -31,7 +32,10 @@ import (
 
 // testAfterConfigApply creates a dispatch callback for non-raft test stores.
 // It mirrors the production configDispatcher but lives in the test package.
-func testAfterConfigApply(orch *orchestrator.Orchestrator, cfgStore system.Store, factories orchestrator.Factories) func(raftfsm.Notification) {
+// ReloadFilters failures are reported instead of swallowed: a harness whose
+// pipeline vault registration fails silently makes every route-touching test
+// pass vacuously (gastrolog-4cl2u4).
+func testAfterConfigApply(t *testing.T, orch *orchestrator.Orchestrator, cfgStore system.Store, factories orchestrator.Factories) func(raftfsm.Notification) {
 	return func(n raftfsm.Notification) {
 		ctx := context.Background()
 		switch n.Kind {
@@ -41,7 +45,9 @@ func testAfterConfigApply(orch *orchestrator.Orchestrator, cfgStore system.Store
 				return
 			}
 			if slices.Contains(orch.ListVaults(), n.ID) {
-				_ = orch.ReloadFilters(ctx)
+				if err := orch.ReloadFilters(ctx); err != nil {
+					t.Errorf("testAfterConfigApply: ReloadFilters: %v", err)
+				}
 				_ = orch.ReloadRotationPolicies(ctx)
 				_ = orch.ReloadRetentionPolicies(ctx)
 				if !cfg.Enabled {
@@ -63,12 +69,8 @@ func testAfterConfigApply(orch *orchestrator.Orchestrator, cfgStore system.Store
 			if err != nil || cfg == nil {
 				return
 			}
-			if slices.Contains(orch.ListIngesters(), n.ID) {
-				if err := orch.RemoveIngester(n.ID); err != nil && !errors.Is(err, orchestrator.ErrIngesterNotFound) {
-					return
-				}
-			}
 			if !cfg.Enabled {
+				orch.UnregisterIngester(n.ID)
 				return
 			}
 			reg, ok := factories.IngesterTypes[cfg.Type]
@@ -85,9 +87,11 @@ func testAfterConfigApply(orch *orchestrator.Orchestrator, cfgStore system.Store
 			if err != nil {
 				return
 			}
-			_ = orch.AddIngester(cfg.ID, cfg.Name, cfg.Type, false, ing)
+			// RegisterIngester replaces an existing ingester of the same ID
+			// idempotently, so no explicit pre-remove is needed.
+			orch.RegisterIngester(cfg.ID, cfg.Name, cfg.Type, ing)
 		case raftfsm.NotifyIngesterDeleted:
-			_ = orch.RemoveIngester(n.ID)
+			orch.UnregisterIngester(n.ID)
 		}
 	}
 }
@@ -98,7 +102,7 @@ func newConfigTestSetup(t *testing.T) (gastrologv1connect.SystemServiceClient, s
 	t.Helper()
 
 	cfgStore := sysmem.NewStore()
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: cfgStore})
+	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: cfgStore, SegmentsDir: filepath.Join(t.TempDir(), "segments")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +120,7 @@ func newConfigTestSetup(t *testing.T) (gastrologv1connect.SystemServiceClient, s
 	}
 
 	srv := server.New(orch, cfgStore, factories, nil, server.Config{
-		AfterConfigApply: testAfterConfigApply(orch, cfgStore, factories),
+		AfterConfigApply: testAfterConfigApply(t, orch, cfgStore, factories),
 	})
 	handler := srv.Handler()
 
@@ -148,18 +152,13 @@ func TestDeleteVaultForce(t *testing.T) {
 		t.Fatalf("PutVault: %v", err)
 	}
 
-	// gastrolog-4kkoo (Phase 5): catch-all route directly on the orchestrator
-	// (not via the config store) so the test can force-delete the vault
-	// without hitting referential-integrity checks.
-	cr, _ := orchestrator.CompileRoute(glid.New(), "all", 0, "*",
-		[]orchestrator.RouteDestination{{VaultID: vaultID}}, "fanout")
-	orch.SetRouteSet(orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{cr}))
-
-	// Ingest data so the vault is non-empty.
-	if err := orch.Ingest(chunk.Record{
-		Raw: []byte("test data"),
-	}); err != nil {
-		t.Fatalf("Ingest: %v", err)
+	// Seed data directly into the vault's chunk manager so it is non-empty.
+	cm := orch.ChunkManager(vaultID)
+	if cm == nil {
+		t.Fatal("expected chunk manager for vault after PutVault")
+	}
+	if _, _, err := cm.Append(chunk.Record{Raw: []byte("test data")}); err != nil {
+		t.Fatalf("seed append: %v", err)
 	}
 
 	// Non-force delete should fail.
@@ -419,9 +418,11 @@ func TestPauseResumeVaultRPC(t *testing.T) {
 		t.Error("vault should be enabled after resume")
 	}
 
-	// Ingest should work after resume.
-	if err := orch.Ingest(chunk.Record{Raw: []byte("after resume")}); err != nil {
-		t.Fatalf("Ingest after resume: %v", err)
+	// Writes should work after resume — seed directly into the chunk manager.
+	if cm := orch.ChunkManager(vaultID); cm != nil {
+		if _, _, err := cm.Append(chunk.Record{Raw: []byte("after resume")}); err != nil {
+			t.Fatalf("append after resume: %v", err)
+		}
 	}
 }
 
@@ -516,7 +517,7 @@ func newConfigTestSetupWithIngesters(t *testing.T) (gastrologv1connect.SystemSer
 	t.Helper()
 
 	cfgStore := sysmem.NewStore()
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: cfgStore})
+	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: cfgStore, SegmentsDir: filepath.Join(t.TempDir(), "segments")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -537,7 +538,7 @@ func newConfigTestSetupWithIngesters(t *testing.T) (gastrologv1connect.SystemSer
 	}
 
 	srv := server.New(orch, cfgStore, factories, nil, server.Config{
-		AfterConfigApply: testAfterConfigApply(orch, cfgStore, factories),
+		AfterConfigApply: testAfterConfigApply(t, orch, cfgStore, factories),
 	})
 	handler := srv.Handler()
 
@@ -1156,12 +1157,12 @@ func TestGetRouteStats(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRouteStats: %v", err)
 	}
-	if resp.Msg.TotalIngested != 0 {
-		t.Errorf("expected 0 ingested, got %d", resp.Msg.TotalIngested)
+	if resp.Msg.TotalRouted != 0 {
+		t.Errorf("expected 0 routed, got %d", resp.Msg.TotalRouted)
 	}
-	// No filter set configured yet.
-	if resp.Msg.FilterSetActive {
-		t.Error("expected filterSetActive=false before routes configured")
+	// No route table published yet.
+	if resp.Msg.RouteTableActive {
+		t.Error("expected routeTableActive=false before routes configured")
 	}
 
 	// Configure a vault and route. gastrolog-4kkoo (Phase 5): expression
@@ -1184,32 +1185,39 @@ func TestGetRouteStats(t *testing.T) {
 		Destinations: []glid.GLID{vaultID}, Enabled: true,
 	})
 
+	// Publish the routing table (registering the pipeline vault while the
+	// segmentation manager is not yet running) and then start the pipeline, so
+	// records drive through the real routing stage — the route-stats counters
+	// live in the pipeline routing manager.
 	if err := orch.ReloadFilters(ctx); err != nil {
 		t.Fatalf("ReloadFilters: %v", err)
 	}
+	if err := orch.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { _ = orch.Stop() })
 
-	// Ingest some records.
 	for range 5 {
-		if err := orch.Ingest(chunk.Record{Raw: []byte("test")}); err != nil {
-			t.Fatalf("Ingest: %v", err)
+		if err := orch.SubmitRetentionRecord(ctx, vaultID, chunk.Record{Raw: []byte("test")}, ""); err != nil {
+			t.Fatalf("SubmitRetentionRecord: %v", err)
 		}
 	}
 
-	resp, err = client.GetRouteStats(ctx, connect.NewRequest(&gastrologv1.GetRouteStatsRequest{}))
-	if err != nil {
-		t.Fatalf("GetRouteStats: %v", err)
-	}
-	if resp.Msg.TotalIngested != 5 {
-		t.Errorf("expected 5 ingested, got %d", resp.Msg.TotalIngested)
+	// Counters increment asynchronously as records flow through routing.
+	resp = waitForRouteStats(t, client, func(m *gastrologv1.GetRouteStatsResponse) bool {
+		return m.TotalRouted == 5
+	})
+	if resp.Msg.TotalRouted != 5 {
+		t.Errorf("expected 5 routed, got %d", resp.Msg.TotalRouted)
 	}
 	if resp.Msg.TotalRouted != 5 {
 		t.Errorf("expected 5 routed, got %d", resp.Msg.TotalRouted)
 	}
-	if resp.Msg.TotalDropped != 0 {
-		t.Errorf("expected 0 dropped, got %d", resp.Msg.TotalDropped)
+	if resp.Msg.TotalUnmatched != 0 {
+		t.Errorf("expected 0 unmatched, got %d", resp.Msg.TotalUnmatched)
 	}
-	if !resp.Msg.FilterSetActive {
-		t.Error("expected filterSetActive=true")
+	if !resp.Msg.RouteTableActive {
+		t.Error("expected routeTableActive=true")
 	}
 	if len(resp.Msg.VaultStats) != 1 {
 		t.Fatalf("expected 1 vault stat, got %d", len(resp.Msg.VaultStats))
@@ -1220,6 +1228,31 @@ func TestGetRouteStats(t *testing.T) {
 	}
 	if vs.RecordsMatched != 5 {
 		t.Errorf("expected 5 matched, got %d", vs.RecordsMatched)
+	}
+}
+
+// waitForRouteStats polls GetRouteStats until cond is satisfied or the deadline
+// expires, returning the last response. Route-stats counters are incremented
+// asynchronously by the pipeline routing workers, so callers poll rather than
+// read once.
+func waitForRouteStats(t *testing.T, client gastrologv1connect.SystemServiceClient, cond func(*gastrologv1.GetRouteStatsResponse) bool) *connect.Response[gastrologv1.GetRouteStatsResponse] {
+	t.Helper()
+	ctx := context.Background()
+	deadline := time.Now().Add(3 * time.Second)
+	var resp *connect.Response[gastrologv1.GetRouteStatsResponse]
+	for {
+		var err error
+		resp, err = client.GetRouteStats(ctx, connect.NewRequest(&gastrologv1.GetRouteStatsRequest{}))
+		if err != nil {
+			t.Fatalf("GetRouteStats: %v", err)
+		}
+		if cond(resp.Msg) {
+			return resp
+		}
+		if time.Now().After(deadline) {
+			return resp
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 

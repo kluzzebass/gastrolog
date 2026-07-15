@@ -161,9 +161,9 @@ func (s *SystemServer) buildIngesterStatus(ctx context.Context, id glid.GLID, ra
 	}
 	if s.peerStats != nil {
 		pMsgs, pBytes, pErrs, _ := s.peerStats.AggregateIngesterStats(id.String())
-		resp.MessagesIngested += int64(pMsgs)  //nolint:gosec // G115: broadcast uses uint64
-		resp.Errors += int64(pErrs)            //nolint:gosec // G115: broadcast uses uint64
-		resp.BytesIngested += int64(pBytes)    //nolint:gosec // G115: broadcast uses uint64
+		resp.MessagesIngested += int64(pMsgs) //nolint:gosec // G115: broadcast uses uint64
+		resp.Errors += int64(pErrs)           //nolint:gosec // G115: broadcast uses uint64
+		resp.BytesIngested += int64(pBytes)   //nolint:gosec // G115: broadcast uses uint64
 	}
 
 	return resp, nil
@@ -414,12 +414,10 @@ func (s *SystemServer) DeleteIngester(
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("ingester not found"))
 	}
 
-	// Remove from local runtime. ErrIngesterNotFound is expected when the
-	// ingester belongs to another node — the owning node's FSM dispatcher
-	// handles its own cleanup.
-	if err := s.orch.RemoveIngester(id); err != nil && !errors.Is(err, orchestrator.ErrIngesterNotFound) {
-		return nil, errInternal(err)
-	}
+	// Remove from local runtime. No-op when the ingester belongs to another
+	// node — the owning node's FSM dispatcher handles its own cleanup once the
+	// config-store delete replicates.
+	s.orch.UnregisterIngester(id)
 
 	// Remove from config store.
 	if err := s.sysStore.DeleteIngester(ctx, id); err != nil {

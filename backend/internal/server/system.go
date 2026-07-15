@@ -24,14 +24,15 @@ import (
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
-	"gastrolog/internal/system/command"
 	"gastrolog/internal/auth"
 	"gastrolog/internal/convert"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/lookup"
 	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/pipeline/routing"
 	"gastrolog/internal/system"
+	"gastrolog/internal/system/command"
 	"gastrolog/internal/system/raftfsm"
 )
 
@@ -50,7 +51,8 @@ type PeerIngesterStatsProvider interface {
 // PeerRouteStatsProvider aggregates route stats from all cluster peer broadcasts.
 // Implemented by cluster.PeerState; nil in single-node mode.
 type PeerRouteStatsProvider interface {
-	AggregateRouteStats() (ingested, dropped, routed int64, filterActive bool, vaultStats []*apiv1.VaultRouteStats, routeStats []*apiv1.PerRouteStats)
+	AggregateRouteStats() (routed, unmatched, matched int64, routeTableActive bool, vaultStats []*apiv1.VaultRouteStats, routeStats []*apiv1.PerRouteStats)
+	AggregateRouteRates() (routed, matched *apiv1.ThroughputRate)
 }
 
 // SystemServerConfig holds all dependencies for SystemServer construction.
@@ -70,8 +72,10 @@ type SystemServerConfig struct {
 	OnLookupConfigChange func(system.LookupConfig, system.MaxMindConfig)
 	CloudTesters         map[string]CloudServiceTester
 	Tokens               *auth.TokenService
-	PlacementReconcile   func(ctx context.Context) // synchronous placement for RPC handlers
-	LogFilter            *logging.ComponentFilterHandler // log-level RPC handlers (gastrolog-3flfp); nil disables them
+	PlacementReconcile   func(ctx context.Context)                             // synchronous placement for RPC handlers
+	LogFilter            *logging.ComponentFilterHandler                       // log-level RPC handlers (gastrolog-3flfp); nil disables them
+	LocalStats           func() *apiv1.NodeStats                               // local NodeStats snapshot (rolling-window rates); nil in tests
+	ClusterRouteRates    func() (*apiv1.ThroughputRate, *apiv1.ThroughputRate) // server-side cluster rate series; nil in single-node/tests
 
 	// Environment banner (gastrolog-4vr0l). Display-only metadata
 	// surfaced on GetSystem so the UI header can render a per-deployment
@@ -88,6 +92,8 @@ type SystemServer struct {
 	certManager          CertManager
 	peerStats            PeerIngesterStatsProvider
 	peerRouteStats       PeerRouteStatsProvider
+	localStats           func() *apiv1.NodeStats
+	clusterRouteRates    func() (*apiv1.ThroughputRate, *apiv1.ThroughputRate)
 	localNodeID          string
 	onTLSConfigChange    func()
 	onLookupConfigChange func(system.LookupConfig, system.MaxMindConfig)
@@ -114,6 +120,8 @@ func NewSystemServer(cfg SystemServerConfig) *SystemServer {
 		certManager:          cfg.CertManager,
 		peerStats:            cfg.PeerStats,
 		peerRouteStats:       cfg.PeerRouteStats,
+		localStats:           cfg.LocalStats,
+		clusterRouteRates:    cfg.ClusterRouteRates,
 		localNodeID:          cfg.LocalNodeID,
 		afterConfigApply:     cfg.AfterConfigApply,
 		configSignal:         cfg.ConfigSignal,
@@ -172,15 +180,15 @@ func (s *SystemServer) buildFullSystem(ctx context.Context) (*apiv1.GetSystemRes
 		}
 	}
 	if s.configSignal != nil {
-		resp.SystemRaftIndex = s.configSignal.Version()
+		resp.ClusterCtlRaftIndex = s.configSignal.Version()
 	}
 	resp.EnvironmentLabel = s.environmentLabel
 	resp.EnvironmentColor = s.environmentColor
 	return resp, nil
 }
 
-// currentSystemRaftIndex returns the committed cluster-ctl Raft log index exposed on GetSystem.
-func (s *SystemServer) currentSystemRaftIndex() uint64 {
+// currentClusterCtlRaftIndex returns the committed cluster-ctl Raft log index exposed on GetSystem.
+func (s *SystemServer) currentClusterCtlRaftIndex() uint64 {
 	if s.configSignal == nil {
 		return 0
 	}
@@ -253,8 +261,9 @@ func (s *SystemServer) buildFullSettingsResponse(ctx context.Context, includeSec
 		},
 		Maxmind: mm,
 		Cluster: &apiv1.ClusterSettings{
-			BroadcastInterval: ss.Cluster.BroadcastInterval,
-			HeartbeatInterval: ss.Cluster.HeartbeatInterval,
+			BroadcastInterval:       ss.Cluster.BroadcastInterval,
+			HeartbeatInterval:       ss.Cluster.HeartbeatInterval,
+			PipelineBacklogMaxBytes: ss.Cluster.PipelineBacklogMaxBytes,
 		},
 		SetupWizardDismissed: func() bool { v, _ := s.sysStore.GetSetupWizardDismissed(ctx); return v }(),
 		NodeId:               []byte(s.localNodeID),
@@ -276,7 +285,7 @@ func (s *SystemServer) newSettingsMutationEcho(ctx context.Context) (*apiv1.Sett
 	}
 	return &apiv1.SettingsMutationEcho{
 		Settings:        settings,
-		SystemRaftIndex: s.currentSystemRaftIndex(),
+		ClusterCtlRaftIndex: s.currentClusterCtlRaftIndex(),
 	}, nil
 }
 
@@ -414,7 +423,7 @@ func (s *SystemServer) loadConfigCloudServices(ctx context.Context, resp *apiv1.
 			StorageClass:      cs.StorageClass,
 			ArchivalMode:      cs.ArchivalMode,
 			Transitions:       transitions,
-			RestoreSpeed:       cs.RestoreSpeed,
+			RestoreSpeed:      cs.RestoreSpeed,
 			RestoreDays:       cs.RestoreDays,
 			SuspectGraceDays:  cs.SuspectGraceDays,
 			ReconcileSchedule: cs.ReconcileSchedule,
@@ -791,22 +800,21 @@ func (s *SystemServer) GenerateName(
 // expression. gastrolog-4kkoo (Phase 5): drives live editor feedback in
 // the route filter UI.
 //
-// The check uses orchestrator.CompileRoute so the RPC's verdict is
-// identical to what PutRoute will accept at save time. A trivial route
-// is constructed with one local destination — the destination doesn't
-// affect parse/semantic validation, only the expression matters.
+// The check uses routing.CompileRoute (the pipeline route compiler) so the
+// RPC's verdict is identical to what PutRoute will accept at save time. A
+// trivial route is constructed with one destination vault — the destination
+// doesn't affect parse/semantic validation, only the expression matters.
 func (s *SystemServer) ValidateExpression(
 	_ context.Context,
 	req *connect.Request[apiv1.ValidateExpressionRequest],
 ) (*connect.Response[apiv1.ValidateExpressionResponse], error) {
 	expr := req.Msg.GetExpression()
-	_, err := orchestrator.CompileRoute(
+	_, err := routing.CompileRoute(
 		glid.New(),
 		"validate",
 		0,
 		expr,
-		[]orchestrator.RouteDestination{{VaultID: glid.New()}},
-		"fanout",
+		[]glid.GLID{glid.New()},
 	)
 	resp := &apiv1.ValidateExpressionResponse{}
 	if err != nil {
@@ -830,7 +838,7 @@ func (s *SystemServer) WatchSystem(
 	if s.configSignal != nil {
 		initialVersion = s.configSignal.Version()
 	}
-	if err := stream.Send(&apiv1.WatchSystemResponse{SystemRaftIndex: initialVersion}); err != nil {
+	if err := stream.Send(&apiv1.WatchSystemResponse{ClusterCtlRaftIndex: initialVersion}); err != nil {
 		return err
 	}
 	if s.configSignal == nil {
@@ -845,7 +853,7 @@ func (s *SystemServer) WatchSystem(
 			return nil
 		case <-ch:
 			if err := stream.Send(&apiv1.WatchSystemResponse{
-				SystemRaftIndex: s.configSignal.Version(),
+				ClusterCtlRaftIndex: s.configSignal.Version(),
 			}); err != nil {
 				return err
 			}
@@ -1245,6 +1253,9 @@ func mergeCluster(c *apiv1.PutClusterSettings, cluster *system.ClusterConfig) *c
 			return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid heartbeat_interval: %w", err))
 		}
 		cluster.HeartbeatInterval = *c.HeartbeatInterval
+	}
+	if c.PipelineBacklogMaxBytes != nil {
+		cluster.PipelineBacklogMaxBytes = *c.PipelineBacklogMaxBytes
 	}
 	return nil
 }

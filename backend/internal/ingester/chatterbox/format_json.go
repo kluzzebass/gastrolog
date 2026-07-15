@@ -113,10 +113,10 @@ func (f *JSONFormat) Generate(rng *rand.Rand) ([]byte, map[string]string, time.T
 		spans := make([]any, spanCount)
 		for i := range spanCount {
 			spans[i] = map[string]any{
-				"span_id":       fmt.Sprintf("%016x", rng.Uint64()),
-				"operation":     pick(rng, []string{"db.query", "http.request", "cache.get", "grpc.call", "queue.publish"}),
-				"duration_us":   rng.IntN(100000),
-				"status":        pick(rng, []string{"ok", "error", "timeout"}),
+				"span_id":     fmt.Sprintf("%016x", rng.Uint64()),
+				"operation":   pick(rng, []string{"db.query", "http.request", "cache.get", "grpc.call", "queue.publish"}),
+				"duration_us": rng.IntN(100000),
+				"status":      pick(rng, []string{"ok", "error", "timeout"}),
 			}
 		}
 		obj["trace_id"] = fmt.Sprintf("%032x", rng.Uint64())

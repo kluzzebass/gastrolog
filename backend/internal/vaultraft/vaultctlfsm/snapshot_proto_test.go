@@ -26,8 +26,7 @@ func buildRichFSM(t *testing.T) *FSM {
 	hash[0], hash[31] = 0x11, 0xFF
 	cloud := glidFromByte(0x42)
 	applyCmd(t, f, MarshalCreateChunk(uploaded, now, now, now))
-	applyCmd(t, f, MarshalSealChunk(uploaded, now.Add(time.Second), 7, 700, now, now, now, true))
-	applyCmd(t, f, MarshalCompressChunk(uploaded, 350))
+	applyCmd(t, f, MarshalSealChunk(uploaded, now.Add(time.Second), 7, 700, now, now, now, true, now.Add(time.Second)))
 	applyCmd(t, f, MarshalUploadChunk(uploaded, 300, 1, 2, 3, 4, hash, cloud, 2))
 
 	// tombstones: deleted chunk + a ghost tombstone for a never-seen chunk.
@@ -38,6 +37,34 @@ func buildRichFSM(t *testing.T) *FSM {
 
 	// pending deletes: an in-flight delete with several expected-from nodes.
 	applyCmd(t, f, MarshalRequestDelete(testChunkID(14), now, "retention-ttl", []string{"n3", "n1", "n2"}))
+
+	// completed segments: pipeline registry.
+	applyCmd(t, f, MarshalPublishCompletedSegment(CompletedSegmentEntry{
+		SegmentID:     glidFromByte(0x55),
+		RecordCount:   9,
+		ByteSize:      900,
+		FirstIngestTS: now.Add(-time.Minute),
+		LastIngestTS:  now,
+		Checksum:      0xBEEF,
+		OriginNodeID:  "node-seg-origin",
+		PublishedAt:   now,
+	}))
+
+	// open-chunk manifest: sealed pending materialization. The ref'd segment
+	// must exist in the registry (apply-time ghost-ref guard).
+	applyCmd(t, f, MarshalPublishCompletedSegment(CompletedSegmentEntry{
+		SegmentID: glidFromByte(0x66), RecordCount: 1000, ByteSize: 1, Checksum: 1, PublishedAt: now,
+	}))
+	openChunk := testChunkID(0x53)
+	applyCmd(t, f, MarshalOpenChunkManifest(openChunk, now))
+	applyCmd(t, f, MarshalAddOpenChunkSegmentRef(openChunk, OpenChunkSegmentRef{
+		SegmentID:         glidFromByte(0x66),
+		FirstRecordNumber: 0,
+		LastRecordNumber:  4,
+		SliceBytes:        500,
+		RefAddedAt:        now.Add(time.Second),
+	}))
+	applyCmd(t, f, MarshalSealOpenChunkManifest(openChunk, now.Add(2*time.Second)))
 
 	return f
 }

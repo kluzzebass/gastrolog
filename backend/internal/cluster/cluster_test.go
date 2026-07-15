@@ -93,7 +93,7 @@ func newTestNode(t *testing.T, nodeID string, bootstrap bool) *testNode {
 	})
 
 	// Enable leader forwarding.
-	fwd := cluster.NewForwarder(r, nil)
+	fwd := cluster.NewForwarder(r, srv.PeerConns())
 	store.SetForwarder(fwd)
 	t.Cleanup(func() { _ = fwd.Close() })
 
@@ -154,9 +154,9 @@ func TestSingleNodeForwardApply(t *testing.T) {
 	ctx := context.Background()
 	probeID := glid.New()
 	err := node.store.PutRotationPolicy(ctx, system.RotationPolicyConfig{
-		ID:     probeID,
-		Name:   "test-probe",
-		MaxAge: &dummyMaxAge,
+		ID:          probeID,
+		Name:        "test-probe",
+		MaxAgeNanos: &dummyMaxAge,
 	})
 	if err != nil {
 		t.Fatalf("PutRotationPolicy: %v", err)
@@ -217,9 +217,9 @@ func TestThreeNodeCluster(t *testing.T) {
 	ctx := context.Background()
 	probeID := glid.New()
 	if err := node1.store.PutRotationPolicy(ctx, system.RotationPolicyConfig{
-		ID:     probeID,
-		Name:   "leader-probe",
-		MaxAge: &dummyMaxAge,
+		ID:          probeID,
+		Name:        "leader-probe",
+		MaxAgeNanos: &dummyMaxAge,
 	}); err != nil {
 		t.Fatalf("PutRotationPolicy on leader: %v", err)
 	}
@@ -245,9 +245,9 @@ func TestThreeNodeCluster(t *testing.T) {
 	// Write on a follower — should be forwarded to the leader.
 	followerProbeID := glid.New()
 	if err := node2.store.PutRotationPolicy(ctx, system.RotationPolicyConfig{
-		ID:     followerProbeID,
-		Name:   "follower-probe",
-		MaxAge: &dummyMaxAge,
+		ID:          followerProbeID,
+		Name:        "follower-probe",
+		MaxAgeNanos: &dummyMaxAge,
 	}); err != nil {
 		t.Fatalf("PutRotationPolicy on follower: %v", err)
 	}
@@ -278,9 +278,9 @@ func TestThreeNodeCluster(t *testing.T) {
 	// snapshot that caused the settings UI to display pre-mutation state.
 	readBackProbeID := glid.New()
 	if err := node2.store.PutRotationPolicy(ctx, system.RotationPolicyConfig{
-		ID:     readBackProbeID,
-		Name:   "read-back-probe",
-		MaxAge: &dummyMaxAge,
+		ID:          readBackProbeID,
+		Name:        "read-back-probe",
+		MaxAgeNanos: &dummyMaxAge,
 	}); err != nil {
 		t.Fatalf("PutRotationPolicy on follower for read-back: %v", err)
 	}

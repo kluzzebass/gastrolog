@@ -3,6 +3,7 @@ import { useReducer, useState } from "react";
 import { protoInt64 } from "@bufbuild/protobuf";
 import { useExpandedCards } from "../../hooks/useExpandedCards";
 import { buildNodeNameMap, resolveNodeName } from "../../utils/nodeNames";
+import { parseBytes } from "../../utils/units";
 import {
   useConfig,
   usePutVault,
@@ -43,12 +44,15 @@ export interface StorageEntry {
   rotationPolicyId: string;
   retentionPolicyId: string;
   retentionDisposition: string; // "delete" (default) | "route"
+  diskFreeWarn: string; // human size ("10GB"); empty inherits the node default
+  diskFreeFloor: string; // human size; empty inherits the node default
+  maxSize: string; // human size; per-node budget for the vault's local disk claim; empty = unlimited
   replicationFactor: string;
   path: string;
   nodeId: string;
 }
 
-export function emptyStorageEntry(type: VaultTypeLabel): StorageEntry {
+function emptyStorageEntry(type: VaultTypeLabel): StorageEntry {
   return {
     key: crypto.randomUUID(),
     type,
@@ -61,6 +65,9 @@ export function emptyStorageEntry(type: VaultTypeLabel): StorageEntry {
     rotationPolicyId: "",
     retentionPolicyId: "",
     retentionDisposition: "delete",
+    diskFreeWarn: "",
+    diskFreeFloor: "",
+    maxSize: "",
     replicationFactor: "1",
     path: "",
     nodeId: "",
@@ -284,6 +291,49 @@ export function VaultStorageForm({
                 min={0}
               />
             )}
+          </FormField>
+
+          <FormField
+            label="Max Size"
+            dark={dark}
+            description="Per-node budget for the vault's whole local disk claim (chunks, indexes, pipeline backlog). At the budget, new records for this vault are refused cluster-wide until retention drains it. Leave empty for unlimited."
+          >
+            <TextInput
+              value={storage.maxSize}
+              onChange={(v) => onUpdate({ maxSize: v })}
+              placeholder=""
+              dark={dark}
+              mono
+              examples={["10GB", "50GB", "500GB"]}
+            />
+          </FormField>
+          <FormField
+            label="Disk Free Warn"
+            dark={dark}
+            description="Free space on the vault's backing volume below which the disk-space alarm raises. Leave empty to inherit the node default."
+          >
+            <TextInput
+              value={storage.diskFreeWarn}
+              onChange={(v) => onUpdate({ diskFreeWarn: v })}
+              placeholder=""
+              dark={dark}
+              mono
+              examples={["5GB", "10GB", "50GB"]}
+            />
+          </FormField>
+          <FormField
+            label="Disk Free Floor"
+            dark={dark}
+            description="Free space below which new records for this vault are refused cluster-wide until space frees. Leave empty to inherit the node default."
+          >
+            <TextInput
+              value={storage.diskFreeFloor}
+              onChange={(v) => onUpdate({ diskFreeFloor: v })}
+              placeholder=""
+              dark={dark}
+              mono
+              examples={["1GB", "3GB", "10GB"]}
+            />
           </FormField>
 
           {/* Cache eviction tuning is only meaningful on cloud-backed
@@ -535,6 +585,9 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
         ? [new RetentionRule({ retentionPolicyId: decode(storage.retentionPolicyId) })]
         : [],
       retentionDisposition: storage.type !== "jsonl" ? (storage.retentionDisposition || "delete") : "",
+      diskFreeWarnBytes: storage.type === "file" ? parseBytes(storage.diskFreeWarn) : BigInt(0),
+      diskFreeFloorBytes: storage.type === "file" ? parseBytes(storage.diskFreeFloor) : BigInt(0),
+      maxSizeBytes: storage.type === "file" ? parseBytes(storage.maxSize) : BigInt(0),
       replicationFactor: parseInt(storage.replicationFactor, 10) || 1,
       path: storage.type === "jsonl" ? storage.path : "",
     });

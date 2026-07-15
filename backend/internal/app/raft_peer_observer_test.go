@@ -316,13 +316,13 @@ func TestReconcilePeerCachesOnce_SkipsOnSourceError(t *testing.T) {
 // got registered with the right name + cron and a non-empty
 // description (i.e. visible in the operator inspector).
 type fakeScheduler struct {
-	mu               sync.Mutex
-	addJobName       string
-	addJobCron       string
-	addJobTaskFn     any
-	addJobErr        error
-	describeName     string
-	describeMessage  string
+	mu              sync.Mutex
+	addJobName      string
+	addJobCron      string
+	addJobTaskFn    any
+	addJobErr       error
+	describeName    string
+	describeMessage string
 }
 
 func (f *fakeScheduler) AddJob(name, cronExpr string, taskFn any, _ ...any) error {

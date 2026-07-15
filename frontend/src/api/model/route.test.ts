@@ -24,18 +24,16 @@ describe("Route", () => {
     expect(r.displayLabel).toBe(r.id);
   });
 
-  test("recordsMatched / recordsForwarded come from stats when present", () => {
+  test("recordsMatched comes from stats when present", () => {
     const cfg = new RouteConfig({ id: bytes(3) });
-    const stats = new PerRouteStats({ routeId: bytes(3), recordsMatched: 100n, recordsForwarded: 40n });
+    const stats = new PerRouteStats({ routeId: bytes(3), recordsMatched: 100n });
     const r = new Route(cfg, stats);
     expect(r.recordsMatched).toBe(100n);
-    expect(r.recordsForwarded).toBe(40n);
   });
 
-  test("recordsMatched / recordsForwarded are 0 when stats are absent", () => {
+  test("recordsMatched is 0 when stats are absent", () => {
     const cfg = new RouteConfig({ id: bytes(4) });
     const r = new Route(cfg, null);
     expect(r.recordsMatched).toBe(0n);
-    expect(r.recordsForwarded).toBe(0n);
   });
 });

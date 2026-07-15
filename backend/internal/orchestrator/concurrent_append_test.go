@@ -37,7 +37,7 @@ func TestConcurrentAppendAttrIntegrity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	im := indexfile.NewManager(dir, nil, nil)
+	im := indexfile.NewManager(dir, nil, nil, cm)
 
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
 
@@ -254,7 +254,7 @@ func TestImportToInstanceCursorVerified(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	im := indexfile.NewManager(dir, nil, nil)
+	im := indexfile.NewManager(dir, nil, nil, cm)
 
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
 
@@ -492,15 +492,12 @@ func TestDrainConcurrentWithIngestion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srcIM := indexfile.NewManager(srcDir, nil, nil)
+	srcIM := indexfile.NewManager(srcDir, nil, nil, srcCM)
 
-	orchA, err := New(Config{
+	orchA := newTestOrch(t, Config{
 		LocalNodeID:  "node-A",
 		SystemLoader: &transitionSystemLoader{store: store},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	srcInst := &VaultInstance{VaultID: vaultID, Type: "file", Chunks: srcCM, Indexes: srcIM, Query: query.New(srcCM, srcIM, nil)}
 	orchA.RegisterVault(NewVault(vaultID, srcInst))
@@ -513,15 +510,12 @@ func TestDrainConcurrentWithIngestion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dstIM := indexfile.NewManager(dstDir, nil, nil)
+	dstIM := indexfile.NewManager(dstDir, nil, nil, dstCM)
 
-	orchB, err := New(Config{
+	orchB := newTestOrch(t, Config{
 		LocalNodeID:  "node-B",
 		SystemLoader: &transitionSystemLoader{store: store},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	dstInst := &VaultInstance{VaultID: vaultID, Type: "file", Chunks: dstCM, Indexes: dstIM, Query: query.New(dstCM, dstIM, nil)}
 	orchB.RegisterVault(NewVault(vaultID, dstInst))
 
@@ -538,7 +532,7 @@ func TestDrainConcurrentWithIngestion(t *testing.T) {
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range 500 {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		if _, _, err := orchA.Append(vaultID, chunk.Record{
+		if err := orchA.AppendToVault(vaultID, chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts, WriteTS: ts, Raw: fmt.Appendf(nil, "pre-drain-%d", i),
 		}); err != nil {
 			t.Fatalf("pre-drain append %d: %v", i, err)

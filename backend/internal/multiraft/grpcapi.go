@@ -2,12 +2,11 @@ package multiraft
 
 import (
 	"io"
+	"sync"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 
 	"github.com/hashicorp/raft"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 // grpcAPI handles incoming Raft RPCs and dispatches them to the correct
@@ -19,50 +18,7 @@ type grpcAPI[K comparable] struct {
 // handleRPC dispatches a decoded Raft command to the correct group.
 // groupID arrives as []byte from the proto wire format; decoded to K for lookup.
 func (g *grpcAPI[K]) handleRPC(groupID []byte, command any, data io.Reader) (any, error) {
-	gs := g.transport.getGroup(g.transport.decodeKey(groupID))
-	if gs == nil {
-		return nil, status.Errorf(codes.NotFound, "raft group %x not registered", groupID)
-	}
-
-	ch := make(chan raft.RPCResponse, 1)
-	rpc := raft.RPC{
-		Command:  command,
-		RespChan: ch,
-		Reader:   data,
-	}
-
-	dispatched := false
-	if req, ok := command.(*raft.AppendEntriesRequest); ok && isHeartbeat(req) {
-		gs.heartbeatFuncMtx.Lock()
-		fn := gs.heartbeatFunc
-		gs.heartbeatFuncMtx.Unlock()
-		if fn != nil {
-			fn(rpc)
-			dispatched = true
-		}
-	}
-
-	if !dispatched {
-		select {
-		case gs.rpcChan <- rpc:
-		case <-gs.doneCh:
-			return nil, status.Error(codes.Unavailable, "raft group removed")
-		case <-g.transport.shutdownCh:
-			return nil, raft.ErrTransportShutdown
-		}
-	}
-
-	select {
-	case resp := <-ch:
-		if resp.Error != nil {
-			return nil, resp.Error
-		}
-		return resp.Response, nil
-	case <-gs.doneCh:
-		return nil, status.Error(codes.Unavailable, "raft group removed")
-	case <-g.transport.shutdownCh:
-		return nil, raft.ErrTransportShutdown
-	}
+	return g.transport.dispatchRPC(g.transport.decodeKey(groupID), command, data)
 }
 
 // ---------- Unary handlers ----------
@@ -100,17 +56,22 @@ func (g *grpcAPI[K]) timeoutNow(req *gastrologv1.MultiRaftTimeoutNowRequest) (*g
 }
 
 func (g *grpcAPI[K]) batchHeartbeat(req *gastrologv1.MultiRaftBatchHeartbeatRequest) (*gastrologv1.MultiRaftBatchHeartbeatResponse, error) {
-	responses := make([]*gastrologv1.MultiRaftAppendEntriesResponse, len(req.GetHeartbeats()))
-	for i, hb := range req.GetHeartbeats() {
-		resp, err := g.appendEntries(hb)
-		if err != nil {
-			// Return an error response for this group but continue with
-			// others — a single dead group shouldn't kill the whole batch.
-			responses[i] = &gastrologv1.MultiRaftAppendEntriesResponse{}
-			continue
-		}
-		responses[i] = resp
+	hbs := req.GetHeartbeats()
+	responses := make([]*gastrologv1.MultiRaftAppendEntriesResponse, len(hbs))
+	var wg sync.WaitGroup
+	for i, hb := range hbs {
+		wg.Add(1)
+		go func(i int, hb *gastrologv1.MultiRaftAppendEntriesRequest) {
+			defer wg.Done()
+			resp, err := g.appendEntries(hb)
+			if err != nil {
+				responses[i] = &gastrologv1.MultiRaftAppendEntriesResponse{}
+				return
+			}
+			responses[i] = resp
+		}(i, hb)
 	}
+	wg.Wait()
 	return &gastrologv1.MultiRaftBatchHeartbeatResponse{Responses: responses}, nil
 }
 

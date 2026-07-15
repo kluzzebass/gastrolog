@@ -17,9 +17,6 @@ var (
 	compPlacement = comp.Root("placement").Desc(
 		"Vault placement reconciler — observes config + cluster topology and assigns vault homes to nodes.")
 
-	compRecordForwarder = comp.Root("record-forwarder").Desc(
-		"Cross-node record forwarder — routes ingested records to the node that owns their target vault.")
-
 	compVaultReplicator = comp.Root("vault-replicator").Desc(
 		"Per-vault chunk replicator — pushes sealed chunks to follower nodes to meet the configured RF.")
 

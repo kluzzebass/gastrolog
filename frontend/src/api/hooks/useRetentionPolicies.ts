@@ -7,7 +7,7 @@ export function usePutRetentionPolicy() {
     async (args: {
       id: string;
       name: string;
-      maxAgeSeconds: bigint;
+      maxAgeNanos: bigint;
       maxBytes: bigint;
       maxChunks: bigint;
     }) => {
@@ -15,7 +15,7 @@ export function usePutRetentionPolicy() {
         config: {
           id: decode(args.id),
           name: args.name,
-          maxAgeSeconds: args.maxAgeSeconds,
+          maxAgeNanos: args.maxAgeNanos,
           maxBytes: args.maxBytes,
           maxChunks: args.maxChunks,
         },

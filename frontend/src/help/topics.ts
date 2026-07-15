@@ -39,7 +39,7 @@ export const helpTopics: HelpTopic[] = [
       { id: 'digester-timestamp', title: 'Timestamp', load: md(() => import('./digester-timestamp.md?raw')) },
     ],
   },
-  { id: 'routing', title: 'Routes & Filtering', load: md(() => import('./routing.md?raw')) },
+  { id: 'routing', title: 'Routes', load: md(() => import('./routing.md?raw')) },
   {
     id: 'storage', title: 'Vaults', load: md(() => import('./storage.md?raw')),
     children: [
@@ -81,6 +81,8 @@ export const helpTopics: HelpTopic[] = [
     id: 'inspector', title: 'Inspector', load: md(() => import('./inspector.md?raw')),
     children: [
       { id: 'inspector-vaults', title: 'Vaults', load: md(() => import('./inspector-vaults.md?raw')) },
+      { id: 'inspector-pipeline-stages', title: 'Pipeline stages', load: md(() => import('./inspector-pipeline-stages.md?raw')) },
+      { id: 'inspector-routes', title: 'Routes', load: md(() => import('./inspector-routes.md?raw')) },
       { id: 'inspector-ingesters', title: 'Ingesters', load: md(() => import('./inspector-ingesters.md?raw')) },
       { id: 'inspector-jobs', title: 'Jobs', load: md(() => import('./inspector-jobs.md?raw')) },
       { id: 'inspector-system', title: 'System', load: md(() => import('./inspector-system.md?raw')) },
