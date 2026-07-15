@@ -465,6 +465,9 @@ func TestCatchupSelectedChunksSkipsDuplicateWhileInFlight(t *testing.T) {
 // replicateSealedChunk delivers the chunks to all follower nodes. Verified
 // via cursor reads AND filesystem directory checks on each follower.
 func TestClusterReplicationSealedChunksArriveOnFollowers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node convergence test")
+	}
 	t.Parallel()
 	h := setupCluster(t, []string{"leader", "f1", "f2", "f3"}, 1, 100)
 
@@ -660,6 +663,9 @@ type recordTimestamps struct {
 // removes the chunk from the follower's chunk manager AND its filesystem
 // directory.
 func TestClusterReplicationDeletePropagation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node convergence test")
+	}
 	t.Parallel()
 	h := setupCluster(t, []string{"leader", "f1", "f2", "f3"}, 1, 100)
 

@@ -60,6 +60,9 @@ func TestRetentionHookFiresRateAlerter(t *testing.T) {
 // goroutine launched by Start actually invokes Evaluate on a fixed
 // cadence and that alerts fire without manual evaluation.
 func TestRateAlertEvaluatorRunsPeriodically(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-second periodic-evaluator test")
+	}
 	t.Parallel()
 
 	fa := &fakeAlerts{}

@@ -52,6 +52,9 @@ import (
 // Vault.ReadinessErr → instance.IsFSMReady path used by search/ingest RPCs
 // in production.
 func TestOrchRel_FreshCluster_VaultReady(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node reliability test")
+	}
 	t.Parallel()
 	h := newOrchRelHarness(t, 3)
 
@@ -68,6 +71,9 @@ func TestOrchRel_FreshCluster_VaultReady(t *testing.T) {
 // CmdCreateChunk/CmdSealChunk replication path end-to-end through real
 // vault-ctl Raft.
 func TestOrchRel_SealedChunk_ReplicatesCrossNode(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node reliability test")
+	}
 	t.Parallel()
 	h := newOrchRelHarness(t, 3)
 
@@ -93,6 +99,9 @@ func TestOrchRel_SealedChunk_ReplicatesCrossNode(t *testing.T) {
 // WAL replay at the orchestrator layer — the vault-ctl FSM manifest must
 // survive a full cluster crash.
 func TestOrchRel_Restart_SealedChunkSurvives(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node reliability test")
+	}
 	t.Parallel()
 	h := newOrchRelHarness(t, 3)
 
@@ -150,6 +159,9 @@ func TestOrchRel_Restart_SealedChunkSurvives(t *testing.T) {
 //   - after unpausing, the paused peer catches up and all nodes' instance
 //     sub-FSMs converge.
 func TestOrchRel_PausedPeer_ClusterStaysHealthy(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node reliability test")
+	}
 	t.Parallel()
 	h := newOrchRelHarness(t, 3)
 
@@ -211,6 +223,9 @@ func TestOrchRel_PausedPeer_ClusterStaysHealthy(t *testing.T) {
 // wiped follower rejoins the cluster with no local state and must be
 // brought up to date via catchup replication + vault-ctl Raft snapshot.
 func TestOrchRel_FollowerWipe_CatchupRebuilds(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node reliability test")
+	}
 	t.Parallel()
 	h := newOrchRelHarness(t, 3)
 
@@ -263,6 +278,9 @@ func TestOrchRel_FollowerWipe_CatchupRebuilds(t *testing.T) {
 // isolation: each vault-ctl Raft group has its own members list and its
 // own replication goroutines.
 func TestOrchRel_TwoVaults_Isolated(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node reliability test")
+	}
 	t.Parallel()
 	h := newOrchRelHarness(t, 3)
 
@@ -320,6 +338,9 @@ func TestOrchRel_TwoVaults_Isolated(t *testing.T) {
 // catches a class of bug where under contention, circuit-breaker
 // misses, or backoff races would appear.
 func TestOrchRel_ConcurrentAppendAndPause(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node reliability test")
+	}
 	t.Parallel()
 	h := newOrchRelHarness(t, 3)
 
@@ -381,6 +402,9 @@ func TestOrchRel_ConcurrentAppendAndPause(t *testing.T) {
 // This models a recovery scenario: a hung node is killed and replaced
 // before the hang is "resolved".
 func TestOrchRel_PausedPeer_Restart_Recovers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node reliability test")
+	}
 	t.Parallel()
 	h := newOrchRelHarness(t, 3)
 
@@ -447,6 +471,9 @@ func TestOrchRel_PausedPeer_Restart_Recovers(t *testing.T) {
 // harness lacks the placement manager, so we focus on the
 // replication-catchup half — the two together cover the closed loop.
 func TestOrchRel_NodeRestartCatchupReplication(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node reliability test")
+	}
 	t.Parallel()
 	h := newOrchRelHarness(t, 3)
 
@@ -578,6 +605,9 @@ func nodeIsVoterInVaultCtl(t *testing.T, h *orchRelHarness, nodeID string) bool 
 // Catches a class of bug where slowness-tolerant code paths assume
 // pause semantics (either fully alive or fully dead).
 func TestOrchRel_SlowPeer_BackoffAbsorbs(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node reliability test")
+	}
 	t.Parallel()
 	h := newOrchRelHarness(t, 3)
 
@@ -625,6 +655,9 @@ func TestOrchRel_SlowPeer_BackoffAbsorbs(t *testing.T) {
 // guarantees this via majority commit before returning from Apply; we
 // just need to make sure our plumbing preserves it.
 func TestOrchRel_LeaderKilledMidAppend_NoLoss(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node reliability test")
+	}
 	t.Parallel()
 	h := newOrchRelHarness(t, 3)
 
@@ -702,6 +735,9 @@ func TestOrchRel_LeaderKilledMidAppend_NoLoss(t *testing.T) {
 //   - no records reported success + later appear lost
 //   - convergence recovers after the pause is released
 func TestOrchRel_IngestionStressWithPause(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node reliability test")
+	}
 	t.Parallel()
 	h := newOrchRelHarness(t, 3)
 
@@ -772,6 +808,9 @@ func TestOrchRel_IngestionStressWithPause(t *testing.T) {
 // be comparable to an unaffected baseline — measurably faster than
 // vault A's which would incur at least one ForwardingTimeout round.
 func TestOrchRel_MultiVault_IsolatedFromPausedPeer(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node reliability test")
+	}
 	t.Parallel()
 	h := newOrchRelHarness(t, 4, withExtraVault([]int{0, 1, 3}))
 

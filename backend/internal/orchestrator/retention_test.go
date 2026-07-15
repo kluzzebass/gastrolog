@@ -588,6 +588,9 @@ func int64Ptr(v int64) *int64 { return &v }
 //   - Retained chunks (3 newest) still readable on leader AND all followers
 //   - Expired chunk directories removed from disk on ALL nodes
 func TestClusterRetentionSweepDeletesOnAllNodes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node convergence test")
+	}
 	if raceEnabled {
 		t.Skip("flaky under -race: same root cause as TestClusterRetentionSweepWithTTLOnAllNodes — manual replicateSealedChunk calls race with fire-and-forget peer forwards under parallel load, producing over-replication (1100 records when 1000 were ingested). Production doesn't hit this path (no synchronous replicateSealedChunk after ingestion).")
 	}
@@ -683,6 +686,9 @@ func TestClusterRetentionSweepDeletesOnAllNodes(t *testing.T) {
 // TestClusterRetentionSweepWithTTLOnAllNodes uses a TTL policy (expire chunks
 // older than 1 minute) with a frozen clock. Verifies cross-node cleanup.
 func TestClusterRetentionSweepWithTTLOnAllNodes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node convergence test")
+	}
 	t.Parallel()
 	h := setupCluster(t, []string{"leader", "f1", "f2", "f3"}, 1, 50)
 
