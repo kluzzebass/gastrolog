@@ -929,6 +929,7 @@ func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	m.mu.Lock()
 	meta = m.lookupMeta(id)
 	cloudBackedNow := meta != nil && meta.cloudBacked
+	sealedNow := meta != nil && meta.sealed
 	m.mu.Unlock()
 	if meta == nil {
 		chunkLock.RUnlock()
@@ -938,6 +939,27 @@ func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 		chunkLock.RUnlock()
 		return m.openCloudCursor(id)
 	}
+
+	// Re-check for data.glcb under the read lock, mirroring the cloudBacked
+	// re-check above — and use the RE-READ sealed flag, not the entry
+	// snapshot: an imported chunk seals (FSM announce) and converts to GLCB
+	// concurrently with readers, and since sealToGLCB started holding the
+	// per-chunk write lock across the GLCB write (gastrolog-66hmx3) a
+	// reader that decided "multi-file, unsealed" before the conversion
+	// queues behind it and can wake AFTER removeLocalDataFiles dropped
+	// raw.log/idx.log — opening files that no longer exist. If the GLCB
+	// appeared while we waited, route to it; it is the canonical sealed
+	// artifact.
+	if sealedNow && m.hasLocalGLCB(id) {
+		chunkLock.RUnlock()
+		if cursor, err := m.openLocalGLCBCursor(id); err == nil {
+			return cursor, nil
+		}
+		// Corrupt or partial data.glcb — fall back to multi-file, which
+		// still exists in that case (removal only follows a good GLCB).
+		chunkLock.RLock()
+	}
+	sealed = sealedNow
 
 	rawPath := m.rawLogPath(id)
 	idxPath := m.idxLogPath(id)
