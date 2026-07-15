@@ -62,8 +62,19 @@ func (v *vaultChunking) recoverOnce(ctx context.Context) error {
 	// (gastrolog-5do8sh gap 7, gastrolog-66hmx3). Best-effort: a failed
 	// sweep must not block the rest of recovery, which is what actually
 	// gets the chunk sealed.
+	//
+	// Under buildMu: RecoverOnce runs on the vault-registration catch-up
+	// goroutine concurrently with the wake-driven worker's build pass, and
+	// an unserialized sweep deletes the ".glcb.tmp.*" a live BuildGLCBFile
+	// is about to rename (observed: "BuildOnce: rename ... no such file or
+	// directory"). With buildMu held no build is mid-staging, so anything
+	// matching the tmp pattern is genuinely orphaned. pruneCorruptGLCBs
+	// shares the lock for the same reason: corruptGLCBs is written from
+	// the build pass under buildMu.
+	v.buildMu.Lock()
 	v.sweepOrphanGLCBBuildTmp()
 	v.pruneCorruptGLCBs()
+	v.buildMu.Unlock()
 	var lastErr error
 	if pending := v.fsm().SealedManifest(); pending != nil {
 		if len(pending.Refs) == 0 && pending.TotalRecords == 0 {

@@ -38,3 +38,14 @@ func IsGLCBBuildTmpName(name string) bool {
 // pattern prefix BuildGLCBFile uses, so contract tests can drive the real
 // writer call instead of retyping the literal.
 const GLCBBuildTmpPrefix = glcbBuildTmpPrefix
+
+// LockBuildForTest takes the vault's buildMu, standing in for an in-flight
+// build pass, so tests can assert that recovery's orphan sweep serializes
+// with builds instead of deleting a live BuildGLCBFile staging file.
+func (m *Manager) LockBuildForTest(vaultID glid.GLID) (unlock func()) {
+	m.mu.Lock()
+	v := m.vaults[vaultID]
+	m.mu.Unlock()
+	v.buildMu.Lock()
+	return v.buildMu.Unlock
+}

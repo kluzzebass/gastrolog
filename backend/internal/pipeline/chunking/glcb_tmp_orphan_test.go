@@ -92,3 +92,51 @@ func TestIsGLCBBuildTmpName_MatchesRealBuildGLCBFileOutput(t *testing.T) {
 		t.Fatalf("IsGLCBBuildTmpName(%q) = true, want false (this is the final sealed artifact, not a temp file)", glcb.BlobFilename)
 	}
 }
+
+// TestRecoverOnceSweepSerializesWithInFlightBuild pins the fix for the
+// regression the gastrolog-66hmx3 sweep introduced: RecoverOnce runs on the
+// vault-registration catch-up goroutine concurrently with the wake-driven
+// worker's build pass, and an unserialized sweepOrphanGLCBBuildTmp deleted
+// the ".glcb.tmp.*" a live BuildGLCBFile was about to rename ("BuildOnce:
+// rename ... no such file or directory"). The sweep now runs under buildMu.
+//
+// The mid-flight assertion is deterministic with the fix in place: while
+// this test holds buildMu, the sweep cannot have run, so the staged file
+// must still exist no matter how the goroutines interleave. Only a
+// regression (sweep outside buildMu) can make it fail.
+func TestRecoverOnceSweepSerializesWithInFlightBuild(t *testing.T) {
+	t.Parallel()
+	fx := setupSealingChunkWithBuiltGLCB(t)
+
+	// A "live" staging file, as if BuildGLCBFile is between CreateTemp and
+	// its rename right now.
+	stagedPath := filepath.Join(filepath.Dir(fx.glcbPath), chunking.GLCBBuildTmpPrefix+"999999")
+	if err := os.WriteFile(stagedPath, []byte("in-flight GLCB build staging"), 0o600); err != nil {
+		t.Fatalf("plant staged temp file: %v", err)
+	}
+
+	mgr := registerFixtureVault(t, fx, nil)
+
+	// Stand in for the in-flight build pass.
+	unlock := mgr.LockBuildForTest(fx.vaultID)
+
+	done := make(chan error, 1)
+	go func() { done <- mgr.RecoverOnce(context.Background(), fx.vaultID) }()
+
+	// While the "build" holds buildMu the sweep must not have removed the
+	// staged file.
+	if _, err := os.Stat(stagedPath); err != nil {
+		unlock()
+		t.Fatalf("staged file removed while build in flight: %v", err)
+	}
+
+	unlock()
+	if err := <-done; err != nil {
+		t.Fatalf("RecoverOnce after build released: %v", err)
+	}
+
+	// With no build in flight the same file IS an orphan and gets swept.
+	if _, err := os.Stat(stagedPath); !os.IsNotExist(err) {
+		t.Fatalf("orphan should be swept once the build released, stat err = %v", err)
+	}
+}
