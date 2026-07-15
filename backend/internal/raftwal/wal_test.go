@@ -184,6 +184,9 @@ func TestMultipleGroupsIsolated(t *testing.T) {
 }
 
 func TestConcurrentGroups(t *testing.T) {
+	if testing.Short() {
+		t.Skip("concurrency stress across 10 groups x 100 logs; -short skips")
+	}
 	t.Parallel()
 	dir := t.TempDir()
 	w, err := Open(dir)
@@ -316,6 +319,9 @@ func TestCrashRecoveryBadCRC(t *testing.T) {
 }
 
 func TestConcurrentStoreLogsStress(t *testing.T) {
+	if testing.Short() {
+		t.Skip("concurrency stress across 20 groups x 500 logs; -short skips")
+	}
 	t.Parallel()
 	dir := t.TempDir()
 	w, err := Open(dir)
@@ -903,6 +909,9 @@ func TestGroupStoreGetLogDoesNotReturnInternalReference(t *testing.T) {
 // --- Segment rotation ---
 
 func TestSegmentRotation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("writes ~70MB (1100x64KB) to trigger segment rotation; -short skips")
+	}
 	t.Parallel()
 	dir := t.TempDir()
 	w, err := Open(dir)
@@ -945,6 +954,9 @@ func TestSegmentRotation(t *testing.T) {
 // --- Multiple reopen cycles ---
 
 func TestMultipleReopenCycles(t *testing.T) {
+	if testing.Short() {
+		t.Skip("5 open/close restart-survival cycles; -short skips")
+	}
 	t.Parallel()
 	dir := t.TempDir()
 
@@ -1034,6 +1046,9 @@ func TestReadsNotBlockedDuringFsync(t *testing.T) {
 }
 
 func TestConcurrentReadWrite(t *testing.T) {
+	if testing.Short() {
+		t.Skip("sustained concurrent reader/writer/stable-writer stress window; -short skips")
+	}
 	t.Parallel()
 	dir := t.TempDir()
 	w, err := Open(dir)

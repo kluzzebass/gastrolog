@@ -98,18 +98,82 @@ func TestSealProgressClaimOnBuiltFiresOnce(t *testing.T) {
 func TestSealProgressClaimPostSealRequiresBuild(t *testing.T) {
 	var p sealProgress
 	key := testSealKey(1)
-	if p.claimPostSeal(key) {
-		t.Fatal("post-seal claimed before markBuilt")
+	if claimed, done := p.claimPostSeal(key); claimed || done != nil {
+		t.Fatal("post-seal claimed (or waitable) before markBuilt")
 	}
 	p.markBuilt(key, BuildResult{})
-	if !p.claimPostSeal(key) {
+	if claimed, _ := p.claimPostSeal(key); !claimed {
 		t.Fatal("first claimPostSeal after build lost")
 	}
-	if p.claimPostSeal(key) {
+	if claimed, _ := p.claimPostSeal(key); claimed {
 		t.Fatal("second claimPostSeal won")
 	}
 	if !p.postSealDone(key) {
 		t.Fatal("postSealDone false after claim")
+	}
+}
+
+// TestSealProgressClaimPostSealWaitsForCompletion pins the gastrolog-4cxvdi
+// contract: a refused claim hands back the claimant's done channel, which
+// stays open until finishPostSeal — a loser that returns on refusal alone
+// races the claimant's in-flight purge.
+func TestSealProgressClaimPostSealWaitsForCompletion(t *testing.T) {
+	var p sealProgress
+	key := testSealKey(1)
+	p.markBuilt(key, BuildResult{})
+	claimed, _ := p.claimPostSeal(key)
+	if !claimed {
+		t.Fatal("setup: claim lost")
+	}
+	refused, done := p.claimPostSeal(key)
+	if refused {
+		t.Fatal("second claimPostSeal won")
+	}
+	if done == nil {
+		t.Fatal("refused claim returned no done channel to wait on")
+	}
+	select {
+	case <-done:
+		t.Fatal("done channel closed before finishPostSeal — waiters would return mid-purge")
+	default:
+	}
+	p.finishPostSeal(key)
+	select {
+	case <-done:
+	default:
+		t.Fatal("finishPostSeal did not release waiters")
+	}
+	// Refusals after completion return an already-closed channel: waiting is
+	// a no-op, never a hang.
+	if _, done := p.claimPostSeal(key); done == nil {
+		t.Fatal("post-completion refusal returned nil done channel")
+	} else {
+		<-done
+	}
+}
+
+// TestSealProgressNewCycleClaimReleasesStaleWaiters: a claim for the next
+// build cycle must not strand goroutines still waiting on a superseded
+// cycle's done channel.
+func TestSealProgressNewCycleClaimReleasesStaleWaiters(t *testing.T) {
+	var p sealProgress
+	key1, key2 := testSealKey(1), testSealKey(2)
+	p.markBuilt(key1, BuildResult{})
+	if claimed, _ := p.claimPostSeal(key1); !claimed {
+		t.Fatal("setup: cycle-1 claim lost")
+	}
+	_, stale := p.claimPostSeal(key1)
+	if stale == nil {
+		t.Fatal("setup: no cycle-1 done channel")
+	}
+	p.markBuilt(key2, BuildResult{})
+	if claimed, _ := p.claimPostSeal(key2); !claimed {
+		t.Fatal("cycle-2 claim lost")
+	}
+	select {
+	case <-stale:
+	default:
+		t.Fatal("cycle-2 claim left cycle-1 waiters hanging")
 	}
 }
 

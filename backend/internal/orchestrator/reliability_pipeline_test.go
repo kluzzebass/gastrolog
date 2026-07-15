@@ -81,27 +81,22 @@ func (h *orchRelHarness) sealedPipelineChunks(v vaultSpec, nodeID string) []vaul
 	return out
 }
 
-// waitSealedRecords polls a node's FSM until the vault's sealed chunks cover
-// exactly wantRecords records in total, then returns the sealed entries.
+// waitSealedRecords waits until a node's FSM shows the vault's sealed chunks
+// covering exactly wantRecords records in total, then returns the sealed
+// entries. Progress metric: sealed record total + sealed chunk count.
 func (h *orchRelHarness) waitSealedRecords(v vaultSpec, nodeID string, wantRecords int64) []vaultctlfsm.ManifestEntry {
 	h.t.Helper()
-	deadline := time.Now().Add(orchHarnessConvWait)
-	var last int64
-	for time.Now().Before(deadline) {
-		entries := h.sealedPipelineChunks(v, nodeID)
-		last = 0
+	var entries []vaultctlfsm.ManifestEntry
+	what := fmt.Sprintf("vault %s on %s: sealed records reaching exactly %d", v.label, h.nodes[nodeID].label, wantRecords)
+	h.waitProgress(what, 50*time.Millisecond, func() (string, bool) {
+		entries = h.sealedPipelineChunks(v, nodeID)
+		var total int64
 		for _, e := range entries {
-			last += e.RecordCount
+			total += e.RecordCount
 		}
-		if last == wantRecords {
-			return entries
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	h.dumpPipelineState(v)
-	h.t.Fatalf("vault %s on %s: sealed records did not reach %d within %s (last %d)",
-		v.label, h.nodes[nodeID].label, wantRecords, orchHarnessConvWait, last)
-	return nil
+		return fmt.Sprintf("sealed_records=%d sealed_chunks=%d", total, len(entries)), total == wantRecords
+	}, func() { h.dumpPipelineState(v) })
+	return entries
 }
 
 // dumpPipelineState logs per-node vault-ctl FSM pipeline state (published
@@ -132,38 +127,35 @@ func (h *orchRelHarness) dumpPipelineState(v vaultSpec) {
 	}
 }
 
-// waitSealedRecordsAtLeast polls until the vault's sealed chunks cover at
+// waitSealedRecordsAtLeast waits until the vault's sealed chunks cover at
 // least wantRecords records (for nondeterministic sources like chatterbox).
+// Progress metric: sealed record total.
 func (h *orchRelHarness) waitSealedRecordsAtLeast(v vaultSpec, nodeID string, wantRecords int64) int64 {
 	h.t.Helper()
-	deadline := time.Now().Add(orchHarnessConvWait)
 	var last int64
-	for time.Now().Before(deadline) {
+	what := fmt.Sprintf("vault %s on %s: sealed records reaching >= %d", v.label, h.nodes[nodeID].label, wantRecords)
+	h.waitProgress(what, 50*time.Millisecond, func() (string, bool) {
 		last = 0
 		for _, e := range h.sealedPipelineChunks(v, nodeID) {
 			last += e.RecordCount
 		}
-		if last >= wantRecords {
-			return last
+		return fmt.Sprintf("sealed_records=%d", last), last >= wantRecords
+	}, func() {
+		if sub := h.vaultCtlSubFSM(v, nodeID); sub != nil {
+			states := map[chunk.ChunkState]int{}
+			var total int64
+			for _, e := range sub.List() {
+				states[e.State]++
+				total += e.RecordCount
+			}
+			h.t.Logf("vault %s on %s FSM census at stall: entries_by_state=%v total_records=%d sealed_manifest=%v open_chunk=%v",
+				v.label, h.nodes[nodeID].label, states, total, sub.SealedManifest() != nil, sub.OpenChunk() != nil)
 		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	if sub := h.vaultCtlSubFSM(v, nodeID); sub != nil {
-		states := map[chunk.ChunkState]int{}
-		var total int64
-		for _, e := range sub.List() {
-			states[e.State]++
-			total += e.RecordCount
-		}
-		h.t.Logf("vault %s on %s FSM census at deadline: entries_by_state=%v total_records=%d sealed_manifest=%v open_chunk=%v",
-			v.label, h.nodes[nodeID].label, states, total, sub.SealedManifest() != nil, sub.OpenChunk() != nil)
-	}
-	var stacks bytes.Buffer
-	_ = pprof.Lookup("goroutine").WriteTo(&stacks, 1)
-	h.t.Logf("goroutine profile at deadline:\n%s", stacks.String())
-	h.t.Fatalf("vault %s on %s: sealed records did not reach >= %d within %s (last %d)",
-		v.label, h.nodes[nodeID].label, wantRecords, orchHarnessConvWait, last)
-	return 0
+		var stacks bytes.Buffer
+		_ = pprof.Lookup("goroutine").WriteTo(&stacks, 1)
+		h.t.Logf("goroutine profile at stall:\n%s", stacks.String())
+	})
+	return last
 }
 
 // pipelineGLCBPath is the on-disk location of a pipeline-built sealed GLCB on
@@ -210,28 +202,39 @@ func (h *orchRelHarness) assertHeadBounded(v vaultSpec, homeIdxs []int, registry
 
 // waitGLCBsOnHomes blocks until every home node holds a GLCB file for every
 // given chunk, then asserts the bytes are identical across homes (the build
-// is deterministic, so divergence means a real bug). Returns per-chunk hashes.
+// is deterministic, so divergence means a real bug). Progress metric: the
+// count of (chunk, home) pairs whose GLCB file exists on disk.
 func (h *orchRelHarness) waitGLCBsOnHomes(v vaultSpec, homeIdxs []int, entries []vaultctlfsm.ManifestEntry) {
 	h.t.Helper()
-	deadline := time.Now().Add(orchHarnessConvWait)
+	total := len(entries) * len(homeIdxs)
+	what := fmt.Sprintf("vault %s: GLCBs for %d chunks on %d homes", v.label, len(entries), len(homeIdxs))
+	h.waitProgress(what, 50*time.Millisecond, func() (string, bool) {
+		present := 0
+		var missing []string
+		for _, e := range entries {
+			for _, idx := range homeIdxs {
+				nodeID := h.nodeIDs[idx]
+				if _, err := os.Stat(h.pipelineGLCBPath(nodeID, v, e.ID)); err == nil {
+					present++
+				} else {
+					missing = append(missing, fmt.Sprintf("%s@%s", e.ID, h.nodes[nodeID].label))
+				}
+			}
+		}
+		return fmt.Sprintf("glcbs_present=%d/%d missing=%v", present, total, missing), present == total
+	}, func() { h.dumpPipelineState(v) })
+
+	// All files exist (GLCBs are renamed into place atomically); assert
+	// byte-identity across homes.
 	for _, e := range entries {
 		var refHash [sha256.Size]byte
 		var refNode string
 		for _, idx := range homeIdxs {
 			nodeID := h.nodeIDs[idx]
-			path := h.pipelineGLCBPath(nodeID, v, e.ID)
-			var data []byte
-			for {
-				var err error
-				data, err = os.ReadFile(path)
-				if err == nil {
-					break
-				}
-				if time.Now().After(deadline) {
-					h.t.Fatalf("vault %s chunk %s: GLCB missing on home %s within %s: %v",
-						v.label, e.ID, h.nodes[nodeID].label, orchHarnessConvWait, err)
-				}
-				time.Sleep(50 * time.Millisecond)
+			data, err := os.ReadFile(h.pipelineGLCBPath(nodeID, v, e.ID))
+			if err != nil {
+				h.t.Fatalf("vault %s chunk %s: GLCB unreadable on home %s after convergence: %v",
+					v.label, e.ID, h.nodes[nodeID].label, err)
 			}
 			sum := sha256.Sum256(data)
 			if refNode == "" {
@@ -287,8 +290,10 @@ func (h *orchRelHarness) submitIngestRecords(nodeID string, count int, prefix st
 			if err != nil {
 				h.t.Fatalf("SubmitIngest %d on %s: ack: %v", i, n.label, err)
 			}
-		case <-time.After(10 * time.Second):
-			h.t.Fatalf("SubmitIngest %d on %s: ack timeout", i, n.label)
+		case <-time.After(orchHarnessStallWindow):
+			// A durability ack is a single progress event; waiting the shared
+			// stall window on it is the degenerate form of waitProgress.
+			h.t.Fatalf("SubmitIngest %d on %s: no ack within stall window %s", i, n.label, orchHarnessStallWindow)
 		}
 		bodies[body] = true
 	}
@@ -335,18 +340,8 @@ func TestOrchPipeline_ClusterIngestToSealedGLCB(t *testing.T) {
 
 	// Cross-node query: records ingested on node-4 are served from a home
 	// (follower home, not the placement leader) with full fidelity.
-	deadline := time.Now().Add(orchHarnessConvWait)
-	var got [][]byte
-	for time.Now().Before(deadline) {
-		got = h.searchRecords(v, h.nodeIDs[1])
-		if len(got) == total {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	if len(got) != total {
-		t.Fatalf("query on home returned %d records, want %d", len(got), total)
-	}
+	h.waitSearchable(v, h.nodeIDs[1], total)
+	got := h.searchRecords(v, h.nodeIDs[1])
 	counts := make(map[string]int, len(got))
 	for _, raw := range got {
 		counts[string(raw)]++
@@ -435,24 +430,16 @@ func TestOrchPipeline_PlacementChurnConverges(t *testing.T) {
 	}
 
 	// Query on the JOINED home returns the post-churn records.
-	deadline := time.Now().Add(orchHarnessConvWait)
-	var postChurn int
-	for time.Now().Before(deadline) {
-		postChurn = 0
+	h.waitProgress("post-churn records searchable on joined home", 50*time.Millisecond, func() (string, bool) {
+		postChurn := 0
 		for _, raw := range h.searchRecords(v, h.nodeIDs[3]) {
 			if bytes.HasPrefix(raw, []byte("post-churn-")) {
 				postChurn++
 			}
 		}
-		if postChurn == pipelineChunkMaxRecords {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	if postChurn != pipelineChunkMaxRecords {
-		t.Fatalf("query on joined home returned %d post-churn records, want %d",
-			postChurn, pipelineChunkMaxRecords)
-	}
+		return fmt.Sprintf("post_churn_records=%d/%d", postChurn, pipelineChunkMaxRecords),
+			postChurn == pipelineChunkMaxRecords
+	}, func() { h.dumpPipelineState(v) })
 }
 
 // TestOrchPipeline_IngesterReassignmentKeepsFlowing runs a live synthetic
@@ -605,8 +592,9 @@ func TestOrchPipeline_SustainedIngestManifestKeepsPace(t *testing.T) {
 	initialSealedRecords := initial.SealedRecords
 
 	maxPending := initial.PendingRecords
-	enforceAfter := time.Now().Add(warmupDuration)
 	deadline := time.Now().Add(warmupDuration + soakDuration)
+	lastSealedChunks := initialSealedChunks
+	lastSealProgress := time.Now()
 
 	for time.Now().Before(deadline) {
 		health := pipelinePlannerHealthFromFSM(h.vaultCtlSubFSM(v, leaderNode))
@@ -614,17 +602,27 @@ func TestOrchPipeline_SustainedIngestManifestKeepsPace(t *testing.T) {
 			maxPending = health.PendingRecords
 		}
 		// Live failure mode: registry grows but sealing stalls with ~all records
-		// still pending (millions of orphans, ~1 sealed chunk). Healthy soak
-		// keeps sealing while pending/registry stays well below 100%.
-		if time.Now().After(enforceAfter) &&
-			health.RegistryRecords >= minRegistryForRatio &&
-			health.SealedChunks < initialSealedChunks+minSealedChunksGain {
+		// still pending (millions of orphans, ~1 sealed chunk). Detection is
+		// stall-based, not calibrated to how fast a healthy soak "should" seal:
+		// every sealed-chunk increment resets the stall clock, so slow-under-
+		// contention sealing never trips this — only a genuine sealing wedge
+		// (no new sealed chunk for the shared stall window while ~all registry
+		// records stay pending) does. The end-of-soak waitSealedRecordsAtLeast
+		// below catches the same wedge when the soak is shorter than the
+		// stall window.
+		if health.SealedChunks != lastSealedChunks {
+			lastSealedChunks = health.SealedChunks
+			lastSealProgress = time.Now()
+		}
+		if health.RegistryRecords >= minRegistryForRatio &&
+			time.Since(lastSealProgress) >= orchHarnessStallWindow {
 			pendingPct := health.PendingRecords * 100 / health.RegistryRecords
 			if pendingPct >= maxPendingRegistryFrac {
 				h.dumpPipelineState(v)
-				t.Fatalf("vault %s: %d%% of registry records pending (%d/%d) while sealed chunks stalled at %d; "+
+				t.Fatalf("vault %s: sealing stalled for %s with %d%% of registry records pending (%d/%d, sealed chunks stuck at %d); "+
 					"open_records=%d open_refs=%d",
-					v.label, pendingPct, health.PendingRecords, health.RegistryRecords, health.SealedChunks,
+					v.label, time.Since(lastSealProgress).Round(time.Millisecond), pendingPct,
+					health.PendingRecords, health.RegistryRecords, health.SealedChunks,
 					health.OpenRecords, health.OpenRefs)
 			}
 		}

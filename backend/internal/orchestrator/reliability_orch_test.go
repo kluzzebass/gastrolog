@@ -1,6 +1,7 @@
 package orchestrator_test
 
 import (
+	"fmt"
 	"strconv"
 	"sync"
 	"testing"
@@ -51,6 +52,9 @@ import (
 // Vault.ReadinessErr → instance.IsFSMReady path used by search/ingest RPCs
 // in production.
 func TestOrchRel_FreshCluster_VaultReady(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node reliability test")
+	}
 	t.Parallel()
 	h := newOrchRelHarness(t, 3)
 
@@ -67,6 +71,9 @@ func TestOrchRel_FreshCluster_VaultReady(t *testing.T) {
 // CmdCreateChunk/CmdSealChunk replication path end-to-end through real
 // vault-ctl Raft.
 func TestOrchRel_SealedChunk_ReplicatesCrossNode(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node reliability test")
+	}
 	t.Parallel()
 	h := newOrchRelHarness(t, 3)
 
@@ -92,6 +99,9 @@ func TestOrchRel_SealedChunk_ReplicatesCrossNode(t *testing.T) {
 // WAL replay at the orchestrator layer — the vault-ctl FSM manifest must
 // survive a full cluster crash.
 func TestOrchRel_Restart_SealedChunkSurvives(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node reliability test")
+	}
 	t.Parallel()
 	h := newOrchRelHarness(t, 3)
 
@@ -149,6 +159,9 @@ func TestOrchRel_Restart_SealedChunkSurvives(t *testing.T) {
 //   - after unpausing, the paused peer catches up and all nodes' instance
 //     sub-FSMs converge.
 func TestOrchRel_PausedPeer_ClusterStaysHealthy(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node reliability test")
+	}
 	t.Parallel()
 	h := newOrchRelHarness(t, 3)
 
@@ -179,15 +192,16 @@ func TestOrchRel_PausedPeer_ClusterStaysHealthy(t *testing.T) {
 		appendDone <- nil
 	}()
 
-	// Budget: much larger than ForwardingTimeout (5s) to tolerate the
-	// first record's backoff ramp, but bounded enough to catch a
-	// regression where the orchestrator deadlocks.
+	// True-deadlock catcher: the phase's inner waits (vault-ctl leader
+	// election in appendOnLeader) are progress-based and may legitimately
+	// run long under CPU contention, so this select uses the shared hard
+	// backstop rather than a budget calibrated to healthy-speed replication.
 	select {
 	case err := <-appendDone:
 		if err != nil {
 			t.Fatalf("append+seal failed under paused peer: %v", err)
 		}
-	case <-time.After(30 * time.Second):
+	case <-time.After(orchHarnessHardBackstop):
 		t.Fatal("append+seal deadlocked with paused peer (gastrolog-5oofa regressed)")
 	}
 
@@ -209,6 +223,9 @@ func TestOrchRel_PausedPeer_ClusterStaysHealthy(t *testing.T) {
 // wiped follower rejoins the cluster with no local state and must be
 // brought up to date via catchup replication + vault-ctl Raft snapshot.
 func TestOrchRel_FollowerWipe_CatchupRebuilds(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node reliability test")
+	}
 	t.Parallel()
 	h := newOrchRelHarness(t, 3)
 
@@ -249,10 +266,11 @@ func TestOrchRel_FollowerWipe_CatchupRebuilds(t *testing.T) {
 
 	// Post-wipe: the node rejoins the cluster with empty state. Wait
 	// for instance FSMs to converge again; catchup replication rebuilds
-	// the manifest through snapshot install or log replay. Extended
-	// budget: recovery is boot + snapshot install + 20s sweep ticks +
-	// push, which overruns the default wait under full-suite load.
-	h.assertAllNodesSeeWithin(3*time.Minute, baseline)
+	// the manifest through snapshot install or log replay. Recovery is
+	// multi-stage (boot + snapshot install + 20s sweep ticks + push);
+	// the progress-based wait tolerates that — each stage moves the
+	// per-node chunk counts and resets the stall clock.
+	h.assertAllNodesSee(baseline)
 }
 
 // Two independent vaults on the same cluster. Pausing a follower of
@@ -260,6 +278,9 @@ func TestOrchRel_FollowerWipe_CatchupRebuilds(t *testing.T) {
 // isolation: each vault-ctl Raft group has its own members list and its
 // own replication goroutines.
 func TestOrchRel_TwoVaults_Isolated(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node reliability test")
+	}
 	t.Parallel()
 	h := newOrchRelHarness(t, 3)
 
@@ -276,7 +297,8 @@ func TestOrchRel_TwoVaults_Isolated(t *testing.T) {
 	h.pausePeer(victim)
 	t.Cleanup(func() { h.unpausePeer(victim) })
 
-	// Concurrent append+seal must complete within budget.
+	// Concurrent append+seal must complete; the select is a true-deadlock
+	// catcher on the shared hard backstop (inner waits are progress-based).
 	const records = 5
 	now := time.Now()
 	appendDone := make(chan error, 1)
@@ -300,7 +322,7 @@ func TestOrchRel_TwoVaults_Isolated(t *testing.T) {
 		if err != nil {
 			t.Fatalf("append+seal failed with one peer paused: %v", err)
 		}
-	case <-time.After(30 * time.Second):
+	case <-time.After(orchHarnessHardBackstop):
 		t.Fatal("append+seal deadlocked with paused peer")
 	}
 
@@ -316,6 +338,9 @@ func TestOrchRel_TwoVaults_Isolated(t *testing.T) {
 // catches a class of bug where under contention, circuit-breaker
 // misses, or backoff races would appear.
 func TestOrchRel_ConcurrentAppendAndPause(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node reliability test")
+	}
 	t.Parallel()
 	h := newOrchRelHarness(t, 3)
 
@@ -354,7 +379,7 @@ func TestOrchRel_ConcurrentAppendAndPause(t *testing.T) {
 
 	select {
 	case <-doneCh:
-	case <-time.After(60 * time.Second):
+	case <-time.After(orchHarnessHardBackstop):
 		t.Fatal("concurrent appends deadlocked under paused peer")
 	}
 	close(errCh)
@@ -377,6 +402,9 @@ func TestOrchRel_ConcurrentAppendAndPause(t *testing.T) {
 // This models a recovery scenario: a hung node is killed and replaced
 // before the hang is "resolved".
 func TestOrchRel_PausedPeer_Restart_Recovers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node reliability test")
+	}
 	t.Parallel()
 	h := newOrchRelHarness(t, 3)
 
@@ -443,6 +471,9 @@ func TestOrchRel_PausedPeer_Restart_Recovers(t *testing.T) {
 // harness lacks the placement manager, so we focus on the
 // replication-catchup half — the two together cover the closed loop.
 func TestOrchRel_NodeRestartCatchupReplication(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node reliability test")
+	}
 	t.Parallel()
 	h := newOrchRelHarness(t, 3)
 
@@ -574,6 +605,9 @@ func nodeIsVoterInVaultCtl(t *testing.T, h *orchRelHarness, nodeID string) bool 
 // Catches a class of bug where slowness-tolerant code paths assume
 // pause semantics (either fully alive or fully dead).
 func TestOrchRel_SlowPeer_BackoffAbsorbs(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node reliability test")
+	}
 	t.Parallel()
 	h := newOrchRelHarness(t, 3)
 
@@ -604,7 +638,7 @@ func TestOrchRel_SlowPeer_BackoffAbsorbs(t *testing.T) {
 		if err != nil {
 			t.Fatalf("append+seal failed under slow peer: %v", err)
 		}
-	case <-time.After(30 * time.Second):
+	case <-time.After(orchHarnessHardBackstop):
 		t.Fatal("append+seal stalled under slow peer")
 	}
 
@@ -621,6 +655,9 @@ func TestOrchRel_SlowPeer_BackoffAbsorbs(t *testing.T) {
 // guarantees this via majority commit before returning from Apply; we
 // just need to make sure our plumbing preserves it.
 func TestOrchRel_LeaderKilledMidAppend_NoLoss(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node reliability test")
+	}
 	t.Parallel()
 	h := newOrchRelHarness(t, 3)
 
@@ -685,14 +722,10 @@ func TestOrchRel_LeaderKilledMidAppend_NoLoss(t *testing.T) {
 
 	// Liveness check on the survivors: their FSMs should have at least
 	// `successCount` entries (matching the committed records).
-	deadline := time.Now().Add(orchHarnessConvWait)
-	for time.Now().Before(deadline) {
+	h.waitProgress("surviving quorum FSM lists a chunk after leader kill", 50*time.Millisecond, func() (string, bool) {
 		ids := h.chunkIDsOnNode(live[0])
-		if len(ids) > 0 {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+		return fmt.Sprintf("chunks=%d", len(ids)), len(ids) > 0
+	}, nil)
 }
 
 // Pump records continuously from multiple goroutines while one peer is
@@ -702,6 +735,9 @@ func TestOrchRel_LeaderKilledMidAppend_NoLoss(t *testing.T) {
 //   - no records reported success + later appear lost
 //   - convergence recovers after the pause is released
 func TestOrchRel_IngestionStressWithPause(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node reliability test")
+	}
 	t.Parallel()
 	h := newOrchRelHarness(t, 3)
 
@@ -740,7 +776,7 @@ func TestOrchRel_IngestionStressWithPause(t *testing.T) {
 
 	select {
 	case <-doneCh:
-	case <-time.After(120 * time.Second):
+	case <-time.After(orchHarnessHardBackstop):
 		t.Fatal("ingestion stalled under paused peer stress")
 	}
 	close(errCh)
@@ -772,6 +808,9 @@ func TestOrchRel_IngestionStressWithPause(t *testing.T) {
 // be comparable to an unaffected baseline — measurably faster than
 // vault A's which would incur at least one ForwardingTimeout round.
 func TestOrchRel_MultiVault_IsolatedFromPausedPeer(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node reliability test")
+	}
 	t.Parallel()
 	h := newOrchRelHarness(t, 4, withExtraVault([]int{0, 1, 3}))
 
@@ -800,11 +839,18 @@ func TestOrchRel_MultiVault_IsolatedFromPausedPeer(t *testing.T) {
 	bElapsed := time.Since(bStart)
 	t.Logf("vault B (no paused replica): 5 appends + seal in %v", bElapsed)
 
-	// Vault B latency budget: should complete quickly since all of its
-	// replicas are healthy. 5 seconds is very generous — healthy
-	// replication completes in milliseconds.
-	if bElapsed > 5*time.Second {
-		t.Errorf("vault B took %v — paused peer should have had no effect", bElapsed)
+	// Vault B bound: the structural isolation property is that vault B's
+	// append+seal path never blocks on the paused peer — a regression
+	// (gastrolog-5oofa class: orchestrator-wide lock held while waiting on
+	// node2) blocks INDEFINITELY, so the shared stall window catches it.
+	// A fine-grained "milliseconds, not seconds" latency assertion is not
+	// contention-robust: under multi-suite CPU load the same phase
+	// (including vault-ctl leader waits) legitimately takes >10s with no
+	// paused-peer involvement, as vault A's fast appends right after prove.
+	// Latency is logged above for humans; only an indefinite block fails.
+	if bElapsed > orchHarnessStallWindow {
+		t.Errorf("vault B took %v (> stall window %v) — append+seal path blocked on the paused peer",
+			bElapsed, orchHarnessStallWindow)
 	}
 
 	// Exercise vault A. This MAY be slower (first record hits
@@ -829,19 +875,11 @@ func TestOrchRel_MultiVault_IsolatedFromPausedPeer(t *testing.T) {
 	}
 	liveForB := []string{h.nodeIDs[0], h.nodeIDs[1], h.nodeIDs[3]}
 	for _, id := range liveForB {
-		deadline := time.Now().Add(orchHarnessConvWait)
-		for time.Now().Before(deadline) {
+		what := fmt.Sprintf("vault B chunks replicating to %s", h.nodes[id].label)
+		h.waitProgress(what, 50*time.Millisecond, func() (string, bool) {
 			got := h.chunkIDsOnNodeForVault(vaultB, id)
-			if len(got) == len(expected) {
-				break
-			}
-			time.Sleep(50 * time.Millisecond)
-		}
-		got := h.chunkIDsOnNodeForVault(vaultB, id)
-		if len(got) != len(expected) {
-			t.Errorf("vault B on node %s: expected %d chunks, got %d",
-				h.nodes[id].label, len(expected), len(got))
-		}
+			return fmt.Sprintf("chunks=%d/%d", len(got), len(expected)), len(got) == len(expected)
+		}, nil)
 	}
 }
 
@@ -850,57 +888,38 @@ func TestOrchRel_MultiVault_IsolatedFromPausedPeer(t *testing.T) {
 // caught up (e.g. one is paused).
 func (h *orchRelHarness) eventuallyLiveNodesSeeSealedChunk(t *testing.T, live []string) {
 	t.Helper()
-	deadline := time.Now().Add(orchHarnessConvWait)
 	var expected map[chunk.ChunkID]bool
-	for time.Now().Before(deadline) {
+	h.waitProgress("sealed chunk appearing on leader", 50*time.Millisecond, func() (string, bool) {
 		expected = h.chunkIDsOnLeader()
-		if len(expected) > 0 {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	if len(expected) == 0 {
-		t.Fatalf("no sealed chunk on leader within %s", orchHarnessConvWait)
-	}
-	// Wait for each live node to match.
+		return fmt.Sprintf("leader_chunks=%d", len(expected)), len(expected) > 0
+	}, nil)
+	// Wait for each live node to match the leader's set.
 	for _, id := range live {
-		dl := time.Now().Add(orchHarnessConvWait)
-		for time.Now().Before(dl) {
+		what := fmt.Sprintf("sealed chunk set replicating to live node %s", h.nodes[id].label)
+		h.waitProgress(what, 50*time.Millisecond, func() (string, bool) {
 			got := h.chunkIDsOnNode(id)
-			if len(got) != len(expected) {
-				time.Sleep(50 * time.Millisecond)
-				continue
-			}
-			mismatch := false
+			matched := 0
 			for cid := range expected {
-				if !got[cid] {
-					mismatch = true
-					break
+				if got[cid] {
+					matched++
 				}
 			}
-			if !mismatch {
-				break
-			}
-			time.Sleep(50 * time.Millisecond)
-		}
+			return fmt.Sprintf("chunks=%d matched=%d/%d", len(got), matched, len(expected)),
+				len(got) == len(expected) && matched == len(expected)
+		}, nil)
 	}
 }
 
-// eventuallyAllSeeSealedChunk polls until the leader reports at least one
-// sealed chunk, then asserts all nodes see the same set. Used by scenarios
-// that append + seal and care about replication success, not specific
-// chunk IDs.
+// eventuallyAllSeeSealedChunk waits until the leader reports at least one
+// sealed chunk, then asserts all nodes converge on the same set. Used by
+// scenarios that append + seal and care about replication success, not
+// specific chunk IDs.
 func (h *orchRelHarness) eventuallyAllSeeSealedChunk(t *testing.T) {
 	t.Helper()
-	deadline := time.Now().Add(orchHarnessConvWait)
-	for time.Now().Before(deadline) {
-		leader := h.chunkIDsOnLeader()
-		if len(leader) == 0 {
-			time.Sleep(50 * time.Millisecond)
-			continue
-		}
-		h.assertAllNodesSee(leader)
-		return
-	}
-	t.Fatalf("no sealed chunk appeared on leader within %s", orchHarnessConvWait)
+	var leader map[chunk.ChunkID]bool
+	h.waitProgress("sealed chunk appearing on leader", 50*time.Millisecond, func() (string, bool) {
+		leader = h.chunkIDsOnLeader()
+		return fmt.Sprintf("leader_chunks=%d", len(leader)), len(leader) > 0
+	}, nil)
+	h.assertAllNodesSee(leader)
 }

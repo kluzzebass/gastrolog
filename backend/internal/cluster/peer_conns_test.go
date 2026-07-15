@@ -52,6 +52,9 @@ func testManager(t *testing.T, peerAddr string) *PeerConnManager {
 }
 
 func TestInvalidateDeferredClose(t *testing.T) {
+	if testing.Short() {
+		t.Skip("waits out the real 5s invalidateGracePeriod; -short skips")
+	}
 	addr, _, cleanup := dialLocal(t)
 	defer cleanup()
 
@@ -111,6 +114,9 @@ func TestResetClearsCache(t *testing.T) {
 }
 
 func TestInvalidateConcurrentUsersNotDisrupted(t *testing.T) {
+	if testing.Short() {
+		t.Skip("waits out the real 5s invalidateGracePeriod; -short skips")
+	}
 	addr, _, cleanup := dialLocal(t)
 	defer cleanup()
 

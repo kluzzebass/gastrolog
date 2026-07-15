@@ -11,6 +11,9 @@ import (
 // run with singleton mode — a second tick is rescheduled (not overlapped)
 // while the previous invocation is still running.
 func TestCronJobSingletonMode(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-second cron-tick test")
+	}
 	t.Parallel()
 
 	sched, err := newScheduler(slog.Default(), 4, time.Now)
@@ -59,6 +62,9 @@ func TestCronJobSingletonMode(t *testing.T) {
 // TestCronJobSingletonModePreservedAcrossRebuild verifies that singleton mode
 // is maintained when the scheduler is rebuilt (e.g., concurrency limit change).
 func TestCronJobSingletonModePreservedAcrossRebuild(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-second cron-tick test")
+	}
 	t.Parallel()
 
 	sched, err := newScheduler(slog.Default(), 4, time.Now)

@@ -2,6 +2,7 @@ package orchestrator_test
 
 import (
 	"bytes"
+	"fmt"
 	"gastrolog/internal/chunk"
 	"os"
 	"path/filepath"
@@ -56,22 +57,18 @@ func TestOrchPipeline_GLCBReplicaCatchup(t *testing.T) {
 
 	// The vault catch-up sweep cron (13/33/53s) stat-misses the GLCB,
 	// pulls it from a peer home, verifies seal metadata against the FSM
-	// entry, and renames it into place.
-	deadline := time.Now().Add(orchHarnessConvWait)
-	recovered := false
-	for time.Now().Before(deadline) {
-		got, err := os.ReadFile(victimPath)
-		if err == nil {
-			if !bytes.Equal(got, want) {
-				t.Fatalf("recovered GLCB differs: %d bytes, want %d", len(got), len(want))
-			}
-			recovered = true
-			break
-		}
-		time.Sleep(200 * time.Millisecond)
+	// entry, and renames it into place. The sweep tick period (20s) sits
+	// inside the stall window, so a slow-but-ticking sweep is never killed.
+	h.waitProgress("victim GLCB recovery from peer home", 200*time.Millisecond, func() (string, bool) {
+		_, err := os.Stat(victimPath)
+		return fmt.Sprintf("victim_glcb_stat=%v", err), err == nil
+	}, func() { h.dumpPipelineState(v) })
+	got, err := os.ReadFile(victimPath)
+	if err != nil {
+		t.Fatalf("read recovered GLCB: %v", err)
 	}
-	if !recovered {
-		t.Fatal("GLCB not recovered from peer within convergence window")
+	if !bytes.Equal(got, want) {
+		t.Fatalf("recovered GLCB differs: %d bytes, want %d", len(got), len(want))
 	}
 
 	// No staging leftovers next to the promoted blob.
@@ -104,7 +101,8 @@ func TestOrchPipeline_GLCBReplicaCatchup(t *testing.T) {
 }
 
 // waitChunkHolders waits until the FSM's holder receipts for chunkID
-// exactly match the given home indexes.
+// exactly match the given home indexes. Progress metric: the receipt set
+// (every earned or revoked receipt resets the stall clock).
 func (h *orchRelHarness) waitChunkHolders(v vaultSpec, chunkID chunk.ChunkID, homeIdxs []int) {
 	h.t.Helper()
 	want := make(map[string]bool, len(homeIdxs))
@@ -112,25 +110,17 @@ func (h *orchRelHarness) waitChunkHolders(v vaultSpec, chunkID chunk.ChunkID, ho
 		want[h.nodeIDs[idx]] = true
 	}
 	leader := h.nodes[h.nodeIDs[homeIdxs[0]]]
-	deadline := time.Now().Add(orchHarnessConvWait)
-	var got []string
-	for time.Now().Before(deadline) {
-		got = leader.orch.ChunkResidency(v.id, chunkID)
-		if len(got) == len(want) {
-			all := true
-			for _, n := range got {
-				if !want[n] {
-					all = false
-					break
-				}
-			}
-			if all {
-				return
+	what := fmt.Sprintf("vault %s chunk %s: holder receipts converging to %d homes", v.label, chunkID, len(want))
+	h.waitProgress(what, 200*time.Millisecond, func() (string, bool) {
+		got := leader.orch.ChunkResidency(v.id, chunkID)
+		matched := len(got) == len(want)
+		for _, n := range got {
+			if !want[n] {
+				matched = false
 			}
 		}
-		time.Sleep(200 * time.Millisecond)
-	}
-	h.t.Fatalf("holder receipts never converged: got %v, want %d homes", got, len(want))
+		return fmt.Sprintf("holders=%d/%d %v", len(got), len(want), got), matched
+	}, func() { h.dumpPipelineState(v) })
 }
 
 // TestOrchPipeline_ChunkHolderRevokeOnByteLoss pins the accounting half of
@@ -173,14 +163,10 @@ func TestOrchPipeline_ChunkHolderRevokeOnByteLoss(t *testing.T) {
 	}
 
 	// Receipts must drain to zero as each home's sweep revokes its claim.
-	deadline := time.Now().Add(orchHarnessConvWait)
-	var got []string
-	for time.Now().Before(deadline) {
-		got = h.nodes[h.nodeIDs[0]].orch.ChunkResidency(v.id, e.ID)
-		if len(got) == 0 {
-			return
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-	t.Fatalf("holder receipts never revoked after byte loss on every home: still %v", got)
+	// Progress metric: the receipt set — every revocation resets the stall
+	// clock, so three staggered sweeps under load never read as a stall.
+	h.waitProgress("holder receipts revoking after byte loss on every home", 200*time.Millisecond, func() (string, bool) {
+		got := h.nodes[h.nodeIDs[0]].orch.ChunkResidency(v.id, e.ID)
+		return fmt.Sprintf("holders=%v", got), len(got) == 0
+	}, func() { h.dumpPipelineState(v) })
 }

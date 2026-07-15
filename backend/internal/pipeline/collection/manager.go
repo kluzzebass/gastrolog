@@ -128,7 +128,7 @@ type collectWaiter struct {
 	done chan error
 }
 
-func newVaultCollect(vaultID glid.GLID, root string, cfg VaultConfig) (*vaultCollect, error) {
+func newVaultCollect(vaultID glid.GLID, root string, cfg VaultConfig, logger *slog.Logger) (*vaultCollect, error) {
 	if cfg.Log == nil {
 		return nil, errors.New("log reader required")
 	}
@@ -150,6 +150,13 @@ func newVaultCollect(vaultID glid.GLID, root string, cfg VaultConfig) (*vaultCol
 		receipts: cfg.Receipts,
 		fsm:      cfg.FSM,
 	})
+	// Sweep pre-head/*.pulling orphans left by a crash mid-pull before this
+	// vault's worker can start (gastrolog-66hmx3 / gastrolog-5do8sh gap 7).
+	// This must happen here, at construction, and not later from a
+	// CollectOnce pass: once the worker is running, a live in-flight pull
+	// may legitimately hold the exact same tmp path open, and this sweep
+	// has no way to distinguish that from a crash orphan.
+	sweepOrphanPullingFiles(root, logger)
 	return v, nil
 }
 
@@ -187,6 +194,11 @@ func (v *vaultCollect) collectOne(ctx context.Context, ref AssignedSegment) erro
 			return nil
 		}
 		if !errors.Is(err, ErrCorruptSegment) {
+			// Includes ErrPreHeadPurged: a concurrent release purge deleted
+			// the file between the stat above and the promote — return the
+			// deferred error instead of pulling a segment the registry may
+			// have just released; the next pass re-reads registry truth
+			// (gastrolog-2as548).
 			return err
 		}
 		// Corrupt orphan discarded — fall through to a fresh pull.
@@ -569,7 +581,7 @@ func (m *Manager) RegisterVault(vaultID glid.GLID, root string, cfg VaultConfig)
 	if _, ok := m.vaults[vaultID]; ok {
 		return errors.New("vault already registered")
 	}
-	v, err := newVaultCollect(vaultID, root, cfg)
+	v, err := newVaultCollect(vaultID, root, cfg, m.logger())
 	if err != nil {
 		return err
 	}
@@ -637,18 +649,27 @@ func (m *Manager) unwireVaultFSMCallbacks(v *vaultCollect) {
 	}
 }
 
-// UnregisterVault removes a vault from collection.
+// UnregisterVault removes a vault from collection. stopWorker is captured
+// inside the SAME m.mu critical section as the map lookup/delete rather than
+// read again afterward: it is written exactly once (nil -> non-nil, never
+// back) by startWorkerLocked under m.mu, so reading the field itself outside
+// the lock is a data race against that write in general (gastrolog-54kqlj;
+// see CollectOnce below for the exploitable instance of this pattern).
 func (m *Manager) UnregisterVault(vaultID glid.GLID) {
 	m.mu.Lock()
 	v, ok := m.vaults[vaultID]
 	delete(m.vaults, vaultID)
+	var stop context.CancelFunc
+	if ok {
+		stop = v.stopWorker
+	}
 	m.mu.Unlock()
 	if !ok {
 		return
 	}
 	m.unwireVaultFSMCallbacks(v)
-	if v.stopWorker != nil {
-		v.stopWorker()
+	if stop != nil {
+		stop()
 	}
 	v.stopRetryWake()
 }
@@ -706,14 +727,42 @@ func (m *Manager) NoteLocalHeadArrival(vaultID, segmentID glid.GLID) {
 	v.noteHeadArrival(path, hdr)
 }
 
+// CollectOnce decides, inside the SAME m.mu critical section as the vault
+// lookup, whether a per-vault worker is running: v.stopWorker is written
+// exactly once (nil -> non-nil, never back to nil) by startWorkerLocked
+// under m.mu, so reading it here while still holding m.mu — rather than
+// after a separate Lock/Unlock, as before — removes the data race against
+// that write, and with it the stale-nil window where CollectOnce would run
+// its own collectMissing pass concurrently with the worker's freshly
+// started initial catch-up pass (gastrolog-54kqlj).
+//
+// Residual note on the stop path: workerRunning can still go stale between
+// this locked read and the awaitCollectPass call below if the worker exits
+// in that gap (Manager.Run's ctx cancelled, or UnregisterVault stopping this
+// vault). That is not new and not fixed here: even a perfectly synchronized
+// read only proves the worker HAD started, not that it is still alive by
+// the time the waiter registers with collectWaitMu (a different lock).
+// startWorkerLocked's goroutine drains and completes every waiter present
+// in v.collectWaiters at exit, via the deferred completeCollectWaiters
+// call, so any waiter registered before that drain still gets a result. A
+// waiter that registers after the drain already ran blocks only on ITS OWN
+// ctx (the ctx passed to CollectOnce) via awaitCollectPass's select, not
+// forever, and does not corrupt state — it just does not get to run
+// collectMissing itself either. Closing that window fully would require
+// coordinating waiter registration with worker shutdown through one lock,
+// which is a larger change than this data-race fix and out of scope here.
 func (m *Manager) CollectOnce(ctx context.Context, vaultID glid.GLID) error {
 	m.mu.Lock()
 	v, ok := m.vaults[vaultID]
+	var workerRunning bool
+	if ok {
+		workerRunning = v.stopWorker != nil
+	}
 	m.mu.Unlock()
 	if !ok {
 		return ErrUnknownVault
 	}
-	if v.stopWorker != nil {
+	if workerRunning {
 		return v.awaitCollectPass(ctx)
 	}
 	_, err := v.collectMissing(ctx)
@@ -841,6 +890,12 @@ func (v *vaultCollect) stopRetryWake() {
 // from their triggers: FSM publish callbacks fire on the Raft FSM-apply
 // goroutine and must never block on a pass that itself applies Raft commands
 // (holder receipts) — see the wake field comment on vaultCollect.
+//
+// v.stopWorker is the ONLY field written here, always under m.mu (both
+// callers — RegisterVault and Run — hold it), and it transitions nil ->
+// non-nil exactly once per vault. Every other reader (CollectOnce,
+// UnregisterVault) must take the same read under m.mu rather than after
+// releasing it, or the read races this write (gastrolog-54kqlj).
 func (m *Manager) startWorkerLocked(v *vaultCollect) {
 	if v.stopWorker != nil {
 		return // already running

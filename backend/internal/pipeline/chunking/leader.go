@@ -447,12 +447,22 @@ func (p manifestProgress) advancedFrom(prev manifestProgress) bool {
 // planCatchUp runs planOnce until the manifest stops changing or a sealed
 // manifest is pending. Callbacks from Apply may advance the chain; the loop
 // covers catch-up when Run starts with work already in the FSM.
+//
+// newPlannerPass is computed under planMu here, uniformly with the pass=nil
+// path inside planStepLocked: newPlannerPass reaches noteUnderReplicated,
+// which mutates v.underReplicatedAlerted and is documented "caller holds
+// planMu". RotateCron's planOnce runs on the orchestrator scheduler's own
+// goroutine (reconcileChunkCron registers RotateChunkCron as a scheduler
+// job), independent of this vault's worker goroutine (startWorkerLocked's
+// wake loop, which reaches planCatchUp via runBuildPass) — so an unlocked
+// newPlannerPass call here could race a concurrent locked one from
+// planStepLocked for the same vault (gastrolog-cqz1ef).
 func (v *vaultChunking) planCatchUp(ctx context.Context) error {
 	if !v.cfg.IsLeader() || v.applier() == nil {
 		return nil
 	}
-	pass := v.newPlannerPass()
 	v.planMu.Lock()
+	pass := v.newPlannerPass()
 	v.pruneSegmentIndexCache(pass.eligible)
 	v.planMu.Unlock()
 	budget := catchUpBudget(len(pass.eligible), v.cfg.Policy)

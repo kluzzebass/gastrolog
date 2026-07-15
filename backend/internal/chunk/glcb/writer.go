@@ -23,6 +23,15 @@ import (
 const (
 	stagingBufferSize = 256 << 10
 	copyBufferSize    = 1024 << 10
+
+	// RecordsStagingPrefix is the os.CreateTemp pattern prefix used for
+	// the record-staging file created by ensureStaging when a Writer is
+	// used without BindOutput (chunk/file.Manager.sealToGLCB is the only
+	// such caller — pipeline/chunking always binds an output file and
+	// stays in direct mode). Exported so orphan-sweep code that shares a
+	// directory with a Writer's staging file can match its exact naming
+	// contract instead of guessing a pattern. See gastrolog-66hmx3.
+	RecordsStagingPrefix = "glcb-records-"
 )
 
 // Writer encodes GLCB. When bound to an output file in workDir, record frames
@@ -165,7 +174,7 @@ func (w *Writer) ensureStaging() error {
 	if w.staging != nil {
 		return nil
 	}
-	f, err := os.CreateTemp(w.workDir, "glcb-records-*.tmp")
+	f, err := os.CreateTemp(w.workDir, RecordsStagingPrefix+"*.tmp")
 	if err != nil {
 		return err
 	}

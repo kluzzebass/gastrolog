@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/paths"
@@ -15,6 +18,16 @@ import (
 var (
 	// ErrCorruptSegment is returned when a pre-head file fails verification.
 	ErrCorruptSegment = errors.New("segment checksum verification failed")
+
+	// ErrPreHeadPurged is returned when the pre-head file vanishes between
+	// the pull's rename-in and the promote — a concurrent purge
+	// (paths.PurgeHeadStaging on segment release, via the supervisor's
+	// OnReleaseSegments hook or chunking's release/stale purges) deleted it
+	// because the registry no longer needs the segment. A catch-up race, not
+	// a data-integrity failure: no byte was ever verified and found wrong.
+	// Joining ErrCorruptSegment here instead surfaced every such race as a
+	// "checksum verification failed" data-integrity WARN (gastrolog-2as548).
+	ErrPreHeadPurged = errors.New("pre-head segment purged during collect")
 )
 
 // preHeadPullSuffix marks an in-flight collect temp file under pre-head/.
@@ -62,6 +75,48 @@ func PullToPreHead(ctx context.Context, vaultRoot string, vaultID, segmentID gli
 	return finalPath, nil
 }
 
+// isPreHeadPullingName reports whether name matches PullToPreHead's exact
+// tmp-file naming contract (a segment ID suffixed with preHeadPullSuffix).
+// Kept as a standalone predicate so a writer-sweeper contract test can
+// assert against this package's actual naming contract, not a guessed
+// pattern.
+func isPreHeadPullingName(name string) bool {
+	return strings.HasSuffix(name, preHeadPullSuffix)
+}
+
+// sweepOrphanPullingFiles removes pre-head/*.pulling files left behind by a
+// pull that crashed between PullToPreHead's O_TRUNC open and its rename
+// commit (gastrolog-5do8sh gap 7, gastrolog-66hmx3). Unlike the
+// data.glcb.tmp wedge, this leak is hygiene rather than correctness: a
+// FINAL-named pre-head orphan blocks nothing (a later collect pass reads
+// through it and a real re-pull of the same segment reuses the exact same
+// tmp path with O_TRUNC, discarding the stale bytes on rename — see
+// TestRegisterVaultSweepsPullingOrphanAndRepullStillOverwrites). The sweep
+// only exists so an unassigned segment's crash orphan does not sit in
+// pre-head/ forever if that segment is never pulled again.
+//
+// Must run before any pull can start (i.e. at vault registration, before
+// the worker goroutine is started) — the per-segment `pulling` exclusivity
+// set only guards against two pulls of the SAME segment racing each other,
+// not against this sweep racing a live in-flight pull.
+func sweepOrphanPullingFiles(vaultRoot string, logger *slog.Logger) {
+	entries, err := os.ReadDir(paths.PreHeadDir(vaultRoot))
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !isPreHeadPullingName(entry.Name()) {
+			continue
+		}
+		path := filepath.Join(paths.PreHeadDir(vaultRoot), entry.Name())
+		if err := os.Remove(path); err != nil {
+			logger.Warn("failed to remove orphan pre-head pulling temp file", "path", path, "error", err)
+		} else {
+			logger.Info("removed orphan pre-head pulling temp file", "path", path)
+		}
+	}
+}
+
 // PromoteVerified opens the pre-head segment, verifies its checksum, and atomically
 // renames it into head. A corrupt transfer is discarded from pre-head. The
 // verified header is returned so callers can count arrivals without a
@@ -84,6 +139,12 @@ func PullToPreHead(ctx context.Context, vaultRoot string, vaultID, segmentID gli
 func PromoteVerified(preHeadPath, vaultRoot string, publishedChecksum uint64) (string, segment.Header, error) {
 	sf, err := segment.Open(preHeadPath)
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			// A concurrent release purge won the race for this file. Only a
+			// verification failure may carry ErrCorruptSegment; a missing
+			// file verified nothing (gastrolog-2as548).
+			return "", segment.Header{}, fmt.Errorf("%w: %w", ErrPreHeadPurged, err)
+		}
 		_ = os.Remove(preHeadPath)
 		return "", segment.Header{}, errors.Join(ErrCorruptSegment, err)
 	}
@@ -102,6 +163,13 @@ func PromoteVerified(preHeadPath, vaultRoot string, publishedChecksum uint64) (s
 	}
 	dest := filepath.Join(paths.HeadDir(vaultRoot), filepath.Base(preHeadPath))
 	if err := os.Rename(filepath.Clean(preHeadPath), dest); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			// Verified fine, then a concurrent release purge removed the
+			// source before the rename (head/ was just ensured, so ENOENT
+			// means the pre-head name is gone). Same race as the open-time
+			// window above (gastrolog-2as548).
+			return "", segment.Header{}, fmt.Errorf("%w: %w", ErrPreHeadPurged, err)
+		}
 		_ = os.Remove(preHeadPath)
 		return "", segment.Header{}, err
 	}

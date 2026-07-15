@@ -131,6 +131,9 @@ func TestWALBackedRaftElectionAndApply(t *testing.T) {
 // with the WAL backend. After a snapshot, old log entries are deleted via
 // DeleteRange and the FSM state is restored on "restart" (new Raft instance).
 func TestWALBackedRaftSnapshotAndRestore(t *testing.T) {
+	if testing.Short() {
+		t.Skip("spins up a real raft instance and waits out election + snapshot timing; -short skips")
+	}
 	t.Parallel()
 	dir := t.TempDir()
 

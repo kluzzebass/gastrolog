@@ -2,6 +2,7 @@ package orchestrator_test
 
 import (
 	"context"
+	"fmt"
 	"gastrolog/internal/query"
 	"testing"
 	"time"
@@ -42,19 +43,10 @@ func TestOrchPipeline_LazyResolutionServesAfterRestart(t *testing.T) {
 	// first lookup. Poll tolerantly: instance construction (ApplyConfig)
 	// races this loop right after start, and "vault not ready" is a
 	// legitimate transient — the assertion is servability once ready,
-	// with NO registration pass in between.
-	deadline := time.Now().Add(orchHarnessConvWait)
-	var got int
-	var lastErr error
-	for time.Now().Before(deadline) {
-		got, lastErr = countSearchable(h, v, victim)
-		if lastErr == nil && got == pipelineChunkMaxRecords {
-			return
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	t.Fatalf("restarted home served %d/%d records (last error: %v) — sealed on-disk chunks did not lazily resolve",
-		got, pipelineChunkMaxRecords, lastErr)
+	// with NO registration pass in between. A stall (count and error both
+	// frozen short of the goal) means sealed on-disk chunks did not lazily
+	// resolve.
+	h.waitSearchable(v, victim, pipelineChunkMaxRecords)
 }
 
 // countSearchable is a fatal-free variant of searchRecords for polling a
@@ -73,4 +65,20 @@ func countSearchable(h *orchRelHarness, v vaultSpec, nodeID string) (int, error)
 		count++
 	}
 	return count, nil
+}
+
+// waitSearchable waits until a match-all search on nodeID serves exactly
+// want records. Progress metric: the searchable-record count plus the last
+// search error (transient "vault not ready" phases show up as progress, not
+// silence).
+func (h *orchRelHarness) waitSearchable(v vaultSpec, nodeID string, want int) {
+	h.t.Helper()
+	what := fmt.Sprintf("vault %s on %s: searchable records reaching %d", v.label, h.nodes[nodeID].label, want)
+	h.waitProgress(what, 100*time.Millisecond, func() (string, bool) {
+		got, err := countSearchable(h, v, nodeID)
+		if err != nil {
+			return fmt.Sprintf("searchable=%d err=%v", got, err), false
+		}
+		return fmt.Sprintf("searchable=%d/%d", got, want), got == want
+	}, func() { h.dumpPipelineState(v) })
 }

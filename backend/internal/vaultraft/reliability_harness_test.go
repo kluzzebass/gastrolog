@@ -66,6 +66,9 @@ const (
 // via t.Cleanup.
 func newReliabilityHarness(t *testing.T, n int) *reliabilityHarness {
 	t.Helper()
+	if testing.Short() {
+		t.Skip("reliability matrix: real multi-node raft cluster, failover/convergence timing; -short skips (see `just backend test-reliability`)")
+	}
 	if n < 1 {
 		t.Fatal("reliability harness requires n >= 1")
 	}

@@ -123,10 +123,9 @@ func NewGLCBCursor(rd *Reader, id chunk.ChunkID, onClose func()) chunk.RecordCur
 
 func (c *glcbCursor) RecordCount() uint64 { return c.recordCount }
 
-// ReadFanOutRecord reads one record by position for parallel retention fan-out.
-// The record is detached from the GLCB mmap and safe across goroutines.
 // PrewarmSequential implements chunk.SequentialPrewarmer for full-scan
-// consumers (retention fan-out) — see Reader.PrewarmSequential.
+// consumers (retention fan-out): it warms the OS page cache for the whole GLCB
+// mapping via madvise before the drain scan — see Reader.PrewarmSequential.
 func (c *glcbCursor) PrewarmSequential() {
 	c.reader.PrewarmSequential()
 }

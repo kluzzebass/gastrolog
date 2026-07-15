@@ -57,9 +57,23 @@ func (v *vaultChunking) afterSealBuild(ctx context.Context, pending *vaultctlfsm
 	key := buildKey{chunkID: pending.ChunkID, sealedAt: pending.SealedAt}
 	// claimPostSeal refuses until the local build is marked done — see the
 	// sealProgress method comment (gastrolog-3vlse).
-	if !v.progress.claimPostSeal(key) {
+	claimed, done := v.progress.claimPostSeal(key)
+	if !claimed {
+		// Another caller owns this cycle's post-seal work — typically the
+		// goroutine the OnSealedManifestCleared callback spawned, racing the
+		// synchronous seal-commit path for the exactly-once claim. Wait for
+		// the claimant to FINISH: callers rely on "afterSealBuild returns ⇒
+		// head purge + release enqueue done", and returning while the
+		// claimant was mid-purge let BuildOnce return before the head copy
+		// was gone (gastrolog-4cxvdi). A nil channel means no claim exists
+		// for this cycle yet (build not marked); a later build pass runs the
+		// work, and there is nothing to wait for.
+		if done != nil {
+			<-done
+		}
 		return
 	}
+	defer v.progress.finishPostSeal(key)
 
 	segmentIDs := releasableSegmentIDs(v.fsm(), pending)
 	v.flushHeadPurgeForManifest(pending, segmentIDs)
@@ -75,6 +89,7 @@ func (v *vaultChunking) afterSealBuild(ctx context.Context, pending *vaultctlfsm
 }
 
 func (v *vaultChunking) buildOnce(ctx context.Context) error {
+	v.pruneCorruptGLCBs()
 	pending := v.sealedManifestForBuild()
 	if pending == nil {
 		return nil
@@ -150,6 +165,9 @@ func (v *vaultChunking) runBuildOncePass(ctx context.Context, pending *vaultctlf
 	if err != nil {
 		return BuildResult{}, false, err
 	}
+	// A successful rebuild heals a quarantined corrupt GLCB: BuildGLCBFile
+	// renamed a fresh, complete blob onto the canonical path.
+	v.clearCorruptGLCB(pending.ChunkID, "rebuilt from source segments")
 	v.progress.markBuilt(key, result)
 	return result, true, nil
 }
@@ -172,8 +190,16 @@ func (v *vaultChunking) adoptExistingGLCBIfPresent(pending *vaultctlfsm.OpenChun
 	}
 	result, readErr := BuildResultFromExistingGLCB(glcbPath, sealedAt)
 	if readErr != nil {
-		return BuildResult{}, false, nil //nolint:nilerr // corrupt GLCB; caller falls through to full rebuild
+		// Unified corrupt-GLCB story (gastrolog-687m11, glcb_corrupt.go):
+		// quarantine + alert, then report "not adopted" so the caller falls
+		// through to a full rebuild from source segments — the pre-687m11
+		// silent self-heal, now with the corruption signal preserved.
+		v.quarantineCorruptGLCB(pending.ChunkID, glcbPath, readErr)
+		return BuildResult{}, false, nil
 	}
+	// Readable again (e.g. a peer re-pull restored the canonical file after
+	// an earlier quarantine): the chunk is healed on this home.
+	v.clearCorruptGLCB(pending.ChunkID, "existing GLCB readable")
 	adoptKey := key
 	if adoptKey.sealedAt.IsZero() {
 		adoptKey.sealedAt = result.WriteEnd

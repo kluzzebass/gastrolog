@@ -157,6 +157,9 @@ func waitForLeader(t *testing.T, g *Group, timeout time.Duration) {
 }
 
 func TestCreateGroupSingleNode(t *testing.T) {
+	if testing.Short() {
+		t.Skip("spins up a real raft group and waits out election timing; -short skips")
+	}
 	// Not parallel — Raft instances + gRPC servers need clean sequential lifecycle.
 	nodes := makeManagerCluster(t, []string{"node-1"})
 
@@ -183,6 +186,9 @@ func TestCreateGroupSingleNode(t *testing.T) {
 }
 
 func TestCreateGroupThreeNode(t *testing.T) {
+	if testing.Short() {
+		t.Skip("spins up a real 3-node raft group and waits out election + replication timing; -short skips")
+	}
 	// Not parallel — Raft instances + gRPC servers need clean sequential lifecycle.
 	nodes := makeManagerCluster(t, []string{"node-1", "node-2", "node-3"})
 
@@ -253,6 +259,9 @@ func TestCreateGroupThreeNode(t *testing.T) {
 }
 
 func TestMultipleGroupsSameNode(t *testing.T) {
+	if testing.Short() {
+		t.Skip("spins up two real raft groups and waits out election timing; -short skips")
+	}
 	// Not parallel — Raft instances + gRPC servers need clean sequential lifecycle.
 	nodes := makeManagerCluster(t, []string{"node-1"})
 
@@ -334,6 +343,9 @@ func TestDuplicateGroupReturnsError(t *testing.T) {
 }
 
 func TestVoterNonvoterAutoEnforcement(t *testing.T) {
+	if testing.Short() {
+		t.Skip("spins up a real 3-node raft group and waits out membership-change convergence; -short skips")
+	}
 	// Not parallel — Raft instances + gRPC servers need clean sequential lifecycle.
 	nodes := makeManagerCluster(t, []string{"node-1", "node-2", "node-3"})
 
@@ -380,6 +392,9 @@ func TestVoterNonvoterAutoEnforcement(t *testing.T) {
 }
 
 func TestGroupRecoveryAfterRestart(t *testing.T) {
+	if testing.Short() {
+		t.Skip("spins up a real raft group twice (restart) and waits out election timing; -short skips")
+	}
 	// Not parallel — Raft instances + gRPC servers need clean sequential lifecycle.
 
 	// Use a persistent temp dir for the group so we can restart.

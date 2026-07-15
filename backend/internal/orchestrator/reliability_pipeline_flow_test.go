@@ -16,53 +16,48 @@ package orchestrator_test
 //     with no operator action.
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
 
-// waitRegistryDrained polls until the vault's completed-segment registry is
+// waitRegistryDrained waits until the vault's completed-segment registry is
 // empty on every given node's FSM — i.e. every published segment has been
 // released via CmdReleaseSegments after its records reached RF in sealed
-// chunks. Uses the shared coarse backstop; only a genuine wedge trips it.
+// chunks. Progress metric: per-node registry sizes (every release resets the
+// stall clock); only a genuine wedge trips the stall.
 func (h *orchRelHarness) waitRegistryDrained(v vaultSpec, nodeIdxs []int) {
 	h.t.Helper()
-	deadline := time.Now().Add(orchHarnessConvWait)
-	var lastCounts map[string]int
-	for time.Now().Before(deadline) {
-		lastCounts = map[string]int{}
+	what := fmt.Sprintf("vault %s: completed-segment registry drain", v.label)
+	h.waitProgress(what, 100*time.Millisecond, func() (string, bool) {
+		counts := map[string]int{}
 		drained := true
 		for _, idx := range nodeIdxs {
 			nodeID := h.nodeIDs[idx]
 			sub := h.vaultCtlSubFSM(v, nodeID)
 			if sub == nil {
 				drained = false
-				lastCounts[h.nodes[nodeID].label] = -1
+				counts[h.nodes[nodeID].label] = -1
 				continue
 			}
 			n := len(sub.ListCompletedSegments())
-			lastCounts[h.nodes[nodeID].label] = n
+			counts[h.nodes[nodeID].label] = n
 			if n != 0 {
 				drained = false
 			}
 		}
-		if drained {
-			return
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	h.dumpPipelineState(v)
-	h.t.Fatalf("vault %s: completed-segment registry never drained within %s (remaining per node: %v)",
-		v.label, orchHarnessConvWait, lastCounts)
+		return fmt.Sprintf("registry_segments=%v", counts), drained
+	}, func() { h.dumpPipelineState(v) })
 }
 
-// waitHeadDrained polls until head/ holds zero segment files on every given
+// waitHeadDrained waits until head/ holds zero segment files on every given
 // home — the purge that follows holder receipts and segment release.
+// Progress metric: per-home head/ file counts.
 func (h *orchRelHarness) waitHeadDrained(v vaultSpec, homeIdxs []int) {
 	h.t.Helper()
-	deadline := time.Now().Add(orchHarnessConvWait)
-	var lastCounts map[string]int
-	for time.Now().Before(deadline) {
-		lastCounts = map[string]int{}
+	what := fmt.Sprintf("vault %s: head/ purge on homes", v.label)
+	h.waitProgress(what, 100*time.Millisecond, func() (string, bool) {
+		counts := map[string]int{}
 		drained := true
 		for _, idx := range homeIdxs {
 			nodeID := h.nodeIDs[idx]
@@ -70,19 +65,13 @@ func (h *orchRelHarness) waitHeadDrained(v vaultSpec, homeIdxs []int) {
 			if err != nil {
 				h.t.Fatalf("vault %s home %s: list head/: %v", v.label, h.nodes[nodeID].label, err)
 			}
-			lastCounts[h.nodes[nodeID].label] = count
+			counts[h.nodes[nodeID].label] = count
 			if count != 0 {
 				drained = false
 			}
 		}
-		if drained {
-			return
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	h.dumpPipelineState(v)
-	h.t.Fatalf("vault %s: head/ never drained on homes within %s (remaining per home: %v)",
-		v.label, orchHarnessConvWait, lastCounts)
+		return fmt.Sprintf("head_files=%v", counts), drained
+	}, func() { h.dumpPipelineState(v) })
 }
 
 // assertSearchBodiesExactly runs a match-all search on nodeID and asserts the
@@ -221,12 +210,6 @@ func TestOrchPipeline_HomeDownDuringIngestCatchesUpOnRestart(t *testing.T) {
 	for b := range postBodies {
 		allBodies[b] = true
 	}
-	deadline := time.Now().Add(orchHarnessConvWait)
-	for time.Now().Before(deadline) {
-		if n, err := countSearchable(h, v, victim); err == nil && n == total {
-			break
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
+	h.waitSearchable(v, victim, total)
 	h.assertSearchBodiesExactly(v, victim, allBodies)
 }
