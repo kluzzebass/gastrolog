@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/system"
 )
@@ -382,7 +383,7 @@ func (o *Orchestrator) markSuspect(vaultInst *VaultInstance, id chunk.ChunkID, n
 	if o.alerts != nil {
 		o.alerts.Set(
 			"chunk-suspect:"+id.String(),
-			1, // Warning
+			alert.Warning,
 			"cloud-reconcile",
 			"Cloud-backed chunk "+id.String()+" not found in blob store — monitoring",
 		)
@@ -412,7 +413,7 @@ func (o *Orchestrator) expireSuspect(vaultInst *VaultInstance, id chunk.ChunkID,
 	if o.alerts != nil {
 		o.alerts.Set(
 			"chunk-suspect:"+id.String(),
-			2, // Error
+			alert.Error,
 			"cloud-reconcile",
 			fmt.Sprintf("Cloud-backed chunk %s removed from index after %d days missing", id, suspectDays),
 		)
