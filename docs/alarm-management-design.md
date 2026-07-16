@@ -51,6 +51,42 @@ Priority derivation: **consequence** (what is at risk if unhandled) ×
 progress or imminent; `High` = durability/availability degraded, will
 compound; `Low` = needs attention on a human timescale.
 
+### Software faults are not process alarms
+
+One row below is a **software fault**, not an alarm on this scale:
+`orchestrator-lock-leak`. The distinction is the standard's own — EEMUA 191
+and ISA-18.2 treat instrument and system faults as a class apart from
+process alarms, because a broken instrument is not a process condition and
+does not belong on a consequence × urgency scale. A software defect is the
+same shape.
+
+The test that separates them: **an alarm's response fixes the condition; a
+software fault's response is to report it.** Restarting a wedged node
+recovers service — it does not address why the lock leaked. Nothing an
+operator can do at 3am fixes a lock-discipline bug.
+
+Consequences for the model:
+
+- **No rubric priority.** "The software is broken" is not consequence ×
+  urgency. Rating it Critical would claim data is at risk (it is not —
+  ingest is ack-after-fsync, so accepted records are already durable and
+  in-flight ones were never acked); rating it High would file it beside
+  routine degradation.
+- **Never shelveable.** Shelving suppresses a condition for a while on the
+  operator's judgement. A defect does not resolve itself and cannot be
+  deferred — a shelved wedge is a lie. Phase 4 must let an alarm type refuse
+  shelve; this is the case that requires it.
+- **Latched** for the reason the code already gives: a leaked hold cannot be
+  released by anything short of a restart, so the condition can never
+  self-clear. Only an operator acknowledging it can.
+
+`orchestrator-lock-leak` exists because of gastrolog-1ug3rq, a P0 where a
+node zombified silently and no goroutine dump could name the leaker (the
+holder had already returned). That root cause — a recursive `o.mu` read
+acquisition in `schedulePipelineCloudUpload` — was found and fixed; the
+tripwire stays armed for the defect class, not for that bug. It firing again
+means a new one.
+
 **Multi-setpoint conditions are separate alarms, not one alarm that changes
 colour.** Where the code today raises one ID at Warning while approaching a
 bound and Error at the bound, the catalog splits it in two. This is the
@@ -69,7 +105,7 @@ Verdicts under the governing test:
 | `segmentation-writer:<vault>` | segmentation | Durable segment commit failed; working segment abandoned for crash recovery — **accepted records at risk** | **Alarm** | Critical | Free disk space or replace the volume on the named node; ingest acks are failing until resolved |
 | `chunking-unplannable-segment:<vault>` | chunking | Segment on-disk indexes unreadable; records stay unchunked and head copies cannot be purged | **Alarm** | Critical | Investigate segment file corruption on the named node. If the vault has a delete-disposition TTL these records are released **unchunked** at expiry — the loss is scheduled, not hypothetical |
 | `wal-reserve:<wal>` | storage | Raft WAL space reserve lost | **Alarm** | Critical | Free disk space now — without the reserve, a full volume crashes consensus on this node |
-| `orchestrator-lock-leak` | orchestrator | Orchestrator lock held past deadline — wedge in progress | **Alarm** (latched) | Critical | Capture the logged stack, then restart the wedged node. Latched: stays until acked, even after the wedge clears |
+| `orchestrator-lock-leak` | orchestrator | Orchestrator lock held or write-stuck past 1min | **Software fault** (latched, never shelveable) | — (see below) | **This should never fire.** If it does, it is a lock-discipline defect, not an operating condition: capture the acquisition stack from this node's log and file it. Restarting the node is a workaround to recover service, not the response |
 | `chunking-build-blocked:<vault>` | chunking | Head-of-queue chunk blocked >2min on segments no local holder can supply, or a manifest referenced a released segment | **Alarm** | High | Restore a node holding the named segments, or accept the gap |
 | `chunking-underreplicated:<vault>` | chunking | Segments below the replication minimum ≥2min; planning gated | **Alarm** | High | Check that all placement nodes are up and replication is progressing. If the origin node is permanently lost, the affected records exist only there |
 | `chunking-glcb-corrupt:<vault>` | chunking | Sealed-chunk GLCB unreadable; quarantined with a `.corrupt` suffix | **Alarm** (DelayOn) | High | Heals on its own — rebuilt from source segments or re-pulled from a peer home. **Only actionable if it persists**, which is what the delay-on is for: then investigate disk health here and replica health on the vault's other homes |
