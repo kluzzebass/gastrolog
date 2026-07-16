@@ -162,7 +162,10 @@ func VaultConfigToProto(v system.VaultConfig) *gastrologv1.VaultConfig {
 		RetentionDisposition: v.RetentionDisposition,
 		DiskFreeWarnBytes:    v.DiskFreeWarnBytes,
 		DiskFreeFloorBytes:   v.DiskFreeFloorBytes,
-		MaxSizeBytes:         v.MaxSizeBytes,
+		// Always present on the wire: a stored VaultConfig carries a resolved
+		// budget (defaulted at creation, never 0), so absence only ever means
+		// "operator has not spoken yet" at the create ingress, never here.
+		MaxSizeBytes: &v.MaxSizeBytes,
 	}
 	pb.RotationPolicyId = glid.OptionalToProto(v.RotationPolicyID)
 	pb.CloudServiceId = glid.OptionalToProto(v.CloudServiceID)

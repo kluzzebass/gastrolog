@@ -82,7 +82,7 @@ function vaultToEntry(v: VaultConfig): StorageEntry {
     retentionDisposition: v.retentionDisposition || "delete",
     diskFreeWarn: v.diskFreeWarnBytes > 0 ? formatBytesBigint(v.diskFreeWarnBytes) : "",
     diskFreeFloor: v.diskFreeFloorBytes > 0 ? formatBytesBigint(v.diskFreeFloorBytes) : "",
-    maxSize: v.maxSizeBytes > 0 ? formatBytesBigint(v.maxSizeBytes) : "",
+    maxSize: v.maxSizeBytes != null && v.maxSizeBytes > BigInt(0) ? formatBytesBigint(v.maxSizeBytes) : "",
     replicationFactor: String(v.replicationFactor || 1),
     path: v.path || "",
     nodeId: "",
@@ -117,7 +117,10 @@ function entryToVault(
     retentionDisposition: entry.type !== "jsonl" ? (entry.retentionDisposition || "delete") : "",
     diskFreeWarnBytes: entry.type === "file" ? parseBytes(entry.diskFreeWarn) : BigInt(0),
     diskFreeFloorBytes: entry.type === "file" ? parseBytes(entry.diskFreeFloor) : BigInt(0),
-    maxSizeBytes: entry.type === "file" ? parseBytes(entry.maxSize) : BigInt(0),
+    // Send the budget only when the operator set it: an empty field is
+    // "unset", which the server defaults, not an explicit 0 (which it
+    // rejects). Non-file vaults have no disk budget (gastrolog-1epfgb).
+    maxSizeBytes: entry.type === "file" && entry.maxSize.trim() !== "" ? parseBytes(entry.maxSize) : undefined,
     replicationFactor: entry.type === "jsonl" ? 1 : parseInt(entry.replicationFactor, 10) || 1,
     path: entry.type === "jsonl" ? entry.path : "",
     placements: vault.placements,

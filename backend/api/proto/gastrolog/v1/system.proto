@@ -260,11 +260,17 @@ message VaultConfig {
   uint64 disk_free_warn_bytes = 17;
   uint64 disk_free_floor_bytes = 18;
   // Per-node byte budget for this vault's whole local disk claim (sealed
-  // chunks, indexes, and pipeline segment backlog). 0 = unlimited. At the
-  // budget, admission for records destined to this vault is refused
-  // cluster-wide (cap-and-refuse) until retention or releases drain it —
-  // the hard backstop behind a size retention policy's cap-and-drain.
-  uint64 max_size_bytes = 19;
+  // chunks, indexes, and pipeline segment backlog). At the budget, admission
+  // for records destined to this vault is refused cluster-wide
+  // (cap-and-refuse) until retention or releases drain it — the hard backstop
+  // behind a size retention policy's cap-and-drain.
+  //
+  // Optional so the server can tell "unset" from "explicitly 0": an unset
+  // value is defaulted server-side at creation (a bounded per-node budget —
+  // see DefaultVaultMaxSizeBytes), and an explicit 0 is REJECTED (a 0 budget
+  // accepts no records). "Unlimited" is an explicit large value, never the
+  // effect of saying nothing (gastrolog-1epfgb / gastrolog-4j1e6y).
+  optional uint64 max_size_bytes = 19;
 }
 
 message RouteDestination {

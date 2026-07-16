@@ -126,8 +126,8 @@ func vaultDetailPairs(v *v1.VaultConfig) [][2]string {
 	if v.DiskFreeFloorBytes > 0 {
 		pairs = append(pairs, [2]string{"Disk Free Floor", units.FormatBytesDisplay(int64(v.DiskFreeFloorBytes))}) //nolint:gosec // display only
 	}
-	if v.MaxSizeBytes > 0 {
-		pairs = append(pairs, [2]string{"Max Size", units.FormatBytesDisplay(int64(v.MaxSizeBytes))}) //nolint:gosec // display only
+	if v.MaxSizeBytes != nil {
+		pairs = append(pairs, [2]string{"Max Size", units.FormatBytesDisplay(int64(v.GetMaxSizeBytes()))}) //nolint:gosec // display only
 	}
 	if v.RetentionDisposition != "" {
 		pairs = append(pairs, [2]string{"Retention Disposition", v.RetentionDisposition})
@@ -217,7 +217,7 @@ shape (memory, file, file+cloud, JSONL) defined by --type, --storage-class
 	cmd.Flags().Uint64("memory-budget", 0, "memory budget in bytes (memory vaults)")
 	cmd.Flags().String("disk-free-warn", "", "free-space warn threshold on the vault's backing volume (e.g. 10GB); empty inherits the node default")
 	cmd.Flags().String("disk-free-floor", "", "free-space floor on the vault's backing volume (e.g. 3GB) — below it, admission for this vault is suspended; empty inherits the node default")
-	cmd.Flags().String("max-size", "", "per-node size budget for the vault's whole local disk claim (e.g. 50GB) — at the budget, new records for this vault are refused until retention drains it; empty means unlimited")
+	cmd.Flags().String("max-size", "", "per-node size budget for the vault's whole local disk claim (e.g. 50GB) — at the budget, new records for this vault are refused until retention drains it. Unset defaults to a bounded per-node budget; 0 is rejected; set a large value (e.g. 1PiB) for effectively-unlimited")
 	_ = cmd.MarkFlagRequired("name")
 	return cmd
 }
@@ -286,8 +286,12 @@ func applyVaultFlags(ctx context.Context, cmd *cobra.Command, client *server.Cli
 	return nil
 }
 
-// applyVaultSizeFlags overlays the byte-size threshold flags (disk-free
-// warn/floor, max-size budget) onto the vault config.
+// applyVaultSizeFlags overlays the byte-size threshold flags onto the vault
+// config. disk-free warn/floor use plain uint64 where 0 legitimately means
+// "inherit the node default". max-size is different: it is proto-optional so
+// the server can tell an unset budget (default it) from an explicit 0 (reject
+// it), so it is only set here when the operator actually passed the flag —
+// leaving it nil otherwise carries "unset" to the server (gastrolog-1epfgb).
 func applyVaultSizeFlags(cmd *cobra.Command, cfg *v1.VaultConfig) error {
 	for _, f := range []struct {
 		name string
@@ -295,7 +299,6 @@ func applyVaultSizeFlags(cmd *cobra.Command, cfg *v1.VaultConfig) error {
 	}{
 		{"disk-free-warn", &cfg.DiskFreeWarnBytes},
 		{"disk-free-floor", &cfg.DiskFreeFloorBytes},
-		{"max-size", &cfg.MaxSizeBytes},
 	} {
 		if !cmd.Flags().Changed(f.name) {
 			continue
@@ -305,6 +308,13 @@ func applyVaultSizeFlags(cmd *cobra.Command, cfg *v1.VaultConfig) error {
 			return err
 		}
 		*f.dst = v
+	}
+	if cmd.Flags().Changed("max-size") {
+		v, err := parseDiskFreeFlag(cmd, "max-size")
+		if err != nil {
+			return err
+		}
+		cfg.MaxSizeBytes = &v // may be 0; the server rejects an explicit 0
 	}
 	return nil
 }

@@ -13,7 +13,47 @@ import (
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/system"
 	"gastrolog/internal/system/raftfsm"
+	"gastrolog/internal/units"
 )
+
+// resolveMaxSizeBudget settles a vault's size budget from the wire, where an
+// absent max_size_bytes ("unset") and a present 0 ("explicitly zero") are
+// distinguishable and mean opposite things (gastrolog-1epfgb). It mutates
+// vaultCfg.MaxSizeBytes to the resolved, always-non-zero value.
+//
+//   - present and 0     → rejected: a 0 budget accepts no records.
+//   - present and > 0   → used as given (an operator's explicit choice,
+//     including a large value for effectively-unlimited).
+//   - absent, creating  → DefaultVaultMaxSizeBytes.
+//   - absent, updating   → the existing vault's stored budget is preserved,
+//     so an update that does not mention max-size never silently re-defaults
+//     a previously-chosen value.
+func resolveMaxSizeBudget(p *apiv1.VaultConfig, vaultCfg *system.VaultConfig, existing []system.VaultConfig) *connect.Error {
+	// max-size is a disk-claim budget: it applies to file vaults. Memory
+	// vaults bound their footprint via memory-budget; leave their (unused)
+	// max-size untouched so a UI/CLI that sends 0 for a non-file vault is not
+	// read as an explicit-0 rejection.
+	if vaultCfg.Type != system.VaultTypeFile {
+		return nil
+	}
+	if p.MaxSizeBytes != nil {
+		if *p.MaxSizeBytes == 0 {
+			return errInvalidArg(fmt.Errorf(
+				"max-size of 0 accepts no records for vault %q; omit it for the default (%s) or set a large value for effectively-unlimited",
+				vaultCfg.Name, units.FormatBytesDisplay(int64(system.DefaultVaultMaxSizeBytes))))
+		}
+		vaultCfg.MaxSizeBytes = *p.MaxSizeBytes
+		return nil
+	}
+	for i := range existing {
+		if existing[i].ID == vaultCfg.ID {
+			vaultCfg.MaxSizeBytes = existing[i].MaxSizeBytes // preserve on update
+			return nil
+		}
+	}
+	vaultCfg.MaxSizeBytes = system.DefaultVaultMaxSizeBytes // default on create
+	return nil
+}
 
 // checkVaultShapeImmutable rejects PutVault when an existing vault's shape
 // fields (type, cloud_service_id) would change. New vaults pass through —
@@ -78,6 +118,15 @@ func (s *SystemServer) PutVault(
 		return nil, errInternal(err)
 	}
 	if connErr := checkNameConflict("vault", vaultCfg.ID, vaultCfg.Name, vaults, func(v system.VaultConfig) (glid.GLID, string) { return v.ID, v.Name }); connErr != nil {
+		return nil, connErr
+	}
+
+	// Resolve the size budget: the wire distinguishes "unset" (absent) from
+	// "explicitly 0" (present, zero), and they mean opposite things
+	// (gastrolog-1epfgb). This is the single ingress for every surface — CLI
+	// create, UI, and config import all call PutVault — so resolving here
+	// makes an unbounded vault unrepresentable regardless of who asked.
+	if connErr := resolveMaxSizeBudget(req.Msg.Config, &vaultCfg, vaults); connErr != nil {
 		return nil, connErr
 	}
 

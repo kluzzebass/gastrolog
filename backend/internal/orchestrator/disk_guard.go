@@ -143,8 +143,10 @@ type vaultDiskGuard struct {
 
 	// Max-size budget (cap-and-refuse): the vault's whole local disk claim
 	// — sealed chunks, indexes, pipeline segment backlog — measured against
-	// maxSizeBytes. 0 = unlimited. Distinct from the free-space thresholds:
-	// those protect the VOLUME, the budget bounds the VAULT.
+	// maxSizeBytes. Always non-zero: creation defaults an unset budget and
+	// the wiring substitutes the default for any 0 (gastrolog-1epfgb), so a 0
+	// here would be a bug, not "unlimited". Distinct from the free-space
+	// thresholds: those protect the VOLUME, the budget bounds the VAULT.
 	maxSizeBytes    uint64
 	capped          atomic.Bool
 	sizeAlarmRaised bool
@@ -764,8 +766,18 @@ func (o *Orchestrator) refreshVaultDiskGuards(ctx context.Context) {
 		if len(paths) == 0 && vc.MaxSizeBytes == 0 {
 			continue
 		}
+		// Defense in depth: a file vault's budget is defaulted at creation and
+		// an explicit 0 is rejected (gastrolog-1epfgb), so a stored 0 on a
+		// file vault can only be a pre-change or bug-produced config. Bound it
+		// with the default rather than pass 0, which the guard reads as "no
+		// budget" — an unbounded file vault must stay unrepresentable, guard
+		// included. Non-file vaults keep their existing (unused) 0.
+		maxSize := vc.MaxSizeBytes
+		if maxSize == 0 && vc.Type == system.VaultTypeFile {
+			maxSize = system.DefaultVaultMaxSizeBytes
+		}
 		keep[vc.ID] = true
-		o.diskGuard.SetVaultGuard(vc.ID, vc.Name, paths, vc.DiskFreeWarnBytes, vc.DiskFreeFloorBytes, vc.MaxSizeBytes)
+		o.diskGuard.SetVaultGuard(vc.ID, vc.Name, paths, vc.DiskFreeWarnBytes, vc.DiskFreeFloorBytes, maxSize)
 	}
 	o.diskGuard.retainVaultGuards(keep, o.alerts)
 }

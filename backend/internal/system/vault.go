@@ -78,13 +78,27 @@ type VaultConfig struct {
 	DiskFreeFloorBytes uint64 `json:"diskFreeFloorBytes,omitempty"`
 
 	// MaxSizeBytes is the per-node byte budget for this vault's whole local
-	// disk claim (sealed chunks, indexes, pipeline segment backlog).
-	// 0 = unlimited. At the budget, admission for records destined to this
-	// vault is refused cluster-wide (cap-and-refuse) until retention or
-	// segment releases drain it — the hard backstop behind a size retention
-	// policy's cap-and-drain.
+	// disk claim (sealed chunks, indexes, pipeline segment backlog). At the
+	// budget, admission for records destined to this vault is refused
+	// cluster-wide (cap-and-refuse) until retention or segment releases drain
+	// it — the hard backstop behind a size retention policy's cap-and-drain.
+	//
+	// A stored config always carries a resolved, non-zero budget: an unset
+	// value is defaulted to DefaultVaultMaxSizeBytes at creation and an
+	// explicit 0 is rejected, both at the PutVault ingress (gastrolog-1epfgb).
+	// "Unlimited" is an explicit large value, never 0. Downstream (disk guard)
+	// may therefore treat a 0 it somehow sees as the default rather than as
+	// "no budget".
 	MaxSizeBytes uint64 `json:"maxSizeBytes,omitempty"`
 }
+
+// DefaultVaultMaxSizeBytes is the per-node size budget applied when a vault is
+// created without one. Deliberately small (1 GiB): the safe failure of a
+// too-small budget is a per-vault refusal that alarms, not the node-wide disk
+// guard deadlock an unbounded vault invites (gastrolog-5ct2av). Operators who
+// want more set --max-size explicitly. Not derived from the volume: a
+// per-vault share does not compose across vaults sharing a disk.
+const DefaultVaultMaxSizeBytes uint64 = 1 << 30
 
 // Canonical values for VaultConfig.RetentionDisposition.
 const (

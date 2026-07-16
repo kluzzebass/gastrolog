@@ -587,7 +587,9 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
       retentionDisposition: storage.type !== "jsonl" ? (storage.retentionDisposition || "delete") : "",
       diskFreeWarnBytes: storage.type === "file" ? parseBytes(storage.diskFreeWarn) : BigInt(0),
       diskFreeFloorBytes: storage.type === "file" ? parseBytes(storage.diskFreeFloor) : BigInt(0),
-      maxSizeBytes: storage.type === "file" ? parseBytes(storage.maxSize) : BigInt(0),
+      // Empty field = unset (server defaults it), not explicit 0 (rejected);
+      // non-file vaults have no disk budget (gastrolog-1epfgb).
+      maxSizeBytes: storage.type === "file" && storage.maxSize.trim() !== "" ? parseBytes(storage.maxSize) : undefined,
       replicationFactor: parseInt(storage.replicationFactor, 10) || 1,
       path: storage.type === "jsonl" ? storage.path : "",
     });
