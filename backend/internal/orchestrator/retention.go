@@ -364,7 +364,15 @@ func (o *Orchestrator) drainExcessChunks(vaultID glid.GLID, cm chunk.ChunkManage
 			now:      o.now,
 			logger:   o.logger,
 		}
-		runner.fireRetentionEvent(m.ID)
+		// Honor the fan-out verdict, exactly as the TTL path does. Ignoring
+		// it destroyed the chunk even when the fan-out was aborted by
+		// shutdown or disk protect, ejecting every record unrouted — the bug
+		// gastrolog-5034va fixed on the TTL path, unfixed here
+		// (gastrolog-65riw5). Skip rather than break: the abort is
+		// per-chunk, and a later chunk may still route.
+		if !runner.fireRetentionEvent(m.ID) {
+			continue
+		}
 		runner.expireChunk(m.ID, "memory-budget-enforcement")
 		reclaimed += m.Bytes
 	}
@@ -901,12 +909,21 @@ func (r *retentionRunner) applyRetentionDispositionToChunk(id chunk.ChunkID) boo
 // re-ingested records produce new chunks that themselves expire on
 // the next sweep. Routes for retention should target a different
 // vault (cold storage, archive, etc.).
-// fireRetentionEvent returns true when the fan-out ran to completion
-// (including the pre-existing partial-fan-out tolerances: unreadable
-// cursor, per-record decode errors). It returns false ONLY when the
-// fan-out was aborted by a terminal condition — pipeline stopped or
-// process shutdown — meaning the route should be retried by a later
-// sweep instead of the chunk being destroyed unrouted (gastrolog-5034va).
+// fireRetentionEvent returns true when the fan-out ran to completion, and
+// false when the caller must leave the chunk alone for a later sweep.
+//
+// False means "no record of this chunk reached a route, and that might
+// change later": the pipeline is stopped or shutting down, disk protect is
+// rejecting everything (gastrolog-5034va), the vault instance is missing, or
+// the chunk could not be opened (gastrolog-65riw5). The chunk survives and
+// the route is retried from scratch. The invariant this protects is stated
+// in applyRetentionDispositionToChunk: duplicate-on-abort at the route
+// target is acceptable, loss of the operator's route disposition is not.
+//
+// True still tolerates a PARTIAL fan-out — records whose own submit failed
+// for a non-terminal reason are dropped and the chunk is destroyed, because
+// one bad record must not strand a chunk forever. Those are counted and
+// reported.
 func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 	if r.orch == nil {
 		return true
@@ -927,16 +944,31 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 		}
 		return false
 	}
+	// No vault instance (or no chunk manager) means the records cannot be
+	// read here, let alone routed. Returning true would destroy the chunk
+	// with zero records delivered — loss of the operator's route
+	// disposition, which this path promises never to do. Retain and let a
+	// later sweep try; if the vault is genuinely gone for good, the chunk
+	// surfaces as an unknown-orphan rather than vanishing (gastrolog-65riw5).
 	vaultInst := r.findVaultInstance()
 	if vaultInst == nil || vaultInst.Chunks == nil {
-		return true
+		r.logger.Warn("retention: no vault instance for fan-out; chunk retained for a later sweep",
+			"vault", r.vaultID, "chunk", id)
+		return false
 	}
 
 	cur, err := vaultInst.Chunks.OpenCursor(id)
 	if err != nil {
-		r.logger.Warn("retention: open cursor for fan-out failed",
-			"vault", r.vaultID, "chunk", id, "error", err)
-		return true
+		// An unreadable cursor may be transient — an I/O error, an
+		// unmounted volume. Destroying the chunk here ejects every record
+		// in it unrouted. Hand it to the unreadable-retry machinery
+		// instead: exponential backoff, the chunk-unreadable alarm, and the
+		// operator's "Retry unreadable" action. Retention sweeps skip a
+		// chunk while it is inside its backoff window, so a permanently
+		// unreadable chunk does not wedge the sweep — which is what made
+		// destroy-on-unreadable look necessary (gastrolog-65riw5).
+		r.markUnreadable(id, fmt.Errorf("open cursor for retention fan-out: %w", err))
+		return false
 	}
 	defer func() {
 		if cerr := cur.Close(); cerr != nil {
@@ -965,6 +997,8 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 
 	jobs := make(chan chunk.Record, retentionFanOutBuffer)
 	var submitWG sync.WaitGroup
+	var dropped atomic.Int64
+	var firstDropErr atomic.Value
 	for range retentionFanOutWorkers {
 		submitWG.Go(func() {
 			for rec := range jobs {
@@ -988,8 +1022,12 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 				default:
 					// Genuine per-record error — partial fan-out is
 					// acceptable; the chunk is still destroyed by the caller.
-					r.logger.Warn("retention: fan-out submit error",
-						"vault", r.vaultID, "chunk", id, "error", subErr)
+					// Counted rather than logged per record: a chunk holds
+					// millions, and one line each is how the pour incident
+					// buried the console. One line with the count after the
+					// fan-out says the same thing (gastrolog-65riw5).
+					dropped.Add(1)
+					firstDropErr.CompareAndSwap(nil, subErr)
 				}
 			}
 		})
@@ -1000,6 +1038,15 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 	submitWG.Wait()
 	if aborted.Load() {
 		return false
+	}
+	// Records that could not be routed are dropped when the caller destroys
+	// the chunk. That tolerance is deliberate — one bad record must not
+	// strand a whole chunk forever — but it is real, so it is reported with
+	// a count rather than left to a Debug line.
+	if n := dropped.Load(); n > 0 {
+		first, _ := firstDropErr.Load().(error)
+		r.logger.Warn("retention: records dropped during route fan-out — they are ejected unrouted when the chunk is destroyed",
+			"vault", r.vaultID, "chunk", id, "dropped", n, "routed", fanned, "first_error", first)
 	}
 	r.logger.Debug("retention: fanned out chunk records via pipeline routing",
 		"vault", r.vaultID, "chunk", id, "count", fanned)
