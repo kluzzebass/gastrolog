@@ -66,8 +66,8 @@ default or correct the comment — the design says apply it.
 | `storage-class` | `1` | **OK-mech** | |
 | `cache-eviction` | `lru` | **OK-mech** | |
 | `retention-disposition` | `delete` | **OK-mech** | safe default: drop, don't route — the conservative choice |
-| `rotation-policy` | `""` = no rotation | **REVIEW** | no rotation ⇒ one ever-growing active chunk; bounded indirectly by `max-size` once that's fixed, but worth an explicit stance |
-| `retention-policy` | `""` = keep forever | **REVIEW** | `retention.go:529` skips when no rules ⇒ data never ages out; also bounded only by `max-size`. Age-unbounded is arguably fine *if* size is bounded — confirm that reasoning holds |
+| `rotation-policy` | `""` = no rotation | **PASS** (operator-confirmed) | Working as intended: size bounds the vault (`max-size`), so rotation may legitimately be unset. Not a defaults defect |
+| `retention-policy` | `""` = keep forever | **PASS** (operator-confirmed) | Working as intended (`retention.go:529` skips when no rules): age is unbounded by design, size is the bound. Not a defaults defect |
 | `cloud-service` | `""` | **N/A** | identity |
 | `path` | `""` | **N/A** | jsonl sinks only |
 
@@ -93,10 +93,13 @@ rule (placeholder text == `ParamDefaults`) is the criterion-4 check.
 | syslog | (read) | — |
 | relp | (read) | — |
 
-**Verdict:** expected **OK-mech** across the board. One remaining task: a UI
-spot-check that placeholder text equals `ParamDefaults()` for two or three
-(chatterbox, docker) — the rule exists but nothing enforces it, so drift is
-possible. No finding expected; confirm.
+**Verdict:** **OK-mech** across the board, and the placeholder-honesty rule
+(criterion 4) is satisfied **by construction**: the UI does not hardcode
+placeholders. `useIngesterDefaults` fetches them from the `GetIngesterDefaults`
+RPC, which serves the backend `ParamDefaults`; the param forms read
+`placeholder={d["<key>"]}`. A grep confirms no form supplies a literal
+placeholder that could drift. There is nothing to keep in sync — the
+placeholder *is* `ParamDefaults`, at runtime.
 
 ## Matrix — mechanism defaults (schedules, sizes, thresholds)
 
@@ -137,24 +140,25 @@ remediation children:
   (documented default never applied), proven at factory.go:102 / manager.go:3561
 - `memory-budget` → gastrolog-1qd5wz
 
-Two policy knobs need an explicit stance rather than a fix:
-
-- `rotation-policy` unset ⇒ no rotation
-- `retention-policy` unset ⇒ no ageing
-
-Both are bounded *indirectly* by `max-size` once it defaults, so they are not
-criterion-1 findings on their own — but the audit should record the decision
-that "size bounds them, so age/rotation may be unset" rather than leave it
-implicit. **Open question for the operator** (below).
+Two policy knobs (`rotation-policy`, `retention-policy`) resolve as
+**working-as-intended** (operator-confirmed): size bounds the vault, so age
+and rotation may legitimately be unset. Not criterion-1 findings. Recorded,
+not deferred.
 
 No new unbounded-when-unset knob was found beyond the three already known.
-The ingester and mechanism defaults are considered and honest (pending the
-UI placeholder spot-check).
+The ingester and mechanism defaults are considered and honest — the ingester
+placeholder-honesty rule holds by construction (defaults served from the
+backend `ParamDefaults` RPC, not hardcoded in the UI).
 
-## Open questions for the operator
+## Audit closed
 
-1. **`rotation-policy` / `retention-policy` unset.** Is "size bounds the
-   vault, so age and rotation may legitimately be unset" the intended stance?
-   If yes, record it. If no (e.g. a vault should always rotate), these become
-   findings with their own defaults.
-2. **UI placeholder spot-check** — confirm, or file if drifted.
+Both open questions resolved:
+
+1. `rotation-policy` / `retention-policy` unset — **working as intended**
+   (operator-confirmed); size is the bound.
+2. Ingester placeholder honesty — **PASS by construction** (UI reads
+   `ParamDefaults` from the RPC; no hardcoded placeholder to drift).
+
+Remediation is tracked on the three children (`max-size` gastrolog-1epfgb,
+`cache-budget` gastrolog-338j51, `memory-budget` gastrolog-1qd5wz) plus the
+landed script fix gastrolog-2b2yyy.
