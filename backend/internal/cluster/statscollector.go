@@ -149,6 +149,16 @@ type RaftStatsProvider interface {
 	LocalStats() map[string]string
 }
 
+// LogDropsProvider exposes the node's cumulative count of discarded
+// diagnostic log records. Satisfied by *logging.CaptureHandler; defined at
+// the consumer site to avoid importing logging. The count is a metric with
+// no operator action — it must never become an alarm or a log line, since
+// logging about dropped logs feeds the self-ingester that is dropping them
+// (gastrolog-3phtqv).
+type LogDropsProvider interface {
+	DroppedCount() int64
+}
+
 // PeerConnSnapshotProvider exposes managed outbound connection telemetry.
 type PeerConnSnapshotProvider interface {
 	Snapshot() []PeerConnSnapshot
@@ -188,8 +198,9 @@ type StatsCollectorConfig struct {
 	// any change so contributors entering/leaving the sum can never read
 	// as traffic (gastrolog-mliwrd).
 	ClusterRouteTotals func() (routed, matched int64, membership string)
-	Alerts             AlertProvider // optional; nil if no alert collector
-	Jobs               JobsProvider  // optional; nil in single-node mode
+	Alerts             AlertProvider    // optional; nil if no alert collector
+	LogDrops           LogDropsProvider // optional; nil disables the drop counter
+	Jobs               JobsProvider     // optional; nil in single-node mode
 	NodeID             string
 	NodeNameFn         func() string // lazily resolved node name
 	Version            string
@@ -490,6 +501,13 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 	}
 	c.appendPeerTrafficTotals(stats, now, stepWindows)
 	c.collectRaftLiveness(stats, now, stepWindows)
+
+	// Discarded diagnostic log records: a pure counter read, no thresholds
+	// and no alarm — the operator has nothing to do about it and the health
+	// surfaces trend it (gastrolog-3phtqv).
+	if c.cfg.LogDrops != nil {
+		stats.SelfIngesterDropsTotal = uint64(max(c.cfg.LogDrops.DroppedCount(), 0))
+	}
 
 	// Active alerts.
 	if c.cfg.Alerts != nil {

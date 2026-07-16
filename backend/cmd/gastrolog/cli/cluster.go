@@ -86,25 +86,14 @@ func newClusterStatusCmd() *cobra.Command {
 				p.table([]string{"ID", "NAME", "ADDRESS", "ROLE", "SUFFRAGE"}, rows)
 			}
 
-			// Raft liveness per node (gastrolog-1io54g) — parity with the
-			// inspector's Raft section.
-			var liveRows [][]string
-			for _, n := range msg.Nodes {
-				if n.Stats == nil || n.Stats.RaftWalAppendsTotal == 0 {
-					continue
-				}
-				liveRows = append(liveRows, []string{
-					n.Name,
-					fmt.Sprintf("%.1fms", n.Stats.RaftWalAppendAvgMs),
-					fmt.Sprintf("%.0fms", n.Stats.RaftWalAppendMaxMs),
-					fmt.Sprintf("%d (%.1f/min)", n.Stats.RaftElectionsTotal, n.Stats.RaftElectionsPerMin),
-					strconv.FormatUint(n.Stats.RaftLeaderLossesTotal, 10),
-					strconv.FormatUint(n.Stats.RaftFailedHeartbeatsTotal, 10),
-				})
-			}
-			if len(liveRows) > 0 {
+			if liveRows := raftLivenessRows(msg.Nodes); len(liveRows) > 0 {
 				fmt.Println()
 				p.table([]string{"NODE", "WAL AVG", "WAL MAX", "ELECTIONS", "LEADER LOSSES", "FAILED HBS"}, liveRows)
+			}
+
+			if dropRows := logDropRows(msg.Nodes); len(dropRows) > 0 {
+				fmt.Println()
+				p.table([]string{"NODE", "LOG DROPS"}, dropRows)
 			}
 
 			if msg.LocalStats != nil {
@@ -124,6 +113,45 @@ func newClusterStatusCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// raftLivenessRows builds the per-node Raft liveness table (gastrolog-1io54g)
+// — parity with the inspector's Raft section. Nodes with no WAL appends are
+// skipped: they run no Raft group and have nothing to report.
+func raftLivenessRows(nodes []*v1.ClusterNode) [][]string {
+	var rows [][]string
+	for _, n := range nodes {
+		if n.Stats == nil || n.Stats.RaftWalAppendsTotal == 0 {
+			continue
+		}
+		rows = append(rows, []string{
+			n.Name,
+			fmt.Sprintf("%.1fms", n.Stats.RaftWalAppendAvgMs),
+			fmt.Sprintf("%.0fms", n.Stats.RaftWalAppendMaxMs),
+			fmt.Sprintf("%d (%.1f/min)", n.Stats.RaftElectionsTotal, n.Stats.RaftElectionsPerMin),
+			strconv.FormatUint(n.Stats.RaftLeaderLossesTotal, 10),
+			strconv.FormatUint(n.Stats.RaftFailedHeartbeatsTotal, 10),
+		})
+	}
+	return rows
+}
+
+// logDropRows builds the per-node discarded-diagnostic-log table
+// (gastrolog-3phtqv) — parity with the inspector's System section. Nodes that
+// have dropped nothing are skipped: at zero there is nothing to report, and
+// this is a capacity signal to trend, not an alarm to act on.
+func logDropRows(nodes []*v1.ClusterNode) [][]string {
+	var rows [][]string
+	for _, n := range nodes {
+		if n.Stats == nil || n.Stats.SelfIngesterDropsTotal == 0 {
+			continue
+		}
+		rows = append(rows, []string{
+			n.Name,
+			strconv.FormatUint(n.Stats.SelfIngesterDropsTotal, 10),
+		})
+	}
+	return rows
 }
 
 // newClusterThroughputCmd shows the pipeline throughput rates the inspector

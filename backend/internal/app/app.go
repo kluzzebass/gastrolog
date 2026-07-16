@@ -363,7 +363,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 
 	groupMgr, vaultWAL, nodeAddrResolver := setupMultiRaft(clusterSrv, rawStore, nodeID, homeDir, logger, alertCollector)
 
-	factories := buildFactories(logger, homeDir, vaultsDir, cfgStore, orch, certMgr, cfg.SlogCapture, cfg.SlogCaptureHandler, alertCollector, groupMgr, nodeAddrResolver, nodeID)
+	factories := buildFactories(logger, homeDir, vaultsDir, cfgStore, orch, certMgr, cfg.SlogCapture, cfg.SlogCaptureHandler, groupMgr, nodeAddrResolver, nodeID)
 	if clusterSrv != nil {
 		factories.PeerConns = clusterSrv.PeerConns()
 	}
@@ -453,7 +453,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		}
 	}
 
-	broadcaster, peerState, peerJobState, localStatsFn, clusterRouteRatesFn := setupClusterStats(ctx, logger, cfgStore, clusterSrv, orch, alertCollector, nodeID, cfg.ServerAddr, cfg.PprofAddr, statsSignal, raftLive)
+	broadcaster, peerState, peerJobState, localStatsFn, clusterRouteRatesFn := setupClusterStats(ctx, logger, cfgStore, clusterSrv, orch, alertCollector, cfg.SlogCaptureHandler, nodeID, cfg.ServerAddr, cfg.PprofAddr, statsSignal, raftLive)
 	if peerState != nil {
 		// Per-vault admission verdicts are cluster-consistent: a starved
 		// vault volume or an over-budget vault claim on any node suspends
@@ -794,7 +794,14 @@ func (a *raftLivenessAdapter) RaftLiveness() (elections, leaderLosses, failedHea
 	return elections, leaderLosses, failedHeartbeats
 }
 
-func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system.Store, clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, alerts *alert.Collector, nodeID string, apiAddr string, pprofAddr string, statsSignal *notify.Signal, raftLive cluster.RaftLivenessProvider) (*cluster.Broadcaster, *cluster.PeerState, *cluster.PeerJobState, func() *gastrologv1.NodeStats, func() (*gastrologv1.ThroughputRate, *gastrologv1.ThroughputRate)) {
+func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system.Store, clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, alerts *alert.Collector, slogCapture *logging.CaptureHandler, nodeID string, apiAddr string, pprofAddr string, statsSignal *notify.Signal, raftLive cluster.RaftLivenessProvider) (*cluster.Broadcaster, *cluster.PeerState, *cluster.PeerJobState, func() *gastrologv1.NodeStats, func() (*gastrologv1.ThroughputRate, *gastrologv1.ThroughputRate)) {
+	// Taken as a concrete type and converted explicitly: assigning a typed
+	// nil *CaptureHandler straight into the interface field would read as
+	// non-nil and panic in DroppedCount on the first tick.
+	var logDrops cluster.LogDropsProvider
+	if slogCapture != nil {
+		logDrops = slogCapture
+	}
 	var broadcaster *cluster.Broadcaster
 	if clusterSrv != nil && clusterSrv.PeerConns() != nil {
 		broadcaster = cluster.NewBroadcaster(clusterSrv.PeerConns(), compBroadcast.Apply(logger))
@@ -838,6 +845,8 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 		Stats:        statsAdapter,
 		PeerConns:    clusterSrv.PeerConns(),
 		RaftLiveness: raftLive,
+		// Discarded diagnostic log records; nil when capture is disabled.
+		LogDrops: logDrops,
 		// Cluster-total route counters: local + live peers' cumulative
 		// broadcast totals. Windowed server-side so cluster rate history is
 		// system data, not client-side accumulation (gastrolog-4eh5ns).
@@ -1554,7 +1563,7 @@ func setupMultiRaft(clusterSrv *cluster.Server, rawStore system.Store, nodeID, h
 	return groupMgr, wal, resolver
 }
 
-func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore system.Store, orch *orchestrator.Orchestrator, certMgr *cert.Manager, slogCh <-chan logging.CapturedRecord, slogCapture *logging.CaptureHandler, alertCollector *alert.Collector, groupMgr *raftgroup.GroupManager, nodeAddrResolver func(string) (string, bool), nodeID string) orchestrator.Factories {
+func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore system.Store, orch *orchestrator.Orchestrator, certMgr *cert.Manager, slogCh <-chan logging.CapturedRecord, slogCapture *logging.CaptureHandler, groupMgr *raftgroup.GroupManager, nodeAddrResolver func(string) (string, bool), nodeID string) orchestrator.Factories {
 	reg := func(factory orchestrator.IngesterFactory, defaults func() map[string]string, tester orchestrator.ConnectionTester) orchestrator.IngesterRegistration {
 		return orchestrator.IngesterRegistration{Factory: factory, Defaults: defaults, Tester: tester}
 	}
@@ -1587,7 +1596,7 @@ func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore sys
 		"tail":      reg(ingesttail.NewFactory(), ingesttail.ParamDefaults, nil),
 	}
 	if slogCh != nil {
-		ingesterTypes["self"] = reg(ingestself.NewFactory(slogCh, slogCapture, alertCollector), ingestself.ParamDefaults, nil)
+		ingesterTypes["self"] = reg(ingestself.NewFactory(slogCh, slogCapture), ingestself.ParamDefaults, nil)
 	}
 	return orchestrator.Factories{
 		IngesterTypes: ingesterTypes,

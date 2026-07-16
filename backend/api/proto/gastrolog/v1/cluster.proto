@@ -168,6 +168,13 @@ message NodeStats {
   // max-size budget. Honored cluster-wide by the same per-vault admission
   // gate as disk_protected_vault_ids, with a budget-specific error.
   repeated bytes size_capped_vault_ids = 49;
+
+  // Cumulative diagnostic log records this node's capture handler has
+  // discarded because the capture channel was full. A capacity signal with
+  // no operator action, so it is a metric and never an alarm
+  // (gastrolog-3phtqv). It is deliberately not logged either: a log line
+  // about dropped logs feeds the self-ingester that is dropping them.
+  uint64 self_ingester_drops_total = 50;
 }
 
 // VaultPipelineNodeDisk is one vault's local pipeline storage areas on a

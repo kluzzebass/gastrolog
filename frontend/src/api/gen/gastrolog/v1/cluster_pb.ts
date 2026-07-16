@@ -741,6 +741,17 @@ export class NodeStats extends Message<NodeStats> {
    */
   sizeCappedVaultIds: Uint8Array[] = [];
 
+  /**
+   * Cumulative diagnostic log records this node's capture handler has
+   * discarded because the capture channel was full. A capacity signal with
+   * no operator action, so it is a metric and never an alarm
+   * (gastrolog-3phtqv). It is deliberately not logged either: a log line
+   * about dropped logs feeds the self-ingester that is dropping them.
+   *
+   * @generated from field: uint64 self_ingester_drops_total = 50;
+   */
+  selfIngesterDropsTotal = protoInt64.zero;
+
   constructor(data?: PartialMessage<NodeStats>) {
     super();
     proto3.util.initPartial(data, this);
@@ -798,6 +809,7 @@ export class NodeStats extends Message<NodeStats> {
     { no: 47, name: "raft_elections_per_min", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
     { no: 48, name: "disk_protected_vault_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
     { no: 49, name: "size_capped_vault_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
+    { no: 50, name: "self_ingester_drops_total", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): NodeStats {

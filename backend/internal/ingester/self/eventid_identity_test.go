@@ -19,7 +19,7 @@ func TestEventIDIdentity(t *testing.T) {
 	capture.SetMinCaptureLevel(slog.LevelInfo)
 
 	id := glid.New()
-	factory := NewFactory(ch, capture, nil)
+	factory := NewFactory(ch, capture)
 	ing, err := factory(id, nil, nil)
 	if err != nil {
 		t.Fatalf("factory: %v", err)

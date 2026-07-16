@@ -656,8 +656,14 @@ type NodeStats struct {
 	// max-size budget. Honored cluster-wide by the same per-vault admission
 	// gate as disk_protected_vault_ids, with a budget-specific error.
 	SizeCappedVaultIds [][]byte `protobuf:"bytes,49,rep,name=size_capped_vault_ids,json=sizeCappedVaultIds,proto3" json:"size_capped_vault_ids,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// Cumulative diagnostic log records this node's capture handler has
+	// discarded because the capture channel was full. A capacity signal with
+	// no operator action, so it is a metric and never an alarm
+	// (gastrolog-3phtqv). It is deliberately not logged either: a log line
+	// about dropped logs feeds the self-ingester that is dropping them.
+	SelfIngesterDropsTotal uint64 `protobuf:"varint,50,opt,name=self_ingester_drops_total,json=selfIngesterDropsTotal,proto3" json:"self_ingester_drops_total,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *NodeStats) Reset() {
@@ -1031,6 +1037,13 @@ func (x *NodeStats) GetSizeCappedVaultIds() [][]byte {
 		return x.SizeCappedVaultIds
 	}
 	return nil
+}
+
+func (x *NodeStats) GetSelfIngesterDropsTotal() uint64 {
+	if x != nil {
+		return x.SelfIngesterDropsTotal
+	}
+	return 0
 }
 
 // VaultPipelineNodeDisk is one vault's local pipeline storage areas on a
@@ -4532,7 +4545,7 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\apayload\"\v\n" +
 	"\tHeartbeat\"1\n" +
 	"\bNodeJobs\x12%\n" +
-	"\x04jobs\x18\x01 \x03(\v2\x11.gastrolog.v1.JobR\x04jobs\"\xcc\x12\n" +
+	"\x04jobs\x18\x01 \x03(\v2\x11.gastrolog.v1.JobR\x04jobs\"\x87\x13\n" +
 	"\tNodeStats\x12\x1f\n" +
 	"\vcpu_percent\x18\x01 \x01(\x01R\n" +
 	"cpuPercent\x12!\n" +
@@ -4590,7 +4603,8 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x1craft_failed_heartbeats_total\x18. \x01(\x04R\x19raftFailedHeartbeatsTotal\x123\n" +
 	"\x16raft_elections_per_min\x18/ \x01(\x01R\x13raftElectionsPerMin\x127\n" +
 	"\x18disk_protected_vault_ids\x180 \x03(\fR\x15diskProtectedVaultIds\x121\n" +
-	"\x15size_capped_vault_ids\x181 \x03(\fR\x12sizeCappedVaultIds\"\xec\x01\n" +
+	"\x15size_capped_vault_ids\x181 \x03(\fR\x12sizeCappedVaultIds\x129\n" +
+	"\x19self_ingester_drops_total\x182 \x01(\x04R\x16selfIngesterDropsTotal\"\xec\x01\n" +
 	"\x15VaultPipelineNodeDisk\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12)\n" +
 	"\x10working_segments\x18\x02 \x01(\rR\x0fworkingSegments\x12<\n" +
