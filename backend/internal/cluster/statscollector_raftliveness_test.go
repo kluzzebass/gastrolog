@@ -1,9 +1,15 @@
 package cluster
 
-// Coverage for gastrolog-1io54g: Raft liveness fields in NodeStats and the
-// election-storm / WAL-latency alerts maintained by the collector tick.
+// Coverage for gastrolog-1io54g: Raft liveness fields in NodeStats, and for
+// gastrolog-5nvb4y: neither election storm nor WAL latency may raise an
+// alarm — both are diagnostics with no operator action, carried as stats
+// plus transition-edge logs (EEMUA 191 actionability test).
 
 import (
+	"context"
+	"log/slog"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -45,8 +51,14 @@ func TestStatsCollector_RaftLivenessFieldsAndAlerts(t *testing.T) {
 	if stats.RaftWalAppendMaxMs != 1500 {
 		t.Fatalf("wal max = %vms, want 1500", stats.RaftWalAppendMaxMs)
 	}
-	if alertActive(alerts, "raft-wal-latency") == false {
-		t.Fatal("wal-latency alert should be set at 1500ms max")
+	// WAL append latency is a diagnostic, not an alarm: the max ships in
+	// stats and the degraded transition is logged, but nothing reaches the
+	// alarm list (gastrolog-5nvb4y).
+	if alertActive(alerts, "raft-wal-latency") {
+		t.Fatal("wal latency must not raise an alarm; it is log + stats only")
+	}
+	if !collectorWalDegraded(collector) {
+		t.Fatal("wal degraded hysteresis state should be active at 1500ms max")
 	}
 
 	// Snapshot between ticks must NOT consume the max.
@@ -77,8 +89,8 @@ func TestStatsCollector_RaftLivenessFieldsAndAlerts(t *testing.T) {
 	if !collectorStormActive(collector) {
 		t.Fatal("storm hysteresis state should be active at 6/min")
 	}
-	if alertActive(alerts, "raft-wal-latency") {
-		t.Fatal("wal-latency alert should clear once max drops below the clear threshold")
+	if collectorWalDegraded(collector) {
+		t.Fatal("wal degraded state should clear once max drops below the calm threshold")
 	}
 
 	// Tick 3: calm — storm state clears with hysteresis.
@@ -95,6 +107,99 @@ func collectorStormActive(c *StatsCollector) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.electionStormActive
+}
+
+func collectorWalDegraded(c *StatsCollector) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.walLatencyDegradedActive
+}
+
+// logSpy captures emitted records so the transition-edge tests can assert
+// one line per edge rather than one per tick.
+type logSpy struct {
+	mu       sync.Mutex
+	messages []string
+}
+
+func (s *logSpy) Enabled(context.Context, slog.Level) bool { return true }
+
+func (s *logSpy) Handle(_ context.Context, r slog.Record) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.messages = append(s.messages, r.Message)
+	return nil
+}
+
+func (s *logSpy) WithAttrs([]slog.Attr) slog.Handler { return s }
+func (s *logSpy) WithGroup(string) slog.Handler      { return s }
+
+func (s *logSpy) count(substr string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for _, m := range s.messages {
+		if strings.Contains(m, substr) {
+			n++
+		}
+	}
+	return n
+}
+
+// A demoted diagnostic logs once entering the condition and once on
+// recovery — never once per tick, which is the chattering the razor demotion
+// exists to avoid (gastrolog-5nvb4y). No alert collector is wired here on
+// purpose: before this change the whole block sat behind a `cfg.Alerts ==
+// nil` guard, which silently disabled the logging on any node without a
+// collector.
+func TestStatsCollector_WalLatencyLogsOnTransitionEdgesOnly(t *testing.T) {
+	t.Parallel()
+	spy := &logSpy{}
+	live := &stubRaftLiveness{}
+	collector := NewStatsCollector(StatsCollectorConfig{
+		RaftLiveness: live,
+		Logger:       slog.New(spy),
+		NodeID:       "node-a",
+		NodeNameFn:   func() string { return "node-a" },
+	})
+	t0 := time.Now()
+
+	// Tick 1: over the degraded threshold — one line.
+	live.maxNanos = uint64(1500 * time.Millisecond)
+	collector.CollectLocalTick(t0)
+	if got := spy.count("WAL append latency degraded"); got != 1 {
+		t.Fatalf("degraded logs = %d, want exactly 1 on the transition edge", got)
+	}
+	if !collectorWalDegraded(collector) {
+		t.Fatal("wal degraded state should be active at 1500ms max")
+	}
+
+	// Tick 2: still degraded — a sustained condition must not repeat.
+	live.maxNanos = uint64(1600 * time.Millisecond)
+	collector.CollectLocalTick(t0.Add(60 * time.Second))
+	if got := spy.count("WAL append latency degraded"); got != 1 {
+		t.Fatalf("degraded logs = %d after a second degraded tick, want still 1", got)
+	}
+
+	// Tick 3: inside the hysteresis band (250–1000ms) — neither edge fires.
+	live.maxNanos = uint64(500 * time.Millisecond)
+	collector.CollectLocalTick(t0.Add(120 * time.Second))
+	if got := spy.count("back to normal"); got != 0 {
+		t.Fatalf("recovery logs = %d inside the hysteresis band, want 0", got)
+	}
+	if !collectorWalDegraded(collector) {
+		t.Fatal("hysteresis: state must hold degraded between the thresholds")
+	}
+
+	// Tick 4: below the calm threshold — one recovery line.
+	live.maxNanos = uint64(10 * time.Millisecond)
+	collector.CollectLocalTick(t0.Add(180 * time.Second))
+	if got := spy.count("back to normal"); got != 1 {
+		t.Fatalf("recovery logs = %d, want exactly 1 on the recovery edge", got)
+	}
+	if collectorWalDegraded(collector) {
+		t.Fatal("wal degraded state should clear once calm")
+	}
 }
 
 func alertActive(c *alert.Collector, id string) bool {

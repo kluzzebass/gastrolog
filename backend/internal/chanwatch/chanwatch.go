@@ -1,17 +1,20 @@
-// Package chanwatch provides threshold-crossing alerts for buffered channels.
-// A Watcher polls channel utilization at a fixed interval and logs once when
-// a channel crosses above the configured threshold, and once when it drops
-// back below. This avoids log spam while still catching pressure spikes.
+// Package chanwatch provides threshold-crossing logging for buffered
+// channels. A Watcher polls channel utilization at a fixed interval and logs
+// once when a channel crosses above the configured threshold, and once when
+// it drops back below. This avoids log spam while still catching pressure
+// spikes.
+//
+// Channel saturation is a diagnostic, not an alarm: the operator has no
+// action to take — relieving it is capacity-tuning engineering work — so it
+// is logged and never raised to the alarm list (EEMUA 191 actionability
+// test, gastrolog-29380r).
 package chanwatch
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"sync"
 	"time"
-
-	"gastrolog/internal/alert"
 )
 
 // Probe returns the current length and capacity of a channel.
@@ -30,7 +33,6 @@ type channel struct {
 type Watcher struct {
 	logger   *slog.Logger
 	interval time.Duration
-	alerts   *alert.Collector // optional
 
 	mu       sync.Mutex
 	channels []channel
@@ -42,13 +44,6 @@ func New(logger *slog.Logger, interval time.Duration) *Watcher {
 		logger:   logger,
 		interval: interval,
 	}
-}
-
-// SetAlerts configures an alert collector for pressure notifications.
-func (w *Watcher) SetAlerts(a *alert.Collector) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.alerts = a
 }
 
 // Watch adds a channel to monitor. Safe to call after Run has started.
@@ -65,17 +60,12 @@ func (w *Watcher) Watch(name string, probe Probe, threshold float64) {
 
 // Unwatch removes a previously-added channel by name. Safe to call
 // after Run has started, and idempotent — unknown names are a no-op.
-// Clears any active pressure alert for the channel before removing
-// it so a removed peer doesn't leave a stuck alert behind.
 func (w *Watcher) Unwatch(name string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	for i, ch := range w.channels {
 		if ch.name != name {
 			continue
-		}
-		if ch.pressured && w.alerts != nil {
-			w.alerts.Clear("channel-pressure:" + name)
 		}
 		w.channels = append(w.channels[:i], w.channels[i+1:]...)
 		return
@@ -116,13 +106,6 @@ func (w *Watcher) poll() {
 				"capacity", capacity,
 				"utilization", int(ratio*100),
 			)
-			if w.alerts != nil {
-				w.alerts.Set(
-					"channel-pressure:"+ch.name,
-					alert.Warning, "chanwatch",
-					fmt.Sprintf("Channel %q at %d%% capacity (%d/%d)", ch.name, int(ratio*100), length, capacity),
-				)
-			}
 		} else if ch.pressured && ratio < ch.threshold {
 			ch.pressured = false
 			w.logger.Info("channel pressure resolved",
@@ -131,9 +114,6 @@ func (w *Watcher) poll() {
 				"capacity", capacity,
 				"utilization", int(ratio*100),
 			)
-			if w.alerts != nil {
-				w.alerts.Clear("channel-pressure:" + ch.name)
-			}
 		}
 	}
 }

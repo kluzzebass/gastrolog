@@ -68,15 +68,14 @@ Verdicts under the governing test:
 | rate-alert (`rate:*`) | ratealerter | Operator-configured rate threshold crossed | **Alarm** (operator-defined) | Low | Operator defined the threshold; response text comes from the rule |
 | archival sweep failures | archival | Archive writes failing | **Alarm** | High | Check archive target storage |
 | retention route-fan-out terminal failure | retention | Chunk destroyed without routing (pipeline down at expiry) | **Alarm** | Critical | Records ejected unrouted — investigate pipeline availability; potential data loss at retention boundary |
-| chanwatch saturation | chanwatch | Internal channel saturated past watermark | **Event** (demote) | — | Diagnostic; capacity tuning is engineering work, not operator action. Metric + journal |
-| `raft-wal-latency` | statscollector | WAL append max over threshold | **Event** (demote) | — | Diagnostic pointer to disk contention; the rate ships in stats. Journal + health surface |
+| chanwatch saturation | chanwatch | Internal channel saturated past watermark | **Event** (demoted ✓) | — | Landed: transition-edge logs. Journal surface lands with phase 5 |
+| `raft-wal-latency` | statscollector | WAL append max over threshold | **Event** (demoted ✓) | — | Landed: transition-edge logs + stats (`RaftWalAppendMaxMs`) |
 | scheduler-stall | schedwatch | Runtime stalled past leader lease | **Event** (demoted ✓) | — | Landed: log + counters |
 | election-storm | statscollector | Elections/min over threshold | **Event** (demoted ✓) | — | Landed: transition-edge logs + stats |
 
-Rows marked "demote" are the remaining razor demotions; rows marked ✓
-already landed. Every surviving alarm gets a catalog entry in code (see
-below) carrying its response text — the UI shows it; no tracker IDs, no
-internal jargon.
+Rows marked ✓ already landed; phase 1 is complete. Every surviving alarm
+gets a catalog entry in code (see below) carrying its response text — the UI
+shows it; no tracker IDs, no internal jargon.
 
 ## Alarm-type catalog in code
 
@@ -172,8 +171,8 @@ with a count.
 
 ## Implementation phases
 
-1. **Razor demotions** — scheduler-stall ✓, election-storm ✓ (landed);
-   chanwatch saturation and raft-wal-latency remain.
+1. **Razor demotions** ✓ — scheduler-stall, election-storm, chanwatch
+   saturation, raft-wal-latency all demoted to transition-edge logs.
 2. **Catalog + priorities** — the AlarmType registry; every Set site
    migrates to Raise; severity → priority; response text written per type
    (operator-reviewed).

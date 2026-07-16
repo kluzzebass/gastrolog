@@ -90,12 +90,9 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 		return fmt.Errorf("start pipeline: %w", err)
 	}
 
-	// Channel pressure watchdog — slog-based alerts at 90%, separate from the
-	// hysteresis gate used for throttling (logs once on cross, once on resolve).
+	// Channel pressure watchdog — logs at 90%, separate from the hysteresis
+	// gate used for throttling (logs once on cross, once on resolve).
 	cw := chanwatch.New(o.logger, time.Second)
-	if ac, ok := o.alerts.(*alert.Collector); ok {
-		cw.SetAlerts(ac)
-	}
 	cw.Watch("ingest-digest", ingestProbe, 0.9)
 	o.auxWg.Go(func() { cw.Run(ctx) })
 

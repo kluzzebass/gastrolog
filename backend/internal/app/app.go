@@ -427,7 +427,6 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	// Monitor slog capture channel pressure.
 	if cfg.SlogCapture != nil {
 		slogCW := chanwatch.New(logger, 1*time.Second)
-		slogCW.SetAlerts(alertCollector)
 		slogCW.Watch("slogCaptureCh", func() (int, int) {
 			return len(cfg.SlogCapture), cap(cfg.SlogCapture)
 		}, 0.9)
