@@ -557,18 +557,22 @@ export class VaultConfig extends Message<VaultConfig> {
   cacheEviction = "";
 
   /**
-   * max cache size (e.g. "1GB", "500MB"; default: "1GiB")
+   * Warm-cache soft cap for cloud-backed chunks, in bytes — numeric to match
+   * max_size_bytes / memory_budget_bytes. Optional so the server can tell
+   * "unset" (defaulted at creation for cloud vaults) from "explicit 0"
+   * (rejected). Unlimited is an explicit large value (gastrolog-338j51).
    *
-   * @generated from field: string cache_budget = 14;
+   * @generated from field: optional uint64 cache_budget_bytes = 14;
    */
-  cacheBudget = "";
+  cacheBudgetBytes?: bigint;
 
   /**
-   * eviction TTL duration (e.g. "1h", "7d"); only for ttl mode
+   * Warm-cache eviction age in nanoseconds (ttl mode only) — numeric to match
+   * the max_age_nanos durations. 0 = unset.
    *
-   * @generated from field: string cache_ttl = 15;
+   * @generated from field: int64 cache_ttl_nanos = 15;
    */
-  cacheTtl = "";
+  cacheTtlNanos = protoInt64.zero;
 
   /**
    * "delete" (default) or "route" — what retention does with aged-out records
@@ -631,8 +635,8 @@ export class VaultConfig extends Message<VaultConfig> {
     { no: 11, name: "path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 12, name: "placements", kind: "message", T: VaultPlacement, repeated: true },
     { no: 13, name: "cache_eviction", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 14, name: "cache_budget", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 15, name: "cache_ttl", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 14, name: "cache_budget_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */, opt: true },
+    { no: 15, name: "cache_ttl_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 16, name: "retention_disposition", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 17, name: "disk_free_warn_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 18, name: "disk_free_floor_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },

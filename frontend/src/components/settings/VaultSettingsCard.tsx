@@ -24,7 +24,7 @@ import { JobProgress } from "./VaultHelpers";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { leaderNodeId, followerNodeIds } from "../../utils/placement";
 import { buildNodeNameMap, resolveNodeName } from "../../utils/nodeNames";
-import { formatBytes, formatBytesBigint, parseBytes } from "../../utils/units";
+import { formatBytes, formatBytesBigint, parseBytes, formatDurationNanos, parseDurationNanos } from "../../utils/units";
 
 import {
   VaultStorageForm,
@@ -74,8 +74,8 @@ function vaultToEntry(v: VaultConfig): StorageEntry {
     storageClass: String(v.storageClass || 0),
     cloudServiceId: v.cloudServiceId.length > 0 ? encode(v.cloudServiceId) : "",
     cacheEviction: v.cacheEviction || "lru",
-    cacheBudget: v.cacheBudget || "",
-    cacheTTL: v.cacheTtl || "",
+    cacheBudget: v.cacheBudgetBytes != null && v.cacheBudgetBytes > BigInt(0) ? formatBytesBigint(v.cacheBudgetBytes) : "",
+    cacheTTL: v.cacheTtlNanos > BigInt(0) ? formatDurationNanos(v.cacheTtlNanos) : "",
     memoryBudget: v.memoryBudgetBytes > 0 ? formatBytes(v.memoryBudgetBytes) : "",
     rotationPolicyId: v.rotationPolicyId.length > 0 ? encode(v.rotationPolicyId) : "",
     retentionPolicyId: v.retentionRules[0] ? encode(v.retentionRules[0].retentionPolicyId) : "",
@@ -107,8 +107,10 @@ function entryToVault(
     storageClass: entry.type === "file" ? parseInt(entry.storageClass, 10) || 0 : 0,
     cloudServiceId: cloudBacked ? decode(entry.cloudServiceId) : new Uint8Array(0),
     cacheEviction: cloudBacked ? (entry.cacheEviction || "lru") : "",
-    cacheBudget: cloudBacked ? (entry.cacheBudget || "") : "",
-    cacheTtl: cloudBacked ? (entry.cacheTTL || "") : "",
+    // Empty field = unset (server defaults it for cloud vaults), not explicit
+    // 0 (rejected); numeric on the wire like max-size (gastrolog-338j51).
+    cacheBudgetBytes: cloudBacked && entry.cacheBudget.trim() !== "" ? parseBytes(entry.cacheBudget) : undefined,
+    cacheTtlNanos: cloudBacked && entry.cacheTTL.trim() !== "" ? parseDurationNanos(entry.cacheTTL) : protoInt64.zero,
     memoryBudgetBytes: entry.type === "memory" ? parseMemoryBudget(entry.memoryBudget) : protoInt64.zero,
     rotationPolicyId: entry.rotationPolicyId ? decode(entry.rotationPolicyId) : new Uint8Array(0),
     retentionRules: entry.retentionPolicyId

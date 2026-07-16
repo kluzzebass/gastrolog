@@ -1693,6 +1693,7 @@ func buildVaultParams(sys *system.System, vaultCfg system.VaultConfig, localNode
 		// the same chunkDir path post-step-7k. See gastrolog-4k5mg.
 		if vaultCfg.IsCloud() {
 			addCloudParams(params, &sys.Config, vaultCfg)
+			addCacheParams(params, vaultCfg)
 		}
 		if fs := findLocalFileStorage(rt, localNodeID, vaultCfg.StorageClass); fs != nil {
 			params["dir"] = filepath.Join(fs.Path, "vaults", vaultCfg.ID.String(), vaultCfg.ID.String())
@@ -1708,6 +1709,23 @@ func buildVaultParams(sys *system.System, vaultCfg system.VaultConfig, localNode
 	}
 
 	return params
+}
+
+// addCacheParams threads the vault's warm-cache config into the factory param
+// map. Before gastrolog-338j51 nothing populated these keys, so the file
+// manager always read empty and ran with an unbounded cache regardless of
+// config. Numeric config → string param → factory re-parses, mirroring how
+// memory-budget is threaded (buildVaultParams' budgetBytes).
+func addCacheParams(params map[string]string, vaultCfg system.VaultConfig) {
+	if vaultCfg.CacheEviction != "" {
+		params["cache_eviction"] = vaultCfg.CacheEviction
+	}
+	if vaultCfg.CacheBudgetBytes > 0 {
+		params["cache_budget"] = strconv.FormatUint(vaultCfg.CacheBudgetBytes, 10)
+	}
+	if vaultCfg.CacheTTLNanos > 0 {
+		params["cache_ttl"] = time.Duration(vaultCfg.CacheTTLNanos).String()
+	}
 }
 
 // addCloudParams writes cloud-store credentials + bucket info into params

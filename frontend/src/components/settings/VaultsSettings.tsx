@@ -3,7 +3,7 @@ import { useReducer, useState } from "react";
 import { protoInt64 } from "@bufbuild/protobuf";
 import { useExpandedCards } from "../../hooks/useExpandedCards";
 import { buildNodeNameMap, resolveNodeName } from "../../utils/nodeNames";
-import { parseBytes } from "../../utils/units";
+import { parseBytes, parseDurationNanos } from "../../utils/units";
 import {
   useConfig,
   usePutVault,
@@ -577,8 +577,10 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
       storageClass: storage.type === "file" ? parseInt(storage.storageClass, 10) || 0 : 0,
       cloudServiceId: cloudBacked ? decode(storage.cloudServiceId) : new Uint8Array(0),
       cacheEviction: cloudBacked ? (storage.cacheEviction || "lru") : "",
-      cacheBudget: cloudBacked ? (storage.cacheBudget || "") : "",
-      cacheTtl: cloudBacked ? (storage.cacheTTL || "") : "",
+      // Empty = unset (server defaults for cloud vaults), not explicit 0;
+      // numeric on the wire like max-size (gastrolog-338j51).
+      cacheBudgetBytes: cloudBacked && storage.cacheBudget.trim() !== "" ? parseBytes(storage.cacheBudget) : undefined,
+      cacheTtlNanos: cloudBacked && storage.cacheTTL.trim() !== "" ? parseDurationNanos(storage.cacheTTL) : protoInt64.zero,
       memoryBudgetBytes: storage.type === "memory" ? parseMemoryBudget(storage.memoryBudget) : protoInt64.zero,
       rotationPolicyId: storage.rotationPolicyId ? decode(storage.rotationPolicyId) : new Uint8Array(0),
       retentionRules: storage.retentionPolicyId

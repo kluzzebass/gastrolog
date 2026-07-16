@@ -249,8 +249,14 @@ message VaultConfig {
   string path = 11;                         // direct path for JSONL sinks
   repeated VaultPlacement placements = 12;  // system-managed: file storage assignments by placement manager
   string cache_eviction = 13;               // "lru" (default) or "ttl"
-  string cache_budget = 14;                  // max cache size (e.g. "1GB", "500MB"; default: "1GiB")
-  string cache_ttl = 15;                     // eviction TTL duration (e.g. "1h", "7d"); only for ttl mode
+  // Warm-cache soft cap for cloud-backed chunks, in bytes — numeric to match
+  // max_size_bytes / memory_budget_bytes. Optional so the server can tell
+  // "unset" (defaulted at creation for cloud vaults) from "explicit 0"
+  // (rejected). Unlimited is an explicit large value (gastrolog-338j51).
+  optional uint64 cache_budget_bytes = 14;
+  // Warm-cache eviction age in nanoseconds (ttl mode only) — numeric to match
+  // the max_age_nanos durations. 0 = unset.
+  int64 cache_ttl_nanos = 15;
   string retention_disposition = 16;         // "delete" (default) or "route" — what retention does with aged-out records
   // Per-vault disk guard thresholds on the vault's backing volume, in
   // bytes of FREE space. 0 = inherit the node defaults (fraction-based

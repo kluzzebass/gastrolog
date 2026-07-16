@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"gastrolog/internal/glid"
 	"strconv"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/spf13/cobra"
@@ -114,11 +115,11 @@ func vaultDetailPairs(v *v1.VaultConfig) [][2]string {
 	if v.CacheEviction != "" {
 		pairs = append(pairs, [2]string{"Cache Eviction", v.CacheEviction})
 	}
-	if v.CacheBudget != "" {
-		pairs = append(pairs, [2]string{"Cache Budget", v.CacheBudget})
+	if v.CacheBudgetBytes != nil {
+		pairs = append(pairs, [2]string{"Cache Budget", units.FormatBytesDisplay(int64(v.GetCacheBudgetBytes()))}) //nolint:gosec // display only
 	}
-	if v.CacheTtl != "" {
-		pairs = append(pairs, [2]string{"Cache TTL", v.CacheTtl})
+	if v.CacheTtlNanos > 0 {
+		pairs = append(pairs, [2]string{"Cache TTL", time.Duration(v.CacheTtlNanos).String()})
 	}
 	if v.DiskFreeWarnBytes > 0 {
 		pairs = append(pairs, [2]string{"Disk Free Warn", units.FormatBytesDisplay(int64(v.DiskFreeWarnBytes))}) //nolint:gosec // display only
@@ -210,7 +211,7 @@ shape (memory, file, file+cloud, JSONL) defined by --type, --storage-class
 	cmd.Flags().String("rotation-policy", "", "rotation policy name or ID")
 	cmd.Flags().String("retention-policy", "", "retention policy name or ID")
 	cmd.Flags().String("cache-eviction", "lru", "cache eviction strategy: lru or ttl")
-	cmd.Flags().String("cache-budget", "", "max cache size (e.g. 1GB, 500MB, 1GiB)")
+	cmd.Flags().String("cache-budget", "", "warm-cache soft cap for cloud-backed chunks (e.g. 1GB, 500MB, 1GiB). Unset defaults to a bounded budget for cloud vaults; 0 is rejected")
 	cmd.Flags().String("cache-ttl", "", "cache TTL duration for ttl eviction mode (e.g. 1h, 7d)")
 	cmd.Flags().String("retention-disposition", "delete", "what retention does with aged-out records: delete (drop) or route (send through routing engine)")
 	cmd.Flags().String("path", "", "direct path for JSONL sinks")
@@ -244,11 +245,8 @@ func applyVaultFlags(ctx context.Context, cmd *cobra.Command, client *server.Cli
 	if cmd.Flags().Changed("cache-eviction") {
 		cfg.CacheEviction, _ = cmd.Flags().GetString("cache-eviction")
 	}
-	if cmd.Flags().Changed("cache-budget") {
-		cfg.CacheBudget, _ = cmd.Flags().GetString("cache-budget")
-	}
-	if cmd.Flags().Changed("cache-ttl") {
-		cfg.CacheTtl, _ = cmd.Flags().GetString("cache-ttl")
+	if err := applyVaultCacheFlags(cmd, cfg); err != nil {
+		return err
 	}
 	if cmd.Flags().Changed("retention-disposition") {
 		v, _ := cmd.Flags().GetString("retention-disposition")
@@ -281,6 +279,38 @@ func applyVaultFlags(ctx context.Context, cmd *cobra.Command, client *server.Cli
 	if cmd.Flags().Changed("retention-policy") {
 		if err := resolveVaultRetentionPolicy(ctx, cmd, client, cfg); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// applyVaultCacheFlags overlays the warm-cache budget/ttl flags. Both are
+// numeric on the wire (gastrolog-338j51); cache-budget is proto-optional so
+// an empty flag is "unset" (server defaults it for cloud vaults) rather than
+// an explicit 0.
+func applyVaultCacheFlags(cmd *cobra.Command, cfg *v1.VaultConfig) error {
+	if cmd.Flags().Changed("cache-budget") {
+		raw, _ := cmd.Flags().GetString("cache-budget")
+		if raw == "" {
+			cfg.CacheBudgetBytes = nil
+		} else {
+			b, err := system.ParseSize(raw)
+			if err != nil {
+				return fmt.Errorf("invalid cache-budget: %w", err)
+			}
+			cfg.CacheBudgetBytes = &b
+		}
+	}
+	if cmd.Flags().Changed("cache-ttl") {
+		raw, _ := cmd.Flags().GetString("cache-ttl")
+		if raw == "" {
+			cfg.CacheTtlNanos = 0
+		} else {
+			d, err := system.ParseDuration(raw)
+			if err != nil {
+				return fmt.Errorf("invalid cache-ttl: %w", err)
+			}
+			cfg.CacheTtlNanos = int64(d)
 		}
 	}
 	return nil

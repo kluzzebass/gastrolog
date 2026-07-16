@@ -48,11 +48,15 @@ type VaultConfig struct {
 	// CacheEviction is "lru" (default) or "ttl" — only meaningful for cloud-backed.
 	CacheEviction string `json:"cacheEviction,omitempty"`
 
-	// CacheBudget caps the local cache size (e.g. "1GB", "500MB", default: "1GiB").
-	CacheBudget string `json:"cacheBudget,omitempty"`
+	// CacheBudgetBytes is the warm-cache soft cap for cloud-backed chunks, in
+	// bytes. A stored cloud vault always carries a resolved, non-zero value
+	// (defaulted at creation, explicit 0 rejected — gastrolog-338j51);
+	// non-cloud vaults have no warm cache and leave it 0.
+	CacheBudgetBytes uint64 `json:"cacheBudgetBytes,omitempty"`
 
-	// CacheTTL is the eviction TTL duration (e.g. "1h", "7d") for ttl mode.
-	CacheTTL string `json:"cacheTtl,omitempty"`
+	// CacheTTLNanos is the warm-cache eviction age in nanoseconds (ttl mode
+	// only). Numeric to match the max_age_nanos durations elsewhere. 0 = unset.
+	CacheTTLNanos int64 `json:"cacheTtlNanos,omitempty"`
 
 	// RetentionDisposition decides what happens to records as retention
 	// ages chunks out of this vault. "delete" (default) drops the records
@@ -99,6 +103,13 @@ type VaultConfig struct {
 // want more set --max-size explicitly. Not derived from the volume: a
 // per-vault share does not compose across vaults sharing a disk.
 const DefaultVaultMaxSizeBytes uint64 = 1 << 30
+
+// DefaultVaultCacheBudgetBytes is the warm-cache soft cap applied when a
+// cloud-backed vault is created without one (1 GiB — the value the field long
+// documented but never applied; see gastrolog-338j51). The cache is a soft
+// LRU cap over cloud-backed chunk copies, so a too-small budget costs re-reads
+// from the blob store, not refused records; but unbounded is still a defect.
+const DefaultVaultCacheBudgetBytes uint64 = 1 << 30
 
 // Canonical values for VaultConfig.RetentionDisposition.
 const (

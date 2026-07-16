@@ -55,6 +55,33 @@ func resolveMaxSizeBudget(p *apiv1.VaultConfig, vaultCfg *system.VaultConfig, ex
 	return nil
 }
 
+// resolveCacheBudget settles a vault's warm-cache budget from the wire, the
+// same unset-vs-explicit-0 distinction as max-size (gastrolog-338j51). The
+// warm cache holds cloud-backed chunks only, so this applies to cloud-backed
+// vaults; a non-cloud vault has no warm cache and keeps its (unused) 0.
+func resolveCacheBudget(p *apiv1.VaultConfig, vaultCfg *system.VaultConfig, existing []system.VaultConfig) *connect.Error {
+	if !vaultCfg.IsCloud() {
+		return nil
+	}
+	if p.CacheBudgetBytes != nil {
+		if *p.CacheBudgetBytes == 0 {
+			return errInvalidArg(fmt.Errorf(
+				"cache-budget of 0 disables the warm-cache bound for vault %q; omit it for the default (%s) or set a large value",
+				vaultCfg.Name, units.FormatBytesDisplay(int64(system.DefaultVaultCacheBudgetBytes))))
+		}
+		vaultCfg.CacheBudgetBytes = *p.CacheBudgetBytes
+		return nil
+	}
+	for i := range existing {
+		if existing[i].ID == vaultCfg.ID {
+			vaultCfg.CacheBudgetBytes = existing[i].CacheBudgetBytes // preserve on update
+			return nil
+		}
+	}
+	vaultCfg.CacheBudgetBytes = system.DefaultVaultCacheBudgetBytes // default on create
+	return nil
+}
+
 // checkVaultShapeImmutable rejects PutVault when an existing vault's shape
 // fields (type, cloud_service_id) would change. New vaults pass through —
 // the existing-vault lookup returns nil and we have nothing to compare.
@@ -127,6 +154,9 @@ func (s *SystemServer) PutVault(
 	// create, UI, and config import all call PutVault — so resolving here
 	// makes an unbounded vault unrepresentable regardless of who asked.
 	if connErr := resolveMaxSizeBudget(req.Msg.Config, &vaultCfg, vaults); connErr != nil {
+		return nil, connErr
+	}
+	if connErr := resolveCacheBudget(req.Msg.Config, &vaultCfg, vaults); connErr != nil {
 		return nil, connErr
 	}
 
