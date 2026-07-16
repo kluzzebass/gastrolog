@@ -109,8 +109,8 @@ func vaultDetailPairs(v *v1.VaultConfig) [][2]string {
 	if v.Path != "" {
 		pairs = append(pairs, [2]string{"Path", v.Path})
 	}
-	if v.MemoryBudgetBytes > 0 {
-		pairs = append(pairs, [2]string{"Memory Budget", strconv.FormatUint(v.MemoryBudgetBytes, 10)})
+	if v.MemoryBudgetBytes != nil {
+		pairs = append(pairs, [2]string{"Memory Budget", strconv.FormatUint(v.GetMemoryBudgetBytes(), 10)})
 	}
 	if v.CacheEviction != "" {
 		pairs = append(pairs, [2]string{"Cache Eviction", v.CacheEviction})
@@ -261,7 +261,10 @@ func applyVaultFlags(ctx context.Context, cmd *cobra.Command, client *server.Cli
 		cfg.Path, _ = cmd.Flags().GetString("path")
 	}
 	if cmd.Flags().Changed("memory-budget") {
-		cfg.MemoryBudgetBytes, _ = cmd.Flags().GetUint64("memory-budget")
+		// Optional so an explicit 0 (present) is rejected while unset (absent)
+		// is defaulted server-side for memory vaults (gastrolog-1qd5wz).
+		b, _ := cmd.Flags().GetUint64("memory-budget")
+		cfg.MemoryBudgetBytes = &b
 	}
 	if err := applyVaultSizeFlags(cmd, cfg); err != nil {
 		return err

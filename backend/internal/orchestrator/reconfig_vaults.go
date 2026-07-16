@@ -1683,9 +1683,15 @@ func buildVaultParams(sys *system.System, vaultCfg system.VaultConfig, localNode
 
 	switch vaultCfg.Type {
 	case system.VaultTypeMemory:
-		if vaultCfg.MemoryBudgetBytes > 0 {
-			params["budgetBytes"] = strconv.FormatUint(vaultCfg.MemoryBudgetBytes, 10)
+		// Defense in depth: creation defaults an unset budget and rejects an
+		// explicit 0 (gastrolog-1qd5wz), so a stored 0 on a memory vault is a
+		// pre-change or bug-produced config. Bound it with the default rather
+		// than run unbounded in RAM.
+		budget := vaultCfg.MemoryBudgetBytes
+		if budget == 0 {
+			budget = system.DefaultVaultMemoryBudgetBytes
 		}
+		params["budgetBytes"] = strconv.FormatUint(budget, 10)
 
 	case system.VaultTypeFile:
 		// Single storage class for all file vaults — local-only and

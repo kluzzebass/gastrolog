@@ -82,6 +82,33 @@ func resolveCacheBudget(p *apiv1.VaultConfig, vaultCfg *system.VaultConfig, exis
 	return nil
 }
 
+// resolveMemoryBudget settles a memory vault's in-RAM cap from the wire, the
+// same unset-vs-explicit-0 distinction as max-size (gastrolog-1qd5wz). Scoped
+// to memory vaults; other types have no in-memory store and keep their
+// (unused) 0.
+func resolveMemoryBudget(p *apiv1.VaultConfig, vaultCfg *system.VaultConfig, existing []system.VaultConfig) *connect.Error {
+	if vaultCfg.Type != system.VaultTypeMemory {
+		return nil
+	}
+	if p.MemoryBudgetBytes != nil {
+		if *p.MemoryBudgetBytes == 0 {
+			return errInvalidArg(fmt.Errorf(
+				"memory-budget of 0 leaves vault %q unbounded in RAM; omit it for the default (%s) or set a real size",
+				vaultCfg.Name, units.FormatBytesDisplay(int64(system.DefaultVaultMemoryBudgetBytes))))
+		}
+		vaultCfg.MemoryBudgetBytes = *p.MemoryBudgetBytes
+		return nil
+	}
+	for i := range existing {
+		if existing[i].ID == vaultCfg.ID {
+			vaultCfg.MemoryBudgetBytes = existing[i].MemoryBudgetBytes // preserve on update
+			return nil
+		}
+	}
+	vaultCfg.MemoryBudgetBytes = system.DefaultVaultMemoryBudgetBytes // default on create
+	return nil
+}
+
 // checkVaultShapeImmutable rejects PutVault when an existing vault's shape
 // fields (type, cloud_service_id) would change. New vaults pass through —
 // the existing-vault lookup returns nil and we have nothing to compare.
@@ -157,6 +184,9 @@ func (s *SystemServer) PutVault(
 		return nil, connErr
 	}
 	if connErr := resolveCacheBudget(req.Msg.Config, &vaultCfg, vaults); connErr != nil {
+		return nil, connErr
+	}
+	if connErr := resolveMemoryBudget(req.Msg.Config, &vaultCfg, vaults); connErr != nil {
 		return nil, connErr
 	}
 

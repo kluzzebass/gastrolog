@@ -151,7 +151,7 @@ func VaultConfigToProto(v system.VaultConfig) *gastrologv1.VaultConfig {
 		Enabled:              v.Enabled,
 		Type:                 VaultTypeToProto(v.Type),
 		RetentionRules:       rules,
-		MemoryBudgetBytes:    v.MemoryBudgetBytes,
+		MemoryBudgetBytes:    &v.MemoryBudgetBytes, // always present; resolved at ingress for memory vaults
 		StorageClass:         v.StorageClass,
 		ReplicationFactor:    v.ReplicationFactor,
 		Path:                 v.Path,

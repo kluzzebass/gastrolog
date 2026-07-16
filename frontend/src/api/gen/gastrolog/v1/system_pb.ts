@@ -514,9 +514,14 @@ export class VaultConfig extends Message<VaultConfig> {
   retentionRules: RetentionRule[] = [];
 
   /**
-   * @generated from field: uint64 memory_budget_bytes = 7;
+   * In-memory storage cap for memory-typed vaults, in bytes. Optional so the
+   * server can tell "unset" (defaulted at creation for memory vaults) from
+   * "explicit 0" (rejected). Unbounded RAM is an OOM, so unset must be a
+   * bounded default, not zero (gastrolog-1qd5wz).
+   *
+   * @generated from field: optional uint64 memory_budget_bytes = 7;
    */
-  memoryBudgetBytes = protoInt64.zero;
+  memoryBudgetBytes?: bigint;
 
   /**
    * @generated from field: uint32 storage_class = 8;
@@ -628,7 +633,7 @@ export class VaultConfig extends Message<VaultConfig> {
     { no: 4, name: "type", kind: "enum", T: proto3.getEnumType(VaultType) },
     { no: 5, name: "rotation_policy_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 6, name: "retention_rules", kind: "message", T: RetentionRule, repeated: true },
-    { no: 7, name: "memory_budget_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 7, name: "memory_budget_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */, opt: true },
     { no: 8, name: "storage_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 9, name: "cloud_service_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 10, name: "replication_factor", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },

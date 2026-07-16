@@ -111,6 +111,13 @@ const DefaultVaultMaxSizeBytes uint64 = 1 << 30
 // from the blob store, not refused records; but unbounded is still a defect.
 const DefaultVaultCacheBudgetBytes uint64 = 1 << 30
 
+// DefaultVaultMemoryBudgetBytes is the in-memory cap applied when a
+// memory-typed vault is created without one. An unbounded memory vault grows
+// until the process OOMs, so unset must be a bounded default. 1 GiB matches
+// the disk budgets for consistency; RAM is scarcer than disk, so operators on
+// small nodes should lower it explicitly (gastrolog-1qd5wz).
+const DefaultVaultMemoryBudgetBytes uint64 = 1 << 30
+
 // Canonical values for VaultConfig.RetentionDisposition.
 const (
 	// RetentionDispositionDelete drops records when retention triggers.

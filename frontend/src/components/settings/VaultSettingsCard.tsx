@@ -76,7 +76,7 @@ function vaultToEntry(v: VaultConfig): StorageEntry {
     cacheEviction: v.cacheEviction || "lru",
     cacheBudget: v.cacheBudgetBytes != null && v.cacheBudgetBytes > BigInt(0) ? formatBytesBigint(v.cacheBudgetBytes) : "",
     cacheTTL: v.cacheTtlNanos > BigInt(0) ? formatDurationNanos(v.cacheTtlNanos) : "",
-    memoryBudget: v.memoryBudgetBytes > 0 ? formatBytes(v.memoryBudgetBytes) : "",
+    memoryBudget: v.memoryBudgetBytes != null && v.memoryBudgetBytes > BigInt(0) ? formatBytes(v.memoryBudgetBytes) : "",
     rotationPolicyId: v.rotationPolicyId.length > 0 ? encode(v.rotationPolicyId) : "",
     retentionPolicyId: v.retentionRules[0] ? encode(v.retentionRules[0].retentionPolicyId) : "",
     retentionDisposition: v.retentionDisposition || "delete",
@@ -111,7 +111,9 @@ function entryToVault(
     // 0 (rejected); numeric on the wire like max-size (gastrolog-338j51).
     cacheBudgetBytes: cloudBacked && entry.cacheBudget.trim() !== "" ? parseBytes(entry.cacheBudget) : undefined,
     cacheTtlNanos: cloudBacked && entry.cacheTTL.trim() !== "" ? parseDurationNanos(entry.cacheTTL) : protoInt64.zero,
-    memoryBudgetBytes: entry.type === "memory" ? parseMemoryBudget(entry.memoryBudget) : protoInt64.zero,
+    // Empty field = unset (server defaults it for memory vaults), not
+    // explicit 0 (rejected) (gastrolog-1qd5wz).
+    memoryBudgetBytes: entry.type === "memory" && entry.memoryBudget.trim() !== "" ? parseMemoryBudget(entry.memoryBudget) : undefined,
     rotationPolicyId: entry.rotationPolicyId ? decode(entry.rotationPolicyId) : new Uint8Array(0),
     retentionRules: entry.retentionPolicyId
       ? [new RetentionRule({ retentionPolicyId: decode(entry.retentionPolicyId) })]
@@ -402,7 +404,7 @@ export function VaultSettingsCard({
               {vault.path || `jsonl/${vault.name || "vault"}.jsonl`}
             </span>
           )}
-          {vault.type === VaultType.MEMORY && vault.memoryBudgetBytes > 0 && (
+          {vault.type === VaultType.MEMORY && vault.memoryBudgetBytes != null && vault.memoryBudgetBytes > BigInt(0) && (
             <span className="font-mono">{formatBytes(vault.memoryBudgetBytes)}</span>
           )}
           {vault.type !== VaultType.JSONL && (

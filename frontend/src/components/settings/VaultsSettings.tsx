@@ -581,7 +581,8 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
       // numeric on the wire like max-size (gastrolog-338j51).
       cacheBudgetBytes: cloudBacked && storage.cacheBudget.trim() !== "" ? parseBytes(storage.cacheBudget) : undefined,
       cacheTtlNanos: cloudBacked && storage.cacheTTL.trim() !== "" ? parseDurationNanos(storage.cacheTTL) : protoInt64.zero,
-      memoryBudgetBytes: storage.type === "memory" ? parseMemoryBudget(storage.memoryBudget) : protoInt64.zero,
+      // Empty = unset (server defaults for memory vaults), not explicit 0.
+      memoryBudgetBytes: storage.type === "memory" && storage.memoryBudget.trim() !== "" ? parseMemoryBudget(storage.memoryBudget) : undefined,
       rotationPolicyId: storage.rotationPolicyId ? decode(storage.rotationPolicyId) : new Uint8Array(0),
       retentionRules: storage.retentionPolicyId
         ? [new RetentionRule({ retentionPolicyId: decode(storage.retentionPolicyId) })]
