@@ -51,23 +51,51 @@ Priority derivation: **consequence** (what is at risk if unhandled) ×
 progress or imminent; `High` = durability/availability degraded, will
 compound; `Low` = needs attention on a human timescale.
 
+**Multi-setpoint conditions are separate alarms, not one alarm that changes
+colour.** Where the code today raises one ID at Warning while approaching a
+bound and Error at the bound, the catalog splits it in two. This is the
+standard's own shape (the HI / HIHI pattern): two setpoints on one
+measurement are two alarms, each with its own priority and its own response.
+It is also what keeps `Priority` a static property of the type. See
+[gastrolog-1cruar].
+
+Every row below is grounded in a real `Set` call site as of the phase 1
+demotions; the ID column is the **real** ID in code, not an abbreviation.
+
 Verdicts under the governing test:
 
 | ID (pattern) | Source | Condition | Verdict | Priority | Operator action (response text) |
 |---|---|---|---|---|---|
-| `segmentation:<vault>` | segmentation | Durable segment writes failing (disk full, I/O error) — **accepted records at risk** | **Alarm** | Critical | Free disk space / replace volume on the named node; ingest acks are failing until resolved |
+| `segmentation-writer:<vault>` | segmentation | Durable segment commit failed; working segment abandoned for crash recovery — **accepted records at risk** | **Alarm** | Critical | Free disk space or replace the volume on the named node; ingest acks are failing until resolved |
+| `chunking-unplannable-segment:<vault>` | chunking | Segment on-disk indexes unreadable; records stay unchunked and head copies cannot be purged | **Alarm** | Critical | Investigate segment file corruption on the named node. If the vault has a delete-disposition TTL these records are released **unchunked** at expiry — the loss is scheduled, not hypothetical |
+| `wal-reserve:<wal>` | storage | Raft WAL space reserve lost | **Alarm** | Critical | Free disk space now — without the reserve, a full volume crashes consensus on this node |
+| `orchestrator-lock-leak` | orchestrator | Orchestrator lock held past deadline — wedge in progress | **Alarm** (latched) | Critical | Capture the logged stack, then restart the wedged node. Latched: stays until acked, even after the wedge clears |
+| `chunking-build-blocked:<vault>` | chunking | Head-of-queue chunk blocked >2min on segments no local holder can supply, or a manifest referenced a released segment | **Alarm** | High | Restore a node holding the named segments, or accept the gap |
+| `chunking-underreplicated:<vault>` | chunking | Segments below the replication minimum ≥2min; planning gated | **Alarm** | High | Check that all placement nodes are up and replication is progressing. If the origin node is permanently lost, the affected records exist only there |
+| `chunking-glcb-corrupt:<vault>` | chunking | Sealed-chunk GLCB unreadable; quarantined with a `.corrupt` suffix | **Alarm** (DelayOn) | High | Heals on its own — rebuilt from source segments or re-pulled from a peer home. **Only actionable if it persists**, which is what the delay-on is for: then investigate disk health here and replica health on the vault's other homes |
+| `chunk-unreadable:<chunk>` | retention | Chunk unreadable during retention; backoff retry scheduled | **Alarm** (DelayOn) | High | Retries automatically. Only actionable once retries stop resolving it: investigate disk health on this node |
+| `chunk-suspect:<chunk>` | cloud-reconcile | Cloud-backed chunk 404s in the blob store; removed from the index after the grace period | **Alarm** | High | Check the blob store for the named chunk. After grace it leaves the index — restore it from a peer or accept the loss |
+| `unknown-orphan:<vault>:<chunk>` | vault | Chunk on disk with records but not recognized by the FSM; preserved | **Alarm** | High | Decide restore vs delete for the named chunk. Do **not** delete manually without review — the cluster has no other copy |
 | `cloud-store:<vault>` | cloud | Cloud store unreachable; uploads stopped | **Alarm** | High | Check cloud credentials/endpoint/network; sealed chunks accumulate locally until restored |
-| `vault-leaderless:<vault>` | placement | Placements resolve to no leader ≥60s (beyond self-healing) | **Alarm** | High | Fix vault placements / node storage configs; retention, rotation, target refresh stopped |
-| lock-leak | orchestrator | Orchestrator lock held past deadline — wedge in progress | **Alarm** (latched) | Critical | Capture the logged stack, restart the wedged node; deliberately sticky until acked |
-| under-replicated / unknown-orphan (`vault:*`) | reconciler | Sealed chunk below required replicas / orphan with no FSM entry | **Alarm** | High | Check placement nodes; decide restore vs accept loss for the named chunk |
-| blocked-build | chunking | GLCB build blocked on segments no holder can supply | **Alarm** | High | Restore a node holding the named segments, or accept the gap |
-| RF-unmeetable (placement keys) | placement | Live placement members below configured RF | **Alarm** | High | Restore nodes or reduce RF; durability target unmet |
-| node soft-offline / unreachable | placement, node-lifecycle | Peer node unreachable past grace | **Alarm** | High | Investigate/restart the node; removal is operator-initiated, never automatic |
-| vault-init failure | orchestrator (factory, reconfig) | Vault instance failed to construct from config | **Alarm** | High | Fix the named config error; vault is not serving |
-| ingester failure (`ingester:*`) | ingester/self | Configured ingester cannot start/run | **Alarm** | Low | Fix ingester config or disable it |
-| rate-alert (`rate:*`) | ratealerter | Operator-configured rate threshold crossed | **Alarm** (operator-defined) | Low | Operator defined the threshold; response text comes from the rule |
-| archival sweep failures | archival | Archive writes failing | **Alarm** | High | Check archive target storage |
-| retention route-fan-out terminal failure | retention | Chunk destroyed without routing (pipeline down at expiry) | **Alarm** | Critical | Records ejected unrouted — investigate pipeline availability; potential data loss at retention boundary |
+| `vault-leaderless:<vault>` | placement | Placements resolve to no leader ≥60s (beyond self-healing) | **Alarm** (DelayOn 60s) | High | Fix vault placements / node storage configs; retention, rotation, target refresh stopped |
+| `vault-underreplicated:<vault>` | placement | Placed replicas below desired RF (insufficient eligible storages) | **Alarm** | High | Restore nodes or reduce RF; durability target unmet |
+| `vault-storage-class-missing:<vault>` *(split from `vault-unplaced`)* | placement | Selected node has no storage of the vault's required class; leader placement refused | **Alarm** | High | Add storage of the required class on the named node, or change the vault's storage class |
+| `vault-no-eligible-node:<vault>` *(split from `vault-unplaced`)* | placement | No currently-eligible node; existing placements retained | **Alarm** | High | Restore an eligible node, or relax the vault's storage requirements |
+| `vault-soft-offline-leader:<vault>` | placement | Leader heartbeat lost while node still Live, or leader on an Unreachable/Maintenance node; rotation gated | **Alarm** | High | Investigate the named leader node |
+| `node-unreachable:<node>` | node-lifecycle | Peer node Unreachable past grace | **Alarm** | High | Investigate or restart the node. Removal is operator-initiated, never automatic |
+| `vault-init:<vault>` | orchestrator (factory, reconfig) | Vault instance failed to construct from config | **Alarm** | High | Fix the named config error; the vault is not serving |
+| `pipeline-backlog-capped:<vault>` *(split)* | storage | Backlog **at** budget — new records for this vault are REFUSED | **Alarm** | High | Check chunking throughput, raise the budget, or reduce the ingest rate. This vault is refusing records now; others are unaffected |
+| `vault-max-size-capped:<vault>` *(split)* | storage | Vault **at** its size budget — new records REFUSED | **Alarm** | High | Raise the budget or shorten retention. This vault is refusing records now; others are unaffected |
+| `disk-space-exhausted:<vault>` *(split)* | storage | Vault volume out of space — admission for this vault SUSPENDED | **Alarm** | High | Free space, add capacity, raise the vault's threshold, or shorten its retention |
+| `disk-space-exhausted` *(node, split)* | storage | Node volume out of space — ingest admission SUSPENDED on this node | **Alarm** | High | Free space, add capacity, or shorten retention. Retention and deletes keep running |
+| `ingester-not-running` | ingestion | Ingesters that should run on this node are not running | **Alarm** | Low | Check the log for build/start errors; fix the ingester config or disable it |
+| `pipeline-backlog-approaching:<vault>` *(split)* | storage | Backlog approaching budget; chunking not keeping pace | **Alarm** | Low | Check chunking throughput, raise the budget, or reduce the ingest rate — before records start being refused |
+| `vault-max-size-approaching:<vault>` *(split)* | storage | Vault approaching its size budget | **Alarm** | Low | Raise the budget or shorten retention — before records start being refused |
+| `disk-space-low:<vault>` *(split)* | storage | Vault volume below its free-space warn band | **Alarm** | Low | Free space, add capacity, raise the vault's threshold, or shorten its retention |
+| `disk-space-low` *(node, split)* | storage | Node volume below its free-space warn band | **Alarm** | Low | Free space, add capacity, or shorten retention |
+| `<kind>-rate:<vault>` (prod: `retention-rate:<vault>`) | ratealerter | Operator-configured rate threshold crossed | **Alarm** (operator-defined) | from the rule | The operator defined the threshold; the response text comes from the rule. Not a catalog alarm — see [gastrolog-1cruar] |
+| **`vault-home-cannot-store:<vault>`** | placement | A vault home node is disk-protected; collection and builds paused there | **NEEDS VERDICT** | — | Razor is unclear. When healthy replicas ≥ RF the text itself says replicas are "backfilled automatically" — handled, nothing waits on an operator. When healthy < RF, the action is "free space", which is already `disk-space-*`'s action on that node. What it uniquely adds is *which vault* is affected. Demote to a metric, or keep as the vault-scoped view of a node condition? |
+| **retention unrouted destroy** | retention | Chunk destroyed with zero records routed (unreadable cursor, nil vault instance) | **Alarm** (not yet raised) | Critical | Aspirational — nothing raises this today. The terminal cases are already prevented (the chunk is retained and retried); the residual tolerance is real and tracked in [gastrolog-65riw5], which also settles whether the behaviour itself should change |
 | chanwatch saturation | chanwatch | Internal channel saturated past watermark | **Event** (demoted ✓) | — | Landed: transition-edge logs. Journal surface lands with phase 5 |
 | ingest-pressure | orchestrator | Ingest pipeline pressure elevated/critical; ingesters throttling | **Event** (demoted ✓) | — | Landed: `NodeStats.ingest_pressure_level`. If ingestion is throttled the matter is already handled — the throttle *is* the response, so nothing waits on an operator. Never logged: the self-ingester captures slog, so logging throttle transitions feeds the pressure |
 | `self-ingester-drops` | ingester/self | Capture channel overflowing; diagnostic records discarded | **Event** (demoted ✓) | — | Landed: `NodeStats.self_ingester_drops_total`. Capacity tuning, not operator action. Never logged: a line about dropped logs feeds the channel dropping them |
@@ -78,6 +106,26 @@ Verdicts under the governing test:
 Rows marked ✓ already landed; phase 1 is complete. Every surviving alarm
 gets a catalog entry in code (see below) carrying its response text — the UI
 shows it; no tracker IDs, no internal jargon.
+
+Two rows are **not** settled and must not be implemented from this table as
+written: `vault-home-cannot-store` needs a razor verdict, and the retention
+unrouted-destroy row is aspirational pending [gastrolog-65riw5].
+
+Rows removed from this table as fiction — they described conditions no code
+raises:
+
+- *under-replicated (reconciler)* — no reconciler raises an under-replication
+  alarm. The real ones are `vault-underreplicated:<vault>` (placement, RF) and
+  `chunking-underreplicated:<vault>` (chunking, segments). The row conflated
+  them with `unknown-orphan`, which is a different condition entirely and now
+  has its own row.
+- *ingester failure (`ingester:*`, source ingester/self)* — no `ingester:*`
+  alarm exists. The real one is `ingester-not-running`, raised by the ingester
+  reconciler in `internal/app` with source `ingestion`, and it is node-scoped
+  rather than per-ingester.
+- *archival sweep failures ("archive writes failing")* — the archival sweep
+  raises `chunk-suspect:<chunk>`, which is a cloud-reconcile 404, not an
+  archive write failure.
 
 ## Alarm-type catalog in code
 

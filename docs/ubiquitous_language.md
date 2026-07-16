@@ -628,13 +628,35 @@ How the cluster reports what it's doing to itself, to operators, and to the UI.
   revoked mid-flight, or shutdown). They are a per-vault sub-account of
   `Matched`, never part of the `Routed = Matched + Unmatched` sum.
 
-- **AlertCollector** — per-node bounded store of alerts (`AlertSeverity`:
-  `WARNING`, `ERROR`). Alerts have a stable key for dedup and auto-clear;
-  included in each NodeStats broadcast.
+- **Alarm** — a condition that **requires an operator action**, carrying a
+  documented cause and response. The governing test is the whole definition:
+  *does the operator have to do something?* If no, it is not an alarm. An
+  alarm announces a condition waiting on a human — a condition the system is
+  already handling (ingest throttling, a chunk healing itself) is not waiting
+  on anyone and is therefore not an alarm, however interesting it is.
+  Surfaced in the alarm list. See `docs/alarm-management-design.md` for the
+  catalog and the per-alarm response text.
 
-- **SystemAlert** — one alert: `ID`, `Severity`, `Source`, `Message`,
-  `FirstSeen`, `LastSeen`. Designed to be keyed ("alert X for reason Y on
-  node Z") so repeated identical alerts don't accumulate.
+- **Event** — a record that something happened. No operator action. Lives in
+  the event journal, never the alarm list. Most demoted diagnostics are
+  events.
+
+- **Metric** — a measured quantity to trend on a health surface. Note that
+  demoting a condition to a **log** and demoting it to a **metric** are not
+  interchangeable: the self ingester captures slog, so any condition
+  *caused by* pressure or volume (channel saturation, ingest pressure,
+  dropped log records) must become a metric — logging it feeds the condition
+  it reports.
+
+- **AlertCollector** — per-node bounded store of alarms (`AlertSeverity`:
+  `WARNING`, `ERROR`). Alarms have a stable key for dedup and auto-clear;
+  included in each NodeStats broadcast. Being renamed to alarm vocabulary
+  with the phase 2 registry; `Severity` becomes a consequence-derived
+  `Priority` owned by the alarm type rather than chosen at the call site.
+
+- **SystemAlert** — one alarm: `ID`, `Severity`, `Source`, `Message`,
+  `FirstSeen`, `LastSeen`. Designed to be keyed ("alarm X for reason Y on
+  node Z") so repeated identical alarms don't accumulate.
 
 ---
 
@@ -893,6 +915,7 @@ Canonical milestone verbs (reuse these names; do not coin synonyms):
 | active chunk     | open chunk        | "Active" matches `ChunkMeta.Sealed = false`.                       |
 | sealed chunk     | closed chunk, finalized chunk | "Sealed" is what the chunk manager actually calls it.  |
 | cloud-backed     | cloud chunk       | Cloud-backed describes storage; "cloud chunk" conflates with archival state. |
+| alarm            | alert             | An alarm requires an operator action; "alert" was applied indiscriminately to alarms, events, and metrics alike, which is what let non-actionable diagnostics into the alarm list. Code identifiers follow in the phase 2 registry. |
 | archived         | cold              | "Archived" is the canonical flag; cloud storage-class is orthogonal. |
 | vault-ctl Raft   |                   | One Raft group per vault, authoritative for that vault's chunk metadata. Follows the `{scope}-ctl` naming pattern for control-plane Raft groups. |
 | cluster-ctl Raft | system Raft, config Raft, cluster Raft | One Raft group per cluster, authoritative for cluster-wide configuration. Pairs with `vault-ctl Raft` to form the `{scope}-ctl` pattern. The on-disk Raft group ID and type names were renamed from `system` → `cluster-ctl` in gastrolog-5eu6v. |
