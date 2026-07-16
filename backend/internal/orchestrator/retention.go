@@ -285,9 +285,9 @@ func (o *Orchestrator) enforceMemoryBudgets(cfg *system.Config) {
 		return
 	}
 	type budgetTarget struct {
-		vaultID glid.GLID
-		cm      chunk.ChunkManager
-		excess  int64
+		runner *retentionRunner
+		cm     chunk.ChunkManager
+		excess int64
 	}
 
 	var targets []budgetTarget
@@ -305,27 +305,39 @@ func (o *Orchestrator) enforceMemoryBudgets(cfg *system.Config) {
 		if !ok {
 			continue
 		}
+		// Use the sweep's runner — never mint one here (gastrolog-aop1yc).
+		// Its absence is meaningful: the sweep only caches runners for
+		// instances that may destroy chunks, so no runner means this vault
+		// has no Raft leader and budget enforcement must wait rather than
+		// destroy on its own authority.
+		runner := o.retention[retentionKey(vaultInst.VaultID, vaultInst.StorageID)]
+		if runner == nil {
+			continue
+		}
 		if excess := monitor.BudgetExceeded(); excess > 0 {
 			targets = append(targets, budgetTarget{
-				vaultID: vaultCfg.ID,
-				cm:      vaultInst.Chunks,
-				excess:  excess,
+				runner: runner,
+				cm:     vaultInst.Chunks,
+				excess: excess,
 			})
 		}
 	}
 	o.mu.RUnlock()
 
 	for _, t := range targets {
-		o.drainExcessChunks(t.vaultID, t.cm, t.excess)
+		o.drainExcessChunks(t.runner, t.cm, t.excess)
 	}
 }
 
-// drainExcessChunks fires retention events on the oldest sealed chunks
-// of a memory vault until the excess bytes are reclaimed (or no more
-// sealed chunks remain). Phase 4 (gastrolog-42f9z): these used to be
-// "transitioned to the next instance"; now they're just retention events
-// like any other, with the routing engine deciding their fate.
-func (o *Orchestrator) drainExcessChunks(vaultID glid.GLID, cm chunk.ChunkManager, excess int64) {
+// drainExcessChunks retires the oldest sealed chunks of a memory vault
+// until the excess bytes are reclaimed (or no more sealed chunks remain).
+// Phase 4 (gastrolog-42f9z): these used to be "transitioned to the next
+// instance"; now they're just retention events like any other.
+//
+// "Like any other" is meant literally, and was not (gastrolog-aop1yc): this
+// takes the sweep's cached runner and goes through the same disposition gate
+// as a TTL expiry. A vault configured "delete" does not fan out here either.
+func (o *Orchestrator) drainExcessChunks(runner *retentionRunner, cm chunk.ChunkManager, excess int64) {
 	metas, err := cm.List()
 	if err != nil {
 		return
@@ -336,16 +348,6 @@ func (o *Orchestrator) drainExcessChunks(vaultID glid.GLID, cm chunk.ChunkManage
 		return a.WriteStart.Compare(b.WriteStart)
 	})
 
-	// Find the index manager for this vault.
-	var im index.IndexManager
-	o.mu.RLock()
-	if vault := o.vaults[vaultID]; vault != nil {
-		if vaultInst := vault.Instance; vaultInst != nil {
-			im = vaultInst.Indexes
-		}
-	}
-	o.mu.RUnlock()
-
 	var reclaimed int64
 	for _, m := range metas {
 		if reclaimed >= excess {
@@ -354,23 +356,13 @@ func (o *Orchestrator) drainExcessChunks(vaultID glid.GLID, cm chunk.ChunkManage
 		if !m.Sealed {
 			continue
 		}
-
-		runner := &retentionRunner{
-			isLeader: true,
-			vaultID:  vaultID,
-			cm:       cm,
-			im:       im,
-			orch:     o,
-			now:      o.now,
-			logger:   o.logger,
-		}
-		// Honor the fan-out verdict, exactly as the TTL path does. Ignoring
-		// it destroyed the chunk even when the fan-out was aborted by
-		// shutdown or disk protect, ejecting every record unrouted — the bug
-		// gastrolog-5034va fixed on the TTL path, unfixed here
-		// (gastrolog-65riw5). Skip rather than break: the abort is
+		// Honor the disposition verdict, exactly as the TTL path does.
+		// Ignoring it destroyed the chunk even when the fan-out was aborted
+		// by shutdown or disk protect, ejecting every record unrouted — the
+		// bug gastrolog-5034va fixed on the TTL path and gastrolog-65riw5
+		// found still live here. Skip rather than break: the abort is
 		// per-chunk, and a later chunk may still route.
-		if !runner.fireRetentionEvent(m.ID) {
+		if !runner.applyRetentionDispositionToChunk(m.ID) {
 			continue
 		}
 		runner.expireChunk(m.ID, "memory-budget-enforcement")
@@ -379,7 +371,7 @@ func (o *Orchestrator) drainExcessChunks(vaultID glid.GLID, cm chunk.ChunkManage
 
 	if reclaimed > 0 {
 		o.retentionLogger.Info("memory budget enforcement: retention events fired",
-			"vault", vaultID,
+			"vault", runner.vaultID,
 			"excess", excess, "reclaimed", reclaimed)
 	}
 }
@@ -479,28 +471,20 @@ func (o *Orchestrator) PendingDeleteAcks(vaultID glid.GLID) map[chunk.ChunkID][]
 	return result
 }
 
-// retentionTargetForInstance resolves a single vault instance into a sweep target.
-// Returns nil if the instance should be skipped (no rules, no leader, etc.).
-func (o *Orchestrator) retentionTargetForInstance(cfg *system.Config, vaultCfg system.VaultConfig, vaultInst *VaultInstance, active map[string]bool) *sweepTarget {
-	if vaultInst.HasRaftLeader != nil && !vaultInst.HasRaftLeader() {
-		return nil
-	}
-	// IsRaftLeader check removed: the instance apply forwarder transparently
-	// routes applies to the vault-ctl Raft leader. The config placement leader
-	// always runs retention regardless of vault-ctl Raft leadership.
-	if len(vaultCfg.RetentionRules) == 0 {
-		return nil
-	}
-	rules, err := resolveRetentionRulesFromVault(cfg, vaultCfg)
-	if err != nil {
-		o.retentionLogger.Warn("retention: failed to resolve rules",
-			"vault", vaultCfg.ID, "error", err)
-		return nil
-	}
-	if len(rules) == 0 {
-		return nil
-	}
-
+// retentionRunnerFor returns the cached retention runner for a vault
+// instance, creating it on first use, and refreshes the per-sweep config on
+// it. Marks the key active so the sweep's GC keeps the runner.
+//
+// EVERY leader instance gets a runner, including vaults with no retention
+// rules. That is deliberate (gastrolog-aop1yc): memory-budget enforcement
+// destroys chunks through this same runner, and it used to mint a bare one
+// per chunk instead — which silently bypassed the disposition gate and threw
+// away unreadable-retry backoff on every iteration. There must be exactly
+// one runner per (vault, storage), because it owns per-chunk state that only
+// means anything if it accumulates.
+//
+// Caller must hold o.mu for write.
+func (o *Orchestrator) retentionRunnerFor(vaultCfg system.VaultConfig, vaultInst *VaultInstance, active map[string]bool) *retentionRunner {
 	key := retentionKey(vaultInst.VaultID, vaultInst.StorageID)
 	active[key] = true
 
@@ -508,8 +492,6 @@ func (o *Orchestrator) retentionTargetForInstance(cfg *system.Config, vaultCfg s
 	if runner == nil {
 		runner = &retentionRunner{
 			vaultID: vaultCfg.ID,
-			cm:      vaultInst.Chunks,
-			im:      vaultInst.Indexes,
 			orch:    o,
 			now:     o.now,
 			logger:  o.logger,
@@ -526,6 +508,36 @@ func (o *Orchestrator) retentionTargetForInstance(cfg *system.Config, vaultCfg s
 	runner.vaultName = vaultCfg.Name
 	runner.vaultType = string(vaultCfg.Type)
 	runner.disposition = vaultCfg.ResolveRetentionDisposition()
+	return runner
+}
+
+// retentionTargetForInstance resolves a single vault instance into a sweep target.
+// Returns nil if the instance should be skipped (no rules, no leader, etc.).
+// A nil return does NOT mean no runner: an instance with no retention rules
+// still has one for memory-budget enforcement to use.
+func (o *Orchestrator) retentionTargetForInstance(cfg *system.Config, vaultCfg system.VaultConfig, vaultInst *VaultInstance, active map[string]bool) *sweepTarget {
+	if vaultInst.HasRaftLeader != nil && !vaultInst.HasRaftLeader() {
+		// No runner either: without a Raft leader nothing may destroy this
+		// vault's chunks, memory-budget enforcement included.
+		return nil
+	}
+	// IsRaftLeader check removed: the instance apply forwarder transparently
+	// routes applies to the vault-ctl Raft leader. The config placement leader
+	// always runs retention regardless of vault-ctl Raft leadership.
+	runner := o.retentionRunnerFor(vaultCfg, vaultInst, active)
+
+	if len(vaultCfg.RetentionRules) == 0 {
+		return nil
+	}
+	rules, err := resolveRetentionRulesFromVault(cfg, vaultCfg)
+	if err != nil {
+		o.retentionLogger.Warn("retention: failed to resolve rules",
+			"vault", vaultCfg.ID, "error", err)
+		return nil
+	}
+	if len(rules) == 0 {
+		return nil
+	}
 	runner.mu.Lock()
 	runner.rules = rules
 	runner.mu.Unlock()
