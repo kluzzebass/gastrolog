@@ -69,6 +69,8 @@ Verdicts under the governing test:
 | archival sweep failures | archival | Archive writes failing | **Alarm** | High | Check archive target storage |
 | retention route-fan-out terminal failure | retention | Chunk destroyed without routing (pipeline down at expiry) | **Alarm** | Critical | Records ejected unrouted — investigate pipeline availability; potential data loss at retention boundary |
 | chanwatch saturation | chanwatch | Internal channel saturated past watermark | **Event** (demoted ✓) | — | Landed: transition-edge logs. Journal surface lands with phase 5 |
+| ingest-pressure | orchestrator | Ingest pipeline pressure elevated/critical; ingesters throttling | **Event** (demoted ✓) | — | Landed: `NodeStats.ingest_pressure_level`. If ingestion is throttled the matter is already handled — the throttle *is* the response, so nothing waits on an operator. Never logged: the self-ingester captures slog, so logging throttle transitions feeds the pressure |
+| `self-ingester-drops` | ingester/self | Capture channel overflowing; diagnostic records discarded | **Event** (demoted ✓) | — | Landed: `NodeStats.self_ingester_drops_total`. Capacity tuning, not operator action. Never logged: a line about dropped logs feeds the channel dropping them |
 | `raft-wal-latency` | statscollector | WAL append max over threshold | **Event** (demoted ✓) | — | Landed: transition-edge logs + stats (`RaftWalAppendMaxMs`) |
 | scheduler-stall | schedwatch | Runtime stalled past leader lease | **Event** (demoted ✓) | — | Landed: log + counters |
 | election-storm | statscollector | Elections/min over threshold | **Event** (demoted ✓) | — | Landed: transition-edge logs + stats |
@@ -172,7 +174,11 @@ with a count.
 ## Implementation phases
 
 1. **Razor demotions** ✓ — scheduler-stall, election-storm, chanwatch
-   saturation, raft-wal-latency all demoted to transition-edge logs.
+   saturation and raft-wal-latency demoted to transition-edge logs;
+   ingest-pressure and self-ingester-drops demoted to NodeStats metrics.
+   Note the two demotion targets are not interchangeable: anything the
+   self-ingester would capture must become a **metric**, never a log, or
+   reporting the pressure adds to it.
 2. **Catalog + priorities** — the AlarmType registry; every Set site
    migrates to Raise; severity → priority; response text written per type
    (operator-reviewed).

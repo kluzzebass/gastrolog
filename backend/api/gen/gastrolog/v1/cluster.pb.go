@@ -662,8 +662,15 @@ type NodeStats struct {
 	// (gastrolog-3phtqv). It is deliberately not logged either: a log line
 	// about dropped logs feeds the self-ingester that is dropping them.
 	SelfIngesterDropsTotal uint64 `protobuf:"varint,50,opt,name=self_ingester_drops_total,json=selfIngesterDropsTotal,proto3" json:"self_ingester_drops_total,omitempty"`
-	unknownFields          protoimpl.UnknownFields
-	sizeCache              protoimpl.SizeCache
+	// Current ingest-pipeline pressure: "normal", "elevated", or "critical".
+	// PressureAware ingesters throttle themselves as this rises. A metric, not
+	// an alarm (gastrolog-3phtqv): the actionable end of a backed-up pipeline
+	// is already covered by the pipeline-backlog and disk-space alarms, which
+	// fire when the backlog actually threatens something. Like raft_state,
+	// this is the level's String() rather than an enum.
+	IngestPressureLevel string `protobuf:"bytes,51,opt,name=ingest_pressure_level,json=ingestPressureLevel,proto3" json:"ingest_pressure_level,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *NodeStats) Reset() {
@@ -1044,6 +1051,13 @@ func (x *NodeStats) GetSelfIngesterDropsTotal() uint64 {
 		return x.SelfIngesterDropsTotal
 	}
 	return 0
+}
+
+func (x *NodeStats) GetIngestPressureLevel() string {
+	if x != nil {
+		return x.IngestPressureLevel
+	}
+	return ""
 }
 
 // VaultPipelineNodeDisk is one vault's local pipeline storage areas on a
@@ -4545,7 +4559,7 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\apayload\"\v\n" +
 	"\tHeartbeat\"1\n" +
 	"\bNodeJobs\x12%\n" +
-	"\x04jobs\x18\x01 \x03(\v2\x11.gastrolog.v1.JobR\x04jobs\"\x87\x13\n" +
+	"\x04jobs\x18\x01 \x03(\v2\x11.gastrolog.v1.JobR\x04jobs\"\xbb\x13\n" +
 	"\tNodeStats\x12\x1f\n" +
 	"\vcpu_percent\x18\x01 \x01(\x01R\n" +
 	"cpuPercent\x12!\n" +
@@ -4604,7 +4618,8 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x16raft_elections_per_min\x18/ \x01(\x01R\x13raftElectionsPerMin\x127\n" +
 	"\x18disk_protected_vault_ids\x180 \x03(\fR\x15diskProtectedVaultIds\x121\n" +
 	"\x15size_capped_vault_ids\x181 \x03(\fR\x12sizeCappedVaultIds\x129\n" +
-	"\x19self_ingester_drops_total\x182 \x01(\x04R\x16selfIngesterDropsTotal\"\xec\x01\n" +
+	"\x19self_ingester_drops_total\x182 \x01(\x04R\x16selfIngesterDropsTotal\x122\n" +
+	"\x15ingest_pressure_level\x183 \x01(\tR\x13ingestPressureLevel\"\xec\x01\n" +
 	"\x15VaultPipelineNodeDisk\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12)\n" +
 	"\x10working_segments\x18\x02 \x01(\rR\x0fworkingSegments\x12<\n" +

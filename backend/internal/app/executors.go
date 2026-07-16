@@ -29,6 +29,12 @@ type orchStatsAdapter struct {
 func (a *orchStatsAdapter) IngestQueueDepth() int    { return a.orch.IngestQueueDepth() }
 func (a *orchStatsAdapter) IngestQueueCapacity() int { return a.orch.IngestQueueCapacity() }
 
+// IngestPressureLevel reports the pressure gate's level for the health
+// surfaces. The gate is non-nil for the orchestrator's whole lifetime.
+func (a *orchStatsAdapter) IngestPressureLevel() string {
+	return a.orch.PressureGate().Level().String()
+}
+
 func (a *orchStatsAdapter) VaultSnapshots() []cluster.StatsVaultSnapshot {
 	snaps := a.orch.VaultSnapshots()
 	out := make([]cluster.StatsVaultSnapshot, len(snaps))

@@ -752,6 +752,18 @@ export class NodeStats extends Message<NodeStats> {
    */
   selfIngesterDropsTotal = protoInt64.zero;
 
+  /**
+   * Current ingest-pipeline pressure: "normal", "elevated", or "critical".
+   * PressureAware ingesters throttle themselves as this rises. A metric, not
+   * an alarm (gastrolog-3phtqv): the actionable end of a backed-up pipeline
+   * is already covered by the pipeline-backlog and disk-space alarms, which
+   * fire when the backlog actually threatens something. Like raft_state,
+   * this is the level's String() rather than an enum.
+   *
+   * @generated from field: string ingest_pressure_level = 51;
+   */
+  ingestPressureLevel = "";
+
   constructor(data?: PartialMessage<NodeStats>) {
     super();
     proto3.util.initPartial(data, this);
@@ -810,6 +822,7 @@ export class NodeStats extends Message<NodeStats> {
     { no: 48, name: "disk_protected_vault_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
     { no: 49, name: "size_capped_vault_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
     { no: 50, name: "self_ingester_drops_total", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 51, name: "ingest_pressure_level", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): NodeStats {

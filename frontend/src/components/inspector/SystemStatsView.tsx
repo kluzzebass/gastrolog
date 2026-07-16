@@ -105,6 +105,18 @@ function CompactView({
                 dark={dark}
               />
             )}
+            {/* Ingest pressure raises no alarm (gastrolog-3phtqv): a throttled
+                pipeline is a handled condition, not one waiting on an
+                operator. It is shown here, next to the queue depth it derives
+                from, and only once it leaves normal — at normal there is
+                nothing to say. */}
+            {stats.ingestPressureLevel !== "" && stats.ingestPressureLevel !== "normal" && (
+              <CompactStatRow
+                label="Pressure"
+                value={stats.ingestPressureLevel}
+                dark={dark}
+              />
+            )}
           </div>
         </section>
       )}

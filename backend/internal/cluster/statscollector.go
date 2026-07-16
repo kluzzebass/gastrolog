@@ -118,6 +118,10 @@ type StatsVaultPipelineDiskSnapshot struct {
 type StatsProvider interface {
 	IngestQueueDepth() int
 	IngestQueueCapacity() int
+	// IngestPressureLevel is the pressure gate's current level as a string
+	// ("normal", "elevated", "critical"). Broadcast as a health metric; it
+	// raises no alarm (gastrolog-3phtqv).
+	IngestPressureLevel() string
 	VaultSnapshots() []StatsVaultSnapshot
 	IngesterIDs() []string
 	IngesterStats(id string) (name string, messages, bytes, errors int64, running bool)
@@ -358,6 +362,7 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 	if c.cfg.Stats != nil {
 		stats.IngestQueueDepth = uint32(c.cfg.Stats.IngestQueueDepth())       //nolint:gosec
 		stats.IngestQueueCapacity = uint32(c.cfg.Stats.IngestQueueCapacity()) //nolint:gosec
+		stats.IngestPressureLevel = c.cfg.Stats.IngestPressureLevel()
 
 		// Vault snapshots.
 		for _, v := range c.cfg.Stats.VaultSnapshots() {

@@ -13,6 +13,8 @@ package cluster
 import (
 	"testing"
 	"time"
+
+	"gastrolog/internal/alert"
 )
 
 type stubLogDrops struct{ n int64 }
@@ -66,5 +68,41 @@ func TestStatsCollector_LogDropsAbsentIsNotAPanic(t *testing.T) {
 	stats := collector.CollectLocalTick(time.Now())
 	if stats.SelfIngesterDropsTotal != 0 {
 		t.Fatalf("drops = %d, want 0 with no capture handler wired", stats.SelfIngesterDropsTotal)
+	}
+}
+
+type stubPressureStats struct {
+	stubStatsProvider
+	level string
+}
+
+func (s *stubPressureStats) IngestQueueCapacity() int    { return 1024 }
+func (s *stubPressureStats) IngestPressureLevel() string { return s.level }
+
+// Ingest pressure ships as a level for the health surfaces and raises no
+// alarm: a throttled pipeline is already handled — the throttle is the
+// response — so there is nothing for an operator to do (gastrolog-3phtqv).
+func TestStatsCollector_IngestPressureIsAMetricNotAnAlarm(t *testing.T) {
+	t.Parallel()
+	stats0 := &stubPressureStats{level: "normal"}
+	alerts := alert.New()
+	collector := NewStatsCollector(StatsCollectorConfig{
+		Stats:      stats0,
+		Alerts:     alerts,
+		NodeID:     "node-a",
+		NodeNameFn: func() string { return "node-a" },
+	})
+	t0 := time.Now()
+
+	for _, level := range []string{"normal", "elevated", "critical", "normal"} {
+		stats0.level = level
+		stats := collector.CollectLocalTick(t0)
+		if stats.IngestPressureLevel != level {
+			t.Fatalf("pressure = %q, want %q", stats.IngestPressureLevel, level)
+		}
+		if alertActive(alerts, "ingest-pressure") {
+			t.Fatalf("ingest-pressure raised an alarm at level %q; throttling is the response, not a call to action", level)
+		}
+		t0 = t0.Add(5 * time.Second)
 	}
 }

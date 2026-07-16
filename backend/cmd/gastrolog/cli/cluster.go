@@ -96,6 +96,11 @@ func newClusterStatusCmd() *cobra.Command {
 				p.table([]string{"NODE", "LOG DROPS"}, dropRows)
 			}
 
+			if pressureRows := ingestPressureRows(msg.Nodes); len(pressureRows) > 0 {
+				fmt.Println()
+				p.table([]string{"NODE", "INGEST PRESSURE", "QUEUE"}, pressureRows)
+			}
+
 			if msg.LocalStats != nil {
 				fmt.Println()
 				s := msg.LocalStats
@@ -149,6 +154,25 @@ func logDropRows(nodes []*v1.ClusterNode) [][]string {
 		rows = append(rows, []string{
 			n.Name,
 			strconv.FormatUint(n.Stats.SelfIngesterDropsTotal, 10),
+		})
+	}
+	return rows
+}
+
+// ingestPressureRows builds the per-node ingest-pressure table
+// (gastrolog-3phtqv) — parity with the inspector's Ingest Queue section.
+// Nodes at normal are skipped: a throttled pipeline is a handled condition
+// reported for trending, not an alarm, and normal is the uneventful case.
+func ingestPressureRows(nodes []*v1.ClusterNode) [][]string {
+	var rows [][]string
+	for _, n := range nodes {
+		if n.Stats == nil || n.Stats.IngestPressureLevel == "" || n.Stats.IngestPressureLevel == "normal" {
+			continue
+		}
+		rows = append(rows, []string{
+			n.Name,
+			n.Stats.IngestPressureLevel,
+			fmt.Sprintf("%d / %d", n.Stats.IngestQueueDepth, n.Stats.IngestQueueCapacity),
 		})
 	}
 	return rows
