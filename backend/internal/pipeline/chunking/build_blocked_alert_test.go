@@ -34,10 +34,6 @@ func (s *recordingAlertSink) Raise(typeID, instanceKey, detail string) {
 	s.active[sinkAlarmID(typeID, instanceKey)] = detail
 }
 
-func (s *recordingAlertSink) RaiseOperator(a alert.OperatorAlarm) {
-	s.Raise(a.TypeID, a.InstanceKey, a.Detail)
-}
-
 func (s *recordingAlertSink) Clear(typeID, instanceKey string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

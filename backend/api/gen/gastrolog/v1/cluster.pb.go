@@ -1465,7 +1465,7 @@ func (x *PeerTrafficTotal) GetRxSpark() []float64 {
 
 // SystemAlert is one standing alarm: a runtime condition requiring operator
 // action, with priority, cause and response stamped from the static alarm
-// catalog (or from the operator's own rule for operator-defined alarms).
+// catalog — never chosen at the raising call site.
 // Alarms are keyed by ID for deduplication — the same condition doesn't
 // create multiple alarms. Each carries its lifecycle state (EEMUA 191
 // standing-alarm management): non-latching alarms auto-clear when the

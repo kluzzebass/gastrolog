@@ -129,7 +129,7 @@ Verdicts under the governing test:
 | `vault-max-size-approaching:<vault>` *(split)* | storage | Vault approaching its size budget | **Alarm** | Low | Raise the budget or shorten retention — before records start being refused |
 | `disk-space-low:<vault>` *(split)* | storage | Vault volume below its free-space warn band | **Alarm** | Low | Free space, add capacity, raise the vault's threshold, or shorten its retention |
 | `node-disk-space-low` *(node, split)* | storage | Node volume below its free-space warn band | **Alarm** | Low | Free space, add capacity, or shorten retention |
-| `<kind>-rate:<vault>` (prod: `retention-rate:<vault>`) | ratealerter | Operator-configured rate threshold crossed | **Alarm** (operator-defined) | from the rule (lower threshold → Low, escalation threshold → High) | The operator defined the threshold; the response text comes from the rule. Not a catalog alarm — enters via `RaiseOperator`, beside the catalog. See [gastrolog-1cruar] |
+| `retention-rate:<vault>` | retention | Retention delete rate sustained above 10/s over a 30s window (product constants; the rate window at the call site is the condition definition and its hysteresis) | **Alarm** | Low | Review the vault's rotation and retention policy; a configuration this aggressive degrades throughput until corrected |
 | `alarm-flood` | alarm-system | This node's alarm activations exceeded the flood threshold (default 10 per rolling 10 minutes) — the alarm system reporting itself degraded (EEMUA 191 rate principle) | **Alarm** | High | The alarm system on this node is degraded by volume: triage by priority — Critical first — and expect suppressed detail (same-type alarms collapse in the panel). Clears on its own after a full under-threshold 10-minute window; threshold adjustable in cluster settings. Exactly one per node regardless of overshoot; never counts toward its own rate |
 | **`vault-home-cannot-store:<vault>`** | placement | A vault home node is disk-protected; collection and builds paused there | **NEEDS VERDICT** (interim: Alarm) | Low (interim) | Razor is unclear. When healthy replicas ≥ RF the text itself says replicas are "backfilled automatically" — handled, nothing waits on an operator. When healthy < RF, the action is "free space", which is already `disk-space-*`'s action on that node. What it uniquely adds is *which vault* is affected. Demote to a metric, or keep as the vault-scoped view of a node condition? Until the verdict lands, the phase 2 registry keeps it as a Low alarm (the code still raises it; a raised type must be cataloged) |
 | *(retention unrouted destroy — row retired)* | retention | Chunk destroyed with zero records routed | **Not an alarm — prevented** | — | Resolved in [gastrolog-65riw5]: the condition no longer occurs, so there is nothing to alarm on. An unreadable cursor now flags the chunk for backoff retry and raises `chunk-unreadable:<chunk>` (which has its own row); a missing vault instance retains the chunk. No alarm was invented — the existing one covers it. **Partial** fan-out remains a deliberate tolerance and is reported with a dropped-record count, not an alarm; see the note below |
@@ -241,11 +241,24 @@ type and stamps priority/cause/response (suppression follows in phase 3);
 `Clear(typeID, instanceKey)` is addressed the same way. Call sites
 stopped choosing severities ad hoc; the three structurally identical sink
 interfaces (orchestrator `AlertCollector`, segmentation and chunking
-`AlertSink`) collapsed into the single `alert.Sink`. Operator-defined
-alarms enter through `RaiseOperator(OperatorAlarm)`. A `Raise` for an
+`AlertSink`) collapsed into the single `alert.Sink`. A `Raise` for an
 unregistered type is loud, never silent: it logs the defect and surfaces
 a software-fault alarm carrying the raiser's detail. `alert.Info` never
 existed — informational conditions are events by definition.
+
+**Recorded decision — the operator-defined category was removed**
+(gastrolog-1cruar). The sink briefly carried a second, catalog-bypassing
+entrance for "operator-defined" alarms, whose priority would come from
+an operator-configured rule rather than the catalog. A code audit
+disproved the premise: the only rate rule in the system is the
+retention-rate alerter constructed in `orchestrator.go` with hardcoded
+constants (>10 deletes/sec over a 30s window) — no config field, proto
+field, CLI flag, or UI setting feeds those thresholds, so no operator has
+ever authored a rate rule. `retention-rate` is now an ordinary catalog
+row, and the catalog principle holds with zero exceptions: every alarm
+enters through `Raise`, and priority is never chosen at a call site. An
+operator-defined category gets designed if and when operator-authored
+rules become a real feature — not before.
 
 ## Lifecycle state model
 

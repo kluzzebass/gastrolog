@@ -97,10 +97,6 @@ func (s *historyAlertSink) Raise(typeID, instanceKey, detail string) {
 	s.events = append(s.events, alertEvent{kind: "set", id: sinkAlarmID(typeID, instanceKey), message: detail})
 }
 
-func (s *historyAlertSink) RaiseOperator(a alert.OperatorAlarm) {
-	s.Raise(a.TypeID, a.InstanceKey, a.Detail)
-}
-
 func (s *historyAlertSink) Clear(typeID, instanceKey string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

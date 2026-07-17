@@ -723,14 +723,13 @@ How the cluster reports what it's doing to itself, to operators, and to the UI.
   `Critical` (data loss in progress or scheduled), `High` (durability or
   availability degraded, will compound), `Low` (needs attention on a human
   timescale). Replaced the old call-site-chosen `Severity`
-  (Warning/Error). **Software faults** (e.g. `orchestrator-lock-leak`) are
+  (Warning/Error). Priority always comes from the catalog, with zero
+  exceptions — the short-lived "operator-defined alarm" category (priority
+  from an operator-configured rule, retired in gastrolog-1cruar)
+  modeled a feature that never existed; `retention-rate` is an ordinary
+  catalog row. **Software faults** (e.g. `orchestrator-lock-leak`) are
   a class apart — defect tripwires whose response is to report, so they
   carry no priority and may never be shelved.
-
-- **Operator-defined alarm** — an alarm whose priority and guidance come
-  from an operator-configured rule rather than the catalog (the
-  `<kind>-rate` alarms). Enters through `RaiseOperator`, beside the
-  catalog, never inside it; still renders in the same alarm list.
 
 - **AlertCollector** — per-node bounded store of standing alarms with
   their suppression and lifecycle state. Alarms have a stable key

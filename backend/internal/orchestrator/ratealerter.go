@@ -10,18 +10,16 @@ import (
 )
 
 // RateAlerter tracks per-vault event rates over a sliding window and raises
-// or clears alarms when sustained rates exceed configured thresholds. It is
-// the mechanism behind gastrolog-47qyw: detecting and surfacing pathological
-// rotation or retention configurations as operator-visible signals rather
-// than silent throughput collapse.
+// or clears a cataloged alarm when the sustained rate crosses a threshold.
+// It is the mechanism behind gastrolog-47qyw: detecting and surfacing
+// pathological rotation or retention configurations as operator-visible
+// signals rather than silent throughput collapse.
 //
-// Rate alarms are OPERATOR-DEFINED: the thresholds are the rule, so the
-// priority comes from which threshold was crossed rather than from the
-// static alarm catalog. They enter the collector through RaiseOperator and
-// live beside the catalog, never inside it — see the design doc's
-// "<kind>-rate" row. Crossing lowAt raises Low; crossing highAt escalates
-// to High (never Critical: a pathological policy degrades throughput, it
-// does not lose accepted data).
+// The alerter owns only the CONDITION definition — the sustained-rate
+// predicate (threshold + window) that decides when "<kind>-rate" is true
+// for a vault. Priority, cause and response come from the alarm catalog
+// like every other alarm: it raises through the ordinary
+// Raise(typeID, instanceKey, detail) path, never choosing a priority.
 //
 // The alerter owns one RateWindow per vault and looks up vault names through
 // an injected callback (so it doesn't need to know about the orchestrator's
@@ -29,37 +27,31 @@ import (
 // "<kind>-rate" keyed per vault, so each vault has an independent
 // Raise/Clear pair.
 //
-// Hysteresis: lowAt and highAt are escalation thresholds. The alarm only
-// clears when the observed rate drops back to below lowAt — there is no
-// separate "clear at X" knob, because the rate window itself smooths over
-// short bursts (a 30s window of 30 events at instant t is still 1/sec at
-// instant t+15 even if no new events arrive). This naturally prevents
-// flapping at the threshold.
+// Hysteresis: the alarm clears when the observed rate drops back below the
+// threshold — there is no separate "clear at X" knob, because the rate
+// window itself smooths over short bursts (a 30s window of 30 events at
+// instant t is still 1/sec at instant t+15 even if no new events arrive).
+// This naturally prevents flapping at the threshold.
 type RateAlerter struct {
 	mu      sync.Mutex
 	windows map[glid.GLID]*RateWindow
-	// active tracks the last priority we raised for each vault so Evaluate
-	// can decide whether the alarm state changed.
-	active map[glid.GLID]alert.Priority
+	// active tracks whether the alarm is currently raised for each vault so
+	// Evaluate can decide whether the condition changed.
+	active map[glid.GLID]bool
 
 	window    time.Duration
 	kind      string  // e.g. "rotation" or "retention"
-	source    string  // alarm "source" field, e.g. "rotation"
-	lowAt     float64 // events/sec to raise Low
-	highAt    float64 // events/sec to escalate to High (0 disables escalation)
+	threshold float64 // events/sec that makes the condition true
 	alerts    alert.Sink
 	vaultName func(glid.GLID) string // best-effort human label, "" if unknown
 }
 
 // rateAlerterConfig bundles the constructor parameters so RateAlerter
-// constructions read clearly at the call site (there are five tunable
-// fields and a positional API would be unreadable).
+// constructions read clearly at the call site.
 type rateAlerterConfig struct {
 	Window    time.Duration
 	Kind      string
-	Source    string
-	LowAt     float64
-	HighAt    float64 // 0 = no High escalation
+	Threshold float64
 	Alerts    alert.Sink
 	VaultName func(glid.GLID) string
 }
@@ -71,12 +63,10 @@ type rateAlerterConfig struct {
 func newRateAlerter(cfg rateAlerterConfig) *RateAlerter {
 	return &RateAlerter{
 		windows:   make(map[glid.GLID]*RateWindow),
-		active:    make(map[glid.GLID]alert.Priority),
+		active:    make(map[glid.GLID]bool),
 		window:    cfg.Window,
 		kind:      cfg.Kind,
-		source:    cfg.Source,
-		lowAt:     cfg.LowAt,
-		highAt:    cfg.HighAt,
+		threshold: cfg.Threshold,
 		alerts:    cfg.Alerts,
 		vaultName: cfg.VaultName,
 	}
@@ -100,10 +90,10 @@ func (r *RateAlerter) Record(vaultID glid.GLID, now time.Time) {
 func (r *RateAlerter) Forget(vaultID glid.GLID) {
 	r.mu.Lock()
 	delete(r.windows, vaultID)
-	prev, hadActive := r.active[vaultID]
+	wasActive := r.active[vaultID]
 	delete(r.active, vaultID)
 	r.mu.Unlock()
-	if hadActive && prev != 0 && r.alerts != nil {
+	if wasActive && r.alerts != nil {
 		r.alerts.Clear(r.alarmTypeID(), vaultID.String())
 	}
 }
@@ -113,10 +103,10 @@ func (r *RateAlerter) Forget(vaultID glid.GLID) {
 // a fixed cadence (e.g., every 5 seconds) by a background goroutine.
 func (r *RateAlerter) Evaluate(now time.Time) {
 	type pending struct {
-		vaultID  glid.GLID
-		priority alert.Priority // 0 = clear
-		rate     float64
-		count    int64
+		vaultID glid.GLID
+		up      bool // condition true (raise) vs resolved (clear)
+		rate    float64
+		count   int64
 	}
 	var work []pending
 
@@ -124,13 +114,12 @@ func (r *RateAlerter) Evaluate(now time.Time) {
 	for vaultID, w := range r.windows {
 		rate := w.Rate(now)
 		count := w.Count(now)
-		desired := r.classify(rate)
-		prev := r.active[vaultID]
-		if desired == prev {
+		up := rate >= r.threshold
+		if up == r.active[vaultID] {
 			continue
 		}
-		r.active[vaultID] = desired
-		work = append(work, pending{vaultID: vaultID, priority: desired, rate: rate, count: count})
+		r.active[vaultID] = up
+		work = append(work, pending{vaultID: vaultID, up: up, rate: rate, count: count})
 	}
 	r.mu.Unlock()
 
@@ -138,32 +127,12 @@ func (r *RateAlerter) Evaluate(now time.Time) {
 		return
 	}
 	for _, p := range work {
-		if p.priority == 0 {
+		if !p.up {
 			r.alerts.Clear(r.alarmTypeID(), p.vaultID.String())
 			continue
 		}
-		r.alerts.RaiseOperator(alert.OperatorAlarm{
-			TypeID:      r.alarmTypeID(),
-			InstanceKey: p.vaultID.String(),
-			Priority:    p.priority,
-			Source:      r.source,
-			Detail:      r.message(p.vaultID, p.rate, p.count),
-			Cause:       fmt.Sprintf("The vault's %s rate crossed an operator-configured threshold (sustained over a %s window).", r.kind, r.window),
-			Response:    fmt.Sprintf("Review the vault's %s policy and the configured threshold — a pathological configuration degrades throughput until corrected.", r.kind),
-		})
+		r.alerts.Raise(r.alarmTypeID(), p.vaultID.String(), r.message(p.vaultID, p.rate, p.count))
 	}
-}
-
-// classify maps a rate to the appropriate alarm priority. Returns 0 to
-// indicate "clear / no alarm".
-func (r *RateAlerter) classify(rate float64) alert.Priority {
-	if r.highAt > 0 && rate >= r.highAt {
-		return alert.High
-	}
-	if rate >= r.lowAt {
-		return alert.Low
-	}
-	return 0
 }
 
 func (r *RateAlerter) alarmTypeID() string {

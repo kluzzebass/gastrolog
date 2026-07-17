@@ -12,7 +12,6 @@ import (
 	"strings"
 	"testing"
 
-	"gastrolog/internal/alert"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/paths"
 )
@@ -23,8 +22,6 @@ type stubAlertSink struct {
 }
 
 func (s *stubAlertSink) Raise(string, string, string) { s.sets++ }
-
-func (s *stubAlertSink) RaiseOperator(alert.OperatorAlarm) { s.sets++ }
 
 func (s *stubAlertSink) Clear(string, string) { s.clears++ }
 

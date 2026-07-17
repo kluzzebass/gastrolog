@@ -126,35 +126,30 @@ func TestRaisePreservesFirstSeen(t *testing.T) {
 	}
 }
 
-func TestRaiseOperatorBesideCatalog(t *testing.T) {
+// TestRetentionRateIsCataloged pins the gastrolog-1cruar fold: retention-rate
+// is an ordinary catalog row (Low, shelveable process condition), raised
+// through the one Raise path like every other type — there is no
+// operator-defined category and no priority chosen at a call site.
+func TestRetentionRateIsCataloged(t *testing.T) {
+	typ, ok := TypeByID("retention-rate")
+	if !ok {
+		t.Fatal("retention-rate missing from the catalog")
+	}
+	if typ.Priority != Low || typ.Source != "retention" {
+		t.Errorf("retention-rate catalog row = %+v, want Low priority from source retention", typ)
+	}
+	if !typ.Shelveable() {
+		t.Error("retention-rate is a process condition; the catalog default (shelveable) applies")
+	}
+
 	c := New()
-
-	c.RaiseOperator(OperatorAlarm{
-		TypeID:      "retention-rate",
-		InstanceKey: "vault-2",
-		Priority:    Low,
-		Source:      "retention",
-		Detail:      "rate 12.00/s",
-		Cause:       "threshold crossed",
-		Response:    "review the rule",
-	})
-
+	c.Raise("retention-rate", "vault-2", "rate 12.00/s")
 	a := findAlarm(c, "retention-rate:vault-2")
 	if a == nil {
-		t.Fatal("operator alarm not surfaced")
+		t.Fatal("retention-rate alarm not surfaced")
 	}
-	if a.Priority != Low || a.Source != "retention" || a.Cause != "threshold crossed" || a.Response != "review the rule" {
-		t.Errorf("operator alarm fields not stored verbatim: %+v", a)
-	}
-
-	// Operator rules may escalate priority on re-raise.
-	c.RaiseOperator(OperatorAlarm{
-		TypeID: "retention-rate", InstanceKey: "vault-2",
-		Priority: High, Source: "retention", Detail: "rate 99.00/s",
-	})
-	a = findAlarm(c, "retention-rate:vault-2")
-	if a.Priority != High {
-		t.Errorf("priority = %v, want High after escalation", a.Priority)
+	if a.Priority != Low || a.Source != "retention" || a.Cause == "" || a.Response == "" {
+		t.Errorf("retention-rate fields must be stamped from the catalog: %+v", a)
 	}
 }
 
