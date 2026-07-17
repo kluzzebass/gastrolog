@@ -684,6 +684,27 @@ config store.
 - **StoreProxy** — a wrapper that intercepts config writes to emit
   change notifications via the dispatcher.
 
+### Configuration defaults
+
+**Policy: an unset value must not express an unbounded claim on a finite,
+shared resource.** Absence of configuration is the common case — the operator
+with no opinion — and it must resolve to the *conservative* reading, not the
+maximal one. A too-small bound announces itself (records refused, alarm
+raised) and is corrected; an absent bound is silent until it exhausts the
+resource. Small-and-loud beats large-and-silent.
+
+- A knob whose unset value claims *the minimum* is correct: `replication-factor`
+  defaults to 1 (one copy is the least that still stores the data).
+- A knob whose unset value claims *the maximum* of a finite shared resource
+  (disk, cache, memory) is a defect: `max-size` / `cache-budget` /
+  `memory-budget` unset must resolve to a bounded default, not "unlimited".
+- "Unlimited" is an explicit large value the operator types, never the effect
+  of saying nothing.
+
+When adding a config knob, apply this before shipping it. See
+[`docs/product-defaults-policy-design.md`](./product-defaults-policy-design.md)
+for the criteria and the audit.
+
 ### Server settings
 
 Live on `Config` directly (not as entities):

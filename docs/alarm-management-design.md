@@ -131,7 +131,7 @@ Verdicts under the governing test:
 | `disk-space-low` *(node, split)* | storage | Node volume below its free-space warn band | **Alarm** | Low | Free space, add capacity, or shorten retention |
 | `<kind>-rate:<vault>` (prod: `retention-rate:<vault>`) | ratealerter | Operator-configured rate threshold crossed | **Alarm** (operator-defined) | from the rule | The operator defined the threshold; the response text comes from the rule. Not a catalog alarm — see [gastrolog-1cruar] |
 | **`vault-home-cannot-store:<vault>`** | placement | A vault home node is disk-protected; collection and builds paused there | **NEEDS VERDICT** | — | Razor is unclear. When healthy replicas ≥ RF the text itself says replicas are "backfilled automatically" — handled, nothing waits on an operator. When healthy < RF, the action is "free space", which is already `disk-space-*`'s action on that node. What it uniquely adds is *which vault* is affected. Demote to a metric, or keep as the vault-scoped view of a node condition? |
-| **retention unrouted destroy** | retention | Chunk destroyed with zero records routed (unreadable cursor, nil vault instance) | **Alarm** (not yet raised) | Critical | Aspirational — nothing raises this today. The terminal cases are already prevented (the chunk is retained and retried); the residual tolerance is real and tracked in [gastrolog-65riw5], which also settles whether the behaviour itself should change |
+| *(retention unrouted destroy — row retired)* | retention | Chunk destroyed with zero records routed | **Not an alarm — prevented** | — | Resolved in [gastrolog-65riw5]: the condition no longer occurs, so there is nothing to alarm on. An unreadable cursor now flags the chunk for backoff retry and raises `chunk-unreadable:<chunk>` (which has its own row); a missing vault instance retains the chunk. No alarm was invented — the existing one covers it. **Partial** fan-out remains a deliberate tolerance and is reported with a dropped-record count, not an alarm; see the note below |
 | chanwatch saturation | chanwatch | Internal channel saturated past watermark | **Event** (demoted ✓) | — | Landed: transition-edge logs. Journal surface lands with phase 5 |
 | ingest-pressure | orchestrator | Ingest pipeline pressure elevated/critical; ingesters throttling | **Event** (demoted ✓) | — | Landed: `NodeStats.ingest_pressure_level`. If ingestion is throttled the matter is already handled — the throttle *is* the response, so nothing waits on an operator. Never logged: the self-ingester captures slog, so logging throttle transitions feeds the pressure |
 | `self-ingester-drops` | ingester/self | Capture channel overflowing; diagnostic records discarded | **Event** (demoted ✓) | — | Landed: `NodeStats.self_ingester_drops_total`. Capacity tuning, not operator action. Never logged: a line about dropped logs feeds the channel dropping them |
@@ -143,9 +143,23 @@ Rows marked ✓ already landed; phase 1 is complete. Every surviving alarm
 gets a catalog entry in code (see below) carrying its response text — the UI
 shows it; no tracker IDs, no internal jargon.
 
-Two rows are **not** settled and must not be implemented from this table as
-written: `vault-home-cannot-store` needs a razor verdict, and the retention
-unrouted-destroy row is aspirational pending [gastrolog-65riw5].
+One row is **not** settled and must not be implemented from this table as
+written: `vault-home-cannot-store` needs a razor verdict.
+
+**The best answer to "what priority should this alarm be?" is sometimes
+"make the condition impossible."** The retention unrouted-destroy row was
+Critical and unraised — an alarm the design wanted and the code never built.
+Working out its response text (gastrolog-65riw5) showed the condition was a
+bug, not a state: retention was destroying chunks with zero records routed
+on an unreadable cursor. Fixing that removed the row instead of filling it
+in. Reach for that before writing a catalog entry: a row that says "tell the
+operator we lost their data" is a row that should have said "don't."
+
+Partial fan-out — individual records failing to submit for non-terminal
+reasons, dropped when the chunk is destroyed — is a **deliberate tolerance**
+and stays one: one bad record must not strand a chunk forever. It is
+reported with a count on a single line rather than a warn per record, and
+whether a nonzero count deserves an alarm of its own is open.
 
 Rows removed from this table as fiction — they described conditions no code
 raises:
