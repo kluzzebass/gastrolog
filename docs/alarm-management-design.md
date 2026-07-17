@@ -268,6 +268,13 @@ with a count.
 - Rate/flood indicator in the panel header.
 - Event journal is a separate page: filterable, no controls, no color
   escalation — it is a record, not a call to action.
+- CLI surface: `gastrolog alerts` (per-node attribution, `--node` filter,
+  `-o json`) and a standing-alarm table in `cluster status` render the
+  same per-node NodeStats aggregation the panel reads, over the local
+  Unix socket with no auth — alarms stay readable from a bare shell when
+  a suspended system writes no logs. The CLI's severity→display mapping
+  is a single function (`alertSeverityStr`), so the phase-2 severity →
+  priority change is a one-place edit there.
 
 ## Implementation phases
 

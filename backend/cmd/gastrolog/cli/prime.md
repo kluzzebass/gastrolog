@@ -104,6 +104,12 @@ CLUSTERING
   # List nodes
   gastrolog config node list
 
+  # Topology, Raft state, and standing system alerts
+  gastrolog cluster status
+
+  # Standing system alerts only, with per-node attribution
+  gastrolog alerts                 # --node <name-or-id> to filter, -o json
+
   WARNING: Joining replaces the joining node's local config with the
   cluster's replicated state. Vault data files on disk survive.
 
