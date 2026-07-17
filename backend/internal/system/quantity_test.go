@@ -27,6 +27,9 @@ func TestParseSizePinsCanonicalExpressions(t *testing.T) {
 		"100TiB": 100 << 40,
 		"1PiB":  1 << 50,
 		"1EiB":  1 << 60,
+		"5 GB":   5_000_000_000,
+		"5 G B":  5_000_000_000,
+		"  5  GiB  ": 5 << 30,
 	}
 	for expr, want := range cases {
 		got, err := system.ParseSize(expr)

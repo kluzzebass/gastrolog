@@ -60,7 +60,7 @@ export function formatBytesBigint(b: bigint): string {
  * empty or unparseable input.
  */
 export function parseBytes(s: string): bigint {
-  s = s.trim();
+  s = s.replace(/\s+/g, "");
   if (!s) return 0n;
   const match = /^(\d+(?:\.\d+)?)\s*(EIB|PIB|TIB|GIB|MIB|KIB|EB|PB|TB|GB|MB|KB|B)?$/.exec(s.toUpperCase());
   if (!match) return 0n;
