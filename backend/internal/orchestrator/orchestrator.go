@@ -843,15 +843,16 @@ func New(cfg Config) (*Orchestrator, error) {
 	o.vaultCtlLeaders.SetOnMemberRemoved(o.proposePruneNodeForVault)
 	o.vaultCtlLeaders.SetOnLeadGained(o.onVaultCtlLeadGained)
 
-	// Per-instance retention rate alerter (gastrolog-47qyw): Low at >10/sec
-	// sustained over 30s. The orchestrator's vaultName closure looks up the
-	// human label from the current vault registry; "" if the instance is unknown.
+	// Per-instance retention rate alerter (gastrolog-47qyw): the condition
+	// is >10 deletes/sec sustained over a 30s window. These constants ARE
+	// the retention-rate catalog row's documented threshold — the row's
+	// Cause text quotes them, so a change here changes both. Priority comes
+	// from the catalog like every other alarm. The vaultName closure looks
+	// up the human label from the current vault registry; "" if unknown.
 	o.retentionRates = newRateAlerter(rateAlerterConfig{
 		Window:    30 * time.Second,
 		Kind:      "retention",
-		Source:    "retention",
-		LowAt:     10.0,
-		HighAt:    0, // no escalation per issue scope
+		Threshold: 10.0,
 		Alerts:    o.alerts,
 		VaultName: o.vaultLabel,
 	})

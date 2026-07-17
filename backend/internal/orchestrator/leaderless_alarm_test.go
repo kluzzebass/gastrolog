@@ -23,10 +23,6 @@ func (s *alertSpy) Raise(typeID, instanceKey, detail string) {
 	s.set[spyAlarmID(typeID, instanceKey)] = detail
 }
 
-func (s *alertSpy) RaiseOperator(a alert.OperatorAlarm) {
-	s.Raise(a.TypeID, a.InstanceKey, a.Detail)
-}
-
 func (s *alertSpy) Clear(typeID, instanceKey string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -41,10 +41,8 @@
 // Raise of the occurrence), not the moment the alarm activated: the
 // delay-on window suppresses annunciation, not the condition's history.
 //
-// Operator-defined alarms — whose priority comes from an operator-configured
-// rule rather than the catalog (e.g. vault rate thresholds) — enter through
-// RaiseOperator() and live beside the catalog, never inside it. They carry
-// no suppression: the rule is the condition definition.
+// There is no path around the catalog: every alarm enters through Raise,
+// and priority is never chosen at a call site.
 package alert
 
 import (
@@ -135,9 +133,9 @@ var (
 	ErrNotShelved = errors.New("alarm is not shelved")
 )
 
-// Alarm is one standing alarm instance: a cataloged (or operator-defined)
-// type plus the instance it fired for. ID is the stable dedup key,
-// composed from the type ID and instance key.
+// Alarm is one standing alarm instance: a cataloged type plus the instance
+// it fired for. ID is the stable dedup key, composed from the type ID and
+// instance key.
 type Alarm struct {
 	ID            string // "<typeID>" or "<typeID>:<instanceKey>"
 	TypeID        string
@@ -166,25 +164,11 @@ type Alarm struct {
 	Shelveable bool
 }
 
-// OperatorAlarm is an alarm whose priority and guidance come from an
-// operator-configured rule rather than the static catalog. It is modeled
-// beside the catalog: RaiseOperator stores it verbatim.
-type OperatorAlarm struct {
-	TypeID      string
-	InstanceKey string
-	Priority    Priority
-	Source      string
-	Detail      string
-	Cause       string
-	Response    string
-}
-
 // Sink is the raising side of the collector, satisfied by *Collector. It is
 // THE alarm-sink interface — components that raise alarms depend on this one
 // type rather than declaring structurally identical local copies.
 type Sink interface {
 	Raise(typeID, instanceKey, detail string)
-	RaiseOperator(a OperatorAlarm)
 	Clear(typeID, instanceKey string)
 }
 
@@ -408,28 +392,10 @@ func (c *Collector) Raise(typeID, instanceKey, detail string) {
 	}, t.DelayOn, t.DelayOff, t.Latching)
 }
 
-// RaiseOperator raises or refreshes an operator-defined alarm. The rule that
-// defined the threshold supplies priority, cause and response; there is no
-// catalog entry and no suppression. Operator-defined alarms are shelveable:
-// they are process conditions by construction (the operator wrote the rule).
-func (c *Collector) RaiseOperator(a OperatorAlarm) {
-	c.raise(Alarm{
-		ID:          alarmID(a.TypeID, a.InstanceKey),
-		TypeID:      a.TypeID,
-		InstanceKey: a.InstanceKey,
-		Priority:    a.Priority,
-		Source:      a.Source,
-		Detail:      a.Detail,
-		Cause:       a.Cause,
-		Response:    a.Response,
-		Shelveable:  true,
-	}, 0, 0, false)
-}
-
 // raise records that the condition for a is up, creating or refreshing its
-// suppression entry. Detail and priority refresh on every raise (operator-
-// defined alarms may escalate; cataloged priorities are static but
-// harmlessly re-stamped); FirstSeen is preserved across the occurrence.
+// suppression entry. Detail refreshes on every raise (the cataloged fields
+// are static but harmlessly re-stamped); FirstSeen is preserved across the
+// occurrence.
 func (c *Collector) raise(a Alarm, delayOn, delayOff time.Duration, latching bool) {
 	c.mu.Lock()
 	var activated []string

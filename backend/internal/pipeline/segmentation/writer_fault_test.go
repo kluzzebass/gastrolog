@@ -17,7 +17,6 @@ import (
 	"testing"
 	"time"
 
-	"gastrolog/internal/alert"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/segment"
 	"gastrolog/internal/record"
@@ -45,10 +44,6 @@ func (a *recordingAlerts) Raise(typeID, instanceKey, _ string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.sets = append(a.sets, typeID+":"+instanceKey)
-}
-
-func (a *recordingAlerts) RaiseOperator(op alert.OperatorAlarm) {
-	a.Raise(op.TypeID, op.InstanceKey, op.Detail)
 }
 
 func (a *recordingAlerts) Clear(typeID, instanceKey string) {

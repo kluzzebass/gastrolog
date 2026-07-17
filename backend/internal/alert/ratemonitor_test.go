@@ -230,24 +230,6 @@ func TestPerNodeIsolation(t *testing.T) {
 	}
 }
 
-func TestOperatorAlarmsCountTowardRate(t *testing.T) {
-	clock := newTestClock()
-	c, m := newMonitoredCollector(clock)
-
-	for i := 0; i < 3; i++ {
-		c.RaiseOperator(OperatorAlarm{
-			TypeID:      "retention-rate",
-			InstanceKey: fmt.Sprintf("vault-%d", i),
-			Priority:    Low,
-			Source:      "ratealerter",
-			Detail:      "rate over threshold",
-		})
-	}
-	if got := m.Rate(); got != 3 {
-		t.Fatalf("rate = %d, want 3 operator-alarm activations", got)
-	}
-}
-
 func TestFloodDetailRefreshesWithRate(t *testing.T) {
 	clock := newTestClock()
 	c, _ := newMonitoredCollector(clock)

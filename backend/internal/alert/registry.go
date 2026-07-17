@@ -64,8 +64,6 @@ func (t AlarmType) Shelveable() bool {
 
 // catalog is the static alarm-type registry. One entry per alarm type the
 // system can raise; every entry carries non-empty Cause and Response.
-// Operator-defined alarms (RaiseOperator, e.g. "retention-rate") are
-// deliberately absent — their priority and guidance come from the rule.
 var catalog = []AlarmType{
 	// ------------------------------------------------------------------
 	// Critical — data loss in progress or scheduled.
@@ -101,8 +99,8 @@ var catalog = []AlarmType{
 		Latching:        true, // a leaked hold can never self-clear
 		NeverShelveable: true, // shelving a wedge is a lie: nothing improves during the window
 		Source:          "orchestrator",
-		Cause:         "The orchestrator registry lock has been held or write-stuck past one minute — a lock-discipline defect, not an operating condition. The node is likely wedging.",
-		Response:      "This should never fire. Capture the acquisition stack from this node's log and file it. Restarting the node is a workaround to recover service, not the response.",
+		Cause:           "The orchestrator registry lock has been held or write-stuck past one minute — a lock-discipline defect, not an operating condition. The node is likely wedging.",
+		Response:        "This should never fire. Capture the acquisition stack from this node's log and file it. Restarting the node is a workaround to recover service, not the response.",
 	},
 
 	// ------------------------------------------------------------------
@@ -181,8 +179,8 @@ var catalog = []AlarmType{
 		// shelving the degradation indicator defeats self-monitoring.
 		NeverShelveable: true,
 		Source:          "alarm-system",
-		Cause:    "This node has raised more alarms in the last 10 minutes than the flood threshold. The alarm list has outrun what an operator can read, so individual alarms on this node are losing their annunciation value.",
-		Response: "The alarm system on this node is degraded by volume: triage by priority — Critical first — and expect suppressed detail (same-type alarms collapse in the panel). Clears on its own once the rate stays under the threshold for a full 10-minute window; the threshold is adjustable in the cluster settings.",
+		Cause:           "This node has raised more alarms in the last 10 minutes than the flood threshold. The alarm list has outrun what an operator can read, so individual alarms on this node are losing their annunciation value.",
+		Response:        "The alarm system on this node is degraded by volume: triage by priority — Critical first — and expect suppressed detail (same-type alarms collapse in the panel). Clears on its own once the rate stays under the threshold for a full 10-minute window; the threshold is adjustable in the cluster settings.",
 	},
 	{
 		IDPrefix: "vault-leaderless",
@@ -295,6 +293,18 @@ var catalog = []AlarmType{
 		Response: "Free space, add capacity, raise the vault's threshold, or shorten its retention.",
 	},
 	{
+		IDPrefix: "retention-rate",
+		Priority: Low,
+		Source:   "retention",
+		// The threshold is a product constant (orchestrator wiring): more
+		// than 10 retention deletes per second sustained over a 30-second
+		// window. The rate window at the call site is the condition
+		// definition — the sustained-rate predicate plus its natural
+		// hysteresis — not chattering suppression, so no DelayOn here.
+		Cause:    "The vault has sustained more than 10 retention deletes per second over a 30-second window — usually a pathological rotation or retention configuration churning tiny chunks.",
+		Response: "Review the vault's rotation and retention policy; a configuration this aggressive degrades throughput until corrected.",
+	},
+	{
 		IDPrefix: "node-disk-space-low",
 		Priority: Low,
 		Source:   "storage",
@@ -349,7 +359,7 @@ func unregisteredAlarmType(typeID string) AlarmType {
 		SoftwareFault:   true,
 		NeverShelveable: true, // a defect tripwire; deferring it defers the report
 		Source:          "alarm-system",
-		Cause:         "A component raised an alarm type that is not in the alarm catalog. The underlying condition is real (see the detail text) but its priority and guidance are undocumented — a software defect in the raising component.",
-		Response:      "Report this, quoting the alarm ID and detail text. Treat the detail text as the condition description until the catalog entry exists.",
+		Cause:           "A component raised an alarm type that is not in the alarm catalog. The underlying condition is real (see the detail text) but its priority and guidance are undocumented — a software defect in the raising component.",
+		Response:        "Report this, quoting the alarm ID and detail text. Treat the detail text as the condition description until the catalog entry exists.",
 	}
 }

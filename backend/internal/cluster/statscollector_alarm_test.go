@@ -43,11 +43,7 @@ func TestStatsCollector_AlarmBroadcastShape(t *testing.T) {
 	now = now.Add(leaderlessType.DelayOn + time.Second)
 	clockMu.Unlock()
 	alarms.Raise("orchestrator-lock-leak", "", "read hold stuck for 2m")
-	alarms.RaiseOperator(alert.OperatorAlarm{
-		TypeID: "retention-rate", InstanceKey: "vault-2",
-		Priority: alert.Low, Source: "retention",
-		Detail: "rate 12.00/s", Cause: "threshold crossed", Response: "review the rule",
-	})
+	alarms.Raise("retention-rate", "vault-2", "rate 12.00/s")
 
 	stats := collector.CollectLocalTick(time.Now())
 	if len(stats.Alerts) != 3 {
@@ -89,15 +85,20 @@ func TestStatsCollector_AlarmBroadcastShape(t *testing.T) {
 		t.Errorf("software faults sit outside the priority scale, got %v", fault.Priority)
 	}
 
-	operator := byID["retention-rate:vault-2"]
-	if operator == nil {
-		t.Fatal("operator-defined alarm missing from broadcast")
+	// retention-rate is an ordinary catalog row (gastrolog-1cruar) — its
+	// priority, cause and response come from the catalog like any other type.
+	rate := byID["retention-rate:vault-2"]
+	if rate == nil {
+		t.Fatal("retention-rate alarm missing from broadcast")
 	}
-	if operator.Priority != gastrologv1.AlarmPriority_ALARM_PRIORITY_LOW {
-		t.Errorf("operator priority = %v, want LOW (from the rule)", operator.Priority)
+	if rate.Priority != gastrologv1.AlarmPriority_ALARM_PRIORITY_LOW {
+		t.Errorf("retention-rate priority = %v, want LOW (stamped from the catalog)", rate.Priority)
 	}
-	if operator.Cause != "threshold crossed" || operator.Response != "review the rule" {
-		t.Errorf("operator rule text must travel on the wire: %+v", operator)
+	if rate.Source != "retention" || rate.Cause == "" || rate.Response == "" {
+		t.Errorf("retention-rate catalog fields must travel on the wire: %+v", rate)
+	}
+	if rate.Detail != "rate 12.00/s" {
+		t.Errorf("retention-rate detail = %q", rate.Detail)
 	}
 
 	// Every broadcast alarm carries its lifecycle state and the catalog's
