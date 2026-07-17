@@ -20,9 +20,12 @@ const (
 // waiters with their acquisition stacks (gastrolog-1ug3rq). Deliberately
 // a raw ticker goroutine rather than a scheduler job: the scheduler and
 // nearly every other subsystem block on o.mu when the lock wedges — a
-// deadlock detector must not depend on the machinery it diagnoses. The
-// alert is never cleared: a leaked hold cannot be released by anything
-// short of a restart, so a sticky alert is the truth.
+// deadlock detector must not depend on the machinery it diagnoses. This
+// site never calls Clear, and the catalog declares the type Latching: a
+// leaked hold cannot be released by anything short of a restart, so a
+// standing alarm is the truth — enforced by the collector now, not by
+// this site's convention. Acknowledgment (the only way a latched alarm
+// clears) ships with the lifecycle phase (gastrolog-1z5gg4).
 func (o *Orchestrator) runLockLeakReporter(ctx context.Context) {
 	if !o.mu.TrackingEnabled() {
 		return

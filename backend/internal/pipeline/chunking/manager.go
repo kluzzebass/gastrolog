@@ -131,16 +131,6 @@ type vaultChunking struct {
 	// progress is the exactly-once state machine for the sealed-manifest
 	// build/seal/post-seal/OnBuilt lifecycle. Owns its own lock.
 	progress sealProgress
-	// blockedChunk/blockedSince track how long the head-of-queue sealed
-	// manifest has been unbuildable for lack of segment files, feeding the
-	// blocked-build operator alert (gastrolog-67c9b0). Accessed only under
-	// buildMu (the build pass is the sole writer).
-	blockedChunk chunk.ChunkID
-	blockedSince time.Time
-	// blockedAlerted makes the blocked-build alert log exactly once per
-	// episode instead of drowning in per-retry lines.
-	blockedAlerted bool
-
 	// Head-purge log aggregation: totals accumulate across passes and one
 	// summary line emits per throttle interval instead of a line per pass.
 	purgedReleased   atomic.Int64
@@ -160,7 +150,7 @@ type vaultChunking struct {
 	// planFailureAlerted tracks the unplannable-segment alert state so
 	// planner passes raise/clear only on transitions. Guarded by planMu.
 	planFailureAlerted bool
-	// corruptMu guards corruptGLCBs/corruptGLCBAlerted. Its own lock:
+	// corruptMu guards corruptGLCBs. Its own lock:
 	// corruption is flagged from the build pass (under buildMu) and restart
 	// recovery, and cleared from those plus the orchestrator's peer re-pull
 	// (Manager.NoteGLCBRestored) — see glcb_corrupt.go (gastrolog-687m11).
@@ -169,9 +159,6 @@ type vaultChunking struct {
 	// unreadable (and quarantined) to the read-error detail, feeding the
 	// corrupt-GLCB operator alert until every flagged chunk heals.
 	corruptGLCBs map[chunk.ChunkID]string
-	// corruptGLCBAlerted tracks the corrupt-GLCB alert state so raise/clear
-	// happen only on transitions. Guarded by corruptMu.
-	corruptGLCBAlerted bool
 	// pendingRelease holds segment IDs awaiting ReleaseSegments once every
 	// required vault home has committed a holder receipt.
 	pendingRelease []glid.GLID

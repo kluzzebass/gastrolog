@@ -3,7 +3,6 @@ package orchestrator
 import (
 	"context"
 	"slices"
-	"time"
 
 	"gastrolog/internal/glid"
 	"gastrolog/internal/system"
@@ -63,8 +62,8 @@ func (o *Orchestrator) placementSweep() {
 
 	// A vault whose placements resolve to no leader is beyond the sweep's
 	// self-healing — sustained, that is an operator problem (alarm after
-	// the delay-on window; see updateLeaderlessAlarms).
-	o.updateLeaderlessAlarms(time.Now(), leaderless)
+	// the catalog's delay-on window; see updateLeaderlessAlarms).
+	o.updateLeaderlessAlarms(leaderless)
 
 	// Reconcile the routing table from routes (safety net — dispatch also
 	// reloads on config changes for immediate effect).

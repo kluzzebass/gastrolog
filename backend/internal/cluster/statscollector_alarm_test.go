@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -17,7 +18,20 @@ import (
 // nodes serve.
 func TestStatsCollector_AlarmBroadcastShape(t *testing.T) {
 	t.Parallel()
-	alarms := alert.New()
+	// vault-leaderless carries a catalog DelayOn; the collector clock is
+	// injected and advanced past it so the alarm is active on the wire —
+	// suppression tests never wait on wall time.
+	leaderlessType, ok := alert.TypeByID("vault-leaderless")
+	if !ok {
+		t.Fatal("vault-leaderless missing from the catalog")
+	}
+	var clockMu sync.Mutex
+	now := time.Date(2026, 7, 1, 10, 0, 0, 0, time.UTC)
+	alarms := alert.NewWithClock(func() time.Time {
+		clockMu.Lock()
+		defer clockMu.Unlock()
+		return now
+	})
 	collector := NewStatsCollector(StatsCollectorConfig{
 		Alerts:     alarms,
 		NodeID:     "node-a",
@@ -25,6 +39,9 @@ func TestStatsCollector_AlarmBroadcastShape(t *testing.T) {
 	})
 
 	alarms.Raise("vault-leaderless", "vault-1", "Vault a has had no placement leader for 90s.")
+	clockMu.Lock()
+	now = now.Add(leaderlessType.DelayOn + time.Second)
+	clockMu.Unlock()
 	alarms.Raise("orchestrator-lock-leak", "", "read hold stuck for 2m")
 	alarms.RaiseOperator(alert.OperatorAlarm{
 		TypeID: "retention-rate", InstanceKey: "vault-2",

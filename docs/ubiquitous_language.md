@@ -650,11 +650,24 @@ How the cluster reports what it's doing to itself, to operators, and to the UI.
 
 - **Alarm catalog** — the static `AlarmType` registry in `internal/alert`,
   one entry per alarm type: `Priority` (the consequence × urgency verdict),
-  `Source`, `Cause`, `Response`, plus declared-but-not-yet-enforced
-  suppression fields (`DelayOn`, `DelayOff`, `Latching`). Call sites raise
+  `Source`, `Cause`, `Response`, plus the suppression fields (`DelayOn`,
+  `DelayOff`, `Latching`), all enforced by the collector. Call sites raise
   by type ID (`alerts.Raise(typeID, instanceKey, detail)`) and cannot
   choose a priority — the collector stamps it from the catalog. The catalog
   and the table in `docs/alarm-management-design.md` must agree.
+
+- **Chattering suppression** — the collector-enforced remedies for a
+  flapping condition producing a flapping alarm (EEMUA 191 principle 3):
+  **delay-on** (the condition must persist that long before the alarm
+  activates; flaps below the window never annunciate), **delay-off** (an
+  active alarm's condition must stay clear that long before auto-clear; a
+  return inside the window is the same occurrence), and **latching** (the
+  alarm stays active after the condition clears, until operator
+  acknowledgment — interim, until ack ships, it simply stands). Driven by
+  the catalog entry; call sites raise and clear the raw condition and
+  carry no alarm timers of their own. Windows evaluate lazily against the
+  collector's injectable clock; `FirstSeen` is condition start, not
+  activation time.
 
 - **Priority** — `alert.Priority`, the cataloged verdict per alarm type:
   `Critical` (data loss in progress or scheduled), `High` (durability or

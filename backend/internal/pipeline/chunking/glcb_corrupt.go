@@ -27,9 +27,11 @@ import (
 //     released is re-pulled from a peer home by the orchestrator's GLCB
 //     catch-up sweep (pullMissingGLCB triggers on the stat-miss).
 //   - Alert: a per-vault operator alert names the chunk and the read error,
-//     raised on the detected→ transition and cleared when no corrupt chunk
-//     remains. Logging is state-transition-only: one Warn when a chunk is
-//     first flagged, one Info when it heals — never per retry.
+//     raised while any corrupt chunk remains and cleared when none does.
+//     The catalog's DelayOn keeps it out of the alarm list while the heal
+//     paths below are still expected to land. Logging is state-transition-
+//     only: one Warn when a chunk is first flagged, one Info when it heals
+//     — never per retry.
 //   - Heal: any path that makes the canonical GLCB readable again clears
 //     the state — rebuild from segments, adopting a readable existing file,
 //     restart recovery reading it cleanly, or the orchestrator's peer
@@ -123,19 +125,16 @@ func (v *vaultChunking) pruneCorruptGLCBs() {
 	}
 }
 
-// updateCorruptGLCBAlertLocked raises/clears the corrupt-GLCB operator alert
-// on state transitions only (same discipline as the blocked-build and
-// unplannable-segment alerts). Caller holds corruptMu.
+// updateCorruptGLCBAlertLocked reports the corrupt-GLCB condition to the
+// alarm collector from the current corrupt set. Raise/Clear dedup and the
+// catalog's DelayOn window (the alarm annunciates only if corruption
+// outlives the self-healing paths) are the collector's; logging here stays
+// transition-edge via the corrupt map itself. Caller holds corruptMu.
 func (v *vaultChunking) updateCorruptGLCBAlertLocked() {
-	stuck := len(v.corruptGLCBs) > 0
-	if stuck == v.corruptGLCBAlerted {
-		return
-	}
-	v.corruptGLCBAlerted = stuck
 	if v.cfg.Alerts == nil {
 		return
 	}
-	if !stuck {
+	if len(v.corruptGLCBs) == 0 {
 		v.cfg.Alerts.Clear(glcbCorruptAlarmType, v.cfg.VaultID.String())
 		return
 	}

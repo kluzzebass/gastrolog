@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"time"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
@@ -378,7 +377,11 @@ func (v *vaultChunking) materializeManifestSegments(ctx context.Context, manifes
 // backlog budget correctly but permanently refuses ingest. Recovery discards
 // the wedged queue and rewinds resume cursors so every un-built record
 // re-plans; ghost ranges are stale duplicates of already-chunked records
-// (see DiscardUnbuildableManifestsCommand). State-based and immediate.
+// (see DiscardUnbuildableManifestsCommand). State-based and immediate —
+// though the RAISE below rides chunking-build-blocked's catalog DelayOn:
+// when the discard heals the queue inside the window (the designed
+// outcome) the alarm never annunciates and the Error log below is the
+// investigation record; the alarm surfaces only if the wedge persists.
 func (v *vaultChunking) proposeDiscardIfGhostRefs(manifest SealedManifest, missing []glid.GLID) bool {
 	if !v.cfg.IsLeader() || v.applier() == nil {
 		return false
@@ -410,60 +413,34 @@ func (v *vaultChunking) proposeDiscardIfGhostRefs(manifest SealedManifest, missi
 	return true
 }
 
-// buildBlockedAlertAfter is the grace period before a blocked build raises an
-// operator alert. Collection normally materializes missing segments within
-// seconds of a seal; anything blocked minutes is stuck, not catching up.
-const buildBlockedAlertAfter = 2 * time.Minute
-
 // buildBlockedAlarmType is the catalog type ID for blocked GLCB builds; the
-// instance key is the vault ID.
+// instance key is the vault ID. The catalog's DelayOn (2min) is what keeps
+// routine collection catch-up out of the alarm list; this site raises the
+// raw condition every blocked build pass. The suppressed activation edge is
+// logged by the collector with this raise's full detail — during the 6h
+// gastrolog-4bl9xx stall the log carried 244k bare retry lines and never a
+// statement of WHAT was blocked on WHOM (gastrolog-67c9b0 follow-up).
 const buildBlockedAlarmType = "chunking-build-blocked"
 
-// noteBuildBlocked tracks how long the head-of-queue sealed manifest has been
-// unbuildable because referenced segment files are missing on this node, and
-// raises an operator alert once the condition outlives the grace period.
+// noteBuildBlocked reports that the head-of-queue sealed manifest is
+// unbuildable because referenced segment files are missing on this node.
 // Sealing is serial per vault: a blocked head manifest pins every later chunk
 // in Sealing and the records inside are unqueryable until it clears
 // (gastrolog-67c9b0). Called only from the build pass, under buildMu.
 func (v *vaultChunking) noteBuildBlocked(chunkID chunk.ChunkID, missing []glid.GLID) {
-	now := v.now()
-	if v.blockedChunk != chunkID || v.blockedSince.IsZero() {
-		v.blockedChunk = chunkID
-		v.blockedSince = now
+	if v.cfg.Alerts == nil || len(missing) == 0 {
 		return
 	}
-	blockedFor := now.Sub(v.blockedSince)
-	if blockedFor < buildBlockedAlertAfter || len(missing) == 0 {
-		return
-	}
-	// Log the transition exactly once: during the 6h gastrolog-4bl9xx stall
-	// the alert fired only into the collector while the log carried 244k
-	// bare retry lines — log-watching operators never saw a statement of
-	// WHAT was blocked on WHOM (gastrolog-67c9b0 follow-up).
-	msg := fmt.Sprintf("vault %s: chunk %s blocked in Sealing for %s — %d referenced segment(s) missing on this node (e.g. %s); later chunks cannot seal until this resolves",
-		v.cfg.VaultID, chunkID, blockedFor.Round(time.Second), len(missing), missing[0])
-	if !v.blockedAlerted {
-		v.blockedAlerted = true
-		v.logger().Error("GLCB build blocked — seal queue wedged", "chunk", chunkID,
-			"blocked_for", blockedFor.Round(time.Second), "missing_segments", len(missing), "example", missing[0])
-	}
-	if v.cfg.Alerts != nil {
-		v.cfg.Alerts.Raise(buildBlockedAlarmType, v.cfg.VaultID.String(), msg)
-	}
+	v.cfg.Alerts.Raise(buildBlockedAlarmType, v.cfg.VaultID.String(),
+		fmt.Sprintf("vault %s: chunk %s blocked in Sealing — %d referenced segment(s) missing on this node (e.g. %s); later chunks cannot seal until this resolves",
+			v.cfg.VaultID, chunkID, len(missing), missing[0]))
 }
 
-// clearBuildBlocked resets blocked-build tracking and drops the alert. Called
-// when every referenced segment is present again (or the manifest advanced).
+// clearBuildBlocked drops the blocked-build condition. Called when every
+// referenced segment is present again (or the manifest advanced). A blip
+// the collector never activated disappears silently — that suppression is
+// the point.
 func (v *vaultChunking) clearBuildBlocked() {
-	if v.blockedSince.IsZero() {
-		return
-	}
-	v.blockedChunk = chunk.ChunkID{}
-	v.blockedSince = time.Time{}
-	if v.blockedAlerted {
-		v.blockedAlerted = false
-		v.logger().Info("GLCB build unblocked — seal queue moving again")
-	}
 	if v.cfg.Alerts != nil {
 		v.cfg.Alerts.Clear(buildBlockedAlarmType, v.cfg.VaultID.String())
 	}

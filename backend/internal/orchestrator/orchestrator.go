@@ -228,11 +228,12 @@ type Orchestrator struct {
 	glcbPullMu       sync.Mutex
 	glcbPullInflight map[chunk.ChunkID]bool
 
-	// leaderlessSince tracks when each vault's placements began resolving
-	// to no leader, for the vault-leaderless alarm's delay-on window.
+	// leaderlessReported is the set of vaults reported leaderless to the
+	// alarm collector last sweep tick, so departures diff to a Clear. The
+	// delay-on window itself is the collector's (catalog DelayOn).
 	// Guarded by leaderlessMu.
-	leaderlessMu    sync.Mutex
-	leaderlessSince map[glid.GLID]time.Time
+	leaderlessMu       sync.Mutex
+	leaderlessReported map[glid.GLID]struct{}
 
 	// diskGuard samples free space and drives the disk-space alarm plus
 	// protect mode (ingest admission suspended below the floor).

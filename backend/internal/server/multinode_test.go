@@ -109,6 +109,9 @@ type mnConfig struct {
 	// live-collects each peer's stats — standing in for the periodic
 	// NodeStats broadcast (gastrolog-33d9n2).
 	clusterStats bool
+	// alertClock, when set, is the deterministic clock every node's
+	// alert.Collector runs on (gastrolog-4wvxqh).
+	alertClock func() time.Time
 }
 
 // WithoutVault creates a node that has an orchestrator but no vault.
@@ -136,6 +139,17 @@ func WithEnvironment(label, color string) mnOption {
 func WithClusterStats() mnOption {
 	return func(c *mnConfig) {
 		c.clusterStats = true
+	}
+}
+
+// WithAlertClock puts every node's alert.Collector on the given clock so
+// suppression tests (catalog DelayOn/DelayOff) advance time
+// deterministically instead of sleeping (gastrolog-4wvxqh). Implies the
+// same wiring as WithClusterStats.
+func WithAlertClock(now func() time.Time) mnOption {
+	return func(c *mnConfig) {
+		c.clusterStats = true
+		c.alertClock = now
 	}
 }
 
@@ -246,6 +260,9 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 		servers := make([]cluster.RaftServer, 0, len(nodeIDs))
 		for _, id := range nodeIDs {
 			ac := alert.New()
+			if cfg.alertClock != nil {
+				ac = alert.NewWithClock(cfg.alertClock)
+			}
 			alertsByNode[id] = ac
 			statsCollectors[id] = cluster.NewStatsCollector(cluster.StatsCollectorConfig{
 				Alerts:     ac,
