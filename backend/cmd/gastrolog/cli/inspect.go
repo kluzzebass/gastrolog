@@ -332,12 +332,25 @@ func appendTS(pairs [][2]string, label string, ts *timestamppb.Timestamp) [][2]s
 }
 
 // chunkBadges returns a space-separated string of status badges for a chunk.
+//
+// The lifecycle badge reads the three-state enum, never the legacy Sealed
+// bool: Sealed is only true at CHUNK_STATE_SEALED, so a binary else-branch
+// painted SEALING chunks as "active" — the opposite diagnosis when seals
+// are wedged and retention cannot fire (gastrolog-5wh571). An unspecified
+// state renders as "unknown", never a guess.
 func chunkBadges(c *v1.ChunkMeta) string {
 	var parts []string
-	if c.Sealed {
-		parts = append(parts, "sealed")
-	} else {
+	switch c.State {
+	case v1.ChunkState_CHUNK_STATE_ACTIVE:
 		parts = append(parts, "active")
+	case v1.ChunkState_CHUNK_STATE_SEALING:
+		parts = append(parts, "sealing")
+	case v1.ChunkState_CHUNK_STATE_SEALED:
+		parts = append(parts, "sealed")
+	case v1.ChunkState_CHUNK_STATE_UNSPECIFIED:
+		parts = append(parts, "unknown")
+	default:
+		parts = append(parts, "unknown")
 	}
 	// "compressed" badge dropped — sealed chunks are GLCB which is
 	// zstd-compressed by construction (gastrolog-24m1t step 7f).

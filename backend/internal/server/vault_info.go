@@ -430,15 +430,21 @@ func chunkStateToProto(state chunk.ChunkState, sealed bool) apiv1.ChunkState {
 	case chunk.ChunkStateSealed:
 		return apiv1.ChunkState_CHUNK_STATE_SEALED
 	case chunk.ChunkStateUnknown:
-		if sealed {
-			return apiv1.ChunkState_CHUNK_STATE_SEALED
-		}
-		return apiv1.ChunkState_CHUNK_STATE_UNSPECIFIED
+		fallthrough
 	default:
+		// A local meta with no FSM-overlaid state (memory-mode vaults,
+		// a head not yet in the FSM snapshot) has a two-state
+		// lifecycle: there is no Sealing intermediate without an FSM
+		// driving the announce protocol (same derivation as
+		// chunkMetaToManifestEntry). Resolve it HERE, where the
+		// manager semantics are known — consumers render UNSPECIFIED
+		// as "unknown" and never guess (gastrolog-5wh571), so leaving
+		// it on the wire would badge every memory-mode active chunk
+		// as unknown.
 		if sealed {
 			return apiv1.ChunkState_CHUNK_STATE_SEALED
 		}
-		return apiv1.ChunkState_CHUNK_STATE_UNSPECIFIED
+		return apiv1.ChunkState_CHUNK_STATE_ACTIVE
 	}
 }
 
