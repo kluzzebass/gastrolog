@@ -1,6 +1,5 @@
 import { useThemeClass } from "../hooks/useThemeClass";
-// eslint-disable-next-line no-restricted-imports -- no Alert model yet (gastrolog-2e2qs follow-up)
-import { AlertSeverity } from "../api/gen/gastrolog/v1/cluster_pb";
+import { AlarmPriority } from "../api/hooks/useAlerts";
 import type { NodeAlert } from "../api/hooks/useAlerts";
 import { encode } from "../api/glid";
 
@@ -16,17 +15,47 @@ function formatTime(seconds: bigint | undefined): string {
   return date.toLocaleTimeString();
 }
 
-function SeverityIcon({ severity }: Readonly<{ severity: AlertSeverity }>) {
-  if (severity === AlertSeverity.ERROR) {
+/** Priority → design-token mapping: Critical (and software faults) reuse the
+ *  error token, High the warn token, Low the info token. */
+function priorityColor(a: Pick<NodeAlert, "priority" | "softwareFault">): string {
+  if (a.softwareFault || a.priority === AlarmPriority.CRITICAL) return "text-severity-error";
+  if (a.priority === AlarmPriority.HIGH) return "text-severity-warn";
+  return "text-severity-info";
+}
+
+function priorityLabel(a: Pick<NodeAlert, "priority" | "softwareFault">): string {
+  if (a.softwareFault) return "fault";
+  switch (a.priority) {
+    case AlarmPriority.CRITICAL:
+      return "critical";
+    case AlarmPriority.HIGH:
+      return "high";
+    case AlarmPriority.LOW:
+      return "low";
+    default:
+      return "—";
+  }
+}
+
+function PriorityIcon({ alarm }: Readonly<{ alarm: NodeAlert }>) {
+  const color = priorityColor(alarm);
+  if (alarm.softwareFault || alarm.priority === AlarmPriority.CRITICAL) {
     return (
-      <svg viewBox="0 0 16 16" className="w-4 h-4 text-severity-error flex-shrink-0" fill="currentColor">
+      <svg viewBox="0 0 16 16" className={`w-4 h-4 ${color} flex-shrink-0`} fill="currentColor">
         <circle cx="8" cy="8" r="7" />
       </svg>
     );
   }
+  if (alarm.priority === AlarmPriority.HIGH) {
+    return (
+      <svg viewBox="0 0 16 16" className={`w-4 h-4 ${color} flex-shrink-0`} fill="currentColor">
+        <path d="M8 1L15 14H1L8 1Z" />
+      </svg>
+    );
+  }
   return (
-    <svg viewBox="0 0 16 16" className="w-4 h-4 text-severity-warn flex-shrink-0" fill="currentColor">
-      <path d="M8 1L15 14H1L8 1Z" />
+    <svg viewBox="0 0 16 16" className={`w-4 h-4 ${color} flex-shrink-0`} fill="currentColor">
+      <circle cx="8" cy="8" r="4" />
     </svg>
   );
 }
@@ -77,12 +106,18 @@ export function AlertPanel({ alerts, dark, onClose }: Readonly<AlertPanelProps>)
                 "border-light-border-subtle",
               )}`}
             >
-              <SeverityIcon severity={a.severity} />
+              <PriorityIcon alarm={a} />
               <div className="flex-1 min-w-0">
                 <p className={`text-sm ${c("text-text-normal", "text-light-text-normal")}`}>
-                  {a.message}
+                  {a.detail}
                 </p>
+                {a.response && (
+                  <p className={`mt-1 text-xs ${c("text-text-muted", "text-light-text-muted")}`}>
+                    {a.response}
+                  </p>
+                )}
                 <div className={`flex gap-3 mt-1 text-xs font-mono ${c("text-text-muted", "text-light-text-muted")}`}>
+                  <span className={priorityColor(a)}>{priorityLabel(a)}</span>
                   <span>{a.nodeName}</span>
                   <span>{a.source}</span>
                   <span title="First seen">{formatTime(a.firstSeen?.seconds)}</span>

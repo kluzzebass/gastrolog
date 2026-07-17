@@ -83,7 +83,7 @@ func TestCorruptSegmentIndexAlertsAndPlansOthers(t *testing.T) {
 		}
 	}
 
-	alertID := "chunking-unplannable-segment-" + vaultID.String()
+	alertID := "chunking-unplannable-segment:" + vaultID.String()
 	active, _ := sink.snapshot()
 	if _, ok := active[alertID]; !ok {
 		t.Fatalf("unplannable-segment alert not raised after repeated failures; active=%v", active)

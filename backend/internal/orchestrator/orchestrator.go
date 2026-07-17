@@ -26,8 +26,8 @@ import (
 	"gastrolog/internal/orchestrator/pipeline"
 	"gastrolog/internal/pipeline/chunking"
 	"gastrolog/internal/pipeline/collection"
-	"gastrolog/internal/pipeline/distribution"
 	"gastrolog/internal/pipeline/digestion"
+	"gastrolog/internal/pipeline/distribution"
 	"gastrolog/internal/pipeline/ingestion"
 	"gastrolog/internal/pipeline/segmentation"
 	"gastrolog/internal/raftgroup"
@@ -48,9 +48,9 @@ type IngesterStats struct {
 // RouteStats is a point-in-time snapshot of global routing counters sourced
 // from the pipeline routing manager.
 type RouteStats struct {
-	Routed  int64 // total records that entered routing (matched + unmatched)
+	Routed    int64 // total records that entered routing (matched + unmatched)
 	Unmatched int64 // records that matched no route (intentional, counted drop)
-	Matched int64 // records that matched a route and were fanned out
+	Matched   int64 // records that matched a route and were fanned out
 }
 
 // VaultRouteStats is a point-in-time snapshot of per-vault routing counters.
@@ -322,8 +322,8 @@ type Orchestrator struct {
 	// Empty (zero GLID) for memory-config / no-node-id orchestrators.
 	localNodeIDGLID glid.GLID
 
-	// Alert collector for runtime system alerts.
-	alerts AlertCollector
+	// Alarm sink for runtime alarms.
+	alerts alert.Sink
 
 	// chunkSignal is the legacy bare-wake-up notifier used by the
 	// pre-gastrolog-3pf9w WatchChunks shape. New code should emit typed
@@ -661,9 +661,10 @@ type Config struct {
 	// to this node (or with empty NodeID) are instantiated.
 	LocalNodeID string
 
-	// Alerts is an optional collector for runtime system alerts.
-	// Components call Set to raise alerts and Clear to resolve them.
-	Alerts AlertCollector
+	// Alerts is an optional sink for runtime alarms. Components call
+	// Raise when they detect a cataloged condition and Clear when it
+	// resolves; priority comes from the alarm catalog, never the caller.
+	Alerts alert.Sink
 
 	// OnIngesterAlive is called when an ingester's alive state changes.
 	// The app layer wires this to Raft to replicate the state cluster-wide.
@@ -727,13 +728,6 @@ const (
 	defaultSegmentCompleteMaxBytes = uint64(8 << 20)
 	defaultSegmentCompleteMaxAge   = 10 * time.Second
 )
-
-// AlertCollector is the interface for raising and clearing system alerts.
-// Satisfied by *alert.Collector.
-type AlertCollector interface {
-	Set(id string, severity alert.Severity, source, message string)
-	Clear(id string)
-}
 
 // New creates an Orchestrator with empty registries.
 func New(cfg Config) (*Orchestrator, error) {
@@ -848,15 +842,15 @@ func New(cfg Config) (*Orchestrator, error) {
 	o.vaultCtlLeaders.SetOnMemberRemoved(o.proposePruneNodeForVault)
 	o.vaultCtlLeaders.SetOnLeadGained(o.onVaultCtlLeadGained)
 
-	// Per-instance retention rate alerter (gastrolog-47qyw): warn at >10/sec
+	// Per-instance retention rate alerter (gastrolog-47qyw): Low at >10/sec
 	// sustained over 30s. The orchestrator's vaultName closure looks up the
 	// human label from the current vault registry; "" if the instance is unknown.
 	o.retentionRates = newRateAlerter(rateAlerterConfig{
 		Window:    30 * time.Second,
 		Kind:      "retention",
 		Source:    "retention",
-		WarningAt: 10.0,
-		ErrorAt:   0, // no error escalation per issue scope
+		LowAt:     10.0,
+		HighAt:    0, // no escalation per issue scope
 		Alerts:    o.alerts,
 		VaultName: o.vaultLabel,
 	})
@@ -972,9 +966,9 @@ func (o *Orchestrator) IsIngesterRunning(id glid.GLID) bool {
 func (o *Orchestrator) GetRouteStats() *RouteStats {
 	snap := o.pipeline.RouteStats()
 	return &RouteStats{
-		Routed:  int64(snap.Routed),    //nolint:gosec // G115: counter bounded in practice
+		Routed:    int64(snap.Routed),    //nolint:gosec // G115: counter bounded in practice
 		Unmatched: int64(snap.Unmatched), //nolint:gosec // G115
-		Matched: int64(snap.Matched),   //nolint:gosec // G115
+		Matched:   int64(snap.Matched),   //nolint:gosec // G115
 	}
 }
 

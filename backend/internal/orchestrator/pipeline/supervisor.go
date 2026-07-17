@@ -24,6 +24,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"gastrolog/internal/alert"
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
@@ -80,9 +81,9 @@ type Config struct {
 
 	NodeID glid.GLID
 	Logger *slog.Logger
-	// Alerts raises operator alerts for degraded pipeline components
+	// Alerts raises operator alarms for degraded pipeline components
 	// (segmentation writers that lose their working segment). Nil disables.
-	Alerts segmentation.AlertSink
+	Alerts alert.Sink
 
 	// Table is the shared, static routing table. Records matched against it are
 	// fanned out to the per-vault segmentation queues registered via RegisterVault.

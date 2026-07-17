@@ -79,20 +79,13 @@ type Config struct {
 	// Logger receives structured segmentation events (working-segment crash
 	// recovery, degraded writers, dropped records). Nil discards.
 	Logger *slog.Logger
-	// Alerts raises operator alerts for degraded writers (commit failures,
-	// abandoned working segments). Nil disables alerts.
-	Alerts AlertSink
+	// Alerts raises operator alarms for degraded writers (commit failures,
+	// abandoned working segments). Nil disables alarms.
+	Alerts alert.Sink
 
 	// newSegmentFile overrides working-segment creation for fault-injection
 	// tests. Nil uses segment.Create.
 	newSegmentFile func(path string, meta segment.Meta) (segmentFile, error)
-}
-
-// AlertSink is the subset of alert.Collector segmentation raises
-// degraded-writer alerts through (satisfied by the orchestrator's collector).
-type AlertSink interface {
-	Set(id string, severity alert.Severity, source, message string)
-	Clear(id string)
 }
 
 // VaultConfig overrides per-vault commit/fsync tuning at RegisterVault time.

@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/system"
 )
@@ -373,7 +372,7 @@ func (o *Orchestrator) clearSuspect(id chunk.ChunkID) {
 		o.suspects.clear(id)
 	}
 	if o.alerts != nil {
-		o.alerts.Clear("chunk-suspect:" + id.String())
+		o.alerts.Clear("chunk-suspect", id.String())
 	}
 }
 
@@ -381,12 +380,8 @@ func (o *Orchestrator) clearSuspect(id chunk.ChunkID) {
 func (o *Orchestrator) markSuspect(vaultInst *VaultInstance, id chunk.ChunkID, now time.Time) {
 	o.suspects.mark(id, now)
 	if o.alerts != nil {
-		o.alerts.Set(
-			"chunk-suspect:"+id.String(),
-			alert.Warning,
-			"cloud-reconcile",
-			"Cloud-backed chunk "+id.String()+" not found in blob store — monitoring",
-		)
+		o.alerts.Raise("chunk-suspect", id.String(),
+			"Cloud-backed chunk "+id.String()+" not found in blob store — monitoring")
 	}
 	o.retentionLogger.Warn("reconcile: chunk not found, marking suspect",
 		"vault", vaultInst.VaultID, "chunk", id.String())
@@ -411,12 +406,8 @@ func (o *Orchestrator) expireSuspect(vaultInst *VaultInstance, id chunk.ChunkID,
 	}
 	o.suspects.clear(id)
 	if o.alerts != nil {
-		o.alerts.Set(
-			"chunk-suspect:"+id.String(),
-			alert.Error,
-			"cloud-reconcile",
-			fmt.Sprintf("Cloud-backed chunk %s removed from index after %d days missing", id, suspectDays),
-		)
+		o.alerts.Raise("chunk-suspect", id.String(),
+			fmt.Sprintf("Cloud-backed chunk %s removed from index after %d days missing", id, suspectDays))
 	}
 	o.retentionLogger.Warn("reconcile: removed chunk from index after grace period",
 		"vault", vaultInst.VaultID, "chunk", id.String(), "suspectDays", suspectDays)

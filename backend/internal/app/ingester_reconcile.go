@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"gastrolog/internal/alert"
-	"gastrolog/internal/orchestrator"
 )
 
 const (
@@ -28,7 +27,7 @@ const (
 // idempotent and never flaps running ingesters, so the sweep is safe to run
 // unconditionally; it also raises the divergence alert — desired ingesters
 // not actually running — so a convergence failure is never silent.
-func startIngesterReconcileSweep(ctx context.Context, scheduler scheduledJobRegistry, d *configDispatcher, alerts orchestrator.AlertCollector) error {
+func startIngesterReconcileSweep(ctx context.Context, scheduler scheduledJobRegistry, d *configDispatcher, alerts alert.Sink) error {
 	task := func() {
 		d.reconcileIngesters(ctx)
 		d.reportIngesterDivergence(ctx, alerts)
@@ -45,7 +44,7 @@ func startIngesterReconcileSweep(ctx context.Context, scheduler scheduledJobRegi
 // should be running but is not, and clears it once converged. Runs after the
 // sweep's reconcile, so anything listed failed to start (or to build) rather
 // than merely awaiting dispatch.
-func (d *configDispatcher) reportIngesterDivergence(ctx context.Context, alerts orchestrator.AlertCollector) {
+func (d *configDispatcher) reportIngesterDivergence(ctx context.Context, alerts alert.Sink) {
 	if alerts == nil {
 		return
 	}
@@ -72,10 +71,10 @@ func (d *configDispatcher) reportIngesterDivergence(ctx context.Context, alerts 
 		}
 	}
 	if len(missing) == 0 {
-		alerts.Clear(ingesterNotRunningAlertID)
+		alerts.Clear(ingesterNotRunningAlertID, "")
 		return
 	}
-	alerts.Set(ingesterNotRunningAlertID, alert.Error, "ingestion",
-		fmt.Sprintf("This node should be running %d ingester(s) that are not running: %s. Ingestion capacity is reduced until they start; check the log for build/start errors.",
+	alerts.Raise(ingesterNotRunningAlertID, "",
+		fmt.Sprintf("This node should be running %d ingester(s) that are not running: %s.",
 			len(missing), strings.Join(missing, ", ")))
 }

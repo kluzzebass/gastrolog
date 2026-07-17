@@ -26,7 +26,7 @@ func TestRetentionHookFiresRateAlerter(t *testing.T) {
 		Window:    10 * time.Second,
 		Kind:      "retention",
 		Source:    "retention",
-		WarningAt: 0.5, // >= 5 deletes in 10s
+		LowAt:     0.5, // >= 5 deletes in 10s
 		Alerts:    fa,
 		VaultName: orch.vaultLabel,
 	})
@@ -48,11 +48,11 @@ func TestRetentionHookFiresRateAlerter(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("expected 1 alert call after 5 expirations, got %d: %v", len(calls), calls)
 	}
-	if calls[0].op != "set" || calls[0].severity != alert.Warning {
-		t.Errorf("expected Warning Set, got %+v", calls[0])
+	if calls[0].op != "set" || calls[0].priority != alert.Low {
+		t.Errorf("expected Low raise, got %+v", calls[0])
 	}
-	if calls[0].id != orch.retentionRates.alertID(vaultID) {
-		t.Errorf("alert ID mismatch: got %q want %q", calls[0].id, orch.retentionRates.alertID(vaultID))
+	if want := "retention-rate:" + vaultID.String(); calls[0].id != want {
+		t.Errorf("alarm ID mismatch: got %q want %q", calls[0].id, want)
 	}
 }
 
@@ -78,7 +78,7 @@ func TestRateAlertEvaluatorRunsPeriodically(t *testing.T) {
 		Window:    10 * time.Second,
 		Kind:      "retention",
 		Source:    "retention",
-		WarningAt: 0.2, // >= 2 expirations in 10s
+		LowAt:     0.2, // >= 2 expirations in 10s
 		Alerts:    fa,
 		VaultName: orch.vaultLabel,
 	})
@@ -99,7 +99,7 @@ func TestRateAlertEvaluatorRunsPeriodically(t *testing.T) {
 	deadline := time.Now().Add(7 * time.Second)
 	for time.Now().Before(deadline) {
 		if calls := fa.snapshot(); len(calls) > 0 {
-			if calls[0].op == "set" && calls[0].severity == alert.Warning {
+			if calls[0].op == "set" && calls[0].priority == alert.Low {
 				return // success
 			}
 			t.Fatalf("unexpected first call: %+v", calls[0])

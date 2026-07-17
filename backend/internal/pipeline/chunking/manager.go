@@ -91,15 +91,8 @@ type VaultConfig struct {
 	// Alerts raises operator alerts for blocked GLCB builds (sealed manifest
 	// referencing segments missing on this node — chunks pinned in Sealing,
 	// gastrolog-67c9b0). Nil inherits the manager Config sink; both nil
-	// disables alerts.
-	Alerts AlertSink
-}
-
-// AlertSink is the subset of alert.Collector chunking raises blocked-build
-// alerts through (satisfied by the orchestrator's collector).
-type AlertSink interface {
-	Set(id string, severity alert.Severity, source, message string)
-	Clear(id string)
+	// disables alarms.
+	Alerts alert.Sink
 }
 
 type vaultChunking struct {
@@ -306,8 +299,8 @@ func newVaultChunking(cfg VaultConfig) (*vaultChunking, error) {
 // Config configures a ChunkingManager.
 type Config struct {
 	Logger *slog.Logger
-	// Alerts is the default AlertSink for vaults registered without one.
-	Alerts AlertSink
+	// Alerts is the default alarm sink for vaults registered without one.
+	Alerts alert.Sink
 	// DeferWrites, when non-nil and returning true, pauses GLCB build
 	// passes: builds create bytes and must stop while the node sheds disk
 	// obligations (disk protect). Deferred work re-fires on the next wake

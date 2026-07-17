@@ -3,8 +3,6 @@ package orchestrator
 import (
 	"context"
 	"time"
-
-	"gastrolog/internal/alert"
 )
 
 const (
@@ -43,10 +41,9 @@ func (o *Orchestrator) runLockLeakReporter(ctx context.Context) {
 				"age", leak.Age.Round(time.Second),
 				"stack", leak.Stack)
 			if o.alerts != nil {
-				o.alerts.Set(lockLeakAlertID, alert.Error, "orchestrator",
+				o.alerts.Raise(lockLeakAlertID, "",
 					string(leak.Kind)+" on the orchestrator registry lock held/stuck for "+
-						leak.Age.Round(time.Second).String()+
-						" — node is likely wedging; the acquisition stack is in this node's log. Restart the node to clear; report the stack")
+						leak.Age.Round(time.Second).String())
 			}
 		}
 	}

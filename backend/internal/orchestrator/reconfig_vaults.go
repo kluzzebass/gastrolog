@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
 	"gastrolog/internal/cluster"
@@ -710,11 +709,8 @@ func (o *Orchestrator) alertVaultInitFailed(vaultID glid.GLID, vaultName string,
 	o.logger.Warn("buildVaultInstances: vaultInst init failed, skipping",
 		"vault", vaultID, "name", vaultName, "error", err)
 	if o.alerts != nil {
-		o.alerts.Set(
-			fmt.Sprintf("vault-init:%s", vaultID),
-			alert.Error, "orchestrator",
-			fmt.Sprintf("Vault %q failed to initialize: %v", vaultName, err),
-		)
+		o.alerts.Raise("vault-init", vaultID.String(),
+			fmt.Sprintf("Vault %q failed to initialize: %v", vaultName, err))
 	}
 }
 

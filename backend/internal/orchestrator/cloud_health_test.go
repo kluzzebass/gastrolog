@@ -100,8 +100,8 @@ func TestEvaluateCloudHealth_SetsAlertWhenDegraded(t *testing.T) {
 	if alerts[0].ID != wantID {
 		t.Errorf("alert ID = %q, want %q", alerts[0].ID, wantID)
 	}
-	if alerts[0].Severity != alert.Error {
-		t.Errorf("severity = %d, want Error(%d)", alerts[0].Severity, alert.Error)
+	if alerts[0].Priority != alert.High {
+		t.Errorf("priority = %d, want High(%d)", alerts[0].Priority, alert.High)
 	}
 }
 
@@ -117,9 +117,8 @@ func TestEvaluateCloudHealth_ClearsAlertWhenHealthy(t *testing.T) {
 	vaultInst := &VaultInstance{VaultID: vaultID, Type: "cloud", Chunks: mock}
 	orch.RegisterVault(NewVault(glid.New(), vaultInst))
 
-	// Simulate prior degraded alert.
-	alertID := fmt.Sprintf("cloud-store:%s", vaultID)
-	ac.Set(alertID, alert.Error, "cloud", "was broken")
+	// Simulate prior degraded alarm.
+	ac.Raise("cloud-store", vaultID.String(), "was broken")
 
 	// Now cloud is healthy (degraded=false, default).
 	orch.evaluateCloudHealth()

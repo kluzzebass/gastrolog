@@ -1,138 +1,202 @@
-// Package alert provides a thread-safe registry of runtime system alerts.
+// Package alert provides a thread-safe registry of runtime alarms.
 //
-// Components push alerts via Set() when they detect degraded conditions,
-// and clear them via Clear() when the condition resolves. The collector
-// is a dumb registry — it stores what it's told. Each component owns
-// the lifecycle of its own alerts.
+// An alarm is a condition requiring operator action, with documented cause
+// and response (EEMUA 191 / ISA-18.2). Priority is a property of the alarm
+// TYPE, derived from a consequence × urgency assessment recorded in the
+// static catalog (registry.go) — call sites cannot choose it. Components
+// raise alarms via Raise() when they detect a cataloged condition and clear
+// them via Clear() when the condition resolves; the collector looks up the
+// type and stamps priority, source, cause and response.
+//
+// Operator-defined alarms — whose priority comes from an operator-configured
+// rule rather than the catalog (e.g. vault rate thresholds) — enter through
+// RaiseOperator() and live beside the catalog, never inside it.
 package alert
 
 import (
+	"log/slog"
 	"slices"
 	"sync"
 	"time"
 )
 
-// Severity indicates the urgency of an alert.
-type Severity int
+// Priority is the consequence × urgency verdict of an alarm type, recorded
+// in the catalog. Critical means data loss is in progress or scheduled;
+// High means durability or availability is degraded and will compound;
+// Low needs attention on a human timescale.
+type Priority int
 
 const (
-	Warning Severity = 1
-	Error   Severity = 2
+	Low      Priority = 1
+	High     Priority = 2
+	Critical Priority = 3
 )
 
-// Alert represents a runtime condition that operators should be aware of.
-type Alert struct {
-	ID        string
-	Severity  Severity
-	Source    string // component name (e.g. "orchestrator", "forwarder")
-	Message   string
-	FirstSeen time.Time
-	LastSeen  time.Time
-}
-
-// Collector is a thread-safe, in-process registry of active alerts.
-// Components call Set to raise alerts and Clear to resolve them.
-type Collector struct {
-	mu     sync.RWMutex
-	alerts map[string]*Alert
-}
-
-// New creates a new alert collector.
-func New() *Collector {
-	return &Collector{
-		alerts: make(map[string]*Alert),
+// String returns the operator-facing label for a priority.
+func (p Priority) String() string {
+	switch p {
+	case Low:
+		return "low"
+	case High:
+		return "high"
+	case Critical:
+		return "critical"
+	default:
+		return "unspecified"
 	}
 }
 
-// Set raises or updates an alert. If an alert with this ID already exists,
-// only LastSeen is updated (preserving FirstSeen and the original message).
-// If it's new, both FirstSeen and LastSeen are set to now.
-func (c *Collector) Set(id string, severity Severity, source, message string) {
+// Alarm is one active alarm instance: a cataloged (or operator-defined)
+// type plus the instance it fired for. ID is the stable dedup key,
+// composed from the type ID and instance key.
+type Alarm struct {
+	ID            string // "<typeID>" or "<typeID>:<instanceKey>"
+	TypeID        string
+	InstanceKey   string
+	Priority      Priority
+	SoftwareFault bool   // outside the priority scale; see AlarmType
+	Source        string // component name (e.g. "placement", "chunking")
+	Detail        string // per-instance specifics from the raiser
+	Cause         string // from the catalog: what condition this is
+	Response      string // from the catalog: what the operator should do
+	FirstSeen     time.Time
+	LastSeen      time.Time
+}
+
+// OperatorAlarm is an alarm whose priority and guidance come from an
+// operator-configured rule rather than the static catalog. It is modeled
+// beside the catalog: RaiseOperator stores it verbatim.
+type OperatorAlarm struct {
+	TypeID      string
+	InstanceKey string
+	Priority    Priority
+	Source      string
+	Detail      string
+	Cause       string
+	Response    string
+}
+
+// Sink is the raising side of the collector, satisfied by *Collector. It is
+// THE alarm-sink interface — components that raise alarms depend on this one
+// type rather than declaring structurally identical local copies.
+type Sink interface {
+	Raise(typeID, instanceKey, detail string)
+	RaiseOperator(a OperatorAlarm)
+	Clear(typeID, instanceKey string)
+}
+
+// Collector is a thread-safe, in-process registry of active alarms.
+type Collector struct {
+	mu     sync.RWMutex
+	alarms map[string]*Alarm
+}
+
+// New creates a new alarm collector.
+func New() *Collector {
+	return &Collector{
+		alarms: make(map[string]*Alarm),
+	}
+}
+
+// alarmID composes the stable dedup key for a type + instance pair.
+// Node-scoped types have no instance key and use the bare type ID.
+func alarmID(typeID, instanceKey string) string {
+	if instanceKey == "" {
+		return typeID
+	}
+	return typeID + ":" + instanceKey
+}
+
+// Raise raises or refreshes the alarm of the given cataloged type for the
+// given instance. The collector stamps priority, source, cause and response
+// from the catalog; detail carries the per-instance specifics.
+//
+// Raising an unregistered type is a catalog defect in the raising component.
+// It is loud, never silent: the defect is logged AND the condition still
+// surfaces — as a software-fault alarm with the raiser's detail, so neither
+// the underlying condition nor the defect can disappear.
+func (c *Collector) Raise(typeID, instanceKey, detail string) {
+	t, ok := TypeByID(typeID)
+	if !ok {
+		slog.Error("alarm raised for a type missing from the alarm catalog — software defect in the raising component",
+			"type", typeID, "instance", instanceKey, "detail", detail)
+		t = unregisteredAlarmType(typeID)
+	}
+	c.upsert(Alarm{
+		ID:            alarmID(typeID, instanceKey),
+		TypeID:        typeID,
+		InstanceKey:   instanceKey,
+		Priority:      t.Priority,
+		SoftwareFault: t.SoftwareFault,
+		Source:        t.Source,
+		Detail:        detail,
+		Cause:         t.Cause,
+		Response:      t.Response,
+	})
+}
+
+// RaiseOperator raises or refreshes an operator-defined alarm. The rule that
+// defined the threshold supplies priority, cause and response.
+func (c *Collector) RaiseOperator(a OperatorAlarm) {
+	c.upsert(Alarm{
+		ID:          alarmID(a.TypeID, a.InstanceKey),
+		TypeID:      a.TypeID,
+		InstanceKey: a.InstanceKey,
+		Priority:    a.Priority,
+		Source:      a.Source,
+		Detail:      a.Detail,
+		Cause:       a.Cause,
+		Response:    a.Response,
+	})
+}
+
+// upsert stores an alarm, preserving FirstSeen for an already-active ID.
+// Detail and priority refresh on every raise (operator-defined alarms may
+// escalate; cataloged priorities are static but harmlessly re-stamped).
+func (c *Collector) upsert(a Alarm) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	now := time.Now()
-	if existing, ok := c.alerts[id]; ok {
-		existing.LastSeen = now
-		existing.Severity = severity
-		existing.Message = message
-		return
+	if existing, ok := c.alarms[a.ID]; ok {
+		a.FirstSeen = existing.FirstSeen
+	} else {
+		a.FirstSeen = now
 	}
-	c.alerts[id] = &Alert{
-		ID:        id,
-		Severity:  severity,
-		Source:    source,
-		Message:   message,
-		FirstSeen: now,
-		LastSeen:  now,
-	}
+	a.LastSeen = now
+	c.alarms[a.ID] = &a
 }
 
-// Clear removes an alert. No-op if the alert doesn't exist.
-func (c *Collector) Clear(id string) {
+// Clear resolves the alarm of the given type for the given instance. No-op
+// if it is not active.
+func (c *Collector) Clear(typeID, instanceKey string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	delete(c.alerts, id)
+	delete(c.alarms, alarmID(typeID, instanceKey))
 }
 
-// Active returns a snapshot of all current alerts, sorted by FirstSeen.
-func (c *Collector) Active() []*Alert {
+// Active returns a snapshot of all current alarms, sorted by FirstSeen.
+func (c *Collector) Active() []*Alarm {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	if len(c.alerts) == 0 {
+	if len(c.alarms) == 0 {
 		return nil
 	}
-	result := make([]*Alert, 0, len(c.alerts))
-	for _, a := range c.alerts {
+	result := make([]*Alarm, 0, len(c.alarms))
+	for _, a := range c.alarms {
 		cp := *a
 		result = append(result, &cp)
 	}
-	slices.SortFunc(result, func(a, b *Alert) int {
+	slices.SortFunc(result, func(a, b *Alarm) int {
 		return a.FirstSeen.Compare(b.FirstSeen)
 	})
 	return result
 }
 
-// AlertInfo is the struct returned by ActiveAlerts, matching the
-// cluster.AlertInfo type without importing the cluster package.
-type AlertInfo struct {
-	ID        string
-	Severity  int
-	Source    string
-	Message   string
-	FirstSeen time.Time
-	LastSeen  time.Time
-}
-
-// ActiveAlerts returns alerts in the format expected by the stats collector.
-func (c *Collector) ActiveAlerts() []AlertInfo {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	if len(c.alerts) == 0 {
-		return nil
-	}
-	result := make([]AlertInfo, 0, len(c.alerts))
-	for _, a := range c.alerts {
-		result = append(result, AlertInfo{
-			ID:        a.ID,
-			Severity:  int(a.Severity),
-			Source:    a.Source,
-			Message:   a.Message,
-			FirstSeen: a.FirstSeen,
-			LastSeen:  a.LastSeen,
-		})
-	}
-	slices.SortFunc(result, func(a, b AlertInfo) int {
-		return a.FirstSeen.Compare(b.FirstSeen)
-	})
-	return result
-}
-
-// Count returns the number of active alerts.
+// Count returns the number of active alarms.
 func (c *Collector) Count() int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return len(c.alerts)
+	return len(c.alarms)
 }
