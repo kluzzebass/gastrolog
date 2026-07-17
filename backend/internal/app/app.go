@@ -252,6 +252,20 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 
 	alertCollector := alert.New()
 
+	// Alarm lifecycle journal (gastrolog-1z5gg4): ack/shelve state survives
+	// restart via a small file under the node home. Attached before any
+	// component raises so replayed state can meet the first annunciation.
+	if err := hd.EnsureExists(); err != nil {
+		return err
+	}
+	if err := alertCollector.OpenJournal(hd.AlarmJournalPath()); err != nil {
+		// Degraded, not fatal: the alarm system runs without restart
+		// survival rather than refusing to start.
+		logger.Error("alarm lifecycle journal unavailable — ack/shelve state will not survive restart",
+			"path", hd.AlarmJournalPath(), "error", err)
+	}
+	defer alertCollector.CloseJournal()
+
 	// Alarm-rate self-monitoring (EEMUA 191): per-node rolling-window rate
 	// gauge plus the alarm-flood meta-alarm. Activations feed it via the
 	// collector hook; the periodic job (registered after the orchestrator
