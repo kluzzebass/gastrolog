@@ -86,6 +86,14 @@ func newClusterStatusCmd() *cobra.Command {
 				p.table([]string{"ID", "NAME", "ADDRESS", "ROLE", "SUFFRAGE"}, rows)
 			}
 
+			// Standing alerts directly after topology (gastrolog-33d9n2):
+			// alarms are state, not events — when a suspended system goes
+			// log-silent, this table is what still says why.
+			if alertRows := systemAlertRows(msg.Nodes); len(alertRows) > 0 {
+				fmt.Println()
+				p.table([]string{"NODE", "SEVERITY", "SOURCE", "MESSAGE", "FIRST SEEN"}, alertRows)
+			}
+
 			if liveRows := raftLivenessRows(msg.Nodes); len(liveRows) > 0 {
 				fmt.Println()
 				p.table([]string{"NODE", "WAL AVG", "WAL MAX", "ELECTIONS", "LEADER LOSSES", "FAILED HBS"}, liveRows)

@@ -16,8 +16,10 @@ import (
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
+	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
 	chunkmem "gastrolog/internal/chunk/memory"
+	"gastrolog/internal/cluster"
 	"gastrolog/internal/convert"
 	"gastrolog/internal/memtest"
 	"gastrolog/internal/notify"
@@ -62,10 +64,14 @@ type multiNodeHarness struct {
 	vaultClient       gastrologv1connect.VaultServiceClient
 	configClient      gastrologv1connect.SystemServiceClient
 	jobSrv            gastrologv1connect.JobServiceClient
+	lifecycleClient   gastrologv1connect.LifecycleServiceClient
 	peerJobs          *mnPeerJobs
 	peerRouteStats    *mnPeerRouteStats
 	peerIngesterStats *mnPeerIngesterStats
 	peerVaultStats    *mnPeerVaultStats
+	// alerts is each node's alert.Collector; populated only with
+	// WithClusterStats (gastrolog-33d9n2).
+	alerts map[string]*alert.Collector
 }
 
 // Node returns the test node by ID, fataling if not found.
@@ -97,6 +103,12 @@ type mnConfig struct {
 	// GetSystem (gastrolog-4vr0l).
 	environmentLabel string
 	environmentColor string
+	// clusterStats wires GetClusterStatus's per-node stats path: a mock
+	// Raft membership over all harness nodes, a per-node alert.Collector
+	// feeding a real cluster.StatsCollector, and a NodeStatsProvider that
+	// live-collects each peer's stats — standing in for the periodic
+	// NodeStats broadcast (gastrolog-33d9n2).
+	clusterStats bool
 }
 
 // WithoutVault creates a node that has an orchestrator but no vault.
@@ -116,6 +128,31 @@ func WithEnvironment(label, color string) mnOption {
 		c.environmentLabel = label
 		c.environmentColor = color
 	}
+}
+
+// WithClusterStats enables the GetClusterStatus per-node stats wiring so
+// tests can raise alerts on any node's alert.Collector and observe them
+// from the coordinator's RPC surface (gastrolog-33d9n2).
+func WithClusterStats() mnOption {
+	return func(c *mnConfig) {
+		c.clusterStats = true
+	}
+}
+
+// mnPeerNodeStats implements server.NodeStatsProvider by live-collecting
+// each node's stats from its real cluster.StatsCollector — the harness
+// stand-in for the periodic NodeStats broadcast, using the same
+// alert→proto conversion production uses.
+type mnPeerNodeStats struct {
+	collectors map[string]*cluster.StatsCollector
+}
+
+func (p *mnPeerNodeStats) Get(senderID string) *gastrologv1.NodeStats {
+	c, ok := p.collectors[senderID]
+	if !ok {
+		return nil
+	}
+	return c.CollectLocalSnapshot()
 }
 
 // setupMultiNode creates an N-node in-process cluster. The first nodeID
@@ -187,7 +224,7 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 	routingFwd := newDirectUnaryForwarder(t, nodes, cfgStore, coordinatorID, vaultsDir)
 
 	coordNode := nodes[coordinatorID]
-	srv := server.New(coordNode.orch, cfgStore, orchestrator.Factories{VaultsDir: vaultsDir}, nil, server.Config{
+	srvCfg := server.Config{
 		NodeID:            coordinatorID,
 		RemoteSearcher:    remoteSearcher,
 		RemoteIndexer:     remoteIndexer,
@@ -198,7 +235,32 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 		PeerVaultStats:    peerVaultStats,
 		EnvironmentLabel:  cfg.environmentLabel,
 		EnvironmentColor:  cfg.environmentColor,
-	})
+	}
+
+	// Per-node alert collectors + stats collectors behind GetClusterStatus
+	// (gastrolog-33d9n2). Assigned conditionally so tests without the option
+	// keep the nil interfaces of single-node mode.
+	alertsByNode := make(map[string]*alert.Collector, len(nodeIDs))
+	if cfg.clusterStats {
+		statsCollectors := make(map[string]*cluster.StatsCollector, len(nodeIDs))
+		servers := make([]cluster.RaftServer, 0, len(nodeIDs))
+		for _, id := range nodeIDs {
+			ac := alert.New()
+			alertsByNode[id] = ac
+			statsCollectors[id] = cluster.NewStatsCollector(cluster.StatsCollectorConfig{
+				Alerts:     ac,
+				NodeID:     id,
+				NodeNameFn: func() string { return id },
+				StartTime:  time.Now(),
+			})
+			servers = append(servers, cluster.RaftServer{ID: id, Address: id + ":4566", Suffrage: "Voter"})
+		}
+		srvCfg.Cluster = &mockCluster{leaderID: coordinatorID, leaderAddr: coordinatorID + ":4566", servers: servers, isLeader: true}
+		srvCfg.PeerStats = &mnPeerNodeStats{collectors: statsCollectors}
+		srvCfg.LocalStats = statsCollectors[coordinatorID].CollectLocalSnapshot
+	}
+
+	srv := server.New(coordNode.orch, cfgStore, orchestrator.Factories{VaultsDir: vaultsDir}, nil, srvCfg)
 
 	handler := srv.Handler()
 	httpClient := &http.Client{
@@ -208,6 +270,7 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 	vaultClient := gastrologv1connect.NewVaultServiceClient(httpClient, "http://embedded")
 	configClient := gastrologv1connect.NewSystemServiceClient(httpClient, "http://embedded")
 	jobClient := gastrologv1connect.NewJobServiceClient(httpClient, "http://embedded")
+	lifecycleClient := gastrologv1connect.NewLifecycleServiceClient(httpClient, "http://embedded")
 
 	t.Cleanup(func() {
 		for _, n := range nodes {
@@ -224,10 +287,12 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 		vaultClient:       vaultClient,
 		configClient:      configClient,
 		jobSrv:            jobClient,
+		lifecycleClient:   lifecycleClient,
 		peerJobs:          peerJobs,
 		peerRouteStats:    peerRouteStats,
 		peerIngesterStats: peerIngesterStats,
 		peerVaultStats:    peerVaultStats,
+		alerts:            alertsByNode,
 	}
 }
 
