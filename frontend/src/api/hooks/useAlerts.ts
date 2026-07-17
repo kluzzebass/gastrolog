@@ -1,8 +1,9 @@
 import { useClusterStatus } from "./useClusterStatus";
+import { AlarmState } from "../gen/gastrolog/v1/cluster_pb";
 import type { SystemAlert } from "../gen/gastrolog/v1/cluster_pb";
 import { encode } from "../glid";
 
-export { AlarmPriority } from "../gen/gastrolog/v1/cluster_pb";
+export { AlarmPriority, AlarmState } from "../gen/gastrolog/v1/cluster_pb";
 
 export interface NodeAlert extends SystemAlert {
   nodeId: string;
@@ -62,9 +63,47 @@ export function alarmRank(a: Pick<NodeAlert, "priority" | "softwareFault">): num
   return a.priority; // CRITICAL=3, HIGH=2, LOW=1, UNSPECIFIED=0
 }
 
+/** Lifecycle section of an alarm (gastrolog-1z5gg4). UNSPECIFIED (a
+ *  pre-lifecycle broadcast) reads as active-unacked. */
+export function alarmSection(
+  a: Pick<NodeAlert, "state">,
+): "active" | "acked" | "cleared" | "shelved" {
+  switch (a.state) {
+    case AlarmState.ACTIVE_ACKED:
+      return "acked";
+    case AlarmState.CLEARED_UNACKED:
+      return "cleared";
+    case AlarmState.SHELVED:
+      return "shelved";
+    default:
+      return "active";
+  }
+}
+
+/** Sort in place: highest rank first, oldest first within a rank. */
+function sortAlerts(alerts: NodeAlert[]): NodeAlert[] {
+  alerts.sort((a, b) => {
+    const rank = alarmRank(b) - alarmRank(a);
+    if (rank !== 0) return rank;
+    const aTime = Number(a.firstSeen?.seconds ?? 0n);
+    const bTime = Number(b.firstSeen?.seconds ?? 0n);
+    return aTime - bTime;
+  });
+  return alerts;
+}
+
 export function useAlerts() {
   const { data: cluster } = useClusterStatus();
-  if (!cluster) return { alerts: [] as NodeAlert[], maxRank: 0, floods: [] as NodeFlood[] };
+  if (!cluster)
+    return {
+      alerts: [] as NodeAlert[],
+      active: [] as NodeAlert[],
+      acked: [] as NodeAlert[],
+      cleared: [] as NodeAlert[],
+      shelved: [] as NodeAlert[],
+      maxRank: 0,
+      floods: [] as NodeFlood[],
+    };
 
   const alerts: NodeAlert[] = [];
   const floods: NodeFlood[] = [];
@@ -84,19 +123,36 @@ export function useAlerts() {
       }
     }
   }
-  // Highest rank first, oldest first within a rank.
-  alerts.sort((a, b) => {
-    const rank = alarmRank(b) - alarmRank(a);
-    if (rank !== 0) return rank;
-    const aTime = Number(a.firstSeen?.seconds ?? 0n);
-    const bTime = Number(b.firstSeen?.seconds ?? 0n);
-    return aTime - bTime;
-  });
+  sortAlerts(alerts);
 
-  let maxRank = 0;
+  // Lifecycle sections (gastrolog-1z5gg4): the active list is
+  // active-unacked; acknowledged, shelved and cleared-unacked render in
+  // collapsed sections below it.
+  const active: NodeAlert[] = [];
+  const acked: NodeAlert[] = [];
+  const cleared: NodeAlert[] = [];
+  const shelved: NodeAlert[] = [];
   for (const a of alerts) {
-    maxRank = Math.max(maxRank, alarmRank(a));
+    switch (alarmSection(a)) {
+      case "acked":
+        acked.push(a);
+        break;
+      case "cleared":
+        cleared.push(a);
+        break;
+      case "shelved":
+        shelved.push(a);
+        break;
+      default:
+        active.push(a);
+    }
   }
 
-  return { alerts, maxRank, floods };
+  // The header pill reflects standing conditions demanding or holding
+  // attention (active + acked); shelved and cleared-unacked stay quiet.
+  let maxRank = 0;
+  for (const a of active) maxRank = Math.max(maxRank, alarmRank(a));
+  for (const a of acked) maxRank = Math.max(maxRank, alarmRank(a));
+
+  return { alerts, active, acked, cleared, shelved, maxRank, floods };
 }

@@ -74,8 +74,8 @@ Consequences for the model:
   routine degradation.
 - **Never shelveable.** Shelving suppresses a condition for a while on the
   operator's judgement. A defect does not resolve itself and cannot be
-  deferred — a shelved wedge is a lie. Phase 4 must let an alarm type refuse
-  shelve; this is the case that requires it.
+  deferred — a shelved wedge is a lie. Phase 4 landed the refusal
+  (`AlarmType.NeverShelveable`); this is the case that required it.
 - **Latched** for the reason the code already gives: a leaked hold cannot be
   released by anything short of a restart, so the condition can never
   self-clear. Only an operator acknowledging it can.
@@ -225,12 +225,12 @@ alarm timers of their own. Decisions of record:
   segment is always briefly inside its replication window even though no
   individual segment is stuck. `node-unreachable`'s grace measures the
   FSM-replicated `StateSince` the same way.
-- **Interim latching.** Acknowledgment does not exist until phase 4
-  (gastrolog-1z5gg4), so a latched alarm whose condition clears simply
-  remains standing with no way to clear it — exactly the sticky-by-
-  convention behavior `orchestrator-lock-leak` already had, now enforced
-  by the collector instead of by the call site never calling Clear. Phase
-  4 makes latched alarms clearable via ack.
+- **Latching + ack.** A latched alarm whose condition clears remains
+  standing until acknowledged; the lifecycle phase (gastrolog-1z5gg4,
+  landed) made latched alarms clearable via ack — the latch releases when
+  BOTH the condition has resolved AND an operator has acked, in either
+  order. (This replaced the phase-3 interim where a latched alarm had no
+  way to clear.)
 - Suppression state is **per-node** (each node's collector), like the
   alarms themselves; the aggregation layer sees only annunciated alarms,
   so a condition flapping on one node cannot chatter cluster-wide.
@@ -249,44 +249,117 @@ existed — informational conditions are events by definition.
 
 ## Lifecycle state model
 
-```
-            condition true (after DelayOn)
-  ┌────────────────────────────────────────────┐
-  │                                            ▼
-[inactive] ◄──(cleared + acked)──── [active-unacked] ──(operator ack)──► [active-acked]
-  ▲                                            │                            │
-  │                     condition false        │ (DelayOff, non-latching)   │ condition false
-  └──── [cleared-unacked] ◄────────────────────┘◄───────────────────────────┘
-                 (operator ack)
-[shelved]: operator-initiated suppression with expiry, from any active state.
+*(Landed with phase 4 — gastrolog-1z5gg4. `internal/alert/collector.go`
+lifecycle layer + journal.go; RPCs in `internal/server/lifecycle_alarms.go`.)*
+
+The lifecycle is LAYERED on the suppression entry, not a parallel machine:
+the entry's substrate (`conditionUp`, `active`, `latching`, the delay
+windows) says what the condition is doing; the lifecycle fields (`acked`,
+`shelvedUntil`, `cleared`) say what the operator has done about it. The
+visible state is derived from the combination on every read.
+
+Combined machine (suppression states in brackets on the transitions):
+
+```mermaid
+stateDiagram-v2
+    [*] --> pending : Raise
+    pending --> [*] : Clear inside DelayOn (suppressed, never annunciates)
+    pending --> active_unacked : condition outlives DelayOn (occurrence++)
+    active_unacked --> active_acked : operator ack (who + when)
+    active_unacked --> cleared_unacked : condition resolves [past DelayOff, non-latching]
+    active_unacked --> active_unacked : condition resolves [latching] — stands until acked
+    active_unacked --> shelved : operator shelve (mandatory expiry)
+    active_acked --> [*] : condition resolves [past DelayOff] — silent release
+    active_acked --> shelved : operator shelve (resets ack)
+    cleared_unacked --> [*] : operator ack — the release it was waiting for
+    cleared_unacked --> pending_again : condition returns (new occurrence, full DelayOn)
+    pending_again --> active_unacked : outlives DelayOn (occurrence++, ack reset, FirstSeen reset)
+    shelved --> active_unacked : shelve expires, condition still true (ack reset)
+    shelved --> active_unacked : operator unshelve
+    shelved --> [*] : condition resolves while shelved — deferral covered awareness
 ```
 
-- **Ack** records operator awareness (who + when). Latching alarms
-  (lock-leak) clear only via ack after the condition resolves.
-- **Shelve** suppresses a specific alarm instance for a duration (with a
-  mandatory expiry — no permanent shelves). Shelved alarms are visible in
-  a collapsed section, never silently gone.
-- Cleared-unacked keeps "it fired while you were away" visible without
-  blocking the active list.
+Decisions of record:
+
+- **Ack** records operator awareness (who + when) on the current
+  occurrence. Acked alarms stay in the active list while the condition
+  stands and release silently when it resolves — acked means the operator
+  knows, so there is nothing left to tell them (ISA-18.2's return-to-normal
+  from the acked state). Idempotent: re-acking refreshes who/when.
+- **Latched alarms release when (condition resolved) AND (acked), in
+  either order.** `orchestrator-lock-leak`'s raiser never calls Clear (a
+  leaked hold cannot be observed releasing), so its whole lifecycle is
+  active-unacked → active-acked → restart → gone; it never reaches
+  cleared-unacked.
+- **Cleared-unacked** keeps "it fired while you were away" visible without
+  blocking the active list (excluded from `Active()`/`Count()`, present in
+  `Standing()` and on the wire). The condition returning on a retained
+  entry is a NEW occurrence: the delay-on window runs again (the retention
+  keeps showing cleared-unacked meanwhile), the occurrence count
+  increments, FirstSeen resets to the new condition start, and no prior
+  ack carries over.
+- **Shelve** suppresses one alarm instance for a duration with a MANDATORY
+  expiry (zero/negative rejected at every boundary — no permanent
+  shelves). Shelving resets any acknowledgment: when the shelve lapses
+  with the condition still true, the alarm returns to **active-unacked**
+  and demands fresh attention. A condition that resolves while shelved
+  releases entirely — the operator's deferral covered the awareness
+  function of ack. Expiry is settled lazily against the collector clock,
+  like every suppression window; the delay-off resolution verdict is taken
+  at the instant the window closed, never at the read instant.
+- **Shelve refusal.** `AlarmType.NeverShelveable` (read via
+  `Shelveable()`) marks types where deferral is meaningless. Sweep
+  verdict: the software-fault class (`orchestrator-lock-leak`, the
+  unregistered-type fallback — nothing improves during the window; the
+  response is to report) and `alarm-flood` (it self-clears within its own
+  window, and hiding the degradation indicator defeats self-monitoring).
+  Every process alarm remains shelveable — deferring a condition the
+  operator judges tolerable is exactly what EEMUA 191 shelving is for.
+  `Shelveable` travels on the wire so the UI renders no control at all for
+  refusing types; `ShelveAlarm` also rejects with the reason.
+- **Occurrences** counts annunciated condition occurrences in the
+  suppression sense — episodes separated by more than the delay-off window
+  — since the alarm ID became standing. A clear-and-return inside
+  delay-off is the same occurrence (no increment, no activation edge); a
+  return after cleared-unacked is a new one (increments, fires the
+  activation hook, counts toward the flood rate).
 
 ### Proto / API
 
-`Alert` message gains: `state`, `priority`, `cause`, `response`,
-`acked_by`, `acked_at`, `shelved_until`, `first_raised`, `occurrences`.
-New RPCs: `AckAlarm(id)`, `ShelveAlarm(id, duration)`, `UnshelveAlarm(id)`.
-Remove-and-renumber applies; no reserved fields.
+`SystemAlert` gained `state` (AlarmState enum), `acked_by`, `acked_at`,
+`shelved_until`, `occurrences`, `shelveable`. `first_seen` (already
+present: the condition start of the current occurrence) IS the
+`first_raised` this section once sketched — no duplicate field was added.
+New LifecycleService RPCs: `AckAlarm(alarm_id)`, `ShelveAlarm(alarm_id,
+duration_seconds)`, `UnshelveAlarm(alarm_id)`, each with an internal
+`local_only` flag marking the fan-out leg. Remove-and-renumber applies; no
+reserved fields.
 
 ### Cross-node semantics
 
 Alarms are raised per-node and aggregated for the UI via the existing
-PeerState broadcast. Ack/shelve are cluster-visible operations: the RPC
-forwards to the owning node (any node can serve the request; the owning
-node persists the ack in its collector). Cluster-wide conditions raised by
-multiple nodes (vault-leaderless) deduplicate in the aggregation layer by
-alarm ID; an ack applies to the deduplicated alarm and fans out to every
-raiser. Ack state survives node restart via a small journal file under the
-node home (not config; not Raft — an ack is operator telemetry, not
-cluster state).
+PeerState broadcast — which now carries alarms in EVERY lifecycle state
+(`Standing()`, not just active), so any node can resolve raisers for any
+alarm. Ack/shelve are cluster-visible operations servable from any node:
+the serving node resolves every raiser of the alarm ID (its own collector
+plus each peer whose broadcast NodeStats carries the ID) and fans a
+`local_only` leg out to each via ForwardRPC. A cluster-wide condition
+raised by multiple nodes (vault-leaderless) therefore acks everywhere in
+one call and cannot reappear unacked on the next aggregation. An
+unreachable raiser surfaces as an error naming the node — partial
+application is reported, never hidden; the operations are idempotent, so
+the operator retries.
+
+Ack/shelve state survives node restart via a small append-only JSON-Lines
+journal under the node home (`alarm-journal.jsonl`; not config, not Raft —
+an ack is operator telemetry, and consensus would make acking a cluster
+write). Records are `ack | shelve | unshelve | resolve`; later records per
+ID supersede earlier ones. At startup the file folds into pending state
+(expired shelves prune immediately), compacts, and applies lazily to the
+FIRST annunciation of each matching alarm ID — standing conditions are
+re-detected by their raisers after boot, so the match happens naturally.
+When an alarm fully releases, a `resolve` record prunes its journal state,
+so yesterday's ack can never mark a future occurrence as handled.
 
 ## Event journal
 
@@ -381,8 +454,9 @@ Decisions:
    chunking-glcb-corrupt and chunk-unreadable gained their catalog
    DelayOn. See "Suppression semantics" above for the decisions of
    record, including the interim latching behavior until phase 4.
-4. **Lifecycle + proto + RPCs** — state model, ack/shelve, cross-node ack
-   fan-out, ack persistence.
+4. **Lifecycle + proto + RPCs** ✓ — state model, ack/shelve, cross-node
+   ack fan-out, ack persistence (see "Lifecycle state model" above for the
+   landed shape and decisions).
 5. **Event journal** — ring buffer, RPC, UI page; move demoted
    diagnostics and lifecycle transitions onto it.
 6. **Self-monitoring** ✓ — rate gauge, flood meta-alarm, flood collapse

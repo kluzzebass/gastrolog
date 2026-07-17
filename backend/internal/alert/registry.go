@@ -35,9 +35,9 @@ type AlarmType struct {
 	// auto-clears; a re-raise inside it is the same occurrence.
 	DelayOff time.Duration
 	// Latching alarms stay active until acknowledged even after the
-	// condition clears. INTERIM: acknowledgment ships with the lifecycle
-	// phase (gastrolog-1z5gg4); until then a latched alarm stands with no
-	// way to clear — the sticky behavior these types had by convention.
+	// condition clears: they release only when BOTH the condition has
+	// resolved AND an operator has acked, in either order (lifecycle phase
+	// gastrolog-1z5gg4).
 	Latching bool
 	// SoftwareFault marks a defect tripwire rather than a process alarm.
 	// EEMUA 191 / ISA-18.2 treat instrument and system faults as a class
@@ -45,6 +45,21 @@ type AlarmType struct {
 	// operating condition, so it carries no consequence × urgency priority
 	// and may never be shelved.
 	SoftwareFault bool
+	// NeverShelveable marks types that refuse operator shelving because
+	// deferral is meaningless: nothing improves during the window, so a
+	// shelve would be a lie. Software faults are the canonical case (a
+	// shelved wedge is still a wedge); alarm-flood is the other (hiding the
+	// degradation indicator defeats self-monitoring, and it self-clears).
+	// The zero value — shelveable — is the default for process alarms:
+	// deferring a condition the operator has judged tolerable for a while
+	// is exactly what EEMUA 191 shelving is for. Read via Shelveable().
+	NeverShelveable bool
+}
+
+// Shelveable reports whether operators may shelve alarms of this type.
+// Default true; see NeverShelveable for the types that refuse.
+func (t AlarmType) Shelveable() bool {
+	return !t.NeverShelveable
 }
 
 // catalog is the static alarm-type registry. One entry per alarm type the
@@ -81,10 +96,11 @@ var catalog = []AlarmType{
 	// Software fault — defect tripwire, outside the priority scale.
 	// ------------------------------------------------------------------
 	{
-		IDPrefix:      "orchestrator-lock-leak",
-		SoftwareFault: true,
-		Latching:      true, // a leaked hold can never self-clear
-		Source:        "orchestrator",
+		IDPrefix:        "orchestrator-lock-leak",
+		SoftwareFault:   true,
+		Latching:        true, // a leaked hold can never self-clear
+		NeverShelveable: true, // shelving a wedge is a lie: nothing improves during the window
+		Source:          "orchestrator",
 		Cause:         "The orchestrator registry lock has been held or write-stuck past one minute — a lock-discipline defect, not an operating condition. The node is likely wedging.",
 		Response:      "This should never fire. Capture the acquisition stack from this node's log and file it. Restarting the node is a workaround to recover service, not the response.",
 	},
@@ -160,7 +176,11 @@ var catalog = []AlarmType{
 	{
 		IDPrefix: FloodTypeID, // "alarm-flood"
 		Priority: High,
-		Source:   "alarm-system",
+		// Deferral is meaningless: the flood either clears itself within its
+		// own 10-minute window or the alarm system stays degraded, and
+		// shelving the degradation indicator defeats self-monitoring.
+		NeverShelveable: true,
+		Source:          "alarm-system",
 		Cause:    "This node has raised more alarms in the last 10 minutes than the flood threshold. The alarm list has outrun what an operator can read, so individual alarms on this node are losing their annunciation value.",
 		Response: "The alarm system on this node is degraded by volume: triage by priority — Critical first — and expect suppressed detail (same-type alarms collapse in the panel). Clears on its own once the rate stays under the threshold for a full 10-minute window; the threshold is adjustable in the cluster settings.",
 	},
@@ -325,9 +345,10 @@ func Types() []AlarmType {
 // underlying condition and the defect visible.
 func unregisteredAlarmType(typeID string) AlarmType {
 	return AlarmType{
-		IDPrefix:      typeID,
-		SoftwareFault: true,
-		Source:        "alarm-system",
+		IDPrefix:        typeID,
+		SoftwareFault:   true,
+		NeverShelveable: true, // a defect tripwire; deferring it defers the report
+		Source:          "alarm-system",
 		Cause:         "A component raised an alarm type that is not in the alarm catalog. The underlying condition is real (see the detail text) but its priority and guidance are undocumented — a software defect in the raising component.",
 		Response:      "Report this, quoting the alarm ID and detail text. Treat the detail text as the condition description until the catalog entry exists.",
 	}

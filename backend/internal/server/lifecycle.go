@@ -14,11 +14,13 @@ import (
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
+	"gastrolog/internal/alert"
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/server/routing"
 	"gastrolog/internal/system"
 	"gastrolog/internal/system/command"
 )
@@ -62,6 +64,12 @@ type LifecycleServer struct {
 	listVaultsFn      func(ctx context.Context) []*apiv1.VaultInfo
 	getStatsFn        func(ctx context.Context) *apiv1.GetStatsResponse
 	logger            *slog.Logger
+
+	// Alarm lifecycle (gastrolog-1z5gg4): this node's collector and the
+	// cluster forwarder for cross-node ack/shelve fan-out. See
+	// lifecycle_alarms.go.
+	alerts         *alert.Collector
+	alarmForwarder routing.UnaryForwarder
 }
 
 var _ gastrologv1connect.LifecycleServiceHandler = (*LifecycleServer)(nil)

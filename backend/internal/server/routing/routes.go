@@ -107,6 +107,13 @@ func DefaultRoutes() map[string]RPCRoute {
 		// YieldLeadership is invoked on the terminating node by its own preStop
 		// hook; forwarding to the leader would defeat the purpose. Route local.
 		gastrologv1connect.LifecycleServiceYieldLeadershipProcedure: {Strategy: RouteLocal},
+		// Alarm lifecycle: the handler resolves every raiser of the alarm
+		// ID and fans the operation out itself (local collector + a
+		// local_only ForwardRPC leg per remote raiser) — RouteFanOut so the
+		// interceptor passes through.
+		gastrologv1connect.LifecycleServiceAckAlarmProcedure:      {Strategy: RouteFanOut},
+		gastrologv1connect.LifecycleServiceShelveAlarmProcedure:   {Strategy: RouteFanOut},
+		gastrologv1connect.LifecycleServiceUnshelveAlarmProcedure: {Strategy: RouteFanOut},
 		// Cluster mutations — need the Raft leader.
 		gastrologv1connect.LifecycleServiceSetNodeSuffrageProcedure: {Strategy: RouteLeader},
 		gastrologv1connect.LifecycleServiceSetNodeStateProcedure:    {Strategy: RouteLeader},

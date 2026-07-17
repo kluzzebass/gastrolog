@@ -22,6 +22,74 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// AlarmState is the lifecycle state of a standing alarm (EEMUA 191
+// principles 5 & 6 — a bare set/clear bit cannot express standing alarms).
+type AlarmState int32
+
+const (
+	AlarmState_ALARM_STATE_UNSPECIFIED AlarmState = 0
+	// Condition annunciated, operator has not acknowledged. Also the state of
+	// a latching alarm whose condition resolved before acknowledgment — it
+	// stands until acked.
+	AlarmState_ALARM_STATE_ACTIVE_UNACKED AlarmState = 1
+	// Condition still true, operator has acknowledged (who/when in
+	// acked_by/acked_at). Clears silently when the condition resolves.
+	AlarmState_ALARM_STATE_ACTIVE_ACKED AlarmState = 2
+	// Condition resolved while unacknowledged (non-latching): retained so "it
+	// fired while you were away" stays visible without blocking the active
+	// list. Acknowledgment releases it.
+	AlarmState_ALARM_STATE_CLEARED_UNACKED AlarmState = 3
+	// Operator-shelved until shelved_until. Visible in a collapsed section,
+	// never silently gone; expiry with the condition still true returns it to
+	// ACTIVE_UNACKED.
+	AlarmState_ALARM_STATE_SHELVED AlarmState = 4
+)
+
+// Enum value maps for AlarmState.
+var (
+	AlarmState_name = map[int32]string{
+		0: "ALARM_STATE_UNSPECIFIED",
+		1: "ALARM_STATE_ACTIVE_UNACKED",
+		2: "ALARM_STATE_ACTIVE_ACKED",
+		3: "ALARM_STATE_CLEARED_UNACKED",
+		4: "ALARM_STATE_SHELVED",
+	}
+	AlarmState_value = map[string]int32{
+		"ALARM_STATE_UNSPECIFIED":     0,
+		"ALARM_STATE_ACTIVE_UNACKED":  1,
+		"ALARM_STATE_ACTIVE_ACKED":    2,
+		"ALARM_STATE_CLEARED_UNACKED": 3,
+		"ALARM_STATE_SHELVED":         4,
+	}
+)
+
+func (x AlarmState) Enum() *AlarmState {
+	p := new(AlarmState)
+	*p = x
+	return p
+}
+
+func (x AlarmState) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (AlarmState) Descriptor() protoreflect.EnumDescriptor {
+	return file_gastrolog_v1_cluster_proto_enumTypes[0].Descriptor()
+}
+
+func (AlarmState) Type() protoreflect.EnumType {
+	return &file_gastrolog_v1_cluster_proto_enumTypes[0]
+}
+
+func (x AlarmState) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use AlarmState.Descriptor instead.
+func (AlarmState) EnumDescriptor() ([]byte, []int) {
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{0}
+}
+
 // AlarmPriority is the cataloged consequence × urgency verdict for an alarm
 // type. CRITICAL = data loss in progress or scheduled; HIGH = durability or
 // availability degraded, will compound; LOW = needs attention on a human
@@ -62,11 +130,11 @@ func (x AlarmPriority) String() string {
 }
 
 func (AlarmPriority) Descriptor() protoreflect.EnumDescriptor {
-	return file_gastrolog_v1_cluster_proto_enumTypes[0].Descriptor()
+	return file_gastrolog_v1_cluster_proto_enumTypes[1].Descriptor()
 }
 
 func (AlarmPriority) Type() protoreflect.EnumType {
-	return &file_gastrolog_v1_cluster_proto_enumTypes[0]
+	return &file_gastrolog_v1_cluster_proto_enumTypes[1]
 }
 
 func (x AlarmPriority) Number() protoreflect.EnumNumber {
@@ -75,7 +143,7 @@ func (x AlarmPriority) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use AlarmPriority.Descriptor instead.
 func (AlarmPriority) EnumDescriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{0}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{1}
 }
 
 // ForwardApplyRequest carries a pre-marshaled ConfigCommand for the leader
@@ -1395,18 +1463,24 @@ func (x *PeerTrafficTotal) GetRxSpark() []float64 {
 	return nil
 }
 
-// SystemAlert is one active alarm: a runtime condition requiring operator
+// SystemAlert is one standing alarm: a runtime condition requiring operator
 // action, with priority, cause and response stamped from the static alarm
 // catalog (or from the operator's own rule for operator-defined alarms).
 // Alarms are keyed by ID for deduplication — the same condition doesn't
-// create multiple alarms. They auto-clear when the component that raised
-// them detects the condition has resolved.
+// create multiple alarms. Each carries its lifecycle state (EEMUA 191
+// standing-alarm management): non-latching alarms auto-clear when the
+// raising component detects the condition resolved AND the operator has
+// acknowledged; latching alarms clear only via acknowledgment.
 type SystemAlert struct {
-	state     protoimpl.MessageState `protogen:"open.v1"`
-	Id        []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`                                              // stable key for dedup (e.g. "vault-init:$vaultID")
-	Priority  AlarmPriority          `protobuf:"varint,2,opt,name=priority,proto3,enum=gastrolog.v1.AlarmPriority" json:"priority,omitempty"` // from the alarm catalog, never the call site
-	Source    string                 `protobuf:"bytes,3,opt,name=source,proto3" json:"source,omitempty"`                                      // component name (e.g. "placement", "chunking")
-	Detail    string                 `protobuf:"bytes,4,opt,name=detail,proto3" json:"detail,omitempty"`                                      // per-instance specifics from the raiser
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Id       []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`                                              // stable key for dedup (e.g. "vault-init:$vaultID")
+	Priority AlarmPriority          `protobuf:"varint,2,opt,name=priority,proto3,enum=gastrolog.v1.AlarmPriority" json:"priority,omitempty"` // from the alarm catalog, never the call site
+	Source   string                 `protobuf:"bytes,3,opt,name=source,proto3" json:"source,omitempty"`                                      // component name (e.g. "placement", "chunking")
+	Detail   string                 `protobuf:"bytes,4,opt,name=detail,proto3" json:"detail,omitempty"`                                      // per-instance specifics from the raiser
+	// Condition start of the current occurrence (the first Raise of the
+	// occurrence, not the annunciation instant — a delay-on window suppresses
+	// annunciation, not the condition's history). This IS the design doc's
+	// "first_raised"; no separate field exists.
 	FirstSeen *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=first_seen,json=firstSeen,proto3" json:"first_seen,omitempty"`
 	LastSeen  *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=last_seen,json=lastSeen,proto3" json:"last_seen,omitempty"`
 	Cause     string                 `protobuf:"bytes,7,opt,name=cause,proto3" json:"cause,omitempty"`       // catalog: what condition this is
@@ -1418,7 +1492,29 @@ type SystemAlert struct {
 	// Catalog type ID ("vault-leaderless", "alarm-flood", ...) — the id field
 	// minus the instance key. Carried explicitly so aggregation-side flood
 	// collapse groups by type without re-deriving it from the id format.
-	TypeId        string `protobuf:"bytes,10,opt,name=type_id,json=typeId,proto3" json:"type_id,omitempty"`
+	TypeId string `protobuf:"bytes,10,opt,name=type_id,json=typeId,proto3" json:"type_id,omitempty"`
+	// Lifecycle state (see AlarmState). Alarms in every state travel on the
+	// wire; consumers filter — the active list, the shelved and
+	// cleared-unacknowledged sections, and cross-node ack fan-out all read
+	// this one field.
+	State AlarmState `protobuf:"varint,11,opt,name=state,proto3,enum=gastrolog.v1.AlarmState" json:"state,omitempty"`
+	// Operator acknowledgment: who and when. Empty/absent until acked.
+	AckedBy string                 `protobuf:"bytes,12,opt,name=acked_by,json=ackedBy,proto3" json:"acked_by,omitempty"`
+	AckedAt *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=acked_at,json=ackedAt,proto3" json:"acked_at,omitempty"`
+	// Shelve expiry. Set only while state is SHELVED — shelves always carry
+	// an expiry; there are no permanent shelves.
+	ShelvedUntil *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=shelved_until,json=shelvedUntil,proto3" json:"shelved_until,omitempty"`
+	// Count of distinct condition occurrences that have annunciated for this
+	// alarm ID since it became standing. An occurrence is the suppression
+	// notion: a continuous condition episode — a clear-and-return inside the
+	// type's delay-off window is the SAME occurrence; a return after the
+	// alarm reached cleared-unacknowledged is a new one (and resets the
+	// operator's acknowledgment).
+	Occurrences uint32 `protobuf:"varint,15,opt,name=occurrences,proto3" json:"occurrences,omitempty"`
+	// Whether operators may shelve this alarm. False for types where deferral
+	// is meaningless (software faults, alarm-flood) — the UI must not render
+	// a shelve control at all, and ShelveAlarm rejects with the reason.
+	Shelveable    bool `protobuf:"varint,16,opt,name=shelveable,proto3" json:"shelveable,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1521,6 +1617,48 @@ func (x *SystemAlert) GetTypeId() string {
 		return x.TypeId
 	}
 	return ""
+}
+
+func (x *SystemAlert) GetState() AlarmState {
+	if x != nil {
+		return x.State
+	}
+	return AlarmState_ALARM_STATE_UNSPECIFIED
+}
+
+func (x *SystemAlert) GetAckedBy() string {
+	if x != nil {
+		return x.AckedBy
+	}
+	return ""
+}
+
+func (x *SystemAlert) GetAckedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.AckedAt
+	}
+	return nil
+}
+
+func (x *SystemAlert) GetShelvedUntil() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ShelvedUntil
+	}
+	return nil
+}
+
+func (x *SystemAlert) GetOccurrences() uint32 {
+	if x != nil {
+		return x.Occurrences
+	}
+	return 0
+}
+
+func (x *SystemAlert) GetShelveable() bool {
+	if x != nil {
+		return x.Shelveable
+	}
+	return false
 }
 
 // IngesterNodeStats reports per-ingester statistics on a cluster node.
@@ -4713,7 +4851,7 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x10tx_bytes_per_sec\x18\x04 \x01(\x01R\rtxBytesPerSec\x12'\n" +
 	"\x10rx_bytes_per_sec\x18\x05 \x01(\x01R\rrxBytesPerSec\x12\x19\n" +
 	"\btx_spark\x18\x06 \x03(\x01R\atxSpark\x12\x19\n" +
-	"\brx_spark\x18\a \x03(\x01R\arxSpark\"\xec\x02\n" +
+	"\brx_spark\x18\a \x03(\x01R\arxSpark\"\xf1\x04\n" +
 	"\vSystemAlert\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x127\n" +
 	"\bpriority\x18\x02 \x01(\x0e2\x1b.gastrolog.v1.AlarmPriorityR\bpriority\x12\x16\n" +
@@ -4726,7 +4864,15 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\bresponse\x18\b \x01(\tR\bresponse\x12%\n" +
 	"\x0esoftware_fault\x18\t \x01(\bR\rsoftwareFault\x12\x17\n" +
 	"\atype_id\x18\n" +
-	" \x01(\tR\x06typeId\"\xbd\x01\n" +
+	" \x01(\tR\x06typeId\x12.\n" +
+	"\x05state\x18\v \x01(\x0e2\x18.gastrolog.v1.AlarmStateR\x05state\x12\x19\n" +
+	"\backed_by\x18\f \x01(\tR\aackedBy\x125\n" +
+	"\backed_at\x18\r \x01(\v2\x1a.google.protobuf.TimestampR\aackedAt\x12?\n" +
+	"\rshelved_until\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampR\fshelvedUntil\x12 \n" +
+	"\voccurrences\x18\x0f \x01(\rR\voccurrences\x12\x1e\n" +
+	"\n" +
+	"shelveable\x18\x10 \x01(\bR\n" +
+	"shelveable\"\xbd\x01\n" +
 	"\x11IngesterNodeStats\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12+\n" +
 	"\x11messages_ingested\x18\x02 \x01(\x04R\x10messagesIngested\x12%\n" +
@@ -4900,7 +5046,14 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"error_code\x18\x03 \x01(\rR\terrorCode\x12#\n" +
 	"\rerror_message\x18\x04 \x01(\tR\ferrorMessage\x12\x1d\n" +
 	"\n" +
-	"end_stream\x18\x05 \x01(\bR\tendStream*}\n" +
+	"end_stream\x18\x05 \x01(\bR\tendStream*\xa1\x01\n" +
+	"\n" +
+	"AlarmState\x12\x1b\n" +
+	"\x17ALARM_STATE_UNSPECIFIED\x10\x00\x12\x1e\n" +
+	"\x1aALARM_STATE_ACTIVE_UNACKED\x10\x01\x12\x1c\n" +
+	"\x18ALARM_STATE_ACTIVE_ACKED\x10\x02\x12\x1f\n" +
+	"\x1bALARM_STATE_CLEARED_UNACKED\x10\x03\x12\x17\n" +
+	"\x13ALARM_STATE_SHELVED\x10\x04*}\n" +
 	"\rAlarmPriority\x12\x1e\n" +
 	"\x1aALARM_PRIORITY_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12ALARM_PRIORITY_LOW\x10\x01\x12\x17\n" +
@@ -4919,142 +5072,146 @@ func file_gastrolog_v1_cluster_proto_rawDescGZIP() []byte {
 	return file_gastrolog_v1_cluster_proto_rawDescData
 }
 
-var file_gastrolog_v1_cluster_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_gastrolog_v1_cluster_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
 var file_gastrolog_v1_cluster_proto_msgTypes = make([]protoimpl.MessageInfo, 70)
 var file_gastrolog_v1_cluster_proto_goTypes = []any{
-	(AlarmPriority)(0),                        // 0: gastrolog.v1.AlarmPriority
-	(*ForwardApplyRequest)(nil),               // 1: gastrolog.v1.ForwardApplyRequest
-	(*ForwardApplyResponse)(nil),              // 2: gastrolog.v1.ForwardApplyResponse
-	(*EnrollRequest)(nil),                     // 3: gastrolog.v1.EnrollRequest
-	(*EnrollResponse)(nil),                    // 4: gastrolog.v1.EnrollResponse
-	(*BroadcastRequest)(nil),                  // 5: gastrolog.v1.BroadcastRequest
-	(*BroadcastResponse)(nil),                 // 6: gastrolog.v1.BroadcastResponse
-	(*BroadcastMessage)(nil),                  // 7: gastrolog.v1.BroadcastMessage
-	(*Heartbeat)(nil),                         // 8: gastrolog.v1.Heartbeat
-	(*NodeJobs)(nil),                          // 9: gastrolog.v1.NodeJobs
-	(*NodeStats)(nil),                         // 10: gastrolog.v1.NodeStats
-	(*VaultPipelineNodeDisk)(nil),             // 11: gastrolog.v1.VaultPipelineNodeDisk
-	(*PeerConnStat)(nil),                      // 12: gastrolog.v1.PeerConnStat
-	(*PeerTrafficTotal)(nil),                  // 13: gastrolog.v1.PeerTrafficTotal
-	(*SystemAlert)(nil),                       // 14: gastrolog.v1.SystemAlert
-	(*IngesterNodeStats)(nil),                 // 15: gastrolog.v1.IngesterNodeStats
-	(*ForwardVaultApplyRequest)(nil),          // 16: gastrolog.v1.ForwardVaultApplyRequest
-	(*ForwardVaultApplyResponse)(nil),         // 17: gastrolog.v1.ForwardVaultApplyResponse
-	(*ChunkReplicationCommand)(nil),           // 18: gastrolog.v1.ChunkReplicationCommand
-	(*ChunkReplicationImportBegin)(nil),       // 19: gastrolog.v1.ChunkReplicationImportBegin
-	(*ChunkReplicationImportRecords)(nil),     // 20: gastrolog.v1.ChunkReplicationImportRecords
-	(*ChunkReplicationImportCommit)(nil),      // 21: gastrolog.v1.ChunkReplicationImportCommit
-	(*ChunkReplicationDelete)(nil),            // 22: gastrolog.v1.ChunkReplicationDelete
-	(*ChunkReplicationAck)(nil),               // 23: gastrolog.v1.ChunkReplicationAck
-	(*RequestReplicaCatchupRequest)(nil),      // 24: gastrolog.v1.RequestReplicaCatchupRequest
-	(*RequestReplicaCatchupResponse)(nil),     // 25: gastrolog.v1.RequestReplicaCatchupResponse
-	(*ForwardSearchRequest)(nil),              // 26: gastrolog.v1.ForwardSearchRequest
-	(*ForwardSearchResponse)(nil),             // 27: gastrolog.v1.ForwardSearchResponse
-	(*ForwardGetContextRequest)(nil),          // 28: gastrolog.v1.ForwardGetContextRequest
-	(*ForwardGetContextResponse)(nil),         // 29: gastrolog.v1.ForwardGetContextResponse
-	(*ForwardListChunksRequest)(nil),          // 30: gastrolog.v1.ForwardListChunksRequest
-	(*ForwardListChunksResponse)(nil),         // 31: gastrolog.v1.ForwardListChunksResponse
-	(*ForwardGetPipelineBacklogRequest)(nil),  // 32: gastrolog.v1.ForwardGetPipelineBacklogRequest
-	(*ForwardGetPipelineBacklogResponse)(nil), // 33: gastrolog.v1.ForwardGetPipelineBacklogResponse
-	(*ForwardWatchChunksRequest)(nil),         // 34: gastrolog.v1.ForwardWatchChunksRequest
-	(*ForwardWatchChunksResponse)(nil),        // 35: gastrolog.v1.ForwardWatchChunksResponse
-	(*ForwardGetIndexesRequest)(nil),          // 36: gastrolog.v1.ForwardGetIndexesRequest
-	(*ForwardGetIndexesResponse)(nil),         // 37: gastrolog.v1.ForwardGetIndexesResponse
-	(*ForwardValidateVaultRequest)(nil),       // 38: gastrolog.v1.ForwardValidateVaultRequest
-	(*ForwardValidateVaultResponse)(nil),      // 39: gastrolog.v1.ForwardValidateVaultResponse
-	(*ForwardGetChunkRequest)(nil),            // 40: gastrolog.v1.ForwardGetChunkRequest
-	(*ForwardGetChunkResponse)(nil),           // 41: gastrolog.v1.ForwardGetChunkResponse
-	(*ForwardAnalyzeChunkRequest)(nil),        // 42: gastrolog.v1.ForwardAnalyzeChunkRequest
-	(*ForwardAnalyzeChunkResponse)(nil),       // 43: gastrolog.v1.ForwardAnalyzeChunkResponse
-	(*ForwardSealVaultRequest)(nil),           // 44: gastrolog.v1.ForwardSealVaultRequest
-	(*ForwardSealVaultResponse)(nil),          // 45: gastrolog.v1.ForwardSealVaultResponse
-	(*ForwardReindexVaultRequest)(nil),        // 46: gastrolog.v1.ForwardReindexVaultRequest
-	(*ForwardReindexVaultResponse)(nil),       // 47: gastrolog.v1.ForwardReindexVaultResponse
-	(*ForwardExportToVaultRequest)(nil),       // 48: gastrolog.v1.ForwardExportToVaultRequest
-	(*ForwardExportToVaultResponse)(nil),      // 49: gastrolog.v1.ForwardExportToVaultResponse
-	(*NotifyEvictionRequest)(nil),             // 50: gastrolog.v1.NotifyEvictionRequest
-	(*NotifyEvictionResponse)(nil),            // 51: gastrolog.v1.NotifyEvictionResponse
-	(*ForwardRemoveNodeRequest)(nil),          // 52: gastrolog.v1.ForwardRemoveNodeRequest
-	(*ForwardRemoveNodeResponse)(nil),         // 53: gastrolog.v1.ForwardRemoveNodeResponse
-	(*ForwardSetNodeSuffrageRequest)(nil),     // 54: gastrolog.v1.ForwardSetNodeSuffrageRequest
-	(*ForwardSetNodeSuffrageResponse)(nil),    // 55: gastrolog.v1.ForwardSetNodeSuffrageResponse
-	(*ForwardExplainRequest)(nil),             // 56: gastrolog.v1.ForwardExplainRequest
-	(*ForwardExplainResponse)(nil),            // 57: gastrolog.v1.ForwardExplainResponse
-	(*ForwardFollowRequest)(nil),              // 58: gastrolog.v1.ForwardFollowRequest
-	(*ForwardFollowResponse)(nil),             // 59: gastrolog.v1.ForwardFollowResponse
-	(*ImportRecordMessage)(nil),               // 60: gastrolog.v1.ImportRecordMessage
-	(*ForwardImportRecordsResponse)(nil),      // 61: gastrolog.v1.ForwardImportRecordsResponse
-	(*PullManagedFileRequest)(nil),            // 62: gastrolog.v1.PullManagedFileRequest
-	(*PullManagedFileChunk)(nil),              // 63: gastrolog.v1.PullManagedFileChunk
-	(*PullSegmentRequest)(nil),                // 64: gastrolog.v1.PullSegmentRequest
-	(*PullSegmentChunk)(nil),                  // 65: gastrolog.v1.PullSegmentChunk
-	(*PullChunkGLCBRequest)(nil),              // 66: gastrolog.v1.PullChunkGLCBRequest
-	(*PullChunkGLCBChunk)(nil),                // 67: gastrolog.v1.PullChunkGLCBChunk
-	(*ListPeerManagedFilesRequest)(nil),       // 68: gastrolog.v1.ListPeerManagedFilesRequest
-	(*ListPeerManagedFilesResponse)(nil),      // 69: gastrolog.v1.ListPeerManagedFilesResponse
-	(*ForwardRPCFrame)(nil),                   // 70: gastrolog.v1.ForwardRPCFrame
-	(*timestamppb.Timestamp)(nil),             // 71: google.protobuf.Timestamp
-	(*Job)(nil),                               // 72: gastrolog.v1.Job
-	(*VaultStats)(nil),                        // 73: gastrolog.v1.VaultStats
-	(*VaultRouteStats)(nil),                   // 74: gastrolog.v1.VaultRouteStats
-	(*PerRouteStats)(nil),                     // 75: gastrolog.v1.PerRouteStats
-	(*ThroughputRate)(nil),                    // 76: gastrolog.v1.ThroughputRate
-	(*ExportRecord)(nil),                      // 77: gastrolog.v1.ExportRecord
-	(*TableResult)(nil),                       // 78: gastrolog.v1.TableResult
-	(*HistogramBucket)(nil),                   // 79: gastrolog.v1.HistogramBucket
-	(*ChunkMeta)(nil),                         // 80: gastrolog.v1.ChunkMeta
-	(ChunkChangeOp)(0),                        // 81: gastrolog.v1.ChunkChangeOp
-	(*IndexInfo)(nil),                         // 82: gastrolog.v1.IndexInfo
-	(*ChunkValidation)(nil),                   // 83: gastrolog.v1.ChunkValidation
-	(*ChunkAnalysis)(nil),                     // 84: gastrolog.v1.ChunkAnalysis
-	(*ChunkPlan)(nil),                         // 85: gastrolog.v1.ChunkPlan
+	(AlarmState)(0),                           // 0: gastrolog.v1.AlarmState
+	(AlarmPriority)(0),                        // 1: gastrolog.v1.AlarmPriority
+	(*ForwardApplyRequest)(nil),               // 2: gastrolog.v1.ForwardApplyRequest
+	(*ForwardApplyResponse)(nil),              // 3: gastrolog.v1.ForwardApplyResponse
+	(*EnrollRequest)(nil),                     // 4: gastrolog.v1.EnrollRequest
+	(*EnrollResponse)(nil),                    // 5: gastrolog.v1.EnrollResponse
+	(*BroadcastRequest)(nil),                  // 6: gastrolog.v1.BroadcastRequest
+	(*BroadcastResponse)(nil),                 // 7: gastrolog.v1.BroadcastResponse
+	(*BroadcastMessage)(nil),                  // 8: gastrolog.v1.BroadcastMessage
+	(*Heartbeat)(nil),                         // 9: gastrolog.v1.Heartbeat
+	(*NodeJobs)(nil),                          // 10: gastrolog.v1.NodeJobs
+	(*NodeStats)(nil),                         // 11: gastrolog.v1.NodeStats
+	(*VaultPipelineNodeDisk)(nil),             // 12: gastrolog.v1.VaultPipelineNodeDisk
+	(*PeerConnStat)(nil),                      // 13: gastrolog.v1.PeerConnStat
+	(*PeerTrafficTotal)(nil),                  // 14: gastrolog.v1.PeerTrafficTotal
+	(*SystemAlert)(nil),                       // 15: gastrolog.v1.SystemAlert
+	(*IngesterNodeStats)(nil),                 // 16: gastrolog.v1.IngesterNodeStats
+	(*ForwardVaultApplyRequest)(nil),          // 17: gastrolog.v1.ForwardVaultApplyRequest
+	(*ForwardVaultApplyResponse)(nil),         // 18: gastrolog.v1.ForwardVaultApplyResponse
+	(*ChunkReplicationCommand)(nil),           // 19: gastrolog.v1.ChunkReplicationCommand
+	(*ChunkReplicationImportBegin)(nil),       // 20: gastrolog.v1.ChunkReplicationImportBegin
+	(*ChunkReplicationImportRecords)(nil),     // 21: gastrolog.v1.ChunkReplicationImportRecords
+	(*ChunkReplicationImportCommit)(nil),      // 22: gastrolog.v1.ChunkReplicationImportCommit
+	(*ChunkReplicationDelete)(nil),            // 23: gastrolog.v1.ChunkReplicationDelete
+	(*ChunkReplicationAck)(nil),               // 24: gastrolog.v1.ChunkReplicationAck
+	(*RequestReplicaCatchupRequest)(nil),      // 25: gastrolog.v1.RequestReplicaCatchupRequest
+	(*RequestReplicaCatchupResponse)(nil),     // 26: gastrolog.v1.RequestReplicaCatchupResponse
+	(*ForwardSearchRequest)(nil),              // 27: gastrolog.v1.ForwardSearchRequest
+	(*ForwardSearchResponse)(nil),             // 28: gastrolog.v1.ForwardSearchResponse
+	(*ForwardGetContextRequest)(nil),          // 29: gastrolog.v1.ForwardGetContextRequest
+	(*ForwardGetContextResponse)(nil),         // 30: gastrolog.v1.ForwardGetContextResponse
+	(*ForwardListChunksRequest)(nil),          // 31: gastrolog.v1.ForwardListChunksRequest
+	(*ForwardListChunksResponse)(nil),         // 32: gastrolog.v1.ForwardListChunksResponse
+	(*ForwardGetPipelineBacklogRequest)(nil),  // 33: gastrolog.v1.ForwardGetPipelineBacklogRequest
+	(*ForwardGetPipelineBacklogResponse)(nil), // 34: gastrolog.v1.ForwardGetPipelineBacklogResponse
+	(*ForwardWatchChunksRequest)(nil),         // 35: gastrolog.v1.ForwardWatchChunksRequest
+	(*ForwardWatchChunksResponse)(nil),        // 36: gastrolog.v1.ForwardWatchChunksResponse
+	(*ForwardGetIndexesRequest)(nil),          // 37: gastrolog.v1.ForwardGetIndexesRequest
+	(*ForwardGetIndexesResponse)(nil),         // 38: gastrolog.v1.ForwardGetIndexesResponse
+	(*ForwardValidateVaultRequest)(nil),       // 39: gastrolog.v1.ForwardValidateVaultRequest
+	(*ForwardValidateVaultResponse)(nil),      // 40: gastrolog.v1.ForwardValidateVaultResponse
+	(*ForwardGetChunkRequest)(nil),            // 41: gastrolog.v1.ForwardGetChunkRequest
+	(*ForwardGetChunkResponse)(nil),           // 42: gastrolog.v1.ForwardGetChunkResponse
+	(*ForwardAnalyzeChunkRequest)(nil),        // 43: gastrolog.v1.ForwardAnalyzeChunkRequest
+	(*ForwardAnalyzeChunkResponse)(nil),       // 44: gastrolog.v1.ForwardAnalyzeChunkResponse
+	(*ForwardSealVaultRequest)(nil),           // 45: gastrolog.v1.ForwardSealVaultRequest
+	(*ForwardSealVaultResponse)(nil),          // 46: gastrolog.v1.ForwardSealVaultResponse
+	(*ForwardReindexVaultRequest)(nil),        // 47: gastrolog.v1.ForwardReindexVaultRequest
+	(*ForwardReindexVaultResponse)(nil),       // 48: gastrolog.v1.ForwardReindexVaultResponse
+	(*ForwardExportToVaultRequest)(nil),       // 49: gastrolog.v1.ForwardExportToVaultRequest
+	(*ForwardExportToVaultResponse)(nil),      // 50: gastrolog.v1.ForwardExportToVaultResponse
+	(*NotifyEvictionRequest)(nil),             // 51: gastrolog.v1.NotifyEvictionRequest
+	(*NotifyEvictionResponse)(nil),            // 52: gastrolog.v1.NotifyEvictionResponse
+	(*ForwardRemoveNodeRequest)(nil),          // 53: gastrolog.v1.ForwardRemoveNodeRequest
+	(*ForwardRemoveNodeResponse)(nil),         // 54: gastrolog.v1.ForwardRemoveNodeResponse
+	(*ForwardSetNodeSuffrageRequest)(nil),     // 55: gastrolog.v1.ForwardSetNodeSuffrageRequest
+	(*ForwardSetNodeSuffrageResponse)(nil),    // 56: gastrolog.v1.ForwardSetNodeSuffrageResponse
+	(*ForwardExplainRequest)(nil),             // 57: gastrolog.v1.ForwardExplainRequest
+	(*ForwardExplainResponse)(nil),            // 58: gastrolog.v1.ForwardExplainResponse
+	(*ForwardFollowRequest)(nil),              // 59: gastrolog.v1.ForwardFollowRequest
+	(*ForwardFollowResponse)(nil),             // 60: gastrolog.v1.ForwardFollowResponse
+	(*ImportRecordMessage)(nil),               // 61: gastrolog.v1.ImportRecordMessage
+	(*ForwardImportRecordsResponse)(nil),      // 62: gastrolog.v1.ForwardImportRecordsResponse
+	(*PullManagedFileRequest)(nil),            // 63: gastrolog.v1.PullManagedFileRequest
+	(*PullManagedFileChunk)(nil),              // 64: gastrolog.v1.PullManagedFileChunk
+	(*PullSegmentRequest)(nil),                // 65: gastrolog.v1.PullSegmentRequest
+	(*PullSegmentChunk)(nil),                  // 66: gastrolog.v1.PullSegmentChunk
+	(*PullChunkGLCBRequest)(nil),              // 67: gastrolog.v1.PullChunkGLCBRequest
+	(*PullChunkGLCBChunk)(nil),                // 68: gastrolog.v1.PullChunkGLCBChunk
+	(*ListPeerManagedFilesRequest)(nil),       // 69: gastrolog.v1.ListPeerManagedFilesRequest
+	(*ListPeerManagedFilesResponse)(nil),      // 70: gastrolog.v1.ListPeerManagedFilesResponse
+	(*ForwardRPCFrame)(nil),                   // 71: gastrolog.v1.ForwardRPCFrame
+	(*timestamppb.Timestamp)(nil),             // 72: google.protobuf.Timestamp
+	(*Job)(nil),                               // 73: gastrolog.v1.Job
+	(*VaultStats)(nil),                        // 74: gastrolog.v1.VaultStats
+	(*VaultRouteStats)(nil),                   // 75: gastrolog.v1.VaultRouteStats
+	(*PerRouteStats)(nil),                     // 76: gastrolog.v1.PerRouteStats
+	(*ThroughputRate)(nil),                    // 77: gastrolog.v1.ThroughputRate
+	(*ExportRecord)(nil),                      // 78: gastrolog.v1.ExportRecord
+	(*TableResult)(nil),                       // 79: gastrolog.v1.TableResult
+	(*HistogramBucket)(nil),                   // 80: gastrolog.v1.HistogramBucket
+	(*ChunkMeta)(nil),                         // 81: gastrolog.v1.ChunkMeta
+	(ChunkChangeOp)(0),                        // 82: gastrolog.v1.ChunkChangeOp
+	(*IndexInfo)(nil),                         // 83: gastrolog.v1.IndexInfo
+	(*ChunkValidation)(nil),                   // 84: gastrolog.v1.ChunkValidation
+	(*ChunkAnalysis)(nil),                     // 85: gastrolog.v1.ChunkAnalysis
+	(*ChunkPlan)(nil),                         // 86: gastrolog.v1.ChunkPlan
 }
 var file_gastrolog_v1_cluster_proto_depIdxs = []int32{
-	7,  // 0: gastrolog.v1.BroadcastRequest.message:type_name -> gastrolog.v1.BroadcastMessage
-	71, // 1: gastrolog.v1.BroadcastMessage.timestamp:type_name -> google.protobuf.Timestamp
-	10, // 2: gastrolog.v1.BroadcastMessage.node_stats:type_name -> gastrolog.v1.NodeStats
-	9,  // 3: gastrolog.v1.BroadcastMessage.node_jobs:type_name -> gastrolog.v1.NodeJobs
-	8,  // 4: gastrolog.v1.BroadcastMessage.heartbeat:type_name -> gastrolog.v1.Heartbeat
-	72, // 5: gastrolog.v1.NodeJobs.jobs:type_name -> gastrolog.v1.Job
-	73, // 6: gastrolog.v1.NodeStats.vaults:type_name -> gastrolog.v1.VaultStats
-	15, // 7: gastrolog.v1.NodeStats.ingesters:type_name -> gastrolog.v1.IngesterNodeStats
-	74, // 8: gastrolog.v1.NodeStats.route_vault_stats:type_name -> gastrolog.v1.VaultRouteStats
-	75, // 9: gastrolog.v1.NodeStats.route_per_route_stats:type_name -> gastrolog.v1.PerRouteStats
-	14, // 10: gastrolog.v1.NodeStats.alerts:type_name -> gastrolog.v1.SystemAlert
-	12, // 11: gastrolog.v1.NodeStats.peer_connections:type_name -> gastrolog.v1.PeerConnStat
-	13, // 12: gastrolog.v1.NodeStats.peer_traffic_totals:type_name -> gastrolog.v1.PeerTrafficTotal
-	11, // 13: gastrolog.v1.NodeStats.vault_pipeline_disk:type_name -> gastrolog.v1.VaultPipelineNodeDisk
-	76, // 14: gastrolog.v1.NodeStats.route_routed:type_name -> gastrolog.v1.ThroughputRate
-	76, // 15: gastrolog.v1.NodeStats.route_matched:type_name -> gastrolog.v1.ThroughputRate
-	0,  // 16: gastrolog.v1.SystemAlert.priority:type_name -> gastrolog.v1.AlarmPriority
-	71, // 17: gastrolog.v1.SystemAlert.first_seen:type_name -> google.protobuf.Timestamp
-	71, // 18: gastrolog.v1.SystemAlert.last_seen:type_name -> google.protobuf.Timestamp
-	22, // 19: gastrolog.v1.ChunkReplicationCommand.delete_chunk:type_name -> gastrolog.v1.ChunkReplicationDelete
-	19, // 20: gastrolog.v1.ChunkReplicationCommand.import_begin:type_name -> gastrolog.v1.ChunkReplicationImportBegin
-	20, // 21: gastrolog.v1.ChunkReplicationCommand.import_records:type_name -> gastrolog.v1.ChunkReplicationImportRecords
-	21, // 22: gastrolog.v1.ChunkReplicationCommand.import_commit:type_name -> gastrolog.v1.ChunkReplicationImportCommit
-	77, // 23: gastrolog.v1.ChunkReplicationImportRecords.records:type_name -> gastrolog.v1.ExportRecord
-	77, // 24: gastrolog.v1.ForwardSearchResponse.records:type_name -> gastrolog.v1.ExportRecord
-	78, // 25: gastrolog.v1.ForwardSearchResponse.table_result:type_name -> gastrolog.v1.TableResult
-	79, // 26: gastrolog.v1.ForwardSearchResponse.histogram:type_name -> gastrolog.v1.HistogramBucket
-	77, // 27: gastrolog.v1.ForwardGetContextResponse.before:type_name -> gastrolog.v1.ExportRecord
-	77, // 28: gastrolog.v1.ForwardGetContextResponse.anchor:type_name -> gastrolog.v1.ExportRecord
-	77, // 29: gastrolog.v1.ForwardGetContextResponse.after:type_name -> gastrolog.v1.ExportRecord
-	80, // 30: gastrolog.v1.ForwardListChunksResponse.chunks:type_name -> gastrolog.v1.ChunkMeta
-	81, // 31: gastrolog.v1.ForwardWatchChunksResponse.op:type_name -> gastrolog.v1.ChunkChangeOp
-	80, // 32: gastrolog.v1.ForwardWatchChunksResponse.meta:type_name -> gastrolog.v1.ChunkMeta
-	82, // 33: gastrolog.v1.ForwardGetIndexesResponse.indexes:type_name -> gastrolog.v1.IndexInfo
-	83, // 34: gastrolog.v1.ForwardValidateVaultResponse.chunks:type_name -> gastrolog.v1.ChunkValidation
-	80, // 35: gastrolog.v1.ForwardGetChunkResponse.chunk:type_name -> gastrolog.v1.ChunkMeta
-	84, // 36: gastrolog.v1.ForwardAnalyzeChunkResponse.analyses:type_name -> gastrolog.v1.ChunkAnalysis
-	85, // 37: gastrolog.v1.ForwardExplainResponse.chunks:type_name -> gastrolog.v1.ChunkPlan
-	77, // 38: gastrolog.v1.ForwardFollowResponse.records:type_name -> gastrolog.v1.ExportRecord
-	77, // 39: gastrolog.v1.ImportRecordMessage.record:type_name -> gastrolog.v1.ExportRecord
-	40, // [40:40] is the sub-list for method output_type
-	40, // [40:40] is the sub-list for method input_type
-	40, // [40:40] is the sub-list for extension type_name
-	40, // [40:40] is the sub-list for extension extendee
-	0,  // [0:40] is the sub-list for field type_name
+	8,  // 0: gastrolog.v1.BroadcastRequest.message:type_name -> gastrolog.v1.BroadcastMessage
+	72, // 1: gastrolog.v1.BroadcastMessage.timestamp:type_name -> google.protobuf.Timestamp
+	11, // 2: gastrolog.v1.BroadcastMessage.node_stats:type_name -> gastrolog.v1.NodeStats
+	10, // 3: gastrolog.v1.BroadcastMessage.node_jobs:type_name -> gastrolog.v1.NodeJobs
+	9,  // 4: gastrolog.v1.BroadcastMessage.heartbeat:type_name -> gastrolog.v1.Heartbeat
+	73, // 5: gastrolog.v1.NodeJobs.jobs:type_name -> gastrolog.v1.Job
+	74, // 6: gastrolog.v1.NodeStats.vaults:type_name -> gastrolog.v1.VaultStats
+	16, // 7: gastrolog.v1.NodeStats.ingesters:type_name -> gastrolog.v1.IngesterNodeStats
+	75, // 8: gastrolog.v1.NodeStats.route_vault_stats:type_name -> gastrolog.v1.VaultRouteStats
+	76, // 9: gastrolog.v1.NodeStats.route_per_route_stats:type_name -> gastrolog.v1.PerRouteStats
+	15, // 10: gastrolog.v1.NodeStats.alerts:type_name -> gastrolog.v1.SystemAlert
+	13, // 11: gastrolog.v1.NodeStats.peer_connections:type_name -> gastrolog.v1.PeerConnStat
+	14, // 12: gastrolog.v1.NodeStats.peer_traffic_totals:type_name -> gastrolog.v1.PeerTrafficTotal
+	12, // 13: gastrolog.v1.NodeStats.vault_pipeline_disk:type_name -> gastrolog.v1.VaultPipelineNodeDisk
+	77, // 14: gastrolog.v1.NodeStats.route_routed:type_name -> gastrolog.v1.ThroughputRate
+	77, // 15: gastrolog.v1.NodeStats.route_matched:type_name -> gastrolog.v1.ThroughputRate
+	1,  // 16: gastrolog.v1.SystemAlert.priority:type_name -> gastrolog.v1.AlarmPriority
+	72, // 17: gastrolog.v1.SystemAlert.first_seen:type_name -> google.protobuf.Timestamp
+	72, // 18: gastrolog.v1.SystemAlert.last_seen:type_name -> google.protobuf.Timestamp
+	0,  // 19: gastrolog.v1.SystemAlert.state:type_name -> gastrolog.v1.AlarmState
+	72, // 20: gastrolog.v1.SystemAlert.acked_at:type_name -> google.protobuf.Timestamp
+	72, // 21: gastrolog.v1.SystemAlert.shelved_until:type_name -> google.protobuf.Timestamp
+	23, // 22: gastrolog.v1.ChunkReplicationCommand.delete_chunk:type_name -> gastrolog.v1.ChunkReplicationDelete
+	20, // 23: gastrolog.v1.ChunkReplicationCommand.import_begin:type_name -> gastrolog.v1.ChunkReplicationImportBegin
+	21, // 24: gastrolog.v1.ChunkReplicationCommand.import_records:type_name -> gastrolog.v1.ChunkReplicationImportRecords
+	22, // 25: gastrolog.v1.ChunkReplicationCommand.import_commit:type_name -> gastrolog.v1.ChunkReplicationImportCommit
+	78, // 26: gastrolog.v1.ChunkReplicationImportRecords.records:type_name -> gastrolog.v1.ExportRecord
+	78, // 27: gastrolog.v1.ForwardSearchResponse.records:type_name -> gastrolog.v1.ExportRecord
+	79, // 28: gastrolog.v1.ForwardSearchResponse.table_result:type_name -> gastrolog.v1.TableResult
+	80, // 29: gastrolog.v1.ForwardSearchResponse.histogram:type_name -> gastrolog.v1.HistogramBucket
+	78, // 30: gastrolog.v1.ForwardGetContextResponse.before:type_name -> gastrolog.v1.ExportRecord
+	78, // 31: gastrolog.v1.ForwardGetContextResponse.anchor:type_name -> gastrolog.v1.ExportRecord
+	78, // 32: gastrolog.v1.ForwardGetContextResponse.after:type_name -> gastrolog.v1.ExportRecord
+	81, // 33: gastrolog.v1.ForwardListChunksResponse.chunks:type_name -> gastrolog.v1.ChunkMeta
+	82, // 34: gastrolog.v1.ForwardWatchChunksResponse.op:type_name -> gastrolog.v1.ChunkChangeOp
+	81, // 35: gastrolog.v1.ForwardWatchChunksResponse.meta:type_name -> gastrolog.v1.ChunkMeta
+	83, // 36: gastrolog.v1.ForwardGetIndexesResponse.indexes:type_name -> gastrolog.v1.IndexInfo
+	84, // 37: gastrolog.v1.ForwardValidateVaultResponse.chunks:type_name -> gastrolog.v1.ChunkValidation
+	81, // 38: gastrolog.v1.ForwardGetChunkResponse.chunk:type_name -> gastrolog.v1.ChunkMeta
+	85, // 39: gastrolog.v1.ForwardAnalyzeChunkResponse.analyses:type_name -> gastrolog.v1.ChunkAnalysis
+	86, // 40: gastrolog.v1.ForwardExplainResponse.chunks:type_name -> gastrolog.v1.ChunkPlan
+	78, // 41: gastrolog.v1.ForwardFollowResponse.records:type_name -> gastrolog.v1.ExportRecord
+	78, // 42: gastrolog.v1.ImportRecordMessage.record:type_name -> gastrolog.v1.ExportRecord
+	43, // [43:43] is the sub-list for method output_type
+	43, // [43:43] is the sub-list for method input_type
+	43, // [43:43] is the sub-list for extension type_name
+	43, // [43:43] is the sub-list for extension extendee
+	0,  // [0:43] is the sub-list for field type_name
 }
 
 func init() { file_gastrolog_v1_cluster_proto_init() }
@@ -5082,7 +5239,7 @@ func file_gastrolog_v1_cluster_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gastrolog_v1_cluster_proto_rawDesc), len(file_gastrolog_v1_cluster_proto_rawDesc)),
-			NumEnums:      1,
+			NumEnums:      2,
 			NumMessages:   70,
 			NumExtensions: 0,
 			NumServices:   0,

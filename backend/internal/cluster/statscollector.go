@@ -172,10 +172,11 @@ type PeerConnSnapshotProvider interface {
 	ResetPurposeWindows()
 }
 
-// AlertProvider exposes active alarms for broadcast.
-// Satisfied by *alert.Collector.
+// AlertProvider exposes standing alarms for broadcast — every lifecycle
+// state (active, cleared-unacked, shelved), so any node can serve ack and
+// shelve for any raiser. Satisfied by *alert.Collector.
 type AlertProvider interface {
-	Active() []*alert.Alarm
+	Standing() []*alert.Alarm
 }
 
 // AlarmRateProvider exposes the alarm system's self-monitoring rate gauge:
@@ -545,8 +546,8 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 // window — per-node truth, never summed across nodes) into the broadcast.
 func (c *StatsCollector) collectAlarms(stats *gastrologv1.NodeStats) {
 	if c.cfg.Alerts != nil {
-		for _, a := range c.cfg.Alerts.Active() {
-			stats.Alerts = append(stats.Alerts, &gastrologv1.SystemAlert{
+		for _, a := range c.cfg.Alerts.Standing() {
+			pa := &gastrologv1.SystemAlert{
 				Id:            []byte(a.ID),
 				TypeId:        a.TypeID,
 				Priority:      gastrologv1.AlarmPriority(a.Priority), //nolint:gosec // bounded enum
@@ -557,7 +558,18 @@ func (c *StatsCollector) collectAlarms(stats *gastrologv1.NodeStats) {
 				Response:      a.Response,
 				FirstSeen:     timestamppb.New(a.FirstSeen),
 				LastSeen:      timestamppb.New(a.LastSeen),
-			})
+				State:         gastrologv1.AlarmState(a.State), //nolint:gosec // bounded enum
+				AckedBy:       a.AckedBy,
+				Occurrences:   uint32(max(a.Occurrences, 0)), //nolint:gosec // non-negative count
+				Shelveable:    a.Shelveable,
+			}
+			if !a.AckedAt.IsZero() {
+				pa.AckedAt = timestamppb.New(a.AckedAt)
+			}
+			if !a.ShelvedUntil.IsZero() {
+				pa.ShelvedUntil = timestamppb.New(a.ShelvedUntil)
+			}
+			stats.Alerts = append(stats.Alerts, pa)
 		}
 	}
 	if c.cfg.AlarmRate != nil {

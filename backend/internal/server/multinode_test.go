@@ -72,6 +72,9 @@ type multiNodeHarness struct {
 	// alerts is each node's alert.Collector; populated only with
 	// WithClusterStats (gastrolog-33d9n2).
 	alerts map[string]*alert.Collector
+	// routingFwd is the in-process ForwardRPC stand-in; tests can remove a
+	// node's handler to simulate an unreachable raiser (gastrolog-1z5gg4).
+	routingFwd *directUnaryForwarder
 }
 
 // Node returns the test node by ID, fataling if not found.
@@ -112,6 +115,11 @@ type mnConfig struct {
 	// alertClock, when set, is the deterministic clock every node's
 	// alert.Collector runs on (gastrolog-4wvxqh).
 	alertClock func() time.Time
+	// alertJournalDir, when set, attaches each node's alert.Collector to a
+	// lifecycle journal at <dir>/<nodeID>.jsonl. A second harness on the
+	// same dir simulates a whole-cluster restart with journal replay
+	// (gastrolog-1z5gg4). Implies the WithClusterStats wiring.
+	alertJournalDir string
 }
 
 // WithoutVault creates a node that has an orchestrator but no vault.
@@ -150,6 +158,17 @@ func WithAlertClock(now func() time.Time) mnOption {
 	return func(c *mnConfig) {
 		c.clusterStats = true
 		c.alertClock = now
+	}
+}
+
+// WithAlertJournalDir attaches each node's alert.Collector to a lifecycle
+// journal under dir, keyed by node ID. Setting up a second harness on the
+// same dir simulates restart-with-replay (gastrolog-1z5gg4). Implies the
+// WithClusterStats wiring.
+func WithAlertJournalDir(dir string) mnOption {
+	return func(c *mnConfig) {
+		c.clusterStats = true
+		c.alertJournalDir = dir
 	}
 }
 
@@ -235,7 +254,31 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 	peerVaultStats := &mnPeerVaultStats{nodes: peerRouteNodes}
 
 	vaultsDir := t.TempDir()
-	routingFwd := newDirectUnaryForwarder(t, nodes, cfgStore, coordinatorID, vaultsDir)
+
+	// Per-node alert collectors + stats collectors behind GetClusterStatus
+	// (gastrolog-33d9n2). Assigned conditionally so tests without the option
+	// keep the nil interfaces of single-node mode. Built BEFORE the unary
+	// forwarder so the remote internal handlers carry their node's collector
+	// — the persistence point for forwarded ack/shelve legs
+	// (gastrolog-1z5gg4).
+	alertsByNode := make(map[string]*alert.Collector, len(nodeIDs))
+	if cfg.clusterStats {
+		for _, id := range nodeIDs {
+			ac := alert.New()
+			if cfg.alertClock != nil {
+				ac = alert.NewWithClock(cfg.alertClock)
+			}
+			if cfg.alertJournalDir != "" {
+				if err := ac.OpenJournal(filepath.Join(cfg.alertJournalDir, id+".jsonl")); err != nil {
+					t.Fatalf("open alert journal for %s: %v", id, err)
+				}
+				t.Cleanup(ac.CloseJournal)
+			}
+			alertsByNode[id] = ac
+		}
+	}
+
+	routingFwd := newDirectUnaryForwarder(t, nodes, cfgStore, coordinatorID, vaultsDir, alertsByNode)
 
 	coordNode := nodes[coordinatorID]
 	srvCfg := server.Config{
@@ -251,21 +294,12 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 		EnvironmentColor:  cfg.environmentColor,
 	}
 
-	// Per-node alert collectors + stats collectors behind GetClusterStatus
-	// (gastrolog-33d9n2). Assigned conditionally so tests without the option
-	// keep the nil interfaces of single-node mode.
-	alertsByNode := make(map[string]*alert.Collector, len(nodeIDs))
 	if cfg.clusterStats {
 		statsCollectors := make(map[string]*cluster.StatsCollector, len(nodeIDs))
 		servers := make([]cluster.RaftServer, 0, len(nodeIDs))
 		for _, id := range nodeIDs {
-			ac := alert.New()
-			if cfg.alertClock != nil {
-				ac = alert.NewWithClock(cfg.alertClock)
-			}
-			alertsByNode[id] = ac
 			statsCollectors[id] = cluster.NewStatsCollector(cluster.StatsCollectorConfig{
-				Alerts:     ac,
+				Alerts:     alertsByNode[id],
 				NodeID:     id,
 				NodeNameFn: func() string { return id },
 				StartTime:  time.Now(),
@@ -275,6 +309,7 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 		srvCfg.Cluster = &mockCluster{leaderID: coordinatorID, leaderAddr: coordinatorID + ":4566", servers: servers, isLeader: true}
 		srvCfg.PeerStats = &mnPeerNodeStats{collectors: statsCollectors}
 		srvCfg.LocalStats = statsCollectors[coordinatorID].CollectLocalSnapshot
+		srvCfg.Alerts = alertsByNode[coordinatorID]
 	}
 
 	srv := server.New(coordNode.orch, cfgStore, orchestrator.Factories{VaultsDir: vaultsDir}, nil, srvCfg)
@@ -310,6 +345,7 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 		peerIngesterStats: peerIngesterStats,
 		peerVaultStats:    peerVaultStats,
 		alerts:            alertsByNode,
+		routingFwd:        routingFwd,
 	}
 }
 
@@ -940,7 +976,7 @@ type directUnaryForwarder struct {
 	handlers map[string]http.Handler // nodeID → Connect mux handler
 }
 
-func newDirectUnaryForwarder(t *testing.T, nodes map[string]multinodeTestNode, cfgStore system.Store, coordinatorID, vaultsDir string) *directUnaryForwarder {
+func newDirectUnaryForwarder(t *testing.T, nodes map[string]multinodeTestNode, cfgStore system.Store, coordinatorID, vaultsDir string, alerts map[string]*alert.Collector) *directUnaryForwarder {
 	t.Helper()
 	handlers := make(map[string]http.Handler)
 	for id, node := range nodes {
@@ -949,13 +985,22 @@ func newDirectUnaryForwarder(t *testing.T, nodes map[string]multinodeTestNode, c
 		}
 		// BuildInternalHandler returns a mux with NoAuthInterceptor and
 		// NO routing interceptor — same as the real ForwardRPC dispatch path.
+		// Alerts carries the node's collector so forwarded local_only
+		// ack/shelve legs persist on the raiser (gastrolog-1z5gg4).
 		remoteSrv := server.New(node.orch, cfgStore, orchestrator.Factories{VaultsDir: vaultsDir}, nil, server.Config{
 			NodeID: id,
 			NoAuth: true,
+			Alerts: alerts[id],
 		})
 		handlers[id] = remoteSrv.BuildInternalHandler()
 	}
 	return &directUnaryForwarder{handlers: handlers}
+}
+
+// dropNode removes a node's handler so forwards to it fail — the in-process
+// stand-in for an unreachable raiser during ack/shelve fan-out.
+func (d *directUnaryForwarder) dropNode(nodeID string) {
+	delete(d.handlers, nodeID)
 }
 
 func (d *directUnaryForwarder) ForwardUnary(ctx context.Context, nodeID, procedure string, reqPayload []byte) ([]byte, error) {

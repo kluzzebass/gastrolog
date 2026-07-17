@@ -59,6 +59,15 @@ const (
 	// LifecycleServiceWatchSystemStatusProcedure is the fully-qualified name of the LifecycleService's
 	// WatchSystemStatus RPC.
 	LifecycleServiceWatchSystemStatusProcedure = "/gastrolog.v1.LifecycleService/WatchSystemStatus"
+	// LifecycleServiceAckAlarmProcedure is the fully-qualified name of the LifecycleService's AckAlarm
+	// RPC.
+	LifecycleServiceAckAlarmProcedure = "/gastrolog.v1.LifecycleService/AckAlarm"
+	// LifecycleServiceShelveAlarmProcedure is the fully-qualified name of the LifecycleService's
+	// ShelveAlarm RPC.
+	LifecycleServiceShelveAlarmProcedure = "/gastrolog.v1.LifecycleService/ShelveAlarm"
+	// LifecycleServiceUnshelveAlarmProcedure is the fully-qualified name of the LifecycleService's
+	// UnshelveAlarm RPC.
+	LifecycleServiceUnshelveAlarmProcedure = "/gastrolog.v1.LifecycleService/UnshelveAlarm"
 )
 
 // LifecycleServiceClient is a client for the gastrolog.v1.LifecycleService service.
@@ -93,6 +102,21 @@ type LifecycleServiceClient interface {
 	// stats) whenever stats are updated. Replaces polling GetClusterStatus,
 	// Health, and GetRouteStats.
 	WatchSystemStatus(context.Context, *connect.Request[v1.WatchSystemStatusRequest]) (*connect.ServerStreamForClient[v1.WatchSystemStatusResponse], error)
+	// AckAlarm acknowledges a standing alarm by ID, recording operator
+	// awareness (who + when). Servable from ANY node: the serving node
+	// resolves every raiser of the ID (local collector + peer broadcasts)
+	// and fans the ack out to each, so a cluster-wide condition raised by
+	// multiple nodes cannot reappear unacked on the next aggregation.
+	// Latching alarms whose condition has resolved clear on ack.
+	AckAlarm(context.Context, *connect.Request[v1.AckAlarmRequest]) (*connect.Response[v1.AckAlarmResponse], error)
+	// ShelveAlarm suppresses a standing alarm for a duration. The expiry is
+	// MANDATORY — a missing, zero or negative duration is rejected — and
+	// unshelveable types (software faults, alarm-flood) are rejected with
+	// the reason. Same any-node fan-out semantics as AckAlarm.
+	ShelveAlarm(context.Context, *connect.Request[v1.ShelveAlarmRequest]) (*connect.Response[v1.ShelveAlarmResponse], error)
+	// UnshelveAlarm ends a shelve early, returning the alarm to its live
+	// state. Same any-node fan-out semantics as AckAlarm.
+	UnshelveAlarm(context.Context, *connect.Request[v1.UnshelveAlarmRequest]) (*connect.Response[v1.UnshelveAlarmResponse], error)
 }
 
 // NewLifecycleServiceClient constructs a client for the gastrolog.v1.LifecycleService service. By
@@ -160,6 +184,24 @@ func NewLifecycleServiceClient(httpClient connect.HTTPClient, baseURL string, op
 			connect.WithSchema(lifecycleServiceMethods.ByName("WatchSystemStatus")),
 			connect.WithClientOptions(opts...),
 		),
+		ackAlarm: connect.NewClient[v1.AckAlarmRequest, v1.AckAlarmResponse](
+			httpClient,
+			baseURL+LifecycleServiceAckAlarmProcedure,
+			connect.WithSchema(lifecycleServiceMethods.ByName("AckAlarm")),
+			connect.WithClientOptions(opts...),
+		),
+		shelveAlarm: connect.NewClient[v1.ShelveAlarmRequest, v1.ShelveAlarmResponse](
+			httpClient,
+			baseURL+LifecycleServiceShelveAlarmProcedure,
+			connect.WithSchema(lifecycleServiceMethods.ByName("ShelveAlarm")),
+			connect.WithClientOptions(opts...),
+		),
+		unshelveAlarm: connect.NewClient[v1.UnshelveAlarmRequest, v1.UnshelveAlarmResponse](
+			httpClient,
+			baseURL+LifecycleServiceUnshelveAlarmProcedure,
+			connect.WithSchema(lifecycleServiceMethods.ByName("UnshelveAlarm")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -174,6 +216,9 @@ type lifecycleServiceClient struct {
 	removeNode        *connect.Client[v1.RemoveNodeRequest, v1.RemoveNodeResponse]
 	yieldLeadership   *connect.Client[v1.YieldLeadershipRequest, v1.YieldLeadershipResponse]
 	watchSystemStatus *connect.Client[v1.WatchSystemStatusRequest, v1.WatchSystemStatusResponse]
+	ackAlarm          *connect.Client[v1.AckAlarmRequest, v1.AckAlarmResponse]
+	shelveAlarm       *connect.Client[v1.ShelveAlarmRequest, v1.ShelveAlarmResponse]
+	unshelveAlarm     *connect.Client[v1.UnshelveAlarmRequest, v1.UnshelveAlarmResponse]
 }
 
 // Health calls gastrolog.v1.LifecycleService.Health.
@@ -221,6 +266,21 @@ func (c *lifecycleServiceClient) WatchSystemStatus(ctx context.Context, req *con
 	return c.watchSystemStatus.CallServerStream(ctx, req)
 }
 
+// AckAlarm calls gastrolog.v1.LifecycleService.AckAlarm.
+func (c *lifecycleServiceClient) AckAlarm(ctx context.Context, req *connect.Request[v1.AckAlarmRequest]) (*connect.Response[v1.AckAlarmResponse], error) {
+	return c.ackAlarm.CallUnary(ctx, req)
+}
+
+// ShelveAlarm calls gastrolog.v1.LifecycleService.ShelveAlarm.
+func (c *lifecycleServiceClient) ShelveAlarm(ctx context.Context, req *connect.Request[v1.ShelveAlarmRequest]) (*connect.Response[v1.ShelveAlarmResponse], error) {
+	return c.shelveAlarm.CallUnary(ctx, req)
+}
+
+// UnshelveAlarm calls gastrolog.v1.LifecycleService.UnshelveAlarm.
+func (c *lifecycleServiceClient) UnshelveAlarm(ctx context.Context, req *connect.Request[v1.UnshelveAlarmRequest]) (*connect.Response[v1.UnshelveAlarmResponse], error) {
+	return c.unshelveAlarm.CallUnary(ctx, req)
+}
+
 // LifecycleServiceHandler is an implementation of the gastrolog.v1.LifecycleService service.
 type LifecycleServiceHandler interface {
 	// Health returns the server health status.
@@ -253,6 +313,21 @@ type LifecycleServiceHandler interface {
 	// stats) whenever stats are updated. Replaces polling GetClusterStatus,
 	// Health, and GetRouteStats.
 	WatchSystemStatus(context.Context, *connect.Request[v1.WatchSystemStatusRequest], *connect.ServerStream[v1.WatchSystemStatusResponse]) error
+	// AckAlarm acknowledges a standing alarm by ID, recording operator
+	// awareness (who + when). Servable from ANY node: the serving node
+	// resolves every raiser of the ID (local collector + peer broadcasts)
+	// and fans the ack out to each, so a cluster-wide condition raised by
+	// multiple nodes cannot reappear unacked on the next aggregation.
+	// Latching alarms whose condition has resolved clear on ack.
+	AckAlarm(context.Context, *connect.Request[v1.AckAlarmRequest]) (*connect.Response[v1.AckAlarmResponse], error)
+	// ShelveAlarm suppresses a standing alarm for a duration. The expiry is
+	// MANDATORY — a missing, zero or negative duration is rejected — and
+	// unshelveable types (software faults, alarm-flood) are rejected with
+	// the reason. Same any-node fan-out semantics as AckAlarm.
+	ShelveAlarm(context.Context, *connect.Request[v1.ShelveAlarmRequest]) (*connect.Response[v1.ShelveAlarmResponse], error)
+	// UnshelveAlarm ends a shelve early, returning the alarm to its live
+	// state. Same any-node fan-out semantics as AckAlarm.
+	UnshelveAlarm(context.Context, *connect.Request[v1.UnshelveAlarmRequest]) (*connect.Response[v1.UnshelveAlarmResponse], error)
 }
 
 // NewLifecycleServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -316,6 +391,24 @@ func NewLifecycleServiceHandler(svc LifecycleServiceHandler, opts ...connect.Han
 		connect.WithSchema(lifecycleServiceMethods.ByName("WatchSystemStatus")),
 		connect.WithHandlerOptions(opts...),
 	)
+	lifecycleServiceAckAlarmHandler := connect.NewUnaryHandler(
+		LifecycleServiceAckAlarmProcedure,
+		svc.AckAlarm,
+		connect.WithSchema(lifecycleServiceMethods.ByName("AckAlarm")),
+		connect.WithHandlerOptions(opts...),
+	)
+	lifecycleServiceShelveAlarmHandler := connect.NewUnaryHandler(
+		LifecycleServiceShelveAlarmProcedure,
+		svc.ShelveAlarm,
+		connect.WithSchema(lifecycleServiceMethods.ByName("ShelveAlarm")),
+		connect.WithHandlerOptions(opts...),
+	)
+	lifecycleServiceUnshelveAlarmHandler := connect.NewUnaryHandler(
+		LifecycleServiceUnshelveAlarmProcedure,
+		svc.UnshelveAlarm,
+		connect.WithSchema(lifecycleServiceMethods.ByName("UnshelveAlarm")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gastrolog.v1.LifecycleService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case LifecycleServiceHealthProcedure:
@@ -336,6 +429,12 @@ func NewLifecycleServiceHandler(svc LifecycleServiceHandler, opts ...connect.Han
 			lifecycleServiceYieldLeadershipHandler.ServeHTTP(w, r)
 		case LifecycleServiceWatchSystemStatusProcedure:
 			lifecycleServiceWatchSystemStatusHandler.ServeHTTP(w, r)
+		case LifecycleServiceAckAlarmProcedure:
+			lifecycleServiceAckAlarmHandler.ServeHTTP(w, r)
+		case LifecycleServiceShelveAlarmProcedure:
+			lifecycleServiceShelveAlarmHandler.ServeHTTP(w, r)
+		case LifecycleServiceUnshelveAlarmProcedure:
+			lifecycleServiceUnshelveAlarmHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -379,4 +478,16 @@ func (UnimplementedLifecycleServiceHandler) YieldLeadership(context.Context, *co
 
 func (UnimplementedLifecycleServiceHandler) WatchSystemStatus(context.Context, *connect.Request[v1.WatchSystemStatusRequest], *connect.ServerStream[v1.WatchSystemStatusResponse]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.LifecycleService.WatchSystemStatus is not implemented"))
+}
+
+func (UnimplementedLifecycleServiceHandler) AckAlarm(context.Context, *connect.Request[v1.AckAlarmRequest]) (*connect.Response[v1.AckAlarmResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.LifecycleService.AckAlarm is not implemented"))
+}
+
+func (UnimplementedLifecycleServiceHandler) ShelveAlarm(context.Context, *connect.Request[v1.ShelveAlarmRequest]) (*connect.Response[v1.ShelveAlarmResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.LifecycleService.ShelveAlarm is not implemented"))
+}
+
+func (UnimplementedLifecycleServiceHandler) UnshelveAlarm(context.Context, *connect.Request[v1.UnshelveAlarmRequest]) (*connect.Response[v1.UnshelveAlarmResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.LifecycleService.UnshelveAlarm is not implemented"))
 }

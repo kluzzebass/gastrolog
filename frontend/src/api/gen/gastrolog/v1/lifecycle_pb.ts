@@ -987,6 +987,294 @@ export class YieldLeadershipResponse extends Message<YieldLeadershipResponse> {
 }
 
 /**
+ * @generated from message gastrolog.v1.AckAlarmRequest
+ */
+export class AckAlarmRequest extends Message<AckAlarmRequest> {
+  /**
+   * Full alarm ID ("<type>" or "<type>:<instance>"), as carried in
+   * SystemAlert.id.
+   *
+   * @generated from field: bytes alarm_id = 1;
+   */
+  alarmId = new Uint8Array(0);
+
+  /**
+   * Operator identity to record. The server prefers the authenticated
+   * user's name when the request carries one; this field covers the local
+   * Unix-socket CLI path, which has no auth context.
+   *
+   * @generated from field: string acked_by = 2;
+   */
+  ackedBy = "";
+
+  /**
+   * Internal: apply to this node's collector only — set on the fan-out leg
+   * so a forwarded ack never re-fans. Client requests leave this unset.
+   *
+   * @generated from field: bool local_only = 3;
+   */
+  localOnly = false;
+
+  constructor(data?: PartialMessage<AckAlarmRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.AckAlarmRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "alarm_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "acked_by", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "local_only", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): AckAlarmRequest {
+    return new AckAlarmRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): AckAlarmRequest {
+    return new AckAlarmRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): AckAlarmRequest {
+    return new AckAlarmRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: AckAlarmRequest | PlainMessage<AckAlarmRequest> | undefined, b: AckAlarmRequest | PlainMessage<AckAlarmRequest> | undefined): boolean {
+    return proto3.util.equals(AckAlarmRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.AckAlarmResponse
+ */
+export class AckAlarmResponse extends Message<AckAlarmResponse> {
+  /**
+   * Number of raiser nodes the ack applied on.
+   *
+   * @generated from field: uint32 applied = 1;
+   */
+  applied = 0;
+
+  constructor(data?: PartialMessage<AckAlarmResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.AckAlarmResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "applied", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): AckAlarmResponse {
+    return new AckAlarmResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): AckAlarmResponse {
+    return new AckAlarmResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): AckAlarmResponse {
+    return new AckAlarmResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: AckAlarmResponse | PlainMessage<AckAlarmResponse> | undefined, b: AckAlarmResponse | PlainMessage<AckAlarmResponse> | undefined): boolean {
+    return proto3.util.equals(AckAlarmResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ShelveAlarmRequest
+ */
+export class ShelveAlarmRequest extends Message<ShelveAlarmRequest> {
+  /**
+   * @generated from field: bytes alarm_id = 1;
+   */
+  alarmId = new Uint8Array(0);
+
+  /**
+   * Shelve duration in seconds. MANDATORY and positive: shelves always
+   * expire — there are no permanent shelves.
+   *
+   * @generated from field: int64 duration_seconds = 2;
+   */
+  durationSeconds = protoInt64.zero;
+
+  /**
+   * Operator identity to record in the lifecycle journal (same sourcing
+   * rules as AckAlarmRequest.acked_by).
+   *
+   * @generated from field: string shelved_by = 3;
+   */
+  shelvedBy = "";
+
+  /**
+   * Internal fan-out leg marker; see AckAlarmRequest.local_only.
+   *
+   * @generated from field: bool local_only = 4;
+   */
+  localOnly = false;
+
+  constructor(data?: PartialMessage<ShelveAlarmRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ShelveAlarmRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "alarm_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "duration_seconds", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 3, name: "shelved_by", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "local_only", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ShelveAlarmRequest {
+    return new ShelveAlarmRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ShelveAlarmRequest {
+    return new ShelveAlarmRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ShelveAlarmRequest {
+    return new ShelveAlarmRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ShelveAlarmRequest | PlainMessage<ShelveAlarmRequest> | undefined, b: ShelveAlarmRequest | PlainMessage<ShelveAlarmRequest> | undefined): boolean {
+    return proto3.util.equals(ShelveAlarmRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ShelveAlarmResponse
+ */
+export class ShelveAlarmResponse extends Message<ShelveAlarmResponse> {
+  /**
+   * @generated from field: uint32 applied = 1;
+   */
+  applied = 0;
+
+  /**
+   * Expiry instant computed by the first collector the shelve applied on.
+   *
+   * @generated from field: google.protobuf.Timestamp shelved_until = 2;
+   */
+  shelvedUntil?: Timestamp;
+
+  constructor(data?: PartialMessage<ShelveAlarmResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ShelveAlarmResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "applied", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 2, name: "shelved_until", kind: "message", T: Timestamp },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ShelveAlarmResponse {
+    return new ShelveAlarmResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ShelveAlarmResponse {
+    return new ShelveAlarmResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ShelveAlarmResponse {
+    return new ShelveAlarmResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ShelveAlarmResponse | PlainMessage<ShelveAlarmResponse> | undefined, b: ShelveAlarmResponse | PlainMessage<ShelveAlarmResponse> | undefined): boolean {
+    return proto3.util.equals(ShelveAlarmResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.UnshelveAlarmRequest
+ */
+export class UnshelveAlarmRequest extends Message<UnshelveAlarmRequest> {
+  /**
+   * @generated from field: bytes alarm_id = 1;
+   */
+  alarmId = new Uint8Array(0);
+
+  /**
+   * Internal fan-out leg marker; see AckAlarmRequest.local_only.
+   *
+   * @generated from field: bool local_only = 2;
+   */
+  localOnly = false;
+
+  constructor(data?: PartialMessage<UnshelveAlarmRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.UnshelveAlarmRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "alarm_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "local_only", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): UnshelveAlarmRequest {
+    return new UnshelveAlarmRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): UnshelveAlarmRequest {
+    return new UnshelveAlarmRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): UnshelveAlarmRequest {
+    return new UnshelveAlarmRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: UnshelveAlarmRequest | PlainMessage<UnshelveAlarmRequest> | undefined, b: UnshelveAlarmRequest | PlainMessage<UnshelveAlarmRequest> | undefined): boolean {
+    return proto3.util.equals(UnshelveAlarmRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.UnshelveAlarmResponse
+ */
+export class UnshelveAlarmResponse extends Message<UnshelveAlarmResponse> {
+  /**
+   * @generated from field: uint32 applied = 1;
+   */
+  applied = 0;
+
+  constructor(data?: PartialMessage<UnshelveAlarmResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.UnshelveAlarmResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "applied", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): UnshelveAlarmResponse {
+    return new UnshelveAlarmResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): UnshelveAlarmResponse {
+    return new UnshelveAlarmResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): UnshelveAlarmResponse {
+    return new UnshelveAlarmResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: UnshelveAlarmResponse | PlainMessage<UnshelveAlarmResponse> | undefined, b: UnshelveAlarmResponse | PlainMessage<UnshelveAlarmResponse> | undefined): boolean {
+    return proto3.util.equals(UnshelveAlarmResponse, a, b);
+  }
+}
+
+/**
  * @generated from message gastrolog.v1.WatchSystemStatusRequest
  */
 export class WatchSystemStatusRequest extends Message<WatchSystemStatusRequest> {
