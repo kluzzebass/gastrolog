@@ -172,10 +172,10 @@ type PeerConnSnapshotProvider interface {
 	ResetPurposeWindows()
 }
 
-// AlertProvider exposes active system alerts for broadcast.
+// AlertProvider exposes active alarms for broadcast.
 // Satisfied by *alert.Collector.
 type AlertProvider interface {
-	ActiveAlerts() []alert.AlertInfo
+	Active() []*alert.Alarm
 }
 
 // JobsProvider returns the current job list for broadcast.
@@ -514,16 +514,19 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 		stats.SelfIngesterDropsTotal = uint64(max(c.cfg.LogDrops.DroppedCount(), 0))
 	}
 
-	// Active alerts.
+	// Active alarms.
 	if c.cfg.Alerts != nil {
-		for _, a := range c.cfg.Alerts.ActiveAlerts() {
+		for _, a := range c.cfg.Alerts.Active() {
 			stats.Alerts = append(stats.Alerts, &gastrologv1.SystemAlert{
-				Id:        []byte(a.ID),
-				Severity:  gastrologv1.AlertSeverity(a.Severity), //nolint:gosec // bounded enum
-				Source:    a.Source,
-				Message:   a.Message,
-				FirstSeen: timestamppb.New(a.FirstSeen),
-				LastSeen:  timestamppb.New(a.LastSeen),
+				Id:            []byte(a.ID),
+				Priority:      gastrologv1.AlarmPriority(a.Priority), //nolint:gosec // bounded enum
+				SoftwareFault: a.SoftwareFault,
+				Source:        a.Source,
+				Detail:        a.Detail,
+				Cause:         a.Cause,
+				Response:      a.Response,
+				FirstSeen:     timestamppb.New(a.FirstSeen),
+				LastSeen:      timestamppb.New(a.LastSeen),
 			})
 		}
 	}

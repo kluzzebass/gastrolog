@@ -25,20 +25,32 @@ type recordingAlertSink struct {
 	cleared int
 }
 
-func (s *recordingAlertSink) Set(id string, _ alert.Severity, _, message string) {
+func (s *recordingAlertSink) Raise(typeID, instanceKey, detail string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.active == nil {
 		s.active = make(map[string]string)
 	}
-	s.active[id] = message
+	s.active[sinkAlarmID(typeID, instanceKey)] = detail
 }
 
-func (s *recordingAlertSink) Clear(id string) {
+func (s *recordingAlertSink) RaiseOperator(a alert.OperatorAlarm) {
+	s.Raise(a.TypeID, a.InstanceKey, a.Detail)
+}
+
+func (s *recordingAlertSink) Clear(typeID, instanceKey string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.active, id)
+	delete(s.active, sinkAlarmID(typeID, instanceKey))
 	s.cleared++
+}
+
+// sinkAlarmID mirrors the collector's type:instance ID composition.
+func sinkAlarmID(typeID, instanceKey string) string {
+	if instanceKey == "" {
+		return typeID
+	}
+	return typeID + ":" + instanceKey
 }
 
 func (s *recordingAlertSink) snapshot() (map[string]string, int) {

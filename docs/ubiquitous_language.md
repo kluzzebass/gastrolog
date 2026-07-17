@@ -648,15 +648,35 @@ How the cluster reports what it's doing to itself, to operators, and to the UI.
   dropped log records) must become a metric — logging it feeds the condition
   it reports.
 
-- **AlertCollector** — per-node bounded store of alarms (`AlertSeverity`:
-  `WARNING`, `ERROR`). Alarms have a stable key for dedup and auto-clear;
-  included in each NodeStats broadcast. Being renamed to alarm vocabulary
-  with the phase 2 registry; `Severity` becomes a consequence-derived
-  `Priority` owned by the alarm type rather than chosen at the call site.
+- **Alarm catalog** — the static `AlarmType` registry in `internal/alert`,
+  one entry per alarm type: `Priority` (the consequence × urgency verdict),
+  `Source`, `Cause`, `Response`, plus declared-but-not-yet-enforced
+  suppression fields (`DelayOn`, `DelayOff`, `Latching`). Call sites raise
+  by type ID (`alerts.Raise(typeID, instanceKey, detail)`) and cannot
+  choose a priority — the collector stamps it from the catalog. The catalog
+  and the table in `docs/alarm-management-design.md` must agree.
 
-- **SystemAlert** — one alarm: `ID`, `Severity`, `Source`, `Message`,
-  `FirstSeen`, `LastSeen`. Designed to be keyed ("alarm X for reason Y on
-  node Z") so repeated identical alarms don't accumulate.
+- **Priority** — `alert.Priority`, the cataloged verdict per alarm type:
+  `Critical` (data loss in progress or scheduled), `High` (durability or
+  availability degraded, will compound), `Low` (needs attention on a human
+  timescale). Replaced the old call-site-chosen `Severity`
+  (Warning/Error). **Software faults** (e.g. `orchestrator-lock-leak`) are
+  a class apart — defect tripwires whose response is to report, so they
+  carry no priority and may never be shelved.
+
+- **Operator-defined alarm** — an alarm whose priority and guidance come
+  from an operator-configured rule rather than the catalog (the
+  `<kind>-rate` alarms). Enters through `RaiseOperator`, beside the
+  catalog, never inside it; still renders in the same alarm list.
+
+- **AlertCollector** — per-node bounded store of active alarms. Alarms
+  have a stable key (`typeID` or `typeID:instanceKey`) for dedup and
+  auto-clear; included in each NodeStats broadcast.
+
+- **SystemAlert** — one alarm on the wire: `ID`, `Priority`, `Source`,
+  `Detail` (per-instance specifics), `Cause`/`Response` (from the
+  catalog), `SoftwareFault`, `FirstSeen`, `LastSeen`. Keyed ("alarm X for
+  reason Y on node Z") so repeated identical alarms don't accumulate.
 
 ---
 
@@ -936,7 +956,7 @@ Canonical milestone verbs (reuse these names; do not coin synonyms):
 | active chunk     | open chunk        | "Active" matches `ChunkMeta.Sealed = false`.                       |
 | sealed chunk     | closed chunk, finalized chunk | "Sealed" is what the chunk manager actually calls it.  |
 | cloud-backed     | cloud chunk       | Cloud-backed describes storage; "cloud chunk" conflates with archival state. |
-| alarm            | alert             | An alarm requires an operator action; "alert" was applied indiscriminately to alarms, events, and metrics alike, which is what let non-actionable diagnostics into the alarm list. Code identifiers follow in the phase 2 registry. |
+| alarm            | alert             | An alarm requires an operator action; "alert" was applied indiscriminately to alarms, events, and metrics alike, which is what let non-actionable diagnostics into the alarm list. The phase 2 registry landed the alarm vocabulary in new identifiers (`AlarmType`, `Raise`, `Priority`); remaining `alert`-named identifiers (package `alert`, `SystemAlert`, `AlertCollector`) phase out with the lifecycle/UI phases. |
 | archived         | cold              | "Archived" is the canonical flag; cloud storage-class is orthogonal. |
 | vault-ctl Raft   |                   | One Raft group per vault, authoritative for that vault's chunk metadata. Follows the `{scope}-ctl` naming pattern for control-plane Raft groups. |
 | cluster-ctl Raft | system Raft, config Raft, cluster Raft | One Raft group per cluster, authoritative for cluster-wide configuration. Pairs with `vault-ctl Raft` to form the `{scope}-ctl` pattern. The on-disk Raft group ID and type names were renamed from `system` → `cluster-ctl` in gastrolog-5eu6v. |

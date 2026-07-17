@@ -13,7 +13,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
 	"gastrolog/internal/orchestrator/pipeline"
@@ -1194,11 +1193,8 @@ func (r *retentionRunner) markUnreadable(id chunk.ChunkID, reason error) {
 	entry.failCount++
 	entry.nextRetry = time.Now().Add(unreadableBackoff(entry.failCount))
 	if r.orch.alerts != nil {
-		r.orch.alerts.Set(
-			fmt.Sprintf("chunk-unreadable:%s", id),
-			alert.Error, "retention",
-			fmt.Sprintf("Chunk %s unreadable: %v (next retry %s)", id, reason, entry.nextRetry.Format(time.RFC3339)),
-		)
+		r.orch.alerts.Raise("chunk-unreadable", id.String(),
+			fmt.Sprintf("Chunk %s unreadable: %v (next retry %s)", id, reason, entry.nextRetry.Format(time.RFC3339)))
 	}
 }
 
@@ -1213,7 +1209,7 @@ func (r *retentionRunner) clearUnreadable(id chunk.ChunkID) {
 	}
 	delete(r.unreadable, id)
 	if r.orch.alerts != nil {
-		r.orch.alerts.Clear(fmt.Sprintf("chunk-unreadable:%s", id))
+		r.orch.alerts.Clear("chunk-unreadable", id.String())
 	}
 }
 

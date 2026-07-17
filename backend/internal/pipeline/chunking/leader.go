@@ -6,7 +6,6 @@ import (
 	"maps"
 	"time"
 
-	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/record"
@@ -598,9 +597,9 @@ func (v *vaultChunking) plannerMinHolders() int {
 // loss-vs-wait decision is explicit operator territory (gastrolog-4bl9xx).
 const underReplicatedAlertAfter = 2 * time.Minute
 
-func (v *vaultChunking) underReplicatedAlertID() string {
-	return "chunking-underreplicated-" + v.cfg.VaultID.String()
-}
+// underReplicatedAlarmType is the catalog type ID for replication-gated
+// planning; the instance key is the vault ID.
+const underReplicatedAlarmType = "chunking-underreplicated"
 
 // noteUnderReplicated raises/clears the under-replicated-segments alert and
 // logs each transition once. Called from the planner pass with the count of
@@ -617,15 +616,15 @@ func (v *vaultChunking) noteUnderReplicated(gated int, oldest time.Duration) {
 		v.logger().Warn("segments stuck inside their replication window — planning gated",
 			"gated", gated, "oldest", oldest.Round(time.Second))
 		if v.cfg.Alerts != nil {
-			v.cfg.Alerts.Set(v.underReplicatedAlertID(), alert.Warning, "chunking",
-				fmt.Sprintf("vault %s: %d segment(s) have been below the replication minimum for %s — chunking waits until a second node holds a copy. Check that all placement nodes are up and replication is progressing; if the origin node is permanently lost, the affected records exist only there",
+			v.cfg.Alerts.Raise(underReplicatedAlarmType, v.cfg.VaultID.String(),
+				fmt.Sprintf("vault %s: %d segment(s) have been below the replication minimum for %s — chunking waits until a second node holds a copy",
 					v.cfg.VaultID, gated, oldest.Round(time.Second)))
 		}
 		return
 	}
 	v.logger().Info("replication window cleared — planning resumed for gated segments")
 	if v.cfg.Alerts != nil {
-		v.cfg.Alerts.Clear(v.underReplicatedAlertID())
+		v.cfg.Alerts.Clear(underReplicatedAlarmType, v.cfg.VaultID.String())
 	}
 }
 
@@ -659,9 +658,9 @@ type planFailure struct {
 // trigger state-based instead of wall-clock-gated.
 const unplannableAlertFailures = 2
 
-func (v *vaultChunking) unplannableAlertID() string {
-	return "chunking-unplannable-segment-" + v.cfg.VaultID.String()
-}
+// unplannableAlarmType is the catalog type ID for segments whose on-disk
+// indexes are unreadable; the instance key is the vault ID.
+const unplannableAlarmType = "chunking-unplannable-segment"
 
 // notePlanFailure records that a segment's on-disk index could not be opened
 // or read. Such a segment is skipped by every planner pass: its records are
@@ -743,12 +742,12 @@ func (v *vaultChunking) updateUnplannableAlert() {
 		return
 	}
 	if stuck {
-		v.cfg.Alerts.Set(v.unplannableAlertID(), alert.Error, "chunking",
-			fmt.Sprintf("vault %s: %d segment(s) have unreadable on-disk indexes and cannot be planned into sealed manifests (e.g. %s) — their records stay unchunked and their head copies cannot be purged. Investigate segment file corruption on this node; if the vault has a delete-disposition retention TTL, the records will eventually be released unchunked as a counted expiry",
+		v.cfg.Alerts.Raise(unplannableAlarmType, v.cfg.VaultID.String(),
+			fmt.Sprintf("vault %s: %d segment(s) have unreadable on-disk indexes and cannot be planned into sealed manifests (e.g. %s) — their records stay unchunked and their head copies cannot be purged",
 				v.cfg.VaultID, repeated, example))
 		return
 	}
-	v.cfg.Alerts.Clear(v.unplannableAlertID())
+	v.cfg.Alerts.Clear(unplannableAlarmType, v.cfg.VaultID.String())
 }
 
 // segmentViewForEntry opens the segment index at most once per cache generation.

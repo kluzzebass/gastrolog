@@ -38,7 +38,7 @@ const (
 
 	// unreachableAlertID is the stable per-node alert ID prefix. Format:
 	// "node-unreachable:<nodeID>". One Set/Clear pair per node.
-	unreachableAlertIDPrefix = "node-unreachable:"
+	unreachableAlarmType = "node-unreachable"
 )
 
 // unreachableSweep transitions nodes between Live and Unreachable based
@@ -165,10 +165,9 @@ func (s *unreachableSweep) alertTick(ctx context.Context) {
 	}
 	now := s.now()
 	for _, n := range nodes {
-		alertID := unreachableAlertIDPrefix + n.ID.String()
 		state := n.EffectiveState()
 		if state != system.NodeStateUnreachable {
-			s.alerts.Clear(alertID)
+			s.alerts.Clear(unreachableAlarmType, n.ID.String())
 			continue
 		}
 		if n.StateSince.IsZero() {
@@ -176,14 +175,14 @@ func (s *unreachableSweep) alertTick(ctx context.Context) {
 		}
 		elapsed := now.Sub(n.StateSince)
 		if elapsed < s.alertThreshold {
-			s.alerts.Clear(alertID)
+			s.alerts.Clear(unreachableAlarmType, n.ID.String())
 			continue
 		}
 		label := n.Name
 		if label == "" {
 			label = n.ID.String()
 		}
-		s.alerts.Set(alertID, alert.Warning, "node-lifecycle",
+		s.alerts.Raise(unreachableAlarmType, n.ID.String(),
 			fmt.Sprintf("node %s has been Unreachable for %s", label, elapsed.Round(time.Second)))
 	}
 }

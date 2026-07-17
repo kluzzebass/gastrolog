@@ -58,7 +58,7 @@ type vaultWriter struct {
 	root    string
 	cfg     Config
 	log     *slog.Logger
-	alerts  AlertSink
+	alerts  alert.Sink
 	dropped *atomic.Uint64 // manager-wide dropped-records counter
 
 	// Cumulative throughput counters for the stats broadcast; the collector's
@@ -360,9 +360,9 @@ func (w *vaultWriter) rejectDegraded(in Input) {
 	}
 }
 
-func (w *vaultWriter) alertID() string {
-	return "segmentation-writer:" + w.vaultID.String()
-}
+// segmentationWriterAlarmType is the catalog type ID for degraded-writer
+// alarms; the instance key is the vault ID.
+const segmentationWriterAlarmType = "segmentation-writer"
 
 // enterDegraded abandons the suspect working segment and rotates to a fresh
 // one. The failed batch's parked acks were already nacked by commit/append.
@@ -391,7 +391,7 @@ func (w *vaultWriter) enterDegraded(b *commitBatch, cause error) {
 	w.log.Error("segment commit failed; abandoning working segment for crash recovery and rotating",
 		"segment", segID, "path", path, "error", cause)
 	if w.alerts != nil {
-		w.alerts.Set(w.alertID(), alert.Error, "segmentation",
+		w.alerts.Raise(segmentationWriterAlarmType, w.vaultID.String(),
 			"vault "+w.vaultID.String()+" segment commit failed: "+cause.Error())
 	}
 	w.tryReopen(b)
@@ -420,7 +420,7 @@ func (w *vaultWriter) tryReopen(b *commitBatch) {
 		"segment", w.segmentID, "dropped_while_degraded", w.degradedDrops)
 	w.degradedDrops = 0
 	if w.alerts != nil {
-		w.alerts.Clear(w.alertID())
+		w.alerts.Clear(segmentationWriterAlarmType, w.vaultID.String())
 	}
 }
 

@@ -123,14 +123,14 @@ Verdicts under the governing test:
 | `pipeline-backlog-capped:<vault>` *(split)* | storage | Backlog **at** budget — new records for this vault are REFUSED | **Alarm** | High | Check chunking throughput, raise the budget, or reduce the ingest rate. This vault is refusing records now; others are unaffected |
 | `vault-max-size-capped:<vault>` *(split)* | storage | Vault **at** its size budget — new records REFUSED | **Alarm** | High | Raise the budget or shorten retention. This vault is refusing records now; others are unaffected |
 | `disk-space-exhausted:<vault>` *(split)* | storage | Vault volume out of space — admission for this vault SUSPENDED | **Alarm** | High | Free space, add capacity, raise the vault's threshold, or shorten its retention |
-| `disk-space-exhausted` *(node, split)* | storage | Node volume out of space — ingest admission SUSPENDED on this node | **Alarm** | High | Free space, add capacity, or shorten retention. Retention and deletes keep running |
+| `node-disk-space-exhausted` *(node, split)* | storage | Node volume out of space — ingest admission SUSPENDED on this node | **Alarm** | High | Free space, add capacity, or shorten retention. Retention and deletes keep running |
 | `ingester-not-running` | ingestion | Ingesters that should run on this node are not running | **Alarm** | Low | Check the log for build/start errors; fix the ingester config or disable it |
 | `pipeline-backlog-approaching:<vault>` *(split)* | storage | Backlog approaching budget; chunking not keeping pace | **Alarm** | Low | Check chunking throughput, raise the budget, or reduce the ingest rate — before records start being refused |
 | `vault-max-size-approaching:<vault>` *(split)* | storage | Vault approaching its size budget | **Alarm** | Low | Raise the budget or shorten retention — before records start being refused |
 | `disk-space-low:<vault>` *(split)* | storage | Vault volume below its free-space warn band | **Alarm** | Low | Free space, add capacity, raise the vault's threshold, or shorten its retention |
-| `disk-space-low` *(node, split)* | storage | Node volume below its free-space warn band | **Alarm** | Low | Free space, add capacity, or shorten retention |
-| `<kind>-rate:<vault>` (prod: `retention-rate:<vault>`) | ratealerter | Operator-configured rate threshold crossed | **Alarm** (operator-defined) | from the rule | The operator defined the threshold; the response text comes from the rule. Not a catalog alarm — see [gastrolog-1cruar] |
-| **`vault-home-cannot-store:<vault>`** | placement | A vault home node is disk-protected; collection and builds paused there | **NEEDS VERDICT** | — | Razor is unclear. When healthy replicas ≥ RF the text itself says replicas are "backfilled automatically" — handled, nothing waits on an operator. When healthy < RF, the action is "free space", which is already `disk-space-*`'s action on that node. What it uniquely adds is *which vault* is affected. Demote to a metric, or keep as the vault-scoped view of a node condition? |
+| `node-disk-space-low` *(node, split)* | storage | Node volume below its free-space warn band | **Alarm** | Low | Free space, add capacity, or shorten retention |
+| `<kind>-rate:<vault>` (prod: `retention-rate:<vault>`) | ratealerter | Operator-configured rate threshold crossed | **Alarm** (operator-defined) | from the rule (lower threshold → Low, escalation threshold → High) | The operator defined the threshold; the response text comes from the rule. Not a catalog alarm — enters via `RaiseOperator`, beside the catalog. See [gastrolog-1cruar] |
+| **`vault-home-cannot-store:<vault>`** | placement | A vault home node is disk-protected; collection and builds paused there | **NEEDS VERDICT** (interim: Alarm) | Low (interim) | Razor is unclear. When healthy replicas ≥ RF the text itself says replicas are "backfilled automatically" — handled, nothing waits on an operator. When healthy < RF, the action is "free space", which is already `disk-space-*`'s action on that node. What it uniquely adds is *which vault* is affected. Demote to a metric, or keep as the vault-scoped view of a node condition? Until the verdict lands, the phase 2 registry keeps it as a Low alarm (the code still raises it; a raised type must be cataloged) |
 | *(retention unrouted destroy — row retired)* | retention | Chunk destroyed with zero records routed | **Not an alarm — prevented** | — | Resolved in [gastrolog-65riw5]: the condition no longer occurs, so there is nothing to alarm on. An unreadable cursor now flags the chunk for backoff retry and raises `chunk-unreadable:<chunk>` (which has its own row); a missing vault instance retains the chunk. No alarm was invented — the existing one covers it. **Partial** fan-out remains a deliberate tolerance and is reported with a dropped-record count, not an alarm; see the note below |
 | chanwatch saturation | chanwatch | Internal channel saturated past watermark | **Event** (demoted ✓) | — | Landed: transition-edge logs. Journal surface lands with phase 5 |
 | ingest-pressure | orchestrator | Ingest pipeline pressure elevated/critical; ingesters throttling | **Event** (demoted ✓) | — | Landed: `NodeStats.ingest_pressure_level`. If ingestion is throttled the matter is already handled — the throttle *is* the response, so nothing waits on an operator. Never logged: the self-ingester captures slog, so logging throttle transitions feeds the pressure |
@@ -183,22 +183,32 @@ A static registry, one entry per alarm type:
 
 ```go
 type AlarmType struct {
-    IDPrefix    string        // "vault-leaderless:", "cloud-store:", ...
-    Priority    alert.Priority // Critical | High | Low (replaces Severity at Set sites)
-    Source      string
-    Cause       string        // one-paragraph cause description
-    Response    string        // what the operator should do
-    DelayOn     time.Duration // suppression: condition must persist this long
-    DelayOff    time.Duration // condition must stay clear this long before auto-clear
-    Latching    bool          // stays active until acked even after condition clears
+    IDPrefix      string         // "vault-leaderless", "cloud-store", ... (full ID = IDPrefix[:instanceKey])
+    Priority      alert.Priority // Critical | High | Low (replaces Severity at Set sites)
+    Source        string
+    Cause         string        // one-paragraph cause description
+    Response      string        // what the operator should do
+    DelayOn       time.Duration // suppression: condition must persist this long
+    DelayOff      time.Duration // condition must stay clear this long before auto-clear
+    Latching      bool          // stays active until acked even after condition clears
+    SoftwareFault bool          // defect tripwire: outside the priority scale, never shelveable
 }
 ```
 
-`alerts.Set(id, severity, source, msg)` becomes
+*(Landed with phase 2 — `internal/alert/registry.go`. DelayOn/DelayOff/
+Latching are declared but not yet enforced; suppression is phase 3.)*
+
+`alerts.Set(id, severity, source, msg)` became
 `alerts.Raise(typeID, instanceKey, detail)` — the collector looks up the
-type, applies suppression, and stamps priority/cause/response. Call sites
-stop choosing severities ad hoc. `alert.Info` disappears — informational
-conditions are events by definition.
+type and stamps priority/cause/response (suppression follows in phase 3);
+`Clear(typeID, instanceKey)` is addressed the same way. Call sites
+stopped choosing severities ad hoc; the three structurally identical sink
+interfaces (orchestrator `AlertCollector`, segmentation and chunking
+`AlertSink`) collapsed into the single `alert.Sink`. Operator-defined
+alarms enter through `RaiseOperator(OperatorAlarm)`. A `Raise` for an
+unregistered type is loud, never silent: it logs the defect and surfaces
+a software-fault alarm carrying the raiser's detail. `alert.Info` never
+existed — informational conditions are events by definition.
 
 ## Lifecycle state model
 

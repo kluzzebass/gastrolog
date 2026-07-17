@@ -7,7 +7,6 @@ import (
 	"os"
 	"time"
 
-	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
@@ -399,7 +398,7 @@ func (v *vaultChunking) proposeDiscardIfGhostRefs(manifest SealedManifest, missi
 	v.logger().Error("unbuildable sealed manifest — ghost segment ref; discarding wedged seal queue for re-plan",
 		"vault", v.cfg.VaultID, "chunk", manifest.ChunkID, "ghost_segment", ghost)
 	if v.cfg.Alerts != nil {
-		v.cfg.Alerts.Set(v.buildBlockedAlertID(), alert.Warning, "chunking",
+		v.cfg.Alerts.Raise(buildBlockedAlarmType, v.cfg.VaultID.String(),
 			fmt.Sprintf("vault %s: sealed manifest %s referenced a released segment and could never build; the wedged seal queue was discarded and its records re-plan into fresh chunks. No records were lost, but investigate how the ghost reference was admitted.",
 				v.cfg.VaultID, manifest.ChunkID))
 	}
@@ -416,9 +415,9 @@ func (v *vaultChunking) proposeDiscardIfGhostRefs(manifest SealedManifest, missi
 // seconds of a seal; anything blocked minutes is stuck, not catching up.
 const buildBlockedAlertAfter = 2 * time.Minute
 
-func (v *vaultChunking) buildBlockedAlertID() string {
-	return "chunking-build-blocked-" + v.cfg.VaultID.String()
-}
+// buildBlockedAlarmType is the catalog type ID for blocked GLCB builds; the
+// instance key is the vault ID.
+const buildBlockedAlarmType = "chunking-build-blocked"
 
 // noteBuildBlocked tracks how long the head-of-queue sealed manifest has been
 // unbuildable because referenced segment files are missing on this node, and
@@ -449,7 +448,7 @@ func (v *vaultChunking) noteBuildBlocked(chunkID chunk.ChunkID, missing []glid.G
 			"blocked_for", blockedFor.Round(time.Second), "missing_segments", len(missing), "example", missing[0])
 	}
 	if v.cfg.Alerts != nil {
-		v.cfg.Alerts.Set(v.buildBlockedAlertID(), alert.Error, "chunking", msg)
+		v.cfg.Alerts.Raise(buildBlockedAlarmType, v.cfg.VaultID.String(), msg)
 	}
 }
 
@@ -466,7 +465,7 @@ func (v *vaultChunking) clearBuildBlocked() {
 		v.logger().Info("GLCB build unblocked — seal queue moving again")
 	}
 	if v.cfg.Alerts != nil {
-		v.cfg.Alerts.Clear(v.buildBlockedAlertID())
+		v.cfg.Alerts.Clear(buildBlockedAlarmType, v.cfg.VaultID.String())
 	}
 }
 

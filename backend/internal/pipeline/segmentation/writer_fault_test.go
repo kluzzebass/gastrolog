@@ -41,16 +41,20 @@ type recordingAlerts struct {
 	clears []string
 }
 
-func (a *recordingAlerts) Set(id string, _ alert.Severity, _, _ string) {
+func (a *recordingAlerts) Raise(typeID, instanceKey, _ string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.sets = append(a.sets, id)
+	a.sets = append(a.sets, typeID+":"+instanceKey)
 }
 
-func (a *recordingAlerts) Clear(id string) {
+func (a *recordingAlerts) RaiseOperator(op alert.OperatorAlarm) {
+	a.Raise(op.TypeID, op.InstanceKey, op.Detail)
+}
+
+func (a *recordingAlerts) Clear(typeID, instanceKey string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.clears = append(a.clears, id)
+	a.clears = append(a.clears, typeID+":"+instanceKey)
 }
 
 func (a *recordingAlerts) counts() (int, int) {

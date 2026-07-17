@@ -205,14 +205,13 @@ func (s *raftClusterCtlStore) Close() error {
 // log write), and restoring it clears the alarm. Nil-tolerant on both alerts
 // and logger.
 func walReserveAlarm(alerts *alert.Collector, logger *slog.Logger, walName string) func(lost bool, err error) {
-	id := "wal-reserve:" + walName
 	return func(lost bool, err error) {
 		if !lost {
 			if logger != nil {
 				logger.Info("raft WAL space reserve restored", "wal", walName)
 			}
 			if alerts != nil {
-				alerts.Clear(id)
+				alerts.Clear("wal-reserve", walName)
 			}
 			return
 		}
@@ -221,9 +220,8 @@ func walReserveAlarm(alerts *alert.Collector, logger *slog.Logger, walName strin
 				"wal", walName, "error", err)
 		}
 		if alerts != nil {
-			alerts.Set(id, alert.Error, "storage", fmt.Sprintf(
-				"Raft WAL (%s) space reserve lost: %v. Free disk space now — without the reserve, a full volume crashes consensus on this node.",
-				walName, err))
+			alerts.Raise("wal-reserve", walName, fmt.Sprintf(
+				"Raft WAL (%s) space reserve lost: %v", walName, err))
 		}
 	}
 }

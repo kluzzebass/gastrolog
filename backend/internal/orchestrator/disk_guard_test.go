@@ -310,10 +310,10 @@ func TestVaultDiskGuardLifecycle(t *testing.T) {
 	if g.vaultProtectActive(vaultB) {
 		t.Fatal("vaultB's healthy volume must keep it open")
 	}
-	if !spy.has("disk-space:" + vaultA.String()) {
+	if !spy.has("disk-space-exhausted:" + vaultA.String()) {
 		t.Fatal("vault alarm must be scoped to the starved vault's ID")
 	}
-	if spy.has("disk-space:" + vaultB.String()) {
+	if spy.has("disk-space-exhausted:" + vaultB.String()) {
 		t.Fatal("healthy vault must not alarm")
 	}
 
@@ -391,7 +391,7 @@ func TestVaultDiskGuardRetainClearsAlarm(t *testing.T) {
 	vaultA := glid.New()
 	g.SetVaultGuard(vaultA, "a", []string{"volA"}, 0, 0, 0)
 	g.evaluateVaults(spy)
-	if !spy.has("disk-space:" + vaultA.String()) {
+	if !spy.has("disk-space-exhausted:" + vaultA.String()) {
 		t.Fatal("starved vault must alarm before the prune")
 	}
 	g.retainVaultGuards(map[glid.GLID]bool{}, spy)
@@ -463,7 +463,7 @@ func TestVaultMaxSizeCap(t *testing.T) {
 	if g.vaultSizeCapped(vaultA) {
 		t.Fatal("approach is not the cap: admission must stay open")
 	}
-	if !spy.has("vault-max-size:" + vaultA.String()) {
+	if !spy.has("vault-max-size-approaching:" + vaultA.String()) {
 		t.Fatal("approaching the budget must raise the vault-max-size alarm")
 	}
 
@@ -483,14 +483,14 @@ func TestVaultMaxSizeCap(t *testing.T) {
 	if g.vaultSizeCapped(vaultA) {
 		t.Fatal("below the budget admission must resume")
 	}
-	if !spy.has("vault-max-size:" + vaultA.String()) {
+	if !spy.has("vault-max-size-approaching:" + vaultA.String()) {
 		t.Fatal("approach alarm must stand until the hysteresis band clears")
 	}
 
 	// Well below approach - 10%: alarm clears.
 	footprint[vaultA] = int64(7 * gib)
 	g.evaluateVaults(spy)
-	if spy.has("vault-max-size:" + vaultA.String()) {
+	if spy.has("vault-max-size-approaching:" + vaultA.String()) {
 		t.Fatal("alarm must clear once clear of the approach band")
 	}
 }
@@ -576,7 +576,7 @@ func TestVaultBacklogBudget(t *testing.T) {
 	if g.vaultBacklogCapped(vaultA) {
 		t.Fatal("approach is not the cap: admission must stay open")
 	}
-	if !spy.has("pipeline-backlog:" + vaultA.String()) {
+	if !spy.has("pipeline-backlog-approaching:" + vaultA.String()) {
 		t.Fatal("approaching the budget must raise the pipeline-backlog alarm")
 	}
 
@@ -596,14 +596,14 @@ func TestVaultBacklogBudget(t *testing.T) {
 	if g.vaultBacklogCapped(vaultA) {
 		t.Fatal("below the budget admission must resume")
 	}
-	if !spy.has("pipeline-backlog:" + vaultA.String()) {
+	if !spy.has("pipeline-backlog-approaching:" + vaultA.String()) {
 		t.Fatal("approach alarm must stand until the hysteresis band clears")
 	}
 
 	// Well below approach - 10%: alarm clears.
 	backlog[vaultA] = int64(7 * gib)
 	g.evaluateVaults(spy)
-	if spy.has("pipeline-backlog:" + vaultA.String()) {
+	if spy.has("pipeline-backlog-approaching:" + vaultA.String()) {
 		t.Fatal("alarm must clear once clear of the approach band")
 	}
 }
@@ -629,7 +629,7 @@ func TestVaultBacklogBudgetDisabled(t *testing.T) {
 	// Operator sets a budget: caps on the next pass.
 	g.backlogBudget.Store(10 * gib)
 	g.evaluateVaults(spy)
-	if !g.vaultBacklogCapped(vaultA) || !spy.has("pipeline-backlog:"+vaultA.String()) {
+	if !g.vaultBacklogCapped(vaultA) || !spy.has("pipeline-backlog-capped:"+vaultA.String()) {
 		t.Fatal("setting a budget below the backlog must cap and alarm")
 	}
 
@@ -639,7 +639,7 @@ func TestVaultBacklogBudgetDisabled(t *testing.T) {
 	if g.vaultBacklogCapped(vaultA) {
 		t.Fatal("disabling the budget must release the standing cap")
 	}
-	if spy.has("pipeline-backlog:" + vaultA.String()) {
+	if spy.has("pipeline-backlog-approaching:" + vaultA.String()) {
 		t.Fatal("disabling the budget must clear the standing alarm")
 	}
 }

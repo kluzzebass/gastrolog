@@ -3,7 +3,6 @@ package orchestrator
 import (
 	"fmt"
 
-	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
 	"os"
 
@@ -66,13 +65,12 @@ func (o *Orchestrator) evaluateVaultCloudHealth(vaultInst *VaultInstance) {
 	if !ok {
 		return
 	}
-	alertID := fmt.Sprintf("cloud-store:%s", vaultInst.VaultID)
 	if chk.CloudDegraded() {
-		o.alerts.Set(alertID, alert.Error, "cloud",
+		o.alerts.Raise("cloud-store", vaultInst.VaultID.String(),
 			fmt.Sprintf("Cloud store unreachable for vault %s: %s",
 				vaultInst.VaultID.String()[:8], chk.CloudDegradedError()))
 	} else {
-		o.alerts.Clear(alertID)
+		o.alerts.Clear("cloud-store", vaultInst.VaultID.String())
 	}
 	if vaultInstRunsCloudBackfill(vaultInst) {
 		o.backfillCloudUploads(vaultInst)

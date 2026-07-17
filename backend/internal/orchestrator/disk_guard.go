@@ -37,7 +37,18 @@ const (
 	diskGuardJobName  = "disk-guard"
 	diskGuardSchedule = "*/15 * * * * *" // every 15 seconds
 
-	diskGuardAlertID = "disk-space"
+	// Alarm type IDs raised by the disk guard. Two setpoints on one
+	// measurement are two alarms, each with its own cataloged priority
+	// (the HI/HIHI pattern): the approaching/low rows are Low, the
+	// capped/exhausted rows are High.
+	alarmNodeDiskLow        = "node-disk-space-low"
+	alarmNodeDiskExhausted  = "node-disk-space-exhausted"
+	alarmVaultDiskLow       = "disk-space-low"
+	alarmVaultDiskExhausted = "disk-space-exhausted"
+	alarmBacklogApproaching = "pipeline-backlog-approaching"
+	alarmBacklogCapped      = "pipeline-backlog-capped"
+	alarmMaxSizeApproaching = "vault-max-size-approaching"
+	alarmMaxSizeCapped      = "vault-max-size-capped"
 
 	// Fractions of the volume, paired with absolute byte minimums. The
 	// larger of the two governs — but the absolute minimums are CLAMPED
@@ -245,7 +256,7 @@ func (g *diskGuard) RemoveVaultGuard(vaultID glid.GLID) {
 // on this node fall out on the next tick. A pruned entry's standing alarm
 // is cleared — nothing would ever clear it once the entry stops being
 // evaluated.
-func (g *diskGuard) retainVaultGuards(keep map[glid.GLID]bool, alerts AlertCollector) {
+func (g *diskGuard) retainVaultGuards(keep map[glid.GLID]bool, alerts alert.Sink) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	for id, v := range g.vaults {
@@ -253,13 +264,16 @@ func (g *diskGuard) retainVaultGuards(keep map[glid.GLID]bool, alerts AlertColle
 			continue
 		}
 		if v.alarmRaised && alerts != nil {
-			alerts.Clear("disk-space:" + id.String())
+			alerts.Clear(alarmVaultDiskLow, id.String())
+			alerts.Clear(alarmVaultDiskExhausted, id.String())
 		}
 		if v.sizeAlarmRaised && alerts != nil {
-			alerts.Clear("vault-max-size:" + id.String())
+			alerts.Clear(alarmMaxSizeApproaching, id.String())
+			alerts.Clear(alarmMaxSizeCapped, id.String())
 		}
 		if v.backlogAlarmRaised && alerts != nil {
-			alerts.Clear("pipeline-backlog:" + id.String())
+			alerts.Clear(alarmBacklogApproaching, id.String())
+			alerts.Clear(alarmBacklogCapped, id.String())
 		}
 		delete(g.vaults, id)
 	}
@@ -321,7 +335,7 @@ func (g *diskGuard) protectedVaults() []glid.GLID {
 }
 
 // evaluateVaults runs the per-vault guard pass. Caller is the scheduler job.
-func (g *diskGuard) evaluateVaults(alerts AlertCollector) {
+func (g *diskGuard) evaluateVaults(alerts alert.Sink) {
 	g.mu.Lock()
 	entries := maps.Clone(g.vaults)
 	g.mu.Unlock()
@@ -380,30 +394,32 @@ func (g *diskGuard) reconcileVaultBacklogCap(id glid.GLID, v *vaultDiskGuard, us
 	}
 }
 
-func (g *diskGuard) reconcileVaultBacklogAlarm(alerts AlertCollector, id glid.GLID, v *vaultDiskGuard, used, budget uint64) {
+func (g *diskGuard) reconcileVaultBacklogAlarm(alerts alert.Sink, id glid.GLID, v *vaultDiskGuard, used, budget uint64) {
 	if alerts == nil {
 		return
 	}
-	alertID := "pipeline-backlog:" + id.String()
 	approachAt := sizeApproachThreshold(budget)
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	switch {
 	case used >= approachAt:
-		severity := alert.Warning
-		msg := fmt.Sprintf(
-			"Vault %s pipeline backlog is approaching its budget: %s of %s. Chunking is not keeping pace with ingest — check chunking throughput, raise the budget, or reduce the ingest rate.",
-			v.name, units.FormatBytesDisplay(int64(used)), units.FormatBytesDisplay(int64(budget))) //nolint:gosec // display only
+		// Two setpoints, two alarms: approaching (Low) below the budget,
+		// capped (High) at it. Exactly one is active at a time.
 		if v.backlogCapped.Load() {
-			severity = alert.Error
-			msg = fmt.Sprintf(
-				"Vault %s pipeline backlog is at its budget: %s of %s — new records for this vault are REFUSED until chunking drains the backlog. Other vaults are unaffected.",
-				v.name, units.FormatBytesDisplay(int64(used)), units.FormatBytesDisplay(int64(budget))) //nolint:gosec // display only
+			alerts.Clear(alarmBacklogApproaching, id.String())
+			alerts.Raise(alarmBacklogCapped, id.String(), fmt.Sprintf(
+				"Vault %s pipeline backlog is at its budget: %s of %s — new records for this vault are REFUSED until chunking drains the backlog.",
+				v.name, units.FormatBytesDisplay(int64(used)), units.FormatBytesDisplay(int64(budget)))) //nolint:gosec // display only
+		} else {
+			alerts.Clear(alarmBacklogCapped, id.String())
+			alerts.Raise(alarmBacklogApproaching, id.String(), fmt.Sprintf(
+				"Vault %s pipeline backlog is approaching its budget: %s of %s.",
+				v.name, units.FormatBytesDisplay(int64(used)), units.FormatBytesDisplay(int64(budget)))) //nolint:gosec // display only
 		}
-		alerts.Set(alertID, severity, "storage", msg)
 		v.backlogAlarmRaised = true
 	case v.backlogAlarmRaised && used < approachAt-approachAt/10:
-		alerts.Clear(alertID)
+		alerts.Clear(alarmBacklogApproaching, id.String())
+		alerts.Clear(alarmBacklogCapped, id.String())
 		v.backlogAlarmRaised = false
 	}
 }
@@ -411,7 +427,7 @@ func (g *diskGuard) reconcileVaultBacklogAlarm(alerts AlertCollector, id glid.GL
 // clearVaultBacklogState releases a standing cap/alarm when the budget is
 // unset (0) — otherwise a vault capped under an old budget would refuse
 // admission forever after the operator disables the bound.
-func (g *diskGuard) clearVaultBacklogState(alerts AlertCollector, id glid.GLID, v *vaultDiskGuard) {
+func (g *diskGuard) clearVaultBacklogState(alerts alert.Sink, id glid.GLID, v *vaultDiskGuard) {
 	if v.backlogCapped.Load() {
 		v.backlogCapped.Store(false)
 		if g.logger != nil {
@@ -423,7 +439,8 @@ func (g *diskGuard) clearVaultBacklogState(alerts AlertCollector, id glid.GLID, 
 	v.backlogAlarmRaised = false
 	g.mu.Unlock()
 	if raised && alerts != nil {
-		alerts.Clear("pipeline-backlog:" + id.String())
+		alerts.Clear(alarmBacklogApproaching, id.String())
+		alerts.Clear(alarmBacklogCapped, id.String())
 	}
 }
 
@@ -467,30 +484,32 @@ func (g *diskGuard) reconcileVaultSizeCap(id glid.GLID, v *vaultDiskGuard, used 
 	}
 }
 
-func (g *diskGuard) reconcileVaultSizeAlarm(alerts AlertCollector, id glid.GLID, v *vaultDiskGuard, used uint64) {
+func (g *diskGuard) reconcileVaultSizeAlarm(alerts alert.Sink, id glid.GLID, v *vaultDiskGuard, used uint64) {
 	if alerts == nil {
 		return
 	}
-	alertID := "vault-max-size:" + id.String()
 	approachAt := sizeApproachThreshold(v.maxSizeBytes)
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	switch {
 	case used >= approachAt:
-		severity := alert.Warning
-		msg := fmt.Sprintf(
-			"Vault %s is approaching its size budget: %s of %s used. Raise the budget, shorten retention, or add a size retention policy to drain ahead of the cap.",
-			v.name, units.FormatBytesDisplay(int64(used)), units.FormatBytesDisplay(int64(v.maxSizeBytes))) //nolint:gosec // display only
+		// Two setpoints, two alarms: approaching (Low) below the budget,
+		// capped (High) at it. Exactly one is active at a time.
 		if v.capped.Load() {
-			severity = alert.Error
-			msg = fmt.Sprintf(
-				"Vault %s is at its size budget: %s of %s used — new records for this vault are REFUSED until retention drains it. Other vaults are unaffected.",
-				v.name, units.FormatBytesDisplay(int64(used)), units.FormatBytesDisplay(int64(v.maxSizeBytes))) //nolint:gosec // display only
+			alerts.Clear(alarmMaxSizeApproaching, id.String())
+			alerts.Raise(alarmMaxSizeCapped, id.String(), fmt.Sprintf(
+				"Vault %s is at its size budget: %s of %s used — new records for this vault are REFUSED until retention drains it.",
+				v.name, units.FormatBytesDisplay(int64(used)), units.FormatBytesDisplay(int64(v.maxSizeBytes)))) //nolint:gosec // display only
+		} else {
+			alerts.Clear(alarmMaxSizeCapped, id.String())
+			alerts.Raise(alarmMaxSizeApproaching, id.String(), fmt.Sprintf(
+				"Vault %s is approaching its size budget: %s of %s used.",
+				v.name, units.FormatBytesDisplay(int64(used)), units.FormatBytesDisplay(int64(v.maxSizeBytes)))) //nolint:gosec // display only
 		}
-		alerts.Set(alertID, severity, "storage", msg)
 		v.sizeAlarmRaised = true
 	case v.sizeAlarmRaised && used < approachAt-approachAt/10:
-		alerts.Clear(alertID)
+		alerts.Clear(alarmMaxSizeApproaching, id.String())
+		alerts.Clear(alarmMaxSizeCapped, id.String())
 		v.sizeAlarmRaised = false
 	}
 }
@@ -518,27 +537,31 @@ func (g *diskGuard) reconcileVaultProtect(id glid.GLID, v *vaultDiskGuard, free,
 	}
 }
 
-func (g *diskGuard) reconcileVaultAlarm(alerts AlertCollector, id glid.GLID, v *vaultDiskGuard, free, total, warnAt uint64) {
+func (g *diskGuard) reconcileVaultAlarm(alerts alert.Sink, id glid.GLID, v *vaultDiskGuard, free, total, warnAt uint64) {
 	if alerts == nil {
 		return
 	}
-	alertID := "disk-space:" + id.String()
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	switch {
 	case free < warnAt:
-		msg := fmt.Sprintf(
-			"Low disk space for vault %s: %s free of %s on its volume. Free space, add capacity, raise the vault's threshold, or shorten its retention.",
-			v.name, units.FormatBytesDisplay(int64(free)), units.FormatBytesDisplay(int64(total))) //nolint:gosec // display only
+		// Two setpoints, two alarms: low (Low) inside the warn band,
+		// exhausted (High) once protect suspends admission.
 		if v.protect.Load() {
-			msg = fmt.Sprintf(
-				"Out of disk space for vault %s: %s free — admission for this vault is SUSPENDED until space frees. Other vaults are unaffected.",
-				v.name, units.FormatBytesDisplay(int64(free))) //nolint:gosec // display only
+			alerts.Clear(alarmVaultDiskLow, id.String())
+			alerts.Raise(alarmVaultDiskExhausted, id.String(), fmt.Sprintf(
+				"Out of disk space for vault %s: %s free — admission for this vault is SUSPENDED until space frees.",
+				v.name, units.FormatBytesDisplay(int64(free)))) //nolint:gosec // display only
+		} else {
+			alerts.Clear(alarmVaultDiskExhausted, id.String())
+			alerts.Raise(alarmVaultDiskLow, id.String(), fmt.Sprintf(
+				"Low disk space for vault %s: %s free of %s on its volume.",
+				v.name, units.FormatBytesDisplay(int64(free)), units.FormatBytesDisplay(int64(total)))) //nolint:gosec // display only
 		}
-		alerts.Set(alertID, alert.Error, "storage", msg)
 		v.alarmRaised = true
 	case v.alarmRaised && free > clearAbove(warnAt):
-		alerts.Clear(alertID)
+		alerts.Clear(alarmVaultDiskLow, id.String())
+		alerts.Clear(alarmVaultDiskExhausted, id.String())
 		v.alarmRaised = false
 	}
 }
@@ -561,7 +584,7 @@ func (g *diskGuard) worstFreeOf(paths []string) (free, total uint64, ok bool) {
 
 // evaluate runs one guard pass: updates protect mode and raises/clears the
 // disk-space alarm on the given collector. Scheduler-driven.
-func (g *diskGuard) evaluate(alerts AlertCollector) {
+func (g *diskGuard) evaluate(alerts alert.Sink) {
 	free, total, ok := g.worstFree()
 	if !ok {
 		return // no sampleable path; nothing trustworthy to act on
@@ -578,18 +601,23 @@ func (g *diskGuard) evaluate(alerts AlertCollector) {
 	defer g.mu.Unlock()
 	switch {
 	case free < warnAt:
-		msg := fmt.Sprintf(
-			"Low disk space: %s free of %s. Free space, add capacity, or shorten retention.",
-			units.FormatBytesDisplay(int64(free)), units.FormatBytesDisplay(int64(total))) //nolint:gosec // display only
+		// Two setpoints, two alarms: low (Low) inside the warn band,
+		// exhausted (High) once protect suspends ingest admission.
 		if g.protect.Load() {
-			msg = fmt.Sprintf(
-				"Out of disk space: %s free of %s — ingest admission is SUSPENDED on this node until space is freed. Retention and deletes keep running.",
-				units.FormatBytesDisplay(int64(free)), units.FormatBytesDisplay(int64(total))) //nolint:gosec // display only
+			alerts.Clear(alarmNodeDiskLow, "")
+			alerts.Raise(alarmNodeDiskExhausted, "", fmt.Sprintf(
+				"Out of disk space: %s free of %s — ingest admission is SUSPENDED on this node until space is freed.",
+				units.FormatBytesDisplay(int64(free)), units.FormatBytesDisplay(int64(total)))) //nolint:gosec // display only
+		} else {
+			alerts.Clear(alarmNodeDiskExhausted, "")
+			alerts.Raise(alarmNodeDiskLow, "", fmt.Sprintf(
+				"Low disk space: %s free of %s.",
+				units.FormatBytesDisplay(int64(free)), units.FormatBytesDisplay(int64(total)))) //nolint:gosec // display only
 		}
-		alerts.Set(diskGuardAlertID, alert.Error, "storage", msg)
 		g.alarmRaised = true
 	case g.alarmRaised && free > clearAbove(warnAt):
-		alerts.Clear(diskGuardAlertID)
+		alerts.Clear(alarmNodeDiskLow, "")
+		alerts.Clear(alarmNodeDiskExhausted, "")
 		g.alarmRaised = false
 	}
 }

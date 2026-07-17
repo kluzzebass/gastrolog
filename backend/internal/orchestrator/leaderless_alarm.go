@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"time"
 
-	"gastrolog/internal/alert"
 	"gastrolog/internal/glid"
 )
 
@@ -41,8 +40,8 @@ func (o *Orchestrator) updateLeaderlessAlarms(now time.Time, leaderless map[glid
 		if now.Sub(since) < vaultLeaderlessAlarmAfter {
 			continue
 		}
-		o.alerts.Set("vault-leaderless:"+vaultID.String(), alert.Error, "placement",
-			fmt.Sprintf("Vault %s has had no placement leader for %s — retention, rotation, and replication-target refresh are stopped. Check the vault's placements and the node storage configurations they reference.",
+		o.alerts.Raise("vault-leaderless", vaultID.String(),
+			fmt.Sprintf("Vault %s has had no placement leader for %s.",
 				name, now.Sub(since).Round(time.Second)))
 	}
 	for vaultID := range o.leaderlessSince {
@@ -50,6 +49,6 @@ func (o *Orchestrator) updateLeaderlessAlarms(now time.Time, leaderless map[glid
 			continue
 		}
 		delete(o.leaderlessSince, vaultID)
-		o.alerts.Clear("vault-leaderless:" + vaultID.String())
+		o.alerts.Clear("vault-leaderless", vaultID.String())
 	}
 }

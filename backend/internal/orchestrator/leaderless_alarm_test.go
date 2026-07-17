@@ -14,19 +14,31 @@ type alertSpy struct {
 	set map[string]string
 }
 
-func (s *alertSpy) Set(id string, _ alert.Severity, _, msg string) {
+func (s *alertSpy) Raise(typeID, instanceKey, detail string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.set == nil {
 		s.set = map[string]string{}
 	}
-	s.set[id] = msg
+	s.set[spyAlarmID(typeID, instanceKey)] = detail
 }
 
-func (s *alertSpy) Clear(id string) {
+func (s *alertSpy) RaiseOperator(a alert.OperatorAlarm) {
+	s.Raise(a.TypeID, a.InstanceKey, a.Detail)
+}
+
+func (s *alertSpy) Clear(typeID, instanceKey string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.set, id)
+	delete(s.set, spyAlarmID(typeID, instanceKey))
+}
+
+// spyAlarmID mirrors the collector's type:instance ID composition.
+func spyAlarmID(typeID, instanceKey string) string {
+	if instanceKey == "" {
+		return typeID
+	}
+	return typeID + ":" + instanceKey
 }
 
 func (s *alertSpy) active() int {

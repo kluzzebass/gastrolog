@@ -9,8 +9,8 @@ import (
 	"gastrolog/internal/alert"
 )
 
-// fakeAlerts captures Set/Clear calls for assertion. Implements
-// AlertCollector.
+// fakeAlerts captures Raise/Clear calls for assertion. Implements
+// alert.Sink.
 type fakeAlerts struct {
 	mu    sync.Mutex
 	calls []alertCall
@@ -19,21 +19,41 @@ type fakeAlerts struct {
 type alertCall struct {
 	op       string // "set" or "clear"
 	id       string
-	severity alert.Severity
+	priority alert.Priority
 	source   string
 	message  string
+	cause    string
+	response string
 }
 
-func (f *fakeAlerts) Set(id string, severity alert.Severity, source, message string) {
+func (f *fakeAlerts) Raise(typeID, instanceKey, detail string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.calls = append(f.calls, alertCall{op: "set", id: id, severity: severity, source: source, message: message})
+	f.calls = append(f.calls, alertCall{op: "set", id: fakeAlarmID(typeID, instanceKey), message: detail})
 }
 
-func (f *fakeAlerts) Clear(id string) {
+func (f *fakeAlerts) RaiseOperator(a alert.OperatorAlarm) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.calls = append(f.calls, alertCall{op: "clear", id: id})
+	f.calls = append(f.calls, alertCall{
+		op: "set", id: fakeAlarmID(a.TypeID, a.InstanceKey),
+		priority: a.Priority, source: a.Source, message: a.Detail,
+		cause: a.Cause, response: a.Response,
+	})
+}
+
+func (f *fakeAlerts) Clear(typeID, instanceKey string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, alertCall{op: "clear", id: fakeAlarmID(typeID, instanceKey)})
+}
+
+// fakeAlarmID mirrors the collector's type:instance ID composition.
+func fakeAlarmID(typeID, instanceKey string) string {
+	if instanceKey == "" {
+		return typeID
+	}
+	return typeID + ":" + instanceKey
 }
 
 func (f *fakeAlerts) snapshot() []alertCall {
@@ -50,13 +70,13 @@ func (f *fakeAlerts) reset() {
 	f.calls = nil
 }
 
-func newTestRateAlerter(alerts AlertCollector) *RateAlerter {
+func newTestRateAlerter(alerts alert.Sink) *RateAlerter {
 	return newRateAlerter(rateAlerterConfig{
 		Window:    10 * time.Second,
 		Kind:      "rotation",
 		Source:    "rotation",
-		WarningAt: 1.0, // >= 10 events in 10s
-		ErrorAt:   5.0, // >= 50 events in 10s
+		LowAt:     1.0, // >= 10 events in 10s
+		HighAt:    5.0, // >= 50 events in 10s
 		Alerts:    alerts,
 		VaultName: func(id glid.GLID) string { return "test-vault-" + id.String()[:4] },
 	})
@@ -95,8 +115,8 @@ func TestRateAlerterRaisesWarningAtThreshold(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("expected 1 alert call, got %d: %v", len(calls), calls)
 	}
-	if calls[0].op != "set" || calls[0].severity != alert.Warning {
-		t.Errorf("expected Warning Set, got %+v", calls[0])
+	if calls[0].op != "set" || calls[0].priority != alert.Low {
+		t.Errorf("expected Low raise, got %+v", calls[0])
 	}
 	if calls[0].id == "" {
 		t.Error("alert ID empty")
@@ -116,8 +136,8 @@ func TestRateAlerterEscalatesToError(t *testing.T) {
 	ra.Evaluate(baseTime.Add(9 * time.Second))
 
 	calls := alerts.snapshot()
-	if len(calls) != 1 || calls[0].severity != alert.Error {
-		t.Errorf("expected single Error alert, got %v", calls)
+	if len(calls) != 1 || calls[0].priority != alert.High {
+		t.Errorf("expected single High alarm, got %v", calls)
 	}
 }
 
@@ -189,8 +209,8 @@ func TestRateAlerterTransitionsWarningToErrorEmitsResetSet(t *testing.T) {
 	if len(calls) != 2 {
 		t.Fatalf("expected warning then error, got %v", calls)
 	}
-	if calls[0].severity != alert.Warning || calls[1].severity != alert.Error {
-		t.Errorf("severity sequence wrong: %v", calls)
+	if calls[0].priority != alert.Low || calls[1].priority != alert.High {
+		t.Errorf("priority sequence wrong: %v", calls)
 	}
 }
 
@@ -214,8 +234,8 @@ func TestRateAlerterPerInstanceIndependence(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("expected 1 alert (only vaultA), got %v", calls)
 	}
-	if calls[0].id != ra.alertID(vaultA) {
-		t.Errorf("wrong vaultInst alerted: got id %q, want %q", calls[0].id, ra.alertID(vaultA))
+	if want := ra.alarmTypeID() + ":" + vaultA.String(); calls[0].id != want {
+		t.Errorf("wrong vaultInst alerted: got id %q, want %q", calls[0].id, want)
 	}
 }
 

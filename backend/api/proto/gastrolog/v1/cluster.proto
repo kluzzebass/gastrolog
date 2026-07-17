@@ -225,23 +225,36 @@ message PeerTrafficTotal {
   repeated double rx_spark = 7;
 }
 
-// SystemAlert represents a runtime condition that operators should be aware of.
-// Alerts are keyed by ID for deduplication — the same condition doesn't create
-// multiple alerts. They auto-clear when the component that raised them detects
-// the condition has resolved.
+// SystemAlert is one active alarm: a runtime condition requiring operator
+// action, with priority, cause and response stamped from the static alarm
+// catalog (or from the operator's own rule for operator-defined alarms).
+// Alarms are keyed by ID for deduplication — the same condition doesn't
+// create multiple alarms. They auto-clear when the component that raised
+// them detects the condition has resolved.
 message SystemAlert {
-  bytes id = 1;                           // stable key for dedup (e.g. "vault-init:$vaultID")
-  AlertSeverity severity = 2;
-  string source = 3;                       // component name (e.g. "orchestrator", "forwarder")
-  string message = 4;
+  bytes id = 1;                            // stable key for dedup (e.g. "vault-init:$vaultID")
+  AlarmPriority priority = 2;              // from the alarm catalog, never the call site
+  string source = 3;                       // component name (e.g. "placement", "chunking")
+  string detail = 4;                       // per-instance specifics from the raiser
   google.protobuf.Timestamp first_seen = 5;
   google.protobuf.Timestamp last_seen = 6;
+  string cause = 7;                        // catalog: what condition this is
+  string response = 8;                     // catalog: what the operator should do
+  // Software faults are defect tripwires, a class apart from process alarms
+  // (EEMUA 191): their response is to report the defect, so they sit outside
+  // the consequence × urgency priority scale (priority is UNSPECIFIED).
+  bool software_fault = 9;
 }
 
-enum AlertSeverity {
-  ALERT_SEVERITY_UNSPECIFIED = 0;
-  ALERT_SEVERITY_WARNING = 1;
-  ALERT_SEVERITY_ERROR = 2;
+// AlarmPriority is the cataloged consequence × urgency verdict for an alarm
+// type. CRITICAL = data loss in progress or scheduled; HIGH = durability or
+// availability degraded, will compound; LOW = needs attention on a human
+// timescale. UNSPECIFIED is only carried by software faults.
+enum AlarmPriority {
+  ALARM_PRIORITY_UNSPECIFIED = 0;
+  ALARM_PRIORITY_LOW = 1;
+  ALARM_PRIORITY_HIGH = 2;
+  ALARM_PRIORITY_CRITICAL = 3;
 }
 
 // IngesterNodeStats reports per-ingester statistics on a cluster node.

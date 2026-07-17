@@ -8,7 +8,6 @@ import (
 	"maps"
 	"slices"
 
-	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/home"
@@ -191,14 +190,12 @@ func (o *Orchestrator) applyVaults(sys *system.System, factories Factories) erro
 // Returns nil on success and on recoverable init failures (vault is skipped).
 // Returns an error only for structural config problems.
 func (o *Orchestrator) initVault(sys *system.System, vaultCfg system.VaultConfig, factories Factories) error {
-	alertKey := fmt.Sprintf("vault-init:%s", vaultCfg.ID)
-
 	instance, err := o.buildVaultInstance(sys, vaultCfg, factories)
 	if err != nil {
 		o.logger.Error("vault failed to initialize, skipping",
 			"id", vaultCfg.ID, "name", vaultCfg.Name, "error", err)
 		if o.alerts != nil {
-			o.alerts.Set(alertKey, alert.Error, "orchestrator",
+			o.alerts.Raise("vault-init", vaultCfg.ID.String(),
 				fmt.Sprintf("Vault %q failed to initialize: %v", vaultCfg.Name, err))
 		}
 		return nil
@@ -216,7 +213,7 @@ func (o *Orchestrator) initVault(sys *system.System, vaultCfg system.VaultConfig
 	vault.StorageType = string(vaultCfg.Type)
 	o.RegisterVault(vault)
 	if o.alerts != nil {
-		o.alerts.Clear(alertKey)
+		o.alerts.Clear("vault-init", vaultCfg.ID.String())
 	}
 	o.logger.Info("vault registered", "id", vaultCfg.ID, "name", vaultCfg.Name, "enabled", vaultCfg.Enabled)
 	return nil
