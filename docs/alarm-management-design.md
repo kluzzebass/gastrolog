@@ -196,7 +196,43 @@ type AlarmType struct {
 ```
 
 *(Landed with phase 2 — `internal/alert/registry.go`. DelayOn/DelayOff/
-Latching are declared but not yet enforced; suppression is phase 3.)*
+Latching are enforced by the collector since phase 3.)*
+
+### Suppression semantics (phase 3, landed)
+
+DelayOn/DelayOff/Latching are enforced in the collector, driven by the
+catalog entry — call sites raise and clear the raw condition and carry no
+alarm timers of their own. Decisions of record:
+
+- **Lazy evaluation.** Suppression windows advance on every Raise/Clear
+  touching an alarm and on every read (`Active()`/`Count()`), against the
+  collector's injectable clock. A condition raised once and never re-raised
+  still activates when its DelayOn elapses — the next read surfaces it.
+  (Sweep-style raisers that re-raise every tick also work; lazy evaluation
+  just doesn't require it.)
+- **FirstSeen is condition start**, not activation time: the delay-on
+  window suppresses annunciation, not the condition's history. An alarm
+  annunciating after a 60s DelayOn appears with 60s of age.
+- **DelayOff continuity.** A condition that clears and returns inside the
+  delay-off window is the same occurrence: the alarm stays active
+  continuously, FirstSeen preserved, no phantom re-occurrence.
+- **Condition-definition durations are not suppression.** A duration that
+  is part of the condition itself and measured from durable state stays at
+  the call site: `chunking-underreplicated` ("below the minimum ≥2min") is
+  a predicate over each gated segment's FSM `PublishedAt` — moving it onto
+  DelayOn would false-alarm under sustained ingest, where *some* fresh
+  segment is always briefly inside its replication window even though no
+  individual segment is stuck. `node-unreachable`'s grace measures the
+  FSM-replicated `StateSince` the same way.
+- **Interim latching.** Acknowledgment does not exist until phase 4
+  (gastrolog-1z5gg4), so a latched alarm whose condition clears simply
+  remains standing with no way to clear it — exactly the sticky-by-
+  convention behavior `orchestrator-lock-leak` already had, now enforced
+  by the collector instead of by the call site never calling Clear. Phase
+  4 makes latched alarms clearable via ack.
+- Suppression state is **per-node** (each node's collector), like the
+  alarms themselves; the aggregation layer sees only annunciated alarms,
+  so a condition flapping on one node cannot chatter cluster-wide.
 
 `alerts.Set(id, severity, source, msg)` became
 `alerts.Raise(typeID, instanceKey, detail)` — the collector looks up the
@@ -297,9 +333,12 @@ with a count.
 2. **Catalog + priorities** — the AlarmType registry; every Set site
    migrates to Raise; severity → priority; response text written per type
    (operator-reviewed).
-3. **Suppression** — DelayOn/DelayOff/Latching in the collector
-   (vault-leaderless already hand-rolls delay-on; migrate it onto the
-   primitive).
+3. **Suppression** ✓ — DelayOn/DelayOff/Latching enforced in the
+   collector on an injectable clock; vault-leaderless and
+   chunking-build-blocked migrated off their hand-rolled delay-on timers;
+   chunking-glcb-corrupt and chunk-unreadable gained their catalog
+   DelayOn. See "Suppression semantics" above for the decisions of
+   record, including the interim latching behavior until phase 4.
 4. **Lifecycle + proto + RPCs** — state model, ack/shelve, cross-node ack
    fan-out, ack persistence.
 5. **Event journal** — ring buffer, RPC, UI page; move demoted

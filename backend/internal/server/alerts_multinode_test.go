@@ -11,9 +11,12 @@ package server_test
 
 import (
 	"context"
+	"sync"
 	"testing"
+	"time"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/alert"
 
 	"connectrpc.com/connect"
 )
@@ -132,5 +135,73 @@ func TestMultiNodeAlerts_MultiNodeAttribution(t *testing.T) {
 	}
 	if n := len(byNode["data-3"]); n != 1 {
 		t.Fatalf("data-3 alerts after data-1 clear = %d, want 1", n)
+	}
+}
+
+// TestMultiNodeAlerts_DelayOnSuppressionIsPerNode drives the suppression
+// phase (gastrolog-4wvxqh) through the aggregation surface: suppression
+// state is per-node collector state, so a condition flapping on one node
+// must never chatter into the aggregated view, while the SAME condition
+// persisting on another node annunciates there — and only there. Every
+// collector runs on one deterministic harness clock; no sleeps.
+func TestMultiNodeAlerts_DelayOnSuppressionIsPerNode(t *testing.T) {
+	leaderlessType, ok := alert.TypeByID("vault-leaderless")
+	if !ok || leaderlessType.DelayOn <= 0 {
+		t.Fatal("vault-leaderless must carry a catalog DelayOn")
+	}
+	var mu sync.Mutex
+	now := time.Date(2026, 7, 1, 8, 0, 0, 0, time.UTC)
+	clock := func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
+		return now
+	}
+	advance := func(d time.Duration) {
+		mu.Lock()
+		now = now.Add(d)
+		mu.Unlock()
+	}
+	h := setupMultiNode(t, []string{"coord", "data-1", "data-2", "data-3"}, WithAlertClock(clock))
+
+	// data-2's condition flaps (placement edit resolving and re-resolving);
+	// data-3's persists. Same alarm ID on both nodes.
+	h.alerts["data-2"].Raise("vault-leaderless", "vault1", "no leader (flap)")
+	h.alerts["data-3"].Raise("vault-leaderless", "vault1", "no leader (stuck)")
+	advance(leaderlessType.DelayOn / 2)
+	h.alerts["data-2"].Clear("vault-leaderless", "vault1")
+	h.alerts["data-2"].Raise("vault-leaderless", "vault1", "no leader (flap)")
+
+	// Inside the window nothing is aggregated from either node.
+	for id, alerts := range alertsByNode(t, h) {
+		if len(alerts) != 0 {
+			t.Fatalf("node %s shows %d alarms inside the delay-on window", id, len(alerts))
+		}
+	}
+
+	// The window elapses. data-2's flap restarted its window (still
+	// pending); data-3's condition persisted the whole time and must be
+	// the ONLY alarm in the aggregated view.
+	advance(leaderlessType.DelayOn/2 + time.Second)
+	byNode := alertsByNode(t, h)
+	if n := len(byNode["data-2"]); n != 0 {
+		t.Fatalf("data-2's flapping condition chattered into the aggregation: %d alarms", n)
+	}
+	if n := len(byNode["data-3"]); n != 1 {
+		t.Fatalf("data-3's sustained condition must annunciate: %d alarms", n)
+	}
+	if got := byNode["data-3"][0].Detail; got != "no leader (stuck)" {
+		t.Fatalf("data-3 alarm detail = %q", got)
+	}
+
+	// data-2's flap finally dies down cleared: nothing ever surfaces from
+	// it, no occurrence, no residue — while data-3 keeps standing.
+	h.alerts["data-2"].Clear("vault-leaderless", "vault1")
+	advance(time.Hour)
+	byNode = alertsByNode(t, h)
+	if n := len(byNode["data-2"]); n != 0 {
+		t.Fatalf("data-2 residue after the flap cleared: %d alarms", n)
+	}
+	if n := len(byNode["data-3"]); n != 1 {
+		t.Fatalf("data-3 sustained alarm lost: %d alarms", n)
 	}
 }

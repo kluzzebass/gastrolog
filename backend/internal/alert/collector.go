@@ -8,9 +8,35 @@
 // them via Clear() when the condition resolves; the collector looks up the
 // type and stamps priority, source, cause and response.
 //
+// Chattering suppression (EEMUA 191 principle 3) is also the collector's,
+// driven by the catalog entry — call sites just Raise/Clear the raw
+// condition:
+//
+//   - DelayOn: the condition must persist that long before the alarm
+//     becomes active. A condition that flaps below the window never
+//     annunciates.
+//   - DelayOff: after an active alarm's condition clears, it must STAY
+//     clear that long before the alarm auto-clears. A re-raise inside the
+//     window is the same continuous occurrence, not a new one.
+//   - Latching: the alarm stays active after the condition clears, until
+//     operator acknowledgment. INTERIM: acknowledgment does not exist until
+//     the lifecycle phase (gastrolog-1z5gg4), so a latched alarm remains
+//     standing with no way to clear it — exactly the sticky behavior the
+//     latched types had by convention before; the ack phase makes them
+//     clearable.
+//
+// Suppression windows are evaluated LAZILY: state advances on every
+// Raise/Clear touching an alarm and on every read (Active/Count), against
+// the collector's injectable clock. A condition raised once and never
+// re-raised still activates once its DelayOn elapses — the next read
+// surfaces it. FirstSeen is the CONDITION start (the first Raise of the
+// occurrence), not the moment the alarm activated: the delay-on window
+// suppresses annunciation, not the condition's history.
+//
 // Operator-defined alarms — whose priority comes from an operator-configured
 // rule rather than the catalog (e.g. vault rate thresholds) — enter through
-// RaiseOperator() and live beside the catalog, never inside it.
+// RaiseOperator() and live beside the catalog, never inside it. They carry
+// no suppression: the rule is the condition definition.
 package alert
 
 import (
@@ -85,16 +111,54 @@ type Sink interface {
 	Clear(typeID, instanceKey string)
 }
 
-// Collector is a thread-safe, in-process registry of active alarms.
-type Collector struct {
-	mu     sync.RWMutex
-	alarms map[string]*Alarm
+// entry is the collector's per-alarm suppression state machine. The alarm
+// inside it is only visible through Active() once the entry has activated.
+type entry struct {
+	alarm Alarm
+
+	// Suppression parameters, stamped from the catalog at raise time.
+	delayOn  time.Duration
+	delayOff time.Duration
+	latching bool
+
+	// conditionUp is whether the raiser currently asserts the condition
+	// (raised and not since cleared).
+	conditionUp bool
+	// conditionSince is when the current continuous condition occurrence
+	// began — the DelayOn window measures from here. It is also the
+	// alarm's FirstSeen.
+	conditionSince time.Time
+	// clearedAt is when the condition last went down while the alarm was
+	// active — the DelayOff window measures from here.
+	clearedAt time.Time
+	// active is whether the alarm has annunciated: the condition outlived
+	// DelayOn (immediately, for zero-delay types).
+	active bool
 }
 
-// New creates a new alarm collector.
+// Collector is a thread-safe, in-process registry of active alarms with
+// catalog-driven chattering suppression.
+type Collector struct {
+	mu      sync.Mutex
+	entries map[string]*entry
+
+	// now is the collector's clock. Injectable (NewWithClock) so
+	// suppression tests advance time deterministically — never with
+	// sleeps — and so sibling features on the collector share one clock.
+	now func() time.Time
+}
+
+// New creates a new alarm collector on the wall clock.
 func New() *Collector {
+	return NewWithClock(time.Now)
+}
+
+// NewWithClock creates an alarm collector whose suppression windows are
+// measured against the given clock. Tests advance it deterministically.
+func NewWithClock(now func() time.Time) *Collector {
 	return &Collector{
-		alarms: make(map[string]*Alarm),
+		entries: make(map[string]*entry),
+		now:     now,
 	}
 }
 
@@ -107,14 +171,17 @@ func alarmID(typeID, instanceKey string) string {
 	return typeID + ":" + instanceKey
 }
 
-// Raise raises or refreshes the alarm of the given cataloged type for the
-// given instance. The collector stamps priority, source, cause and response
-// from the catalog; detail carries the per-instance specifics.
+// Raise reports that the condition of the given cataloged type holds for
+// the given instance. The collector stamps priority, source, cause and
+// response from the catalog and applies the type's suppression: with a
+// DelayOn the alarm activates only once the condition has persisted that
+// long (re-raises refresh detail but do not restart the window; a Clear
+// does). detail carries the per-instance specifics.
 //
 // Raising an unregistered type is a catalog defect in the raising component.
 // It is loud, never silent: the defect is logged AND the condition still
-// surfaces — as a software-fault alarm with the raiser's detail, so neither
-// the underlying condition nor the defect can disappear.
+// surfaces — immediately, as a software-fault alarm with the raiser's
+// detail, so neither the underlying condition nor the defect can disappear.
 func (c *Collector) Raise(typeID, instanceKey, detail string) {
 	t, ok := TypeByID(typeID)
 	if !ok {
@@ -122,7 +189,7 @@ func (c *Collector) Raise(typeID, instanceKey, detail string) {
 			"type", typeID, "instance", instanceKey, "detail", detail)
 		t = unregisteredAlarmType(typeID)
 	}
-	c.upsert(Alarm{
+	c.raise(Alarm{
 		ID:            alarmID(typeID, instanceKey),
 		TypeID:        typeID,
 		InstanceKey:   instanceKey,
@@ -132,13 +199,14 @@ func (c *Collector) Raise(typeID, instanceKey, detail string) {
 		Detail:        detail,
 		Cause:         t.Cause,
 		Response:      t.Response,
-	})
+	}, t.DelayOn, t.DelayOff, t.Latching)
 }
 
 // RaiseOperator raises or refreshes an operator-defined alarm. The rule that
-// defined the threshold supplies priority, cause and response.
+// defined the threshold supplies priority, cause and response; there is no
+// catalog entry and no suppression.
 func (c *Collector) RaiseOperator(a OperatorAlarm) {
-	c.upsert(Alarm{
+	c.raise(Alarm{
 		ID:          alarmID(a.TypeID, a.InstanceKey),
 		TypeID:      a.TypeID,
 		InstanceKey: a.InstanceKey,
@@ -147,46 +215,162 @@ func (c *Collector) RaiseOperator(a OperatorAlarm) {
 		Detail:      a.Detail,
 		Cause:       a.Cause,
 		Response:    a.Response,
-	})
+	}, 0, 0, false)
 }
 
-// upsert stores an alarm, preserving FirstSeen for an already-active ID.
-// Detail and priority refresh on every raise (operator-defined alarms may
-// escalate; cataloged priorities are static but harmlessly re-stamped).
-func (c *Collector) upsert(a Alarm) {
+// raise records that the condition for a is up, creating or refreshing its
+// suppression entry. Detail and priority refresh on every raise (operator-
+// defined alarms may escalate; cataloged priorities are static but
+// harmlessly re-stamped); FirstSeen is preserved across the occurrence.
+func (c *Collector) raise(a Alarm, delayOn, delayOff time.Duration, latching bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	now := time.Now()
-	if existing, ok := c.alarms[a.ID]; ok {
-		a.FirstSeen = existing.FirstSeen
-	} else {
-		a.FirstSeen = now
+	now := c.now()
+	e := c.entries[a.ID]
+	if e != nil && c.settleLocked(e, now) {
+		// The previous occurrence's delay-off window had already expired;
+		// this raise starts a fresh one.
+		delete(c.entries, a.ID)
+		e = nil
 	}
-	a.LastSeen = now
-	c.alarms[a.ID] = &a
+	if e == nil {
+		e = &entry{
+			delayOn:        delayOn,
+			delayOff:       delayOff,
+			latching:       latching,
+			conditionUp:    true,
+			conditionSince: now,
+		}
+		a.FirstSeen = now
+		a.LastSeen = now
+		e.alarm = a
+		c.entries[a.ID] = e
+		c.settleLocked(e, now) // zero DelayOn activates immediately
+		return
+	}
+
+	firstSeen := e.alarm.FirstSeen
+	e.alarm = a
+	e.alarm.FirstSeen = firstSeen
+	e.alarm.LastSeen = now
+	e.delayOn, e.delayOff, e.latching = delayOn, delayOff, latching
+	if !e.conditionUp {
+		// The condition returned inside the delay-off window (or on a
+		// latched alarm): the same occurrence continues — the alarm stays
+		// active with its FirstSeen, no re-occurrence.
+		e.conditionUp = true
+		e.clearedAt = time.Time{}
+	}
+	c.settleLocked(e, now)
 }
 
-// Clear resolves the alarm of the given type for the given instance. No-op
-// if it is not active.
+// Clear reports that the condition of the given type for the given instance
+// no longer holds. No-op if nothing is tracked for it. What happens next is
+// the type's suppression verdict:
+//
+//   - never activated (condition died inside DelayOn): dropped silently —
+//     that is the chattering the window exists to suppress.
+//   - active, Latching: stays active. INTERIM until the lifecycle phase
+//     (gastrolog-1z5gg4) ships acknowledgment, a latched alarm has no way
+//     to clear — today's sticky behavior, unchanged; ack will clear it.
+//   - active, DelayOff zero: clears immediately (the pre-suppression
+//     behavior of every type).
+//   - active, DelayOff set: stays active until the condition has stayed
+//     clear for the whole window; a Raise inside it resumes the same
+//     occurrence.
 func (c *Collector) Clear(typeID, instanceKey string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	delete(c.alarms, alarmID(typeID, instanceKey))
+
+	id := alarmID(typeID, instanceKey)
+	e, ok := c.entries[id]
+	if !ok {
+		return
+	}
+	now := c.now()
+	if c.settleLocked(e, now) {
+		delete(c.entries, id)
+		return
+	}
+	if !e.active {
+		// The condition never outlived its delay-on window: suppressed.
+		delete(c.entries, id)
+		return
+	}
+	if !e.conditionUp {
+		// Repeat clear inside the delay-off window: the window keeps
+		// measuring from the FIRST clear — the condition never came back.
+		return
+	}
+	e.conditionUp = false
+	e.clearedAt = now
+	if e.latching {
+		slog.Info("alarm condition cleared but the alarm is latched — standing until operator acknowledgment",
+			"id", e.alarm.ID, "source", e.alarm.Source)
+		return
+	}
+	if e.delayOff <= 0 {
+		if e.delayOn > 0 {
+			// This alarm's annunciation was logged by the collector
+			// (activation edge below); log the matching resolution edge.
+			slog.Info("alarm cleared — condition resolved",
+				"id", e.alarm.ID, "source", e.alarm.Source)
+		}
+		delete(c.entries, id)
+	}
 }
 
-// Active returns a snapshot of all current alarms, sorted by FirstSeen.
-func (c *Collector) Active() []*Alarm {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	if len(c.alarms) == 0 {
-		return nil
+// settleLocked advances one entry's suppression state to now: it activates
+// a pending entry whose condition has outlived DelayOn, and reports (true)
+// an active entry whose condition has stayed clear past DelayOff so the
+// caller removes it. Transition edges of suppressed types are logged here —
+// the call site cannot log them, since it no longer knows when the window
+// elapses. Caller holds c.mu.
+func (c *Collector) settleLocked(e *entry, now time.Time) (expired bool) {
+	if e.conditionUp {
+		if !e.active && now.Sub(e.conditionSince) >= e.delayOn {
+			e.active = true
+			if e.delayOn > 0 {
+				slog.Warn("alarm active — condition persisted past its delay-on window",
+					"id", e.alarm.ID, "source", e.alarm.Source, "delay_on", e.delayOn, "detail", e.alarm.Detail)
+			}
+		}
+		return false
 	}
-	result := make([]*Alarm, 0, len(c.alarms))
-	for _, a := range c.alarms {
-		cp := *a
+	if e.active && !e.latching && now.Sub(e.clearedAt) >= e.delayOff {
+		if e.delayOff > 0 {
+			slog.Info("alarm cleared — condition stayed clear past its delay-off window",
+				"id", e.alarm.ID, "source", e.alarm.Source, "delay_off", e.delayOff)
+		}
+		return true
+	}
+	return false
+}
+
+// Active returns a snapshot of all currently active alarms, sorted by
+// FirstSeen. Reading settles suppression state: pending conditions whose
+// delay-on window has elapsed activate here even if never re-raised, and
+// cleared conditions past their delay-off window drop out.
+func (c *Collector) Active() []*Alarm {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	now := c.now()
+	var result []*Alarm
+	for id, e := range c.entries {
+		if c.settleLocked(e, now) {
+			delete(c.entries, id)
+			continue
+		}
+		if !e.active {
+			continue
+		}
+		cp := e.alarm
 		result = append(result, &cp)
+	}
+	if len(result) == 0 {
+		return nil
 	}
 	slices.SortFunc(result, func(a, b *Alarm) int {
 		return a.FirstSeen.Compare(b.FirstSeen)
@@ -194,9 +378,22 @@ func (c *Collector) Active() []*Alarm {
 	return result
 }
 
-// Count returns the number of active alarms.
+// Count returns the number of active alarms (pending delay-on conditions
+// excluded), settling suppression state like Active.
 func (c *Collector) Count() int {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return len(c.alarms)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	now := c.now()
+	n := 0
+	for id, e := range c.entries {
+		if c.settleLocked(e, now) {
+			delete(c.entries, id)
+			continue
+		}
+		if e.active {
+			n++
+		}
+	}
+	return n
 }

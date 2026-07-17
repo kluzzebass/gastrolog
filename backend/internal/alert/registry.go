@@ -7,10 +7,13 @@ import "time"
 // single alarm type. The catalog is the code half of the table in
 // docs/alarm-management-design.md — the two must agree.
 //
-// DelayOn, DelayOff and Latching are declared here but not yet enforced:
-// suppression (chattering control) lands in a later phase. Call sites that
-// hand-roll delay-on today (vault-leaderless, chunking-build-blocked,
-// chunking-underreplicated) migrate onto the primitive then.
+// DelayOn, DelayOff and Latching are ENFORCED by the collector — call
+// sites just Raise/Clear the raw condition. Note the distinction the
+// suppression sweep drew: a duration in the CONDITION definition
+// (chunking-underreplicated's "below the minimum ≥2min" is a predicate
+// over each segment's FSM PublishedAt; node-unreachable's grace measures
+// the FSM's replicated StateSince) is state the raiser evaluates, not
+// chattering suppression, and stays at the call site.
 type AlarmType struct {
 	// IDPrefix is the stable type ID ("vault-leaderless", "wal-reserve").
 	// The full alarm ID is IDPrefix for node-scoped types, or
@@ -26,13 +29,15 @@ type AlarmType struct {
 	// Response is what the operator should do, surfaced in the UI.
 	Response string
 	// DelayOn is how long the condition must persist before the alarm
-	// raises (declared; suppression is a later phase).
+	// activates; conditions that flap below it never annunciate.
 	DelayOn time.Duration
 	// DelayOff is how long the condition must stay clear before the alarm
-	// auto-clears (declared; suppression is a later phase).
+	// auto-clears; a re-raise inside it is the same occurrence.
 	DelayOff time.Duration
 	// Latching alarms stay active until acknowledged even after the
-	// condition clears (declared; lifecycle is a later phase).
+	// condition clears. INTERIM: acknowledgment ships with the lifecycle
+	// phase (gastrolog-1z5gg4); until then a latched alarm stands with no
+	// way to clear — the sticky behavior these types had by convention.
 	Latching bool
 	// SoftwareFault marks a defect tripwire rather than a process alarm.
 	// EEMUA 191 / ISA-18.2 treat instrument and system faults as a class
@@ -91,6 +96,13 @@ var catalog = []AlarmType{
 		IDPrefix: "chunking-build-blocked",
 		Priority: High,
 		Source:   "chunking",
+		// Collection normally materializes missing segments within seconds
+		// of a seal; anything blocked minutes is stuck, not catching up.
+		// (Also holds back the ghost-released-segment raise: the discard it
+		// proposes self-heals the queue well inside the window, and a
+		// self-healing wedge is the transition-edge Error log's story, not
+		// an operator's.)
+		DelayOn:  2 * time.Minute,
 		Cause:    "The head-of-queue chunk is blocked on segments no local holder can supply (or a manifest referenced a released segment); later chunks cannot seal until it clears.",
 		Response: "Restore a node holding the named segments, or accept the gap.",
 	},
@@ -105,6 +117,11 @@ var catalog = []AlarmType{
 		IDPrefix: "chunking-glcb-corrupt",
 		Priority: High,
 		Source:   "chunking",
+		// Both heal paths (rebuild from source segments on the next build
+		// pass; peer re-pull by the GLCB catch-up sweep) land within a
+		// couple of sweep cycles. Corruption still standing after minutes
+		// means healing is failing — that is the actionable condition.
+		DelayOn:  5 * time.Minute,
 		Cause:    "A sealed chunk's GLCB was unreadable on this node and was quarantined with a .corrupt suffix.",
 		Response: "Heals on its own — rebuilt from source segments or re-pulled from a peer home. Only actionable if it persists: investigate disk health on this node and replica health on the vault's other homes.",
 	},
@@ -112,6 +129,10 @@ var catalog = []AlarmType{
 		IDPrefix: "chunk-unreadable",
 		Priority: High,
 		Source:   "retention",
+		// The retry backoff schedule starts at 5m: a window past the first
+		// automatic retry means a transient blip that clears on retry never
+		// annunciates, while a read failure that survives it does.
+		DelayOn:  10 * time.Minute,
 		Cause:    "A chunk was unreadable during retention processing; a backoff retry is scheduled.",
 		Response: "Retries automatically. Only actionable once retries stop resolving it: investigate disk health on this node.",
 	},

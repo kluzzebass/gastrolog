@@ -1177,8 +1177,11 @@ func unreadableBackoff(failCount int) time.Duration {
 
 // markUnreadable flags a chunk as unreadable and schedules its next
 // retry. Each successive failure pushes the next retry further out
-// per unreadableBackoff. The chunk-unreadable alert is set; it stays
-// up while the entry exists and is cleared by clearUnreadable.
+// per unreadableBackoff — that schedule is RETRY logic (when to try the
+// read again), not alarm suppression: the raw chunk-unreadable condition
+// is raised here per failure and cleared by clearUnreadable, and the
+// catalog's DelayOn keeps a blip that resolves on the first retry from
+// ever annunciating (gastrolog-4wvxqh).
 func (r *retentionRunner) markUnreadable(id chunk.ChunkID, reason error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

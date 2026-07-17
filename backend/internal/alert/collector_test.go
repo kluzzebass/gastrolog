@@ -5,12 +5,17 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRaiseStampsCatalogFields(t *testing.T) {
-	c := New()
+	// vault-leaderless carries a catalog DelayOn; drive the injected clock
+	// past it so the stamped fields are observable through Active().
+	clk := newSuppressionClock()
+	c := NewWithClock(clk.Now)
 
 	c.Raise("vault-leaderless", "vault-1", "Vault a has had no placement leader for 90s.")
+	clk.Advance(leaderlessWindow(t) + time.Second)
 
 	alarms := c.Active()
 	if len(alarms) != 1 {
@@ -41,7 +46,8 @@ func TestRaiseStampsCatalogFields(t *testing.T) {
 }
 
 func TestRaiseEmptyInstanceKeyUsesBareTypeID(t *testing.T) {
-	c := New()
+	clk := newSuppressionClock()
+	c := NewWithClock(clk.Now)
 
 	c.Raise("ingester-not-running", "", "2 ingesters not running")
 
@@ -56,8 +62,9 @@ func TestRaiseEmptyInstanceKeyUsesBareTypeID(t *testing.T) {
 		t.Errorf("priority = %v, want Low", alarms[0].Priority)
 	}
 	// A per-instance type raised with an empty key still surfaces (bare ID)
-	// rather than being dropped.
+	// rather than being dropped — once its catalog delay-on elapses.
 	c.Raise("vault-leaderless", "", "no instance key")
+	clk.Advance(leaderlessWindow(t) + time.Second)
 	if a := findAlarm(c, "vault-leaderless"); a == nil {
 		t.Error("empty instance key on an instance-scoped type must still surface")
 	}
