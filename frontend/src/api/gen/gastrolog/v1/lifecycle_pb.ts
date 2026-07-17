@@ -1275,6 +1275,246 @@ export class UnshelveAlarmResponse extends Message<UnshelveAlarmResponse> {
 }
 
 /**
+ * @generated from message gastrolog.v1.ListEventsRequest
+ */
+export class ListEventsRequest extends Message<ListEventsRequest> {
+  /**
+   * Exact event type filter ("alarm-raised", "alarm-acked",
+   * "node-started", ...); empty matches all types.
+   *
+   * @generated from field: string type = 1;
+   */
+  type = "";
+
+  /**
+   * Exact source (component) filter ("storage", "raft", ...); empty
+   * matches all sources.
+   *
+   * @generated from field: string source = 2;
+   */
+  source = "";
+
+  /**
+   * Inclusive lower time bound; unset = from the start of each journal.
+   *
+   * @generated from field: google.protobuf.Timestamp since = 3;
+   */
+  since?: Timestamp;
+
+  /**
+   * Inclusive upper time bound; unset = through the newest entry.
+   *
+   * @generated from field: google.protobuf.Timestamp until = 4;
+   */
+  until?: Timestamp;
+
+  /**
+   * Maximum entries returned after the cross-node merge, keeping the
+   * NEWEST. 0 = server default (1000).
+   *
+   * @generated from field: uint32 limit = 5;
+   */
+  limit = 0;
+
+  /**
+   * Internal fan-out leg marker; see AckAlarmRequest.local_only.
+   *
+   * @generated from field: bool local_only = 6;
+   */
+  localOnly = false;
+
+  constructor(data?: PartialMessage<ListEventsRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ListEventsRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "source", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "since", kind: "message", T: Timestamp },
+    { no: 4, name: "until", kind: "message", T: Timestamp },
+    { no: 5, name: "limit", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 6, name: "local_only", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ListEventsRequest {
+    return new ListEventsRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ListEventsRequest {
+    return new ListEventsRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ListEventsRequest {
+    return new ListEventsRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ListEventsRequest | PlainMessage<ListEventsRequest> | undefined, b: ListEventsRequest | PlainMessage<ListEventsRequest> | undefined): boolean {
+    return proto3.util.equals(ListEventsRequest, a, b);
+  }
+}
+
+/**
+ * SystemEvent is one event-journal entry: a record of something that
+ * happened, requiring no operator action — no priority, no response text,
+ * no lifecycle state. Deliberately quieter than SystemAlert.
+ *
+ * @generated from message gastrolog.v1.SystemEvent
+ */
+export class SystemEvent extends Message<SystemEvent> {
+  /**
+   * Raising node's raft ID, stamped by the node that journaled the event.
+   *
+   * @generated from field: bytes node_id = 1;
+   */
+  nodeId = new Uint8Array(0);
+
+  /**
+   * Display name of the raising node, resolved by the serving node from
+   * node config (best effort; may be empty, fall back to node_id).
+   *
+   * @generated from field: string node_name = 2;
+   */
+  nodeName = "";
+
+  /**
+   * @generated from field: google.protobuf.Timestamp time = 3;
+   */
+  time?: Timestamp;
+
+  /**
+   * Per-node monotonic journal sequence. Keeps counting when the ring
+   * drops old entries, so a first visible seq > 1 means history aged out.
+   *
+   * @generated from field: uint64 seq = 4;
+   */
+  seq = protoInt64.zero;
+
+  /**
+   * Event type ("alarm-raised", "election-storm", "node-started", ...).
+   *
+   * @generated from field: string type = 5;
+   */
+  type = "";
+
+  /**
+   * Component the event is about (an alarm's catalog source, "raft",
+   * "ingest-pipeline", "node", ...).
+   *
+   * @generated from field: string source = 6;
+   */
+  source = "";
+
+  /**
+   * Full alarm ID for alarm lifecycle events, empty otherwise. Same
+   * encoding as SystemAlert.id.
+   *
+   * @generated from field: bytes alarm_id = 7;
+   */
+  alarmId = new Uint8Array(0);
+
+  /**
+   * @generated from field: string detail = 8;
+   */
+  detail = "";
+
+  /**
+   * Operator identity on ack/shelve/unshelve events; empty for system
+   * transitions.
+   *
+   * @generated from field: string by = 9;
+   */
+  by = "";
+
+  constructor(data?: PartialMessage<SystemEvent>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.SystemEvent";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "node_name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "time", kind: "message", T: Timestamp },
+    { no: 4, name: "seq", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 5, name: "type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 6, name: "source", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 7, name: "alarm_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 8, name: "detail", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 9, name: "by", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SystemEvent {
+    return new SystemEvent().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): SystemEvent {
+    return new SystemEvent().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): SystemEvent {
+    return new SystemEvent().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: SystemEvent | PlainMessage<SystemEvent> | undefined, b: SystemEvent | PlainMessage<SystemEvent> | undefined): boolean {
+    return proto3.util.equals(SystemEvent, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ListEventsResponse
+ */
+export class ListEventsResponse extends Message<ListEventsResponse> {
+  /**
+   * Chronological (oldest first) across all reachable nodes; per-node
+   * seq breaks ties. When limit truncates, the NEWEST entries survive.
+   *
+   * @generated from field: repeated gastrolog.v1.SystemEvent events = 1;
+   */
+  events: SystemEvent[] = [];
+
+  /**
+   * Node IDs whose journal could not be collected (unreachable, no
+   * forwarder). Their events are MISSING from this response — absence
+   * of events from these nodes is unknown state, not quiet history.
+   *
+   * @generated from field: repeated string unreachable_nodes = 2;
+   */
+  unreachableNodes: string[] = [];
+
+  constructor(data?: PartialMessage<ListEventsResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ListEventsResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "events", kind: "message", T: SystemEvent, repeated: true },
+    { no: 2, name: "unreachable_nodes", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ListEventsResponse {
+    return new ListEventsResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ListEventsResponse {
+    return new ListEventsResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ListEventsResponse {
+    return new ListEventsResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ListEventsResponse | PlainMessage<ListEventsResponse> | undefined, b: ListEventsResponse | PlainMessage<ListEventsResponse> | undefined): boolean {
+    return proto3.util.equals(ListEventsResponse, a, b);
+  }
+}
+
+/**
  * @generated from message gastrolog.v1.WatchSystemStatusRequest
  */
 export class WatchSystemStatusRequest extends Message<WatchSystemStatusRequest> {

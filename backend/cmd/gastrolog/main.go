@@ -231,6 +231,7 @@ func main() {
 		cli.NewPrimeCommand(),
 		cli.NewClusterCommand(),
 		cli.NewAlertsCommand(),
+		cli.NewEventsCommand(),
 		cli.NewJobCommand(),
 		cli.NewUserCommand(),
 		cli.NewLoginCommand(),
