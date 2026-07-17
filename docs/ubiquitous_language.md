@@ -662,12 +662,48 @@ How the cluster reports what it's doing to itself, to operators, and to the UI.
   activates; flaps below the window never annunciate), **delay-off** (an
   active alarm's condition must stay clear that long before auto-clear; a
   return inside the window is the same occurrence), and **latching** (the
-  alarm stays active after the condition clears, until operator
-  acknowledgment — interim, until ack ships, it simply stands). Driven by
-  the catalog entry; call sites raise and clear the raw condition and
-  carry no alarm timers of their own. Windows evaluate lazily against the
-  collector's injectable clock; `FirstSeen` is condition start, not
-  activation time.
+  alarm stays active after the condition clears, releasing only when both
+  the condition has resolved and an operator has acked, in either order).
+  Driven by the catalog entry; call sites raise and clear the raw
+  condition and carry no alarm timers of their own. Windows evaluate
+  lazily against the collector's injectable clock; `FirstSeen` is
+  condition start, not activation time.
+
+- **Alarm lifecycle** — the standing-alarm state model layered on the
+  suppression entry (EEMUA 191 principles 5 & 6): **active-unacked**
+  (annunciated, waiting on an operator), **active-acked** (operator aware;
+  releases silently when the condition resolves), **cleared-unacked**
+  (condition resolved before anyone acked; retained, out of the active
+  list, until acked), **shelved** (operator-suppressed until a mandatory
+  expiry). See the combined state machine in
+  `docs/alarm-management-design.md`.
+
+- **Acknowledge (ack)** — the operator records awareness of a standing
+  alarm (who + when). Acking a cleared-unacked alarm — or a latched alarm
+  whose condition has resolved — releases it. Servable from any node;
+  fans out to every node raising the alarm ID. Idempotent.
+
+- **Shelve** — operator-initiated suppression of one standing alarm for a
+  duration with a **mandatory expiry** (no permanent shelves). Shelved
+  alarms stay visible in a collapsed section; expiry with the condition
+  still true returns the alarm to active-unacked and resets any ack.
+  Types where deferral is meaningless (software faults, `alarm-flood`)
+  are **never shelveable** (`AlarmType.NeverShelveable`) and show no
+  shelve control. **Unshelve** ends a shelve early.
+
+- **Occurrence** — one continuous condition episode of an alarm ID in the
+  suppression sense: a clear-and-return inside the delay-off window is
+  the same occurrence; a return after the alarm reached cleared-unacked
+  is a new one (new activation edge, new delay-on window, ack reset).
+  `SystemAlert.occurrences` counts the annunciated ones since the alarm
+  became standing.
+
+- **Alarm lifecycle journal** — the per-node append-only file
+  (`<home>/alarm-journal.jsonl`) that lets ack/shelve state survive
+  restart. Operator telemetry: deliberately not config and not Raft.
+  Folded and compacted at startup; pending state applies to the first
+  annunciation of the matching alarm ID; a `resolve` record prunes state
+  when the alarm releases.
 
 - **Priority** — `alert.Priority`, the cataloged verdict per alarm type:
   `Critical` (data loss in progress or scheduled), `High` (durability or
@@ -682,9 +718,11 @@ How the cluster reports what it's doing to itself, to operators, and to the UI.
   `<kind>-rate` alarms). Enters through `RaiseOperator`, beside the
   catalog, never inside it; still renders in the same alarm list.
 
-- **AlertCollector** — per-node bounded store of active alarms. Alarms
-  have a stable key (`typeID` or `typeID:instanceKey`) for dedup and
-  auto-clear; included in each NodeStats broadcast.
+- **AlertCollector** — per-node bounded store of standing alarms with
+  their suppression and lifecycle state. Alarms have a stable key
+  (`typeID` or `typeID:instanceKey`) for dedup; every lifecycle state
+  (`Standing()`) is included in each NodeStats broadcast so any node can
+  serve ack/shelve for any raiser.
 
 - **Alarm flood** — the alarm system's self-diagnosed degraded state
   (EEMUA 191 rate principle): a node whose alarm **activations**
@@ -700,8 +738,10 @@ How the cluster reports what it's doing to itself, to operators, and to the UI.
 
 - **SystemAlert** — one alarm on the wire: `ID`, `Priority`, `Source`,
   `Detail` (per-instance specifics), `Cause`/`Response` (from the
-  catalog), `SoftwareFault`, `FirstSeen`, `LastSeen`. Keyed ("alarm X for
-  reason Y on node Z") so repeated identical alarms don't accumulate.
+  catalog), `SoftwareFault`, `FirstSeen`, `LastSeen`, plus the lifecycle
+  fields `State`, `AckedBy`/`AckedAt`, `ShelvedUntil`, `Occurrences`,
+  `Shelveable`. Keyed ("alarm X for reason Y on node Z") so repeated
+  identical alarms don't accumulate.
 
 ---
 
