@@ -27,6 +27,12 @@ type ClusterConfig struct {
 	// the budget. The operating bound ahead of the disk-guard backstop.
 	// 0 = unbounded.
 	PipelineBacklogMaxBytes uint64 `json:"pipeline_backlog_max_bytes,omitempty"`
+	// AlarmFloodThreshold is the alarm-flood threshold: alarm activations
+	// per node per rolling 10 minutes above which that node raises the
+	// alarm-flood meta-alarm (EEMUA 191 rate self-monitoring). The rate is
+	// measured per node; the threshold applies on every node.
+	// 0 = default (alert.DefaultFloodThreshold, 10).
+	AlarmFloodThreshold uint32 `json:"alarm_flood_threshold,omitempty"`
 }
 
 // ---------------------------------------------------------------------------

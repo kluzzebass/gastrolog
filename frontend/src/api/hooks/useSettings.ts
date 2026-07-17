@@ -49,6 +49,8 @@ type ServiceCluster = {
   broadcastInterval?: string;
   heartbeatInterval?: string;
   pipelineBacklogMaxBytes?: bigint;
+  /** Alarm activations per node per rolling 10 minutes before alarm-flood raises. 0 = default (10). */
+  alarmFloodThreshold?: number;
 };
 
 export type PutServiceSettingsArgs = {

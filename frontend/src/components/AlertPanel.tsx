@@ -1,10 +1,12 @@
+import { useState } from "react";
 import { useThemeClass } from "../hooks/useThemeClass";
-import { AlarmPriority } from "../api/hooks/useAlerts";
-import type { NodeAlert } from "../api/hooks/useAlerts";
+import { AlarmPriority, collapseFloodAlerts } from "../api/hooks/useAlerts";
+import type { NodeAlert, NodeFlood } from "../api/hooks/useAlerts";
 import { encode } from "../api/glid";
 
 interface AlertPanelProps {
   alerts: NodeAlert[];
+  floods: NodeFlood[];
   dark: boolean;
   onClose: () => void;
 }
@@ -60,8 +62,20 @@ function PriorityIcon({ alarm }: Readonly<{ alarm: NodeAlert }>) {
   );
 }
 
-export function AlertPanel({ alerts, dark, onClose }: Readonly<AlertPanelProps>) {
+export function AlertPanel({ alerts, floods, dark, onClose }: Readonly<AlertPanelProps>) {
   const c = useThemeClass(dark);
+  // Flood-mode collapse: same-type alarms of a flooding node fold into one
+  // row with a count. Aggregation-side only — the wire keeps every instance.
+  const floodingNodeIds = new Set(floods.map((f) => f.nodeId));
+  const groups = collapseFloodAlerts(alerts, floodingNodeIds);
+  const [expandedGroups, setExpandedGroups] = useState<ReadonlySet<string>>(new Set());
+  const toggleGroup = (key: string) =>
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-16" onClick={onClose}>
@@ -97,34 +111,106 @@ export function AlertPanel({ alerts, dark, onClose }: Readonly<AlertPanelProps>)
           </button>
         </div>
 
+        {floods.length > 0 && (
+          <div
+            className={`px-4 py-2 border-b bg-severity-warn/10 ${c(
+              "border-ink-border-subtle",
+              "border-light-border-subtle",
+            )}`}
+          >
+            {floods.map((f) => (
+              <p key={f.nodeId} className="text-xs font-mono text-severity-warn">
+                Alarm flood on {f.nodeName} — {f.rate} alarms in 10 min. Same-type alarms are
+                collapsed below.
+              </p>
+            ))}
+          </div>
+        )}
+
         <div className="max-h-80 overflow-y-auto">
-          {alerts.map((a) => (
-            <div
-              key={`${a.nodeId}:${encode(a.id)}`}
-              className={`flex gap-3 px-4 py-3 border-b last:border-b-0 ${c(
-                "border-ink-border-subtle",
-                "border-light-border-subtle",
-              )}`}
-            >
-              <PriorityIcon alarm={a} />
-              <div className="flex-1 min-w-0">
-                <p className={`text-sm ${c("text-text-normal", "text-light-text-normal")}`}>
-                  {a.detail}
-                </p>
-                {a.response && (
-                  <p className={`mt-1 text-xs ${c("text-text-muted", "text-light-text-muted")}`}>
-                    {a.response}
-                  </p>
-                )}
-                <div className={`flex gap-3 mt-1 text-xs font-mono ${c("text-text-muted", "text-light-text-muted")}`}>
-                  <span className={priorityColor(a)}>{priorityLabel(a)}</span>
-                  <span>{a.nodeName}</span>
-                  <span>{a.source}</span>
-                  <span title="First seen">{formatTime(a.firstSeen?.seconds)}</span>
-                </div>
+          {groups.map((g) => {
+            const head = g.alerts[0]!;
+            if (g.alerts.length === 1) {
+              return <AlertRow key={g.key} alarm={head} dark={dark} />;
+            }
+            const expanded = expandedGroups.has(g.key);
+            return (
+              <div
+                key={g.key}
+                className={`border-b last:border-b-0 ${c(
+                  "border-ink-border-subtle",
+                  "border-light-border-subtle",
+                )}`}
+              >
+                <button
+                  onClick={() => toggleGroup(g.key)}
+                  aria-expanded={expanded}
+                  className={`w-full text-left flex gap-3 px-4 py-3 ${c(
+                    "hover:bg-ink-hover",
+                    "hover:bg-light-hover",
+                  )}`}
+                >
+                  <PriorityIcon alarm={head} />
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-sm ${c("text-text-normal", "text-light-text-normal")}`}>
+                      {head.cause || head.detail}
+                    </p>
+                    <div
+                      className={`flex gap-3 mt-1 text-xs font-mono ${c("text-text-muted", "text-light-text-muted")}`}
+                    >
+                      <span className={priorityColor(head)}>{priorityLabel(head)}</span>
+                      <span>{head.nodeName}</span>
+                      <span>{head.typeId}</span>
+                      <span>
+                        ×{g.alerts.length} {expanded ? "▾" : "▸"}
+                      </span>
+                    </div>
+                  </div>
+                </button>
+                {expanded &&
+                  g.alerts.map((a) => (
+                    <AlertRow
+                      key={`${a.nodeId}:${encode(a.id)}`}
+                      alarm={a}
+                      dark={dark}
+                      nested
+                    />
+                  ))}
               </div>
-            </div>
-          ))}
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AlertRow({
+  alarm: a,
+  dark,
+  nested,
+}: Readonly<{ alarm: NodeAlert; dark: boolean; nested?: boolean }>) {
+  const c = useThemeClass(dark);
+  return (
+    <div
+      className={`flex gap-3 py-3 ${nested ? "pl-11 pr-4" : "px-4 border-b last:border-b-0"} ${c(
+        "border-ink-border-subtle",
+        "border-light-border-subtle",
+      )}`}
+    >
+      <PriorityIcon alarm={a} />
+      <div className="flex-1 min-w-0">
+        <p className={`text-sm ${c("text-text-normal", "text-light-text-normal")}`}>{a.detail}</p>
+        {a.response && (
+          <p className={`mt-1 text-xs ${c("text-text-muted", "text-light-text-muted")}`}>
+            {a.response}
+          </p>
+        )}
+        <div className={`flex gap-3 mt-1 text-xs font-mono ${c("text-text-muted", "text-light-text-muted")}`}>
+          <span className={priorityColor(a)}>{priorityLabel(a)}</span>
+          <span>{a.nodeName}</span>
+          <span>{a.source}</span>
+          <span title="First seen">{formatTime(a.firstSeen?.seconds)}</span>
         </div>
       </div>
     </div>

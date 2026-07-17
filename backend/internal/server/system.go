@@ -264,6 +264,7 @@ func (s *SystemServer) buildFullSettingsResponse(ctx context.Context, includeSec
 			BroadcastInterval:       ss.Cluster.BroadcastInterval,
 			HeartbeatInterval:       ss.Cluster.HeartbeatInterval,
 			PipelineBacklogMaxBytes: ss.Cluster.PipelineBacklogMaxBytes,
+			AlarmFloodThreshold:     ss.Cluster.AlarmFloodThreshold,
 		},
 		SetupWizardDismissed: func() bool { v, _ := s.sysStore.GetSetupWizardDismissed(ctx); return v }(),
 		NodeId:               []byte(s.localNodeID),
@@ -1256,6 +1257,11 @@ func mergeCluster(c *apiv1.PutClusterSettings, cluster *system.ClusterConfig) *c
 	}
 	if c.PipelineBacklogMaxBytes != nil {
 		cluster.PipelineBacklogMaxBytes = *c.PipelineBacklogMaxBytes
+	}
+	if c.AlarmFloodThreshold != nil {
+		// 0 = reset to the default (alert.DefaultFloodThreshold); every node's
+		// rate monitor resolves 0 to the default when it converges.
+		cluster.AlarmFloodThreshold = *c.AlarmFloodThreshold
 	}
 	return nil
 }

@@ -158,6 +158,13 @@ var catalog = []AlarmType{
 		Response: "Check cloud credentials, endpoint and network; sealed chunks accumulate locally until the store is restored.",
 	},
 	{
+		IDPrefix: FloodTypeID, // "alarm-flood"
+		Priority: High,
+		Source:   "alarm-system",
+		Cause:    "This node has raised more alarms in the last 10 minutes than the flood threshold. The alarm list has outrun what an operator can read, so individual alarms on this node are losing their annunciation value.",
+		Response: "The alarm system on this node is degraded by volume: triage by priority — Critical first — and expect suppressed detail (same-type alarms collapse in the panel). Clears on its own once the rate stays under the threshold for a full 10-minute window; the threshold is adjustable in the cluster settings.",
+	},
+	{
 		IDPrefix: "vault-leaderless",
 		Priority: High,
 		Source:   "placement",

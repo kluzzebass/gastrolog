@@ -676,8 +676,15 @@ type NodeStats struct {
 	// fire when the backlog actually threatens something. Like raft_state,
 	// this is the level's String() rather than an enum.
 	IngestPressureLevel string `protobuf:"bytes,51,opt,name=ingest_pressure_level,json=ingestPressureLevel,proto3" json:"ingest_pressure_level,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	// Alarm activations on THIS node in the rolling 10-minute window — the
+	// alarm system's self-monitoring rate gauge (EEMUA 191 rate principle).
+	// Per-node by design: the collector is per-node, so a flood is a fact
+	// about one node's alarm system; there is no cluster-aggregate flood.
+	// Over the operator-set threshold the node raises the single alarm-flood
+	// meta-alarm (see the alarm catalog).
+	AlarmRate_10M uint32 `protobuf:"varint,52,opt,name=alarm_rate_10m,json=alarmRate10m,proto3" json:"alarm_rate_10m,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *NodeStats) Reset() {
@@ -1067,6 +1074,13 @@ func (x *NodeStats) GetIngestPressureLevel() string {
 	return ""
 }
 
+func (x *NodeStats) GetAlarmRate_10M() uint32 {
+	if x != nil {
+		return x.AlarmRate_10M
+	}
+	return 0
+}
+
 // VaultPipelineNodeDisk is one vault's local pipeline storage areas on a
 // single node, included in the periodic NodeStats broadcast.
 type VaultPipelineNodeDisk struct {
@@ -1401,6 +1415,10 @@ type SystemAlert struct {
 	// (EEMUA 191): their response is to report the defect, so they sit outside
 	// the consequence × urgency priority scale (priority is UNSPECIFIED).
 	SoftwareFault bool `protobuf:"varint,9,opt,name=software_fault,json=softwareFault,proto3" json:"software_fault,omitempty"`
+	// Catalog type ID ("vault-leaderless", "alarm-flood", ...) — the id field
+	// minus the instance key. Carried explicitly so aggregation-side flood
+	// collapse groups by type without re-deriving it from the id format.
+	TypeId        string `protobuf:"bytes,10,opt,name=type_id,json=typeId,proto3" json:"type_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1496,6 +1514,13 @@ func (x *SystemAlert) GetSoftwareFault() bool {
 		return x.SoftwareFault
 	}
 	return false
+}
+
+func (x *SystemAlert) GetTypeId() string {
+	if x != nil {
+		return x.TypeId
+	}
+	return ""
 }
 
 // IngesterNodeStats reports per-ingester statistics on a cluster node.
@@ -4595,7 +4620,7 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\apayload\"\v\n" +
 	"\tHeartbeat\"1\n" +
 	"\bNodeJobs\x12%\n" +
-	"\x04jobs\x18\x01 \x03(\v2\x11.gastrolog.v1.JobR\x04jobs\"\xbb\x13\n" +
+	"\x04jobs\x18\x01 \x03(\v2\x11.gastrolog.v1.JobR\x04jobs\"\xe1\x13\n" +
 	"\tNodeStats\x12\x1f\n" +
 	"\vcpu_percent\x18\x01 \x01(\x01R\n" +
 	"cpuPercent\x12!\n" +
@@ -4655,7 +4680,8 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x18disk_protected_vault_ids\x180 \x03(\fR\x15diskProtectedVaultIds\x121\n" +
 	"\x15size_capped_vault_ids\x181 \x03(\fR\x12sizeCappedVaultIds\x129\n" +
 	"\x19self_ingester_drops_total\x182 \x01(\x04R\x16selfIngesterDropsTotal\x122\n" +
-	"\x15ingest_pressure_level\x183 \x01(\tR\x13ingestPressureLevel\"\xec\x01\n" +
+	"\x15ingest_pressure_level\x183 \x01(\tR\x13ingestPressureLevel\x12$\n" +
+	"\x0ealarm_rate_10m\x184 \x01(\rR\falarmRate10m\"\xec\x01\n" +
 	"\x15VaultPipelineNodeDisk\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12)\n" +
 	"\x10working_segments\x18\x02 \x01(\rR\x0fworkingSegments\x12<\n" +
@@ -4687,7 +4713,7 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x10tx_bytes_per_sec\x18\x04 \x01(\x01R\rtxBytesPerSec\x12'\n" +
 	"\x10rx_bytes_per_sec\x18\x05 \x01(\x01R\rrxBytesPerSec\x12\x19\n" +
 	"\btx_spark\x18\x06 \x03(\x01R\atxSpark\x12\x19\n" +
-	"\brx_spark\x18\a \x03(\x01R\arxSpark\"\xd3\x02\n" +
+	"\brx_spark\x18\a \x03(\x01R\arxSpark\"\xec\x02\n" +
 	"\vSystemAlert\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x127\n" +
 	"\bpriority\x18\x02 \x01(\x0e2\x1b.gastrolog.v1.AlarmPriorityR\bpriority\x12\x16\n" +
@@ -4698,7 +4724,9 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\tlast_seen\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\blastSeen\x12\x14\n" +
 	"\x05cause\x18\a \x01(\tR\x05cause\x12\x1a\n" +
 	"\bresponse\x18\b \x01(\tR\bresponse\x12%\n" +
-	"\x0esoftware_fault\x18\t \x01(\bR\rsoftwareFault\"\xbd\x01\n" +
+	"\x0esoftware_fault\x18\t \x01(\bR\rsoftwareFault\x12\x17\n" +
+	"\atype_id\x18\n" +
+	" \x01(\tR\x06typeId\"\xbd\x01\n" +
 	"\x11IngesterNodeStats\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12+\n" +
 	"\x11messages_ingested\x18\x02 \x01(\x04R\x10messagesIngested\x12%\n" +

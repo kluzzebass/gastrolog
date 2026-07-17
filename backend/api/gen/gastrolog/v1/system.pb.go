@@ -3674,8 +3674,13 @@ type ClusterSettings struct {
 	// chunking drains it below the budget. The operating bound that engages
 	// BEFORE disk pressure; the disk guard remains the backstop. 0 = unbounded.
 	PipelineBacklogMaxBytes uint64 `protobuf:"varint,3,opt,name=pipeline_backlog_max_bytes,json=pipelineBacklogMaxBytes,proto3" json:"pipeline_backlog_max_bytes,omitempty"`
-	unknownFields           protoimpl.UnknownFields
-	sizeCache               protoimpl.SizeCache
+	// Alarm-flood threshold: alarm activations per node per rolling 10 minutes
+	// above which that node raises the alarm-flood meta-alarm (EEMUA 191 rate
+	// self-monitoring). Applies on every node — the rate is measured per node.
+	// 0 = default (10).
+	AlarmFloodThreshold uint32 `protobuf:"varint,4,opt,name=alarm_flood_threshold,json=alarmFloodThreshold,proto3" json:"alarm_flood_threshold,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *ClusterSettings) Reset() {
@@ -3725,6 +3730,13 @@ func (x *ClusterSettings) GetHeartbeatInterval() string {
 func (x *ClusterSettings) GetPipelineBacklogMaxBytes() uint64 {
 	if x != nil {
 		return x.PipelineBacklogMaxBytes
+	}
+	return 0
+}
+
+func (x *ClusterSettings) GetAlarmFloodThreshold() uint32 {
+	if x != nil {
+		return x.AlarmFloodThreshold
 	}
 	return 0
 }
@@ -4310,6 +4322,7 @@ type PutClusterSettings struct {
 	BroadcastInterval       *string                `protobuf:"bytes,1,opt,name=broadcast_interval,json=broadcastInterval,proto3,oneof" json:"broadcast_interval,omitempty"`
 	HeartbeatInterval       *string                `protobuf:"bytes,2,opt,name=heartbeat_interval,json=heartbeatInterval,proto3,oneof" json:"heartbeat_interval,omitempty"`
 	PipelineBacklogMaxBytes *uint64                `protobuf:"varint,3,opt,name=pipeline_backlog_max_bytes,json=pipelineBacklogMaxBytes,proto3,oneof" json:"pipeline_backlog_max_bytes,omitempty"`
+	AlarmFloodThreshold     *uint32                `protobuf:"varint,4,opt,name=alarm_flood_threshold,json=alarmFloodThreshold,proto3,oneof" json:"alarm_flood_threshold,omitempty"`
 	unknownFields           protoimpl.UnknownFields
 	sizeCache               protoimpl.SizeCache
 }
@@ -4361,6 +4374,13 @@ func (x *PutClusterSettings) GetHeartbeatInterval() string {
 func (x *PutClusterSettings) GetPipelineBacklogMaxBytes() uint64 {
 	if x != nil && x.PipelineBacklogMaxBytes != nil {
 		return *x.PipelineBacklogMaxBytes
+	}
+	return 0
+}
+
+func (x *PutClusterSettings) GetAlarmFloodThreshold() uint32 {
+	if x != nil && x.AlarmFloodThreshold != nil {
+		return *x.AlarmFloodThreshold
 	}
 	return 0
 }
@@ -9139,11 +9159,12 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x06values\x18\x01 \x03(\v2).gastrolog.v1.StaticLookupRow.ValuesEntryR\x06values\x1a9\n" +
 	"\vValuesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xac\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xe0\x01\n" +
 	"\x0fClusterSettings\x12-\n" +
 	"\x12broadcast_interval\x18\x01 \x01(\tR\x11broadcastInterval\x12-\n" +
 	"\x12heartbeat_interval\x18\x02 \x01(\tR\x11heartbeatInterval\x12;\n" +
-	"\x1apipeline_backlog_max_bytes\x18\x03 \x01(\x04R\x17pipelineBacklogMaxBytes\"\xf8\x03\n" +
+	"\x1apipeline_backlog_max_bytes\x18\x03 \x01(\x04R\x17pipelineBacklogMaxBytes\x122\n" +
+	"\x15alarm_flood_threshold\x18\x04 \x01(\rR\x13alarmFloodThreshold\"\xf8\x03\n" +
 	"\x13GetSettingsResponse\x12.\n" +
 	"\x04auth\x18\x01 \x01(\v2\x1a.gastrolog.v1.AuthSettingsR\x04auth\x121\n" +
 	"\x05query\x18\x02 \x01(\v2\x1b.gastrolog.v1.QuerySettingsR\x05query\x12=\n" +
@@ -9214,14 +9235,16 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\vcsv_lookups\x18\x04 \x03(\v2\x1c.gastrolog.v1.CSVLookupEntryR\n" +
 	"csvLookups\x12F\n" +
 	"\x0estatic_lookups\x18\x05 \x03(\v2\x1f.gastrolog.v1.StaticLookupEntryR\rstaticLookups\x12M\n" +
-	"\x11yaml_file_lookups\x18\x06 \x03(\v2!.gastrolog.v1.YAMLFileLookupEntryR\x0fyamlFileLookups\"\x8b\x02\n" +
+	"\x11yaml_file_lookups\x18\x06 \x03(\v2!.gastrolog.v1.YAMLFileLookupEntryR\x0fyamlFileLookups\"\xde\x02\n" +
 	"\x12PutClusterSettings\x122\n" +
 	"\x12broadcast_interval\x18\x01 \x01(\tH\x00R\x11broadcastInterval\x88\x01\x01\x122\n" +
 	"\x12heartbeat_interval\x18\x02 \x01(\tH\x01R\x11heartbeatInterval\x88\x01\x01\x12@\n" +
-	"\x1apipeline_backlog_max_bytes\x18\x03 \x01(\x04H\x02R\x17pipelineBacklogMaxBytes\x88\x01\x01B\x15\n" +
+	"\x1apipeline_backlog_max_bytes\x18\x03 \x01(\x04H\x02R\x17pipelineBacklogMaxBytes\x88\x01\x01\x127\n" +
+	"\x15alarm_flood_threshold\x18\x04 \x01(\rH\x03R\x13alarmFloodThreshold\x88\x01\x01B\x15\n" +
 	"\x13_broadcast_intervalB\x15\n" +
 	"\x13_heartbeat_intervalB\x1d\n" +
-	"\x1b_pipeline_backlog_max_bytes\"\xb2\x02\n" +
+	"\x1b_pipeline_backlog_max_bytesB\x18\n" +
+	"\x16_alarm_flood_threshold\"\xb2\x02\n" +
 	"\x19PutServiceSettingsRequest\x121\n" +
 	"\x04auth\x18\x01 \x01(\v2\x1d.gastrolog.v1.PutAuthSettingsR\x04auth\x124\n" +
 	"\x05query\x18\x02 \x01(\v2\x1e.gastrolog.v1.PutQuerySettingsR\x05query\x12@\n" +

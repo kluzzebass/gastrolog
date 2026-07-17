@@ -130,6 +130,7 @@ Verdicts under the governing test:
 | `disk-space-low:<vault>` *(split)* | storage | Vault volume below its free-space warn band | **Alarm** | Low | Free space, add capacity, raise the vault's threshold, or shorten its retention |
 | `node-disk-space-low` *(node, split)* | storage | Node volume below its free-space warn band | **Alarm** | Low | Free space, add capacity, or shorten retention |
 | `<kind>-rate:<vault>` (prod: `retention-rate:<vault>`) | ratealerter | Operator-configured rate threshold crossed | **Alarm** (operator-defined) | from the rule (lower threshold → Low, escalation threshold → High) | The operator defined the threshold; the response text comes from the rule. Not a catalog alarm — enters via `RaiseOperator`, beside the catalog. See [gastrolog-1cruar] |
+| `alarm-flood` | alarm-system | This node's alarm activations exceeded the flood threshold (default 10 per rolling 10 minutes) — the alarm system reporting itself degraded (EEMUA 191 rate principle) | **Alarm** | High | The alarm system on this node is degraded by volume: triage by priority — Critical first — and expect suppressed detail (same-type alarms collapse in the panel). Clears on its own after a full under-threshold 10-minute window; threshold adjustable in cluster settings. Exactly one per node regardless of overshoot; never counts toward its own rate |
 | **`vault-home-cannot-store:<vault>`** | placement | A vault home node is disk-protected; collection and builds paused there | **NEEDS VERDICT** (interim: Alarm) | Low (interim) | Razor is unclear. When healthy replicas ≥ RF the text itself says replicas are "backfilled automatically" — handled, nothing waits on an operator. When healthy < RF, the action is "free space", which is already `disk-space-*`'s action on that node. What it uniquely adds is *which vault* is affected. Demote to a metric, or keep as the vault-scoped view of a node condition? Until the verdict lands, the phase 2 registry keeps it as a Low alarm (the code still raises it; a raised type must be cataloged) |
 | *(retention unrouted destroy — row retired)* | retention | Chunk destroyed with zero records routed | **Not an alarm — prevented** | — | Resolved in [gastrolog-65riw5]: the condition no longer occurs, so there is nothing to alarm on. An unreadable cursor now flags the chunk for backoff retry and raises `chunk-unreadable:<chunk>` (which has its own row); a missing vault instance retains the chunk. No alarm was invented — the existing one covers it. **Partial** fan-out remains a deliberate tolerance and is reported with a dropped-record count, not an alarm; see the note below |
 | chanwatch saturation | chanwatch | Internal channel saturated past watermark | **Event** (demoted ✓) | — | Landed: transition-edge logs. Journal surface lands with phase 5 |
@@ -298,12 +299,49 @@ must not carry.
 
 ## Rate self-monitoring
 
-The collector tracks alarms raised per rolling 10 minutes. Over threshold
-(default 10/10min) it raises exactly one meta-alarm — `alarm-flood` —
-which is itself an alarm by the razor: the operator's action is "the
-alarm system is degraded; triage by priority, expect suppressed detail."
-Flood mode collapses per-instance alarms of the same type into one row
-with a count.
+*(Landed with phase 6 — `internal/alert/ratemonitor.go`.)*
+
+The alarm system measures its own annunciation rate (EEMUA 191 principle
+2: steady-state target ~1 alarm per operator per 10 minutes, explicit
+flood handling for upsets). A `RateMonitor` beside the collector counts
+alarm **activations** — transitions inactive → active via the collector's
+activation hook; refreshes of an already-active alarm never count — over a
+rolling 10-minute window. Over threshold it raises exactly one meta-alarm,
+`alarm-flood`, which passes the razor: the operator's action is "the alarm
+system is degraded; triage by priority, expect suppressed detail." The
+flood alarm never counts toward its own rate — a flood cannot produce a
+flood of floods. It clears once the rate has stayed under the threshold
+for a full window (the clear instant is computed from activation expiries,
+not from tick timing). The monitor's clock is injectable; every rate test
+advances it deterministically.
+
+Decisions:
+
+- **Flood scope is per-node.** The collector is per-node, so the rate is a
+  fact about one node's alarm system; each node's monitor raises its own
+  `alarm-flood`, and the aggregated UI names the flooding node. There is
+  no cluster-aggregate flood — summing rates across nodes would blur which
+  alarm system is degraded and would misfire on large healthy clusters.
+  The gauge travels as `NodeStats.alarm_rate_10m`, per-node truth that is
+  never summed.
+- **Collapse happens on the aggregation side (UI), not in the collector.**
+  Flood mode folds same-type alarms of the flooding node into one row with
+  a count, expandable to the instances on interaction
+  (`collapseFloodAlerts` in `useAlerts.ts`). Collapsing in the collector
+  would destroy per-node, per-instance truth on the wire; the display is
+  the right layer for a display concern, and the collapse is reversible
+  per interaction. `SystemAlert` carries `type_id` explicitly so grouping
+  never re-derives the type from the ID format. A non-flooding node's
+  alarms stay itemized even while another node floods.
+- **The threshold is a named, operator-adjustable cluster setting**
+  (`ClusterConfig.AlarmFloodThreshold`, default
+  `alert.DefaultFloodThreshold` = 10; stored 0 = default). It lives in the
+  Raft-replicated server settings, so a change saved on any node reaches
+  every node; each node's `alarm-rate-monitor` scheduler job converges the
+  threshold on its next tick (the discovery-based shape used by the disk
+  guard's backlog budget) and advances the flood state machine so a flood
+  clears even when no new alarms arrive. The window itself (10 minutes) is
+  fixed by the standard, not a setting.
 
 ## UI
 
@@ -311,7 +349,11 @@ with a count.
 - Each alarm row expands to cause + response text from the catalog.
 - Ack / shelve controls per row; shelved and cleared-unacked sections
   collapsed below.
-- Rate/flood indicator in the panel header.
+- Rate/flood indicator in the panel header: quiet until needed — nothing
+  at normal rates; during a flood the header pill reads "Alarm Flood" and
+  the panel shows a per-node banner naming the flooding node and its
+  10-minute rate. Flood mode collapses that node's same-type alarms into
+  one row with a count, expandable to the instances.
 - Event journal is a separate page: filterable, no controls, no color
   escalation — it is a record, not a call to action.
 - CLI surface: `gastrolog alerts` (per-node attribution, `--node` filter,
@@ -343,7 +385,8 @@ with a count.
    fan-out, ack persistence.
 5. **Event journal** — ring buffer, RPC, UI page; move demoted
    diagnostics and lifecycle transitions onto it.
-6. **Self-monitoring** — rate gauge, flood meta-alarm, flood collapse.
+6. **Self-monitoring** ✓ — rate gauge, flood meta-alarm, flood collapse
+   (see Rate self-monitoring above for the landed shape and decisions).
 7. **Vocabulary** — ubiquitous_language.md entries land with phase 2.
 
 Each phase is independently shippable; phases 2–4 touch every alert call

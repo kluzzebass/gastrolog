@@ -146,6 +146,35 @@ type Collector struct {
 	// suppression tests advance time deterministically — never with
 	// sleeps — and so sibling features on the collector share one clock.
 	now func() time.Time
+
+	// onActivate, when set, is invoked after an alarm annunciates — the
+	// inactive → active transition in settleLocked, which for delayed
+	// types may happen on a read rather than a Raise. Never invoked on a
+	// refresh of an already-active alarm or a delay-off resume of the
+	// same occurrence. Called outside the collector lock, because the
+	// hook may raise back into the collector (the rate monitor raising
+	// alarm-flood). Wired to RateMonitor.Observe.
+	onActivate func(typeID string)
+}
+
+// SetOnActivate installs the activation hook. Wire once at startup, before
+// components start raising.
+func (c *Collector) SetOnActivate(fn func(typeID string)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.onActivate = fn
+}
+
+// fireActivations invokes the activation hook for each annunciated type.
+// Callers pass the hook captured under the lock and call this after
+// unlocking — hook re-entry into the collector must not deadlock.
+func fireActivations(hook func(typeID string), typeIDs []string) {
+	if hook == nil {
+		return
+	}
+	for _, t := range typeIDs {
+		hook(t)
+	}
 }
 
 // New creates a new alarm collector on the wall clock.
@@ -224,11 +253,11 @@ func (c *Collector) RaiseOperator(a OperatorAlarm) {
 // harmlessly re-stamped); FirstSeen is preserved across the occurrence.
 func (c *Collector) raise(a Alarm, delayOn, delayOff time.Duration, latching bool) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	var activated []string
 
 	now := c.now()
 	e := c.entries[a.ID]
-	if e != nil && c.settleLocked(e, now) {
+	if e != nil && c.settleLocked(e, now, &activated) {
 		// The previous occurrence's delay-off window had already expired;
 		// this raise starts a fresh one.
 		delete(c.entries, a.ID)
@@ -246,23 +275,25 @@ func (c *Collector) raise(a Alarm, delayOn, delayOff time.Duration, latching boo
 		a.LastSeen = now
 		e.alarm = a
 		c.entries[a.ID] = e
-		c.settleLocked(e, now) // zero DelayOn activates immediately
-		return
+		c.settleLocked(e, now, &activated) // zero DelayOn activates immediately
+	} else {
+		firstSeen := e.alarm.FirstSeen
+		e.alarm = a
+		e.alarm.FirstSeen = firstSeen
+		e.alarm.LastSeen = now
+		e.delayOn, e.delayOff, e.latching = delayOn, delayOff, latching
+		if !e.conditionUp {
+			// The condition returned inside the delay-off window (or on a
+			// latched alarm): the same occurrence continues — the alarm stays
+			// active with its FirstSeen, no re-occurrence, no activation edge.
+			e.conditionUp = true
+			e.clearedAt = time.Time{}
+		}
+		c.settleLocked(e, now, &activated)
 	}
-
-	firstSeen := e.alarm.FirstSeen
-	e.alarm = a
-	e.alarm.FirstSeen = firstSeen
-	e.alarm.LastSeen = now
-	e.delayOn, e.delayOff, e.latching = delayOn, delayOff, latching
-	if !e.conditionUp {
-		// The condition returned inside the delay-off window (or on a
-		// latched alarm): the same occurrence continues — the alarm stays
-		// active with its FirstSeen, no re-occurrence.
-		e.conditionUp = true
-		e.clearedAt = time.Time{}
-	}
-	c.settleLocked(e, now)
+	hook := c.onActivate
+	c.mu.Unlock()
+	fireActivations(hook, activated)
 }
 
 // Clear reports that the condition of the given type for the given instance
@@ -281,15 +312,24 @@ func (c *Collector) raise(a Alarm, delayOn, delayOff time.Duration, latching boo
 //     occurrence.
 func (c *Collector) Clear(typeID, instanceKey string) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	var activated []string
+	c.clearLocked(typeID, instanceKey, &activated)
+	hook := c.onActivate
+	c.mu.Unlock()
+	// A pending condition whose delay-on elapsed before this Clear arrived
+	// annunciated during settling — it outlived its window, so it counts.
+	fireActivations(hook, activated)
+}
 
+// clearLocked is Clear's body; caller holds c.mu.
+func (c *Collector) clearLocked(typeID, instanceKey string, activated *[]string) {
 	id := alarmID(typeID, instanceKey)
 	e, ok := c.entries[id]
 	if !ok {
 		return
 	}
 	now := c.now()
-	if c.settleLocked(e, now) {
+	if c.settleLocked(e, now, activated) {
 		delete(c.entries, id)
 		return
 	}
@@ -326,11 +366,13 @@ func (c *Collector) Clear(typeID, instanceKey string) {
 // an active entry whose condition has stayed clear past DelayOff so the
 // caller removes it. Transition edges of suppressed types are logged here —
 // the call site cannot log them, since it no longer knows when the window
-// elapses. Caller holds c.mu.
-func (c *Collector) settleLocked(e *entry, now time.Time) (expired bool) {
+// elapses. Annunciations are appended to activated for the caller to fire
+// through the activation hook after unlocking. Caller holds c.mu.
+func (c *Collector) settleLocked(e *entry, now time.Time, activated *[]string) (expired bool) {
 	if e.conditionUp {
 		if !e.active && now.Sub(e.conditionSince) >= e.delayOn {
 			e.active = true
+			*activated = append(*activated, e.alarm.TypeID)
 			if e.delayOn > 0 {
 				slog.Warn("alarm active — condition persisted past its delay-on window",
 					"id", e.alarm.ID, "source", e.alarm.Source, "delay_on", e.delayOn, "detail", e.alarm.Detail)
@@ -354,12 +396,12 @@ func (c *Collector) settleLocked(e *entry, now time.Time) (expired bool) {
 // cleared conditions past their delay-off window drop out.
 func (c *Collector) Active() []*Alarm {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	var activated []string
 
 	now := c.now()
 	var result []*Alarm
 	for id, e := range c.entries {
-		if c.settleLocked(e, now) {
+		if c.settleLocked(e, now, &activated) {
 			delete(c.entries, id)
 			continue
 		}
@@ -369,6 +411,12 @@ func (c *Collector) Active() []*Alarm {
 		cp := e.alarm
 		result = append(result, &cp)
 	}
+	hook := c.onActivate
+	c.mu.Unlock()
+	// Delayed conditions may annunciate on a read — the rate monitor must
+	// still see them.
+	fireActivations(hook, activated)
+
 	if len(result) == 0 {
 		return nil
 	}
@@ -382,12 +430,12 @@ func (c *Collector) Active() []*Alarm {
 // excluded), settling suppression state like Active.
 func (c *Collector) Count() int {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	var activated []string
 
 	now := c.now()
 	n := 0
 	for id, e := range c.entries {
-		if c.settleLocked(e, now) {
+		if c.settleLocked(e, now, &activated) {
 			delete(c.entries, id)
 			continue
 		}
@@ -395,5 +443,8 @@ func (c *Collector) Count() int {
 			n++
 		}
 	}
+	hook := c.onActivate
+	c.mu.Unlock()
+	fireActivations(hook, activated)
 	return n
 }

@@ -101,7 +101,7 @@ export function HeaderBar({
 
   const { totalCpu, totalMemory, totalStorage } = sumClusterStats(nodes);
 
-  const { alerts, maxRank } = useAlerts();
+  const { alerts, maxRank, floods } = useAlerts();
   const [alertPanelOpen, setAlertPanelOpen] = useState(false);
   // Highest alarm rank → design token: Critical/faults on the error token,
   // High on warn, Low on the info token.
@@ -117,6 +117,19 @@ export function HeaderBar({
 
   const loading = isLoading || nodes.length === 0;
   const noQuorum = computeNoQuorum(cluster ?? null, isLoading);
+
+  // Flood indicator: quiet until needed — the pill reads as a plain alert
+  // count at normal rates and names the flood only while one is active.
+  const alertNoun = alerts.length === 1 ? "Alert" : "Alerts";
+  const floodSummary = floods.map((f) => `${f.nodeName} (${f.rate} in 10 min)`).join(", ");
+  const alertPillTitle =
+    floods.length > 0
+      ? `Alarm flood: ${floodSummary}`
+      : `${alerts.length} active ${alertNoun.toLowerCase()}`;
+  const alertPillText =
+    floods.length > 0
+      ? `Alarm Flood — ${alerts.length} ${alertNoun}`
+      : `${alerts.length} ${alertNoun}`;
 
   return (
     <header
@@ -141,12 +154,12 @@ export function HeaderBar({
           <button
             onClick={() => setAlertPanelOpen(true)}
             className={`flex items-center gap-1.5 px-2.5 py-1 text-[0.7em] font-mono font-semibold rounded transition-all duration-200 ${alertPillClass}`}
-            title={`${alerts.length} active alert${alerts.length === 1 ? "" : "s"}`}
+            title={alertPillTitle}
           >
             <span
               className={`inline-block w-2 h-2 rounded-full animate-pulse ${alertDotClass}`}
             />
-            {alerts.length} {alerts.length === 1 ? "Alert" : "Alerts"}
+            {alertPillText}
           </button>
         )}
       </div>
@@ -272,7 +285,7 @@ export function HeaderBar({
         )}
       </div>
       {alertPanelOpen && (
-        <AlertPanel alerts={alerts} dark={dark} onClose={() => setAlertPanelOpen(false)} />
+        <AlertPanel alerts={alerts} floods={floods} dark={dark} onClose={() => setAlertPanelOpen(false)} />
       )}
     </header>
   );

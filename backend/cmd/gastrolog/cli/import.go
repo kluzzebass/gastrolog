@@ -315,6 +315,9 @@ func buildClusterSettings(c *clusterExport) *v1.PutClusterSettings {
 	if c.PipelineBacklogMaxBytes != 0 {
 		pc.PipelineBacklogMaxBytes = &c.PipelineBacklogMaxBytes
 	}
+	if c.AlarmFloodThreshold != 0 {
+		pc.AlarmFloodThreshold = &c.AlarmFloodThreshold
+	}
 	return pc
 }
 

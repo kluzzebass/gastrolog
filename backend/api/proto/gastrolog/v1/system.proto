@@ -627,6 +627,11 @@ message ClusterSettings {
   // chunking drains it below the budget. The operating bound that engages
   // BEFORE disk pressure; the disk guard remains the backstop. 0 = unbounded.
   uint64 pipeline_backlog_max_bytes = 3;
+  // Alarm-flood threshold: alarm activations per node per rolling 10 minutes
+  // above which that node raises the alarm-flood meta-alarm (EEMUA 191 rate
+  // self-monitoring). Applies on every node — the rate is measured per node.
+  // 0 = default (10).
+  uint32 alarm_flood_threshold = 4;
 }
 
 message GetSettingsResponse {
@@ -695,6 +700,7 @@ message PutClusterSettings {
   optional string broadcast_interval = 1;
   optional string heartbeat_interval = 2;
   optional uint64 pipeline_backlog_max_bytes = 3;
+  optional uint32 alarm_flood_threshold = 4;
 }
 
 message PutServiceSettingsRequest {
