@@ -18,12 +18,12 @@ func mkAlertNode(id, name string, alerts ...*v1.SystemAlert) *v1.ClusterNode {
 	}
 }
 
-func mkAlert(id string, sev v1.AlertSeverity, source, msg string, firstSeen time.Time) *v1.SystemAlert {
+func mkAlert(id string, pri v1.AlarmPriority, source, detail string, firstSeen time.Time) *v1.SystemAlert {
 	return &v1.SystemAlert{
 		Id:        []byte(id),
-		Severity:  sev,
+		Priority:  pri,
 		Source:    source,
-		Message:   msg,
+		Detail:    detail,
 		FirstSeen: timestamppb.New(firstSeen),
 		LastSeen:  timestamppb.New(firstSeen.Add(time.Minute)),
 	}
@@ -36,8 +36,8 @@ func TestCollectNodeAlerts_Attribution(t *testing.T) {
 	t.Parallel()
 	t0 := time.Date(2026, 7, 17, 10, 0, 0, 0, time.UTC)
 	nodes := []*v1.ClusterNode{
-		mkAlertNode("node-A", "alpha", mkAlert("disk:v1", v1.AlertSeverity_ALERT_SEVERITY_ERROR, "diskguard", "disk protect engaged", t0.Add(2*time.Second))),
-		mkAlertNode("node-B", "beta", mkAlert("disk:v1", v1.AlertSeverity_ALERT_SEVERITY_ERROR, "diskguard", "disk protect engaged", t0)),
+		mkAlertNode("node-A", "alpha", mkAlert("disk-space-exhausted:v1", v1.AlarmPriority_ALARM_PRIORITY_HIGH, "diskguard", "disk protect engaged", t0.Add(2*time.Second))),
+		mkAlertNode("node-B", "beta", mkAlert("disk-space-exhausted:v1", v1.AlarmPriority_ALARM_PRIORITY_HIGH, "diskguard", "disk protect engaged", t0)),
 	}
 
 	got := collectNodeAlerts(nodes, "")
@@ -48,7 +48,7 @@ func TestCollectNodeAlerts_Attribution(t *testing.T) {
 	if got[0].node != "beta" || got[1].node != "alpha" {
 		t.Fatalf("attribution/order wrong: got [%s, %s], want [beta, alpha]", got[0].node, got[1].node)
 	}
-	if string(got[0].alert.Id) != "disk:v1" || string(got[1].alert.Id) != "disk:v1" {
+	if string(got[0].alert.Id) != "disk-space-exhausted:v1" || string(got[1].alert.Id) != "disk-space-exhausted:v1" {
 		t.Fatalf("alert IDs lost in collection: %q, %q", got[0].alert.Id, got[1].alert.Id)
 	}
 }
@@ -58,8 +58,8 @@ func TestCollectNodeAlerts_Attribution(t *testing.T) {
 func TestCollectNodeAlerts_NodeFilter(t *testing.T) {
 	t.Parallel()
 	t0 := time.Date(2026, 7, 17, 10, 0, 0, 0, time.UTC)
-	a := mkAlertNode("node-A", "alpha", mkAlert("x", v1.AlertSeverity_ALERT_SEVERITY_WARNING, "chunking", "m1", t0))
-	b := mkAlertNode("node-B", "", mkAlert("y", v1.AlertSeverity_ALERT_SEVERITY_ERROR, "diskguard", "m2", t0))
+	a := mkAlertNode("node-A", "alpha", mkAlert("x", v1.AlarmPriority_ALARM_PRIORITY_LOW, "chunking", "m1", t0))
+	b := mkAlertNode("node-B", "", mkAlert("y", v1.AlarmPriority_ALARM_PRIORITY_HIGH, "diskguard", "m2", t0))
 	b.Stats.NodeName = "beta-broadcast"
 	nodes := []*v1.ClusterNode{a, b}
 
@@ -136,7 +136,7 @@ func TestNodesWithoutStats(t *testing.T) {
 	t.Parallel()
 	t0 := time.Date(2026, 7, 17, 10, 0, 0, 0, time.UTC)
 	nodes := []*v1.ClusterNode{
-		mkAlertNode("node-A", "alpha", mkAlert("x", v1.AlertSeverity_ALERT_SEVERITY_WARNING, "chunking", "m", t0)),
+		mkAlertNode("node-A", "alpha", mkAlert("x", v1.AlarmPriority_ALARM_PRIORITY_LOW, "chunking", "m", t0)),
 		{Id: []byte("node-B"), Name: "beta"}, // never broadcast
 		nil,
 	}
@@ -171,39 +171,81 @@ func TestAlertNodeName(t *testing.T) {
 	}
 }
 
-// TestAlertSeverityStr pins the one severity→display mapping point.
-// When the alarm line replaces Severity with Priority, this test and
-// alertSeverityStr are the whole CLI-side change.
-func TestAlertSeverityStr(t *testing.T) {
+// TestAlarmPriorityStr pins the one priority→display mapping point.
+// Software faults sit outside the priority scale and render as FAULT.
+func TestAlarmPriorityStr(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		sev  v1.AlertSeverity
-		want string
+		alert *v1.SystemAlert
+		want  string
 	}{
-		{v1.AlertSeverity_ALERT_SEVERITY_WARNING, "WARNING"},
-		{v1.AlertSeverity_ALERT_SEVERITY_ERROR, "ERROR"},
-		{v1.AlertSeverity_ALERT_SEVERITY_UNSPECIFIED, "UNSPECIFIED"},
+		{&v1.SystemAlert{Priority: v1.AlarmPriority_ALARM_PRIORITY_LOW}, "LOW"},
+		{&v1.SystemAlert{Priority: v1.AlarmPriority_ALARM_PRIORITY_HIGH}, "HIGH"},
+		{&v1.SystemAlert{Priority: v1.AlarmPriority_ALARM_PRIORITY_CRITICAL}, "CRITICAL"},
+		{&v1.SystemAlert{Priority: v1.AlarmPriority_ALARM_PRIORITY_UNSPECIFIED}, "UNSPECIFIED"},
+		{&v1.SystemAlert{SoftwareFault: true}, "FAULT"},
+		// A fault outranks any priority value that might also be set.
+		{&v1.SystemAlert{Priority: v1.AlarmPriority_ALARM_PRIORITY_CRITICAL, SoftwareFault: true}, "FAULT"},
 	}
 	for _, tc := range tests {
-		if got := alertSeverityStr(tc.sev); got != tc.want {
-			t.Errorf("alertSeverityStr(%v) = %q, want %q", tc.sev, got, tc.want)
+		if got := alarmPriorityStr(tc.alert); got != tc.want {
+			t.Errorf("alarmPriorityStr(%+v) = %q, want %q", tc.alert, got, tc.want)
 		}
 	}
 }
 
+// TestAlarmTypeID verifies type extraction from full alarm IDs: instance
+// alarms carry "type:instance", node-scoped alarms are bare type IDs.
+func TestAlarmTypeID(t *testing.T) {
+	t.Parallel()
+	if got := alarmTypeID("disk-space-exhausted:vault1"); got != "disk-space-exhausted" {
+		t.Fatalf("instance-scoped: got %q", got)
+	}
+	if got := alarmTypeID("node-disk-space-exhausted"); got != "node-disk-space-exhausted" {
+		t.Fatalf("node-scoped: got %q", got)
+	}
+}
+
+// TestAlarmResponseLines verifies the response section dedupes by alarm
+// type: response text is a property of the type, so many instances of one
+// type yield one guidance line, and alarms with no response yield none.
+func TestAlarmResponseLines(t *testing.T) {
+	t.Parallel()
+	t0 := time.Date(2026, 7, 17, 10, 0, 0, 0, time.UTC)
+	withResponse := func(a *v1.SystemAlert, resp string) *v1.SystemAlert {
+		a.Response = resp
+		return a
+	}
+	alerts := []nodeAlert{
+		{node: "alpha", alert: withResponse(mkAlert("disk-space-exhausted:v1", v1.AlarmPriority_ALARM_PRIORITY_HIGH, "diskguard", "d1", t0), "free disk space")},
+		{node: "beta", alert: withResponse(mkAlert("disk-space-exhausted:v2", v1.AlarmPriority_ALARM_PRIORITY_HIGH, "diskguard", "d2", t0), "free disk space")},
+		{node: "alpha", alert: mkAlert("no-response-type", v1.AlarmPriority_ALARM_PRIORITY_LOW, "x", "d3", t0)},
+	}
+	lines := alarmResponseLines(alerts)
+	if len(lines) != 1 {
+		t.Fatalf("got %d lines, want 1 (deduped by type, no-response skipped): %v", len(lines), lines)
+	}
+	if lines[0] != "  disk-space-exhausted: free disk space" {
+		t.Fatalf("line = %q", lines[0])
+	}
+	if lines := alarmResponseLines(nil); len(lines) != 0 {
+		t.Fatalf("no alerts: got %v", lines)
+	}
+}
+
 // TestSystemAlertRows verifies the cluster-status table rows: attributed,
-// severity-labeled, and absent (nil) when nothing stands.
+// priority-labeled, and absent (nil) when nothing stands.
 func TestSystemAlertRows(t *testing.T) {
 	t.Parallel()
 	t0 := time.Date(2026, 7, 17, 10, 0, 0, 0, time.UTC)
 	nodes := []*v1.ClusterNode{
-		mkAlertNode("node-A", "alpha", mkAlert("wal:stall", v1.AlertSeverity_ALERT_SEVERITY_WARNING, "raftwal", "append latency degraded", t0)),
+		mkAlertNode("node-A", "alpha", mkAlert("wal-reserve:wal1", v1.AlarmPriority_ALARM_PRIORITY_CRITICAL, "raft", "reserve below floor", t0)),
 	}
 	rows := systemAlertRows(nodes)
 	if len(rows) != 1 {
 		t.Fatalf("got %d rows, want 1", len(rows))
 	}
-	want := []string{"alpha", "WARNING", "raftwal", "append latency degraded", "2026-07-17 10:00:00 UTC"}
+	want := []string{"alpha", "CRITICAL", "raft", "reserve below floor", "2026-07-17 10:00:00 UTC"}
 	for i, w := range want {
 		if rows[0][i] != w {
 			t.Fatalf("row col %d = %q, want %q", i, rows[0][i], w)
@@ -214,14 +256,16 @@ func TestSystemAlertRows(t *testing.T) {
 	}
 }
 
-// TestAlertsToJSON verifies the -o json shape keeps attribution and renders
-// severity through the single mapping function.
+// TestAlertsToJSON verifies the -o json shape keeps attribution, renders
+// priority through the single mapping function, and carries the catalog
+// text (cause/response) so scripted consumers get the full alarm.
 func TestAlertsToJSON(t *testing.T) {
 	t.Parallel()
 	t0 := time.Date(2026, 7, 17, 10, 0, 0, 0, time.UTC)
-	nodes := []*v1.ClusterNode{
-		mkAlertNode("node-A", "alpha", mkAlert("disk:v1", v1.AlertSeverity_ALERT_SEVERITY_ERROR, "diskguard", "disk protect engaged", t0)),
-	}
+	a := mkAlert("disk-space-exhausted:v1", v1.AlarmPriority_ALARM_PRIORITY_HIGH, "diskguard", "disk protect engaged", t0)
+	a.Cause = "the vault's volume is out of space"
+	a.Response = "free disk space or raise the budget"
+	nodes := []*v1.ClusterNode{mkAlertNode("node-A", "alpha", a)}
 	out := alertsToJSON(collectNodeAlerts(nodes, ""))
 	if len(out) != 1 {
 		t.Fatalf("got %d entries, want 1", len(out))
@@ -230,8 +274,14 @@ func TestAlertsToJSON(t *testing.T) {
 	if j.Node != "alpha" || j.NodeID != "node-A" {
 		t.Fatalf("attribution: node=%q node_id=%q", j.Node, j.NodeID)
 	}
-	if j.Severity != "ERROR" || j.Source != "diskguard" || j.ID != "disk:v1" {
+	if j.Priority != "HIGH" || j.Source != "diskguard" || j.ID != "disk-space-exhausted:v1" {
 		t.Fatalf("fields: %+v", j)
+	}
+	if j.Detail != "disk protect engaged" || j.Cause == "" || j.Response == "" {
+		t.Fatalf("catalog text missing: %+v", j)
+	}
+	if j.SoftwareFault {
+		t.Fatalf("software_fault should be false: %+v", j)
 	}
 	if j.FirstSeen != "2026-07-17T10:00:00Z" {
 		t.Fatalf("first_seen = %q", j.FirstSeen)

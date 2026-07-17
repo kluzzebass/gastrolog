@@ -14,7 +14,6 @@ import (
 	"testing"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
-	"gastrolog/internal/alert"
 
 	"connectrpc.com/connect"
 )
@@ -48,7 +47,7 @@ func alertsByNode(t *testing.T, h *multiNodeHarness) map[string][]*gastrologv1.S
 func TestMultiNodeAlerts_PeerAlarmVisibleFromCoordinator(t *testing.T) {
 	h := setupMultiNode(t, []string{"coord", "data-1", "data-2", "data-3"}, WithClusterStats())
 
-	h.alerts["data-2"].Set("disk-space:vault1", alert.Error, "diskguard", "disk protect engaged")
+	h.alerts["data-2"].Raise("disk-space-exhausted", "vault1", "disk protect engaged")
 
 	byNode := alertsByNode(t, h)
 	if len(byNode) != 4 {
@@ -59,10 +58,13 @@ func TestMultiNodeAlerts_PeerAlarmVisibleFromCoordinator(t *testing.T) {
 		t.Fatalf("data-2 alerts = %d, want 1", len(got))
 	}
 	a := got[0]
-	if string(a.Id) != "disk-space:vault1" || a.Source != "diskguard" ||
-		a.Message != "disk protect engaged" ||
-		a.Severity != gastrologv1.AlertSeverity_ALERT_SEVERITY_ERROR {
+	if string(a.Id) != "disk-space-exhausted:vault1" || a.Source != "storage" ||
+		a.Detail != "disk protect engaged" ||
+		a.Priority != gastrologv1.AlarmPriority_ALARM_PRIORITY_HIGH {
 		t.Fatalf("alert fields wrong: %+v", a)
+	}
+	if a.Response == "" || a.Cause == "" {
+		t.Fatalf("catalog text not stamped on the wire: %+v", a)
 	}
 	if a.FirstSeen == nil || a.LastSeen == nil {
 		t.Fatalf("alert timestamps missing: %+v", a)
@@ -95,27 +97,27 @@ func TestMultiNodeAlerts_NoAlarms(t *testing.T) {
 func TestMultiNodeAlerts_MultiNodeAttribution(t *testing.T) {
 	h := setupMultiNode(t, []string{"coord", "data-1", "data-2", "data-3"}, WithClusterStats())
 
-	h.alerts["data-1"].Set("disk-space:vault1", alert.Error, "diskguard", "disk protect engaged on data-1")
-	h.alerts["data-3"].Set("disk-space:vault1", alert.Error, "diskguard", "disk protect engaged on data-3")
+	h.alerts["data-1"].Raise("disk-space-exhausted", "vault1", "disk protect engaged on data-1")
+	h.alerts["data-3"].Raise("disk-space-exhausted", "vault1", "disk protect engaged on data-3")
 	// Coordinator-local alarm goes through the LocalStats path, not the
 	// peer provider — both must surface.
-	h.alerts["coord"].Set("wal:latency", alert.Warning, "raftwal", "append latency degraded")
+	h.alerts["coord"].Raise("wal-reserve", "cluster-ctl", "reservation below floor")
 
 	byNode := alertsByNode(t, h)
 	if n := len(byNode["data-1"]); n != 1 {
 		t.Fatalf("data-1 alerts = %d, want 1", n)
 	}
-	if got := byNode["data-1"][0].Message; got != "disk protect engaged on data-1" {
-		t.Fatalf("data-1 alert message = %q — cross-node attribution broken", got)
+	if got := byNode["data-1"][0].Detail; got != "disk protect engaged on data-1" {
+		t.Fatalf("data-1 alert detail = %q — cross-node attribution broken", got)
 	}
-	if got := byNode["data-3"][0].Message; got != "disk protect engaged on data-3" {
-		t.Fatalf("data-3 alert message = %q — cross-node attribution broken", got)
+	if got := byNode["data-3"][0].Detail; got != "disk protect engaged on data-3" {
+		t.Fatalf("data-3 alert detail = %q — cross-node attribution broken", got)
 	}
 	if n := len(byNode["coord"]); n != 1 {
 		t.Fatalf("coord alerts = %d, want 1 (LocalStats path)", n)
 	}
-	if got := byNode["coord"][0].Severity; got != gastrologv1.AlertSeverity_ALERT_SEVERITY_WARNING {
-		t.Fatalf("coord alert severity = %v, want WARNING", got)
+	if got := byNode["coord"][0].Priority; got != gastrologv1.AlarmPriority_ALARM_PRIORITY_CRITICAL {
+		t.Fatalf("coord alert priority = %v, want CRITICAL (wal-reserve catalog row)", got)
 	}
 	if n := len(byNode["data-2"]); n != 0 {
 		t.Fatalf("data-2 alerts = %d, want 0", n)
@@ -123,7 +125,7 @@ func TestMultiNodeAlerts_MultiNodeAttribution(t *testing.T) {
 
 	// Alarms are state: the condition resolving on data-1 clears exactly
 	// data-1's entry while data-3's identical ID keeps standing.
-	h.alerts["data-1"].Clear("disk-space:vault1")
+	h.alerts["data-1"].Clear("disk-space-exhausted", "vault1")
 	byNode = alertsByNode(t, h)
 	if n := len(byNode["data-1"]); n != 0 {
 		t.Fatalf("data-1 alerts after clear = %d, want 0", n)

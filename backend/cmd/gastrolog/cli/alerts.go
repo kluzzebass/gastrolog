@@ -63,14 +63,15 @@ func newAlertsCmd() *cobra.Command {
 				for _, a := range alerts {
 					rows = append(rows, []string{
 						a.node,
-						alertSeverityStr(a.alert.Severity),
+						alarmPriorityStr(a.alert),
 						a.alert.Source,
-						a.alert.Message,
+						a.alert.Detail,
 						formatAlertTS(a.alert.FirstSeen.AsTime()),
 						formatAlertTS(a.alert.LastSeen.AsTime()),
 					})
 				}
-				p.table([]string{"NODE", "SEVERITY", "SOURCE", "MESSAGE", "FIRST SEEN", "LAST SEEN"}, rows)
+				p.table([]string{"NODE", "PRIORITY", "SOURCE", "DETAIL", "FIRST SEEN", "LAST SEEN"}, rows)
+				printAlarmResponses(alerts)
 			}
 			// Absence of stats is not absence of alarms: a node that has
 			// not broadcast NodeStats has UNKNOWN alert state, and saying
@@ -173,12 +174,56 @@ func nodeMatchesFilter(n *v1.ClusterNode, filter string) bool {
 		strings.EqualFold(filter, formatIDBytes(n.Id))
 }
 
-// alertSeverityStr is the single severity→display mapping for the CLI.
-// Deliberately the only place severity is turned into text: the alarm
-// line is replacing Severity with Priority plus cause/response text, and
-// when that lands this function is the one place to change.
-func alertSeverityStr(s v1.AlertSeverity) string {
-	return strings.TrimPrefix(s.String(), "ALERT_SEVERITY_")
+// alarmPriorityStr is the single priority→display mapping for the CLI.
+// Software faults sit outside the consequence×urgency scale (their proto
+// priority is UNSPECIFIED) and render as FAULT — same ranking the UI uses,
+// where a fault outranks Critical because it means the system itself is
+// defective, not merely a process condition.
+func alarmPriorityStr(a *v1.SystemAlert) string {
+	if a.SoftwareFault {
+		return "FAULT"
+	}
+	return strings.TrimPrefix(a.Priority.String(), "ALARM_PRIORITY_")
+}
+
+// printAlarmResponses prints the catalog response text for the alarm types
+// present, deduplicated by type: response text is a property of the type,
+// not the instance, so 200 chunk-unreadable alarms get one guidance line.
+// The CLI is where an operator lands when the UI is unreachable, which is
+// why the response text renders here by default rather than behind a flag.
+func printAlarmResponses(alerts []nodeAlert) {
+	lines := alarmResponseLines(alerts)
+	if len(lines) == 0 {
+		return
+	}
+	fmt.Println()
+	fmt.Println("RESPONSE")
+	for _, l := range lines {
+		fmt.Println(l)
+	}
+}
+
+// alarmResponseLines builds the deduplicated guidance lines, one per alarm
+// type with a non-empty response, in first-seen order.
+func alarmResponseLines(alerts []nodeAlert) []string {
+	seen := make(map[string]bool)
+	var lines []string
+	for _, a := range alerts {
+		typeID := alarmTypeID(string(a.alert.Id))
+		if a.alert.Response == "" || seen[typeID] {
+			continue
+		}
+		seen[typeID] = true
+		lines = append(lines, fmt.Sprintf("  %s: %s", typeID, a.alert.Response))
+	}
+	return lines
+}
+
+// alarmTypeID extracts the catalog type ID from a full alarm ID
+// ("disk-space-exhausted:vault1" → "disk-space-exhausted").
+func alarmTypeID(id string) string {
+	typeID, _, _ := strings.Cut(id, ":")
+	return typeID
 }
 
 // formatAlertTS renders an alert timestamp for table output.
@@ -190,28 +235,34 @@ func formatAlertTS(t time.Time) string {
 // rather than the raw proto because attribution (node name + ID) is not a
 // field on SystemAlert — it comes from the ClusterNode carrying it.
 type alertJSON struct {
-	Node      string `json:"node"`
-	NodeID    string `json:"node_id"`
-	ID        string `json:"id"`
-	Severity  string `json:"severity"`
-	Source    string `json:"source"`
-	Message   string `json:"message"`
-	FirstSeen string `json:"first_seen"`
-	LastSeen  string `json:"last_seen"`
+	Node          string `json:"node"`
+	NodeID        string `json:"node_id"`
+	ID            string `json:"id"`
+	Priority      string `json:"priority"`
+	SoftwareFault bool   `json:"software_fault"`
+	Source        string `json:"source"`
+	Detail        string `json:"detail"`
+	Cause         string `json:"cause"`
+	Response      string `json:"response"`
+	FirstSeen     string `json:"first_seen"`
+	LastSeen      string `json:"last_seen"`
 }
 
 func alertsToJSON(alerts []nodeAlert) []alertJSON {
 	out := make([]alertJSON, 0, len(alerts))
 	for _, a := range alerts {
 		out = append(out, alertJSON{
-			Node:      a.node,
-			NodeID:    a.nodeID,
-			ID:        string(a.alert.Id),
-			Severity:  alertSeverityStr(a.alert.Severity),
-			Source:    a.alert.Source,
-			Message:   a.alert.Message,
-			FirstSeen: a.alert.FirstSeen.AsTime().UTC().Format(time.RFC3339),
-			LastSeen:  a.alert.LastSeen.AsTime().UTC().Format(time.RFC3339),
+			Node:          a.node,
+			NodeID:        a.nodeID,
+			ID:            string(a.alert.Id),
+			Priority:      alarmPriorityStr(a.alert),
+			SoftwareFault: a.alert.SoftwareFault,
+			Source:        a.alert.Source,
+			Detail:        a.alert.Detail,
+			Cause:         a.alert.Cause,
+			Response:      a.alert.Response,
+			FirstSeen:     a.alert.FirstSeen.AsTime().UTC().Format(time.RFC3339),
+			LastSeen:      a.alert.LastSeen.AsTime().UTC().Format(time.RFC3339),
 		})
 	}
 	return out
@@ -227,9 +278,9 @@ func systemAlertRows(nodes []*v1.ClusterNode) [][]string {
 	for _, a := range collectNodeAlerts(nodes, "") {
 		rows = append(rows, []string{
 			a.node,
-			alertSeverityStr(a.alert.Severity),
+			alarmPriorityStr(a.alert),
 			a.alert.Source,
-			a.alert.Message,
+			a.alert.Detail,
 			formatAlertTS(a.alert.FirstSeen.AsTime()),
 		})
 	}

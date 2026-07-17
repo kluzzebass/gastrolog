@@ -91,7 +91,7 @@ func newClusterStatusCmd() *cobra.Command {
 			// log-silent, this table is what still says why.
 			if alertRows := systemAlertRows(msg.Nodes); len(alertRows) > 0 {
 				fmt.Println()
-				p.table([]string{"NODE", "SEVERITY", "SOURCE", "MESSAGE", "FIRST SEEN"}, alertRows)
+				p.table([]string{"NODE", "PRIORITY", "SOURCE", "DETAIL", "FIRST SEEN"}, alertRows)
 			}
 
 			if liveRows := raftLivenessRows(msg.Nodes); len(liveRows) > 0 {
