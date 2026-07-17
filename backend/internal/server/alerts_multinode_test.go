@@ -126,15 +126,30 @@ func TestMultiNodeAlerts_MultiNodeAttribution(t *testing.T) {
 		t.Fatalf("data-2 alerts = %d, want 0", n)
 	}
 
-	// Alarms are state: the condition resolving on data-1 clears exactly
-	// data-1's entry while data-3's identical ID keeps standing.
+	// Alarms are state: the condition resolving on data-1 transitions
+	// exactly data-1's entry to cleared-unacked (retained until an operator
+	// acks — gastrolog-1z5gg4) while data-3's identical ID keeps standing
+	// active. Acknowledging data-1's releases it, and only it.
 	h.alerts["data-1"].Clear("disk-space-exhausted", "vault1")
 	byNode = alertsByNode(t, h)
+	if n := len(byNode["data-1"]); n != 1 {
+		t.Fatalf("data-1 alerts after clear = %d, want 1 (cleared-unacked retained)", n)
+	}
+	if got := byNode["data-1"][0].State; got != gastrologv1.AlarmState_ALARM_STATE_CLEARED_UNACKED {
+		t.Fatalf("data-1 alert state after clear = %v, want CLEARED_UNACKED", got)
+	}
+	if got := byNode["data-3"][0].State; got != gastrologv1.AlarmState_ALARM_STATE_ACTIVE_UNACKED {
+		t.Fatalf("data-3 alert state = %v, want ACTIVE_UNACKED", got)
+	}
+	if err := h.alerts["data-1"].Ack("disk-space-exhausted:vault1", "op"); err != nil {
+		t.Fatalf("Ack on data-1: %v", err)
+	}
+	byNode = alertsByNode(t, h)
 	if n := len(byNode["data-1"]); n != 0 {
-		t.Fatalf("data-1 alerts after clear = %d, want 0", n)
+		t.Fatalf("data-1 alerts after ack = %d, want 0", n)
 	}
 	if n := len(byNode["data-3"]); n != 1 {
-		t.Fatalf("data-3 alerts after data-1 clear = %d, want 1", n)
+		t.Fatalf("data-3 alerts after data-1 ack = %d, want 1", n)
 	}
 }
 
