@@ -156,7 +156,7 @@ func TestSingleNodeForwardApply(t *testing.T) {
 	err := node.store.PutRotationPolicy(ctx, system.RotationPolicyConfig{
 		ID:          probeID,
 		Name:        "test-probe",
-		MaxAgeNanos: &dummyMaxAge,
+		MaxAge: &dummyMaxAge,
 	})
 	if err != nil {
 		t.Fatalf("PutRotationPolicy: %v", err)
@@ -219,7 +219,7 @@ func TestThreeNodeCluster(t *testing.T) {
 	if err := node1.store.PutRotationPolicy(ctx, system.RotationPolicyConfig{
 		ID:          probeID,
 		Name:        "leader-probe",
-		MaxAgeNanos: &dummyMaxAge,
+		MaxAge: &dummyMaxAge,
 	}); err != nil {
 		t.Fatalf("PutRotationPolicy on leader: %v", err)
 	}
@@ -247,7 +247,7 @@ func TestThreeNodeCluster(t *testing.T) {
 	if err := node2.store.PutRotationPolicy(ctx, system.RotationPolicyConfig{
 		ID:          followerProbeID,
 		Name:        "follower-probe",
-		MaxAgeNanos: &dummyMaxAge,
+		MaxAge: &dummyMaxAge,
 	}); err != nil {
 		t.Fatalf("PutRotationPolicy on follower: %v", err)
 	}
@@ -280,7 +280,7 @@ func TestThreeNodeCluster(t *testing.T) {
 	if err := node2.store.PutRotationPolicy(ctx, system.RotationPolicyConfig{
 		ID:          readBackProbeID,
 		Name:        "read-back-probe",
-		MaxAgeNanos: &dummyMaxAge,
+		MaxAge: &dummyMaxAge,
 	}); err != nil {
 		t.Fatalf("PutRotationPolicy on follower for read-back: %v", err)
 	}

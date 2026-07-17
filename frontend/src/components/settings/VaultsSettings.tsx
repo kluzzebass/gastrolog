@@ -1,9 +1,7 @@
 import { encode, decode } from "../../api/glid";
 import { useReducer, useState } from "react";
-import { protoInt64 } from "@bufbuild/protobuf";
 import { useExpandedCards } from "../../hooks/useExpandedCards";
 import { buildNodeNameMap, resolveNodeName } from "../../utils/nodeNames";
-import { parseBytes, parseDurationNanos } from "../../utils/units";
 import {
   useConfig,
   usePutVault,
@@ -558,22 +556,22 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
       storageClass: storage.type === "file" ? parseInt(storage.storageClass, 10) || 0 : 0,
       cloudServiceId: cloudBacked ? decode(storage.cloudServiceId) : new Uint8Array(0),
       cacheEviction: cloudBacked ? (storage.cacheEviction || "lru") : "",
-      // Empty = unset (server defaults for cloud vaults), not explicit 0;
-      // numeric on the wire like max-size (gastrolog-338j51).
-      cacheBudgetBytes: cloudBacked && storage.cacheBudget.trim() !== "" ? parseBytes(storage.cacheBudget) : undefined,
-      cacheTtlNanos: cloudBacked && storage.cacheTTL.trim() !== "" ? parseDurationNanos(storage.cacheTTL) : protoInt64.zero,
-      // Empty = unset (server defaults for memory vaults), not explicit 0.
-      memoryBudgetBytes: storage.type === "memory" && storage.memoryBudget.trim() !== "" ? parseBytes(storage.memoryBudget) : undefined,
+      // Expressions pass through verbatim; the server defaults an unset value
+      // for the applicable vault type and rejects an explicit "0"
+      // (gastrolog-etcjdx).
+      cacheBudget: cloudBacked ? storage.cacheBudget : "",
+      cacheTtl: cloudBacked ? storage.cacheTTL : "",
+      memoryBudget: storage.type === "memory" ? storage.memoryBudget : "",
       rotationPolicyId: storage.rotationPolicyId ? decode(storage.rotationPolicyId) : new Uint8Array(0),
       retentionRules: storage.retentionPolicyId
         ? [new RetentionRule({ retentionPolicyId: decode(storage.retentionPolicyId) })]
         : [],
       retentionDisposition: storage.type !== "jsonl" ? (storage.retentionDisposition || "delete") : "",
-      diskFreeWarnBytes: storage.type === "file" ? parseBytes(storage.diskFreeWarn) : BigInt(0),
-      diskFreeFloorBytes: storage.type === "file" ? parseBytes(storage.diskFreeFloor) : BigInt(0),
+      diskFreeWarn: storage.type === "file" ? storage.diskFreeWarn : "",
+      diskFreeFloor: storage.type === "file" ? storage.diskFreeFloor : "",
       // Empty field = unset (server defaults it), not explicit 0 (rejected);
       // non-file vaults have no disk budget (gastrolog-1epfgb).
-      maxSizeBytes: storage.type === "file" && storage.maxSize.trim() !== "" ? parseBytes(storage.maxSize) : undefined,
+      maxSize: storage.type === "file" ? storage.maxSize : "",
       replicationFactor: parseInt(storage.replicationFactor, 10) || 1,
       path: storage.type === "jsonl" ? storage.path : "",
     });

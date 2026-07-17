@@ -59,8 +59,8 @@ func putRotationPolicyCmd(cfg system.RotationPolicyConfig) *gastrologv1.PutRotat
 	return &gastrologv1.PutRotationPolicyCommand{
 		Id:          cfg.ID.ToProto(),
 		Name:        cfg.Name,
-		MaxBytes:    cfg.MaxBytes,
-		MaxAgeNanos: cfg.MaxAgeNanos,
+		MaxSize:     cfg.MaxSize,
+		MaxAge:      cfg.MaxAge,
 		MaxRecords:  cfg.MaxRecords,
 		Cron:        cfg.Cron,
 	}
@@ -89,8 +89,8 @@ func ExtractPutRotationPolicy(cmd *gastrologv1.PutRotationPolicyCommand) (system
 	return system.RotationPolicyConfig{
 		ID:          glid.FromBytes(cmd.GetId()),
 		Name:        cmd.GetName(),
-		MaxBytes:    cmd.MaxBytes,
-		MaxAgeNanos: cmd.MaxAgeNanos,
+		MaxSize:     cmd.MaxSize,
+		MaxAge:      cmd.MaxAge,
 		MaxRecords:  cmd.MaxRecords,
 		Cron:        cmd.Cron,
 	}, nil
@@ -109,8 +109,8 @@ func putRetentionPolicyCmd(cfg system.RetentionPolicyConfig) *gastrologv1.PutRet
 	return &gastrologv1.PutRetentionPolicyCommand{
 		Id:          cfg.ID.ToProto(),
 		Name:        cfg.Name,
-		MaxAgeNanos: cfg.MaxAgeNanos,
-		MaxBytes:    cfg.MaxBytes,
+		MaxAge:      cfg.MaxAge,
+		MaxSize:     cfg.MaxSize,
 		MaxChunks:   cfg.MaxChunks,
 	}
 }
@@ -138,8 +138,8 @@ func ExtractPutRetentionPolicy(cmd *gastrologv1.PutRetentionPolicyCommand) (syst
 	return system.RetentionPolicyConfig{
 		ID:          glid.FromBytes(cmd.GetId()),
 		Name:        cmd.GetName(),
-		MaxAgeNanos: cmd.MaxAgeNanos,
-		MaxBytes:    cmd.MaxBytes,
+		MaxAge:      cmd.MaxAge,
+		MaxSize:     cmd.MaxSize,
 		MaxChunks:   cmd.MaxChunks,
 	}, nil
 }

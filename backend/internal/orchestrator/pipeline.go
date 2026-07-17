@@ -354,19 +354,26 @@ func (o *Orchestrator) resolveChunkPolicy(sys *system.System, vaultID glid.GLID)
 }
 
 // manifestRotationPolicy maps a system rotation policy config onto the pipeline
-// chunking manifest policy plus its cron expression. Quantities are numeric at
-// rest (bytes / nanoseconds), so this is a direct mapping — no parsing, and no
-// possibility of the two rotation paths disagreeing on interpretation.
+// chunking manifest policy plus its cron expression. This is a config→runtime
+// boundary: the operator's expressions are resolved here, once, through the
+// shared parser, so both rotation paths read the same numbers from the same
+// source (gastrolog-etcjdx). A malformed expression cannot reach here —
+// PutRotationPolicy parse-checks at write — so a parse failure is a bug and
+// leaves the threshold unset rather than guessing.
 func manifestRotationPolicy(c system.RotationPolicyConfig) (chunking.ManifestRotationPolicy, string) {
 	var p chunking.ManifestRotationPolicy
 	if c.MaxRecords != nil && *c.MaxRecords > 0 {
 		p.MaxRecords = uint64(*c.MaxRecords)
 	}
-	if c.MaxBytes != nil {
-		p.MaxBytes = *c.MaxBytes
+	if c.MaxSize != nil {
+		if size, err := system.SizeOrDefault(*c.MaxSize, 0); err == nil {
+			p.MaxBytes = size
+		}
 	}
-	if c.MaxAgeNanos != nil && *c.MaxAgeNanos > 0 {
-		p.MaxAge = time.Duration(*c.MaxAgeNanos)
+	if c.MaxAge != nil {
+		if age, err := system.DurationOrDefault(*c.MaxAge, 0); err == nil && age > 0 {
+			p.MaxAge = age
+		}
 	}
 	cron := ""
 	if c.Cron != nil {

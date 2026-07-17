@@ -808,7 +808,7 @@ func TestRetentionSingleJobRegistered(t *testing.T) {
 			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 		RetentionPolicies: []system.RetentionPolicyConfig{
-			{ID: retPolicyID, Name: "age-2m", MaxAgeNanos: int64Ptr(int64(2 * time.Minute))},
+			{ID: retPolicyID, Name: "age-2m", MaxAge: strPtr("2m")},
 		},
 		Vaults: []system.VaultConfig{
 			{ID: vaultID, Name: "src"},

@@ -50,7 +50,51 @@ Two opposite meanings for "unset" in one sentence, on one function call.
 `maxSizeBytes=0` means *no protection at all*. The precedent for the fix is
 sitting in the same struct as the bug.
 
+## Representation: expressions at rest (gastrolog-etcjdx)
+
+The principle above is about *values*; this is about *storage*. Config
+quantities — sizes and durations — are stored as the operator's own
+expression (`"5GiB"`, `"3m"`), not resolved to a number at ingress. They are
+parsed at the point of use, through one shared resolver
+(`system.SizeOrDefault` / `DurationOrDefault`, over the `ParseSize` /
+`ParseDuration` primitives). No call site parses a quantity itself.
+
+Why the operator's string and not a resolved number:
+
+- **Readable at rest and in export.** A stored `"5GiB"` reads as `5GiB`, not
+  `5368709120`; `config export` is meant to be reviewed and hand-edited.
+- **Faithful.** Display is an exact echo — no reconstruct-a-human-string step
+  to be lossy (`5368709119` → `"5.0 GiB"` → 5368709120) or ugly. What the
+  operator typed is what comes back.
+- **It is the house style.** Auth/query/cluster/lookup durations were already
+  stored as Go-duration strings; the numeric `max_age_nanos` policy fields
+  were the minority. Uniform strings meets the codebase where it already was.
+
+This reverses an earlier numeric-at-rest rule (recorded in `fsm.proto` and the
+policy structs) that cited cross-node/version parser drift as a consensus
+risk. Overridden deliberately: `ParseSize`/`ParseDuration` are deterministic
+and pinned by round-trip tests (`quantity_test.go`), which is exactly what
+Kubernetes relies on to store `"5Gi"` in replicated etcd. Resolution is
+per-node for node-local thresholds (disk-free) and identical everywhere for
+cluster quantities because the parser is stable.
+
+Counts (`max_records`, `max_chunks`) stay numeric — a count is unitless, so
+there is no expression to preserve. Measured telemetry (chunk bytes,
+timestamps) is likewise numeric and out of scope; only operator-authored
+config is an expression.
+
+The size grammar spans `B`…`EiB` (decimal `KB`–`EB`, binary `KiB`–`EiB`),
+identical on both surfaces; `FormatBytesCompact` / `formatBytesBigint` emit
+the largest unit that divides exactly, else raw bytes, so every value
+round-trips.
+
 ## Decisions (settled)
+
+> Note: decisions 1–4 below predate the expression-at-rest flip and are
+> superseded by it in *form* — the 1 GiB default is now the string `"1GiB"`,
+> "explicit 0" is the string `"0"`, resolution moved from ingress to use — but
+> their *intent* (bounded default, explicit-0 rejected, unlimited-is-explicit,
+> per-vault-type scope) is unchanged and preserved by gastrolog-etcjdx.
 
 1. **`max-size` default is a constant: 1 GiB per node.** Not derived from the
    volume. A constant was chosen deliberately over a volume-share formula: a

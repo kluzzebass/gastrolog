@@ -515,13 +515,15 @@ export class VaultConfig extends Message<VaultConfig> {
 
   /**
    * In-memory storage cap for memory-typed vaults, in bytes. Optional so the
-   * server can tell "unset" (defaulted at creation for memory vaults) from
-   * "explicit 0" (rejected). Unbounded RAM is an OOM, so unset must be a
-   * bounded default, not zero (gastrolog-1qd5wz).
+   * In-memory storage cap for memory vaults, as a human size expression
+   * ("512MiB", "1GiB"). Empty = unset (defaulted at creation for memory
+   * vaults); "0" is rejected (unbounded RAM is an OOM). See gastrolog-etcjdx
+   * for why all config quantities are stored as the operator's expression and
+   * resolved at use.
    *
-   * @generated from field: optional uint64 memory_budget_bytes = 7;
+   * @generated from field: string memory_budget = 7;
    */
-  memoryBudgetBytes?: bigint;
+  memoryBudget = "";
 
   /**
    * @generated from field: uint32 storage_class = 8;
@@ -562,22 +564,21 @@ export class VaultConfig extends Message<VaultConfig> {
   cacheEviction = "";
 
   /**
-   * Warm-cache soft cap for cloud-backed chunks, in bytes — numeric to match
-   * max_size_bytes / memory_budget_bytes. Optional so the server can tell
-   * "unset" (defaulted at creation for cloud vaults) from "explicit 0"
-   * (rejected). Unlimited is an explicit large value (gastrolog-338j51).
+   * Warm-cache soft cap for cloud-backed chunks, as a size expression
+   * ("1GiB"). Empty = unset (defaulted at creation for cloud vaults); "0"
+   * rejected.
    *
-   * @generated from field: optional uint64 cache_budget_bytes = 14;
+   * @generated from field: string cache_budget = 14;
    */
-  cacheBudgetBytes?: bigint;
+  cacheBudget = "";
 
   /**
-   * Warm-cache eviction age in nanoseconds (ttl mode only) — numeric to match
-   * the max_age_nanos durations. 0 = unset.
+   * Warm-cache eviction age (ttl mode only), as a duration expression ("1h",
+   * "7d"). Empty = unset.
    *
-   * @generated from field: int64 cache_ttl_nanos = 15;
+   * @generated from field: string cache_ttl = 15;
    */
-  cacheTtlNanos = protoInt64.zero;
+  cacheTtl = "";
 
   /**
    * "delete" (default) or "route" — what retention does with aged-out records
@@ -587,37 +588,30 @@ export class VaultConfig extends Message<VaultConfig> {
   retentionDisposition = "";
 
   /**
-   * Per-vault disk guard thresholds on the vault's backing volume, in
-   * bytes of FREE space. 0 = inherit the node defaults (fraction-based
-   * with share clamps; env-overridable). Warn raises the disk-space
-   * alarm for this vault; floor suspends admission for records destined
-   * to this vault while other vaults keep ingesting.
+   * Per-vault disk-guard free-space thresholds on the vault's backing volume,
+   * as size expressions ("10GB"). Empty = inherit the node defaults
+   * (fraction-based, per-node). Warn raises the disk-space alarm; floor
+   * suspends admission for this vault while others keep ingesting.
    *
-   * @generated from field: uint64 disk_free_warn_bytes = 17;
+   * @generated from field: string disk_free_warn = 17;
    */
-  diskFreeWarnBytes = protoInt64.zero;
+  diskFreeWarn = "";
 
   /**
-   * @generated from field: uint64 disk_free_floor_bytes = 18;
+   * @generated from field: string disk_free_floor = 18;
    */
-  diskFreeFloorBytes = protoInt64.zero;
+  diskFreeFloor = "";
 
   /**
-   * Per-node byte budget for this vault's whole local disk claim (sealed
-   * chunks, indexes, and pipeline segment backlog). At the budget, admission
-   * for records destined to this vault is refused cluster-wide
-   * (cap-and-refuse) until retention or releases drain it — the hard backstop
-   * behind a size retention policy's cap-and-drain.
+   * Per-node budget for this vault's whole local disk claim (sealed chunks,
+   * indexes, segment backlog), as a size expression ("50GB"). At the budget,
+   * admission for this vault is refused cluster-wide until retention drains
+   * it. Empty = unset (defaulted at creation); "0" rejected; a large value
+   * (e.g. "1PiB") is effectively unlimited (gastrolog-1epfgb / gastrolog-etcjdx).
    *
-   * Optional so the server can tell "unset" from "explicitly 0": an unset
-   * value is defaulted server-side at creation (a bounded per-node budget —
-   * see DefaultVaultMaxSizeBytes), and an explicit 0 is REJECTED (a 0 budget
-   * accepts no records). "Unlimited" is an explicit large value, never the
-   * effect of saying nothing (gastrolog-1epfgb / gastrolog-4j1e6y).
-   *
-   * @generated from field: optional uint64 max_size_bytes = 19;
+   * @generated from field: string max_size = 19;
    */
-  maxSizeBytes?: bigint;
+  maxSize = "";
 
   constructor(data?: PartialMessage<VaultConfig>) {
     super();
@@ -633,19 +627,19 @@ export class VaultConfig extends Message<VaultConfig> {
     { no: 4, name: "type", kind: "enum", T: proto3.getEnumType(VaultType) },
     { no: 5, name: "rotation_policy_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 6, name: "retention_rules", kind: "message", T: RetentionRule, repeated: true },
-    { no: 7, name: "memory_budget_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */, opt: true },
+    { no: 7, name: "memory_budget", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 8, name: "storage_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 9, name: "cloud_service_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 10, name: "replication_factor", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 11, name: "path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 12, name: "placements", kind: "message", T: VaultPlacement, repeated: true },
     { no: 13, name: "cache_eviction", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 14, name: "cache_budget_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */, opt: true },
-    { no: 15, name: "cache_ttl_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 14, name: "cache_budget", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 15, name: "cache_ttl", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 16, name: "retention_disposition", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 17, name: "disk_free_warn_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
-    { no: 18, name: "disk_free_floor_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
-    { no: 19, name: "max_size_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */, opt: true },
+    { no: 17, name: "disk_free_warn", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 18, name: "disk_free_floor", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 19, name: "max_size", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultConfig {
@@ -997,9 +991,13 @@ export class IngesterConfig extends Message<IngesterConfig> {
  */
 export class RotationPolicyConfig extends Message<RotationPolicyConfig> {
   /**
-   * @generated from field: int64 max_bytes = 1;
+   * Size and duration are the operator's expression ("512MiB", "1m"), parsed
+   * by the shared resolver at use — not resolved at ingress. Counts stay
+   * numeric: a record count is unitless (gastrolog-etcjdx).
+   *
+   * @generated from field: string max_size = 1;
    */
-  maxBytes = protoInt64.zero;
+  maxSize = "";
 
   /**
    * @generated from field: int64 max_records = 2;
@@ -1007,12 +1005,9 @@ export class RotationPolicyConfig extends Message<RotationPolicyConfig> {
   maxRecords = protoInt64.zero;
 
   /**
-   * Nanoseconds: durations are stored at full precision — a seconds field
-   * silently truncated sub-second input (e.g. "1004ms").
-   *
-   * @generated from field: int64 max_age_nanos = 3;
+   * @generated from field: string max_age = 3;
    */
-  maxAgeNanos = protoInt64.zero;
+  maxAge = "";
 
   /**
    * @generated from field: string cron = 4;
@@ -1037,9 +1032,9 @@ export class RotationPolicyConfig extends Message<RotationPolicyConfig> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.RotationPolicyConfig";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "max_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 1, name: "max_size", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "max_records", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 3, name: "max_age_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 3, name: "max_age", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 4, name: "cron", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 5, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 6, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
@@ -1067,16 +1062,14 @@ export class RotationPolicyConfig extends Message<RotationPolicyConfig> {
  */
 export class RetentionPolicyConfig extends Message<RetentionPolicyConfig> {
   /**
-   * Nanoseconds (see RotationPolicyConfig.max_age_nanos).
-   *
-   * @generated from field: int64 max_age_nanos = 1;
+   * @generated from field: string max_age = 1;
    */
-  maxAgeNanos = protoInt64.zero;
+  maxAge = "";
 
   /**
-   * @generated from field: int64 max_bytes = 2;
+   * @generated from field: string max_size = 2;
    */
-  maxBytes = protoInt64.zero;
+  maxSize = "";
 
   /**
    * @generated from field: int64 max_chunks = 3;
@@ -1101,8 +1094,8 @@ export class RetentionPolicyConfig extends Message<RetentionPolicyConfig> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.RetentionPolicyConfig";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "max_age_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 2, name: "max_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 1, name: "max_age", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "max_size", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "max_chunks", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 4, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 5, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
@@ -3134,11 +3127,12 @@ export class ClusterSettings extends Message<ClusterSettings> {
    * in the vault-ctl registry). When a vault's backlog reaches the budget,
    * ingest admission for that vault is refused (retryable backpressure) until
    * chunking drains it below the budget. The operating bound that engages
-   * BEFORE disk pressure; the disk guard remains the backstop. 0 = unbounded.
+   * BEFORE disk pressure; the disk guard remains the backstop. A size
+   * expression ("8GiB"); empty = unbounded (gastrolog-etcjdx).
    *
-   * @generated from field: uint64 pipeline_backlog_max_bytes = 3;
+   * @generated from field: string pipeline_backlog_max = 3;
    */
-  pipelineBacklogMaxBytes = protoInt64.zero;
+  pipelineBacklogMax = "";
 
   constructor(data?: PartialMessage<ClusterSettings>) {
     super();
@@ -3150,7 +3144,7 @@ export class ClusterSettings extends Message<ClusterSettings> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "broadcast_interval", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "heartbeat_interval", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 3, name: "pipeline_backlog_max_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 3, name: "pipeline_backlog_max", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ClusterSettings {
@@ -3661,9 +3655,9 @@ export class PutClusterSettings extends Message<PutClusterSettings> {
   heartbeatInterval?: string;
 
   /**
-   * @generated from field: optional uint64 pipeline_backlog_max_bytes = 3;
+   * @generated from field: optional string pipeline_backlog_max = 3;
    */
-  pipelineBacklogMaxBytes?: bigint;
+  pipelineBacklogMax?: string;
 
   constructor(data?: PartialMessage<PutClusterSettings>) {
     super();
@@ -3675,7 +3669,7 @@ export class PutClusterSettings extends Message<PutClusterSettings> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "broadcast_interval", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
     { no: 2, name: "heartbeat_interval", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
-    { no: 3, name: "pipeline_backlog_max_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */, opt: true },
+    { no: 3, name: "pipeline_backlog_max", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutClusterSettings {

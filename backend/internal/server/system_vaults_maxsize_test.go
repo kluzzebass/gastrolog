@@ -1,10 +1,9 @@
 package server_test
 
-// Coverage for gastrolog-1epfgb: max-size is resolved at the PutVault
-// ingress so an unbounded vault is unrepresentable. An unset budget defaults
-// to DefaultVaultMaxSizeBytes; an explicit 0 is rejected; a large explicit
-// value is honored; and an update that does not mention max-size preserves
-// the stored value rather than silently re-defaulting it.
+// Coverage for gastrolog-1epfgb / gastrolog-etcjdx: max-size is a stored
+// expression, resolved at use. The PutVault ingress defaults an unset budget,
+// rejects an explicit "0", stores a set value verbatim, and preserves it
+// across an update that does not mention it.
 
 import (
 	"context"
@@ -16,8 +15,6 @@ import (
 	"gastrolog/internal/glid"
 	"gastrolog/internal/system"
 )
-
-func u64(v uint64) *uint64 { return &v }
 
 func getStoredVault(t *testing.T, store system.Store, id glid.GLID) system.VaultConfig {
 	t.Helper()
@@ -31,7 +28,7 @@ func getStoredVault(t *testing.T, store system.Store, id glid.GLID) system.Vault
 	return *v
 }
 
-// Unset max-size on create is stored as the default, not left unlimited.
+// Unset max-size on create is stored as the default expression, not left empty.
 func TestPutVaultDefaultsUnsetMaxSize(t *testing.T) {
 	client, store, _ := newConfigTestSetup(t)
 	ctx := context.Background()
@@ -43,29 +40,29 @@ func TestPutVaultDefaultsUnsetMaxSize(t *testing.T) {
 			Name:    "v",
 			Enabled: true,
 			Type:    gastrologv1.VaultType_VAULT_TYPE_FILE,
-			// MaxSizeBytes omitted → unset.
+			// MaxSize omitted → unset.
 		},
 	}))
 	if err != nil {
 		t.Fatalf("PutVault: %v", err)
 	}
-	if got := getStoredVault(t, store, id).MaxSizeBytes; got != system.DefaultVaultMaxSizeBytes {
-		t.Fatalf("stored max-size = %d, want default %d", got, system.DefaultVaultMaxSizeBytes)
+	if got := getStoredVault(t, store, id).MaxSize; got != system.DefaultVaultMaxSize {
+		t.Fatalf("stored max-size = %q, want default %q", got, system.DefaultVaultMaxSize)
 	}
 }
 
-// An explicit 0 is a real error, not a silent accept-nothing.
+// An explicit "0" is a real error, not a silent accept-nothing.
 func TestPutVaultRejectsExplicitZeroMaxSize(t *testing.T) {
 	client, _, _ := newConfigTestSetup(t)
 	ctx := context.Background()
 
 	_, err := client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
 		Config: &gastrologv1.VaultConfig{
-			Id:           glid.New().Bytes(),
-			Name:         "v",
-			Enabled:      true,
-			Type:         gastrologv1.VaultType_VAULT_TYPE_FILE,
-			MaxSizeBytes: u64(0), // present and zero
+			Id:      glid.New().Bytes(),
+			Name:    "v",
+			Enabled: true,
+			Type:    gastrologv1.VaultType_VAULT_TYPE_FILE,
+			MaxSize: "0",
 		},
 	}))
 	if err == nil {
@@ -76,27 +73,45 @@ func TestPutVaultRejectsExplicitZeroMaxSize(t *testing.T) {
 	}
 }
 
-// A large explicit value is the way to say "effectively unlimited".
-func TestPutVaultHonorsLargeExplicitMaxSize(t *testing.T) {
+// A set value is stored verbatim — the operator's own expression, echoed back.
+func TestPutVaultStoresMaxSizeVerbatim(t *testing.T) {
 	client, store, _ := newConfigTestSetup(t)
 	ctx := context.Background()
 	id := glid.New()
-	const large = uint64(1) << 50 // 1 PiB
 
 	_, err := client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
 		Config: &gastrologv1.VaultConfig{
-			Id:           id.Bytes(),
-			Name:         "v",
-			Enabled:      true,
-			Type:         gastrologv1.VaultType_VAULT_TYPE_FILE,
-			MaxSizeBytes: u64(large),
+			Id:      id.Bytes(),
+			Name:    "v",
+			Enabled: true,
+			Type:    gastrologv1.VaultType_VAULT_TYPE_FILE,
+			MaxSize: "100TiB", // effectively unlimited, said explicitly
 		},
 	}))
 	if err != nil {
 		t.Fatalf("PutVault: %v", err)
 	}
-	if got := getStoredVault(t, store, id).MaxSizeBytes; got != large {
-		t.Fatalf("stored max-size = %d, want %d", got, large)
+	if got := getStoredVault(t, store, id).MaxSize; got != "100TiB" {
+		t.Fatalf("stored max-size = %q, want %q verbatim", got, "100TiB")
+	}
+}
+
+// An unparseable value is rejected at the write boundary, not at use.
+func TestPutVaultRejectsUnparseableMaxSize(t *testing.T) {
+	client, _, _ := newConfigTestSetup(t)
+	ctx := context.Background()
+
+	_, err := client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
+		Config: &gastrologv1.VaultConfig{
+			Id:      glid.New().Bytes(),
+			Name:    "v",
+			Enabled: true,
+			Type:    gastrologv1.VaultType_VAULT_TYPE_FILE,
+			MaxSize: "gigabytes-please",
+		},
+	}))
+	if err == nil || connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected InvalidArgument for an unparseable max-size, got %v", err)
 	}
 }
 
@@ -106,30 +121,27 @@ func TestPutVaultUpdatePreservesMaxSize(t *testing.T) {
 	client, store, _ := newConfigTestSetup(t)
 	ctx := context.Background()
 	id := glid.New()
-	const chosen = uint64(50) << 30 // 50 GiB
 
-	// Create with an explicit budget.
 	_, err := client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
 		Config: &gastrologv1.VaultConfig{
-			Id:           id.Bytes(),
-			Name:         "v",
-			Enabled:      true,
-			Type:         gastrologv1.VaultType_VAULT_TYPE_FILE,
-			MaxSizeBytes: u64(chosen),
+			Id:      id.Bytes(),
+			Name:    "v",
+			Enabled: true,
+			Type:    gastrologv1.VaultType_VAULT_TYPE_FILE,
+			MaxSize: "50GiB",
 		},
 	}))
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
-	// Update a different field, omitting max-size entirely.
 	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
 		Config: &gastrologv1.VaultConfig{
 			Id:      id.Bytes(),
 			Name:    "v-renamed",
 			Enabled: true,
 			Type:    gastrologv1.VaultType_VAULT_TYPE_FILE,
-			// MaxSizeBytes omitted → must preserve, not re-default.
+			// MaxSize omitted → must preserve, not re-default.
 		},
 	}))
 	if err != nil {
@@ -139,7 +151,7 @@ func TestPutVaultUpdatePreservesMaxSize(t *testing.T) {
 	if stored.Name != "v-renamed" {
 		t.Fatalf("name = %q, want v-renamed (update did not apply)", stored.Name)
 	}
-	if stored.MaxSizeBytes != chosen {
-		t.Fatalf("max-size = %d after an update that omitted it, want preserved %d (a silent re-default)", stored.MaxSizeBytes, chosen)
+	if stored.MaxSize != "50GiB" {
+		t.Fatalf("max-size = %q after an update that omitted it, want preserved %q", stored.MaxSize, "50GiB")
 	}
 }

@@ -617,44 +617,38 @@ type VaultConfig struct {
 	RotationPolicyId []byte                 `protobuf:"bytes,5,opt,name=rotation_policy_id,json=rotationPolicyId,proto3" json:"rotation_policy_id,omitempty"`
 	RetentionRules   []*RetentionRule       `protobuf:"bytes,6,rep,name=retention_rules,json=retentionRules,proto3" json:"retention_rules,omitempty"`
 	// In-memory storage cap for memory-typed vaults, in bytes. Optional so the
-	// server can tell "unset" (defaulted at creation for memory vaults) from
-	// "explicit 0" (rejected). Unbounded RAM is an OOM, so unset must be a
-	// bounded default, not zero (gastrolog-1qd5wz).
-	MemoryBudgetBytes *uint64           `protobuf:"varint,7,opt,name=memory_budget_bytes,json=memoryBudgetBytes,proto3,oneof" json:"memory_budget_bytes,omitempty"`
+	// In-memory storage cap for memory vaults, as a human size expression
+	// ("512MiB", "1GiB"). Empty = unset (defaulted at creation for memory
+	// vaults); "0" is rejected (unbounded RAM is an OOM). See gastrolog-etcjdx
+	// for why all config quantities are stored as the operator's expression and
+	// resolved at use.
+	MemoryBudget      string            `protobuf:"bytes,7,opt,name=memory_budget,json=memoryBudget,proto3" json:"memory_budget,omitempty"`
 	StorageClass      uint32            `protobuf:"varint,8,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"`
 	CloudServiceId    []byte            `protobuf:"bytes,9,opt,name=cloud_service_id,json=cloudServiceId,proto3" json:"cloud_service_id,omitempty"`
 	ReplicationFactor uint32            `protobuf:"varint,10,opt,name=replication_factor,json=replicationFactor,proto3" json:"replication_factor,omitempty"` // desired RF (1 = no replication, default)
 	Path              string            `protobuf:"bytes,11,opt,name=path,proto3" json:"path,omitempty"`                                                     // direct path for JSONL sinks
 	Placements        []*VaultPlacement `protobuf:"bytes,12,rep,name=placements,proto3" json:"placements,omitempty"`                                         // system-managed: file storage assignments by placement manager
 	CacheEviction     string            `protobuf:"bytes,13,opt,name=cache_eviction,json=cacheEviction,proto3" json:"cache_eviction,omitempty"`              // "lru" (default) or "ttl"
-	// Warm-cache soft cap for cloud-backed chunks, in bytes — numeric to match
-	// max_size_bytes / memory_budget_bytes. Optional so the server can tell
-	// "unset" (defaulted at creation for cloud vaults) from "explicit 0"
-	// (rejected). Unlimited is an explicit large value (gastrolog-338j51).
-	CacheBudgetBytes *uint64 `protobuf:"varint,14,opt,name=cache_budget_bytes,json=cacheBudgetBytes,proto3,oneof" json:"cache_budget_bytes,omitempty"`
-	// Warm-cache eviction age in nanoseconds (ttl mode only) — numeric to match
-	// the max_age_nanos durations. 0 = unset.
-	CacheTtlNanos        int64  `protobuf:"varint,15,opt,name=cache_ttl_nanos,json=cacheTtlNanos,proto3" json:"cache_ttl_nanos,omitempty"`
+	// Warm-cache soft cap for cloud-backed chunks, as a size expression
+	// ("1GiB"). Empty = unset (defaulted at creation for cloud vaults); "0"
+	// rejected.
+	CacheBudget string `protobuf:"bytes,14,opt,name=cache_budget,json=cacheBudget,proto3" json:"cache_budget,omitempty"`
+	// Warm-cache eviction age (ttl mode only), as a duration expression ("1h",
+	// "7d"). Empty = unset.
+	CacheTtl             string `protobuf:"bytes,15,opt,name=cache_ttl,json=cacheTtl,proto3" json:"cache_ttl,omitempty"`
 	RetentionDisposition string `protobuf:"bytes,16,opt,name=retention_disposition,json=retentionDisposition,proto3" json:"retention_disposition,omitempty"` // "delete" (default) or "route" — what retention does with aged-out records
-	// Per-vault disk guard thresholds on the vault's backing volume, in
-	// bytes of FREE space. 0 = inherit the node defaults (fraction-based
-	// with share clamps; env-overridable). Warn raises the disk-space
-	// alarm for this vault; floor suspends admission for records destined
-	// to this vault while other vaults keep ingesting.
-	DiskFreeWarnBytes  uint64 `protobuf:"varint,17,opt,name=disk_free_warn_bytes,json=diskFreeWarnBytes,proto3" json:"disk_free_warn_bytes,omitempty"`
-	DiskFreeFloorBytes uint64 `protobuf:"varint,18,opt,name=disk_free_floor_bytes,json=diskFreeFloorBytes,proto3" json:"disk_free_floor_bytes,omitempty"`
-	// Per-node byte budget for this vault's whole local disk claim (sealed
-	// chunks, indexes, and pipeline segment backlog). At the budget, admission
-	// for records destined to this vault is refused cluster-wide
-	// (cap-and-refuse) until retention or releases drain it — the hard backstop
-	// behind a size retention policy's cap-and-drain.
-	//
-	// Optional so the server can tell "unset" from "explicitly 0": an unset
-	// value is defaulted server-side at creation (a bounded per-node budget —
-	// see DefaultVaultMaxSizeBytes), and an explicit 0 is REJECTED (a 0 budget
-	// accepts no records). "Unlimited" is an explicit large value, never the
-	// effect of saying nothing (gastrolog-1epfgb / gastrolog-4j1e6y).
-	MaxSizeBytes  *uint64 `protobuf:"varint,19,opt,name=max_size_bytes,json=maxSizeBytes,proto3,oneof" json:"max_size_bytes,omitempty"`
+	// Per-vault disk-guard free-space thresholds on the vault's backing volume,
+	// as size expressions ("10GB"). Empty = inherit the node defaults
+	// (fraction-based, per-node). Warn raises the disk-space alarm; floor
+	// suspends admission for this vault while others keep ingesting.
+	DiskFreeWarn  string `protobuf:"bytes,17,opt,name=disk_free_warn,json=diskFreeWarn,proto3" json:"disk_free_warn,omitempty"`
+	DiskFreeFloor string `protobuf:"bytes,18,opt,name=disk_free_floor,json=diskFreeFloor,proto3" json:"disk_free_floor,omitempty"`
+	// Per-node budget for this vault's whole local disk claim (sealed chunks,
+	// indexes, segment backlog), as a size expression ("50GB"). At the budget,
+	// admission for this vault is refused cluster-wide until retention drains
+	// it. Empty = unset (defaulted at creation); "0" rejected; a large value
+	// (e.g. "1PiB") is effectively unlimited (gastrolog-1epfgb / gastrolog-etcjdx).
+	MaxSize       string `protobuf:"bytes,19,opt,name=max_size,json=maxSize,proto3" json:"max_size,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -731,11 +725,11 @@ func (x *VaultConfig) GetRetentionRules() []*RetentionRule {
 	return nil
 }
 
-func (x *VaultConfig) GetMemoryBudgetBytes() uint64 {
-	if x != nil && x.MemoryBudgetBytes != nil {
-		return *x.MemoryBudgetBytes
+func (x *VaultConfig) GetMemoryBudget() string {
+	if x != nil {
+		return x.MemoryBudget
 	}
-	return 0
+	return ""
 }
 
 func (x *VaultConfig) GetStorageClass() uint32 {
@@ -780,18 +774,18 @@ func (x *VaultConfig) GetCacheEviction() string {
 	return ""
 }
 
-func (x *VaultConfig) GetCacheBudgetBytes() uint64 {
-	if x != nil && x.CacheBudgetBytes != nil {
-		return *x.CacheBudgetBytes
+func (x *VaultConfig) GetCacheBudget() string {
+	if x != nil {
+		return x.CacheBudget
 	}
-	return 0
+	return ""
 }
 
-func (x *VaultConfig) GetCacheTtlNanos() int64 {
+func (x *VaultConfig) GetCacheTtl() string {
 	if x != nil {
-		return x.CacheTtlNanos
+		return x.CacheTtl
 	}
-	return 0
+	return ""
 }
 
 func (x *VaultConfig) GetRetentionDisposition() string {
@@ -801,25 +795,25 @@ func (x *VaultConfig) GetRetentionDisposition() string {
 	return ""
 }
 
-func (x *VaultConfig) GetDiskFreeWarnBytes() uint64 {
+func (x *VaultConfig) GetDiskFreeWarn() string {
 	if x != nil {
-		return x.DiskFreeWarnBytes
+		return x.DiskFreeWarn
 	}
-	return 0
+	return ""
 }
 
-func (x *VaultConfig) GetDiskFreeFloorBytes() uint64 {
+func (x *VaultConfig) GetDiskFreeFloor() string {
 	if x != nil {
-		return x.DiskFreeFloorBytes
+		return x.DiskFreeFloor
 	}
-	return 0
+	return ""
 }
 
-func (x *VaultConfig) GetMaxSizeBytes() uint64 {
-	if x != nil && x.MaxSizeBytes != nil {
-		return *x.MaxSizeBytes
+func (x *VaultConfig) GetMaxSize() string {
+	if x != nil {
+		return x.MaxSize
 	}
-	return 0
+	return ""
 }
 
 type RouteDestination struct {
@@ -1215,12 +1209,13 @@ func (x *IngesterConfig) GetAllNodes() bool {
 }
 
 type RotationPolicyConfig struct {
-	state      protoimpl.MessageState `protogen:"open.v1"`
-	MaxBytes   int64                  `protobuf:"varint,1,opt,name=max_bytes,json=maxBytes,proto3" json:"max_bytes,omitempty"`
-	MaxRecords int64                  `protobuf:"varint,2,opt,name=max_records,json=maxRecords,proto3" json:"max_records,omitempty"`
-	// Nanoseconds: durations are stored at full precision — a seconds field
-	// silently truncated sub-second input (e.g. "1004ms").
-	MaxAgeNanos   int64  `protobuf:"varint,3,opt,name=max_age_nanos,json=maxAgeNanos,proto3" json:"max_age_nanos,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Size and duration are the operator's expression ("512MiB", "1m"), parsed
+	// by the shared resolver at use — not resolved at ingress. Counts stay
+	// numeric: a record count is unitless (gastrolog-etcjdx).
+	MaxSize       string `protobuf:"bytes,1,opt,name=max_size,json=maxSize,proto3" json:"max_size,omitempty"`
+	MaxRecords    int64  `protobuf:"varint,2,opt,name=max_records,json=maxRecords,proto3" json:"max_records,omitempty"`
+	MaxAge        string `protobuf:"bytes,3,opt,name=max_age,json=maxAge,proto3" json:"max_age,omitempty"`
 	Cron          string `protobuf:"bytes,4,opt,name=cron,proto3" json:"cron,omitempty"`
 	Id            []byte `protobuf:"bytes,5,opt,name=id,proto3" json:"id,omitempty"`
 	Name          string `protobuf:"bytes,6,opt,name=name,proto3" json:"name,omitempty"`
@@ -1258,11 +1253,11 @@ func (*RotationPolicyConfig) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{10}
 }
 
-func (x *RotationPolicyConfig) GetMaxBytes() int64 {
+func (x *RotationPolicyConfig) GetMaxSize() string {
 	if x != nil {
-		return x.MaxBytes
+		return x.MaxSize
 	}
-	return 0
+	return ""
 }
 
 func (x *RotationPolicyConfig) GetMaxRecords() int64 {
@@ -1272,11 +1267,11 @@ func (x *RotationPolicyConfig) GetMaxRecords() int64 {
 	return 0
 }
 
-func (x *RotationPolicyConfig) GetMaxAgeNanos() int64 {
+func (x *RotationPolicyConfig) GetMaxAge() string {
 	if x != nil {
-		return x.MaxAgeNanos
+		return x.MaxAge
 	}
-	return 0
+	return ""
 }
 
 func (x *RotationPolicyConfig) GetCron() string {
@@ -1301,13 +1296,12 @@ func (x *RotationPolicyConfig) GetName() string {
 }
 
 type RetentionPolicyConfig struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Nanoseconds (see RotationPolicyConfig.max_age_nanos).
-	MaxAgeNanos   int64  `protobuf:"varint,1,opt,name=max_age_nanos,json=maxAgeNanos,proto3" json:"max_age_nanos,omitempty"`
-	MaxBytes      int64  `protobuf:"varint,2,opt,name=max_bytes,json=maxBytes,proto3" json:"max_bytes,omitempty"`
-	MaxChunks     int64  `protobuf:"varint,3,opt,name=max_chunks,json=maxChunks,proto3" json:"max_chunks,omitempty"`
-	Id            []byte `protobuf:"bytes,4,opt,name=id,proto3" json:"id,omitempty"`
-	Name          string `protobuf:"bytes,5,opt,name=name,proto3" json:"name,omitempty"`
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	MaxAge        string                 `protobuf:"bytes,1,opt,name=max_age,json=maxAge,proto3" json:"max_age,omitempty"`
+	MaxSize       string                 `protobuf:"bytes,2,opt,name=max_size,json=maxSize,proto3" json:"max_size,omitempty"`
+	MaxChunks     int64                  `protobuf:"varint,3,opt,name=max_chunks,json=maxChunks,proto3" json:"max_chunks,omitempty"`
+	Id            []byte                 `protobuf:"bytes,4,opt,name=id,proto3" json:"id,omitempty"`
+	Name          string                 `protobuf:"bytes,5,opt,name=name,proto3" json:"name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1342,18 +1336,18 @@ func (*RetentionPolicyConfig) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{11}
 }
 
-func (x *RetentionPolicyConfig) GetMaxAgeNanos() int64 {
+func (x *RetentionPolicyConfig) GetMaxAge() string {
 	if x != nil {
-		return x.MaxAgeNanos
+		return x.MaxAge
 	}
-	return 0
+	return ""
 }
 
-func (x *RetentionPolicyConfig) GetMaxBytes() int64 {
+func (x *RetentionPolicyConfig) GetMaxSize() string {
 	if x != nil {
-		return x.MaxBytes
+		return x.MaxSize
 	}
-	return 0
+	return ""
 }
 
 func (x *RetentionPolicyConfig) GetMaxChunks() int64 {
@@ -3688,10 +3682,11 @@ type ClusterSettings struct {
 	// in the vault-ctl registry). When a vault's backlog reaches the budget,
 	// ingest admission for that vault is refused (retryable backpressure) until
 	// chunking drains it below the budget. The operating bound that engages
-	// BEFORE disk pressure; the disk guard remains the backstop. 0 = unbounded.
-	PipelineBacklogMaxBytes uint64 `protobuf:"varint,3,opt,name=pipeline_backlog_max_bytes,json=pipelineBacklogMaxBytes,proto3" json:"pipeline_backlog_max_bytes,omitempty"`
-	unknownFields           protoimpl.UnknownFields
-	sizeCache               protoimpl.SizeCache
+	// BEFORE disk pressure; the disk guard remains the backstop. A size
+	// expression ("8GiB"); empty = unbounded (gastrolog-etcjdx).
+	PipelineBacklogMax string `protobuf:"bytes,3,opt,name=pipeline_backlog_max,json=pipelineBacklogMax,proto3" json:"pipeline_backlog_max,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *ClusterSettings) Reset() {
@@ -3738,11 +3733,11 @@ func (x *ClusterSettings) GetHeartbeatInterval() string {
 	return ""
 }
 
-func (x *ClusterSettings) GetPipelineBacklogMaxBytes() uint64 {
+func (x *ClusterSettings) GetPipelineBacklogMax() string {
 	if x != nil {
-		return x.PipelineBacklogMaxBytes
+		return x.PipelineBacklogMax
 	}
-	return 0
+	return ""
 }
 
 type GetSettingsResponse struct {
@@ -4322,12 +4317,12 @@ func (x *PutLookupSettings) GetYamlFileLookups() []*YAMLFileLookupEntry {
 }
 
 type PutClusterSettings struct {
-	state                   protoimpl.MessageState `protogen:"open.v1"`
-	BroadcastInterval       *string                `protobuf:"bytes,1,opt,name=broadcast_interval,json=broadcastInterval,proto3,oneof" json:"broadcast_interval,omitempty"`
-	HeartbeatInterval       *string                `protobuf:"bytes,2,opt,name=heartbeat_interval,json=heartbeatInterval,proto3,oneof" json:"heartbeat_interval,omitempty"`
-	PipelineBacklogMaxBytes *uint64                `protobuf:"varint,3,opt,name=pipeline_backlog_max_bytes,json=pipelineBacklogMaxBytes,proto3,oneof" json:"pipeline_backlog_max_bytes,omitempty"`
-	unknownFields           protoimpl.UnknownFields
-	sizeCache               protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	BroadcastInterval  *string                `protobuf:"bytes,1,opt,name=broadcast_interval,json=broadcastInterval,proto3,oneof" json:"broadcast_interval,omitempty"`
+	HeartbeatInterval  *string                `protobuf:"bytes,2,opt,name=heartbeat_interval,json=heartbeatInterval,proto3,oneof" json:"heartbeat_interval,omitempty"`
+	PipelineBacklogMax *string                `protobuf:"bytes,3,opt,name=pipeline_backlog_max,json=pipelineBacklogMax,proto3,oneof" json:"pipeline_backlog_max,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *PutClusterSettings) Reset() {
@@ -4374,11 +4369,11 @@ func (x *PutClusterSettings) GetHeartbeatInterval() string {
 	return ""
 }
 
-func (x *PutClusterSettings) GetPipelineBacklogMaxBytes() uint64 {
-	if x != nil && x.PipelineBacklogMaxBytes != nil {
-		return *x.PipelineBacklogMaxBytes
+func (x *PutClusterSettings) GetPipelineBacklogMax() string {
+	if x != nil && x.PipelineBacklogMax != nil {
+		return *x.PipelineBacklogMax
 	}
-	return 0
+	return ""
 }
 
 type PutServiceSettingsRequest struct {
@@ -8920,15 +8915,15 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x0eVaultPlacement\x12\x1d\n" +
 	"\n" +
 	"storage_id\x18\x01 \x01(\fR\tstorageId\x12\x16\n" +
-	"\x06leader\x18\x02 \x01(\bR\x06leader\"\xf9\x06\n" +
+	"\x06leader\x18\x02 \x01(\bR\x06leader\"\xe6\x05\n" +
 	"\vVaultConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
 	"\aenabled\x18\x03 \x01(\bR\aenabled\x12+\n" +
 	"\x04type\x18\x04 \x01(\x0e2\x17.gastrolog.v1.VaultTypeR\x04type\x12,\n" +
 	"\x12rotation_policy_id\x18\x05 \x01(\fR\x10rotationPolicyId\x12D\n" +
-	"\x0fretention_rules\x18\x06 \x03(\v2\x1b.gastrolog.v1.RetentionRuleR\x0eretentionRules\x123\n" +
-	"\x13memory_budget_bytes\x18\a \x01(\x04H\x00R\x11memoryBudgetBytes\x88\x01\x01\x12#\n" +
+	"\x0fretention_rules\x18\x06 \x03(\v2\x1b.gastrolog.v1.RetentionRuleR\x0eretentionRules\x12#\n" +
+	"\rmemory_budget\x18\a \x01(\tR\fmemoryBudget\x12#\n" +
 	"\rstorage_class\x18\b \x01(\rR\fstorageClass\x12(\n" +
 	"\x10cloud_service_id\x18\t \x01(\fR\x0ecloudServiceId\x12-\n" +
 	"\x12replication_factor\x18\n" +
@@ -8937,16 +8932,13 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\n" +
 	"placements\x18\f \x03(\v2\x1c.gastrolog.v1.VaultPlacementR\n" +
 	"placements\x12%\n" +
-	"\x0ecache_eviction\x18\r \x01(\tR\rcacheEviction\x121\n" +
-	"\x12cache_budget_bytes\x18\x0e \x01(\x04H\x01R\x10cacheBudgetBytes\x88\x01\x01\x12&\n" +
-	"\x0fcache_ttl_nanos\x18\x0f \x01(\x03R\rcacheTtlNanos\x123\n" +
-	"\x15retention_disposition\x18\x10 \x01(\tR\x14retentionDisposition\x12/\n" +
-	"\x14disk_free_warn_bytes\x18\x11 \x01(\x04R\x11diskFreeWarnBytes\x121\n" +
-	"\x15disk_free_floor_bytes\x18\x12 \x01(\x04R\x12diskFreeFloorBytes\x12)\n" +
-	"\x0emax_size_bytes\x18\x13 \x01(\x04H\x02R\fmaxSizeBytes\x88\x01\x01B\x16\n" +
-	"\x14_memory_budget_bytesB\x15\n" +
-	"\x13_cache_budget_bytesB\x11\n" +
-	"\x0f_max_size_bytes\"-\n" +
+	"\x0ecache_eviction\x18\r \x01(\tR\rcacheEviction\x12!\n" +
+	"\fcache_budget\x18\x0e \x01(\tR\vcacheBudget\x12\x1b\n" +
+	"\tcache_ttl\x18\x0f \x01(\tR\bcacheTtl\x123\n" +
+	"\x15retention_disposition\x18\x10 \x01(\tR\x14retentionDisposition\x12$\n" +
+	"\x0edisk_free_warn\x18\x11 \x01(\tR\fdiskFreeWarn\x12&\n" +
+	"\x0fdisk_free_floor\x18\x12 \x01(\tR\rdiskFreeFloor\x12\x19\n" +
+	"\bmax_size\x18\x13 \x01(\tR\amaxSize\"-\n" +
 	"\x10RouteDestination\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\"\x81\x02\n" +
 	"\vRouteConfig\x12\x0e\n" +
@@ -8978,18 +8970,18 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\tall_nodes\x18\t \x01(\bR\ballNodes\x1a9\n" +
 	"\vParamsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xb0\x01\n" +
-	"\x14RotationPolicyConfig\x12\x1b\n" +
-	"\tmax_bytes\x18\x01 \x01(\x03R\bmaxBytes\x12\x1f\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xa3\x01\n" +
+	"\x14RotationPolicyConfig\x12\x19\n" +
+	"\bmax_size\x18\x01 \x01(\tR\amaxSize\x12\x1f\n" +
 	"\vmax_records\x18\x02 \x01(\x03R\n" +
-	"maxRecords\x12\"\n" +
-	"\rmax_age_nanos\x18\x03 \x01(\x03R\vmaxAgeNanos\x12\x12\n" +
+	"maxRecords\x12\x17\n" +
+	"\amax_age\x18\x03 \x01(\tR\x06maxAge\x12\x12\n" +
 	"\x04cron\x18\x04 \x01(\tR\x04cron\x12\x0e\n" +
 	"\x02id\x18\x05 \x01(\fR\x02id\x12\x12\n" +
-	"\x04name\x18\x06 \x01(\tR\x04name\"\x9b\x01\n" +
-	"\x15RetentionPolicyConfig\x12\"\n" +
-	"\rmax_age_nanos\x18\x01 \x01(\x03R\vmaxAgeNanos\x12\x1b\n" +
-	"\tmax_bytes\x18\x02 \x01(\x03R\bmaxBytes\x12\x1d\n" +
+	"\x04name\x18\x06 \x01(\tR\x04name\"\x8e\x01\n" +
+	"\x15RetentionPolicyConfig\x12\x17\n" +
+	"\amax_age\x18\x01 \x01(\tR\x06maxAge\x12\x19\n" +
+	"\bmax_size\x18\x02 \x01(\tR\amaxSize\x12\x1d\n" +
 	"\n" +
 	"max_chunks\x18\x03 \x01(\x03R\tmaxChunks\x12\x0e\n" +
 	"\x02id\x18\x04 \x01(\fR\x02id\x12\x12\n" +
@@ -9158,11 +9150,11 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x06values\x18\x01 \x03(\v2).gastrolog.v1.StaticLookupRow.ValuesEntryR\x06values\x1a9\n" +
 	"\vValuesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xac\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xa1\x01\n" +
 	"\x0fClusterSettings\x12-\n" +
 	"\x12broadcast_interval\x18\x01 \x01(\tR\x11broadcastInterval\x12-\n" +
-	"\x12heartbeat_interval\x18\x02 \x01(\tR\x11heartbeatInterval\x12;\n" +
-	"\x1apipeline_backlog_max_bytes\x18\x03 \x01(\x04R\x17pipelineBacklogMaxBytes\"\xf8\x03\n" +
+	"\x12heartbeat_interval\x18\x02 \x01(\tR\x11heartbeatInterval\x120\n" +
+	"\x14pipeline_backlog_max\x18\x03 \x01(\tR\x12pipelineBacklogMax\"\xf8\x03\n" +
 	"\x13GetSettingsResponse\x12.\n" +
 	"\x04auth\x18\x01 \x01(\v2\x1a.gastrolog.v1.AuthSettingsR\x04auth\x121\n" +
 	"\x05query\x18\x02 \x01(\v2\x1b.gastrolog.v1.QuerySettingsR\x05query\x12=\n" +
@@ -9233,14 +9225,14 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\vcsv_lookups\x18\x04 \x03(\v2\x1c.gastrolog.v1.CSVLookupEntryR\n" +
 	"csvLookups\x12F\n" +
 	"\x0estatic_lookups\x18\x05 \x03(\v2\x1f.gastrolog.v1.StaticLookupEntryR\rstaticLookups\x12M\n" +
-	"\x11yaml_file_lookups\x18\x06 \x03(\v2!.gastrolog.v1.YAMLFileLookupEntryR\x0fyamlFileLookups\"\x8b\x02\n" +
+	"\x11yaml_file_lookups\x18\x06 \x03(\v2!.gastrolog.v1.YAMLFileLookupEntryR\x0fyamlFileLookups\"\xfa\x01\n" +
 	"\x12PutClusterSettings\x122\n" +
 	"\x12broadcast_interval\x18\x01 \x01(\tH\x00R\x11broadcastInterval\x88\x01\x01\x122\n" +
-	"\x12heartbeat_interval\x18\x02 \x01(\tH\x01R\x11heartbeatInterval\x88\x01\x01\x12@\n" +
-	"\x1apipeline_backlog_max_bytes\x18\x03 \x01(\x04H\x02R\x17pipelineBacklogMaxBytes\x88\x01\x01B\x15\n" +
+	"\x12heartbeat_interval\x18\x02 \x01(\tH\x01R\x11heartbeatInterval\x88\x01\x01\x125\n" +
+	"\x14pipeline_backlog_max\x18\x03 \x01(\tH\x02R\x12pipelineBacklogMax\x88\x01\x01B\x15\n" +
 	"\x13_broadcast_intervalB\x15\n" +
-	"\x13_heartbeat_intervalB\x1d\n" +
-	"\x1b_pipeline_backlog_max_bytes\"\xb2\x02\n" +
+	"\x13_heartbeat_intervalB\x17\n" +
+	"\x15_pipeline_backlog_max\"\xb2\x02\n" +
 	"\x19PutServiceSettingsRequest\x121\n" +
 	"\x04auth\x18\x01 \x01(\v2\x1d.gastrolog.v1.PutAuthSettingsR\x04auth\x124\n" +
 	"\x05query\x18\x02 \x01(\v2\x1e.gastrolog.v1.PutQuerySettingsR\x05query\x12@\n" +
@@ -10042,7 +10034,6 @@ func file_gastrolog_v1_system_proto_init() {
 	}
 	file_gastrolog_v1_storage_proto_init()
 	file_gastrolog_v1_vault_proto_init()
-	file_gastrolog_v1_system_proto_msgTypes[4].OneofWrappers = []any{}
 	file_gastrolog_v1_system_proto_msgTypes[7].OneofWrappers = []any{
 		(*RouteStage_Match)(nil),
 	}

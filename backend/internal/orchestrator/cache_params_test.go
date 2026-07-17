@@ -8,7 +8,6 @@ package orchestrator
 
 import (
 	"testing"
-	"time"
 
 	"gastrolog/internal/system"
 )
@@ -17,23 +16,21 @@ func TestAddCacheParamsThreadsConfigToFactory(t *testing.T) {
 	t.Parallel()
 	params := map[string]string{}
 	addCacheParams(params, system.VaultConfig{
-		CacheEviction:    "lru",
-		CacheBudgetBytes: 2 << 30, // 2 GiB
-		CacheTTLNanos:    int64(time.Hour),
+		CacheEviction: "lru",
+		CacheBudget:   "2GiB",
+		CacheTTL:      "1h",
 	})
 
-	// Keys the file-manager factory (applyCloudAndCacheParams) reads.
+	// Expressions pass through verbatim — the factory resolves them with the
+	// shared parser (gastrolog-etcjdx).
 	if got := params["cache_eviction"]; got != "lru" {
 		t.Errorf("cache_eviction = %q, want lru", got)
 	}
-	// Budget is threaded as a plain byte count; the factory's ParseSize
-	// accepts that and yields the same value lruRule enforces.
-	if got := params["cache_budget"]; got != "2147483648" {
-		t.Errorf("cache_budget = %q, want 2147483648 (2 GiB)", got)
+	if got := params["cache_budget"]; got != "2GiB" {
+		t.Errorf("cache_budget = %q, want 2GiB", got)
 	}
-	// TTL is threaded as a duration string the factory's ParseDuration reads.
-	if got := params["cache_ttl"]; got != "1h0m0s" {
-		t.Errorf("cache_ttl = %q, want 1h0m0s", got)
+	if got := params["cache_ttl"]; got != "1h" {
+		t.Errorf("cache_ttl = %q, want 1h", got)
 	}
 }
 

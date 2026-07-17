@@ -34,6 +34,14 @@ visible at the CLI — *"warn/floor of 0 inherit the node defaults … maxSizeBy
 of 0 means no budget."* The remediation is to make the finite-resource limits
 follow the pattern their neighbours already set.
 
+**Update (gastrolog-etcjdx):** the remediation went further than aligning
+defaults — all config quantities are now stored as the operator's expression
+(`"5GiB"`, `"3m"`) and resolved at use, empty = unset. So the "warn/floor of
+0 = inherit" vs "max-size 0 = no budget" split is gone entirely: every field
+reads empty = unset (defaulted or inherited per its rule), `"0"` = explicit
+zero (rejected where meaningless). See the design doc's *Representation*
+section.
+
 ## Matrix — vault limits (`config vault create`)
 
 | Knob | Unset | Crit 1 | Crit 2 | Crit 3 | Crit 4 | Verdict | Follow-up |

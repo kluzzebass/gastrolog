@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"gastrolog/internal/glid"
-	"time"
 )
 
 // DefaultConfig returns the bootstrap configuration for first-run.
@@ -23,7 +22,7 @@ func DefaultConfig() *Config {
 		// gastrolog-4kkoo (Phase 5): no separate Filters; the default route
 		// carries its catch-all expression inline via MatchStage.
 		RotationPolicies: []RotationPolicyConfig{
-			{ID: rotationID, Name: "default", MaxAgeNanos: new(int64(5 * time.Minute))},
+			{ID: rotationID, Name: "default", MaxAge: new("5m")},
 		},
 		RetentionPolicies: []RetentionPolicyConfig{
 			{ID: retentionID, Name: "default", MaxChunks: new(int64(10))},

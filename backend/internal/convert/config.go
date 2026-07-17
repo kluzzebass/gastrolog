@@ -151,21 +151,18 @@ func VaultConfigToProto(v system.VaultConfig) *gastrologv1.VaultConfig {
 		Enabled:              v.Enabled,
 		Type:                 VaultTypeToProto(v.Type),
 		RetentionRules:       rules,
-		MemoryBudgetBytes:    &v.MemoryBudgetBytes, // always present; resolved at ingress for memory vaults
+		MemoryBudget:         v.MemoryBudget,
 		StorageClass:         v.StorageClass,
 		ReplicationFactor:    v.ReplicationFactor,
 		Path:                 v.Path,
 		Placements:           pbPlacements,
 		CacheEviction:        v.CacheEviction,
-		CacheBudgetBytes:     &v.CacheBudgetBytes, // always present; resolved at ingress
-		CacheTtlNanos:        v.CacheTTLNanos,
+		CacheBudget:          v.CacheBudget,
+		CacheTtl:             v.CacheTTL,
 		RetentionDisposition: v.RetentionDisposition,
-		DiskFreeWarnBytes:    v.DiskFreeWarnBytes,
-		DiskFreeFloorBytes:   v.DiskFreeFloorBytes,
-		// Always present on the wire: a stored VaultConfig carries a resolved
-		// budget (defaulted at creation, never 0), so absence only ever means
-		// "operator has not spoken yet" at the create ingress, never here.
-		MaxSizeBytes: &v.MaxSizeBytes,
+		DiskFreeWarn:         v.DiskFreeWarn,
+		DiskFreeFloor:        v.DiskFreeFloor,
+		MaxSize:              v.MaxSize,
 	}
 	pb.RotationPolicyId = glid.OptionalToProto(v.RotationPolicyID)
 	pb.CloudServiceId = glid.OptionalToProto(v.CloudServiceID)
@@ -182,17 +179,17 @@ func VaultConfigFromProto(p *gastrologv1.VaultConfig) (system.VaultConfig, error
 		Name:                 p.GetName(),
 		Enabled:              p.GetEnabled(),
 		Type:                 VaultTypeFromProto(p.GetType()),
-		MemoryBudgetBytes:    p.GetMemoryBudgetBytes(),
+		MemoryBudget:         p.GetMemoryBudget(),
 		StorageClass:         p.GetStorageClass(),
 		ReplicationFactor:    p.GetReplicationFactor(),
 		Path:                 p.GetPath(),
 		CacheEviction:        p.GetCacheEviction(),
-		CacheBudgetBytes:     p.GetCacheBudgetBytes(),
-		CacheTTLNanos:        p.GetCacheTtlNanos(),
+		CacheBudget:          p.GetCacheBudget(),
+		CacheTTL:             p.GetCacheTtl(),
 		RetentionDisposition: p.GetRetentionDisposition(),
-		DiskFreeWarnBytes:    p.GetDiskFreeWarnBytes(),
-		DiskFreeFloorBytes:   p.GetDiskFreeFloorBytes(),
-		MaxSizeBytes:         p.GetMaxSizeBytes(),
+		DiskFreeWarn:         p.GetDiskFreeWarn(),
+		DiskFreeFloor:        p.GetDiskFreeFloor(),
+		MaxSize:              p.GetMaxSize(),
 		RotationPolicyID:     glid.OptionalFromProto(p.GetRotationPolicyId()),
 		CloudServiceID:       glid.OptionalFromProto(p.GetCloudServiceId()),
 	}

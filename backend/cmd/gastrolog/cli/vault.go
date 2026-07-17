@@ -6,15 +6,12 @@ import (
 	"fmt"
 	"gastrolog/internal/glid"
 	"strconv"
-	"time"
 
 	"connectrpc.com/connect"
 	"github.com/spf13/cobra"
 
 	v1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/server"
-	"gastrolog/internal/system"
-	"gastrolog/internal/units"
 )
 
 func newVaultCmd() *cobra.Command {
@@ -109,32 +106,22 @@ func vaultDetailPairs(v *v1.VaultConfig) [][2]string {
 	if v.Path != "" {
 		pairs = append(pairs, [2]string{"Path", v.Path})
 	}
-	// Operator-settable size values use FormatBytesCompact, not
-	// FormatBytesDisplay: it round-trips exactly (a value copied from here
-	// back into a create command re-parses to the same bytes), where the
-	// .toFixed display formatter would drift 1500→"1.5 KiB"→1536. Clean values
-	// still read as "1GiB"; only odd ones show raw bytes (gastrolog-1qd5wz).
-	if v.MemoryBudgetBytes != nil {
-		pairs = append(pairs, [2]string{"Memory Budget", units.FormatBytesCompact(v.GetMemoryBudgetBytes())})
+	// Quantities are stored as the operator's own expression, so display is an
+	// exact echo — no formatter, no drift (gastrolog-etcjdx).
+	addExpr := func(label, expr string) {
+		if expr != "" {
+			pairs = append(pairs, [2]string{label, expr})
+		}
 	}
+	addExpr("Memory Budget", v.MemoryBudget)
 	if v.CacheEviction != "" {
 		pairs = append(pairs, [2]string{"Cache Eviction", v.CacheEviction})
 	}
-	if v.CacheBudgetBytes != nil {
-		pairs = append(pairs, [2]string{"Cache Budget", units.FormatBytesCompact(v.GetCacheBudgetBytes())})
-	}
-	if v.CacheTtlNanos > 0 {
-		pairs = append(pairs, [2]string{"Cache TTL", time.Duration(v.CacheTtlNanos).String()})
-	}
-	if v.DiskFreeWarnBytes > 0 {
-		pairs = append(pairs, [2]string{"Disk Free Warn", units.FormatBytesCompact(v.DiskFreeWarnBytes)})
-	}
-	if v.DiskFreeFloorBytes > 0 {
-		pairs = append(pairs, [2]string{"Disk Free Floor", units.FormatBytesCompact(v.DiskFreeFloorBytes)})
-	}
-	if v.MaxSizeBytes != nil {
-		pairs = append(pairs, [2]string{"Max Size", units.FormatBytesCompact(v.GetMaxSizeBytes())})
-	}
+	addExpr("Cache Budget", v.CacheBudget)
+	addExpr("Cache TTL", v.CacheTtl)
+	addExpr("Disk Free Warn", v.DiskFreeWarn)
+	addExpr("Disk Free Floor", v.DiskFreeFloor)
+	addExpr("Max Size", v.MaxSize)
 	if v.RetentionDisposition != "" {
 		pairs = append(pairs, [2]string{"Retention Disposition", v.RetentionDisposition})
 	} else {
@@ -289,88 +276,32 @@ func applyVaultFlags(ctx context.Context, cmd *cobra.Command, client *server.Cli
 // applyVaultCacheFlags overlays the warm-cache budget/ttl flags. Both are
 // numeric on the wire (gastrolog-338j51); cache-budget is proto-optional so
 // an empty flag is "unset" (server defaults it for cloud vaults) rather than
-// an explicit 0.
+// (see gastrolog-etcjdx).
 func applyVaultCacheFlags(cmd *cobra.Command, cfg *v1.VaultConfig) error {
-	if cmd.Flags().Changed("cache-budget") {
-		raw, _ := cmd.Flags().GetString("cache-budget")
-		if raw == "" {
-			cfg.CacheBudgetBytes = nil
-		} else {
-			b, err := system.ParseSize(raw)
-			if err != nil {
-				return fmt.Errorf("invalid cache-budget: %w", err)
-			}
-			cfg.CacheBudgetBytes = &b
-		}
-	}
-	if cmd.Flags().Changed("cache-ttl") {
-		raw, _ := cmd.Flags().GetString("cache-ttl")
-		if raw == "" {
-			cfg.CacheTtlNanos = 0
-		} else {
-			d, err := system.ParseDuration(raw)
-			if err != nil {
-				return fmt.Errorf("invalid cache-ttl: %w", err)
-			}
-			cfg.CacheTtlNanos = int64(d)
-		}
-	}
+	setFromFlag(cmd, "cache-budget", &cfg.CacheBudget)
+	setFromFlag(cmd, "cache-ttl", &cfg.CacheTtl)
 	return nil
 }
 
-// applyVaultSizeFlags overlays the byte-size threshold flags onto the vault
-// config. disk-free warn/floor use plain uint64 where 0 legitimately means
-// "inherit the node default". max-size is different: it is proto-optional so
-// the server can tell an unset budget (default it) from an explicit 0 (reject
-// it), so it is only set here when the operator actually passed the flag —
-// leaving it nil otherwise carries "unset" to the server (gastrolog-1epfgb).
+// applyVaultSizeFlags overlays the size expression flags. Quantities are
+// stored as the operator typed them and validated/resolved server-side, so
+// the CLI just carries the string through — no parsing here (gastrolog-etcjdx).
 func applyVaultSizeFlags(cmd *cobra.Command, cfg *v1.VaultConfig) error {
-	for _, f := range []struct {
-		name string
-		dst  *uint64
-	}{
-		{"disk-free-warn", &cfg.DiskFreeWarnBytes},
-		{"disk-free-floor", &cfg.DiskFreeFloorBytes},
-	} {
-		if !cmd.Flags().Changed(f.name) {
-			continue
-		}
-		v, err := parseDiskFreeFlag(cmd, f.name)
-		if err != nil {
-			return err
-		}
-		*f.dst = v
-	}
-	if cmd.Flags().Changed("max-size") {
-		v, err := parseDiskFreeFlag(cmd, "max-size")
-		if err != nil {
-			return err
-		}
-		cfg.MaxSizeBytes = &v // may be 0; the server rejects an explicit 0
-	}
-	if cmd.Flags().Changed("memory-budget") {
-		v, err := parseDiskFreeFlag(cmd, "memory-budget")
-		if err != nil {
-			return err
-		}
-		cfg.MemoryBudgetBytes = &v // human size string like max-size; server rejects an explicit 0
-	}
+	setFromFlag(cmd, "disk-free-warn", &cfg.DiskFreeWarn)
+	setFromFlag(cmd, "disk-free-floor", &cfg.DiskFreeFloor)
+	setFromFlag(cmd, "max-size", &cfg.MaxSize)
+	setFromFlag(cmd, "memory-budget", &cfg.MemoryBudget)
 	return nil
 }
 
-// parseDiskFreeFlag parses a human-friendly size flag; empty resets to 0
-// (inherit the node default / unlimited).
-func parseDiskFreeFlag(cmd *cobra.Command, name string) (uint64, error) {
-	raw, _ := cmd.Flags().GetString(name)
-	if raw == "" {
-		return 0, nil
+// setFromFlag copies a string flag onto dst only when the operator passed it,
+// so an omitted flag leaves the stored value (or "unset") untouched.
+func setFromFlag(cmd *cobra.Command, name string, dst *string) {
+	if cmd.Flags().Changed(name) {
+		*dst, _ = cmd.Flags().GetString(name)
 	}
-	v, err := system.ParseSize(raw)
-	if err != nil {
-		return 0, fmt.Errorf("invalid --%s %q: %w", name, raw, err)
-	}
-	return v, nil
 }
+
 
 func resolveVaultCloudService(ctx context.Context, cmd *cobra.Command, client *server.Client, cfg *v1.VaultConfig) error {
 	csName, _ := cmd.Flags().GetString("cloud-service")

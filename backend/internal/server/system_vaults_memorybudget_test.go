@@ -1,8 +1,8 @@
 package server_test
 
-// Coverage for gastrolog-1qd5wz: a memory vault's in-RAM budget is resolved
-// at the PutVault ingress like max-size, scoped to memory vaults. Unset →
-// default, explicit 0 → rejected, non-memory → untouched.
+// Coverage for gastrolog-1qd5wz / gastrolog-etcjdx: a memory vault's in-RAM cap
+// is a stored expression resolved at use, scoped to memory vaults. Unset →
+// default; explicit "0" → rejected; non-memory → left empty.
 
 import (
 	"context"
@@ -15,8 +15,7 @@ import (
 	"gastrolog/internal/system"
 )
 
-// An unset memory-budget on a memory vault is stored as the default, not left
-// unbounded (an unbounded memory vault grows until OOM).
+// An unset memory-budget on a memory vault is stored as the default.
 func TestPutVaultDefaultsUnsetMemoryBudget(t *testing.T) {
 	client, store, _ := newConfigTestSetup(t)
 	ctx := context.Background()
@@ -28,28 +27,28 @@ func TestPutVaultDefaultsUnsetMemoryBudget(t *testing.T) {
 			Name:    "mem-v",
 			Enabled: true,
 			Type:    gastrologv1.VaultType_VAULT_TYPE_MEMORY,
-			// MemoryBudgetBytes unset.
+			// MemoryBudget unset.
 		},
 	})); err != nil {
 		t.Fatalf("PutVault: %v", err)
 	}
-	if got := getStoredVault(t, store, id).MemoryBudgetBytes; got != system.DefaultVaultMemoryBudgetBytes {
-		t.Fatalf("stored memory-budget = %d, want default %d", got, system.DefaultVaultMemoryBudgetBytes)
+	if got := getStoredVault(t, store, id).MemoryBudget; got != system.DefaultVaultMemoryBudget {
+		t.Fatalf("stored memory-budget = %q, want default %q", got, system.DefaultVaultMemoryBudget)
 	}
 }
 
-// An explicit 0 leaves the vault unbounded in RAM, so it is rejected.
+// An explicit "0" leaves the vault unbounded in RAM, so it is rejected.
 func TestPutVaultRejectsExplicitZeroMemoryBudget(t *testing.T) {
 	client, _, _ := newConfigTestSetup(t)
 	ctx := context.Background()
 
 	_, err := client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
 		Config: &gastrologv1.VaultConfig{
-			Id:                glid.New().Bytes(),
-			Name:              "mem-v",
-			Enabled:           true,
-			Type:              gastrologv1.VaultType_VAULT_TYPE_MEMORY,
-			MemoryBudgetBytes: u64(0),
+			Id:           glid.New().Bytes(),
+			Name:         "mem-v",
+			Enabled:      true,
+			Type:         gastrologv1.VaultType_VAULT_TYPE_MEMORY,
+			MemoryBudget: "0",
 		},
 	}))
 	if err == nil {
@@ -60,8 +59,7 @@ func TestPutVaultRejectsExplicitZeroMemoryBudget(t *testing.T) {
 	}
 }
 
-// A non-memory vault has no in-memory store: memory-budget is neither
-// defaulted nor rejected.
+// A non-memory vault has no in-memory store: memory-budget is left empty.
 func TestPutVaultLeavesMemoryBudgetUnsetForFileVault(t *testing.T) {
 	client, store, _ := newConfigTestSetup(t)
 	ctx := context.Background()
@@ -69,16 +67,16 @@ func TestPutVaultLeavesMemoryBudgetUnsetForFileVault(t *testing.T) {
 
 	if _, err := client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
 		Config: &gastrologv1.VaultConfig{
-			Id:           id.Bytes(),
-			Name:         "file-v",
-			Enabled:      true,
-			Type:         gastrologv1.VaultType_VAULT_TYPE_FILE,
-			MaxSizeBytes: u64(1 << 30),
+			Id:      id.Bytes(),
+			Name:    "file-v",
+			Enabled: true,
+			Type:    gastrologv1.VaultType_VAULT_TYPE_FILE,
+			MaxSize: "1GiB",
 		},
 	})); err != nil {
 		t.Fatalf("PutVault: %v", err)
 	}
-	if got := getStoredVault(t, store, id).MemoryBudgetBytes; got != 0 {
-		t.Fatalf("file-vault memory-budget = %d, want 0", got)
+	if got := getStoredVault(t, store, id).MemoryBudget; got != "" {
+		t.Fatalf("file-vault memory-budget = %q, want empty", got)
 	}
 }

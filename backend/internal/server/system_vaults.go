@@ -13,99 +13,106 @@ import (
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/system"
 	"gastrolog/internal/system/raftfsm"
-	"gastrolog/internal/units"
 )
 
-// resolveMaxSizeBudget settles a vault's size budget from the wire, where an
-// absent max_size_bytes ("unset") and a present 0 ("explicitly zero") are
-// distinguishable and mean opposite things (gastrolog-1epfgb). It mutates
-// vaultCfg.MaxSizeBytes to the resolved, always-non-zero value.
+// vaultQuantity describes one operator-authored config quantity on a vault:
+// which field it lands in, what it defaults to, and whether it applies to this
+// vault's type at all.
+type vaultQuantity struct {
+	flag    string // operator-facing name, for error messages
+	applies bool   // false → this vault type has no such quantity; leave it alone
+	in      string // the incoming expression from the wire
+	dst     *string
+	def     string                       // default expression when unset on create
+	prev    func(system.VaultConfig) string // the stored value, for preserve-on-update
+}
+
+// resolveVaultQuantities settles every config quantity on a vault from one set
+// of rules, rather than a near-identical function per field (gastrolog-etcjdx):
 //
-//   - present and 0     → rejected: a 0 budget accepts no records.
-//   - present and > 0   → used as given (an operator's explicit choice,
-//     including a large value for effectively-unlimited).
-//   - absent, creating  → DefaultVaultMaxSizeBytes.
-//   - absent, updating   → the existing vault's stored budget is preserved,
-//     so an update that does not mention max-size never silently re-defaults
-//     a previously-chosen value.
-func resolveMaxSizeBudget(p *apiv1.VaultConfig, vaultCfg *system.VaultConfig, existing []system.VaultConfig) *connect.Error {
-	// max-size is a disk-claim budget: it applies to file vaults. Memory
-	// vaults bound their footprint via memory-budget; leave their (unused)
-	// max-size untouched so a UI/CLI that sends 0 for a non-file vault is not
-	// read as an explicit-0 rejection.
-	if vaultCfg.Type != system.VaultTypeFile {
-		return nil
-	}
-	if p.MaxSizeBytes != nil {
-		if *p.MaxSizeBytes == 0 {
-			return errInvalidArg(fmt.Errorf(
-				"max-size of 0 accepts no records for vault %q; omit it for the default (%s) or set a large value for effectively-unlimited",
-				vaultCfg.Name, units.FormatBytesDisplay(int64(system.DefaultVaultMaxSizeBytes))))
+//   - set          → stored verbatim, as the operator typed it, after a
+//     parse-check so an unparseable expression fails at write rather than
+//     surfacing later at use.
+//   - "0"          → rejected: an explicit zero means "accept nothing" or "no
+//     bound", the two states this model exists to prevent.
+//   - unset, create → the default expression.
+//   - unset, update → the stored value, so an update that does not mention a
+//     quantity never silently re-defaults a chosen one.
+func resolveVaultQuantities(p *apiv1.VaultConfig, vaultCfg *system.VaultConfig, existing []system.VaultConfig) *connect.Error {
+	for _, q := range []vaultQuantity{
+		{
+			flag: "max-size", applies: vaultCfg.Type == system.VaultTypeFile,
+			in: p.GetMaxSize(), dst: &vaultCfg.MaxSize, def: system.DefaultVaultMaxSize,
+			prev: func(v system.VaultConfig) string { return v.MaxSize },
+		},
+		{
+			flag: "cache-budget", applies: vaultCfg.IsCloud(),
+			in: p.GetCacheBudget(), dst: &vaultCfg.CacheBudget, def: system.DefaultVaultCacheBudget,
+			prev: func(v system.VaultConfig) string { return v.CacheBudget },
+		},
+		{
+			flag: "memory-budget", applies: vaultCfg.Type == system.VaultTypeMemory,
+			in: p.GetMemoryBudget(), dst: &vaultCfg.MemoryBudget, def: system.DefaultVaultMemoryBudget,
+			prev: func(v system.VaultConfig) string { return v.MemoryBudget },
+		},
+	} {
+		if !q.applies {
+			continue
 		}
-		vaultCfg.MaxSizeBytes = *p.MaxSizeBytes
-		return nil
-	}
-	for i := range existing {
-		if existing[i].ID == vaultCfg.ID {
-			vaultCfg.MaxSizeBytes = existing[i].MaxSizeBytes // preserve on update
-			return nil
+		if connErr := resolveVaultQuantity(q, vaultCfg, existing); connErr != nil {
+			return connErr
 		}
 	}
-	vaultCfg.MaxSizeBytes = system.DefaultVaultMaxSizeBytes // default on create
 	return nil
 }
 
-// resolveCacheBudget settles a vault's warm-cache budget from the wire, the
-// same unset-vs-explicit-0 distinction as max-size (gastrolog-338j51). The
-// warm cache holds cloud-backed chunks only, so this applies to cloud-backed
-// vaults; a non-cloud vault has no warm cache and keeps its (unused) 0.
-func resolveCacheBudget(p *apiv1.VaultConfig, vaultCfg *system.VaultConfig, existing []system.VaultConfig) *connect.Error {
-	if !vaultCfg.IsCloud() {
-		return nil
-	}
-	if p.CacheBudgetBytes != nil {
-		if *p.CacheBudgetBytes == 0 {
-			return errInvalidArg(fmt.Errorf(
-				"cache-budget of 0 disables the warm-cache bound for vault %q; omit it for the default (%s) or set a large value",
-				vaultCfg.Name, units.FormatBytesDisplay(int64(system.DefaultVaultCacheBudgetBytes))))
+func resolveVaultQuantity(q vaultQuantity, vaultCfg *system.VaultConfig, existing []system.VaultConfig) *connect.Error {
+	if !system.IsQuantityUnset(q.in) {
+		bytes, err := system.ParseSize(q.in)
+		if err != nil {
+			return errInvalidArg(fmt.Errorf("%s %q on vault %q: %w", q.flag, q.in, vaultCfg.Name, err))
 		}
-		vaultCfg.CacheBudgetBytes = *p.CacheBudgetBytes
+		if bytes == 0 {
+			return errInvalidArg(fmt.Errorf(
+				"%s of %q on vault %q means no bound; omit it for the default (%s) or set a real size",
+				q.flag, q.in, vaultCfg.Name, q.def))
+		}
+		*q.dst = q.in // the operator's expression, verbatim
 		return nil
 	}
 	for i := range existing {
 		if existing[i].ID == vaultCfg.ID {
-			vaultCfg.CacheBudgetBytes = existing[i].CacheBudgetBytes // preserve on update
+			*q.dst = q.prev(existing[i]) // preserve on update
 			return nil
 		}
 	}
-	vaultCfg.CacheBudgetBytes = system.DefaultVaultCacheBudgetBytes // default on create
+	*q.dst = q.def // default on create
 	return nil
 }
 
-// resolveMemoryBudget settles a memory vault's in-RAM cap from the wire, the
-// same unset-vs-explicit-0 distinction as max-size (gastrolog-1qd5wz). Scoped
-// to memory vaults; other types have no in-memory store and keep their
-// (unused) 0.
-func resolveMemoryBudget(p *apiv1.VaultConfig, vaultCfg *system.VaultConfig, existing []system.VaultConfig) *connect.Error {
-	if vaultCfg.Type != system.VaultTypeMemory {
-		return nil
-	}
-	if p.MemoryBudgetBytes != nil {
-		if *p.MemoryBudgetBytes == 0 {
-			return errInvalidArg(fmt.Errorf(
-				"memory-budget of 0 leaves vault %q unbounded in RAM; omit it for the default (%s) or set a real size",
-				vaultCfg.Name, units.FormatBytesDisplay(int64(system.DefaultVaultMemoryBudgetBytes))))
+// validateVaultExpressions parse-checks the quantities that carry no default —
+// an empty value is legitimately "inherit" or "off" — so a malformed one is
+// caught at write instead of at use (gastrolog-etcjdx).
+func validateVaultExpressions(vaultCfg *system.VaultConfig) *connect.Error {
+	for _, f := range []struct {
+		flag string
+		expr string
+	}{
+		{"disk-free-warn", vaultCfg.DiskFreeWarn},
+		{"disk-free-floor", vaultCfg.DiskFreeFloor},
+	} {
+		if system.IsQuantityUnset(f.expr) {
+			continue
 		}
-		vaultCfg.MemoryBudgetBytes = *p.MemoryBudgetBytes
-		return nil
-	}
-	for i := range existing {
-		if existing[i].ID == vaultCfg.ID {
-			vaultCfg.MemoryBudgetBytes = existing[i].MemoryBudgetBytes // preserve on update
-			return nil
+		if _, err := system.ParseSize(f.expr); err != nil {
+			return errInvalidArg(fmt.Errorf("%s %q on vault %q: %w", f.flag, f.expr, vaultCfg.Name, err))
 		}
 	}
-	vaultCfg.MemoryBudgetBytes = system.DefaultVaultMemoryBudgetBytes // default on create
+	if !system.IsQuantityUnset(vaultCfg.CacheTTL) {
+		if _, err := system.ParseDuration(vaultCfg.CacheTTL); err != nil {
+			return errInvalidArg(fmt.Errorf("cache-ttl %q on vault %q: %w", vaultCfg.CacheTTL, vaultCfg.Name, err))
+		}
+	}
 	return nil
 }
 
@@ -180,13 +187,10 @@ func (s *SystemServer) PutVault(
 	// (gastrolog-1epfgb). This is the single ingress for every surface — CLI
 	// create, UI, and config import all call PutVault — so resolving here
 	// makes an unbounded vault unrepresentable regardless of who asked.
-	if connErr := resolveMaxSizeBudget(req.Msg.Config, &vaultCfg, vaults); connErr != nil {
+	if connErr := resolveVaultQuantities(req.Msg.Config, &vaultCfg, vaults); connErr != nil {
 		return nil, connErr
 	}
-	if connErr := resolveCacheBudget(req.Msg.Config, &vaultCfg, vaults); connErr != nil {
-		return nil, connErr
-	}
-	if connErr := resolveMemoryBudget(req.Msg.Config, &vaultCfg, vaults); connErr != nil {
+	if connErr := validateVaultExpressions(&vaultCfg); connErr != nil {
 		return nil, connErr
 	}
 

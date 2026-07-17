@@ -243,44 +243,38 @@ message VaultConfig {
   bytes rotation_policy_id = 5;
   repeated RetentionRule retention_rules = 6;
   // In-memory storage cap for memory-typed vaults, in bytes. Optional so the
-  // server can tell "unset" (defaulted at creation for memory vaults) from
-  // "explicit 0" (rejected). Unbounded RAM is an OOM, so unset must be a
-  // bounded default, not zero (gastrolog-1qd5wz).
-  optional uint64 memory_budget_bytes = 7;
+  // In-memory storage cap for memory vaults, as a human size expression
+  // ("512MiB", "1GiB"). Empty = unset (defaulted at creation for memory
+  // vaults); "0" is rejected (unbounded RAM is an OOM). See gastrolog-etcjdx
+  // for why all config quantities are stored as the operator's expression and
+  // resolved at use.
+  string memory_budget = 7;
   uint32 storage_class = 8;
   bytes cloud_service_id = 9;
   uint32 replication_factor = 10;          // desired RF (1 = no replication, default)
   string path = 11;                         // direct path for JSONL sinks
   repeated VaultPlacement placements = 12;  // system-managed: file storage assignments by placement manager
   string cache_eviction = 13;               // "lru" (default) or "ttl"
-  // Warm-cache soft cap for cloud-backed chunks, in bytes — numeric to match
-  // max_size_bytes / memory_budget_bytes. Optional so the server can tell
-  // "unset" (defaulted at creation for cloud vaults) from "explicit 0"
-  // (rejected). Unlimited is an explicit large value (gastrolog-338j51).
-  optional uint64 cache_budget_bytes = 14;
-  // Warm-cache eviction age in nanoseconds (ttl mode only) — numeric to match
-  // the max_age_nanos durations. 0 = unset.
-  int64 cache_ttl_nanos = 15;
+  // Warm-cache soft cap for cloud-backed chunks, as a size expression
+  // ("1GiB"). Empty = unset (defaulted at creation for cloud vaults); "0"
+  // rejected.
+  string cache_budget = 14;
+  // Warm-cache eviction age (ttl mode only), as a duration expression ("1h",
+  // "7d"). Empty = unset.
+  string cache_ttl = 15;
   string retention_disposition = 16;         // "delete" (default) or "route" — what retention does with aged-out records
-  // Per-vault disk guard thresholds on the vault's backing volume, in
-  // bytes of FREE space. 0 = inherit the node defaults (fraction-based
-  // with share clamps; env-overridable). Warn raises the disk-space
-  // alarm for this vault; floor suspends admission for records destined
-  // to this vault while other vaults keep ingesting.
-  uint64 disk_free_warn_bytes = 17;
-  uint64 disk_free_floor_bytes = 18;
-  // Per-node byte budget for this vault's whole local disk claim (sealed
-  // chunks, indexes, and pipeline segment backlog). At the budget, admission
-  // for records destined to this vault is refused cluster-wide
-  // (cap-and-refuse) until retention or releases drain it — the hard backstop
-  // behind a size retention policy's cap-and-drain.
-  //
-  // Optional so the server can tell "unset" from "explicitly 0": an unset
-  // value is defaulted server-side at creation (a bounded per-node budget —
-  // see DefaultVaultMaxSizeBytes), and an explicit 0 is REJECTED (a 0 budget
-  // accepts no records). "Unlimited" is an explicit large value, never the
-  // effect of saying nothing (gastrolog-1epfgb / gastrolog-4j1e6y).
-  optional uint64 max_size_bytes = 19;
+  // Per-vault disk-guard free-space thresholds on the vault's backing volume,
+  // as size expressions ("10GB"). Empty = inherit the node defaults
+  // (fraction-based, per-node). Warn raises the disk-space alarm; floor
+  // suspends admission for this vault while others keep ingesting.
+  string disk_free_warn = 17;
+  string disk_free_floor = 18;
+  // Per-node budget for this vault's whole local disk claim (sealed chunks,
+  // indexes, segment backlog), as a size expression ("50GB"). At the budget,
+  // admission for this vault is refused cluster-wide until retention drains
+  // it. Empty = unset (defaulted at creation); "0" rejected; a large value
+  // (e.g. "1PiB") is effectively unlimited (gastrolog-1epfgb / gastrolog-etcjdx).
+  string max_size = 19;
 }
 
 message RouteDestination {
@@ -363,20 +357,20 @@ message IngesterConfig {
 }
 
 message RotationPolicyConfig {
-  int64 max_bytes = 1;
+  // Size and duration are the operator's expression ("512MiB", "1m"), parsed
+  // by the shared resolver at use — not resolved at ingress. Counts stay
+  // numeric: a record count is unitless (gastrolog-etcjdx).
+  string max_size = 1;
   int64 max_records = 2;
-  // Nanoseconds: durations are stored at full precision — a seconds field
-  // silently truncated sub-second input (e.g. "1004ms").
-  int64 max_age_nanos = 3;
+  string max_age = 3;
   string cron = 4;
   bytes id = 5;
   string name = 6;
 }
 
 message RetentionPolicyConfig {
-  // Nanoseconds (see RotationPolicyConfig.max_age_nanos).
-  int64 max_age_nanos = 1;
-  int64 max_bytes = 2;
+  string max_age = 1;
+  string max_size = 2;
   int64 max_chunks = 3;
   bytes id = 4;
   string name = 5;
@@ -641,8 +635,9 @@ message ClusterSettings {
   // in the vault-ctl registry). When a vault's backlog reaches the budget,
   // ingest admission for that vault is refused (retryable backpressure) until
   // chunking drains it below the budget. The operating bound that engages
-  // BEFORE disk pressure; the disk guard remains the backstop. 0 = unbounded.
-  uint64 pipeline_backlog_max_bytes = 3;
+  // BEFORE disk pressure; the disk guard remains the backstop. A size
+  // expression ("8GiB"); empty = unbounded (gastrolog-etcjdx).
+  string pipeline_backlog_max = 3;
 }
 
 message GetSettingsResponse {
@@ -710,7 +705,7 @@ message PutLookupSettings {
 message PutClusterSettings {
   optional string broadcast_interval = 1;
   optional string heartbeat_interval = 2;
-  optional uint64 pipeline_backlog_max_bytes = 3;
+  optional string pipeline_backlog_max = 3;
 }
 
 message PutServiceSettingsRequest {

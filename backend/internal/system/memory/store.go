@@ -943,11 +943,11 @@ func copyRotationPolicy(rp system.RotationPolicyConfig) system.RotationPolicyCon
 		ID:   rp.ID,
 		Name: rp.Name,
 	}
-	if rp.MaxBytes != nil {
-		c.MaxBytes = new(*rp.MaxBytes)
+	if rp.MaxSize != nil {
+		c.MaxSize = new(*rp.MaxSize)
 	}
-	if rp.MaxAgeNanos != nil {
-		c.MaxAgeNanos = new(*rp.MaxAgeNanos)
+	if rp.MaxAge != nil {
+		c.MaxAge = new(*rp.MaxAge)
 	}
 	if rp.MaxRecords != nil {
 		c.MaxRecords = new(*rp.MaxRecords)
@@ -963,11 +963,11 @@ func copyRetentionPolicy(rp system.RetentionPolicyConfig) system.RetentionPolicy
 		ID:   rp.ID,
 		Name: rp.Name,
 	}
-	if rp.MaxAgeNanos != nil {
-		c.MaxAgeNanos = new(*rp.MaxAgeNanos)
+	if rp.MaxAge != nil {
+		c.MaxAge = new(*rp.MaxAge)
 	}
-	if rp.MaxBytes != nil {
-		c.MaxBytes = new(*rp.MaxBytes)
+	if rp.MaxSize != nil {
+		c.MaxSize = new(*rp.MaxSize)
 	}
 	if rp.MaxChunks != nil {
 		c.MaxChunks = new(*rp.MaxChunks)
@@ -981,17 +981,17 @@ func copyVaultConfig(st system.VaultConfig) system.VaultConfig {
 		Name:                 st.Name,
 		Enabled:              st.Enabled,
 		Type:                 st.Type,
-		MemoryBudgetBytes:    st.MemoryBudgetBytes,
+		MemoryBudget:         st.MemoryBudget,
 		StorageClass:         st.StorageClass,
 		ReplicationFactor:    st.ReplicationFactor,
 		Path:                 st.Path,
 		CacheEviction:        st.CacheEviction,
-		CacheBudgetBytes:     st.CacheBudgetBytes,
-		CacheTTLNanos:        st.CacheTTLNanos,
+		CacheBudget:          st.CacheBudget,
+		CacheTTL:             st.CacheTTL,
 		RetentionDisposition: st.RetentionDisposition,
-		DiskFreeWarnBytes:    st.DiskFreeWarnBytes,
-		DiskFreeFloorBytes:   st.DiskFreeFloorBytes,
-		MaxSizeBytes:         st.MaxSizeBytes,
+		DiskFreeWarn:         st.DiskFreeWarn,
+		DiskFreeFloor:        st.DiskFreeFloor,
+		MaxSize:              st.MaxSize,
 	}
 	if st.RotationPolicyID != nil {
 		id := *st.RotationPolicyID

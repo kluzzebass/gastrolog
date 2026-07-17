@@ -79,7 +79,7 @@ var settingsGroups = []settingsGroup{
 	{name: "cluster", short: "Configure cluster behavior", putRoot: "service", getPath: []string{"cluster"}, setPath: []string{"cluster"}, fields: []settingsField{
 		{flag: "broadcast-interval", label: "broadcast_interval", getKey: "broadcast_interval", setKey: "broadcast_interval", desc: "Stats broadcast interval (e.g. \"5s\")"},
 		{flag: "heartbeat-interval", label: "heartbeat_interval", getKey: "heartbeat_interval", setKey: "heartbeat_interval", desc: "Liveness heartbeat interval (e.g. \"1s\")"},
-		{flag: "backlog-budget", label: "pipeline_backlog_max_bytes", getKey: "pipeline_backlog_max_bytes", setKey: "pipeline_backlog_max_bytes", desc: "Per-vault pipeline backlog budget (e.g. \"2GB\"); admission for a vault is refused at the budget until chunking drains it; empty = unbounded"},
+		{flag: "backlog-budget", label: "pipeline_backlog_max", getKey: "pipeline_backlog_max", setKey: "pipeline_backlog_max", desc: "Per-vault pipeline backlog budget (e.g. \"2GB\"); admission for a vault is refused at the budget until chunking drains it; empty = unbounded"},
 	}},
 	{name: "maxmind", short: "Configure MaxMind database downloads", putRoot: "maxmind", getPath: []string{"maxmind"}, setPath: []string{"maxmind"}, fields: []settingsField{
 		{flag: "auto-download", label: "auto_download", getKey: "auto_download", setKey: "auto_download", desc: "Auto-download MaxMind databases"},

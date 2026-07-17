@@ -1,6 +1,5 @@
 import { encode, decode } from "../../api/glid";
 import { useState } from "react";
-import { protoInt64 } from "@bufbuild/protobuf";
 import type { RouteConfig, NodeConfig } from "../../api/gen/gastrolog/v1/system_pb";
 import type { NodeStorageConfig } from "../../api/gen/gastrolog/v1/storage_pb";
 import { VaultType, RetentionRule, VaultConfig } from "../../api/gen/gastrolog/v1/system_pb";
@@ -24,7 +23,6 @@ import { JobProgress } from "./VaultHelpers";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { leaderNodeId, followerNodeIds } from "../../utils/placement";
 import { buildNodeNameMap, resolveNodeName } from "../../utils/nodeNames";
-import { formatBytesBigint, parseBytes, formatDurationNanos, parseDurationNanos } from "../../utils/units";
 
 import {
   VaultStorageForm,
@@ -73,15 +71,15 @@ function vaultToEntry(v: VaultConfig): StorageEntry {
     storageClass: String(v.storageClass || 0),
     cloudServiceId: v.cloudServiceId.length > 0 ? encode(v.cloudServiceId) : "",
     cacheEviction: v.cacheEviction || "lru",
-    cacheBudget: v.cacheBudgetBytes != null && v.cacheBudgetBytes > BigInt(0) ? formatBytesBigint(v.cacheBudgetBytes) : "",
-    cacheTTL: v.cacheTtlNanos > BigInt(0) ? formatDurationNanos(v.cacheTtlNanos) : "",
-    memoryBudget: v.memoryBudgetBytes != null && v.memoryBudgetBytes > BigInt(0) ? formatBytesBigint(v.memoryBudgetBytes) : "",
+    cacheBudget: v.cacheBudget,
+    cacheTTL: v.cacheTtl,
+    memoryBudget: v.memoryBudget,
     rotationPolicyId: v.rotationPolicyId.length > 0 ? encode(v.rotationPolicyId) : "",
     retentionPolicyId: v.retentionRules[0] ? encode(v.retentionRules[0].retentionPolicyId) : "",
     retentionDisposition: v.retentionDisposition || "delete",
-    diskFreeWarn: v.diskFreeWarnBytes > 0 ? formatBytesBigint(v.diskFreeWarnBytes) : "",
-    diskFreeFloor: v.diskFreeFloorBytes > 0 ? formatBytesBigint(v.diskFreeFloorBytes) : "",
-    maxSize: v.maxSizeBytes != null && v.maxSizeBytes > BigInt(0) ? formatBytesBigint(v.maxSizeBytes) : "",
+    diskFreeWarn: v.diskFreeWarn,
+    diskFreeFloor: v.diskFreeFloor,
+    maxSize: v.maxSize,
     replicationFactor: String(v.replicationFactor || 1),
     path: v.path || "",
     nodeId: "",
@@ -108,22 +106,22 @@ function entryToVault(
     cacheEviction: cloudBacked ? (entry.cacheEviction || "lru") : "",
     // Empty field = unset (server defaults it for cloud vaults), not explicit
     // 0 (rejected); numeric on the wire like max-size (gastrolog-338j51).
-    cacheBudgetBytes: cloudBacked && entry.cacheBudget.trim() !== "" ? parseBytes(entry.cacheBudget) : undefined,
-    cacheTtlNanos: cloudBacked && entry.cacheTTL.trim() !== "" ? parseDurationNanos(entry.cacheTTL) : protoInt64.zero,
+    cacheBudget: cloudBacked ? entry.cacheBudget : "",
+    cacheTtl: cloudBacked ? entry.cacheTTL : "",
     // Empty field = unset (server defaults it for memory vaults), not
     // explicit 0 (rejected) (gastrolog-1qd5wz).
-    memoryBudgetBytes: entry.type === "memory" && entry.memoryBudget.trim() !== "" ? parseBytes(entry.memoryBudget) : undefined,
+    memoryBudget: entry.type === "memory" ? entry.memoryBudget : "",
     rotationPolicyId: entry.rotationPolicyId ? decode(entry.rotationPolicyId) : new Uint8Array(0),
     retentionRules: entry.retentionPolicyId
       ? [new RetentionRule({ retentionPolicyId: decode(entry.retentionPolicyId) })]
       : [],
     retentionDisposition: entry.type !== "jsonl" ? (entry.retentionDisposition || "delete") : "",
-    diskFreeWarnBytes: entry.type === "file" ? parseBytes(entry.diskFreeWarn) : BigInt(0),
-    diskFreeFloorBytes: entry.type === "file" ? parseBytes(entry.diskFreeFloor) : BigInt(0),
+    diskFreeWarn: entry.type === "file" ? entry.diskFreeWarn : "",
+    diskFreeFloor: entry.type === "file" ? entry.diskFreeFloor : "",
     // Send the budget only when the operator set it: an empty field is
     // "unset", which the server defaults, not an explicit 0 (which it
     // rejects). Non-file vaults have no disk budget (gastrolog-1epfgb).
-    maxSizeBytes: entry.type === "file" && entry.maxSize.trim() !== "" ? parseBytes(entry.maxSize) : undefined,
+    maxSize: entry.type === "file" ? entry.maxSize : "",
     replicationFactor: entry.type === "jsonl" ? 1 : parseInt(entry.replicationFactor, 10) || 1,
     path: entry.type === "jsonl" ? entry.path : "",
     placements: vault.placements,
@@ -403,8 +401,8 @@ export function VaultSettingsCard({
               {vault.path || `jsonl/${vault.name || "vault"}.jsonl`}
             </span>
           )}
-          {vault.type === VaultType.MEMORY && vault.memoryBudgetBytes != null && vault.memoryBudgetBytes > BigInt(0) && (
-            <span className="font-mono">{formatBytesBigint(vault.memoryBudgetBytes)}</span>
+          {vault.type === VaultType.MEMORY && vault.memoryBudget !== "" && (
+            <span className="font-mono">{vault.memoryBudget}</span>
           )}
           {vault.type !== VaultType.JSONL && (
             <span>{`RF=${String(rfActual)}`}</span>

@@ -10,8 +10,8 @@ import (
 
 // ParseSize parses a human-friendly byte size string. Supports:
 //   - Plain numbers: "1073741824" (bytes)
-//   - KB/MB/GB/TB: "1GB", "500MB", "1.5TB"
-//   - KiB/MiB/GiB/TiB: "1GiB", "512MiB"
+//   - KB/MB/GB/TB/PB/EB: "1GB", "500MB", "1.5TB"
+//   - KiB/MiB/GiB/TiB/PiB/EiB: "1GiB", "512MiB", "2PiB"
 //
 // Case insensitive. Returns bytes as uint64.
 func ParseSize(s string) (uint64, error) {
@@ -52,6 +52,10 @@ func ParseSize(s string) (uint64, error) {
 		multiplier = 1000 * 1000 * 1000
 	case "tb":
 		multiplier = 1000 * 1000 * 1000 * 1000
+	case "pb":
+		multiplier = 1000 * 1000 * 1000 * 1000 * 1000
+	case "eb":
+		multiplier = 1000 * 1000 * 1000 * 1000 * 1000 * 1000
 	case "kib":
 		multiplier = 1024
 	case "mib":
@@ -60,6 +64,10 @@ func ParseSize(s string) (uint64, error) {
 		multiplier = 1024 * 1024 * 1024
 	case "tib":
 		multiplier = 1024 * 1024 * 1024 * 1024
+	case "pib":
+		multiplier = 1024 * 1024 * 1024 * 1024 * 1024
+	case "eib":
+		multiplier = 1024 * 1024 * 1024 * 1024 * 1024 * 1024
 	default:
 		return 0, fmt.Errorf("unknown size unit: %q", unit)
 	}
