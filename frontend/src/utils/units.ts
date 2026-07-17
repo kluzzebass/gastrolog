@@ -34,6 +34,10 @@ export function formatRate(n: number): string {
 export function formatBytesBigint(b: bigint): string {
   if (b === 0n) return "";
   const units: Array<[bigint, string]> = [
+    [1_000_000_000_000_000_000n, "EB"],
+    [1152921504606846976n, "EiB"],
+    [1_000_000_000_000_000n, "PB"],
+    [1125899906842624n, "PiB"],
     [1_000_000_000_000n, "TB"],
     [1099511627776n, "TiB"],
     [1_000_000_000n, "GB"],
@@ -56,23 +60,37 @@ export function formatBytesBigint(b: bigint): string {
  * empty or unparseable input.
  */
 export function parseBytes(s: string): bigint {
-  s = s.trim();
+  s = s.replace(/\s+/g, "");
   if (!s) return 0n;
-  const match = /^(\d+(?:\.\d+)?)\s*(TIB|GIB|MIB|KIB|TB|GB|MB|KB|B)?$/.exec(s.toUpperCase());
+  const match = /^(\d+(?:\.\d+)?)\s*(EIB|PIB|TIB|GIB|MIB|KIB|EB|PB|TB|GB|MB|KB|B)?$/.exec(s.toUpperCase());
   if (!match) return 0n;
-  const n = parseFloat(match[1]!);
-  const mult: Record<string, number> = {
-    B: 1,
-    KB: 1_000,
-    MB: 1_000_000,
-    GB: 1_000_000_000,
-    TB: 1_000_000_000_000,
-    KIB: 1024,
-    MIB: 1024 ** 2,
-    GIB: 1024 ** 3,
-    TIB: 1024 ** 4,
+  // BigInt multipliers so large units (PiB, EiB) stay exact — Number math
+  // loses precision above 2^53, which would corrupt an EiB value on the way
+  // to the wire. Keep parity with the backend's ParseSize (gastrolog-etcjdx).
+  const mult: Record<string, bigint> = {
+    B: 1n,
+    KB: 1_000n,
+    MB: 1_000_000n,
+    GB: 1_000_000_000n,
+    TB: 1_000_000_000_000n,
+    PB: 1_000_000_000_000_000n,
+    EB: 1_000_000_000_000_000_000n,
+    KIB: 1024n,
+    MIB: 1024n ** 2n,
+    GIB: 1024n ** 3n,
+    TIB: 1024n ** 4n,
+    PIB: 1024n ** 5n,
+    EIB: 1024n ** 6n,
   };
-  return BigInt(Math.round(n * mult[match[2] ?? "B"]!));
+  const unit = mult[match[2] ?? "B"]!;
+  const num = match[1]!;
+  // Integer numeric part → exact BigInt math (the common config case).
+  // Fractional part → Number math, acceptable only for the smaller units
+  // where fractions are actually used ("1.5TB"); nobody writes "1.5EiB".
+  if (!num.includes(".")) {
+    return BigInt(num) * unit;
+  }
+  return BigInt(Math.round(parseFloat(num) * Number(unit)));
 }
 
 /** Format seconds (bigint) as human-readable duration (e.g. "1h30m"). */

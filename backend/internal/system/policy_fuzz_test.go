@@ -5,27 +5,27 @@ import "testing"
 func FuzzRotationPolicyConfigToRotationPolicy(f *testing.F) {
 	// Seed corpus: (maxBytes, maxAgeNanos, maxRecords, cron)
 	// Zero means nil for the pointer field. Quantities are numeric at rest,
-	// so the fuzz space is signs/extremes/cron strings — unparseable quantity
-	// strings can no longer reach the config.
-	f.Add(uint64(64_000_000), int64(3600e9), int64(10000), "")
-	f.Add(uint64(1_000_000_000), int64(0), int64(0), "")
-	f.Add(uint64(0), int64(1800e9), int64(0), "")
-	f.Add(uint64(0), int64(0), int64(5000), "")
-	f.Add(uint64(0), int64(0), int64(0), "0 * * * *")
-	f.Add(uint64(0), int64(0), int64(0), "30 0 * * * *")
-	f.Add(uint64(0), int64(-3600e9), int64(0), "")
-	f.Add(uint64(0), int64(0), int64(-1), "")
-	f.Add(uint64(0), int64(0), int64(0), "invalid cron")
-	f.Add(uint64(10_000), int64(300e9), int64(100), "*/5 * * * *")
-	f.Add(^uint64(0), int64(1<<62), int64(1<<62), "")
+	// The quantity fields are free-form expressions now, so the fuzz space is
+	// arbitrary size/duration strings plus cron — the parser must never panic.
+	f.Add("", "", int64(0), "0 * * * *")
+	f.Add("", "", int64(0), "30 0 * * * *")
+	f.Add("", "-1h", int64(0), "")
+	f.Add("", "", int64(-1), "")
+	f.Add("", "", int64(0), "invalid cron")
+	f.Add("10KB", "5m", int64(100), "*/5 * * * *")
+	f.Add("64MiB", "-1h", int64(1<<62), "")
+	f.Add("garbage", "1x", int64(0), "")
+	f.Add("0", "0", int64(0), "")
 
-	f.Fuzz(func(t *testing.T, maxBytes uint64, maxAgeNanos, maxRecords int64, cron string) {
+	// Quantities are now free-form expressions, so this fuzzes the parser the
+	// whole model depends on: it must never panic, whatever the operator types.
+	f.Fuzz(func(t *testing.T, maxSize, maxAge string, maxRecords int64, cron string) {
 		cfg := RotationPolicyConfig{}
-		if maxBytes != 0 {
-			cfg.MaxBytes = &maxBytes
+		if maxSize != "" {
+			cfg.MaxSize = &maxSize
 		}
-		if maxAgeNanos != 0 {
-			cfg.MaxAgeNanos = &maxAgeNanos
+		if maxAge != "" {
+			cfg.MaxAge = &maxAge
 		}
 		if maxRecords != 0 {
 			cfg.MaxRecords = &maxRecords
@@ -37,28 +37,28 @@ func FuzzRotationPolicyConfigToRotationPolicy(f *testing.F) {
 		// Must not panic on any input.
 		_, _ = cfg.ToRotationPolicy()
 		_ = cfg.ValidateCron()
+		_ = cfg.IsEmpty()
 	})
 }
 
 func FuzzRetentionPolicyConfigToRetentionPolicy(f *testing.F) {
 	// Seed corpus: (maxAgeNanos, maxBytes, maxChunks); zero means nil.
-	f.Add(int64(720*3600e9), uint64(10_000_000_000), int64(100))
-	f.Add(int64(24*3600e9), uint64(0), int64(0))
-	f.Add(int64(0), uint64(500_000_000), int64(0))
-	f.Add(int64(0), uint64(0), int64(50))
-	f.Add(int64(-3600e9), uint64(0), int64(0))
-	f.Add(int64(0), uint64(0), int64(-1))
-	f.Add(int64(0), uint64(0), int64(0))
-	f.Add(int64(3600e9), uint64(1_000_000_000), int64(10))
-	f.Add(int64(1<<62), ^uint64(0), int64(1<<62))
+	f.Add("720h", "10GB", int64(100))
+	f.Add("24h", "", int64(0))
+	f.Add("", "500MB", int64(0))
+	f.Add("", "", int64(50))
+	f.Add("-1h", "", int64(0))
+	f.Add("", "", int64(-1))
+	f.Add("garbage", "1x", int64(0))
+	f.Add("1h", "1GB", int64(10))
 
-	f.Fuzz(func(t *testing.T, maxAgeNanos int64, maxBytes uint64, maxChunks int64) {
+	f.Fuzz(func(t *testing.T, maxAge, maxSize string, maxChunks int64) {
 		cfg := RetentionPolicyConfig{}
-		if maxAgeNanos != 0 {
-			cfg.MaxAgeNanos = &maxAgeNanos
+		if maxAge != "" {
+			cfg.MaxAge = &maxAge
 		}
-		if maxBytes != 0 {
-			cfg.MaxBytes = &maxBytes
+		if maxSize != "" {
+			cfg.MaxSize = &maxSize
 		}
 		if maxChunks != 0 {
 			cfg.MaxChunks = &maxChunks

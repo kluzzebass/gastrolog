@@ -362,20 +362,27 @@ func TestApplyFlagBytes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("apply 2GB: %v", err)
 	}
-	if got := req.GetCluster().GetPipelineBacklogMaxBytes(); got != 2_000_000_000 {
-		t.Fatalf("2GB parsed to %d, want %d (system.ParseSize is decimal SI)", got, uint64(2_000_000_000))
+	if got := req.GetCluster().GetPipelineBacklogMax(); got != "2GB" {
+		t.Fatalf("2GB stored as %q, want %q verbatim", got, "2GB")
 	}
 
 	req, err = run("")
 	if err != nil {
 		t.Fatalf("apply empty: %v", err)
 	}
-	if got := req.GetCluster().GetPipelineBacklogMaxBytes(); got != 0 {
-		t.Fatalf("empty must reset to 0 (unbounded), got %d", got)
+	if got := req.GetCluster().GetPipelineBacklogMax(); got != "" {
+		t.Fatalf("empty must stay empty (unbounded), got %q", got)
 	}
 
-	if _, err = run("garbage"); err == nil {
-		t.Fatal("junk size must error, not silently zero")
+	// The CLI now passes size expressions through verbatim; the server
+	// parse-checks them (gastrolog-etcjdx). So "garbage" is carried, not
+	// rejected here — it is the server that refuses it.
+	req, err = run("garbage")
+	if err != nil {
+		t.Fatalf("apply garbage: CLI should pass through, not error: %v", err)
+	}
+	if got := req.GetCluster().GetPipelineBacklogMax(); got != "garbage" {
+		t.Fatalf("junk carried verbatim to the server for validation, got %q", got)
 	}
 }
 

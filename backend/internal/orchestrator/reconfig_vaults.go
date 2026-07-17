@@ -9,7 +9,6 @@ import (
 	"maps"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -1683,9 +1682,19 @@ func buildVaultParams(sys *system.System, vaultCfg system.VaultConfig, localNode
 
 	switch vaultCfg.Type {
 	case system.VaultTypeMemory:
-		if vaultCfg.MemoryBudgetBytes > 0 {
-			params["budgetBytes"] = strconv.FormatUint(vaultCfg.MemoryBudgetBytes, 10)
+		// The expression passes through verbatim — the params map is already
+		// strings and the factory resolves it with the shared parser, so
+		// nothing converts here (gastrolog-etcjdx).
+		//
+		// Defense in depth: creation defaults an unset budget and rejects an
+		// explicit "0" (gastrolog-1qd5wz), so an unset one here is a pre-change
+		// or bug-produced config. Bound it with the default rather than run
+		// unbounded in RAM.
+		budget := vaultCfg.MemoryBudget
+		if system.IsQuantityUnset(budget) {
+			budget = system.DefaultVaultMemoryBudget
 		}
+		params["budgetBytes"] = budget
 
 	case system.VaultTypeFile:
 		// Single storage class for all file vaults — local-only and
@@ -1693,6 +1702,7 @@ func buildVaultParams(sys *system.System, vaultCfg system.VaultConfig, localNode
 		// the same chunkDir path post-step-7k. See gastrolog-4k5mg.
 		if vaultCfg.IsCloud() {
 			addCloudParams(params, &sys.Config, vaultCfg)
+			addCacheParams(params, vaultCfg)
 		}
 		if fs := findLocalFileStorage(rt, localNodeID, vaultCfg.StorageClass); fs != nil {
 			params["dir"] = filepath.Join(fs.Path, "vaults", vaultCfg.ID.String(), vaultCfg.ID.String())
@@ -1708,6 +1718,23 @@ func buildVaultParams(sys *system.System, vaultCfg system.VaultConfig, localNode
 	}
 
 	return params
+}
+
+// addCacheParams threads the vault's warm-cache config into the factory param
+// map. Before gastrolog-338j51 nothing populated these keys, so the file
+// manager always read empty and ran with an unbounded cache regardless of
+// config. The expressions pass through verbatim: the params map is strings and
+// the factory resolves them with the shared parser (gastrolog-etcjdx).
+func addCacheParams(params map[string]string, vaultCfg system.VaultConfig) {
+	if vaultCfg.CacheEviction != "" {
+		params["cache_eviction"] = vaultCfg.CacheEviction
+	}
+	if !system.IsQuantityUnset(vaultCfg.CacheBudget) {
+		params["cache_budget"] = vaultCfg.CacheBudget
+	}
+	if !system.IsQuantityUnset(vaultCfg.CacheTTL) {
+		params["cache_ttl"] = vaultCfg.CacheTTL
+	}
 }
 
 // addCloudParams writes cloud-store credentials + bucket info into params

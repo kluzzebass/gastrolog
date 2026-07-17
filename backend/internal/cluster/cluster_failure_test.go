@@ -16,7 +16,7 @@ import (
 // putReplProbe — avoids per-callsite local string vars in cluster tests.
 // gastrolog-4kkoo (Phase 5): rotation policy replaces FilterConfig as the
 // generic Raft replication probe.
-var dummyMaxAge = int64(time.Hour)
+var dummyMaxAge = "1h"
 
 // putReplProbe writes a rotation policy through a node's store as a
 // generic Raft-replicate smoke test. Tests assert it shows up on other
@@ -24,7 +24,7 @@ var dummyMaxAge = int64(time.Hour)
 func putReplProbe(t *testing.T, node *testNode, id glid.GLID, name, where string) {
 	t.Helper()
 	if err := node.store.PutRotationPolicy(context.Background(), system.RotationPolicyConfig{
-		ID: id, Name: name, MaxAgeNanos: &dummyMaxAge,
+		ID: id, Name: name, MaxAge: &dummyMaxAge,
 	}); err != nil {
 		t.Fatalf("PutRotationPolicy %s: %v", where, err)
 	}
@@ -399,7 +399,7 @@ func TestFollowerForwardingAfterLeaderChange(t *testing.T) {
 	fwdDeadline := time.Now().Add(5 * time.Second)
 	for {
 		err := follower.store.PutRotationPolicy(context.Background(), system.RotationPolicyConfig{
-			ID: probe2ID, Name: "fwd-to-new-leader", MaxAgeNanos: &dummyMaxAge,
+			ID: probe2ID, Name: "fwd-to-new-leader", MaxAge: &dummyMaxAge,
 		})
 		if err == nil {
 			break
@@ -440,7 +440,7 @@ func TestQuorumLossBlocksWrites(t *testing.T) {
 
 	probeID := glid.New()
 	err := node1.store.PutRotationPolicy(ctx, system.RotationPolicyConfig{
-		ID: probeID, Name: "should-fail", MaxAgeNanos: &dummyMaxAge,
+		ID: probeID, Name: "should-fail", MaxAge: &dummyMaxAge,
 	})
 	if err == nil {
 		t.Error("expected PutRotationPolicy to fail without quorum, but it succeeded")

@@ -26,7 +26,7 @@ type ClusterConfig struct {
 	// ingest admission for that vault is refused until chunking drains below
 	// the budget. The operating bound ahead of the disk-guard backstop.
 	// 0 = unbounded.
-	PipelineBacklogMaxBytes uint64 `json:"pipeline_backlog_max_bytes,omitempty"`
+	PipelineBacklogMax string `json:"pipeline_backlog_max,omitempty"`
 }
 
 // ---------------------------------------------------------------------------

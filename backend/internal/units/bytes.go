@@ -17,6 +17,10 @@ func FormatBytesCompact(b uint64) string {
 		mult  uint64
 		label string
 	}{
+		{1_000_000_000_000_000_000, "EB"},
+		{1 << 60, "EiB"},
+		{1_000_000_000_000_000, "PB"},
+		{1 << 50, "PiB"},
 		{1_000_000_000_000, "TB"},
 		{1 << 40, "TiB"},
 		{1_000_000_000, "GB"},
@@ -38,6 +42,10 @@ func FormatBytesCompact(b uint64) string {
 // spaces and decimal precision (e.g. "1.5 MiB").
 func FormatBytesDisplay(b int64) string {
 	switch {
+	case b >= 1<<60:
+		return fmt.Sprintf("%.1f EiB", float64(b)/(1<<60))
+	case b >= 1<<50:
+		return fmt.Sprintf("%.1f PiB", float64(b)/(1<<50))
 	case b >= 1<<40:
 		return fmt.Sprintf("%.1f TiB", float64(b)/(1<<40))
 	case b >= 1<<30:

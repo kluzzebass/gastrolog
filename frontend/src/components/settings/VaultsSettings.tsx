@@ -1,9 +1,7 @@
 import { encode, decode } from "../../api/glid";
 import { useReducer, useState } from "react";
-import { protoInt64 } from "@bufbuild/protobuf";
 import { useExpandedCards } from "../../hooks/useExpandedCards";
 import { buildNodeNameMap, resolveNodeName } from "../../utils/nodeNames";
-import { parseBytes } from "../../utils/units";
 import {
   useConfig,
   usePutVault,
@@ -77,25 +75,6 @@ function emptyStorageEntry(type: VaultTypeLabel): StorageEntry {
 // ---------------------------------------------------------------------------
 // Memory budget parser — "4GB" -> bigint bytes
 // ---------------------------------------------------------------------------
-
-const SIZE_MULTIPLIERS: Record<string, bigint> = {
-  B: 1n,
-  KB: 1024n,
-  MB: 1024n * 1024n,
-  GB: 1024n * 1024n * 1024n,
-  TB: 1024n * 1024n * 1024n * 1024n,
-};
-
-export function parseMemoryBudget(raw: string): bigint {
-  const s = raw.trim().toUpperCase();
-  if (!s) return protoInt64.zero;
-  const match = /^(\d+(?:\.\d+)?)\s*(TB|GB|MB|KB|B)?$/.exec(s);
-  if (!match?.[1]) return protoInt64.zero;
-  const num = parseFloat(match[1]);
-  const unit = match[2] ?? "B";
-  const mult = SIZE_MULTIPLIERS[unit] ?? 1n;
-  return BigInt(Math.round(num)) * mult;
-}
 
 // ---------------------------------------------------------------------------
 // VaultType label ↔ enum conversion
@@ -577,17 +556,22 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
       storageClass: storage.type === "file" ? parseInt(storage.storageClass, 10) || 0 : 0,
       cloudServiceId: cloudBacked ? decode(storage.cloudServiceId) : new Uint8Array(0),
       cacheEviction: cloudBacked ? (storage.cacheEviction || "lru") : "",
-      cacheBudget: cloudBacked ? (storage.cacheBudget || "") : "",
-      cacheTtl: cloudBacked ? (storage.cacheTTL || "") : "",
-      memoryBudgetBytes: storage.type === "memory" ? parseMemoryBudget(storage.memoryBudget) : protoInt64.zero,
+      // Expressions pass through verbatim; the server defaults an unset value
+      // for the applicable vault type and rejects an explicit "0"
+      // (gastrolog-etcjdx).
+      cacheBudget: cloudBacked ? storage.cacheBudget : "",
+      cacheTtl: cloudBacked ? storage.cacheTTL : "",
+      memoryBudget: storage.type === "memory" ? storage.memoryBudget : "",
       rotationPolicyId: storage.rotationPolicyId ? decode(storage.rotationPolicyId) : new Uint8Array(0),
       retentionRules: storage.retentionPolicyId
         ? [new RetentionRule({ retentionPolicyId: decode(storage.retentionPolicyId) })]
         : [],
       retentionDisposition: storage.type !== "jsonl" ? (storage.retentionDisposition || "delete") : "",
-      diskFreeWarnBytes: storage.type === "file" ? parseBytes(storage.diskFreeWarn) : BigInt(0),
-      diskFreeFloorBytes: storage.type === "file" ? parseBytes(storage.diskFreeFloor) : BigInt(0),
-      maxSizeBytes: storage.type === "file" ? parseBytes(storage.maxSize) : BigInt(0),
+      diskFreeWarn: storage.type === "file" ? storage.diskFreeWarn : "",
+      diskFreeFloor: storage.type === "file" ? storage.diskFreeFloor : "",
+      // Empty field = unset (server defaults it), not explicit 0 (rejected);
+      // non-file vaults have no disk budget (gastrolog-1epfgb).
+      maxSize: storage.type === "file" ? storage.maxSize : "",
       replicationFactor: parseInt(storage.replicationFactor, 10) || 1,
       path: storage.type === "jsonl" ? storage.path : "",
     });

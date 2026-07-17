@@ -769,7 +769,7 @@ func TestRetentionTargetRefreshesCmOnExistingRunner(t *testing.T) {
 		}},
 		RetentionPolicies: []system.RetentionPolicyConfig{{
 			ID:          policyID,
-			MaxAgeNanos: int64Ptr(int64(time.Hour)),
+			MaxAge:      strPtr("1h"),
 		}},
 	}
 

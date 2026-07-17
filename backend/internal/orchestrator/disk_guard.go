@@ -143,8 +143,10 @@ type vaultDiskGuard struct {
 
 	// Max-size budget (cap-and-refuse): the vault's whole local disk claim
 	// — sealed chunks, indexes, pipeline segment backlog — measured against
-	// maxSizeBytes. 0 = unlimited. Distinct from the free-space thresholds:
-	// those protect the VOLUME, the budget bounds the VAULT.
+	// maxSizeBytes. Always non-zero: creation defaults an unset budget and
+	// the wiring substitutes the default for any 0 (gastrolog-1epfgb), so a 0
+	// here would be a bug, not "unlimited". Distinct from the free-space
+	// thresholds: those protect the VOLUME, the budget bounds the VAULT.
 	maxSizeBytes    uint64
 	capped          atomic.Bool
 	sizeAlarmRaised bool
@@ -758,14 +760,41 @@ func (o *Orchestrator) refreshVaultDiskGuards(ctx context.Context) {
 				paths = append(paths, fs.Path)
 			}
 		}
-		// A vault with no local placement still claims local disk through
-		// its origin segment backlog, so a max-size budget registers it
-		// even when there is no volume to sample here.
-		if len(paths) == 0 && vc.MaxSizeBytes == 0 {
+		// Config→runtime boundary: the operator's expressions become numbers
+		// here, once, through the shared resolver (gastrolog-etcjdx). Write-time
+		// validation guarantees they parse; a failure here is a bug, so fall
+		// back to the bounded default rather than to "unbounded".
+		//
+		// Defense in depth: a file vault's budget is defaulted at creation and
+		// an explicit "0" is rejected (gastrolog-1epfgb), so an unset one here
+		// can only be a pre-change or bug-produced config. Bound it with the
+		// default rather than pass 0, which the guard reads as "no budget" — an
+		// unbounded file vault must stay unrepresentable, guard included.
+		// Non-file vaults have no disk budget and keep 0.
+		var maxSize uint64
+		if vc.Type == system.VaultTypeFile {
+			var err error
+			maxSize, err = system.SizeOrDefault(vc.MaxSize, 0)
+			if err != nil || maxSize == 0 {
+				maxSize, _ = system.ParseSize(system.DefaultVaultMaxSize)
+			}
+		}
+		// A vault with no local placement still claims local disk through its
+		// origin segment backlog, so a max-size budget registers it even when
+		// there is no volume to sample here.
+		if len(paths) == 0 && maxSize == 0 {
 			continue
 		}
+		warn, err := system.SizeOrDefault(vc.DiskFreeWarn, 0)
+		if err != nil {
+			warn = 0 // 0 = inherit the node default, the safe reading
+		}
+		floor, err := system.SizeOrDefault(vc.DiskFreeFloor, 0)
+		if err != nil {
+			floor = 0
+		}
 		keep[vc.ID] = true
-		o.diskGuard.SetVaultGuard(vc.ID, vc.Name, paths, vc.DiskFreeWarnBytes, vc.DiskFreeFloorBytes, vc.MaxSizeBytes)
+		o.diskGuard.SetVaultGuard(vc.ID, vc.Name, paths, warn, floor, maxSize)
 	}
 	o.diskGuard.retainVaultGuards(keep, o.alerts)
 }
@@ -809,7 +838,14 @@ func (o *Orchestrator) refreshBacklogBudget(ctx context.Context) {
 	if err != nil {
 		return
 	}
-	o.diskGuard.backlogBudget.Store(ss.Cluster.PipelineBacklogMaxBytes)
+	// Resolve the backlog budget expression at use, via the shared parser
+	// (gastrolog-etcjdx). Empty = unbounded (0); a malformed value was rejected
+	// at write, so treat a parse failure as unbounded rather than guess.
+	budget, err := system.SizeOrDefault(ss.Cluster.PipelineBacklogMax, 0)
+	if err != nil {
+		budget = 0
+	}
+	o.diskGuard.backlogBudget.Store(budget)
 }
 
 // startDiskGuard registers the guard's scheduler job. No-op without paths.

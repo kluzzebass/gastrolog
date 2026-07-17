@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/system"
 )
 
 // Factory parameter keys.
@@ -43,7 +44,10 @@ func NewFactory() chunk.ManagerFactory {
 		policies = append(policies, chunk.NewRecordCountPolicy(uint64(maxRecords))) //nolint:gosec // G115: validated > 0
 
 		if v, ok := params[ParamBudget]; ok {
-			n, err := strconv.ParseUint(v, 10, 64)
+			// A size expression ("1GiB"), resolved with the shared parser like
+			// the file manager's cache budget — the memory budget is the
+			// operator's expression threaded through unchanged (gastrolog-etcjdx).
+			n, err := system.ParseSize(v)
 			if err != nil {
 				return nil, fmt.Errorf("invalid %s: %w", ParamBudget, err)
 			}

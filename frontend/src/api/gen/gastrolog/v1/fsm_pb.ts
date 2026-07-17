@@ -340,18 +340,22 @@ export class PutRotationPolicyCommand extends Message<PutRotationPolicyCommand> 
   name = "";
 
   /**
-   * Quantities are numeric at rest: replicated state must mean the same
-   * thing on every node regardless of code version — strings re-parsed at
-   * read time change meaning when the parser does.
+   * Quantities are the operator's expression ("512MiB", "1m"), replicated
+   * verbatim and resolved at use by the shared parser (gastrolog-etcjdx).
+   * This reverses an earlier rule that replicated quantities be numeric on
+   * parser-drift grounds: the parser is deterministic and pinned by
+   * round-trip tests, and storing the expression keeps config readable at
+   * rest and lets per-node values (e.g. "10%") mean the right thing on each
+   * node. Counts stay numeric — they are unitless.
    *
-   * @generated from field: optional uint64 max_bytes = 3;
+   * @generated from field: optional string max_size = 3;
    */
-  maxBytes?: bigint;
+  maxSize?: string;
 
   /**
-   * @generated from field: optional int64 max_age_nanos = 4;
+   * @generated from field: optional string max_age = 4;
    */
-  maxAgeNanos?: bigint;
+  maxAge?: string;
 
   /**
    * @generated from field: optional int64 max_records = 5;
@@ -373,8 +377,8 @@ export class PutRotationPolicyCommand extends Message<PutRotationPolicyCommand> 
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 3, name: "max_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */, opt: true },
-    { no: 4, name: "max_age_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */, opt: true },
+    { no: 3, name: "max_size", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
+    { no: 4, name: "max_age", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
     { no: 5, name: "max_records", kind: "scalar", T: 3 /* ScalarType.INT64 */, opt: true },
     { no: 6, name: "cron", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
   ]);
@@ -448,14 +452,14 @@ export class PutRetentionPolicyCommand extends Message<PutRetentionPolicyCommand
   name = "";
 
   /**
-   * @generated from field: optional int64 max_age_nanos = 3;
+   * @generated from field: optional string max_age = 3;
    */
-  maxAgeNanos?: bigint;
+  maxAge?: string;
 
   /**
-   * @generated from field: optional uint64 max_bytes = 4;
+   * @generated from field: optional string max_size = 4;
    */
-  maxBytes?: bigint;
+  maxSize?: string;
 
   /**
    * @generated from field: optional int64 max_chunks = 5;
@@ -472,8 +476,8 @@ export class PutRetentionPolicyCommand extends Message<PutRetentionPolicyCommand
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 3, name: "max_age_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */, opt: true },
-    { no: 4, name: "max_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */, opt: true },
+    { no: 3, name: "max_age", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
+    { no: 4, name: "max_size", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
     { no: 5, name: "max_chunks", kind: "scalar", T: 3 /* ScalarType.INT64 */, opt: true },
   ]);
 

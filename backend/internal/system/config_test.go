@@ -3,7 +3,6 @@ package system
 import (
 	"gastrolog/internal/glid"
 	"testing"
-	"time"
 
 	"gastrolog/internal/chunk"
 )
@@ -81,7 +80,7 @@ func TestRotationPolicyConfigToPolicy(t *testing.T) {
 
 	t.Run("maxBytes only", func(t *testing.T) {
 		t.Parallel()
-		cfg := RotationPolicyConfig{MaxBytes: new(uint64(64 << 20))}
+		cfg := RotationPolicyConfig{MaxSize: new("64MiB")}
 		policy, err := cfg.ToRotationPolicy()
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -129,7 +128,7 @@ func TestRotationPolicyConfigToPolicy(t *testing.T) {
 	t.Run("composite", func(t *testing.T) {
 		t.Parallel()
 		cfg := RotationPolicyConfig{
-			MaxBytes:   new(uint64(1 << 20)),
+			MaxSize:    new("1MiB"),
 			MaxRecords: new(int64(100)),
 		}
 		policy, err := cfg.ToRotationPolicy()
@@ -166,7 +165,7 @@ func TestRotationPolicyConfigToPolicy(t *testing.T) {
 	// happens once at the input surface. Sign remains the only invalid state.
 	t.Run("negative maxAge", func(t *testing.T) {
 		t.Parallel()
-		cfg := RotationPolicyConfig{MaxAgeNanos: new(int64(-time.Hour))}
+		cfg := RotationPolicyConfig{MaxAge: new("-1h")}
 		_, err := cfg.ToRotationPolicy()
 		if err == nil {
 			t.Error("expected error for negative maxAge")
@@ -264,7 +263,7 @@ func TestToRetentionPolicy(t *testing.T) {
 
 	t.Run("maxAge only", func(t *testing.T) {
 		t.Parallel()
-		cfg := RetentionPolicyConfig{MaxAgeNanos: new(int64(24 * time.Hour))}
+		cfg := RetentionPolicyConfig{MaxAge: new("24h")}
 		policy, err := cfg.ToRetentionPolicy()
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -276,7 +275,7 @@ func TestToRetentionPolicy(t *testing.T) {
 
 	t.Run("maxBytes only", func(t *testing.T) {
 		t.Parallel()
-		cfg := RetentionPolicyConfig{MaxBytes: new(uint64(10_000_000_000))}
+		cfg := RetentionPolicyConfig{MaxSize: new("10GB")}
 		policy, err := cfg.ToRetentionPolicy()
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -301,7 +300,7 @@ func TestToRetentionPolicy(t *testing.T) {
 	t.Run("composite age and chunks", func(t *testing.T) {
 		t.Parallel()
 		cfg := RetentionPolicyConfig{
-			MaxAgeNanos: new(int64(720 * time.Hour)),
+			MaxAge:      new("720h"),
 			MaxChunks:   new(int64(100)),
 		}
 		policy, err := cfg.ToRetentionPolicy()
@@ -316,8 +315,8 @@ func TestToRetentionPolicy(t *testing.T) {
 	t.Run("all three conditions", func(t *testing.T) {
 		t.Parallel()
 		cfg := RetentionPolicyConfig{
-			MaxAgeNanos: new(int64(720 * time.Hour)),
-			MaxBytes:    new(uint64(10_000_000_000)),
+			MaxAge:      new("720h"),
+			MaxSize:     new("10GB"),
 			MaxChunks:   new(int64(50)),
 		}
 		policy, err := cfg.ToRetentionPolicy()
@@ -332,7 +331,7 @@ func TestToRetentionPolicy(t *testing.T) {
 	// Unparseable-string cases are gone with string storage; sign/zero remain.
 	t.Run("negative maxAge", func(t *testing.T) {
 		t.Parallel()
-		cfg := RetentionPolicyConfig{MaxAgeNanos: new(int64(-time.Hour))}
+		cfg := RetentionPolicyConfig{MaxAge: new("-1h")}
 		_, err := cfg.ToRetentionPolicy()
 		if err == nil {
 			t.Error("expected error for negative maxAge")
@@ -341,7 +340,7 @@ func TestToRetentionPolicy(t *testing.T) {
 
 	t.Run("zero maxAge", func(t *testing.T) {
 		t.Parallel()
-		cfg := RetentionPolicyConfig{MaxAgeNanos: new(int64(0))}
+		cfg := RetentionPolicyConfig{MaxAge: new("0")}
 		_, err := cfg.ToRetentionPolicy()
 		if err == nil {
 			t.Error("expected error for zero maxAge")
@@ -379,12 +378,12 @@ func TestRotationPolicyConfigIsEmpty(t *testing.T) {
 		want bool
 	}{
 		{"zero value", RotationPolicyConfig{}, true},
-		{"zero MaxBytes", RotationPolicyConfig{MaxBytes: new(uint64(0))}, true},
-		{"zero MaxAgeNanos", RotationPolicyConfig{MaxAgeNanos: new(int64(0))}, true},
+		{"zero MaxSize", RotationPolicyConfig{MaxSize: new("0")}, true},
+		{"zero MaxAge", RotationPolicyConfig{MaxAge: new("0")}, true},
 		{"empty Cron string", RotationPolicyConfig{Cron: &empty}, true},
-		{"all zero", RotationPolicyConfig{MaxBytes: new(uint64(0)), MaxAgeNanos: new(int64(0)), Cron: &empty}, true},
-		{"MaxBytes set", RotationPolicyConfig{MaxBytes: new(uint64(64 << 20))}, false},
-		{"MaxAgeNanos set", RotationPolicyConfig{MaxAgeNanos: new(int64(time.Hour))}, false},
+		{"all zero", RotationPolicyConfig{MaxSize: new("0"), MaxAge: new("0"), Cron: &empty}, true},
+		{"MaxBytes set", RotationPolicyConfig{MaxSize: new("64MiB")}, false},
+		{"MaxAge set", RotationPolicyConfig{MaxAge: new("1h")}, false},
 		{"MaxRecords set", RotationPolicyConfig{MaxRecords: new(int64(1000))}, false},
 		{"Cron set", RotationPolicyConfig{Cron: new("0 * * * *")}, false},
 	}
@@ -407,11 +406,11 @@ func TestRetentionPolicyConfigIsEmpty(t *testing.T) {
 		want bool
 	}{
 		{"zero value", RetentionPolicyConfig{}, true},
-		{"zero MaxAgeNanos", RetentionPolicyConfig{MaxAgeNanos: new(int64(0))}, true},
-		{"zero MaxBytes", RetentionPolicyConfig{MaxBytes: new(uint64(0))}, true},
-		{"all zero", RetentionPolicyConfig{MaxAgeNanos: new(int64(0)), MaxBytes: new(uint64(0))}, true},
-		{"MaxAgeNanos set", RetentionPolicyConfig{MaxAgeNanos: new(int64(24 * time.Hour))}, false},
-		{"MaxBytes set", RetentionPolicyConfig{MaxBytes: new(uint64(10_000_000_000))}, false},
+		{"zero MaxAgeNanos", RetentionPolicyConfig{MaxAge: new("0")}, true},
+		{"zero MaxSize", RetentionPolicyConfig{MaxSize: new("0")}, true},
+		{"all zero", RetentionPolicyConfig{MaxAge: new("0"), MaxSize: new("0")}, true},
+		{"MaxAgeNanos set", RetentionPolicyConfig{MaxAge: new("24h")}, false},
+		{"MaxBytes set", RetentionPolicyConfig{MaxSize: new("10GB")}, false},
 		{"MaxChunks set", RetentionPolicyConfig{MaxChunks: new(int64(10))}, false},
 	}
 	for _, tc := range cases {

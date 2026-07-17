@@ -39,16 +39,16 @@ func TestApplyPutRotationPolicy(t *testing.T) {
 	t.Parallel()
 	fsm := New()
 	id := newID()
-	maxBytes := uint64(64_000_000)
+	maxSize := "64MB"
 	applyCmd(t, fsm, command.NewPutRotationPolicy(system.RotationPolicyConfig{
-		ID: id, Name: "rp", MaxBytes: &maxBytes,
+		ID: id, Name: "rp", MaxSize: &maxSize,
 	}))
 
 	got, err := fsm.Store().GetRotationPolicy(context.Background(), id)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got == nil || got.Name != "rp" || got.MaxBytes == nil || *got.MaxBytes != 64_000_000 {
+	if got == nil || got.Name != "rp" || got.MaxSize == nil || *got.MaxSize != "64MB" {
 		t.Fatalf("unexpected rotation policy: %+v", got)
 	}
 }
@@ -73,16 +73,16 @@ func TestApplyPutRetentionPolicy(t *testing.T) {
 	t.Parallel()
 	fsm := New()
 	id := newID()
-	maxAge := int64(720 * time.Hour)
+	maxAge := "720h"
 	applyCmd(t, fsm, command.NewPutRetentionPolicy(system.RetentionPolicyConfig{
-		ID: id, Name: "ret", MaxAgeNanos: &maxAge,
+		ID: id, Name: "ret", MaxAge: &maxAge,
 	}))
 
 	got, err := fsm.Store().GetRetentionPolicy(context.Background(), id)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got == nil || got.Name != "ret" || got.MaxAgeNanos == nil || *got.MaxAgeNanos != int64(720*time.Hour) {
+	if got == nil || got.Name != "ret" || got.MaxAge == nil || *got.MaxAge != "720h" {
 		t.Fatalf("unexpected retention policy: %+v", got)
 	}
 }
@@ -804,13 +804,13 @@ func TestSnapshotRestore(t *testing.T) {
 	// gastrolog-4kkoo (Phase 5): no FilterConfig — match expressions live
 	// inline on routes; the route round-trip below covers the snapshot path.
 
-	maxAge := int64(time.Hour)
+	maxAge := "1h"
 	rpID := newID()
-	applyCmd(t, fsm1, command.NewPutRotationPolicy(system.RotationPolicyConfig{ID: rpID, Name: "rp1", MaxAgeNanos: &maxAge}))
+	applyCmd(t, fsm1, command.NewPutRotationPolicy(system.RotationPolicyConfig{ID: rpID, Name: "rp1", MaxAge: &maxAge}))
 
-	retMaxAge := int64(720 * time.Hour)
+	retMaxAge := "720h"
 	retID := newID()
-	applyCmd(t, fsm1, command.NewPutRetentionPolicy(system.RetentionPolicyConfig{ID: retID, Name: "ret1", MaxAgeNanos: &retMaxAge}))
+	applyCmd(t, fsm1, command.NewPutRetentionPolicy(system.RetentionPolicyConfig{ID: retID, Name: "ret1", MaxAge: &retMaxAge}))
 
 	vaultID := newID()
 
@@ -924,9 +924,9 @@ func TestApplyAfterRestore(t *testing.T) {
 	// gastrolog-4kkoo (Phase 5): exercise Apply via rotation policy instead
 	// of the deleted filter command — the assertion is about post-Restore
 	// Apply behavior, not about which entity is mutated.
-	preMaxAge := int64(time.Hour)
+	preMaxAge := "1h"
 	applyCmd(t, fsm1, command.NewPutRotationPolicy(system.RotationPolicyConfig{
-		ID: newID(), Name: "pre-snap", MaxAgeNanos: &preMaxAge,
+		ID: newID(), Name: "pre-snap", MaxAge: &preMaxAge,
 	}))
 	applyCmd(t, fsm1, command.NewCreateUser(system.User{
 		ID: newID(), Username: "pre", PasswordHash: "h", Role: "user",
@@ -949,10 +949,10 @@ func TestApplyAfterRestore(t *testing.T) {
 	}
 
 	// Apply new commands after restore.
-	postMaxAge := int64(2 * time.Hour)
+	postMaxAge := "2h"
 	newRotID := newID()
 	applyCmd(t, fsm2, command.NewPutRotationPolicy(system.RotationPolicyConfig{
-		ID: newRotID, Name: "post-snap", MaxAgeNanos: &postMaxAge,
+		ID: newRotID, Name: "post-snap", MaxAge: &postMaxAge,
 	}))
 
 	got, err := fsm2.Store().GetRotationPolicy(context.Background(), newRotID)

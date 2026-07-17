@@ -28,16 +28,18 @@ type RotationPolicyConfig struct {
 	// Name is the human-readable display name (unique).
 	Name string `json:"name"`
 
-	// MaxBytes rotates when chunk size exceeds this many bytes.
-	// Numeric at rest: human forms ("64MB") are parsed once at the input
-	// surface (UI/CLI), never re-parsed from stored state.
-	MaxBytes *uint64 `json:"maxBytes,omitempty"`
+	// MaxSize rotates when chunk size exceeds this size expression ("64MB").
+	// Stored as the operator wrote it and resolved with SizeOrDefault at use
+	// (gastrolog-etcjdx) — this replaces an earlier numeric-at-rest rule.
+	MaxSize *string `json:"maxSize,omitempty"`
 
-	// MaxAgeNanos rotates when chunk age exceeds this duration (nanoseconds).
-	// Full precision — a seconds field truncated sub-second input.
-	MaxAgeNanos *int64 `json:"maxAgeNanos,omitempty"`
+	// MaxAge rotates when chunk age exceeds this duration expression ("1m").
+	// Resolved with DurationOrDefault at use; full precision is preserved
+	// because the operator's own text is kept.
+	MaxAge *string `json:"maxAge,omitempty"`
 
-	// MaxRecords rotates when record count exceeds this value.
+	// MaxRecords rotates when record count exceeds this value. Numeric: a
+	// record count is unitless, so there is no expression to preserve.
 	MaxRecords *int64 `json:"maxRecords,omitempty"`
 
 	// Cron rotates on a fixed schedule using cron syntax.
@@ -55,13 +57,10 @@ type RotationPolicyConfig struct {
 // PutRotationPolicy uses this check to reject empty configs at the
 // admission boundary. See gastrolog-1rbuf.
 func (c RotationPolicyConfig) IsEmpty() bool {
-	if c.MaxBytes != nil && *c.MaxBytes > 0 {
+	if positiveSize(c.MaxSize) || positiveDuration(c.MaxAge) {
 		return false
 	}
-	if c.MaxAgeNanos != nil && *c.MaxAgeNanos > 0 {
-		return false
-	}
-	if c.MaxRecords != nil {
+	if c.MaxRecords != nil && *c.MaxRecords > 0 {
 		return false
 	}
 	if c.Cron != nil && *c.Cron != "" {
@@ -89,15 +88,28 @@ func (c RotationPolicyConfig) ValidateCron() error {
 func (c RotationPolicyConfig) ToRotationPolicy() (chunk.RotationPolicy, error) {
 	var policies []chunk.RotationPolicy
 
-	if c.MaxBytes != nil && *c.MaxBytes > 0 {
-		policies = append(policies, chunk.NewSizePolicy(*c.MaxBytes))
+	// Resolve the operator's expressions here, at use, through the shared
+	// resolver — this is the only place a rotation policy's quantities become
+	// numbers (gastrolog-etcjdx).
+	if c.MaxSize != nil && !IsQuantityUnset(*c.MaxSize) {
+		size, err := ParseSize(*c.MaxSize)
+		if err != nil {
+			return nil, fmt.Errorf("invalid maxSize %q: %w", *c.MaxSize, err)
+		}
+		if size > 0 {
+			policies = append(policies, chunk.NewSizePolicy(size))
+		}
 	}
 
-	if c.MaxAgeNanos != nil {
-		if *c.MaxAgeNanos <= 0 {
+	if c.MaxAge != nil && !IsQuantityUnset(*c.MaxAge) {
+		age, err := ParseDuration(*c.MaxAge)
+		if err != nil {
+			return nil, fmt.Errorf("invalid maxAge %q: %w", *c.MaxAge, err)
+		}
+		if age <= 0 {
 			return nil, errors.New("invalid maxAge: must be positive")
 		}
-		policies = append(policies, chunk.NewAgePolicy(time.Duration(*c.MaxAgeNanos), nil))
+		policies = append(policies, chunk.NewAgePolicy(age, nil))
 	}
 
 	if c.MaxRecords != nil {
@@ -125,33 +137,51 @@ type RetentionPolicyConfig struct {
 	// Name is the human-readable display name (unique).
 	Name string `json:"name"`
 
-	// MaxAgeNanos deletes sealed chunks older than this duration (nanoseconds).
-	MaxAgeNanos *int64 `json:"maxAgeNanos,omitempty"`
+	// MaxAge deletes sealed chunks older than this duration expression ("3m").
+	// Resolved at use through the shared parser (gastrolog-etcjdx).
+	MaxAge *string `json:"maxAge,omitempty"`
 
-	// MaxBytes deletes oldest sealed chunks when total vault size exceeds
-	// this many bytes.
-	MaxBytes *uint64 `json:"maxBytes,omitempty"`
+	// MaxSize deletes oldest sealed chunks when total vault size exceeds this
+	// size expression ("50GB").
+	MaxSize *string `json:"maxSize,omitempty"`
 
 	// MaxChunks keeps at most this many sealed chunks, deleting the oldest.
 	MaxChunks *int64 `json:"maxChunks,omitempty"`
 }
 
 // IsEmpty reports whether this retention policy has no conditions set —
-// all of MaxAgeNanos, MaxBytes, and MaxChunks are nil or zero. An empty
+// all of MaxAge, MaxSize, and MaxChunks are nil or unset. An empty
 // retention policy is a no-op (chunks accumulate indefinitely), almost
 // certainly an operator mistake. PutRetentionPolicy uses this check to
 // reject empty configs at the admission boundary. See gastrolog-1rbuf.
 func (c RetentionPolicyConfig) IsEmpty() bool {
-	if c.MaxAgeNanos != nil && *c.MaxAgeNanos > 0 {
+	if positiveDuration(c.MaxAge) || positiveSize(c.MaxSize) {
 		return false
 	}
-	if c.MaxBytes != nil && *c.MaxBytes > 0 {
-		return false
-	}
-	if c.MaxChunks != nil {
+	if c.MaxChunks != nil && *c.MaxChunks > 0 {
 		return false
 	}
 	return true
+}
+
+// positiveSize / positiveDuration report whether a size/duration expression
+// pointer is set and resolves to a positive quantity. A nil, empty, "0", or
+// unparseable value contributes nothing — the same "no-op condition" the
+// numeric zero used to mean. The one parser, again (gastrolog-etcjdx).
+func positiveSize(expr *string) bool {
+	if expr == nil || IsQuantityUnset(*expr) {
+		return false
+	}
+	n, err := ParseSize(*expr)
+	return err == nil && n > 0
+}
+
+func positiveDuration(expr *string) bool {
+	if expr == nil || IsQuantityUnset(*expr) {
+		return false
+	}
+	d, err := ParseDuration(*expr)
+	return err == nil && d > 0
 }
 
 // ToRetentionPolicy converts a RetentionPolicyConfig to a chunk.RetentionPolicy.
@@ -159,15 +189,26 @@ func (c RetentionPolicyConfig) IsEmpty() bool {
 func (c RetentionPolicyConfig) ToRetentionPolicy() (chunk.RetentionPolicy, error) {
 	var policies []chunk.RetentionPolicy
 
-	if c.MaxAgeNanos != nil {
-		if *c.MaxAgeNanos <= 0 {
+	// Resolve expressions at use, via the shared parser.
+	if c.MaxAge != nil && !IsQuantityUnset(*c.MaxAge) {
+		age, err := ParseDuration(*c.MaxAge)
+		if err != nil {
+			return nil, fmt.Errorf("invalid maxAge %q: %w", *c.MaxAge, err)
+		}
+		if age <= 0 {
 			return nil, errors.New("invalid maxAge: must be positive")
 		}
-		policies = append(policies, chunk.NewTTLRetentionPolicy(time.Duration(*c.MaxAgeNanos)))
+		policies = append(policies, chunk.NewTTLRetentionPolicy(age))
 	}
 
-	if c.MaxBytes != nil && *c.MaxBytes > 0 {
-		policies = append(policies, chunk.NewSizeRetentionPolicy(int64(*c.MaxBytes))) //nolint:gosec // G115: config byte count is always reasonable
+	if c.MaxSize != nil && !IsQuantityUnset(*c.MaxSize) {
+		size, err := ParseSize(*c.MaxSize)
+		if err != nil {
+			return nil, fmt.Errorf("invalid maxSize %q: %w", *c.MaxSize, err)
+		}
+		if size > 0 {
+			policies = append(policies, chunk.NewSizeRetentionPolicy(int64(size))) //nolint:gosec // G115: config byte count is always reasonable
+		}
 	}
 
 	if c.MaxChunks != nil {
