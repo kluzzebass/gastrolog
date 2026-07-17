@@ -233,17 +233,23 @@ message PeerTrafficTotal {
   repeated double rx_spark = 7;
 }
 
-// SystemAlert is one active alarm: a runtime condition requiring operator
+// SystemAlert is one standing alarm: a runtime condition requiring operator
 // action, with priority, cause and response stamped from the static alarm
 // catalog (or from the operator's own rule for operator-defined alarms).
 // Alarms are keyed by ID for deduplication — the same condition doesn't
-// create multiple alarms. They auto-clear when the component that raised
-// them detects the condition has resolved.
+// create multiple alarms. Each carries its lifecycle state (EEMUA 191
+// standing-alarm management): non-latching alarms auto-clear when the
+// raising component detects the condition resolved AND the operator has
+// acknowledged; latching alarms clear only via acknowledgment.
 message SystemAlert {
   bytes id = 1;                            // stable key for dedup (e.g. "vault-init:$vaultID")
   AlarmPriority priority = 2;              // from the alarm catalog, never the call site
   string source = 3;                       // component name (e.g. "placement", "chunking")
   string detail = 4;                       // per-instance specifics from the raiser
+  // Condition start of the current occurrence (the first Raise of the
+  // occurrence, not the annunciation instant — a delay-on window suppresses
+  // annunciation, not the condition's history). This IS the design doc's
+  // "first_raised"; no separate field exists.
   google.protobuf.Timestamp first_seen = 5;
   google.protobuf.Timestamp last_seen = 6;
   string cause = 7;                        // catalog: what condition this is
@@ -256,6 +262,49 @@ message SystemAlert {
   // minus the instance key. Carried explicitly so aggregation-side flood
   // collapse groups by type without re-deriving it from the id format.
   string type_id = 10;
+  // Lifecycle state (see AlarmState). Alarms in every state travel on the
+  // wire; consumers filter — the active list, the shelved and
+  // cleared-unacknowledged sections, and cross-node ack fan-out all read
+  // this one field.
+  AlarmState state = 11;
+  // Operator acknowledgment: who and when. Empty/absent until acked.
+  string acked_by = 12;
+  google.protobuf.Timestamp acked_at = 13;
+  // Shelve expiry. Set only while state is SHELVED — shelves always carry
+  // an expiry; there are no permanent shelves.
+  google.protobuf.Timestamp shelved_until = 14;
+  // Count of distinct condition occurrences that have annunciated for this
+  // alarm ID since it became standing. An occurrence is the suppression
+  // notion: a continuous condition episode — a clear-and-return inside the
+  // type's delay-off window is the SAME occurrence; a return after the
+  // alarm reached cleared-unacknowledged is a new one (and resets the
+  // operator's acknowledgment).
+  uint32 occurrences = 15;
+  // Whether operators may shelve this alarm. False for types where deferral
+  // is meaningless (software faults, alarm-flood) — the UI must not render
+  // a shelve control at all, and ShelveAlarm rejects with the reason.
+  bool shelveable = 16;
+}
+
+// AlarmState is the lifecycle state of a standing alarm (EEMUA 191
+// principles 5 & 6 — a bare set/clear bit cannot express standing alarms).
+enum AlarmState {
+  ALARM_STATE_UNSPECIFIED = 0;
+  // Condition annunciated, operator has not acknowledged. Also the state of
+  // a latching alarm whose condition resolved before acknowledgment — it
+  // stands until acked.
+  ALARM_STATE_ACTIVE_UNACKED = 1;
+  // Condition still true, operator has acknowledged (who/when in
+  // acked_by/acked_at). Clears silently when the condition resolves.
+  ALARM_STATE_ACTIVE_ACKED = 2;
+  // Condition resolved while unacknowledged (non-latching): retained so "it
+  // fired while you were away" stays visible without blocking the active
+  // list. Acknowledgment releases it.
+  ALARM_STATE_CLEARED_UNACKED = 3;
+  // Operator-shelved until shelved_until. Visible in a collapsed section,
+  // never silently gone; expiry with the condition still true returns it to
+  // ACTIVE_UNACKED.
+  ALARM_STATE_SHELVED = 4;
 }
 
 // AlarmPriority is the cataloged consequence × urgency verdict for an alarm

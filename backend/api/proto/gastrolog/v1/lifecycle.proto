@@ -49,6 +49,24 @@ service LifecycleService {
   // stats) whenever stats are updated. Replaces polling GetClusterStatus,
   // Health, and GetRouteStats.
   rpc WatchSystemStatus(WatchSystemStatusRequest) returns (stream WatchSystemStatusResponse);
+
+  // AckAlarm acknowledges a standing alarm by ID, recording operator
+  // awareness (who + when). Servable from ANY node: the serving node
+  // resolves every raiser of the ID (local collector + peer broadcasts)
+  // and fans the ack out to each, so a cluster-wide condition raised by
+  // multiple nodes cannot reappear unacked on the next aggregation.
+  // Latching alarms whose condition has resolved clear on ack.
+  rpc AckAlarm(AckAlarmRequest) returns (AckAlarmResponse);
+
+  // ShelveAlarm suppresses a standing alarm for a duration. The expiry is
+  // MANDATORY — a missing, zero or negative duration is rejected — and
+  // unshelveable types (software faults, alarm-flood) are rejected with
+  // the reason. Same any-node fan-out semantics as AckAlarm.
+  rpc ShelveAlarm(ShelveAlarmRequest) returns (ShelveAlarmResponse);
+
+  // UnshelveAlarm ends a shelve early, returning the alarm to its live
+  // state. Same any-node fan-out semantics as AckAlarm.
+  rpc UnshelveAlarm(UnshelveAlarmRequest) returns (UnshelveAlarmResponse);
 }
 
 message HealthRequest {}
@@ -183,6 +201,52 @@ message YieldLeadershipResponse {
   // transfer was initiated. False if the call was a no-op because the
   // node wasn't leader.
   bool transferred = 1;
+}
+
+message AckAlarmRequest {
+  // Full alarm ID ("<type>" or "<type>:<instance>"), as carried in
+  // SystemAlert.id.
+  bytes alarm_id = 1;
+  // Operator identity to record. The server prefers the authenticated
+  // user's name when the request carries one; this field covers the local
+  // Unix-socket CLI path, which has no auth context.
+  string acked_by = 2;
+  // Internal: apply to this node's collector only — set on the fan-out leg
+  // so a forwarded ack never re-fans. Client requests leave this unset.
+  bool local_only = 3;
+}
+
+message AckAlarmResponse {
+  // Number of raiser nodes the ack applied on.
+  uint32 applied = 1;
+}
+
+message ShelveAlarmRequest {
+  bytes alarm_id = 1;
+  // Shelve duration in seconds. MANDATORY and positive: shelves always
+  // expire — there are no permanent shelves.
+  int64 duration_seconds = 2;
+  // Operator identity to record in the lifecycle journal (same sourcing
+  // rules as AckAlarmRequest.acked_by).
+  string shelved_by = 3;
+  // Internal fan-out leg marker; see AckAlarmRequest.local_only.
+  bool local_only = 4;
+}
+
+message ShelveAlarmResponse {
+  uint32 applied = 1;
+  // Expiry instant computed by the first collector the shelve applied on.
+  google.protobuf.Timestamp shelved_until = 2;
+}
+
+message UnshelveAlarmRequest {
+  bytes alarm_id = 1;
+  // Internal fan-out leg marker; see AckAlarmRequest.local_only.
+  bool local_only = 2;
+}
+
+message UnshelveAlarmResponse {
+  uint32 applied = 1;
 }
 
 message WatchSystemStatusRequest {}
