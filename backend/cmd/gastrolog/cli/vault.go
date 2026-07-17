@@ -109,26 +109,31 @@ func vaultDetailPairs(v *v1.VaultConfig) [][2]string {
 	if v.Path != "" {
 		pairs = append(pairs, [2]string{"Path", v.Path})
 	}
+	// Operator-settable size values use FormatBytesCompact, not
+	// FormatBytesDisplay: it round-trips exactly (a value copied from here
+	// back into a create command re-parses to the same bytes), where the
+	// .toFixed display formatter would drift 1500→"1.5 KiB"→1536. Clean values
+	// still read as "1GiB"; only odd ones show raw bytes (gastrolog-1qd5wz).
 	if v.MemoryBudgetBytes != nil {
-		pairs = append(pairs, [2]string{"Memory Budget", units.FormatBytesDisplay(int64(v.GetMemoryBudgetBytes()))}) //nolint:gosec // display only
+		pairs = append(pairs, [2]string{"Memory Budget", units.FormatBytesCompact(v.GetMemoryBudgetBytes())})
 	}
 	if v.CacheEviction != "" {
 		pairs = append(pairs, [2]string{"Cache Eviction", v.CacheEviction})
 	}
 	if v.CacheBudgetBytes != nil {
-		pairs = append(pairs, [2]string{"Cache Budget", units.FormatBytesDisplay(int64(v.GetCacheBudgetBytes()))}) //nolint:gosec // display only
+		pairs = append(pairs, [2]string{"Cache Budget", units.FormatBytesCompact(v.GetCacheBudgetBytes())})
 	}
 	if v.CacheTtlNanos > 0 {
 		pairs = append(pairs, [2]string{"Cache TTL", time.Duration(v.CacheTtlNanos).String()})
 	}
 	if v.DiskFreeWarnBytes > 0 {
-		pairs = append(pairs, [2]string{"Disk Free Warn", units.FormatBytesDisplay(int64(v.DiskFreeWarnBytes))}) //nolint:gosec // display only
+		pairs = append(pairs, [2]string{"Disk Free Warn", units.FormatBytesCompact(v.DiskFreeWarnBytes)})
 	}
 	if v.DiskFreeFloorBytes > 0 {
-		pairs = append(pairs, [2]string{"Disk Free Floor", units.FormatBytesDisplay(int64(v.DiskFreeFloorBytes))}) //nolint:gosec // display only
+		pairs = append(pairs, [2]string{"Disk Free Floor", units.FormatBytesCompact(v.DiskFreeFloorBytes)})
 	}
 	if v.MaxSizeBytes != nil {
-		pairs = append(pairs, [2]string{"Max Size", units.FormatBytesDisplay(int64(v.GetMaxSizeBytes()))}) //nolint:gosec // display only
+		pairs = append(pairs, [2]string{"Max Size", units.FormatBytesCompact(v.GetMaxSizeBytes())})
 	}
 	if v.RetentionDisposition != "" {
 		pairs = append(pairs, [2]string{"Retention Disposition", v.RetentionDisposition})

@@ -24,7 +24,7 @@ import { JobProgress } from "./VaultHelpers";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { leaderNodeId, followerNodeIds } from "../../utils/placement";
 import { buildNodeNameMap, resolveNodeName } from "../../utils/nodeNames";
-import { formatBytes, formatBytesBigint, parseBytes, formatDurationNanos, parseDurationNanos } from "../../utils/units";
+import { formatBytesBigint, parseBytes, formatDurationNanos, parseDurationNanos } from "../../utils/units";
 
 import {
   VaultStorageForm,
@@ -75,7 +75,7 @@ function vaultToEntry(v: VaultConfig): StorageEntry {
     cacheEviction: v.cacheEviction || "lru",
     cacheBudget: v.cacheBudgetBytes != null && v.cacheBudgetBytes > BigInt(0) ? formatBytesBigint(v.cacheBudgetBytes) : "",
     cacheTTL: v.cacheTtlNanos > BigInt(0) ? formatDurationNanos(v.cacheTtlNanos) : "",
-    memoryBudget: v.memoryBudgetBytes != null && v.memoryBudgetBytes > BigInt(0) ? formatBytes(v.memoryBudgetBytes) : "",
+    memoryBudget: v.memoryBudgetBytes != null && v.memoryBudgetBytes > BigInt(0) ? formatBytesBigint(v.memoryBudgetBytes) : "",
     rotationPolicyId: v.rotationPolicyId.length > 0 ? encode(v.rotationPolicyId) : "",
     retentionPolicyId: v.retentionRules[0] ? encode(v.retentionRules[0].retentionPolicyId) : "",
     retentionDisposition: v.retentionDisposition || "delete",
@@ -404,7 +404,7 @@ export function VaultSettingsCard({
             </span>
           )}
           {vault.type === VaultType.MEMORY && vault.memoryBudgetBytes != null && vault.memoryBudgetBytes > BigInt(0) && (
-            <span className="font-mono">{formatBytes(vault.memoryBudgetBytes)}</span>
+            <span className="font-mono">{formatBytesBigint(vault.memoryBudgetBytes)}</span>
           )}
           {vault.type !== VaultType.JSONL && (
             <span>{`RF=${String(rfActual)}`}</span>
