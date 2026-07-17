@@ -30,7 +30,6 @@ import {
   VaultStorageForm,
   isCloudBacked,
   isStorageComplete,
-  parseMemoryBudget,
   vaultTypeEnum,
   type StorageEntry,
   type VaultTypeLabel,
@@ -113,7 +112,7 @@ function entryToVault(
     cacheTtlNanos: cloudBacked && entry.cacheTTL.trim() !== "" ? parseDurationNanos(entry.cacheTTL) : protoInt64.zero,
     // Empty field = unset (server defaults it for memory vaults), not
     // explicit 0 (rejected) (gastrolog-1qd5wz).
-    memoryBudgetBytes: entry.type === "memory" && entry.memoryBudget.trim() !== "" ? parseMemoryBudget(entry.memoryBudget) : undefined,
+    memoryBudgetBytes: entry.type === "memory" && entry.memoryBudget.trim() !== "" ? parseBytes(entry.memoryBudget) : undefined,
     rotationPolicyId: entry.rotationPolicyId ? decode(entry.rotationPolicyId) : new Uint8Array(0),
     retentionRules: entry.retentionPolicyId
       ? [new RetentionRule({ retentionPolicyId: decode(entry.retentionPolicyId) })]

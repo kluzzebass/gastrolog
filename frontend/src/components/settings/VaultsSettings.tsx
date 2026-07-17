@@ -78,25 +78,6 @@ function emptyStorageEntry(type: VaultTypeLabel): StorageEntry {
 // Memory budget parser — "4GB" -> bigint bytes
 // ---------------------------------------------------------------------------
 
-const SIZE_MULTIPLIERS: Record<string, bigint> = {
-  B: 1n,
-  KB: 1024n,
-  MB: 1024n * 1024n,
-  GB: 1024n * 1024n * 1024n,
-  TB: 1024n * 1024n * 1024n * 1024n,
-};
-
-export function parseMemoryBudget(raw: string): bigint {
-  const s = raw.trim().toUpperCase();
-  if (!s) return protoInt64.zero;
-  const match = /^(\d+(?:\.\d+)?)\s*(TB|GB|MB|KB|B)?$/.exec(s);
-  if (!match?.[1]) return protoInt64.zero;
-  const num = parseFloat(match[1]);
-  const unit = match[2] ?? "B";
-  const mult = SIZE_MULTIPLIERS[unit] ?? 1n;
-  return BigInt(Math.round(num)) * mult;
-}
-
 // ---------------------------------------------------------------------------
 // VaultType label ↔ enum conversion
 // ---------------------------------------------------------------------------
@@ -582,7 +563,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
       cacheBudgetBytes: cloudBacked && storage.cacheBudget.trim() !== "" ? parseBytes(storage.cacheBudget) : undefined,
       cacheTtlNanos: cloudBacked && storage.cacheTTL.trim() !== "" ? parseDurationNanos(storage.cacheTTL) : protoInt64.zero,
       // Empty = unset (server defaults for memory vaults), not explicit 0.
-      memoryBudgetBytes: storage.type === "memory" && storage.memoryBudget.trim() !== "" ? parseMemoryBudget(storage.memoryBudget) : undefined,
+      memoryBudgetBytes: storage.type === "memory" && storage.memoryBudget.trim() !== "" ? parseBytes(storage.memoryBudget) : undefined,
       rotationPolicyId: storage.rotationPolicyId ? decode(storage.rotationPolicyId) : new Uint8Array(0),
       retentionRules: storage.retentionPolicyId
         ? [new RetentionRule({ retentionPolicyId: decode(storage.retentionPolicyId) })]

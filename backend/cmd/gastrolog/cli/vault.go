@@ -110,7 +110,7 @@ func vaultDetailPairs(v *v1.VaultConfig) [][2]string {
 		pairs = append(pairs, [2]string{"Path", v.Path})
 	}
 	if v.MemoryBudgetBytes != nil {
-		pairs = append(pairs, [2]string{"Memory Budget", strconv.FormatUint(v.GetMemoryBudgetBytes(), 10)})
+		pairs = append(pairs, [2]string{"Memory Budget", units.FormatBytesDisplay(int64(v.GetMemoryBudgetBytes()))}) //nolint:gosec // display only
 	}
 	if v.CacheEviction != "" {
 		pairs = append(pairs, [2]string{"Cache Eviction", v.CacheEviction})
@@ -215,7 +215,7 @@ shape (memory, file, file+cloud, JSONL) defined by --type, --storage-class
 	cmd.Flags().String("cache-ttl", "", "cache TTL duration for ttl eviction mode (e.g. 1h, 7d)")
 	cmd.Flags().String("retention-disposition", "delete", "what retention does with aged-out records: delete (drop) or route (send through routing engine)")
 	cmd.Flags().String("path", "", "direct path for JSONL sinks")
-	cmd.Flags().Uint64("memory-budget", 0, "memory budget in bytes (memory vaults)")
+	cmd.Flags().String("memory-budget", "", "in-memory storage cap for memory vaults (e.g. 1GB, 512MiB). Unset defaults to a bounded budget; 0 is rejected")
 	cmd.Flags().String("disk-free-warn", "", "free-space warn threshold on the vault's backing volume (e.g. 10GB); empty inherits the node default")
 	cmd.Flags().String("disk-free-floor", "", "free-space floor on the vault's backing volume (e.g. 3GB) — below it, admission for this vault is suspended; empty inherits the node default")
 	cmd.Flags().String("max-size", "", "per-node size budget for the vault's whole local disk claim (e.g. 50GB) — at the budget, new records for this vault are refused until retention drains it. Unset defaults to a bounded per-node budget; 0 is rejected; set a large value (e.g. 1PiB) for effectively-unlimited")
@@ -259,12 +259,6 @@ func applyVaultFlags(ctx context.Context, cmd *cobra.Command, client *server.Cli
 	}
 	if cmd.Flags().Changed("path") {
 		cfg.Path, _ = cmd.Flags().GetString("path")
-	}
-	if cmd.Flags().Changed("memory-budget") {
-		// Optional so an explicit 0 (present) is rejected while unset (absent)
-		// is defaulted server-side for memory vaults (gastrolog-1qd5wz).
-		b, _ := cmd.Flags().GetUint64("memory-budget")
-		cfg.MemoryBudgetBytes = &b
 	}
 	if err := applyVaultSizeFlags(cmd, cfg); err != nil {
 		return err
@@ -348,6 +342,13 @@ func applyVaultSizeFlags(cmd *cobra.Command, cfg *v1.VaultConfig) error {
 			return err
 		}
 		cfg.MaxSizeBytes = &v // may be 0; the server rejects an explicit 0
+	}
+	if cmd.Flags().Changed("memory-budget") {
+		v, err := parseDiskFreeFlag(cmd, "memory-budget")
+		if err != nil {
+			return err
+		}
+		cfg.MemoryBudgetBytes = &v // human size string like max-size; server rejects an explicit 0
 	}
 	return nil
 }
