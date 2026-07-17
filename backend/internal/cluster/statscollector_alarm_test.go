@@ -90,3 +90,44 @@ func TestStatsCollector_AlarmBroadcastShape(t *testing.T) {
 		t.Fatalf("alerts = %d after clear, want 2", len(stats.Alerts))
 	}
 }
+
+// TestStatsCollector_AlarmRateGaugeAndTypeID pins the self-monitoring
+// additions to the broadcast: the per-node rolling alarm-rate gauge
+// (NodeStats.alarm_rate_10m) and the explicit type_id on every alarm, which
+// the UI's flood collapse groups by. The monitor's clock is injected — the
+// window is a time construct and is never tested with sleeps.
+func TestStatsCollector_AlarmRateGaugeAndTypeID(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
+	alarms := alert.New()
+	monitor := alert.NewRateMonitor(alarms, func() time.Time { return now })
+	alarms.SetOnActivate(monitor.Observe)
+
+	collector := NewStatsCollector(StatsCollectorConfig{
+		Alerts:     alarms,
+		AlarmRate:  monitor,
+		NodeID:     "node-a",
+		NodeNameFn: func() string { return "node-a" },
+	})
+
+	alarms.Raise("vault-leaderless", "vault-1", "no leader")
+	alarms.Raise("node-unreachable", "peer-1", "gone")
+	alarms.Raise("node-unreachable", "peer-1", "still gone") // refresh, not an activation
+
+	stats := collector.CollectLocalTick(now)
+	if stats.AlarmRate_10M != 2 {
+		t.Errorf("alarm_rate_10m = %d, want 2 (refresh must not count)", stats.AlarmRate_10M)
+	}
+	for _, a := range stats.Alerts {
+		if a.TypeId == "" {
+			t.Errorf("alert %q broadcast without type_id", a.Id)
+		}
+	}
+
+	// Aged-out activations leave the gauge; the collector snapshot follows.
+	now = now.Add(11 * time.Minute)
+	stats = collector.CollectLocalTick(now)
+	if stats.AlarmRate_10M != 0 {
+		t.Errorf("alarm_rate_10m = %d after the window rolled, want 0", stats.AlarmRate_10M)
+	}
+}

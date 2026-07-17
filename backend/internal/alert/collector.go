@@ -89,6 +89,19 @@ type Sink interface {
 type Collector struct {
 	mu     sync.RWMutex
 	alarms map[string]*Alarm
+	// onActivate, when set, is invoked after an alarm transitions
+	// inactive → active (a new ID entering the registry) — never on a
+	// refresh of an already-active alarm. Called outside the collector
+	// lock. Wired to the rate monitor (RateMonitor.Observe).
+	onActivate func(typeID string)
+}
+
+// SetOnActivate installs the activation hook. Wire once at startup, before
+// components start raising.
+func (c *Collector) SetOnActivate(fn func(typeID string)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.onActivate = fn
 }
 
 // New creates a new alarm collector.
@@ -155,16 +168,23 @@ func (c *Collector) RaiseOperator(a OperatorAlarm) {
 // escalate; cataloged priorities are static but harmlessly re-stamped).
 func (c *Collector) upsert(a Alarm) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	now := time.Now()
-	if existing, ok := c.alarms[a.ID]; ok {
+	existing, refresh := c.alarms[a.ID]
+	if refresh {
 		a.FirstSeen = existing.FirstSeen
 	} else {
 		a.FirstSeen = now
 	}
 	a.LastSeen = now
 	c.alarms[a.ID] = &a
+	onActivate := c.onActivate
+	c.mu.Unlock()
+
+	// Activation hook outside the lock: the hook may raise back into the
+	// collector (the rate monitor raising alarm-flood).
+	if !refresh && onActivate != nil {
+		onActivate(a.TypeID)
+	}
 }
 
 // Clear resolves the alarm of the given type for the given instance. No-op

@@ -178,6 +178,14 @@ type AlertProvider interface {
 	Active() []*alert.Alarm
 }
 
+// AlarmRateProvider exposes the alarm system's self-monitoring rate gauge:
+// alarm activations on this node in the rolling 10-minute window (EEMUA 191
+// rate principle). Satisfied by *alert.RateMonitor. Read-only — the flood
+// state machine advances on its own scheduler job, not on stats ticks.
+type AlarmRateProvider interface {
+	Rate() int
+}
+
 // JobsProvider returns the current job list for broadcast.
 // Defined at the consumer site to avoid importing orchestrator/server.
 type JobsProvider interface {
@@ -202,9 +210,10 @@ type StatsCollectorConfig struct {
 	// any change so contributors entering/leaving the sum can never read
 	// as traffic (gastrolog-mliwrd).
 	ClusterRouteTotals func() (routed, matched int64, membership string)
-	Alerts             AlertProvider    // optional; nil if no alert collector
-	LogDrops           LogDropsProvider // optional; nil disables the drop counter
-	Jobs               JobsProvider     // optional; nil in single-node mode
+	Alerts             AlertProvider     // optional; nil if no alert collector
+	AlarmRate          AlarmRateProvider // optional; nil disables the alarm-rate gauge
+	LogDrops           LogDropsProvider  // optional; nil disables the drop counter
+	Jobs               JobsProvider      // optional; nil in single-node mode
 	NodeID             string
 	NodeNameFn         func() string // lazily resolved node name
 	Version            string
@@ -514,22 +523,7 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 		stats.SelfIngesterDropsTotal = uint64(max(c.cfg.LogDrops.DroppedCount(), 0))
 	}
 
-	// Active alarms.
-	if c.cfg.Alerts != nil {
-		for _, a := range c.cfg.Alerts.Active() {
-			stats.Alerts = append(stats.Alerts, &gastrologv1.SystemAlert{
-				Id:            []byte(a.ID),
-				Priority:      gastrologv1.AlarmPriority(a.Priority), //nolint:gosec // bounded enum
-				SoftwareFault: a.SoftwareFault,
-				Source:        a.Source,
-				Detail:        a.Detail,
-				Cause:         a.Cause,
-				Response:      a.Response,
-				FirstSeen:     timestamppb.New(a.FirstSeen),
-				LastSeen:      timestamppb.New(a.LastSeen),
-			})
-		}
-	}
+	c.collectAlarms(stats)
 
 	// Raft stats.
 	if c.cfg.RaftStats != nil {
@@ -544,6 +538,31 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 	}
 
 	return stats
+}
+
+// collectAlarms snapshots the active alarms and the alarm-rate
+// self-monitoring gauge (activations on this node in the rolling 10-minute
+// window — per-node truth, never summed across nodes) into the broadcast.
+func (c *StatsCollector) collectAlarms(stats *gastrologv1.NodeStats) {
+	if c.cfg.Alerts != nil {
+		for _, a := range c.cfg.Alerts.Active() {
+			stats.Alerts = append(stats.Alerts, &gastrologv1.SystemAlert{
+				Id:            []byte(a.ID),
+				TypeId:        a.TypeID,
+				Priority:      gastrologv1.AlarmPriority(a.Priority), //nolint:gosec // bounded enum
+				SoftwareFault: a.SoftwareFault,
+				Source:        a.Source,
+				Detail:        a.Detail,
+				Cause:         a.Cause,
+				Response:      a.Response,
+				FirstSeen:     timestamppb.New(a.FirstSeen),
+				LastSeen:      timestamppb.New(a.LastSeen),
+			})
+		}
+	}
+	if c.cfg.AlarmRate != nil {
+		stats.AlarmRate_10M = uint32(max(c.cfg.AlarmRate.Rate(), 0)) //nolint:gosec // non-negative count
+	}
 }
 
 func (c *StatsCollector) appendPeerTrafficTotals(stats *gastrologv1.NodeStats, now time.Time, stepWindows bool) {

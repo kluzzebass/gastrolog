@@ -183,6 +183,14 @@ message NodeStats {
   // fire when the backlog actually threatens something. Like raft_state,
   // this is the level's String() rather than an enum.
   string ingest_pressure_level = 51;
+
+  // Alarm activations on THIS node in the rolling 10-minute window — the
+  // alarm system's self-monitoring rate gauge (EEMUA 191 rate principle).
+  // Per-node by design: the collector is per-node, so a flood is a fact
+  // about one node's alarm system; there is no cluster-aggregate flood.
+  // Over the operator-set threshold the node raises the single alarm-flood
+  // meta-alarm (see the alarm catalog).
+  uint32 alarm_rate_10m = 52;
 }
 
 // VaultPipelineNodeDisk is one vault's local pipeline storage areas on a
@@ -244,6 +252,10 @@ message SystemAlert {
   // (EEMUA 191): their response is to report the defect, so they sit outside
   // the consequence × urgency priority scale (priority is UNSPECIFIED).
   bool software_fault = 9;
+  // Catalog type ID ("vault-leaderless", "alarm-flood", ...) — the id field
+  // minus the instance key. Carried explicitly so aggregation-side flood
+  // collapse groups by type without re-deriving it from the id format.
+  string type_id = 10;
 }
 
 // AlarmPriority is the cataloged consequence × urgency verdict for an alarm

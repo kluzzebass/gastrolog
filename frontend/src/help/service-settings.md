@@ -25,6 +25,12 @@ Controls how [cluster nodes](settings:nodes) [![icon:help]()](help:clustering-no
 |---------|-------------|---------|
 | **Backlog Budget** | Per-vault budget for the pipeline backlog (completed segments awaiting chunking). At the budget, new records for that vault are refused cluster-wide — retryable backpressure — until chunking drains it below the budget. Bounds the backlog by policy before disk pressure; the [disk-space guard](help:storage-config) remains the backstop. Applies to every vault | Unbounded |
 
+## Alarms
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| **Flood Threshold** | Alarm activations per node per rolling 10 minutes before that node raises the `alarm-flood` meta-alarm — the alarm system reporting itself degraded by volume. The rate is measured **per node** (each node's alarm collector monitors itself), so the threshold applies to each node separately; the alert panel names the flooding node. During a flood, same-type alarms from that node collapse into one row with a count. The flood clears once the rate stays under the threshold for a full 10-minute window | `10` |
+
 ## TLS Configuration
 
 When a [certificate](help:certificates) is configured as the default, additional TLS options appear:

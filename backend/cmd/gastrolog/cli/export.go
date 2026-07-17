@@ -95,6 +95,7 @@ type clusterExport struct {
 	BroadcastInterval       string `json:"broadcast_interval,omitempty"`
 	HeartbeatInterval       string `json:"heartbeat_interval,omitempty"`
 	PipelineBacklogMaxBytes uint64 `json:"pipeline_backlog_max_bytes,omitempty"`
+	AlarmFloodThreshold     uint32 `json:"alarm_flood_threshold,omitempty"`
 }
 
 // settingsToExport converts the nested proto GetSettingsResponse into
@@ -178,6 +179,7 @@ func settingsToExport(sc *v1.GetSettingsResponse) (auth *authExport, query *quer
 			BroadcastInterval:       cl.GetBroadcastInterval(),
 			HeartbeatInterval:       cl.GetHeartbeatInterval(),
 			PipelineBacklogMaxBytes: cl.GetPipelineBacklogMaxBytes(),
+			AlarmFloodThreshold:     cl.GetAlarmFloodThreshold(),
 		}
 		if ce != (clusterExport{}) {
 			cluster = &ce

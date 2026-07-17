@@ -775,6 +775,18 @@ export class NodeStats extends Message<NodeStats> {
    */
   ingestPressureLevel = "";
 
+  /**
+   * Alarm activations on THIS node in the rolling 10-minute window — the
+   * alarm system's self-monitoring rate gauge (EEMUA 191 rate principle).
+   * Per-node by design: the collector is per-node, so a flood is a fact
+   * about one node's alarm system; there is no cluster-aggregate flood.
+   * Over the operator-set threshold the node raises the single alarm-flood
+   * meta-alarm (see the alarm catalog).
+   *
+   * @generated from field: uint32 alarm_rate_10m = 52;
+   */
+  alarmRate10m = 0;
+
   constructor(data?: PartialMessage<NodeStats>) {
     super();
     proto3.util.initPartial(data, this);
@@ -834,6 +846,7 @@ export class NodeStats extends Message<NodeStats> {
     { no: 49, name: "size_capped_vault_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
     { no: 50, name: "self_ingester_drops_total", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 51, name: "ingest_pressure_level", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 52, name: "alarm_rate_10m", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): NodeStats {
@@ -1186,6 +1199,15 @@ export class SystemAlert extends Message<SystemAlert> {
    */
   softwareFault = false;
 
+  /**
+   * Catalog type ID ("vault-leaderless", "alarm-flood", ...) — the id field
+   * minus the instance key. Carried explicitly so aggregation-side flood
+   * collapse groups by type without re-deriving it from the id format.
+   *
+   * @generated from field: string type_id = 10;
+   */
+  typeId = "";
+
   constructor(data?: PartialMessage<SystemAlert>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1203,6 +1225,7 @@ export class SystemAlert extends Message<SystemAlert> {
     { no: 7, name: "cause", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 8, name: "response", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 9, name: "software_fault", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 10, name: "type_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SystemAlert {

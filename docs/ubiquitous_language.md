@@ -673,6 +673,18 @@ How the cluster reports what it's doing to itself, to operators, and to the UI.
   have a stable key (`typeID` or `typeID:instanceKey`) for dedup and
   auto-clear; included in each NodeStats broadcast.
 
+- **Alarm flood** — the alarm system's self-diagnosed degraded state
+  (EEMUA 191 rate principle): a node whose alarm **activations**
+  (inactive → active transitions; refreshes never count) exceed the
+  flood threshold (default 10 per rolling 10 minutes, operator-adjustable
+  via cluster settings) raises exactly one `alarm-flood` meta-alarm.
+  Per-node by design — the `RateMonitor` sits beside each node's
+  collector, and the UI names the flooding node. Clears after a full
+  under-threshold window. During a flood the alert panel collapses that
+  node's same-type alarms into one counted, expandable row
+  (aggregation-side; the wire keeps per-instance truth). The rolling rate
+  travels as `NodeStats.alarm_rate_10m`.
+
 - **SystemAlert** — one alarm on the wire: `ID`, `Priority`, `Source`,
   `Detail` (per-instance specifics), `Cause`/`Response` (from the
   catalog), `SoftwareFault`, `FirstSeen`, `LastSeen`. Keyed ("alarm X for
