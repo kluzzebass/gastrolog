@@ -23,7 +23,7 @@ go into `docs/ubiquitous_language.md` with the implementing change:
 | Term | Meaning | Surface |
 |------|---------|---------|
 | **Alarm** | A condition requiring operator action, with documented cause and response. Has lifecycle state. | Alarm list (System Alerts panel, renamed) |
-| **Event** | A record of something that happened; no action required. | Event journal (new) |
+| **Event** | A record of something that happened; no action required. | Event journal (inspector Events page, `gastrolog events`) |
 | **Metric** | A measured quantity trending over time. | Health/stats surfaces |
 
 ## Standards principles adopted
@@ -363,12 +363,54 @@ so yesterday's ack can never mark a future occurrence as handled.
 
 ## Event journal
 
+*(Landed with phase 5 — `internal/alert/events.go`, gastrolog-1m3e0d.)*
+
 The collector's event-shaped traffic (demoted diagnostics, occurrence
 records, state transitions) moves to a per-node ring-buffer journal
-(bounded, e.g. 10k entries) with a `ListEvents` RPC and a UI page next to
-the alarm list. Alarm lifecycle transitions (raised, acked, cleared,
-shelved) are themselves journaled — the audit trail the alarm list itself
-must not carry.
+(`alert.EventJournal`, bounded at 10k entries, oldest dropped first) with
+a `ListEvents` RPC and a UI page next to the alarm list. Alarm lifecycle
+transitions are themselves journaled — the audit trail the alarm list
+itself must not carry.
+
+Decisions:
+
+- **Exactly one entry per lifecycle transition edge**, emitted by the
+  collector at the edge (collected under the lock, delivered after unlock
+  — the activation-hook pattern). The set: `alarm-raised` (annunciation,
+  including a new occurrence on a retained cleared-unacked entry),
+  `alarm-cleared` (condition resolution — released, latched-standing, or
+  retained; the detail says which; for delay-off types this is the
+  window-close edge), `alarm-acked`, `alarm-shelved`, `alarm-unshelved`
+  (operator actions, with identity), `alarm-shelve-expired` (system
+  transition, no identity). A condition that dies inside its delay-on
+  window journals **nothing** — journaling it would reintroduce the
+  chattering the window suppresses. Lifecycle-journal replay that
+  re-applies a pre-restart ack/shelve to the first annunciation after
+  boot journals one entry saying so.
+- **Demoted diagnostics journal only where a choke point already
+  exists**: the stats collector's election-storm and WAL-latency
+  hysteresis edges (`election-storm`, `raft-wal-latency`) and the ingest
+  pipeline pressure gate's `OnChange` hook (`channel-pressure`).
+  Scheduler-stall stays slog-only (the watchdog has no hook and journals
+  would need new plumbing); ingest-pressure and self-ingester-drops stay
+  **metrics** per the phase-1 demotion — they are continuous quantities,
+  not events.
+- **The ring does NOT survive restart** — it is a ring of recent
+  occurrences, not durable history (ack/shelve state has its own durable
+  journal; diagnostics have the log stream). The choice is visible, not
+  implicit: every journal seeds itself with a `node-started` event at
+  construction (boot), the UI page and CLI state the semantics, and
+  `ListEvents` names nodes it could not collect from
+  (`unreachable_nodes`) so a missing journal never reads as quiet
+  history. Per-node `seq` keeps counting across ring drops, so a first
+  visible seq > 1 means history aged out.
+- **Cluster-first**: `ListEvents` is servable from any node — local ring
+  plus a `local_only` ForwardRPC leg to every peer (the ack/shelve
+  fan-out shape), merged chronologically, limit keeping the newest.
+  Filters (type, source, time range) evaluate identically on every leg.
+- **The page is deliberately quieter than the alarm list**: no ack/shelve
+  controls, no severity coloring — three text levels only. CLI parity:
+  `gastrolog events` with the same filters.
 
 ## Rate self-monitoring
 
@@ -457,8 +499,9 @@ Decisions:
 4. **Lifecycle + proto + RPCs** ✓ — state model, ack/shelve, cross-node
    ack fan-out, ack persistence (see "Lifecycle state model" above for the
    landed shape and decisions).
-5. **Event journal** — ring buffer, RPC, UI page; move demoted
-   diagnostics and lifecycle transitions onto it.
+5. **Event journal** ✓ — ring buffer, RPC, UI page; lifecycle
+   transitions and hook-reachable demoted diagnostics journaled (see
+   "Event journal" above for the landed shape and decisions).
 6. **Self-monitoring** ✓ — rate gauge, flood meta-alarm, flood collapse
    (see Rate self-monitoring above for the landed shape and decisions).
 7. **Vocabulary** — ubiquitous_language.md entries land with phase 2.

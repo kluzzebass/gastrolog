@@ -70,6 +70,11 @@ type LifecycleServer struct {
 	// lifecycle_alarms.go.
 	alerts         *alert.Collector
 	alarmForwarder routing.UnaryForwarder
+
+	// Event journal (gastrolog-1m3e0d): this node's in-memory event ring,
+	// served cluster-wide by ListEvents via the same forwarder. See
+	// lifecycle_events.go.
+	events *alert.EventJournal
 }
 
 var _ gastrologv1connect.LifecycleServiceHandler = (*LifecycleServer)(nil)

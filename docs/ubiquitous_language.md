@@ -705,6 +705,20 @@ How the cluster reports what it's doing to itself, to operators, and to the UI.
   annunciation of the matching alarm ID; a `resolve` record prunes state
   when the alarm releases.
 
+- **Event journal** — the per-node bounded in-memory ring
+  (`alert.EventJournal`, ~10k entries, oldest dropped first) that records
+  events: exactly one entry per alarm lifecycle transition
+  (`alarm-raised`, `alarm-cleared`, `alarm-acked`, `alarm-shelved`,
+  `alarm-unshelved`, `alarm-shelve-expired`) plus the demoted
+  event-shaped diagnostics (`election-storm`, `raft-wal-latency`,
+  `channel-pressure`). Served cluster-wide by `ListEvents` — any node
+  merges every node's ring — and surfaced on the inspector's Events page
+  and `gastrolog events`. Deliberately **not durable**: it does not
+  survive restart, and every journal begins with a `node-started` entry
+  at boot so history before it reads as unknown, never as quiet. Distinct
+  from the **alarm lifecycle journal**, which persists ack/shelve *state*
+  on disk (gastrolog-1m3e0d).
+
 - **Priority** — `alert.Priority`, the cataloged verdict per alarm type:
   `Critical` (data loss in progress or scheduled), `High` (durability or
   availability degraded, will compound), `Low` (needs attention on a human

@@ -67,6 +67,18 @@ service LifecycleService {
   // UnshelveAlarm ends a shelve early, returning the alarm to its live
   // state. Same any-node fan-out semantics as AckAlarm.
   rpc UnshelveAlarm(UnshelveAlarmRequest) returns (UnshelveAlarmResponse);
+
+  // ListEvents returns the event journal: records of occurrence (alarm
+  // lifecycle transitions, demoted diagnostics) that require no operator
+  // action — EEMUA 191 separates them from the alarm list so history
+  // never clutters the call to action. The journal is a per-node
+  // in-memory ring; the serving node merges its own with every peer's
+  // via ForwardRPC fan-out, so the view is cluster-wide from any node.
+  // Entries do not survive node restart: each node's journal begins with
+  // a node-started event carrying the boot instant, and unreachable
+  // nodes are named in the response — absence of events is never
+  // presented as absence of occurrences.
+  rpc ListEvents(ListEventsRequest) returns (ListEventsResponse);
 }
 
 message HealthRequest {}
@@ -247,6 +259,61 @@ message UnshelveAlarmRequest {
 
 message UnshelveAlarmResponse {
   uint32 applied = 1;
+}
+
+message ListEventsRequest {
+  // Exact event type filter ("alarm-raised", "alarm-acked",
+  // "node-started", ...); empty matches all types.
+  string type = 1;
+  // Exact source (component) filter ("storage", "raft", ...); empty
+  // matches all sources.
+  string source = 2;
+  // Inclusive lower time bound; unset = from the start of each journal.
+  google.protobuf.Timestamp since = 3;
+  // Inclusive upper time bound; unset = through the newest entry.
+  google.protobuf.Timestamp until = 4;
+  // Maximum entries returned after the cross-node merge, keeping the
+  // NEWEST. 0 = server default (1000).
+  uint32 limit = 5;
+  // Internal fan-out leg marker; see AckAlarmRequest.local_only.
+  bool local_only = 6;
+}
+
+// SystemEvent is one event-journal entry: a record of something that
+// happened, requiring no operator action — no priority, no response text,
+// no lifecycle state. Deliberately quieter than SystemAlert.
+message SystemEvent {
+  // Raising node's raft ID, stamped by the node that journaled the event.
+  bytes node_id = 1;
+  // Display name of the raising node, resolved by the serving node from
+  // node config (best effort; may be empty, fall back to node_id).
+  string node_name = 2;
+  google.protobuf.Timestamp time = 3;
+  // Per-node monotonic journal sequence. Keeps counting when the ring
+  // drops old entries, so a first visible seq > 1 means history aged out.
+  uint64 seq = 4;
+  // Event type ("alarm-raised", "election-storm", "node-started", ...).
+  string type = 5;
+  // Component the event is about (an alarm's catalog source, "raft",
+  // "ingest-pipeline", "node", ...).
+  string source = 6;
+  // Full alarm ID for alarm lifecycle events, empty otherwise. Same
+  // encoding as SystemAlert.id.
+  bytes alarm_id = 7;
+  string detail = 8;
+  // Operator identity on ack/shelve/unshelve events; empty for system
+  // transitions.
+  string by = 9;
+}
+
+message ListEventsResponse {
+  // Chronological (oldest first) across all reachable nodes; per-node
+  // seq breaks ties. When limit truncates, the NEWEST entries survive.
+  repeated SystemEvent events = 1;
+  // Node IDs whose journal could not be collected (unreachable, no
+  // forwarder). Their events are MISSING from this response — absence
+  // of events from these nodes is unknown state, not quiet history.
+  repeated string unreachable_nodes = 2;
 }
 
 message WatchSystemStatusRequest {}
