@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { computeCloudPips, computePips, pipOrder, type PipInputs } from "./sealPipState";
+import { ChunkMeta, ChunkState } from "../../api/gen/gastrolog/v1/vault_pb";
+import {
+  chunkLifecycleState,
+  computeCloudPips,
+  computePips,
+  pipOrder,
+  type PipInputs,
+} from "./sealPipState";
 
 const base: PipInputs = {
   chunkState: "sealed",
@@ -9,6 +16,28 @@ const base: PipInputs = {
   deleteInFlight: false,
   liveNodes: new Set(["node-1", "node-2", "node-3", "node-4"]),
 };
+
+describe("chunkLifecycleState", () => {
+  // gastrolog-5wh571: the enum is the sole authority — the legacy Sealed
+  // bool used to paint SEALING chunks as active in the CLI, and the UI
+  // shares this derivation for parity. Same states, same words.
+  test("maps each lifecycle state to its word", () => {
+    expect(chunkLifecycleState(new ChunkMeta({ state: ChunkState.ACTIVE }))).toBe("active");
+    expect(chunkLifecycleState(new ChunkMeta({ state: ChunkState.SEALING }))).toBe("sealing");
+    expect(chunkLifecycleState(new ChunkMeta({ state: ChunkState.SEALED }))).toBe("sealed");
+  });
+
+  test("unspecified state is unknown, never a guess", () => {
+    expect(chunkLifecycleState(new ChunkMeta({}))).toBe("unknown");
+  });
+
+  test("legacy sealed bool never overrides the enum", () => {
+    expect(chunkLifecycleState(new ChunkMeta({ sealed: true }))).toBe("unknown");
+    expect(chunkLifecycleState(new ChunkMeta({ sealed: true, state: ChunkState.SEALING }))).toBe(
+      "sealing",
+    );
+  });
+});
 
 describe("pipOrder", () => {
   test("natural sort keeps node-2 before node-10", () => {
@@ -54,6 +83,21 @@ describe("computePips — birth fills green", () => {
       liveNodes: new Set(["node-1", "node-2"]),
     });
     expect(pips.map((p) => p.state)).toEqual(["sealed", "sealed", "missing"]);
+  });
+
+  test("unknown lifecycle claims nothing — even for resident nodes", () => {
+    const { pips } = computePips({ ...base, chunkState: "unknown" });
+    expect(pips.map((p) => p.state)).toEqual(["unknown", "unknown", "unknown"]);
+    expect(pips[0]?.title).toContain("lifecycle unknown");
+  });
+
+  test("unknown lifecycle still reports unreachable nodes as missing", () => {
+    const { pips } = computePips({
+      ...base,
+      chunkState: "unknown",
+      liveNodes: new Set(["node-1", "node-2"]),
+    });
+    expect(pips.map((p) => p.state)).toEqual(["unknown", "unknown", "missing"]);
   });
 });
 
