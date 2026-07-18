@@ -362,13 +362,19 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	// are records of occurrence, and the gate's OnChange hook is the
 	// existing choke point — one log line per level change, no per-tick
 	// chatter. The log stream is the event record.
+	// Attr discipline: the pressure tier is "pressure", never "level" (that
+	// key belongs to slog itself), and an empty cause channel is omitted
+	// rather than logged as channel="".
+	pressureLogger := logger.With("component", "orchestrator")
 	orch.PressureGate().AddOnChange(func(tr chanwatch.PressureTransition) {
+		attrs := []any{"from", tr.From.String(), "pressure", tr.To.String(), "ratio", tr.Ratio}
+		if tr.Cause != "" {
+			attrs = append(attrs, "channel", tr.Cause)
+		}
 		if tr.To == chanwatch.PressureNormal {
-			logger.Info("ingest pipeline pressure back to normal",
-				"from", tr.From.String(), "channel", tr.Cause, "ratio", tr.Ratio)
+			pressureLogger.Info("ingest pipeline pressure back to normal", attrs...)
 		} else {
-			logger.Warn("ingest pipeline pressure elevated — ingesters throttling",
-				"level", tr.To.String(), "channel", tr.Cause, "ratio", tr.Ratio)
+			pressureLogger.Warn("ingest pipeline pressure elevated — ingesters throttling", attrs...)
 		}
 	})
 

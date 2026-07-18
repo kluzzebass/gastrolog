@@ -632,7 +632,7 @@ func (s *Server) Serve(listener net.Listener) error {
 	// Build the core handler once — reused by both HTTP and HTTPS.
 	// Chain: tracking → CORS → securityHeaders → rateLimit → compress → mux
 	mux := s.buildMux()
-	s.handler = s.trackingMiddleware(s.corsMiddleware(securityHeadersMiddleware(rateLimitMiddleware(s.rl)(compressMiddleware(mux)))))
+	s.handler = s.trackingMiddleware(s.corsMiddleware(securityHeadersMiddleware(rateLimitMiddleware(s.rl)(compressMiddleware(s.logger, mux)))))
 
 	// HTTP adds redirect-to-HTTPS + h2c (HTTP/2 without TLS).
 	redirectHandler := s.redirectMiddleware(s.handler)

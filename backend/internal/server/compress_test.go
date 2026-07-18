@@ -1,6 +1,7 @@
 package server
 
 import (
+	"log/slog"
 	"compress/gzip"
 	"io"
 	"net/http"
@@ -18,7 +19,7 @@ func TestCompressMiddleware_Brotli(t *testing.T) {
 		w.Write([]byte(body))
 	})
 
-	h := compressMiddleware(inner)
+	h := compressMiddleware(slog.Default(), inner)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("Accept-Encoding", "gzip, br")
 	rec := httptest.NewRecorder()
@@ -44,7 +45,7 @@ func TestCompressMiddleware_Gzip(t *testing.T) {
 		w.Write([]byte(body))
 	})
 
-	h := compressMiddleware(inner)
+	h := compressMiddleware(slog.Default(), inner)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("Accept-Encoding", "gzip, deflate")
 	rec := httptest.NewRecorder()
@@ -72,7 +73,7 @@ func TestCompressMiddleware_PrefersBrotli(t *testing.T) {
 		w.Write([]byte("data"))
 	})
 
-	h := compressMiddleware(inner)
+	h := compressMiddleware(slog.Default(), inner)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("Accept-Encoding", "gzip, deflate, br")
 	rec := httptest.NewRecorder()
@@ -89,7 +90,7 @@ func TestCompressMiddleware_NoAcceptEncoding(t *testing.T) {
 		w.Write([]byte(body))
 	})
 
-	h := compressMiddleware(inner)
+	h := compressMiddleware(slog.Default(), inner)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -110,7 +111,7 @@ func TestCompressMiddleware_SkipsPreCompressed(t *testing.T) {
 		w.Write([]byte("pre-compressed-brotli-data"))
 	})
 
-	h := compressMiddleware(inner)
+	h := compressMiddleware(slog.Default(), inner)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("Accept-Encoding", "gzip, br")
 	rec := httptest.NewRecorder()
@@ -130,7 +131,7 @@ func TestCompressMiddleware_NoContent(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	})
 
-	h := compressMiddleware(inner)
+	h := compressMiddleware(slog.Default(), inner)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("Accept-Encoding", "gzip")
 	rec := httptest.NewRecorder()
@@ -150,7 +151,7 @@ func TestCompressMiddleware_Flush(t *testing.T) {
 		w.Write([]byte("chunk2"))
 	})
 
-	h := compressMiddleware(inner)
+	h := compressMiddleware(slog.Default(), inner)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("Accept-Encoding", "gzip")
 	rec := httptest.NewRecorder()
@@ -188,7 +189,7 @@ func BenchmarkCompressBrotli(b *testing.B) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(payload)
 	})
-	h := compressMiddleware(inner)
+	h := compressMiddleware(slog.Default(), inner)
 	b.SetBytes(int64(len(payload)))
 	for b.Loop() {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -205,7 +206,7 @@ func BenchmarkCompressGzip(b *testing.B) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(payload)
 	})
-	h := compressMiddleware(inner)
+	h := compressMiddleware(slog.Default(), inner)
 	b.SetBytes(int64(len(payload)))
 	for b.Loop() {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
