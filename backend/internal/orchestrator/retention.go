@@ -284,9 +284,9 @@ func (o *Orchestrator) enforceMemoryBudgets(cfg *system.Config) {
 		return
 	}
 	type budgetTarget struct {
-		vaultID glid.GLID
-		cm      chunk.ChunkManager
-		excess  int64
+		runner *retentionRunner
+		cm     chunk.ChunkManager
+		excess int64
 	}
 
 	var targets []budgetTarget
@@ -304,27 +304,39 @@ func (o *Orchestrator) enforceMemoryBudgets(cfg *system.Config) {
 		if !ok {
 			continue
 		}
+		// Use the sweep's runner — never mint one here (gastrolog-aop1yc).
+		// Its absence is meaningful: the sweep only caches runners for
+		// instances that may destroy chunks, so no runner means this vault
+		// has no Raft leader and budget enforcement must wait rather than
+		// destroy on its own authority.
+		runner := o.retention[retentionKey(vaultInst.VaultID, vaultInst.StorageID)]
+		if runner == nil {
+			continue
+		}
 		if excess := monitor.BudgetExceeded(); excess > 0 {
 			targets = append(targets, budgetTarget{
-				vaultID: vaultCfg.ID,
-				cm:      vaultInst.Chunks,
-				excess:  excess,
+				runner: runner,
+				cm:     vaultInst.Chunks,
+				excess: excess,
 			})
 		}
 	}
 	o.mu.RUnlock()
 
 	for _, t := range targets {
-		o.drainExcessChunks(t.vaultID, t.cm, t.excess)
+		o.drainExcessChunks(t.runner, t.cm, t.excess)
 	}
 }
 
-// drainExcessChunks fires retention events on the oldest sealed chunks
-// of a memory vault until the excess bytes are reclaimed (or no more
-// sealed chunks remain). Phase 4 (gastrolog-42f9z): these used to be
-// "transitioned to the next instance"; now they're just retention events
-// like any other, with the routing engine deciding their fate.
-func (o *Orchestrator) drainExcessChunks(vaultID glid.GLID, cm chunk.ChunkManager, excess int64) {
+// drainExcessChunks retires the oldest sealed chunks of a memory vault
+// until the excess bytes are reclaimed (or no more sealed chunks remain).
+// Phase 4 (gastrolog-42f9z): these used to be "transitioned to the next
+// instance"; now they're just retention events like any other.
+//
+// "Like any other" is meant literally, and was not (gastrolog-aop1yc): this
+// takes the sweep's cached runner and goes through the same disposition gate
+// as a TTL expiry. A vault configured "delete" does not fan out here either.
+func (o *Orchestrator) drainExcessChunks(runner *retentionRunner, cm chunk.ChunkManager, excess int64) {
 	metas, err := cm.List()
 	if err != nil {
 		return
@@ -335,16 +347,6 @@ func (o *Orchestrator) drainExcessChunks(vaultID glid.GLID, cm chunk.ChunkManage
 		return a.WriteStart.Compare(b.WriteStart)
 	})
 
-	// Find the index manager for this vault.
-	var im index.IndexManager
-	o.mu.RLock()
-	if vault := o.vaults[vaultID]; vault != nil {
-		if vaultInst := vault.Instance; vaultInst != nil {
-			im = vaultInst.Indexes
-		}
-	}
-	o.mu.RUnlock()
-
 	var reclaimed int64
 	for _, m := range metas {
 		if reclaimed >= excess {
@@ -353,24 +355,22 @@ func (o *Orchestrator) drainExcessChunks(vaultID glid.GLID, cm chunk.ChunkManage
 		if !m.Sealed {
 			continue
 		}
-
-		runner := &retentionRunner{
-			isLeader: true,
-			vaultID:  vaultID,
-			cm:       cm,
-			im:       im,
-			orch:     o,
-			now:      o.now,
-			logger:   o.logger,
+		// Honor the disposition verdict, exactly as the TTL path does.
+		// Ignoring it destroyed the chunk even when the fan-out was aborted
+		// by shutdown or disk protect, ejecting every record unrouted — the
+		// bug gastrolog-5034va fixed on the TTL path and gastrolog-65riw5
+		// found still live here. Skip rather than break: the abort is
+		// per-chunk, and a later chunk may still route.
+		if !runner.applyRetentionDispositionToChunk(m.ID) {
+			continue
 		}
-		runner.fireRetentionEvent(m.ID)
 		runner.expireChunk(m.ID, "memory-budget-enforcement")
 		reclaimed += m.Bytes
 	}
 
 	if reclaimed > 0 {
 		o.retentionLogger.Info("memory budget enforcement: retention events fired",
-			"vault", vaultID,
+			"vault", runner.vaultID,
 			"excess", excess, "reclaimed", reclaimed)
 	}
 }
@@ -470,28 +470,20 @@ func (o *Orchestrator) PendingDeleteAcks(vaultID glid.GLID) map[chunk.ChunkID][]
 	return result
 }
 
-// retentionTargetForInstance resolves a single vault instance into a sweep target.
-// Returns nil if the instance should be skipped (no rules, no leader, etc.).
-func (o *Orchestrator) retentionTargetForInstance(cfg *system.Config, vaultCfg system.VaultConfig, vaultInst *VaultInstance, active map[string]bool) *sweepTarget {
-	if vaultInst.HasRaftLeader != nil && !vaultInst.HasRaftLeader() {
-		return nil
-	}
-	// IsRaftLeader check removed: the instance apply forwarder transparently
-	// routes applies to the vault-ctl Raft leader. The config placement leader
-	// always runs retention regardless of vault-ctl Raft leadership.
-	if len(vaultCfg.RetentionRules) == 0 {
-		return nil
-	}
-	rules, err := resolveRetentionRulesFromVault(cfg, vaultCfg)
-	if err != nil {
-		o.retentionLogger.Warn("retention: failed to resolve rules",
-			"vault", vaultCfg.ID, "error", err)
-		return nil
-	}
-	if len(rules) == 0 {
-		return nil
-	}
-
+// retentionRunnerFor returns the cached retention runner for a vault
+// instance, creating it on first use, and refreshes the per-sweep config on
+// it. Marks the key active so the sweep's GC keeps the runner.
+//
+// EVERY leader instance gets a runner, including vaults with no retention
+// rules. That is deliberate (gastrolog-aop1yc): memory-budget enforcement
+// destroys chunks through this same runner, and it used to mint a bare one
+// per chunk instead — which silently bypassed the disposition gate and threw
+// away unreadable-retry backoff on every iteration. There must be exactly
+// one runner per (vault, storage), because it owns per-chunk state that only
+// means anything if it accumulates.
+//
+// Caller must hold o.mu for write.
+func (o *Orchestrator) retentionRunnerFor(vaultCfg system.VaultConfig, vaultInst *VaultInstance, active map[string]bool) *retentionRunner {
 	key := retentionKey(vaultInst.VaultID, vaultInst.StorageID)
 	active[key] = true
 
@@ -499,8 +491,6 @@ func (o *Orchestrator) retentionTargetForInstance(cfg *system.Config, vaultCfg s
 	if runner == nil {
 		runner = &retentionRunner{
 			vaultID: vaultCfg.ID,
-			cm:      vaultInst.Chunks,
-			im:      vaultInst.Indexes,
 			orch:    o,
 			now:     o.now,
 			logger:  o.logger,
@@ -517,6 +507,36 @@ func (o *Orchestrator) retentionTargetForInstance(cfg *system.Config, vaultCfg s
 	runner.vaultName = vaultCfg.Name
 	runner.vaultType = string(vaultCfg.Type)
 	runner.disposition = vaultCfg.ResolveRetentionDisposition()
+	return runner
+}
+
+// retentionTargetForInstance resolves a single vault instance into a sweep target.
+// Returns nil if the instance should be skipped (no rules, no leader, etc.).
+// A nil return does NOT mean no runner: an instance with no retention rules
+// still has one for memory-budget enforcement to use.
+func (o *Orchestrator) retentionTargetForInstance(cfg *system.Config, vaultCfg system.VaultConfig, vaultInst *VaultInstance, active map[string]bool) *sweepTarget {
+	if vaultInst.HasRaftLeader != nil && !vaultInst.HasRaftLeader() {
+		// No runner either: without a Raft leader nothing may destroy this
+		// vault's chunks, memory-budget enforcement included.
+		return nil
+	}
+	// IsRaftLeader check removed: the instance apply forwarder transparently
+	// routes applies to the vault-ctl Raft leader. The config placement leader
+	// always runs retention regardless of vault-ctl Raft leadership.
+	runner := o.retentionRunnerFor(vaultCfg, vaultInst, active)
+
+	if len(vaultCfg.RetentionRules) == 0 {
+		return nil
+	}
+	rules, err := resolveRetentionRulesFromVault(cfg, vaultCfg)
+	if err != nil {
+		o.retentionLogger.Warn("retention: failed to resolve rules",
+			"vault", vaultCfg.ID, "error", err)
+		return nil
+	}
+	if len(rules) == 0 {
+		return nil
+	}
 	runner.mu.Lock()
 	runner.rules = rules
 	runner.mu.Unlock()
@@ -900,12 +920,21 @@ func (r *retentionRunner) applyRetentionDispositionToChunk(id chunk.ChunkID) boo
 // re-ingested records produce new chunks that themselves expire on
 // the next sweep. Routes for retention should target a different
 // vault (cold storage, archive, etc.).
-// fireRetentionEvent returns true when the fan-out ran to completion
-// (including the pre-existing partial-fan-out tolerances: unreadable
-// cursor, per-record decode errors). It returns false ONLY when the
-// fan-out was aborted by a terminal condition — pipeline stopped or
-// process shutdown — meaning the route should be retried by a later
-// sweep instead of the chunk being destroyed unrouted (gastrolog-5034va).
+// fireRetentionEvent returns true when the fan-out ran to completion, and
+// false when the caller must leave the chunk alone for a later sweep.
+//
+// False means "no record of this chunk reached a route, and that might
+// change later": the pipeline is stopped or shutting down, disk protect is
+// rejecting everything (gastrolog-5034va), the vault instance is missing, or
+// the chunk could not be opened (gastrolog-65riw5). The chunk survives and
+// the route is retried from scratch. The invariant this protects is stated
+// in applyRetentionDispositionToChunk: duplicate-on-abort at the route
+// target is acceptable, loss of the operator's route disposition is not.
+//
+// True still tolerates a PARTIAL fan-out — records whose own submit failed
+// for a non-terminal reason are dropped and the chunk is destroyed, because
+// one bad record must not strand a chunk forever. Those are counted and
+// reported.
 func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 	if r.orch == nil {
 		return true
@@ -926,16 +955,31 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 		}
 		return false
 	}
+	// No vault instance (or no chunk manager) means the records cannot be
+	// read here, let alone routed. Returning true would destroy the chunk
+	// with zero records delivered — loss of the operator's route
+	// disposition, which this path promises never to do. Retain and let a
+	// later sweep try; if the vault is genuinely gone for good, the chunk
+	// surfaces as an unknown-orphan rather than vanishing (gastrolog-65riw5).
 	vaultInst := r.findVaultInstance()
 	if vaultInst == nil || vaultInst.Chunks == nil {
-		return true
+		r.logger.Warn("retention: no vault instance for fan-out; chunk retained for a later sweep",
+			"vault", r.vaultID, "chunk", id)
+		return false
 	}
 
 	cur, err := vaultInst.Chunks.OpenCursor(id)
 	if err != nil {
-		r.logger.Warn("retention: open cursor for fan-out failed",
-			"vault", r.vaultID, "chunk", id, "error", err)
-		return true
+		// An unreadable cursor may be transient — an I/O error, an
+		// unmounted volume. Destroying the chunk here ejects every record
+		// in it unrouted. Hand it to the unreadable-retry machinery
+		// instead: exponential backoff, the chunk-unreadable alarm, and the
+		// operator's "Retry unreadable" action. Retention sweeps skip a
+		// chunk while it is inside its backoff window, so a permanently
+		// unreadable chunk does not wedge the sweep — which is what made
+		// destroy-on-unreadable look necessary (gastrolog-65riw5).
+		r.markUnreadable(id, fmt.Errorf("open cursor for retention fan-out: %w", err))
+		return false
 	}
 	defer func() {
 		if cerr := cur.Close(); cerr != nil {
@@ -964,6 +1008,8 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 
 	jobs := make(chan chunk.Record, retentionFanOutBuffer)
 	var submitWG sync.WaitGroup
+	var dropped atomic.Int64
+	var firstDropErr atomic.Value
 	for range retentionFanOutWorkers {
 		submitWG.Go(func() {
 			for rec := range jobs {
@@ -987,8 +1033,12 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 				default:
 					// Genuine per-record error — partial fan-out is
 					// acceptable; the chunk is still destroyed by the caller.
-					r.logger.Warn("retention: fan-out submit error",
-						"vault", r.vaultID, "chunk", id, "error", subErr)
+					// Counted rather than logged per record: a chunk holds
+					// millions, and one line each is how the pour incident
+					// buried the console. One line with the count after the
+					// fan-out says the same thing (gastrolog-65riw5).
+					dropped.Add(1)
+					firstDropErr.CompareAndSwap(nil, subErr)
 				}
 			}
 		})
@@ -999,6 +1049,15 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 	submitWG.Wait()
 	if aborted.Load() {
 		return false
+	}
+	// Records that could not be routed are dropped when the caller destroys
+	// the chunk. That tolerance is deliberate — one bad record must not
+	// strand a whole chunk forever — but it is real, so it is reported with
+	// a count rather than left to a Debug line.
+	if n := dropped.Load(); n > 0 {
+		first, _ := firstDropErr.Load().(error)
+		r.logger.Warn("retention: records dropped during route fan-out — they are ejected unrouted when the chunk is destroyed",
+			"vault", r.vaultID, "chunk", id, "dropped", n, "routed", fanned, "first_error", first)
 	}
 	r.logger.Debug("retention: fanned out chunk records via pipeline routing",
 		"vault", r.vaultID, "chunk", id, "count", fanned)
