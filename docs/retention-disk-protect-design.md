@@ -131,6 +131,23 @@ be fixed for this lever to be safe; it remains a separate issue.)
 - **The 5034va ordering** (route before marking retention-pending; aborted
   fan-out does not consume the one-shot) stays.
 
+## Accepted systemic property: a full drive can stall the cluster
+
+A full volume on one node can stall admission far beyond that node, and this
+is accepted, not a defect to engineer away. It follows from the durability
+guarantee: a record accepted for a vault must be durably placeable on that
+vault's placements, so when a placement's volume cannot take it, refusal at
+admission is the only response that keeps the promise — accepting into a
+doomed write, silently degrading the replica count, or delivering a partial
+fan-out are all worse.
+
+The blast radius is route coupling, not node topology: a record stalls only
+when its matched route set touches an affected vault. Operators bound it by
+spreading placements across volumes and not funneling every route through
+one vault. What the system owes them — and what this design delivers — is
+that the stall is bounded and named (drain-gate recovery, deferral alarm),
+never permanent and silent.
+
 ## Cluster considerations
 
 - The guard is per-node state; the sweep runs on the vault's placement
