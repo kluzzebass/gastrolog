@@ -192,12 +192,33 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 	cfgStore := sysmem.NewStore()
 	ctx := context.Background()
 
+	// Per-node alert collectors, built BEFORE node creation so each
+	// orchestrator can be wired to its own collector at construction time
+	// (gastrolog-1xl29s): orchestrator.Config.Alerts has no post-construction
+	// setter, so wiring it late (as this used to, further down where the
+	// GetClusterStatus stats collectors are built) left every node's own
+	// orch.alerts nil — production alarm-raising code (o.alerts.Raise(...))
+	// never actually ran in any multi-node test; only tests that called
+	// h.alerts[id].Raise(...) directly on the bare collector worked. Assigned
+	// conditionally so tests without the option keep the nil interfaces of
+	// single-node mode.
+	alertsByNode := make(map[string]*alert.Collector, len(nodeIDs))
+	if cfg.clusterStats {
+		for _, id := range nodeIDs {
+			ac := alert.New()
+			if cfg.alertClock != nil {
+				ac = alert.NewWithClock(cfg.alertClock)
+			}
+			alertsByNode[id] = ac
+		}
+	}
+
 	// Create all nodes.
 	for _, id := range nodeIDs {
 		if cfg.noVault[id] {
-			nodes[id] = setupMNNodeNoVault(t, id, cfgStore)
+			nodes[id] = setupMNNodeNoVault(t, id, cfgStore, alertsByNode[id])
 		} else {
-			node := setupMNNode(t, id, cfgStore)
+			node := setupMNNode(t, id, cfgStore, alertsByNode[id])
 			// Write VaultConfig directly with all storage fields, plus a
 			// synthetic placement for this node.
 			placements := []system.VaultPlacement{
@@ -240,19 +261,9 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 
 	vaultsDir := t.TempDir()
 
-	// Per-node alert collectors + stats collectors behind GetClusterStatus
-	// (gastrolog-33d9n2). Assigned conditionally so tests without the option
-	// keep the nil interfaces of single-node mode.
-	alertsByNode := make(map[string]*alert.Collector, len(nodeIDs))
-	if cfg.clusterStats {
-		for _, id := range nodeIDs {
-			ac := alert.New()
-			if cfg.alertClock != nil {
-				ac = alert.NewWithClock(cfg.alertClock)
-			}
-			alertsByNode[id] = ac
-		}
-	}
+	// alertsByNode (per-node alert collectors, feeding the GetClusterStatus
+	// stats collectors below) was built earlier, before node creation — see
+	// that block's comment.
 
 	routingFwd := newDirectUnaryForwarder(t, nodes, cfgStore, coordinatorID, vaultsDir)
 
@@ -324,10 +335,24 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 	}
 }
 
-func setupMNNode(t *testing.T, nodeID string, loader system.Store) multinodeTestNode {
+// mnOrchConfig builds the common orchestrator.Config shared by
+// setupMNNode/setupMNNodeNoVault. alerts is nil for harnesses that didn't
+// ask for WithClusterStats/WithAlertClock — left unset rather than
+// assigned as a typed-nil alert.Sink, which would make o.alerts != nil
+// true while every method call on it panics on the nil *alert.Collector
+// receiver.
+func mnOrchConfig(nodeID string, loader system.Store, tmpDir string, alerts *alert.Collector) orchestrator.Config {
+	cfg := orchestrator.Config{LocalNodeID: nodeID, SystemLoader: loader, SegmentsDir: filepath.Join(tmpDir, "segments")}
+	if alerts != nil {
+		cfg.Alerts = alerts
+	}
+	return cfg
+}
+
+func setupMNNode(t *testing.T, nodeID string, loader system.Store, alerts *alert.Collector) multinodeTestNode {
 	t.Helper()
 
-	orch, err := orchestrator.New(orchestrator.Config{LocalNodeID: nodeID, SystemLoader: loader, SegmentsDir: filepath.Join(t.TempDir(), "segments")})
+	orch, err := orchestrator.New(mnOrchConfig(nodeID, loader, t.TempDir(), alerts))
 	if err != nil {
 		t.Fatalf("orchestrator.New: %v", err)
 	}
@@ -342,10 +367,10 @@ func setupMNNode(t *testing.T, nodeID string, loader system.Store) multinodeTest
 	return multinodeTestNode{nodeID: nodeID, orch: orch, vaultID: vaultID, vault: v}
 }
 
-func setupMNNodeNoVault(t *testing.T, nodeID string, loader system.Store) multinodeTestNode {
+func setupMNNodeNoVault(t *testing.T, nodeID string, loader system.Store, alerts *alert.Collector) multinodeTestNode {
 	t.Helper()
 
-	orch, err := orchestrator.New(orchestrator.Config{LocalNodeID: nodeID, SystemLoader: loader, SegmentsDir: filepath.Join(t.TempDir(), "segments")})
+	orch, err := orchestrator.New(mnOrchConfig(nodeID, loader, t.TempDir(), alerts))
 	if err != nil {
 		t.Fatalf("orchestrator.New: %v", err)
 	}
