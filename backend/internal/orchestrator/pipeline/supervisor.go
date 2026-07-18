@@ -65,11 +65,11 @@ type Config struct {
 
 	// DeferWritesGate, when non-nil, pauses the heavy-write DRAIN stages
 	// (chunking builds, collection pulls) when it returns true. Distinct
-	// from AdmissionGate: the drain tier resumes EARLIER than ingest
-	// admission on disk recovery so the pipeline can seal backlog into
-	// chunks retention frees, rather than deadlocking behind the closed
-	// front door (gastrolog-67gvjo staged release). Falls back to tracking
-	// AdmissionGate when nil.
+	// from AdmissionGate: the drain gate resumes EARLIER than the
+	// node-global admission gate on disk recovery so the pipeline can seal
+	// backlog into chunks retention frees, rather than deadlocking behind
+	// the closed front door (gastrolog-67gvjo staged release). Falls back
+	// to tracking AdmissionGate when nil.
 	DeferWritesGate func() bool
 
 	// VaultAdmissionGate, when non-nil, is the per-destination admission
