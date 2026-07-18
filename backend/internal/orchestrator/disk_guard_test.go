@@ -53,17 +53,17 @@ func TestDiskGuardLifecycle(t *testing.T) {
 		t.Fatal("warn is not the floor: admission must stay open")
 	}
 
-	// Crossing the floor: both tiers engage, alarm text escalates.
+	// Crossing the floor: both gates engage, alarm text escalates.
 	sampler.free["b"] = 10 * gib
 	g.evaluate(spy)
 	if !g.protect.Load() {
 		t.Fatal("below the floor the node must stop accepting work")
 	}
 	if !g.deferWrites.Load() {
-		t.Fatal("below the floor the drain tier must pause too")
+		t.Fatal("below the floor the drain gate must pause too")
 	}
 
-	// Just above the floor: hysteresis holds both tiers on.
+	// Just above the floor: hysteresis holds both gates on.
 	sampler.free["b"] = 13 * gib
 	g.evaluate(spy)
 	if !g.protect.Load() || !g.deferWrites.Load() {
@@ -71,12 +71,12 @@ func TestDiskGuardLifecycle(t *testing.T) {
 	}
 
 	// Clear of the FLOOR band but still under WARN: staged release — the
-	// drain tier resumes so the pipeline can seal backlog, but the consumer
-	// tier (admission) stays held so a burst can't re-cross the floor.
+	// drain gate resumes so the pipeline can seal backlog, but the consumer
+	// gate (admission) stays held so a burst can't re-cross the floor.
 	sampler.free["b"] = 20 * gib
 	g.evaluate(spy)
 	if g.deferWrites.Load() {
-		t.Fatal("drain tier must resume once clear of the floor band")
+		t.Fatal("drain gate must resume once clear of the floor band")
 	}
 	if !g.protect.Load() {
 		t.Fatal("admission must stay held until free clears the WARN band (ratchet headroom)")
@@ -230,19 +230,19 @@ func (s *alertSpy) has(id string) bool {
 
 // TestDiskGuardStagedReleaseInvariant sweeps free space up from a floor
 // breach and pins the ratchet-avoidance invariant: at NO recovery level is
-// ingest admission open while the drain tier is still paused. Admission always
-// resumes at or after the drain tier, and only above the WARN band — the wide
+// ingest admission open while the drain gate is still paused. Admission always
+// resumes at or after the drain gate, and only above the WARN band — the wide
 // asymmetric deadband that denies the release burst room to re-cross the floor.
 func TestDiskGuardStagedReleaseInvariant(t *testing.T) {
 	t.Parallel()
 	total := 400 * gib // warn 40GiB, floor 12GiB; admission resumes above 50GiB
 	g, sampler := newGuardFixture(total, map[string]uint64{"a": 200 * gib, "b": 200 * gib})
 
-	// Breach the floor so both tiers engage.
+	// Breach the floor so both gates engage.
 	sampler.free["b"] = 5 * gib
 	g.evaluate(nil)
 	if !g.protect.Load() || !g.deferWrites.Load() {
-		t.Fatal("floor breach must engage both tiers")
+		t.Fatal("floor breach must engage both gates")
 	}
 
 	// Walk recovery upward in 1GiB steps through the whole band.
@@ -255,7 +255,7 @@ func TestDiskGuardStagedReleaseInvariant(t *testing.T) {
 
 		// The invariant: admission open implies drain already open.
 		if admissionOpen && !drainOpen {
-			t.Fatalf("at %dGiB free admission reopened while the drain tier was still paused", free)
+			t.Fatalf("at %dGiB free admission reopened while the drain gate was still paused", free)
 		}
 		if drainOpen && !admissionOpen {
 			sawDrainResumeWhileAdmissionHeld = true
@@ -266,11 +266,11 @@ func TestDiskGuardStagedReleaseInvariant(t *testing.T) {
 		}
 	}
 	if !sawDrainResumeWhileAdmissionHeld {
-		t.Fatal("staged release never observed: drain tier should reopen while admission is still held")
+		t.Fatal("staged release never observed: drain gate should reopen while admission is still held")
 	}
 	// Fully recovered: both open.
 	if g.protect.Load() || g.deferWrites.Load() {
-		t.Fatal("well above the WARN band both tiers must be open")
+		t.Fatal("well above the WARN band both gates must be open")
 	}
 }
 
@@ -292,7 +292,7 @@ func TestPrimeDiskGuardClosesBootWindow(t *testing.T) {
 		t.Fatal("prime must engage protect on a full volume before admission opens")
 	}
 	if !o.diskDeferWrites() {
-		t.Fatal("prime must also pause the drain tier below the floor")
+		t.Fatal("prime must also pause the drain gate below the floor")
 	}
 	// Guardless / pathless orchestrators prime to a no-op without panicking.
 	(&Orchestrator{}).primeDiskGuard()
