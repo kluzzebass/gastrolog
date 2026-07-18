@@ -71,8 +71,8 @@ func TestDiskGuardLifecycle(t *testing.T) {
 	}
 
 	// Clear of the FLOOR band but still under WARN: staged release — the
-	// drain gate resumes so the pipeline can seal backlog, but the consumer
-	// gate (admission) stays held so a burst can't re-cross the floor.
+	// drain gate resumes so the pipeline can seal backlog, but the admission
+	// gate stays held so a burst can't re-cross the floor.
 	sampler.free["b"] = 20 * gib
 	g.evaluate(spy)
 	if g.deferWrites.Load() {
