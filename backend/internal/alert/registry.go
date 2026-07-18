@@ -236,13 +236,11 @@ var catalog = []AlarmType{
 	// ------------------------------------------------------------------
 	// Low — needs attention on a human timescale.
 	// ------------------------------------------------------------------
-	{
-		IDPrefix: "ingester-not-running",
-		Priority: Low,
-		Source:   "ingestion",
-		Cause:    "Ingesters that should run on this node are not running; ingestion capacity is reduced until they start.",
-		Response: "Check the log for build or start errors; fix the ingester configuration or disable the ingester.",
-	},
+	// ingester-not-running was demoted to a log (operator razor): the
+	// convergence sweep re-dispatches every tick and failed runs retry with
+	// backoff — the system is already doing everything an operator could
+	// ask, and the actionable detail (build/start errors) is already in the
+	// log. An alarm whose response is "check the log" is a log.
 	{
 		IDPrefix: "pipeline-backlog-approaching",
 		Priority: Low,

@@ -68,7 +68,7 @@ type Config struct {
 // of flooding the log every few seconds. The counter resets on any clean run
 // exit, so an ingester that recovers and later fails again starts back at the
 // base delay. Operator visibility does not ride on the log line: the
-// convergence sweep's ingester-not-running alert (gastrolog-3mnjlo) stays
+// convergence sweep's divergence log (gastrolog-3mnjlo) stays
 // raised between attempts and clears once a retry holds.
 const (
 	retryBackoffBase   = 3 * time.Second
@@ -263,7 +263,7 @@ func (m *Manager) Stop() error {
 // adapter's alive-false, against the same shared IngesterStats reused across
 // rebuilds) lands last — leaving a running ingester reported not-running
 // until the next rebuild, so the convergence sweep re-raised
-// ingester-not-running forever on a healthy node (gastrolog-4rdb9f). The wait
+// divergence forever on a healthy node (gastrolog-4rdb9f). The wait
 // happens with mu released — never hold the state lock while blocking on a
 // goroutine — and is unbounded by design: Ingester.Run is contractually
 // required to exit promptly on cancellation (Stop already waits unboundedly
@@ -402,7 +402,7 @@ func (m *Manager) stopLocked(id glid.GLID) chan struct{} {
 //     exit was logged once and the goroutine returned: ingest for that source
 //     stopped until a config change rebuilt the spec. Between failing attempts
 //     the ingester's alive state stays down, so the convergence sweep's
-//     ingester-not-running alert (gastrolog-3mnjlo) surfaces the degraded
+//     divergence log (gastrolog-3mnjlo) surfaces the degraded
 //     condition and clears it once a retry holds.
 func (m *Manager) runIngester(
 	id glid.GLID,

@@ -49,17 +49,17 @@ func TestRaiseEmptyInstanceKeyUsesBareTypeID(t *testing.T) {
 	clk := newSuppressionClock()
 	c := NewWithClock(clk.Now)
 
-	c.Raise("ingester-not-running", "", "2 ingesters not running")
+	c.Raise("node-disk-space-exhausted", "", "12 GiB free of 400 GiB")
 
 	alarms := c.Standing()
 	if len(alarms) != 1 {
 		t.Fatalf("got %d alarms, want 1", len(alarms))
 	}
-	if alarms[0].ID != "ingester-not-running" {
+	if alarms[0].ID != "node-disk-space-exhausted" {
 		t.Errorf("ID = %q, want bare type ID for node-scoped alarms", alarms[0].ID)
 	}
-	if alarms[0].Priority != Low {
-		t.Errorf("priority = %v, want Low", alarms[0].Priority)
+	if alarms[0].Priority != High {
+		t.Errorf("priority = %v, want High (node-disk-space-exhausted catalog row)", alarms[0].Priority)
 	}
 	// A per-instance type raised with an empty key still surfaces (bare ID)
 	// rather than being dropped — once its catalog delay-on elapses.
@@ -164,9 +164,9 @@ func TestClearIsTypeAndInstanceAddressed(t *testing.T) {
 		t.Error("clear must not touch other instances of the same type")
 	}
 
-	c.Raise("ingester-not-running", "", "msg")
-	c.Clear("ingester-not-running", "")
-	if findAlarm(c, "ingester-not-running") != nil {
+	c.Raise("node-disk-space-exhausted", "", "msg")
+	c.Clear("node-disk-space-exhausted", "")
+	if findAlarm(c, "node-disk-space-exhausted") != nil {
 		t.Error("bare-ID clear failed")
 	}
 }

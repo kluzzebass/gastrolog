@@ -156,7 +156,7 @@ Verdicts under the governing test:
 | `vault-max-size-capped:<vault>` *(split)* | storage | Vault **at** its size budget — new records REFUSED | **Alarm** | High | Raise the budget or shorten retention. This vault is refusing records now; others are unaffected |
 | `disk-space-exhausted:<vault>` *(split)* | storage | Vault volume out of space — admission for this vault SUSPENDED | **Alarm** | High | Free space, add capacity, raise the vault's threshold, or shorten its retention |
 | `node-disk-space-exhausted` *(node, split)* | storage | Node volume out of space — ingest admission SUSPENDED on this node | **Alarm** | High | Free space, add capacity, or shorten retention. Retention and deletes keep running |
-| `ingester-not-running` | ingestion | Ingesters that should run on this node are not running | **Alarm** | Low | Check the log for build/start errors; fix the ingester config or disable it |
+| `ingester-not-running` | ingestion | Ingesters that should run on this node are not running | **Log** (demoted) | — | Demoted on the operator razor: the convergence sweep re-dispatches every tick and failed runs retry with backoff — the system is already doing everything an operator could ask, and the actionable detail (build/start errors) is already in the log. An alarm whose response is "check the log" is a log. The sweep logs divergence once per state change (never per tick), captured by the self-ingester |
 | `pipeline-backlog-approaching:<vault>` *(split)* | storage | Backlog approaching budget; chunking not keeping pace | **Alarm** | Low | Check chunking throughput, raise the budget, or reduce the ingest rate — before records start being refused |
 | `vault-max-size-approaching:<vault>` *(split)* | storage | Vault approaching its size budget | **Alarm** | Low | Raise the budget or shorten retention — before records start being refused |
 | `disk-space-low:<vault>` *(split)* | storage | Vault volume below its free-space warn band | **Alarm** | Low | Free space, add capacity, raise the vault's threshold, or shorten its retention |
@@ -203,9 +203,10 @@ raises:
   them with `unknown-orphan`, which is a different condition entirely and now
   has its own row.
 - *ingester failure (`ingester:*`, source ingester/self)* — no `ingester:*`
-  alarm exists. The real one is `ingester-not-running`, raised by the ingester
-  reconciler in `internal/app` with source `ingestion`, and it is node-scoped
-  rather than per-ingester.
+  alarm exists. The real condition is ingester divergence, reported by the
+  ingester reconciler in `internal/app` — node-scoped rather than
+  per-ingester, and since demoted from an alarm to a once-per-transition log
+  (see the catalog table).
 - *archival sweep failures ("archive writes failing")* — the archival sweep
   raises `chunk-suspect:<chunk>`, which is a cloud-reconcile 404, not an
   archive write failure.

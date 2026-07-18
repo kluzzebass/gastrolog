@@ -6,7 +6,7 @@ package orchestrator_test
 // successor had stored alive=true on the SAME shared IngesterStats (reused
 // across rebuilds by design so counters survive), and its deferred
 // alive-false clobbered it — IsIngesterRunning lied false forever and the
-// convergence sweep re-raised ingester-not-running every 15s on 3 of 4 nodes.
+// convergence sweep reported divergence every 15s on 3 of 4 nodes.
 //
 // These tests run the real orchestrator + pipeline: a digester that blocks
 // every record pins the digestion stage exactly like the saturated field

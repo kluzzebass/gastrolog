@@ -1030,7 +1030,7 @@ func drainOnStop(t *testing.T, mgr *ingestion.Manager, out <-chan ingestion.Inge
 // in a send on the full digestion queue — woke AFTER the successor had
 // started, and its deferred teardown (the orchestrator adapter's alive-false
 // on the shared IngesterStats) clobbered the successor's alive-true, so the
-// ingester-not-running alarm re-raised every sweep for a demonstrably running
+// convergence sweep reporting divergence for a demonstrably running
 // ingester (3 of 4 nodes on the live cluster).
 //
 // Synchronization is pure channels: the old run is deterministically parked

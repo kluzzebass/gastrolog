@@ -73,6 +73,12 @@ type configDispatcher struct {
 	managedFileHandler ManagedFileHandler                                // nil for single-node or before wiring
 	catchupScheduler   func(vaultID glid.GLID, followerNodeIDs []string) // nil until orch is wired
 	placementTrigger   func()                                            // triggers immediate placement reconcile; nil for single-node
+
+	// lastIngesterDivergence is the previously logged not-running set
+	// (sorted, comma-joined; "" = converged), so the convergence sweep logs
+	// once per state change rather than every 15s tick. Only the sweep
+	// goroutine touches it.
+	lastIngesterDivergence string
 }
 
 // Handle dispatches a single FSM notification to the appropriate orchestrator

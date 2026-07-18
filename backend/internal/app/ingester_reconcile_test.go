@@ -2,11 +2,12 @@ package app
 
 import (
 	"context"
+	"log/slog"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
-	"gastrolog/internal/alert"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/pipeline/digestion"
@@ -14,10 +15,49 @@ import (
 	"gastrolog/internal/system"
 )
 
-// TestReportIngesterDivergence pins the alert half of the convergence sweep
-// (gastrolog-3mnjlo): a desired-but-not-running ingester raises the
-// ingester-not-running alert; convergence clears it; ingesters this node
-// should NOT run (disabled, other-node pinned) never count as missing.
+const (
+	divergenceLogMsg = "desired ingester(s) not running"
+	convergedLogMsg  = "ingester convergence restored"
+)
+
+func countMessages(h *captureHandler, substr string) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	n := 0
+	for _, r := range h.records {
+		if strings.Contains(r.Message, substr) {
+			n++
+		}
+	}
+	return n
+}
+
+// lastAttr returns the string value of the named attr on the most recent
+// record whose message contains substr; "" if absent.
+func lastAttr(h *captureHandler, substr, key string) string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	val := ""
+	for _, r := range h.records {
+		if !strings.Contains(r.Message, substr) {
+			continue
+		}
+		r.Attrs(func(a slog.Attr) bool {
+			if a.Key == key {
+				val = a.Value.String()
+			}
+			return true
+		})
+	}
+	return val
+}
+
+// TestReportIngesterDivergence pins the log half of the convergence sweep
+// (gastrolog-3mnjlo, demoted from an alarm on the operator razor): a
+// desired-but-not-running ingester logs ONE divergence line — once per state
+// change, never per 15s tick — convergence logs one restored line, and
+// ingesters this node should NOT run (disabled, other-node pinned) never
+// count as missing.
 func TestReportIngesterDivergence(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -30,32 +70,56 @@ func TestReportIngesterDivergence(t *testing.T) {
 		{ID: idOtherNode, Name: "pinned-elsewhere", Type: "scatterbox", Enabled: true, NodeIDs: []string{"other"}},
 	}}
 	orchMock := &mockOrch{running: map[glid.GLID]bool{idRunning: true}}
-	d := newTestDispatcher(orchMock, store, &captureHandler{})
+	capture := &captureHandler{}
+	logger := slog.New(capture)
+	d := newTestDispatcher(orchMock, store, capture)
 	d.factories.IngesterTypes["scatterbox"] = orchestrator.IngesterRegistration{}
 
-	alerts := alert.New()
-	d.reportIngesterDivergence(ctx, alerts)
-	if !hasActiveAlert(alerts, ingesterNotRunningAlertID) {
-		t.Fatal("missing desired ingester must raise the alert")
+	d.reportIngesterDivergence(ctx, logger)
+	if n := countMessages(capture, divergenceLogMsg); n != 1 {
+		t.Fatalf("missing desired ingester must log divergence once, got %d", n)
+	}
+	if got := lastAttr(capture, divergenceLogMsg, "missing"); got != "missing" {
+		t.Fatalf("divergence line must carry the missing set, got %q", got)
 	}
 
-	// Converge: the missing one starts.
+	// Same state on the next tick: no repeat line.
+	d.reportIngesterDivergence(ctx, logger)
+	if n := countMessages(capture, divergenceLogMsg); n != 1 {
+		t.Fatalf("unchanged divergence must not re-log, got %d lines", n)
+	}
+
+	// Converge: the missing one starts — one restored line.
 	orchMock.running[idMissing] = true
-	d.reportIngesterDivergence(ctx, alerts)
-	if hasActiveAlert(alerts, ingesterNotRunningAlertID) {
-		t.Fatal("alert must clear once every desired ingester runs")
+	d.reportIngesterDivergence(ctx, logger)
+	if n := countMessages(capture, convergedLogMsg); n != 1 {
+		t.Fatalf("convergence must log restored once, got %d", n)
+	}
+	// Converged steady state: silent.
+	d.reportIngesterDivergence(ctx, logger)
+	if n := countMessages(capture, convergedLogMsg); n != 1 {
+		t.Fatalf("steady converged state must stay silent, got %d restored lines", n)
 	}
 
-	// Transient store error must not flap the standing state.
+	// Re-diverge: a second divergence line.
 	orchMock.running[idMissing] = false
-	d.reportIngesterDivergence(ctx, alerts)
-	if !hasActiveAlert(alerts, ingesterNotRunningAlertID) {
-		t.Fatal("re-diverged: alert must raise again")
+	d.reportIngesterDivergence(ctx, logger)
+	if n := countMessages(capture, divergenceLogMsg); n != 2 {
+		t.Fatalf("re-divergence must log again, got %d lines", n)
 	}
+
+	// Transient store error must not flap the reported state: no new lines,
+	// and the next successful converged tick still logs restored.
 	store.ingesterListErr = context.DeadlineExceeded
-	d.reportIngesterDivergence(ctx, alerts)
-	if !hasActiveAlert(alerts, ingesterNotRunningAlertID) {
-		t.Fatal("transient list error must keep the standing alert, not clear it")
+	d.reportIngesterDivergence(ctx, logger)
+	if n := countMessages(capture, divergenceLogMsg) + countMessages(capture, convergedLogMsg); n != 3 {
+		t.Fatalf("store error must log nothing, got %d state lines", n)
+	}
+	store.ingesterListErr = nil
+	orchMock.running[idMissing] = true
+	d.reportIngesterDivergence(ctx, logger)
+	if n := countMessages(capture, convergedLogMsg); n != 2 {
+		t.Fatalf("recovery after store error must log restored, got %d", n)
 	}
 }
 
@@ -110,18 +174,18 @@ func awaitAlive(t *testing.T, events <-chan bool, want bool) {
 // TestReportIngesterDivergence_ClearsAfterRebuildUnderSaturation is the
 // gastrolog-4rdb9f sweep-level regression: on the live cluster, a config
 // rebuild under a saturated pipeline left the shared Alive flag false for a
-// running ingester, so this sweep re-raised ingester-not-running every 15s
-// on 3 of 4 nodes — the alarm an operator must trust during an incident was
-// lying. Here the sweep runs against a REAL orchestrator + pipeline (not a
-// mock) that just rebuilt an ingester while the digestion stage was pinned:
-// the alarm must clear.
+// running ingester, so this sweep reported divergence every 15s on 3 of 4
+// nodes — the surface an operator must trust during an incident was lying.
+// Here the sweep runs against a REAL orchestrator + pipeline (not a mock)
+// that just rebuilt an ingester while the digestion stage was pinned: the
+// sweep must report convergence, not divergence.
 //
 // A full multi-node reproduction is impractical without timing games — the
 // multinode harness drives rebuilds through Raft config dispatch and cannot
 // deterministically pin one node's digest queue at the rebuild instant — so
 // this focused sweep-against-real-manager test carries the multi-dimension
 // intent: the exact component chain the field incident traversed
-// (manager rebuild → shared IngesterStats → IsIngesterRunning → sweep alarm).
+// (manager rebuild → shared IngesterStats → IsIngesterRunning → sweep log).
 func TestReportIngesterDivergence_ClearsAfterRebuildUnderSaturation(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -152,14 +216,15 @@ func TestReportIngesterDivergence_ClearsAfterRebuildUnderSaturation(t *testing.T
 	store := &stubCfgStore{ingesterList: []system.IngesterConfig{
 		{ID: id, Name: "flood", Type: "mock", Enabled: true, AllNodes: true},
 	}}
-	d := newTestDispatcher(orch, store, &captureHandler{})
+	capture := &captureHandler{}
+	logger := slog.New(capture)
+	d := newTestDispatcher(orch, store, capture)
 	d.factories.IngesterTypes["mock"] = orchestrator.IngesterRegistration{}
-	alerts := alert.New()
 
-	// Desired but not yet running: the sweep must alarm.
-	d.reportIngesterDivergence(ctx, alerts)
-	if !hasActiveAlert(alerts, ingesterNotRunningAlertID) {
-		t.Fatal("desired-but-not-started ingester must raise the alert")
+	// Desired but not yet running: the sweep must log divergence.
+	d.reportIngesterDivergence(ctx, logger)
+	if n := countMessages(capture, divergenceLogMsg); n != 1 {
+		t.Fatalf("desired-but-not-started ingester must log divergence, got %d", n)
 	}
 
 	desired := func(burst string, build func() (orchestrator.Ingester, error)) []orchestrator.IngesterDesired {
@@ -177,9 +242,9 @@ func TestReportIngesterDivergence_ClearsAfterRebuildUnderSaturation(t *testing.T
 		t.Fatalf("first reconcile: %v", err)
 	}
 	awaitAlive(t, aliveCh, true)
-	d.reportIngesterDivergence(ctx, alerts)
-	if hasActiveAlert(alerts, ingesterNotRunningAlertID) {
-		t.Fatal("alert must clear once the ingester runs")
+	d.reportIngesterDivergence(ctx, logger)
+	if n := countMessages(capture, convergedLogMsg); n != 1 {
+		t.Fatalf("running ingester must log convergence restored, got %d", n)
 	}
 
 	// Saturate: 4 pinned digestion workers + 1 queue slot + 1 pump + 1
@@ -208,18 +273,10 @@ func TestReportIngesterDivergence_ClearsAfterRebuildUnderSaturation(t *testing.T
 	awaitAlive(t, aliveCh, false)
 	awaitAlive(t, aliveCh, true)
 
-	// The sweep after the rebuild: pre-fix this stayed raised forever.
-	d.reportIngesterDivergence(ctx, alerts)
-	if hasActiveAlert(alerts, ingesterNotRunningAlertID) {
-		t.Fatal("gastrolog-4rdb9f: sweep must not alarm on a running ingester after a rebuild under saturation")
+	// The sweep after the rebuild: pre-fix the stale Alive flag made this
+	// report divergence forever on a healthy ingester.
+	d.reportIngesterDivergence(ctx, logger)
+	if n := countMessages(capture, divergenceLogMsg); n != 1 {
+		t.Fatalf("gastrolog-4rdb9f: sweep must not report divergence on a running ingester after a rebuild under saturation (got %d divergence lines)", n)
 	}
-}
-
-func hasActiveAlert(alerts *alert.Collector, id string) bool {
-	for _, a := range alerts.Standing() {
-		if a.ID == id {
-			return true
-		}
-	}
-	return false
 }

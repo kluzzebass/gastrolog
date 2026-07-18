@@ -555,10 +555,10 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	// node that misses its boot dispatch runs no ingesters until the next
 	// config change (a full-cluster restart left one node originating nothing
 	// for 40+ minutes). This periodic safety net re-reconciles
-	// desired-vs-running (idempotent) and raises the ingester-not-running
-	// alert while diverged. Registered unconditionally — single-node deploys
+	// desired-vs-running (idempotent) and logs any divergence, once per
+	// state change. Registered unconditionally — single-node deploys
 	// converge the same way.
-	if err := startIngesterReconcileSweep(ctx, orch.Scheduler(), disp, alertCollector); err != nil {
+	if err := startIngesterReconcileSweep(ctx, orch.Scheduler(), disp, logger); err != nil {
 		logger.Warn("startup: register scheduled job", "job", "ingester-reconcile", "error", err)
 	}
 
