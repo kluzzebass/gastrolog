@@ -134,6 +134,15 @@ var catalog = []AlarmType{
 		Response: "Retries automatically. Only actionable once retries stop resolving it: investigate disk health on this node.",
 	},
 	{
+		IDPrefix: "retention-route-deferred",
+		Priority: High,
+		Source:   "retention",
+		// The consecutive-sweep count at the call site is the condition
+		// definition (like chunking-underreplicated's window), so no DelayOn.
+		Cause:    "Route-disposition retention on this vault has been unable to fan out for consecutive sweeps — the only mechanism that drains the vault is deferred, so expired chunks accumulate and any size caps stay engaged.",
+		Response: "Read the alarm detail for the deferral cause: free space on the starved volume (the drain resumes once free clears the floor band), drain or grow the destination vault, or — last resort, discards the routed records — set the vault's retention disposition to delete.",
+	},
+	{
 		IDPrefix: "chunk-suspect",
 		Priority: High,
 		Source:   "cloud-reconcile",

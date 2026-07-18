@@ -497,6 +497,27 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
   the chunk is destroyed. A retention-trigger route directing records to
   another vault is how retention routing chains are expressed.
 
+- **Disk guard** — the per-node free-space guard job (`disk_guard.go`):
+  samples the node's data volumes every 15s and drives two staged gates
+  plus the per-vault caps (max-size budget, backlog budget, per-vault
+  floor).
+
+- **Admission gate** (`protect`) — the disk guard's outer gate: suspends
+  ingest admission and catch-up pulls. Engages below the free-space
+  floor, releases only above the warn band (asymmetric deadband so the
+  release burst cannot re-cross the floor).
+
+- **Drain gate** (`deferWrites`) — the disk guard's inner gate: pauses
+  chunking builds, collection pulls, and retention route fan-out.
+  Engages below the floor, releases just above it — before the
+  admission gate, so the paths that free space run while admission is
+  still suspended.
+
+- **Retention deferral** — a sweep whose route fan-out could not run
+  (drain gate engaged, destination vault gated, or fan-out stalled);
+  the chunk is retained for a later sweep. Consecutive deferrals raise
+  the `retention-route-deferred` alarm.
+
 - **Reconcile** — compare the vault FSM manifest against local disk;
   delete sealed chunks on disk that aren't in the manifest (orphan
   cleanup) and replicate manifest chunks that are missing locally.

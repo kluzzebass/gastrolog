@@ -3,6 +3,7 @@ package server_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"gastrolog/internal/glid"
 	"io"
@@ -2929,4 +2930,62 @@ func TestEnvironmentBannerLabelWithoutColor(t *testing.T) {
 	if resp.Msg.EnvironmentColor != "" {
 		t.Errorf("EnvironmentColor = %q, want empty", resp.Msg.EnvironmentColor)
 	}
+}
+
+// TestMultiNode_RetentionSubmitDefersOnRemoteCappedDestination pins the
+// cross-node deferral seam for gastrolog-5ct2av: a destination vault
+// size-capped on a DIFFERENT node must reject the retention submit on the
+// sweeping node (via the peer-state lookup the NodeStats broadcast feeds),
+// and the same rejection must occur regardless of which node submits.
+func TestMultiNode_RetentionSubmitDefersOnRemoteCappedDestination(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node pipeline convergence test")
+	}
+	t.Parallel()
+	h := setupMultiNode(t, []string{"coord", "data-1", "data-2"}, WithoutVault("coord"))
+	ctx := context.Background()
+
+	d1 := h.Node(t, "data-1")
+	d2 := h.Node(t, "data-2")
+
+	// Cluster-wide route: retention output of d1's vault lands in d2's vault.
+	if err := h.cfgStore.PutRoute(ctx, system.RouteConfig{
+		ID:   glid.New(),
+		Name: "retain-to-d2",
+		Stages: []system.RouteStage{{Match: &system.MatchStage{
+			Expression: `_source="retention" AND _vault="` + d1.vaultID.String() + `"`,
+		}}},
+		Destinations: []glid.GLID{d2.vaultID}, Enabled: true,
+	}); err != nil {
+		t.Fatalf("PutRoute: %v", err)
+	}
+	startMNRouteStatsNode(t, d1)
+	startMNRouteStatsNode(t, d2)
+
+	// Simulate d2's NodeStats broadcast reporting its vault size-capped.
+	// (The broadcast plumbing itself is covered by the peer-state tests;
+	// this installs the same lookup production wiring installs.)
+	capped := d2.vaultID
+	d1.orch.SetRemoteVaultSizeCapped(func(id glid.GLID) bool { return id == capped })
+	d2.orch.SetRemoteVaultSizeCapped(func(id glid.GLID) bool { return id == capped })
+
+	rec := chunk.Record{Attrs: chunk.Attributes{"k": "v"}, Raw: []byte("expired")}
+	// Sweep-node independence: the gate verdict is identical from either node.
+	for _, node := range []multinodeTestNode{d1, d2} {
+		err := node.orch.SubmitRetentionRecord(ctx, d1.vaultID, rec, "")
+		if !errors.Is(err, orchestrator.ErrVaultMaxSize) {
+			t.Fatalf("submit on %s: want vault size-budget rejection, got %v", node.nodeID, err)
+		}
+	}
+
+	// Cap released: the rejected record is retryable and now drains.
+	d1.orch.SetRemoteVaultSizeCapped(func(glid.GLID) bool { return false })
+	d2.orch.SetRemoteVaultSizeCapped(func(glid.GLID) bool { return false })
+	if err := d1.orch.SubmitRetentionRecord(ctx, d1.vaultID, rec, ""); err != nil {
+		t.Fatalf("retry after cap release: %v", err)
+	}
+	submitMNRouteRecords(t, d1, "k", "v", "expired", 3)
+	waitForMNRouteStats(t, h.configClient, func(m *gastrologv1.GetRouteStatsResponse) bool {
+		return m.TotalMatched >= 4
+	})
 }

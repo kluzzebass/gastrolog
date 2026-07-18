@@ -65,11 +65,11 @@ type Config struct {
 
 	// DeferWritesGate, when non-nil, pauses the heavy-write DRAIN stages
 	// (chunking builds, collection pulls) when it returns true. Distinct
-	// from AdmissionGate: the drain tier resumes EARLIER than ingest
-	// admission on disk recovery so the pipeline can seal backlog into
-	// chunks retention frees, rather than deadlocking behind the closed
-	// front door (gastrolog-67gvjo staged release). Falls back to tracking
-	// AdmissionGate when nil.
+	// from AdmissionGate: the drain gate resumes EARLIER than the
+	// node-global admission gate on disk recovery so the pipeline can seal
+	// backlog into chunks retention frees, rather than deadlocking behind
+	// the closed front door (gastrolog-67gvjo staged release). Falls back
+	// to tracking AdmissionGate when nil.
 	DeferWritesGate func() bool
 
 	// VaultAdmissionGate, when non-nil, is the per-destination admission
@@ -509,6 +509,25 @@ func (s *Supervisor) Submit(ctx context.Context, in routing.Input) error {
 	}
 	if err := s.admit(); err != nil {
 		return err
+	}
+	if !s.sendRouting(ctx, in) {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return ErrNotRunning
+	}
+	return nil
+}
+
+// SubmitDrain routes a record exactly like Submit but skips the node-global
+// admission gate: drain work — retention route fan-out — must run whenever
+// the pipeline runs, because it is the mechanism that frees the space the
+// admission gate is waiting for (gastrolog-5ct2av). Per-destination
+// admission still applies in the routing stage, and the drain gate
+// (deferWrites) is enforced by the caller before any record is read.
+func (s *Supervisor) SubmitDrain(ctx context.Context, in routing.Input) error {
+	if !s.running.Load() {
+		return ErrNotRunning
 	}
 	if !s.sendRouting(ctx, in) {
 		if err := ctx.Err(); err != nil {
