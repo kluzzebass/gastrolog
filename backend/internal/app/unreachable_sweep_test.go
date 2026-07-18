@@ -311,7 +311,7 @@ func newAlertSweepTest(t *testing.T, alertThreshold time.Duration) (*unreachable
 }
 
 func findAlert(collector *alert.Collector, id string) *alert.Alarm {
-	for _, a := range collector.Active() {
+	for _, a := range collector.Standing() {
 		if a.ID == id {
 			return a
 		}

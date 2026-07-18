@@ -3125,16 +3125,6 @@ export class ClusterSettings extends Message<ClusterSettings> {
    */
   pipelineBacklogMaxBytes = protoInt64.zero;
 
-  /**
-   * Alarm-flood threshold: alarm activations per node per rolling 10 minutes
-   * above which that node raises the alarm-flood meta-alarm (EEMUA 191 rate
-   * self-monitoring). Applies on every node — the rate is measured per node.
-   * 0 = default (10).
-   *
-   * @generated from field: uint32 alarm_flood_threshold = 4;
-   */
-  alarmFloodThreshold = 0;
-
   constructor(data?: PartialMessage<ClusterSettings>) {
     super();
     proto3.util.initPartial(data, this);
@@ -3146,7 +3136,6 @@ export class ClusterSettings extends Message<ClusterSettings> {
     { no: 1, name: "broadcast_interval", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "heartbeat_interval", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "pipeline_backlog_max_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
-    { no: 4, name: "alarm_flood_threshold", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ClusterSettings {
@@ -3661,11 +3650,6 @@ export class PutClusterSettings extends Message<PutClusterSettings> {
    */
   pipelineBacklogMaxBytes?: bigint;
 
-  /**
-   * @generated from field: optional uint32 alarm_flood_threshold = 4;
-   */
-  alarmFloodThreshold?: number;
-
   constructor(data?: PartialMessage<PutClusterSettings>) {
     super();
     proto3.util.initPartial(data, this);
@@ -3677,7 +3661,6 @@ export class PutClusterSettings extends Message<PutClusterSettings> {
     { no: 1, name: "broadcast_interval", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
     { no: 2, name: "heartbeat_interval", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
     { no: 3, name: "pipeline_backlog_max_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */, opt: true },
-    { no: 4, name: "alarm_flood_threshold", kind: "scalar", T: 13 /* ScalarType.UINT32 */, opt: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutClusterSettings {

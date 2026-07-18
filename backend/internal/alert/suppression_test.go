@@ -83,12 +83,12 @@ func TestDelayOnFlappingConditionNeverActivates(t *testing.T) {
 	}
 	// Even the SUM of the flapping exceeded the window; only continuous
 	// persistence counts, so still nothing.
-	if c.Active() != nil {
+	if c.Standing() != nil {
 		t.Fatal("flapping below DelayOn must never activate")
 	}
 }
 
-func TestDelayOnPersistingConditionActivatesOnceWithConditionStartFirstSeen(t *testing.T) {
+func TestDelayOnPersistingConditionAnnunciatesOnceWithConditionStartFirstSeen(t *testing.T) {
 	clk := newSuppressionClock()
 	c := NewWithClock(clk.Now)
 	window := leaderlessWindow(t)
@@ -102,7 +102,7 @@ func TestDelayOnPersistingConditionActivatesOnceWithConditionStartFirstSeen(t *t
 	// Lazy evaluation: no re-raise — the persisting condition activates on
 	// the next read after the window.
 	clk.Advance(window + time.Second)
-	alarms := c.Active()
+	alarms := c.Standing()
 	if len(alarms) != 1 {
 		t.Fatalf("persisting condition must activate; active=%d", len(alarms))
 	}
@@ -114,7 +114,7 @@ func TestDelayOnPersistingConditionActivatesOnceWithConditionStartFirstSeen(t *t
 
 	// Re-raising while active refreshes detail but preserves the occurrence.
 	c.Raise(leaderlessType, "v1", "still no leader")
-	alarms = c.Active()
+	alarms = c.Standing()
 	if len(alarms) != 1 {
 		t.Fatalf("re-raise must not duplicate; active=%d", len(alarms))
 	}
@@ -187,7 +187,7 @@ func TestDelayOffReRaiseInsideWindowIsOneContinuousOccurrence(t *testing.T) {
 		t.Fatal("alarm dropped before the delay-off window elapsed")
 	}
 	delayedRaise(c, "doff", "up again", 0, time.Minute, false)
-	alarms := c.Active()
+	alarms := c.Standing()
 	if len(alarms) != 1 {
 		t.Fatalf("re-raise inside delay-off must be the same occurrence; active=%d", len(alarms))
 	}
@@ -217,7 +217,7 @@ func TestDelayOffExpiresAfterConditionStaysClear(t *testing.T) {
 	// FirstSeen.
 	freshStart := clk.Now()
 	delayedRaise(c, "doff", "up later", 0, time.Minute, false)
-	alarms := c.Active()
+	alarms := c.Standing()
 	if len(alarms) != 1 {
 		t.Fatalf("fresh occurrence must activate; active=%d", len(alarms))
 	}
@@ -258,7 +258,7 @@ func TestLatchingAlarmSurvivesConditionClear(t *testing.T) {
 	// Time does not clear it either — a latched alarm has no release path;
 	// it stands until process restart.
 	clk.Advance(24 * time.Hour)
-	alarms := c.Active()
+	alarms := c.Standing()
 	if len(alarms) != 1 {
 		t.Fatal("latched alarm must stand until process restart")
 	}
@@ -297,7 +297,7 @@ func TestUnknownTypeRaiseIsImmediateDespiteSuppression(t *testing.T) {
 	// The software-fault path for uncataloged raises must not gain a
 	// window: it surfaces on the very next read, no clock movement.
 	c.Raise("no-such-type", "x", "the condition detail")
-	alarms := c.Active()
+	alarms := c.Standing()
 	if len(alarms) != 1 {
 		t.Fatalf("unregistered raise must surface immediately; active=%d", len(alarms))
 	}
@@ -306,15 +306,15 @@ func TestUnknownTypeRaiseIsImmediateDespiteSuppression(t *testing.T) {
 	}
 }
 
-func TestPendingConditionIsInvisibleToActiveAndCount(t *testing.T) {
+func TestPendingConditionIsInvisibleToStandingAndCount(t *testing.T) {
 	clk := newSuppressionClock()
 	c := NewWithClock(clk.Now)
 	window := leaderlessWindow(t)
 
 	c.Raise(leaderlessType, "v1", "no leader")
 	clk.Advance(window / 2)
-	if c.Active() != nil {
-		t.Fatal("pending condition leaked into Active()")
+	if c.Standing() != nil {
+		t.Fatal("pending condition leaked into Standing()")
 	}
 	if c.Count() != 0 {
 		t.Fatal("pending condition counted")
@@ -336,7 +336,7 @@ func TestSuppressionConcurrency(t *testing.T) {
 			for j := 0; j < 200; j++ {
 				c.Raise(leaderlessType, "shared", "flap")
 				clk.Advance(time.Millisecond)
-				c.Active()
+				c.Standing()
 				c.Clear(leaderlessType, "shared")
 				c.Count()
 			}

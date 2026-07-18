@@ -52,32 +52,18 @@ Peer node data is refreshed at the [broadcast interval](help:clustering-broadcas
 The header's alert pill opens the alarm list: every **standing alarm** in
 the cluster, attributed to the node that raised it, with priority, cause
 and response text from the alarm catalog. Alarms are state, not events —
-they stand while a condition holds.
+they stand while a condition holds, and there are no per-alarm operator
+states: an alarm is standing or it is not.
 
-Each alarm is in one of two **states**:
+The list is flat, sorted by priority then age. A row expands to its cause
+and response text. An alarm clears on its own when the condition resolves —
+there is nothing to acknowledge or dismiss. **Latching** alarms (such as
+`orchestrator-lock-leak`) are the exception: a software fault stands until
+the affected node restarts, because a fault that "went away" is still a
+fault — report it, then restart.
 
-- **Active** — the condition stands. This is the default list, sorted by
-  priority then age. A row expands to its cause and response text. The
-  alarm clears on its own when the condition resolves — there is nothing
-  to acknowledge or dismiss. **Latching** alarms (such as
-  `orchestrator-lock-leak`) are the exception: a software fault stands
-  until the affected node restarts, because a fault that "went away" is
-  still a fault — report it, then restart.
-- **Shelved** — an operator suppressed the alarm for a chosen duration.
-  Shelves **always expire** (there are no permanent shelves) and shelved
-  alarms stay visible in a collapsed section. When the shelve lapses with
-  the condition still true, the alarm returns to the active list.
+Alarm state is in-memory only and does not survive a node restart — after
+a restart, a condition that still holds is simply re-detected and raised
+again.
 
-Some alarm types refuse shelving because deferral is meaningless for them:
-software faults (nothing improves during the window — report them instead)
-and `alarm-flood` (hiding the degradation indicator defeats the alarm
-system's self-monitoring). Those rows show no shelve control.
-
-Shelves apply **cluster-wide**: the node serving the request forwards the
-operation to every node raising the alarm ID. Alarm state is in-memory
-only and does not survive a node restart — after a restart, a condition
-that still holds is simply re-detected and raised as an active alarm.
-
-The same controls are available from a shell: `gastrolog alerts`,
-`gastrolog alerts shelve <id> --for 2h`, and
-`gastrolog alerts unshelve <id>`.
+The same list is available from a shell: `gastrolog alerts`.

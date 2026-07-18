@@ -136,7 +136,7 @@ func TestStrategyDistribution(t *testing.T) {
 		routing.RouteLocal:    47,
 		routing.RouteLeader:   37,
 		routing.RouteTargeted: 11,
-		routing.RouteFanOut:   9,
+		routing.RouteFanOut:   7,
 	}
 
 	for strategy, expected := range want {
@@ -151,8 +151,8 @@ func TestStrategyDistribution(t *testing.T) {
 	for _, c := range counts {
 		total += c
 	}
-	if total != 104 {
-		t.Errorf("total procedures: got %d, want 104", total)
+	if total != 102 {
+		t.Errorf("total procedures: got %d, want 102", total)
 	}
 }
 

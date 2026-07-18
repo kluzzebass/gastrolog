@@ -56,7 +56,7 @@ func TestReportIngesterDivergence(t *testing.T) {
 }
 
 func hasActiveAlert(alerts *alert.Collector, id string) bool {
-	for _, a := range alerts.Active() {
+	for _, a := range alerts.Standing() {
 		if a.ID == id {
 			return true
 		}

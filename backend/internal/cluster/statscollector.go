@@ -172,19 +172,10 @@ type PeerConnSnapshotProvider interface {
 	ResetPurposeWindows()
 }
 
-// AlertProvider exposes standing alarms for broadcast — every state
-// (active, shelved), so any node can serve shelve/unshelve for any
-// raiser. Satisfied by *alert.Collector.
+// AlertProvider exposes this node's standing alarms for broadcast.
+// Satisfied by *alert.Collector.
 type AlertProvider interface {
 	Standing() []*alert.Alarm
-}
-
-// AlarmRateProvider exposes the alarm system's self-monitoring rate gauge:
-// alarm activations on this node in the rolling 10-minute window (EEMUA 191
-// rate principle). Satisfied by *alert.RateMonitor. Read-only — the flood
-// state machine advances on its own scheduler job, not on stats ticks.
-type AlarmRateProvider interface {
-	Rate() int
 }
 
 // JobsProvider returns the current job list for broadcast.
@@ -211,10 +202,9 @@ type StatsCollectorConfig struct {
 	// any change so contributors entering/leaving the sum can never read
 	// as traffic (gastrolog-mliwrd).
 	ClusterRouteTotals func() (routed, matched int64, membership string)
-	Alerts             AlertProvider     // optional; nil if no alert collector
-	AlarmRate          AlarmRateProvider // optional; nil disables the alarm-rate gauge
-	LogDrops           LogDropsProvider  // optional; nil disables the drop counter
-	Jobs               JobsProvider      // optional; nil in single-node mode
+	Alerts             AlertProvider    // optional; nil if no alert collector
+	LogDrops           LogDropsProvider // optional; nil disables the drop counter
+	Jobs               JobsProvider     // optional; nil in single-node mode
 	NodeID             string
 	NodeNameFn         func() string // lazily resolved node name
 	Version            string
@@ -541,34 +531,23 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 	return stats
 }
 
-// collectAlarms snapshots the active alarms and the alarm-rate
-// self-monitoring gauge (activations on this node in the rolling 10-minute
-// window — per-node truth, never summed across nodes) into the broadcast.
+// collectAlarms snapshots this node's standing alarms into the broadcast.
 func (c *StatsCollector) collectAlarms(stats *gastrologv1.NodeStats) {
-	if c.cfg.Alerts != nil {
-		for _, a := range c.cfg.Alerts.Standing() {
-			pa := &gastrologv1.SystemAlert{
-				Id:            []byte(a.ID),
-				TypeId:        a.TypeID,
-				Priority:      gastrologv1.AlarmPriority(a.Priority), //nolint:gosec // bounded enum
-				SoftwareFault: a.SoftwareFault,
-				Source:        a.Source,
-				Detail:        a.Detail,
-				Cause:         a.Cause,
-				Response:      a.Response,
-				FirstSeen:     timestamppb.New(a.FirstSeen),
-				LastSeen:      timestamppb.New(a.LastSeen),
-				State:         gastrologv1.AlarmState(a.State), //nolint:gosec // bounded enum
-				Shelveable:    a.Shelveable,
-			}
-			if !a.ShelvedUntil.IsZero() {
-				pa.ShelvedUntil = timestamppb.New(a.ShelvedUntil)
-			}
-			stats.Alerts = append(stats.Alerts, pa)
-		}
+	if c.cfg.Alerts == nil {
+		return
 	}
-	if c.cfg.AlarmRate != nil {
-		stats.AlarmRate_10M = uint32(max(c.cfg.AlarmRate.Rate(), 0)) //nolint:gosec // non-negative count
+	for _, a := range c.cfg.Alerts.Standing() {
+		stats.Alerts = append(stats.Alerts, &gastrologv1.SystemAlert{
+			Id:            []byte(a.ID),
+			Priority:      gastrologv1.AlarmPriority(a.Priority), //nolint:gosec // bounded enum
+			SoftwareFault: a.SoftwareFault,
+			Source:        a.Source,
+			Detail:        a.Detail,
+			Cause:         a.Cause,
+			Response:      a.Response,
+			FirstSeen:     timestamppb.New(a.FirstSeen),
+			LastSeen:      timestamppb.New(a.LastSeen),
+		})
 	}
 }
 

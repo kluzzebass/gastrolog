@@ -22,7 +22,6 @@ import (
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
-	"gastrolog/internal/alert"
 	"gastrolog/internal/auth"
 	"gastrolog/internal/cert"
 	"gastrolog/internal/frontend"
@@ -148,11 +147,6 @@ type Config struct {
 	// Nil in single-node mode. Satisfies routing.UnaryForwarder.
 	RoutingForwarder routing.UnaryForwarder
 
-	// Alerts is this node's alarm collector, the state the alarm shelving
-	// RPCs (ShelveAlarm / UnshelveAlarm) act on. Nil disables those RPCs
-	// (some tests); production always wires it.
-	Alerts *alert.Collector
-
 	// PlacementReconcile runs synchronous placement so RPC responses include
 	// vault placements. Nil in single-node or non-cluster mode.
 	PlacementReconcile func(ctx context.Context)
@@ -229,7 +223,6 @@ type Server struct {
 	queryServer           *QueryServer              // stored for ExportToVault executor wiring
 	routingForwarder      routing.UnaryForwarder    // forwards requests to remote nodes; nil in single-node
 	placementReconcile    func(ctx context.Context) // synchronous placement; nil in non-cluster mode
-	alerts                *alert.Collector          // local alarm collector for the lifecycle RPCs; nil disables them
 
 	// gastrolog-o9z6o: bootstrap-token endpoint configuration. When the
 	// secret is non-empty, /cluster/bootstrap-token is registered and
@@ -306,7 +299,6 @@ func New(orch *orchestrator.Orchestrator, cfgStore system.Store, factories orche
 		statsSignal:               cfg.StatsSignal,
 		routingForwarder:          cfg.RoutingForwarder,
 		placementReconcile:        cfg.PlacementReconcile,
-		alerts:                    cfg.Alerts,
 		bootstrapTokenServeSecret: cfg.BootstrapTokenServeSecret,
 		bootstrapTokenFn:          cfg.BootstrapTokenFn,
 		logFilter:                 cfg.LogFilter,
@@ -555,7 +547,6 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 		EnvironmentColor: s.environmentColor,
 	})
 	lifecycleServer := NewLifecycleServer(s.orch, s.initiateShutdown, s.cluster, s.cfgStore, s.localNodeID, s.clusterAddress, s.peerStats, s.localStatsFn, s.logger)
-	lifecycleServer.SetAlarmLifecycle(s.alerts, s.routingForwarder)
 	if s.joinClusterFn != nil {
 		lifecycleServer.SetJoinClusterFunc(s.joinClusterFn)
 	}

@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { GetClusterStatusRequest, GetClusterStatusResponse, HealthRequest, HealthResponse, JoinClusterRequest, JoinClusterResponse, RemoveNodeRequest, RemoveNodeResponse, SetNodeStateRequest, SetNodeStateResponse, SetNodeSuffrageRequest, SetNodeSuffrageResponse, ShelveAlarmRequest, ShelveAlarmResponse, ShutdownRequest, ShutdownResponse, UnshelveAlarmRequest, UnshelveAlarmResponse, WatchSystemStatusRequest, WatchSystemStatusResponse, YieldLeadershipRequest, YieldLeadershipResponse } from "./lifecycle_pb.js";
+import { GetClusterStatusRequest, GetClusterStatusResponse, HealthRequest, HealthResponse, JoinClusterRequest, JoinClusterResponse, RemoveNodeRequest, RemoveNodeResponse, SetNodeStateRequest, SetNodeStateResponse, SetNodeSuffrageRequest, SetNodeSuffrageResponse, ShutdownRequest, ShutdownResponse, WatchSystemStatusRequest, WatchSystemStatusResponse, YieldLeadershipRequest, YieldLeadershipResponse } from "./lifecycle_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -124,35 +124,6 @@ export const LifecycleService = {
       I: WatchSystemStatusRequest,
       O: WatchSystemStatusResponse,
       kind: MethodKind.ServerStreaming,
-    },
-    /**
-     * ShelveAlarm suppresses a standing alarm for a duration. The expiry is
-     * MANDATORY — a missing, zero or negative duration is rejected — and
-     * unshelveable types (software faults, alarm-flood) are rejected with
-     * the reason. Servable from ANY node: the serving node resolves every
-     * raiser of the ID (local collector + peer broadcasts) and fans the
-     * shelve out to each. Shelve state is in-memory only and does not
-     * survive node restart.
-     *
-     * @generated from rpc gastrolog.v1.LifecycleService.ShelveAlarm
-     */
-    shelveAlarm: {
-      name: "ShelveAlarm",
-      I: ShelveAlarmRequest,
-      O: ShelveAlarmResponse,
-      kind: MethodKind.Unary,
-    },
-    /**
-     * UnshelveAlarm ends a shelve early, returning the alarm to ACTIVE.
-     * Same any-node fan-out semantics as ShelveAlarm.
-     *
-     * @generated from rpc gastrolog.v1.LifecycleService.UnshelveAlarm
-     */
-    unshelveAlarm: {
-      name: "UnshelveAlarm",
-      I: UnshelveAlarmRequest,
-      O: UnshelveAlarmResponse,
-      kind: MethodKind.Unary,
     },
   }
 } as const;

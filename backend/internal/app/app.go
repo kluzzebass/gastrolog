@@ -251,16 +251,8 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	// boot-time decision.
 
 	// Alarm state is in-memory only: nothing survives restart — after a
-	// restart a re-detected condition is simply an active alarm again.
+	// restart a re-detected condition is simply a standing alarm again.
 	alertCollector := alert.New()
-
-	// Alarm-rate self-monitoring (EEMUA 191): per-node rolling-window rate
-	// gauge plus the alarm-flood meta-alarm. Activations feed it via the
-	// collector hook; the periodic job (registered after the orchestrator
-	// exists) supplies the threshold from cluster settings and the passage
-	// of time for flood clearing.
-	alarmRateMonitor := alert.NewRateMonitor(alertCollector, time.Now)
-	alertCollector.SetOnActivate(alarmRateMonitor.Observe)
 
 	configSignal := notify.NewSignal()
 	statsSignal := notify.NewSignal()
@@ -478,7 +470,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		}
 	}
 
-	broadcaster, peerState, peerJobState, localStatsFn, clusterRouteRatesFn := setupClusterStats(ctx, logger, cfgStore, clusterSrv, orch, alertCollector, alarmRateMonitor, cfg.SlogCaptureHandler, nodeID, cfg.ServerAddr, cfg.PprofAddr, statsSignal, raftLive)
+	broadcaster, peerState, peerJobState, localStatsFn, clusterRouteRatesFn := setupClusterStats(ctx, logger, cfgStore, clusterSrv, orch, alertCollector, cfg.SlogCaptureHandler, nodeID, cfg.ServerAddr, cfg.PprofAddr, statsSignal, raftLive)
 	if peerState != nil {
 		// Per-vault admission verdicts are cluster-consistent: a starved
 		// vault volume or an over-budget vault claim on any node suspends
@@ -570,13 +562,6 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		logger.Warn("startup: register scheduled job", "job", "ingester-reconcile", "error", err)
 	}
 
-	// Alarm-rate self-monitoring tick: threshold convergence + flood
-	// raise/clear. Registered unconditionally — the rate is per-node and
-	// works the same in single-node deploys.
-	if err := startAlarmRateMonitorJob(ctx, orch.Scheduler(), alarmRateMonitor, cfgStore); err != nil {
-		logger.Warn("startup: register scheduled job", "job", alarmRateJobName, "error", err)
-	}
-
 	// For replication cases: block until server settings replicate from the leader.
 	if err := awaitReplication(ctx, appSys, cfg.ConfigType, cfgStore, logger); err != nil {
 		return err
@@ -658,7 +643,6 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		WAL:                 vaultWAL,
 		ConfigStore:         proxy,
 		PlacementReconcile:  placementReconcileFn,
-		Alerts:              alertCollector,
 
 		BootstrapTokenServeSecret: cfg.BootstrapTokenServeSecret,
 		BootstrapTokenFn:          makeBootstrapTokenFn(cfgStore),
@@ -827,7 +811,7 @@ func (a *raftLivenessAdapter) RaftLiveness() (elections, leaderLosses, failedHea
 	return elections, leaderLosses, failedHeartbeats
 }
 
-func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system.Store, clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, alerts *alert.Collector, alarmRate *alert.RateMonitor, slogCapture *logging.CaptureHandler, nodeID string, apiAddr string, pprofAddr string, statsSignal *notify.Signal, raftLive cluster.RaftLivenessProvider) (*cluster.Broadcaster, *cluster.PeerState, *cluster.PeerJobState, func() *gastrologv1.NodeStats, func() (*gastrologv1.ThroughputRate, *gastrologv1.ThroughputRate)) {
+func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system.Store, clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, alerts *alert.Collector, slogCapture *logging.CaptureHandler, nodeID string, apiAddr string, pprofAddr string, statsSignal *notify.Signal, raftLive cluster.RaftLivenessProvider) (*cluster.Broadcaster, *cluster.PeerState, *cluster.PeerJobState, func() *gastrologv1.NodeStats, func() (*gastrologv1.ThroughputRate, *gastrologv1.ThroughputRate)) {
 	// Taken as a concrete type and converted explicitly: assigning a typed
 	// nil *CaptureHandler straight into the interface field would read as
 	// non-nil and panic in DroppedCount on the first tick.
@@ -892,10 +876,9 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 			return rs.Routed + pRouted, rs.Matched + pMatched,
 				"self," + strings.Join(members, ",")
 		},
-		Alerts:    alerts,
-		AlarmRate: alarmRate,
-		Jobs:      &jobBroadcastAdapter{scheduler: orch.Scheduler(), nodeID: nodeID},
-		NodeID:    nodeID,
+		Alerts: alerts,
+		Jobs:   &jobBroadcastAdapter{scheduler: orch.Scheduler(), nodeID: nodeID},
+		NodeID: nodeID,
 		NodeNameFn: func() string {
 			nid, err := glid.ParseAny(nodeID)
 			if err != nil {
@@ -1420,7 +1403,6 @@ type serverDeps struct {
 	WAL                 *raftwal.WAL // vault-ctl raftwal at raft/groups/wal; closed after cluster-ctl raft
 	ConfigStore         io.Closer    // rawStore — closed before gRPC for clean Raft shutdown
 	PlacementReconcile  func(ctx context.Context)
-	Alerts              *alert.Collector // local alarm collector for the lifecycle RPCs
 
 	// gastrolog-o9z6o: when non-empty, the server registers
 	// /cluster/bootstrap-token gated on this secret. BootstrapTokenFn
@@ -1458,12 +1440,6 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 				"file": blobstore.NewConnectionTester(deps.Logger),
 			},
 			PlacementReconcile:        deps.PlacementReconcile,
-			// Alarm collector for the shelving RPCs. Alerts was missed
-			// when the shelve fan-out landed (gastrolog-1z5gg4 wired it
-			// in the test harness only), which left production
-			// ShelveAlarm answering "alarm lifecycle not available";
-			// wired here (gastrolog-1m3e0d).
-			Alerts:                    deps.Alerts,
 			BootstrapTokenServeSecret: deps.BootstrapTokenServeSecret,
 			BootstrapTokenFn:          deps.BootstrapTokenFn,
 			EnvironmentLabel:          deps.EnvironmentLabel,

@@ -136,8 +136,30 @@ func TestMultiNodeAlerts_MultiNodeAttribution(t *testing.T) {
 	if n := len(byNode["data-3"]); n != 1 {
 		t.Fatalf("data-3 alerts after data-1 clear = %d, want 1", n)
 	}
-	if got := byNode["data-3"][0].State; got != gastrologv1.AlarmState_ALARM_STATE_ACTIVE {
-		t.Fatalf("data-3 alert state = %v, want ACTIVE", got)
+}
+
+// TestMultiNodeAlerts_NothingSurvivesRestart: alarm state is in-memory only.
+// A second harness is the in-process whole-cluster restart: nothing carries
+// over, and the re-detected condition simply stands again once re-raised.
+func TestMultiNodeAlerts_NothingSurvivesRestart(t *testing.T) {
+	h1 := setupMultiNode(t, []string{"coord", "data-1", "data-2", "data-3"}, WithClusterStats())
+	h1.alerts["data-2"].Raise("chunking-underreplicated", "vault1", "segments below minimum")
+	if n := len(alertsByNode(t, h1)["data-2"]); n != 1 {
+		t.Fatalf("pre-restart alerts = %d, want 1", n)
+	}
+
+	// Restart: a fresh cluster starts empty.
+	h2 := setupMultiNode(t, []string{"coord", "data-1", "data-2", "data-3"}, WithClusterStats())
+	if n := len(alertsByNode(t, h2)["data-2"]); n != 0 {
+		t.Fatalf("alarm state survived restart: %d alerts", n)
+	}
+
+	// The raiser re-detects the standing condition after boot; the alarm is
+	// simply standing again.
+	h2.alerts["data-2"].Raise("chunking-underreplicated", "vault1", "segments below minimum")
+	got := alertsByNode(t, h2)["data-2"]
+	if len(got) != 1 || string(got[0].Id) != "chunking-underreplicated:vault1" {
+		t.Fatalf("re-raised alarm not visible after restart: %+v", got)
 	}
 }
 

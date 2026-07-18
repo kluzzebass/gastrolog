@@ -11,42 +11,6 @@ import { PerRouteStats, VaultRouteStats } from "./system_pb.js";
 import { ChunkPlan, HistogramBucket, TableResult } from "./query_pb.js";
 
 /**
- * AlarmState is the state of a standing alarm: alarms stand while the
- * condition holds, clear when it resolves, and can be temporarily shelved.
- *
- * @generated from enum gastrolog.v1.AlarmState
- */
-export enum AlarmState {
-  /**
-   * @generated from enum value: ALARM_STATE_UNSPECIFIED = 0;
-   */
-  UNSPECIFIED = 0,
-
-  /**
-   * Condition annunciated and standing. Also the state of a latching alarm
-   * whose condition resolved — it stands until process restart.
-   *
-   * @generated from enum value: ALARM_STATE_ACTIVE = 1;
-   */
-  ACTIVE = 1,
-
-  /**
-   * Operator-shelved until shelved_until. Visible in a collapsed section,
-   * never silently gone; expiry with the condition still true returns it
-   * to ACTIVE.
-   *
-   * @generated from enum value: ALARM_STATE_SHELVED = 2;
-   */
-  SHELVED = 2,
-}
-// Retrieve enum metadata with: proto3.getEnumType(AlarmState)
-proto3.util.setEnumType(AlarmState, "gastrolog.v1.AlarmState", [
-  { no: 0, name: "ALARM_STATE_UNSPECIFIED" },
-  { no: 1, name: "ALARM_STATE_ACTIVE" },
-  { no: 2, name: "ALARM_STATE_SHELVED" },
-]);
-
-/**
  * AlarmPriority is the cataloged consequence × urgency verdict for an alarm
  * type. CRITICAL = data loss in progress or scheduled; HIGH = durability or
  * availability degraded, will compound; LOW = needs attention on a human
@@ -811,18 +775,6 @@ export class NodeStats extends Message<NodeStats> {
    */
   ingestPressureLevel = "";
 
-  /**
-   * Alarm activations on THIS node in the rolling 10-minute window — the
-   * alarm system's self-monitoring rate gauge (EEMUA 191 rate principle).
-   * Per-node by design: the collector is per-node, so a flood is a fact
-   * about one node's alarm system; there is no cluster-aggregate flood.
-   * Over the operator-set threshold the node raises the single alarm-flood
-   * meta-alarm (see the alarm catalog).
-   *
-   * @generated from field: uint32 alarm_rate_10m = 52;
-   */
-  alarmRate10m = 0;
-
   constructor(data?: PartialMessage<NodeStats>) {
     super();
     proto3.util.initPartial(data, this);
@@ -882,7 +834,6 @@ export class NodeStats extends Message<NodeStats> {
     { no: 49, name: "size_capped_vault_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
     { no: 50, name: "self_ingester_drops_total", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 51, name: "ingest_pressure_level", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 52, name: "alarm_rate_10m", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): NodeStats {
@@ -1169,8 +1120,9 @@ export class PeerTrafficTotal extends Message<PeerTrafficTotal> {
  * catalog — never chosen at the raising call site.
  * Alarms are keyed by ID for deduplication — the same condition doesn't
  * create multiple alarms. Alarms are STATE with suppression: they stand
- * while the condition holds, clear when it resolves, and can be
- * temporarily shelved. Latching alarms stand until process restart.
+ * while the condition holds and clear when it resolves — an alarm is
+ * standing or it is not; there are no per-alarm operator states. Latching
+ * alarms stand until process restart.
  *
  * @generated from message gastrolog.v1.SystemAlert
  */
@@ -1241,41 +1193,6 @@ export class SystemAlert extends Message<SystemAlert> {
    */
   softwareFault = false;
 
-  /**
-   * Catalog type ID ("vault-leaderless", "alarm-flood", ...) — the id field
-   * minus the instance key. Carried explicitly so aggregation-side flood
-   * collapse groups by type without re-deriving it from the id format.
-   *
-   * @generated from field: string type_id = 10;
-   */
-  typeId = "";
-
-  /**
-   * State (see AlarmState). Alarms in every state travel on the wire;
-   * consumers filter — the active list, the shelved section, and
-   * cross-node shelve fan-out all read this one field.
-   *
-   * @generated from field: gastrolog.v1.AlarmState state = 11;
-   */
-  state = AlarmState.UNSPECIFIED;
-
-  /**
-   * Shelve expiry. Set only while state is SHELVED — shelves always carry
-   * an expiry; there are no permanent shelves.
-   *
-   * @generated from field: google.protobuf.Timestamp shelved_until = 12;
-   */
-  shelvedUntil?: Timestamp;
-
-  /**
-   * Whether operators may shelve this alarm. False for types where deferral
-   * is meaningless (software faults, alarm-flood) — the UI must not render
-   * a shelve control at all, and ShelveAlarm rejects with the reason.
-   *
-   * @generated from field: bool shelveable = 13;
-   */
-  shelveable = false;
-
   constructor(data?: PartialMessage<SystemAlert>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1293,10 +1210,6 @@ export class SystemAlert extends Message<SystemAlert> {
     { no: 7, name: "cause", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 8, name: "response", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 9, name: "software_fault", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 10, name: "type_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 11, name: "state", kind: "enum", T: proto3.getEnumType(AlarmState) },
-    { no: 12, name: "shelved_until", kind: "message", T: Timestamp },
-    { no: 13, name: "shelveable", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SystemAlert {

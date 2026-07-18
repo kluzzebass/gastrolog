@@ -101,10 +101,8 @@ export function HeaderBar({
 
   const { totalCpu, totalMemory, totalStorage } = sumClusterStats(nodes);
 
-  const { alerts, active, shelved, maxRank, floods } = useAlerts();
-  // The pill counts active alarms; shelved alarms live in the panel's
-  // collapsed section and stay quiet.
-  const standingCount = active.length;
+  const { alerts, maxRank } = useAlerts();
+  const standingCount = alerts.length;
   const [alertPanelOpen, setAlertPanelOpen] = useState(false);
   // Highest alarm rank → design token: Critical/faults on the error token,
   // High on warn, Low on the info token.
@@ -121,21 +119,9 @@ export function HeaderBar({
   const loading = isLoading || nodes.length === 0;
   const noQuorum = computeNoQuorum(cluster ?? null, isLoading);
 
-  // Flood indicator: quiet until needed — the pill reads as a plain alert
-  // count at normal rates and names the flood only while one is active.
-  // With nothing active but shelved alarms retained, the pill stays
-  // reachable (they are never silently gone) with a quiet label.
   const alertNoun = standingCount === 1 ? "Alert" : "Alerts";
-  const floodSummary = floods.map((f) => `${f.nodeName} (${f.rate} in 10 min)`).join(", ");
-  let alertPillTitle = `${standingCount} active ${alertNoun.toLowerCase()}`;
-  let alertPillText = `${standingCount} ${alertNoun}`;
-  if (floods.length > 0) {
-    alertPillTitle = `Alarm flood: ${floodSummary}`;
-    alertPillText = `Alarm Flood — ${standingCount} ${alertNoun}`;
-  } else if (standingCount === 0 && shelved.length > 0) {
-    alertPillTitle = `${shelved.length} shelved alarm${shelved.length === 1 ? "" : "s"}`;
-    alertPillText = `${shelved.length} Shelved`;
-  }
+  const alertPillTitle = `${standingCount} standing ${alertNoun.toLowerCase()}`;
+  const alertPillText = `${standingCount} ${alertNoun}`;
 
   return (
     <header
@@ -292,9 +278,7 @@ export function HeaderBar({
       </div>
       {alertPanelOpen && (
         <AlertPanel
-          active={active}
-          shelved={shelved}
-          floods={floods}
+          alerts={alerts}
           dark={dark}
           onClose={() => setAlertPanelOpen(false)}
         />

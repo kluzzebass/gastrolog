@@ -10,14 +10,14 @@ import (
 
 func TestRaiseStampsCatalogFields(t *testing.T) {
 	// vault-leaderless carries a catalog DelayOn; drive the injected clock
-	// past it so the stamped fields are observable through Active().
+	// past it so the stamped fields are observable through Standing().
 	clk := newSuppressionClock()
 	c := NewWithClock(clk.Now)
 
 	c.Raise("vault-leaderless", "vault-1", "Vault a has had no placement leader for 90s.")
 	clk.Advance(leaderlessWindow(t) + time.Second)
 
-	alarms := c.Active()
+	alarms := c.Standing()
 	if len(alarms) != 1 {
 		t.Fatalf("got %d alarms, want 1", len(alarms))
 	}
@@ -51,7 +51,7 @@ func TestRaiseEmptyInstanceKeyUsesBareTypeID(t *testing.T) {
 
 	c.Raise("ingester-not-running", "", "2 ingesters not running")
 
-	alarms := c.Active()
+	alarms := c.Standing()
 	if len(alarms) != 1 {
 		t.Fatalf("got %d alarms, want 1", len(alarms))
 	}
@@ -84,7 +84,7 @@ func TestRaiseUnknownTypeIsLoudNotSilent(t *testing.T) {
 		t.Errorf("unregistered raise must log the type ID; log was: %s", logBuf.String())
 	}
 	// …and still surfaced, as a software fault, with the raiser's detail.
-	alarms := c.Active()
+	alarms := c.Standing()
 	if len(alarms) != 1 {
 		t.Fatalf("unregistered raise must surface an alarm, got %d", len(alarms))
 	}
@@ -107,10 +107,10 @@ func TestRaisePreservesFirstSeen(t *testing.T) {
 	c := New()
 
 	c.Raise("cloud-store", "v1", "first detail")
-	first := c.Active()[0].FirstSeen
+	first := c.Standing()[0].FirstSeen
 
 	c.Raise("cloud-store", "v1", "updated detail")
-	alarms := c.Active()
+	alarms := c.Standing()
 
 	if len(alarms) != 1 {
 		t.Fatalf("got %d alarms, want 1 (same type+instance dedups)", len(alarms))
@@ -127,9 +127,9 @@ func TestRaisePreservesFirstSeen(t *testing.T) {
 }
 
 // TestRetentionRateIsCataloged pins the gastrolog-1cruar fold: retention-rate
-// is an ordinary catalog row (Low, shelveable process condition), raised
-// through the one Raise path like every other type — there is no
-// operator-defined category and no priority chosen at a call site.
+// is an ordinary catalog row (a Low process condition), raised through the
+// one Raise path like every other type — there is no operator-defined
+// category and no priority chosen at a call site.
 func TestRetentionRateIsCataloged(t *testing.T) {
 	typ, ok := TypeByID("retention-rate")
 	if !ok {
@@ -137,9 +137,6 @@ func TestRetentionRateIsCataloged(t *testing.T) {
 	}
 	if typ.Priority != Low || typ.Source != "retention" {
 		t.Errorf("retention-rate catalog row = %+v, want Low priority from source retention", typ)
-	}
-	if !typ.Shelveable() {
-		t.Error("retention-rate is a process condition; the catalog default (shelveable) applies")
 	}
 
 	c := New()
@@ -180,9 +177,9 @@ func TestClearNonExistent(t *testing.T) {
 	c.Clear("no-such-type", "")              // unknown type clear is a no-op too
 }
 
-func TestActiveEmpty(t *testing.T) {
+func TestStandingEmpty(t *testing.T) {
 	c := New()
-	if alarms := c.Active(); alarms != nil {
+	if alarms := c.Standing(); alarms != nil {
 		t.Errorf("empty collector should return nil, got %v", alarms)
 	}
 }
@@ -203,14 +200,14 @@ func TestCount(t *testing.T) {
 	}
 }
 
-func TestActiveSortedByFirstSeen(t *testing.T) {
+func TestStandingSortedByFirstSeen(t *testing.T) {
 	c := New()
 
 	c.Raise("cloud-store", "third", "msg")
 	c.Raise("cloud-store", "second", "msg")
 	c.Raise("cloud-store", "first", "msg")
 
-	alarms := c.Active()
+	alarms := c.Standing()
 	for i := 1; i < len(alarms); i++ {
 		if alarms[i].FirstSeen.Before(alarms[i-1].FirstSeen) {
 			t.Errorf("alarm %d (FirstSeen=%v) is before alarm %d (FirstSeen=%v)",
@@ -288,7 +285,7 @@ func TestConcurrentRaiseClear(t *testing.T) {
 			defer func() { done <- struct{}{} }()
 			for j := 0; j < 200; j++ {
 				c.Raise("cloud-store", "shared", "msg")
-				c.Active()
+				c.Standing()
 				c.Clear("cloud-store", "shared")
 				c.Count()
 			}
@@ -301,7 +298,7 @@ func TestConcurrentRaiseClear(t *testing.T) {
 
 // findAlarm returns the active alarm with the given composed ID, or nil.
 func findAlarm(c *Collector, id string) *Alarm {
-	for _, a := range c.Active() {
+	for _, a := range c.Standing() {
 		if a.ID == id {
 			return a
 		}

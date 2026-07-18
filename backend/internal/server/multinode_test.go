@@ -241,9 +241,7 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 
 	// Per-node alert collectors + stats collectors behind GetClusterStatus
 	// (gastrolog-33d9n2). Assigned conditionally so tests without the option
-	// keep the nil interfaces of single-node mode. Built BEFORE the unary
-	// forwarder so the remote internal handlers carry their node's collector
-	// — the state forwarded shelve legs act on.
+	// keep the nil interfaces of single-node mode.
 	alertsByNode := make(map[string]*alert.Collector, len(nodeIDs))
 	if cfg.clusterStats {
 		for _, id := range nodeIDs {
@@ -255,7 +253,7 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 		}
 	}
 
-	routingFwd := newDirectUnaryForwarder(t, nodes, cfgStore, coordinatorID, vaultsDir, alertsByNode)
+	routingFwd := newDirectUnaryForwarder(t, nodes, cfgStore, coordinatorID, vaultsDir)
 
 	coordNode := nodes[coordinatorID]
 	srvCfg := server.Config{
@@ -286,7 +284,6 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 		srvCfg.Cluster = &mockCluster{leaderID: coordinatorID, leaderAddr: coordinatorID + ":4566", servers: servers, isLeader: true}
 		srvCfg.PeerStats = &mnPeerNodeStats{collectors: statsCollectors}
 		srvCfg.LocalStats = statsCollectors[coordinatorID].CollectLocalSnapshot
-		srvCfg.Alerts = alertsByNode[coordinatorID]
 	}
 
 	srv := server.New(coordNode.orch, cfgStore, orchestrator.Factories{VaultsDir: vaultsDir}, nil, srvCfg)
@@ -953,7 +950,7 @@ type directUnaryForwarder struct {
 	handlers map[string]http.Handler // nodeID → Connect mux handler
 }
 
-func newDirectUnaryForwarder(t *testing.T, nodes map[string]multinodeTestNode, cfgStore system.Store, coordinatorID, vaultsDir string, alerts map[string]*alert.Collector) *directUnaryForwarder {
+func newDirectUnaryForwarder(t *testing.T, nodes map[string]multinodeTestNode, cfgStore system.Store, coordinatorID, vaultsDir string) *directUnaryForwarder {
 	t.Helper()
 	handlers := make(map[string]http.Handler)
 	for id, node := range nodes {
@@ -962,22 +959,13 @@ func newDirectUnaryForwarder(t *testing.T, nodes map[string]multinodeTestNode, c
 		}
 		// BuildInternalHandler returns a mux with NoAuthInterceptor and
 		// NO routing interceptor — same as the real ForwardRPC dispatch path.
-		// Alerts carries the node's collector so forwarded local_only
-		// ack/shelve legs persist on the raiser (gastrolog-1z5gg4).
 		remoteSrv := server.New(node.orch, cfgStore, orchestrator.Factories{VaultsDir: vaultsDir}, nil, server.Config{
 			NodeID: id,
 			NoAuth: true,
-			Alerts: alerts[id],
 		})
 		handlers[id] = remoteSrv.BuildInternalHandler()
 	}
 	return &directUnaryForwarder{handlers: handlers}
-}
-
-// dropNode removes a node's handler so forwards to it fail — the in-process
-// stand-in for an unreachable raiser during ack/shelve fan-out.
-func (d *directUnaryForwarder) dropNode(nodeID string) {
-	delete(d.handlers, nodeID)
 }
 
 func (d *directUnaryForwarder) ForwardUnary(ctx context.Context, nodeID, procedure string, reqPayload []byte) ([]byte, error) {

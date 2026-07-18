@@ -138,7 +138,7 @@ func TestBlockedBuildRaisesAndClearsAlert(t *testing.T) {
 	if err := mgr.BuildOnce(t.Context(), vaultID); err == nil {
 		t.Fatal("BuildOnce should still fail")
 	}
-	active := collector.Active()
+	active := collector.Standing()
 	if len(active) != 1 {
 		t.Fatalf("want 1 active alarm after the delay-on window, got %v", active)
 	}

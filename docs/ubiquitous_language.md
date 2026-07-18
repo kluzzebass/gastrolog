@@ -672,26 +672,20 @@ How the cluster reports what it's doing to itself, to operators, and to the UI.
   timers of their own. Windows evaluate lazily against the collector's
   injectable clock; `FirstSeen` is condition start, not activation time.
 
-- **Alarm state** — a standing alarm is **active** (annunciated, the
-  condition holds — or held, for a latched fault) or **shelved**
-  (operator-suppressed until a mandatory expiry). Alarms are state with
+- **Standing alarm** — an annunciated alarm: its condition holds (or
+  held, for a latched fault). An alarm is **standing or it is not** —
+  there are no per-alarm operator states. Alarms are state with
   suppression: they stand while the condition holds, clear when it
   resolves, and nothing persists across restart — a re-detected condition
-  after boot is simply an active alarm again. (An acknowledgment layer —
-  "acknowledge/ack" with its acked and retained-after-clear states, and a
-  per-node on-disk lifecycle journal — was built in the lifecycle phase
-  and removed on operator verdict: awareness bookkeeping is ceremony, and
-  loud is safe. Those terms are retired; do not reintroduce them.) See
-  the state machine in `docs/alarm-management-design.md`.
-
-- **Shelve** — operator-initiated suppression of one standing alarm for a
-  duration with a **mandatory expiry** (no permanent shelves). Shelved
-  alarms stay visible in a collapsed section; expiry with the condition
-  still true returns the alarm to active. In-memory only: a shelve does
-  not survive node restart. Types where deferral is meaningless (software
-  faults, `alarm-flood`) are **never shelveable**
-  (`AlarmType.NeverShelveable`) and show no shelve control. **Unshelve**
-  ends a shelve early.
+  after boot is simply standing again. (Two operator-state layers were
+  built and removed on operator verdict: an acknowledgment layer —
+  "acknowledge/ack", acked and retained-after-clear states, an on-disk
+  lifecycle journal — because awareness bookkeeping is ceremony and loud
+  is safe; then operator shelving — "shelve/unshelve", bounded
+  suppression with mandatory expiry — with the epic verdict "strip
+  management, keep prevention": management machinery presumes the alarm
+  volume the razor exists to eliminate. All those terms are retired; do
+  not reintroduce them.) See `docs/alarm-management-design.md`.
 
 - **Occurrence** — one continuous condition episode of an alarm ID in the
   suppression sense: a clear-and-return inside the delay-off window is
@@ -708,30 +702,20 @@ How the cluster reports what it's doing to itself, to operators, and to the UI.
   modeled a feature that never existed; `retention-rate` is an ordinary
   catalog row. **Software faults** (e.g. `orchestrator-lock-leak`) are
   a class apart — defect tripwires whose response is to report, so they
-  carry no priority and may never be shelved.
+  carry no priority.
 
 - **AlertCollector** — per-node in-memory store of standing alarms with
-  their suppression and shelve state (no file I/O; nothing survives
-  restart). Alarms have a stable key (`typeID` or `typeID:instanceKey`)
-  for dedup; every state (`Standing()`) is included in each NodeStats
-  broadcast so any node can serve shelve/unshelve for any raiser.
-
-- **Alarm flood** — the alarm system's self-diagnosed degraded state
-  (EEMUA 191 rate principle): a node whose alarm **activations**
-  (inactive → active transitions; refreshes never count) exceed the
-  flood threshold (default 10 per rolling 10 minutes, operator-adjustable
-  via cluster settings) raises exactly one `alarm-flood` meta-alarm.
-  Per-node by design — the `RateMonitor` sits beside each node's
-  collector, and the UI names the flooding node. Clears after a full
-  under-threshold window. During a flood the alert panel collapses that
-  node's same-type alarms into one counted, expandable row
-  (aggregation-side; the wire keeps per-instance truth). The rolling rate
-  travels as `NodeStats.alarm_rate_10m`.
+  their suppression state (no file I/O; nothing survives restart). Alarms
+  have a stable key (`typeID` or `typeID:instanceKey`) for dedup; the
+  standing list (`Standing()`) is included in each NodeStats broadcast so
+  the full attributed cluster list is readable from any node. (An
+  "alarm flood" rate self-monitor — a per-node activation-rate meter
+  raising a meta-alarm over an operator threshold — was built and removed
+  on the same epic verdict as shelving; the term is retired.)
 
 - **SystemAlert** — one alarm on the wire: `ID`, `Priority`, `Source`,
   `Detail` (per-instance specifics), `Cause`/`Response` (from the
-  catalog), `SoftwareFault`, `FirstSeen`, `LastSeen`, plus `State`
-  (active/shelved), `ShelvedUntil`, `Shelveable`. Keyed ("alarm X for
+  catalog), `SoftwareFault`, `FirstSeen`, `LastSeen`. Keyed ("alarm X for
   reason Y on node Z") so repeated identical alarms don't accumulate.
 
 ---

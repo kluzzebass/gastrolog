@@ -22,30 +22,61 @@ go into `docs/ubiquitous_language.md` with the implementing change:
 
 | Term | Meaning | Surface |
 |------|---------|---------|
-| **Alarm** | A condition requiring operator action, with documented cause and response. State: active or shelved. | Alarm list (System Alerts panel, renamed) |
+| **Alarm** | A condition requiring operator action, with documented cause and response. An alarm is standing or it is not — there are no per-alarm operator states. | Alarm list (System Alerts panel, renamed) |
 | **Event** | A record of something that happened; no action required. | The log stream (slog lines, captured by the self ingester, searchable like any other logs) |
 | **Metric** | A measured quantity trending over time. | Health/stats surfaces |
 
 ## Standards principles adopted
 
 1. **Actionability** — every alarm requires a response (the governing test).
-2. **Rate** — steady-state target ~1 alarm per operator per 10 minutes;
-   flood recognition during upsets.
+2. **Rate** — steady-state target ~1 alarm per operator per 10 minutes.
+   Satisfied by having FEW alarms — the razor and chattering suppression —
+   not by measuring and managing a rate. (A rate self-monitor with a flood
+   meta-alarm was built and removed on operator verdict; see "The operator
+   verdict" below.)
 3. **Chattering suppression** — delay-on / delay-off timers and latching
    instead of raw Set/Clear flapping.
 4. **Consequence-based priority** — severity derives from a documented
    consequence × urgency assessment, not ad-hoc choice at the call site.
 5. **Standing-alarm management** — the list reflects live, unhandled
-   conditions. Satisfied by standing state + shelving, deliberately WITHOUT
-   an acknowledgment state machine — see "State model" below for the
-   recorded deviation from ISA-18.2's full model.
-6. **State model** — alarms are state with suppression (active / shelved),
-   not a bare Set/Clear bit and not an acknowledgment lifecycle.
+   conditions. Satisfied by the razor keeping the list short and by
+   release-on-resolve keeping it live — deliberately WITHOUT an
+   acknowledgment state machine or shelving; see "State model" below for
+   the recorded deviations from ISA-18.2's full model.
+6. **State model** — alarms are state with suppression: an alarm is
+   standing or it is not. Not a bare Set/Clear bit, not an acknowledgment
+   lifecycle, and not an operator-suppression (shelve) layer.
 7. **Response guidance** — each alarm type carries documented cause +
    operator action, surfaced in the UI.
 8. **Separation** — alarms vs events vs metrics (vocabulary above).
-9. **Self-monitoring** — the alarm system measures its own rate and
-   surfaces flood conditions.
+
+## The operator verdict: strip management, keep prevention
+
+**Recorded operator decision (gastrolog-29380r).** The epic exists for one
+reason: **to get rid of excessive alarms and warnings.** Its purpose was
+alarm REDUCTION. On review of the built system the operator's verdict was
+that shelving and rate self-monitoring are management machinery — they
+presume a rich alarm ecosystem worth managing, which is the opposite of
+the goal. If the razor works, there are a handful of standing alarms and
+none of that apparatus earns its keep.
+
+What was removed on that verdict (each had been fully built):
+
+- **Shelving** — the shelve/unshelve RPCs and their cross-node fan-out,
+  the SHELVED state and mandatory expiry, `NeverShelveable` refusal, the
+  shelve controls in the UI and CLI, and the per-alarm `state` on the
+  wire. With only one state left, per-alarm state is meaningless — every
+  standing alarm is active, so the field itself came out.
+- **Rate self-monitoring** — the `RateMonitor`, the `alarm-flood`
+  meta-alarm and its catalog row, the activation hook in the collector,
+  the `alarm_rate_10m` gauge, the operator-adjustable flood threshold
+  setting, and the UI flood banner + same-type collapse.
+
+What stays is prevention: the razor (most alarms never exist), the static
+catalog (priority is never chosen at a call site), chattering suppression
+(flapping conditions never annunciate), and latching for the software-fault
+tripwire. The alarm surface is a short, flat, honest list of standing
+conditions with cause and response.
 
 ## Alarm catalog
 
@@ -75,10 +106,6 @@ Consequences for the model:
   ingest is ack-after-fsync, so accepted records are already durable and
   in-flight ones were never acked); rating it High would file it beside
   routine degradation.
-- **Never shelveable.** Shelving suppresses a condition for a while on the
-  operator's judgement. A defect does not resolve itself and cannot be
-  deferred — a shelved wedge is a lie. Phase 4 landed the refusal
-  (`AlarmType.NeverShelveable`); this is the case that required it.
 - **Latched** for the reason the code already gives: a leaked hold cannot be
   released by anything short of a restart, so the condition can never
   self-clear. The alarm stands until the process restarts — there is no
@@ -110,7 +137,7 @@ Verdicts under the governing test:
 | `segmentation-writer:<vault>` | segmentation | Durable segment commit failed; working segment abandoned for crash recovery — **accepted records at risk** | **Alarm** | Critical | Free disk space or replace the volume on the named node; ingest acks are failing until resolved |
 | `chunking-unplannable-segment:<vault>` | chunking | Segment on-disk indexes unreadable; records stay unchunked and head copies cannot be purged | **Alarm** | Critical | Investigate segment file corruption on the named node. If the vault has a delete-disposition TTL these records are released **unchunked** at expiry — the loss is scheduled, not hypothetical |
 | `wal-reserve:<wal>` | storage | Raft WAL space reserve lost | **Alarm** | Critical | Free disk space now — without the reserve, a full volume crashes consensus on this node |
-| `orchestrator-lock-leak` | orchestrator | Orchestrator lock held or write-stuck past 1min | **Software fault** (latched, never shelveable) | — (see below) | **This should never fire.** If it does, it is a lock-discipline defect, not an operating condition: capture the acquisition stack from this node's log and file it. Restarting the node is a workaround to recover service, not the response |
+| `orchestrator-lock-leak` | orchestrator | Orchestrator lock held or write-stuck past 1min | **Software fault** (latched) | — (see below) | **This should never fire.** If it does, it is a lock-discipline defect, not an operating condition: capture the acquisition stack from this node's log and file it. Restarting the node is a workaround to recover service, not the response |
 | `chunking-build-blocked:<vault>` | chunking | Head-of-queue chunk blocked >2min on segments no local holder can supply, or a manifest referenced a released segment | **Alarm** | High | Restore a node holding the named segments, or accept the gap |
 | `chunking-underreplicated:<vault>` | chunking | Segments below the replication minimum ≥2min; planning gated | **Alarm** | High | Check that all placement nodes are up and replication is progressing. If the origin node is permanently lost, the affected records exist only there |
 | `chunking-glcb-corrupt:<vault>` | chunking | Sealed-chunk GLCB unreadable; quarantined with a `.corrupt` suffix | **Alarm** (DelayOn) | High | Heals on its own — rebuilt from source segments or re-pulled from a peer home. **Only actionable if it persists**, which is what the delay-on is for: then investigate disk health here and replica health on the vault's other homes |
@@ -135,7 +162,7 @@ Verdicts under the governing test:
 | `disk-space-low:<vault>` *(split)* | storage | Vault volume below its free-space warn band | **Alarm** | Low | Free space, add capacity, raise the vault's threshold, or shorten its retention |
 | `node-disk-space-low` *(node, split)* | storage | Node volume below its free-space warn band | **Alarm** | Low | Free space, add capacity, or shorten retention |
 | `retention-rate:<vault>` | retention | Retention delete rate sustained above 10/s over a 30s window (product constants; the rate window at the call site is the condition definition and its hysteresis) | **Alarm** | Low | Review the vault's rotation and retention policy; a configuration this aggressive degrades throughput until corrected |
-| `alarm-flood` | alarm-system | This node's alarm activations exceeded the flood threshold (default 10 per rolling 10 minutes) — the alarm system reporting itself degraded (EEMUA 191 rate principle) | **Alarm** | High | The alarm system on this node is degraded by volume: triage by priority — Critical first — and expect suppressed detail (same-type alarms collapse in the panel). Clears on its own after a full under-threshold 10-minute window; threshold adjustable in cluster settings. Exactly one per node regardless of overshoot; never counts toward its own rate |
+| *(alarm-flood — row retired)* | alarm-system | Node alarm rate over a threshold | **Removed on operator verdict** | — | The rate self-monitor and its meta-alarm were built and removed (see "The operator verdict" above): the flood apparatus presumes the alarm volume the epic exists to eliminate |
 | **`vault-home-cannot-store:<vault>`** | placement | A vault home node is disk-protected; collection and builds paused there | **NEEDS VERDICT** (interim: Alarm) | Low (interim) | Razor is unclear. When healthy replicas ≥ RF the text itself says replicas are "backfilled automatically" — handled, nothing waits on an operator. When healthy < RF, the action is "free space", which is already `disk-space-*`'s action on that node. What it uniquely adds is *which vault* is affected. Demote to a metric, or keep as the vault-scoped view of a node condition? Until the verdict lands, the phase 2 registry keeps it as a Low alarm (the code still raises it; a raised type must be cataloged) |
 | *(retention unrouted destroy — row retired)* | retention | Chunk destroyed with zero records routed | **Not an alarm — prevented** | — | Resolved in [gastrolog-65riw5]: the condition no longer occurs, so there is nothing to alarm on. An unreadable cursor now flags the chunk for backoff retry and raises `chunk-unreadable:<chunk>` (which has its own row); a missing vault instance retains the chunk. No alarm was invented — the existing one covers it. **Partial** fan-out remains a deliberate tolerance and is reported with a dropped-record count, not an alarm; see the note below |
 | chanwatch saturation | chanwatch | Internal channel saturated past watermark | **Event** (demoted ✓) | — | Landed: transition-edge logs |
@@ -197,7 +224,7 @@ type AlarmType struct {
     DelayOn       time.Duration // suppression: condition must persist this long
     DelayOff      time.Duration // condition must stay clear this long before auto-clear
     Latching      bool          // sticky: stands after the condition clears, until process restart
-    SoftwareFault bool          // defect tripwire: outside the priority scale, never shelveable
+    SoftwareFault bool          // defect tripwire: outside the priority scale
 }
 ```
 
@@ -211,7 +238,7 @@ catalog entry — call sites raise and clear the raw condition and carry no
 alarm timers of their own. Decisions of record:
 
 - **Lazy evaluation.** Suppression windows advance on every Raise/Clear
-  touching an alarm and on every read (`Active()`/`Count()`), against the
+  touching an alarm and on every read (`Standing()`/`Count()`), against the
   collector's injectable clock. A condition raised once and never re-raised
   still activates when its DelayOn elapses — the next read surfaces it.
   (Sweep-style raisers that re-raise every tick also work; lazy evaluation
@@ -267,42 +294,47 @@ rules become a real feature — not before.
 
 ## State model
 
-**Recorded operator decision.** The state model is **active / shelved**.
-An acknowledgment layer — the acked and retained-after-clear states, the
-ack RPC with its cross-node fan-out, and an on-disk lifecycle journal — was
-built (phase 4, gastrolog-1z5gg4) and **removed on operator verdict**
-("lose the ACK crap"; the journal earlier: "no. lose it."). The reasoning
-of record:
+**Recorded operator decisions.** An alarm is **standing or it is not** —
+there are no per-alarm operator states. Two layers were built on top of
+the suppression substrate and removed on operator verdict:
 
-- **Awareness bookkeeping is ceremony.** Acknowledgment records that an
-  operator *knows* about a condition; it changes nothing about the
-  condition. This system does not want operator-awareness state machines —
-  an alarm list that reflects live conditions IS the awareness surface.
+- An **acknowledgment layer** — the acked and retained-after-clear states,
+  the ack RPC with its cross-node fan-out, and an on-disk lifecycle
+  journal — was built (gastrolog-1z5gg4) and removed ("lose the ACK
+  crap"; the journal earlier: "no. lose it."). Awareness bookkeeping is
+  ceremony: acknowledgment records that an operator *knows* about a
+  condition; it changes nothing about the condition. An alarm list that
+  reflects live conditions IS the awareness surface.
+- **Shelving** — bounded operator suppression with mandatory expiry, the
+  shelve/unshelve RPCs and their cross-node fan-out, and the SHELVED
+  state — was built (the remainder of gastrolog-1z5gg4) and removed on
+  the epic verdict ("strip management, keep prevention"): shelving is
+  management machinery for an alarm volume the razor exists to prevent.
+  With a short list, an operator who has judged a Low alarm tolerable
+  simply reads past it; a suppression subsystem is not worth its state,
+  its RPC fan-out, or its UI surface.
+
+The remaining reasoning of record:
+
 - **Alarms are state.** They stand while the condition holds and clear
   when it resolves. Retaining a cleared alarm ("it fired while you were
   away") reintroduced event-ness into a state surface; the log stream is
   the event record (see "Events are log messages").
 - **Restart resets everything.** Nothing persists across restart — no
   journal, no file I/O in the alert package. After a restart a re-detected
-  condition is simply an active alarm again. **Loud is safe**: the failure
-  mode of forgetting operator state is an alarm that is *too visible*.
-- **Shelving remains** because bounded suppression is an operator ACTION
-  with an effect on the surface, not bookkeeping: deliberate, mandatory
-  expiry, never permanent.
+  condition is simply a standing alarm again. **Loud is safe**: the
+  failure mode of forgetting operator state is an alarm that is *too
+  visible*.
 
-State machine (suppression states in brackets on the transitions):
+State machine (all that remains is the suppression substrate):
 
 ```mermaid
 stateDiagram-v2
     [*] --> pending : Raise
     pending --> [*] : Clear inside DelayOn (suppressed, never annunciates)
-    pending --> active : condition outlives DelayOn
-    active --> [*] : condition resolves [past DelayOff, non-latching]
-    active --> active : condition resolves [latching] — stands until process restart
-    active --> shelved : operator shelve (mandatory expiry)
-    shelved --> active : shelve expires, condition still true
-    shelved --> active : operator unshelve
-    shelved --> [*] : condition resolves while shelved
+    pending --> standing : condition outlives DelayOn
+    standing --> [*] : condition resolves [past DelayOff, non-latching]
+    standing --> standing : condition resolves [latching] — stands until process restart
 ```
 
 Decisions of record:
@@ -315,61 +347,39 @@ Decisions of record:
   (`orchestrator-lock-leak`) is a software-fault tripwire, and the
   response to a software fault is report + restart — the restart is what
   clears it. Its raiser never calls Clear (a leaked hold cannot be
-  observed releasing), so its whole lifecycle is active → restart → gone.
-- **Shelve** suppresses one alarm instance for a duration with a MANDATORY
-  expiry (zero/negative rejected at every boundary — no permanent
-  shelves). When the shelve lapses with the condition still true, the
-  alarm returns to **active** and demands fresh attention. A condition
-  that resolves while shelved releases entirely. Shelve state is
-  in-memory only — it does not survive restart. Expiry is settled lazily
-  against the collector clock, like every suppression window.
-- **Shelve refusal.** `AlarmType.NeverShelveable` (read via
-  `Shelveable()`) marks types where deferral is meaningless. Sweep
-  verdict: the software-fault class (`orchestrator-lock-leak`, the
-  unregistered-type fallback — nothing improves during the window; the
-  response is to report) and `alarm-flood` (it self-clears within its own
-  window, and hiding the degradation indicator defeats self-monitoring).
-  Every process alarm remains shelveable — deferring a condition the
-  operator judges tolerable is exactly what EEMUA 191 shelving is for.
-  `Shelveable` travels on the wire so the UI renders no control at all for
-  refusing types; `ShelveAlarm` also rejects with the reason.
-- **EEMUA principles 5 & 6 are deliberately satisfied without an ack state
-  machine.** Standing state (an alarm stands until the condition resolves,
-  latched faults until restart) plus shelving keeps the list a live,
-  honest picture of unhandled conditions. This deviates from ISA-18.2's
-  full model (acknowledge, return-to-normal-unacknowledged, and the
-  associated re-annunciation states) as a considered product decision, not
-  an omission: those states exist to manage operator attention in a
-  control room; here the attention surface is the list itself, and the
-  event history lives in the logs.
+  observed releasing), so its whole lifecycle is standing → restart →
+  gone.
+- **EEMUA principles 5 & 6 are satisfied by having FEW alarms**, not by
+  managing many. The razor keeps the list short; release-on-resolve keeps
+  it live; suppression keeps it quiet. This deviates from ISA-18.2's full
+  model (acknowledge, shelve, return-to-normal-unacknowledged, and the
+  associated re-annunciation states) as a considered product decision,
+  not an omission: those states exist to manage operator attention in a
+  control room drowning in annunciators; here the attention surface is
+  the list itself, and the event history lives in the logs.
 
 ### Proto / API
 
-`SystemAlert` carries `state` (AlarmState: UNSPECIFIED / ACTIVE /
-SHELVED), `shelved_until`, `shelveable`. `first_seen` (the condition start
-of the current occurrence) IS the `first_raised` this section once
-sketched — no duplicate field was added. LifecycleService RPCs:
-`ShelveAlarm(alarm_id, duration_seconds)`, `UnshelveAlarm(alarm_id)`, each
-with an internal `local_only` flag marking the fan-out leg.
-Remove-and-renumber applies; no reserved fields — the ack RPC, the
-who/when acknowledgment fields, and the occurrences counter (structurally
-always 1 once retained-after-clear went away: delay-off resumption does
-not re-annunciate, and any true release makes the next raise a fresh
-alarm) were deleted and the remaining tags renumbered.
+`SystemAlert` carries exactly the alarm: `id`, `priority`, `source`,
+`detail`, `first_seen`, `last_seen`, `cause`, `response`,
+`software_fault`. `first_seen` (the condition start of the current
+occurrence) IS the `first_raised` this section once sketched — no
+duplicate field was added. There are no alarm lifecycle RPCs: nothing an
+operator does mutates an alarm. Remove-and-renumber applies; no reserved
+fields — the ack fields, the `state` enum, `shelved_until`, `shelveable`,
+`type_id` (its only consumer was the removed flood collapse; the CLI
+derives the type from the ID string) and the shelve/unshelve RPCs were
+deleted and the remaining tags renumbered.
 
 ### Cross-node semantics
 
 Alarms are raised per-node and aggregated for the UI via the existing
-PeerState broadcast — which carries alarms in EVERY state (`Standing()`,
-active and shelved), so any node can resolve raisers for any alarm.
-Shelve/unshelve are cluster-visible operations servable from any node: the
-serving node resolves every raiser of the alarm ID (its own collector plus
-each peer whose broadcast NodeStats carries the ID) and fans a `local_only`
-leg out to each via ForwardRPC. A cluster-wide condition raised by
-multiple nodes (vault-leaderless) is therefore shelved everywhere in one
-call. An unreachable raiser surfaces as an error naming the node — partial
-application is reported, never hidden; the operations are idempotent, so
-the operator retries.
+PeerState broadcast (`Standing()` → `NodeStats.alerts`), so the full
+attributed list is readable from any node — `GetClusterStatus` serves the
+CLI and the inspector panel identically. There are no cross-node alarm
+mutations: with ack and shelve gone, the fan-out machinery
+(raiser resolution + `local_only` ForwardRPC legs) had no remaining
+caller and was deleted with them.
 
 ## Events are log messages
 
@@ -387,11 +397,11 @@ the collector, events live in the logs, metrics live in NodeStats.
 What that means concretely:
 
 - **Every transition edge logs exactly one slog line from the collector**
-  — annunciation (including zero-delay raises), resolution (released or
-  latched-standing; the message says which), shelve (who + until),
-  unshelve, and shelve expiry. A condition that dies inside its delay-on
-  window logs **nothing** — logging it would reintroduce the chattering
-  the window suppresses. A slog-capture test pins one line per edge.
+  — annunciation (including zero-delay raises) and resolution (released
+  or latched-standing; the message says which). A condition that dies
+  inside its delay-on window logs **nothing** — logging it would
+  reintroduce the chattering the window suppresses. A slog-capture test
+  pins one line per edge.
 - **Demoted diagnostics keep their transition-edge logs**: the stats
   collector's election-storm and WAL-latency hysteresis edges, the
   chanwatch cross/resolve pair, and the ingest pipeline pressure gate's
@@ -403,72 +413,33 @@ What that means concretely:
   self ingester routes to and live under its retention — no second
   retention story, no in-memory ring that silently forgets on restart.
 
-## Rate self-monitoring
+## Rate self-monitoring — built, then removed
 
-*(Landed with phase 6 — `internal/alert/ratemonitor.go`.)*
-
-The alarm system measures its own annunciation rate (EEMUA 191 principle
-2: steady-state target ~1 alarm per operator per 10 minutes, explicit
-flood handling for upsets). A `RateMonitor` beside the collector counts
-alarm **activations** — transitions inactive → active via the collector's
-activation hook; refreshes of an already-active alarm never count — over a
-rolling 10-minute window. Over threshold it raises exactly one meta-alarm,
-`alarm-flood`, which passes the razor: the operator's action is "the alarm
-system is degraded; triage by priority, expect suppressed detail." The
-flood alarm never counts toward its own rate — a flood cannot produce a
-flood of floods. It clears once the rate has stayed under the threshold
-for a full window (the clear instant is computed from activation expiries,
-not from tick timing). The monitor's clock is injectable; every rate test
-advances it deterministically.
-
-Decisions:
-
-- **Flood scope is per-node.** The collector is per-node, so the rate is a
-  fact about one node's alarm system; each node's monitor raises its own
-  `alarm-flood`, and the aggregated UI names the flooding node. There is
-  no cluster-aggregate flood — summing rates across nodes would blur which
-  alarm system is degraded and would misfire on large healthy clusters.
-  The gauge travels as `NodeStats.alarm_rate_10m`, per-node truth that is
-  never summed.
-- **Collapse happens on the aggregation side (UI), not in the collector.**
-  Flood mode folds same-type alarms of the flooding node into one row with
-  a count, expandable to the instances on interaction
-  (`collapseFloodAlerts` in `useAlerts.ts`). Collapsing in the collector
-  would destroy per-node, per-instance truth on the wire; the display is
-  the right layer for a display concern, and the collapse is reversible
-  per interaction. `SystemAlert` carries `type_id` explicitly so grouping
-  never re-derives the type from the ID format. A non-flooding node's
-  alarms stay itemized even while another node floods.
-- **The threshold is a named, operator-adjustable cluster setting**
-  (`ClusterConfig.AlarmFloodThreshold`, default
-  `alert.DefaultFloodThreshold` = 10; stored 0 = default). It lives in the
-  Raft-replicated server settings, so a change saved on any node reaches
-  every node; each node's `alarm-rate-monitor` scheduler job converges the
-  threshold on its next tick (the discovery-based shape used by the disk
-  guard's backlog budget) and advances the flood state machine so a flood
-  clears even when no new alarms arrive. The window itself (10 minutes) is
-  fixed by the standard, not a setting.
+A full rate self-monitor was built (a per-node rolling activation window
+feeding an `alarm-flood` meta-alarm through the collector's activation
+hook, an operator-adjustable threshold in the Raft-replicated settings, a
+`NodeStats` rate gauge, and UI flood collapse) and **removed on the epic
+verdict** (see "The operator verdict" above). The recorded reasoning: the
+epic's purpose was alarm reduction, and a flood detector presumes the
+flood the razor exists to prevent. If the standing list ever outruns an
+operator again, the fix is more razor — demote or prevent the offending
+conditions — not machinery that measures the overflow. EEMUA 191's rate
+principle is satisfied by the target (few alarms), not by the meter.
 
 ## UI
 
-- Alarm list defaults to the active alarms, sorted priority then age.
+- The alarm list is flat: every standing alarm in the cluster, sorted
+  priority then age, attributed to the raising node.
 - Each alarm row expands to cause + response text from the catalog.
-- Shelve control per row (absent for unshelveable types); the shelved
-  section collapsed below.
-- Rate/flood indicator in the panel header: quiet until needed — nothing
-  at normal rates; during a flood the header pill reads "Alarm Flood" and
-  the panel shows a per-node banner naming the flooding node and its
-  10-minute rate. Flood mode collapses that node's same-type alarms into
-  one row with a count, expandable to the instances.
 - Event history is not a page: events are log messages, searched like any
   other logs (see "Events are log messages" above).
 - CLI surface: `gastrolog alerts` (per-node attribution, `--node` filter,
   `-o json`) and a standing-alarm table in `cluster status` render the
   same per-node NodeStats aggregation the panel reads, over the local
   Unix socket with no auth — alarms stay readable from a bare shell when
-  a suspended system writes no logs. The CLI's severity→display mapping
-  is a single function (`alertSeverityStr`), so the phase-2 severity →
-  priority change is a one-place edit there.
+  a suspended system writes no logs. The CLI's priority→display mapping
+  is a single function (`alarmPriorityStr`); software faults render as
+  FAULT, outranking Critical.
 
 ## Implementation phases
 
@@ -488,18 +459,22 @@ Decisions:
    DelayOn. See "Suppression semantics" above for the decisions of
    record, including the interim latching behavior until phase 4.
 4. **Lifecycle + proto + RPCs** — built (ack/shelve state machine,
-   cross-node fan-out, ack persistence journal), then the ENTIRE
-   acknowledgment layer and the journal were **removed on operator
-   verdict**; shelving and its fan-out stayed (see "State model" above for
-   the recorded decision).
+   cross-node fan-out, ack persistence journal), then **removed on
+   operator verdict** in two steps: the acknowledgment layer and journal
+   first ("lose the ACK crap"), then shelving and the whole fan-out with
+   the epic verdict ("strip management, keep prevention"). See "State
+   model" above for the recorded decisions.
 5. **Event journal** — built (ring buffer, RPC, UI page), then
    **removed on operator verdict**: events are log messages and the log
    pipeline already records, stores, and searches them (see "Events are
    log messages" above). The lifecycle transitions stay as collector slog
    lines.
-6. **Self-monitoring** ✓ — rate gauge, flood meta-alarm, flood collapse
-   (see Rate self-monitoring above for the landed shape and decisions).
-7. **Vocabulary** — ubiquitous_language.md entries land with phase 2.
+6. **Self-monitoring** — built (rate gauge, flood meta-alarm, flood
+   collapse), then **removed on the epic verdict**: management machinery
+   presumes the alarm volume the epic exists to eliminate (see "Rate
+   self-monitoring — built, then removed" above).
+7. **Vocabulary** — ubiquitous_language.md entries land with phase 2;
+   Shelve/Unshelve and alarm-flood retired with the strip.
 
 Each phase is independently shippable; phases 2–4 touch every alert call
 site and the proto and should land on one stack.

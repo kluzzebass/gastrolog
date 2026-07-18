@@ -245,7 +245,7 @@ func TestSystemAlertRows(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("got %d rows, want 1", len(rows))
 	}
-	want := []string{"alpha", "active", "CRITICAL", "raft", "reserve below floor", "2026-07-17 10:00:00 UTC"}
+	want := []string{"alpha", "CRITICAL", "raft", "reserve below floor", "2026-07-17 10:00:00 UTC"}
 	for i, w := range want {
 		if rows[0][i] != w {
 			t.Fatalf("row col %d = %q, want %q", i, rows[0][i], w)
@@ -289,25 +289,5 @@ func TestAlertsToJSON(t *testing.T) {
 	// Empty input marshals as an empty array, not null.
 	if out := alertsToJSON(nil); out == nil || len(out) != 0 {
 		t.Fatalf("empty input: got %#v, want empty non-nil slice", out)
-	}
-}
-
-// TestAlarmStateStr pins the single state→display mapping: active, and
-// shelved (with expiry) — and the default of "active" for UNSPECIFIED.
-func TestAlarmStateStr(t *testing.T) {
-	t.Parallel()
-	t0 := time.Date(2026, 7, 17, 10, 0, 0, 0, time.UTC)
-	a := mkAlert("x", v1.AlarmPriority_ALARM_PRIORITY_HIGH, "s", "d", t0)
-	if got := alarmStateStr(a); got != "active" {
-		t.Errorf("unspecified = %q, want active", got)
-	}
-	a.State = v1.AlarmState_ALARM_STATE_ACTIVE
-	if got := alarmStateStr(a); got != "active" {
-		t.Errorf("active = %q, want active", got)
-	}
-	a.State = v1.AlarmState_ALARM_STATE_SHELVED
-	a.ShelvedUntil = timestamppb.New(t0.Add(time.Hour))
-	if got := alarmStateStr(a); got != "shelved→2026-07-17 11:00:00 UTC" {
-		t.Errorf("shelved = %q", got)
 	}
 }
