@@ -55,7 +55,11 @@ func (c *unreadableCursorCM) OpenCursor(chunk.ChunkID) (chunk.RecordCursor, erro
 func TestFireRetentionEventRetainsAndFlagsUnreadableCursor(t *testing.T) {
 	t.Parallel()
 	o := newTestOrch(t, Config{LocalNodeID: "node-A"})
-	alerts := alert.New()
+	// chunk-unreadable carries a catalog DelayOn (transient I/O errors and
+	// retry backoff must not chatter); inject the clock and advance past it
+	// so the raise annunciates — never wait on wall time.
+	now := time.Date(2026, 7, 18, 6, 0, 0, 0, time.UTC)
+	alerts := alert.NewWithClock(func() time.Time { return now })
 	o.alerts = alerts
 
 	vaultID := glid.New()
@@ -89,13 +93,18 @@ func TestFireRetentionEventRetainsAndFlagsUnreadableCursor(t *testing.T) {
 	}
 
 	wantID := "chunk-unreadable:" + id.String()
+	typ, ok := alert.TypeByID("chunk-unreadable")
+	if !ok {
+		t.Fatal("chunk-unreadable missing from the alarm catalog")
+	}
+	now = now.Add(typ.DelayOn + time.Second)
 	found := false
-	for _, a := range alerts.Active() {
+	for _, a := range alerts.Standing() {
 		if a.ID == wantID {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("unreadable cursor must raise %s: the operator decides restore vs accept loss", wantID)
+		t.Fatalf("unreadable cursor must raise %s (annunciating after its %s delay-on): the operator decides restore vs accept loss", wantID, typ.DelayOn)
 	}
 }
