@@ -1010,6 +1010,19 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 		})
 	}
 
+	// Watchdog: a fan-out that stops making progress — a destination that
+	// passes its admission gate but stops draining, a jammed routing input —
+	// must abort and retain the chunk instead of parking the sweep forever
+	// (gastrolog-5ct2av). Progress is a completed submit: accepted-and-
+	// committed, per-record-dropped, or unmatched all count; only a BLOCKED
+	// submit does not.
+	watch := &progressWatch{}
+	watchDone := make(chan struct{})
+	defer close(watchDone)
+	stallTicker := time.NewTicker(retentionFanOutStallWindow)
+	defer stallTicker.Stop()
+	go runStallMonitor(watchDone, stallTicker.C, watch, abort)
+
 	jobs := make(chan chunk.Record, retentionFanOutBuffer)
 	var submitWG sync.WaitGroup
 	var dropped atomic.Int64
@@ -1044,6 +1057,7 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 					dropped.Add(1)
 					firstDropErr.CompareAndSwap(nil, subErr)
 				}
+				watch.bump()
 			}
 		})
 	}
