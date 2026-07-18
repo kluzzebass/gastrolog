@@ -37,8 +37,13 @@ below:
   (`routing.Manager.route`): delivering to the healthy subset and retaining
   the chunk would re-route the same records on the next sweep and duplicate
   them unboundedly at the healthy destinations (routing has no dedup). The
-  retention worker treats that nack as a terminal abort and retains the
-  chunk. This stays.
+  retention worker's terminal-error switch is written to treat that nack as
+  an abort — but the nack travels on the submit's ack channel, and the
+  retention submit currently passes none, so a gated destination silently
+  discards the record and the chunk is destroyed unrouted. Implementation
+  therefore carries the durability ack through `SubmitRetentionRecord` and
+  waits for it: a completed fan-out means durably committed at every
+  matched destination, and a gate rejection is a real terminal abort.
 - **Queues jam in ways gates cannot see.** `sink.deliver` is a blocking send
   into each destination's bounded segmentation queue. A destination that
   passes its admission gate but stops draining parks routing workers; parked
