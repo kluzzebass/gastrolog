@@ -24,8 +24,8 @@ const (
 // site never calls Clear, and the catalog declares the type Latching: a
 // leaked hold cannot be released by anything short of a restart, so a
 // standing alarm is the truth — enforced by the collector now, not by
-// this site's convention. Acknowledgment (the only way a latched alarm
-// clears) ships with the lifecycle phase (gastrolog-1z5gg4).
+// this site's convention. A latched alarm has no release path: it stands
+// until process restart, and the restart is what clears it.
 func (o *Orchestrator) runLockLeakReporter(ctx context.Context) {
 	if !o.mu.TrackingEnabled() {
 		return

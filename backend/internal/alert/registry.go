@@ -34,10 +34,10 @@ type AlarmType struct {
 	// DelayOff is how long the condition must stay clear before the alarm
 	// auto-clears; a re-raise inside it is the same occurrence.
 	DelayOff time.Duration
-	// Latching alarms stay active until acknowledged even after the
-	// condition clears: they release only when BOTH the condition has
-	// resolved AND an operator has acked, in either order (lifecycle phase
-	// gastrolog-1z5gg4).
+	// Latching alarms are plain sticky: they stay standing after the
+	// condition clears, until process restart. There is no release path,
+	// and that is intentional — the response to a software fault is
+	// report + restart, and a fault that "went away" is still a fault.
 	Latching bool
 	// SoftwareFault marks a defect tripwire rather than a process alarm.
 	// EEMUA 191 / ISA-18.2 treat instrument and system faults as a class

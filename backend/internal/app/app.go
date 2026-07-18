@@ -250,21 +250,9 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	// (delete /config/raft/ before starting the pod), not a silent
 	// boot-time decision.
 
+	// Alarm state is in-memory only: nothing survives restart — after a
+	// restart a re-detected condition is simply an active alarm again.
 	alertCollector := alert.New()
-
-	// Alarm lifecycle journal (gastrolog-1z5gg4): ack/shelve state survives
-	// restart via a small file under the node home. Attached before any
-	// component raises so replayed state can meet the first annunciation.
-	if err := hd.EnsureExists(); err != nil {
-		return err
-	}
-	if err := alertCollector.OpenJournal(hd.AlarmJournalPath()); err != nil {
-		// Degraded, not fatal: the alarm system runs without restart
-		// survival rather than refusing to start.
-		logger.Error("alarm lifecycle journal unavailable — ack/shelve state will not survive restart",
-			"path", hd.AlarmJournalPath(), "error", err)
-	}
-	defer alertCollector.CloseJournal()
 
 	// Alarm-rate self-monitoring (EEMUA 191): per-node rolling-window rate
 	// gauge plus the alarm-flood meta-alarm. Activations feed it via the
@@ -1470,11 +1458,11 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 				"file": blobstore.NewConnectionTester(deps.Logger),
 			},
 			PlacementReconcile:        deps.PlacementReconcile,
-			// Alarm collector for the lifecycle RPCs. Alerts was missed
-			// when the ack/shelve fan-out landed (gastrolog-1z5gg4 wired it
+			// Alarm collector for the shelving RPCs. Alerts was missed
+			// when the shelve fan-out landed (gastrolog-1z5gg4 wired it
 			// in the test harness only), which left production
-			// AckAlarm/ShelveAlarm answering "alarm lifecycle not
-			// available"; wired here (gastrolog-1m3e0d).
+			// ShelveAlarm answering "alarm lifecycle not available";
+			// wired here (gastrolog-1m3e0d).
 			Alerts:                    deps.Alerts,
 			BootstrapTokenServeSecret: deps.BootstrapTokenServeSecret,
 			BootstrapTokenFn:          deps.BootstrapTokenFn,

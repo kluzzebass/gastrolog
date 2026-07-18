@@ -148,9 +148,9 @@ type Config struct {
 	// Nil in single-node mode. Satisfies routing.UnaryForwarder.
 	RoutingForwarder routing.UnaryForwarder
 
-	// Alerts is this node's alarm collector, the persistence point for the
-	// alarm lifecycle RPCs (AckAlarm / ShelveAlarm / UnshelveAlarm). Nil
-	// disables those RPCs (some tests); production always wires it.
+	// Alerts is this node's alarm collector, the state the alarm shelving
+	// RPCs (ShelveAlarm / UnshelveAlarm) act on. Nil disables those RPCs
+	// (some tests); production always wires it.
 	Alerts *alert.Collector
 
 	// PlacementReconcile runs synchronous placement so RPC responses include

@@ -7,8 +7,6 @@ import { encode } from "../api/glid";
 
 interface AlertPanelProps {
   active: NodeAlert[];
-  acked: NodeAlert[];
-  cleared: NodeAlert[];
   shelved: NodeAlert[];
   floods: NodeFlood[];
   dark: boolean;
@@ -76,8 +74,6 @@ const SHELVE_CHOICES: ReadonlyArray<{ label: string; seconds: number }> = [
 
 export function AlertPanel({
   active,
-  acked,
-  cleared,
   shelved,
   floods,
   dark,
@@ -102,10 +98,6 @@ export function AlertPanel({
   const onError = (err: unknown) =>
     setActionError(err instanceof Error ? err.message : String(err));
   const handlers = {
-    onAck: (a: NodeAlert) => {
-      setActionError(null);
-      lifecycle.ack.mutate(a.id, { onError });
-    },
     onShelve: (a: NodeAlert, seconds: number) => {
       setActionError(null);
       lifecycle.shelve.mutate({ alarmId: a.id, durationSeconds: seconds }, { onError });
@@ -237,23 +229,9 @@ export function AlertPanel({
           })}
 
           <AlertSection
-            title="Acknowledged"
-            hint="condition standing; operator aware"
-            alerts={acked}
-            dark={dark}
-            {...handlers}
-          />
-          <AlertSection
             title="Shelved"
             hint="suppressed until expiry"
             alerts={shelved}
-            dark={dark}
-            {...handlers}
-          />
-          <AlertSection
-            title="Cleared, unacknowledged"
-            hint="fired while you were away"
-            alerts={cleared}
             dark={dark}
             {...handlers}
           />
@@ -264,12 +242,11 @@ export function AlertPanel({
 }
 
 interface RowHandlers {
-  onAck: (a: NodeAlert) => void;
   onShelve: (a: NodeAlert, seconds: number) => void;
   onUnshelve: (a: NodeAlert) => void;
 }
 
-/** A collapsed lifecycle section below the active list: quiet until opened. */
+/** A collapsed section below the active list: quiet until opened. */
 function AlertSection({
   title,
   hint,
@@ -307,18 +284,15 @@ function AlertRow({
   alarm: a,
   dark,
   nested,
-  onAck,
   onShelve,
   onUnshelve,
 }: Readonly<{ alarm: NodeAlert; dark: boolean; nested?: boolean } & RowHandlers>) {
   const c = useThemeClass(dark);
   const [expanded, setExpanded] = useState(false);
   const isShelved = a.state === AlarmState.SHELVED;
-  const isAcked = a.state === AlarmState.ACTIVE_ACKED;
-  // No shelve control at all for unshelveable types or non-standing states —
-  // an enabled control that errors on click is worse than no control.
-  const canShelve = a.shelveable && !isShelved && a.state !== AlarmState.CLEARED_UNACKED;
-  const canAck = !isAcked && !isShelved;
+  // No shelve control at all for unshelveable types — an enabled control
+  // that errors on click is worse than no control.
+  const canShelve = a.shelveable && !isShelved;
   const actionClass = c(
     "text-text-muted hover:text-text-bright",
     "text-light-text-muted hover:text-light-text-bright",
@@ -355,23 +329,10 @@ function AlertRow({
           <span>{a.nodeName}</span>
           <span>{a.source}</span>
           <span title="First seen">{formatTime(a.firstSeen?.seconds)}</span>
-          {a.occurrences > 1 && <span title="Occurrences">×{a.occurrences}</span>}
-          {isAcked && (
-            <span title={`Acknowledged by ${a.ackedBy}`}>ack {a.ackedBy}</span>
-          )}
           {isShelved && (
             <span title="Shelved until">until {formatTime(a.shelvedUntil?.seconds)}</span>
           )}
           <span className="ml-auto flex items-baseline gap-2">
-            {canAck && (
-              <button
-                onClick={() => onAck(a)}
-                className={actionClass}
-                title="Acknowledge — records your awareness; a cleared alarm is released"
-              >
-                ack
-              </button>
-            )}
             {canShelve && (
               <select
                 value=""

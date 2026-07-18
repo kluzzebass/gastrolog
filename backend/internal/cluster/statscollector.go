@@ -172,9 +172,9 @@ type PeerConnSnapshotProvider interface {
 	ResetPurposeWindows()
 }
 
-// AlertProvider exposes standing alarms for broadcast — every lifecycle
-// state (active, cleared-unacked, shelved), so any node can serve ack and
-// shelve for any raiser. Satisfied by *alert.Collector.
+// AlertProvider exposes standing alarms for broadcast — every state
+// (active, shelved), so any node can serve shelve/unshelve for any
+// raiser. Satisfied by *alert.Collector.
 type AlertProvider interface {
 	Standing() []*alert.Alarm
 }
@@ -559,12 +559,7 @@ func (c *StatsCollector) collectAlarms(stats *gastrologv1.NodeStats) {
 				FirstSeen:     timestamppb.New(a.FirstSeen),
 				LastSeen:      timestamppb.New(a.LastSeen),
 				State:         gastrologv1.AlarmState(a.State), //nolint:gosec // bounded enum
-				AckedBy:       a.AckedBy,
-				Occurrences:   uint32(max(a.Occurrences, 0)), //nolint:gosec // non-negative count
 				Shelveable:    a.Shelveable,
-			}
-			if !a.AckedAt.IsZero() {
-				pa.AckedAt = timestamppb.New(a.AckedAt)
 			}
 			if !a.ShelvedUntil.IsZero() {
 				pa.ShelvedUntil = timestamppb.New(a.ShelvedUntil)

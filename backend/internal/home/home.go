@@ -141,13 +141,6 @@ func (d Dir) SocketPath() string {
 	return filepath.Join(d.root, "gastrolog.sock")
 }
 
-// AlarmJournalPath returns the path of the alarm lifecycle journal — the
-// small append-only file that lets ack/shelve state survive node restart
-// (operator telemetry, deliberately outside config and Raft).
-func (d Dir) AlarmJournalPath() string {
-	return filepath.Join(d.root, "alarm-journal.jsonl")
-}
-
 // EnsureExists creates the home directory (and parents) if it doesn't exist.
 func (d Dir) EnsureExists() error {
 	if err := os.MkdirAll(d.root, 0o750); err != nil {

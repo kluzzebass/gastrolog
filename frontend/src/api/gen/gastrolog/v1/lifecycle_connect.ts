@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { AckAlarmRequest, AckAlarmResponse, GetClusterStatusRequest, GetClusterStatusResponse, HealthRequest, HealthResponse, JoinClusterRequest, JoinClusterResponse, RemoveNodeRequest, RemoveNodeResponse, SetNodeStateRequest, SetNodeStateResponse, SetNodeSuffrageRequest, SetNodeSuffrageResponse, ShelveAlarmRequest, ShelveAlarmResponse, ShutdownRequest, ShutdownResponse, UnshelveAlarmRequest, UnshelveAlarmResponse, WatchSystemStatusRequest, WatchSystemStatusResponse, YieldLeadershipRequest, YieldLeadershipResponse } from "./lifecycle_pb.js";
+import { GetClusterStatusRequest, GetClusterStatusResponse, HealthRequest, HealthResponse, JoinClusterRequest, JoinClusterResponse, RemoveNodeRequest, RemoveNodeResponse, SetNodeStateRequest, SetNodeStateResponse, SetNodeSuffrageRequest, SetNodeSuffrageResponse, ShelveAlarmRequest, ShelveAlarmResponse, ShutdownRequest, ShutdownResponse, UnshelveAlarmRequest, UnshelveAlarmResponse, WatchSystemStatusRequest, WatchSystemStatusResponse, YieldLeadershipRequest, YieldLeadershipResponse } from "./lifecycle_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -126,26 +126,13 @@ export const LifecycleService = {
       kind: MethodKind.ServerStreaming,
     },
     /**
-     * AckAlarm acknowledges a standing alarm by ID, recording operator
-     * awareness (who + when). Servable from ANY node: the serving node
-     * resolves every raiser of the ID (local collector + peer broadcasts)
-     * and fans the ack out to each, so a cluster-wide condition raised by
-     * multiple nodes cannot reappear unacked on the next aggregation.
-     * Latching alarms whose condition has resolved clear on ack.
-     *
-     * @generated from rpc gastrolog.v1.LifecycleService.AckAlarm
-     */
-    ackAlarm: {
-      name: "AckAlarm",
-      I: AckAlarmRequest,
-      O: AckAlarmResponse,
-      kind: MethodKind.Unary,
-    },
-    /**
      * ShelveAlarm suppresses a standing alarm for a duration. The expiry is
      * MANDATORY — a missing, zero or negative duration is rejected — and
      * unshelveable types (software faults, alarm-flood) are rejected with
-     * the reason. Same any-node fan-out semantics as AckAlarm.
+     * the reason. Servable from ANY node: the serving node resolves every
+     * raiser of the ID (local collector + peer broadcasts) and fans the
+     * shelve out to each. Shelve state is in-memory only and does not
+     * survive node restart.
      *
      * @generated from rpc gastrolog.v1.LifecycleService.ShelveAlarm
      */
@@ -156,8 +143,8 @@ export const LifecycleService = {
       kind: MethodKind.Unary,
     },
     /**
-     * UnshelveAlarm ends a shelve early, returning the alarm to its live
-     * state. Same any-node fan-out semantics as AckAlarm.
+     * UnshelveAlarm ends a shelve early, returning the alarm to ACTIVE.
+     * Same any-node fan-out semantics as ShelveAlarm.
      *
      * @generated from rpc gastrolog.v1.LifecycleService.UnshelveAlarm
      */

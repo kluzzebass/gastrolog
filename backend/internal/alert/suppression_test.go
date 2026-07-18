@@ -255,12 +255,12 @@ func TestLatchingAlarmSurvivesConditionClear(t *testing.T) {
 	if c.Count() != 1 {
 		t.Fatal("latched alarm must survive its condition clearing")
 	}
-	// Time does not clear it either — INTERIM (until gastrolog-1z5gg4
-	// ships acknowledgment) a latched alarm stands with no way to clear.
+	// Time does not clear it either — a latched alarm has no release path;
+	// it stands until process restart.
 	clk.Advance(24 * time.Hour)
 	alarms := c.Active()
 	if len(alarms) != 1 {
-		t.Fatal("latched alarm must stand until acknowledgment exists")
+		t.Fatal("latched alarm must stand until process restart")
 	}
 	if !alarms[0].SoftwareFault {
 		t.Error("lock-leak must remain a software fault through suppression")

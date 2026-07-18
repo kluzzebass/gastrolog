@@ -11,8 +11,8 @@ import { PerRouteStats, VaultRouteStats } from "./system_pb.js";
 import { ChunkPlan, HistogramBucket, TableResult } from "./query_pb.js";
 
 /**
- * AlarmState is the lifecycle state of a standing alarm (EEMUA 191
- * principles 5 & 6 — a bare set/clear bit cannot express standing alarms).
+ * AlarmState is the state of a standing alarm: alarms stand while the
+ * condition holds, clear when it resolves, and can be temporarily shelved.
  *
  * @generated from enum gastrolog.v1.AlarmState
  */
@@ -23,47 +23,27 @@ export enum AlarmState {
   UNSPECIFIED = 0,
 
   /**
-   * Condition annunciated, operator has not acknowledged. Also the state of
-   * a latching alarm whose condition resolved before acknowledgment — it
-   * stands until acked.
+   * Condition annunciated and standing. Also the state of a latching alarm
+   * whose condition resolved — it stands until process restart.
    *
-   * @generated from enum value: ALARM_STATE_ACTIVE_UNACKED = 1;
+   * @generated from enum value: ALARM_STATE_ACTIVE = 1;
    */
-  ACTIVE_UNACKED = 1,
-
-  /**
-   * Condition still true, operator has acknowledged (who/when in
-   * acked_by/acked_at). Clears silently when the condition resolves.
-   *
-   * @generated from enum value: ALARM_STATE_ACTIVE_ACKED = 2;
-   */
-  ACTIVE_ACKED = 2,
-
-  /**
-   * Condition resolved while unacknowledged (non-latching): retained so "it
-   * fired while you were away" stays visible without blocking the active
-   * list. Acknowledgment releases it.
-   *
-   * @generated from enum value: ALARM_STATE_CLEARED_UNACKED = 3;
-   */
-  CLEARED_UNACKED = 3,
+  ACTIVE = 1,
 
   /**
    * Operator-shelved until shelved_until. Visible in a collapsed section,
-   * never silently gone; expiry with the condition still true returns it to
-   * ACTIVE_UNACKED.
+   * never silently gone; expiry with the condition still true returns it
+   * to ACTIVE.
    *
-   * @generated from enum value: ALARM_STATE_SHELVED = 4;
+   * @generated from enum value: ALARM_STATE_SHELVED = 2;
    */
-  SHELVED = 4,
+  SHELVED = 2,
 }
 // Retrieve enum metadata with: proto3.getEnumType(AlarmState)
 proto3.util.setEnumType(AlarmState, "gastrolog.v1.AlarmState", [
   { no: 0, name: "ALARM_STATE_UNSPECIFIED" },
-  { no: 1, name: "ALARM_STATE_ACTIVE_UNACKED" },
-  { no: 2, name: "ALARM_STATE_ACTIVE_ACKED" },
-  { no: 3, name: "ALARM_STATE_CLEARED_UNACKED" },
-  { no: 4, name: "ALARM_STATE_SHELVED" },
+  { no: 1, name: "ALARM_STATE_ACTIVE" },
+  { no: 2, name: "ALARM_STATE_SHELVED" },
 ]);
 
 /**
@@ -1188,10 +1168,9 @@ export class PeerTrafficTotal extends Message<PeerTrafficTotal> {
  * action, with priority, cause and response stamped from the static alarm
  * catalog — never chosen at the raising call site.
  * Alarms are keyed by ID for deduplication — the same condition doesn't
- * create multiple alarms. Each carries its lifecycle state (EEMUA 191
- * standing-alarm management): non-latching alarms auto-clear when the
- * raising component detects the condition resolved AND the operator has
- * acknowledged; latching alarms clear only via acknowledgment.
+ * create multiple alarms. Alarms are STATE with suppression: they stand
+ * while the condition holds, clear when it resolves, and can be
+ * temporarily shelved. Latching alarms stand until process restart.
  *
  * @generated from message gastrolog.v1.SystemAlert
  */
@@ -1272,53 +1251,28 @@ export class SystemAlert extends Message<SystemAlert> {
   typeId = "";
 
   /**
-   * Lifecycle state (see AlarmState). Alarms in every state travel on the
-   * wire; consumers filter — the active list, the shelved and
-   * cleared-unacknowledged sections, and cross-node ack fan-out all read
-   * this one field.
+   * State (see AlarmState). Alarms in every state travel on the wire;
+   * consumers filter — the active list, the shelved section, and
+   * cross-node shelve fan-out all read this one field.
    *
    * @generated from field: gastrolog.v1.AlarmState state = 11;
    */
   state = AlarmState.UNSPECIFIED;
 
   /**
-   * Operator acknowledgment: who and when. Empty/absent until acked.
-   *
-   * @generated from field: string acked_by = 12;
-   */
-  ackedBy = "";
-
-  /**
-   * @generated from field: google.protobuf.Timestamp acked_at = 13;
-   */
-  ackedAt?: Timestamp;
-
-  /**
    * Shelve expiry. Set only while state is SHELVED — shelves always carry
    * an expiry; there are no permanent shelves.
    *
-   * @generated from field: google.protobuf.Timestamp shelved_until = 14;
+   * @generated from field: google.protobuf.Timestamp shelved_until = 12;
    */
   shelvedUntil?: Timestamp;
-
-  /**
-   * Count of distinct condition occurrences that have annunciated for this
-   * alarm ID since it became standing. An occurrence is the suppression
-   * notion: a continuous condition episode — a clear-and-return inside the
-   * type's delay-off window is the SAME occurrence; a return after the
-   * alarm reached cleared-unacknowledged is a new one (and resets the
-   * operator's acknowledgment).
-   *
-   * @generated from field: uint32 occurrences = 15;
-   */
-  occurrences = 0;
 
   /**
    * Whether operators may shelve this alarm. False for types where deferral
    * is meaningless (software faults, alarm-flood) — the UI must not render
    * a shelve control at all, and ShelveAlarm rejects with the reason.
    *
-   * @generated from field: bool shelveable = 16;
+   * @generated from field: bool shelveable = 13;
    */
   shelveable = false;
 
@@ -1341,11 +1295,8 @@ export class SystemAlert extends Message<SystemAlert> {
     { no: 9, name: "software_fault", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 10, name: "type_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 11, name: "state", kind: "enum", T: proto3.getEnumType(AlarmState) },
-    { no: 12, name: "acked_by", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 13, name: "acked_at", kind: "message", T: Timestamp },
-    { no: 14, name: "shelved_until", kind: "message", T: Timestamp },
-    { no: 15, name: "occurrences", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
-    { no: 16, name: "shelveable", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 12, name: "shelved_until", kind: "message", T: Timestamp },
+    { no: 13, name: "shelveable", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SystemAlert {

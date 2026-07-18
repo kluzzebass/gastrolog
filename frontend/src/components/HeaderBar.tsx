@@ -101,10 +101,10 @@ export function HeaderBar({
 
   const { totalCpu, totalMemory, totalStorage } = sumClusterStats(nodes);
 
-  const { alerts, active, acked, cleared, shelved, maxRank, floods } = useAlerts();
-  // The pill counts standing conditions (active + acked); shelved and
-  // cleared-unacked live in the panel's collapsed sections and stay quiet.
-  const standingCount = active.length + acked.length;
+  const { alerts, active, shelved, maxRank, floods } = useAlerts();
+  // The pill counts active alarms; shelved alarms live in the panel's
+  // collapsed section and stay quiet.
+  const standingCount = active.length;
   const [alertPanelOpen, setAlertPanelOpen] = useState(false);
   // Highest alarm rank → design token: Critical/faults on the error token,
   // High on warn, Low on the info token.
@@ -123,9 +123,8 @@ export function HeaderBar({
 
   // Flood indicator: quiet until needed — the pill reads as a plain alert
   // count at normal rates and names the flood only while one is active.
-  // With nothing standing but cleared/shelved alarms retained, the pill
-  // stays reachable (they are never silently gone) with a quiet label.
-  const restingCount = cleared.length + shelved.length;
+  // With nothing active but shelved alarms retained, the pill stays
+  // reachable (they are never silently gone) with a quiet label.
   const alertNoun = standingCount === 1 ? "Alert" : "Alerts";
   const floodSummary = floods.map((f) => `${f.nodeName} (${f.rate} in 10 min)`).join(", ");
   let alertPillTitle = `${standingCount} active ${alertNoun.toLowerCase()}`;
@@ -133,10 +132,9 @@ export function HeaderBar({
   if (floods.length > 0) {
     alertPillTitle = `Alarm flood: ${floodSummary}`;
     alertPillText = `Alarm Flood — ${standingCount} ${alertNoun}`;
-  } else if (standingCount === 0 && restingCount > 0) {
-    alertPillTitle = `${restingCount} cleared or shelved alarm${restingCount === 1 ? "" : "s"}`;
-    alertPillText =
-      cleared.length > 0 ? `${cleared.length} Cleared` : `${shelved.length} Shelved`;
+  } else if (standingCount === 0 && shelved.length > 0) {
+    alertPillTitle = `${shelved.length} shelved alarm${shelved.length === 1 ? "" : "s"}`;
+    alertPillText = `${shelved.length} Shelved`;
   }
 
   return (
@@ -295,8 +293,6 @@ export function HeaderBar({
       {alertPanelOpen && (
         <AlertPanel
           active={active}
-          acked={acked}
-          cleared={cleared}
           shelved={shelved}
           floods={floods}
           dark={dark}

@@ -1,18 +1,16 @@
 package server
 
-// Alarm lifecycle RPCs (gastrolog-1z5gg4): AckAlarm, ShelveAlarm,
-// UnshelveAlarm. Cluster-first: alarms are raised per-node and aggregated
-// via the PeerState broadcast, so the node serving one of these RPCs is
-// usually NOT the node whose collector holds the alarm. The serving node
-// resolves every raiser of the alarm ID — its own collector plus each
-// peer whose broadcast NodeStats carries the ID — applies locally where
-// applicable, and forwards a local_only leg to every remote raiser via
-// ForwardRPC. A cluster-wide condition raised by multiple nodes (e.g.
-// vault-leaderless on every orchestrator) therefore acks everywhere in one
-// call, and cannot reappear unacked on the next aggregation. Forward
-// failures surface as errors naming the unreachable nodes — never
-// silently dropped; the operations are idempotent, so the operator
-// retries.
+// Alarm shelving RPCs: ShelveAlarm, UnshelveAlarm. Cluster-first: alarms
+// are raised per-node and aggregated via the PeerState broadcast, so the
+// node serving one of these RPCs is usually NOT the node whose collector
+// holds the alarm. The serving node resolves every raiser of the alarm ID
+// — its own collector plus each peer whose broadcast NodeStats carries the
+// ID — applies locally where applicable, and forwards a local_only leg to
+// every remote raiser via ForwardRPC. A cluster-wide condition raised by
+// multiple nodes (e.g. vault-leaderless on every orchestrator) is
+// therefore shelved everywhere in one call. Forward failures surface as
+// errors naming the unreachable nodes — never silently dropped; the
+// operations are idempotent, so the operator retries.
 
 import (
 	"context"
@@ -34,14 +32,14 @@ import (
 
 // SetAlarmLifecycle wires the local alarm collector and the cluster
 // forwarder into the lifecycle server. alerts nil disables the alarm
-// lifecycle RPCs; forwarder nil limits them to locally-raised alarms
+// shelving RPCs; forwarder nil limits them to locally-raised alarms
 // (single-node mode).
 func (s *LifecycleServer) SetAlarmLifecycle(alerts *alert.Collector, forwarder routing.UnaryForwarder) {
 	s.alerts = alerts
 	s.alarmForwarder = forwarder
 }
 
-// alarmLifecycleErr maps collector lifecycle errors to Connect codes.
+// alarmLifecycleErr maps collector shelving errors to Connect codes.
 func alarmLifecycleErr(err error) error {
 	switch {
 	case errors.Is(err, alert.ErrUnknownAlarm):
@@ -49,7 +47,6 @@ func alarmLifecycleErr(err error) error {
 	case errors.Is(err, alert.ErrShelveExpiryRequired):
 		return connect.NewError(connect.CodeInvalidArgument, err)
 	case errors.Is(err, alert.ErrNotShelveable),
-		errors.Is(err, alert.ErrAlarmCleared),
 		errors.Is(err, alert.ErrNotShelved):
 		return connect.NewError(connect.CodeFailedPrecondition, err)
 	default:
@@ -57,7 +54,7 @@ func alarmLifecycleErr(err error) error {
 	}
 }
 
-// operatorIdentity resolves who to record on an ack/shelve. The explicit
+// operatorIdentity resolves who to record on a shelve. The explicit
 // request field wins: the Unix-socket CLI supplies the OS username (its
 // no-auth context only carries the synthetic "admin" claims), and forwarded
 // fan-out legs carry the identity already resolved by the serving node —
@@ -77,8 +74,8 @@ func operatorIdentity(ctx context.Context, fromRequest string) string {
 
 // alarmRaisers resolves which nodes currently raise the given alarm ID:
 // the local collector and every peer whose latest broadcast NodeStats
-// carries it (in any lifecycle state — an ack must reach a raiser whose
-// alarm has already moved to cleared-unacked).
+// carries it (in any state — a shelve must reach a raiser whose alarm is
+// already shelved so the expiry refreshes everywhere).
 func (s *LifecycleServer) alarmRaisers(alarmID string) (local bool, remote []string) {
 	if s.alerts != nil && s.alerts.HasStanding(alarmID) {
 		local = true
@@ -112,8 +109,8 @@ func (s *LifecycleServer) alarmRaisers(alarmID string) (local bool, remote []str
 // alarmForwardTimeout caps each remote fan-out leg. Same rationale as
 // peerInspectorTimeout: comfortably above a healthy round-trip, well below
 // operator patience; an unreachable raiser surfaces as an error (never
-// silently elided — a half-applied ack that looks whole would let the
-// alarm reappear).
+// silently elided — a half-applied shelve that looks whole would leave the
+// alarm standing on the missed node).
 const alarmForwardTimeout = 3 * time.Second
 
 // fanOutAlarmOp applies an alarm lifecycle operation cluster-wide: local
@@ -168,40 +165,6 @@ func (s *LifecycleServer) fanOutAlarmOp(
 				op, alarmID, applied, strings.Join(failures, ", ")))
 	}
 	return applied, nil
-}
-
-// AckAlarm acknowledges a standing alarm on every node that raises it.
-func (s *LifecycleServer) AckAlarm(
-	ctx context.Context,
-	req *connect.Request[apiv1.AckAlarmRequest],
-) (*connect.Response[apiv1.AckAlarmResponse], error) {
-	if s.alerts == nil {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("alarm lifecycle not available on this node"))
-	}
-	alarmID := string(req.Msg.AlarmId)
-	if alarmID == "" {
-		return nil, errRequired("alarm_id")
-	}
-	by := operatorIdentity(ctx, req.Msg.AckedBy)
-
-	if req.Msg.LocalOnly {
-		// Fan-out leg from the serving node: apply to this collector only.
-		if err := s.alerts.Ack(alarmID, by); err != nil {
-			return nil, alarmLifecycleErr(err)
-		}
-		return connect.NewResponse(&apiv1.AckAlarmResponse{Applied: 1}), nil
-	}
-
-	applied, err := s.fanOutAlarmOp(ctx, "ack", alarmID,
-		func() error { return s.alerts.Ack(alarmID, by) },
-		func(fctx context.Context, nodeID string) error {
-			return s.forwardAlarmOp(fctx, nodeID, gastrologv1connect.LifecycleServiceAckAlarmProcedure,
-				&apiv1.AckAlarmRequest{AlarmId: req.Msg.AlarmId, AckedBy: by, LocalOnly: true}, &apiv1.AckAlarmResponse{})
-		})
-	if err != nil {
-		return nil, err
-	}
-	return connect.NewResponse(&apiv1.AckAlarmResponse{Applied: applied}), nil
 }
 
 // ShelveAlarm shelves a standing alarm on every node that raises it. The

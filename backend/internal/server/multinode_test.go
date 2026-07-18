@@ -115,11 +115,6 @@ type mnConfig struct {
 	// alertClock, when set, is the deterministic clock every node's
 	// alert.Collector runs on (gastrolog-4wvxqh).
 	alertClock func() time.Time
-	// alertJournalDir, when set, attaches each node's alert.Collector to a
-	// lifecycle journal at <dir>/<nodeID>.jsonl. A second harness on the
-	// same dir simulates a whole-cluster restart with journal replay
-	// (gastrolog-1z5gg4). Implies the WithClusterStats wiring.
-	alertJournalDir string
 }
 
 // WithoutVault creates a node that has an orchestrator but no vault.
@@ -158,17 +153,6 @@ func WithAlertClock(now func() time.Time) mnOption {
 	return func(c *mnConfig) {
 		c.clusterStats = true
 		c.alertClock = now
-	}
-}
-
-// WithAlertJournalDir attaches each node's alert.Collector to a lifecycle
-// journal under dir, keyed by node ID. Setting up a second harness on the
-// same dir simulates restart-with-replay (gastrolog-1z5gg4). Implies the
-// WithClusterStats wiring.
-func WithAlertJournalDir(dir string) mnOption {
-	return func(c *mnConfig) {
-		c.clusterStats = true
-		c.alertJournalDir = dir
 	}
 }
 
@@ -259,20 +243,13 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 	// (gastrolog-33d9n2). Assigned conditionally so tests without the option
 	// keep the nil interfaces of single-node mode. Built BEFORE the unary
 	// forwarder so the remote internal handlers carry their node's collector
-	// — the persistence point for forwarded ack/shelve legs
-	// (gastrolog-1z5gg4).
+	// — the state forwarded shelve legs act on.
 	alertsByNode := make(map[string]*alert.Collector, len(nodeIDs))
 	if cfg.clusterStats {
 		for _, id := range nodeIDs {
 			ac := alert.New()
 			if cfg.alertClock != nil {
 				ac = alert.NewWithClock(cfg.alertClock)
-			}
-			if cfg.alertJournalDir != "" {
-				if err := ac.OpenJournal(filepath.Join(cfg.alertJournalDir, id+".jsonl")); err != nil {
-					t.Fatalf("open alert journal for %s: %v", id, err)
-				}
-				t.Cleanup(ac.CloseJournal)
 			}
 			alertsByNode[id] = ac
 		}

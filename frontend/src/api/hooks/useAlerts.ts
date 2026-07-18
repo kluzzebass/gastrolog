@@ -63,21 +63,10 @@ export function alarmRank(a: Pick<NodeAlert, "priority" | "softwareFault">): num
   return a.priority; // CRITICAL=3, HIGH=2, LOW=1, UNSPECIFIED=0
 }
 
-/** Lifecycle section of an alarm (gastrolog-1z5gg4). UNSPECIFIED (a
- *  pre-lifecycle broadcast) reads as active-unacked. */
-export function alarmSection(
-  a: Pick<NodeAlert, "state">,
-): "active" | "acked" | "cleared" | "shelved" {
-  switch (a.state) {
-    case AlarmState.ACTIVE_ACKED:
-      return "acked";
-    case AlarmState.CLEARED_UNACKED:
-      return "cleared";
-    case AlarmState.SHELVED:
-      return "shelved";
-    default:
-      return "active";
-  }
+/** Panel section of an alarm: shelved alarms collapse below the active
+ *  list. UNSPECIFIED reads as active. */
+export function alarmSection(a: Pick<NodeAlert, "state">): "active" | "shelved" {
+  return a.state === AlarmState.SHELVED ? "shelved" : "active";
 }
 
 /** Sort in place: highest rank first, oldest first within a rank. */
@@ -98,8 +87,6 @@ export function useAlerts() {
     return {
       alerts: [] as NodeAlert[],
       active: [] as NodeAlert[],
-      acked: [] as NodeAlert[],
-      cleared: [] as NodeAlert[],
       shelved: [] as NodeAlert[],
       maxRank: 0,
       floods: [] as NodeFlood[],
@@ -125,34 +112,19 @@ export function useAlerts() {
   }
   sortAlerts(alerts);
 
-  // Lifecycle sections (gastrolog-1z5gg4): the active list is
-  // active-unacked; acknowledged, shelved and cleared-unacked render in
-  // collapsed sections below it.
+  // The default view is simply the active alarms; shelved alarms collapse
+  // below.
   const active: NodeAlert[] = [];
-  const acked: NodeAlert[] = [];
-  const cleared: NodeAlert[] = [];
   const shelved: NodeAlert[] = [];
   for (const a of alerts) {
-    switch (alarmSection(a)) {
-      case "acked":
-        acked.push(a);
-        break;
-      case "cleared":
-        cleared.push(a);
-        break;
-      case "shelved":
-        shelved.push(a);
-        break;
-      default:
-        active.push(a);
-    }
+    if (alarmSection(a) === "shelved") shelved.push(a);
+    else active.push(a);
   }
 
-  // The header pill reflects standing conditions demanding or holding
-  // attention (active + acked); shelved and cleared-unacked stay quiet.
+  // The header pill reflects standing conditions demanding attention
+  // (active); shelved alarms stay quiet.
   let maxRank = 0;
   for (const a of active) maxRank = Math.max(maxRank, alarmRank(a));
-  for (const a of acked) maxRank = Math.max(maxRank, alarmRank(a));
 
-  return { alerts, active, acked, cleared, shelved, maxRank, floods };
+  return { alerts, active, shelved, maxRank, floods };
 }

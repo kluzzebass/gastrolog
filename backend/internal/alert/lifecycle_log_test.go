@@ -63,10 +63,10 @@ func spyDefaultLogger(t *testing.T) *logSpy {
 }
 
 // TestLifecycleTransitionsLogExactlyOneLineEach drives the full lifecycle —
-// raise → ack → clear (released) → re-raise → shelve → unshelve → re-shelve
-// → shelve expiry → clear (retained) → releasing ack — and asserts exactly
-// one slog line per transition edge, in order, with the operator identity on
-// the operator actions. Reads settle state in between and must add nothing.
+// raise → clear (released) → re-raise → shelve → unshelve → re-shelve →
+// shelve expiry → clear (released) — and asserts exactly one slog line per
+// transition edge, in order, with the operator identity on the operator
+// actions. Reads settle state in between and must add nothing.
 func TestLifecycleTransitionsLogExactlyOneLineEach(t *testing.T) {
 	spy := spyDefaultLogger(t)
 	clk := newSuppressionClock()
@@ -76,13 +76,10 @@ func TestLifecycleTransitionsLogExactlyOneLineEach(t *testing.T) {
 	c.Raise("wal-reserve", "cluster-ctl", "reservation below floor")
 	c.Standing() // reads must not double-log
 	c.Standing()
-	if err := c.Ack("wal-reserve:cluster-ctl", "op"); err != nil {
-		t.Fatalf("Ack: %v", err)
-	}
-	c.Clear("wal-reserve", "cluster-ctl") // acked → released
+	c.Clear("wal-reserve", "cluster-ctl") // released
 	c.Standing()
 
-	// Second occurrence: shelve, early unshelve, re-shelve, lapsed expiry.
+	// Second firing: shelve, early unshelve, re-shelve, lapsed expiry.
 	c.Raise("wal-reserve", "cluster-ctl", "reservation below floor again")
 	if _, err := c.Shelve("wal-reserve:cluster-ctl", time.Hour, "op"); err != nil {
 		t.Fatalf("Shelve: %v", err)
@@ -95,11 +92,7 @@ func TestLifecycleTransitionsLogExactlyOneLineEach(t *testing.T) {
 	}
 	clk.Advance(2 * time.Hour)
 	c.Standing() // lazy settle runs the expiry
-	c.Clear("wal-reserve", "cluster-ctl") // unacked → retained cleared-unacked
-	c.Standing()
-	if err := c.Ack("wal-reserve:cluster-ctl", "op"); err != nil {
-		t.Fatalf("Ack of cleared-unacked: %v", err)
-	}
+	c.Clear("wal-reserve", "cluster-ctl") // released
 	c.Standing()
 
 	want := []struct {
@@ -108,15 +101,13 @@ func TestLifecycleTransitionsLogExactlyOneLineEach(t *testing.T) {
 		by    string // expected operator identity attr value; "" = none
 	}{
 		{slog.LevelWarn, "alarm raised", ""},
-		{slog.LevelInfo, "alarm acknowledged", "op"},
 		{slog.LevelInfo, "alarm cleared — condition resolved", ""},
 		{slog.LevelWarn, "alarm raised", ""},
 		{slog.LevelInfo, "alarm shelved", "op"},
 		{slog.LevelInfo, "alarm unshelved", ""},
 		{slog.LevelInfo, "alarm shelved", "op"},
 		{slog.LevelInfo, "alarm shelve expired — returned to the active list", ""},
-		{slog.LevelInfo, "alarm cleared — condition resolved; retained until acknowledged", ""},
-		{slog.LevelInfo, "alarm acknowledged and released — condition already resolved", "op"},
+		{slog.LevelInfo, "alarm cleared — condition resolved", ""},
 	}
 	got := spy.lines()
 	if len(got) != len(want) {
@@ -133,17 +124,13 @@ func TestLifecycleTransitionsLogExactlyOneLineEach(t *testing.T) {
 		if id := g.attrs["id"]; id != "wal-reserve:cluster-ctl" {
 			t.Errorf("line %d (%q) id = %q, want the full alarm ID", i, g.msg, id)
 		}
-		by := g.attrs["acked_by"]
-		if by == "" {
-			by = g.attrs["shelved_by"]
-		}
-		if by != w.by {
+		if by := g.attrs["shelved_by"]; by != w.by {
 			t.Errorf("line %d (%q) operator identity = %q, want %q", i, g.msg, by, w.by)
 		}
 	}
 	// The shelve lines carry the mandatory expiry.
-	if got[4].attrs["until"] == "" || got[6].attrs["until"] == "" {
-		t.Errorf("shelve lines must carry the expiry: %+v %+v", got[4], got[6])
+	if got[3].attrs["until"] == "" || got[5].attrs["until"] == "" {
+		t.Errorf("shelve lines must carry the expiry: %+v %+v", got[3], got[5])
 	}
 }
 
@@ -192,8 +179,9 @@ func TestDelayedAnnunciationLogsOnce(t *testing.T) {
 	}
 }
 
-// TestLatchedAlarmLogs: condition resolves before ack → one latched-standing
-// line, then the releasing ack → one line.
+// TestLatchedAlarmLogs: the condition resolving on a latched alarm logs one
+// latched-standing line — and nothing more, because there is no release
+// path. Repeat reads add nothing.
 func TestLatchedAlarmLogs(t *testing.T) {
 	spy := spyDefaultLogger(t)
 	clk := newSuppressionClock()
@@ -212,14 +200,13 @@ func TestLatchedAlarmLogs(t *testing.T) {
 	}
 	c.Raise(latchingID, "inst", "latched condition")
 	c.Clear(latchingID, "inst")
-	if err := c.Ack(latchingID+":inst", "op"); err != nil {
-		t.Fatalf("Ack: %v", err)
-	}
+	clk.Advance(24 * time.Hour)
+	c.Standing()
+	c.Standing()
 
 	wantMsgs := []string{
 		"alarm raised",
-		"alarm condition cleared but the alarm is latched — standing until operator acknowledgment",
-		"alarm acknowledged and released — condition already resolved",
+		"alarm condition cleared but the alarm is latched — standing until process restart",
 	}
 	lines := spy.lines()
 	if len(lines) != len(wantMsgs) {
