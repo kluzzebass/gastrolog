@@ -252,7 +252,11 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 
 	// Alarm state is in-memory only: nothing survives restart — after a
 	// restart a re-detected condition is simply a standing alarm again.
+	// The configured logger routes transition lines through the same
+	// handler chain as every other component (structured format, captured
+	// by the self-ingester) — never the bare slog package globals.
 	alertCollector := alert.New()
+	alertCollector.SetLogger(logger.With("component", "alert"))
 
 	configSignal := notify.NewSignal()
 	statsSignal := notify.NewSignal()

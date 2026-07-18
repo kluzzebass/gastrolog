@@ -142,6 +142,15 @@ type Collector struct {
 	// suppression tests advance time deterministically — never with
 	// sleeps.
 	now func() time.Time
+
+	// logger carries the alarm transition lines (raised / cleared /
+	// latched-standing / unknown-type). It MUST be the app's configured
+	// logger, never the bare slog package globals: transition lines are the
+	// alarm system's event record, and only the configured handler chain
+	// formats them like every other component and feeds them through the
+	// self-ingester. Wired once at startup via SetLogger, before any
+	// component raises.
+	logger *slog.Logger
 }
 
 // New creates a new alarm collector on the wall clock.
@@ -155,6 +164,17 @@ func NewWithClock(now func() time.Time) *Collector {
 	return &Collector{
 		entries: make(map[string]*entry),
 		now:     now,
+		logger:  slog.Default(),
+	}
+}
+
+// SetLogger routes the collector's transition lines through the app's
+// configured logger. Call once at startup, before components start raising.
+func (c *Collector) SetLogger(l *slog.Logger) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if l != nil {
+		c.logger = l
 	}
 }
 
@@ -181,7 +201,7 @@ func alarmID(typeID, instanceKey string) string {
 func (c *Collector) Raise(typeID, instanceKey, detail string) {
 	t, ok := TypeByID(typeID)
 	if !ok {
-		slog.Error("alarm raised for a type missing from the alarm catalog — software defect in the raising component",
+		c.logger.Error("alarm raised for a type missing from the alarm catalog — software defect in the raising component",
 			"type", typeID, "instance", instanceKey, "detail", detail)
 		t = unregisteredAlarmType(typeID)
 	}
@@ -281,12 +301,12 @@ func (c *Collector) Clear(typeID, instanceKey string) {
 	e.conditionUp = false
 	e.clearedAt = now
 	if e.latching {
-		slog.Info("alarm condition cleared but the alarm is latched — standing until process restart",
+		c.logger.Info("alarm condition cleared but the alarm is latched — standing until process restart",
 			"id", e.alarm.ID, "source", e.alarm.Source)
 		return
 	}
 	if e.delayOff <= 0 {
-		slog.Info("alarm cleared — condition resolved",
+		c.logger.Info("alarm cleared — condition resolved",
 			"id", e.alarm.ID, "source", e.alarm.Source)
 		c.removeLocked(id)
 	}
@@ -309,7 +329,7 @@ func (c *Collector) settleLocked(e *entry, now time.Time) (expired bool) {
 		// The condition resolved when its delay-off window closed: the
 		// alarm releases, full stop — lazy settling reaches the same state
 		// no matter when the next read runs.
-		slog.Info("alarm cleared — condition stayed clear past its delay-off window",
+		c.logger.Info("alarm cleared — condition stayed clear past its delay-off window",
 			"id", e.alarm.ID, "source", e.alarm.Source, "delay_off", e.delayOff)
 		return true
 	}
@@ -327,10 +347,10 @@ func (c *Collector) activateLocked(e *entry) {
 	// them). Call sites cannot log this edge: they no longer know when a
 	// delay-on window elapses, and zero-delay raisers refresh every tick.
 	if e.delayOn > 0 {
-		slog.Warn("alarm active — condition persisted past its delay-on window",
+		c.logger.Warn("alarm active — condition persisted past its delay-on window",
 			"id", e.alarm.ID, "source", e.alarm.Source, "delay_on", e.delayOn, "detail", e.alarm.Detail)
 	} else {
-		slog.Warn("alarm raised",
+		c.logger.Warn("alarm raised",
 			"id", e.alarm.ID, "source", e.alarm.Source, "detail", e.alarm.Detail)
 	}
 }
