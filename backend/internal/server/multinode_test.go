@@ -3,6 +3,7 @@ package server_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"gastrolog/internal/glid"
 	"io"
@@ -2970,16 +2971,19 @@ func TestMultiNode_RetentionSubmitDefersOnRemoteCappedDestination(t *testing.T) 
 	// Sweep-node independence: the gate verdict is identical from either node.
 	for _, node := range []multinodeTestNode{d1, d2} {
 		err := node.orch.SubmitRetentionRecord(ctx, d1.vaultID, rec, "")
-		if err == nil || !strings.Contains(err.Error(), "size budget") {
+		if !errors.Is(err, orchestrator.ErrVaultMaxSize) {
 			t.Fatalf("submit on %s: want vault size-budget rejection, got %v", node.nodeID, err)
 		}
 	}
 
-	// Cap released: the same submit drains and the record is routed.
+	// Cap released: the rejected record is retryable and now drains.
 	d1.orch.SetRemoteVaultSizeCapped(func(glid.GLID) bool { return false })
 	d2.orch.SetRemoteVaultSizeCapped(func(glid.GLID) bool { return false })
+	if err := d1.orch.SubmitRetentionRecord(ctx, d1.vaultID, rec, ""); err != nil {
+		t.Fatalf("retry after cap release: %v", err)
+	}
 	submitMNRouteRecords(t, d1, "k", "v", "expired", 3)
 	waitForMNRouteStats(t, h.configClient, func(m *gastrologv1.GetRouteStatsResponse) bool {
-		return m.TotalMatched >= 3
+		return m.TotalMatched >= 4
 	})
 }
