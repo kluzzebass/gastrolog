@@ -29,7 +29,27 @@ const (
 	// channel handle event-driven reconciles; this scheduled tick is
 	// the periodic safety net for cases neither path catches.
 	placementReconcileSchedule = "*/15 * * * * *"
+
+	// Alarm type IDs raised by the placement manager; the instance key is
+	// the vault ID. The two unplaced conditions are separate alarm types
+	// (split from the old vault-unplaced ID): a selected node missing the
+	// required storage class and no eligible node at all have different
+	// causes and different operator responses.
+	softOfflineAlarmType         = "vault-soft-offline-leader"
+	storageClassMissingAlarmType = "vault-storage-class-missing"
+	noEligibleNodeAlarmType      = "vault-no-eligible-node"
+	homeCannotStoreAlarmType     = "vault-home-cannot-store"
 )
+
+// clearUnplacedAlarms clears both unplaced-condition alarms for a vault —
+// called when the vault has a valid, eligible leader placement.
+func (pm *placementManager) clearUnplacedAlarms(v system.VaultConfig) {
+	if pm.alerts == nil {
+		return
+	}
+	pm.alerts.Clear(storageClassMissingAlarmType, v.ID.String())
+	pm.alerts.Clear(noEligibleNodeAlarmType, v.ID.String())
+}
 
 // placementManager assigns vaults to nodes automatically.
 // Runs on every node but only acts when this node is the Raft leader.
@@ -39,7 +59,7 @@ type placementManager struct {
 	clusterSrv  *cluster.Server
 	peerState   *cluster.PeerState
 	factories   *orchestrator.Factories
-	alerts      orchestrator.AlertCollector
+	alerts      alert.Sink
 	localNodeID string
 	logger      *slog.Logger
 	triggerCh   chan struct{} // poked to run reconcile immediately
@@ -208,8 +228,6 @@ func (pm *placementManager) reportDegradedHomes(ctx context.Context, v system.Va
 	if pm.alerts == nil {
 		return
 	}
-	alertKey := fmt.Sprintf("vault-home-cannot-store:%s", v.ID)
-
 	placements, _ := pm.cfgStore.GetVaultPlacements(ctx, v.ID)
 	homes := make(map[string]bool)
 	if leader := system.LeaderNodeID(placements, nscs); leader != "" {
@@ -221,7 +239,7 @@ func (pm *placementManager) reportDegradedHomes(ctx context.Context, v system.Va
 		}
 	}
 	if len(homes) == 0 {
-		pm.alerts.Clear(alertKey)
+		pm.alerts.Clear(homeCannotStoreAlarmType, v.ID.String())
 		return
 	}
 
@@ -236,7 +254,7 @@ func (pm *placementManager) reportDegradedHomes(ctx context.Context, v system.Va
 		}
 	}
 	if len(degraded) == 0 {
-		pm.alerts.Clear(alertKey)
+		pm.alerts.Clear(homeCannotStoreAlarmType, v.ID.String())
 		return
 	}
 	sort.Strings(degraded)
@@ -249,7 +267,7 @@ func (pm *placementManager) reportDegradedHomes(ctx context.Context, v system.Va
 	if healthy < rf {
 		remedy = fmt.Sprintf("no eligible replacement node — %d of %d storable members; admission for this vault throttles at the source until space frees", healthy, rf)
 	}
-	pm.alerts.Set(alertKey, alert.Warning, "placement",
+	pm.alerts.Raise(homeCannotStoreAlarmType, v.ID.String(),
 		fmt.Sprintf("Vault %q: home %s cannot store (disk protect) — collection and builds are paused there; %s",
 			v.Name, strings.Join(degraded, ", "), remedy))
 }
@@ -369,9 +387,6 @@ func (pm *placementManager) isSingletonIngester(ing system.IngesterConfig) bool 
 
 // placeVault evaluates a single vault and assigns it to an eligible node if needed.
 func (pm *placementManager) placeVault(ctx context.Context, v system.VaultConfig, alive map[string]bool, nodeStates map[string]system.NodeState, nscs []system.NodeStorageConfig, vaultCount map[string]int) {
-	alertKey := fmt.Sprintf("vault-unplaced:%s", v.ID)
-	softOfflineAlertKey := fmt.Sprintf("vault-soft-offline-leader:%s", v.ID)
-
 	currentLeader := system.LeaderNodeID(func() []system.VaultPlacement {
 		p, _ := pm.cfgStore.GetVaultPlacements(context.Background(), v.ID)
 		return p
@@ -411,7 +426,7 @@ func (pm *placementManager) placeVault(ctx context.Context, v system.VaultConfig
 			// alert, reconcile followers only.
 			if !alive[currentLeader] {
 				if pm.alerts != nil {
-					pm.alerts.Set(softOfflineAlertKey, alert.Warning, "placement",
+					pm.alerts.Raise(softOfflineAlarmType, v.ID.String(),
 						fmt.Sprintf("Vault %q leader heartbeat lost on node %s (state still Live) — placement retained, rotation gated until the node lifecycle state changes",
 							v.Name, currentLeader))
 				}
@@ -420,7 +435,7 @@ func (pm *placementManager) placeVault(ctx context.Context, v system.VaultConfig
 			}
 		case system.NodeStateUnreachable, system.NodeStateMaintenance:
 			if pm.alerts != nil {
-				pm.alerts.Set(softOfflineAlertKey, alert.Warning, "placement",
+				pm.alerts.Raise(softOfflineAlarmType, v.ID.String(),
 					fmt.Sprintf("Vault %q leader on %s node %s — placement retained, rotation gated",
 						v.Name, nodeStates[currentLeader], currentLeader))
 			}
@@ -434,7 +449,7 @@ func (pm *placementManager) placeVault(ctx context.Context, v system.VaultConfig
 		}
 	}
 	if pm.alerts != nil {
-		pm.alerts.Clear(softOfflineAlertKey)
+		pm.alerts.Clear(softOfflineAlarmType, v.ID.String())
 	}
 
 	// Current leader assignment still valid — check followers too. The
@@ -442,9 +457,7 @@ func (pm *placementManager) placeVault(ctx context.Context, v system.VaultConfig
 	// guard above returned otherwise), so only eligibility (storage
 	// config) can invalidate it here.
 	if currentLeader != "" && pm.nodeEligible(v, currentLeader, nscs) {
-		if pm.alerts != nil {
-			pm.alerts.Clear(alertKey)
-		}
+		pm.clearUnplacedAlarms(v)
 		pm.placeFollowers(ctx, &v, alive, nscs, vaultCount)
 		return
 	}
@@ -452,7 +465,7 @@ func (pm *placementManager) placeVault(ctx context.Context, v system.VaultConfig
 	eligible := pm.eligibleNodes(v, alive, nscs)
 
 	if len(eligible) == 0 {
-		pm.handleUnplaceable(ctx, v, alertKey, nscs, vaultCount)
+		pm.handleUnplaceable(ctx, v, nscs, vaultCount)
 		return
 	}
 
@@ -471,7 +484,8 @@ func (pm *placementManager) placeVault(ctx context.Context, v system.VaultConfig
 		pm.logger.Error("placement: no storage of required class on selected node; refusing leader placement",
 			"vault", v.ID, "name", v.Name, "node", best, "class", v.StorageClass)
 		if pm.alerts != nil {
-			pm.alerts.Set(alertKey, alert.Error, "placement",
+			pm.alerts.Clear(noEligibleNodeAlarmType, v.ID.String())
+			pm.alerts.Raise(storageClassMissingAlarmType, v.ID.String(),
 				fmt.Sprintf("Vault %q: selected node %s has no storage of class %d", v.Name, best, v.StorageClass))
 		}
 		return
@@ -488,9 +502,7 @@ func (pm *placementManager) placeVault(ctx context.Context, v system.VaultConfig
 	}
 	vaultCount[best]++
 
-	if pm.alerts != nil {
-		pm.alerts.Clear(alertKey)
-	}
+	pm.clearUnplacedAlarms(v)
 
 	if old == "" {
 		pm.logger.Info("placement: vault assigned", "vault", v.ID, "name", v.Name, "node", best)
@@ -696,17 +708,16 @@ func (pm *placementManager) vaultDiskProtectedSet(vaultID glid.GLID) map[string]
 	return protected
 }
 
-// alertReplication sets or clears the under-replicated vault alert.
+// alertReplication raises or clears the under-replicated vault alarm.
 func (pm *placementManager) alertReplication(v *system.VaultConfig, placed, desired int) {
 	if pm.alerts == nil {
 		return
 	}
-	alertKey := fmt.Sprintf("vault-underreplicated:%s", v.ID)
 	if placed < desired {
-		pm.alerts.Set(alertKey, alert.Warning, "placement",
+		pm.alerts.Raise("vault-underreplicated", v.ID.String(),
 			fmt.Sprintf("Vault %q: only %d of %d desired replicas (insufficient eligible file storages)", v.Name, placed+1, int(v.ReplicationFactor)))
 	} else {
-		pm.alerts.Clear(alertKey)
+		pm.alerts.Clear("vault-underreplicated", v.ID.String())
 	}
 }
 
@@ -797,7 +808,7 @@ func slicesEqual(a, b []string) bool {
 }
 
 // handleUnplaceable clears a vault's assignment when no eligible node exists.
-func (pm *placementManager) handleUnplaceable(_ context.Context, v system.VaultConfig, alertKey string, nscs []system.NodeStorageConfig, _ map[string]int) {
+func (pm *placementManager) handleUnplaceable(_ context.Context, v system.VaultConfig, nscs []system.NodeStorageConfig, _ map[string]int) {
 	// "Zero eligible nodes" is almost always transient — peer state
 	// hasn't broadcast in yet, the FSM snapshot is still being replayed,
 	// or the cluster just bootstrapped and NSCs haven't propagated to
@@ -821,7 +832,8 @@ func (pm *placementManager) handleUnplaceable(_ context.Context, v system.VaultC
 	pm.logger.Warn("placement: vault has no currently-eligible node, retaining existing placements",
 		"vault", v.ID, "name", v.Name, "current_leader", currentLeader)
 	if pm.alerts != nil {
-		pm.alerts.Set(alertKey, alert.Warning, "placement",
+		pm.alerts.Clear(storageClassMissingAlarmType, v.ID.String())
+		pm.alerts.Raise(noEligibleNodeAlarmType, v.ID.String(),
 			fmt.Sprintf("Vault %q has no eligible node", v.Name))
 	}
 }

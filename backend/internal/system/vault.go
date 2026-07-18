@@ -74,11 +74,13 @@ type VaultConfig struct {
 	RetentionDisposition string `json:"retentionDisposition,omitempty"`
 
 	// DiskFreeWarn / DiskFreeFloor are per-vault disk-guard thresholds on the
-	// vault's backing volume, as free-space size expressions ("10GB"). Empty
-	// inherits the node defaults (fraction-based, resolved per-node against
-	// that node's volume). Warn raises the disk-space alarm for this vault;
-	// floor suspends admission for records destined to this vault while
-	// vaults on healthy volumes keep ingesting.
+	// vault's backing volume: an absolute free-space size ("10GB") or a
+	// percentage of the volume ("10%"), resolved per node against the volume
+	// actually sampled (ParseSizeOrPercent). Empty inherits the node defaults
+	// — the typeable expressions "10%" (warn) and "3%" (floor). Warn raises
+	// the disk-space alarm for this vault; floor suspends admission for
+	// records destined to this vault while vaults on healthy volumes keep
+	// ingesting.
 	DiskFreeWarn  string `json:"diskFreeWarn,omitempty"`
 	DiskFreeFloor string `json:"diskFreeFloor,omitempty"`
 

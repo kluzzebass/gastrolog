@@ -12,6 +12,7 @@ package ingestion_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -956,6 +957,345 @@ func TestManagerRetryFailureCountResets(t *testing.T) {
 		}
 	}()
 	_ = mgr.Stop()
+}
+
+// rebuildFake is a controllable ingester for the gastrolog-4rdb9f rebuild
+// ordering tests. Run announces itself on the shared ordered events channel
+// ("<label>:run" on entry, "<label>:exit" via defer as the very last thing
+// before returning), emits messages until the pipeline is saturated (one
+// buffered token per successful send on sent), and exits only on ctx
+// cancellation. With OutCapacity 1 and no consumer on the digestion queue,
+// exactly two sends complete — msg1 fills the queue, msg2 is held by the
+// manager's pump blocked in the queue send — and the third send can never
+// finish: the run is then deterministically parked, wakeable only by cancel,
+// reproducing the field state (a scatterbox mid-send on a pinned pipeline).
+type rebuildFake struct {
+	label  string
+	events chan<- string
+	sent   chan struct{}
+	exited atomic.Bool
+}
+
+func (f *rebuildFake) Run(ctx context.Context, out chan<- ingestion.IngesterMessage) error {
+	f.events <- f.label + ":run"
+	defer func() {
+		f.exited.Store(true)
+		f.events <- f.label + ":exit"
+	}()
+	for {
+		select {
+		case out <- ingestion.IngesterMessage{Raw: []byte(f.label)}:
+			select {
+			case f.sent <- struct{}{}:
+			default:
+			}
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+func newRebuildFake(label string, events chan<- string) *rebuildFake {
+	return &rebuildFake{label: label, events: events, sent: make(chan struct{}, 8)}
+}
+
+func expectEvent(t *testing.T, events <-chan string, want string) {
+	t.Helper()
+	select {
+	case got := <-events:
+		if got != want {
+			t.Fatalf("event = %q, want %q", got, want)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatalf("timed out waiting for event %q", want)
+	}
+}
+
+// drainOnStop keeps the digestion queue drained once the test is over so
+// Stop's close cascade can complete.
+func drainOnStop(t *testing.T, mgr *ingestion.Manager, out <-chan ingestion.IngestMessage) {
+	t.Helper()
+	t.Cleanup(func() {
+		go func() {
+			for range out {
+			}
+		}()
+		_ = mgr.Stop()
+	})
+}
+
+// TestManagerRebuildWaitsForOldRunUnderBackpressure is the gastrolog-4rdb9f
+// regression test. Field incident: a config rebuild under a saturated
+// pipeline cancelled the old run without waiting for it; the old run — parked
+// in a send on the full digestion queue — woke AFTER the successor had
+// started, and its deferred teardown (the orchestrator adapter's alive-false
+// on the shared IngesterStats) clobbered the successor's alive-true, so the
+// convergence sweep reporting divergence for a demonstrably running
+// ingester (3 of 4 nodes on the live cluster).
+//
+// Synchronization is pure channels: the old run is deterministically parked
+// (two sends absorbed by queue+pump, the third can never complete), the
+// rebuild is driven synchronously, and the assertion is happens-before —
+// Reconcile must not return until the old run has fully exited, and the
+// ordered events stream must show old-exit strictly before new-run-entry.
+func TestManagerRebuildWaitsForOldRunUnderBackpressure(t *testing.T) {
+	t.Parallel()
+
+	events := make(chan string, 32)
+	oldRun := newRebuildFake("old", events)
+	newRun := newRebuildFake("new", events)
+
+	mgr, out := ingestion.New(ingestion.Config{NodeID: glid.New(), OutCapacity: 1})
+	id := glid.New()
+	if err := mgr.Reconcile([]ingestion.IngesterSpec{
+		{ID: id, Ingester: oldRun, Name: "src", Type: "mock"},
+	}); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := mgr.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	drainOnStop(t, mgr, out)
+
+	expectEvent(t, events, "old:run")
+	// Saturate: queue full + pump blocked in the queue send. The old run is
+	// now parked mid-send; only cancellation can wake it.
+	<-oldRun.sent
+	<-oldRun.sent
+
+	// Rebuild: same ID, new Ingester instance.
+	if err := mgr.Reconcile([]ingestion.IngesterSpec{
+		{ID: id, Ingester: newRun, Name: "src", Type: "mock"},
+	}); err != nil {
+		t.Fatalf("Reconcile rebuild: %v", err)
+	}
+
+	if !oldRun.exited.Load() {
+		t.Fatal("Reconcile returned before the old run fully exited")
+	}
+	expectEvent(t, events, "old:exit")
+	expectEvent(t, events, "new:run")
+	if newRun.exited.Load() {
+		t.Fatal("successor exited unexpectedly")
+	}
+}
+
+// TestManagerStopOnlyWaitsForOldRun: removing an ingester (no successor) also
+// waits for the run to fully exit before Reconcile returns, and nothing
+// starts afterwards.
+func TestManagerStopOnlyWaitsForOldRun(t *testing.T) {
+	t.Parallel()
+
+	events := make(chan string, 32)
+	oldRun := newRebuildFake("old", events)
+
+	mgr, out := ingestion.New(ingestion.Config{NodeID: glid.New(), OutCapacity: 1})
+	id := glid.New()
+	if err := mgr.Reconcile([]ingestion.IngesterSpec{
+		{ID: id, Ingester: oldRun, Name: "src", Type: "mock"},
+	}); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := mgr.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	drainOnStop(t, mgr, out)
+
+	expectEvent(t, events, "old:run")
+	<-oldRun.sent
+	<-oldRun.sent
+
+	if err := mgr.Reconcile(nil); err != nil {
+		t.Fatalf("Reconcile remove: %v", err)
+	}
+	if !oldRun.exited.Load() {
+		t.Fatal("Reconcile returned before the removed run fully exited")
+	}
+	expectEvent(t, events, "old:exit")
+	select {
+	case ev := <-events:
+		t.Fatalf("unexpected event after removal: %q", ev)
+	default:
+	}
+}
+
+// cleanExitEventIngester completes immediately (finite non-passive source),
+// announcing entry and exit on the ordered events channel.
+type cleanExitEventIngester struct {
+	label  string
+	events chan<- string
+}
+
+func (c *cleanExitEventIngester) Run(context.Context, chan<- ingestion.IngesterMessage) error {
+	c.events <- c.label + ":run"
+	c.events <- c.label + ":exit"
+	return nil
+}
+
+// TestManagerRebuildAfterCleanExit: waiting on a run that already exited on
+// its own must not hang the rebuild.
+func TestManagerRebuildAfterCleanExit(t *testing.T) {
+	t.Parallel()
+
+	events := make(chan string, 32)
+	oldRun := &cleanExitEventIngester{label: "old", events: events}
+	newRun := newRebuildFake("new", events)
+
+	mgr, out := ingestion.New(ingestion.Config{NodeID: glid.New(), OutCapacity: 1})
+	id := glid.New()
+	if err := mgr.Reconcile([]ingestion.IngesterSpec{
+		{ID: id, Ingester: oldRun, Name: "src", Type: "mock"},
+	}); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := mgr.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	drainOnStop(t, mgr, out)
+
+	expectEvent(t, events, "old:run")
+	expectEvent(t, events, "old:exit")
+
+	if err := mgr.Reconcile([]ingestion.IngesterSpec{
+		{ID: id, Ingester: newRun, Name: "src", Type: "mock"},
+	}); err != nil {
+		t.Fatalf("Reconcile rebuild: %v", err)
+	}
+	expectEvent(t, events, "new:run")
+}
+
+// TestManagerRebuildChurnStrictAlternation: several rapid rebuilds in a row
+// keep the invariant one-run-at-a-time — the ordered events stream must be a
+// strict run/exit alternation, ending with exactly one live run.
+func TestManagerRebuildChurnStrictAlternation(t *testing.T) {
+	t.Parallel()
+
+	const generations = 5
+	events := make(chan string, 64)
+	fakes := make([]*rebuildFake, generations)
+	for i := range fakes {
+		fakes[i] = newRebuildFake(fmt.Sprintf("g%d", i), events)
+	}
+
+	mgr, out := ingestion.New(ingestion.Config{NodeID: glid.New(), OutCapacity: 1})
+	id := glid.New()
+	if err := mgr.Reconcile([]ingestion.IngesterSpec{
+		{ID: id, Ingester: fakes[0], Name: "src", Type: "mock"},
+	}); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := mgr.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	drainOnStop(t, mgr, out)
+
+	expectEvent(t, events, "g0:run")
+	// Saturate under generation 0 so every later generation starts against a
+	// pinned pipeline.
+	<-fakes[0].sent
+	<-fakes[0].sent
+
+	for i := 1; i < generations; i++ {
+		if err := mgr.Reconcile([]ingestion.IngesterSpec{
+			{ID: id, Ingester: fakes[i], Name: "src", Type: "mock"},
+		}); err != nil {
+			t.Fatalf("Reconcile churn %d: %v", i, err)
+		}
+		if !fakes[i-1].exited.Load() {
+			t.Fatalf("churn %d: Reconcile returned before generation %d exited", i, i-1)
+		}
+		expectEvent(t, events, fmt.Sprintf("g%d:exit", i-1))
+		expectEvent(t, events, fmt.Sprintf("g%d:run", i))
+	}
+
+	if fakes[generations-1].exited.Load() {
+		t.Fatal("final generation is not running")
+	}
+	select {
+	case ev := <-events:
+		t.Fatalf("unexpected trailing event: %q", ev)
+	default:
+	}
+}
+
+// failThenBackoffIngester fails its single attempt; the manager then parks
+// its run goroutine in the retry backoff (a long injected delay). The rebuild
+// wait must cover that parked backoff, and cancellation must abort it
+// promptly — the runIngester goroutine spans attempts AND the sleeps between
+// them.
+type failThenBackoffIngester struct {
+	label  string
+	events chan<- string
+}
+
+func (f *failThenBackoffIngester) Run(context.Context, chan<- ingestion.IngesterMessage) error {
+	f.events <- f.label + ":run"
+	f.events <- f.label + ":exit"
+	return errors.New("source unavailable")
+}
+
+// TestManagerRebuildInterruptsRetryBackoff: a rebuild that lands while the
+// old run goroutine is parked in a retry backoff (not in an attempt) still
+// waits for the goroutine to exit — and the cancel aborts the pending
+// backoff instead of sleeping it out (the injected delay is an hour).
+func TestManagerRebuildInterruptsRetryBackoff(t *testing.T) {
+	t.Parallel()
+
+	events := make(chan string, 32)
+	oldRun := &failThenBackoffIngester{label: "old", events: events}
+	newRun := newRebuildFake("new", events)
+
+	delayCalled := make(chan struct{}, 4)
+	mgr, out := ingestion.New(ingestion.Config{
+		NodeID:      glid.New(),
+		OutCapacity: 1,
+		RetryDelay: func(int) time.Duration {
+			delayCalled <- struct{}{}
+			return time.Hour
+		},
+	})
+	id := glid.New()
+	if err := mgr.Reconcile([]ingestion.IngesterSpec{
+		{ID: id, Ingester: oldRun, Name: "src", Type: "mock"},
+	}); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := mgr.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	drainOnStop(t, mgr, out)
+
+	expectEvent(t, events, "old:run")
+	expectEvent(t, events, "old:exit")
+	select {
+	case <-delayCalled:
+	case <-time.After(10 * time.Second):
+		t.Fatal("retry delay was never consulted")
+	}
+
+	// The old run goroutine is now headed into (or already inside) an
+	// hour-long backoff select. The rebuild must return promptly anyway.
+	if err := mgr.Reconcile([]ingestion.IngesterSpec{
+		{ID: id, Ingester: newRun, Name: "src", Type: "mock"},
+	}); err != nil {
+		t.Fatalf("Reconcile rebuild: %v", err)
+	}
+	expectEvent(t, events, "new:run")
 }
 
 // TestManagerCheckpointPeriodicSave exercises the CheckpointInterval knob

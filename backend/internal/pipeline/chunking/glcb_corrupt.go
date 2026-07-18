@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 
-	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
 )
@@ -28,9 +27,11 @@ import (
 //     released is re-pulled from a peer home by the orchestrator's GLCB
 //     catch-up sweep (pullMissingGLCB triggers on the stat-miss).
 //   - Alert: a per-vault operator alert names the chunk and the read error,
-//     raised on the detected→ transition and cleared when no corrupt chunk
-//     remains. Logging is state-transition-only: one Warn when a chunk is
-//     first flagged, one Info when it heals — never per retry.
+//     raised while any corrupt chunk remains and cleared when none does.
+//     The catalog's DelayOn keeps it out of the alarm list while the heal
+//     paths below are still expected to land. Logging is state-transition-
+//     only: one Warn when a chunk is first flagged, one Info when it heals
+//     — never per retry.
 //   - Heal: any path that makes the canonical GLCB readable again clears
 //     the state — rebuild from segments, adopting a readable existing file,
 //     restart recovery reading it cleanly, or the orchestrator's peer
@@ -50,9 +51,9 @@ import (
 // canonical path reads as missing to every recovery mechanism.
 const GLCBCorruptSuffix = ".corrupt"
 
-func (v *vaultChunking) glcbCorruptAlertID() string {
-	return "chunking-glcb-corrupt-" + v.cfg.VaultID.String()
-}
+// glcbCorruptAlarmType is the catalog type ID for quarantined unreadable
+// GLCBs; the instance key is the vault ID.
+const glcbCorruptAlarmType = "chunking-glcb-corrupt"
 
 // quarantineCorruptGLCB moves an existing-but-unreadable sealed GLCB aside
 // and flags the chunk corrupt (alert + one Warn per episode). See the file
@@ -124,20 +125,17 @@ func (v *vaultChunking) pruneCorruptGLCBs() {
 	}
 }
 
-// updateCorruptGLCBAlertLocked raises/clears the corrupt-GLCB operator alert
-// on state transitions only (same discipline as the blocked-build and
-// unplannable-segment alerts). Caller holds corruptMu.
+// updateCorruptGLCBAlertLocked reports the corrupt-GLCB condition to the
+// alarm collector from the current corrupt set. Raise/Clear dedup and the
+// catalog's DelayOn window (the alarm annunciates only if corruption
+// outlives the self-healing paths) are the collector's; logging here stays
+// transition-edge via the corrupt map itself. Caller holds corruptMu.
 func (v *vaultChunking) updateCorruptGLCBAlertLocked() {
-	stuck := len(v.corruptGLCBs) > 0
-	if stuck == v.corruptGLCBAlerted {
-		return
-	}
-	v.corruptGLCBAlerted = stuck
 	if v.cfg.Alerts == nil {
 		return
 	}
-	if !stuck {
-		v.cfg.Alerts.Clear(v.glcbCorruptAlertID())
+	if len(v.corruptGLCBs) == 0 {
+		v.cfg.Alerts.Clear(glcbCorruptAlarmType, v.cfg.VaultID.String())
 		return
 	}
 	var example chunk.ChunkID
@@ -146,8 +144,8 @@ func (v *vaultChunking) updateCorruptGLCBAlertLocked() {
 		example, exampleErr = id, e
 		break
 	}
-	v.cfg.Alerts.Set(v.glcbCorruptAlertID(), alert.Error, "chunking",
-		fmt.Sprintf("vault %s: %d sealed chunk GLCB(s) were unreadable on this node (e.g. chunk %s: %s); each file was quarantined with a %s suffix and the chunk heals automatically — rebuilt from source segments when they are still available, or re-pulled from a peer home by the catch-up sweep. If this alert persists, no local rebuild or peer copy has succeeded: investigate disk health on this node and replica health on the vault's other homes",
+	v.cfg.Alerts.Raise(glcbCorruptAlarmType, v.cfg.VaultID.String(),
+		fmt.Sprintf("vault %s: %d sealed chunk GLCB(s) were unreadable on this node (e.g. chunk %s: %s); each file was quarantined with a %s suffix",
 			v.cfg.VaultID, len(v.corruptGLCBs), example, exampleErr, GLCBCorruptSuffix))
 }
 

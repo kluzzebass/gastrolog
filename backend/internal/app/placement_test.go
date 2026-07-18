@@ -54,7 +54,7 @@ func vaultNode(t *testing.T, store *sysmem.Store, vaultID glid.GLID) string {
 }
 
 func hasAlert(alerts *alert.Collector, prefix string) bool {
-	for _, a := range alerts.Active() {
+	for _, a := range alerts.Standing() {
 		if len(a.ID) >= len(prefix) && a.ID[:len(prefix)] == prefix {
 			return true
 		}
@@ -283,8 +283,8 @@ func TestPlacementNoEligibleNodeClearsAssignment(t *testing.T) {
 	}
 
 	// Alert should be set.
-	if !hasAlert(alerts, "vault-unplaced:") {
-		t.Fatal("expected vault-unplaced alert")
+	if !hasAlert(alerts, "vault-no-eligible-node:") {
+		t.Fatal("expected vault-no-eligible-node alarm")
 	}
 }
 
@@ -302,7 +302,7 @@ func TestPlacementNoEligibleNodeAlreadyUnassigned(t *testing.T) {
 	if got := vaultNode(t, store, vaultID); got != "" {
 		t.Fatalf("expected still unassigned, got %q", got)
 	}
-	if !hasAlert(alerts, "vault-unplaced:") {
+	if !hasAlert(alerts, "vault-no-eligible-node:") {
 		t.Fatal("expected alert for unplaceable vault")
 	}
 }
@@ -402,7 +402,7 @@ func TestPlacementUnknownVaultType(t *testing.T) {
 	if got := vaultNode(t, store, vaultID); got != "" {
 		t.Fatalf("expected unknown type vault unassigned, got %q", got)
 	}
-	if !hasAlert(alerts, "vault-unplaced:") {
+	if !hasAlert(alerts, "vault-no-eligible-node:") {
 		t.Fatal("expected alert for unplaceable unknown-type vault")
 	}
 }
@@ -426,7 +426,7 @@ func TestPlacementLocalVaultStorageClassZero(t *testing.T) {
 	if got := vaultNode(t, store, vaultID); got != "" {
 		t.Fatalf("expected StorageClass 0 vault unassigned, got %q", got)
 	}
-	if !hasAlert(alerts, "vault-unplaced:") {
+	if !hasAlert(alerts, "vault-no-eligible-node:") {
 		t.Fatal("expected alert")
 	}
 }
@@ -450,7 +450,7 @@ func TestPlacementCloudVaultActiveChunkClassZero(t *testing.T) {
 	if got := vaultNode(t, store, vaultID); got != "" {
 		t.Fatalf("expected ActiveChunkClass 0 vault unassigned, got %q", got)
 	}
-	if !hasAlert(alerts, "vault-unplaced:") {
+	if !hasAlert(alerts, "vault-no-eligible-node:") {
 		t.Fatal("expected alert")
 	}
 }
@@ -467,7 +467,7 @@ func TestPlacementAlertClearedWhenPlaced(t *testing.T) {
 
 	// First reconcile: no eligible node → alert set.
 	pm.reconcile(ctx)
-	if !hasAlert(alerts, "vault-unplaced:") {
+	if !hasAlert(alerts, "vault-no-eligible-node:") {
 		t.Fatal("expected alert after first reconcile")
 	}
 
@@ -482,7 +482,7 @@ func TestPlacementAlertClearedWhenPlaced(t *testing.T) {
 	if got := vaultNode(t, store, vaultID); got != "node-1" {
 		t.Fatalf("expected placed on node-1, got %q", got)
 	}
-	if hasAlert(alerts, "vault-unplaced:") {
+	if hasAlert(alerts, "vault-no-eligible-node:") {
 		t.Fatal("expected alert to be cleared after placement")
 	}
 }
@@ -496,12 +496,12 @@ func TestPlacementAlertClearedOnStableAssignment(t *testing.T) {
 	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "mem", Type: system.VaultTypeMemory})
 
 	// Pre-set an alert manually.
-	alerts.Set("vault-unplaced:"+vaultID.String(), alert.Warning, "test", "stale alert")
+	alerts.Raise("vault-no-eligible-node", vaultID.String(), "stale alert")
 
 	pm.reconcile(ctx)
 
 	// Vault is correctly assigned → alert should be cleared.
-	if hasAlert(alerts, "vault-unplaced:") {
+	if hasAlert(alerts, "vault-no-eligible-node:") {
 		t.Fatal("expected stale alert to be cleared")
 	}
 }
@@ -1142,9 +1142,9 @@ func TestStartPlacementReconcile_PropagatesAddJobError(t *testing.T) {
 // ---------- Degraded-home alarm (gastrolog-38bm9t) ----------
 
 func alertMessage(alerts *alert.Collector, prefix string) string {
-	for _, a := range alerts.Active() {
+	for _, a := range alerts.Standing() {
 		if strings.HasPrefix(a.ID, prefix) {
-			return a.Message
+			return a.Detail
 		}
 	}
 	return ""

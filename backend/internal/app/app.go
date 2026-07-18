@@ -250,7 +250,13 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	// (delete /config/raft/ before starting the pod), not a silent
 	// boot-time decision.
 
+	// Alarm state is in-memory only: nothing survives restart — after a
+	// restart a re-detected condition is simply a standing alarm again.
+	// The configured logger routes transition lines through the same
+	// handler chain as every other component (structured format, captured
+	// by the self-ingester) — never the bare slog package globals.
 	alertCollector := alert.New()
+	alertCollector.SetLogger(logger.With("component", "alert"))
 
 	configSignal := notify.NewSignal()
 	statsSignal := notify.NewSignal()
@@ -351,6 +357,27 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		return fmt.Errorf("create orchestrator: %w", err)
 	}
 
+	// Ingest-pipeline channel pressure was demoted from an alarm to a
+	// diagnostic (gastrolog-3phtqv, gastrolog-5nvb4y); its transition edges
+	// are records of occurrence, and the gate's OnChange hook is the
+	// existing choke point — one log line per level change, no per-tick
+	// chatter. The log stream is the event record.
+	// Attr discipline: the pressure tier is "pressure", never "level" (that
+	// key belongs to slog itself), and an empty cause channel is omitted
+	// rather than logged as channel="".
+	pressureLogger := logger.With("component", "orchestrator")
+	orch.PressureGate().AddOnChange(func(tr chanwatch.PressureTransition) {
+		attrs := []any{"from", tr.From.String(), "pressure", tr.To.String(), "ratio", tr.Ratio}
+		if tr.Cause != "" {
+			attrs = append(attrs, "channel", tr.Cause)
+		}
+		if tr.To == chanwatch.PressureNormal {
+			pressureLogger.Info("ingest pipeline pressure back to normal", attrs...)
+		} else {
+			pressureLogger.Warn("ingest pipeline pressure elevated — ingesters throttling", attrs...)
+		}
+	})
+
 	vaultsDir := cfg.VaultsFlag
 	if vaultsDir == "" {
 		vaultsDir = homeDir // default: vaults resolve relative to home
@@ -363,7 +390,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 
 	groupMgr, vaultWAL, nodeAddrResolver := setupMultiRaft(clusterSrv, rawStore, nodeID, homeDir, logger, alertCollector)
 
-	factories := buildFactories(logger, homeDir, vaultsDir, cfgStore, orch, certMgr, cfg.SlogCapture, cfg.SlogCaptureHandler, alertCollector, groupMgr, nodeAddrResolver, nodeID)
+	factories := buildFactories(logger, homeDir, vaultsDir, cfgStore, orch, certMgr, cfg.SlogCapture, cfg.SlogCaptureHandler, groupMgr, nodeAddrResolver, nodeID)
 	if clusterSrv != nil {
 		factories.PeerConns = clusterSrv.PeerConns()
 	}
@@ -427,7 +454,6 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	// Monitor slog capture channel pressure.
 	if cfg.SlogCapture != nil {
 		slogCW := chanwatch.New(logger, 1*time.Second)
-		slogCW.SetAlerts(alertCollector)
 		slogCW.Watch("slogCaptureCh", func() (int, int) {
 			return len(cfg.SlogCapture), cap(cfg.SlogCapture)
 		}, 0.9)
@@ -454,7 +480,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		}
 	}
 
-	broadcaster, peerState, peerJobState, localStatsFn, clusterRouteRatesFn := setupClusterStats(ctx, logger, cfgStore, clusterSrv, orch, alertCollector, nodeID, cfg.ServerAddr, cfg.PprofAddr, statsSignal, raftLive)
+	broadcaster, peerState, peerJobState, localStatsFn, clusterRouteRatesFn := setupClusterStats(ctx, logger, cfgStore, clusterSrv, orch, alertCollector, cfg.SlogCaptureHandler, nodeID, cfg.ServerAddr, cfg.PprofAddr, statsSignal, raftLive)
 	if peerState != nil {
 		// Per-vault admission verdicts are cluster-consistent: a starved
 		// vault volume or an over-budget vault claim on any node suspends
@@ -539,10 +565,10 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	// node that misses its boot dispatch runs no ingesters until the next
 	// config change (a full-cluster restart left one node originating nothing
 	// for 40+ minutes). This periodic safety net re-reconciles
-	// desired-vs-running (idempotent) and raises the ingester-not-running
-	// alert while diverged. Registered unconditionally — single-node deploys
+	// desired-vs-running (idempotent) and logs any divergence, once per
+	// state change. Registered unconditionally — single-node deploys
 	// converge the same way.
-	if err := startIngesterReconcileSweep(ctx, orch.Scheduler(), disp, alertCollector); err != nil {
+	if err := startIngesterReconcileSweep(ctx, orch.Scheduler(), disp, logger.With("component", "ingestion")); err != nil {
 		logger.Warn("startup: register scheduled job", "job", "ingester-reconcile", "error", err)
 	}
 
@@ -795,7 +821,14 @@ func (a *raftLivenessAdapter) RaftLiveness() (elections, leaderLosses, failedHea
 	return elections, leaderLosses, failedHeartbeats
 }
 
-func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system.Store, clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, alerts *alert.Collector, nodeID string, apiAddr string, pprofAddr string, statsSignal *notify.Signal, raftLive cluster.RaftLivenessProvider) (*cluster.Broadcaster, *cluster.PeerState, *cluster.PeerJobState, func() *gastrologv1.NodeStats, func() (*gastrologv1.ThroughputRate, *gastrologv1.ThroughputRate)) {
+func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system.Store, clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, alerts *alert.Collector, slogCapture *logging.CaptureHandler, nodeID string, apiAddr string, pprofAddr string, statsSignal *notify.Signal, raftLive cluster.RaftLivenessProvider) (*cluster.Broadcaster, *cluster.PeerState, *cluster.PeerJobState, func() *gastrologv1.NodeStats, func() (*gastrologv1.ThroughputRate, *gastrologv1.ThroughputRate)) {
+	// Taken as a concrete type and converted explicitly: assigning a typed
+	// nil *CaptureHandler straight into the interface field would read as
+	// non-nil and panic in DroppedCount on the first tick.
+	var logDrops cluster.LogDropsProvider
+	if slogCapture != nil {
+		logDrops = slogCapture
+	}
 	var broadcaster *cluster.Broadcaster
 	if clusterSrv != nil && clusterSrv.PeerConns() != nil {
 		broadcaster = cluster.NewBroadcaster(clusterSrv.PeerConns(), compBroadcast.Apply(logger))
@@ -839,6 +872,8 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 		Stats:        statsAdapter,
 		PeerConns:    clusterSrv.PeerConns(),
 		RaftLiveness: raftLive,
+		// Discarded diagnostic log records; nil when capture is disabled.
+		LogDrops: logDrops,
 		// Cluster-total route counters: local + live peers' cumulative
 		// broadcast totals. Windowed server-side so cluster rate history is
 		// system data, not client-side accumulation (gastrolog-4eh5ns).
@@ -1555,7 +1590,7 @@ func setupMultiRaft(clusterSrv *cluster.Server, rawStore system.Store, nodeID, h
 	return groupMgr, wal, resolver
 }
 
-func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore system.Store, orch *orchestrator.Orchestrator, certMgr *cert.Manager, slogCh <-chan logging.CapturedRecord, slogCapture *logging.CaptureHandler, alertCollector *alert.Collector, groupMgr *raftgroup.GroupManager, nodeAddrResolver func(string) (string, bool), nodeID string) orchestrator.Factories {
+func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore system.Store, orch *orchestrator.Orchestrator, certMgr *cert.Manager, slogCh <-chan logging.CapturedRecord, slogCapture *logging.CaptureHandler, groupMgr *raftgroup.GroupManager, nodeAddrResolver func(string) (string, bool), nodeID string) orchestrator.Factories {
 	reg := func(factory orchestrator.IngesterFactory, defaults func() map[string]string, tester orchestrator.ConnectionTester) orchestrator.IngesterRegistration {
 		return orchestrator.IngesterRegistration{Factory: factory, Defaults: defaults, Tester: tester}
 	}
@@ -1588,7 +1623,7 @@ func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore sys
 		"tail":      reg(ingesttail.NewFactory(), ingesttail.ParamDefaults, nil),
 	}
 	if slogCh != nil {
-		ingesterTypes["self"] = reg(ingestself.NewFactory(slogCh, slogCapture, alertCollector), ingestself.ParamDefaults, nil)
+		ingesterTypes["self"] = reg(ingestself.NewFactory(slogCh, slogCapture), ingestself.ParamDefaults, nil)
 	}
 	return orchestrator.Factories{
 		IngesterTypes: ingesterTypes,

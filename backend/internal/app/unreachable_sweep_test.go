@@ -310,8 +310,8 @@ func newAlertSweepTest(t *testing.T, alertThreshold time.Duration) (*unreachable
 	return sweep, store, collector, peerID
 }
 
-func findAlert(collector *alert.Collector, id string) *alert.Alert {
-	for _, a := range collector.Active() {
+func findAlert(collector *alert.Collector, id string) *alert.Alarm {
+	for _, a := range collector.Standing() {
 		if a.ID == id {
 			return a
 		}
@@ -336,12 +336,15 @@ func TestUnreachableSweep_AlertFiresAfterThreshold(t *testing.T) {
 
 	sweep.alertTick(ctx)
 
-	a := findAlert(collector, unreachableAlertIDPrefix+peerID.String())
+	a := findAlert(collector, unreachableAlarmType+":"+peerID.String())
 	if a == nil {
 		t.Fatal("expected unreachable alert to fire after sustained duration")
 	}
-	if a.Severity != alert.Warning {
-		t.Fatalf("expected Warning severity, got %v", a.Severity)
+	if a.Priority != alert.High {
+		t.Fatalf("expected High priority (from the catalog), got %v", a.Priority)
+	}
+	if a.Response == "" || a.Cause == "" {
+		t.Fatal("catalog cause/response must be stamped on the raised alarm")
 	}
 }
 
@@ -362,7 +365,7 @@ func TestUnreachableSweep_AlertSuppressedWithinThreshold(t *testing.T) {
 
 	sweep.alertTick(ctx)
 
-	if a := findAlert(collector, unreachableAlertIDPrefix+peerID.String()); a != nil {
+	if a := findAlert(collector, unreachableAlarmType+":"+peerID.String()); a != nil {
 		t.Fatalf("expected no alert within threshold window, got %+v", a)
 	}
 }
@@ -382,7 +385,7 @@ func TestUnreachableSweep_AlertClearsOnRecovery(t *testing.T) {
 		t.Fatalf("PutNode peer: %v", err)
 	}
 	sweep.alertTick(ctx)
-	if a := findAlert(collector, unreachableAlertIDPrefix+peerID.String()); a == nil {
+	if a := findAlert(collector, unreachableAlarmType+":"+peerID.String()); a == nil {
 		t.Fatal("preconditions: alert should have fired")
 	}
 
@@ -394,7 +397,7 @@ func TestUnreachableSweep_AlertClearsOnRecovery(t *testing.T) {
 	}
 	sweep.alertTick(ctx)
 
-	if a := findAlert(collector, unreachableAlertIDPrefix+peerID.String()); a != nil {
+	if a := findAlert(collector, unreachableAlarmType+":"+peerID.String()); a != nil {
 		t.Fatalf("expected alert cleared after recovery, got %+v", a)
 	}
 }
@@ -416,7 +419,7 @@ func TestUnreachableSweep_AlertSilentInMaintenance(t *testing.T) {
 
 	sweep.alertTick(ctx)
 
-	if a := findAlert(collector, unreachableAlertIDPrefix+peerID.String()); a != nil {
+	if a := findAlert(collector, unreachableAlarmType+":"+peerID.String()); a != nil {
 		t.Fatalf("expected no alert for Maintenance state, got %+v", a)
 	}
 }
@@ -573,7 +576,7 @@ func TestTickOnce_NonLeaderRunsAlertPhaseOnly(t *testing.T) {
 	sweep.tickOnce(ctx)
 
 	// Alert phase ran → alert fired for the Unreachable peer.
-	if a := findAlert(sweep.alerts, unreachableAlertIDPrefix+peerID.String()); a == nil {
+	if a := findAlert(sweep.alerts, unreachableAlarmType+":"+peerID.String()); a == nil {
 		t.Fatal("expected alert phase to fire on non-leader; got no alert")
 	}
 	// Transition phase did NOT run → store still shows Unreachable

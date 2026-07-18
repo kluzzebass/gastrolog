@@ -88,6 +88,13 @@ identical on both surfaces; `FormatBytesCompact` / `formatBytesBigint` emit
 the largest unit that divides exactly, else raw bytes, so every value
 round-trips.
 
+The volume-relative fields (`disk-free-warn`, `disk-free-floor`) extend the
+grammar with a percentage form (`"10%"`), parsed by the sibling resolver
+`ParseSizeOrPercent` / `ResolveSizeOrPercent` — still one shared parser, no
+call site inspecting `%` itself — and resolved per node against the volume
+actually sampled. The stored value remains the operator's string, verbatim.
+See decision 6.
+
 ## Decisions (settled)
 
 > Note: decisions 1–4 below predate the expression-at-rest flip and are
@@ -132,6 +139,29 @@ round-trips.
    1 GiB product default. The product default protects the operator who says
    nothing; the script says something.
 
+6. **A default must be typeable in the field's own vocabulary.** Operator
+   directive (near-verbatim): *"do NOT create defaults that can not be
+   specified explicitly by the operator! there's no way for an operator to
+   type max(fraction·volume, hardBytes) into the config fields, so the
+   default can't work like that either."* A default is only legitimate if it
+   is a value the operator could have entered in the same field. This
+   supersedes the audit's earlier celebration of the disk guard's
+   `max(fraction·volume, hardBytes)`-with-share-clamps curve as the
+   "reference implementation" of a derived default: the curve was six
+   constants no field grammar could express, so it was never a legitimate
+   default. A derived formula is only a legitimate default when the field's
+   vocabulary can express it — which is exactly what the percentage grammar
+   provides. `disk-free-warn` / `disk-free-floor` accept an absolute size
+   (`"10GB"`) **or** a percentage of the volume (`"10%"`, fractional
+   allowed), via one shared parser (`system.ParseSizeOrPercent` /
+   `ResolveSizeOrPercent`); the node defaults ARE the typeable strings
+   `"10%"` (warn) and `"3%"` (floor), resolved per node against that node's
+   volume size through the same resolver an explicit value uses. The
+   percentage form is allowed on these two fields **only**: a threshold
+   guards the vault's own volume, so a share composes; a %-of-volume
+   *budget* (`max-size`, `cache-budget`, `memory-budget`) does not compose
+   across vaults sharing a volume (decision 1) and stays size-only.
+
 ## Scope: a defaults audit epic
 
 Modeled on gastrolog-2p313 (the backend architecture audit): **audit-only —
@@ -160,10 +190,12 @@ surface is honest about it.
 
 3. **Derivable or operator-knowledge?** Decides *which kind* of default a
    knob gets when it needs one. Derivable → a computed value is legitimate
-   (the disk floor's `max(3% , 3 GiB)`). Operator-knowledge → a conservative
-   constant or minimum the product does not pretend to guess (`RF=1`; and,
-   per the settled decision, `max-size`'s 1 GiB — treated as a constant
-   rather than derived because the derived value does not compose).
+   **only if it is typeable in the field's own vocabulary** (decision 6: the
+   disk floor's default is the expression `"3%"`, not a formula).
+   Operator-knowledge → a conservative constant or minimum the product does
+   not pretend to guess (`RF=1`; and, per the settled decision, `max-size`'s
+   1 GiB — treated as a constant rather than derived because the derived
+   value does not compose).
 
 4. **Does the surface tell the truth about the default?** The project already
    requires this for ingesters: placeholder text must equal the real default
@@ -190,9 +222,10 @@ decomposition:
 - **Policies & schedules** — rotation, retention, reconcile cadence, suspect
   grace. Mechanism defaults; assess criterion 4 (are they surfaced
   honestly?) more than criterion 1.
-- **Disk guard thresholds** — `floorFraction`, `floorBytes`, share clamps.
-  The reference implementation of a good derived default; audit confirms it
-  and documents it as the pattern others should follow.
+- **Disk guard thresholds** — the node-default warn/floor expressions
+  (`"10%"` / `"3%"`). Originally audited as a six-constant derived formula
+  and celebrated as the reference implementation; superseded by decision 6 —
+  the formula was not typeable and was replaced by the percentage defaults.
 - **Cluster / node settings** — anything created via `config cluster`,
   `config node`.
 

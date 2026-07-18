@@ -458,7 +458,7 @@ func (f *failOnceIngester) Run(ctx context.Context, _ chan<- orchestrator.Ingest
 // TestIngesterAliveTracksErrorRetry pins the observability chain behind the
 // gastrolog-fjwhbr fix: a non-passive ingester whose run returns an error
 // drops its alive state (OnIngesterAlive false, IsIngesterRunning false — the
-// trigger for the ingester convergence sweep's ingester-not-running alert,
+// trigger for the ingester convergence sweep's divergence log,
 // gastrolog-3mnjlo), and the pipeline retry re-arms the run so the alive state
 // comes back up, which is what lets the sweep clear the alert on recovery.
 func TestIngesterAliveTracksErrorRetry(t *testing.T) {

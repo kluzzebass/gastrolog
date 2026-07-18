@@ -54,7 +54,7 @@ func putBrotliWriter(w *brotli.Writer) {
 // client supports it. Prefers brotli over gzip. Skips responses that already
 // have Content-Encoding set (e.g. pre-compressed static assets from the
 // frontend handler).
-func compressMiddleware(next http.Handler) http.Handler {
+func compressMiddleware(logger *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ae := r.Header.Get("Accept-Encoding")
 
@@ -77,6 +77,7 @@ func compressMiddleware(next http.Handler) http.Handler {
 		cw := &compressWriter{
 			ResponseWriter: w,
 			encoding:       encoding,
+			logger:         logger,
 		}
 		defer cw.Close()
 
@@ -103,6 +104,7 @@ type compressWriter struct {
 	writer      io.WriteCloser
 	started     bool
 	compressing bool
+	logger      *slog.Logger
 }
 
 func (cw *compressWriter) WriteHeader(code int) {
@@ -158,7 +160,7 @@ func (cw *compressWriter) Flush() {
 		// point — log and move on.
 		if f, ok := cw.writer.(interface{ Flush() error }); ok {
 			if err := f.Flush(); err != nil {
-				slog.Debug("compress: flush failed", "encoding", cw.encoding, "error", err)
+				cw.logger.Debug("compress: flush failed", "encoding", cw.encoding, "error", err)
 			}
 		}
 	}
@@ -172,7 +174,7 @@ func (cw *compressWriter) Close() {
 		return
 	}
 	if err := cw.writer.Close(); err != nil {
-		slog.Debug("compress: close failed", "encoding", cw.encoding, "error", err)
+		cw.logger.Debug("compress: close failed", "encoding", cw.encoding, "error", err)
 	}
 
 	// Return to pool.

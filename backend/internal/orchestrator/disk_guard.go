@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"maps"
 	"os"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -37,20 +36,28 @@ const (
 	diskGuardJobName  = "disk-guard"
 	diskGuardSchedule = "*/15 * * * * *" // every 15 seconds
 
-	diskGuardAlertID = "disk-space"
+	// Alarm type IDs raised by the disk guard. Two setpoints on one
+	// measurement are two alarms, each with its own cataloged priority
+	// (the HI/HIHI pattern): the approaching/low rows are Low, the
+	// capped/exhausted rows are High.
+	alarmNodeDiskLow        = "node-disk-space-low"
+	alarmNodeDiskExhausted  = "node-disk-space-exhausted"
+	alarmVaultDiskLow       = "disk-space-low"
+	alarmVaultDiskExhausted = "disk-space-exhausted"
+	alarmBacklogApproaching = "pipeline-backlog-approaching"
+	alarmBacklogCapped      = "pipeline-backlog-capped"
+	alarmMaxSizeApproaching = "vault-max-size-approaching"
+	alarmMaxSizeCapped      = "vault-max-size-capped"
 
-	// Fractions of the volume, paired with absolute byte minimums. The
-	// larger of the two governs — but the absolute minimums are CLAMPED
-	// to a share of the volume so a small (or quota-capped) volume isn't
-	// permanently in alarm: a 10GB test volume must not carry a 10GiB
-	// warn threshold.
-	diskFreeWarnFraction  = 0.10
-	diskFreeFloorFraction = 0.03
-	diskFreeWarnBytes     = uint64(10 << 30) // 10 GiB
-	diskFreeFloorBytes    = uint64(3 << 30)  // 3 GiB
-	diskFreeWarnMaxShare  = 0.25             // warn threshold ≤ 25% of the volume
-	diskFreeFloorMaxShare = 0.10             // floor threshold ≤ 10% of the volume
-
+	// Node-default thresholds, as expressions an operator could type into a
+	// disk-free-warn / disk-free-floor field themselves. A default must be
+	// expressible in the field's own vocabulary — the earlier
+	// max(fraction·volume, hardBytes)-with-clamp formula was not typeable
+	// and therefore not a legitimate default (operator directive; see
+	// docs/product-defaults-policy-design.md). Percentages scale with the
+	// volume and resolve per node through the shared resolver.
+	defaultDiskFreeWarn  = "10%"
+	defaultDiskFreeFloor = "3%"
 )
 
 // clearAbove is the hysteresis exit bound: thresholds release only once
@@ -88,10 +95,11 @@ type diskGuard struct {
 	sample func(path string) (free, total uint64, err error)
 	logger *slog.Logger
 
-	warnFraction  float64
-	floorFraction float64
-	warnBytes     uint64
-	floorBytes    uint64
+	// Node-level threshold expressions ("10%", "10GB"). Never empty: set to
+	// the typeable defaults at construction, replaced by a validated
+	// GLOG_DISK_FREE_WARN / GLOG_DISK_FREE_FLOOR override when present.
+	warnExpr  string
+	floorExpr string
 
 	// protect gates the CONSUMER tier — ingest admission, retention
 	// re-routing, replica catch-up. It engages at the floor and resumes
@@ -134,9 +142,12 @@ type diskGuard struct {
 
 // vaultDiskGuard is one vault's disk-guard state.
 type vaultDiskGuard struct {
-	paths       []string
-	warnBytes   uint64 // 0 = inherit node defaults
-	floorBytes  uint64 // 0 = inherit node defaults
+	paths []string
+	// Threshold expressions ("10%", "10GB"); empty inherits the node level.
+	// Kept as expressions because a percentage can only be resolved against
+	// the volume actually sampled at evaluation time.
+	warnExpr    string
+	floorExpr   string
 	protect     atomic.Bool
 	alarmRaised bool
 	name        string
@@ -169,19 +180,23 @@ func newDiskGuardWithLogger(paths []string, logger *slog.Logger) *diskGuard {
 
 func newDiskGuard(paths []string) *diskGuard {
 	g := &diskGuard{
-		paths:         paths,
-		sample:        statfsSample,
-		warnFraction:  diskFreeWarnFraction,
-		floorFraction: diskFreeFloorFraction,
-		warnBytes:     diskFreeWarnBytes,
-		floorBytes:    diskFreeFloorBytes,
+		paths:     paths,
+		sample:    statfsSample,
+		warnExpr:  defaultDiskFreeWarn,
+		floorExpr: defaultDiskFreeFloor,
 	}
-	// Operator overrides in whole GiB via the .env channel.
-	if v, err := strconv.ParseUint(os.Getenv("GLOG_DISK_FREE_WARN_GB"), 10, 32); err == nil && v > 0 {
-		g.warnBytes = v << 30
+	// Operator overrides via the .env channel, in the same size-or-percent
+	// vocabulary as the config fields ("15%", "20GB"). A malformed override
+	// is ignored — the typeable defaults are the safe reading.
+	if e := os.Getenv("GLOG_DISK_FREE_WARN"); e != "" {
+		if _, err := system.ParseSizeOrPercent(e); err == nil {
+			g.warnExpr = e
+		}
 	}
-	if v, err := strconv.ParseUint(os.Getenv("GLOG_DISK_FREE_FLOOR_GB"), 10, 32); err == nil && v > 0 {
-		g.floorBytes = v << 30
+	if e := os.Getenv("GLOG_DISK_FREE_FLOOR"); e != "" {
+		if _, err := system.ParseSizeOrPercent(e); err == nil {
+			g.floorExpr = e
+		}
 	}
 	return g
 }
@@ -202,22 +217,35 @@ func (g *diskGuard) worstFree() (free, total uint64, ok bool) {
 	return g.worstFreeOf(g.paths)
 }
 
+// resolveThreshold resolves a disk-free threshold expression against the
+// sampled volume size through the shared resolver, inheriting fallbackExpr
+// when expr is unset. fallbackExpr is always a validated expression (the
+// typeable defaults or the checked env override), so it parses; a malformed
+// expr — impossible after write-time validation — falls back to it rather
+// than to a silent 0 threshold.
+func resolveThreshold(expr, fallbackExpr string, total uint64) uint64 {
+	if t, err := system.ResolveSizeOrPercent(expr, total, fallbackExpr); err == nil {
+		return t
+	}
+	t, _ := system.ResolveSizeOrPercent("", total, fallbackExpr)
+	return t
+}
+
 func (g *diskGuard) warnThreshold(total uint64) uint64 {
-	t := max(uint64(float64(total)*g.warnFraction), g.warnBytes)
-	return min(t, uint64(float64(total)*diskFreeWarnMaxShare))
+	return resolveThreshold(g.warnExpr, defaultDiskFreeWarn, total)
 }
 
 func (g *diskGuard) floorThreshold(total uint64) uint64 {
-	t := max(uint64(float64(total)*g.floorFraction), g.floorBytes)
-	return min(t, uint64(float64(total)*diskFreeFloorMaxShare))
+	return resolveThreshold(g.floorExpr, defaultDiskFreeFloor, total)
 }
 
 // SetVaultGuard registers (or updates) a vault's guard entry. paths are the
 // vault's local backing directories (storage chunks dir, segment root);
-// warn/floor of 0 inherit the node defaults with share clamps; maxSizeBytes
-// of 0 means no budget. Called from the discovery refresh; removal via
-// RemoveVaultGuard / retainVaultGuards.
-func (g *diskGuard) SetVaultGuard(vaultID glid.GLID, name string, paths []string, warnBytes, floorBytes, maxSizeBytes uint64) {
+// warnExpr/floorExpr are size-or-percent expressions ("10GB", "10%") and
+// empty inherits the node level; maxSizeBytes of 0 means no budget (non-file
+// vaults). Called from the discovery refresh; removal via RemoveVaultGuard /
+// retainVaultGuards.
+func (g *diskGuard) SetVaultGuard(vaultID glid.GLID, name string, paths []string, warnExpr, floorExpr string, maxSizeBytes uint64) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.vaults == nil {
@@ -230,8 +258,8 @@ func (g *diskGuard) SetVaultGuard(vaultID glid.GLID, name string, paths []string
 	}
 	v.paths = paths
 	v.name = name
-	v.warnBytes = warnBytes
-	v.floorBytes = floorBytes
+	v.warnExpr = warnExpr
+	v.floorExpr = floorExpr
 	v.maxSizeBytes = maxSizeBytes
 }
 
@@ -247,7 +275,7 @@ func (g *diskGuard) RemoveVaultGuard(vaultID glid.GLID) {
 // on this node fall out on the next tick. A pruned entry's standing alarm
 // is cleared — nothing would ever clear it once the entry stops being
 // evaluated.
-func (g *diskGuard) retainVaultGuards(keep map[glid.GLID]bool, alerts AlertCollector) {
+func (g *diskGuard) retainVaultGuards(keep map[glid.GLID]bool, alerts alert.Sink) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	for id, v := range g.vaults {
@@ -255,13 +283,16 @@ func (g *diskGuard) retainVaultGuards(keep map[glid.GLID]bool, alerts AlertColle
 			continue
 		}
 		if v.alarmRaised && alerts != nil {
-			alerts.Clear("disk-space:" + id.String())
+			alerts.Clear(alarmVaultDiskLow, id.String())
+			alerts.Clear(alarmVaultDiskExhausted, id.String())
 		}
 		if v.sizeAlarmRaised && alerts != nil {
-			alerts.Clear("vault-max-size:" + id.String())
+			alerts.Clear(alarmMaxSizeApproaching, id.String())
+			alerts.Clear(alarmMaxSizeCapped, id.String())
 		}
 		if v.backlogAlarmRaised && alerts != nil {
-			alerts.Clear("pipeline-backlog:" + id.String())
+			alerts.Clear(alarmBacklogApproaching, id.String())
+			alerts.Clear(alarmBacklogCapped, id.String())
 		}
 		delete(g.vaults, id)
 	}
@@ -323,21 +354,15 @@ func (g *diskGuard) protectedVaults() []glid.GLID {
 }
 
 // evaluateVaults runs the per-vault guard pass. Caller is the scheduler job.
-func (g *diskGuard) evaluateVaults(alerts AlertCollector) {
+func (g *diskGuard) evaluateVaults(alerts alert.Sink) {
 	g.mu.Lock()
 	entries := maps.Clone(g.vaults)
 	g.mu.Unlock()
 
 	for id, v := range entries {
 		if free, total, ok := g.worstFreeOf(v.paths); ok {
-			warnAt := g.warnThreshold(total)
-			if v.warnBytes > 0 {
-				warnAt = v.warnBytes
-			}
-			floorAt := g.floorThreshold(total)
-			if v.floorBytes > 0 {
-				floorAt = v.floorBytes
-			}
+			warnAt := resolveThreshold(v.warnExpr, g.warnExpr, total)
+			floorAt := resolveThreshold(v.floorExpr, g.floorExpr, total)
 			g.reconcileVaultProtect(id, v, free, floorAt, warnAt)
 			g.reconcileVaultAlarm(alerts, id, v, free, total, warnAt)
 		}
@@ -382,30 +407,32 @@ func (g *diskGuard) reconcileVaultBacklogCap(id glid.GLID, v *vaultDiskGuard, us
 	}
 }
 
-func (g *diskGuard) reconcileVaultBacklogAlarm(alerts AlertCollector, id glid.GLID, v *vaultDiskGuard, used, budget uint64) {
+func (g *diskGuard) reconcileVaultBacklogAlarm(alerts alert.Sink, id glid.GLID, v *vaultDiskGuard, used, budget uint64) {
 	if alerts == nil {
 		return
 	}
-	alertID := "pipeline-backlog:" + id.String()
 	approachAt := sizeApproachThreshold(budget)
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	switch {
 	case used >= approachAt:
-		severity := alert.Warning
-		msg := fmt.Sprintf(
-			"Vault %s pipeline backlog is approaching its budget: %s of %s. Chunking is not keeping pace with ingest — check chunking throughput, raise the budget, or reduce the ingest rate.",
-			v.name, units.FormatBytesDisplay(int64(used)), units.FormatBytesDisplay(int64(budget))) //nolint:gosec // display only
+		// Two setpoints, two alarms: approaching (Low) below the budget,
+		// capped (High) at it. Exactly one is active at a time.
 		if v.backlogCapped.Load() {
-			severity = alert.Error
-			msg = fmt.Sprintf(
-				"Vault %s pipeline backlog is at its budget: %s of %s — new records for this vault are REFUSED until chunking drains the backlog. Other vaults are unaffected.",
-				v.name, units.FormatBytesDisplay(int64(used)), units.FormatBytesDisplay(int64(budget))) //nolint:gosec // display only
+			alerts.Clear(alarmBacklogApproaching, id.String())
+			alerts.Raise(alarmBacklogCapped, id.String(), fmt.Sprintf(
+				"Vault %s pipeline backlog is at its budget: %s of %s — new records for this vault are REFUSED until chunking drains the backlog.",
+				v.name, units.FormatBytesDisplay(int64(used)), units.FormatBytesDisplay(int64(budget)))) //nolint:gosec // display only
+		} else {
+			alerts.Clear(alarmBacklogCapped, id.String())
+			alerts.Raise(alarmBacklogApproaching, id.String(), fmt.Sprintf(
+				"Vault %s pipeline backlog is approaching its budget: %s of %s.",
+				v.name, units.FormatBytesDisplay(int64(used)), units.FormatBytesDisplay(int64(budget)))) //nolint:gosec // display only
 		}
-		alerts.Set(alertID, severity, "storage", msg)
 		v.backlogAlarmRaised = true
 	case v.backlogAlarmRaised && used < approachAt-approachAt/10:
-		alerts.Clear(alertID)
+		alerts.Clear(alarmBacklogApproaching, id.String())
+		alerts.Clear(alarmBacklogCapped, id.String())
 		v.backlogAlarmRaised = false
 	}
 }
@@ -413,7 +440,7 @@ func (g *diskGuard) reconcileVaultBacklogAlarm(alerts AlertCollector, id glid.GL
 // clearVaultBacklogState releases a standing cap/alarm when the budget is
 // unset (0) — otherwise a vault capped under an old budget would refuse
 // admission forever after the operator disables the bound.
-func (g *diskGuard) clearVaultBacklogState(alerts AlertCollector, id glid.GLID, v *vaultDiskGuard) {
+func (g *diskGuard) clearVaultBacklogState(alerts alert.Sink, id glid.GLID, v *vaultDiskGuard) {
 	if v.backlogCapped.Load() {
 		v.backlogCapped.Store(false)
 		if g.logger != nil {
@@ -425,7 +452,8 @@ func (g *diskGuard) clearVaultBacklogState(alerts AlertCollector, id glid.GLID, 
 	v.backlogAlarmRaised = false
 	g.mu.Unlock()
 	if raised && alerts != nil {
-		alerts.Clear("pipeline-backlog:" + id.String())
+		alerts.Clear(alarmBacklogApproaching, id.String())
+		alerts.Clear(alarmBacklogCapped, id.String())
 	}
 }
 
@@ -469,30 +497,32 @@ func (g *diskGuard) reconcileVaultSizeCap(id glid.GLID, v *vaultDiskGuard, used 
 	}
 }
 
-func (g *diskGuard) reconcileVaultSizeAlarm(alerts AlertCollector, id glid.GLID, v *vaultDiskGuard, used uint64) {
+func (g *diskGuard) reconcileVaultSizeAlarm(alerts alert.Sink, id glid.GLID, v *vaultDiskGuard, used uint64) {
 	if alerts == nil {
 		return
 	}
-	alertID := "vault-max-size:" + id.String()
 	approachAt := sizeApproachThreshold(v.maxSizeBytes)
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	switch {
 	case used >= approachAt:
-		severity := alert.Warning
-		msg := fmt.Sprintf(
-			"Vault %s is approaching its size budget: %s of %s used. Raise the budget, shorten retention, or add a size retention policy to drain ahead of the cap.",
-			v.name, units.FormatBytesDisplay(int64(used)), units.FormatBytesDisplay(int64(v.maxSizeBytes))) //nolint:gosec // display only
+		// Two setpoints, two alarms: approaching (Low) below the budget,
+		// capped (High) at it. Exactly one is active at a time.
 		if v.capped.Load() {
-			severity = alert.Error
-			msg = fmt.Sprintf(
-				"Vault %s is at its size budget: %s of %s used — new records for this vault are REFUSED until retention drains it. Other vaults are unaffected.",
-				v.name, units.FormatBytesDisplay(int64(used)), units.FormatBytesDisplay(int64(v.maxSizeBytes))) //nolint:gosec // display only
+			alerts.Clear(alarmMaxSizeApproaching, id.String())
+			alerts.Raise(alarmMaxSizeCapped, id.String(), fmt.Sprintf(
+				"Vault %s is at its size budget: %s of %s used — new records for this vault are REFUSED until retention drains it.",
+				v.name, units.FormatBytesDisplay(int64(used)), units.FormatBytesDisplay(int64(v.maxSizeBytes)))) //nolint:gosec // display only
+		} else {
+			alerts.Clear(alarmMaxSizeCapped, id.String())
+			alerts.Raise(alarmMaxSizeApproaching, id.String(), fmt.Sprintf(
+				"Vault %s is approaching its size budget: %s of %s used.",
+				v.name, units.FormatBytesDisplay(int64(used)), units.FormatBytesDisplay(int64(v.maxSizeBytes)))) //nolint:gosec // display only
 		}
-		alerts.Set(alertID, severity, "storage", msg)
 		v.sizeAlarmRaised = true
 	case v.sizeAlarmRaised && used < approachAt-approachAt/10:
-		alerts.Clear(alertID)
+		alerts.Clear(alarmMaxSizeApproaching, id.String())
+		alerts.Clear(alarmMaxSizeCapped, id.String())
 		v.sizeAlarmRaised = false
 	}
 }
@@ -520,27 +550,31 @@ func (g *diskGuard) reconcileVaultProtect(id glid.GLID, v *vaultDiskGuard, free,
 	}
 }
 
-func (g *diskGuard) reconcileVaultAlarm(alerts AlertCollector, id glid.GLID, v *vaultDiskGuard, free, total, warnAt uint64) {
+func (g *diskGuard) reconcileVaultAlarm(alerts alert.Sink, id glid.GLID, v *vaultDiskGuard, free, total, warnAt uint64) {
 	if alerts == nil {
 		return
 	}
-	alertID := "disk-space:" + id.String()
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	switch {
 	case free < warnAt:
-		msg := fmt.Sprintf(
-			"Low disk space for vault %s: %s free of %s on its volume. Free space, add capacity, raise the vault's threshold, or shorten its retention.",
-			v.name, units.FormatBytesDisplay(int64(free)), units.FormatBytesDisplay(int64(total))) //nolint:gosec // display only
+		// Two setpoints, two alarms: low (Low) inside the warn band,
+		// exhausted (High) once protect suspends admission.
 		if v.protect.Load() {
-			msg = fmt.Sprintf(
-				"Out of disk space for vault %s: %s free — admission for this vault is SUSPENDED until space frees. Other vaults are unaffected.",
-				v.name, units.FormatBytesDisplay(int64(free))) //nolint:gosec // display only
+			alerts.Clear(alarmVaultDiskLow, id.String())
+			alerts.Raise(alarmVaultDiskExhausted, id.String(), fmt.Sprintf(
+				"Out of disk space for vault %s: %s free — admission for this vault is SUSPENDED until space frees.",
+				v.name, units.FormatBytesDisplay(int64(free)))) //nolint:gosec // display only
+		} else {
+			alerts.Clear(alarmVaultDiskExhausted, id.String())
+			alerts.Raise(alarmVaultDiskLow, id.String(), fmt.Sprintf(
+				"Low disk space for vault %s: %s free of %s on its volume.",
+				v.name, units.FormatBytesDisplay(int64(free)), units.FormatBytesDisplay(int64(total)))) //nolint:gosec // display only
 		}
-		alerts.Set(alertID, alert.Error, "storage", msg)
 		v.alarmRaised = true
 	case v.alarmRaised && free > clearAbove(warnAt):
-		alerts.Clear(alertID)
+		alerts.Clear(alarmVaultDiskLow, id.String())
+		alerts.Clear(alarmVaultDiskExhausted, id.String())
 		v.alarmRaised = false
 	}
 }
@@ -563,7 +597,7 @@ func (g *diskGuard) worstFreeOf(paths []string) (free, total uint64, ok bool) {
 
 // evaluate runs one guard pass: updates protect mode and raises/clears the
 // disk-space alarm on the given collector. Scheduler-driven.
-func (g *diskGuard) evaluate(alerts AlertCollector) {
+func (g *diskGuard) evaluate(alerts alert.Sink) {
 	free, total, ok := g.worstFree()
 	if !ok {
 		return // no sampleable path; nothing trustworthy to act on
@@ -580,18 +614,23 @@ func (g *diskGuard) evaluate(alerts AlertCollector) {
 	defer g.mu.Unlock()
 	switch {
 	case free < warnAt:
-		msg := fmt.Sprintf(
-			"Low disk space: %s free of %s. Free space, add capacity, or shorten retention.",
-			units.FormatBytesDisplay(int64(free)), units.FormatBytesDisplay(int64(total))) //nolint:gosec // display only
+		// Two setpoints, two alarms: low (Low) inside the warn band,
+		// exhausted (High) once protect suspends ingest admission.
 		if g.protect.Load() {
-			msg = fmt.Sprintf(
-				"Out of disk space: %s free of %s — ingest admission is SUSPENDED on this node until space is freed. Retention and deletes keep running.",
-				units.FormatBytesDisplay(int64(free)), units.FormatBytesDisplay(int64(total))) //nolint:gosec // display only
+			alerts.Clear(alarmNodeDiskLow, "")
+			alerts.Raise(alarmNodeDiskExhausted, "", fmt.Sprintf(
+				"Out of disk space: %s free of %s — ingest admission is SUSPENDED on this node until space is freed.",
+				units.FormatBytesDisplay(int64(free)), units.FormatBytesDisplay(int64(total)))) //nolint:gosec // display only
+		} else {
+			alerts.Clear(alarmNodeDiskExhausted, "")
+			alerts.Raise(alarmNodeDiskLow, "", fmt.Sprintf(
+				"Low disk space: %s free of %s.",
+				units.FormatBytesDisplay(int64(free)), units.FormatBytesDisplay(int64(total)))) //nolint:gosec // display only
 		}
-		alerts.Set(diskGuardAlertID, alert.Error, "storage", msg)
 		g.alarmRaised = true
 	case g.alarmRaised && free > clearAbove(warnAt):
-		alerts.Clear(diskGuardAlertID)
+		alerts.Clear(alarmNodeDiskLow, "")
+		alerts.Clear(alarmNodeDiskExhausted, "")
 		g.alarmRaised = false
 	}
 }
@@ -785,16 +824,12 @@ func (o *Orchestrator) refreshVaultDiskGuards(ctx context.Context) {
 		if len(paths) == 0 && maxSize == 0 {
 			continue
 		}
-		warn, err := system.SizeOrDefault(vc.DiskFreeWarn, 0)
-		if err != nil {
-			warn = 0 // 0 = inherit the node default, the safe reading
-		}
-		floor, err := system.SizeOrDefault(vc.DiskFreeFloor, 0)
-		if err != nil {
-			floor = 0
-		}
+		// The disk-free thresholds stay expressions all the way into the
+		// guard: a percentage ("10%") can only be resolved against the volume
+		// actually sampled at evaluation time. Empty inherits the node level;
+		// write-time validation guarantees a set value parses.
 		keep[vc.ID] = true
-		o.diskGuard.SetVaultGuard(vc.ID, vc.Name, paths, warn, floor, maxSize)
+		o.diskGuard.SetVaultGuard(vc.ID, vc.Name, paths, vc.DiskFreeWarn, vc.DiskFreeFloor, maxSize)
 	}
 	o.diskGuard.retainVaultGuards(keep, o.alerts)
 }

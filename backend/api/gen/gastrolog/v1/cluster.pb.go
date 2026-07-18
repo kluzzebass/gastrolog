@@ -22,52 +22,59 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-type AlertSeverity int32
+// AlarmPriority is the cataloged consequence × urgency verdict for an alarm
+// type. CRITICAL = data loss in progress or scheduled; HIGH = durability or
+// availability degraded, will compound; LOW = needs attention on a human
+// timescale. UNSPECIFIED is only carried by software faults.
+type AlarmPriority int32
 
 const (
-	AlertSeverity_ALERT_SEVERITY_UNSPECIFIED AlertSeverity = 0
-	AlertSeverity_ALERT_SEVERITY_WARNING     AlertSeverity = 1
-	AlertSeverity_ALERT_SEVERITY_ERROR       AlertSeverity = 2
+	AlarmPriority_ALARM_PRIORITY_UNSPECIFIED AlarmPriority = 0
+	AlarmPriority_ALARM_PRIORITY_LOW         AlarmPriority = 1
+	AlarmPriority_ALARM_PRIORITY_HIGH        AlarmPriority = 2
+	AlarmPriority_ALARM_PRIORITY_CRITICAL    AlarmPriority = 3
 )
 
-// Enum value maps for AlertSeverity.
+// Enum value maps for AlarmPriority.
 var (
-	AlertSeverity_name = map[int32]string{
-		0: "ALERT_SEVERITY_UNSPECIFIED",
-		1: "ALERT_SEVERITY_WARNING",
-		2: "ALERT_SEVERITY_ERROR",
+	AlarmPriority_name = map[int32]string{
+		0: "ALARM_PRIORITY_UNSPECIFIED",
+		1: "ALARM_PRIORITY_LOW",
+		2: "ALARM_PRIORITY_HIGH",
+		3: "ALARM_PRIORITY_CRITICAL",
 	}
-	AlertSeverity_value = map[string]int32{
-		"ALERT_SEVERITY_UNSPECIFIED": 0,
-		"ALERT_SEVERITY_WARNING":     1,
-		"ALERT_SEVERITY_ERROR":       2,
+	AlarmPriority_value = map[string]int32{
+		"ALARM_PRIORITY_UNSPECIFIED": 0,
+		"ALARM_PRIORITY_LOW":         1,
+		"ALARM_PRIORITY_HIGH":        2,
+		"ALARM_PRIORITY_CRITICAL":    3,
 	}
 )
 
-func (x AlertSeverity) Enum() *AlertSeverity {
-	p := new(AlertSeverity)
+func (x AlarmPriority) Enum() *AlarmPriority {
+	p := new(AlarmPriority)
 	*p = x
 	return p
 }
 
-func (x AlertSeverity) String() string {
+func (x AlarmPriority) String() string {
 	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
 }
 
-func (AlertSeverity) Descriptor() protoreflect.EnumDescriptor {
+func (AlarmPriority) Descriptor() protoreflect.EnumDescriptor {
 	return file_gastrolog_v1_cluster_proto_enumTypes[0].Descriptor()
 }
 
-func (AlertSeverity) Type() protoreflect.EnumType {
+func (AlarmPriority) Type() protoreflect.EnumType {
 	return &file_gastrolog_v1_cluster_proto_enumTypes[0]
 }
 
-func (x AlertSeverity) Number() protoreflect.EnumNumber {
+func (x AlarmPriority) Number() protoreflect.EnumNumber {
 	return protoreflect.EnumNumber(x)
 }
 
-// Deprecated: Use AlertSeverity.Descriptor instead.
-func (AlertSeverity) EnumDescriptor() ([]byte, []int) {
+// Deprecated: Use AlarmPriority.Descriptor instead.
+func (AlarmPriority) EnumDescriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{0}
 }
 
@@ -656,8 +663,21 @@ type NodeStats struct {
 	// max-size budget. Honored cluster-wide by the same per-vault admission
 	// gate as disk_protected_vault_ids, with a budget-specific error.
 	SizeCappedVaultIds [][]byte `protobuf:"bytes,49,rep,name=size_capped_vault_ids,json=sizeCappedVaultIds,proto3" json:"size_capped_vault_ids,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// Cumulative diagnostic log records this node's capture handler has
+	// discarded because the capture channel was full. A capacity signal with
+	// no operator action, so it is a metric and never an alarm
+	// (gastrolog-3phtqv). It is deliberately not logged either: a log line
+	// about dropped logs feeds the self-ingester that is dropping them.
+	SelfIngesterDropsTotal uint64 `protobuf:"varint,50,opt,name=self_ingester_drops_total,json=selfIngesterDropsTotal,proto3" json:"self_ingester_drops_total,omitempty"`
+	// Current ingest-pipeline pressure: "normal", "elevated", or "critical".
+	// PressureAware ingesters throttle themselves as this rises. A metric, not
+	// an alarm (gastrolog-3phtqv): the actionable end of a backed-up pipeline
+	// is already covered by the pipeline-backlog and disk-space alarms, which
+	// fire when the backlog actually threatens something. Like raft_state,
+	// this is the level's String() rather than an enum.
+	IngestPressureLevel string `protobuf:"bytes,51,opt,name=ingest_pressure_level,json=ingestPressureLevel,proto3" json:"ingest_pressure_level,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *NodeStats) Reset() {
@@ -1033,6 +1053,20 @@ func (x *NodeStats) GetSizeCappedVaultIds() [][]byte {
 	return nil
 }
 
+func (x *NodeStats) GetSelfIngesterDropsTotal() uint64 {
+	if x != nil {
+		return x.SelfIngesterDropsTotal
+	}
+	return 0
+}
+
+func (x *NodeStats) GetIngestPressureLevel() string {
+	if x != nil {
+		return x.IngestPressureLevel
+	}
+	return ""
+}
+
 // VaultPipelineNodeDisk is one vault's local pipeline storage areas on a
 // single node, included in the periodic NodeStats broadcast.
 type VaultPipelineNodeDisk struct {
@@ -1347,18 +1381,32 @@ func (x *PeerTrafficTotal) GetRxSpark() []float64 {
 	return nil
 }
 
-// SystemAlert represents a runtime condition that operators should be aware of.
-// Alerts are keyed by ID for deduplication — the same condition doesn't create
-// multiple alerts. They auto-clear when the component that raised them detects
-// the condition has resolved.
+// SystemAlert is one standing alarm: a runtime condition requiring operator
+// action, with priority, cause and response stamped from the static alarm
+// catalog — never chosen at the raising call site.
+// Alarms are keyed by ID for deduplication — the same condition doesn't
+// create multiple alarms. Alarms are STATE with suppression: they stand
+// while the condition holds and clear when it resolves — an alarm is
+// standing or it is not; there are no per-alarm operator states. Latching
+// alarms stand until process restart.
 type SystemAlert struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"` // stable key for dedup (e.g. "vault-init:$vaultID")
-	Severity      AlertSeverity          `protobuf:"varint,2,opt,name=severity,proto3,enum=gastrolog.v1.AlertSeverity" json:"severity,omitempty"`
-	Source        string                 `protobuf:"bytes,3,opt,name=source,proto3" json:"source,omitempty"` // component name (e.g. "orchestrator", "forwarder")
-	Message       string                 `protobuf:"bytes,4,opt,name=message,proto3" json:"message,omitempty"`
-	FirstSeen     *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=first_seen,json=firstSeen,proto3" json:"first_seen,omitempty"`
-	LastSeen      *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=last_seen,json=lastSeen,proto3" json:"last_seen,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Id       []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`                                              // stable key for dedup (e.g. "vault-init:$vaultID")
+	Priority AlarmPriority          `protobuf:"varint,2,opt,name=priority,proto3,enum=gastrolog.v1.AlarmPriority" json:"priority,omitempty"` // from the alarm catalog, never the call site
+	Source   string                 `protobuf:"bytes,3,opt,name=source,proto3" json:"source,omitempty"`                                      // component name (e.g. "placement", "chunking")
+	Detail   string                 `protobuf:"bytes,4,opt,name=detail,proto3" json:"detail,omitempty"`                                      // per-instance specifics from the raiser
+	// Condition start of the current occurrence (the first Raise of the
+	// occurrence, not the annunciation instant — a delay-on window suppresses
+	// annunciation, not the condition's history). This IS the design doc's
+	// "first_raised"; no separate field exists.
+	FirstSeen *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=first_seen,json=firstSeen,proto3" json:"first_seen,omitempty"`
+	LastSeen  *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=last_seen,json=lastSeen,proto3" json:"last_seen,omitempty"`
+	Cause     string                 `protobuf:"bytes,7,opt,name=cause,proto3" json:"cause,omitempty"`       // catalog: what condition this is
+	Response  string                 `protobuf:"bytes,8,opt,name=response,proto3" json:"response,omitempty"` // catalog: what the operator should do
+	// Software faults are defect tripwires, a class apart from process alarms
+	// (EEMUA 191): their response is to report the defect, so they sit outside
+	// the consequence × urgency priority scale (priority is UNSPECIFIED).
+	SoftwareFault bool `protobuf:"varint,9,opt,name=software_fault,json=softwareFault,proto3" json:"software_fault,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1400,11 +1448,11 @@ func (x *SystemAlert) GetId() []byte {
 	return nil
 }
 
-func (x *SystemAlert) GetSeverity() AlertSeverity {
+func (x *SystemAlert) GetPriority() AlarmPriority {
 	if x != nil {
-		return x.Severity
+		return x.Priority
 	}
-	return AlertSeverity_ALERT_SEVERITY_UNSPECIFIED
+	return AlarmPriority_ALARM_PRIORITY_UNSPECIFIED
 }
 
 func (x *SystemAlert) GetSource() string {
@@ -1414,9 +1462,9 @@ func (x *SystemAlert) GetSource() string {
 	return ""
 }
 
-func (x *SystemAlert) GetMessage() string {
+func (x *SystemAlert) GetDetail() string {
 	if x != nil {
-		return x.Message
+		return x.Detail
 	}
 	return ""
 }
@@ -1433,6 +1481,27 @@ func (x *SystemAlert) GetLastSeen() *timestamppb.Timestamp {
 		return x.LastSeen
 	}
 	return nil
+}
+
+func (x *SystemAlert) GetCause() string {
+	if x != nil {
+		return x.Cause
+	}
+	return ""
+}
+
+func (x *SystemAlert) GetResponse() string {
+	if x != nil {
+		return x.Response
+	}
+	return ""
+}
+
+func (x *SystemAlert) GetSoftwareFault() bool {
+	if x != nil {
+		return x.SoftwareFault
+	}
+	return false
 }
 
 // IngesterNodeStats reports per-ingester statistics on a cluster node.
@@ -4532,7 +4601,7 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\apayload\"\v\n" +
 	"\tHeartbeat\"1\n" +
 	"\bNodeJobs\x12%\n" +
-	"\x04jobs\x18\x01 \x03(\v2\x11.gastrolog.v1.JobR\x04jobs\"\xcc\x12\n" +
+	"\x04jobs\x18\x01 \x03(\v2\x11.gastrolog.v1.JobR\x04jobs\"\xbb\x13\n" +
 	"\tNodeStats\x12\x1f\n" +
 	"\vcpu_percent\x18\x01 \x01(\x01R\n" +
 	"cpuPercent\x12!\n" +
@@ -4590,7 +4659,9 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x1craft_failed_heartbeats_total\x18. \x01(\x04R\x19raftFailedHeartbeatsTotal\x123\n" +
 	"\x16raft_elections_per_min\x18/ \x01(\x01R\x13raftElectionsPerMin\x127\n" +
 	"\x18disk_protected_vault_ids\x180 \x03(\fR\x15diskProtectedVaultIds\x121\n" +
-	"\x15size_capped_vault_ids\x181 \x03(\fR\x12sizeCappedVaultIds\"\xec\x01\n" +
+	"\x15size_capped_vault_ids\x181 \x03(\fR\x12sizeCappedVaultIds\x129\n" +
+	"\x19self_ingester_drops_total\x182 \x01(\x04R\x16selfIngesterDropsTotal\x122\n" +
+	"\x15ingest_pressure_level\x183 \x01(\tR\x13ingestPressureLevel\"\xec\x01\n" +
 	"\x15VaultPipelineNodeDisk\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12)\n" +
 	"\x10working_segments\x18\x02 \x01(\rR\x0fworkingSegments\x12<\n" +
@@ -4622,15 +4693,18 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x10tx_bytes_per_sec\x18\x04 \x01(\x01R\rtxBytesPerSec\x12'\n" +
 	"\x10rx_bytes_per_sec\x18\x05 \x01(\x01R\rrxBytesPerSec\x12\x19\n" +
 	"\btx_spark\x18\x06 \x03(\x01R\atxSpark\x12\x19\n" +
-	"\brx_spark\x18\a \x03(\x01R\arxSpark\"\xfc\x01\n" +
+	"\brx_spark\x18\a \x03(\x01R\arxSpark\"\xd3\x02\n" +
 	"\vSystemAlert\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x127\n" +
-	"\bseverity\x18\x02 \x01(\x0e2\x1b.gastrolog.v1.AlertSeverityR\bseverity\x12\x16\n" +
-	"\x06source\x18\x03 \x01(\tR\x06source\x12\x18\n" +
-	"\amessage\x18\x04 \x01(\tR\amessage\x129\n" +
+	"\bpriority\x18\x02 \x01(\x0e2\x1b.gastrolog.v1.AlarmPriorityR\bpriority\x12\x16\n" +
+	"\x06source\x18\x03 \x01(\tR\x06source\x12\x16\n" +
+	"\x06detail\x18\x04 \x01(\tR\x06detail\x129\n" +
 	"\n" +
 	"first_seen\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\tfirstSeen\x127\n" +
-	"\tlast_seen\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\blastSeen\"\xbd\x01\n" +
+	"\tlast_seen\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\blastSeen\x12\x14\n" +
+	"\x05cause\x18\a \x01(\tR\x05cause\x12\x1a\n" +
+	"\bresponse\x18\b \x01(\tR\bresponse\x12%\n" +
+	"\x0esoftware_fault\x18\t \x01(\bR\rsoftwareFault\"\xbd\x01\n" +
 	"\x11IngesterNodeStats\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12+\n" +
 	"\x11messages_ingested\x18\x02 \x01(\x04R\x10messagesIngested\x12%\n" +
@@ -4804,11 +4878,12 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"error_code\x18\x03 \x01(\rR\terrorCode\x12#\n" +
 	"\rerror_message\x18\x04 \x01(\tR\ferrorMessage\x12\x1d\n" +
 	"\n" +
-	"end_stream\x18\x05 \x01(\bR\tendStream*e\n" +
-	"\rAlertSeverity\x12\x1e\n" +
-	"\x1aALERT_SEVERITY_UNSPECIFIED\x10\x00\x12\x1a\n" +
-	"\x16ALERT_SEVERITY_WARNING\x10\x01\x12\x18\n" +
-	"\x14ALERT_SEVERITY_ERROR\x10\x02B,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
+	"end_stream\x18\x05 \x01(\bR\tendStream*}\n" +
+	"\rAlarmPriority\x12\x1e\n" +
+	"\x1aALARM_PRIORITY_UNSPECIFIED\x10\x00\x12\x16\n" +
+	"\x12ALARM_PRIORITY_LOW\x10\x01\x12\x17\n" +
+	"\x13ALARM_PRIORITY_HIGH\x10\x02\x12\x1b\n" +
+	"\x17ALARM_PRIORITY_CRITICAL\x10\x03B,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
 
 var (
 	file_gastrolog_v1_cluster_proto_rawDescOnce sync.Once
@@ -4825,7 +4900,7 @@ func file_gastrolog_v1_cluster_proto_rawDescGZIP() []byte {
 var file_gastrolog_v1_cluster_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_gastrolog_v1_cluster_proto_msgTypes = make([]protoimpl.MessageInfo, 70)
 var file_gastrolog_v1_cluster_proto_goTypes = []any{
-	(AlertSeverity)(0),                        // 0: gastrolog.v1.AlertSeverity
+	(AlarmPriority)(0),                        // 0: gastrolog.v1.AlarmPriority
 	(*ForwardApplyRequest)(nil),               // 1: gastrolog.v1.ForwardApplyRequest
 	(*ForwardApplyResponse)(nil),              // 2: gastrolog.v1.ForwardApplyResponse
 	(*EnrollRequest)(nil),                     // 3: gastrolog.v1.EnrollRequest
@@ -4929,7 +5004,7 @@ var file_gastrolog_v1_cluster_proto_depIdxs = []int32{
 	11, // 13: gastrolog.v1.NodeStats.vault_pipeline_disk:type_name -> gastrolog.v1.VaultPipelineNodeDisk
 	76, // 14: gastrolog.v1.NodeStats.route_routed:type_name -> gastrolog.v1.ThroughputRate
 	76, // 15: gastrolog.v1.NodeStats.route_matched:type_name -> gastrolog.v1.ThroughputRate
-	0,  // 16: gastrolog.v1.SystemAlert.severity:type_name -> gastrolog.v1.AlertSeverity
+	0,  // 16: gastrolog.v1.SystemAlert.priority:type_name -> gastrolog.v1.AlarmPriority
 	71, // 17: gastrolog.v1.SystemAlert.first_seen:type_name -> google.protobuf.Timestamp
 	71, // 18: gastrolog.v1.SystemAlert.last_seen:type_name -> google.protobuf.Timestamp
 	22, // 19: gastrolog.v1.ChunkReplicationCommand.delete_chunk:type_name -> gastrolog.v1.ChunkReplicationDelete

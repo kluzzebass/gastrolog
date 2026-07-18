@@ -14,7 +14,7 @@ func FuzzNewFactory(f *testing.F) {
 	ch := make(chan logging.CapturedRecord, 1)
 	// nil CaptureHandler and nil AlertCollector — the factory and
 	// drop monitor are guarded by nil checks.
-	factory := NewFactory(ch, nil, nil)
+	factory := NewFactory(ch, nil)
 	id := glid.New()
 
 	// Seed: valid params.

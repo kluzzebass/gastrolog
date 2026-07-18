@@ -68,7 +68,7 @@ type Config struct {
 // of flooding the log every few seconds. The counter resets on any clean run
 // exit, so an ingester that recovers and later fails again starts back at the
 // base delay. Operator visibility does not ride on the log line: the
-// convergence sweep's ingester-not-running alert (gastrolog-3mnjlo) stays
+// convergence sweep's divergence log (gastrolog-3mnjlo) stays
 // raised between attempts and clears once a retry holds.
 const (
 	retryBackoffBase   = 3 * time.Second
@@ -120,6 +120,13 @@ type Manager struct {
 	retryDelay         func(consecutiveFailures int) time.Duration
 	checkpointInterval time.Duration
 
+	// lifecycleMu serializes Start, Stop, and Reconcile against each other.
+	// Reconcile must release mu while it waits for stopped runs to exit
+	// (never wait on a goroutine while holding the state lock), so mu alone
+	// cannot keep a concurrent lifecycle call from interleaving with that
+	// window. Lock order: lifecycleMu before mu.
+	lifecycleMu sync.Mutex
+
 	mu      sync.Mutex
 	running atomic.Bool
 	runCtx  context.Context
@@ -129,6 +136,13 @@ type Manager struct {
 	meta      map[glid.GLID]ingesterMeta
 	minters   map[glid.GLID]*Minter
 	cancels   map[glid.GLID]context.CancelFunc
+	// dones holds, per running ingester, a channel closed when its
+	// runIngester goroutine has fully returned — after every goroutine of the
+	// attempt (including the Ingester.Run goroutine, see pumpIngester) has
+	// exited. Reconcile waits on these so a replaced ingester's old run can
+	// never overlap its successor (gastrolog-4rdb9f: a stale run's deferred
+	// alive-false clobbered the new run's alive-true on the shared stats).
+	dones map[glid.GLID]chan struct{}
 
 	ingesterWg sync.WaitGroup
 	// outOnce guards close(out): both Stop and the Start-installed
@@ -169,6 +183,7 @@ func New(cfg Config) (*Manager, <-chan IngestMessage) {
 		meta:               make(map[glid.GLID]ingesterMeta),
 		minters:            make(map[glid.GLID]*Minter),
 		cancels:            make(map[glid.GLID]context.CancelFunc),
+		dones:              make(map[glid.GLID]chan struct{}),
 	}
 	return m, out
 }
@@ -176,6 +191,8 @@ func New(cfg Config) (*Manager, <-chan IngestMessage) {
 // Start launches all registered ingesters. Reconcile may be called before or
 // after Start; ingesters added while stopped start when Start runs.
 func (m *Manager) Start(parent context.Context) error {
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -207,6 +224,9 @@ func (m *Manager) Start(parent context.Context) error {
 // Stop cancels all ingesters, waits for them to exit, then closes the output
 // channel so downstream can drain and exit.
 func (m *Manager) Stop() error {
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+
 	if !m.running.CompareAndSwap(true, false) {
 		return ErrNotRunning
 	}
@@ -226,6 +246,7 @@ func (m *Manager) Stop() error {
 	m.runCtx = nil
 	m.cancel = nil
 	m.cancels = make(map[glid.GLID]context.CancelFunc)
+	m.dones = make(map[glid.GLID]chan struct{})
 	m.mu.Unlock()
 
 	return nil
@@ -234,10 +255,20 @@ func (m *Manager) Stop() error {
 // Reconcile starts ingesters present in the snapshot and stops those absent.
 // An ingester whose spec changes (different Ingester value or metadata) is
 // replaced idempotently; an unchanged spec keeps its running instance untouched.
+//
+// A replaced ingester's old run has FULLY exited before its successor starts:
+// stop is cancel-then-wait, not fire-and-forget. Without the wait, a run
+// parked in a send on the full digestion queue wakes on cancel AFTER the
+// successor has started, and its deferred teardown (the orchestrator
+// adapter's alive-false, against the same shared IngesterStats reused across
+// rebuilds) lands last — leaving a running ingester reported not-running
+// until the next rebuild, so the convergence sweep re-raised
+// divergence forever on a healthy node (gastrolog-4rdb9f). The wait
+// happens with mu released — never hold the state lock while blocking on a
+// goroutine — and is unbounded by design: Ingester.Run is contractually
+// required to exit promptly on cancellation (Stop already waits unboundedly
+// on the same goroutines via ingesterWg).
 func (m *Manager) Reconcile(snapshot []IngesterSpec) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	desired := make(map[glid.GLID]IngesterSpec, len(snapshot))
 	for _, spec := range snapshot {
 		if spec.ID.IsZero() {
@@ -249,15 +280,30 @@ func (m *Manager) Reconcile(snapshot []IngesterSpec) error {
 		desired[spec.ID] = spec
 	}
 
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+
+	// Phase 1 (under mu): cancel removed and replaced runs, install the new
+	// specs, and collect the done channels of every run we stopped.
+	m.mu.Lock()
+
+	var waits []chan struct{}
+	stop := func(id glid.GLID) {
+		if done := m.stopLocked(id); done != nil {
+			waits = append(waits, done)
+		}
+	}
+
 	for id := range m.ingesters {
 		if _, ok := desired[id]; !ok {
-			m.stopLocked(id)
+			stop(id)
 			delete(m.ingesters, id)
 			delete(m.meta, id)
 			delete(m.minters, id)
 		}
 	}
 
+	var toStart []glid.GLID
 	for id, spec := range desired {
 		existing, had := m.ingesters[id]
 		meta := ingesterMeta{name: spec.Name, typ: spec.Type, passive: spec.Passive}
@@ -266,7 +312,7 @@ func (m *Manager) Reconcile(snapshot []IngesterSpec) error {
 		}
 
 		if had {
-			m.stopLocked(id)
+			stop(id)
 		}
 
 		m.ingesters[id] = spec.Ingester
@@ -274,11 +320,28 @@ func (m *Manager) Reconcile(snapshot []IngesterSpec) error {
 		if m.minters[id] == nil {
 			m.minters[id] = NewMinter(id, m.nodeID)
 		}
+		toStart = append(toStart, id)
+	}
 
-		if m.running.Load() {
-			m.startLocked(id, spec.Ingester)
+	m.mu.Unlock()
+
+	// Phase 2 (no locks): wait for every stopped run to fully exit. Their
+	// contexts are already cancelled; a run parked in a queue send or a retry
+	// backoff wakes immediately. lifecycleMu keeps Start/Stop/Reconcile from
+	// interleaving with this window.
+	for _, done := range waits {
+		<-done
+	}
+
+	// Phase 3 (under mu): start successors. Only started when the manager
+	// runs; otherwise the installed specs start at Start, as before.
+	m.mu.Lock()
+	if m.running.Load() {
+		for _, id := range toStart {
+			m.startLocked(id, m.ingesters[id])
 		}
 	}
+	m.mu.Unlock()
 
 	return nil
 }
@@ -291,24 +354,39 @@ func (m *Manager) startLocked(id glid.GLID, ing Ingester) {
 	recvCtx, recvCancel := context.WithCancel(m.runCtx)
 	m.cancels[id] = recvCancel
 
+	// Closed when runIngester returns — the whole retry loop, including any
+	// in-flight attempt's goroutines (pumpIngester waits for Ingester.Run
+	// before returning). stopLocked hands this to Reconcile so a successor
+	// never starts while the old run can still write.
+	done := make(chan struct{})
+	m.dones[id] = done
+
 	meta := m.meta[id]
 	minter := m.minters[id]
 	out := m.out
 
 	m.ingesterWg.Go(func() {
+		defer close(done)
 		m.runIngester(id, ing, minter, meta, recvCtx, out)
 	})
 
 	m.logger.Info("ingester started", "id", id, "name", meta.name, "type", meta.typ)
 }
 
-func (m *Manager) stopLocked(id glid.GLID) {
+// stopLocked cancels the ingester's run and returns the channel that closes
+// when the run goroutine has fully exited (nil when no run was started).
+// Callers must wait on it — outside mu — before starting a successor for the
+// same ID.
+func (m *Manager) stopLocked(id glid.GLID) chan struct{} {
 	if cancel, ok := m.cancels[id]; ok {
 		cancel()
 		delete(m.cancels, id)
 	}
+	done := m.dones[id]
+	delete(m.dones, id)
 	meta := m.meta[id]
 	m.logger.Info("ingester stopped", "id", id, "name", meta.name, "type", meta.typ)
+	return done
 }
 
 // runIngester executes a single ingester with panic recovery so that a
@@ -324,7 +402,7 @@ func (m *Manager) stopLocked(id glid.GLID) {
 //     exit was logged once and the goroutine returned: ingest for that source
 //     stopped until a config change rebuilt the spec. Between failing attempts
 //     the ingester's alive state stays down, so the convergence sweep's
-//     ingester-not-running alert (gastrolog-3mnjlo) surfaces the degraded
+//     divergence log (gastrolog-3mnjlo) surfaces the degraded
 //     condition and clears it once a retry holds.
 func (m *Manager) runIngester(
 	id glid.GLID,
@@ -442,6 +520,17 @@ func (m *Manager) pumpIngester(
 
 	for msg := range ingesterOut {
 		if err := emitMinted(ctx, minter, out, msg); err != nil {
+			// ctx cancelled mid-emit. Run's own ctx select exits it promptly
+			// (the Ingester contract); drain whatever it flushes on the way
+			// out so its sends never block, then wait for it to return.
+			// Returning while Run still executes would let a stale run's
+			// writes — the orchestrator adapter's deferred alive-false and
+			// its ingest counters — land after the manager considers this
+			// attempt finished, clobbering the successor started on the
+			// done signal (gastrolog-4rdb9f).
+			for range ingesterOut { //nolint:revive // draining until close
+			}
+			<-errCh
 			return err
 		}
 	}

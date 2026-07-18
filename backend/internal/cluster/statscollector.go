@@ -118,6 +118,10 @@ type StatsVaultPipelineDiskSnapshot struct {
 type StatsProvider interface {
 	IngestQueueDepth() int
 	IngestQueueCapacity() int
+	// IngestPressureLevel is the pressure gate's current level as a string
+	// ("normal", "elevated", "critical"). Broadcast as a health metric; it
+	// raises no alarm (gastrolog-3phtqv).
+	IngestPressureLevel() string
 	VaultSnapshots() []StatsVaultSnapshot
 	IngesterIDs() []string
 	IngesterStats(id string) (name string, messages, bytes, errors int64, running bool)
@@ -149,6 +153,16 @@ type RaftStatsProvider interface {
 	LocalStats() map[string]string
 }
 
+// LogDropsProvider exposes the node's cumulative count of discarded
+// diagnostic log records. Satisfied by *logging.CaptureHandler; defined at
+// the consumer site to avoid importing logging. The count is a metric with
+// no operator action — it must never become an alarm or a log line, since
+// logging about dropped logs feeds the self-ingester that is dropping them
+// (gastrolog-3phtqv).
+type LogDropsProvider interface {
+	DroppedCount() int64
+}
+
 // PeerConnSnapshotProvider exposes managed outbound connection telemetry.
 type PeerConnSnapshotProvider interface {
 	Snapshot() []PeerConnSnapshot
@@ -158,10 +172,10 @@ type PeerConnSnapshotProvider interface {
 	ResetPurposeWindows()
 }
 
-// AlertProvider exposes active system alerts for broadcast.
+// AlertProvider exposes this node's standing alarms for broadcast.
 // Satisfied by *alert.Collector.
 type AlertProvider interface {
-	ActiveAlerts() []alert.AlertInfo
+	Standing() []*alert.Alarm
 }
 
 // JobsProvider returns the current job list for broadcast.
@@ -188,8 +202,9 @@ type StatsCollectorConfig struct {
 	// any change so contributors entering/leaving the sum can never read
 	// as traffic (gastrolog-mliwrd).
 	ClusterRouteTotals func() (routed, matched int64, membership string)
-	Alerts             AlertProvider // optional; nil if no alert collector
-	Jobs               JobsProvider  // optional; nil in single-node mode
+	Alerts             AlertProvider    // optional; nil if no alert collector
+	LogDrops           LogDropsProvider // optional; nil disables the drop counter
+	Jobs               JobsProvider     // optional; nil in single-node mode
 	NodeID             string
 	NodeNameFn         func() string // lazily resolved node name
 	Version            string
@@ -224,6 +239,9 @@ type StatsCollector struct {
 	// electionStormActive is the storm/calm hysteresis state for the
 	// transition-edge logging in collectRaftLiveness. Guarded by mu.
 	electionStormActive bool
+	// walLatencyDegradedActive is the degraded/calm hysteresis state for the
+	// transition-edge logging in collectRaftLiveness. Guarded by mu.
+	walLatencyDegradedActive bool
 	// lastPublishedPurposeWindows holds purposes_window from the most recent
 	// CollectLocalTick (5s broadcast). CollectLocalSnapshot overlays this onto
 	// read-only snapshots briefly after each tick so WatchSystemStatus still
@@ -344,6 +362,7 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 	if c.cfg.Stats != nil {
 		stats.IngestQueueDepth = uint32(c.cfg.Stats.IngestQueueDepth())       //nolint:gosec
 		stats.IngestQueueCapacity = uint32(c.cfg.Stats.IngestQueueCapacity()) //nolint:gosec
+		stats.IngestPressureLevel = c.cfg.Stats.IngestPressureLevel()
 
 		// Vault snapshots.
 		for _, v := range c.cfg.Stats.VaultSnapshots() {
@@ -488,19 +507,14 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 	c.appendPeerTrafficTotals(stats, now, stepWindows)
 	c.collectRaftLiveness(stats, now, stepWindows)
 
-	// Active alerts.
-	if c.cfg.Alerts != nil {
-		for _, a := range c.cfg.Alerts.ActiveAlerts() {
-			stats.Alerts = append(stats.Alerts, &gastrologv1.SystemAlert{
-				Id:        []byte(a.ID),
-				Severity:  gastrologv1.AlertSeverity(a.Severity), //nolint:gosec // bounded enum
-				Source:    a.Source,
-				Message:   a.Message,
-				FirstSeen: timestamppb.New(a.FirstSeen),
-				LastSeen:  timestamppb.New(a.LastSeen),
-			})
-		}
+	// Discarded diagnostic log records: a pure counter read, no thresholds
+	// and no alarm — the operator has nothing to do about it and the health
+	// surfaces trend it (gastrolog-3phtqv).
+	if c.cfg.LogDrops != nil {
+		stats.SelfIngesterDropsTotal = uint64(max(c.cfg.LogDrops.DroppedCount(), 0))
 	}
+
+	c.collectAlarms(stats)
 
 	// Raft stats.
 	if c.cfg.RaftStats != nil {
@@ -515,6 +529,26 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 	}
 
 	return stats
+}
+
+// collectAlarms snapshots this node's standing alarms into the broadcast.
+func (c *StatsCollector) collectAlarms(stats *gastrologv1.NodeStats) {
+	if c.cfg.Alerts == nil {
+		return
+	}
+	for _, a := range c.cfg.Alerts.Standing() {
+		stats.Alerts = append(stats.Alerts, &gastrologv1.SystemAlert{
+			Id:            []byte(a.ID),
+			Priority:      gastrologv1.AlarmPriority(a.Priority), //nolint:gosec // bounded enum
+			SoftwareFault: a.SoftwareFault,
+			Source:        a.Source,
+			Detail:        a.Detail,
+			Cause:         a.Cause,
+			Response:      a.Response,
+			FirstSeen:     timestamppb.New(a.FirstSeen),
+			LastSeen:      timestamppb.New(a.LastSeen),
+		})
+	}
 }
 
 func (c *StatsCollector) appendPeerTrafficTotals(stats *gastrologv1.NodeStats, now time.Time, stepWindows bool) {
@@ -592,23 +626,23 @@ func (c *StatsCollector) applyPublishedPurposeWindows(stats *gastrologv1.NodeSta
 	}
 }
 
-// Raft liveness alert thresholds (gastrolog-1io54g). Storm: sustained
+// Raft liveness logging thresholds (gastrolog-1io54g). Storm: sustained
 // elections at a rate no healthy cluster shows (the 2026-07-04 incident ran
 // 7-13/min). Calm clears with hysteresis so a single quiet tick doesn't
-// flap the alert. WAL max latency: one slow append is normal on shared
+// flap the log. WAL max latency: one slow append is normal on shared
 // disks; above a second, Raft replication RTTs and lease checks are in the
 // danger zone.
 const (
 	raftElectionStormPerMin = 3.0
 	raftElectionCalmPerMin  = 0.5
-	walAppendMaxAlertMs     = 1000.0
-	walAppendMaxClearMs     = 250.0
+	walAppendMaxDegradedMs  = 1000.0
+	walAppendMaxCalmMs      = 250.0
 )
 
 // collectRaftLiveness populates the Raft WAL latency and election liveness
-// fields and maintains the degraded-liveness alerts. Alert evaluation lives
-// here, not in a component, because the rolling-window rates only exist in
-// the collector (gastrolog-1io54g).
+// fields and logs the degraded-liveness transitions. Threshold evaluation
+// lives here, not in a component, because the rolling-window rates only
+// exist in the collector (gastrolog-1io54g).
 func (c *StatsCollector) collectRaftLiveness(stats *gastrologv1.NodeStats, now time.Time, stepWindows bool) {
 	if c.cfg.RaftLiveness == nil {
 		return
@@ -637,21 +671,15 @@ func (c *StatsCollector) collectRaftLiveness(stats *gastrologv1.NodeStats, now t
 	c.mu.Unlock()
 	stats.RaftWalAppendMaxMs = float64(maxNanos) / 1e6
 
-	if c.cfg.Alerts == nil || !stepWindows {
+	if !stepWindows {
 		return
 	}
-	alerts, ok := c.cfg.Alerts.(interface {
-		Set(id string, severity alert.Severity, source, message string)
-		Clear(id string)
-	})
-	if !ok {
-		return
-	}
-	// Election churn is a diagnostic, not an alarm: there is no direct
-	// operator action, and the rate already ships in stats for the health
+	// Election churn and WAL append latency are diagnostics, not alarms:
+	// neither has an operator action — both point at engineering-side disk
+	// contention — and both rates already ship in stats for the health
 	// surfaces (EEMUA 191 actionability test, gastrolog-29380r). Log on the
-	// storm/calm transitions only — the same hysteresis the alert had — so
-	// a sustained storm is one line, not one per tick.
+	// transition edges only, with the same hysteresis the alerts had, so a
+	// sustained condition is one line, not one per tick.
 	c.mu.Lock()
 	stormWas := c.electionStormActive
 	switch {
@@ -661,8 +689,21 @@ func (c *StatsCollector) collectRaftLiveness(stats *gastrologv1.NodeStats, now t
 		c.electionStormActive = false
 	}
 	stormNow := c.electionStormActive
+	walWas := c.walLatencyDegradedActive
+	switch {
+	case stats.RaftWalAppendMaxMs >= walAppendMaxDegradedMs:
+		c.walLatencyDegradedActive = true
+	case stats.RaftWalAppendMaxMs < walAppendMaxCalmMs:
+		c.walLatencyDegradedActive = false
+	}
+	walNow := c.walLatencyDegradedActive
 	c.mu.Unlock()
-	if logger := c.cfg.Logger; logger != nil && stormNow != stormWas {
+
+	logger := c.cfg.Logger
+	if logger == nil {
+		return
+	}
+	if stormNow != stormWas {
 		if stormNow {
 			logger.Warn("Raft election storm: consensus is churning on this node",
 				"elections_per_min", stats.RaftElectionsPerMin)
@@ -671,12 +712,14 @@ func (c *StatsCollector) collectRaftLiveness(stats *gastrologv1.NodeStats, now t
 				"elections_per_min", stats.RaftElectionsPerMin)
 		}
 	}
-	switch {
-	case stats.RaftWalAppendMaxMs >= walAppendMaxAlertMs:
-		alerts.Set("raft-wal-latency", alert.Warning, "raft",
-			fmt.Sprintf("Raft WAL append latency degraded: max %.0fms since last tick — bulk I/O may be starving consensus", stats.RaftWalAppendMaxMs))
-	case stats.RaftWalAppendMaxMs < walAppendMaxClearMs:
-		alerts.Clear("raft-wal-latency")
+	if walNow != walWas {
+		if walNow {
+			logger.Warn("Raft WAL append latency degraded: bulk I/O may be starving consensus",
+				"wal_append_max_ms", stats.RaftWalAppendMaxMs)
+		} else {
+			logger.Info("Raft WAL append latency back to normal",
+				"wal_append_max_ms", stats.RaftWalAppendMaxMs)
+		}
 	}
 }
 

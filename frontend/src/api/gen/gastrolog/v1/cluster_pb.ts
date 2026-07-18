@@ -11,29 +11,40 @@ import { PerRouteStats, VaultRouteStats } from "./system_pb.js";
 import { ChunkPlan, HistogramBucket, TableResult } from "./query_pb.js";
 
 /**
- * @generated from enum gastrolog.v1.AlertSeverity
+ * AlarmPriority is the cataloged consequence × urgency verdict for an alarm
+ * type. CRITICAL = data loss in progress or scheduled; HIGH = durability or
+ * availability degraded, will compound; LOW = needs attention on a human
+ * timescale. UNSPECIFIED is only carried by software faults.
+ *
+ * @generated from enum gastrolog.v1.AlarmPriority
  */
-export enum AlertSeverity {
+export enum AlarmPriority {
   /**
-   * @generated from enum value: ALERT_SEVERITY_UNSPECIFIED = 0;
+   * @generated from enum value: ALARM_PRIORITY_UNSPECIFIED = 0;
    */
   UNSPECIFIED = 0,
 
   /**
-   * @generated from enum value: ALERT_SEVERITY_WARNING = 1;
+   * @generated from enum value: ALARM_PRIORITY_LOW = 1;
    */
-  WARNING = 1,
+  LOW = 1,
 
   /**
-   * @generated from enum value: ALERT_SEVERITY_ERROR = 2;
+   * @generated from enum value: ALARM_PRIORITY_HIGH = 2;
    */
-  ERROR = 2,
+  HIGH = 2,
+
+  /**
+   * @generated from enum value: ALARM_PRIORITY_CRITICAL = 3;
+   */
+  CRITICAL = 3,
 }
-// Retrieve enum metadata with: proto3.getEnumType(AlertSeverity)
-proto3.util.setEnumType(AlertSeverity, "gastrolog.v1.AlertSeverity", [
-  { no: 0, name: "ALERT_SEVERITY_UNSPECIFIED" },
-  { no: 1, name: "ALERT_SEVERITY_WARNING" },
-  { no: 2, name: "ALERT_SEVERITY_ERROR" },
+// Retrieve enum metadata with: proto3.getEnumType(AlarmPriority)
+proto3.util.setEnumType(AlarmPriority, "gastrolog.v1.AlarmPriority", [
+  { no: 0, name: "ALARM_PRIORITY_UNSPECIFIED" },
+  { no: 1, name: "ALARM_PRIORITY_LOW" },
+  { no: 2, name: "ALARM_PRIORITY_HIGH" },
+  { no: 3, name: "ALARM_PRIORITY_CRITICAL" },
 ]);
 
 /**
@@ -741,6 +752,29 @@ export class NodeStats extends Message<NodeStats> {
    */
   sizeCappedVaultIds: Uint8Array[] = [];
 
+  /**
+   * Cumulative diagnostic log records this node's capture handler has
+   * discarded because the capture channel was full. A capacity signal with
+   * no operator action, so it is a metric and never an alarm
+   * (gastrolog-3phtqv). It is deliberately not logged either: a log line
+   * about dropped logs feeds the self-ingester that is dropping them.
+   *
+   * @generated from field: uint64 self_ingester_drops_total = 50;
+   */
+  selfIngesterDropsTotal = protoInt64.zero;
+
+  /**
+   * Current ingest-pipeline pressure: "normal", "elevated", or "critical".
+   * PressureAware ingesters throttle themselves as this rises. A metric, not
+   * an alarm (gastrolog-3phtqv): the actionable end of a backed-up pipeline
+   * is already covered by the pipeline-backlog and disk-space alarms, which
+   * fire when the backlog actually threatens something. Like raft_state,
+   * this is the level's String() rather than an enum.
+   *
+   * @generated from field: string ingest_pressure_level = 51;
+   */
+  ingestPressureLevel = "";
+
   constructor(data?: PartialMessage<NodeStats>) {
     super();
     proto3.util.initPartial(data, this);
@@ -798,6 +832,8 @@ export class NodeStats extends Message<NodeStats> {
     { no: 47, name: "raft_elections_per_min", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
     { no: 48, name: "disk_protected_vault_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
     { no: 49, name: "size_capped_vault_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
+    { no: 50, name: "self_ingester_drops_total", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 51, name: "ingest_pressure_level", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): NodeStats {
@@ -1079,10 +1115,14 @@ export class PeerTrafficTotal extends Message<PeerTrafficTotal> {
 }
 
 /**
- * SystemAlert represents a runtime condition that operators should be aware of.
- * Alerts are keyed by ID for deduplication — the same condition doesn't create
- * multiple alerts. They auto-clear when the component that raised them detects
- * the condition has resolved.
+ * SystemAlert is one standing alarm: a runtime condition requiring operator
+ * action, with priority, cause and response stamped from the static alarm
+ * catalog — never chosen at the raising call site.
+ * Alarms are keyed by ID for deduplication — the same condition doesn't
+ * create multiple alarms. Alarms are STATE with suppression: they stand
+ * while the condition holds and clear when it resolves — an alarm is
+ * standing or it is not; there are no per-alarm operator states. Latching
+ * alarms stand until process restart.
  *
  * @generated from message gastrolog.v1.SystemAlert
  */
@@ -1095,23 +1135,32 @@ export class SystemAlert extends Message<SystemAlert> {
   id = new Uint8Array(0);
 
   /**
-   * @generated from field: gastrolog.v1.AlertSeverity severity = 2;
+   * from the alarm catalog, never the call site
+   *
+   * @generated from field: gastrolog.v1.AlarmPriority priority = 2;
    */
-  severity = AlertSeverity.UNSPECIFIED;
+  priority = AlarmPriority.UNSPECIFIED;
 
   /**
-   * component name (e.g. "orchestrator", "forwarder")
+   * component name (e.g. "placement", "chunking")
    *
    * @generated from field: string source = 3;
    */
   source = "";
 
   /**
-   * @generated from field: string message = 4;
+   * per-instance specifics from the raiser
+   *
+   * @generated from field: string detail = 4;
    */
-  message = "";
+  detail = "";
 
   /**
+   * Condition start of the current occurrence (the first Raise of the
+   * occurrence, not the annunciation instant — a delay-on window suppresses
+   * annunciation, not the condition's history). This IS the design doc's
+   * "first_raised"; no separate field exists.
+   *
    * @generated from field: google.protobuf.Timestamp first_seen = 5;
    */
   firstSeen?: Timestamp;
@@ -1120,6 +1169,29 @@ export class SystemAlert extends Message<SystemAlert> {
    * @generated from field: google.protobuf.Timestamp last_seen = 6;
    */
   lastSeen?: Timestamp;
+
+  /**
+   * catalog: what condition this is
+   *
+   * @generated from field: string cause = 7;
+   */
+  cause = "";
+
+  /**
+   * catalog: what the operator should do
+   *
+   * @generated from field: string response = 8;
+   */
+  response = "";
+
+  /**
+   * Software faults are defect tripwires, a class apart from process alarms
+   * (EEMUA 191): their response is to report the defect, so they sit outside
+   * the consequence × urgency priority scale (priority is UNSPECIFIED).
+   *
+   * @generated from field: bool software_fault = 9;
+   */
+  softwareFault = false;
 
   constructor(data?: PartialMessage<SystemAlert>) {
     super();
@@ -1130,11 +1202,14 @@ export class SystemAlert extends Message<SystemAlert> {
   static readonly typeName = "gastrolog.v1.SystemAlert";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 2, name: "severity", kind: "enum", T: proto3.getEnumType(AlertSeverity) },
+    { no: 2, name: "priority", kind: "enum", T: proto3.getEnumType(AlarmPriority) },
     { no: 3, name: "source", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 4, name: "message", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "detail", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 5, name: "first_seen", kind: "message", T: Timestamp },
     { no: 6, name: "last_seen", kind: "message", T: Timestamp },
+    { no: 7, name: "cause", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 8, name: "response", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 9, name: "software_fault", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SystemAlert {

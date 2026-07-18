@@ -22,6 +22,7 @@ type stubStatsProvider struct {
 
 func (s *stubStatsProvider) IngestQueueDepth() int    { return 0 }
 func (s *stubStatsProvider) IngestQueueCapacity() int { return 0 }
+func (s *stubStatsProvider) IngestPressureLevel() string { return "normal" }
 func (s *stubStatsProvider) VaultSnapshots() []StatsVaultSnapshot {
 	out := make([]StatsVaultSnapshot, len(s.appendStats))
 	for i, as := range s.appendStats {

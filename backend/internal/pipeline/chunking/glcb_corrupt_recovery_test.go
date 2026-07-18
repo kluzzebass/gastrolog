@@ -91,16 +91,16 @@ type historyAlertSink struct {
 	events []alertEvent
 }
 
-func (s *historyAlertSink) Set(id string, _ alert.Severity, _, message string) {
+func (s *historyAlertSink) Raise(typeID, instanceKey, detail string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.events = append(s.events, alertEvent{kind: "set", id: id, message: message})
+	s.events = append(s.events, alertEvent{kind: "set", id: sinkAlarmID(typeID, instanceKey), message: detail})
 }
 
-func (s *historyAlertSink) Clear(id string) {
+func (s *historyAlertSink) Clear(typeID, instanceKey string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.events = append(s.events, alertEvent{kind: "clear", id: id})
+	s.events = append(s.events, alertEvent{kind: "clear", id: sinkAlarmID(typeID, instanceKey)})
 }
 
 func (s *historyAlertSink) history(id string) []alertEvent {
@@ -149,7 +149,7 @@ func (fx builtGLCBFixture) quarantinePath() string {
 }
 
 func (fx builtGLCBFixture) alertID() string {
-	return "chunking-glcb-corrupt-" + fx.vaultID.String()
+	return "chunking-glcb-corrupt:" + fx.vaultID.String()
 }
 
 // setupSealingChunkWithBuiltGLCB reproduces the TestRecoverOnceSealsFromExistingGLCB
@@ -206,7 +206,7 @@ func setupSealingChunkWithBuiltGLCB(t *testing.T) builtGLCBFixture {
 	}
 }
 
-func registerFixtureVault(t *testing.T, fx builtGLCBFixture, sink chunking.AlertSink) *chunking.Manager {
+func registerFixtureVault(t *testing.T, fx builtGLCBFixture, sink alert.Sink) *chunking.Manager {
 	t.Helper()
 	mgr := chunking.New(chunking.Config{})
 	if err := mgr.RegisterVault(fx.vaultID, chunking.VaultConfig{

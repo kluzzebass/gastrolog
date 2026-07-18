@@ -76,7 +76,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/chunking"
@@ -908,9 +907,8 @@ func (r *VaultLifecycleReconciler) alertUnknownOrphan(meta chunk.ChunkMeta) {
 	if r.orch == nil || r.orch.alerts == nil {
 		return
 	}
-	alertID := fmt.Sprintf("unknown-orphan:%s:%s", r.vaultID, meta.ID)
-	r.orch.alerts.Set(alertID, alert.Warning, "vault",
-		fmt.Sprintf("Vault %s: chunk %s on disk with %d records but not recognized by FSM; preserved for recovery (do not manually delete without operator review)",
+	r.orch.alerts.Raise("unknown-orphan", fmt.Sprintf("%s:%s", r.vaultID, meta.ID),
+		fmt.Sprintf("Vault %s: chunk %s on disk with %d records but not recognized by FSM; preserved for recovery",
 			r.vaultID, meta.ID, meta.RecordCount))
 }
 

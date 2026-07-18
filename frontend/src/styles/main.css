@@ -29,6 +29,17 @@
   --color-severity-debug: #5b8ab5;
   --color-severity-trace: #6a6080;
 
+  /* Alarm priority ladder — the alarm domain owns its tokens; it must never
+     borrow log-severity semantics (info is green: right for a log line, a lie
+     on an alarm) and never render muted (a de-emphasized alarm is a
+     contradiction). Derived from the active palette's own hues so every theme
+     inherits automatically: Critical/fault = the palette's error red, High =
+     its warn amber, Low = the same warm hue at reduced intensity — urgency
+     encoded as intensity, the same way the text hierarchy encodes emphasis. */
+  --color-alarm-critical: var(--color-severity-error);
+  --color-alarm-high: var(--color-severity-warn);
+  --color-alarm-low: color-mix(in srgb, var(--color-severity-warn) 70%, transparent);
+
   /* Severity text — WCAG AA contrast-safe text on severity backgrounds */
   --color-severity-error-text: #ffffff;
   --color-severity-warn-text: #0d0f12;

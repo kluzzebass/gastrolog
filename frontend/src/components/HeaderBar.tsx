@@ -6,8 +6,6 @@ import { SlidersIcon } from "./icons";
 import { useThemeClass } from "../hooks/useThemeClass";
 import { useClusterStatus } from "../api/hooks/useClusterStatus";
 import { useAlerts } from "../api/hooks/useAlerts";
-// eslint-disable-next-line no-restricted-imports -- no Alert model yet (gastrolog-2e2qs follow-up)
-import { AlertSeverity } from "../api/gen/gastrolog/v1/cluster_pb";
 import { formatBytes } from "../utils/units";
 import { middleTruncate } from "../utils/middleTruncate";
 // eslint-disable-next-line no-restricted-imports -- HeaderBar still iterates raw ClusterNode for sum/sort; deferred migration (gastrolog-2e2qs follow-up)
@@ -103,11 +101,28 @@ export function HeaderBar({
 
   const { totalCpu, totalMemory, totalStorage } = sumClusterStats(nodes);
 
-  const { alerts, maxSeverity } = useAlerts();
+  const { alerts, maxRank } = useAlerts();
+  const standingCount = alerts.length;
   const [alertPanelOpen, setAlertPanelOpen] = useState(false);
+  // Highest alarm rank → the alarm-priority ladder (red / amber / yellow).
+  // Never a log-severity green (a green alarm pill claims health) and never
+  // muted (a de-emphasized alarm is a contradiction).
+  let alertPillClass = "bg-alarm-low/15 text-alarm-low";
+  let alertDotClass = "bg-alarm-low";
+  if (maxRank >= 3) {
+    alertPillClass = "bg-alarm-critical/15 text-alarm-critical";
+    alertDotClass = "bg-alarm-critical";
+  } else if (maxRank === 2) {
+    alertPillClass = "bg-alarm-high/15 text-alarm-high";
+    alertDotClass = "bg-alarm-high";
+  }
 
   const loading = isLoading || nodes.length === 0;
   const noQuorum = computeNoQuorum(cluster ?? null, isLoading);
+
+  const alertNoun = standingCount === 1 ? "Alert" : "Alerts";
+  const alertPillTitle = `${standingCount} standing ${alertNoun.toLowerCase()}`;
+  const alertPillText = `${standingCount} ${alertNoun}`;
 
   return (
     <header
@@ -131,19 +146,13 @@ export function HeaderBar({
         {alerts.length > 0 && (
           <button
             onClick={() => setAlertPanelOpen(true)}
-            className={`flex items-center gap-1.5 px-2.5 py-1 text-[0.7em] font-mono font-semibold rounded transition-all duration-200 ${
-              maxSeverity === AlertSeverity.ERROR
-                ? "bg-severity-error/15 text-severity-error"
-                : "bg-severity-warn/15 text-severity-warn"
-            }`}
-            title={`${alerts.length} active alert${alerts.length === 1 ? "" : "s"}`}
+            className={`flex items-center gap-1.5 px-2.5 py-1 text-[0.7em] font-mono font-semibold rounded transition-all duration-200 ${alertPillClass}`}
+            title={alertPillTitle}
           >
             <span
-              className={`inline-block w-2 h-2 rounded-full animate-pulse ${
-                maxSeverity === AlertSeverity.ERROR ? "bg-severity-error" : "bg-severity-warn"
-              }`}
+              className={`inline-block w-2 h-2 rounded-full animate-pulse ${alertDotClass}`}
             />
-            {alerts.length} {alerts.length === 1 ? "Alert" : "Alerts"}
+            {alertPillText}
           </button>
         )}
       </div>
@@ -269,7 +278,11 @@ export function HeaderBar({
         )}
       </div>
       {alertPanelOpen && (
-        <AlertPanel alerts={alerts} dark={dark} onClose={() => setAlertPanelOpen(false)} />
+        <AlertPanel
+          alerts={alerts}
+          dark={dark}
+          onClose={() => setAlertPanelOpen(false)}
+        />
       )}
     </header>
   );

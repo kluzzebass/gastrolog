@@ -2,11 +2,9 @@ package app
 
 import (
 	"context"
-	"fmt"
+	"log/slog"
+	"slices"
 	"strings"
-
-	"gastrolog/internal/alert"
-	"gastrolog/internal/orchestrator"
 )
 
 const (
@@ -14,8 +12,6 @@ const (
 	// Offset from the placement reconcile's */15 so the two sweeps don't
 	// stack on the same tick.
 	ingesterReconcileSchedule = "7,22,37,52 * * * * *"
-
-	ingesterNotRunningAlertID = "ingester-not-running"
 )
 
 // startIngesterReconcileSweep registers the periodic ingester convergence
@@ -26,32 +22,38 @@ const (
 // full-cluster restart left one node with zero ingesters for 40+ minutes
 // while its peers ingested (gastrolog-3mnjlo). reconcileIngesters is
 // idempotent and never flaps running ingesters, so the sweep is safe to run
-// unconditionally; it also raises the divergence alert — desired ingesters
-// not actually running — so a convergence failure is never silent.
-func startIngesterReconcileSweep(ctx context.Context, scheduler scheduledJobRegistry, d *configDispatcher, alerts orchestrator.AlertCollector) error {
+// unconditionally; it also logs divergence — desired ingesters not actually
+// running — so a convergence failure is never silent.
+//
+// Divergence is a LOG, not an alarm (operator razor): the sweep itself
+// re-dispatches every tick and the run loop retries failed ingesters with
+// backoff — the system is already doing everything an operator could ask.
+// The condition is normal for a tick or two at boot, and the failure detail
+// an operator would act on (build/start errors) is already in the log the
+// self-ingester captures.
+func startIngesterReconcileSweep(ctx context.Context, scheduler scheduledJobRegistry, d *configDispatcher, logger *slog.Logger) error {
 	task := func() {
 		d.reconcileIngesters(ctx)
-		d.reportIngesterDivergence(ctx, alerts)
+		d.reportIngesterDivergence(ctx, logger)
 	}
 	if err := scheduler.AddJob(ingesterReconcileJobName, ingesterReconcileSchedule, task); err != nil {
 		return err
 	}
 	scheduler.Describe(ingesterReconcileJobName,
-		"Ingester convergence sweep — periodic safety net. Recomputes the ingesters this node should run from config and drives the orchestrator toward it (idempotent; running ingesters never flap), then alarms on any desired ingester that is still not running. Event-driven reconciles (config puts, singleton assignment) remain the fast path; this tick heals missed triggers such as a node that was not ready at boot dispatch.")
+		"Ingester convergence sweep — periodic safety net. Recomputes the ingesters this node should run from config and drives the orchestrator toward it (idempotent; running ingesters never flap), then logs any desired ingester that is still not running. Event-driven reconciles (config puts, singleton assignment) remain the fast path; this tick heals missed triggers such as a node that was not ready at boot dispatch.")
 	return nil
 }
 
-// reportIngesterDivergence raises one alert naming every ingester this node
-// should be running but is not, and clears it once converged. Runs after the
-// sweep's reconcile, so anything listed failed to start (or to build) rather
-// than merely awaiting dispatch.
-func (d *configDispatcher) reportIngesterDivergence(ctx context.Context, alerts orchestrator.AlertCollector) {
-	if alerts == nil {
-		return
-	}
+// reportIngesterDivergence logs the set of ingesters this node should be
+// running but is not — once per state CHANGE, never per tick: the sweep runs
+// every 15 seconds and a wedged ingester must not fill the log with the same
+// line (the same once-on-cross, once-on-resolve shape the channel-pressure
+// watchdog uses). Runs after the sweep's reconcile, so anything listed failed
+// to start (or to build) rather than merely awaiting dispatch.
+func (d *configDispatcher) reportIngesterDivergence(ctx context.Context, logger *slog.Logger) {
 	cfgs, err := d.cfgStore.ListIngesters(ctx)
 	if err != nil {
-		// The reconcile pass already logged; keep the standing alert state
+		// The reconcile pass already logged; keep the last-reported state
 		// rather than flapping on a transient store error.
 		return
 	}
@@ -71,11 +73,21 @@ func (d *configDispatcher) reportIngesterDivergence(ctx context.Context, alerts 
 			missing = append(missing, cfg.Name)
 		}
 	}
-	if len(missing) == 0 {
-		alerts.Clear(ingesterNotRunningAlertID)
+	slices.Sort(missing)
+	state := strings.Join(missing, ", ")
+	if state == d.lastIngesterDivergence {
 		return
 	}
-	alerts.Set(ingesterNotRunningAlertID, alert.Error, "ingestion",
-		fmt.Sprintf("This node should be running %d ingester(s) that are not running: %s. Ingestion capacity is reduced until they start; check the log for build/start errors.",
-			len(missing), strings.Join(missing, ", ")))
+	prev := d.lastIngesterDivergence
+	d.lastIngesterDivergence = state
+	if logger == nil {
+		return
+	}
+	if state == "" {
+		logger.Info("ingester convergence restored — all desired ingesters running",
+			"previously_missing", prev)
+		return
+	}
+	logger.Warn("desired ingester(s) not running — sweep will keep re-dispatching, runs retry with backoff",
+		"missing", state, "count", len(missing))
 }

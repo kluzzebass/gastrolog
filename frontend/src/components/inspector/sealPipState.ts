@@ -8,6 +8,9 @@
 // is normal operation; the pip row exists so it reads as catch-up instead
 // of "resealing already sealed chunks".
 
+// eslint-disable-next-line no-restricted-imports -- no Chunk model yet (gastrolog-2e2qs follow-up)
+import { ChunkState, type ChunkMeta } from "../../api/gen/gastrolog/v1/vault_pb";
+
 /** Lifecycle state of one pip. Birth fills green; death drains red.
  *  Sealed is deliberately calm: attention belongs to the ANOMALOUS pip,
  *  which renders with a glow in its own color — the eye lands on the node
@@ -21,7 +24,31 @@ export type PipState =
   | "holds" // solid red, pulsing — delete requested, node still holds bytes
   | "acked" // dim hollow red — node acked the delete, bytes gone
   | "uncached" // dim hollow green ring — cloud-backed, no local copy on this node (normal)
+  | "unknown" // dashed muted ring — chunk lifecycle unspecified, claiming nothing
   | "ghost"; // muted dot after a gap — copy on a node outside placement
+
+/** Cluster-wide chunk lifecycle as rendered to the operator. Mirrors the
+ *  CLI's inspect badge vocabulary (gastrolog-5wh571): same states, same
+ *  words. */
+export type ChunkLifecycle = "active" | "sealing" | "sealed" | "unknown";
+
+/** chunkLifecycleState maps the FSM overlay to the pip grammar's
+ *  cluster-wide chunk lifecycle. The three-state enum is the sole
+ *  authority — the legacy Sealed bool is only true at CHUNK_STATE_SEALED,
+ *  and deriving the lifecycle from it painted SEALING chunks as active
+ *  (gastrolog-5wh571). Unspecified renders as "unknown", never a guess. */
+export function chunkLifecycleState(chunk: ChunkMeta): ChunkLifecycle {
+  switch (chunk.state) {
+    case ChunkState.ACTIVE:
+      return "active";
+    case ChunkState.SEALING:
+      return "sealing";
+    case ChunkState.SEALED:
+      return "sealed";
+    default:
+      return "unknown";
+  }
+}
 
 export interface SealPip {
   node: string;
@@ -31,7 +58,7 @@ export interface SealPip {
 
 export interface PipInputs {
   /** Cluster-wide chunk lifecycle from the FSM overlay. */
-  chunkState: "active" | "sealing" | "sealed";
+  chunkState: ChunkLifecycle;
   /** Placement node names for the vault (expected holders). */
   placementNodes: readonly string[];
   /** Nodes reporting a copy (bytes-truth via holder receipts). */
@@ -81,6 +108,13 @@ export function computePips(input: PipInputs): { pips: SealPip[]; ghosts: SealPi
     }
     if (!input.liveNodes.has(node)) {
       return { node, state: "missing", title: `${node}: unreachable — copy state unknown` };
+    }
+    if (input.chunkState === "unknown") {
+      // Lifecycle missing from the FSM overlay: claim nothing. Residency
+      // for non-sealed chunks is a placement fallback rather than
+      // bytes-truth, so even a resident pip would be a guess here
+      // (gastrolog-5wh571).
+      return { node, state: "unknown", title: `${node}: chunk lifecycle unknown — no state in the FSM overlay` };
     }
     if (input.chunkState === "active") {
       // No copy seals exist for an open chunk; residency for actives is

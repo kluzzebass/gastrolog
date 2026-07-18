@@ -12,7 +12,6 @@ import (
 	"strings"
 	"testing"
 
-	"gastrolog/internal/alert"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/paths"
 )
@@ -22,8 +21,9 @@ type stubAlertSink struct {
 	clears int
 }
 
-func (s *stubAlertSink) Set(string, alert.Severity, string, string) { s.sets++ }
-func (s *stubAlertSink) Clear(string)                               { s.clears++ }
+func (s *stubAlertSink) Raise(string, string, string) { s.sets++ }
+
+func (s *stubAlertSink) Clear(string, string) { s.clears++ }
 
 func newLoggedVault(cfg VaultConfig) (*vaultChunking, *bytes.Buffer) {
 	buf := &bytes.Buffer{}

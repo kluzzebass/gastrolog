@@ -18,6 +18,7 @@ type fakeStats struct {
 
 func (f *fakeStats) IngestQueueDepth() int    { return f.depth }
 func (f *fakeStats) IngestQueueCapacity() int { return f.capacity }
+func (f *fakeStats) IngestPressureLevel() string { return "normal" }
 func (f *fakeStats) VaultSnapshots() []orchestrator.VaultSnapshot {
 	return f.snapshots
 }

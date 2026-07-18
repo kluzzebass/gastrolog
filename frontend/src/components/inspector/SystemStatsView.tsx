@@ -54,6 +54,19 @@ function CompactView({
           <CompactStatRow label="Heap Idle" value={formatBytes(Number(stats.memoryHeapIdle))} mono dark={dark} />
           <CompactStatRow label="Stack" value={formatBytes(Number(stats.memoryStackInuse))} mono dark={dark} />
           <CompactStatRow label="GC Cycles" value={stats.numGc.toLocaleString()} mono dark={dark} />
+          {/* Diagnostic log records discarded because the capture channel was
+              full (gastrolog-3phtqv). Shown only once it happens: at zero
+              there is nothing to say, and it is a capacity signal to trend,
+              not a condition to act on — hence a stat here rather than an
+              alarm. */}
+          {stats.selfIngesterDropsTotal > BigInt(0) && (
+            <CompactStatRow
+              label="Log Drops"
+              value={Number(stats.selfIngesterDropsTotal).toLocaleString()}
+              mono
+              dark={dark}
+            />
+          )}
         </div>
       </section>
 
@@ -89,6 +102,18 @@ function CompactView({
               <CompactStatRow
                 label="Uptime"
                 value={formatUptime(stats.uptimeSeconds)}
+                dark={dark}
+              />
+            )}
+            {/* Ingest pressure raises no alarm (gastrolog-3phtqv): a throttled
+                pipeline is a handled condition, not one waiting on an
+                operator. It is shown here, next to the queue depth it derives
+                from, and only once it leaves normal — at normal there is
+                nothing to say. */}
+            {stats.ingestPressureLevel !== "" && stats.ingestPressureLevel !== "normal" && (
+              <CompactStatRow
+                label="Pressure"
+                value={stats.ingestPressureLevel}
                 dark={dark}
               />
             )}

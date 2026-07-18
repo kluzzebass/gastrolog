@@ -16,7 +16,7 @@ func TestSelfIngesterEmit(t *testing.T) {
 	capture := logging.NewCaptureHandler(slog.Default().Handler(), ch, nil)
 	capture.SetMinCaptureLevel(slog.LevelInfo)
 
-	factory := NewFactory(ch, capture, nil)
+	factory := NewFactory(ch, capture)
 	ing, err := factory([16]byte{1}, nil, nil)
 	if err != nil {
 		t.Fatalf("factory: %v", err)
@@ -60,7 +60,7 @@ func TestSelfIngesterRunOpensAndClosesCaptureGate(t *testing.T) {
 		t.Fatal("CaptureHandler reports enabled before Run started")
 	}
 
-	factory := NewFactory(ch, capture, nil)
+	factory := NewFactory(ch, capture)
 	ing, err := factory([16]byte{1}, nil, nil)
 	if err != nil {
 		t.Fatalf("factory: %v", err)

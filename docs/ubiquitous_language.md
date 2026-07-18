@@ -628,13 +628,95 @@ How the cluster reports what it's doing to itself, to operators, and to the UI.
   revoked mid-flight, or shutdown). They are a per-vault sub-account of
   `Matched`, never part of the `Routed = Matched + Unmatched` sum.
 
-- **AlertCollector** — per-node bounded store of alerts (`AlertSeverity`:
-  `WARNING`, `ERROR`). Alerts have a stable key for dedup and auto-clear;
-  included in each NodeStats broadcast.
+- **Alarm** — a condition that **requires an operator action**, carrying a
+  documented cause and response. The governing test is the whole definition:
+  *does the operator have to do something?* If no, it is not an alarm. An
+  alarm announces a condition waiting on a human — a condition the system is
+  already handling (ingest throttling, a chunk healing itself) is not waiting
+  on anyone and is therefore not an alarm, however interesting it is.
+  Surfaced in the alarm list. See `docs/alarm-management-design.md` for the
+  catalog and the per-alarm response text.
 
-- **SystemAlert** — one alert: `ID`, `Severity`, `Source`, `Message`,
-  `FirstSeen`, `LastSeen`. Designed to be keyed ("alert X for reason Y on
-  node Z") so repeated identical alerts don't accumulate.
+- **Event** — a record that something happened. No operator action. An event
+  is a **log message**: a structured slog line, captured by the self ingester
+  and searchable like any other logs — never an alarm-list entry. Most
+  demoted diagnostics are events. (A dedicated per-node "event journal" ring
+  with its own RPC, inspector page and CLI command was built and removed on
+  operator verdict in gastrolog-1m3e0d — the log pipeline already records,
+  stores, and searches events; a parallel store duplicated it.)
+
+- **Metric** — a measured quantity to trend on a health surface. Note that
+  demoting a condition to a **log** and demoting it to a **metric** are not
+  interchangeable: the self ingester captures slog, so any condition
+  *caused by* pressure or volume (channel saturation, ingest pressure,
+  dropped log records) must become a metric — logging it feeds the condition
+  it reports.
+
+- **Alarm catalog** — the static `AlarmType` registry in `internal/alert`,
+  one entry per alarm type: `Priority` (the consequence × urgency verdict),
+  `Source`, `Cause`, `Response`, plus the suppression fields (`DelayOn`,
+  `DelayOff`, `Latching`), all enforced by the collector. Call sites raise
+  by type ID (`alerts.Raise(typeID, instanceKey, detail)`) and cannot
+  choose a priority — the collector stamps it from the catalog. The catalog
+  and the table in `docs/alarm-management-design.md` must agree.
+
+- **Chattering suppression** — the collector-enforced remedies for a
+  flapping condition producing a flapping alarm (EEMUA 191 principle 3):
+  **delay-on** (the condition must persist that long before the alarm
+  activates; flaps below the window never annunciate), **delay-off** (an
+  active alarm's condition must stay clear that long before auto-clear; a
+  return inside the window is the same occurrence), and **latching** (plain
+  sticky: the alarm stays standing after the condition clears, until
+  process restart — no release path, by design). Driven by the catalog
+  entry; call sites raise and clear the raw condition and carry no alarm
+  timers of their own. Windows evaluate lazily against the collector's
+  injectable clock; `FirstSeen` is condition start, not activation time.
+
+- **Standing alarm** — an annunciated alarm: its condition holds (or
+  held, for a latched fault). An alarm is **standing or it is not** —
+  there are no per-alarm operator states. Alarms are state with
+  suppression: they stand while the condition holds, clear when it
+  resolves, and nothing persists across restart — a re-detected condition
+  after boot is simply standing again. (Two operator-state layers were
+  built and removed on operator verdict: an acknowledgment layer —
+  "acknowledge/ack", acked and retained-after-clear states, an on-disk
+  lifecycle journal — because awareness bookkeeping is ceremony and loud
+  is safe; then operator shelving — "shelve/unshelve", bounded
+  suppression with mandatory expiry — with the epic verdict "strip
+  management, keep prevention": management machinery presumes the alarm
+  volume the razor exists to eliminate. All those terms are retired; do
+  not reintroduce them.) See `docs/alarm-management-design.md`.
+
+- **Occurrence** — one continuous condition episode of an alarm ID in the
+  suppression sense: a clear-and-return inside the delay-off window is
+  the same occurrence (the alarm stays active, `FirstSeen` preserved); a
+  raise after the alarm released is a fresh alarm.
+
+- **Priority** — `alert.Priority`, the cataloged verdict per alarm type:
+  `Critical` (data loss in progress or scheduled), `High` (durability or
+  availability degraded, will compound), `Low` (needs attention on a human
+  timescale). Replaced the old call-site-chosen `Severity`
+  (Warning/Error). Priority always comes from the catalog, with zero
+  exceptions — the short-lived "operator-defined alarm" category (priority
+  from an operator-configured rule, retired in gastrolog-1cruar)
+  modeled a feature that never existed; `retention-rate` is an ordinary
+  catalog row. **Software faults** (e.g. `orchestrator-lock-leak`) are
+  a class apart — defect tripwires whose response is to report, so they
+  carry no priority.
+
+- **AlertCollector** — per-node in-memory store of standing alarms with
+  their suppression state (no file I/O; nothing survives restart). Alarms
+  have a stable key (`typeID` or `typeID:instanceKey`) for dedup; the
+  standing list (`Standing()`) is included in each NodeStats broadcast so
+  the full attributed cluster list is readable from any node. (An
+  "alarm flood" rate self-monitor — a per-node activation-rate meter
+  raising a meta-alarm over an operator threshold — was built and removed
+  on the same epic verdict as shelving; the term is retired.)
+
+- **SystemAlert** — one alarm on the wire: `ID`, `Priority`, `Source`,
+  `Detail` (per-instance specifics), `Cause`/`Response` (from the
+  catalog), `SoftwareFault`, `FirstSeen`, `LastSeen`. Keyed ("alarm X for
+  reason Y on node Z") so repeated identical alarms don't accumulate.
 
 ---
 
@@ -914,6 +996,7 @@ Canonical milestone verbs (reuse these names; do not coin synonyms):
 | active chunk     | open chunk        | "Active" matches `ChunkMeta.Sealed = false`.                       |
 | sealed chunk     | closed chunk, finalized chunk | "Sealed" is what the chunk manager actually calls it.  |
 | cloud-backed     | cloud chunk       | Cloud-backed describes storage; "cloud chunk" conflates with archival state. |
+| alarm            | alert             | An alarm requires an operator action; "alert" was applied indiscriminately to alarms, events, and metrics alike, which is what let non-actionable diagnostics into the alarm list. The phase 2 registry landed the alarm vocabulary in new identifiers (`AlarmType`, `Raise`, `Priority`); remaining `alert`-named identifiers (package `alert`, `SystemAlert`, `AlertCollector`) phase out with the lifecycle/UI phases. |
 | archived         | cold              | "Archived" is the canonical flag; cloud storage-class is orthogonal. |
 | vault-ctl Raft   |                   | One Raft group per vault, authoritative for that vault's chunk metadata. Follows the `{scope}-ctl` naming pattern for control-plane Raft groups. |
 | cluster-ctl Raft | system Raft, config Raft, cluster Raft | One Raft group per cluster, authoritative for cluster-wide configuration. Pairs with `vault-ctl Raft` to form the `{scope}-ctl` pattern. The on-disk Raft group ID and type names were renamed from `system` → `cluster-ctl` in gastrolog-5eu6v. |

@@ -42,8 +42,8 @@ export interface StorageEntry {
   rotationPolicyId: string;
   retentionPolicyId: string;
   retentionDisposition: string; // "delete" (default) | "route"
-  diskFreeWarn: string; // human size ("10GB"); empty inherits the node default
-  diskFreeFloor: string; // human size; empty inherits the node default
+  diskFreeWarn: string; // size ("10GB") or % of the volume ("10%"); empty inherits the node default ("10%")
+  diskFreeFloor: string; // size or % of the volume; empty inherits the node default ("3%")
   maxSize: string; // human size; per-node budget for the vault's local disk claim; empty = unlimited
   replicationFactor: string;
   path: string;
@@ -289,29 +289,29 @@ export function VaultStorageForm({
           <FormField
             label="Disk Free Warn"
             dark={dark}
-            description="Free space on the vault's backing volume below which the disk-space alarm raises. Leave empty to inherit the node default."
+            description="Free space on the vault's backing volume below which the disk-space alarm raises. A size like 10GB, or a percentage of the volume like 10%. Leave empty to inherit the node default, 10%."
           >
             <TextInput
               value={storage.diskFreeWarn}
               onChange={(v) => onUpdate({ diskFreeWarn: v })}
-              placeholder=""
+              placeholder="10%"
               dark={dark}
               mono
-              examples={["5GB", "10GB", "50GB"]}
+              examples={["10%", "10GB", "50GB"]}
             />
           </FormField>
           <FormField
             label="Disk Free Floor"
             dark={dark}
-            description="Free space below which new records for this vault are refused cluster-wide until space frees. Leave empty to inherit the node default."
+            description="Free space below which new records for this vault are refused cluster-wide until space frees. A size like 3GB, or a percentage of the volume like 3%. Leave empty to inherit the node default, 3%."
           >
             <TextInput
               value={storage.diskFreeFloor}
               onChange={(v) => onUpdate({ diskFreeFloor: v })}
-              placeholder=""
+              placeholder="3%"
               dark={dark}
               mono
-              examples={["1GB", "3GB", "10GB"]}
+              examples={["3%", "3GB", "10GB"]}
             />
           </FormField>
 

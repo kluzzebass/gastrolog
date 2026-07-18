@@ -7,7 +7,6 @@ import (
 	"gastrolog/internal/glid"
 	"time"
 
-	"gastrolog/internal/alert"
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/orchestrator/pipeline"
@@ -45,32 +44,23 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	// when the pipeline backs up; the supervisor's ingestion manager injects it
 	// into each ingester. Bounded inter-phase queues still block on send and
 	// remain the primary backpressure mechanism for the durable write path.
-	// Hysteresis transitions update ingest-pressure alerts only — NOT slog —
-	// to avoid a feedback loop where the self-ingester captures throttle
-	// messages and adds to the pressure.
+	//
+	// Pressure raises no alarm: if ingestion is throttled, the matter is
+	// already handled — the throttle IS the response. An alarm announces a
+	// condition waiting on a human, and this one is not waiting on anyone.
+	// The cases where a backlog goes on to threaten something are carried by
+	// the pipeline-backlog and disk-space alarms, which do have an operator
+	// action. The level ships in NodeStats as ingest_pressure_level for the
+	// health surfaces (gastrolog-3phtqv).
+	//
+	// It is deliberately not logged either: the self-ingester captures slog
+	// records, so logging throttle transitions would feed the very pressure
+	// being reported.
 	gate := o.pipelineGate
 	ingestProbe := func() (int, int) {
 		return o.pipeline.IngestQueueDepth(), o.pipeline.IngestQueueCapacity()
 	}
 	gate.AddProbe("ingest-digest", ingestProbe)
-	if ac, ok := o.alerts.(*alert.Collector); ok {
-		gate.AddOnChange(func(tr chanwatch.PressureTransition) {
-			if tr.To == chanwatch.PressureNormal {
-				ac.Clear("ingest-pressure")
-				return
-			}
-			sev := alert.Warning
-			if tr.To == chanwatch.PressureCritical {
-				sev = alert.Error
-			}
-			ac.Set(
-				"ingest-pressure",
-				sev, "orchestrator",
-				fmt.Sprintf("Ingest pipeline pressure %s (%s at %d%%)",
-					tr.To, tr.Cause, int(tr.Ratio*100)),
-			)
-		})
-	}
 
 	// Prime the disk guard BEFORE admission opens: a node restarting into an
 	// already-full volume must reject from the first record, not after the
@@ -90,12 +80,9 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 		return fmt.Errorf("start pipeline: %w", err)
 	}
 
-	// Channel pressure watchdog — slog-based alerts at 90%, separate from the
-	// hysteresis gate used for throttling (logs once on cross, once on resolve).
+	// Channel pressure watchdog — logs at 90%, separate from the hysteresis
+	// gate used for throttling (logs once on cross, once on resolve).
 	cw := chanwatch.New(o.logger, time.Second)
-	if ac, ok := o.alerts.(*alert.Collector); ok {
-		cw.SetAlerts(ac)
-	}
 	cw.Watch("ingest-digest", ingestProbe, 0.9)
 	o.auxWg.Go(func() { cw.Run(ctx) })
 

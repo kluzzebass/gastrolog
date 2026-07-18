@@ -46,3 +46,24 @@ experiencing write-path backpressure (usually fsync pressure on that node's
 disk).
 
 Peer node data is refreshed at the [broadcast interval](help:clustering-broadcasting) (default 5 seconds). Nodes that haven't broadcast recently show stale timestamps.
+
+## System alerts
+
+The header's alert pill opens the alarm list: every **standing alarm** in
+the cluster, attributed to the node that raised it, with priority, cause
+and response text from the alarm catalog. Alarms are state, not events —
+they stand while a condition holds, and there are no per-alarm operator
+states: an alarm is standing or it is not.
+
+The list is flat, sorted by priority then age. A row expands to its cause
+and response text. An alarm clears on its own when the condition resolves —
+there is nothing to acknowledge or dismiss. **Latching** alarms (such as
+`orchestrator-lock-leak`) are the exception: a software fault stands until
+the affected node restarts, because a fault that "went away" is still a
+fault — report it, then restart.
+
+Alarm state is in-memory only and does not survive a node restart — after
+a restart, a condition that still holds is simply re-detected and raised
+again.
+
+The same list is available from a shell: `gastrolog alerts`.

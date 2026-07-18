@@ -142,7 +142,7 @@ func (s *Server) ListenUnix(path string) error {
 		&auth.NoAuthInterceptor{},
 	)
 	mux := s.buildMux(noAuthOpt)
-	handler := s.trackingMiddleware(s.corsMiddleware(securityHeadersMiddleware(rateLimitMiddleware(s.rl)(compressMiddleware(mux)))))
+	handler := s.trackingMiddleware(s.corsMiddleware(securityHeadersMiddleware(rateLimitMiddleware(s.rl)(compressMiddleware(s.logger, mux)))))
 
 	s.mu.Lock()
 	s.unixListener = ln

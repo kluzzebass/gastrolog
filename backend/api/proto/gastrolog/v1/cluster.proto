@@ -168,6 +168,21 @@ message NodeStats {
   // max-size budget. Honored cluster-wide by the same per-vault admission
   // gate as disk_protected_vault_ids, with a budget-specific error.
   repeated bytes size_capped_vault_ids = 49;
+
+  // Cumulative diagnostic log records this node's capture handler has
+  // discarded because the capture channel was full. A capacity signal with
+  // no operator action, so it is a metric and never an alarm
+  // (gastrolog-3phtqv). It is deliberately not logged either: a log line
+  // about dropped logs feeds the self-ingester that is dropping them.
+  uint64 self_ingester_drops_total = 50;
+
+  // Current ingest-pipeline pressure: "normal", "elevated", or "critical".
+  // PressureAware ingesters throttle themselves as this rises. A metric, not
+  // an alarm (gastrolog-3phtqv): the actionable end of a backed-up pipeline
+  // is already covered by the pipeline-backlog and disk-space alarms, which
+  // fire when the backlog actually threatens something. Like raft_state,
+  // this is the level's String() rather than an enum.
+  string ingest_pressure_level = 51;
 }
 
 // VaultPipelineNodeDisk is one vault's local pipeline storage areas on a
@@ -210,23 +225,42 @@ message PeerTrafficTotal {
   repeated double rx_spark = 7;
 }
 
-// SystemAlert represents a runtime condition that operators should be aware of.
-// Alerts are keyed by ID for deduplication — the same condition doesn't create
-// multiple alerts. They auto-clear when the component that raised them detects
-// the condition has resolved.
+// SystemAlert is one standing alarm: a runtime condition requiring operator
+// action, with priority, cause and response stamped from the static alarm
+// catalog — never chosen at the raising call site.
+// Alarms are keyed by ID for deduplication — the same condition doesn't
+// create multiple alarms. Alarms are STATE with suppression: they stand
+// while the condition holds and clear when it resolves — an alarm is
+// standing or it is not; there are no per-alarm operator states. Latching
+// alarms stand until process restart.
 message SystemAlert {
-  bytes id = 1;                           // stable key for dedup (e.g. "vault-init:$vaultID")
-  AlertSeverity severity = 2;
-  string source = 3;                       // component name (e.g. "orchestrator", "forwarder")
-  string message = 4;
+  bytes id = 1;                            // stable key for dedup (e.g. "vault-init:$vaultID")
+  AlarmPriority priority = 2;              // from the alarm catalog, never the call site
+  string source = 3;                       // component name (e.g. "placement", "chunking")
+  string detail = 4;                       // per-instance specifics from the raiser
+  // Condition start of the current occurrence (the first Raise of the
+  // occurrence, not the annunciation instant — a delay-on window suppresses
+  // annunciation, not the condition's history). This IS the design doc's
+  // "first_raised"; no separate field exists.
   google.protobuf.Timestamp first_seen = 5;
   google.protobuf.Timestamp last_seen = 6;
+  string cause = 7;                        // catalog: what condition this is
+  string response = 8;                     // catalog: what the operator should do
+  // Software faults are defect tripwires, a class apart from process alarms
+  // (EEMUA 191): their response is to report the defect, so they sit outside
+  // the consequence × urgency priority scale (priority is UNSPECIFIED).
+  bool software_fault = 9;
 }
 
-enum AlertSeverity {
-  ALERT_SEVERITY_UNSPECIFIED = 0;
-  ALERT_SEVERITY_WARNING = 1;
-  ALERT_SEVERITY_ERROR = 2;
+// AlarmPriority is the cataloged consequence × urgency verdict for an alarm
+// type. CRITICAL = data loss in progress or scheduled; HIGH = durability or
+// availability degraded, will compound; LOW = needs attention on a human
+// timescale. UNSPECIFIED is only carried by software faults.
+enum AlarmPriority {
+  ALARM_PRIORITY_UNSPECIFIED = 0;
+  ALARM_PRIORITY_LOW = 1;
+  ALARM_PRIORITY_HIGH = 2;
+  ALARM_PRIORITY_CRITICAL = 3;
 }
 
 // IngesterNodeStats reports per-ingester statistics on a cluster node.

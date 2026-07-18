@@ -9,7 +9,7 @@ import { usePipelineBacklog } from "../../api/hooks";
 import { useToast } from "../Toast";
 import { buildNodeNameMap, resolveNodeName } from "../../utils/nodeNames";
 // eslint-disable-next-line no-restricted-imports -- no Chunk model yet (gastrolog-2e2qs follow-up)
-import { ChunkState, type ChunkMeta } from "../../api/gen/gastrolog/v1/vault_pb";
+import { type ChunkMeta } from "../../api/gen/gastrolog/v1/vault_pb";
 import type { Vault } from "../../api/model/vault";
 import { protoToInstant, instantToMs, instantToDate, formatDateTimeShort } from "../../utils/temporal";
 import { formatBytes, formatRate } from "../../utils/units";
@@ -18,7 +18,7 @@ import { middleTruncate } from "../../utils/middleTruncate";
 import { leaderNodeId, followerNodeIds } from "../../utils/placement";
 import { Badge } from "../Badge";
 import { BlobMark, SealPips } from "./SealPips";
-import { computeCloudPips, computePips } from "./sealPipState";
+import { chunkLifecycleState, computeCloudPips, computePips } from "./sealPipState";
 import { CogIcon } from "../icons";
 import { ExpandableCard } from "../settings/ExpandableCard";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
@@ -46,14 +46,6 @@ function chunkStartInstant(chunk: ChunkMeta): Date | undefined {
   const start = instantToDate(protoToInstant(startTs));
   if (start.getFullYear() < 2000) return undefined;
   return start;
-}
-
-// chunkLifecycleState maps the FSM overlay to the pip grammar's cluster-wide
-// chunk lifecycle. Legacy entries without State fall back to the Sealed bool.
-function chunkLifecycleState(chunk: ChunkMeta): "active" | "sealing" | "sealed" {
-  if (chunk.sealed || chunk.state === ChunkState.SEALED) return "sealed";
-  if (chunk.state === ChunkState.SEALING) return "sealing";
-  return "active";
 }
 
 interface VaultCardProps {

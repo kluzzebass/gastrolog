@@ -26,8 +26,8 @@ import (
 	"gastrolog/internal/orchestrator/pipeline"
 	"gastrolog/internal/pipeline/chunking"
 	"gastrolog/internal/pipeline/collection"
-	"gastrolog/internal/pipeline/distribution"
 	"gastrolog/internal/pipeline/digestion"
+	"gastrolog/internal/pipeline/distribution"
 	"gastrolog/internal/pipeline/ingestion"
 	"gastrolog/internal/pipeline/segmentation"
 	"gastrolog/internal/raftgroup"
@@ -48,9 +48,9 @@ type IngesterStats struct {
 // RouteStats is a point-in-time snapshot of global routing counters sourced
 // from the pipeline routing manager.
 type RouteStats struct {
-	Routed  int64 // total records that entered routing (matched + unmatched)
+	Routed    int64 // total records that entered routing (matched + unmatched)
 	Unmatched int64 // records that matched no route (intentional, counted drop)
-	Matched int64 // records that matched a route and were fanned out
+	Matched   int64 // records that matched a route and were fanned out
 }
 
 // VaultRouteStats is a point-in-time snapshot of per-vault routing counters.
@@ -228,11 +228,12 @@ type Orchestrator struct {
 	glcbPullMu       sync.Mutex
 	glcbPullInflight map[chunk.ChunkID]bool
 
-	// leaderlessSince tracks when each vault's placements began resolving
-	// to no leader, for the vault-leaderless alarm's delay-on window.
+	// leaderlessReported is the set of vaults reported leaderless to the
+	// alarm collector last sweep tick, so departures diff to a Clear. The
+	// delay-on window itself is the collector's (catalog DelayOn).
 	// Guarded by leaderlessMu.
-	leaderlessMu    sync.Mutex
-	leaderlessSince map[glid.GLID]time.Time
+	leaderlessMu       sync.Mutex
+	leaderlessReported map[glid.GLID]struct{}
 
 	// diskGuard samples free space and drives the disk-space alarm plus
 	// protect mode (ingest admission suspended below the floor).
@@ -322,8 +323,8 @@ type Orchestrator struct {
 	// Empty (zero GLID) for memory-config / no-node-id orchestrators.
 	localNodeIDGLID glid.GLID
 
-	// Alert collector for runtime system alerts.
-	alerts AlertCollector
+	// Alarm sink for runtime alarms.
+	alerts alert.Sink
 
 	// chunkSignal is the legacy bare-wake-up notifier used by the
 	// pre-gastrolog-3pf9w WatchChunks shape. New code should emit typed
@@ -661,9 +662,10 @@ type Config struct {
 	// to this node (or with empty NodeID) are instantiated.
 	LocalNodeID string
 
-	// Alerts is an optional collector for runtime system alerts.
-	// Components call Set to raise alerts and Clear to resolve them.
-	Alerts AlertCollector
+	// Alerts is an optional sink for runtime alarms. Components call
+	// Raise when they detect a cataloged condition and Clear when it
+	// resolves; priority comes from the alarm catalog, never the caller.
+	Alerts alert.Sink
 
 	// OnIngesterAlive is called when an ingester's alive state changes.
 	// The app layer wires this to Raft to replicate the state cluster-wide.
@@ -727,13 +729,6 @@ const (
 	defaultSegmentCompleteMaxBytes = uint64(8 << 20)
 	defaultSegmentCompleteMaxAge   = 10 * time.Second
 )
-
-// AlertCollector is the interface for raising and clearing system alerts.
-// Satisfied by *alert.Collector.
-type AlertCollector interface {
-	Set(id string, severity alert.Severity, source, message string)
-	Clear(id string)
-}
 
 // New creates an Orchestrator with empty registries.
 func New(cfg Config) (*Orchestrator, error) {
@@ -848,15 +843,16 @@ func New(cfg Config) (*Orchestrator, error) {
 	o.vaultCtlLeaders.SetOnMemberRemoved(o.proposePruneNodeForVault)
 	o.vaultCtlLeaders.SetOnLeadGained(o.onVaultCtlLeadGained)
 
-	// Per-instance retention rate alerter (gastrolog-47qyw): warn at >10/sec
-	// sustained over 30s. The orchestrator's vaultName closure looks up the
-	// human label from the current vault registry; "" if the instance is unknown.
+	// Per-instance retention rate alerter (gastrolog-47qyw): the condition
+	// is >10 deletes/sec sustained over a 30s window. These constants ARE
+	// the retention-rate catalog row's documented threshold — the row's
+	// Cause text quotes them, so a change here changes both. Priority comes
+	// from the catalog like every other alarm. The vaultName closure looks
+	// up the human label from the current vault registry; "" if unknown.
 	o.retentionRates = newRateAlerter(rateAlerterConfig{
 		Window:    30 * time.Second,
 		Kind:      "retention",
-		Source:    "retention",
-		WarningAt: 10.0,
-		ErrorAt:   0, // no error escalation per issue scope
+		Threshold: 10.0,
 		Alerts:    o.alerts,
 		VaultName: o.vaultLabel,
 	})
@@ -972,9 +968,9 @@ func (o *Orchestrator) IsIngesterRunning(id glid.GLID) bool {
 func (o *Orchestrator) GetRouteStats() *RouteStats {
 	snap := o.pipeline.RouteStats()
 	return &RouteStats{
-		Routed:  int64(snap.Routed),    //nolint:gosec // G115: counter bounded in practice
+		Routed:    int64(snap.Routed),    //nolint:gosec // G115: counter bounded in practice
 		Unmatched: int64(snap.Unmatched), //nolint:gosec // G115
-		Matched: int64(snap.Matched),   //nolint:gosec // G115
+		Matched:   int64(snap.Matched),   //nolint:gosec // G115
 	}
 }
 
