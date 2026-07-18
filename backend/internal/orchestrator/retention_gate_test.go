@@ -81,3 +81,63 @@ func readOneSealedRecord(t *testing.T, fx dispositionFixture) (chunk.Record, err
 }
 
 func errorsIsVaultMaxSize(err error) bool { return errors.Is(err, ErrVaultMaxSize) }
+
+// TestFireRetentionEventRunsUnderAdmissionGate pins the drain-gate
+// reclassification: with the node's admission gate engaged (free space in
+// the warn band) but the drain gate open, retention fan-out must complete —
+// this is exactly the incident's frozen band (gastrolog-5ct2av).
+func TestFireRetentionEventRunsUnderAdmissionGate(t *testing.T) {
+	t.Parallel()
+
+	fx := newDispositionFixture(t)
+	// 400GiB volume, 20GiB free: below the warn band (40GiB) resume bar,
+	// above the floor band (12GiB*1.25) — admission gate engaged, drain
+	// gate open after evaluate.
+	g, sampler := newGuardFixture(400*gib, map[string]uint64{"a": 5 * gib})
+	g.evaluate(nil) // floor breach: both gates engage
+	sampler.free["a"] = 20 * gib
+	g.evaluate(nil) // recovery into the frozen band
+	fx.orch.diskGuard = g
+	if !fx.orch.diskProtectActive() || fx.orch.diskDeferWrites() {
+		t.Fatal("fixture must be in the frozen band: admission engaged, drain open")
+	}
+
+	r := &retentionRunner{
+		vaultID: fx.sourceID,
+		orch:    fx.orch,
+		logger:  slog.Default(),
+	}
+	if !r.fireRetentionEvent(fx.sealedID) {
+		t.Fatal("fan-out must complete in the frozen band (admission gate engaged, drain gate open)")
+	}
+	waitForRouteStats(t, fx.orch, "3 records routed under the admission gate", func(s *RouteStats) bool {
+		return s.Matched == 3
+	})
+}
+
+// TestFireRetentionEventDefersBelowFloor pins the other side: below the
+// floor both gates are engaged and the fan-out defers with a single warn.
+func TestFireRetentionEventDefersBelowFloor(t *testing.T) {
+	t.Parallel()
+
+	fx := newDispositionFixture(t)
+	g, _ := newGuardFixture(400*gib, map[string]uint64{"a": 5 * gib})
+	g.evaluate(nil) // below floor: drain gate engaged
+	fx.orch.diskGuard = g
+
+	logSink := &syncBuffer{}
+	r := &retentionRunner{
+		vaultID: fx.sourceID,
+		orch:    fx.orch,
+		logger:  slog.New(slog.NewTextHandler(logSink, nil)),
+	}
+	if r.fireRetentionEvent(fx.sealedID) {
+		t.Fatal("fan-out must defer below the floor")
+	}
+	if !strings.Contains(logSink.String(), "route fan-out deferred") {
+		t.Errorf("deferral must warn; logs:\n%s", logSink.String())
+	}
+	if s := fx.orch.GetRouteStats(); s.Routed != 0 {
+		t.Errorf("no records may enter routing below the floor; Routed=%d", s.Routed)
+	}
+}

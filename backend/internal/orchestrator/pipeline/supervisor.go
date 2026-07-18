@@ -519,6 +519,25 @@ func (s *Supervisor) Submit(ctx context.Context, in routing.Input) error {
 	return nil
 }
 
+// SubmitDrain routes a record exactly like Submit but skips the node-global
+// admission gate: drain work — retention route fan-out — must run whenever
+// the pipeline runs, because it is the mechanism that frees the space the
+// admission gate is waiting for (gastrolog-5ct2av). Per-destination
+// admission still applies in the routing stage, and the drain gate
+// (deferWrites) is enforced by the caller before any record is read.
+func (s *Supervisor) SubmitDrain(ctx context.Context, in routing.Input) error {
+	if !s.running.Load() {
+		return ErrNotRunning
+	}
+	if !s.sendRouting(ctx, in) {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return ErrNotRunning
+	}
+	return nil
+}
+
 // SubmitToVault enqueues a record directly into a specific vault's segmentation
 // queue on this node, bypassing the routing table. It is the direct-to-vault
 // entry for writers that target a named vault and preserve the record's EventID

@@ -942,15 +942,19 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 	if r.orch.shuttingDown() {
 		return false
 	}
-	if r.orch.diskProtectActive() {
-		// Admission is rejecting everything: every routed record would be
-		// refused and the chunk destroyed UNROUTED — the disk-guard test
-		// caught exactly this (1.5M per-record rejections, then the chunk
-		// expunged with zero records delivered). Abort so the chunk
-		// survives and a later sweep retries once space frees. Delete-
-		// disposition retention is unaffected — it never fans out.
+	if r.orch.diskDeferWrites() {
+		// The drain gate is engaged: the node is below its free-space floor,
+		// where nothing may consume disk — not even the drain itself. Above
+		// the floor band the gate releases and this fan-out runs even while
+		// the ADMISSION gate still suspends ingest: retention is the only
+		// mechanism that frees space on a route-disposition vault, so gating
+		// it on admission's resume bar deadlocked the vault permanently
+		// (gastrolog-5ct2av; previously this checked diskProtectActive).
+		// Fanning out below the floor would still be wrong for the
+		// gastrolog-5034va reason: every routed record would be refused and
+		// the chunk destroyed unrouted.
 		if n, ok := r.idleLog.Allow("disk-protect"); ok {
-			r.logger.Warn("retention: route fan-out deferred — disk protect active; chunk retained for a later sweep",
+			r.logger.Warn("retention: route fan-out deferred — drain gate engaged below the disk floor; chunk retained for a later sweep",
 				"vault", r.vaultID, "suppressed", n)
 		}
 		return false

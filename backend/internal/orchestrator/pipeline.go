@@ -100,7 +100,7 @@ func (o *Orchestrator) SubmitRetentionRecord(ctx context.Context, sourceVaultID 
 	// record; nothing else holds the map (gastrolog-11y2iv).
 	prec := convert.ChunkToRecordOwned(rec)
 	ack := make(chan error, 1)
-	if err := pl.Submit(ctx, routing.Input{
+	if err := pl.SubmitDrain(ctx, routing.Input{
 		Record: &prec,
 		Source: routing.RetentionSource(sourceVaultID, reason),
 		Ack:    ack,
