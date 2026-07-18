@@ -68,9 +68,6 @@ const (
 	// LifecycleServiceUnshelveAlarmProcedure is the fully-qualified name of the LifecycleService's
 	// UnshelveAlarm RPC.
 	LifecycleServiceUnshelveAlarmProcedure = "/gastrolog.v1.LifecycleService/UnshelveAlarm"
-	// LifecycleServiceListEventsProcedure is the fully-qualified name of the LifecycleService's
-	// ListEvents RPC.
-	LifecycleServiceListEventsProcedure = "/gastrolog.v1.LifecycleService/ListEvents"
 )
 
 // LifecycleServiceClient is a client for the gastrolog.v1.LifecycleService service.
@@ -120,17 +117,6 @@ type LifecycleServiceClient interface {
 	// UnshelveAlarm ends a shelve early, returning the alarm to its live
 	// state. Same any-node fan-out semantics as AckAlarm.
 	UnshelveAlarm(context.Context, *connect.Request[v1.UnshelveAlarmRequest]) (*connect.Response[v1.UnshelveAlarmResponse], error)
-	// ListEvents returns the event journal: records of occurrence (alarm
-	// lifecycle transitions, demoted diagnostics) that require no operator
-	// action — EEMUA 191 separates them from the alarm list so history
-	// never clutters the call to action. The journal is a per-node
-	// in-memory ring; the serving node merges its own with every peer's
-	// via ForwardRPC fan-out, so the view is cluster-wide from any node.
-	// Entries do not survive node restart: each node's journal begins with
-	// a node-started event carrying the boot instant, and unreachable
-	// nodes are named in the response — absence of events is never
-	// presented as absence of occurrences.
-	ListEvents(context.Context, *connect.Request[v1.ListEventsRequest]) (*connect.Response[v1.ListEventsResponse], error)
 }
 
 // NewLifecycleServiceClient constructs a client for the gastrolog.v1.LifecycleService service. By
@@ -216,12 +202,6 @@ func NewLifecycleServiceClient(httpClient connect.HTTPClient, baseURL string, op
 			connect.WithSchema(lifecycleServiceMethods.ByName("UnshelveAlarm")),
 			connect.WithClientOptions(opts...),
 		),
-		listEvents: connect.NewClient[v1.ListEventsRequest, v1.ListEventsResponse](
-			httpClient,
-			baseURL+LifecycleServiceListEventsProcedure,
-			connect.WithSchema(lifecycleServiceMethods.ByName("ListEvents")),
-			connect.WithClientOptions(opts...),
-		),
 	}
 }
 
@@ -239,7 +219,6 @@ type lifecycleServiceClient struct {
 	ackAlarm          *connect.Client[v1.AckAlarmRequest, v1.AckAlarmResponse]
 	shelveAlarm       *connect.Client[v1.ShelveAlarmRequest, v1.ShelveAlarmResponse]
 	unshelveAlarm     *connect.Client[v1.UnshelveAlarmRequest, v1.UnshelveAlarmResponse]
-	listEvents        *connect.Client[v1.ListEventsRequest, v1.ListEventsResponse]
 }
 
 // Health calls gastrolog.v1.LifecycleService.Health.
@@ -302,11 +281,6 @@ func (c *lifecycleServiceClient) UnshelveAlarm(ctx context.Context, req *connect
 	return c.unshelveAlarm.CallUnary(ctx, req)
 }
 
-// ListEvents calls gastrolog.v1.LifecycleService.ListEvents.
-func (c *lifecycleServiceClient) ListEvents(ctx context.Context, req *connect.Request[v1.ListEventsRequest]) (*connect.Response[v1.ListEventsResponse], error) {
-	return c.listEvents.CallUnary(ctx, req)
-}
-
 // LifecycleServiceHandler is an implementation of the gastrolog.v1.LifecycleService service.
 type LifecycleServiceHandler interface {
 	// Health returns the server health status.
@@ -354,17 +328,6 @@ type LifecycleServiceHandler interface {
 	// UnshelveAlarm ends a shelve early, returning the alarm to its live
 	// state. Same any-node fan-out semantics as AckAlarm.
 	UnshelveAlarm(context.Context, *connect.Request[v1.UnshelveAlarmRequest]) (*connect.Response[v1.UnshelveAlarmResponse], error)
-	// ListEvents returns the event journal: records of occurrence (alarm
-	// lifecycle transitions, demoted diagnostics) that require no operator
-	// action — EEMUA 191 separates them from the alarm list so history
-	// never clutters the call to action. The journal is a per-node
-	// in-memory ring; the serving node merges its own with every peer's
-	// via ForwardRPC fan-out, so the view is cluster-wide from any node.
-	// Entries do not survive node restart: each node's journal begins with
-	// a node-started event carrying the boot instant, and unreachable
-	// nodes are named in the response — absence of events is never
-	// presented as absence of occurrences.
-	ListEvents(context.Context, *connect.Request[v1.ListEventsRequest]) (*connect.Response[v1.ListEventsResponse], error)
 }
 
 // NewLifecycleServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -446,12 +409,6 @@ func NewLifecycleServiceHandler(svc LifecycleServiceHandler, opts ...connect.Han
 		connect.WithSchema(lifecycleServiceMethods.ByName("UnshelveAlarm")),
 		connect.WithHandlerOptions(opts...),
 	)
-	lifecycleServiceListEventsHandler := connect.NewUnaryHandler(
-		LifecycleServiceListEventsProcedure,
-		svc.ListEvents,
-		connect.WithSchema(lifecycleServiceMethods.ByName("ListEvents")),
-		connect.WithHandlerOptions(opts...),
-	)
 	return "/gastrolog.v1.LifecycleService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case LifecycleServiceHealthProcedure:
@@ -478,8 +435,6 @@ func NewLifecycleServiceHandler(svc LifecycleServiceHandler, opts ...connect.Han
 			lifecycleServiceShelveAlarmHandler.ServeHTTP(w, r)
 		case LifecycleServiceUnshelveAlarmProcedure:
 			lifecycleServiceUnshelveAlarmHandler.ServeHTTP(w, r)
-		case LifecycleServiceListEventsProcedure:
-			lifecycleServiceListEventsHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -535,8 +490,4 @@ func (UnimplementedLifecycleServiceHandler) ShelveAlarm(context.Context, *connec
 
 func (UnimplementedLifecycleServiceHandler) UnshelveAlarm(context.Context, *connect.Request[v1.UnshelveAlarmRequest]) (*connect.Response[v1.UnshelveAlarmResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.LifecycleService.UnshelveAlarm is not implemented"))
-}
-
-func (UnimplementedLifecycleServiceHandler) ListEvents(context.Context, *connect.Request[v1.ListEventsRequest]) (*connect.Response[v1.ListEventsResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.LifecycleService.ListEvents is not implemented"))
 }

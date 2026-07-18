@@ -1555,279 +1555,6 @@ func (x *UnshelveAlarmResponse) GetApplied() uint32 {
 	return 0
 }
 
-type ListEventsRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Exact event type filter ("alarm-raised", "alarm-acked",
-	// "node-started", ...); empty matches all types.
-	Type string `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`
-	// Exact source (component) filter ("storage", "raft", ...); empty
-	// matches all sources.
-	Source string `protobuf:"bytes,2,opt,name=source,proto3" json:"source,omitempty"`
-	// Inclusive lower time bound; unset = from the start of each journal.
-	Since *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=since,proto3" json:"since,omitempty"`
-	// Inclusive upper time bound; unset = through the newest entry.
-	Until *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=until,proto3" json:"until,omitempty"`
-	// Maximum entries returned after the cross-node merge, keeping the
-	// NEWEST. 0 = server default (1000).
-	Limit uint32 `protobuf:"varint,5,opt,name=limit,proto3" json:"limit,omitempty"`
-	// Internal fan-out leg marker; see AckAlarmRequest.local_only.
-	LocalOnly     bool `protobuf:"varint,6,opt,name=local_only,json=localOnly,proto3" json:"local_only,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ListEventsRequest) Reset() {
-	*x = ListEventsRequest{}
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[24]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ListEventsRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ListEventsRequest) ProtoMessage() {}
-
-func (x *ListEventsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[24]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ListEventsRequest.ProtoReflect.Descriptor instead.
-func (*ListEventsRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{24}
-}
-
-func (x *ListEventsRequest) GetType() string {
-	if x != nil {
-		return x.Type
-	}
-	return ""
-}
-
-func (x *ListEventsRequest) GetSource() string {
-	if x != nil {
-		return x.Source
-	}
-	return ""
-}
-
-func (x *ListEventsRequest) GetSince() *timestamppb.Timestamp {
-	if x != nil {
-		return x.Since
-	}
-	return nil
-}
-
-func (x *ListEventsRequest) GetUntil() *timestamppb.Timestamp {
-	if x != nil {
-		return x.Until
-	}
-	return nil
-}
-
-func (x *ListEventsRequest) GetLimit() uint32 {
-	if x != nil {
-		return x.Limit
-	}
-	return 0
-}
-
-func (x *ListEventsRequest) GetLocalOnly() bool {
-	if x != nil {
-		return x.LocalOnly
-	}
-	return false
-}
-
-// SystemEvent is one event-journal entry: a record of something that
-// happened, requiring no operator action — no priority, no response text,
-// no lifecycle state. Deliberately quieter than SystemAlert.
-type SystemEvent struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Raising node's raft ID, stamped by the node that journaled the event.
-	NodeId []byte `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
-	// Display name of the raising node, resolved by the serving node from
-	// node config (best effort; may be empty, fall back to node_id).
-	NodeName string                 `protobuf:"bytes,2,opt,name=node_name,json=nodeName,proto3" json:"node_name,omitempty"`
-	Time     *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=time,proto3" json:"time,omitempty"`
-	// Per-node monotonic journal sequence. Keeps counting when the ring
-	// drops old entries, so a first visible seq > 1 means history aged out.
-	Seq uint64 `protobuf:"varint,4,opt,name=seq,proto3" json:"seq,omitempty"`
-	// Event type ("alarm-raised", "election-storm", "node-started", ...).
-	Type string `protobuf:"bytes,5,opt,name=type,proto3" json:"type,omitempty"`
-	// Component the event is about (an alarm's catalog source, "raft",
-	// "ingest-pipeline", "node", ...).
-	Source string `protobuf:"bytes,6,opt,name=source,proto3" json:"source,omitempty"`
-	// Full alarm ID for alarm lifecycle events, empty otherwise. Same
-	// encoding as SystemAlert.id.
-	AlarmId []byte `protobuf:"bytes,7,opt,name=alarm_id,json=alarmId,proto3" json:"alarm_id,omitempty"`
-	Detail  string `protobuf:"bytes,8,opt,name=detail,proto3" json:"detail,omitempty"`
-	// Operator identity on ack/shelve/unshelve events; empty for system
-	// transitions.
-	By            string `protobuf:"bytes,9,opt,name=by,proto3" json:"by,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SystemEvent) Reset() {
-	*x = SystemEvent{}
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[25]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SystemEvent) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SystemEvent) ProtoMessage() {}
-
-func (x *SystemEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[25]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SystemEvent.ProtoReflect.Descriptor instead.
-func (*SystemEvent) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{25}
-}
-
-func (x *SystemEvent) GetNodeId() []byte {
-	if x != nil {
-		return x.NodeId
-	}
-	return nil
-}
-
-func (x *SystemEvent) GetNodeName() string {
-	if x != nil {
-		return x.NodeName
-	}
-	return ""
-}
-
-func (x *SystemEvent) GetTime() *timestamppb.Timestamp {
-	if x != nil {
-		return x.Time
-	}
-	return nil
-}
-
-func (x *SystemEvent) GetSeq() uint64 {
-	if x != nil {
-		return x.Seq
-	}
-	return 0
-}
-
-func (x *SystemEvent) GetType() string {
-	if x != nil {
-		return x.Type
-	}
-	return ""
-}
-
-func (x *SystemEvent) GetSource() string {
-	if x != nil {
-		return x.Source
-	}
-	return ""
-}
-
-func (x *SystemEvent) GetAlarmId() []byte {
-	if x != nil {
-		return x.AlarmId
-	}
-	return nil
-}
-
-func (x *SystemEvent) GetDetail() string {
-	if x != nil {
-		return x.Detail
-	}
-	return ""
-}
-
-func (x *SystemEvent) GetBy() string {
-	if x != nil {
-		return x.By
-	}
-	return ""
-}
-
-type ListEventsResponse struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Chronological (oldest first) across all reachable nodes; per-node
-	// seq breaks ties. When limit truncates, the NEWEST entries survive.
-	Events []*SystemEvent `protobuf:"bytes,1,rep,name=events,proto3" json:"events,omitempty"`
-	// Node IDs whose journal could not be collected (unreachable, no
-	// forwarder). Their events are MISSING from this response — absence
-	// of events from these nodes is unknown state, not quiet history.
-	UnreachableNodes []string `protobuf:"bytes,2,rep,name=unreachable_nodes,json=unreachableNodes,proto3" json:"unreachable_nodes,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
-}
-
-func (x *ListEventsResponse) Reset() {
-	*x = ListEventsResponse{}
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[26]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ListEventsResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ListEventsResponse) ProtoMessage() {}
-
-func (x *ListEventsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[26]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ListEventsResponse.ProtoReflect.Descriptor instead.
-func (*ListEventsResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{26}
-}
-
-func (x *ListEventsResponse) GetEvents() []*SystemEvent {
-	if x != nil {
-		return x.Events
-	}
-	return nil
-}
-
-func (x *ListEventsResponse) GetUnreachableNodes() []string {
-	if x != nil {
-		return x.UnreachableNodes
-	}
-	return nil
-}
-
 type WatchSystemStatusRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -1836,7 +1563,7 @@ type WatchSystemStatusRequest struct {
 
 func (x *WatchSystemStatusRequest) Reset() {
 	*x = WatchSystemStatusRequest{}
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[27]
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1848,7 +1575,7 @@ func (x *WatchSystemStatusRequest) String() string {
 func (*WatchSystemStatusRequest) ProtoMessage() {}
 
 func (x *WatchSystemStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[27]
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1861,7 +1588,7 @@ func (x *WatchSystemStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchSystemStatusRequest.ProtoReflect.Descriptor instead.
 func (*WatchSystemStatusRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{27}
+	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{24}
 }
 
 type WatchSystemStatusResponse struct {
@@ -1884,7 +1611,7 @@ type WatchSystemStatusResponse struct {
 
 func (x *WatchSystemStatusResponse) Reset() {
 	*x = WatchSystemStatusResponse{}
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[28]
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1896,7 +1623,7 @@ func (x *WatchSystemStatusResponse) String() string {
 func (*WatchSystemStatusResponse) ProtoMessage() {}
 
 func (x *WatchSystemStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[28]
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1909,7 +1636,7 @@ func (x *WatchSystemStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchSystemStatusResponse.ProtoReflect.Descriptor instead.
 func (*WatchSystemStatusResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{28}
+	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *WatchSystemStatusResponse) GetCluster() *GetClusterStatusResponse {
@@ -2062,28 +1789,7 @@ const file_gastrolog_v1_lifecycle_proto_rawDesc = "" +
 	"\n" +
 	"local_only\x18\x02 \x01(\bR\tlocalOnly\"1\n" +
 	"\x15UnshelveAlarmResponse\x12\x18\n" +
-	"\aapplied\x18\x01 \x01(\rR\aapplied\"\xd8\x01\n" +
-	"\x11ListEventsRequest\x12\x12\n" +
-	"\x04type\x18\x01 \x01(\tR\x04type\x12\x16\n" +
-	"\x06source\x18\x02 \x01(\tR\x06source\x120\n" +
-	"\x05since\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x05since\x120\n" +
-	"\x05until\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\x05until\x12\x14\n" +
-	"\x05limit\x18\x05 \x01(\rR\x05limit\x12\x1d\n" +
-	"\n" +
-	"local_only\x18\x06 \x01(\bR\tlocalOnly\"\xf4\x01\n" +
-	"\vSystemEvent\x12\x17\n" +
-	"\anode_id\x18\x01 \x01(\fR\x06nodeId\x12\x1b\n" +
-	"\tnode_name\x18\x02 \x01(\tR\bnodeName\x12.\n" +
-	"\x04time\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x04time\x12\x10\n" +
-	"\x03seq\x18\x04 \x01(\x04R\x03seq\x12\x12\n" +
-	"\x04type\x18\x05 \x01(\tR\x04type\x12\x16\n" +
-	"\x06source\x18\x06 \x01(\tR\x06source\x12\x19\n" +
-	"\balarm_id\x18\a \x01(\fR\aalarmId\x12\x16\n" +
-	"\x06detail\x18\b \x01(\tR\x06detail\x12\x0e\n" +
-	"\x02by\x18\t \x01(\tR\x02by\"t\n" +
-	"\x12ListEventsResponse\x121\n" +
-	"\x06events\x18\x01 \x03(\v2\x19.gastrolog.v1.SystemEventR\x06events\x12+\n" +
-	"\x11unreachable_nodes\x18\x02 \x03(\tR\x10unreachableNodes\"\x1a\n" +
+	"\aapplied\x18\x01 \x01(\rR\aapplied\"\x1a\n" +
 	"\x18WatchSystemStatusRequest\"\xd3\x03\n" +
 	"\x19WatchSystemStatusResponse\x12@\n" +
 	"\acluster\x18\x01 \x01(\v2&.gastrolog.v1.GetClusterStatusResponseR\acluster\x124\n" +
@@ -2107,7 +1813,7 @@ const file_gastrolog_v1_lifecycle_proto_rawDesc = "" +
 	"!CLUSTER_NODE_SUFFRAGE_UNSPECIFIED\x10\x00\x12\x1f\n" +
 	"\x1bCLUSTER_NODE_SUFFRAGE_VOTER\x10\x01\x12\"\n" +
 	"\x1eCLUSTER_NODE_SUFFRAGE_NONVOTER\x10\x02\x12!\n" +
-	"\x1dCLUSTER_NODE_SUFFRAGE_STAGING\x10\x032\xf3\b\n" +
+	"\x1dCLUSTER_NODE_SUFFRAGE_STAGING\x10\x032\xa2\b\n" +
 	"\x10LifecycleService\x12C\n" +
 	"\x06Health\x12\x1b.gastrolog.v1.HealthRequest\x1a\x1c.gastrolog.v1.HealthResponse\x12I\n" +
 	"\bShutdown\x12\x1d.gastrolog.v1.ShutdownRequest\x1a\x1e.gastrolog.v1.ShutdownResponse\x12a\n" +
@@ -2121,9 +1827,7 @@ const file_gastrolog_v1_lifecycle_proto_rawDesc = "" +
 	"\x11WatchSystemStatus\x12&.gastrolog.v1.WatchSystemStatusRequest\x1a'.gastrolog.v1.WatchSystemStatusResponse0\x01\x12I\n" +
 	"\bAckAlarm\x12\x1d.gastrolog.v1.AckAlarmRequest\x1a\x1e.gastrolog.v1.AckAlarmResponse\x12R\n" +
 	"\vShelveAlarm\x12 .gastrolog.v1.ShelveAlarmRequest\x1a!.gastrolog.v1.ShelveAlarmResponse\x12X\n" +
-	"\rUnshelveAlarm\x12\".gastrolog.v1.UnshelveAlarmRequest\x1a#.gastrolog.v1.UnshelveAlarmResponse\x12O\n" +
-	"\n" +
-	"ListEvents\x12\x1f.gastrolog.v1.ListEventsRequest\x1a .gastrolog.v1.ListEventsResponseB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
+	"\rUnshelveAlarm\x12\".gastrolog.v1.UnshelveAlarmRequest\x1a#.gastrolog.v1.UnshelveAlarmResponseB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
 
 var (
 	file_gastrolog_v1_lifecycle_proto_rawDescOnce sync.Once
@@ -2138,7 +1842,7 @@ func file_gastrolog_v1_lifecycle_proto_rawDescGZIP() []byte {
 }
 
 var file_gastrolog_v1_lifecycle_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_gastrolog_v1_lifecycle_proto_msgTypes = make([]protoimpl.MessageInfo, 29)
+var file_gastrolog_v1_lifecycle_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
 var file_gastrolog_v1_lifecycle_proto_goTypes = []any{
 	(Status)(0),                       // 0: gastrolog.v1.Status
 	(ClusterNodeRole)(0),              // 1: gastrolog.v1.ClusterNodeRole
@@ -2167,19 +1871,16 @@ var file_gastrolog_v1_lifecycle_proto_goTypes = []any{
 	(*ShelveAlarmResponse)(nil),       // 24: gastrolog.v1.ShelveAlarmResponse
 	(*UnshelveAlarmRequest)(nil),      // 25: gastrolog.v1.UnshelveAlarmRequest
 	(*UnshelveAlarmResponse)(nil),     // 26: gastrolog.v1.UnshelveAlarmResponse
-	(*ListEventsRequest)(nil),         // 27: gastrolog.v1.ListEventsRequest
-	(*SystemEvent)(nil),               // 28: gastrolog.v1.SystemEvent
-	(*ListEventsResponse)(nil),        // 29: gastrolog.v1.ListEventsResponse
-	(*WatchSystemStatusRequest)(nil),  // 30: gastrolog.v1.WatchSystemStatusRequest
-	(*WatchSystemStatusResponse)(nil), // 31: gastrolog.v1.WatchSystemStatusResponse
-	(*NodeStats)(nil),                 // 32: gastrolog.v1.NodeStats
-	(NodeState)(0),                    // 33: gastrolog.v1.NodeState
-	(*timestamppb.Timestamp)(nil),     // 34: google.protobuf.Timestamp
-	(*GetRouteStatsResponse)(nil),     // 35: gastrolog.v1.GetRouteStatsResponse
-	(*VaultInfo)(nil),                 // 36: gastrolog.v1.VaultInfo
-	(*GetStatsResponse)(nil),          // 37: gastrolog.v1.GetStatsResponse
-	(*IngesterAlive)(nil),             // 38: gastrolog.v1.IngesterAlive
-	(*VaultPipelineBacklog)(nil),      // 39: gastrolog.v1.VaultPipelineBacklog
+	(*WatchSystemStatusRequest)(nil),  // 27: gastrolog.v1.WatchSystemStatusRequest
+	(*WatchSystemStatusResponse)(nil), // 28: gastrolog.v1.WatchSystemStatusResponse
+	(*NodeStats)(nil),                 // 29: gastrolog.v1.NodeStats
+	(NodeState)(0),                    // 30: gastrolog.v1.NodeState
+	(*timestamppb.Timestamp)(nil),     // 31: google.protobuf.Timestamp
+	(*GetRouteStatsResponse)(nil),     // 32: gastrolog.v1.GetRouteStatsResponse
+	(*VaultInfo)(nil),                 // 33: gastrolog.v1.VaultInfo
+	(*GetStatsResponse)(nil),          // 34: gastrolog.v1.GetStatsResponse
+	(*IngesterAlive)(nil),             // 35: gastrolog.v1.IngesterAlive
+	(*VaultPipelineBacklog)(nil),      // 36: gastrolog.v1.VaultPipelineBacklog
 }
 var file_gastrolog_v1_lifecycle_proto_depIdxs = []int32{
 	0,  // 0: gastrolog.v1.HealthResponse.status:type_name -> gastrolog.v1.Status
@@ -2187,53 +1888,47 @@ var file_gastrolog_v1_lifecycle_proto_depIdxs = []int32{
 	9,  // 2: gastrolog.v1.GetClusterStatusResponse.local_stats:type_name -> gastrolog.v1.RaftStats
 	1,  // 3: gastrolog.v1.ClusterNode.role:type_name -> gastrolog.v1.ClusterNodeRole
 	2,  // 4: gastrolog.v1.ClusterNode.suffrage:type_name -> gastrolog.v1.ClusterNodeSuffrage
-	32, // 5: gastrolog.v1.ClusterNode.stats:type_name -> gastrolog.v1.NodeStats
-	33, // 6: gastrolog.v1.ClusterNode.state:type_name -> gastrolog.v1.NodeState
-	34, // 7: gastrolog.v1.ClusterNode.state_since:type_name -> google.protobuf.Timestamp
-	33, // 8: gastrolog.v1.SetNodeStateRequest.state:type_name -> gastrolog.v1.NodeState
-	34, // 9: gastrolog.v1.ShelveAlarmResponse.shelved_until:type_name -> google.protobuf.Timestamp
-	34, // 10: gastrolog.v1.ListEventsRequest.since:type_name -> google.protobuf.Timestamp
-	34, // 11: gastrolog.v1.ListEventsRequest.until:type_name -> google.protobuf.Timestamp
-	34, // 12: gastrolog.v1.SystemEvent.time:type_name -> google.protobuf.Timestamp
-	28, // 13: gastrolog.v1.ListEventsResponse.events:type_name -> gastrolog.v1.SystemEvent
-	8,  // 14: gastrolog.v1.WatchSystemStatusResponse.cluster:type_name -> gastrolog.v1.GetClusterStatusResponse
-	4,  // 15: gastrolog.v1.WatchSystemStatusResponse.health:type_name -> gastrolog.v1.HealthResponse
-	35, // 16: gastrolog.v1.WatchSystemStatusResponse.route_stats:type_name -> gastrolog.v1.GetRouteStatsResponse
-	36, // 17: gastrolog.v1.WatchSystemStatusResponse.vaults:type_name -> gastrolog.v1.VaultInfo
-	37, // 18: gastrolog.v1.WatchSystemStatusResponse.stats:type_name -> gastrolog.v1.GetStatsResponse
-	38, // 19: gastrolog.v1.WatchSystemStatusResponse.ingester_alive:type_name -> gastrolog.v1.IngesterAlive
-	39, // 20: gastrolog.v1.WatchSystemStatusResponse.pipeline_backlog:type_name -> gastrolog.v1.VaultPipelineBacklog
-	3,  // 21: gastrolog.v1.LifecycleService.Health:input_type -> gastrolog.v1.HealthRequest
-	5,  // 22: gastrolog.v1.LifecycleService.Shutdown:input_type -> gastrolog.v1.ShutdownRequest
-	7,  // 23: gastrolog.v1.LifecycleService.GetClusterStatus:input_type -> gastrolog.v1.GetClusterStatusRequest
-	11, // 24: gastrolog.v1.LifecycleService.SetNodeSuffrage:input_type -> gastrolog.v1.SetNodeSuffrageRequest
-	13, // 25: gastrolog.v1.LifecycleService.SetNodeState:input_type -> gastrolog.v1.SetNodeStateRequest
-	15, // 26: gastrolog.v1.LifecycleService.JoinCluster:input_type -> gastrolog.v1.JoinClusterRequest
-	17, // 27: gastrolog.v1.LifecycleService.RemoveNode:input_type -> gastrolog.v1.RemoveNodeRequest
-	19, // 28: gastrolog.v1.LifecycleService.YieldLeadership:input_type -> gastrolog.v1.YieldLeadershipRequest
-	30, // 29: gastrolog.v1.LifecycleService.WatchSystemStatus:input_type -> gastrolog.v1.WatchSystemStatusRequest
-	21, // 30: gastrolog.v1.LifecycleService.AckAlarm:input_type -> gastrolog.v1.AckAlarmRequest
-	23, // 31: gastrolog.v1.LifecycleService.ShelveAlarm:input_type -> gastrolog.v1.ShelveAlarmRequest
-	25, // 32: gastrolog.v1.LifecycleService.UnshelveAlarm:input_type -> gastrolog.v1.UnshelveAlarmRequest
-	27, // 33: gastrolog.v1.LifecycleService.ListEvents:input_type -> gastrolog.v1.ListEventsRequest
-	4,  // 34: gastrolog.v1.LifecycleService.Health:output_type -> gastrolog.v1.HealthResponse
-	6,  // 35: gastrolog.v1.LifecycleService.Shutdown:output_type -> gastrolog.v1.ShutdownResponse
-	8,  // 36: gastrolog.v1.LifecycleService.GetClusterStatus:output_type -> gastrolog.v1.GetClusterStatusResponse
-	12, // 37: gastrolog.v1.LifecycleService.SetNodeSuffrage:output_type -> gastrolog.v1.SetNodeSuffrageResponse
-	14, // 38: gastrolog.v1.LifecycleService.SetNodeState:output_type -> gastrolog.v1.SetNodeStateResponse
-	16, // 39: gastrolog.v1.LifecycleService.JoinCluster:output_type -> gastrolog.v1.JoinClusterResponse
-	18, // 40: gastrolog.v1.LifecycleService.RemoveNode:output_type -> gastrolog.v1.RemoveNodeResponse
-	20, // 41: gastrolog.v1.LifecycleService.YieldLeadership:output_type -> gastrolog.v1.YieldLeadershipResponse
-	31, // 42: gastrolog.v1.LifecycleService.WatchSystemStatus:output_type -> gastrolog.v1.WatchSystemStatusResponse
-	22, // 43: gastrolog.v1.LifecycleService.AckAlarm:output_type -> gastrolog.v1.AckAlarmResponse
-	24, // 44: gastrolog.v1.LifecycleService.ShelveAlarm:output_type -> gastrolog.v1.ShelveAlarmResponse
-	26, // 45: gastrolog.v1.LifecycleService.UnshelveAlarm:output_type -> gastrolog.v1.UnshelveAlarmResponse
-	29, // 46: gastrolog.v1.LifecycleService.ListEvents:output_type -> gastrolog.v1.ListEventsResponse
-	34, // [34:47] is the sub-list for method output_type
-	21, // [21:34] is the sub-list for method input_type
-	21, // [21:21] is the sub-list for extension type_name
-	21, // [21:21] is the sub-list for extension extendee
-	0,  // [0:21] is the sub-list for field type_name
+	29, // 5: gastrolog.v1.ClusterNode.stats:type_name -> gastrolog.v1.NodeStats
+	30, // 6: gastrolog.v1.ClusterNode.state:type_name -> gastrolog.v1.NodeState
+	31, // 7: gastrolog.v1.ClusterNode.state_since:type_name -> google.protobuf.Timestamp
+	30, // 8: gastrolog.v1.SetNodeStateRequest.state:type_name -> gastrolog.v1.NodeState
+	31, // 9: gastrolog.v1.ShelveAlarmResponse.shelved_until:type_name -> google.protobuf.Timestamp
+	8,  // 10: gastrolog.v1.WatchSystemStatusResponse.cluster:type_name -> gastrolog.v1.GetClusterStatusResponse
+	4,  // 11: gastrolog.v1.WatchSystemStatusResponse.health:type_name -> gastrolog.v1.HealthResponse
+	32, // 12: gastrolog.v1.WatchSystemStatusResponse.route_stats:type_name -> gastrolog.v1.GetRouteStatsResponse
+	33, // 13: gastrolog.v1.WatchSystemStatusResponse.vaults:type_name -> gastrolog.v1.VaultInfo
+	34, // 14: gastrolog.v1.WatchSystemStatusResponse.stats:type_name -> gastrolog.v1.GetStatsResponse
+	35, // 15: gastrolog.v1.WatchSystemStatusResponse.ingester_alive:type_name -> gastrolog.v1.IngesterAlive
+	36, // 16: gastrolog.v1.WatchSystemStatusResponse.pipeline_backlog:type_name -> gastrolog.v1.VaultPipelineBacklog
+	3,  // 17: gastrolog.v1.LifecycleService.Health:input_type -> gastrolog.v1.HealthRequest
+	5,  // 18: gastrolog.v1.LifecycleService.Shutdown:input_type -> gastrolog.v1.ShutdownRequest
+	7,  // 19: gastrolog.v1.LifecycleService.GetClusterStatus:input_type -> gastrolog.v1.GetClusterStatusRequest
+	11, // 20: gastrolog.v1.LifecycleService.SetNodeSuffrage:input_type -> gastrolog.v1.SetNodeSuffrageRequest
+	13, // 21: gastrolog.v1.LifecycleService.SetNodeState:input_type -> gastrolog.v1.SetNodeStateRequest
+	15, // 22: gastrolog.v1.LifecycleService.JoinCluster:input_type -> gastrolog.v1.JoinClusterRequest
+	17, // 23: gastrolog.v1.LifecycleService.RemoveNode:input_type -> gastrolog.v1.RemoveNodeRequest
+	19, // 24: gastrolog.v1.LifecycleService.YieldLeadership:input_type -> gastrolog.v1.YieldLeadershipRequest
+	27, // 25: gastrolog.v1.LifecycleService.WatchSystemStatus:input_type -> gastrolog.v1.WatchSystemStatusRequest
+	21, // 26: gastrolog.v1.LifecycleService.AckAlarm:input_type -> gastrolog.v1.AckAlarmRequest
+	23, // 27: gastrolog.v1.LifecycleService.ShelveAlarm:input_type -> gastrolog.v1.ShelveAlarmRequest
+	25, // 28: gastrolog.v1.LifecycleService.UnshelveAlarm:input_type -> gastrolog.v1.UnshelveAlarmRequest
+	4,  // 29: gastrolog.v1.LifecycleService.Health:output_type -> gastrolog.v1.HealthResponse
+	6,  // 30: gastrolog.v1.LifecycleService.Shutdown:output_type -> gastrolog.v1.ShutdownResponse
+	8,  // 31: gastrolog.v1.LifecycleService.GetClusterStatus:output_type -> gastrolog.v1.GetClusterStatusResponse
+	12, // 32: gastrolog.v1.LifecycleService.SetNodeSuffrage:output_type -> gastrolog.v1.SetNodeSuffrageResponse
+	14, // 33: gastrolog.v1.LifecycleService.SetNodeState:output_type -> gastrolog.v1.SetNodeStateResponse
+	16, // 34: gastrolog.v1.LifecycleService.JoinCluster:output_type -> gastrolog.v1.JoinClusterResponse
+	18, // 35: gastrolog.v1.LifecycleService.RemoveNode:output_type -> gastrolog.v1.RemoveNodeResponse
+	20, // 36: gastrolog.v1.LifecycleService.YieldLeadership:output_type -> gastrolog.v1.YieldLeadershipResponse
+	28, // 37: gastrolog.v1.LifecycleService.WatchSystemStatus:output_type -> gastrolog.v1.WatchSystemStatusResponse
+	22, // 38: gastrolog.v1.LifecycleService.AckAlarm:output_type -> gastrolog.v1.AckAlarmResponse
+	24, // 39: gastrolog.v1.LifecycleService.ShelveAlarm:output_type -> gastrolog.v1.ShelveAlarmResponse
+	26, // 40: gastrolog.v1.LifecycleService.UnshelveAlarm:output_type -> gastrolog.v1.UnshelveAlarmResponse
+	29, // [29:41] is the sub-list for method output_type
+	17, // [17:29] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_gastrolog_v1_lifecycle_proto_init() }
@@ -2250,7 +1945,7 @@ func file_gastrolog_v1_lifecycle_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gastrolog_v1_lifecycle_proto_rawDesc), len(file_gastrolog_v1_lifecycle_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   29,
+			NumMessages:   26,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

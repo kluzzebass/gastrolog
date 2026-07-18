@@ -114,10 +114,6 @@ func DefaultRoutes() map[string]RPCRoute {
 		gastrologv1connect.LifecycleServiceAckAlarmProcedure:      {Strategy: RouteFanOut},
 		gastrologv1connect.LifecycleServiceShelveAlarmProcedure:   {Strategy: RouteFanOut},
 		gastrologv1connect.LifecycleServiceUnshelveAlarmProcedure: {Strategy: RouteFanOut},
-		// Event journal: per-node rings, merged by the handler (local ring
-		// + a local_only ForwardRPC leg per remote node) — RouteFanOut so
-		// the interceptor passes through (gastrolog-1m3e0d).
-		gastrologv1connect.LifecycleServiceListEventsProcedure: {Strategy: RouteFanOut},
 		// Cluster mutations — need the Raft leader.
 		gastrologv1connect.LifecycleServiceSetNodeSuffrageProcedure: {Strategy: RouteLeader},
 		gastrologv1connect.LifecycleServiceSetNodeStateProcedure:    {Strategy: RouteLeader},

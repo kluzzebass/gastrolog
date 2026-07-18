@@ -637,9 +637,13 @@ How the cluster reports what it's doing to itself, to operators, and to the UI.
   Surfaced in the alarm list. See `docs/alarm-management-design.md` for the
   catalog and the per-alarm response text.
 
-- **Event** — a record that something happened. No operator action. Lives in
-  the event journal, never the alarm list. Most demoted diagnostics are
-  events.
+- **Event** — a record that something happened. No operator action. An event
+  is a **log message**: a structured slog line, captured by the self ingester
+  and searchable like any other logs — never an alarm-list entry. Most
+  demoted diagnostics are events. (A dedicated per-node "event journal" ring
+  with its own RPC, inspector page and CLI command was built and removed on
+  operator verdict in gastrolog-1m3e0d — the log pipeline already records,
+  stores, and searches events; a parallel store duplicated it.)
 
 - **Metric** — a measured quantity to trend on a health surface. Note that
   demoting a condition to a **log** and demoting it to a **metric** are not
@@ -704,20 +708,6 @@ How the cluster reports what it's doing to itself, to operators, and to the UI.
   Folded and compacted at startup; pending state applies to the first
   annunciation of the matching alarm ID; a `resolve` record prunes state
   when the alarm releases.
-
-- **Event journal** — the per-node bounded in-memory ring
-  (`alert.EventJournal`, ~10k entries, oldest dropped first) that records
-  events: exactly one entry per alarm lifecycle transition
-  (`alarm-raised`, `alarm-cleared`, `alarm-acked`, `alarm-shelved`,
-  `alarm-unshelved`, `alarm-shelve-expired`) plus the demoted
-  event-shaped diagnostics (`election-storm`, `raft-wal-latency`,
-  `channel-pressure`). Served cluster-wide by `ListEvents` — any node
-  merges every node's ring — and surfaced on the inspector's Events page
-  and `gastrolog events`. Deliberately **not durable**: it does not
-  survive restart, and every journal begins with a `node-started` entry
-  at boot so history before it reads as unknown, never as quiet. Distinct
-  from the **alarm lifecycle journal**, which persists ack/shelve *state*
-  on disk (gastrolog-1m3e0d).
 
 - **Priority** — `alert.Priority`, the cataloged verdict per alarm type:
   `Critical` (data loss in progress or scheduled), `High` (durability or

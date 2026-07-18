@@ -13,7 +13,7 @@ the catalog table below is the source of truth for per-alarm behavior.
 This test gates everything else. It is applied **before** rate limits,
 priorities, or lifecycle mechanics, to every existing and future
 `alerts.Set()` site. A condition with no operator action is an **event**
-(journal) or a **metric** (health surface), never an alarm.
+(a log message) or a **metric** (health surface), never an alarm.
 
 ## Vocabulary
 
@@ -23,7 +23,7 @@ go into `docs/ubiquitous_language.md` with the implementing change:
 | Term | Meaning | Surface |
 |------|---------|---------|
 | **Alarm** | A condition requiring operator action, with documented cause and response. Has lifecycle state. | Alarm list (System Alerts panel, renamed) |
-| **Event** | A record of something that happened; no action required. | Event journal (inspector Events page, `gastrolog events`) |
+| **Event** | A record of something that happened; no action required. | The log stream (slog lines, captured by the self ingester, searchable like any other logs) |
 | **Metric** | A measured quantity trending over time. | Health/stats surfaces |
 
 ## Standards principles adopted
@@ -133,8 +133,8 @@ Verdicts under the governing test:
 | `alarm-flood` | alarm-system | This node's alarm activations exceeded the flood threshold (default 10 per rolling 10 minutes) — the alarm system reporting itself degraded (EEMUA 191 rate principle) | **Alarm** | High | The alarm system on this node is degraded by volume: triage by priority — Critical first — and expect suppressed detail (same-type alarms collapse in the panel). Clears on its own after a full under-threshold 10-minute window; threshold adjustable in cluster settings. Exactly one per node regardless of overshoot; never counts toward its own rate |
 | **`vault-home-cannot-store:<vault>`** | placement | A vault home node is disk-protected; collection and builds paused there | **NEEDS VERDICT** (interim: Alarm) | Low (interim) | Razor is unclear. When healthy replicas ≥ RF the text itself says replicas are "backfilled automatically" — handled, nothing waits on an operator. When healthy < RF, the action is "free space", which is already `disk-space-*`'s action on that node. What it uniquely adds is *which vault* is affected. Demote to a metric, or keep as the vault-scoped view of a node condition? Until the verdict lands, the phase 2 registry keeps it as a Low alarm (the code still raises it; a raised type must be cataloged) |
 | *(retention unrouted destroy — row retired)* | retention | Chunk destroyed with zero records routed | **Not an alarm — prevented** | — | Resolved in [gastrolog-65riw5]: the condition no longer occurs, so there is nothing to alarm on. An unreadable cursor now flags the chunk for backoff retry and raises `chunk-unreadable:<chunk>` (which has its own row); a missing vault instance retains the chunk. No alarm was invented — the existing one covers it. **Partial** fan-out remains a deliberate tolerance and is reported with a dropped-record count, not an alarm; see the note below |
-| chanwatch saturation | chanwatch | Internal channel saturated past watermark | **Event** (demoted ✓) | — | Landed: transition-edge logs. Journal surface lands with phase 5 |
-| ingest-pressure | orchestrator | Ingest pipeline pressure elevated/critical; ingesters throttling | **Event** (demoted ✓) | — | Landed: `NodeStats.ingest_pressure_level`. If ingestion is throttled the matter is already handled — the throttle *is* the response, so nothing waits on an operator. Never logged: the self-ingester captures slog, so logging throttle transitions feeds the pressure |
+| chanwatch saturation | chanwatch | Internal channel saturated past watermark | **Event** (demoted ✓) | — | Landed: transition-edge logs |
+| ingest-pressure | orchestrator | Ingest pipeline pressure elevated/critical; ingesters throttling | **Event** (demoted ✓) | — | Landed: `NodeStats.ingest_pressure_level`. If ingestion is throttled the matter is already handled — the throttle *is* the response, so nothing waits on an operator. The gate's `OnChange` hook logs one line per level transition (hysteresis-bounded, gastrolog-1m3e0d); sustained pressure is never logged per tick — the self-ingester captures slog, so continuous logging would feed the pressure |
 | `self-ingester-drops` | ingester/self | Capture channel overflowing; diagnostic records discarded | **Event** (demoted ✓) | — | Landed: `NodeStats.self_ingester_drops_total`. Capacity tuning, not operator action. Never logged: a line about dropped logs feeds the channel dropping them |
 | `raft-wal-latency` | statscollector | WAL append max over threshold | **Event** (demoted ✓) | — | Landed: transition-edge logs + stats (`RaftWalAppendMaxMs`) |
 | scheduler-stall | schedwatch | Runtime stalled past leader lease | **Event** (demoted ✓) | — | Landed: log + counters |
@@ -374,56 +374,39 @@ re-detected by their raisers after boot, so the match happens naturally.
 When an alarm fully releases, a `resolve` record prunes its journal state,
 so yesterday's ack can never mark a future occurrence as handled.
 
-## Event journal
+## Events are log messages
 
-*(Landed with phase 5 — `internal/alert/events.go`, gastrolog-1m3e0d.)*
+**Recorded operator decision (gastrolog-1m3e0d).** GastroLog is a log
+system that ingests its own logs: every lifecycle transition and demoted
+diagnostic is a structured slog line, the self ingester captures those
+lines into a vault, and the full query engine searches them there. The
+log pipeline **is** the event record. A phase-5 implementation of a
+parallel surface — a per-node in-memory ring with its own RPC, inspector
+page, and CLI command — was built and then removed on operator verdict:
+it was a second, worse log pipeline bolted onto a log pipeline. EEMUA
+191's separation (principle 8) is satisfied without it: alarms live in
+the collector, events live in the logs, metrics live in NodeStats.
 
-The collector's event-shaped traffic (demoted diagnostics, occurrence
-records, state transitions) moves to a per-node ring-buffer journal
-(`alert.EventJournal`, bounded at 10k entries, oldest dropped first) with
-a `ListEvents` RPC and a UI page next to the alarm list. Alarm lifecycle
-transitions are themselves journaled — the audit trail the alarm list
-itself must not carry.
+What that means concretely:
 
-Decisions:
-
-- **Exactly one entry per lifecycle transition edge**, emitted by the
-  collector at the edge (collected under the lock, delivered after unlock
-  — the activation-hook pattern). The set: `alarm-raised` (annunciation,
-  including a new occurrence on a retained cleared-unacked entry),
-  `alarm-cleared` (condition resolution — released, latched-standing, or
-  retained; the detail says which; for delay-off types this is the
-  window-close edge), `alarm-acked`, `alarm-shelved`, `alarm-unshelved`
-  (operator actions, with identity), `alarm-shelve-expired` (system
-  transition, no identity). A condition that dies inside its delay-on
-  window journals **nothing** — journaling it would reintroduce the
-  chattering the window suppresses. Lifecycle-journal replay that
-  re-applies a pre-restart ack/shelve to the first annunciation after
-  boot journals one entry saying so.
-- **Demoted diagnostics journal only where a choke point already
-  exists**: the stats collector's election-storm and WAL-latency
-  hysteresis edges (`election-storm`, `raft-wal-latency`) and the ingest
-  pipeline pressure gate's `OnChange` hook (`channel-pressure`).
-  Scheduler-stall stays slog-only (the watchdog has no hook and journals
-  would need new plumbing); ingest-pressure and self-ingester-drops stay
-  **metrics** per the phase-1 demotion — they are continuous quantities,
-  not events.
-- **The ring does NOT survive restart** — it is a ring of recent
-  occurrences, not durable history (ack/shelve state has its own durable
-  journal; diagnostics have the log stream). The choice is visible, not
-  implicit: every journal seeds itself with a `node-started` event at
-  construction (boot), the UI page and CLI state the semantics, and
-  `ListEvents` names nodes it could not collect from
-  (`unreachable_nodes`) so a missing journal never reads as quiet
-  history. Per-node `seq` keeps counting across ring drops, so a first
-  visible seq > 1 means history aged out.
-- **Cluster-first**: `ListEvents` is servable from any node — local ring
-  plus a `local_only` ForwardRPC leg to every peer (the ack/shelve
-  fan-out shape), merged chronologically, limit keeping the newest.
-  Filters (type, source, time range) evaluate identically on every leg.
-- **The page is deliberately quieter than the alarm list**: no ack/shelve
-  controls, no severity coloring — three text levels only. CLI parity:
-  `gastrolog events` with the same filters.
+- **Every lifecycle transition edge logs exactly one slog line from the
+  collector** — annunciation (including zero-delay raises and new
+  occurrences on retained cleared-unacked entries), resolution (released,
+  latched-standing, or retained; the message says which), ack, shelve,
+  unshelve (operator identity in the attrs), shelve expiry, and
+  lifecycle-journal replay. A condition that dies inside its delay-on
+  window logs **nothing** — logging it would reintroduce the chattering
+  the window suppresses. A slog-capture test pins one line per edge.
+- **Demoted diagnostics keep their transition-edge logs**: the stats
+  collector's election-storm and WAL-latency hysteresis edges, the
+  chanwatch cross/resolve pair, and the ingest pipeline pressure gate's
+  `OnChange` hook (one line per level change, hysteresis-bounded). The
+  pressure **level** itself and self-ingester-drops stay **metrics** —
+  sustained pressure must never generate sustained logging on the very
+  path that is under pressure.
+- **Durability is the log pipeline's**: events land in whatever vault the
+  self ingester routes to and live under its retention — no second
+  retention story, no in-memory ring that silently forgets on restart.
 
 ## Rate self-monitoring
 
@@ -482,8 +465,8 @@ Decisions:
   the panel shows a per-node banner naming the flooding node and its
   10-minute rate. Flood mode collapses that node's same-type alarms into
   one row with a count, expandable to the instances.
-- Event journal is a separate page: filterable, no controls, no color
-  escalation — it is a record, not a call to action.
+- Event history is not a page: events are log messages, searched like any
+  other logs (see "Events are log messages" above).
 - CLI surface: `gastrolog alerts` (per-node attribution, `--node` filter,
   `-o json`) and a standing-alarm table in `cluster status` render the
   same per-node NodeStats aggregation the panel reads, over the local
@@ -512,9 +495,11 @@ Decisions:
 4. **Lifecycle + proto + RPCs** ✓ — state model, ack/shelve, cross-node
    ack fan-out, ack persistence (see "Lifecycle state model" above for the
    landed shape and decisions).
-5. **Event journal** ✓ — ring buffer, RPC, UI page; lifecycle
-   transitions and hook-reachable demoted diagnostics journaled (see
-   "Event journal" above for the landed shape and decisions).
+5. **Event journal** — built (ring buffer, RPC, UI page), then
+   **removed on operator verdict**: events are log messages and the log
+   pipeline already records, stores, and searches them (see "Events are
+   log messages" above). The lifecycle transitions stay as collector slog
+   lines.
 6. **Self-monitoring** ✓ — rate gauge, flood meta-alarm, flood collapse
    (see Rate self-monitoring above for the landed shape and decisions).
 7. **Vocabulary** — ubiquitous_language.md entries land with phase 2.

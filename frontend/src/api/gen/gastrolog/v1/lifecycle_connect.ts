@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { AckAlarmRequest, AckAlarmResponse, GetClusterStatusRequest, GetClusterStatusResponse, HealthRequest, HealthResponse, JoinClusterRequest, JoinClusterResponse, ListEventsRequest, ListEventsResponse, RemoveNodeRequest, RemoveNodeResponse, SetNodeStateRequest, SetNodeStateResponse, SetNodeSuffrageRequest, SetNodeSuffrageResponse, ShelveAlarmRequest, ShelveAlarmResponse, ShutdownRequest, ShutdownResponse, UnshelveAlarmRequest, UnshelveAlarmResponse, WatchSystemStatusRequest, WatchSystemStatusResponse, YieldLeadershipRequest, YieldLeadershipResponse } from "./lifecycle_pb.js";
+import { AckAlarmRequest, AckAlarmResponse, GetClusterStatusRequest, GetClusterStatusResponse, HealthRequest, HealthResponse, JoinClusterRequest, JoinClusterResponse, RemoveNodeRequest, RemoveNodeResponse, SetNodeStateRequest, SetNodeStateResponse, SetNodeSuffrageRequest, SetNodeSuffrageResponse, ShelveAlarmRequest, ShelveAlarmResponse, ShutdownRequest, ShutdownResponse, UnshelveAlarmRequest, UnshelveAlarmResponse, WatchSystemStatusRequest, WatchSystemStatusResponse, YieldLeadershipRequest, YieldLeadershipResponse } from "./lifecycle_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -165,26 +165,6 @@ export const LifecycleService = {
       name: "UnshelveAlarm",
       I: UnshelveAlarmRequest,
       O: UnshelveAlarmResponse,
-      kind: MethodKind.Unary,
-    },
-    /**
-     * ListEvents returns the event journal: records of occurrence (alarm
-     * lifecycle transitions, demoted diagnostics) that require no operator
-     * action — EEMUA 191 separates them from the alarm list so history
-     * never clutters the call to action. The journal is a per-node
-     * in-memory ring; the serving node merges its own with every peer's
-     * via ForwardRPC fan-out, so the view is cluster-wide from any node.
-     * Entries do not survive node restart: each node's journal begins with
-     * a node-started event carrying the boot instant, and unreachable
-     * nodes are named in the response — absence of events is never
-     * presented as absence of occurrences.
-     *
-     * @generated from rpc gastrolog.v1.LifecycleService.ListEvents
-     */
-    listEvents: {
-      name: "ListEvents",
-      I: ListEventsRequest,
-      O: ListEventsResponse,
       kind: MethodKind.Unary,
     },
   }

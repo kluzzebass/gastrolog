@@ -72,9 +72,6 @@ type multiNodeHarness struct {
 	// alerts is each node's alert.Collector; populated only with
 	// WithClusterStats (gastrolog-33d9n2).
 	alerts map[string]*alert.Collector
-	// events is each node's event journal, wired to its collector;
-	// populated only with WithClusterStats (gastrolog-1m3e0d).
-	events map[string]*alert.EventJournal
 	// routingFwd is the in-process ForwardRPC stand-in; tests can remove a
 	// node's handler to simulate an unreachable raiser (gastrolog-1z5gg4).
 	routingFwd *directUnaryForwarder
@@ -265,19 +262,12 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 	// — the persistence point for forwarded ack/shelve legs
 	// (gastrolog-1z5gg4).
 	alertsByNode := make(map[string]*alert.Collector, len(nodeIDs))
-	eventsByNode := make(map[string]*alert.EventJournal, len(nodeIDs))
 	if cfg.clusterStats {
 		for _, id := range nodeIDs {
 			ac := alert.New()
-			ej := alert.NewEventJournal(alert.DefaultEventJournalCapacity)
 			if cfg.alertClock != nil {
 				ac = alert.NewWithClock(cfg.alertClock)
-				ej = alert.NewEventJournalWithClock(alert.DefaultEventJournalCapacity, cfg.alertClock)
 			}
-			// Same wiring as production: every lifecycle transition
-			// journals exactly one event on the raising node
-			// (gastrolog-1m3e0d).
-			ac.SetOnEvent(ej.Record)
 			if cfg.alertJournalDir != "" {
 				if err := ac.OpenJournal(filepath.Join(cfg.alertJournalDir, id+".jsonl")); err != nil {
 					t.Fatalf("open alert journal for %s: %v", id, err)
@@ -285,11 +275,10 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 				t.Cleanup(ac.CloseJournal)
 			}
 			alertsByNode[id] = ac
-			eventsByNode[id] = ej
 		}
 	}
 
-	routingFwd := newDirectUnaryForwarder(t, nodes, cfgStore, coordinatorID, vaultsDir, alertsByNode, eventsByNode)
+	routingFwd := newDirectUnaryForwarder(t, nodes, cfgStore, coordinatorID, vaultsDir, alertsByNode)
 
 	coordNode := nodes[coordinatorID]
 	srvCfg := server.Config{
@@ -321,7 +310,6 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 		srvCfg.PeerStats = &mnPeerNodeStats{collectors: statsCollectors}
 		srvCfg.LocalStats = statsCollectors[coordinatorID].CollectLocalSnapshot
 		srvCfg.Alerts = alertsByNode[coordinatorID]
-		srvCfg.Events = eventsByNode[coordinatorID]
 	}
 
 	srv := server.New(coordNode.orch, cfgStore, orchestrator.Factories{VaultsDir: vaultsDir}, nil, srvCfg)
@@ -357,7 +345,6 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 		peerIngesterStats: peerIngesterStats,
 		peerVaultStats:    peerVaultStats,
 		alerts:            alertsByNode,
-		events:            eventsByNode,
 		routingFwd:        routingFwd,
 	}
 }
@@ -989,7 +976,7 @@ type directUnaryForwarder struct {
 	handlers map[string]http.Handler // nodeID → Connect mux handler
 }
 
-func newDirectUnaryForwarder(t *testing.T, nodes map[string]multinodeTestNode, cfgStore system.Store, coordinatorID, vaultsDir string, alerts map[string]*alert.Collector, events map[string]*alert.EventJournal) *directUnaryForwarder {
+func newDirectUnaryForwarder(t *testing.T, nodes map[string]multinodeTestNode, cfgStore system.Store, coordinatorID, vaultsDir string, alerts map[string]*alert.Collector) *directUnaryForwarder {
 	t.Helper()
 	handlers := make(map[string]http.Handler)
 	for id, node := range nodes {
@@ -999,14 +986,11 @@ func newDirectUnaryForwarder(t *testing.T, nodes map[string]multinodeTestNode, c
 		// BuildInternalHandler returns a mux with NoAuthInterceptor and
 		// NO routing interceptor — same as the real ForwardRPC dispatch path.
 		// Alerts carries the node's collector so forwarded local_only
-		// ack/shelve legs persist on the raiser (gastrolog-1z5gg4); Events
-		// carries its journal so forwarded local_only ListEvents legs read
-		// the raiser's ring (gastrolog-1m3e0d).
+		// ack/shelve legs persist on the raiser (gastrolog-1z5gg4).
 		remoteSrv := server.New(node.orch, cfgStore, orchestrator.Factories{VaultsDir: vaultsDir}, nil, server.Config{
 			NodeID: id,
 			NoAuth: true,
 			Alerts: alerts[id],
-			Events: events[id],
 		})
 		handlers[id] = remoteSrv.BuildInternalHandler()
 	}

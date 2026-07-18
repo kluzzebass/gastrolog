@@ -86,7 +86,6 @@ export const helpTopics: HelpTopic[] = [
       { id: 'inspector-ingesters', title: 'Ingesters', load: md(() => import('./inspector-ingesters.md?raw')) },
       { id: 'inspector-jobs', title: 'Jobs', load: md(() => import('./inspector-jobs.md?raw')) },
       { id: 'inspector-system', title: 'System', load: md(() => import('./inspector-system.md?raw')) },
-      { id: 'inspector-events', title: 'Events', load: md(() => import('./inspector-events.md?raw')) },
     ],
   },
   {
