@@ -81,6 +81,15 @@ const (
 	vaultCatchupSweepSchedule = "13,33,53 * * * * *"
 )
 
+// alarmRetentionRouteDeferred names the deadlock in one alarm: route
+// fan-out deferred for consecutive sweeps, so the vault's only drain is
+// stopped (gastrolog-5ct2av).
+const alarmRetentionRouteDeferred = "retention-route-deferred"
+
+// retentionDeferralAlarmAfter is how many CONSECUTIVE deferred sweeps raise
+// the alarm. A count, not a clock: sweeps are the unit of retention time.
+const retentionDeferralAlarmAfter = 3
+
 // retentionKey returns a unique map key for a vault instance's retention state.
 func retentionKey(vaultID glid.GLID, storageID string) string {
 	if storageID == "" {
@@ -118,6 +127,16 @@ type retentionRunner struct {
 	// idleLog throttles per-reason idle diagnostics (one per interval per
 	// reason) so a silently-idle vault names its gate without flooding.
 	idleLog logging.Throttle
+
+	// Deferral streak (gastrolog-5ct2av), guarded by mu: consecutive sweeps
+	// whose route fan-out could not run. Pure count, in memory only — a
+	// restart starts a fresh streak. sweepDeferred/sweepRouted are the
+	// current sweep's scratch flags, folded into the streak by
+	// finishSweepDeferralState at sweep end.
+	deferralStreak    int
+	lastDeferralCause string
+	sweepDeferred     bool
+	sweepRouted       bool
 
 	applyRaftRetentionPending func(id chunk.ChunkID) error
 
@@ -624,6 +643,7 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 
 	if len(sealed) == 0 {
 		r.noteIdle("no eligible chunks", len(metas), filtered)
+		r.finishSweepDeferralState()
 		return
 	}
 
@@ -668,6 +688,7 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 	if totalMatched == 0 {
 		r.noteIdle("rules matched no chunks", len(metas), filtered)
 	}
+	r.finishSweepDeferralState()
 }
 
 // appendUnlistedManifestSealed appends synthetic retention candidates for
@@ -719,6 +740,57 @@ func (r *retentionRunner) noteIdle(reason string, metas int, f candidateFilterSt
 		"vault", r.vaultName, "reason", reason, "chunks_listed", metas,
 		"filtered_unsealed", f.unsealed, "filtered_ghosts", f.ghosts,
 		"filtered_unreadable", f.unreadable)
+}
+
+// noteFanOutDeferral records that this sweep's route fan-out could not run,
+// with an operator-readable cause for the alarm detail.
+func (r *retentionRunner) noteFanOutDeferral(cause string) {
+	r.mu.Lock()
+	r.sweepDeferred = true
+	r.lastDeferralCause = cause
+	r.mu.Unlock()
+}
+
+// noteFanOutProgress records that a chunk completed its route fan-out this
+// sweep — the deadlock, if one was forming, is not standing.
+func (r *retentionRunner) noteFanOutProgress() {
+	r.mu.Lock()
+	r.sweepRouted = true
+	r.mu.Unlock()
+}
+
+// finishSweepDeferralState folds the sweep's scratch flags into the streak
+// and drives the retention-route-deferred alarm: raise at the threshold,
+// clear on progress. Called at the end of every sweep on the runner.
+func (r *retentionRunner) finishSweepDeferralState() {
+	r.mu.Lock()
+	deferred, routed, cause := r.sweepDeferred, r.sweepRouted, r.lastDeferralCause
+	r.sweepDeferred, r.sweepRouted = false, false
+	switch {
+	case routed:
+		r.deferralStreak = 0
+	case deferred:
+		r.deferralStreak++
+	}
+	streak := r.deferralStreak
+	name := r.vaultName
+	r.mu.Unlock()
+
+	if r.orch == nil || r.orch.alerts == nil {
+		return
+	}
+	key := r.vaultID.String()
+	switch {
+	case routed:
+		r.orch.alerts.Clear(alarmRetentionRouteDeferred, key)
+	case deferred && streak >= retentionDeferralAlarmAfter:
+		r.orch.alerts.Raise(alarmRetentionRouteDeferred, key, fmt.Sprintf(
+			"Retention route fan-out for vault %s has been deferred for %d consecutive sweeps: %s. "+
+				"Expired chunks are retained and any size caps stay engaged until the drain runs. "+
+				"Free space on the starved volume, drain or grow the destination vault, or — last resort, "+
+				"discards the routed records — set this vault's retention disposition to delete.",
+			name, streak, cause))
+	}
 }
 
 // buildManifestSet returns the FSM-known chunk IDs for the given instance and a
@@ -841,6 +913,9 @@ func (r *retentionRunner) tryRetainChunk(id chunk.ChunkID, b retentionRule, alre
 			// marked, nothing is destroyed; a later sweep retries fully.
 			return
 		}
+		if r.disposition == system.RetentionDispositionRoute {
+			r.noteFanOutProgress()
+		}
 		// Mark as retention-pending in vault-ctl Raft so all nodes see it —
 		// but ONLY if the FSM doesn't already carry the flag. Skipping the
 		// redundant Apply when the action stalls (transition unreachable
@@ -957,6 +1032,7 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 			r.logger.Warn("retention: route fan-out deferred — drain gate engaged below the disk floor; chunk retained for a later sweep",
 				"vault", r.vaultID, "suppressed", n)
 		}
+		r.noteFanOutDeferral("drain gate engaged (node below its disk floor)")
 		return false
 	}
 	// No vault instance (or no chunk manager) means the records cannot be
@@ -969,6 +1045,7 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 	if vaultInst == nil || vaultInst.Chunks == nil {
 		r.logger.Warn("retention: no vault instance for fan-out; chunk retained for a later sweep",
 			"vault", r.vaultID, "chunk", id)
+		r.noteFanOutDeferral("vault instance unavailable on the sweeping node")
 		return false
 	}
 
@@ -1006,6 +1083,7 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 			aborted.Store(true)
 			r.logger.Warn("retention: fan-out aborted; chunk will re-route on a later sweep",
 				"vault", r.vaultID, "chunk", id, "error", cause)
+			r.noteFanOutDeferral(cause.Error())
 			cancel()
 		})
 	}
