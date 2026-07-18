@@ -105,9 +105,13 @@ export function HeaderBar({
   const standingCount = alerts.length;
   const [alertPanelOpen, setAlertPanelOpen] = useState(false);
   // Highest alarm rank → design token: Critical/faults on the error token,
-  // High on warn, Low on the info token.
-  let alertPillClass = "bg-severity-info/15 text-severity-info";
-  let alertDotClass = "bg-severity-info";
+  // High on warn, Low on the muted text token. Never a log-severity green:
+  // a green alarm pill claims health while demanding attention.
+  let alertPillClass = c(
+    "bg-ink-raised text-text-muted",
+    "bg-light-raised text-light-text-muted",
+  );
+  let alertDotClass = c("bg-text-muted", "bg-light-text-muted");
   if (maxRank >= 3) {
     alertPillClass = "bg-severity-error/15 text-severity-error";
     alertDotClass = "bg-severity-error";
