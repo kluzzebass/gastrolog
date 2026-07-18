@@ -8,7 +8,10 @@ package distribution
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"os"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -126,5 +129,93 @@ func TestPublishRetryBackoffEventuallyPublishes(t *testing.T) {
 	// loop racks up orders of magnitude more before the backoff window ends.
 	if n := pub.attempts.Load(); n > 10 {
 		t.Fatalf("publish attempts = %d, want <=10 (retry loop must back off)", n)
+	}
+}
+
+// logCounter counts slog lines by message substring — transition-logging
+// assertions for the publish-failure edges.
+type logCounter struct {
+	mu   sync.Mutex
+	msgs []string
+}
+
+func (h *logCounter) Enabled(context.Context, slog.Level) bool { return true }
+func (h *logCounter) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	h.msgs = append(h.msgs, r.Message)
+	h.mu.Unlock()
+	return nil
+}
+func (h *logCounter) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *logCounter) WithGroup(string) slog.Handler      { return h }
+func (h *logCounter) count(substr string) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	n := 0
+	for _, m := range h.msgs {
+		if strings.Contains(m, substr) {
+			n++
+		}
+	}
+	return n
+}
+
+// TestPublishFailureLogsOnTransitionsOnly: a standing vault-ctl publish
+// failure (leaderless election) logs ONE failing line no matter how many
+// batches fail across how many retry wakes, and ONE recovered line when
+// applies succeed again — never a line per batch. During the 06:16 field
+// incident a single node emitted the per-batch line thousands of times in
+// one leaderless minute.
+func TestPublishFailureLogsOnTransitionsOnly(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	root := t.TempDir()
+	pub := &failNThenOKPublisher{failures: 6}
+	capture := &logCounter{}
+
+	mgr, _ := New(Config{Logger: slog.New(capture)})
+	if err := mgr.RegisterVault(vaultID, root, VaultConfig{Publisher: pub}); err != nil {
+		t.Fatal(err)
+	}
+
+	batch := func() map[glid.GLID][]pendingPublish {
+		segID := glid.New()
+		_, meta := writeCompleted(t, root, vaultID, segID)
+		return map[glid.GLID][]pendingPublish{vaultID: {{
+			vaultID: vaultID,
+			segID:   segID,
+			path:    paths.CompletedSegment(root, segID),
+			meta:    meta,
+		}}}
+	}
+
+	// Six failing batches across separate publish passes: one line total.
+	for range 6 {
+		mgr.publishGroups(context.Background(), batch())
+	}
+	if n := capture.count("vault-ctl publish failing"); n != 1 {
+		t.Fatalf("standing failure must log once, got %d lines", n)
+	}
+	if n := capture.count("recovered"); n != 0 {
+		t.Fatalf("no recovery yet, got %d recovered lines", n)
+	}
+
+	// Publisher heals: exactly one recovery line.
+	mgr.publishGroups(context.Background(), batch())
+	if n := capture.count("vault-ctl publish recovered"); n != 1 {
+		t.Fatalf("recovery must log once, got %d lines", n)
+	}
+
+	// Healthy steady state stays silent.
+	mgr.publishGroups(context.Background(), batch())
+	if n := capture.count("vault-ctl publish recovered"); n != 1 {
+		t.Fatalf("healthy publishes must not re-log recovery, got %d", n)
+	}
+
+	// A fresh failure episode logs a fresh edge.
+	pub.failures = pub.attempts.Load() + 1
+	mgr.publishGroups(context.Background(), batch())
+	if n := capture.count("vault-ctl publish failing"); n != 2 {
+		t.Fatalf("a new failure episode must log a new edge, got %d lines", n)
 	}
 }

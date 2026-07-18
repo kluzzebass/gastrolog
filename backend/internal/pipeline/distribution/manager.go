@@ -90,11 +90,14 @@ type Manager struct {
 	publishRetry *notify.Signal
 	retryMu      sync.Mutex
 	retryPending []pendingPublish
-	retryDelay   time.Duration
-	retryTimer   *time.Timer
-	runCtx       context.Context
-	running      atomic.Bool
-	wg           sync.WaitGroup
+	// publishFailing tracks per-vault standing publish-failure conditions
+	// (guarded by retryMu) so failures log on transitions, not per batch.
+	publishFailing map[glid.GLID]*publishFailState
+	retryDelay     time.Duration
+	retryTimer     *time.Timer
+	runCtx         context.Context
+	running        atomic.Bool
+	wg             sync.WaitGroup
 }
 
 // New returns a manager. Pull requests are sent to the returned channel.
@@ -300,18 +303,24 @@ func (m *Manager) publishBurst(ctx context.Context, publishQ chan pendingPublish
 }
 
 // publishGroups commits per-vault batches, queuing retryable failures behind a
-// backoff wake and logging every failure — a persistent vault-ctl apply error
-// previously looped forever with no log line and no delay.
+// backoff wake. Retryable failure is a STANDING condition the retry machinery
+// handles, so it logs on transitions only — one Warn when a vault's publishes
+// start failing, one Info when they recover, never a line per batch per retry
+// wake: during a leaderless election a node accumulates hundreds of pending
+// batches and every wake re-attempts them all, which turned this into
+// thousands of identical lines per minute. The condition is never silent
+// (the failing edge always logs) and never noisy (the standing state does
+// not re-log).
 func (m *Manager) publishGroups(ctx context.Context, groups map[glid.GLID][]pendingPublish) {
 	for vaultID, items := range groups {
 		err := m.publishVaultBatch(ctx, vaultID, items)
 		if err == nil {
 			m.resetRetryBackoff()
+			m.notePublishRecovered(vaultID)
 			continue
 		}
 		if publishRetryable(err) {
-			m.logger().Warn("vault-ctl publish failed; queuing retry",
-				"vault", vaultID, "segments", len(items), "error", err)
+			m.notePublishFailing(vaultID, len(items), err)
 			for _, p := range items {
 				m.queuePublishRetry(p)
 			}
@@ -321,6 +330,54 @@ func (m *Manager) publishGroups(ctx context.Context, groups map[glid.GLID][]pend
 		m.logger().Warn("publish failed terminally; dropping batch",
 			"vault", vaultID, "segments", len(items), "error", err)
 	}
+}
+
+// publishFailState tracks one vault's standing publish-failure condition
+// between the failing and recovered log edges.
+type publishFailState struct {
+	since    time.Time
+	attempts int
+	segments int
+}
+
+// notePublishFailing logs the ok→failing edge for a vault and accumulates
+// silently while the condition stands.
+func (m *Manager) notePublishFailing(vaultID glid.GLID, segments int, err error) {
+	m.retryMu.Lock()
+	st := m.publishFailing[vaultID]
+	first := st == nil
+	if first {
+		st = &publishFailState{since: time.Now()}
+		if m.publishFailing == nil {
+			m.publishFailing = make(map[glid.GLID]*publishFailState)
+		}
+		m.publishFailing[vaultID] = st
+	}
+	st.attempts++
+	st.segments += segments
+	m.retryMu.Unlock()
+	if first {
+		m.logger().Warn("vault-ctl publish failing; queuing retries until it recovers",
+			"vault", vaultID, "segments", segments, "error", err)
+	}
+}
+
+// notePublishRecovered logs the failing→ok edge with what the standing
+// condition cost, and is silent when publishes were healthy all along.
+func (m *Manager) notePublishRecovered(vaultID glid.GLID) {
+	m.retryMu.Lock()
+	st := m.publishFailing[vaultID]
+	if st != nil {
+		delete(m.publishFailing, vaultID)
+	}
+	m.retryMu.Unlock()
+	if st == nil {
+		return
+	}
+	m.logger().Info("vault-ctl publish recovered",
+		"vault", vaultID, "failed_attempts", st.attempts,
+		"segments_retried", st.segments,
+		"down_for", time.Since(st.since).Round(time.Millisecond))
 }
 
 func (m *Manager) coalesceBatch(publishQ chan pendingPublish, first pendingPublish) []pendingPublish {
