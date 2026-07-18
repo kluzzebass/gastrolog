@@ -79,10 +79,14 @@ func (o *Orchestrator) ServeChunkGLCBPull(vaultID glid.GLID, chunkID chunk.Chunk
 // SubmitRetentionRecord routes a single record ejected from a vault during a
 // retention event (disposition=route) through the pipeline routing stage with a
 // RetentionSource context, so routes matching _source="retention" / _vault=<id>
-// fan it out to their configured destinations. It is fire-and-forget (no
-// durability ack): partial fan-out is acceptable since the source chunk is
-// destroyed regardless. Returns an error only when the pipeline is unavailable
-// or the submit is cancelled.
+// fan it out to their configured destinations. It carries the durability ack
+// and waits for it: a nil return means every matched destination durably
+// committed the record (an unmatched record is a counted drop that also
+// returns nil). A per-destination admission rejection (ErrVaultMaxSize,
+// ErrVaultDiskProtect, ErrVaultBacklogBudget) surfaces here so the caller can
+// abort the whole chunk fan-out and retain the chunk — before the ack was
+// wired, the routing gate's whole-record nack went to a nil ack and the
+// record silently vanished (gastrolog-5ct2av).
 func (o *Orchestrator) SubmitRetentionRecord(ctx context.Context, sourceVaultID glid.GLID, rec chunk.Record, reason string) error {
 	o.mu.RLock()
 	pl := o.pipeline
@@ -95,10 +99,20 @@ func (o *Orchestrator) SubmitRetentionRecord(ctx context.Context, sourceVaultID 
 	// Owned conversion: the drain cursor materializes rec.Attrs fresh per
 	// record; nothing else holds the map (gastrolog-11y2iv).
 	prec := convert.ChunkToRecordOwned(rec)
-	return pl.Submit(ctx, routing.Input{
+	ack := make(chan error, 1)
+	if err := pl.Submit(ctx, routing.Input{
 		Record: &prec,
 		Source: routing.RetentionSource(sourceVaultID, reason),
-	})
+		Ack:    ack,
+	}); err != nil {
+		return err
+	}
+	select {
+	case err := <-ack:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // SubmitToVault writes a record directly into a named vault's segmentation queue
