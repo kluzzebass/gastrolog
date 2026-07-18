@@ -141,12 +141,17 @@ admission is the only response that keeps the promise — accepting into a
 doomed write, silently degrading the replica count, or delivering a partial
 fan-out are all worse.
 
-The blast radius is route coupling, not node topology: a record stalls only
-when its matched route set touches an affected vault. Operators bound it by
-spreading placements across volumes and not funneling every route through
-one vault. What the system owes them — and what this design delivers — is
-that the stall is bounded and named (drain-gate recovery, deferral alarm),
-never permanent and silent.
+The stall does not stay scoped to records destined for the gated vault. A
+nacked record is not dropped (cardinal rule) and its source cannot release
+later records past it without breaking source ordering, so one gated-vault
+record halts its entire source stream — healthy destinations included —
+while retries recirculate through the shared routing input and fill it with
+records that can never proceed. The shared queues are one conveyor: a
+single gated vault eventually stops routing for everything. Spreading
+placements and routes delays this; it does not bound it. What the system
+owes the operator — and what this design delivers — is that the stall is
+bounded in time and named (drain-gate recovery, deferral alarm), never
+permanent and silent.
 
 ## Cluster considerations
 
