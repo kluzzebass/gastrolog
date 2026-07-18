@@ -143,6 +143,16 @@ var catalog = []AlarmType{
 		Response: "Read the alarm detail for the deferral cause: free space on the starved volume (the drain resumes once free clears the floor band), drain or grow the destination vault, or — last resort, discards the routed records — set the vault's retention disposition to delete.",
 	},
 	{
+		IDPrefix: "retention-unenforceable",
+		Priority: High,
+		Source:   "retention",
+		// The condition is config-derived and static (not a transient
+		// mid-election or mid-flap state), so no DelayOn -- unlike
+		// vault-leaderless, a trigger-less policy doesn't resolve itself.
+		Cause:    "The vault has retention_rules configured, but every referenced retention policy resolves with no trigger set (no maxAge, maxSize, or maxChunks) -- the vault's only drain never runs. Expired data accumulates and any size caps stay engaged until this is fixed.",
+		Response: "Read the alarm detail for which policies resolved with no trigger. Add a maxAge, maxSize, or maxChunks to at least one referenced policy, or remove the vault's retention_rules if enforcement isn't intended.",
+	},
+	{
 		IDPrefix: "chunk-suspect",
 		Priority: High,
 		Source:   "cloud-reconcile",
@@ -337,7 +347,7 @@ func unregisteredAlarmType(typeID string) AlarmType {
 		IDPrefix:      typeID,
 		SoftwareFault: true,
 		Source:        "alarm-system",
-		Cause:           "A component raised an alarm type that is not in the alarm catalog. The underlying condition is real (see the detail text) but its priority and guidance are undocumented — a software defect in the raising component.",
-		Response:        "Report this, quoting the alarm ID and detail text. Treat the detail text as the condition description until the catalog entry exists.",
+		Cause:         "A component raised an alarm type that is not in the alarm catalog. The underlying condition is real (see the detail text) but its priority and guidance are undocumented — a software defect in the raising component.",
+		Response:      "Report this, quoting the alarm ID and detail text. Treat the detail text as the condition description until the catalog entry exists.",
 	}
 }

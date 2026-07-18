@@ -187,6 +187,15 @@ type Orchestrator struct {
 	backfillLogThrottle logging.Throttle
 	// registerSkipLog spaces skipped-GLCB-registration warnings per vault.
 	registerSkipLog logging.Throttle
+	// retentionLeaderlessLog spaces "vault-ctl raft group has no leader"
+	// warnings per vault (gastrolog-1xl29s case 1). Distinct from the
+	// vault-leaderless ALARM (leaderless_alarm.go), which tracks config
+	// PLACEMENT leader resolution: this is the vault-ctl Raft group's own
+	// election state (hasLeader callback == r.Leader() != "", see
+	// buildVaultRaftCallbacks in reconfig_vaults.go), which can be
+	// momentarily unelected even when placement resolves cleanly. See
+	// retentionTargetForInstance.
+	retentionLeaderlessLog logging.Throttle
 
 	// Vault registry. Each vault bundles Chunks, Indexes, and Query.
 	vaults map[glid.GLID]*Vault
@@ -759,43 +768,44 @@ func New(cfg Config) (*Orchestrator, error) {
 	}
 
 	o := &Orchestrator{
-		backfillLogThrottle:  logging.Throttle{Interval: 30 * time.Second},
-		vaults:               make(map[glid.GLID]*Vault),
-		ingesters:            make(map[glid.GLID]Ingester),
-		ingesterStats:        make(map[glid.GLID]*IngesterStats),
-		ingesterMeta:         make(map[glid.GLID]ingesterInfo),
-		ingesterAdapters:     make(map[glid.GLID]ingestion.Ingester),
-		draining:             make(map[glid.GLID]*drainState),
-		vaultDraining:        make(map[string]*vaultDrainState),
-		retention:            make(map[string]*retentionRunner),
-		scheduler:            sched,
-		sysLoader:            cfg.SystemLoader,
-		localNodeID:          cfg.LocalNodeID,
-		localNodeIDGLID:      parseNodeGLID(cfg.LocalNodeID),
-		alerts:               cfg.Alerts,
-		suspects:             newSuspectTracker(),
-		chunkSignal:          notify.NewSignal(),
-		chunkBus:             notify.NewBus[ChunkChangeEvent](256),
-		progressTrigger:      newProgressNotifier(),
-		vaultCtlLeaders:      newVaultCtlLeaderManager(baseLogger),
-		phase:                cfg.Phase,
-		onIngesterAlive:      cfg.OnIngesterAlive,
-		onIngesterCheckpoint: cfg.OnIngesterCheckpoint,
-		segmentsDir:          cfg.SegmentsDir,
-		diskGuard:            newDiskGuardWithLogger(cfg.DiskGuardPaths, cfg.Logger),
-		homeDir:              homeDirFromSegments(cfg.SegmentsDir),
-		pipelineVaults:       make(map[glid.GLID]pipelineVaultReg),
-		now:                  cfg.Now,
-		logger:               logger,
-		baseLogger:           baseLogger,
-		replicationLogger:    compReplication.Apply(baseLogger),
-		drainLogger:          compDrain.Apply(baseLogger),
-		retentionLogger:      compRetention.Apply(baseLogger),
-		rotationLogger:       compRotation.Apply(baseLogger),
-		schedulerLogger:      compScheduler.Apply(baseLogger),
-		vaultOpsLogger:       compVaultOps.Apply(baseLogger),
-		cacheEvictionLogger:  compCacheEviction.Apply(baseLogger),
-		cloudHealthLogger:    compCloudHealth.Apply(baseLogger),
+		backfillLogThrottle:    logging.Throttle{Interval: 30 * time.Second},
+		retentionLeaderlessLog: logging.Throttle{Interval: 10 * time.Minute},
+		vaults:                 make(map[glid.GLID]*Vault),
+		ingesters:              make(map[glid.GLID]Ingester),
+		ingesterStats:          make(map[glid.GLID]*IngesterStats),
+		ingesterMeta:           make(map[glid.GLID]ingesterInfo),
+		ingesterAdapters:       make(map[glid.GLID]ingestion.Ingester),
+		draining:               make(map[glid.GLID]*drainState),
+		vaultDraining:          make(map[string]*vaultDrainState),
+		retention:              make(map[string]*retentionRunner),
+		scheduler:              sched,
+		sysLoader:              cfg.SystemLoader,
+		localNodeID:            cfg.LocalNodeID,
+		localNodeIDGLID:        parseNodeGLID(cfg.LocalNodeID),
+		alerts:                 cfg.Alerts,
+		suspects:               newSuspectTracker(),
+		chunkSignal:            notify.NewSignal(),
+		chunkBus:               notify.NewBus[ChunkChangeEvent](256),
+		progressTrigger:        newProgressNotifier(),
+		vaultCtlLeaders:        newVaultCtlLeaderManager(baseLogger),
+		phase:                  cfg.Phase,
+		onIngesterAlive:        cfg.OnIngesterAlive,
+		onIngesterCheckpoint:   cfg.OnIngesterCheckpoint,
+		segmentsDir:            cfg.SegmentsDir,
+		diskGuard:              newDiskGuardWithLogger(cfg.DiskGuardPaths, cfg.Logger),
+		homeDir:                homeDirFromSegments(cfg.SegmentsDir),
+		pipelineVaults:         make(map[glid.GLID]pipelineVaultReg),
+		now:                    cfg.Now,
+		logger:                 logger,
+		baseLogger:             baseLogger,
+		replicationLogger:      compReplication.Apply(baseLogger),
+		drainLogger:            compDrain.Apply(baseLogger),
+		retentionLogger:        compRetention.Apply(baseLogger),
+		rotationLogger:         compRotation.Apply(baseLogger),
+		schedulerLogger:        compScheduler.Apply(baseLogger),
+		vaultOpsLogger:         compVaultOps.Apply(baseLogger),
+		cacheEvictionLogger:    compCacheEviction.Apply(baseLogger),
+		cloudHealthLogger:      compCloudHealth.Apply(baseLogger),
 	}
 
 	// The max-size budget measures the vault's whole local disk claim.

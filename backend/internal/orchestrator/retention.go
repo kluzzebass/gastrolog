@@ -86,6 +86,13 @@ const (
 // stopped (gastrolog-5ct2av).
 const alarmRetentionRouteDeferred = "retention-route-deferred"
 
+// alarmRetentionUnenforceable names the case a vault's retention_rules ALL
+// resolve to no usable trigger (every referenced policy has none of
+// maxAge/maxSize/maxChunks set) — the vault's only drain never runs, but
+// nothing about that state looks different from a healthy idle vault
+// without this alarm. See retentionTargetForInstance. (gastrolog-1xl29s)
+const alarmRetentionUnenforceable = "retention-unenforceable"
+
 // retentionDeferralAlarmAfter is how many CONSECUTIVE deferred sweeps raise
 // the alarm. A count, not a clock: sweeps are the unit of retention time.
 const retentionDeferralAlarmAfter = 3
@@ -233,12 +240,17 @@ func (o *Orchestrator) retentionSweepAll() {
 	}
 	for key, runner := range o.retention {
 		if !active[key] {
-			// A pruned runner's standing deferral alarm must be cleared here —
-			// nothing else will ever clear it once the runner stops sweeping
+			// A pruned runner's standing alarms must be cleared here —
+			// nothing else will ever clear them once the runner stops sweeping
 			// (vault removed from config, placement moved off this node,
-			// leadership lost). Mirrors disk_guard.go retainVaultGuards.
+			// leadership lost, or its vault-ctl Raft group lost its leader).
+			// Mirrors disk_guard.go retainVaultGuards. Covers both the
+			// deferral streak alarm and the unenforceable-rules alarm
+			// (gastrolog-1xl29s) — either may be standing when a runner
+			// falls out of this node's active set.
 			if o.alerts != nil {
 				o.alerts.Clear(alarmRetentionRouteDeferred, runner.vaultID.String())
+				o.alerts.Clear(alarmRetentionUnenforceable, runner.vaultID.String())
 			}
 			delete(o.retention, key)
 		}
@@ -549,7 +561,25 @@ func (o *Orchestrator) retentionRunnerFor(vaultCfg system.VaultConfig, vaultInst
 func (o *Orchestrator) retentionTargetForInstance(cfg *system.Config, vaultCfg system.VaultConfig, vaultInst *VaultInstance, active map[string]bool) *sweepTarget {
 	if vaultInst.HasRaftLeader != nil && !vaultInst.HasRaftLeader() {
 		// No runner either: without a Raft leader nothing may destroy this
-		// vault's chunks, memory-budget enforcement included.
+		// vault's chunks, memory-budget enforcement included. Not marking
+		// `active` here also means the GC loop in retentionSweepAll prunes
+		// any pre-existing runner for this vault on this node next tick,
+		// clearing its standing alarms — see that loop's comment.
+		//
+		// This is a DIFFERENT condition from the vault-leaderless alarm
+		// (leaderless_alarm.go): that one tracks config PLACEMENT leader
+		// resolution (system.LeaderNodeID over vaultCfg.Placements); this
+		// is the vault-ctl Raft group's own election state (hasLeader ==
+		// r.Leader() != "", see buildVaultRaftCallbacks), which spans every
+		// cluster node symmetrically and can be transiently unelected (a
+		// quorum blip, a fresh election) even when placement resolves
+		// cleanly. No existing alarm covers it, and unlike a trigger-less
+		// policy it is not necessarily a settled operator mistake — so this
+		// gets a throttled log, not a new alarm type (gastrolog-1xl29s).
+		if n, ok := o.retentionLeaderlessLog.Allow(vaultCfg.ID.String()); ok {
+			o.retentionLogger.Warn("retention: vault-ctl raft group has no leader; retention cannot run for this vault",
+				"vault", vaultCfg.Name, "suppressed", n)
+		}
 		return nil
 	}
 	// IsRaftLeader check removed: the instance apply forwarder transparently
@@ -558,21 +588,63 @@ func (o *Orchestrator) retentionTargetForInstance(cfg *system.Config, vaultCfg s
 	runner := o.retentionRunnerFor(vaultCfg, vaultInst, active)
 
 	if len(vaultCfg.RetentionRules) == 0 {
+		// Legitimately unconfigured — stays quiet, no log, no alarm. But if
+		// this vault previously raised retention-unenforceable (the
+		// operator removed retention_rules outright instead of fixing the
+		// policy), that condition no longer holds and must clear.
+		o.clearRetentionUnenforceable(vaultCfg.ID)
 		return nil
 	}
-	rules, err := resolveRetentionRulesFromVault(cfg, vaultCfg)
+	rules, triggerLess, err := resolveRetentionRulesFromVault(cfg, vaultCfg)
 	if err != nil {
 		o.retentionLogger.Warn("retention: failed to resolve rules",
 			"vault", vaultCfg.ID, "error", err)
+		// A different failure mode than the trigger-less gap this alarm
+		// names (unknown policy reference, invalid duration/size syntax) —
+		// already logged above. Clear rather than leave a stale
+		// trigger-less-worded alarm standing for an unrelated new error.
+		o.clearRetentionUnenforceable(vaultCfg.ID)
 		return nil
 	}
 	if len(rules) == 0 {
+		// The vault HAS retention rules, the operator EXPECTS enforcement,
+		// but every referenced policy resolved with no trigger — the exact
+		// live-incident gap (gastrolog-1xl29s). Name it: throttled log plus
+		// a standing alarm, both naming which policies are trigger-less.
+		o.raiseRetentionUnenforceable(vaultCfg.ID, vaultCfg.Name, triggerLess)
+		runner.noteUnenforceable(triggerLess)
 		return nil
 	}
+	o.clearRetentionUnenforceable(vaultCfg.ID)
+
 	runner.mu.Lock()
 	runner.rules = rules
 	runner.mu.Unlock()
 	return &sweepTarget{runner: runner, rules: rules}
+}
+
+// raiseRetentionUnenforceable raises the retention-unenforceable alarm,
+// naming the vault and every referenced policy that resolved with no
+// trigger. Idempotent per the collector's Raise semantics — called on
+// every sweep tick while the condition holds.
+func (o *Orchestrator) raiseRetentionUnenforceable(vaultID glid.GLID, vaultName string, triggerLess []string) {
+	if o.alerts == nil {
+		return
+	}
+	o.alerts.Raise(alarmRetentionUnenforceable, vaultID.String(), fmt.Sprintf(
+		"Vault %s has retention_rules configured, but every referenced retention policy resolves with no trigger: %s. "+
+			"Retention cannot enforce anything until at least one referenced policy has a maxAge, maxSize, or maxChunks set.",
+		vaultName, strings.Join(triggerLess, ", ")))
+}
+
+// clearRetentionUnenforceable clears the retention-unenforceable alarm for
+// a vault. Safe to call unconditionally — Clear on an alarm that isn't
+// standing is a no-op at the collector.
+func (o *Orchestrator) clearRetentionUnenforceable(vaultID glid.GLID) {
+	if o.alerts == nil {
+		return
+	}
+	o.alerts.Clear(alarmRetentionUnenforceable, vaultID.String())
 }
 
 // (Disk-vs-manifest orphan cleanup lives on VaultLifecycleReconciler now —
@@ -586,8 +658,31 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 	// forwarded transparently to the Raft leader via VaultCtlChunkApplyForwarder.
 	// Config followers must not independently evaluate and transition chunks —
 	// that causes N× duplication.
+	//
+	// gastrolog-1xl29s audit finding: this guard is structurally
+	// UNREACHABLE via the only production caller. retentionSweepAll builds
+	// `targets` (the sole source of sweep() calls) by gating on
+	// vaultInst.IsLeader() BEFORE a runner is even minted, and a follower
+	// instance never gets a retention runner at all — followers react to
+	// the vault-ctl FSM's OnDelete callback instead (see the
+	// retentionRunner doc comment). So r.isLeader is always true by the
+	// time production code reaches here, and this branch can never log.
+	// That is WHY a real cluster's incident log had zero "retention sweep
+	// idle" / not-placement-leader lines ever, including from followers —
+	// not a bug in the branch, a branch that was never reachable to begin
+	// with. See TestRetentionSweepAllNeverInvokesSweepOnFollowerInstance.
+	//
+	// Kept as a correctness safety net for any future or test-only direct
+	// sweep() call on a non-leader runner (tests in this package do call
+	// sweep() directly, bypassing retentionSweepAll's gate). Hitting this
+	// WOULD mean an actual N×-duplication risk, not routine idleness, so it
+	// logs at Warn — not folded into the routine idle-diagnostics Info
+	// line noteIdle uses for "ran and found nothing to do".
 	if !r.isLeader {
-		r.noteIdle("not placement leader on this node", 0, candidateFilterStats{})
+		if n, ok := r.idleLog.Allow("not placement leader on this node"); ok {
+			r.logger.Warn("retention: sweep() called on a non-leader runner — should be unreachable via retentionSweepAll and would risk duplicate deletes",
+				"vault", r.vaultName, "suppressed", n)
+		}
 		return
 	}
 
@@ -764,6 +859,21 @@ func (r *retentionRunner) noteIdle(reason string, metas int, f candidateFilterSt
 		"vault", r.vaultName, "reason", reason, "chunks_listed", metas,
 		"filtered_unsealed", f.unsealed, "filtered_ghosts", f.ghosts,
 		"filtered_unreadable", f.unreadable)
+}
+
+// noteUnenforceable reports, throttled, that a vault's retention rules
+// exist but resolve to zero usable policies — every referenced policy is
+// trigger-less. Distinct from noteIdle (a sweep that RAN and found nothing
+// to act on): this fires before sweep() is ever invoked for the tick, so
+// none of noteIdle's breadcrumbs get a chance to fire either. Shares the
+// runner's idleLog throttle — same operator-facing cadence, different
+// reason key. See gastrolog-1xl29s.
+func (r *retentionRunner) noteUnenforceable(triggerLess []string) {
+	if _, ok := r.idleLog.Allow("unenforceable"); !ok {
+		return
+	}
+	r.logger.Warn("retention: vault has retention rules configured but none resolve to a usable trigger",
+		"vault", r.vaultName, "trigger_less_policies", strings.Join(triggerLess, ", "))
 }
 
 // noteFanOutDeferral records that this sweep's route fan-out could not run,
