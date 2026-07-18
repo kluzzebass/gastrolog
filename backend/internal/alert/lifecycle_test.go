@@ -1,10 +1,11 @@
 package alert
 
-// Alarm lifecycle tests (gastrolog-1z5gg4, EEMUA 191 principles 5 & 6):
-// the four states — active-unacked, active-acked, cleared-unacked,
-// shelved — layered on the suppression entry. Every test drives the
-// collector's injected clock; shelve expiry is a time construct settled
-// lazily, so there is not a single sleep here and never should be.
+// Alarm state tests: the two states — active and shelved — layered on the
+// suppression entry. Acknowledgment and its journal were built here and
+// removed on operator verdict (alarms are state with suppression; nothing
+// persists across restart). Every test drives the collector's injected
+// clock; shelve expiry is a time construct settled lazily, so there is not
+// a single sleep here and never should be.
 
 import (
 	"errors"
@@ -40,169 +41,87 @@ func mustGone(t *testing.T, c *Collector, id string) {
 	}
 }
 
-// TestLifecycle_AckActiveAlarm: active-unacked → (ack) → active-acked with
-// who/when recorded → (condition resolves) → gone, silently.
-func TestLifecycle_AckActiveAlarm(t *testing.T) {
+// TestLifecycle_ActiveReleasesOnClear: active → (condition resolves) →
+// gone, full stop. There is no retained cleared state.
+func TestLifecycle_ActiveReleasesOnClear(t *testing.T) {
 	clock := newSuppressionClock()
 	c := NewWithClock(clock.Now)
 
 	c.Raise("disk-space-exhausted", "vault-1", "volume full")
-	a := mustState(t, c, "disk-space-exhausted:vault-1", StateActiveUnacked)
-	if a.Occurrences != 1 {
-		t.Fatalf("occurrences = %d, want 1", a.Occurrences)
-	}
-
-	if err := c.Ack("disk-space-exhausted:vault-1", "alice"); err != nil {
-		t.Fatalf("Ack: %v", err)
-	}
-	a = mustState(t, c, "disk-space-exhausted:vault-1", StateActiveAcked)
-	if a.AckedBy != "alice" || !a.AckedAt.Equal(clock.Now()) {
-		t.Fatalf("ack record = %q @ %v, want alice @ %v", a.AckedBy, a.AckedAt, clock.Now())
-	}
-	// Acked alarms stay in the active list (Active) — the condition stands.
+	mustState(t, c, "disk-space-exhausted:vault-1", StateActive)
 	if got := c.Count(); got != 1 {
 		t.Fatalf("Count = %d, want 1", got)
 	}
 
-	// Condition resolves: acked alarms release silently, no cleared-unacked.
 	c.Clear("disk-space-exhausted", "vault-1")
 	mustGone(t, c, "disk-space-exhausted:vault-1")
-}
-
-// TestLifecycle_ClearedUnackedRetention: an unacked alarm whose condition
-// resolves is retained as cleared-unacked — out of the active list but
-// visible — until an operator acks it.
-func TestLifecycle_ClearedUnackedRetention(t *testing.T) {
-	clock := newSuppressionClock()
-	c := NewWithClock(clock.Now)
-
-	c.Raise("disk-space-exhausted", "vault-1", "volume full")
-	c.Clear("disk-space-exhausted", "vault-1")
-
-	a := mustState(t, c, "disk-space-exhausted:vault-1", StateClearedUnacked)
-	if a.Occurrences != 1 {
-		t.Fatalf("occurrences = %d, want 1", a.Occurrences)
-	}
 	if got := c.Count(); got != 0 {
-		t.Fatalf("Count = %d, want 0 — cleared-unacked must not block the active list", got)
+		t.Fatalf("Count = %d after clear, want 0", got)
 	}
-	if c.Active() != nil {
-		t.Fatal("Active() must exclude cleared-unacked alarms")
-	}
-
-	// Ack is what it was waiting for.
-	if err := c.Ack("disk-space-exhausted:vault-1", "alice"); err != nil {
-		t.Fatalf("Ack: %v", err)
-	}
-	mustGone(t, c, "disk-space-exhausted:vault-1")
 }
 
-// TestLifecycle_NewOccurrenceOnClearedEntry: a condition returning on a
-// retained cleared-unacked entry is a NEW occurrence — the delay-on window
-// runs again, the occurrence count increments, FirstSeen resets to the new
-// condition start, and any previous acknowledgment does not carry over.
-func TestLifecycle_NewOccurrenceOnClearedEntry(t *testing.T) {
+// TestLifecycle_ReRaiseAfterReleaseIsFresh: a condition returning after its
+// alarm released is simply a new alarm — fresh FirstSeen, fresh delay-on
+// window, nothing carried over.
+func TestLifecycle_ReRaiseAfterReleaseIsFresh(t *testing.T) {
 	clock := newSuppressionClock()
 	c := NewWithClock(clock.Now)
 	window := leaderlessWindow(t)
 
 	c.Raise(leaderlessType, "v", "no leader")
 	clock.Advance(window + time.Second)
-	mustState(t, c, leaderlessType+":v", StateActiveUnacked)
+	mustState(t, c, leaderlessType+":v", StateActive)
 	c.Clear(leaderlessType, "v")
-	mustState(t, c, leaderlessType+":v", StateClearedUnacked)
-	firstOccurrenceStart := standingByID(c)[leaderlessType+":v"].FirstSeen
+	mustGone(t, c, leaderlessType+":v")
 
-	// Condition returns: the entry stays cleared-unacked while the new
-	// occurrence sits inside its delay-on window — chattering suppression
-	// applies to the new occurrence exactly as to a fresh alarm.
+	// The condition returns much later: the full delay-on window applies
+	// again, and the annunciated alarm's FirstSeen is the new condition
+	// start.
 	clock.Advance(time.Hour)
+	freshStart := clock.Now()
 	c.Raise(leaderlessType, "v", "no leader again")
-	mustState(t, c, leaderlessType+":v", StateClearedUnacked)
-
+	mustGone(t, c, leaderlessType+":v") // pending its window, not standing
 	clock.Advance(window + time.Second)
-	a := mustState(t, c, leaderlessType+":v", StateActiveUnacked)
-	if a.Occurrences != 2 {
-		t.Fatalf("occurrences = %d, want 2", a.Occurrences)
-	}
-	if !a.FirstSeen.After(firstOccurrenceStart) {
-		t.Fatalf("FirstSeen must reset to the new occurrence's condition start; got %v (old %v)",
-			a.FirstSeen, firstOccurrenceStart)
-	}
-	if a.AckedBy != "" {
-		t.Fatal("acknowledgment must not carry over to a new occurrence")
+	a := mustState(t, c, leaderlessType+":v", StateActive)
+	if !a.FirstSeen.Equal(freshStart) {
+		t.Fatalf("FirstSeen = %v, want the new condition start %v", a.FirstSeen, freshStart)
 	}
 }
 
-// TestLifecycle_LatchedClearViaAck completes the phase-3 interim: a latched
-// alarm whose condition resolves stands active-unacked until acknowledged,
-// and the ack releases it (resolution first, ack second).
-func TestLifecycle_LatchedClearViaAck(t *testing.T) {
-	clock := newSuppressionClock()
-	c := NewWithClock(clock.Now)
-
-	delayedRaise(c, "latched-alarm", "condition up", 0, 0, true)
-	mustState(t, c, "latched-alarm", StateActiveUnacked)
-
-	c.Clear("latched-alarm", "")
-	// Latched: stays standing in the ACTIVE list, not cleared-unacked.
-	mustState(t, c, "latched-alarm", StateActiveUnacked)
-	if got := c.Count(); got != 1 {
-		t.Fatalf("Count = %d, want 1 — a latched alarm stands until acked", got)
-	}
-	clock.Advance(24 * time.Hour)
-	mustState(t, c, "latched-alarm", StateActiveUnacked)
-
-	if err := c.Ack("latched-alarm", "alice"); err != nil {
-		t.Fatalf("Ack: %v", err)
-	}
-	mustGone(t, c, "latched-alarm")
-}
-
-// TestLifecycle_LatchedAckThenClear is the other order: ack while the
-// condition still stands (active-acked), then the condition resolves and
-// the latch is satisfied — released on the Clear.
-func TestLifecycle_LatchedAckThenClear(t *testing.T) {
-	clock := newSuppressionClock()
-	c := NewWithClock(clock.Now)
-
-	delayedRaise(c, "latched-alarm", "condition up", 0, 0, true)
-	if err := c.Ack("latched-alarm", "alice"); err != nil {
-		t.Fatalf("Ack: %v", err)
-	}
-	mustState(t, c, "latched-alarm", StateActiveAcked)
-
-	c.Clear("latched-alarm", "")
-	mustGone(t, c, "latched-alarm")
-}
-
-// TestLifecycle_LockLeakAckIsTheOnlyRelease pins the exact lifecycle of
-// orchestrator-lock-leak: the raiser never calls Clear (a leaked hold
-// cannot be observed releasing), so the path is active-unacked →
-// active-acked → (restart) gone. It never reaches cleared-unacked on its
-// own, no matter how much time passes.
-func TestLifecycle_LockLeakAckIsTheOnlyRelease(t *testing.T) {
+// TestLifecycle_LatchedStandsUntilRestart pins the exact lifecycle of
+// orchestrator-lock-leak: latched is plain STICKY. The condition clearing
+// does not release it, time does not release it — there is no release path,
+// and that is intentional (the response to a software fault is report +
+// restart). A restart (a fresh collector) is what clears it: the fault is
+// simply gone unless re-detected.
+func TestLifecycle_LatchedStandsUntilRestart(t *testing.T) {
 	clock := newSuppressionClock()
 	c := NewWithClock(clock.Now)
 
 	c.Raise("orchestrator-lock-leak", "", "read hold stuck for 2m")
-	a := mustState(t, c, "orchestrator-lock-leak", StateActiveUnacked)
+	a := mustState(t, c, "orchestrator-lock-leak", StateActive)
 	if a.Shelveable {
 		t.Fatal("lock-leak must be unshelveable on the snapshot")
 	}
 
-	if err := c.Ack("orchestrator-lock-leak", "alice"); err != nil {
-		t.Fatalf("Ack: %v", err)
-	}
-	mustState(t, c, "orchestrator-lock-leak", StateActiveAcked)
-
-	// Days pass; no Clear ever arrives. The fault stands acked — visible,
-	// attributed, never cleared-unacked — until the process restarts.
-	clock.Advance(72 * time.Hour)
-	mustState(t, c, "orchestrator-lock-leak", StateActiveAcked)
+	// The condition "clears" (it cannot, for a leaked hold, but the state
+	// machine must hold even if a Clear arrives): the latch keeps it
+	// standing in the active list.
+	c.Clear("orchestrator-lock-leak", "")
+	mustState(t, c, "orchestrator-lock-leak", StateActive)
 	if got := c.Count(); got != 1 {
-		t.Fatalf("Count = %d, want 1", got)
+		t.Fatalf("Count = %d, want 1 — a latched alarm stands", got)
 	}
+
+	// Days pass. Still standing: no release path.
+	clock.Advance(72 * time.Hour)
+	mustState(t, c, "orchestrator-lock-leak", StateActive)
+
+	// Restart: a fresh collector holds nothing. Nothing persists across
+	// restart — a re-detected condition would simply be an active alarm
+	// again.
+	c2 := NewWithClock(clock.Now)
+	mustGone(t, c2, "orchestrator-lock-leak")
 }
 
 // TestLifecycle_ShelveMandatoryExpiry: zero and negative durations are
@@ -216,7 +135,7 @@ func TestLifecycle_ShelveMandatoryExpiry(t *testing.T) {
 			t.Fatalf("Shelve(%v) error = %v, want ErrShelveExpiryRequired", d, err)
 		}
 	}
-	mustState(t, c, "disk-space-exhausted:vault-1", StateActiveUnacked)
+	mustState(t, c, "disk-space-exhausted:vault-1", StateActive)
 }
 
 // TestLifecycle_ShelveRefusal: types where deferral is meaningless refuse
@@ -231,7 +150,7 @@ func TestLifecycle_ShelveRefusal(t *testing.T) {
 	if _, err := c.Shelve("orchestrator-lock-leak", time.Hour, "alice"); !errors.Is(err, ErrNotShelveable) {
 		t.Fatalf("Shelve(lock-leak) error = %v, want ErrNotShelveable", err)
 	}
-	mustState(t, c, "orchestrator-lock-leak", StateActiveUnacked)
+	mustState(t, c, "orchestrator-lock-leak", StateActive)
 
 	c.Raise(FloodTypeID, "", "12 activations in 10m")
 	if _, err := c.Shelve(FloodTypeID, time.Hour, "alice"); !errors.Is(err, ErrNotShelveable) {
@@ -253,16 +172,12 @@ func TestLifecycle_ShelveRefusal(t *testing.T) {
 
 // TestLifecycle_ShelveAndExpiry: shelved alarms leave the active list but
 // stay visible; expiry with the condition still true returns the alarm to
-// active-unacked (any acknowledgment resets with the shelve) — settled
-// lazily on the next read, like every suppression window.
+// ACTIVE — settled lazily on the next read, like every suppression window.
 func TestLifecycle_ShelveAndExpiry(t *testing.T) {
 	clock := newSuppressionClock()
 	c := NewWithClock(clock.Now)
 
 	c.Raise("disk-space-exhausted", "vault-1", "volume full")
-	if err := c.Ack("disk-space-exhausted:vault-1", "alice"); err != nil {
-		t.Fatalf("Ack: %v", err)
-	}
 	until, err := c.Shelve("disk-space-exhausted:vault-1", time.Hour, "alice")
 	if err != nil {
 		t.Fatalf("Shelve: %v", err)
@@ -283,12 +198,10 @@ func TestLifecycle_ShelveAndExpiry(t *testing.T) {
 	clock.Advance(30 * time.Minute)
 	mustState(t, c, "disk-space-exhausted:vault-1", StateShelved)
 
-	// Expiry with the condition still true: back to active-unacked. The
-	// pre-shelve ack does not survive — the deferral window is over and the
-	// condition demands fresh attention.
+	// Expiry with the condition still true: back to ACTIVE, no residue.
 	clock.Advance(31 * time.Minute)
-	a = mustState(t, c, "disk-space-exhausted:vault-1", StateActiveUnacked)
-	if a.AckedBy != "" || !a.ShelvedUntil.IsZero() {
+	a = mustState(t, c, "disk-space-exhausted:vault-1", StateActive)
+	if !a.ShelvedUntil.IsZero() {
 		t.Fatalf("expired shelve left residue: %+v", a)
 	}
 	if got := c.Count(); got != 1 {
@@ -296,10 +209,34 @@ func TestLifecycle_ShelveAndExpiry(t *testing.T) {
 	}
 }
 
+// TestLifecycle_ShelveDoesNotSurviveRestart: shelve state is in-memory
+// only. A fresh collector (the in-process restart) knows nothing of the
+// shelve; the re-detected condition is simply an active alarm again. Loud
+// is safe.
+func TestLifecycle_ShelveDoesNotSurviveRestart(t *testing.T) {
+	clock := newSuppressionClock()
+	c1 := NewWithClock(clock.Now)
+
+	c1.Raise("disk-space-exhausted", "vault-1", "volume full")
+	if _, err := c1.Shelve("disk-space-exhausted:vault-1", 24*time.Hour, "alice"); err != nil {
+		t.Fatalf("Shelve: %v", err)
+	}
+	mustState(t, c1, "disk-space-exhausted:vault-1", StateShelved)
+
+	// Restart well inside the shelve window: the raiser re-detects the
+	// standing condition; the alarm annunciates plain ACTIVE.
+	clock.Advance(time.Minute)
+	c2 := NewWithClock(clock.Now)
+	c2.Raise("disk-space-exhausted", "vault-1", "volume full")
+	a := mustState(t, c2, "disk-space-exhausted:vault-1", StateActive)
+	if !a.ShelvedUntil.IsZero() {
+		t.Fatalf("shelve resurrected across restart: %+v", a)
+	}
+}
+
 // TestLifecycle_ConditionClearsWhileShelved: the operator deferred the
-// alarm and the condition resolved inside the window — the shelve covered
-// the awareness function, so the alarm releases entirely (no cleared-
-// unacked comeback), regardless of when the next read runs.
+// alarm and the condition resolved inside the window — the alarm releases
+// entirely, regardless of when the next read runs.
 func TestLifecycle_ConditionClearsWhileShelved(t *testing.T) {
 	clock := newSuppressionClock()
 	c := NewWithClock(clock.Now)
@@ -313,8 +250,7 @@ func TestLifecycle_ConditionClearsWhileShelved(t *testing.T) {
 	mustGone(t, c, "disk-space-exhausted:vault-1")
 
 	// Same story when the release is only observed LONG after the shelve
-	// would have expired: the verdict is taken at the resolution instant,
-	// not the read instant (lazy settling must not change outcomes).
+	// would have expired: lazy settling must not change outcomes.
 	c.Raise("disk-space-exhausted", "vault-2", "volume full")
 	if _, err := c.Shelve("disk-space-exhausted:vault-2", time.Hour, "alice"); err != nil {
 		t.Fatalf("Shelve: %v", err)
@@ -326,7 +262,7 @@ func TestLifecycle_ConditionClearsWhileShelved(t *testing.T) {
 }
 
 // TestLifecycle_Unshelve: ends the shelve early, returning the alarm to
-// active-unacked; unshelving a non-shelved alarm errors.
+// ACTIVE; unshelving a non-shelved alarm errors.
 func TestLifecycle_Unshelve(t *testing.T) {
 	clock := newSuppressionClock()
 	c := NewWithClock(clock.Now)
@@ -342,19 +278,16 @@ func TestLifecycle_Unshelve(t *testing.T) {
 	if err := c.Unshelve("disk-space-exhausted:vault-1"); err != nil {
 		t.Fatalf("Unshelve: %v", err)
 	}
-	mustState(t, c, "disk-space-exhausted:vault-1", StateActiveUnacked)
+	mustState(t, c, "disk-space-exhausted:vault-1", StateActive)
 }
 
-// TestLifecycle_UnknownAndPendingAlarms: lifecycle operations on unknown
-// IDs and on conditions still inside their delay-on window (not yet
+// TestLifecycle_UnknownAndPendingAlarms: shelve operations on unknown IDs
+// and on conditions still inside their delay-on window (not yet
 // annunciated — not standing) return ErrUnknownAlarm.
 func TestLifecycle_UnknownAndPendingAlarms(t *testing.T) {
 	clock := newSuppressionClock()
 	c := NewWithClock(clock.Now)
 
-	if err := c.Ack("no-such-alarm", "alice"); !errors.Is(err, ErrUnknownAlarm) {
-		t.Fatalf("Ack(unknown) error = %v, want ErrUnknownAlarm", err)
-	}
 	if _, err := c.Shelve("no-such-alarm", time.Hour, "alice"); !errors.Is(err, ErrUnknownAlarm) {
 		t.Fatalf("Shelve(unknown) error = %v, want ErrUnknownAlarm", err)
 	}
@@ -363,81 +296,56 @@ func TestLifecycle_UnknownAndPendingAlarms(t *testing.T) {
 	}
 
 	// A condition inside its delay-on window has not annunciated: there is
-	// nothing standing to ack.
+	// nothing standing to shelve.
 	c.Raise(leaderlessType, "v", "no leader")
-	if err := c.Ack(leaderlessType+":v", "alice"); !errors.Is(err, ErrUnknownAlarm) {
-		t.Fatalf("Ack(pending) error = %v, want ErrUnknownAlarm", err)
+	if _, err := c.Shelve(leaderlessType+":v", time.Hour, "alice"); !errors.Is(err, ErrUnknownAlarm) {
+		t.Fatalf("Shelve(pending) error = %v, want ErrUnknownAlarm", err)
 	}
 
-	// An alarm that fully released is unknown again: raise, ack, clear.
+	// An alarm that fully released is unknown again.
 	c.Raise("disk-space-exhausted", "vault-1", "full")
-	if err := c.Ack("disk-space-exhausted:vault-1", "alice"); err != nil {
-		t.Fatalf("Ack: %v", err)
-	}
 	c.Clear("disk-space-exhausted", "vault-1")
-	if err := c.Ack("disk-space-exhausted:vault-1", "alice"); !errors.Is(err, ErrUnknownAlarm) {
-		t.Fatalf("Ack(released) error = %v, want ErrUnknownAlarm", err)
+	if _, err := c.Shelve("disk-space-exhausted:vault-1", time.Hour, "alice"); !errors.Is(err, ErrUnknownAlarm) {
+		t.Fatalf("Shelve(released) error = %v, want ErrUnknownAlarm", err)
 	}
 }
 
-// TestLifecycle_ShelveClearedAlarmRefused: shelving a cleared-unacked alarm
-// is refused — there is nothing standing to defer; ack is the operation
-// that releases it.
-func TestLifecycle_ShelveClearedAlarmRefused(t *testing.T) {
+// TestLifecycle_ShelveIsIdempotent: re-shelving refreshes the expiry
+// instead of erroring — the cross-node fan-out retries after partial
+// failures.
+func TestLifecycle_ShelveIsIdempotent(t *testing.T) {
 	clock := newSuppressionClock()
 	c := NewWithClock(clock.Now)
 
 	c.Raise("disk-space-exhausted", "vault-1", "volume full")
-	c.Clear("disk-space-exhausted", "vault-1")
-	mustState(t, c, "disk-space-exhausted:vault-1", StateClearedUnacked)
-	if _, err := c.Shelve("disk-space-exhausted:vault-1", time.Hour, "alice"); !errors.Is(err, ErrAlarmCleared) {
-		t.Fatalf("Shelve(cleared) error = %v, want ErrAlarmCleared", err)
-	}
-}
-
-// TestLifecycle_AckIsIdempotent: re-acking refreshes who/when instead of
-// erroring — the cross-node fan-out retries after partial failures.
-func TestLifecycle_AckIsIdempotent(t *testing.T) {
-	clock := newSuppressionClock()
-	c := NewWithClock(clock.Now)
-
-	c.Raise("disk-space-exhausted", "vault-1", "volume full")
-	if err := c.Ack("disk-space-exhausted:vault-1", "alice"); err != nil {
-		t.Fatalf("first Ack: %v", err)
+	if _, err := c.Shelve("disk-space-exhausted:vault-1", time.Hour, "alice"); err != nil {
+		t.Fatalf("first Shelve: %v", err)
 	}
 	clock.Advance(time.Minute)
-	if err := c.Ack("disk-space-exhausted:vault-1", "bob"); err != nil {
-		t.Fatalf("second Ack: %v", err)
+	until, err := c.Shelve("disk-space-exhausted:vault-1", 2*time.Hour, "bob")
+	if err != nil {
+		t.Fatalf("second Shelve: %v", err)
 	}
-	a := mustState(t, c, "disk-space-exhausted:vault-1", StateActiveAcked)
-	if a.AckedBy != "bob" {
-		t.Fatalf("acked_by = %q, want bob (refreshed)", a.AckedBy)
+	a := mustState(t, c, "disk-space-exhausted:vault-1", StateShelved)
+	if !a.ShelvedUntil.Equal(until) || !until.Equal(clock.Now().Add(2*time.Hour)) {
+		t.Fatalf("re-shelve must refresh the expiry: %v, want %v", a.ShelvedUntil, until)
 	}
 }
 
-// TestLifecycle_DelayOffResolutionUsesWindowCloseInstant: an acked alarm
-// with a delay-off window releases when the window closes; the verdict is
+// TestLifecycle_DelayOffResolutionUsesWindowCloseInstant: an alarm with a
+// delay-off window releases when the window closes; the verdict is
 // identical whether the next read runs immediately or much later.
 func TestLifecycle_DelayOffResolutionUsesWindowCloseInstant(t *testing.T) {
 	clock := newSuppressionClock()
 	c := NewWithClock(clock.Now)
 
 	delayedRaise(c, "flappy", "up", 0, 5*time.Minute, false)
-	if err := c.Ack("flappy", "alice"); err != nil {
-		t.Fatalf("Ack: %v", err)
-	}
 	c.Clear("flappy", "")
-	// Inside the delay-off window the alarm is still active (acked).
+	// Inside the delay-off window the alarm is still active.
 	clock.Advance(2 * time.Minute)
-	mustState(t, c, "flappy", StateActiveAcked)
-	// Long after the window closed: released (acked at close), not
-	// cleared-unacked — regardless of the read arriving hours late.
+	mustState(t, c, "flappy", StateActive)
+	// Long after the window closed: released — regardless of the read
+	// arriving hours late.
 	clock.Advance(6 * time.Hour)
 	mustGone(t, c, "flappy")
-
-	// The unacked twin resolves to cleared-unacked at the same instant.
-	delayedRaise(c, "flappy2", "up", 0, 5*time.Minute, false)
-	c.Clear("flappy2", "")
-	clock.Advance(6 * time.Hour)
-	mustState(t, c, "flappy2", StateClearedUnacked)
 }

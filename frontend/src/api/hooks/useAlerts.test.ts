@@ -78,13 +78,11 @@ describe("collapseFloodAlerts", () => {
 });
 
 describe("alarmSection", () => {
-  test("maps lifecycle states to panel sections, defaulting to active", async () => {
+  test("maps states to panel sections, defaulting to active", async () => {
     const { alarmSection, AlarmState } = await import("./useAlerts");
-    expect(alarmSection({ state: AlarmState.ACTIVE_UNACKED })).toBe("active");
-    expect(alarmSection({ state: AlarmState.ACTIVE_ACKED })).toBe("acked");
-    expect(alarmSection({ state: AlarmState.CLEARED_UNACKED })).toBe("cleared");
+    expect(alarmSection({ state: AlarmState.ACTIVE })).toBe("active");
     expect(alarmSection({ state: AlarmState.SHELVED })).toBe("shelved");
-    // Pre-lifecycle broadcasts (UNSPECIFIED) read as active-unacked.
+    // UNSPECIFIED reads as active.
     expect(alarmSection({ state: AlarmState.UNSPECIFIED })).toBe("active");
   });
 });

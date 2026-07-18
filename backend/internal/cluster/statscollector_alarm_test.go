@@ -101,10 +101,10 @@ func TestStatsCollector_AlarmBroadcastShape(t *testing.T) {
 		t.Errorf("retention-rate detail = %q", rate.Detail)
 	}
 
-	// Every broadcast alarm carries its lifecycle state and the catalog's
-	// shelveability verdict (gastrolog-1z5gg4).
-	if catalog.State != gastrologv1.AlarmState_ALARM_STATE_ACTIVE_UNACKED {
-		t.Errorf("state = %v, want ACTIVE_UNACKED", catalog.State)
+	// Every broadcast alarm carries its state and the catalog's
+	// shelveability verdict.
+	if catalog.State != gastrologv1.AlarmState_ALARM_STATE_ACTIVE {
+		t.Errorf("state = %v, want ACTIVE", catalog.State)
 	}
 	if !catalog.Shelveable {
 		t.Error("process alarm must broadcast as shelveable")
@@ -112,29 +112,18 @@ func TestStatsCollector_AlarmBroadcastShape(t *testing.T) {
 	if fault.Shelveable {
 		t.Error("software fault must broadcast as unshelveable")
 	}
-	if catalog.Occurrences != 1 {
-		t.Errorf("occurrences = %d, want 1", catalog.Occurrences)
-	}
 
-	// Clearing an unacknowledged alarm retains it as cleared-unacked on the
-	// wire — "it fired while you were away" stays visible until acked
-	// (gastrolog-1z5gg4); acknowledging it releases it from the broadcast.
+	// Alarms are state: the condition resolving releases the alarm from the
+	// broadcast, full stop.
 	alarms.Clear("vault-leaderless", "vault-1")
 	stats = collector.CollectLocalTick(time.Now().Add(time.Second))
-	if len(stats.Alerts) != 3 {
-		t.Fatalf("alerts = %d after clear, want 3 (cleared-unacked retained)", len(stats.Alerts))
+	if len(stats.Alerts) != 2 {
+		t.Fatalf("alerts = %d after clear, want 2 (cleared alarm released)", len(stats.Alerts))
 	}
 	for _, a := range stats.Alerts {
-		if string(a.Id) == "vault-leaderless:vault-1" && a.State != gastrologv1.AlarmState_ALARM_STATE_CLEARED_UNACKED {
-			t.Errorf("cleared alarm state = %v, want CLEARED_UNACKED", a.State)
+		if string(a.Id) == "vault-leaderless:vault-1" {
+			t.Errorf("cleared alarm still on the wire: %+v", a)
 		}
-	}
-	if err := alarms.Ack("vault-leaderless:vault-1", "op"); err != nil {
-		t.Fatalf("Ack: %v", err)
-	}
-	stats = collector.CollectLocalTick(time.Now().Add(2 * time.Second))
-	if len(stats.Alerts) != 2 {
-		t.Fatalf("alerts = %d after ack of cleared alarm, want 2", len(stats.Alerts))
 	}
 }
 

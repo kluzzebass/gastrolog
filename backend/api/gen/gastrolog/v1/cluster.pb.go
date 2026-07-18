@@ -22,44 +22,32 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// AlarmState is the lifecycle state of a standing alarm (EEMUA 191
-// principles 5 & 6 — a bare set/clear bit cannot express standing alarms).
+// AlarmState is the state of a standing alarm: alarms stand while the
+// condition holds, clear when it resolves, and can be temporarily shelved.
 type AlarmState int32
 
 const (
 	AlarmState_ALARM_STATE_UNSPECIFIED AlarmState = 0
-	// Condition annunciated, operator has not acknowledged. Also the state of
-	// a latching alarm whose condition resolved before acknowledgment — it
-	// stands until acked.
-	AlarmState_ALARM_STATE_ACTIVE_UNACKED AlarmState = 1
-	// Condition still true, operator has acknowledged (who/when in
-	// acked_by/acked_at). Clears silently when the condition resolves.
-	AlarmState_ALARM_STATE_ACTIVE_ACKED AlarmState = 2
-	// Condition resolved while unacknowledged (non-latching): retained so "it
-	// fired while you were away" stays visible without blocking the active
-	// list. Acknowledgment releases it.
-	AlarmState_ALARM_STATE_CLEARED_UNACKED AlarmState = 3
+	// Condition annunciated and standing. Also the state of a latching alarm
+	// whose condition resolved — it stands until process restart.
+	AlarmState_ALARM_STATE_ACTIVE AlarmState = 1
 	// Operator-shelved until shelved_until. Visible in a collapsed section,
-	// never silently gone; expiry with the condition still true returns it to
-	// ACTIVE_UNACKED.
-	AlarmState_ALARM_STATE_SHELVED AlarmState = 4
+	// never silently gone; expiry with the condition still true returns it
+	// to ACTIVE.
+	AlarmState_ALARM_STATE_SHELVED AlarmState = 2
 )
 
 // Enum value maps for AlarmState.
 var (
 	AlarmState_name = map[int32]string{
 		0: "ALARM_STATE_UNSPECIFIED",
-		1: "ALARM_STATE_ACTIVE_UNACKED",
-		2: "ALARM_STATE_ACTIVE_ACKED",
-		3: "ALARM_STATE_CLEARED_UNACKED",
-		4: "ALARM_STATE_SHELVED",
+		1: "ALARM_STATE_ACTIVE",
+		2: "ALARM_STATE_SHELVED",
 	}
 	AlarmState_value = map[string]int32{
-		"ALARM_STATE_UNSPECIFIED":     0,
-		"ALARM_STATE_ACTIVE_UNACKED":  1,
-		"ALARM_STATE_ACTIVE_ACKED":    2,
-		"ALARM_STATE_CLEARED_UNACKED": 3,
-		"ALARM_STATE_SHELVED":         4,
+		"ALARM_STATE_UNSPECIFIED": 0,
+		"ALARM_STATE_ACTIVE":      1,
+		"ALARM_STATE_SHELVED":     2,
 	}
 )
 
@@ -1467,10 +1455,9 @@ func (x *PeerTrafficTotal) GetRxSpark() []float64 {
 // action, with priority, cause and response stamped from the static alarm
 // catalog — never chosen at the raising call site.
 // Alarms are keyed by ID for deduplication — the same condition doesn't
-// create multiple alarms. Each carries its lifecycle state (EEMUA 191
-// standing-alarm management): non-latching alarms auto-clear when the
-// raising component detects the condition resolved AND the operator has
-// acknowledged; latching alarms clear only via acknowledgment.
+// create multiple alarms. Alarms are STATE with suppression: they stand
+// while the condition holds, clear when it resolves, and can be
+// temporarily shelved. Latching alarms stand until process restart.
 type SystemAlert struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
 	Id       []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`                                              // stable key for dedup (e.g. "vault-init:$vaultID")
@@ -1493,28 +1480,17 @@ type SystemAlert struct {
 	// minus the instance key. Carried explicitly so aggregation-side flood
 	// collapse groups by type without re-deriving it from the id format.
 	TypeId string `protobuf:"bytes,10,opt,name=type_id,json=typeId,proto3" json:"type_id,omitempty"`
-	// Lifecycle state (see AlarmState). Alarms in every state travel on the
-	// wire; consumers filter — the active list, the shelved and
-	// cleared-unacknowledged sections, and cross-node ack fan-out all read
-	// this one field.
+	// State (see AlarmState). Alarms in every state travel on the wire;
+	// consumers filter — the active list, the shelved section, and
+	// cross-node shelve fan-out all read this one field.
 	State AlarmState `protobuf:"varint,11,opt,name=state,proto3,enum=gastrolog.v1.AlarmState" json:"state,omitempty"`
-	// Operator acknowledgment: who and when. Empty/absent until acked.
-	AckedBy string                 `protobuf:"bytes,12,opt,name=acked_by,json=ackedBy,proto3" json:"acked_by,omitempty"`
-	AckedAt *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=acked_at,json=ackedAt,proto3" json:"acked_at,omitempty"`
 	// Shelve expiry. Set only while state is SHELVED — shelves always carry
 	// an expiry; there are no permanent shelves.
-	ShelvedUntil *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=shelved_until,json=shelvedUntil,proto3" json:"shelved_until,omitempty"`
-	// Count of distinct condition occurrences that have annunciated for this
-	// alarm ID since it became standing. An occurrence is the suppression
-	// notion: a continuous condition episode — a clear-and-return inside the
-	// type's delay-off window is the SAME occurrence; a return after the
-	// alarm reached cleared-unacknowledged is a new one (and resets the
-	// operator's acknowledgment).
-	Occurrences uint32 `protobuf:"varint,15,opt,name=occurrences,proto3" json:"occurrences,omitempty"`
+	ShelvedUntil *timestamppb.Timestamp `protobuf:"bytes,12,opt,name=shelved_until,json=shelvedUntil,proto3" json:"shelved_until,omitempty"`
 	// Whether operators may shelve this alarm. False for types where deferral
 	// is meaningless (software faults, alarm-flood) — the UI must not render
 	// a shelve control at all, and ShelveAlarm rejects with the reason.
-	Shelveable    bool `protobuf:"varint,16,opt,name=shelveable,proto3" json:"shelveable,omitempty"`
+	Shelveable    bool `protobuf:"varint,13,opt,name=shelveable,proto3" json:"shelveable,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1626,32 +1602,11 @@ func (x *SystemAlert) GetState() AlarmState {
 	return AlarmState_ALARM_STATE_UNSPECIFIED
 }
 
-func (x *SystemAlert) GetAckedBy() string {
-	if x != nil {
-		return x.AckedBy
-	}
-	return ""
-}
-
-func (x *SystemAlert) GetAckedAt() *timestamppb.Timestamp {
-	if x != nil {
-		return x.AckedAt
-	}
-	return nil
-}
-
 func (x *SystemAlert) GetShelvedUntil() *timestamppb.Timestamp {
 	if x != nil {
 		return x.ShelvedUntil
 	}
 	return nil
-}
-
-func (x *SystemAlert) GetOccurrences() uint32 {
-	if x != nil {
-		return x.Occurrences
-	}
-	return 0
 }
 
 func (x *SystemAlert) GetShelveable() bool {
@@ -4851,7 +4806,7 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x10tx_bytes_per_sec\x18\x04 \x01(\x01R\rtxBytesPerSec\x12'\n" +
 	"\x10rx_bytes_per_sec\x18\x05 \x01(\x01R\rrxBytesPerSec\x12\x19\n" +
 	"\btx_spark\x18\x06 \x03(\x01R\atxSpark\x12\x19\n" +
-	"\brx_spark\x18\a \x03(\x01R\arxSpark\"\xf1\x04\n" +
+	"\brx_spark\x18\a \x03(\x01R\arxSpark\"\xfd\x03\n" +
 	"\vSystemAlert\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x127\n" +
 	"\bpriority\x18\x02 \x01(\x0e2\x1b.gastrolog.v1.AlarmPriorityR\bpriority\x12\x16\n" +
@@ -4865,13 +4820,10 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x0esoftware_fault\x18\t \x01(\bR\rsoftwareFault\x12\x17\n" +
 	"\atype_id\x18\n" +
 	" \x01(\tR\x06typeId\x12.\n" +
-	"\x05state\x18\v \x01(\x0e2\x18.gastrolog.v1.AlarmStateR\x05state\x12\x19\n" +
-	"\backed_by\x18\f \x01(\tR\aackedBy\x125\n" +
-	"\backed_at\x18\r \x01(\v2\x1a.google.protobuf.TimestampR\aackedAt\x12?\n" +
-	"\rshelved_until\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampR\fshelvedUntil\x12 \n" +
-	"\voccurrences\x18\x0f \x01(\rR\voccurrences\x12\x1e\n" +
+	"\x05state\x18\v \x01(\x0e2\x18.gastrolog.v1.AlarmStateR\x05state\x12?\n" +
+	"\rshelved_until\x18\f \x01(\v2\x1a.google.protobuf.TimestampR\fshelvedUntil\x12\x1e\n" +
 	"\n" +
-	"shelveable\x18\x10 \x01(\bR\n" +
+	"shelveable\x18\r \x01(\bR\n" +
 	"shelveable\"\xbd\x01\n" +
 	"\x11IngesterNodeStats\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12+\n" +
@@ -5046,14 +4998,12 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"error_code\x18\x03 \x01(\rR\terrorCode\x12#\n" +
 	"\rerror_message\x18\x04 \x01(\tR\ferrorMessage\x12\x1d\n" +
 	"\n" +
-	"end_stream\x18\x05 \x01(\bR\tendStream*\xa1\x01\n" +
+	"end_stream\x18\x05 \x01(\bR\tendStream*Z\n" +
 	"\n" +
 	"AlarmState\x12\x1b\n" +
-	"\x17ALARM_STATE_UNSPECIFIED\x10\x00\x12\x1e\n" +
-	"\x1aALARM_STATE_ACTIVE_UNACKED\x10\x01\x12\x1c\n" +
-	"\x18ALARM_STATE_ACTIVE_ACKED\x10\x02\x12\x1f\n" +
-	"\x1bALARM_STATE_CLEARED_UNACKED\x10\x03\x12\x17\n" +
-	"\x13ALARM_STATE_SHELVED\x10\x04*}\n" +
+	"\x17ALARM_STATE_UNSPECIFIED\x10\x00\x12\x16\n" +
+	"\x12ALARM_STATE_ACTIVE\x10\x01\x12\x17\n" +
+	"\x13ALARM_STATE_SHELVED\x10\x02*}\n" +
 	"\rAlarmPriority\x12\x1e\n" +
 	"\x1aALARM_PRIORITY_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12ALARM_PRIORITY_LOW\x10\x01\x12\x17\n" +
@@ -5184,34 +5134,33 @@ var file_gastrolog_v1_cluster_proto_depIdxs = []int32{
 	72, // 17: gastrolog.v1.SystemAlert.first_seen:type_name -> google.protobuf.Timestamp
 	72, // 18: gastrolog.v1.SystemAlert.last_seen:type_name -> google.protobuf.Timestamp
 	0,  // 19: gastrolog.v1.SystemAlert.state:type_name -> gastrolog.v1.AlarmState
-	72, // 20: gastrolog.v1.SystemAlert.acked_at:type_name -> google.protobuf.Timestamp
-	72, // 21: gastrolog.v1.SystemAlert.shelved_until:type_name -> google.protobuf.Timestamp
-	23, // 22: gastrolog.v1.ChunkReplicationCommand.delete_chunk:type_name -> gastrolog.v1.ChunkReplicationDelete
-	20, // 23: gastrolog.v1.ChunkReplicationCommand.import_begin:type_name -> gastrolog.v1.ChunkReplicationImportBegin
-	21, // 24: gastrolog.v1.ChunkReplicationCommand.import_records:type_name -> gastrolog.v1.ChunkReplicationImportRecords
-	22, // 25: gastrolog.v1.ChunkReplicationCommand.import_commit:type_name -> gastrolog.v1.ChunkReplicationImportCommit
-	78, // 26: gastrolog.v1.ChunkReplicationImportRecords.records:type_name -> gastrolog.v1.ExportRecord
-	78, // 27: gastrolog.v1.ForwardSearchResponse.records:type_name -> gastrolog.v1.ExportRecord
-	79, // 28: gastrolog.v1.ForwardSearchResponse.table_result:type_name -> gastrolog.v1.TableResult
-	80, // 29: gastrolog.v1.ForwardSearchResponse.histogram:type_name -> gastrolog.v1.HistogramBucket
-	78, // 30: gastrolog.v1.ForwardGetContextResponse.before:type_name -> gastrolog.v1.ExportRecord
-	78, // 31: gastrolog.v1.ForwardGetContextResponse.anchor:type_name -> gastrolog.v1.ExportRecord
-	78, // 32: gastrolog.v1.ForwardGetContextResponse.after:type_name -> gastrolog.v1.ExportRecord
-	81, // 33: gastrolog.v1.ForwardListChunksResponse.chunks:type_name -> gastrolog.v1.ChunkMeta
-	82, // 34: gastrolog.v1.ForwardWatchChunksResponse.op:type_name -> gastrolog.v1.ChunkChangeOp
-	81, // 35: gastrolog.v1.ForwardWatchChunksResponse.meta:type_name -> gastrolog.v1.ChunkMeta
-	83, // 36: gastrolog.v1.ForwardGetIndexesResponse.indexes:type_name -> gastrolog.v1.IndexInfo
-	84, // 37: gastrolog.v1.ForwardValidateVaultResponse.chunks:type_name -> gastrolog.v1.ChunkValidation
-	81, // 38: gastrolog.v1.ForwardGetChunkResponse.chunk:type_name -> gastrolog.v1.ChunkMeta
-	85, // 39: gastrolog.v1.ForwardAnalyzeChunkResponse.analyses:type_name -> gastrolog.v1.ChunkAnalysis
-	86, // 40: gastrolog.v1.ForwardExplainResponse.chunks:type_name -> gastrolog.v1.ChunkPlan
-	78, // 41: gastrolog.v1.ForwardFollowResponse.records:type_name -> gastrolog.v1.ExportRecord
-	78, // 42: gastrolog.v1.ImportRecordMessage.record:type_name -> gastrolog.v1.ExportRecord
-	43, // [43:43] is the sub-list for method output_type
-	43, // [43:43] is the sub-list for method input_type
-	43, // [43:43] is the sub-list for extension type_name
-	43, // [43:43] is the sub-list for extension extendee
-	0,  // [0:43] is the sub-list for field type_name
+	72, // 20: gastrolog.v1.SystemAlert.shelved_until:type_name -> google.protobuf.Timestamp
+	23, // 21: gastrolog.v1.ChunkReplicationCommand.delete_chunk:type_name -> gastrolog.v1.ChunkReplicationDelete
+	20, // 22: gastrolog.v1.ChunkReplicationCommand.import_begin:type_name -> gastrolog.v1.ChunkReplicationImportBegin
+	21, // 23: gastrolog.v1.ChunkReplicationCommand.import_records:type_name -> gastrolog.v1.ChunkReplicationImportRecords
+	22, // 24: gastrolog.v1.ChunkReplicationCommand.import_commit:type_name -> gastrolog.v1.ChunkReplicationImportCommit
+	78, // 25: gastrolog.v1.ChunkReplicationImportRecords.records:type_name -> gastrolog.v1.ExportRecord
+	78, // 26: gastrolog.v1.ForwardSearchResponse.records:type_name -> gastrolog.v1.ExportRecord
+	79, // 27: gastrolog.v1.ForwardSearchResponse.table_result:type_name -> gastrolog.v1.TableResult
+	80, // 28: gastrolog.v1.ForwardSearchResponse.histogram:type_name -> gastrolog.v1.HistogramBucket
+	78, // 29: gastrolog.v1.ForwardGetContextResponse.before:type_name -> gastrolog.v1.ExportRecord
+	78, // 30: gastrolog.v1.ForwardGetContextResponse.anchor:type_name -> gastrolog.v1.ExportRecord
+	78, // 31: gastrolog.v1.ForwardGetContextResponse.after:type_name -> gastrolog.v1.ExportRecord
+	81, // 32: gastrolog.v1.ForwardListChunksResponse.chunks:type_name -> gastrolog.v1.ChunkMeta
+	82, // 33: gastrolog.v1.ForwardWatchChunksResponse.op:type_name -> gastrolog.v1.ChunkChangeOp
+	81, // 34: gastrolog.v1.ForwardWatchChunksResponse.meta:type_name -> gastrolog.v1.ChunkMeta
+	83, // 35: gastrolog.v1.ForwardGetIndexesResponse.indexes:type_name -> gastrolog.v1.IndexInfo
+	84, // 36: gastrolog.v1.ForwardValidateVaultResponse.chunks:type_name -> gastrolog.v1.ChunkValidation
+	81, // 37: gastrolog.v1.ForwardGetChunkResponse.chunk:type_name -> gastrolog.v1.ChunkMeta
+	85, // 38: gastrolog.v1.ForwardAnalyzeChunkResponse.analyses:type_name -> gastrolog.v1.ChunkAnalysis
+	86, // 39: gastrolog.v1.ForwardExplainResponse.chunks:type_name -> gastrolog.v1.ChunkPlan
+	78, // 40: gastrolog.v1.ForwardFollowResponse.records:type_name -> gastrolog.v1.ExportRecord
+	78, // 41: gastrolog.v1.ImportRecordMessage.record:type_name -> gastrolog.v1.ExportRecord
+	42, // [42:42] is the sub-list for method output_type
+	42, // [42:42] is the sub-list for method input_type
+	42, // [42:42] is the sub-list for extension type_name
+	42, // [42:42] is the sub-list for extension extendee
+	0,  // [0:42] is the sub-list for field type_name
 }
 
 func init() { file_gastrolog_v1_cluster_proto_init() }

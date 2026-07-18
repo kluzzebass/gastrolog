@@ -987,108 +987,13 @@ export class YieldLeadershipResponse extends Message<YieldLeadershipResponse> {
 }
 
 /**
- * @generated from message gastrolog.v1.AckAlarmRequest
- */
-export class AckAlarmRequest extends Message<AckAlarmRequest> {
-  /**
-   * Full alarm ID ("<type>" or "<type>:<instance>"), as carried in
-   * SystemAlert.id.
-   *
-   * @generated from field: bytes alarm_id = 1;
-   */
-  alarmId = new Uint8Array(0);
-
-  /**
-   * Operator identity to record. The server prefers the authenticated
-   * user's name when the request carries one; this field covers the local
-   * Unix-socket CLI path, which has no auth context.
-   *
-   * @generated from field: string acked_by = 2;
-   */
-  ackedBy = "";
-
-  /**
-   * Internal: apply to this node's collector only — set on the fan-out leg
-   * so a forwarded ack never re-fans. Client requests leave this unset.
-   *
-   * @generated from field: bool local_only = 3;
-   */
-  localOnly = false;
-
-  constructor(data?: PartialMessage<AckAlarmRequest>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.AckAlarmRequest";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "alarm_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 2, name: "acked_by", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 3, name: "local_only", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): AckAlarmRequest {
-    return new AckAlarmRequest().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): AckAlarmRequest {
-    return new AckAlarmRequest().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): AckAlarmRequest {
-    return new AckAlarmRequest().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: AckAlarmRequest | PlainMessage<AckAlarmRequest> | undefined, b: AckAlarmRequest | PlainMessage<AckAlarmRequest> | undefined): boolean {
-    return proto3.util.equals(AckAlarmRequest, a, b);
-  }
-}
-
-/**
- * @generated from message gastrolog.v1.AckAlarmResponse
- */
-export class AckAlarmResponse extends Message<AckAlarmResponse> {
-  /**
-   * Number of raiser nodes the ack applied on.
-   *
-   * @generated from field: uint32 applied = 1;
-   */
-  applied = 0;
-
-  constructor(data?: PartialMessage<AckAlarmResponse>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.AckAlarmResponse";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "applied", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): AckAlarmResponse {
-    return new AckAlarmResponse().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): AckAlarmResponse {
-    return new AckAlarmResponse().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): AckAlarmResponse {
-    return new AckAlarmResponse().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: AckAlarmResponse | PlainMessage<AckAlarmResponse> | undefined, b: AckAlarmResponse | PlainMessage<AckAlarmResponse> | undefined): boolean {
-    return proto3.util.equals(AckAlarmResponse, a, b);
-  }
-}
-
-/**
  * @generated from message gastrolog.v1.ShelveAlarmRequest
  */
 export class ShelveAlarmRequest extends Message<ShelveAlarmRequest> {
   /**
+   * Full alarm ID ("<type>" or "<type>:<instance>"), as carried in
+   * SystemAlert.id.
+   *
    * @generated from field: bytes alarm_id = 1;
    */
   alarmId = new Uint8Array(0);
@@ -1102,15 +1007,18 @@ export class ShelveAlarmRequest extends Message<ShelveAlarmRequest> {
   durationSeconds = protoInt64.zero;
 
   /**
-   * Operator identity to record in the lifecycle journal (same sourcing
-   * rules as AckAlarmRequest.acked_by).
+   * Operator identity to record in the shelve slog line. The server
+   * prefers the authenticated user's name when the request carries one;
+   * this field covers the local Unix-socket CLI path, which has no auth
+   * context.
    *
    * @generated from field: string shelved_by = 3;
    */
   shelvedBy = "";
 
   /**
-   * Internal fan-out leg marker; see AckAlarmRequest.local_only.
+   * Internal: apply to this node's collector only — set on the fan-out leg
+   * so a forwarded shelve never re-fans. Client requests leave this unset.
    *
    * @generated from field: bool local_only = 4;
    */
@@ -1152,6 +1060,8 @@ export class ShelveAlarmRequest extends Message<ShelveAlarmRequest> {
  */
 export class ShelveAlarmResponse extends Message<ShelveAlarmResponse> {
   /**
+   * Number of raiser nodes the shelve applied on.
+   *
    * @generated from field: uint32 applied = 1;
    */
   applied = 0;
@@ -1202,7 +1112,7 @@ export class UnshelveAlarmRequest extends Message<UnshelveAlarmRequest> {
   alarmId = new Uint8Array(0);
 
   /**
-   * Internal fan-out leg marker; see AckAlarmRequest.local_only.
+   * Internal fan-out leg marker; see ShelveAlarmRequest.local_only.
    *
    * @generated from field: bool local_only = 2;
    */

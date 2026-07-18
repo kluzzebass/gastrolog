@@ -18,19 +18,20 @@
 //   - DelayOff: after an active alarm's condition clears, it must STAY
 //     clear that long before the alarm auto-clears. A re-raise inside the
 //     window is the same continuous occurrence, not a new one.
-//   - Latching: the alarm stays active after the condition clears, until
-//     operator acknowledgment. A latched alarm releases only when BOTH the
-//     condition has resolved AND an operator has acked, in either order
-//     (gastrolog-1z5gg4).
+//   - Latching: plain sticky — the alarm stays standing after the condition
+//     clears, until process restart. There is no release path, and that is
+//     intentional: the one latching type is a software-fault tripwire, and
+//     the response to a software fault is report + restart.
 //
-// Standing-alarm lifecycle (EEMUA 191 principles 5 & 6) is LAYERED on the
-// suppression entry: the entry's conditionUp/active/latching substrate says
-// what the condition is doing; the lifecycle fields (acked, shelvedUntil)
-// say what the operator has done about it. The four visible states —
-// active-unacked, active-acked, cleared-unacked, shelved — are derived from
-// the combination on every read; see stateLocked and the combined state
-// machine in docs/alarm-management-design.md. Ack and shelve survive node
-// restart via a small journal under the node home (journal.go).
+// Alarms are STATE with suppression, nothing more: an alarm is ACTIVE while
+// its condition holds and releases when the condition resolves, and an
+// operator can temporarily SHELVE it (bounded, deliberate suppression with
+// a mandatory expiry). Nothing persists across restart — after a restart a
+// re-detected condition is simply an active alarm again. An acknowledgment
+// layer (extra operator-awareness states plus an on-disk journal) was
+// built here and removed on operator verdict: awareness bookkeeping is
+// ceremony, and loud is safe. See the state-model section of
+// docs/alarm-management-design.md for the recorded decision.
 //
 // Suppression windows are evaluated LAZILY: state advances on every
 // Raise/Clear touching an alarm and on every read (Standing/Active/Count),
@@ -80,34 +81,24 @@ func (p Priority) String() string {
 	}
 }
 
-// AlarmState is the lifecycle state of a standing alarm, derived from the
-// suppression substrate plus the operator's ack/shelve actions on every
-// read. Mirrors the proto AlarmState enum.
+// AlarmState is the state of a standing alarm, derived from the suppression
+// substrate plus the operator's shelve action on every read. Mirrors the
+// proto AlarmState enum.
 type AlarmState int
 
 const (
-	// StateActiveUnacked: annunciated, not acknowledged. Also a latched
-	// alarm whose condition resolved before acknowledgment — it stands.
-	StateActiveUnacked AlarmState = 1
-	// StateActiveAcked: condition still true, operator has acknowledged.
-	StateActiveAcked AlarmState = 2
-	// StateClearedUnacked: condition resolved while unacknowledged
-	// (non-latching); retained so "it fired while you were away" stays
-	// visible. Acknowledgment releases it.
-	StateClearedUnacked AlarmState = 3
+	// StateActive: annunciated and standing. Also a latched alarm whose
+	// condition resolved — it stands until process restart.
+	StateActive AlarmState = 1
 	// StateShelved: operator-shelved until an expiry. Never permanent.
-	StateShelved AlarmState = 4
+	StateShelved AlarmState = 2
 )
 
-// String returns the operator-facing label for a lifecycle state.
+// String returns the operator-facing label for an alarm state.
 func (s AlarmState) String() string {
 	switch s {
-	case StateActiveUnacked:
+	case StateActive:
 		return "active"
-	case StateActiveAcked:
-		return "acked"
-	case StateClearedUnacked:
-		return "cleared"
 	case StateShelved:
 		return "shelved"
 	default:
@@ -126,9 +117,6 @@ var (
 	// ErrNotShelveable: the alarm's type refuses shelving (software
 	// faults, alarm-flood — deferral is meaningless for them).
 	ErrNotShelveable = errors.New("alarm type refuses shelving")
-	// ErrAlarmCleared: shelve requested for an alarm whose condition has
-	// already resolved; acknowledge it instead.
-	ErrAlarmCleared = errors.New("alarm condition already cleared — acknowledge it instead of shelving")
 	// ErrNotShelved: unshelve requested for an alarm that is not shelved.
 	ErrNotShelved = errors.New("alarm is not shelved")
 )
@@ -149,16 +137,10 @@ type Alarm struct {
 	FirstSeen     time.Time
 	LastSeen      time.Time
 
-	// Lifecycle (gastrolog-1z5gg4). State is derived at snapshot time;
-	// AckedBy/AckedAt are set once acknowledged; ShelvedUntil only while
-	// shelved. Occurrences counts distinct condition occurrences (the
-	// suppression sense: episodes separated by more than the delay-off
-	// window) that have annunciated since the alarm became standing.
+	// State is derived at snapshot time; ShelvedUntil is set only while
+	// shelved.
 	State        AlarmState
-	AckedBy      string
-	AckedAt      time.Time
 	ShelvedUntil time.Time
-	Occurrences  int
 	// Shelveable is the catalog verdict (AlarmType.Shelveable), carried on
 	// the snapshot so consumers can suppress the shelve control entirely.
 	Shelveable bool
@@ -173,7 +155,7 @@ type Sink interface {
 }
 
 // entry is the collector's per-alarm suppression state machine plus the
-// lifecycle layer on top of it. The alarm inside it is only visible through
+// shelve state on top of it. The alarm inside it is only visible through
 // Standing()/Active() once the entry has activated.
 type entry struct {
 	alarm Alarm
@@ -197,23 +179,10 @@ type entry struct {
 	// DelayOn (immediately, for zero-delay types).
 	active bool
 
-	// ---- lifecycle layer (gastrolog-1z5gg4) ----
-
-	// cleared marks a retained cleared-unacked entry: the condition
-	// resolved (past delay-off) while unacknowledged, and the alarm is
-	// kept visible until an operator acks it. A re-raise on a cleared
-	// entry starts a NEW occurrence (delay-on applies again).
-	cleared bool
-	// acked records operator acknowledgment of the current occurrence.
-	acked   bool
-	ackedBy string
-	ackedAt time.Time
 	// shelvedUntil is the mandatory shelve expiry; zero when not shelved.
-	// Expiry is settled lazily against the collector clock.
+	// Expiry is settled lazily against the collector clock. In-memory
+	// only: shelves do not survive restart.
 	shelvedUntil time.Time
-	// occurrences counts annunciated condition occurrences (activation
-	// edges) since this entry became standing.
-	occurrences int
 	// shelveable is the catalog verdict, stamped at raise time.
 	shelveable bool
 }
@@ -223,20 +192,14 @@ func (e *entry) shelved(now time.Time) bool {
 	return !e.shelvedUntil.IsZero() && now.Before(e.shelvedUntil)
 }
 
-// stateAt derives the lifecycle state of an annunciated entry.
+// stateAt derives the state of an annunciated entry.
 func (e *entry) stateAt(now time.Time) AlarmState {
-	switch {
-	case e.shelved(now):
+	if e.shelved(now) {
 		return StateShelved
-	case e.cleared:
-		return StateClearedUnacked
-	case e.acked:
-		return StateActiveAcked
-	default:
-		// Includes a latched alarm whose condition resolved: it stands
-		// active-unacked until acknowledged.
-		return StateActiveUnacked
 	}
+	// Includes a latched alarm whose condition resolved: it stands until
+	// process restart.
+	return StateActive
 }
 
 // Collector is a thread-safe, in-process registry of active alarms with
@@ -258,13 +221,6 @@ type Collector struct {
 	// hook may raise back into the collector (the rate monitor raising
 	// alarm-flood). Wired to RateMonitor.Observe.
 	onActivate func(typeID string)
-
-	// journal persists ack/shelve state across restart (journal.go); nil
-	// when no journal is attached (tests, in-memory setups). pending holds
-	// replayed lifecycle state waiting for its alarm ID to annunciate
-	// again after startup; consumed on the activation edge.
-	journal *journal
-	pending map[string]pendingLifecycle
 }
 
 // SetOnActivate installs the activation hook. Wire once at startup, before
@@ -353,8 +309,8 @@ func (c *Collector) raise(a Alarm, delayOn, delayOff time.Duration, latching boo
 	now := c.now()
 	e := c.entries[a.ID]
 	if e != nil && c.settleLocked(e, now, &activated) {
-		// The previous occurrence had fully released (e.g. acked and its
-		// delay-off window expired); this raise starts a fresh entry.
+		// The previous occurrence had fully released (its delay-off window
+		// expired); this raise starts a fresh entry.
 		c.removeLocked(a.ID)
 		e = nil
 	}
@@ -379,18 +335,7 @@ func (c *Collector) raise(a Alarm, delayOn, delayOff time.Duration, latching boo
 		e.alarm.LastSeen = now
 		e.delayOn, e.delayOff, e.latching = delayOn, delayOff, latching
 		e.shelveable = a.Shelveable
-		switch {
-		case e.cleared && !e.conditionUp:
-			// The condition returned on a retained cleared-unacked entry:
-			// a NEW occurrence of the same alarm ID. Delay-on applies
-			// again — the entry keeps showing cleared-unacked while the
-			// new occurrence sits inside its window, and the activation
-			// edge (settleLocked) promotes it: occurrence count up, ack
-			// reset, FirstSeen reset to the new condition start.
-			e.conditionUp = true
-			e.conditionSince = now
-			e.clearedAt = time.Time{}
-		case !e.cleared && !e.conditionUp:
+		if !e.conditionUp {
 			// The condition returned inside the delay-off window (or on a
 			// latched alarm): the same occurrence continues — the alarm stays
 			// active with its FirstSeen, no re-occurrence, no activation edge.
@@ -406,18 +351,14 @@ func (c *Collector) raise(a Alarm, delayOn, delayOff time.Duration, latching boo
 
 // Clear reports that the condition of the given type for the given instance
 // no longer holds. No-op if nothing is tracked for it. What happens next is
-// the type's suppression + lifecycle verdict:
+// the type's suppression verdict:
 //
 //   - never activated (condition died inside DelayOn): dropped silently —
 //     that is the chattering the window exists to suppress.
-//   - active, Latching: stays standing until acknowledged. If the operator
-//     already acked, the latch is satisfied and the alarm releases now.
-//   - active, non-latching (once DelayOff has run, immediately for zero):
-//     acked or shelved → released (the operator has already handled it);
-//     unacked → retained as cleared-unacked until acknowledged.
-//   - active, DelayOff set: stays active until the condition has stayed
-//     clear for the whole window; a Raise inside it resumes the same
-//     occurrence.
+//   - active, Latching: stays standing until process restart — there is no
+//     release path for a latched alarm.
+//   - active, non-latching: released once DelayOff has run (immediately for
+//     zero). A Raise inside the window resumes the same occurrence.
 func (c *Collector) Clear(typeID, instanceKey string) {
 	c.mu.Lock()
 	var activated []string
@@ -454,117 +395,57 @@ func (c *Collector) clearLocked(typeID, instanceKey string, activated *[]string)
 	e.conditionUp = false
 	e.clearedAt = now
 	if e.latching {
-		if e.acked {
-			// The latch is satisfied: condition resolved AND acknowledged
-			// (in this order, ack first). Release.
-			slog.Info("latched alarm released — condition resolved after acknowledgment",
-				"id", e.alarm.ID, "source", e.alarm.Source, "acked_by", e.ackedBy)
-			c.removeLocked(id)
-			return
-		}
-		slog.Info("alarm condition cleared but the alarm is latched — standing until operator acknowledgment",
+		slog.Info("alarm condition cleared but the alarm is latched — standing until process restart",
 			"id", e.alarm.ID, "source", e.alarm.Source)
 		return
 	}
 	if e.delayOff <= 0 {
-		c.conditionResolvedLocked(id, e, now)
-	}
-}
-
-// conditionResolvedLocked handles a non-latching entry whose condition has
-// fully resolved (delay-off elapsed, or zero): acked or shelved entries
-// release — the operator has already handled them — and unacked entries are
-// retained as cleared-unacked so "it fired while you were away" stays
-// visible until acknowledged. Caller holds c.mu.
-func (c *Collector) conditionResolvedLocked(id string, e *entry, now time.Time) {
-	if e.acked || e.shelved(now) {
 		slog.Info("alarm cleared — condition resolved",
 			"id", e.alarm.ID, "source", e.alarm.Source)
 		c.removeLocked(id)
-		return
-	}
-	if !e.cleared {
-		e.cleared = true
-		// A cleared alarm cannot stay shelved (there is nothing standing to
-		// suppress); drop any expired shelve residue.
-		e.shelvedUntil = time.Time{}
-		slog.Info("alarm cleared — condition resolved; retained until acknowledged",
-			"id", e.alarm.ID, "source", e.alarm.Source)
 	}
 }
 
-// settleLocked advances one entry's suppression + lifecycle state to now:
-// it expires a lapsed shelve, activates a pending entry whose condition has
-// outlived DelayOn, and resolves an active entry whose condition has stayed
-// clear past DelayOff — releasing it (report true so the caller removes it)
-// when acked or shelved, retaining it as cleared-unacked otherwise.
-// Transition edges of suppressed types are logged here — the call site
-// cannot log them, since it no longer knows when the window elapses.
-// Annunciations are appended to activated for the caller to fire through
-// the activation hook after unlocking. Caller holds c.mu.
+// settleLocked advances one entry's suppression state to now: it expires a
+// lapsed shelve, activates a pending entry whose condition has outlived
+// DelayOn, and releases an active entry whose condition has stayed clear
+// past DelayOff (report true so the caller removes it). Transition edges of
+// suppressed types are logged here — the call site cannot log them, since
+// it no longer knows when the window elapses. Annunciations are appended to
+// activated for the caller to fire through the activation hook after
+// unlocking. Caller holds c.mu.
 func (c *Collector) settleLocked(e *entry, now time.Time, activated *[]string) (expired bool) {
 	// Shelve expiry is a lazy time construct like the delay windows. A
-	// shelve that lapses returns the alarm to active-unacked: the deferral
-	// window the operator chose is over, so the condition demands fresh
-	// attention — any acknowledgment is reset along with the shelve. The
-	// pre-expiry value is kept for the resolution decision below, which
-	// must be evaluated at the instant the delay-off window closed, not at
-	// whatever instant this read happens to run.
-	shelvedBefore := e.shelvedUntil
+	// shelve that lapses returns the alarm to ACTIVE: the deferral window
+	// the operator chose is over, so the condition demands fresh attention.
 	if !e.shelvedUntil.IsZero() && !now.Before(e.shelvedUntil) {
 		e.shelvedUntil = time.Time{}
-		e.acked, e.ackedBy, e.ackedAt = false, "", time.Time{}
 		slog.Info("alarm shelve expired — returned to the active list",
 			"id", e.alarm.ID, "source", e.alarm.Source)
 	}
 	if e.conditionUp {
-		// Activation covers two shapes: the first annunciation of a fresh
-		// entry (!active) and a NEW occurrence on a retained cleared-unacked
-		// entry (active && cleared) — both run the full delay-on window.
-		if (!e.active || e.cleared) && now.Sub(e.conditionSince) >= e.delayOn {
+		if !e.active && now.Sub(e.conditionSince) >= e.delayOn {
 			c.activateLocked(e, activated)
 		}
 		return false
 	}
-	if e.active && !e.cleared && !e.latching && now.Sub(e.clearedAt) >= e.delayOff {
-		// The condition resolved when its delay-off window closed. The
-		// lifecycle verdict is taken at THAT instant — lazy settling must
-		// reach the same state no matter when the next read runs: shelved
-		// or acked at resolution → released; unacked → cleared-unacked.
-		resolvedAt := e.clearedAt.Add(e.delayOff)
-		wasShelved := !shelvedBefore.IsZero() && resolvedAt.Before(shelvedBefore)
-		if e.acked || wasShelved {
-			if e.delayOff > 0 {
-				slog.Info("alarm cleared — condition stayed clear past its delay-off window",
-					"id", e.alarm.ID, "source", e.alarm.Source, "delay_off", e.delayOff)
-			}
-			return true
-		}
-		e.cleared = true
-		e.shelvedUntil = time.Time{}
-		slog.Info("alarm cleared — condition resolved; retained until acknowledged",
-			"id", e.alarm.ID, "source", e.alarm.Source)
+	if e.active && !e.latching && now.Sub(e.clearedAt) >= e.delayOff {
+		// The condition resolved when its delay-off window closed: the
+		// alarm releases, full stop — lazy settling reaches the same state
+		// no matter when the next read runs.
+		slog.Info("alarm cleared — condition stayed clear past its delay-off window",
+			"id", e.alarm.ID, "source", e.alarm.Source, "delay_off", e.delayOff)
+		return true
 	}
 	return false
 }
 
 // activateLocked annunciates an entry whose condition has outlived its
-// delay-on window: the first annunciation of a fresh entry, or a new
-// occurrence on a retained cleared-unacked entry. Caller holds c.mu.
+// delay-on window. Caller holds c.mu.
 func (c *Collector) activateLocked(e *entry, activated *[]string) {
-	if e.cleared {
-		// New occurrence: the previous one's retention (and any
-		// acknowledgment — there was none, it was cleared-UNACKED) ends.
-		e.cleared = false
-		e.acked, e.ackedBy, e.ackedAt = false, "", time.Time{}
-	}
 	e.active = true
-	// FirstSeen is the current occurrence's condition start — for a fresh
-	// entry this is already true; for a re-occurrence it resets (the
-	// occurrence counter keeps the history).
+	// FirstSeen is the condition start of this occurrence.
 	e.alarm.FirstSeen = e.conditionSince
-	e.occurrences++
-	c.applyPendingLocked(e)
 	*activated = append(*activated, e.alarm.TypeID)
 	// Every annunciation edge logs exactly once — the log stream is the
 	// event record (events are log messages; the self ingester captures
@@ -579,48 +460,14 @@ func (c *Collector) activateLocked(e *entry, activated *[]string) {
 	}
 }
 
-// applyPendingLocked applies journal-replayed lifecycle state to an entry on
-// its first annunciation after startup. An expired replayed shelve applies
-// nothing (mirrors live expiry, which also resets acknowledgment). Caller
-// holds c.mu.
-func (c *Collector) applyPendingLocked(e *entry) {
-	p, ok := c.pending[e.alarm.ID]
-	if !ok {
-		return
-	}
-	delete(c.pending, e.alarm.ID)
-	now := c.now()
-	if !p.ShelvedUntil.IsZero() && !now.Before(p.ShelvedUntil) {
-		// Shelve lapsed while the node was down (or before the condition
-		// returned): active-unacked, nothing to re-apply.
-		return
-	}
-	e.acked, e.ackedBy, e.ackedAt = p.Acked, p.AckedBy, p.AckedAt
-	e.shelvedUntil = p.ShelvedUntil
-	if p.Acked || !p.ShelvedUntil.IsZero() {
-		slog.Info("alarm lifecycle state replayed from journal",
-			"id", e.alarm.ID, "acked", p.Acked, "shelved_until", p.ShelvedUntil)
-	}
-}
-
-// removeLocked releases an entry entirely and prunes any journal state for
-// its ID — the alarm is gone, so a replay after restart must not resurrect
-// operator actions against a future occurrence. Caller holds c.mu.
+// removeLocked releases an entry entirely. Caller holds c.mu.
 func (c *Collector) removeLocked(id string) {
-	e := c.entries[id]
 	delete(c.entries, id)
-	if c.journal == nil {
-		return
-	}
-	if _, hadPending := c.pending[id]; hadPending || (e != nil && (e.acked || !e.shelvedUntil.IsZero())) {
-		delete(c.pending, id)
-		c.journal.append(journalRecord{Op: journalOpResolve, ID: id, At: c.now()})
-	}
 }
 
-// snapshot walks all entries under the lock, settles their suppression +
-// lifecycle state, and returns copies of the annunciated ones that pass
-// keep. Sorted by FirstSeen.
+// snapshot walks all entries under the lock, settles their suppression
+// state, and returns copies of the annunciated ones that pass keep. Sorted
+// by FirstSeen.
 func (c *Collector) snapshot(keep func(AlarmState) bool) []*Alarm {
 	c.mu.Lock()
 	var activated []string
@@ -641,11 +488,9 @@ func (c *Collector) snapshot(keep func(AlarmState) bool) []*Alarm {
 		}
 		cp := e.alarm
 		cp.State = st
-		cp.AckedBy, cp.AckedAt = e.ackedBy, e.ackedAt
 		if st == StateShelved {
 			cp.ShelvedUntil = e.shelvedUntil
 		}
-		cp.Occurrences = e.occurrences
 		cp.Shelveable = e.shelveable
 		result = append(result, &cp)
 	}
@@ -664,37 +509,35 @@ func (c *Collector) snapshot(keep func(AlarmState) bool) []*Alarm {
 	return result
 }
 
-// isActiveState reports whether a lifecycle state demands a place in the
-// active list: the condition is standing (or latched standing) and not
+// isActiveState reports whether a state demands a place in the active
+// list: the condition is standing (or latched standing) and not
 // operator-suppressed.
 func isActiveState(s AlarmState) bool {
-	return s == StateActiveUnacked || s == StateActiveAcked
+	return s == StateActive
 }
 
-// Standing returns a snapshot of every visible alarm — active (unacked and
-// acked), cleared-unacked, and shelved — each stamped with its lifecycle
-// state, sorted by FirstSeen. This is the broadcast surface: alarms in
-// every state travel in NodeStats so any node can serve ack/shelve for
-// them. Reading settles suppression and lifecycle state lazily.
+// Standing returns a snapshot of every visible alarm — active and shelved —
+// each stamped with its state, sorted by FirstSeen. This is the broadcast
+// surface: alarms in every state travel in NodeStats so any node can serve
+// shelve/unshelve for them. Reading settles suppression state lazily.
 func (c *Collector) Standing() []*Alarm {
 	return c.snapshot(func(AlarmState) bool { return true })
 }
 
-// Active returns a snapshot of the alarms in the active states only —
-// pending delay-on conditions, shelved alarms and retained cleared-unacked
-// alarms are excluded — sorted by FirstSeen.
+// Active returns a snapshot of the active alarms only — pending delay-on
+// conditions and shelved alarms are excluded — sorted by FirstSeen.
 func (c *Collector) Active() []*Alarm {
 	return c.snapshot(isActiveState)
 }
 
-// Count returns the number of alarms in the active states (the same set
-// Active returns), settling state like Active.
+// Count returns the number of active alarms (the same set Active returns),
+// settling state like Active.
 func (c *Collector) Count() int {
 	return len(c.Active())
 }
 
 // HasStanding reports whether an alarm with the given full ID is currently
-// visible in any lifecycle state on this collector.
+// visible in any state on this collector.
 func (c *Collector) HasStanding(id string) bool {
 	for _, a := range c.Standing() {
 		if a.ID == id {
@@ -705,7 +548,7 @@ func (c *Collector) HasStanding(id string) bool {
 }
 
 // visibleLocked settles e and returns whether it is annunciated (visible in
-// some lifecycle state). Caller holds c.mu; removal on release is applied.
+// some state). Caller holds c.mu; removal on release is applied.
 func (c *Collector) visibleLocked(id string, e *entry, activated *[]string) bool {
 	if c.settleLocked(e, c.now(), activated) {
 		c.removeLocked(id)
@@ -714,64 +557,10 @@ func (c *Collector) visibleLocked(id string, e *entry, activated *[]string) bool
 	return e.active
 }
 
-// Ack acknowledges the standing alarm with the given full ID, recording
-// operator awareness (who + when):
-//
-//   - active, condition standing: → active-acked. The alarm then releases
-//     silently when the condition resolves.
-//   - cleared-unacked: released now — the ack is what it was waiting for.
-//   - latched with the condition already resolved: released now (the latch
-//     needs both resolution and ack, in either order).
-//   - already acked: idempotent; who/when refresh.
-//
-// Returns ErrUnknownAlarm if no standing alarm has that ID.
-func (c *Collector) Ack(id, by string) error {
-	c.mu.Lock()
-	var activated []string
-	err := c.ackLocked(id, by, &activated)
-	hook := c.onActivate
-	c.mu.Unlock()
-	fireActivations(hook, activated)
-	return err
-}
-
-func (c *Collector) ackLocked(id, by string, activated *[]string) error {
-	e, ok := c.entries[id]
-	if !ok || !c.visibleLocked(id, e, activated) {
-		return ErrUnknownAlarm
-	}
-	now := c.now()
-	if e.cleared && e.conditionUp {
-		// Cleared-unacked with the condition already back and pending its
-		// delay-on window: the ack releases the retention, and the pending
-		// occurrence keeps tracking — it annunciates as a fresh alarm if
-		// it outlives the window.
-		slog.Info("alarm acknowledged and released — new occurrence pending its delay-on window",
-			"id", id, "acked_by", by)
-		e.cleared = false
-		e.active = false
-		return nil
-	}
-	if e.cleared || (e.latching && !e.conditionUp) {
-		// The condition has already resolved; acknowledgment is the one
-		// thing the alarm was standing for. Release it.
-		slog.Info("alarm acknowledged and released — condition already resolved",
-			"id", id, "acked_by", by)
-		c.removeLocked(id)
-		return nil
-	}
-	e.acked, e.ackedBy, e.ackedAt = true, by, now
-	slog.Info("alarm acknowledged", "id", id, "acked_by", by)
-	c.journalAppendLocked(journalRecord{Op: journalOpAck, ID: id, By: by, At: now})
-	return nil
-}
-
 // Shelve suppresses the standing alarm with the given full ID until now+d.
 // The expiry is mandatory (d must be positive — there are no permanent
-// shelves) and the alarm's type must allow shelving. Shelving resets any
-// acknowledgment: when the shelve lapses with the condition still true, the
-// alarm returns to active-unacked and demands fresh attention. Returns the
-// expiry instant.
+// shelves) and the alarm's type must allow shelving. Shelve state is
+// in-memory only and does not survive restart. Returns the expiry instant.
 func (c *Collector) Shelve(id string, d time.Duration, by string) (time.Time, error) {
 	if d <= 0 {
 		return time.Time{}, ErrShelveExpiryRequired
@@ -794,15 +583,9 @@ func (c *Collector) shelveLocked(id string, d time.Duration, by string, activate
 		return time.Time{}, fmt.Errorf("%w: %s — %s", ErrNotShelveable, e.alarm.TypeID,
 			shelveRefusalReason(e.alarm))
 	}
-	if e.cleared {
-		return time.Time{}, ErrAlarmCleared
-	}
-	now := c.now()
-	until := now.Add(d)
+	until := c.now().Add(d)
 	e.shelvedUntil = until
-	e.acked, e.ackedBy, e.ackedAt = false, "", time.Time{}
 	slog.Info("alarm shelved", "id", id, "shelved_by", by, "until", until)
-	c.journalAppendLocked(journalRecord{Op: journalOpShelve, ID: id, By: by, At: now, Until: until})
 	return until, nil
 }
 
@@ -815,9 +598,8 @@ func shelveRefusalReason(a Alarm) string {
 	return "deferral is meaningless for this alarm type"
 }
 
-// Unshelve ends a shelve early, returning the alarm to its live state
-// (active-unacked when the condition still stands). Returns ErrNotShelved
-// when the alarm exists but is not shelved.
+// Unshelve ends a shelve early, returning the alarm to ACTIVE. Returns
+// ErrNotShelved when the alarm exists but is not shelved.
 func (c *Collector) Unshelve(id string) error {
 	c.mu.Lock()
 	var activated []string
@@ -839,14 +621,5 @@ func (c *Collector) unshelveLocked(id string, activated *[]string) error {
 	}
 	e.shelvedUntil = time.Time{}
 	slog.Info("alarm unshelved", "id", id)
-	c.journalAppendLocked(journalRecord{Op: journalOpUnshelve, ID: id, At: now})
 	return nil
-}
-
-// journalAppendLocked persists a lifecycle record when a journal is
-// attached. Caller holds c.mu.
-func (c *Collector) journalAppendLocked(rec journalRecord) {
-	if c.journal != nil {
-		c.journal.append(rec)
-	}
 }

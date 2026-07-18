@@ -292,9 +292,8 @@ func TestAlertsToJSON(t *testing.T) {
 	}
 }
 
-// TestAlarmStateStr pins the single lifecycle-state→display mapping
-// (gastrolog-1z5gg4): active, acked (with who), cleared, shelved (with
-// expiry) — and the wire back-compat default of "active" for UNSPECIFIED.
+// TestAlarmStateStr pins the single state→display mapping: active, and
+// shelved (with expiry) — and the default of "active" for UNSPECIFIED.
 func TestAlarmStateStr(t *testing.T) {
 	t.Parallel()
 	t0 := time.Date(2026, 7, 17, 10, 0, 0, 0, time.UTC)
@@ -302,18 +301,9 @@ func TestAlarmStateStr(t *testing.T) {
 	if got := alarmStateStr(a); got != "active" {
 		t.Errorf("unspecified = %q, want active", got)
 	}
-	a.State = v1.AlarmState_ALARM_STATE_ACTIVE_UNACKED
+	a.State = v1.AlarmState_ALARM_STATE_ACTIVE
 	if got := alarmStateStr(a); got != "active" {
-		t.Errorf("active-unacked = %q, want active", got)
-	}
-	a.State = v1.AlarmState_ALARM_STATE_ACTIVE_ACKED
-	a.AckedBy = "alice"
-	if got := alarmStateStr(a); got != "acked:alice" {
-		t.Errorf("active-acked = %q, want acked:alice", got)
-	}
-	a.State = v1.AlarmState_ALARM_STATE_CLEARED_UNACKED
-	if got := alarmStateStr(a); got != "cleared" {
-		t.Errorf("cleared-unacked = %q, want cleared", got)
+		t.Errorf("active = %q, want active", got)
 	}
 	a.State = v1.AlarmState_ALARM_STATE_SHELVED
 	a.ShelvedUntil = timestamppb.New(t0.Add(time.Hour))

@@ -1220,128 +1220,21 @@ func (x *YieldLeadershipResponse) GetTransferred() bool {
 	return false
 }
 
-type AckAlarmRequest struct {
+type ShelveAlarmRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Full alarm ID ("<type>" or "<type>:<instance>"), as carried in
 	// SystemAlert.id.
 	AlarmId []byte `protobuf:"bytes,1,opt,name=alarm_id,json=alarmId,proto3" json:"alarm_id,omitempty"`
-	// Operator identity to record. The server prefers the authenticated
-	// user's name when the request carries one; this field covers the local
-	// Unix-socket CLI path, which has no auth context.
-	AckedBy string `protobuf:"bytes,2,opt,name=acked_by,json=ackedBy,proto3" json:"acked_by,omitempty"`
-	// Internal: apply to this node's collector only — set on the fan-out leg
-	// so a forwarded ack never re-fans. Client requests leave this unset.
-	LocalOnly     bool `protobuf:"varint,3,opt,name=local_only,json=localOnly,proto3" json:"local_only,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *AckAlarmRequest) Reset() {
-	*x = AckAlarmRequest{}
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[18]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *AckAlarmRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*AckAlarmRequest) ProtoMessage() {}
-
-func (x *AckAlarmRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[18]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use AckAlarmRequest.ProtoReflect.Descriptor instead.
-func (*AckAlarmRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{18}
-}
-
-func (x *AckAlarmRequest) GetAlarmId() []byte {
-	if x != nil {
-		return x.AlarmId
-	}
-	return nil
-}
-
-func (x *AckAlarmRequest) GetAckedBy() string {
-	if x != nil {
-		return x.AckedBy
-	}
-	return ""
-}
-
-func (x *AckAlarmRequest) GetLocalOnly() bool {
-	if x != nil {
-		return x.LocalOnly
-	}
-	return false
-}
-
-type AckAlarmResponse struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Number of raiser nodes the ack applied on.
-	Applied       uint32 `protobuf:"varint,1,opt,name=applied,proto3" json:"applied,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *AckAlarmResponse) Reset() {
-	*x = AckAlarmResponse{}
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[19]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *AckAlarmResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*AckAlarmResponse) ProtoMessage() {}
-
-func (x *AckAlarmResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[19]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use AckAlarmResponse.ProtoReflect.Descriptor instead.
-func (*AckAlarmResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{19}
-}
-
-func (x *AckAlarmResponse) GetApplied() uint32 {
-	if x != nil {
-		return x.Applied
-	}
-	return 0
-}
-
-type ShelveAlarmRequest struct {
-	state   protoimpl.MessageState `protogen:"open.v1"`
-	AlarmId []byte                 `protobuf:"bytes,1,opt,name=alarm_id,json=alarmId,proto3" json:"alarm_id,omitempty"`
 	// Shelve duration in seconds. MANDATORY and positive: shelves always
 	// expire — there are no permanent shelves.
 	DurationSeconds int64 `protobuf:"varint,2,opt,name=duration_seconds,json=durationSeconds,proto3" json:"duration_seconds,omitempty"`
-	// Operator identity to record in the lifecycle journal (same sourcing
-	// rules as AckAlarmRequest.acked_by).
+	// Operator identity to record in the shelve slog line. The server
+	// prefers the authenticated user's name when the request carries one;
+	// this field covers the local Unix-socket CLI path, which has no auth
+	// context.
 	ShelvedBy string `protobuf:"bytes,3,opt,name=shelved_by,json=shelvedBy,proto3" json:"shelved_by,omitempty"`
-	// Internal fan-out leg marker; see AckAlarmRequest.local_only.
+	// Internal: apply to this node's collector only — set on the fan-out leg
+	// so a forwarded shelve never re-fans. Client requests leave this unset.
 	LocalOnly     bool `protobuf:"varint,4,opt,name=local_only,json=localOnly,proto3" json:"local_only,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1349,7 +1242,7 @@ type ShelveAlarmRequest struct {
 
 func (x *ShelveAlarmRequest) Reset() {
 	*x = ShelveAlarmRequest{}
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[20]
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1361,7 +1254,7 @@ func (x *ShelveAlarmRequest) String() string {
 func (*ShelveAlarmRequest) ProtoMessage() {}
 
 func (x *ShelveAlarmRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[20]
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1374,7 +1267,7 @@ func (x *ShelveAlarmRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShelveAlarmRequest.ProtoReflect.Descriptor instead.
 func (*ShelveAlarmRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{20}
+	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ShelveAlarmRequest) GetAlarmId() []byte {
@@ -1406,8 +1299,9 @@ func (x *ShelveAlarmRequest) GetLocalOnly() bool {
 }
 
 type ShelveAlarmResponse struct {
-	state   protoimpl.MessageState `protogen:"open.v1"`
-	Applied uint32                 `protobuf:"varint,1,opt,name=applied,proto3" json:"applied,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Number of raiser nodes the shelve applied on.
+	Applied uint32 `protobuf:"varint,1,opt,name=applied,proto3" json:"applied,omitempty"`
 	// Expiry instant computed by the first collector the shelve applied on.
 	ShelvedUntil  *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=shelved_until,json=shelvedUntil,proto3" json:"shelved_until,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -1416,7 +1310,7 @@ type ShelveAlarmResponse struct {
 
 func (x *ShelveAlarmResponse) Reset() {
 	*x = ShelveAlarmResponse{}
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[21]
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1428,7 +1322,7 @@ func (x *ShelveAlarmResponse) String() string {
 func (*ShelveAlarmResponse) ProtoMessage() {}
 
 func (x *ShelveAlarmResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[21]
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1441,7 +1335,7 @@ func (x *ShelveAlarmResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShelveAlarmResponse.ProtoReflect.Descriptor instead.
 func (*ShelveAlarmResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{21}
+	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ShelveAlarmResponse) GetApplied() uint32 {
@@ -1461,7 +1355,7 @@ func (x *ShelveAlarmResponse) GetShelvedUntil() *timestamppb.Timestamp {
 type UnshelveAlarmRequest struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
 	AlarmId []byte                 `protobuf:"bytes,1,opt,name=alarm_id,json=alarmId,proto3" json:"alarm_id,omitempty"`
-	// Internal fan-out leg marker; see AckAlarmRequest.local_only.
+	// Internal fan-out leg marker; see ShelveAlarmRequest.local_only.
 	LocalOnly     bool `protobuf:"varint,2,opt,name=local_only,json=localOnly,proto3" json:"local_only,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1469,7 +1363,7 @@ type UnshelveAlarmRequest struct {
 
 func (x *UnshelveAlarmRequest) Reset() {
 	*x = UnshelveAlarmRequest{}
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[22]
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1481,7 +1375,7 @@ func (x *UnshelveAlarmRequest) String() string {
 func (*UnshelveAlarmRequest) ProtoMessage() {}
 
 func (x *UnshelveAlarmRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[22]
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1494,7 +1388,7 @@ func (x *UnshelveAlarmRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnshelveAlarmRequest.ProtoReflect.Descriptor instead.
 func (*UnshelveAlarmRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{22}
+	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *UnshelveAlarmRequest) GetAlarmId() []byte {
@@ -1520,7 +1414,7 @@ type UnshelveAlarmResponse struct {
 
 func (x *UnshelveAlarmResponse) Reset() {
 	*x = UnshelveAlarmResponse{}
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[23]
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1532,7 +1426,7 @@ func (x *UnshelveAlarmResponse) String() string {
 func (*UnshelveAlarmResponse) ProtoMessage() {}
 
 func (x *UnshelveAlarmResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[23]
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1545,7 +1439,7 @@ func (x *UnshelveAlarmResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnshelveAlarmResponse.ProtoReflect.Descriptor instead.
 func (*UnshelveAlarmResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{23}
+	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *UnshelveAlarmResponse) GetApplied() uint32 {
@@ -1563,7 +1457,7 @@ type WatchSystemStatusRequest struct {
 
 func (x *WatchSystemStatusRequest) Reset() {
 	*x = WatchSystemStatusRequest{}
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[24]
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1575,7 +1469,7 @@ func (x *WatchSystemStatusRequest) String() string {
 func (*WatchSystemStatusRequest) ProtoMessage() {}
 
 func (x *WatchSystemStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[24]
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1588,7 +1482,7 @@ func (x *WatchSystemStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchSystemStatusRequest.ProtoReflect.Descriptor instead.
 func (*WatchSystemStatusRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{24}
+	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{22}
 }
 
 type WatchSystemStatusResponse struct {
@@ -1611,7 +1505,7 @@ type WatchSystemStatusResponse struct {
 
 func (x *WatchSystemStatusResponse) Reset() {
 	*x = WatchSystemStatusResponse{}
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[25]
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1623,7 +1517,7 @@ func (x *WatchSystemStatusResponse) String() string {
 func (*WatchSystemStatusResponse) ProtoMessage() {}
 
 func (x *WatchSystemStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[25]
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1636,7 +1530,7 @@ func (x *WatchSystemStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchSystemStatusResponse.ProtoReflect.Descriptor instead.
 func (*WatchSystemStatusResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{25}
+	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *WatchSystemStatusResponse) GetCluster() *GetClusterStatusResponse {
@@ -1766,14 +1660,7 @@ const file_gastrolog_v1_lifecycle_proto_rawDesc = "" +
 	"\x12RemoveNodeResponse\"\x18\n" +
 	"\x16YieldLeadershipRequest\";\n" +
 	"\x17YieldLeadershipResponse\x12 \n" +
-	"\vtransferred\x18\x01 \x01(\bR\vtransferred\"f\n" +
-	"\x0fAckAlarmRequest\x12\x19\n" +
-	"\balarm_id\x18\x01 \x01(\fR\aalarmId\x12\x19\n" +
-	"\backed_by\x18\x02 \x01(\tR\aackedBy\x12\x1d\n" +
-	"\n" +
-	"local_only\x18\x03 \x01(\bR\tlocalOnly\",\n" +
-	"\x10AckAlarmResponse\x12\x18\n" +
-	"\aapplied\x18\x01 \x01(\rR\aapplied\"\x98\x01\n" +
+	"\vtransferred\x18\x01 \x01(\bR\vtransferred\"\x98\x01\n" +
 	"\x12ShelveAlarmRequest\x12\x19\n" +
 	"\balarm_id\x18\x01 \x01(\fR\aalarmId\x12)\n" +
 	"\x10duration_seconds\x18\x02 \x01(\x03R\x0fdurationSeconds\x12\x1d\n" +
@@ -1813,7 +1700,7 @@ const file_gastrolog_v1_lifecycle_proto_rawDesc = "" +
 	"!CLUSTER_NODE_SUFFRAGE_UNSPECIFIED\x10\x00\x12\x1f\n" +
 	"\x1bCLUSTER_NODE_SUFFRAGE_VOTER\x10\x01\x12\"\n" +
 	"\x1eCLUSTER_NODE_SUFFRAGE_NONVOTER\x10\x02\x12!\n" +
-	"\x1dCLUSTER_NODE_SUFFRAGE_STAGING\x10\x032\xa2\b\n" +
+	"\x1dCLUSTER_NODE_SUFFRAGE_STAGING\x10\x032\xd7\a\n" +
 	"\x10LifecycleService\x12C\n" +
 	"\x06Health\x12\x1b.gastrolog.v1.HealthRequest\x1a\x1c.gastrolog.v1.HealthResponse\x12I\n" +
 	"\bShutdown\x12\x1d.gastrolog.v1.ShutdownRequest\x1a\x1e.gastrolog.v1.ShutdownResponse\x12a\n" +
@@ -1824,8 +1711,7 @@ const file_gastrolog_v1_lifecycle_proto_rawDesc = "" +
 	"\n" +
 	"RemoveNode\x12\x1f.gastrolog.v1.RemoveNodeRequest\x1a .gastrolog.v1.RemoveNodeResponse\x12^\n" +
 	"\x0fYieldLeadership\x12$.gastrolog.v1.YieldLeadershipRequest\x1a%.gastrolog.v1.YieldLeadershipResponse\x12f\n" +
-	"\x11WatchSystemStatus\x12&.gastrolog.v1.WatchSystemStatusRequest\x1a'.gastrolog.v1.WatchSystemStatusResponse0\x01\x12I\n" +
-	"\bAckAlarm\x12\x1d.gastrolog.v1.AckAlarmRequest\x1a\x1e.gastrolog.v1.AckAlarmResponse\x12R\n" +
+	"\x11WatchSystemStatus\x12&.gastrolog.v1.WatchSystemStatusRequest\x1a'.gastrolog.v1.WatchSystemStatusResponse0\x01\x12R\n" +
 	"\vShelveAlarm\x12 .gastrolog.v1.ShelveAlarmRequest\x1a!.gastrolog.v1.ShelveAlarmResponse\x12X\n" +
 	"\rUnshelveAlarm\x12\".gastrolog.v1.UnshelveAlarmRequest\x1a#.gastrolog.v1.UnshelveAlarmResponseB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
 
@@ -1842,7 +1728,7 @@ func file_gastrolog_v1_lifecycle_proto_rawDescGZIP() []byte {
 }
 
 var file_gastrolog_v1_lifecycle_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_gastrolog_v1_lifecycle_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
+var file_gastrolog_v1_lifecycle_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
 var file_gastrolog_v1_lifecycle_proto_goTypes = []any{
 	(Status)(0),                       // 0: gastrolog.v1.Status
 	(ClusterNodeRole)(0),              // 1: gastrolog.v1.ClusterNodeRole
@@ -1865,22 +1751,20 @@ var file_gastrolog_v1_lifecycle_proto_goTypes = []any{
 	(*RemoveNodeResponse)(nil),        // 18: gastrolog.v1.RemoveNodeResponse
 	(*YieldLeadershipRequest)(nil),    // 19: gastrolog.v1.YieldLeadershipRequest
 	(*YieldLeadershipResponse)(nil),   // 20: gastrolog.v1.YieldLeadershipResponse
-	(*AckAlarmRequest)(nil),           // 21: gastrolog.v1.AckAlarmRequest
-	(*AckAlarmResponse)(nil),          // 22: gastrolog.v1.AckAlarmResponse
-	(*ShelveAlarmRequest)(nil),        // 23: gastrolog.v1.ShelveAlarmRequest
-	(*ShelveAlarmResponse)(nil),       // 24: gastrolog.v1.ShelveAlarmResponse
-	(*UnshelveAlarmRequest)(nil),      // 25: gastrolog.v1.UnshelveAlarmRequest
-	(*UnshelveAlarmResponse)(nil),     // 26: gastrolog.v1.UnshelveAlarmResponse
-	(*WatchSystemStatusRequest)(nil),  // 27: gastrolog.v1.WatchSystemStatusRequest
-	(*WatchSystemStatusResponse)(nil), // 28: gastrolog.v1.WatchSystemStatusResponse
-	(*NodeStats)(nil),                 // 29: gastrolog.v1.NodeStats
-	(NodeState)(0),                    // 30: gastrolog.v1.NodeState
-	(*timestamppb.Timestamp)(nil),     // 31: google.protobuf.Timestamp
-	(*GetRouteStatsResponse)(nil),     // 32: gastrolog.v1.GetRouteStatsResponse
-	(*VaultInfo)(nil),                 // 33: gastrolog.v1.VaultInfo
-	(*GetStatsResponse)(nil),          // 34: gastrolog.v1.GetStatsResponse
-	(*IngesterAlive)(nil),             // 35: gastrolog.v1.IngesterAlive
-	(*VaultPipelineBacklog)(nil),      // 36: gastrolog.v1.VaultPipelineBacklog
+	(*ShelveAlarmRequest)(nil),        // 21: gastrolog.v1.ShelveAlarmRequest
+	(*ShelveAlarmResponse)(nil),       // 22: gastrolog.v1.ShelveAlarmResponse
+	(*UnshelveAlarmRequest)(nil),      // 23: gastrolog.v1.UnshelveAlarmRequest
+	(*UnshelveAlarmResponse)(nil),     // 24: gastrolog.v1.UnshelveAlarmResponse
+	(*WatchSystemStatusRequest)(nil),  // 25: gastrolog.v1.WatchSystemStatusRequest
+	(*WatchSystemStatusResponse)(nil), // 26: gastrolog.v1.WatchSystemStatusResponse
+	(*NodeStats)(nil),                 // 27: gastrolog.v1.NodeStats
+	(NodeState)(0),                    // 28: gastrolog.v1.NodeState
+	(*timestamppb.Timestamp)(nil),     // 29: google.protobuf.Timestamp
+	(*GetRouteStatsResponse)(nil),     // 30: gastrolog.v1.GetRouteStatsResponse
+	(*VaultInfo)(nil),                 // 31: gastrolog.v1.VaultInfo
+	(*GetStatsResponse)(nil),          // 32: gastrolog.v1.GetStatsResponse
+	(*IngesterAlive)(nil),             // 33: gastrolog.v1.IngesterAlive
+	(*VaultPipelineBacklog)(nil),      // 34: gastrolog.v1.VaultPipelineBacklog
 }
 var file_gastrolog_v1_lifecycle_proto_depIdxs = []int32{
 	0,  // 0: gastrolog.v1.HealthResponse.status:type_name -> gastrolog.v1.Status
@@ -1888,18 +1772,18 @@ var file_gastrolog_v1_lifecycle_proto_depIdxs = []int32{
 	9,  // 2: gastrolog.v1.GetClusterStatusResponse.local_stats:type_name -> gastrolog.v1.RaftStats
 	1,  // 3: gastrolog.v1.ClusterNode.role:type_name -> gastrolog.v1.ClusterNodeRole
 	2,  // 4: gastrolog.v1.ClusterNode.suffrage:type_name -> gastrolog.v1.ClusterNodeSuffrage
-	29, // 5: gastrolog.v1.ClusterNode.stats:type_name -> gastrolog.v1.NodeStats
-	30, // 6: gastrolog.v1.ClusterNode.state:type_name -> gastrolog.v1.NodeState
-	31, // 7: gastrolog.v1.ClusterNode.state_since:type_name -> google.protobuf.Timestamp
-	30, // 8: gastrolog.v1.SetNodeStateRequest.state:type_name -> gastrolog.v1.NodeState
-	31, // 9: gastrolog.v1.ShelveAlarmResponse.shelved_until:type_name -> google.protobuf.Timestamp
+	27, // 5: gastrolog.v1.ClusterNode.stats:type_name -> gastrolog.v1.NodeStats
+	28, // 6: gastrolog.v1.ClusterNode.state:type_name -> gastrolog.v1.NodeState
+	29, // 7: gastrolog.v1.ClusterNode.state_since:type_name -> google.protobuf.Timestamp
+	28, // 8: gastrolog.v1.SetNodeStateRequest.state:type_name -> gastrolog.v1.NodeState
+	29, // 9: gastrolog.v1.ShelveAlarmResponse.shelved_until:type_name -> google.protobuf.Timestamp
 	8,  // 10: gastrolog.v1.WatchSystemStatusResponse.cluster:type_name -> gastrolog.v1.GetClusterStatusResponse
 	4,  // 11: gastrolog.v1.WatchSystemStatusResponse.health:type_name -> gastrolog.v1.HealthResponse
-	32, // 12: gastrolog.v1.WatchSystemStatusResponse.route_stats:type_name -> gastrolog.v1.GetRouteStatsResponse
-	33, // 13: gastrolog.v1.WatchSystemStatusResponse.vaults:type_name -> gastrolog.v1.VaultInfo
-	34, // 14: gastrolog.v1.WatchSystemStatusResponse.stats:type_name -> gastrolog.v1.GetStatsResponse
-	35, // 15: gastrolog.v1.WatchSystemStatusResponse.ingester_alive:type_name -> gastrolog.v1.IngesterAlive
-	36, // 16: gastrolog.v1.WatchSystemStatusResponse.pipeline_backlog:type_name -> gastrolog.v1.VaultPipelineBacklog
+	30, // 12: gastrolog.v1.WatchSystemStatusResponse.route_stats:type_name -> gastrolog.v1.GetRouteStatsResponse
+	31, // 13: gastrolog.v1.WatchSystemStatusResponse.vaults:type_name -> gastrolog.v1.VaultInfo
+	32, // 14: gastrolog.v1.WatchSystemStatusResponse.stats:type_name -> gastrolog.v1.GetStatsResponse
+	33, // 15: gastrolog.v1.WatchSystemStatusResponse.ingester_alive:type_name -> gastrolog.v1.IngesterAlive
+	34, // 16: gastrolog.v1.WatchSystemStatusResponse.pipeline_backlog:type_name -> gastrolog.v1.VaultPipelineBacklog
 	3,  // 17: gastrolog.v1.LifecycleService.Health:input_type -> gastrolog.v1.HealthRequest
 	5,  // 18: gastrolog.v1.LifecycleService.Shutdown:input_type -> gastrolog.v1.ShutdownRequest
 	7,  // 19: gastrolog.v1.LifecycleService.GetClusterStatus:input_type -> gastrolog.v1.GetClusterStatusRequest
@@ -1908,24 +1792,22 @@ var file_gastrolog_v1_lifecycle_proto_depIdxs = []int32{
 	15, // 22: gastrolog.v1.LifecycleService.JoinCluster:input_type -> gastrolog.v1.JoinClusterRequest
 	17, // 23: gastrolog.v1.LifecycleService.RemoveNode:input_type -> gastrolog.v1.RemoveNodeRequest
 	19, // 24: gastrolog.v1.LifecycleService.YieldLeadership:input_type -> gastrolog.v1.YieldLeadershipRequest
-	27, // 25: gastrolog.v1.LifecycleService.WatchSystemStatus:input_type -> gastrolog.v1.WatchSystemStatusRequest
-	21, // 26: gastrolog.v1.LifecycleService.AckAlarm:input_type -> gastrolog.v1.AckAlarmRequest
-	23, // 27: gastrolog.v1.LifecycleService.ShelveAlarm:input_type -> gastrolog.v1.ShelveAlarmRequest
-	25, // 28: gastrolog.v1.LifecycleService.UnshelveAlarm:input_type -> gastrolog.v1.UnshelveAlarmRequest
-	4,  // 29: gastrolog.v1.LifecycleService.Health:output_type -> gastrolog.v1.HealthResponse
-	6,  // 30: gastrolog.v1.LifecycleService.Shutdown:output_type -> gastrolog.v1.ShutdownResponse
-	8,  // 31: gastrolog.v1.LifecycleService.GetClusterStatus:output_type -> gastrolog.v1.GetClusterStatusResponse
-	12, // 32: gastrolog.v1.LifecycleService.SetNodeSuffrage:output_type -> gastrolog.v1.SetNodeSuffrageResponse
-	14, // 33: gastrolog.v1.LifecycleService.SetNodeState:output_type -> gastrolog.v1.SetNodeStateResponse
-	16, // 34: gastrolog.v1.LifecycleService.JoinCluster:output_type -> gastrolog.v1.JoinClusterResponse
-	18, // 35: gastrolog.v1.LifecycleService.RemoveNode:output_type -> gastrolog.v1.RemoveNodeResponse
-	20, // 36: gastrolog.v1.LifecycleService.YieldLeadership:output_type -> gastrolog.v1.YieldLeadershipResponse
-	28, // 37: gastrolog.v1.LifecycleService.WatchSystemStatus:output_type -> gastrolog.v1.WatchSystemStatusResponse
-	22, // 38: gastrolog.v1.LifecycleService.AckAlarm:output_type -> gastrolog.v1.AckAlarmResponse
-	24, // 39: gastrolog.v1.LifecycleService.ShelveAlarm:output_type -> gastrolog.v1.ShelveAlarmResponse
-	26, // 40: gastrolog.v1.LifecycleService.UnshelveAlarm:output_type -> gastrolog.v1.UnshelveAlarmResponse
-	29, // [29:41] is the sub-list for method output_type
-	17, // [17:29] is the sub-list for method input_type
+	25, // 25: gastrolog.v1.LifecycleService.WatchSystemStatus:input_type -> gastrolog.v1.WatchSystemStatusRequest
+	21, // 26: gastrolog.v1.LifecycleService.ShelveAlarm:input_type -> gastrolog.v1.ShelveAlarmRequest
+	23, // 27: gastrolog.v1.LifecycleService.UnshelveAlarm:input_type -> gastrolog.v1.UnshelveAlarmRequest
+	4,  // 28: gastrolog.v1.LifecycleService.Health:output_type -> gastrolog.v1.HealthResponse
+	6,  // 29: gastrolog.v1.LifecycleService.Shutdown:output_type -> gastrolog.v1.ShutdownResponse
+	8,  // 30: gastrolog.v1.LifecycleService.GetClusterStatus:output_type -> gastrolog.v1.GetClusterStatusResponse
+	12, // 31: gastrolog.v1.LifecycleService.SetNodeSuffrage:output_type -> gastrolog.v1.SetNodeSuffrageResponse
+	14, // 32: gastrolog.v1.LifecycleService.SetNodeState:output_type -> gastrolog.v1.SetNodeStateResponse
+	16, // 33: gastrolog.v1.LifecycleService.JoinCluster:output_type -> gastrolog.v1.JoinClusterResponse
+	18, // 34: gastrolog.v1.LifecycleService.RemoveNode:output_type -> gastrolog.v1.RemoveNodeResponse
+	20, // 35: gastrolog.v1.LifecycleService.YieldLeadership:output_type -> gastrolog.v1.YieldLeadershipResponse
+	26, // 36: gastrolog.v1.LifecycleService.WatchSystemStatus:output_type -> gastrolog.v1.WatchSystemStatusResponse
+	22, // 37: gastrolog.v1.LifecycleService.ShelveAlarm:output_type -> gastrolog.v1.ShelveAlarmResponse
+	24, // 38: gastrolog.v1.LifecycleService.UnshelveAlarm:output_type -> gastrolog.v1.UnshelveAlarmResponse
+	28, // [28:39] is the sub-list for method output_type
+	17, // [17:28] is the sub-list for method input_type
 	17, // [17:17] is the sub-list for extension type_name
 	17, // [17:17] is the sub-list for extension extendee
 	0,  // [0:17] is the sub-list for field type_name
@@ -1945,7 +1827,7 @@ func file_gastrolog_v1_lifecycle_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gastrolog_v1_lifecycle_proto_rawDesc), len(file_gastrolog_v1_lifecycle_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   26,
+			NumMessages:   24,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

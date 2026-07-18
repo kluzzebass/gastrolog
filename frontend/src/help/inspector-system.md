@@ -54,22 +54,15 @@ the cluster, attributed to the node that raised it, with priority, cause
 and response text from the alarm catalog. Alarms are state, not events —
 they stand while a condition holds.
 
-Each alarm carries a **lifecycle state**:
+Each alarm is in one of two **states**:
 
-- **Active** — the condition stands and no operator has acknowledged it.
-  This is the default list, sorted by priority then age. A row expands to
-  its cause and response text.
-- **Acknowledged** (`ack`) — an operator has recorded awareness (who and
-  when). The alarm stays visible while its condition stands and releases
-  silently when the condition resolves. **Latching** alarms (such as
-  `orchestrator-lock-leak`) release *only* through acknowledgment: once the
-  condition resolves — or, for a wedged node, on restart — the ack is what
-  clears the alarm.
-- **Cleared, unacknowledged** — the condition resolved before anyone
-  acknowledged. The alarm is kept in a collapsed section so "it fired while
-  you were away" stays visible without blocking the active list;
-  acknowledging it releases it. If the condition returns, it re-annunciates
-  as a new occurrence (the `×N` count) and demands a fresh acknowledgment.
+- **Active** — the condition stands. This is the default list, sorted by
+  priority then age. A row expands to its cause and response text. The
+  alarm clears on its own when the condition resolves — there is nothing
+  to acknowledge or dismiss. **Latching** alarms (such as
+  `orchestrator-lock-leak`) are the exception: a software fault stands
+  until the affected node restarts, because a fault that "went away" is
+  still a fault — report it, then restart.
 - **Shelved** — an operator suppressed the alarm for a chosen duration.
   Shelves **always expire** (there are no permanent shelves) and shelved
   alarms stay visible in a collapsed section. When the shelve lapses with
@@ -80,11 +73,11 @@ software faults (nothing improves during the window — report them instead)
 and `alarm-flood` (hiding the degradation indicator defeats the alarm
 system's self-monitoring). Those rows show no shelve control.
 
-Acknowledgments and shelves apply **cluster-wide**: the node serving the
-request forwards the operation to every node raising the alarm ID, so a
-condition raised by several nodes cannot reappear unacknowledged. Ack and
-shelve state survives node restart.
+Shelves apply **cluster-wide**: the node serving the request forwards the
+operation to every node raising the alarm ID. Alarm state is in-memory
+only and does not survive a node restart — after a restart, a condition
+that still holds is simply re-detected and raised as an active alarm.
 
-The same lifecycle is available from a shell: `gastrolog alerts`,
-`gastrolog alerts ack <id>`, `gastrolog alerts shelve <id> --for 2h`, and
+The same controls are available from a shell: `gastrolog alerts`,
+`gastrolog alerts shelve <id> --for 2h`, and
 `gastrolog alerts unshelve <id>`.

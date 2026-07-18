@@ -87,11 +87,11 @@ func newAlertsCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&nodeFilter, "node", "", "only show alerts raised on this node (name or ID)")
-	cmd.AddCommand(newAlertsAckCmd(), newAlertsShelveCmd(), newAlertsUnshelveCmd())
+	cmd.AddCommand(newAlertsShelveCmd(), newAlertsUnshelveCmd())
 	return cmd
 }
 
-// operatorName is the identity recorded on ack/shelve from the CLI. The
+// operatorName is the identity recorded on a shelve from the CLI. The
 // local Unix-socket path has no authenticated user, so the OS username is
 // the most honest identity available; the server prefers an authenticated
 // user's name when one exists (TCP + JWT).
@@ -100,34 +100,6 @@ func operatorName() string {
 		return u.Username
 	}
 	return "operator"
-}
-
-// newAlertsAckCmd acknowledges a standing alarm by its full ID. Works from
-// any node: the server resolves every raiser of the ID cluster-wide and
-// fans the ack out to each — the same semantics as the inspector's Ack
-// control.
-func newAlertsAckCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "ack <alarm-id>",
-		Short: "Acknowledge a standing alarm (applies on every raising node)",
-		Long: "Acknowledge the standing alarm with the given ID (as shown by `gastrolog alerts`, " +
-			"e.g. \"disk-space-exhausted:vault1\"). Recorded with your identity on every node " +
-			"raising the ID. A latched alarm whose condition has resolved is released by the ack; " +
-			"a cleared-unacknowledged alarm is released likewise.",
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			client := clientFromCmd(cmd)
-			resp, err := client.Lifecycle.AckAlarm(context.Background(), connect.NewRequest(&v1.AckAlarmRequest{
-				AlarmId: []byte(args[0]),
-				AckedBy: operatorName(),
-			}))
-			if err != nil {
-				return err
-			}
-			fmt.Printf("Acknowledged %s on %d node(s).\n", args[0], resp.Msg.Applied)
-			return nil
-		},
-	}
 }
 
 // newAlertsShelveCmd shelves a standing alarm for a mandatory duration.
@@ -274,28 +246,16 @@ func nodeMatchesFilter(n *v1.ClusterNode, filter string) bool {
 		strings.EqualFold(filter, formatIDBytes(n.Id))
 }
 
-// alarmStateStr is the single lifecycle-state→display mapping for the CLI:
-// active (unacked), acked, cleared (unacked), shelved. Unspecified renders
-// as active for wire back-compat with pre-lifecycle broadcasts.
+// alarmStateStr is the single state→display mapping for the CLI: active or
+// shelved (with expiry). Unspecified renders as active.
 func alarmStateStr(a *v1.SystemAlert) string {
-	switch a.State {
-	case v1.AlarmState_ALARM_STATE_ACTIVE_ACKED:
-		if a.AckedBy != "" {
-			return "acked:" + a.AckedBy
-		}
-		return "acked"
-	case v1.AlarmState_ALARM_STATE_CLEARED_UNACKED:
-		return "cleared"
-	case v1.AlarmState_ALARM_STATE_SHELVED:
+	if a.State == v1.AlarmState_ALARM_STATE_SHELVED {
 		if a.ShelvedUntil != nil {
 			return "shelved→" + formatAlertTS(a.ShelvedUntil.AsTime())
 		}
 		return "shelved"
-	case v1.AlarmState_ALARM_STATE_ACTIVE_UNACKED, v1.AlarmState_ALARM_STATE_UNSPECIFIED:
-		return "active"
-	default:
-		return "active"
 	}
+	return "active"
 }
 
 // alarmPriorityStr is the single priority→display mapping for the CLI.
@@ -372,9 +332,6 @@ type alertJSON struct {
 	Response      string `json:"response"`
 	FirstSeen     string `json:"first_seen"`
 	LastSeen      string `json:"last_seen"`
-	Occurrences   uint32 `json:"occurrences"`
-	AckedBy       string `json:"acked_by,omitempty"`
-	AckedAt       string `json:"acked_at,omitempty"`
 	ShelvedUntil  string `json:"shelved_until,omitempty"`
 }
 
@@ -395,11 +352,6 @@ func alertsToJSON(alerts []nodeAlert) []alertJSON {
 			Response:      a.alert.Response,
 			FirstSeen:     a.alert.FirstSeen.AsTime().UTC().Format(time.RFC3339),
 			LastSeen:      a.alert.LastSeen.AsTime().UTC().Format(time.RFC3339),
-			Occurrences:   a.alert.Occurrences,
-			AckedBy:       a.alert.AckedBy,
-		}
-		if a.alert.AckedAt != nil {
-			j.AckedAt = a.alert.AckedAt.AsTime().UTC().Format(time.RFC3339)
 		}
 		if a.alert.ShelvedUntil != nil {
 			j.ShelvedUntil = a.alert.ShelvedUntil.AsTime().UTC().Format(time.RFC3339)
