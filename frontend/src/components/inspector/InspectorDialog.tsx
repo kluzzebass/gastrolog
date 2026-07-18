@@ -4,7 +4,7 @@ import { useVaults, useNodeRegistry } from "../../api/hooks";
 import { useWatchJobs } from "../../api/hooks";
 import { toastError } from "../Toast";
 import { Dialog } from "../Dialog";
-import { VaultsIcon, IngestersIcon, JobsIcon, MetricsIcon, ClusterIcon, RouteIcon, HistoryIcon } from "../icons";
+import { VaultsIcon, IngestersIcon, JobsIcon, MetricsIcon, ClusterIcon, RouteIcon } from "../icons";
 import { Badge } from "../Badge";
 import { OfflineBadge } from "../OfflineBadge";
 import { NodeState } from "../../api/model/node";
@@ -13,7 +13,7 @@ import type { InspectorMode } from "./ModeToggle";
 import { NodeDetailPane } from "./NodeDetailPane";
 import { EntityListPane } from "./EntityListPane";
 
-export type EntityType = "vaults" | "ingesters" | "routes" | "jobs" | "system" | "events";
+export type EntityType = "vaults" | "ingesters" | "routes" | "jobs" | "system";
 
 interface InspectorDialogProps {
   dark: boolean;
@@ -29,7 +29,7 @@ type ParsedState =
   | { mode: "nodes"; nodeId: string }
   | { mode: "entities"; entityType: EntityType; expandTarget: string | null };
 
-const entityTypes = new Set<EntityType>(["vaults", "ingesters", "routes", "jobs", "system", "events"]);
+const entityTypes = new Set<EntityType>(["vaults", "ingesters", "routes", "jobs", "system"]);
 
 function parseParam(param: string): ParsedState {
   if (param.startsWith("nodes:")) {
@@ -83,7 +83,6 @@ const entityNavItems: EntityNavItem[] = [
   { id: "routes", label: "Routes", icon: RouteIcon },
   { id: "jobs", label: "Jobs", icon: JobsIcon },
   { id: "system", label: "System", icon: MetricsIcon },
-  { id: "events", label: "Events", icon: HistoryIcon },
 ];
 
 // ---- Dialog ----
@@ -114,8 +113,6 @@ export function InspectorDialog({
     routes: routeCount,
     jobs: jobs.length,
     system: registry.all.filter((n) => n.isLive).length || 1,
-    // Events is a quiet record, not a call to action — no count badge.
-    events: 0,
   };
 
   // Parse URL state, forcing entities mode in single-node.

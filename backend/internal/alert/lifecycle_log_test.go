@@ -1,0 +1,233 @@
+package alert
+
+import (
+	"context"
+	"log/slog"
+	"sync"
+	"testing"
+	"time"
+)
+
+// The log stream IS the event record (gastrolog-1m3e0d): every alarm
+// lifecycle transition edge logs exactly one structured slog line from the
+// collector, and the self ingester captures those lines into a vault. These
+// tests pin that contract the way the removed event-journal tests pinned
+// ring entries: one line per transition, none for suppressed flaps, on an
+// injected clock with zero sleeps.
+
+// logSpy is a slog.Handler that records every line with its level and
+// attributes, so tests assert on structure, not formatting.
+type logSpy struct {
+	mu      sync.Mutex
+	records []spyLine
+}
+
+type spyLine struct {
+	level slog.Level
+	msg   string
+	attrs map[string]string
+}
+
+func (s *logSpy) Enabled(context.Context, slog.Level) bool { return true }
+
+func (s *logSpy) Handle(_ context.Context, r slog.Record) error {
+	attrs := make(map[string]string)
+	r.Attrs(func(a slog.Attr) bool {
+		attrs[a.Key] = a.Value.String()
+		return true
+	})
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.records = append(s.records, spyLine{level: r.Level, msg: r.Message, attrs: attrs})
+	return nil
+}
+
+func (s *logSpy) WithAttrs([]slog.Attr) slog.Handler { return s }
+func (s *logSpy) WithGroup(string) slog.Handler      { return s }
+
+func (s *logSpy) lines() []spyLine {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]spyLine(nil), s.records...)
+}
+
+// spyDefaultLogger swaps the process default logger for a spy for the
+// duration of the test. The collector logs through the slog default.
+func spyDefaultLogger(t *testing.T) *logSpy {
+	t.Helper()
+	spy := &logSpy{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(spy))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return spy
+}
+
+// TestLifecycleTransitionsLogExactlyOneLineEach drives the full lifecycle —
+// raise → ack → clear (released) → re-raise → shelve → unshelve → re-shelve
+// → shelve expiry → clear (retained) → releasing ack — and asserts exactly
+// one slog line per transition edge, in order, with the operator identity on
+// the operator actions. Reads settle state in between and must add nothing.
+func TestLifecycleTransitionsLogExactlyOneLineEach(t *testing.T) {
+	spy := spyDefaultLogger(t)
+	clk := newSuppressionClock()
+	c := NewWithClock(clk.Now)
+
+	// wal-reserve: zero delay-on, zero delay-off, non-latching, shelveable.
+	c.Raise("wal-reserve", "cluster-ctl", "reservation below floor")
+	c.Standing() // reads must not double-log
+	c.Standing()
+	if err := c.Ack("wal-reserve:cluster-ctl", "op"); err != nil {
+		t.Fatalf("Ack: %v", err)
+	}
+	c.Clear("wal-reserve", "cluster-ctl") // acked → released
+	c.Standing()
+
+	// Second occurrence: shelve, early unshelve, re-shelve, lapsed expiry.
+	c.Raise("wal-reserve", "cluster-ctl", "reservation below floor again")
+	if _, err := c.Shelve("wal-reserve:cluster-ctl", time.Hour, "op"); err != nil {
+		t.Fatalf("Shelve: %v", err)
+	}
+	if err := c.Unshelve("wal-reserve:cluster-ctl"); err != nil {
+		t.Fatalf("Unshelve: %v", err)
+	}
+	if _, err := c.Shelve("wal-reserve:cluster-ctl", time.Hour, "op"); err != nil {
+		t.Fatalf("re-Shelve: %v", err)
+	}
+	clk.Advance(2 * time.Hour)
+	c.Standing() // lazy settle runs the expiry
+	c.Clear("wal-reserve", "cluster-ctl") // unacked → retained cleared-unacked
+	c.Standing()
+	if err := c.Ack("wal-reserve:cluster-ctl", "op"); err != nil {
+		t.Fatalf("Ack of cleared-unacked: %v", err)
+	}
+	c.Standing()
+
+	want := []struct {
+		level slog.Level
+		msg   string
+		by    string // expected operator identity attr value; "" = none
+	}{
+		{slog.LevelWarn, "alarm raised", ""},
+		{slog.LevelInfo, "alarm acknowledged", "op"},
+		{slog.LevelInfo, "alarm cleared — condition resolved", ""},
+		{slog.LevelWarn, "alarm raised", ""},
+		{slog.LevelInfo, "alarm shelved", "op"},
+		{slog.LevelInfo, "alarm unshelved", ""},
+		{slog.LevelInfo, "alarm shelved", "op"},
+		{slog.LevelInfo, "alarm shelve expired — returned to the active list", ""},
+		{slog.LevelInfo, "alarm cleared — condition resolved; retained until acknowledged", ""},
+		{slog.LevelInfo, "alarm acknowledged and released — condition already resolved", "op"},
+	}
+	got := spy.lines()
+	if len(got) != len(want) {
+		t.Fatalf("logged %d lines, want %d:\n%+v", len(got), len(want), got)
+	}
+	for i, w := range want {
+		g := got[i]
+		if g.msg != w.msg {
+			t.Fatalf("line %d = %q, want %q", i, g.msg, w.msg)
+		}
+		if g.level != w.level {
+			t.Errorf("line %d (%q) level = %v, want %v", i, g.msg, g.level, w.level)
+		}
+		if id := g.attrs["id"]; id != "wal-reserve:cluster-ctl" {
+			t.Errorf("line %d (%q) id = %q, want the full alarm ID", i, g.msg, id)
+		}
+		by := g.attrs["acked_by"]
+		if by == "" {
+			by = g.attrs["shelved_by"]
+		}
+		if by != w.by {
+			t.Errorf("line %d (%q) operator identity = %q, want %q", i, g.msg, by, w.by)
+		}
+	}
+	// The shelve lines carry the mandatory expiry.
+	if got[4].attrs["until"] == "" || got[6].attrs["until"] == "" {
+		t.Errorf("shelve lines must carry the expiry: %+v %+v", got[4], got[6])
+	}
+}
+
+// TestSuppressedConditionLogsNothing: a condition that dies inside its
+// delay-on window never annunciated — logging it would reintroduce the
+// chattering the window suppresses.
+func TestSuppressedConditionLogsNothing(t *testing.T) {
+	spy := spyDefaultLogger(t)
+	clk := newSuppressionClock()
+	c := NewWithClock(clk.Now)
+
+	lt, ok := TypeByID("vault-leaderless")
+	if !ok || lt.DelayOn <= 0 {
+		t.Fatal("vault-leaderless must carry a catalog DelayOn")
+	}
+	c.Raise("vault-leaderless", "vault1", "no leader (flap)")
+	clk.Advance(lt.DelayOn / 2)
+	c.Clear("vault-leaderless", "vault1")
+	clk.Advance(time.Hour)
+	c.Standing()
+
+	if lines := spy.lines(); len(lines) != 0 {
+		t.Fatalf("suppressed flap logged %d lines: %+v", len(lines), lines)
+	}
+}
+
+// TestDelayedAnnunciationLogsOnce: a condition outliving its delay-on window
+// annunciates on the settling read and logs exactly one activation line.
+func TestDelayedAnnunciationLogsOnce(t *testing.T) {
+	spy := spyDefaultLogger(t)
+	clk := newSuppressionClock()
+	c := NewWithClock(clk.Now)
+
+	lt, _ := TypeByID("vault-leaderless")
+	c.Raise("vault-leaderless", "vault1", "no leader (stuck)")
+	clk.Advance(lt.DelayOn + time.Second)
+	c.Standing()
+	c.Standing()
+
+	lines := spy.lines()
+	if len(lines) != 1 || lines[0].msg != "alarm active — condition persisted past its delay-on window" {
+		t.Fatalf("want exactly one activation line, got %+v", lines)
+	}
+	if lines[0].level != slog.LevelWarn {
+		t.Errorf("activation line level = %v, want Warn", lines[0].level)
+	}
+}
+
+// TestLatchedAlarmLogs: condition resolves before ack → one latched-standing
+// line, then the releasing ack → one line.
+func TestLatchedAlarmLogs(t *testing.T) {
+	spy := spyDefaultLogger(t)
+	clk := newSuppressionClock()
+	c := NewWithClock(clk.Now)
+
+	// Find a zero-delay latching catalog type so the test tracks the catalog.
+	var latchingID string
+	for _, at := range Types() {
+		if at.Latching && at.DelayOn == 0 {
+			latchingID = at.IDPrefix
+			break
+		}
+	}
+	if latchingID == "" {
+		t.Skip("no zero-delay latching type in the catalog")
+	}
+	c.Raise(latchingID, "inst", "latched condition")
+	c.Clear(latchingID, "inst")
+	if err := c.Ack(latchingID+":inst", "op"); err != nil {
+		t.Fatalf("Ack: %v", err)
+	}
+
+	wantMsgs := []string{
+		"alarm raised",
+		"alarm condition cleared but the alarm is latched — standing until operator acknowledgment",
+		"alarm acknowledged and released — condition already resolved",
+	}
+	lines := spy.lines()
+	if len(lines) != len(wantMsgs) {
+		t.Fatalf("logged %d lines, want %d: %+v", len(lines), len(wantMsgs), lines)
+	}
+	for i, w := range wantMsgs {
+		if lines[i].msg != w {
+			t.Fatalf("line %d = %q, want %q", i, lines[i].msg, w)
+		}
+	}
+}

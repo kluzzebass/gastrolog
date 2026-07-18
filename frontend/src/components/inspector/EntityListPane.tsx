@@ -18,7 +18,6 @@ import { protoToInstant, formatTimestamp, elapsed, countdown } from "../../utils
 import { useTick } from "./JobCard";
 import { SystemStatsView, ClusterSummaryView } from "./SystemStatsView";
 import { RouteStatsView } from "./RouteStatsView";
-import { EventJournalView } from "./EventJournalView";
 import { groupByNode } from "./groupByNode";
 import type { EntityType } from "./InspectorDialog";
 import { encode } from "../../api/glid";
@@ -42,8 +41,6 @@ export function EntityListPane({ entityType, dark, onOpenSettings, expandTarget 
       return <JobsList dark={dark} />;
     case "system":
       return <SystemList dark={dark} />;
-    case "events":
-      return <EventsList dark={dark} />;
   }
 }
 
@@ -168,20 +165,6 @@ function RouteStatsList({ dark }: Readonly<{ dark: boolean }>) {
     <div className="flex flex-col gap-3">
       <EntityHeader title="Routes" helpTopicId="inspector-routes" dark={dark} />
       <RouteStatsView dark={dark} />
-    </div>
-  );
-}
-
-// ---- Events ----
-
-// Event journal (gastrolog-1m3e0d): a record, not a call to action — no
-// controls, no severity color; visually quieter than the alarm list by
-// design.
-function EventsList({ dark }: Readonly<{ dark: boolean }>) {
-  return (
-    <div className="flex flex-col gap-3">
-      <EntityHeader title="Events" helpTopicId="inspector-events" dark={dark} />
-      <EventJournalView dark={dark} />
     </div>
   );
 }

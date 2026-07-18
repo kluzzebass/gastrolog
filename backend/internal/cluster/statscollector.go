@@ -179,13 +179,6 @@ type AlertProvider interface {
 	Standing() []*alert.Alarm
 }
 
-// EventRecorder receives event-journal entries for demoted event-shaped
-// diagnostics (transition edges that are records of occurrence, not
-// alarms). Satisfied by *alert.EventJournal (gastrolog-1m3e0d).
-type EventRecorder interface {
-	Record(e alert.Event)
-}
-
 // AlarmRateProvider exposes the alarm system's self-monitoring rate gauge:
 // alarm activations on this node in the rolling 10-minute window (EEMUA 191
 // rate principle). Satisfied by *alert.RateMonitor. Read-only — the flood
@@ -220,7 +213,6 @@ type StatsCollectorConfig struct {
 	ClusterRouteTotals func() (routed, matched int64, membership string)
 	Alerts             AlertProvider     // optional; nil if no alert collector
 	AlarmRate          AlarmRateProvider // optional; nil disables the alarm-rate gauge
-	Events             EventRecorder     // optional; nil skips event-journal entries for demoted diagnostics
 	LogDrops           LogDropsProvider  // optional; nil disables the drop counter
 	Jobs               JobsProvider      // optional; nil in single-node mode
 	NodeID             string
@@ -733,48 +725,27 @@ func (c *StatsCollector) collectRaftLiveness(stats *gastrologv1.NodeStats, now t
 	walNow := c.walLatencyDegradedActive
 	c.mu.Unlock()
 
-	// Each transition edge is one log line AND one event-journal entry
-	// (gastrolog-1m3e0d): these are demoted diagnostics — records of
-	// occurrence with no operator action — and the hysteresis above is the
-	// existing choke point that already knows the edges.
+	logger := c.cfg.Logger
+	if logger == nil {
+		return
+	}
 	if stormNow != stormWas {
 		if stormNow {
-			c.diagnosticEdge(true, "Raft election storm: consensus is churning on this node",
-				"elections_per_min", stats.RaftElectionsPerMin, alert.EventElectionStorm,
-				fmt.Sprintf("election storm engaged — %.1f elections/min, consensus is churning", stats.RaftElectionsPerMin))
+			logger.Warn("Raft election storm: consensus is churning on this node",
+				"elections_per_min", stats.RaftElectionsPerMin)
 		} else {
-			c.diagnosticEdge(false, "Raft election rate back to calm",
-				"elections_per_min", stats.RaftElectionsPerMin, alert.EventElectionStorm,
-				fmt.Sprintf("election rate back to calm — %.1f elections/min", stats.RaftElectionsPerMin))
+			logger.Info("Raft election rate back to calm",
+				"elections_per_min", stats.RaftElectionsPerMin)
 		}
 	}
 	if walNow != walWas {
 		if walNow {
-			c.diagnosticEdge(true, "Raft WAL append latency degraded: bulk I/O may be starving consensus",
-				"wal_append_max_ms", stats.RaftWalAppendMaxMs, alert.EventWALLatency,
-				fmt.Sprintf("WAL append latency degraded — max %.0f ms; bulk I/O may be starving consensus", stats.RaftWalAppendMaxMs))
+			logger.Warn("Raft WAL append latency degraded: bulk I/O may be starving consensus",
+				"wal_append_max_ms", stats.RaftWalAppendMaxMs)
 		} else {
-			c.diagnosticEdge(false, "Raft WAL append latency back to normal",
-				"wal_append_max_ms", stats.RaftWalAppendMaxMs, alert.EventWALLatency,
-				fmt.Sprintf("WAL append latency back to normal — max %.0f ms", stats.RaftWalAppendMaxMs))
+			logger.Info("Raft WAL append latency back to normal",
+				"wal_append_max_ms", stats.RaftWalAppendMaxMs)
 		}
-	}
-}
-
-// diagnosticEdge emits one log line (Warn when the condition engaged, Info
-// when it calmed) and one event-journal entry for a demoted-diagnostic
-// transition edge. Raft-sourced: the two callers are the election-storm and
-// WAL-latency hysteresis in collectRaftLiveness.
-func (c *StatsCollector) diagnosticEdge(engaged bool, logMsg, logKey string, logVal float64, eventType, detail string) {
-	if l := c.cfg.Logger; l != nil {
-		if engaged {
-			l.Warn(logMsg, logKey, logVal)
-		} else {
-			l.Info(logMsg, logKey, logVal)
-		}
-	}
-	if c.cfg.Events != nil {
-		c.cfg.Events.Record(alert.Event{Type: eventType, Source: "raft", Detail: detail})
 	}
 }
 

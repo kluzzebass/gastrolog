@@ -265,17 +265,6 @@ type Collector struct {
 	// again after startup; consumed on the activation edge.
 	journal *journal
 	pending map[string]pendingLifecycle
-
-	// onEvent, when set, receives EXACTLY ONE Event per alarm lifecycle
-	// transition edge (gastrolog-1m3e0d; see the Event* constants in
-	// events.go for the set). Same discipline as onActivate: transition
-	// edges are collected under the lock into pendingEvents and emitted
-	// after unlocking, so the hook may safely touch the collector. Wired
-	// to EventJournal.Record.
-	onEvent func(Event)
-	// pendingEvents accumulates transition events under c.mu until the
-	// public method that took the lock drains and emits them.
-	pendingEvents []Event
 }
 
 // SetOnActivate installs the activation hook. Wire once at startup, before
@@ -295,45 +284,6 @@ func fireActivations(hook func(typeID string), typeIDs []string) {
 	}
 	for _, t := range typeIDs {
 		hook(t)
-	}
-}
-
-// SetOnEvent installs the lifecycle-transition event hook (the event
-// journal). Wire once at startup, before components start raising.
-func (c *Collector) SetOnEvent(fn func(Event)) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.onEvent = fn
-}
-
-// eventLocked queues one lifecycle-transition event, stamped with the
-// collector clock — lazily settled transitions record the instant the
-// settling read ran, same as their slog lines. No-op without a hook.
-// Caller holds c.mu.
-func (c *Collector) eventLocked(e Event) {
-	if c.onEvent == nil {
-		return
-	}
-	e.Time = c.now()
-	c.pendingEvents = append(c.pendingEvents, e)
-}
-
-// drainEventsLocked hands the queued transition events to the caller for
-// emission after unlock. Caller holds c.mu.
-func (c *Collector) drainEventsLocked() (hook func(Event), events []Event) {
-	events = c.pendingEvents
-	c.pendingEvents = nil
-	return c.onEvent, events
-}
-
-// emitEvents delivers drained transition events outside the collector lock,
-// mirroring fireActivations.
-func emitEvents(hook func(Event), events []Event) {
-	if hook == nil {
-		return
-	}
-	for _, e := range events {
-		hook(e)
 	}
 }
 
@@ -450,10 +400,8 @@ func (c *Collector) raise(a Alarm, delayOn, delayOff time.Duration, latching boo
 		c.settleLocked(e, now, &activated)
 	}
 	hook := c.onActivate
-	evHook, events := c.drainEventsLocked()
 	c.mu.Unlock()
 	fireActivations(hook, activated)
-	emitEvents(evHook, events)
 }
 
 // Clear reports that the condition of the given type for the given instance
@@ -475,12 +423,10 @@ func (c *Collector) Clear(typeID, instanceKey string) {
 	var activated []string
 	c.clearLocked(typeID, instanceKey, &activated)
 	hook := c.onActivate
-	evHook, events := c.drainEventsLocked()
 	c.mu.Unlock()
 	// A pending condition whose delay-on elapsed before this Clear arrived
 	// annunciated during settling — it outlived its window, so it counts.
 	fireActivations(hook, activated)
-	emitEvents(evHook, events)
 }
 
 // clearLocked is Clear's body; caller holds c.mu.
@@ -513,23 +459,11 @@ func (c *Collector) clearLocked(typeID, instanceKey string, activated *[]string)
 			// (in this order, ack first). Release.
 			slog.Info("latched alarm released — condition resolved after acknowledgment",
 				"id", e.alarm.ID, "source", e.alarm.Source, "acked_by", e.ackedBy)
-			c.eventLocked(Event{
-				Type:    EventAlarmCleared,
-				Source:  e.alarm.Source,
-				AlarmID: e.alarm.ID,
-				Detail:  "condition resolved after acknowledgment — released",
-			})
 			c.removeLocked(id)
 			return
 		}
 		slog.Info("alarm condition cleared but the alarm is latched — standing until operator acknowledgment",
 			"id", e.alarm.ID, "source", e.alarm.Source)
-		c.eventLocked(Event{
-			Type:    EventAlarmCleared,
-			Source:  e.alarm.Source,
-			AlarmID: e.alarm.ID,
-			Detail:  "condition resolved — latched, standing until acknowledged",
-		})
 		return
 	}
 	if e.delayOff <= 0 {
@@ -544,16 +478,8 @@ func (c *Collector) clearLocked(typeID, instanceKey string, activated *[]string)
 // visible until acknowledged. Caller holds c.mu.
 func (c *Collector) conditionResolvedLocked(id string, e *entry, now time.Time) {
 	if e.acked || e.shelved(now) {
-		if e.delayOn > 0 || e.acked {
-			slog.Info("alarm cleared — condition resolved",
-				"id", e.alarm.ID, "source", e.alarm.Source)
-		}
-		c.eventLocked(Event{
-			Type:    EventAlarmCleared,
-			Source:  e.alarm.Source,
-			AlarmID: e.alarm.ID,
-			Detail:  "condition resolved — released",
-		})
+		slog.Info("alarm cleared — condition resolved",
+			"id", e.alarm.ID, "source", e.alarm.Source)
 		c.removeLocked(id)
 		return
 	}
@@ -564,12 +490,6 @@ func (c *Collector) conditionResolvedLocked(id string, e *entry, now time.Time) 
 		e.shelvedUntil = time.Time{}
 		slog.Info("alarm cleared — condition resolved; retained until acknowledged",
 			"id", e.alarm.ID, "source", e.alarm.Source)
-		c.eventLocked(Event{
-			Type:    EventAlarmCleared,
-			Source:  e.alarm.Source,
-			AlarmID: e.alarm.ID,
-			Detail:  "condition resolved — retained until acknowledged",
-		})
 	}
 }
 
@@ -596,12 +516,6 @@ func (c *Collector) settleLocked(e *entry, now time.Time, activated *[]string) (
 		e.acked, e.ackedBy, e.ackedAt = false, "", time.Time{}
 		slog.Info("alarm shelve expired — returned to the active list",
 			"id", e.alarm.ID, "source", e.alarm.Source)
-		c.eventLocked(Event{
-			Type:    EventAlarmShelveExpired,
-			Source:  e.alarm.Source,
-			AlarmID: e.alarm.ID,
-			Detail:  "shelve expired — returned to the active list",
-		})
 	}
 	if e.conditionUp {
 		// Activation covers two shapes: the first annunciation of a fresh
@@ -624,24 +538,12 @@ func (c *Collector) settleLocked(e *entry, now time.Time, activated *[]string) (
 				slog.Info("alarm cleared — condition stayed clear past its delay-off window",
 					"id", e.alarm.ID, "source", e.alarm.Source, "delay_off", e.delayOff)
 			}
-			c.eventLocked(Event{
-				Type:    EventAlarmCleared,
-				Source:  e.alarm.Source,
-				AlarmID: e.alarm.ID,
-				Detail:  "condition stayed clear past its delay-off window — released",
-			})
 			return true
 		}
 		e.cleared = true
 		e.shelvedUntil = time.Time{}
 		slog.Info("alarm cleared — condition resolved; retained until acknowledged",
 			"id", e.alarm.ID, "source", e.alarm.Source)
-		c.eventLocked(Event{
-			Type:    EventAlarmCleared,
-			Source:  e.alarm.Source,
-			AlarmID: e.alarm.ID,
-			Detail:  "condition stayed clear past its delay-off window — retained until acknowledged",
-		})
 	}
 	return false
 }
@@ -662,17 +564,18 @@ func (c *Collector) activateLocked(e *entry, activated *[]string) {
 	// occurrence counter keeps the history).
 	e.alarm.FirstSeen = e.conditionSince
 	e.occurrences++
-	c.eventLocked(Event{
-		Type:    EventAlarmRaised,
-		Source:  e.alarm.Source,
-		AlarmID: e.alarm.ID,
-		Detail:  e.alarm.Detail,
-	})
 	c.applyPendingLocked(e)
 	*activated = append(*activated, e.alarm.TypeID)
+	// Every annunciation edge logs exactly once — the log stream is the
+	// event record (events are log messages; the self ingester captures
+	// them). Call sites cannot log this edge: they no longer know when a
+	// delay-on window elapses, and zero-delay raisers refresh every tick.
 	if e.delayOn > 0 {
 		slog.Warn("alarm active — condition persisted past its delay-on window",
 			"id", e.alarm.ID, "source", e.alarm.Source, "delay_on", e.delayOn, "detail", e.alarm.Detail)
+	} else {
+		slog.Warn("alarm raised",
+			"id", e.alarm.ID, "source", e.alarm.Source, "detail", e.alarm.Detail)
 	}
 }
 
@@ -697,24 +600,6 @@ func (c *Collector) applyPendingLocked(e *entry) {
 	if p.Acked || !p.ShelvedUntil.IsZero() {
 		slog.Info("alarm lifecycle state replayed from journal",
 			"id", e.alarm.ID, "acked", p.Acked, "shelved_until", p.ShelvedUntil)
-		// One event per re-application: the alarm's visible state changed
-		// on this node. Shelve wins the label when both are set (a live
-		// shelve resets acknowledgment; a folded ack-while-shelved keeps
-		// both, and shelved is the state the operator sees).
-		ev := Event{
-			Type:    EventAlarmAcked,
-			Source:  e.alarm.Source,
-			AlarmID: e.alarm.ID,
-			By:      p.AckedBy,
-			Detail:  "acknowledgment replayed from the alarm lifecycle journal after restart",
-		}
-		if !p.ShelvedUntil.IsZero() {
-			ev.Type = EventAlarmShelved
-			ev.By = ""
-			ev.Detail = "shelve replayed from the alarm lifecycle journal after restart — until " +
-				p.ShelvedUntil.UTC().Format(time.RFC3339)
-		}
-		c.eventLocked(ev)
 	}
 }
 
@@ -765,12 +650,10 @@ func (c *Collector) snapshot(keep func(AlarmState) bool) []*Alarm {
 		result = append(result, &cp)
 	}
 	hook := c.onActivate
-	evHook, events := c.drainEventsLocked()
 	c.mu.Unlock()
 	// Delayed conditions may annunciate on a read — the rate monitor must
 	// still see them.
 	fireActivations(hook, activated)
-	emitEvents(evHook, events)
 
 	if len(result) == 0 {
 		return nil
@@ -847,10 +730,8 @@ func (c *Collector) Ack(id, by string) error {
 	var activated []string
 	err := c.ackLocked(id, by, &activated)
 	hook := c.onActivate
-	evHook, events := c.drainEventsLocked()
 	c.mu.Unlock()
 	fireActivations(hook, activated)
-	emitEvents(evHook, events)
 	return err
 }
 
@@ -867,13 +748,6 @@ func (c *Collector) ackLocked(id, by string, activated *[]string) error {
 		// it outlives the window.
 		slog.Info("alarm acknowledged and released — new occurrence pending its delay-on window",
 			"id", id, "acked_by", by)
-		c.eventLocked(Event{
-			Type:    EventAlarmAcked,
-			Source:  e.alarm.Source,
-			AlarmID: id,
-			By:      by,
-			Detail:  "acknowledged and released — new occurrence pending its delay-on window",
-		})
 		e.cleared = false
 		e.active = false
 		return nil
@@ -883,25 +757,11 @@ func (c *Collector) ackLocked(id, by string, activated *[]string) error {
 		// thing the alarm was standing for. Release it.
 		slog.Info("alarm acknowledged and released — condition already resolved",
 			"id", id, "acked_by", by)
-		c.eventLocked(Event{
-			Type:    EventAlarmAcked,
-			Source:  e.alarm.Source,
-			AlarmID: id,
-			By:      by,
-			Detail:  "acknowledged and released — condition already resolved",
-		})
 		c.removeLocked(id)
 		return nil
 	}
 	e.acked, e.ackedBy, e.ackedAt = true, by, now
 	slog.Info("alarm acknowledged", "id", id, "acked_by", by)
-	c.eventLocked(Event{
-		Type:    EventAlarmAcked,
-		Source:  e.alarm.Source,
-		AlarmID: id,
-		By:      by,
-		Detail:  "acknowledged",
-	})
 	c.journalAppendLocked(journalRecord{Op: journalOpAck, ID: id, By: by, At: now})
 	return nil
 }
@@ -920,10 +780,8 @@ func (c *Collector) Shelve(id string, d time.Duration, by string) (time.Time, er
 	var activated []string
 	until, err := c.shelveLocked(id, d, by, &activated)
 	hook := c.onActivate
-	evHook, events := c.drainEventsLocked()
 	c.mu.Unlock()
 	fireActivations(hook, activated)
-	emitEvents(evHook, events)
 	return until, err
 }
 
@@ -944,13 +802,6 @@ func (c *Collector) shelveLocked(id string, d time.Duration, by string, activate
 	e.shelvedUntil = until
 	e.acked, e.ackedBy, e.ackedAt = false, "", time.Time{}
 	slog.Info("alarm shelved", "id", id, "shelved_by", by, "until", until)
-	c.eventLocked(Event{
-		Type:    EventAlarmShelved,
-		Source:  e.alarm.Source,
-		AlarmID: id,
-		By:      by,
-		Detail:  "shelved until " + until.UTC().Format(time.RFC3339),
-	})
 	c.journalAppendLocked(journalRecord{Op: journalOpShelve, ID: id, By: by, At: now, Until: until})
 	return until, nil
 }
@@ -972,10 +823,8 @@ func (c *Collector) Unshelve(id string) error {
 	var activated []string
 	err := c.unshelveLocked(id, &activated)
 	hook := c.onActivate
-	evHook, events := c.drainEventsLocked()
 	c.mu.Unlock()
 	fireActivations(hook, activated)
-	emitEvents(evHook, events)
 	return err
 }
 
@@ -990,12 +839,6 @@ func (c *Collector) unshelveLocked(id string, activated *[]string) error {
 	}
 	e.shelvedUntil = time.Time{}
 	slog.Info("alarm unshelved", "id", id)
-	c.eventLocked(Event{
-		Type:    EventAlarmUnshelved,
-		Source:  e.alarm.Source,
-		AlarmID: id,
-		Detail:  "shelve ended early — returned to the active list",
-	})
 	c.journalAppendLocked(journalRecord{Op: journalOpUnshelve, ID: id, At: now})
 	return nil
 }

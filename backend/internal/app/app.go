@@ -274,15 +274,6 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	alarmRateMonitor := alert.NewRateMonitor(alertCollector, time.Now)
 	alertCollector.SetOnActivate(alarmRateMonitor.Observe)
 
-	// Event journal (gastrolog-1m3e0d): per-node in-memory ring of records
-	// of occurrence — alarm lifecycle transitions plus demoted event-shaped
-	// diagnostics — served cluster-wide by the ListEvents RPC. In-memory by
-	// decision: it does not survive restart, and its node-started seed entry
-	// (recorded at construction, i.e. right here at boot) makes that visible
-	// instead of implicit.
-	eventJournal := alert.NewEventJournal(alert.DefaultEventJournalCapacity)
-	alertCollector.SetOnEvent(eventJournal.Record)
-
 	configSignal := notify.NewSignal()
 	statsSignal := notify.NewSignal()
 	disp := &configDispatcher{localNodeID: nodeID, logger: compDispatch.Apply(logger), clusterTLS: clusterTLS, tlsFilePath: hd.ClusterTLSPath(), configSignal: configSignal}
@@ -383,16 +374,18 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	}
 
 	// Ingest-pipeline channel pressure was demoted from an alarm to a
-	// diagnostic (gastrolog-3phtqv); its transition edges are event-shaped,
-	// and the gate's OnChange hook is the existing choke point — one journal
-	// entry per level change, no per-tick chatter (gastrolog-1m3e0d).
+	// diagnostic (gastrolog-3phtqv, gastrolog-5nvb4y); its transition edges
+	// are records of occurrence, and the gate's OnChange hook is the
+	// existing choke point — one log line per level change, no per-tick
+	// chatter. The log stream is the event record.
 	orch.PressureGate().AddOnChange(func(tr chanwatch.PressureTransition) {
-		eventJournal.Record(alert.Event{
-			Type:   alert.EventChannelPressure,
-			Source: "ingest-pipeline",
-			Detail: fmt.Sprintf("ingest pipeline pressure %s → %s (channel %s at %.0f%%)",
-				tr.From, tr.To, tr.Cause, tr.Ratio*100),
-		})
+		if tr.To == chanwatch.PressureNormal {
+			logger.Info("ingest pipeline pressure back to normal",
+				"from", tr.From.String(), "channel", tr.Cause, "ratio", tr.Ratio)
+		} else {
+			logger.Warn("ingest pipeline pressure elevated — ingesters throttling",
+				"level", tr.To.String(), "channel", tr.Cause, "ratio", tr.Ratio)
+		}
 	})
 
 	vaultsDir := cfg.VaultsFlag
@@ -497,7 +490,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		}
 	}
 
-	broadcaster, peerState, peerJobState, localStatsFn, clusterRouteRatesFn := setupClusterStats(ctx, logger, cfgStore, clusterSrv, orch, alertCollector, alarmRateMonitor, eventJournal, cfg.SlogCaptureHandler, nodeID, cfg.ServerAddr, cfg.PprofAddr, statsSignal, raftLive)
+	broadcaster, peerState, peerJobState, localStatsFn, clusterRouteRatesFn := setupClusterStats(ctx, logger, cfgStore, clusterSrv, orch, alertCollector, alarmRateMonitor, cfg.SlogCaptureHandler, nodeID, cfg.ServerAddr, cfg.PprofAddr, statsSignal, raftLive)
 	if peerState != nil {
 		// Per-vault admission verdicts are cluster-consistent: a starved
 		// vault volume or an over-budget vault claim on any node suspends
@@ -678,7 +671,6 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		ConfigStore:         proxy,
 		PlacementReconcile:  placementReconcileFn,
 		Alerts:              alertCollector,
-		Events:              eventJournal,
 
 		BootstrapTokenServeSecret: cfg.BootstrapTokenServeSecret,
 		BootstrapTokenFn:          makeBootstrapTokenFn(cfgStore),
@@ -847,7 +839,7 @@ func (a *raftLivenessAdapter) RaftLiveness() (elections, leaderLosses, failedHea
 	return elections, leaderLosses, failedHeartbeats
 }
 
-func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system.Store, clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, alerts *alert.Collector, alarmRate *alert.RateMonitor, events *alert.EventJournal, slogCapture *logging.CaptureHandler, nodeID string, apiAddr string, pprofAddr string, statsSignal *notify.Signal, raftLive cluster.RaftLivenessProvider) (*cluster.Broadcaster, *cluster.PeerState, *cluster.PeerJobState, func() *gastrologv1.NodeStats, func() (*gastrologv1.ThroughputRate, *gastrologv1.ThroughputRate)) {
+func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system.Store, clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, alerts *alert.Collector, alarmRate *alert.RateMonitor, slogCapture *logging.CaptureHandler, nodeID string, apiAddr string, pprofAddr string, statsSignal *notify.Signal, raftLive cluster.RaftLivenessProvider) (*cluster.Broadcaster, *cluster.PeerState, *cluster.PeerJobState, func() *gastrologv1.NodeStats, func() (*gastrologv1.ThroughputRate, *gastrologv1.ThroughputRate)) {
 	// Taken as a concrete type and converted explicitly: assigning a typed
 	// nil *CaptureHandler straight into the interface field would read as
 	// non-nil and panic in DroppedCount on the first tick.
@@ -914,9 +906,6 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 		},
 		Alerts:    alerts,
 		AlarmRate: alarmRate,
-		// Demoted raft diagnostics (election-storm, wal-latency) journal
-		// their transition edges beside their log lines (gastrolog-1m3e0d).
-		Events: events,
 		Jobs:      &jobBroadcastAdapter{scheduler: orch.Scheduler(), nodeID: nodeID},
 		NodeID:    nodeID,
 		NodeNameFn: func() string {
@@ -1443,8 +1432,7 @@ type serverDeps struct {
 	WAL                 *raftwal.WAL // vault-ctl raftwal at raft/groups/wal; closed after cluster-ctl raft
 	ConfigStore         io.Closer    // rawStore — closed before gRPC for clean Raft shutdown
 	PlacementReconcile  func(ctx context.Context)
-	Alerts              *alert.Collector    // local alarm collector for the lifecycle RPCs
-	Events              *alert.EventJournal // local event journal for ListEvents (gastrolog-1m3e0d)
+	Alerts              *alert.Collector // local alarm collector for the lifecycle RPCs
 
 	// gastrolog-o9z6o: when non-empty, the server registers
 	// /cluster/bootstrap-token gated on this secret. BootstrapTokenFn
@@ -1482,14 +1470,12 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 				"file": blobstore.NewConnectionTester(deps.Logger),
 			},
 			PlacementReconcile:        deps.PlacementReconcile,
-			// Alarm collector + event journal for the lifecycle RPCs.
-			// Alerts was missed when the ack/shelve fan-out landed
-			// (gastrolog-1z5gg4 wired it in the test harness only), which
-			// left production AckAlarm/ShelveAlarm answering "alarm
-			// lifecycle not available"; wired here together with the event
-			// journal (gastrolog-1m3e0d).
+			// Alarm collector for the lifecycle RPCs. Alerts was missed
+			// when the ack/shelve fan-out landed (gastrolog-1z5gg4 wired it
+			// in the test harness only), which left production
+			// AckAlarm/ShelveAlarm answering "alarm lifecycle not
+			// available"; wired here (gastrolog-1m3e0d).
 			Alerts:                    deps.Alerts,
-			Events:                    deps.Events,
 			BootstrapTokenServeSecret: deps.BootstrapTokenServeSecret,
 			BootstrapTokenFn:          deps.BootstrapTokenFn,
 			EnvironmentLabel:          deps.EnvironmentLabel,

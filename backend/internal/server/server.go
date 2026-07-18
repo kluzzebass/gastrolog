@@ -153,11 +153,6 @@ type Config struct {
 	// disables those RPCs (some tests); production always wires it.
 	Alerts *alert.Collector
 
-	// Events is this node's event journal, read by the ListEvents RPC
-	// (local ring + cross-node fan-out). Nil disables the RPC (some
-	// tests); production always wires it (gastrolog-1m3e0d).
-	Events *alert.EventJournal
-
 	// PlacementReconcile runs synchronous placement so RPC responses include
 	// vault placements. Nil in single-node or non-cluster mode.
 	PlacementReconcile func(ctx context.Context)
@@ -235,7 +230,6 @@ type Server struct {
 	routingForwarder      routing.UnaryForwarder    // forwards requests to remote nodes; nil in single-node
 	placementReconcile    func(ctx context.Context) // synchronous placement; nil in non-cluster mode
 	alerts                *alert.Collector          // local alarm collector for the lifecycle RPCs; nil disables them
-	events                *alert.EventJournal       // local event journal for ListEvents; nil disables it
 
 	// gastrolog-o9z6o: bootstrap-token endpoint configuration. When the
 	// secret is non-empty, /cluster/bootstrap-token is registered and
@@ -313,7 +307,6 @@ func New(orch *orchestrator.Orchestrator, cfgStore system.Store, factories orche
 		routingForwarder:          cfg.RoutingForwarder,
 		placementReconcile:        cfg.PlacementReconcile,
 		alerts:                    cfg.Alerts,
-		events:                    cfg.Events,
 		bootstrapTokenServeSecret: cfg.BootstrapTokenServeSecret,
 		bootstrapTokenFn:          cfg.BootstrapTokenFn,
 		logFilter:                 cfg.LogFilter,
@@ -563,7 +556,6 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 	})
 	lifecycleServer := NewLifecycleServer(s.orch, s.initiateShutdown, s.cluster, s.cfgStore, s.localNodeID, s.clusterAddress, s.peerStats, s.localStatsFn, s.logger)
 	lifecycleServer.SetAlarmLifecycle(s.alerts, s.routingForwarder)
-	lifecycleServer.SetEventJournal(s.events)
 	if s.joinClusterFn != nil {
 		lifecycleServer.SetJoinClusterFunc(s.joinClusterFn)
 	}
