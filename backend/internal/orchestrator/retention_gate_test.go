@@ -47,6 +47,57 @@ func TestFireRetentionEventAbortsOnCappedDestination(t *testing.T) {
 	}
 }
 
+// TestFireRetentionEventAbortsOnBacklogCappedDestination pins the terminal
+// treatment of ErrVaultBacklogBudget alongside the size cap above: a
+// destination vault whose pipeline backlog has hit the cluster-global budget
+// must abort the whole fan-out with a single warn, not fall into the
+// default per-record-drop branch (which would destroy the chunk with every
+// record silently dropped at the gate). Unlike the size cap the backlog
+// budget needs no peer lookup — vaultAdmissionGate reads the LOCAL guard's
+// vaultBacklogCapped state directly (disk_guard.go:735-740) — so this
+// flips the real gate via SetVaultGuard + reconcileVaultBacklogCap instead
+// of a remote-lookup stub.
+func TestFireRetentionEventAbortsOnBacklogCappedDestination(t *testing.T) {
+	t.Parallel()
+
+	fx := newDispositionFixture(t)
+
+	// Register the archive (destination) vault with the guard and force its
+	// backlog over budget, exactly as evaluateVaults would on a real tick.
+	g, _ := newGuardFixture(400*gib, map[string]uint64{})
+	g.SetVaultGuard(fx.archiveID, "archive", nil, "", "", 0)
+	g.backlogBudget.Store(100)
+	g.vaultBacklogBytes = func(id glid.GLID) int64 {
+		if id == fx.archiveID {
+			return 200
+		}
+		return 0
+	}
+	g.evaluateVaults(nil)
+	if !g.vaultBacklogCapped(fx.archiveID) {
+		t.Fatal("fixture setup: archive vault must be backlog-capped before firing retention")
+	}
+	fx.orch.diskGuard = g
+
+	logSink := &syncBuffer{}
+	r := &retentionRunner{
+		vaultID: fx.sourceID,
+		orch:    fx.orch,
+		logger:  slog.New(slog.NewTextHandler(logSink, nil)),
+	}
+
+	if r.fireRetentionEvent(fx.sealedID) {
+		t.Fatal("fireRetentionEvent must report non-completion when a destination vault is backlog-capped")
+	}
+	logs := logSink.String()
+	if got := strings.Count(logs, "fan-out aborted"); got != 1 {
+		t.Errorf("want exactly 1 abort warn, got %d\nlogs:\n%s", got, logs)
+	}
+	if s := fx.orch.GetRouteStats(); s.Matched != 0 {
+		t.Errorf("no record may be counted matched past a backlog-capped gate; Matched=%d", s.Matched)
+	}
+}
+
 // TestSubmitRetentionRecordReturnsGateError pins the exported seam
 // directly: the per-destination gate error surfaces on the submit call.
 func TestSubmitRetentionRecordReturnsGateError(t *testing.T) {

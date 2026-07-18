@@ -108,7 +108,7 @@ constant, small) it raises one High alarm, new catalog type
 - the vault,
 - the cause of the most recent deferral (drain gate engaged / destination
   vault X gated / fan-out stalled),
-- how much is waiting (chunks and bytes past policy),
+- how much is waiting (chunks past policy),
 - what resumes it.
 
 Any chunk fully routed and destroyed resets the count and clears the alarm.
@@ -200,15 +200,16 @@ Unit (single-node):
 - Alarm: raises at N consecutive deferrals, carries the cause, clears on
   the first successful chunk.
 
-Multi-node (4+ nodes, file-backed vaults, real transferrers,
-`setupMultiNode` harness):
+Multi-node (`setupMultiNode` harness, 3 nodes, file-backed vaults):
 
-- Guard engaged on the sweep node, healthy peers: retention drains in the
-  drain band.
-- Destination vault capped on a remote node: sweep defers locally, alarm
-  names the remote cause.
-- Sweep-node independence: same outcome regardless of which node holds
-  placement leadership.
+- A single pin (`TestMultiNode_RetentionSubmitDefersOnRemoteCappedDestination`)
+  covers what shipped: a destination vault capped on a remote node rejects
+  the retention submit identically regardless of which node issues it
+  (sweep-node independence), and once the cap releases the previously
+  rejected record is retryable and drains. Deeper multi-node coverage of
+  the drain-band recovery arc (guard engaged on the sweep node with healthy
+  peers, alarm naming the remote cause end-to-end) is future work, not yet
+  landed.
 
 Unhappy paths and edges:
 

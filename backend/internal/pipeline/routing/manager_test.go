@@ -3,6 +3,7 @@ package routing_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -506,8 +507,15 @@ func TestManagerVaultGateRejectsWholeRecord(t *testing.T) {
 	ack := make(chan error, 1)
 	in <- routing.Input{Record: rec, Source: routing.IngestSource(rec), Ack: ack}
 
-	if err := <-ack; !errors.Is(err, gateErr) {
+	err := <-ack
+	if !errors.Is(err, gateErr) {
 		t.Fatalf("ack = %v, want the vault gate error", err)
+	}
+	// The gate error alone doesn't say WHICH matched vault rejected the
+	// record — with two-plus matched destinations, an operator reading the
+	// alarm/log can't tell which one to act on. route() must name it.
+	if !strings.Contains(err.Error(), vaultB.String()) {
+		t.Fatalf("ack error must name the gated destination vault %s; got %v", vaultB, err)
 	}
 	select {
 	case got := <-chA:

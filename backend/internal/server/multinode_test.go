@@ -2949,14 +2949,16 @@ func TestMultiNode_RetentionSubmitDefersOnRemoteCappedDestination(t *testing.T) 
 	d2 := h.Node(t, "data-2")
 
 	// Cluster-wide route: retention output of d1's vault lands in d2's vault.
-	_ = h.cfgStore.PutRoute(ctx, system.RouteConfig{
+	if err := h.cfgStore.PutRoute(ctx, system.RouteConfig{
 		ID:   glid.New(),
 		Name: "retain-to-d2",
 		Stages: []system.RouteStage{{Match: &system.MatchStage{
 			Expression: `_source="retention" AND _vault="` + d1.vaultID.String() + `"`,
 		}}},
 		Destinations: []glid.GLID{d2.vaultID}, Enabled: true,
-	})
+	}); err != nil {
+		t.Fatalf("PutRoute: %v", err)
+	}
 	startMNRouteStatsNode(t, d1)
 	startMNRouteStatsNode(t, d2)
 

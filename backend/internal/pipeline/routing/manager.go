@@ -3,6 +3,7 @@ package routing
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 
@@ -244,7 +245,12 @@ func (m *Manager) route(ctx context.Context, in Input) {
 	if m.vaultGate != nil {
 		for _, vaultID := range vaults {
 			if err := m.vaultGate(vaultID); err != nil {
-				sendAck(in.Ack, err)
+				// Name the gated destination: with two-plus matched vaults the
+				// sentinel alone doesn't say WHICH one rejected the record, and
+				// the operator (or the deferral alarm text built from this
+				// error) needs that to act. errors.Is still matches the
+				// wrapped sentinel through %w.
+				sendAck(in.Ack, fmt.Errorf("destination vault %s: %w", vaultID, err))
 				return
 			}
 		}

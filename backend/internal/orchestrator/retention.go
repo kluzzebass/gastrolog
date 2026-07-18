@@ -137,6 +137,12 @@ type retentionRunner struct {
 	lastDeferralCause string
 	sweepDeferred     bool
 	sweepRouted       bool
+	// sweepMatchedChunks is the current sweep's total policy-matched chunk
+	// count (across all rules, pre-dedup), set once per sweep just before
+	// finishSweepDeferralState folds the scratch state. Read into the
+	// Raise detail so the alarm names how much is waiting — chunks, not
+	// bytes; a per-record byte count is not tracked here.
+	sweepMatchedChunks int
 
 	applyRaftRetentionPending func(id chunk.ChunkID) error
 
@@ -225,8 +231,15 @@ func (o *Orchestrator) retentionSweepAll() {
 			}
 		}
 	}
-	for key := range o.retention {
+	for key, runner := range o.retention {
 		if !active[key] {
+			// A pruned runner's standing deferral alarm must be cleared here —
+			// nothing else will ever clear it once the runner stops sweeping
+			// (vault removed from config, placement moved off this node,
+			// leadership lost). Mirrors disk_guard.go retainVaultGuards.
+			if o.alerts != nil {
+				o.alerts.Clear(alarmRetentionRouteDeferred, runner.vaultID.String())
+			}
 			delete(o.retention, key)
 		}
 	}
@@ -590,6 +603,11 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 
 	metas, err := r.cm.List()
 	if err != nil {
+		// Deliberately does not touch sweepDeferred/sweepRouted/deferralStreak:
+		// a transient List error is neither a fan-out deferral nor progress,
+		// so the deferral scratch state freezes here (carries whatever the
+		// previous sweep left it at) rather than folding into the streak
+		// either way. finishSweepDeferralState is not called on this exit.
 		r.logger.Error("retention: failed to list chunks", "vault", r.vaultID, "error", err)
 		return
 	}
@@ -643,6 +661,9 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 
 	if len(sealed) == 0 {
 		r.noteIdle("no eligible chunks", len(metas), filtered)
+		r.mu.Lock()
+		r.sweepMatchedChunks = 0
+		r.mu.Unlock()
 		r.finishSweepDeferralState()
 		return
 	}
@@ -688,6 +709,9 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 	if totalMatched == 0 {
 		r.noteIdle("rules matched no chunks", len(metas), filtered)
 	}
+	r.mu.Lock()
+	r.sweepMatchedChunks = totalMatched
+	r.mu.Unlock()
 	r.finishSweepDeferralState()
 }
 
@@ -765,6 +789,7 @@ func (r *retentionRunner) noteFanOutProgress() {
 func (r *retentionRunner) finishSweepDeferralState() {
 	r.mu.Lock()
 	deferred, routed, cause := r.sweepDeferred, r.sweepRouted, r.lastDeferralCause
+	matchedChunks := r.sweepMatchedChunks
 	r.sweepDeferred, r.sweepRouted = false, false
 	switch {
 	case routed:
@@ -785,11 +810,11 @@ func (r *retentionRunner) finishSweepDeferralState() {
 		r.orch.alerts.Clear(alarmRetentionRouteDeferred, key)
 	case deferred && streak >= retentionDeferralAlarmAfter:
 		r.orch.alerts.Raise(alarmRetentionRouteDeferred, key, fmt.Sprintf(
-			"Retention route fan-out for vault %s has been deferred for %d consecutive sweeps: %s. "+
+			"%d chunks past policy are waiting. Retention route fan-out for vault %s has been deferred for %d consecutive sweeps: %s. "+
 				"Expired chunks are retained and any size caps stay engaged until the drain runs. "+
 				"Free space on the starved volume, drain or grow the destination vault, or — last resort, "+
 				"discards the routed records — set this vault's retention disposition to delete.",
-			name, streak, cause))
+			matchedChunks, name, streak, cause))
 	}
 }
 
@@ -913,9 +938,12 @@ func (r *retentionRunner) tryRetainChunk(id chunk.ChunkID, b retentionRule, alre
 			// marked, nothing is destroyed; a later sweep retries fully.
 			return
 		}
-		if r.disposition == system.RetentionDispositionRoute {
-			r.noteFanOutProgress()
-		}
+		// Progress from either disposition clears the deferral alarm: the
+		// alarm's response text tells the operator to flip disposition to
+		// delete, and a delete-disposition sweep that successfully destroys
+		// a chunk is freeing space exactly as intended — that is progress
+		// by definition, not just a completed route fan-out.
+		r.noteFanOutProgress()
 		// Mark as retention-pending in vault-ctl Raft so all nodes see it —
 		// but ONLY if the FSM doesn't already carry the flag. Skipping the
 		// redundant Apply when the action stalls (transition unreachable
@@ -1094,6 +1122,14 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 	// (gastrolog-5ct2av). Progress is a completed submit: accepted-and-
 	// committed, per-record-dropped, or unmatched all count; only a BLOCKED
 	// submit does not.
+	// Bump-before-Wait invariant: every submit worker below calls watch.bump()
+	// for its last record before returning, and submitWG.Wait() (below) does
+	// not return until every worker has returned — so the last bump always
+	// happens-before Wait's return. A "spurious" abort firing after the
+	// fan-out has already completed would need the monitor to observe TWO
+	// consecutive stall windows with no bump after that last one, and even
+	// then it is a benign retained-chunk retry (gastrolog-5034va ordering),
+	// never a correctness problem.
 	watch := &progressWatch{}
 	watchDone := make(chan struct{})
 	defer close(watchDone)
@@ -1119,6 +1155,7 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 					errors.Is(subErr, ErrDiskProtect),
 					errors.Is(subErr, ErrVaultDiskProtect),
 					errors.Is(subErr, ErrVaultMaxSize),
+					errors.Is(subErr, ErrVaultBacklogBudget),
 					r.orch.shuttingDown():
 					// ErrDiskProtect is terminal for the whole fan-out: every
 					// subsequent record would be rejected the same way, and
