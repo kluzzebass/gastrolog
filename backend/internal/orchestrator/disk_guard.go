@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
-	"os"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -96,8 +95,10 @@ type diskGuard struct {
 	logger *slog.Logger
 
 	// Node-level threshold expressions ("10%", "10GB"). Never empty: set to
-	// the typeable defaults at construction, replaced by a validated
-	// GLOG_DISK_FREE_WARN / GLOG_DISK_FREE_FLOOR override when present.
+	// the typeable defaults at construction. Per-vault overrides come from
+	// the config store (VaultConfig.DiskFreeWarn/DiskFreeFloor) — there is
+	// deliberately no env-var channel, which would be invisible at runtime
+	// and silently per-node divergent (gastrolog-2mrfdw).
 	warnExpr  string
 	floorExpr string
 
@@ -179,26 +180,12 @@ func newDiskGuardWithLogger(paths []string, logger *slog.Logger) *diskGuard {
 }
 
 func newDiskGuard(paths []string) *diskGuard {
-	g := &diskGuard{
+	return &diskGuard{
 		paths:     paths,
 		sample:    statfsSample,
 		warnExpr:  defaultDiskFreeWarn,
 		floorExpr: defaultDiskFreeFloor,
 	}
-	// Operator overrides via the .env channel, in the same size-or-percent
-	// vocabulary as the config fields ("15%", "20GB"). A malformed override
-	// is ignored — the typeable defaults are the safe reading.
-	if e := os.Getenv("GLOG_DISK_FREE_WARN"); e != "" {
-		if _, err := system.ParseSizeOrPercent(e); err == nil {
-			g.warnExpr = e
-		}
-	}
-	if e := os.Getenv("GLOG_DISK_FREE_FLOOR"); e != "" {
-		if _, err := system.ParseSizeOrPercent(e); err == nil {
-			g.floorExpr = e
-		}
-	}
-	return g
 }
 
 func statfsSample(path string) (uint64, uint64, error) {

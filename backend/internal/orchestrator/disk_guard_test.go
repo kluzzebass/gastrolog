@@ -180,25 +180,20 @@ func TestDiskGuardDefaultsAreTypeable(t *testing.T) {
 	}
 }
 
-// TestDiskGuardEnvOverride pins the .env operator channel: the node-level
-// expressions accept the same size-or-percent vocabulary as the config
-// fields, and a malformed value is ignored in favor of the defaults.
-func TestDiskGuardEnvOverride(t *testing.T) { //nolint:paralleltest // t.Setenv
+// TestDiskGuardIgnoresEnv pins the removal of the env-var channel
+// (gastrolog-2mrfdw): node thresholds come from the typeable defaults and
+// the config store only — a stray GLOG_DISK_FREE_* in the environment must
+// have no effect.
+func TestDiskGuardIgnoresEnv(t *testing.T) { //nolint:paralleltest // t.Setenv
 	t.Setenv("GLOG_DISK_FREE_WARN", "20%")
 	t.Setenv("GLOG_DISK_FREE_FLOOR", "5GiB")
 	g := newDiskGuard(nil)
-	total := 100 * gib
-	if w := g.warnThreshold(total); w != 20*gib {
-		t.Fatalf("env warn 20%% of 100GiB = %d, want 20GiB", w)
+	total := 400 * gib
+	if w := g.warnThreshold(total); w != 40*gib {
+		t.Fatalf("warn must stay the 10%% default despite env: got %d, want 40GiB", w)
 	}
-	if f := g.floorThreshold(total); f != 5*gib {
-		t.Fatalf("env floor 5GiB = %d, want 5GiB regardless of volume", f)
-	}
-
-	t.Setenv("GLOG_DISK_FREE_WARN", "max(10%, 10GiB)") // not typeable ⇒ not parseable
-	g = newDiskGuard(nil)
-	if w := g.warnThreshold(total); w != 10*gib {
-		t.Fatalf("malformed env override must fall back to the default 10%%: got %d", w)
+	if f := g.floorThreshold(total); f != 12*gib {
+		t.Fatalf("floor must stay the 3%% default despite env: got %d, want 12GiB", f)
 	}
 }
 
