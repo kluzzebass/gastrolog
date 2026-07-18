@@ -16,17 +16,14 @@ function formatTime(seconds: bigint | undefined): string {
   return date.toLocaleTimeString();
 }
 
-/** Priority → design-token mapping: Critical (and software faults) reuse the
- *  error token, High the warn token, Low the muted text token. Low must NEVER
- *  reuse a log-severity token: severity-info is green, and green on an alarm
- *  row claims health while demanding attention. An alarm is never green. */
-function priorityColor(
-  a: Pick<NodeAlert, "priority" | "softwareFault">,
-  dark: boolean,
-): string {
-  if (a.softwareFault || a.priority === AlarmPriority.CRITICAL) return "text-severity-error";
-  if (a.priority === AlarmPriority.HIGH) return "text-severity-warn";
-  return dark ? "text-text-muted" : "text-light-text-muted";
+/** Priority → the alarm-priority token ladder (red / amber / yellow).
+ *  Never a log-severity token (info is green — a lie on an alarm row) and
+ *  never muted (muted is de-emphasis; a de-emphasized alarm is a
+ *  contradiction). Every alarm carries an alarm color. */
+function priorityColor(a: Pick<NodeAlert, "priority" | "softwareFault">): string {
+  if (a.softwareFault || a.priority === AlarmPriority.CRITICAL) return "text-alarm-critical";
+  if (a.priority === AlarmPriority.HIGH) return "text-alarm-high";
+  return "text-alarm-low";
 }
 
 function priorityLabel(a: Pick<NodeAlert, "priority" | "softwareFault">): string {
@@ -43,8 +40,8 @@ function priorityLabel(a: Pick<NodeAlert, "priority" | "softwareFault">): string
   }
 }
 
-function PriorityIcon({ alarm, dark }: Readonly<{ alarm: NodeAlert; dark: boolean }>) {
-  const color = priorityColor(alarm, dark);
+function PriorityIcon({ alarm }: Readonly<{ alarm: NodeAlert }>) {
+  const color = priorityColor(alarm);
   if (alarm.softwareFault || alarm.priority === AlarmPriority.CRITICAL) {
     return (
       <svg viewBox="0 0 16 16" className={`w-4 h-4 ${color} flex-shrink-0`} fill="currentColor">
@@ -130,7 +127,7 @@ function AlertRow({ alarm: a, dark }: Readonly<{ alarm: NodeAlert; dark: boolean
         "border-light-border-subtle",
       )}`}
     >
-      <PriorityIcon alarm={a} dark={dark} />
+      <PriorityIcon alarm={a} />
       <div className="flex-1 min-w-0">
         <button
           onClick={() => setExpanded((v) => !v)}
@@ -151,7 +148,7 @@ function AlertRow({ alarm: a, dark }: Readonly<{ alarm: NodeAlert; dark: boolean
           </p>
         )}
         <div className={`flex flex-wrap items-baseline gap-3 mt-1 text-xs font-mono ${c("text-text-muted", "text-light-text-muted")}`}>
-          <span className={priorityColor(a, dark)}>{priorityLabel(a)}</span>
+          <span className={priorityColor(a)}>{priorityLabel(a)}</span>
           <span>{a.nodeName}</span>
           <span>{a.source}</span>
           <span title="First seen">{formatTime(a.firstSeen?.seconds)}</span>
