@@ -50,8 +50,8 @@ section.
 | `max-size` | `""` = unlimited | **unbounded** | limit | operator-knowledge (constant) | help says "empty means unlimited" (accurate, but the behaviour is the bug) | **FIX** | gastrolog-1epfgb (product) + gastrolog-2b2yyy (script) |
 | `cache-budget` | `""` = **no cap** | **unbounded** | limit | derivable/op | **DISHONEST** — field comment says `default: "1GiB"`, code never applies it | **FIX** (crit 1 **and** 4) | gastrolog-338j51 |
 | `memory-budget` | `0` = no budget | **unbounded** | limit | operator-knowledge | help silent on unbounded | **FIX** | gastrolog-1qd5wz |
-| `disk-free-warn` | `""` = inherit node default | bounded | limit | derivable | **was vague** — see correction below | **PASS** (crit 1) + crit-4 fix | fixed in this epic |
-| `disk-free-floor` | `""` = inherit node default | bounded | limit | derivable | **was vague** — see correction below | **PASS** (crit 1) + crit-4 fix | fixed in this epic |
+| `disk-free-warn` | `""` = inherit node default `"10%"` | bounded | limit | derivable **and typeable** (`%` grammar) | **was vague, then untypeable** — see correction below | **PASS** (crit 1) + crit-4 fix | fixed in this epic |
+| `disk-free-floor` | `""` = inherit node default `"3%"` | bounded | limit | derivable **and typeable** (`%` grammar) | **was vague, then untypeable** — see correction below | **PASS** (crit 1) + crit-4 fix | fixed in this epic |
 | `cache-ttl` | `""` | n/a (only used in `ttl` eviction mode) | mechanism | operator | honest | **OK-mech** | — |
 
 ### Criterion-4 correction: `disk-free-warn` / `disk-free-floor` (found in the field)
@@ -61,12 +61,17 @@ only** ("empty inherits the node default") and never checked the UI: the
 vault form rendered `placeholder=""` with the same vague sentence, so an
 operator staring at a live disk-space alarm and a blank threshold field had
 no way to learn what was being enforced. "Inherits the node default" without
-stating the default is not honest — it is a pointer to nowhere. Every
-surface now states the formula: warn `max(10% of volume, 10 GiB)` capped at
-25% of the volume; floor `max(3% of volume, 3 GiB)` capped at 10% — in the
-form description and placeholder and in the CLI flag help. The audit's own
-miss here is the lesson: criterion 4 must be checked on **every** surface a
-knob has, not the first one that answers.
+stating the default is not honest — it is a pointer to nowhere. The first
+fix stated the then-current formula on every surface — and thereby exposed
+the deeper defect: the formula (`max(10% of volume, 10 GiB)` capped at 25%;
+floor `max(3%, 3 GiB)` capped at 10%) was **not a value an operator could
+type into the field**, so it violated the typeable-defaults principle
+(policy decision 6, operator directive). The formula is GONE. The fields now
+accept a size (`"10GB"`) or a percentage of the volume (`"10%"`), and the
+node defaults ARE the typeable expressions `"10%"` (warn) and `"3%"`
+(floor), stated as placeholder and help on every surface. Two lessons stand:
+criterion 4 must be checked on **every** surface a knob has, and a default a
+surface cannot state as a typeable value is itself a finding.
 
 ### The `cache-budget` finding (crit 4, proven)
 
@@ -132,19 +137,25 @@ placeholder *is* `ParamDefaults`, at runtime.
 | retention sweep cadence | every minute | **OK-mech** | |
 | reconcile schedule | daily 03:00 | **OK-mech** | |
 | suspect grace | 7 days | **OK-mech** | |
-| disk-guard `floorFraction` | 0.03 | **REFERENCE** | see below |
-| disk-guard `floorBytes` | 3 GiB | **REFERENCE** | `max(3% , 3 GiB)`, clamped ≤10% of volume |
-| disk-guard warn share clamp | — | **REFERENCE** | |
+| disk-guard warn default | `"10%"` | **REFERENCE** | typeable expression, resolved per node |
+| disk-guard floor default | `"3%"` | **REFERENCE** | typeable expression, resolved per node |
 
-### The disk guard is the reference implementation
+### The disk guard is the reference implementation — for *typeable* defaults
 
-`floorThreshold = min( max(fraction·total, floorBytes), share·total )` is
-exactly a good derived default: a fraction for scale, a floor for small
-volumes, a share clamp so it can't eat the disk. This is the pattern a
-*derivable* limit (criterion 3) should follow. It is documented here as the
-reference; `max-size` deliberately does **not** use it (a per-vault share
-doesn't compose — see the design doc), but future per-node derived defaults
-should.
+An earlier revision of this audit celebrated the guard's
+`min( max(fraction·total, floorBytes), share·total )` curve as the reference
+derived default. That verdict is **superseded** by the typeable-defaults
+principle (policy decision 6, operator directive): no operator can type
+`max(fraction·volume, hardBytes)` into a config field, so the formula was
+never a legitimate default — the six constants and the max()/clamp machinery
+were deleted. The reference pattern now is: give the field a grammar that can
+express the volume-scaled value (`ParseSizeOrPercent` — size or percentage),
+then make the default a constant **expression in that grammar** (`"10%"` /
+`"3%"`), resolved through the exact resolver an explicit value uses.
+Criterion 3's *derivable* now requires typeability. `max-size` deliberately
+does **not** take a percentage (a per-vault share doesn't compose — see the
+design doc); future per-node derived defaults follow the disk guard's
+expression pattern.
 
 ## Cluster / node settings
 

@@ -23,7 +23,7 @@ type vaultQuantity struct {
 	applies bool   // false → this vault type has no such quantity; leave it alone
 	in      string // the incoming expression from the wire
 	dst     *string
-	def     string                       // default expression when unset on create
+	def     string                          // default expression when unset on create
 	prev    func(system.VaultConfig) string // the stored value, for preserve-on-update
 }
 
@@ -70,6 +70,15 @@ func resolveVaultQuantity(q vaultQuantity, vaultCfg *system.VaultConfig, existin
 	if !system.IsQuantityUnset(q.in) {
 		bytes, err := system.ParseSize(q.in)
 		if err != nil {
+			// Budgets are size-only: a %-of-volume budget does not compose —
+			// N vaults at 10% each overcommit the shared volume (see the
+			// max-size decision in docs/product-defaults-policy-design.md).
+			// Name that reason instead of a bare unknown-unit error.
+			if sp, perr := system.ParseSizeOrPercent(q.in); perr == nil && sp.IsPercent() {
+				return errInvalidArg(fmt.Errorf(
+					"%s %q on vault %q: a percentage of the volume is not allowed here — per-vault shares do not compose across vaults on the same volume; use an absolute size (e.g. %s)",
+					q.flag, q.in, vaultCfg.Name, q.def))
+			}
 			return errInvalidArg(fmt.Errorf("%s %q on vault %q: %w", q.flag, q.in, vaultCfg.Name, err))
 		}
 		if bytes == 0 {
@@ -93,6 +102,12 @@ func resolveVaultQuantity(q vaultQuantity, vaultCfg *system.VaultConfig, existin
 // validateVaultExpressions parse-checks the quantities that carry no default —
 // an empty value is legitimately "inherit" or "off" — so a malformed one is
 // caught at write instead of at use (gastrolog-etcjdx).
+//
+// The disk-free thresholds are the only volume-relative fields: they accept a
+// percentage of the volume ("10%") alongside an absolute size, because the
+// threshold guards the vault's own volume, so a share composes. An explicit
+// zero ("0", "0%") would disable the guard for this vault and is rejected,
+// like the explicit-0 budgets.
 func validateVaultExpressions(vaultCfg *system.VaultConfig) *connect.Error {
 	for _, f := range []struct {
 		flag string
@@ -104,8 +119,14 @@ func validateVaultExpressions(vaultCfg *system.VaultConfig) *connect.Error {
 		if system.IsQuantityUnset(f.expr) {
 			continue
 		}
-		if _, err := system.ParseSize(f.expr); err != nil {
+		sp, err := system.ParseSizeOrPercent(f.expr)
+		if err != nil {
 			return errInvalidArg(fmt.Errorf("%s %q on vault %q: %w", f.flag, f.expr, vaultCfg.Name, err))
+		}
+		if sp.IsZero() {
+			return errInvalidArg(fmt.Errorf(
+				"%s of %q on vault %q disables the guard; omit it to inherit the node default, or set a real size or percentage",
+				f.flag, f.expr, vaultCfg.Name))
 		}
 	}
 	if !system.IsQuantityUnset(vaultCfg.CacheTTL) {

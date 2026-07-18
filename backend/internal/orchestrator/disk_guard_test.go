@@ -126,10 +126,11 @@ func TestDiskGuardUnsampleablePathsAreInert(t *testing.T) {
 	}
 }
 
-// TestDiskGuardTinyVolumeThresholds pins the clamp: on a 10GB quota volume
-// the absolute byte minimums must not exceed their share ceilings — without
-// the clamp the warn threshold (10GiB) exceeded the whole volume and the
-// alarm latched on from boot, unclearable.
+// TestDiskGuardTinyVolumeThresholds pins that the percentage defaults scale
+// with the volume: a 10GiB test volume carries a 1GiB warn / ~0.3GiB floor,
+// never a threshold larger than the volume itself (the failure the old
+// absolute byte minimums had before their clamps, and the whole curve, were
+// replaced by the typeable "10%"/"3%" defaults).
 func TestDiskGuardTinyVolumeThresholds(t *testing.T) {
 	t.Parallel()
 	total := 10 * gib
@@ -141,18 +142,63 @@ func TestDiskGuardTinyVolumeThresholds(t *testing.T) {
 		t.Fatalf("near-empty tiny volume must be quiet (warn=%d floor=%d)",
 			g.warnThreshold(total), g.floorThreshold(total))
 	}
-	if w := g.warnThreshold(total); w > total/4 {
-		t.Fatalf("warn threshold %d exceeds 25%% of a %d volume", w, total)
+	if w := g.warnThreshold(total); w != total/10 {
+		t.Fatalf("warn threshold %d, want 10%% of a %d volume", w, total)
+	}
+	if f := g.floorThreshold(total); f != 3*total/100 {
+		t.Fatalf("floor threshold %d, want 3%% of a %d volume", f, total)
 	}
 
-	// Fill toward the clamped floor (10% of 10GiB = 1GiB): protect trips.
-	sampler.free["b"] = gib / 2
+	// Fill below the scaled floor (3% of 10GiB ≈ 0.3GiB): protect trips.
+	sampler.free["b"] = gib / 4
 	g.evaluate(spy)
 	if !g.protect.Load() {
-		t.Fatal("tiny volume below its clamped floor must protect")
+		t.Fatal("tiny volume below its scaled floor must protect")
 	}
 	if spy.active() != 1 {
 		t.Fatal("alarm must accompany protect")
+	}
+}
+
+// TestDiskGuardDefaultsAreTypeable pins the typeable-defaults contract: the
+// node defaults are the expressions "10%"/"3%" — values an operator could
+// enter in a disk-free field — resolved against the volume through the same
+// shared resolver an explicit value uses.
+func TestDiskGuardDefaultsAreTypeable(t *testing.T) {
+	t.Parallel()
+	g := newDiskGuard(nil)
+	if g.warnExpr != defaultDiskFreeWarn || g.floorExpr != defaultDiskFreeFloor {
+		t.Fatalf("node expressions = %q/%q, want the typeable defaults %q/%q",
+			g.warnExpr, g.floorExpr, defaultDiskFreeWarn, defaultDiskFreeFloor)
+	}
+	total := 400 * gib
+	if w := g.warnThreshold(total); w != 40*gib {
+		t.Fatalf("warn threshold on 400GiB = %d, want 40GiB (10%%)", w)
+	}
+	if f := g.floorThreshold(total); f != 12*gib {
+		t.Fatalf("floor threshold on 400GiB = %d, want 12GiB (3%%)", f)
+	}
+}
+
+// TestDiskGuardEnvOverride pins the .env operator channel: the node-level
+// expressions accept the same size-or-percent vocabulary as the config
+// fields, and a malformed value is ignored in favor of the defaults.
+func TestDiskGuardEnvOverride(t *testing.T) { //nolint:paralleltest // t.Setenv
+	t.Setenv("GLOG_DISK_FREE_WARN", "20%")
+	t.Setenv("GLOG_DISK_FREE_FLOOR", "5GiB")
+	g := newDiskGuard(nil)
+	total := 100 * gib
+	if w := g.warnThreshold(total); w != 20*gib {
+		t.Fatalf("env warn 20%% of 100GiB = %d, want 20GiB", w)
+	}
+	if f := g.floorThreshold(total); f != 5*gib {
+		t.Fatalf("env floor 5GiB = %d, want 5GiB regardless of volume", f)
+	}
+
+	t.Setenv("GLOG_DISK_FREE_WARN", "max(10%, 10GiB)") // not typeable ⇒ not parseable
+	g = newDiskGuard(nil)
+	if w := g.warnThreshold(total); w != 10*gib {
+		t.Fatalf("malformed env override must fall back to the default 10%%: got %d", w)
 	}
 }
 
@@ -292,8 +338,8 @@ func TestVaultDiskGuardLifecycle(t *testing.T) {
 	spy := &alertSpy{}
 
 	vaultA, vaultB := glid.New(), glid.New()
-	g.SetVaultGuard(vaultA, "hot", []string{"volA"}, 0, 0, 0)
-	g.SetVaultGuard(vaultB, "cold", []string{"volB"}, 0, 0, 0)
+	g.SetVaultGuard(vaultA, "hot", []string{"volA"}, "", "", 0)
+	g.SetVaultGuard(vaultB, "cold", []string{"volB"}, "", "", 0)
 
 	g.evaluateVaults(spy)
 	if g.vaultProtectActive(vaultA) || g.vaultProtectActive(vaultB) || spy.active() != 0 {
@@ -336,7 +382,8 @@ func TestVaultDiskGuardLifecycle(t *testing.T) {
 }
 
 // TestVaultDiskGuardConfigOverridesThresholds pins the per-vault override:
-// explicit warn/floor bytes replace the node-default fractions entirely.
+// an explicit expression — absolute size or percentage of the volume —
+// replaces the node-default expressions entirely.
 func TestVaultDiskGuardConfigOverridesThresholds(t *testing.T) {
 	t.Parallel()
 	total := 400 * gib
@@ -345,7 +392,7 @@ func TestVaultDiskGuardConfigOverridesThresholds(t *testing.T) {
 	vaultA := glid.New()
 
 	// Node default floor would be 12GiB; this vault demands 50GiB free.
-	g.SetVaultGuard(vaultA, "greedy", []string{"volA"}, 100*gib, 50*gib, 0)
+	g.SetVaultGuard(vaultA, "greedy", []string{"volA"}, "100GiB", "50GiB", 0)
 	g.evaluateVaults(spy)
 	if !g.vaultProtectActive(vaultA) {
 		t.Fatal("30GiB free is below the vault's 50GiB floor override")
@@ -353,10 +400,26 @@ func TestVaultDiskGuardConfigOverridesThresholds(t *testing.T) {
 
 	// A modest override in the other direction: 30GiB free clears a 1GiB floor.
 	sampler.free["volA"] = 30 * gib
-	g.SetVaultGuard(vaultA, "modest", []string{"volA"}, 2*gib, gib, 0)
+	g.SetVaultGuard(vaultA, "modest", []string{"volA"}, "2GiB", "1GiB", 0)
 	g.evaluateVaults(spy)
 	if g.vaultProtectActive(vaultA) {
 		t.Fatal("30GiB free must clear a 1GiB floor override (with hysteresis)")
+	}
+
+	// A percentage override resolves against the vault's own volume: 20% of
+	// 400GiB = 80GiB floor, so 30GiB free is a breach the node default
+	// (3% = 12GiB) would not see.
+	g.SetVaultGuard(vaultA, "percenty", []string{"volA"}, "25%", "20%", 0)
+	g.evaluateVaults(spy)
+	if !g.vaultProtectActive(vaultA) {
+		t.Fatal(`30GiB free is below the vault's "20%" floor override`)
+	}
+	// And a small percentage clears again: floor 1% = 4GiB, resume above the
+	// 2% warn band (with hysteresis) — 30GiB is well clear.
+	g.SetVaultGuard(vaultA, "percenty", []string{"volA"}, "2%", "1%", 0)
+	g.evaluateVaults(spy)
+	if g.vaultProtectActive(vaultA) {
+		t.Fatal(`30GiB free must clear a "1%" floor override`)
 	}
 }
 
@@ -366,8 +429,8 @@ func TestVaultDiskGuardRetain(t *testing.T) {
 	t.Parallel()
 	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": gib})
 	vaultA, vaultB := glid.New(), glid.New()
-	g.SetVaultGuard(vaultA, "a", []string{"volA"}, 0, 0, 0)
-	g.SetVaultGuard(vaultB, "b", []string{"volA"}, 0, 0, 0)
+	g.SetVaultGuard(vaultA, "a", []string{"volA"}, "", "", 0)
+	g.SetVaultGuard(vaultB, "b", []string{"volA"}, "", "", 0)
 	g.evaluateVaults(nil)
 	if !g.vaultProtectActive(vaultA) || !g.vaultProtectActive(vaultB) {
 		t.Fatal("both vaults share the starved volume")
@@ -389,7 +452,7 @@ func TestVaultDiskGuardRetainClearsAlarm(t *testing.T) {
 	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": gib})
 	spy := &alertSpy{}
 	vaultA := glid.New()
-	g.SetVaultGuard(vaultA, "a", []string{"volA"}, 0, 0, 0)
+	g.SetVaultGuard(vaultA, "a", []string{"volA"}, "", "", 0)
 	g.evaluateVaults(spy)
 	if !spy.has("disk-space:" + vaultA.String()) {
 		t.Fatal("starved vault must alarm before the prune")
@@ -406,8 +469,8 @@ func TestVaultAdmissionGate(t *testing.T) {
 	t.Parallel()
 	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": gib, "volB": 200 * gib})
 	vaultA, vaultB := glid.New(), glid.New()
-	g.SetVaultGuard(vaultA, "a", []string{"volA"}, 0, 0, 0)
-	g.SetVaultGuard(vaultB, "b", []string{"volB"}, 0, 0, 0)
+	g.SetVaultGuard(vaultA, "a", []string{"volA"}, "", "", 0)
+	g.SetVaultGuard(vaultB, "b", []string{"volB"}, "", "", 0)
 	g.evaluateVaults(nil)
 
 	o := &Orchestrator{diskGuard: g}
@@ -449,8 +512,8 @@ func TestVaultMaxSizeCap(t *testing.T) {
 
 	footprint := map[glid.GLID]int64{vaultA: int64(gib), vaultB: int64(gib)}
 	g.vaultFootprint = func(id glid.GLID) int64 { return footprint[id] }
-	g.SetVaultGuard(vaultA, "capped", []string{"volA"}, 0, 0, 10*gib)
-	g.SetVaultGuard(vaultB, "roomy", []string{"volA"}, 0, 0, 100*gib)
+	g.SetVaultGuard(vaultA, "capped", []string{"volA"}, "", "", 10*gib)
+	g.SetVaultGuard(vaultB, "roomy", []string{"volA"}, "", "", 100*gib)
 
 	g.evaluateVaults(spy)
 	if g.vaultSizeCapped(vaultA) || spy.active() != 0 {
@@ -503,7 +566,7 @@ func TestVaultMaxSizeBudgetOnlyEntry(t *testing.T) {
 	g, _ := newGuardFixture(400*gib, map[string]uint64{})
 	vaultA := glid.New()
 	g.vaultFootprint = func(glid.GLID) int64 { return int64(20 * gib) }
-	g.SetVaultGuard(vaultA, "originy", nil, 0, 0, 10*gib)
+	g.SetVaultGuard(vaultA, "originy", nil, "", "", 10*gib)
 	g.evaluateVaults(nil)
 	if !g.vaultSizeCapped(vaultA) {
 		t.Fatal("budget must be enforced even with no sampleable volume paths")
@@ -522,8 +585,8 @@ func TestVaultAdmissionGateMaxSize(t *testing.T) {
 		}
 		return int64(gib)
 	}
-	g.SetVaultGuard(vaultA, "a", []string{"volA"}, 0, 0, 10*gib)
-	g.SetVaultGuard(vaultB, "b", []string{"volA"}, 0, 0, 10*gib)
+	g.SetVaultGuard(vaultA, "a", []string{"volA"}, "", "", 10*gib)
+	g.SetVaultGuard(vaultB, "b", []string{"volA"}, "", "", 10*gib)
 	g.evaluateVaults(nil)
 
 	o := &Orchestrator{diskGuard: g}
@@ -562,8 +625,8 @@ func TestVaultBacklogBudget(t *testing.T) {
 	backlog := map[glid.GLID]int64{vaultA: int64(gib), vaultB: int64(gib)}
 	g.vaultBacklogBytes = func(id glid.GLID) int64 { return backlog[id] }
 	g.backlogBudget.Store(10 * gib)
-	g.SetVaultGuard(vaultA, "busy", []string{"volA"}, 0, 0, 0)
-	g.SetVaultGuard(vaultB, "calm", []string{"volA"}, 0, 0, 0)
+	g.SetVaultGuard(vaultA, "busy", []string{"volA"}, "", "", 0)
+	g.SetVaultGuard(vaultB, "calm", []string{"volA"}, "", "", 0)
 
 	g.evaluateVaults(spy)
 	if g.vaultBacklogCapped(vaultA) || spy.active() != 0 {
@@ -618,7 +681,7 @@ func TestVaultBacklogBudgetDisabled(t *testing.T) {
 	spy := &alertSpy{}
 	vaultA := glid.New()
 	g.vaultBacklogBytes = func(glid.GLID) int64 { return int64(50 * gib) }
-	g.SetVaultGuard(vaultA, "busy", []string{"volA"}, 0, 0, 0)
+	g.SetVaultGuard(vaultA, "busy", []string{"volA"}, "", "", 0)
 
 	// Budget unset: enormous backlog, no cap, no alarm.
 	g.evaluateVaults(spy)
@@ -659,8 +722,8 @@ func TestVaultAdmissionGateBacklog(t *testing.T) {
 		return int64(gib)
 	}
 	g.backlogBudget.Store(10 * gib)
-	g.SetVaultGuard(vaultA, "a", []string{"volA"}, 0, 0, 0)
-	g.SetVaultGuard(vaultB, "b", []string{"volA"}, 0, 0, 0)
+	g.SetVaultGuard(vaultA, "a", []string{"volA"}, "", "", 0)
+	g.SetVaultGuard(vaultB, "b", []string{"volA"}, "", "", 0)
 	g.evaluateVaults(nil)
 
 	o := &Orchestrator{diskGuard: g}
