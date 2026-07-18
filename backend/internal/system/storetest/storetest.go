@@ -49,8 +49,8 @@ func testRotationPolicies(t *testing.T, newStore func(t *testing.T) system.Store
 		rp := system.RotationPolicyConfig{
 			ID:          id,
 			Name:        "default",
-			MaxBytes:    new(uint64(64_000_000)),
-			MaxAgeNanos: new(int64(time.Hour)),
+			MaxSize:     new("64MB"),
+			MaxAge:      new("1h"),
 			MaxRecords:  new(int64(1000)),
 			Cron:        new("0 * * * *"),
 		}
@@ -66,8 +66,8 @@ func testRotationPolicies(t *testing.T, newStore func(t *testing.T) system.Store
 		if got == nil {
 			t.Fatal("expected rotation policy, got nil")
 		}
-		assertUint64Ptr(t, "MaxBytes", got.MaxBytes, 64_000_000)
-		assertInt64Ptr(t, "MaxAgeNanos", got.MaxAgeNanos, int64(time.Hour))
+		assertStringPtr(t, "MaxSize", got.MaxSize, "64MB")
+		assertStringPtr(t, "MaxAge", got.MaxAge, "1h")
 		assertInt64Ptr(t, "MaxRecords", got.MaxRecords, 1000)
 		assertStringPtr(t, "Cron", got.Cron, "0 * * * *")
 	})
@@ -77,13 +77,13 @@ func testRotationPolicies(t *testing.T, newStore func(t *testing.T) system.Store
 		ctx := context.Background()
 
 		id := newID()
-		rp1 := system.RotationPolicyConfig{ID: id, Name: "p1", MaxAgeNanos: new(int64(time.Hour)), Cron: new("0 * * * *")}
+		rp1 := system.RotationPolicyConfig{ID: id, Name: "p1", MaxAge:      new("1h"), Cron: new("0 * * * *")}
 		if err := s.PutRotationPolicy(ctx, rp1); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 
 		// Upsert: change MaxAge, remove Cron.
-		rp2 := system.RotationPolicyConfig{ID: id, Name: "p1", MaxAgeNanos: new(int64(2 * time.Hour))}
+		rp2 := system.RotationPolicyConfig{ID: id, Name: "p1", MaxAge: new("2h")}
 		if err := s.PutRotationPolicy(ctx, rp2); err != nil {
 			t.Fatalf("Put upsert: %v", err)
 		}
@@ -92,7 +92,7 @@ func testRotationPolicies(t *testing.T, newStore func(t *testing.T) system.Store
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
-		assertInt64Ptr(t, "MaxAgeNanos", got.MaxAgeNanos, int64(2*time.Hour))
+		assertStringPtr(t, "MaxAge", got.MaxAge, "2h")
 		if got.Cron != nil {
 			t.Errorf("expected Cron to be nil after upsert without cron, got %q", *got.Cron)
 		}
@@ -122,10 +122,10 @@ func testRotationPolicies(t *testing.T, newStore func(t *testing.T) system.Store
 
 		idA := newID()
 		idB := newID()
-		if err := s.PutRotationPolicy(ctx, system.RotationPolicyConfig{ID: idA, Name: "a", MaxAgeNanos: new(int64(time.Hour))}); err != nil {
+		if err := s.PutRotationPolicy(ctx, system.RotationPolicyConfig{ID: idA, Name: "a", MaxAge: new("1h")}); err != nil {
 			t.Fatalf("Put a: %v", err)
 		}
-		if err := s.PutRotationPolicy(ctx, system.RotationPolicyConfig{ID: idB, Name: "b", MaxBytes: new(uint64(10_000_000))}); err != nil {
+		if err := s.PutRotationPolicy(ctx, system.RotationPolicyConfig{ID: idB, Name: "b", MaxSize: new("10MB")}); err != nil {
 			t.Fatalf("Put b: %v", err)
 		}
 
@@ -150,7 +150,7 @@ func testRotationPolicies(t *testing.T, newStore func(t *testing.T) system.Store
 		ctx := context.Background()
 
 		id := newID()
-		if err := s.PutRotationPolicy(ctx, system.RotationPolicyConfig{ID: id, Name: "del", MaxAgeNanos: new(int64(5 * time.Minute))}); err != nil {
+		if err := s.PutRotationPolicy(ctx, system.RotationPolicyConfig{ID: id, Name: "del", MaxAge: new("5m")}); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 
@@ -190,11 +190,11 @@ func testRotationPolicies(t *testing.T, newStore func(t *testing.T) system.Store
 		if got == nil {
 			t.Fatal("expected rotation policy, got nil")
 		}
-		if got.MaxBytes != nil {
-			t.Errorf("expected nil MaxBytes, got %v", *got.MaxBytes)
+		if got.MaxSize != nil {
+			t.Errorf("expected nil MaxSize, got %v", *got.MaxSize)
 		}
-		if got.MaxAgeNanos != nil {
-			t.Errorf("expected nil MaxAgeNanos, got %v", *got.MaxAgeNanos)
+		if got.MaxAge != nil {
+			t.Errorf("expected nil MaxAge, got %v", *got.MaxAge)
 		}
 		if got.MaxRecords != nil {
 			t.Errorf("expected nil MaxRecords, got %v", *got.MaxRecords)
@@ -211,8 +211,8 @@ func testRetentionPolicies(t *testing.T, newStore func(t *testing.T) system.Stor
 		rp := system.RetentionPolicyConfig{
 			ID:          id,
 			Name:        "default",
-			MaxAgeNanos: new(int64(720 * time.Hour)),
-			MaxBytes:    new(uint64(10_000_000_000)),
+			MaxAge:      new("720h"),
+			MaxSize:     new("10GB"),
 			MaxChunks:   new(int64(100)),
 		}
 
@@ -227,8 +227,8 @@ func testRetentionPolicies(t *testing.T, newStore func(t *testing.T) system.Stor
 		if got == nil {
 			t.Fatal("expected retention policy, got nil")
 		}
-		assertInt64Ptr(t, "MaxAgeNanos", got.MaxAgeNanos, int64(720*time.Hour))
-		assertUint64Ptr(t, "MaxBytes", got.MaxBytes, 10_000_000_000)
+		assertStringPtr(t, "MaxAge", got.MaxAge, "720h")
+		assertStringPtr(t, "MaxSize", got.MaxSize, "10GB")
 		assertInt64Ptr(t, "MaxChunks", got.MaxChunks, 100)
 	})
 
@@ -237,12 +237,12 @@ func testRetentionPolicies(t *testing.T, newStore func(t *testing.T) system.Stor
 		ctx := context.Background()
 
 		id := newID()
-		rp1 := system.RetentionPolicyConfig{ID: id, Name: "p1", MaxAgeNanos: new(int64(24 * time.Hour))}
+		rp1 := system.RetentionPolicyConfig{ID: id, Name: "p1", MaxAge: new("24h")}
 		if err := s.PutRetentionPolicy(ctx, rp1); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 
-		rp2 := system.RetentionPolicyConfig{ID: id, Name: "p1", MaxAgeNanos: new(int64(48 * time.Hour))}
+		rp2 := system.RetentionPolicyConfig{ID: id, Name: "p1", MaxAge: new("48h")}
 		if err := s.PutRetentionPolicy(ctx, rp2); err != nil {
 			t.Fatalf("Put upsert: %v", err)
 		}
@@ -251,7 +251,7 @@ func testRetentionPolicies(t *testing.T, newStore func(t *testing.T) system.Stor
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
-		assertInt64Ptr(t, "MaxAgeNanos", got.MaxAgeNanos, int64(48*time.Hour))
+		assertStringPtr(t, "MaxAge", got.MaxAge, "48h")
 
 		all, err := s.ListRetentionPolicies(ctx)
 		if err != nil {
@@ -276,7 +276,7 @@ func testRetentionPolicies(t *testing.T, newStore func(t *testing.T) system.Stor
 
 		idA := newID()
 		idB := newID()
-		if err := s.PutRetentionPolicy(ctx, system.RetentionPolicyConfig{ID: idA, Name: "a", MaxAgeNanos: new(int64(time.Hour))}); err != nil {
+		if err := s.PutRetentionPolicy(ctx, system.RetentionPolicyConfig{ID: idA, Name: "a", MaxAge: new("1h")}); err != nil {
 			t.Fatalf("Put a: %v", err)
 		}
 		if err := s.PutRetentionPolicy(ctx, system.RetentionPolicyConfig{ID: idB, Name: "b", MaxChunks: new(int64(5))}); err != nil {
@@ -304,7 +304,7 @@ func testRetentionPolicies(t *testing.T, newStore func(t *testing.T) system.Stor
 		ctx := context.Background()
 
 		id := newID()
-		if err := s.PutRetentionPolicy(ctx, system.RetentionPolicyConfig{ID: id, Name: "del", MaxAgeNanos: new(int64(5 * time.Minute))}); err != nil {
+		if err := s.PutRetentionPolicy(ctx, system.RetentionPolicyConfig{ID: id, Name: "del", MaxAge: new("5m")}); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 
@@ -342,11 +342,11 @@ func testRetentionPolicies(t *testing.T, newStore func(t *testing.T) system.Stor
 		if got == nil {
 			t.Fatal("expected retention policy, got nil")
 		}
-		if got.MaxAgeNanos != nil {
-			t.Errorf("expected nil MaxAgeNanos, got %v", *got.MaxAgeNanos)
+		if got.MaxAge != nil {
+			t.Errorf("expected nil MaxAge, got %v", *got.MaxAge)
 		}
-		if got.MaxBytes != nil {
-			t.Errorf("expected nil MaxBytes, got %v", *got.MaxBytes)
+		if got.MaxSize != nil {
+			t.Errorf("expected nil MaxSize, got %v", *got.MaxSize)
 		}
 		if got.MaxChunks != nil {
 			t.Errorf("expected nil MaxChunks, got %v", *got.MaxChunks)
@@ -726,10 +726,10 @@ func testIntegration(t *testing.T, newStore func(t *testing.T) system.Store) {
 		ing2ID := newID()
 
 		// Put several entities via CRUD.
-		if err := s.PutRotationPolicy(ctx, system.RotationPolicyConfig{ID: rpFastID, Name: "fast", MaxAgeNanos: new(int64(5 * time.Minute))}); err != nil {
+		if err := s.PutRotationPolicy(ctx, system.RotationPolicyConfig{ID: rpFastID, Name: "fast", MaxAge: new("5m")}); err != nil {
 			t.Fatalf("PutRotationPolicy: %v", err)
 		}
-		if err := s.PutRotationPolicy(ctx, system.RotationPolicyConfig{ID: rpSlowID, Name: "slow", MaxAgeNanos: new(int64(time.Hour))}); err != nil {
+		if err := s.PutRotationPolicy(ctx, system.RotationPolicyConfig{ID: rpSlowID, Name: "slow", MaxAge: new("1h")}); err != nil {
 			t.Fatalf("PutRotationPolicy: %v", err)
 		}
 		if err := s.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "main", Enabled: true}); err != nil {

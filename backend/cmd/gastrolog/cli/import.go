@@ -312,8 +312,8 @@ func buildClusterSettings(c *clusterExport) *v1.PutClusterSettings {
 	if c.HeartbeatInterval != "" {
 		pc.HeartbeatInterval = &c.HeartbeatInterval
 	}
-	if c.PipelineBacklogMaxBytes != 0 {
-		pc.PipelineBacklogMaxBytes = &c.PipelineBacklogMaxBytes
+	if c.PipelineBacklogMax != "" {
+		pc.PipelineBacklogMax = &c.PipelineBacklogMax
 	}
 	return pc
 }

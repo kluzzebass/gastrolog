@@ -12,8 +12,6 @@ import (
 
 	v1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/server"
-	"gastrolog/internal/system"
-	"gastrolog/internal/units"
 )
 
 func newVaultCmd() *cobra.Command {
@@ -108,27 +106,22 @@ func vaultDetailPairs(v *v1.VaultConfig) [][2]string {
 	if v.Path != "" {
 		pairs = append(pairs, [2]string{"Path", v.Path})
 	}
-	if v.MemoryBudgetBytes > 0 {
-		pairs = append(pairs, [2]string{"Memory Budget", strconv.FormatUint(v.MemoryBudgetBytes, 10)})
+	// Quantities are stored as the operator's own expression, so display is an
+	// exact echo — no formatter, no drift (gastrolog-etcjdx).
+	addExpr := func(label, expr string) {
+		if expr != "" {
+			pairs = append(pairs, [2]string{label, expr})
+		}
 	}
+	addExpr("Memory Budget", v.MemoryBudget)
 	if v.CacheEviction != "" {
 		pairs = append(pairs, [2]string{"Cache Eviction", v.CacheEviction})
 	}
-	if v.CacheBudget != "" {
-		pairs = append(pairs, [2]string{"Cache Budget", v.CacheBudget})
-	}
-	if v.CacheTtl != "" {
-		pairs = append(pairs, [2]string{"Cache TTL", v.CacheTtl})
-	}
-	if v.DiskFreeWarnBytes > 0 {
-		pairs = append(pairs, [2]string{"Disk Free Warn", units.FormatBytesDisplay(int64(v.DiskFreeWarnBytes))}) //nolint:gosec // display only
-	}
-	if v.DiskFreeFloorBytes > 0 {
-		pairs = append(pairs, [2]string{"Disk Free Floor", units.FormatBytesDisplay(int64(v.DiskFreeFloorBytes))}) //nolint:gosec // display only
-	}
-	if v.MaxSizeBytes > 0 {
-		pairs = append(pairs, [2]string{"Max Size", units.FormatBytesDisplay(int64(v.MaxSizeBytes))}) //nolint:gosec // display only
-	}
+	addExpr("Cache Budget", v.CacheBudget)
+	addExpr("Cache TTL", v.CacheTtl)
+	addExpr("Disk Free Warn", v.DiskFreeWarn)
+	addExpr("Disk Free Floor", v.DiskFreeFloor)
+	addExpr("Max Size", v.MaxSize)
 	if v.RetentionDisposition != "" {
 		pairs = append(pairs, [2]string{"Retention Disposition", v.RetentionDisposition})
 	} else {
@@ -210,14 +203,14 @@ shape (memory, file, file+cloud, JSONL) defined by --type, --storage-class
 	cmd.Flags().String("rotation-policy", "", "rotation policy name or ID")
 	cmd.Flags().String("retention-policy", "", "retention policy name or ID")
 	cmd.Flags().String("cache-eviction", "lru", "cache eviction strategy: lru or ttl")
-	cmd.Flags().String("cache-budget", "", "max cache size (e.g. 1GB, 500MB, 1GiB)")
+	cmd.Flags().String("cache-budget", "", "warm-cache soft cap for cloud-backed chunks (e.g. 1GB, 500MB, 1GiB). Unset defaults to a bounded budget for cloud vaults; 0 is rejected")
 	cmd.Flags().String("cache-ttl", "", "cache TTL duration for ttl eviction mode (e.g. 1h, 7d)")
 	cmd.Flags().String("retention-disposition", "delete", "what retention does with aged-out records: delete (drop) or route (send through routing engine)")
 	cmd.Flags().String("path", "", "direct path for JSONL sinks")
-	cmd.Flags().Uint64("memory-budget", 0, "memory budget in bytes (memory vaults)")
-	cmd.Flags().String("disk-free-warn", "", "free-space warn threshold on the vault's backing volume (e.g. 10GB); empty inherits the node default")
-	cmd.Flags().String("disk-free-floor", "", "free-space floor on the vault's backing volume (e.g. 3GB) — below it, admission for this vault is suspended; empty inherits the node default")
-	cmd.Flags().String("max-size", "", "per-node size budget for the vault's whole local disk claim (e.g. 50GB) — at the budget, new records for this vault are refused until retention drains it; empty means unlimited")
+	cmd.Flags().String("memory-budget", "", "in-memory storage cap for memory vaults (e.g. 1GB, 512MiB). Unset defaults to a bounded budget; 0 is rejected")
+	cmd.Flags().String("disk-free-warn", "", "free-space warn threshold on the vault's backing volume: an absolute size (10GB) or a percentage of the volume (10%); empty inherits the node default, 10%")
+	cmd.Flags().String("disk-free-floor", "", "free-space floor on the vault's backing volume — below it, admission for this vault is suspended — as an absolute size (3GB) or a percentage of the volume (3%); empty inherits the node default, 3%")
+	cmd.Flags().String("max-size", "", "per-node size budget for the vault's whole local disk claim (e.g. 50GB) — at the budget, new records for this vault are refused until retention drains it. Unset defaults to a bounded per-node budget; 0 is rejected; set a large value (e.g. 1PiB) for effectively-unlimited")
 	_ = cmd.MarkFlagRequired("name")
 	return cmd
 }
@@ -244,11 +237,8 @@ func applyVaultFlags(ctx context.Context, cmd *cobra.Command, client *server.Cli
 	if cmd.Flags().Changed("cache-eviction") {
 		cfg.CacheEviction, _ = cmd.Flags().GetString("cache-eviction")
 	}
-	if cmd.Flags().Changed("cache-budget") {
-		cfg.CacheBudget, _ = cmd.Flags().GetString("cache-budget")
-	}
-	if cmd.Flags().Changed("cache-ttl") {
-		cfg.CacheTtl, _ = cmd.Flags().GetString("cache-ttl")
+	if err := applyVaultCacheFlags(cmd, cfg); err != nil {
+		return err
 	}
 	if cmd.Flags().Changed("retention-disposition") {
 		v, _ := cmd.Flags().GetString("retention-disposition")
@@ -261,9 +251,6 @@ func applyVaultFlags(ctx context.Context, cmd *cobra.Command, client *server.Cli
 	}
 	if cmd.Flags().Changed("path") {
 		cfg.Path, _ = cmd.Flags().GetString("path")
-	}
-	if cmd.Flags().Changed("memory-budget") {
-		cfg.MemoryBudgetBytes, _ = cmd.Flags().GetUint64("memory-budget")
 	}
 	if err := applyVaultSizeFlags(cmd, cfg); err != nil {
 		return err
@@ -286,42 +273,35 @@ func applyVaultFlags(ctx context.Context, cmd *cobra.Command, client *server.Cli
 	return nil
 }
 
-// applyVaultSizeFlags overlays the byte-size threshold flags (disk-free
-// warn/floor, max-size budget) onto the vault config.
-func applyVaultSizeFlags(cmd *cobra.Command, cfg *v1.VaultConfig) error {
-	for _, f := range []struct {
-		name string
-		dst  *uint64
-	}{
-		{"disk-free-warn", &cfg.DiskFreeWarnBytes},
-		{"disk-free-floor", &cfg.DiskFreeFloorBytes},
-		{"max-size", &cfg.MaxSizeBytes},
-	} {
-		if !cmd.Flags().Changed(f.name) {
-			continue
-		}
-		v, err := parseDiskFreeFlag(cmd, f.name)
-		if err != nil {
-			return err
-		}
-		*f.dst = v
-	}
+// applyVaultCacheFlags overlays the warm-cache budget/ttl flags. Both are
+// numeric on the wire (gastrolog-338j51); cache-budget is proto-optional so
+// an empty flag is "unset" (server defaults it for cloud vaults) rather than
+// (see gastrolog-etcjdx).
+func applyVaultCacheFlags(cmd *cobra.Command, cfg *v1.VaultConfig) error {
+	setFromFlag(cmd, "cache-budget", &cfg.CacheBudget)
+	setFromFlag(cmd, "cache-ttl", &cfg.CacheTtl)
 	return nil
 }
 
-// parseDiskFreeFlag parses a human-friendly size flag; empty resets to 0
-// (inherit the node default / unlimited).
-func parseDiskFreeFlag(cmd *cobra.Command, name string) (uint64, error) {
-	raw, _ := cmd.Flags().GetString(name)
-	if raw == "" {
-		return 0, nil
-	}
-	v, err := system.ParseSize(raw)
-	if err != nil {
-		return 0, fmt.Errorf("invalid --%s %q: %w", name, raw, err)
-	}
-	return v, nil
+// applyVaultSizeFlags overlays the size expression flags. Quantities are
+// stored as the operator typed them and validated/resolved server-side, so
+// the CLI just carries the string through — no parsing here (gastrolog-etcjdx).
+func applyVaultSizeFlags(cmd *cobra.Command, cfg *v1.VaultConfig) error {
+	setFromFlag(cmd, "disk-free-warn", &cfg.DiskFreeWarn)
+	setFromFlag(cmd, "disk-free-floor", &cfg.DiskFreeFloor)
+	setFromFlag(cmd, "max-size", &cfg.MaxSize)
+	setFromFlag(cmd, "memory-budget", &cfg.MemoryBudget)
+	return nil
 }
+
+// setFromFlag copies a string flag onto dst only when the operator passed it,
+// so an omitted flag leaves the stored value (or "unset") untouched.
+func setFromFlag(cmd *cobra.Command, name string, dst *string) {
+	if cmd.Flags().Changed(name) {
+		*dst, _ = cmd.Flags().GetString(name)
+	}
+}
+
 
 func resolveVaultCloudService(ctx context.Context, cmd *cobra.Command, client *server.Client, cfg *v1.VaultConfig) error {
 	csName, _ := cmd.Flags().GetString("cloud-service")

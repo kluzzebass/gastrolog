@@ -27,8 +27,10 @@ type VaultConfig struct {
 	// RetentionRules are evaluated in order on chunk-age events.
 	RetentionRules []RetentionRule `json:"retentionRules,omitempty"`
 
-	// MemoryBudgetBytes caps in-memory storage for memory-typed vaults.
-	MemoryBudgetBytes uint64 `json:"memoryBudgetBytes,omitempty"`
+	// MemoryBudget caps in-memory storage for memory-typed vaults, as a size
+	// expression ("512MiB"). Empty = unset (defaulted at creation); resolve
+	// with SizeOrDefault, never by parsing here.
+	MemoryBudget string `json:"memoryBudget,omitempty"`
 
 	// StorageClass selects which file storage class on a node hosts this vault.
 	StorageClass uint32 `json:"storageClass,omitempty"`
@@ -48,10 +50,13 @@ type VaultConfig struct {
 	// CacheEviction is "lru" (default) or "ttl" — only meaningful for cloud-backed.
 	CacheEviction string `json:"cacheEviction,omitempty"`
 
-	// CacheBudget caps the local cache size (e.g. "1GB", "500MB", default: "1GiB").
+	// CacheBudget is the warm-cache soft cap for cloud-backed chunks, as a size
+	// expression ("1GiB"). Empty = unset (defaulted at creation for cloud
+	// vaults); non-cloud vaults have no warm cache and leave it empty.
 	CacheBudget string `json:"cacheBudget,omitempty"`
 
-	// CacheTTL is the eviction TTL duration (e.g. "1h", "7d") for ttl mode.
+	// CacheTTL is the warm-cache eviction age (ttl mode only) as a duration
+	// expression ("1h", "7d"). Empty = unset.
 	CacheTTL string `json:"cacheTtl,omitempty"`
 
 	// RetentionDisposition decides what happens to records as retention
@@ -68,23 +73,56 @@ type VaultConfig struct {
 	// explicitly. See gastrolog-18du3.
 	RetentionDisposition string `json:"retentionDisposition,omitempty"`
 
-	// DiskFreeWarnBytes / DiskFreeFloorBytes are per-vault disk-guard
-	// thresholds on the vault's backing volume, in bytes of free space.
-	// 0 inherits the node defaults (fraction-based with share clamps).
-	// Warn raises the disk-space alarm for this vault; floor suspends
-	// admission for records destined to this vault while vaults on
-	// healthy volumes keep ingesting.
-	DiskFreeWarnBytes  uint64 `json:"diskFreeWarnBytes,omitempty"`
-	DiskFreeFloorBytes uint64 `json:"diskFreeFloorBytes,omitempty"`
+	// DiskFreeWarn / DiskFreeFloor are per-vault disk-guard thresholds on the
+	// vault's backing volume: an absolute free-space size ("10GB") or a
+	// percentage of the volume ("10%"), resolved per node against the volume
+	// actually sampled (ParseSizeOrPercent). Empty inherits the node defaults
+	// — the typeable expressions "10%" (warn) and "3%" (floor). Warn raises
+	// the disk-space alarm for this vault; floor suspends admission for
+	// records destined to this vault while vaults on healthy volumes keep
+	// ingesting.
+	DiskFreeWarn  string `json:"diskFreeWarn,omitempty"`
+	DiskFreeFloor string `json:"diskFreeFloor,omitempty"`
 
-	// MaxSizeBytes is the per-node byte budget for this vault's whole local
-	// disk claim (sealed chunks, indexes, pipeline segment backlog).
-	// 0 = unlimited. At the budget, admission for records destined to this
-	// vault is refused cluster-wide (cap-and-refuse) until retention or
-	// segment releases drain it — the hard backstop behind a size retention
-	// policy's cap-and-drain.
-	MaxSizeBytes uint64 `json:"maxSizeBytes,omitempty"`
+	// MaxSize is the per-node budget for this vault's whole local disk claim
+	// (sealed chunks, indexes, pipeline segment backlog), as a size expression
+	// ("50GB"). At the budget, admission for records destined to this vault is
+	// refused cluster-wide (cap-and-refuse) until retention or segment
+	// releases drain it — the hard backstop behind a size retention policy's
+	// cap-and-drain.
+	//
+	// Empty = unset, defaulted at the PutVault ingress; an explicit "0" is
+	// rejected there. "Unlimited" is an explicit large value like "1PiB",
+	// never the effect of saying nothing (gastrolog-1epfgb). Resolve with
+	// SizeOrDefault.
+	MaxSize string `json:"maxSize,omitempty"`
 }
+
+// Defaults are expressions, like the fields they fill: what the operator would
+// have typed. Stored verbatim at creation, so a defaulted vault reads exactly
+// like a configured one (gastrolog-etcjdx).
+
+// DefaultVaultMaxSize is the per-node size budget applied when a vault is
+// created without one. Deliberately small: the safe failure of a too-small
+// budget is a per-vault refusal that alarms, not the node-wide disk guard
+// deadlock an unbounded vault invites (gastrolog-5ct2av). Operators who want
+// more set --max-size explicitly. Not derived from the volume: a per-vault
+// share does not compose across vaults sharing a disk.
+const DefaultVaultMaxSize = "1GiB"
+
+// DefaultVaultCacheBudget is the warm-cache soft cap applied when a
+// cloud-backed vault is created without one (the value the field long
+// documented but never applied; see gastrolog-338j51). The cache is a soft LRU
+// cap over cloud-backed chunk copies, so a too-small budget costs re-reads
+// from the blob store, not refused records; but unbounded is still a defect.
+const DefaultVaultCacheBudget = "1GiB"
+
+// DefaultVaultMemoryBudget is the in-memory cap applied when a memory-typed
+// vault is created without one. An unbounded memory vault grows until the
+// process OOMs, so unset must be a bounded default. Matches the disk budgets
+// for consistency; RAM is scarcer than disk, so operators on small nodes
+// should lower it explicitly (gastrolog-1qd5wz).
+const DefaultVaultMemoryBudget = "1GiB"
 
 // Canonical values for VaultConfig.RetentionDisposition.
 const (

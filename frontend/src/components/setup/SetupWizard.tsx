@@ -5,7 +5,6 @@ import { useThemeClass } from "../../hooks/useThemeClass";
 import { useToast } from "../Toast";
 import { systemClient } from "../../api/client";
 import { VaultType } from "../../api/gen/gastrolog/v1/system_pb";
-import { parseBytes, parseDurationNanos } from "../../utils/units";
 import { usePutSetupSettings } from "../../api/hooks/useSettings";
 import { useGenerateName } from "../../api/hooks/useSystem";
 import { useQueryClient } from "@tanstack/react-query";
@@ -121,14 +120,12 @@ export function SetupWizard() {
 
     // Extract conditional expressions before try/catch for React Compiler compatibility
     const hasRotation = rotation.maxAge || rotation.maxBytes || rotation.maxRecords || rotation.cron;
-    const rotationMaxBytes = parseBytes(rotation.maxBytes);
     const rotationMaxRecords = rotation.maxRecords ? BigInt(rotation.maxRecords) : BigInt(0);
     const rotationName = rotation.name || namePlaceholders.rotation || "default";
 
     const hasRetention = retention.maxChunks || retention.maxAge || retention.maxBytes;
     const retentionMaxChunks = retention.maxChunks ? BigInt(retention.maxChunks) : BigInt(0);
     const retentionMaxAge = retention.maxAge || "";
-    const retentionMaxBytes = parseBytes(retention.maxBytes);
     const retentionName = retention.name || namePlaceholders.retention || "default";
 
     const vaultName = vault.name || namePlaceholders.vault || "default";
@@ -153,8 +150,8 @@ export function SetupWizard() {
           config: {
             id: rotationIdBytes,
             name: rotationName,
-            maxAgeNanos: parseDurationNanos(rotation.maxAge),
-            maxBytes: rotationMaxBytes,
+            maxAge: rotation.maxAge,
+            maxSize: rotation.maxBytes,
             maxRecords: rotationMaxRecords,
             cron: rotation.cron,
           },
@@ -168,8 +165,8 @@ export function SetupWizard() {
             id: retentionIdBytes,
             name: retentionName,
             maxChunks: retentionMaxChunks,
-            maxAgeNanos: parseDurationNanos(retentionMaxAge),
-            maxBytes: retentionMaxBytes,
+            maxAge: retentionMaxAge,
+            maxSize: retention.maxBytes,
           },
         }),
       );

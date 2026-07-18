@@ -7,18 +7,18 @@ export function usePutRotationPolicy() {
     async (args: {
       id: string;
       name: string;
-      maxBytes: bigint;
+      maxSize: string;
       maxRecords: bigint;
-      maxAgeNanos: bigint;
+      maxAge: string;
       cron: string;
     }) => {
       return systemClient.putRotationPolicy({
         config: {
           id: decode(args.id),
           name: args.name,
-          maxBytes: args.maxBytes,
+          maxSize: args.maxSize,
           maxRecords: args.maxRecords,
-          maxAgeNanos: args.maxAgeNanos,
+          maxAge: args.maxAge,
           cron: args.cron,
         },
       });

@@ -224,11 +224,11 @@ func (s *SystemServer) DeleteRetentionPolicy(
 func protoToRotationPolicy(p *apiv1.RotationPolicyConfig) system.RotationPolicyConfig {
 	var cfg system.RotationPolicyConfig
 
-	if p.MaxBytes > 0 {
-		cfg.MaxBytes = new(uint64(p.MaxBytes))
+	if p.MaxSize != "" {
+		cfg.MaxSize = new(p.MaxSize)
 	}
-	if p.MaxAgeNanos > 0 {
-		cfg.MaxAgeNanos = new(p.MaxAgeNanos)
+	if p.MaxAge != "" {
+		cfg.MaxAge = new(p.MaxAge)
 	}
 	if p.MaxRecords > 0 {
 		cfg.MaxRecords = new(p.MaxRecords)
@@ -244,11 +244,11 @@ func protoToRotationPolicy(p *apiv1.RotationPolicyConfig) system.RotationPolicyC
 func rotationPolicyToProto(cfg system.RotationPolicyConfig) *apiv1.RotationPolicyConfig {
 	p := &apiv1.RotationPolicyConfig{}
 
-	if cfg.MaxBytes != nil {
-		p.MaxBytes = int64(*cfg.MaxBytes) //nolint:gosec // G115: config byte count is always reasonable
+	if cfg.MaxSize != nil {
+		p.MaxSize = *cfg.MaxSize
 	}
-	if cfg.MaxAgeNanos != nil {
-		p.MaxAgeNanos = *cfg.MaxAgeNanos
+	if cfg.MaxAge != nil {
+		p.MaxAge = *cfg.MaxAge
 	}
 	if cfg.MaxRecords != nil {
 		p.MaxRecords = *cfg.MaxRecords
@@ -264,11 +264,11 @@ func rotationPolicyToProto(cfg system.RotationPolicyConfig) *apiv1.RotationPolic
 func protoToRetentionPolicy(p *apiv1.RetentionPolicyConfig) system.RetentionPolicyConfig {
 	var cfg system.RetentionPolicyConfig
 
-	if p.MaxAgeNanos > 0 {
-		cfg.MaxAgeNanos = new(p.MaxAgeNanos)
+	if p.MaxAge != "" {
+		cfg.MaxAge = new(p.MaxAge)
 	}
-	if p.MaxBytes > 0 {
-		cfg.MaxBytes = new(uint64(p.MaxBytes))
+	if p.MaxSize != "" {
+		cfg.MaxSize = new(p.MaxSize)
 	}
 	if p.MaxChunks > 0 {
 		cfg.MaxChunks = new(p.MaxChunks)
@@ -281,11 +281,11 @@ func protoToRetentionPolicy(p *apiv1.RetentionPolicyConfig) system.RetentionPoli
 func retentionPolicyToProto(cfg system.RetentionPolicyConfig) *apiv1.RetentionPolicyConfig {
 	p := &apiv1.RetentionPolicyConfig{}
 
-	if cfg.MaxAgeNanos != nil {
-		p.MaxAgeNanos = *cfg.MaxAgeNanos
+	if cfg.MaxAge != nil {
+		p.MaxAge = *cfg.MaxAge
 	}
-	if cfg.MaxBytes != nil {
-		p.MaxBytes = int64(*cfg.MaxBytes) //nolint:gosec // G115: config byte count is always reasonable
+	if cfg.MaxSize != nil {
+		p.MaxSize = *cfg.MaxSize
 	}
 	if cfg.MaxChunks != nil {
 		p.MaxChunks = *cfg.MaxChunks

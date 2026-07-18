@@ -21,12 +21,6 @@ import type { SettingsTab } from "./SettingsDialog";
 import { sortByName } from "../../lib/sort";
 
 type NavigateTo = (tab: SettingsTab, entityName?: string) => void;
-import {
-  formatBytesBigint,
-  formatDurationNanos,
-  parseBytes,
-  parseDurationNanos,
-} from "../../utils/units";
 
 interface PolicyEdit {
   name: string;
@@ -109,8 +103,8 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
     if (!pol) return { name: "", maxAge: "", maxBytes: "", maxChunks: "" };
     return {
       name: pol.name,
-      maxAge: formatDurationNanos(pol.maxAgeNanos),
-      maxBytes: formatBytesBigint(pol.maxBytes),
+      maxAge: pol.maxAge,
+      maxBytes: pol.maxSize,
       maxChunks: pol.maxChunks > BigInt(0) ? pol.maxChunks.toString() : "",
     };
   };
@@ -126,8 +120,8 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
       return {
         id,
         name: edit.name,
-        maxAgeNanos: parseDurationNanos(edit.maxAge),
-        maxBytes: parseBytes(edit.maxBytes),
+        maxAge: edit.maxAge,
+        maxSize: edit.maxBytes,
         maxChunks: maxChunksValue,
       };
     },
@@ -155,8 +149,8 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
       await putPolicy.mutateAsync({
         id: encode(crypto.getRandomValues(new Uint8Array(16))),
         name,
-        maxAgeNanos: parseDurationNanos(newMaxAge),
-        maxBytes: parseBytes(newMaxBytes),
+        maxAge: newMaxAge,
+        maxSize: newMaxBytes,
         maxChunks: maxChunksValue,
       });
       addToast(`Retention policy "${name}" created`, "info");

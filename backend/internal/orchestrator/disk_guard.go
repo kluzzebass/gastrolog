@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"maps"
 	"os"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -50,18 +49,15 @@ const (
 	alarmMaxSizeApproaching = "vault-max-size-approaching"
 	alarmMaxSizeCapped      = "vault-max-size-capped"
 
-	// Fractions of the volume, paired with absolute byte minimums. The
-	// larger of the two governs — but the absolute minimums are CLAMPED
-	// to a share of the volume so a small (or quota-capped) volume isn't
-	// permanently in alarm: a 10GB test volume must not carry a 10GiB
-	// warn threshold.
-	diskFreeWarnFraction  = 0.10
-	diskFreeFloorFraction = 0.03
-	diskFreeWarnBytes     = uint64(10 << 30) // 10 GiB
-	diskFreeFloorBytes    = uint64(3 << 30)  // 3 GiB
-	diskFreeWarnMaxShare  = 0.25             // warn threshold ≤ 25% of the volume
-	diskFreeFloorMaxShare = 0.10             // floor threshold ≤ 10% of the volume
-
+	// Node-default thresholds, as expressions an operator could type into a
+	// disk-free-warn / disk-free-floor field themselves. A default must be
+	// expressible in the field's own vocabulary — the earlier
+	// max(fraction·volume, hardBytes)-with-clamp formula was not typeable
+	// and therefore not a legitimate default (operator directive; see
+	// docs/product-defaults-policy-design.md). Percentages scale with the
+	// volume and resolve per node through the shared resolver.
+	defaultDiskFreeWarn  = "10%"
+	defaultDiskFreeFloor = "3%"
 )
 
 // clearAbove is the hysteresis exit bound: thresholds release only once
@@ -99,10 +95,11 @@ type diskGuard struct {
 	sample func(path string) (free, total uint64, err error)
 	logger *slog.Logger
 
-	warnFraction  float64
-	floorFraction float64
-	warnBytes     uint64
-	floorBytes    uint64
+	// Node-level threshold expressions ("10%", "10GB"). Never empty: set to
+	// the typeable defaults at construction, replaced by a validated
+	// GLOG_DISK_FREE_WARN / GLOG_DISK_FREE_FLOOR override when present.
+	warnExpr  string
+	floorExpr string
 
 	// protect gates the CONSUMER tier — ingest admission, retention
 	// re-routing, replica catch-up. It engages at the floor and resumes
@@ -145,17 +142,22 @@ type diskGuard struct {
 
 // vaultDiskGuard is one vault's disk-guard state.
 type vaultDiskGuard struct {
-	paths       []string
-	warnBytes   uint64 // 0 = inherit node defaults
-	floorBytes  uint64 // 0 = inherit node defaults
+	paths []string
+	// Threshold expressions ("10%", "10GB"); empty inherits the node level.
+	// Kept as expressions because a percentage can only be resolved against
+	// the volume actually sampled at evaluation time.
+	warnExpr    string
+	floorExpr   string
 	protect     atomic.Bool
 	alarmRaised bool
 	name        string
 
 	// Max-size budget (cap-and-refuse): the vault's whole local disk claim
 	// — sealed chunks, indexes, pipeline segment backlog — measured against
-	// maxSizeBytes. 0 = unlimited. Distinct from the free-space thresholds:
-	// those protect the VOLUME, the budget bounds the VAULT.
+	// maxSizeBytes. Always non-zero: creation defaults an unset budget and
+	// the wiring substitutes the default for any 0 (gastrolog-1epfgb), so a 0
+	// here would be a bug, not "unlimited". Distinct from the free-space
+	// thresholds: those protect the VOLUME, the budget bounds the VAULT.
 	maxSizeBytes    uint64
 	capped          atomic.Bool
 	sizeAlarmRaised bool
@@ -178,19 +180,23 @@ func newDiskGuardWithLogger(paths []string, logger *slog.Logger) *diskGuard {
 
 func newDiskGuard(paths []string) *diskGuard {
 	g := &diskGuard{
-		paths:         paths,
-		sample:        statfsSample,
-		warnFraction:  diskFreeWarnFraction,
-		floorFraction: diskFreeFloorFraction,
-		warnBytes:     diskFreeWarnBytes,
-		floorBytes:    diskFreeFloorBytes,
+		paths:     paths,
+		sample:    statfsSample,
+		warnExpr:  defaultDiskFreeWarn,
+		floorExpr: defaultDiskFreeFloor,
 	}
-	// Operator overrides in whole GiB via the .env channel.
-	if v, err := strconv.ParseUint(os.Getenv("GLOG_DISK_FREE_WARN_GB"), 10, 32); err == nil && v > 0 {
-		g.warnBytes = v << 30
+	// Operator overrides via the .env channel, in the same size-or-percent
+	// vocabulary as the config fields ("15%", "20GB"). A malformed override
+	// is ignored — the typeable defaults are the safe reading.
+	if e := os.Getenv("GLOG_DISK_FREE_WARN"); e != "" {
+		if _, err := system.ParseSizeOrPercent(e); err == nil {
+			g.warnExpr = e
+		}
 	}
-	if v, err := strconv.ParseUint(os.Getenv("GLOG_DISK_FREE_FLOOR_GB"), 10, 32); err == nil && v > 0 {
-		g.floorBytes = v << 30
+	if e := os.Getenv("GLOG_DISK_FREE_FLOOR"); e != "" {
+		if _, err := system.ParseSizeOrPercent(e); err == nil {
+			g.floorExpr = e
+		}
 	}
 	return g
 }
@@ -211,22 +217,35 @@ func (g *diskGuard) worstFree() (free, total uint64, ok bool) {
 	return g.worstFreeOf(g.paths)
 }
 
+// resolveThreshold resolves a disk-free threshold expression against the
+// sampled volume size through the shared resolver, inheriting fallbackExpr
+// when expr is unset. fallbackExpr is always a validated expression (the
+// typeable defaults or the checked env override), so it parses; a malformed
+// expr — impossible after write-time validation — falls back to it rather
+// than to a silent 0 threshold.
+func resolveThreshold(expr, fallbackExpr string, total uint64) uint64 {
+	if t, err := system.ResolveSizeOrPercent(expr, total, fallbackExpr); err == nil {
+		return t
+	}
+	t, _ := system.ResolveSizeOrPercent("", total, fallbackExpr)
+	return t
+}
+
 func (g *diskGuard) warnThreshold(total uint64) uint64 {
-	t := max(uint64(float64(total)*g.warnFraction), g.warnBytes)
-	return min(t, uint64(float64(total)*diskFreeWarnMaxShare))
+	return resolveThreshold(g.warnExpr, defaultDiskFreeWarn, total)
 }
 
 func (g *diskGuard) floorThreshold(total uint64) uint64 {
-	t := max(uint64(float64(total)*g.floorFraction), g.floorBytes)
-	return min(t, uint64(float64(total)*diskFreeFloorMaxShare))
+	return resolveThreshold(g.floorExpr, defaultDiskFreeFloor, total)
 }
 
 // SetVaultGuard registers (or updates) a vault's guard entry. paths are the
 // vault's local backing directories (storage chunks dir, segment root);
-// warn/floor of 0 inherit the node defaults with share clamps; maxSizeBytes
-// of 0 means no budget. Called from the discovery refresh; removal via
-// RemoveVaultGuard / retainVaultGuards.
-func (g *diskGuard) SetVaultGuard(vaultID glid.GLID, name string, paths []string, warnBytes, floorBytes, maxSizeBytes uint64) {
+// warnExpr/floorExpr are size-or-percent expressions ("10GB", "10%") and
+// empty inherits the node level; maxSizeBytes of 0 means no budget (non-file
+// vaults). Called from the discovery refresh; removal via RemoveVaultGuard /
+// retainVaultGuards.
+func (g *diskGuard) SetVaultGuard(vaultID glid.GLID, name string, paths []string, warnExpr, floorExpr string, maxSizeBytes uint64) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.vaults == nil {
@@ -239,8 +258,8 @@ func (g *diskGuard) SetVaultGuard(vaultID glid.GLID, name string, paths []string
 	}
 	v.paths = paths
 	v.name = name
-	v.warnBytes = warnBytes
-	v.floorBytes = floorBytes
+	v.warnExpr = warnExpr
+	v.floorExpr = floorExpr
 	v.maxSizeBytes = maxSizeBytes
 }
 
@@ -342,14 +361,8 @@ func (g *diskGuard) evaluateVaults(alerts alert.Sink) {
 
 	for id, v := range entries {
 		if free, total, ok := g.worstFreeOf(v.paths); ok {
-			warnAt := g.warnThreshold(total)
-			if v.warnBytes > 0 {
-				warnAt = v.warnBytes
-			}
-			floorAt := g.floorThreshold(total)
-			if v.floorBytes > 0 {
-				floorAt = v.floorBytes
-			}
+			warnAt := resolveThreshold(v.warnExpr, g.warnExpr, total)
+			floorAt := resolveThreshold(v.floorExpr, g.floorExpr, total)
 			g.reconcileVaultProtect(id, v, free, floorAt, warnAt)
 			g.reconcileVaultAlarm(alerts, id, v, free, total, warnAt)
 		}
@@ -786,14 +799,37 @@ func (o *Orchestrator) refreshVaultDiskGuards(ctx context.Context) {
 				paths = append(paths, fs.Path)
 			}
 		}
-		// A vault with no local placement still claims local disk through
-		// its origin segment backlog, so a max-size budget registers it
-		// even when there is no volume to sample here.
-		if len(paths) == 0 && vc.MaxSizeBytes == 0 {
+		// Config→runtime boundary: the operator's expressions become numbers
+		// here, once, through the shared resolver (gastrolog-etcjdx). Write-time
+		// validation guarantees they parse; a failure here is a bug, so fall
+		// back to the bounded default rather than to "unbounded".
+		//
+		// Defense in depth: a file vault's budget is defaulted at creation and
+		// an explicit "0" is rejected (gastrolog-1epfgb), so an unset one here
+		// can only be a pre-change or bug-produced config. Bound it with the
+		// default rather than pass 0, which the guard reads as "no budget" — an
+		// unbounded file vault must stay unrepresentable, guard included.
+		// Non-file vaults have no disk budget and keep 0.
+		var maxSize uint64
+		if vc.Type == system.VaultTypeFile {
+			var err error
+			maxSize, err = system.SizeOrDefault(vc.MaxSize, 0)
+			if err != nil || maxSize == 0 {
+				maxSize, _ = system.ParseSize(system.DefaultVaultMaxSize)
+			}
+		}
+		// A vault with no local placement still claims local disk through its
+		// origin segment backlog, so a max-size budget registers it even when
+		// there is no volume to sample here.
+		if len(paths) == 0 && maxSize == 0 {
 			continue
 		}
+		// The disk-free thresholds stay expressions all the way into the
+		// guard: a percentage ("10%") can only be resolved against the volume
+		// actually sampled at evaluation time. Empty inherits the node level;
+		// write-time validation guarantees a set value parses.
 		keep[vc.ID] = true
-		o.diskGuard.SetVaultGuard(vc.ID, vc.Name, paths, vc.DiskFreeWarnBytes, vc.DiskFreeFloorBytes, vc.MaxSizeBytes)
+		o.diskGuard.SetVaultGuard(vc.ID, vc.Name, paths, vc.DiskFreeWarn, vc.DiskFreeFloor, maxSize)
 	}
 	o.diskGuard.retainVaultGuards(keep, o.alerts)
 }
@@ -837,7 +873,14 @@ func (o *Orchestrator) refreshBacklogBudget(ctx context.Context) {
 	if err != nil {
 		return
 	}
-	o.diskGuard.backlogBudget.Store(ss.Cluster.PipelineBacklogMaxBytes)
+	// Resolve the backlog budget expression at use, via the shared parser
+	// (gastrolog-etcjdx). Empty = unbounded (0); a malformed value was rejected
+	// at write, so treat a parse failure as unbounded rather than guess.
+	budget, err := system.SizeOrDefault(ss.Cluster.PipelineBacklogMax, 0)
+	if err != nil {
+		budget = 0
+	}
+	o.diskGuard.backlogBudget.Store(budget)
 }
 
 // startDiskGuard registers the guard's scheduler job. No-op without paths.

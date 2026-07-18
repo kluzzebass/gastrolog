@@ -15,6 +15,128 @@ import (
 	"gastrolog/internal/system/raftfsm"
 )
 
+// vaultQuantity describes one operator-authored config quantity on a vault:
+// which field it lands in, what it defaults to, and whether it applies to this
+// vault's type at all.
+type vaultQuantity struct {
+	flag    string // operator-facing name, for error messages
+	applies bool   // false → this vault type has no such quantity; leave it alone
+	in      string // the incoming expression from the wire
+	dst     *string
+	def     string                          // default expression when unset on create
+	prev    func(system.VaultConfig) string // the stored value, for preserve-on-update
+}
+
+// resolveVaultQuantities settles every config quantity on a vault from one set
+// of rules, rather than a near-identical function per field (gastrolog-etcjdx):
+//
+//   - set          → stored verbatim, as the operator typed it, after a
+//     parse-check so an unparseable expression fails at write rather than
+//     surfacing later at use.
+//   - "0"          → rejected: an explicit zero means "accept nothing" or "no
+//     bound", the two states this model exists to prevent.
+//   - unset, create → the default expression.
+//   - unset, update → the stored value, so an update that does not mention a
+//     quantity never silently re-defaults a chosen one.
+func resolveVaultQuantities(p *apiv1.VaultConfig, vaultCfg *system.VaultConfig, existing []system.VaultConfig) *connect.Error {
+	for _, q := range []vaultQuantity{
+		{
+			flag: "max-size", applies: vaultCfg.Type == system.VaultTypeFile,
+			in: p.GetMaxSize(), dst: &vaultCfg.MaxSize, def: system.DefaultVaultMaxSize,
+			prev: func(v system.VaultConfig) string { return v.MaxSize },
+		},
+		{
+			flag: "cache-budget", applies: vaultCfg.IsCloud(),
+			in: p.GetCacheBudget(), dst: &vaultCfg.CacheBudget, def: system.DefaultVaultCacheBudget,
+			prev: func(v system.VaultConfig) string { return v.CacheBudget },
+		},
+		{
+			flag: "memory-budget", applies: vaultCfg.Type == system.VaultTypeMemory,
+			in: p.GetMemoryBudget(), dst: &vaultCfg.MemoryBudget, def: system.DefaultVaultMemoryBudget,
+			prev: func(v system.VaultConfig) string { return v.MemoryBudget },
+		},
+	} {
+		if !q.applies {
+			continue
+		}
+		if connErr := resolveVaultQuantity(q, vaultCfg, existing); connErr != nil {
+			return connErr
+		}
+	}
+	return nil
+}
+
+func resolveVaultQuantity(q vaultQuantity, vaultCfg *system.VaultConfig, existing []system.VaultConfig) *connect.Error {
+	if !system.IsQuantityUnset(q.in) {
+		bytes, err := system.ParseSize(q.in)
+		if err != nil {
+			// Budgets are size-only: a %-of-volume budget does not compose —
+			// N vaults at 10% each overcommit the shared volume (see the
+			// max-size decision in docs/product-defaults-policy-design.md).
+			// Name that reason instead of a bare unknown-unit error.
+			if sp, perr := system.ParseSizeOrPercent(q.in); perr == nil && sp.IsPercent() {
+				return errInvalidArg(fmt.Errorf(
+					"%s %q on vault %q: a percentage of the volume is not allowed here — per-vault shares do not compose across vaults on the same volume; use an absolute size (e.g. %s)",
+					q.flag, q.in, vaultCfg.Name, q.def))
+			}
+			return errInvalidArg(fmt.Errorf("%s %q on vault %q: %w", q.flag, q.in, vaultCfg.Name, err))
+		}
+		if bytes == 0 {
+			return errInvalidArg(fmt.Errorf(
+				"%s of %q on vault %q means no bound; omit it for the default (%s) or set a real size",
+				q.flag, q.in, vaultCfg.Name, q.def))
+		}
+		*q.dst = q.in // the operator's expression, verbatim
+		return nil
+	}
+	for i := range existing {
+		if existing[i].ID == vaultCfg.ID {
+			*q.dst = q.prev(existing[i]) // preserve on update
+			return nil
+		}
+	}
+	*q.dst = q.def // default on create
+	return nil
+}
+
+// validateVaultExpressions parse-checks the quantities that carry no default —
+// an empty value is legitimately "inherit" or "off" — so a malformed one is
+// caught at write instead of at use (gastrolog-etcjdx).
+//
+// The disk-free thresholds are the only volume-relative fields: they accept a
+// percentage of the volume ("10%") alongside an absolute size, because the
+// threshold guards the vault's own volume, so a share composes. An explicit
+// zero ("0", "0%") would disable the guard for this vault and is rejected,
+// like the explicit-0 budgets.
+func validateVaultExpressions(vaultCfg *system.VaultConfig) *connect.Error {
+	for _, f := range []struct {
+		flag string
+		expr string
+	}{
+		{"disk-free-warn", vaultCfg.DiskFreeWarn},
+		{"disk-free-floor", vaultCfg.DiskFreeFloor},
+	} {
+		if system.IsQuantityUnset(f.expr) {
+			continue
+		}
+		sp, err := system.ParseSizeOrPercent(f.expr)
+		if err != nil {
+			return errInvalidArg(fmt.Errorf("%s %q on vault %q: %w", f.flag, f.expr, vaultCfg.Name, err))
+		}
+		if sp.IsZero() {
+			return errInvalidArg(fmt.Errorf(
+				"%s of %q on vault %q disables the guard; omit it to inherit the node default, or set a real size or percentage",
+				f.flag, f.expr, vaultCfg.Name))
+		}
+	}
+	if !system.IsQuantityUnset(vaultCfg.CacheTTL) {
+		if _, err := system.ParseDuration(vaultCfg.CacheTTL); err != nil {
+			return errInvalidArg(fmt.Errorf("cache-ttl %q on vault %q: %w", vaultCfg.CacheTTL, vaultCfg.Name, err))
+		}
+	}
+	return nil
+}
+
 // checkVaultShapeImmutable rejects PutVault when an existing vault's shape
 // fields (type, cloud_service_id) would change. New vaults pass through —
 // the existing-vault lookup returns nil and we have nothing to compare.
@@ -78,6 +200,18 @@ func (s *SystemServer) PutVault(
 		return nil, errInternal(err)
 	}
 	if connErr := checkNameConflict("vault", vaultCfg.ID, vaultCfg.Name, vaults, func(v system.VaultConfig) (glid.GLID, string) { return v.ID, v.Name }); connErr != nil {
+		return nil, connErr
+	}
+
+	// Resolve the size budget: the wire distinguishes "unset" (absent) from
+	// "explicitly 0" (present, zero), and they mean opposite things
+	// (gastrolog-1epfgb). This is the single ingress for every surface — CLI
+	// create, UI, and config import all call PutVault — so resolving here
+	// makes an unbounded vault unrepresentable regardless of who asked.
+	if connErr := resolveVaultQuantities(req.Msg.Config, &vaultCfg, vaults); connErr != nil {
+		return nil, connErr
+	}
+	if connErr := validateVaultExpressions(&vaultCfg); connErr != nil {
 		return nil, connErr
 	}
 

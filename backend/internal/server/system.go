@@ -263,7 +263,7 @@ func (s *SystemServer) buildFullSettingsResponse(ctx context.Context, includeSec
 		Cluster: &apiv1.ClusterSettings{
 			BroadcastInterval:       ss.Cluster.BroadcastInterval,
 			HeartbeatInterval:       ss.Cluster.HeartbeatInterval,
-			PipelineBacklogMaxBytes: ss.Cluster.PipelineBacklogMaxBytes,
+			PipelineBacklogMax:      ss.Cluster.PipelineBacklogMax,
 		},
 		SetupWizardDismissed: func() bool { v, _ := s.sysStore.GetSetupWizardDismissed(ctx); return v }(),
 		NodeId:               []byte(s.localNodeID),
@@ -1254,8 +1254,13 @@ func mergeCluster(c *apiv1.PutClusterSettings, cluster *system.ClusterConfig) *c
 		}
 		cluster.HeartbeatInterval = *c.HeartbeatInterval
 	}
-	if c.PipelineBacklogMaxBytes != nil {
-		cluster.PipelineBacklogMaxBytes = *c.PipelineBacklogMaxBytes
+	if c.PipelineBacklogMax != nil {
+		if !system.IsQuantityUnset(*c.PipelineBacklogMax) {
+			if _, err := system.ParseSize(*c.PipelineBacklogMax); err != nil {
+				return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid pipeline_backlog_max: %w", err))
+			}
+		}
+		cluster.PipelineBacklogMax = *c.PipelineBacklogMax
 	}
 	return nil
 }

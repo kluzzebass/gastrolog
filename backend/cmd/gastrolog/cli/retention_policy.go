@@ -44,12 +44,12 @@ func newRetentionPolicyListCmd() *cobra.Command {
 			for _, rp := range resp.Msg.RetentionPolicies {
 				rows = append(rows, []string{
 					glid.FromBytes(rp.Id).String(), rp.Name,
-					formatDurationCell(rp.MaxAgeNanos),
-					formatBytesCell(rp.MaxBytes),
+					rp.MaxAge,
+					rp.MaxSize,
 					formatInt64(rp.MaxChunks),
 				})
 			}
-			p.table([]string{"ID", "NAME", "MAX AGE", "MAX BYTES", "MAX CHUNKS"}, rows)
+			p.table([]string{"ID", "NAME", "MAX AGE", "MAX SIZE", "MAX CHUNKS"}, rows)
 			return nil
 		},
 	}
@@ -83,8 +83,8 @@ func newRetentionPolicyGetCmd() *cobra.Command {
 					p.kv([][2]string{
 						{"ID", glid.FromBytes(rp.Id).String()},
 						{"Name", rp.Name},
-						{"Max Age", formatDurationCell(rp.MaxAgeNanos)},
-						{"Max Bytes", formatBytesCell(rp.MaxBytes)},
+						{"Max Age", rp.MaxAge},
+						{"Max Size", rp.MaxSize},
 						{"Max Chunks", formatInt64(rp.MaxChunks)},
 					})
 					return nil
@@ -123,18 +123,10 @@ func newRetentionPolicyCreateCmd() *cobra.Command {
 			}
 
 			if cmd.Flags().Changed("max-age") {
-				v, err := maxAgeFlagNanos(cmd)
-				if err != nil {
-					return err
-				}
-				cfg.MaxAgeNanos = v
+				cfg.MaxAge, _ = cmd.Flags().GetString("max-age")
 			}
-			if cmd.Flags().Changed("max-bytes") {
-				v, err := maxBytesFlagValue(cmd)
-				if err != nil {
-					return err
-				}
-				cfg.MaxBytes = v
+			if cmd.Flags().Changed("max-size") {
+				cfg.MaxSize, _ = cmd.Flags().GetString("max-size")
 			}
 			if cmd.Flags().Changed("max-chunks") {
 				cfg.MaxChunks, _ = cmd.Flags().GetInt64("max-chunks")
@@ -155,7 +147,7 @@ func newRetentionPolicyCreateCmd() *cobra.Command {
 	}
 	cmd.Flags().String("name", "", "policy name (required)")
 	cmd.Flags().String("max-age", "", "max age (e.g. 3m, 1h, 30s)")
-	cmd.Flags().String("max-bytes", "", "max total size retained (e.g. \"50GB\", \"1GiB\"; empty = no limit)")
+	cmd.Flags().String("max-size", "", "max total size retained (e.g. \"50GB\", \"1GiB\"; empty = no limit)")
 	cmd.Flags().Int64("max-chunks", 0, "max chunks")
 	_ = cmd.MarkFlagRequired("name")
 	return cmd

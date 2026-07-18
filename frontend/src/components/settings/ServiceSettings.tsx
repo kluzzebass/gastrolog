@@ -10,7 +10,6 @@ import { Button } from "./Buttons";
 import { Checkbox } from "./Checkbox";
 import { ExpandableCard } from "./ExpandableCard";
 import { useExpandedCards } from "../../hooks/useExpandedCards";
-import { formatBytesBigint, parseBytes } from "../../utils/units";
 import { extractMessage } from "../../utils/errors";
 import type { GetSettingsResponse } from "../../api/gen/gastrolog/v1/system_pb";
 
@@ -70,8 +69,8 @@ function fieldsFromData(data: GetSettingsResponse): ServiceFormState {
     broadcastInterval: data.cluster?.broadcastInterval || "5s",
     heartbeatInterval: data.cluster?.heartbeatInterval || "1s",
     pipelineBacklogMax:
-      data.cluster && data.cluster.pipelineBacklogMaxBytes > BigInt(0)
-        ? formatBytesBigint(data.cluster.pipelineBacklogMaxBytes)
+      data.cluster && data.cluster.pipelineBacklogMax !== ""
+        ? data.cluster.pipelineBacklogMax
         : "",
     initialized: true,
   };
@@ -162,8 +161,8 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
       s.broadcastInterval !== (data.cluster?.broadcastInterval || "5s") ||
       s.heartbeatInterval !== (data.cluster?.heartbeatInterval || "1s") ||
       s.pipelineBacklogMax !==
-        (data.cluster && data.cluster.pipelineBacklogMaxBytes > BigInt(0)
-          ? formatBytesBigint(data.cluster.pipelineBacklogMaxBytes)
+        (data.cluster && data.cluster.pipelineBacklogMax !== ""
+          ? data.cluster.pipelineBacklogMax
           : ""));
 
   const handleSave = async () => {
@@ -209,7 +208,7 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
           heartbeatInterval: effectiveHeartbeat,
           // Always sent: clearing the field means 0 = unbounded, which must
           // reach the store (undefined would merge-skip and keep the old budget).
-          pipelineBacklogMaxBytes: parseBytes(s.pipelineBacklogMax),
+          pipelineBacklogMax: s.pipelineBacklogMax,
         },
       });
       addToast("Server configuration updated", "info");

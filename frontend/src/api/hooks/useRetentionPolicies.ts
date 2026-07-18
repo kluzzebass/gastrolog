@@ -7,16 +7,16 @@ export function usePutRetentionPolicy() {
     async (args: {
       id: string;
       name: string;
-      maxAgeNanos: bigint;
-      maxBytes: bigint;
+      maxAge: string;
+      maxSize: string;
       maxChunks: bigint;
     }) => {
       return systemClient.putRetentionPolicy({
         config: {
           id: decode(args.id),
           name: args.name,
-          maxAgeNanos: args.maxAgeNanos,
-          maxBytes: args.maxBytes,
+          maxAge: args.maxAge,
+          maxSize: args.maxSize,
           maxChunks: args.maxChunks,
         },
       });
