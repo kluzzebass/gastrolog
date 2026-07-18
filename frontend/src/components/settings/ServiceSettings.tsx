@@ -36,7 +36,6 @@ interface ServiceFormState {
   broadcastInterval: string;
   heartbeatInterval: string;
   pipelineBacklogMax: string; // human size; per-vault pipeline backlog budget; empty = unbounded
-  alarmFloodThreshold: string; // alarm activations per node per 10 min; empty = default (10)
   initialized: boolean;
 }
 
@@ -74,9 +73,6 @@ function fieldsFromData(data: GetSettingsResponse): ServiceFormState {
       data.cluster && data.cluster.pipelineBacklogMaxBytes > BigInt(0)
         ? formatBytesBigint(data.cluster.pipelineBacklogMaxBytes)
         : "",
-    alarmFloodThreshold: data.cluster?.alarmFloodThreshold
-      ? String(data.cluster.alarmFloodThreshold)
-      : "",
     initialized: true,
   };
 }
@@ -88,7 +84,7 @@ const INITIAL_STATE: ServiceFormState = {
   requireSpecial: false, maxConsecutiveRepeats: "", forbidAnimalNoise: false,
   refreshTokenDuration: "", maxFollowDuration: "", queryTimeout: "",
   maxResultCount: "", broadcastInterval: "", heartbeatInterval: "",
-  pipelineBacklogMax: "", alarmFloodThreshold: "", initialized: false,
+  pipelineBacklogMax: "", initialized: false,
 };
 
 function serviceReducer(state: ServiceFormState, action: ServiceFormAction): ServiceFormState {
@@ -168,9 +164,7 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
       s.pipelineBacklogMax !==
         (data.cluster && data.cluster.pipelineBacklogMaxBytes > BigInt(0)
           ? formatBytesBigint(data.cluster.pipelineBacklogMaxBytes)
-          : "") ||
-      s.alarmFloodThreshold !==
-        (data.cluster?.alarmFloodThreshold ? String(data.cluster.alarmFloodThreshold) : ""));
+          : ""));
 
   const handleSave = async () => {
     const hasCert = certIdSet.has(s.tlsDefaultCert);
@@ -216,9 +210,6 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
           // Always sent: clearing the field means 0 = unbounded, which must
           // reach the store (undefined would merge-skip and keep the old budget).
           pipelineBacklogMaxBytes: parseBytes(s.pipelineBacklogMax),
-          // Always sent: clearing the field means 0 = default (10), which
-          // must reach the store the same way.
-          alarmFloodThreshold: parseInt(s.alarmFloodThreshold, 10) || 0,
         },
       });
       addToast("Server configuration updated", "info");
@@ -239,7 +230,6 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
     tls: false,
     cluster: false,
     pipeline: false,
-    alarms: false,
   });
 
   return (
@@ -637,31 +627,6 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
                   dark={dark}
                   mono
                   examples={["2GB", "10GB", "50GB"]}
-                />
-              </FormField>
-            </div>
-          </ExpandableCard>
-
-          <ExpandableCard
-            id="Alarms"
-            dark={dark}
-            expanded={isExpanded("alarms")}
-            onToggle={() => toggle("alarms")}
-            monoTitle={false}
-          >
-            <div className="flex flex-col gap-4">
-              <FormField
-                label="Flood Threshold"
-                description="Alarm activations per node per rolling 10 minutes before that node raises the alarm-flood meta-alarm (the alarm system reporting itself degraded by volume). The rate is measured per node, so the threshold applies to each node separately. Clears once the rate stays under the threshold for a full 10-minute window. Leave empty for the default."
-                dark={dark}
-              >
-                <NumberInput
-                  value={s.alarmFloodThreshold}
-                  onChange={set("alarmFloodThreshold")}
-                  placeholder="10"
-                  dark={dark}
-                  min={1}
-                  examples={["10", "20", "50"]}
                 />
               </FormField>
             </div>

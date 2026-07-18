@@ -127,7 +127,7 @@ func TestRateAlerterCatalogOwnsPriority(t *testing.T) {
 	}
 	ra.Evaluate(baseTime.Add(9 * time.Second))
 
-	active := collector.Active()
+	active := collector.Standing()
 	if len(active) != 1 {
 		t.Fatalf("expected 1 active alarm, got %d: %v", len(active), active)
 	}

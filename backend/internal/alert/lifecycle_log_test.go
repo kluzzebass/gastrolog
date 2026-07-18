@@ -63,51 +63,36 @@ func spyDefaultLogger(t *testing.T) *logSpy {
 }
 
 // TestLifecycleTransitionsLogExactlyOneLineEach drives the full lifecycle —
-// raise → clear (released) → re-raise → shelve → unshelve → re-shelve →
-// shelve expiry → clear (released) — and asserts exactly one slog line per
-// transition edge, in order, with the operator identity on the operator
-// actions. Reads settle state in between and must add nothing.
+// raise → clear (released) → re-raise → clear (released) — and asserts
+// exactly one slog line per transition edge, in order. Reads settle state
+// in between and must add nothing.
 func TestLifecycleTransitionsLogExactlyOneLineEach(t *testing.T) {
 	spy := spyDefaultLogger(t)
 	clk := newSuppressionClock()
 	c := NewWithClock(clk.Now)
 
-	// wal-reserve: zero delay-on, zero delay-off, non-latching, shelveable.
+	// wal-reserve: zero delay-on, zero delay-off, non-latching.
 	c.Raise("wal-reserve", "cluster-ctl", "reservation below floor")
 	c.Standing() // reads must not double-log
 	c.Standing()
 	c.Clear("wal-reserve", "cluster-ctl") // released
 	c.Standing()
 
-	// Second firing: shelve, early unshelve, re-shelve, lapsed expiry.
+	// Second firing: same edges, nothing carried over.
 	c.Raise("wal-reserve", "cluster-ctl", "reservation below floor again")
-	if _, err := c.Shelve("wal-reserve:cluster-ctl", time.Hour, "op"); err != nil {
-		t.Fatalf("Shelve: %v", err)
-	}
-	if err := c.Unshelve("wal-reserve:cluster-ctl"); err != nil {
-		t.Fatalf("Unshelve: %v", err)
-	}
-	if _, err := c.Shelve("wal-reserve:cluster-ctl", time.Hour, "op"); err != nil {
-		t.Fatalf("re-Shelve: %v", err)
-	}
 	clk.Advance(2 * time.Hour)
-	c.Standing() // lazy settle runs the expiry
+	c.Standing() // reads settle, never log
 	c.Clear("wal-reserve", "cluster-ctl") // released
 	c.Standing()
 
 	want := []struct {
 		level slog.Level
 		msg   string
-		by    string // expected operator identity attr value; "" = none
 	}{
-		{slog.LevelWarn, "alarm raised", ""},
-		{slog.LevelInfo, "alarm cleared — condition resolved", ""},
-		{slog.LevelWarn, "alarm raised", ""},
-		{slog.LevelInfo, "alarm shelved", "op"},
-		{slog.LevelInfo, "alarm unshelved", ""},
-		{slog.LevelInfo, "alarm shelved", "op"},
-		{slog.LevelInfo, "alarm shelve expired — returned to the active list", ""},
-		{slog.LevelInfo, "alarm cleared — condition resolved", ""},
+		{slog.LevelWarn, "alarm raised"},
+		{slog.LevelInfo, "alarm cleared — condition resolved"},
+		{slog.LevelWarn, "alarm raised"},
+		{slog.LevelInfo, "alarm cleared — condition resolved"},
 	}
 	got := spy.lines()
 	if len(got) != len(want) {
@@ -124,13 +109,6 @@ func TestLifecycleTransitionsLogExactlyOneLineEach(t *testing.T) {
 		if id := g.attrs["id"]; id != "wal-reserve:cluster-ctl" {
 			t.Errorf("line %d (%q) id = %q, want the full alarm ID", i, g.msg, id)
 		}
-		if by := g.attrs["shelved_by"]; by != w.by {
-			t.Errorf("line %d (%q) operator identity = %q, want %q", i, g.msg, by, w.by)
-		}
-	}
-	// The shelve lines carry the mandatory expiry.
-	if got[3].attrs["until"] == "" || got[5].attrs["until"] == "" {
-		t.Errorf("shelve lines must carry the expiry: %+v %+v", got[3], got[5])
 	}
 }
 

@@ -135,7 +135,7 @@ func TestLeaderlessAlarmSustainedWithoutReRaise(t *testing.T) {
 
 	o.updateLeaderlessAlarms(map[glid.GLID]string{vaultID: "quiet-vault"})
 	advance(delayOn + time.Second)
-	alarms := c.Active()
+	alarms := c.Standing()
 	if len(alarms) != 1 {
 		t.Fatalf("persisting condition past delay-on must activate on read; active=%d", len(alarms))
 	}

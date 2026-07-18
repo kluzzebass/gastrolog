@@ -203,7 +203,7 @@ func TestStatsCollector_WalLatencyLogsOnTransitionEdgesOnly(t *testing.T) {
 }
 
 func alertActive(c *alert.Collector, id string) bool {
-	for _, a := range c.Active() {
+	for _, a := range c.Standing() {
 		if a.ID == id {
 			return true
 		}

@@ -183,14 +183,6 @@ message NodeStats {
   // fire when the backlog actually threatens something. Like raft_state,
   // this is the level's String() rather than an enum.
   string ingest_pressure_level = 51;
-
-  // Alarm activations on THIS node in the rolling 10-minute window — the
-  // alarm system's self-monitoring rate gauge (EEMUA 191 rate principle).
-  // Per-node by design: the collector is per-node, so a flood is a fact
-  // about one node's alarm system; there is no cluster-aggregate flood.
-  // Over the operator-set threshold the node raises the single alarm-flood
-  // meta-alarm (see the alarm catalog).
-  uint32 alarm_rate_10m = 52;
 }
 
 // VaultPipelineNodeDisk is one vault's local pipeline storage areas on a
@@ -238,8 +230,9 @@ message PeerTrafficTotal {
 // catalog — never chosen at the raising call site.
 // Alarms are keyed by ID for deduplication — the same condition doesn't
 // create multiple alarms. Alarms are STATE with suppression: they stand
-// while the condition holds, clear when it resolves, and can be
-// temporarily shelved. Latching alarms stand until process restart.
+// while the condition holds and clear when it resolves — an alarm is
+// standing or it is not; there are no per-alarm operator states. Latching
+// alarms stand until process restart.
 message SystemAlert {
   bytes id = 1;                            // stable key for dedup (e.g. "vault-init:$vaultID")
   AlarmPriority priority = 2;              // from the alarm catalog, never the call site
@@ -257,34 +250,6 @@ message SystemAlert {
   // (EEMUA 191): their response is to report the defect, so they sit outside
   // the consequence × urgency priority scale (priority is UNSPECIFIED).
   bool software_fault = 9;
-  // Catalog type ID ("vault-leaderless", "alarm-flood", ...) — the id field
-  // minus the instance key. Carried explicitly so aggregation-side flood
-  // collapse groups by type without re-deriving it from the id format.
-  string type_id = 10;
-  // State (see AlarmState). Alarms in every state travel on the wire;
-  // consumers filter — the active list, the shelved section, and
-  // cross-node shelve fan-out all read this one field.
-  AlarmState state = 11;
-  // Shelve expiry. Set only while state is SHELVED — shelves always carry
-  // an expiry; there are no permanent shelves.
-  google.protobuf.Timestamp shelved_until = 12;
-  // Whether operators may shelve this alarm. False for types where deferral
-  // is meaningless (software faults, alarm-flood) — the UI must not render
-  // a shelve control at all, and ShelveAlarm rejects with the reason.
-  bool shelveable = 13;
-}
-
-// AlarmState is the state of a standing alarm: alarms stand while the
-// condition holds, clear when it resolves, and can be temporarily shelved.
-enum AlarmState {
-  ALARM_STATE_UNSPECIFIED = 0;
-  // Condition annunciated and standing. Also the state of a latching alarm
-  // whose condition resolved — it stands until process restart.
-  ALARM_STATE_ACTIVE = 1;
-  // Operator-shelved until shelved_until. Visible in a collapsed section,
-  // never silently gone; expiry with the condition still true returns it
-  // to ACTIVE.
-  ALARM_STATE_SHELVED = 2;
 }
 
 // AlarmPriority is the cataloged consequence × urgency verdict for an alarm

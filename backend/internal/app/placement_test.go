@@ -54,7 +54,7 @@ func vaultNode(t *testing.T, store *sysmem.Store, vaultID glid.GLID) string {
 }
 
 func hasAlert(alerts *alert.Collector, prefix string) bool {
-	for _, a := range alerts.Active() {
+	for _, a := range alerts.Standing() {
 		if len(a.ID) >= len(prefix) && a.ID[:len(prefix)] == prefix {
 			return true
 		}
@@ -1142,7 +1142,7 @@ func TestStartPlacementReconcile_PropagatesAddJobError(t *testing.T) {
 // ---------- Degraded-home alarm (gastrolog-38bm9t) ----------
 
 func alertMessage(alerts *alert.Collector, prefix string) string {
-	for _, a := range alerts.Active() {
+	for _, a := range alerts.Standing() {
 		if strings.HasPrefix(a.ID, prefix) {
 			return a.Detail
 		}

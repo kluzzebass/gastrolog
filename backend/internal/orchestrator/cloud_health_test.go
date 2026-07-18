@@ -92,7 +92,7 @@ func TestEvaluateCloudHealth_SetsAlertWhenDegraded(t *testing.T) {
 
 	orch.evaluateCloudHealth()
 
-	alerts := ac.Active()
+	alerts := ac.Standing()
 	if len(alerts) != 1 {
 		t.Fatalf("expected 1 alert, got %d", len(alerts))
 	}
@@ -123,7 +123,7 @@ func TestEvaluateCloudHealth_ClearsAlertWhenHealthy(t *testing.T) {
 	// Now cloud is healthy (degraded=false, default).
 	orch.evaluateCloudHealth()
 
-	if alerts := ac.Active(); len(alerts) != 0 {
+	if alerts := ac.Standing(); len(alerts) != 0 {
 		t.Fatalf("expected 0 alerts after recovery, got %d: %v", len(alerts), alerts)
 	}
 }
@@ -145,7 +145,7 @@ func TestEvaluateCloudHealth_SkipsFileVaultWithoutCloudStore(t *testing.T) {
 
 	orch.evaluateCloudHealth()
 
-	if alerts := ac.Active(); len(alerts) != 0 {
+	if alerts := ac.Standing(); len(alerts) != 0 {
 		t.Fatalf("expected 0 alerts for file vault without cloud store, got %d", len(alerts))
 	}
 }
@@ -167,7 +167,7 @@ func TestEvaluateCloudHealth_FileVaultWithCloudStore(t *testing.T) {
 
 	orch.evaluateCloudHealth()
 
-	alerts := ac.Active()
+	alerts := ac.Standing()
 	if len(alerts) != 1 {
 		t.Fatalf("expected 1 alert, got %d", len(alerts))
 	}
