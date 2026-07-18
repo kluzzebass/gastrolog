@@ -50,9 +50,23 @@ section.
 | `max-size` | `""` = unlimited | **unbounded** | limit | operator-knowledge (constant) | help says "empty means unlimited" (accurate, but the behaviour is the bug) | **FIX** | gastrolog-1epfgb (product) + gastrolog-2b2yyy (script) |
 | `cache-budget` | `""` = **no cap** | **unbounded** | limit | derivable/op | **DISHONEST** — field comment says `default: "1GiB"`, code never applies it | **FIX** (crit 1 **and** 4) | gastrolog-338j51 |
 | `memory-budget` | `0` = no budget | **unbounded** | limit | operator-knowledge | help silent on unbounded | **FIX** | gastrolog-1qd5wz |
-| `disk-free-warn` | `""` = inherit node default | bounded | limit | derivable | honest ("empty inherits the node default") | **PASS** — the good pattern | — |
-| `disk-free-floor` | `""` = inherit node default | bounded | limit | derivable | honest | **PASS** — the good pattern | — |
+| `disk-free-warn` | `""` = inherit node default | bounded | limit | derivable | **was vague** — see correction below | **PASS** (crit 1) + crit-4 fix | fixed in this epic |
+| `disk-free-floor` | `""` = inherit node default | bounded | limit | derivable | **was vague** — see correction below | **PASS** (crit 1) + crit-4 fix | fixed in this epic |
 | `cache-ttl` | `""` | n/a (only used in `ttl` eviction mode) | mechanism | operator | honest | **OK-mech** | — |
+
+### Criterion-4 correction: `disk-free-warn` / `disk-free-floor` (found in the field)
+
+The original verdict rated these two "honest" by reading the **CLI flag help
+only** ("empty inherits the node default") and never checked the UI: the
+vault form rendered `placeholder=""` with the same vague sentence, so an
+operator staring at a live disk-space alarm and a blank threshold field had
+no way to learn what was being enforced. "Inherits the node default" without
+stating the default is not honest — it is a pointer to nowhere. Every
+surface now states the formula: warn `max(10% of volume, 10 GiB)` capped at
+25% of the volume; floor `max(3% of volume, 3 GiB)` capped at 10% — in the
+form description and placeholder and in the CLI flag help. The audit's own
+miss here is the lesson: criterion 4 must be checked on **every** surface a
+knob has, not the first one that answers.
 
 ### The `cache-budget` finding (crit 4, proven)
 

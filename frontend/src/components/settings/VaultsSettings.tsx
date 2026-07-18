@@ -294,7 +294,7 @@ export function VaultStorageForm({
             <TextInput
               value={storage.diskFreeWarn}
               onChange={(v) => onUpdate({ diskFreeWarn: v })}
-              placeholder=""
+              placeholder="max(10% of volume, 10GiB)"
               dark={dark}
               mono
               examples={["5GB", "10GB", "50GB"]}
@@ -308,7 +308,7 @@ export function VaultStorageForm({
             <TextInput
               value={storage.diskFreeFloor}
               onChange={(v) => onUpdate({ diskFreeFloor: v })}
-              placeholder=""
+              placeholder="max(3% of volume, 3GiB)"
               dark={dark}
               mono
               examples={["1GB", "3GB", "10GB"]}
