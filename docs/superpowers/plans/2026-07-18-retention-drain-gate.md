@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- The word "tier" is BANNED from all GastroLog prose, identifiers, comments, and docs (gastrolog-16hruo). The two disk-guard stages are the **admission gate** (`protect`) and the **drain gate** (`deferWrites`).
+- The banned storage-level word (see gastrolog-16hruo; the concept ban covers every sense) must not appear in any GastroLog prose, identifiers, comments, or docs. The two disk-guard stages are the **admission gate** (`protect`) and the **drain gate** (`deferWrites`).
 - No new operator-facing configuration. New numeric bounds are unexported Go constants.
 - No wall-clock in test assertions: watchdog logic is tested through injected ticks and pure functions, never sleeps racing timers.
 - Never modify the 5034va ordering: routing runs before the retention-pending flag; an aborted fan-out must not consume the one-shot.
@@ -35,22 +35,13 @@
 
 Comment-only edits — no code or string literals change. Replace every banned-word phrase:
 
-| Location | Old phrase | New phrase |
-|---|---|---|
-| `admissionResumeAbove` doc (l.76-85) | "the drain tier's resume level" | "the drain gate's resume level" |
-| `protect` field doc (l.104) | "protect gates the CONSUMER tier" | "protect is the ADMISSION GATE" |
-| `deferWrites` field doc (l.110) | "deferWrites gates the DRAIN tier" | "deferWrites is the DRAIN GATE" |
-| same block (l.114) | "waited for the consumer tier" | "waited for the admission gate" |
-| `reconcileVaultProtect` doc (l.530-533) | "Like the node consumer tier" / "no per-vault drain tier" | "Like the node admission gate" / "no per-vault drain gate" |
-| `reconcileProtect` doc + body comments (l.638-660) | "two-tier staged protect", "Both tiers", "DRAIN tier resumes first", "CONSUMER tier resumes last", "Drain tier:", "Consumer tier:" | "two staged gates", "Both gates", "the drain gate releases first", "the admission gate releases last", "Drain gate:", "Admission gate:" |
-| `diskProtectActive` doc (l.677-683) | "(the CONSUMER tier)" | "(the admission gate)" |
-| `diskDeferWrites` doc (l.685-690) | "pipeline DRAIN tier" | "pipeline drain gate" |
+*(Executed — the original mapping quoted the banned word per site and is preserved in this file's git history; the result is the comment text now in `disk_guard.go`: admission gate for `protect`, drain gate for `deferWrites`, "two staged gates", "the drain gate releases first / the admission gate releases last".)*
 
-In `disk_guard_test.go`, rewrite the comments and t.Fatal strings in `TestDiskGuardStagedReleaseInvariant` (l.231-275) and `TestPrimeDiskGuardClosesBootWindow` (l.294-296) the same way ("both tiers" → "both gates", "drain tier" → "drain gate"). Fatal-string edits are test-message-only, no assertion logic changes.
+In `disk_guard_test.go`, the comments and t.Fatal strings in `TestDiskGuardStagedReleaseInvariant` (l.231-275) and `TestPrimeDiskGuardClosesBootWindow` (l.294-296) got the same gate-vocabulary rewrite. Fatal-string edits are test-message-only, no assertion logic changes.
 
 - [ ] **Step 2: Verify the word is gone from both files**
 
-Run: `grep -n -i "tier" backend/internal/orchestrator/disk_guard.go backend/internal/orchestrator/disk_guard_test.go`
+Run: `grep -n -i "t[i]er" backend/internal/orchestrator/disk_guard.go backend/internal/orchestrator/disk_guard_test.go`
 Expected: no output (exit 1).
 
 - [ ] **Step 3: Add ubiquitous-language entries**
@@ -1003,7 +994,7 @@ Expected: PASS. Multi-second convergence tests included.
 
 - [ ] **Step 3: Banned-word sweep over the whole diff**
 
-Run: `git diff main --unified=0 | grep -i "tier" ; echo "exit: $?"`
+Run: `git diff main --unified=0 | grep -i "t[i]er" ; echo "exit: $?"`
 Expected: `exit: 1` (no occurrences anywhere in the diff).
 
 - [ ] **Step 4: Set the issue in_review**
