@@ -562,7 +562,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	// desired-vs-running (idempotent) and logs any divergence, once per
 	// state change. Registered unconditionally — single-node deploys
 	// converge the same way.
-	if err := startIngesterReconcileSweep(ctx, orch.Scheduler(), disp, logger); err != nil {
+	if err := startIngesterReconcileSweep(ctx, orch.Scheduler(), disp, logger.With("component", "ingestion")); err != nil {
 		logger.Warn("startup: register scheduled job", "job", "ingester-reconcile", "error", err)
 	}
 
