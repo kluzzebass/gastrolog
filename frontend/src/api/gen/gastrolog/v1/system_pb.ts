@@ -598,20 +598,17 @@ export class VaultConfig extends Message<VaultConfig> {
   diskFreeWarn = "";
 
   /**
+   * gastrolog-33ul6h: max_size (field 19) removed. The per-node disk-claim
+   * budget is no longer a vault-level field — it lives on the retention
+   * policy (RetentionPolicyConfig.size_budget) attached via retention_rules,
+   * min-wins across attached policies, with the creation default
+   * (system.DefaultVaultMaxSize) as the floor when no attached policy
+   * carries one. No `reserved` (house rule): zero production deployments,
+   * operator reinitializes.
+   *
    * @generated from field: string disk_free_floor = 18;
    */
   diskFreeFloor = "";
-
-  /**
-   * Per-node budget for this vault's whole local disk claim (sealed chunks,
-   * indexes, segment backlog), as a size expression ("50GB"). At the budget,
-   * admission for this vault is refused cluster-wide until retention drains
-   * it. Empty = unset (defaulted at creation); "0" rejected; a large value
-   * (e.g. "1PiB") is effectively unlimited (gastrolog-1epfgb / gastrolog-etcjdx).
-   *
-   * @generated from field: string max_size = 19;
-   */
-  maxSize = "";
 
   constructor(data?: PartialMessage<VaultConfig>) {
     super();
@@ -639,7 +636,6 @@ export class VaultConfig extends Message<VaultConfig> {
     { no: 16, name: "retention_disposition", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 17, name: "disk_free_warn", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 18, name: "disk_free_floor", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 19, name: "max_size", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultConfig {
@@ -1086,6 +1082,23 @@ export class RetentionPolicyConfig extends Message<RetentionPolicyConfig> {
    */
   name = "";
 
+  /**
+   * Per-node disk-claim budget attached to this policy, as a size expression
+   * ("50GB"), in the same vocabulary as every other size quantity. This is
+   * the refuse bound (cap-and-refuse), NOT a drain trigger — deliberately
+   * not named max_size, which stays the drain trigger above. Effective
+   * budget resolution (refreshVaultDiskGuards): for each file vault, resolve
+   * every attached retention rule's policy; the effective budget is the min
+   * over the policies' parsed size_budget values; when no attached policy
+   * carries one, the creation default (system.DefaultVaultMaxSize) applies.
+   * A trigger-less policy (no max_age/max_size/max_chunks) that carries only
+   * size_budget is legal and meaningful — the bound applies even though the
+   * policy drains nothing (gastrolog-33ul6h).
+   *
+   * @generated from field: optional string size_budget = 6;
+   */
+  sizeBudget?: string;
+
   constructor(data?: PartialMessage<RetentionPolicyConfig>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1099,6 +1112,7 @@ export class RetentionPolicyConfig extends Message<RetentionPolicyConfig> {
     { no: 3, name: "max_chunks", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 4, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 5, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 6, name: "size_budget", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RetentionPolicyConfig {

@@ -838,12 +838,15 @@ func (x *DeleteRotationPolicyCommand) GetId() []byte {
 }
 
 type PutRetentionPolicyCommand struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	MaxAge        *string                `protobuf:"bytes,3,opt,name=max_age,json=maxAge,proto3,oneof" json:"max_age,omitempty"`
-	MaxSize       *string                `protobuf:"bytes,4,opt,name=max_size,json=maxSize,proto3,oneof" json:"max_size,omitempty"`
-	MaxChunks     *int64                 `protobuf:"varint,5,opt,name=max_chunks,json=maxChunks,proto3,oneof" json:"max_chunks,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Id        []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name      string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	MaxAge    *string                `protobuf:"bytes,3,opt,name=max_age,json=maxAge,proto3,oneof" json:"max_age,omitempty"`
+	MaxSize   *string                `protobuf:"bytes,4,opt,name=max_size,json=maxSize,proto3,oneof" json:"max_size,omitempty"`
+	MaxChunks *int64                 `protobuf:"varint,5,opt,name=max_chunks,json=maxChunks,proto3,oneof" json:"max_chunks,omitempty"`
+	// Per-node disk-claim budget (refuse bound), size expression. Mirrors
+	// RetentionPolicyConfig.size_budget in system.proto (gastrolog-33ul6h).
+	SizeBudget    *string `protobuf:"bytes,6,opt,name=size_budget,json=sizeBudget,proto3,oneof" json:"size_budget,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -911,6 +914,13 @@ func (x *PutRetentionPolicyCommand) GetMaxChunks() int64 {
 		return *x.MaxChunks
 	}
 	return 0
+}
+
+func (x *PutRetentionPolicyCommand) GetSizeBudget() string {
+	if x != nil && x.SizeBudget != nil {
+		return *x.SizeBudget
+	}
+	return ""
 }
 
 type DeleteRetentionPolicyCommand struct {
@@ -3237,18 +3247,21 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"\f_max_recordsB\a\n" +
 	"\x05_cron\"-\n" +
 	"\x1bDeleteRotationPolicyCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\fR\x02id\"\xc9\x01\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\"\xff\x01\n" +
 	"\x19PutRetentionPolicyCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1c\n" +
 	"\amax_age\x18\x03 \x01(\tH\x00R\x06maxAge\x88\x01\x01\x12\x1e\n" +
 	"\bmax_size\x18\x04 \x01(\tH\x01R\amaxSize\x88\x01\x01\x12\"\n" +
 	"\n" +
-	"max_chunks\x18\x05 \x01(\x03H\x02R\tmaxChunks\x88\x01\x01B\n" +
+	"max_chunks\x18\x05 \x01(\x03H\x02R\tmaxChunks\x88\x01\x01\x12$\n" +
+	"\vsize_budget\x18\x06 \x01(\tH\x03R\n" +
+	"sizeBudget\x88\x01\x01B\n" +
 	"\n" +
 	"\b_max_ageB\v\n" +
 	"\t_max_sizeB\r\n" +
-	"\v_max_chunks\".\n" +
+	"\v_max_chunksB\x0e\n" +
+	"\f_size_budget\".\n" +
 	"\x1cDeleteRetentionPolicyCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\"B\n" +
 	"\x0fPutVaultCommand\x12/\n" +

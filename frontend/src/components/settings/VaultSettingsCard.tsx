@@ -79,7 +79,6 @@ function vaultToEntry(v: VaultConfig): StorageEntry {
     retentionDisposition: v.retentionDisposition || "delete",
     diskFreeWarn: v.diskFreeWarn,
     diskFreeFloor: v.diskFreeFloor,
-    maxSize: v.maxSize,
     replicationFactor: String(v.replicationFactor || 1),
     path: v.path || "",
     nodeId: "",
@@ -105,7 +104,8 @@ function entryToVault(
     cloudServiceId: cloudBacked ? decode(entry.cloudServiceId) : new Uint8Array(0),
     cacheEviction: cloudBacked ? (entry.cacheEviction || "lru") : "",
     // Empty field = unset (server defaults it for cloud vaults), not explicit
-    // 0 (rejected); numeric on the wire like max-size (gastrolog-338j51).
+    // 0 (rejected); same size-expression convention as diskFreeFloor below
+    // (gastrolog-338j51).
     cacheBudget: cloudBacked ? entry.cacheBudget : "",
     cacheTtl: cloudBacked ? entry.cacheTTL : "",
     // Empty field = unset (server defaults it for memory vaults), not
@@ -118,10 +118,6 @@ function entryToVault(
     retentionDisposition: entry.type !== "jsonl" ? (entry.retentionDisposition || "delete") : "",
     diskFreeWarn: entry.type === "file" ? entry.diskFreeWarn : "",
     diskFreeFloor: entry.type === "file" ? entry.diskFreeFloor : "",
-    // Send the budget only when the operator set it: an empty field is
-    // "unset", which the server defaults, not an explicit 0 (which it
-    // rejects). Non-file vaults have no disk budget (gastrolog-1epfgb).
-    maxSize: entry.type === "file" ? entry.maxSize : "",
     replicationFactor: entry.type === "jsonl" ? 1 : parseInt(entry.replicationFactor, 10) || 1,
     path: entry.type === "jsonl" ? entry.path : "",
     placements: vault.placements,

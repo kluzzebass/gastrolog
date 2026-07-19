@@ -643,12 +643,6 @@ type VaultConfig struct {
 	// suspends admission for this vault while others keep ingesting.
 	DiskFreeWarn  string `protobuf:"bytes,17,opt,name=disk_free_warn,json=diskFreeWarn,proto3" json:"disk_free_warn,omitempty"`
 	DiskFreeFloor string `protobuf:"bytes,18,opt,name=disk_free_floor,json=diskFreeFloor,proto3" json:"disk_free_floor,omitempty"`
-	// Per-node budget for this vault's whole local disk claim (sealed chunks,
-	// indexes, segment backlog), as a size expression ("50GB"). At the budget,
-	// admission for this vault is refused cluster-wide until retention drains
-	// it. Empty = unset (defaulted at creation); "0" rejected; a large value
-	// (e.g. "1PiB") is effectively unlimited (gastrolog-1epfgb / gastrolog-etcjdx).
-	MaxSize       string `protobuf:"bytes,19,opt,name=max_size,json=maxSize,proto3" json:"max_size,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -805,13 +799,6 @@ func (x *VaultConfig) GetDiskFreeWarn() string {
 func (x *VaultConfig) GetDiskFreeFloor() string {
 	if x != nil {
 		return x.DiskFreeFloor
-	}
-	return ""
-}
-
-func (x *VaultConfig) GetMaxSize() string {
-	if x != nil {
-		return x.MaxSize
 	}
 	return ""
 }
@@ -1296,12 +1283,24 @@ func (x *RotationPolicyConfig) GetName() string {
 }
 
 type RetentionPolicyConfig struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	MaxAge        string                 `protobuf:"bytes,1,opt,name=max_age,json=maxAge,proto3" json:"max_age,omitempty"`
-	MaxSize       string                 `protobuf:"bytes,2,opt,name=max_size,json=maxSize,proto3" json:"max_size,omitempty"`
-	MaxChunks     int64                  `protobuf:"varint,3,opt,name=max_chunks,json=maxChunks,proto3" json:"max_chunks,omitempty"`
-	Id            []byte                 `protobuf:"bytes,4,opt,name=id,proto3" json:"id,omitempty"`
-	Name          string                 `protobuf:"bytes,5,opt,name=name,proto3" json:"name,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	MaxAge    string                 `protobuf:"bytes,1,opt,name=max_age,json=maxAge,proto3" json:"max_age,omitempty"`
+	MaxSize   string                 `protobuf:"bytes,2,opt,name=max_size,json=maxSize,proto3" json:"max_size,omitempty"`
+	MaxChunks int64                  `protobuf:"varint,3,opt,name=max_chunks,json=maxChunks,proto3" json:"max_chunks,omitempty"`
+	Id        []byte                 `protobuf:"bytes,4,opt,name=id,proto3" json:"id,omitempty"`
+	Name      string                 `protobuf:"bytes,5,opt,name=name,proto3" json:"name,omitempty"`
+	// Per-node disk-claim budget attached to this policy, as a size expression
+	// ("50GB"), in the same vocabulary as every other size quantity. This is
+	// the refuse bound (cap-and-refuse), NOT a drain trigger — deliberately
+	// not named max_size, which stays the drain trigger above. Effective
+	// budget resolution (refreshVaultDiskGuards): for each file vault, resolve
+	// every attached retention rule's policy; the effective budget is the min
+	// over the policies' parsed size_budget values; when no attached policy
+	// carries one, the creation default (system.DefaultVaultMaxSize) applies.
+	// A trigger-less policy (no max_age/max_size/max_chunks) that carries only
+	// size_budget is legal and meaningful — the bound applies even though the
+	// policy drains nothing (gastrolog-33ul6h).
+	SizeBudget    *string `protobuf:"bytes,6,opt,name=size_budget,json=sizeBudget,proto3,oneof" json:"size_budget,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1367,6 +1366,13 @@ func (x *RetentionPolicyConfig) GetId() []byte {
 func (x *RetentionPolicyConfig) GetName() string {
 	if x != nil {
 		return x.Name
+	}
+	return ""
+}
+
+func (x *RetentionPolicyConfig) GetSizeBudget() string {
+	if x != nil && x.SizeBudget != nil {
+		return *x.SizeBudget
 	}
 	return ""
 }
@@ -8915,7 +8921,7 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x0eVaultPlacement\x12\x1d\n" +
 	"\n" +
 	"storage_id\x18\x01 \x01(\fR\tstorageId\x12\x16\n" +
-	"\x06leader\x18\x02 \x01(\bR\x06leader\"\xe6\x05\n" +
+	"\x06leader\x18\x02 \x01(\bR\x06leader\"\xcb\x05\n" +
 	"\vVaultConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
@@ -8937,8 +8943,7 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\tcache_ttl\x18\x0f \x01(\tR\bcacheTtl\x123\n" +
 	"\x15retention_disposition\x18\x10 \x01(\tR\x14retentionDisposition\x12$\n" +
 	"\x0edisk_free_warn\x18\x11 \x01(\tR\fdiskFreeWarn\x12&\n" +
-	"\x0fdisk_free_floor\x18\x12 \x01(\tR\rdiskFreeFloor\x12\x19\n" +
-	"\bmax_size\x18\x13 \x01(\tR\amaxSize\"-\n" +
+	"\x0fdisk_free_floor\x18\x12 \x01(\tR\rdiskFreeFloor\"-\n" +
 	"\x10RouteDestination\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\"\x81\x02\n" +
 	"\vRouteConfig\x12\x0e\n" +
@@ -8978,14 +8983,17 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\amax_age\x18\x03 \x01(\tR\x06maxAge\x12\x12\n" +
 	"\x04cron\x18\x04 \x01(\tR\x04cron\x12\x0e\n" +
 	"\x02id\x18\x05 \x01(\fR\x02id\x12\x12\n" +
-	"\x04name\x18\x06 \x01(\tR\x04name\"\x8e\x01\n" +
+	"\x04name\x18\x06 \x01(\tR\x04name\"\xc4\x01\n" +
 	"\x15RetentionPolicyConfig\x12\x17\n" +
 	"\amax_age\x18\x01 \x01(\tR\x06maxAge\x12\x19\n" +
 	"\bmax_size\x18\x02 \x01(\tR\amaxSize\x12\x1d\n" +
 	"\n" +
 	"max_chunks\x18\x03 \x01(\x03R\tmaxChunks\x12\x0e\n" +
 	"\x02id\x18\x04 \x01(\fR\x02id\x12\x12\n" +
-	"\x04name\x18\x05 \x01(\tR\x04name\"\xac\x01\n" +
+	"\x04name\x18\x05 \x01(\tR\x04name\x12$\n" +
+	"\vsize_budget\x18\x06 \x01(\tH\x00R\n" +
+	"sizeBudget\x88\x01\x01B\x0e\n" +
+	"\f_size_budget\"\xac\x01\n" +
 	"\rIngesterAlive\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12L\n" +
 	"\vnode_status\x18\x02 \x03(\v2+.gastrolog.v1.IngesterAlive.NodeStatusEntryR\n" +
@@ -10037,6 +10045,7 @@ func file_gastrolog_v1_system_proto_init() {
 	file_gastrolog_v1_system_proto_msgTypes[7].OneofWrappers = []any{
 		(*RouteStage_Match)(nil),
 	}
+	file_gastrolog_v1_system_proto_msgTypes[11].OneofWrappers = []any{}
 	file_gastrolog_v1_system_proto_msgTypes[55].OneofWrappers = []any{}
 	file_gastrolog_v1_system_proto_msgTypes[56].OneofWrappers = []any{}
 	file_gastrolog_v1_system_proto_msgTypes[57].OneofWrappers = []any{}

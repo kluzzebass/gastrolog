@@ -41,11 +41,6 @@ type vaultQuantity struct {
 func resolveVaultQuantities(p *apiv1.VaultConfig, vaultCfg *system.VaultConfig, existing []system.VaultConfig) *connect.Error {
 	for _, q := range []vaultQuantity{
 		{
-			flag: "max-size", applies: vaultCfg.Type == system.VaultTypeFile,
-			in: p.GetMaxSize(), dst: &vaultCfg.MaxSize, def: system.DefaultVaultMaxSize,
-			prev: func(v system.VaultConfig) string { return v.MaxSize },
-		},
-		{
 			flag: "cache-budget", applies: vaultCfg.IsCloud(),
 			in: p.GetCacheBudget(), dst: &vaultCfg.CacheBudget, def: system.DefaultVaultCacheBudget,
 			prev: func(v system.VaultConfig) string { return v.CacheBudget },

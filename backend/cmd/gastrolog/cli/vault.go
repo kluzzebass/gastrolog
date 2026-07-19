@@ -121,7 +121,6 @@ func vaultDetailPairs(v *v1.VaultConfig) [][2]string {
 	addExpr("Cache TTL", v.CacheTtl)
 	addExpr("Disk Free Warn", v.DiskFreeWarn)
 	addExpr("Disk Free Floor", v.DiskFreeFloor)
-	addExpr("Max Size", v.MaxSize)
 	if v.RetentionDisposition != "" {
 		pairs = append(pairs, [2]string{"Retention Disposition", v.RetentionDisposition})
 	} else {
@@ -210,7 +209,6 @@ shape (memory, file, file+cloud, JSONL) defined by --type, --storage-class
 	cmd.Flags().String("memory-budget", "", "in-memory storage cap for memory vaults (e.g. 1GB, 512MiB). Unset defaults to a bounded budget; 0 is rejected")
 	cmd.Flags().String("disk-free-warn", "", "free-space warn threshold on the vault's backing volume: an absolute size (10GB) or a percentage of the volume (10%); empty inherits the node default, 10%")
 	cmd.Flags().String("disk-free-floor", "", "free-space floor on the vault's backing volume — below it, admission for this vault is suspended — as an absolute size (3GB) or a percentage of the volume (3%); empty inherits the node default, 3%")
-	cmd.Flags().String("max-size", "", "per-node size budget for the vault's whole local disk claim (e.g. 50GB) — at the budget, new records for this vault are refused until retention drains it. Unset defaults to a bounded per-node budget; 0 is rejected; set a large value (e.g. 1PiB) for effectively-unlimited")
 	_ = cmd.MarkFlagRequired("name")
 	return cmd
 }
@@ -289,7 +287,6 @@ func applyVaultCacheFlags(cmd *cobra.Command, cfg *v1.VaultConfig) error {
 func applyVaultSizeFlags(cmd *cobra.Command, cfg *v1.VaultConfig) error {
 	setFromFlag(cmd, "disk-free-warn", &cfg.DiskFreeWarn)
 	setFromFlag(cmd, "disk-free-floor", &cfg.DiskFreeFloor)
-	setFromFlag(cmd, "max-size", &cfg.MaxSize)
 	setFromFlag(cmd, "memory-budget", &cfg.MemoryBudget)
 	return nil
 }

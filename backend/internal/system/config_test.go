@@ -412,6 +412,10 @@ func TestRetentionPolicyConfigIsEmpty(t *testing.T) {
 		{"MaxAgeNanos set", RetentionPolicyConfig{MaxAge: new("24h")}, false},
 		{"MaxBytes set", RetentionPolicyConfig{MaxSize: new("10GB")}, false},
 		{"MaxChunks set", RetentionPolicyConfig{MaxChunks: new(int64(10))}, false},
+		// gastrolog-33ul6h: a bound-only policy (SizeBudget set, no drain
+		// trigger) is legal and meaningful — it must not be treated as empty.
+		{"zero SizeBudget", RetentionPolicyConfig{SizeBudget: new("0")}, true},
+		{"SizeBudget set, no triggers", RetentionPolicyConfig{SizeBudget: new("50GB")}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

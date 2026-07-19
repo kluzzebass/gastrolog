@@ -7,8 +7,20 @@ A retention policy defines **when** sealed chunks fire a retention event. Multip
 | Condition | Config field | Description | Example |
 |-----------|-------------|-------------|---------|
 | **TTL** | `maxAge` | Fire when chunks age past this duration | `720h` (30 days) |
-| **Total size** | `maxBytes` | Keep total vault size under this limit, firing on oldest chunks first | `10GB` |
+| **Total size** | `maxBytes` | Keep the retained store's local disk claim under this limit, firing on oldest chunks first | `10GB` |
 | **Chunk count** | `maxChunks` | Keep at most this many sealed chunks, firing on oldest excess | `100` |
+
+## Size Budget
+
+A retention policy can also carry a **Size Budget** — a per-node byte budget for the *whole local disk claim* of any vault this policy is attached to: sealed chunks, indexes, and pipeline segment backlog. This is a different mechanism from the conditions above: it does not itself fire a retention event or destroy anything.
+
+At the budget, the cluster **refuses** new records for the vault (cap-and-refuse: everything already accepted is kept, the newest is nacked) until retention — the conditions above — drains the vault's disk claim back under the budget. This is the opposite durability trade from a size drain trigger (**Total size**, above), which keeps the newest by destroying the oldest (cap-and-drain). Set a size drain trigger *below* the Size Budget so retention drains ahead of the cap, with the budget as the hard backstop. A warning alarm raises at 90% of the budget.
+
+A policy that sets **only** a Size Budget, with no drain condition, is legal and meaningful — the refuse bound applies even though the policy drains nothing.
+
+**Min-wins across attached policies:** a vault can attach more than one retention policy. If more than one attached policy carries a Size Budget, the vault's effective budget is the **lowest** of them — the most restrictive budget wins.
+
+**Default floor:** a vault with no retention rules, or whose attached policies carry no Size Budget at all, still gets a bound — the system default applies. An unbounded file vault is not representable.
 
 ## What Happens When a Retention Event Fires
 
@@ -58,7 +70,7 @@ Conditions use union semantics — a chunk fires if **any** condition matches. T
 | **Rolling window** | `maxChunks: 100` | Keep a fixed number of chunks regardless of size or age |
 | **Belt and suspenders** | `maxAge: 720h` + `maxBytes: 100GB` | TTL for predictable expiry, size cap as a safety net for bursts |
 
-**Combining TTL with size budget:** Use TTL as the primary control and size budget as a guardrail. Under normal load, TTL governs what gets deleted. During traffic spikes, the size budget prevents the vault from consuming all available disk before chunks age out.
+**Combining TTL with a size trigger:** Use TTL as the primary control and the size drain trigger as a guardrail. Under normal load, TTL governs what gets deleted. During traffic spikes, the size trigger prevents the vault from consuming all available disk before chunks age out.
 
 **Layered storage via retention-trigger routes:** Instead of dropping old data, re-route it to a cloud-backed vault for long-term archival:
 

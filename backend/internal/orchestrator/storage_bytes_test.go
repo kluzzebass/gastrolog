@@ -4,7 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"gastrolog/internal/chunk"
 	"gastrolog/internal/diskusage"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/home"
@@ -129,5 +131,46 @@ func TestLocalRaftStorageBytes(t *testing.T) {
 	o := &Orchestrator{homeDir: homeRoot}
 	if got := o.localRaftStorageBytes(); got != 5 {
 		t.Fatalf("localRaftStorageBytes() = %d, want 5", got)
+	}
+}
+
+// TestLocalVaultChunkBytesMatchesDiskClaimFormula pins that extracting
+// localVaultChunkBytes onto the shared chunk.DiskClaim helper did not
+// change its arithmetic: DiskBytes wins when recorded, a cloud-backed
+// chunk with no local copy costs nothing, and the fallback (no DiskBytes)
+// adds index sizes on top of logical Bytes — exactly the pre-extraction
+// formula, now shared with the size-drain trigger.
+func TestLocalVaultChunkBytesMatchesDiskClaimFormula(t *testing.T) {
+	t.Parallel()
+
+	diskRecorded := chunk.NewChunkID()   // DiskBytes wins over Bytes
+	cloudEvicted := chunk.NewChunkID()   // cloud-backed, no local copy: 0
+	cloudCached := chunk.NewChunkID()    // cloud-backed, cached: DiskBytes
+	fallbackLegacy := chunk.NewChunkID() // no DiskBytes: Bytes + indexes
+
+	base := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	metas := []chunk.ChunkMeta{
+		{ID: diskRecorded, WriteStart: base, WriteEnd: base, Bytes: 9000, DiskBytes: 1000, Sealed: true},
+		{ID: cloudEvicted, WriteStart: base, WriteEnd: base, Bytes: 9_000_000, DiskBytes: 0, CloudBacked: true, Sealed: true},
+		{ID: cloudCached, WriteStart: base, WriteEnd: base, Bytes: 9000, DiskBytes: 700, CloudBacked: true, Sealed: true},
+		{ID: fallbackLegacy, WriteStart: base, WriteEnd: base, Bytes: 300, DiskBytes: 0, Sealed: true},
+	}
+	cm := &retentionFakeChunkManager{chunks: metas}
+	im := &retentionFakeIndexManager{sizes: map[chunk.ChunkID]map[string]int64{
+		fallbackLegacy: {"token": 50, "attr": 25},
+	}}
+
+	orch := newTestOrch(t, Config{LocalNodeID: "node-A"})
+	vaultID := glid.New()
+	v := NewVaultFromComponents(vaultID, cm, im, nil)
+	orch.RegisterVault(v)
+
+	got := orch.localVaultChunkBytes(vaultID)
+	// diskRecorded: 1000 (DiskBytes). cloudEvicted: 0 (evicted, no local
+	// copy). cloudCached: 700 (DiskBytes, its cache footprint).
+	// fallbackLegacy: 300 + 50 + 25 = 375 (Bytes + index sizes).
+	want := int64(1000 + 0 + 700 + 375)
+	if got != want {
+		t.Fatalf("localVaultChunkBytes() = %d, want %d", got, want)
 	}
 }

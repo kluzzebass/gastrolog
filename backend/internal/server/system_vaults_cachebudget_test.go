@@ -22,7 +22,6 @@ func cloudFileVault(id, cloud glid.GLID, cacheBudget string) *gastrologv1.VaultC
 		Enabled:        true,
 		Type:           gastrologv1.VaultType_VAULT_TYPE_FILE,
 		CloudServiceId: cloud.Bytes(),
-		MaxSize:        "1GiB", // avoid the max-size default path
 		CacheBudget:    cacheBudget,
 	}
 }
@@ -73,7 +72,6 @@ func TestPutVaultLeavesCacheBudgetUnsetForNonCloudVault(t *testing.T) {
 			Name:    "local-v",
 			Enabled: true,
 			Type:    gastrologv1.VaultType_VAULT_TYPE_FILE,
-			MaxSize: "1GiB",
 			// no cloud service, no cache-budget
 		},
 	})); err != nil {

@@ -466,6 +466,14 @@ export class PutRetentionPolicyCommand extends Message<PutRetentionPolicyCommand
    */
   maxChunks?: bigint;
 
+  /**
+   * Per-node disk-claim budget (refuse bound), size expression. Mirrors
+   * RetentionPolicyConfig.size_budget in system.proto (gastrolog-33ul6h).
+   *
+   * @generated from field: optional string size_budget = 6;
+   */
+  sizeBudget?: string;
+
   constructor(data?: PartialMessage<PutRetentionPolicyCommand>) {
     super();
     proto3.util.initPartial(data, this);
@@ -479,6 +487,7 @@ export class PutRetentionPolicyCommand extends Message<PutRetentionPolicyCommand
     { no: 3, name: "max_age", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
     { no: 4, name: "max_size", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
     { no: 5, name: "max_chunks", kind: "scalar", T: 3 /* ScalarType.INT64 */, opt: true },
+    { no: 6, name: "size_budget", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutRetentionPolicyCommand {

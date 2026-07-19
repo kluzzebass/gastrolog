@@ -23,7 +23,6 @@ func diskFreeVault(id glid.GLID, warn, floor string) *gastrologv1.VaultConfig {
 		Name:          "df-v",
 		Enabled:       true,
 		Type:          gastrologv1.VaultType_VAULT_TYPE_FILE,
-		MaxSize:       "1GiB", // avoid the max-size default path
 		DiskFreeWarn:  warn,
 		DiskFreeFloor: floor,
 	}
@@ -123,11 +122,6 @@ func TestPutVaultRejectsPercentOnBudgetFields(t *testing.T) {
 	ctx := context.Background()
 
 	for name, cfg := range map[string]*gastrologv1.VaultConfig{
-		"max-size": {
-			Id: glid.New().Bytes(), Name: "pct-max", Enabled: true,
-			Type:    gastrologv1.VaultType_VAULT_TYPE_FILE,
-			MaxSize: "10%",
-		},
 		"memory-budget": {
 			Id: glid.New().Bytes(), Name: "pct-mem", Enabled: true,
 			Type:         gastrologv1.VaultType_VAULT_TYPE_MEMORY,
@@ -137,7 +131,6 @@ func TestPutVaultRejectsPercentOnBudgetFields(t *testing.T) {
 			Id: glid.New().Bytes(), Name: "pct-cache", Enabled: true,
 			Type:           gastrologv1.VaultType_VAULT_TYPE_FILE,
 			CloudServiceId: glid.New().Bytes(),
-			MaxSize:        "1GiB",
 			CacheBudget:    "10%",
 		},
 	} {

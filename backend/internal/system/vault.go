@@ -84,18 +84,12 @@ type VaultConfig struct {
 	DiskFreeWarn  string `json:"diskFreeWarn,omitempty"`
 	DiskFreeFloor string `json:"diskFreeFloor,omitempty"`
 
-	// MaxSize is the per-node budget for this vault's whole local disk claim
-	// (sealed chunks, indexes, pipeline segment backlog), as a size expression
-	// ("50GB"). At the budget, admission for records destined to this vault is
-	// refused cluster-wide (cap-and-refuse) until retention or segment
-	// releases drain it — the hard backstop behind a size retention policy's
-	// cap-and-drain.
-	//
-	// Empty = unset, defaulted at the PutVault ingress; an explicit "0" is
-	// rejected there. "Unlimited" is an explicit large value like "1PiB",
-	// never the effect of saying nothing (gastrolog-1epfgb). Resolve with
-	// SizeOrDefault.
-	MaxSize string `json:"maxSize,omitempty"`
+	// gastrolog-33ul6h: MaxSize removed. The per-node disk-claim budget is no
+	// longer a vault-level field — it lives on the retention policy
+	// (RetentionPolicyConfig.SizeBudget) attached via RetentionRules,
+	// min-wins across attached policies, with DefaultVaultMaxSize as the
+	// floor when no attached policy carries one. See
+	// orchestrator.resolveVaultSizeBudget (disk_guard.go).
 }
 
 // Defaults are expressions, like the fields they fill: what the operator would

@@ -209,11 +209,12 @@ func testRetentionPolicies(t *testing.T, newStore func(t *testing.T) system.Stor
 
 		id := newID()
 		rp := system.RetentionPolicyConfig{
-			ID:          id,
-			Name:        "default",
-			MaxAge:      new("720h"),
-			MaxSize:     new("10GB"),
-			MaxChunks:   new(int64(100)),
+			ID:         id,
+			Name:       "default",
+			MaxAge:     new("720h"),
+			MaxSize:    new("10GB"),
+			MaxChunks:  new(int64(100)),
+			SizeBudget: new("50GB"),
 		}
 
 		if err := s.PutRetentionPolicy(ctx, rp); err != nil {
@@ -230,6 +231,7 @@ func testRetentionPolicies(t *testing.T, newStore func(t *testing.T) system.Stor
 		assertStringPtr(t, "MaxAge", got.MaxAge, "720h")
 		assertStringPtr(t, "MaxSize", got.MaxSize, "10GB")
 		assertInt64Ptr(t, "MaxChunks", got.MaxChunks, 100)
+		assertStringPtr(t, "SizeBudget", got.SizeBudget, "50GB")
 	})
 
 	t.Run("PutRetentionPolicyUpsert", func(t *testing.T) {
@@ -350,6 +352,9 @@ func testRetentionPolicies(t *testing.T, newStore func(t *testing.T) system.Stor
 		}
 		if got.MaxChunks != nil {
 			t.Errorf("expected nil MaxChunks, got %v", *got.MaxChunks)
+		}
+		if got.SizeBudget != nil {
+			t.Errorf("expected nil SizeBudget, got %v", *got.SizeBudget)
 		}
 	})
 

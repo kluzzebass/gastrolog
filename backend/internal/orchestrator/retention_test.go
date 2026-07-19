@@ -91,6 +91,12 @@ type retentionFakeIndexManager struct {
 	// mu guards deleted; see retentionFakeChunkManager.mu.
 	mu      sync.Mutex
 	deleted []chunk.ChunkID
+
+	// sizes, when set, drives IndexSizes per chunk — used by the
+	// disk-claim fallback-path tests (DiskBytes unset). Absent chunks
+	// (or a nil map) fall through to an empty result, same as the
+	// zero-value behavior every other test relies on.
+	sizes map[chunk.ChunkID]map[string]int64
 }
 
 func (f *retentionFakeIndexManager) BuildIndexes(ctx context.Context, chunkID chunk.ChunkID) error {
@@ -157,6 +163,9 @@ func (f *retentionFakeIndexManager) OpenJSONPVIndex(chunkID chunk.ChunkID) (*ind
 	return nil, index.JSONComplete, nil
 }
 func (f *retentionFakeIndexManager) IndexSizes(chunkID chunk.ChunkID) map[string]int64 {
+	if sizes, ok := f.sizes[chunkID]; ok {
+		return sizes
+	}
 	return map[string]int64{}
 }
 func (f *retentionFakeIndexManager) BuildAdapter() chunk.ChunkIndexBuilder { return nil }
