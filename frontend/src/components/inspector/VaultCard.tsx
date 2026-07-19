@@ -68,6 +68,12 @@ export function VaultCard({
   const { data: chunks } = useChunks(vault.id);
   const chunkCount = chunks?.length ?? 0;
   const recordCount = (chunks ?? []).reduce((sum, c) => sum + Number(c.recordCount), 0);
+  // Vault size = summed per-chunk disk claim (GLCB bytes when recorded,
+  // logical bytes otherwise) — the same quantity the max-size bound measures.
+  const sizeBytes = (chunks ?? []).reduce(
+    (sum, c) => sum + Number(Number(c.diskBytes) > 0 ? c.diskBytes : c.bytes),
+    0,
+  );
 
   return (
     <ExpandableCard
@@ -88,6 +94,9 @@ export function VaultCard({
           </Badge>
           <Badge variant="muted" dark={dark}>
             {recordCount.toLocaleString()} records
+          </Badge>
+          <Badge variant="muted" dark={dark}>
+            {formatBytes(sizeBytes)}
           </Badge>
           {onOpenSettings && (
             <CrossLinkBadge dark={dark} title="Open in Settings" onClick={onOpenSettings}>
