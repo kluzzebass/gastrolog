@@ -766,6 +766,7 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 	state := chunk.VaultState{
 		Chunks: sealed,
 		Now:    r.now(),
+		Claims: r.claimsIfNeeded(rules, sealed),
 	}
 
 	processed := make(map[chunk.ChunkID]bool)
@@ -808,6 +809,43 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 	r.sweepMatchedChunks = totalMatched
 	r.mu.Unlock()
 	r.finishSweepDeferralState()
+}
+
+// claimsIfNeeded computes disk claims for sealed only when some rule in
+// this sweep actually reads them (chunk.NeedsDiskClaims — a
+// SizeRetentionPolicy, bare or composed). Skipping otherwise avoids an
+// index-size lookup per fallback chunk on every TTL/count-only sweep,
+// which is most sweeps most of the time.
+func (r *retentionRunner) claimsIfNeeded(rules []retentionRule, sealed []chunk.ChunkMeta) map[chunk.ChunkID]int64 {
+	for _, b := range rules {
+		if chunk.NeedsDiskClaims(b.policy) {
+			return r.chunkDiskClaims(sealed)
+		}
+	}
+	return nil
+}
+
+// chunkDiskClaims computes each sealed chunk's local disk claim
+// (chunk.DiskClaim) for this sweep — the currency SizeRetentionPolicy
+// measures against its budget. Same formula and index-size seam as the disk
+// guard's local footprint measurement (localVaultChunkBytes in
+// storage_bytes.go), scoped here to only the chunks this sweep evaluates.
+// r.orch is nil in a handful of unit-test harnesses that build a
+// retentionRunner directly without a backing Orchestrator; DiskClaim's
+// nil-safe lookup degrades those to the Bytes-only fallback rather than
+// panicking.
+func (r *retentionRunner) chunkDiskClaims(metas []chunk.ChunkMeta) map[chunk.ChunkID]int64 {
+	var lookup chunk.IndexSizeLookup
+	if r.orch != nil {
+		lookup = func(id chunk.ChunkID) (map[string]int64, error) {
+			return r.orch.IndexSizes(r.vaultID, id)
+		}
+	}
+	claims := make(map[chunk.ChunkID]int64, len(metas))
+	for _, meta := range metas {
+		claims[meta.ID] = chunk.DiskClaim(meta, lookup)
+	}
+	return claims
 }
 
 // appendUnlistedManifestSealed appends synthetic retention candidates for

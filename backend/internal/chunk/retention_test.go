@@ -241,12 +241,194 @@ func TestSizeRetentionPolicy(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			policy := NewSizeRetentionPolicy(tt.maxBytes)
-			got := policy.Apply(VaultState{Chunks: tt.chunks, Now: base})
+			// Newest-first keep-set semantics are what this test pins, not the
+			// claim formula itself — feed a claims map that mirrors each
+			// fixture's logical Bytes so the numbers line up exactly as before
+			// the drain trigger switched currencies.
+			got := policy.Apply(VaultState{Chunks: tt.chunks, Now: base, Claims: claimsFromBytes(tt.chunks)})
 			if !chunkIDsEqual(got, tt.want) {
 				t.Errorf("got %s, want %s", formatIDs(got), formatIDs(tt.want))
 			}
 		})
 	}
+}
+
+// claimsFromBytes builds a VaultState.Claims map that mirrors each chunk's
+// logical Bytes — used by tests that pin keep-set/ordering semantics
+// unrelated to the disk-claim formula itself.
+func claimsFromBytes(chunks []ChunkMeta) map[ChunkID]int64 {
+	claims := make(map[ChunkID]int64, len(chunks))
+	for _, meta := range chunks {
+		claims[meta.ID] = meta.Bytes
+	}
+	return claims
+}
+
+// metaWithClaim builds a ChunkMeta carrying the fields DiskClaim reads
+// (Bytes, DiskBytes, CloudBacked) for size-drain-trigger tests that care
+// about the claim formula, not just the logical byte count.
+func metaWithClaim(id ChunkID, start, end time.Time, bytes, diskBytes int64, cloudBacked bool) ChunkMeta {
+	m := metaAt(id, start, end, bytes)
+	m.DiskBytes = diskBytes
+	m.CloudBacked = cloudBacked
+	return m
+}
+
+// TestSizeRetentionPolicyUsesDiskClaimNotLogicalBytes pins the measurement
+// switch itself: a compressed chunk's logical Bytes wildly overstates what
+// draining it reclaims. Selection must follow DiskBytes, not Bytes — a
+// chunk that is cheap on disk but huge logically must not be evicted ahead
+// of a chunk that is the reverse.
+func TestSizeRetentionPolicyUsesDiskClaimNotLogicalBytes(t *testing.T) {
+	base := time.Date(2025, 6, 15, 12, 0, 0, 0, time.UTC)
+
+	// id1 (older) is logically small but claims a lot on disk (poor
+	// compression); id2 (newer) is logically huge but claims almost
+	// nothing (well compressed). A Bytes-driven policy would delete id2
+	// first (newest-first keep, walking by Bytes) or keep id1 outright;
+	// a claim-driven policy must delete id1 to stay under budget instead,
+	// since id1 is what is actually consuming the disk.
+	id1 := idAt(base.Add(-2 * time.Hour))
+	id2 := idAt(base.Add(-1 * time.Hour))
+
+	chunks := []ChunkMeta{
+		metaWithClaim(id1, base.Add(-2*time.Hour), base.Add(-90*time.Minute), 100, 900, false),
+		metaWithClaim(id2, base.Add(-1*time.Hour), base.Add(-30*time.Minute), 5000, 100, false),
+	}
+	claims := map[ChunkID]int64{id1: 900, id2: 100}
+
+	policy := NewSizeRetentionPolicy(500)
+	got := policy.Apply(VaultState{Chunks: chunks, Now: base, Claims: claims})
+	want := []ChunkID{id1}
+	if !chunkIDsEqual(got, want) {
+		t.Fatalf("got %s, want %s (claim-driven, not logical-bytes-driven)", formatIDs(got), formatIDs(want))
+	}
+}
+
+// TestSizeRetentionPolicyFallbackPath pins the DiskBytes-unset fallback:
+// when a caller precomputes Claims via DiskClaim for a chunk with no
+// DiskBytes recorded, the claim is Bytes plus index sizes — and the policy
+// just consumes whatever the caller computed, without reaching into Bytes
+// itself.
+func TestSizeRetentionPolicyFallbackPath(t *testing.T) {
+	base := time.Date(2025, 6, 15, 12, 0, 0, 0, time.UTC)
+	id1 := idAt(base.Add(-2 * time.Hour))
+	id2 := idAt(base.Add(-1 * time.Hour))
+
+	chunks := []ChunkMeta{
+		metaWithClaim(id1, base.Add(-2*time.Hour), base.Add(-90*time.Minute), 300, 0, false),
+		metaWithClaim(id2, base.Add(-1*time.Hour), base.Add(-30*time.Minute), 300, 0, false),
+	}
+	// Fallback claim = Bytes + indexes, computed by the caller exactly as
+	// DiskClaim would: 300 + 100 index bytes = 400 each.
+	claims := map[ChunkID]int64{
+		id1: DiskClaim(chunks[0], func(ChunkID) (map[string]int64, error) {
+			return map[string]int64{"token": 100}, nil
+		}),
+		id2: DiskClaim(chunks[1], func(ChunkID) (map[string]int64, error) {
+			return map[string]int64{"token": 100}, nil
+		}),
+	}
+
+	policy := NewSizeRetentionPolicy(500)
+	got := policy.Apply(VaultState{Chunks: chunks, Now: base, Claims: claims})
+	want := []ChunkID{id1}
+	if !chunkIDsEqual(got, want) {
+		t.Fatalf("got %s, want %s", formatIDs(got), formatIDs(want))
+	}
+}
+
+// TestSizeRetentionPolicyCloudBackedCachedVsEvicted pins the intended
+// consequence of the disk-claim switch: an evicted cloud-backed chunk
+// (DiskBytes 0) is never selected by a size trigger, no matter how large
+// its logical Bytes — destroying it would free no local disk. A cached
+// cloud-backed chunk (DiskBytes > 0) is eligible exactly like a file-vault
+// chunk, since its cache file occupies real local disk.
+func TestSizeRetentionPolicyCloudBackedCachedVsEvicted(t *testing.T) {
+	base := time.Date(2025, 6, 15, 12, 0, 0, 0, time.UTC)
+
+	evictedOld := idAt(base.Add(-3 * time.Hour))
+	cachedMid := idAt(base.Add(-2 * time.Hour))
+	freshSmall := idAt(base.Add(-1 * time.Hour))
+
+	chunks := []ChunkMeta{
+		// Evicted: huge logical Bytes, zero local disk claim.
+		metaWithClaim(evictedOld, base.Add(-3*time.Hour), base.Add(-150*time.Minute), 10_000_000, 0, true),
+		// Cached: claims real disk (its cache bytes).
+		metaWithClaim(cachedMid, base.Add(-2*time.Hour), base.Add(-90*time.Minute), 5000, 600, true),
+		// Ordinary local chunk, small.
+		metaWithClaim(freshSmall, base.Add(-1*time.Hour), base.Add(-30*time.Minute), 100, 100, false),
+	}
+	claims := map[ChunkID]int64{
+		evictedOld: 0,
+		cachedMid:  600,
+		freshSmall: 100,
+	}
+
+	policy := NewSizeRetentionPolicy(500)
+	got := policy.Apply(VaultState{Chunks: chunks, Now: base, Claims: claims})
+
+	// Budget 500: newest-first, freshSmall (100) fits (budget=100), then
+	// cachedMid (600) does not (100+600 > 500) so it is deleted, then
+	// evictedOld (0) always fits regardless of order or budget already
+	// spent — it must never be selected even though it is the oldest and
+	// logically the largest chunk in the vault.
+	want := []ChunkID{cachedMid}
+	if !chunkIDsEqual(got, want) {
+		t.Fatalf("got %s, want %s (evicted must survive, cached must be eligible)", formatIDs(got), formatIDs(want))
+	}
+	if slicesContainsChunkID(got, evictedOld) {
+		t.Fatalf("evicted cloud-backed chunk must never be selected by a size trigger: got %s", formatIDs(got))
+	}
+}
+
+// TestSizeRetentionPolicyMixedVault drives a vault with every claim shape at
+// once — DiskBytes-recorded, fallback (no DiskBytes), cached cloud-backed,
+// evicted cloud-backed — and pins the exact keep/delete split.
+func TestSizeRetentionPolicyMixedVault(t *testing.T) {
+	base := time.Date(2025, 6, 15, 12, 0, 0, 0, time.UTC)
+
+	oldest := idAt(base.Add(-4 * time.Hour)) // fallback path, claim 250
+	old := idAt(base.Add(-3 * time.Hour))    // evicted cloud-backed, claim 0
+	mid := idAt(base.Add(-2 * time.Hour))    // DiskBytes recorded, claim 300
+	newest := idAt(base.Add(-1 * time.Hour)) // cached cloud-backed, claim 150
+
+	chunks := []ChunkMeta{
+		metaWithClaim(oldest, base.Add(-4*time.Hour), base.Add(-3*time.Hour-30*time.Minute), 200, 0, false),
+		metaWithClaim(old, base.Add(-3*time.Hour), base.Add(-2*time.Hour-30*time.Minute), 8_000_000, 0, true),
+		metaWithClaim(mid, base.Add(-2*time.Hour), base.Add(-1*time.Hour-30*time.Minute), 900, 300, false),
+		metaWithClaim(newest, base.Add(-1*time.Hour), base.Add(-30*time.Minute), 2000, 150, true),
+	}
+	claims := map[ChunkID]int64{
+		oldest: 250,
+		old:    0,
+		mid:    300,
+		newest: 150,
+	}
+
+	// Budget 400: newest-first — newest(150) fits (150), mid(300) does not
+	// (150+300=450 > 400) so mid is deleted, old(0) always fits, oldest(250)
+	// does not fit alongside newest's 150 kept-budget (150+250=400 <= 400,
+	// so it DOES fit) — walk it precisely below instead of eyeballing.
+	policy := NewSizeRetentionPolicy(400)
+	got := policy.Apply(VaultState{Chunks: chunks, Now: base, Claims: claims})
+
+	// Newest-first walk: newest(150) -> budget=150 (kept). mid(300) ->
+	// 150+300=450 > 400, skip (deleted). old(0) -> 150+0=150 <= 400, kept.
+	// oldest(250) -> 150+250=400 <= 400, kept.
+	want := []ChunkID{mid}
+	if !chunkIDsEqual(got, want) {
+		t.Fatalf("got %s, want %s", formatIDs(got), formatIDs(want))
+	}
+}
+
+func slicesContainsChunkID(ids []ChunkID, target ChunkID) bool {
+	for _, id := range ids {
+		if id == target {
+			return true
+		}
+	}
+	return false
 }
 
 // --- CountRetentionPolicy ---
