@@ -430,7 +430,7 @@ export function VaultStorageForm({
         <FormField
           label="Retention Disposition"
           dark={dark}
-          description="What happens to records when retention triggers. 'Delete' frees storage immediately. 'Route' sends records through the routing engine — only enable if you have an archival route configured for this vault, otherwise records may cascade unexpectedly. 'Transfer' re-homes the sealed chunk to another vault unchanged — no decode, no re-ingest — the common archive pattern; the target must be a different, non-cloud file vault."
+          description="What retention does with aged-out chunks: delete, route the records, or transfer the chunk unchanged."
         >
           <SelectInput
             value={storage.retentionDisposition || "delete"}
@@ -449,7 +449,7 @@ export function VaultStorageForm({
         <FormField
           label="Transfer Target"
           dark={dark}
-          description="The file vault sealed chunks re-home to unchanged when this vault's retention fires. Must be a different, non-cloud file vault."
+          description="A different, non-cloud file vault."
         >
           <SelectInput
             value={storage.retentionTransferTarget}
