@@ -26,15 +26,6 @@ func newRetentionPolicyCmd() *cobra.Command {
 	return cmd
 }
 
-// formatOptionalString renders a proto3 `optional string` field for table
-// display: "-" when unset (nil) or empty, the value otherwise.
-func formatOptionalString(v *string) string {
-	if v == nil || *v == "" {
-		return "-"
-	}
-	return *v
-}
-
 func newRetentionPolicyListCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
@@ -56,10 +47,9 @@ func newRetentionPolicyListCmd() *cobra.Command {
 					rp.MaxAge,
 					rp.MaxSize,
 					formatInt64(rp.MaxChunks),
-					formatOptionalString(rp.SizeBudget),
 				})
 			}
-			p.table([]string{"ID", "NAME", "MAX AGE", "MAX SIZE", "MAX CHUNKS", "SIZE BUDGET"}, rows)
+			p.table([]string{"ID", "NAME", "MAX AGE", "MAX SIZE", "MAX CHUNKS"}, rows)
 			return nil
 		},
 	}
@@ -96,7 +86,6 @@ func newRetentionPolicyGetCmd() *cobra.Command {
 						{"Max Age", rp.MaxAge},
 						{"Max Size", rp.MaxSize},
 						{"Max Chunks", formatInt64(rp.MaxChunks)},
-						{"Size Budget", formatOptionalString(rp.SizeBudget)},
 					})
 					return nil
 				}
@@ -142,10 +131,6 @@ func newRetentionPolicyCreateCmd() *cobra.Command {
 			if cmd.Flags().Changed("max-chunks") {
 				cfg.MaxChunks, _ = cmd.Flags().GetInt64("max-chunks")
 			}
-			if cmd.Flags().Changed("size-budget") {
-				sizeBudget, _ := cmd.Flags().GetString("size-budget")
-				cfg.SizeBudget = &sizeBudget
-			}
 
 			_, err = client.System.PutRetentionPolicy(ctx, connect.NewRequest(&v1.PutRetentionPolicyRequest{
 				Config: cfg,
@@ -162,9 +147,8 @@ func newRetentionPolicyCreateCmd() *cobra.Command {
 	}
 	cmd.Flags().String("name", "", "policy name (required)")
 	cmd.Flags().String("max-age", "", "max age (e.g. 3m, 1h, 30s)")
-	cmd.Flags().String("max-size", "", "max total size retained (e.g. \"50GB\", \"1GiB\"; empty = no limit); drain trigger — destroys the oldest sealed chunks past this bound")
+	cmd.Flags().String("max-size", "", "vault's disk-claim bound (e.g. \"50GB\", \"1GiB\"; empty = no bound from this policy): oldest sealed chunks drain past it, and admission refuses cluster-wide while the vault's local claim is at/over it. Min-wins across a vault's attached policies")
 	cmd.Flags().Int64("max-chunks", 0, "max chunks")
-	cmd.Flags().String("size-budget", "", "per-node disk-claim budget for vaults using this policy (e.g. \"50GB\", \"500GB\"); refuse bound — admission is refused, nothing is destroyed. Min-wins across a vault's attached policies; unset leaves no bound from this policy")
 	_ = cmd.MarkFlagRequired("name")
 	return cmd
 }
