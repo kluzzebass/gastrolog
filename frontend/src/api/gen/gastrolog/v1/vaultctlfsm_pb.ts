@@ -2184,7 +2184,10 @@ export class ManifestEntry extends Message<ManifestEntry> {
   keyScheme = 0;
 
   /**
-   * Wall-clock time when sealing completed (CmdSealChunk apply).
+   * Wall-clock time when sealing completed (CmdSealChunk apply). For a
+   * chunk introduced by retention transfer disposition, this is the
+   * destination-side arrival time (fresh anchor), NOT the source's
+   * original seal time — see gastrolog-2l918 decision #6.
    *
    * @generated from field: int64 sealed_at_nanos = 23;
    */
@@ -2197,6 +2200,22 @@ export class ManifestEntry extends Message<ManifestEntry> {
    * @generated from field: repeated string holders = 24;
    */
   holders: string[] = [];
+
+  /**
+   * Non-nil only for a chunk introduced via retention transfer disposition
+   * (CmdRepatriateChunk from a different vault's retention runner, not a
+   * local orphan recovery): the vault ID this chunk's bytes still need to
+   * be pulled FROM. Empty for every normally-chunked or same-vault
+   * repatriated entry. Lets the GLCB replica catch-up sweep
+   * (pullMissingGLCB) address its pull at the SOURCE vault's chunk root
+   * instead of this (destination) vault's own placement peers — the seam
+   * that makes "destination homes pull the chunk" work across vaults
+   * without a parallel transfer-fetch mechanism. See
+   * docs/retention-transfer-disposition-design.md.
+   *
+   * @generated from field: bytes transfer_source_vault_id = 25;
+   */
+  transferSourceVaultId = new Uint8Array(0);
 
   constructor(data?: PartialMessage<ManifestEntry>) {
     super();
@@ -2230,6 +2249,7 @@ export class ManifestEntry extends Message<ManifestEntry> {
     { no: 22, name: "key_scheme", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 23, name: "sealed_at_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 24, name: "holders", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 25, name: "transfer_source_vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ManifestEntry {
