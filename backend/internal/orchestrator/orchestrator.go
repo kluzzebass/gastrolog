@@ -197,6 +197,18 @@ type Orchestrator struct {
 	// retentionTargetForInstance.
 	retentionLeaderlessLog logging.Throttle
 
+	// backfillMu guards backfillFailures — a dedicated lock (not o.mu) since
+	// backfillCloudUploads runs under o.mu.RLock() while the scheduler job
+	// that populates this map runs later, off that lock, asynchronously.
+	backfillMu sync.Mutex
+	// backfillFailures tracks per-chunk retry backoff for cloud-backfill
+	// uploads that failed and were not resolved by registration repair
+	// (gastrolog-4ryguo). In-memory only, mirroring retention's
+	// unreadableEntry: a restart clears it and the first sweep re-establishes
+	// state from scratch, which is fine — the point is to stop hammering a
+	// chunk that keeps failing, not to remember why forever.
+	backfillFailures map[chunk.ChunkID]*backfillFailureEntry
+
 	// Vault registry. Each vault bundles Chunks, Indexes, and Query.
 	vaults map[glid.GLID]*Vault
 

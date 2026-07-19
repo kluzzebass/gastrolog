@@ -134,6 +134,18 @@ var catalog = []AlarmType{
 		Response: "Retries automatically. Only actionable once retries stop resolving it: investigate disk health on this node.",
 	},
 	{
+		IDPrefix: "cloud-backfill-stuck",
+		Priority: High,
+		Source:   "cloud-health",
+		// Same backoff schedule as chunk-unreadable (5m first retry, same
+		// unreadableBackoff schedule reused directly): the DelayOn window
+		// keeps a blip that clears on the very next retry from ever
+		// annunciating, while a chunk still failing past it does.
+		DelayOn:  10 * time.Minute,
+		Cause:    "A sealed chunk's cloud-backfill upload has kept failing after a chunk-manager registration repair was attempted; the chunk is not converging to cloud-backed on its own.",
+		Response: "Read the alarm detail for the last upload error. If the chunk's GLCB is missing on disk, restore it from a peer holder or accept the gap; otherwise check cloud store credentials/connectivity and disk health on the named node.",
+	},
+	{
 		IDPrefix: "retention-route-deferred",
 		Priority: High,
 		Source:   "retention",
