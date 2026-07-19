@@ -580,9 +580,7 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
   disposition (route fan-out or transfer) could not run (drain gate
   engaged, destination/target vault gated, receipts stalled, etc.); the
   chunk is retained for a later sweep. Consecutive deferrals raise the
-  `retention-deferred` alarm (renamed from `retention-route-deferred`
-  when transfer disposition — gastrolog-2l918 — generalized it beyond
-  route).
+  `retention-deferred` alarm.
 
 - **Transfer (retention disposition)** — a third `RetentionDisposition`
   value alongside `delete` and `route`: when a retention event fires,
