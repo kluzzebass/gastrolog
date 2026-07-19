@@ -48,6 +48,37 @@ function chunkStartInstant(chunk: ChunkMeta): Date | undefined {
   return start;
 }
 
+// chunkDiskClaimBytes is this chunk's LOCAL on-disk claim — what deleting
+// it would actually free on the responding node. Mirrors the backend's
+// chunk.DiskClaim formula (backend/internal/chunk/claim.go): a cloud-backed
+// chunk with no local cache (diskBytes == 0) claims nothing — the object
+// still lives in the cloud store, at cloudBytes, a currency this never
+// substitutes in. Otherwise diskBytes wins when recorded, falling back to
+// logical bytes only for chunks with no disk-bytes tracking at all
+// (pipeline GLCB chunks). See gastrolog-33ul6h.
+export function chunkDiskClaimBytes(chunk: ChunkMeta): number {
+  const diskBytes = Number(chunk.diskBytes);
+  if (chunk.cloudBacked && diskBytes === 0) return 0;
+  if (diskBytes > 0) return diskBytes;
+  return Number(chunk.bytes);
+}
+
+// chunkSizeCellTitle explains the size column's number — terse, and honest
+// about which of the two cloud currencies (local cache vs. cloud object) is
+// showing. undefined = no tooltip needed (the number is self-explanatory).
+function chunkSizeCellTitle(chunk: ChunkMeta): string | undefined {
+  const diskBytes = Number(chunk.diskBytes);
+  if (chunk.cloudBacked) {
+    return diskBytes > 0
+      ? `${formatBytes(diskBytes)} cached — cloud object ${formatBytes(Number(chunk.cloudBytes))}`
+      : `evicted from local cache — cloud object ${formatBytes(Number(chunk.cloudBytes))}`;
+  }
+  if (diskBytes > 0) {
+    return `${formatBytes(Number(chunk.bytes))} → ${formatBytes(diskBytes)} on disk`;
+  }
+  return undefined;
+}
+
 interface VaultCardProps {
   vault: Vault;
   dark: boolean;
@@ -68,10 +99,12 @@ export function VaultCard({
   const { data: chunks } = useChunks(vault.id);
   const chunkCount = chunks?.length ?? 0;
   const recordCount = (chunks ?? []).reduce((sum, c) => sum + Number(c.recordCount), 0);
-  // Vault size = summed per-chunk disk claim (GLCB bytes when recorded,
-  // logical bytes otherwise) — the same quantity the max-size bound measures.
+  // Vault size = summed per-chunk local disk claim — the same quantity the
+  // max-size bound measures. An evicted cloud-backed chunk contributes 0,
+  // not its logical bytes (the object is still in the cloud store, not on
+  // this node). See gastrolog-33ul6h.
   const sizeBytes = (chunks ?? []).reduce(
-    (sum, c) => sum + Number(Number(c.diskBytes) > 0 ? c.diskBytes : c.bytes),
+    (sum, c) => sum + chunkDiskClaimBytes(c),
     0,
   );
 
@@ -888,13 +921,9 @@ function ChunkRow({
         </td>
         <td
           className={`px-4 py-2 text-right font-mono whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}
-          title={Number(chunk.diskBytes) > 0
-            ? `${formatBytes(Number(chunk.bytes))} \u2192 ${formatBytes(Number(chunk.diskBytes))} on disk`
-            : undefined}
+          title={chunkSizeCellTitle(chunk)}
         >
-          {Number(chunk.diskBytes) > 0
-            ? formatBytes(Number(chunk.diskBytes))
-            : formatBytes(Number(chunk.bytes))}
+          {formatBytes(chunkDiskClaimBytes(chunk))}
         </td>
       </tr>
       {isExpanded && (
@@ -1000,10 +1029,16 @@ function ChunkDetail({
             <div className={`flex items-center gap-3 text-[0.85em]`}>
               <span className={`font-mono w-20 ${c("text-text-bright", "text-light-text-bright")}`}>blob</span>
               <span className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}>
-                {formatBytes(Number(chunk.diskBytes))}
+                {formatBytes(Number(chunk.cloudBytes))}
               </span>
               <span className={c("text-text-muted", "text-light-text-muted")}>
-                GLCB{chunk.cloudBacked ? " (zstd-wrapped on transport)" : ""}
+                GLCB (zstd-wrapped on transport)
+              </span>
+            </div>
+            <div className={`flex items-center gap-3 text-[0.85em]`}>
+              <span className={`font-mono w-20 ${c("text-text-bright", "text-light-text-bright")}`}>cached</span>
+              <span className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}>
+                {Number(chunk.diskBytes) > 0 ? formatBytes(Number(chunk.diskBytes)) : "evicted"}
               </span>
             </div>
             <div className={`flex items-center gap-3 text-[0.85em]`}>
