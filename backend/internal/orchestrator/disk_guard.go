@@ -788,17 +788,17 @@ func (o *Orchestrator) refreshVaultDiskGuards(ctx context.Context) {
 		}
 		// Config→runtime boundary: the operator's expressions become numbers
 		// here, once, through the shared resolver (gastrolog-etcjdx). The
-		// budget itself now resolves from the vault's attached retention
+		// bound itself now resolves from the vault's attached retention
 		// policies rather than a vault-level field (gastrolog-33ul6h); see
-		// resolveVaultSizeBudgetSource for the min-wins / default-floor rule.
-		maxSize, budgetSource := resolveVaultSizeBudgetSource(vc, sys.Config.RetentionPolicies)
+		// resolveVaultSizeBoundSource for the min-wins / default-floor rule.
+		maxSize, boundSource := resolveVaultSizeBoundSource(vc, sys.Config.RetentionPolicies)
 		// A vault with no local placement still claims local disk through its
-		// origin segment backlog, so a max-size budget registers it even when
+		// origin segment backlog, so a max-size bound registers it even when
 		// there is no volume to sample here.
 		if len(paths) == 0 && maxSize == 0 {
 			continue
 		}
-		// Budget transitions are otherwise silent: a size cap tightening or
+		// Bound transitions are otherwise silent: a size cap tightening or
 		// loosening changes admission behavior with no operator-visible
 		// signal until a cap/uncap actually fires. Log the CHANGE only — not
 		// every tick's re-resolution, which would flood the log with the
@@ -808,7 +808,7 @@ func (o *Orchestrator) refreshVaultDiskGuards(ctx context.Context) {
 			o.diskGuard.logger.Info("vault size budget changed",
 				"vault", vc.ID, "name", vc.Name,
 				"old", fmtBytes(prev), "new", fmtBytes(maxSize),
-				"source", budgetSource)
+				"source", boundSource)
 		}
 		// The disk-free thresholds stay expressions all the way into the
 		// guard: a percentage ("10%") can only be resolved against the volume
@@ -820,77 +820,59 @@ func (o *Orchestrator) refreshVaultDiskGuards(ctx context.Context) {
 	o.diskGuard.retainVaultGuards(keep, o.alerts)
 }
 
-// attachedSizeBudget scans the vault's RetentionRules for the tightest
-// (minimum) usable SizeBudget among referenced policies. A referenced
-// policy that carries no SizeBudget (nil, unset, or unparseable — defense
-// in depth; PutRetentionPolicy validates parseability at write, so a parse
-// failure here can only be a pre-change or bug-produced config) contributes
-// nothing to the min. A trigger-less policy (no MaxAge/MaxSize/MaxChunks)
-// that carries only SizeBudget still contributes — the bound applies even
-// though the policy drains nothing (a bound-only policy is legal and
-// meaningful, gastrolog-33ul6h). Returns the winning policy (nil if none
-// carries a usable budget) so callers can build both the numeric budget and
-// an operator-readable source label without re-scanning.
-func attachedSizeBudget(vc system.VaultConfig, policies []system.RetentionPolicyConfig) (minBudget uint64, winner *system.RetentionPolicyConfig) {
+// attachedSizeBound scans the vault's RetentionRules for the tightest
+// (minimum) usable MaxSize among referenced policies. A referenced policy
+// that carries no MaxSize (nil, unset, or unparseable — defense in depth;
+// PutRetentionPolicy validates parseability at write, so a parse failure
+// here can only be a pre-change or bug-produced config) contributes nothing
+// to the min. Returns the winning policy (nil if none carries a usable
+// bound) so callers can build both the numeric bound and an
+// operator-readable source label without re-scanning.
+func attachedSizeBound(vc system.VaultConfig, policies []system.RetentionPolicyConfig) (minBound uint64, winner *system.RetentionPolicyConfig) {
 	for _, rule := range vc.RetentionRules {
 		policy := findRetentionPolicy(policies, rule.RetentionPolicyID)
-		if policy == nil || policy.SizeBudget == nil || system.IsQuantityUnset(*policy.SizeBudget) {
+		if policy == nil || policy.MaxSize == nil || system.IsQuantityUnset(*policy.MaxSize) {
 			continue
 		}
-		size, err := system.ParseSize(*policy.SizeBudget)
+		size, err := system.ParseSize(*policy.MaxSize)
 		if err != nil || size == 0 {
 			continue
 		}
-		if winner == nil || size < minBudget {
-			minBudget = size
+		if winner == nil || size < minBound {
+			minBound = size
 			winner = policy
 		}
 	}
-	return minBudget, winner
+	return minBound, winner
 }
 
-// resolveVaultSizeBudget computes the effective per-node disk-claim budget
-// for a file vault (gastrolog-33ul6h): attachedSizeBudget's min-wins result,
-// or the creation default (system.DefaultVaultMaxSize) as the floor when no
-// attached policy carries a usable budget — zero retention rules, zero
-// policies, or only budget-less policies — so a file vault stays bounded
-// with no operator diligence required.
-func resolveVaultSizeBudget(vc system.VaultConfig, policies []system.RetentionPolicyConfig) uint64 {
-	budget, _ := resolveVaultSizeBudgetSource(vc, policies)
-	return budget
+// resolveVaultSizeBound computes the effective per-node disk-claim bound for
+// a file vault (gastrolog-33ul6h): attachedSizeBound's min-wins result, or
+// the creation default (system.DefaultVaultMaxSize) as the refuse-only floor
+// when no attached policy carries a usable bound — zero retention rules,
+// zero policies, or only bound-less policies — so a file vault stays
+// bounded with no operator diligence required.
+func resolveVaultSizeBound(vc system.VaultConfig, policies []system.RetentionPolicyConfig) uint64 {
+	bound, _ := resolveVaultSizeBoundSource(vc, policies)
+	return bound
 }
 
-// resolveVaultSizeBudgetSource is resolveVaultSizeBudget plus an
+// resolveVaultSizeBoundSource is resolveVaultSizeBound plus an
 // operator-readable source label ("policy <name/id>" or "default floor"),
-// for the budget-transition log (gastrolog-33ul6h finding 4): naming WHERE
-// an effective budget change came from, not just the old/new numbers.
-func resolveVaultSizeBudgetSource(vc system.VaultConfig, policies []system.RetentionPolicyConfig) (uint64, string) {
-	budget, winner := attachedSizeBudget(vc, policies)
+// for the bound-transition log (gastrolog-33ul6h finding 4): naming WHERE
+// an effective bound change came from, not just the old/new numbers.
+func resolveVaultSizeBoundSource(vc system.VaultConfig, policies []system.RetentionPolicyConfig) (uint64, string) {
+	bound, winner := attachedSizeBound(vc, policies)
 	if winner == nil {
 		def, _ := system.ParseSize(system.DefaultVaultMaxSize)
 		return def, "default floor"
 	}
-	return budget, "policy " + retentionPolicyLabel(*winner)
-}
-
-// vaultHasAttachedSizeBudget reports whether ANY policy referenced via the
-// vault's RetentionRules carries a usable SizeBudget, regardless of whether
-// that policy also carries a drain trigger. Used by retentionTargetForInstance
-// to distinguish a legal bound-only vault (every referenced policy is
-// trigger-less, but at least one carries a SizeBudget — the vault has no
-// drain but the budget still binds via the guard) from a genuinely
-// unenforceable one (zero drain triggers AND zero attached budgets). The
-// resolver's own default-floor fallback must NOT count here: the default
-// floor applies regardless of operator intent and says nothing about
-// whether the operator meant to bound this vault (gastrolog-33ul6h).
-func vaultHasAttachedSizeBudget(vc system.VaultConfig, policies []system.RetentionPolicyConfig) bool {
-	_, winner := attachedSizeBudget(vc, policies)
-	return winner != nil
+	return bound, "policy " + retentionPolicyLabel(*winner)
 }
 
 // currentMaxSizeBytes returns the vault's currently-registered max-size
-// budget and whether an entry exists yet. Used by refreshVaultDiskGuards to
-// detect an effective-budget CHANGE (vs. first observation) before calling
+// bound and whether an entry exists yet. Used by refreshVaultDiskGuards to
+// detect an effective-bound CHANGE (vs. first observation) before calling
 // SetVaultGuard, which overwrites the value unconditionally.
 func (g *diskGuard) currentMaxSizeBytes(vaultID glid.GLID) (uint64, bool) {
 	g.mu.Lock()

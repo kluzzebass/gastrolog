@@ -93,12 +93,13 @@ type VaultConfig struct {
 	DiskFreeWarn  string `json:"diskFreeWarn,omitempty"`
 	DiskFreeFloor string `json:"diskFreeFloor,omitempty"`
 
-	// gastrolog-33ul6h: MaxSize removed. The per-node disk-claim budget is no
+	// gastrolog-33ul6h: MaxSize removed. The vault's disk-claim bound is no
 	// longer a vault-level field — it lives on the retention policy
-	// (RetentionPolicyConfig.SizeBudget) attached via RetentionRules,
-	// min-wins across attached policies, with DefaultVaultMaxSize as the
-	// floor when no attached policy carries one. See
-	// orchestrator.resolveVaultSizeBudget (disk_guard.go).
+	// (RetentionPolicyConfig.MaxSize, which drains AND refuses at the same
+	// bound) attached via RetentionRules, min-wins across attached policies,
+	// with DefaultVaultMaxSize as the refuse-only floor when no attached
+	// policy carries one. See orchestrator.resolveVaultSizeBound
+	// (disk_guard.go).
 }
 
 // Defaults are expressions, like the fields they fill: what the operator would
