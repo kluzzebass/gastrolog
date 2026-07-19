@@ -275,12 +275,12 @@ export function VaultStorageForm({
           <FormField
             label="Max Size"
             dark={dark}
-            description="Per-node budget for the vault's whole local disk claim (chunks, indexes, pipeline backlog). At the budget, new records for this vault are refused cluster-wide until retention drains it. Leave empty for unlimited."
+            description="Per-node budget for the vault's whole local disk claim (chunks, indexes, pipeline backlog). At the budget, new records for this vault are refused cluster-wide until retention drains it — set a size retention threshold below the budget so retention drains ahead of the cap."
           >
             <TextInput
               value={storage.maxSize}
               onChange={(v) => onUpdate({ maxSize: v })}
-              placeholder=""
+              placeholder="1GiB"
               dark={dark}
               mono
               examples={["10GB", "50GB", "500GB"]}
@@ -289,7 +289,7 @@ export function VaultStorageForm({
           <FormField
             label="Disk Free Warn"
             dark={dark}
-            description="Free space on the vault's backing volume below which the disk-space alarm raises. A size like 10GB, or a percentage of the volume like 10%. Leave empty to inherit the node default, 10%."
+            description="Free space on the vault's backing volume below which the disk-space alarm raises. A size like 10GB, or a percentage of the volume like 10%. Empty inherits the node default."
           >
             <TextInput
               value={storage.diskFreeWarn}
@@ -303,7 +303,7 @@ export function VaultStorageForm({
           <FormField
             label="Disk Free Floor"
             dark={dark}
-            description="Free space below which new records for this vault are refused cluster-wide until space frees. A size like 3GB, or a percentage of the volume like 3%. Leave empty to inherit the node default, 3%."
+            description="Free space below which new records for this vault are refused cluster-wide until space frees. A size like 3GB, or a percentage of the volume like 3%. Empty inherits the node default."
           >
             <TextInput
               value={storage.diskFreeFloor}
