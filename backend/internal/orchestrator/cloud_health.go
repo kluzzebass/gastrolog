@@ -24,6 +24,13 @@ type cloudHealthChecker interface {
 // alerts. When an instance transitions from degraded → healthy, schedules
 // post-seal work for sealed chunks that are missing their cloud upload.
 // Runs in the rate alert evaluator loop (every 5s).
+//
+// Also GCs cloud-backfill failure/backoff state the same way
+// retentionSweepAll GCs retention runners: a vault this node no longer runs
+// backfill for (leadership moved, placement changed, vault removed from
+// config) is never visited by backfillCloudUploads again, so nothing else
+// would ever clear its stranded backoff entries or alarms. See
+// gastrolog-4ryguo review follow-up.
 func (o *Orchestrator) evaluateCloudHealth() {
 	if o.alerts == nil {
 		return
@@ -31,13 +38,18 @@ func (o *Orchestrator) evaluateCloudHealth() {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 
+	active := make(map[glid.GLID]bool)
 	for _, vault := range o.vaults {
 		vaultInst := vault.Instance
 		if vaultInst == nil || !vaultInstanceHasCloudBacking(vaultInst) {
 			continue
 		}
 		o.evaluateVaultCloudHealth(vaultInst)
+		if vaultInstRunsCloudBackfill(vaultInst) {
+			active[vaultInst.VaultID] = true
+		}
 	}
+	o.purgeBackfillFailuresForInactiveVaults(active)
 }
 
 // vaultInstanceHasCloudBacking reports whether this instance participates in
@@ -134,7 +146,19 @@ func (o *Orchestrator) backfillCloudUploads(vaultInst *VaultInstance) {
 		if vaultInst.OverlayFromFSM != nil {
 			m = vaultInst.OverlayFromFSM(m)
 		}
-		if !m.Sealed || chunkIsCloudBacked(vaultInst, m) {
+		if !m.Sealed {
+			continue
+		}
+		if chunkIsCloudBacked(vaultInst, m) {
+			// The PRIMARY path (schedulePipelineCloudUpload / onSeal) may
+			// have resolved this chunk before this sweep's RunOnce ever
+			// ran again — that upload never went through
+			// markBackfillFailure/clearBackfillFailure, so without this the
+			// chunk's backoff entry and alarm would strand here forever:
+			// this continue is the only place backfillCloudUploads visits
+			// an already-resolved chunk again. See gastrolog-4ryguo review
+			// follow-up.
+			o.clearBackfillFailure(m.ID)
 			continue
 		}
 		// A chunk with an unexpired backoff window from a prior failure is
@@ -150,17 +174,7 @@ func (o *Orchestrator) backfillCloudUploads(vaultInst *VaultInstance) {
 			continue
 		}
 		if err := o.scheduler.RunOnce(name, func(id chunk.ChunkID) error {
-			err := uploader.UploadToCloud(id)
-			if err != nil {
-				err = o.repairAndRetryBackfill(vaultInst, id, err, uploader)
-			}
-			if err != nil {
-				o.logBackfillFailure(vaultInst.VaultID, id, err)
-				o.markBackfillFailure(vaultInst.VaultID, id, err)
-				return err
-			}
-			o.clearBackfillFailure(id)
-			return nil
+			return o.runBackfillUpload(vaultInst, id, uploader)
 		}, m.ID); err == nil {
 			backfilled++
 		}
@@ -170,6 +184,37 @@ func (o *Orchestrator) backfillCloudUploads(vaultInst *VaultInstance) {
 		o.cloudHealthLogger.Debug("cloud backfill: scheduled uploads",
 			"vault", vaultInst.VaultID, "count", backfilled)
 	}
+}
+
+// runBackfillUpload performs one chunk's upload attempt — including
+// registration repair and failure-track bookkeeping — as the scheduler job
+// body. Extracted from backfillCloudUploads to keep the sweep loop small;
+// this is where the review follow-up's build-lag gate lives: onDisk (the
+// registration-missing signature — GLCB verifiably present on disk) is
+// computed once and gates BOTH repair applicability and entry into the
+// backoff/alarm track. A chunk whose local build simply hasn't finished yet
+// (onDisk false) fails the same not-found error but is owned by the
+// primary upload path (schedulePipelineCloudUpload / onSeal) and resolves
+// itself in seconds — pushing it into the 5-minute backoff track would
+// pollute it with build-lag noise that was never actually stuck. See
+// gastrolog-4ryguo review follow-up.
+func (o *Orchestrator) runBackfillUpload(vaultInst *VaultInstance, id chunk.ChunkID, uploader chunk.ChunkCloudUploader) error {
+	err := uploader.UploadToCloud(id)
+	if err != nil {
+		onDisk := o.backfillChunkOnDisk(vaultInst.VaultID, id)
+		if onDisk {
+			err = o.repairAndRetryBackfill(vaultInst, id, err, uploader)
+		}
+		if err != nil {
+			o.logBackfillFailure(vaultInst.VaultID, id, err, onDisk)
+			if onDisk {
+				o.markBackfillFailure(vaultInst.VaultID, id, err)
+			}
+			return err
+		}
+	}
+	o.clearBackfillFailure(id)
+	return nil
 }
 
 // repairAndRetryBackfill detects the registration-missing signature that
@@ -194,11 +239,7 @@ func (o *Orchestrator) repairAndRetryBackfill(vaultInst *VaultInstance, id chunk
 	if vaultInst.Reconciler == nil || vaultInst.ManifestEntry == nil {
 		return uploadErr
 	}
-	root, ok := o.pipelineVaultChunkRoot(vaultInst.VaultID)
-	if !ok {
-		return uploadErr
-	}
-	if _, statErr := os.Stat(chunking.ChunkGLCBPath(root, id)); statErr != nil {
+	if !o.backfillChunkOnDisk(vaultInst.VaultID, id) {
 		// Bytes genuinely absent — nothing to repair.
 		return uploadErr
 	}
@@ -208,6 +249,23 @@ func (o *Orchestrator) repairAndRetryBackfill(vaultInst *VaultInstance, id chunk
 	}
 	vaultInst.Reconciler.registerPipelineGLCB(entry)
 	return uploader.UploadToCloud(id)
+}
+
+// backfillChunkOnDisk reports whether a chunk's GLCB is verifiably present
+// on disk under this vault's pipeline chunk root — the registration-missing
+// signature predicate shared by three call sites: the repair-applicability
+// check, the failure-track entry gate (only a registration-missing-shaped
+// failure backs off/alarms; a build-lag failure does not), and the
+// operator-facing on-disk/awaiting-build log split. False whenever there is
+// no pipeline home registration for the vault on this node (root not found)
+// as well as when the file itself is absent.
+func (o *Orchestrator) backfillChunkOnDisk(vaultID glid.GLID, id chunk.ChunkID) bool {
+	root, ok := o.pipelineVaultChunkRoot(vaultID)
+	if !ok {
+		return false
+	}
+	_, statErr := os.Stat(chunking.ChunkGLCBPath(root, id))
+	return statErr == nil
 }
 
 // backfillFailureEntry tracks per-chunk retry backoff for cloud-backfill
@@ -276,24 +334,18 @@ func (o *Orchestrator) clearBackfillFailure(id chunk.ChunkID) {
 	}
 }
 
-// pruneVanishedBackfillFailures drops backoff/alarm state for chunks that
-// no longer appear in this vault's raw candidate view (chunk manager List()
-// plus unlisted-manifest-sealed) — the chunk was deleted (retention or
-// otherwise) and is gone for good. Without this, a chunk that fails backfill
-// and is then destroyed would strand its backoff entry and alarm forever:
-// nothing would ever revisit it to clear them. metas is deliberately the
-// pre-filter list (before the Sealed/CloudBacked gate) so a chunk that
-// simply became cloud-backed is still "present" here — its entry clears via
-// the upload-success path instead, not by pruning.
-func (o *Orchestrator) pruneVanishedBackfillFailures(vaultID glid.GLID, metas []chunk.ChunkMeta) {
-	present := make(map[chunk.ChunkID]bool, len(metas))
-	for _, m := range metas {
-		present[m.ID] = true
-	}
+// purgeBackfillFailuresWhere drops backoff state and clears the alarm for
+// every backfillFailures entry the predicate matches. The single locked
+// scan-and-delete primitive behind pruneVanishedBackfillFailures (per-sweep,
+// vault-scoped, keyed by which chunks vanished from the candidate view),
+// purgeBackfillFailuresForInactiveVaults (per-sweep, node-wide, keyed by
+// which vaults this node still runs backfill for), and
+// purgeBackfillFailuresForVault (immediate, on vault teardown/unregister).
+func (o *Orchestrator) purgeBackfillFailuresWhere(match func(id chunk.ChunkID, entry *backfillFailureEntry) bool) {
 	o.backfillMu.Lock()
 	var vanished []chunk.ChunkID
 	for id, entry := range o.backfillFailures {
-		if entry.vaultID != vaultID || present[id] {
+		if !match(id, entry) {
 			continue
 		}
 		vanished = append(vanished, id)
@@ -310,19 +362,58 @@ func (o *Orchestrator) pruneVanishedBackfillFailures(vaultID glid.GLID, metas []
 	}
 }
 
-// logBackfillFailure reports a failed backfill upload with the signal an
-// operator needs: whether the GLCB exists on disk. Present-but-unuploadable
-// means the chunk manager lost its registration (a bug — the restart
-// registration gap produced 1,500 bare 'chunk not found' warns); absent
-// means the local build simply hasn't finished (normal on followers,
-// Debug). Both throttled per vault: retries every 5s flood otherwise.
-func (o *Orchestrator) logBackfillFailure(vaultID glid.GLID, id chunk.ChunkID, err error) {
-	onDisk := false
-	if root, ok := o.pipelineVaultChunkRoot(vaultID); ok {
-		if _, statErr := os.Stat(chunking.ChunkGLCBPath(root, id)); statErr == nil {
-			onDisk = true
-		}
+// pruneVanishedBackfillFailures drops backoff/alarm state for chunks that
+// no longer appear in this vault's raw candidate view (chunk manager List()
+// plus unlisted-manifest-sealed) — the chunk was deleted (retention or
+// otherwise) and is gone for good. Without this, a chunk that fails backfill
+// and is then destroyed would strand its backoff entry and alarm forever:
+// nothing would ever revisit it to clear them. metas is deliberately the
+// pre-filter list (before the Sealed/CloudBacked gate) so a chunk that
+// simply became cloud-backed is still "present" here — its entry clears via
+// the upload-success path (the chunkIsCloudBacked continue in
+// backfillCloudUploads) instead, not by pruning.
+func (o *Orchestrator) pruneVanishedBackfillFailures(vaultID glid.GLID, metas []chunk.ChunkMeta) {
+	present := make(map[chunk.ChunkID]bool, len(metas))
+	for _, m := range metas {
+		present[m.ID] = true
 	}
+	o.purgeBackfillFailuresWhere(func(id chunk.ChunkID, entry *backfillFailureEntry) bool {
+		return entry.vaultID == vaultID && !present[id]
+	})
+}
+
+// purgeBackfillFailuresForInactiveVaults drops backoff/alarm state for
+// every entry whose vault is not in active — a vault this node no longer
+// runs cloud backfill for (leadership moved, placement changed, vault
+// removed from config). Without this, a vault that fell out of the active
+// set would never have backfillCloudUploads called for it again, so nothing
+// would ever revisit and clear its stranded entries. Called once per
+// evaluateCloudHealth sweep. Mirrors retentionSweepAll's runner GC.
+func (o *Orchestrator) purgeBackfillFailuresForInactiveVaults(active map[glid.GLID]bool) {
+	o.purgeBackfillFailuresWhere(func(_ chunk.ChunkID, entry *backfillFailureEntry) bool {
+		return !active[entry.vaultID]
+	})
+}
+
+// purgeBackfillFailuresForVault immediately drops every backoff/alarm entry
+// for one vault — called from teardownVault/removeVaultJobs so a vault
+// leaving this node (deleted, unregistered, drained) doesn't leave its
+// alarms standing until the next evaluateCloudHealth sweep notices.
+func (o *Orchestrator) purgeBackfillFailuresForVault(vaultID glid.GLID) {
+	o.purgeBackfillFailuresWhere(func(_ chunk.ChunkID, entry *backfillFailureEntry) bool {
+		return entry.vaultID == vaultID
+	})
+}
+
+// logBackfillFailure reports a failed backfill upload with the signal an
+// operator needs: whether the GLCB exists on disk (onDisk, computed once by
+// the caller via backfillChunkOnDisk and shared with the failure-track
+// gate). Present-but-unuploadable means the chunk manager lost its
+// registration (a bug — the restart registration gap produced 1,500 bare
+// 'chunk not found' warns); absent means the local build simply hasn't
+// finished (normal, Debug). Both throttled per vault: retries every 5s
+// flood otherwise.
+func (o *Orchestrator) logBackfillFailure(vaultID glid.GLID, id chunk.ChunkID, err error, onDisk bool) {
 	n, allow := o.backfillLogThrottle.Allow(vaultID.String())
 	if !allow {
 		return

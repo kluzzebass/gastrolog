@@ -416,14 +416,26 @@ func TestPruneVanishedBackfillFailuresDropsDeletedChunkState(t *testing.T) {
 	}
 }
 
-// ---------- edge: GLCB deleted out from under the manifest entry ----------
+// ---------- build-lag: GLCB not yet built locally (review follow-up) ----------
+//
+// A sealed-in-FSM chunk whose local GLCB build hasn't finished yet fails
+// UploadToCloud with the same chunk.ErrChunkNotFound as the genuine
+// registration-missing case — os.Stat alone cannot tell "will exist in a
+// few seconds" from "gone forever". Before this fix both landed in the
+// backoff/alarm track; that pollutes it with false positives, since the
+// PRIMARY path (schedulePipelineCloudUpload / onSeal) resolves ordinary
+// build-lag in seconds on its own. The fix: only chunks whose GLCB IS on
+// disk (backfillChunkOnDisk == true) enter the failure track. GLCB-absent
+// failures keep the pre-existing gentle behavior — Debug log, normal 5s
+// sweep retry, no failure entry, no alarm — which also covers the edge
+// case of a GLCB genuinely deleted out from under the manifest entry
+// (indistinguishable from build-lag by os.Stat; that state is accepted as
+// self-resolving/owned by the primary path, not this track's job).
 
-// TestBackfillCloudUploads_GLCBMissingDoesNotRepairAndBacksOff pins the
-// acceptance edge case: a manifest entry says sealed, but the GLCB bytes
-// are genuinely gone from disk (deleted out from under it). This is not
-// repairable — repairAndRetryBackfill must not call registerPipelineGLCB —
-// and it must still back off rather than tight-looping every 5s.
-func TestBackfillCloudUploads_GLCBMissingDoesNotRepairAndBacksOff(t *testing.T) {
+// TestBackfillCloudUploads_GLCBAbsentDoesNotEnterFailureTrack pins the
+// build-lag fix directly: no repair attempt, no backoff/alarm entry, and
+// the chunk stays due for the next ordinary sweep.
+func TestBackfillCloudUploads_GLCBAbsentDoesNotEnterFailureTrack(t *testing.T) {
 	t.Parallel()
 	orch, vaultInst, id, mock := backfillRepairFixture(t, false) // no GLCB written
 	orch.alerts = alert.New()
@@ -435,27 +447,226 @@ func TestBackfillCloudUploads_GLCBMissingDoesNotRepairAndBacksOff(t *testing.T) 
 	jobName := fmt.Sprintf("cloud-backfill:%s:%s", vaultInst.VaultID, id)
 	waitBackfillJobDone(t, orch, jobName, mock, 1, 5*time.Second)
 
-	// Give a moment past settlement to make sure no second attempt sneaks in.
-	time.Sleep(100 * time.Millisecond)
-	if got := mock.uploadCallCount(); got != 1 {
-		t.Fatalf("expected exactly 1 upload attempt (no repair retry when bytes are absent), got %d", got)
-	}
 	if got := mock.registerCallCount(); got != 0 {
-		t.Fatalf("a genuinely-absent GLCB must not trigger a repair registration, got %d calls", got)
+		t.Fatalf("a GLCB absent from disk must not trigger a repair registration, got %d calls", got)
 	}
 
 	orch.backfillMu.Lock()
-	entry := orch.backfillFailures[id]
+	_, hasEntry := orch.backfillFailures[id]
 	orch.backfillMu.Unlock()
-	if entry == nil || entry.failCount != 1 {
-		t.Fatalf("expected backoff state recorded after the unrepairable failure, got %+v", entry)
+	if hasEntry {
+		t.Fatal("a build-lag (GLCB-absent) failure must not create a backoff/alarm entry — that state belongs to the primary upload path")
 	}
 
-	// A second sweep before the backoff window elapses must not reschedule
-	// the job — this is the tight-loop the edge case guards against.
+	// No failure entry means no backoff window either — the chunk stays due
+	// for the next ordinary sweep, which is the pre-existing gentle retry
+	// behavior this fix preserves.
+	if !orch.backfillDue(id) {
+		t.Fatal("a chunk with no failure entry must remain due for the normal sweep cadence")
+	}
+}
+
+// ---------- strand fix 1: cross-path success (review follow-up) ----------
+
+// TestBackfillCloudUploads_CrossPathSuccessClearsEntryAndAlarm pins the
+// first Critical strand: a chunk with a standing backfill failure entry and
+// alarm gets uploaded by the PRIMARY path (schedulePipelineCloudUpload /
+// onSeal, not backfillCloudUploads) and becomes CloudBacked. The next
+// backfillCloudUploads sweep sees it via chunkIsCloudBacked and must clear
+// the entry+alarm right there — that continue is the only place the sweep
+// ever visits an already-resolved chunk again; without an explicit clear at
+// that point nothing else would ever remove the stranded state.
+func TestBackfillCloudUploads_CrossPathSuccessClearsEntryAndAlarm(t *testing.T) {
+	t.Parallel()
+	clockNow := time.Now()
+	clock := func() time.Time { return clockNow }
+	chunkID := chunk.NewChunkID()
+	vaultID := glid.New()
+	mock := newRegistrarUploaderMock([]chunk.ChunkMeta{
+		{ID: chunkID, Sealed: true, CloudBacked: false, WriteStart: clockNow, WriteEnd: clockNow},
+	})
+	orch := newTestOrch(t, Config{LocalNodeID: "node-A", Now: clock})
+	ac := alert.NewWithClock(clock)
+	orch.alerts = ac
+
+	typ, _ := alert.TypeByID("cloud-backfill-stuck")
+	orch.markBackfillFailure(vaultID, chunkID, errors.New("boom"))
+	clockNow = clockNow.Add(typ.DelayOn + time.Second)
+	orch.markBackfillFailure(vaultID, chunkID, errors.New("boom again"))
+	if len(ac.Standing()) != 1 {
+		t.Fatal("setup: expected the alarm to be standing before the cross-path success")
+	}
+
+	// The FSM overlay reporting CloudBacked=true is how the sweep learns the
+	// primary path already resolved this chunk — vaultInst.Chunks itself
+	// (the mock) is never told to upload it here.
+	vaultInst := &VaultInstance{
+		VaultID:      vaultID,
+		Type:         "file",
+		Chunks:       mock,
+		IsRaftLeader: func() bool { return true },
+		OverlayFromFSM: func(m chunk.ChunkMeta) chunk.ChunkMeta {
+			m.CloudBacked = true
+			return m
+		},
+	}
+
 	orch.backfillCloudUploads(vaultInst)
-	time.Sleep(100 * time.Millisecond)
-	if got := mock.uploadCallCount(); got != 1 {
-		t.Fatalf("chunk must not be retried before its backoff window elapses, got %d upload calls", got)
+
+	orch.backfillMu.Lock()
+	_, present := orch.backfillFailures[chunkID]
+	orch.backfillMu.Unlock()
+	if present {
+		t.Fatal("a chunk resolved by the primary path must have its backoff state cleared on the next sweep")
+	}
+	if alerts := ac.Standing(); len(alerts) != 0 {
+		t.Fatalf("a chunk resolved by the primary path must have its alarm cleared, got %v", alerts)
+	}
+	if got := mock.uploadCallCount(); got != 0 {
+		t.Fatalf("an already cloud-backed chunk must not be re-uploaded by the sweep, got %d calls", got)
+	}
+}
+
+// ---------- strand fix 2: vault leaves this node (review follow-up) ----------
+
+// TestEvaluateCloudHealth_PurgesBackfillFailuresForRemovedVault pins the
+// second Critical strand's simplest form: a vault with a standing backfill
+// failure+alarm is not registered on this node at all (removed from
+// config, or placement/leadership moved it entirely away before this test
+// even runs). backfillCloudUploads is never called for it again, so nothing
+// but evaluateCloudHealth's per-sweep GC could ever clear the stranded
+// state.
+func TestEvaluateCloudHealth_PurgesBackfillFailuresForRemovedVault(t *testing.T) {
+	t.Parallel()
+	clockNow := time.Now()
+	clock := func() time.Time { return clockNow }
+	orch := newTestOrch(t, Config{LocalNodeID: "node-A", Now: clock})
+	ac := alert.NewWithClock(clock)
+	orch.alerts = ac
+
+	vaultID := glid.New()
+	chunkID := chunk.NewChunkID()
+	typ, _ := alert.TypeByID("cloud-backfill-stuck")
+
+	orch.markBackfillFailure(vaultID, chunkID, errors.New("boom"))
+	clockNow = clockNow.Add(typ.DelayOn + time.Second)
+	orch.markBackfillFailure(vaultID, chunkID, errors.New("boom again"))
+	if len(ac.Standing()) != 1 {
+		t.Fatal("setup: expected the alarm to be standing before the vault stops being visited")
+	}
+
+	// No vault registered for vaultID at all.
+	orch.evaluateCloudHealth()
+
+	orch.backfillMu.Lock()
+	_, present := orch.backfillFailures[chunkID]
+	orch.backfillMu.Unlock()
+	if present {
+		t.Fatal("a vault this node no longer runs backfill for must have its stranded backoff entry purged")
+	}
+	if alerts := ac.Standing(); len(alerts) != 0 {
+		t.Fatalf("the alarm for a vault no longer visited must clear, got %v", alerts)
+	}
+}
+
+// TestEvaluateCloudHealth_PurgesBackfillFailuresForNonLeaderVault covers the
+// leadership-handoff shape of the same strand: the vault is still
+// registered on this node, but this node is no longer the placement
+// leader/uploader for it (CloudStoreConfigured()==false, e.g. a follower
+// after a handoff) — vaultInstRunsCloudBackfill is false, so
+// backfillCloudUploads is skipped for it just as if it were removed.
+func TestEvaluateCloudHealth_PurgesBackfillFailuresForNonLeaderVault(t *testing.T) {
+	t.Parallel()
+	clockNow := time.Now()
+	clock := func() time.Time { return clockNow }
+	orch := newTestOrch(t, Config{LocalNodeID: "node-A", Now: clock})
+	ac := alert.NewWithClock(clock)
+	orch.alerts = ac
+
+	vaultID := glid.New()
+	chunkID := chunk.NewChunkID()
+	typ, _ := alert.TypeByID("cloud-backfill-stuck")
+
+	orch.markBackfillFailure(vaultID, chunkID, errors.New("boom"))
+	clockNow = clockNow.Add(typ.DelayOn + time.Second)
+	orch.markBackfillFailure(vaultID, chunkID, errors.New("boom again"))
+	if len(ac.Standing()) != 1 {
+		t.Fatal("setup: expected the alarm to be standing before leadership moved away")
+	}
+
+	mock := &mockCloudBackedChunkManager{}
+	mock.cloudStoreConfigured.Store(false) // follower now — no upload access
+	followerInst := &VaultInstance{VaultID: vaultID, Type: "file", Chunks: mock, IsRaftLeader: func() bool { return true }}
+	orch.RegisterVault(NewVault(glid.New(), followerInst))
+
+	orch.evaluateCloudHealth()
+
+	orch.backfillMu.Lock()
+	_, present := orch.backfillFailures[chunkID]
+	orch.backfillMu.Unlock()
+	if present {
+		t.Fatal("a vault this node lost backfill leadership for must have its stranded backoff entry purged")
+	}
+	if alerts := ac.Standing(); len(alerts) != 0 {
+		t.Fatalf("the alarm for a vault this node no longer uploads for must clear, got %v", alerts)
+	}
+}
+
+// ---------- strand fix 3: vault teardown (review follow-up minor) ----------
+
+// TestTeardownVaultPurgesBackfillFailures pins the reviewer's Minor: vault
+// teardown must cancel pending cloud-backfill jobs and purge that vault's
+// failure entries immediately, the same as it already does for
+// post-seal/compress/index-build jobs — not wait for the next
+// evaluateCloudHealth sweep.
+func TestTeardownVaultPurgesBackfillFailures(t *testing.T) {
+	t.Parallel()
+	clockNow := time.Now()
+	clock := func() time.Time { return clockNow }
+	orch := newTestOrch(t, Config{LocalNodeID: "node-A", Now: clock})
+	ac := alert.NewWithClock(clock)
+	orch.alerts = ac
+
+	vaultID := glid.New()
+	chunkID := chunk.NewChunkID()
+	typ, _ := alert.TypeByID("cloud-backfill-stuck")
+
+	orch.markBackfillFailure(vaultID, chunkID, errors.New("boom"))
+	clockNow = clockNow.Add(typ.DelayOn + time.Second)
+	orch.markBackfillFailure(vaultID, chunkID, errors.New("boom again"))
+	if len(ac.Standing()) != 1 {
+		t.Fatal("setup: expected the alarm to be standing before teardown")
+	}
+
+	inst := newMemoryInstance(t, vaultID)
+	v := &Vault{ID: vaultID, Instance: inst}
+	orch.vaults[vaultID] = v
+
+	// A pending cloud-backfill job for this vault must be cancelled too —
+	// block it on an unclosed channel so it's still pending when teardown runs.
+	jobName := "cloud-backfill:" + vaultID.String() + ":" + chunkID.String()
+	blocked := make(chan struct{})
+	defer close(blocked) // let the job's goroutine exit; avoid leaking it
+	if err := orch.Scheduler().RunOnce(jobName, func() { <-blocked }); err != nil {
+		t.Fatalf("schedule blocking job: %v", err)
+	}
+	if !orch.Scheduler().HasPendingPrefix(jobName) {
+		t.Fatal("setup: job should be pending immediately after RunOnce")
+	}
+
+	orch.teardownVault(vaultID, v)
+
+	if orch.Scheduler().HasPendingPrefix(jobName) {
+		t.Fatal("teardownVault must cancel pending cloud-backfill jobs for the vault")
+	}
+
+	orch.backfillMu.Lock()
+	_, present := orch.backfillFailures[chunkID]
+	orch.backfillMu.Unlock()
+	if present {
+		t.Fatal("teardownVault must purge the vault's backfill failure entries immediately")
+	}
+	if alerts := ac.Standing(); len(alerts) != 0 {
+		t.Fatalf("teardownVault must clear the vault's backfill alarms immediately, got %v", alerts)
 	}
 }
