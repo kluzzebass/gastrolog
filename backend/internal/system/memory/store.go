@@ -972,6 +972,9 @@ func copyRetentionPolicy(rp system.RetentionPolicyConfig) system.RetentionPolicy
 	if rp.MaxChunks != nil {
 		c.MaxChunks = new(*rp.MaxChunks)
 	}
+	if rp.SizeBudget != nil {
+		c.SizeBudget = new(*rp.SizeBudget)
+	}
 	return c
 }
 
@@ -991,7 +994,6 @@ func copyVaultConfig(st system.VaultConfig) system.VaultConfig {
 		RetentionDisposition: st.RetentionDisposition,
 		DiskFreeWarn:         st.DiskFreeWarn,
 		DiskFreeFloor:        st.DiskFreeFloor,
-		MaxSize:              st.MaxSize,
 	}
 	if st.RotationPolicyID != nil {
 		id := *st.RotationPolicyID

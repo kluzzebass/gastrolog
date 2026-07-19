@@ -787,24 +787,11 @@ func (o *Orchestrator) refreshVaultDiskGuards(ctx context.Context) {
 			}
 		}
 		// Config→runtime boundary: the operator's expressions become numbers
-		// here, once, through the shared resolver (gastrolog-etcjdx). Write-time
-		// validation guarantees they parse; a failure here is a bug, so fall
-		// back to the bounded default rather than to "unbounded".
-		//
-		// Defense in depth: a file vault's budget is defaulted at creation and
-		// an explicit "0" is rejected (gastrolog-1epfgb), so an unset one here
-		// can only be a pre-change or bug-produced config. Bound it with the
-		// default rather than pass 0, which the guard reads as "no budget" — an
-		// unbounded file vault must stay unrepresentable, guard included.
-		// Non-file vaults have no disk budget and keep 0.
-		var maxSize uint64
-		if vc.Type == system.VaultTypeFile {
-			var err error
-			maxSize, err = system.SizeOrDefault(vc.MaxSize, 0)
-			if err != nil || maxSize == 0 {
-				maxSize, _ = system.ParseSize(system.DefaultVaultMaxSize)
-			}
-		}
+		// here, once, through the shared resolver (gastrolog-etcjdx). The
+		// budget itself now resolves from the vault's attached retention
+		// policies rather than a vault-level field (gastrolog-33ul6h); see
+		// resolveVaultSizeBudget for the min-wins / default-floor rule.
+		maxSize := resolveVaultSizeBudget(vc, sys.Config.RetentionPolicies)
 		// A vault with no local placement still claims local disk through its
 		// origin segment backlog, so a max-size budget registers it even when
 		// there is no volume to sample here.
@@ -819,6 +806,43 @@ func (o *Orchestrator) refreshVaultDiskGuards(ctx context.Context) {
 		o.diskGuard.SetVaultGuard(vc.ID, vc.Name, paths, vc.DiskFreeWarn, vc.DiskFreeFloor, maxSize)
 	}
 	o.diskGuard.retainVaultGuards(keep, o.alerts)
+}
+
+// resolveVaultSizeBudget computes the effective per-node disk-claim budget
+// for a file vault (gastrolog-33ul6h): the minimum SizeBudget across every
+// retention policy attached via the vault's RetentionRules. A referenced
+// policy that carries no SizeBudget (nil, unset, or unparseable — defense in
+// depth; PutRetentionPolicy validates parseability at write, so a parse
+// failure here can only be a pre-change or bug-produced config) contributes
+// nothing to the min. When no attached policy carries a usable budget — zero
+// retention rules, zero policies, or only budget-less policies — the
+// creation default (system.DefaultVaultMaxSize) is the floor, so a file
+// vault stays bounded with no operator diligence required. A trigger-less
+// policy (no MaxAge/MaxSize/MaxChunks) that carries only SizeBudget still
+// contributes to the min — the bound applies even though the policy drains
+// nothing (a bound-only policy is legal and meaningful).
+func resolveVaultSizeBudget(vc system.VaultConfig, policies []system.RetentionPolicyConfig) uint64 {
+	var minBudget uint64
+	found := false
+	for _, rule := range vc.RetentionRules {
+		policy := findRetentionPolicy(policies, rule.RetentionPolicyID)
+		if policy == nil || policy.SizeBudget == nil || system.IsQuantityUnset(*policy.SizeBudget) {
+			continue
+		}
+		size, err := system.ParseSize(*policy.SizeBudget)
+		if err != nil || size == 0 {
+			continue
+		}
+		if !found || size < minBudget {
+			minBudget = size
+			found = true
+		}
+	}
+	if !found {
+		def, _ := system.ParseSize(system.DefaultVaultMaxSize)
+		return def
+	}
+	return minBudget
 }
 
 // primeDiskGuard runs one synchronous NODE-level guard pass before ingest

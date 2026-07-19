@@ -88,6 +88,9 @@ message PutRetentionPolicyCommand {
   optional string max_age = 3;
   optional string max_size = 4;
   optional int64 max_chunks = 5;
+  // Per-node disk-claim budget (refuse bound), size expression. Mirrors
+  // RetentionPolicyConfig.size_budget in system.proto (gastrolog-33ul6h).
+  optional string size_budget = 6;
 }
 
 message DeleteRetentionPolicyCommand {

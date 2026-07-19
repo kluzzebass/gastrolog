@@ -107,11 +107,12 @@ func ExtractDeleteRotationPolicy(cmd *gastrologv1.DeleteRotationPolicyCommand) (
 
 func putRetentionPolicyCmd(cfg system.RetentionPolicyConfig) *gastrologv1.PutRetentionPolicyCommand {
 	return &gastrologv1.PutRetentionPolicyCommand{
-		Id:          cfg.ID.ToProto(),
-		Name:        cfg.Name,
-		MaxAge:      cfg.MaxAge,
-		MaxSize:     cfg.MaxSize,
-		MaxChunks:   cfg.MaxChunks,
+		Id:         cfg.ID.ToProto(),
+		Name:       cfg.Name,
+		MaxAge:     cfg.MaxAge,
+		MaxSize:    cfg.MaxSize,
+		MaxChunks:  cfg.MaxChunks,
+		SizeBudget: cfg.SizeBudget,
 	}
 }
 
@@ -136,11 +137,12 @@ func NewDeleteRetentionPolicy(id glid.GLID) *gastrologv1.SystemCommand {
 // ExtractPutRetentionPolicy converts a PutRetentionPolicyCommand back to a RetentionPolicyConfig.
 func ExtractPutRetentionPolicy(cmd *gastrologv1.PutRetentionPolicyCommand) (system.RetentionPolicyConfig, error) {
 	return system.RetentionPolicyConfig{
-		ID:          glid.FromBytes(cmd.GetId()),
-		Name:        cmd.GetName(),
-		MaxAge:      cmd.MaxAge,
-		MaxSize:     cmd.MaxSize,
-		MaxChunks:   cmd.MaxChunks,
+		ID:         glid.FromBytes(cmd.GetId()),
+		Name:       cmd.GetName(),
+		MaxAge:     cmd.MaxAge,
+		MaxSize:    cmd.MaxSize,
+		MaxChunks:  cmd.MaxChunks,
+		SizeBudget: cmd.SizeBudget,
 	}, nil
 }
 

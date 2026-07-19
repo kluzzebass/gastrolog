@@ -144,15 +144,30 @@ func (s *SystemServer) PutRetentionPolicy(
 	cfg.ID = id
 	cfg.Name = req.Msg.Config.Name
 
-	// Reject policies with no conditions: they're silent no-ops that almost
-	// always reflect operator confusion rather than intent. See gastrolog-1rbuf.
+	// Reject policies with no conditions AND no bound: they're silent no-ops
+	// that almost always reflect operator confusion rather than intent. See
+	// gastrolog-1rbuf. A policy that sets ONLY sizeBudget is legal (a
+	// bound-only policy is meaningful — gastrolog-33ul6h), so sizeBudget
+	// counts toward non-empty via cfg.IsEmpty().
 	if cfg.IsEmpty() {
-		return nil, errInvalidArg(errors.New("retention policy must set at least one of maxAge, maxBytes, or maxChunks"))
+		return nil, errInvalidArg(errors.New("retention policy must set at least one of maxAge, maxBytes, maxChunks, or sizeBudget"))
 	}
 
 	// Validate by trying to convert.
 	if _, err := cfg.ToRetentionPolicy(); err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid retention policy: %w", err))
+	}
+
+	// sizeBudget parse-checks the same way PutVault checked max_size before
+	// the field moved here (gastrolog-33ul6h): must parse, and an explicit
+	// "0" is rejected (it would mean "no bound", not "no restriction" — the
+	// state resolution treats as absent, so it must not be sayable). Unlike
+	// max_size on vault creation, an absent sizeBudget stores nil — no
+	// per-policy default is stamped; the resolver's default floor
+	// (system.DefaultVaultMaxSize) applies only when NO attached policy
+	// carries a budget at all.
+	if connErr := validateRetentionSizeBudget(cfg.SizeBudget, cfg.Name); connErr != nil {
+		return nil, connErr
 	}
 
 	if err := s.sysStore.PutRetentionPolicy(ctx, cfg); err != nil {
@@ -215,6 +230,29 @@ func (s *SystemServer) DeleteRetentionPolicy(
 	return connect.NewResponse(&apiv1.DeleteRetentionPolicyResponse{System: cfg}), nil
 }
 
+// validateRetentionSizeBudget parse-checks a retention policy's size_budget
+// the way resolveVaultQuantity checked a vault's max-size before the field
+// moved to the policy (gastrolog-33ul6h): unset is fine (no bound stored, no
+// default stamped — the resolver's default floor applies only when no
+// attached policy has one at all); an unparseable expression is rejected at
+// write; an explicit "0" is rejected because it means "no bound", the
+// unrepresentable state this model exists to prevent.
+func validateRetentionSizeBudget(sizeBudget *string, policyName string) *connect.Error {
+	if sizeBudget == nil || system.IsQuantityUnset(*sizeBudget) {
+		return nil
+	}
+	bytes, err := system.ParseSize(*sizeBudget)
+	if err != nil {
+		return errInvalidArg(fmt.Errorf("size-budget %q on retention policy %q: %w", *sizeBudget, policyName, err))
+	}
+	if bytes == 0 {
+		return errInvalidArg(fmt.Errorf(
+			"size-budget of %q on retention policy %q means no bound; omit it to leave this policy's budget unset, or set a real size",
+			*sizeBudget, policyName))
+	}
+	return nil
+}
+
 // --- Proto <-> Config conversion helpers for policies ---
 
 // protoToRotationPolicy converts a proto RotationPolicyConfig to a system.RotationPolicyConfig.
@@ -273,6 +311,10 @@ func protoToRetentionPolicy(p *apiv1.RetentionPolicyConfig) system.RetentionPoli
 	if p.MaxChunks > 0 {
 		cfg.MaxChunks = new(p.MaxChunks)
 	}
+	// SizeBudget is proto3 `optional` on both sides (unlike MaxAge/MaxSize/
+	// MaxChunks, which predate it and use the empty-string/zero sentinel
+	// convention above) — direct pointer passthrough, no sentinel needed.
+	cfg.SizeBudget = p.SizeBudget
 
 	return cfg
 }
@@ -290,6 +332,7 @@ func retentionPolicyToProto(cfg system.RetentionPolicyConfig) *apiv1.RetentionPo
 	if cfg.MaxChunks != nil {
 		p.MaxChunks = *cfg.MaxChunks
 	}
+	p.SizeBudget = cfg.SizeBudget
 
 	return p
 }

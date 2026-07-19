@@ -147,15 +147,28 @@ type RetentionPolicyConfig struct {
 
 	// MaxChunks keeps at most this many sealed chunks, deleting the oldest.
 	MaxChunks *int64 `json:"maxChunks,omitempty"`
+
+	// SizeBudget is the per-node disk-claim budget attached to this policy —
+	// the refuse bound (cap-and-refuse), NOT a drain trigger. Same size
+	// vocabulary as MaxSize ("50GB"), resolved at the config→runtime boundary
+	// by refreshVaultDiskGuards: min over every attached policy's parsed
+	// SizeBudget, floored by system.DefaultVaultMaxSize when no attached
+	// policy carries one. A policy that sets ONLY SizeBudget (no MaxAge,
+	// MaxSize, or MaxChunks) is legal and meaningful — it drains nothing but
+	// still bounds the vault (gastrolog-33ul6h).
+	SizeBudget *string `json:"sizeBudget,omitempty"`
 }
 
-// IsEmpty reports whether this retention policy has no conditions set —
-// all of MaxAge, MaxSize, and MaxChunks are nil or unset. An empty
-// retention policy is a no-op (chunks accumulate indefinitely), almost
-// certainly an operator mistake. PutRetentionPolicy uses this check to
-// reject empty configs at the admission boundary. See gastrolog-1rbuf.
+// IsEmpty reports whether this retention policy has no conditions AND no
+// bound set — MaxAge, MaxSize, MaxChunks, and SizeBudget are all nil or
+// unset. An empty retention policy is a no-op (chunks accumulate
+// indefinitely, no bound backstops it), almost certainly an operator
+// mistake. PutRetentionPolicy uses this check to reject empty configs at
+// the admission boundary. See gastrolog-1rbuf. SizeBudget counts toward
+// non-empty because a bound-only policy (no drain trigger) is legal and
+// meaningful (gastrolog-33ul6h).
 func (c RetentionPolicyConfig) IsEmpty() bool {
-	if positiveDuration(c.MaxAge) || positiveSize(c.MaxSize) {
+	if positiveDuration(c.MaxAge) || positiveSize(c.MaxSize) || positiveSize(c.SizeBudget) {
 		return false
 	}
 	if c.MaxChunks != nil && *c.MaxChunks > 0 {

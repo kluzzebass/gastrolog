@@ -71,7 +71,6 @@ func TestPutVaultLeavesMemoryBudgetUnsetForFileVault(t *testing.T) {
 			Name:    "file-v",
 			Enabled: true,
 			Type:    gastrologv1.VaultType_VAULT_TYPE_FILE,
-			MaxSize: "1GiB",
 		},
 	})); err != nil {
 		t.Fatalf("PutVault: %v", err)
