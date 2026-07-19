@@ -464,17 +464,41 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
 - **Retention policy** (`RetentionPolicyConfig`) — named, reusable
   policy referenced by `RetentionRule`.
 
-- **Size budget** (`RetentionPolicyConfig.size_budget`, gastrolog-33ul6h) —
-  the per-node local disk-claim refuse bound, carried on a retention policy
-  rather than `VaultConfig` (that field is removed; no reserved tag, per
-  house rule). Effective per-vault budget = min over every attached
-  policy's `size_budget`; falls back to the creation default
-  (`system.DefaultVaultMaxSize`) when no attached policy carries one, so a
-  file vault stays bounded with zero retention rules configured. Feeds
-  `refreshVaultDiskGuards` → the disk guard's Admission gate (cap-and-
-  refuse); the gate mechanism itself is unchanged, only its config source.
-  Not the same field as `RetentionPolicyConfig.MaxSize` — see **Drain
-  trigger vs refuse bound**, below.
+- **Max size (retention policy)** (`RetentionPolicyConfig.MaxSize`,
+  gastrolog-33ul6h) — the vault's disk-claim bound, carried on a retention
+  policy rather than `VaultConfig` (that field is removed; no reserved tag,
+  per house rule). It means BOTH things at once — this is a corrected
+  design (operator, 2026-07-19, comment c2): an earlier shape that split
+  this into two fields was superseded before implementation, see the
+  retention design doc's superseded-section note (docs/) for the
+  measurement decisions, which still stand.
+  - **Drain** (evaluated by `SizeRetentionPolicy`): drains the oldest sealed
+    chunks, per the vault's disposition, once the vault's disk claim exceeds
+    the bound. Scope: the chunk store retention can act on.
+  - **Refuse** (evaluated by the disk guard's Admission gate): refuses
+    ingest admission for the vault once its whole local footprint (chunk
+    store + pipeline segment backlog) exceeds the same bound. Scope:
+    everything the vault holds on this node. The backstop while drain
+    catches up or is deferred.
+
+  Effective per-vault bound = min over every attached policy's `MaxSize`;
+  falls back to the creation default (`system.DefaultVaultMaxSize`) when no
+  attached policy carries one — that default floor is REFUSE-ONLY (it never
+  drains), because a default must never destroy data. Feeds
+  `refreshVaultDiskGuards` → `orchestrator.resolveVaultSizeBound` → the disk
+  guard's Admission gate; the gate mechanism itself is unchanged, only its
+  config source. "Bound-only" (a size-only field with no drain) is not a
+  concept: a policy that sets only `MaxSize` is simply a drain policy that
+  also happens to bound the vault.
+
+  Measures the **disk claim** (`chunk.DiskClaim`): `DiskBytes` when
+  recorded (also what a cached cloud-backed chunk's cache file reports), 0
+  for a cloud-backed chunk with no local copy (an evicted chunk's
+  destruction frees nothing locally, so drain never selects one), otherwise
+  logical `Bytes` plus index sizes. One field, one measurement, one bound —
+  drain and refuse can no longer drift apart under compression the way two
+  independently-set fields could (they diverged 3-4× before gastrolog-33ul6h,
+  since the vault-level cap used to measure logical `Bytes` alone).
 
 - **Retention event** — the cluster-visible signal that a chunk has aged
   out. Fires unconditionally on policy match; the vault's retention
@@ -521,30 +545,9 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
   Empty/unrecognized values resolve to `delete` via
   `VaultConfig.ResolveRetentionDisposition()`.
 
-- **Drain trigger vs refuse bound** (gastrolog-33ul6h) — a size-shaped
-  homonym pair on `RetentionPolicyConfig`; do not conflate them, and do not
-  confuse either with the unrelated **Drain gate** / **Drain** verbs below
-  (disk-guard backpressure, node decommission — different concepts that
-  happen to share the word "drain").
-  - The **drain trigger** (`RetentionPolicyConfig.MaxSize`, evaluated by
-    `SizeRetentionPolicy`) destroys the oldest sealed chunks once the
-    vault's retained chunk store exceeds the bound. Scope: the chunk store
-    retention can act on.
-  - The **refuse bound** (`RetentionPolicyConfig.size_budget`, see **Size
-    budget** above, evaluated by the disk guard's Admission gate) refuses
-    ingest admission for the vault once its whole local footprint (chunk
-    store + pipeline segment backlog) exceeds the bound. Scope: everything
-    the vault holds on this node.
-
-  Both measure the same currency — the **disk claim**
-  (`chunk.DiskClaim`): `DiskBytes` when recorded (also what a cached
-  cloud-backed chunk's cache file reports), 0 for a cloud-backed chunk with
-  no local copy (an evicted chunk's destruction frees nothing locally, so
-  the drain trigger never selects one), otherwise logical `Bytes` plus
-  index sizes. Same currency, different scope — that is what makes a
-  drain-below-refuse policy pairing compose instead of drifting apart
-  under compression (they diverged 3-4× before this fix, since the drain
-  trigger used to sum logical `Bytes` alone).
+  Note: do not confuse the drain half of max size with the unrelated
+  **Drain gate** / **Drain** verbs below (disk-guard backpressure, node
+  decommission — different concepts that happen to share the word "drain").
 
 ### Core state transitions (verbs)
 

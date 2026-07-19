@@ -61,7 +61,7 @@ func TestDeferralStreakRaisesAtThresholdAndClearsOnProgress(t *testing.T) {
 	}
 
 	// Third consecutive deferral: raise, naming vault and cause.
-	r.noteRetentionDeferral("destination vault second-vault is at its size budget")
+	r.noteRetentionDeferral("destination vault second-vault is at its max-size bound")
 	r.finishSweepDeferralState()
 	sink.mu.Lock()
 	defer sink.mu.Unlock()
@@ -72,7 +72,7 @@ func TestDeferralStreakRaisesAtThresholdAndClearsOnProgress(t *testing.T) {
 	if !strings.HasPrefix(got, alarmRetentionDeferred+"|"+vaultID.String()+"|") {
 		t.Errorf("raise must be typed and instance-keyed by vault: %s", got)
 	}
-	for _, want := range []string{"first-vault", "size budget", "3 consecutive"} {
+	for _, want := range []string{"first-vault", "max-size bound", "3 consecutive"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("alarm detail must contain %q; got: %s", want, got)
 		}
@@ -103,7 +103,7 @@ func TestDeferralStreakRaiseNamesMatchedChunkCount(t *testing.T) {
 	r.mu.Lock()
 	r.sweepMatchedChunks = 5
 	r.mu.Unlock()
-	r.noteRetentionDeferral("destination vault second-vault is at its size budget")
+	r.noteRetentionDeferral("destination vault second-vault is at its max-size bound")
 	r.finishSweepDeferralState()
 
 	sink.mu.Lock()

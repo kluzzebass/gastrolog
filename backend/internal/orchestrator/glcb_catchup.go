@@ -59,7 +59,7 @@ func (o *Orchestrator) pullMissingGLCB(vaultID glid.GLID, e vaultctlfsm.Manifest
 		return // this vault's own backing volume is below its floor
 	}
 	if o.diskGuard != nil && o.diskGuard.vaultSizeCapped(vaultID) {
-		return // at the max-size budget: replica pulls grow the local claim
+		return // at the max-size bound: replica pulls grow the local claim
 	}
 	// A chunk on its way out must not be pulled back in: retention flagged it
 	// (RetentionPending precedes the expunge) or the delete protocol is

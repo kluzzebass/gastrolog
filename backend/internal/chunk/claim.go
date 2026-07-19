@@ -9,7 +9,7 @@ type IndexSizeLookup func(id ChunkID) (map[string]int64, error)
 
 // DiskClaim is the local disk claim for a single chunk: what deleting this
 // chunk would actually free on this node. One formula, one currency, shared
-// by every consumer that measures local disk against a size budget — the
+// by every consumer that measures local disk against a max-size bound — the
 // disk guard's whole-vault footprint (everything the vault holds) and the
 // size-drain trigger (SizeRetentionPolicy, the retained chunk store only).
 // Scope differs by caller; the per-chunk arithmetic does not.

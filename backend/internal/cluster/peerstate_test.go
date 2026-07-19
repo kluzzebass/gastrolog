@@ -272,7 +272,7 @@ func TestPeerState_VaultDiskProtected(t *testing.T) {
 }
 
 // TestPeerState_VaultSizeCapped mirrors the disk-protect lookup for the
-// max-size budget list.
+// max-size-capped list.
 func TestPeerState_VaultSizeCapped(t *testing.T) {
 	capped := glid.New()
 	roomy := glid.New()

@@ -25,12 +25,12 @@ func ptr[T any](v T) *T { return &v }
 func TestPutRotationPolicy(t *testing.T) {
 	t.Parallel()
 	want := system.RotationPolicyConfig{
-		ID:          glid.New(),
-		Name:        "default-rotation",
-		MaxSize:     ptr("64MB"),
-		MaxAge:      ptr("1h"),
-		MaxRecords:  ptr(int64(100000)),
-		Cron:        ptr("0 * * * *"),
+		ID:         glid.New(),
+		Name:       "default-rotation",
+		MaxSize:    ptr("64MB"),
+		MaxAge:     ptr("1h"),
+		MaxRecords: ptr(int64(100000)),
+		Cron:       ptr("0 * * * *"),
 	}
 	got := roundTripCommand(t, NewPutRotationPolicy(want), func(cmd *gastrologv1.SystemCommand) (system.RotationPolicyConfig, error) {
 		return ExtractPutRotationPolicy(cmd.GetPutRotationPolicy())
@@ -57,12 +57,11 @@ func TestPutRotationPolicyNilOptionals(t *testing.T) {
 func TestPutRetentionPolicy(t *testing.T) {
 	t.Parallel()
 	want := system.RetentionPolicyConfig{
-		ID:         glid.New(),
-		Name:       "long-term",
-		MaxAge:     ptr("720h"),
-		MaxSize:    ptr("10GB"),
-		MaxChunks:  ptr(int64(500)),
-		SizeBudget: ptr("50GB"),
+		ID:        glid.New(),
+		Name:      "long-term",
+		MaxAge:    ptr("720h"),
+		MaxSize:   ptr("10GB"),
+		MaxChunks: ptr(int64(500)),
 	}
 	got := roundTripCommand(t, NewPutRetentionPolicy(want), func(cmd *gastrologv1.SystemCommand) (system.RetentionPolicyConfig, error) {
 		return ExtractPutRetentionPolicy(cmd.GetPutRetentionPolicy())
@@ -72,15 +71,16 @@ func TestPutRetentionPolicy(t *testing.T) {
 	}
 }
 
-// gastrolog-33ul6h: a trigger-less policy (no MaxAge/MaxSize/MaxChunks) that
-// carries only SizeBudget must round-trip through the FSM command exactly
-// like any other field — the bound-only shape is legal and meaningful.
-func TestPutRetentionPolicySizeBudgetOnly(t *testing.T) {
+// gastrolog-33ul6h: a policy that carries only MaxSize (no MaxAge/MaxChunks)
+// must round-trip through the FSM command exactly like any other field —
+// max_size is the combined drain-trigger-and-refuse-bound quantity, so a
+// size-only policy is simply a drain policy.
+func TestPutRetentionPolicyMaxSizeOnly(t *testing.T) {
 	t.Parallel()
 	want := system.RetentionPolicyConfig{
-		ID:         glid.New(),
-		Name:       "bound-only",
-		SizeBudget: ptr("50GB"),
+		ID:      glid.New(),
+		Name:    "size-only",
+		MaxSize: ptr("50GB"),
 	}
 	got := roundTripCommand(t, NewPutRetentionPolicy(want), func(cmd *gastrologv1.SystemCommand) (system.RetentionPolicyConfig, error) {
 		return ExtractPutRetentionPolicy(cmd.GetPutRetentionPolicy())
@@ -434,7 +434,7 @@ func TestSnapshotRoundTrip(t *testing.T) {
 			{ID: policyID, Name: "hourly", MaxAge: ptr("1h"), MaxSize: ptr("64MB")},
 		},
 		RetentionPolicies: []system.RetentionPolicyConfig{
-			{ID: retPolicyID, Name: "30d", MaxAge: ptr("720h"), SizeBudget: ptr("50GB")},
+			{ID: retPolicyID, Name: "30d", MaxAge: ptr("720h"), MaxSize: ptr("50GB")},
 		},
 		Vaults: []system.VaultConfig{
 			{

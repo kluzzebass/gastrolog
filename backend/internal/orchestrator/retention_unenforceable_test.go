@@ -142,6 +142,112 @@ func TestRetentionTargetClearsUnenforceableAlarmWhenTriggerRestored(t *testing.T
 	}
 }
 
+// TestRetentionTargetMaxSizeOnlyPolicyProducesSweepTargetNoAlarm pins the
+// positive case directly (gastrolog-33ul6h): a policy that sets ONLY
+// MaxSize (no MaxAge/MaxChunks) is a drain policy — it resolves to exactly
+// one SizeRetentionPolicy rule, produces a live sweep target, and never
+// raises retention-unenforceable. "Bound-only" is not a concept anymore; a
+// size-only policy drains, so it never reaches the zero-triggers branch.
+func TestRetentionTargetMaxSizeOnlyPolicyProducesSweepTargetNoAlarm(t *testing.T) {
+	t.Parallel()
+
+	vaultID := glid.New()
+	policyID := glid.New()
+	cfg := &system.Config{
+		Vaults: []system.VaultConfig{{
+			ID:      vaultID,
+			Name:    "first-vault",
+			Enabled: true,
+			RetentionRules: []system.RetentionRule{{
+				RetentionPolicyID: policyID,
+			}},
+		}},
+		RetentionPolicies: []system.RetentionPolicyConfig{{
+			ID:      policyID,
+			Name:    "size-only-policy",
+			MaxSize: strPtr("50GB"),
+			// MaxAge / MaxChunks nil: MaxSize is the policy's only trigger.
+		}},
+	}
+
+	sink := &recordingSink{}
+	logSink := &syncBuffer{}
+	orch := newUnenforceableTestOrch(t, sink, logSink)
+
+	vaultInst := &VaultInstance{VaultID: vaultID, Chunks: &retentionFakeChunkManager{}, Indexes: &retentionFakeIndexManager{}}
+	active := make(map[string]bool)
+
+	target := orch.retentionTargetForInstance(cfg, cfg.Vaults[0], vaultInst, active)
+	if target == nil {
+		t.Fatal("a MaxSize-only policy is a drain policy and must produce a live sweep target")
+	}
+	if len(target.rules) != 1 {
+		t.Fatalf("want exactly 1 resolved rule (the SizeRetentionPolicy), got %d", len(target.rules))
+	}
+
+	sink.mu.Lock()
+	raises := len(sink.raises)
+	sink.mu.Unlock()
+	if raises != 0 {
+		t.Fatalf("a MaxSize-only policy must never raise retention-unenforceable; got %d raises", raises)
+	}
+	if strings.Contains(logSink.String(), "unenforceable") {
+		t.Errorf("a MaxSize-only policy must stay quiet — no unenforceable warn either; got:\n%s", logSink.String())
+	}
+}
+
+// TestRetentionTargetClearsUnenforceableAlarmWhenTriggerRestoredViaMaxSize
+// mirrors TestRetentionTargetClearsUnenforceableAlarmWhenTriggerRestored,
+// restoring the trigger via MaxSize instead of MaxAge: the fold means
+// MaxSize alone is now sufficient to both clear the alarm and produce a
+// live sweep target, exactly like any other trigger field.
+func TestRetentionTargetClearsUnenforceableAlarmWhenTriggerRestoredViaMaxSize(t *testing.T) {
+	t.Parallel()
+
+	vaultID := glid.New()
+	policyID := glid.New()
+	cfg := triggerLessPolicyCfg(vaultID, policyID, "first-vault", "no-op-policy")
+
+	sink := &recordingSink{}
+	orch := newUnenforceableTestOrch(t, sink, &syncBuffer{})
+
+	vaultInst := &VaultInstance{VaultID: vaultID, Chunks: &retentionFakeChunkManager{}, Indexes: &retentionFakeIndexManager{}}
+	active := make(map[string]bool)
+
+	if target := orch.retentionTargetForInstance(cfg, cfg.Vaults[0], vaultInst, active); target != nil {
+		t.Fatal("expected nil target on the first (trigger-less) pass")
+	}
+	sink.mu.Lock()
+	raisedBefore := len(sink.raises)
+	sink.mu.Unlock()
+	if raisedBefore != 1 {
+		t.Fatalf("want 1 raise before the fix, got %d", raisedBefore)
+	}
+
+	// Restore a real trigger on the same policy, via MaxSize this time.
+	cfg.RetentionPolicies[0].MaxSize = strPtr("50GB")
+	active2 := make(map[string]bool)
+	target := orch.retentionTargetForInstance(cfg, cfg.Vaults[0], vaultInst, active2)
+	if target == nil {
+		t.Fatal("a restored MaxSize trigger must produce a live sweep target on the next build")
+	}
+	if len(target.rules) != 1 {
+		t.Fatalf("want exactly 1 resolved rule, got %d", len(target.rules))
+	}
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	found := false
+	for _, c := range sink.clears {
+		if c == alarmRetentionUnenforceable+"|"+vaultID.String() {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("restoring the trigger via MaxSize must clear the alarm; clears=%v", sink.clears)
+	}
+}
+
 func TestRetentionTargetNoRulesAtAllStaysSilent(t *testing.T) {
 	t.Parallel()
 
@@ -348,192 +454,6 @@ func TestRetentionSweepAllDoesNotDestroyChunksWhenPolicyTriggerLess(t *testing.T
 	defer sink.mu.Unlock()
 	if len(sink.raises) != 1 {
 		t.Fatalf("want exactly 1 alarm raise from the full sweep pass, got %d: %v", len(sink.raises), sink.raises)
-	}
-}
-
-// boundOnlyPolicyCfg returns a vault + retention-policy config pair whose
-// single referenced policy carries ONLY a SizeBudget — no MaxAge/MaxSize/
-// MaxChunks. This is the legal bound-only shape (gastrolog-33ul6h finding
-// 1): the policy drains nothing (ToRetentionPolicy() returns (nil, nil), so
-// resolveRetentionRulesFromVault reports it trigger-less same as
-// triggerLessPolicyCfg), but the SizeBudget still binds via the disk guard.
-func boundOnlyPolicyCfg(vaultID, policyID glid.GLID, vaultName, policyName, sizeBudget string) *system.Config {
-	return &system.Config{
-		Vaults: []system.VaultConfig{{
-			ID:      vaultID,
-			Name:    vaultName,
-			Enabled: true,
-			RetentionRules: []system.RetentionRule{{
-				RetentionPolicyID: policyID,
-			}},
-		}},
-		RetentionPolicies: []system.RetentionPolicyConfig{{
-			ID:         policyID,
-			Name:       policyName,
-			SizeBudget: &sizeBudget,
-			// MaxAge / MaxSize / MaxChunks all nil: trigger-less, bound-only.
-		}},
-	}
-}
-
-// TestRetentionTargetBoundOnlyPolicyRaisesNoAlarm pins the fix for
-// gastrolog-33ul6h finding 1: a vault whose sole retention rule references a
-// policy that carries ONLY a SizeBudget must NOT raise
-// retention-unenforceable. It is a legal, quiet, bound-only configuration —
-// the vault has no drain, but the size budget still resolves and binds via
-// the disk guard (resolveVaultSizeBudget), independent of this sweep
-// target. Before the fix, retentionTargetForInstance could not distinguish
-// this from the genuinely unenforceable case and alarmed regardless.
-func TestRetentionTargetBoundOnlyPolicyRaisesNoAlarm(t *testing.T) {
-	t.Parallel()
-
-	vaultID := glid.New()
-	policyID := glid.New()
-	cfg := boundOnlyPolicyCfg(vaultID, policyID, "bound-only-vault", "bound-only-policy", "50GB")
-
-	sink := &recordingSink{}
-	logSink := &syncBuffer{}
-	orch := newUnenforceableTestOrch(t, sink, logSink)
-
-	vaultInst := &VaultInstance{VaultID: vaultID, Chunks: &retentionFakeChunkManager{}, Indexes: &retentionFakeIndexManager{}}
-	active := make(map[string]bool)
-
-	target := orch.retentionTargetForInstance(cfg, cfg.Vaults[0], vaultInst, active)
-	if target != nil {
-		t.Fatal("a bound-only policy has no drain trigger, so it must still produce no sweep target")
-	}
-
-	sink.mu.Lock()
-	raises := len(sink.raises)
-	sink.mu.Unlock()
-	if raises != 0 {
-		t.Fatalf("a bound-only policy (SizeBudget set, no drain trigger) must never raise retention-unenforceable; got %d raises", raises)
-	}
-	if strings.Contains(logSink.String(), "unenforceable") {
-		t.Errorf("a bound-only policy must stay quiet — no unenforceable warn either; got:\n%s", logSink.String())
-	}
-
-	// The budget still resolves via the independent disk-guard resolver,
-	// unaffected by this sweep-target decision.
-	got := resolveVaultSizeBudget(cfg.Vaults[0], cfg.RetentionPolicies)
-	want, _ := system.ParseSize("50GB")
-	if got != want {
-		t.Fatalf("resolveVaultSizeBudget for the bound-only vault = %d, want %d (50GB)", got, want)
-	}
-}
-
-// TestRetentionTargetBoundOnlyPolicyClearsStandingAlarm covers the
-// transition into the legal bound-only state: a vault previously alarmed
-// (trigger-less AND budget-less) that then gets a SizeBudget added to its
-// referenced policy must have the alarm clear on the next resolution pass,
-// not stay latched.
-func TestRetentionTargetBoundOnlyPolicyClearsStandingAlarm(t *testing.T) {
-	t.Parallel()
-
-	vaultID := glid.New()
-	policyID := glid.New()
-	cfg := triggerLessPolicyCfg(vaultID, policyID, "first-vault", "no-op-policy")
-
-	sink := &recordingSink{}
-	orch := newUnenforceableTestOrch(t, sink, &syncBuffer{})
-
-	vaultInst := &VaultInstance{VaultID: vaultID, Chunks: &retentionFakeChunkManager{}, Indexes: &retentionFakeIndexManager{}}
-	active := make(map[string]bool)
-	if target := orch.retentionTargetForInstance(cfg, cfg.Vaults[0], vaultInst, active); target != nil {
-		t.Fatal("expected nil target on the genuinely-unenforceable first pass")
-	}
-	sink.mu.Lock()
-	raisedBefore := len(sink.raises)
-	sink.mu.Unlock()
-	if raisedBefore != 1 {
-		t.Fatalf("want 1 raise before the budget is attached, got %d", raisedBefore)
-	}
-
-	// Operator adds a SizeBudget to the same (still trigger-less) policy.
-	budget := "50GB"
-	cfg.RetentionPolicies[0].SizeBudget = &budget
-	active2 := make(map[string]bool)
-	if target := orch.retentionTargetForInstance(cfg, cfg.Vaults[0], vaultInst, active2); target != nil {
-		t.Fatal("a bound-only policy still has no drain trigger, so target must remain nil")
-	}
-
-	sink.mu.Lock()
-	defer sink.mu.Unlock()
-	found := false
-	for _, c := range sink.clears {
-		if c == alarmRetentionUnenforceable+"|"+vaultID.String() {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("attaching a SizeBudget must clear the alarm (now a legal bound-only vault); clears=%v", sink.clears)
-	}
-}
-
-// TestRetentionSweepAllDoesNotDestroyChunksOrAlarmForBoundOnlyPolicy proves
-// the sweep-all seam for the bound-only case, mirroring
-// TestRetentionSweepAllDoesNotDestroyChunksWhenPolicyTriggerLess: a vault
-// with sealed chunks and a bound-only retention rule comes out of a full
-// retentionSweepAll pass with nothing deleted AND no alarm raised.
-func TestRetentionSweepAllDoesNotDestroyChunksOrAlarmForBoundOnlyPolicy(t *testing.T) {
-	t.Parallel()
-
-	vaultID := glid.New()
-	policyID := glid.New()
-	cfg := boundOnlyPolicyCfg(vaultID, policyID, "bound-only-vault", "bound-only-policy", "50GB")
-
-	sink := &recordingSink{}
-	orch := newUnenforceableTestOrch(t, sink, &syncBuffer{})
-	orch.sysLoader = testSystemLoader{cfg: cfg}
-
-	cm := &retentionFakeChunkManager{chunks: []chunk.ChunkMeta{{
-		ID:     chunk.ChunkID{},
-		Sealed: true,
-	}}}
-	vaultInst := &VaultInstance{VaultID: vaultID, Chunks: cm, Indexes: &retentionFakeIndexManager{}}
-	orch.RegisterVault(NewVault(vaultID, vaultInst))
-
-	orch.retentionSweepAll()
-
-	cm.mu.Lock()
-	deleted := len(cm.deleted)
-	cm.mu.Unlock()
-	if deleted != 0 {
-		t.Fatalf("a bound-only-policy vault must never have chunks destroyed (no drain trigger); deleted=%d", deleted)
-	}
-
-	sink.mu.Lock()
-	defer sink.mu.Unlock()
-	if len(sink.raises) != 0 {
-		t.Fatalf("a bound-only-policy vault must never raise retention-unenforceable; got %v", sink.raises)
-	}
-}
-
-// TestRetentionTargetGenuinelyUnenforceableStillAlarmsWithBoundOnlyFix
-// re-pins the negative case after the finding-1 fix: a trigger-less policy
-// that ALSO carries no SizeBudget must still raise the alarm exactly as
-// before — the bound-only carve-out must not swallow the genuine gap.
-func TestRetentionTargetGenuinelyUnenforceableStillAlarmsWithBoundOnlyFix(t *testing.T) {
-	t.Parallel()
-
-	vaultID := glid.New()
-	policyID := glid.New()
-	cfg := triggerLessPolicyCfg(vaultID, policyID, "first-vault", "no-op-policy")
-
-	sink := &recordingSink{}
-	orch := newUnenforceableTestOrch(t, sink, &syncBuffer{})
-
-	vaultInst := &VaultInstance{VaultID: vaultID, Chunks: &retentionFakeChunkManager{}, Indexes: &retentionFakeIndexManager{}}
-	active := make(map[string]bool)
-
-	target := orch.retentionTargetForInstance(cfg, cfg.Vaults[0], vaultInst, active)
-	if target != nil {
-		t.Fatal("a genuinely trigger-less AND budget-less policy must still produce no sweep target")
-	}
-	sink.mu.Lock()
-	defer sink.mu.Unlock()
-	if len(sink.raises) != 1 {
-		t.Fatalf("a genuinely unenforceable vault (no trigger, no budget) must still raise exactly 1 alarm; got %d: %v", len(sink.raises), sink.raises)
 	}
 }
 

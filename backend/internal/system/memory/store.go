@@ -972,9 +972,6 @@ func copyRetentionPolicy(rp system.RetentionPolicyConfig) system.RetentionPolicy
 	if rp.MaxChunks != nil {
 		c.MaxChunks = new(*rp.MaxChunks)
 	}
-	if rp.SizeBudget != nil {
-		c.SizeBudget = new(*rp.SizeBudget)
-	}
 	return c
 }
 

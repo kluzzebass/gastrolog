@@ -2,9 +2,9 @@ package orchestrator
 
 // Coverage for gastrolog-33ul6h finding 3: "a policy-sourced budget caps a
 // vault and the cap refuses cluster-wide" — the spec-promised multi-node
-// scenario. resolveVaultSizeBudget/resolveVaultSizeBudgetSource (config→
-// number) and the sweep-time cap flip (disk_guard_sizebudget_test.go's
-// TestRefreshVaultDiskGuardsCappedFromPolicyBudgetLifecycle) already had
+// scenario. resolveVaultSizeBound/resolveVaultSizeBoundSource (config→
+// number) and the sweep-time cap flip (disk_guard_maxsize_test.go's
+// TestRefreshVaultDiskGuardsCappedFromPolicyMaxSizeLifecycle) already had
 // coverage; what was missing is the admission seam itself — a capped
 // vault's SubmitToVault/SubmitRetentionRecord calls actually returning
 // ErrVaultMaxSize, on both the node that measured the footprint and a peer
@@ -80,8 +80,8 @@ func startedPipelineOrch(t *testing.T, cfg Config) *Orchestrator {
 }
 
 // TestResolvedPolicyBudgetCapsSubmitToVaultLocally pins the "origin node"
-// half of the spec: a policy-sourced size budget, resolved through the real
-// config→guard resolver and flipped by a real evaluateVaults pass, makes
+// half of the spec: a policy-sourced max-size bound, resolved through the
+// real config→guard resolver and flipped by a real evaluateVaults pass, makes
 // SubmitToVault refuse with ErrVaultMaxSize on the node that measured the
 // footprint.
 func TestResolvedPolicyBudgetCapsSubmitToVaultLocally(t *testing.T) {
@@ -100,7 +100,7 @@ func TestResolvedPolicyBudgetCapsSubmitToVaultLocally(t *testing.T) {
 			},
 		}},
 		RetentionPolicies: []system.RetentionPolicyConfig{
-			{ID: policyID, Name: "budget-policy", SizeBudget: &budget},
+			{ID: policyID, Name: "budget-policy", MaxSize: &budget},
 		},
 	}
 
@@ -109,7 +109,7 @@ func TestResolvedPolicyBudgetCapsSubmitToVaultLocally(t *testing.T) {
 
 	// Footprint fixed above the 10GiB policy budget but below the 1GiB
 	// default — the capped verdict below can only be explained by the
-	// policy budget, matching TestRefreshVaultDiskGuardsCappedFromPolicyBudgetLifecycle's
+	// policy budget, matching TestRefreshVaultDiskGuardsCappedFromPolicyMaxSizeLifecycle's
 	// fixture discipline.
 	const footprint = int64(11) << 30
 	orch.diskGuard.vaultFootprint = func(id glid.GLID) int64 {
@@ -180,7 +180,7 @@ func TestResolvedBudgetRederivesFromConfigAfterRestartNotFromOrchestratorState(t
 	store := sysmem.NewStore()
 	ctx := context.Background()
 	if err := store.PutRetentionPolicy(ctx, system.RetentionPolicyConfig{
-		ID: policyID, Name: "budget-policy", SizeBudget: &budget,
+		ID: policyID, Name: "budget-policy", MaxSize: &budget,
 	}); err != nil {
 		t.Fatalf("PutRetentionPolicy: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestResolvedBudgetRederivesFromConfigAfterRestartNotFromOrchestratorState(t
 	// is down" — no live orchestrator observes this change.
 	raised := "50GiB"
 	if err := store.PutRetentionPolicy(ctx, system.RetentionPolicyConfig{
-		ID: policyID, Name: "budget-policy", SizeBudget: &raised,
+		ID: policyID, Name: "budget-policy", MaxSize: &raised,
 	}); err != nil {
 		t.Fatalf("PutRetentionPolicy (raise): %v", err)
 	}

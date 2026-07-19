@@ -116,7 +116,7 @@ type diskGuard struct {
 	deferWrites atomic.Bool
 
 	// vaultFootprint measures a vault's whole local disk claim for the
-	// max-size budget. Injected by the orchestrator (chunk + index bytes
+	// max-size bound. Injected by the orchestrator (chunk + index bytes
 	// plus pipeline segment backlog); injectable for tests.
 	vaultFootprint func(glid.GLID) int64
 
@@ -153,12 +153,12 @@ type vaultDiskGuard struct {
 	alarmRaised bool
 	name        string
 
-	// Max-size budget (cap-and-refuse): the vault's whole local disk claim
+	// Max-size bound (cap-and-refuse): the vault's whole local disk claim
 	// — sealed chunks, indexes, pipeline segment backlog — measured against
-	// maxSizeBytes. Always non-zero: creation defaults an unset budget and
+	// maxSizeBytes. Always non-zero: creation defaults an unset bound and
 	// the wiring substitutes the default for any 0 (gastrolog-1epfgb), so a 0
 	// here would be a bug, not "unlimited". Distinct from the free-space
-	// thresholds: those protect the VOLUME, the budget bounds the VAULT.
+	// thresholds: those protect the VOLUME, this bound covers the VAULT.
 	maxSizeBytes    uint64
 	capped          atomic.Bool
 	sizeAlarmRaised bool
@@ -167,8 +167,8 @@ type vaultDiskGuard struct {
 	// bytes measured against the cluster-global backlogBudget. The OPERATING
 	// bound — engages well before disk pressure so the backlog is bounded by
 	// policy, not by the volume filling up (design-notes R2). Distinct from
-	// maxSizeBytes: the size budget bounds everything the vault RETAINS, the
-	// backlog budget bounds what chunking has not yet drained.
+	// maxSizeBytes: the max-size bound covers everything the vault RETAINS,
+	// the backlog budget covers what chunking has not yet drained.
 	backlogCapped      atomic.Bool
 	backlogAlarmRaised bool
 }
@@ -295,7 +295,7 @@ func (g *diskGuard) vaultProtectActive(vaultID glid.GLID) bool {
 }
 
 // vaultSizeCapped reports whether this vault's local disk claim has reached
-// its max-size budget. Lock-free read; false for unknown vaults.
+// its max-size bound. Lock-free read; false for unknown vaults.
 func (g *diskGuard) vaultSizeCapped(vaultID glid.GLID) bool {
 	g.mu.Lock()
 	v := g.vaults[vaultID]
@@ -312,7 +312,7 @@ func (g *diskGuard) vaultBacklogCapped(vaultID glid.GLID) bool {
 	return v != nil && v.backlogCapped.Load()
 }
 
-// sizeCappedVaults lists the vaults currently at their max-size budget.
+// sizeCappedVaults lists the vaults currently at their max-size bound.
 // Broadcast in NodeStats so peers' admission gates honor it.
 func (g *diskGuard) sizeCappedVaults() []glid.GLID {
 	g.mu.Lock()
@@ -498,12 +498,12 @@ func (g *diskGuard) reconcileVaultSizeAlarm(alerts alert.Sink, id glid.GLID, v *
 		if v.capped.Load() {
 			alerts.Clear(alarmMaxSizeApproaching, id.String())
 			alerts.Raise(alarmMaxSizeCapped, id.String(), fmt.Sprintf(
-				"Vault %s is at its size budget: %s of %s used — new records for this vault are REFUSED until retention drains it.",
+				"Vault %s is at its max-size bound: %s of %s used — new records for this vault are REFUSED until space drains below the bound.",
 				v.name, units.FormatBytesDisplay(int64(used)), units.FormatBytesDisplay(int64(v.maxSizeBytes)))) //nolint:gosec // display only
 		} else {
 			alerts.Clear(alarmMaxSizeCapped, id.String())
 			alerts.Raise(alarmMaxSizeApproaching, id.String(), fmt.Sprintf(
-				"Vault %s is approaching its size budget: %s of %s used.",
+				"Vault %s is approaching its max-size bound: %s of %s used.",
 				v.name, units.FormatBytesDisplay(int64(used)), units.FormatBytesDisplay(int64(v.maxSizeBytes)))) //nolint:gosec // display only
 		}
 		v.sizeAlarmRaised = true
@@ -691,10 +691,13 @@ func (o *Orchestrator) diskAdmissionGate() error {
 var ErrVaultDiskProtect = errors.New("vault's volume is out of disk space: admission for this vault suspended until space is freed")
 
 // ErrVaultMaxSize rejects records destined to a vault whose local disk claim
-// has reached its per-node max-size budget on some node. Cap-and-refuse:
+// has reached its per-node max-size bound on some node. Cap-and-refuse:
 // everything already accepted is kept; the newest records are nacked as
-// retryable backpressure until retention or releases drain below the budget.
-var ErrVaultMaxSize = errors.New("vault is at its size budget: admission for this vault refused until retention drains it")
+// retryable backpressure until space drains below the bound. Not always
+// "until retention drains it" — the bound may be the refuse-only creation-
+// default floor with no attached policy to drain anything at all; space
+// frees only via releases (deletes, transfers, cache eviction) in that case.
+var ErrVaultMaxSize = errors.New("vault is at its max-size bound: admission for this vault refused until space drains below the bound")
 
 // ErrVaultBacklogBudget rejects records destined to a vault whose pipeline
 // backlog (unreleased registry segments) has reached the cluster-global
@@ -728,7 +731,7 @@ func (o *Orchestrator) vaultAdmissionGate(vaultID glid.GLID) error {
 	return nil
 }
 
-// SizeCappedVaults lists vaults at their local max-size budget, for the
+// SizeCappedVaults lists vaults at their local max-size bound, for the
 // NodeStats broadcast.
 func (o *Orchestrator) SizeCappedVaults() []glid.GLID {
 	if o.diskGuard == nil {
@@ -788,27 +791,27 @@ func (o *Orchestrator) refreshVaultDiskGuards(ctx context.Context) {
 		}
 		// Config→runtime boundary: the operator's expressions become numbers
 		// here, once, through the shared resolver (gastrolog-etcjdx). The
-		// budget itself now resolves from the vault's attached retention
+		// bound itself now resolves from the vault's attached retention
 		// policies rather than a vault-level field (gastrolog-33ul6h); see
-		// resolveVaultSizeBudgetSource for the min-wins / default-floor rule.
-		maxSize, budgetSource := resolveVaultSizeBudgetSource(vc, sys.Config.RetentionPolicies)
+		// resolveVaultSizeBoundSource for the min-wins / default-floor rule.
+		maxSize, boundSource := resolveVaultSizeBoundSource(vc, sys.Config.RetentionPolicies)
 		// A vault with no local placement still claims local disk through its
-		// origin segment backlog, so a max-size budget registers it even when
+		// origin segment backlog, so a max-size bound registers it even when
 		// there is no volume to sample here.
 		if len(paths) == 0 && maxSize == 0 {
 			continue
 		}
-		// Budget transitions are otherwise silent: a size cap tightening or
+		// Bound transitions are otherwise silent: a size cap tightening or
 		// loosening changes admission behavior with no operator-visible
 		// signal until a cap/uncap actually fires. Log the CHANGE only — not
 		// every tick's re-resolution, which would flood the log with the
 		// steady-state case (gastrolog-33ul6h finding 4). First observation
 		// (no prior entry) is not a transition, so it stays quiet too.
 		if prev, existed := o.diskGuard.currentMaxSizeBytes(vc.ID); existed && prev != maxSize && o.diskGuard.logger != nil {
-			o.diskGuard.logger.Info("vault size budget changed",
+			o.diskGuard.logger.Info("vault max-size bound changed",
 				"vault", vc.ID, "name", vc.Name,
 				"old", fmtBytes(prev), "new", fmtBytes(maxSize),
-				"source", budgetSource)
+				"source", boundSource)
 		}
 		// The disk-free thresholds stay expressions all the way into the
 		// guard: a percentage ("10%") can only be resolved against the volume
@@ -820,77 +823,59 @@ func (o *Orchestrator) refreshVaultDiskGuards(ctx context.Context) {
 	o.diskGuard.retainVaultGuards(keep, o.alerts)
 }
 
-// attachedSizeBudget scans the vault's RetentionRules for the tightest
-// (minimum) usable SizeBudget among referenced policies. A referenced
-// policy that carries no SizeBudget (nil, unset, or unparseable — defense
-// in depth; PutRetentionPolicy validates parseability at write, so a parse
-// failure here can only be a pre-change or bug-produced config) contributes
-// nothing to the min. A trigger-less policy (no MaxAge/MaxSize/MaxChunks)
-// that carries only SizeBudget still contributes — the bound applies even
-// though the policy drains nothing (a bound-only policy is legal and
-// meaningful, gastrolog-33ul6h). Returns the winning policy (nil if none
-// carries a usable budget) so callers can build both the numeric budget and
-// an operator-readable source label without re-scanning.
-func attachedSizeBudget(vc system.VaultConfig, policies []system.RetentionPolicyConfig) (minBudget uint64, winner *system.RetentionPolicyConfig) {
+// attachedSizeBound scans the vault's RetentionRules for the tightest
+// (minimum) usable MaxSize among referenced policies. A referenced policy
+// that carries no MaxSize (nil, unset, or unparseable — defense in depth;
+// PutRetentionPolicy validates parseability at write, so a parse failure
+// here can only be a pre-change or bug-produced config) contributes nothing
+// to the min. Returns the winning policy (nil if none carries a usable
+// bound) so callers can build both the numeric bound and an
+// operator-readable source label without re-scanning.
+func attachedSizeBound(vc system.VaultConfig, policies []system.RetentionPolicyConfig) (minBound uint64, winner *system.RetentionPolicyConfig) {
 	for _, rule := range vc.RetentionRules {
 		policy := findRetentionPolicy(policies, rule.RetentionPolicyID)
-		if policy == nil || policy.SizeBudget == nil || system.IsQuantityUnset(*policy.SizeBudget) {
+		if policy == nil || policy.MaxSize == nil || system.IsQuantityUnset(*policy.MaxSize) {
 			continue
 		}
-		size, err := system.ParseSize(*policy.SizeBudget)
+		size, err := system.ParseSize(*policy.MaxSize)
 		if err != nil || size == 0 {
 			continue
 		}
-		if winner == nil || size < minBudget {
-			minBudget = size
+		if winner == nil || size < minBound {
+			minBound = size
 			winner = policy
 		}
 	}
-	return minBudget, winner
+	return minBound, winner
 }
 
-// resolveVaultSizeBudget computes the effective per-node disk-claim budget
-// for a file vault (gastrolog-33ul6h): attachedSizeBudget's min-wins result,
-// or the creation default (system.DefaultVaultMaxSize) as the floor when no
-// attached policy carries a usable budget — zero retention rules, zero
-// policies, or only budget-less policies — so a file vault stays bounded
-// with no operator diligence required.
-func resolveVaultSizeBudget(vc system.VaultConfig, policies []system.RetentionPolicyConfig) uint64 {
-	budget, _ := resolveVaultSizeBudgetSource(vc, policies)
-	return budget
+// resolveVaultSizeBound computes the effective per-node disk-claim bound for
+// a file vault (gastrolog-33ul6h): attachedSizeBound's min-wins result, or
+// the creation default (system.DefaultVaultMaxSize) as the refuse-only floor
+// when no attached policy carries a usable bound — zero retention rules,
+// zero policies, or only bound-less policies — so a file vault stays
+// bounded with no operator diligence required.
+func resolveVaultSizeBound(vc system.VaultConfig, policies []system.RetentionPolicyConfig) uint64 {
+	bound, _ := resolveVaultSizeBoundSource(vc, policies)
+	return bound
 }
 
-// resolveVaultSizeBudgetSource is resolveVaultSizeBudget plus an
+// resolveVaultSizeBoundSource is resolveVaultSizeBound plus an
 // operator-readable source label ("policy <name/id>" or "default floor"),
-// for the budget-transition log (gastrolog-33ul6h finding 4): naming WHERE
-// an effective budget change came from, not just the old/new numbers.
-func resolveVaultSizeBudgetSource(vc system.VaultConfig, policies []system.RetentionPolicyConfig) (uint64, string) {
-	budget, winner := attachedSizeBudget(vc, policies)
+// for the bound-transition log (gastrolog-33ul6h finding 4): naming WHERE
+// an effective bound change came from, not just the old/new numbers.
+func resolveVaultSizeBoundSource(vc system.VaultConfig, policies []system.RetentionPolicyConfig) (uint64, string) {
+	bound, winner := attachedSizeBound(vc, policies)
 	if winner == nil {
 		def, _ := system.ParseSize(system.DefaultVaultMaxSize)
 		return def, "default floor"
 	}
-	return budget, "policy " + retentionPolicyLabel(*winner)
-}
-
-// vaultHasAttachedSizeBudget reports whether ANY policy referenced via the
-// vault's RetentionRules carries a usable SizeBudget, regardless of whether
-// that policy also carries a drain trigger. Used by retentionTargetForInstance
-// to distinguish a legal bound-only vault (every referenced policy is
-// trigger-less, but at least one carries a SizeBudget — the vault has no
-// drain but the budget still binds via the guard) from a genuinely
-// unenforceable one (zero drain triggers AND zero attached budgets). The
-// resolver's own default-floor fallback must NOT count here: the default
-// floor applies regardless of operator intent and says nothing about
-// whether the operator meant to bound this vault (gastrolog-33ul6h).
-func vaultHasAttachedSizeBudget(vc system.VaultConfig, policies []system.RetentionPolicyConfig) bool {
-	_, winner := attachedSizeBudget(vc, policies)
-	return winner != nil
+	return bound, "policy " + retentionPolicyLabel(*winner)
 }
 
 // currentMaxSizeBytes returns the vault's currently-registered max-size
-// budget and whether an entry exists yet. Used by refreshVaultDiskGuards to
-// detect an effective-budget CHANGE (vs. first observation) before calling
+// bound and whether an entry exists yet. Used by refreshVaultDiskGuards to
+// detect an effective-bound CHANGE (vs. first observation) before calling
 // SetVaultGuard, which overwrites the value unconditionally.
 func (g *diskGuard) currentMaxSizeBytes(vaultID glid.GLID) (uint64, bool) {
 	g.mu.Lock()
@@ -965,6 +950,6 @@ func (o *Orchestrator) startDiskGuard() error {
 		return fmt.Errorf("disk guard: %w", err)
 	}
 	o.scheduler.Describe(diskGuardJobName,
-		"Free-space guard: raises the disk-space alarm and suspends ingest admission below the floor or when a vault's backlog/size budget is reached")
+		"Free-space guard: raises the disk-space alarm and suspends ingest admission below the floor or when a vault's backlog budget or max-size bound is reached")
 	return nil
 }

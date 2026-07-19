@@ -86,11 +86,10 @@ message PutRetentionPolicyCommand {
   bytes id = 1;
   string name = 2;
   optional string max_age = 3;
+  // max_size is the combined drain-trigger-and-refuse-bound quantity — see
+  // RetentionPolicyConfig.max_size in system.proto (gastrolog-33ul6h).
   optional string max_size = 4;
   optional int64 max_chunks = 5;
-  // Per-node disk-claim budget (refuse bound), size expression. Mirrors
-  // RetentionPolicyConfig.size_budget in system.proto (gastrolog-33ul6h).
-  optional string size_budget = 6;
 }
 
 message DeleteRetentionPolicyCommand {

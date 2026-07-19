@@ -1,13 +1,21 @@
 package orchestrator
 
-// Coverage for gastrolog-33ul6h: resolveVaultSizeBudget is the config→runtime
+// Coverage for gastrolog-33ul6h: resolveVaultSizeBound is the config→runtime
 // resolver that replaces reading VaultConfig.MaxSize directly. It computes
-// the effective per-node disk-claim budget for a file vault from the
+// the effective per-node disk-claim bound for a file vault from the
 // retention policies attached via the vault's RetentionRules: min-wins
-// across every attached policy's parsed SizeBudget, with
-// system.DefaultVaultMaxSize as the floor when none carries one. The guard's
-// own seam (SetVaultGuard / maxSizeBytes) is unchanged — these tests pin
-// only the resolver that feeds it a number.
+// across every attached policy's parsed MaxSize, with
+// system.DefaultVaultMaxSize as the refuse-only floor when none carries one.
+// The guard's own seam (SetVaultGuard / maxSizeBytes) is unchanged — these
+// tests pin only the resolver that feeds it a number.
+//
+// Operator correction (2026-07-19, gastrolog-33ul6h comment c2): the earlier
+// shape of this branch split the vault's size story into a MaxSize drain
+// trigger and a separate refuse-bound field carried on the same policy.
+// That was superseded before merge: MaxSize is now the ONE field and means
+// both things at once — it drains AND refuses at the same bound.
+// "Bound-only" (a refuse bound with no drain trigger) is no longer a
+// concept: a policy that sets only MaxSize is simply a drain policy.
 
 import (
 	"context"
@@ -23,9 +31,9 @@ func retentionRuleFor(policyID glid.GLID) system.RetentionRule {
 	return system.RetentionRule{RetentionPolicyID: policyID}
 }
 
-func policyWithBudget(id glid.GLID, budget string) system.RetentionPolicyConfig {
-	b := budget
-	return system.RetentionPolicyConfig{ID: id, Name: "p-" + id.String(), SizeBudget: &b}
+func policyWithBound(id glid.GLID, bound string) system.RetentionPolicyConfig {
+	b := bound
+	return system.RetentionPolicyConfig{ID: id, Name: "p-" + id.String(), MaxSize: &b}
 }
 
 func defaultVaultMaxSizeBytes(t *testing.T) uint64 {
@@ -40,39 +48,39 @@ func defaultVaultMaxSizeBytes(t *testing.T) uint64 {
 // No attached retention rules at all: the vault stays bounded by the
 // creation default, not unbounded — the product-defaults invariant survives
 // zero operator diligence.
-func TestResolveVaultSizeBudgetNoRulesUsesDefault(t *testing.T) {
+func TestResolveVaultSizeBoundNoRulesUsesDefault(t *testing.T) {
 	vc := system.VaultConfig{ID: glid.New(), Name: "v"}
-	got := resolveVaultSizeBudget(vc, nil)
+	got := resolveVaultSizeBound(vc, nil)
 	want := defaultVaultMaxSizeBytes(t)
 	if got != want {
-		t.Fatalf("resolveVaultSizeBudget with no rules = %d, want default %d", got, want)
+		t.Fatalf("resolveVaultSizeBound with no rules = %d, want default %d", got, want)
 	}
 }
 
-// A single attached policy with a budget is used directly.
-func TestResolveVaultSizeBudgetSinglePolicy(t *testing.T) {
+// A single attached policy with a max_size is used directly.
+func TestResolveVaultSizeBoundSinglePolicy(t *testing.T) {
 	policyID := glid.New()
-	policies := []system.RetentionPolicyConfig{policyWithBudget(policyID, "20GiB")}
+	policies := []system.RetentionPolicyConfig{policyWithBound(policyID, "20GiB")}
 	vc := system.VaultConfig{
 		ID:             glid.New(),
 		RetentionRules: []system.RetentionRule{retentionRuleFor(policyID)},
 	}
-	got := resolveVaultSizeBudget(vc, policies)
+	got := resolveVaultSizeBound(vc, policies)
 	want, _ := system.ParseSize("20GiB")
 	if got != want {
-		t.Fatalf("resolveVaultSizeBudget single policy = %d, want %d (20GiB)", got, want)
+		t.Fatalf("resolveVaultSizeBound single policy = %d, want %d (20GiB)", got, want)
 	}
 }
 
-// Multiple attached policies: the effective budget is the MINIMUM across
-// every parsed SizeBudget — the operator decision that the refuse bound is
-// the tightest constraint among a vault's attached policies.
-func TestResolveVaultSizeBudgetMinWinsAcrossPolicies(t *testing.T) {
+// Multiple attached policies: the effective bound is the MINIMUM across
+// every parsed MaxSize — the operator decision that the refuse bound is the
+// tightest constraint among a vault's attached policies.
+func TestResolveVaultSizeBoundMinWinsAcrossPolicies(t *testing.T) {
 	loose, tight, mid := glid.New(), glid.New(), glid.New()
 	policies := []system.RetentionPolicyConfig{
-		policyWithBudget(loose, "500GiB"),
-		policyWithBudget(tight, "10GiB"),
-		policyWithBudget(mid, "100GiB"),
+		policyWithBound(loose, "500GiB"),
+		policyWithBound(tight, "10GiB"),
+		policyWithBound(mid, "100GiB"),
 	}
 	vc := system.VaultConfig{
 		ID: glid.New(),
@@ -80,80 +88,60 @@ func TestResolveVaultSizeBudgetMinWinsAcrossPolicies(t *testing.T) {
 			retentionRuleFor(loose), retentionRuleFor(tight), retentionRuleFor(mid),
 		},
 	}
-	got := resolveVaultSizeBudget(vc, policies)
+	got := resolveVaultSizeBound(vc, policies)
 	want, _ := system.ParseSize("10GiB")
 	if got != want {
-		t.Fatalf("resolveVaultSizeBudget min-wins = %d, want %d (10GiB, the tightest)", got, want)
+		t.Fatalf("resolveVaultSizeBound min-wins = %d, want %d (10GiB, the tightest)", got, want)
 	}
 }
 
-// A trigger-less policy (no MaxAge/MaxSize/MaxChunks — it drains nothing)
-// that carries ONLY a SizeBudget still contributes to the resolved budget: a
-// bound-only policy is legal and meaningful (operator decision 1).
-func TestResolveVaultSizeBudgetTriggerLessPolicyStillApplies(t *testing.T) {
-	policyID := glid.New()
-	b := "30GiB"
-	policies := []system.RetentionPolicyConfig{
-		{ID: policyID, Name: "bound-only", SizeBudget: &b}, // no MaxAge/MaxSize/MaxChunks
-	}
-	vc := system.VaultConfig{
-		ID:             glid.New(),
-		RetentionRules: []system.RetentionRule{retentionRuleFor(policyID)},
-	}
-	got := resolveVaultSizeBudget(vc, policies)
-	want, _ := system.ParseSize("30GiB")
-	if got != want {
-		t.Fatalf("resolveVaultSizeBudget trigger-less bound-only policy = %d, want %d (30GiB)", got, want)
-	}
-}
-
-// A policy attached but with no SizeBudget set at all contributes nothing —
+// A policy attached but with no MaxSize set at all contributes nothing —
 // falls through to the default floor, same as no rules.
-func TestResolveVaultSizeBudgetPolicyWithoutBudgetUsesDefault(t *testing.T) {
+func TestResolveVaultSizeBoundPolicyWithoutMaxSizeUsesDefault(t *testing.T) {
 	policyID := glid.New()
 	policies := []system.RetentionPolicyConfig{
-		{ID: policyID, Name: "age-only", MaxAge: strPtr("7d")}, // no SizeBudget
+		{ID: policyID, Name: "age-only", MaxAge: strPtr("7d")}, // no MaxSize
 	}
 	vc := system.VaultConfig{
 		ID:             glid.New(),
 		RetentionRules: []system.RetentionRule{retentionRuleFor(policyID)},
 	}
-	got := resolveVaultSizeBudget(vc, policies)
+	got := resolveVaultSizeBound(vc, policies)
 	want := defaultVaultMaxSizeBytes(t)
 	if got != want {
-		t.Fatalf("resolveVaultSizeBudget policy without budget = %d, want default %d", got, want)
+		t.Fatalf("resolveVaultSizeBound policy without max_size = %d, want default %d", got, want)
 	}
 }
 
-// Defense in depth: an unparseable SizeBudget (should be impossible —
+// Defense in depth: an unparseable MaxSize (should be impossible —
 // PutRetentionPolicy validates at write) must never be read as 0/unbounded.
-// It is skipped, same as if it were absent; with no other valid budget, the
+// It is skipped, same as if it were absent; with no other valid bound, the
 // resolver falls back to the default floor.
-func TestResolveVaultSizeBudgetParseFailureFallsBackToDefault(t *testing.T) {
+func TestResolveVaultSizeBoundParseFailureFallsBackToDefault(t *testing.T) {
 	policyID := glid.New()
 	garbage := "not-a-size"
 	policies := []system.RetentionPolicyConfig{
-		{ID: policyID, Name: "corrupt", SizeBudget: &garbage},
+		{ID: policyID, Name: "corrupt", MaxSize: &garbage},
 	}
 	vc := system.VaultConfig{
 		ID:             glid.New(),
 		RetentionRules: []system.RetentionRule{retentionRuleFor(policyID)},
 	}
-	got := resolveVaultSizeBudget(vc, policies)
+	got := resolveVaultSizeBound(vc, policies)
 	want := defaultVaultMaxSizeBytes(t)
 	if got != want {
-		t.Fatalf("resolveVaultSizeBudget parse failure = %d, want default fallback %d", got, want)
+		t.Fatalf("resolveVaultSizeBound parse failure = %d, want default fallback %d", got, want)
 	}
 }
 
-// A parse failure on ONE policy must not poison a valid budget from another
+// A parse failure on ONE policy must not poison a valid bound from another
 // attached policy — only the unparseable one is skipped.
-func TestResolveVaultSizeBudgetParseFailureSkipsOnlyThatPolicy(t *testing.T) {
+func TestResolveVaultSizeBoundParseFailureSkipsOnlyThatPolicy(t *testing.T) {
 	good, bad := glid.New(), glid.New()
 	garbage := "not-a-size"
 	policies := []system.RetentionPolicyConfig{
-		policyWithBudget(good, "15GiB"),
-		{ID: bad, Name: "corrupt", SizeBudget: &garbage},
+		policyWithBound(good, "15GiB"),
+		{ID: bad, Name: "corrupt", MaxSize: &garbage},
 	}
 	vc := system.VaultConfig{
 		ID: glid.New(),
@@ -161,39 +149,39 @@ func TestResolveVaultSizeBudgetParseFailureSkipsOnlyThatPolicy(t *testing.T) {
 			retentionRuleFor(good), retentionRuleFor(bad),
 		},
 	}
-	got := resolveVaultSizeBudget(vc, policies)
+	got := resolveVaultSizeBound(vc, policies)
 	want, _ := system.ParseSize("15GiB")
 	if got != want {
-		t.Fatalf("resolveVaultSizeBudget with one bad policy = %d, want the surviving valid budget %d (15GiB)", got, want)
+		t.Fatalf("resolveVaultSizeBound with one bad policy = %d, want the surviving valid bound %d (15GiB)", got, want)
 	}
 }
 
 // An unresolvable RetentionPolicyID (rule references a policy that no
 // longer exists in the passed slice) contributes nothing — matches the
-// "policy without budget" fallback, never a panic or an unbounded result.
-func TestResolveVaultSizeBudgetUnknownPolicyIDUsesDefault(t *testing.T) {
+// "policy without max_size" fallback, never a panic or an unbounded result.
+func TestResolveVaultSizeBoundUnknownPolicyIDUsesDefault(t *testing.T) {
 	vc := system.VaultConfig{
 		ID:             glid.New(),
 		RetentionRules: []system.RetentionRule{retentionRuleFor(glid.New())},
 	}
-	got := resolveVaultSizeBudget(vc, nil)
+	got := resolveVaultSizeBound(vc, nil)
 	want := defaultVaultMaxSizeBytes(t)
 	if got != want {
-		t.Fatalf("resolveVaultSizeBudget unknown policy id = %d, want default %d", got, want)
+		t.Fatalf("resolveVaultSizeBound unknown policy id = %d, want default %d", got, want)
 	}
 }
 
-// TestRefreshVaultDiskGuardsCappedFromPolicyBudgetLifecycle exercises the
+// TestRefreshVaultDiskGuardsCappedFromPolicyMaxSizeLifecycle exercises the
 // resolver wired into the real guard end to end (refreshVaultDiskGuards +
-// evaluateVaults, the same pairing startDiskGuard's scheduler job runs):
-// a policy's size_budget caps the vault; raising the budget on the policy
-// resumes admission; detaching the policy entirely falls back to the
+// evaluateVaults, the same pairing startDiskGuard's scheduler job runs): a
+// policy's max_size caps the vault; raising it on the policy resumes
+// admission; detaching the policy entirely falls back to the
 // creation-default floor, not to unbounded.
-func TestRefreshVaultDiskGuardsCappedFromPolicyBudgetLifecycle(t *testing.T) {
+func TestRefreshVaultDiskGuardsCappedFromPolicyMaxSizeLifecycle(t *testing.T) {
 	t.Parallel()
 
 	vaultID, policyID := glid.New(), glid.New()
-	budget := "10GiB"
+	bound := "10GiB"
 	cfg := &system.Config{
 		Vaults: []system.VaultConfig{{
 			ID:      vaultID,
@@ -205,16 +193,16 @@ func TestRefreshVaultDiskGuardsCappedFromPolicyBudgetLifecycle(t *testing.T) {
 			},
 		}},
 		RetentionPolicies: []system.RetentionPolicyConfig{
-			{ID: policyID, Name: "budget-policy", SizeBudget: &budget},
+			{ID: policyID, Name: "bound-policy", MaxSize: &bound},
 		},
 	}
 
 	orch := newTestOrch(t, Config{})
 	orch.sysLoader = testSystemLoader{cfg: cfg}
 
-	// Footprint fixed above the 10GiB policy budget but below the 1GiB
+	// Footprint fixed above the 10GiB policy bound but below the 1GiB
 	// default — the capped/uncapped verdict below can only be explained by
-	// the policy budget, not the default floor.
+	// the policy bound, not the default floor.
 	const footprint = int64(11) << 30 // 11GiB
 	orch.diskGuard.vaultFootprint = func(id glid.GLID) int64 {
 		if id == vaultID {
@@ -229,19 +217,19 @@ func TestRefreshVaultDiskGuardsCappedFromPolicyBudgetLifecycle(t *testing.T) {
 		orch.diskGuard.evaluateVaults(orch.alerts)
 	}
 
-	// 1. Capped state driven from the policy budget: 11GiB footprint over a
-	// 10GiB policy budget.
+	// 1. Capped state driven from the policy bound: 11GiB footprint over a
+	// 10GiB policy bound.
 	refresh()
 	if !orch.diskGuard.vaultSizeCapped(vaultID) {
-		t.Fatal("vault must be capped: 11GiB footprint exceeds the 10GiB policy budget")
+		t.Fatal("vault must be capped: 11GiB footprint exceeds the 10GiB policy bound")
 	}
 
-	// 2. Budget raised on the policy → admission resumes, same footprint.
+	// 2. Bound raised on the policy → admission resumes, same footprint.
 	raised := "50GiB"
-	cfg.RetentionPolicies[0].SizeBudget = &raised
+	cfg.RetentionPolicies[0].MaxSize = &raised
 	refresh()
 	if orch.diskGuard.vaultSizeCapped(vaultID) {
-		t.Fatal("vault must resume admission once the policy budget is raised above the footprint")
+		t.Fatal("vault must resume admission once the policy bound is raised above the footprint")
 	}
 
 	// 3. Policy detached entirely → the creation default (1GiB) is the
@@ -255,23 +243,23 @@ func TestRefreshVaultDiskGuardsCappedFromPolicyBudgetLifecycle(t *testing.T) {
 	}
 }
 
-// TestRefreshVaultDiskGuardsLogsOnBudgetChangeOnly pins gastrolog-33ul6h
-// finding 4: an effective-budget CHANGE (the resolved max-size differs from
-// what was previously registered for this vault) logs exactly once at
-// INFO, naming old, new, and the source ("policy <name/id>" or "default
-// floor"). First observation (nothing registered yet) is not a transition
-// and must not log; re-resolving the SAME budget on every subsequent tick
-// (the steady-state case — refreshVaultDiskGuards runs on every 15s guard
-// tick) must never log again either.
-func TestRefreshVaultDiskGuardsLogsOnBudgetChangeOnly(t *testing.T) {
+// TestRefreshVaultDiskGuardsLogsOnBoundChangeOnly pins gastrolog-33ul6h
+// finding 4: an effective-bound CHANGE (the resolved max-size differs from
+// what was previously registered for this vault) logs exactly once at INFO,
+// naming old, new, and the source ("policy <name/id>" or "default floor").
+// First observation (nothing registered yet) is not a transition and must
+// not log; re-resolving the SAME bound on every subsequent tick (the
+// steady-state case — refreshVaultDiskGuards runs on every 15s guard tick)
+// must never log again either.
+func TestRefreshVaultDiskGuardsLogsOnBoundChangeOnly(t *testing.T) {
 	t.Parallel()
 
 	vaultID, policyID := glid.New(), glid.New()
-	budget := "10GiB"
+	bound := "10GiB"
 	cfg := &system.Config{
 		Vaults: []system.VaultConfig{{
 			ID:      vaultID,
-			Name:    "budget-vault",
+			Name:    "bound-vault",
 			Enabled: true,
 			Type:    system.VaultTypeFile,
 			RetentionRules: []system.RetentionRule{
@@ -279,7 +267,7 @@ func TestRefreshVaultDiskGuardsLogsOnBudgetChangeOnly(t *testing.T) {
 			},
 		}},
 		RetentionPolicies: []system.RetentionPolicyConfig{
-			{ID: policyID, Name: "budget-policy", SizeBudget: &budget},
+			{ID: policyID, Name: "bound-policy", MaxSize: &bound},
 		},
 	}
 
@@ -288,29 +276,29 @@ func TestRefreshVaultDiskGuardsLogsOnBudgetChangeOnly(t *testing.T) {
 	orch.sysLoader = testSystemLoader{cfg: cfg}
 	ctx := context.Background()
 
-	const changeMsg = "vault size budget changed"
+	const changeMsg = "vault max-size bound changed"
 
 	// 1. First observation: no prior entry, so no transition to log.
 	orch.refreshVaultDiskGuards(ctx)
 	if strings.Contains(logSink.String(), changeMsg) {
-		t.Fatalf("first observation must not log a budget change:\n%s", logSink.String())
+		t.Fatalf("first observation must not log a bound change:\n%s", logSink.String())
 	}
 
-	// 2. Steady state: same policy, same resolved budget, repeated ticks.
+	// 2. Steady state: same policy, same resolved bound, repeated ticks.
 	orch.refreshVaultDiskGuards(ctx)
 	orch.refreshVaultDiskGuards(ctx)
 	if strings.Contains(logSink.String(), changeMsg) {
-		t.Fatalf("re-resolving an unchanged budget must never log:\n%s", logSink.String())
+		t.Fatalf("re-resolving an unchanged bound must never log:\n%s", logSink.String())
 	}
 
-	// 3. Raise the policy's budget: a real transition.
+	// 3. Raise the policy's bound: a real transition.
 	raised := "50GiB"
-	cfg.RetentionPolicies[0].SizeBudget = &raised
+	cfg.RetentionPolicies[0].MaxSize = &raised
 	orch.refreshVaultDiskGuards(ctx)
 	if got := strings.Count(logSink.String(), changeMsg); got != 1 {
-		t.Fatalf("a budget change must log exactly once, got %d:\n%s", got, logSink.String())
+		t.Fatalf("a bound change must log exactly once, got %d:\n%s", got, logSink.String())
 	}
-	if !strings.Contains(logSink.String(), "policy budget-policy") {
+	if !strings.Contains(logSink.String(), "policy bound-policy") {
 		t.Errorf("the log must name the source policy:\n%s", logSink.String())
 	}
 

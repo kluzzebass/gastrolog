@@ -553,10 +553,11 @@ func TestVaultMaxSizeCap(t *testing.T) {
 	}
 }
 
-// TestVaultMaxSizeBudgetOnlyEntry pins the origin-node case: a vault with a
-// budget but NO local placement (nothing to statfs) is still evaluated —
-// origin segment backlog claims local disk everywhere records are accepted.
-func TestVaultMaxSizeBudgetOnlyEntry(t *testing.T) {
+// TestVaultMaxSizeEntryWithoutLocalPaths pins the origin-node case: a vault
+// with a max-size bound but NO local placement (nothing to statfs) is still
+// evaluated — origin segment backlog claims local disk everywhere records
+// are accepted.
+func TestVaultMaxSizeEntryWithoutLocalPaths(t *testing.T) {
 	t.Parallel()
 	g, _ := newGuardFixture(400*gib, map[string]uint64{})
 	vaultA := glid.New()
@@ -564,7 +565,7 @@ func TestVaultMaxSizeBudgetOnlyEntry(t *testing.T) {
 	g.SetVaultGuard(vaultA, "originy", nil, "", "", 10*gib)
 	g.evaluateVaults(nil)
 	if !g.vaultSizeCapped(vaultA) {
-		t.Fatal("budget must be enforced even with no sampleable volume paths")
+		t.Fatal("the bound must be enforced even with no sampleable volume paths")
 	}
 }
 

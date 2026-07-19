@@ -318,13 +318,16 @@ configure() {
   $GLOG config rotation-policy create --addr "$S" --name "10000-records" --max-records 10000 2>&1 | sed 's/^/  /'
   $GLOG config rotation-policy create --addr "$S" --name "1M-1m" --max-records 1000000 --max-age 1m 2>&1 | sed 's/^/  /'
   $GLOG config retention-policy create --addr "$S" --name "3m-retain" --max-age 3m 2>&1 | sed 's/^/  /'
-  # The drain policy carries the refuse bound too (gastrolog-33ul6h): one
-  # policy is first-vault's whole size/age story. 50GB per node — every
-  # node holds a full replica (RF = NODES), so the volume needs at least
-  # NODES x this; an unbounded vault is how GastroLog1 filled a 466 GiB
-  # volume and deadlocked (gastrolog-2b2yyy, gastrolog-5ct2av).
+  # max-size is one field, drain+refuse in one bound now (gastrolog-33ul6h):
+  # this policy is first-vault's whole size/age story. Draining fires at
+  # whichever of max-age (1h) or max-size (50GB) comes first; the same 50GB
+  # bound also refuses admission cluster-wide while the vault's local claim
+  # stays at/over it. 50GB per node — every node holds a full replica (RF =
+  # NODES), so the volume needs at least NODES x this; an unbounded vault is
+  # how GastroLog1 filled a 466 GiB volume and deadlocked (gastrolog-2b2yyy,
+  # gastrolog-5ct2av).
   $GLOG config retention-policy create --addr "$S" --name "1h-retain" --max-age 1h \
-    --size-budget "50GB" 2>&1 | sed 's/^/  /'
+    --max-size "50GB" 2>&1 | sed 's/^/  /'
 
   # gastrolog-4kkoo (Phase 5): no filter entity — match expressions live
   # inline on routes via --expression. Synthetic attributes (_source,
@@ -341,15 +344,15 @@ configure() {
   #                  carries over so chunk granularity is consistent; no
   #                  retention policy (data lives forever).
   #
-  # Both are bounded via their retention policies' size budget
-  # (gastrolog-33ul6h). Drain triggers alone do NOT bound a vault: they act
-  # on sealed chunks, and the bulk of a busy vault's disk can be segments
-  # awaiting collection — which retention has no authority over
-  # (gastrolog-2b2yyy: a 3-minute TTL sat next to 449 GiB of unpurged
-  # segments). The budget's cap-and-refuse is what makes the
-  # vault-max-size alarm reachable before the disk guard traps the
-  # cluster. second-vault has no retention policy: cloud-served, its local
-  # claim is cache + backlog, bounded by the creation-default floor.
+  # Both are bounded (gastrolog-33ul6h): first-vault via its policy's max
+  # size, second-vault via the creation-default floor (no retention policy;
+  # cloud-served, so its local claim is cache + backlog only). A drain
+  # trigger alone does NOT bound a vault: it acts on sealed chunks, and the
+  # bulk of a busy vault's disk can be segments awaiting collection — which
+  # retention has no authority over (gastrolog-2b2yyy: a 3-minute TTL sat
+  # next to 449 GiB of unpurged segments). max-size's refuse half is what
+  # makes the vault-max-size alarm reachable before the disk guard traps
+  # the cluster.
   $GLOG config vault create --addr "$S" --name "first-vault" \
     --type file --storage-class 1 --replication-factor "$NODES" \
     --rotation-policy "1M-1m" --retention-policy "1h-retain" 2>&1 | sed 's/^/  /'

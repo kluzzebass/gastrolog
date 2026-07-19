@@ -74,9 +74,9 @@ func TestApplyPutRetentionPolicy(t *testing.T) {
 	fsm := New()
 	id := newID()
 	maxAge := "720h"
-	sizeBudget := "50GB"
+	maxSize := "50GB"
 	applyCmd(t, fsm, command.NewPutRetentionPolicy(system.RetentionPolicyConfig{
-		ID: id, Name: "ret", MaxAge: &maxAge, SizeBudget: &sizeBudget,
+		ID: id, Name: "ret", MaxAge: &maxAge, MaxSize: &maxSize,
 	}))
 
 	got, err := fsm.Store().GetRetentionPolicy(context.Background(), id)
@@ -86,9 +86,10 @@ func TestApplyPutRetentionPolicy(t *testing.T) {
 	if got == nil || got.Name != "ret" || got.MaxAge == nil || *got.MaxAge != "720h" {
 		t.Fatalf("unexpected retention policy: %+v", got)
 	}
-	// gastrolog-33ul6h: size_budget must survive the FSM apply path too.
-	if got.SizeBudget == nil || *got.SizeBudget != "50GB" {
-		t.Fatalf("unexpected retention policy size budget: %+v", got.SizeBudget)
+	// gastrolog-33ul6h: max_size (the combined drain-and-refuse bound) must
+	// survive the FSM apply path too.
+	if got.MaxSize == nil || *got.MaxSize != "50GB" {
+		t.Fatalf("unexpected retention policy max size: %+v", got.MaxSize)
 	}
 }
 

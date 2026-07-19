@@ -147,7 +147,7 @@ func (r *retentionRunner) fireTransferEvent(id chunk.ChunkID) bool {
 		return false
 	}
 
-	// Destination admission: the same disk-guard / size-budget check that
+	// Destination admission: the same disk-guard / max-size check that
 	// gates routed records gates transfer intake — a capped or protected
 	// destination vault defers, it does not overfill (reuse
 	// vaultAdmissionGate, not a parallel check).

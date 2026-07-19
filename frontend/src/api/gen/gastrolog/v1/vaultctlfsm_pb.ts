@@ -296,6 +296,12 @@ export class VaultCtlCommand extends Message<VaultCtlCommand> {
      */
     value: DiscardUnbuildableManifestsCommand;
     case: "discardUnbuildableManifests";
+  } | {
+    /**
+     * @generated from field: gastrolog.v1.ClearTransferSourceCommand clear_transfer_source = 25;
+     */
+    value: ClearTransferSourceCommand;
+    case: "clearTransferSource";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<VaultCtlCommand>) {
@@ -330,6 +336,7 @@ export class VaultCtlCommand extends Message<VaultCtlCommand> {
     { no: 22, name: "ack_chunk_holder", kind: "message", T: AckChunkHolderCommand, oneof: "command" },
     { no: 23, name: "revoke_chunk_holder", kind: "message", T: RevokeChunkHolderCommand, oneof: "command" },
     { no: 24, name: "discard_unbuildable_manifests", kind: "message", T: DiscardUnbuildableManifestsCommand, oneof: "command" },
+    { no: 25, name: "clear_transfer_source", kind: "message", T: ClearTransferSourceCommand, oneof: "command" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultCtlCommand {
@@ -2062,6 +2069,54 @@ export class RevokeChunkHolderCommand extends Message<RevokeChunkHolderCommand> 
 
   static equals(a: RevokeChunkHolderCommand | PlainMessage<RevokeChunkHolderCommand> | undefined, b: RevokeChunkHolderCommand | PlainMessage<RevokeChunkHolderCommand> | undefined): boolean {
     return proto3.util.equals(RevokeChunkHolderCommand, a, b);
+  }
+}
+
+/**
+ * ClearTransferSourceCommand clears a manifest entry's
+ * transfer_source_vault_id once the destination has confirmed enough
+ * holder receipts that the source vault is about to expire its own
+ * copies. Proposed by the SOURCE vault's retention runner against the
+ * DESTINATION vault's FSM, right before the source's local expire
+ * (gastrolog-2l918 review finding 1): without this, an entry whose
+ * source vault later deletes its copies keeps pointing replica-repair
+ * pulls (pullMissingGLCB / runGLCBPull) at a vault that has nothing left
+ * to give, permanently defeating self-healing for transferred chunks.
+ * No-op if the entry doesn't exist or the field is already clear.
+ *
+ * @generated from message gastrolog.v1.ClearTransferSourceCommand
+ */
+export class ClearTransferSourceCommand extends Message<ClearTransferSourceCommand> {
+  /**
+   * @generated from field: bytes chunk_id = 1;
+   */
+  chunkId = new Uint8Array(0);
+
+  constructor(data?: PartialMessage<ClearTransferSourceCommand>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ClearTransferSourceCommand";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ClearTransferSourceCommand {
+    return new ClearTransferSourceCommand().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ClearTransferSourceCommand {
+    return new ClearTransferSourceCommand().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ClearTransferSourceCommand {
+    return new ClearTransferSourceCommand().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ClearTransferSourceCommand | PlainMessage<ClearTransferSourceCommand> | undefined, b: ClearTransferSourceCommand | PlainMessage<ClearTransferSourceCommand> | undefined): boolean {
+    return proto3.util.equals(ClearTransferSourceCommand, a, b);
   }
 }
 

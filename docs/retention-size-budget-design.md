@@ -3,6 +3,26 @@
 Issue: gastrolog-33ul6h. Status: approved design (operator decisions
 2026-07-19), pre-implementation.
 
+## Superseded (2026-07-19)
+
+The shape below — a separate refuse-bound field on `RetentionPolicyConfig`,
+distinct from the drain-trigger `MaxSize` field — was superseded by the
+operator (comment c2) before implementation. The corrected shape: the drain
+trigger and the refuse bound COMBINE into `MaxSize` alone. `MaxSize` on a
+retention policy now means BOTH things at once — oldest sealed chunks drain
+past it, and admission refuses cluster-wide while the vault's local claim is
+at/over it. There is no second field; "bound-only" (a refuse bound with no
+drain trigger) is not a concept — a policy that sets only `MaxSize` is
+simply a drain policy that also happens to bound the vault. The creation-
+default floor stays refuse-only (a default must never destroy data).
+
+This file is kept because the measurement decisions below — ONE meaning of
+size as the local disk claim, cached cloud-backed chunks counted like any
+other chunk, the min-wins/default-floor resolution shape — still stand
+unchanged by the correction. Read the shape sections below as history: where
+they say "the budget field" or describe two fields, read "`MaxSize`,
+combined."
+
 ## Problem
 
 The vault's size story is split across two config surfaces that are only

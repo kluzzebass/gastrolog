@@ -144,33 +144,31 @@ func (s *SystemServer) PutRetentionPolicy(
 	cfg.ID = id
 	cfg.Name = req.Msg.Config.Name
 
-	// sizeBudget parse-checks FIRST, before the IsEmpty no-op gate below
-	// (gastrolog-33ul6h finding 7): IsEmpty's positiveSize check treats an
+	// max_size parse-checks FIRST, before the IsEmpty no-op gate below
+	// (gastrolog-33ul6h finding 7, carried forward from an earlier,
+	// superseded design's separate refuse-bound field): IsEmpty's
+	// positiveSize check treats an
 	// unparseable expression the same as absent (both contribute nothing to
 	// "is this policy non-empty"), so an otherwise-empty policy with a
-	// garbled sizeBudget would fall into IsEmpty()==true and surface the
+	// garbled max_size would fall into IsEmpty()==true and surface the
 	// generic "must set at least one" error instead of the actual parse
 	// failure — the wrong diagnostic for what the operator typed. Checking
-	// parseability first ensures a malformed sizeBudget always gets its own
+	// parseability first ensures a malformed max_size always gets its own
 	// error, regardless of what else the policy sets.
 	//
-	// Must parse, and an explicit "0" is rejected (it would mean "no
-	// bound", not "no restriction" — the state resolution treats as absent,
-	// so it must not be sayable). Unlike max_size on vault creation, an
-	// absent sizeBudget stores nil — no per-policy default is stamped; the
-	// resolver's default floor (system.DefaultVaultMaxSize) applies only
-	// when NO attached policy carries a budget at all.
-	if connErr := validateRetentionSizeBudget(cfg.SizeBudget, cfg.Name); connErr != nil {
+	// Must parse, and an explicit "0" is rejected: max_size is now both the
+	// drain trigger and the refuse bound, and "0" would mean "no bound", not
+	// "no restriction" — the state resolution treats as absent, so it must
+	// not be sayable.
+	if connErr := validateRetentionMaxSize(cfg.MaxSize, cfg.Name); connErr != nil {
 		return nil, connErr
 	}
 
-	// Reject policies with no conditions AND no bound: they're silent no-ops
-	// that almost always reflect operator confusion rather than intent. See
-	// gastrolog-1rbuf. A policy that sets ONLY sizeBudget is legal (a
-	// bound-only policy is meaningful — gastrolog-33ul6h), so sizeBudget
-	// counts toward non-empty via cfg.IsEmpty().
+	// Reject policies with no conditions: they're silent no-ops that almost
+	// always reflect operator confusion rather than intent. See
+	// gastrolog-1rbuf.
 	if cfg.IsEmpty() {
-		return nil, errInvalidArg(errors.New("retention policy must set at least one of maxAge, maxBytes, maxChunks, or sizeBudget"))
+		return nil, errInvalidArg(errors.New("retention policy must set at least one of maxAge, maxSize, or maxChunks"))
 	}
 
 	// Validate by trying to convert.
@@ -238,25 +236,24 @@ func (s *SystemServer) DeleteRetentionPolicy(
 	return connect.NewResponse(&apiv1.DeleteRetentionPolicyResponse{System: cfg}), nil
 }
 
-// validateRetentionSizeBudget parse-checks a retention policy's size_budget
-// the way resolveVaultQuantity checked a vault's max-size before the field
-// moved to the policy (gastrolog-33ul6h): unset is fine (no bound stored, no
-// default stamped — the resolver's default floor applies only when no
-// attached policy has one at all); an unparseable expression is rejected at
-// write; an explicit "0" is rejected because it means "no bound", the
-// unrepresentable state this model exists to prevent.
-func validateRetentionSizeBudget(sizeBudget *string, policyName string) *connect.Error {
-	if sizeBudget == nil || system.IsQuantityUnset(*sizeBudget) {
+// validateRetentionMaxSize parse-checks a retention policy's max_size —
+// the combined drain-trigger-and-refuse-bound quantity (gastrolog-33ul6h):
+// unset is fine (no bound stored — the resolver's default floor applies
+// only when no attached policy has one at all); an unparseable expression is
+// rejected at write; an explicit "0" is rejected because it means "no
+// bound", the unrepresentable state this model exists to prevent.
+func validateRetentionMaxSize(maxSize *string, policyName string) *connect.Error {
+	if maxSize == nil || system.IsQuantityUnset(*maxSize) {
 		return nil
 	}
-	bytes, err := system.ParseSize(*sizeBudget)
+	bytes, err := system.ParseSize(*maxSize)
 	if err != nil {
-		return errInvalidArg(fmt.Errorf("size-budget %q on retention policy %q: %w", *sizeBudget, policyName, err))
+		return errInvalidArg(fmt.Errorf("max-size %q on retention policy %q: %w", *maxSize, policyName, err))
 	}
 	if bytes == 0 {
 		return errInvalidArg(fmt.Errorf(
-			"size-budget of %q on retention policy %q means no bound; omit it to leave this policy's budget unset, or set a real size",
-			*sizeBudget, policyName))
+			"max-size of %q on retention policy %q means no bound; omit it to leave this policy's bound unset, or set a real size",
+			*maxSize, policyName))
 	}
 	return nil
 }
@@ -319,18 +316,6 @@ func protoToRetentionPolicy(p *apiv1.RetentionPolicyConfig) system.RetentionPoli
 	if p.MaxChunks > 0 {
 		cfg.MaxChunks = new(p.MaxChunks)
 	}
-	// SizeBudget is proto3 `optional` on both sides (unlike MaxAge/MaxSize/
-	// MaxChunks, which predate it and use the empty-string/zero sentinel
-	// convention above) — direct pointer passthrough. But the UI form can
-	// still submit an explicit "" (a present-but-blank field, distinct from
-	// the field being absent from the proto entirely): normalize that the
-	// same way IsQuantityUnset treats it everywhere else, so an
-	// operator clearing the field in the UI stores unset, not a stray empty
-	// string that would fail ParseSize downstream (gastrolog-33ul6h finding 2).
-	cfg.SizeBudget = p.SizeBudget
-	if cfg.SizeBudget != nil && system.IsQuantityUnset(*cfg.SizeBudget) {
-		cfg.SizeBudget = nil
-	}
 
 	return cfg
 }
@@ -348,7 +333,6 @@ func retentionPolicyToProto(cfg system.RetentionPolicyConfig) *apiv1.RetentionPo
 	if cfg.MaxChunks != nil {
 		p.MaxChunks = *cfg.MaxChunks
 	}
-	p.SizeBudget = cfg.SizeBudget
 
 	return p
 }

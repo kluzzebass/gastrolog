@@ -330,7 +330,7 @@ func (p *PeerState) VaultDiskProtected(vaultID glid.GLID) bool {
 }
 
 // VaultSizeCapped reports whether any live peer has this vault at its local
-// max-size budget. Same cluster-consistency contract as VaultDiskProtected.
+// max-size bound. Same cluster-consistency contract as VaultDiskProtected.
 func (p *PeerState) VaultSizeCapped(vaultID glid.GLID) bool {
 	return p.vaultListedByAnyPeer(vaultID, func(ns *gastrologv1.NodeStats) [][]byte {
 		return ns.SizeCappedVaultIds

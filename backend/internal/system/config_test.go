@@ -300,8 +300,8 @@ func TestToRetentionPolicy(t *testing.T) {
 	t.Run("composite age and chunks", func(t *testing.T) {
 		t.Parallel()
 		cfg := RetentionPolicyConfig{
-			MaxAge:      new("720h"),
-			MaxChunks:   new(int64(100)),
+			MaxAge:    new("720h"),
+			MaxChunks: new(int64(100)),
 		}
 		policy, err := cfg.ToRetentionPolicy()
 		if err != nil {
@@ -315,9 +315,9 @@ func TestToRetentionPolicy(t *testing.T) {
 	t.Run("all three conditions", func(t *testing.T) {
 		t.Parallel()
 		cfg := RetentionPolicyConfig{
-			MaxAge:      new("720h"),
-			MaxSize:     new("10GB"),
-			MaxChunks:   new(int64(50)),
+			MaxAge:    new("720h"),
+			MaxSize:   new("10GB"),
+			MaxChunks: new(int64(50)),
 		}
 		policy, err := cfg.ToRetentionPolicy()
 		if err != nil {
@@ -412,10 +412,6 @@ func TestRetentionPolicyConfigIsEmpty(t *testing.T) {
 		{"MaxAgeNanos set", RetentionPolicyConfig{MaxAge: new("24h")}, false},
 		{"MaxBytes set", RetentionPolicyConfig{MaxSize: new("10GB")}, false},
 		{"MaxChunks set", RetentionPolicyConfig{MaxChunks: new(int64(10))}, false},
-		// gastrolog-33ul6h: a bound-only policy (SizeBudget set, no drain
-		// trigger) is legal and meaningful — it must not be treated as empty.
-		{"zero SizeBudget", RetentionPolicyConfig{SizeBudget: new("0")}, true},
-		{"SizeBudget set, no triggers", RetentionPolicyConfig{SizeBudget: new("50GB")}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
