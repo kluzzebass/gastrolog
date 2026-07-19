@@ -44,7 +44,6 @@ export interface StorageEntry {
   retentionDisposition: string; // "delete" (default) | "route"
   diskFreeWarn: string; // size ("10GB") or % of the volume ("10%"); empty inherits the node default ("10%")
   diskFreeFloor: string; // size or % of the volume; empty inherits the node default ("3%")
-  maxSize: string; // human size; per-node budget for the vault's local disk claim; empty = unlimited
   replicationFactor: string;
   path: string;
   nodeId: string;
@@ -65,7 +64,6 @@ function emptyStorageEntry(type: VaultTypeLabel): StorageEntry {
     retentionDisposition: "delete",
     diskFreeWarn: "",
     diskFreeFloor: "",
-    maxSize: "",
     replicationFactor: "1",
     path: "",
     nodeId: "",
@@ -272,20 +270,6 @@ export function VaultStorageForm({
             )}
           </FormField>
 
-          <FormField
-            label="Max Size"
-            dark={dark}
-            description="Per-node budget for the vault's whole local disk claim (chunks, indexes, pipeline backlog). At the budget, new records for this vault are refused cluster-wide until retention drains it — set a size retention threshold below the budget so retention drains ahead of the cap."
-          >
-            <TextInput
-              value={storage.maxSize}
-              onChange={(v) => onUpdate({ maxSize: v })}
-              placeholder="1GiB"
-              dark={dark}
-              mono
-              examples={["10GB", "50GB", "500GB"]}
-            />
-          </FormField>
           <FormField
             label="Disk Free Warn"
             dark={dark}
@@ -569,9 +553,6 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
       retentionDisposition: storage.type !== "jsonl" ? (storage.retentionDisposition || "delete") : "",
       diskFreeWarn: storage.type === "file" ? storage.diskFreeWarn : "",
       diskFreeFloor: storage.type === "file" ? storage.diskFreeFloor : "",
-      // Empty field = unset (server defaults it), not explicit 0 (rejected);
-      // non-file vaults have no disk budget (gastrolog-1epfgb).
-      maxSize: storage.type === "file" ? storage.maxSize : "",
       replicationFactor: parseInt(storage.replicationFactor, 10) || 1,
       path: storage.type === "jsonl" ? storage.path : "",
     });
