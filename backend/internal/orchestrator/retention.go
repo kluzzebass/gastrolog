@@ -81,10 +81,12 @@ const (
 	vaultCatchupSweepSchedule = "13,33,53 * * * * *"
 )
 
-// alarmRetentionRouteDeferred names the deadlock in one alarm: route
-// fan-out deferred for consecutive sweeps, so the vault's only drain is
-// stopped (gastrolog-5ct2av).
-const alarmRetentionRouteDeferred = "retention-route-deferred"
+// alarmRetentionDeferred names the deadlock in one alarm: the vault's
+// configured non-delete disposition (route fan-out or transfer) deferred
+// for consecutive sweeps, so the vault's only drain is stopped
+// (gastrolog-5ct2av; generalized from route-only to cover transfer by
+// gastrolog-2l918).
+const alarmRetentionDeferred = "retention-deferred"
 
 // alarmRetentionUnenforceable names the case a vault's retention_rules ALL
 // resolve to no usable trigger (every referenced policy has none of
@@ -140,14 +142,15 @@ type retentionRunner struct {
 	idleLog logging.Throttle
 
 	// Deferral streak (gastrolog-5ct2av), guarded by mu: consecutive sweeps
-	// whose route fan-out could not run. Pure count, in memory only — a
-	// restart starts a fresh streak. sweepDeferred/sweepRouted are the
+	// whose configured disposition (route fan-out or transfer,
+	// gastrolog-2l918) could not run. Pure count, in memory only — a
+	// restart starts a fresh streak. sweepDeferred/sweepProgressed are the
 	// current sweep's scratch flags, folded into the streak by
 	// finishSweepDeferralState at sweep end.
 	deferralStreak    int
 	lastDeferralCause string
 	sweepDeferred     bool
-	sweepRouted       bool
+	sweepProgressed   bool
 	// sweepMatchedChunks is the current sweep's total policy-matched chunk
 	// count (across all rules, pre-dedup), set once per sweep just before
 	// finishSweepDeferralState folds the scratch state. Read into the
@@ -183,8 +186,22 @@ type retentionRunner struct {
 	// Refreshed on every sweep via retentionTargetForInstance so live config
 	// edits take effect on the next tick. Branches the per-chunk path:
 	// "delete" skips the routing engine entirely, "route" fans records
-	// out for operator-configured routes to forward.
+	// out for operator-configured routes to forward, "transfer" re-homes
+	// the sealed chunk to another vault unchanged (gastrolog-2l918).
 	disposition string
+	// transferTarget is VaultConfig.RetentionTransferTargetVaultID,
+	// refreshed alongside disposition on every sweep. Only meaningful
+	// when disposition == RetentionDispositionTransfer; PutVault
+	// validation guarantees it is non-nil whenever that's true, but
+	// fireTransferEvent re-checks defensively (config can drift between
+	// validation and sweep).
+	transferTarget *glid.GLID
+	// transferReceiptTick, when non-nil, overrides the real-time poll
+	// ticker fireTransferEvent uses while waiting for destination
+	// holder receipts. Tests inject a manually-driven channel so the
+	// stall/success paths are exercised without wall-clock sleeps; nil
+	// means production behavior (a real time.Ticker).
+	transferReceiptTick <-chan time.Time
 
 	now    func() time.Time
 	logger *slog.Logger
@@ -253,7 +270,7 @@ func (o *Orchestrator) retentionSweepAll() {
 			// (gastrolog-1xl29s) — either may be standing when a runner
 			// falls out of this node's active set.
 			if o.alerts != nil {
-				o.alerts.Clear(alarmRetentionRouteDeferred, runner.vaultID.String())
+				o.alerts.Clear(alarmRetentionDeferred, runner.vaultID.String())
 				o.alerts.Clear(alarmRetentionUnenforceable, runner.vaultID.String())
 			}
 			delete(o.retention, key)
@@ -555,6 +572,7 @@ func (o *Orchestrator) retentionRunnerFor(vaultCfg system.VaultConfig, vaultInst
 	runner.vaultName = vaultCfg.Name
 	runner.vaultType = string(vaultCfg.Type)
 	runner.disposition = vaultCfg.ResolveRetentionDisposition()
+	runner.transferTarget = vaultCfg.RetentionTransferTargetVaultID
 	return runner
 }
 
@@ -715,7 +733,7 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 
 	metas, err := r.cm.List()
 	if err != nil {
-		// Deliberately does not touch sweepDeferred/sweepRouted/deferralStreak:
+		// Deliberately does not touch sweepDeferred/sweepProgressed/deferralStreak:
 		// a transient List error is neither a fan-out deferral nor progress,
 		// so the deferral scratch state freezes here (carries whatever the
 		// previous sweep left it at) rather than folding into the streak
@@ -931,33 +949,41 @@ func (r *retentionRunner) noteUnenforceable(triggerLess []string) {
 		"vault", r.vaultName, "trigger_less_policies", strings.Join(triggerLess, ", "))
 }
 
-// noteFanOutDeferral records that this sweep's route fan-out could not run,
-// with an operator-readable cause for the alarm detail.
-func (r *retentionRunner) noteFanOutDeferral(cause string) {
+// noteRetentionDeferral records that this sweep's configured disposition
+// (route fan-out or transfer) could not run, with an operator-readable
+// cause for the alarm detail. Progress and deferral are disposition-
+// agnostic (gastrolog-2l918): route fan-out and transfer feed the same
+// streak.
+func (r *retentionRunner) noteRetentionDeferral(cause string) {
 	r.mu.Lock()
 	r.sweepDeferred = true
 	r.lastDeferralCause = cause
 	r.mu.Unlock()
 }
 
-// noteFanOutProgress records that a chunk completed its route fan-out this
-// sweep — the deadlock, if one was forming, is not standing.
-func (r *retentionRunner) noteFanOutProgress() {
+// noteRetentionProgress records that a chunk completed its configured
+// disposition (route fan-out or transfer) this sweep — the deadlock, if
+// one was forming, is not standing. A successful transfer is progress
+// exactly like a successful route fan-out, per the 33ul6h
+// progress-is-progress fix.
+func (r *retentionRunner) noteRetentionProgress() {
 	r.mu.Lock()
-	r.sweepRouted = true
+	r.sweepProgressed = true
 	r.mu.Unlock()
 }
 
 // finishSweepDeferralState folds the sweep's scratch flags into the streak
-// and drives the retention-route-deferred alarm: raise at the threshold,
-// clear on progress. Called at the end of every sweep on the runner.
+// and drives the retention-deferred alarm (covers both route fan-out and
+// transfer disposition, gastrolog-2l918): raise at the threshold, clear on
+// progress. Called at the end of every sweep on the runner.
 func (r *retentionRunner) finishSweepDeferralState() {
 	r.mu.Lock()
-	deferred, routed, cause := r.sweepDeferred, r.sweepRouted, r.lastDeferralCause
+	deferred, progressed, cause := r.sweepDeferred, r.sweepProgressed, r.lastDeferralCause
 	matchedChunks := r.sweepMatchedChunks
-	r.sweepDeferred, r.sweepRouted = false, false
+	disposition := r.disposition
+	r.sweepDeferred, r.sweepProgressed = false, false
 	switch {
-	case routed:
+	case progressed:
 		r.deferralStreak = 0
 	case deferred:
 		r.deferralStreak++
@@ -971,15 +997,15 @@ func (r *retentionRunner) finishSweepDeferralState() {
 	}
 	key := r.vaultID.String()
 	switch {
-	case routed:
-		r.orch.alerts.Clear(alarmRetentionRouteDeferred, key)
+	case progressed:
+		r.orch.alerts.Clear(alarmRetentionDeferred, key)
 	case deferred && streak >= retentionDeferralAlarmAfter:
-		r.orch.alerts.Raise(alarmRetentionRouteDeferred, key, fmt.Sprintf(
-			"%d chunks past policy are waiting. Retention route fan-out for vault %s has been deferred for %d consecutive sweeps: %s. "+
+		r.orch.alerts.Raise(alarmRetentionDeferred, key, fmt.Sprintf(
+			"%d chunks past policy are waiting. Retention %s for vault %s has been deferred for %d consecutive sweeps: %s. "+
 				"Expired chunks are retained and any size caps stay engaged until the drain runs. "+
-				"Free space on the starved volume, drain or grow the destination vault, or — last resort, "+
-				"discards the routed records — set this vault's retention disposition to delete.",
-			matchedChunks, name, streak, cause))
+				"Free space on the starved volume, drain or grow the destination/target vault, or — last resort, "+
+				"discards the records — set this vault's retention disposition to delete.",
+			matchedChunks, dispositionActionName(disposition), name, streak, cause))
 	}
 }
 
@@ -1108,7 +1134,7 @@ func (r *retentionRunner) tryRetainChunk(id chunk.ChunkID, b retentionRule, alre
 		// delete, and a delete-disposition sweep that successfully destroys
 		// a chunk is freeing space exactly as intended — that is progress
 		// by definition, not just a completed route fan-out.
-		r.noteFanOutProgress()
+		r.noteRetentionProgress()
 		// Mark as retention-pending in vault-ctl Raft so all nodes see it —
 		// but ONLY if the FSM doesn't already carry the flag. Skipping the
 		// redundant Apply when the action stalls (transition unreachable
@@ -1146,21 +1172,38 @@ func (r *retentionRunner) markRetentionPending(id chunk.ChunkID) bool {
 	return true
 }
 
-// applyRetentionDispositionToChunk runs the chunk's records through the
-// routing engine when the vault's disposition is "route"; otherwise it
-// is a no-op. Returns false when the fan-out was aborted before
-// completing (shutdown, stopped pipeline) — the caller must then leave
-// the chunk untouched so a later sweep retries the route from scratch
-// (gastrolog-5034va). On true the caller destroys the chunk via
-// expireChunk regardless of disposition. Extracted so tests can
-// verify the disposition gate without standing up the full
-// expire-chunk machinery (which needs a reconciler, Raft, etc.). See
-// gastrolog-18du3.
+// applyRetentionDispositionToChunk runs the chunk through the vault's
+// configured non-delete disposition — "route" fans its records through the
+// routing engine, "transfer" re-homes the sealed chunk to another vault
+// unchanged (gastrolog-2l918) — or is a no-op for "delete". Returns false
+// when the action was aborted before completing (shutdown, stopped
+// pipeline, stalled destination receipts) — the caller must then leave the
+// chunk untouched so a later sweep retries from scratch (gastrolog-5034va).
+// On true the caller destroys the LOCAL chunk via expireChunk regardless of
+// disposition — for transfer this is a pure local-copy delete, since the
+// data now lives on at the destination. Extracted so tests can verify the
+// disposition gate without standing up the full expire-chunk machinery
+// (which needs a reconciler, Raft, etc.). See gastrolog-18du3.
 func (r *retentionRunner) applyRetentionDispositionToChunk(id chunk.ChunkID) bool {
-	if r.disposition == system.RetentionDispositionRoute {
+	switch r.disposition {
+	case system.RetentionDispositionRoute:
 		return r.fireRetentionEvent(id)
+	case system.RetentionDispositionTransfer:
+		return r.fireTransferEvent(id)
+	default:
+		return true
 	}
-	return true
+}
+
+// dispositionActionName renders a disposition value for the shared
+// retention-deferred alarm text, naming which mechanism stalled.
+func dispositionActionName(disposition string) string {
+	switch disposition {
+	case system.RetentionDispositionTransfer:
+		return "transfer"
+	default:
+		return "route fan-out"
+	}
 }
 
 // fireRetentionEvent streams the chunk's records through the routing
@@ -1225,7 +1268,7 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 			r.logger.Warn("retention: route fan-out deferred — drain gate engaged below the disk floor; chunk retained for a later sweep",
 				"vault", r.vaultID, "suppressed", n)
 		}
-		r.noteFanOutDeferral("drain gate engaged (node below its disk floor)")
+		r.noteRetentionDeferral("drain gate engaged (node below its disk floor)")
 		return false
 	}
 	// No vault instance (or no chunk manager) means the records cannot be
@@ -1238,7 +1281,7 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 	if vaultInst == nil || vaultInst.Chunks == nil {
 		r.logger.Warn("retention: no vault instance for fan-out; chunk retained for a later sweep",
 			"vault", r.vaultID, "chunk", id)
-		r.noteFanOutDeferral("vault instance unavailable on the sweeping node")
+		r.noteRetentionDeferral("vault instance unavailable on the sweeping node")
 		return false
 	}
 
@@ -1276,7 +1319,7 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 			aborted.Store(true)
 			r.logger.Warn("retention: fan-out aborted; chunk will re-route on a later sweep",
 				"vault", r.vaultID, "chunk", id, "error", cause)
-			r.noteFanOutDeferral(cause.Error())
+			r.noteRetentionDeferral(cause.Error())
 			cancel()
 		})
 	}

@@ -371,11 +371,25 @@ message ManifestEntry {
   bytes hash = 20;
   bytes cloud_service_id = 21;
   uint32 key_scheme = 22;
-  // Wall-clock time when sealing completed (CmdSealChunk apply).
+  // Wall-clock time when sealing completed (CmdSealChunk apply). For a
+  // chunk introduced by retention transfer disposition, this is the
+  // destination-side arrival time (fresh anchor), NOT the source's
+  // original seal time — see gastrolog-2l918 decision #6.
   int64 sealed_at_nanos = 23;
   // Node IDs holding verified GLCB bytes for this chunk (AckChunkHolder /
   // RevokeChunkHolder). Residency truth — placement says who SHOULD hold.
   repeated string holders = 24;
+  // Non-nil only for a chunk introduced via retention transfer disposition
+  // (CmdRepatriateChunk from a different vault's retention runner, not a
+  // local orphan recovery): the vault ID this chunk's bytes still need to
+  // be pulled FROM. Empty for every normally-chunked or same-vault
+  // repatriated entry. Lets the GLCB replica catch-up sweep
+  // (pullMissingGLCB) address its pull at the SOURCE vault's chunk root
+  // instead of this (destination) vault's own placement peers — the seam
+  // that makes "destination homes pull the chunk" work across vaults
+  // without a parallel transfer-fetch mechanism. See
+  // docs/retention-transfer-disposition-design.md.
+  bytes transfer_source_vault_id = 25;
 }
 
 // Tombstone records a deleted chunk ID and the apply time of the delete.

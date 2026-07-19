@@ -166,6 +166,15 @@ type ManifestEntry struct {
 	// by Get/List never race with later applies.
 	Holders []string
 
+	// TransferSourceVaultID is non-zero only for a chunk introduced via
+	// retention transfer disposition (gastrolog-2l918): the vault ID this
+	// chunk's bytes still need to be pulled FROM. Zero value for every
+	// normally-chunked or same-vault repatriated entry. Consulted by the
+	// GLCB replica catch-up sweep (pullMissingGLCB) to address its pull
+	// at the SOURCE vault's chunk root instead of this vault's own
+	// placement peers.
+	TransferSourceVaultID glid.GLID
+
 	// IngestTSMonotonic is true when records were appended in IngestTS-
 	// ascending order; the histogram fast path uses position-as-rank only
 	// when this is true. Set by CmdSealChunk from the chunk manager's
@@ -1738,31 +1747,42 @@ func MarshalRepatriateChunk(entry ManifestEntry) ([]byte, error) {
 // carrying every field including Hash / CloudServiceID / KeyScheme.
 func entryToProto(e *ManifestEntry) *gastrologv1.ManifestEntry {
 	return &gastrologv1.ManifestEntry{
-		Id:                e.ID[:],
-		WriteStartNanos:   e.WriteStart.UnixNano(),
-		WriteEndNanos:     e.WriteEnd.UnixNano(),
-		RecordCount:       e.RecordCount,
-		Bytes:             e.Bytes,
-		State:             gastrologv1.ChunkState(e.State),
-		DiskBytes:         e.DiskBytes,
-		IngestStartNanos:  e.IngestStart.UnixNano(),
-		IngestEndNanos:    e.IngestEnd.UnixNano(),
-		SourceStartNanos:  e.SourceStart.UnixNano(),
-		SourceEndNanos:    e.SourceEnd.UnixNano(),
-		IngestTsMonotonic: e.IngestTSMonotonic,
-		CloudBacked:       e.CloudBacked,
-		Archived:          e.Archived,
-		RetentionPending:  e.RetentionPending,
-		IngestIdxOffset:   e.IngestIdxOffset,
-		IngestIdxSize:     e.IngestIdxSize,
-		SourceIdxOffset:   e.SourceIdxOffset,
-		SourceIdxSize:     e.SourceIdxSize,
-		Hash:              e.Hash[:],
-		CloudServiceId:    e.CloudServiceID[:],
-		KeyScheme:         uint32(e.KeyScheme),
-		SealedAtNanos:     e.SealedAt.UnixNano(),
-		Holders:           slices.Clone(e.Holders),
+		Id:                    e.ID[:],
+		WriteStartNanos:       e.WriteStart.UnixNano(),
+		WriteEndNanos:         e.WriteEnd.UnixNano(),
+		RecordCount:           e.RecordCount,
+		Bytes:                 e.Bytes,
+		State:                 gastrologv1.ChunkState(e.State),
+		DiskBytes:             e.DiskBytes,
+		IngestStartNanos:      e.IngestStart.UnixNano(),
+		IngestEndNanos:        e.IngestEnd.UnixNano(),
+		SourceStartNanos:      e.SourceStart.UnixNano(),
+		SourceEndNanos:        e.SourceEnd.UnixNano(),
+		IngestTsMonotonic:     e.IngestTSMonotonic,
+		CloudBacked:           e.CloudBacked,
+		Archived:              e.Archived,
+		RetentionPending:      e.RetentionPending,
+		IngestIdxOffset:       e.IngestIdxOffset,
+		IngestIdxSize:         e.IngestIdxSize,
+		SourceIdxOffset:       e.SourceIdxOffset,
+		SourceIdxSize:         e.SourceIdxSize,
+		Hash:                  e.Hash[:],
+		CloudServiceId:        e.CloudServiceID[:],
+		KeyScheme:             uint32(e.KeyScheme),
+		SealedAtNanos:         e.SealedAt.UnixNano(),
+		Holders:               slices.Clone(e.Holders),
+		TransferSourceVaultId: glid.OptionalToProto(nonZeroGLID(e.TransferSourceVaultID)),
 	}
+}
+
+// nonZeroGLID returns nil for the zero GLID and &g otherwise, so
+// glid.OptionalToProto round-trips "no transfer source" as an empty proto
+// bytes field rather than encoding 16 zero bytes.
+func nonZeroGLID(g glid.GLID) *glid.GLID {
+	if g.IsZero() {
+		return nil
+	}
+	return &g
 }
 
 // entryFromProto converts a proto ManifestEntry back to the Go struct.
@@ -1793,6 +1813,9 @@ func entryFromProto(p *gastrologv1.ManifestEntry) ManifestEntry {
 		Holders:           slices.Clone(p.GetHolders()),
 	}
 	copy(e.Hash[:], p.GetHash())
+	if src := glid.OptionalFromProto(p.GetTransferSourceVaultId()); src != nil {
+		e.TransferSourceVaultID = *src
+	}
 	return e
 }
 

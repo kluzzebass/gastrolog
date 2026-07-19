@@ -132,6 +132,54 @@ func validateVaultExpressions(vaultCfg *system.VaultConfig) *connect.Error {
 	return nil
 }
 
+// validateRetentionTransferDisposition enforces the gastrolog-2l918
+// transfer-disposition config rules at write time, not at retention-sweep
+// time: disposition "transfer" requires a target vault ID; the target must
+// not be the source vault (self-transfer is the cascade footgun — a
+// transferred chunk would immediately re-qualify for the same rule); and
+// per spec decision #4, transfer is file → file only (cloud-backed and
+// memory vaults have different at-rest forms and lifecycle machinery, so
+// their pairing with transfer is an explicit config error rather than a
+// runtime surprise on the first retention sweep). vaults is the
+// already-loaded vault list (existing vaults, for the target lookup);
+// vaultCfg is the (already resolved) incoming config.
+func validateRetentionTransferDisposition(vaultCfg system.VaultConfig, vaults []system.VaultConfig) *connect.Error {
+	if vaultCfg.ResolveRetentionDisposition() != system.RetentionDispositionTransfer {
+		return nil
+	}
+	if vaultCfg.RetentionTransferTargetVaultID == nil {
+		return errInvalidArg(fmt.Errorf(
+			"vault %q: retention_disposition=transfer requires a retention_transfer_target_vault_id", vaultCfg.Name))
+	}
+	targetID := *vaultCfg.RetentionTransferTargetVaultID
+	if targetID == vaultCfg.ID {
+		return errInvalidArg(fmt.Errorf(
+			"vault %q: retention transfer target cannot be the vault itself (self-transfer is a retention cascade)", vaultCfg.Name))
+	}
+	var target *system.VaultConfig
+	for i := range vaults {
+		if vaults[i].ID == targetID {
+			target = &vaults[i]
+			break
+		}
+	}
+	if target == nil {
+		return errInvalidArg(fmt.Errorf(
+			"vault %q: retention transfer target %s not found", vaultCfg.Name, targetID))
+	}
+	if vaultCfg.Type != system.VaultTypeFile || vaultCfg.IsCloud() {
+		return errInvalidArg(fmt.Errorf(
+			"vault %q: retention_disposition=transfer requires a plain file-typed source vault (got %s, cloud=%t) — cloud-backed and memory vaults have different at-rest forms and lifecycle machinery",
+			vaultCfg.Name, vaultCfg.Type, vaultCfg.IsCloud()))
+	}
+	if target.Type != system.VaultTypeFile || target.IsCloud() {
+		return errInvalidArg(fmt.Errorf(
+			"vault %q: retention transfer target %q must be a plain file vault (got %s, cloud=%t) — cloud-backed and memory vaults have different at-rest forms and lifecycle machinery",
+			vaultCfg.Name, target.Name, target.Type, target.IsCloud()))
+	}
+	return nil
+}
+
 // checkVaultShapeImmutable rejects PutVault when an existing vault's shape
 // fields (type, cloud_service_id) would change. New vaults pass through —
 // the existing-vault lookup returns nil and we have nothing to compare.
@@ -207,6 +255,9 @@ func (s *SystemServer) PutVault(
 		return nil, connErr
 	}
 	if connErr := validateVaultExpressions(&vaultCfg); connErr != nil {
+		return nil, connErr
+	}
+	if connErr := validateRetentionTransferDisposition(vaultCfg, vaults); connErr != nil {
 		return nil, connErr
 	}
 

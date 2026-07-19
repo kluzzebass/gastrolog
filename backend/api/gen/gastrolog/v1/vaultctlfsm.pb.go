@@ -2732,13 +2732,27 @@ type ManifestEntry struct {
 	Hash              []byte                 `protobuf:"bytes,20,opt,name=hash,proto3" json:"hash,omitempty"`
 	CloudServiceId    []byte                 `protobuf:"bytes,21,opt,name=cloud_service_id,json=cloudServiceId,proto3" json:"cloud_service_id,omitempty"`
 	KeyScheme         uint32                 `protobuf:"varint,22,opt,name=key_scheme,json=keyScheme,proto3" json:"key_scheme,omitempty"`
-	// Wall-clock time when sealing completed (CmdSealChunk apply).
+	// Wall-clock time when sealing completed (CmdSealChunk apply). For a
+	// chunk introduced by retention transfer disposition, this is the
+	// destination-side arrival time (fresh anchor), NOT the source's
+	// original seal time — see gastrolog-2l918 decision #6.
 	SealedAtNanos int64 `protobuf:"varint,23,opt,name=sealed_at_nanos,json=sealedAtNanos,proto3" json:"sealed_at_nanos,omitempty"`
 	// Node IDs holding verified GLCB bytes for this chunk (AckChunkHolder /
 	// RevokeChunkHolder). Residency truth — placement says who SHOULD hold.
-	Holders       []string `protobuf:"bytes,24,rep,name=holders,proto3" json:"holders,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Holders []string `protobuf:"bytes,24,rep,name=holders,proto3" json:"holders,omitempty"`
+	// Non-nil only for a chunk introduced via retention transfer disposition
+	// (CmdRepatriateChunk from a different vault's retention runner, not a
+	// local orphan recovery): the vault ID this chunk's bytes still need to
+	// be pulled FROM. Empty for every normally-chunked or same-vault
+	// repatriated entry. Lets the GLCB replica catch-up sweep
+	// (pullMissingGLCB) address its pull at the SOURCE vault's chunk root
+	// instead of this (destination) vault's own placement peers — the seam
+	// that makes "destination homes pull the chunk" work across vaults
+	// without a parallel transfer-fetch mechanism. See
+	// docs/retention-transfer-disposition-design.md.
+	TransferSourceVaultId []byte `protobuf:"bytes,25,opt,name=transfer_source_vault_id,json=transferSourceVaultId,proto3" json:"transfer_source_vault_id,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *ManifestEntry) Reset() {
@@ -2935,6 +2949,13 @@ func (x *ManifestEntry) GetSealedAtNanos() int64 {
 func (x *ManifestEntry) GetHolders() []string {
 	if x != nil {
 		return x.Holders
+	}
+	return nil
+}
+
+func (x *ManifestEntry) GetTransferSourceVaultId() []byte {
+	if x != nil {
+		return x.TransferSourceVaultId
 	}
 	return nil
 }
@@ -3485,7 +3506,7 @@ const file_gastrolog_v1_vaultctlfsm_proto_rawDesc = "" +
 	"\anode_id\x18\x02 \x01(\tR\x06nodeId\"P\n" +
 	"\x18RevokeChunkHolderCommand\x12\x1b\n" +
 	"\tchunk_ids\x18\x01 \x03(\fR\bchunkIds\x12\x17\n" +
-	"\anode_id\x18\x02 \x01(\tR\x06nodeId\"\x8e\a\n" +
+	"\anode_id\x18\x02 \x01(\tR\x06nodeId\"\xc7\a\n" +
 	"\rManifestEntry\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12*\n" +
 	"\x11write_start_nanos\x18\x02 \x01(\x03R\x0fwriteStartNanos\x12&\n" +
@@ -3513,7 +3534,8 @@ const file_gastrolog_v1_vaultctlfsm_proto_rawDesc = "" +
 	"\n" +
 	"key_scheme\x18\x16 \x01(\rR\tkeyScheme\x12&\n" +
 	"\x0fsealed_at_nanos\x18\x17 \x01(\x03R\rsealedAtNanos\x12\x18\n" +
-	"\aholders\x18\x18 \x03(\tR\aholders\"P\n" +
+	"\aholders\x18\x18 \x03(\tR\aholders\x127\n" +
+	"\x18transfer_source_vault_id\x18\x19 \x01(\fR\x15transferSourceVaultId\"P\n" +
 	"\tTombstone\x12\x19\n" +
 	"\bchunk_id\x18\x01 \x01(\fR\achunkId\x12(\n" +
 	"\x10deleted_at_nanos\x18\x02 \x01(\x03R\x0edeletedAtNanos\"\x93\x01\n" +

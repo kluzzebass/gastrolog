@@ -32,6 +32,18 @@ const maxConcurrentGLCBPulls = 4
 // back to holding its replica — without this, retention starves forever
 // while the manifest still reports the home as a holder.
 //
+// Doubles as the destination-side half of retention transfer disposition
+// (gastrolog-2l918): when e.TransferSourceVaultID is set, this entry
+// arrived via announce-import (CmdRepatriateChunk proposed by the SOURCE
+// vault's retention runner) rather than local chunking, and no peer of
+// THIS (destination) vault has the bytes yet — only nodes holding the
+// SOURCE vault's placement do. glcbSourceVaultID/glcbPullSources address
+// the pull at the source vault while the local write path (glcbPath,
+// registration, holder receipt) stays this — the destination's — own
+// vault throughout, exactly like same-vault replica catch-up. This is the
+// seam that makes "destination homes pull the chunk" work across vaults
+// without a parallel transfer-fetch mechanism.
+//
 // No-op when the file exists, the vault has no pipeline home registration
 // here, a pull for the chunk is already in flight, or the in-flight cap is
 // reached (the next sweep tick retries). The pull itself runs as a one-time
@@ -91,6 +103,14 @@ func (o *Orchestrator) pullMissingGLCB(vaultID glid.GLID, e vaultctlfsm.Manifest
 	o.glcbPullInflight[e.ID] = true
 	o.glcbPullMu.Unlock()
 
+	// The pull's SOURCE vault is normally this same vault (same-vault
+	// replica catch-up); a transfer-introduced entry pulls from the
+	// vault it was transferred FROM instead — see the doc comment above.
+	sourceVaultID := vaultID
+	if !e.TransferSourceVaultID.IsZero() {
+		sourceVaultID = e.TransferSourceVaultID
+	}
+
 	name := fmt.Sprintf("glcb-catchup:%s:%s", vaultID, e.ID)
 	err := o.scheduler.RunOnce(name, func() {
 		defer func() {
@@ -98,7 +118,7 @@ func (o *Orchestrator) pullMissingGLCB(vaultID glid.GLID, e vaultctlfsm.Manifest
 			delete(o.glcbPullInflight, e.ID)
 			o.glcbPullMu.Unlock()
 		}()
-		o.runGLCBPull(vaultID, e, glcbPath)
+		o.runGLCBPull(vaultID, sourceVaultID, e, glcbPath) // destVaultID=vaultID, sourceVaultID may differ (transfer)
 	})
 	if err != nil {
 		o.glcbPullMu.Lock()
@@ -111,13 +131,19 @@ func (o *Orchestrator) pullMissingGLCB(vaultID glid.GLID, e vaultctlfsm.Manifest
 
 // runGLCBPull tries each peer home in placement order until one supplies a
 // verified GLCB, then registers the chunk so query and retention see it.
-func (o *Orchestrator) runGLCBPull(vaultID glid.GLID, e vaultctlfsm.ManifestEntry, glcbPath string) {
-	sources := o.glcbPullSources(vaultID)
+// destVaultID is the vault whose manifest entry e belongs to (and whose
+// local reconciler/chunk-manager gets the registration + holder receipt);
+// sourceVaultID is whose placement/bytes to pull FROM — equal to
+// destVaultID for ordinary same-vault replica catch-up, and the transfer's
+// source vault for a transfer-introduced entry (gastrolog-2l918; see
+// pullMissingGLCB).
+func (o *Orchestrator) runGLCBPull(destVaultID, sourceVaultID glid.GLID, e vaultctlfsm.ManifestEntry, glcbPath string) {
+	sources := o.glcbPullSources(sourceVaultID)
 	if len(sources) == 0 {
 		return
 	}
 	if o.stageEvents != nil {
-		o.stageEvents.recordGLCBPullAttempt(vaultID)
+		o.stageEvents.recordGLCBPullAttempt(destVaultID)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), glcbPullTimeout)
@@ -125,21 +151,21 @@ func (o *Orchestrator) runGLCBPull(vaultID glid.GLID, e vaultctlfsm.ManifestEntr
 
 	var lastErr error
 	for _, node := range sources {
-		if err := o.pullGLCBFromNode(ctx, node, vaultID, e, glcbPath); err != nil {
+		if err := o.pullGLCBFromNode(ctx, node, sourceVaultID, e, glcbPath); err != nil {
 			lastErr = err
 			continue
 		}
 		o.logger.Info("GLCB replica recovered from peer",
-			"vault", vaultID, "chunk", e.ID, "from", node)
+			"vault", destVaultID, "source_vault", sourceVaultID, "chunk", e.ID, "from", node)
 		// A verified copy is back on the canonical path: clear any
 		// corrupt-GLCB quarantine + alert chunking raised for this chunk
 		// (gastrolog-687m11). No-op when the miss was a plain byte loss.
 		if o.pipeline != nil {
-			o.pipeline.NoteGLCBRestored(vaultID, e.ID)
+			o.pipeline.NoteGLCBRestored(destVaultID, e.ID)
 		}
 		o.mu.RLock()
 		var rec *VaultLifecycleReconciler
-		if vault := o.vaults[vaultID]; vault != nil && vault.Instance != nil {
+		if vault := o.vaults[destVaultID]; vault != nil && vault.Instance != nil {
 			rec = vault.Instance.Reconciler
 		}
 		o.mu.RUnlock()
@@ -152,18 +178,20 @@ func (o *Orchestrator) runGLCBPull(vaultID glid.GLID, e vaultctlfsm.ManifestEntr
 	// heal on the next sweep tick; a chunk NO home can supply is a durability
 	// incident that shows up here repeatedly until someone restores a copy.
 	if o.stageEvents != nil {
-		o.stageEvents.recordGLCBPullFailed(vaultID)
+		o.stageEvents.recordGLCBPullFailed(destVaultID)
 	}
-	if n, ok := o.registerSkipLog.Allow(vaultID.String() + ":glcb-pull"); ok {
+	if n, ok := o.registerSkipLog.Allow(destVaultID.String() + ":glcb-pull"); ok {
 		o.logger.Warn("GLCB replica pull failed from every peer",
-			"vault", vaultID, "chunk", e.ID, "peers", len(sources),
+			"vault", destVaultID, "source_vault", sourceVaultID, "chunk", e.ID, "peers", len(sources),
 			"error", lastErr, "suppressed", n)
 	}
 }
 
 // pullGLCBFromNode streams one GLCB to a temp file next to its final
 // location (same convention as BuildGLCBFile's dot-prefixed temps, which
-// sweeps ignore), verifies, and promotes.
+// sweeps ignore), verifies, and promotes. vaultID addresses the RPC (whose
+// chunk root the peer serves FROM) — the source vault; may differ from the
+// entry's own vault for a transfer-introduced entry.
 func (o *Orchestrator) pullGLCBFromNode(ctx context.Context, node string, vaultID glid.GLID, e vaultctlfsm.ManifestEntry, glcbPath string) error {
 	if err := os.MkdirAll(filepath.Dir(glcbPath), 0o750); err != nil {
 		return err
