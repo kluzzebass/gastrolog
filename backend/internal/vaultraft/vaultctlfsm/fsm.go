@@ -126,6 +126,19 @@ const (
 	// CmdRevokeChunkHolder withdraws a holder claim after the node
 	// stat-missed the bytes it was recorded as holding. Idempotent.
 	CmdRevokeChunkHolder Command = 23
+
+	// CmdClearTransferSource clears a manifest entry's
+	// TransferSourceVaultID once the destination has confirmed enough
+	// holder receipts that the source vault is about to expire its own
+	// copies. Proposed by the SOURCE vault's retention runner against
+	// the DESTINATION vault's FSM, right before the source's local
+	// expire (gastrolog-2l918 review finding 1). Idempotent; a no-op if
+	// the entry is missing or the field is already clear. See
+	// pullMissingGLCB / runGLCBPull (glcb_catchup.go) for the defense-
+	// in-depth other half: a holder-set fallback when this clear was
+	// missed (crash, apply failure) and a pull still gets addressed at
+	// an already-expired source.
+	CmdClearTransferSource Command = 25
 )
 
 // ManifestEntry holds the full metadata for one chunk in this vault's
@@ -172,7 +185,15 @@ type ManifestEntry struct {
 	// normally-chunked or same-vault repatriated entry. Consulted by the
 	// GLCB replica catch-up sweep (pullMissingGLCB) to address its pull
 	// at the SOURCE vault's chunk root instead of this vault's own
-	// placement peers.
+	// placement peers. Cleared (CmdClearTransferSource) by the source's
+	// retention runner once destination receipts meet RF, right before
+	// the source expires its own copies — left set past that point,
+	// every FUTURE replica-repair pull would keep addressing a vault
+	// that has nothing left to give. pullMissingGLCB / runGLCBPull carry
+	// a holder-set fallback as defense in depth for a missed clear (a
+	// crash between receipts-met and the clear). See
+	// docs/retention-transfer-disposition-design.md "Replica repair
+	// after completion".
 	TransferSourceVaultID glid.GLID
 
 	// IngestTSMonotonic is true when records were appended in IngestTS-
@@ -1094,6 +1115,8 @@ func (f *FSM) applyLocked(cmd *gastrologv1.VaultCtlCommand) (any, applyEffects) 
 		// (retention, indexes, etc.) reacts identically to a normal
 		// CmdCreateChunk path.
 		fx.createdEntry = f.captureEntry(result, chunkIDFromProto(c.RepatriateChunk.GetEntry().GetId()))
+	case *gastrologv1.VaultCtlCommand_ClearTransferSource:
+		result = f.applyClearTransferSource(c.ClearTransferSource)
 	default:
 		var ok bool
 		result, fx, ok = f.tryApplySegmentPipelineLocked(cmd)
@@ -1534,6 +1557,21 @@ func (f *FSM) applyRepatriate(c *gastrologv1.RepatriateChunkCommand) error {
 	return nil
 }
 
+// applyClearTransferSource clears a manifest entry's TransferSourceVaultID.
+// Idempotent: a no-op (nil error, no state change) when the entry doesn't
+// exist or the field is already the zero GLID — a replayed or retried
+// clear must never error. See CmdClearTransferSource and
+// gastrolog-2l918 review finding 1.
+func (f *FSM) applyClearTransferSource(c *gastrologv1.ClearTransferSourceCommand) error {
+	id := chunkIDFromProto(c.GetChunkId())
+	e := f.chunks[id]
+	if e == nil || e.TransferSourceVaultID.IsZero() {
+		return nil
+	}
+	e.TransferSourceVaultID = glid.GLID{}
+	return nil
+}
+
 // AttachOffsets: [16 ChunkID][8 IngestIdxOff][8 IngestIdxSize][8 SourceIdxOff][8 SourceIdxSize]
 //
 // Fired after sealToGLCB on the leader (and after finalizeImportedChunk
@@ -1741,6 +1779,18 @@ func NewRepatriateChunk(entry ManifestEntry) *gastrologv1.VaultCtlCommand {
 // proto build cannot fail.
 func MarshalRepatriateChunk(entry ManifestEntry) ([]byte, error) {
 	return mustMarshalCommand(NewRepatriateChunk(entry)), nil
+}
+
+// NewClearTransferSource builds a ClearTransferSource command message. See
+// CmdClearTransferSource.
+func NewClearTransferSource(id chunk.ChunkID) *gastrologv1.VaultCtlCommand {
+	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_ClearTransferSource{ClearTransferSource: &gastrologv1.ClearTransferSourceCommand{ChunkId: id[:]}}}
+}
+
+// MarshalClearTransferSource builds the Raft log data for a
+// ClearTransferSource command.
+func MarshalClearTransferSource(id chunk.ChunkID) []byte {
+	return mustMarshalCommand(NewClearTransferSource(id))
 }
 
 // entryToProto converts a ManifestEntry to its proto representation,

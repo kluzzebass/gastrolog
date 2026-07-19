@@ -71,6 +71,7 @@ message VaultCtlCommand {
     AckChunkHolderCommand ack_chunk_holder = 22;
     RevokeChunkHolderCommand revoke_chunk_holder = 23;
     DiscardUnbuildableManifestsCommand discard_unbuildable_manifests = 24;
+    ClearTransferSourceCommand clear_transfer_source = 25;
   }
 }
 
@@ -341,6 +342,20 @@ message AckChunkHolderCommand {
 message RevokeChunkHolderCommand {
   repeated bytes chunk_ids = 1;
   string node_id = 2;
+}
+
+// ClearTransferSourceCommand clears a manifest entry's
+// transfer_source_vault_id once the destination has confirmed enough
+// holder receipts that the source vault is about to expire its own
+// copies. Proposed by the SOURCE vault's retention runner against the
+// DESTINATION vault's FSM, right before the source's local expire
+// (gastrolog-2l918 review finding 1): without this, an entry whose
+// source vault later deletes its copies keeps pointing replica-repair
+// pulls (pullMissingGLCB / runGLCBPull) at a vault that has nothing left
+// to give, permanently defeating self-healing for transferred chunks.
+// No-op if the entry doesn't exist or the field is already clear.
+message ClearTransferSourceCommand {
+  bytes chunk_id = 1;
 }
 
 // ---------- Snapshot (replaces the 5 hand-rolled sections) ------------------
