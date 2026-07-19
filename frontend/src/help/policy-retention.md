@@ -7,20 +7,19 @@ A retention policy defines **when** sealed chunks fire a retention event. Multip
 | Condition | Config field | Description | Example |
 |-----------|-------------|-------------|---------|
 | **TTL** | `maxAge` | Fire when chunks age past this duration | `720h` (30 days) |
-| **Total size** | `maxBytes` | Keep the retained store's local disk claim under this limit, firing on oldest chunks first | `10GB` |
+| **Max size** | `maxSize` | The vault's disk-claim bound (sealed chunks, indexes, pipeline segment backlog) — combined meaning, below | `10GB` |
 | **Chunk count** | `maxChunks` | Keep at most this many sealed chunks, firing on oldest excess | `100` |
 
-## Size Budget
+## Max Size
 
-A retention policy can also carry a **Size Budget** — a per-node byte budget for the *whole local disk claim* of any vault this policy is attached to: sealed chunks, indexes, and pipeline segment backlog. This is a different mechanism from the conditions above: it does not itself fire a retention event or destroy anything.
+**Max size** is the vault's disk-claim bound, and it means two things at once:
 
-At the budget, the cluster **refuses** new records for the vault (cap-and-refuse: everything already accepted is kept, the newest is nacked) until retention — the conditions above — drains the vault's disk claim back under the budget. This is the opposite durability trade from a size drain trigger (**Total size**, above), which keeps the newest by destroying the oldest (cap-and-drain). Set a size drain trigger *below* the Size Budget so retention drains ahead of the cap, with the budget as the hard backstop. A warning alarm raises at 90% of the budget.
+- **Drain:** oldest sealed chunks fire retention events once the vault's local disk claim exceeds the bound.
+- **Refuse:** while the vault's local disk claim is at or over the bound, the cluster **refuses** new records for the vault (everything already accepted is kept, the newest is nacked) — the backstop while drain catches up or is deferred. A warning alarm raises at 90% of the bound.
 
-A policy that sets **only** a Size Budget, with no drain condition, is legal and meaningful — the refuse bound applies even though the policy drains nothing.
+**Min-wins across attached policies:** a vault can attach more than one retention policy. If more than one attached policy carries a max size, the vault's effective bound is the **lowest** of them — the most restrictive bound wins.
 
-**Min-wins across attached policies:** a vault can attach more than one retention policy. If more than one attached policy carries a Size Budget, the vault's effective budget is the **lowest** of them — the most restrictive budget wins.
-
-**Default floor:** a vault with no retention rules, or whose attached policies carry no Size Budget at all, still gets a bound — the system default applies. An unbounded file vault is not representable.
+**Default floor:** a vault with no retention rules, or whose attached policies carry no max size at all, still gets a bound — the system default applies, refuse-only (a default never destroys data). An unbounded file vault is not representable.
 
 ## What Happens When a Retention Event Fires
 
@@ -35,7 +34,7 @@ Retention policies are evaluated periodically by a [background scheduler](help:i
 
 1. The policy receives a snapshot of all sealed chunks in the vault
 2. **TTL**: Flags any chunk whose **EndTS** (the WriteTS of its last record) is older than the configured duration
-3. **Total size**: Walks chunks from newest to oldest, keeping those that fit within the byte budget. Everything beyond the budget is flagged.
+3. **Max size**: Walks chunks from newest to oldest, keeping those that fit within the bound. Everything beyond the bound is flagged. (Admission refusal, the other half of max size, runs separately on the disk guard — not part of this sweep.)
 4. **Chunk count**: Keeps the newest N chunks, flags the rest
 5. The union of all flagged chunks fires retention events.
 
@@ -53,7 +52,7 @@ The vault's retention rule itself just specifies the trigger policy. The "what h
 
 ## Example
 
-A retention policy with `maxAge: "720h"` and `maxBytes: "50GB"` will fire on chunks older than 30 days **and** also fire on the oldest chunks if total vault size exceeds 50 GB.
+A retention policy with `maxAge: "720h"` and `maxSize: "50GB"` will fire on chunks older than 30 days **and** also fire on the oldest chunks if the vault's disk claim exceeds 50 GB — and refuse new records while it stays over that bound.
 
 ## Choosing a Strategy
 
@@ -64,11 +63,11 @@ Conditions use union semantics — a chunk fires if **any** condition matches. T
 | Pattern | Configuration | Use case |
 |---------|--------------|----------|
 | **Fixed window** | `maxAge: 720h` (30 days) | Compliance or operational policy — data older than N days is gone |
-| **Budget cap** | `maxBytes: 50GB` | Fixed disk allocation — oldest chunks are evicted when space runs low |
+| **Bound cap** | `maxSize: 50GB` | Fixed disk allocation — oldest chunks drain when space runs low, admission refuses if drain can't keep up |
 | **Rolling window** | `maxChunks: 100` | Keep a fixed number of chunks regardless of size or age |
-| **Belt and suspenders** | `maxAge: 720h` + `maxBytes: 100GB` | TTL for predictable expiry, size cap as a safety net for bursts |
+| **Belt and suspenders** | `maxAge: 720h` + `maxSize: 100GB` | TTL for predictable expiry, size bound as a safety net for bursts |
 
-**Combining TTL with a size trigger:** Use TTL as the primary control and the size drain trigger as a guardrail. Under normal load, TTL governs what gets deleted. During traffic spikes, the size trigger prevents the vault from consuming all available disk before chunks age out.
+**Combining TTL with a size bound:** Use TTL as the primary control and max size as a guardrail. Under normal load, TTL governs what gets deleted. During traffic spikes, the size bound prevents the vault from consuming all available disk before chunks age out — draining what it can and refusing admission if it can't keep up.
 
 **Layered storage via retention-trigger routes:** Instead of dropping old data, re-route it to a cloud-backed vault for long-term archival:
 
