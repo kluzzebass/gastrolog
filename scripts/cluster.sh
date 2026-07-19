@@ -20,6 +20,7 @@
 #   --pprof-debug      With --pprof: enable mutex/block sampling (dev/incident)
 #   GLOG_NO_AUTH       Disable auth when truthy (default: true). Set false/0 to require login.
 #   GLOG_SEGMENT_HOT_PATH_FSYNC  Segmentation group-commit fsync (default: true; set false/0 for load testing)
+#   GLOG_VAULT_MAX_SIZE  Per-node size budget for each bootstrapped vault (default: 50GB).
 #                      Every node holds a full replica, so the volume needs at least NODES x this.
 
 set -euo pipefail
@@ -55,9 +56,9 @@ ENV_COLOR="${GLOG_ENV_COLOR:-limegreen}"
 # 466 GiB volume and deadlocked (gastrolog-2b2yyy, gastrolog-5ct2av): the
 # budget makes the vault refuse records for itself and lets retention
 # drain it.
-# Every node holds a full replica (RF = NODES), so the volume needs at
-# least NODES x this. Edit here for a bigger volume or a smaller laptop.
-VAULT_MAX_SIZE="50GB"
+# Every node holds a full replica (RF = NODES), so the volume needs at least
+# NODES x this. Raise it for a big soak volume; lower it for a laptop.
+VAULT_MAX_SIZE="${GLOG_VAULT_MAX_SIZE:-50GB}"
 SEGMENT_HOT_PATH_FSYNC="${GLOG_SEGMENT_HOT_PATH_FSYNC:-true}"
 
 while [[ $# -gt 0 ]]; do
