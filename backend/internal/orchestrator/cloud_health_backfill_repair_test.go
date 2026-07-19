@@ -491,7 +491,7 @@ func TestBackfillCloudUploads_GLCBAbsentBacksOffWithoutAlarm(t *testing.T) {
 		t.Fatalf("chunk must not be retried before its backoff window elapses, got %d upload calls", got)
 	}
 
-	// Force the entry well past several backoff tiers directly (no
+	// Force the entry well up the backoff ladder directly (no
 	// wall-clock races) — the same escalation depth that would annunciate
 	// an alarm-eligible failure via the catalog's DelayOn. Still no alarm.
 	for range 5 {
