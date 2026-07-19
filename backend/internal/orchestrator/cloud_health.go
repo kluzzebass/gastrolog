@@ -1,7 +1,9 @@
 package orchestrator
 
 import (
+	"errors"
 	"fmt"
+	"time"
 
 	"gastrolog/internal/chunk"
 	"os"
@@ -116,6 +118,12 @@ func (o *Orchestrator) backfillCloudUploads(vaultInst *VaultInstance) {
 	// (post-restart) still need upload backfill (gastrolog-2kmgj6).
 	metas = appendUnlistedManifestSealed(metas, vaultInst)
 
+	// A chunk that dropped out of this vault's raw candidate view since the
+	// last sweep (retention destroyed it, or anything else made it vanish)
+	// must not keep its backoff state or alarm — that would strand both
+	// forever, since a gone chunk is never visited by the loop below again.
+	o.pruneVanishedBackfillFailures(vaultInst.VaultID, metas)
+
 	var backfilled int
 	for _, m := range metas {
 		// Phase 3 (gastrolog-1huz5): gate on FSM-Sealed, not local.
@@ -129,6 +137,14 @@ func (o *Orchestrator) backfillCloudUploads(vaultInst *VaultInstance) {
 		if !m.Sealed || chunkIsCloudBacked(vaultInst, m) {
 			continue
 		}
+		// A chunk with an unexpired backoff window from a prior failure is
+		// not due for retry yet. Skipping the schedule entirely — not just
+		// the upload — is what stops the schedule/complete INFO pair from
+		// flooding the job journal every 5s for a known-failing chunk
+		// (gastrolog-4ryguo).
+		if !o.backfillDue(m.ID) {
+			continue
+		}
 		name := fmt.Sprintf("cloud-backfill:%s:%s", vaultInst.VaultID, m.ID)
 		if o.scheduler.HasPendingPrefix(name) {
 			continue
@@ -136,9 +152,15 @@ func (o *Orchestrator) backfillCloudUploads(vaultInst *VaultInstance) {
 		if err := o.scheduler.RunOnce(name, func(id chunk.ChunkID) error {
 			err := uploader.UploadToCloud(id)
 			if err != nil {
-				o.logBackfillFailure(vaultInst.VaultID, id, err)
+				err = o.repairAndRetryBackfill(vaultInst, id, err, uploader)
 			}
-			return err
+			if err != nil {
+				o.logBackfillFailure(vaultInst.VaultID, id, err)
+				o.markBackfillFailure(vaultInst.VaultID, id, err)
+				return err
+			}
+			o.clearBackfillFailure(id)
+			return nil
 		}, m.ID); err == nil {
 			backfilled++
 		}
@@ -147,6 +169,144 @@ func (o *Orchestrator) backfillCloudUploads(vaultInst *VaultInstance) {
 	if backfilled > 0 {
 		o.cloudHealthLogger.Debug("cloud backfill: scheduled uploads",
 			"vault", vaultInst.VaultID, "count", backfilled)
+	}
+}
+
+// repairAndRetryBackfill detects the registration-missing signature that
+// made this bug permanent (gastrolog-4ryguo): the chunk is FSM-sealed with
+// its GLCB verifiably present on disk, but UploadToCloud failed because the
+// local chunk manager has no registration for it — the lazy-resolution gap
+// the gastrolog-2kmgj6 fix left open (appendUnlistedManifestSealed made the
+// chunk schedulable for backfill, not uploadable). Repairs the registration
+// via the same primitive pipeline sealing uses to register a freshly-built
+// GLCB (VaultLifecycleReconciler.registerPipelineGLCB) and retries the
+// upload once.
+//
+// Returns the original error untouched whenever repair does not apply:
+// wrong error, no reconciler, no manifest entry, or the GLCB genuinely
+// absent from disk (e.g. deleted out from under the manifest entry). That
+// last case is not repairable — falling through to backoff instead of
+// retrying here is what keeps it from tight-looping.
+func (o *Orchestrator) repairAndRetryBackfill(vaultInst *VaultInstance, id chunk.ChunkID, uploadErr error, uploader chunk.ChunkCloudUploader) error {
+	if !errors.Is(uploadErr, chunk.ErrChunkNotFound) {
+		return uploadErr
+	}
+	if vaultInst.Reconciler == nil || vaultInst.ManifestEntry == nil {
+		return uploadErr
+	}
+	root, ok := o.pipelineVaultChunkRoot(vaultInst.VaultID)
+	if !ok {
+		return uploadErr
+	}
+	if _, statErr := os.Stat(chunking.ChunkGLCBPath(root, id)); statErr != nil {
+		// Bytes genuinely absent — nothing to repair.
+		return uploadErr
+	}
+	entry, ok := vaultInst.ManifestEntry(id)
+	if !ok {
+		return uploadErr
+	}
+	vaultInst.Reconciler.registerPipelineGLCB(entry)
+	return uploader.UploadToCloud(id)
+}
+
+// backfillFailureEntry tracks per-chunk retry backoff for cloud-backfill
+// uploads that failed and were not resolved by registration repair. Mirrors
+// retention's unreadableEntry (retention.go): a failure schedules the next
+// attempt via the same unreadableBackoff schedule and raises the
+// cloud-backfill-stuck alarm — the catalog's DelayOn keeps a blip that
+// clears on the very next retry from ever annunciating, while a chunk stuck
+// past it does.
+type backfillFailureEntry struct {
+	vaultID   glid.GLID
+	failCount int
+	nextRetry time.Time
+}
+
+// backfillDue reports whether a chunk's cloud-backfill retry is due: no
+// failure on record (never failed, or already cleared), or its backoff
+// window has elapsed.
+func (o *Orchestrator) backfillDue(id chunk.ChunkID) bool {
+	o.backfillMu.Lock()
+	defer o.backfillMu.Unlock()
+	entry := o.backfillFailures[id]
+	if entry == nil {
+		return true
+	}
+	return !o.now().Before(entry.nextRetry)
+}
+
+// markBackfillFailure records a cloud-backfill upload failure that
+// registration repair did not resolve, schedules the next retry via
+// unreadableBackoff, and raises the cloud-backfill-stuck alarm (subject to
+// the catalog's DelayOn suppression).
+func (o *Orchestrator) markBackfillFailure(vaultID glid.GLID, id chunk.ChunkID, cause error) {
+	o.backfillMu.Lock()
+	if o.backfillFailures == nil {
+		o.backfillFailures = make(map[chunk.ChunkID]*backfillFailureEntry)
+	}
+	entry := o.backfillFailures[id]
+	if entry == nil {
+		entry = &backfillFailureEntry{vaultID: vaultID}
+		o.backfillFailures[id] = entry
+	}
+	entry.vaultID = vaultID
+	entry.failCount++
+	entry.nextRetry = o.now().Add(unreadableBackoff(entry.failCount))
+	nextRetry := entry.nextRetry
+	o.backfillMu.Unlock()
+
+	if o.alerts != nil {
+		o.alerts.Raise("cloud-backfill-stuck", id.String(),
+			fmt.Sprintf("Chunk %s in vault %s failed cloud backfill: %v (next retry %s)",
+				id, vaultID, cause, nextRetry.Format(time.RFC3339)))
+	}
+}
+
+// clearBackfillFailure drops a chunk's backfill backoff state and clears
+// its alarm — called on upload success, whether the original attempt
+// succeeded outright or a registration repair's retry did.
+func (o *Orchestrator) clearBackfillFailure(id chunk.ChunkID) {
+	o.backfillMu.Lock()
+	_, had := o.backfillFailures[id]
+	delete(o.backfillFailures, id)
+	o.backfillMu.Unlock()
+	if had && o.alerts != nil {
+		o.alerts.Clear("cloud-backfill-stuck", id.String())
+	}
+}
+
+// pruneVanishedBackfillFailures drops backoff/alarm state for chunks that
+// no longer appear in this vault's raw candidate view (chunk manager List()
+// plus unlisted-manifest-sealed) — the chunk was deleted (retention or
+// otherwise) and is gone for good. Without this, a chunk that fails backfill
+// and is then destroyed would strand its backoff entry and alarm forever:
+// nothing would ever revisit it to clear them. metas is deliberately the
+// pre-filter list (before the Sealed/CloudBacked gate) so a chunk that
+// simply became cloud-backed is still "present" here — its entry clears via
+// the upload-success path instead, not by pruning.
+func (o *Orchestrator) pruneVanishedBackfillFailures(vaultID glid.GLID, metas []chunk.ChunkMeta) {
+	present := make(map[chunk.ChunkID]bool, len(metas))
+	for _, m := range metas {
+		present[m.ID] = true
+	}
+	o.backfillMu.Lock()
+	var vanished []chunk.ChunkID
+	for id, entry := range o.backfillFailures {
+		if entry.vaultID != vaultID || present[id] {
+			continue
+		}
+		vanished = append(vanished, id)
+	}
+	for _, id := range vanished {
+		delete(o.backfillFailures, id)
+	}
+	o.backfillMu.Unlock()
+	if o.alerts == nil {
+		return
+	}
+	for _, id := range vanished {
+		o.alerts.Clear("cloud-backfill-stuck", id.String())
 	}
 }
 
