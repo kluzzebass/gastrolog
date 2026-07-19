@@ -60,7 +60,7 @@ func (o *Orchestrator) localVaultChunkBytes(vaultID glid.GLID) int64 {
 
 // localVaultFootprintBytes is the vault's whole local disk claim — chunk
 // store plus pipeline segment backlog — measured against the vault's
-// max-size budget. Backlog counts by design: the budget bounds everything
+// max-size bound. Backlog counts by design: the bound covers everything
 // the vault holds on this node, not just its retained data.
 func (o *Orchestrator) localVaultFootprintBytes(vaultID glid.GLID) int64 {
 	return o.localVaultChunkBytes(vaultID) + o.localPipelineSegmentStorageBytes(vaultID)

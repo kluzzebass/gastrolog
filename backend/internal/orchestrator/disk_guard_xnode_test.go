@@ -26,7 +26,7 @@ func TestVaultAdmissionGateHonorsPeerBroadcast(t *testing.T) {
 	ttl := time.Minute
 	ps := cluster.NewPeerState(ttl)
 	// Peer "node-a" broadcasts that it has one vault below its disk floor and
-	// one at its size budget.
+	// one at its max-size bound.
 	ps.Update("node-a", &gastrologv1.NodeStats{
 		DiskProtectedVaultIds: [][]byte{protectedElsewhere.ToProto()},
 		SizeCappedVaultIds:    [][]byte{cappedElsewhere.ToProto()},

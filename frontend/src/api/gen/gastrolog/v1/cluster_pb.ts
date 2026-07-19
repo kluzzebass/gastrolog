@@ -745,8 +745,8 @@ export class NodeStats extends Message<NodeStats> {
 
   /**
    * Vaults whose local disk claim on THIS node has reached their per-node
-   * max-size budget. Honored cluster-wide by the same per-vault admission
-   * gate as disk_protected_vault_ids, with a budget-specific error.
+   * max-size bound. Honored cluster-wide by the same per-vault admission
+   * gate as disk_protected_vault_ids, with a bound-specific error.
    *
    * @generated from field: repeated bytes size_capped_vault_ids = 49;
    */

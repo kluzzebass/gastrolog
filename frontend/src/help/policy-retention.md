@@ -7,15 +7,15 @@ A retention policy defines **when** sealed chunks fire a retention event. Multip
 | Condition | Config field | Description | Example |
 |-----------|-------------|-------------|---------|
 | **TTL** | `maxAge` | Fire when chunks age past this duration | `720h` (30 days) |
-| **Max size** | `maxSize` | The vault's disk-claim bound (sealed chunks, indexes, pipeline segment backlog) — combined meaning, below | `10GB` |
+| **Max size** | `maxSize` | The vault's disk-claim bound — combined meaning, below | `10GB` |
 | **Chunk count** | `maxChunks` | Keep at most this many sealed chunks, firing on oldest excess | `100` |
 
 ## Max Size
 
 **Max size** is the vault's disk-claim bound, and it means two things at once:
 
-- **Drain:** oldest sealed chunks fire retention events once the vault's local disk claim exceeds the bound.
-- **Refuse:** while the vault's local disk claim is at or over the bound, the cluster **refuses** new records for the vault (everything already accepted is kept, the newest is nacked) — the backstop while drain catches up or is deferred. A warning alarm raises at 90% of the bound.
+- **Drain:** oldest sealed chunks fire retention events once the **sealed-chunk store's** disk claim exceeds the bound. Scope: only what retention can act on — sealed chunks and their indexes.
+- **Refuse:** while the vault's **whole local footprint** — the sealed-chunk store plus the pipeline segment backlog — is at or over the bound, the cluster **refuses** new records for the vault (everything already accepted is kept, the newest is nacked) — the backstop while drain catches up or is deferred. A warning alarm raises at 90% of the bound.
 
 **Min-wins across attached policies:** a vault can attach more than one retention policy. If more than one attached policy carries a max size, the vault's effective bound is the **lowest** of them — the most restrictive bound wins.
 

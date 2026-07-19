@@ -142,6 +142,112 @@ func TestRetentionTargetClearsUnenforceableAlarmWhenTriggerRestored(t *testing.T
 	}
 }
 
+// TestRetentionTargetMaxSizeOnlyPolicyProducesSweepTargetNoAlarm pins the
+// positive case directly (gastrolog-33ul6h): a policy that sets ONLY
+// MaxSize (no MaxAge/MaxChunks) is a drain policy — it resolves to exactly
+// one SizeRetentionPolicy rule, produces a live sweep target, and never
+// raises retention-unenforceable. "Bound-only" is not a concept anymore; a
+// size-only policy drains, so it never reaches the zero-triggers branch.
+func TestRetentionTargetMaxSizeOnlyPolicyProducesSweepTargetNoAlarm(t *testing.T) {
+	t.Parallel()
+
+	vaultID := glid.New()
+	policyID := glid.New()
+	cfg := &system.Config{
+		Vaults: []system.VaultConfig{{
+			ID:      vaultID,
+			Name:    "first-vault",
+			Enabled: true,
+			RetentionRules: []system.RetentionRule{{
+				RetentionPolicyID: policyID,
+			}},
+		}},
+		RetentionPolicies: []system.RetentionPolicyConfig{{
+			ID:      policyID,
+			Name:    "size-only-policy",
+			MaxSize: strPtr("50GB"),
+			// MaxAge / MaxChunks nil: MaxSize is the policy's only trigger.
+		}},
+	}
+
+	sink := &recordingSink{}
+	logSink := &syncBuffer{}
+	orch := newUnenforceableTestOrch(t, sink, logSink)
+
+	vaultInst := &VaultInstance{VaultID: vaultID, Chunks: &retentionFakeChunkManager{}, Indexes: &retentionFakeIndexManager{}}
+	active := make(map[string]bool)
+
+	target := orch.retentionTargetForInstance(cfg, cfg.Vaults[0], vaultInst, active)
+	if target == nil {
+		t.Fatal("a MaxSize-only policy is a drain policy and must produce a live sweep target")
+	}
+	if len(target.rules) != 1 {
+		t.Fatalf("want exactly 1 resolved rule (the SizeRetentionPolicy), got %d", len(target.rules))
+	}
+
+	sink.mu.Lock()
+	raises := len(sink.raises)
+	sink.mu.Unlock()
+	if raises != 0 {
+		t.Fatalf("a MaxSize-only policy must never raise retention-unenforceable; got %d raises", raises)
+	}
+	if strings.Contains(logSink.String(), "unenforceable") {
+		t.Errorf("a MaxSize-only policy must stay quiet — no unenforceable warn either; got:\n%s", logSink.String())
+	}
+}
+
+// TestRetentionTargetClearsUnenforceableAlarmWhenTriggerRestoredViaMaxSize
+// mirrors TestRetentionTargetClearsUnenforceableAlarmWhenTriggerRestored,
+// restoring the trigger via MaxSize instead of MaxAge: the fold means
+// MaxSize alone is now sufficient to both clear the alarm and produce a
+// live sweep target, exactly like any other trigger field.
+func TestRetentionTargetClearsUnenforceableAlarmWhenTriggerRestoredViaMaxSize(t *testing.T) {
+	t.Parallel()
+
+	vaultID := glid.New()
+	policyID := glid.New()
+	cfg := triggerLessPolicyCfg(vaultID, policyID, "first-vault", "no-op-policy")
+
+	sink := &recordingSink{}
+	orch := newUnenforceableTestOrch(t, sink, &syncBuffer{})
+
+	vaultInst := &VaultInstance{VaultID: vaultID, Chunks: &retentionFakeChunkManager{}, Indexes: &retentionFakeIndexManager{}}
+	active := make(map[string]bool)
+
+	if target := orch.retentionTargetForInstance(cfg, cfg.Vaults[0], vaultInst, active); target != nil {
+		t.Fatal("expected nil target on the first (trigger-less) pass")
+	}
+	sink.mu.Lock()
+	raisedBefore := len(sink.raises)
+	sink.mu.Unlock()
+	if raisedBefore != 1 {
+		t.Fatalf("want 1 raise before the fix, got %d", raisedBefore)
+	}
+
+	// Restore a real trigger on the same policy, via MaxSize this time.
+	cfg.RetentionPolicies[0].MaxSize = strPtr("50GB")
+	active2 := make(map[string]bool)
+	target := orch.retentionTargetForInstance(cfg, cfg.Vaults[0], vaultInst, active2)
+	if target == nil {
+		t.Fatal("a restored MaxSize trigger must produce a live sweep target on the next build")
+	}
+	if len(target.rules) != 1 {
+		t.Fatalf("want exactly 1 resolved rule, got %d", len(target.rules))
+	}
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	found := false
+	for _, c := range sink.clears {
+		if c == alarmRetentionUnenforceable+"|"+vaultID.String() {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("restoring the trigger via MaxSize must clear the alarm; clears=%v", sink.clears)
+	}
+}
+
 func TestRetentionTargetNoRulesAtAllStaysSilent(t *testing.T) {
 	t.Parallel()
 

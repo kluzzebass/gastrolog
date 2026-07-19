@@ -1071,7 +1071,7 @@ export class RetentionPolicyConfig extends Message<RetentionPolicyConfig> {
    * max_size is the vault's disk-claim bound, in the same vocabulary as
    * every other size quantity ("50GB"), and it means BOTH things at once
    * (gastrolog-33ul6h correction: an earlier, superseded design split this
-   * into two fields — see docs/retention-size-budget-design.md):
+   * into two fields — see the design doc history under docs/):
    *   - DRAIN: oldest sealed chunks past the bound are drained (per the
    *     vault's disposition), exactly as this field always meant.
    *   - REFUSE: while the vault's local disk claim is at/over the bound,

@@ -116,7 +116,7 @@ type diskGuard struct {
 	deferWrites atomic.Bool
 
 	// vaultFootprint measures a vault's whole local disk claim for the
-	// max-size budget. Injected by the orchestrator (chunk + index bytes
+	// max-size bound. Injected by the orchestrator (chunk + index bytes
 	// plus pipeline segment backlog); injectable for tests.
 	vaultFootprint func(glid.GLID) int64
 
@@ -153,12 +153,12 @@ type vaultDiskGuard struct {
 	alarmRaised bool
 	name        string
 
-	// Max-size budget (cap-and-refuse): the vault's whole local disk claim
+	// Max-size bound (cap-and-refuse): the vault's whole local disk claim
 	// — sealed chunks, indexes, pipeline segment backlog — measured against
-	// maxSizeBytes. Always non-zero: creation defaults an unset budget and
+	// maxSizeBytes. Always non-zero: creation defaults an unset bound and
 	// the wiring substitutes the default for any 0 (gastrolog-1epfgb), so a 0
 	// here would be a bug, not "unlimited". Distinct from the free-space
-	// thresholds: those protect the VOLUME, the budget bounds the VAULT.
+	// thresholds: those protect the VOLUME, this bound covers the VAULT.
 	maxSizeBytes    uint64
 	capped          atomic.Bool
 	sizeAlarmRaised bool
@@ -167,8 +167,8 @@ type vaultDiskGuard struct {
 	// bytes measured against the cluster-global backlogBudget. The OPERATING
 	// bound — engages well before disk pressure so the backlog is bounded by
 	// policy, not by the volume filling up (design-notes R2). Distinct from
-	// maxSizeBytes: the size budget bounds everything the vault RETAINS, the
-	// backlog budget bounds what chunking has not yet drained.
+	// maxSizeBytes: the max-size bound covers everything the vault RETAINS,
+	// the backlog budget covers what chunking has not yet drained.
 	backlogCapped      atomic.Bool
 	backlogAlarmRaised bool
 }
@@ -295,7 +295,7 @@ func (g *diskGuard) vaultProtectActive(vaultID glid.GLID) bool {
 }
 
 // vaultSizeCapped reports whether this vault's local disk claim has reached
-// its max-size budget. Lock-free read; false for unknown vaults.
+// its max-size bound. Lock-free read; false for unknown vaults.
 func (g *diskGuard) vaultSizeCapped(vaultID glid.GLID) bool {
 	g.mu.Lock()
 	v := g.vaults[vaultID]
@@ -312,7 +312,7 @@ func (g *diskGuard) vaultBacklogCapped(vaultID glid.GLID) bool {
 	return v != nil && v.backlogCapped.Load()
 }
 
-// sizeCappedVaults lists the vaults currently at their max-size budget.
+// sizeCappedVaults lists the vaults currently at their max-size bound.
 // Broadcast in NodeStats so peers' admission gates honor it.
 func (g *diskGuard) sizeCappedVaults() []glid.GLID {
 	g.mu.Lock()
@@ -498,12 +498,12 @@ func (g *diskGuard) reconcileVaultSizeAlarm(alerts alert.Sink, id glid.GLID, v *
 		if v.capped.Load() {
 			alerts.Clear(alarmMaxSizeApproaching, id.String())
 			alerts.Raise(alarmMaxSizeCapped, id.String(), fmt.Sprintf(
-				"Vault %s is at its size budget: %s of %s used — new records for this vault are REFUSED until retention drains it.",
+				"Vault %s is at its max-size bound: %s of %s used — new records for this vault are REFUSED until space drains below the bound.",
 				v.name, units.FormatBytesDisplay(int64(used)), units.FormatBytesDisplay(int64(v.maxSizeBytes)))) //nolint:gosec // display only
 		} else {
 			alerts.Clear(alarmMaxSizeCapped, id.String())
 			alerts.Raise(alarmMaxSizeApproaching, id.String(), fmt.Sprintf(
-				"Vault %s is approaching its size budget: %s of %s used.",
+				"Vault %s is approaching its max-size bound: %s of %s used.",
 				v.name, units.FormatBytesDisplay(int64(used)), units.FormatBytesDisplay(int64(v.maxSizeBytes)))) //nolint:gosec // display only
 		}
 		v.sizeAlarmRaised = true
@@ -691,10 +691,13 @@ func (o *Orchestrator) diskAdmissionGate() error {
 var ErrVaultDiskProtect = errors.New("vault's volume is out of disk space: admission for this vault suspended until space is freed")
 
 // ErrVaultMaxSize rejects records destined to a vault whose local disk claim
-// has reached its per-node max-size budget on some node. Cap-and-refuse:
+// has reached its per-node max-size bound on some node. Cap-and-refuse:
 // everything already accepted is kept; the newest records are nacked as
-// retryable backpressure until retention or releases drain below the budget.
-var ErrVaultMaxSize = errors.New("vault is at its size budget: admission for this vault refused until retention drains it")
+// retryable backpressure until space drains below the bound. Not always
+// "until retention drains it" — the bound may be the refuse-only creation-
+// default floor with no attached policy to drain anything at all; space
+// frees only via releases (deletes, transfers, cache eviction) in that case.
+var ErrVaultMaxSize = errors.New("vault is at its max-size bound: admission for this vault refused until space drains below the bound")
 
 // ErrVaultBacklogBudget rejects records destined to a vault whose pipeline
 // backlog (unreleased registry segments) has reached the cluster-global
@@ -728,7 +731,7 @@ func (o *Orchestrator) vaultAdmissionGate(vaultID glid.GLID) error {
 	return nil
 }
 
-// SizeCappedVaults lists vaults at their local max-size budget, for the
+// SizeCappedVaults lists vaults at their local max-size bound, for the
 // NodeStats broadcast.
 func (o *Orchestrator) SizeCappedVaults() []glid.GLID {
 	if o.diskGuard == nil {
@@ -805,7 +808,7 @@ func (o *Orchestrator) refreshVaultDiskGuards(ctx context.Context) {
 		// steady-state case (gastrolog-33ul6h finding 4). First observation
 		// (no prior entry) is not a transition, so it stays quiet too.
 		if prev, existed := o.diskGuard.currentMaxSizeBytes(vc.ID); existed && prev != maxSize && o.diskGuard.logger != nil {
-			o.diskGuard.logger.Info("vault size budget changed",
+			o.diskGuard.logger.Info("vault max-size bound changed",
 				"vault", vc.ID, "name", vc.Name,
 				"old", fmtBytes(prev), "new", fmtBytes(maxSize),
 				"source", boundSource)
@@ -947,6 +950,6 @@ func (o *Orchestrator) startDiskGuard() error {
 		return fmt.Errorf("disk guard: %w", err)
 	}
 	o.scheduler.Describe(diskGuardJobName,
-		"Free-space guard: raises the disk-space alarm and suspends ingest admission below the floor or when a vault's backlog/size budget is reached")
+		"Free-space guard: raises the disk-space alarm and suspends ingest admission below the floor or when a vault's backlog budget or max-size bound is reached")
 	return nil
 }

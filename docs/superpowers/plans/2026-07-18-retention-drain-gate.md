@@ -948,7 +948,7 @@ func TestMultiNode_RetentionSubmitDefersOnRemoteCappedDestination(t *testing.T) 
 	for _, node := range []multinodeTestNode{d1, d2} {
 		err := node.orch.SubmitRetentionRecord(ctx, d1.vaultID, rec, "")
 		if err == nil || !strings.Contains(err.Error(), "size budget") {
-			t.Fatalf("submit on %s: want vault size-budget rejection, got %v", node.nodeID, err)
+			t.Fatalf("submit on %s: want vault max-size rejection, got %v", node.nodeID, err)
 		}
 	}
 

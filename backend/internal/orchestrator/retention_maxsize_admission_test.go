@@ -80,8 +80,8 @@ func startedPipelineOrch(t *testing.T, cfg Config) *Orchestrator {
 }
 
 // TestResolvedPolicyBudgetCapsSubmitToVaultLocally pins the "origin node"
-// half of the spec: a policy-sourced size budget, resolved through the real
-// config→guard resolver and flipped by a real evaluateVaults pass, makes
+// half of the spec: a policy-sourced max-size bound, resolved through the
+// real config→guard resolver and flipped by a real evaluateVaults pass, makes
 // SubmitToVault refuse with ErrVaultMaxSize on the node that measured the
 // footprint.
 func TestResolvedPolicyBudgetCapsSubmitToVaultLocally(t *testing.T) {

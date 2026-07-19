@@ -106,9 +106,9 @@ type VaultConfig struct {
 // have typed. Stored verbatim at creation, so a defaulted vault reads exactly
 // like a configured one (gastrolog-etcjdx).
 
-// DefaultVaultMaxSize is the per-node size budget applied when a vault is
+// DefaultVaultMaxSize is the per-node max-size bound applied when a vault is
 // created without one. Deliberately small: the safe failure of a too-small
-// budget is a per-vault refusal that alarms, not the node-wide disk guard
+// bound is a per-vault refusal that alarms, not the node-wide disk guard
 // deadlock an unbounded vault invites (gastrolog-5ct2av). Operators who want
 // more set --max-size explicitly. Not derived from the volume: a per-vault
 // share does not compose across vaults sharing a disk.

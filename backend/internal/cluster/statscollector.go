@@ -133,7 +133,7 @@ type StatsProvider interface {
 	// its free-space floor. Broadcast so every node's admission gate can
 	// honor the cluster-wide union.
 	DiskProtectedVaults() []glid.GLID
-	// SizeCappedVaults lists vaults at their local max-size budget —
+	// SizeCappedVaults lists vaults at their local max-size bound —
 	// broadcast for the same cluster-wide admission union.
 	SizeCappedVaults() []glid.GLID
 }

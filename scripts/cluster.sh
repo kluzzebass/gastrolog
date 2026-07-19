@@ -344,15 +344,15 @@ configure() {
   #                  carries over so chunk granularity is consistent; no
   #                  retention policy (data lives forever).
   #
-  # Both are bounded via their retention policies' max-size bound
-  # (gastrolog-33ul6h). A drain trigger alone does NOT bound a vault: it
-  # acts on sealed chunks, and the bulk of a busy vault's disk can be
-  # segments awaiting collection — which retention has no authority over
-  # (gastrolog-2b2yyy: a 3-minute TTL sat next to 449 GiB of unpurged
-  # segments). max-size's refuse half is what makes the vault-max-size
-  # alarm reachable before the disk guard traps the cluster. second-vault
-  # has no retention policy: cloud-served, its local claim is cache +
-  # backlog, bounded by the creation-default floor.
+  # Both are bounded (gastrolog-33ul6h): first-vault via its policy's max
+  # size, second-vault via the creation-default floor (no retention policy;
+  # cloud-served, so its local claim is cache + backlog only). A drain
+  # trigger alone does NOT bound a vault: it acts on sealed chunks, and the
+  # bulk of a busy vault's disk can be segments awaiting collection — which
+  # retention has no authority over (gastrolog-2b2yyy: a 3-minute TTL sat
+  # next to 449 GiB of unpurged segments). max-size's refuse half is what
+  # makes the vault-max-size alarm reachable before the disk guard traps
+  # the cluster.
   $GLOG config vault create --addr "$S" --name "first-vault" \
     --type file --storage-class 1 --replication-factor "$NODES" \
     --rotation-policy "1M-1m" --retention-policy "1h-retain" 2>&1 | sed 's/^/  /'

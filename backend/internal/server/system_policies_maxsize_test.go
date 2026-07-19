@@ -5,8 +5,8 @@ package server_test
 // prior home, formerly covered by system_vaults_maxsize_test.go) onto
 // RetentionPolicyConfig.max_size, which now means BOTH things at once —
 // operator correction 2026-07-19 (comment c2): an earlier design that split
-// this into two fields was superseded before implementation (see
-// docs/retention-size-budget-design.md). max_size
+// this into two fields was superseded before implementation (see the
+// design doc history under docs/). max_size
 // drains oldest sealed chunks past the bound AND refuses admission while
 // the vault's local claim is at/over it. PutRetentionPolicy parse-checks
 // it — must parse, must be > 0 when set; an absent max_size is not

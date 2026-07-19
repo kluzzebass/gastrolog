@@ -163,7 +163,7 @@ var catalog = []AlarmType{
 		// The condition is config-derived and static (not a transient
 		// mid-election or mid-flap state), so no DelayOn -- unlike
 		// vault-leaderless, a trigger-less policy doesn't resolve itself.
-		Cause:    "The vault has retention_rules configured, but every referenced retention policy resolves with no trigger set (no maxAge, maxSize, or maxChunks) -- the vault's only drain never runs and nothing bounds it. Expired data accumulates without limit until this is fixed.",
+		Cause:    "The vault has retention_rules configured, but every referenced retention policy resolves with no trigger set (no maxAge, maxSize, or maxChunks) -- the vault's only drain never runs. The refuse-only creation-default floor still bounds the vault, so data is not unbounded, but it accumulates up to that floor and then admission refuses -- there is no drain to keep the vault small or recover space.",
 		Response: "Read the alarm detail for which policies resolved with no trigger. Add a maxAge, maxSize, or maxChunks to at least one referenced policy -- maxSize both drains oldest chunks past the bound and refuses admission while over it, so it alone is enough to both bound the vault and enable draining. Do NOT remove the vault's retention_rules to silence this -- detaching every policy also detaches any maxSize they carried, collapsing the vault back to the untyped creation-default floor instead of the operator's intended bound.",
 	},
 	{
@@ -248,8 +248,8 @@ var catalog = []AlarmType{
 		IDPrefix: "vault-max-size-capped",
 		Priority: High, // refused ingest is not lost data
 		Source:   "storage",
-		Cause:    "The vault is at its size budget; new records for this vault are refused.",
-		Response: "Raise the budget or shorten retention. This vault is refusing records now; others are unaffected.",
+		Cause:    "The vault is at its max-size bound; new records for this vault are refused.",
+		Response: "Raise the bound (set a larger max size on an attached retention policy) or shorten retention. This vault is refusing records now; others are unaffected.",
 	},
 	{
 		IDPrefix: "disk-space-exhausted",
@@ -285,8 +285,8 @@ var catalog = []AlarmType{
 		IDPrefix: "vault-max-size-approaching",
 		Priority: Low,
 		Source:   "storage",
-		Cause:    "The vault is approaching its size budget.",
-		Response: "Raise the budget or shorten retention — before records start being refused.",
+		Cause:    "The vault is approaching its max-size bound.",
+		Response: "Raise the bound (set a larger max size on an attached retention policy) or shorten retention — before records start being refused.",
 	},
 	{
 		IDPrefix: "disk-space-low",

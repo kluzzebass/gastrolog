@@ -288,11 +288,12 @@ func (s *SystemServer) PutVault(
 		return nil, connErr
 	}
 
-	// Resolve the size budget: the wire distinguishes "unset" (absent) from
-	// "explicitly 0" (present, zero), and they mean opposite things
-	// (gastrolog-1epfgb). This is the single ingress for every surface — CLI
-	// create, UI, and config import all call PutVault — so resolving here
-	// makes an unbounded vault unrepresentable regardless of who asked.
+	// Resolve the vault's cache/memory budgets: the wire distinguishes
+	// "unset" (absent) from "explicitly 0" (present, zero), and they mean
+	// opposite things (gastrolog-1epfgb). This is the single ingress for
+	// every surface — CLI create, UI, and config import all call PutVault —
+	// so resolving here makes an unbounded vault unrepresentable regardless
+	// of who asked.
 	if connErr := resolveVaultQuantities(req.Msg.Config, &vaultCfg, vaults); connErr != nil {
 		return nil, connErr
 	}

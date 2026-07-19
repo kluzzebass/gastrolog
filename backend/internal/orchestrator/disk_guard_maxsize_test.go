@@ -276,7 +276,7 @@ func TestRefreshVaultDiskGuardsLogsOnBoundChangeOnly(t *testing.T) {
 	orch.sysLoader = testSystemLoader{cfg: cfg}
 	ctx := context.Background()
 
-	const changeMsg = "vault size budget changed"
+	const changeMsg = "vault max-size bound changed"
 
 	// 1. First observation: no prior entry, so no transition to log.
 	orch.refreshVaultDiskGuards(ctx)

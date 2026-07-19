@@ -266,7 +266,7 @@ type Orchestrator struct {
 	remoteVaultDiskProtected atomic.Pointer[func(glid.GLID) bool]
 
 	// remoteVaultSizeCapped is the same peer lookup for vaults at their
-	// max-size budget elsewhere. Installed via SetRemoteVaultSizeCapped.
+	// max-size bound elsewhere. Installed via SetRemoteVaultSizeCapped.
 	remoteVaultSizeCapped atomic.Pointer[func(glid.GLID) bool]
 
 	// Remote transferrer for cross-node chunk migration (nil in single-node mode).
@@ -820,7 +820,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		cloudHealthLogger:      compCloudHealth.Apply(baseLogger),
 	}
 
-	// The max-size budget measures the vault's whole local disk claim.
+	// The max-size bound measures the vault's whole local disk claim.
 	o.diskGuard.vaultFootprint = o.localVaultFootprintBytes
 	// The backlog budget measures the vault-ctl registry (cluster-wide truth).
 	o.diskGuard.vaultBacklogBytes = o.vaultRegistryBacklogBytes

@@ -469,12 +469,12 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
   policy rather than `VaultConfig` (that field is removed; no reserved tag,
   per house rule). It means BOTH things at once — this is a corrected
   design (operator, 2026-07-19, comment c2): an earlier shape that split
-  this into two fields was superseded before implementation, see
-  docs/retention-size-budget-design.md for the superseded-section note and
-  the measurement decisions, which still stand.
-  - **Drain** (evaluated by `SizeRetentionPolicy`): destroys the oldest
-    sealed chunks once the vault's disk claim exceeds the bound. Scope: the
-    chunk store retention can act on.
+  this into two fields was superseded before implementation, see the
+  retention design doc's superseded-section note (docs/) for the
+  measurement decisions, which still stand.
+  - **Drain** (evaluated by `SizeRetentionPolicy`): drains the oldest sealed
+    chunks, per the vault's disposition, once the vault's disk claim exceeds
+    the bound. Scope: the chunk store retention can act on.
   - **Refuse** (evaluated by the disk guard's Admission gate): refuses
     ingest admission for the vault once its whole local footprint (chunk
     store + pipeline segment backlog) exceeds the same bound. Scope:

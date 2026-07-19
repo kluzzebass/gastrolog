@@ -144,8 +144,8 @@ type RetentionPolicyConfig struct {
 	// MaxSize is the vault's disk-claim bound, as a size expression
 	// ("50GB"), and it means BOTH things at once (gastrolog-33ul6h
 	// correction — an earlier design split this into two fields; that
-	// design was superseded before implementation, see
-	// docs/retention-size-budget-design.md):
+	// design was superseded before implementation, see the design doc
+	// history under docs/):
 	//   - DRAIN: oldest sealed chunks past the bound are drained (per the
 	//     vault's disposition), exactly as SizeRetentionPolicy always did.
 	//   - REFUSE: while the vault's local disk claim is at/over the bound,

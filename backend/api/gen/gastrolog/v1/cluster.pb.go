@@ -660,8 +660,8 @@ type NodeStats struct {
 	// that vault at every front door while other vaults keep ingesting.
 	DiskProtectedVaultIds [][]byte `protobuf:"bytes,48,rep,name=disk_protected_vault_ids,json=diskProtectedVaultIds,proto3" json:"disk_protected_vault_ids,omitempty"`
 	// Vaults whose local disk claim on THIS node has reached their per-node
-	// max-size budget. Honored cluster-wide by the same per-vault admission
-	// gate as disk_protected_vault_ids, with a budget-specific error.
+	// max-size bound. Honored cluster-wide by the same per-vault admission
+	// gate as disk_protected_vault_ids, with a bound-specific error.
 	SizeCappedVaultIds [][]byte `protobuf:"bytes,49,rep,name=size_capped_vault_ids,json=sizeCappedVaultIds,proto3" json:"size_capped_vault_ids,omitempty"`
 	// Cumulative diagnostic log records this node's capture handler has
 	// discarded because the capture channel was full. A capacity signal with
