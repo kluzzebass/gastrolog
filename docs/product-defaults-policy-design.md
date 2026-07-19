@@ -133,11 +133,14 @@ See decision 6.
    removes, just at the other extreme. This requires a vault-config
    validation path, which does not exist today.
 
-5. **`cluster.sh` keeps its explicit `GLOG_VAULT_MAX_SIZE` (50 GB).** Already
-   landed under gastrolog-2b2yyy. Consistent with the policy: soak wants
-   headroom, so it states a large value explicitly rather than relying on the
-   1 GiB product default. The product default protects the operator who says
-   nothing; the script says something.
+5. **`cluster.sh` states its vault budget explicitly (50 GB, inline at the
+   policy-creation sites like every other bootstrap config value).** Landed
+   under gastrolog-2b2yyy as an env knob; the never-set knob was removed
+   2026-07-19 and the budget now flows through retention policies
+   (gastrolog-33ul6h). Consistent with the policy either way: the dev
+   cluster wants headroom, so the script states a large value explicitly
+   rather than relying on the small product default. The product default
+   protects the operator who says nothing; the script says something.
 
 6. **A default must be typeable in the field's own vocabulary.** Operator
    directive (near-verbatim): *"do NOT create defaults that can not be
