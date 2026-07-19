@@ -88,9 +88,13 @@ const alarmRetentionRouteDeferred = "retention-route-deferred"
 
 // alarmRetentionUnenforceable names the case a vault's retention_rules ALL
 // resolve to no usable trigger (every referenced policy has none of
-// maxAge/maxSize/maxChunks set) — the vault's only drain never runs, but
-// nothing about that state looks different from a healthy idle vault
-// without this alarm. See retentionTargetForInstance. (gastrolog-1xl29s)
+// maxAge/maxSize/maxChunks set) AND no referenced policy carries a
+// SizeBudget either — the vault's only drain never runs and nothing bounds
+// it, but nothing about that state looks different from a healthy idle
+// vault without this alarm. A bound-only policy (SizeBudget set, no drain
+// trigger) does NOT raise this alarm: it is a legal configuration — see
+// vaultHasAttachedSizeBudget (gastrolog-33ul6h). See
+// retentionTargetForInstance. (gastrolog-1xl29s)
 const alarmRetentionUnenforceable = "retention-unenforceable"
 
 // retentionDeferralAlarmAfter is how many CONSECUTIVE deferred sweeps raise
@@ -607,10 +611,23 @@ func (o *Orchestrator) retentionTargetForInstance(cfg *system.Config, vaultCfg s
 		return nil
 	}
 	if len(rules) == 0 {
-		// The vault HAS retention rules, the operator EXPECTS enforcement,
-		// but every referenced policy resolved with no trigger — the exact
-		// live-incident gap (gastrolog-1xl29s). Name it: throttled log plus
-		// a standing alarm, both naming which policies are trigger-less.
+		// Every referenced policy resolved with no drain trigger. That is
+		// NOT automatically the live-incident gap (gastrolog-1xl29s): a
+		// policy that carries only a SizeBudget is a legal bound-only
+		// configuration (gastrolog-33ul6h) — it drains nothing on purpose,
+		// but the size budget still binds via the disk guard
+		// (resolveVaultSizeBudget, independent of this sweep target). Raising
+		// retention-unenforceable for that case would tell the operator to
+		// "fix" a vault that is working exactly as configured.
+		if vaultHasAttachedSizeBudget(vaultCfg, cfg.RetentionPolicies) {
+			o.clearRetentionUnenforceable(vaultCfg.ID)
+			return nil
+		}
+		// No drain trigger AND no attached budget: the vault HAS retention
+		// rules, the operator EXPECTS enforcement, but nothing about this
+		// vault's referenced policies does anything — the exact
+		// live-incident gap. Name it: throttled log plus a standing alarm,
+		// both naming which policies are trigger-less.
 		o.raiseRetentionUnenforceable(vaultCfg.ID, vaultCfg.Name, triggerLess)
 		runner.noteUnenforceable(triggerLess)
 		return nil

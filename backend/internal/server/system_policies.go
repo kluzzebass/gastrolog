@@ -144,6 +144,26 @@ func (s *SystemServer) PutRetentionPolicy(
 	cfg.ID = id
 	cfg.Name = req.Msg.Config.Name
 
+	// sizeBudget parse-checks FIRST, before the IsEmpty no-op gate below
+	// (gastrolog-33ul6h finding 7): IsEmpty's positiveSize check treats an
+	// unparseable expression the same as absent (both contribute nothing to
+	// "is this policy non-empty"), so an otherwise-empty policy with a
+	// garbled sizeBudget would fall into IsEmpty()==true and surface the
+	// generic "must set at least one" error instead of the actual parse
+	// failure — the wrong diagnostic for what the operator typed. Checking
+	// parseability first ensures a malformed sizeBudget always gets its own
+	// error, regardless of what else the policy sets.
+	//
+	// Must parse, and an explicit "0" is rejected (it would mean "no
+	// bound", not "no restriction" — the state resolution treats as absent,
+	// so it must not be sayable). Unlike max_size on vault creation, an
+	// absent sizeBudget stores nil — no per-policy default is stamped; the
+	// resolver's default floor (system.DefaultVaultMaxSize) applies only
+	// when NO attached policy carries a budget at all.
+	if connErr := validateRetentionSizeBudget(cfg.SizeBudget, cfg.Name); connErr != nil {
+		return nil, connErr
+	}
+
 	// Reject policies with no conditions AND no bound: they're silent no-ops
 	// that almost always reflect operator confusion rather than intent. See
 	// gastrolog-1rbuf. A policy that sets ONLY sizeBudget is legal (a
@@ -156,18 +176,6 @@ func (s *SystemServer) PutRetentionPolicy(
 	// Validate by trying to convert.
 	if _, err := cfg.ToRetentionPolicy(); err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid retention policy: %w", err))
-	}
-
-	// sizeBudget parse-checks the same way PutVault checked max_size before
-	// the field moved here (gastrolog-33ul6h): must parse, and an explicit
-	// "0" is rejected (it would mean "no bound", not "no restriction" — the
-	// state resolution treats as absent, so it must not be sayable). Unlike
-	// max_size on vault creation, an absent sizeBudget stores nil — no
-	// per-policy default is stamped; the resolver's default floor
-	// (system.DefaultVaultMaxSize) applies only when NO attached policy
-	// carries a budget at all.
-	if connErr := validateRetentionSizeBudget(cfg.SizeBudget, cfg.Name); connErr != nil {
-		return nil, connErr
 	}
 
 	if err := s.sysStore.PutRetentionPolicy(ctx, cfg); err != nil {
@@ -313,8 +321,16 @@ func protoToRetentionPolicy(p *apiv1.RetentionPolicyConfig) system.RetentionPoli
 	}
 	// SizeBudget is proto3 `optional` on both sides (unlike MaxAge/MaxSize/
 	// MaxChunks, which predate it and use the empty-string/zero sentinel
-	// convention above) — direct pointer passthrough, no sentinel needed.
+	// convention above) — direct pointer passthrough. But the UI form can
+	// still submit an explicit "" (a present-but-blank field, distinct from
+	// the field being absent from the proto entirely): normalize that the
+	// same way IsQuantityUnset treats it everywhere else, so an
+	// operator clearing the field in the UI stores unset, not a stray empty
+	// string that would fail ParseSize downstream (gastrolog-33ul6h finding 2).
 	cfg.SizeBudget = p.SizeBudget
+	if cfg.SizeBudget != nil && system.IsQuantityUnset(*cfg.SizeBudget) {
+		cfg.SizeBudget = nil
+	}
 
 	return cfg
 }

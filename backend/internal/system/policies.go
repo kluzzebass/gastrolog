@@ -141,8 +141,9 @@ type RetentionPolicyConfig struct {
 	// Resolved at use through the shared parser (gastrolog-etcjdx).
 	MaxAge *string `json:"maxAge,omitempty"`
 
-	// MaxSize deletes oldest sealed chunks when total vault size exceeds this
-	// size expression ("50GB").
+	// MaxSize deletes oldest sealed chunks when the retained store's local
+	// disk claim exceeds this size expression ("50GB"). A drain trigger
+	// (cap-and-drain), distinct from SizeBudget below (cap-and-refuse).
 	MaxSize *string `json:"maxSize,omitempty"`
 
 	// MaxChunks keeps at most this many sealed chunks, deleting the oldest.

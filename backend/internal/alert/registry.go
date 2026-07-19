@@ -161,8 +161,8 @@ var catalog = []AlarmType{
 		// The condition is config-derived and static (not a transient
 		// mid-election or mid-flap state), so no DelayOn -- unlike
 		// vault-leaderless, a trigger-less policy doesn't resolve itself.
-		Cause:    "The vault has retention_rules configured, but every referenced retention policy resolves with no trigger set (no maxAge, maxSize, or maxChunks) -- the vault's only drain never runs. Expired data accumulates and any size caps stay engaged until this is fixed.",
-		Response: "Read the alarm detail for which policies resolved with no trigger. Add a maxAge, maxSize, or maxChunks to at least one referenced policy, or remove the vault's retention_rules if enforcement isn't intended.",
+		Cause:    "The vault has retention_rules configured, but every referenced retention policy resolves with no trigger set (no maxAge, maxSize, or maxChunks) AND none of them carries a sizeBudget either -- the vault's only drain never runs and nothing bounds it. Expired data accumulates without limit until this is fixed. (A policy that sets ONLY sizeBudget is a legal bound-only configuration and does not raise this alarm -- it drains nothing on purpose, but the budget still refuses new writes once the vault hits it.)",
+		Response: "Read the alarm detail for which policies resolved with no trigger. Add a maxAge, maxSize, or maxChunks to at least one referenced policy to enable draining, or add a sizeBudget to at least one referenced policy to at least bound the vault (still no drain, but growth stops at the budget). Do NOT remove the vault's retention_rules to silence this -- detaching every policy also detaches any sizeBudget they carried, collapsing the vault back to the untyped creation-default floor instead of the operator's intended bound.",
 	},
 	{
 		IDPrefix: "chunk-suspect",

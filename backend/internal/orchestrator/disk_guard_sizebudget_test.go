@@ -11,6 +11,8 @@ package orchestrator
 
 import (
 	"context"
+	"log/slog"
+	"strings"
 	"testing"
 
 	"gastrolog/internal/glid"
@@ -250,5 +252,83 @@ func TestRefreshVaultDiskGuardsCappedFromPolicyBudgetLifecycle(t *testing.T) {
 	refresh()
 	if !orch.diskGuard.vaultSizeCapped(vaultID) {
 		t.Fatal("detaching the policy must fall back to the default floor (1GiB), not unbounded — the 11GiB footprint must cap")
+	}
+}
+
+// TestRefreshVaultDiskGuardsLogsOnBudgetChangeOnly pins gastrolog-33ul6h
+// finding 4: an effective-budget CHANGE (the resolved max-size differs from
+// what was previously registered for this vault) logs exactly once at
+// INFO, naming old, new, and the source ("policy <name/id>" or "default
+// floor"). First observation (nothing registered yet) is not a transition
+// and must not log; re-resolving the SAME budget on every subsequent tick
+// (the steady-state case — refreshVaultDiskGuards runs on every 15s guard
+// tick) must never log again either.
+func TestRefreshVaultDiskGuardsLogsOnBudgetChangeOnly(t *testing.T) {
+	t.Parallel()
+
+	vaultID, policyID := glid.New(), glid.New()
+	budget := "10GiB"
+	cfg := &system.Config{
+		Vaults: []system.VaultConfig{{
+			ID:      vaultID,
+			Name:    "budget-vault",
+			Enabled: true,
+			Type:    system.VaultTypeFile,
+			RetentionRules: []system.RetentionRule{
+				{RetentionPolicyID: policyID},
+			},
+		}},
+		RetentionPolicies: []system.RetentionPolicyConfig{
+			{ID: policyID, Name: "budget-policy", SizeBudget: &budget},
+		},
+	}
+
+	logSink := &syncBuffer{}
+	orch := newTestOrch(t, Config{Logger: slog.New(slog.NewTextHandler(logSink, nil))})
+	orch.sysLoader = testSystemLoader{cfg: cfg}
+	ctx := context.Background()
+
+	const changeMsg = "vault size budget changed"
+
+	// 1. First observation: no prior entry, so no transition to log.
+	orch.refreshVaultDiskGuards(ctx)
+	if strings.Contains(logSink.String(), changeMsg) {
+		t.Fatalf("first observation must not log a budget change:\n%s", logSink.String())
+	}
+
+	// 2. Steady state: same policy, same resolved budget, repeated ticks.
+	orch.refreshVaultDiskGuards(ctx)
+	orch.refreshVaultDiskGuards(ctx)
+	if strings.Contains(logSink.String(), changeMsg) {
+		t.Fatalf("re-resolving an unchanged budget must never log:\n%s", logSink.String())
+	}
+
+	// 3. Raise the policy's budget: a real transition.
+	raised := "50GiB"
+	cfg.RetentionPolicies[0].SizeBudget = &raised
+	orch.refreshVaultDiskGuards(ctx)
+	if got := strings.Count(logSink.String(), changeMsg); got != 1 {
+		t.Fatalf("a budget change must log exactly once, got %d:\n%s", got, logSink.String())
+	}
+	if !strings.Contains(logSink.String(), "policy budget-policy") {
+		t.Errorf("the log must name the source policy:\n%s", logSink.String())
+	}
+
+	// 4. Steady state again after the change: no additional log line.
+	orch.refreshVaultDiskGuards(ctx)
+	orch.refreshVaultDiskGuards(ctx)
+	if got := strings.Count(logSink.String(), changeMsg); got != 1 {
+		t.Fatalf("steady state after the change must not add another log line, got %d:\n%s", got, logSink.String())
+	}
+
+	// 5. Detach the policy entirely: falls back to the default floor — a
+	// second real transition, source now "default floor".
+	cfg.Vaults[0].RetentionRules = nil
+	orch.refreshVaultDiskGuards(ctx)
+	if got := strings.Count(logSink.String(), changeMsg); got != 2 {
+		t.Fatalf("falling back to the default floor is a real change, want 2 total log lines, got %d:\n%s", got, logSink.String())
+	}
+	if !strings.Contains(logSink.String(), "default floor") {
+		t.Errorf("the log must name the fallback source:\n%s", logSink.String())
 	}
 }

@@ -7,7 +7,7 @@ A retention policy defines **when** sealed chunks fire a retention event. Multip
 | Condition | Config field | Description | Example |
 |-----------|-------------|-------------|---------|
 | **TTL** | `maxAge` | Fire when chunks age past this duration | `720h` (30 days) |
-| **Total size** | `maxBytes` | Keep total vault size under this limit, firing on oldest chunks first | `10GB` |
+| **Total size** | `maxBytes` | Keep the retained store's local disk claim under this limit, firing on oldest chunks first | `10GB` |
 | **Chunk count** | `maxChunks` | Keep at most this many sealed chunks, firing on oldest excess | `100` |
 
 ## Size Budget
@@ -20,7 +20,7 @@ A policy that sets **only** a Size Budget, with no drain condition, is legal and
 
 **Min-wins across attached policies:** a vault can attach more than one retention policy. If more than one attached policy carries a Size Budget, the vault's effective budget is the **lowest** of them — the most restrictive budget wins.
 
-**Default floor:** a vault with no retention rules, or whose attached policies carry no Size Budget at all, still gets a bound — the system default (`1GiB`) applies. An unbounded file vault is not representable.
+**Default floor:** a vault with no retention rules, or whose attached policies carry no Size Budget at all, still gets a bound — the system default applies. An unbounded file vault is not representable.
 
 ## What Happens When a Retention Event Fires
 

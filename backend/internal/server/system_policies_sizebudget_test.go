@@ -12,6 +12,7 @@ package server_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -78,6 +79,36 @@ func TestPutRetentionPolicyLeavesSizeBudgetUnset(t *testing.T) {
 	}
 }
 
+// TestPutRetentionPolicyExplicitEmptyStringSizeBudgetStoresUnset pins the UI
+// path (gastrolog-33ul6h finding 2): the settings form always sends a
+// SizeBudget pointer, even when the operator left the field blank — that is
+// a PRESENT-but-empty string, distinct from the field being absent from the
+// proto entirely (TestPutRetentionPolicyLeavesSizeBudgetUnset above covers
+// the absent case). Before the normalization, protoToRetentionPolicy passed
+// the empty string straight through, storing "" instead of nil — a value
+// that resolveVaultSizeBudget's ParseSize call would fail on downstream.
+func TestPutRetentionPolicyExplicitEmptyStringSizeBudgetStoresUnset(t *testing.T) {
+	client, store, _ := newConfigTestSetup(t)
+	ctx := context.Background()
+	id := glid.New()
+
+	empty := ""
+	_, err := client.PutRetentionPolicy(ctx, connect.NewRequest(&gastrologv1.PutRetentionPolicyRequest{
+		Config: &gastrologv1.RetentionPolicyConfig{
+			Id:         id.Bytes(),
+			Name:       "budget-explicit-empty",
+			MaxChunks:  10, // needs at least one condition to pass IsEmpty
+			SizeBudget: &empty,
+		},
+	}))
+	if err != nil {
+		t.Fatalf("PutRetentionPolicy: %v", err)
+	}
+	if got := getStoredRetentionPolicy(t, store, id).SizeBudget; got != nil {
+		t.Fatalf("stored size-budget = %q, want nil (explicit \"\" normalizes to unset)", strPtrVal(got))
+	}
+}
+
 // An explicit "0" is a real error, not a silent accept-nothing — it would
 // mean "no bound", the unrepresentable state this model exists to prevent.
 func TestPutRetentionPolicyRejectsExplicitZeroSizeBudget(t *testing.T) {
@@ -141,6 +172,37 @@ func TestPutRetentionPolicyRejectsUnparseableSizeBudget(t *testing.T) {
 		if err == nil || connect.CodeOf(err) != connect.CodeInvalidArgument {
 			t.Fatalf("size-budget %q: want InvalidArgument, got %v", bad, err)
 		}
+	}
+}
+
+// TestPutRetentionPolicyUnparseableSizeBudgetOnOtherwiseEmptyPolicyGetsParseError
+// pins the validation ORDER (gastrolog-33ul6h finding 7): a policy that sets
+// no maxAge/maxSize/maxChunks and ONLY an unparseable sizeBudget must report
+// the actual parse failure, not the generic "must set at least one"
+// no-op-policy message — IsEmpty()'s positiveSize check treats an
+// unparseable expression the same as absent, so before the reorder this
+// case fell through to the wrong, less actionable error.
+func TestPutRetentionPolicyUnparseableSizeBudgetOnOtherwiseEmptyPolicyGetsParseError(t *testing.T) {
+	client, _, _ := newConfigTestSetup(t)
+	ctx := context.Background()
+
+	bad := "gigabytes-please"
+	_, err := client.PutRetentionPolicy(ctx, connect.NewRequest(&gastrologv1.PutRetentionPolicyRequest{
+		Config: &gastrologv1.RetentionPolicyConfig{
+			Id:         glid.New().Bytes(),
+			Name:       "budget-only-bad",
+			SizeBudget: &bad,
+			// No MaxAge, MaxSize, or MaxChunks: otherwise entirely empty.
+		},
+	}))
+	if err == nil || connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("want InvalidArgument, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "size-budget") {
+		t.Fatalf("want the size-budget parse error, got the wrong diagnostic: %v", err)
+	}
+	if strings.Contains(err.Error(), "must set at least one") {
+		t.Fatalf("must not fall through to the generic empty-policy error: %v", err)
 	}
 }
 

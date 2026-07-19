@@ -222,6 +222,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
             <FormField
               label="Max Bytes"
               dark={dark}
+              description="Drain trigger: when the retained store's local disk claim exceeds this, the oldest chunks are destroyed to bring it back under. Distinct from Size Budget below, which refuses the newest records instead of destroying old ones."
             >
               <TextInput
                 value={newMaxBytes}
@@ -244,7 +245,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
           <FormField
             label="Size Budget"
             dark={dark}
-            description="Per-node disk-claim budget for vaults using this policy. At the budget, new records are refused until retention drains it below the budget. When a vault attaches several policies, the lowest budget wins. Vaults with no budget-carrying policy get the 1GiB creation default."
+            description="Per-node disk-claim budget for vaults using this policy. At the budget, new records are refused until retention drains it below the budget. When a vault attaches several policies, the lowest budget wins. Vaults with no budget-carrying policy get the system default."
           >
             <TextInput
               value={newSizeBudget}
@@ -310,6 +311,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
                 <FormField
                   label="Max Bytes"
                       dark={dark}
+                  description="Drain trigger: when the retained store's local disk claim exceeds this, the oldest chunks are destroyed to bring it back under. Distinct from Size Budget below, which refuses the newest records instead of destroying old ones."
                 >
                   <TextInput
                     value={edit.maxBytes}
@@ -332,7 +334,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
               <FormField
                 label="Size Budget"
                 dark={dark}
-                description="Per-node disk-claim budget for vaults using this policy. At the budget, new records are refused until retention drains it below the budget. When a vault attaches several policies, the lowest budget wins. Vaults with no budget-carrying policy get the 1GiB creation default."
+                description="Per-node disk-claim budget for vaults using this policy. At the budget, new records are refused until retention drains it below the budget. When a vault attaches several policies, the lowest budget wins. Vaults with no budget-carrying policy get the system default."
               >
                 <TextInput
                   value={edit.sizeBudget}
