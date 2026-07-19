@@ -3631,15 +3631,16 @@ func (m *Manager) runEvictionSweep(label string, rules []evictionRule) (int, int
 			continue
 		}
 		m.evictMappedGLCB(c.id)
+		// The local warm cache is gone — persist that to the cloud index
+		// (diskBytes -> 0) BEFORE releasing this chunk's lock, so no
+		// concurrent reader/re-warmer can observe the window where the
+		// file is already gone but the index still claims a positive
+		// local footprint. See gastrolog-33ul6h.
+		m.updateCloudDiskBytes(c.id, 0)
 		chunkLock.Unlock()
 		m.lastAccessMu.Lock()
 		delete(m.lastAccess, c.id)
 		m.lastAccessMu.Unlock()
-		// The local warm cache is gone — the cloud index's persisted
-		// diskBytes must drop to 0 so Meta()/List() stop reporting a local
-		// claim for a chunk that no longer has any local bytes to reclaim.
-		// See gastrolog-33ul6h.
-		m.updateCloudDiskBytes(c.id, 0)
 		totalRemaining -= c.size
 		freed += c.size
 		evicted++
@@ -3779,15 +3780,26 @@ func (m *Manager) downloadCloudBlobToChunkDir(id chunk.ChunkID) (chunk.RecordCur
 	}
 
 	finalPath := filepath.Join(dir, dataGLCBFileName)
+
+	// Serialize the rename + persisted-diskBytes update against a
+	// concurrent eviction sweep, which takes this same per-chunk lock
+	// around its os.Remove + updateCloudDiskBytes(0) pair. Without this,
+	// an in-flight re-warm and an eviction sweep could interleave and
+	// leave the file and the persisted claim disagreeing. Released before
+	// openLocalGLCBCursor below, which takes its OWN (read) lock on the
+	// same non-reentrant mutex. See gastrolog-33ul6h.
+	chunkLock := m.chunkLockFor(id)
+	chunkLock.Lock()
 	if err := os.Rename(tmpPath, finalPath); err != nil { //nolint:gosec // G304: tmpPath is from os.CreateTemp inside chunkDir
+		chunkLock.Unlock()
 		_ = os.Remove(tmpPath) //nolint:gosec // G703
 		return nil, err
 	}
-
 	// The chunk is re-warmed — the cloud index's persisted diskBytes must
 	// reflect the newly-cached local file, not stay at 0 (evicted) or a
 	// stale prior value. See gastrolog-33ul6h.
 	m.updateCloudDiskBytes(id, m.computeDiskBytes(id))
+	chunkLock.Unlock()
 
 	return m.openLocalGLCBCursor(id)
 }
@@ -4881,8 +4893,53 @@ func (m *Manager) loadCloudBackedChunks() error {
 		// itself stays put — OpenCursor's local-GLCB fast path picks it
 		// up via hasLocalGLCB. See gastrolog-24m1t step 7j.
 		m.dropLocalMetaForCloudBackedChunks()
+		m.reconcileCloudDiskBytesAtStartup()
 	}
 	return nil
+}
+
+// reconcileCloudDiskBytesAtStartup stats every EXISTING cloud-index entry's
+// data.glcb once and corrects any stale persisted diskBytes.
+// loadCloudBackedChunksFromStore only initializes diskBytes for entries it
+// newly discovers from the cloud store's listing — an entry already in the
+// index is trusted as-is, on the assumption that the in-process
+// eviction/re-warm paths (updateCloudDiskBytes) kept it current. That
+// assumption breaks on a crash between the local mutation and the paired
+// index update: a crash between eviction's os.Remove and its
+// updateCloudDiskBytes(id, 0) call leaves a stale-positive claim; nothing
+// else self-heals it, since runEvictionSweep's candidate set
+// (cacheCandidates) only considers chunks whose data.glcb stat still
+// succeeds — a chunk already missing its file is invisible to every future
+// eviction sweep too. The mirror case (crash between a completed
+// download's rename and its update) leaves a stale-zero claim, similarly
+// permanent. Startup is not a hot path, so a full stat pass here is the
+// right place to close both windows. See gastrolog-33ul6h.
+func (m *Manager) reconcileCloudDiskBytesAtStartup() {
+	if m.cloudIdx == nil {
+		return
+	}
+	type staleEntry struct {
+		id   chunk.ChunkID
+		want int64
+	}
+	var stale []staleEntry
+	m.cloudIdxMu.Lock()
+	_ = m.cloudIdx.ForEach(func(id chunk.ChunkID, meta *chunkMeta) bool {
+		actual := m.computeDiskBytes(id)
+		if actual != meta.diskBytes {
+			stale = append(stale, staleEntry{id: id, want: actual})
+		}
+		return true
+	})
+	m.cloudIdxMu.Unlock()
+
+	for _, e := range stale {
+		m.updateCloudDiskBytes(e.id, e.want)
+	}
+	if len(stale) > 0 {
+		m.logger.Info("cloud cache: reconciled stale local diskBytes at startup",
+			"count", len(stale))
+	}
 }
 
 // dropLocalMetaForCloudBackedChunks removes m.metas entries for any chunk also

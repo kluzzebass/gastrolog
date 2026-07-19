@@ -71,7 +71,10 @@ function chunkSizeCellTitle(chunk: ChunkMeta): string | undefined {
   if (chunk.cloudBacked) {
     return diskBytes > 0
       ? `${formatBytes(diskBytes)} cached — cloud object ${formatBytes(Number(chunk.cloudBytes))}`
-      : `evicted from local cache — cloud object ${formatBytes(Number(chunk.cloudBytes))}`;
+      // "Not cached" rather than "evicted" — also true for a follower
+      // that registered this chunk from FSM metadata alone and has never
+      // downloaded it, not just one that cached and later evicted it.
+      : `not cached — cloud object ${formatBytes(Number(chunk.cloudBytes))}`;
   }
   if (diskBytes > 0) {
     return `${formatBytes(Number(chunk.bytes))} → ${formatBytes(diskBytes)} on disk`;
@@ -1038,7 +1041,7 @@ function ChunkDetail({
             <div className={`flex items-center gap-3 text-[0.85em]`}>
               <span className={`font-mono w-20 ${c("text-text-bright", "text-light-text-bright")}`}>cached</span>
               <span className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}>
-                {Number(chunk.diskBytes) > 0 ? formatBytes(Number(chunk.diskBytes)) : "evicted"}
+                {Number(chunk.diskBytes) > 0 ? formatBytes(Number(chunk.diskBytes)) : "not cached"}
               </span>
             </div>
             <div className={`flex items-center gap-3 text-[0.85em]`}>

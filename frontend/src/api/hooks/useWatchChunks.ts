@@ -357,7 +357,23 @@ export function mergeMeta(existing: ChunkMeta | undefined, incoming: ChunkMeta):
   // ignore those.
   if (incoming.bytes > merged.bytes) merged.bytes = incoming.bytes;
   if (incoming.recordCount > merged.recordCount) merged.recordCount = incoming.recordCount;
-  if (incoming.diskBytes > merged.diskBytes) merged.diskBytes = incoming.diskBytes;
+  // cloudBytes is fixed at upload time and never changes for the rest of
+  // the chunk's life — same monotone-max shape as bytes/recordCount so a
+  // stale pre-upload zero can't clobber it once set. Without this, a live
+  // UPLOADED event left cloudBacked=true with cloudBytes=0 in the cache
+  // until the next ListChunks refetch. See gastrolog-33ul6h.
+  if (incoming.cloudBytes > merged.cloudBytes) merged.cloudBytes = incoming.cloudBytes;
+  // diskBytes is DIFFERENT: it's per-node LIVE local cache state, not
+  // monotone. Eviction legitimately drops it to 0; re-warm brings it back
+  // up. No WatchChunks op currently announces eviction (cacheEvictionSweepAll
+  // / EvictCache never call an Emit* helper — see cache_eviction.go), so
+  // in practice a decrease only reaches this cache via a ListChunks
+  // refetch (mergeChunksSnapshot, which also calls mergeMeta). A max-merge
+  // here would keep a stale positive claim forever past eviction — trust
+  // whichever source produced `incoming`, the same way every other
+  // event-sourced field on this stream is trusted once the version-gap
+  // resync (see connect() above) guarantees ordering. gastrolog-33ul6h.
+  merged.diskBytes = incoming.diskBytes;
   // Replica info is authoritative when present on the event: the
   // backend stamps cluster-wide residency from the vault-ctl FSM
   // (placement set minus in-flight delete-acks) on every CREATED /
