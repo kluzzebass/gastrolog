@@ -388,4 +388,43 @@ func TestOrchPipeline_TransferDispositionMultiNodeDestRF(t *testing.T) {
 	if _, err := os.Stat(h.pipelineGLCBPath(sourceNode, source, e.ID)); !os.IsNotExist(err) {
 		t.Fatalf("source GLCB file still on disk after multi-home transfer completed (err=%v)", err)
 	}
+
+	// gastrolog-2l918 review finding 1a: on completion, the destination's
+	// manifest entry must have TransferSourceVaultID CLEARED — left set,
+	// every future replica-repair pull for this chunk would keep
+	// addressing itself at the now-empty source vault.
+	finalEntries := h.sealedPipelineChunks(dest, h.nodeIDs[destHomeIdxs[0]])
+	if len(finalEntries) != 1 || finalEntries[0].ID != e.ID {
+		t.Fatalf("destination sealed entries after completion = %v, want exactly %s", finalEntries, e.ID)
+	}
+	if !finalEntries[0].TransferSourceVaultID.IsZero() {
+		t.Fatalf("destination entry TransferSourceVaultID = %s after completion, want zero (cleared on completion)",
+			finalEntries[0].TransferSourceVaultID)
+	}
+
+	// gastrolog-2l918 review finding 1b, the defense-in-depth other half:
+	// a destination home that loses its copy AFTER the source vault has
+	// expired its own copies must still self-heal. The source vault no
+	// longer holds this chunk at all (asserted above), so if
+	// runGLCBPull's replica-repair pull were still addressed at the
+	// (already-empty) source, this would time out forever — recovery can
+	// only succeed via the holder-set fallback pulling from ANOTHER
+	// destination home.
+	victimIdx := destHomeIdxs[0]
+	victimPath := h.pipelineGLCBPath(h.nodeIDs[victimIdx], dest, e.ID)
+	if err := os.Remove(victimPath); err != nil {
+		t.Fatalf("remove victim destination GLCB: %v", err)
+	}
+	h.waitProgress("victim destination home GLCB recovery after source vault is fully gone", 200*time.Millisecond, func() (string, bool) {
+		_, err := os.Stat(victimPath)
+		return fmt.Sprintf("victim_glcb_stat=%v", err), err == nil
+	}, func() { h.dumpPipelineState(dest) })
+	got, err := os.ReadFile(victimPath)
+	if err != nil {
+		t.Fatalf("read recovered destination GLCB: %v", err)
+	}
+	if string(got) != string(wantBytes) {
+		t.Fatalf("recovered destination GLCB differs from the original transferred bytes")
+	}
+	h.waitChunkHolders(dest, e.ID, destHomeIdxs)
 }

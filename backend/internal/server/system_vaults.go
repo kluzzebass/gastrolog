@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+
 	"gastrolog/internal/glid"
 
 	"connectrpc.com/connect"
@@ -176,6 +178,46 @@ func validateRetentionTransferDisposition(vaultCfg system.VaultConfig, vaults []
 		return errInvalidArg(fmt.Errorf(
 			"vault %q: retention transfer target %q must be a plain file vault (got %s, cloud=%t) — cloud-backed and memory vaults have different at-rest forms and lifecycle machinery",
 			vaultCfg.Name, target.Name, target.Type, target.IsCloud()))
+	}
+	return detectTransferCycle(vaultCfg, vaults)
+}
+
+// detectTransferCycle rejects a transfer-target graph that would cycle
+// back to the writing vault — A→B→A, or any longer chain A→B→C→A
+// (gastrolog-2l918 review finding 3a). Self-transfer (the 1-hop cycle) is
+// already rejected above; this generalizes to the multi-hop case, which
+// self-transfer's simple equality check cannot catch. The graph is tiny
+// (one edge per vault, at most len(vaults) hops), so a plain walk with a
+// seen-set is the whole algorithm — no need for anything fancier.
+//
+// vaults is the existing vault list; vaultCfg is the incoming (not yet
+// persisted) config for its own ID, so the walk uses vaultCfg — not
+// whatever is currently stored — as the starting point and as the
+// resolution for its own ID if it appears again later in the chain (a
+// vault cannot cycle back to a stale view of itself).
+func detectTransferCycle(vaultCfg system.VaultConfig, vaults []system.VaultConfig) *connect.Error {
+	byID := make(map[glid.GLID]system.VaultConfig, len(vaults)+1)
+	for _, v := range vaults {
+		byID[v.ID] = v
+	}
+	byID[vaultCfg.ID] = vaultCfg
+
+	chain := []string{vaultCfg.Name}
+	seen := map[glid.GLID]bool{vaultCfg.ID: true}
+	cur := vaultCfg
+	for cur.ResolveRetentionDisposition() == system.RetentionDispositionTransfer && cur.RetentionTransferTargetVaultID != nil {
+		nextID := *cur.RetentionTransferTargetVaultID
+		next, ok := byID[nextID]
+		if !ok {
+			return nil // target doesn't exist — the "not found" check above already covers this
+		}
+		chain = append(chain, next.Name)
+		if seen[nextID] {
+			return errInvalidArg(fmt.Errorf(
+				"vault %q: retention transfer target graph has a cycle: %s", vaultCfg.Name, strings.Join(chain, " -> ")))
+		}
+		seen[nextID] = true
+		cur = next
 	}
 	return nil
 }

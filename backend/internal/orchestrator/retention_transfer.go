@@ -44,7 +44,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"gastrolog/internal/chunk"
@@ -53,6 +52,29 @@ import (
 	"gastrolog/internal/system"
 	"gastrolog/internal/vaultraft"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
+)
+
+// Defer-cause categories for deferTransfer's throttle key (gastrolog-2l918
+// review finding 6). Bounded and fixed regardless of chunk/target
+// identity — the throttle key must never embed variable text (chunk IDs,
+// record counts) or the idleLog map grows unboundedly and every distinct
+// failure re-logs instead of throttling. The full, variable-text cause
+// still reaches the operator via noteRetentionDeferral (alarm detail) and
+// the log line itself; only the THROTTLE KEY is category-bounded.
+const (
+	deferCatTargetUnconfigured = "target-unconfigured"
+	deferCatConfigLoadFailed   = "config-load-failed"
+	deferCatTargetDisabled     = "target-disabled"
+	deferCatTargetNotFileVault = "target-not-file-vault"
+	deferCatTargetNotFound     = "target-not-found"
+	deferCatAdmission          = "target-admission"
+	deferCatNoHandle           = "no-vault-ctl-handle"
+	deferCatCorruption         = "corruption"
+	deferCatTombstoned         = "tombstoned"
+	deferCatAnnounceFailed     = "announce-failed"
+	deferCatEntryNotVisible    = "entry-not-visible"
+	deferCatReceiptsStall      = "receipts-stall"
+	deferCatTargetStalled      = "target-stalled-this-sweep"
 )
 
 // transferReceiptsPollInterval is how often fireTransferEvent polls the
@@ -79,7 +101,11 @@ const transferReceiptsMaxStallTicks = 60
 // for route disposition. See applyRetentionDispositionToChunk.
 func (r *retentionRunner) fireTransferEvent(id chunk.ChunkID) bool {
 	if r.orch == nil {
-		return true // bare test harnesses with no orchestrator: nothing to transfer into
+		// No orchestrator: nothing to transfer into. Retain rather than
+		// silently succeed — a disposition that cannot reach a
+		// destination must never destroy the source's only copy
+		// (gastrolog-2l918 review finding 6).
+		return false
 	}
 	if r.orch.shuttingDown() {
 		return false
@@ -98,14 +124,26 @@ func (r *retentionRunner) fireTransferEvent(id chunk.ChunkID) bool {
 	}
 
 	if r.transferTarget == nil {
-		r.deferTransfer(id, "retention_transfer_target_vault_id is not set")
+		r.deferTransfer(id, deferCatTargetUnconfigured, "retention_transfer_target_vault_id is not set")
 		return false
 	}
 	targetID := *r.transferTarget
 
-	targetCfg, deferCause := r.resolveTransferTarget(targetID)
+	// Per-sweep circuit breaker (gastrolog-2l918 review finding 2): a
+	// target that already stalled a DIFFERENT chunk's receipts wait this
+	// sweep is not going to un-stall for this chunk either. Defer
+	// immediately instead of burning another full stall window — without
+	// this, N chunks queued against one stalled destination serially eat
+	// N stall windows (2 minutes each in production), freezing every
+	// OTHER chunk's retention on this vault for hours.
+	if cause, stalled := r.transferTargetStalledThisSweep(targetID); stalled {
+		r.deferTransfer(id, deferCatTargetStalled, cause)
+		return false
+	}
+
+	targetCfg, category, deferCause := r.resolveTransferTarget(targetID)
 	if targetCfg == nil {
-		r.deferTransfer(id, deferCause)
+		r.deferTransfer(id, category, deferCause)
 		return false
 	}
 
@@ -114,7 +152,7 @@ func (r *retentionRunner) fireTransferEvent(id chunk.ChunkID) bool {
 	// destination vault defers, it does not overfill (reuse
 	// vaultAdmissionGate, not a parallel check).
 	if err := r.orch.vaultAdmissionGate(targetID); err != nil {
-		r.deferTransfer(id, fmt.Sprintf("transfer target vault %q: %v", targetCfg.Name, err))
+		r.deferTransfer(id, deferCatAdmission, fmt.Sprintf("transfer target vault %q: %v", targetCfg.Name, err))
 		return false
 	}
 
@@ -126,13 +164,13 @@ func (r *retentionRunner) fireTransferEvent(id chunk.ChunkID) bool {
 
 	destFSM, _, _, hasHandle := r.orch.vaultCtlHandle(targetID)
 	if !hasHandle || destFSM == nil {
-		r.deferTransfer(id, fmt.Sprintf("transfer target vault %q has no local vault-ctl handle on this node", targetCfg.Name))
+		r.deferTransfer(id, deferCatNoHandle, fmt.Sprintf("transfer target vault %q has no local vault-ctl handle on this node", targetCfg.Name))
 		return false
 	}
 
-	entry, deferCause := r.ensureDestManifestEntry(destFSM, targetID, id, meta)
+	entry, category, deferCause := r.ensureDestManifestEntry(destFSM, targetID, id, meta)
 	if entry == nil {
-		r.deferTransfer(id, deferCause)
+		r.deferTransfer(id, category, deferCause)
 		return false
 	}
 
@@ -155,10 +193,26 @@ func (r *retentionRunner) fireTransferEvent(id chunk.ChunkID) bool {
 	ok := r.waitForDestHolders(destFSM, id, destRF, tick)
 	stop()
 	if !ok {
-		r.deferTransfer(id, fmt.Sprintf(
+		r.markTransferTargetStalledThisSweep(targetID)
+		r.deferTransfer(id, deferCatReceiptsStall, fmt.Sprintf(
 			"destination vault %q did not reach %d holder receipt(s) for the transferred chunk within the stall window",
 			targetCfg.Name, destRF))
 		return false
+	}
+
+	// Destination RF is met: clear the manifest entry's transfer-source
+	// pointer BEFORE the caller expires the source's local copy
+	// (gastrolog-2l918 review finding 1). Left set, every future replica-
+	// repair pull for this chunk would keep addressing itself at THIS
+	// (source) vault's placement peers — who are about to delete their
+	// copies — permanently defeating self-healing for the transferred
+	// chunk. Defense in depth, not the only guard: if this apply fails
+	// (leader hiccup, forwarding error), completion still proceeds —
+	// runGLCBPull's holder-set fallback (glcb_catchup.go) is the second
+	// line of defense for a miss here.
+	if err := r.orch.ApplyVaultControlPlane(targetID, vaultraft.MarshalVaultChunkCommand(targetID, vaultctlfsm.MarshalClearTransferSource(id))); err != nil {
+		r.logger.Warn("retention: transfer completed but failed to clear the destination's transfer-source pointer — replica repair falls back to the destination's own holders if this is ever needed",
+			"vault", r.vaultID, "target", targetCfg.Name, "chunk", id, "error", err)
 	}
 
 	r.noteRetentionProgress()
@@ -166,27 +220,61 @@ func (r *retentionRunner) fireTransferEvent(id chunk.ChunkID) bool {
 }
 
 // deferTransfer folds a defer cause into the shared deferral streak AND
-// logs it (throttled, one line per distinct cause per idleLog interval) —
-// parity with fireRetentionEvent's per-branch r.logger.Warn calls, so an
-// operator (or a debugging session) watching this node's logs sees why a
-// transfer stalled without waiting 3 sweeps for the alarm to name it.
-func (r *retentionRunner) deferTransfer(id chunk.ChunkID, cause string) {
+// logs it (throttled, one line per distinct CATEGORY per idleLog
+// interval) — parity with fireRetentionEvent's per-branch r.logger.Warn
+// calls, so an operator (or a debugging session) watching this node's
+// logs sees why a transfer stalled without waiting 3 sweeps for the alarm
+// to name it. category is a small, fixed defer-cause enum (deferCat*
+// constants) used ONLY for the throttle key; cause is the full,
+// variable-text operator-facing message (chunk/target identity included)
+// carried in the alarm detail and the log line. Splitting them matters
+// (gastrolog-2l918 review finding 6): a throttle key built from the
+// formatted cause text embeds per-chunk data (record counts, chunk IDs)
+// and grows the idleLog map without bound, defeating the throttle for
+// every distinct chunk instead of collapsing repeats of the same failure
+// mode.
+func (r *retentionRunner) deferTransfer(id chunk.ChunkID, category, cause string) {
 	r.noteRetentionDeferral(cause)
-	if n, ok := r.idleLog.Allow("transfer:" + cause); ok {
+	if n, ok := r.idleLog.Allow("transfer:" + category); ok {
 		r.logger.Warn("retention: transfer deferred; chunk retained for a later sweep",
-			"vault", r.vaultID, "chunk", id, "cause", cause, "suppressed", n)
+			"vault", r.vaultID, "chunk", id, "category", category, "cause", cause, "suppressed", n)
 	}
+}
+
+// transferTargetStalledThisSweep reports whether targetID's receipts wait
+// already stalled once during the CURRENT sweep — the per-sweep circuit
+// breaker (gastrolog-2l918 review finding 2).
+func (r *retentionRunner) transferTargetStalledThisSweep(targetID glid.GLID) (string, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.sweepStalledTransferTargets[targetID] {
+		return "", false
+	}
+	return fmt.Sprintf("transfer target vault %s stalled earlier this sweep — deferring immediately rather than re-waiting", targetID), true
+}
+
+// markTransferTargetStalledThisSweep records that targetID's receipts
+// wait stalled this sweep, tripping the circuit breaker for every OTHER
+// chunk targeting the same vault for the rest of THIS sweep. Reset to nil
+// at the start of every sweep() call.
+func (r *retentionRunner) markTransferTargetStalledThisSweep(targetID glid.GLID) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.sweepStalledTransferTargets == nil {
+		r.sweepStalledTransferTargets = make(map[glid.GLID]bool)
+	}
+	r.sweepStalledTransferTargets[targetID] = true
 }
 
 // resolveTransferTarget re-validates the transfer target at sweep time —
 // PutVault already enforced target-exists/file/not-self at config-write
 // time, but config can drift after validation (target vault deleted,
 // disabled, or its type changed is not possible for type but disabled is).
-// Returns (nil, cause) when the target is not currently usable.
-func (r *retentionRunner) resolveTransferTarget(targetID glid.GLID) (*system.VaultConfig, string) {
+// Returns (nil, category, cause) when the target is not currently usable.
+func (r *retentionRunner) resolveTransferTarget(targetID glid.GLID) (*system.VaultConfig, string, string) {
 	sys, err := r.orch.loadSystem(context.Background())
 	if err != nil || sys == nil {
-		return nil, "failed to load config to resolve transfer target"
+		return nil, deferCatConfigLoadFailed, "failed to load config to resolve transfer target"
 	}
 	for i := range sys.Config.Vaults {
 		if sys.Config.Vaults[i].ID != targetID {
@@ -194,14 +282,14 @@ func (r *retentionRunner) resolveTransferTarget(targetID glid.GLID) (*system.Vau
 		}
 		targetCfg := &sys.Config.Vaults[i]
 		if !targetCfg.Enabled {
-			return nil, fmt.Sprintf("transfer target vault %q is disabled", targetCfg.Name)
+			return nil, deferCatTargetDisabled, fmt.Sprintf("transfer target vault %q is disabled", targetCfg.Name)
 		}
 		if targetCfg.Type != system.VaultTypeFile || targetCfg.IsCloud() {
-			return nil, fmt.Sprintf("transfer target vault %q is no longer a plain file vault", targetCfg.Name)
+			return nil, deferCatTargetNotFileVault, fmt.Sprintf("transfer target vault %q is no longer a plain file vault", targetCfg.Name)
 		}
-		return targetCfg, ""
+		return targetCfg, "", ""
 	}
-	return nil, fmt.Sprintf("transfer target vault %s no longer exists", targetID)
+	return nil, deferCatTargetNotFound, fmt.Sprintf("transfer target vault %s no longer exists", targetID)
 }
 
 // ensureDestManifestEntry announces the chunk into the destination vault's
@@ -213,40 +301,76 @@ func (r *retentionRunner) resolveTransferTarget(targetID glid.GLID) (*system.Vau
 // transfer attempt reached announce-import — this is the idempotent-retry
 // path (spec decision #7): a matching record count proceeds straight to
 // the receipts wait; a mismatch is corruption and defers with an alarm
-// cause naming it.
-func (r *retentionRunner) ensureDestManifestEntry(destFSM *vaultctlfsm.FSM, targetID glid.GLID, id chunk.ChunkID, meta chunk.ChunkMeta) (*vaultctlfsm.ManifestEntry, string) {
+// cause naming it. If the destination has TOMBSTONED this chunk ID (a
+// prior transfer to this same destination was retracted — see the
+// abandoned-announce GC in vault_lifecycle_reconciler.go, finding 4 — or
+// an operator delete), the announce is refused with a NAMED cause distinct
+// from corruption (finding 3b): the transfer defers until the tombstone
+// prunes rather than looping on a dead entry forever. Returns
+// (entry, category, cause); category is a bounded deferCat* constant for
+// deferTransfer's throttle key, cause is the full operator-facing text.
+func (r *retentionRunner) ensureDestManifestEntry(destFSM *vaultctlfsm.FSM, targetID glid.GLID, id chunk.ChunkID, meta chunk.ChunkMeta) (*vaultctlfsm.ManifestEntry, string, string) {
 	if existing := destFSM.Get(id); existing != nil {
 		if existing.RecordCount != meta.RecordCount {
-			return nil, fmt.Sprintf(
+			return nil, deferCatCorruption, fmt.Sprintf(
 				"transfer target already holds a DIFFERENT chunk under ID %s (record count %d != source %d) — corruption, not re-transferring",
 				id, existing.RecordCount, meta.RecordCount)
 		}
-		return existing, ""
+		return existing, "", ""
+	}
+	if destFSM.IsTombstoned(id) {
+		return nil, deferCatTombstoned, fmt.Sprintf(
+			"transfer target vault: chunk %s is tombstoned at the destination — deferred until the destination's tombstone prunes (see docs/retention-transfer-disposition-design.md \"Cycles and tombstones\")",
+			id)
 	}
 
-	entry := chunkMetaToManifestEntry(meta)
+	entry := r.sourceManifestEntryForTransfer(id, meta)
 	entry.SealedAt = r.now()
 	entry.TransferSourceVaultID = r.vaultID
 	entry.Holders = nil
+	entry.RetentionPending = false
 
 	cmdData, err := vaultctlfsm.MarshalRepatriateChunk(entry)
 	if err != nil {
-		return nil, fmt.Sprintf("marshal transfer announce-import: %v", err)
+		return nil, deferCatAnnounceFailed, fmt.Sprintf("marshal transfer announce-import: %v", err)
 	}
-	if err := r.orch.ApplyVaultControlPlane(targetID, vaultraft.MarshalVaultChunkCommand(targetID, cmdData)); err != nil {
-		if !strings.Contains(err.Error(), "already in manifest") {
-			return nil, fmt.Sprintf("announce-import to transfer target failed: %v", err)
-		}
-		// Lost the race against a concurrent or earlier attempt — benign;
-		// re-read what's actually there now.
-		if existing := destFSM.Get(id); existing != nil {
-			return existing, ""
-		}
-	}
+	applyErr := r.orch.ApplyVaultControlPlane(targetID, vaultraft.MarshalVaultChunkCommand(targetID, cmdData))
+	// Authoritative check regardless of what the apply error says
+	// (gastrolog-2l918 review finding 6): a concurrent or earlier attempt
+	// landing the exact same entry is success (idempotent retry) whether
+	// or not the error text happens to say so. Re-read the FSM directly
+	// instead of pattern-matching error text across the RPC boundary.
 	if got := destFSM.Get(id); got != nil {
-		return got, ""
+		if got.RecordCount != meta.RecordCount {
+			return nil, deferCatCorruption, fmt.Sprintf(
+				"transfer target already holds a DIFFERENT chunk under ID %s (record count %d != source %d) — corruption, not re-transferring",
+				id, got.RecordCount, meta.RecordCount)
+		}
+		return got, "", ""
 	}
-	return nil, "announce-import applied but the destination FSM does not show the entry yet"
+	if applyErr != nil {
+		return nil, deferCatAnnounceFailed, fmt.Sprintf("announce-import to transfer target failed: %v", applyErr)
+	}
+	return nil, deferCatEntryNotVisible, "announce-import applied but the destination FSM does not show the entry yet"
+}
+
+// sourceManifestEntryForTransfer returns the manifest entry to announce at
+// the destination: a full copy of the SOURCE vault-ctl FSM's own entry
+// when this node has a local handle on it — preserving Hash, KeyScheme,
+// IngestTSMonotonic, and the GLCB section-offset fields that rebuilding
+// from ChunkMeta alone drops (gastrolog-2l918 review finding 5) — falling
+// back to chunkMetaToManifestEntry only when no local source FSM handle
+// exists (bare unit-test harnesses that build a retentionRunner without an
+// Orchestrator).
+func (r *retentionRunner) sourceManifestEntryForTransfer(id chunk.ChunkID, meta chunk.ChunkMeta) vaultctlfsm.ManifestEntry {
+	if r.orch != nil {
+		if srcFSM, _, _, ok := r.orch.vaultCtlHandle(r.vaultID); ok && srcFSM != nil {
+			if e := srcFSM.Get(id); e != nil {
+				return *e
+			}
+		}
+	}
+	return chunkMetaToManifestEntry(meta)
 }
 
 // tryLocalTransferCopy copies the chunk's GLCB directly from this node's

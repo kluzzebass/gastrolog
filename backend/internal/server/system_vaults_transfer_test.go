@@ -174,3 +174,72 @@ func TestPutVaultRouteDispositionDoesNotRequireTarget(t *testing.T) {
 		t.Fatalf("route disposition without target: %v", err)
 	}
 }
+
+// TestPutVaultTransferRejectsTwoHopCycle rejects A→B→A: self-transfer
+// (the 1-hop case) is caught by the simple target==self check above, but
+// a 2-hop cycle needs the target-graph walk (gastrolog-2l918 review
+// finding 3a). B is configured to transfer into A FIRST — that alone is
+// not a cycle (A has no transfer disposition yet) — then closing the loop
+// by pointing A at B must be rejected.
+func TestPutVaultTransferRejectsTwoHopCycle(t *testing.T) {
+	client, _, _ := newConfigTestSetup(t)
+
+	a := fileVaultConfig(glid.New(), "cycle-a")
+	if err := putVault(t, client, a); err != nil {
+		t.Fatalf("create A: %v", err)
+	}
+	b := fileVaultConfig(glid.New(), "cycle-b")
+	b.RetentionDisposition = "transfer"
+	b.RetentionTransferTargetVaultId = a.Id
+	if err := putVault(t, client, b); err != nil {
+		t.Fatalf("create B targeting A (not yet a cycle): %v", err)
+	}
+
+	// Close the loop: A now targets B.
+	a.RetentionDisposition = "transfer"
+	a.RetentionTransferTargetVaultId = b.Id
+	err := putVault(t, client, a)
+	if err == nil || connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("A->B->A cycle: want InvalidArgument, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "cycle") {
+		t.Fatalf("error must name the cycle, got: %v", err)
+	}
+}
+
+// TestPutVaultTransferRejectsThreeHopCycle rejects the longer A→B→C→A
+// chain — the walk must not stop after one hop.
+func TestPutVaultTransferRejectsThreeHopCycle(t *testing.T) {
+	client, _, _ := newConfigTestSetup(t)
+
+	a := fileVaultConfig(glid.New(), "cycle3-a")
+	if err := putVault(t, client, a); err != nil {
+		t.Fatalf("create A: %v", err)
+	}
+	b := fileVaultConfig(glid.New(), "cycle3-b")
+	if err := putVault(t, client, b); err != nil {
+		t.Fatalf("create B: %v", err)
+	}
+	c := fileVaultConfig(glid.New(), "cycle3-c")
+	c.RetentionDisposition = "transfer"
+	c.RetentionTransferTargetVaultId = a.Id
+	if err := putVault(t, client, c); err != nil {
+		t.Fatalf("create C targeting A (not yet a cycle): %v", err)
+	}
+	b.RetentionDisposition = "transfer"
+	b.RetentionTransferTargetVaultId = c.Id
+	if err := putVault(t, client, b); err != nil {
+		t.Fatalf("B targeting C (not yet a cycle): %v", err)
+	}
+
+	// Close the loop: A now targets B, completing A->B->C->A.
+	a.RetentionDisposition = "transfer"
+	a.RetentionTransferTargetVaultId = b.Id
+	err := putVault(t, client, a)
+	if err == nil || connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("A->B->C->A cycle: want InvalidArgument, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "cycle") {
+		t.Fatalf("error must name the cycle, got: %v", err)
+	}
+}

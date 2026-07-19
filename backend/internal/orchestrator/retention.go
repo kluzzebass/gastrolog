@@ -202,6 +202,15 @@ type retentionRunner struct {
 	// stall/success paths are exercised without wall-clock sleeps; nil
 	// means production behavior (a real time.Ticker).
 	transferReceiptTick <-chan time.Time
+	// sweepStalledTransferTargets is the per-sweep circuit breaker
+	// (gastrolog-2l918 review finding 2): once a chunk's receipts wait
+	// stalls against a given target vault, every OTHER chunk targeting
+	// that SAME vault for the rest of THIS sweep defers immediately
+	// instead of also burning the full stall window — one stalled
+	// destination must not freeze retention on this vault for hours by
+	// serially re-waiting per chunk. Reset to nil at the start of every
+	// sweep(). Guarded by mu.
+	sweepStalledTransferTargets map[glid.GLID]bool
 
 	now    func() time.Time
 	logger *slog.Logger
@@ -725,6 +734,11 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 	if r.inflight == nil {
 		r.inflight = make(map[chunk.ChunkID]bool)
 	}
+	// Fresh per-sweep circuit-breaker state (gastrolog-2l918 review
+	// finding 2): a target that stalled LAST sweep gets a clean retry
+	// this sweep — only a stall observed DURING this sweep should defer
+	// its siblings immediately.
+	r.sweepStalledTransferTargets = nil
 	r.mu.Unlock()
 
 	if len(rules) == 0 {
@@ -898,6 +912,23 @@ func appendUnlistedManifestSealed(metas []chunk.ChunkMeta, vaultInst *VaultInsta
 	}
 	for _, e := range vaultInst.ManifestEntries() {
 		if listed[e.ID] || e.CloudBacked || !e.IsSealed() {
+			continue
+		}
+		// In-flight transfer landing (gastrolog-2l918 review finding 3c):
+		// an entry introduced by retention transfer disposition
+		// (TransferSourceVaultID set) with ZERO confirmed holders hasn't
+		// actually arrived on any destination home yet — the bytes are
+		// still in flight from the source, and cm.List() correctly has
+		// no local copy to report (which is why this synthetic path
+		// would otherwise be the one making it a candidate). Surfacing
+		// it here would let the DESTINATION vault's OWN retention rules
+		// (a short TTL, size pressure) tombstone the phantom placeholder
+		// out from under the transfer before receipts land — destroying
+		// an in-flight hand-off with no data ever having existed on
+		// this side, and stranding the source's receipts-wait forever.
+		// Once ANY holder acks, Holders is non-empty and the entry
+		// rejoins normal candidacy.
+		if !e.TransferSourceVaultID.IsZero() && len(e.Holders) == 0 {
 			continue
 		}
 		metas = append(metas, chunk.ChunkMeta{
