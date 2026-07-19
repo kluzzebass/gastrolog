@@ -27,7 +27,6 @@ interface PolicyEdit {
   maxAge: string;
   maxBytes: string;
   maxChunks: string;
-  sizeBudget: string;
 }
 
 // -- Reducer for "Add retention policy" form state --
@@ -38,7 +37,6 @@ interface AddRetentionFormState {
   newMaxAge: string;
   newMaxBytes: string;
   newMaxChunks: string;
-  newSizeBudget: string;
 }
 
 const addRetentionFormInitial: AddRetentionFormState = {
@@ -47,7 +45,6 @@ const addRetentionFormInitial: AddRetentionFormState = {
   newMaxAge: "",
   newMaxBytes: "",
   newMaxChunks: "",
-  newSizeBudget: "",
 };
 
 type AddRetentionFormAction =
@@ -56,7 +53,6 @@ type AddRetentionFormAction =
   | { type: "setNewMaxAge"; value: string }
   | { type: "setNewMaxBytes"; value: string }
   | { type: "setNewMaxChunks"; value: string }
-  | { type: "setNewSizeBudget"; value: string }
   | { type: "resetForm" };
 
 function addRetentionFormReducer(state: AddRetentionFormState, action: AddRetentionFormAction): AddRetentionFormState {
@@ -71,8 +67,6 @@ function addRetentionFormReducer(state: AddRetentionFormState, action: AddRetent
       return { ...state, newMaxBytes: action.value };
     case "setNewMaxChunks":
       return { ...state, newMaxChunks: action.value };
-    case "setNewSizeBudget":
-      return { ...state, newSizeBudget: action.value };
     case "resetForm":
       return addRetentionFormInitial;
     default:
@@ -91,7 +85,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
   const { isExpanded, toggle: toggleCard } = useExpandedCards();
 
   const [addForm, dispatchAdd] = useReducer(addRetentionFormReducer, addRetentionFormInitial);
-  const { adding, newName, newMaxAge, newMaxBytes, newMaxChunks, newSizeBudget } = addForm;
+  const { adding, newName, newMaxAge, newMaxBytes, newMaxChunks } = addForm;
   const [namePlaceholder, setNamePlaceholder] = useState("");
 
   const policies = config?.retentionPolicies ?? [];
@@ -101,20 +95,17 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
   const vaults = config?.vaults ?? [];
   // gastrolog-1rbuf: at least one condition must be set, otherwise the
   // retention policy is a silent no-op. Backend rejects empty policies
-  // with InvalidArgument; mirror the rule client-side. A policy that sets
-  // ONLY sizeBudget is legal (a bound-only policy is meaningful —
-  // gastrolog-33ul6h), so sizeBudget counts toward non-empty here too.
-  const newPolicyEmpty = !newMaxAge.trim() && !newMaxBytes.trim() && !newMaxChunks.trim() && !newSizeBudget.trim();
+  // with InvalidArgument; mirror the rule client-side.
+  const newPolicyEmpty = !newMaxAge.trim() && !newMaxBytes.trim() && !newMaxChunks.trim();
 
   const defaults = (id: string): PolicyEdit => {
     const pol = policies.find((p) => encode(p.id) === id);
-    if (!pol) return { name: "", maxAge: "", maxBytes: "", maxChunks: "", sizeBudget: "" };
+    if (!pol) return { name: "", maxAge: "", maxBytes: "", maxChunks: "" };
     return {
       name: pol.name,
       maxAge: pol.maxAge,
       maxBytes: pol.maxSize,
       maxChunks: pol.maxChunks > BigInt(0) ? pol.maxChunks.toString() : "",
-      sizeBudget: pol.sizeBudget ?? "",
     };
   };
 
@@ -132,7 +123,6 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
         maxAge: edit.maxAge,
         maxSize: edit.maxBytes,
         maxChunks: maxChunksValue,
-        sizeBudget: edit.sizeBudget,
       };
     },
     onDeleteSuccess: (id) => {
@@ -162,7 +152,6 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
         maxAge: newMaxAge,
         maxSize: newMaxBytes,
         maxChunks: maxChunksValue,
-        sizeBudget: newSizeBudget,
       });
       addToast(`Retention policy "${name}" created`, "info");
       dispatchAdd({ type: "resetForm" });
@@ -220,9 +209,9 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
               />
             </FormField>
             <FormField
-              label="Max Bytes"
+              label="Max Size"
               dark={dark}
-              description="Destroys the oldest chunks past this disk claim."
+              description="The vault's disk-claim bound: oldest chunks drain past it; new records refuse while over it."
             >
               <TextInput
                 value={newMaxBytes}
@@ -242,20 +231,6 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
               />
             </FormField>
           </div>
-          <FormField
-            label="Size Budget"
-            dark={dark}
-            description="Refuses new records at this per-node disk claim."
-          >
-            <TextInput
-              value={newSizeBudget}
-              onChange={(v) => dispatchAdd({ type: "setNewSizeBudget", value: v })}
-              placeholder=""
-              dark={dark}
-              mono
-              examples={["10GB", "50GB", "500GB"]}
-            />
-          </FormField>
         </AddFormCard>
       )}
 
@@ -264,10 +239,8 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
         const edit = getEdit(id);
         const refs = vaultRefsForRetentionPolicy(id, vaults);
         // gastrolog-1rbuf: backend rejects empty policies; disable Save
-        // preemptively if the operator has cleared every condition. A
-        // bound-only policy (sizeBudget set, no drain trigger) is legal
-        // (gastrolog-33ul6h), so sizeBudget counts toward non-empty too.
-        const editEmpty = !edit.maxAge.trim() && !edit.maxBytes.trim() && !edit.maxChunks.trim() && !edit.sizeBudget.trim();
+        // preemptively if the operator has cleared every condition.
+        const editEmpty = !edit.maxAge.trim() && !edit.maxBytes.trim() && !edit.maxChunks.trim();
         return (
           <SettingsCard
             key={id}
@@ -309,9 +282,9 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
                   />
                 </FormField>
                 <FormField
-                  label="Max Bytes"
-                      dark={dark}
-                  description="Destroys the oldest chunks past this disk claim."
+                  label="Max Size"
+                  dark={dark}
+                  description="The vault's disk-claim bound: oldest chunks drain past it; new records refuse while over it."
                 >
                   <TextInput
                     value={edit.maxBytes}
@@ -331,20 +304,6 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
                   />
                 </FormField>
               </div>
-              <FormField
-                label="Size Budget"
-                dark={dark}
-                description="Refuses new records at this per-node disk claim."
-              >
-                <TextInput
-                  value={edit.sizeBudget}
-                  onChange={(v) => setEdit(id, { sizeBudget: v })}
-                  placeholder=""
-                  dark={dark}
-                  mono
-                  examples={["10GB", "50GB", "500GB"]}
-                />
-              </FormField>
             </div>
           </SettingsCard>
         );
