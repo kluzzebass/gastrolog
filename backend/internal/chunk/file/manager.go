@@ -317,7 +317,8 @@ type chunkMeta struct {
 	bytes            int64     // Total logical bytes (data + non-data files)
 	logicalDataBytes int64     // Logical data bytes only (raw + attr + idx content)
 	sealed           bool
-	diskBytes        int64 // actual on-disk size of data.glcb
+	diskBytes        int64 // LOCAL on-disk size right now (0 when cloud-backed and evicted)
+	cloudBytes       int64 // compressed cloud object (transport) size; 0 = never uploaded
 
 	// IngestTS and SourceTS bounds (zero = unknown).
 	ingestStart time.Time
@@ -367,6 +368,7 @@ func (m *chunkMeta) toChunkMeta() chunk.ChunkMeta {
 		Bytes:             m.bytes,
 		Sealed:            m.sealed,
 		DiskBytes:         m.diskBytes,
+		CloudBytes:        m.cloudBytes,
 		IngestStart:       m.ingestStart,
 		IngestEnd:         m.ingestEnd,
 		SourceStart:       m.sourceStart,
@@ -3633,6 +3635,11 @@ func (m *Manager) runEvictionSweep(label string, rules []evictionRule) (int, int
 		m.lastAccessMu.Lock()
 		delete(m.lastAccess, c.id)
 		m.lastAccessMu.Unlock()
+		// The local warm cache is gone — the cloud index's persisted
+		// diskBytes must drop to 0 so Meta()/List() stop reporting a local
+		// claim for a chunk that no longer has any local bytes to reclaim.
+		// See gastrolog-33ul6h.
+		m.updateCloudDiskBytes(c.id, 0)
 		totalRemaining -= c.size
 		freed += c.size
 		evicted++
@@ -3642,6 +3649,45 @@ func (m *Manager) runEvictionSweep(label string, rules []evictionRule) (int, int
 			"policy", label, "evicted", evicted, "freed_bytes", freed)
 	}
 	return evicted, freed
+}
+
+// updateCloudDiskBytes persists a new LOCAL diskBytes value onto a
+// cloud-backed chunk's cloud-index entry — called whenever this node's
+// warm-cache footprint for the chunk changes (eviction removes the local
+// data.glcb, download/re-warm restores it). DiskBytes is per-node cache
+// state, not cluster-replicated (CloudBytes is); every node's cloud index
+// must be kept honest independently as its own local cache turns over.
+// No-op if the chunk isn't in this node's cloud index. Same
+// Lookup-mutate-Delete-Insert-Sync-invalidate shape as setArchivedFlag.
+func (m *Manager) updateCloudDiskBytes(id chunk.ChunkID, diskBytes int64) {
+	if m.cloudIdx == nil {
+		return
+	}
+	m.cloudIdxMu.Lock()
+	meta, found := m.cloudIdx.Lookup(id)
+	if !found {
+		m.cloudIdxMu.Unlock()
+		return
+	}
+	if meta.diskBytes == diskBytes {
+		m.cloudIdxMu.Unlock()
+		return
+	}
+	meta.diskBytes = diskBytes
+	if _, err := m.cloudIdx.Delete(id); err != nil {
+		m.logger.Warn("cloud index: delete failed", "chunk", id, "error", err)
+	}
+	if err := m.cloudIdx.Insert(id, meta); err != nil {
+		m.logger.Warn("cloud index: insert failed", "chunk", id, "error", err)
+	}
+	if err := m.cloudIdx.Sync(); err != nil {
+		m.logger.Warn("cloud index: sync failed", "error", err)
+	}
+	m.cloudIdxMu.Unlock()
+
+	m.mu.Lock()
+	m.cloudListCache = nil // invalidate cached List() results
+	m.mu.Unlock()
 }
 
 // cacheEntry is one row in the eviction-candidate set: a chunk whose
@@ -3737,6 +3783,11 @@ func (m *Manager) downloadCloudBlobToChunkDir(id chunk.ChunkID) (chunk.RecordCur
 		_ = os.Remove(tmpPath) //nolint:gosec // G703
 		return nil, err
 	}
+
+	// The chunk is re-warmed — the cloud index's persisted diskBytes must
+	// reflect the newly-cached local file, not stay at 0 (evicted) or a
+	// stale prior value. See gastrolog-33ul6h.
+	m.updateCloudDiskBytes(id, m.computeDiskBytes(id))
 
 	return m.openLocalGLCBCursor(id)
 }
@@ -4437,11 +4488,19 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 
 	// Move metadata from in-memory map to cloud B+ tree index.
 	// The chunk is now cloud-only — remove from Go heap.
+	//
+	// diskBytes stays the LOCAL warm-cache footprint: removeLocalDataFiles
+	// above only deleted the redundant multi-file artifacts, not data.glcb
+	// itself, so the chunk dir's on-disk size right now (computeDiskBytes)
+	// is the honest local claim — NOT blobSize, which is the compressed
+	// cloud object's transport size and belongs on cloudBytes instead. See
+	// gastrolog-33ul6h.
 	m.mu.Lock()
 	meta = m.metas[id]
 	if meta != nil {
 		meta.cloudBacked = true
-		meta.diskBytes = blobSize
+		meta.diskBytes = m.computeDiskBytes(id)
+		meta.cloudBytes = blobSize
 		meta.ingestIdxOffset = toc.IngestIdxOffset
 		meta.ingestIdxSize = toc.IngestIdxSize
 		meta.sourceIdxOffset = toc.SourceIdxOffset
@@ -4534,11 +4593,15 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 	// and the next TTL sweep would immediately evict it.
 	m.touchLastAccess(id)
 
+	// Same diskBytes/cloudBytes split as uploadToCloud: data.glcb stays as
+	// the local warm cache, so the honest local claim is what's actually on
+	// disk right now, not the compressed blob size. See gastrolog-33ul6h.
 	m.mu.Lock()
 	meta := m.metas[id]
 	if meta != nil {
 		meta.cloudBacked = true
-		meta.diskBytes = blobSize
+		meta.diskBytes = m.computeDiskBytes(id)
+		meta.cloudBytes = blobSize
 		meta.ingestIdxOffset = ingestIdxOff
 		meta.ingestIdxSize = ingestIdxSize
 		meta.sourceIdxOffset = sourceIdxOff
@@ -4607,11 +4670,17 @@ func (m *Manager) RegisterCloudBackedChunk(id chunk.ChunkID, info chunk.CloudBac
 		bytes:             info.Bytes,
 		sealed:            true,
 		cloudBacked:       true,
-		diskBytes:         info.DiskBytes,
-		ingestIdxOffset:   info.IngestIdxOffset,
-		ingestIdxSize:     info.IngestIdxSize,
-		sourceIdxOffset:   info.SourceIdxOffset,
-		sourceIdxSize:     info.SourceIdxSize,
+		// diskBytes stays 0: this node is registering the chunk from FSM
+		// metadata alone, with no local copy — nothing has been downloaded
+		// here yet. info.CloudBytes (the leader's uploaded blob size) is a
+		// cluster-wide fact, not evidence of local presence. See
+		// gastrolog-33ul6h.
+		diskBytes:       0,
+		cloudBytes:      info.CloudBytes,
+		ingestIdxOffset: info.IngestIdxOffset,
+		ingestIdxSize:   info.IngestIdxSize,
+		sourceIdxOffset: info.SourceIdxOffset,
+		sourceIdxSize:   info.SourceIdxSize,
 	}
 
 	m.cloudIdxMu.Lock()
@@ -4886,7 +4955,18 @@ func (m *Manager) loadCloudBackedChunksFromStore() error {
 			writeEnd:    cm.WriteEnd,
 			recordCount: cm.RecordCount,
 			bytes:       cm.Bytes,
-			diskBytes:   cm.DiskBytes,
+			// diskBytes is the LOCAL footprint, initialized from whatever
+			// this node's chunk dir actually has on disk right now — NOT
+			// cm.DiskBytes/CloudBytes, which came from the cloud store's
+			// object listing (a cluster-wide fact, wired onto cloudBytes
+			// below). Most newly-discovered blobs have no local copy
+			// (0, via computeDiskBytes' ReadDir-miss branch), but a
+			// codec-mismatch cloud-index rebuild can rediscover a blob
+			// whose data.glcb survived on disk as a still-warm cache —
+			// this stat is what keeps that cache from reporting as
+			// evicted. See gastrolog-33ul6h.
+			diskBytes:   m.computeDiskBytes(id),
+			cloudBytes:  cm.CloudBytes,
 			sealed:      true,
 			ingestStart: cm.IngestStart,
 			ingestEnd:   cm.IngestEnd,

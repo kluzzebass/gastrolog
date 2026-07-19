@@ -829,13 +829,16 @@ func (x *SealChunkCommand) GetSealedAtNanos() int64 {
 }
 
 type UploadChunkCommand struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	Id              []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	DiskBytes       int64                  `protobuf:"varint,2,opt,name=disk_bytes,json=diskBytes,proto3" json:"disk_bytes,omitempty"`
-	IngestIdxOffset int64                  `protobuf:"varint,3,opt,name=ingest_idx_offset,json=ingestIdxOffset,proto3" json:"ingest_idx_offset,omitempty"`
-	IngestIdxSize   int64                  `protobuf:"varint,4,opt,name=ingest_idx_size,json=ingestIdxSize,proto3" json:"ingest_idx_size,omitempty"`
-	SourceIdxOffset int64                  `protobuf:"varint,5,opt,name=source_idx_offset,json=sourceIdxOffset,proto3" json:"source_idx_offset,omitempty"`
-	SourceIdxSize   int64                  `protobuf:"varint,6,opt,name=source_idx_size,json=sourceIdxSize,proto3" json:"source_idx_size,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Id    []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// cloud_bytes is the compressed cloud object's transport size — the only
+	// size fact this command ever carried (AnnounceUpload's post-upload
+	// stat). Was misleadingly named disk_bytes; renamed honestly, gastrolog-33ul6h.
+	CloudBytes      int64 `protobuf:"varint,2,opt,name=cloud_bytes,json=cloudBytes,proto3" json:"cloud_bytes,omitempty"`
+	IngestIdxOffset int64 `protobuf:"varint,3,opt,name=ingest_idx_offset,json=ingestIdxOffset,proto3" json:"ingest_idx_offset,omitempty"`
+	IngestIdxSize   int64 `protobuf:"varint,4,opt,name=ingest_idx_size,json=ingestIdxSize,proto3" json:"ingest_idx_size,omitempty"`
+	SourceIdxOffset int64 `protobuf:"varint,5,opt,name=source_idx_offset,json=sourceIdxOffset,proto3" json:"source_idx_offset,omitempty"`
+	SourceIdxSize   int64 `protobuf:"varint,6,opt,name=source_idx_size,json=sourceIdxSize,proto3" json:"source_idx_size,omitempty"`
 	// Integrity fields (gastrolog-grnc3); optional, present on the extended form.
 	Hash           []byte `protobuf:"bytes,7,opt,name=hash,proto3" json:"hash,omitempty"`
 	CloudServiceId []byte `protobuf:"bytes,8,opt,name=cloud_service_id,json=cloudServiceId,proto3" json:"cloud_service_id,omitempty"`
@@ -881,9 +884,9 @@ func (x *UploadChunkCommand) GetId() []byte {
 	return nil
 }
 
-func (x *UploadChunkCommand) GetDiskBytes() int64 {
+func (x *UploadChunkCommand) GetCloudBytes() int64 {
 	if x != nil {
-		return x.DiskBytes
+		return x.CloudBytes
 	}
 	return 0
 }
@@ -2779,29 +2782,35 @@ func (x *ClearTransferSourceCommand) GetChunkId() []byte {
 // proto carries every field of the Go ManifestEntry, including Hash /
 // CloudServiceID / KeyScheme which the legacy 123-byte snapshot codec dropped.
 type ManifestEntry struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	Id                []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	WriteStartNanos   int64                  `protobuf:"varint,2,opt,name=write_start_nanos,json=writeStartNanos,proto3" json:"write_start_nanos,omitempty"`
-	WriteEndNanos     int64                  `protobuf:"varint,3,opt,name=write_end_nanos,json=writeEndNanos,proto3" json:"write_end_nanos,omitempty"`
-	RecordCount       int64                  `protobuf:"varint,4,opt,name=record_count,json=recordCount,proto3" json:"record_count,omitempty"`
-	Bytes             int64                  `protobuf:"varint,5,opt,name=bytes,proto3" json:"bytes,omitempty"`
-	State             ChunkState             `protobuf:"varint,6,opt,name=state,proto3,enum=gastrolog.v1.ChunkState" json:"state,omitempty"`
-	DiskBytes         int64                  `protobuf:"varint,7,opt,name=disk_bytes,json=diskBytes,proto3" json:"disk_bytes,omitempty"`
-	IngestStartNanos  int64                  `protobuf:"varint,8,opt,name=ingest_start_nanos,json=ingestStartNanos,proto3" json:"ingest_start_nanos,omitempty"`
-	IngestEndNanos    int64                  `protobuf:"varint,9,opt,name=ingest_end_nanos,json=ingestEndNanos,proto3" json:"ingest_end_nanos,omitempty"`
-	SourceStartNanos  int64                  `protobuf:"varint,10,opt,name=source_start_nanos,json=sourceStartNanos,proto3" json:"source_start_nanos,omitempty"`
-	SourceEndNanos    int64                  `protobuf:"varint,11,opt,name=source_end_nanos,json=sourceEndNanos,proto3" json:"source_end_nanos,omitempty"`
-	IngestTsMonotonic bool                   `protobuf:"varint,12,opt,name=ingest_ts_monotonic,json=ingestTsMonotonic,proto3" json:"ingest_ts_monotonic,omitempty"`
-	CloudBacked       bool                   `protobuf:"varint,13,opt,name=cloud_backed,json=cloudBacked,proto3" json:"cloud_backed,omitempty"`
-	Archived          bool                   `protobuf:"varint,14,opt,name=archived,proto3" json:"archived,omitempty"`
-	RetentionPending  bool                   `protobuf:"varint,15,opt,name=retention_pending,json=retentionPending,proto3" json:"retention_pending,omitempty"`
-	IngestIdxOffset   int64                  `protobuf:"varint,16,opt,name=ingest_idx_offset,json=ingestIdxOffset,proto3" json:"ingest_idx_offset,omitempty"`
-	IngestIdxSize     int64                  `protobuf:"varint,17,opt,name=ingest_idx_size,json=ingestIdxSize,proto3" json:"ingest_idx_size,omitempty"`
-	SourceIdxOffset   int64                  `protobuf:"varint,18,opt,name=source_idx_offset,json=sourceIdxOffset,proto3" json:"source_idx_offset,omitempty"`
-	SourceIdxSize     int64                  `protobuf:"varint,19,opt,name=source_idx_size,json=sourceIdxSize,proto3" json:"source_idx_size,omitempty"`
-	Hash              []byte                 `protobuf:"bytes,20,opt,name=hash,proto3" json:"hash,omitempty"`
-	CloudServiceId    []byte                 `protobuf:"bytes,21,opt,name=cloud_service_id,json=cloudServiceId,proto3" json:"cloud_service_id,omitempty"`
-	KeyScheme         uint32                 `protobuf:"varint,22,opt,name=key_scheme,json=keyScheme,proto3" json:"key_scheme,omitempty"`
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Id              []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	WriteStartNanos int64                  `protobuf:"varint,2,opt,name=write_start_nanos,json=writeStartNanos,proto3" json:"write_start_nanos,omitempty"`
+	WriteEndNanos   int64                  `protobuf:"varint,3,opt,name=write_end_nanos,json=writeEndNanos,proto3" json:"write_end_nanos,omitempty"`
+	RecordCount     int64                  `protobuf:"varint,4,opt,name=record_count,json=recordCount,proto3" json:"record_count,omitempty"`
+	Bytes           int64                  `protobuf:"varint,5,opt,name=bytes,proto3" json:"bytes,omitempty"`
+	State           ChunkState             `protobuf:"varint,6,opt,name=state,proto3,enum=gastrolog.v1.ChunkState" json:"state,omitempty"`
+	// cloud_bytes is the compressed cloud object's transport size, set only
+	// by CmdUploadChunk (0 until the chunk is uploaded). This entry never
+	// carried a real per-node local-disk-bytes fact — ManifestEntry is
+	// Raft-replicated cluster state, and local warm-cache footprint is
+	// node-local; was misleadingly named disk_bytes. Renamed honestly,
+	// gastrolog-33ul6h.
+	CloudBytes        int64  `protobuf:"varint,7,opt,name=cloud_bytes,json=cloudBytes,proto3" json:"cloud_bytes,omitempty"`
+	IngestStartNanos  int64  `protobuf:"varint,8,opt,name=ingest_start_nanos,json=ingestStartNanos,proto3" json:"ingest_start_nanos,omitempty"`
+	IngestEndNanos    int64  `protobuf:"varint,9,opt,name=ingest_end_nanos,json=ingestEndNanos,proto3" json:"ingest_end_nanos,omitempty"`
+	SourceStartNanos  int64  `protobuf:"varint,10,opt,name=source_start_nanos,json=sourceStartNanos,proto3" json:"source_start_nanos,omitempty"`
+	SourceEndNanos    int64  `protobuf:"varint,11,opt,name=source_end_nanos,json=sourceEndNanos,proto3" json:"source_end_nanos,omitempty"`
+	IngestTsMonotonic bool   `protobuf:"varint,12,opt,name=ingest_ts_monotonic,json=ingestTsMonotonic,proto3" json:"ingest_ts_monotonic,omitempty"`
+	CloudBacked       bool   `protobuf:"varint,13,opt,name=cloud_backed,json=cloudBacked,proto3" json:"cloud_backed,omitempty"`
+	Archived          bool   `protobuf:"varint,14,opt,name=archived,proto3" json:"archived,omitempty"`
+	RetentionPending  bool   `protobuf:"varint,15,opt,name=retention_pending,json=retentionPending,proto3" json:"retention_pending,omitempty"`
+	IngestIdxOffset   int64  `protobuf:"varint,16,opt,name=ingest_idx_offset,json=ingestIdxOffset,proto3" json:"ingest_idx_offset,omitempty"`
+	IngestIdxSize     int64  `protobuf:"varint,17,opt,name=ingest_idx_size,json=ingestIdxSize,proto3" json:"ingest_idx_size,omitempty"`
+	SourceIdxOffset   int64  `protobuf:"varint,18,opt,name=source_idx_offset,json=sourceIdxOffset,proto3" json:"source_idx_offset,omitempty"`
+	SourceIdxSize     int64  `protobuf:"varint,19,opt,name=source_idx_size,json=sourceIdxSize,proto3" json:"source_idx_size,omitempty"`
+	Hash              []byte `protobuf:"bytes,20,opt,name=hash,proto3" json:"hash,omitempty"`
+	CloudServiceId    []byte `protobuf:"bytes,21,opt,name=cloud_service_id,json=cloudServiceId,proto3" json:"cloud_service_id,omitempty"`
+	KeyScheme         uint32 `protobuf:"varint,22,opt,name=key_scheme,json=keyScheme,proto3" json:"key_scheme,omitempty"`
 	// Wall-clock time when sealing completed (CmdSealChunk apply). For a
 	// chunk introduced by retention transfer disposition, this is the
 	// destination-side arrival time (fresh anchor), NOT the source's
@@ -2897,9 +2906,9 @@ func (x *ManifestEntry) GetState() ChunkState {
 	return ChunkState_CHUNK_STATE_UNSPECIFIED
 }
 
-func (x *ManifestEntry) GetDiskBytes() int64 {
+func (x *ManifestEntry) GetCloudBytes() int64 {
 	if x != nil {
-		return x.DiskBytes
+		return x.CloudBytes
 	}
 	return 0
 }
@@ -3428,11 +3437,11 @@ const file_gastrolog_v1_vaultctlfsm_proto_rawDesc = "" +
 	"\x10source_end_nanos\x18\x06 \x01(\x03R\x0esourceEndNanos\x12,\n" +
 	"\x12ingest_start_nanos\x18\a \x01(\x03R\x10ingestStartNanos\x12.\n" +
 	"\x13ingest_ts_monotonic\x18\b \x01(\bR\x11ingestTsMonotonic\x12&\n" +
-	"\x0fsealed_at_nanos\x18\t \x01(\x03R\rsealedAtNanos\"\xc8\x02\n" +
+	"\x0fsealed_at_nanos\x18\t \x01(\x03R\rsealedAtNanos\"\xca\x02\n" +
 	"\x12UploadChunkCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\fR\x02id\x12\x1d\n" +
-	"\n" +
-	"disk_bytes\x18\x02 \x01(\x03R\tdiskBytes\x12*\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12\x1f\n" +
+	"\vcloud_bytes\x18\x02 \x01(\x03R\n" +
+	"cloudBytes\x12*\n" +
 	"\x11ingest_idx_offset\x18\x03 \x01(\x03R\x0fingestIdxOffset\x12&\n" +
 	"\x0fingest_idx_size\x18\x04 \x01(\x03R\ringestIdxSize\x12*\n" +
 	"\x11source_idx_offset\x18\x05 \x01(\x03R\x0fsourceIdxOffset\x12&\n" +
@@ -3579,16 +3588,16 @@ const file_gastrolog_v1_vaultctlfsm_proto_rawDesc = "" +
 	"\tchunk_ids\x18\x01 \x03(\fR\bchunkIds\x12\x17\n" +
 	"\anode_id\x18\x02 \x01(\tR\x06nodeId\"7\n" +
 	"\x1aClearTransferSourceCommand\x12\x19\n" +
-	"\bchunk_id\x18\x01 \x01(\fR\achunkId\"\xc7\a\n" +
+	"\bchunk_id\x18\x01 \x01(\fR\achunkId\"\xc9\a\n" +
 	"\rManifestEntry\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12*\n" +
 	"\x11write_start_nanos\x18\x02 \x01(\x03R\x0fwriteStartNanos\x12&\n" +
 	"\x0fwrite_end_nanos\x18\x03 \x01(\x03R\rwriteEndNanos\x12!\n" +
 	"\frecord_count\x18\x04 \x01(\x03R\vrecordCount\x12\x14\n" +
 	"\x05bytes\x18\x05 \x01(\x03R\x05bytes\x12.\n" +
-	"\x05state\x18\x06 \x01(\x0e2\x18.gastrolog.v1.ChunkStateR\x05state\x12\x1d\n" +
-	"\n" +
-	"disk_bytes\x18\a \x01(\x03R\tdiskBytes\x12,\n" +
+	"\x05state\x18\x06 \x01(\x0e2\x18.gastrolog.v1.ChunkStateR\x05state\x12\x1f\n" +
+	"\vcloud_bytes\x18\a \x01(\x03R\n" +
+	"cloudBytes\x12,\n" +
 	"\x12ingest_start_nanos\x18\b \x01(\x03R\x10ingestStartNanos\x12(\n" +
 	"\x10ingest_end_nanos\x18\t \x01(\x03R\x0eingestEndNanos\x12,\n" +
 	"\x12source_start_nanos\x18\n" +

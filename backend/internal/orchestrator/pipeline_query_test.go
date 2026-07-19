@@ -148,7 +148,6 @@ func externalInfoFromEntry(e vaultctlfsm.ManifestEntry) chunk.ExternalGLCBInfo {
 		SourceEnd:         e.SourceEnd,
 		RecordCount:       e.RecordCount,
 		Bytes:             e.Bytes,
-		DiskBytes:         e.DiskBytes,
 		IngestIdxOffset:   e.IngestIdxOffset,
 		IngestIdxSize:     e.IngestIdxSize,
 		SourceIdxOffset:   e.SourceIdxOffset,

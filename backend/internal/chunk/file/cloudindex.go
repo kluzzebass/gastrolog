@@ -15,22 +15,29 @@ import (
 const cloudIndexFile = "cloud.idx"
 
 // cloudMetaValue is the fixed-size encoded form of cloud-backed chunk metadata.
-// Layout (106 bytes):
+// Layout (114 bytes):
 //   - 9 × int64 (72 bytes): WriteStart, WriteEnd, RecordCount, Bytes, DiskBytes,
 //     IngestStart, IngestEnd, SourceStart, SourceEnd — all unix nanos or raw int64
 //   - 1 × uint16 (2 bytes): flags (bit 0 = sealed, bit 1 = compressed [reserved], bit 2 = archived)
 //   - 4 × int64 (32 bytes): IngestIdxOffset, IngestIdxSize, SourceIdxOffset, SourceIdxSize
 //     — GLCB section offsets for embedded TS indexes (0 = none)
+//   - 1 × int64 (8 bytes): CloudBytes — the compressed cloud object's transport
+//     size. Distinct currency from DiskBytes: DiskBytes is this node's LIVE
+//     local warm-cache footprint (0 when evicted, refreshed on every
+//     warm/evict/re-warm transition); CloudBytes is the cluster-wide,
+//     upload-time-fixed blob size. See gastrolog-33ul6h.
 //
 // Pre-Phase-6 layouts included a trailing int32 NumFrames (seekable
 // zstd frame count). With seekable-zstd gone (gastrolog-69fd5), the
-// field is dropped — the codec value size shrinks from 110 to 106 bytes
+// field is dropped — the codec value size shrunk from 110 to 106 bytes,
 // and the cloud index is wiped + repopulated on first open by
-// openCloudIndex's incompatible-codec branch.
-type cloudMetaValue [106]byte
+// openCloudIndex's incompatible-codec branch. The gastrolog-33ul6h
+// CloudBytes addition grows it again, 106 -> 114, via the same mechanism
+// (no migration: formats stay V1 pre-release, house policy).
+type cloudMetaValue [114]byte
 
 const (
-	cloudMetaValSize = 106
+	cloudMetaValSize = 114
 	flagSealed       = 1 << 0
 	flagCompressed   = 1 << 1
 	flagArchived     = 1 << 2
@@ -62,6 +69,7 @@ func encodeCloudMeta(m *chunkMeta) cloudMetaValue {
 	binary.LittleEndian.PutUint64(v[82:90], uint64(m.ingestIdxSize))   //nolint:gosec // size is always non-negative
 	binary.LittleEndian.PutUint64(v[90:98], uint64(m.sourceIdxOffset)) //nolint:gosec // offset is always non-negative
 	binary.LittleEndian.PutUint64(v[98:106], uint64(m.sourceIdxSize))  //nolint:gosec // size is always non-negative
+	binary.LittleEndian.PutUint64(v[106:114], uint64(m.cloudBytes))    //nolint:gosec // cloudBytes is always non-negative
 	return v
 }
 
@@ -82,10 +90,11 @@ func decodeCloudMeta(id chunk.ChunkID, v cloudMetaValue) *chunkMeta {
 		// flagCompressed (1<<1) reserved — see Phase 6 (gastrolog-69fd5).
 		archived:        flags&flagArchived != 0,
 		cloudBacked:     true,
-		ingestIdxOffset: int64(binary.LittleEndian.Uint64(v[74:82])),  //nolint:gosec // round-trip
-		ingestIdxSize:   int64(binary.LittleEndian.Uint64(v[82:90])),  //nolint:gosec // round-trip
-		sourceIdxOffset: int64(binary.LittleEndian.Uint64(v[90:98])),  //nolint:gosec // round-trip
-		sourceIdxSize:   int64(binary.LittleEndian.Uint64(v[98:106])), //nolint:gosec // round-trip
+		ingestIdxOffset: int64(binary.LittleEndian.Uint64(v[74:82])),   //nolint:gosec // round-trip
+		ingestIdxSize:   int64(binary.LittleEndian.Uint64(v[82:90])),   //nolint:gosec // round-trip
+		sourceIdxOffset: int64(binary.LittleEndian.Uint64(v[90:98])),   //nolint:gosec // round-trip
+		sourceIdxSize:   int64(binary.LittleEndian.Uint64(v[98:106])),  //nolint:gosec // round-trip
+		cloudBytes:      int64(binary.LittleEndian.Uint64(v[106:114])), //nolint:gosec // round-trip
 	}
 }
 

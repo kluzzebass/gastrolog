@@ -80,7 +80,7 @@ func projectChunkMeta(m chunk.ChunkMeta) vaultctlfsm.ManifestEntry {
 		RecordCount: m.RecordCount,
 		Bytes:       m.Bytes,
 		State:       state,
-		DiskBytes:   m.DiskBytes,
+		CloudBytes:  m.CloudBytes,
 		IngestStart: m.IngestStart,
 		IngestEnd:   m.IngestEnd,
 		SourceStart: m.SourceStart,

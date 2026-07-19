@@ -25,7 +25,7 @@ func TestAppendUnlistedManifestSealed(t *testing.T) {
 
 	entries := []vaultctlfsm.ManifestEntry{
 		{ID: listedID, State: chunk.ChunkStateSealed, SealedAt: now, RecordCount: 10},
-		{ID: unlistedID, State: chunk.ChunkStateSealed, SealedAt: now.Add(-time.Hour), RecordCount: 20, DiskBytes: 4096},
+		{ID: unlistedID, State: chunk.ChunkStateSealed, SealedAt: now.Add(-time.Hour), RecordCount: 20},
 		{ID: unsealedID, State: chunk.ChunkStateActive},
 		{ID: cloudID, State: chunk.ChunkStateSealed, SealedAt: now, CloudBacked: true},
 	}
@@ -51,8 +51,15 @@ func TestAppendUnlistedManifestSealed(t *testing.T) {
 	if synthetic == nil {
 		t.Fatal("unlisted sealed manifest entry missing from candidates")
 	}
-	if !synthetic.Sealed || synthetic.SealedAt.IsZero() || synthetic.DiskBytes != 4096 {
+	if !synthetic.Sealed || synthetic.SealedAt.IsZero() {
 		t.Fatalf("synthetic candidate lost fields: %+v", synthetic)
+	}
+	// ManifestEntry carries no per-node local-disk fact (gastrolog-33ul6h):
+	// the synthetic candidate's DiskBytes must stay 0, never inherit
+	// anything FSM-sourced. chunk.DiskClaim's Bytes+indexes fallback
+	// covers sizing for these candidates, same as it always has.
+	if synthetic.DiskBytes != 0 {
+		t.Fatalf("synthetic candidate DiskBytes = %d, want 0 (no per-node local fact on ManifestEntry)", synthetic.DiskBytes)
 	}
 
 	// Nil instance / callback: pass-through, no panic.

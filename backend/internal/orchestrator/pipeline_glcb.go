@@ -129,15 +129,19 @@ func externalGLCBInfoForPipeline(e vaultctlfsm.ManifestEntry, glcbPath string) (
 
 func externalGLCBInfoFromFSM(e vaultctlfsm.ManifestEntry) chunk.ExternalGLCBInfo {
 	return chunk.ExternalGLCBInfo{
-		WriteStart:        e.WriteStart,
-		WriteEnd:          e.WriteEnd,
-		IngestStart:       e.IngestStart,
-		IngestEnd:         e.IngestEnd,
-		SourceStart:       e.SourceStart,
-		SourceEnd:         e.SourceEnd,
-		RecordCount:       e.RecordCount,
-		Bytes:             e.Bytes,
-		DiskBytes:         e.DiskBytes,
+		WriteStart:  e.WriteStart,
+		WriteEnd:    e.WriteEnd,
+		IngestStart: e.IngestStart,
+		IngestEnd:   e.IngestEnd,
+		SourceStart: e.SourceStart,
+		SourceEnd:   e.SourceEnd,
+		RecordCount: e.RecordCount,
+		Bytes:       e.Bytes,
+		// No DiskBytes seed here: ManifestEntry carries no per-node local
+		// footprint (see gastrolog-33ul6h). overlayPipelineGLCBFromBuild's
+		// info.DiskBytes==0 fallback below always fires and recomputes it
+		// from the actual local build result, which is the only place a
+		// pipeline chunk's real on-disk size lives.
 		IngestIdxOffset:   e.IngestIdxOffset,
 		IngestIdxSize:     e.IngestIdxSize,
 		SourceIdxOffset:   e.SourceIdxOffset,

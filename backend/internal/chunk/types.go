@@ -197,8 +197,23 @@ type ChunkMeta struct {
 	// State is the explicit three-state lifecycle. See gastrolog-1huz5.
 	// Zero value (ChunkStateUnknown) round-trips legacy entries that
 	// pre-date the field — callers fall back to Sealed in that case.
-	State     ChunkState
-	DiskBytes int64 // actual on-disk size of the chunk's data.glcb
+	State ChunkState
+	// DiskBytes is the LOCAL on-disk footprint, always: the actual size of
+	// the chunk's data.glcb on THIS node. For a cloud-backed chunk this is
+	// the warm-cache state — the full cached GLCB size while cached, 0 once
+	// evicted. Never falls back to a cloud/logical size; CloudBacked with
+	// DiskBytes==0 means "nothing local to reclaim here," not "unknown."
+	DiskBytes int64
+	// CloudBytes is the compressed cloud object size (the zstd-wrapped
+	// blob's transport size) for a cloud-backed chunk. Zero when the chunk
+	// has never been uploaded. Distinct currency from DiskBytes: CloudBytes
+	// is a cluster-wide fact (same value on every node, sourced from the
+	// FSM/cloud store) while DiskBytes is per-node cache state. Compare:
+	// a cached GLCB's DiskBytes is the uncompressed local size, which is
+	// typically LARGER than CloudBytes (the compressed transport size) —
+	// the two are not interchangeable and neither substitutes for the
+	// other in a claim/budget computation.
+	CloudBytes int64
 
 	// IngestTS and SourceTS bounds (zero = unknown).
 	// Used to filter chunks by ingest_start/ingest_end and source_start/source_end

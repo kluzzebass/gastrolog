@@ -331,7 +331,7 @@ func TestRegisterCloudBackedChunk(t *testing.T) {
 		WriteEnd:    time.Date(2025, 6, 1, 0, 1, 0, 0, time.UTC),
 		RecordCount: 100,
 		Bytes:       50000,
-		DiskBytes:   30000,
+		CloudBytes:  30000,
 	}
 
 	if err := cm.RegisterCloudBackedChunk(id, info); err != nil {
@@ -353,6 +353,15 @@ func TestRegisterCloudBackedChunk(t *testing.T) {
 			if m.RecordCount != 100 {
 				t.Errorf("RecordCount = %d, want 100", m.RecordCount)
 			}
+			if m.CloudBytes != 30000 {
+				t.Errorf("CloudBytes = %d, want 30000", m.CloudBytes)
+			}
+			// This node registered the chunk from FSM metadata alone —
+			// it has no local copy yet, so DiskBytes must start at 0
+			// regardless of the leader's blob size. See gastrolog-33ul6h.
+			if m.DiskBytes != 0 {
+				t.Errorf("DiskBytes = %d, want 0 (no local copy on register)", m.DiskBytes)
+			}
 			break
 		}
 	}
@@ -368,7 +377,7 @@ func TestRegisterCloudBackedChunkIdempotent(t *testing.T) {
 	cm, _, _ := newCloudManagerWithIndexes(t)
 
 	id := chunk.NewChunkID()
-	info := chunk.CloudBackedChunkInfo{RecordCount: 50, Bytes: 1000, DiskBytes: 500}
+	info := chunk.CloudBackedChunkInfo{RecordCount: 50, Bytes: 1000, CloudBytes: 500}
 
 	if err := cm.RegisterCloudBackedChunk(id, info); err != nil {
 		t.Fatalf("first RegisterCloudBackedChunk: %v", err)

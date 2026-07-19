@@ -1153,16 +1153,18 @@ func (o *Orchestrator) VaultSnapshots() []VaultSnapshot {
 		// correct API choice here, not cluster.
 		if metas, err := o.ListLocalChunkMetas(id); err == nil {
 			snap.ChunkCount = len(metas)
+			vaultID := id
 			for _, m := range metas {
 				if m.Sealed {
 					snap.SealedChunks++
 				}
 				snap.RecordCount += m.RecordCount
-				if m.DiskBytes > 0 {
-					snap.DataBytes += m.DiskBytes
-				} else {
-					snap.DataBytes += m.Bytes
-				}
+				// Same currency as the disk guard's footprint and the
+				// size-drain trigger: an evicted cloud-backed chunk must
+				// not fall back to logical Bytes. See gastrolog-33ul6h.
+				snap.DataBytes += chunk.DiskClaim(m, func(cid chunk.ChunkID) (map[string]int64, error) {
+					return o.IndexSizes(vaultID, cid)
+				})
 			}
 		}
 		snapshots = append(snapshots, snap)

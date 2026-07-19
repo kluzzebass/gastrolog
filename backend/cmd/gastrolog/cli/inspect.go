@@ -297,6 +297,11 @@ func buildChunkKV(c *v1.ChunkMeta, vaultName string, nodeNames map[string]string
 
 	if c.CloudBacked {
 		pairs = append(pairs, [2]string{"Cloud", "GLCB (zstd-wrapped on transport)"})
+		// Distinguish the two currencies: Disk Size above is THIS node's
+		// live local cache state (0 once evicted); Cloud Size is the fixed
+		// compressed object size, unaffected by local eviction/re-warm.
+		// See gastrolog-33ul6h.
+		pairs = append(pairs, [2]string{"Cloud Size", units.FormatBytesDisplay(c.CloudBytes)})
 	}
 	if c.StorageClass != "" {
 		pairs = append(pairs, [2]string{"Storage Class", c.StorageClass})
@@ -317,7 +322,16 @@ func formatDiskSize(c *v1.ChunkMeta) string {
 // populate DiskBytes (the manager store holds no local copy; bytes live
 // in the staging GLCB), and rendering their size as "0 B" while the UI
 // shows the logical size was a parity bug (gastrolog-45ywhx).
+//
+// A cloud-backed chunk with DiskBytes==0 is different: it was evicted from
+// this node's warm cache, not "never measured." It must report 0 here, not
+// fall back to logical Bytes — the object still exists in the cloud store,
+// at Cloud Size, a currency this local-disk stat never touches. See
+// gastrolog-33ul6h.
 func chunkSizeBytes(c *v1.ChunkMeta) int64 {
+	if c.CloudBacked && c.DiskBytes == 0 {
+		return 0
+	}
 	if c.DiskBytes > 0 {
 		return c.DiskBytes
 	}

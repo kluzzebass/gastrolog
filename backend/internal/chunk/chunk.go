@@ -275,15 +275,21 @@ type ChunkCacheEvictor interface {
 // on a follower without streaming any records. All fields come from the vault
 // Raft FSM entry (populated by AnnounceSeal + AnnounceUpload on the leader).
 type CloudBackedChunkInfo struct {
-	WriteStart      time.Time
-	WriteEnd        time.Time
-	IngestStart     time.Time
-	IngestEnd       time.Time
-	SourceStart     time.Time
-	SourceEnd       time.Time
-	RecordCount     int64
-	Bytes           int64
-	DiskBytes       int64
+	WriteStart  time.Time
+	WriteEnd    time.Time
+	IngestStart time.Time
+	IngestEnd   time.Time
+	SourceStart time.Time
+	SourceEnd   time.Time
+	RecordCount int64
+	Bytes       int64
+	// CloudBytes is the compressed cloud object size — the only size fact
+	// the FSM actually carries for an uploaded chunk (AnnounceUpload's
+	// param). There is deliberately no DiskBytes here: a follower
+	// registering from metadata alone has no local copy yet, so its local
+	// warm-cache footprint starts at 0 regardless of what the leader's
+	// blob is sized at — see RegisterCloudBackedChunk. gastrolog-33ul6h.
+	CloudBytes      int64
 	IngestIdxOffset int64
 	IngestIdxSize   int64
 	SourceIdxOffset int64

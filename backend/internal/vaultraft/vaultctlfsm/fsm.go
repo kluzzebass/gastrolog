@@ -161,8 +161,14 @@ type ManifestEntry struct {
 	// ChunkMeta still carries a separate `Sealed` bool because its
 	// semantics differ — ChunkMeta.Sealed is the LOCAL active-form-closed
 	// signal, distinct from this cluster-wide lifecycle state.
-	State     chunk.ChunkState
-	DiskBytes int64
+	State chunk.ChunkState
+	// CloudBytes is the compressed cloud object's transport size, set only
+	// by CmdUploadChunk (0 until uploaded). This entry never carried a real
+	// per-node local-disk-bytes fact — ManifestEntry is Raft-replicated
+	// cluster state, and local warm-cache footprint is node-local and
+	// lives in file.Manager's own chunkMeta/cloudIdx instead. Was
+	// misleadingly named DiskBytes; renamed honestly. See gastrolog-33ul6h.
+	CloudBytes int64
 
 	IngestStart time.Time
 	IngestEnd   time.Time
@@ -243,7 +249,12 @@ func (e *ManifestEntry) IsSealed() bool {
 	return e.State == chunk.ChunkStateSealed
 }
 
-// ToChunkMeta converts to the public chunk.ChunkMeta type.
+// ToChunkMeta converts to the public chunk.ChunkMeta type. DiskBytes is
+// deliberately left zero: it's per-node live warm-cache state that only
+// file.Manager's own chunkMeta/cloudIdx track, and this ManifestEntry-
+// sourced meta has no local Manager behind it. CloudBytes (the cloud
+// object size) is the one size fact the FSM actually carries for an
+// uploaded chunk. See gastrolog-33ul6h.
 func (e *ManifestEntry) ToChunkMeta() chunk.ChunkMeta {
 	state := e.State
 	return chunk.ChunkMeta{
@@ -255,7 +266,7 @@ func (e *ManifestEntry) ToChunkMeta() chunk.ChunkMeta {
 		Bytes:             e.Bytes,
 		Sealed:            state == chunk.ChunkStateSealed,
 		State:             state,
-		DiskBytes:         e.DiskBytes,
+		CloudBytes:        e.CloudBytes,
 		IngestStart:       e.IngestStart,
 		IngestEnd:         e.IngestEnd,
 		SourceStart:       e.SourceStart,
@@ -1601,7 +1612,7 @@ func (f *FSM) applyUpload(c *gastrologv1.UploadChunkCommand) error {
 	if e == nil {
 		return fmt.Errorf("upload chunk: %s not found", id)
 	}
-	e.DiskBytes = c.GetDiskBytes()
+	e.CloudBytes = c.GetCloudBytes()
 	e.IngestIdxOffset = c.GetIngestIdxOffset()
 	e.IngestIdxSize = c.GetIngestIdxSize()
 	e.SourceIdxOffset = c.GetSourceIdxOffset()
@@ -1709,12 +1720,14 @@ func MarshalBeginSeal(id chunk.ChunkID) []byte {
 	return mustMarshalCommand(NewBeginSeal(id))
 }
 
-// NewUploadChunk builds an UploadChunk command message. The integrity
-// fields (hash, cloud service ID, key scheme) are gastrolog-grnc3 additions.
-func NewUploadChunk(id chunk.ChunkID, diskBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64, hash [32]byte, cloudServiceID glid.GLID, keyScheme uint8) *gastrologv1.VaultCtlCommand {
+// NewUploadChunk builds an UploadChunk command message. cloudBytes is the
+// compressed cloud object's transport size (was misleadingly passed as
+// "diskBytes"; see gastrolog-33ul6h). The integrity fields (hash, cloud
+// service ID, key scheme) are gastrolog-grnc3 additions.
+func NewUploadChunk(id chunk.ChunkID, cloudBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64, hash [32]byte, cloudServiceID glid.GLID, keyScheme uint8) *gastrologv1.VaultCtlCommand {
 	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_UploadChunk{UploadChunk: &gastrologv1.UploadChunkCommand{
 		Id:              id[:],
-		DiskBytes:       diskBytes,
+		CloudBytes:      cloudBytes,
 		IngestIdxOffset: ingestIdxOff,
 		IngestIdxSize:   ingestIdxSize,
 		SourceIdxOffset: sourceIdxOff,
@@ -1726,8 +1739,8 @@ func NewUploadChunk(id chunk.ChunkID, diskBytes, ingestIdxOff, ingestIdxSize, so
 }
 
 // MarshalUploadChunk builds the Raft log data for an UploadChunk command.
-func MarshalUploadChunk(id chunk.ChunkID, diskBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64, hash [32]byte, cloudServiceID glid.GLID, keyScheme uint8) []byte {
-	return mustMarshalCommand(NewUploadChunk(id, diskBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize, hash, cloudServiceID, keyScheme))
+func MarshalUploadChunk(id chunk.ChunkID, cloudBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64, hash [32]byte, cloudServiceID glid.GLID, keyScheme uint8) []byte {
+	return mustMarshalCommand(NewUploadChunk(id, cloudBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize, hash, cloudServiceID, keyScheme))
 }
 
 // NewAttachOffsets builds a CmdAttachOffsets command message.
@@ -1803,7 +1816,7 @@ func entryToProto(e *ManifestEntry) *gastrologv1.ManifestEntry {
 		RecordCount:           e.RecordCount,
 		Bytes:                 e.Bytes,
 		State:                 gastrologv1.ChunkState(e.State),
-		DiskBytes:             e.DiskBytes,
+		CloudBytes:            e.CloudBytes,
 		IngestStartNanos:      e.IngestStart.UnixNano(),
 		IngestEndNanos:        e.IngestEnd.UnixNano(),
 		SourceStartNanos:      e.SourceStart.UnixNano(),
@@ -1844,7 +1857,7 @@ func entryFromProto(p *gastrologv1.ManifestEntry) ManifestEntry {
 		RecordCount:       p.GetRecordCount(),
 		Bytes:             p.GetBytes(),
 		State:             chunk.ChunkState(p.GetState()), //nolint:gosec // G115: ChunkState enum values are 0-3, round-trips a uint8
-		DiskBytes:         p.GetDiskBytes(),
+		CloudBytes:        p.GetCloudBytes(),
 		IngestStart:       time.Unix(0, p.GetIngestStartNanos()),
 		IngestEnd:         time.Unix(0, p.GetIngestEndNanos()),
 		SourceStart:       time.Unix(0, p.GetSourceStartNanos()),

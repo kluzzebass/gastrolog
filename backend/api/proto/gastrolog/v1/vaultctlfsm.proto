@@ -98,7 +98,10 @@ message SealChunkCommand {
 
 message UploadChunkCommand {
   bytes id = 1;
-  int64 disk_bytes = 2;
+  // cloud_bytes is the compressed cloud object's transport size — the only
+  // size fact this command ever carried (AnnounceUpload's post-upload
+  // stat). Was misleadingly named disk_bytes; renamed honestly, gastrolog-33ul6h.
+  int64 cloud_bytes = 2;
   int64 ingest_idx_offset = 3;
   int64 ingest_idx_size = 4;
   int64 source_idx_offset = 5;
@@ -370,7 +373,13 @@ message ManifestEntry {
   int64 record_count = 4;
   int64 bytes = 5;
   ChunkState state = 6;
-  int64 disk_bytes = 7;
+  // cloud_bytes is the compressed cloud object's transport size, set only
+  // by CmdUploadChunk (0 until the chunk is uploaded). This entry never
+  // carried a real per-node local-disk-bytes fact — ManifestEntry is
+  // Raft-replicated cluster state, and local warm-cache footprint is
+  // node-local; was misleadingly named disk_bytes. Renamed honestly,
+  // gastrolog-33ul6h.
+  int64 cloud_bytes = 7;
   int64 ingest_start_nanos = 8;
   int64 ingest_end_nanos = 9;
   int64 source_start_nanos = 10;
