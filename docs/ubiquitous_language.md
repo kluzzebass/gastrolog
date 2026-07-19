@@ -479,18 +479,44 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
 - **Retention event** — the cluster-visible signal that a chunk has aged
   out. Fires unconditionally on policy match; the vault's retention
   disposition decides whether the records are forwarded through the
-  routing engine before the chunk is destroyed.
+  routing engine, transferred to another vault, or dropped before the
+  chunk's local copy is destroyed.
 
 - **Retention disposition** (`VaultConfig.RetentionDisposition`,
-  gastrolog-18du3) — per-vault flag controlling what happens to records
-  when a retention event fires. Two canonical values:
+  gastrolog-18du3, extended by gastrolog-2l918) — per-vault flag
+  controlling what happens to records when a retention event fires.
+  Three canonical values:
   - **`delete`** (default): records drop, storage frees, the routing
     engine is never invoked. The safe default — no risk of accidental
-    cascades.
+    cascades. `transfer` cannot become the zero-config default: it
+    requires a target vault, and a default must be a value the operator
+    could type into the field.
   - **`route`**: records flow through the routing engine with synthetic
     `_source = "retention"` and `_vault = "<id>"`, so operator-configured
-    routes can forward them to archive vaults, cold storage, etc. The
-    chunk is destroyed regardless of disposition.
+    routes can forward them to archive vaults, cold storage, etc.
+  - **`transfer`** (`VaultConfig.RetentionTransferTargetVaultID`,
+    gastrolog-2l918): the sealed chunk is re-homed to the target vault
+    UNCHANGED — no record decode, no re-route, no re-ingest. Where
+    `route` filters/re-tags/fans out and `delete` drops, `transfer`
+    moves; it is the recommended primary pattern for archive/cold-
+    storage vaults (route stays the tool for filtering/re-tagging).
+    Mechanism: the destination's homes pull the sealed GLCB via the
+    same verify-before-promote replica catch-up machinery same-vault
+    replication uses (`glcb_catchup.go`), addressed at the source vault
+    via `ManifestEntry.TransferSourceVaultID`; destination holder
+    receipts must reach the destination's replication factor before the
+    source expires its local copy (`AckChunkHolder`/receipt-protocol
+    reuse — no loss window, nothing marked on the source until the
+    destination confirms). The destination-side retention clock starts
+    FRESH at arrival (`SealedAt` stamped on landing via the reused
+    `CmdRepatriateChunk` announce-import), so a shorter destination TTL
+    does not re-fire retention the moment the chunk lands; the chunk's
+    own record timestamps and identity are untouched. File vaults only
+    (source and target — cloud-backed and memory vaults have different
+    at-rest forms); self-transfer is rejected at `PutVault`. A stalled
+    or deferred transfer retains the chunk with the one-shot
+    unconsumed, same as a stalled route fan-out. See
+    docs/retention-transfer-disposition-design.md.
 
   Empty/unrecognized values resolve to `delete` via
   `VaultConfig.ResolveRetentionDisposition()`.
@@ -550,10 +576,26 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
   admission gate, so the paths that free space run while admission is
   still suspended.
 
-- **Retention deferral** — a sweep whose route fan-out could not run
-  (drain gate engaged, destination vault gated, or fan-out stalled);
-  the chunk is retained for a later sweep. Consecutive deferrals raise
-  the `retention-route-deferred` alarm.
+- **Retention deferral** — a sweep whose configured non-delete
+  disposition (route fan-out or transfer) could not run (drain gate
+  engaged, destination/target vault gated, receipts stalled, etc.); the
+  chunk is retained for a later sweep. Consecutive deferrals raise the
+  `retention-deferred` alarm.
+
+- **Transfer (retention disposition)** — a third `RetentionDisposition`
+  value alongside `delete` and `route`: when a retention event fires,
+  the sealed chunk is re-homed to `RetentionTransferTargetVaultID`
+  UNCHANGED — no record decode, no re-route, no re-ingest. The
+  destination's homes pull the sealed GLCB (the same verify-before-
+  promote replica catch-up machinery same-vault replication uses,
+  addressed at the source vault); destination holder receipts must
+  reach the destination's replication factor before the source expires
+  its local copy — no loss window. The destination-side retention clock
+  starts fresh at arrival (`SealedAt` stamped on landing), so a shorter
+  destination TTL does not re-fire retention the moment the chunk
+  lands. File vaults only (source and target); self-transfer is
+  rejected at `PutVault`. See
+  docs/retention-transfer-disposition-design.md (gastrolog-2l918).
 
 - **Reconcile** — compare the vault FSM manifest against local disk;
   delete sealed chunks on disk that aren't in the manifest (orphan

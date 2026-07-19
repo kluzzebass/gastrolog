@@ -636,15 +636,22 @@ type VaultConfig struct {
 	// Warm-cache eviction age (ttl mode only), as a duration expression ("1h",
 	// "7d"). Empty = unset.
 	CacheTtl             string `protobuf:"bytes,15,opt,name=cache_ttl,json=cacheTtl,proto3" json:"cache_ttl,omitempty"`
-	RetentionDisposition string `protobuf:"bytes,16,opt,name=retention_disposition,json=retentionDisposition,proto3" json:"retention_disposition,omitempty"` // "delete" (default) or "route" — what retention does with aged-out records
+	RetentionDisposition string `protobuf:"bytes,16,opt,name=retention_disposition,json=retentionDisposition,proto3" json:"retention_disposition,omitempty"` // "delete", "route", or "transfer" — what retention does with aged-out records
 	// Per-vault disk-guard free-space thresholds on the vault's backing volume,
 	// as size expressions ("10GB"). Empty = inherit the node defaults
 	// (fraction-based, per-node). Warn raises the disk-space alarm; floor
 	// suspends admission for this vault while others keep ingesting.
 	DiskFreeWarn  string `protobuf:"bytes,17,opt,name=disk_free_warn,json=diskFreeWarn,proto3" json:"disk_free_warn,omitempty"`
 	DiskFreeFloor string `protobuf:"bytes,18,opt,name=disk_free_floor,json=diskFreeFloor,proto3" json:"disk_free_floor,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// Target vault ID for retention_disposition = "transfer": the sealed
+	// chunk is re-homed here unchanged when retention fires. Required when,
+	// and only valid when, disposition is "transfer" — see PutVault
+	// validation and docs/retention-transfer-disposition-design.md. Reuses
+	// field 19, vacated by max_size's removal (gastrolog-33ul6h) — no
+	// `reserved` (house rule): zero production deployments.
+	RetentionTransferTargetVaultId []byte `protobuf:"bytes,19,opt,name=retention_transfer_target_vault_id,json=retentionTransferTargetVaultId,proto3" json:"retention_transfer_target_vault_id,omitempty"`
+	unknownFields                  protoimpl.UnknownFields
+	sizeCache                      protoimpl.SizeCache
 }
 
 func (x *VaultConfig) Reset() {
@@ -801,6 +808,13 @@ func (x *VaultConfig) GetDiskFreeFloor() string {
 		return x.DiskFreeFloor
 	}
 	return ""
+}
+
+func (x *VaultConfig) GetRetentionTransferTargetVaultId() []byte {
+	if x != nil {
+		return x.RetentionTransferTargetVaultId
+	}
+	return nil
 }
 
 type RouteDestination struct {
@@ -8921,7 +8935,7 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x0eVaultPlacement\x12\x1d\n" +
 	"\n" +
 	"storage_id\x18\x01 \x01(\fR\tstorageId\x12\x16\n" +
-	"\x06leader\x18\x02 \x01(\bR\x06leader\"\xcb\x05\n" +
+	"\x06leader\x18\x02 \x01(\bR\x06leader\"\x97\x06\n" +
 	"\vVaultConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
@@ -8943,7 +8957,8 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\tcache_ttl\x18\x0f \x01(\tR\bcacheTtl\x123\n" +
 	"\x15retention_disposition\x18\x10 \x01(\tR\x14retentionDisposition\x12$\n" +
 	"\x0edisk_free_warn\x18\x11 \x01(\tR\fdiskFreeWarn\x12&\n" +
-	"\x0fdisk_free_floor\x18\x12 \x01(\tR\rdiskFreeFloor\"-\n" +
+	"\x0fdisk_free_floor\x18\x12 \x01(\tR\rdiskFreeFloor\x12J\n" +
+	"\"retention_transfer_target_vault_id\x18\x13 \x01(\fR\x1eretentionTransferTargetVaultId\"-\n" +
 	"\x10RouteDestination\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\"\x81\x02\n" +
 	"\vRouteConfig\x12\x0e\n" +

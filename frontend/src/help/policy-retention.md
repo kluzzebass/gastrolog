@@ -24,12 +24,10 @@ A policy that sets **only** a Size Budget, with no drain condition, is legal and
 
 ## What Happens When a Retention Event Fires
 
-A retention event always does the same thing:
+What happens depends on the vault's [Retention Disposition](help:vaults-config):
 
-1. The chunk's records are streamed through the routing engine with `source = retention-trigger(vault)`.
-2. The original chunk is **destroyed** — indexes first, then the chunk data.
-
-The routing engine's verdict drives placement: if any [retention-trigger route](help:routing) matches, the records are re-appended to that route's destination vaults (per-record filtering applies). If no route matches, the records are dropped — the chunk just goes away. Either way, the source chunk is gone.
+- **Delete** (default) and **Route** both destroy the original chunk — indexes first, then the chunk data — and decide the records' fate via the routing engine: with `route`, the chunk's records are streamed through the routing engine with `source = retention-trigger(vault)`, and if any [retention-trigger route](help:routing) matches, they're re-appended to that route's destination vaults (per-record filtering applies); with `delete`, or with `route` and no matching route, the records are simply dropped.
+- **Transfer** skips the routing engine entirely: the sealed chunk itself is re-homed unchanged to the vault's **Transfer Target**. No decode, no re-ingest, no per-record filtering — the chunk's records and identity are untouched, only its retention clock resets at the destination. The original chunk is only removed from the source once the target confirms it holds the chunk.
 
 ## How Retention Runs
 
@@ -79,5 +77,7 @@ Conditions use union semantics — a chunk fires if **any** condition matches. T
 3. On your upstream vault (e.g. a fast local vault), set a retention rule and choose `Send records to routing engine` as the disposition.
 
 Records flow: upstream vault retention fires → routing engine matches the retention-trigger route → archive vault (cloud-backed). The upstream vault stays small and fast; the archive vault accumulates history in cheap cloud storage. Queries automatically search both.
+
+**Layered storage via transfer (the common case):** When the archive target is a plain local file vault rather than a cloud-backed one, [Transfer disposition](help:vaults-config) is simpler than a retention-trigger route — no route to configure, no re-ingest through the routing engine. Set the upstream vault's retention rule, choose `Transfer records to another vault unchanged` as the disposition, and pick the archive vault as the **Transfer Target**. The sealed chunk moves to the target as-is; queries search both vaults exactly as with the routed pattern above. Both vaults must be plain (non-cloud) file vaults — for a cloud-backed archive, use the retention-trigger route pattern instead.
 
 **No retention:** Omitting a retention policy means chunks accumulate forever. This is fine for testing but will eventually fill the disk in production. Always configure retention for production vaults.

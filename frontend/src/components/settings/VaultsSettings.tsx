@@ -30,6 +30,27 @@ export function isCloudBacked(v: { type: VaultTypeLabel; cloudServiceId: string 
   return v.type === "file" && v.cloudServiceId !== "";
 }
 
+/**
+ * Candidate targets for retention_disposition = "transfer": file-typed,
+ * non-cloud vaults other than the one identified by excludeId. Per
+ * gastrolog-2l918 spec decision #4, transfer is file → file only (both
+ * source and target plain, non-cloud file vaults); self-transfer is
+ * rejected at PutVault as the retention cascade footgun.
+ */
+export function transferTargetOptions(
+  vaults: { id: Uint8Array; name: string; type: VaultType; cloudServiceId: Uint8Array }[],
+  excludeId?: string,
+): { value: string; label: string }[] {
+  const options: { value: string; label: string }[] = [];
+  for (const v of vaults) {
+    if (v.type !== VaultType.FILE || v.cloudServiceId.length > 0) continue;
+    const value = encode(v.id);
+    if (value === excludeId) continue;
+    options.push({ value, label: v.name || value });
+  }
+  return options.sort((a, b) => a.label.localeCompare(b.label));
+}
+
 export interface StorageEntry {
   key: string;
   type: VaultTypeLabel;
@@ -41,7 +62,8 @@ export interface StorageEntry {
   memoryBudget: string;
   rotationPolicyId: string;
   retentionPolicyId: string;
-  retentionDisposition: string; // "delete" (default) | "route"
+  retentionDisposition: string; // "delete" (default) | "route" | "transfer"
+  retentionTransferTarget: string; // vault ID — required when retentionDisposition is "transfer"
   diskFreeWarn: string; // size ("10GB") or % of the volume ("10%"); empty inherits the node default ("10%")
   diskFreeFloor: string; // size or % of the volume; empty inherits the node default ("3%")
   replicationFactor: string;
@@ -62,6 +84,7 @@ function emptyStorageEntry(type: VaultTypeLabel): StorageEntry {
     rotationPolicyId: "",
     retentionPolicyId: "",
     retentionDisposition: "delete",
+    retentionTransferTarget: "",
     diskFreeWarn: "",
     diskFreeFloor: "",
     replicationFactor: "1",
@@ -104,6 +127,9 @@ function extractErrorMessage(err: unknown, fallback: string): string {
 }
 
 export function isStorageComplete(s: StorageEntry, _hasCloudServices: boolean): boolean {
+  if (s.type !== "jsonl" && s.retentionDisposition === "transfer" && s.retentionTransferTarget === "") {
+    return false;
+  }
   switch (s.type) {
     case "memory":
       return true;
@@ -173,6 +199,7 @@ export function VaultStorageForm({
   cloudServiceOptions,
   rotationPolicyOptions,
   retentionPolicyOptions,
+  transferTargetOptions,
   nodeOptions,
   vaultName,
   maxRF,
@@ -186,6 +213,10 @@ export function VaultStorageForm({
   cloudServiceOptions: { value: string; label: string }[];
   rotationPolicyOptions: { value: string; label: string }[];
   retentionPolicyOptions: { value: string; label: string }[];
+  // Candidate targets for retention_disposition = "transfer" — file-typed,
+  // non-cloud vaults other than this one (gastrolog-2l918: transfer is
+  // file → file only, self-transfer rejected at PutVault).
+  transferTargetOptions: { value: string; label: string }[];
   nodeOptions: { value: string; label: string }[];
   vaultName: string;
   maxRF?: number;
@@ -399,7 +430,7 @@ export function VaultStorageForm({
         <FormField
           label="Retention Disposition"
           dark={dark}
-          description="What happens to records when retention triggers. 'Delete' frees storage immediately. 'Route' sends records through the routing engine — only enable if you have an archival route configured for this vault, otherwise records may cascade unexpectedly."
+          description="What happens to records when retention triggers. 'Delete' frees storage immediately. 'Route' sends records through the routing engine — only enable if you have an archival route configured for this vault, otherwise records may cascade unexpectedly. 'Transfer' re-homes the sealed chunk to another vault unchanged — no decode, no re-ingest — the common archive pattern; the target must be a different, non-cloud file vault."
         >
           <SelectInput
             value={storage.retentionDisposition || "delete"}
@@ -407,6 +438,25 @@ export function VaultStorageForm({
             options={[
               { value: "delete", label: "Delete records on retention" },
               { value: "route", label: "Send records to routing engine" },
+              { value: "transfer", label: "Transfer records to another vault unchanged" },
+            ]}
+            dark={dark}
+          />
+        </FormField>
+      )}
+
+      {storage.type !== "jsonl" && storage.retentionDisposition === "transfer" && (
+        <FormField
+          label="Transfer Target"
+          dark={dark}
+          description="The file vault sealed chunks re-home to unchanged when this vault's retention fires. Must be a different, non-cloud file vault."
+        >
+          <SelectInput
+            value={storage.retentionTransferTarget}
+            onChange={(v) => onUpdate({ retentionTransferTarget: v })}
+            options={[
+              { value: "", label: "Select target vault..." },
+              ...transferTargetOptions,
             ]}
             dark={dark}
           />
@@ -551,6 +601,10 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
         ? [new RetentionRule({ retentionPolicyId: decode(storage.retentionPolicyId) })]
         : [],
       retentionDisposition: storage.type !== "jsonl" ? (storage.retentionDisposition || "delete") : "",
+      retentionTransferTargetVaultId:
+        storage.type !== "jsonl" && storage.retentionDisposition === "transfer" && storage.retentionTransferTarget
+          ? decode(storage.retentionTransferTarget)
+          : new Uint8Array(0),
       diskFreeWarn: storage.type === "file" ? storage.diskFreeWarn : "",
       diskFreeFloor: storage.type === "file" ? storage.diskFreeFloor : "",
       replicationFactor: parseInt(storage.replicationFactor, 10) || 1,
@@ -613,6 +667,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
             cloudServiceOptions={cloudServiceOptions}
             rotationPolicyOptions={rotationPolicyOptions}
             retentionPolicyOptions={retentionPolicyOptions}
+            transferTargetOptions={transferTargetOptions(vaults)}
             nodeOptions={(config?.nodeConfigs ?? []).map((n) => ({ value: encode(n.id), label: n.name || encode(n.id) })).sort((a, b) => a.label.localeCompare(b.label))}
             vaultName={addForm.name || addForm.namePlaceholder || ""}
             maxRF={maxRFForStorage(addForm.storage)}

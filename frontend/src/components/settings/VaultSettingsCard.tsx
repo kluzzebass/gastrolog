@@ -29,6 +29,7 @@ import {
   isCloudBacked,
   isStorageComplete,
   vaultTypeEnum,
+  transferTargetOptions,
   type StorageEntry,
   type VaultTypeLabel,
 } from "./VaultsSettings";
@@ -77,6 +78,7 @@ function vaultToEntry(v: VaultConfig): StorageEntry {
     rotationPolicyId: v.rotationPolicyId.length > 0 ? encode(v.rotationPolicyId) : "",
     retentionPolicyId: v.retentionRules[0] ? encode(v.retentionRules[0].retentionPolicyId) : "",
     retentionDisposition: v.retentionDisposition || "delete",
+    retentionTransferTarget: v.retentionTransferTargetVaultId.length > 0 ? encode(v.retentionTransferTargetVaultId) : "",
     diskFreeWarn: v.diskFreeWarn,
     diskFreeFloor: v.diskFreeFloor,
     replicationFactor: String(v.replicationFactor || 1),
@@ -116,6 +118,10 @@ function entryToVault(
       ? [new RetentionRule({ retentionPolicyId: decode(entry.retentionPolicyId) })]
       : [],
     retentionDisposition: entry.type !== "jsonl" ? (entry.retentionDisposition || "delete") : "",
+    retentionTransferTargetVaultId:
+      entry.type !== "jsonl" && entry.retentionDisposition === "transfer" && entry.retentionTransferTarget
+        ? decode(entry.retentionTransferTarget)
+        : new Uint8Array(0),
     diskFreeWarn: entry.type === "file" ? entry.diskFreeWarn : "",
     diskFreeFloor: entry.type === "file" ? entry.diskFreeFloor : "",
     replicationFactor: entry.type === "jsonl" ? 1 : parseInt(entry.replicationFactor, 10) || 1,
@@ -126,7 +132,7 @@ function entryToVault(
 
 export function VaultSettingsCard({
   vault,
-  vaults: _vaults,
+  vaults,
   routes: _routes,
   nodeConfigs,
   nodeStorageConfigs,
@@ -433,6 +439,7 @@ export function VaultSettingsCard({
           cloudServiceOptions={cloudServiceOptions}
           rotationPolicyOptions={rotationPolicyOptions}
           retentionPolicyOptions={retentionPolicyOptions}
+          transferTargetOptions={transferTargetOptions(vaults, encode(vault.id))}
           nodeOptions={nodeConfigs.map((n) => ({ value: encode(n.id), label: n.name || encode(n.id) })).sort((a, b) => a.label.localeCompare(b.label))}
           vaultName={vault.name || ""}
           maxRF={maxRFForEntry(edit.storage)}

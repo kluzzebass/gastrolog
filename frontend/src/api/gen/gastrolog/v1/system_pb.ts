@@ -581,7 +581,7 @@ export class VaultConfig extends Message<VaultConfig> {
   cacheTtl = "";
 
   /**
-   * "delete" (default) or "route" — what retention does with aged-out records
+   * "delete", "route", or "transfer" — what retention does with aged-out records
    *
    * @generated from field: string retention_disposition = 16;
    */
@@ -598,17 +598,21 @@ export class VaultConfig extends Message<VaultConfig> {
   diskFreeWarn = "";
 
   /**
-   * gastrolog-33ul6h: max_size (field 19) removed. The per-node disk-claim
-   * budget is no longer a vault-level field — it lives on the retention
-   * policy (RetentionPolicyConfig.size_budget) attached via retention_rules,
-   * min-wins across attached policies, with the creation default
-   * (system.DefaultVaultMaxSize) as the floor when no attached policy
-   * carries one. No `reserved` (house rule): zero production deployments,
-   * operator reinitializes.
-   *
    * @generated from field: string disk_free_floor = 18;
    */
   diskFreeFloor = "";
+
+  /**
+   * Target vault ID for retention_disposition = "transfer": the sealed
+   * chunk is re-homed here unchanged when retention fires. Required when,
+   * and only valid when, disposition is "transfer" — see PutVault
+   * validation and docs/retention-transfer-disposition-design.md. Reuses
+   * field 19, vacated by max_size's removal (gastrolog-33ul6h) — no
+   * `reserved` (house rule): zero production deployments.
+   *
+   * @generated from field: bytes retention_transfer_target_vault_id = 19;
+   */
+  retentionTransferTargetVaultId = new Uint8Array(0);
 
   constructor(data?: PartialMessage<VaultConfig>) {
     super();
@@ -636,6 +640,7 @@ export class VaultConfig extends Message<VaultConfig> {
     { no: 16, name: "retention_disposition", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 17, name: "disk_free_warn", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 18, name: "disk_free_floor", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 19, name: "retention_transfer_target_vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultConfig {

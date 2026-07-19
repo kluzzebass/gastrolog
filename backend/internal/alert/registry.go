@@ -146,13 +146,15 @@ var catalog = []AlarmType{
 		Response: "Read the alarm detail for the last upload error. If the chunk's GLCB is missing on disk, restore it from a peer holder or accept the gap; otherwise check cloud store credentials/connectivity and disk health on the named node.",
 	},
 	{
-		IDPrefix: "retention-route-deferred",
+		IDPrefix: "retention-deferred",
 		Priority: High,
 		Source:   "retention",
 		// The consecutive-sweep count at the call site is the condition
 		// definition (like chunking-underreplicated's window), so no DelayOn.
-		Cause:    "Route-disposition retention on this vault has been unable to fan out for consecutive sweeps — the only mechanism that drains the vault is deferred, so expired chunks accumulate and any size caps stay engaged.",
-		Response: "Read the alarm detail for the deferral cause: free space on the starved volume (the drain resumes once free clears the floor band), drain or grow the destination vault, or — last resort, discards the routed records — set the vault's retention disposition to delete.",
+		// Covers both non-delete dispositions that can stall (gastrolog-2l918
+		// generalized this from route-only): route fan-out and transfer.
+		Cause:    "Retention on this vault has been unable to complete its configured disposition (route fan-out or transfer) for consecutive sweeps — the only mechanism that drains the vault is deferred, so expired chunks accumulate and any size caps stay engaged.",
+		Response: "Read the alarm detail for the deferral cause and disposition: free space on the starved volume (the drain resumes once free clears the floor band), drain or grow the destination/target vault, or — last resort, discards the records — set the vault's retention disposition to delete.",
 	},
 	{
 		IDPrefix: "retention-unenforceable",

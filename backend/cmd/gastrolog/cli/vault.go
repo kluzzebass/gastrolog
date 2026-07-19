@@ -126,6 +126,9 @@ func vaultDetailPairs(v *v1.VaultConfig) [][2]string {
 	} else {
 		pairs = append(pairs, [2]string{"Retention Disposition", "delete (default)"})
 	}
+	if len(v.RetentionTransferTargetVaultId) > 0 {
+		pairs = append(pairs, [2]string{"Retention Transfer Target", glid.FromBytes(v.RetentionTransferTargetVaultId).String()})
+	}
 	if len(v.RotationPolicyId) > 0 {
 		pairs = append(pairs, [2]string{"Rotation Policy ID", glid.FromBytes(v.RotationPolicyId).String()})
 	}
@@ -204,7 +207,8 @@ shape (memory, file, file+cloud, JSONL) defined by --type, --storage-class
 	cmd.Flags().String("cache-eviction", "lru", "cache eviction strategy: lru or ttl")
 	cmd.Flags().String("cache-budget", "", "warm-cache soft cap for cloud-backed chunks (e.g. 1GB, 500MB, 1GiB). Unset defaults to a bounded budget for cloud vaults; 0 is rejected")
 	cmd.Flags().String("cache-ttl", "", "cache TTL duration for ttl eviction mode (e.g. 1h, 7d)")
-	cmd.Flags().String("retention-disposition", "delete", "what retention does with aged-out records: delete (drop) or route (send through routing engine)")
+	cmd.Flags().String("retention-disposition", "delete", "what retention does with aged-out records: delete (drop), route (send through routing engine), or transfer (re-home the sealed chunk unchanged to --retention-transfer-target)")
+	cmd.Flags().String("retention-transfer-target", "", "vault name or ID records transfer to when --retention-disposition=transfer; must be a different, non-cloud file vault")
 	cmd.Flags().String("path", "", "direct path for JSONL sinks")
 	cmd.Flags().String("memory-budget", "", "in-memory storage cap for memory vaults (e.g. 1GB, 512MiB). Unset defaults to a bounded budget; 0 is rejected")
 	cmd.Flags().String("disk-free-warn", "", "free-space warn threshold on the vault's backing volume: an absolute size (10GB) or a percentage of the volume (10%); empty inherits the node default, 10%")
@@ -241,10 +245,15 @@ func applyVaultFlags(ctx context.Context, cmd *cobra.Command, client *server.Cli
 	if cmd.Flags().Changed("retention-disposition") {
 		v, _ := cmd.Flags().GetString("retention-disposition")
 		switch v {
-		case "delete", "route":
+		case "delete", "route", "transfer":
 			cfg.RetentionDisposition = v
 		default:
-			return fmt.Errorf("invalid --retention-disposition %q (valid: delete, route)", v)
+			return fmt.Errorf("invalid --retention-disposition %q (valid: delete, route, transfer)", v)
+		}
+	}
+	if cmd.Flags().Changed("retention-transfer-target") {
+		if err := resolveVaultRetentionTransferTarget(ctx, cmd, client, cfg); err != nil {
+			return err
 		}
 	}
 	if cmd.Flags().Changed("path") {
@@ -311,6 +320,25 @@ func resolveVaultCloudService(ctx context.Context, cmd *cobra.Command, client *s
 		return err
 	}
 	cfg.CloudServiceId, err = resolveToProto(csName, r.cloudServices, "cloud service")
+	return err
+}
+
+// resolveVaultRetentionTransferTarget resolves --retention-transfer-target
+// (vault name or ID) onto RetentionTransferTargetVaultId. An empty value
+// clears the target; the server enforces the transfer-disposition
+// constraints (target required when disposition=transfer, target != self,
+// both source and target plain non-cloud file vaults — gastrolog-2l918).
+func resolveVaultRetentionTransferTarget(ctx context.Context, cmd *cobra.Command, client *server.Client, cfg *v1.VaultConfig) error {
+	target, _ := cmd.Flags().GetString("retention-transfer-target")
+	if target == "" {
+		cfg.RetentionTransferTargetVaultId = nil
+		return nil
+	}
+	r, err := newResolver(ctx, client)
+	if err != nil {
+		return err
+	}
+	cfg.RetentionTransferTargetVaultId, err = resolveToProto(target, r.vaults, "vault")
 	return err
 }
 

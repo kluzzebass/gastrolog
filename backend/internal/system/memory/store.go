@@ -1003,6 +1003,10 @@ func copyVaultConfig(st system.VaultConfig) system.VaultConfig {
 		id := *st.CloudServiceID
 		cp.CloudServiceID = &id
 	}
+	if st.RetentionTransferTargetVaultID != nil {
+		id := *st.RetentionTransferTargetVaultID
+		cp.RetentionTransferTargetVaultID = &id
+	}
 	if len(st.RetentionRules) > 0 {
 		cp.RetentionRules = make([]system.RetentionRule, len(st.RetentionRules))
 		for i, r := range st.RetentionRules {

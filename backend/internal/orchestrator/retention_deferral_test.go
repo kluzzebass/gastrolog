@@ -7,6 +7,8 @@ package orchestrator
 // nothing persists across restart.
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -48,7 +50,7 @@ func TestDeferralStreakRaisesAtThresholdAndClearsOnProgress(t *testing.T) {
 
 	// Two deferred sweeps: below the threshold, no raise.
 	for range retentionDeferralAlarmAfter - 1 {
-		r.noteFanOutDeferral("drain gate engaged (node below its disk floor)")
+		r.noteRetentionDeferral("drain gate engaged (node below its disk floor)")
 		r.finishSweepDeferralState()
 	}
 	sink.mu.Lock()
@@ -59,7 +61,7 @@ func TestDeferralStreakRaisesAtThresholdAndClearsOnProgress(t *testing.T) {
 	}
 
 	// Third consecutive deferral: raise, naming vault and cause.
-	r.noteFanOutDeferral("destination vault second-vault is at its size budget")
+	r.noteRetentionDeferral("destination vault second-vault is at its size budget")
 	r.finishSweepDeferralState()
 	sink.mu.Lock()
 	defer sink.mu.Unlock()
@@ -67,7 +69,7 @@ func TestDeferralStreakRaisesAtThresholdAndClearsOnProgress(t *testing.T) {
 		t.Fatalf("want exactly 1 raise at the threshold, got %d", len(sink.raises))
 	}
 	got := sink.raises[0]
-	if !strings.HasPrefix(got, alarmRetentionRouteDeferred+"|"+vaultID.String()+"|") {
+	if !strings.HasPrefix(got, alarmRetentionDeferred+"|"+vaultID.String()+"|") {
 		t.Errorf("raise must be typed and instance-keyed by vault: %s", got)
 	}
 	for _, want := range []string{"first-vault", "size budget", "3 consecutive"} {
@@ -95,13 +97,13 @@ func TestDeferralStreakRaiseNamesMatchedChunkCount(t *testing.T) {
 	}
 
 	for range retentionDeferralAlarmAfter - 1 {
-		r.noteFanOutDeferral("drain gate engaged (node below its disk floor)")
+		r.noteRetentionDeferral("drain gate engaged (node below its disk floor)")
 		r.finishSweepDeferralState()
 	}
 	r.mu.Lock()
 	r.sweepMatchedChunks = 5
 	r.mu.Unlock()
-	r.noteFanOutDeferral("destination vault second-vault is at its size budget")
+	r.noteRetentionDeferral("destination vault second-vault is at its size budget")
 	r.finishSweepDeferralState()
 
 	sink.mu.Lock()
@@ -125,11 +127,11 @@ func TestDeferralStreakResetsOnRoutedChunk(t *testing.T) {
 		orch:      &Orchestrator{alerts: sink},
 	}
 	for range retentionDeferralAlarmAfter {
-		r.noteFanOutDeferral("drain gate engaged (node below its disk floor)")
+		r.noteRetentionDeferral("drain gate engaged (node below its disk floor)")
 		r.finishSweepDeferralState()
 	}
 	// A sweep that fully routes a chunk clears the alarm and resets.
-	r.noteFanOutProgress()
+	r.noteRetentionProgress()
 	r.finishSweepDeferralState()
 
 	sink.mu.Lock()
@@ -138,7 +140,7 @@ func TestDeferralStreakResetsOnRoutedChunk(t *testing.T) {
 		t.Fatal("progress must clear the alarm")
 	}
 	// A single fresh deferral after recovery must not re-raise.
-	r.noteFanOutDeferral("drain gate engaged (node below its disk floor)")
+	r.noteRetentionDeferral("drain gate engaged (node below its disk floor)")
 	r.finishSweepDeferralState()
 	if len(sink.raises) != 1 {
 		t.Fatalf("streak must reset on progress; raises=%d", len(sink.raises))
@@ -147,7 +149,7 @@ func TestDeferralStreakResetsOnRoutedChunk(t *testing.T) {
 
 // TestDeferralStreakResetsOnDeleteDispositionProgress documents that the
 // progress signal is disposition-agnostic: tryRetainChunk now calls
-// noteFanOutProgress unconditionally after ANY successful
+// noteRetentionProgress unconditionally after ANY successful
 // applyRetentionDispositionToChunk, not just a route-disposition fan-out.
 // The alarm's response text tells the operator to flip disposition to
 // delete; once flipped, a delete-disposition sweep that destroys chunks and
@@ -166,14 +168,14 @@ func TestDeferralStreakResetsOnDeleteDispositionProgress(t *testing.T) {
 		orch:      &Orchestrator{alerts: sink},
 	}
 	for range retentionDeferralAlarmAfter {
-		r.noteFanOutDeferral("drain gate engaged (node below its disk floor)")
+		r.noteRetentionDeferral("drain gate engaged (node below its disk floor)")
 		r.finishSweepDeferralState()
 	}
 	// Simulates a delete-disposition sweep successfully destroying a chunk:
 	// applyRetentionDispositionToChunk returns true (disposition == delete
 	// is a no-op that always succeeds) and tryRetainChunk now notes progress
 	// unconditionally rather than gating on disposition == route.
-	r.noteFanOutProgress()
+	r.noteRetentionProgress()
 	r.finishSweepDeferralState()
 
 	sink.mu.Lock()
@@ -219,7 +221,7 @@ func TestRetentionSweepAllClearsAlarmOnRunnerGC(t *testing.T) {
 	defer sink.mu.Unlock()
 	found := false
 	for _, c := range sink.clears {
-		if c == alarmRetentionRouteDeferred+"|"+vaultID.String() {
+		if c == alarmRetentionDeferred+"|"+vaultID.String() {
 			found = true
 		}
 	}
@@ -231,5 +233,77 @@ func TestRetentionSweepAllClearsAlarmOnRunnerGC(t *testing.T) {
 	o.mu.RUnlock()
 	if stillPresent {
 		t.Fatal("runner must have been pruned")
+	}
+}
+
+// TestRetentionRouteDeferredStringFullyRenamed proves the alarm rename
+// (gastrolog-2l918: retention-route-deferred -> retention-deferred, done
+// because transfer disposition now shares the same deferral streak and
+// alarm as route) left no trace in the Go source tree. Walks every .go
+// file under backend/ except api/gen (generated protobuf, out of scope for
+// a hand-rename) and this test's own file (which must legitimately name
+// the old identifier to build the needle and describe what it's checking).
+// The needle is built by concatenation so this file doesn't trip its own
+// scan by containing the literal string.
+func TestRetentionRouteDeferredStringFullyRenamed(t *testing.T) {
+	t.Parallel()
+
+	// backend/internal/orchestrator -> backend
+	backendRoot, err := filepath.Abs(filepath.Join(".", "..", ".."))
+	if err != nil {
+		t.Fatalf("resolve backend root: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(backendRoot, "go.mod")); err != nil {
+		t.Fatalf("resolved path %q does not look like the backend module root: %v", backendRoot, err)
+	}
+	selfPath, err := filepath.Abs("retention_deferral_test.go")
+	if err != nil {
+		t.Fatalf("resolve own path: %v", err)
+	}
+
+	needle := "retention" + "-" + "route" + "-" + "deferred"
+	oldSymbol := "alarmRetentionRoute" + "Deferred"
+	oldNoteDeferral := "noteFanOut" + "Deferral"
+	oldNoteProgress := "noteFanOut" + "Progress"
+
+	var offenders []string
+	err = filepath.WalkDir(backendRoot, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if d.Name() == "gen" && filepath.Base(filepath.Dir(path)) == "api" {
+				return filepath.SkipDir // generated protobuf
+			}
+			return nil
+		}
+		if filepath.Ext(path) != ".go" {
+			return nil
+		}
+		abs, err := filepath.Abs(path)
+		if err != nil {
+			return err
+		}
+		if abs == selfPath {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		content := string(data)
+		for _, s := range []string{needle, oldSymbol, oldNoteDeferral, oldNoteProgress} {
+			if strings.Contains(content, s) {
+				offenders = append(offenders, path+" contains "+s)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk backend tree: %v", err)
+	}
+	if len(offenders) > 0 {
+		t.Fatalf("rename incomplete — %d reference(s) to the old alarm/method names survive:\n%s",
+			len(offenders), strings.Join(offenders, "\n"))
 	}
 }

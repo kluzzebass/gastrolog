@@ -14,6 +14,38 @@ import (
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
+// TestHolderPullSourcesExcludesSelfAndEmptyEntries pins gastrolog-2l918
+// review finding 1's fallback source list: every non-empty, non-self node
+// in e.Holders is a candidate; self and empty entries are excluded.
+func TestHolderPullSourcesExcludesSelfAndEmptyEntries(t *testing.T) {
+	t.Parallel()
+	o := &Orchestrator{localNodeID: "node-self"}
+	e := vaultctlfsm.ManifestEntry{Holders: []string{"node-self", "node-A", "", "node-B"}}
+
+	got := o.holderPullSources(e)
+	want := map[string]bool{"node-A": true, "node-B": true}
+	if len(got) != len(want) {
+		t.Fatalf("holderPullSources = %v, want exactly %v", got, want)
+	}
+	for _, n := range got {
+		if !want[n] {
+			t.Errorf("unexpected source %q", n)
+		}
+	}
+}
+
+// TestHolderPullSourcesEmptyWhenNoHolders pins the no-fallback-available
+// case: an entry nobody has confirmed yet yields no fallback sources
+// either — runGLCBPull's early no-op path stays quiet rather than
+// recording a spurious pull attempt/failure.
+func TestHolderPullSourcesEmptyWhenNoHolders(t *testing.T) {
+	t.Parallel()
+	o := &Orchestrator{localNodeID: "node-self"}
+	if got := o.holderPullSources(vaultctlfsm.ManifestEntry{}); len(got) != 0 {
+		t.Fatalf("holderPullSources on empty Holders = %v, want empty", got)
+	}
+}
+
 // buildCatchupTestGLCB writes a real segment and builds a valid GLCB from
 // it, returning the GLCB path and its record count.
 func buildCatchupTestGLCB(t *testing.T, records int) (string, int64) {

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/glid"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
@@ -60,5 +61,49 @@ func TestAppendUnlistedManifestSealed(t *testing.T) {
 	}
 	if got := appendUnlistedManifestSealed(metas, &VaultInstance{}); len(got) != 1 {
 		t.Fatalf("nil callback: %d candidates, want 1", len(got))
+	}
+}
+
+// TestAppendUnlistedManifestSealedExcludesInFlightTransferPhantom pins
+// gastrolog-2l918 review finding 3c: a manifest entry introduced by
+// retention transfer disposition (TransferSourceVaultID set) with ZERO
+// confirmed holders must NOT become a destination retention candidate —
+// the bytes haven't landed on any home yet, so a short destination TTL
+// firing on it would tombstone the transfer's own placeholder out from
+// under the still-in-flight hand-off. An otherwise-identical entry that
+// HAS earned at least one holder receipt is a normal candidate again.
+func TestAppendUnlistedManifestSealedExcludesInFlightTransferPhantom(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	sourceVaultID := glid.New()
+	phantomID := chunk.NewChunkID()
+	landedID := chunk.NewChunkID()
+
+	entries := []vaultctlfsm.ManifestEntry{
+		// Zero holders: in-flight, must be excluded.
+		{ID: phantomID, State: chunk.ChunkStateSealed, SealedAt: now, RecordCount: 5, TransferSourceVaultID: sourceVaultID},
+		// Same shape but a holder has already acked: eligible again.
+		{ID: landedID, State: chunk.ChunkStateSealed, SealedAt: now, RecordCount: 5, TransferSourceVaultID: sourceVaultID, Holders: []string{"node-A"}},
+	}
+	vaultInst := &VaultInstance{
+		ManifestEntries: func() []vaultctlfsm.ManifestEntry { return entries },
+	}
+
+	out := appendUnlistedManifestSealed(nil, vaultInst)
+
+	var sawPhantom, sawLanded bool
+	for _, m := range out {
+		if m.ID == phantomID {
+			sawPhantom = true
+		}
+		if m.ID == landedID {
+			sawLanded = true
+		}
+	}
+	if sawPhantom {
+		t.Error("zero-holder transfer-introduced entry must NOT be a retention candidate (phantom expiry wedge)")
+	}
+	if !sawLanded {
+		t.Error("a transfer-introduced entry with a confirmed holder must rejoin normal candidacy")
 	}
 }

@@ -2,6 +2,7 @@ import { describe, test, expect, beforeEach } from "bun:test";
 import { render, fireEvent, waitFor } from "@testing-library/react";
 import { installMockClients, m } from "../../../test/api-mock";
 import { createTestQueryClient, settingsWrapper } from "../../../test/render";
+import { encode } from "../../api/glid";
 
 const mocks = installMockClients();
 
@@ -238,6 +239,64 @@ describe("VaultsSettings", () => {
 
     await waitFor(() => {
       expect(m(mocks.systemClient, "putVault")).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  test("transfer target field appears only when disposition is transfer, and is required to create", async () => {
+    m(mocks.systemClient, "generateName").mockResolvedValueOnce({ name: "happy-fox" });
+    const qc = createTestQueryClient();
+    qc.setQueryData(["system"], sampleConfig);
+
+    const { getByText, getByLabelText, queryByLabelText } = render(<VaultsSettings dark />, {
+      wrapper: settingsWrapper(qc),
+    });
+
+    fireEvent.click(getByText("Add Vault"));
+    await waitFor(() => expect(getByText("Create")).toBeTruthy());
+
+    fireEvent.change(getByLabelText("Storage Type"), { target: { value: "file" } });
+    expect(queryByLabelText("Transfer Target")).toBeNull();
+
+    fireEvent.change(getByLabelText("Storage Class"), { target: { value: "1" } });
+    fireEvent.change(getByLabelText("Retention Disposition"), { target: { value: "transfer" } });
+
+    await waitFor(() => expect(getByLabelText("Transfer Target")).toBeTruthy());
+    // Storage class is set but no transfer target yet — Create stays disabled.
+    const createBtn = getByText("Create").closest("button")!;
+    expect(createBtn.disabled).toBe(true);
+  });
+
+  test("create file vault with transfer disposition sends the transfer target vault ID", async () => {
+    m(mocks.systemClient, "generateName").mockResolvedValueOnce({ name: "happy-fox" });
+    m(mocks.systemClient, "putVault").mockResolvedValueOnce({});
+    const qc = createTestQueryClient();
+    qc.setQueryData(["system"], sampleConfig);
+
+    const { getByText, getByLabelText } = render(<VaultsSettings dark />, {
+      wrapper: settingsWrapper(qc),
+    });
+
+    fireEvent.click(getByText("Add Vault"));
+    await waitFor(() => expect(getByText("Create")).toBeTruthy());
+
+    fireEvent.change(getByLabelText("Storage Type"), { target: { value: "file" } });
+    fireEvent.change(getByLabelText("Storage Class"), { target: { value: "1" } });
+    fireEvent.change(getByLabelText("Retention Disposition"), { target: { value: "transfer" } });
+    await waitFor(() => expect(getByLabelText("Transfer Target")).toBeTruthy());
+    // vault-alpha (testId(1)) is the only eligible target — a non-cloud file vault.
+    fireEvent.change(getByLabelText("Transfer Target"), { target: { value: encode(testId(1)) } });
+
+    const createBtn = getByText("Create").closest("button")!;
+    await waitFor(() => expect(createBtn.disabled).toBe(false));
+    fireEvent.click(createBtn);
+
+    await waitFor(() => {
+      expect(m(mocks.systemClient, "putVault")).toHaveBeenCalledTimes(1);
+      const call = m(mocks.systemClient, "putVault").mock.calls[0]! as unknown[];
+      const arg = call[0] as Record<string, Record<string, unknown>>;
+      const cfg = arg.config as Record<string, unknown>;
+      expect(cfg.retentionDisposition).toBe("transfer");
+      expect(encode(cfg.retentionTransferTargetVaultId as Uint8Array)).toBe(encode(testId(1)));
     });
   });
 });

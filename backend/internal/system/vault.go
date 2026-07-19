@@ -64,7 +64,9 @@ type VaultConfig struct {
 	// and frees storage immediately, never touching the routing engine.
 	// "route" feeds the records back through the routing engine with
 	// _source = "retention" so operator-configured routes can forward
-	// them to archive vaults, cold storage, etc.
+	// them to archive vaults, cold storage, etc. "transfer" re-homes the
+	// sealed chunk to RetentionTransferTargetVaultID UNCHANGED — no
+	// record decode, no re-route, no re-ingest (gastrolog-2l918).
 	//
 	// Default is "delete" because the routing path is fail-open: an
 	// accidental match on a retention-source route can create a cascade
@@ -72,6 +74,13 @@ type VaultConfig struct {
 	// the next sweep). Operators who want forwarding must opt in
 	// explicitly. See gastrolog-18du3.
 	RetentionDisposition string `json:"retentionDisposition,omitempty"`
+
+	// RetentionTransferTargetVaultID is the destination vault for
+	// RetentionDisposition == "transfer". Required when, and only valid
+	// when, disposition is "transfer" — PutVault rejects self-transfer
+	// and non-file source/target. See
+	// docs/retention-transfer-disposition-design.md (gastrolog-2l918).
+	RetentionTransferTargetVaultID *glid.GLID `json:"retentionTransferTargetVaultId,omitempty"`
 
 	// DiskFreeWarn / DiskFreeFloor are per-vault disk-guard thresholds on the
 	// vault's backing volume: an absolute free-space size ("10GB") or a
@@ -127,6 +136,10 @@ const (
 	// routing engine so operator-configured routes can forward records
 	// to other destinations.
 	RetentionDispositionRoute = "route"
+	// RetentionDispositionTransfer re-homes the sealed chunk to
+	// RetentionTransferTargetVaultID unchanged — no record decode, no
+	// re-route, no re-ingest. See gastrolog-2l918.
+	RetentionDispositionTransfer = "transfer"
 )
 
 // ResolveRetentionDisposition returns the effective retention disposition
@@ -138,6 +151,8 @@ func (v VaultConfig) ResolveRetentionDisposition() string {
 	switch v.RetentionDisposition {
 	case RetentionDispositionRoute:
 		return RetentionDispositionRoute
+	case RetentionDispositionTransfer:
+		return RetentionDispositionTransfer
 	default:
 		return RetentionDispositionDelete
 	}

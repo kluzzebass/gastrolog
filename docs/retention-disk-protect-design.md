@@ -102,8 +102,10 @@ route flag is not consumed, and the sweep returns instead of hanging.
 
 The retention runner counts consecutive deferred sweeps per vault — a pure
 count, in memory, nothing persisted. At N consecutive deferrals (internal
-constant, small) it raises one High alarm, new catalog type
-`retention-route-deferred`, whose detail names in a single line:
+constant, small) it raises one High alarm, catalog type
+`retention-deferred` (renamed from `retention-route-deferred` when
+transfer disposition — gastrolog-2l918 — generalized it beyond route),
+whose detail names in a single line:
 
 - the vault,
 - the cause of the most recent deferral (drain gate engaged / destination

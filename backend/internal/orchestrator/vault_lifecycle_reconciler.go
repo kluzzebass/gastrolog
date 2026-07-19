@@ -721,6 +721,7 @@ func (r *VaultLifecycleReconciler) ReconcileTick() {
 	r.reconcileStaleLeaderFSMEntries(v)
 	r.reconcileStalePendingDeleteAcks(v)
 	r.reconcileIdleActiveChunks(v)
+	r.reconcileAbandonedTransferAnnounces(v)
 }
 
 func (r *VaultLifecycleReconciler) SweepPendingObligations() {
@@ -1273,6 +1274,77 @@ func (r *VaultLifecycleReconciler) replicationPeers() []string {
 // failure mode (gRPC retry, leader election, warm-cache fault) and
 // matches the cluster's coarse-grained reconciliation cadence.
 const staleLeaderFSMGracePeriod = 1 * time.Hour
+
+// abandonedTransferAnnounceGCAge bounds how long a transfer-introduced
+// manifest entry (TransferSourceVaultID set) may sit with ZERO confirmed
+// holders before this destination gives up and retracts the announce
+// (gastrolog-2l918 review finding 4). The source retention protocol has
+// no message to signal "I gave up on this transfer" — a source can defer
+// terminally (disposition changed away from transfer, target changed,
+// corruption mismatch) with nothing left pointing the destination at a
+// live, in-progress hand-off. Without retraction, the phantom entry sits
+// forever: zero holders, nothing pulling it, no error anywhere.
+//
+// Deliberately generous and imprecise: an ACTIVELY retried transfer (the
+// destination genuinely unreachable, but the source keeps retrying every
+// sweep) looks identical to an abandoned one from here — this is the
+// "minimal honest version" the review accepted in place of a real
+// retraction protocol. A day is long enough that no plausible transient
+// stall survives it, so false-positive GC is rare; if the source really
+// is still trying, its next sweep's ensureDestManifestEntry re-announces
+// (deferred by the destination's tombstone — see deferCatTombstoned —
+// until PruneTombstones drops it, then the announce succeeds like new).
+const abandonedTransferAnnounceGCAge = 24 * time.Hour
+
+// reconcileAbandonedTransferAnnounces retracts a transfer announce-import
+// the source has abandoned: a manifest entry introduced via retention
+// transfer (TransferSourceVaultID set) with zero destination holder
+// receipts that has sat past abandonedTransferAnnounceGCAge. Reuses
+// deleteChunk — the SAME receipt-based delete every other retirement path
+// in this file uses (single-node fallback included) — rather than a
+// parallel removal mechanism. Leader-only: only the destination's config
+// placement leader proposes deletes, matching every other write path
+// here (reconcileStaleLeaderFSMEntries, reconcileStalePendingDeleteAcks).
+func (r *VaultLifecycleReconciler) reconcileAbandonedTransferAnnounces(v *reconcileView) {
+	if r.vaultInst == nil || r.vaultInst.IsFollower {
+		return
+	}
+	now := time.Now()
+	expectedFrom := r.placementMembership()
+	var retracted int
+	for _, e := range v.entries {
+		if e.TransferSourceVaultID.IsZero() || len(e.Holders) > 0 {
+			continue
+		}
+		anchor := e.SealedAt
+		if anchor.IsZero() || now.Sub(anchor) < abandonedTransferAnnounceGCAge {
+			continue
+		}
+		if v.pendingByID[e.ID] != nil {
+			continue // retraction already in flight
+		}
+		r.logger.Warn("abandoned-transfer-announce GC: retracting a transfer announce with zero holders",
+			"chunk", e.ID, "transfer_source_vault", e.TransferSourceVaultID, "age", now.Sub(anchor))
+		if err := r.deleteChunk(e.ID, "abandoned-transfer-announce", expectedFrom); err != nil {
+			r.logger.Warn("abandoned-transfer-announce GC: deleteChunk failed", "chunk", e.ID, "error", err)
+			continue
+		}
+		retracted++
+	}
+	if retracted > 0 {
+		r.logger.Info("abandoned-transfer-announce GC: retractions proposed", "count", retracted)
+	}
+}
+
+// SweepAbandonedTransferAnnounces runs reconcileAbandonedTransferAnnounces
+// as an isolated entry point (tests, targeted recovery) — mirrors the
+// other Sweep* wrappers in this file. Production cadence goes through
+// ReconcileTick.
+func (r *VaultLifecycleReconciler) SweepAbandonedTransferAnnounces() {
+	if v := r.gatherReconcileView(); v != nil {
+		r.reconcileAbandonedTransferAnnounces(v)
+	}
+}
 
 // SweepStaleLeaderFSMEntries walks the FSM manifest on the leader of a
 // non-cloud instance and proposes CmdRequestDelete for any sealed entry
