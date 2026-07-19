@@ -325,10 +325,6 @@ configure() {
   # volume and deadlocked (gastrolog-2b2yyy, gastrolog-5ct2av).
   $GLOG config retention-policy create --addr "$S" --name "1h-retain" --max-age 1h \
     --size-budget "50GB" 2>&1 | sed 's/^/  /'
-  # Bound-only policy (no drain triggers — legal): bounds second-vault,
-  # which keeps its data forever but must not claim unbounded disk.
-  $GLOG config retention-policy create --addr "$S" --name "vault-budget" \
-    --size-budget "50GB" 2>&1 | sed 's/^/  /'
 
   # gastrolog-4kkoo (Phase 5): no filter entity — match expressions live
   # inline on routes via --expression. Synthetic attributes (_source,
@@ -343,8 +339,7 @@ configure() {
   #                  the routing engine.
   #   - second-vault: file-backed but cloud-served (S3). 10000-records rotation
   #                  carries over so chunk granularity is consistent; no
-  #                  drain triggers (data lives forever), bounded by the
-  #                  bound-only vault-budget policy.
+  #                  retention policy (data lives forever).
   #
   # Both are bounded via their retention policies' size budget
   # (gastrolog-33ul6h). Drain triggers alone do NOT bound a vault: they act
@@ -353,14 +348,14 @@ configure() {
   # (gastrolog-2b2yyy: a 3-minute TTL sat next to 449 GiB of unpurged
   # segments). The budget's cap-and-refuse is what makes the
   # vault-max-size alarm reachable before the disk guard traps the
-  # cluster. second-vault has no drain (data lives forever) so it attaches
-  # the bound-only policy.
+  # cluster. second-vault has no retention policy: cloud-served, its local
+  # claim is cache + backlog, bounded by the creation-default floor.
   $GLOG config vault create --addr "$S" --name "first-vault" \
     --type file --storage-class 1 --replication-factor "$NODES" \
     --rotation-policy "1M-1m" --retention-policy "1h-retain" 2>&1 | sed 's/^/  /'
   $GLOG config vault create --addr "$S" --name "second-vault" \
     --type file --storage-class 1 --replication-factor "$NODES" \
-    --cloud-service "S3" --retention-policy "vault-budget" \
+    --cloud-service "S3" \
     --rotation-policy "10000-records" 2>&1 | sed 's/^/  /'
 
   # The retention route needs the first vault's GLID inline in its
