@@ -203,13 +203,23 @@ func (o *Orchestrator) runBackfillUpload(vaultInst *VaultInstance, id chunk.Chun
 	if err != nil {
 		onDisk := o.backfillChunkOnDisk(vaultInst.VaultID, id)
 		if onDisk {
-			err = o.repairAndRetryBackfill(vaultInst, id, err, uploader)
+			err = o.repairAndRetryBackfill(vaultInst, id, err, uploader, onDisk)
 		}
 		if err != nil {
+			// Both onDisk cases get a failure entry with the same
+			// exponential backoff — one map, one strand-safe lifecycle
+			// (cross-path clear, the vault-scoped purges, and the
+			// vanished-candidate prune all apply regardless of onDisk).
+			// onDisk gates ALARM ELIGIBILITY only: build-lag and a
+			// genuinely-deleted GLCB are indistinguishable from an
+			// os.Stat, so neither pages an operator — build-lag entries
+			// clear entirely via the chunkIsCloudBacked cross-path once
+			// the primary upload lands, and a genuinely-deleted GLCB backs
+			// off to the cap without flooding the scheduler journal
+			// (backfillDue still gates it) or ever alarming for state the
+			// primary path owns. See gastrolog-4ryguo review follow-up.
 			o.logBackfillFailure(vaultInst.VaultID, id, err, onDisk)
-			if onDisk {
-				o.markBackfillFailure(vaultInst.VaultID, id, err)
-			}
+			o.markBackfillFailure(vaultInst.VaultID, id, err, onDisk)
 			return err
 		}
 	}
@@ -231,15 +241,17 @@ func (o *Orchestrator) runBackfillUpload(vaultInst *VaultInstance, id chunk.Chun
 // wrong error, no reconciler, no manifest entry, or the GLCB genuinely
 // absent from disk (e.g. deleted out from under the manifest entry). That
 // last case is not repairable — falling through to backoff instead of
-// retrying here is what keeps it from tight-looping.
-func (o *Orchestrator) repairAndRetryBackfill(vaultInst *VaultInstance, id chunk.ChunkID, uploadErr error, uploader chunk.ChunkCloudUploader) error {
+// retrying here is what keeps it from tight-looping. onDisk is the caller's
+// already-computed backfillChunkOnDisk result, passed in rather than
+// re-derived via a second os.Stat.
+func (o *Orchestrator) repairAndRetryBackfill(vaultInst *VaultInstance, id chunk.ChunkID, uploadErr error, uploader chunk.ChunkCloudUploader, onDisk bool) error {
 	if !errors.Is(uploadErr, chunk.ErrChunkNotFound) {
 		return uploadErr
 	}
 	if vaultInst.Reconciler == nil || vaultInst.ManifestEntry == nil {
 		return uploadErr
 	}
-	if !o.backfillChunkOnDisk(vaultInst.VaultID, id) {
+	if !onDisk {
 		// Bytes genuinely absent — nothing to repair.
 		return uploadErr
 	}
@@ -269,16 +281,24 @@ func (o *Orchestrator) backfillChunkOnDisk(vaultID glid.GLID, id chunk.ChunkID) 
 }
 
 // backfillFailureEntry tracks per-chunk retry backoff for cloud-backfill
-// uploads that failed and were not resolved by registration repair. Mirrors
-// retention's unreadableEntry (retention.go): a failure schedules the next
-// attempt via the same unreadableBackoff schedule and raises the
-// cloud-backfill-stuck alarm — the catalog's DelayOn keeps a blip that
-// clears on the very next retry from ever annunciating, while a chunk stuck
-// past it does.
+// uploads that failed. Mirrors retention's unreadableEntry (retention.go):
+// every failure — registration-missing or GLCB-absent alike — schedules the
+// next attempt via the same unreadableBackoff schedule, one map, one
+// strand-safe lifecycle. alarmEligible is the ONLY distinction between the
+// two shapes: only a registration-missing failure (GLCB verifiably on
+// disk) escalates to the cloud-backfill-stuck alarm (subject to the
+// catalog's DelayOn suppression). A GLCB-absent failure — build-lag or a
+// GLCB genuinely deleted out from under the manifest entry, indistinguishable
+// by an os.Stat — backs off the same way but never alarms: build-lag
+// entries clear via the chunkIsCloudBacked cross-path once the primary
+// upload lands, and a permanently-missing GLCB backs off to the cap
+// without paging an operator for state the primary path owns. See
+// gastrolog-4ryguo review follow-up.
 type backfillFailureEntry struct {
-	vaultID   glid.GLID
-	failCount int
-	nextRetry time.Time
+	vaultID       glid.GLID
+	failCount     int
+	nextRetry     time.Time
+	alarmEligible bool
 }
 
 // backfillDue reports whether a chunk's cloud-backfill retry is due: no
@@ -294,11 +314,16 @@ func (o *Orchestrator) backfillDue(id chunk.ChunkID) bool {
 	return !o.now().Before(entry.nextRetry)
 }
 
-// markBackfillFailure records a cloud-backfill upload failure that
-// registration repair did not resolve, schedules the next retry via
-// unreadableBackoff, and raises the cloud-backfill-stuck alarm (subject to
-// the catalog's DelayOn suppression).
-func (o *Orchestrator) markBackfillFailure(vaultID glid.GLID, id chunk.ChunkID, cause error) {
+// markBackfillFailure records a cloud-backfill upload failure and schedules
+// the next retry via unreadableBackoff — for BOTH registration-missing and
+// GLCB-absent failures alike (one map, one strand-safe lifecycle).
+// alarmEligible (the caller's backfillChunkOnDisk observation) decides only
+// whether this raises the cloud-backfill-stuck alarm (subject to the
+// catalog's DelayOn suppression): a GLCB-absent failure backs off silently,
+// never alarming. alarmEligible tracks the LATEST observation, not the
+// first — if a later failure's eligibility differs from what a prior
+// standing alarm assumed, the alarm is raised/cleared to match.
+func (o *Orchestrator) markBackfillFailure(vaultID glid.GLID, id chunk.ChunkID, cause error, alarmEligible bool) {
 	o.backfillMu.Lock()
 	if o.backfillFailures == nil {
 		o.backfillFailures = make(map[chunk.ChunkID]*backfillFailureEntry)
@@ -311,14 +336,20 @@ func (o *Orchestrator) markBackfillFailure(vaultID glid.GLID, id chunk.ChunkID, 
 	entry.vaultID = vaultID
 	entry.failCount++
 	entry.nextRetry = o.now().Add(unreadableBackoff(entry.failCount))
+	entry.alarmEligible = alarmEligible
 	nextRetry := entry.nextRetry
 	o.backfillMu.Unlock()
 
-	if o.alerts != nil {
-		o.alerts.Raise("cloud-backfill-stuck", id.String(),
-			fmt.Sprintf("Chunk %s in vault %s failed cloud backfill: %v (next retry %s)",
-				id, vaultID, cause, nextRetry.Format(time.RFC3339)))
+	if o.alerts == nil {
+		return
 	}
+	if !alarmEligible {
+		o.alerts.Clear("cloud-backfill-stuck", id.String())
+		return
+	}
+	o.alerts.Raise("cloud-backfill-stuck", id.String(),
+		fmt.Sprintf("Chunk %s in vault %s failed cloud backfill: %v (next retry %s)",
+			id, vaultID, cause, nextRetry.Format(time.RFC3339)))
 }
 
 // clearBackfillFailure drops a chunk's backfill backoff state and clears

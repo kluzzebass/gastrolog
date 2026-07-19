@@ -8,14 +8,20 @@ package orchestrator
 //
 // These tests pin: (1) the registration gap is repaired via the same
 // primitive pipeline sealing uses (registerPipelineGLCB) and the upload then
-// succeeds; (2) a failure repair cannot fix backs off exponentially instead
-// of retrying every 5s; (3) a failure that persists past the catalog's
-// DelayOn raises the cloud-backfill-stuck alarm naming the chunk, vault and
-// cause; (4) success clears both the backoff state and the alarm; (5) a
-// chunk that vanishes (deleted) drops its state and alarm too — no strand;
-// (6) the edge case where the GLCB is genuinely absent from disk (deleted
-// out from under the manifest entry) is NOT repaired and still backs off —
-// it must not tight-loop either.
+// succeeds; (2) EVERY failure — registration-missing (GLCB on disk) or
+// GLCB-absent (build-lag / genuinely deleted) alike — backs off
+// exponentially instead of retrying every 5s, one map, one strand-safe
+// lifecycle; (3) only a registration-missing failure that persists past the
+// catalog's DelayOn raises the cloud-backfill-stuck alarm naming the chunk,
+// vault and cause — a GLCB-absent failure backs off the same way but NEVER
+// alarms, since build-lag and a genuinely-deleted GLCB are indistinguishable
+// by an os.Stat and neither should page an operator; (4) success clears both
+// the backoff state and the alarm (if any), whether the chunk resolved
+// through backfillCloudUploads itself or was uploaded by the PRIMARY path
+// (schedulePipelineCloudUpload/onSeal) and observed cloud-backed on the next
+// sweep; (5) a chunk that vanishes (deleted), or a vault this node stops
+// running backfill for (leadership handoff, teardown), drops all state and
+// alarms too — no strand.
 
 import (
 	"errors"
@@ -216,7 +222,7 @@ func TestMarkBackfillFailureBacksOffExponentially(t *testing.T) {
 	vaultID := glid.New()
 	id := chunk.NewChunkID()
 
-	orch.markBackfillFailure(vaultID, id, errors.New("cloud store unreachable"))
+	orch.markBackfillFailure(vaultID, id, errors.New("cloud store unreachable"), true)
 	orch.backfillMu.Lock()
 	first := *orch.backfillFailures[id]
 	orch.backfillMu.Unlock()
@@ -224,7 +230,7 @@ func TestMarkBackfillFailureBacksOffExponentially(t *testing.T) {
 		t.Fatalf("failCount = %d, want 1 after first failure", first.failCount)
 	}
 
-	orch.markBackfillFailure(vaultID, id, errors.New("cloud store unreachable"))
+	orch.markBackfillFailure(vaultID, id, errors.New("cloud store unreachable"), true)
 	orch.backfillMu.Lock()
 	second := *orch.backfillFailures[id]
 	orch.backfillMu.Unlock()
@@ -246,7 +252,7 @@ func TestBackfillDueRespectsBackoffWindow(t *testing.T) {
 		t.Fatal("a chunk with no failure history must be due immediately")
 	}
 
-	orch.markBackfillFailure(glid.New(), id, errors.New("boom"))
+	orch.markBackfillFailure(glid.New(), id, errors.New("boom"), true)
 	if orch.backfillDue(id) {
 		t.Fatal("a freshly-failed chunk must not be due before its backoff window elapses")
 	}
@@ -270,7 +276,7 @@ func TestBackfillCloudUploads_SkipsSchedulingDuringBackoff(t *testing.T) {
 		{ID: chunkID, Sealed: true, CloudBacked: false, WriteStart: fixedNow, WriteEnd: fixedNow},
 	})
 	orch := newTestOrch(t, Config{LocalNodeID: "node-A", Now: func() time.Time { return fixedNow }})
-	orch.markBackfillFailure(vaultID, chunkID, errors.New("boom"))
+	orch.markBackfillFailure(vaultID, chunkID, errors.New("boom"), true)
 
 	vaultInst := &VaultInstance{VaultID: vaultID, Type: "file", Chunks: mock, IsRaftLeader: func() bool { return true }}
 	orch.backfillCloudUploads(vaultInst)
@@ -305,7 +311,7 @@ func TestBackfillPersistentFailureRaisesAlarm(t *testing.T) {
 		t.Fatal("cloud-backfill-stuck must be registered in the alarm catalog")
 	}
 
-	orch.markBackfillFailure(vaultID, id, errors.New("boom"))
+	orch.markBackfillFailure(vaultID, id, errors.New("boom"), true)
 	if alerts := ac.Standing(); len(alerts) != 0 {
 		t.Fatalf("a single failure must not yet annunciate (DelayOn not elapsed): got %v", alerts)
 	}
@@ -313,7 +319,7 @@ func TestBackfillPersistentFailureRaisesAlarm(t *testing.T) {
 	// Advance past the catalog's DelayOn and re-raise (a later failure) —
 	// re-raises refresh detail but do not restart the suppression window.
 	clockNow = clockNow.Add(typ.DelayOn + time.Second)
-	orch.markBackfillFailure(vaultID, id, errors.New("boom again"))
+	orch.markBackfillFailure(vaultID, id, errors.New("boom again"), true)
 
 	alerts := ac.Standing()
 	if len(alerts) != 1 {
@@ -351,9 +357,9 @@ func TestClearBackfillFailureDropsStateAndAlarm(t *testing.T) {
 	id := chunk.NewChunkID()
 	typ, _ := alert.TypeByID("cloud-backfill-stuck")
 
-	orch.markBackfillFailure(vaultID, id, errors.New("boom"))
+	orch.markBackfillFailure(vaultID, id, errors.New("boom"), true)
 	clockNow = clockNow.Add(typ.DelayOn + time.Second)
-	orch.markBackfillFailure(vaultID, id, errors.New("boom again"))
+	orch.markBackfillFailure(vaultID, id, errors.New("boom again"), true)
 	if len(ac.Standing()) != 1 {
 		t.Fatal("setup: expected the alarm to be standing before clearing")
 	}
@@ -385,11 +391,11 @@ func TestPruneVanishedBackfillFailuresDropsDeletedChunkState(t *testing.T) {
 	typ, _ := alert.TypeByID("cloud-backfill-stuck")
 
 	for _, id := range []chunk.ChunkID{stillThere, deleted} {
-		orch.markBackfillFailure(vaultID, id, errors.New("boom"))
+		orch.markBackfillFailure(vaultID, id, errors.New("boom"), true)
 	}
 	clockNow = clockNow.Add(typ.DelayOn + time.Second)
 	for _, id := range []chunk.ChunkID{stillThere, deleted} {
-		orch.markBackfillFailure(vaultID, id, errors.New("boom again"))
+		orch.markBackfillFailure(vaultID, id, errors.New("boom again"), true)
 	}
 	if len(ac.Standing()) != 2 {
 		t.Fatalf("setup: want 2 standing alarms, got %d", len(ac.Standing()))
@@ -416,29 +422,39 @@ func TestPruneVanishedBackfillFailuresDropsDeletedChunkState(t *testing.T) {
 	}
 }
 
-// ---------- build-lag: GLCB not yet built locally (review follow-up) ----------
+// ---------- build-lag / genuinely-deleted GLCB: back off, never alarm (review follow-up #2) ----------
 //
 // A sealed-in-FSM chunk whose local GLCB build hasn't finished yet fails
 // UploadToCloud with the same chunk.ErrChunkNotFound as the genuine
 // registration-missing case — os.Stat alone cannot tell "will exist in a
-// few seconds" from "gone forever". Before this fix both landed in the
-// backoff/alarm track; that pollutes it with false positives, since the
-// PRIMARY path (schedulePipelineCloudUpload / onSeal) resolves ordinary
-// build-lag in seconds on its own. The fix: only chunks whose GLCB IS on
-// disk (backfillChunkOnDisk == true) enter the failure track. GLCB-absent
-// failures keep the pre-existing gentle behavior — Debug log, normal 5s
-// sweep retry, no failure entry, no alarm — which also covers the edge
-// case of a GLCB genuinely deleted out from under the manifest entry
-// (indistinguishable from build-lag by os.Stat; that state is accepted as
-// self-resolving/owned by the primary path, not this track's job).
+// few seconds" from "gone forever" (a GLCB genuinely deleted out from under
+// the manifest entry). A first review pass excluded both from the failure
+// track entirely; that over-corrected — a permanently-missing GLCB then
+// tight-loops at the 5s sweep cadence forever with no failure entry to ever
+// gate it, which the issue's acceptance explicitly forbids. The corrected
+// shape: BOTH cases get a failure entry with the same exponential backoff —
+// one map, one strand-safe lifecycle (cross-path clear, the vault-scoped
+// purges, and the vanished-candidate prune all apply regardless). The
+// ONLY distinction is alarm eligibility: only a registration-missing
+// failure (GLCB verifiably on disk) escalates to the cloud-backfill-stuck
+// alarm. A GLCB-absent failure backs off the same way but never alarms —
+// build-lag entries clear entirely via the chunkIsCloudBacked cross-path
+// once the primary upload (schedulePipelineCloudUpload/onSeal) lands, and a
+// genuinely-deleted GLCB backs off to the cap without ever flooding the
+// scheduler journal (backfillDue still gates scheduling) or paging an
+// operator for state the primary path owns.
 
-// TestBackfillCloudUploads_GLCBAbsentDoesNotEnterFailureTrack pins the
-// build-lag fix directly: no repair attempt, no backoff/alarm entry, and
-// the chunk stays due for the next ordinary sweep.
-func TestBackfillCloudUploads_GLCBAbsentDoesNotEnterFailureTrack(t *testing.T) {
+// TestBackfillCloudUploads_GLCBAbsentBacksOffWithoutAlarm pins the
+// corrected build-lag/deleted-GLCB shape end-to-end: no repair attempt, a
+// backoff entry IS created and grows across repeated sweeps, the chunk
+// stops being scheduled once inside its backoff window (no tight loop), and
+// no alarm is ever raised — even once escalated well past where an
+// alarm-eligible failure would annunciate.
+func TestBackfillCloudUploads_GLCBAbsentBacksOffWithoutAlarm(t *testing.T) {
 	t.Parallel()
 	orch, vaultInst, id, mock := backfillRepairFixture(t, false) // no GLCB written
-	orch.alerts = alert.New()
+	ac := alert.New()
+	orch.alerts = ac
 
 	orch.backfillCloudUploads(vaultInst)
 	orch.Scheduler().Start()
@@ -452,17 +468,90 @@ func TestBackfillCloudUploads_GLCBAbsentDoesNotEnterFailureTrack(t *testing.T) {
 	}
 
 	orch.backfillMu.Lock()
-	_, hasEntry := orch.backfillFailures[id]
+	first := orch.backfillFailures[id]
 	orch.backfillMu.Unlock()
-	if hasEntry {
-		t.Fatal("a build-lag (GLCB-absent) failure must not create a backoff/alarm entry — that state belongs to the primary upload path")
+	if first == nil || first.failCount != 1 {
+		t.Fatalf("expected a backoff entry recorded after the first failure, got %+v", first)
+	}
+	if first.alarmEligible {
+		t.Fatal("a GLCB-absent failure must not be alarm-eligible")
+	}
+	if orch.backfillDue(id) {
+		t.Fatal("a freshly-failed chunk must not be due before its backoff window elapses — this is the tight-loop guard")
+	}
+	if alerts := ac.Standing(); len(alerts) != 0 {
+		t.Fatalf("a GLCB-absent failure must never alarm, got %v", alerts)
 	}
 
-	// No failure entry means no backoff window either — the chunk stays due
-	// for the next ordinary sweep, which is the pre-existing gentle retry
-	// behavior this fix preserves.
-	if !orch.backfillDue(id) {
-		t.Fatal("a chunk with no failure entry must remain due for the normal sweep cadence")
+	// A second sweep before the backoff window elapses must not reschedule
+	// the job — no tight loop.
+	orch.backfillCloudUploads(vaultInst)
+	time.Sleep(100 * time.Millisecond)
+	if got := mock.uploadCallCount(); got != 1 {
+		t.Fatalf("chunk must not be retried before its backoff window elapses, got %d upload calls", got)
+	}
+
+	// Force the entry well past several backoff tiers directly (no
+	// wall-clock races) — the same escalation depth that would annunciate
+	// an alarm-eligible failure via the catalog's DelayOn. Still no alarm.
+	for range 5 {
+		orch.markBackfillFailure(vaultInst.VaultID, id, errors.New("still no glcb"), false)
+	}
+	if alerts := ac.Standing(); len(alerts) != 0 {
+		t.Fatalf("a GLCB-absent failure must never alarm even after repeated escalation, got %v", alerts)
+	}
+	orch.backfillMu.Lock()
+	escalated := orch.backfillFailures[id]
+	orch.backfillMu.Unlock()
+	if escalated.failCount != 6 {
+		t.Fatalf("failCount = %d, want 6: backoff must still accumulate for the non-alarming case", escalated.failCount)
+	}
+}
+
+// TestMarkBackfillFailureAlarmEligibleGatesAlarmNotBackoff is the direct
+// unit-level pin for the same distinction: backoff state is identical
+// regardless of alarmEligible; only the alarm differs.
+func TestMarkBackfillFailureAlarmEligibleGatesAlarmNotBackoff(t *testing.T) {
+	t.Parallel()
+	clockNow := time.Now()
+	clock := func() time.Time { return clockNow }
+	orch := newTestOrch(t, Config{LocalNodeID: "node-A", Now: clock})
+	ac := alert.NewWithClock(clock)
+	orch.alerts = ac
+
+	vaultID := glid.New()
+	id := chunk.NewChunkID()
+	typ, _ := alert.TypeByID("cloud-backfill-stuck")
+
+	orch.markBackfillFailure(vaultID, id, errors.New("no glcb"), false)
+	clockNow = clockNow.Add(typ.DelayOn + time.Second)
+	orch.markBackfillFailure(vaultID, id, errors.New("still no glcb"), false)
+
+	if alerts := ac.Standing(); len(alerts) != 0 {
+		t.Fatalf("alarmEligible=false must never raise the alarm, got %v", alerts)
+	}
+	orch.backfillMu.Lock()
+	entry := *orch.backfillFailures[id]
+	orch.backfillMu.Unlock()
+	if entry.failCount != 2 {
+		t.Fatalf("failCount = %d, want 2: backoff accumulates the same regardless of alarm eligibility", entry.failCount)
+	}
+	if entry.alarmEligible {
+		t.Fatal("entry.alarmEligible must reflect the latest (false) observation")
+	}
+
+	// A later failure whose onDisk observation flips to true (e.g. the
+	// build finished but something else — cloud store down — now fails)
+	// must become alarm-eligible from that point on. The alarm's own
+	// DelayOn only starts counting from its first Raise (the two prior
+	// alarmEligible=false calls never raised anything for this ID), so a
+	// second alarm-eligible failure past that fresh window is what actually
+	// annunciates.
+	orch.markBackfillFailure(vaultID, id, errors.New("cloud store down"), true)
+	clockNow = clockNow.Add(typ.DelayOn + time.Second)
+	orch.markBackfillFailure(vaultID, id, errors.New("cloud store still down"), true)
+	if alerts := ac.Standing(); len(alerts) != 1 {
+		t.Fatalf("a failure that becomes alarm-eligible must raise the alarm once its own DelayOn elapses, got %d standing", len(alerts))
 	}
 }
 
@@ -490,9 +579,9 @@ func TestBackfillCloudUploads_CrossPathSuccessClearsEntryAndAlarm(t *testing.T) 
 	orch.alerts = ac
 
 	typ, _ := alert.TypeByID("cloud-backfill-stuck")
-	orch.markBackfillFailure(vaultID, chunkID, errors.New("boom"))
+	orch.markBackfillFailure(vaultID, chunkID, errors.New("boom"), true)
 	clockNow = clockNow.Add(typ.DelayOn + time.Second)
-	orch.markBackfillFailure(vaultID, chunkID, errors.New("boom again"))
+	orch.markBackfillFailure(vaultID, chunkID, errors.New("boom again"), true)
 	if len(ac.Standing()) != 1 {
 		t.Fatal("setup: expected the alarm to be standing before the cross-path success")
 	}
@@ -527,6 +616,60 @@ func TestBackfillCloudUploads_CrossPathSuccessClearsEntryAndAlarm(t *testing.T) 
 	}
 }
 
+// TestBackfillCloudUploads_CrossPathSuccessClearsBuildLagEntry is the
+// GLCB-absent sibling of the above: a build-lag entry (alarmEligible=false,
+// so no alarm was ever raised for it) must clear the same way once the
+// primary path resolves the chunk — the chunkIsCloudBacked cross-path clear
+// in backfillCloudUploads is unconditional on alarmEligible, since it's the
+// ONLY thing that ever removes a build-lag entry (it has no DelayOn
+// escalation to fall back on, unlike the alarm-eligible case).
+func TestBackfillCloudUploads_CrossPathSuccessClearsBuildLagEntry(t *testing.T) {
+	t.Parallel()
+	chunkID := chunk.NewChunkID()
+	vaultID := glid.New()
+	now := time.Now()
+	mock := newRegistrarUploaderMock([]chunk.ChunkMeta{
+		{ID: chunkID, Sealed: true, CloudBacked: false, WriteStart: now, WriteEnd: now},
+	})
+	orch := newTestOrch(t, Config{LocalNodeID: "node-A"})
+	ac := alert.New()
+	orch.alerts = ac
+
+	orch.markBackfillFailure(vaultID, chunkID, errors.New("no glcb yet"), false)
+	orch.backfillMu.Lock()
+	_, hadEntry := orch.backfillFailures[chunkID]
+	orch.backfillMu.Unlock()
+	if !hadEntry {
+		t.Fatal("setup: expected a backoff entry recorded before the cross-path success")
+	}
+	if len(ac.Standing()) != 0 {
+		t.Fatal("setup: a build-lag entry must never have raised an alarm")
+	}
+
+	vaultInst := &VaultInstance{
+		VaultID:      vaultID,
+		Type:         "file",
+		Chunks:       mock,
+		IsRaftLeader: func() bool { return true },
+		OverlayFromFSM: func(m chunk.ChunkMeta) chunk.ChunkMeta {
+			m.CloudBacked = true
+			return m
+		},
+	}
+
+	orch.backfillCloudUploads(vaultInst)
+
+	orch.backfillMu.Lock()
+	_, present := orch.backfillFailures[chunkID]
+	orch.backfillMu.Unlock()
+	if present {
+		t.Fatal("a build-lag entry resolved by the primary path must clear on the next sweep — same as an alarm-eligible entry")
+	}
+	if got := mock.uploadCallCount(); got != 0 {
+		t.Fatalf("an already cloud-backed chunk must not be re-uploaded by the sweep, got %d calls", got)
+	}
+}
+
 // ---------- strand fix 2: vault leaves this node (review follow-up) ----------
 
 // TestEvaluateCloudHealth_PurgesBackfillFailuresForRemovedVault pins the
@@ -548,9 +691,9 @@ func TestEvaluateCloudHealth_PurgesBackfillFailuresForRemovedVault(t *testing.T)
 	chunkID := chunk.NewChunkID()
 	typ, _ := alert.TypeByID("cloud-backfill-stuck")
 
-	orch.markBackfillFailure(vaultID, chunkID, errors.New("boom"))
+	orch.markBackfillFailure(vaultID, chunkID, errors.New("boom"), true)
 	clockNow = clockNow.Add(typ.DelayOn + time.Second)
-	orch.markBackfillFailure(vaultID, chunkID, errors.New("boom again"))
+	orch.markBackfillFailure(vaultID, chunkID, errors.New("boom again"), true)
 	if len(ac.Standing()) != 1 {
 		t.Fatal("setup: expected the alarm to be standing before the vault stops being visited")
 	}
@@ -587,9 +730,9 @@ func TestEvaluateCloudHealth_PurgesBackfillFailuresForNonLeaderVault(t *testing.
 	chunkID := chunk.NewChunkID()
 	typ, _ := alert.TypeByID("cloud-backfill-stuck")
 
-	orch.markBackfillFailure(vaultID, chunkID, errors.New("boom"))
+	orch.markBackfillFailure(vaultID, chunkID, errors.New("boom"), true)
 	clockNow = clockNow.Add(typ.DelayOn + time.Second)
-	orch.markBackfillFailure(vaultID, chunkID, errors.New("boom again"))
+	orch.markBackfillFailure(vaultID, chunkID, errors.New("boom again"), true)
 	if len(ac.Standing()) != 1 {
 		t.Fatal("setup: expected the alarm to be standing before leadership moved away")
 	}
@@ -631,9 +774,9 @@ func TestTeardownVaultPurgesBackfillFailures(t *testing.T) {
 	chunkID := chunk.NewChunkID()
 	typ, _ := alert.TypeByID("cloud-backfill-stuck")
 
-	orch.markBackfillFailure(vaultID, chunkID, errors.New("boom"))
+	orch.markBackfillFailure(vaultID, chunkID, errors.New("boom"), true)
 	clockNow = clockNow.Add(typ.DelayOn + time.Second)
-	orch.markBackfillFailure(vaultID, chunkID, errors.New("boom again"))
+	orch.markBackfillFailure(vaultID, chunkID, errors.New("boom again"), true)
 	if len(ac.Standing()) != 1 {
 		t.Fatal("setup: expected the alarm to be standing before teardown")
 	}
