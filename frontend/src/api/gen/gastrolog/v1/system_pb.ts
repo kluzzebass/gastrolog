@@ -1068,6 +1068,22 @@ export class RetentionPolicyConfig extends Message<RetentionPolicyConfig> {
   maxAge = "";
 
   /**
+   * max_size is the vault's disk-claim bound, in the same vocabulary as
+   * every other size quantity ("50GB"), and it means BOTH things at once
+   * (gastrolog-33ul6h correction: an earlier, superseded design split this
+   * into two fields — see docs/retention-size-budget-design.md):
+   *   - DRAIN: oldest sealed chunks past the bound are drained (per the
+   *     vault's disposition), exactly as this field always meant.
+   *   - REFUSE: while the vault's local disk claim is at/over the bound,
+   *     admission refuses cluster-wide — the backstop while drain catches
+   *     up or is deferred.
+   * Effective bound resolution (refreshVaultDiskGuards): for each file
+   * vault, resolve every attached retention rule's policy; the effective
+   * bound is the min over the policies' parsed max_size values; when no
+   * attached policy carries one, the creation default
+   * (system.DefaultVaultMaxSize) applies as a REFUSE-ONLY floor — a default
+   * must never destroy data, so the floor never drains, only refuses.
+   *
    * @generated from field: string max_size = 2;
    */
   maxSize = "";
@@ -1087,23 +1103,6 @@ export class RetentionPolicyConfig extends Message<RetentionPolicyConfig> {
    */
   name = "";
 
-  /**
-   * Per-node disk-claim budget attached to this policy, as a size expression
-   * ("50GB"), in the same vocabulary as every other size quantity. This is
-   * the refuse bound (cap-and-refuse), NOT a drain trigger — deliberately
-   * not named max_size, which stays the drain trigger above. Effective
-   * budget resolution (refreshVaultDiskGuards): for each file vault, resolve
-   * every attached retention rule's policy; the effective budget is the min
-   * over the policies' parsed size_budget values; when no attached policy
-   * carries one, the creation default (system.DefaultVaultMaxSize) applies.
-   * A trigger-less policy (no max_age/max_size/max_chunks) that carries only
-   * size_budget is legal and meaningful — the bound applies even though the
-   * policy drains nothing (gastrolog-33ul6h).
-   *
-   * @generated from field: optional string size_budget = 6;
-   */
-  sizeBudget?: string;
-
   constructor(data?: PartialMessage<RetentionPolicyConfig>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1117,7 +1116,6 @@ export class RetentionPolicyConfig extends Message<RetentionPolicyConfig> {
     { no: 3, name: "max_chunks", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 4, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 5, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 6, name: "size_budget", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RetentionPolicyConfig {

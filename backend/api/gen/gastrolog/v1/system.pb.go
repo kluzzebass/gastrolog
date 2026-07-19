@@ -1297,24 +1297,28 @@ func (x *RotationPolicyConfig) GetName() string {
 }
 
 type RetentionPolicyConfig struct {
-	state     protoimpl.MessageState `protogen:"open.v1"`
-	MaxAge    string                 `protobuf:"bytes,1,opt,name=max_age,json=maxAge,proto3" json:"max_age,omitempty"`
-	MaxSize   string                 `protobuf:"bytes,2,opt,name=max_size,json=maxSize,proto3" json:"max_size,omitempty"`
-	MaxChunks int64                  `protobuf:"varint,3,opt,name=max_chunks,json=maxChunks,proto3" json:"max_chunks,omitempty"`
-	Id        []byte                 `protobuf:"bytes,4,opt,name=id,proto3" json:"id,omitempty"`
-	Name      string                 `protobuf:"bytes,5,opt,name=name,proto3" json:"name,omitempty"`
-	// Per-node disk-claim budget attached to this policy, as a size expression
-	// ("50GB"), in the same vocabulary as every other size quantity. This is
-	// the refuse bound (cap-and-refuse), NOT a drain trigger — deliberately
-	// not named max_size, which stays the drain trigger above. Effective
-	// budget resolution (refreshVaultDiskGuards): for each file vault, resolve
-	// every attached retention rule's policy; the effective budget is the min
-	// over the policies' parsed size_budget values; when no attached policy
-	// carries one, the creation default (system.DefaultVaultMaxSize) applies.
-	// A trigger-less policy (no max_age/max_size/max_chunks) that carries only
-	// size_budget is legal and meaningful — the bound applies even though the
-	// policy drains nothing (gastrolog-33ul6h).
-	SizeBudget    *string `protobuf:"bytes,6,opt,name=size_budget,json=sizeBudget,proto3,oneof" json:"size_budget,omitempty"`
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	MaxAge string                 `protobuf:"bytes,1,opt,name=max_age,json=maxAge,proto3" json:"max_age,omitempty"`
+	// max_size is the vault's disk-claim bound, in the same vocabulary as
+	// every other size quantity ("50GB"), and it means BOTH things at once
+	// (gastrolog-33ul6h correction: an earlier, superseded design split this
+	// into two fields — see docs/retention-size-budget-design.md):
+	//   - DRAIN: oldest sealed chunks past the bound are drained (per the
+	//     vault's disposition), exactly as this field always meant.
+	//   - REFUSE: while the vault's local disk claim is at/over the bound,
+	//     admission refuses cluster-wide — the backstop while drain catches
+	//     up or is deferred.
+	//
+	// Effective bound resolution (refreshVaultDiskGuards): for each file
+	// vault, resolve every attached retention rule's policy; the effective
+	// bound is the min over the policies' parsed max_size values; when no
+	// attached policy carries one, the creation default
+	// (system.DefaultVaultMaxSize) applies as a REFUSE-ONLY floor — a default
+	// must never destroy data, so the floor never drains, only refuses.
+	MaxSize       string `protobuf:"bytes,2,opt,name=max_size,json=maxSize,proto3" json:"max_size,omitempty"`
+	MaxChunks     int64  `protobuf:"varint,3,opt,name=max_chunks,json=maxChunks,proto3" json:"max_chunks,omitempty"`
+	Id            []byte `protobuf:"bytes,4,opt,name=id,proto3" json:"id,omitempty"`
+	Name          string `protobuf:"bytes,5,opt,name=name,proto3" json:"name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1380,13 +1384,6 @@ func (x *RetentionPolicyConfig) GetId() []byte {
 func (x *RetentionPolicyConfig) GetName() string {
 	if x != nil {
 		return x.Name
-	}
-	return ""
-}
-
-func (x *RetentionPolicyConfig) GetSizeBudget() string {
-	if x != nil && x.SizeBudget != nil {
-		return *x.SizeBudget
 	}
 	return ""
 }
@@ -8998,17 +8995,14 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\amax_age\x18\x03 \x01(\tR\x06maxAge\x12\x12\n" +
 	"\x04cron\x18\x04 \x01(\tR\x04cron\x12\x0e\n" +
 	"\x02id\x18\x05 \x01(\fR\x02id\x12\x12\n" +
-	"\x04name\x18\x06 \x01(\tR\x04name\"\xc4\x01\n" +
+	"\x04name\x18\x06 \x01(\tR\x04name\"\x8e\x01\n" +
 	"\x15RetentionPolicyConfig\x12\x17\n" +
 	"\amax_age\x18\x01 \x01(\tR\x06maxAge\x12\x19\n" +
 	"\bmax_size\x18\x02 \x01(\tR\amaxSize\x12\x1d\n" +
 	"\n" +
 	"max_chunks\x18\x03 \x01(\x03R\tmaxChunks\x12\x0e\n" +
 	"\x02id\x18\x04 \x01(\fR\x02id\x12\x12\n" +
-	"\x04name\x18\x05 \x01(\tR\x04name\x12$\n" +
-	"\vsize_budget\x18\x06 \x01(\tH\x00R\n" +
-	"sizeBudget\x88\x01\x01B\x0e\n" +
-	"\f_size_budget\"\xac\x01\n" +
+	"\x04name\x18\x05 \x01(\tR\x04name\"\xac\x01\n" +
 	"\rIngesterAlive\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12L\n" +
 	"\vnode_status\x18\x02 \x03(\v2+.gastrolog.v1.IngesterAlive.NodeStatusEntryR\n" +
@@ -10060,7 +10054,6 @@ func file_gastrolog_v1_system_proto_init() {
 	file_gastrolog_v1_system_proto_msgTypes[7].OneofWrappers = []any{
 		(*RouteStage_Match)(nil),
 	}
-	file_gastrolog_v1_system_proto_msgTypes[11].OneofWrappers = []any{}
 	file_gastrolog_v1_system_proto_msgTypes[55].OneofWrappers = []any{}
 	file_gastrolog_v1_system_proto_msgTypes[56].OneofWrappers = []any{}
 	file_gastrolog_v1_system_proto_msgTypes[57].OneofWrappers = []any{}
