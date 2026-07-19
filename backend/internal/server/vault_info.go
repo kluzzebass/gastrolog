@@ -152,6 +152,13 @@ func (s *VaultServer) buildVaultStats(ctx context.Context, vaultID glid.GLID, me
 }
 
 func (s *VaultServer) accumulateChunkBytes(stat *apiv1.VaultStats, vaultID glid.GLID, meta chunk.ChunkMeta) {
+	// An evicted cloud-backed chunk has nothing local to reclaim — it must
+	// not fall back to logical Bytes (the object still exists in the cloud
+	// store, at CloudBytes, a currency this local-disk stat never touches).
+	// Same rule as chunk.DiskClaim. See gastrolog-33ul6h.
+	if meta.CloudBacked && meta.DiskBytes == 0 {
+		return
+	}
 	if meta.DiskBytes > 0 {
 		stat.DataBytes += meta.DiskBytes
 		return
@@ -397,6 +404,7 @@ func ChunkMetaToProto(meta chunk.ChunkMeta) *apiv1.ChunkMeta {
 		RecordCount:  meta.RecordCount,
 		Bytes:        meta.Bytes,
 		DiskBytes:    meta.DiskBytes,
+		CloudBytes:   meta.CloudBytes,
 		CloudBacked:  meta.CloudBacked,
 		Archived:     meta.Archived,
 		StorageClass: meta.StorageClass,

@@ -925,15 +925,20 @@ func appendUnlistedManifestSealed(metas []chunk.ChunkMeta, vaultInst *VaultInsta
 			continue
 		}
 		metas = append(metas, chunk.ChunkMeta{
-			ID:                e.ID,
-			WriteStart:        e.WriteStart,
-			WriteEnd:          e.WriteEnd,
-			SealedAt:          e.SealedAt,
-			RecordCount:       e.RecordCount,
-			Bytes:             e.Bytes,
-			Sealed:            true,
-			State:             e.State,
-			DiskBytes:         e.DiskBytes,
+			ID:          e.ID,
+			WriteStart:  e.WriteStart,
+			WriteEnd:    e.WriteEnd,
+			SealedAt:    e.SealedAt,
+			RecordCount: e.RecordCount,
+			Bytes:       e.Bytes,
+			Sealed:      true,
+			State:       e.State,
+			// No DiskBytes here (was already always zero: this loop
+			// excludes CloudBacked entries above, and ManifestEntry never
+			// carried a per-node local footprint for anything else — see
+			// gastrolog-33ul6h). The size-drain trigger's DiskClaim falls
+			// back to Bytes+indexes for these synthetic candidates, same
+			// as it always has.
 			IngestStart:       e.IngestStart,
 			IngestEnd:         e.IngestEnd,
 			SourceStart:       e.SourceStart,

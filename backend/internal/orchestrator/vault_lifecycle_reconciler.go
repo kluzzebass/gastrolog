@@ -383,7 +383,7 @@ func (r *VaultLifecycleReconciler) projectAllCloudBackedFromFSM(fsm *vaultctlfsm
 			SourceEnd:         e.SourceEnd,
 			RecordCount:       e.RecordCount,
 			Bytes:             e.Bytes,
-			DiskBytes:         e.DiskBytes,
+			CloudBytes:        e.CloudBytes,
 			IngestIdxOffset:   e.IngestIdxOffset,
 			IngestIdxSize:     e.IngestIdxSize,
 			SourceIdxOffset:   e.SourceIdxOffset,
@@ -443,15 +443,18 @@ func (r *VaultLifecycleReconciler) registerPipelineGLCB(e vaultctlfsm.ManifestEn
 		r.logger.Warn("registerPipelineGLCB: read GLCB metadata failed",
 			"chunk", e.ID, "path", glcbPath, "error", err)
 		info = chunk.ExternalGLCBInfo{
-			WriteStart:        e.WriteStart,
-			WriteEnd:          e.WriteEnd,
-			IngestStart:       e.IngestStart,
-			IngestEnd:         e.IngestEnd,
-			SourceStart:       e.SourceStart,
-			SourceEnd:         e.SourceEnd,
-			RecordCount:       e.RecordCount,
-			Bytes:             e.Bytes,
-			DiskBytes:         e.DiskBytes,
+			WriteStart:  e.WriteStart,
+			WriteEnd:    e.WriteEnd,
+			IngestStart: e.IngestStart,
+			IngestEnd:   e.IngestEnd,
+			SourceStart: e.SourceStart,
+			SourceEnd:   e.SourceEnd,
+			RecordCount: e.RecordCount,
+			Bytes:       e.Bytes,
+			// No DiskBytes here: ManifestEntry carries no per-node local
+			// footprint (gastrolog-33ul6h). This is the degraded fallback
+			// when the GLCB itself is unreadable, so there's no local file
+			// to size either — 0 is honest, not a regression.
 			IngestIdxOffset:   e.IngestIdxOffset,
 			IngestIdxSize:     e.IngestIdxSize,
 			SourceIdxOffset:   e.SourceIdxOffset,

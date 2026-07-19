@@ -64,8 +64,8 @@ func (a *Announcer) AnnounceAttachOffsets(id chunk.ChunkID, ingestIdxOff, ingest
 	a.apply("attach-offsets", id, MarshalAttachOffsets(id, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize))
 }
 
-func (a *Announcer) AnnounceUpload(id chunk.ChunkID, diskBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64, hash [32]byte, cloudServiceID glid.GLID, keyScheme uint8) {
-	a.apply("upload", id, MarshalUploadChunk(id, diskBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize, hash, cloudServiceID, keyScheme))
+func (a *Announcer) AnnounceUpload(id chunk.ChunkID, cloudBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64, hash [32]byte, cloudServiceID glid.GLID, keyScheme uint8) {
+	a.apply("upload", id, MarshalUploadChunk(id, cloudBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize, hash, cloudServiceID, keyScheme))
 }
 
 func (a *Announcer) AnnounceDelete(id chunk.ChunkID) {

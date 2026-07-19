@@ -1598,7 +1598,7 @@ func wireVaultFSMOnUpload(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkM
 			SourceEnd:       e.SourceEnd,
 			RecordCount:     e.RecordCount,
 			Bytes:           e.Bytes,
-			DiskBytes:       e.DiskBytes,
+			CloudBytes:      e.CloudBytes,
 			IngestIdxOffset: e.IngestIdxOffset,
 			IngestIdxSize:   e.IngestIdxSize,
 			SourceIdxOffset: e.SourceIdxOffset,

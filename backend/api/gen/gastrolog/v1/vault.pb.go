@@ -542,10 +542,13 @@ type ChunkMeta struct {
 	// sealed is the legacy two-state flag; transitionally true when state
 	// == CHUNK_STATE_SEALED. New consumers should read state directly so
 	// they can branch on Sealing explicitly. gastrolog-1huz5.
-	Sealed           bool                   `protobuf:"varint,4,opt,name=sealed,proto3" json:"sealed,omitempty"`
-	RecordCount      int64                  `protobuf:"varint,5,opt,name=record_count,json=recordCount,proto3" json:"record_count,omitempty"`
-	Bytes            int64                  `protobuf:"varint,6,opt,name=bytes,proto3" json:"bytes,omitempty"`
-	DiskBytes        int64                  `protobuf:"varint,7,opt,name=disk_bytes,json=diskBytes,proto3" json:"disk_bytes,omitempty"` // actual on-disk size (differs from bytes: dict-encoded GLCB)
+	Sealed      bool  `protobuf:"varint,4,opt,name=sealed,proto3" json:"sealed,omitempty"`
+	RecordCount int64 `protobuf:"varint,5,opt,name=record_count,json=recordCount,proto3" json:"record_count,omitempty"`
+	Bytes       int64 `protobuf:"varint,6,opt,name=bytes,proto3" json:"bytes,omitempty"`
+	// disk_bytes is the LOCAL on-disk footprint on the responding node, always
+	// — for a cloud-backed chunk this is the warm-cache state (the cached
+	// GLCB's size while cached, 0 once evicted), never the cloud object size.
+	DiskBytes        int64                  `protobuf:"varint,7,opt,name=disk_bytes,json=diskBytes,proto3" json:"disk_bytes,omitempty"`
 	IngestStart      *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=ingest_start,json=ingestStart,proto3" json:"ingest_start,omitempty"`
 	IngestEnd        *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=ingest_end,json=ingestEnd,proto3" json:"ingest_end,omitempty"`
 	CloudBacked      bool                   `protobuf:"varint,10,opt,name=cloud_backed,json=cloudBacked,proto3" json:"cloud_backed,omitempty"`                // true = chunk lives in cloud storage (S3/Azure/GCS)
@@ -571,7 +574,11 @@ type ChunkMeta struct {
 	// Three-state lifecycle (gastrolog-1huz5). When unset for replay of
 	// pre-Phase-3 entries, callers derive the state from the legacy
 	// sealed bool: state == SEALED iff sealed == true.
-	State         ChunkState `protobuf:"varint,19,opt,name=state,proto3,enum=gastrolog.v1.ChunkState" json:"state,omitempty"`
+	State ChunkState `protobuf:"varint,19,opt,name=state,proto3,enum=gastrolog.v1.ChunkState" json:"state,omitempty"`
+	// cloud_bytes is the compressed cloud object's transport size for a
+	// cloud-backed chunk (0 = never uploaded). Cluster-wide fact, distinct
+	// from disk_bytes (per-node, live warm-cache state). gastrolog-33ul6h.
+	CloudBytes    int64 `protobuf:"varint,20,opt,name=cloud_bytes,json=cloudBytes,proto3" json:"cloud_bytes,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -737,6 +744,13 @@ func (x *ChunkMeta) GetState() ChunkState {
 		return x.State
 	}
 	return ChunkState_CHUNK_STATE_UNSPECIFIED
+}
+
+func (x *ChunkMeta) GetCloudBytes() int64 {
+	if x != nil {
+		return x.CloudBytes
+	}
+	return 0
 }
 
 type GetChunkRequest struct {
@@ -3607,7 +3621,7 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\vactive_only\x18\x02 \x01(\bR\n" +
 	"activeOnly\"E\n" +
 	"\x12ListChunksResponse\x12/\n" +
-	"\x06chunks\x18\x01 \x03(\v2\x17.gastrolog.v1.ChunkMetaR\x06chunks\"\xf6\x05\n" +
+	"\x06chunks\x18\x01 \x03(\v2\x17.gastrolog.v1.ChunkMetaR\x06chunks\"\x97\x06\n" +
 	"\tChunkMeta\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12;\n" +
 	"\vwrite_start\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
@@ -3632,7 +3646,9 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\rreplica_count\x18\x10 \x01(\x05R\freplicaCount\x12(\n" +
 	"\x10replica_node_ids\x18\x11 \x03(\tR\x0ereplicaNodeIds\x12/\n" +
 	"\x14pending_ack_node_ids\x18\x12 \x03(\tR\x11pendingAckNodeIds\x12.\n" +
-	"\x05state\x18\x13 \x01(\x0e2\x18.gastrolog.v1.ChunkStateR\x05state\"B\n" +
+	"\x05state\x18\x13 \x01(\x0e2\x18.gastrolog.v1.ChunkStateR\x05state\x12\x1f\n" +
+	"\vcloud_bytes\x18\x14 \x01(\x03R\n" +
+	"cloudBytes\"B\n" +
 	"\x0fGetChunkRequest\x12\x14\n" +
 	"\x05vault\x18\x01 \x01(\tR\x05vault\x12\x19\n" +
 	"\bchunk_id\x18\x02 \x01(\fR\achunkId\"A\n" +

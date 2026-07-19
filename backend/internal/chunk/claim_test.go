@@ -64,3 +64,26 @@ func TestDiskClaim(t *testing.T) {
 		})
 	}
 }
+
+// TestDiskClaimMixedVaultSum pins the guard-footprint / size-drain-trigger
+// aggregate over a vault holding all three chunk shapes at once: a plain
+// local chunk, a cached cloud-backed chunk (warm local copy), and an
+// evicted cloud-backed chunk (no local copy). Guards against a regression
+// where an evicted cloud chunk's claim silently falls back to its logical
+// Bytes (double counting: the object still exists in the cloud store,
+// where its size is CloudBytes, a currency this sum must never touch).
+func TestDiskClaimMixedVaultSum(t *testing.T) {
+	plain := ChunkMeta{ID: NewChunkID(), Bytes: 4000, DiskBytes: 900}
+	cachedCloud := ChunkMeta{ID: NewChunkID(), Bytes: 999999, CloudBacked: true, DiskBytes: 1200, CloudBytes: 300}
+	evictedCloud := ChunkMeta{ID: NewChunkID(), Bytes: 999999, CloudBacked: true, DiskBytes: 0, CloudBytes: 300}
+
+	var sum int64
+	for _, m := range []ChunkMeta{plain, cachedCloud, evictedCloud} {
+		sum += DiskClaim(m, nil)
+	}
+
+	const want = 900 + 1200 + 0
+	if sum != want {
+		t.Errorf("mixed-vault DiskClaim sum = %d, want %d (evicted cloud chunk must contribute 0, not its logical Bytes or CloudBytes)", sum, want)
+	}
+}

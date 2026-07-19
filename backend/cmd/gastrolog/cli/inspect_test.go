@@ -82,3 +82,49 @@ func TestChunkBadges(t *testing.T) {
 		})
 	}
 }
+
+// TestChunkSizeBytes pins the gastrolog-33ul6h fix: an evicted cloud-backed
+// chunk (CloudBacked, DiskBytes==0) must report 0, never fall back to
+// logical Bytes — the object still exists in the cloud store, at
+// CloudBytes, a currency this local-disk stat never touches. The existing
+// pipeline-chunk fallback (non-cloud, DiskBytes unset -> logical Bytes,
+// gastrolog-45ywhx) must still hold.
+func TestChunkSizeBytes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		chunk  *v1.ChunkMeta
+		expect int64
+	}{
+		{
+			name:   "local sealed chunk reports DiskBytes",
+			chunk:  &v1.ChunkMeta{Bytes: 4000, DiskBytes: 900},
+			expect: 900,
+		},
+		{
+			name:   "pipeline GLCB chunk falls back to logical Bytes (gastrolog-45ywhx)",
+			chunk:  &v1.ChunkMeta{Bytes: 4000, DiskBytes: 0},
+			expect: 4000,
+		},
+		{
+			name:   "cached cloud-backed chunk reports its cache size",
+			chunk:  &v1.ChunkMeta{Bytes: 999999, CloudBacked: true, DiskBytes: 1200, CloudBytes: 300},
+			expect: 1200,
+		},
+		{
+			name:   "evicted cloud-backed chunk reports 0, not logical Bytes or CloudBytes",
+			chunk:  &v1.ChunkMeta{Bytes: 999999, CloudBacked: true, DiskBytes: 0, CloudBytes: 300},
+			expect: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := chunkSizeBytes(tt.chunk)
+			if got != tt.expect {
+				t.Errorf("chunkSizeBytes() = %d, want %d", got, tt.expect)
+			}
+		})
+	}
+}

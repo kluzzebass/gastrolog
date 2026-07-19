@@ -458,7 +458,9 @@ export class ChunkMeta extends Message<ChunkMeta> {
   bytes = protoInt64.zero;
 
   /**
-   * actual on-disk size (differs from bytes: dict-encoded GLCB)
+   * disk_bytes is the LOCAL on-disk footprint on the responding node, always
+   * — for a cloud-backed chunk this is the warm-cache state (the cached
+   * GLCB's size while cached, 0 once evicted), never the cloud object size.
    *
    * @generated from field: int64 disk_bytes = 7;
    */
@@ -555,6 +557,15 @@ export class ChunkMeta extends Message<ChunkMeta> {
    */
   state = ChunkState.UNSPECIFIED;
 
+  /**
+   * cloud_bytes is the compressed cloud object's transport size for a
+   * cloud-backed chunk (0 = never uploaded). Cluster-wide fact, distinct
+   * from disk_bytes (per-node, live warm-cache state). gastrolog-33ul6h.
+   *
+   * @generated from field: int64 cloud_bytes = 20;
+   */
+  cloudBytes = protoInt64.zero;
+
   constructor(data?: PartialMessage<ChunkMeta>) {
     super();
     proto3.util.initPartial(data, this);
@@ -582,6 +593,7 @@ export class ChunkMeta extends Message<ChunkMeta> {
     { no: 17, name: "replica_node_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
     { no: 18, name: "pending_ack_node_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
     { no: 19, name: "state", kind: "enum", T: proto3.getEnumType(ChunkState) },
+    { no: 20, name: "cloud_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkMeta {

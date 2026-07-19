@@ -500,6 +500,19 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
   independently-set fields could (they diverged 3-4× before gastrolog-33ul6h,
   since the vault-level cap used to measure logical `Bytes` alone).
 
+  **`DiskBytes` vs `CloudBytes`** (`ChunkMeta`, gastrolog-33ul6h) — two
+  distinct currencies that must never substitute for each other. `DiskBytes`
+  is always the LOCAL on-disk footprint on the responding node: for a
+  cloud-backed chunk this is the warm-cache state (the cached GLCB's size
+  while cached, 0 once evicted), live and per-node — it changes on upload,
+  eviction, and re-warm. `CloudBytes` is the compressed cloud object's
+  transport size: cluster-wide, fixed at upload time, unaffected by any
+  node's local cache turnover. `chunk.DiskClaim` and every consumer that
+  measures against the disk-claim bound above reads `DiskBytes` only, never
+  `CloudBytes` — a chunk evicted from this node's cache must claim 0 here
+  even though its `CloudBytes` is unchanged and its object is still in the
+  cloud store.
+
 - **Retention event** — the cluster-visible signal that a chunk has aged
   out. Fires unconditionally on policy match; the vault's retention
   disposition decides whether the records are forwarded through the

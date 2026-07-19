@@ -509,9 +509,13 @@ export class UploadChunkCommand extends Message<UploadChunkCommand> {
   id = new Uint8Array(0);
 
   /**
-   * @generated from field: int64 disk_bytes = 2;
+   * cloud_bytes is the compressed cloud object's transport size — the only
+   * size fact this command ever carried (AnnounceUpload's post-upload
+   * stat). Was misleadingly named disk_bytes; renamed honestly, gastrolog-33ul6h.
+   *
+   * @generated from field: int64 cloud_bytes = 2;
    */
-  diskBytes = protoInt64.zero;
+  cloudBytes = protoInt64.zero;
 
   /**
    * @generated from field: int64 ingest_idx_offset = 3;
@@ -559,7 +563,7 @@ export class UploadChunkCommand extends Message<UploadChunkCommand> {
   static readonly typeName = "gastrolog.v1.UploadChunkCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 2, name: "disk_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 2, name: "cloud_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 3, name: "ingest_idx_offset", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 4, name: "ingest_idx_size", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 5, name: "source_idx_offset", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
@@ -2159,9 +2163,16 @@ export class ManifestEntry extends Message<ManifestEntry> {
   state = ChunkState.UNSPECIFIED;
 
   /**
-   * @generated from field: int64 disk_bytes = 7;
+   * cloud_bytes is the compressed cloud object's transport size, set only
+   * by CmdUploadChunk (0 until the chunk is uploaded). This entry never
+   * carried a real per-node local-disk-bytes fact — ManifestEntry is
+   * Raft-replicated cluster state, and local warm-cache footprint is
+   * node-local; was misleadingly named disk_bytes. Renamed honestly,
+   * gastrolog-33ul6h.
+   *
+   * @generated from field: int64 cloud_bytes = 7;
    */
-  diskBytes = protoInt64.zero;
+  cloudBytes = protoInt64.zero;
 
   /**
    * @generated from field: int64 ingest_start_nanos = 8;
@@ -2286,7 +2297,7 @@ export class ManifestEntry extends Message<ManifestEntry> {
     { no: 4, name: "record_count", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 5, name: "bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 6, name: "state", kind: "enum", T: proto3.getEnumType(ChunkState) },
-    { no: 7, name: "disk_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 7, name: "cloud_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 8, name: "ingest_start_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 9, name: "ingest_end_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 10, name: "source_start_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },

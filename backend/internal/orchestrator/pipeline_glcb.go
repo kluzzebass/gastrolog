@@ -129,15 +129,27 @@ func externalGLCBInfoForPipeline(e vaultctlfsm.ManifestEntry, glcbPath string) (
 
 func externalGLCBInfoFromFSM(e vaultctlfsm.ManifestEntry) chunk.ExternalGLCBInfo {
 	return chunk.ExternalGLCBInfo{
-		WriteStart:        e.WriteStart,
-		WriteEnd:          e.WriteEnd,
-		IngestStart:       e.IngestStart,
-		IngestEnd:         e.IngestEnd,
-		SourceStart:       e.SourceStart,
-		SourceEnd:         e.SourceEnd,
-		RecordCount:       e.RecordCount,
-		Bytes:             e.Bytes,
-		DiskBytes:         e.DiskBytes,
+		WriteStart:  e.WriteStart,
+		WriteEnd:    e.WriteEnd,
+		IngestStart: e.IngestStart,
+		IngestEnd:   e.IngestEnd,
+		SourceStart: e.SourceStart,
+		SourceEnd:   e.SourceEnd,
+		RecordCount: e.RecordCount,
+		Bytes:       e.Bytes,
+		// No DiskBytes seed here: ManifestEntry carries no per-node local
+		// footprint (see gastrolog-33ul6h). overlayPipelineGLCBFromBuild's
+		// info.DiskBytes==0 fallback below recomputes it from the actual
+		// local build result — but only when it runs at all:
+		// overlayPipelineGLCBFromBuild early-returns once the FSM entry
+		// already has RecordCount and both IngestStart/IngestEnd (the
+		// steady-state case, once CmdSealChunk has fully committed), so
+		// DiskBytes stays 0 there. That's unchanged from before this
+		// field was removed: ManifestEntry.DiskBytes was never populated
+		// for a non-cloud entry either (only CmdUploadChunk ever set it),
+		// so this seed was already always 0 in that same steady-state
+		// case. chunk.DiskClaim's Bytes+index-size legacy fallback covers
+		// sizing whenever DiskBytes lands at 0, same as it always has.
 		IngestIdxOffset:   e.IngestIdxOffset,
 		IngestIdxSize:     e.IngestIdxSize,
 		SourceIdxOffset:   e.SourceIdxOffset,

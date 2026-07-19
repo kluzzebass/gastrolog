@@ -155,7 +155,10 @@ message ChunkMeta {
   bool sealed = 4;
   int64 record_count = 5;
   int64 bytes = 6;
-  int64 disk_bytes = 7;   // actual on-disk size (differs from bytes: dict-encoded GLCB)
+  // disk_bytes is the LOCAL on-disk footprint on the responding node, always
+  // — for a cloud-backed chunk this is the warm-cache state (the cached
+  // GLCB's size while cached, 0 once evicted), never the cloud object size.
+  int64 disk_bytes = 7;
   google.protobuf.Timestamp ingest_start = 8;
   google.protobuf.Timestamp ingest_end = 9;
   bool cloud_backed = 10; // true = chunk lives in cloud storage (S3/Azure/GCS)
@@ -182,6 +185,10 @@ message ChunkMeta {
   // pre-Phase-3 entries, callers derive the state from the legacy
   // sealed bool: state == SEALED iff sealed == true.
   ChunkState state = 19;
+  // cloud_bytes is the compressed cloud object's transport size for a
+  // cloud-backed chunk (0 = never uploaded). Cluster-wide fact, distinct
+  // from disk_bytes (per-node, live warm-cache state). gastrolog-33ul6h.
+  int64 cloud_bytes = 20;
 }
 
 message GetChunkRequest {
