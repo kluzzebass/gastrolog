@@ -7,6 +7,42 @@ import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialM
 import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
 
 /**
+ * VaultAdmissionCause identifies why a vault's admission gate is currently
+ * refusing new records for it. Mirrors
+ * orchestrator.VaultAdmissionCause (backend/internal/orchestrator/disk_guard.go).
+ *
+ * @generated from enum gastrolog.v1.VaultAdmissionCause
+ */
+export enum VaultAdmissionCause {
+  /**
+   * @generated from enum value: VAULT_ADMISSION_CAUSE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: VAULT_ADMISSION_CAUSE_MAX_SIZE_BOUND = 1;
+   */
+  MAX_SIZE_BOUND = 1,
+
+  /**
+   * @generated from enum value: VAULT_ADMISSION_CAUSE_VAULT_DISK_PROTECT = 2;
+   */
+  VAULT_DISK_PROTECT = 2,
+
+  /**
+   * @generated from enum value: VAULT_ADMISSION_CAUSE_BACKLOG_BUDGET = 3;
+   */
+  BACKLOG_BUDGET = 3,
+}
+// Retrieve enum metadata with: proto3.getEnumType(VaultAdmissionCause)
+proto3.util.setEnumType(VaultAdmissionCause, "gastrolog.v1.VaultAdmissionCause", [
+  { no: 0, name: "VAULT_ADMISSION_CAUSE_UNSPECIFIED" },
+  { no: 1, name: "VAULT_ADMISSION_CAUSE_MAX_SIZE_BOUND" },
+  { no: 2, name: "VAULT_ADMISSION_CAUSE_VAULT_DISK_PROTECT" },
+  { no: 3, name: "VAULT_ADMISSION_CAUSE_BACKLOG_BUDGET" },
+]);
+
+/**
  * ChunkState is the lifecycle stage of a chunk on the vault-ctl FSM.
  *
  * Active   — accepting appends; only the leader's bytes are authoritative;
@@ -223,6 +259,17 @@ export class VaultInfo extends Message<VaultInfo> {
    */
   remote = false;
 
+  /**
+   * Currently-applicable admission-refusal causes for this vault, as
+   * computed by the responding node's admission gate (local disk guard +
+   * live-peer broadcasts) — the same inputs admission itself consults, not
+   * a UI-side derivation from alarm state. Empty when the vault admits
+   * normally.
+   *
+   * @generated from field: repeated gastrolog.v1.VaultAdmissionCause admission_refused = 10;
+   */
+  admissionRefused: VaultAdmissionCause[] = [];
+
   constructor(data?: PartialMessage<VaultInfo>) {
     super();
     proto3.util.initPartial(data, this);
@@ -240,6 +287,7 @@ export class VaultInfo extends Message<VaultInfo> {
     { no: 7, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 8, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 9, name: "remote", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 10, name: "admission_refused", kind: "enum", T: proto3.getEnumType(VaultAdmissionCause), repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultInfo {

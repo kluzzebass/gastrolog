@@ -6,13 +6,11 @@ import { useChunks, useIndexes, useValidateVault, useConfig, useArchiveChunk, us
 import { useClusterStatus } from "../../api/hooks/useClusterStatus";
 import { useNodeRegistry } from "../../api/hooks";
 import { usePipelineBacklog } from "../../api/hooks";
-import { useAlerts } from "../../api/hooks/useAlerts";
-import type { NodeAlert } from "../../api/hooks/useAlerts";
 import { useToast } from "../Toast";
 import { buildNodeNameMap, resolveNodeName } from "../../utils/nodeNames";
 // eslint-disable-next-line no-restricted-imports -- no Chunk model yet (gastrolog-2e2qs follow-up)
 import { type ChunkMeta } from "../../api/gen/gastrolog/v1/vault_pb";
-import type { Vault } from "../../api/model/vault";
+import { VaultAdmissionCause, type Vault } from "../../api/model/vault";
 import { protoToInstant, instantToMs, instantToDate, formatDateTimeShort } from "../../utils/temporal";
 import { formatBytes, formatRate } from "../../utils/units";
 import { Spark } from "../Spark";
@@ -84,44 +82,27 @@ function chunkSizeCellTitle(chunk: ChunkMeta): string | undefined {
   return undefined;
 }
 
-// vaultGateAlarmCauses maps the three per-vault admission-gate alarm types
-// (backend/internal/orchestrator/disk_guard.go) to a terse tooltip phrase.
-// These are the alarms whose response is "admission for this vault is
-// REFUSED" — a standing verdict from the system, not a UI heuristic.
-const vaultGateAlarmCauses: Record<string, string> = {
-  "vault-max-size-capped": "at max-size bound",
-  "disk-space-exhausted": "volume below floor",
-  "pipeline-backlog-capped": "backlog at budget",
+// vaultAdmissionCauseLabels maps the backend's admission-refusal cause enum
+// (VaultInfo.admissionRefused, populated from the responding node's own
+// admission-causes collector — backend/internal/orchestrator/disk_guard.go's
+// VaultAdmissionCauses) to a terse tooltip phrase. A first-class backend
+// signal, not a UI-side derivation from alarm state (gastrolog-33ul6h).
+const vaultAdmissionCauseLabels: Partial<Record<VaultAdmissionCause, string>> = {
+  [VaultAdmissionCause.MAX_SIZE_BOUND]: "at max-size bound",
+  [VaultAdmissionCause.VAULT_DISK_PROTECT]: "volume below floor",
+  [VaultAdmissionCause.BACKLOG_BUDGET]: "backlog at budget",
 };
 
-// alarmTypeAndInstance splits a full alarm id ("type:instanceKey") into its
-// parts. SystemAlert.id is a proto bytes field carrying a UTF-8 string (the
-// stable dedup key), not a 16-byte GLID — glid.encode's non-16-byte fallback
-// decodes it verbatim, mirroring the CLI's alarmTypeID
-// (backend/cmd/gastrolog/cli/alerts.go).
-function alarmTypeAndInstance(id: Uint8Array): [typeID: string, instanceKey: string] {
-  const full = encode(id);
-  const sep = full.indexOf(":");
-  if (sep === -1) return [full, ""];
-  return [full.slice(0, sep), full.slice(sep + 1)];
-}
-
-// vaultRefusingCauses lists the deduplicated causes of this vault's standing
-// admission-gate alarms across every node — the three per-vault gates that
-// refuse new records outright (max-size bound, disk floor, backlog budget).
-// Empty when the vault admits normally. The instance key on these alarms is
-// the vault's GLID.String() (backend), which is the same string as vault.id
-// here (frontend glid.encode) — both are the same base32hex encoding of the
-// same 16 raw bytes.
-export function vaultRefusingCauses(alerts: readonly NodeAlert[], vaultId: string): string[] {
-  const causes = new Set<string>();
-  for (const a of alerts) {
-    const [typeID, instanceKey] = alarmTypeAndInstance(a.id);
-    if (instanceKey !== vaultId) continue;
-    const cause = vaultGateAlarmCauses[typeID];
-    if (cause) causes.add(cause);
+// vaultRefusingCauseLabels maps the vault's admission-refused causes to their
+// terse tooltip phrases, dropping UNSPECIFIED (never emitted by the backend
+// today, but the label map has no entry for it — defense in depth).
+export function vaultRefusingCauseLabels(causes: readonly VaultAdmissionCause[]): string[] {
+  const labels: string[] = [];
+  for (const cause of causes) {
+    const label = vaultAdmissionCauseLabels[cause];
+    if (label) labels.push(label);
   }
-  return [...causes];
+  return labels;
 }
 
 interface VaultCardProps {
@@ -152,8 +133,7 @@ export function VaultCard({
     (sum, c) => sum + chunkDiskClaimBytes(c),
     0,
   );
-  const { alerts } = useAlerts();
-  const refusingCauses = vaultRefusingCauses(alerts, vault.id);
+  const refusingCauses = vaultRefusingCauseLabels(vault.admissionRefused);
 
   return (
     <ExpandableCard

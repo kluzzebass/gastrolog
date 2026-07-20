@@ -1,7 +1,6 @@
 import { describe, test, expect } from "bun:test";
-import { chunkDiskClaimBytes, vaultRefusingCauses } from "./VaultCard";
-import { ChunkMeta } from "../../api/gen/gastrolog/v1/vault_pb";
-import type { NodeAlert } from "../../api/hooks/useAlerts";
+import { chunkDiskClaimBytes, vaultRefusingCauseLabels } from "./VaultCard";
+import { ChunkMeta, VaultAdmissionCause } from "../../api/gen/gastrolog/v1/vault_pb";
 
 // Pins the gastrolog-33ul6h fix: the vault size badge and per-row size cell
 // both sum this LOCAL disk claim, never the cloud object size and never a
@@ -59,86 +58,55 @@ describe("chunkDiskClaimBytes", () => {
   });
 });
 
-// Pins gastrolog-33ul6h: the vault card's "refusing" badge derives entirely
-// from the cluster's own standing alarms — the three per-vault admission
-// gates (max-size bound, disk floor, backlog budget) — never a UI heuristic.
-describe("vaultRefusingCauses", () => {
-  // gateAlert stands in for a NodeAlert carrying a gate alarm's full id
-  // ("type:instanceKey"), the shape SystemAlert.id is decoded into via
-  // glid.encode's UTF-8 fallback for non-16-byte ids.
-  function gateAlert(id: string, nodeId = "node-a"): NodeAlert {
-    return {
-      nodeId,
-      nodeName: nodeId,
-      id: new TextEncoder().encode(id),
-    } as unknown as NodeAlert;
-  }
-
-  const vaultA = "vault-a-id";
-  const vaultB = "vault-b-id";
-
-  test("empty alerts yields no causes", () => {
-    expect(vaultRefusingCauses([], vaultA)).toEqual([]);
+// Pins gastrolog-33ul6h: the vault card's "refusing" badge reads a
+// first-class backend field (VaultInfo.admissionRefused, populated by the
+// responding node's own admission-causes collector) and maps its enum
+// values to terse labels — never a UI-side derivation from alarm state.
+// vaultRefusingCauseLabels' empty-vs-non-empty result is exactly what gates
+// the badge's visibility in VaultCard (`refusingCauses.length > 0`).
+describe("vaultRefusingCauseLabels", () => {
+  test("empty causes yields no labels (badge hidden)", () => {
+    expect(vaultRefusingCauseLabels([])).toEqual([]);
   });
 
-  test("vault-max-size-capped keyed to this vault yields its cause", () => {
-    const alerts = [gateAlert(`vault-max-size-capped:${vaultA}`)];
-    expect(vaultRefusingCauses(alerts, vaultA)).toEqual(["at max-size bound"]);
-  });
-
-  test("disk-space-exhausted keyed to this vault yields its cause", () => {
-    const alerts = [gateAlert(`disk-space-exhausted:${vaultA}`)];
-    expect(vaultRefusingCauses(alerts, vaultA)).toEqual(["volume below floor"]);
-  });
-
-  test("pipeline-backlog-capped keyed to this vault yields its cause", () => {
-    const alerts = [gateAlert(`pipeline-backlog-capped:${vaultA}`)];
-    expect(vaultRefusingCauses(alerts, vaultA)).toEqual(["backlog at budget"]);
-  });
-
-  test("all three gates standing at once yields all three causes", () => {
-    const alerts = [
-      gateAlert(`vault-max-size-capped:${vaultA}`),
-      gateAlert(`disk-space-exhausted:${vaultA}`),
-      gateAlert(`pipeline-backlog-capped:${vaultA}`),
-    ];
-    expect(vaultRefusingCauses(alerts, vaultA)).toEqual([
+  test("MAX_SIZE_BOUND maps to its label", () => {
+    expect(vaultRefusingCauseLabels([VaultAdmissionCause.MAX_SIZE_BOUND])).toEqual([
       "at max-size bound",
+    ]);
+  });
+
+  test("VAULT_DISK_PROTECT maps to its label", () => {
+    expect(vaultRefusingCauseLabels([VaultAdmissionCause.VAULT_DISK_PROTECT])).toEqual([
       "volume below floor",
+    ]);
+  });
+
+  test("BACKLOG_BUDGET maps to its label", () => {
+    expect(vaultRefusingCauseLabels([VaultAdmissionCause.BACKLOG_BUDGET])).toEqual([
       "backlog at budget",
     ]);
   });
 
-  test("hidden for a different vault's alarm of the same type", () => {
-    const alerts = [gateAlert(`vault-max-size-capped:${vaultB}`)];
-    expect(vaultRefusingCauses(alerts, vaultA)).toEqual([]);
+  test("all three causes at once yields all three labels, in backend order", () => {
+    expect(
+      vaultRefusingCauseLabels([
+        VaultAdmissionCause.VAULT_DISK_PROTECT,
+        VaultAdmissionCause.MAX_SIZE_BOUND,
+        VaultAdmissionCause.BACKLOG_BUDGET,
+      ]),
+    ).toEqual(["volume below floor", "at max-size bound", "backlog at budget"]);
   });
 
-  test("hidden for an unrelated alarm type on this vault", () => {
-    const alerts = [gateAlert(`chunking-build-blocked:${vaultA}`)];
-    expect(vaultRefusingCauses(alerts, vaultA)).toEqual([]);
+  test("UNSPECIFIED is dropped, never rendered as a blank badge cause", () => {
+    expect(
+      vaultRefusingCauseLabels([
+        VaultAdmissionCause.UNSPECIFIED,
+        VaultAdmissionCause.MAX_SIZE_BOUND,
+      ]),
+    ).toEqual(["at max-size bound"]);
   });
 
-  test("hidden for a node-scoped alarm with no instance key", () => {
-    const alerts = [gateAlert("node-disk-space-exhausted")];
-    expect(vaultRefusingCauses(alerts, vaultA)).toEqual([]);
-  });
-
-  test("dedupes the same standing alarm reported by several nodes", () => {
-    const alerts = [
-      gateAlert(`vault-max-size-capped:${vaultA}`, "node-a"),
-      gateAlert(`vault-max-size-capped:${vaultA}`, "node-b"),
-      gateAlert(`vault-max-size-capped:${vaultA}`, "node-c"),
-    ];
-    expect(vaultRefusingCauses(alerts, vaultA)).toEqual(["at max-size bound"]);
-  });
-
-  test("mixed: one vault's alarms don't leak into another's badge", () => {
-    const alerts = [
-      gateAlert(`vault-max-size-capped:${vaultA}`),
-      gateAlert(`disk-space-exhausted:${vaultB}`),
-    ];
-    expect(vaultRefusingCauses(alerts, vaultA)).toEqual(["at max-size bound"]);
-    expect(vaultRefusingCauses(alerts, vaultB)).toEqual(["volume below floor"]);
+  test("a vault with only UNSPECIFIED yields no labels (badge hidden)", () => {
+    expect(vaultRefusingCauseLabels([VaultAdmissionCause.UNSPECIFIED])).toEqual([]);
   });
 });
