@@ -926,7 +926,14 @@ function ChunkRow({
           className={`px-4 py-2 text-right font-mono whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}
           title={chunkSizeCellTitle(chunk)}
         >
-          {formatBytes(chunkDiskClaimBytes(chunk))}
+          {chunk.cloudBacked && Number(chunk.diskBytes) === 0 && Number(chunk.cloudBytes) > 0 ? (
+            // Cloud-only: show the GLCB's cloud object size, italic to mark
+            // that no local copy backs the number. Display only — the local
+            // disk claim (and the vault size badge) still counts it as zero.
+            <span className="italic">{formatBytes(Number(chunk.cloudBytes))}</span>
+          ) : (
+            formatBytes(chunkDiskClaimBytes(chunk))
+          )}
         </td>
       </tr>
       {isExpanded && (
