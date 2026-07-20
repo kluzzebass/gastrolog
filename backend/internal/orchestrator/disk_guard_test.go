@@ -730,3 +730,146 @@ func TestVaultAdmissionGateBacklog(t *testing.T) {
 		t.Fatalf("vault under budget must be admitted: %v", err)
 	}
 }
+
+// causesEqual compares a VaultAdmissionCauses result against an expected
+// ordered set, ignoring nothing — order is part of the contract (gate-check
+// order: disk protect, max-size bound, backlog budget).
+func causesEqual(got []VaultAdmissionCause, want ...VaultAdmissionCause) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// TestVaultAdmissionCausesEmpty pins the healthy case: a vault admitting
+// normally reports zero causes, and so does a guardless orchestrator (same
+// contract vaultAdmissionGate has for "no guard, always admit").
+func TestVaultAdmissionCausesEmpty(t *testing.T) {
+	t.Parallel()
+	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": 200 * gib})
+	vaultA := glid.New()
+	g.SetVaultGuard(vaultA, "healthy", []string{"volA"}, "", "", 0)
+	g.evaluateVaults(nil)
+
+	o := &Orchestrator{diskGuard: g}
+	if got := o.VaultAdmissionCauses(vaultA); len(got) != 0 {
+		t.Fatalf("healthy vault must report no causes, got %v", got)
+	}
+	if got := (&Orchestrator{}).VaultAdmissionCauses(vaultA); len(got) != 0 {
+		t.Fatalf("guardless orchestrator must report no causes, got %v", got)
+	}
+}
+
+// TestVaultAdmissionCausesEachGate pins one cause per gate, local half:
+// disk protect alone, max-size alone, backlog alone — each reporting
+// exactly its own cause and nothing else.
+func TestVaultAdmissionCausesEachGate(t *testing.T) {
+	t.Parallel()
+
+	t.Run("disk protect", func(t *testing.T) {
+		t.Parallel()
+		g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": gib})
+		vaultA := glid.New()
+		g.SetVaultGuard(vaultA, "a", []string{"volA"}, "", "", 0)
+		g.evaluateVaults(nil)
+
+		o := &Orchestrator{diskGuard: g}
+		if got := o.VaultAdmissionCauses(vaultA); !causesEqual(got, VaultAdmissionCauseVaultDiskProtect) {
+			t.Fatalf("VaultAdmissionCauses = %v, want [VaultDiskProtect]", got)
+		}
+	})
+
+	t.Run("max-size bound", func(t *testing.T) {
+		t.Parallel()
+		g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": 200 * gib})
+		vaultA := glid.New()
+		g.vaultFootprint = func(glid.GLID) int64 { return int64(11 * gib) }
+		g.SetVaultGuard(vaultA, "a", []string{"volA"}, "", "", 10*gib)
+		g.evaluateVaults(nil)
+
+		o := &Orchestrator{diskGuard: g}
+		if got := o.VaultAdmissionCauses(vaultA); !causesEqual(got, VaultAdmissionCauseMaxSizeBound) {
+			t.Fatalf("VaultAdmissionCauses = %v, want [MaxSizeBound]", got)
+		}
+	})
+
+	t.Run("backlog budget", func(t *testing.T) {
+		t.Parallel()
+		g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": 200 * gib})
+		vaultA := glid.New()
+		g.vaultBacklogBytes = func(glid.GLID) int64 { return int64(11 * gib) }
+		g.backlogBudget.Store(10 * gib)
+		g.SetVaultGuard(vaultA, "a", []string{"volA"}, "", "", 0)
+		g.evaluateVaults(nil)
+
+		o := &Orchestrator{diskGuard: g}
+		if got := o.VaultAdmissionCauses(vaultA); !causesEqual(got, VaultAdmissionCauseBacklogBudget) {
+			t.Fatalf("VaultAdmissionCauses = %v, want [BacklogBudget]", got)
+		}
+	})
+}
+
+// TestVaultAdmissionCausesRemote pins the peer-broadcast half: a vault
+// reported protected/capped only by a live peer's broadcast (no local guard
+// state) reports the same cause the local half would.
+func TestVaultAdmissionCausesRemote(t *testing.T) {
+	t.Parallel()
+
+	t.Run("disk protect", func(t *testing.T) {
+		t.Parallel()
+		vaultA := glid.New()
+		o := &Orchestrator{}
+		o.SetRemoteVaultDiskProtected(func(id glid.GLID) bool { return id == vaultA })
+		if got := o.VaultAdmissionCauses(vaultA); !causesEqual(got, VaultAdmissionCauseVaultDiskProtect) {
+			t.Fatalf("VaultAdmissionCauses = %v, want [VaultDiskProtect]", got)
+		}
+	})
+
+	t.Run("max-size bound", func(t *testing.T) {
+		t.Parallel()
+		vaultA := glid.New()
+		o := &Orchestrator{}
+		o.SetRemoteVaultSizeCapped(func(id glid.GLID) bool { return id == vaultA })
+		if got := o.VaultAdmissionCauses(vaultA); !causesEqual(got, VaultAdmissionCauseMaxSizeBound) {
+			t.Fatalf("VaultAdmissionCauses = %v, want [MaxSizeBound]", got)
+		}
+	})
+}
+
+// TestVaultAdmissionCausesCombination pins the ALL-CAUSES-AT-ONCE case: a
+// vault simultaneously under disk protect, at its max-size bound, and at its
+// backlog budget reports all three, in gate-check order — this is the "no
+// drift" contract: vaultAdmissionGate returns causes[0] (disk protect) for
+// this exact vault, and the RPC field must show the full set, not just the
+// one the gate acts on.
+func TestVaultAdmissionCausesCombination(t *testing.T) {
+	t.Parallel()
+	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": gib})
+	vaultA := glid.New()
+	g.vaultFootprint = func(glid.GLID) int64 { return int64(11 * gib) }
+	g.vaultBacklogBytes = func(glid.GLID) int64 { return int64(11 * gib) }
+	g.backlogBudget.Store(10 * gib)
+	g.SetVaultGuard(vaultA, "a", []string{"volA"}, "", "", 10*gib)
+	g.evaluateVaults(nil)
+
+	o := &Orchestrator{diskGuard: g}
+	got := o.VaultAdmissionCauses(vaultA)
+	want := []VaultAdmissionCause{
+		VaultAdmissionCauseVaultDiskProtect,
+		VaultAdmissionCauseMaxSizeBound,
+		VaultAdmissionCauseBacklogBudget,
+	}
+	if !causesEqual(got, want...) {
+		t.Fatalf("VaultAdmissionCauses = %v, want %v (gate-check order)", got, want)
+	}
+
+	// The gate takes causes[0]: disk protect wins even though all three fired.
+	if err := o.vaultAdmissionGate(vaultA); !errors.Is(err, ErrVaultDiskProtect) {
+		t.Fatalf("gate must return the FIRST cause (disk protect), got %v", err)
+	}
+}

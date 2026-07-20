@@ -3014,3 +3014,70 @@ func TestMultiNode_RetentionSubmitDefersOnRemoteCappedDestination(t *testing.T) 
 		return m.TotalMatched >= 4
 	})
 }
+
+// TestMultiNode_VaultAdmissionCausesConsistentAcrossNodes pins the backend
+// signal's cluster-consistency contract (gastrolog-33ul6h): the vault
+// "refusing admission" badge is now a first-class backend field
+// (VaultInfo.AdmissionRefused), computed on the RESPONDING node from its own
+// local guard plus its live-peer broadcasts — the same inputs
+// vaultAdmissionGate itself consults (orchestrator.VaultAdmissionCauses).
+// Every node in a cluster receives the same NodeStats broadcasts, so every
+// node must report the SAME causes for the same vault, regardless of which
+// node the operator happens to be connected to. Modeled on
+// TestMultiNode_RetentionSubmitDefersOnRemoteCappedDestination: installs the
+// same peer-broadcast lookup production wiring installs on every node's
+// orchestrator, then reads VaultAdmissionCauses directly from each.
+func TestMultiNode_VaultAdmissionCausesConsistentAcrossNodes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node convergence test")
+	}
+	t.Parallel()
+	h := setupMultiNode(t, []string{"coord", "data-1", "data-2"}, WithoutVault("coord"))
+
+	d1 := h.Node(t, "data-1")
+	d2 := h.Node(t, "data-2")
+
+	// Every node, healthy: no causes anywhere.
+	for _, node := range []multinodeTestNode{d1, d2} {
+		if got := node.orch.VaultAdmissionCauses(d1.vaultID); len(got) != 0 {
+			t.Fatalf("node %s: VaultAdmissionCauses(healthy) = %v, want empty", node.nodeID, got)
+		}
+	}
+
+	// d1's vault is disk-protected AND size-capped on d2 (its actual home);
+	// the NodeStats broadcast carries both to every peer, including d1 itself.
+	protected := d1.vaultID
+	diskProtect := func(id glid.GLID) bool { return id == protected }
+	sizeCapped := func(id glid.GLID) bool { return id == protected }
+	for _, node := range []multinodeTestNode{d1, d2} {
+		node.orch.SetRemoteVaultDiskProtected(diskProtect)
+		node.orch.SetRemoteVaultSizeCapped(sizeCapped)
+	}
+
+	want := []orchestrator.VaultAdmissionCause{
+		orchestrator.VaultAdmissionCauseVaultDiskProtect,
+		orchestrator.VaultAdmissionCauseMaxSizeBound,
+	}
+	for _, node := range []multinodeTestNode{d1, d2} {
+		got := node.orch.VaultAdmissionCauses(protected)
+		if len(got) != len(want) {
+			t.Fatalf("node %s: VaultAdmissionCauses = %v, want %v", node.nodeID, got, want)
+		}
+		for i := range got {
+			if got[i] != want[i] {
+				t.Fatalf("node %s: VaultAdmissionCauses = %v, want %v", node.nodeID, got, want)
+			}
+		}
+	}
+
+	// Causes release: both nodes converge back to empty together.
+	for _, node := range []multinodeTestNode{d1, d2} {
+		node.orch.SetRemoteVaultDiskProtected(func(glid.GLID) bool { return false })
+		node.orch.SetRemoteVaultSizeCapped(func(glid.GLID) bool { return false })
+	}
+	for _, node := range []multinodeTestNode{d1, d2} {
+		if got := node.orch.VaultAdmissionCauses(protected); len(got) != 0 {
+			t.Fatalf("node %s: VaultAdmissionCauses after release = %v, want empty", node.nodeID, got)
+		}
+	}
+}

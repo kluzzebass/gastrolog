@@ -705,30 +705,99 @@ var ErrVaultMaxSize = errors.New("vault is at its max-size bound: admission for 
 // below the budget. The operating bound that engages before disk pressure.
 var ErrVaultBacklogBudget = errors.New("vault's pipeline backlog is at its budget: admission refused until chunking drains it")
 
-// vaultAdmissionGate is the per-destination admission check. It honors both
-// the local guard and — via the NodeStats broadcast — every live peer's:
-// the starved volume or over-budget claim backing a vault is usually on a
-// different node than the front door accepting records for it.
-func (o *Orchestrator) vaultAdmissionGate(vaultID glid.GLID) error {
-	if o.diskGuard != nil && o.diskGuard.vaultProtectActive(vaultID) {
-		return ErrVaultDiskProtect
+// VaultAdmissionCause identifies one reason a vault's admission gate is
+// currently refusing new records for it. Defined here rather than imported
+// from the generated proto package so orchestrator stays proto-free; the
+// server package maps these to apiv1.VaultAdmissionCause for the
+// VaultInfo.AdmissionRefused RPC field. Order of these constants carries no
+// meaning — gate-check order lives in vaultAdmissionCauses, not here.
+type VaultAdmissionCause int
+
+const (
+	VaultAdmissionCauseVaultDiskProtect VaultAdmissionCause = iota + 1
+	VaultAdmissionCauseMaxSizeBound
+	VaultAdmissionCauseBacklogBudget
+)
+
+// vaultAdmissionCauseEntry pairs a cause with the sentinel error
+// vaultAdmissionGate returns for it, so the gate can consume
+// vaultAdmissionCauses' output directly instead of re-deriving anything.
+type vaultAdmissionCauseEntry struct {
+	Cause VaultAdmissionCause
+	Err   error
+}
+
+// vaultAdmissionCauses is the SOLE source of truth for per-vault admission
+// causes: it collects every currently-applicable one, in gate-check order —
+// vault disk protect (local OR any live peer's broadcast), max-size bound
+// (local OR any live peer's broadcast), backlog budget (local only: the
+// vault-ctl FSM registry is replicated to every node, so the local guard's
+// verdict already IS the cluster verdict). Empty when the vault admits
+// normally. vaultAdmissionGate takes causes[0]; the exported
+// VaultAdmissionCauses wrapper reports ALL of them for the VaultInfo RPC
+// field — both consume this one collector, so the gate and the UI-facing
+// signal can never drift apart.
+func (o *Orchestrator) vaultAdmissionCauses(vaultID glid.GLID) []vaultAdmissionCauseEntry {
+	var causes []vaultAdmissionCauseEntry
+
+	diskProtected := o.diskGuard != nil && o.diskGuard.vaultProtectActive(vaultID)
+	if !diskProtected {
+		if fn := o.remoteVaultDiskProtected.Load(); fn != nil && (*fn)(vaultID) {
+			diskProtected = true
+		}
 	}
-	if fn := o.remoteVaultDiskProtected.Load(); fn != nil && (*fn)(vaultID) {
-		return ErrVaultDiskProtect
+	if diskProtected {
+		causes = append(causes, vaultAdmissionCauseEntry{VaultAdmissionCauseVaultDiskProtect, ErrVaultDiskProtect})
 	}
-	if o.diskGuard != nil && o.diskGuard.vaultSizeCapped(vaultID) {
-		return ErrVaultMaxSize
+
+	sizeCapped := o.diskGuard != nil && o.diskGuard.vaultSizeCapped(vaultID)
+	if !sizeCapped {
+		if fn := o.remoteVaultSizeCapped.Load(); fn != nil && (*fn)(vaultID) {
+			sizeCapped = true
+		}
 	}
-	if fn := o.remoteVaultSizeCapped.Load(); fn != nil && (*fn)(vaultID) {
-		return ErrVaultMaxSize
+	if sizeCapped {
+		causes = append(causes, vaultAdmissionCauseEntry{VaultAdmissionCauseMaxSizeBound, ErrVaultMaxSize})
 	}
+
 	// Backlog budget needs no peer lookup: the measure is the vault-ctl FSM
 	// registry, replicated to every node, so the local guard's verdict is the
 	// cluster's verdict.
 	if o.diskGuard != nil && o.diskGuard.vaultBacklogCapped(vaultID) {
-		return ErrVaultBacklogBudget
+		causes = append(causes, vaultAdmissionCauseEntry{VaultAdmissionCauseBacklogBudget, ErrVaultBacklogBudget})
 	}
-	return nil
+
+	return causes
+}
+
+// vaultAdmissionGate is the per-destination admission check: the first
+// currently-applicable cause wins. It honors both the local guard and — via
+// the NodeStats broadcast — every live peer's: the starved volume or
+// over-budget claim backing a vault is usually on a different node than the
+// front door accepting records for it. The gate consumes
+// vaultAdmissionCauses so its behavior cannot drift from what that collector
+// (and therefore the VaultInfo.AdmissionRefused RPC field) reports.
+func (o *Orchestrator) vaultAdmissionGate(vaultID glid.GLID) error {
+	causes := o.vaultAdmissionCauses(vaultID)
+	if len(causes) == 0 {
+		return nil
+	}
+	return causes[0].Err
+}
+
+// VaultAdmissionCauses reports every currently-applicable admission-refusal
+// cause for vaultID (empty when the vault admits normally). Exported for the
+// VaultInfo.AdmissionRefused RPC field (server package): the responding
+// node's own view (local guard + its live-peer broadcasts) is the same
+// cluster-aware input vaultAdmissionGate consults, so the UI's "refusing"
+// signal is never a client-side derivation from other state.
+func (o *Orchestrator) VaultAdmissionCauses(vaultID glid.GLID) []VaultAdmissionCause {
+	entries := o.vaultAdmissionCauses(vaultID)
+	out := make([]VaultAdmissionCause, len(entries))
+	for i, e := range entries {
+		out[i] = e.Cause
+	}
+	return out
 }
 
 // SizeCappedVaults lists vaults at their local max-size bound, for the

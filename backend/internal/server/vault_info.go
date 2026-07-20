@@ -347,8 +347,44 @@ func (s *VaultServer) vaultInfoFromConfig(cfg system.VaultConfig, localSet map[g
 		info.Remote = true
 		s.enrichRemoteVaultInfo(info, cfg.ID)
 	}
+	s.fillAdmissionRefused(info, cfg.ID)
 
 	return info
+}
+
+// fillAdmissionRefused populates VaultInfo.AdmissionRefused from the
+// orchestrator's admission-causes collector — the responding node's own view
+// (local disk guard + its live-peer broadcasts), the same cluster-aware
+// inputs vaultAdmissionGate itself consults. This is deliberately NOT gated
+// on whether the vault is locally placed: disk protect and max-size causes
+// already fold in peer broadcasts, and the backlog budget is FSM-replicated,
+// so the collector reports the correct cluster-wide verdict for local and
+// remote vaults alike.
+func (s *VaultServer) fillAdmissionRefused(info *apiv1.VaultInfo, id glid.GLID) {
+	causes := s.orch.VaultAdmissionCauses(id)
+	if len(causes) == 0 {
+		return
+	}
+	info.AdmissionRefused = make([]apiv1.VaultAdmissionCause, len(causes))
+	for i, c := range causes {
+		info.AdmissionRefused[i] = admissionCauseToProto(c)
+	}
+}
+
+// admissionCauseToProto maps the orchestrator's proto-free cause enum to the
+// wire enum. UNSPECIFIED for anything unrecognized — defense in depth; every
+// value orchestrator emits today is handled.
+func admissionCauseToProto(c orchestrator.VaultAdmissionCause) apiv1.VaultAdmissionCause {
+	switch c {
+	case orchestrator.VaultAdmissionCauseVaultDiskProtect:
+		return apiv1.VaultAdmissionCause_VAULT_ADMISSION_CAUSE_VAULT_DISK_PROTECT
+	case orchestrator.VaultAdmissionCauseMaxSizeBound:
+		return apiv1.VaultAdmissionCause_VAULT_ADMISSION_CAUSE_MAX_SIZE_BOUND
+	case orchestrator.VaultAdmissionCauseBacklogBudget:
+		return apiv1.VaultAdmissionCause_VAULT_ADMISSION_CAUSE_BACKLOG_BUDGET
+	default:
+		return apiv1.VaultAdmissionCause_VAULT_ADMISSION_CAUSE_UNSPECIFIED
+	}
 }
 
 func (s *VaultServer) enrichLocalVaultInfo(info *apiv1.VaultInfo, id glid.GLID) {
@@ -393,6 +429,7 @@ func (s *VaultServer) vaultInfoFromLocal(ctx context.Context, id glid.GLID) *api
 			info.RecordCount += m.RecordCount
 		}
 	}
+	s.fillAdmissionRefused(info, id)
 
 	return info
 }

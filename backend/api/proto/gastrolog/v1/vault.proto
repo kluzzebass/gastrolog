@@ -98,6 +98,23 @@ message VaultInfo {
   string name = 7;
   bytes node_id = 8;
   bool remote = 9; // True if vault lives on another node
+
+  // Currently-applicable admission-refusal causes for this vault, as
+  // computed by the responding node's admission gate (local disk guard +
+  // live-peer broadcasts) — the same inputs admission itself consults, not
+  // a UI-side derivation from alarm state. Empty when the vault admits
+  // normally.
+  repeated VaultAdmissionCause admission_refused = 10;
+}
+
+// VaultAdmissionCause identifies why a vault's admission gate is currently
+// refusing new records for it. Mirrors
+// orchestrator.VaultAdmissionCause (backend/internal/orchestrator/disk_guard.go).
+enum VaultAdmissionCause {
+  VAULT_ADMISSION_CAUSE_UNSPECIFIED = 0;
+  VAULT_ADMISSION_CAUSE_MAX_SIZE_BOUND = 1;
+  VAULT_ADMISSION_CAUSE_VAULT_DISK_PROTECT = 2;
+  VAULT_ADMISSION_CAUSE_BACKLOG_BUDGET = 3;
 }
 
 message GetVaultRequest {
