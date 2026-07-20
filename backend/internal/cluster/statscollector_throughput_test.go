@@ -20,8 +20,8 @@ type stubStatsProvider struct {
 	sizeCapped    []glid.GLID
 }
 
-func (s *stubStatsProvider) IngestQueueDepth() int    { return 0 }
-func (s *stubStatsProvider) IngestQueueCapacity() int { return 0 }
+func (s *stubStatsProvider) IngestQueueDepth() int       { return 0 }
+func (s *stubStatsProvider) IngestQueueCapacity() int    { return 0 }
 func (s *stubStatsProvider) IngestPressureLevel() string { return "normal" }
 func (s *stubStatsProvider) VaultSnapshots() []StatsVaultSnapshot {
 	out := make([]StatsVaultSnapshot, len(s.appendStats))
@@ -42,6 +42,8 @@ func (s *stubStatsProvider) PipelineDiskSnapshots() []StatsVaultPipelineDiskSnap
 func (s *stubStatsProvider) LocalStorageBytes() int64                                { return 0 }
 func (s *stubStatsProvider) DiskProtectedVaults() []glid.GLID                        { return s.diskProtected }
 func (s *stubStatsProvider) SizeCappedVaults() []glid.GLID                           { return s.sizeCapped }
+func (s *stubStatsProvider) AgeBoundCappedVaults() []glid.GLID                       { return nil }
+func (s *stubStatsProvider) ChunkCountBoundCappedVaults() []glid.GLID                { return nil }
 
 func TestStatsCollector_ThroughputRates(t *testing.T) {
 	t.Parallel()
