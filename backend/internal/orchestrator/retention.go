@@ -120,6 +120,21 @@ func retentionKey(vaultID glid.GLID, storageID string) string {
 // unconditionally destroyed.
 type retentionRule struct {
 	policy chunk.RetentionPolicy
+
+	// refuse, agePolicy, countPolicy (gastrolog-5yfaqj) support the
+	// post-sweep age/count refusal predicate — see
+	// retentionRunner.checkBoundViolations. refuse is the originating
+	// RetentionPolicyConfig.RefuseEnabled(): a violation only counts
+	// toward refusal when the STATING policy has refuse=true (a vault
+	// mixing a hard and a soft policy refuses only on the hard one's
+	// bounds). agePolicy/countPolicy are the SAME MaxAge/MaxChunks values
+	// `policy` was built from, isolated to one dimension apiece so
+	// checkBoundViolations can ask "is THIS specific bound still
+	// violated" independent of whatever else this rule's policy also
+	// bounds — nil when this rule's policy doesn't state that dimension.
+	refuse      bool
+	agePolicy   chunk.RetentionPolicy
+	countPolicy chunk.RetentionPolicy
 }
 
 // retentionRunner holds per-vault-instance state that persists across sweeps.
@@ -735,6 +750,7 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 	r.mu.Unlock()
 
 	if len(rules) == 0 {
+		r.checkBoundViolations(rules)
 		return
 	}
 
@@ -802,6 +818,7 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 		r.sweepMatchedChunks = 0
 		r.mu.Unlock()
 		r.finishSweepDeferralState()
+		r.checkBoundViolations(rules)
 		return
 	}
 
@@ -851,6 +868,7 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 	r.sweepMatchedChunks = totalMatched
 	r.mu.Unlock()
 	r.finishSweepDeferralState()
+	r.checkBoundViolations(rules)
 }
 
 // claimsIfNeeded computes disk claims for sealed only when some rule in
@@ -1036,6 +1054,80 @@ func (r *retentionRunner) finishSweepDeferralState() {
 				"discards the records — set this vault's retention disposition to delete.",
 			matchedChunks, dispositionActionName(disposition), name, streak, cause))
 	}
+}
+
+// checkBoundViolations is the age/count VIOLATION PREDICATE (gastrolog-5yfaqj):
+// a violation is refusal-worthy only once retention has SWEPT AND FAILED
+// TO CLEAR it — never on the transient between a chunk's seal and the next
+// sweep. Called at every sweep exit (the early no-rules/no-eligible-chunks
+// returns and the normal end) against a FRESH chunk listing, so it reflects
+// what retention actually left behind after THIS sweep's deletes ran, not
+// what existed before them. No streak, no clock, no slack duration: the
+// sweep's own outcome, re-observed once per sweep, IS the predicate.
+//
+// Only rules whose originating policy has refuse=true count toward a
+// violation — a vault mixing a hard and a soft policy refuses only on the
+// hard one's bounds (min-per-kind resolution: the tightest attached policy
+// that also refuses wins; a looser refuse=false policy contributes
+// nothing here even if it's the one still matching chunks).
+func (r *retentionRunner) checkBoundViolations(rules []retentionRule) {
+	if r.orch == nil {
+		return
+	}
+
+	needsCheck := false
+	for _, rl := range rules {
+		if rl.agePolicy != nil || rl.countPolicy != nil {
+			needsCheck = true
+			break
+		}
+	}
+
+	var sealed []chunk.ChunkMeta
+	if needsCheck {
+		metas, err := r.cm.List()
+		if err != nil {
+			// Transient — leave the guard's cached verdict as-is rather
+			// than guess; the next sweep retries. Mirrors sweep()'s own
+			// top-of-sweep List error handling.
+			return
+		}
+		r.mu.Lock()
+		vaultInst := r.findVaultInstance()
+		r.mu.Unlock()
+		if vaultInst != nil && vaultInst.OverlayFromFSM != nil {
+			for i := range metas {
+				metas[i] = vaultInst.OverlayFromFSM(metas[i])
+			}
+		}
+		metas = appendUnlistedManifestSealed(metas, vaultInst)
+		for _, m := range metas {
+			if m.Sealed {
+				sealed = append(sealed, m)
+			}
+		}
+	}
+
+	state := chunk.VaultState{Chunks: sealed, Now: r.now()}
+	ageViolated, countViolated := false, false
+	for _, rl := range rules {
+		if !rl.refuse {
+			continue
+		}
+		if rl.agePolicy != nil && len(rl.agePolicy.Apply(state)) > 0 {
+			ageViolated = true
+		}
+		if rl.countPolicy != nil && len(rl.countPolicy.Apply(state)) > 0 {
+			countViolated = true
+		}
+	}
+
+	// Unconditional, even when needsCheck was false (no attached policy
+	// states either dimension): releases any capped state a since-removed
+	// bound may have left standing — nothing else clears it once the
+	// operator drops the last policy that stated it.
+	r.orch.SetVaultAgeBoundCapped(r.vaultID, ageViolated)
+	r.orch.SetVaultChunkCountBoundCapped(r.vaultID, countViolated)
 }
 
 // buildManifestSet returns the FSM-known chunk IDs for the given instance and a

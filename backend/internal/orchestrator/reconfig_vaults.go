@@ -133,8 +133,31 @@ func resolveRetentionRulesFromVault(cfg *system.Config, vaultCfg system.VaultCon
 		// anymore. A fired retention event always streams the chunk's
 		// records through the routing engine and always destroys the
 		// chunk. The retention rule carries only the trigger policy.
+		//
+		// gastrolog-5yfaqj: agePolicy/countPolicy are the SAME
+		// MaxAge/MaxChunks values `policy` was built from
+		// (ToRetentionPolicy), isolated to one dimension apiece so the
+		// post-sweep bound check can test "is THIS bound still violated"
+		// independent of whatever else the composite policy also bounds.
+		// Errors here are unreachable in practice — ToRetentionPolicy
+		// above already validated the same expressions — so a parse
+		// failure degrades to "this rule states no such bound" rather
+		// than aborting rule resolution a second time for the same cause.
+		var agePolicy, countPolicy chunk.RetentionPolicy
+		if retCfg.MaxAge != nil && !system.IsQuantityUnset(*retCfg.MaxAge) {
+			if age, err := system.ParseDuration(*retCfg.MaxAge); err == nil && age > 0 {
+				agePolicy = chunk.NewTTLRetentionPolicy(age)
+			}
+		}
+		if retCfg.MaxChunks != nil && *retCfg.MaxChunks > 0 {
+			countPolicy = chunk.NewCountRetentionPolicy(int(*retCfg.MaxChunks))
+		}
+
 		rules = append(rules, retentionRule{
-			policy: policy,
+			policy:      policy,
+			refuse:      retCfg.RefuseEnabled(),
+			agePolicy:   agePolicy,
+			countPolicy: countPolicy,
 		})
 	}
 	return rules, triggerLess, nil

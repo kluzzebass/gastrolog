@@ -159,6 +159,34 @@ type RetentionPolicyConfig struct {
 
 	// MaxChunks keeps at most this many sealed chunks, deleting the oldest.
 	MaxChunks *int64 `json:"maxChunks,omitempty"`
+
+	// Refuse generalizes MaxSize's refuse behavior to every bound this
+	// policy states (gastrolog-5yfaqj): while true (the default — nil
+	// reads as true, a "hard bound" in operator terms; a policy must opt
+	// out explicitly to become a "soft bound") and any of
+	// MaxAge/MaxSize/MaxChunks is violated, admission refuses. false means
+	// drain-only: the policy still drains past its bounds, but the
+	// operator explicitly accepts that only the node-level disk guard
+	// backstops the vault while violated.
+	//
+	// MaxSize's refuse check stays instantaneous (the disk guard's cap
+	// machinery, unchanged). MaxAge/MaxChunks refuse only once the
+	// retention runner has swept and failed to clear the violation — see
+	// orchestrator/retention.go's post-sweep bound check — never on the
+	// normal transient between a chunk's seal and the next sweep.
+	//
+	// Per-vault resolution is per bound KIND: min over every attached
+	// policy that states it, with refuse-eligibility following the
+	// STATING policy's own flag — a vault mixing a hard and a soft policy
+	// refuses only on the hard one's bounds.
+	Refuse *bool `json:"refuse,omitempty"`
+}
+
+// RefuseEnabled reports whether this policy's stated bounds refuse
+// admission while violated. Unset (nil) defaults to true — a policy must
+// opt OUT of refusal explicitly, not into it.
+func (c RetentionPolicyConfig) RefuseEnabled() bool {
+	return c.Refuse == nil || *c.Refuse
 }
 
 // IsEmpty reports whether this retention policy has no conditions set —

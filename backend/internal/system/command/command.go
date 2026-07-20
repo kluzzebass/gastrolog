@@ -112,6 +112,7 @@ func putRetentionPolicyCmd(cfg system.RetentionPolicyConfig) *gastrologv1.PutRet
 		MaxAge:    cfg.MaxAge,
 		MaxSize:   cfg.MaxSize,
 		MaxChunks: cfg.MaxChunks,
+		Refuse:    cfg.Refuse,
 	}
 }
 
@@ -141,6 +142,7 @@ func ExtractPutRetentionPolicy(cmd *gastrologv1.PutRetentionPolicyCommand) (syst
 		MaxAge:    cmd.MaxAge,
 		MaxSize:   cmd.MaxSize,
 		MaxChunks: cmd.MaxChunks,
+		Refuse:    cmd.Refuse,
 	}, nil
 }
 

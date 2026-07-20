@@ -1315,10 +1315,26 @@ type RetentionPolicyConfig struct {
 	// attached policy carries one, the creation default
 	// (system.DefaultVaultMaxSize) applies as a REFUSE-ONLY floor — a default
 	// must never destroy data, so the floor never drains, only refuses.
-	MaxSize       string `protobuf:"bytes,2,opt,name=max_size,json=maxSize,proto3" json:"max_size,omitempty"`
-	MaxChunks     int64  `protobuf:"varint,3,opt,name=max_chunks,json=maxChunks,proto3" json:"max_chunks,omitempty"`
-	Id            []byte `protobuf:"bytes,4,opt,name=id,proto3" json:"id,omitempty"`
-	Name          string `protobuf:"bytes,5,opt,name=name,proto3" json:"name,omitempty"`
+	MaxSize   string `protobuf:"bytes,2,opt,name=max_size,json=maxSize,proto3" json:"max_size,omitempty"`
+	MaxChunks int64  `protobuf:"varint,3,opt,name=max_chunks,json=maxChunks,proto3" json:"max_chunks,omitempty"`
+	Id        []byte `protobuf:"bytes,4,opt,name=id,proto3" json:"id,omitempty"`
+	Name      string `protobuf:"bytes,5,opt,name=name,proto3" json:"name,omitempty"`
+	// refuse generalizes the max_size REFUSE behavior above to every bound
+	// this policy states (gastrolog-5yfaqj): while true (the default — unset
+	// reads as true, so a policy must opt OUT explicitly) and ANY of
+	// max_age/max_size/max_chunks is violated, admission refuses. false is
+	// the drain-only "soft bound" posture: the policy still drains, but the
+	// operator explicitly accepts that only the node-level disk guard
+	// backstops the vault while violated. max_size's refuse behavior is
+	// unchanged and instantaneous; max_age/max_chunks refuse only once the
+	// retention runner has swept and failed to clear the violation — see
+	// orchestrator/retention.go to avoid refusing on the normal transient
+	// between a chunk's seal and the next sweep. Per-vault resolution is
+	// per bound KIND: the min over every attached policy that states it,
+	// with refuse-eligibility following the STATING policy's own flag (a
+	// vault mixing a hard and a soft policy refuses only on the hard one's
+	// bounds).
+	Refuse        *bool `protobuf:"varint,6,opt,name=refuse,proto3,oneof" json:"refuse,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1386,6 +1402,13 @@ func (x *RetentionPolicyConfig) GetName() string {
 		return x.Name
 	}
 	return ""
+}
+
+func (x *RetentionPolicyConfig) GetRefuse() bool {
+	if x != nil && x.Refuse != nil {
+		return *x.Refuse
+	}
+	return false
 }
 
 // IngesterAlive carries the per-node alive map for a single ingester, as
@@ -8995,14 +9018,16 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\amax_age\x18\x03 \x01(\tR\x06maxAge\x12\x12\n" +
 	"\x04cron\x18\x04 \x01(\tR\x04cron\x12\x0e\n" +
 	"\x02id\x18\x05 \x01(\fR\x02id\x12\x12\n" +
-	"\x04name\x18\x06 \x01(\tR\x04name\"\x8e\x01\n" +
+	"\x04name\x18\x06 \x01(\tR\x04name\"\xb6\x01\n" +
 	"\x15RetentionPolicyConfig\x12\x17\n" +
 	"\amax_age\x18\x01 \x01(\tR\x06maxAge\x12\x19\n" +
 	"\bmax_size\x18\x02 \x01(\tR\amaxSize\x12\x1d\n" +
 	"\n" +
 	"max_chunks\x18\x03 \x01(\x03R\tmaxChunks\x12\x0e\n" +
 	"\x02id\x18\x04 \x01(\fR\x02id\x12\x12\n" +
-	"\x04name\x18\x05 \x01(\tR\x04name\"\xac\x01\n" +
+	"\x04name\x18\x05 \x01(\tR\x04name\x12\x1b\n" +
+	"\x06refuse\x18\x06 \x01(\bH\x00R\x06refuse\x88\x01\x01B\t\n" +
+	"\a_refuse\"\xac\x01\n" +
 	"\rIngesterAlive\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12L\n" +
 	"\vnode_status\x18\x02 \x03(\v2+.gastrolog.v1.IngesterAlive.NodeStatusEntryR\n" +
@@ -10054,6 +10079,7 @@ func file_gastrolog_v1_system_proto_init() {
 	file_gastrolog_v1_system_proto_msgTypes[7].OneofWrappers = []any{
 		(*RouteStage_Match)(nil),
 	}
+	file_gastrolog_v1_system_proto_msgTypes[11].OneofWrappers = []any{}
 	file_gastrolog_v1_system_proto_msgTypes[55].OneofWrappers = []any{}
 	file_gastrolog_v1_system_proto_msgTypes[56].OneofWrappers = []any{}
 	file_gastrolog_v1_system_proto_msgTypes[57].OneofWrappers = []any{}
