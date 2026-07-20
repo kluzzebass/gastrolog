@@ -10,6 +10,7 @@ export function usePutRetentionPolicy() {
       maxAge: string;
       maxSize: string;
       maxChunks: bigint;
+      refuse: boolean;
     }) => {
       return systemClient.putRetentionPolicy({
         config: {
@@ -18,6 +19,7 @@ export function usePutRetentionPolicy() {
           maxAge: args.maxAge,
           maxSize: args.maxSize,
           maxChunks: args.maxChunks,
+          refuse: args.refuse,
         },
       });
     },

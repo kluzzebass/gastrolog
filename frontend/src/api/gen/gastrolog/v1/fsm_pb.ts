@@ -469,6 +469,14 @@ export class PutRetentionPolicyCommand extends Message<PutRetentionPolicyCommand
    */
   maxChunks?: bigint;
 
+  /**
+   * refuse — see RetentionPolicyConfig.refuse in system.proto
+   * (gastrolog-5yfaqj). Unset reads as true (default on).
+   *
+   * @generated from field: optional bool refuse = 6;
+   */
+  refuse?: boolean;
+
   constructor(data?: PartialMessage<PutRetentionPolicyCommand>) {
     super();
     proto3.util.initPartial(data, this);
@@ -482,6 +490,7 @@ export class PutRetentionPolicyCommand extends Message<PutRetentionPolicyCommand
     { no: 3, name: "max_age", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
     { no: 4, name: "max_size", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
     { no: 5, name: "max_chunks", kind: "scalar", T: 3 /* ScalarType.INT64 */, opt: true },
+    { no: 6, name: "refuse", kind: "scalar", T: 8 /* ScalarType.BOOL */, opt: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutRetentionPolicyCommand {

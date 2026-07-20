@@ -10,6 +10,10 @@ A retention policy defines **when** sealed chunks fire a retention event. Multip
 | **Max size** | `maxSize` | The vault's disk-claim bound — combined meaning, below | `10GB` |
 | **Chunk count** | `maxChunks` | Keep at most this many sealed chunks, firing on oldest excess | `100` |
 
+## Hard vs Soft Bounds
+
+Every set condition (age, size, or chunk count) is a **hard bound** by default: once a retention sweep fails to clear the violation (size is checked instantaneously instead), the cluster refuses new records for the vault until drain catches up. Toggling a policy's **Refuse** flag off makes its bounds **soft**: they still drain, but that policy never triggers refusal — only the node-level disk-protect floor backstops the vault.
+
 ## Max Size
 
 **Max size** is the vault's disk-claim bound, and it means two things at once:

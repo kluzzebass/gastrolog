@@ -91,6 +91,8 @@ const vaultAdmissionCauseLabels: Partial<Record<VaultAdmissionCause, string>> = 
   [VaultAdmissionCause.MAX_SIZE_BOUND]: "at max-size bound",
   [VaultAdmissionCause.VAULT_DISK_PROTECT]: "volume below floor",
   [VaultAdmissionCause.BACKLOG_BUDGET]: "backlog at budget",
+  [VaultAdmissionCause.AGE_BOUND]: "past age bound",
+  [VaultAdmissionCause.CHUNK_COUNT_BOUND]: "over chunk-count bound",
 };
 
 // vaultRefusingCauseLabels maps the vault's admission-refused causes to their

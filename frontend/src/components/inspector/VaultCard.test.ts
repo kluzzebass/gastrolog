@@ -87,14 +87,35 @@ describe("vaultRefusingCauseLabels", () => {
     ]);
   });
 
-  test("all three causes at once yields all three labels, in backend order", () => {
+  // gastrolog-5yfaqj: refusal generalized to age and chunk-count bounds.
+  test("AGE_BOUND maps to its label", () => {
+    expect(vaultRefusingCauseLabels([VaultAdmissionCause.AGE_BOUND])).toEqual([
+      "past age bound",
+    ]);
+  });
+
+  test("CHUNK_COUNT_BOUND maps to its label", () => {
+    expect(vaultRefusingCauseLabels([VaultAdmissionCause.CHUNK_COUNT_BOUND])).toEqual([
+      "over chunk-count bound",
+    ]);
+  });
+
+  test("all five causes at once yields all five labels, in backend order", () => {
     expect(
       vaultRefusingCauseLabels([
         VaultAdmissionCause.VAULT_DISK_PROTECT,
         VaultAdmissionCause.MAX_SIZE_BOUND,
         VaultAdmissionCause.BACKLOG_BUDGET,
+        VaultAdmissionCause.AGE_BOUND,
+        VaultAdmissionCause.CHUNK_COUNT_BOUND,
       ]),
-    ).toEqual(["volume below floor", "at max-size bound", "backlog at budget"]);
+    ).toEqual([
+      "volume below floor",
+      "at max-size bound",
+      "backlog at budget",
+      "past age bound",
+      "over chunk-count bound",
+    ]);
   });
 
   test("UNSPECIFIED is dropped, never rendered as a blank badge cause", () => {
