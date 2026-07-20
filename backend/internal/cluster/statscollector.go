@@ -136,6 +136,14 @@ type StatsProvider interface {
 	// SizeCappedVaults lists vaults at their local max-size bound —
 	// broadcast for the same cluster-wide admission union.
 	SizeCappedVaults() []glid.GLID
+	// AgeBoundCappedVaults lists vaults whose max-age retention bound is
+	// still violated after this node's retention runner swept and failed
+	// to clear it, on a policy with refuse=true (gastrolog-5yfaqj).
+	// Broadcast for the same cluster-wide admission union.
+	AgeBoundCappedVaults() []glid.GLID
+	// ChunkCountBoundCappedVaults is AgeBoundCappedVaults' max-chunks
+	// sibling.
+	ChunkCountBoundCappedVaults() []glid.GLID
 }
 
 // RaftLivenessProvider exposes aggregated Raft WAL append latency and
@@ -476,6 +484,8 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 		stats.StorageBytes = c.cfg.Stats.LocalStorageBytes()
 		stats.DiskProtectedVaultIds = glidsToProto(c.cfg.Stats.DiskProtectedVaults())
 		stats.SizeCappedVaultIds = glidsToProto(c.cfg.Stats.SizeCappedVaults())
+		stats.AgeBoundVaultIds = glidsToProto(c.cfg.Stats.AgeBoundCappedVaults())
+		stats.ChunkCountBoundVaultIds = glidsToProto(c.cfg.Stats.ChunkCountBoundCappedVaults())
 	}
 
 	if c.cfg.PeerConns != nil {

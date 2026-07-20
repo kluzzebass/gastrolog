@@ -663,6 +663,16 @@ type NodeStats struct {
 	// max-size bound. Honored cluster-wide by the same per-vault admission
 	// gate as disk_protected_vault_ids, with a bound-specific error.
 	SizeCappedVaultIds [][]byte `protobuf:"bytes,49,rep,name=size_capped_vault_ids,json=sizeCappedVaultIds,proto3" json:"size_capped_vault_ids,omitempty"`
+	// Vaults whose max-age retention bound is still violated after this
+	// node's retention runner swept and failed to clear it, on a policy
+	// with refuse=true (gastrolog-5yfaqj). Unlike size_capped_vault_ids this
+	// is NOT instantaneous — see RetentionPolicyConfig.refuse. Honored
+	// cluster-wide by the same per-vault admission gate.
+	AgeBoundVaultIds [][]byte `protobuf:"bytes,52,rep,name=age_bound_vault_ids,json=ageBoundVaultIds,proto3" json:"age_bound_vault_ids,omitempty"`
+	// Vaults whose max-chunks retention bound is still violated after a
+	// failed sweep, on a policy with refuse=true. Same contract as
+	// age_bound_vault_ids.
+	ChunkCountBoundVaultIds [][]byte `protobuf:"bytes,53,rep,name=chunk_count_bound_vault_ids,json=chunkCountBoundVaultIds,proto3" json:"chunk_count_bound_vault_ids,omitempty"`
 	// Cumulative diagnostic log records this node's capture handler has
 	// discarded because the capture channel was full. A capacity signal with
 	// no operator action, so it is a metric and never an alarm
@@ -1049,6 +1059,20 @@ func (x *NodeStats) GetDiskProtectedVaultIds() [][]byte {
 func (x *NodeStats) GetSizeCappedVaultIds() [][]byte {
 	if x != nil {
 		return x.SizeCappedVaultIds
+	}
+	return nil
+}
+
+func (x *NodeStats) GetAgeBoundVaultIds() [][]byte {
+	if x != nil {
+		return x.AgeBoundVaultIds
+	}
+	return nil
+}
+
+func (x *NodeStats) GetChunkCountBoundVaultIds() [][]byte {
+	if x != nil {
+		return x.ChunkCountBoundVaultIds
 	}
 	return nil
 }
@@ -4601,7 +4625,7 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\apayload\"\v\n" +
 	"\tHeartbeat\"1\n" +
 	"\bNodeJobs\x12%\n" +
-	"\x04jobs\x18\x01 \x03(\v2\x11.gastrolog.v1.JobR\x04jobs\"\xbb\x13\n" +
+	"\x04jobs\x18\x01 \x03(\v2\x11.gastrolog.v1.JobR\x04jobs\"\xa8\x14\n" +
 	"\tNodeStats\x12\x1f\n" +
 	"\vcpu_percent\x18\x01 \x01(\x01R\n" +
 	"cpuPercent\x12!\n" +
@@ -4659,7 +4683,9 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x1craft_failed_heartbeats_total\x18. \x01(\x04R\x19raftFailedHeartbeatsTotal\x123\n" +
 	"\x16raft_elections_per_min\x18/ \x01(\x01R\x13raftElectionsPerMin\x127\n" +
 	"\x18disk_protected_vault_ids\x180 \x03(\fR\x15diskProtectedVaultIds\x121\n" +
-	"\x15size_capped_vault_ids\x181 \x03(\fR\x12sizeCappedVaultIds\x129\n" +
+	"\x15size_capped_vault_ids\x181 \x03(\fR\x12sizeCappedVaultIds\x12-\n" +
+	"\x13age_bound_vault_ids\x184 \x03(\fR\x10ageBoundVaultIds\x12<\n" +
+	"\x1bchunk_count_bound_vault_ids\x185 \x03(\fR\x17chunkCountBoundVaultIds\x129\n" +
 	"\x19self_ingester_drops_total\x182 \x01(\x04R\x16selfIngesterDropsTotal\x122\n" +
 	"\x15ingest_pressure_level\x183 \x01(\tR\x13ingestPressureLevel\"\xec\x01\n" +
 	"\x15VaultPipelineNodeDisk\x12\x19\n" +

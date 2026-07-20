@@ -337,6 +337,25 @@ func (p *PeerState) VaultSizeCapped(vaultID glid.GLID) bool {
 	})
 }
 
+// VaultAgeBoundCapped reports whether any live peer's retention runner has
+// swept and failed to clear this vault's max-age bound, on a policy with
+// refuse=true (gastrolog-5yfaqj). Same cluster-consistency contract as
+// VaultDiskProtected: only the retention leader for a vault instance
+// derives this, so a peer that only fronts ingest for the vault needs the
+// broadcast.
+func (p *PeerState) VaultAgeBoundCapped(vaultID glid.GLID) bool {
+	return p.vaultListedByAnyPeer(vaultID, func(ns *gastrologv1.NodeStats) [][]byte {
+		return ns.AgeBoundVaultIds
+	})
+}
+
+// VaultChunkCountBoundCapped is VaultAgeBoundCapped's max-chunks sibling.
+func (p *PeerState) VaultChunkCountBoundCapped(vaultID glid.GLID) bool {
+	return p.vaultListedByAnyPeer(vaultID, func(ns *gastrologv1.NodeStats) [][]byte {
+		return ns.ChunkCountBoundVaultIds
+	})
+}
+
 // VaultDiskProtectedNodes returns the live peers currently reporting this
 // vault's local backing volume under disk protect — the WHO to
 // VaultDiskProtected's whether. The placement manager uses it to name the

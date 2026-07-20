@@ -269,6 +269,16 @@ type Orchestrator struct {
 	// max-size bound elsewhere. Installed via SetRemoteVaultSizeCapped.
 	remoteVaultSizeCapped atomic.Pointer[func(glid.GLID) bool]
 
+	// remoteVaultAgeBoundCapped/remoteVaultChunkCountBoundCapped
+	// (gastrolog-5yfaqj) are the same peer-lookup pattern for the two
+	// generalized retention-bound refusal causes: only the retention
+	// leader for a vault instance derives these, so a peer that only
+	// fronts ingest for the vault must consult the broadcast too.
+	// Installed via SetRemoteVaultAgeBoundCapped /
+	// SetRemoteVaultChunkCountBoundCapped.
+	remoteVaultAgeBoundCapped        atomic.Pointer[func(glid.GLID) bool]
+	remoteVaultChunkCountBoundCapped atomic.Pointer[func(glid.GLID) bool]
+
 	// Remote transferrer for cross-node chunk migration (nil in single-node mode).
 	transferrer RemoteTransferrer
 
