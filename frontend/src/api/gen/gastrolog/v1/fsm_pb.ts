@@ -471,7 +471,8 @@ export class PutRetentionPolicyCommand extends Message<PutRetentionPolicyCommand
 
   /**
    * refuse — see RetentionPolicyConfig.refuse in system.proto
-   * (gastrolog-5yfaqj). Unset reads as true (default on).
+   * (gastrolog-5yfaqj). Unset reads as false (default off — bounds are
+   * drain-first, refusal is the explicit hard mode).
    *
    * @generated from field: optional bool refuse = 6;
    */

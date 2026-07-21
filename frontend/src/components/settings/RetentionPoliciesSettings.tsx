@@ -25,7 +25,7 @@ type NavigateTo = (tab: SettingsTab, entityName?: string) => void;
 
 // refuseDescription doubles as the checkbox label in both forms — the
 // checkbox IS the field, no FormField wrapper.
-const refuseDescription = "Refuse new records while a bound is violated; off = drain only.";
+const refuseDescription = "Refuse new records while a bound is violated.";
 
 interface PolicyEdit {
   name: string;
