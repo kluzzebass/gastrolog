@@ -166,10 +166,12 @@ type vaultDiskGuard struct {
 
 	// Max-size bound (cap-and-refuse): the vault's whole local disk claim
 	// — sealed chunks, indexes, pipeline segment backlog — measured against
-	// maxSizeBytes. Always non-zero: creation defaults an unset bound and
-	// the wiring substitutes the default for any 0 (gastrolog-1epfgb), so a 0
-	// here would be a bug, not "unlimited". Distinct from the free-space
-	// thresholds: those protect the VOLUME, this bound covers the VAULT.
+	// maxSizeBytes. 0 means no refuse bound: the vault's only size policies
+	// are refuse=false (soft — drain-only, operator's explicit opt-out,
+	// gastrolog-5yfaqj); evaluateVaults clears any standing cap/alarm for it.
+	// Otherwise non-zero: refuse-eligible policy min, else the creation
+	// default (gastrolog-1epfgb). Distinct from the free-space thresholds:
+	// those protect the VOLUME, this bound covers the VAULT.
 	maxSizeBytes    uint64
 	capped          atomic.Bool
 	sizeAlarmRaised bool
