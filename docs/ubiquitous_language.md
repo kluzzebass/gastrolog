@@ -102,7 +102,12 @@ for append-heavy write patterns and time-ordered reads.
 
 - **FileStorage** — a directory on a node's disk, identified by a GLID, tagged
   with a **StorageClass**. A node can have many file storages (different disks,
-  different performance classes). [`system.FileStorage`](../backend/internal/system/storage.go).
+  different performance classes). Carries the disk-guard free-space thresholds
+  (`DiskFreeWarn`/`DiskFreeFloor`, size-or-percent expressions; empty inherits
+  the node defaults) — moved here from `VaultConfig` (gastrolog-9akebz): the
+  thresholds guard the volume, not the vaults sharing it. A storage below its
+  floor puts every vault placed on it into admission refuse (cause
+  `STORAGE_DISK_PROTECT`). [`system.FileStorage`](../backend/internal/system/storage.go).
 
 - **NodeStorageConfig** — the list of file storages on one node. Runtime state
   (not operator-authored). [`system.NodeStorageConfig`](../backend/internal/system/storage.go).
@@ -1178,6 +1183,7 @@ Canonical milestone verbs (reuse these names; do not coin synonyms):
 | synthetic attribute | source predicate, RouteSource | Source/content predicates unify via `_source`/`_ingester`/`_vault`/`_reason` overlays at routing-eval time. |
 | retire (segment, distribution) | forget | Distribution's node-local drop of segment tracking was called `forgetSegment` while the exported entry point was `RetireSegments`; one verb per meaning (gastrolog-34zx9y). See [Pipeline](#9-pipeline) for the release / retire / purge distinction. |
 | glcb (container-format package) | chunk/cloud | The GLCB container package lived at `chunk/cloud`, but GLCB is universal — local-only vaults seal into it too. The package is `chunk/glcb`; "cloud" names only genuine object-storage interaction (blobstore, cloud-backed cache, cloud upload) (gastrolog-34zx9y). |
+| storage disk protect | vault disk protect | The disk-guard free-space thresholds moved from `VaultConfig` to `system.FileStorage` (gastrolog-9akebz): a below-floor storage protects every vault placed on it, not one vault's own threshold. Renamed through the stack: proto enum `VAULT_ADMISSION_CAUSE_VAULT_DISK_PROTECT` → `..._STORAGE_DISK_PROTECT`, `orchestrator.ErrVaultDiskProtect` → `ErrStorageDiskProtect`, `VaultAdmissionCauseVaultDiskProtect` → `VaultAdmissionCauseStorageDiskProtect`, NodeStats `disk_protected_vault_ids` → `storage_protected_vault_ids`, `PeerState.VaultDiskProtected(Nodes)` → `VaultStorageProtected(Nodes)`. |
 | complete (segment lifecycle) | close | "Close" is overloaded: writer shutdown vs the segment lifecycle event (working/ → completed/). The rotation trigger is `segmentation.CompletePolicy` and a segment COMPLETES; reserve Close for genuine resource shutdown (`Close()` methods, closed writers) (gastrolog-34zx9y). |
 | routed (routing counter) | ingested (at routing) | The counter that was `Ingested` on routing stats counts records ENTERING ROUTING, not ingestion — counter provenance matters when proving loss. Whole chain renamed: `Routed` = entered routing, `Matched` = matched a route and fanned out (proto `total_routed`/`total_matched`, NodeStats `route_stats_*`, UI labels) (gastrolog-34zx9y). "Ingested" stays only on genuine ingester counters (`MessagesIngested`, `BytesIngested`). |
 | unmatched (routing counter) | dropped (at routing) | "Dropped" named two different quantities. `Unmatched` = matched no route, an intentional counted drop (proto `total_unmatched`, NodeStats `route_stats_unmatched`, UI label "Unmatched"); the invariant is `Routed = Matched + Unmatched`. "Dropped" is reserved for delivery drops: `StatsSnapshot.PerVaultDropped` counts already-matched records whose fan-out delivery to a vault failed — a per-vault sub-account of `Matched`, never part of the routed sum (gastrolog-5sdzfv). |
