@@ -263,19 +263,14 @@ message VaultConfig {
   // "7d"). Empty = unset.
   string cache_ttl = 15;
   string retention_disposition = 16;         // "delete", "route", or "transfer" — what retention does with aged-out records
-  // Per-vault disk-guard free-space thresholds on the vault's backing volume,
-  // as size expressions ("10GB"). Empty = inherit the node defaults
-  // (fraction-based, per-node). Warn raises the disk-space alarm; floor
-  // suspends admission for this vault while others keep ingesting.
-  string disk_free_warn = 17;
-  string disk_free_floor = 18;
   // Target vault ID for retention_disposition = "transfer": the sealed
   // chunk is re-homed here unchanged when retention fires. Required when,
   // and only valid when, disposition is "transfer" — see PutVault
-  // validation and docs/retention-transfer-disposition-design.md. Reuses
-  // field 19, vacated by max_size's removal (gastrolog-33ul6h) — no
-  // `reserved` (house rule): zero production deployments.
-  bytes retention_transfer_target_vault_id = 19;
+  // validation and docs/retention-transfer-disposition-design.md.
+  // Renumbered to 17 when disk_free_warn/disk_free_floor moved to
+  // FileStorage (gastrolog-9akebz) — no `reserved` (house rule): zero
+  // production deployments.
+  bytes retention_transfer_target_vault_id = 17;
 }
 
 message RouteDestination {

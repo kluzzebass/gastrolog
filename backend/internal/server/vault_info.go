@@ -356,18 +356,24 @@ func (s *VaultServer) vaultInfoFromConfig(cfg system.VaultConfig, localSet map[g
 // orchestrator's admission-causes collector — the responding node's own view
 // (local disk guard + its live-peer broadcasts), the same cluster-aware
 // inputs vaultAdmissionGate itself consults. This is deliberately NOT gated
-// on whether the vault is locally placed: disk protect and max-size causes
-// already fold in peer broadcasts, and the backlog budget is FSM-replicated,
-// so the collector reports the correct cluster-wide verdict for local and
-// remote vaults alike.
+// on whether the vault is locally placed: storage protect and max-size
+// causes already fold in peer broadcasts, and the backlog budget is
+// FSM-replicated, so the collector reports the correct cluster-wide verdict
+// for local and remote vaults alike. Each entry carries the backend's own
+// detail text for that cause (gastrolog-9akebz) — which storage and its
+// free-vs-floor numbers, or the bound kind and value — never a client-side
+// reconstruction.
 func (s *VaultServer) fillAdmissionRefused(info *apiv1.VaultInfo, id glid.GLID) {
-	causes := s.orch.VaultAdmissionCauses(id)
+	causes := s.orch.VaultAdmissionCauseDetails(id)
 	if len(causes) == 0 {
 		return
 	}
-	info.AdmissionRefused = make([]apiv1.VaultAdmissionCause, len(causes))
+	info.AdmissionRefused = make([]*apiv1.VaultAdmissionRefusal, len(causes))
 	for i, c := range causes {
-		info.AdmissionRefused[i] = admissionCauseToProto(c)
+		info.AdmissionRefused[i] = &apiv1.VaultAdmissionRefusal{
+			Cause:  admissionCauseToProto(c.Cause),
+			Detail: c.Detail,
+		}
 	}
 }
 
@@ -376,8 +382,8 @@ func (s *VaultServer) fillAdmissionRefused(info *apiv1.VaultInfo, id glid.GLID) 
 // value orchestrator emits today is handled.
 func admissionCauseToProto(c orchestrator.VaultAdmissionCause) apiv1.VaultAdmissionCause {
 	switch c {
-	case orchestrator.VaultAdmissionCauseVaultDiskProtect:
-		return apiv1.VaultAdmissionCause_VAULT_ADMISSION_CAUSE_VAULT_DISK_PROTECT
+	case orchestrator.VaultAdmissionCauseStorageDiskProtect:
+		return apiv1.VaultAdmissionCause_VAULT_ADMISSION_CAUSE_STORAGE_DISK_PROTECT
 	case orchestrator.VaultAdmissionCauseMaxSizeBound:
 		return apiv1.VaultAdmissionCause_VAULT_ADMISSION_CAUSE_MAX_SIZE_BOUND
 	case orchestrator.VaultAdmissionCauseBacklogBudget:

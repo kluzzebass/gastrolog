@@ -241,32 +241,32 @@ func TestPeerJobState_Delete_Missing(t *testing.T) {
 	pjs.Delete("never-existed") // must not panic
 }
 
-// TestPeerState_VaultDiskProtected pins the broadcast half of per-vault disk
-// protect: a vault listed in any LIVE peer's DiskProtectedVaultIds reads as
+// TestPeerState_VaultStorageProtected pins the broadcast half of per-vault disk
+// protect: a vault listed in any LIVE peer's StorageProtectedVaultIds reads as
 // protected here; an expired peer's verdict does not linger.
-func TestPeerState_VaultDiskProtected(t *testing.T) {
+func TestPeerState_VaultStorageProtected(t *testing.T) {
 	starved := glid.New()
 	healthy := glid.New()
 
 	ps := NewPeerState(time.Minute)
 	ps.Update("node-a", &gastrologv1.NodeStats{
-		DiskProtectedVaultIds: [][]byte{starved.ToProto()},
+		StorageProtectedVaultIds: [][]byte{starved.ToProto()},
 	}, time.Now())
 	ps.Update("node-b", &gastrologv1.NodeStats{}, time.Now())
 
-	if !ps.VaultDiskProtected(starved) {
+	if !ps.VaultStorageProtected(starved) {
 		t.Fatal("vault protected on a live peer must read as protected")
 	}
-	if ps.VaultDiskProtected(healthy) {
+	if ps.VaultStorageProtected(healthy) {
 		t.Fatal("unlisted vault must not read as protected")
 	}
 
 	// The reporting peer's entry expires: its verdict expires with it —
 	// a dead node must not suspend a vault's admission forever.
 	ps.Update("node-a", &gastrologv1.NodeStats{
-		DiskProtectedVaultIds: [][]byte{starved.ToProto()},
+		StorageProtectedVaultIds: [][]byte{starved.ToProto()},
 	}, time.Now().Add(-2*time.Minute))
-	if ps.VaultDiskProtected(starved) {
+	if ps.VaultStorageProtected(starved) {
 		t.Fatal("expired peer's protect verdict must not linger")
 	}
 }

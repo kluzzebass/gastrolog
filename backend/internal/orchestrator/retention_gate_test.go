@@ -65,7 +65,7 @@ func TestFireRetentionEventAbortsOnBacklogCappedDestination(t *testing.T) {
 	// Register the archive (destination) vault with the guard and force its
 	// backlog over budget, exactly as evaluateVaults would on a real tick.
 	g, _ := newGuardFixture(400*gib, map[string]uint64{})
-	g.SetVaultGuard(fx.archiveID, "archive", nil, "", "", 0)
+	g.SetVaultGuard(fx.archiveID, "archive", nil, 0, "", "")
 	g.backlogBudget.Store(100)
 	g.vaultBacklogBytes = func(id glid.GLID) int64 {
 		if id == fx.archiveID {

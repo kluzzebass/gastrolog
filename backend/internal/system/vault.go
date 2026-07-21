@@ -82,16 +82,14 @@ type VaultConfig struct {
 	// docs/retention-transfer-disposition-design.md (gastrolog-2l918).
 	RetentionTransferTargetVaultID *glid.GLID `json:"retentionTransferTargetVaultId,omitempty"`
 
-	// DiskFreeWarn / DiskFreeFloor are per-vault disk-guard thresholds on the
-	// vault's backing volume: an absolute free-space size ("10GB") or a
-	// percentage of the volume ("10%"), resolved per node against the volume
-	// actually sampled (ParseSizeOrPercent). Empty inherits the node defaults
-	// — the typeable expressions "10%" (warn) and "3%" (floor). Warn raises
-	// the disk-space alarm for this vault; floor suspends admission for
-	// records destined to this vault while vaults on healthy volumes keep
-	// ingesting.
-	DiskFreeWarn  string `json:"diskFreeWarn,omitempty"`
-	DiskFreeFloor string `json:"diskFreeFloor,omitempty"`
+	// gastrolog-9akebz: DiskFreeWarn/DiskFreeFloor removed from here — the
+	// disk-guard free-space thresholds are a property of the storage a
+	// vault is placed on (system.FileStorage.DiskFreeWarn/DiskFreeFloor),
+	// not the vault: N vaults sharing one storage evaluating the same
+	// statfs against potentially different per-vault thresholds was the
+	// modeling error. A vault's refuse signal is now DERIVED — refused
+	// whenever any of its placements' storages is below its floor. See
+	// orchestrator.vaultAdmissionCauses (disk_guard.go).
 
 	// gastrolog-33ul6h: MaxSize removed. The vault's disk-claim bound is no
 	// longer a vault-level field — it lives on the retention policy

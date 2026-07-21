@@ -3044,18 +3044,19 @@ func TestMultiNode_VaultAdmissionCausesConsistentAcrossNodes(t *testing.T) {
 		}
 	}
 
-	// d1's vault is disk-protected AND size-capped on d2 (its actual home);
-	// the NodeStats broadcast carries both to every peer, including d1 itself.
+	// d1's vault is storage-disk-protected AND size-capped on d2 (its actual
+	// home); the NodeStats broadcast carries both to every peer, including
+	// d1 itself.
 	protected := d1.vaultID
-	diskProtect := func(id glid.GLID) bool { return id == protected }
+	storageProtect := func(id glid.GLID) bool { return id == protected }
 	sizeCapped := func(id glid.GLID) bool { return id == protected }
 	for _, node := range []multinodeTestNode{d1, d2} {
-		node.orch.SetRemoteVaultDiskProtected(diskProtect)
+		node.orch.SetRemoteVaultStorageProtected(storageProtect)
 		node.orch.SetRemoteVaultSizeCapped(sizeCapped)
 	}
 
 	want := []orchestrator.VaultAdmissionCause{
-		orchestrator.VaultAdmissionCauseVaultDiskProtect,
+		orchestrator.VaultAdmissionCauseStorageDiskProtect,
 		orchestrator.VaultAdmissionCauseMaxSizeBound,
 	}
 	for _, node := range []multinodeTestNode{d1, d2} {
@@ -3072,7 +3073,7 @@ func TestMultiNode_VaultAdmissionCausesConsistentAcrossNodes(t *testing.T) {
 
 	// Causes release: both nodes converge back to empty together.
 	for _, node := range []multinodeTestNode{d1, d2} {
-		node.orch.SetRemoteVaultDiskProtected(func(glid.GLID) bool { return false })
+		node.orch.SetRemoteVaultStorageProtected(func(glid.GLID) bool { return false })
 		node.orch.SetRemoteVaultSizeCapped(func(glid.GLID) bool { return false })
 	}
 	for _, node := range []multinodeTestNode{d1, d2} {

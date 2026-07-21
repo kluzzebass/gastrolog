@@ -1,0 +1,158 @@
+package orchestrator
+
+// Coverage for the DISCOVERY half of gastrolog-9akebz: refreshVaultDiskGuards
+// converging storageDiskGuard entries from system.FileStorage (the storage
+// entity's own DiskFreeWarn/DiskFreeFloor, not a vault-level field) and
+// linking each vault's guard entry to its LOCAL placements' storage IDs.
+// disk_guard_test.go exercises the guard's own API directly (SetStorageGuard
+// / SetVaultGuard); this file drives the same path through a real
+// system.Config + Runtime, the shape refreshVaultDiskGuards actually reads on
+// every scheduler tick — proving the config→guard wiring itself, not just
+// the guard's internal bookkeeping.
+
+import (
+	"context"
+	"testing"
+
+	"gastrolog/internal/glid"
+	"gastrolog/internal/system"
+)
+
+// TestRefreshVaultDiskGuardsRegistersStorageFromConfig pins the end-to-end
+// discovery wiring: a NodeStorageConfig's FileStorage carries its own
+// DiskFreeWarn/DiskFreeFloor, and a vault's placement on that storage links
+// the vault's guard entry to it — so evaluateStorages' verdict, derived
+// purely from config + a live statfs sample, protects the vault.
+func TestRefreshVaultDiskGuardsRegistersStorageFromConfig(t *testing.T) {
+	t.Parallel()
+
+	vaultID := glid.New()
+	storageID := glid.New()
+	const nodeID = "node-1"
+
+	cfg := &system.Config{
+		Vaults: []system.VaultConfig{{
+			ID:      vaultID,
+			Name:    "on-disk",
+			Enabled: true,
+			Type:    system.VaultTypeFile,
+			Placements: []system.VaultPlacement{
+				{StorageID: storageID.String(), Leader: true},
+			},
+		}},
+	}
+	rt := system.Runtime{
+		NodeStorageConfigs: []system.NodeStorageConfig{{
+			NodeID: nodeID,
+			FileStorages: []system.FileStorage{{
+				ID:            storageID,
+				Path:          "volA",
+				DiskFreeWarn:  "50%",
+				DiskFreeFloor: "40%",
+			}},
+		}},
+	}
+
+	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
+	orch.sysLoader = testSystemLoaderWithRuntime{cfg: cfg, rt: rt}
+	orch.diskGuard.sample = func(path string) (uint64, uint64, error) {
+		if path == "volA" {
+			return 30 * gib, 100 * gib, nil // 30% free — below the storage's 40% floor
+		}
+		return 0, 0, errNoSuchVolume
+	}
+
+	ctx := context.Background()
+	orch.refreshVaultDiskGuards(ctx)
+	orch.diskGuard.evaluateStorages(orch.alerts)
+
+	if !orch.diskGuard.vaultStorageProtected(vaultID) {
+		t.Fatal("vault must be storage-protected: its placement's storage carries a 40% floor and free is 30%")
+	}
+}
+
+// TestRefreshVaultDiskGuardsStorageRemovalReleasesNoStrand pins the
+// no-strand contract at the DISCOVERY layer (not just the guard's own
+// retainStorageGuards API): a storage removed from NodeStorageConfigs
+// between ticks — the operator deleted it, or it moved off this node —
+// must release every vault's derived protect flag on the very next
+// refresh, exactly like retainVaultGuards' vault-removal precedent.
+func TestRefreshVaultDiskGuardsStorageRemovalReleasesNoStrand(t *testing.T) {
+	t.Parallel()
+
+	vaultID := glid.New()
+	storageID := glid.New()
+	const nodeID = "node-1"
+
+	cfg := &system.Config{
+		Vaults: []system.VaultConfig{{
+			ID:      vaultID,
+			Name:    "on-disk",
+			Enabled: true,
+			Type:    system.VaultTypeFile,
+			Placements: []system.VaultPlacement{
+				{StorageID: storageID.String(), Leader: true},
+			},
+		}},
+	}
+	rt := system.Runtime{
+		NodeStorageConfigs: []system.NodeStorageConfig{{
+			NodeID: nodeID,
+			FileStorages: []system.FileStorage{{
+				ID:            storageID,
+				Path:          "volA",
+				DiskFreeWarn:  "50%",
+				DiskFreeFloor: "40%",
+			}},
+		}},
+	}
+
+	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
+	loader := &testSystemLoaderWithRuntime{cfg: cfg, rt: rt}
+	orch.sysLoader = loader
+	orch.diskGuard.sample = func(path string) (uint64, uint64, error) {
+		if path == "volA" {
+			return 30 * gib, 100 * gib, nil
+		}
+		return 0, 0, errNoSuchVolume
+	}
+
+	ctx := context.Background()
+	orch.refreshVaultDiskGuards(ctx)
+	orch.diskGuard.evaluateStorages(orch.alerts)
+	if !orch.diskGuard.vaultStorageProtected(vaultID) {
+		t.Fatal("precondition: vault must start storage-protected")
+	}
+
+	// The storage is removed from config entirely (deleted, or its
+	// NodeStorageConfig no longer lists it).
+	loader.rt = system.Runtime{
+		NodeStorageConfigs: []system.NodeStorageConfig{{NodeID: nodeID}},
+	}
+	orch.refreshVaultDiskGuards(ctx)
+	if orch.diskGuard.vaultStorageProtected(vaultID) {
+		t.Fatal("removing the storage from config must release the vault's protect flag on the next refresh — no strand")
+	}
+}
+
+var errNoSuchVolume = &noSuchVolumeError{}
+
+type noSuchVolumeError struct{}
+
+func (*noSuchVolumeError) Error() string { return "no such volume" }
+
+// testSystemLoaderWithRuntime is testSystemLoader plus a settable Runtime —
+// refreshVaultDiskGuards reads both sys.Config (vaults, retention policies)
+// and sys.Runtime (NodeStorageConfigs), and this test needs to mutate the
+// latter BETWEEN refreshes to simulate a storage disappearing from config.
+type testSystemLoaderWithRuntime struct {
+	cfg *system.Config
+	rt  system.Runtime
+}
+
+func (l testSystemLoaderWithRuntime) Load(_ context.Context) (*system.System, error) {
+	if l.cfg == nil {
+		return nil, nil
+	}
+	return &system.System{Config: *l.cfg, Runtime: l.rt}, nil
+}

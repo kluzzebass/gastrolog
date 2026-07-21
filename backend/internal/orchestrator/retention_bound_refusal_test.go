@@ -92,7 +92,7 @@ func newBoundRunnerFixtureWithManager(t *testing.T, vaultID glid.GLID, cm chunk.
 	spy := &alertSpy{}
 	orch := newTestOrch(t, Config{LocalNodeID: "node-A", Alerts: spy})
 	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": 200 * gib})
-	g.SetVaultGuard(vaultID, "bound-test", []string{"volA"}, "", "", 10*gib)
+	g.SetVaultGuard(vaultID, "bound-test", []string{"volA"}, 10*gib, "", "")
 	orch.diskGuard = g
 
 	r := &retentionRunner{
@@ -418,7 +418,7 @@ func TestRetentionSweepAllReleasesBoundCapsOnLeadershipLoss(t *testing.T) {
 	o := newTestOrch(t, Config{LocalNodeID: "node-A", Alerts: spy})
 	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": 200 * gib})
 	vaultID := glid.New()
-	g.SetVaultGuard(vaultID, "deposed", []string{"volA"}, "", "", 10*gib)
+	g.SetVaultGuard(vaultID, "deposed", []string{"volA"}, 10*gib, "", "")
 	o.diskGuard = g
 	g.setVaultAgeBoundCapped(spy, vaultID, true)
 	g.setVaultChunkCountBoundCapped(spy, vaultID, true)

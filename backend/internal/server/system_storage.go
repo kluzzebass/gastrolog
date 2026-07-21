@@ -142,6 +142,12 @@ func (s *SystemServer) SetNodeStorageConfig(
 		}
 	}
 
+	for _, fs := range cfg.FileStorages {
+		if connErr := validateFileStorageExpressions(fs); connErr != nil {
+			return nil, connErr
+		}
+	}
+
 	if err := s.sysStore.SetNodeStorageConfig(ctx, cfg); err != nil {
 		return nil, errInternal(err)
 	}
@@ -152,6 +158,38 @@ func (s *SystemServer) SetNodeStorageConfig(
 		return nil, errInternal(err)
 	}
 	return connect.NewResponse(&apiv1.SetNodeStorageConfigResponse{System: fullCfg}), nil
+}
+
+// validateFileStorageExpressions parse-checks a file storage's disk-guard
+// free-space thresholds (gastrolog-9akebz: moved here from VaultConfig — the
+// thresholds guard the volume a storage entity represents, not the vaults
+// placed on it). An empty value legitimately means "inherit the node
+// default"; a percentage of the volume ("10%") is allowed alongside an
+// absolute size because the threshold guards this storage's own volume, so a
+// share composes; an explicit zero ("0", "0%") would disable the guard for
+// this storage and is rejected, like the vault-quantity explicit-0 rule.
+func validateFileStorageExpressions(fs system.FileStorage) *connect.Error {
+	for _, f := range []struct {
+		flag string
+		expr string
+	}{
+		{"disk-free-warn", fs.DiskFreeWarn},
+		{"disk-free-floor", fs.DiskFreeFloor},
+	} {
+		if system.IsQuantityUnset(f.expr) {
+			continue
+		}
+		sp, err := system.ParseSizeOrPercent(f.expr)
+		if err != nil {
+			return errInvalidArg(fmt.Errorf("%s %q on storage %q: %w", f.flag, f.expr, fs.Name, err))
+		}
+		if sp.IsZero() {
+			return errInvalidArg(fmt.Errorf(
+				"%s of %q on storage %q disables the guard; omit it to inherit the node default, or set a real size or percentage",
+				f.flag, f.expr, fs.Name))
+		}
+	}
+	return nil
 }
 
 // --- Proto <-> Config conversion ---

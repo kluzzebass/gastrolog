@@ -64,13 +64,15 @@ type placementManager struct {
 	logger      *slog.Logger
 	triggerCh   chan struct{} // poked to run reconcile immediately
 
-	// localVaultDiskProtected reports whether THIS node's backing volume
-	// for the vault is under disk protect. Peers' protect state arrives
-	// via the NodeStats broadcast (PeerState.VaultDiskProtectedNodes);
-	// the local node does not appear in its own peer table, so the
-	// degraded-home alarm needs this direct orchestrator lookup. Nil in
-	// tests that don't exercise the local-degraded case.
-	localVaultDiskProtected func(glid.GLID) bool
+	// localVaultStorageProtected reports whether THIS node's backing
+	// storage for the vault is under disk protect. Peers' protect state
+	// arrives via the NodeStats broadcast
+	// (PeerState.VaultStorageProtectedNodes); the local node does not
+	// appear in its own peer table, so the degraded-home alarm needs this
+	// direct orchestrator lookup. Nil in tests that don't exercise the
+	// local-degraded case. Renamed from localVaultDiskProtected
+	// (gastrolog-9akebz).
+	localVaultStorageProtected func(glid.GLID) bool
 }
 
 // Run blocks until ctx is cancelled. Handles the two event-driven
@@ -243,7 +245,7 @@ func (pm *placementManager) reportDegradedHomes(ctx context.Context, v system.Va
 		return
 	}
 
-	protected := pm.vaultDiskProtectedSet(v.ID)
+	protected := pm.vaultStorageProtectedSet(v.ID)
 	var degraded []string
 	healthy := 0
 	for nid := range homes {
@@ -541,7 +543,7 @@ func (pm *placementManager) placeFollowers(ctx context.Context, v *system.VaultC
 	// a replica automatically. A degraded LEADER raises the target even
 	// for RF=1 vaults — the state guards retain its leadership, but the
 	// vault still needs one member that can actually store.
-	degraded := pm.vaultDiskProtectedSet(v.ID)
+	degraded := pm.vaultStorageProtectedSet(v.ID)
 	rf := int(v.ReplicationFactor)
 	if rf <= 0 {
 		rf = 1 // unset RF means a single copy
@@ -691,18 +693,19 @@ func (pm *placementManager) selectFollowers(v *system.VaultConfig, target int, l
 	return kept, healthy
 }
 
-// vaultDiskProtectedSet returns the node IDs currently reporting this
-// vault's local backing volume under disk protect: live peers via the
+// vaultStorageProtectedSet returns the node IDs currently reporting a
+// storage backing this vault under disk protect: live peers via the
 // NodeStats broadcast, the local node via the orchestrator lookup (it is
-// absent from its own peer table).
-func (pm *placementManager) vaultDiskProtectedSet(vaultID glid.GLID) map[string]bool {
+// absent from its own peer table). Renamed from vaultDiskProtectedSet
+// (gastrolog-9akebz).
+func (pm *placementManager) vaultStorageProtectedSet(vaultID glid.GLID) map[string]bool {
 	protected := make(map[string]bool)
 	if pm.peerState != nil {
-		for _, nid := range pm.peerState.VaultDiskProtectedNodes(vaultID) {
+		for _, nid := range pm.peerState.VaultStorageProtectedNodes(vaultID) {
 			protected[nid] = true
 		}
 	}
-	if pm.localVaultDiskProtected != nil && pm.localVaultDiskProtected(vaultID) {
+	if pm.localVaultStorageProtected != nil && pm.localVaultStorageProtected(vaultID) {
 		protected[pm.localNodeID] = true
 	}
 	return protected

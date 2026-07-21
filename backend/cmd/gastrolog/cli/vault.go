@@ -119,8 +119,6 @@ func vaultDetailPairs(v *v1.VaultConfig) [][2]string {
 	}
 	addExpr("Cache Budget", v.CacheBudget)
 	addExpr("Cache TTL", v.CacheTtl)
-	addExpr("Disk Free Warn", v.DiskFreeWarn)
-	addExpr("Disk Free Floor", v.DiskFreeFloor)
 	if v.RetentionDisposition != "" {
 		pairs = append(pairs, [2]string{"Retention Disposition", v.RetentionDisposition})
 	} else {
@@ -211,8 +209,6 @@ shape (memory, file, file+cloud, JSONL) defined by --type, --storage-class
 	cmd.Flags().String("retention-transfer-target", "", "vault name or ID records transfer to when --retention-disposition=transfer; must be a different, non-cloud file vault")
 	cmd.Flags().String("path", "", "direct path for JSONL sinks")
 	cmd.Flags().String("memory-budget", "", "in-memory storage cap for memory vaults (e.g. 1GB, 512MiB). Unset defaults to a bounded budget; 0 is rejected")
-	cmd.Flags().String("disk-free-warn", "", "free-space warn threshold on the vault's backing volume: an absolute size (10GB) or a percentage of the volume (10%); empty inherits the node default, 10%")
-	cmd.Flags().String("disk-free-floor", "", "free-space floor on the vault's backing volume — below it, admission for this vault is suspended — as an absolute size (3GB) or a percentage of the volume (3%); empty inherits the node default, 3%")
 	_ = cmd.MarkFlagRequired("name")
 	return cmd
 }
@@ -293,9 +289,10 @@ func applyVaultCacheFlags(cmd *cobra.Command, cfg *v1.VaultConfig) error {
 // applyVaultSizeFlags overlays the size expression flags. Quantities are
 // stored as the operator typed them and validated/resolved server-side, so
 // the CLI just carries the string through — no parsing here (gastrolog-etcjdx).
+// gastrolog-9akebz: disk-free-warn/disk-free-floor moved off the vault onto
+// the storage entity a vault's placements reference (system.FileStorage);
+// a storage-level CLI/UI surface for them is tracked separately.
 func applyVaultSizeFlags(cmd *cobra.Command, cfg *v1.VaultConfig) error {
-	setFromFlag(cmd, "disk-free-warn", &cfg.DiskFreeWarn)
-	setFromFlag(cmd, "disk-free-floor", &cfg.DiskFreeFloor)
 	setFromFlag(cmd, "memory-budget", &cfg.MemoryBudget)
 	return nil
 }

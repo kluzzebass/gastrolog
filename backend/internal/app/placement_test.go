@@ -1151,7 +1151,7 @@ func alertMessage(alerts *alert.Collector, prefix string) string {
 }
 
 func protectStats(vaultID glid.GLID) *gastrologv1.NodeStats {
-	return &gastrologv1.NodeStats{DiskProtectedVaultIds: [][]byte{vaultID.ToProto()}}
+	return &gastrologv1.NodeStats{StorageProtectedVaultIds: [][]byte{vaultID.ToProto()}}
 }
 
 // A placement member whose volume for the vault is under disk protect is a
@@ -1265,7 +1265,7 @@ func TestDegradedHomeAlarm_NoCandidates(t *testing.T) {
 	// node-1 (local) is alive and eligible for a memory vault, so it IS a
 	// candidate here; degrade it too via the local lookup to force the
 	// no-candidate branch.
-	pm.localVaultDiskProtected = func(id glid.GLID) bool { return id == vaultID }
+	pm.localVaultStorageProtected = func(id glid.GLID) bool { return id == vaultID }
 	pm.reconcile(ctx)
 	msg = alertMessage(alerts, "vault-home-cannot-store:")
 	if !strings.Contains(msg, "no eligible replacement") {
@@ -1281,7 +1281,7 @@ func TestDegradedHomeAlarm_LocalHome(t *testing.T) {
 	ctx := context.Background()
 	pm, store, alerts := newTestPlacement(t, "node-1", []string{"node-2"})
 	vaultID := seedVaultWithLeader(t, store, "node-1")
-	pm.localVaultDiskProtected = func(id glid.GLID) bool { return id == vaultID }
+	pm.localVaultStorageProtected = func(id glid.GLID) bool { return id == vaultID }
 
 	pm.reconcile(ctx)
 

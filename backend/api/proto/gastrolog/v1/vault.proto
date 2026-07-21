@@ -103,8 +103,10 @@ message VaultInfo {
   // computed by the responding node's admission gate (local disk guard +
   // live-peer broadcasts) — the same inputs admission itself consults, not
   // a UI-side derivation from alarm state. Empty when the vault admits
-  // normally.
-  repeated VaultAdmissionCause admission_refused = 10;
+  // normally. Each entry pairs the cause with a detail string naming the
+  // specifics (which storage and its free-vs-floor numbers, which bound
+  // and value) — see VaultAdmissionRefusal (gastrolog-9akebz).
+  repeated VaultAdmissionRefusal admission_refused = 10;
 }
 
 // VaultAdmissionCause identifies why a vault's admission gate is currently
@@ -113,7 +115,11 @@ message VaultInfo {
 enum VaultAdmissionCause {
   VAULT_ADMISSION_CAUSE_UNSPECIFIED = 0;
   VAULT_ADMISSION_CAUSE_MAX_SIZE_BOUND = 1;
-  VAULT_ADMISSION_CAUSE_VAULT_DISK_PROTECT = 2;
+  // gastrolog-9akebz: renamed from VAULT_DISK_PROTECT — the disk-free
+  // thresholds moved from VaultConfig to the storage entity a vault's
+  // placements reference, so the cause is a storage property, not a
+  // vault one. Every vault placed on a below-floor storage refuses.
+  VAULT_ADMISSION_CAUSE_STORAGE_DISK_PROTECT = 2;
   VAULT_ADMISSION_CAUSE_BACKLOG_BUDGET = 3;
   // gastrolog-5yfaqj: refuse generalized from max_size to every retention
   // policy bound. AGE_BOUND/CHUNK_COUNT_BOUND only ever appear when the
@@ -122,6 +128,18 @@ enum VaultAdmissionCause {
   // transient between a chunk's seal and the next sweep.
   VAULT_ADMISSION_CAUSE_AGE_BOUND = 4;
   VAULT_ADMISSION_CAUSE_CHUNK_COUNT_BOUND = 5;
+}
+
+// VaultAdmissionRefusal pairs one admission-refusal cause with the
+// backend's own detail text for it — facts the backend already knows at
+// response time, not a client-side reconstruction (gastrolog-9akebz):
+// storage protect names the storage and its free-vs-floor numbers when
+// locally sampled, or "reported by <node>" for a peer-broadcast verdict
+// with no local sample; bounds name the bound kind and its value. Kept
+// terse — this is inspector detail text, not a log line.
+message VaultAdmissionRefusal {
+  VaultAdmissionCause cause = 1;
+  string detail = 2;
 }
 
 message GetVaultRequest {

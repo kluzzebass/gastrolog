@@ -1526,7 +1526,7 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 				case errors.Is(subErr, pipeline.ErrNotRunning),
 					errors.Is(subErr, context.Canceled),
 					errors.Is(subErr, ErrDiskProtect),
-					errors.Is(subErr, ErrVaultDiskProtect),
+					errors.Is(subErr, ErrStorageDiskProtect),
 					errors.Is(subErr, ErrVaultMaxSize),
 					errors.Is(subErr, ErrVaultBacklogBudget),
 					errors.Is(subErr, ErrVaultAgeBound),

@@ -446,6 +446,8 @@ func (s *SystemServer) loadConfigNodeStorageConfigs(ctx context.Context, resp *a
 				Name:              a.Name,
 				Path:              a.Path,
 				MemoryBudgetBytes: a.MemoryBudgetBytes,
+				DiskFreeWarn:      a.DiskFreeWarn,
+				DiskFreeFloor:     a.DiskFreeFloor,
 			}
 		}
 		resp.NodeStorageConfigs = append(resp.NodeStorageConfigs, &apiv1.NodeStorageConfig{

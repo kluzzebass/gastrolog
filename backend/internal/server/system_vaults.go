@@ -100,32 +100,10 @@ func resolveVaultQuantity(q vaultQuantity, vaultCfg *system.VaultConfig, existin
 // an empty value is legitimately "inherit" or "off" — so a malformed one is
 // caught at write instead of at use (gastrolog-etcjdx).
 //
-// The disk-free thresholds are the only volume-relative fields: they accept a
-// percentage of the volume ("10%") alongside an absolute size, because the
-// threshold guards the vault's own volume, so a share composes. An explicit
-// zero ("0", "0%") would disable the guard for this vault and is rejected,
-// like the explicit-0 budgets.
+// gastrolog-9akebz: the disk-free thresholds moved off VaultConfig onto the
+// storage entity a vault's placements reference (see validateFileStorageExpressions
+// in system_storage.go) — this function no longer touches them.
 func validateVaultExpressions(vaultCfg *system.VaultConfig) *connect.Error {
-	for _, f := range []struct {
-		flag string
-		expr string
-	}{
-		{"disk-free-warn", vaultCfg.DiskFreeWarn},
-		{"disk-free-floor", vaultCfg.DiskFreeFloor},
-	} {
-		if system.IsQuantityUnset(f.expr) {
-			continue
-		}
-		sp, err := system.ParseSizeOrPercent(f.expr)
-		if err != nil {
-			return errInvalidArg(fmt.Errorf("%s %q on vault %q: %w", f.flag, f.expr, vaultCfg.Name, err))
-		}
-		if sp.IsZero() {
-			return errInvalidArg(fmt.Errorf(
-				"%s of %q on vault %q disables the guard; omit it to inherit the node default, or set a real size or percentage",
-				f.flag, f.expr, vaultCfg.Name))
-		}
-	}
 	if !system.IsQuantityUnset(vaultCfg.CacheTTL) {
 		if _, err := system.ParseDuration(vaultCfg.CacheTTL); err != nil {
 			return errInvalidArg(fmt.Errorf("cache-ttl %q on vault %q: %w", vaultCfg.CacheTTL, vaultCfg.Name, err))
