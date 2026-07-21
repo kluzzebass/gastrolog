@@ -30,7 +30,7 @@ func TestVaultAgeBoundCapAndAlarm(t *testing.T) {
 	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": 200 * gib})
 	spy := &alertSpy{}
 	vaultA := glid.New()
-	g.SetVaultGuard(vaultA, "aged", []string{"volA"}, "", "", 10*gib)
+	g.SetVaultGuard(vaultA, "aged", []string{"volA"}, 10*gib, "", "")
 
 	if g.vaultAgeBoundCapped(vaultA) {
 		t.Fatal("a fresh guard entry must start uncapped for the age bound")
@@ -60,7 +60,7 @@ func TestVaultChunkCountBoundCapAndAlarm(t *testing.T) {
 	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": 200 * gib})
 	spy := &alertSpy{}
 	vaultA := glid.New()
-	g.SetVaultGuard(vaultA, "many-chunks", []string{"volA"}, "", "", 10*gib)
+	g.SetVaultGuard(vaultA, "many-chunks", []string{"volA"}, 10*gib, "", "")
 
 	g.setVaultChunkCountBoundCapped(spy, vaultA, true)
 	if !g.vaultChunkCountBoundCapped(vaultA) {
@@ -88,7 +88,7 @@ func TestVaultBoundCapsCoexistOnOneVault(t *testing.T) {
 	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": 200 * gib})
 	spy := &alertSpy{}
 	vaultA := glid.New()
-	g.SetVaultGuard(vaultA, "double-bound", []string{"volA"}, "", "", 10*gib)
+	g.SetVaultGuard(vaultA, "double-bound", []string{"volA"}, 10*gib, "", "")
 
 	g.setVaultAgeBoundCapped(spy, vaultA, true)
 	g.setVaultChunkCountBoundCapped(spy, vaultA, true)
@@ -140,8 +140,8 @@ func TestVaultAdmissionGateAgeAndChunkCountBound(t *testing.T) {
 	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": 200 * gib})
 	spy := &alertSpy{}
 	vaultAge, vaultCount, vaultRemote := glid.New(), glid.New(), glid.New()
-	g.SetVaultGuard(vaultAge, "age", []string{"volA"}, "", "", 10*gib)
-	g.SetVaultGuard(vaultCount, "count", []string{"volA"}, "", "", 10*gib)
+	g.SetVaultGuard(vaultAge, "age", []string{"volA"}, 10*gib, "", "")
+	g.SetVaultGuard(vaultCount, "count", []string{"volA"}, 10*gib, "", "")
 	g.setVaultAgeBoundCapped(spy, vaultAge, true)
 	g.setVaultChunkCountBoundCapped(spy, vaultCount, true)
 
@@ -190,7 +190,7 @@ func TestVaultAdmissionCausesReportsAllBoundCausesTogether(t *testing.T) {
 	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": 200 * gib})
 	spy := &alertSpy{}
 	vaultID := glid.New()
-	g.SetVaultGuard(vaultID, "everything", []string{"volA"}, "", "", 10*gib)
+	g.SetVaultGuard(vaultID, "everything", []string{"volA"}, 10*gib, "", "")
 	g.setVaultAgeBoundCapped(spy, vaultID, true)
 	g.setVaultChunkCountBoundCapped(spy, vaultID, true)
 
@@ -216,7 +216,7 @@ func TestRetainVaultGuardsClearsBoundAlarms(t *testing.T) {
 	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": 200 * gib})
 	spy := &alertSpy{}
 	vaultID := glid.New()
-	g.SetVaultGuard(vaultID, "pruned", []string{"volA"}, "", "", 10*gib)
+	g.SetVaultGuard(vaultID, "pruned", []string{"volA"}, 10*gib, "", "")
 	g.setVaultAgeBoundCapped(spy, vaultID, true)
 	g.setVaultChunkCountBoundCapped(spy, vaultID, true)
 	if spy.active() != 2 {
@@ -254,7 +254,7 @@ func TestVaultMaxSizeReleasesWhenBoundBecomesSoftOnly(t *testing.T) {
 		}
 		return 0
 	}
-	g.SetVaultGuard(vaultA, "was-hard", []string{"volA"}, "", "", 10*gib)
+	g.SetVaultGuard(vaultA, "was-hard", []string{"volA"}, 10*gib, "", "")
 	g.evaluateVaults(spy)
 	if !g.vaultSizeCapped(vaultA) {
 		t.Fatal("fixture setup: vault must be capped under the original 10GiB hard bound")
@@ -267,7 +267,7 @@ func TestVaultMaxSizeReleasesWhenBoundBecomesSoftOnly(t *testing.T) {
 	// now resolve maxSize=0 (resolveVaultSizeBoundSource's corner case) —
 	// simulate that re-resolution directly via SetVaultGuard, same as a
 	// live config change would drive on the next tick.
-	g.SetVaultGuard(vaultA, "was-hard", []string{"volA"}, "", "", 0)
+	g.SetVaultGuard(vaultA, "was-hard", []string{"volA"}, 0, "", "")
 	g.evaluateVaults(spy)
 
 	if g.vaultSizeCapped(vaultA) {

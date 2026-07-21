@@ -654,14 +654,19 @@ type NodeStats struct {
 	RaftLeaderLossesTotal     uint64  `protobuf:"varint,45,opt,name=raft_leader_losses_total,json=raftLeaderLossesTotal,proto3" json:"raft_leader_losses_total,omitempty"`
 	RaftFailedHeartbeatsTotal uint64  `protobuf:"varint,46,opt,name=raft_failed_heartbeats_total,json=raftFailedHeartbeatsTotal,proto3" json:"raft_failed_heartbeats_total,omitempty"`
 	RaftElectionsPerMin       float64 `protobuf:"fixed64,47,opt,name=raft_elections_per_min,json=raftElectionsPerMin,proto3" json:"raft_elections_per_min,omitempty"`
-	// Vaults whose backing volume on THIS node is below its free-space floor.
-	// Every node's admission gate honors the union across live peers, so a
-	// starved vault volume anywhere in the cluster suspends new records for
-	// that vault at every front door while other vaults keep ingesting.
-	DiskProtectedVaultIds [][]byte `protobuf:"bytes,48,rep,name=disk_protected_vault_ids,json=diskProtectedVaultIds,proto3" json:"disk_protected_vault_ids,omitempty"`
+	// Vaults with a placement on a storage, THIS node hosts, that is below
+	// its free-space floor. Every node's admission gate honors the union
+	// across live peers, so a starved storage anywhere in the cluster
+	// suspends new records for every vault placed on it at every front
+	// door while vaults on healthy storages keep ingesting. Renamed from
+	// disk_protected_vault_ids (gastrolog-9akebz: thresholds moved from
+	// VaultConfig to the storage entity; still vault-keyed — the node that
+	// samples the storage already knows which of its OWN vaults are placed
+	// on it, so the broadcast shape didn't need to become storage-keyed).
+	StorageProtectedVaultIds [][]byte `protobuf:"bytes,48,rep,name=storage_protected_vault_ids,json=storageProtectedVaultIds,proto3" json:"storage_protected_vault_ids,omitempty"`
 	// Vaults whose local disk claim on THIS node has reached their per-node
 	// max-size bound. Honored cluster-wide by the same per-vault admission
-	// gate as disk_protected_vault_ids, with a bound-specific error.
+	// gate as storage_protected_vault_ids, with a bound-specific error.
 	SizeCappedVaultIds [][]byte `protobuf:"bytes,49,rep,name=size_capped_vault_ids,json=sizeCappedVaultIds,proto3" json:"size_capped_vault_ids,omitempty"`
 	// Vaults whose max-age retention bound is still violated after this
 	// node's retention runner swept and failed to clear it, on a policy
@@ -1049,9 +1054,9 @@ func (x *NodeStats) GetRaftElectionsPerMin() float64 {
 	return 0
 }
 
-func (x *NodeStats) GetDiskProtectedVaultIds() [][]byte {
+func (x *NodeStats) GetStorageProtectedVaultIds() [][]byte {
 	if x != nil {
-		return x.DiskProtectedVaultIds
+		return x.StorageProtectedVaultIds
 	}
 	return nil
 }
@@ -4625,7 +4630,7 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\apayload\"\v\n" +
 	"\tHeartbeat\"1\n" +
 	"\bNodeJobs\x12%\n" +
-	"\x04jobs\x18\x01 \x03(\v2\x11.gastrolog.v1.JobR\x04jobs\"\xa8\x14\n" +
+	"\x04jobs\x18\x01 \x03(\v2\x11.gastrolog.v1.JobR\x04jobs\"\xae\x14\n" +
 	"\tNodeStats\x12\x1f\n" +
 	"\vcpu_percent\x18\x01 \x01(\x01R\n" +
 	"cpuPercent\x12!\n" +
@@ -4681,8 +4686,8 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x14raft_elections_total\x18, \x01(\x04R\x12raftElectionsTotal\x127\n" +
 	"\x18raft_leader_losses_total\x18- \x01(\x04R\x15raftLeaderLossesTotal\x12?\n" +
 	"\x1craft_failed_heartbeats_total\x18. \x01(\x04R\x19raftFailedHeartbeatsTotal\x123\n" +
-	"\x16raft_elections_per_min\x18/ \x01(\x01R\x13raftElectionsPerMin\x127\n" +
-	"\x18disk_protected_vault_ids\x180 \x03(\fR\x15diskProtectedVaultIds\x121\n" +
+	"\x16raft_elections_per_min\x18/ \x01(\x01R\x13raftElectionsPerMin\x12=\n" +
+	"\x1bstorage_protected_vault_ids\x180 \x03(\fR\x18storageProtectedVaultIds\x121\n" +
 	"\x15size_capped_vault_ids\x181 \x03(\fR\x12sizeCappedVaultIds\x12-\n" +
 	"\x13age_bound_vault_ids\x184 \x03(\fR\x10ageBoundVaultIds\x12<\n" +
 	"\x1bchunk_count_bound_vault_ids\x185 \x03(\fR\x17chunkCountBoundVaultIds\x129\n" +

@@ -588,29 +588,15 @@ export class VaultConfig extends Message<VaultConfig> {
   retentionDisposition = "";
 
   /**
-   * Per-vault disk-guard free-space thresholds on the vault's backing volume,
-   * as size expressions ("10GB"). Empty = inherit the node defaults
-   * (fraction-based, per-node). Warn raises the disk-space alarm; floor
-   * suspends admission for this vault while others keep ingesting.
-   *
-   * @generated from field: string disk_free_warn = 17;
-   */
-  diskFreeWarn = "";
-
-  /**
-   * @generated from field: string disk_free_floor = 18;
-   */
-  diskFreeFloor = "";
-
-  /**
    * Target vault ID for retention_disposition = "transfer": the sealed
    * chunk is re-homed here unchanged when retention fires. Required when,
    * and only valid when, disposition is "transfer" — see PutVault
-   * validation and docs/retention-transfer-disposition-design.md. Reuses
-   * field 19, vacated by max_size's removal (gastrolog-33ul6h) — no
-   * `reserved` (house rule): zero production deployments.
+   * validation and docs/retention-transfer-disposition-design.md.
+   * Renumbered to 17 when disk_free_warn/disk_free_floor moved to
+   * FileStorage (gastrolog-9akebz) — no `reserved` (house rule): zero
+   * production deployments.
    *
-   * @generated from field: bytes retention_transfer_target_vault_id = 19;
+   * @generated from field: bytes retention_transfer_target_vault_id = 17;
    */
   retentionTransferTargetVaultId = new Uint8Array(0);
 
@@ -638,9 +624,7 @@ export class VaultConfig extends Message<VaultConfig> {
     { no: 14, name: "cache_budget", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 15, name: "cache_ttl", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 16, name: "retention_disposition", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 17, name: "disk_free_warn", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 18, name: "disk_free_floor", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 19, name: "retention_transfer_target_vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 17, name: "retention_transfer_target_vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultConfig {

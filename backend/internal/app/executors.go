@@ -177,8 +177,8 @@ func (a *orchStatsAdapter) LocalStorageBytes() int64 {
 	return a.orch.LocalStorageBytes()
 }
 
-func (a *orchStatsAdapter) DiskProtectedVaults() []glid.GLID {
-	return a.orch.DiskProtectedVaults()
+func (a *orchStatsAdapter) StorageProtectedVaults() []glid.GLID {
+	return a.orch.StorageProtectedVaults()
 }
 
 func (a *orchStatsAdapter) SizeCappedVaults() []glid.GLID {

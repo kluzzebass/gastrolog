@@ -25,9 +25,14 @@ export enum VaultAdmissionCause {
   MAX_SIZE_BOUND = 1,
 
   /**
-   * @generated from enum value: VAULT_ADMISSION_CAUSE_VAULT_DISK_PROTECT = 2;
+   * gastrolog-9akebz: renamed from VAULT_DISK_PROTECT — the disk-free
+   * thresholds moved from VaultConfig to the storage entity a vault's
+   * placements reference, so the cause is a storage property, not a
+   * vault one. Every vault placed on a below-floor storage refuses.
+   *
+   * @generated from enum value: VAULT_ADMISSION_CAUSE_STORAGE_DISK_PROTECT = 2;
    */
-  VAULT_DISK_PROTECT = 2,
+  STORAGE_DISK_PROTECT = 2,
 
   /**
    * @generated from enum value: VAULT_ADMISSION_CAUSE_BACKLOG_BUDGET = 3;
@@ -54,7 +59,7 @@ export enum VaultAdmissionCause {
 proto3.util.setEnumType(VaultAdmissionCause, "gastrolog.v1.VaultAdmissionCause", [
   { no: 0, name: "VAULT_ADMISSION_CAUSE_UNSPECIFIED" },
   { no: 1, name: "VAULT_ADMISSION_CAUSE_MAX_SIZE_BOUND" },
-  { no: 2, name: "VAULT_ADMISSION_CAUSE_VAULT_DISK_PROTECT" },
+  { no: 2, name: "VAULT_ADMISSION_CAUSE_STORAGE_DISK_PROTECT" },
   { no: 3, name: "VAULT_ADMISSION_CAUSE_BACKLOG_BUDGET" },
   { no: 4, name: "VAULT_ADMISSION_CAUSE_AGE_BOUND" },
   { no: 5, name: "VAULT_ADMISSION_CAUSE_CHUNK_COUNT_BOUND" },
@@ -282,11 +287,13 @@ export class VaultInfo extends Message<VaultInfo> {
    * computed by the responding node's admission gate (local disk guard +
    * live-peer broadcasts) — the same inputs admission itself consults, not
    * a UI-side derivation from alarm state. Empty when the vault admits
-   * normally.
+   * normally. Each entry pairs the cause with a detail string naming the
+   * specifics (which storage and its free-vs-floor numbers, which bound
+   * and value) — see VaultAdmissionRefusal (gastrolog-9akebz).
    *
-   * @generated from field: repeated gastrolog.v1.VaultAdmissionCause admission_refused = 10;
+   * @generated from field: repeated gastrolog.v1.VaultAdmissionRefusal admission_refused = 10;
    */
-  admissionRefused: VaultAdmissionCause[] = [];
+  admissionRefused: VaultAdmissionRefusal[] = [];
 
   constructor(data?: PartialMessage<VaultInfo>) {
     super();
@@ -305,7 +312,7 @@ export class VaultInfo extends Message<VaultInfo> {
     { no: 7, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 8, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 9, name: "remote", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 10, name: "admission_refused", kind: "enum", T: proto3.getEnumType(VaultAdmissionCause), repeated: true },
+    { no: 10, name: "admission_refused", kind: "message", T: VaultAdmissionRefusal, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultInfo {
@@ -322,6 +329,57 @@ export class VaultInfo extends Message<VaultInfo> {
 
   static equals(a: VaultInfo | PlainMessage<VaultInfo> | undefined, b: VaultInfo | PlainMessage<VaultInfo> | undefined): boolean {
     return proto3.util.equals(VaultInfo, a, b);
+  }
+}
+
+/**
+ * VaultAdmissionRefusal pairs one admission-refusal cause with the
+ * backend's own detail text for it — facts the backend already knows at
+ * response time, not a client-side reconstruction (gastrolog-9akebz):
+ * storage protect names the storage and its free-vs-floor numbers when
+ * locally sampled, or "reported by <node>" for a peer-broadcast verdict
+ * with no local sample; bounds name the bound kind and its value. Kept
+ * terse — this is inspector detail text, not a log line.
+ *
+ * @generated from message gastrolog.v1.VaultAdmissionRefusal
+ */
+export class VaultAdmissionRefusal extends Message<VaultAdmissionRefusal> {
+  /**
+   * @generated from field: gastrolog.v1.VaultAdmissionCause cause = 1;
+   */
+  cause = VaultAdmissionCause.UNSPECIFIED;
+
+  /**
+   * @generated from field: string detail = 2;
+   */
+  detail = "";
+
+  constructor(data?: PartialMessage<VaultAdmissionRefusal>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.VaultAdmissionRefusal";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "cause", kind: "enum", T: proto3.getEnumType(VaultAdmissionCause) },
+    { no: 2, name: "detail", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultAdmissionRefusal {
+    return new VaultAdmissionRefusal().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): VaultAdmissionRefusal {
+    return new VaultAdmissionRefusal().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): VaultAdmissionRefusal {
+    return new VaultAdmissionRefusal().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: VaultAdmissionRefusal | PlainMessage<VaultAdmissionRefusal> | undefined, b: VaultAdmissionRefusal | PlainMessage<VaultAdmissionRefusal> | undefined): boolean {
+    return proto3.util.equals(VaultAdmissionRefusal, a, b);
   }
 }
 

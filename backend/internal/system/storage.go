@@ -124,6 +124,21 @@ type FileStorage struct {
 	Name              string    `json:"name"`
 	Path              string    `json:"path,omitempty"`
 	MemoryBudgetBytes uint64    `json:"memoryBudgetBytes,omitempty"`
+
+	// DiskFreeWarn / DiskFreeFloor are disk-guard free-space thresholds on
+	// this storage's volume: an absolute free-space size ("10GB") or a
+	// percentage of the volume ("10%"), resolved per node against the
+	// volume actually sampled (ParseSizeOrPercent). Empty inherits the
+	// node defaults — the typeable expressions "10%" (warn) and "3%"
+	// (floor). Warn raises the disk-space alarm naming this storage;
+	// floor puts every vault placed here into admission refuse (cause
+	// STORAGE_DISK_PROTECT) while vaults on healthy storages keep
+	// ingesting. Moved off VaultConfig (gastrolog-9akebz): the thresholds
+	// guard the volume, not the vaults sharing it — N vaults on one
+	// storage evaluating the same statfs against potentially different
+	// per-vault thresholds was the modeling error.
+	DiskFreeWarn  string `json:"diskFreeWarn,omitempty"`
+	DiskFreeFloor string `json:"diskFreeFloor,omitempty"`
 }
 
 // NodeStorageConfig defines the file storages for a specific cluster node.

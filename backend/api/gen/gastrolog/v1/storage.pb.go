@@ -31,8 +31,18 @@ type FileStorage struct {
 	Name              string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
 	Path              string                 `protobuf:"bytes,4,opt,name=path,proto3" json:"path,omitempty"`
 	MemoryBudgetBytes uint64                 `protobuf:"varint,5,opt,name=memory_budget_bytes,json=memoryBudgetBytes,proto3" json:"memory_budget_bytes,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Disk-guard free-space thresholds for this storage: an absolute size
+	// ("10GB") or a percentage of the volume ("10%"), resolved against the
+	// volume actually sampled. Empty inherits the node defaults (10%/3%).
+	// Warn raises the disk-space alarm naming this storage; floor puts
+	// every vault placed here into admission refuse (cause
+	// STORAGE_DISK_PROTECT) while vaults on healthy storages keep
+	// ingesting. gastrolog-9akebz: moved off VaultConfig — the thresholds
+	// guard the volume, not the vaults sharing it.
+	DiskFreeWarn  string `protobuf:"bytes,6,opt,name=disk_free_warn,json=diskFreeWarn,proto3" json:"disk_free_warn,omitempty"`
+	DiskFreeFloor string `protobuf:"bytes,7,opt,name=disk_free_floor,json=diskFreeFloor,proto3" json:"disk_free_floor,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *FileStorage) Reset() {
@@ -98,6 +108,20 @@ func (x *FileStorage) GetMemoryBudgetBytes() uint64 {
 		return x.MemoryBudgetBytes
 	}
 	return 0
+}
+
+func (x *FileStorage) GetDiskFreeWarn() string {
+	if x != nil {
+		return x.DiskFreeWarn
+	}
+	return ""
+}
+
+func (x *FileStorage) GetDiskFreeFloor() string {
+	if x != nil {
+		return x.DiskFreeFloor
+	}
+	return ""
 }
 
 // NodeStorageConfig declares all locally-attached storage available on a node.
@@ -398,13 +422,15 @@ var File_gastrolog_v1_storage_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_storage_proto_rawDesc = "" +
 	"\n" +
-	"\x1agastrolog/v1/storage.proto\x12\fgastrolog.v1\"\x9a\x01\n" +
+	"\x1agastrolog/v1/storage.proto\x12\fgastrolog.v1\"\xe8\x01\n" +
 	"\vFileStorage\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12#\n" +
 	"\rstorage_class\x18\x02 \x01(\rR\fstorageClass\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12\x12\n" +
 	"\x04path\x18\x04 \x01(\tR\x04path\x12.\n" +
-	"\x13memory_budget_bytes\x18\x05 \x01(\x04R\x11memoryBudgetBytes\"l\n" +
+	"\x13memory_budget_bytes\x18\x05 \x01(\x04R\x11memoryBudgetBytes\x12$\n" +
+	"\x0edisk_free_warn\x18\x06 \x01(\tR\fdiskFreeWarn\x12&\n" +
+	"\x0fdisk_free_floor\x18\a \x01(\tR\rdiskFreeFloor\"l\n" +
 	"\x11NodeStorageConfig\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\fR\x06nodeId\x12>\n" +
 	"\rfile_storages\x18\x02 \x03(\v2\x19.gastrolog.v1.FileStorageR\ffileStorages\"S\n" +

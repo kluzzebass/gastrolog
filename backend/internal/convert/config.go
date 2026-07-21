@@ -94,6 +94,8 @@ func NodeStorageConfigToProto(cfg system.NodeStorageConfig) *gastrologv1.NodeSto
 			Name:              fs.Name,
 			Path:              fs.Path,
 			MemoryBudgetBytes: fs.MemoryBudgetBytes,
+			DiskFreeWarn:      fs.DiskFreeWarn,
+			DiskFreeFloor:     fs.DiskFreeFloor,
 		}
 	}
 	return &gastrologv1.NodeStorageConfig{
@@ -116,6 +118,8 @@ func NodeStorageConfigFromProto(p *gastrologv1.NodeStorageConfig) system.NodeSto
 			Name:              a.GetName(),
 			Path:              a.GetPath(),
 			MemoryBudgetBytes: a.GetMemoryBudgetBytes(),
+			DiskFreeWarn:      a.GetDiskFreeWarn(),
+			DiskFreeFloor:     a.GetDiskFreeFloor(),
 		}
 		if len(a.GetId()) > 0 {
 			fs.ID = glid.FromBytes(a.GetId())
@@ -160,8 +164,6 @@ func VaultConfigToProto(v system.VaultConfig) *gastrologv1.VaultConfig {
 		CacheBudget:          v.CacheBudget,
 		CacheTtl:             v.CacheTTL,
 		RetentionDisposition: v.RetentionDisposition,
-		DiskFreeWarn:         v.DiskFreeWarn,
-		DiskFreeFloor:        v.DiskFreeFloor,
 	}
 	pb.RotationPolicyId = glid.OptionalToProto(v.RotationPolicyID)
 	pb.CloudServiceId = glid.OptionalToProto(v.CloudServiceID)
@@ -187,8 +189,6 @@ func VaultConfigFromProto(p *gastrologv1.VaultConfig) (system.VaultConfig, error
 		CacheBudget:                    p.GetCacheBudget(),
 		CacheTTL:                       p.GetCacheTtl(),
 		RetentionDisposition:           p.GetRetentionDisposition(),
-		DiskFreeWarn:                   p.GetDiskFreeWarn(),
-		DiskFreeFloor:                  p.GetDiskFreeFloor(),
 		RotationPolicyID:               glid.OptionalFromProto(p.GetRotationPolicyId()),
 		CloudServiceID:                 glid.OptionalFromProto(p.GetCloudServiceId()),
 		RetentionTransferTargetVaultID: glid.OptionalFromProto(p.GetRetentionTransferTargetVaultId()),

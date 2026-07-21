@@ -998,8 +998,6 @@ func copyVaultConfig(st system.VaultConfig) system.VaultConfig {
 		CacheBudget:          st.CacheBudget,
 		CacheTTL:             st.CacheTTL,
 		RetentionDisposition: st.RetentionDisposition,
-		DiskFreeWarn:         st.DiskFreeWarn,
-		DiskFreeFloor:        st.DiskFreeFloor,
 	}
 	if st.RotationPolicyID != nil {
 		id := *st.RotationPolicyID

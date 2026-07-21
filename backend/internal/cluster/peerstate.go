@@ -319,13 +319,15 @@ func (p *PeerState) AggregatePipelineDisk() map[glid.GLID][]PeerVaultPipelineDis
 	return out
 }
 
-// VaultDiskProtected reports whether any live peer has this vault's local
-// backing volume below its free-space floor. Combined with the local guard,
-// this makes per-vault admission cluster-consistent: the starved volume is
+// VaultStorageProtected reports whether any live peer has a storage backing
+// this vault below its free-space floor (gastrolog-9akebz: renamed from
+// VaultDiskProtected — the thresholds moved from VaultConfig to the storage
+// entity a vault's placements reference). Combined with the local guard,
+// this makes per-vault admission cluster-consistent: the starved storage is
 // usually on a different node than the front door taking the records.
-func (p *PeerState) VaultDiskProtected(vaultID glid.GLID) bool {
+func (p *PeerState) VaultStorageProtected(vaultID glid.GLID) bool {
 	return p.vaultListedByAnyPeer(vaultID, func(ns *gastrologv1.NodeStats) [][]byte {
-		return ns.DiskProtectedVaultIds
+		return ns.StorageProtectedVaultIds
 	})
 }
 
@@ -356,11 +358,12 @@ func (p *PeerState) VaultChunkCountBoundCapped(vaultID glid.GLID) bool {
 	})
 }
 
-// VaultDiskProtectedNodes returns the live peers currently reporting this
-// vault's local backing volume under disk protect — the WHO to
-// VaultDiskProtected's whether. The placement manager uses it to name the
-// degraded home in the vault-home-cannot-store alarm (gastrolog-38bm9t).
-func (p *PeerState) VaultDiskProtectedNodes(vaultID glid.GLID) []string {
+// VaultStorageProtectedNodes returns the live peers currently reporting a
+// storage backing this vault under disk protect — the WHO to
+// VaultStorageProtected's whether. The placement manager uses it to name
+// the degraded home in the vault-home-cannot-store alarm (gastrolog-38bm9t).
+// Renamed from VaultDiskProtectedNodes (gastrolog-9akebz).
+func (p *PeerState) VaultStorageProtectedNodes(vaultID glid.GLID) []string {
 	want := vaultID.ToProto()
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -370,7 +373,7 @@ func (p *PeerState) VaultDiskProtectedNodes(vaultID glid.GLID) []string {
 		if now.Sub(e.received) > p.ttl || e.stats == nil {
 			continue
 		}
-		for _, id := range e.stats.DiskProtectedVaultIds {
+		for _, id := range e.stats.StorageProtectedVaultIds {
 			if string(id) == string(want) {
 				nodes = append(nodes, nodeID)
 				break
@@ -378,6 +381,45 @@ func (p *PeerState) VaultDiskProtectedNodes(vaultID glid.GLID) []string {
 		}
 	}
 	return nodes
+}
+
+// VaultStorageProtectedNodeNames is VaultStorageProtectedNodes' operator-
+// facing sibling: the same live peers, named instead of ID-keyed, for the
+// admission-detail signal's "reported by <name>" text (gastrolog-9akebz).
+// Deliberately a SEPARATE method from VaultStorageProtectedNodes rather
+// than a repurposing of it — the placement manager compares that method's
+// output against raw node IDs for set membership (vaultStorageProtectedSet
+// in backend/internal/app/placement.go), so swapping its return value to
+// names would silently break that match.
+//
+// The name comes from each peer's OWN broadcast NodeStats.NodeName —
+// already resident in this entry, no config-store lookup — falling back to
+// the node ID when a peer hasn't reported a name yet. Sorted so the joined
+// "reported by a, b" string is stable between reads (map iteration order
+// is not).
+func (p *PeerState) VaultStorageProtectedNodeNames(vaultID glid.GLID) []string {
+	want := vaultID.ToProto()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	now := time.Now()
+	var names []string
+	for nodeID, e := range p.entries {
+		if now.Sub(e.received) > p.ttl || e.stats == nil {
+			continue
+		}
+		for _, id := range e.stats.StorageProtectedVaultIds {
+			if string(id) == string(want) {
+				name := e.stats.NodeName
+				if name == "" {
+					name = nodeID
+				}
+				names = append(names, name)
+				break
+			}
+		}
+	}
+	sort.Strings(names)
+	return names
 }
 
 func (p *PeerState) vaultListedByAnyPeer(vaultID glid.GLID, list func(*gastrologv1.NodeStats) [][]byte) bool {

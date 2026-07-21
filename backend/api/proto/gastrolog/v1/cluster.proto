@@ -158,15 +158,20 @@ message NodeStats {
   uint64 raft_failed_heartbeats_total = 46;
   double raft_elections_per_min = 47;
 
-  // Vaults whose backing volume on THIS node is below its free-space floor.
-  // Every node's admission gate honors the union across live peers, so a
-  // starved vault volume anywhere in the cluster suspends new records for
-  // that vault at every front door while other vaults keep ingesting.
-  repeated bytes disk_protected_vault_ids = 48;
+  // Vaults with a placement on a storage, THIS node hosts, that is below
+  // its free-space floor. Every node's admission gate honors the union
+  // across live peers, so a starved storage anywhere in the cluster
+  // suspends new records for every vault placed on it at every front
+  // door while vaults on healthy storages keep ingesting. Renamed from
+  // disk_protected_vault_ids (gastrolog-9akebz: thresholds moved from
+  // VaultConfig to the storage entity; still vault-keyed — the node that
+  // samples the storage already knows which of its OWN vaults are placed
+  // on it, so the broadcast shape didn't need to become storage-keyed).
+  repeated bytes storage_protected_vault_ids = 48;
 
   // Vaults whose local disk claim on THIS node has reached their per-node
   // max-size bound. Honored cluster-wide by the same per-vault admission
-  // gate as disk_protected_vault_ids, with a bound-specific error.
+  // gate as storage_protected_vault_ids, with a bound-specific error.
   repeated bytes size_capped_vault_ids = 49;
 
   // Vaults whose max-age retention bound is still violated after this

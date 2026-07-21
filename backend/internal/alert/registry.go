@@ -268,11 +268,17 @@ var catalog = []AlarmType{
 		Response: "Read the alarm detail for which bound and vault. If retention-deferred is also standing for this vault, that names why the sweep isn't clearing it; otherwise raise the bound, shorten it enough that draining can keep up, or turn the policy's refuse flag off (or simply leave it unset) to accept drain-only.",
 	},
 	{
+		// gastrolog-9akebz: the free-space thresholds moved from VaultConfig
+		// to the storage entity a vault's placements reference, and the
+		// guard evaluates each storage ONCE — the instance key is the
+		// storage ID (was the vault ID), and the detail text names the
+		// storage and its node, since every vault placed there refuses
+		// together for the same physical condition.
 		IDPrefix: "disk-space-exhausted",
 		Priority: High, // suspended admission is not lost data
 		Source:   "storage",
-		Cause:    "The vault's volume is out of space; admission for this vault is suspended.",
-		Response: "Free space, add capacity, raise the vault's threshold, or shorten its retention.",
+		Cause:    "A storage is out of space; admission for every vault placed on it is suspended.",
+		Response: "Free space, add capacity, raise the storage's threshold, or shorten retention for the vaults placed on it.",
 	},
 	{
 		IDPrefix: "node-disk-space-exhausted",
@@ -305,11 +311,13 @@ var catalog = []AlarmType{
 		Response: "Raise the bound (set a larger max size on an attached retention policy) or shorten retention — before records start being refused.",
 	},
 	{
+		// gastrolog-9akebz: instance key is the storage ID (was the vault
+		// ID) — see disk-space-exhausted's comment.
 		IDPrefix: "disk-space-low",
 		Priority: Low,
 		Source:   "storage",
-		Cause:    "The vault's volume is below its free-space warn band.",
-		Response: "Free space, add capacity, raise the vault's threshold, or shorten its retention.",
+		Cause:    "A storage is below its free-space warn band.",
+		Response: "Free space, add capacity, raise the storage's threshold, or shorten retention for the vaults placed on it.",
 	},
 	{
 		IDPrefix: "retention-rate",

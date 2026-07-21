@@ -5,10 +5,11 @@ package server_test
 // the backend's own admission-causes collector, not be derived client-side
 // from alarm state. These tests drive the REAL orchestrator admission gate
 // (via the same exported peer-broadcast hooks production wiring installs —
-// SetRemoteVaultDiskProtected / SetRemoteVaultSizeCapped, per the existing
+// SetRemoteVaultStorageProtected / SetRemoteVaultSizeCapped, per the existing
 // TestMultiNode_RetentionSubmitDefersOnRemoteCappedDestination pattern) and
 // assert the ListVaults/GetVault RPCs report exactly what the gate itself
-// would enforce.
+// would enforce. gastrolog-9akebz: AdmissionRefused entries are now
+// VaultAdmissionRefusal{cause, detail} pairs, not bare cause enums.
 
 import (
 	"context"
@@ -113,18 +114,25 @@ func TestListVaultsAdmissionRefusedEmpty(t *testing.T) {
 	}
 }
 
-// TestListVaultsAdmissionRefusedDiskProtect drives the real admission gate's
-// peer-broadcast half (SetRemoteVaultDiskProtected) and asserts the RPC field
-// reports VAULT_ADMISSION_CAUSE_VAULT_DISK_PROTECT — the same cause
-// vaultAdmissionGate would refuse the vault with.
-func TestListVaultsAdmissionRefusedDiskProtect(t *testing.T) {
+// TestListVaultsAdmissionRefusedStorageDiskProtect drives the real admission
+// gate's peer-broadcast half (SetRemoteVaultStorageProtected) and asserts
+// the RPC field reports VAULT_ADMISSION_CAUSE_STORAGE_DISK_PROTECT — the
+// same cause vaultAdmissionGate would refuse the vault with — plus a
+// non-empty detail naming the reporting node (gastrolog-9akebz).
+func TestListVaultsAdmissionRefusedStorageDiskProtect(t *testing.T) {
 	t.Parallel()
 	sysClient, vaultClient, _, orch := admissionTestSetup(t)
 	ctx := context.Background()
 	id := glid.New()
 	putAdmissionTestVault(t, sysClient, id, "protected")
 
-	orch.SetRemoteVaultDiskProtected(func(vid glid.GLID) bool { return vid == id })
+	orch.SetRemoteVaultStorageProtected(func(vid glid.GLID) bool { return vid == id })
+	orch.SetRemoteVaultStorageProtectedNodes(func(vid glid.GLID) []string {
+		if vid == id {
+			return []string{"data-2"}
+		}
+		return nil
+	})
 
 	resp, err := vaultClient.ListVaults(ctx, connect.NewRequest(&gastrologv1.ListVaultsRequest{}))
 	if err != nil {
@@ -134,9 +142,12 @@ func TestListVaultsAdmissionRefusedDiskProtect(t *testing.T) {
 	if info == nil {
 		t.Fatal("vault missing from ListVaults response")
 	}
-	want := []gastrologv1.VaultAdmissionCause{gastrologv1.VaultAdmissionCause_VAULT_ADMISSION_CAUSE_VAULT_DISK_PROTECT}
+	want := []gastrologv1.VaultAdmissionCause{gastrologv1.VaultAdmissionCause_VAULT_ADMISSION_CAUSE_STORAGE_DISK_PROTECT}
 	if !causesMatch(info.AdmissionRefused, want) {
 		t.Fatalf("AdmissionRefused = %v, want %v", info.AdmissionRefused, want)
+	}
+	if len(info.AdmissionRefused) != 1 || info.AdmissionRefused[0].Detail == "" {
+		t.Fatalf("AdmissionRefused detail must be populated, got %+v", info.AdmissionRefused)
 	}
 
 	// GetVault must agree with ListVaults — same collector, same verdict.
@@ -150,7 +161,7 @@ func TestListVaultsAdmissionRefusedDiskProtect(t *testing.T) {
 
 	// Cause releases: the RPC field must clear on the next read, not stay
 	// stuck reporting a stale refusal.
-	orch.SetRemoteVaultDiskProtected(func(glid.GLID) bool { return false })
+	orch.SetRemoteVaultStorageProtected(func(glid.GLID) bool { return false })
 	resp2, err := vaultClient.ListVaults(ctx, connect.NewRequest(&gastrologv1.ListVaultsRequest{}))
 	if err != nil {
 		t.Fatalf("ListVaults (after release): %v", err)
@@ -161,8 +172,8 @@ func TestListVaultsAdmissionRefusedDiskProtect(t *testing.T) {
 	}
 }
 
-// TestListVaultsAdmissionRefusedCombination drives both the disk-protect and
-// max-size peer hooks at once and asserts BOTH causes are reported, in
+// TestListVaultsAdmissionRefusedCombination drives both the storage-protect
+// and max-size peer hooks at once and asserts BOTH causes are reported, in
 // gate-check order — the RPC field must show the full set even though
 // vaultAdmissionGate itself only acts on the first.
 func TestListVaultsAdmissionRefusedCombination(t *testing.T) {
@@ -172,7 +183,7 @@ func TestListVaultsAdmissionRefusedCombination(t *testing.T) {
 	id := glid.New()
 	putAdmissionTestVault(t, sysClient, id, "double-refused")
 
-	orch.SetRemoteVaultDiskProtected(func(vid glid.GLID) bool { return vid == id })
+	orch.SetRemoteVaultStorageProtected(func(vid glid.GLID) bool { return vid == id })
 	orch.SetRemoteVaultSizeCapped(func(vid glid.GLID) bool { return vid == id })
 
 	resp, err := vaultClient.ListVaults(ctx, connect.NewRequest(&gastrologv1.ListVaultsRequest{}))
@@ -184,7 +195,7 @@ func TestListVaultsAdmissionRefusedCombination(t *testing.T) {
 		t.Fatal("vault missing from ListVaults response")
 	}
 	want := []gastrologv1.VaultAdmissionCause{
-		gastrologv1.VaultAdmissionCause_VAULT_ADMISSION_CAUSE_VAULT_DISK_PROTECT,
+		gastrologv1.VaultAdmissionCause_VAULT_ADMISSION_CAUSE_STORAGE_DISK_PROTECT,
 		gastrologv1.VaultAdmissionCause_VAULT_ADMISSION_CAUSE_MAX_SIZE_BOUND,
 	}
 	if !causesMatch(info.AdmissionRefused, want) {
@@ -192,12 +203,12 @@ func TestListVaultsAdmissionRefusedCombination(t *testing.T) {
 	}
 }
 
-func causesMatch(got []gastrologv1.VaultAdmissionCause, want []gastrologv1.VaultAdmissionCause) bool {
+func causesMatch(got []*gastrologv1.VaultAdmissionRefusal, want []gastrologv1.VaultAdmissionCause) bool {
 	if len(got) != len(want) {
 		return false
 	}
 	for i := range got {
-		if got[i] != want[i] {
+		if got[i].Cause != want[i] {
 			return false
 		}
 	}

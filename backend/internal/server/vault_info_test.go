@@ -52,7 +52,7 @@ func TestAdmissionCauseToProto(t *testing.T) {
 		cause  orchestrator.VaultAdmissionCause
 		expect apiv1.VaultAdmissionCause
 	}{
-		{"vault disk protect", orchestrator.VaultAdmissionCauseVaultDiskProtect, apiv1.VaultAdmissionCause_VAULT_ADMISSION_CAUSE_VAULT_DISK_PROTECT},
+		{"storage disk protect", orchestrator.VaultAdmissionCauseStorageDiskProtect, apiv1.VaultAdmissionCause_VAULT_ADMISSION_CAUSE_STORAGE_DISK_PROTECT},
 		{"max-size bound", orchestrator.VaultAdmissionCauseMaxSizeBound, apiv1.VaultAdmissionCause_VAULT_ADMISSION_CAUSE_MAX_SIZE_BOUND},
 		{"backlog budget", orchestrator.VaultAdmissionCauseBacklogBudget, apiv1.VaultAdmissionCause_VAULT_ADMISSION_CAUSE_BACKLOG_BUDGET},
 		{"unrecognized value resolves to unspecified", orchestrator.VaultAdmissionCause(99), apiv1.VaultAdmissionCause_VAULT_ADMISSION_CAUSE_UNSPECIFIED},

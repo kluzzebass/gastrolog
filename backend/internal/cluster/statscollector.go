@@ -129,10 +129,13 @@ type StatsProvider interface {
 	VaultAppendStats() []StatsVaultAppendSnapshot
 	PipelineDiskSnapshots() []StatsVaultPipelineDiskSnapshot
 	LocalStorageBytes() int64
-	// DiskProtectedVaults lists vaults whose local backing volume is below
-	// its free-space floor. Broadcast so every node's admission gate can
-	// honor the cluster-wide union.
-	DiskProtectedVaults() []glid.GLID
+	// StorageProtectedVaults lists vaults with a placement on a LOCALLY-
+	// hosted storage that is below its free-space floor (gastrolog-9akebz:
+	// renamed from DiskProtectedVaults — the thresholds moved from
+	// VaultConfig to the storage entity a vault's placements reference).
+	// Broadcast so every node's admission gate can honor the cluster-wide
+	// union.
+	StorageProtectedVaults() []glid.GLID
 	// SizeCappedVaults lists vaults at their local max-size bound —
 	// broadcast for the same cluster-wide admission union.
 	SizeCappedVaults() []glid.GLID
@@ -482,7 +485,7 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 		}
 
 		stats.StorageBytes = c.cfg.Stats.LocalStorageBytes()
-		stats.DiskProtectedVaultIds = glidsToProto(c.cfg.Stats.DiskProtectedVaults())
+		stats.StorageProtectedVaultIds = glidsToProto(c.cfg.Stats.StorageProtectedVaults())
 		stats.SizeCappedVaultIds = glidsToProto(c.cfg.Stats.SizeCappedVaults())
 		stats.AgeBoundVaultIds = glidsToProto(c.cfg.Stats.AgeBoundCappedVaults())
 		stats.ChunkCountBoundVaultIds = glidsToProto(c.cfg.Stats.ChunkCountBoundCappedVaults())

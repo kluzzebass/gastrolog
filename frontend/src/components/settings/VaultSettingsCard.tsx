@@ -79,8 +79,6 @@ function vaultToEntry(v: VaultConfig): StorageEntry {
     retentionPolicyId: v.retentionRules[0] ? encode(v.retentionRules[0].retentionPolicyId) : "",
     retentionDisposition: v.retentionDisposition || "delete",
     retentionTransferTarget: v.retentionTransferTargetVaultId.length > 0 ? encode(v.retentionTransferTargetVaultId) : "",
-    diskFreeWarn: v.diskFreeWarn,
-    diskFreeFloor: v.diskFreeFloor,
     replicationFactor: String(v.replicationFactor || 1),
     path: v.path || "",
     nodeId: "",
@@ -106,8 +104,8 @@ function entryToVault(
     cloudServiceId: cloudBacked ? decode(entry.cloudServiceId) : new Uint8Array(0),
     cacheEviction: cloudBacked ? (entry.cacheEviction || "lru") : "",
     // Empty field = unset (server defaults it for cloud vaults), not explicit
-    // 0 (rejected); same size-expression convention as diskFreeFloor below
-    // (gastrolog-338j51).
+    // 0 (rejected) — same size-expression convention as the storage's
+    // disk-free thresholds (gastrolog-338j51).
     cacheBudget: cloudBacked ? entry.cacheBudget : "",
     cacheTtl: cloudBacked ? entry.cacheTTL : "",
     // Empty field = unset (server defaults it for memory vaults), not
@@ -122,8 +120,6 @@ function entryToVault(
       entry.type !== "jsonl" && entry.retentionDisposition === "transfer" && entry.retentionTransferTarget
         ? decode(entry.retentionTransferTarget)
         : new Uint8Array(0),
-    diskFreeWarn: entry.type === "file" ? entry.diskFreeWarn : "",
-    diskFreeFloor: entry.type === "file" ? entry.diskFreeFloor : "",
     replicationFactor: entry.type === "jsonl" ? 1 : parseInt(entry.replicationFactor, 10) || 1,
     path: entry.type === "jsonl" ? entry.path : "",
     placements: vault.placements,

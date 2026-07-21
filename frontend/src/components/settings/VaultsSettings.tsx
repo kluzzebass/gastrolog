@@ -64,8 +64,6 @@ export interface StorageEntry {
   retentionPolicyId: string;
   retentionDisposition: string; // "delete" (default) | "route" | "transfer"
   retentionTransferTarget: string; // vault ID — required when retentionDisposition is "transfer"
-  diskFreeWarn: string; // size ("10GB") or % of the volume ("10%"); empty inherits the node default ("10%")
-  diskFreeFloor: string; // size or % of the volume; empty inherits the node default ("3%")
   replicationFactor: string;
   path: string;
   nodeId: string;
@@ -85,8 +83,6 @@ function emptyStorageEntry(type: VaultTypeLabel): StorageEntry {
     retentionPolicyId: "",
     retentionDisposition: "delete",
     retentionTransferTarget: "",
-    diskFreeWarn: "",
-    diskFreeFloor: "",
     replicationFactor: "1",
     path: "",
     nodeId: "",
@@ -299,35 +295,6 @@ export function VaultStorageForm({
                 min={0}
               />
             )}
-          </FormField>
-
-          <FormField
-            label="Disk Free Warn"
-            dark={dark}
-            description="Free space on the vault's backing volume below which the disk-space alarm raises. A size like 10GB, or a percentage of the volume like 10%. Empty inherits the node default."
-          >
-            <TextInput
-              value={storage.diskFreeWarn}
-              onChange={(v) => onUpdate({ diskFreeWarn: v })}
-              placeholder="10%"
-              dark={dark}
-              mono
-              examples={["10%", "10GB", "50GB"]}
-            />
-          </FormField>
-          <FormField
-            label="Disk Free Floor"
-            dark={dark}
-            description="Free space below which new records for this vault are refused cluster-wide until space frees. A size like 3GB, or a percentage of the volume like 3%. Empty inherits the node default."
-          >
-            <TextInput
-              value={storage.diskFreeFloor}
-              onChange={(v) => onUpdate({ diskFreeFloor: v })}
-              placeholder="3%"
-              dark={dark}
-              mono
-              examples={["3%", "3GB", "10GB"]}
-            />
           </FormField>
 
           {/* Cache eviction tuning is only meaningful on cloud-backed
@@ -605,8 +572,6 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
         storage.type !== "jsonl" && storage.retentionDisposition === "transfer" && storage.retentionTransferTarget
           ? decode(storage.retentionTransferTarget)
           : new Uint8Array(0),
-      diskFreeWarn: storage.type === "file" ? storage.diskFreeWarn : "",
-      diskFreeFloor: storage.type === "file" ? storage.diskFreeFloor : "",
       replicationFactor: parseInt(storage.replicationFactor, 10) || 1,
       path: storage.type === "jsonl" ? storage.path : "",
     });

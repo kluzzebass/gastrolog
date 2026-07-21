@@ -260,10 +260,19 @@ type Orchestrator struct {
 	// protect mode (ingest admission suspended below the floor).
 	diskGuard *diskGuard
 
-	// remoteVaultDiskProtected consults peer NodeStats broadcasts for vaults
-	// under disk protect on OTHER nodes, so this node's per-vault admission
-	// gate is cluster-consistent. Installed via SetRemoteVaultDiskProtected.
-	remoteVaultDiskProtected atomic.Pointer[func(glid.GLID) bool]
+	// remoteVaultStorageProtected consults peer NodeStats broadcasts for
+	// vaults with a storage under disk protect on OTHER nodes, so this
+	// node's per-vault admission gate is cluster-consistent. Installed via
+	// SetRemoteVaultStorageProtected. Renamed from remoteVaultDiskProtected
+	// (gastrolog-9akebz).
+	remoteVaultStorageProtected atomic.Pointer[func(glid.GLID) bool]
+
+	// remoteVaultStorageProtectedNodes is remoteVaultStorageProtected's
+	// "WHO" sibling: the reporting peers' node IDs, for the admission
+	// detail signal's "reported by <node>" text when this node has no
+	// local sample to attach numbers to. Installed via
+	// SetRemoteVaultStorageProtectedNodes.
+	remoteVaultStorageProtectedNodes atomic.Pointer[func(glid.GLID) []string]
 
 	// remoteVaultSizeCapped is the same peer lookup for vaults at their
 	// max-size bound elsewhere. Installed via SetRemoteVaultSizeCapped.

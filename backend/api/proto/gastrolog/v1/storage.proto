@@ -14,6 +14,17 @@ message FileStorage {
   string name = 3;
   string path = 4;
   uint64 memory_budget_bytes = 5;
+
+  // Disk-guard free-space thresholds for this storage: an absolute size
+  // ("10GB") or a percentage of the volume ("10%"), resolved against the
+  // volume actually sampled. Empty inherits the node defaults (10%/3%).
+  // Warn raises the disk-space alarm naming this storage; floor puts
+  // every vault placed here into admission refuse (cause
+  // STORAGE_DISK_PROTECT) while vaults on healthy storages keep
+  // ingesting. gastrolog-9akebz: moved off VaultConfig — the thresholds
+  // guard the volume, not the vaults sharing it.
+  string disk_free_warn = 6;
+  string disk_free_floor = 7;
 }
 
 // NodeStorageConfig declares all locally-attached storage available on a node.

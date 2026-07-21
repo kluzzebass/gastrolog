@@ -32,8 +32,8 @@ A **File** vault is local-only by default. Selecting a Cloud Storage on it makes
 
 - **Cloud Storage** — optional. Select a [cloud service](help:storage-config) to make the vault cloud-backed; leave as "Local-only" to keep all data on disk. Fixed at vault creation — to change, create a new vault and migrate data.
 - **Storage Class** — which [file storages](help:storage-config) this vault uses. For local-only vaults this hosts all chunks; for cloud-backed vaults it hosts the active chunk and warm cache (sealed chunks live in the cloud). The placement manager assigns one file storage per replica.
-- **Disk Free Warn** — free space on the vault's backing volume below which the disk-space alarm raises for this vault. An absolute size like `10GB`, or a percentage of the volume like `10%`. Leave empty to inherit the node default.
-- **Disk Free Floor** — free space below which the cluster stops accepting new records destined to this vault, on every node, until space frees. Records for other vaults keep flowing. A size like `3GB` or a percentage like `3%`; leave empty to inherit the node default.
+
+Disk-free warn/floor thresholds are no longer set per vault — they belong to the [file storage](help:storage-config) a vault's chunks are placed on, since multiple vaults commonly share one physical volume.
 
 There is no vault-level size cap here anymore — the disk-claim bound lives on the retention policy's **Max Size**, which drains oldest chunks past it, and — with that policy's **Refuse** flag on — also refuses admission while over it. See [**Max Size**](help:policy-retention) on the Retention Policies help for the combined mechanics, the min-wins resolution across a vault's attached policies, and the default floor that applies when no attached policy states a size.
 

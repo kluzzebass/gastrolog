@@ -39,6 +39,25 @@ export class FileStorage extends Message<FileStorage> {
    */
   memoryBudgetBytes = protoInt64.zero;
 
+  /**
+   * Disk-guard free-space thresholds for this storage: an absolute size
+   * ("10GB") or a percentage of the volume ("10%"), resolved against the
+   * volume actually sampled. Empty inherits the node defaults (10%/3%).
+   * Warn raises the disk-space alarm naming this storage; floor puts
+   * every vault placed here into admission refuse (cause
+   * STORAGE_DISK_PROTECT) while vaults on healthy storages keep
+   * ingesting. gastrolog-9akebz: moved off VaultConfig — the thresholds
+   * guard the volume, not the vaults sharing it.
+   *
+   * @generated from field: string disk_free_warn = 6;
+   */
+  diskFreeWarn = "";
+
+  /**
+   * @generated from field: string disk_free_floor = 7;
+   */
+  diskFreeFloor = "";
+
   constructor(data?: PartialMessage<FileStorage>) {
     super();
     proto3.util.initPartial(data, this);
@@ -52,6 +71,8 @@ export class FileStorage extends Message<FileStorage> {
     { no: 3, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 4, name: "path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 5, name: "memory_budget_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 6, name: "disk_free_warn", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 7, name: "disk_free_floor", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): FileStorage {

@@ -55,8 +55,8 @@ func (o *Orchestrator) pullMissingGLCB(vaultID glid.GLID, e vaultctlfsm.Manifest
 	if o.diskProtectActive() {
 		return // below the free-space floor: recovery writes wait for space
 	}
-	if o.diskGuard != nil && o.diskGuard.vaultProtectActive(vaultID) {
-		return // this vault's own backing volume is below its floor
+	if o.diskGuard != nil && o.diskGuard.vaultStorageProtected(vaultID) {
+		return // this vault's own backing storage is below its floor
 	}
 	if o.diskGuard != nil && o.diskGuard.vaultSizeCapped(vaultID) {
 		return // at the max-size bound: replica pulls grow the local claim

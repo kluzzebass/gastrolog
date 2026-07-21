@@ -73,6 +73,8 @@ export function useSetNodeStorageConfig() {
         name: string;
         path: string;
         memoryBudgetBytes: bigint;
+        diskFreeWarn: string;
+        diskFreeFloor: string;
       }[];
     }) => {
       return systemClient.setNodeStorageConfig({

@@ -241,33 +241,81 @@ func TestPeerJobState_Delete_Missing(t *testing.T) {
 	pjs.Delete("never-existed") // must not panic
 }
 
-// TestPeerState_VaultDiskProtected pins the broadcast half of per-vault disk
-// protect: a vault listed in any LIVE peer's DiskProtectedVaultIds reads as
+// TestPeerState_VaultStorageProtected pins the broadcast half of per-vault disk
+// protect: a vault listed in any LIVE peer's StorageProtectedVaultIds reads as
 // protected here; an expired peer's verdict does not linger.
-func TestPeerState_VaultDiskProtected(t *testing.T) {
+func TestPeerState_VaultStorageProtected(t *testing.T) {
 	starved := glid.New()
 	healthy := glid.New()
 
 	ps := NewPeerState(time.Minute)
 	ps.Update("node-a", &gastrologv1.NodeStats{
-		DiskProtectedVaultIds: [][]byte{starved.ToProto()},
+		StorageProtectedVaultIds: [][]byte{starved.ToProto()},
 	}, time.Now())
 	ps.Update("node-b", &gastrologv1.NodeStats{}, time.Now())
 
-	if !ps.VaultDiskProtected(starved) {
+	if !ps.VaultStorageProtected(starved) {
 		t.Fatal("vault protected on a live peer must read as protected")
 	}
-	if ps.VaultDiskProtected(healthy) {
+	if ps.VaultStorageProtected(healthy) {
 		t.Fatal("unlisted vault must not read as protected")
 	}
 
 	// The reporting peer's entry expires: its verdict expires with it —
 	// a dead node must not suspend a vault's admission forever.
 	ps.Update("node-a", &gastrologv1.NodeStats{
-		DiskProtectedVaultIds: [][]byte{starved.ToProto()},
+		StorageProtectedVaultIds: [][]byte{starved.ToProto()},
 	}, time.Now().Add(-2*time.Minute))
-	if ps.VaultDiskProtected(starved) {
+	if ps.VaultStorageProtected(starved) {
 		t.Fatal("expired peer's protect verdict must not linger")
+	}
+}
+
+// TestPeerState_VaultStorageProtectedNodeNames pins a review finding on
+// gastrolog-9akebz: the "reported by <node>" admission detail must name
+// nodes, not raw IDs, and the joined list must be stable between reads
+// (sorted) rather than following Go's randomized map iteration order.
+// Names come from each peer's own broadcast NodeStats.NodeName — a peer
+// that hasn't reported one yet (empty string) falls back to its node ID,
+// same contract as placementManager.nameOrID.
+func TestPeerState_VaultStorageProtectedNodeNames(t *testing.T) {
+	starved := glid.New()
+
+	ps := NewPeerState(time.Minute)
+	// Three reporting peers, updated out of sorted order, one with no
+	// NodeName yet (falls back to its raw node ID).
+	ps.Update("node-c", &gastrologv1.NodeStats{
+		NodeName:                 "charlie",
+		StorageProtectedVaultIds: [][]byte{starved.ToProto()},
+	}, time.Now())
+	ps.Update("node-a", &gastrologv1.NodeStats{
+		NodeName:                 "alpha",
+		StorageProtectedVaultIds: [][]byte{starved.ToProto()},
+	}, time.Now())
+	ps.Update("node-b", &gastrologv1.NodeStats{
+		// No NodeName reported yet: falls back to the raw node ID.
+		StorageProtectedVaultIds: [][]byte{starved.ToProto()},
+	}, time.Now())
+
+	got := ps.VaultStorageProtectedNodeNames(starved)
+	want := []string{"alpha", "charlie", "node-b"}
+	if len(got) != len(want) {
+		t.Fatalf("VaultStorageProtectedNodeNames = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("VaultStorageProtectedNodeNames = %v, want %v (sorted)", got, want)
+		}
+	}
+
+	// VaultStorageProtectedNodes (the placement manager's set-membership
+	// method) must stay ID-keyed — a repurposing to names would silently
+	// break placement's degraded-home matching against real node IDs.
+	ids := ps.VaultStorageProtectedNodes(starved)
+	for _, id := range ids {
+		if id != "node-a" && id != "node-b" && id != "node-c" {
+			t.Fatalf("VaultStorageProtectedNodes leaked a name instead of a node ID: %v", ids)
+		}
 	}
 }
 

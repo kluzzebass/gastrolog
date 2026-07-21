@@ -136,6 +136,8 @@ func newNodeAddStorageCmd() *cobra.Command {
 			name, _ := cmd.Flags().GetString("name")
 			path, _ := cmd.Flags().GetString("path")
 			storageClass, _ := cmd.Flags().GetUint32("storage-class")
+			diskFreeWarn, _ := cmd.Flags().GetString("disk-free-warn")
+			diskFreeFloor, _ := cmd.Flags().GetString("disk-free-floor")
 
 			client := clientFromCmd(cmd)
 			r, err := newResolver(context.Background(), client)
@@ -157,10 +159,12 @@ func newNodeAddStorageCmd() *cobra.Command {
 			// Append new storage.
 			newFsID := glid.New()
 			existing = append(existing, &v1.FileStorage{
-				Id:           newFsID.ToProto(),
-				Name:         name,
-				Path:         path,
-				StorageClass: storageClass,
+				Id:            newFsID.ToProto(),
+				Name:          name,
+				Path:          path,
+				StorageClass:  storageClass,
+				DiskFreeWarn:  diskFreeWarn,
+				DiskFreeFloor: diskFreeFloor,
 			})
 
 			_, err = client.System.SetNodeStorageConfig(context.Background(), connect.NewRequest(&v1.SetNodeStorageConfigRequest{
@@ -179,6 +183,8 @@ func newNodeAddStorageCmd() *cobra.Command {
 	cmd.Flags().String("name", "", "storage name (required)")
 	cmd.Flags().String("path", "", "storage path (default: auto)")
 	cmd.Flags().Uint32("storage-class", 1, "storage class")
+	cmd.Flags().String("disk-free-warn", "", "free space below which the disk-space alarm raises for this storage (e.g. 10GB, 10%). Empty inherits the node default (10%)")
+	cmd.Flags().String("disk-free-floor", "", "free space below which every vault placed on this storage is refused cluster-wide (e.g. 3GB, 3%). Empty inherits the node default (3%)")
 	_ = cmd.MarkFlagRequired("name")
 	return cmd
 }
@@ -232,11 +238,11 @@ func newNodeListStorageCmd() *cobra.Command {
 					rows = append(rows, []string{
 						nodeName, glid.FromBytes(fs.Id).String(), fs.Name,
 						strconv.FormatUint(uint64(fs.StorageClass), 10),
-						fs.Path,
+						fs.Path, fs.DiskFreeWarn, fs.DiskFreeFloor,
 					})
 				}
 			}
-			p.table([]string{"NODE", "STORAGE ID", "NAME", "CLASS", "PATH"}, rows)
+			p.table([]string{"NODE", "STORAGE ID", "NAME", "CLASS", "PATH", "DISK-FREE-WARN", "DISK-FREE-FLOOR"}, rows)
 			return nil
 		},
 	}
