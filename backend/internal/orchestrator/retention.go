@@ -298,6 +298,18 @@ func (o *Orchestrator) retentionSweepAll() {
 				o.alerts.Clear(alarmRetentionDeferred, runner.vaultID.String())
 				o.alerts.Clear(alarmRetentionUnenforceable, runner.vaultID.String())
 			}
+			// gastrolog-5yfaqj fix: the age/count bound-capped flags are
+			// THIS runner's verdict — nothing else on this node will ever
+			// call checkBoundViolations for this vault again once the
+			// runner is pruned (leadership moved, placement moved off,
+			// vault-ctl Raft lost its leader). Without releasing them
+			// here, a deposed leader keeps broadcasting
+			// age_bound_vault_ids/chunk_count_bound_vault_ids forever —
+			// every peer's admission-gate union refuses the vault
+			// cluster-wide permanently, long after the condition (and the
+			// runner that observed it) is gone.
+			o.SetVaultAgeBoundCapped(runner.vaultID, false)
+			o.SetVaultChunkCountBoundCapped(runner.vaultID, false)
 			delete(o.retention, key)
 		}
 	}
@@ -1085,26 +1097,13 @@ func (r *retentionRunner) checkBoundViolations(rules []retentionRule) {
 
 	var sealed []chunk.ChunkMeta
 	if needsCheck {
-		metas, err := r.cm.List()
-		if err != nil {
+		var ok bool
+		sealed, ok = r.currentSealedForBoundCheck()
+		if !ok {
 			// Transient — leave the guard's cached verdict as-is rather
 			// than guess; the next sweep retries. Mirrors sweep()'s own
 			// top-of-sweep List error handling.
 			return
-		}
-		r.mu.Lock()
-		vaultInst := r.findVaultInstance()
-		r.mu.Unlock()
-		if vaultInst != nil && vaultInst.OverlayFromFSM != nil {
-			for i := range metas {
-				metas[i] = vaultInst.OverlayFromFSM(metas[i])
-			}
-		}
-		metas = appendUnlistedManifestSealed(metas, vaultInst)
-		for _, m := range metas {
-			if m.Sealed {
-				sealed = append(sealed, m)
-			}
 		}
 	}
 
@@ -1128,6 +1127,51 @@ func (r *retentionRunner) checkBoundViolations(rules []retentionRule) {
 	// operator drops the last policy that stated it.
 	r.orch.SetVaultAgeBoundCapped(r.vaultID, ageViolated)
 	r.orch.SetVaultChunkCountBoundCapped(r.vaultID, countViolated)
+}
+
+// currentSealedForBoundCheck re-lists the vault's CURRENT sealed chunks for
+// checkBoundViolations — a fresh read reflecting whatever this sweep's
+// deletes actually did, not the pre-sweep snapshot sweep() started with.
+// Returns ok=false only on a transient list error, distinct from a
+// legitimately empty result.
+//
+// Ghost filter (gastrolog-5yfaqj review fix I1): a sealed chunk on disk
+// with no FSM manifest entry is the orphan reaper's problem, not
+// retention's — its FSM entry was finalize-deleted but the disk file was
+// never reaped, exactly the case selectRetentionCandidates already
+// excludes (see buildManifestSet). A sweep may never clear it (retention
+// doesn't touch ghosts at all), so it must not count toward the violation
+// either, or a vault could refuse admission forever over a chunk
+// retention itself will never act on. Chunks in unreadable-retry backoff
+// are DELIBERATELY NOT filtered here (unlike selectRetentionCandidates):
+// a chunk that keeps failing to read is an honest sweep failure — it
+// belongs in the violation count, not silently excluded.
+func (r *retentionRunner) currentSealedForBoundCheck() ([]chunk.ChunkMeta, bool) {
+	metas, err := r.cm.List()
+	if err != nil {
+		return nil, false
+	}
+	r.mu.Lock()
+	vaultInst := r.findVaultInstance()
+	r.mu.Unlock()
+	if vaultInst != nil && vaultInst.OverlayFromFSM != nil {
+		for i := range metas {
+			metas[i] = vaultInst.OverlayFromFSM(metas[i])
+		}
+	}
+	metas = appendUnlistedManifestSealed(metas, vaultInst)
+	manifest, manifestKnown := buildManifestSet(vaultInst)
+	var sealed []chunk.ChunkMeta
+	for _, m := range metas {
+		if !m.Sealed {
+			continue
+		}
+		if manifestKnown && !manifest[m.ID] {
+			continue // ghost
+		}
+		sealed = append(sealed, m)
+	}
+	return sealed, true
 }
 
 // buildManifestSet returns the FSM-known chunk IDs for the given instance and a
@@ -1485,6 +1529,8 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 					errors.Is(subErr, ErrVaultDiskProtect),
 					errors.Is(subErr, ErrVaultMaxSize),
 					errors.Is(subErr, ErrVaultBacklogBudget),
+					errors.Is(subErr, ErrVaultAgeBound),
+					errors.Is(subErr, ErrVaultChunkCountBound),
 					r.orch.shuttingDown():
 					// ErrDiskProtect is terminal for the whole fan-out: every
 					// subsequent record would be rejected the same way, and

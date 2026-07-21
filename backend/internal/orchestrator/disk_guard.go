@@ -371,19 +371,40 @@ func (g *diskGuard) vaultChunkCountBoundCapped(vaultID glid.GLID) bool {
 // refusal already covers (refreshVaultDiskGuards only guards file vaults);
 // a memory vault or a vault whose guard entry hasn't been registered yet
 // has nothing to fold the verdict into.
+//
+// Holds g.mu for the WHOLE operation — map lookup, atomic Swap, and the
+// alarm Raise/Clear — rather than releasing it between the Swap and the
+// alarm call (gastrolog-5yfaqj review fix, minor: the earlier two-lock
+// version left a window where a concurrent retainVaultGuards prune could
+// delete this vault's entry and, reading raisedFlag before this call had
+// set it, skip clearing an alarm this call was about to raise — stranding
+// a Raise that fires into the void right after prune). One lock for the
+// whole sequence matches every other guard reconcile function in this
+// file (reconcileVaultSizeAlarm, reconcileVaultBacklogAlarm,
+// reconcileVaultAlarm all call alerts.Raise/Clear while holding g.mu) and
+// makes the two prune paths mutually exclusive with this one: either this
+// completes first and retainVaultGuards' next pass sees + clears the
+// raised alarm, or retainVaultGuards runs first and this call's own map
+// lookup returns nil before touching the alarm at all. This is IN
+// ADDITION to the C1 runner-GC fix (retentionSweepAll calling
+// SetVaultAgeBoundCapped(false) before deleting a pruned runner) — that
+// fix closes the leadership-loss strand at the retention-runner layer;
+// this one closes a structurally different race at the disk-guard-entry
+// layer (retainVaultGuards prunes on vault-removed-from-config/placement-
+// moved, a separate discovery sweep from retention's own runner GC), so
+// relying on C1 alone would not have covered it.
 func (g *diskGuard) setVaultAgeBoundCapped(alerts alert.Sink, id glid.GLID, capped bool) {
 	g.mu.Lock()
+	defer g.mu.Unlock()
 	v := g.vaults[id]
 	if v == nil {
-		g.mu.Unlock()
 		return
 	}
 	was := v.ageBoundCapped.Swap(capped)
-	g.mu.Unlock()
 	if was == capped {
 		return
 	}
-	g.reconcileVaultBoundAlarm(alerts, id, v, "age", capped, &v.ageBoundAlarmRaised,
+	g.reconcileVaultBoundAlarmLocked(alerts, id, v, "age", capped, &v.ageBoundAlarmRaised,
 		fmt.Sprintf("Vault %s's max-age retention bound is still violated after retention swept and attempted to clear it — "+
 			"new records for this vault are REFUSED (the stating policy has refuse enabled). "+
 			"Read the retention-deferred alarm, if standing, for why the sweep isn't clearing it.", v.name),
@@ -392,20 +413,19 @@ func (g *diskGuard) setVaultAgeBoundCapped(alerts alert.Sink, id glid.GLID, capp
 }
 
 // setVaultChunkCountBoundCapped is setVaultAgeBoundCapped's max-chunks
-// sibling.
+// sibling — same single-lock-for-the-whole-operation contract.
 func (g *diskGuard) setVaultChunkCountBoundCapped(alerts alert.Sink, id glid.GLID, capped bool) {
 	g.mu.Lock()
+	defer g.mu.Unlock()
 	v := g.vaults[id]
 	if v == nil {
-		g.mu.Unlock()
 		return
 	}
 	was := v.chunkCountBoundCapped.Swap(capped)
-	g.mu.Unlock()
 	if was == capped {
 		return
 	}
-	g.reconcileVaultBoundAlarm(alerts, id, v, "count", capped, &v.chunkCountAlarmRaised,
+	g.reconcileVaultBoundAlarmLocked(alerts, id, v, "count", capped, &v.chunkCountAlarmRaised,
 		fmt.Sprintf("Vault %s's max-chunks retention bound is still violated after retention swept and attempted to clear it — "+
 			"new records for this vault are REFUSED (the stating policy has refuse enabled). "+
 			"Read the retention-deferred alarm, if standing, for why the sweep isn't clearing it.", v.name),
@@ -413,17 +433,19 @@ func (g *diskGuard) setVaultChunkCountBoundCapped(alerts alert.Sink, id glid.GLI
 		"vault chunk-count bound released — admission resumed for vault "+v.name)
 }
 
-// reconcileVaultBoundAlarm raises/clears the shared vault-bound-capped
-// alarm for one cause ("age"/"count") on a transition, and logs it — bound
-// transitions are otherwise silent, the same razor refreshVaultDiskGuards'
-// max-size change log follows. cause disambiguates the entity key so age
-// and chunk-count can stand on the same vault at once without colliding on
-// one alarm slot.
-func (g *diskGuard) reconcileVaultBoundAlarm(alerts alert.Sink, id glid.GLID, v *vaultDiskGuard, cause string, capped bool, raisedFlag *bool, detail, engagedLog, releasedLog string) {
+// reconcileVaultBoundAlarmLocked raises/clears the shared
+// vault-bound-capped alarm for one cause ("age"/"count") on a transition,
+// and logs it — bound transitions are otherwise silent, the same razor
+// refreshVaultDiskGuards' max-size change log follows. cause disambiguates
+// the entity key so age and chunk-count can stand on the same vault at
+// once without colliding on one alarm slot.
+//
+// Caller must already hold g.mu for the duration — see
+// setVaultAgeBoundCapped's doc comment for why this must not re-lock (or
+// release and re-lock) internally.
+func (g *diskGuard) reconcileVaultBoundAlarmLocked(alerts alert.Sink, id glid.GLID, v *vaultDiskGuard, cause string, capped bool, raisedFlag *bool, detail, engagedLog, releasedLog string) {
 	key := id.String() + "/" + cause
-	g.mu.Lock()
 	*raisedFlag = capped
-	g.mu.Unlock()
 	if capped {
 		if g.logger != nil {
 			g.logger.Warn("retention: " + engagedLog)
@@ -514,6 +536,8 @@ func (g *diskGuard) evaluateVaults(alerts alert.Sink) {
 			used := footprintBytes(g.vaultFootprint(id))
 			g.reconcileVaultSizeCap(id, v, used)
 			g.reconcileVaultSizeAlarm(alerts, id, v, used)
+		} else {
+			g.clearVaultSizeState(alerts, id, v)
 		}
 		if budget := g.backlogBudget.Load(); budget > 0 && g.vaultBacklogBytes != nil {
 			used := footprintBytes(g.vaultBacklogBytes(id))
@@ -598,6 +622,33 @@ func (g *diskGuard) clearVaultBacklogState(alerts alert.Sink, id glid.GLID, v *v
 	if raised && alerts != nil {
 		alerts.Clear(alarmBacklogApproaching, id.String())
 		alerts.Clear(alarmBacklogCapped, id.String())
+	}
+}
+
+// clearVaultSizeState releases a standing size cap/alarm when the bound is
+// unset (0) — otherwise a vault capped under a since-removed or
+// since-softened max-size bound would refuse admission forever.
+// gastrolog-5yfaqj made 0 reachable for the first time: previously
+// resolveVaultSizeBoundSource always resolved to either a stated bound or
+// the default floor, never 0; now a vault whose only attached size
+// policies are all refuse=false (soft bound — drains, never refuses)
+// correctly resolves to 0 (no refuse bound, and the default floor must
+// NOT re-engage over the operator's explicit opt-out). Mirrors
+// clearVaultBacklogState.
+func (g *diskGuard) clearVaultSizeState(alerts alert.Sink, id glid.GLID, v *vaultDiskGuard) {
+	if v.capped.Load() {
+		v.capped.Store(false)
+		if g.logger != nil {
+			g.logger.Info("vault max-size bound unset or soft-only — admission resumed for vault", "vault", id, "name", v.name)
+		}
+	}
+	g.mu.Lock()
+	raised := v.sizeAlarmRaised
+	v.sizeAlarmRaised = false
+	g.mu.Unlock()
+	if raised && alerts != nil {
+		alerts.Clear(alarmMaxSizeApproaching, id.String())
+		alerts.Clear(alarmMaxSizeCapped, id.String())
 	}
 }
 
@@ -1144,14 +1195,21 @@ func (o *Orchestrator) refreshVaultDiskGuards(ctx context.Context) {
 }
 
 // attachedSizeBound scans the vault's RetentionRules for the tightest
-// (minimum) usable MaxSize among referenced policies. A referenced policy
-// that carries no MaxSize (nil, unset, or unparseable — defense in depth;
-// PutRetentionPolicy validates parseability at write, so a parse failure
-// here can only be a pre-change or bug-produced config) contributes nothing
-// to the min. Returns the winning policy (nil if none carries a usable
-// bound) so callers can build both the numeric bound and an
-// operator-readable source label without re-scanning.
-func attachedSizeBound(vc system.VaultConfig, policies []system.RetentionPolicyConfig) (minBound uint64, winner *system.RetentionPolicyConfig) {
+// (minimum) usable MaxSize among REFUSE-ELIGIBLE referenced policies
+// (gastrolog-5yfaqj: policy.RefuseEnabled() — a policy stating MaxSize
+// with refuse=false still drains via its own SizeRetentionPolicy rule
+// elsewhere, but contributes nothing to the instantaneous refuse bound
+// this function resolves). A referenced policy that carries no MaxSize
+// (nil, unset, or unparseable — defense in depth; PutRetentionPolicy
+// validates parseability at write, so a parse failure here can only be a
+// pre-change or bug-produced config) contributes nothing to the min
+// either. Returns the winning policy (nil if none carries a usable
+// refuse-eligible bound) so callers can build both the numeric bound and
+// an operator-readable source label without re-scanning, plus anyStated:
+// whether ANY attached policy — refuse-eligible or not — states a usable
+// MaxSize at all, which the caller needs to decide whether the
+// refuse-only default floor may apply (see resolveVaultSizeBoundSource).
+func attachedSizeBound(vc system.VaultConfig, policies []system.RetentionPolicyConfig) (minBound uint64, winner *system.RetentionPolicyConfig, anyStated bool) {
 	for _, rule := range vc.RetentionRules {
 		policy := findRetentionPolicy(policies, rule.RetentionPolicyID)
 		if policy == nil || policy.MaxSize == nil || system.IsQuantityUnset(*policy.MaxSize) {
@@ -1161,36 +1219,50 @@ func attachedSizeBound(vc system.VaultConfig, policies []system.RetentionPolicyC
 		if err != nil || size == 0 {
 			continue
 		}
+		anyStated = true
+		if !policy.RefuseEnabled() {
+			continue // soft bound: drains (its own rule), never refuses
+		}
 		if winner == nil || size < minBound {
 			minBound = size
 			winner = policy
 		}
 	}
-	return minBound, winner
+	return minBound, winner, anyStated
 }
 
-// resolveVaultSizeBound computes the effective per-node disk-claim bound for
-// a file vault (gastrolog-33ul6h): attachedSizeBound's min-wins result, or
-// the creation default (system.DefaultVaultMaxSize) as the refuse-only floor
-// when no attached policy carries a usable bound — zero retention rules,
-// zero policies, or only bound-less policies — so a file vault stays
-// bounded with no operator diligence required.
+// resolveVaultSizeBound computes the effective per-node disk-claim REFUSE
+// bound for a file vault (gastrolog-33ul6h): attachedSizeBound's min-wins
+// result over refuse-eligible policies, or the creation default
+// (system.DefaultVaultMaxSize) as the refuse-only floor when NO attached
+// policy states a usable bound at all — zero retention rules, zero
+// policies, or only bound-less policies — so a file vault stays bounded
+// with no operator diligence required. gastrolog-5yfaqj corner case: when
+// at least one attached policy DOES state a usable bound but every one of
+// them is refuse=false (soft), the result is 0 — no refuse bound applies,
+// and the default floor does NOT re-engage either, because the operator
+// explicitly opted every stating policy out of refusal; silently falling
+// back to the floor would override that choice.
 func resolveVaultSizeBound(vc system.VaultConfig, policies []system.RetentionPolicyConfig) uint64 {
 	bound, _ := resolveVaultSizeBoundSource(vc, policies)
 	return bound
 }
 
 // resolveVaultSizeBoundSource is resolveVaultSizeBound plus an
-// operator-readable source label ("policy <name/id>" or "default floor"),
-// for the bound-transition log (gastrolog-33ul6h finding 4): naming WHERE
-// an effective bound change came from, not just the old/new numbers.
+// operator-readable source label ("policy <name/id>", "default floor", or
+// the soft-only corner case), for the bound-transition log
+// (gastrolog-33ul6h finding 4): naming WHERE an effective bound change
+// came from, not just the old/new numbers.
 func resolveVaultSizeBoundSource(vc system.VaultConfig, policies []system.RetentionPolicyConfig) (uint64, string) {
-	bound, winner := attachedSizeBound(vc, policies)
-	if winner == nil {
-		def, _ := system.ParseSize(system.DefaultVaultMaxSize)
-		return def, "default floor"
+	bound, winner, anyStated := attachedSizeBound(vc, policies)
+	if winner != nil {
+		return bound, "policy " + retentionPolicyLabel(*winner)
 	}
-	return bound, "policy " + retentionPolicyLabel(*winner)
+	if anyStated {
+		return 0, "no refuse-eligible policy (soft bound only)"
+	}
+	def, _ := system.ParseSize(system.DefaultVaultMaxSize)
+	return def, "default floor"
 }
 
 // currentMaxSizeBytes returns the vault's currently-registered max-size

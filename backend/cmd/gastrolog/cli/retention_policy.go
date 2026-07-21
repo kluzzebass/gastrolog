@@ -166,7 +166,7 @@ func newRetentionPolicyCreateCmd() *cobra.Command {
 	cmd.Flags().String("max-size", "", "vault's disk-claim bound (e.g. \"50GB\", \"1GiB\"; empty = no bound from this policy): oldest sealed chunks drain past it, and admission refuses cluster-wide while the vault's local claim is at/over it. Min-wins across a vault's attached policies")
 	cmd.Flags().Int64("max-chunks", 0, "max chunks")
 	cmd.Flags().Bool("refuse", true, "while any set bound (max-age, max-size, max-chunks) is violated, refuse admission cluster-wide (a \"hard bound\"). "+
-		"--no-refuse makes this a drain-only \"soft bound\": the policy still drains past its bounds, but only the node-level disk guard backstops the vault while violated. "+
+		"--refuse=false makes this a drain-only \"soft bound\": the policy still drains past its bounds, but only the node-level disk guard backstops the vault while violated. "+
 		"max-size's refuse check is instantaneous; max-age/max-chunks refuse only once a retention sweep has run and failed to clear the violation")
 	_ = cmd.MarkFlagRequired("name")
 	return cmd

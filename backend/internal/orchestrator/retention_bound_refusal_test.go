@@ -20,6 +20,7 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/system"
+	sysmem "gastrolog/internal/system/memory"
 )
 
 // boundFakeChunkManager embeds retentionFakeChunkManager (retention_test.go)
@@ -396,5 +397,142 @@ func TestCheckBoundViolationsRestartDoesNotCarryOverState(t *testing.T) {
 	r2.sweep(rules)
 	if !g2.vaultAgeBoundCapped(vaultID) {
 		t.Fatal("the restarted runner must re-derive capped=true from the still-violating data, not stay uncapped forever")
+	}
+}
+
+// TestRetentionSweepAllReleasesBoundCapsOnLeadershipLoss pins review fix C1
+// (strand on leadership move): retentionSweepAll's prune loop must release
+// BOTH age and chunk-count bound flags — and the shared vault-bound-capped
+// alarm for both causes — when a runner is garbage-collected (vault
+// removed from config, placement moved, or THIS node lost leadership for
+// the instance). Before the fix, a deposed leader's guard entry kept
+// reporting age_bound_vault_ids/chunk_count_bound_vault_ids in its
+// NodeStats broadcast forever, so the cluster-wide peer union refused the
+// vault permanently — long after the condition (and the runner that
+// observed it) was gone. Mirrors
+// TestRetentionSweepAllClearsAlarmOnRunnerGC for the deferral alarm.
+func TestRetentionSweepAllReleasesBoundCapsOnLeadershipLoss(t *testing.T) {
+	t.Parallel()
+
+	spy := &alertSpy{}
+	o := newTestOrch(t, Config{LocalNodeID: "node-A", Alerts: spy})
+	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": 200 * gib})
+	vaultID := glid.New()
+	g.SetVaultGuard(vaultID, "deposed", []string{"volA"}, "", "", 10*gib)
+	o.diskGuard = g
+	g.setVaultAgeBoundCapped(spy, vaultID, true)
+	g.setVaultChunkCountBoundCapped(spy, vaultID, true)
+	if !g.vaultAgeBoundCapped(vaultID) || !g.vaultChunkCountBoundCapped(vaultID) {
+		t.Fatal("fixture setup: both bounds must start capped")
+	}
+
+	// Seed an unrelated vault so retentionSweepAll's config load doesn't
+	// bail out before reaching the GC loop at all (mirrors
+	// TestRetentionSweepAllClearsAlarmOnRunnerGC's fixture).
+	store := sysmem.NewStore()
+	_ = store.PutVault(t.Context(), system.VaultConfig{ID: glid.New(), Name: "other", Type: system.VaultTypeMemory})
+	o.sysLoader = &transitionSystemLoader{store: store}
+
+	o.mu.Lock()
+	if o.retention == nil {
+		o.retention = make(map[string]*retentionRunner)
+	}
+	o.retention[vaultID.String()] = &retentionRunner{vaultID: vaultID, vaultName: "deposed"}
+	o.mu.Unlock()
+
+	o.retentionSweepAll()
+
+	if g.vaultAgeBoundCapped(vaultID) {
+		t.Fatal("leadership loss (runner pruned) must release the age-bound cap")
+	}
+	if g.vaultChunkCountBoundCapped(vaultID) {
+		t.Fatal("leadership loss (runner pruned) must release the chunk-count-bound cap")
+	}
+	if spy.has(alarmVaultBoundCapped + ":" + vaultID.String() + "/age") {
+		t.Fatal("leadership loss must clear the age-cause vault-bound-capped alarm")
+	}
+	if spy.has(alarmVaultBoundCapped + ":" + vaultID.String() + "/count") {
+		t.Fatal("leadership loss must clear the count-cause vault-bound-capped alarm")
+	}
+	o.mu.RLock()
+	_, stillPresent := o.retention[vaultID.String()]
+	o.mu.RUnlock()
+	if stillPresent {
+		t.Fatal("runner must have been pruned")
+	}
+}
+
+// TestCheckBoundViolationsGhostChunkNeverCountsTowardViolation pins review
+// fix I1 (ghost drift): a sealed chunk on disk with NO FSM manifest entry
+// (a ghost — its FSM entry was finalize-deleted but the disk file was
+// never reaped) is the orphan reaper's problem, not retention's.
+// selectRetentionCandidates already excludes ghosts from what a sweep
+// acts on; checkBoundViolations must apply the SAME filter to what it
+// counts toward a violation — a sweep can never clear a ghost (retention
+// doesn't touch it at all), so counting it would let a vault refuse
+// admission forever over a chunk retention will never act on.
+func TestCheckBoundViolationsGhostChunkNeverCountsTowardViolation(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	now := time.Now()
+	ghost := sealedChunkMeta(now.Add(-2 * time.Hour)) // objectively past the 1h bound
+
+	r, g, _ := newBoundRunnerFixture(t, vaultID, ghost)
+	r.now = func() time.Time { return now }
+
+	// Wire a vault instance whose FSM manifest is known (non-nil) but does
+	// NOT include the ghost's ID — buildManifestSet's manifestKnown=true,
+	// manifest[ghost.ID]=false, exactly the ghost condition.
+	vault := NewVaultFromComponents(vaultID, r.cm, &retentionFakeIndexManager{}, nil)
+	vault.Instance.ListManifest = func() []chunk.ChunkID { return []chunk.ChunkID{} }
+	r.orch.RegisterVault(vault)
+
+	agePolicy := chunk.NewTTLRetentionPolicy(time.Hour)
+	rules := []retentionRule{{policy: agePolicy, refuse: true, agePolicy: agePolicy}}
+
+	r.sweep(rules)
+
+	if g.vaultAgeBoundCapped(vaultID) {
+		t.Fatal("a ghost chunk (on disk, no FSM manifest entry) must never count toward the age-bound violation")
+	}
+}
+
+// TestCheckBoundViolationsEngageThenReleaseRunnerLevel is the minor
+// engage-then-release runner-level test: a sweep that fails to clear the
+// age bound caps it and raises the alarm; a LATER sweep that successfully
+// clears it (disposition flips to delete, or the destination recovers)
+// must uncap it and clear the alarm — the full round trip through
+// sweep(), not just the two halves independently.
+func TestCheckBoundViolationsEngageThenReleaseRunnerLevel(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	now := time.Now()
+	old := sealedChunkMeta(now.Add(-2 * time.Hour))
+	cm := newBoundFakeChunkManager(old)
+	r, g, spy := newBoundRunnerFixtureWithManager(t, vaultID, cm)
+	r.now = func() time.Time { return now }
+	r.disposition = system.RetentionDispositionRoute // deferred: findVaultInstance() nil
+
+	agePolicy := chunk.NewTTLRetentionPolicy(time.Hour)
+	rules := []retentionRule{{policy: agePolicy, refuse: true, agePolicy: agePolicy}}
+
+	r.sweep(rules)
+	if !g.vaultAgeBoundCapped(vaultID) {
+		t.Fatal("fixture setup: first sweep must fail to clear and engage the cap")
+	}
+	if !spy.has(alarmVaultBoundCapped + ":" + vaultID.String() + "/age") {
+		t.Fatal("fixture setup: the alarm must be standing after the first sweep")
+	}
+
+	// Recovery: disposition flips to delete (the operator's documented
+	// recovery action) — this sweep now succeeds and destroys the chunk.
+	r.disposition = ""
+	r.sweep(rules)
+
+	if g.vaultAgeBoundCapped(vaultID) {
+		t.Fatal("a later successful sweep must release the age-bound cap")
+	}
+	if spy.has(alarmVaultBoundCapped + ":" + vaultID.String() + "/age") {
+		t.Fatal("a later successful sweep must clear the vault-bound-capped alarm")
 	}
 }

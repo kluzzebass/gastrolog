@@ -95,6 +95,65 @@ func TestResolveVaultSizeBoundMinWinsAcrossPolicies(t *testing.T) {
 	}
 }
 
+// policyWithBoundRefuse is policyWithBound plus an explicit Refuse value —
+// gastrolog-5yfaqj: the tightest attached MaxSize must not win the
+// instantaneous refuse bound unless its OWN policy has refuse=true.
+func policyWithBoundRefuse(id glid.GLID, bound string, refuse bool) system.RetentionPolicyConfig {
+	p := policyWithBound(id, bound)
+	p.Refuse = &refuse
+	return p
+}
+
+// TestResolveVaultSizeBoundRefuseFalseExcludedFromRefuseBound pins review
+// fix C3 (refuse=false doesn't gate size): the spec example. A soft
+// (refuse=false) 10GB policy plus a hard (refuse=true) 50GB policy on the
+// same vault refuses at 50GB — the hard policy's OWN bound — even though
+// 10GB is tighter. Drain is unaffected (each rule keeps draining its own
+// bound independently; this resolver only feeds the guard's instantaneous
+// refuse threshold).
+func TestResolveVaultSizeBoundRefuseFalseExcludedFromRefuseBound(t *testing.T) {
+	soft, hard := glid.New(), glid.New()
+	policies := []system.RetentionPolicyConfig{
+		policyWithBoundRefuse(soft, "10GB", false),
+		policyWithBoundRefuse(hard, "50GB", true),
+	}
+	vc := system.VaultConfig{
+		ID: glid.New(),
+		RetentionRules: []system.RetentionRule{
+			retentionRuleFor(soft), retentionRuleFor(hard),
+		},
+	}
+	got := resolveVaultSizeBound(vc, policies)
+	want, _ := system.ParseSize("50GB")
+	if got != want {
+		t.Fatalf("resolveVaultSizeBound(soft 10GB + hard 50GB) = %d, want %d (50GB — the tighter soft bound must not contribute to refusal)", got, want)
+	}
+}
+
+// TestResolveVaultSizeBoundAllSoftMeansNoRefuseBoundNoFloor pins the
+// corner case: every attached policy that states a size bound is soft
+// (refuse=false). No refuse bound applies — and the refuse-only
+// creation-default floor must NOT re-engage either, since that would
+// silently override the operator's explicit opt-out on every stating
+// policy with a bound they never asked for.
+func TestResolveVaultSizeBoundAllSoftMeansNoRefuseBoundNoFloor(t *testing.T) {
+	soft := glid.New()
+	policies := []system.RetentionPolicyConfig{
+		policyWithBoundRefuse(soft, "10GB", false),
+	}
+	vc := system.VaultConfig{
+		ID:             glid.New(),
+		RetentionRules: []system.RetentionRule{retentionRuleFor(soft)},
+	}
+	got, source := resolveVaultSizeBoundSource(vc, policies)
+	if got != 0 {
+		t.Fatalf("resolveVaultSizeBound(soft-only) = %d, want 0 (no refuse bound)", got)
+	}
+	if strings.Contains(source, "default floor") {
+		t.Fatalf("source = %q must NOT be the default floor — the operator explicitly opted the stating policy out of refusal", source)
+	}
+}
+
 // A policy attached but with no MaxSize set at all contributes nothing —
 // falls through to the default floor, same as no rules.
 func TestResolveVaultSizeBoundPolicyWithoutMaxSizeUsesDefault(t *testing.T) {

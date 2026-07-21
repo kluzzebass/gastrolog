@@ -232,3 +232,51 @@ func TestRetainVaultGuardsClearsBoundAlarms(t *testing.T) {
 		t.Fatal("pruned entry must read as uncapped")
 	}
 }
+
+// TestVaultMaxSizeReleasesWhenBoundBecomesSoftOnly pins the guard-tick
+// half of review fix C3: a vault previously capped under a hard max-size
+// bound must release (cap AND alarm) once refreshVaultDiskGuards
+// re-resolves the bound to 0 (every attached size policy went soft, or
+// the hard one was removed) — this is the same "unset bound must not
+// strand a standing cap" contract clearVaultBacklogState already
+// guarantees for the backlog budget, now needed for size because
+// gastrolog-5yfaqj made maxSizeBytes==0 reachable via a LIVE transition
+// for the first time (previously resolveVaultSizeBoundSource always
+// resolved to a nonzero bound, never 0).
+func TestVaultMaxSizeReleasesWhenBoundBecomesSoftOnly(t *testing.T) {
+	t.Parallel()
+	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": 200 * gib})
+	spy := &alertSpy{}
+	vaultA := glid.New()
+	g.vaultFootprint = func(id glid.GLID) int64 {
+		if id == vaultA {
+			return int64(11 * gib)
+		}
+		return 0
+	}
+	g.SetVaultGuard(vaultA, "was-hard", []string{"volA"}, "", "", 10*gib)
+	g.evaluateVaults(spy)
+	if !g.vaultSizeCapped(vaultA) {
+		t.Fatal("fixture setup: vault must be capped under the original 10GiB hard bound")
+	}
+	if !spy.has(alarmMaxSizeCapped + ":" + vaultA.String()) {
+		t.Fatal("fixture setup: the max-size-capped alarm must be standing")
+	}
+
+	// The operator's policy went soft-only: refreshVaultDiskGuards would
+	// now resolve maxSize=0 (resolveVaultSizeBoundSource's corner case) —
+	// simulate that re-resolution directly via SetVaultGuard, same as a
+	// live config change would drive on the next tick.
+	g.SetVaultGuard(vaultA, "was-hard", []string{"volA"}, "", "", 0)
+	g.evaluateVaults(spy)
+
+	if g.vaultSizeCapped(vaultA) {
+		t.Fatal("a size bound that resolved to 0 (soft-only) must release the cap, not strand it")
+	}
+	if spy.has(alarmMaxSizeCapped + ":" + vaultA.String()) {
+		t.Fatal("the max-size-capped alarm must clear")
+	}
+	if spy.has(alarmMaxSizeApproaching + ":" + vaultA.String()) {
+		t.Fatal("the max-size-approaching alarm must clear too")
+	}
+}
