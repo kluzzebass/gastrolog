@@ -169,6 +169,18 @@ message NodeStats {
   // gate as disk_protected_vault_ids, with a bound-specific error.
   repeated bytes size_capped_vault_ids = 49;
 
+  // Vaults whose max-age retention bound is still violated after this
+  // node's retention runner swept and failed to clear it, on a policy
+  // with refuse=true (gastrolog-5yfaqj). Unlike size_capped_vault_ids this
+  // is NOT instantaneous — see RetentionPolicyConfig.refuse. Honored
+  // cluster-wide by the same per-vault admission gate.
+  repeated bytes age_bound_vault_ids = 52;
+
+  // Vaults whose max-chunks retention bound is still violated after a
+  // failed sweep, on a policy with refuse=true. Same contract as
+  // age_bound_vault_ids.
+  repeated bytes chunk_count_bound_vault_ids = 53;
+
   // Cumulative diagnostic log records this node's capture handler has
   // discarded because the capture channel was full. A capacity signal with
   // no operator action, so it is a metric and never an alarm

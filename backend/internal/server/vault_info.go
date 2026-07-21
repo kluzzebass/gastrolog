@@ -382,6 +382,10 @@ func admissionCauseToProto(c orchestrator.VaultAdmissionCause) apiv1.VaultAdmiss
 		return apiv1.VaultAdmissionCause_VAULT_ADMISSION_CAUSE_MAX_SIZE_BOUND
 	case orchestrator.VaultAdmissionCauseBacklogBudget:
 		return apiv1.VaultAdmissionCause_VAULT_ADMISSION_CAUSE_BACKLOG_BUDGET
+	case orchestrator.VaultAdmissionCauseAgeBound:
+		return apiv1.VaultAdmissionCause_VAULT_ADMISSION_CAUSE_AGE_BOUND
+	case orchestrator.VaultAdmissionCauseChunkCountBound:
+		return apiv1.VaultAdmissionCause_VAULT_ADMISSION_CAUSE_CHUNK_COUNT_BOUND
 	default:
 		return apiv1.VaultAdmissionCause_VAULT_ADMISSION_CAUSE_UNSPECIFIED
 	}

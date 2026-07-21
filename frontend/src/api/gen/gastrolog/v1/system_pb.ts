@@ -1103,6 +1103,27 @@ export class RetentionPolicyConfig extends Message<RetentionPolicyConfig> {
    */
   name = "";
 
+  /**
+   * refuse generalizes the max_size REFUSE behavior above to every bound
+   * this policy states (gastrolog-5yfaqj): while true (the default — unset
+   * reads as true, so a policy must opt OUT explicitly) and ANY of
+   * max_age/max_size/max_chunks is violated, admission refuses. false is
+   * the drain-only "soft bound" posture: the policy still drains, but the
+   * operator explicitly accepts that only the node-level disk guard
+   * backstops the vault while violated. max_size's refuse behavior is
+   * unchanged and instantaneous; max_age/max_chunks refuse only once the
+   * retention runner has swept and failed to clear the violation — see
+   * orchestrator/retention.go to avoid refusing on the normal transient
+   * between a chunk's seal and the next sweep. Per-vault resolution is
+   * per bound KIND: the min over every attached policy that states it,
+   * with refuse-eligibility following the STATING policy's own flag (a
+   * vault mixing a hard and a soft policy refuses only on the hard one's
+   * bounds).
+   *
+   * @generated from field: optional bool refuse = 6;
+   */
+  refuse?: boolean;
+
   constructor(data?: PartialMessage<RetentionPolicyConfig>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1116,6 +1137,7 @@ export class RetentionPolicyConfig extends Message<RetentionPolicyConfig> {
     { no: 3, name: "max_chunks", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 4, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 5, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 6, name: "refuse", kind: "scalar", T: 8 /* ScalarType.BOOL */, opt: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RetentionPolicyConfig {

@@ -33,6 +33,22 @@ export enum VaultAdmissionCause {
    * @generated from enum value: VAULT_ADMISSION_CAUSE_BACKLOG_BUDGET = 3;
    */
   BACKLOG_BUDGET = 3,
+
+  /**
+   * gastrolog-5yfaqj: refuse generalized from max_size to every retention
+   * policy bound. AGE_BOUND/CHUNK_COUNT_BOUND only ever appear when the
+   * stating policy's refuse flag is true AND the retention runner has
+   * swept and failed to clear the violation — never on the normal
+   * transient between a chunk's seal and the next sweep.
+   *
+   * @generated from enum value: VAULT_ADMISSION_CAUSE_AGE_BOUND = 4;
+   */
+  AGE_BOUND = 4,
+
+  /**
+   * @generated from enum value: VAULT_ADMISSION_CAUSE_CHUNK_COUNT_BOUND = 5;
+   */
+  CHUNK_COUNT_BOUND = 5,
 }
 // Retrieve enum metadata with: proto3.getEnumType(VaultAdmissionCause)
 proto3.util.setEnumType(VaultAdmissionCause, "gastrolog.v1.VaultAdmissionCause", [
@@ -40,6 +56,8 @@ proto3.util.setEnumType(VaultAdmissionCause, "gastrolog.v1.VaultAdmissionCause",
   { no: 1, name: "VAULT_ADMISSION_CAUSE_MAX_SIZE_BOUND" },
   { no: 2, name: "VAULT_ADMISSION_CAUSE_VAULT_DISK_PROTECT" },
   { no: 3, name: "VAULT_ADMISSION_CAUSE_BACKLOG_BUDGET" },
+  { no: 4, name: "VAULT_ADMISSION_CAUSE_AGE_BOUND" },
+  { no: 5, name: "VAULT_ADMISSION_CAUSE_CHUNK_COUNT_BOUND" },
 ]);
 
 /**

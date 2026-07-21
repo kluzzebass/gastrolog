@@ -487,6 +487,8 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		// admission for that vault everywhere.
 		orch.SetRemoteVaultDiskProtected(peerState.VaultDiskProtected)
 		orch.SetRemoteVaultSizeCapped(peerState.VaultSizeCapped)
+		orch.SetRemoteVaultAgeBoundCapped(peerState.VaultAgeBoundCapped)
+		orch.SetRemoteVaultChunkCountBoundCapped(peerState.VaultChunkCountBoundCapped)
 	}
 
 	// Start vault placement manager (cluster mode only).

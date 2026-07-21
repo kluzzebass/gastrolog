@@ -134,9 +134,9 @@ func (a *orchStatsAdapter) VaultAppendStats() []cluster.StatsVaultAppendSnapshot
 func (a *orchStatsAdapter) RouteStats() cluster.StatsRouteSnapshot {
 	rs := a.orch.GetRouteStats()
 	snap := cluster.StatsRouteSnapshot{
-		Routed:       rs.Routed,
-		Unmatched:    rs.Unmatched,
-		Matched:      rs.Matched,
+		Routed:           rs.Routed,
+		Unmatched:        rs.Unmatched,
+		Matched:          rs.Matched,
 		RouteTableActive: a.orch.IsRouteTableActive(),
 	}
 	for vaultID, vs := range a.orch.VaultRouteStatsList() {
@@ -183,6 +183,14 @@ func (a *orchStatsAdapter) DiskProtectedVaults() []glid.GLID {
 
 func (a *orchStatsAdapter) SizeCappedVaults() []glid.GLID {
 	return a.orch.SizeCappedVaults()
+}
+
+func (a *orchStatsAdapter) AgeBoundCappedVaults() []glid.GLID {
+	return a.orch.AgeBoundCappedVaults()
+}
+
+func (a *orchStatsAdapter) ChunkCountBoundCappedVaults() []glid.GLID {
+	return a.orch.ChunkCountBoundCappedVaults()
 }
 
 // jobBroadcastAdapter bridges the scheduler to the cluster.JobsProvider interface.

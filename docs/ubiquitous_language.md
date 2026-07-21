@@ -464,6 +464,40 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
 - **Retention policy** (`RetentionPolicyConfig`) — named, reusable
   policy referenced by `RetentionRule`.
 
+- **Refuse** (`RetentionPolicyConfig.Refuse`, gastrolog-5yfaqj) — ONE
+  boolean generalizing `MaxSize`'s refuse behavior to every bound a
+  retention policy states (`MaxAge`, `MaxSize`, `MaxChunks`). Default ON
+  (unset reads as true — a policy must opt OUT explicitly, not into it).
+  Every SET parameter on a `refuse=true` policy is a **hard bound**: drain
+  restores it, and refusal guards it while violated. `refuse=false` makes
+  every set parameter a **soft bound**: drain still restores it, but
+  refusal is off — the operator explicitly accepts that only the
+  node-level disk guard's own floor/warn bands backstop the vault while
+  violated. Not per-parameter flags (three knobs of ceremony) and not
+  paired refuse-values per dimension (the two-fields-per-concept split the
+  `MaxSize` field combine killed, see below) — one flag per policy.
+  - **Min-per-kind resolution**: a vault's effective bound, per KIND
+    (age/size/count), is the min over every attached policy that states
+    that kind. Refuse-eligibility follows the STATING policy's own flag —
+    a vault mixing a hard and a soft policy refuses only on the hard
+    one's bounds, even if the soft one's bound is the tighter (and
+    therefore drain-triggering) one.
+  - **Violation predicate for age/chunks** (the subtle part): normal
+    operation transiently violates both between a chunk's seal and the
+    next retention sweep — refusing on that transient would be pure
+    flapping. A violation counts as refusal-worthy only once the
+    retention runner has SWEPT AND FAILED TO CLEAR it
+    (`retentionRunner.checkBoundViolations`, called at every sweep exit
+    against a fresh post-sweep chunk listing) — clock-free, no streak, no
+    slack duration: the sweep's own outcome, re-observed once per sweep,
+    IS the predicate. `MaxSize`'s refuse check stays instantaneous
+    (measured every disk-guard tick, unchanged) — it is resource-backed
+    (disk fills regardless of sweep cadence), unlike age/count which are
+    purely retention-policy-derived.
+  - Surfaced as `VaultAdmissionCause` `AGE_BOUND` / `CHUNK_COUNT_BOUND`
+    (alongside the existing `MAX_SIZE_BOUND`) and the `vault-bound-capped`
+    alarm — see docs/alarm-management-design.md.
+
 - **Max size (retention policy)** (`RetentionPolicyConfig.MaxSize`,
   gastrolog-33ul6h) — the vault's disk-claim bound, carried on a retention
   policy rather than `VaultConfig` (that field is removed; no reserved tag,
@@ -475,16 +509,26 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
   - **Drain** (evaluated by `SizeRetentionPolicy`): drains the oldest sealed
     chunks, per the vault's disposition, once the vault's disk claim exceeds
     the bound. Scope: the chunk store retention can act on.
-  - **Refuse** (evaluated by the disk guard's Admission gate): refuses
-    ingest admission for the vault once its whole local footprint (chunk
-    store + pipeline segment backlog) exceeds the same bound. Scope:
-    everything the vault holds on this node. The backstop while drain
-    catches up or is deferred.
+  - **Refuse** (evaluated by the disk guard's Admission gate; see the
+    generalized `Refuse` entry above — this is its size-specific,
+    instantaneous instantiation): refuses ingest admission for the vault
+    once its whole local footprint (chunk store + pipeline segment
+    backlog) exceeds the same bound, while the stating policy's `Refuse`
+    is true (the default). Scope: everything the vault holds on this
+    node. The backstop while drain catches up or is deferred. The
+    creation-default floor (below) stays refuse-only and unchanged,
+    independent of any policy's `Refuse` flag — a default must never
+    destroy data, so the floor never drains, only refuses.
 
-  Effective per-vault bound = min over every attached policy's `MaxSize`;
-  falls back to the creation default (`system.DefaultVaultMaxSize`) when no
-  attached policy carries one — that default floor is REFUSE-ONLY (it never
-  drains), because a default must never destroy data. Feeds
+  Effective per-vault REFUSE bound = min over the refuse-eligible
+  (`Refuse` on) attached policies' `MaxSize`; falls back to the creation
+  default (`system.DefaultVaultMaxSize`) only when NO attached policy
+  states a size — that default floor is REFUSE-ONLY (it never drains),
+  because a default must never destroy data. A vault whose only size
+  policies are soft (`Refuse` off) has no refuse bound and no floor: the
+  operator explicitly accepted drain-only, backstopped by the node-level
+  guard alone. The DRAIN trigger mins over ALL stating policies regardless
+  of the flag. Feeds
   `refreshVaultDiskGuards` → `orchestrator.resolveVaultSizeBound` → the disk
   guard's Admission gate; the gate mechanism itself is unchanged, only its
   config source. "Bound-only" (a size-only field with no drain) is not a

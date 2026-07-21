@@ -120,6 +120,21 @@ func retentionKey(vaultID glid.GLID, storageID string) string {
 // unconditionally destroyed.
 type retentionRule struct {
 	policy chunk.RetentionPolicy
+
+	// refuse, agePolicy, countPolicy (gastrolog-5yfaqj) support the
+	// post-sweep age/count refusal predicate — see
+	// retentionRunner.checkBoundViolations. refuse is the originating
+	// RetentionPolicyConfig.RefuseEnabled(): a violation only counts
+	// toward refusal when the STATING policy has refuse=true (a vault
+	// mixing a hard and a soft policy refuses only on the hard one's
+	// bounds). agePolicy/countPolicy are the SAME MaxAge/MaxChunks values
+	// `policy` was built from, isolated to one dimension apiece so
+	// checkBoundViolations can ask "is THIS specific bound still
+	// violated" independent of whatever else this rule's policy also
+	// bounds — nil when this rule's policy doesn't state that dimension.
+	refuse      bool
+	agePolicy   chunk.RetentionPolicy
+	countPolicy chunk.RetentionPolicy
 }
 
 // retentionRunner holds per-vault-instance state that persists across sweeps.
@@ -283,6 +298,18 @@ func (o *Orchestrator) retentionSweepAll() {
 				o.alerts.Clear(alarmRetentionDeferred, runner.vaultID.String())
 				o.alerts.Clear(alarmRetentionUnenforceable, runner.vaultID.String())
 			}
+			// gastrolog-5yfaqj fix: the age/count bound-capped flags are
+			// THIS runner's verdict — nothing else on this node will ever
+			// call checkBoundViolations for this vault again once the
+			// runner is pruned (leadership moved, placement moved off,
+			// vault-ctl Raft lost its leader). Without releasing them
+			// here, a deposed leader keeps broadcasting
+			// age_bound_vault_ids/chunk_count_bound_vault_ids forever —
+			// every peer's admission-gate union refuses the vault
+			// cluster-wide permanently, long after the condition (and the
+			// runner that observed it) is gone.
+			o.SetVaultAgeBoundCapped(runner.vaultID, false)
+			o.SetVaultChunkCountBoundCapped(runner.vaultID, false)
 			delete(o.retention, key)
 		}
 	}
@@ -735,6 +762,7 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 	r.mu.Unlock()
 
 	if len(rules) == 0 {
+		r.checkBoundViolations(rules)
 		return
 	}
 
@@ -802,6 +830,7 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 		r.sweepMatchedChunks = 0
 		r.mu.Unlock()
 		r.finishSweepDeferralState()
+		r.checkBoundViolations(rules)
 		return
 	}
 
@@ -851,6 +880,7 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 	r.sweepMatchedChunks = totalMatched
 	r.mu.Unlock()
 	r.finishSweepDeferralState()
+	r.checkBoundViolations(rules)
 }
 
 // claimsIfNeeded computes disk claims for sealed only when some rule in
@@ -1036,6 +1066,112 @@ func (r *retentionRunner) finishSweepDeferralState() {
 				"discards the records — set this vault's retention disposition to delete.",
 			matchedChunks, dispositionActionName(disposition), name, streak, cause))
 	}
+}
+
+// checkBoundViolations is the age/count VIOLATION PREDICATE (gastrolog-5yfaqj):
+// a violation is refusal-worthy only once retention has SWEPT AND FAILED
+// TO CLEAR it — never on the transient between a chunk's seal and the next
+// sweep. Called at every sweep exit (the early no-rules/no-eligible-chunks
+// returns and the normal end) against a FRESH chunk listing, so it reflects
+// what retention actually left behind after THIS sweep's deletes ran, not
+// what existed before them. No streak, no clock, no slack duration: the
+// sweep's own outcome, re-observed once per sweep, IS the predicate.
+//
+// Only rules whose originating policy has refuse=true count toward a
+// violation — a vault mixing a hard and a soft policy refuses only on the
+// hard one's bounds (min-per-kind resolution: the tightest attached policy
+// that also refuses wins; a looser refuse=false policy contributes
+// nothing here even if it's the one still matching chunks).
+func (r *retentionRunner) checkBoundViolations(rules []retentionRule) {
+	if r.orch == nil {
+		return
+	}
+
+	needsCheck := false
+	for _, rl := range rules {
+		if rl.agePolicy != nil || rl.countPolicy != nil {
+			needsCheck = true
+			break
+		}
+	}
+
+	var sealed []chunk.ChunkMeta
+	if needsCheck {
+		var ok bool
+		sealed, ok = r.currentSealedForBoundCheck()
+		if !ok {
+			// Transient — leave the guard's cached verdict as-is rather
+			// than guess; the next sweep retries. Mirrors sweep()'s own
+			// top-of-sweep List error handling.
+			return
+		}
+	}
+
+	state := chunk.VaultState{Chunks: sealed, Now: r.now()}
+	ageViolated, countViolated := false, false
+	for _, rl := range rules {
+		if !rl.refuse {
+			continue
+		}
+		if rl.agePolicy != nil && len(rl.agePolicy.Apply(state)) > 0 {
+			ageViolated = true
+		}
+		if rl.countPolicy != nil && len(rl.countPolicy.Apply(state)) > 0 {
+			countViolated = true
+		}
+	}
+
+	// Unconditional, even when needsCheck was false (no attached policy
+	// states either dimension): releases any capped state a since-removed
+	// bound may have left standing — nothing else clears it once the
+	// operator drops the last policy that stated it.
+	r.orch.SetVaultAgeBoundCapped(r.vaultID, ageViolated)
+	r.orch.SetVaultChunkCountBoundCapped(r.vaultID, countViolated)
+}
+
+// currentSealedForBoundCheck re-lists the vault's CURRENT sealed chunks for
+// checkBoundViolations — a fresh read reflecting whatever this sweep's
+// deletes actually did, not the pre-sweep snapshot sweep() started with.
+// Returns ok=false only on a transient list error, distinct from a
+// legitimately empty result.
+//
+// Ghost filter (gastrolog-5yfaqj review fix I1): a sealed chunk on disk
+// with no FSM manifest entry is the orphan reaper's problem, not
+// retention's — its FSM entry was finalize-deleted but the disk file was
+// never reaped, exactly the case selectRetentionCandidates already
+// excludes (see buildManifestSet). A sweep may never clear it (retention
+// doesn't touch ghosts at all), so it must not count toward the violation
+// either, or a vault could refuse admission forever over a chunk
+// retention itself will never act on. Chunks in unreadable-retry backoff
+// are DELIBERATELY NOT filtered here (unlike selectRetentionCandidates):
+// a chunk that keeps failing to read is an honest sweep failure — it
+// belongs in the violation count, not silently excluded.
+func (r *retentionRunner) currentSealedForBoundCheck() ([]chunk.ChunkMeta, bool) {
+	metas, err := r.cm.List()
+	if err != nil {
+		return nil, false
+	}
+	r.mu.Lock()
+	vaultInst := r.findVaultInstance()
+	r.mu.Unlock()
+	if vaultInst != nil && vaultInst.OverlayFromFSM != nil {
+		for i := range metas {
+			metas[i] = vaultInst.OverlayFromFSM(metas[i])
+		}
+	}
+	metas = appendUnlistedManifestSealed(metas, vaultInst)
+	manifest, manifestKnown := buildManifestSet(vaultInst)
+	var sealed []chunk.ChunkMeta
+	for _, m := range metas {
+		if !m.Sealed {
+			continue
+		}
+		if manifestKnown && !manifest[m.ID] {
+			continue // ghost
+		}
+		sealed = append(sealed, m)
+	}
+	return sealed, true
 }
 
 // buildManifestSet returns the FSM-known chunk IDs for the given instance and a
@@ -1393,6 +1529,8 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 					errors.Is(subErr, ErrVaultDiskProtect),
 					errors.Is(subErr, ErrVaultMaxSize),
 					errors.Is(subErr, ErrVaultBacklogBudget),
+					errors.Is(subErr, ErrVaultAgeBound),
+					errors.Is(subErr, ErrVaultChunkCountBound),
 					r.orch.shuttingDown():
 					// ErrDiskProtect is terminal for the whole fan-out: every
 					// subsequent record would be rejected the same way, and

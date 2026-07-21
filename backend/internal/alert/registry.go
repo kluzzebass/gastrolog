@@ -252,6 +252,22 @@ var catalog = []AlarmType{
 		Response: "Raise the bound (set a larger max size on an attached retention policy) or shorten retention. This vault is refusing records now; others are unaffected.",
 	},
 	{
+		// gastrolog-5yfaqj: generalizes refusal from max-size (above, its
+		// own already-shipped alarm pair, unchanged) to max-age and
+		// max-chunks. One type, cause named in the detail text and
+		// disambiguated in the entity key (<vault>/age, <vault>/count) so
+		// both can stand on one vault at once. No "approaching" variant —
+		// unlike max-size this isn't an instantaneous measurement to lead
+		// with, it's a sweep verdict (violated, swept, still violated),
+		// and alarms-no-ceremony argues against inventing a lead-in for
+		// something clock-free.
+		IDPrefix: "vault-bound-capped",
+		Priority: High, // refused ingest is not lost data
+		Source:   "retention",
+		Cause:    "A retention policy's max-age or max-chunks bound is still violated after retention swept and attempted to clear it; new records for this vault are refused. Only happens when the stating policy has refuse enabled (the default) — a policy set to drain-only never refuses.",
+		Response: "Read the alarm detail for which bound and vault. If retention-deferred is also standing for this vault, that names why the sweep isn't clearing it; otherwise raise the bound, shorten it enough that draining can keep up, or set the policy's refuse flag off to accept drain-only.",
+	},
+	{
 		IDPrefix: "disk-space-exhausted",
 		Priority: High, // suspended admission is not lost data
 		Source:   "storage",

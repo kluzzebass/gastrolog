@@ -192,3 +192,69 @@ func TestFireRetentionEventDefersBelowFloor(t *testing.T) {
 		t.Errorf("no records may enter routing below the floor; Routed=%d", s.Routed)
 	}
 }
+
+// TestFireRetentionEventAbortsOnAgeBoundCappedDestination extends the
+// TestFireRetentionEventAbortsOnCappedDestination family (gastrolog-5yfaqj
+// review fix C2): a destination vault refused on the NEW age-bound cause
+// must abort the fan-out the same terminal way size/backlog capping do —
+// before this fix, ErrVaultAgeBound/ErrVaultChunkCountBound fell into the
+// default per-record-drop branch instead of the terminal-abort list, so
+// EVERY record in the source chunk was dropped (not just the ones that
+// happened to submit first) and the chunk was still destroyed by the
+// caller afterward — a route-disposition vault silently converted into a
+// delete-and-lose vault the moment its destination started refusing on an
+// age or count bound.
+func TestFireRetentionEventAbortsOnAgeBoundCappedDestination(t *testing.T) {
+	t.Parallel()
+
+	fx := newDispositionFixture(t)
+	capped := fx.archiveID
+	fx.orch.SetRemoteVaultAgeBoundCapped(func(id glid.GLID) bool { return id == capped })
+
+	logSink := &syncBuffer{}
+	r := &retentionRunner{
+		vaultID: fx.sourceID,
+		orch:    fx.orch,
+		logger:  slog.New(slog.NewTextHandler(logSink, nil)),
+	}
+
+	if r.fireRetentionEvent(fx.sealedID) {
+		t.Fatal("fireRetentionEvent must report non-completion when a destination vault is age-bound-capped")
+	}
+	logs := logSink.String()
+	if got := strings.Count(logs, "fan-out aborted"); got != 1 {
+		t.Errorf("want exactly 1 abort warn, got %d\nlogs:\n%s", got, logs)
+	}
+	if s := fx.orch.GetRouteStats(); s.Matched != 0 {
+		t.Errorf("no record may be counted matched past an age-bound-capped gate; Matched=%d", s.Matched)
+	}
+}
+
+// TestFireRetentionEventAbortsOnChunkCountBoundCappedDestination is
+// TestFireRetentionEventAbortsOnAgeBoundCappedDestination's chunk-count
+// sibling.
+func TestFireRetentionEventAbortsOnChunkCountBoundCappedDestination(t *testing.T) {
+	t.Parallel()
+
+	fx := newDispositionFixture(t)
+	capped := fx.archiveID
+	fx.orch.SetRemoteVaultChunkCountBoundCapped(func(id glid.GLID) bool { return id == capped })
+
+	logSink := &syncBuffer{}
+	r := &retentionRunner{
+		vaultID: fx.sourceID,
+		orch:    fx.orch,
+		logger:  slog.New(slog.NewTextHandler(logSink, nil)),
+	}
+
+	if r.fireRetentionEvent(fx.sealedID) {
+		t.Fatal("fireRetentionEvent must report non-completion when a destination vault is chunk-count-bound-capped")
+	}
+	logs := logSink.String()
+	if got := strings.Count(logs, "fan-out aborted"); got != 1 {
+		t.Errorf("want exactly 1 abort warn, got %d\nlogs:\n%s", got, logs)
+	}
+	if s := fx.orch.GetRouteStats(); s.Matched != 0 {
+		t.Errorf("no record may be counted matched past a chunk-count-bound-capped gate; Matched=%d", s.Matched)
+	}
+}

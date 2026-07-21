@@ -32,6 +32,13 @@ const (
 	VaultAdmissionCause_VAULT_ADMISSION_CAUSE_MAX_SIZE_BOUND     VaultAdmissionCause = 1
 	VaultAdmissionCause_VAULT_ADMISSION_CAUSE_VAULT_DISK_PROTECT VaultAdmissionCause = 2
 	VaultAdmissionCause_VAULT_ADMISSION_CAUSE_BACKLOG_BUDGET     VaultAdmissionCause = 3
+	// gastrolog-5yfaqj: refuse generalized from max_size to every retention
+	// policy bound. AGE_BOUND/CHUNK_COUNT_BOUND only ever appear when the
+	// stating policy's refuse flag is true AND the retention runner has
+	// swept and failed to clear the violation — never on the normal
+	// transient between a chunk's seal and the next sweep.
+	VaultAdmissionCause_VAULT_ADMISSION_CAUSE_AGE_BOUND         VaultAdmissionCause = 4
+	VaultAdmissionCause_VAULT_ADMISSION_CAUSE_CHUNK_COUNT_BOUND VaultAdmissionCause = 5
 )
 
 // Enum value maps for VaultAdmissionCause.
@@ -41,12 +48,16 @@ var (
 		1: "VAULT_ADMISSION_CAUSE_MAX_SIZE_BOUND",
 		2: "VAULT_ADMISSION_CAUSE_VAULT_DISK_PROTECT",
 		3: "VAULT_ADMISSION_CAUSE_BACKLOG_BUDGET",
+		4: "VAULT_ADMISSION_CAUSE_AGE_BOUND",
+		5: "VAULT_ADMISSION_CAUSE_CHUNK_COUNT_BOUND",
 	}
 	VaultAdmissionCause_value = map[string]int32{
 		"VAULT_ADMISSION_CAUSE_UNSPECIFIED":        0,
 		"VAULT_ADMISSION_CAUSE_MAX_SIZE_BOUND":     1,
 		"VAULT_ADMISSION_CAUSE_VAULT_DISK_PROTECT": 2,
 		"VAULT_ADMISSION_CAUSE_BACKLOG_BUDGET":     3,
+		"VAULT_ADMISSION_CAUSE_AGE_BOUND":          4,
+		"VAULT_ADMISSION_CAUSE_CHUNK_COUNT_BOUND":  5,
 	}
 )
 
@@ -3945,12 +3956,14 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\x17completed_staging_bytes\x18\a \x01(\x04R\x15completedStagingBytes\x12\x1d\n" +
 	"\n" +
 	"head_bytes\x18\b \x01(\x04R\theadBytes\x12$\n" +
-	"\x0epre_head_bytes\x18\t \x01(\x04R\fpreHeadBytes*\xbe\x01\n" +
+	"\x0epre_head_bytes\x18\t \x01(\x04R\fpreHeadBytes*\x90\x02\n" +
 	"\x13VaultAdmissionCause\x12%\n" +
 	"!VAULT_ADMISSION_CAUSE_UNSPECIFIED\x10\x00\x12(\n" +
 	"$VAULT_ADMISSION_CAUSE_MAX_SIZE_BOUND\x10\x01\x12,\n" +
 	"(VAULT_ADMISSION_CAUSE_VAULT_DISK_PROTECT\x10\x02\x12(\n" +
-	"$VAULT_ADMISSION_CAUSE_BACKLOG_BUDGET\x10\x03*r\n" +
+	"$VAULT_ADMISSION_CAUSE_BACKLOG_BUDGET\x10\x03\x12#\n" +
+	"\x1fVAULT_ADMISSION_CAUSE_AGE_BOUND\x10\x04\x12+\n" +
+	"'VAULT_ADMISSION_CAUSE_CHUNK_COUNT_BOUND\x10\x05*r\n" +
 	"\n" +
 	"ChunkState\x12\x1b\n" +
 	"\x17CHUNK_STATE_UNSPECIFIED\x10\x00\x12\x16\n" +

@@ -753,6 +753,26 @@ export class NodeStats extends Message<NodeStats> {
   sizeCappedVaultIds: Uint8Array[] = [];
 
   /**
+   * Vaults whose max-age retention bound is still violated after this
+   * node's retention runner swept and failed to clear it, on a policy
+   * with refuse=true (gastrolog-5yfaqj). Unlike size_capped_vault_ids this
+   * is NOT instantaneous — see RetentionPolicyConfig.refuse. Honored
+   * cluster-wide by the same per-vault admission gate.
+   *
+   * @generated from field: repeated bytes age_bound_vault_ids = 52;
+   */
+  ageBoundVaultIds: Uint8Array[] = [];
+
+  /**
+   * Vaults whose max-chunks retention bound is still violated after a
+   * failed sweep, on a policy with refuse=true. Same contract as
+   * age_bound_vault_ids.
+   *
+   * @generated from field: repeated bytes chunk_count_bound_vault_ids = 53;
+   */
+  chunkCountBoundVaultIds: Uint8Array[] = [];
+
+  /**
    * Cumulative diagnostic log records this node's capture handler has
    * discarded because the capture channel was full. A capacity signal with
    * no operator action, so it is a metric and never an alarm
@@ -832,6 +852,8 @@ export class NodeStats extends Message<NodeStats> {
     { no: 47, name: "raft_elections_per_min", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
     { no: 48, name: "disk_protected_vault_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
     { no: 49, name: "size_capped_vault_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
+    { no: 52, name: "age_bound_vault_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
+    { no: 53, name: "chunk_count_bound_vault_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
     { no: 50, name: "self_ingester_drops_total", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 51, name: "ingest_pressure_level", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);

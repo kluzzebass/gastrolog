@@ -115,6 +115,13 @@ enum VaultAdmissionCause {
   VAULT_ADMISSION_CAUSE_MAX_SIZE_BOUND = 1;
   VAULT_ADMISSION_CAUSE_VAULT_DISK_PROTECT = 2;
   VAULT_ADMISSION_CAUSE_BACKLOG_BUDGET = 3;
+  // gastrolog-5yfaqj: refuse generalized from max_size to every retention
+  // policy bound. AGE_BOUND/CHUNK_COUNT_BOUND only ever appear when the
+  // stating policy's refuse flag is true AND the retention runner has
+  // swept and failed to clear the violation — never on the normal
+  // transient between a chunk's seal and the next sweep.
+  VAULT_ADMISSION_CAUSE_AGE_BOUND = 4;
+  VAULT_ADMISSION_CAUSE_CHUNK_COUNT_BOUND = 5;
 }
 
 message GetVaultRequest {
