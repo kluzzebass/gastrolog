@@ -325,9 +325,13 @@ configure() {
   # stays at/over it. 50GB per node — every node holds a full replica (RF =
   # NODES), so the volume needs at least NODES x this; an unbounded vault is
   # how GastroLog1 filled a 466 GiB volume and deadlocked (gastrolog-2b2yyy,
-  # gastrolog-5ct2av).
+  # gastrolog-5ct2av). --refuse is required explicitly here: refuse now
+  # defaults OFF (gastrolog-5yfaqj operator decision — bounds are
+  # drain-first), so without this flag the policy would only drain and the
+  # cap-and-refuse behavior this bootstrap and comment describe would
+  # silently stop happening. Semantics below are otherwise unchanged.
   $GLOG config retention-policy create --addr "$S" --name "1h-retain" --max-age 1h \
-    --max-size "50GB" 2>&1 | sed 's/^/  /'
+    --max-size "50GB" --refuse 2>&1 | sed 's/^/  /'
 
   # gastrolog-4kkoo (Phase 5): no filter entity — match expressions live
   # inline on routes via --expression. Synthetic attributes (_source,

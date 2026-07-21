@@ -7,9 +7,11 @@ package server_test
 // operator correction 2026-07-19 (comment c2): an earlier design that split
 // this into two fields was superseded before implementation (see the
 // design doc history under docs/). max_size
-// drains oldest sealed chunks past the bound AND refuses admission while
-// the vault's local claim is at/over it. PutRetentionPolicy parse-checks
-// it — must parse, must be > 0 when set; an absent max_size is not
+// drains oldest sealed chunks past the bound, and — when the policy's
+// refuse flag is explicitly on (gastrolog-5yfaqj: refuse now defaults
+// off) — also refuses admission while the vault's local claim is at/over
+// it. PutRetentionPolicy parse-checks it — must parse, must be > 0 when
+// set; an absent max_size is not
 // defaulted here (no per-policy stamping) — the default floor is applied
 // downstream by the disk-guard resolver (orchestrator.resolveVaultSizeBound)
 // only when NO attached policy carries a bound at all, and that floor is

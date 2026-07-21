@@ -31,9 +31,17 @@ func retentionRuleFor(policyID glid.GLID) system.RetentionRule {
 	return system.RetentionRule{RetentionPolicyID: policyID}
 }
 
+// policyWithBound builds a refuse-eligible ("hard") size-bound policy —
+// every caller in this file is testing the REFUSE bound resolution itself
+// (min-wins, default floor, parse-failure handling), which only makes
+// sense against a policy that actually contributes to it. Explicit
+// Refuse:true here since refuse now defaults off (gastrolog-5yfaqj
+// operator decision) — the OLD default-true assumption these tests were
+// written under no longer holds, so the fixture states its intent
+// directly rather than relying on an unset flag.
 func policyWithBound(id glid.GLID, bound string) system.RetentionPolicyConfig {
 	b := bound
-	return system.RetentionPolicyConfig{ID: id, Name: "p-" + id.String(), MaxSize: &b}
+	return system.RetentionPolicyConfig{ID: id, Name: "p-" + id.String(), MaxSize: &b, Refuse: new(true)}
 }
 
 func defaultVaultMaxSizeBytes(t *testing.T) uint64 {
@@ -154,6 +162,62 @@ func TestResolveVaultSizeBoundAllSoftMeansNoRefuseBoundNoFloor(t *testing.T) {
 	}
 }
 
+// TestUnsetRefusePolicyWithMaxSizeDrainsNotRefusesNoFloor is the operator's
+// default-flip pin (gastrolog-5yfaqj): a policy that states max_size but
+// leaves Refuse UNSET (nil, not explicit false) must:
+//  1. still DRAIN — ToRetentionPolicy builds the same SizeRetentionPolicy
+//     it always has, since drain never reads Refuse at all;
+//  2. NOT contribute to the guard's instantaneous refuse bound — nil now
+//     reads as false (RefuseEnabled()), so this policy is excluded from
+//     attachedSizeBound's winner search exactly like an explicit
+//     refuse=false policy;
+//  3. NOT re-engage the refuse-only creation-default floor either — the
+//     floor applies only when NO policy STATES a size at all, and this
+//     one does state one, just without opting into refusal.
+//
+// This is the direct behavior change from the flip: before, an unset
+// Refuse on a max_size policy silently refused (nil read as true); now it
+// silently drains only, and an operator who wants the old behavior must
+// set refuse=true explicitly.
+func TestUnsetRefusePolicyWithMaxSizeDrainsNotRefusesNoFloor(t *testing.T) {
+	t.Parallel()
+	policyID := glid.New()
+	bound := "10GB"
+	// Refuse deliberately left nil — NOT policyWithBound (which sets
+	// Refuse:true) and NOT policyWithBoundRefuse(..., false) either: this
+	// pins the true zero-value/unset case, not an explicit opt-out.
+	policy := system.RetentionPolicyConfig{ID: policyID, Name: "unset-refuse", MaxSize: &bound}
+	if policy.Refuse != nil {
+		t.Fatal("fixture setup: Refuse must be nil (unset), not explicitly set")
+	}
+	if policy.RefuseEnabled() {
+		t.Fatal("fixture setup: an unset Refuse must read as false after the default flip")
+	}
+
+	// 1. Drain: ToRetentionPolicy must still build a usable drain policy —
+	// unaffected by Refuse, which it never reads.
+	drainPolicy, err := policy.ToRetentionPolicy()
+	if err != nil {
+		t.Fatalf("ToRetentionPolicy: %v", err)
+	}
+	if drainPolicy == nil {
+		t.Fatal("a policy with max_size set must still produce a drain trigger, unset Refuse or not")
+	}
+
+	// 2 & 3. No refuse bound, no floor re-engagement.
+	vc := system.VaultConfig{
+		ID:             glid.New(),
+		RetentionRules: []system.RetentionRule{retentionRuleFor(policyID)},
+	}
+	got, source := resolveVaultSizeBoundSource(vc, []system.RetentionPolicyConfig{policy})
+	if got != 0 {
+		t.Fatalf("resolveVaultSizeBound(unset-refuse max_size) = %d, want 0 (drains only, no refuse bound)", got)
+	}
+	if strings.Contains(source, "default floor") {
+		t.Fatalf("source = %q must NOT be the default floor — the policy DOES state a size, just without opting into refusal", source)
+	}
+}
+
 // A policy attached but with no MaxSize set at all contributes nothing —
 // falls through to the default floor, same as no rules.
 func TestResolveVaultSizeBoundPolicyWithoutMaxSizeUsesDefault(t *testing.T) {
@@ -252,7 +316,10 @@ func TestRefreshVaultDiskGuardsCappedFromPolicyMaxSizeLifecycle(t *testing.T) {
 			},
 		}},
 		RetentionPolicies: []system.RetentionPolicyConfig{
-			{ID: policyID, Name: "bound-policy", MaxSize: &bound},
+			// Refuse:true explicit — refuse now defaults off
+			// (gastrolog-5yfaqj); this test is about the size-cap
+			// lifecycle itself, so the fixture states its intent.
+			{ID: policyID, Name: "bound-policy", MaxSize: &bound, Refuse: new(true)},
 		},
 	}
 
@@ -326,7 +393,12 @@ func TestRefreshVaultDiskGuardsLogsOnBoundChangeOnly(t *testing.T) {
 			},
 		}},
 		RetentionPolicies: []system.RetentionPolicyConfig{
-			{ID: policyID, Name: "bound-policy", MaxSize: &bound},
+			// Refuse:true explicit — refuse now defaults off
+			// (gastrolog-5yfaqj); without it this policy is not a
+			// refuse-eligible "winner" at all and the bound resolves to
+			// the soft-only no-refuse-bound path instead of the
+			// policy-sourced bound this test pins the log text for.
+			{ID: policyID, Name: "bound-policy", MaxSize: &bound, Refuse: new(true)},
 		},
 	}
 

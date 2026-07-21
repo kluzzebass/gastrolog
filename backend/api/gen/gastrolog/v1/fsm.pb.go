@@ -847,7 +847,8 @@ type PutRetentionPolicyCommand struct {
 	MaxSize   *string `protobuf:"bytes,4,opt,name=max_size,json=maxSize,proto3,oneof" json:"max_size,omitempty"`
 	MaxChunks *int64  `protobuf:"varint,5,opt,name=max_chunks,json=maxChunks,proto3,oneof" json:"max_chunks,omitempty"`
 	// refuse — see RetentionPolicyConfig.refuse in system.proto
-	// (gastrolog-5yfaqj). Unset reads as true (default on).
+	// (gastrolog-5yfaqj). Unset reads as false (default off — bounds are
+	// drain-first, refusal is the explicit hard mode).
 	Refuse        *bool `protobuf:"varint,6,opt,name=refuse,proto3,oneof" json:"refuse,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

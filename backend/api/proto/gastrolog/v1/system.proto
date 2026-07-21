@@ -372,39 +372,44 @@ message RotationPolicyConfig {
 message RetentionPolicyConfig {
   string max_age = 1;
   // max_size is the vault's disk-claim bound, in the same vocabulary as
-  // every other size quantity ("50GB"), and it means BOTH things at once
+  // every other size quantity ("50GB"), and it can mean BOTH things at once
   // (gastrolog-33ul6h correction: an earlier, superseded design split this
   // into two fields — see the design doc history under docs/):
   //   - DRAIN: oldest sealed chunks past the bound are drained (per the
   //     vault's disposition), exactly as this field always meant.
+  //     Unconditional — every set max_size drains, regardless of refuse.
   //   - REFUSE: while the vault's local disk claim is at/over the bound,
   //     admission refuses cluster-wide — the backstop while drain catches
-  //     up or is deferred.
+  //     up or is deferred. Gated by refuse (gastrolog-5yfaqj, default off):
+  //     a max_size with no explicit refuse=true only drains.
   // Effective bound resolution (refreshVaultDiskGuards): for each file
   // vault, resolve every attached retention rule's policy; the effective
-  // bound is the min over the policies' parsed max_size values; when no
-  // attached policy carries one, the creation default
-  // (system.DefaultVaultMaxSize) applies as a REFUSE-ONLY floor — a default
-  // must never destroy data, so the floor never drains, only refuses.
+  // REFUSE bound is the min over the REFUSE-ELIGIBLE policies' parsed
+  // max_size values; the creation default (system.DefaultVaultMaxSize)
+  // applies as a REFUSE-ONLY floor only when no attached policy STATES a
+  // max_size at all — a stated-but-soft max_size does not re-engage the
+  // floor either, the operator's opt-out stands. A default must never
+  // destroy data, so the floor never drains, only refuses.
   string max_size = 2;
   int64 max_chunks = 3;
   bytes id = 4;
   string name = 5;
   // refuse generalizes the max_size REFUSE behavior above to every bound
-  // this policy states (gastrolog-5yfaqj): while true (the default — unset
-  // reads as true, so a policy must opt OUT explicitly) and ANY of
-  // max_age/max_size/max_chunks is violated, admission refuses. false is
-  // the drain-only "soft bound" posture: the policy still drains, but the
-  // operator explicitly accepts that only the node-level disk guard
-  // backstops the vault while violated. max_size's refuse behavior is
-  // unchanged and instantaneous; max_age/max_chunks refuse only once the
-  // retention runner has swept and failed to clear the violation — see
-  // orchestrator/retention.go to avoid refusing on the normal transient
-  // between a chunk's seal and the next sweep. Per-vault resolution is
-  // per bound KIND: the min over every attached policy that states it,
-  // with refuse-eligibility following the STATING policy's own flag (a
-  // vault mixing a hard and a soft policy refuses only on the hard one's
-  // bounds).
+  // this policy states (gastrolog-5yfaqj). DEFAULT OFF (operator decision:
+  // bounds are drain-first, refusal is the explicit hard mode — unset
+  // reads as false, so a policy must opt IN explicitly). true means: while
+  // ANY of max_age/max_size/max_chunks is violated, admission refuses.
+  // false (unset or explicit) is the "soft bound" posture: the policy
+  // still drains, but the operator has not opted every attached bound
+  // into cluster-wide refusal — only the node-level disk guard backstops
+  // the vault while violated. max_size's refuse behavior is instantaneous;
+  // max_age/max_chunks refuse only once the retention runner has swept and
+  // failed to clear the violation — see orchestrator/retention.go to
+  // avoid refusing on the normal transient between a chunk's seal and the
+  // next sweep. Per-vault resolution is per bound KIND: the min over every
+  // attached policy that states it, with refuse-eligibility following the
+  // STATING policy's own flag (a vault mixing a hard and a soft policy
+  // refuses only on the hard one's bounds).
   optional bool refuse = 6;
 }
 

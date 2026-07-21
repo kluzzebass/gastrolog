@@ -100,7 +100,10 @@ func TestResolvedPolicyBudgetCapsSubmitToVaultLocally(t *testing.T) {
 			},
 		}},
 		RetentionPolicies: []system.RetentionPolicyConfig{
-			{ID: policyID, Name: "budget-policy", MaxSize: &budget},
+			// Refuse:true explicit — refuse now defaults off
+			// (gastrolog-5yfaqj); this test is about the size-refuse
+			// mechanism itself, so the fixture states its intent.
+			{ID: policyID, Name: "budget-policy", MaxSize: &budget, Refuse: new(true)},
 		},
 	}
 
@@ -180,7 +183,10 @@ func TestResolvedBudgetRederivesFromConfigAfterRestartNotFromOrchestratorState(t
 	store := sysmem.NewStore()
 	ctx := context.Background()
 	if err := store.PutRetentionPolicy(ctx, system.RetentionPolicyConfig{
-		ID: policyID, Name: "budget-policy", MaxSize: &budget,
+		// Refuse:true explicit — refuse now defaults off (gastrolog-5yfaqj);
+		// this test is about restart-survival of the resolved budget, not
+		// the refuse default itself.
+		ID: policyID, Name: "budget-policy", MaxSize: &budget, Refuse: new(true),
 	}); err != nil {
 		t.Fatalf("PutRetentionPolicy: %v", err)
 	}
@@ -224,7 +230,7 @@ func TestResolvedBudgetRederivesFromConfigAfterRestartNotFromOrchestratorState(t
 	// is down" — no live orchestrator observes this change.
 	raised := "50GiB"
 	if err := store.PutRetentionPolicy(ctx, system.RetentionPolicyConfig{
-		ID: policyID, Name: "budget-policy", MaxSize: &raised,
+		ID: policyID, Name: "budget-policy", MaxSize: &raised, Refuse: new(true),
 	}); err != nil {
 		t.Fatalf("PutRetentionPolicy (raise): %v", err)
 	}

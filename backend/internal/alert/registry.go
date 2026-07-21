@@ -164,7 +164,7 @@ var catalog = []AlarmType{
 		// mid-election or mid-flap state), so no DelayOn -- unlike
 		// vault-leaderless, a trigger-less policy doesn't resolve itself.
 		Cause:    "The vault has retention_rules configured, but every referenced retention policy resolves with no trigger set (no maxAge, maxSize, or maxChunks) -- the vault's only drain never runs. The refuse-only creation-default floor still bounds the vault, so data is not unbounded, but it accumulates up to that floor and then admission refuses -- there is no drain to keep the vault small or recover space.",
-		Response: "Read the alarm detail for which policies resolved with no trigger. Add a maxAge, maxSize, or maxChunks to at least one referenced policy -- maxSize both drains oldest chunks past the bound and refuses admission while over it, so it alone is enough to both bound the vault and enable draining. Do NOT remove the vault's retention_rules to silence this -- detaching every policy also detaches any maxSize they carried, collapsing the vault back to the untyped creation-default floor instead of the operator's intended bound.",
+		Response: "Read the alarm detail for which policies resolved with no trigger. Add a maxAge, maxSize, or maxChunks to at least one referenced policy -- maxSize alone is enough to both bound the vault and enable draining (it drains oldest chunks past the bound regardless of the refuse flag); add refuse=true to also refuse admission while over it, since refuse now defaults off. Do NOT remove the vault's retention_rules to silence this -- detaching every policy also detaches any maxSize they carried, collapsing the vault back to the untyped creation-default floor instead of the operator's intended bound.",
 	},
 	{
 		IDPrefix: "chunk-suspect",
@@ -264,8 +264,8 @@ var catalog = []AlarmType{
 		IDPrefix: "vault-bound-capped",
 		Priority: High, // refused ingest is not lost data
 		Source:   "retention",
-		Cause:    "A retention policy's max-age or max-chunks bound is still violated after retention swept and attempted to clear it; new records for this vault are refused. Only happens when the stating policy has refuse enabled (the default) — a policy set to drain-only never refuses.",
-		Response: "Read the alarm detail for which bound and vault. If retention-deferred is also standing for this vault, that names why the sweep isn't clearing it; otherwise raise the bound, shorten it enough that draining can keep up, or set the policy's refuse flag off to accept drain-only.",
+		Cause:    "A retention policy's max-age or max-chunks bound is still violated after retention swept and attempted to clear it; new records for this vault are refused. Only happens when the stating policy has refuse enabled explicitly — refuse defaults off, so a plain drain-only policy never refuses.",
+		Response: "Read the alarm detail for which bound and vault. If retention-deferred is also standing for this vault, that names why the sweep isn't clearing it; otherwise raise the bound, shorten it enough that draining can keep up, or turn the policy's refuse flag off (or simply leave it unset) to accept drain-only.",
 	},
 	{
 		IDPrefix: "disk-space-exhausted",

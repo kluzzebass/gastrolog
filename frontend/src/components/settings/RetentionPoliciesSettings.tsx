@@ -52,10 +52,11 @@ const addRetentionFormInitial: AddRetentionFormState = {
   newMaxAge: "",
   newMaxBytes: "",
   newMaxChunks: "",
-  // RetentionPolicyConfig.Refuse defaults on (nil reads as true) — match
-  // that here so the add form starts in the same state a freshly-created
-  // policy would resolve to.
-  newRefuse: true,
+  // RetentionPolicyConfig.Refuse defaults off (nil reads as false —
+  // gastrolog-5yfaqj: bounds are drain-first, refusal is the explicit
+  // hard mode) — match that here so the add form starts in the same
+  // state a freshly-created policy would resolve to.
+  newRefuse: false,
 };
 
 type AddRetentionFormAction =
@@ -114,15 +115,15 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
 
   const defaults = (id: string): PolicyEdit => {
     const pol = policies.find((p) => encode(p.id) === id);
-    if (!pol) return { name: "", maxAge: "", maxBytes: "", maxChunks: "", refuse: true };
+    if (!pol) return { name: "", maxAge: "", maxBytes: "", maxChunks: "", refuse: false };
     return {
       name: pol.name,
       maxAge: pol.maxAge,
       maxBytes: pol.maxSize,
       maxChunks: pol.maxChunks > BigInt(0) ? pol.maxChunks.toString() : "",
-      // proto refuse is optional bool — unset reads as true, matching
+      // proto refuse is optional bool — unset reads as false, matching
       // RetentionPolicyConfig.RefuseEnabled() on the backend.
-      refuse: pol.refuse ?? true,
+      refuse: pol.refuse ?? false,
     };
   };
 
@@ -230,7 +231,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
             <FormField
               label="Max Size"
               dark={dark}
-              description="The vault's disk-claim bound: oldest chunks drain past it; new records refuse while over it."
+              description="The vault's disk-claim bound: oldest chunks drain past it; with Refuse on, new records refuse while over it."
             >
               <TextInput
                 value={newMaxBytes}
@@ -309,7 +310,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
                 <FormField
                   label="Max Size"
                   dark={dark}
-                  description="The vault's disk-claim bound: oldest chunks drain past it; new records refuse while over it."
+                  description="The vault's disk-claim bound: oldest chunks drain past it; with Refuse on, new records refuse while over it."
                 >
                   <TextInput
                     value={edit.maxBytes}

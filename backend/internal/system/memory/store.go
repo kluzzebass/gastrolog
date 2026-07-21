@@ -972,6 +972,15 @@ func copyRetentionPolicy(rp system.RetentionPolicyConfig) system.RetentionPolicy
 	if rp.MaxChunks != nil {
 		c.MaxChunks = new(*rp.MaxChunks)
 	}
+	// Refuse (gastrolog-5yfaqj) was missing here — silently dropped every
+	// explicit Refuse value (true AND false alike) back to nil on every
+	// write, which the OLD default-true semantics happened to mask (nil
+	// still read as true) but the operator's explicit refuse=false opt-out
+	// was ALWAYS silently discarded by this store, and now that the
+	// default flipped to off, an explicit refuse=true would be too.
+	if rp.Refuse != nil {
+		c.Refuse = new(*rp.Refuse)
+	}
 	return c
 }
 

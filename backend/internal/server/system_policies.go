@@ -316,10 +316,12 @@ func protoToRetentionPolicy(p *apiv1.RetentionPolicyConfig) system.RetentionPoli
 	if p.MaxChunks > 0 {
 		cfg.MaxChunks = new(p.MaxChunks)
 	}
-	// refuse is genuinely tri-state (unset must default to true), unlike
-	// the other fields above which use the empty-string/zero convention —
-	// so it's the one field carried as *bool straight through, matching
-	// the proto's own optional bool representation.
+	// refuse is genuinely tri-state (unset must default to false —
+	// gastrolog-5yfaqj: bounds are drain-first, refusal is the explicit
+	// hard mode), unlike the other fields above which use the
+	// empty-string/zero convention — so it's the one field carried as
+	// *bool straight through, matching the proto's own optional bool
+	// representation.
 	cfg.Refuse = p.Refuse
 
 	return cfg
