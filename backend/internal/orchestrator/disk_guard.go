@@ -1449,15 +1449,6 @@ func (o *Orchestrator) SetVaultChunkCountBoundCapped(id glid.GLID, capped bool) 
 	o.diskGuard.setVaultChunkCountBoundCapped(o.alerts, id, capped)
 }
 
-// refreshVaultDiskGuards converges the guard's per-storage AND per-vault
-// entries with the current config (gastrolog-9akebz): every LOCALLY-hosted
-// storage gets ONE guard entry (the free-space thresholds now live there —
-// system.FileStorage.DiskFreeWarn/DiskFreeFloor), and every file vault gets
-// a guard entry recording which of those storage IDs its LOCAL placements
-// reference plus the OTHER per-vault cap-and-refuse dimensions (max-size,
-// age/count bound labels). Discovery-based like the rotation and retention
-// sweeps — storage/vault add/update/remove and placement changes are all
-// picked up on the next tick with no per-callsite lifecycle wiring.
 // nodeDisplayName resolves a node ID to its operator-facing name from the
 // live NodeConfig list, falling back to the raw ID when unknown — the same
 // contract as placementManager.nameOrID (backend/internal/app/placement.go),
@@ -1473,6 +1464,15 @@ func nodeDisplayName(nodes []system.NodeConfig, nodeID string) string {
 	return nodeID
 }
 
+// refreshVaultDiskGuards converges the guard's per-storage AND per-vault
+// entries with the current config (gastrolog-9akebz): every LOCALLY-hosted
+// storage gets ONE guard entry (the free-space thresholds now live there —
+// system.FileStorage.DiskFreeWarn/DiskFreeFloor), and every file vault gets
+// a guard entry recording which of those storage IDs its LOCAL placements
+// reference plus the OTHER per-vault cap-and-refuse dimensions (max-size,
+// age/count bound labels). Discovery-based like the rotation and retention
+// sweeps — storage/vault add/update/remove and placement changes are all
+// picked up on the next tick with no per-callsite lifecycle wiring.
 func (o *Orchestrator) refreshVaultDiskGuards(ctx context.Context) {
 	if o.diskGuard == nil {
 		return
