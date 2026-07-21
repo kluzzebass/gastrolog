@@ -631,8 +631,10 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
 
 - **Disk guard** — the per-node free-space guard job (`disk_guard.go`):
   samples the node's data volumes every 15s and drives two staged gates
-  plus the per-vault caps (max-size budget, backlog budget, per-vault
-  floor).
+  plus the per-vault caps (max-size budget, backlog budget) and, since
+  gastrolog-9akebz, a per-storage evaluation (`evaluateStorages`) — one
+  statfs/warn-floor verdict per locally-hosted `FileStorage`, regardless
+  of how many vaults share it; the floor is no longer a per-vault cap.
 
 - **Admission gate** (`protect`) — the disk guard's outer gate: suspends
   ingest admission and catch-up pulls. Engages below the free-space

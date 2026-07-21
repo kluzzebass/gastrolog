@@ -10,7 +10,7 @@ import { useToast } from "../Toast";
 import { buildNodeNameMap, resolveNodeName } from "../../utils/nodeNames";
 // eslint-disable-next-line no-restricted-imports -- no Chunk model yet (gastrolog-2e2qs follow-up)
 import { type ChunkMeta } from "../../api/gen/gastrolog/v1/vault_pb";
-import { VaultAdmissionCause, type Vault } from "../../api/model/vault";
+import { VaultAdmissionCause, type Vault, type VaultAdmissionRefusal } from "../../api/model/vault";
 import { protoToInstant, instantToMs, instantToDate, formatDateTimeShort } from "../../utils/temporal";
 import { formatBytes, formatRate } from "../../utils/units";
 import { Spark } from "../Spark";
@@ -87,9 +87,11 @@ function chunkSizeCellTitle(chunk: ChunkMeta): string | undefined {
 // admission-causes collector — backend/internal/orchestrator/disk_guard.go's
 // VaultAdmissionCauses) to a terse tooltip phrase. A first-class backend
 // signal, not a UI-side derivation from alarm state (gastrolog-33ul6h).
+// gastrolog-9akebz: VAULT_DISK_PROTECT renamed STORAGE_DISK_PROTECT — the
+// disk-free thresholds moved from the vault to the storage it's placed on.
 const vaultAdmissionCauseLabels: Partial<Record<VaultAdmissionCause, string>> = {
   [VaultAdmissionCause.MAX_SIZE_BOUND]: "at max-size bound",
-  [VaultAdmissionCause.VAULT_DISK_PROTECT]: "volume below floor",
+  [VaultAdmissionCause.STORAGE_DISK_PROTECT]: "storage below floor",
   [VaultAdmissionCause.BACKLOG_BUDGET]: "backlog at budget",
   [VaultAdmissionCause.AGE_BOUND]: "past age bound",
   [VaultAdmissionCause.CHUNK_COUNT_BOUND]: "over chunk-count bound",
@@ -98,13 +100,32 @@ const vaultAdmissionCauseLabels: Partial<Record<VaultAdmissionCause, string>> = 
 // vaultRefusingCauseLabels maps the vault's admission-refused causes to their
 // terse tooltip phrases, dropping UNSPECIFIED (never emitted by the backend
 // today, but the label map has no entry for it — defense in depth).
-export function vaultRefusingCauseLabels(causes: readonly VaultAdmissionCause[]): string[] {
+export function vaultRefusingCauseLabels(refusals: readonly VaultAdmissionRefusal[]): string[] {
   const labels: string[] = [];
-  for (const cause of causes) {
-    const label = vaultAdmissionCauseLabels[cause];
+  for (const r of refusals) {
+    const label = vaultAdmissionCauseLabels[r.cause];
     if (label) labels.push(label);
   }
   return labels;
+}
+
+// vaultRefusalDetails pairs each active cause's label with the backend's own
+// detail string, verbatim — the expanded card's refusal section renders
+// exactly this, never reconstructing the specifics client-side
+// (gastrolog-9akebz: VaultAdmissionRefusal carries {cause, detail} on the
+// wire). Same UNSPECIFIED-drop discipline as vaultRefusingCauseLabels.
+export interface VaultRefusalDetail {
+  label: string;
+  detail: string;
+}
+
+export function vaultRefusalDetails(refusals: readonly VaultAdmissionRefusal[]): VaultRefusalDetail[] {
+  const details: VaultRefusalDetail[] = [];
+  for (const r of refusals) {
+    const label = vaultAdmissionCauseLabels[r.cause];
+    if (label) details.push({ label, detail: r.detail });
+  }
+  return details;
 }
 
 interface VaultCardProps {
@@ -174,6 +195,7 @@ export function VaultCard({
       }
     >
       <div className="flex flex-col gap-4 pt-2">
+        <VaultRefusalSection refusals={vault.admissionRefused} dark={dark} />
         <VaultLeaderSummary vaultId={vault.id} vaultTypeLabel={vault.typeLabel} dark={dark} />
         <VaultThroughputSection vaultId={vault.id} dark={dark} />
         <VaultStageCountersSection vaultId={vault.id} dark={dark} />
@@ -181,6 +203,42 @@ export function VaultCard({
         <ChunkList vaultId={vault.id} dark={dark} />
       </div>
     </ExpandableCard>
+  );
+}
+
+// VaultRefusalSection lists each active admission-refusal cause with the
+// backend's own detail string, verbatim — the same VaultAdmissionRefusal
+// signal that drives the header's "refusing" badge, expanded into a
+// dedicated section while it's non-empty. No client-side reconstruction of
+// which storage or bound is involved: the detail text is exactly what the
+// backend attached (gastrolog-9akebz). Matches the Topology/Throughput
+// section chrome (uppercase muted heading, bordered well panel).
+function VaultRefusalSection({
+  refusals,
+  dark,
+}: Readonly<{ refusals: readonly VaultAdmissionRefusal[]; dark: boolean }>) {
+  const c = useThemeClass(dark);
+  const details = vaultRefusalDetails(refusals);
+  if (details.length === 0) return null;
+
+  return (
+    <section className="flex flex-col gap-4">
+      <h3
+        className={`text-[0.75em] font-medium uppercase tracking-[0.15em] whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}
+      >
+        Refusal
+      </h3>
+      <div
+        className={`rounded-lg border px-4 py-3 flex flex-col gap-2 ${c("border-ink-border bg-ink-well", "border-light-border bg-light-well")}`}
+      >
+        {details.map((d) => (
+          <div key={d.label} className="flex items-baseline gap-3 text-[0.85em]">
+            <span className="font-mono text-severity-warn whitespace-nowrap">{d.label}</span>
+            <span className={c("text-text-muted", "text-light-text-muted")}>{d.detail}</span>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 

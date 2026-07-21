@@ -734,14 +734,19 @@ export class NodeStats extends Message<NodeStats> {
   raftElectionsPerMin = 0;
 
   /**
-   * Vaults whose backing volume on THIS node is below its free-space floor.
-   * Every node's admission gate honors the union across live peers, so a
-   * starved vault volume anywhere in the cluster suspends new records for
-   * that vault at every front door while other vaults keep ingesting.
+   * Vaults with a placement on a storage, THIS node hosts, that is below
+   * its free-space floor. Every node's admission gate honors the union
+   * across live peers, so a starved storage anywhere in the cluster
+   * suspends new records for every vault placed on it at every front
+   * door while vaults on healthy storages keep ingesting. Renamed from
+   * disk_protected_vault_ids (gastrolog-9akebz: thresholds moved from
+   * VaultConfig to the storage entity; still vault-keyed — the node that
+   * samples the storage already knows which of its OWN vaults are placed
+   * on it, so the broadcast shape didn't need to become storage-keyed).
    *
-   * @generated from field: repeated bytes disk_protected_vault_ids = 48;
+   * @generated from field: repeated bytes storage_protected_vault_ids = 48;
    */
-  diskProtectedVaultIds: Uint8Array[] = [];
+  storageProtectedVaultIds: Uint8Array[] = [];
 
   /**
    * Vaults whose local disk claim on THIS node has reached their per-node
@@ -850,7 +855,7 @@ export class NodeStats extends Message<NodeStats> {
     { no: 45, name: "raft_leader_losses_total", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 46, name: "raft_failed_heartbeats_total", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 47, name: "raft_elections_per_min", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
-    { no: 48, name: "disk_protected_vault_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
+    { no: 48, name: "storage_protected_vault_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
     { no: 49, name: "size_capped_vault_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
     { no: 52, name: "age_bound_vault_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
     { no: 53, name: "chunk_count_bound_vault_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },

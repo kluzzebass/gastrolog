@@ -9,8 +9,12 @@ File storages are locally-attached disk resources declared per node. Each file s
 - **Name** — a human-readable label for the storage (e.g. "nvme-fast", "hdd-archive").
 - **Path** — where chunk data is stored, relative to the node's home directory. Absolute paths (starting with /) are also supported. Defaults to `storage/<name>`.
 - **Storage Class** — a numeric rank that indicates speed. Lower numbers mean faster storage (e.g. 1 for NVMe, 2 for SSD, 3 for HDD). Multiple file storages can share the same class to form a pool.
+- **Disk Free Warn** — free space on this storage below which the disk-space alarm raises. An absolute size like `10GB`, or a percentage of the volume like `10%`. Leave empty to inherit the node default.
+- **Disk Free Floor** — free space below which every vault placed on this storage is refused admission, cluster-wide, until space frees. Vaults on other storages keep ingesting. A size like `3GB` or a percentage like `3%`; leave empty to inherit the node default.
 
 File storages on the local node can be added, edited, or removed. Peer node file storages are displayed read-only.
+
+The thresholds are evaluated once per storage, not once per vault — a below-floor storage refuses every vault placed on it with a single alarm, rather than one alarm per vault sharing the volume.
 
 ### How vaults use file storages
 

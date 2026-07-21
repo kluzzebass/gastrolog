@@ -6,6 +6,10 @@ The Vaults tab shows each configured [vault](help:storage) with its [chunks](hel
 
 Each vault lists its name, type, enabled/disabled status, total chunk count, and record count. Expand a vault to see its chunk timeline. In a [cluster](help:clustering), vaults are grouped by their owning [node](help:clustering-nodes).
 
+## Refusal
+
+A **refusing** badge appears on the header when the vault is currently refusing new records. Expand the card to see the **Refusal** section, which lists each active cause with the backend's own detail text — which [file storage](help:storage-config) is below its floor and its free-vs-floor numbers, or which retention bound is violated and its value. Nothing here is reconstructed in the browser; it's exactly what the responding node's admission gate reports.
+
 ## Chunks
 
 Each chunk shows its ID, time range, per-node seal pips, record count, and size. The active chunk is the one currently accepting writes — all others are sealed and immutable. Chunks are sealed according to the vault's [rotation policy](help:policy-rotation).

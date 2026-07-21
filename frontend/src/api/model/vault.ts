@@ -15,10 +15,11 @@ import { type EntityID, idFromBytes, isEmptyID } from "./id";
 import { leaderNodeId, followerNodeIds } from "../../utils/placement";
 
 // Re-exported so components (gastrolog-2e2qs: no direct api/gen imports
-// outside src/api/model/ and src/api/hooks/) can name the enum without
-// reaching into the generated proto layer themselves.
+// outside src/api/model/ and src/api/hooks/) can name the enum/message
+// without reaching into the generated proto layer themselves.
 export { VaultAdmissionCause } from "../gen/gastrolog/v1/vault_pb";
-import type { VaultAdmissionCause } from "../gen/gastrolog/v1/vault_pb";
+import type { VaultAdmissionRefusal } from "../gen/gastrolog/v1/vault_pb";
+export type { VaultAdmissionRefusal } from "../gen/gastrolog/v1/vault_pb";
 
 export class Vault {
   readonly id: EntityID;
@@ -84,12 +85,14 @@ export class Vault {
   }
 
   /**
-   * Currently-applicable admission-refusal causes, as reported by the
+   * Currently-applicable admission-refusal causes, each paired with the
+   * backend's own detail text for it (which storage and its free-vs-floor
+   * numbers, which bound and value — gastrolog-9akebz), as reported by the
    * responding node's own admission-causes collector (local disk guard +
    * live-peer broadcasts) — a first-class backend signal, not a client-side
    * derivation from alarm state. Empty when the vault admits normally.
    */
-  get admissionRefused(): readonly VaultAdmissionCause[] {
+  get admissionRefused(): readonly VaultAdmissionRefusal[] {
     return this.info?.admissionRefused ?? [];
   }
 
