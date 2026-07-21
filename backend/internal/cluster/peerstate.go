@@ -383,6 +383,45 @@ func (p *PeerState) VaultStorageProtectedNodes(vaultID glid.GLID) []string {
 	return nodes
 }
 
+// VaultStorageProtectedNodeNames is VaultStorageProtectedNodes' operator-
+// facing sibling: the same live peers, named instead of ID-keyed, for the
+// admission-detail signal's "reported by <name>" text (gastrolog-9akebz).
+// Deliberately a SEPARATE method from VaultStorageProtectedNodes rather
+// than a repurposing of it — the placement manager compares that method's
+// output against raw node IDs for set membership (vaultStorageProtectedSet
+// in backend/internal/app/placement.go), so swapping its return value to
+// names would silently break that match.
+//
+// The name comes from each peer's OWN broadcast NodeStats.NodeName —
+// already resident in this entry, no config-store lookup — falling back to
+// the node ID when a peer hasn't reported a name yet. Sorted so the joined
+// "reported by a, b" string is stable between reads (map iteration order
+// is not).
+func (p *PeerState) VaultStorageProtectedNodeNames(vaultID glid.GLID) []string {
+	want := vaultID.ToProto()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	now := time.Now()
+	var names []string
+	for nodeID, e := range p.entries {
+		if now.Sub(e.received) > p.ttl || e.stats == nil {
+			continue
+		}
+		for _, id := range e.stats.StorageProtectedVaultIds {
+			if string(id) == string(want) {
+				name := e.stats.NodeName
+				if name == "" {
+					name = nodeID
+				}
+				names = append(names, name)
+				break
+			}
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
 func (p *PeerState) vaultListedByAnyPeer(vaultID glid.GLID, list func(*gastrologv1.NodeStats) [][]byte) bool {
 	want := vaultID.ToProto()
 	p.mu.RLock()

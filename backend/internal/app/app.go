@@ -486,7 +486,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		// below floor or an over-budget vault claim on any node suspends
 		// admission for that vault everywhere.
 		orch.SetRemoteVaultStorageProtected(peerState.VaultStorageProtected)
-		orch.SetRemoteVaultStorageProtectedNodes(peerState.VaultStorageProtectedNodes)
+		orch.SetRemoteVaultStorageProtectedNodes(peerState.VaultStorageProtectedNodeNames)
 		orch.SetRemoteVaultSizeCapped(peerState.VaultSizeCapped)
 		orch.SetRemoteVaultAgeBoundCapped(peerState.VaultAgeBoundCapped)
 		orch.SetRemoteVaultChunkCountBoundCapped(peerState.VaultChunkCountBoundCapped)

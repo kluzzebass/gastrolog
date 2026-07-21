@@ -19,8 +19,8 @@ func TestStatsCollector_BroadcastsDiskGuardVaultIDs(t *testing.T) {
 	protectedA, protectedB := glid.New(), glid.New()
 	capped := glid.New()
 	provider := &stubStatsProvider{
-		diskProtected: []glid.GLID{protectedA, protectedB},
-		sizeCapped:    []glid.GLID{capped},
+		storageProtected: []glid.GLID{protectedA, protectedB},
+		sizeCapped:       []glid.GLID{capped},
 	}
 	collector := NewStatsCollector(StatsCollectorConfig{
 		Stats:      provider,
@@ -42,7 +42,7 @@ func TestStatsCollector_BroadcastsDiskGuardVaultIDs(t *testing.T) {
 	}
 
 	// A node with nothing protected broadcasts empty lists (not stale entries).
-	provider.diskProtected = nil
+	provider.storageProtected = nil
 	provider.sizeCapped = nil
 	stats = collector.CollectLocalTick(time.Now())
 	if len(stats.StorageProtectedVaultIds) != 0 || len(stats.SizeCappedVaultIds) != 0 {

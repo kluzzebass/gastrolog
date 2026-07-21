@@ -12,6 +12,7 @@ package orchestrator
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"gastrolog/internal/glid"
@@ -155,4 +156,96 @@ func (l testSystemLoaderWithRuntime) Load(_ context.Context) (*system.System, er
 		return nil, nil
 	}
 	return &system.System{Config: *l.cfg, Runtime: l.rt}, nil
+}
+
+// TestRefreshVaultDiskGuardsResolvesNodeDisplayName pins a review finding on
+// gastrolog-9akebz: operator-facing text (alarms, the local admission
+// detail) must name the node, not its raw GLID — the same fallback
+// contract as placementManager.nameOrID. refreshVaultDiskGuards resolves
+// the local node's display name from Runtime.Nodes ONCE per refresh (config
+// already loaded, off the admission hot path) and threads it into
+// SetStorageGuard, so both the alarm text and vaultStorageProtectDetail
+// read the name.
+func TestRefreshVaultDiskGuardsResolvesNodeDisplayName(t *testing.T) {
+	t.Parallel()
+
+	vaultID := glid.New()
+	storageID := glid.New()
+	nodeGLID := glid.New()
+	nodeIDStr := nodeGLID.String()
+	const nodeDisplay = "friendly-node-name"
+
+	cfg := &system.Config{
+		Vaults: []system.VaultConfig{{
+			ID:      vaultID,
+			Name:    "on-disk",
+			Enabled: true,
+			Type:    system.VaultTypeFile,
+			Placements: []system.VaultPlacement{
+				{StorageID: storageID.String(), Leader: true},
+			},
+		}},
+	}
+	// NodeConfig.ID and NodeStorageConfig.NodeID are looked up independently
+	// (nodeDisplayName scans the former, NodeIDForStorage/localNodeID match
+	// the latter) — both must agree with orch.LocalNodeID to exercise "this
+	// is the local node, resolve its display name" end to end.
+	rt := system.Runtime{
+		Nodes: []system.NodeConfig{{ID: nodeGLID, Name: nodeDisplay}},
+		NodeStorageConfigs: []system.NodeStorageConfig{{
+			NodeID: nodeIDStr,
+			FileStorages: []system.FileStorage{{
+				ID:            storageID,
+				Name:          "my-storage",
+				Path:          "volA",
+				DiskFreeWarn:  "50%",
+				DiskFreeFloor: "40%",
+			}},
+		}},
+	}
+
+	orch := newTestOrch(t, Config{LocalNodeID: nodeIDStr})
+	orch.sysLoader = testSystemLoaderWithRuntime{cfg: cfg, rt: rt}
+	orch.diskGuard.sample = func(path string) (uint64, uint64, error) {
+		if path == "volA" {
+			return 30 * gib, 100 * gib, nil // below the storage's 40% floor
+		}
+		return 0, 0, errNoSuchVolume
+	}
+
+	ctx := context.Background()
+	orch.refreshVaultDiskGuards(ctx)
+	orch.diskGuard.evaluateStorages(orch.alerts)
+
+	if !orch.diskGuard.vaultStorageProtected(vaultID) {
+		t.Fatal("precondition: vault must be storage-protected")
+	}
+	detail := orch.diskGuard.vaultStorageProtectDetail(vaultID)
+	if !strings.Contains(detail, nodeDisplay) {
+		t.Fatalf("detail must name the node (%q), not its raw ID, got: %q", nodeDisplay, detail)
+	}
+	if strings.Contains(detail, nodeIDStr) {
+		t.Fatalf("detail must not leak the raw node GLID once a display name is known, got: %q", detail)
+	}
+}
+
+// TestNodeDisplayNameFallsBackToID pins the fallback half: an unknown node
+// (no matching NodeConfig, or a NodeConfig with an empty Name) resolves to
+// the raw ID — never an empty string — matching nameOrID's contract.
+func TestNodeDisplayNameFallsBackToID(t *testing.T) {
+	t.Parallel()
+	known := glid.New()
+	unknown := "some-node-id"
+
+	nodes := []system.NodeConfig{{ID: known, Name: "known-name"}, {ID: glid.New(), Name: ""}}
+
+	if got := nodeDisplayName(nodes, known.String()); got != "known-name" {
+		t.Fatalf("nodeDisplayName(known) = %q, want %q", got, "known-name")
+	}
+	if got := nodeDisplayName(nodes, unknown); got != unknown {
+		t.Fatalf("nodeDisplayName(unknown) = %q, want the raw id %q", got, unknown)
+	}
+	if got := nodeDisplayName(nil, unknown); got != unknown {
+		t.Fatalf("nodeDisplayName(nil nodes) = %q, want the raw id %q", got, unknown)
+	}
 }

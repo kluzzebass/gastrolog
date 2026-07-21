@@ -42,14 +42,14 @@ const (
 	// measurement are two alarms, each with its own cataloged priority
 	// (the HI/HIHI pattern): the approaching/low rows are Low, the
 	// capped/exhausted rows are High.
-	alarmNodeDiskLow        = "node-disk-space-low"
-	alarmNodeDiskExhausted  = "node-disk-space-exhausted"
-	alarmVaultDiskLow       = "disk-space-low"
-	alarmVaultDiskExhausted = "disk-space-exhausted"
-	alarmBacklogApproaching = "pipeline-backlog-approaching"
-	alarmBacklogCapped      = "pipeline-backlog-capped"
-	alarmMaxSizeApproaching = "vault-max-size-approaching"
-	alarmMaxSizeCapped      = "vault-max-size-capped"
+	alarmNodeDiskLow          = "node-disk-space-low"
+	alarmNodeDiskExhausted    = "node-disk-space-exhausted"
+	alarmStorageDiskLow       = "disk-space-low"
+	alarmStorageDiskExhausted = "disk-space-exhausted"
+	alarmBacklogApproaching   = "pipeline-backlog-approaching"
+	alarmBacklogCapped        = "pipeline-backlog-capped"
+	alarmMaxSizeApproaching   = "vault-max-size-approaching"
+	alarmMaxSizeCapped        = "vault-max-size-capped"
 
 	// alarmVaultBoundCapped covers the two generalized refuse-eligible
 	// bounds gastrolog-5yfaqj added (age, chunk-count): one alarm type,
@@ -109,10 +109,11 @@ type diskGuard struct {
 	logger *slog.Logger
 
 	// Node-level threshold expressions ("10%", "10GB"). Never empty: set to
-	// the typeable defaults at construction. Per-vault overrides come from
-	// the config store (VaultConfig.DiskFreeWarn/DiskFreeFloor) — there is
-	// deliberately no env-var channel, which would be invisible at runtime
-	// and silently per-node divergent (gastrolog-2mrfdw).
+	// the typeable defaults at construction. Per-storage overrides come from
+	// the config store (system.FileStorage.DiskFreeWarn/DiskFreeFloor,
+	// gastrolog-9akebz — moved off VaultConfig) — there is deliberately no
+	// env-var channel, which would be invisible at runtime and silently
+	// per-node divergent (gastrolog-2mrfdw).
 	warnExpr  string
 	floorExpr string
 
@@ -365,7 +366,10 @@ func (g *diskGuard) retainVaultGuards(keep map[glid.GLID]bool, alerts alert.Sink
 }
 
 // SetStorageGuard registers (or updates) a LOCALLY-hosted storage's guard
-// entry. path is the storage's filesystem path; warnExpr/floorExpr are
+// entry. node is the operator-facing display name of the hosting node,
+// already resolved by the caller (nodeDisplayName) — never a raw ID by the
+// time it lands here, so every alarm/detail string built from it reads a
+// name. path is the storage's filesystem path; warnExpr/floorExpr are
 // size-or-percent expressions ("10GB", "10%"), empty inherits the node
 // level. Called from the discovery refresh; removal via retainStorageGuards
 // (gastrolog-9akebz).
@@ -399,8 +403,8 @@ func (g *diskGuard) retainStorageGuards(keep map[string]bool, alerts alert.Sink)
 			continue
 		}
 		if s.alarmRaised && alerts != nil {
-			alerts.Clear(alarmVaultDiskLow, id)
-			alerts.Clear(alarmVaultDiskExhausted, id)
+			alerts.Clear(alarmStorageDiskLow, id)
+			alerts.Clear(alarmStorageDiskExhausted, id)
 		}
 		delete(g.storages, id)
 	}
@@ -738,6 +742,11 @@ func (g *diskGuard) evaluateStorages(alerts alert.Sink) {
 	for id, s := range entries {
 		free, total, ok := g.worstFreeOf([]string{s.path})
 		if !ok {
+			// No trustworthy sample this tick (unmounted, permissions): skip
+			// reconciliation entirely and keep whatever protect/alarm verdict
+			// was last derived from a successful sample — inherited behavior
+			// from the node-level guard's own worstFree/reconcileProtect
+			// (evaluate), unchanged by the move to per-storage evaluation.
 			continue
 		}
 		warnAt := resolveThreshold(s.warnExpr, g.warnExpr, total)
@@ -961,20 +970,20 @@ func (g *diskGuard) reconcileStorageAlarm(alerts alert.Sink, id string, s *stora
 		// Two setpoints, two alarms: low (Low) inside the warn band,
 		// exhausted (High) once protect suspends admission.
 		if s.protect.Load() {
-			alerts.Clear(alarmVaultDiskLow, id)
-			alerts.Raise(alarmVaultDiskExhausted, id, fmt.Sprintf(
+			alerts.Clear(alarmStorageDiskLow, id)
+			alerts.Raise(alarmStorageDiskExhausted, id, fmt.Sprintf(
 				"Out of disk space on storage %s (node %s): %s free — admission for every vault placed here is SUSPENDED until space frees.",
 				s.name, s.node, units.FormatBytesDisplay(int64(free)))) //nolint:gosec // display only
 		} else {
-			alerts.Clear(alarmVaultDiskExhausted, id)
-			alerts.Raise(alarmVaultDiskLow, id, fmt.Sprintf(
+			alerts.Clear(alarmStorageDiskExhausted, id)
+			alerts.Raise(alarmStorageDiskLow, id, fmt.Sprintf(
 				"Low disk space on storage %s (node %s): %s free of %s.",
 				s.name, s.node, units.FormatBytesDisplay(int64(free)), units.FormatBytesDisplay(int64(total)))) //nolint:gosec // display only
 		}
 		s.alarmRaised = true
 	case s.alarmRaised && free > clearAbove(warnAt):
-		alerts.Clear(alarmVaultDiskLow, id)
-		alerts.Clear(alarmVaultDiskExhausted, id)
+		alerts.Clear(alarmStorageDiskLow, id)
+		alerts.Clear(alarmStorageDiskExhausted, id)
 		s.alarmRaised = false
 	}
 }
@@ -1377,8 +1386,13 @@ func (o *Orchestrator) SetRemoteVaultStorageProtected(fn func(glid.GLID) bool) {
 }
 
 // SetRemoteVaultStorageProtectedNodes installs the peer-state lookup for
-// WHICH nodes report a vault's storage under disk protect — the admission
-// detail signal's "reported by <node>" text. Set once at app wiring.
+// WHICH nodes report a vault's storage under disk protect, already
+// resolved to operator-facing NAMES (falling back to the raw ID per-peer
+// when a name isn't known) and sorted for a stable join — the admission
+// detail signal's "reported by <name>" text. Production wiring is
+// PeerState.VaultStorageProtectedNodeNames, NOT the ID-returning
+// VaultStorageProtectedNodes the placement manager uses for set-membership
+// matching — do not swap them. Set once at app wiring.
 func (o *Orchestrator) SetRemoteVaultStorageProtectedNodes(fn func(glid.GLID) []string) {
 	o.remoteVaultStorageProtectedNodes.Store(&fn)
 }
@@ -1444,6 +1458,21 @@ func (o *Orchestrator) SetVaultChunkCountBoundCapped(id glid.GLID, capped bool) 
 // age/count bound labels). Discovery-based like the rotation and retention
 // sweeps — storage/vault add/update/remove and placement changes are all
 // picked up on the next tick with no per-callsite lifecycle wiring.
+// nodeDisplayName resolves a node ID to its operator-facing name from the
+// live NodeConfig list, falling back to the raw ID when unknown — the same
+// contract as placementManager.nameOrID (backend/internal/app/placement.go),
+// reimplemented here (rather than shared) because it operates on
+// []system.NodeConfig directly for a single lookup per refresh tick, not a
+// pre-built batch map.
+func nodeDisplayName(nodes []system.NodeConfig, nodeID string) string {
+	for _, n := range nodes {
+		if n.ID.String() == nodeID && n.Name != "" {
+			return n.Name
+		}
+	}
+	return nodeID
+}
+
 func (o *Orchestrator) refreshVaultDiskGuards(ctx context.Context) {
 	if o.diskGuard == nil {
 		return
@@ -1457,7 +1486,12 @@ func (o *Orchestrator) refreshVaultDiskGuards(ctx context.Context) {
 	// One entry per LOCALLY-hosted storage: the guard samples each
 	// storage's volume ONCE regardless of how many vaults share it. "Local"
 	// means this node's own NodeStorageConfig — the only volumes it can
-	// statfs.
+	// statfs. The node is resolved to its operator-facing name HERE, once
+	// per refresh (config is already loaded, off the admission hot path) —
+	// same fallback contract as placementManager.nameOrID: name when known,
+	// the raw ID otherwise. Every alarm/detail string that names this
+	// storage's node reads it pre-resolved.
+	nodeName := nodeDisplayName(rt.Nodes, o.localNodeID)
 	keepStorages := make(map[string]bool)
 	for _, nsc := range rt.NodeStorageConfigs {
 		if nsc.NodeID != o.localNodeID {
@@ -1466,7 +1500,7 @@ func (o *Orchestrator) refreshVaultDiskGuards(ctx context.Context) {
 		for _, fs := range nsc.FileStorages {
 			sid := fs.ID.String()
 			keepStorages[sid] = true
-			o.diskGuard.SetStorageGuard(sid, fs.Name, nsc.NodeID, fs.Path, fs.DiskFreeWarn, fs.DiskFreeFloor)
+			o.diskGuard.SetStorageGuard(sid, fs.Name, nodeName, fs.Path, fs.DiskFreeWarn, fs.DiskFreeFloor)
 		}
 	}
 	o.diskGuard.retainStorageGuards(keepStorages, o.alerts)
@@ -1702,15 +1736,28 @@ func (o *Orchestrator) startDiskGuard() error {
 	if o.diskGuard == nil || len(o.diskGuard.paths) == 0 {
 		return nil
 	}
-	if err := o.scheduler.AddJob(diskGuardJobName, diskGuardSchedule, func() {
-		o.diskGuard.evaluate(o.alerts)
-		o.refreshVaultDiskGuards(context.Background())
-		o.refreshBacklogBudget(context.Background())
-		o.diskGuard.evaluateVaults(o.alerts)
-	}); err != nil {
+	if err := o.scheduler.AddJob(diskGuardJobName, diskGuardSchedule, o.diskGuardTick); err != nil {
 		return fmt.Errorf("disk guard: %w", err)
 	}
 	o.scheduler.Describe(diskGuardJobName,
 		"Free-space guard: raises the disk-space alarm and suspends ingest admission below the floor or when a vault's backlog budget or max-size bound is reached")
 	return nil
+}
+
+// diskGuardTick is the disk guard's scheduler job body — a named method
+// (not an inline closure) so a test can call the EXACT function object the
+// scheduler holds directly, rather than re-implementing its steps and
+// silently drifting from what actually runs in production. This is the
+// fix for gastrolog-9akebz's review finding: evaluateStorages had no
+// production call site (the closure only ran evaluate ->
+// refreshVaultDiskGuards -> refreshBacklogBudget -> evaluateVaults), so no
+// storage ever engaged protect/alarmed/broadcast on a live node — a
+// regression from the per-vault free-space pass evaluateVaults used to run
+// before the storage move.
+func (o *Orchestrator) diskGuardTick() {
+	o.diskGuard.evaluate(o.alerts)
+	o.refreshVaultDiskGuards(context.Background())
+	o.refreshBacklogBudget(context.Background())
+	o.diskGuard.evaluateStorages(o.alerts)
+	o.diskGuard.evaluateVaults(o.alerts)
 }

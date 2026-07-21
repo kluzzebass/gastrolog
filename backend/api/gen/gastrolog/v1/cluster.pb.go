@@ -666,7 +666,7 @@ type NodeStats struct {
 	StorageProtectedVaultIds [][]byte `protobuf:"bytes,48,rep,name=storage_protected_vault_ids,json=storageProtectedVaultIds,proto3" json:"storage_protected_vault_ids,omitempty"`
 	// Vaults whose local disk claim on THIS node has reached their per-node
 	// max-size bound. Honored cluster-wide by the same per-vault admission
-	// gate as disk_protected_vault_ids, with a bound-specific error.
+	// gate as storage_protected_vault_ids, with a bound-specific error.
 	SizeCappedVaultIds [][]byte `protobuf:"bytes,49,rep,name=size_capped_vault_ids,json=sizeCappedVaultIds,proto3" json:"size_capped_vault_ids,omitempty"`
 	// Vaults whose max-age retention bound is still violated after this
 	// node's retention runner swept and failed to clear it, on a policy
