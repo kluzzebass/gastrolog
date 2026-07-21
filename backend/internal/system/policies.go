@@ -142,32 +142,39 @@ type RetentionPolicyConfig struct {
 	MaxAge *string `json:"maxAge,omitempty"`
 
 	// MaxSize is the vault's disk-claim bound, as a size expression
-	// ("50GB"), and it means BOTH things at once (gastrolog-33ul6h
+	// ("50GB"), and it can mean BOTH things at once (gastrolog-33ul6h
 	// correction — an earlier design split this into two fields; that
 	// design was superseded before implementation, see the design doc
 	// history under docs/):
 	//   - DRAIN: oldest sealed chunks past the bound are drained (per the
 	//     vault's disposition), exactly as SizeRetentionPolicy always did.
+	//     Unconditional — every set MaxSize drains, regardless of Refuse.
 	//   - REFUSE: while the vault's local disk claim is at/over the bound,
 	//     admission refuses cluster-wide — the backstop while drain catches
-	//     up or is deferred. Resolved at the config→runtime boundary by
-	//     refreshVaultDiskGuards: min over every attached policy's parsed
-	//     MaxSize, floored by system.DefaultVaultMaxSize (refuse-only — a
-	//     default must never destroy data) when no attached policy carries
-	//     one.
+	//     up or is deferred. Gated by Refuse (gastrolog-5yfaqj, default
+	//     off): a MaxSize policy with no explicit Refuse:true only drains,
+	//     it does not refuse. Resolved at the config→runtime boundary by
+	//     refreshVaultDiskGuards: min over every REFUSE-ELIGIBLE attached
+	//     policy's parsed MaxSize, floored by system.DefaultVaultMaxSize
+	//     (refuse-only — a default must never destroy data) only when no
+	//     attached policy STATES a MaxSize at all — a stated-but-soft
+	//     MaxSize does not re-engage the floor either; the operator's
+	//     opt-out stands.
 	MaxSize *string `json:"maxSize,omitempty"`
 
 	// MaxChunks keeps at most this many sealed chunks, deleting the oldest.
 	MaxChunks *int64 `json:"maxChunks,omitempty"`
 
 	// Refuse generalizes MaxSize's refuse behavior to every bound this
-	// policy states (gastrolog-5yfaqj): while true (the default — nil
-	// reads as true, a "hard bound" in operator terms; a policy must opt
-	// out explicitly to become a "soft bound") and any of
-	// MaxAge/MaxSize/MaxChunks is violated, admission refuses. false means
-	// drain-only: the policy still drains past its bounds, but the
-	// operator explicitly accepts that only the node-level disk guard
-	// backstops the vault while violated.
+	// policy states (gastrolog-5yfaqj). DEFAULT OFF (operator decision:
+	// bounds are drain-first, refusal is the explicit hard mode — nil
+	// reads as false; a policy must opt IN explicitly to become a "hard
+	// bound"). true means: while any of MaxAge/MaxSize/MaxChunks is
+	// violated, admission refuses. false (unset or explicit) is the
+	// "soft bound" default: the policy still drains past its bounds, but
+	// only the node-level disk guard backstops the vault while violated —
+	// including a MaxSize policy with no explicit Refuse: it drains like
+	// always, but no longer refuses unless the operator opts in.
 	//
 	// MaxSize's refuse check stays instantaneous (the disk guard's cap
 	// machinery, unchanged). MaxAge/MaxChunks refuse only once the
@@ -178,15 +185,21 @@ type RetentionPolicyConfig struct {
 	// Per-vault resolution is per bound KIND: min over every attached
 	// policy that states it, with refuse-eligibility following the
 	// STATING policy's own flag — a vault mixing a hard and a soft policy
-	// refuses only on the hard one's bounds.
+	// refuses only on the hard one's bounds. When NO attached policy
+	// opts in, there is no refuse bound at all for that kind — for
+	// MaxSize this also means the refuse-only creation-default floor
+	// does not re-engage (see resolveVaultSizeBoundSource): it applies
+	// only when no attached policy STATES a size bound, not when one
+	// states it without refusing.
 	Refuse *bool `json:"refuse,omitempty"`
 }
 
 // RefuseEnabled reports whether this policy's stated bounds refuse
-// admission while violated. Unset (nil) defaults to true — a policy must
-// opt OUT of refusal explicitly, not into it.
+// admission while violated. Unset (nil) defaults to false (gastrolog-5yfaqj
+// operator decision: bounds are drain-first) — a policy must opt IN to
+// refusal explicitly, not out of it.
 func (c RetentionPolicyConfig) RefuseEnabled() bool {
-	return c.Refuse == nil || *c.Refuse
+	return c.Refuse != nil && *c.Refuse
 }
 
 // IsEmpty reports whether this retention policy has no conditions set —

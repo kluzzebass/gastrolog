@@ -12,16 +12,16 @@ A retention policy defines **when** sealed chunks fire a retention event. Multip
 
 ## Hard vs Soft Bounds
 
-Every set condition (age, size, or chunk count) is a **hard bound** by default: once a retention sweep fails to clear the violation (size is checked instantaneously instead), the cluster refuses new records for the vault until drain catches up. Toggling a policy's **Refuse** flag off makes its bounds **soft**: they still drain, but that policy never triggers refusal — only the node-level disk-protect floor backstops the vault.
+Every set condition (age, size, or chunk count) is a **soft bound** by default: it drains, but never refuses admission — only the node-level disk-protect floor backstops the vault. Toggling a policy's **Refuse** flag on makes its bounds **hard**: once a retention sweep fails to clear the violation (size is checked instantaneously instead), the cluster refuses new records for the vault until drain catches up.
 
 ## Max Size
 
-**Max size** is the vault's disk-claim bound, and it means two things at once:
+**Max size** is the vault's disk-claim bound, and it can mean two things at once:
 
-- **Drain:** oldest sealed chunks fire retention events once the **sealed-chunk store's** disk claim exceeds the bound. Scope: only what retention can act on — sealed chunks and their indexes.
-- **Refuse:** while the vault's **whole local footprint** — the sealed-chunk store plus the pipeline segment backlog — is at or over the bound, the cluster **refuses** new records for the vault (everything already accepted is kept, the newest is nacked) — the backstop while drain catches up or is deferred. A warning alarm raises at 90% of the bound.
+- **Drain:** oldest sealed chunks fire retention events once the **sealed-chunk store's** disk claim exceeds the bound. Scope: only what retention can act on — sealed chunks and their indexes. Unconditional — set `maxSize` always drains, regardless of **Refuse**.
+- **Refuse:** while the vault's **whole local footprint** — the sealed-chunk store plus the pipeline segment backlog — is at or over the bound, the cluster **refuses** new records for the vault (everything already accepted is kept, the newest is nacked) — the backstop while drain catches up or is deferred. A warning alarm raises at 90% of the bound. Only when the policy's **Refuse** flag is on — off by default, so a plain `maxSize` only drains.
 
-**Min-wins across attached policies:** a vault can attach more than one retention policy. If more than one attached policy carries a max size, the vault's effective bound is the **lowest** of them — the most restrictive bound wins.
+**Min-wins across attached policies:** a vault can attach more than one retention policy. Drain mins over **every** attached policy that carries a max size; refuse mins over only the ones with **Refuse** on — the tightest such policy's bound wins for refusal, even if a looser soft policy is what actually triggers the drain.
 
 **Default floor:** a vault with no retention rules, or whose attached policies carry no max size at all, still gets a bound — the system default applies, refuse-only (a default never destroys data). An unbounded file vault is not representable.
 
@@ -56,7 +56,7 @@ The vault's retention rule itself just specifies the trigger policy. The "what h
 
 ## Example
 
-A retention policy with `maxAge: "720h"` and `maxSize: "50GB"` will fire on chunks older than 30 days **and** also fire on the oldest chunks if the vault's disk claim exceeds 50 GB — and refuse new records while it stays over that bound.
+A retention policy with `maxAge: "720h"` and `maxSize: "50GB"` will fire on chunks older than 30 days **and** also fire on the oldest chunks if the vault's disk claim exceeds 50 GB. With **Refuse** on, it also refuses new records while either bound stays violated (size instantly, age once a sweep fails to clear it); left off (the default), both bounds only drain.
 
 ## Choosing a Strategy
 
@@ -67,7 +67,7 @@ Conditions use union semantics — a chunk fires if **any** condition matches. T
 | Pattern | Configuration | Use case |
 |---------|--------------|----------|
 | **Fixed window** | `maxAge: 720h` (30 days) | Compliance or operational policy — data older than N days is gone |
-| **Bound cap** | `maxSize: 50GB` | Fixed disk allocation — oldest chunks drain when space runs low, admission refuses if drain can't keep up |
+| **Bound cap** | `maxSize: 50GB` | Fixed disk allocation — oldest chunks drain when space runs low; add Refuse to also refuse admission if drain can't keep up |
 | **Rolling window** | `maxChunks: 100` | Keep a fixed number of chunks regardless of size or age |
 | **Belt and suspenders** | `maxAge: 720h` + `maxSize: 100GB` | TTL for predictable expiry, size bound as a safety net for bursts |
 

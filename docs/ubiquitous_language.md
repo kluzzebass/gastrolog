@@ -466,15 +466,18 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
 
 - **Refuse** (`RetentionPolicyConfig.Refuse`, gastrolog-5yfaqj) — ONE
   boolean generalizing `MaxSize`'s refuse behavior to every bound a
-  retention policy states (`MaxAge`, `MaxSize`, `MaxChunks`). Default ON
-  (unset reads as true — a policy must opt OUT explicitly, not into it).
-  Every SET parameter on a `refuse=true` policy is a **hard bound**: drain
-  restores it, and refusal guards it while violated. `refuse=false` makes
-  every set parameter a **soft bound**: drain still restores it, but
-  refusal is off — the operator explicitly accepts that only the
-  node-level disk guard's own floor/warn bands backstop the vault while
-  violated. Not per-parameter flags (three knobs of ceremony) and not
-  paired refuse-values per dimension (the two-fields-per-concept split the
+  retention policy states (`MaxAge`, `MaxSize`, `MaxChunks`). Default OFF
+  (operator decision: bounds are drain-first, refusal is the explicit hard
+  mode — unset reads as false, a policy must opt IN explicitly); the
+  consequence is that an unset-flag policy is always drain-only, never
+  refusing, even one that sets `MaxSize`. Every SET parameter on a
+  `refuse=true` policy is a **hard bound**: drain restores it, and refusal
+  guards it while violated. `refuse=false` (unset or explicit) makes every
+  set parameter a **soft bound**: drain still restores it, but refusal is
+  off — the operator explicitly accepts that only the node-level disk
+  guard's own floor/warn bands backstop the vault while violated. Not
+  per-parameter flags (three knobs of ceremony) and not paired
+  refuse-values per dimension (the two-fields-per-concept split the
   `MaxSize` field combine killed, see below) — one flag per policy.
   - **Min-per-kind resolution**: a vault's effective bound, per KIND
     (age/size/count), is the min over every attached policy that states
@@ -514,11 +517,12 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
     instantaneous instantiation): refuses ingest admission for the vault
     once its whole local footprint (chunk store + pipeline segment
     backlog) exceeds the same bound, while the stating policy's `Refuse`
-    is true (the default). Scope: everything the vault holds on this
-    node. The backstop while drain catches up or is deferred. The
-    creation-default floor (below) stays refuse-only and unchanged,
-    independent of any policy's `Refuse` flag — a default must never
-    destroy data, so the floor never drains, only refuses.
+    is explicitly true (default off, so a bare `MaxSize` alone drains
+    only). Scope: everything the vault holds on this node. The backstop
+    while drain catches up or is deferred. The creation-default floor
+    (below) stays refuse-only and unchanged, independent of any policy's
+    `Refuse` flag — a default must never destroy data, so the floor never
+    drains, only refuses.
 
   Effective per-vault REFUSE bound = min over the refuse-eligible
   (`Refuse` on) attached policies' `MaxSize`; falls back to the creation

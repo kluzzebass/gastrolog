@@ -423,11 +423,14 @@ func TestRetentionPolicyConfigIsEmpty(t *testing.T) {
 	}
 }
 
-// TestRetentionPolicyConfigRefuseEnabled pins gastrolog-5yfaqj's default:
-// unset (nil) must read as true — a policy opts OUT of refusal explicitly,
-// never opts in. This is the one field on RetentionPolicyConfig that is
-// genuinely tri-state (unlike MaxAge/MaxSize's empty-string-means-unset
-// convention), because "unset" and "false" must mean different things.
+// TestRetentionPolicyConfigRefuseEnabled pins gastrolog-5yfaqj's default
+// (operator decision: bounds are drain-first, refusal is the explicit
+// hard mode): unset (nil) must read as false — a policy opts IN to
+// refusal explicitly, never opts out. This is the one field on
+// RetentionPolicyConfig that is genuinely tri-state (unlike
+// MaxAge/MaxSize's empty-string-means-unset convention), because "unset"
+// and "true" must mean different things (true is the explicit hard-bound
+// opt-in; unset and false are indistinguishable in effect, both soft).
 func TestRetentionPolicyConfigRefuseEnabled(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -435,8 +438,8 @@ func TestRetentionPolicyConfigRefuseEnabled(t *testing.T) {
 		cfg  RetentionPolicyConfig
 		want bool
 	}{
-		{"unset defaults to true (hard bound)", RetentionPolicyConfig{}, true},
-		{"explicit true", RetentionPolicyConfig{Refuse: new(true)}, true},
+		{"unset defaults to false (soft bound)", RetentionPolicyConfig{}, false},
+		{"explicit true (hard bound)", RetentionPolicyConfig{Refuse: new(true)}, true},
 		{"explicit false (soft bound)", RetentionPolicyConfig{Refuse: new(false)}, false},
 	}
 	for _, tc := range cases {
