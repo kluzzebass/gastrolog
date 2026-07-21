@@ -23,8 +23,8 @@ import { sortByName } from "../../lib/sort";
 
 type NavigateTo = (tab: SettingsTab, entityName?: string) => void;
 
-// refuseDescription is the one-line explanation shown under the Refuse
-// toggle in both the add and edit forms — terse, no editorializing.
+// refuseDescription doubles as the checkbox label in both forms — the
+// checkbox IS the field, no FormField wrapper.
 const refuseDescription = "Refuse new records while a bound is violated; off = drain only.";
 
 interface PolicyEdit {
@@ -250,13 +250,12 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
               />
             </FormField>
           </div>
-          <FormField label="Refuse" description={refuseDescription} dark={dark}>
-            <Checkbox
-              checked={newRefuse}
-              onChange={(v) => dispatchAdd({ type: "setNewRefuse", value: v })}
-              dark={dark}
-            />
-          </FormField>
+          <Checkbox
+            checked={newRefuse}
+            onChange={(v) => dispatchAdd({ type: "setNewRefuse", value: v })}
+            label={refuseDescription}
+            dark={dark}
+          />
         </AddFormCard>
       )}
 
@@ -330,13 +329,12 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
                   />
                 </FormField>
               </div>
-              <FormField label="Refuse" description={refuseDescription} dark={dark}>
-                <Checkbox
-                  checked={edit.refuse}
-                  onChange={(v) => setEdit(id, { refuse: v })}
-                  dark={dark}
-                />
-              </FormField>
+              <Checkbox
+                checked={edit.refuse}
+                onChange={(v) => setEdit(id, { refuse: v })}
+                label={refuseDescription}
+                dark={dark}
+              />
             </div>
           </SettingsCard>
         );
