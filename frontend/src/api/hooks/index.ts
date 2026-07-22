@@ -62,3 +62,4 @@ export {
   useDeleteCloudService,
   useSetNodeStorageConfig,
 } from "./useStorage";
+export { useStorages } from "./useStorages";

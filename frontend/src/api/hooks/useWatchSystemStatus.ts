@@ -19,6 +19,9 @@ function applyStatusMessage(qc: QueryClient, msg: WatchSystemStatusResponse) {
   if (msg.vaults.length > 0) {
     qc.setQueryData(["vaults"], msg.vaults);
   }
+  if (msg.storages.length > 0) {
+    qc.setQueryData(["storages"], msg.storages);
+  }
   if (msg.stats) {
     qc.setQueryData(["stats", "all"], msg.stats);
   }

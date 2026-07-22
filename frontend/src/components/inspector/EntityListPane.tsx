@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
-import { useVaults, useIngesters, useNodeRegistry } from "../../api/hooks";
+import { useVaults, useStorages, useIngesters, useNodeRegistry } from "../../api/hooks";
 import { type EntityID, idFromBytes } from "../../api/model/id";
 import { useWatchJobs } from "../../api/hooks";
 import { useClusterStatus } from "../../api/hooks/useClusterStatus";
@@ -13,12 +13,14 @@ import { NodeStateBadge } from "../NodeStateBadge";
 import { ExpandableCard } from "../settings/ExpandableCard";
 import { HelpButton } from "../HelpButton";
 import { VaultCard } from "./VaultCard";
+import { StorageCard } from "./StorageCard";
 import { IngesterCard } from "./IngesterCard";
 import { protoToInstant, formatTimestamp, elapsed, countdown } from "../../utils/temporal";
 import { useTick } from "./JobCard";
 import { SystemStatsView, ClusterSummaryView } from "./SystemStatsView";
 import { RouteStatsView } from "./RouteStatsView";
 import { groupByNode } from "./groupByNode";
+import { groupStoragesByNode } from "./groupStoragesByNode";
 import type { EntityType } from "./InspectorDialog";
 import { encode } from "../../api/glid";
 
@@ -27,12 +29,15 @@ interface EntityListPaneProps {
   dark: boolean;
   onOpenSettings?: (tab: string, entityName?: string) => void;
   expandTarget?: string | null;
+  onNavigate?: (param: string) => void;
 }
 
-export function EntityListPane({ entityType, dark, onOpenSettings, expandTarget }: Readonly<EntityListPaneProps>) {
+export function EntityListPane({ entityType, dark, onOpenSettings, expandTarget, onNavigate }: Readonly<EntityListPaneProps>) {
   switch (entityType) {
     case "vaults":
       return <VaultsList dark={dark} onOpenSettings={onOpenSettings} expandTarget={expandTarget} />;
+    case "storages":
+      return <StoragesList dark={dark} onOpenSettings={onOpenSettings} expandTarget={expandTarget} onNavigate={onNavigate} />;
     case "ingesters":
       return <IngestersList dark={dark} onOpenSettings={onOpenSettings} expandTarget={expandTarget} />;
     case "routes":
@@ -113,6 +118,102 @@ function VaultsList({ dark, onOpenSettings, expandTarget }: Readonly<{ dark: boo
           onToggle={() => toggle(vault.id)}
           onOpenSettings={onOpenSettings ? () => onOpenSettings("vaults", vault.displayLabel) : undefined}
         />
+      ))}
+    </div>
+  );
+}
+
+// ---- Storages ----
+//
+// A storage is a fundamentally per-node resource (one physical volume,
+// owned by exactly one node — unlike a vault, which can be placed on
+// several). So unlike VaultsList/IngestersList, which stay flat with a
+// per-card node badge, the storage entity list groups by node in
+// multi-node the same way JobsList does: one ExpandableCard per node,
+// flat storage cards inside. Single-node stays a flat sorted list.
+//
+// StorageState carries no raw node ID (only the pre-resolved node_name
+// string), so grouping resolves nodeName -> EntityID via the node
+// registry before handing off to the shared groupByNode helper.
+
+function StoragesList({
+  dark,
+  onOpenSettings,
+  expandTarget,
+  onNavigate,
+}: Readonly<{
+  dark: boolean;
+  onOpenSettings?: (tab: string, entityName?: string) => void;
+  expandTarget?: string | null;
+  onNavigate?: (param: string) => void;
+}>) {
+  const { data: storages, isLoading } = useStorages();
+  const { localNodeId, multiNode, nodeNames } = useNodeContext();
+  const registry = useNodeRegistry();
+  const { expanded, toggle, add } = useToggleSet();
+  const [expandedNodes, setExpandedNodes] = useState<Record<string, boolean>>({});
+
+  // Auto-expand a storage when deep-linked (e.g. cross-linked from Settings).
+  const [consumedTarget, setConsumedTarget] = useState<string | null>(null);
+  if (expandTarget && expandTarget !== consumedTarget && storages.length > 0) {
+    setConsumedTarget(expandTarget);
+    const match = storages.find((s) => s.displayLabel === expandTarget);
+    if (match) add(match.id);
+  }
+
+  if (isLoading) return <Loading dark={dark} />;
+  if (storages.length === 0) return <Empty dark={dark}>No storages configured.</Empty>;
+
+  const sorted = [...storages].sort((a, b) => a.displayLabel.localeCompare(b.displayLabel));
+
+  const card = (storage: (typeof storages)[number]) => (
+    <StorageCard
+      key={storage.id}
+      storage={storage}
+      dark={dark}
+      expanded={expanded.has(storage.id)}
+      onToggle={() => toggle(storage.id)}
+      onOpenSettings={onOpenSettings ? () => onOpenSettings("storage", storage.displayLabel) : undefined}
+      onNavigate={onNavigate}
+    />
+  );
+
+  if (!multiNode) {
+    return (
+      <div className="flex flex-col gap-3">
+        <EntityHeader title="Storages" helpTopicId="inspector-storages" dark={dark} />
+        {sorted.map(card)}
+      </div>
+    );
+  }
+
+  const nodeIdByName = new Map(registry.all.map((n) => [n.name, n.id]));
+  const groups = groupStoragesByNode(sorted, nodeIdByName, nodeNames, localNodeId);
+
+  return (
+    <div className="flex flex-col gap-3">
+      <EntityHeader title="Storages" helpTopicId="inspector-storages" dark={dark} />
+      {groups.map((group) => (
+        <ExpandableCard
+          key={group.nodeId}
+          id={group.nodeName}
+          dark={dark}
+          monoTitle={false}
+          expanded={expandedNodes[group.nodeId] ?? true}
+          onToggle={() =>
+            setExpandedNodes((prev) => ({ ...prev, [group.nodeId]: !(prev[group.nodeId] ?? true) }))
+          }
+          headerRight={
+            <span className="flex items-center gap-1.5">
+              {group.nodeId === localNodeId && <Badge variant="copper" dark={dark}>this node</Badge>}
+              <Badge variant="muted" dark={dark}>{group.storages.length}</Badge>
+            </span>
+          }
+        >
+          <div className="flex flex-col gap-2 pt-2">
+            {group.storages.map((storage) => card(storage))}
+          </div>
+        </ExpandableCard>
       ))}
     </div>
   );

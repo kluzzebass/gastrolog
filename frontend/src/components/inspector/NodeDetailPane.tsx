@@ -2,13 +2,14 @@ import { encode } from "../../api/glid";
 import { type EntityID, idFromBytes } from "../../api/model/id";
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
-import { useVaults, useIngesters, useNodeRegistry } from "../../api/hooks";
+import { useVaults, useStorages, useIngesters, useNodeRegistry } from "../../api/hooks";
 import { useWatchJobs } from "../../api/hooks";
 import { useClusterStatus } from "../../api/hooks/useClusterStatus";
 import { useConfig } from "../../api/hooks/useSystem";
 import { useSettings } from "../../api/hooks/useSettings";
 import { toastError } from "../Toast";
 import { VaultCard } from "./VaultCard";
+import { StorageCard } from "./StorageCard";
 import { IngesterCard } from "./IngesterCard";
 import { JobCard, ScheduledJobsTable } from "./JobCard";
 import { HelpButton } from "../HelpButton";
@@ -20,9 +21,10 @@ interface NodeDetailPaneProps {
   nodeId: string;
   dark: boolean;
   onOpenSettings?: (tab: string, entityName?: string) => void;
+  onNavigate?: (param: string) => void;
 }
 
-export function NodeDetailPane({ nodeId, dark, onOpenSettings }: Readonly<NodeDetailPaneProps>) {
+export function NodeDetailPane({ nodeId, dark, onOpenSettings, onNavigate }: Readonly<NodeDetailPaneProps>) {
   const { data: settingsData } = useSettings();
   const localNodeId = settingsData?.nodeId ? encode(settingsData.nodeId) : "";
 
@@ -36,11 +38,16 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings }: Readonly<NodeDe
 
   // Data for all entity types, filtered by this node.
   const { data: allVaults } = useVaults();
+  const { data: allStorages } = useStorages();
   const allIngesters = useIngesters();
   const { jobs } = useWatchJobs({ onError: toastError });
 
   const nscs = config?.nodeStorageConfigs ?? [];
   const vaults = allVaults.filter((v) => v.isOn(nodeIdTyped, nscs, registry.localNodeId));
+  // StorageState carries no raw node ID (only the pre-resolved node_name
+  // string), so filter by name against this pane's node — same lookup
+  // StorageCard's node badge does per-card (gastrolog-3cobq4).
+  const storages = allStorages.filter((s) => s.nodeName === node?.name);
   const ingesters = allIngesters.filter((i) => i.isEligibleOn(nodeIdTyped));
   const nodeJobs = jobs.filter((j) => (j.nodeId || registry.localNodeId) === nodeIdTyped);
   const tasks = nodeJobs.filter((j) => j.isTask);
@@ -48,6 +55,7 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings }: Readonly<NodeDe
 
   // Expanded states per section (multi-expand).
   const [expandedVaults, setExpandedVaults] = useState<Record<string, boolean>>({});
+  const [expandedStorages, setExpandedStorages] = useState<Record<string, boolean>>({});
   const [expandedIngesters, setExpandedIngesters] = useState<Record<string, boolean>>({});
   const [expandedJobs, setExpandedJobs] = useState<Record<string, boolean>>({});
 
@@ -77,6 +85,29 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings }: Readonly<NodeDe
                   expanded={!!expandedVaults[vault.id]}
                   onToggle={() => setExpandedVaults((prev) => ({ ...prev, [vault.id]: !prev[vault.id] }))}
                   onOpenSettings={onOpenSettings ? () => onOpenSettings("vaults", vault.displayLabel) : undefined}
+                />
+              ))}
+          </div>
+        )}
+      </Section>
+
+      {/* Storages section */}
+      <Section title="Storages" dark={dark} helpTopic="inspector-storages">
+        {storages.length === 0 ? (
+          <EmptyMessage dark={dark}>No storages on this node.</EmptyMessage>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {[...storages]
+              .sort((a, b) => a.displayLabel.localeCompare(b.displayLabel))
+              .map((storage) => (
+                <StorageCard
+                  key={storage.id}
+                  storage={storage}
+                  dark={dark}
+                  expanded={!!expandedStorages[storage.id]}
+                  onToggle={() => setExpandedStorages((prev) => ({ ...prev, [storage.id]: !prev[storage.id] }))}
+                  onOpenSettings={onOpenSettings ? () => onOpenSettings("storage", storage.displayLabel) : undefined}
+                  onNavigate={onNavigate}
                 />
               ))}
           </div>
