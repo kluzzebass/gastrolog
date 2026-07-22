@@ -86,6 +86,13 @@ message StorageState {
   string path = 3;
   string node_name = 4;    // operator-facing node display name, pre-resolved
   uint32 storage_class = 5;
+  // node_id is the owning node's raw ID, wire-encoded the same way
+  // NodeStorageConfig.node_id already is ([]byte(nodeID) — a UTF-8 string
+  // cast, not raw GLID bytes; frontend id.ts/glid.ts's encode() already
+  // handles this dual convention). node_name stays the display label; this
+  // is the stable join key for grouping/filtering storages by node
+  // (gastrolog-3cobq4 review: name-based joins collide/rename-race).
+  bytes node_id = 18;
 
   // Threshold expressions as configured on this storage ("10%", "10GB");
   // empty means this storage inherits the node-level default. The

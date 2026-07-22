@@ -621,15 +621,6 @@ func (c *StatsCollector) appendPeerTrafficTotals(stats *gastrologv1.NodeStats, n
 	})
 }
 
-// storageStateToProto converts one local storage guard snapshot to its wire
-// form for the NodeStats broadcast (gastrolog-3cobq4). ss.ID is the GLID's
-// canonical String() form (the storage guard's map key, sid := fs.ID.String()
-// at refresh time) — the wire field carries raw GLID bytes, matching
-// FileStorage.Id and VaultInfo.Id, never the ASCII string cast that broke
-// StatsVaultRouteSnapshot's round-trip before that fix. Returns nil (skip,
-// never publish an empty identity) for an unparsable ID — only reachable
-// from a test fixture using a synthetic non-GLID string, never from
-// refreshVaultDiskGuards.
 // appendStorageStates fills stats.Storages from every locally-hosted
 // storage's guard snapshot (gastrolog-3cobq4). A separate method (rather
 // than inline in collectLocal) both keeps collectLocal's cognitive
@@ -640,13 +631,24 @@ func (c *StatsCollector) appendStorageStates(stats *gastrologv1.NodeStats) {
 		return
 	}
 	for _, ss := range c.cfg.Stats.StorageSnapshots() {
-		if state := storageStateToProto(ss); state != nil {
+		if state := storageStateToProto(ss, c.cfg.NodeID); state != nil {
 			stats.Storages = append(stats.Storages, state)
 		}
 	}
 }
 
-func storageStateToProto(ss StatsStorageSnapshot) *gastrologv1.StorageState {
+// storageStateToProto converts one local storage guard snapshot to its wire
+// form for the NodeStats broadcast (gastrolog-3cobq4). ss.ID is the GLID's
+// canonical String() form (the storage guard's map key, sid := fs.ID.String()
+// at refresh time) — the wire field carries raw GLID bytes, matching
+// FileStorage.Id and VaultInfo.Id, never the ASCII string cast that broke
+// StatsVaultRouteSnapshot's round-trip before that fix. Returns nil (skip,
+// never publish an empty identity) for an unparsable ID — only reachable
+// from a test fixture using a synthetic non-GLID string, never from
+// refreshVaultDiskGuards. nodeID is this collector's own local node ID
+// (StatsCollectorConfig.NodeID) — every entry it broadcasts is one of THIS
+// node's own locally-hosted storages.
+func storageStateToProto(ss StatsStorageSnapshot, nodeID string) *gastrologv1.StorageState {
 	id, err := glid.Parse(ss.ID)
 	if err != nil {
 		return nil
@@ -656,6 +658,7 @@ func storageStateToProto(ss StatsStorageSnapshot) *gastrologv1.StorageState {
 		Name:           ss.Name,
 		Path:           ss.Path,
 		NodeName:       ss.Node,
+		NodeId:         []byte(nodeID),
 		StorageClass:   ss.StorageClass,
 		WarnExpr:       ss.WarnExpr,
 		FloorExpr:      ss.FloorExpr,

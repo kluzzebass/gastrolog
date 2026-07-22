@@ -79,12 +79,17 @@ func printOneStorage(cmd *cobra.Command, ctx context.Context, client *server.Cli
 }
 
 // storageVerdict renders the storage's badge grammar as text (consistent
-// with the vault card's badge grammar, gastrolog-3cobq4): "protected" when
-// the admission gate is engaged, "warn" when below the warn threshold but
-// not yet floor, "ok" otherwise. Both booleans are server-computed
-// hysteresis-aware verdicts, never re-derived from free/warn/floor here.
+// with the vault card's badge grammar, gastrolog-3cobq4): "no sample" when
+// the owning node hasn't statfs'd it yet (SampledAt unset — the honest
+// "facts before speculation" fallback, gastrolog-9akebz), else "protected"
+// when the admission gate is engaged, "warn" when below the warn threshold
+// but not yet floor, "ok" otherwise. Both verdict booleans are
+// server-computed hysteresis-aware verdicts, never re-derived from
+// free/warn/floor here.
 func storageVerdict(st *v1.StorageState) string {
 	switch {
+	case st.SampledAt == nil:
+		return "no sample"
 	case st.ProtectVerdict:
 		return "protected"
 	case st.WarnVerdict:
@@ -94,13 +99,24 @@ func storageVerdict(st *v1.StorageState) string {
 	}
 }
 
+// freeTotalLabel renders the free/total pair, or "—" for both when no
+// statfs sample has landed yet — "0 B / 0 B" would read as a full disk,
+// not as "unmeasured" (gastrolog-3cobq4 review).
+func freeTotalLabel(st *v1.StorageState) (free, total string) {
+	if st.SampledAt == nil {
+		return "—", "—"
+	}
+	return formatStorageBytes(st.FreeBytes), formatStorageBytes(st.TotalBytes)
+}
+
 func storageRow(st *v1.StorageState) []string {
+	free, total := freeTotalLabel(st)
 	return []string{
 		st.Name,
 		st.NodeName,
 		storageVerdict(st),
-		formatStorageBytes(st.FreeBytes),
-		formatStorageBytes(st.TotalBytes),
+		free,
+		total,
 		thresholdLabel(st.WarnExpr, st.WarnInherited, st.WarnBytes),
 		thresholdLabel(st.FloorExpr, st.FloorInherited, st.FloorBytes),
 		strconv.Itoa(len(st.PlacedVaultIds)),
@@ -126,6 +142,7 @@ func formatStorageBytes(b uint64) string {
 }
 
 func storageDetailPairs(st *v1.StorageState, vaultNames map[string]string) [][2]string {
+	free, total := freeTotalLabel(st)
 	pairs := [][2]string{
 		{"ID", glid.FromBytes(st.Id).String()},
 		{"Name", st.Name},
@@ -133,7 +150,7 @@ func storageDetailPairs(st *v1.StorageState, vaultNames map[string]string) [][2]
 		{"Path", st.Path},
 		{"Storage Class", strconv.FormatUint(uint64(st.StorageClass), 10)},
 		{"Verdict", storageVerdict(st)},
-		{"Free / Total", formatStorageBytes(st.FreeBytes) + " / " + formatStorageBytes(st.TotalBytes)},
+		{"Free / Total", free + " / " + total},
 		{"Warn Threshold", thresholdLabel(st.WarnExpr, st.WarnInherited, st.WarnBytes)},
 		{"Floor Threshold", thresholdLabel(st.FloorExpr, st.FloorInherited, st.FloorBytes)},
 	}

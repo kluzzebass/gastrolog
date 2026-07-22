@@ -732,13 +732,19 @@ type StorageSnapshot struct {
 }
 
 // storageSnapshots returns a snapshot of every LOCALLY-hosted storage's
-// guard state, for broadcast in NodeStats (gastrolog-3cobq4). WarnVerdict
-// is the alarm-band verdict short of protect (hysteresis-aware via
-// alarmRaised, same state reconcileStorageAlarm derives); ProtectVerdict is
-// the admission-gate state itself. A storage never sampled yet (no
-// trustworthy statfs this tick) reports zero free/total/verdicts rather
-// than fabricating a value — the same "facts before speculation" contract
-// as vaultStorageProtectDetail.
+// guard state, for broadcast in NodeStats (gastrolog-3cobq4). ProtectVerdict
+// is the admission-gate state itself (s.protect, hysteresis-aware).
+// WarnVerdict is computed directly from the same free-vs-warn comparison
+// reconcileStorageAlarm uses to decide "low" vs "exhausted" — NOT from
+// s.alarmRaised, which only reconcileStorageAlarm sets and only when an
+// alert.Sink is wired (it no-ops on a nil sink). Deriving WarnVerdict from
+// alarmRaised would make it silently depend on whether an alert sink
+// exists — a nil-alerts deployment or test path would always report
+// WarnVerdict=false regardless of the real free/warn numbers (gastrolog-
+// 3cobq4 review). A storage never sampled yet (lastWarn/lastFree both zero)
+// naturally reports WarnVerdict=false here too — no separate guard needed —
+// and zero free/total/verdicts generally, the same "facts before
+// speculation" contract as vaultStorageProtectDetail.
 func (g *diskGuard) storageSnapshots() []StorageSnapshot {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -748,6 +754,9 @@ func (g *diskGuard) storageSnapshots() []StorageSnapshot {
 		if ns := s.lastSampledAt.Load(); ns != 0 {
 			sampledAt = time.Unix(0, ns)
 		}
+		free := s.lastFree.Load()
+		warnAt := s.lastWarn.Load()
+		protect := s.protect.Load()
 		out = append(out, StorageSnapshot{
 			ID:             id,
 			Name:           s.name,
@@ -756,13 +765,13 @@ func (g *diskGuard) storageSnapshots() []StorageSnapshot {
 			StorageClass:   s.storageClass,
 			WarnExpr:       s.warnExpr,
 			FloorExpr:      s.floorExpr,
-			WarnBytes:      s.lastWarn.Load(),
+			WarnBytes:      warnAt,
 			FloorBytes:     s.lastFloor.Load(),
-			FreeBytes:      s.lastFree.Load(),
+			FreeBytes:      free,
 			TotalBytes:     s.lastTotal.Load(),
 			SampledAt:      sampledAt,
-			WarnVerdict:    s.alarmRaised && !s.protect.Load(),
-			ProtectVerdict: s.protect.Load(),
+			WarnVerdict:    free < warnAt && !protect,
+			ProtectVerdict: protect,
 			PlacedVaultIDs: append([]glid.GLID(nil), s.placedVaultIDs...),
 		})
 	}

@@ -132,9 +132,8 @@ function VaultsList({ dark, onOpenSettings, expandTarget }: Readonly<{ dark: boo
 // multi-node the same way JobsList does: one ExpandableCard per node,
 // flat storage cards inside. Single-node stays a flat sorted list.
 //
-// StorageState carries no raw node ID (only the pre-resolved node_name
-// string), so grouping resolves nodeName -> EntityID via the node
-// registry before handing off to the shared groupByNode helper.
+// Grouping joins on StorageState.node_id (gastrolog-3cobq4 review) — the
+// stable key — via groupStoragesByNode; node_name stays the display label.
 
 function StoragesList({
   dark,
@@ -149,7 +148,6 @@ function StoragesList({
 }>) {
   const { data: storages, isLoading } = useStorages();
   const { localNodeId, multiNode, nodeNames } = useNodeContext();
-  const registry = useNodeRegistry();
   const { expanded, toggle, add } = useToggleSet();
   const [expandedNodes, setExpandedNodes] = useState<Record<string, boolean>>({});
 
@@ -187,8 +185,7 @@ function StoragesList({
     );
   }
 
-  const nodeIdByName = new Map(registry.all.map((n) => [n.name, n.id]));
-  const groups = groupStoragesByNode(sorted, nodeIdByName, nodeNames, localNodeId);
+  const groups = groupStoragesByNode(sorted, nodeNames, localNodeId);
 
   return (
     <div className="flex flex-col gap-3">

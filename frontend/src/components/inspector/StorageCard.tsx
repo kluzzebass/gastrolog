@@ -1,11 +1,12 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
-import { useNodeRegistry, useVaults } from "../../api/hooks";
+import { useVaults } from "../../api/hooks";
 import type { Storage } from "../../api/model/storage";
 import { formatBytes } from "../../utils/units";
 import { protoToInstant, relativeTime } from "../../utils/temporal";
 import { Badge } from "../Badge";
 import { CogIcon } from "../icons";
 import { ExpandableCard } from "../settings/ExpandableCard";
+import { NodeBadge } from "../settings/NodeBadge";
 import { CrossLinkBadge, CrossLinkChip } from "./CrossLinkBadge";
 
 // storageVerdictLabel renders the storage's badge grammar as text — the
@@ -61,7 +62,7 @@ export function StorageCard({
       onToggle={onToggle}
       headerRight={
         <span className="flex items-center gap-1.5">
-          <StorageNodeBadge nodeName={storage.nodeName} dark={dark} />
+          <NodeBadge nodeId={storage.nodeId} dark={dark} />
           {verdict === "protected" && (
             <Badge variant="error" dark={dark}>protected</Badge>
           )}
@@ -81,23 +82,6 @@ export function StorageCard({
     >
       <StorageDetail storage={storage} dark={dark} onNavigate={onNavigate} />
     </ExpandableCard>
-  );
-}
-
-// StorageNodeBadge mirrors NodeBadge's grammar (this-node copper pill +
-// muted node-name pill, hidden in single-node) but keys off the storage's
-// published node_name string rather than a node ID — StorageState carries
-// no node ID, only the pre-resolved display name (gastrolog-3cobq4).
-function StorageNodeBadge({ nodeName, dark }: Readonly<{ nodeName: string; dark: boolean }>) {
-  const registry = useNodeRegistry();
-  if (!registry.multiNode) return null;
-  const node = registry.all.find((n) => n.name === nodeName);
-  const isLocal = node ? registry.isLocal(node.id) : false;
-  return (
-    <>
-      {isLocal && <Badge variant="copper" dark={dark}>this node</Badge>}
-      <Badge variant="muted" dark={dark}>{nodeName}</Badge>
-    </>
   );
 }
 

@@ -436,6 +436,13 @@ type StorageState struct {
 	Path         string                 `protobuf:"bytes,3,opt,name=path,proto3" json:"path,omitempty"`
 	NodeName     string                 `protobuf:"bytes,4,opt,name=node_name,json=nodeName,proto3" json:"node_name,omitempty"` // operator-facing node display name, pre-resolved
 	StorageClass uint32                 `protobuf:"varint,5,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"`
+	// node_id is the owning node's raw ID, wire-encoded the same way
+	// NodeStorageConfig.node_id already is ([]byte(nodeID) — a UTF-8 string
+	// cast, not raw GLID bytes; frontend id.ts/glid.ts's encode() already
+	// handles this dual convention). node_name stays the display label; this
+	// is the stable join key for grouping/filtering storages by node
+	// (gastrolog-3cobq4 review: name-based joins collide/rename-race).
+	NodeId []byte `protobuf:"bytes,18,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
 	// Threshold expressions as configured on this storage ("10%", "10GB");
 	// empty means this storage inherits the node-level default. The
 	// *_inherited flags say so explicitly — never left for a client to infer
@@ -527,6 +534,13 @@ func (x *StorageState) GetStorageClass() uint32 {
 		return x.StorageClass
 	}
 	return 0
+}
+
+func (x *StorageState) GetNodeId() []byte {
+	if x != nil {
+		return x.NodeId
+	}
+	return nil
 }
 
 func (x *StorageState) GetWarnExpr() string {
@@ -653,13 +667,14 @@ const file_gastrolog_v1_storage_proto_rawDesc = "" +
 	"\rrestore_speed\x18\x0f \x01(\tR\frestoreSpeed\x12!\n" +
 	"\frestore_days\x18\x10 \x01(\rR\vrestoreDays\x12,\n" +
 	"\x12suspect_grace_days\x18\x11 \x01(\rR\x10suspectGraceDays\x12-\n" +
-	"\x12reconcile_schedule\x18\x12 \x01(\tR\x11reconcileSchedule\"\xc5\x04\n" +
+	"\x12reconcile_schedule\x18\x12 \x01(\tR\x11reconcileSchedule\"\xde\x04\n" +
 	"\fStorageState\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
 	"\x04path\x18\x03 \x01(\tR\x04path\x12\x1b\n" +
 	"\tnode_name\x18\x04 \x01(\tR\bnodeName\x12#\n" +
-	"\rstorage_class\x18\x05 \x01(\rR\fstorageClass\x12\x1b\n" +
+	"\rstorage_class\x18\x05 \x01(\rR\fstorageClass\x12\x17\n" +
+	"\anode_id\x18\x12 \x01(\fR\x06nodeId\x12\x1b\n" +
 	"\twarn_expr\x18\x06 \x01(\tR\bwarnExpr\x12\x1d\n" +
 	"\n" +
 	"floor_expr\x18\a \x01(\tR\tfloorExpr\x12%\n" +

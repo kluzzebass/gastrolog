@@ -5,6 +5,7 @@ import (
 	"sort"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
@@ -69,7 +70,7 @@ func (s *SystemServer) allStorageStates(ctx context.Context) ([]*apiv1.StorageSt
 	local := make(map[string]*apiv1.StorageState)
 	if s.orch != nil {
 		for _, ss := range s.orch.StorageSnapshots() {
-			local[ss.ID] = storageSnapshotToProto(ss)
+			local[ss.ID] = storageSnapshotToProto(ss, s.localNodeID)
 		}
 	}
 
@@ -82,9 +83,20 @@ func (s *SystemServer) allStorageStates(ctx context.Context) ([]*apiv1.StorageSt
 		for _, fs := range nsc.FileStorages {
 			sid := fs.ID.String()
 
+			// local[sid] is built fresh by storageSnapshotToProto on every
+			// call above — safe to mutate directly. A peer-provided state is
+			// NOT: FindStorageState (cluster.PeerState in production) returns
+			// the exact *StorageState living inside that peer's cached
+			// broadcast, shared with every other concurrent WatchSystemStatus
+			// subscriber / ListStorages call / GetClusterStatus read
+			// marshaling the same object. Clone it before setting
+			// PlacedVaultIds below — mutating the shared pointer in place
+			// raced under concurrent access (gastrolog-3cobq4 review).
 			state := local[sid]
 			if state == nil && s.peerStorageStats != nil {
-				state = s.peerStorageStats.FindStorageState(sid)
+				if peer := s.peerStorageStats.FindStorageState(sid); peer != nil {
+					state = proto.Clone(peer).(*apiv1.StorageState) //nolint:forcetypeassert // Clone(x) always returns the concrete type of x
+				}
 			}
 			if state == nil {
 				// No live sample yet — owning node down, or hasn't ticked
@@ -96,6 +108,7 @@ func (s *SystemServer) allStorageStates(ctx context.Context) ([]*apiv1.StorageSt
 					Name:           fs.Name,
 					Path:           fs.Path,
 					NodeName:       nodeName,
+					NodeId:         []byte(nsc.NodeID),
 					StorageClass:   fs.StorageClass,
 					WarnExpr:       fs.DiskFreeWarn,
 					FloorExpr:      fs.DiskFreeFloor,
@@ -150,7 +163,9 @@ func glidsToProtoBytes(ids []glid.GLID) [][]byte {
 // storageSnapshotToProto converts the orchestrator's local guard snapshot
 // to the wire StorageState — the local-storage counterpart to what the
 // stats collector builds for the NodeStats broadcast (gastrolog-3cobq4).
-func storageSnapshotToProto(ss orchestrator.StorageSnapshot) *apiv1.StorageState {
+// nodeID is this responding node's own raw ID (every locally-hosted storage
+// shares it — the guard only ever tracks THIS node's own volumes).
+func storageSnapshotToProto(ss orchestrator.StorageSnapshot, nodeID string) *apiv1.StorageState {
 	id, err := glid.Parse(ss.ID)
 	if err != nil {
 		return nil
@@ -160,6 +175,7 @@ func storageSnapshotToProto(ss orchestrator.StorageSnapshot) *apiv1.StorageState
 		Name:           ss.Name,
 		Path:           ss.Path,
 		NodeName:       ss.Node,
+		NodeId:         []byte(nodeID),
 		StorageClass:   ss.StorageClass,
 		WarnExpr:       ss.WarnExpr,
 		FloorExpr:      ss.FloorExpr,

@@ -39,6 +39,16 @@ export class Storage {
     return this.state.nodeName;
   }
 
+  /**
+   * The owning node's raw ID — the stable join key for grouping/filtering
+   * storages by node (gastrolog-3cobq4 review: nodeName alone collides on
+   * rename/duplicate names). nodeName stays the display label; this is the
+   * key.
+   */
+  get nodeId(): EntityID {
+    return idFromBytes(this.state.nodeId);
+  }
+
   get storageClass(): number {
     return this.state.storageClass;
   }

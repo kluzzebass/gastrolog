@@ -113,7 +113,14 @@ func (p *PeerState) FindVaultStats(vaultID string) *gastrologv1.VaultStats {
 // A storage is only ever reported by its owning node (only that node can
 // statfs the volume), so this returns at most one match. Returns nil if no
 // live peer reports state for this storage — e.g. the owning node is down,
-// or storageID doesn't parse as a GLID.
+// or storageID doesn't parse as a GLID. If a storage's config moves to a
+// different node (rare — an operator edits NodeStorageConfig), the two
+// nodes' guard ticks aren't synchronized, so there's a transient window of
+// up to ~two broadcast intervals where this can return the OLD node's
+// stale cached entry (until its next tick drops it via
+// retainStorageGuards) and then nil (until the new node's next tick picks
+// it up via SetStorageGuard and actually samples it) — never a fabricated
+// blend of the two, but not instantaneously consistent either.
 func (p *PeerState) FindStorageState(storageID string) *gastrologv1.StorageState {
 	id, err := glid.Parse(storageID)
 	if err != nil {

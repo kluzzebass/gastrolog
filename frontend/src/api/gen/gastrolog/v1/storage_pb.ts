@@ -388,6 +388,18 @@ export class StorageState extends Message<StorageState> {
   storageClass = 0;
 
   /**
+   * node_id is the owning node's raw ID, wire-encoded the same way
+   * NodeStorageConfig.node_id already is ([]byte(nodeID) — a UTF-8 string
+   * cast, not raw GLID bytes; frontend id.ts/glid.ts's encode() already
+   * handles this dual convention). node_name stays the display label; this
+   * is the stable join key for grouping/filtering storages by node
+   * (gastrolog-3cobq4 review: name-based joins collide/rename-race).
+   *
+   * @generated from field: bytes node_id = 18;
+   */
+  nodeId = new Uint8Array(0);
+
+  /**
    * Threshold expressions as configured on this storage ("10%", "10GB");
    * empty means this storage inherits the node-level default. The
    * *_inherited flags say so explicitly — never left for a client to infer
@@ -477,6 +489,7 @@ export class StorageState extends Message<StorageState> {
     { no: 3, name: "path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 4, name: "node_name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 5, name: "storage_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 18, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 6, name: "warn_expr", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 7, name: "floor_expr", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 8, name: "warn_inherited", kind: "scalar", T: 8 /* ScalarType.BOOL */ },

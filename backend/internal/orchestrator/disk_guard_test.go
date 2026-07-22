@@ -693,6 +693,37 @@ func TestStorageSnapshotsReportsWarnAndProtectVerdicts(t *testing.T) {
 	}
 }
 
+// TestStorageSnapshotsWarnVerdictIndependentOfAlertSink pins the
+// gastrolog-3cobq4 review fix: WarnVerdict must come from the free-vs-warn
+// comparison directly, never from s.alarmRaised — reconcileStorageAlarm
+// only sets alarmRaised when an alert.Sink is wired (alerts == nil is a
+// legitimate no-op path, e.g. some test/tooling call sites), so deriving
+// WarnVerdict from it would silently report false for a genuinely
+// below-warn storage whenever no alert sink exists. Passing a nil Sink
+// here is exactly that path.
+func TestStorageSnapshotsWarnVerdictIndependentOfAlertSink(t *testing.T) {
+	t.Parallel()
+	total := 400 * gib // warn=40GiB, floor=12GiB
+	g, sampler := newGuardFixture(total, map[string]uint64{"volA": 30 * gib}) // inside the warn band
+	g.SetStorageGuard("storA", "a", "node-1", "volA", "", "")
+
+	g.evaluateStorages(nil) // no alert sink — alarmRaised is never touched
+	s := g.storageSnapshots()[0]
+	if !s.WarnVerdict {
+		t.Fatal("WarnVerdict must reflect free < warn regardless of whether an alert sink exists")
+	}
+	if s.ProtectVerdict {
+		t.Fatal("30GiB is above the 12GiB floor: protect must not engage")
+	}
+
+	sampler.free["volA"] = 60 * gib // clear of the warn band
+	g.evaluateStorages(nil)
+	s = g.storageSnapshots()[0]
+	if s.WarnVerdict {
+		t.Fatal("clearing the warn band must drop WarnVerdict even with no alert sink")
+	}
+}
+
 // TestStorageSnapshotsIncludesPlacedVaults pins the placements-on-storage
 // contract: SetStorageMeta's vault IDs surface in the snapshot, for the
 // storage inspector's cross-link to each placed vault's card.

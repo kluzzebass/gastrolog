@@ -7,7 +7,7 @@ import { idFromBytes } from "../model/id";
 import { ingesterAliveListToMap } from "./useIngesterAlive";
 
 /** Apply a single WatchSystemStatus message to the query cache. */
-function applyStatusMessage(qc: QueryClient, msg: WatchSystemStatusResponse) {
+export function applyStatusMessage(qc: QueryClient, msg: WatchSystemStatusResponse) {
   if (msg.cluster) {
     qc.setQueryData(["clusterStatus"], msg.cluster);
   }
@@ -19,9 +19,13 @@ function applyStatusMessage(qc: QueryClient, msg: WatchSystemStatusResponse) {
   if (msg.vaults.length > 0) {
     qc.setQueryData(["vaults"], msg.vaults);
   }
-  if (msg.storages.length > 0) {
-    qc.setQueryData(["storages"], msg.storages);
-  }
+  // storages is always present on the message proto (buildSystemStatus
+  // populates it unconditionally, an empty slice included) — write
+  // unconditionally too, same as routeStats above. The old `length > 0`
+  // guard silently kept the LAST-deleted storage's card in the cache
+  // forever, because a config edit that leaves zero storages never writes
+  // anything to overwrite the stale non-empty list (gastrolog-3cobq4 review).
+  qc.setQueryData(["storages"], msg.storages);
   if (msg.stats) {
     qc.setQueryData(["stats", "all"], msg.stats);
   }

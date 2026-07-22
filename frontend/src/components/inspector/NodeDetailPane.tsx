@@ -44,10 +44,9 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings, onNavigate }: Rea
 
   const nscs = config?.nodeStorageConfigs ?? [];
   const vaults = allVaults.filter((v) => v.isOn(nodeIdTyped, nscs, registry.localNodeId));
-  // StorageState carries no raw node ID (only the pre-resolved node_name
-  // string), so filter by name against this pane's node — same lookup
-  // StorageCard's node badge does per-card (gastrolog-3cobq4).
-  const storages = allStorages.filter((s) => s.nodeName === node?.name);
+  // Join on StorageState.node_id (gastrolog-3cobq4 review) — the stable
+  // key — never nodeName, which collides on rename races or duplicate names.
+  const storages = allStorages.filter((s) => s.nodeId === nodeIdTyped);
   const ingesters = allIngesters.filter((i) => i.isEligibleOn(nodeIdTyped));
   const nodeJobs = jobs.filter((j) => (j.nodeId || registry.localNodeId) === nodeIdTyped);
   const tasks = nodeJobs.filter((j) => j.isTask);

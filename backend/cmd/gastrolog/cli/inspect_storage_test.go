@@ -6,7 +6,17 @@ import (
 
 	v1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/glid"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
+
+// sampled sets SampledAt on a StorageState fixture, so tests exercising
+// warn/protect/ok can be distinguished from the "never sampled" case
+// (gastrolog-3cobq4 review: a never-sampled storage must never render as
+// "ok").
+func sampled(st *v1.StorageState) *v1.StorageState {
+	st.SampledAt = timestamppb.Now()
+	return st
+}
 
 func TestStorageVerdict(t *testing.T) {
 	t.Parallel()
@@ -17,27 +27,35 @@ func TestStorageVerdict(t *testing.T) {
 		expect string
 	}{
 		{
-			name:   "healthy",
+			// gastrolog-3cobq4 review: a storage the owning node hasn't
+			// statfs'd yet must never render as "ok" — "no sample" is the
+			// honest fallback (facts before speculation, gastrolog-9akebz).
+			name:   "never sampled",
 			st:     &v1.StorageState{},
+			expect: "no sample",
+		},
+		{
+			name:   "healthy",
+			st:     sampled(&v1.StorageState{}),
 			expect: "ok",
 		},
 		{
 			// Warn-band verdicts (gastrolog-9akebz alarm pair: low/exhausted)
 			// render as "warn" — server-computed, never re-derived here.
 			name:   "warn band",
-			st:     &v1.StorageState{WarnVerdict: true},
+			st:     sampled(&v1.StorageState{WarnVerdict: true}),
 			expect: "warn",
 		},
 		{
 			// Protect supersedes warn — the badge names the worse condition,
 			// mirroring the alarm pair's low/exhausted split.
 			name:   "protect supersedes warn",
-			st:     &v1.StorageState{WarnVerdict: true, ProtectVerdict: true},
+			st:     sampled(&v1.StorageState{WarnVerdict: true, ProtectVerdict: true}),
 			expect: "protected",
 		},
 		{
 			name:   "protect only",
-			st:     &v1.StorageState{ProtectVerdict: true},
+			st:     sampled(&v1.StorageState{ProtectVerdict: true}),
 			expect: "protected",
 		},
 	}
@@ -49,6 +67,22 @@ func TestStorageVerdict(t *testing.T) {
 				t.Errorf("storageVerdict(%+v) = %q, want %q", tt.st, got, tt.expect)
 			}
 		})
+	}
+}
+
+func TestFreeTotalLabel(t *testing.T) {
+	t.Parallel()
+
+	// Never sampled: "—"/"—", never "0 B"/"0 B" (would read as a full disk).
+	free, total := freeTotalLabel(&v1.StorageState{})
+	if free != "—" || total != "—" {
+		t.Errorf("freeTotalLabel(never sampled) = (%q, %q), want (\"—\", \"—\")", free, total)
+	}
+
+	st := sampled(&v1.StorageState{FreeBytes: 5 << 30, TotalBytes: 100 << 30})
+	free, total = freeTotalLabel(st)
+	if free != "5.0 GiB" || total != "100.0 GiB" {
+		t.Errorf("freeTotalLabel(sampled) = (%q, %q), want (\"5.0 GiB\", \"100.0 GiB\")", free, total)
 	}
 }
 

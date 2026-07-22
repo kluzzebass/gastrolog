@@ -604,7 +604,7 @@ func (p *mnPeerStorageStats) FindStorageState(storageID string) *gastrologv1.Sto
 	if err != nil {
 		return nil
 	}
-	for _, orch := range p.nodes {
+	for nodeID, orch := range p.nodes {
 		for _, ss := range orch.StorageSnapshots() {
 			if ss.ID != storageID {
 				continue
@@ -614,6 +614,7 @@ func (p *mnPeerStorageStats) FindStorageState(storageID string) *gastrologv1.Sto
 				Name:           ss.Name,
 				Path:           ss.Path,
 				NodeName:       ss.Node,
+				NodeId:         []byte(nodeID),
 				StorageClass:   ss.StorageClass,
 				WarnExpr:       ss.WarnExpr,
 				FloorExpr:      ss.FloorExpr,
