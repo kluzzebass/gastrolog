@@ -231,6 +231,16 @@ type Orchestrator struct {
 	segmentsDir string
 	// homeDir is the gastrolog home directory (stores, segments, raft, …).
 	homeDir string
+	// vaultsDir is the base directory relative file-vault/storage paths
+	// resolve against — the same base resolveVaultDir joins a vault's "dir"
+	// param against (Factories.VaultsDir, defaulting to homeDir when
+	// --vaults is not set). Cached here so periodic guard/discovery passes
+	// that don't receive Factories per call (refreshStorageGuards) can
+	// resolve system.FileStorage.Path the same way vault dirs resolve,
+	// instead of reaching the filesystem with a raw relative path
+	// (gastrolog-3cobq4 regression: statfs against a relative path resolves
+	// against the process CWD, not the node's home, and fails silently).
+	vaultsDir string
 	// pipelineVaults tracks which vaults are currently registered in the pipeline
 	// supervisor and whether each is registered as a Home (collection) on this
 	// node, so a route/placement reload registers/unregisters/re-registers only
@@ -825,6 +835,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		segmentsDir:            cfg.SegmentsDir,
 		diskGuard:              newDiskGuardWithLogger(cfg.DiskGuardPaths, cfg.Logger),
 		homeDir:                homeDirFromSegments(cfg.SegmentsDir),
+		vaultsDir:              homeDirFromSegments(cfg.SegmentsDir),
 		pipelineVaults:         make(map[glid.GLID]pipelineVaultReg),
 		now:                    cfg.Now,
 		logger:                 logger,

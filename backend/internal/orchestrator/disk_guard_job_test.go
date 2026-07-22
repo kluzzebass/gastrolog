@@ -108,6 +108,11 @@ func TestDiskGuardJobBodyProtectsStorageEndToEnd(t *testing.T) {
 		Alerts:         spy,
 	})
 	orch.sysLoader = testSystemLoaderWithRuntime{cfg: cfg, rt: rt}
+	// Path resolution against vaultsDir is tested on its own
+	// (disk_guard_storage_path_test.go); disable it here so "volA" stays the
+	// literal fake-sampler key this test's assertions depend on — this test
+	// is about the scheduler job wiring, not path resolution.
+	orch.vaultsDir = ""
 	orch.diskGuard.sample = func(path string) (uint64, uint64, error) {
 		switch path {
 		case "nodepath":

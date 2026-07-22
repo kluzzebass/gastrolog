@@ -1614,7 +1614,15 @@ func (o *Orchestrator) refreshStorageGuards(sys *system.System, rt *system.Runti
 			sid := fs.ID.String()
 			keepStorages[sid] = true
 			storageClasses[sid] = fs.StorageClass
-			o.diskGuard.SetStorageGuard(sid, fs.Name, nodeName, fs.Path, fs.DiskFreeWarn, fs.DiskFreeFloor)
+			// fs.Path is stored relative by the same convention vault dirs
+			// are (resolveVaultDir's contract) — resolve it against the
+			// same base before it ever reaches statfs. A raw relative path
+			// resolves against the process's CWD instead of the node home,
+			// fails silently, and worstFreeOf then skips the storage
+			// forever: no sample, no protect, an inherited threshold
+			// resolving against a 0 total (gastrolog-3cobq4 regression).
+			path := resolveStoragePath(fs.Path, o.vaultsDir)
+			o.diskGuard.SetStorageGuard(sid, fs.Name, nodeName, path, fs.DiskFreeWarn, fs.DiskFreeFloor)
 		}
 	}
 	o.diskGuard.retainStorageGuards(keepStorages, o.alerts)

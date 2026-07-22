@@ -55,6 +55,11 @@ func TestRefreshVaultDiskGuardsRegistersStorageFromConfig(t *testing.T) {
 	}
 
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
+	// Path resolution against vaultsDir is tested on its own
+	// (TestRefreshStorageGuardsResolvesRelativePathAgainstVaultsDir); disable
+	// it here so "volA" stays the literal fake-sampler key this test's
+	// assertions depend on.
+	orch.vaultsDir = ""
 	orch.sysLoader = testSystemLoaderWithRuntime{cfg: cfg, rt: rt}
 	orch.diskGuard.sample = func(path string) (uint64, uint64, error) {
 		if path == "volA" {
@@ -107,6 +112,11 @@ func TestRefreshVaultDiskGuardsPublishesPlacementsAndClass(t *testing.T) {
 	}
 
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
+	// Path resolution against vaultsDir is tested on its own
+	// (TestRefreshStorageGuardsResolvesRelativePathAgainstVaultsDir); disable
+	// it here so "volA" stays the literal fake-sampler key this test's
+	// assertions depend on.
+	orch.vaultsDir = ""
 	orch.sysLoader = testSystemLoaderWithRuntime{cfg: cfg, rt: rt}
 	orch.diskGuard.sample = func(path string) (uint64, uint64, error) {
 		if path == "volA" {
@@ -169,6 +179,11 @@ func TestRefreshVaultDiskGuardsPlacementsClearWhenVaultRemoved(t *testing.T) {
 	}
 
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
+	// Path resolution against vaultsDir is tested on its own
+	// (TestRefreshStorageGuardsResolvesRelativePathAgainstVaultsDir); disable
+	// it here so "volA" stays the literal fake-sampler key this test's
+	// assertions depend on.
+	orch.vaultsDir = ""
 	orch.sysLoader = loader
 	orch.diskGuard.sample = func(path string) (uint64, uint64, error) {
 		if path == "volA" {
@@ -233,6 +248,11 @@ func TestRefreshVaultDiskGuardsStorageRemovalReleasesNoStrand(t *testing.T) {
 	}
 
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
+	// Path resolution against vaultsDir is tested on its own
+	// (TestRefreshStorageGuardsResolvesRelativePathAgainstVaultsDir); disable
+	// it here so "volA" stays the literal fake-sampler key this test's
+	// assertions depend on.
+	orch.vaultsDir = ""
 	loader := &testSystemLoaderWithRuntime{cfg: cfg, rt: rt}
 	orch.sysLoader = loader
 	orch.diskGuard.sample = func(path string) (uint64, uint64, error) {
@@ -329,6 +349,9 @@ func TestRefreshVaultDiskGuardsResolvesNodeDisplayName(t *testing.T) {
 	}
 
 	orch := newTestOrch(t, Config{LocalNodeID: nodeIDStr})
+	// Path resolution tested separately; disable it here so "volA" stays
+	// literal.
+	orch.vaultsDir = ""
 	orch.sysLoader = testSystemLoaderWithRuntime{cfg: cfg, rt: rt}
 	orch.diskGuard.sample = func(path string) (uint64, uint64, error) {
 		if path == "volA" {

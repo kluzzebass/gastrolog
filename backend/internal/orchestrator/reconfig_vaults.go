@@ -26,20 +26,33 @@ import (
 	hraft "github.com/hashicorp/raft"
 )
 
+// resolveStoragePath resolves a possibly-relative filesystem path against
+// vaultsDir (which defaults to homeDir when --vaults is not set) — the one
+// contract every relative path stored in config follows: the stored value
+// stays relative so each node resolves it independently against its own
+// directory, and a consumer that reaches the filesystem through it must
+// join against the same base resolveVaultDir uses, not read it raw. An
+// already-absolute path, or an empty vaultsDir (base not known yet), passes
+// through unchanged.
+func resolveStoragePath(path, vaultsDir string) string {
+	if path == "" || filepath.IsAbs(path) || vaultsDir == "" {
+		return path
+	}
+	return filepath.Join(vaultsDir, path)
+}
+
 // resolveVaultDir resolves a file vault's "dir" parameter relative to vaultsDir.
 // If dir is empty, defaults to "vaults/<vaultName>". Relative paths are joined
-// with vaultsDir (which defaults to homeDir when --vaults is not set). The
-// returned map is always a new copy — the caller's params are never mutated.
-// The stored config retains the original relative path so each node resolves
-// independently against its own directory.
+// with vaultsDir via resolveStoragePath. The returned map is always a new copy
+// — the caller's params are never mutated. The stored config retains the
+// original relative path so each node resolves independently against its own
+// directory.
 func resolveVaultDir(params map[string]string, vaultsDir, vaultID string) map[string]string {
 	dir := params["dir"]
 	if dir == "" {
 		dir = filepath.Join("vaults", vaultID)
 	}
-	if !filepath.IsAbs(dir) && vaultsDir != "" {
-		dir = filepath.Join(vaultsDir, dir)
-	}
+	dir = resolveStoragePath(dir, vaultsDir)
 	out := maps.Clone(params)
 	if out == nil {
 		out = make(map[string]string)
