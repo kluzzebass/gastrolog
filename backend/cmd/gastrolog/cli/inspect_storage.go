@@ -140,6 +140,10 @@ func storageRow(st *v1.StorageState) []string {
 func thresholdLabel(expr string, isDefault bool, effectiveBytes uint64) string {
 	eff := formatStorageBytes(effectiveBytes)
 	switch {
+	case isDefault && expr == "":
+		// A peer running a build predating the effective-expression field
+		// sends an empty expr; "(default)" alone beats "(, default)".
+		return eff + " (default)"
 	case isDefault:
 		return eff + " (" + expr + ", default)"
 	case strings.Contains(expr, "%"):

@@ -38,7 +38,9 @@ export function storageVerdictLabel(storage: Pick<Storage, "warnVerdict" | "prot
 // spelling — the bytes alone are the complete, non-redundant answer.
 export function thresholdLabel(expr: string, isDefault: boolean, effectiveBytes: bigint): string {
   const eff = formatBytes(effectiveBytes);
-  if (isDefault) return `${eff} (${expr}, default)`;
+  // Empty expr from a build predating the effective-expression field:
+  // "(default)" alone beats "(, default)".
+  if (isDefault) return expr === "" ? `${eff} (default)` : `${eff} (${expr}, default)`;
   if (expr.includes("%")) return `${eff} (${expr})`;
   return eff;
 }
