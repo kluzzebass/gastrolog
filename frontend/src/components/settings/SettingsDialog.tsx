@@ -172,7 +172,7 @@ export function SettingsDialog({
           {tab === "files" && <FilesSettings dark={dark} />}
           {tab === "lookups" && <LookupsSettings dark={dark} />}
           {tab === "users" && <UsersSettings dark={dark} noAuth={noAuth} />}
-          {tab === "storage" && <StorageSettings dark={dark} />}
+          {tab === "storage" && <StorageSettings dark={dark} onOpenInspector={onOpenInspector} />}
           {tab === "ingesters" && <IngestersSettings dark={dark} expandTarget={expandTarget} onExpandTargetConsumed={clearExpandTarget} onOpenInspector={onOpenInspector} />}
           {tab === "routes" && <RoutesSettings dark={dark} onNavigateTo={navigateTo} />}
           {tab === "policies" && <PoliciesSettings dark={dark} onNavigateTo={navigateTo} />}

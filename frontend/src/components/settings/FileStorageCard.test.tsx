@@ -110,4 +110,79 @@ describe("FileStorageCard", () => {
     expect(edit.diskFreeFloor).toBe("3%");
     expect(edit.diskFreeWarn).toBe("");
   });
+
+  // gastrolog-3cobq4: the inverse cross-link (storage inspector card ->
+  // Settings) already existed; this pins the storage config card's own
+  // link back to its inspector card, matching VaultSettingsCard's and
+  // IngestersSettings' "Open in Inspector" cross-link exactly (same icon,
+  // same title, same entities:<type>:<name> deep-link format the inspector
+  // parses).
+  describe("Open in Inspector cross-link", () => {
+    const fs = new FileStorage({
+      id: testId(4),
+      name: "nvme-fast",
+      path: "storage/nvme-fast",
+      storageClass: 1,
+    });
+
+    test("omitted when onOpenInspector is not provided", () => {
+      const { queryByTitle } = render(
+        <FileStorageCard
+          fs={fs}
+          nodeName="node-1"
+          dark={true}
+          expanded={true}
+          onToggle={() => {}}
+          onSave={async () => {}}
+          onDelete={async () => {}}
+          saving={false}
+        />,
+      );
+      expect(queryByTitle("Open in Inspector")).toBeNull();
+    });
+
+    test("navigates to the storage's entity card, named the same way ID fallback does elsewhere", () => {
+      const onOpenInspector = mock((_param: string) => {});
+      const { getByTitle } = render(
+        <FileStorageCard
+          fs={fs}
+          nodeName="node-1"
+          dark={true}
+          expanded={true}
+          onToggle={() => {}}
+          onSave={async () => {}}
+          onDelete={async () => {}}
+          saving={false}
+          onOpenInspector={onOpenInspector}
+        />,
+      );
+
+      fireEvent.click(getByTitle("Open in Inspector"));
+
+      expect(onOpenInspector).toHaveBeenCalledTimes(1);
+      expect(onOpenInspector).toHaveBeenCalledWith("entities:storages:nvme-fast");
+    });
+
+    test("falls back to the encoded id when the storage has no name", () => {
+      const unnamed = new FileStorage({ id: testId(5), path: "storage/unnamed", storageClass: 1 });
+      const onOpenInspector = mock((_param: string) => {});
+      const { getByTitle } = render(
+        <FileStorageCard
+          fs={unnamed}
+          nodeName="node-1"
+          dark={true}
+          expanded={true}
+          onToggle={() => {}}
+          onSave={async () => {}}
+          onDelete={async () => {}}
+          saving={false}
+          onOpenInspector={onOpenInspector}
+        />,
+      );
+
+      fireEvent.click(getByTitle("Open in Inspector"));
+
+      expect(onOpenInspector).toHaveBeenCalledWith(`entities:storages:${encode(unnamed.id)}`);
+    });
+  });
 });

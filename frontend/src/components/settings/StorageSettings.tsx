@@ -89,7 +89,7 @@ function addFormReducer(state: AddFormState, action: AddFormAction): AddFormStat
 
 // ─── Component ───────────────────────────────────────────────
 
-export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
+export function StorageSettings({ dark, onOpenInspector }: Readonly<{ dark: boolean; onOpenInspector?: (inspectorParam: string) => void }>) {
   const c = useThemeClass(dark);
   const { data: config, isLoading } = useConfig();
   const { data: settingsData } = useSettings();
@@ -388,6 +388,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
                     await handleRemoveStorage(nodeId, storageId);
                   }}
                   saving={setNodeStorage.isPending}
+                  onOpenInspector={onOpenInspector}
                 />
               ))}
             </div>

@@ -4,6 +4,8 @@ import { useEditState } from "../../hooks/useEditState";
 import { SettingsCard } from "./SettingsCard";
 import { FormField, TextInput, SpinnerInput } from "./FormField";
 import { Button } from "./Buttons";
+import { PulseIcon } from "../icons";
+import { CrossLinkBadge } from "../inspector/CrossLinkBadge";
 
 interface FileStorageEdit {
   name: string;
@@ -22,6 +24,7 @@ interface FileStorageCardProps {
   onSave: (storageId: string, edit: FileStorageEdit) => Promise<void>;
   onDelete: (storageId: string) => Promise<void>;
   saving: boolean;
+  onOpenInspector?: (inspectorParam: string) => void;
 }
 
 export function FileStorageCard({
@@ -33,6 +36,7 @@ export function FileStorageCard({
   onSave,
   onDelete,
   saving,
+  onOpenInspector,
 }: Readonly<FileStorageCardProps>) {
   const defaults = (): FileStorageEdit => ({
     name: fs.name,
@@ -55,6 +59,17 @@ export function FileStorageCard({
       onToggle={onToggle}
       onDelete={() => onDelete(encode(fs.id))}
       deleteLabel="Remove"
+      headerRight={
+        onOpenInspector && (
+          <CrossLinkBadge
+            dark={dark}
+            title="Open in Inspector"
+            onClick={() => onOpenInspector(`entities:storages:${fs.name || encode(fs.id)}`)}
+          >
+            <PulseIcon className="w-3 h-3" />
+          </CrossLinkBadge>
+        )
+      }
       footer={
         <>
           {isDirty(encode(fs.id)) && (
