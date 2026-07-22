@@ -24,6 +24,7 @@ type resolver struct {
 	certs             map[string]string
 	routes            map[string]string
 	cloudServices     map[string]string
+	storages          map[string]string
 }
 
 // newResolver fetches the full config and user list, building name→ID maps.
@@ -43,6 +44,7 @@ func newResolver(ctx context.Context, client *server.Client) (*resolver, error) 
 		certs:             make(map[string]string),
 		routes:            make(map[string]string),
 		cloudServices:     make(map[string]string),
+		storages:          make(map[string]string),
 	}
 
 	cfg := resp.Msg
@@ -66,6 +68,13 @@ func newResolver(ctx context.Context, client *server.Client) (*resolver, error) 
 	}
 	for _, cs := range cfg.CloudServices {
 		r.cloudServices[strings.ToLower(cs.Name)] = glid.FromBytes(cs.Id).String()
+	}
+	for _, nsc := range cfg.NodeStorageConfigs {
+		for _, fs := range nsc.FileStorages {
+			if fs.Name != "" {
+				r.storages[strings.ToLower(fs.Name)] = glid.FromBytes(fs.Id).String()
+			}
+		}
 	}
 
 	// Certs via ListCertificates.

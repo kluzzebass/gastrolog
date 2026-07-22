@@ -4,6 +4,7 @@ package gastrolog.v1;
 
 import "google/protobuf/timestamp.proto";
 import "gastrolog/v1/cluster.proto";
+import "gastrolog/v1/storage.proto";
 import "gastrolog/v1/system.proto";
 import "gastrolog/v1/vault.proto";
 
@@ -200,4 +201,9 @@ message WatchSystemStatusResponse {
   // Per-vault chunking pipeline depth (vault-ctl FSM + aggregated segment
   // disk counts from NodeStats broadcasts). Push-updated on each stats tick.
   repeated VaultPipelineBacklog pipeline_backlog = 7;
+
+  // Every configured storage cluster-wide, with live guard state merged in
+  // — the entity-list surface for the storage inspector (gastrolog-3cobq4),
+  // same shape ListStorages returns. Push-updated on each stats tick.
+  repeated StorageState storages = 8;
 }

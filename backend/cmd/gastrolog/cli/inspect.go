@@ -30,6 +30,7 @@ func NewInspectCommand() *cobra.Command {
 	cmd.AddCommand(
 		newInspectVaultCmd(),
 		newInspectChunkCmd(),
+		newInspectStorageCmd(),
 	)
 	return cmd
 }

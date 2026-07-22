@@ -4,6 +4,7 @@ package gastrolog.v1;
 import "google/protobuf/timestamp.proto";
 import "gastrolog/v1/job.proto";
 import "gastrolog/v1/query.proto";
+import "gastrolog/v1/storage.proto";
 import "gastrolog/v1/system.proto";
 import "gastrolog/v1/vault.proto";
 
@@ -200,6 +201,13 @@ message NodeStats {
   // fire when the backlog actually threatens something. Like raft_state,
   // this is the level's String() rather than an enum.
   string ingest_pressure_level = 51;
+
+  // Per-storage disk-guard state for storages LOCALLY hosted on this node —
+  // only the owning node can statfs its volume (gastrolog-3cobq4). Bounded
+  // by the node's own NodeStorageConfig entries. Aggregated cluster-wide the
+  // same way VaultStats/VaultPipelineDisk are: each node reports its own,
+  // PeerState merges across live peers for the storage inspector.
+  repeated StorageState storages = 54;
 }
 
 // VaultPipelineNodeDisk is one vault's local pipeline storage areas on a

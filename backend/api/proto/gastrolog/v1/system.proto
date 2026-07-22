@@ -160,6 +160,14 @@ service SystemService {
   // Node storage
   rpc SetNodeStorageConfig(SetNodeStorageConfigRequest) returns (SetNodeStorageConfigResponse);
 
+  // ListStorages returns every configured file storage cluster-wide, with
+  // live guard state (free/total, resolved thresholds, verdicts) merged in
+  // from the owning node's NodeStats broadcast — the entity-list analogue
+  // of ListVaults (gastrolog-3cobq4). Local storages read the orchestrator
+  // directly; remote storages read the peer broadcast cache, the same
+  // PeerState channel VaultInfo uses for remote vault stats.
+  rpc ListStorages(ListStoragesRequest) returns (ListStoragesResponse);
+
   // DeleteLookup removes a lookup table by name (any type).
   rpc DeleteLookup(DeleteLookupRequest) returns (DeleteLookupResponse);
 
@@ -1176,6 +1184,12 @@ message SetNodeStorageConfigRequest {
 
 message SetNodeStorageConfigResponse {
   GetSystemResponse system = 1;
+}
+
+message ListStoragesRequest {}
+
+message ListStoragesResponse {
+  repeated StorageState storages = 1;
 }
 
 message DeleteLookupRequest {

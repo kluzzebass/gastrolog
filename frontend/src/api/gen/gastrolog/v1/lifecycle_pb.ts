@@ -8,6 +8,7 @@ import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
 import { NodeStats } from "./cluster_pb.js";
 import { GetRouteStatsResponse, IngesterAlive, NodeState } from "./system_pb.js";
 import { GetStatsResponse, VaultInfo, VaultPipelineBacklog } from "./vault_pb.js";
+import { StorageState } from "./storage_pb.js";
 
 /**
  * @generated from enum gastrolog.v1.Status
@@ -1063,6 +1064,15 @@ export class WatchSystemStatusResponse extends Message<WatchSystemStatusResponse
    */
   pipelineBacklog: VaultPipelineBacklog[] = [];
 
+  /**
+   * Every configured storage cluster-wide, with live guard state merged in
+   * — the entity-list surface for the storage inspector (gastrolog-3cobq4),
+   * same shape ListStorages returns. Push-updated on each stats tick.
+   *
+   * @generated from field: repeated gastrolog.v1.StorageState storages = 8;
+   */
+  storages: StorageState[] = [];
+
   constructor(data?: PartialMessage<WatchSystemStatusResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1078,6 +1088,7 @@ export class WatchSystemStatusResponse extends Message<WatchSystemStatusResponse
     { no: 5, name: "stats", kind: "message", T: GetStatsResponse },
     { no: 6, name: "ingester_alive", kind: "message", T: IngesterAlive, repeated: true },
     { no: 7, name: "pipeline_backlog", kind: "message", T: VaultPipelineBacklog, repeated: true },
+    { no: 8, name: "storages", kind: "message", T: StorageState, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): WatchSystemStatusResponse {

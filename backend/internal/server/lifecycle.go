@@ -61,6 +61,7 @@ type LifecycleServer struct {
 	peerPipelineDisk  PeerPipelineDiskProvider
 	listVaultsFn      func(ctx context.Context) []*apiv1.VaultInfo
 	getStatsFn        func(ctx context.Context) *apiv1.GetStatsResponse
+	listStoragesFn    func(ctx context.Context) []*apiv1.StorageState
 	logger            *slog.Logger
 }
 
@@ -125,6 +126,13 @@ func (s *LifecycleServer) SetPeerPipelineDisk(p PeerPipelineDiskProvider) {
 func (s *LifecycleServer) SetVaultFuncs(listVaults func(ctx context.Context) []*apiv1.VaultInfo, getStats func(ctx context.Context) *apiv1.GetStatsResponse) {
 	s.listVaultsFn = listVaults
 	s.getStatsFn = getStats
+}
+
+// SetStorageFunc wires the storage entity-list provider for the
+// WatchSystemStatus stream (gastrolog-3cobq4) — same shape ListStorages
+// returns.
+func (s *LifecycleServer) SetStorageFunc(listStorages func(ctx context.Context) []*apiv1.StorageState) {
+	s.listStoragesFn = listStorages
 }
 
 // Health returns the server health status.
@@ -506,6 +514,10 @@ func (s *LifecycleServer) buildSystemStatus(ctx context.Context) *apiv1.WatchSys
 	if s.getStatsFn != nil {
 		stats = s.getStatsFn(ctx)
 	}
+	var storages []*apiv1.StorageState
+	if s.listStoragesFn != nil {
+		storages = s.listStoragesFn(ctx)
+	}
 
 	return &apiv1.WatchSystemStatusResponse{
 		Cluster:         cluster,
@@ -515,6 +527,7 @@ func (s *LifecycleServer) buildSystemStatus(ctx context.Context) *apiv1.WatchSys
 		Stats:           stats,
 		IngesterAlive:   s.buildIngesterAlive(ctx),
 		PipelineBacklog: pipelineBacklog,
+		Storages:        storages,
 	}
 }
 

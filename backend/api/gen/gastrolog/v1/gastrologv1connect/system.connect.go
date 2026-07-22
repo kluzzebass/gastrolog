@@ -174,6 +174,9 @@ const (
 	// SystemServiceSetNodeStorageConfigProcedure is the fully-qualified name of the SystemService's
 	// SetNodeStorageConfig RPC.
 	SystemServiceSetNodeStorageConfigProcedure = "/gastrolog.v1.SystemService/SetNodeStorageConfig"
+	// SystemServiceListStoragesProcedure is the fully-qualified name of the SystemService's
+	// ListStorages RPC.
+	SystemServiceListStoragesProcedure = "/gastrolog.v1.SystemService/ListStorages"
 	// SystemServiceDeleteLookupProcedure is the fully-qualified name of the SystemService's
 	// DeleteLookup RPC.
 	SystemServiceDeleteLookupProcedure = "/gastrolog.v1.SystemService/DeleteLookup"
@@ -290,6 +293,13 @@ type SystemServiceClient interface {
 	DeleteCloudService(context.Context, *connect.Request[v1.DeleteCloudServiceRequest]) (*connect.Response[v1.DeleteCloudServiceResponse], error)
 	// Node storage
 	SetNodeStorageConfig(context.Context, *connect.Request[v1.SetNodeStorageConfigRequest]) (*connect.Response[v1.SetNodeStorageConfigResponse], error)
+	// ListStorages returns every configured file storage cluster-wide, with
+	// live guard state (free/total, resolved thresholds, verdicts) merged in
+	// from the owning node's NodeStats broadcast — the entity-list analogue
+	// of ListVaults (gastrolog-3cobq4). Local storages read the orchestrator
+	// directly; remote storages read the peer broadcast cache, the same
+	// PeerState channel VaultInfo uses for remote vault stats.
+	ListStorages(context.Context, *connect.Request[v1.ListStoragesRequest]) (*connect.Response[v1.ListStoragesResponse], error)
 	// DeleteLookup removes a lookup table by name (any type).
 	DeleteLookup(context.Context, *connect.Request[v1.DeleteLookupRequest]) (*connect.Response[v1.DeleteLookupResponse], error)
 	// Log levels (gastrolog-3flfp). PutLogLevels replaces the cluster-wide
@@ -602,6 +612,12 @@ func NewSystemServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(systemServiceMethods.ByName("SetNodeStorageConfig")),
 			connect.WithClientOptions(opts...),
 		),
+		listStorages: connect.NewClient[v1.ListStoragesRequest, v1.ListStoragesResponse](
+			httpClient,
+			baseURL+SystemServiceListStoragesProcedure,
+			connect.WithSchema(systemServiceMethods.ByName("ListStorages")),
+			connect.WithClientOptions(opts...),
+		),
 		deleteLookup: connect.NewClient[v1.DeleteLookupRequest, v1.DeleteLookupResponse](
 			httpClient,
 			baseURL+SystemServiceDeleteLookupProcedure,
@@ -673,6 +689,7 @@ type systemServiceClient struct {
 	putCloudService       *connect.Client[v1.PutCloudServiceRequest, v1.PutCloudServiceResponse]
 	deleteCloudService    *connect.Client[v1.DeleteCloudServiceRequest, v1.DeleteCloudServiceResponse]
 	setNodeStorageConfig  *connect.Client[v1.SetNodeStorageConfigRequest, v1.SetNodeStorageConfigResponse]
+	listStorages          *connect.Client[v1.ListStoragesRequest, v1.ListStoragesResponse]
 	deleteLookup          *connect.Client[v1.DeleteLookupRequest, v1.DeleteLookupResponse]
 	putLogLevels          *connect.Client[v1.PutLogLevelsRequest, v1.PutLogLevelsResponse]
 	listLogComponents     *connect.Client[v1.ListLogComponentsRequest, v1.ListLogComponentsResponse]
@@ -918,6 +935,11 @@ func (c *systemServiceClient) SetNodeStorageConfig(ctx context.Context, req *con
 	return c.setNodeStorageConfig.CallUnary(ctx, req)
 }
 
+// ListStorages calls gastrolog.v1.SystemService.ListStorages.
+func (c *systemServiceClient) ListStorages(ctx context.Context, req *connect.Request[v1.ListStoragesRequest]) (*connect.Response[v1.ListStoragesResponse], error) {
+	return c.listStorages.CallUnary(ctx, req)
+}
+
 // DeleteLookup calls gastrolog.v1.SystemService.DeleteLookup.
 func (c *systemServiceClient) DeleteLookup(ctx context.Context, req *connect.Request[v1.DeleteLookupRequest]) (*connect.Response[v1.DeleteLookupResponse], error) {
 	return c.deleteLookup.CallUnary(ctx, req)
@@ -1038,6 +1060,13 @@ type SystemServiceHandler interface {
 	DeleteCloudService(context.Context, *connect.Request[v1.DeleteCloudServiceRequest]) (*connect.Response[v1.DeleteCloudServiceResponse], error)
 	// Node storage
 	SetNodeStorageConfig(context.Context, *connect.Request[v1.SetNodeStorageConfigRequest]) (*connect.Response[v1.SetNodeStorageConfigResponse], error)
+	// ListStorages returns every configured file storage cluster-wide, with
+	// live guard state (free/total, resolved thresholds, verdicts) merged in
+	// from the owning node's NodeStats broadcast — the entity-list analogue
+	// of ListVaults (gastrolog-3cobq4). Local storages read the orchestrator
+	// directly; remote storages read the peer broadcast cache, the same
+	// PeerState channel VaultInfo uses for remote vault stats.
+	ListStorages(context.Context, *connect.Request[v1.ListStoragesRequest]) (*connect.Response[v1.ListStoragesResponse], error)
 	// DeleteLookup removes a lookup table by name (any type).
 	DeleteLookup(context.Context, *connect.Request[v1.DeleteLookupRequest]) (*connect.Response[v1.DeleteLookupResponse], error)
 	// Log levels (gastrolog-3flfp). PutLogLevels replaces the cluster-wide
@@ -1346,6 +1375,12 @@ func NewSystemServiceHandler(svc SystemServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(systemServiceMethods.ByName("SetNodeStorageConfig")),
 		connect.WithHandlerOptions(opts...),
 	)
+	systemServiceListStoragesHandler := connect.NewUnaryHandler(
+		SystemServiceListStoragesProcedure,
+		svc.ListStorages,
+		connect.WithSchema(systemServiceMethods.ByName("ListStorages")),
+		connect.WithHandlerOptions(opts...),
+	)
 	systemServiceDeleteLookupHandler := connect.NewUnaryHandler(
 		SystemServiceDeleteLookupProcedure,
 		svc.DeleteLookup,
@@ -1462,6 +1497,8 @@ func NewSystemServiceHandler(svc SystemServiceHandler, opts ...connect.HandlerOp
 			systemServiceDeleteCloudServiceHandler.ServeHTTP(w, r)
 		case SystemServiceSetNodeStorageConfigProcedure:
 			systemServiceSetNodeStorageConfigHandler.ServeHTTP(w, r)
+		case SystemServiceListStoragesProcedure:
+			systemServiceListStoragesHandler.ServeHTTP(w, r)
 		case SystemServiceDeleteLookupProcedure:
 			systemServiceDeleteLookupHandler.ServeHTTP(w, r)
 		case SystemServicePutLogLevelsProcedure:
@@ -1667,6 +1704,10 @@ func (UnimplementedSystemServiceHandler) DeleteCloudService(context.Context, *co
 
 func (UnimplementedSystemServiceHandler) SetNodeStorageConfig(context.Context, *connect.Request[v1.SetNodeStorageConfigRequest]) (*connect.Response[v1.SetNodeStorageConfigResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.SystemService.SetNodeStorageConfig is not implemented"))
+}
+
+func (UnimplementedSystemServiceHandler) ListStorages(context.Context, *connect.Request[v1.ListStoragesRequest]) (*connect.Response[v1.ListStoragesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.SystemService.ListStorages is not implemented"))
 }
 
 func (UnimplementedSystemServiceHandler) DeleteLookup(context.Context, *connect.Request[v1.DeleteLookupRequest]) (*connect.Response[v1.DeleteLookupResponse], error) {

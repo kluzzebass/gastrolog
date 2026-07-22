@@ -603,6 +603,178 @@ func TestVaultDiskGuardRetainDropsStorageLinkage(t *testing.T) {
 	}
 }
 
+// TestStorageSnapshotsReportsEffectiveThresholdsAndInheritance pins the
+// snapshot contract for gastrolog-3cobq4: an unset expression reports
+// *_inherited-equivalent (empty WarnExpr/FloorExpr the caller renders as
+// "inherited") alongside the RESOLVED bytes value — never leaving the
+// caller to resolve the expression itself (operator directive, 9akebz: no
+// client-side derivation of thresholds).
+func TestStorageSnapshotsReportsEffectiveThresholdsAndInheritance(t *testing.T) {
+	t.Parallel()
+	total := 400 * gib // node defaults: warn=40GiB (10%), floor=12GiB (3%)
+	g, _ := newGuardFixture(total, map[string]uint64{"volA": 200 * gib})
+	g.SetStorageGuard("storA", "inherits", "node-1", "volA", "", "")
+	g.evaluateStorages(nil)
+
+	snaps := g.storageSnapshots()
+	if len(snaps) != 1 {
+		t.Fatalf("want 1 snapshot, got %d", len(snaps))
+	}
+	s := snaps[0]
+	if s.WarnExpr != "" || s.FloorExpr != "" {
+		t.Fatalf("unset expressions must stay empty (caller renders as inherited), got warn=%q floor=%q", s.WarnExpr, s.FloorExpr)
+	}
+	if s.WarnBytes != 40*gib {
+		t.Fatalf("effective warn bytes = %d, want 40GiB (10%% of 400GiB)", s.WarnBytes)
+	}
+	if s.FloorBytes != 12*gib {
+		t.Fatalf("effective floor bytes = %d, want 12GiB (3%% of 400GiB)", s.FloorBytes)
+	}
+	if s.FreeBytes != 200*gib || s.TotalBytes != total {
+		t.Fatalf("free/total = %d/%d, want %d/%d", s.FreeBytes, s.TotalBytes, 200*gib, total)
+	}
+	if s.WarnVerdict || s.ProtectVerdict {
+		t.Fatal("well above both thresholds must report neither verdict")
+	}
+	if s.SampledAt.IsZero() {
+		t.Fatal("a successful sample must record a sampled-at instant")
+	}
+}
+
+// TestStorageSnapshotsReportsExplicitThresholds pins the explicit-override
+// half: a storage with its own configured expressions reports them
+// verbatim, not the node defaults.
+func TestStorageSnapshotsReportsExplicitThresholds(t *testing.T) {
+	t.Parallel()
+	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": 200 * gib})
+	g.SetStorageGuard("storA", "explicit", "node-1", "volA", "20%", "10%")
+	g.evaluateStorages(nil)
+
+	snaps := g.storageSnapshots()
+	s := snaps[0]
+	if s.WarnExpr != "20%" || s.FloorExpr != "10%" {
+		t.Fatalf("explicit expressions must round-trip verbatim, got warn=%q floor=%q", s.WarnExpr, s.FloorExpr)
+	}
+	if s.WarnBytes != 80*gib || s.FloorBytes != 40*gib {
+		t.Fatalf("effective bytes = %d/%d, want 80GiB/40GiB", s.WarnBytes, s.FloorBytes)
+	}
+}
+
+// TestStorageSnapshotsReportsWarnAndProtectVerdicts pins the three-state
+// badge grammar (gastrolog-3cobq4): ok when healthy, warn-only inside the
+// warn band, protect once below the floor — WarnVerdict and ProtectVerdict
+// are never both true (protect supersedes the warn badge, same as the
+// alarm pair's low/exhausted split).
+func TestStorageSnapshotsReportsWarnAndProtectVerdicts(t *testing.T) {
+	t.Parallel()
+	total := 400 * gib // warn=40GiB, floor=12GiB
+	g, sampler := newGuardFixture(total, map[string]uint64{"volA": 200 * gib})
+	spy := &alertSpy{}
+	g.SetStorageGuard("storA", "a", "node-1", "volA", "", "")
+
+	g.evaluateStorages(spy)
+	s := g.storageSnapshots()[0]
+	if s.WarnVerdict || s.ProtectVerdict {
+		t.Fatal("healthy storage must report neither verdict")
+	}
+
+	sampler.free["volA"] = 30 * gib // below warn (40GiB), above floor (12GiB)
+	g.evaluateStorages(spy)
+	s = g.storageSnapshots()[0]
+	if !s.WarnVerdict || s.ProtectVerdict {
+		t.Fatalf("inside the warn band must report warn only, got warn=%v protect=%v", s.WarnVerdict, s.ProtectVerdict)
+	}
+
+	sampler.free["volA"] = 5 * gib // below floor
+	g.evaluateStorages(spy)
+	s = g.storageSnapshots()[0]
+	if s.WarnVerdict || !s.ProtectVerdict {
+		t.Fatalf("below floor must report protect only, got warn=%v protect=%v", s.WarnVerdict, s.ProtectVerdict)
+	}
+}
+
+// TestStorageSnapshotsWarnVerdictIndependentOfAlertSink pins the
+// gastrolog-3cobq4 review fix: WarnVerdict must come from the free-vs-warn
+// comparison directly, never from s.alarmRaised — reconcileStorageAlarm
+// only sets alarmRaised when an alert.Sink is wired (alerts == nil is a
+// legitimate no-op path, e.g. some test/tooling call sites), so deriving
+// WarnVerdict from it would silently report false for a genuinely
+// below-warn storage whenever no alert sink exists. Passing a nil Sink
+// here is exactly that path.
+func TestStorageSnapshotsWarnVerdictIndependentOfAlertSink(t *testing.T) {
+	t.Parallel()
+	total := 400 * gib // warn=40GiB, floor=12GiB
+	g, sampler := newGuardFixture(total, map[string]uint64{"volA": 30 * gib}) // inside the warn band
+	g.SetStorageGuard("storA", "a", "node-1", "volA", "", "")
+
+	g.evaluateStorages(nil) // no alert sink — alarmRaised is never touched
+	s := g.storageSnapshots()[0]
+	if !s.WarnVerdict {
+		t.Fatal("WarnVerdict must reflect free < warn regardless of whether an alert sink exists")
+	}
+	if s.ProtectVerdict {
+		t.Fatal("30GiB is above the 12GiB floor: protect must not engage")
+	}
+
+	sampler.free["volA"] = 60 * gib // clear of the warn band
+	g.evaluateStorages(nil)
+	s = g.storageSnapshots()[0]
+	if s.WarnVerdict {
+		t.Fatal("clearing the warn band must drop WarnVerdict even with no alert sink")
+	}
+}
+
+// TestStorageSnapshotsIncludesPlacedVaults pins the placements-on-storage
+// contract: SetStorageMeta's vault IDs surface in the snapshot, for the
+// storage inspector's cross-link to each placed vault's card.
+func TestStorageSnapshotsIncludesPlacedVaults(t *testing.T) {
+	t.Parallel()
+	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": 200 * gib})
+	vaultA, vaultB := glid.New(), glid.New()
+	g.SetStorageGuard("storA", "shared", "node-1", "volA", "", "")
+	g.SetStorageMeta("storA", 2, []glid.GLID{vaultA, vaultB})
+	g.evaluateStorages(nil)
+
+	s := g.storageSnapshots()[0]
+	if s.StorageClass != 2 {
+		t.Fatalf("storage class = %d, want 2", s.StorageClass)
+	}
+	if len(s.PlacedVaultIDs) != 2 {
+		t.Fatalf("placed vaults = %v, want [%s %s]", s.PlacedVaultIDs, vaultA, vaultB)
+	}
+}
+
+// TestSetStorageMetaNoopForUnknownStorage pins the no-op contract: calling
+// SetStorageMeta before the storage is registered (or after it's been
+// pruned) must not panic and must not fabricate an entry.
+func TestSetStorageMetaNoopForUnknownStorage(t *testing.T) {
+	t.Parallel()
+	g, _ := newGuardFixture(400*gib, nil)
+	g.SetStorageMeta("unknown", 1, []glid.GLID{glid.New()})
+	if len(g.storageSnapshots()) != 0 {
+		t.Fatal("SetStorageMeta must not create an entry for an unregistered storage")
+	}
+}
+
+// TestStorageSnapshotsOmitRemovedStorage pins the no-strand contract at the
+// snapshot layer: a storage pruned by retainStorageGuards is gone from
+// storageSnapshots() — the inspector's card must disappear, not linger with
+// stale state.
+func TestStorageSnapshotsOmitRemovedStorage(t *testing.T) {
+	t.Parallel()
+	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": gib})
+	g.SetStorageGuard("storA", "a", "node-1", "volA", "", "")
+	g.evaluateStorages(nil)
+	if len(g.storageSnapshots()) != 1 {
+		t.Fatal("precondition: storage must be present before removal")
+	}
+
+	g.retainStorageGuards(map[string]bool{}, nil)
+	if len(g.storageSnapshots()) != 0 {
+		t.Fatal("a pruned storage must be gone from storageSnapshots — no strand")
+	}
+}
+
 // TestVaultAdmissionGate pins the orchestrator-facing contract, including the
 // peer-broadcast half: a vault whose storage is protected on ANY live node
 // is refused here.

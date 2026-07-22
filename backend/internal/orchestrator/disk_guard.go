@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -183,8 +184,24 @@ type storageDiskGuard struct {
 	// speculation) without re-sampling on the hot admission path.
 	lastFree  atomic.Uint64
 	lastFloor atomic.Uint64
+	// lastWarn/lastTotal/lastSampledAt extend the cached sample for the
+	// storage inspector surface (gastrolog-3cobq4): the resolved warn
+	// threshold and sampled volume total, alongside the sample instant, so
+	// the published snapshot can show recency without a second statfs.
+	lastWarn      atomic.Uint64
+	lastTotal     atomic.Uint64
+	lastSampledAt atomic.Int64 // UnixNano; zero means never sampled
 
 	alarmRaised bool
+
+	// storageClass and placedVaultIDs are config-derived fields the guard's
+	// own threshold/verdict behavior never reads — set by SetStorageMeta,
+	// separately from SetStorageGuard, so existing guard-only call sites
+	// don't need to know about them (gastrolog-3cobq4). placedVaultIDs are
+	// the vault IDs with a config placement on this storage, refreshed
+	// every discovery tick.
+	storageClass   uint32
+	placedVaultIDs []glid.GLID
 }
 
 // vaultDiskGuard is one vault's disk-guard state for the cap-and-refuse
@@ -389,6 +406,23 @@ func (g *diskGuard) SetStorageGuard(storageID, name, node, path, warnExpr, floor
 	s.node = node
 	s.warnExpr = warnExpr
 	s.floorExpr = floorExpr
+}
+
+// SetStorageMeta records config-derived fields for a LOCALLY-hosted storage
+// that the guard's own threshold/verdict behavior never reads, but the
+// storage inspector surface does (gastrolog-3cobq4): the storage class and
+// the vault IDs with a config placement on it. A separate setter from
+// SetStorageGuard so call sites exercising only the guard's
+// threshold/verdict behavior (most existing tests) don't need to know
+// about it. No-op if the storage isn't registered yet — call after
+// SetStorageGuard in the same refresh tick.
+func (g *diskGuard) SetStorageMeta(storageID string, storageClass uint32, placedVaultIDs []glid.GLID) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if s := g.storages[storageID]; s != nil {
+		s.storageClass = storageClass
+		s.placedVaultIDs = placedVaultIDs
+	}
 }
 
 // retainStorageGuards drops every storage entry not in keep — a storage
@@ -673,6 +707,77 @@ func (g *diskGuard) storageProtectedVaults() []glid.GLID {
 	return out
 }
 
+// StorageSnapshot is a value-typed copy of one LOCALLY-hosted storage's
+// disk-guard state, for the NodeStats broadcast and the ListStorages RPC
+// (gastrolog-3cobq4). WarnVerdict/ProtectVerdict are the guard's own
+// hysteresis-aware verdicts — never derived by a caller from
+// FreeBytes/WarnBytes/FloorBytes (operator directive, gastrolog-9akebz: no
+// client-side derivation of verdicts/thresholds).
+type StorageSnapshot struct {
+	ID             string
+	Name           string
+	Node           string // operator-facing display name, pre-resolved
+	Path           string
+	StorageClass   uint32
+	WarnExpr       string
+	FloorExpr      string
+	WarnBytes      uint64
+	FloorBytes     uint64
+	FreeBytes      uint64
+	TotalBytes     uint64
+	SampledAt      time.Time // zero if never sampled
+	WarnVerdict    bool
+	ProtectVerdict bool
+	PlacedVaultIDs []glid.GLID
+}
+
+// storageSnapshots returns a snapshot of every LOCALLY-hosted storage's
+// guard state, for broadcast in NodeStats (gastrolog-3cobq4). ProtectVerdict
+// is the admission-gate state itself (s.protect, hysteresis-aware).
+// WarnVerdict is computed directly from the same free-vs-warn comparison
+// reconcileStorageAlarm uses to decide "low" vs "exhausted" — NOT from
+// s.alarmRaised, which only reconcileStorageAlarm sets and only when an
+// alert.Sink is wired (it no-ops on a nil sink). Deriving WarnVerdict from
+// alarmRaised would make it silently depend on whether an alert sink
+// exists — a nil-alerts deployment or test path would always report
+// WarnVerdict=false regardless of the real free/warn numbers (gastrolog-
+// 3cobq4 review). A storage never sampled yet (lastWarn/lastFree both zero)
+// naturally reports WarnVerdict=false here too — no separate guard needed —
+// and zero free/total/verdicts generally, the same "facts before
+// speculation" contract as vaultStorageProtectDetail.
+func (g *diskGuard) storageSnapshots() []StorageSnapshot {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	out := make([]StorageSnapshot, 0, len(g.storages))
+	for id, s := range g.storages {
+		var sampledAt time.Time
+		if ns := s.lastSampledAt.Load(); ns != 0 {
+			sampledAt = time.Unix(0, ns)
+		}
+		free := s.lastFree.Load()
+		warnAt := s.lastWarn.Load()
+		protect := s.protect.Load()
+		out = append(out, StorageSnapshot{
+			ID:             id,
+			Name:           s.name,
+			Node:           s.node,
+			Path:           s.path,
+			StorageClass:   s.storageClass,
+			WarnExpr:       s.warnExpr,
+			FloorExpr:      s.floorExpr,
+			WarnBytes:      warnAt,
+			FloorBytes:     s.lastFloor.Load(),
+			FreeBytes:      free,
+			TotalBytes:     s.lastTotal.Load(),
+			SampledAt:      sampledAt,
+			WarnVerdict:    free < warnAt && !protect,
+			ProtectVerdict: protect,
+			PlacedVaultIDs: append([]glid.GLID(nil), s.placedVaultIDs...),
+		})
+	}
+	return out
+}
+
 // ageBoundCappedVaults lists the vaults whose max-age bound is currently
 // refusing admission on this node. Broadcast in NodeStats so peers'
 // admission gates honor it, same pattern as sizeCappedVaults.
@@ -753,6 +858,9 @@ func (g *diskGuard) evaluateStorages(alerts alert.Sink) {
 		floorAt := resolveThreshold(s.floorExpr, g.floorExpr, total)
 		s.lastFree.Store(free)
 		s.lastFloor.Store(floorAt)
+		s.lastWarn.Store(warnAt)
+		s.lastTotal.Store(total)
+		s.lastSampledAt.Store(time.Now().UnixNano())
 		g.reconcileStorageProtect(id, s, free, floorAt, warnAt)
 		g.reconcileStorageAlarm(alerts, id, s, free, total, warnAt)
 	}
@@ -1378,6 +1486,16 @@ func (o *Orchestrator) StorageProtectedVaults() []glid.GLID {
 	return o.diskGuard.storageProtectedVaults()
 }
 
+// StorageSnapshots lists the disk-guard state of every storage LOCALLY
+// hosted on this node, for the NodeStats broadcast and the ListStorages RPC
+// (gastrolog-3cobq4).
+func (o *Orchestrator) StorageSnapshots() []StorageSnapshot {
+	if o.diskGuard == nil {
+		return nil
+	}
+	return o.diskGuard.storageSnapshots()
+}
+
 // SetRemoteVaultStorageProtected installs the peer-state lookup consulted by
 // vaultAdmissionGate. Set once at app wiring, after cluster stats exist.
 // Renamed from SetRemoteVaultDiskProtected (gastrolog-9akebz).
@@ -1464,6 +1582,64 @@ func nodeDisplayName(nodes []system.NodeConfig, nodeID string) string {
 	return nodeID
 }
 
+// refreshStorageGuards converges the guard's per-storage entries with the
+// current config — split out of refreshVaultDiskGuards (gastrolog-3cobq4)
+// to keep that function's cognitive complexity down. One entry per
+// LOCALLY-hosted storage: the guard samples each storage's volume ONCE
+// regardless of how many vaults share it. "Local" means this node's own
+// NodeStorageConfig — the only volumes it can statfs. The node is resolved
+// to its operator-facing name HERE, once per refresh (config is already
+// loaded, off the admission hot path) — same fallback contract as
+// placementManager.nameOrID: name when known, the raw ID otherwise. Every
+// alarm/detail string that names this storage's node reads it pre-resolved.
+//
+// Also computes placements-on-storage (gastrolog-3cobq4): which vaults
+// reference each LOCALLY-hosted storage, config-derived — a storage ID
+// resolves to exactly one node (system.NodeIDForStorage), so any placement
+// naming a storage this node hosts already belongs to THIS node; no
+// local-node filter needed here, unlike refreshVaultDiskGuards' per-vault
+// storageIDs loop (which links a VAULT's guard entry to its own local
+// placements). Every locally-hosted storage gets an entry, even zero
+// vaults, so a storage that just lost its last placement reports empty
+// rather than stale.
+func (o *Orchestrator) refreshStorageGuards(sys *system.System, rt *system.Runtime) {
+	nodeName := nodeDisplayName(rt.Nodes, o.localNodeID)
+	keepStorages := make(map[string]bool)
+	storageClasses := make(map[string]uint32)
+	for _, nsc := range rt.NodeStorageConfigs {
+		if nsc.NodeID != o.localNodeID {
+			continue
+		}
+		for _, fs := range nsc.FileStorages {
+			sid := fs.ID.String()
+			keepStorages[sid] = true
+			storageClasses[sid] = fs.StorageClass
+			o.diskGuard.SetStorageGuard(sid, fs.Name, nodeName, fs.Path, fs.DiskFreeWarn, fs.DiskFreeFloor)
+		}
+	}
+	o.diskGuard.retainStorageGuards(keepStorages, o.alerts)
+
+	placedVaults := make(map[string][]glid.GLID, len(keepStorages))
+	for sid := range keepStorages {
+		placedVaults[sid] = nil
+	}
+	for _, vc := range sys.Config.Vaults {
+		if vc.Type != system.VaultTypeFile {
+			continue
+		}
+		for _, p := range vc.Placements {
+			if _, ok := placedVaults[p.StorageID]; !ok {
+				continue
+			}
+			placedVaults[p.StorageID] = append(placedVaults[p.StorageID], vc.ID)
+		}
+	}
+	for sid, vaultIDs := range placedVaults {
+		sort.Slice(vaultIDs, func(i, j int) bool { return vaultIDs[i].String() < vaultIDs[j].String() })
+		o.diskGuard.SetStorageMeta(sid, storageClasses[sid], vaultIDs)
+	}
+}
+
 // refreshVaultDiskGuards converges the guard's per-storage AND per-vault
 // entries with the current config (gastrolog-9akebz): every LOCALLY-hosted
 // storage gets ONE guard entry (the free-space thresholds now live there —
@@ -1482,28 +1658,7 @@ func (o *Orchestrator) refreshVaultDiskGuards(ctx context.Context) {
 		return
 	}
 	rt := &sys.Runtime
-
-	// One entry per LOCALLY-hosted storage: the guard samples each
-	// storage's volume ONCE regardless of how many vaults share it. "Local"
-	// means this node's own NodeStorageConfig — the only volumes it can
-	// statfs. The node is resolved to its operator-facing name HERE, once
-	// per refresh (config is already loaded, off the admission hot path) —
-	// same fallback contract as placementManager.nameOrID: name when known,
-	// the raw ID otherwise. Every alarm/detail string that names this
-	// storage's node reads it pre-resolved.
-	nodeName := nodeDisplayName(rt.Nodes, o.localNodeID)
-	keepStorages := make(map[string]bool)
-	for _, nsc := range rt.NodeStorageConfigs {
-		if nsc.NodeID != o.localNodeID {
-			continue
-		}
-		for _, fs := range nsc.FileStorages {
-			sid := fs.ID.String()
-			keepStorages[sid] = true
-			o.diskGuard.SetStorageGuard(sid, fs.Name, nodeName, fs.Path, fs.DiskFreeWarn, fs.DiskFreeFloor)
-		}
-	}
-	o.diskGuard.retainStorageGuards(keepStorages, o.alerts)
+	o.refreshStorageGuards(sys, rt)
 
 	keepVaults := make(map[glid.GLID]bool)
 	for _, vc := range sys.Config.Vaults {

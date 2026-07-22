@@ -271,6 +271,52 @@ func TestPeerState_VaultStorageProtected(t *testing.T) {
 	}
 }
 
+// TestPeerState_FindStorageState pins the cross-node lookup contract for
+// gastrolog-3cobq4: a storage is only ever reported by the node that owns
+// it, so FindStorageState scans every live peer's broadcast and returns
+// that one entry, keyed by the GLID's canonical String() form (parsed and
+// compared against the wire's raw bytes — never a raw-bytes-vs-string
+// mismatch, see the function's own doc comment). An unknown ID, an
+// unparsable ID, and an expired reporting peer all resolve to nil — this
+// is the surface "every node can serve every storage's state including
+// remote ones" rests on.
+func TestPeerState_FindStorageState(t *testing.T) {
+	hosted := glid.New()
+	unknown := glid.New()
+
+	ps := NewPeerState(time.Minute)
+	ps.Update("node-a", &gastrologv1.NodeStats{
+		Storages: []*gastrologv1.StorageState{{
+			Id:        hosted.ToProto(),
+			Name:      "fast-ssd",
+			NodeName:  "node-a",
+			FreeBytes: 10 << 30,
+		}},
+	}, time.Now())
+	ps.Update("node-b", &gastrologv1.NodeStats{}, time.Now())
+
+	got := ps.FindStorageState(hosted.String())
+	if got == nil || got.Name != "fast-ssd" || got.NodeName != "node-a" {
+		t.Fatalf("FindStorageState(hosted) = %+v, want the node-a entry", got)
+	}
+
+	if ps.FindStorageState(unknown.String()) != nil {
+		t.Fatal("an ID no live peer reports must resolve to nil")
+	}
+	if ps.FindStorageState("not-a-glid") != nil {
+		t.Fatal("an unparsable ID must resolve to nil, not panic or match spuriously")
+	}
+
+	// The owning node's entry expires: the storage's state expires with
+	// it — a dead node must not leave stale free/total numbers standing.
+	ps.Update("node-a", &gastrologv1.NodeStats{
+		Storages: []*gastrologv1.StorageState{{Id: hosted.ToProto(), Name: "fast-ssd"}},
+	}, time.Now().Add(-2*time.Minute))
+	if ps.FindStorageState(hosted.String()) != nil {
+		t.Fatal("expired peer's storage state must not linger")
+	}
+}
+
 // TestPeerState_VaultStorageProtectedNodeNames pins a review finding on
 // gastrolog-9akebz: the "reported by <node>" admission detail must name
 // nodes, not raw IDs, and the joined list must be stable between reads
