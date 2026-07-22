@@ -1,6 +1,6 @@
 # Storages
 
-The Storages tab shows each configured [file storage](help:storage-config) with its disk-guard state — the same published signals the admission gate itself consults. In a [cluster](help:clustering), storages are grouped by their owning [node](help:clustering-nodes), since a storage is a single physical volume that only its owning node can sample.
+The Storages tab shows each configured [file storage](help:storage-config) with its disk-guard state — the same published signals the admission gate itself consults — as a flat list, the same shape as the [Vaults](help:inspector-vaults) tab. Each card names its owning [node](help:clustering-nodes), since a storage is a single physical volume that only its owning node can sample. To see storages grouped by node, switch to [Nodes mode](help:inspector).
 
 ## Storage Overview
 

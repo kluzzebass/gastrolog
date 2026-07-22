@@ -20,7 +20,6 @@ import { useTick } from "./JobCard";
 import { SystemStatsView, ClusterSummaryView } from "./SystemStatsView";
 import { RouteStatsView } from "./RouteStatsView";
 import { groupByNode } from "./groupByNode";
-import { groupStoragesByNode } from "./groupStoragesByNode";
 import type { EntityType } from "./InspectorDialog";
 import { encode } from "../../api/glid";
 
@@ -125,15 +124,11 @@ function VaultsList({ dark, onOpenSettings, expandTarget }: Readonly<{ dark: boo
 
 // ---- Storages ----
 //
-// A storage is a fundamentally per-node resource (one physical volume,
-// owned by exactly one node — unlike a vault, which can be placed on
-// several). So unlike VaultsList/IngestersList, which stay flat with a
-// per-card node badge, the storage entity list groups by node in
-// multi-node the same way JobsList does: one ExpandableCard per node,
-// flat storage cards inside. Single-node stays a flat sorted list.
-//
-// Grouping joins on StorageState.node_id (gastrolog-3cobq4 review) — the
-// stable key — via groupStoragesByNode; node_name stays the display label.
+// Flat, sorted list — exactly the VaultsList shape. No node grouping here:
+// the node is already a badge on each card (StorageCard renders NodeBadge),
+// and grouping by node would just duplicate the per-node view (NodeDetailPane's
+// Storages section) with nothing new to offer. Single-node and multi-node
+// render identically.
 
 function StoragesList({
   dark,
@@ -147,9 +142,7 @@ function StoragesList({
   onNavigate?: (param: string) => void;
 }>) {
   const { data: storages, isLoading } = useStorages();
-  const { localNodeId, multiNode, nodeNames } = useNodeContext();
   const { expanded, toggle, add } = useToggleSet();
-  const [expandedNodes, setExpandedNodes] = useState<Record<string, boolean>>({});
 
   // Auto-expand a storage when deep-linked (e.g. cross-linked from Settings).
   const [consumedTarget, setConsumedTarget] = useState<string | null>(null);
@@ -164,53 +157,19 @@ function StoragesList({
 
   const sorted = [...storages].sort((a, b) => a.displayLabel.localeCompare(b.displayLabel));
 
-  const card = (storage: (typeof storages)[number]) => (
-    <StorageCard
-      key={storage.id}
-      storage={storage}
-      dark={dark}
-      expanded={expanded.has(storage.id)}
-      onToggle={() => toggle(storage.id)}
-      onOpenSettings={onOpenSettings ? () => onOpenSettings("storage", storage.displayLabel) : undefined}
-      onNavigate={onNavigate}
-    />
-  );
-
-  if (!multiNode) {
-    return (
-      <div className="flex flex-col gap-3">
-        <EntityHeader title="Storages" helpTopicId="inspector-storages" dark={dark} />
-        {sorted.map(card)}
-      </div>
-    );
-  }
-
-  const groups = groupStoragesByNode(sorted, nodeNames, localNodeId);
-
   return (
     <div className="flex flex-col gap-3">
       <EntityHeader title="Storages" helpTopicId="inspector-storages" dark={dark} />
-      {groups.map((group) => (
-        <ExpandableCard
-          key={group.nodeId}
-          id={group.nodeName}
+      {sorted.map((storage) => (
+        <StorageCard
+          key={storage.id}
+          storage={storage}
           dark={dark}
-          monoTitle={false}
-          expanded={expandedNodes[group.nodeId] ?? true}
-          onToggle={() =>
-            setExpandedNodes((prev) => ({ ...prev, [group.nodeId]: !(prev[group.nodeId] ?? true) }))
-          }
-          headerRight={
-            <span className="flex items-center gap-1.5">
-              {group.nodeId === localNodeId && <Badge variant="copper" dark={dark}>this node</Badge>}
-              <Badge variant="muted" dark={dark}>{group.storages.length}</Badge>
-            </span>
-          }
-        >
-          <div className="flex flex-col gap-2 pt-2">
-            {group.storages.map((storage) => card(storage))}
-          </div>
-        </ExpandableCard>
+          expanded={expanded.has(storage.id)}
+          onToggle={() => toggle(storage.id)}
+          onOpenSettings={onOpenSettings ? () => onOpenSettings("storage", storage.displayLabel) : undefined}
+          onNavigate={onNavigate}
+        />
       ))}
     </div>
   );
