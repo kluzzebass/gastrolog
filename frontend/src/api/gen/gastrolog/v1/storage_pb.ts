@@ -400,11 +400,15 @@ export class StorageState extends Message<StorageState> {
   nodeId = new Uint8Array(0);
 
   /**
-   * Threshold expressions as configured on this storage ("10%", "10GB");
-   * empty means this storage inherits the node-level default. The
-   * *_inherited flags say so explicitly — never left for a client to infer
-   * from an empty string (placeholder-style: the effective value below is
-   * what matters).
+   * Threshold expressions in EFFECTIVE form ("10%", "10GB") — never empty:
+   * the storage's own explicit expression when set, otherwise the built-in
+   * default the guard actually resolves against. There is no configurable
+   * node-level override to inherit from (gastrolog-2mrfdw removed the env
+   * channel), so an unset storage expression is DEFAULTED, not inherited
+   * from anything operator-configurable — *_is_default says which case
+   * applies, never left for a client to infer by matching a hardcoded
+   * literal (gastrolog-3cobq4 review: the earlier warn_inherited naming
+   * implied a configurable parent that doesn't exist).
    *
    * @generated from field: string warn_expr = 6;
    */
@@ -416,14 +420,14 @@ export class StorageState extends Message<StorageState> {
   floorExpr = "";
 
   /**
-   * @generated from field: bool warn_inherited = 8;
+   * @generated from field: bool warn_is_default = 8;
    */
-  warnInherited = false;
+  warnIsDefault = false;
 
   /**
-   * @generated from field: bool floor_inherited = 9;
+   * @generated from field: bool floor_is_default = 9;
    */
-  floorInherited = false;
+  floorIsDefault = false;
 
   /**
    * Effective thresholds resolved in bytes against the last sampled volume
@@ -492,8 +496,8 @@ export class StorageState extends Message<StorageState> {
     { no: 18, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 6, name: "warn_expr", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 7, name: "floor_expr", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 8, name: "warn_inherited", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 9, name: "floor_inherited", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 8, name: "warn_is_default", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 9, name: "floor_is_default", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 10, name: "warn_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 11, name: "floor_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 12, name: "free_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },

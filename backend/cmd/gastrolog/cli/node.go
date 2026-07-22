@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/orchestrator"
 	"strconv"
 
 	"connectrpc.com/connect"
@@ -235,10 +236,12 @@ func newNodeListStorageCmd() *cobra.Command {
 					nodeName = nscNodeStr
 				}
 				for _, fs := range nsc.FileStorages {
+					warnExpr, warnIsDefault := orchestrator.EffectiveThresholdExpr(fs.DiskFreeWarn, orchestrator.DefaultDiskFreeWarn)
+					floorExpr, floorIsDefault := orchestrator.EffectiveThresholdExpr(fs.DiskFreeFloor, orchestrator.DefaultDiskFreeFloor)
 					rows = append(rows, []string{
 						nodeName, glid.FromBytes(fs.Id).String(), fs.Name,
 						strconv.FormatUint(uint64(fs.StorageClass), 10),
-						fs.Path, fs.DiskFreeWarn, fs.DiskFreeFloor,
+						fs.Path, thresholdExprLabel(warnExpr, warnIsDefault), thresholdExprLabel(floorExpr, floorIsDefault),
 					})
 				}
 			}
@@ -246,6 +249,21 @@ func newNodeListStorageCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// thresholdExprLabel renders an EFFECTIVE threshold expression with its
+// provenance for the config-listing view: "(default)" when isDefault, the
+// bare expression otherwise. There is no configurable node-level override
+// to inherit from (gastrolog-2mrfdw removed the env channel), so an unset
+// expression is DEFAULTED, never "inherited" (gastrolog-3cobq4 review).
+// Unlike inspect storage's thresholdLabel, this has no live-guard bytes to
+// show — list-storage is a config view, not a live-state view — so it
+// renders the expression alone, verbatim from config, never re-derived.
+func thresholdExprLabel(expr string, isDefault bool) string {
+	if isDefault {
+		return expr + " (default)"
+	}
+	return expr
 }
 
 // fileStoragesForNode returns the existing FileStorages for nodeID. NodeId on

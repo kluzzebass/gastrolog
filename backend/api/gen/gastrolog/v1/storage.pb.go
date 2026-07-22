@@ -443,15 +443,19 @@ type StorageState struct {
 	// is the stable join key for grouping/filtering storages by node
 	// (gastrolog-3cobq4 review: name-based joins collide/rename-race).
 	NodeId []byte `protobuf:"bytes,18,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
-	// Threshold expressions as configured on this storage ("10%", "10GB");
-	// empty means this storage inherits the node-level default. The
-	// *_inherited flags say so explicitly — never left for a client to infer
-	// from an empty string (placeholder-style: the effective value below is
-	// what matters).
+	// Threshold expressions in EFFECTIVE form ("10%", "10GB") — never empty:
+	// the storage's own explicit expression when set, otherwise the built-in
+	// default the guard actually resolves against. There is no configurable
+	// node-level override to inherit from (gastrolog-2mrfdw removed the env
+	// channel), so an unset storage expression is DEFAULTED, not inherited
+	// from anything operator-configurable — *_is_default says which case
+	// applies, never left for a client to infer by matching a hardcoded
+	// literal (gastrolog-3cobq4 review: the earlier warn_inherited naming
+	// implied a configurable parent that doesn't exist).
 	WarnExpr       string `protobuf:"bytes,6,opt,name=warn_expr,json=warnExpr,proto3" json:"warn_expr,omitempty"`
 	FloorExpr      string `protobuf:"bytes,7,opt,name=floor_expr,json=floorExpr,proto3" json:"floor_expr,omitempty"`
-	WarnInherited  bool   `protobuf:"varint,8,opt,name=warn_inherited,json=warnInherited,proto3" json:"warn_inherited,omitempty"`
-	FloorInherited bool   `protobuf:"varint,9,opt,name=floor_inherited,json=floorInherited,proto3" json:"floor_inherited,omitempty"`
+	WarnIsDefault  bool   `protobuf:"varint,8,opt,name=warn_is_default,json=warnIsDefault,proto3" json:"warn_is_default,omitempty"`
+	FloorIsDefault bool   `protobuf:"varint,9,opt,name=floor_is_default,json=floorIsDefault,proto3" json:"floor_is_default,omitempty"`
 	// Effective thresholds resolved in bytes against the last sampled volume
 	// total — the numbers admission actually compares free space to.
 	WarnBytes  uint64 `protobuf:"varint,10,opt,name=warn_bytes,json=warnBytes,proto3" json:"warn_bytes,omitempty"`
@@ -557,16 +561,16 @@ func (x *StorageState) GetFloorExpr() string {
 	return ""
 }
 
-func (x *StorageState) GetWarnInherited() bool {
+func (x *StorageState) GetWarnIsDefault() bool {
 	if x != nil {
-		return x.WarnInherited
+		return x.WarnIsDefault
 	}
 	return false
 }
 
-func (x *StorageState) GetFloorInherited() bool {
+func (x *StorageState) GetFloorIsDefault() bool {
 	if x != nil {
-		return x.FloorInherited
+		return x.FloorIsDefault
 	}
 	return false
 }
@@ -667,7 +671,7 @@ const file_gastrolog_v1_storage_proto_rawDesc = "" +
 	"\rrestore_speed\x18\x0f \x01(\tR\frestoreSpeed\x12!\n" +
 	"\frestore_days\x18\x10 \x01(\rR\vrestoreDays\x12,\n" +
 	"\x12suspect_grace_days\x18\x11 \x01(\rR\x10suspectGraceDays\x12-\n" +
-	"\x12reconcile_schedule\x18\x12 \x01(\tR\x11reconcileSchedule\"\xde\x04\n" +
+	"\x12reconcile_schedule\x18\x12 \x01(\tR\x11reconcileSchedule\"\xe0\x04\n" +
 	"\fStorageState\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
@@ -677,9 +681,9 @@ const file_gastrolog_v1_storage_proto_rawDesc = "" +
 	"\anode_id\x18\x12 \x01(\fR\x06nodeId\x12\x1b\n" +
 	"\twarn_expr\x18\x06 \x01(\tR\bwarnExpr\x12\x1d\n" +
 	"\n" +
-	"floor_expr\x18\a \x01(\tR\tfloorExpr\x12%\n" +
-	"\x0ewarn_inherited\x18\b \x01(\bR\rwarnInherited\x12'\n" +
-	"\x0ffloor_inherited\x18\t \x01(\bR\x0efloorInherited\x12\x1d\n" +
+	"floor_expr\x18\a \x01(\tR\tfloorExpr\x12&\n" +
+	"\x0fwarn_is_default\x18\b \x01(\bR\rwarnIsDefault\x12(\n" +
+	"\x10floor_is_default\x18\t \x01(\bR\x0efloorIsDefault\x12\x1d\n" +
 	"\n" +
 	"warn_bytes\x18\n" +
 	" \x01(\x04R\twarnBytes\x12\x1f\n" +

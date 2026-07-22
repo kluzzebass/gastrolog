@@ -26,23 +26,24 @@ describe("storageVerdictLabel", () => {
   });
 });
 
-// thresholdLabel renders the effective (resolved) byte value with its
-// source — placeholder-style, matching the Settings form's "effective
-// value is what matters" convention and the CLI's identical helper.
+// thresholdLabel renders the EFFECTIVE (resolved) byte value with its
+// provenance — placeholder-style, matching the Settings form's "effective
+// value is what matters" convention and the CLI's identical helper. expr
+// is always the effective, non-empty expression from the wire.
 describe("thresholdLabel", () => {
-  test("inherited threshold labels the source as \"inherited\", not the (empty) expression", () => {
-    expect(thresholdLabel("", true, 3_000_000_000n)).toBe("2.8 GiB (inherited)");
+  test("defaulted threshold labels the source as \"default\", not \"inherited\" — there is no configurable node-level override to inherit from (gastrolog-2mrfdw)", () => {
+    expect(thresholdLabel("10%", true, 3_000_000_000n)).toBe("2.8 GiB (10%, default)");
   });
 
-  test("explicit threshold echoes the configured expression verbatim", () => {
+  test("explicit percentage threshold echoes the configured expression verbatim", () => {
     expect(thresholdLabel("10%", false, 5_368_709_120n)).toBe("5.0 GiB (10%)");
   });
 
-  test("explicit absolute-size expression round-trips alongside its resolved bytes", () => {
-    expect(thresholdLabel("3GB", false, 3_000_000_000n)).toBe("2.8 GiB (3GB)");
+  test("explicit absolute-size expression omits the redundant expression — the bytes alone are the complete answer", () => {
+    expect(thresholdLabel("3GB", false, 3_000_000_000n)).toBe("2.8 GiB");
   });
 
   test("zero resolved bytes (no sample yet) still renders honestly, not blank", () => {
-    expect(thresholdLabel("10%", true, 0n)).toBe("0 B (inherited)");
+    expect(thresholdLabel("10%", true, 0n)).toBe("0 B (10%, default)");
   });
 });

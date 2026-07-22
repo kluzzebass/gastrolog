@@ -168,9 +168,9 @@ func TestDiskGuardTinyVolumeThresholds(t *testing.T) {
 func TestDiskGuardDefaultsAreTypeable(t *testing.T) {
 	t.Parallel()
 	g := newDiskGuard(nil)
-	if g.warnExpr != defaultDiskFreeWarn || g.floorExpr != defaultDiskFreeFloor {
+	if g.warnExpr != DefaultDiskFreeWarn || g.floorExpr != DefaultDiskFreeFloor {
 		t.Fatalf("node expressions = %q/%q, want the typeable defaults %q/%q",
-			g.warnExpr, g.floorExpr, defaultDiskFreeWarn, defaultDiskFreeFloor)
+			g.warnExpr, g.floorExpr, DefaultDiskFreeWarn, DefaultDiskFreeFloor)
 	}
 	total := 400 * gib
 	if w := g.warnThreshold(total); w != 40*gib {
@@ -609,11 +609,11 @@ func TestVaultDiskGuardRetainDropsStorageLinkage(t *testing.T) {
 // "inherited") alongside the RESOLVED bytes value — never leaving the
 // caller to resolve the expression itself (operator directive, 9akebz: no
 // client-side derivation of thresholds).
-func TestStorageSnapshotsReportsEffectiveThresholdsAndInheritance(t *testing.T) {
+func TestStorageSnapshotsReportsEffectiveThresholdsAndDefaultProvenance(t *testing.T) {
 	t.Parallel()
 	total := 400 * gib // node defaults: warn=40GiB (10%), floor=12GiB (3%)
 	g, _ := newGuardFixture(total, map[string]uint64{"volA": 200 * gib})
-	g.SetStorageGuard("storA", "inherits", "node-1", "volA", "", "")
+	g.SetStorageGuard("storA", "defaulted", "node-1", "volA", "", "")
 	g.evaluateStorages(nil)
 
 	snaps := g.storageSnapshots()
@@ -621,8 +621,16 @@ func TestStorageSnapshotsReportsEffectiveThresholdsAndInheritance(t *testing.T) 
 		t.Fatalf("want 1 snapshot, got %d", len(snaps))
 	}
 	s := snaps[0]
-	if s.WarnExpr != "" || s.FloorExpr != "" {
-		t.Fatalf("unset expressions must stay empty (caller renders as inherited), got warn=%q floor=%q", s.WarnExpr, s.FloorExpr)
+	// gastrolog-3cobq4 review: an unset expression must publish the
+	// EFFECTIVE (built-in default) expression, never empty — there is no
+	// configurable node-level override to leave the caller inferring
+	// "inherited" from an empty string (gastrolog-2mrfdw removed the env
+	// channel).
+	if s.WarnExpr != DefaultDiskFreeWarn || s.FloorExpr != DefaultDiskFreeFloor {
+		t.Fatalf("unset expressions must publish the effective default expression, got warn=%q floor=%q", s.WarnExpr, s.FloorExpr)
+	}
+	if !s.WarnIsDefault || !s.FloorIsDefault {
+		t.Fatalf("unset expressions must report IsDefault=true, got warn=%v floor=%v", s.WarnIsDefault, s.FloorIsDefault)
 	}
 	if s.WarnBytes != 40*gib {
 		t.Fatalf("effective warn bytes = %d, want 40GiB (10%% of 400GiB)", s.WarnBytes)
@@ -641,6 +649,21 @@ func TestStorageSnapshotsReportsEffectiveThresholdsAndInheritance(t *testing.T) 
 	}
 }
 
+// TestEffectiveThresholdExpr pins the pure resolution rule storageSnapshots
+// and the ListStorages fallback both rely on: an explicit expression wins
+// outright; an unset one resolves straight to the built-in default literal
+// (gastrolog-2mrfdw removed the only other source, the env override), with
+// IsDefault naming which case applied.
+func TestEffectiveThresholdExpr(t *testing.T) {
+	t.Parallel()
+	if expr, isDefault := EffectiveThresholdExpr("20%", DefaultDiskFreeWarn); expr != "20%" || isDefault {
+		t.Fatalf("explicit expression must win verbatim with IsDefault=false, got %q/%v", expr, isDefault)
+	}
+	if expr, isDefault := EffectiveThresholdExpr("", DefaultDiskFreeWarn); expr != DefaultDiskFreeWarn || !isDefault {
+		t.Fatalf("unset expression must resolve to the default with IsDefault=true, got %q/%v", expr, isDefault)
+	}
+}
+
 // TestStorageSnapshotsReportsExplicitThresholds pins the explicit-override
 // half: a storage with its own configured expressions reports them
 // verbatim, not the node defaults.
@@ -654,6 +677,9 @@ func TestStorageSnapshotsReportsExplicitThresholds(t *testing.T) {
 	s := snaps[0]
 	if s.WarnExpr != "20%" || s.FloorExpr != "10%" {
 		t.Fatalf("explicit expressions must round-trip verbatim, got warn=%q floor=%q", s.WarnExpr, s.FloorExpr)
+	}
+	if s.WarnIsDefault || s.FloorIsDefault {
+		t.Fatalf("explicit expressions must report IsDefault=false, got warn=%v floor=%v", s.WarnIsDefault, s.FloorIsDefault)
 	}
 	if s.WarnBytes != 80*gib || s.FloorBytes != 40*gib {
 		t.Fatalf("effective bytes = %d/%d, want 80GiB/40GiB", s.WarnBytes, s.FloorBytes)

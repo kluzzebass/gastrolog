@@ -21,15 +21,26 @@ export function storageVerdictLabel(storage: Pick<Storage, "warnVerdict" | "prot
   return null;
 }
 
-// thresholdLabel renders an effective threshold with its source — the
-// resolved bytes value is what matters (placeholder-style, same as the
-// Settings form's inherited-value placeholders), with the configured
-// expression or "inherited" naming where it came from. Mirrors the CLI's
-// thresholdLabel exactly (gastrolog-3cobq4).
-export function thresholdLabel(expr: string, inherited: boolean, effectiveBytes: bigint): string {
+// thresholdLabel renders an effective threshold with its provenance — the
+// resolved bytes value always leads (placeholder-style: the effective
+// value is what matters). expr is the EFFECTIVE expression from the wire,
+// verbatim, never re-derived here (gastrolog-9akebz: render the wire).
+// Mirrors the CLI's thresholdLabel exactly (gastrolog-3cobq4).
+//
+// isDefault storages get "(expr, default)" — there is no configurable
+// node-level override to inherit from (gastrolog-2mrfdw removed the env
+// channel), so an unset expression is DEFAULTED, never "inherited"
+// (gastrolog-3cobq4 review). An explicit percentage expression ("10%")
+// still gets "(expr)": a percentage carries information the resolved byte
+// count alone can't (it rescales with the volume). An explicit
+// absolute-size expression ("20GiB") resolves to exactly the shown byte
+// count, so appending it would just repeat the same number in a second
+// spelling — the bytes alone are the complete, non-redundant answer.
+export function thresholdLabel(expr: string, isDefault: boolean, effectiveBytes: bigint): string {
   const eff = formatBytes(effectiveBytes);
-  if (inherited) return `${eff} (inherited)`;
-  return `${eff} (${expr})`;
+  if (isDefault) return `${eff} (${expr}, default)`;
+  if (expr.includes("%")) return `${eff} (${expr})`;
+  return eff;
 }
 
 interface StorageCardProps {
@@ -125,13 +136,13 @@ function StorageDetail({
             <div className="flex items-baseline gap-2">
               <span className={labelClass}>Warn</span>
               <span className={`font-mono ${valueClass}`}>
-                {thresholdLabel(storage.warnExpr, storage.warnInherited, storage.warnBytes)}
+                {thresholdLabel(storage.warnExpr, storage.warnIsDefault, storage.warnBytes)}
               </span>
             </div>
             <div className="flex items-baseline gap-2">
               <span className={labelClass}>Floor</span>
               <span className={`font-mono ${valueClass}`}>
-                {thresholdLabel(storage.floorExpr, storage.floorInherited, storage.floorBytes)}
+                {thresholdLabel(storage.floorExpr, storage.floorIsDefault, storage.floorBytes)}
               </span>
             </div>
           </div>

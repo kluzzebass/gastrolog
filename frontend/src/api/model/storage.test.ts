@@ -21,10 +21,10 @@ describe("Storage", () => {
       path: "storage/nvme-fast",
       nodeName: "node-1",
       storageClass: 1,
-      warnExpr: "10%",
-      floorExpr: "",
-      warnInherited: false,
-      floorInherited: true,
+      warnExpr: "10%", // explicit
+      floorExpr: "3%", // effective — the built-in default, never empty on the wire
+      warnIsDefault: false,
+      floorIsDefault: true,
       warnBytes: BigInt(5_000_000_000),
       floorBytes: BigInt(1_000_000_000),
       freeBytes: BigInt(20_000_000_000),
@@ -41,9 +41,9 @@ describe("Storage", () => {
     expect(storage.nodeName).toBe("node-1");
     expect(storage.storageClass).toBe(1);
     expect(storage.warnExpr).toBe("10%");
-    expect(storage.floorExpr).toBe("");
-    expect(storage.warnInherited).toBe(false);
-    expect(storage.floorInherited).toBe(true);
+    expect(storage.floorExpr).toBe("3%");
+    expect(storage.warnIsDefault).toBe(false);
+    expect(storage.floorIsDefault).toBe(true);
     expect(storage.warnBytes).toBe(BigInt(5_000_000_000));
     expect(storage.floorBytes).toBe(BigInt(1_000_000_000));
     expect(storage.freeBytes).toBe(BigInt(20_000_000_000));

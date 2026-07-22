@@ -18,7 +18,7 @@ import (
 
 // newInspectStorageCmd is the CLI parity surface for the storage inspector
 // (gastrolog-3cobq4): the same published guard state the UI's storage cards
-// render — free/total, effective thresholds with inherited-vs-explicit
+// render — free/total, effective thresholds with default-vs-explicit
 // indication, warn/protect verdicts, and placed vaults — never re-derived
 // from raw numbers here (operator directive, gastrolog-9akebz: render the
 // wire).
@@ -117,21 +117,36 @@ func storageRow(st *v1.StorageState) []string {
 		storageVerdict(st),
 		free,
 		total,
-		thresholdLabel(st.WarnExpr, st.WarnInherited, st.WarnBytes),
-		thresholdLabel(st.FloorExpr, st.FloorInherited, st.FloorBytes),
+		thresholdLabel(st.WarnExpr, st.WarnIsDefault, st.WarnBytes),
+		thresholdLabel(st.FloorExpr, st.FloorIsDefault, st.FloorBytes),
 		strconv.Itoa(len(st.PlacedVaultIds)),
 	}
 }
 
-// thresholdLabel renders an effective threshold with its source — the
-// resolved bytes value is what matters (placeholder-style), with the
-// configured expression or "inherited" naming where it came from.
-func thresholdLabel(expr string, inherited bool, effectiveBytes uint64) string {
+// thresholdLabel renders an effective threshold with its provenance — the
+// resolved bytes value always leads (placeholder-style: the effective
+// value is what matters). expr is the EFFECTIVE expression from the wire,
+// verbatim, never re-derived here (gastrolog-9akebz: render the wire).
+//
+// isDefault storages get "(expr, default)" — there is no configurable
+// node-level override to inherit from (gastrolog-2mrfdw removed the env
+// channel), so an unset expression is DEFAULTED, never "inherited"
+// (gastrolog-3cobq4 review). An explicit percentage expression ("10%")
+// still gets "(expr)": a percentage carries information the resolved byte
+// count alone can't (it rescales with the volume). An explicit
+// absolute-size expression ("20GiB") resolves to exactly the shown byte
+// count, so appending it would just repeat the same number in a second
+// spelling — the bytes alone are the complete, non-redundant answer.
+func thresholdLabel(expr string, isDefault bool, effectiveBytes uint64) string {
 	eff := formatStorageBytes(effectiveBytes)
-	if inherited {
-		return eff + " (inherited)"
+	switch {
+	case isDefault:
+		return eff + " (" + expr + ", default)"
+	case strings.Contains(expr, "%"):
+		return eff + " (" + expr + ")"
+	default:
+		return eff
 	}
-	return eff + " (" + expr + ")"
 }
 
 // formatStorageBytes renders a disk-guard byte count. Disk free/total
@@ -151,8 +166,8 @@ func storageDetailPairs(st *v1.StorageState, vaultNames map[string]string) [][2]
 		{"Storage Class", strconv.FormatUint(uint64(st.StorageClass), 10)},
 		{"Verdict", storageVerdict(st)},
 		{"Free / Total", free + " / " + total},
-		{"Warn Threshold", thresholdLabel(st.WarnExpr, st.WarnInherited, st.WarnBytes)},
-		{"Floor Threshold", thresholdLabel(st.FloorExpr, st.FloorInherited, st.FloorBytes)},
+		{"Warn Threshold", thresholdLabel(st.WarnExpr, st.WarnIsDefault, st.WarnBytes)},
+		{"Floor Threshold", thresholdLabel(st.FloorExpr, st.FloorIsDefault, st.FloorBytes)},
 	}
 	if st.SampledAt != nil {
 		pairs = append(pairs, [2]string{"Sampled At", st.SampledAt.AsTime().UTC().Format(tsFormat)})

@@ -94,15 +94,19 @@ message StorageState {
   // (gastrolog-3cobq4 review: name-based joins collide/rename-race).
   bytes node_id = 18;
 
-  // Threshold expressions as configured on this storage ("10%", "10GB");
-  // empty means this storage inherits the node-level default. The
-  // *_inherited flags say so explicitly — never left for a client to infer
-  // from an empty string (placeholder-style: the effective value below is
-  // what matters).
+  // Threshold expressions in EFFECTIVE form ("10%", "10GB") — never empty:
+  // the storage's own explicit expression when set, otherwise the built-in
+  // default the guard actually resolves against. There is no configurable
+  // node-level override to inherit from (gastrolog-2mrfdw removed the env
+  // channel), so an unset storage expression is DEFAULTED, not inherited
+  // from anything operator-configurable — *_is_default says which case
+  // applies, never left for a client to infer by matching a hardcoded
+  // literal (gastrolog-3cobq4 review: the earlier warn_inherited naming
+  // implied a configurable parent that doesn't exist).
   string warn_expr = 6;
   string floor_expr = 7;
-  bool warn_inherited = 8;
-  bool floor_inherited = 9;
+  bool warn_is_default = 8;
+  bool floor_is_default = 9;
 
   // Effective thresholds resolved in bytes against the last sampled volume
   // total — the numbers admission actually compares free space to.

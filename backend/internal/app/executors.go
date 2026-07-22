@@ -205,6 +205,8 @@ func (a *orchStatsAdapter) StorageSnapshots() []cluster.StatsStorageSnapshot {
 			StorageClass:   s.StorageClass,
 			WarnExpr:       s.WarnExpr,
 			FloorExpr:      s.FloorExpr,
+			WarnIsDefault:  s.WarnIsDefault,
+			FloorIsDefault: s.FloorIsDefault,
 			WarnBytes:      s.WarnBytes,
 			FloorBytes:     s.FloorBytes,
 			FreeBytes:      s.FreeBytes,

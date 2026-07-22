@@ -4,7 +4,7 @@
 // Operator directive (gastrolog-9akebz, extended to storages by
 // gastrolog-3cobq4): every threshold and verdict here is rendered verbatim
 // from the wire — free/total, warn/floor bytes, warn/protect verdicts, and
-// the inherited-vs-explicit flags are all server-computed. This model does
+// the default-vs-explicit flags are all server-computed. This model does
 // no derivation of its own; it only reshapes proto bytes into typed
 // EntityID values for the UI layer, the same role Vault plays for
 // VaultInfo.
@@ -53,20 +53,30 @@ export class Storage {
     return this.state.storageClass;
   }
 
+  /** Effective warn expression — never empty; the storage's own explicit
+   * expression, or the built-in default when unset. */
   get warnExpr(): string {
     return this.state.warnExpr;
   }
 
+  /** Effective floor expression — never empty, same contract as warnExpr. */
   get floorExpr(): string {
     return this.state.floorExpr;
   }
 
-  get warnInherited(): boolean {
-    return this.state.warnInherited;
+  /**
+   * True when warnExpr came from the built-in default rather than an
+   * explicit override. There is no configurable node-level override to
+   * "inherit" from (gastrolog-2mrfdw removed the env channel) — an unset
+   * expression is DEFAULTED, not inherited (gastrolog-3cobq4 review).
+   */
+  get warnIsDefault(): boolean {
+    return this.state.warnIsDefault;
   }
 
-  get floorInherited(): boolean {
-    return this.state.floorInherited;
+  /** Floor sibling of warnIsDefault. */
+  get floorIsDefault(): boolean {
+    return this.state.floorIsDefault;
   }
 
   get warnBytes(): bigint {

@@ -122,8 +122,10 @@ type StatsStorageSnapshot struct {
 	Node           string
 	Path           string
 	StorageClass   uint32
-	WarnExpr       string
-	FloorExpr      string
+	WarnExpr       string // effective expression — never empty
+	FloorExpr      string // effective expression — never empty
+	WarnIsDefault  bool
+	FloorIsDefault bool
 	WarnBytes      uint64
 	FloorBytes     uint64
 	FreeBytes      uint64
@@ -662,8 +664,8 @@ func storageStateToProto(ss StatsStorageSnapshot, nodeID string) *gastrologv1.St
 		StorageClass:   ss.StorageClass,
 		WarnExpr:       ss.WarnExpr,
 		FloorExpr:      ss.FloorExpr,
-		WarnInherited:  ss.WarnExpr == "",
-		FloorInherited: ss.FloorExpr == "",
+		WarnIsDefault:  ss.WarnIsDefault,
+		FloorIsDefault: ss.FloorIsDefault,
 		WarnBytes:      ss.WarnBytes,
 		FloorBytes:     ss.FloorBytes,
 		FreeBytes:      ss.FreeBytes,

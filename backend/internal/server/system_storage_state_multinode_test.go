@@ -25,6 +25,7 @@ import (
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/system"
 )
 
@@ -131,8 +132,11 @@ func TestMultiNodeListStorages_ConfigOnlyBeforeFirstSample(t *testing.T) {
 	if s.Name != "guarded-storage" || s.StorageClass != 4 {
 		t.Fatalf("identity fields wrong: %+v", s)
 	}
-	if !s.FloorInherited || !s.WarnInherited {
-		t.Fatalf("unset expressions must report inherited, got warn_inherited=%v floor_inherited=%v", s.WarnInherited, s.FloorInherited)
+	if !s.FloorIsDefault || !s.WarnIsDefault {
+		t.Fatalf("unset expressions must report default, got warn_is_default=%v floor_is_default=%v", s.WarnIsDefault, s.FloorIsDefault)
+	}
+	if s.WarnExpr != orchestrator.DefaultDiskFreeWarn || s.FloorExpr != orchestrator.DefaultDiskFreeFloor {
+		t.Fatalf("defaulted thresholds must publish the EFFECTIVE (built-in default) expression, not empty: got warn=%q floor=%q", s.WarnExpr, s.FloorExpr)
 	}
 	if s.FreeBytes != 0 || s.TotalBytes != 0 || s.ProtectVerdict || s.WarnVerdict {
 		t.Fatalf("no sample has run yet: live fields must be honestly zero, got %+v", s)
@@ -170,8 +174,8 @@ func TestMultiNodeListStorages_RealTickReportsProtectPlacementsAndRemoval(t *tes
 	if s.TotalBytes == 0 {
 		t.Error("a real statfs sample must report a nonzero volume total")
 	}
-	if s.FloorExpr != "99%" || s.FloorInherited {
-		t.Fatalf("explicit floor override must round-trip, got expr=%q inherited=%v", s.FloorExpr, s.FloorInherited)
+	if s.FloorExpr != "99%" || s.FloorIsDefault {
+		t.Fatalf("explicit floor override must round-trip, got expr=%q is_default=%v", s.FloorExpr, s.FloorIsDefault)
 	}
 	if len(s.PlacedVaultIds) != 1 || glid.FromBytes(s.PlacedVaultIds[0]) != vaultID {
 		t.Fatalf("placements must still be present alongside live state, got %v", s.PlacedVaultIds)

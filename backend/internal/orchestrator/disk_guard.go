@@ -69,9 +69,17 @@ const (
 	// max(fraction·volume, hardBytes)-with-clamp formula was not typeable
 	// and therefore not a legitimate default (operator directive; see
 	// docs/product-defaults-policy-design.md). Percentages scale with the
-	// volume and resolve per node through the shared resolver.
-	defaultDiskFreeWarn  = "10%"
-	defaultDiskFreeFloor = "3%"
+	// volume and resolve per node through the shared resolver. Exported
+	// (DefaultDiskFreeWarn/DefaultDiskFreeFloor) so the server package can
+	// publish the EFFECTIVE expression for a storage that has no explicit
+	// override — there is no configurable node-level override to
+	// "inherit" from since gastrolog-2mrfdw removed the env channel, so an
+	// unset storage expression resolves straight to these built-in
+	// literals (gastrolog-3cobq4 review: "(inherited)" implied a
+	// configurable parent that doesn't exist; the honest label is
+	// "default").
+	DefaultDiskFreeWarn  = "10%"
+	DefaultDiskFreeFloor = "3%"
 )
 
 // clearAbove is the hysteresis exit bound: thresholds release only once
@@ -277,8 +285,8 @@ func newDiskGuard(paths []string) *diskGuard {
 	return &diskGuard{
 		paths:     paths,
 		sample:    statfsSample,
-		warnExpr:  defaultDiskFreeWarn,
-		floorExpr: defaultDiskFreeFloor,
+		warnExpr:  DefaultDiskFreeWarn,
+		floorExpr: DefaultDiskFreeFloor,
 	}
 }
 
@@ -299,11 +307,12 @@ func (g *diskGuard) worstFree() (free, total uint64, ok bool) {
 }
 
 // resolveThreshold resolves a disk-free threshold expression against the
-// sampled volume size through the shared resolver, inheriting fallbackExpr
-// when expr is unset. fallbackExpr is always a validated expression (the
-// typeable defaults or the checked env override), so it parses; a malformed
-// expr — impossible after write-time validation — falls back to it rather
-// than to a silent 0 threshold.
+// sampled volume size through the shared resolver, falling back to
+// fallbackExpr when expr is unset. fallbackExpr is always the validated
+// typeable default (DefaultDiskFreeWarn/Floor — gastrolog-2mrfdw removed
+// the env-override channel, so this is the only fallback source left), so
+// it parses; a malformed expr — impossible after write-time validation —
+// falls back to it rather than to a silent 0 threshold.
 func resolveThreshold(expr, fallbackExpr string, total uint64) uint64 {
 	if t, err := system.ResolveSizeOrPercent(expr, total, fallbackExpr); err == nil {
 		return t
@@ -312,12 +321,27 @@ func resolveThreshold(expr, fallbackExpr string, total uint64) uint64 {
 	return t
 }
 
+// EffectiveThresholdExpr resolves a threshold expression to the value the
+// guard actually evaluates against: storageExpr when the storage states
+// its own, otherwise defaultExpr — the built-in literal, since there is no
+// configurable node-level override to inherit from (gastrolog-2mrfdw
+// removed the env channel). Returns the effective expression and whether
+// it came from the default, for publishing both the resolved value and its
+// provenance (gastrolog-3cobq4 review: an unset expression is DEFAULTED,
+// not "inherited" from anything operator-configurable).
+func EffectiveThresholdExpr(storageExpr, defaultExpr string) (expr string, isDefault bool) {
+	if storageExpr != "" {
+		return storageExpr, false
+	}
+	return defaultExpr, true
+}
+
 func (g *diskGuard) warnThreshold(total uint64) uint64 {
-	return resolveThreshold(g.warnExpr, defaultDiskFreeWarn, total)
+	return resolveThreshold(g.warnExpr, DefaultDiskFreeWarn, total)
 }
 
 func (g *diskGuard) floorThreshold(total uint64) uint64 {
-	return resolveThreshold(g.floorExpr, defaultDiskFreeFloor, total)
+	return resolveThreshold(g.floorExpr, DefaultDiskFreeFloor, total)
 }
 
 // SetVaultGuard registers (or updates) a vault's guard entry. storageIDs are
@@ -712,7 +736,13 @@ func (g *diskGuard) storageProtectedVaults() []glid.GLID {
 // (gastrolog-3cobq4). WarnVerdict/ProtectVerdict are the guard's own
 // hysteresis-aware verdicts — never derived by a caller from
 // FreeBytes/WarnBytes/FloorBytes (operator directive, gastrolog-9akebz: no
-// client-side derivation of verdicts/thresholds).
+// client-side derivation of verdicts/thresholds). WarnExpr/FloorExpr are
+// the EFFECTIVE expressions — never empty: the storage's own explicit
+// expression, or the built-in default (DefaultDiskFreeWarn/Floor) when
+// unset. WarnIsDefault/FloorIsDefault say which case applies — there is no
+// configurable node-level override to "inherit" from since gastrolog-2mrfdw
+// removed the env channel, so an unset storage expression is DEFAULTED,
+// not inherited (gastrolog-3cobq4 review).
 type StorageSnapshot struct {
 	ID             string
 	Name           string
@@ -721,6 +751,8 @@ type StorageSnapshot struct {
 	StorageClass   uint32
 	WarnExpr       string
 	FloorExpr      string
+	WarnIsDefault  bool
+	FloorIsDefault bool
 	WarnBytes      uint64
 	FloorBytes     uint64
 	FreeBytes      uint64
@@ -757,14 +789,18 @@ func (g *diskGuard) storageSnapshots() []StorageSnapshot {
 		free := s.lastFree.Load()
 		warnAt := s.lastWarn.Load()
 		protect := s.protect.Load()
+		warnExpr, warnIsDefault := EffectiveThresholdExpr(s.warnExpr, g.warnExpr)
+		floorExpr, floorIsDefault := EffectiveThresholdExpr(s.floorExpr, g.floorExpr)
 		out = append(out, StorageSnapshot{
 			ID:             id,
 			Name:           s.name,
 			Node:           s.node,
 			Path:           s.path,
 			StorageClass:   s.storageClass,
-			WarnExpr:       s.warnExpr,
-			FloorExpr:      s.floorExpr,
+			WarnExpr:       warnExpr,
+			FloorExpr:      floorExpr,
+			WarnIsDefault:  warnIsDefault,
+			FloorIsDefault: floorIsDefault,
 			WarnBytes:      warnAt,
 			FloorBytes:     s.lastFloor.Load(),
 			FreeBytes:      free,

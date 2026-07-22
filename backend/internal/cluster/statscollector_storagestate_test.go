@@ -27,8 +27,10 @@ func TestStatsCollector_BroadcastsStorageState(t *testing.T) {
 			Node:           "node-a",
 			Path:           "/data/fast",
 			StorageClass:   2,
-			WarnExpr:       "",     // inherits the node default
-			FloorExpr:      "5GiB", // explicit override
+			WarnExpr:       "10%",  // effective — the orchestrator already resolved
+			FloorExpr:      "5GiB", // an unset expression to the built-in default;
+			WarnIsDefault:  true,   // this collector only copies both fields
+			FloorIsDefault: false,  // through, it never re-derives IsDefault.
 			WarnBytes:      40 << 30,
 			FloorBytes:     5 << 30,
 			FreeBytes:      3 << 30,
@@ -58,11 +60,14 @@ func TestStatsCollector_BroadcastsStorageState(t *testing.T) {
 	if got.Name != "fast-ssd" || got.NodeName != "node-a" || got.Path != "/data/fast" || got.StorageClass != 2 {
 		t.Fatalf("identity fields wrong: %+v", got)
 	}
-	if !got.WarnInherited {
-		t.Fatal("empty WarnExpr must report WarnInherited=true — never left for the caller to infer")
+	if got.WarnExpr != "10%" {
+		t.Fatalf("WarnExpr must round-trip verbatim (effective form), got %q", got.WarnExpr)
 	}
-	if got.FloorInherited {
-		t.Fatal("explicit FloorExpr must report FloorInherited=false")
+	if !got.WarnIsDefault {
+		t.Fatal("WarnIsDefault must round-trip verbatim — never re-derived from the (now always non-empty) expression")
+	}
+	if got.FloorIsDefault {
+		t.Fatal("explicit FloorIsDefault must round-trip as false")
 	}
 	if got.FloorExpr != "5GiB" {
 		t.Fatalf("FloorExpr must round-trip verbatim, got %q", got.FloorExpr)

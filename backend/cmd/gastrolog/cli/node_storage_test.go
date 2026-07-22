@@ -49,6 +49,21 @@ func TestNodeAddStorageCmdDiskFreeFlags(t *testing.T) {
 	}
 }
 
+// TestThresholdExprLabel pins gastrolog-3cobq4's review fix for the
+// list-storage columns: a defaulted expression gets a "(default)" suffix,
+// never "(inherited)" — there is no configurable node-level override to
+// inherit from since gastrolog-2mrfdw removed the env channel. An explicit
+// expression renders bare, verbatim from config.
+func TestThresholdExprLabel(t *testing.T) {
+	t.Parallel()
+	if got := thresholdExprLabel("10%", true); got != "10% (default)" {
+		t.Errorf("thresholdExprLabel(defaulted) = %q, want %q", got, "10% (default)")
+	}
+	if got := thresholdExprLabel("20%", false); got != "20%" {
+		t.Errorf("thresholdExprLabel(explicit) = %q, want %q", got, "20%")
+	}
+}
+
 func TestFileStoragesForNodeMatchesWireEncoding(t *testing.T) {
 	t.Parallel()
 	nodeID := glid.New().String()

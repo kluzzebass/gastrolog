@@ -91,41 +91,50 @@ func TestThresholdLabel(t *testing.T) {
 
 	tests := []struct {
 		name      string
-		expr      string
-		inherited bool
+		expr      string // EFFECTIVE expression — always non-empty on the real wire
+		isDefault bool
 		bytes     uint64
 		expect    string
 	}{
 		{
-			// Operator directive (gastrolog-9akebz): render the wire — the
-			// effective resolved value always leads, with the source named.
-			name:      "inherited",
-			expr:      "",
-			inherited: true,
+			// gastrolog-3cobq4 review: there is no configurable node-level
+			// override to inherit from (gastrolog-2mrfdw removed the env
+			// channel) — a defaulted threshold is labeled "default", never
+			// "inherited", and the wire's effective expression ("10%")
+			// still renders verbatim alongside it.
+			name:      "default",
+			expr:      "10%",
+			isDefault: true,
 			bytes:     10 << 30,
-			expect:    "10.0 GiB (inherited)",
+			expect:    "10.0 GiB (10%, default)",
 		},
 		{
+			// A percentage carries information the byte count alone can't
+			// (it rescales with the volume) — shown even when explicit.
 			name:      "explicit percentage",
 			expr:      "20%",
-			inherited: false,
+			isDefault: false,
 			bytes:     40 << 30,
 			expect:    "40.0 GiB (20%)",
 		},
 		{
+			// An explicit absolute-size expression resolves to exactly the
+			// shown byte count — appending "(5GiB)" next to "5.0 GiB" would
+			// just repeat the same number in a second spelling, so the
+			// terse form omits it.
 			name:      "explicit absolute size",
 			expr:      "5GiB",
-			inherited: false,
+			isDefault: false,
 			bytes:     5 << 30,
-			expect:    "5.0 GiB (5GiB)",
+			expect:    "5.0 GiB",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := thresholdLabel(tt.expr, tt.inherited, tt.bytes); got != tt.expect {
-				t.Errorf("thresholdLabel(%q, %v, %d) = %q, want %q", tt.expr, tt.inherited, tt.bytes, got, tt.expect)
+			if got := thresholdLabel(tt.expr, tt.isDefault, tt.bytes); got != tt.expect {
+				t.Errorf("thresholdLabel(%q, %v, %d) = %q, want %q", tt.expr, tt.isDefault, tt.bytes, got, tt.expect)
 			}
 		})
 	}

@@ -102,7 +102,12 @@ func (s *SystemServer) allStorageStates(ctx context.Context) ([]*apiv1.StorageSt
 				// No live sample yet — owning node down, or hasn't ticked
 				// since this storage was added. Identity from config; live
 				// fields honestly zero rather than fabricated (facts before
-				// speculation, gastrolog-9akebz).
+				// speculation, gastrolog-9akebz). Thresholds still publish
+				// EFFECTIVE form even here — the same DefaultDiskFreeWarn/
+				// Floor literals the guard itself would resolve against on
+				// its first tick (gastrolog-3cobq4 review).
+				warnExpr, warnIsDefault := orchestrator.EffectiveThresholdExpr(fs.DiskFreeWarn, orchestrator.DefaultDiskFreeWarn)
+				floorExpr, floorIsDefault := orchestrator.EffectiveThresholdExpr(fs.DiskFreeFloor, orchestrator.DefaultDiskFreeFloor)
 				state = &apiv1.StorageState{
 					Id:             fs.ID.ToProto(),
 					Name:           fs.Name,
@@ -110,10 +115,10 @@ func (s *SystemServer) allStorageStates(ctx context.Context) ([]*apiv1.StorageSt
 					NodeName:       nodeName,
 					NodeId:         []byte(nsc.NodeID),
 					StorageClass:   fs.StorageClass,
-					WarnExpr:       fs.DiskFreeWarn,
-					FloorExpr:      fs.DiskFreeFloor,
-					WarnInherited:  fs.DiskFreeWarn == "",
-					FloorInherited: fs.DiskFreeFloor == "",
+					WarnExpr:       warnExpr,
+					FloorExpr:      floorExpr,
+					WarnIsDefault:  warnIsDefault,
+					FloorIsDefault: floorIsDefault,
 				}
 			}
 			state.PlacedVaultIds = glidsToProtoBytes(placements[sid])
@@ -179,8 +184,8 @@ func storageSnapshotToProto(ss orchestrator.StorageSnapshot, nodeID string) *api
 		StorageClass:   ss.StorageClass,
 		WarnExpr:       ss.WarnExpr,
 		FloorExpr:      ss.FloorExpr,
-		WarnInherited:  ss.WarnExpr == "",
-		FloorInherited: ss.FloorExpr == "",
+		WarnIsDefault:  ss.WarnIsDefault,
+		FloorIsDefault: ss.FloorIsDefault,
 		WarnBytes:      ss.WarnBytes,
 		FloorBytes:     ss.FloorBytes,
 		FreeBytes:      ss.FreeBytes,
