@@ -193,6 +193,31 @@ func (a *orchStatsAdapter) ChunkCountBoundCappedVaults() []glid.GLID {
 	return a.orch.ChunkCountBoundCappedVaults()
 }
 
+func (a *orchStatsAdapter) StorageSnapshots() []cluster.StatsStorageSnapshot {
+	snaps := a.orch.StorageSnapshots()
+	out := make([]cluster.StatsStorageSnapshot, len(snaps))
+	for i, s := range snaps {
+		out[i] = cluster.StatsStorageSnapshot{
+			ID:             s.ID,
+			Name:           s.Name,
+			Node:           s.Node,
+			Path:           s.Path,
+			StorageClass:   s.StorageClass,
+			WarnExpr:       s.WarnExpr,
+			FloorExpr:      s.FloorExpr,
+			WarnBytes:      s.WarnBytes,
+			FloorBytes:     s.FloorBytes,
+			FreeBytes:      s.FreeBytes,
+			TotalBytes:     s.TotalBytes,
+			SampledAt:      s.SampledAt,
+			WarnVerdict:    s.WarnVerdict,
+			ProtectVerdict: s.ProtectVerdict,
+			PlacedVaultIDs: s.PlacedVaultIDs,
+		}
+	}
+	return out
+}
+
 // jobBroadcastAdapter bridges the scheduler to the cluster.JobsProvider interface.
 type jobBroadcastAdapter struct {
 	scheduler *orchestrator.Scheduler
