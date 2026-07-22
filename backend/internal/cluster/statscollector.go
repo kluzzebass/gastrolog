@@ -113,6 +113,27 @@ type StatsVaultPipelineDiskSnapshot struct {
 	PreHead          int
 }
 
+// StatsStorageSnapshot is one LOCALLY-hosted storage's disk-guard state,
+// broadcast via NodeStats for the storage inspector (gastrolog-3cobq4).
+// Mirrors orchestrator.StorageSnapshot without importing it.
+type StatsStorageSnapshot struct {
+	ID             string
+	Name           string
+	Node           string
+	Path           string
+	StorageClass   uint32
+	WarnExpr       string
+	FloorExpr      string
+	WarnBytes      uint64
+	FloorBytes     uint64
+	FreeBytes      uint64
+	TotalBytes     uint64
+	SampledAt      time.Time
+	WarnVerdict    bool
+	ProtectVerdict bool
+	PlacedVaultIDs []glid.GLID
+}
+
 // StatsProvider abstracts the orchestrator for stats collection.
 // Defined here at the consumer site to avoid importing orchestrator.
 type StatsProvider interface {
@@ -147,6 +168,12 @@ type StatsProvider interface {
 	// ChunkCountBoundCappedVaults is AgeBoundCappedVaults' max-chunks
 	// sibling.
 	ChunkCountBoundCappedVaults() []glid.GLID
+	// StorageSnapshots lists the disk-guard state of every storage LOCALLY
+	// hosted on this node — free/total, resolved thresholds, verdicts, and
+	// config-derived placements (gastrolog-3cobq4). Broadcast so the
+	// storage inspector can render every storage cluster-wide; only the
+	// owning node can statfs its volume, so this is the sole source.
+	StorageSnapshots() []StatsStorageSnapshot
 }
 
 // RaftLivenessProvider exposes aggregated Raft WAL append latency and
@@ -490,6 +517,7 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 		stats.AgeBoundVaultIds = glidsToProto(c.cfg.Stats.AgeBoundCappedVaults())
 		stats.ChunkCountBoundVaultIds = glidsToProto(c.cfg.Stats.ChunkCountBoundCappedVaults())
 	}
+	c.appendStorageStates(stats)
 
 	if c.cfg.PeerConns != nil {
 		for _, pc := range c.cfg.PeerConns.Snapshot() {
@@ -591,6 +619,60 @@ func (c *StatsCollector) appendPeerTrafficTotals(stats *gastrologv1.NodeStats, n
 	sort.Slice(stats.PeerTrafficTotals, func(i, j int) bool {
 		return stats.PeerTrafficTotals[i].Peer < stats.PeerTrafficTotals[j].Peer
 	})
+}
+
+// storageStateToProto converts one local storage guard snapshot to its wire
+// form for the NodeStats broadcast (gastrolog-3cobq4). ss.ID is the GLID's
+// canonical String() form (the storage guard's map key, sid := fs.ID.String()
+// at refresh time) — the wire field carries raw GLID bytes, matching
+// FileStorage.Id and VaultInfo.Id, never the ASCII string cast that broke
+// StatsVaultRouteSnapshot's round-trip before that fix. Returns nil (skip,
+// never publish an empty identity) for an unparsable ID — only reachable
+// from a test fixture using a synthetic non-GLID string, never from
+// refreshVaultDiskGuards.
+// appendStorageStates fills stats.Storages from every locally-hosted
+// storage's guard snapshot (gastrolog-3cobq4). A separate method (rather
+// than inline in collectLocal) both keeps collectLocal's cognitive
+// complexity down and mirrors appendPeerTrafficTotals/collectRaftLiveness'
+// existing shape: one self-contained call per broadcast section.
+func (c *StatsCollector) appendStorageStates(stats *gastrologv1.NodeStats) {
+	if c.cfg.Stats == nil {
+		return
+	}
+	for _, ss := range c.cfg.Stats.StorageSnapshots() {
+		if state := storageStateToProto(ss); state != nil {
+			stats.Storages = append(stats.Storages, state)
+		}
+	}
+}
+
+func storageStateToProto(ss StatsStorageSnapshot) *gastrologv1.StorageState {
+	id, err := glid.Parse(ss.ID)
+	if err != nil {
+		return nil
+	}
+	state := &gastrologv1.StorageState{
+		Id:             id.ToProto(),
+		Name:           ss.Name,
+		Path:           ss.Path,
+		NodeName:       ss.Node,
+		StorageClass:   ss.StorageClass,
+		WarnExpr:       ss.WarnExpr,
+		FloorExpr:      ss.FloorExpr,
+		WarnInherited:  ss.WarnExpr == "",
+		FloorInherited: ss.FloorExpr == "",
+		WarnBytes:      ss.WarnBytes,
+		FloorBytes:     ss.FloorBytes,
+		FreeBytes:      ss.FreeBytes,
+		TotalBytes:     ss.TotalBytes,
+		WarnVerdict:    ss.WarnVerdict,
+		ProtectVerdict: ss.ProtectVerdict,
+		PlacedVaultIds: glidsToProto(ss.PlacedVaultIDs),
+	}
+	if !ss.SampledAt.IsZero() {
+		state.SampledAt = timestamppb.New(ss.SampledAt)
+	}
+	return state
 }
 
 // glidsToProto maps a GLID slice to its broadcast wire form.

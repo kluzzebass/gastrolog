@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { DeleteCertificateRequest, DeleteCertificateResponse, DeleteCloudServiceRequest, DeleteCloudServiceResponse, DeleteIngesterRequest, DeleteIngesterResponse, DeleteLookupRequest, DeleteLookupResponse, DeleteManagedFileRequest, DeleteManagedFileResponse, DeleteRetentionPolicyRequest, DeleteRetentionPolicyResponse, DeleteRotationPolicyRequest, DeleteRotationPolicyResponse, DeleteRouteRequest, DeleteRouteResponse, DeleteSavedQueryRequest, DeleteSavedQueryResponse, DeleteVaultRequest, DeleteVaultResponse, GenerateNameRequest, GenerateNameResponse, GetCertificateRequest, GetCertificateResponse, GetIngesterDefaultsRequest, GetIngesterDefaultsResponse, GetIngesterStatusRequest, GetIngesterStatusResponse, GetPreferencesRequest, GetPreferencesResponse, GetRouteStatsRequest, GetRouteStatsResponse, GetSavedQueriesRequest, GetSavedQueriesResponse, GetSettingsRequest, GetSettingsResponse, GetSystemRequest, GetSystemResponse, ListCertificatesRequest, ListCertificatesResponse, ListLogComponentsRequest, ListLogComponentsResponse, ListManagedFilesRequest, ListManagedFilesResponse, PauseVaultRequest, PauseVaultResponse, PreviewCSVLookupRequest, PreviewCSVLookupResponse, PreviewJSONLookupRequest, PreviewJSONLookupResponse, PreviewYAMLLookupRequest, PreviewYAMLLookupResponse, PutCertificateRequest, PutCertificateResponse, PutCloudServiceRequest, PutCloudServiceResponse, PutIngesterRequest, PutIngesterResponse, PutLogLevelsRequest, PutLogLevelsResponse, PutLookupSettingsRequest, PutLookupSettingsResponse, PutMaxMindSettingsRequest, PutMaxMindSettingsResponse, PutNodeConfigRequest, PutNodeConfigResponse, PutPreferencesRequest, PutPreferencesResponse, PutRetentionPolicyRequest, PutRetentionPolicyResponse, PutRotationPolicyRequest, PutRotationPolicyResponse, PutRouteRequest, PutRouteResponse, PutSavedQueryRequest, PutSavedQueryResponse, PutServiceSettingsRequest, PutServiceSettingsResponse, PutSetupSettingsRequest, PutSetupSettingsResponse, PutVaultRequest, PutVaultResponse, RegenerateJwtSecretRequest, RegenerateJwtSecretResponse, ResumeVaultRequest, ResumeVaultResponse, SetNodeStorageConfigRequest, SetNodeStorageConfigResponse, TestCloudServiceRequest, TestCloudServiceResponse, TestHTTPLookupRequest, TestHTTPLookupResponse, TestIngesterRequest, TestIngesterResponse, TriggerIngesterRequest, TriggerIngesterResponse, ValidateExpressionRequest, ValidateExpressionResponse, WatchIngesterStatusRequest, WatchIngesterStatusResponse, WatchSystemRequest, WatchSystemResponse } from "./system_pb.js";
+import { DeleteCertificateRequest, DeleteCertificateResponse, DeleteCloudServiceRequest, DeleteCloudServiceResponse, DeleteIngesterRequest, DeleteIngesterResponse, DeleteLookupRequest, DeleteLookupResponse, DeleteManagedFileRequest, DeleteManagedFileResponse, DeleteRetentionPolicyRequest, DeleteRetentionPolicyResponse, DeleteRotationPolicyRequest, DeleteRotationPolicyResponse, DeleteRouteRequest, DeleteRouteResponse, DeleteSavedQueryRequest, DeleteSavedQueryResponse, DeleteVaultRequest, DeleteVaultResponse, GenerateNameRequest, GenerateNameResponse, GetCertificateRequest, GetCertificateResponse, GetIngesterDefaultsRequest, GetIngesterDefaultsResponse, GetIngesterStatusRequest, GetIngesterStatusResponse, GetPreferencesRequest, GetPreferencesResponse, GetRouteStatsRequest, GetRouteStatsResponse, GetSavedQueriesRequest, GetSavedQueriesResponse, GetSettingsRequest, GetSettingsResponse, GetSystemRequest, GetSystemResponse, ListCertificatesRequest, ListCertificatesResponse, ListLogComponentsRequest, ListLogComponentsResponse, ListManagedFilesRequest, ListManagedFilesResponse, ListStoragesRequest, ListStoragesResponse, PauseVaultRequest, PauseVaultResponse, PreviewCSVLookupRequest, PreviewCSVLookupResponse, PreviewJSONLookupRequest, PreviewJSONLookupResponse, PreviewYAMLLookupRequest, PreviewYAMLLookupResponse, PutCertificateRequest, PutCertificateResponse, PutCloudServiceRequest, PutCloudServiceResponse, PutIngesterRequest, PutIngesterResponse, PutLogLevelsRequest, PutLogLevelsResponse, PutLookupSettingsRequest, PutLookupSettingsResponse, PutMaxMindSettingsRequest, PutMaxMindSettingsResponse, PutNodeConfigRequest, PutNodeConfigResponse, PutPreferencesRequest, PutPreferencesResponse, PutRetentionPolicyRequest, PutRetentionPolicyResponse, PutRotationPolicyRequest, PutRotationPolicyResponse, PutRouteRequest, PutRouteResponse, PutSavedQueryRequest, PutSavedQueryResponse, PutServiceSettingsRequest, PutServiceSettingsResponse, PutSetupSettingsRequest, PutSetupSettingsResponse, PutVaultRequest, PutVaultResponse, RegenerateJwtSecretRequest, RegenerateJwtSecretResponse, ResumeVaultRequest, ResumeVaultResponse, SetNodeStorageConfigRequest, SetNodeStorageConfigResponse, TestCloudServiceRequest, TestCloudServiceResponse, TestHTTPLookupRequest, TestHTTPLookupResponse, TestIngesterRequest, TestIngesterResponse, TriggerIngesterRequest, TriggerIngesterResponse, ValidateExpressionRequest, ValidateExpressionResponse, WatchIngesterStatusRequest, WatchIngesterStatusResponse, WatchSystemRequest, WatchSystemResponse } from "./system_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -546,6 +546,22 @@ export const SystemService = {
       name: "SetNodeStorageConfig",
       I: SetNodeStorageConfigRequest,
       O: SetNodeStorageConfigResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * ListStorages returns every configured file storage cluster-wide, with
+     * live guard state (free/total, resolved thresholds, verdicts) merged in
+     * from the owning node's NodeStats broadcast — the entity-list analogue
+     * of ListVaults (gastrolog-3cobq4). Local storages read the orchestrator
+     * directly; remote storages read the peer broadcast cache, the same
+     * PeerState channel VaultInfo uses for remote vault stats.
+     *
+     * @generated from rpc gastrolog.v1.SystemService.ListStorages
+     */
+    listStorages: {
+      name: "ListStorages",
+      I: ListStoragesRequest,
+      O: ListStoragesResponse,
       kind: MethodKind.Unary,
     },
     /**

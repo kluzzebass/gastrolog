@@ -72,6 +72,130 @@ func TestRefreshVaultDiskGuardsRegistersStorageFromConfig(t *testing.T) {
 	}
 }
 
+// TestRefreshVaultDiskGuardsPublishesPlacementsAndClass pins the
+// placements-on-storage discovery wiring for gastrolog-3cobq4: a vault's
+// config placement on a storage surfaces in that storage's snapshot
+// (config-derived, per the storage inspector brief), and the storage's
+// configured class passes through too.
+func TestRefreshVaultDiskGuardsPublishesPlacementsAndClass(t *testing.T) {
+	t.Parallel()
+
+	vaultID := glid.New()
+	storageID := glid.New()
+	const nodeID = "node-1"
+
+	cfg := &system.Config{
+		Vaults: []system.VaultConfig{{
+			ID:      vaultID,
+			Name:    "on-disk",
+			Enabled: true,
+			Type:    system.VaultTypeFile,
+			Placements: []system.VaultPlacement{
+				{StorageID: storageID.String(), Leader: true},
+			},
+		}},
+	}
+	rt := system.Runtime{
+		NodeStorageConfigs: []system.NodeStorageConfig{{
+			NodeID: nodeID,
+			FileStorages: []system.FileStorage{{
+				ID:           storageID,
+				Path:         "volA",
+				StorageClass: 3,
+			}},
+		}},
+	}
+
+	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
+	orch.sysLoader = testSystemLoaderWithRuntime{cfg: cfg, rt: rt}
+	orch.diskGuard.sample = func(path string) (uint64, uint64, error) {
+		if path == "volA" {
+			return 50 * gib, 100 * gib, nil
+		}
+		return 0, 0, errNoSuchVolume
+	}
+
+	orch.refreshVaultDiskGuards(context.Background())
+	orch.diskGuard.evaluateStorages(orch.alerts)
+
+	snaps := orch.diskGuard.storageSnapshots()
+	if len(snaps) != 1 {
+		t.Fatalf("want 1 storage snapshot, got %d", len(snaps))
+	}
+	s := snaps[0]
+	if s.StorageClass != 3 {
+		t.Fatalf("storage class = %d, want 3", s.StorageClass)
+	}
+	if len(s.PlacedVaultIDs) != 1 || s.PlacedVaultIDs[0] != vaultID {
+		t.Fatalf("placed vaults = %v, want [%s]", s.PlacedVaultIDs, vaultID)
+	}
+}
+
+// TestRefreshVaultDiskGuardsPlacementsClearWhenVaultRemoved pins the
+// no-strand contract for placements specifically: a vault's placement
+// disappearing from config (the vault is deleted, or its placement moves
+// elsewhere) must clear it from the storage's placed-vault list on the very
+// next refresh — the storage entry itself is retained (still hosted here),
+// only the placement linkage changes.
+func TestRefreshVaultDiskGuardsPlacementsClearWhenVaultRemoved(t *testing.T) {
+	t.Parallel()
+
+	vaultID := glid.New()
+	storageID := glid.New()
+	const nodeID = "node-1"
+
+	rt := system.Runtime{
+		NodeStorageConfigs: []system.NodeStorageConfig{{
+			NodeID: nodeID,
+			FileStorages: []system.FileStorage{{
+				ID:   storageID,
+				Path: "volA",
+			}},
+		}},
+	}
+	loader := &testSystemLoaderWithRuntime{
+		cfg: &system.Config{
+			Vaults: []system.VaultConfig{{
+				ID:      vaultID,
+				Name:    "on-disk",
+				Enabled: true,
+				Type:    system.VaultTypeFile,
+				Placements: []system.VaultPlacement{
+					{StorageID: storageID.String(), Leader: true},
+				},
+			}},
+		},
+		rt: rt,
+	}
+
+	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
+	orch.sysLoader = loader
+	orch.diskGuard.sample = func(path string) (uint64, uint64, error) {
+		if path == "volA" {
+			return 50 * gib, 100 * gib, nil
+		}
+		return 0, 0, errNoSuchVolume
+	}
+
+	orch.refreshVaultDiskGuards(context.Background())
+	snaps := orch.diskGuard.storageSnapshots()
+	if len(snaps) != 1 || len(snaps[0].PlacedVaultIDs) != 1 {
+		t.Fatal("precondition: storage must start with the vault's placement")
+	}
+
+	// The vault is deleted from config entirely.
+	loader.cfg = &system.Config{}
+	orch.refreshVaultDiskGuards(context.Background())
+
+	snaps = orch.diskGuard.storageSnapshots()
+	if len(snaps) != 1 {
+		t.Fatalf("the storage itself must remain (still locally hosted), got %d snapshots", len(snaps))
+	}
+	if len(snaps[0].PlacedVaultIDs) != 0 {
+		t.Fatalf("removed vault's placement must clear from the storage's list, got %v", snaps[0].PlacedVaultIDs)
+	}
+}
+
 // TestRefreshVaultDiskGuardsStorageRemovalReleasesNoStrand pins the
 // no-strand contract at the DISCOVERY layer (not just the guard's own
 // retainStorageGuards API): a storage removed from NodeStorageConfigs

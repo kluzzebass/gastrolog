@@ -5,7 +5,7 @@
 
 import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialMessage, PlainMessage } from "@bufbuild/protobuf";
 import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
-import { CloudService, NodeStorageConfig } from "./storage_pb.js";
+import { CloudService, NodeStorageConfig, StorageState } from "./storage_pb.js";
 import { ThroughputRate } from "./vault_pb.js";
 
 /**
@@ -7195,6 +7195,74 @@ export class SetNodeStorageConfigResponse extends Message<SetNodeStorageConfigRe
 
   static equals(a: SetNodeStorageConfigResponse | PlainMessage<SetNodeStorageConfigResponse> | undefined, b: SetNodeStorageConfigResponse | PlainMessage<SetNodeStorageConfigResponse> | undefined): boolean {
     return proto3.util.equals(SetNodeStorageConfigResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ListStoragesRequest
+ */
+export class ListStoragesRequest extends Message<ListStoragesRequest> {
+  constructor(data?: PartialMessage<ListStoragesRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ListStoragesRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ListStoragesRequest {
+    return new ListStoragesRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ListStoragesRequest {
+    return new ListStoragesRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ListStoragesRequest {
+    return new ListStoragesRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ListStoragesRequest | PlainMessage<ListStoragesRequest> | undefined, b: ListStoragesRequest | PlainMessage<ListStoragesRequest> | undefined): boolean {
+    return proto3.util.equals(ListStoragesRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ListStoragesResponse
+ */
+export class ListStoragesResponse extends Message<ListStoragesResponse> {
+  /**
+   * @generated from field: repeated gastrolog.v1.StorageState storages = 1;
+   */
+  storages: StorageState[] = [];
+
+  constructor(data?: PartialMessage<ListStoragesResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ListStoragesResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "storages", kind: "message", T: StorageState, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ListStoragesResponse {
+    return new ListStoragesResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ListStoragesResponse {
+    return new ListStoragesResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ListStoragesResponse {
+    return new ListStoragesResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ListStoragesResponse | PlainMessage<ListStoragesResponse> | undefined, b: ListStoragesResponse | PlainMessage<ListStoragesResponse> | undefined): boolean {
+    return proto3.util.equals(ListStoragesResponse, a, b);
   }
 }
 

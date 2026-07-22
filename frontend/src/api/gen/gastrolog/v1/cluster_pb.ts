@@ -8,6 +8,7 @@ import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
 import { Job } from "./job_pb.js";
 import { ChunkAnalysis, ChunkChangeOp, ChunkMeta, ChunkValidation, ExportRecord, IndexInfo, ThroughputRate, VaultStats } from "./vault_pb.js";
 import { PerRouteStats, VaultRouteStats } from "./system_pb.js";
+import { StorageState } from "./storage_pb.js";
 import { ChunkPlan, HistogramBucket, TableResult } from "./query_pb.js";
 
 /**
@@ -751,7 +752,7 @@ export class NodeStats extends Message<NodeStats> {
   /**
    * Vaults whose local disk claim on THIS node has reached their per-node
    * max-size bound. Honored cluster-wide by the same per-vault admission
-   * gate as disk_protected_vault_ids, with a bound-specific error.
+   * gate as storage_protected_vault_ids, with a bound-specific error.
    *
    * @generated from field: repeated bytes size_capped_vault_ids = 49;
    */
@@ -799,6 +800,17 @@ export class NodeStats extends Message<NodeStats> {
    * @generated from field: string ingest_pressure_level = 51;
    */
   ingestPressureLevel = "";
+
+  /**
+   * Per-storage disk-guard state for storages LOCALLY hosted on this node —
+   * only the owning node can statfs its volume (gastrolog-3cobq4). Bounded
+   * by the node's own NodeStorageConfig entries. Aggregated cluster-wide the
+   * same way VaultStats/VaultPipelineDisk are: each node reports its own,
+   * PeerState merges across live peers for the storage inspector.
+   *
+   * @generated from field: repeated gastrolog.v1.StorageState storages = 54;
+   */
+  storages: StorageState[] = [];
 
   constructor(data?: PartialMessage<NodeStats>) {
     super();
@@ -861,6 +873,7 @@ export class NodeStats extends Message<NodeStats> {
     { no: 53, name: "chunk_count_bound_vault_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
     { no: 50, name: "self_ingester_drops_total", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 51, name: "ingest_pressure_level", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 54, name: "storages", kind: "message", T: StorageState, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): NodeStats {

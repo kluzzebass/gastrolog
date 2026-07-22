@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"bytes"
 	"sort"
 	"sync"
 	"time"
@@ -97,6 +98,38 @@ func (p *PeerState) FindVaultStats(vaultID string) *gastrologv1.VaultStats {
 		for _, vs := range e.stats.Vaults {
 			if string(vs.Id) == vaultID {
 				return vs
+			}
+		}
+	}
+	return nil
+}
+
+// FindStorageState scans all live peers for a StorageState matching the
+// given ID (gastrolog-3cobq4). storageID is the GLID's canonical String()
+// form (matches every other resolver in this codebase, e.g. resolve() /
+// FindVaultStats callers) — parsed here and compared against the wire's raw
+// GLID bytes, never a raw-bytes-vs-string comparison (that mismatch bit
+// StatsVaultRouteSnapshot before it was fixed to carry glid.GLID directly).
+// A storage is only ever reported by its owning node (only that node can
+// statfs the volume), so this returns at most one match. Returns nil if no
+// live peer reports state for this storage — e.g. the owning node is down,
+// or storageID doesn't parse as a GLID.
+func (p *PeerState) FindStorageState(storageID string) *gastrologv1.StorageState {
+	id, err := glid.Parse(storageID)
+	if err != nil {
+		return nil
+	}
+	want := id.ToProto()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	now := time.Now()
+	for _, e := range p.entries {
+		if now.Sub(e.received) > p.ttl || e.stats == nil {
+			continue
+		}
+		for _, ss := range e.stats.Storages {
+			if bytes.Equal(ss.Id, want) {
+				return ss
 			}
 		}
 	}

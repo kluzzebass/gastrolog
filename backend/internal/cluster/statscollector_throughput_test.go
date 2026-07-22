@@ -18,6 +18,7 @@ type stubStatsProvider struct {
 	route            StatsRouteSnapshot
 	storageProtected []glid.GLID
 	sizeCapped       []glid.GLID
+	storages         []StatsStorageSnapshot
 }
 
 func (s *stubStatsProvider) IngestQueueDepth() int       { return 0 }
@@ -44,6 +45,7 @@ func (s *stubStatsProvider) StorageProtectedVaults() []glid.GLID                
 func (s *stubStatsProvider) SizeCappedVaults() []glid.GLID                           { return s.sizeCapped }
 func (s *stubStatsProvider) AgeBoundCappedVaults() []glid.GLID                       { return nil }
 func (s *stubStatsProvider) ChunkCountBoundCappedVaults() []glid.GLID                { return nil }
+func (s *stubStatsProvider) StorageSnapshots() []StatsStorageSnapshot                { return s.storages }
 
 func TestStatsCollector_ThroughputRates(t *testing.T) {
 	t.Parallel()

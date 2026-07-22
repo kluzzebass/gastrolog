@@ -1270,8 +1270,12 @@ type WatchSystemStatusResponse struct {
 	// Per-vault chunking pipeline depth (vault-ctl FSM + aggregated segment
 	// disk counts from NodeStats broadcasts). Push-updated on each stats tick.
 	PipelineBacklog []*VaultPipelineBacklog `protobuf:"bytes,7,rep,name=pipeline_backlog,json=pipelineBacklog,proto3" json:"pipeline_backlog,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Every configured storage cluster-wide, with live guard state merged in
+	// — the entity-list surface for the storage inspector (gastrolog-3cobq4),
+	// same shape ListStorages returns. Push-updated on each stats tick.
+	Storages      []*StorageState `protobuf:"bytes,8,rep,name=storages,proto3" json:"storages,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *WatchSystemStatusResponse) Reset() {
@@ -1353,11 +1357,18 @@ func (x *WatchSystemStatusResponse) GetPipelineBacklog() []*VaultPipelineBacklog
 	return nil
 }
 
+func (x *WatchSystemStatusResponse) GetStorages() []*StorageState {
+	if x != nil {
+		return x.Storages
+	}
+	return nil
+}
+
 var File_gastrolog_v1_lifecycle_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_lifecycle_proto_rawDesc = "" +
 	"\n" +
-	"\x1cgastrolog/v1/lifecycle.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1agastrolog/v1/cluster.proto\x1a\x19gastrolog/v1/system.proto\x1a\x18gastrolog/v1/vault.proto\"\x0f\n" +
+	"\x1cgastrolog/v1/lifecycle.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1agastrolog/v1/cluster.proto\x1a\x1agastrolog/v1/storage.proto\x1a\x19gastrolog/v1/system.proto\x1a\x18gastrolog/v1/vault.proto\"\x0f\n" +
 	"\rHealthRequest\"\xe1\x01\n" +
 	"\x0eHealthResponse\x12,\n" +
 	"\x06status\x18\x01 \x01(\x0e2\x14.gastrolog.v1.StatusR\x06status\x12\x18\n" +
@@ -1432,7 +1443,7 @@ const file_gastrolog_v1_lifecycle_proto_rawDesc = "" +
 	"\x16YieldLeadershipRequest\";\n" +
 	"\x17YieldLeadershipResponse\x12 \n" +
 	"\vtransferred\x18\x01 \x01(\bR\vtransferred\"\x1a\n" +
-	"\x18WatchSystemStatusRequest\"\xd3\x03\n" +
+	"\x18WatchSystemStatusRequest\"\x8b\x04\n" +
 	"\x19WatchSystemStatusResponse\x12@\n" +
 	"\acluster\x18\x01 \x01(\v2&.gastrolog.v1.GetClusterStatusResponseR\acluster\x124\n" +
 	"\x06health\x18\x02 \x01(\v2\x1c.gastrolog.v1.HealthResponseR\x06health\x12D\n" +
@@ -1441,7 +1452,8 @@ const file_gastrolog_v1_lifecycle_proto_rawDesc = "" +
 	"\x06vaults\x18\x04 \x03(\v2\x17.gastrolog.v1.VaultInfoR\x06vaults\x124\n" +
 	"\x05stats\x18\x05 \x01(\v2\x1e.gastrolog.v1.GetStatsResponseR\x05stats\x12B\n" +
 	"\x0eingester_alive\x18\x06 \x03(\v2\x1b.gastrolog.v1.IngesterAliveR\ringesterAlive\x12M\n" +
-	"\x10pipeline_backlog\x18\a \x03(\v2\".gastrolog.v1.VaultPipelineBacklogR\x0fpipelineBacklog*_\n" +
+	"\x10pipeline_backlog\x18\a \x03(\v2\".gastrolog.v1.VaultPipelineBacklogR\x0fpipelineBacklog\x126\n" +
+	"\bstorages\x18\b \x03(\v2\x1a.gastrolog.v1.StorageStateR\bstorages*_\n" +
 	"\x06Status\x12\x16\n" +
 	"\x12STATUS_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eSTATUS_HEALTHY\x10\x01\x12\x13\n" +
@@ -1514,6 +1526,7 @@ var file_gastrolog_v1_lifecycle_proto_goTypes = []any{
 	(*GetStatsResponse)(nil),          // 28: gastrolog.v1.GetStatsResponse
 	(*IngesterAlive)(nil),             // 29: gastrolog.v1.IngesterAlive
 	(*VaultPipelineBacklog)(nil),      // 30: gastrolog.v1.VaultPipelineBacklog
+	(*StorageState)(nil),              // 31: gastrolog.v1.StorageState
 }
 var file_gastrolog_v1_lifecycle_proto_depIdxs = []int32{
 	0,  // 0: gastrolog.v1.HealthResponse.status:type_name -> gastrolog.v1.Status
@@ -1532,29 +1545,30 @@ var file_gastrolog_v1_lifecycle_proto_depIdxs = []int32{
 	28, // 13: gastrolog.v1.WatchSystemStatusResponse.stats:type_name -> gastrolog.v1.GetStatsResponse
 	29, // 14: gastrolog.v1.WatchSystemStatusResponse.ingester_alive:type_name -> gastrolog.v1.IngesterAlive
 	30, // 15: gastrolog.v1.WatchSystemStatusResponse.pipeline_backlog:type_name -> gastrolog.v1.VaultPipelineBacklog
-	3,  // 16: gastrolog.v1.LifecycleService.Health:input_type -> gastrolog.v1.HealthRequest
-	5,  // 17: gastrolog.v1.LifecycleService.Shutdown:input_type -> gastrolog.v1.ShutdownRequest
-	7,  // 18: gastrolog.v1.LifecycleService.GetClusterStatus:input_type -> gastrolog.v1.GetClusterStatusRequest
-	11, // 19: gastrolog.v1.LifecycleService.SetNodeSuffrage:input_type -> gastrolog.v1.SetNodeSuffrageRequest
-	13, // 20: gastrolog.v1.LifecycleService.SetNodeState:input_type -> gastrolog.v1.SetNodeStateRequest
-	15, // 21: gastrolog.v1.LifecycleService.JoinCluster:input_type -> gastrolog.v1.JoinClusterRequest
-	17, // 22: gastrolog.v1.LifecycleService.RemoveNode:input_type -> gastrolog.v1.RemoveNodeRequest
-	19, // 23: gastrolog.v1.LifecycleService.YieldLeadership:input_type -> gastrolog.v1.YieldLeadershipRequest
-	21, // 24: gastrolog.v1.LifecycleService.WatchSystemStatus:input_type -> gastrolog.v1.WatchSystemStatusRequest
-	4,  // 25: gastrolog.v1.LifecycleService.Health:output_type -> gastrolog.v1.HealthResponse
-	6,  // 26: gastrolog.v1.LifecycleService.Shutdown:output_type -> gastrolog.v1.ShutdownResponse
-	8,  // 27: gastrolog.v1.LifecycleService.GetClusterStatus:output_type -> gastrolog.v1.GetClusterStatusResponse
-	12, // 28: gastrolog.v1.LifecycleService.SetNodeSuffrage:output_type -> gastrolog.v1.SetNodeSuffrageResponse
-	14, // 29: gastrolog.v1.LifecycleService.SetNodeState:output_type -> gastrolog.v1.SetNodeStateResponse
-	16, // 30: gastrolog.v1.LifecycleService.JoinCluster:output_type -> gastrolog.v1.JoinClusterResponse
-	18, // 31: gastrolog.v1.LifecycleService.RemoveNode:output_type -> gastrolog.v1.RemoveNodeResponse
-	20, // 32: gastrolog.v1.LifecycleService.YieldLeadership:output_type -> gastrolog.v1.YieldLeadershipResponse
-	22, // 33: gastrolog.v1.LifecycleService.WatchSystemStatus:output_type -> gastrolog.v1.WatchSystemStatusResponse
-	25, // [25:34] is the sub-list for method output_type
-	16, // [16:25] is the sub-list for method input_type
-	16, // [16:16] is the sub-list for extension type_name
-	16, // [16:16] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	31, // 16: gastrolog.v1.WatchSystemStatusResponse.storages:type_name -> gastrolog.v1.StorageState
+	3,  // 17: gastrolog.v1.LifecycleService.Health:input_type -> gastrolog.v1.HealthRequest
+	5,  // 18: gastrolog.v1.LifecycleService.Shutdown:input_type -> gastrolog.v1.ShutdownRequest
+	7,  // 19: gastrolog.v1.LifecycleService.GetClusterStatus:input_type -> gastrolog.v1.GetClusterStatusRequest
+	11, // 20: gastrolog.v1.LifecycleService.SetNodeSuffrage:input_type -> gastrolog.v1.SetNodeSuffrageRequest
+	13, // 21: gastrolog.v1.LifecycleService.SetNodeState:input_type -> gastrolog.v1.SetNodeStateRequest
+	15, // 22: gastrolog.v1.LifecycleService.JoinCluster:input_type -> gastrolog.v1.JoinClusterRequest
+	17, // 23: gastrolog.v1.LifecycleService.RemoveNode:input_type -> gastrolog.v1.RemoveNodeRequest
+	19, // 24: gastrolog.v1.LifecycleService.YieldLeadership:input_type -> gastrolog.v1.YieldLeadershipRequest
+	21, // 25: gastrolog.v1.LifecycleService.WatchSystemStatus:input_type -> gastrolog.v1.WatchSystemStatusRequest
+	4,  // 26: gastrolog.v1.LifecycleService.Health:output_type -> gastrolog.v1.HealthResponse
+	6,  // 27: gastrolog.v1.LifecycleService.Shutdown:output_type -> gastrolog.v1.ShutdownResponse
+	8,  // 28: gastrolog.v1.LifecycleService.GetClusterStatus:output_type -> gastrolog.v1.GetClusterStatusResponse
+	12, // 29: gastrolog.v1.LifecycleService.SetNodeSuffrage:output_type -> gastrolog.v1.SetNodeSuffrageResponse
+	14, // 30: gastrolog.v1.LifecycleService.SetNodeState:output_type -> gastrolog.v1.SetNodeStateResponse
+	16, // 31: gastrolog.v1.LifecycleService.JoinCluster:output_type -> gastrolog.v1.JoinClusterResponse
+	18, // 32: gastrolog.v1.LifecycleService.RemoveNode:output_type -> gastrolog.v1.RemoveNodeResponse
+	20, // 33: gastrolog.v1.LifecycleService.YieldLeadership:output_type -> gastrolog.v1.YieldLeadershipResponse
+	22, // 34: gastrolog.v1.LifecycleService.WatchSystemStatus:output_type -> gastrolog.v1.WatchSystemStatusResponse
+	26, // [26:35] is the sub-list for method output_type
+	17, // [17:26] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_gastrolog_v1_lifecycle_proto_init() }
@@ -1563,6 +1577,7 @@ func file_gastrolog_v1_lifecycle_proto_init() {
 		return
 	}
 	file_gastrolog_v1_cluster_proto_init()
+	file_gastrolog_v1_storage_proto_init()
 	file_gastrolog_v1_system_proto_init()
 	file_gastrolog_v1_vault_proto_init()
 	type x struct{}
