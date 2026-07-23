@@ -133,12 +133,12 @@ flowchart TD
     RuntimeFilters --> TSScanner["buildTSOrderedScanner()"]
     Sequential --> TSScanner
 
-    TSScanner --> TSCheck{"Sealed + TS index?"}
-    TSCheck -->|Yes| TSIndex["Walk TS index in timestamp order"]
-    TSCheck -->|No| Reorder["Buffer + sort (reorderByTS)"]
+    TSScanner --> TSCheck{"Rank view?"}
+    TSCheck -->|"Sealed: mmap'd ITSI/STSI"| TSIndex["Walk TS index rank-by-rank"]
+    TSCheck -->|"Active: B+ tree rank view"| TSIndex
+    TSCheck -->|"None (locally materialized)"| Fail["Error: TS index required"]
 
     TSIndex --> FinalBuild["b.build() → scanner"]
-    Reorder --> FinalBuild
 ```
 
 ### Position Narrowing
@@ -163,10 +163,13 @@ TS-ordered scanning path:
 
 | Chunk Type | Strategy |
 |------------|----------|
-| Sealed + TS index available | Walk embedded TS index, seek to positions in TS order |
-| Sealed + no TS index | Buffer all records, sort by TS field |
-| Active (unsealed) | Buffer all records, sort by TS field (`reorderByTS`) |
-| Cloud + TS index cached | Same as sealed — TS index downloaded once, cached locally |
+| Sealed (local or warm-cached cloud) | Walk the embedded mmap'd ITSI/STSI rank-by-rank, seek to positions in TS order |
+| Active (unsealed) | Same rank-ordered path via the chunk manager's B+ tree rank view (`IngestTSRankView`) |
+| Locally materialized, no rank view | Query fails with `TS index required` — there is no buffer-and-sort fallback |
+| Not locally materialized, no TS index | Sequential scan (`b.build()`), yielded in write order |
+
+The old `reorderByTS` buffer-and-sort path was removed (gastrolog-2o9e9,
+gastrolog-1dg3i); rank-based TS index scanning is the only TS-ordered path.
 
 ## Chunk Access Paths
 
@@ -175,10 +178,10 @@ flowchart TD
     Open["cm.OpenCursor(chunkID)"] --> LookupMeta["lookupMeta()"]
 
     LookupMeta --> IsCloud{"Cloud-backed?"}
-    IsCloud -->|Yes| CloudPath["RemoteReader (range requests on demand)"]
+    IsCloud -->|Yes| CloudPath["Warm-cache fill: whole-blob download → mmap data.glcb"]
     IsCloud -->|No| IsSealed{"Sealed?"}
-    IsSealed -->|Yes| MmapPath["mmap raw.log + idx.log + attr.log"]
-    IsSealed -->|No| StdioPath["pread on open file descriptors"]
+    IsSealed -->|Yes| MmapPath["mmap data.glcb (GLCB)"]
+    IsSealed -->|No| StdioPath["pread on raw.log / idx.log / attr.log"]
 
     subgraph Memory Vault
         MemOpen["cm.OpenCursor()"] --> MemSlice["Direct slice access"]
@@ -194,7 +197,7 @@ flowchart TD
 | Sealed (local) | `mmapCursor` | Memory-mapped GLCB, random access via record-index offsets |
 | Cloud-backed | `glcbCursor` (after warm-cache fill) | One whole-blob download → unwrap zstd → mmap GLCB; reads are local from then on |
 
-For Phase 3 (gastrolog-1huz5) Sealing chunks, the query engine branches on the **local** `meta.Sealed` (active-form closed?) rather than the cluster `State == Sealed` (GLCB committed?). This is the one place where local truth is the right truth — the chunk is locally readable as soon as the active-form files are closed; whether the cluster has finished publishing its GLCB digest is irrelevant to the read path. TS-index loads gracefully fall back to the reorder-buffer scanner if `PostSealProcess` hasn't built the indexes yet.
+For Phase 3 (gastrolog-1huz5) Sealing chunks, the query engine branches on the **local** `meta.Sealed` (active-form closed?) rather than the cluster `State == Sealed` (GLCB committed?). This is the one place where local truth is the right truth — the chunk is locally readable as soon as the active-form files are closed; whether the cluster has finished publishing its GLCB digest is irrelevant to the read path. If `PostSealProcess` hasn't built the embedded indexes yet, TS-ordered scanning has no rank view for the chunk (the B+ tree rank view serves only the live active chunk) and the query fails with `TS index required` — no buffer-and-sort fallback exists.
 
 ### Memory Vault Cursors
 

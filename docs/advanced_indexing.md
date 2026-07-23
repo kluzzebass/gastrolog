@@ -101,7 +101,7 @@ What this is **not**: it is not Loki's "scan everything" model (only works with 
 
 **Production-system patterns worth stealing**, beyond what's covered above:
 
-- **Splunk's TSIDX reduction** (drop the lexicon for cold buckets, keep the journal): a clean tier story applicable to cloud-backed vaults — store the index when warm, drop it when cold and accept slow scan.
+- **Splunk's TSIDX reduction** (drop the lexicon for old buckets, keep the journal): applicable to cloud-backed vaults as **index-artifact lifecycle only** — keep the index while the chunk sits in the local warm cache, let it go when the cache is evicted, and accept slow scan on the next fill. Note GastroLog has a standing rejection of hot/cold storage temperature layering; adopt the drop-the-index idea without importing Splunk's bucket-temperature model.
 - **VictoriaLogs's stream-as-partition**: collapse the index size by treating the stream identity as the primary key. If GastroLog's natural stream key (vault × ingester × source) has high selectivity, much of the per-chunk index work can be avoided entirely.
 - **Husky's column-skip-list + sketch-instead-of-bloom**: their "superset regex" sketch is a real design point for log content where users do `error` and `err.*timeout`.
 - **ClickHouse's deprecation of `tokenbf_v1` / `ngrambf_v1` in favor of a real `text` inverted index** (2025+): bloom variants are useful but not sufficient for full-text search at scale. Don't try to skip the inverted index entirely.
@@ -126,7 +126,7 @@ The current GastroLog KV indexer (`backend/internal/index/file/kv/indexer.go` an
 
 **CLP / Drain template extraction — small dictionary.** Logtype dictionary at build time is the set of distinct templates (hundreds for millions of lines on real workloads); per-segment variable dictionary holds string-typed variables (tens of thousands at most). Both fit in memory comfortably for any reasonable chunk size. The variable streams themselves are columnar and follow the columnar build guidance above.
 
-**B+-tree-during-build — possible, but not the right answer here.** A B+-tree would solve the in-memory limit by spilling to disk during build, but it produces a B+-tree as the artifact, which is a heavier, less-compact final structure than an FST and doesn't compose with the recommended search path. **External-sort-then-stream-into-FST is strictly better**: it solves the same memory problem (build-time data structure spills to disk) while producing the recommended search artifact (FST), with smaller peak memory than a B+-tree (sort runs are sequentially flushed, not maintained as a balanced tree on disk) and a more compact final byte slice. If a B+-tree-during-build is already in the codebase for a different purpose (e.g. the active chunk's `btree.Tree[int64, uint32]` for IngestTS lookups, see `chunkfile/manager.go`), reusing that infra for KV index construction is reasonable as a stepping stone — but the destination should still be a streaming-built FST.
+**B+-tree-during-build — possible, but not the right answer here.** A B+-tree would solve the in-memory limit by spilling to disk during build, but it produces a B+-tree as the artifact, which is a heavier, less-compact final structure than an FST and doesn't compose with the recommended search path. **External-sort-then-stream-into-FST is strictly better**: it solves the same memory problem (build-time data structure spills to disk) while producing the recommended search artifact (FST), with smaller peak memory than a B+-tree (sort runs are sequentially flushed, not maintained as a balanced tree on disk) and a more compact final byte slice. If a B+-tree-during-build is already in the codebase for a different purpose (e.g. the active chunk's `btree.Tree[int64, uint32]` for IngestTS lookups, see `backend/internal/chunk/file/manager.go`), reusing that infra for KV index construction is reasonable as a stepping stone — but the destination should still be a streaming-built FST.
 
 **Implication for the existing 1000-keys cap.** If the KV indexer is rewritten on the FST + Roaring + bloom stack, the `MaxValuesPerKey = 1000`, `MaxUniqueKeys = 10000`, `MaxTotalEntries = 100000` defensive caps become obsolete. The natural caps shift to:
 
@@ -231,13 +231,13 @@ Land v1 of the codec with: per-field FST term dict (Vellum), per-term Roaring po
 
 The current GLCB blob carries:
 - A header with format version + flags
-- The compressed body (seekable zstd frames)
+- The uncompressed body (records + record index; cloud objects are zstd-wrapped whole-blob on transport only — gastrolog-69fd5)
 - Embedded TS indexes (per gastrolog-2n697)
 
 The proposed extension:
 - Bump the format version
 - Add a **hotcache footer** at the tail of the file: index directory, FST roots, bloom filters, column metadata
-- The body retains seekable zstd; index data lives in the footer (also zstd'd or not — the footer is small enough that compression ratio matters less than parse speed)
+- The body stays uncompressed; index data lives in the footer (zstd'd or not — the footer is small enough that compression ratio matters less than parse speed)
 - Old chunks (without footer) remain readable; the codec dispatches on the format version in the header
 
 This is the same shape as Quickwit splits (Tantivy index + hotcache footer) and works equally well for local file chunks and S3-backed cloud-backed chunks — the footer is the universal "open me cheaply" entry point.
