@@ -5,7 +5,7 @@
 
 import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialMessage, PlainMessage } from "@bufbuild/protobuf";
 import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
-import { CloudService, NodeStorageConfig } from "./storage_pb.js";
+import { CloudService, NodeStorageConfig, StorageState } from "./storage_pb.js";
 import { ThroughputRate } from "./vault_pb.js";
 
 /**
@@ -581,37 +581,24 @@ export class VaultConfig extends Message<VaultConfig> {
   cacheTtl = "";
 
   /**
-   * "delete" (default) or "route" — what retention does with aged-out records
+   * "delete", "route", or "transfer" — what retention does with aged-out records
    *
    * @generated from field: string retention_disposition = 16;
    */
   retentionDisposition = "";
 
   /**
-   * Per-vault disk-guard free-space thresholds on the vault's backing volume,
-   * as size expressions ("10GB"). Empty = inherit the node defaults
-   * (fraction-based, per-node). Warn raises the disk-space alarm; floor
-   * suspends admission for this vault while others keep ingesting.
+   * Target vault ID for retention_disposition = "transfer": the sealed
+   * chunk is re-homed here unchanged when retention fires. Required when,
+   * and only valid when, disposition is "transfer" — see PutVault
+   * validation and docs/retention-transfer-disposition-design.md.
+   * Renumbered to 17 when disk_free_warn/disk_free_floor moved to
+   * FileStorage (gastrolog-9akebz) — no `reserved` (house rule): zero
+   * production deployments.
    *
-   * @generated from field: string disk_free_warn = 17;
+   * @generated from field: bytes retention_transfer_target_vault_id = 17;
    */
-  diskFreeWarn = "";
-
-  /**
-   * @generated from field: string disk_free_floor = 18;
-   */
-  diskFreeFloor = "";
-
-  /**
-   * Per-node budget for this vault's whole local disk claim (sealed chunks,
-   * indexes, segment backlog), as a size expression ("50GB"). At the budget,
-   * admission for this vault is refused cluster-wide until retention drains
-   * it. Empty = unset (defaulted at creation); "0" rejected; a large value
-   * (e.g. "1PiB") is effectively unlimited (gastrolog-1epfgb / gastrolog-etcjdx).
-   *
-   * @generated from field: string max_size = 19;
-   */
-  maxSize = "";
+  retentionTransferTargetVaultId = new Uint8Array(0);
 
   constructor(data?: PartialMessage<VaultConfig>) {
     super();
@@ -637,9 +624,7 @@ export class VaultConfig extends Message<VaultConfig> {
     { no: 14, name: "cache_budget", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 15, name: "cache_ttl", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 16, name: "retention_disposition", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 17, name: "disk_free_warn", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 18, name: "disk_free_floor", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 19, name: "max_size", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 17, name: "retention_transfer_target_vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultConfig {
@@ -1067,6 +1052,26 @@ export class RetentionPolicyConfig extends Message<RetentionPolicyConfig> {
   maxAge = "";
 
   /**
+   * max_size is the vault's disk-claim bound, in the same vocabulary as
+   * every other size quantity ("50GB"), and it can mean BOTH things at once
+   * (gastrolog-33ul6h correction: an earlier, superseded design split this
+   * into two fields — see the design doc history under docs/):
+   *   - DRAIN: oldest sealed chunks past the bound are drained (per the
+   *     vault's disposition), exactly as this field always meant.
+   *     Unconditional — every set max_size drains, regardless of refuse.
+   *   - REFUSE: while the vault's local disk claim is at/over the bound,
+   *     admission refuses cluster-wide — the backstop while drain catches
+   *     up or is deferred. Gated by refuse (gastrolog-5yfaqj, default off):
+   *     a max_size with no explicit refuse=true only drains.
+   * Effective bound resolution (refreshVaultDiskGuards): for each file
+   * vault, resolve every attached retention rule's policy; the effective
+   * REFUSE bound is the min over the REFUSE-ELIGIBLE policies' parsed
+   * max_size values; the creation default (system.DefaultVaultMaxSize)
+   * applies as a REFUSE-ONLY floor only when no attached policy STATES a
+   * max_size at all — a stated-but-soft max_size does not re-engage the
+   * floor either, the operator's opt-out stands. A default must never
+   * destroy data, so the floor never drains, only refuses.
+   *
    * @generated from field: string max_size = 2;
    */
   maxSize = "";
@@ -1086,6 +1091,28 @@ export class RetentionPolicyConfig extends Message<RetentionPolicyConfig> {
    */
   name = "";
 
+  /**
+   * refuse generalizes the max_size REFUSE behavior above to every bound
+   * this policy states (gastrolog-5yfaqj). DEFAULT OFF (operator decision:
+   * bounds are drain-first, refusal is the explicit hard mode — unset
+   * reads as false, so a policy must opt IN explicitly). true means: while
+   * ANY of max_age/max_size/max_chunks is violated, admission refuses.
+   * false (unset or explicit) is the "soft bound" posture: the policy
+   * still drains, but the operator has not opted every attached bound
+   * into cluster-wide refusal — only the node-level disk guard backstops
+   * the vault while violated. max_size's refuse behavior is instantaneous;
+   * max_age/max_chunks refuse only once the retention runner has swept and
+   * failed to clear the violation — see orchestrator/retention.go to
+   * avoid refusing on the normal transient between a chunk's seal and the
+   * next sweep. Per-vault resolution is per bound KIND: the min over every
+   * attached policy that states it, with refuse-eligibility following the
+   * STATING policy's own flag (a vault mixing a hard and a soft policy
+   * refuses only on the hard one's bounds).
+   *
+   * @generated from field: optional bool refuse = 6;
+   */
+  refuse?: boolean;
+
   constructor(data?: PartialMessage<RetentionPolicyConfig>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1099,6 +1126,7 @@ export class RetentionPolicyConfig extends Message<RetentionPolicyConfig> {
     { no: 3, name: "max_chunks", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 4, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 5, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 6, name: "refuse", kind: "scalar", T: 8 /* ScalarType.BOOL */, opt: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RetentionPolicyConfig {
@@ -7167,6 +7195,74 @@ export class SetNodeStorageConfigResponse extends Message<SetNodeStorageConfigRe
 
   static equals(a: SetNodeStorageConfigResponse | PlainMessage<SetNodeStorageConfigResponse> | undefined, b: SetNodeStorageConfigResponse | PlainMessage<SetNodeStorageConfigResponse> | undefined): boolean {
     return proto3.util.equals(SetNodeStorageConfigResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ListStoragesRequest
+ */
+export class ListStoragesRequest extends Message<ListStoragesRequest> {
+  constructor(data?: PartialMessage<ListStoragesRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ListStoragesRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ListStoragesRequest {
+    return new ListStoragesRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ListStoragesRequest {
+    return new ListStoragesRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ListStoragesRequest {
+    return new ListStoragesRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ListStoragesRequest | PlainMessage<ListStoragesRequest> | undefined, b: ListStoragesRequest | PlainMessage<ListStoragesRequest> | undefined): boolean {
+    return proto3.util.equals(ListStoragesRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ListStoragesResponse
+ */
+export class ListStoragesResponse extends Message<ListStoragesResponse> {
+  /**
+   * @generated from field: repeated gastrolog.v1.StorageState storages = 1;
+   */
+  storages: StorageState[] = [];
+
+  constructor(data?: PartialMessage<ListStoragesResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ListStoragesResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "storages", kind: "message", T: StorageState, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ListStoragesResponse {
+    return new ListStoragesResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ListStoragesResponse {
+    return new ListStoragesResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ListStoragesResponse {
+    return new ListStoragesResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ListStoragesResponse | PlainMessage<ListStoragesResponse> | undefined, b: ListStoragesResponse | PlainMessage<ListStoragesResponse> | undefined): boolean {
+    return proto3.util.equals(ListStoragesResponse, a, b);
   }
 }
 

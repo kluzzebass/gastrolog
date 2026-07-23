@@ -1,10 +1,10 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useConfig } from "../../api/hooks/useSystem";
-import { useVaults, useNodeRegistry } from "../../api/hooks";
+import { useVaults, useStorages, useNodeRegistry } from "../../api/hooks";
 import { useWatchJobs } from "../../api/hooks";
 import { toastError } from "../Toast";
 import { Dialog } from "../Dialog";
-import { VaultsIcon, IngestersIcon, JobsIcon, MetricsIcon, ClusterIcon, RouteIcon } from "../icons";
+import { VaultsIcon, IngestersIcon, JobsIcon, MetricsIcon, ClusterIcon, RouteIcon, StorageIcon } from "../icons";
 import { Badge } from "../Badge";
 import { OfflineBadge } from "../OfflineBadge";
 import { NodeState } from "../../api/model/node";
@@ -13,7 +13,7 @@ import type { InspectorMode } from "./ModeToggle";
 import { NodeDetailPane } from "./NodeDetailPane";
 import { EntityListPane } from "./EntityListPane";
 
-export type EntityType = "vaults" | "ingesters" | "routes" | "jobs" | "system";
+export type EntityType = "vaults" | "storages" | "ingesters" | "routes" | "jobs" | "system";
 
 interface InspectorDialogProps {
   dark: boolean;
@@ -29,7 +29,7 @@ type ParsedState =
   | { mode: "nodes"; nodeId: string }
   | { mode: "entities"; entityType: EntityType; expandTarget: string | null };
 
-const entityTypes = new Set<EntityType>(["vaults", "ingesters", "routes", "jobs", "system"]);
+const entityTypes = new Set<EntityType>(["vaults", "storages", "ingesters", "routes", "jobs", "system"]);
 
 function parseParam(param: string): ParsedState {
   if (param.startsWith("nodes:")) {
@@ -79,6 +79,7 @@ type EntityNavItem = {
 
 const entityNavItems: EntityNavItem[] = [
   { id: "vaults", label: "Vaults", icon: VaultsIcon },
+  { id: "storages", label: "Storages", icon: StorageIcon },
   { id: "ingesters", label: "Ingesters", icon: IngestersIcon },
   { id: "routes", label: "Routes", icon: RouteIcon },
   { id: "jobs", label: "Jobs", icon: JobsIcon },
@@ -104,11 +105,13 @@ export function InspectorDialog({
 
   // Entity counts for nav badges.
   const { data: vaults } = useVaults();
+  const { data: storages } = useStorages();
   const { jobs } = useWatchJobs({ onError: toastError });
 
   const routeCount = config?.routes.length ?? 0;
   const entityCounts: Record<EntityType, number> = {
     vaults: vaults?.length ?? 0,
+    storages: storages?.length ?? 0,
     ingesters: config?.ingesters.length ?? 0,
     routes: routeCount,
     jobs: jobs.length,
@@ -247,9 +250,9 @@ export function InspectorDialog({
         {/* ---- Right content pane ---- */}
         <div className="flex-1 overflow-y-auto app-scroll p-5">
           {parsed.mode === "nodes" ? (
-            <NodeDetailPane nodeId={selectedNodeId} dark={dark} onOpenSettings={onOpenSettings} />
+            <NodeDetailPane nodeId={selectedNodeId} dark={dark} onOpenSettings={onOpenSettings} onNavigate={onNavigate} />
           ) : (
-            <EntityListPane entityType={parsed.entityType} dark={dark} onOpenSettings={onOpenSettings} expandTarget={parsed.expandTarget} />
+            <EntityListPane entityType={parsed.entityType} dark={dark} onOpenSettings={onOpenSettings} expandTarget={parsed.expandTarget} onNavigate={onNavigate} />
           )}
         </div>
       </div>

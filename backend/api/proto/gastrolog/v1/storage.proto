@@ -4,6 +4,7 @@ package gastrolog.v1;
 
 option go_package = "gastrolog/api/gen/gastrolog/v1;gastrologv1";
 
+import "google/protobuf/timestamp.proto";
 
 // FileStorage declares a locally-attached storage resource on a node.
 // Storage class ranks local storage by speed: lower = faster.
@@ -14,6 +15,17 @@ message FileStorage {
   string name = 3;
   string path = 4;
   uint64 memory_budget_bytes = 5;
+
+  // Disk-guard free-space thresholds for this storage: an absolute size
+  // ("10GB") or a percentage of the volume ("10%"), resolved against the
+  // volume actually sampled. Empty inherits the node defaults (10%/3%).
+  // Warn raises the disk-space alarm naming this storage; floor puts
+  // every vault placed here into admission refuse (cause
+  // STORAGE_DISK_PROTECT) while vaults on healthy storages keep
+  // ingesting. gastrolog-9akebz: moved off VaultConfig — the thresholds
+  // guard the volume, not the vaults sharing it.
+  string disk_free_warn = 6;
+  string disk_free_floor = 7;
 }
 
 // NodeStorageConfig declares all locally-attached storage available on a node.
@@ -56,4 +68,62 @@ message CloudService {
   uint32 restore_days = 16;                         // S3: how long restored copy stays readable (days)
   uint32 suspect_grace_days = 17;                   // days before suspect chunk removed from index (default 7)
   string reconcile_schedule = 18;                   // cron for reconciliation sweep (default "0 3 * * *")
+}
+
+// StorageState is one storage's disk-guard state — published only by the
+// node that owns the volume (only that node can statfs it) and merged
+// cluster-wide via the NodeStats broadcast, the same channel VaultStats and
+// VaultPipelineNodeDisk already use for per-node runtime signals
+// (gastrolog-3cobq4). Identity/threshold-expression fields are config-
+// derived (refreshed on the guard's discovery tick, same freshness contract
+// as the rest of the disk guard); free/total/verdicts come from the last
+// statfs sample. Every verdict/threshold field here is the server-computed
+// value the admission gate itself consults — never a client-side
+// derivation from free/total (operator directive, gastrolog-9akebz).
+message StorageState {
+  bytes id = 1;
+  string name = 2;
+  string path = 3;
+  string node_name = 4;    // operator-facing node display name, pre-resolved
+  uint32 storage_class = 5;
+  // node_id is the owning node's raw ID, wire-encoded the same way
+  // NodeStorageConfig.node_id already is ([]byte(nodeID) — a UTF-8 string
+  // cast, not raw GLID bytes; frontend id.ts/glid.ts's encode() already
+  // handles this dual convention). node_name stays the display label; this
+  // is the stable join key for grouping/filtering storages by node
+  // (gastrolog-3cobq4 review: name-based joins collide/rename-race).
+  bytes node_id = 18;
+
+  // Threshold expressions in EFFECTIVE form ("10%", "10GB") — never empty:
+  // the storage's own explicit expression when set, otherwise the built-in
+  // default the guard actually resolves against. There is no configurable
+  // node-level override to inherit from (gastrolog-2mrfdw removed the env
+  // channel), so an unset storage expression is DEFAULTED, not inherited
+  // from anything operator-configurable — *_is_default says which case
+  // applies, never left for a client to infer by matching a hardcoded
+  // literal (gastrolog-3cobq4 review: the earlier warn_inherited naming
+  // implied a configurable parent that doesn't exist).
+  string warn_expr = 6;
+  string floor_expr = 7;
+  bool warn_is_default = 8;
+  bool floor_is_default = 9;
+
+  // Effective thresholds resolved in bytes against the last sampled volume
+  // total — the numbers admission actually compares free space to.
+  uint64 warn_bytes = 10;
+  uint64 floor_bytes = 11;
+
+  // Last statfs sample on the owning node.
+  uint64 free_bytes = 12;
+  uint64 total_bytes = 13;
+  google.protobuf.Timestamp sampled_at = 14;
+
+  // Server-computed verdicts (hysteresis-aware — the same state the
+  // admission gate consults), never derived client-side from free/warn/floor.
+  bool warn_verdict = 15;
+  bool protect_verdict = 16;
+
+  // Vault IDs with a config placement on this storage — config-derived, so
+  // correct even before the next guard sample.
+  repeated bytes placed_vault_ids = 17;
 }

@@ -972,6 +972,15 @@ func copyRetentionPolicy(rp system.RetentionPolicyConfig) system.RetentionPolicy
 	if rp.MaxChunks != nil {
 		c.MaxChunks = new(*rp.MaxChunks)
 	}
+	// Refuse (gastrolog-5yfaqj) was missing here — silently dropped every
+	// explicit Refuse value (true AND false alike) back to nil on every
+	// write, which the OLD default-true semantics happened to mask (nil
+	// still read as true) but the operator's explicit refuse=false opt-out
+	// was ALWAYS silently discarded by this store, and now that the
+	// default flipped to off, an explicit refuse=true would be too.
+	if rp.Refuse != nil {
+		c.Refuse = new(*rp.Refuse)
+	}
 	return c
 }
 
@@ -989,9 +998,6 @@ func copyVaultConfig(st system.VaultConfig) system.VaultConfig {
 		CacheBudget:          st.CacheBudget,
 		CacheTTL:             st.CacheTTL,
 		RetentionDisposition: st.RetentionDisposition,
-		DiskFreeWarn:         st.DiskFreeWarn,
-		DiskFreeFloor:        st.DiskFreeFloor,
-		MaxSize:              st.MaxSize,
 	}
 	if st.RotationPolicyID != nil {
 		id := *st.RotationPolicyID
@@ -1000,6 +1006,10 @@ func copyVaultConfig(st system.VaultConfig) system.VaultConfig {
 	if st.CloudServiceID != nil {
 		id := *st.CloudServiceID
 		cp.CloudServiceID = &id
+	}
+	if st.RetentionTransferTargetVaultID != nil {
+		id := *st.RetentionTransferTargetVaultID
+		cp.RetentionTransferTargetVaultID = &id
 	}
 	if len(st.RetentionRules) > 0 {
 		cp.RetentionRules = make([]system.RetentionRule, len(st.RetentionRules))

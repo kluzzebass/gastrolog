@@ -29,6 +29,7 @@ import {
   isCloudBacked,
   isStorageComplete,
   vaultTypeEnum,
+  transferTargetOptions,
   type StorageEntry,
   type VaultTypeLabel,
 } from "./VaultsSettings";
@@ -77,9 +78,7 @@ function vaultToEntry(v: VaultConfig): StorageEntry {
     rotationPolicyId: v.rotationPolicyId.length > 0 ? encode(v.rotationPolicyId) : "",
     retentionPolicyId: v.retentionRules[0] ? encode(v.retentionRules[0].retentionPolicyId) : "",
     retentionDisposition: v.retentionDisposition || "delete",
-    diskFreeWarn: v.diskFreeWarn,
-    diskFreeFloor: v.diskFreeFloor,
-    maxSize: v.maxSize,
+    retentionTransferTarget: v.retentionTransferTargetVaultId.length > 0 ? encode(v.retentionTransferTargetVaultId) : "",
     replicationFactor: String(v.replicationFactor || 1),
     path: v.path || "",
     nodeId: "",
@@ -105,7 +104,8 @@ function entryToVault(
     cloudServiceId: cloudBacked ? decode(entry.cloudServiceId) : new Uint8Array(0),
     cacheEviction: cloudBacked ? (entry.cacheEviction || "lru") : "",
     // Empty field = unset (server defaults it for cloud vaults), not explicit
-    // 0 (rejected); numeric on the wire like max-size (gastrolog-338j51).
+    // 0 (rejected) — same size-expression convention as the storage's
+    // disk-free thresholds (gastrolog-338j51).
     cacheBudget: cloudBacked ? entry.cacheBudget : "",
     cacheTtl: cloudBacked ? entry.cacheTTL : "",
     // Empty field = unset (server defaults it for memory vaults), not
@@ -116,12 +116,10 @@ function entryToVault(
       ? [new RetentionRule({ retentionPolicyId: decode(entry.retentionPolicyId) })]
       : [],
     retentionDisposition: entry.type !== "jsonl" ? (entry.retentionDisposition || "delete") : "",
-    diskFreeWarn: entry.type === "file" ? entry.diskFreeWarn : "",
-    diskFreeFloor: entry.type === "file" ? entry.diskFreeFloor : "",
-    // Send the budget only when the operator set it: an empty field is
-    // "unset", which the server defaults, not an explicit 0 (which it
-    // rejects). Non-file vaults have no disk budget (gastrolog-1epfgb).
-    maxSize: entry.type === "file" ? entry.maxSize : "",
+    retentionTransferTargetVaultId:
+      entry.type !== "jsonl" && entry.retentionDisposition === "transfer" && entry.retentionTransferTarget
+        ? decode(entry.retentionTransferTarget)
+        : new Uint8Array(0),
     replicationFactor: entry.type === "jsonl" ? 1 : parseInt(entry.replicationFactor, 10) || 1,
     path: entry.type === "jsonl" ? entry.path : "",
     placements: vault.placements,
@@ -130,7 +128,7 @@ function entryToVault(
 
 export function VaultSettingsCard({
   vault,
-  vaults: _vaults,
+  vaults,
   routes: _routes,
   nodeConfigs,
   nodeStorageConfigs,
@@ -437,6 +435,7 @@ export function VaultSettingsCard({
           cloudServiceOptions={cloudServiceOptions}
           rotationPolicyOptions={rotationPolicyOptions}
           retentionPolicyOptions={retentionPolicyOptions}
+          transferTargetOptions={transferTargetOptions(vaults, encode(vault.id))}
           nodeOptions={nodeConfigs.map((n) => ({ value: encode(n.id), label: n.name || encode(n.id) })).sort((a, b) => a.label.localeCompare(b.label))}
           vaultName={vault.name || ""}
           maxRF={maxRFForEntry(edit.storage)}

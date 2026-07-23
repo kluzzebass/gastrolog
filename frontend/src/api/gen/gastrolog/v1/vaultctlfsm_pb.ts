@@ -296,6 +296,12 @@ export class VaultCtlCommand extends Message<VaultCtlCommand> {
      */
     value: DiscardUnbuildableManifestsCommand;
     case: "discardUnbuildableManifests";
+  } | {
+    /**
+     * @generated from field: gastrolog.v1.ClearTransferSourceCommand clear_transfer_source = 25;
+     */
+    value: ClearTransferSourceCommand;
+    case: "clearTransferSource";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<VaultCtlCommand>) {
@@ -330,6 +336,7 @@ export class VaultCtlCommand extends Message<VaultCtlCommand> {
     { no: 22, name: "ack_chunk_holder", kind: "message", T: AckChunkHolderCommand, oneof: "command" },
     { no: 23, name: "revoke_chunk_holder", kind: "message", T: RevokeChunkHolderCommand, oneof: "command" },
     { no: 24, name: "discard_unbuildable_manifests", kind: "message", T: DiscardUnbuildableManifestsCommand, oneof: "command" },
+    { no: 25, name: "clear_transfer_source", kind: "message", T: ClearTransferSourceCommand, oneof: "command" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultCtlCommand {
@@ -502,9 +509,13 @@ export class UploadChunkCommand extends Message<UploadChunkCommand> {
   id = new Uint8Array(0);
 
   /**
-   * @generated from field: int64 disk_bytes = 2;
+   * cloud_bytes is the compressed cloud object's transport size — the only
+   * size fact this command ever carried (AnnounceUpload's post-upload
+   * stat). Was misleadingly named disk_bytes; renamed honestly, gastrolog-33ul6h.
+   *
+   * @generated from field: int64 cloud_bytes = 2;
    */
-  diskBytes = protoInt64.zero;
+  cloudBytes = protoInt64.zero;
 
   /**
    * @generated from field: int64 ingest_idx_offset = 3;
@@ -552,7 +563,7 @@ export class UploadChunkCommand extends Message<UploadChunkCommand> {
   static readonly typeName = "gastrolog.v1.UploadChunkCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 2, name: "disk_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 2, name: "cloud_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 3, name: "ingest_idx_offset", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 4, name: "ingest_idx_size", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 5, name: "source_idx_offset", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
@@ -2066,6 +2077,54 @@ export class RevokeChunkHolderCommand extends Message<RevokeChunkHolderCommand> 
 }
 
 /**
+ * ClearTransferSourceCommand clears a manifest entry's
+ * transfer_source_vault_id once the destination has confirmed enough
+ * holder receipts that the source vault is about to expire its own
+ * copies. Proposed by the SOURCE vault's retention runner against the
+ * DESTINATION vault's FSM, right before the source's local expire
+ * (gastrolog-2l918 review finding 1): without this, an entry whose
+ * source vault later deletes its copies keeps pointing replica-repair
+ * pulls (pullMissingGLCB / runGLCBPull) at a vault that has nothing left
+ * to give, permanently defeating self-healing for transferred chunks.
+ * No-op if the entry doesn't exist or the field is already clear.
+ *
+ * @generated from message gastrolog.v1.ClearTransferSourceCommand
+ */
+export class ClearTransferSourceCommand extends Message<ClearTransferSourceCommand> {
+  /**
+   * @generated from field: bytes chunk_id = 1;
+   */
+  chunkId = new Uint8Array(0);
+
+  constructor(data?: PartialMessage<ClearTransferSourceCommand>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ClearTransferSourceCommand";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ClearTransferSourceCommand {
+    return new ClearTransferSourceCommand().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ClearTransferSourceCommand {
+    return new ClearTransferSourceCommand().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ClearTransferSourceCommand {
+    return new ClearTransferSourceCommand().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ClearTransferSourceCommand | PlainMessage<ClearTransferSourceCommand> | undefined, b: ClearTransferSourceCommand | PlainMessage<ClearTransferSourceCommand> | undefined): boolean {
+    return proto3.util.equals(ClearTransferSourceCommand, a, b);
+  }
+}
+
+/**
  * ManifestEntry is the full metadata for one chunk in a vault's manifest. The
  * proto carries every field of the Go ManifestEntry, including Hash /
  * CloudServiceID / KeyScheme which the legacy 123-byte snapshot codec dropped.
@@ -2104,9 +2163,16 @@ export class ManifestEntry extends Message<ManifestEntry> {
   state = ChunkState.UNSPECIFIED;
 
   /**
-   * @generated from field: int64 disk_bytes = 7;
+   * cloud_bytes is the compressed cloud object's transport size, set only
+   * by CmdUploadChunk (0 until the chunk is uploaded). This entry never
+   * carried a real per-node local-disk-bytes fact — ManifestEntry is
+   * Raft-replicated cluster state, and local warm-cache footprint is
+   * node-local; was misleadingly named disk_bytes. Renamed honestly,
+   * gastrolog-33ul6h.
+   *
+   * @generated from field: int64 cloud_bytes = 7;
    */
-  diskBytes = protoInt64.zero;
+  cloudBytes = protoInt64.zero;
 
   /**
    * @generated from field: int64 ingest_start_nanos = 8;
@@ -2184,7 +2250,10 @@ export class ManifestEntry extends Message<ManifestEntry> {
   keyScheme = 0;
 
   /**
-   * Wall-clock time when sealing completed (CmdSealChunk apply).
+   * Wall-clock time when sealing completed (CmdSealChunk apply). For a
+   * chunk introduced by retention transfer disposition, this is the
+   * destination-side arrival time (fresh anchor), NOT the source's
+   * original seal time — see gastrolog-2l918 decision #6.
    *
    * @generated from field: int64 sealed_at_nanos = 23;
    */
@@ -2197,6 +2266,22 @@ export class ManifestEntry extends Message<ManifestEntry> {
    * @generated from field: repeated string holders = 24;
    */
   holders: string[] = [];
+
+  /**
+   * Non-nil only for a chunk introduced via retention transfer disposition
+   * (CmdRepatriateChunk from a different vault's retention runner, not a
+   * local orphan recovery): the vault ID this chunk's bytes still need to
+   * be pulled FROM. Empty for every normally-chunked or same-vault
+   * repatriated entry. Lets the GLCB replica catch-up sweep
+   * (pullMissingGLCB) address its pull at the SOURCE vault's chunk root
+   * instead of this (destination) vault's own placement peers — the seam
+   * that makes "destination homes pull the chunk" work across vaults
+   * without a parallel transfer-fetch mechanism. See
+   * docs/retention-transfer-disposition-design.md.
+   *
+   * @generated from field: bytes transfer_source_vault_id = 25;
+   */
+  transferSourceVaultId = new Uint8Array(0);
 
   constructor(data?: PartialMessage<ManifestEntry>) {
     super();
@@ -2212,7 +2297,7 @@ export class ManifestEntry extends Message<ManifestEntry> {
     { no: 4, name: "record_count", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 5, name: "bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 6, name: "state", kind: "enum", T: proto3.getEnumType(ChunkState) },
-    { no: 7, name: "disk_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 7, name: "cloud_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 8, name: "ingest_start_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 9, name: "ingest_end_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 10, name: "source_start_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
@@ -2230,6 +2315,7 @@ export class ManifestEntry extends Message<ManifestEntry> {
     { no: 22, name: "key_scheme", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 23, name: "sealed_at_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 24, name: "holders", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 25, name: "transfer_source_vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ManifestEntry {

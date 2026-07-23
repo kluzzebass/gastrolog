@@ -126,6 +126,19 @@ const (
 	// CmdRevokeChunkHolder withdraws a holder claim after the node
 	// stat-missed the bytes it was recorded as holding. Idempotent.
 	CmdRevokeChunkHolder Command = 23
+
+	// CmdClearTransferSource clears a manifest entry's
+	// TransferSourceVaultID once the destination has confirmed enough
+	// holder receipts that the source vault is about to expire its own
+	// copies. Proposed by the SOURCE vault's retention runner against
+	// the DESTINATION vault's FSM, right before the source's local
+	// expire (gastrolog-2l918 review finding 1). Idempotent; a no-op if
+	// the entry is missing or the field is already clear. See
+	// pullMissingGLCB / runGLCBPull (glcb_catchup.go) for the defense-
+	// in-depth other half: a holder-set fallback when this clear was
+	// missed (crash, apply failure) and a pull still gets addressed at
+	// an already-expired source.
+	CmdClearTransferSource Command = 25
 )
 
 // ManifestEntry holds the full metadata for one chunk in this vault's
@@ -148,8 +161,14 @@ type ManifestEntry struct {
 	// ChunkMeta still carries a separate `Sealed` bool because its
 	// semantics differ — ChunkMeta.Sealed is the LOCAL active-form-closed
 	// signal, distinct from this cluster-wide lifecycle state.
-	State     chunk.ChunkState
-	DiskBytes int64
+	State chunk.ChunkState
+	// CloudBytes is the compressed cloud object's transport size, set only
+	// by CmdUploadChunk (0 until uploaded). This entry never carried a real
+	// per-node local-disk-bytes fact — ManifestEntry is Raft-replicated
+	// cluster state, and local warm-cache footprint is node-local and
+	// lives in file.Manager's own chunkMeta/cloudIdx instead. Was
+	// misleadingly named DiskBytes; renamed honestly. See gastrolog-33ul6h.
+	CloudBytes int64
 
 	IngestStart time.Time
 	IngestEnd   time.Time
@@ -165,6 +184,23 @@ type ManifestEntry struct {
 	// apply functions copy-on-write so the shallow entry copies handed out
 	// by Get/List never race with later applies.
 	Holders []string
+
+	// TransferSourceVaultID is non-zero only for a chunk introduced via
+	// retention transfer disposition (gastrolog-2l918): the vault ID this
+	// chunk's bytes still need to be pulled FROM. Zero value for every
+	// normally-chunked or same-vault repatriated entry. Consulted by the
+	// GLCB replica catch-up sweep (pullMissingGLCB) to address its pull
+	// at the SOURCE vault's chunk root instead of this vault's own
+	// placement peers. Cleared (CmdClearTransferSource) by the source's
+	// retention runner once destination receipts meet RF, right before
+	// the source expires its own copies — left set past that point,
+	// every FUTURE replica-repair pull would keep addressing a vault
+	// that has nothing left to give. pullMissingGLCB / runGLCBPull carry
+	// a holder-set fallback as defense in depth for a missed clear (a
+	// crash between receipts-met and the clear). See
+	// docs/retention-transfer-disposition-design.md "Replica repair
+	// after completion".
+	TransferSourceVaultID glid.GLID
 
 	// IngestTSMonotonic is true when records were appended in IngestTS-
 	// ascending order; the histogram fast path uses position-as-rank only
@@ -213,7 +249,12 @@ func (e *ManifestEntry) IsSealed() bool {
 	return e.State == chunk.ChunkStateSealed
 }
 
-// ToChunkMeta converts to the public chunk.ChunkMeta type.
+// ToChunkMeta converts to the public chunk.ChunkMeta type. DiskBytes is
+// deliberately left zero: it's per-node live warm-cache state that only
+// file.Manager's own chunkMeta/cloudIdx track, and this ManifestEntry-
+// sourced meta has no local Manager behind it. CloudBytes (the cloud
+// object size) is the one size fact the FSM actually carries for an
+// uploaded chunk. See gastrolog-33ul6h.
 func (e *ManifestEntry) ToChunkMeta() chunk.ChunkMeta {
 	state := e.State
 	return chunk.ChunkMeta{
@@ -225,7 +266,7 @@ func (e *ManifestEntry) ToChunkMeta() chunk.ChunkMeta {
 		Bytes:             e.Bytes,
 		Sealed:            state == chunk.ChunkStateSealed,
 		State:             state,
-		DiskBytes:         e.DiskBytes,
+		CloudBytes:        e.CloudBytes,
 		IngestStart:       e.IngestStart,
 		IngestEnd:         e.IngestEnd,
 		SourceStart:       e.SourceStart,
@@ -1085,6 +1126,8 @@ func (f *FSM) applyLocked(cmd *gastrologv1.VaultCtlCommand) (any, applyEffects) 
 		// (retention, indexes, etc.) reacts identically to a normal
 		// CmdCreateChunk path.
 		fx.createdEntry = f.captureEntry(result, chunkIDFromProto(c.RepatriateChunk.GetEntry().GetId()))
+	case *gastrologv1.VaultCtlCommand_ClearTransferSource:
+		result = f.applyClearTransferSource(c.ClearTransferSource)
 	default:
 		var ok bool
 		result, fx, ok = f.tryApplySegmentPipelineLocked(cmd)
@@ -1525,6 +1568,21 @@ func (f *FSM) applyRepatriate(c *gastrologv1.RepatriateChunkCommand) error {
 	return nil
 }
 
+// applyClearTransferSource clears a manifest entry's TransferSourceVaultID.
+// Idempotent: a no-op (nil error, no state change) when the entry doesn't
+// exist or the field is already the zero GLID — a replayed or retried
+// clear must never error. See CmdClearTransferSource and
+// gastrolog-2l918 review finding 1.
+func (f *FSM) applyClearTransferSource(c *gastrologv1.ClearTransferSourceCommand) error {
+	id := chunkIDFromProto(c.GetChunkId())
+	e := f.chunks[id]
+	if e == nil || e.TransferSourceVaultID.IsZero() {
+		return nil
+	}
+	e.TransferSourceVaultID = glid.GLID{}
+	return nil
+}
+
 // AttachOffsets: [16 ChunkID][8 IngestIdxOff][8 IngestIdxSize][8 SourceIdxOff][8 SourceIdxSize]
 //
 // Fired after sealToGLCB on the leader (and after finalizeImportedChunk
@@ -1554,7 +1612,7 @@ func (f *FSM) applyUpload(c *gastrologv1.UploadChunkCommand) error {
 	if e == nil {
 		return fmt.Errorf("upload chunk: %s not found", id)
 	}
-	e.DiskBytes = c.GetDiskBytes()
+	e.CloudBytes = c.GetCloudBytes()
 	e.IngestIdxOffset = c.GetIngestIdxOffset()
 	e.IngestIdxSize = c.GetIngestIdxSize()
 	e.SourceIdxOffset = c.GetSourceIdxOffset()
@@ -1662,12 +1720,14 @@ func MarshalBeginSeal(id chunk.ChunkID) []byte {
 	return mustMarshalCommand(NewBeginSeal(id))
 }
 
-// NewUploadChunk builds an UploadChunk command message. The integrity
-// fields (hash, cloud service ID, key scheme) are gastrolog-grnc3 additions.
-func NewUploadChunk(id chunk.ChunkID, diskBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64, hash [32]byte, cloudServiceID glid.GLID, keyScheme uint8) *gastrologv1.VaultCtlCommand {
+// NewUploadChunk builds an UploadChunk command message. cloudBytes is the
+// compressed cloud object's transport size (was misleadingly passed as
+// "diskBytes"; see gastrolog-33ul6h). The integrity fields (hash, cloud
+// service ID, key scheme) are gastrolog-grnc3 additions.
+func NewUploadChunk(id chunk.ChunkID, cloudBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64, hash [32]byte, cloudServiceID glid.GLID, keyScheme uint8) *gastrologv1.VaultCtlCommand {
 	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_UploadChunk{UploadChunk: &gastrologv1.UploadChunkCommand{
 		Id:              id[:],
-		DiskBytes:       diskBytes,
+		CloudBytes:      cloudBytes,
 		IngestIdxOffset: ingestIdxOff,
 		IngestIdxSize:   ingestIdxSize,
 		SourceIdxOffset: sourceIdxOff,
@@ -1679,8 +1739,8 @@ func NewUploadChunk(id chunk.ChunkID, diskBytes, ingestIdxOff, ingestIdxSize, so
 }
 
 // MarshalUploadChunk builds the Raft log data for an UploadChunk command.
-func MarshalUploadChunk(id chunk.ChunkID, diskBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64, hash [32]byte, cloudServiceID glid.GLID, keyScheme uint8) []byte {
-	return mustMarshalCommand(NewUploadChunk(id, diskBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize, hash, cloudServiceID, keyScheme))
+func MarshalUploadChunk(id chunk.ChunkID, cloudBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64, hash [32]byte, cloudServiceID glid.GLID, keyScheme uint8) []byte {
+	return mustMarshalCommand(NewUploadChunk(id, cloudBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize, hash, cloudServiceID, keyScheme))
 }
 
 // NewAttachOffsets builds a CmdAttachOffsets command message.
@@ -1734,35 +1794,58 @@ func MarshalRepatriateChunk(entry ManifestEntry) ([]byte, error) {
 	return mustMarshalCommand(NewRepatriateChunk(entry)), nil
 }
 
+// NewClearTransferSource builds a ClearTransferSource command message. See
+// CmdClearTransferSource.
+func NewClearTransferSource(id chunk.ChunkID) *gastrologv1.VaultCtlCommand {
+	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_ClearTransferSource{ClearTransferSource: &gastrologv1.ClearTransferSourceCommand{ChunkId: id[:]}}}
+}
+
+// MarshalClearTransferSource builds the Raft log data for a
+// ClearTransferSource command.
+func MarshalClearTransferSource(id chunk.ChunkID) []byte {
+	return mustMarshalCommand(NewClearTransferSource(id))
+}
+
 // entryToProto converts a ManifestEntry to its proto representation,
 // carrying every field including Hash / CloudServiceID / KeyScheme.
 func entryToProto(e *ManifestEntry) *gastrologv1.ManifestEntry {
 	return &gastrologv1.ManifestEntry{
-		Id:                e.ID[:],
-		WriteStartNanos:   e.WriteStart.UnixNano(),
-		WriteEndNanos:     e.WriteEnd.UnixNano(),
-		RecordCount:       e.RecordCount,
-		Bytes:             e.Bytes,
-		State:             gastrologv1.ChunkState(e.State),
-		DiskBytes:         e.DiskBytes,
-		IngestStartNanos:  e.IngestStart.UnixNano(),
-		IngestEndNanos:    e.IngestEnd.UnixNano(),
-		SourceStartNanos:  e.SourceStart.UnixNano(),
-		SourceEndNanos:    e.SourceEnd.UnixNano(),
-		IngestTsMonotonic: e.IngestTSMonotonic,
-		CloudBacked:       e.CloudBacked,
-		Archived:          e.Archived,
-		RetentionPending:  e.RetentionPending,
-		IngestIdxOffset:   e.IngestIdxOffset,
-		IngestIdxSize:     e.IngestIdxSize,
-		SourceIdxOffset:   e.SourceIdxOffset,
-		SourceIdxSize:     e.SourceIdxSize,
-		Hash:              e.Hash[:],
-		CloudServiceId:    e.CloudServiceID[:],
-		KeyScheme:         uint32(e.KeyScheme),
-		SealedAtNanos:     e.SealedAt.UnixNano(),
-		Holders:           slices.Clone(e.Holders),
+		Id:                    e.ID[:],
+		WriteStartNanos:       e.WriteStart.UnixNano(),
+		WriteEndNanos:         e.WriteEnd.UnixNano(),
+		RecordCount:           e.RecordCount,
+		Bytes:                 e.Bytes,
+		State:                 gastrologv1.ChunkState(e.State),
+		CloudBytes:            e.CloudBytes,
+		IngestStartNanos:      e.IngestStart.UnixNano(),
+		IngestEndNanos:        e.IngestEnd.UnixNano(),
+		SourceStartNanos:      e.SourceStart.UnixNano(),
+		SourceEndNanos:        e.SourceEnd.UnixNano(),
+		IngestTsMonotonic:     e.IngestTSMonotonic,
+		CloudBacked:           e.CloudBacked,
+		Archived:              e.Archived,
+		RetentionPending:      e.RetentionPending,
+		IngestIdxOffset:       e.IngestIdxOffset,
+		IngestIdxSize:         e.IngestIdxSize,
+		SourceIdxOffset:       e.SourceIdxOffset,
+		SourceIdxSize:         e.SourceIdxSize,
+		Hash:                  e.Hash[:],
+		CloudServiceId:        e.CloudServiceID[:],
+		KeyScheme:             uint32(e.KeyScheme),
+		SealedAtNanos:         e.SealedAt.UnixNano(),
+		Holders:               slices.Clone(e.Holders),
+		TransferSourceVaultId: glid.OptionalToProto(nonZeroGLID(e.TransferSourceVaultID)),
 	}
+}
+
+// nonZeroGLID returns nil for the zero GLID and &g otherwise, so
+// glid.OptionalToProto round-trips "no transfer source" as an empty proto
+// bytes field rather than encoding 16 zero bytes.
+func nonZeroGLID(g glid.GLID) *glid.GLID {
+	if g.IsZero() {
+		return nil
+	}
+	return &g
 }
 
 // entryFromProto converts a proto ManifestEntry back to the Go struct.
@@ -1774,7 +1857,7 @@ func entryFromProto(p *gastrologv1.ManifestEntry) ManifestEntry {
 		RecordCount:       p.GetRecordCount(),
 		Bytes:             p.GetBytes(),
 		State:             chunk.ChunkState(p.GetState()), //nolint:gosec // G115: ChunkState enum values are 0-3, round-trips a uint8
-		DiskBytes:         p.GetDiskBytes(),
+		CloudBytes:        p.GetCloudBytes(),
 		IngestStart:       time.Unix(0, p.GetIngestStartNanos()),
 		IngestEnd:         time.Unix(0, p.GetIngestEndNanos()),
 		SourceStart:       time.Unix(0, p.GetSourceStartNanos()),
@@ -1793,6 +1876,9 @@ func entryFromProto(p *gastrologv1.ManifestEntry) ManifestEntry {
 		Holders:           slices.Clone(p.GetHolders()),
 	}
 	copy(e.Hash[:], p.GetHash())
+	if src := glid.OptionalFromProto(p.GetTransferSourceVaultId()); src != nil {
+		e.TransferSourceVaultID = *src
+	}
 	return e
 }
 

@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
-	"os"
+	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"gastrolog/internal/alert"
 	"gastrolog/internal/glid"
@@ -40,14 +43,25 @@ const (
 	// measurement are two alarms, each with its own cataloged priority
 	// (the HI/HIHI pattern): the approaching/low rows are Low, the
 	// capped/exhausted rows are High.
-	alarmNodeDiskLow        = "node-disk-space-low"
-	alarmNodeDiskExhausted  = "node-disk-space-exhausted"
-	alarmVaultDiskLow       = "disk-space-low"
-	alarmVaultDiskExhausted = "disk-space-exhausted"
-	alarmBacklogApproaching = "pipeline-backlog-approaching"
-	alarmBacklogCapped      = "pipeline-backlog-capped"
-	alarmMaxSizeApproaching = "vault-max-size-approaching"
-	alarmMaxSizeCapped      = "vault-max-size-capped"
+	alarmNodeDiskLow          = "node-disk-space-low"
+	alarmNodeDiskExhausted    = "node-disk-space-exhausted"
+	alarmStorageDiskLow       = "disk-space-low"
+	alarmStorageDiskExhausted = "disk-space-exhausted"
+	alarmBacklogApproaching   = "pipeline-backlog-approaching"
+	alarmBacklogCapped        = "pipeline-backlog-capped"
+	alarmMaxSizeApproaching   = "vault-max-size-approaching"
+	alarmMaxSizeCapped        = "vault-max-size-capped"
+
+	// alarmVaultBoundCapped covers the two generalized refuse-eligible
+	// bounds gastrolog-5yfaqj added (age, chunk-count): one alarm type,
+	// cause named in the detail text and disambiguated in the entity key
+	// (<vaultID>/age, <vaultID>/count) so both bounds can stand at once on
+	// the same vault without colliding. Deliberately NOT merged with
+	// alarmMaxSizeCapped — that pair is instantaneous and already shipped;
+	// these two are sweep-verdict-driven, and no "approaching" variant
+	// exists for them (no continuous measurement to lead with, and
+	// alarms-no-ceremony argues against inventing one).
+	alarmVaultBoundCapped = "vault-bound-capped"
 
 	// Node-default thresholds, as expressions an operator could type into a
 	// disk-free-warn / disk-free-floor field themselves. A default must be
@@ -55,9 +69,17 @@ const (
 	// max(fraction·volume, hardBytes)-with-clamp formula was not typeable
 	// and therefore not a legitimate default (operator directive; see
 	// docs/product-defaults-policy-design.md). Percentages scale with the
-	// volume and resolve per node through the shared resolver.
-	defaultDiskFreeWarn  = "10%"
-	defaultDiskFreeFloor = "3%"
+	// volume and resolve per node through the shared resolver. Exported
+	// (DefaultDiskFreeWarn/DefaultDiskFreeFloor) so the server package can
+	// publish the EFFECTIVE expression for a storage that has no explicit
+	// override — there is no configurable node-level override to
+	// "inherit" from since gastrolog-2mrfdw removed the env channel, so an
+	// unset storage expression resolves straight to these built-in
+	// literals (gastrolog-3cobq4 review: "(inherited)" implied a
+	// configurable parent that doesn't exist; the honest label is
+	// "default").
+	DefaultDiskFreeWarn  = "10%"
+	DefaultDiskFreeFloor = "3%"
 )
 
 // clearAbove is the hysteresis exit bound: thresholds release only once
@@ -96,8 +118,11 @@ type diskGuard struct {
 	logger *slog.Logger
 
 	// Node-level threshold expressions ("10%", "10GB"). Never empty: set to
-	// the typeable defaults at construction, replaced by a validated
-	// GLOG_DISK_FREE_WARN / GLOG_DISK_FREE_FLOOR override when present.
+	// the typeable defaults at construction. Per-storage overrides come from
+	// the config store (system.FileStorage.DiskFreeWarn/DiskFreeFloor,
+	// gastrolog-9akebz — moved off VaultConfig) — there is deliberately no
+	// env-var channel, which would be invisible at runtime and silently
+	// per-node divergent (gastrolog-2mrfdw).
 	warnExpr  string
 	floorExpr string
 
@@ -115,7 +140,7 @@ type diskGuard struct {
 	deferWrites atomic.Bool
 
 	// vaultFootprint measures a vault's whole local disk claim for the
-	// max-size budget. Injected by the orchestrator (chunk + index bytes
+	// max-size bound. Injected by the orchestrator (chunk + index bytes
 	// plus pipeline segment backlog); injectable for tests.
 	vaultFootprint func(glid.GLID) int64
 
@@ -132,32 +157,94 @@ type diskGuard struct {
 
 	mu          sync.Mutex
 	alarmRaised bool
-	// vaults holds per-vault guard state: each vault is evaluated against
-	// its OWN backing paths and (optionally) config-overridden thresholds,
-	// so one vault's starved volume suspends only that vault's admission
-	// while vaults on healthy volumes keep ingesting. Keyed by vault ID.
-	// Guarded by mu; the per-vault protect flags are read lock-free.
+	// storages holds per-storage disk-guard state (gastrolog-9akebz): each
+	// LOCALLY-hosted storage is evaluated ONCE — one statfs, one warn/floor
+	// verdict, one alarm pair — regardless of how many vaults are placed on
+	// it. Replaces the old per-vault statfs duplication (N vaults on one
+	// volume each independently sampling and alarming the same condition).
+	// Guarded by mu; keyed by storage ID.
+	storages map[string]*storageDiskGuard
+	// vaults holds per-vault guard state for the OTHER cap-and-refuse
+	// dimensions (max-size, backlog, age/count bounds) plus the storage IDs
+	// this vault's LOCAL placements reference — used to derive
+	// vaultStorageProtected from the `storages` map. Guarded by mu.
 	vaults map[glid.GLID]*vaultDiskGuard
 }
 
-// vaultDiskGuard is one vault's disk-guard state.
-type vaultDiskGuard struct {
-	paths []string
+// storageDiskGuard is one storage's disk-guard state — evaluated ONCE per
+// storage regardless of how many vaults are placed on it (gastrolog-9akebz).
+// Only LOCALLY-hosted storages get an entry: only the node that owns the
+// path can statfs it. name/node feed the alarm text and the admission
+// detail signal.
+type storageDiskGuard struct {
+	path string
+	name string
+	node string
 	// Threshold expressions ("10%", "10GB"); empty inherits the node level.
 	// Kept as expressions because a percentage can only be resolved against
 	// the volume actually sampled at evaluation time.
-	warnExpr    string
-	floorExpr   string
-	protect     atomic.Bool
-	alarmRaised bool
-	name        string
+	warnExpr  string
+	floorExpr string
+	protect   atomic.Bool
 
-	// Max-size budget (cap-and-refuse): the vault's whole local disk claim
+	// lastFree/lastFloor cache the most recent sample so the admission
+	// detail signal can name "free vs floor" honestly (facts before
+	// speculation) without re-sampling on the hot admission path.
+	lastFree  atomic.Uint64
+	lastFloor atomic.Uint64
+	// lastWarn/lastTotal/lastSampledAt extend the cached sample for the
+	// storage inspector surface (gastrolog-3cobq4): the resolved warn
+	// threshold and sampled volume total, alongside the sample instant, so
+	// the published snapshot can show recency without a second statfs.
+	lastWarn      atomic.Uint64
+	lastTotal     atomic.Uint64
+	lastSampledAt atomic.Int64 // UnixNano; zero means never sampled
+
+	alarmRaised bool
+
+	// storageClass and placedVaultIDs are config-derived fields the guard's
+	// own threshold/verdict behavior never reads — set by SetStorageMeta,
+	// separately from SetStorageGuard, so existing guard-only call sites
+	// don't need to know about them (gastrolog-3cobq4). placedVaultIDs are
+	// the vault IDs with a config placement on this storage, refreshed
+	// every discovery tick.
+	storageClass   uint32
+	placedVaultIDs []glid.GLID
+}
+
+// vaultDiskGuard is one vault's disk-guard state for the cap-and-refuse
+// dimensions that stay per-vault (max-size, backlog, age/count bounds). The
+// free-space protect dimension moved to storageDiskGuard (gastrolog-9akebz);
+// storageIDs is this vault's link to it.
+type vaultDiskGuard struct {
+	name string
+
+	// storageIDs are the storage IDs this vault's LOCAL placements
+	// reference (placements hosted on THIS node) — used to derive
+	// vaultStorageProtected by looking up each ID in the `storages` map.
+	// Placements hosted on OTHER nodes are covered by the peer-broadcast
+	// fallback in vaultAdmissionCauses: the node that hosts the storage
+	// detects the breach and broadcasts the vault ID, so this node never
+	// needs to resolve a remote storage ID to anything.
+	storageIDs []string
+
+	// ageBoundLabel/chunkCountBoundLabel cache the effective refuse-eligible
+	// bound's operator-facing expression (e.g. "3d", "100"), resolved from
+	// config at the same discovery tick as maxSizeBytes — for the admission
+	// detail signal (gastrolog-9akebz). Empty when no refuse-eligible policy
+	// states that dimension; the detail then falls back to a label-less
+	// sentence rather than fabricating a number.
+	ageBoundLabel        string
+	chunkCountBoundLabel string
+
+	// Max-size bound (cap-and-refuse): the vault's whole local disk claim
 	// — sealed chunks, indexes, pipeline segment backlog — measured against
-	// maxSizeBytes. Always non-zero: creation defaults an unset budget and
-	// the wiring substitutes the default for any 0 (gastrolog-1epfgb), so a 0
-	// here would be a bug, not "unlimited". Distinct from the free-space
-	// thresholds: those protect the VOLUME, the budget bounds the VAULT.
+	// maxSizeBytes. 0 means no refuse bound: the vault's only size policies
+	// are refuse=false (soft — drain-only, operator's explicit opt-out,
+	// gastrolog-5yfaqj); evaluateVaults clears any standing cap/alarm for it.
+	// Otherwise non-zero: refuse-eligible policy min, else the creation
+	// default (gastrolog-1epfgb). Distinct from the free-space thresholds:
+	// those protect the VOLUME, this bound covers the VAULT.
 	maxSizeBytes    uint64
 	capped          atomic.Bool
 	sizeAlarmRaised bool
@@ -166,10 +253,26 @@ type vaultDiskGuard struct {
 	// bytes measured against the cluster-global backlogBudget. The OPERATING
 	// bound — engages well before disk pressure so the backlog is bounded by
 	// policy, not by the volume filling up (design-notes R2). Distinct from
-	// maxSizeBytes: the size budget bounds everything the vault RETAINS, the
-	// backlog budget bounds what chunking has not yet drained.
+	// maxSizeBytes: the max-size bound covers everything the vault RETAINS,
+	// the backlog budget covers what chunking has not yet drained.
 	backlogCapped      atomic.Bool
 	backlogAlarmRaised bool
+
+	// Age/chunk-count bounds (gastrolog-5yfaqj): cap-and-refuse like
+	// max-size, but NOT instantaneous. Normal operation transiently
+	// violates both between a chunk's seal and the next retention sweep,
+	// so refusing on that transient would be pure flapping. These flags
+	// are set by the retention runner's post-sweep bound check
+	// (retention.go), which recomputes each bound AFTER a full sweep has
+	// run and attempted to clear it: refusal-worthy only once the sweep
+	// has swept-and-failed, never on the pre-sweep transient. The guard
+	// just folds whatever the runner last reported into
+	// vaultAdmissionCauses/NodeStats — no clock, no evaluateVaults tick
+	// involvement (contrast reconcileVaultSizeCap's instantaneous check).
+	ageBoundCapped        atomic.Bool
+	ageBoundAlarmRaised   bool
+	chunkCountBoundCapped atomic.Bool
+	chunkCountAlarmRaised bool
 }
 
 func newDiskGuardWithLogger(paths []string, logger *slog.Logger) *diskGuard {
@@ -179,26 +282,12 @@ func newDiskGuardWithLogger(paths []string, logger *slog.Logger) *diskGuard {
 }
 
 func newDiskGuard(paths []string) *diskGuard {
-	g := &diskGuard{
+	return &diskGuard{
 		paths:     paths,
 		sample:    statfsSample,
-		warnExpr:  defaultDiskFreeWarn,
-		floorExpr: defaultDiskFreeFloor,
+		warnExpr:  DefaultDiskFreeWarn,
+		floorExpr: DefaultDiskFreeFloor,
 	}
-	// Operator overrides via the .env channel, in the same size-or-percent
-	// vocabulary as the config fields ("15%", "20GB"). A malformed override
-	// is ignored — the typeable defaults are the safe reading.
-	if e := os.Getenv("GLOG_DISK_FREE_WARN"); e != "" {
-		if _, err := system.ParseSizeOrPercent(e); err == nil {
-			g.warnExpr = e
-		}
-	}
-	if e := os.Getenv("GLOG_DISK_FREE_FLOOR"); e != "" {
-		if _, err := system.ParseSizeOrPercent(e); err == nil {
-			g.floorExpr = e
-		}
-	}
-	return g
 }
 
 func statfsSample(path string) (uint64, uint64, error) {
@@ -218,11 +307,12 @@ func (g *diskGuard) worstFree() (free, total uint64, ok bool) {
 }
 
 // resolveThreshold resolves a disk-free threshold expression against the
-// sampled volume size through the shared resolver, inheriting fallbackExpr
-// when expr is unset. fallbackExpr is always a validated expression (the
-// typeable defaults or the checked env override), so it parses; a malformed
-// expr — impossible after write-time validation — falls back to it rather
-// than to a silent 0 threshold.
+// sampled volume size through the shared resolver, falling back to
+// fallbackExpr when expr is unset. fallbackExpr is always the validated
+// typeable default (DefaultDiskFreeWarn/Floor — gastrolog-2mrfdw removed
+// the env-override channel, so this is the only fallback source left), so
+// it parses; a malformed expr — impossible after write-time validation —
+// falls back to it rather than to a silent 0 threshold.
 func resolveThreshold(expr, fallbackExpr string, total uint64) uint64 {
 	if t, err := system.ResolveSizeOrPercent(expr, total, fallbackExpr); err == nil {
 		return t
@@ -231,21 +321,35 @@ func resolveThreshold(expr, fallbackExpr string, total uint64) uint64 {
 	return t
 }
 
+// EffectiveThresholdExpr resolves a threshold expression to the value the
+// guard actually evaluates against: storageExpr when the storage states
+// its own, otherwise defaultExpr — the built-in literal, since there is no
+// configurable node-level override to inherit from (gastrolog-2mrfdw
+// removed the env channel). Returns the effective expression and whether
+// it came from the default, for publishing both the resolved value and its
+// provenance (gastrolog-3cobq4 review: an unset expression is DEFAULTED,
+// not "inherited" from anything operator-configurable).
+func EffectiveThresholdExpr(storageExpr, defaultExpr string) (expr string, isDefault bool) {
+	if storageExpr != "" {
+		return storageExpr, false
+	}
+	return defaultExpr, true
+}
+
 func (g *diskGuard) warnThreshold(total uint64) uint64 {
-	return resolveThreshold(g.warnExpr, defaultDiskFreeWarn, total)
+	return resolveThreshold(g.warnExpr, DefaultDiskFreeWarn, total)
 }
 
 func (g *diskGuard) floorThreshold(total uint64) uint64 {
-	return resolveThreshold(g.floorExpr, defaultDiskFreeFloor, total)
+	return resolveThreshold(g.floorExpr, DefaultDiskFreeFloor, total)
 }
 
-// SetVaultGuard registers (or updates) a vault's guard entry. paths are the
-// vault's local backing directories (storage chunks dir, segment root);
-// warnExpr/floorExpr are size-or-percent expressions ("10GB", "10%") and
-// empty inherits the node level; maxSizeBytes of 0 means no budget (non-file
-// vaults). Called from the discovery refresh; removal via RemoveVaultGuard /
-// retainVaultGuards.
-func (g *diskGuard) SetVaultGuard(vaultID glid.GLID, name string, paths []string, warnExpr, floorExpr string, maxSizeBytes uint64) {
+// SetVaultGuard registers (or updates) a vault's guard entry. storageIDs are
+// the storage IDs this vault's LOCAL placements reference (the link to the
+// `storages` map for deriving vaultStorageProtected); maxSizeBytes of 0
+// means no budget (non-file vaults). Called from the discovery refresh;
+// removal via RemoveVaultGuard / retainVaultGuards.
+func (g *diskGuard) SetVaultGuard(vaultID glid.GLID, name string, storageIDs []string, maxSizeBytes uint64, ageBoundLabel, chunkCountBoundLabel string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.vaults == nil {
@@ -256,11 +360,11 @@ func (g *diskGuard) SetVaultGuard(vaultID glid.GLID, name string, paths []string
 		v = &vaultDiskGuard{}
 		g.vaults[vaultID] = v
 	}
-	v.paths = paths
 	v.name = name
-	v.warnExpr = warnExpr
-	v.floorExpr = floorExpr
+	v.storageIDs = storageIDs
 	v.maxSizeBytes = maxSizeBytes
+	v.ageBoundLabel = ageBoundLabel
+	v.chunkCountBoundLabel = chunkCountBoundLabel
 }
 
 // RemoveVaultGuard drops a vault's guard entry (vault deleted / no longer local).
@@ -274,17 +378,15 @@ func (g *diskGuard) RemoveVaultGuard(vaultID glid.GLID) {
 // discovery-based refresh: vaults removed from config or no longer placed
 // on this node fall out on the next tick. A pruned entry's standing alarm
 // is cleared — nothing would ever clear it once the entry stops being
-// evaluated.
+// evaluated. gastrolog-9akebz: the disk-space-low/exhausted alarm no longer
+// lives here — it moved to storageDiskGuard/retainStorageGuards, keyed by
+// storage ID instead of vault ID.
 func (g *diskGuard) retainVaultGuards(keep map[glid.GLID]bool, alerts alert.Sink) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	for id, v := range g.vaults {
 		if keep[id] {
 			continue
-		}
-		if v.alarmRaised && alerts != nil {
-			alerts.Clear(alarmVaultDiskLow, id.String())
-			alerts.Clear(alarmVaultDiskExhausted, id.String())
 		}
 		if v.sizeAlarmRaised && alerts != nil {
 			alerts.Clear(alarmMaxSizeApproaching, id.String())
@@ -294,21 +396,173 @@ func (g *diskGuard) retainVaultGuards(keep map[glid.GLID]bool, alerts alert.Sink
 			alerts.Clear(alarmBacklogApproaching, id.String())
 			alerts.Clear(alarmBacklogCapped, id.String())
 		}
+		if v.ageBoundAlarmRaised && alerts != nil {
+			alerts.Clear(alarmVaultBoundCapped, id.String()+"/age")
+		}
+		if v.chunkCountAlarmRaised && alerts != nil {
+			alerts.Clear(alarmVaultBoundCapped, id.String()+"/count")
+		}
 		delete(g.vaults, id)
 	}
 }
 
-// vaultProtectActive reports whether admission for this vault destination is
-// suspended. Lock-free read; false for unknown vaults.
-func (g *diskGuard) vaultProtectActive(vaultID glid.GLID) bool {
+// SetStorageGuard registers (or updates) a LOCALLY-hosted storage's guard
+// entry. node is the operator-facing display name of the hosting node,
+// already resolved by the caller (nodeDisplayName) — never a raw ID by the
+// time it lands here, so every alarm/detail string built from it reads a
+// name. path is the storage's filesystem path; warnExpr/floorExpr are
+// size-or-percent expressions ("10GB", "10%"), empty inherits the node
+// level. Called from the discovery refresh; removal via retainStorageGuards
+// (gastrolog-9akebz).
+func (g *diskGuard) SetStorageGuard(storageID, name, node, path, warnExpr, floorExpr string) {
 	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.storages == nil {
+		g.storages = make(map[string]*storageDiskGuard)
+	}
+	s := g.storages[storageID]
+	if s == nil {
+		s = &storageDiskGuard{}
+		g.storages[storageID] = s
+	}
+	s.path = path
+	s.name = name
+	s.node = node
+	s.warnExpr = warnExpr
+	s.floorExpr = floorExpr
+}
+
+// SetStorageMeta records config-derived fields for a LOCALLY-hosted storage
+// that the guard's own threshold/verdict behavior never reads, but the
+// storage inspector surface does (gastrolog-3cobq4): the storage class and
+// the vault IDs with a config placement on it. A separate setter from
+// SetStorageGuard so call sites exercising only the guard's
+// threshold/verdict behavior (most existing tests) don't need to know
+// about it. No-op if the storage isn't registered yet — call after
+// SetStorageGuard in the same refresh tick.
+func (g *diskGuard) SetStorageMeta(storageID string, storageClass uint32, placedVaultIDs []glid.GLID) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if s := g.storages[storageID]; s != nil {
+		s.storageClass = storageClass
+		s.placedVaultIDs = placedVaultIDs
+	}
+}
+
+// retainStorageGuards drops every storage entry not in keep — a storage
+// removed from config, or no longer hosted on this node, falls out on the
+// next tick. A pruned entry's standing alarm is cleared so it cannot strand
+// (retainVaultGuards precedent — gastrolog-9akebz sibling for storages).
+func (g *diskGuard) retainStorageGuards(keep map[string]bool, alerts alert.Sink) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for id, s := range g.storages {
+		if keep[id] {
+			continue
+		}
+		if s.alarmRaised && alerts != nil {
+			alerts.Clear(alarmStorageDiskLow, id)
+			alerts.Clear(alarmStorageDiskExhausted, id)
+		}
+		delete(g.storages, id)
+	}
+}
+
+// vaultStorageProtected reports whether this vault refuses admission
+// because a storage backing one of its LOCAL placements is below its
+// free-space floor (gastrolog-9akebz). Placements hosted on other nodes are
+// covered by the peer-broadcast fallback in vaultAdmissionCauses — the node
+// that hosts the storage detects the breach and broadcasts the vault ID.
+// False for unknown vaults.
+func (g *diskGuard) vaultStorageProtected(vaultID glid.GLID) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	v := g.vaults[vaultID]
-	g.mu.Unlock()
-	return v != nil && v.protect.Load()
+	if v == nil {
+		return false
+	}
+	for _, sid := range v.storageIDs {
+		if s := g.storages[sid]; s != nil && s.protect.Load() {
+			return true
+		}
+	}
+	return false
+}
+
+// vaultStorageProtectDetail returns terse detail text for vaultID's
+// storage-protect cause when a LOCAL placement's storage is the one
+// currently below floor: the storage's name, node, and free-vs-floor
+// numbers — facts this node sampled directly, not a client-side guess.
+// Empty when no local storage is protecting this vault (the cause came
+// from a peer broadcast instead — see vaultAdmissionCauses).
+func (g *diskGuard) vaultStorageProtectDetail(vaultID glid.GLID) string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	v := g.vaults[vaultID]
+	if v == nil {
+		return ""
+	}
+	for _, sid := range v.storageIDs {
+		s := g.storages[sid]
+		if s == nil || !s.protect.Load() {
+			continue
+		}
+		return fmt.Sprintf("storage %s on node %s: %s free, floor %s",
+			s.name, s.node, fmtBytes(s.lastFree.Load()), fmtBytes(s.lastFloor.Load()))
+	}
+	return ""
+}
+
+// vaultMaxSizeBoundDetail names the max-size bound value for the admission
+// detail signal. The bound is a pure function of replicated config
+// (resolveVaultSizeBoundSource at refresh time), so it is honest whether
+// this node's own footprint sample or a peer's tripped the cap. Empty for
+// unknown vaults.
+func (g *diskGuard) vaultMaxSizeBoundDetail(vaultID glid.GLID) string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	v := g.vaults[vaultID]
+	if v == nil {
+		return ""
+	}
+	return "max-size bound: " + fmtBytes(v.maxSizeBytes)
+}
+
+// backlogBudgetDetail names the cluster-global backlog budget for the
+// admission detail signal — same value on every node (ClusterSettings), so
+// no peer lookup is needed for the detail text.
+func (g *diskGuard) backlogBudgetDetail() string {
+	return "backlog budget: " + fmtBytes(g.backlogBudget.Load())
+}
+
+// vaultAgeBoundDetail names the effective max-age bound's operator-facing
+// expression for the admission detail signal, cached at refresh time from
+// config (see refreshVaultDiskGuards' attachedAgeBound). Empty when no
+// refuse-eligible policy states a usable MaxAge, or the vault is unknown —
+// callers fall back to a label-less sentence rather than fabricate a value.
+func (g *diskGuard) vaultAgeBoundDetail(vaultID glid.GLID) string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	v := g.vaults[vaultID]
+	if v == nil || v.ageBoundLabel == "" {
+		return ""
+	}
+	return fmt.Sprintf("max-age bound (%s) still violated after a sweep", v.ageBoundLabel)
+}
+
+// vaultChunkCountBoundDetail is vaultAgeBoundDetail's max-chunks sibling.
+func (g *diskGuard) vaultChunkCountBoundDetail(vaultID glid.GLID) string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	v := g.vaults[vaultID]
+	if v == nil || v.chunkCountBoundLabel == "" {
+		return ""
+	}
+	return fmt.Sprintf("max-chunks bound (%s) still violated after a sweep", v.chunkCountBoundLabel)
 }
 
 // vaultSizeCapped reports whether this vault's local disk claim has reached
-// its max-size budget. Lock-free read; false for unknown vaults.
+// its max-size bound. Lock-free read; false for unknown vaults.
 func (g *diskGuard) vaultSizeCapped(vaultID glid.GLID) bool {
 	g.mu.Lock()
 	v := g.vaults[vaultID]
@@ -325,7 +579,125 @@ func (g *diskGuard) vaultBacklogCapped(vaultID glid.GLID) bool {
 	return v != nil && v.backlogCapped.Load()
 }
 
-// sizeCappedVaults lists the vaults currently at their max-size budget.
+// vaultAgeBoundCapped reports whether this vault's max-age retention bound
+// is still violated after the retention runner's last sweep, on a policy
+// with refuse=true. False for unknown vaults (no file-vault guard entry —
+// see refreshVaultDiskGuards) and for vaults where no sweep has yet run.
+func (g *diskGuard) vaultAgeBoundCapped(vaultID glid.GLID) bool {
+	g.mu.Lock()
+	v := g.vaults[vaultID]
+	g.mu.Unlock()
+	return v != nil && v.ageBoundCapped.Load()
+}
+
+// vaultChunkCountBoundCapped is vaultAgeBoundCapped's max-chunks sibling.
+func (g *diskGuard) vaultChunkCountBoundCapped(vaultID glid.GLID) bool {
+	g.mu.Lock()
+	v := g.vaults[vaultID]
+	g.mu.Unlock()
+	return v != nil && v.chunkCountBoundCapped.Load()
+}
+
+// setVaultAgeBoundCapped records the retention runner's post-sweep verdict
+// for the max-age bound and raises/clears the shared vault-bound-capped
+// alarm on the transition. Silently no-ops for a vault with no guard
+// entry — age/count refusal is scoped to the same file vaults max-size
+// refusal already covers (refreshVaultDiskGuards only guards file vaults);
+// a memory vault or a vault whose guard entry hasn't been registered yet
+// has nothing to fold the verdict into.
+//
+// Holds g.mu for the WHOLE operation — map lookup, atomic Swap, and the
+// alarm Raise/Clear — rather than releasing it between the Swap and the
+// alarm call (gastrolog-5yfaqj review fix, minor: the earlier two-lock
+// version left a window where a concurrent retainVaultGuards prune could
+// delete this vault's entry and, reading raisedFlag before this call had
+// set it, skip clearing an alarm this call was about to raise — stranding
+// a Raise that fires into the void right after prune). One lock for the
+// whole sequence matches every other guard reconcile function in this
+// file (reconcileVaultSizeAlarm, reconcileVaultBacklogAlarm,
+// reconcileVaultAlarm all call alerts.Raise/Clear while holding g.mu) and
+// makes the two prune paths mutually exclusive with this one: either this
+// completes first and retainVaultGuards' next pass sees + clears the
+// raised alarm, or retainVaultGuards runs first and this call's own map
+// lookup returns nil before touching the alarm at all. This is IN
+// ADDITION to the C1 runner-GC fix (retentionSweepAll calling
+// SetVaultAgeBoundCapped(false) before deleting a pruned runner) — that
+// fix closes the leadership-loss strand at the retention-runner layer;
+// this one closes a structurally different race at the disk-guard-entry
+// layer (retainVaultGuards prunes on vault-removed-from-config/placement-
+// moved, a separate discovery sweep from retention's own runner GC), so
+// relying on C1 alone would not have covered it.
+func (g *diskGuard) setVaultAgeBoundCapped(alerts alert.Sink, id glid.GLID, capped bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	v := g.vaults[id]
+	if v == nil {
+		return
+	}
+	was := v.ageBoundCapped.Swap(capped)
+	if was == capped {
+		return
+	}
+	g.reconcileVaultBoundAlarmLocked(alerts, id, v, "age", capped, &v.ageBoundAlarmRaised,
+		fmt.Sprintf("Vault %s's max-age retention bound is still violated after retention swept and attempted to clear it — "+
+			"new records for this vault are REFUSED (the stating policy has refuse enabled). "+
+			"Read the retention-deferred alarm, if standing, for why the sweep isn't clearing it.", v.name),
+		fmt.Sprintf("vault max-age bound engaged — admission refused for vault %s (swept and still violated)", v.name),
+		"vault max-age bound released — admission resumed for vault "+v.name)
+}
+
+// setVaultChunkCountBoundCapped is setVaultAgeBoundCapped's max-chunks
+// sibling — same single-lock-for-the-whole-operation contract.
+func (g *diskGuard) setVaultChunkCountBoundCapped(alerts alert.Sink, id glid.GLID, capped bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	v := g.vaults[id]
+	if v == nil {
+		return
+	}
+	was := v.chunkCountBoundCapped.Swap(capped)
+	if was == capped {
+		return
+	}
+	g.reconcileVaultBoundAlarmLocked(alerts, id, v, "count", capped, &v.chunkCountAlarmRaised,
+		fmt.Sprintf("Vault %s's max-chunks retention bound is still violated after retention swept and attempted to clear it — "+
+			"new records for this vault are REFUSED (the stating policy has refuse enabled). "+
+			"Read the retention-deferred alarm, if standing, for why the sweep isn't clearing it.", v.name),
+		fmt.Sprintf("vault chunk-count bound engaged — admission refused for vault %s (swept and still violated)", v.name),
+		"vault chunk-count bound released — admission resumed for vault "+v.name)
+}
+
+// reconcileVaultBoundAlarmLocked raises/clears the shared
+// vault-bound-capped alarm for one cause ("age"/"count") on a transition,
+// and logs it — bound transitions are otherwise silent, the same razor
+// refreshVaultDiskGuards' max-size change log follows. cause disambiguates
+// the entity key so age and chunk-count can stand on the same vault at
+// once without colliding on one alarm slot.
+//
+// Caller must already hold g.mu for the duration — see
+// setVaultAgeBoundCapped's doc comment for why this must not re-lock (or
+// release and re-lock) internally.
+func (g *diskGuard) reconcileVaultBoundAlarmLocked(alerts alert.Sink, id glid.GLID, v *vaultDiskGuard, cause string, capped bool, raisedFlag *bool, detail, engagedLog, releasedLog string) {
+	key := id.String() + "/" + cause
+	*raisedFlag = capped
+	if capped {
+		if g.logger != nil {
+			g.logger.Warn("retention: " + engagedLog)
+		}
+		if alerts != nil {
+			alerts.Raise(alarmVaultBoundCapped, key, detail)
+		}
+		return
+	}
+	if g.logger != nil {
+		g.logger.Info("retention: " + releasedLog)
+	}
+	if alerts != nil {
+		alerts.Clear(alarmVaultBoundCapped, key)
+	}
+}
+
+// sizeCappedVaults lists the vaults currently at their max-size bound.
 // Broadcast in NodeStats so peers' admission gates honor it.
 func (g *diskGuard) sizeCappedVaults() []glid.GLID {
 	g.mu.Lock()
@@ -339,37 +711,154 @@ func (g *diskGuard) sizeCappedVaults() []glid.GLID {
 	return out
 }
 
-// protectedVaults lists the vaults currently under local disk protect.
-// Broadcast in NodeStats so peers' admission gates honor it.
-func (g *diskGuard) protectedVaults() []glid.GLID {
+// storageProtectedVaults lists the vaults currently refusing admission
+// because a LOCALLY-hosted storage backing one of their placements is below
+// its free-space floor (gastrolog-9akebz). Broadcast in NodeStats so peers'
+// admission gates honor it — the node that samples a storage is the only
+// one that can compute this for the vaults placed on it.
+func (g *diskGuard) storageProtectedVaults() []glid.GLID {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	var out []glid.GLID
 	for id, v := range g.vaults {
-		if v.protect.Load() {
+		for _, sid := range v.storageIDs {
+			if s := g.storages[sid]; s != nil && s.protect.Load() {
+				out = append(out, id)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// StorageSnapshot is a value-typed copy of one LOCALLY-hosted storage's
+// disk-guard state, for the NodeStats broadcast and the ListStorages RPC
+// (gastrolog-3cobq4). WarnVerdict/ProtectVerdict are the guard's own
+// hysteresis-aware verdicts — never derived by a caller from
+// FreeBytes/WarnBytes/FloorBytes (operator directive, gastrolog-9akebz: no
+// client-side derivation of verdicts/thresholds). WarnExpr/FloorExpr are
+// the EFFECTIVE expressions — never empty: the storage's own explicit
+// expression, or the built-in default (DefaultDiskFreeWarn/Floor) when
+// unset. WarnIsDefault/FloorIsDefault say which case applies — there is no
+// configurable node-level override to "inherit" from since gastrolog-2mrfdw
+// removed the env channel, so an unset storage expression is DEFAULTED,
+// not inherited (gastrolog-3cobq4 review).
+type StorageSnapshot struct {
+	ID             string
+	Name           string
+	Node           string // operator-facing display name, pre-resolved
+	Path           string
+	StorageClass   uint32
+	WarnExpr       string
+	FloorExpr      string
+	WarnIsDefault  bool
+	FloorIsDefault bool
+	WarnBytes      uint64
+	FloorBytes     uint64
+	FreeBytes      uint64
+	TotalBytes     uint64
+	SampledAt      time.Time // zero if never sampled
+	WarnVerdict    bool
+	ProtectVerdict bool
+	PlacedVaultIDs []glid.GLID
+}
+
+// storageSnapshots returns a snapshot of every LOCALLY-hosted storage's
+// guard state, for broadcast in NodeStats (gastrolog-3cobq4). ProtectVerdict
+// is the admission-gate state itself (s.protect, hysteresis-aware).
+// WarnVerdict is computed directly from the same free-vs-warn comparison
+// reconcileStorageAlarm uses to decide "low" vs "exhausted" — NOT from
+// s.alarmRaised, which only reconcileStorageAlarm sets and only when an
+// alert.Sink is wired (it no-ops on a nil sink). Deriving WarnVerdict from
+// alarmRaised would make it silently depend on whether an alert sink
+// exists — a nil-alerts deployment or test path would always report
+// WarnVerdict=false regardless of the real free/warn numbers (gastrolog-
+// 3cobq4 review). A storage never sampled yet (lastWarn/lastFree both zero)
+// naturally reports WarnVerdict=false here too — no separate guard needed —
+// and zero free/total/verdicts generally, the same "facts before
+// speculation" contract as vaultStorageProtectDetail.
+func (g *diskGuard) storageSnapshots() []StorageSnapshot {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	out := make([]StorageSnapshot, 0, len(g.storages))
+	for id, s := range g.storages {
+		var sampledAt time.Time
+		if ns := s.lastSampledAt.Load(); ns != 0 {
+			sampledAt = time.Unix(0, ns)
+		}
+		free := s.lastFree.Load()
+		warnAt := s.lastWarn.Load()
+		protect := s.protect.Load()
+		warnExpr, warnIsDefault := EffectiveThresholdExpr(s.warnExpr, g.warnExpr)
+		floorExpr, floorIsDefault := EffectiveThresholdExpr(s.floorExpr, g.floorExpr)
+		out = append(out, StorageSnapshot{
+			ID:             id,
+			Name:           s.name,
+			Node:           s.node,
+			Path:           s.path,
+			StorageClass:   s.storageClass,
+			WarnExpr:       warnExpr,
+			FloorExpr:      floorExpr,
+			WarnIsDefault:  warnIsDefault,
+			FloorIsDefault: floorIsDefault,
+			WarnBytes:      warnAt,
+			FloorBytes:     s.lastFloor.Load(),
+			FreeBytes:      free,
+			TotalBytes:     s.lastTotal.Load(),
+			SampledAt:      sampledAt,
+			WarnVerdict:    free < warnAt && !protect,
+			ProtectVerdict: protect,
+			PlacedVaultIDs: append([]glid.GLID(nil), s.placedVaultIDs...),
+		})
+	}
+	return out
+}
+
+// ageBoundCappedVaults lists the vaults whose max-age bound is currently
+// refusing admission on this node. Broadcast in NodeStats so peers'
+// admission gates honor it, same pattern as sizeCappedVaults.
+func (g *diskGuard) ageBoundCappedVaults() []glid.GLID {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	var out []glid.GLID
+	for id, v := range g.vaults {
+		if v.ageBoundCapped.Load() {
 			out = append(out, id)
 		}
 	}
 	return out
 }
 
-// evaluateVaults runs the per-vault guard pass. Caller is the scheduler job.
+// chunkCountBoundCappedVaults is ageBoundCappedVaults' max-chunks sibling.
+func (g *diskGuard) chunkCountBoundCappedVaults() []glid.GLID {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	var out []glid.GLID
+	for id, v := range g.vaults {
+		if v.chunkCountBoundCapped.Load() {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// evaluateVaults runs the per-vault guard pass: the cap-and-refuse
+// dimensions that stay per-vault (max-size, backlog). The free-space
+// protect dimension moved to evaluateStorages (gastrolog-9akebz) — one
+// statfs per storage, not one per vault sharing it. Caller is the
+// scheduler job.
 func (g *diskGuard) evaluateVaults(alerts alert.Sink) {
 	g.mu.Lock()
 	entries := maps.Clone(g.vaults)
 	g.mu.Unlock()
 
 	for id, v := range entries {
-		if free, total, ok := g.worstFreeOf(v.paths); ok {
-			warnAt := resolveThreshold(v.warnExpr, g.warnExpr, total)
-			floorAt := resolveThreshold(v.floorExpr, g.floorExpr, total)
-			g.reconcileVaultProtect(id, v, free, floorAt, warnAt)
-			g.reconcileVaultAlarm(alerts, id, v, free, total, warnAt)
-		}
 		if v.maxSizeBytes > 0 && g.vaultFootprint != nil {
 			used := footprintBytes(g.vaultFootprint(id))
 			g.reconcileVaultSizeCap(id, v, used)
 			g.reconcileVaultSizeAlarm(alerts, id, v, used)
+		} else {
+			g.clearVaultSizeState(alerts, id, v)
 		}
 		if budget := g.backlogBudget.Load(); budget > 0 && g.vaultBacklogBytes != nil {
 			used := footprintBytes(g.vaultBacklogBytes(id))
@@ -378,6 +867,38 @@ func (g *diskGuard) evaluateVaults(alerts alert.Sink) {
 		} else {
 			g.clearVaultBacklogState(alerts, id, v)
 		}
+	}
+}
+
+// evaluateStorages runs the per-storage guard pass: ONE statfs, ONE
+// warn/floor verdict, ONE alarm pair per LOCALLY-hosted storage —
+// regardless of how many vaults are placed on it (gastrolog-9akebz;
+// previously this ran once per vault, duplicating the statfs and the alarm
+// once per vault sharing a volume). Caller is the scheduler job.
+func (g *diskGuard) evaluateStorages(alerts alert.Sink) {
+	g.mu.Lock()
+	entries := maps.Clone(g.storages)
+	g.mu.Unlock()
+
+	for id, s := range entries {
+		free, total, ok := g.worstFreeOf([]string{s.path})
+		if !ok {
+			// No trustworthy sample this tick (unmounted, permissions): skip
+			// reconciliation entirely and keep whatever protect/alarm verdict
+			// was last derived from a successful sample — inherited behavior
+			// from the node-level guard's own worstFree/reconcileProtect
+			// (evaluate), unchanged by the move to per-storage evaluation.
+			continue
+		}
+		warnAt := resolveThreshold(s.warnExpr, g.warnExpr, total)
+		floorAt := resolveThreshold(s.floorExpr, g.floorExpr, total)
+		s.lastFree.Store(free)
+		s.lastFloor.Store(floorAt)
+		s.lastWarn.Store(warnAt)
+		s.lastTotal.Store(total)
+		s.lastSampledAt.Store(time.Now().UnixNano())
+		g.reconcileStorageProtect(id, s, free, floorAt, warnAt)
+		g.reconcileStorageAlarm(alerts, id, s, free, total, warnAt)
 	}
 }
 
@@ -457,6 +978,33 @@ func (g *diskGuard) clearVaultBacklogState(alerts alert.Sink, id glid.GLID, v *v
 	}
 }
 
+// clearVaultSizeState releases a standing size cap/alarm when the bound is
+// unset (0) — otherwise a vault capped under a since-removed or
+// since-softened max-size bound would refuse admission forever.
+// gastrolog-5yfaqj made 0 reachable for the first time: previously
+// resolveVaultSizeBoundSource always resolved to either a stated bound or
+// the default floor, never 0; now a vault whose only attached size
+// policies are all refuse=false (soft bound — drains, never refuses)
+// correctly resolves to 0 (no refuse bound, and the default floor must
+// NOT re-engage over the operator's explicit opt-out). Mirrors
+// clearVaultBacklogState.
+func (g *diskGuard) clearVaultSizeState(alerts alert.Sink, id glid.GLID, v *vaultDiskGuard) {
+	if v.capped.Load() {
+		v.capped.Store(false)
+		if g.logger != nil {
+			g.logger.Info("vault max-size bound unset or soft-only — admission resumed for vault", "vault", id, "name", v.name)
+		}
+	}
+	g.mu.Lock()
+	raised := v.sizeAlarmRaised
+	v.sizeAlarmRaised = false
+	g.mu.Unlock()
+	if raised && alerts != nil {
+		alerts.Clear(alarmMaxSizeApproaching, id.String())
+		alerts.Clear(alarmMaxSizeCapped, id.String())
+	}
+}
+
 // footprintBytes clamps a measured footprint to unsigned; a negative
 // measurement (unreachable store mid-teardown) reads as empty.
 func footprintBytes(n int64) uint64 {
@@ -511,12 +1059,12 @@ func (g *diskGuard) reconcileVaultSizeAlarm(alerts alert.Sink, id glid.GLID, v *
 		if v.capped.Load() {
 			alerts.Clear(alarmMaxSizeApproaching, id.String())
 			alerts.Raise(alarmMaxSizeCapped, id.String(), fmt.Sprintf(
-				"Vault %s is at its size budget: %s of %s used — new records for this vault are REFUSED until retention drains it.",
+				"Vault %s is at its max-size bound: %s of %s used — new records for this vault are REFUSED until space drains below the bound.",
 				v.name, units.FormatBytesDisplay(int64(used)), units.FormatBytesDisplay(int64(v.maxSizeBytes)))) //nolint:gosec // display only
 		} else {
 			alerts.Clear(alarmMaxSizeCapped, id.String())
 			alerts.Raise(alarmMaxSizeApproaching, id.String(), fmt.Sprintf(
-				"Vault %s is approaching its size budget: %s of %s used.",
+				"Vault %s is approaching its max-size bound: %s of %s used.",
 				v.name, units.FormatBytesDisplay(int64(used)), units.FormatBytesDisplay(int64(v.maxSizeBytes)))) //nolint:gosec // display only
 		}
 		v.sizeAlarmRaised = true
@@ -527,30 +1075,35 @@ func (g *diskGuard) reconcileVaultSizeAlarm(alerts alert.Sink, id glid.GLID, v *
 	}
 }
 
-// reconcileVaultProtect gates a single vault's per-destination admission. Like
-// the node admission gate it engages at the vault's floor and resumes only
-// above its WARN band — same ratchet-avoidance headroom. There is no per-vault
-// drain gate: builds and pulls are gated node-globally by deferWrites.
-func (g *diskGuard) reconcileVaultProtect(id glid.GLID, v *vaultDiskGuard, free, floorAt, warnAt uint64) {
+// reconcileStorageProtect gates every vault placed on this storage
+// (gastrolog-9akebz — replaces reconcileVaultProtect, which duplicated this
+// once per vault sharing a volume). Like the node admission gate it engages
+// at the storage's floor and resumes only above its WARN band — same
+// ratchet-avoidance headroom. There is no per-storage drain gate: builds
+// and pulls are gated node-globally by deferWrites.
+func (g *diskGuard) reconcileStorageProtect(id string, s *storageDiskGuard, free, floorAt, warnAt uint64) {
 	resumeAt := admissionResumeAbove(floorAt, warnAt)
 	switch {
-	case v.protect.Load() && free > resumeAt:
-		v.protect.Store(false)
+	case s.protect.Load() && free > resumeAt:
+		s.protect.Store(false)
 		if g.logger != nil {
-			g.logger.Info("vault disk protect released — admission resumed for vault",
-				"vault", id, "name", v.name, "free", fmtBytes(free), "resumeAbove", fmtBytes(resumeAt))
+			g.logger.Info("storage disk protect released — admission resumed for every vault placed here",
+				"storage", id, "name", s.name, "node", s.node, "free", fmtBytes(free), "resumeAbove", fmtBytes(resumeAt))
 		}
-	case !v.protect.Load() && free < floorAt:
-		v.protect.Store(true)
+	case !s.protect.Load() && free < floorAt:
+		s.protect.Store(true)
 		if g.logger != nil {
-			g.logger.Warn("vault disk protect engaged — admission suspended for vault until free space clears its low-disk alarm band",
-				"vault", id, "name", v.name,
+			g.logger.Warn("storage disk protect engaged — admission suspended for every vault placed here until free space clears its low-disk alarm band",
+				"storage", id, "name", s.name, "node", s.node,
 				"free", fmtBytes(free), "floor", fmtBytes(floorAt), "resumeAbove", fmtBytes(resumeAt))
 		}
 	}
 }
 
-func (g *diskGuard) reconcileVaultAlarm(alerts alert.Sink, id glid.GLID, v *vaultDiskGuard, free, total, warnAt uint64) {
+// reconcileStorageAlarm is reconcileVaultAlarm's storage-keyed replacement:
+// one alarm pair per storage, naming the storage and its node, instead of
+// one per vault sharing it (gastrolog-9akebz).
+func (g *diskGuard) reconcileStorageAlarm(alerts alert.Sink, id string, s *storageDiskGuard, free, total, warnAt uint64) {
 	if alerts == nil {
 		return
 	}
@@ -560,22 +1113,22 @@ func (g *diskGuard) reconcileVaultAlarm(alerts alert.Sink, id glid.GLID, v *vaul
 	case free < warnAt:
 		// Two setpoints, two alarms: low (Low) inside the warn band,
 		// exhausted (High) once protect suspends admission.
-		if v.protect.Load() {
-			alerts.Clear(alarmVaultDiskLow, id.String())
-			alerts.Raise(alarmVaultDiskExhausted, id.String(), fmt.Sprintf(
-				"Out of disk space for vault %s: %s free — admission for this vault is SUSPENDED until space frees.",
-				v.name, units.FormatBytesDisplay(int64(free)))) //nolint:gosec // display only
+		if s.protect.Load() {
+			alerts.Clear(alarmStorageDiskLow, id)
+			alerts.Raise(alarmStorageDiskExhausted, id, fmt.Sprintf(
+				"Out of disk space on storage %s (node %s): %s free — admission for every vault placed here is SUSPENDED until space frees.",
+				s.name, s.node, units.FormatBytesDisplay(int64(free)))) //nolint:gosec // display only
 		} else {
-			alerts.Clear(alarmVaultDiskExhausted, id.String())
-			alerts.Raise(alarmVaultDiskLow, id.String(), fmt.Sprintf(
-				"Low disk space for vault %s: %s free of %s on its volume.",
-				v.name, units.FormatBytesDisplay(int64(free)), units.FormatBytesDisplay(int64(total)))) //nolint:gosec // display only
+			alerts.Clear(alarmStorageDiskExhausted, id)
+			alerts.Raise(alarmStorageDiskLow, id, fmt.Sprintf(
+				"Low disk space on storage %s (node %s): %s free of %s.",
+				s.name, s.node, units.FormatBytesDisplay(int64(free)), units.FormatBytesDisplay(int64(total)))) //nolint:gosec // display only
 		}
-		v.alarmRaised = true
-	case v.alarmRaised && free > clearAbove(warnAt):
-		alerts.Clear(alarmVaultDiskLow, id.String())
-		alerts.Clear(alarmVaultDiskExhausted, id.String())
-		v.alarmRaised = false
+		s.alarmRaised = true
+	case s.alarmRaised && free > clearAbove(warnAt):
+		alerts.Clear(alarmStorageDiskLow, id)
+		alerts.Clear(alarmStorageDiskExhausted, id)
+		s.alarmRaised = false
 	}
 }
 
@@ -698,16 +1251,22 @@ func (o *Orchestrator) diskAdmissionGate() error {
 	return nil
 }
 
-// ErrVaultDiskProtect rejects records destined to a vault whose backing
-// volume is below that vault's free-space floor. Scoped: other vaults on
-// healthy volumes keep ingesting.
-var ErrVaultDiskProtect = errors.New("vault's volume is out of disk space: admission for this vault suspended until space is freed")
+// ErrStorageDiskProtect rejects records destined to a vault placed on a
+// storage that is below its free-space floor. Scoped: other vaults on
+// healthy storages keep ingesting. Renamed from ErrVaultDiskProtect
+// (gastrolog-9akebz): the thresholds moved from VaultConfig to the storage
+// entity a vault's placements reference — every vault sharing a below-floor
+// storage refuses for the same reason.
+var ErrStorageDiskProtect = errors.New("vault's storage is out of disk space: admission for this vault suspended until space is freed")
 
 // ErrVaultMaxSize rejects records destined to a vault whose local disk claim
-// has reached its per-node max-size budget on some node. Cap-and-refuse:
+// has reached its per-node max-size bound on some node. Cap-and-refuse:
 // everything already accepted is kept; the newest records are nacked as
-// retryable backpressure until retention or releases drain below the budget.
-var ErrVaultMaxSize = errors.New("vault is at its size budget: admission for this vault refused until retention drains it")
+// retryable backpressure until space drains below the bound. Not always
+// "until retention drains it" — the bound may be the refuse-only creation-
+// default floor with no attached policy to drain anything at all; space
+// frees only via releases (deletes, transfers, cache eviction) in that case.
+var ErrVaultMaxSize = errors.New("vault is at its max-size bound: admission for this vault refused until space drains below the bound")
 
 // ErrVaultBacklogBudget rejects records destined to a vault whose pipeline
 // backlog (unreleased registry segments) has reached the cluster-global
@@ -715,33 +1274,230 @@ var ErrVaultMaxSize = errors.New("vault is at its size budget: admission for thi
 // below the budget. The operating bound that engages before disk pressure.
 var ErrVaultBacklogBudget = errors.New("vault's pipeline backlog is at its budget: admission refused until chunking drains it")
 
-// vaultAdmissionGate is the per-destination admission check. It honors both
-// the local guard and — via the NodeStats broadcast — every live peer's:
-// the starved volume or over-budget claim backing a vault is usually on a
-// different node than the front door accepting records for it.
-func (o *Orchestrator) vaultAdmissionGate(vaultID glid.GLID) error {
-	if o.diskGuard != nil && o.diskGuard.vaultProtectActive(vaultID) {
-		return ErrVaultDiskProtect
-	}
-	if fn := o.remoteVaultDiskProtected.Load(); fn != nil && (*fn)(vaultID) {
-		return ErrVaultDiskProtect
-	}
-	if o.diskGuard != nil && o.diskGuard.vaultSizeCapped(vaultID) {
-		return ErrVaultMaxSize
-	}
-	if fn := o.remoteVaultSizeCapped.Load(); fn != nil && (*fn)(vaultID) {
-		return ErrVaultMaxSize
-	}
-	// Backlog budget needs no peer lookup: the measure is the vault-ctl FSM
-	// registry, replicated to every node, so the local guard's verdict is the
-	// cluster's verdict.
-	if o.diskGuard != nil && o.diskGuard.vaultBacklogCapped(vaultID) {
-		return ErrVaultBacklogBudget
-	}
-	return nil
+// ErrVaultAgeBound rejects records destined to a vault whose max-age
+// retention bound is still violated after a retention sweep attempted to
+// clear it (gastrolog-5yfaqj), on a policy with refuse=true. Retryable
+// backpressure: retention keeps trying every sweep, admission resumes the
+// moment a sweep's post-check finds the bound clear.
+var ErrVaultAgeBound = errors.New("vault's max-age retention bound is still violated after a sweep: admission refused until retention clears it")
+
+// ErrVaultChunkCountBound is ErrVaultAgeBound's max-chunks sibling.
+var ErrVaultChunkCountBound = errors.New("vault's max-chunks retention bound is still violated after a sweep: admission refused until retention clears it")
+
+// VaultAdmissionCause identifies one reason a vault's admission gate is
+// currently refusing new records for it. Defined here rather than imported
+// from the generated proto package so orchestrator stays proto-free; the
+// server package maps these to apiv1.VaultAdmissionCause for the
+// VaultInfo.AdmissionRefused RPC field. Order of these constants carries no
+// meaning — gate-check order lives in vaultAdmissionCauses, not here.
+type VaultAdmissionCause int
+
+const (
+	// VaultAdmissionCauseStorageDiskProtect renamed from
+	// VaultAdmissionCauseVaultDiskProtect (gastrolog-9akebz): the disk-free
+	// thresholds moved from VaultConfig to the storage entity a vault's
+	// placements reference — this cause fires for every vault placed on a
+	// below-floor storage, not a per-vault threshold.
+	VaultAdmissionCauseStorageDiskProtect VaultAdmissionCause = iota + 1
+	VaultAdmissionCauseMaxSizeBound
+	VaultAdmissionCauseBacklogBudget
+	// VaultAdmissionCauseAgeBound and VaultAdmissionCauseChunkCountBound
+	// (gastrolog-5yfaqj) generalize refusal from max-size to every
+	// retention policy bound: they apply only when the stating policy has
+	// refuse=true AND the retention runner has swept and failed to clear
+	// the violation — never on the transient between a chunk's seal and
+	// the next sweep. See disk_guard's ageBoundCapped/chunkCountBoundCapped.
+	VaultAdmissionCauseAgeBound
+	VaultAdmissionCauseChunkCountBound
+)
+
+// vaultAdmissionCauseEntry pairs a cause with the sentinel error
+// vaultAdmissionGate returns for it, so the gate can consume
+// vaultAdmissionCauses' output directly instead of re-deriving anything.
+// Detail is the backend's own terse specifics for this cause (gastrolog-9akebz)
+// — which storage and its free-vs-floor numbers, or the bound kind and
+// value — never a client-side reconstruction.
+type vaultAdmissionCauseEntry struct {
+	Cause  VaultAdmissionCause
+	Err    error
+	Detail string
 }
 
-// SizeCappedVaults lists vaults at their local max-size budget, for the
+// vaultAdmissionCauses is the SOLE source of truth for per-vault admission
+// causes: it collects every currently-applicable one, in gate-check order —
+// storage disk protect (local OR any live peer's broadcast), max-size bound
+// (local OR any live peer's broadcast), backlog budget (local only: the
+// vault-ctl FSM registry is replicated to every node, so the local guard's
+// verdict already IS the cluster verdict). Empty when the vault admits
+// normally. vaultAdmissionGate takes causes[0]; the exported
+// VaultAdmissionCauses wrapper reports ALL of them for the VaultInfo RPC
+// field — both consume this one collector, so the gate and the UI-facing
+// signal can never drift apart.
+func (o *Orchestrator) vaultAdmissionCauses(vaultID glid.GLID) []vaultAdmissionCauseEntry {
+	var causes []vaultAdmissionCauseEntry
+	for _, check := range []func(glid.GLID) (vaultAdmissionCauseEntry, bool){
+		o.storageDiskProtectCause,
+		o.maxSizeBoundCause,
+		o.backlogBudgetCause,
+		o.ageBoundCause,
+		o.chunkCountBoundCause,
+	} {
+		if entry, ok := check(vaultID); ok {
+			causes = append(causes, entry)
+		}
+	}
+	return causes
+}
+
+// storageDiskProtectCause checks the first gate-check-order cause
+// (gastrolog-9akebz): local first (this node can name the storage and its
+// free-vs-floor numbers honestly), else the peer broadcast (the reporting
+// node's identity is the detail — this node has no local sample to attach
+// numbers to).
+func (o *Orchestrator) storageDiskProtectCause(vaultID glid.GLID) (vaultAdmissionCauseEntry, bool) {
+	if o.diskGuard != nil && o.diskGuard.vaultStorageProtected(vaultID) {
+		return vaultAdmissionCauseEntry{VaultAdmissionCauseStorageDiskProtect, ErrStorageDiskProtect, o.diskGuard.vaultStorageProtectDetail(vaultID)}, true
+	}
+	fn := o.remoteVaultStorageProtected.Load()
+	if fn == nil || !(*fn)(vaultID) {
+		return vaultAdmissionCauseEntry{}, false
+	}
+	detail := ""
+	if nfn := o.remoteVaultStorageProtectedNodes.Load(); nfn != nil {
+		if nodes := (*nfn)(vaultID); len(nodes) > 0 {
+			detail = "reported by " + strings.Join(nodes, ", ")
+		}
+	}
+	return vaultAdmissionCauseEntry{VaultAdmissionCauseStorageDiskProtect, ErrStorageDiskProtect, detail}, true
+}
+
+func (o *Orchestrator) maxSizeBoundCause(vaultID glid.GLID) (vaultAdmissionCauseEntry, bool) {
+	sizeCapped := o.diskGuard != nil && o.diskGuard.vaultSizeCapped(vaultID)
+	if !sizeCapped {
+		if fn := o.remoteVaultSizeCapped.Load(); fn != nil && (*fn)(vaultID) {
+			sizeCapped = true
+		}
+	}
+	if !sizeCapped {
+		return vaultAdmissionCauseEntry{}, false
+	}
+	detail := ""
+	if o.diskGuard != nil {
+		detail = o.diskGuard.vaultMaxSizeBoundDetail(vaultID)
+	}
+	return vaultAdmissionCauseEntry{VaultAdmissionCauseMaxSizeBound, ErrVaultMaxSize, detail}, true
+}
+
+// backlogBudgetCause needs no peer lookup: the measure is the vault-ctl FSM
+// registry, replicated to every node, so the local guard's verdict is the
+// cluster's verdict.
+func (o *Orchestrator) backlogBudgetCause(vaultID glid.GLID) (vaultAdmissionCauseEntry, bool) {
+	if o.diskGuard == nil || !o.diskGuard.vaultBacklogCapped(vaultID) {
+		return vaultAdmissionCauseEntry{}, false
+	}
+	return vaultAdmissionCauseEntry{VaultAdmissionCauseBacklogBudget, ErrVaultBacklogBudget, o.diskGuard.backlogBudgetDetail()}, true
+}
+
+// ageBoundCause / chunkCountBoundCause (gastrolog-5yfaqj): only the
+// retention leader for a vault instance runs the sweep that derives these,
+// so — like storage disk protect and max-size — a peer that only hosts the
+// front door for this vault must consult the NodeStats broadcast too. The
+// bound LABEL, unlike the violated flag, is a pure function of replicated
+// config (attachedAgeBound/attachedChunkCountBound at refresh time) — every
+// node resolves the same label regardless of which one detected the
+// violation, so no remote plumbing is needed for the detail text itself.
+func (o *Orchestrator) ageBoundCause(vaultID glid.GLID) (vaultAdmissionCauseEntry, bool) {
+	ageBound := o.diskGuard != nil && o.diskGuard.vaultAgeBoundCapped(vaultID)
+	if !ageBound {
+		if fn := o.remoteVaultAgeBoundCapped.Load(); fn != nil && (*fn)(vaultID) {
+			ageBound = true
+		}
+	}
+	if !ageBound {
+		return vaultAdmissionCauseEntry{}, false
+	}
+	detail := "max-age bound still violated after a sweep"
+	if o.diskGuard != nil {
+		if d := o.diskGuard.vaultAgeBoundDetail(vaultID); d != "" {
+			detail = d
+		}
+	}
+	return vaultAdmissionCauseEntry{VaultAdmissionCauseAgeBound, ErrVaultAgeBound, detail}, true
+}
+
+// chunkCountBoundCause is ageBoundCause's max-chunks sibling.
+func (o *Orchestrator) chunkCountBoundCause(vaultID glid.GLID) (vaultAdmissionCauseEntry, bool) {
+	chunkCountBound := o.diskGuard != nil && o.diskGuard.vaultChunkCountBoundCapped(vaultID)
+	if !chunkCountBound {
+		if fn := o.remoteVaultChunkCountBoundCapped.Load(); fn != nil && (*fn)(vaultID) {
+			chunkCountBound = true
+		}
+	}
+	if !chunkCountBound {
+		return vaultAdmissionCauseEntry{}, false
+	}
+	detail := "max-chunks bound still violated after a sweep"
+	if o.diskGuard != nil {
+		if d := o.diskGuard.vaultChunkCountBoundDetail(vaultID); d != "" {
+			detail = d
+		}
+	}
+	return vaultAdmissionCauseEntry{VaultAdmissionCauseChunkCountBound, ErrVaultChunkCountBound, detail}, true
+}
+
+// vaultAdmissionGate is the per-destination admission check: the first
+// currently-applicable cause wins. It honors both the local guard and — via
+// the NodeStats broadcast — every live peer's: the starved volume or
+// over-budget claim backing a vault is usually on a different node than the
+// front door accepting records for it. The gate consumes
+// vaultAdmissionCauses so its behavior cannot drift from what that collector
+// (and therefore the VaultInfo.AdmissionRefused RPC field) reports.
+func (o *Orchestrator) vaultAdmissionGate(vaultID glid.GLID) error {
+	causes := o.vaultAdmissionCauses(vaultID)
+	if len(causes) == 0 {
+		return nil
+	}
+	return causes[0].Err
+}
+
+// VaultAdmissionCauses reports every currently-applicable admission-refusal
+// cause for vaultID (empty when the vault admits normally). Exported for the
+// VaultInfo.AdmissionRefused RPC field (server package): the responding
+// node's own view (local guard + its live-peer broadcasts) is the same
+// cluster-aware input vaultAdmissionGate consults, so the UI's "refusing"
+// signal is never a client-side derivation from other state.
+func (o *Orchestrator) VaultAdmissionCauses(vaultID glid.GLID) []VaultAdmissionCause {
+	entries := o.vaultAdmissionCauses(vaultID)
+	out := make([]VaultAdmissionCause, len(entries))
+	for i, e := range entries {
+		out[i] = e.Cause
+	}
+	return out
+}
+
+// VaultAdmissionCauseDetail pairs a cause with its detail text — the
+// specifics the backend knows at response time (which storage and its
+// free-vs-floor numbers, which bound and its value), never a client-side
+// reconstruction (gastrolog-9akebz).
+type VaultAdmissionCauseDetail struct {
+	Cause  VaultAdmissionCause
+	Detail string
+}
+
+// VaultAdmissionCauseDetails is VaultAdmissionCauses plus each cause's
+// detail text, for the VaultInfo.AdmissionRefused RPC field's per-cause
+// message. Same underlying collector as VaultAdmissionCauses and
+// vaultAdmissionGate, so the signal can never drift.
+func (o *Orchestrator) VaultAdmissionCauseDetails(vaultID glid.GLID) []VaultAdmissionCauseDetail {
+	entries := o.vaultAdmissionCauses(vaultID)
+	out := make([]VaultAdmissionCauseDetail, len(entries))
+	for i, e := range entries {
+		out[i] = VaultAdmissionCauseDetail{Cause: e.Cause, Detail: e.Detail}
+	}
+	return out
+}
+
+// SizeCappedVaults lists vaults at their local max-size bound, for the
 // NodeStats broadcast.
 func (o *Orchestrator) SizeCappedVaults() []glid.GLID {
 	if o.diskGuard == nil {
@@ -756,25 +1512,186 @@ func (o *Orchestrator) SetRemoteVaultSizeCapped(fn func(glid.GLID) bool) {
 	o.remoteVaultSizeCapped.Store(&fn)
 }
 
-// DiskProtectedVaults lists vaults under local disk protect, for the
-// NodeStats broadcast.
-func (o *Orchestrator) DiskProtectedVaults() []glid.GLID {
+// StorageProtectedVaults lists vaults with a placement on a LOCALLY-hosted
+// storage under disk protect, for the NodeStats broadcast. Renamed from
+// DiskProtectedVaults (gastrolog-9akebz).
+func (o *Orchestrator) StorageProtectedVaults() []glid.GLID {
 	if o.diskGuard == nil {
 		return nil
 	}
-	return o.diskGuard.protectedVaults()
+	return o.diskGuard.storageProtectedVaults()
 }
 
-// SetRemoteVaultDiskProtected installs the peer-state lookup consulted by
+// StorageSnapshots lists the disk-guard state of every storage LOCALLY
+// hosted on this node, for the NodeStats broadcast and the ListStorages RPC
+// (gastrolog-3cobq4).
+func (o *Orchestrator) StorageSnapshots() []StorageSnapshot {
+	if o.diskGuard == nil {
+		return nil
+	}
+	return o.diskGuard.storageSnapshots()
+}
+
+// SetRemoteVaultStorageProtected installs the peer-state lookup consulted by
 // vaultAdmissionGate. Set once at app wiring, after cluster stats exist.
-func (o *Orchestrator) SetRemoteVaultDiskProtected(fn func(glid.GLID) bool) {
-	o.remoteVaultDiskProtected.Store(&fn)
+// Renamed from SetRemoteVaultDiskProtected (gastrolog-9akebz).
+func (o *Orchestrator) SetRemoteVaultStorageProtected(fn func(glid.GLID) bool) {
+	o.remoteVaultStorageProtected.Store(&fn)
 }
 
-// refreshVaultDiskGuards converges the guard's per-vault entries with the
-// current config: every file vault with a placement on this node is guarded
-// against its local storage volume(s). Discovery-based like the rotation and
-// retention sweeps — vault add/update/remove and placement changes are all
+// SetRemoteVaultStorageProtectedNodes installs the peer-state lookup for
+// WHICH nodes report a vault's storage under disk protect, already
+// resolved to operator-facing NAMES (falling back to the raw ID per-peer
+// when a name isn't known) and sorted for a stable join — the admission
+// detail signal's "reported by <name>" text. Production wiring is
+// PeerState.VaultStorageProtectedNodeNames, NOT the ID-returning
+// VaultStorageProtectedNodes the placement manager uses for set-membership
+// matching — do not swap them. Set once at app wiring.
+func (o *Orchestrator) SetRemoteVaultStorageProtectedNodes(fn func(glid.GLID) []string) {
+	o.remoteVaultStorageProtectedNodes.Store(&fn)
+}
+
+// AgeBoundCappedVaults lists vaults whose max-age retention bound is
+// currently refusing admission on this node, for the NodeStats broadcast.
+func (o *Orchestrator) AgeBoundCappedVaults() []glid.GLID {
+	if o.diskGuard == nil {
+		return nil
+	}
+	return o.diskGuard.ageBoundCappedVaults()
+}
+
+// SetRemoteVaultAgeBoundCapped installs the peer-state lookup for vaults
+// age-bound-capped on other nodes. Set once at app wiring, after cluster
+// stats exist.
+func (o *Orchestrator) SetRemoteVaultAgeBoundCapped(fn func(glid.GLID) bool) {
+	o.remoteVaultAgeBoundCapped.Store(&fn)
+}
+
+// ChunkCountBoundCappedVaults is AgeBoundCappedVaults' max-chunks sibling.
+func (o *Orchestrator) ChunkCountBoundCappedVaults() []glid.GLID {
+	if o.diskGuard == nil {
+		return nil
+	}
+	return o.diskGuard.chunkCountBoundCappedVaults()
+}
+
+// SetRemoteVaultChunkCountBoundCapped is SetRemoteVaultAgeBoundCapped's
+// max-chunks sibling.
+func (o *Orchestrator) SetRemoteVaultChunkCountBoundCapped(fn func(glid.GLID) bool) {
+	o.remoteVaultChunkCountBoundCapped.Store(&fn)
+}
+
+// SetVaultAgeBoundCapped records the retention runner's post-sweep verdict
+// for a vault's max-age bound (gastrolog-5yfaqj) — the seam retention.go's
+// sweep() calls after every sweep to report whether the bound is still
+// violated. No-ops if the guard has no entry for this vault (a memory
+// vault, or a file vault whose guard entry hasn't been registered yet by
+// refreshVaultDiskGuards — the next sweep after registration retries).
+func (o *Orchestrator) SetVaultAgeBoundCapped(id glid.GLID, capped bool) {
+	if o.diskGuard == nil {
+		return
+	}
+	o.diskGuard.setVaultAgeBoundCapped(o.alerts, id, capped)
+}
+
+// SetVaultChunkCountBoundCapped is SetVaultAgeBoundCapped's max-chunks
+// sibling.
+func (o *Orchestrator) SetVaultChunkCountBoundCapped(id glid.GLID, capped bool) {
+	if o.diskGuard == nil {
+		return
+	}
+	o.diskGuard.setVaultChunkCountBoundCapped(o.alerts, id, capped)
+}
+
+// nodeDisplayName resolves a node ID to its operator-facing name from the
+// live NodeConfig list, falling back to the raw ID when unknown — the same
+// contract as placementManager.nameOrID (backend/internal/app/placement.go),
+// reimplemented here (rather than shared) because it operates on
+// []system.NodeConfig directly for a single lookup per refresh tick, not a
+// pre-built batch map.
+func nodeDisplayName(nodes []system.NodeConfig, nodeID string) string {
+	for _, n := range nodes {
+		if n.ID.String() == nodeID && n.Name != "" {
+			return n.Name
+		}
+	}
+	return nodeID
+}
+
+// refreshStorageGuards converges the guard's per-storage entries with the
+// current config — split out of refreshVaultDiskGuards (gastrolog-3cobq4)
+// to keep that function's cognitive complexity down. One entry per
+// LOCALLY-hosted storage: the guard samples each storage's volume ONCE
+// regardless of how many vaults share it. "Local" means this node's own
+// NodeStorageConfig — the only volumes it can statfs. The node is resolved
+// to its operator-facing name HERE, once per refresh (config is already
+// loaded, off the admission hot path) — same fallback contract as
+// placementManager.nameOrID: name when known, the raw ID otherwise. Every
+// alarm/detail string that names this storage's node reads it pre-resolved.
+//
+// Also computes placements-on-storage (gastrolog-3cobq4): which vaults
+// reference each LOCALLY-hosted storage, config-derived — a storage ID
+// resolves to exactly one node (system.NodeIDForStorage), so any placement
+// naming a storage this node hosts already belongs to THIS node; no
+// local-node filter needed here, unlike refreshVaultDiskGuards' per-vault
+// storageIDs loop (which links a VAULT's guard entry to its own local
+// placements). Every locally-hosted storage gets an entry, even zero
+// vaults, so a storage that just lost its last placement reports empty
+// rather than stale.
+func (o *Orchestrator) refreshStorageGuards(sys *system.System, rt *system.Runtime) {
+	nodeName := nodeDisplayName(rt.Nodes, o.localNodeID)
+	keepStorages := make(map[string]bool)
+	storageClasses := make(map[string]uint32)
+	for _, nsc := range rt.NodeStorageConfigs {
+		if nsc.NodeID != o.localNodeID {
+			continue
+		}
+		for _, fs := range nsc.FileStorages {
+			sid := fs.ID.String()
+			keepStorages[sid] = true
+			storageClasses[sid] = fs.StorageClass
+			// fs.Path is stored relative by the same convention vault dirs
+			// are (resolveVaultDir's contract) — resolve it against the
+			// same base before it ever reaches statfs. A raw relative path
+			// resolves against the process's CWD instead of the node home,
+			// fails silently, and worstFreeOf then skips the storage
+			// forever: no sample, no protect, an inherited threshold
+			// resolving against a 0 total (gastrolog-3cobq4 regression).
+			path := resolveStoragePath(fs.Path, o.vaultsDir)
+			o.diskGuard.SetStorageGuard(sid, fs.Name, nodeName, path, fs.DiskFreeWarn, fs.DiskFreeFloor)
+		}
+	}
+	o.diskGuard.retainStorageGuards(keepStorages, o.alerts)
+
+	placedVaults := make(map[string][]glid.GLID, len(keepStorages))
+	for sid := range keepStorages {
+		placedVaults[sid] = nil
+	}
+	for _, vc := range sys.Config.Vaults {
+		if vc.Type != system.VaultTypeFile {
+			continue
+		}
+		for _, p := range vc.Placements {
+			if _, ok := placedVaults[p.StorageID]; !ok {
+				continue
+			}
+			placedVaults[p.StorageID] = append(placedVaults[p.StorageID], vc.ID)
+		}
+	}
+	for sid, vaultIDs := range placedVaults {
+		sort.Slice(vaultIDs, func(i, j int) bool { return vaultIDs[i].String() < vaultIDs[j].String() })
+		o.diskGuard.SetStorageMeta(sid, storageClasses[sid], vaultIDs)
+	}
+}
+
+// refreshVaultDiskGuards converges the guard's per-storage AND per-vault
+// entries with the current config (gastrolog-9akebz): every LOCALLY-hosted
+// storage gets ONE guard entry (the free-space thresholds now live there —
+// system.FileStorage.DiskFreeWarn/DiskFreeFloor), and every file vault gets
+// a guard entry recording which of those storage IDs its LOCAL placements
+// reference plus the OTHER per-vault cap-and-refuse dimensions (max-size,
+// age/count bound labels). Discovery-based like the rotation and retention
+// sweeps — storage/vault add/update/remove and placement changes are all
 // picked up on the next tick with no per-callsite lifecycle wiring.
 func (o *Orchestrator) refreshVaultDiskGuards(ctx context.Context) {
 	if o.diskGuard == nil {
@@ -785,53 +1702,183 @@ func (o *Orchestrator) refreshVaultDiskGuards(ctx context.Context) {
 		return
 	}
 	rt := &sys.Runtime
-	keep := make(map[glid.GLID]bool)
+	o.refreshStorageGuards(sys, rt)
+
+	keepVaults := make(map[glid.GLID]bool)
 	for _, vc := range sys.Config.Vaults {
 		if vc.Type != system.VaultTypeFile {
 			continue
 		}
-		var paths []string
+		var storageIDs []string
 		for _, p := range vc.Placements {
 			if system.NodeIDForStorage(p.StorageID, rt.NodeStorageConfigs) != o.localNodeID {
 				continue
 			}
-			if fs := findFileStorageByID(rt, p.StorageID); fs != nil {
-				paths = append(paths, fs.Path)
+			if findFileStorageByID(rt, p.StorageID) != nil {
+				storageIDs = append(storageIDs, p.StorageID)
 			}
 		}
 		// Config→runtime boundary: the operator's expressions become numbers
-		// here, once, through the shared resolver (gastrolog-etcjdx). Write-time
-		// validation guarantees they parse; a failure here is a bug, so fall
-		// back to the bounded default rather than to "unbounded".
-		//
-		// Defense in depth: a file vault's budget is defaulted at creation and
-		// an explicit "0" is rejected (gastrolog-1epfgb), so an unset one here
-		// can only be a pre-change or bug-produced config. Bound it with the
-		// default rather than pass 0, which the guard reads as "no budget" — an
-		// unbounded file vault must stay unrepresentable, guard included.
-		// Non-file vaults have no disk budget and keep 0.
-		var maxSize uint64
-		if vc.Type == system.VaultTypeFile {
-			var err error
-			maxSize, err = system.SizeOrDefault(vc.MaxSize, 0)
-			if err != nil || maxSize == 0 {
-				maxSize, _ = system.ParseSize(system.DefaultVaultMaxSize)
-			}
-		}
+		// here, once, through the shared resolver (gastrolog-etcjdx). The
+		// bound itself now resolves from the vault's attached retention
+		// policies rather than a vault-level field (gastrolog-33ul6h); see
+		// resolveVaultSizeBoundSource for the min-wins / default-floor rule.
+		maxSize, boundSource := resolveVaultSizeBoundSource(vc, sys.Config.RetentionPolicies)
 		// A vault with no local placement still claims local disk through its
-		// origin segment backlog, so a max-size budget registers it even when
-		// there is no volume to sample here.
-		if len(paths) == 0 && maxSize == 0 {
+		// origin segment backlog, so a max-size bound registers it even when
+		// there is no storage to sample here.
+		if len(storageIDs) == 0 && maxSize == 0 {
 			continue
 		}
-		// The disk-free thresholds stay expressions all the way into the
-		// guard: a percentage ("10%") can only be resolved against the volume
-		// actually sampled at evaluation time. Empty inherits the node level;
-		// write-time validation guarantees a set value parses.
-		keep[vc.ID] = true
-		o.diskGuard.SetVaultGuard(vc.ID, vc.Name, paths, vc.DiskFreeWarn, vc.DiskFreeFloor, maxSize)
+		// Bound transitions are otherwise silent: a size cap tightening or
+		// loosening changes admission behavior with no operator-visible
+		// signal until a cap/uncap actually fires. Log the CHANGE only — not
+		// every tick's re-resolution, which would flood the log with the
+		// steady-state case (gastrolog-33ul6h finding 4). First observation
+		// (no prior entry) is not a transition, so it stays quiet too.
+		if prev, existed := o.diskGuard.currentMaxSizeBytes(vc.ID); existed && prev != maxSize && o.diskGuard.logger != nil {
+			o.diskGuard.logger.Info("vault max-size bound changed",
+				"vault", vc.ID, "name", vc.Name,
+				"old", fmtBytes(prev), "new", fmtBytes(maxSize),
+				"source", boundSource)
+		}
+		keepVaults[vc.ID] = true
+		ageLabel := attachedAgeBound(vc, sys.Config.RetentionPolicies)
+		countLabel := attachedChunkCountBound(vc, sys.Config.RetentionPolicies)
+		o.diskGuard.SetVaultGuard(vc.ID, vc.Name, storageIDs, maxSize, ageLabel, countLabel)
 	}
-	o.diskGuard.retainVaultGuards(keep, o.alerts)
+	o.diskGuard.retainVaultGuards(keepVaults, o.alerts)
+}
+
+// attachedSizeBound scans the vault's RetentionRules for the tightest
+// (minimum) usable MaxSize among REFUSE-ELIGIBLE referenced policies
+// (gastrolog-5yfaqj: policy.RefuseEnabled() — a policy stating MaxSize
+// with refuse=false still drains via its own SizeRetentionPolicy rule
+// elsewhere, but contributes nothing to the instantaneous refuse bound
+// this function resolves). A referenced policy that carries no MaxSize
+// (nil, unset, or unparseable — defense in depth; PutRetentionPolicy
+// validates parseability at write, so a parse failure here can only be a
+// pre-change or bug-produced config) contributes nothing to the min
+// either. Returns the winning policy (nil if none carries a usable
+// refuse-eligible bound) so callers can build both the numeric bound and
+// an operator-readable source label without re-scanning, plus anyStated:
+// whether ANY attached policy — refuse-eligible or not — states a usable
+// MaxSize at all, which the caller needs to decide whether the
+// refuse-only default floor may apply (see resolveVaultSizeBoundSource).
+func attachedSizeBound(vc system.VaultConfig, policies []system.RetentionPolicyConfig) (minBound uint64, winner *system.RetentionPolicyConfig, anyStated bool) {
+	for _, rule := range vc.RetentionRules {
+		policy := findRetentionPolicy(policies, rule.RetentionPolicyID)
+		if policy == nil || policy.MaxSize == nil || system.IsQuantityUnset(*policy.MaxSize) {
+			continue
+		}
+		size, err := system.ParseSize(*policy.MaxSize)
+		if err != nil || size == 0 {
+			continue
+		}
+		anyStated = true
+		if !policy.RefuseEnabled() {
+			continue // soft bound: drains (its own rule), never refuses
+		}
+		if winner == nil || size < minBound {
+			minBound = size
+			winner = policy
+		}
+	}
+	return minBound, winner, anyStated
+}
+
+// attachedAgeBound scans the vault's RetentionRules for the tightest
+// (minimum) usable MaxAge among refuse-eligible referenced policies — same
+// min-wins/refuse-eligibility contract as attachedSizeBound, resolved at
+// the same discovery tick and cached on vaultDiskGuard.ageBoundLabel for
+// the admission detail signal (gastrolog-9akebz). Returns the operator's
+// own duration expression verbatim ("3d"), not a reformatted value — the
+// label is display text, not a quantity anything resolves again. Empty
+// when no refuse-eligible policy states a usable MaxAge.
+func attachedAgeBound(vc system.VaultConfig, policies []system.RetentionPolicyConfig) string {
+	var winner string
+	var minAge time.Duration
+	for _, rule := range vc.RetentionRules {
+		policy := findRetentionPolicy(policies, rule.RetentionPolicyID)
+		if policy == nil || !policy.RefuseEnabled() || policy.MaxAge == nil || system.IsQuantityUnset(*policy.MaxAge) {
+			continue
+		}
+		age, err := system.ParseDuration(*policy.MaxAge)
+		if err != nil || age <= 0 {
+			continue
+		}
+		if winner == "" || age < minAge {
+			minAge = age
+			winner = *policy.MaxAge
+		}
+	}
+	return winner
+}
+
+// attachedChunkCountBound is attachedAgeBound's max-chunks sibling.
+func attachedChunkCountBound(vc system.VaultConfig, policies []system.RetentionPolicyConfig) string {
+	var winner string
+	var minCount int64
+	for _, rule := range vc.RetentionRules {
+		policy := findRetentionPolicy(policies, rule.RetentionPolicyID)
+		if policy == nil || !policy.RefuseEnabled() || policy.MaxChunks == nil || *policy.MaxChunks <= 0 {
+			continue
+		}
+		count := *policy.MaxChunks
+		if winner == "" || count < minCount {
+			minCount = count
+			winner = strconv.FormatInt(count, 10)
+		}
+	}
+	return winner
+}
+
+// resolveVaultSizeBound computes the effective per-node disk-claim REFUSE
+// bound for a file vault (gastrolog-33ul6h): attachedSizeBound's min-wins
+// result over refuse-eligible policies, or the creation default
+// (system.DefaultVaultMaxSize) as the refuse-only floor when NO attached
+// policy states a usable bound at all — zero retention rules, zero
+// policies, or only bound-less policies — so a file vault stays bounded
+// with no operator diligence required. gastrolog-5yfaqj corner case: when
+// at least one attached policy DOES state a usable bound but every one of
+// them is refuse=false (soft), the result is 0 — no refuse bound applies,
+// and the default floor does NOT re-engage either, because the operator
+// explicitly opted every stating policy out of refusal; silently falling
+// back to the floor would override that choice.
+func resolveVaultSizeBound(vc system.VaultConfig, policies []system.RetentionPolicyConfig) uint64 {
+	bound, _ := resolveVaultSizeBoundSource(vc, policies)
+	return bound
+}
+
+// resolveVaultSizeBoundSource is resolveVaultSizeBound plus an
+// operator-readable source label ("policy <name/id>", "default floor", or
+// the soft-only corner case), for the bound-transition log
+// (gastrolog-33ul6h finding 4): naming WHERE an effective bound change
+// came from, not just the old/new numbers.
+func resolveVaultSizeBoundSource(vc system.VaultConfig, policies []system.RetentionPolicyConfig) (uint64, string) {
+	bound, winner, anyStated := attachedSizeBound(vc, policies)
+	if winner != nil {
+		return bound, "policy " + retentionPolicyLabel(*winner)
+	}
+	if anyStated {
+		return 0, "no refuse-eligible policy (soft bound only)"
+	}
+	def, _ := system.ParseSize(system.DefaultVaultMaxSize)
+	return def, "default floor"
+}
+
+// currentMaxSizeBytes returns the vault's currently-registered max-size
+// bound and whether an entry exists yet. Used by refreshVaultDiskGuards to
+// detect an effective-bound CHANGE (vs. first observation) before calling
+// SetVaultGuard, which overwrites the value unconditionally.
+func (g *diskGuard) currentMaxSizeBytes(vaultID glid.GLID) (uint64, bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	v, ok := g.vaults[vaultID]
+	if !ok {
+		return 0, false
+	}
+	return v.maxSizeBytes, true
 }
 
 // primeDiskGuard runs one synchronous NODE-level guard pass before ingest
@@ -888,15 +1935,28 @@ func (o *Orchestrator) startDiskGuard() error {
 	if o.diskGuard == nil || len(o.diskGuard.paths) == 0 {
 		return nil
 	}
-	if err := o.scheduler.AddJob(diskGuardJobName, diskGuardSchedule, func() {
-		o.diskGuard.evaluate(o.alerts)
-		o.refreshVaultDiskGuards(context.Background())
-		o.refreshBacklogBudget(context.Background())
-		o.diskGuard.evaluateVaults(o.alerts)
-	}); err != nil {
+	if err := o.scheduler.AddJob(diskGuardJobName, diskGuardSchedule, o.diskGuardTick); err != nil {
 		return fmt.Errorf("disk guard: %w", err)
 	}
 	o.scheduler.Describe(diskGuardJobName,
-		"Free-space guard: raises the disk-space alarm and suspends ingest admission below the floor or when a vault's backlog/size budget is reached")
+		"Free-space guard: raises the disk-space alarm and suspends ingest admission below the floor or when a vault's backlog budget or max-size bound is reached")
 	return nil
+}
+
+// diskGuardTick is the disk guard's scheduler job body — a named method
+// (not an inline closure) so a test can call the EXACT function object the
+// scheduler holds directly, rather than re-implementing its steps and
+// silently drifting from what actually runs in production. This is the
+// fix for gastrolog-9akebz's review finding: evaluateStorages had no
+// production call site (the closure only ran evaluate ->
+// refreshVaultDiskGuards -> refreshBacklogBudget -> evaluateVaults), so no
+// storage ever engaged protect/alarmed/broadcast on a live node — a
+// regression from the per-vault free-space pass evaluateVaults used to run
+// before the storage move.
+func (o *Orchestrator) diskGuardTick() {
+	o.diskGuard.evaluate(o.alerts)
+	o.refreshVaultDiskGuards(context.Background())
+	o.refreshBacklogBudget(context.Background())
+	o.diskGuard.evaluateStorages(o.alerts)
+	o.diskGuard.evaluateVaults(o.alerts)
 }

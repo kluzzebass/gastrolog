@@ -89,7 +89,7 @@ function addFormReducer(state: AddFormState, action: AddFormAction): AddFormStat
 
 // ─── Component ───────────────────────────────────────────────
 
-export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
+export function StorageSettings({ dark, onOpenInspector }: Readonly<{ dark: boolean; onOpenInspector?: (inspectorParam: string) => void }>) {
   const c = useThemeClass(dark);
   const { data: config, isLoading } = useConfig();
   const { data: settingsData } = useSettings();
@@ -150,6 +150,8 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
           name: a.name,
           path: a.path,
           memoryBudgetBytes: a.memoryBudgetBytes,
+          diskFreeWarn: a.diskFreeWarn,
+          diskFreeFloor: a.diskFreeFloor,
         })),
       });
       addToast("File storage removed", "info");
@@ -158,17 +160,29 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
     }
   };
 
-  const handleUpdateStorage = async (nodeId: string, storageId: string, edit: { name: string; path: string; storageClass: string }) => {
+  const handleUpdateStorage = async (nodeId: string, storageId: string, edit: { name: string; path: string; storageClass: string; diskFreeWarn: string; diskFreeFloor: string }) => {
     const nsc = nodeStorageConfigs.find((n) => encode(n.nodeId) === nodeId);
     const currentStorages = nsc?.fileStorages ?? [];
     const updated = currentStorages.map((a) => {
-      if (encode(a.id) !== storageId) return { id: encode(a.id), storageClass: a.storageClass, name: a.name, path: a.path, memoryBudgetBytes: a.memoryBudgetBytes };
+      if (encode(a.id) !== storageId) {
+        return {
+          id: encode(a.id),
+          storageClass: a.storageClass,
+          name: a.name,
+          path: a.path,
+          memoryBudgetBytes: a.memoryBudgetBytes,
+          diskFreeWarn: a.diskFreeWarn,
+          diskFreeFloor: a.diskFreeFloor,
+        };
+      }
       return {
         id: encode(a.id),
         storageClass: parseInt(edit.storageClass, 10) || 0,
         name: edit.name,
         path: edit.path,
         memoryBudgetBytes: a.memoryBudgetBytes,
+        diskFreeWarn: edit.diskFreeWarn,
+        diskFreeFloor: edit.diskFreeFloor,
       };
     });
     try {
@@ -187,6 +201,8 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
   const [storageClass, setStorageClass] = useState("");
   const [storageName, setStorageName] = useState("");
   const [storageNamePlaceholder, setStorageNamePlaceholder] = useState("");
+  const [storageDiskFreeWarn, setStorageDiskFreeWarn] = useState("");
+  const [storageDiskFreeFloor, setStorageDiskFreeFloor] = useState("");
   const openStorageForm = () => {
     setAddingStorage(true);
     setStorageNodeId(localNodeId);
@@ -199,6 +215,8 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
     setStorageClass("");
     setStorageName("");
     setStorageNamePlaceholder("");
+    setStorageDiskFreeWarn("");
+    setStorageDiskFreeFloor("");
   };
 
   const handleCreateStorage = async () => {
@@ -216,6 +234,8 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
       name,
       path,
       memoryBudgetBytes: BigInt(0),
+      diskFreeWarn: storageDiskFreeWarn,
+      diskFreeFloor: storageDiskFreeFloor,
     };
 
     const nsc = nodeStorageConfigs.find((n) => encode(n.nodeId) === targetNodeId);
@@ -226,6 +246,8 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
       name: a.name,
       path: a.path,
       memoryBudgetBytes: a.memoryBudgetBytes,
+      diskFreeWarn: a.diskFreeWarn,
+      diskFreeFloor: a.diskFreeFloor,
     })), newStorage];
 
     try {
@@ -294,6 +316,34 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
                   min={0}
                 />
               </FormField>
+              <FormField
+                label="Disk Free Warn"
+                dark={dark}
+                description="Free space on this storage below which the disk-space alarm raises. A size like 10GB, or a percentage of the volume like 10%. Empty inherits the node default."
+              >
+                <TextInput
+                  value={storageDiskFreeWarn}
+                  onChange={setStorageDiskFreeWarn}
+                  placeholder="10%"
+                  dark={dark}
+                  mono
+                  examples={["10%", "10GB", "50GB"]}
+                />
+              </FormField>
+              <FormField
+                label="Disk Free Floor"
+                dark={dark}
+                description="Free space below which every vault placed on this storage is refused cluster-wide until space frees. A size like 3GB, or a percentage of the volume like 3%. Empty inherits the node default."
+              >
+                <TextInput
+                  value={storageDiskFreeFloor}
+                  onChange={setStorageDiskFreeFloor}
+                  placeholder="3%"
+                  dark={dark}
+                  mono
+                  examples={["3%", "3GB", "10GB"]}
+                />
+              </FormField>
             </AddFormCard>
           </div>
         )}
@@ -338,6 +388,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
                     await handleRemoveStorage(nodeId, storageId);
                   }}
                   saving={setNodeStorage.isPending}
+                  onOpenInspector={onOpenInspector}
                 />
               ))}
             </div>

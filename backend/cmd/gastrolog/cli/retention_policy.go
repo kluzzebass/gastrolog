@@ -11,6 +11,17 @@ import (
 	v1 "gastrolog/api/gen/gastrolog/v1"
 )
 
+// formatRefuse renders the tri-state refuse flag for table/kv output.
+// Unset (nil) reads as false — the default (gastrolog-5yfaqj operator
+// decision: bounds are drain-first; refusal is the explicit hard mode) —
+// same as system.RetentionPolicyConfig.RefuseEnabled().
+func formatRefuse(v *bool) string {
+	if v != nil && *v {
+		return "true"
+	}
+	return "false"
+}
+
 func newRetentionPolicyCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "retention-policy",
@@ -47,9 +58,10 @@ func newRetentionPolicyListCmd() *cobra.Command {
 					rp.MaxAge,
 					rp.MaxSize,
 					formatInt64(rp.MaxChunks),
+					formatRefuse(rp.Refuse),
 				})
 			}
-			p.table([]string{"ID", "NAME", "MAX AGE", "MAX SIZE", "MAX CHUNKS"}, rows)
+			p.table([]string{"ID", "NAME", "MAX AGE", "MAX SIZE", "MAX CHUNKS", "REFUSE"}, rows)
 			return nil
 		},
 	}
@@ -86,6 +98,7 @@ func newRetentionPolicyGetCmd() *cobra.Command {
 						{"Max Age", rp.MaxAge},
 						{"Max Size", rp.MaxSize},
 						{"Max Chunks", formatInt64(rp.MaxChunks)},
+						{"Refuse", formatRefuse(rp.Refuse)},
 					})
 					return nil
 				}
@@ -131,6 +144,10 @@ func newRetentionPolicyCreateCmd() *cobra.Command {
 			if cmd.Flags().Changed("max-chunks") {
 				cfg.MaxChunks, _ = cmd.Flags().GetInt64("max-chunks")
 			}
+			if cmd.Flags().Changed("refuse") {
+				refuse, _ := cmd.Flags().GetBool("refuse")
+				cfg.Refuse = &refuse
+			}
 
 			_, err = client.System.PutRetentionPolicy(ctx, connect.NewRequest(&v1.PutRetentionPolicyRequest{
 				Config: cfg,
@@ -147,8 +164,11 @@ func newRetentionPolicyCreateCmd() *cobra.Command {
 	}
 	cmd.Flags().String("name", "", "policy name (required)")
 	cmd.Flags().String("max-age", "", "max age (e.g. 3m, 1h, 30s)")
-	cmd.Flags().String("max-size", "", "max total size retained (e.g. \"50GB\", \"1GiB\"; empty = no limit)")
+	cmd.Flags().String("max-size", "", "vault's disk-claim bound (e.g. \"50GB\", \"1GiB\"; empty = no bound from this policy): oldest sealed chunks drain past it, and admission refuses cluster-wide while the vault's local claim is at/over it. Drain mins across all attached policies; the refuse side mins across refuse-enabled ones only")
 	cmd.Flags().Int64("max-chunks", 0, "max chunks")
+	cmd.Flags().Bool("refuse", false, "while any set bound (max-age, max-size, max-chunks) is violated, refuse admission cluster-wide — the explicit \"hard bound\" opt-in. "+
+		"Default off: a \"soft bound\" that drains past its bounds but leaves refusal to the node-level disk guard backstop only. "+
+		"max-size's refuse check is instantaneous; max-age/max-chunks refuse only once a retention sweep has run and failed to clear the violation")
 	_ = cmd.MarkFlagRequired("name")
 	return cmd
 }

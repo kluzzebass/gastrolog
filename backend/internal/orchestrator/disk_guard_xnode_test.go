@@ -26,19 +26,19 @@ func TestVaultAdmissionGateHonorsPeerBroadcast(t *testing.T) {
 	ttl := time.Minute
 	ps := cluster.NewPeerState(ttl)
 	// Peer "node-a" broadcasts that it has one vault below its disk floor and
-	// one at its size budget.
+	// one at its max-size bound.
 	ps.Update("node-a", &gastrologv1.NodeStats{
-		DiskProtectedVaultIds: [][]byte{protectedElsewhere.ToProto()},
-		SizeCappedVaultIds:    [][]byte{cappedElsewhere.ToProto()},
+		StorageProtectedVaultIds: [][]byte{protectedElsewhere.ToProto()},
+		SizeCappedVaultIds:       [][]byte{cappedElsewhere.ToProto()},
 	}, time.Now())
 
 	// This node has no local guard state; only the peer broadcast informs it —
 	// exactly the common case, since the starved volume is usually elsewhere.
 	o := &Orchestrator{}
-	o.SetRemoteVaultDiskProtected(ps.VaultDiskProtected)
+	o.SetRemoteVaultStorageProtected(ps.VaultStorageProtected)
 	o.SetRemoteVaultSizeCapped(ps.VaultSizeCapped)
 
-	if err := o.vaultAdmissionGate(protectedElsewhere); !errors.Is(err, ErrVaultDiskProtect) {
+	if err := o.vaultAdmissionGate(protectedElsewhere); !errors.Is(err, ErrStorageDiskProtect) {
 		t.Fatalf("vault protected on a peer must be refused here: got %v", err)
 	}
 	if err := o.vaultAdmissionGate(cappedElsewhere); !errors.Is(err, ErrVaultMaxSize) {
@@ -51,8 +51,8 @@ func TestVaultAdmissionGateHonorsPeerBroadcast(t *testing.T) {
 	// The reporting peer goes silent past the TTL: its verdicts expire, and
 	// admission reopens here — a dead peer must not wedge a vault shut forever.
 	ps.Update("node-a", &gastrologv1.NodeStats{
-		DiskProtectedVaultIds: [][]byte{protectedElsewhere.ToProto()},
-		SizeCappedVaultIds:    [][]byte{cappedElsewhere.ToProto()},
+		StorageProtectedVaultIds: [][]byte{protectedElsewhere.ToProto()},
+		SizeCappedVaultIds:       [][]byte{cappedElsewhere.ToProto()},
 	}, time.Now().Add(-2*ttl))
 	if err := o.vaultAdmissionGate(protectedElsewhere); err != nil {
 		t.Fatalf("expired peer protect must reopen admission: %v", err)

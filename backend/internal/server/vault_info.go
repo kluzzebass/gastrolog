@@ -152,6 +152,13 @@ func (s *VaultServer) buildVaultStats(ctx context.Context, vaultID glid.GLID, me
 }
 
 func (s *VaultServer) accumulateChunkBytes(stat *apiv1.VaultStats, vaultID glid.GLID, meta chunk.ChunkMeta) {
+	// An evicted cloud-backed chunk has nothing local to reclaim — it must
+	// not fall back to logical Bytes (the object still exists in the cloud
+	// store, at CloudBytes, a currency this local-disk stat never touches).
+	// Same rule as chunk.DiskClaim. See gastrolog-33ul6h.
+	if meta.CloudBacked && meta.DiskBytes == 0 {
+		return
+	}
 	if meta.DiskBytes > 0 {
 		stat.DataBytes += meta.DiskBytes
 		return
@@ -340,8 +347,54 @@ func (s *VaultServer) vaultInfoFromConfig(cfg system.VaultConfig, localSet map[g
 		info.Remote = true
 		s.enrichRemoteVaultInfo(info, cfg.ID)
 	}
+	s.fillAdmissionRefused(info, cfg.ID)
 
 	return info
+}
+
+// fillAdmissionRefused populates VaultInfo.AdmissionRefused from the
+// orchestrator's admission-causes collector — the responding node's own view
+// (local disk guard + its live-peer broadcasts), the same cluster-aware
+// inputs vaultAdmissionGate itself consults. This is deliberately NOT gated
+// on whether the vault is locally placed: storage protect and max-size
+// causes already fold in peer broadcasts, and the backlog budget is
+// FSM-replicated, so the collector reports the correct cluster-wide verdict
+// for local and remote vaults alike. Each entry carries the backend's own
+// detail text for that cause (gastrolog-9akebz) — which storage and its
+// free-vs-floor numbers, or the bound kind and value — never a client-side
+// reconstruction.
+func (s *VaultServer) fillAdmissionRefused(info *apiv1.VaultInfo, id glid.GLID) {
+	causes := s.orch.VaultAdmissionCauseDetails(id)
+	if len(causes) == 0 {
+		return
+	}
+	info.AdmissionRefused = make([]*apiv1.VaultAdmissionRefusal, len(causes))
+	for i, c := range causes {
+		info.AdmissionRefused[i] = &apiv1.VaultAdmissionRefusal{
+			Cause:  admissionCauseToProto(c.Cause),
+			Detail: c.Detail,
+		}
+	}
+}
+
+// admissionCauseToProto maps the orchestrator's proto-free cause enum to the
+// wire enum. UNSPECIFIED for anything unrecognized — defense in depth; every
+// value orchestrator emits today is handled.
+func admissionCauseToProto(c orchestrator.VaultAdmissionCause) apiv1.VaultAdmissionCause {
+	switch c {
+	case orchestrator.VaultAdmissionCauseStorageDiskProtect:
+		return apiv1.VaultAdmissionCause_VAULT_ADMISSION_CAUSE_STORAGE_DISK_PROTECT
+	case orchestrator.VaultAdmissionCauseMaxSizeBound:
+		return apiv1.VaultAdmissionCause_VAULT_ADMISSION_CAUSE_MAX_SIZE_BOUND
+	case orchestrator.VaultAdmissionCauseBacklogBudget:
+		return apiv1.VaultAdmissionCause_VAULT_ADMISSION_CAUSE_BACKLOG_BUDGET
+	case orchestrator.VaultAdmissionCauseAgeBound:
+		return apiv1.VaultAdmissionCause_VAULT_ADMISSION_CAUSE_AGE_BOUND
+	case orchestrator.VaultAdmissionCauseChunkCountBound:
+		return apiv1.VaultAdmissionCause_VAULT_ADMISSION_CAUSE_CHUNK_COUNT_BOUND
+	default:
+		return apiv1.VaultAdmissionCause_VAULT_ADMISSION_CAUSE_UNSPECIFIED
+	}
 }
 
 func (s *VaultServer) enrichLocalVaultInfo(info *apiv1.VaultInfo, id glid.GLID) {
@@ -386,6 +439,7 @@ func (s *VaultServer) vaultInfoFromLocal(ctx context.Context, id glid.GLID) *api
 			info.RecordCount += m.RecordCount
 		}
 	}
+	s.fillAdmissionRefused(info, id)
 
 	return info
 }
@@ -397,6 +451,7 @@ func ChunkMetaToProto(meta chunk.ChunkMeta) *apiv1.ChunkMeta {
 		RecordCount:  meta.RecordCount,
 		Bytes:        meta.Bytes,
 		DiskBytes:    meta.DiskBytes,
+		CloudBytes:   meta.CloudBytes,
 		CloudBacked:  meta.CloudBacked,
 		Archived:     meta.Archived,
 		StorageClass: meta.StorageClass,

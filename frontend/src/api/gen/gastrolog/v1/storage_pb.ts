@@ -4,7 +4,7 @@
 // @ts-nocheck
 
 import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialMessage, PlainMessage } from "@bufbuild/protobuf";
-import { Message, proto3, protoInt64 } from "@bufbuild/protobuf";
+import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
 
 /**
  * FileStorage declares a locally-attached storage resource on a node.
@@ -39,6 +39,25 @@ export class FileStorage extends Message<FileStorage> {
    */
   memoryBudgetBytes = protoInt64.zero;
 
+  /**
+   * Disk-guard free-space thresholds for this storage: an absolute size
+   * ("10GB") or a percentage of the volume ("10%"), resolved against the
+   * volume actually sampled. Empty inherits the node defaults (10%/3%).
+   * Warn raises the disk-space alarm naming this storage; floor puts
+   * every vault placed here into admission refuse (cause
+   * STORAGE_DISK_PROTECT) while vaults on healthy storages keep
+   * ingesting. gastrolog-9akebz: moved off VaultConfig — the thresholds
+   * guard the volume, not the vaults sharing it.
+   *
+   * @generated from field: string disk_free_warn = 6;
+   */
+  diskFreeWarn = "";
+
+  /**
+   * @generated from field: string disk_free_floor = 7;
+   */
+  diskFreeFloor = "";
+
   constructor(data?: PartialMessage<FileStorage>) {
     super();
     proto3.util.initPartial(data, this);
@@ -52,6 +71,8 @@ export class FileStorage extends Message<FileStorage> {
     { no: 3, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 4, name: "path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 5, name: "memory_budget_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 6, name: "disk_free_warn", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 7, name: "disk_free_floor", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): FileStorage {
@@ -321,6 +342,186 @@ export class CloudService extends Message<CloudService> {
 
   static equals(a: CloudService | PlainMessage<CloudService> | undefined, b: CloudService | PlainMessage<CloudService> | undefined): boolean {
     return proto3.util.equals(CloudService, a, b);
+  }
+}
+
+/**
+ * StorageState is one storage's disk-guard state — published only by the
+ * node that owns the volume (only that node can statfs it) and merged
+ * cluster-wide via the NodeStats broadcast, the same channel VaultStats and
+ * VaultPipelineNodeDisk already use for per-node runtime signals
+ * (gastrolog-3cobq4). Identity/threshold-expression fields are config-
+ * derived (refreshed on the guard's discovery tick, same freshness contract
+ * as the rest of the disk guard); free/total/verdicts come from the last
+ * statfs sample. Every verdict/threshold field here is the server-computed
+ * value the admission gate itself consults — never a client-side
+ * derivation from free/total (operator directive, gastrolog-9akebz).
+ *
+ * @generated from message gastrolog.v1.StorageState
+ */
+export class StorageState extends Message<StorageState> {
+  /**
+   * @generated from field: bytes id = 1;
+   */
+  id = new Uint8Array(0);
+
+  /**
+   * @generated from field: string name = 2;
+   */
+  name = "";
+
+  /**
+   * @generated from field: string path = 3;
+   */
+  path = "";
+
+  /**
+   * operator-facing node display name, pre-resolved
+   *
+   * @generated from field: string node_name = 4;
+   */
+  nodeName = "";
+
+  /**
+   * @generated from field: uint32 storage_class = 5;
+   */
+  storageClass = 0;
+
+  /**
+   * node_id is the owning node's raw ID, wire-encoded the same way
+   * NodeStorageConfig.node_id already is ([]byte(nodeID) — a UTF-8 string
+   * cast, not raw GLID bytes; frontend id.ts/glid.ts's encode() already
+   * handles this dual convention). node_name stays the display label; this
+   * is the stable join key for grouping/filtering storages by node
+   * (gastrolog-3cobq4 review: name-based joins collide/rename-race).
+   *
+   * @generated from field: bytes node_id = 18;
+   */
+  nodeId = new Uint8Array(0);
+
+  /**
+   * Threshold expressions in EFFECTIVE form ("10%", "10GB") — never empty:
+   * the storage's own explicit expression when set, otherwise the built-in
+   * default the guard actually resolves against. There is no configurable
+   * node-level override to inherit from (gastrolog-2mrfdw removed the env
+   * channel), so an unset storage expression is DEFAULTED, not inherited
+   * from anything operator-configurable — *_is_default says which case
+   * applies, never left for a client to infer by matching a hardcoded
+   * literal (gastrolog-3cobq4 review: the earlier warn_inherited naming
+   * implied a configurable parent that doesn't exist).
+   *
+   * @generated from field: string warn_expr = 6;
+   */
+  warnExpr = "";
+
+  /**
+   * @generated from field: string floor_expr = 7;
+   */
+  floorExpr = "";
+
+  /**
+   * @generated from field: bool warn_is_default = 8;
+   */
+  warnIsDefault = false;
+
+  /**
+   * @generated from field: bool floor_is_default = 9;
+   */
+  floorIsDefault = false;
+
+  /**
+   * Effective thresholds resolved in bytes against the last sampled volume
+   * total — the numbers admission actually compares free space to.
+   *
+   * @generated from field: uint64 warn_bytes = 10;
+   */
+  warnBytes = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 floor_bytes = 11;
+   */
+  floorBytes = protoInt64.zero;
+
+  /**
+   * Last statfs sample on the owning node.
+   *
+   * @generated from field: uint64 free_bytes = 12;
+   */
+  freeBytes = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 total_bytes = 13;
+   */
+  totalBytes = protoInt64.zero;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp sampled_at = 14;
+   */
+  sampledAt?: Timestamp;
+
+  /**
+   * Server-computed verdicts (hysteresis-aware — the same state the
+   * admission gate consults), never derived client-side from free/warn/floor.
+   *
+   * @generated from field: bool warn_verdict = 15;
+   */
+  warnVerdict = false;
+
+  /**
+   * @generated from field: bool protect_verdict = 16;
+   */
+  protectVerdict = false;
+
+  /**
+   * Vault IDs with a config placement on this storage — config-derived, so
+   * correct even before the next guard sample.
+   *
+   * @generated from field: repeated bytes placed_vault_ids = 17;
+   */
+  placedVaultIds: Uint8Array[] = [];
+
+  constructor(data?: PartialMessage<StorageState>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.StorageState";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "node_name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 5, name: "storage_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 18, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 6, name: "warn_expr", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 7, name: "floor_expr", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 8, name: "warn_is_default", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 9, name: "floor_is_default", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 10, name: "warn_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 11, name: "floor_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 12, name: "free_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 13, name: "total_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 14, name: "sampled_at", kind: "message", T: Timestamp },
+    { no: 15, name: "warn_verdict", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 16, name: "protect_verdict", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 17, name: "placed_vault_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): StorageState {
+    return new StorageState().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): StorageState {
+    return new StorageState().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): StorageState {
+    return new StorageState().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: StorageState | PlainMessage<StorageState> | undefined, b: StorageState | PlainMessage<StorageState> | undefined): boolean {
+    return proto3.util.equals(StorageState, a, b);
   }
 }
 

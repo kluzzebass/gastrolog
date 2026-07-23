@@ -134,13 +134,37 @@ var catalog = []AlarmType{
 		Response: "Retries automatically. Only actionable once retries stop resolving it: investigate disk health on this node.",
 	},
 	{
-		IDPrefix: "retention-route-deferred",
+		IDPrefix: "cloud-backfill-stuck",
+		Priority: High,
+		Source:   "cloud-health",
+		// Same backoff schedule as chunk-unreadable (5m first retry, same
+		// unreadableBackoff schedule reused directly): the DelayOn window
+		// keeps a blip that clears on the very next retry from ever
+		// annunciating, while a chunk still failing past it does.
+		DelayOn:  10 * time.Minute,
+		Cause:    "A sealed chunk's cloud-backfill upload has kept failing after a chunk-manager registration repair was attempted; the chunk is not converging to cloud-backed on its own.",
+		Response: "Read the alarm detail for the last upload error. If the chunk's GLCB is missing on disk, restore it from a peer holder or accept the gap; otherwise check cloud store credentials/connectivity and disk health on the named node.",
+	},
+	{
+		IDPrefix: "retention-deferred",
 		Priority: High,
 		Source:   "retention",
 		// The consecutive-sweep count at the call site is the condition
 		// definition (like chunking-underreplicated's window), so no DelayOn.
-		Cause:    "Route-disposition retention on this vault has been unable to fan out for consecutive sweeps — the only mechanism that drains the vault is deferred, so expired chunks accumulate and any size caps stay engaged.",
-		Response: "Read the alarm detail for the deferral cause: free space on the starved volume (the drain resumes once free clears the floor band), drain or grow the destination vault, or — last resort, discards the routed records — set the vault's retention disposition to delete.",
+		// Covers both non-delete dispositions that can stall (gastrolog-2l918
+		// generalized this from route-only): route fan-out and transfer.
+		Cause:    "Retention on this vault has been unable to complete its configured disposition (route fan-out or transfer) for consecutive sweeps — the only mechanism that drains the vault is deferred, so expired chunks accumulate and any size caps stay engaged.",
+		Response: "Read the alarm detail for the deferral cause and disposition: free space on the starved volume (the drain resumes once free clears the floor band), drain or grow the destination/target vault, or — last resort, discards the records — set the vault's retention disposition to delete.",
+	},
+	{
+		IDPrefix: "retention-unenforceable",
+		Priority: High,
+		Source:   "retention",
+		// The condition is config-derived and static (not a transient
+		// mid-election or mid-flap state), so no DelayOn -- unlike
+		// vault-leaderless, a trigger-less policy doesn't resolve itself.
+		Cause:    "The vault has retention_rules configured, but every referenced retention policy resolves with no trigger set (no maxAge, maxSize, or maxChunks) -- the vault's only drain never runs. The refuse-only creation-default floor still bounds the vault, so data is not unbounded, but it accumulates up to that floor and then admission refuses -- there is no drain to keep the vault small or recover space.",
+		Response: "Read the alarm detail for which policies resolved with no trigger. Add a maxAge, maxSize, or maxChunks to at least one referenced policy -- maxSize alone is enough to both bound the vault and enable draining (it drains oldest chunks past the bound regardless of the refuse flag); add refuse=true to also refuse admission while over it, since refuse now defaults off. Do NOT remove the vault's retention_rules to silence this -- detaching every policy also detaches any maxSize they carried, collapsing the vault back to the untyped creation-default floor instead of the operator's intended bound.",
 	},
 	{
 		IDPrefix: "chunk-suspect",
@@ -224,15 +248,37 @@ var catalog = []AlarmType{
 		IDPrefix: "vault-max-size-capped",
 		Priority: High, // refused ingest is not lost data
 		Source:   "storage",
-		Cause:    "The vault is at its size budget; new records for this vault are refused.",
-		Response: "Raise the budget or shorten retention. This vault is refusing records now; others are unaffected.",
+		Cause:    "The vault is at its max-size bound; new records for this vault are refused.",
+		Response: "Raise the bound (set a larger max size on an attached retention policy) or shorten retention. This vault is refusing records now; others are unaffected.",
 	},
 	{
+		// gastrolog-5yfaqj: generalizes refusal from max-size (above, its
+		// own already-shipped alarm pair, unchanged) to max-age and
+		// max-chunks. One type, cause named in the detail text and
+		// disambiguated in the entity key (<vault>/age, <vault>/count) so
+		// both can stand on one vault at once. No "approaching" variant —
+		// unlike max-size this isn't an instantaneous measurement to lead
+		// with, it's a sweep verdict (violated, swept, still violated),
+		// and alarms-no-ceremony argues against inventing a lead-in for
+		// something clock-free.
+		IDPrefix: "vault-bound-capped",
+		Priority: High, // refused ingest is not lost data
+		Source:   "retention",
+		Cause:    "A retention policy's max-age or max-chunks bound is still violated after retention swept and attempted to clear it; new records for this vault are refused. Only happens when the stating policy has refuse enabled explicitly — refuse defaults off, so a plain drain-only policy never refuses.",
+		Response: "Read the alarm detail for which bound and vault. If retention-deferred is also standing for this vault, that names why the sweep isn't clearing it; otherwise raise the bound, shorten it enough that draining can keep up, or turn the policy's refuse flag off (or simply leave it unset) to accept drain-only.",
+	},
+	{
+		// gastrolog-9akebz: the free-space thresholds moved from VaultConfig
+		// to the storage entity a vault's placements reference, and the
+		// guard evaluates each storage ONCE — the instance key is the
+		// storage ID (was the vault ID), and the detail text names the
+		// storage and its node, since every vault placed there refuses
+		// together for the same physical condition.
 		IDPrefix: "disk-space-exhausted",
 		Priority: High, // suspended admission is not lost data
 		Source:   "storage",
-		Cause:    "The vault's volume is out of space; admission for this vault is suspended.",
-		Response: "Free space, add capacity, raise the vault's threshold, or shorten its retention.",
+		Cause:    "A storage is out of space; admission for every vault placed on it is suspended.",
+		Response: "Free space, add capacity, raise the storage's threshold, or shorten retention for the vaults placed on it.",
 	},
 	{
 		IDPrefix: "node-disk-space-exhausted",
@@ -261,15 +307,17 @@ var catalog = []AlarmType{
 		IDPrefix: "vault-max-size-approaching",
 		Priority: Low,
 		Source:   "storage",
-		Cause:    "The vault is approaching its size budget.",
-		Response: "Raise the budget or shorten retention — before records start being refused.",
+		Cause:    "The vault is approaching its max-size bound.",
+		Response: "Raise the bound (set a larger max size on an attached retention policy) or shorten retention — before records start being refused.",
 	},
 	{
+		// gastrolog-9akebz: instance key is the storage ID (was the vault
+		// ID) — see disk-space-exhausted's comment.
 		IDPrefix: "disk-space-low",
 		Priority: Low,
 		Source:   "storage",
-		Cause:    "The vault's volume is below its free-space warn band.",
-		Response: "Free space, add capacity, raise the vault's threshold, or shorten its retention.",
+		Cause:    "A storage is below its free-space warn band.",
+		Response: "Free space, add capacity, raise the storage's threshold, or shorten retention for the vaults placed on it.",
 	},
 	{
 		IDPrefix: "retention-rate",
@@ -337,7 +385,7 @@ func unregisteredAlarmType(typeID string) AlarmType {
 		IDPrefix:      typeID,
 		SoftwareFault: true,
 		Source:        "alarm-system",
-		Cause:           "A component raised an alarm type that is not in the alarm catalog. The underlying condition is real (see the detail text) but its priority and guidance are undocumented — a software defect in the raising component.",
-		Response:        "Report this, quoting the alarm ID and detail text. Treat the detail text as the condition description until the catalog entry exists.",
+		Cause:         "A component raised an alarm type that is not in the alarm catalog. The underlying condition is real (see the detail text) but its priority and guidance are undocumented — a software defect in the raising component.",
+		Response:      "Report this, quoting the alarm ID and detail text. Treat the detail text as the condition description until the catalog entry exists.",
 	}
 }

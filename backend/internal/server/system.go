@@ -63,6 +63,7 @@ type SystemServerConfig struct {
 	CertManager          CertManager
 	PeerStats            PeerIngesterStatsProvider
 	PeerRouteStats       PeerRouteStatsProvider
+	PeerStorageStats     PeerStorageStatsProvider
 	LocalNodeID          string
 	AfterConfigApply     func(raftfsm.Notification)
 	ConfigSignal         *notify.Signal
@@ -92,6 +93,7 @@ type SystemServer struct {
 	certManager          CertManager
 	peerStats            PeerIngesterStatsProvider
 	peerRouteStats       PeerRouteStatsProvider
+	peerStorageStats     PeerStorageStatsProvider
 	localStats           func() *apiv1.NodeStats
 	clusterRouteRates    func() (*apiv1.ThroughputRate, *apiv1.ThroughputRate)
 	localNodeID          string
@@ -120,6 +122,7 @@ func NewSystemServer(cfg SystemServerConfig) *SystemServer {
 		certManager:          cfg.CertManager,
 		peerStats:            cfg.PeerStats,
 		peerRouteStats:       cfg.PeerRouteStats,
+		peerStorageStats:     cfg.PeerStorageStats,
 		localStats:           cfg.LocalStats,
 		clusterRouteRates:    cfg.ClusterRouteRates,
 		localNodeID:          cfg.LocalNodeID,
@@ -446,6 +449,8 @@ func (s *SystemServer) loadConfigNodeStorageConfigs(ctx context.Context, resp *a
 				Name:              a.Name,
 				Path:              a.Path,
 				MemoryBudgetBytes: a.MemoryBudgetBytes,
+				DiskFreeWarn:      a.DiskFreeWarn,
+				DiskFreeFloor:     a.DiskFreeFloor,
 			}
 		}
 		resp.NodeStorageConfigs = append(resp.NodeStorageConfigs, &apiv1.NodeStorageConfig{

@@ -93,11 +93,16 @@ func EncodeObjectMetadata(bm BlobMeta) map[string]string {
 func DecodeObjectMetadata(id chunk.ChunkID, info blobstore.BlobInfo) (chunk.ChunkMeta, error) {
 	md := newMetaLookup(info.Metadata)
 
+	// info.Size is the cloud object's own size — CloudBytes, not DiskBytes.
+	// This ChunkMeta is built straight from the cloud store's blob listing;
+	// the caller (loadCloudBackedChunksFromStore) fills in the LOCAL
+	// DiskBytes separately, from whatever this node actually has cached on
+	// disk (0 if nothing). See gastrolog-33ul6h.
 	meta := chunk.ChunkMeta{
-		ID:        id,
-		Sealed:    true,
-		DiskBytes: info.Size,
-		Bytes:     info.Size, // overwritten below when raw_bytes is known
+		ID:         id,
+		Sealed:     true,
+		CloudBytes: info.Size,
+		Bytes:      info.Size, // overwritten below when raw_bytes is known
 	}
 
 	if v, ok := md.get(metaKeyRawBytes); ok {
@@ -154,17 +159,20 @@ func DecodeObjectMetadata(id chunk.ChunkID, info blobstore.BlobInfo) (chunk.Chun
 // object metadata is unreadable (DecodeObjectMetadata returned an error): the
 // footer is trusted, the object-metadata cache is not.
 //
-// diskBytes is the on-disk / on-wire size of the blob (BlobMeta does not carry
-// it); Bytes falls back to it only when the footer's RawBytes is unknown.
-func BlobMetaToChunkMeta(bm BlobMeta, diskBytes int64) chunk.ChunkMeta {
+// cloudBytes is the on-wire size of the cloud object (BlobMeta does not
+// carry it — the only caller is the cloud-blob-footer fallback, so this is
+// always the compressed blob's size, never a local on-disk fact). Bytes
+// falls back to it only when the footer's RawBytes is unknown. The caller
+// fills in the LOCAL DiskBytes separately. See gastrolog-33ul6h.
+func BlobMetaToChunkMeta(bm BlobMeta, cloudBytes int64) chunk.ChunkMeta {
 	bytes := bm.RawBytes
 	if bytes <= 0 {
-		bytes = diskBytes
+		bytes = cloudBytes
 	}
 	return chunk.ChunkMeta{
 		ID:                bm.ChunkID,
 		Sealed:            true,
-		DiskBytes:         diskBytes,
+		CloudBytes:        cloudBytes,
 		Bytes:             bytes,
 		RecordCount:       int64(bm.RecordCount),
 		WriteStart:        bm.WriteStart,

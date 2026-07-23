@@ -43,14 +43,14 @@ func TestLifecycle_StandingReleasesOnClear(t *testing.T) {
 	clock := newSuppressionClock()
 	c := NewWithClock(clock.Now)
 
-	c.Raise("disk-space-exhausted", "vault-1", "volume full")
-	mustStanding(t, c, "disk-space-exhausted:vault-1")
+	c.Raise("disk-space-exhausted", "storage-1", "volume full")
+	mustStanding(t, c, "disk-space-exhausted:storage-1")
 	if got := c.Count(); got != 1 {
 		t.Fatalf("Count = %d, want 1", got)
 	}
 
-	c.Clear("disk-space-exhausted", "vault-1")
-	mustGone(t, c, "disk-space-exhausted:vault-1")
+	c.Clear("disk-space-exhausted", "storage-1")
+	mustGone(t, c, "disk-space-exhausted:storage-1")
 	if got := c.Count(); got != 0 {
 		t.Fatalf("Count = %d after clear, want 0", got)
 	}

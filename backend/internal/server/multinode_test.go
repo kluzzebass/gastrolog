@@ -70,6 +70,7 @@ type multiNodeHarness struct {
 	peerRouteStats    *mnPeerRouteStats
 	peerIngesterStats *mnPeerIngesterStats
 	peerVaultStats    *mnPeerVaultStats
+	peerStorageStats  *mnPeerStorageStats
 	// alerts is each node's alert.Collector; populated only with
 	// WithClusterStats (gastrolog-33d9n2).
 	alerts map[string]*alert.Collector
@@ -116,6 +117,13 @@ type mnConfig struct {
 	// alertClock, when set, is the deterministic clock every node's
 	// alert.Collector runs on (gastrolog-4wvxqh).
 	alertClock func() time.Time
+	// diskGuardNodes is the set of node IDs whose orchestrator gets a
+	// DiskGuardPaths entry (its own SegmentsDir tmpdir), starting the real
+	// disk-guard scheduler job (gastrolog-3cobq4). Off by default — most
+	// multi-node tests have no use for a live statfs job ticking every 15s
+	// in the background — so tests that DO need it (waiting for a real
+	// tick) opt in per node via WithDiskGuard.
+	diskGuardNodes map[string]bool
 }
 
 // WithoutVault creates a node that has an orchestrator but no vault.
@@ -143,6 +151,21 @@ func WithEnvironment(label, color string) mnOption {
 func WithClusterStats() mnOption {
 	return func(c *mnConfig) {
 		c.clusterStats = true
+	}
+}
+
+// WithDiskGuard starts the real disk-guard scheduler job (15s cadence) on
+// the given nodes, pointed at each node's own SegmentsDir tmpdir
+// (gastrolog-3cobq4). Needed only by tests that wait for a live
+// refreshVaultDiskGuards/evaluateStorages tick — there is no test-only
+// trigger for that unexported cron job reachable from this external
+// package (same constraint retention_unenforceable_multinode_test.go
+// documents for the retention sweep).
+func WithDiskGuard(nodeIDs ...string) mnOption {
+	return func(c *mnConfig) {
+		for _, id := range nodeIDs {
+			c.diskGuardNodes[id] = true
+		}
 	}
 }
 
@@ -182,7 +205,7 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 		t.Fatal("setupMultiNode requires at least 2 node IDs")
 	}
 
-	cfg := &mnConfig{noVault: make(map[string]bool)}
+	cfg := &mnConfig{noVault: make(map[string]bool), diskGuardNodes: make(map[string]bool)}
 	for _, opt := range opts {
 		opt(cfg)
 	}
@@ -192,12 +215,33 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 	cfgStore := sysmem.NewStore()
 	ctx := context.Background()
 
+	// Per-node alert collectors, built BEFORE node creation so each
+	// orchestrator can be wired to its own collector at construction time
+	// (gastrolog-1xl29s): orchestrator.Config.Alerts has no post-construction
+	// setter, so wiring it late (as this used to, further down where the
+	// GetClusterStatus stats collectors are built) left every node's own
+	// orch.alerts nil — production alarm-raising code (o.alerts.Raise(...))
+	// never actually ran in any multi-node test; only tests that called
+	// h.alerts[id].Raise(...) directly on the bare collector worked. Assigned
+	// conditionally so tests without the option keep the nil interfaces of
+	// single-node mode.
+	alertsByNode := make(map[string]*alert.Collector, len(nodeIDs))
+	if cfg.clusterStats {
+		for _, id := range nodeIDs {
+			ac := alert.New()
+			if cfg.alertClock != nil {
+				ac = alert.NewWithClock(cfg.alertClock)
+			}
+			alertsByNode[id] = ac
+		}
+	}
+
 	// Create all nodes.
 	for _, id := range nodeIDs {
 		if cfg.noVault[id] {
-			nodes[id] = setupMNNodeNoVault(t, id, cfgStore)
+			nodes[id] = setupMNNodeNoVault(t, id, cfgStore, alertsByNode[id], cfg.diskGuardNodes[id])
 		} else {
-			node := setupMNNode(t, id, cfgStore)
+			node := setupMNNode(t, id, cfgStore, alertsByNode[id], cfg.diskGuardNodes[id])
 			// Write VaultConfig directly with all storage fields, plus a
 			// synthetic placement for this node.
 			placements := []system.VaultPlacement{
@@ -237,22 +281,13 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 	peerRouteStats := &mnPeerRouteStats{nodes: peerRouteNodes}
 	peerIngesterStats := &mnPeerIngesterStats{nodes: peerRouteNodes}
 	peerVaultStats := &mnPeerVaultStats{nodes: peerRouteNodes}
+	peerStorageStats := &mnPeerStorageStats{nodes: peerRouteNodes}
 
 	vaultsDir := t.TempDir()
 
-	// Per-node alert collectors + stats collectors behind GetClusterStatus
-	// (gastrolog-33d9n2). Assigned conditionally so tests without the option
-	// keep the nil interfaces of single-node mode.
-	alertsByNode := make(map[string]*alert.Collector, len(nodeIDs))
-	if cfg.clusterStats {
-		for _, id := range nodeIDs {
-			ac := alert.New()
-			if cfg.alertClock != nil {
-				ac = alert.NewWithClock(cfg.alertClock)
-			}
-			alertsByNode[id] = ac
-		}
-	}
+	// alertsByNode (per-node alert collectors, feeding the GetClusterStatus
+	// stats collectors below) was built earlier, before node creation — see
+	// that block's comment.
 
 	routingFwd := newDirectUnaryForwarder(t, nodes, cfgStore, coordinatorID, vaultsDir)
 
@@ -266,6 +301,7 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 		PeerRouteStats:    peerRouteStats,
 		PeerIngesterStats: peerIngesterStats,
 		PeerVaultStats:    peerVaultStats,
+		PeerStorageStats:  peerStorageStats,
 		EnvironmentLabel:  cfg.environmentLabel,
 		EnvironmentColor:  cfg.environmentColor,
 	}
@@ -319,15 +355,38 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 		peerRouteStats:    peerRouteStats,
 		peerIngesterStats: peerIngesterStats,
 		peerVaultStats:    peerVaultStats,
+		peerStorageStats:  peerStorageStats,
 		alerts:            alertsByNode,
 		routingFwd:        routingFwd,
 	}
 }
 
-func setupMNNode(t *testing.T, nodeID string, loader system.Store) multinodeTestNode {
+// mnOrchConfig builds the common orchestrator.Config shared by
+// setupMNNode/setupMNNodeNoVault. alerts is nil for harnesses that didn't
+// ask for WithClusterStats/WithAlertClock — left unset rather than
+// assigned as a typed-nil alert.Sink, which would make o.alerts != nil
+// true while every method call on it panics on the nil *alert.Collector
+// receiver.
+func mnOrchConfig(nodeID string, loader system.Store, tmpDir string, alerts *alert.Collector, diskGuard bool) orchestrator.Config {
+	cfg := orchestrator.Config{LocalNodeID: nodeID, SystemLoader: loader, SegmentsDir: filepath.Join(tmpDir, "segments")}
+	if alerts != nil {
+		cfg.Alerts = alerts
+	}
+	if diskGuard {
+		// The disk-guard scheduler job (refreshVaultDiskGuards/
+		// evaluateStorages, 15s cadence) only registers when at least one
+		// path is configured (gastrolog-3cobq4) — see startDiskGuard's
+		// no-op-without-paths guard. tmpDir always exists (t.TempDir()),
+		// so this is a real, harmless statfs target.
+		cfg.DiskGuardPaths = []string{tmpDir}
+	}
+	return cfg
+}
+
+func setupMNNode(t *testing.T, nodeID string, loader system.Store, alerts *alert.Collector, diskGuard bool) multinodeTestNode {
 	t.Helper()
 
-	orch, err := orchestrator.New(orchestrator.Config{LocalNodeID: nodeID, SystemLoader: loader, SegmentsDir: filepath.Join(t.TempDir(), "segments")})
+	orch, err := orchestrator.New(mnOrchConfig(nodeID, loader, t.TempDir(), alerts, diskGuard))
 	if err != nil {
 		t.Fatalf("orchestrator.New: %v", err)
 	}
@@ -342,10 +401,10 @@ func setupMNNode(t *testing.T, nodeID string, loader system.Store) multinodeTest
 	return multinodeTestNode{nodeID: nodeID, orch: orch, vaultID: vaultID, vault: v}
 }
 
-func setupMNNodeNoVault(t *testing.T, nodeID string, loader system.Store) multinodeTestNode {
+func setupMNNodeNoVault(t *testing.T, nodeID string, loader system.Store, alerts *alert.Collector, diskGuard bool) multinodeTestNode {
 	t.Helper()
 
-	orch, err := orchestrator.New(orchestrator.Config{LocalNodeID: nodeID, SystemLoader: loader, SegmentsDir: filepath.Join(t.TempDir(), "segments")})
+	orch, err := orchestrator.New(mnOrchConfig(nodeID, loader, t.TempDir(), alerts, diskGuard))
 	if err != nil {
 		t.Fatalf("orchestrator.New: %v", err)
 	}
@@ -525,6 +584,49 @@ func (p *mnPeerVaultStats) FindVaultStats(vaultID string) *gastrologv1.VaultStat
 				stat.DataBytes += meta.Bytes
 			}
 			return stat
+		}
+	}
+	return nil
+}
+
+// mnPeerStorageStats implements PeerStorageStatsProvider by scanning all
+// non-coordinator orchestrators' local storage guard snapshots
+// (gastrolog-3cobq4) — the harness's stand-in for the NodeStats broadcast +
+// PeerState, same shortcut mnPeerVaultStats takes above for vault stats:
+// storages only ever live on their owning node, so this is a direct read of
+// the remote orchestrator's own StorageSnapshots(), never a wire round-trip.
+type mnPeerStorageStats struct {
+	nodes map[string]*orchestrator.Orchestrator // remote node orchs
+}
+
+func (p *mnPeerStorageStats) FindStorageState(storageID string) *gastrologv1.StorageState {
+	id, err := glid.Parse(storageID)
+	if err != nil {
+		return nil
+	}
+	for nodeID, orch := range p.nodes {
+		for _, ss := range orch.StorageSnapshots() {
+			if ss.ID != storageID {
+				continue
+			}
+			return &gastrologv1.StorageState{
+				Id:             id.ToProto(),
+				Name:           ss.Name,
+				Path:           ss.Path,
+				NodeName:       ss.Node,
+				NodeId:         []byte(nodeID),
+				StorageClass:   ss.StorageClass,
+				WarnExpr:       ss.WarnExpr,
+				FloorExpr:      ss.FloorExpr,
+				WarnIsDefault:  ss.WarnIsDefault,
+				FloorIsDefault: ss.FloorIsDefault,
+				WarnBytes:      ss.WarnBytes,
+				FloorBytes:     ss.FloorBytes,
+				FreeBytes:      ss.FreeBytes,
+				TotalBytes:     ss.TotalBytes,
+				WarnVerdict:    ss.WarnVerdict,
+				ProtectVerdict: ss.ProtectVerdict,
+			}
 		}
 	}
 	return nil
@@ -2974,7 +3076,7 @@ func TestMultiNode_RetentionSubmitDefersOnRemoteCappedDestination(t *testing.T) 
 	for _, node := range []multinodeTestNode{d1, d2} {
 		err := node.orch.SubmitRetentionRecord(ctx, d1.vaultID, rec, "")
 		if !errors.Is(err, orchestrator.ErrVaultMaxSize) {
-			t.Fatalf("submit on %s: want vault size-budget rejection, got %v", node.nodeID, err)
+			t.Fatalf("submit on %s: want vault max-size rejection, got %v", node.nodeID, err)
 		}
 	}
 
@@ -2988,4 +3090,72 @@ func TestMultiNode_RetentionSubmitDefersOnRemoteCappedDestination(t *testing.T) 
 	waitForMNRouteStats(t, h.configClient, func(m *gastrologv1.GetRouteStatsResponse) bool {
 		return m.TotalMatched >= 4
 	})
+}
+
+// TestMultiNode_VaultAdmissionCausesConsistentAcrossNodes pins the backend
+// signal's cluster-consistency contract (gastrolog-33ul6h): the vault
+// "refusing admission" badge is now a first-class backend field
+// (VaultInfo.AdmissionRefused), computed on the RESPONDING node from its own
+// local guard plus its live-peer broadcasts — the same inputs
+// vaultAdmissionGate itself consults (orchestrator.VaultAdmissionCauses).
+// Every node in a cluster receives the same NodeStats broadcasts, so every
+// node must report the SAME causes for the same vault, regardless of which
+// node the operator happens to be connected to. Modeled on
+// TestMultiNode_RetentionSubmitDefersOnRemoteCappedDestination: installs the
+// same peer-broadcast lookup production wiring installs on every node's
+// orchestrator, then reads VaultAdmissionCauses directly from each.
+func TestMultiNode_VaultAdmissionCausesConsistentAcrossNodes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node convergence test")
+	}
+	t.Parallel()
+	h := setupMultiNode(t, []string{"coord", "data-1", "data-2"}, WithoutVault("coord"))
+
+	d1 := h.Node(t, "data-1")
+	d2 := h.Node(t, "data-2")
+
+	// Every node, healthy: no causes anywhere.
+	for _, node := range []multinodeTestNode{d1, d2} {
+		if got := node.orch.VaultAdmissionCauses(d1.vaultID); len(got) != 0 {
+			t.Fatalf("node %s: VaultAdmissionCauses(healthy) = %v, want empty", node.nodeID, got)
+		}
+	}
+
+	// d1's vault is storage-disk-protected AND size-capped on d2 (its actual
+	// home); the NodeStats broadcast carries both to every peer, including
+	// d1 itself.
+	protected := d1.vaultID
+	storageProtect := func(id glid.GLID) bool { return id == protected }
+	sizeCapped := func(id glid.GLID) bool { return id == protected }
+	for _, node := range []multinodeTestNode{d1, d2} {
+		node.orch.SetRemoteVaultStorageProtected(storageProtect)
+		node.orch.SetRemoteVaultSizeCapped(sizeCapped)
+	}
+
+	want := []orchestrator.VaultAdmissionCause{
+		orchestrator.VaultAdmissionCauseStorageDiskProtect,
+		orchestrator.VaultAdmissionCauseMaxSizeBound,
+	}
+	for _, node := range []multinodeTestNode{d1, d2} {
+		got := node.orch.VaultAdmissionCauses(protected)
+		if len(got) != len(want) {
+			t.Fatalf("node %s: VaultAdmissionCauses = %v, want %v", node.nodeID, got, want)
+		}
+		for i := range got {
+			if got[i] != want[i] {
+				t.Fatalf("node %s: VaultAdmissionCauses = %v, want %v", node.nodeID, got, want)
+			}
+		}
+	}
+
+	// Causes release: both nodes converge back to empty together.
+	for _, node := range []multinodeTestNode{d1, d2} {
+		node.orch.SetRemoteVaultStorageProtected(func(glid.GLID) bool { return false })
+		node.orch.SetRemoteVaultSizeCapped(func(glid.GLID) bool { return false })
+	}
+	for _, node := range []multinodeTestNode{d1, d2} {
+		if got := node.orch.VaultAdmissionCauses(protected); len(got) != 0 {
+			t.Fatalf("node %s: VaultAdmissionCauses after release = %v, want empty", node.nodeID, got)
+		}
+	}
 }

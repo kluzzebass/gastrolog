@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"gastrolog/internal/chunk"
 	"gastrolog/internal/diskusage"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/home"
@@ -38,7 +39,11 @@ func (o *Orchestrator) localChunkStorageBytes() int64 {
 
 // localVaultChunkBytes is one vault's local chunk-store claim: sealed GLCB
 // bytes where recorded, otherwise record bytes plus index sizes. Cloud-backed
-// chunks without a local copy cost nothing here.
+// chunks without a local copy cost nothing here. Delegates to chunk.DiskClaim
+// — the same per-chunk formula the size-drain trigger uses
+// (SizeRetentionPolicy, via the retention runner) — so the guard's
+// whole-vault footprint and the drain trigger's retained-store measurement
+// share one currency, just different scope.
 func (o *Orchestrator) localVaultChunkBytes(vaultID glid.GLID) int64 {
 	metas, err := o.ListLocalChunkMetas(vaultID)
 	if err != nil {
@@ -46,26 +51,16 @@ func (o *Orchestrator) localVaultChunkBytes(vaultID glid.GLID) int64 {
 	}
 	var total int64
 	for _, meta := range metas {
-		if meta.CloudBacked && meta.DiskBytes == 0 {
-			continue
-		}
-		if meta.DiskBytes > 0 {
-			total += meta.DiskBytes
-			continue
-		}
-		total += meta.Bytes
-		if sizes, err := o.IndexSizes(vaultID, meta.ID); err == nil {
-			for _, sz := range sizes {
-				total += sz
-			}
-		}
+		total += chunk.DiskClaim(meta, func(id chunk.ChunkID) (map[string]int64, error) {
+			return o.IndexSizes(vaultID, id)
+		})
 	}
 	return total
 }
 
 // localVaultFootprintBytes is the vault's whole local disk claim — chunk
 // store plus pipeline segment backlog — measured against the vault's
-// max-size budget. Backlog counts by design: the budget bounds everything
+// max-size bound. Backlog counts by design: the bound covers everything
 // the vault holds on this node, not just its retained data.
 func (o *Orchestrator) localVaultFootprintBytes(vaultID glid.GLID) int64 {
 	return o.localVaultChunkBytes(vaultID) + o.localPipelineSegmentStorageBytes(vaultID)

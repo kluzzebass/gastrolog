@@ -50,7 +50,7 @@ func alertsByNode(t *testing.T, h *multiNodeHarness) map[string][]*gastrologv1.S
 func TestMultiNodeAlerts_PeerAlarmVisibleFromCoordinator(t *testing.T) {
 	h := setupMultiNode(t, []string{"coord", "data-1", "data-2", "data-3"}, WithClusterStats())
 
-	h.alerts["data-2"].Raise("disk-space-exhausted", "vault1", "disk protect engaged")
+	h.alerts["data-2"].Raise("disk-space-exhausted", "storage1", "disk protect engaged")
 
 	byNode := alertsByNode(t, h)
 	if len(byNode) != 4 {
@@ -61,7 +61,7 @@ func TestMultiNodeAlerts_PeerAlarmVisibleFromCoordinator(t *testing.T) {
 		t.Fatalf("data-2 alerts = %d, want 1", len(got))
 	}
 	a := got[0]
-	if string(a.Id) != "disk-space-exhausted:vault1" || a.Source != "storage" ||
+	if string(a.Id) != "disk-space-exhausted:storage1" || a.Source != "storage" ||
 		a.Detail != "disk protect engaged" ||
 		a.Priority != gastrologv1.AlarmPriority_ALARM_PRIORITY_HIGH {
 		t.Fatalf("alert fields wrong: %+v", a)
@@ -100,8 +100,8 @@ func TestMultiNodeAlerts_NoAlarms(t *testing.T) {
 func TestMultiNodeAlerts_MultiNodeAttribution(t *testing.T) {
 	h := setupMultiNode(t, []string{"coord", "data-1", "data-2", "data-3"}, WithClusterStats())
 
-	h.alerts["data-1"].Raise("disk-space-exhausted", "vault1", "disk protect engaged on data-1")
-	h.alerts["data-3"].Raise("disk-space-exhausted", "vault1", "disk protect engaged on data-3")
+	h.alerts["data-1"].Raise("disk-space-exhausted", "storage1", "disk protect engaged on data-1")
+	h.alerts["data-3"].Raise("disk-space-exhausted", "storage1", "disk protect engaged on data-3")
 	// Coordinator-local alarm goes through the LocalStats path, not the
 	// peer provider — both must surface.
 	h.alerts["coord"].Raise("wal-reserve", "cluster-ctl", "reservation below floor")
@@ -128,7 +128,7 @@ func TestMultiNodeAlerts_MultiNodeAttribution(t *testing.T) {
 
 	// Alarms are state: the condition resolving on data-1 releases exactly
 	// data-1's entry while data-3's identical ID keeps standing active.
-	h.alerts["data-1"].Clear("disk-space-exhausted", "vault1")
+	h.alerts["data-1"].Clear("disk-space-exhausted", "storage1")
 	byNode = alertsByNode(t, h)
 	if n := len(byNode["data-1"]); n != 0 {
 		t.Fatalf("data-1 alerts after clear = %d, want 0 (released)", n)

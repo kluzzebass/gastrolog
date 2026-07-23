@@ -457,6 +457,9 @@ export class PutRetentionPolicyCommand extends Message<PutRetentionPolicyCommand
   maxAge?: string;
 
   /**
+   * max_size is the combined drain-trigger-and-refuse-bound quantity — see
+   * RetentionPolicyConfig.max_size in system.proto (gastrolog-33ul6h).
+   *
    * @generated from field: optional string max_size = 4;
    */
   maxSize?: string;
@@ -465,6 +468,15 @@ export class PutRetentionPolicyCommand extends Message<PutRetentionPolicyCommand
    * @generated from field: optional int64 max_chunks = 5;
    */
   maxChunks?: bigint;
+
+  /**
+   * refuse — see RetentionPolicyConfig.refuse in system.proto
+   * (gastrolog-5yfaqj). Unset reads as false (default off — bounds are
+   * drain-first, refusal is the explicit hard mode).
+   *
+   * @generated from field: optional bool refuse = 6;
+   */
+  refuse?: boolean;
 
   constructor(data?: PartialMessage<PutRetentionPolicyCommand>) {
     super();
@@ -479,6 +491,7 @@ export class PutRetentionPolicyCommand extends Message<PutRetentionPolicyCommand
     { no: 3, name: "max_age", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
     { no: 4, name: "max_size", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
     { no: 5, name: "max_chunks", kind: "scalar", T: 3 /* ScalarType.INT64 */, opt: true },
+    { no: 6, name: "refuse", kind: "scalar", T: 8 /* ScalarType.BOOL */, opt: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutRetentionPolicyCommand {

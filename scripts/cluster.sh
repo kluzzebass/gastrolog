@@ -20,7 +20,6 @@
 #   --pprof-debug      With --pprof: enable mutex/block sampling (dev/incident)
 #   GLOG_NO_AUTH       Disable auth when truthy (default: true). Set false/0 to require login.
 #   GLOG_SEGMENT_HOT_PATH_FSYNC  Segmentation group-commit fsync (default: true; set false/0 for load testing)
-#   GLOG_VAULT_MAX_SIZE  Per-node size budget for each bootstrapped vault (default: 50GB).
 #                      Every node holds a full replica, so the volume needs at least NODES x this.
 
 set -euo pipefail
@@ -49,15 +48,6 @@ PPROF_DEBUG="${GLOG_PPROF_DEBUG:-false}"
 # with a K8s/staging instance. Single token only (no spaces).
 ENV_LABEL="${GLOG_ENV_LABEL:-Development}"
 ENV_COLOR="${GLOG_ENV_COLOR:-limegreen}"
-# Per-node size budget for each bootstrapped vault. Unset means unlimited,
-# which is how GastroLog1 filled a 466 GiB volume and deadlocked: with no
-# vault budget the per-vault cap can never engage, so the node disk guard is
-# the only backstop — and it suspends admission for every vault at once and
-# cannot recover on its own (gastrolog-2b2yyy, gastrolog-5ct2av). A bounded
-# vault refuses records for itself and lets retention drain it.
-# Every node holds a full replica (RF = NODES), so the volume needs at least
-# NODES x this. Raise it for a big soak volume; lower it for a laptop.
-VAULT_MAX_SIZE="${GLOG_VAULT_MAX_SIZE:-50GB}"
 SEGMENT_HOT_PATH_FSYNC="${GLOG_SEGMENT_HOT_PATH_FSYNC:-true}"
 
 while [[ $# -gt 0 ]]; do
@@ -328,37 +318,51 @@ configure() {
   $GLOG config rotation-policy create --addr "$S" --name "10000-records" --max-records 10000 2>&1 | sed 's/^/  /'
   $GLOG config rotation-policy create --addr "$S" --name "1M-1m" --max-records 1000000 --max-age 1m 2>&1 | sed 's/^/  /'
   $GLOG config retention-policy create --addr "$S" --name "3m-retain" --max-age 3m 2>&1 | sed 's/^/  /'
-  $GLOG config retention-policy create --addr "$S" --name "1h-retain" --max-age 1h 2>&1 | sed 's/^/  /'
+  # max-size is one field, drain+refuse in one bound now (gastrolog-33ul6h):
+  # this policy is first-vault's whole size/age story. Draining fires at
+  # whichever of max-age (1h) or max-size (50GB) comes first; the same 50GB
+  # bound also refuses admission cluster-wide while the vault's local claim
+  # stays at/over it. 50GB per node — every node holds a full replica (RF =
+  # NODES), so the volume needs at least NODES x this; an unbounded vault is
+  # how GastroLog1 filled a 466 GiB volume and deadlocked (gastrolog-2b2yyy,
+  # gastrolog-5ct2av). --refuse is required explicitly here: refuse now
+  # defaults OFF (gastrolog-5yfaqj operator decision — bounds are
+  # drain-first), so without this flag the policy would only drain and the
+  # cap-and-refuse behavior this bootstrap and comment describe would
+  # silently stop happening. Semantics below are otherwise unchanged.
+  $GLOG config retention-policy create --addr "$S" --name "1h-retain" --max-age 1h \
+    --max-size "50GB" --refuse 2>&1 | sed 's/^/  /'
 
   # gastrolog-4kkoo (Phase 5): no filter entity — match expressions live
   # inline on routes via --expression. Synthetic attributes (_source,
   # _vault) tag the record's origin at routing-eval time and let one
   # route distinguish "from an ingester" from "from a retention sweep".
 
-  echo ">>> Creating vaults (per-node budget: ${VAULT_MAX_SIZE})..."
+  echo ">>> Creating vaults..."
   # Two-vault local→cloud chain wired via inter-vault routing (gastrolog-4kkoo).
   #   - first-vault: file-backed on local disk, 1M-records / 1m rotation, with
   #                  a retention policy. Chunks past their TTL fire the
   #                  retention sweep, which streams their records back through
   #                  the routing engine.
   #   - second-vault: file-backed but cloud-served (S3). 10000-records rotation
-  #                  carries over so chunk granularity is consistent;
-  #                  no retention policy means data lives forever.
+  #                  carries over so chunk granularity is consistent; no
+  #                  retention policy (data lives forever).
   #
-  # Both get --max-size. Retention alone does NOT bound a vault: it acts on
-  # sealed chunks, and the bulk of a busy vault's disk is segments awaiting
-  # collection — which retention has no authority over. On GastroLog1 a
-  # 3-minute retention policy sat next to 449 GiB of unpurged segments because
-  # chunking never kept pace, and head segments only purge once their chunk
-  # builds (gastrolog-2b2yyy). The budget is what makes the vault-max-size
-  # alarm reachable before the disk guard traps the cluster.
+  # Both are bounded (gastrolog-33ul6h): first-vault via its policy's max
+  # size, second-vault via the creation-default floor (no retention policy;
+  # cloud-served, so its local claim is cache + backlog only). A drain
+  # trigger alone does NOT bound a vault: it acts on sealed chunks, and the
+  # bulk of a busy vault's disk can be segments awaiting collection — which
+  # retention has no authority over (gastrolog-2b2yyy: a 3-minute TTL sat
+  # next to 449 GiB of unpurged segments). max-size's refuse half is what
+  # makes the vault-max-size alarm reachable before the disk guard traps
+  # the cluster.
   $GLOG config vault create --addr "$S" --name "first-vault" \
     --type file --storage-class 1 --replication-factor "$NODES" \
-    --max-size "$VAULT_MAX_SIZE" \
     --rotation-policy "1M-1m" --retention-policy "1h-retain" 2>&1 | sed 's/^/  /'
   $GLOG config vault create --addr "$S" --name "second-vault" \
     --type file --storage-class 1 --replication-factor "$NODES" \
-    --cloud-service "S3" --max-size "$VAULT_MAX_SIZE" \
+    --cloud-service "S3" \
     --rotation-policy "10000-records" 2>&1 | sed 's/^/  /'
 
   # The retention route needs the first vault's GLID inline in its

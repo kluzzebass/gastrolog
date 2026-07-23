@@ -98,6 +98,48 @@ message VaultInfo {
   string name = 7;
   bytes node_id = 8;
   bool remote = 9; // True if vault lives on another node
+
+  // Currently-applicable admission-refusal causes for this vault, as
+  // computed by the responding node's admission gate (local disk guard +
+  // live-peer broadcasts) — the same inputs admission itself consults, not
+  // a UI-side derivation from alarm state. Empty when the vault admits
+  // normally. Each entry pairs the cause with a detail string naming the
+  // specifics (which storage and its free-vs-floor numbers, which bound
+  // and value) — see VaultAdmissionRefusal (gastrolog-9akebz).
+  repeated VaultAdmissionRefusal admission_refused = 10;
+}
+
+// VaultAdmissionCause identifies why a vault's admission gate is currently
+// refusing new records for it. Mirrors
+// orchestrator.VaultAdmissionCause (backend/internal/orchestrator/disk_guard.go).
+enum VaultAdmissionCause {
+  VAULT_ADMISSION_CAUSE_UNSPECIFIED = 0;
+  VAULT_ADMISSION_CAUSE_MAX_SIZE_BOUND = 1;
+  // gastrolog-9akebz: renamed from VAULT_DISK_PROTECT — the disk-free
+  // thresholds moved from VaultConfig to the storage entity a vault's
+  // placements reference, so the cause is a storage property, not a
+  // vault one. Every vault placed on a below-floor storage refuses.
+  VAULT_ADMISSION_CAUSE_STORAGE_DISK_PROTECT = 2;
+  VAULT_ADMISSION_CAUSE_BACKLOG_BUDGET = 3;
+  // gastrolog-5yfaqj: refuse generalized from max_size to every retention
+  // policy bound. AGE_BOUND/CHUNK_COUNT_BOUND only ever appear when the
+  // stating policy's refuse flag is true AND the retention runner has
+  // swept and failed to clear the violation — never on the normal
+  // transient between a chunk's seal and the next sweep.
+  VAULT_ADMISSION_CAUSE_AGE_BOUND = 4;
+  VAULT_ADMISSION_CAUSE_CHUNK_COUNT_BOUND = 5;
+}
+
+// VaultAdmissionRefusal pairs one admission-refusal cause with the
+// backend's own detail text for it — facts the backend already knows at
+// response time, not a client-side reconstruction (gastrolog-9akebz):
+// storage protect names the storage and its free-vs-floor numbers when
+// locally sampled, or "reported by <node>" for a peer-broadcast verdict
+// with no local sample; bounds name the bound kind and its value. Kept
+// terse — this is inspector detail text, not a log line.
+message VaultAdmissionRefusal {
+  VaultAdmissionCause cause = 1;
+  string detail = 2;
 }
 
 message GetVaultRequest {
@@ -155,7 +197,10 @@ message ChunkMeta {
   bool sealed = 4;
   int64 record_count = 5;
   int64 bytes = 6;
-  int64 disk_bytes = 7;   // actual on-disk size (differs from bytes: dict-encoded GLCB)
+  // disk_bytes is the LOCAL on-disk footprint on the responding node, always
+  // — for a cloud-backed chunk this is the warm-cache state (the cached
+  // GLCB's size while cached, 0 once evicted), never the cloud object size.
+  int64 disk_bytes = 7;
   google.protobuf.Timestamp ingest_start = 8;
   google.protobuf.Timestamp ingest_end = 9;
   bool cloud_backed = 10; // true = chunk lives in cloud storage (S3/Azure/GCS)
@@ -182,6 +227,10 @@ message ChunkMeta {
   // pre-Phase-3 entries, callers derive the state from the legacy
   // sealed bool: state == SEALED iff sealed == true.
   ChunkState state = 19;
+  // cloud_bytes is the compressed cloud object's transport size for a
+  // cloud-backed chunk (0 = never uploaded). Cluster-wide fact, distinct
+  // from disk_bytes (per-node, live warm-cache state). gastrolog-33ul6h.
+  int64 cloud_bytes = 20;
 }
 
 message GetChunkRequest {

@@ -47,12 +47,12 @@ func testRotationPolicies(t *testing.T, newStore func(t *testing.T) system.Store
 
 		id := newID()
 		rp := system.RotationPolicyConfig{
-			ID:          id,
-			Name:        "default",
-			MaxSize:     new("64MB"),
-			MaxAge:      new("1h"),
-			MaxRecords:  new(int64(1000)),
-			Cron:        new("0 * * * *"),
+			ID:         id,
+			Name:       "default",
+			MaxSize:    new("64MB"),
+			MaxAge:     new("1h"),
+			MaxRecords: new(int64(1000)),
+			Cron:       new("0 * * * *"),
 		}
 
 		if err := s.PutRotationPolicy(ctx, rp); err != nil {
@@ -77,7 +77,7 @@ func testRotationPolicies(t *testing.T, newStore func(t *testing.T) system.Store
 		ctx := context.Background()
 
 		id := newID()
-		rp1 := system.RotationPolicyConfig{ID: id, Name: "p1", MaxAge:      new("1h"), Cron: new("0 * * * *")}
+		rp1 := system.RotationPolicyConfig{ID: id, Name: "p1", MaxAge: new("1h"), Cron: new("0 * * * *")}
 		if err := s.PutRotationPolicy(ctx, rp1); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
@@ -209,11 +209,17 @@ func testRetentionPolicies(t *testing.T, newStore func(t *testing.T) system.Stor
 
 		id := newID()
 		rp := system.RetentionPolicyConfig{
-			ID:          id,
-			Name:        "default",
-			MaxAge:      new("720h"),
-			MaxSize:     new("10GB"),
-			MaxChunks:   new(int64(100)),
+			ID:        id,
+			Name:      "default",
+			MaxAge:    new("720h"),
+			MaxSize:   new("10GB"),
+			MaxChunks: new(int64(100)),
+			// Explicit true, not the (now off) default — a store that
+			// silently drops this back to nil on write would silently
+			// flip the operator's hard-bound choice to soft
+			// (gastrolog-5yfaqj; caught a real bug in the memory store's
+			// copyRetentionPolicy, which forgot this field entirely).
+			Refuse: new(true),
 		}
 
 		if err := s.PutRetentionPolicy(ctx, rp); err != nil {
@@ -230,6 +236,35 @@ func testRetentionPolicies(t *testing.T, newStore func(t *testing.T) system.Stor
 		assertStringPtr(t, "MaxAge", got.MaxAge, "720h")
 		assertStringPtr(t, "MaxSize", got.MaxSize, "10GB")
 		assertInt64Ptr(t, "MaxChunks", got.MaxChunks, 100)
+		assertBoolPtr(t, "Refuse", got.Refuse, true)
+	})
+
+	t.Run("PutGetRetentionPolicyRefuseFalseRoundTrips", func(t *testing.T) {
+		// Refuse:false must round-trip distinctly from unset — nil and
+		// false read the same through RefuseEnabled() today, but a store
+		// that coalesces explicit false into nil would break the moment
+		// any future caller distinguishes "explicitly declined" from
+		// "never asked" (an audit trail, a UI tri-state control, etc.),
+		// and silently discarding a WRITTEN value is a store-honesty bug
+		// on its own even where nothing downstream currently reads the
+		// difference.
+		s := newStore(t)
+		ctx := context.Background()
+
+		id := newID()
+		rp := system.RetentionPolicyConfig{ID: id, Name: "soft", MaxSize: new("10GB"), Refuse: new(false)}
+		if err := s.PutRetentionPolicy(ctx, rp); err != nil {
+			t.Fatalf("Put: %v", err)
+		}
+
+		got, err := s.GetRetentionPolicy(ctx, id)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got == nil {
+			t.Fatal("expected retention policy, got nil")
+		}
+		assertBoolPtr(t, "Refuse", got.Refuse, false)
 	})
 
 	t.Run("PutRetentionPolicyUpsert", func(t *testing.T) {
@@ -1793,5 +1828,16 @@ func assertInt64Ptr(t *testing.T, name string, got *int64, want int64) {
 	}
 	if *got != want {
 		t.Errorf("%s: expected %d, got %d", name, want, *got)
+	}
+}
+
+func assertBoolPtr(t *testing.T, name string, got *bool, want bool) {
+	t.Helper()
+	if got == nil {
+		t.Errorf("%s: expected %v, got nil", name, want)
+		return
+	}
+	if *got != want {
+		t.Errorf("%s: expected %v, got %v", name, want, *got)
 	}
 }

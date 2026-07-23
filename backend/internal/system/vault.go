@@ -64,7 +64,9 @@ type VaultConfig struct {
 	// and frees storage immediately, never touching the routing engine.
 	// "route" feeds the records back through the routing engine with
 	// _source = "retention" so operator-configured routes can forward
-	// them to archive vaults, cold storage, etc.
+	// them to archive vaults, cold storage, etc. "transfer" re-homes the
+	// sealed chunk to RetentionTransferTargetVaultID UNCHANGED — no
+	// record decode, no re-route, no re-ingest (gastrolog-2l918).
 	//
 	// Default is "delete" because the routing path is fail-open: an
 	// accidental match on a retention-source route can create a cascade
@@ -73,38 +75,38 @@ type VaultConfig struct {
 	// explicitly. See gastrolog-18du3.
 	RetentionDisposition string `json:"retentionDisposition,omitempty"`
 
-	// DiskFreeWarn / DiskFreeFloor are per-vault disk-guard thresholds on the
-	// vault's backing volume: an absolute free-space size ("10GB") or a
-	// percentage of the volume ("10%"), resolved per node against the volume
-	// actually sampled (ParseSizeOrPercent). Empty inherits the node defaults
-	// — the typeable expressions "10%" (warn) and "3%" (floor). Warn raises
-	// the disk-space alarm for this vault; floor suspends admission for
-	// records destined to this vault while vaults on healthy volumes keep
-	// ingesting.
-	DiskFreeWarn  string `json:"diskFreeWarn,omitempty"`
-	DiskFreeFloor string `json:"diskFreeFloor,omitempty"`
+	// RetentionTransferTargetVaultID is the destination vault for
+	// RetentionDisposition == "transfer". Required when, and only valid
+	// when, disposition is "transfer" — PutVault rejects self-transfer
+	// and non-file source/target. See
+	// docs/retention-transfer-disposition-design.md (gastrolog-2l918).
+	RetentionTransferTargetVaultID *glid.GLID `json:"retentionTransferTargetVaultId,omitempty"`
 
-	// MaxSize is the per-node budget for this vault's whole local disk claim
-	// (sealed chunks, indexes, pipeline segment backlog), as a size expression
-	// ("50GB"). At the budget, admission for records destined to this vault is
-	// refused cluster-wide (cap-and-refuse) until retention or segment
-	// releases drain it — the hard backstop behind a size retention policy's
-	// cap-and-drain.
-	//
-	// Empty = unset, defaulted at the PutVault ingress; an explicit "0" is
-	// rejected there. "Unlimited" is an explicit large value like "1PiB",
-	// never the effect of saying nothing (gastrolog-1epfgb). Resolve with
-	// SizeOrDefault.
-	MaxSize string `json:"maxSize,omitempty"`
+	// gastrolog-9akebz: DiskFreeWarn/DiskFreeFloor removed from here — the
+	// disk-guard free-space thresholds are a property of the storage a
+	// vault is placed on (system.FileStorage.DiskFreeWarn/DiskFreeFloor),
+	// not the vault: N vaults sharing one storage evaluating the same
+	// statfs against potentially different per-vault thresholds was the
+	// modeling error. A vault's refuse signal is now DERIVED — refused
+	// whenever any of its placements' storages is below its floor. See
+	// orchestrator.vaultAdmissionCauses (disk_guard.go).
+
+	// gastrolog-33ul6h: MaxSize removed. The vault's disk-claim bound is no
+	// longer a vault-level field — it lives on the retention policy
+	// (RetentionPolicyConfig.MaxSize, which drains AND refuses at the same
+	// bound) attached via RetentionRules, min-wins across attached policies,
+	// with DefaultVaultMaxSize as the refuse-only floor when no attached
+	// policy carries one. See orchestrator.resolveVaultSizeBound
+	// (disk_guard.go).
 }
 
 // Defaults are expressions, like the fields they fill: what the operator would
 // have typed. Stored verbatim at creation, so a defaulted vault reads exactly
 // like a configured one (gastrolog-etcjdx).
 
-// DefaultVaultMaxSize is the per-node size budget applied when a vault is
+// DefaultVaultMaxSize is the per-node max-size bound applied when a vault is
 // created without one. Deliberately small: the safe failure of a too-small
-// budget is a per-vault refusal that alarms, not the node-wide disk guard
+// bound is a per-vault refusal that alarms, not the node-wide disk guard
 // deadlock an unbounded vault invites (gastrolog-5ct2av). Operators who want
 // more set --max-size explicitly. Not derived from the volume: a per-vault
 // share does not compose across vaults sharing a disk.
@@ -133,6 +135,10 @@ const (
 	// routing engine so operator-configured routes can forward records
 	// to other destinations.
 	RetentionDispositionRoute = "route"
+	// RetentionDispositionTransfer re-homes the sealed chunk to
+	// RetentionTransferTargetVaultID unchanged — no record decode, no
+	// re-route, no re-ingest. See gastrolog-2l918.
+	RetentionDispositionTransfer = "transfer"
 )
 
 // ResolveRetentionDisposition returns the effective retention disposition
@@ -144,6 +150,8 @@ func (v VaultConfig) ResolveRetentionDisposition() string {
 	switch v.RetentionDisposition {
 	case RetentionDispositionRoute:
 		return RetentionDispositionRoute
+	case RetentionDispositionTransfer:
+		return RetentionDispositionTransfer
 	default:
 		return RetentionDispositionDelete
 	}

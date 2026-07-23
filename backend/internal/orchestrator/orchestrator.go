@@ -187,6 +187,27 @@ type Orchestrator struct {
 	backfillLogThrottle logging.Throttle
 	// registerSkipLog spaces skipped-GLCB-registration warnings per vault.
 	registerSkipLog logging.Throttle
+	// retentionLeaderlessLog spaces "vault-ctl raft group has no leader"
+	// warnings per vault (gastrolog-1xl29s case 1). Distinct from the
+	// vault-leaderless ALARM (leaderless_alarm.go), which tracks config
+	// PLACEMENT leader resolution: this is the vault-ctl Raft group's own
+	// election state (hasLeader callback == r.Leader() != "", see
+	// buildVaultRaftCallbacks in reconfig_vaults.go), which can be
+	// momentarily unelected even when placement resolves cleanly. See
+	// retentionTargetForInstance.
+	retentionLeaderlessLog logging.Throttle
+
+	// backfillMu guards backfillFailures — a dedicated lock (not o.mu) since
+	// backfillCloudUploads runs under o.mu.RLock() while the scheduler job
+	// that populates this map runs later, off that lock, asynchronously.
+	backfillMu sync.Mutex
+	// backfillFailures tracks per-chunk retry backoff for cloud-backfill
+	// uploads that failed and were not resolved by registration repair
+	// (gastrolog-4ryguo). In-memory only, mirroring retention's
+	// unreadableEntry: a restart clears it and the first sweep re-establishes
+	// state from scratch, which is fine — the point is to stop hammering a
+	// chunk that keeps failing, not to remember why forever.
+	backfillFailures map[chunk.ChunkID]*backfillFailureEntry
 
 	// Vault registry. Each vault bundles Chunks, Indexes, and Query.
 	vaults map[glid.GLID]*Vault
@@ -210,6 +231,16 @@ type Orchestrator struct {
 	segmentsDir string
 	// homeDir is the gastrolog home directory (stores, segments, raft, …).
 	homeDir string
+	// vaultsDir is the base directory relative file-vault/storage paths
+	// resolve against — the same base resolveVaultDir joins a vault's "dir"
+	// param against (Factories.VaultsDir, defaulting to homeDir when
+	// --vaults is not set). Cached here so periodic guard/discovery passes
+	// that don't receive Factories per call (refreshStorageGuards) can
+	// resolve system.FileStorage.Path the same way vault dirs resolve,
+	// instead of reaching the filesystem with a raw relative path
+	// (gastrolog-3cobq4 regression: statfs against a relative path resolves
+	// against the process CWD, not the node's home, and fails silently).
+	vaultsDir string
 	// pipelineVaults tracks which vaults are currently registered in the pipeline
 	// supervisor and whether each is registered as a Home (collection) on this
 	// node, so a route/placement reload registers/unregisters/re-registers only
@@ -239,14 +270,33 @@ type Orchestrator struct {
 	// protect mode (ingest admission suspended below the floor).
 	diskGuard *diskGuard
 
-	// remoteVaultDiskProtected consults peer NodeStats broadcasts for vaults
-	// under disk protect on OTHER nodes, so this node's per-vault admission
-	// gate is cluster-consistent. Installed via SetRemoteVaultDiskProtected.
-	remoteVaultDiskProtected atomic.Pointer[func(glid.GLID) bool]
+	// remoteVaultStorageProtected consults peer NodeStats broadcasts for
+	// vaults with a storage under disk protect on OTHER nodes, so this
+	// node's per-vault admission gate is cluster-consistent. Installed via
+	// SetRemoteVaultStorageProtected. Renamed from remoteVaultDiskProtected
+	// (gastrolog-9akebz).
+	remoteVaultStorageProtected atomic.Pointer[func(glid.GLID) bool]
+
+	// remoteVaultStorageProtectedNodes is remoteVaultStorageProtected's
+	// "WHO" sibling: the reporting peers' node IDs, for the admission
+	// detail signal's "reported by <node>" text when this node has no
+	// local sample to attach numbers to. Installed via
+	// SetRemoteVaultStorageProtectedNodes.
+	remoteVaultStorageProtectedNodes atomic.Pointer[func(glid.GLID) []string]
 
 	// remoteVaultSizeCapped is the same peer lookup for vaults at their
-	// max-size budget elsewhere. Installed via SetRemoteVaultSizeCapped.
+	// max-size bound elsewhere. Installed via SetRemoteVaultSizeCapped.
 	remoteVaultSizeCapped atomic.Pointer[func(glid.GLID) bool]
+
+	// remoteVaultAgeBoundCapped/remoteVaultChunkCountBoundCapped
+	// (gastrolog-5yfaqj) are the same peer-lookup pattern for the two
+	// generalized retention-bound refusal causes: only the retention
+	// leader for a vault instance derives these, so a peer that only
+	// fronts ingest for the vault must consult the broadcast too.
+	// Installed via SetRemoteVaultAgeBoundCapped /
+	// SetRemoteVaultChunkCountBoundCapped.
+	remoteVaultAgeBoundCapped        atomic.Pointer[func(glid.GLID) bool]
+	remoteVaultChunkCountBoundCapped atomic.Pointer[func(glid.GLID) bool]
 
 	// Remote transferrer for cross-node chunk migration (nil in single-node mode).
 	transferrer RemoteTransferrer
@@ -759,46 +809,48 @@ func New(cfg Config) (*Orchestrator, error) {
 	}
 
 	o := &Orchestrator{
-		backfillLogThrottle:  logging.Throttle{Interval: 30 * time.Second},
-		vaults:               make(map[glid.GLID]*Vault),
-		ingesters:            make(map[glid.GLID]Ingester),
-		ingesterStats:        make(map[glid.GLID]*IngesterStats),
-		ingesterMeta:         make(map[glid.GLID]ingesterInfo),
-		ingesterAdapters:     make(map[glid.GLID]ingestion.Ingester),
-		draining:             make(map[glid.GLID]*drainState),
-		vaultDraining:        make(map[string]*vaultDrainState),
-		retention:            make(map[string]*retentionRunner),
-		scheduler:            sched,
-		sysLoader:            cfg.SystemLoader,
-		localNodeID:          cfg.LocalNodeID,
-		localNodeIDGLID:      parseNodeGLID(cfg.LocalNodeID),
-		alerts:               cfg.Alerts,
-		suspects:             newSuspectTracker(),
-		chunkSignal:          notify.NewSignal(),
-		chunkBus:             notify.NewBus[ChunkChangeEvent](256),
-		progressTrigger:      newProgressNotifier(),
-		vaultCtlLeaders:      newVaultCtlLeaderManager(baseLogger),
-		phase:                cfg.Phase,
-		onIngesterAlive:      cfg.OnIngesterAlive,
-		onIngesterCheckpoint: cfg.OnIngesterCheckpoint,
-		segmentsDir:          cfg.SegmentsDir,
-		diskGuard:            newDiskGuardWithLogger(cfg.DiskGuardPaths, cfg.Logger),
-		homeDir:              homeDirFromSegments(cfg.SegmentsDir),
-		pipelineVaults:       make(map[glid.GLID]pipelineVaultReg),
-		now:                  cfg.Now,
-		logger:               logger,
-		baseLogger:           baseLogger,
-		replicationLogger:    compReplication.Apply(baseLogger),
-		drainLogger:          compDrain.Apply(baseLogger),
-		retentionLogger:      compRetention.Apply(baseLogger),
-		rotationLogger:       compRotation.Apply(baseLogger),
-		schedulerLogger:      compScheduler.Apply(baseLogger),
-		vaultOpsLogger:       compVaultOps.Apply(baseLogger),
-		cacheEvictionLogger:  compCacheEviction.Apply(baseLogger),
-		cloudHealthLogger:    compCloudHealth.Apply(baseLogger),
+		backfillLogThrottle:    logging.Throttle{Interval: 30 * time.Second},
+		retentionLeaderlessLog: logging.Throttle{Interval: 10 * time.Minute},
+		vaults:                 make(map[glid.GLID]*Vault),
+		ingesters:              make(map[glid.GLID]Ingester),
+		ingesterStats:          make(map[glid.GLID]*IngesterStats),
+		ingesterMeta:           make(map[glid.GLID]ingesterInfo),
+		ingesterAdapters:       make(map[glid.GLID]ingestion.Ingester),
+		draining:               make(map[glid.GLID]*drainState),
+		vaultDraining:          make(map[string]*vaultDrainState),
+		retention:              make(map[string]*retentionRunner),
+		scheduler:              sched,
+		sysLoader:              cfg.SystemLoader,
+		localNodeID:            cfg.LocalNodeID,
+		localNodeIDGLID:        parseNodeGLID(cfg.LocalNodeID),
+		alerts:                 cfg.Alerts,
+		suspects:               newSuspectTracker(),
+		chunkSignal:            notify.NewSignal(),
+		chunkBus:               notify.NewBus[ChunkChangeEvent](256),
+		progressTrigger:        newProgressNotifier(),
+		vaultCtlLeaders:        newVaultCtlLeaderManager(baseLogger),
+		phase:                  cfg.Phase,
+		onIngesterAlive:        cfg.OnIngesterAlive,
+		onIngesterCheckpoint:   cfg.OnIngesterCheckpoint,
+		segmentsDir:            cfg.SegmentsDir,
+		diskGuard:              newDiskGuardWithLogger(cfg.DiskGuardPaths, cfg.Logger),
+		homeDir:                homeDirFromSegments(cfg.SegmentsDir),
+		vaultsDir:              homeDirFromSegments(cfg.SegmentsDir),
+		pipelineVaults:         make(map[glid.GLID]pipelineVaultReg),
+		now:                    cfg.Now,
+		logger:                 logger,
+		baseLogger:             baseLogger,
+		replicationLogger:      compReplication.Apply(baseLogger),
+		drainLogger:            compDrain.Apply(baseLogger),
+		retentionLogger:        compRetention.Apply(baseLogger),
+		rotationLogger:         compRotation.Apply(baseLogger),
+		schedulerLogger:        compScheduler.Apply(baseLogger),
+		vaultOpsLogger:         compVaultOps.Apply(baseLogger),
+		cacheEvictionLogger:    compCacheEviction.Apply(baseLogger),
+		cloudHealthLogger:      compCloudHealth.Apply(baseLogger),
 	}
 
-	// The max-size budget measures the vault's whole local disk claim.
+	// The max-size bound measures the vault's whole local disk claim.
 	o.diskGuard.vaultFootprint = o.localVaultFootprintBytes
 	// The backlog budget measures the vault-ctl registry (cluster-wide truth).
 	o.diskGuard.vaultBacklogBytes = o.vaultRegistryBacklogBytes
@@ -1131,16 +1183,18 @@ func (o *Orchestrator) VaultSnapshots() []VaultSnapshot {
 		// correct API choice here, not cluster.
 		if metas, err := o.ListLocalChunkMetas(id); err == nil {
 			snap.ChunkCount = len(metas)
+			vaultID := id
 			for _, m := range metas {
 				if m.Sealed {
 					snap.SealedChunks++
 				}
 				snap.RecordCount += m.RecordCount
-				if m.DiskBytes > 0 {
-					snap.DataBytes += m.DiskBytes
-				} else {
-					snap.DataBytes += m.Bytes
-				}
+				// Same currency as the disk guard's footprint and the
+				// size-drain trigger: an evicted cloud-backed chunk must
+				// not fall back to logical Bytes. See gastrolog-33ul6h.
+				snap.DataBytes += chunk.DiskClaim(m, func(cid chunk.ChunkID) (map[string]int64, error) {
+					return o.IndexSizes(vaultID, cid)
+				})
 			}
 		}
 		snapshots = append(snapshots, snap)

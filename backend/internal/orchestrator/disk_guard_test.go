@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"gastrolog/internal/glid"
@@ -167,9 +168,9 @@ func TestDiskGuardTinyVolumeThresholds(t *testing.T) {
 func TestDiskGuardDefaultsAreTypeable(t *testing.T) {
 	t.Parallel()
 	g := newDiskGuard(nil)
-	if g.warnExpr != defaultDiskFreeWarn || g.floorExpr != defaultDiskFreeFloor {
+	if g.warnExpr != DefaultDiskFreeWarn || g.floorExpr != DefaultDiskFreeFloor {
 		t.Fatalf("node expressions = %q/%q, want the typeable defaults %q/%q",
-			g.warnExpr, g.floorExpr, defaultDiskFreeWarn, defaultDiskFreeFloor)
+			g.warnExpr, g.floorExpr, DefaultDiskFreeWarn, DefaultDiskFreeFloor)
 	}
 	total := 400 * gib
 	if w := g.warnThreshold(total); w != 40*gib {
@@ -180,25 +181,20 @@ func TestDiskGuardDefaultsAreTypeable(t *testing.T) {
 	}
 }
 
-// TestDiskGuardEnvOverride pins the .env operator channel: the node-level
-// expressions accept the same size-or-percent vocabulary as the config
-// fields, and a malformed value is ignored in favor of the defaults.
-func TestDiskGuardEnvOverride(t *testing.T) { //nolint:paralleltest // t.Setenv
+// TestDiskGuardIgnoresEnv pins the removal of the env-var channel
+// (gastrolog-2mrfdw): node thresholds come from the typeable defaults and
+// the config store only — a stray GLOG_DISK_FREE_* in the environment must
+// have no effect.
+func TestDiskGuardIgnoresEnv(t *testing.T) { //nolint:paralleltest // t.Setenv
 	t.Setenv("GLOG_DISK_FREE_WARN", "20%")
 	t.Setenv("GLOG_DISK_FREE_FLOOR", "5GiB")
 	g := newDiskGuard(nil)
-	total := 100 * gib
-	if w := g.warnThreshold(total); w != 20*gib {
-		t.Fatalf("env warn 20%% of 100GiB = %d, want 20GiB", w)
+	total := 400 * gib
+	if w := g.warnThreshold(total); w != 40*gib {
+		t.Fatalf("warn must stay the 10%% default despite env: got %d, want 40GiB", w)
 	}
-	if f := g.floorThreshold(total); f != 5*gib {
-		t.Fatalf("env floor 5GiB = %d, want 5GiB regardless of volume", f)
-	}
-
-	t.Setenv("GLOG_DISK_FREE_WARN", "max(10%, 10GiB)") // not typeable ⇒ not parseable
-	g = newDiskGuard(nil)
-	if w := g.warnThreshold(total); w != 10*gib {
-		t.Fatalf("malformed env override must fall back to the default 10%%: got %d", w)
+	if f := g.floorThreshold(total); f != 12*gib {
+		t.Fatalf("floor must stay the 3%% default despite env: got %d, want 12GiB", f)
 	}
 }
 
@@ -327,10 +323,12 @@ func TestDiskDeferWritesGate(t *testing.T) {
 	}
 }
 
-// TestVaultDiskGuardLifecycle pins the per-vault arc: a starved vault volume
-// trips ONLY that vault's protect and a vault-scoped alarm, while a vault on
-// a healthy volume stays open. Exits are hysteretic like the node guard.
-func TestVaultDiskGuardLifecycle(t *testing.T) {
+// TestStorageDiskGuardLifecycle pins the per-storage arc (gastrolog-9akebz):
+// a starved storage trips protect/alarm ONCE for that storage, and every
+// vault placed there inherits the derived STORAGE_DISK_PROTECT signal via
+// vaultStorageProtected, while a vault on a healthy sibling storage stays
+// open. Exits are hysteretic like the node guard.
+func TestStorageDiskGuardLifecycle(t *testing.T) {
 	t.Parallel()
 	total := 400 * gib
 	fs := map[string]uint64{"volA": 200 * gib, "volB": 200 * gib}
@@ -338,159 +336,502 @@ func TestVaultDiskGuardLifecycle(t *testing.T) {
 	spy := &alertSpy{}
 
 	vaultA, vaultB := glid.New(), glid.New()
-	g.SetVaultGuard(vaultA, "hot", []string{"volA"}, "", "", 0)
-	g.SetVaultGuard(vaultB, "cold", []string{"volB"}, "", "", 0)
+	g.SetStorageGuard("storA", "storage-a", "node-1", "volA", "", "")
+	g.SetStorageGuard("storB", "storage-b", "node-1", "volB", "", "")
+	g.SetVaultGuard(vaultA, "hot", []string{"storA"}, 0, "", "")
+	g.SetVaultGuard(vaultB, "cold", []string{"storB"}, 0, "", "")
 
-	g.evaluateVaults(spy)
-	if g.vaultProtectActive(vaultA) || g.vaultProtectActive(vaultB) || spy.active() != 0 {
-		t.Fatal("healthy volumes must raise nothing")
+	g.evaluateStorages(spy)
+	if g.vaultStorageProtected(vaultA) || g.vaultStorageProtected(vaultB) || spy.active() != 0 {
+		t.Fatal("healthy storages must raise nothing")
 	}
 
-	// vaultA's volume crosses the floor (node-default 3%% = 12GiB): protect
-	// and alarm for vaultA only.
+	// storA crosses the floor (node-default 3%% = 12GiB): protect and alarm
+	// for storA — and therefore vaultA, its only placed vault — only.
 	sampler.free["volA"] = 10 * gib
-	g.evaluateVaults(spy)
-	if !g.vaultProtectActive(vaultA) {
-		t.Fatal("starved vault volume must protect that vault")
+	g.evaluateStorages(spy)
+	if !g.vaultStorageProtected(vaultA) {
+		t.Fatal("starved storage must protect every vault placed there")
 	}
-	if g.vaultProtectActive(vaultB) {
-		t.Fatal("vaultB's healthy volume must keep it open")
+	if g.vaultStorageProtected(vaultB) {
+		t.Fatal("vaultB's healthy storage must keep it open")
 	}
-	if !spy.has("disk-space-exhausted:" + vaultA.String()) {
-		t.Fatal("vault alarm must be scoped to the starved vault's ID")
+	if !spy.has("disk-space-exhausted:storA") {
+		t.Fatal("storage alarm must be scoped to the starved storage's ID")
 	}
-	if spy.has("disk-space-exhausted:" + vaultB.String()) {
-		t.Fatal("healthy vault must not alarm")
+	if spy.has("disk-space-exhausted:storB") {
+		t.Fatal("healthy storage must not alarm")
 	}
 
 	// Just above the floor: hysteresis holds protect.
 	sampler.free["volA"] = 13 * gib
-	g.evaluateVaults(spy)
-	if !g.vaultProtectActive(vaultA) {
-		t.Fatal("vault protect must not flap at the boundary")
+	g.evaluateStorages(spy)
+	if !g.vaultStorageProtected(vaultA) {
+		t.Fatal("storage protect must not flap at the boundary")
 	}
 
 	// Clear of both bands: protect releases, then the alarm clears.
 	sampler.free["volA"] = 60 * gib
-	g.evaluateVaults(spy)
-	if g.vaultProtectActive(vaultA) {
-		t.Fatal("vault protect must release once clear of the floor band")
+	g.evaluateStorages(spy)
+	if g.vaultStorageProtected(vaultA) {
+		t.Fatal("storage protect must release once clear of the floor band")
 	}
 	if spy.active() != 0 {
-		t.Fatal("vault alarm must clear with hysteresis above warn")
+		t.Fatal("storage alarm must clear with hysteresis above warn")
 	}
 }
 
-// TestVaultDiskGuardConfigOverridesThresholds pins the per-vault override:
-// an explicit expression — absolute size or percentage of the volume —
-// replaces the node-default expressions entirely.
-func TestVaultDiskGuardConfigOverridesThresholds(t *testing.T) {
+// TestStorageDiskGuardSharedStorage pins the ONE-EVALUATION-PER-STORAGE
+// requirement (gastrolog-9akebz core shape): several vaults placed on the
+// SAME storage share exactly ONE statfs sample and ONE alarm, and ALL of
+// them refuse once that storage is below floor — not one duplicated
+// statfs/alarm per vault, the old per-vault model's modeling error.
+func TestStorageDiskGuardSharedStorage(t *testing.T) {
+	t.Parallel()
+	total := 400 * gib
+	g, _ := newGuardFixture(total, map[string]uint64{"volA": 10 * gib})
+	sampleCount := 0
+	underlying := g.sample
+	g.sample = func(path string) (uint64, uint64, error) {
+		sampleCount++
+		return underlying(path)
+	}
+	spy := &alertSpy{}
+
+	vaultA, vaultB, vaultC := glid.New(), glid.New(), glid.New()
+	g.SetStorageGuard("storA", "shared", "node-1", "volA", "", "")
+	g.SetVaultGuard(vaultA, "a", []string{"storA"}, 0, "", "")
+	g.SetVaultGuard(vaultB, "b", []string{"storA"}, 0, "", "")
+	g.SetVaultGuard(vaultC, "c", []string{"storA"}, 0, "", "")
+
+	g.evaluateStorages(spy)
+
+	if sampleCount != 1 {
+		t.Fatalf("one storage must be statfs'd ONCE regardless of vault count, got %d samples", sampleCount)
+	}
+	if !g.vaultStorageProtected(vaultA) || !g.vaultStorageProtected(vaultB) || !g.vaultStorageProtected(vaultC) {
+		t.Fatal("every vault placed on the below-floor storage must be storage-protected")
+	}
+	if spy.active() != 1 {
+		t.Fatalf("one below-floor storage must raise exactly ONE alarm, got %d active", spy.active())
+	}
+}
+
+// TestStorageDiskGuardInheritsNodeDefaults pins the empty-expression
+// contract for a storage entity: unset DiskFreeWarn/DiskFreeFloor ("" from
+// FileStorage, same as an operator who never touched those fields)
+// resolves against the node-level defaults (10%/3%), exactly like the node
+// guard itself — a storage is never left with a silent 0 threshold just
+// because the operator didn't configure it (gastrolog-9akebz).
+func TestStorageDiskGuardInheritsNodeDefaults(t *testing.T) {
+	t.Parallel()
+	total := 400 * gib // node defaults resolve to warn=40GiB, floor=12GiB
+	g, sampler := newGuardFixture(total, map[string]uint64{"volA": 200 * gib})
+	spy := &alertSpy{}
+	vaultA := glid.New()
+	g.SetStorageGuard("storA", "inherits", "node-1", "volA", "", "")
+	g.SetVaultGuard(vaultA, "a", []string{"storA"}, 0, "", "")
+
+	g.evaluateStorages(spy)
+	if g.vaultStorageProtected(vaultA) || spy.active() != 0 {
+		t.Fatal("well above the inherited 12GiB floor must be quiet")
+	}
+
+	// Cross the INHERITED floor (3% of 400GiB = 12GiB) — never configured
+	// on the storage itself.
+	sampler.free["volA"] = 10 * gib
+	g.evaluateStorages(spy)
+	if !g.vaultStorageProtected(vaultA) {
+		t.Fatal("crossing the inherited node-default floor must protect")
+	}
+	if !spy.has("disk-space-exhausted:storA") {
+		t.Fatal("the alarm must fire off the inherited threshold too")
+	}
+}
+
+// TestStorageDiskGuardRestartReDerives pins restart safety: a freshly
+// constructed guard (simulating a node restart — no carried-over protect
+// state, no alarmRaised history) that discovers a storage ALREADY below its
+// floor must protect on the very first evaluation, deriving purely from the
+// current sample and config — never from state that only existed in the
+// pre-restart process (gastrolog-9akebz; mirrors TestPrimeDiskGuardClosesBootWindow's
+// node-level boot-window contract for the storage/vault dimension).
+func TestStorageDiskGuardRestartReDerives(t *testing.T) {
+	t.Parallel()
+	total := 400 * gib
+	vaultA := glid.New()
+
+	// "Before restart": nothing constructed yet — there is no prior guard
+	// instance to carry state over from, which is the point.
+	g, _ := newGuardFixture(total, map[string]uint64{"volA": 5 * gib}) // already below the 12GiB floor
+	spy := &alertSpy{}
+
+	// "After restart": discovery (refreshVaultDiskGuards' equivalent)
+	// registers the storage and vault fresh, exactly as it would from
+	// replicated config with no memory of any prior process.
+	g.SetStorageGuard("storA", "restarted", "node-1", "volA", "", "")
+	g.SetVaultGuard(vaultA, "a", []string{"storA"}, 0, "", "")
+
+	g.evaluateStorages(spy)
+	if !g.vaultStorageProtected(vaultA) {
+		t.Fatal("a storage already below floor at restart must protect on the FIRST evaluation")
+	}
+	if !spy.has("disk-space-exhausted:storA") {
+		t.Fatal("the alarm must fire on the first post-restart evaluation too")
+	}
+}
+
+// TestStorageDiskGuardConfigOverridesThresholds pins the per-storage
+// override: an explicit expression — absolute size or percentage of the
+// volume — replaces the node-default expressions entirely.
+func TestStorageDiskGuardConfigOverridesThresholds(t *testing.T) {
 	t.Parallel()
 	total := 400 * gib
 	g, sampler := newGuardFixture(total, map[string]uint64{"volA": 30 * gib})
 	spy := &alertSpy{}
 	vaultA := glid.New()
+	g.SetVaultGuard(vaultA, "greedy", []string{"storA"}, 0, "", "")
 
-	// Node default floor would be 12GiB; this vault demands 50GiB free.
-	g.SetVaultGuard(vaultA, "greedy", []string{"volA"}, "100GiB", "50GiB", 0)
-	g.evaluateVaults(spy)
-	if !g.vaultProtectActive(vaultA) {
-		t.Fatal("30GiB free is below the vault's 50GiB floor override")
+	// Node default floor would be 12GiB; this storage demands 50GiB free.
+	g.SetStorageGuard("storA", "greedy-storage", "node-1", "volA", "100GiB", "50GiB")
+	g.evaluateStorages(spy)
+	if !g.vaultStorageProtected(vaultA) {
+		t.Fatal("30GiB free is below the storage's 50GiB floor override")
 	}
 
 	// A modest override in the other direction: 30GiB free clears a 1GiB floor.
 	sampler.free["volA"] = 30 * gib
-	g.SetVaultGuard(vaultA, "modest", []string{"volA"}, "2GiB", "1GiB", 0)
-	g.evaluateVaults(spy)
-	if g.vaultProtectActive(vaultA) {
+	g.SetStorageGuard("storA", "modest-storage", "node-1", "volA", "2GiB", "1GiB")
+	g.evaluateStorages(spy)
+	if g.vaultStorageProtected(vaultA) {
 		t.Fatal("30GiB free must clear a 1GiB floor override (with hysteresis)")
 	}
 
-	// A percentage override resolves against the vault's own volume: 20% of
-	// 400GiB = 80GiB floor, so 30GiB free is a breach the node default
+	// A percentage override resolves against the storage's own volume: 20%
+	// of 400GiB = 80GiB floor, so 30GiB free is a breach the node default
 	// (3% = 12GiB) would not see.
-	g.SetVaultGuard(vaultA, "percenty", []string{"volA"}, "25%", "20%", 0)
-	g.evaluateVaults(spy)
-	if !g.vaultProtectActive(vaultA) {
-		t.Fatal(`30GiB free is below the vault's "20%" floor override`)
+	g.SetStorageGuard("storA", "percenty-storage", "node-1", "volA", "25%", "20%")
+	g.evaluateStorages(spy)
+	if !g.vaultStorageProtected(vaultA) {
+		t.Fatal(`30GiB free is below the storage's "20%" floor override`)
 	}
 	// And a small percentage clears again: floor 1% = 4GiB, resume above the
 	// 2% warn band (with hysteresis) — 30GiB is well clear.
-	g.SetVaultGuard(vaultA, "percenty", []string{"volA"}, "2%", "1%", 0)
-	g.evaluateVaults(spy)
-	if g.vaultProtectActive(vaultA) {
+	g.SetStorageGuard("storA", "percenty-storage", "node-1", "volA", "2%", "1%")
+	g.evaluateStorages(spy)
+	if g.vaultStorageProtected(vaultA) {
 		t.Fatal(`30GiB free must clear a "1%" floor override`)
 	}
 }
 
-// TestVaultDiskGuardRetain pins the discovery-refresh prune: entries not in
-// the keep set fall out, clearing their protect verdict with them.
-func TestVaultDiskGuardRetain(t *testing.T) {
+// TestStorageDiskGuardRetain pins the discovery-refresh no-strand contract
+// for a REMOVED storage (gastrolog-9akebz retainVaultGuards precedent): a
+// storage entry dropped from the keep set falls out, releasing every
+// vault's derived protect flag with it — a vault sharing the pruned storage
+// with a still-tracked storage/vault must not stay stranded in protect.
+func TestStorageDiskGuardRetain(t *testing.T) {
 	t.Parallel()
-	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": gib})
+	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": gib, "volB": gib})
 	vaultA, vaultB := glid.New(), glid.New()
-	g.SetVaultGuard(vaultA, "a", []string{"volA"}, "", "", 0)
-	g.SetVaultGuard(vaultB, "b", []string{"volA"}, "", "", 0)
-	g.evaluateVaults(nil)
-	if !g.vaultProtectActive(vaultA) || !g.vaultProtectActive(vaultB) {
-		t.Fatal("both vaults share the starved volume")
+	g.SetStorageGuard("storA", "a", "node-1", "volA", "", "")
+	g.SetStorageGuard("storB", "b", "node-1", "volB", "", "")
+	g.SetVaultGuard(vaultA, "a", []string{"storA"}, 0, "", "")
+	g.SetVaultGuard(vaultB, "b", []string{"storB"}, 0, "", "")
+	g.evaluateStorages(nil)
+	if !g.vaultStorageProtected(vaultA) || !g.vaultStorageProtected(vaultB) {
+		t.Fatal("both starved storages must protect their vault")
 	}
-	g.retainVaultGuards(map[glid.GLID]bool{vaultB: true}, nil)
-	if g.vaultProtectActive(vaultA) {
-		t.Fatal("pruned vault must no longer report protect")
+
+	// storA is removed from config (or no longer local): retainStorageGuards
+	// prunes it, and vaultA's derived flag must release even though vaultA's
+	// guard entry still lists storA in its storageIDs — the storage entry
+	// itself is simply gone, so the lookup finds nothing to protect on.
+	g.retainStorageGuards(map[string]bool{"storB": true}, nil)
+	if g.vaultStorageProtected(vaultA) {
+		t.Fatal("a vault referencing a pruned storage must not stay stranded in protect")
 	}
-	if !g.vaultProtectActive(vaultB) {
-		t.Fatal("retained vault must keep its verdict")
+	if !g.vaultStorageProtected(vaultB) {
+		t.Fatal("retained storage must keep its verdict")
 	}
 }
 
-// TestVaultDiskGuardRetainClearsAlarm pins the prune-side alarm contract: a
-// vault dropped from the guard set takes its standing alarm with it —
+// TestStorageDiskGuardRetainClearsAlarm pins the prune-side alarm contract: a
+// storage dropped from the guard set takes its standing alarm with it —
 // nothing else would ever clear an alert for an entry no longer evaluated.
-func TestVaultDiskGuardRetainClearsAlarm(t *testing.T) {
+func TestStorageDiskGuardRetainClearsAlarm(t *testing.T) {
 	t.Parallel()
 	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": gib})
 	spy := &alertSpy{}
-	vaultA := glid.New()
-	g.SetVaultGuard(vaultA, "a", []string{"volA"}, "", "", 0)
-	g.evaluateVaults(spy)
-	if !spy.has("disk-space-exhausted:" + vaultA.String()) {
-		t.Fatal("starved vault must alarm before the prune")
+	g.SetStorageGuard("storA", "a", "node-1", "volA", "", "")
+	g.evaluateStorages(spy)
+	if !spy.has("disk-space-exhausted:storA") {
+		t.Fatal("starved storage must alarm before the prune")
 	}
-	g.retainVaultGuards(map[glid.GLID]bool{}, spy)
+	g.retainStorageGuards(map[string]bool{}, spy)
 	if spy.active() != 0 {
-		t.Fatal("pruning an alarmed vault must clear its alert")
+		t.Fatal("pruning an alarmed storage must clear its alert")
+	}
+}
+
+// TestVaultDiskGuardRetainDropsStorageLinkage pins the no-strand contract
+// for a vault's PLACEMENT MOVING off a storage (or the vault itself being
+// removed): retainVaultGuards drops the vault's storageIDs linkage, so it
+// reports unprotected even while the storage it used to reference is still
+// starved — the vault no longer claims that storage as its own, so nothing
+// should keep refusing on its behalf. A sibling vault still placed there
+// stays protected.
+func TestVaultDiskGuardRetainDropsStorageLinkage(t *testing.T) {
+	t.Parallel()
+	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": gib})
+	vaultA, vaultB := glid.New(), glid.New()
+	g.SetStorageGuard("storA", "a", "node-1", "volA", "", "")
+	g.SetVaultGuard(vaultA, "a", []string{"storA"}, 0, "", "")
+	g.SetVaultGuard(vaultB, "b", []string{"storA"}, 0, "", "")
+	g.evaluateStorages(nil)
+	if !g.vaultStorageProtected(vaultA) || !g.vaultStorageProtected(vaultB) {
+		t.Fatal("both vaults share the starved storage")
+	}
+
+	// vaultA's placement moves elsewhere (or vaultA is removed): its guard
+	// entry is pruned, dropping the storageIDs linkage.
+	g.retainVaultGuards(map[glid.GLID]bool{vaultB: true}, nil)
+	if g.vaultStorageProtected(vaultA) {
+		t.Fatal("a vault no longer linked to the storage must not report protect")
+	}
+	if !g.vaultStorageProtected(vaultB) {
+		t.Fatal("a sibling still placed on the starved storage must keep its verdict")
+	}
+}
+
+// TestStorageSnapshotsReportsEffectiveThresholdsAndInheritance pins the
+// snapshot contract for gastrolog-3cobq4: an unset expression reports
+// *_inherited-equivalent (empty WarnExpr/FloorExpr the caller renders as
+// "inherited") alongside the RESOLVED bytes value — never leaving the
+// caller to resolve the expression itself (operator directive, 9akebz: no
+// client-side derivation of thresholds).
+func TestStorageSnapshotsReportsEffectiveThresholdsAndDefaultProvenance(t *testing.T) {
+	t.Parallel()
+	total := 400 * gib // node defaults: warn=40GiB (10%), floor=12GiB (3%)
+	g, _ := newGuardFixture(total, map[string]uint64{"volA": 200 * gib})
+	g.SetStorageGuard("storA", "defaulted", "node-1", "volA", "", "")
+	g.evaluateStorages(nil)
+
+	snaps := g.storageSnapshots()
+	if len(snaps) != 1 {
+		t.Fatalf("want 1 snapshot, got %d", len(snaps))
+	}
+	s := snaps[0]
+	// gastrolog-3cobq4 review: an unset expression must publish the
+	// EFFECTIVE (built-in default) expression, never empty — there is no
+	// configurable node-level override to leave the caller inferring
+	// "inherited" from an empty string (gastrolog-2mrfdw removed the env
+	// channel).
+	if s.WarnExpr != DefaultDiskFreeWarn || s.FloorExpr != DefaultDiskFreeFloor {
+		t.Fatalf("unset expressions must publish the effective default expression, got warn=%q floor=%q", s.WarnExpr, s.FloorExpr)
+	}
+	if !s.WarnIsDefault || !s.FloorIsDefault {
+		t.Fatalf("unset expressions must report IsDefault=true, got warn=%v floor=%v", s.WarnIsDefault, s.FloorIsDefault)
+	}
+	if s.WarnBytes != 40*gib {
+		t.Fatalf("effective warn bytes = %d, want 40GiB (10%% of 400GiB)", s.WarnBytes)
+	}
+	if s.FloorBytes != 12*gib {
+		t.Fatalf("effective floor bytes = %d, want 12GiB (3%% of 400GiB)", s.FloorBytes)
+	}
+	if s.FreeBytes != 200*gib || s.TotalBytes != total {
+		t.Fatalf("free/total = %d/%d, want %d/%d", s.FreeBytes, s.TotalBytes, 200*gib, total)
+	}
+	if s.WarnVerdict || s.ProtectVerdict {
+		t.Fatal("well above both thresholds must report neither verdict")
+	}
+	if s.SampledAt.IsZero() {
+		t.Fatal("a successful sample must record a sampled-at instant")
+	}
+}
+
+// TestEffectiveThresholdExpr pins the pure resolution rule storageSnapshots
+// and the ListStorages fallback both rely on: an explicit expression wins
+// outright; an unset one resolves straight to the built-in default literal
+// (gastrolog-2mrfdw removed the only other source, the env override), with
+// IsDefault naming which case applied.
+func TestEffectiveThresholdExpr(t *testing.T) {
+	t.Parallel()
+	if expr, isDefault := EffectiveThresholdExpr("20%", DefaultDiskFreeWarn); expr != "20%" || isDefault {
+		t.Fatalf("explicit expression must win verbatim with IsDefault=false, got %q/%v", expr, isDefault)
+	}
+	if expr, isDefault := EffectiveThresholdExpr("", DefaultDiskFreeWarn); expr != DefaultDiskFreeWarn || !isDefault {
+		t.Fatalf("unset expression must resolve to the default with IsDefault=true, got %q/%v", expr, isDefault)
+	}
+}
+
+// TestStorageSnapshotsReportsExplicitThresholds pins the explicit-override
+// half: a storage with its own configured expressions reports them
+// verbatim, not the node defaults.
+func TestStorageSnapshotsReportsExplicitThresholds(t *testing.T) {
+	t.Parallel()
+	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": 200 * gib})
+	g.SetStorageGuard("storA", "explicit", "node-1", "volA", "20%", "10%")
+	g.evaluateStorages(nil)
+
+	snaps := g.storageSnapshots()
+	s := snaps[0]
+	if s.WarnExpr != "20%" || s.FloorExpr != "10%" {
+		t.Fatalf("explicit expressions must round-trip verbatim, got warn=%q floor=%q", s.WarnExpr, s.FloorExpr)
+	}
+	if s.WarnIsDefault || s.FloorIsDefault {
+		t.Fatalf("explicit expressions must report IsDefault=false, got warn=%v floor=%v", s.WarnIsDefault, s.FloorIsDefault)
+	}
+	if s.WarnBytes != 80*gib || s.FloorBytes != 40*gib {
+		t.Fatalf("effective bytes = %d/%d, want 80GiB/40GiB", s.WarnBytes, s.FloorBytes)
+	}
+}
+
+// TestStorageSnapshotsReportsWarnAndProtectVerdicts pins the three-state
+// badge grammar (gastrolog-3cobq4): ok when healthy, warn-only inside the
+// warn band, protect once below the floor — WarnVerdict and ProtectVerdict
+// are never both true (protect supersedes the warn badge, same as the
+// alarm pair's low/exhausted split).
+func TestStorageSnapshotsReportsWarnAndProtectVerdicts(t *testing.T) {
+	t.Parallel()
+	total := 400 * gib // warn=40GiB, floor=12GiB
+	g, sampler := newGuardFixture(total, map[string]uint64{"volA": 200 * gib})
+	spy := &alertSpy{}
+	g.SetStorageGuard("storA", "a", "node-1", "volA", "", "")
+
+	g.evaluateStorages(spy)
+	s := g.storageSnapshots()[0]
+	if s.WarnVerdict || s.ProtectVerdict {
+		t.Fatal("healthy storage must report neither verdict")
+	}
+
+	sampler.free["volA"] = 30 * gib // below warn (40GiB), above floor (12GiB)
+	g.evaluateStorages(spy)
+	s = g.storageSnapshots()[0]
+	if !s.WarnVerdict || s.ProtectVerdict {
+		t.Fatalf("inside the warn band must report warn only, got warn=%v protect=%v", s.WarnVerdict, s.ProtectVerdict)
+	}
+
+	sampler.free["volA"] = 5 * gib // below floor
+	g.evaluateStorages(spy)
+	s = g.storageSnapshots()[0]
+	if s.WarnVerdict || !s.ProtectVerdict {
+		t.Fatalf("below floor must report protect only, got warn=%v protect=%v", s.WarnVerdict, s.ProtectVerdict)
+	}
+}
+
+// TestStorageSnapshotsWarnVerdictIndependentOfAlertSink pins the
+// gastrolog-3cobq4 review fix: WarnVerdict must come from the free-vs-warn
+// comparison directly, never from s.alarmRaised — reconcileStorageAlarm
+// only sets alarmRaised when an alert.Sink is wired (alerts == nil is a
+// legitimate no-op path, e.g. some test/tooling call sites), so deriving
+// WarnVerdict from it would silently report false for a genuinely
+// below-warn storage whenever no alert sink exists. Passing a nil Sink
+// here is exactly that path.
+func TestStorageSnapshotsWarnVerdictIndependentOfAlertSink(t *testing.T) {
+	t.Parallel()
+	total := 400 * gib // warn=40GiB, floor=12GiB
+	g, sampler := newGuardFixture(total, map[string]uint64{"volA": 30 * gib}) // inside the warn band
+	g.SetStorageGuard("storA", "a", "node-1", "volA", "", "")
+
+	g.evaluateStorages(nil) // no alert sink — alarmRaised is never touched
+	s := g.storageSnapshots()[0]
+	if !s.WarnVerdict {
+		t.Fatal("WarnVerdict must reflect free < warn regardless of whether an alert sink exists")
+	}
+	if s.ProtectVerdict {
+		t.Fatal("30GiB is above the 12GiB floor: protect must not engage")
+	}
+
+	sampler.free["volA"] = 60 * gib // clear of the warn band
+	g.evaluateStorages(nil)
+	s = g.storageSnapshots()[0]
+	if s.WarnVerdict {
+		t.Fatal("clearing the warn band must drop WarnVerdict even with no alert sink")
+	}
+}
+
+// TestStorageSnapshotsIncludesPlacedVaults pins the placements-on-storage
+// contract: SetStorageMeta's vault IDs surface in the snapshot, for the
+// storage inspector's cross-link to each placed vault's card.
+func TestStorageSnapshotsIncludesPlacedVaults(t *testing.T) {
+	t.Parallel()
+	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": 200 * gib})
+	vaultA, vaultB := glid.New(), glid.New()
+	g.SetStorageGuard("storA", "shared", "node-1", "volA", "", "")
+	g.SetStorageMeta("storA", 2, []glid.GLID{vaultA, vaultB})
+	g.evaluateStorages(nil)
+
+	s := g.storageSnapshots()[0]
+	if s.StorageClass != 2 {
+		t.Fatalf("storage class = %d, want 2", s.StorageClass)
+	}
+	if len(s.PlacedVaultIDs) != 2 {
+		t.Fatalf("placed vaults = %v, want [%s %s]", s.PlacedVaultIDs, vaultA, vaultB)
+	}
+}
+
+// TestSetStorageMetaNoopForUnknownStorage pins the no-op contract: calling
+// SetStorageMeta before the storage is registered (or after it's been
+// pruned) must not panic and must not fabricate an entry.
+func TestSetStorageMetaNoopForUnknownStorage(t *testing.T) {
+	t.Parallel()
+	g, _ := newGuardFixture(400*gib, nil)
+	g.SetStorageMeta("unknown", 1, []glid.GLID{glid.New()})
+	if len(g.storageSnapshots()) != 0 {
+		t.Fatal("SetStorageMeta must not create an entry for an unregistered storage")
+	}
+}
+
+// TestStorageSnapshotsOmitRemovedStorage pins the no-strand contract at the
+// snapshot layer: a storage pruned by retainStorageGuards is gone from
+// storageSnapshots() — the inspector's card must disappear, not linger with
+// stale state.
+func TestStorageSnapshotsOmitRemovedStorage(t *testing.T) {
+	t.Parallel()
+	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": gib})
+	g.SetStorageGuard("storA", "a", "node-1", "volA", "", "")
+	g.evaluateStorages(nil)
+	if len(g.storageSnapshots()) != 1 {
+		t.Fatal("precondition: storage must be present before removal")
+	}
+
+	g.retainStorageGuards(map[string]bool{}, nil)
+	if len(g.storageSnapshots()) != 0 {
+		t.Fatal("a pruned storage must be gone from storageSnapshots — no strand")
 	}
 }
 
 // TestVaultAdmissionGate pins the orchestrator-facing contract, including the
-// peer-broadcast half: a vault protected on ANY live node is refused here.
+// peer-broadcast half: a vault whose storage is protected on ANY live node
+// is refused here.
 func TestVaultAdmissionGate(t *testing.T) {
 	t.Parallel()
 	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": gib, "volB": 200 * gib})
 	vaultA, vaultB := glid.New(), glid.New()
-	g.SetVaultGuard(vaultA, "a", []string{"volA"}, "", "", 0)
-	g.SetVaultGuard(vaultB, "b", []string{"volB"}, "", "", 0)
-	g.evaluateVaults(nil)
+	g.SetStorageGuard("storA", "a", "node-1", "volA", "", "")
+	g.SetStorageGuard("storB", "b", "node-1", "volB", "", "")
+	g.SetVaultGuard(vaultA, "a", []string{"storA"}, 0, "", "")
+	g.SetVaultGuard(vaultB, "b", []string{"storB"}, 0, "", "")
+	g.evaluateStorages(nil)
 
 	o := &Orchestrator{diskGuard: g}
-	if err := o.vaultAdmissionGate(vaultA); !errors.Is(err, ErrVaultDiskProtect) {
-		t.Fatalf("locally protected vault must be refused, got %v", err)
+	if err := o.vaultAdmissionGate(vaultA); !errors.Is(err, ErrStorageDiskProtect) {
+		t.Fatalf("vault on a locally protected storage must be refused, got %v", err)
 	}
 	if err := o.vaultAdmissionGate(vaultB); err != nil {
 		t.Fatalf("healthy vault must be admitted: %v", err)
 	}
 
 	// Remote protect (another node's broadcast) refuses vaultB here too.
-	o.SetRemoteVaultDiskProtected(func(id glid.GLID) bool { return id == vaultB })
-	if err := o.vaultAdmissionGate(vaultB); !errors.Is(err, ErrVaultDiskProtect) {
+	o.SetRemoteVaultStorageProtected(func(id glid.GLID) bool { return id == vaultB })
+	if err := o.vaultAdmissionGate(vaultB); !errors.Is(err, ErrStorageDiskProtect) {
 		t.Fatalf("remotely protected vault must be refused, got %v", err)
 	}
 
 	// Broadcast side: only locally protected vaults are published.
-	prot := o.DiskProtectedVaults()
+	prot := o.StorageProtectedVaults()
 	if len(prot) != 1 || prot[0] != vaultA {
-		t.Fatalf("DiskProtectedVaults = %v, want [%s]", prot, vaultA)
+		t.Fatalf("StorageProtectedVaults = %v, want [%s]", prot, vaultA)
 	}
 
 	// No guard, no remote fn: always admit.
@@ -512,8 +853,8 @@ func TestVaultMaxSizeCap(t *testing.T) {
 
 	footprint := map[glid.GLID]int64{vaultA: int64(gib), vaultB: int64(gib)}
 	g.vaultFootprint = func(id glid.GLID) int64 { return footprint[id] }
-	g.SetVaultGuard(vaultA, "capped", []string{"volA"}, "", "", 10*gib)
-	g.SetVaultGuard(vaultB, "roomy", []string{"volA"}, "", "", 100*gib)
+	g.SetVaultGuard(vaultA, "capped", []string{"volA"}, 10*gib, "", "")
+	g.SetVaultGuard(vaultB, "roomy", []string{"volA"}, 100*gib, "", "")
 
 	g.evaluateVaults(spy)
 	if g.vaultSizeCapped(vaultA) || spy.active() != 0 {
@@ -558,18 +899,19 @@ func TestVaultMaxSizeCap(t *testing.T) {
 	}
 }
 
-// TestVaultMaxSizeBudgetOnlyEntry pins the origin-node case: a vault with a
-// budget but NO local placement (nothing to statfs) is still evaluated —
-// origin segment backlog claims local disk everywhere records are accepted.
-func TestVaultMaxSizeBudgetOnlyEntry(t *testing.T) {
+// TestVaultMaxSizeEntryWithoutLocalPaths pins the origin-node case: a vault
+// with a max-size bound but NO local placement (nothing to statfs) is still
+// evaluated — origin segment backlog claims local disk everywhere records
+// are accepted.
+func TestVaultMaxSizeEntryWithoutLocalPaths(t *testing.T) {
 	t.Parallel()
 	g, _ := newGuardFixture(400*gib, map[string]uint64{})
 	vaultA := glid.New()
 	g.vaultFootprint = func(glid.GLID) int64 { return int64(20 * gib) }
-	g.SetVaultGuard(vaultA, "originy", nil, "", "", 10*gib)
+	g.SetVaultGuard(vaultA, "originy", nil, 10*gib, "", "")
 	g.evaluateVaults(nil)
 	if !g.vaultSizeCapped(vaultA) {
-		t.Fatal("budget must be enforced even with no sampleable volume paths")
+		t.Fatal("the bound must be enforced even with no sampleable volume paths")
 	}
 }
 
@@ -585,8 +927,8 @@ func TestVaultAdmissionGateMaxSize(t *testing.T) {
 		}
 		return int64(gib)
 	}
-	g.SetVaultGuard(vaultA, "a", []string{"volA"}, "", "", 10*gib)
-	g.SetVaultGuard(vaultB, "b", []string{"volA"}, "", "", 10*gib)
+	g.SetVaultGuard(vaultA, "a", []string{"volA"}, 10*gib, "", "")
+	g.SetVaultGuard(vaultB, "b", []string{"volA"}, 10*gib, "", "")
 	g.evaluateVaults(nil)
 
 	o := &Orchestrator{diskGuard: g}
@@ -625,8 +967,8 @@ func TestVaultBacklogBudget(t *testing.T) {
 	backlog := map[glid.GLID]int64{vaultA: int64(gib), vaultB: int64(gib)}
 	g.vaultBacklogBytes = func(id glid.GLID) int64 { return backlog[id] }
 	g.backlogBudget.Store(10 * gib)
-	g.SetVaultGuard(vaultA, "busy", []string{"volA"}, "", "", 0)
-	g.SetVaultGuard(vaultB, "calm", []string{"volA"}, "", "", 0)
+	g.SetVaultGuard(vaultA, "busy", []string{"volA"}, 0, "", "")
+	g.SetVaultGuard(vaultB, "calm", []string{"volA"}, 0, "", "")
 
 	g.evaluateVaults(spy)
 	if g.vaultBacklogCapped(vaultA) || spy.active() != 0 {
@@ -681,7 +1023,7 @@ func TestVaultBacklogBudgetDisabled(t *testing.T) {
 	spy := &alertSpy{}
 	vaultA := glid.New()
 	g.vaultBacklogBytes = func(glid.GLID) int64 { return int64(50 * gib) }
-	g.SetVaultGuard(vaultA, "busy", []string{"volA"}, "", "", 0)
+	g.SetVaultGuard(vaultA, "busy", []string{"volA"}, 0, "", "")
 
 	// Budget unset: enormous backlog, no cap, no alarm.
 	g.evaluateVaults(spy)
@@ -722,8 +1064,8 @@ func TestVaultAdmissionGateBacklog(t *testing.T) {
 		return int64(gib)
 	}
 	g.backlogBudget.Store(10 * gib)
-	g.SetVaultGuard(vaultA, "a", []string{"volA"}, "", "", 0)
-	g.SetVaultGuard(vaultB, "b", []string{"volA"}, "", "", 0)
+	g.SetVaultGuard(vaultA, "a", []string{"volA"}, 0, "", "")
+	g.SetVaultGuard(vaultB, "b", []string{"volA"}, 0, "", "")
 	g.evaluateVaults(nil)
 
 	o := &Orchestrator{diskGuard: g}
@@ -732,5 +1074,174 @@ func TestVaultAdmissionGateBacklog(t *testing.T) {
 	}
 	if err := o.vaultAdmissionGate(vaultB); err != nil {
 		t.Fatalf("vault under budget must be admitted: %v", err)
+	}
+}
+
+// causesEqual compares a VaultAdmissionCauses result against an expected
+// ordered set, ignoring nothing — order is part of the contract (gate-check
+// order: disk protect, max-size bound, backlog budget).
+func causesEqual(got []VaultAdmissionCause, want ...VaultAdmissionCause) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// TestVaultAdmissionCausesEmpty pins the healthy case: a vault admitting
+// normally reports zero causes, and so does a guardless orchestrator (same
+// contract vaultAdmissionGate has for "no guard, always admit").
+func TestVaultAdmissionCausesEmpty(t *testing.T) {
+	t.Parallel()
+	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": 200 * gib})
+	vaultA := glid.New()
+	g.SetVaultGuard(vaultA, "healthy", []string{"volA"}, 0, "", "")
+	g.evaluateVaults(nil)
+
+	o := &Orchestrator{diskGuard: g}
+	if got := o.VaultAdmissionCauses(vaultA); len(got) != 0 {
+		t.Fatalf("healthy vault must report no causes, got %v", got)
+	}
+	if got := (&Orchestrator{}).VaultAdmissionCauses(vaultA); len(got) != 0 {
+		t.Fatalf("guardless orchestrator must report no causes, got %v", got)
+	}
+}
+
+// TestVaultAdmissionCausesEachGate pins one cause per gate, local half:
+// disk protect alone, max-size alone, backlog alone — each reporting
+// exactly its own cause and nothing else.
+func TestVaultAdmissionCausesEachGate(t *testing.T) {
+	t.Parallel()
+
+	t.Run("storage disk protect", func(t *testing.T) {
+		t.Parallel()
+		g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": gib})
+		vaultA := glid.New()
+		g.SetStorageGuard("storA", "my-storage", "node-1", "volA", "", "")
+		g.SetVaultGuard(vaultA, "a", []string{"storA"}, 0, "", "")
+		g.evaluateStorages(nil)
+
+		o := &Orchestrator{diskGuard: g}
+		if got := o.VaultAdmissionCauses(vaultA); !causesEqual(got, VaultAdmissionCauseStorageDiskProtect) {
+			t.Fatalf("VaultAdmissionCauses = %v, want [StorageDiskProtect]", got)
+		}
+		// Detail names the storage and its free-vs-floor numbers when
+		// locally sampled — facts before speculation (gastrolog-9akebz).
+		details := o.VaultAdmissionCauseDetails(vaultA)
+		if len(details) != 1 || !strings.Contains(details[0].Detail, "my-storage") {
+			t.Fatalf("detail must name the protecting storage, got %+v", details)
+		}
+	})
+
+	t.Run("max-size bound", func(t *testing.T) {
+		t.Parallel()
+		g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": 200 * gib})
+		vaultA := glid.New()
+		g.vaultFootprint = func(glid.GLID) int64 { return int64(11 * gib) }
+		g.SetVaultGuard(vaultA, "a", []string{"volA"}, 10*gib, "", "")
+		g.evaluateVaults(nil)
+
+		o := &Orchestrator{diskGuard: g}
+		if got := o.VaultAdmissionCauses(vaultA); !causesEqual(got, VaultAdmissionCauseMaxSizeBound) {
+			t.Fatalf("VaultAdmissionCauses = %v, want [MaxSizeBound]", got)
+		}
+		details := o.VaultAdmissionCauseDetails(vaultA)
+		if len(details) != 1 || !strings.Contains(details[0].Detail, "max-size bound") {
+			t.Fatalf("detail must name the max-size bound, got %+v", details)
+		}
+	})
+
+	t.Run("backlog budget", func(t *testing.T) {
+		t.Parallel()
+		g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": 200 * gib})
+		vaultA := glid.New()
+		g.vaultBacklogBytes = func(glid.GLID) int64 { return int64(11 * gib) }
+		g.backlogBudget.Store(10 * gib)
+		g.SetVaultGuard(vaultA, "a", []string{"volA"}, 0, "", "")
+		g.evaluateVaults(nil)
+
+		o := &Orchestrator{diskGuard: g}
+		if got := o.VaultAdmissionCauses(vaultA); !causesEqual(got, VaultAdmissionCauseBacklogBudget) {
+			t.Fatalf("VaultAdmissionCauses = %v, want [BacklogBudget]", got)
+		}
+	})
+}
+
+// TestVaultAdmissionCausesRemote pins the peer-broadcast half: a vault
+// reported protected/capped only by a live peer's broadcast (no local guard
+// state) reports the same cause the local half would.
+func TestVaultAdmissionCausesRemote(t *testing.T) {
+	t.Parallel()
+
+	t.Run("storage disk protect", func(t *testing.T) {
+		t.Parallel()
+		vaultA := glid.New()
+		o := &Orchestrator{}
+		o.SetRemoteVaultStorageProtected(func(id glid.GLID) bool { return id == vaultA })
+		o.SetRemoteVaultStorageProtectedNodes(func(id glid.GLID) []string {
+			if id == vaultA {
+				return []string{"node-b"}
+			}
+			return nil
+		})
+		if got := o.VaultAdmissionCauses(vaultA); !causesEqual(got, VaultAdmissionCauseStorageDiskProtect) {
+			t.Fatalf("VaultAdmissionCauses = %v, want [StorageDiskProtect]", got)
+		}
+		// No local sample to attach numbers to: the detail names WHO
+		// reported it instead (gastrolog-9akebz).
+		details := o.VaultAdmissionCauseDetails(vaultA)
+		if len(details) != 1 || !strings.Contains(details[0].Detail, "node-b") {
+			t.Fatalf("remote detail must name the reporting node, got %+v", details)
+		}
+	})
+
+	t.Run("max-size bound", func(t *testing.T) {
+		t.Parallel()
+		vaultA := glid.New()
+		o := &Orchestrator{}
+		o.SetRemoteVaultSizeCapped(func(id glid.GLID) bool { return id == vaultA })
+		if got := o.VaultAdmissionCauses(vaultA); !causesEqual(got, VaultAdmissionCauseMaxSizeBound) {
+			t.Fatalf("VaultAdmissionCauses = %v, want [MaxSizeBound]", got)
+		}
+	})
+}
+
+// TestVaultAdmissionCausesCombination pins the ALL-CAUSES-AT-ONCE case: a
+// vault simultaneously with a protected storage, at its max-size bound, and
+// at its backlog budget reports all three, in gate-check order — this is
+// the "no drift" contract: vaultAdmissionGate returns causes[0] (storage
+// disk protect) for this exact vault, and the RPC field must show the full
+// set, not just the one the gate acts on.
+func TestVaultAdmissionCausesCombination(t *testing.T) {
+	t.Parallel()
+	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": gib})
+	vaultA := glid.New()
+	g.vaultFootprint = func(glid.GLID) int64 { return int64(11 * gib) }
+	g.vaultBacklogBytes = func(glid.GLID) int64 { return int64(11 * gib) }
+	g.backlogBudget.Store(10 * gib)
+	g.SetStorageGuard("storA", "combo-storage", "node-1", "volA", "", "")
+	g.SetVaultGuard(vaultA, "a", []string{"storA"}, 10*gib, "", "")
+	g.evaluateStorages(nil)
+	g.evaluateVaults(nil)
+
+	o := &Orchestrator{diskGuard: g}
+	got := o.VaultAdmissionCauses(vaultA)
+	want := []VaultAdmissionCause{
+		VaultAdmissionCauseStorageDiskProtect,
+		VaultAdmissionCauseMaxSizeBound,
+		VaultAdmissionCauseBacklogBudget,
+	}
+	if !causesEqual(got, want...) {
+		t.Fatalf("VaultAdmissionCauses = %v, want %v (gate-check order)", got, want)
+	}
+
+	// The gate takes causes[0]: storage disk protect wins even though all
+	// three fired.
+	if err := o.vaultAdmissionGate(vaultA); !errors.Is(err, ErrStorageDiskProtect) {
+		t.Fatalf("gate must return the FIRST cause (storage disk protect), got %v", err)
 	}
 }

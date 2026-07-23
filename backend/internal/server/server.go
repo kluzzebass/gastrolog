@@ -96,6 +96,11 @@ type Config struct {
 	// Nil in single-node mode. Typically the same *cluster.PeerState as PeerRouteStats.
 	PeerPipelineDisk PeerPipelineDiskProvider
 
+	// PeerStorageStats looks up a storage's disk-guard state from cluster
+	// peer broadcasts, for storages not locally hosted (gastrolog-3cobq4).
+	// Nil in single-node mode. Typically the same *cluster.PeerState as PeerStats.
+	PeerStorageStats PeerStorageStatsProvider
+
 	// RemoteSearcher forwards search requests to remote cluster nodes.
 	// Nil in single-node mode.
 	RemoteSearcher        RemoteSearcher
@@ -200,6 +205,7 @@ type Server struct {
 	peerIngesterStats     PeerIngesterStatsProvider
 	peerRouteStats        PeerRouteStatsProvider
 	peerPipelineDisk      PeerPipelineDiskProvider
+	peerStorageStats      PeerStorageStatsProvider
 	remoteSearcher        RemoteSearcher
 	remoteChunkLister     RemoteChunkLister
 	remotePipelineBacklog RemotePipelineBacklogGetter
@@ -277,6 +283,7 @@ func New(orch *orchestrator.Orchestrator, cfgStore system.Store, factories orche
 		peerIngesterStats:         cfg.PeerIngesterStats,
 		peerRouteStats:            cfg.PeerRouteStats,
 		peerPipelineDisk:          cfg.PeerPipelineDisk,
+		peerStorageStats:          cfg.PeerStorageStats,
 		remoteSearcher:            cfg.RemoteSearcher,
 		remoteChunkLister:         cfg.RemoteChunkLister,
 		remotePipelineBacklog:     cfg.RemotePipelineBacklog,
@@ -528,6 +535,7 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 		CertManager:        s.certManager,
 		PeerStats:          s.peerIngesterStats,
 		PeerRouteStats:     s.peerRouteStats,
+		PeerStorageStats:   s.peerStorageStats,
 		LocalStats:         s.localStatsFn,
 		ClusterRouteRates:  s.clusterRouteRatesFn,
 		LocalNodeID:        s.localNodeID,
@@ -570,6 +578,10 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 			return resp.Msg
 		}
 		return nil
+	})
+	lifecycleServer.SetStorageFunc(func(ctx context.Context) []*apiv1.StorageState {
+		storages, _ := configServer.allStorageStates(ctx)
+		return storages
 	})
 	authServer := NewAuthServer(s.cfgStore, s.tokens, s.logger, s.noAuth)
 	jobServer := NewJobServer(s.orch.Scheduler(), s.localNodeID, s.peerJobs, s.orch.Scheduler().Events())

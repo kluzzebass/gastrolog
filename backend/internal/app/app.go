@@ -482,11 +482,14 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 
 	broadcaster, peerState, peerJobState, localStatsFn, clusterRouteRatesFn := setupClusterStats(ctx, logger, cfgStore, clusterSrv, orch, alertCollector, cfg.SlogCaptureHandler, nodeID, cfg.ServerAddr, cfg.PprofAddr, statsSignal, raftLive)
 	if peerState != nil {
-		// Per-vault admission verdicts are cluster-consistent: a starved
-		// vault volume or an over-budget vault claim on any node suspends
+		// Per-vault admission verdicts are cluster-consistent: a storage
+		// below floor or an over-budget vault claim on any node suspends
 		// admission for that vault everywhere.
-		orch.SetRemoteVaultDiskProtected(peerState.VaultDiskProtected)
+		orch.SetRemoteVaultStorageProtected(peerState.VaultStorageProtected)
+		orch.SetRemoteVaultStorageProtectedNodes(peerState.VaultStorageProtectedNodeNames)
 		orch.SetRemoteVaultSizeCapped(peerState.VaultSizeCapped)
+		orch.SetRemoteVaultAgeBoundCapped(peerState.VaultAgeBoundCapped)
+		orch.SetRemoteVaultChunkCountBoundCapped(peerState.VaultChunkCountBoundCapped)
 	}
 
 	// Start vault placement manager (cluster mode only).
@@ -502,10 +505,10 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 			logger:      compPlacement.Apply(logger),
 			triggerCh:   make(chan struct{}, 1),
 			// Local half of the degraded-home check (gastrolog-38bm9t):
-			// peers report their vault protect state via NodeStats, but
-			// the local node isn't in its own peer table.
-			localVaultDiskProtected: func(id glid.GLID) bool {
-				return slices.Contains(orch.DiskProtectedVaults(), id)
+			// peers report their vault storage-protect state via
+			// NodeStats, but the local node isn't in its own peer table.
+			localVaultStorageProtected: func(id glid.GLID) bool {
+				return slices.Contains(orch.StorageProtectedVaults(), id)
 			},
 		}
 		disp.placementTrigger = pm.Trigger
@@ -1437,9 +1440,9 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 			AfterConfigApply: deps.AfterConfigApply, ConfigSignal: deps.ConfigSignal, StatsSignal: deps.StatsSignal,
 			Cluster: deps.ClusterSrv, PeerStats: deps.PeerState,
 			PeerVaultStats: deps.PeerState, PeerIngesterStats: deps.PeerState, PeerRouteStats: deps.PeerState,
-			PeerPipelineDisk: deps.PeerState,
-			PeerJobs:         deps.PeerJobState,
-			LocalStats:       deps.LocalStats, ClusterRouteRates: deps.ClusterRouteRates, RemoteSearcher: deps.SearchForwarder, RemoteChunkLister: deps.SearchForwarder,
+			PeerPipelineDisk: deps.PeerState, PeerStorageStats: deps.PeerState,
+			PeerJobs:   deps.PeerJobState,
+			LocalStats: deps.LocalStats, ClusterRouteRates: deps.ClusterRouteRates, RemoteSearcher: deps.SearchForwarder, RemoteChunkLister: deps.SearchForwarder,
 			RemotePipelineBacklog: deps.SearchForwarder,
 			RemoteChunkWatcher:    deps.SearchForwarder,
 			RemoteIndexer:         deps.SearchForwarder,

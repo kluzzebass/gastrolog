@@ -94,6 +94,8 @@ func NodeStorageConfigToProto(cfg system.NodeStorageConfig) *gastrologv1.NodeSto
 			Name:              fs.Name,
 			Path:              fs.Path,
 			MemoryBudgetBytes: fs.MemoryBudgetBytes,
+			DiskFreeWarn:      fs.DiskFreeWarn,
+			DiskFreeFloor:     fs.DiskFreeFloor,
 		}
 	}
 	return &gastrologv1.NodeStorageConfig{
@@ -116,6 +118,8 @@ func NodeStorageConfigFromProto(p *gastrologv1.NodeStorageConfig) system.NodeSto
 			Name:              a.GetName(),
 			Path:              a.GetPath(),
 			MemoryBudgetBytes: a.GetMemoryBudgetBytes(),
+			DiskFreeWarn:      a.GetDiskFreeWarn(),
+			DiskFreeFloor:     a.GetDiskFreeFloor(),
 		}
 		if len(a.GetId()) > 0 {
 			fs.ID = glid.FromBytes(a.GetId())
@@ -160,12 +164,10 @@ func VaultConfigToProto(v system.VaultConfig) *gastrologv1.VaultConfig {
 		CacheBudget:          v.CacheBudget,
 		CacheTtl:             v.CacheTTL,
 		RetentionDisposition: v.RetentionDisposition,
-		DiskFreeWarn:         v.DiskFreeWarn,
-		DiskFreeFloor:        v.DiskFreeFloor,
-		MaxSize:              v.MaxSize,
 	}
 	pb.RotationPolicyId = glid.OptionalToProto(v.RotationPolicyID)
 	pb.CloudServiceId = glid.OptionalToProto(v.CloudServiceID)
+	pb.RetentionTransferTargetVaultId = glid.OptionalToProto(v.RetentionTransferTargetVaultID)
 	return pb
 }
 
@@ -175,23 +177,21 @@ func VaultConfigFromProto(p *gastrologv1.VaultConfig) (system.VaultConfig, error
 		return system.VaultConfig{}, nil
 	}
 	cfg := system.VaultConfig{
-		ID:                   glid.FromBytes(p.GetId()),
-		Name:                 p.GetName(),
-		Enabled:              p.GetEnabled(),
-		Type:                 VaultTypeFromProto(p.GetType()),
-		MemoryBudget:         p.GetMemoryBudget(),
-		StorageClass:         p.GetStorageClass(),
-		ReplicationFactor:    p.GetReplicationFactor(),
-		Path:                 p.GetPath(),
-		CacheEviction:        p.GetCacheEviction(),
-		CacheBudget:          p.GetCacheBudget(),
-		CacheTTL:             p.GetCacheTtl(),
-		RetentionDisposition: p.GetRetentionDisposition(),
-		DiskFreeWarn:         p.GetDiskFreeWarn(),
-		DiskFreeFloor:        p.GetDiskFreeFloor(),
-		MaxSize:              p.GetMaxSize(),
-		RotationPolicyID:     glid.OptionalFromProto(p.GetRotationPolicyId()),
-		CloudServiceID:       glid.OptionalFromProto(p.GetCloudServiceId()),
+		ID:                             glid.FromBytes(p.GetId()),
+		Name:                           p.GetName(),
+		Enabled:                        p.GetEnabled(),
+		Type:                           VaultTypeFromProto(p.GetType()),
+		MemoryBudget:                   p.GetMemoryBudget(),
+		StorageClass:                   p.GetStorageClass(),
+		ReplicationFactor:              p.GetReplicationFactor(),
+		Path:                           p.GetPath(),
+		CacheEviction:                  p.GetCacheEviction(),
+		CacheBudget:                    p.GetCacheBudget(),
+		CacheTTL:                       p.GetCacheTtl(),
+		RetentionDisposition:           p.GetRetentionDisposition(),
+		RotationPolicyID:               glid.OptionalFromProto(p.GetRotationPolicyId()),
+		CloudServiceID:                 glid.OptionalFromProto(p.GetCloudServiceId()),
+		RetentionTransferTargetVaultID: glid.OptionalFromProto(p.GetRetentionTransferTargetVaultId()),
 	}
 
 	for _, r := range p.GetRetentionRules() {

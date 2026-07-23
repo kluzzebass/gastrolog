@@ -10,7 +10,7 @@ import { useToast } from "../Toast";
 import { buildNodeNameMap, resolveNodeName } from "../../utils/nodeNames";
 // eslint-disable-next-line no-restricted-imports -- no Chunk model yet (gastrolog-2e2qs follow-up)
 import { type ChunkMeta } from "../../api/gen/gastrolog/v1/vault_pb";
-import type { Vault } from "../../api/model/vault";
+import { VaultAdmissionCause, type Vault, type VaultAdmissionRefusal } from "../../api/model/vault";
 import { protoToInstant, instantToMs, instantToDate, formatDateTimeShort } from "../../utils/temporal";
 import { formatBytes, formatRate } from "../../utils/units";
 import { Spark } from "../Spark";
@@ -48,6 +48,86 @@ function chunkStartInstant(chunk: ChunkMeta): Date | undefined {
   return start;
 }
 
+// chunkDiskClaimBytes is this chunk's LOCAL on-disk claim — what deleting
+// it would actually free on the responding node. Mirrors the backend's
+// chunk.DiskClaim formula (backend/internal/chunk/claim.go): a cloud-backed
+// chunk with no local cache (diskBytes == 0) claims nothing — the object
+// still lives in the cloud store, at cloudBytes, a currency this never
+// substitutes in. Otherwise diskBytes wins when recorded, falling back to
+// logical bytes only for chunks with no disk-bytes tracking at all
+// (pipeline GLCB chunks). See gastrolog-33ul6h.
+export function chunkDiskClaimBytes(chunk: ChunkMeta): number {
+  const diskBytes = Number(chunk.diskBytes);
+  if (chunk.cloudBacked && diskBytes === 0) return 0;
+  if (diskBytes > 0) return diskBytes;
+  return Number(chunk.bytes);
+}
+
+// chunkSizeCellTitle explains the size column's number — terse, and honest
+// about which of the two cloud currencies (local cache vs. cloud object) is
+// showing. undefined = no tooltip needed (the number is self-explanatory).
+function chunkSizeCellTitle(chunk: ChunkMeta): string | undefined {
+  const diskBytes = Number(chunk.diskBytes);
+  if (chunk.cloudBacked) {
+    return diskBytes > 0
+      ? `${formatBytes(diskBytes)} cached — cloud object ${formatBytes(Number(chunk.cloudBytes))}`
+      // "Not cached" rather than "evicted" — also true for a follower
+      // that registered this chunk from FSM metadata alone and has never
+      // downloaded it, not just one that cached and later evicted it.
+      : `not cached — cloud object ${formatBytes(Number(chunk.cloudBytes))}`;
+  }
+  if (diskBytes > 0) {
+    return `${formatBytes(Number(chunk.bytes))} → ${formatBytes(diskBytes)} on disk`;
+  }
+  return undefined;
+}
+
+// vaultAdmissionCauseLabels maps the backend's admission-refusal cause enum
+// (VaultInfo.admissionRefused, populated from the responding node's own
+// admission-causes collector — backend/internal/orchestrator/disk_guard.go's
+// VaultAdmissionCauses) to a terse tooltip phrase. A first-class backend
+// signal, not a UI-side derivation from alarm state (gastrolog-33ul6h).
+// gastrolog-9akebz: VAULT_DISK_PROTECT renamed STORAGE_DISK_PROTECT — the
+// disk-free thresholds moved from the vault to the storage it's placed on.
+const vaultAdmissionCauseLabels: Partial<Record<VaultAdmissionCause, string>> = {
+  [VaultAdmissionCause.MAX_SIZE_BOUND]: "at max-size bound",
+  [VaultAdmissionCause.STORAGE_DISK_PROTECT]: "storage below floor",
+  [VaultAdmissionCause.BACKLOG_BUDGET]: "backlog at budget",
+  [VaultAdmissionCause.AGE_BOUND]: "past age bound",
+  [VaultAdmissionCause.CHUNK_COUNT_BOUND]: "over chunk-count bound",
+};
+
+// vaultRefusingCauseLabels maps the vault's admission-refused causes to their
+// terse tooltip phrases, dropping UNSPECIFIED (never emitted by the backend
+// today, but the label map has no entry for it — defense in depth).
+export function vaultRefusingCauseLabels(refusals: readonly VaultAdmissionRefusal[]): string[] {
+  const labels: string[] = [];
+  for (const r of refusals) {
+    const label = vaultAdmissionCauseLabels[r.cause];
+    if (label) labels.push(label);
+  }
+  return labels;
+}
+
+// vaultRefusalDetails pairs each active cause's label with the backend's own
+// detail string, verbatim — the expanded card's refusal section renders
+// exactly this, never reconstructing the specifics client-side
+// (gastrolog-9akebz: VaultAdmissionRefusal carries {cause, detail} on the
+// wire). Same UNSPECIFIED-drop discipline as vaultRefusingCauseLabels.
+export interface VaultRefusalDetail {
+  label: string;
+  detail: string;
+}
+
+export function vaultRefusalDetails(refusals: readonly VaultAdmissionRefusal[]): VaultRefusalDetail[] {
+  const details: VaultRefusalDetail[] = [];
+  for (const r of refusals) {
+    const label = vaultAdmissionCauseLabels[r.cause];
+    if (label) details.push({ label, detail: r.detail });
+  }
+  return details;
+}
+
 interface VaultCardProps {
   vault: Vault;
   dark: boolean;
@@ -68,6 +148,15 @@ export function VaultCard({
   const { data: chunks } = useChunks(vault.id);
   const chunkCount = chunks?.length ?? 0;
   const recordCount = (chunks ?? []).reduce((sum, c) => sum + Number(c.recordCount), 0);
+  // Vault size = summed per-chunk local disk claim — the same quantity the
+  // max-size bound measures. An evicted cloud-backed chunk contributes 0,
+  // not its logical bytes (the object is still in the cloud store, not on
+  // this node). See gastrolog-33ul6h.
+  const sizeBytes = (chunks ?? []).reduce(
+    (sum, c) => sum + chunkDiskClaimBytes(c),
+    0,
+  );
+  const refusingCauses = vaultRefusingCauseLabels(vault.admissionRefused);
 
   return (
     <ExpandableCard
@@ -83,11 +172,19 @@ export function VaultCard({
           {!vault.enabled && (
             <Badge variant="warn" dark={dark}>disabled</Badge>
           )}
+          {refusingCauses.length > 0 && (
+            <Badge variant="warn" dark={dark} title={refusingCauses.join("; ")}>
+              refusing
+            </Badge>
+          )}
           <Badge variant="muted" dark={dark}>
             {chunkCount.toLocaleString()} chunks
           </Badge>
           <Badge variant="muted" dark={dark}>
             {recordCount.toLocaleString()} records
+          </Badge>
+          <Badge variant="muted" dark={dark}>
+            {formatBytes(sizeBytes)}
           </Badge>
           {onOpenSettings && (
             <CrossLinkBadge dark={dark} title="Open in Settings" onClick={onOpenSettings}>
@@ -98,6 +195,7 @@ export function VaultCard({
       }
     >
       <div className="flex flex-col gap-4 pt-2">
+        <VaultRefusalSection refusals={vault.admissionRefused} dark={dark} />
         <VaultLeaderSummary vaultId={vault.id} vaultTypeLabel={vault.typeLabel} dark={dark} />
         <VaultThroughputSection vaultId={vault.id} dark={dark} />
         <VaultStageCountersSection vaultId={vault.id} dark={dark} />
@@ -105,6 +203,42 @@ export function VaultCard({
         <ChunkList vaultId={vault.id} dark={dark} />
       </div>
     </ExpandableCard>
+  );
+}
+
+// VaultRefusalSection lists each active admission-refusal cause with the
+// backend's own detail string, verbatim — the same VaultAdmissionRefusal
+// signal that drives the header's "refusing" badge, expanded into a
+// dedicated section while it's non-empty. No client-side reconstruction of
+// which storage or bound is involved: the detail text is exactly what the
+// backend attached (gastrolog-9akebz). Matches the Topology/Throughput
+// section chrome (uppercase muted heading, bordered well panel).
+function VaultRefusalSection({
+  refusals,
+  dark,
+}: Readonly<{ refusals: readonly VaultAdmissionRefusal[]; dark: boolean }>) {
+  const c = useThemeClass(dark);
+  const details = vaultRefusalDetails(refusals);
+  if (details.length === 0) return null;
+
+  return (
+    <section className="flex flex-col gap-4">
+      <h3
+        className={`text-[0.75em] font-medium uppercase tracking-[0.15em] whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}
+      >
+        Refusal
+      </h3>
+      <div
+        className={`rounded-lg border px-4 py-3 flex flex-col gap-2 ${c("border-ink-border bg-ink-well", "border-light-border bg-light-well")}`}
+      >
+        {details.map((d) => (
+          <div key={d.label} className="flex items-baseline gap-3 text-[0.85em]">
+            <span className="font-mono text-severity-warn whitespace-nowrap">{d.label}</span>
+            <span className={c("text-text-muted", "text-light-text-muted")}>{d.detail}</span>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -879,13 +1013,16 @@ function ChunkRow({
         </td>
         <td
           className={`px-4 py-2 text-right font-mono whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}
-          title={Number(chunk.diskBytes) > 0
-            ? `${formatBytes(Number(chunk.bytes))} \u2192 ${formatBytes(Number(chunk.diskBytes))} on disk`
-            : undefined}
+          title={chunkSizeCellTitle(chunk)}
         >
-          {Number(chunk.diskBytes) > 0
-            ? formatBytes(Number(chunk.diskBytes))
-            : formatBytes(Number(chunk.bytes))}
+          {chunk.cloudBacked && Number(chunk.diskBytes) === 0 && Number(chunk.cloudBytes) > 0 ? (
+            // Cloud-only: show the GLCB's cloud object size, italic to mark
+            // that no local copy backs the number. Display only — the local
+            // disk claim (and the vault size badge) still counts it as zero.
+            <span className="italic">{formatBytes(Number(chunk.cloudBytes))}</span>
+          ) : (
+            formatBytes(chunkDiskClaimBytes(chunk))
+          )}
         </td>
       </tr>
       {isExpanded && (
@@ -991,10 +1128,16 @@ function ChunkDetail({
             <div className={`flex items-center gap-3 text-[0.85em]`}>
               <span className={`font-mono w-20 ${c("text-text-bright", "text-light-text-bright")}`}>blob</span>
               <span className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}>
-                {formatBytes(Number(chunk.diskBytes))}
+                {formatBytes(Number(chunk.cloudBytes))}
               </span>
               <span className={c("text-text-muted", "text-light-text-muted")}>
-                GLCB{chunk.cloudBacked ? " (zstd-wrapped on transport)" : ""}
+                GLCB (zstd-wrapped on transport)
+              </span>
+            </div>
+            <div className={`flex items-center gap-3 text-[0.85em]`}>
+              <span className={`font-mono w-20 ${c("text-text-bright", "text-light-text-bright")}`}>cached</span>
+              <span className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}>
+                {Number(chunk.diskBytes) > 0 ? formatBytes(Number(chunk.diskBytes)) : "not cached"}
               </span>
             </div>
             <div className={`flex items-center gap-3 text-[0.85em]`}>

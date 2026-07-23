@@ -15,6 +15,7 @@ import { SettingsCard } from "./SettingsCard";
 import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
 import { FormField, TextInput, NumberInput } from "./FormField";
+import { Checkbox } from "./Checkbox";
 import { Button } from "./Buttons";
 import { UsedByStatus, vaultRefsForRetentionPolicy } from "./UsedByStatus";
 import type { SettingsTab } from "./SettingsDialog";
@@ -22,11 +23,16 @@ import { sortByName } from "../../lib/sort";
 
 type NavigateTo = (tab: SettingsTab, entityName?: string) => void;
 
+// refuseDescription doubles as the checkbox label in both forms — the
+// checkbox IS the field, no FormField wrapper.
+const refuseDescription = "Refuse new records while a bound is violated.";
+
 interface PolicyEdit {
   name: string;
   maxAge: string;
   maxBytes: string;
   maxChunks: string;
+  refuse: boolean;
 }
 
 // -- Reducer for "Add retention policy" form state --
@@ -37,6 +43,7 @@ interface AddRetentionFormState {
   newMaxAge: string;
   newMaxBytes: string;
   newMaxChunks: string;
+  newRefuse: boolean;
 }
 
 const addRetentionFormInitial: AddRetentionFormState = {
@@ -45,6 +52,11 @@ const addRetentionFormInitial: AddRetentionFormState = {
   newMaxAge: "",
   newMaxBytes: "",
   newMaxChunks: "",
+  // RetentionPolicyConfig.Refuse defaults off (nil reads as false —
+  // gastrolog-5yfaqj: bounds are drain-first, refusal is the explicit
+  // hard mode) — match that here so the add form starts in the same
+  // state a freshly-created policy would resolve to.
+  newRefuse: false,
 };
 
 type AddRetentionFormAction =
@@ -53,6 +65,7 @@ type AddRetentionFormAction =
   | { type: "setNewMaxAge"; value: string }
   | { type: "setNewMaxBytes"; value: string }
   | { type: "setNewMaxChunks"; value: string }
+  | { type: "setNewRefuse"; value: boolean }
   | { type: "resetForm" };
 
 function addRetentionFormReducer(state: AddRetentionFormState, action: AddRetentionFormAction): AddRetentionFormState {
@@ -67,6 +80,8 @@ function addRetentionFormReducer(state: AddRetentionFormState, action: AddRetent
       return { ...state, newMaxBytes: action.value };
     case "setNewMaxChunks":
       return { ...state, newMaxChunks: action.value };
+    case "setNewRefuse":
+      return { ...state, newRefuse: action.value };
     case "resetForm":
       return addRetentionFormInitial;
     default:
@@ -85,7 +100,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
   const { isExpanded, toggle: toggleCard } = useExpandedCards();
 
   const [addForm, dispatchAdd] = useReducer(addRetentionFormReducer, addRetentionFormInitial);
-  const { adding, newName, newMaxAge, newMaxBytes, newMaxChunks } = addForm;
+  const { adding, newName, newMaxAge, newMaxBytes, newMaxChunks, newRefuse } = addForm;
   const [namePlaceholder, setNamePlaceholder] = useState("");
 
   const policies = config?.retentionPolicies ?? [];
@@ -100,12 +115,15 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
 
   const defaults = (id: string): PolicyEdit => {
     const pol = policies.find((p) => encode(p.id) === id);
-    if (!pol) return { name: "", maxAge: "", maxBytes: "", maxChunks: "" };
+    if (!pol) return { name: "", maxAge: "", maxBytes: "", maxChunks: "", refuse: false };
     return {
       name: pol.name,
       maxAge: pol.maxAge,
       maxBytes: pol.maxSize,
       maxChunks: pol.maxChunks > BigInt(0) ? pol.maxChunks.toString() : "",
+      // proto refuse is optional bool — unset reads as false, matching
+      // RetentionPolicyConfig.RefuseEnabled() on the backend.
+      refuse: pol.refuse ?? false,
     };
   };
 
@@ -123,6 +141,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
         maxAge: edit.maxAge,
         maxSize: edit.maxBytes,
         maxChunks: maxChunksValue,
+        refuse: edit.refuse,
       };
     },
     onDeleteSuccess: (id) => {
@@ -152,6 +171,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
         maxAge: newMaxAge,
         maxSize: newMaxBytes,
         maxChunks: maxChunksValue,
+        refuse: newRefuse,
       });
       addToast(`Retention policy "${name}" created`, "info");
       dispatchAdd({ type: "resetForm" });
@@ -209,8 +229,9 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
               />
             </FormField>
             <FormField
-              label="Max Bytes"
+              label="Max Size"
               dark={dark}
+              description="The vault's disk-claim bound: oldest chunks drain past it; with Refuse on, new records refuse while over it."
             >
               <TextInput
                 value={newMaxBytes}
@@ -230,6 +251,12 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
               />
             </FormField>
           </div>
+          <Checkbox
+            checked={newRefuse}
+            onChange={(v) => dispatchAdd({ type: "setNewRefuse", value: v })}
+            label={refuseDescription}
+            dark={dark}
+          />
         </AddFormCard>
       )}
 
@@ -281,8 +308,9 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
                   />
                 </FormField>
                 <FormField
-                  label="Max Bytes"
-                      dark={dark}
+                  label="Max Size"
+                  dark={dark}
+                  description="The vault's disk-claim bound: oldest chunks drain past it; with Refuse on, new records refuse while over it."
                 >
                   <TextInput
                     value={edit.maxBytes}
@@ -302,6 +330,12 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
                   />
                 </FormField>
               </div>
+              <Checkbox
+                checked={edit.refuse}
+                onChange={(v) => setEdit(id, { refuse: v })}
+                label={refuseDescription}
+                dark={dark}
+              />
             </div>
           </SettingsCard>
         );

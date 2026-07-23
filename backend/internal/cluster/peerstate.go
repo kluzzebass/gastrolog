@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"bytes"
 	"sort"
 	"sync"
 	"time"
@@ -97,6 +98,45 @@ func (p *PeerState) FindVaultStats(vaultID string) *gastrologv1.VaultStats {
 		for _, vs := range e.stats.Vaults {
 			if string(vs.Id) == vaultID {
 				return vs
+			}
+		}
+	}
+	return nil
+}
+
+// FindStorageState scans all live peers for a StorageState matching the
+// given ID (gastrolog-3cobq4). storageID is the GLID's canonical String()
+// form (matches every other resolver in this codebase, e.g. resolve() /
+// FindVaultStats callers) — parsed here and compared against the wire's raw
+// GLID bytes, never a raw-bytes-vs-string comparison (that mismatch bit
+// StatsVaultRouteSnapshot before it was fixed to carry glid.GLID directly).
+// A storage is only ever reported by its owning node (only that node can
+// statfs the volume), so this returns at most one match. Returns nil if no
+// live peer reports state for this storage — e.g. the owning node is down,
+// or storageID doesn't parse as a GLID. If a storage's config moves to a
+// different node (rare — an operator edits NodeStorageConfig), the two
+// nodes' guard ticks aren't synchronized, so there's a transient window of
+// up to ~two broadcast intervals where this can return the OLD node's
+// stale cached entry (until its next tick drops it via
+// retainStorageGuards) and then nil (until the new node's next tick picks
+// it up via SetStorageGuard and actually samples it) — never a fabricated
+// blend of the two, but not instantaneously consistent either.
+func (p *PeerState) FindStorageState(storageID string) *gastrologv1.StorageState {
+	id, err := glid.Parse(storageID)
+	if err != nil {
+		return nil
+	}
+	want := id.ToProto()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	now := time.Now()
+	for _, e := range p.entries {
+		if now.Sub(e.received) > p.ttl || e.stats == nil {
+			continue
+		}
+		for _, ss := range e.stats.Storages {
+			if bytes.Equal(ss.Id, want) {
+				return ss
 			}
 		}
 	}
@@ -319,29 +359,51 @@ func (p *PeerState) AggregatePipelineDisk() map[glid.GLID][]PeerVaultPipelineDis
 	return out
 }
 
-// VaultDiskProtected reports whether any live peer has this vault's local
-// backing volume below its free-space floor. Combined with the local guard,
-// this makes per-vault admission cluster-consistent: the starved volume is
+// VaultStorageProtected reports whether any live peer has a storage backing
+// this vault below its free-space floor (gastrolog-9akebz: renamed from
+// VaultDiskProtected — the thresholds moved from VaultConfig to the storage
+// entity a vault's placements reference). Combined with the local guard,
+// this makes per-vault admission cluster-consistent: the starved storage is
 // usually on a different node than the front door taking the records.
-func (p *PeerState) VaultDiskProtected(vaultID glid.GLID) bool {
+func (p *PeerState) VaultStorageProtected(vaultID glid.GLID) bool {
 	return p.vaultListedByAnyPeer(vaultID, func(ns *gastrologv1.NodeStats) [][]byte {
-		return ns.DiskProtectedVaultIds
+		return ns.StorageProtectedVaultIds
 	})
 }
 
 // VaultSizeCapped reports whether any live peer has this vault at its local
-// max-size budget. Same cluster-consistency contract as VaultDiskProtected.
+// max-size bound. Same cluster-consistency contract as VaultDiskProtected.
 func (p *PeerState) VaultSizeCapped(vaultID glid.GLID) bool {
 	return p.vaultListedByAnyPeer(vaultID, func(ns *gastrologv1.NodeStats) [][]byte {
 		return ns.SizeCappedVaultIds
 	})
 }
 
-// VaultDiskProtectedNodes returns the live peers currently reporting this
-// vault's local backing volume under disk protect — the WHO to
-// VaultDiskProtected's whether. The placement manager uses it to name the
-// degraded home in the vault-home-cannot-store alarm (gastrolog-38bm9t).
-func (p *PeerState) VaultDiskProtectedNodes(vaultID glid.GLID) []string {
+// VaultAgeBoundCapped reports whether any live peer's retention runner has
+// swept and failed to clear this vault's max-age bound, on a policy with
+// refuse=true (gastrolog-5yfaqj). Same cluster-consistency contract as
+// VaultDiskProtected: only the retention leader for a vault instance
+// derives this, so a peer that only fronts ingest for the vault needs the
+// broadcast.
+func (p *PeerState) VaultAgeBoundCapped(vaultID glid.GLID) bool {
+	return p.vaultListedByAnyPeer(vaultID, func(ns *gastrologv1.NodeStats) [][]byte {
+		return ns.AgeBoundVaultIds
+	})
+}
+
+// VaultChunkCountBoundCapped is VaultAgeBoundCapped's max-chunks sibling.
+func (p *PeerState) VaultChunkCountBoundCapped(vaultID glid.GLID) bool {
+	return p.vaultListedByAnyPeer(vaultID, func(ns *gastrologv1.NodeStats) [][]byte {
+		return ns.ChunkCountBoundVaultIds
+	})
+}
+
+// VaultStorageProtectedNodes returns the live peers currently reporting a
+// storage backing this vault under disk protect — the WHO to
+// VaultStorageProtected's whether. The placement manager uses it to name
+// the degraded home in the vault-home-cannot-store alarm (gastrolog-38bm9t).
+// Renamed from VaultDiskProtectedNodes (gastrolog-9akebz).
+func (p *PeerState) VaultStorageProtectedNodes(vaultID glid.GLID) []string {
 	want := vaultID.ToProto()
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -351,7 +413,7 @@ func (p *PeerState) VaultDiskProtectedNodes(vaultID glid.GLID) []string {
 		if now.Sub(e.received) > p.ttl || e.stats == nil {
 			continue
 		}
-		for _, id := range e.stats.DiskProtectedVaultIds {
+		for _, id := range e.stats.StorageProtectedVaultIds {
 			if string(id) == string(want) {
 				nodes = append(nodes, nodeID)
 				break
@@ -359,6 +421,45 @@ func (p *PeerState) VaultDiskProtectedNodes(vaultID glid.GLID) []string {
 		}
 	}
 	return nodes
+}
+
+// VaultStorageProtectedNodeNames is VaultStorageProtectedNodes' operator-
+// facing sibling: the same live peers, named instead of ID-keyed, for the
+// admission-detail signal's "reported by <name>" text (gastrolog-9akebz).
+// Deliberately a SEPARATE method from VaultStorageProtectedNodes rather
+// than a repurposing of it — the placement manager compares that method's
+// output against raw node IDs for set membership (vaultStorageProtectedSet
+// in backend/internal/app/placement.go), so swapping its return value to
+// names would silently break that match.
+//
+// The name comes from each peer's OWN broadcast NodeStats.NodeName —
+// already resident in this entry, no config-store lookup — falling back to
+// the node ID when a peer hasn't reported a name yet. Sorted so the joined
+// "reported by a, b" string is stable between reads (map iteration order
+// is not).
+func (p *PeerState) VaultStorageProtectedNodeNames(vaultID glid.GLID) []string {
+	want := vaultID.ToProto()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	now := time.Now()
+	var names []string
+	for nodeID, e := range p.entries {
+		if now.Sub(e.received) > p.ttl || e.stats == nil {
+			continue
+		}
+		for _, id := range e.stats.StorageProtectedVaultIds {
+			if string(id) == string(want) {
+				name := e.stats.NodeName
+				if name == "" {
+					name = nodeID
+				}
+				names = append(names, name)
+				break
+			}
+		}
+	}
+	sort.Strings(names)
+	return names
 }
 
 func (p *PeerState) vaultListedByAnyPeer(vaultID glid.GLID, list func(*gastrologv1.NodeStats) [][]byte) bool {

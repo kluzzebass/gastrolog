@@ -26,20 +26,33 @@ import (
 	hraft "github.com/hashicorp/raft"
 )
 
+// resolveStoragePath resolves a possibly-relative filesystem path against
+// vaultsDir (which defaults to homeDir when --vaults is not set) — the one
+// contract every relative path stored in config follows: the stored value
+// stays relative so each node resolves it independently against its own
+// directory, and a consumer that reaches the filesystem through it must
+// join against the same base resolveVaultDir uses, not read it raw. An
+// already-absolute path, or an empty vaultsDir (base not known yet), passes
+// through unchanged.
+func resolveStoragePath(path, vaultsDir string) string {
+	if path == "" || filepath.IsAbs(path) || vaultsDir == "" {
+		return path
+	}
+	return filepath.Join(vaultsDir, path)
+}
+
 // resolveVaultDir resolves a file vault's "dir" parameter relative to vaultsDir.
 // If dir is empty, defaults to "vaults/<vaultName>". Relative paths are joined
-// with vaultsDir (which defaults to homeDir when --vaults is not set). The
-// returned map is always a new copy — the caller's params are never mutated.
-// The stored config retains the original relative path so each node resolves
-// independently against its own directory.
+// with vaultsDir via resolveStoragePath. The returned map is always a new copy
+// — the caller's params are never mutated. The stored config retains the
+// original relative path so each node resolves independently against its own
+// directory.
 func resolveVaultDir(params map[string]string, vaultsDir, vaultID string) map[string]string {
 	dir := params["dir"]
 	if dir == "" {
 		dir = filepath.Join("vaults", vaultID)
 	}
-	if !filepath.IsAbs(dir) && vaultsDir != "" {
-		dir = filepath.Join(vaultsDir, dir)
-	}
+	dir = resolveStoragePath(dir, vaultsDir)
 	out := maps.Clone(params)
 	if out == nil {
 		out = make(map[string]string)
@@ -102,22 +115,30 @@ func findVaultConfig(vaults []system.VaultConfig, id glid.GLID) *system.VaultCon
 	return nil
 }
 
-// resolveRetentionRulesFromVault converts vault retention rules to resolved retentionRule objects.
-func resolveRetentionRulesFromVault(cfg *system.Config, vaultCfg system.VaultConfig) ([]retentionRule, error) {
+// resolveRetentionRulesFromVault converts vault retention rules to resolved
+// retentionRule objects. The second return names every referenced policy
+// that resolved with NO trigger (ToRetentionPolicy returned nil, nil — none
+// of maxAge/maxSize/maxChunks set): a vault whose RetentionRules are all
+// trigger-less this way is the silent-drain gap gastrolog-1xl29s fixed. The
+// caller uses these labels to name the gap in the retention-unenforceable
+// alarm and log line rather than leaving the operator to read code.
+func resolveRetentionRulesFromVault(cfg *system.Config, vaultCfg system.VaultConfig) ([]retentionRule, []string, error) {
 	// Phase 4 (gastrolog-42f9z): retention rules carry only the trigger
 	// policy. The action enum is gone — every fired event streams records
 	// through the routing engine and always destroys the chunk.
 	var rules []retentionRule
+	var triggerLess []string
 	for _, b := range vaultCfg.RetentionRules {
 		retCfg := findRetentionPolicy(cfg.RetentionPolicies, b.RetentionPolicyID)
 		if retCfg == nil {
-			return nil, fmt.Errorf("vault %s references unknown retention policy: %s", vaultCfg.ID, b.RetentionPolicyID)
+			return nil, nil, fmt.Errorf("vault %s references unknown retention policy: %s", vaultCfg.ID, b.RetentionPolicyID)
 		}
 		policy, err := retCfg.ToRetentionPolicy()
 		if err != nil {
-			return nil, fmt.Errorf("invalid retention policy %s for vault %s: %w", b.RetentionPolicyID, vaultCfg.ID, err)
+			return nil, nil, fmt.Errorf("invalid retention policy %s for vault %s: %w", b.RetentionPolicyID, vaultCfg.ID, err)
 		}
 		if policy == nil {
+			triggerLess = append(triggerLess, retentionPolicyLabel(*retCfg))
 			continue
 		}
 
@@ -125,11 +146,45 @@ func resolveRetentionRulesFromVault(cfg *system.Config, vaultCfg system.VaultCon
 		// anymore. A fired retention event always streams the chunk's
 		// records through the routing engine and always destroys the
 		// chunk. The retention rule carries only the trigger policy.
+		//
+		// gastrolog-5yfaqj: agePolicy/countPolicy are the SAME
+		// MaxAge/MaxChunks values `policy` was built from
+		// (ToRetentionPolicy), isolated to one dimension apiece so the
+		// post-sweep bound check can test "is THIS bound still violated"
+		// independent of whatever else the composite policy also bounds.
+		// Errors here are unreachable in practice — ToRetentionPolicy
+		// above already validated the same expressions — so a parse
+		// failure degrades to "this rule states no such bound" rather
+		// than aborting rule resolution a second time for the same cause.
+		var agePolicy, countPolicy chunk.RetentionPolicy
+		if retCfg.MaxAge != nil && !system.IsQuantityUnset(*retCfg.MaxAge) {
+			if age, err := system.ParseDuration(*retCfg.MaxAge); err == nil && age > 0 {
+				agePolicy = chunk.NewTTLRetentionPolicy(age)
+			}
+		}
+		if retCfg.MaxChunks != nil && *retCfg.MaxChunks > 0 {
+			countPolicy = chunk.NewCountRetentionPolicy(int(*retCfg.MaxChunks))
+		}
+
 		rules = append(rules, retentionRule{
-			policy: policy,
+			policy:      policy,
+			refuse:      retCfg.RefuseEnabled(),
+			agePolicy:   agePolicy,
+			countPolicy: countPolicy,
 		})
 	}
-	return rules, nil
+	return rules, triggerLess, nil
+}
+
+// retentionPolicyLabel returns an operator-readable identifier for a
+// retention policy config: its name plus ID when named, or just the ID
+// otherwise. Used to name trigger-less policies in the
+// retention-unenforceable alarm and log line.
+func retentionPolicyLabel(c system.RetentionPolicyConfig) string {
+	if c.Name != "" {
+		return fmt.Sprintf("%s (%s)", c.Name, c.ID)
+	}
+	return c.ID.String()
 }
 
 // RemoveVault removes a vault if it's empty (no chunks with data).
@@ -228,6 +283,14 @@ func (o *Orchestrator) listClusterChunkMetasLocked(vaultID glid.GLID) ([]chunk.C
 func (o *Orchestrator) removeVaultJobs(_ glid.GLID, vault *Vault) {
 	if vaultInst := vault.Instance; vaultInst != nil {
 		delete(o.retention, retentionKey(vaultInst.VaultID, vaultInst.StorageID))
+		// Cancel pending cloud-backfill jobs and drop any stranded backoff/
+		// alarm state for this vault — without this, a vault that leaves
+		// this node mid-backoff keeps its cloud-backfill-stuck alarm
+		// standing until the next evaluateCloudHealth sweep notices (or
+		// forever, if this node never runs that sweep for the vault
+		// again). See gastrolog-4ryguo review follow-up.
+		o.scheduler.RemoveJobsByPrefix("cloud-backfill:" + vaultInst.VaultID.String())
+		o.purgeBackfillFailuresForVault(vaultInst.VaultID)
 	}
 }
 
@@ -243,6 +306,11 @@ func (o *Orchestrator) teardownVault(id glid.GLID, vault *Vault) {
 	o.scheduler.RemoveJobsByPrefix("post-seal:" + vaultPrefix)
 	o.scheduler.RemoveJobsByPrefix("compress:" + vaultPrefix)
 	o.scheduler.RemoveJobsByPrefix("index-build:" + vaultPrefix)
+	// Same reasoning as removeVaultJobs: a torn-down vault must not leave a
+	// stranded cloud-backfill-stuck alarm behind. See gastrolog-4ryguo
+	// review follow-up.
+	o.scheduler.RemoveJobsByPrefix("cloud-backfill:" + vaultPrefix)
+	o.purgeBackfillFailuresForVault(id)
 
 	// Remove the per-instance retention runner.
 	if vaultInst := vault.Instance; vaultInst != nil {
@@ -1566,7 +1634,7 @@ func wireVaultFSMOnUpload(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkM
 			SourceEnd:       e.SourceEnd,
 			RecordCount:     e.RecordCount,
 			Bytes:           e.Bytes,
-			DiskBytes:       e.DiskBytes,
+			CloudBytes:      e.CloudBytes,
 			IngestIdxOffset: e.IngestIdxOffset,
 			IngestIdxSize:   e.IngestIdxSize,
 			SourceIdxOffset: e.SourceIdxOffset,

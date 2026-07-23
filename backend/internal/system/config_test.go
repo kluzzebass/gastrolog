@@ -300,8 +300,8 @@ func TestToRetentionPolicy(t *testing.T) {
 	t.Run("composite age and chunks", func(t *testing.T) {
 		t.Parallel()
 		cfg := RetentionPolicyConfig{
-			MaxAge:      new("720h"),
-			MaxChunks:   new(int64(100)),
+			MaxAge:    new("720h"),
+			MaxChunks: new(int64(100)),
 		}
 		policy, err := cfg.ToRetentionPolicy()
 		if err != nil {
@@ -315,9 +315,9 @@ func TestToRetentionPolicy(t *testing.T) {
 	t.Run("all three conditions", func(t *testing.T) {
 		t.Parallel()
 		cfg := RetentionPolicyConfig{
-			MaxAge:      new("720h"),
-			MaxSize:     new("10GB"),
-			MaxChunks:   new(int64(50)),
+			MaxAge:    new("720h"),
+			MaxSize:   new("10GB"),
+			MaxChunks: new(int64(50)),
 		}
 		policy, err := cfg.ToRetentionPolicy()
 		if err != nil {
@@ -418,6 +418,35 @@ func TestRetentionPolicyConfigIsEmpty(t *testing.T) {
 			t.Parallel()
 			if got := tc.cfg.IsEmpty(); got != tc.want {
 				t.Errorf("IsEmpty() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestRetentionPolicyConfigRefuseEnabled pins gastrolog-5yfaqj's default
+// (operator decision: bounds are drain-first, refusal is the explicit
+// hard mode): unset (nil) must read as false — a policy opts IN to
+// refusal explicitly, never opts out. This is the one field on
+// RetentionPolicyConfig that is genuinely tri-state (unlike
+// MaxAge/MaxSize's empty-string-means-unset convention), because "unset"
+// and "true" must mean different things (true is the explicit hard-bound
+// opt-in; unset and false are indistinguishable in effect, both soft).
+func TestRetentionPolicyConfigRefuseEnabled(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		cfg  RetentionPolicyConfig
+		want bool
+	}{
+		{"unset defaults to false (soft bound)", RetentionPolicyConfig{}, false},
+		{"explicit true (hard bound)", RetentionPolicyConfig{Refuse: new(true)}, true},
+		{"explicit false (soft bound)", RetentionPolicyConfig{Refuse: new(false)}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := tc.cfg.RefuseEnabled(); got != tc.want {
+				t.Errorf("RefuseEnabled() = %v, want %v", got, tc.want)
 			}
 		})
 	}

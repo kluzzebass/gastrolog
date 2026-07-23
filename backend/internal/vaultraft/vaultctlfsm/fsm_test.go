@@ -210,8 +210,8 @@ func TestFSMUpload(t *testing.T) {
 	if !e.CloudBacked {
 		t.Error("should be cloud-backed")
 	}
-	if e.DiskBytes != 25000 {
-		t.Errorf("DiskBytes: got %d, want 25000", e.DiskBytes)
+	if e.CloudBytes != 25000 {
+		t.Errorf("CloudBytes: got %d, want 25000", e.CloudBytes)
 	}
 	if e.IngestIdxOffset != 1000 {
 		t.Errorf("IngestIdxOffset: got %d, want 1000", e.IngestIdxOffset)
@@ -295,9 +295,9 @@ func TestFSMSnapshotRestore(t *testing.T) {
 
 	// Verify cloud-backed chunk.
 	e2 := fsm2.Get(id2)
-	if e2 == nil || !e2.CloudBacked || e2.DiskBytes != 25000 {
-		t.Errorf("chunk 2: cloud=%v, diskBytes=%d",
-			e2 != nil && e2.CloudBacked, e2.DiskBytes)
+	if e2 == nil || !e2.CloudBacked || e2.CloudBytes != 25000 {
+		t.Errorf("chunk 2: cloud=%v, cloudBytes=%d",
+			e2 != nil && e2.CloudBacked, e2.CloudBytes)
 	}
 	if e2.IngestIdxOffset != 100 || e2.SourceIdxSize != 400 {
 		t.Errorf("chunk 2: TOC offsets wrong")

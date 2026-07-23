@@ -134,9 +134,9 @@ func (a *orchStatsAdapter) VaultAppendStats() []cluster.StatsVaultAppendSnapshot
 func (a *orchStatsAdapter) RouteStats() cluster.StatsRouteSnapshot {
 	rs := a.orch.GetRouteStats()
 	snap := cluster.StatsRouteSnapshot{
-		Routed:       rs.Routed,
-		Unmatched:    rs.Unmatched,
-		Matched:      rs.Matched,
+		Routed:           rs.Routed,
+		Unmatched:        rs.Unmatched,
+		Matched:          rs.Matched,
 		RouteTableActive: a.orch.IsRouteTableActive(),
 	}
 	for vaultID, vs := range a.orch.VaultRouteStatsList() {
@@ -177,12 +177,47 @@ func (a *orchStatsAdapter) LocalStorageBytes() int64 {
 	return a.orch.LocalStorageBytes()
 }
 
-func (a *orchStatsAdapter) DiskProtectedVaults() []glid.GLID {
-	return a.orch.DiskProtectedVaults()
+func (a *orchStatsAdapter) StorageProtectedVaults() []glid.GLID {
+	return a.orch.StorageProtectedVaults()
 }
 
 func (a *orchStatsAdapter) SizeCappedVaults() []glid.GLID {
 	return a.orch.SizeCappedVaults()
+}
+
+func (a *orchStatsAdapter) AgeBoundCappedVaults() []glid.GLID {
+	return a.orch.AgeBoundCappedVaults()
+}
+
+func (a *orchStatsAdapter) ChunkCountBoundCappedVaults() []glid.GLID {
+	return a.orch.ChunkCountBoundCappedVaults()
+}
+
+func (a *orchStatsAdapter) StorageSnapshots() []cluster.StatsStorageSnapshot {
+	snaps := a.orch.StorageSnapshots()
+	out := make([]cluster.StatsStorageSnapshot, len(snaps))
+	for i, s := range snaps {
+		out[i] = cluster.StatsStorageSnapshot{
+			ID:             s.ID,
+			Name:           s.Name,
+			Node:           s.Node,
+			Path:           s.Path,
+			StorageClass:   s.StorageClass,
+			WarnExpr:       s.WarnExpr,
+			FloorExpr:      s.FloorExpr,
+			WarnIsDefault:  s.WarnIsDefault,
+			FloorIsDefault: s.FloorIsDefault,
+			WarnBytes:      s.WarnBytes,
+			FloorBytes:     s.FloorBytes,
+			FreeBytes:      s.FreeBytes,
+			TotalBytes:     s.TotalBytes,
+			SampledAt:      s.SampledAt,
+			WarnVerdict:    s.WarnVerdict,
+			ProtectVerdict: s.ProtectVerdict,
+			PlacedVaultIDs: s.PlacedVaultIDs,
+		}
+	}
+	return out
 }
 
 // jobBroadcastAdapter bridges the scheduler to the cluster.JobsProvider interface.

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
-import { useVaults, useIngesters, useNodeRegistry } from "../../api/hooks";
+import { useVaults, useStorages, useIngesters, useNodeRegistry } from "../../api/hooks";
 import { type EntityID, idFromBytes } from "../../api/model/id";
 import { useWatchJobs } from "../../api/hooks";
 import { useClusterStatus } from "../../api/hooks/useClusterStatus";
@@ -13,6 +13,7 @@ import { NodeStateBadge } from "../NodeStateBadge";
 import { ExpandableCard } from "../settings/ExpandableCard";
 import { HelpButton } from "../HelpButton";
 import { VaultCard } from "./VaultCard";
+import { StorageCard } from "./StorageCard";
 import { IngesterCard } from "./IngesterCard";
 import { protoToInstant, formatTimestamp, elapsed, countdown } from "../../utils/temporal";
 import { useTick } from "./JobCard";
@@ -27,12 +28,15 @@ interface EntityListPaneProps {
   dark: boolean;
   onOpenSettings?: (tab: string, entityName?: string) => void;
   expandTarget?: string | null;
+  onNavigate?: (param: string) => void;
 }
 
-export function EntityListPane({ entityType, dark, onOpenSettings, expandTarget }: Readonly<EntityListPaneProps>) {
+export function EntityListPane({ entityType, dark, onOpenSettings, expandTarget, onNavigate }: Readonly<EntityListPaneProps>) {
   switch (entityType) {
     case "vaults":
       return <VaultsList dark={dark} onOpenSettings={onOpenSettings} expandTarget={expandTarget} />;
+    case "storages":
+      return <StoragesList dark={dark} onOpenSettings={onOpenSettings} expandTarget={expandTarget} onNavigate={onNavigate} />;
     case "ingesters":
       return <IngestersList dark={dark} onOpenSettings={onOpenSettings} expandTarget={expandTarget} />;
     case "routes":
@@ -112,6 +116,59 @@ function VaultsList({ dark, onOpenSettings, expandTarget }: Readonly<{ dark: boo
           expanded={expanded.has(vault.id)}
           onToggle={() => toggle(vault.id)}
           onOpenSettings={onOpenSettings ? () => onOpenSettings("vaults", vault.displayLabel) : undefined}
+        />
+      ))}
+    </div>
+  );
+}
+
+// ---- Storages ----
+//
+// Flat, sorted list — exactly the VaultsList shape. No node grouping here:
+// the node is already a badge on each card (StorageCard renders NodeBadge),
+// and grouping by node would just duplicate the per-node view (NodeDetailPane's
+// Storages section) with nothing new to offer. Single-node and multi-node
+// render identically.
+
+function StoragesList({
+  dark,
+  onOpenSettings,
+  expandTarget,
+  onNavigate,
+}: Readonly<{
+  dark: boolean;
+  onOpenSettings?: (tab: string, entityName?: string) => void;
+  expandTarget?: string | null;
+  onNavigate?: (param: string) => void;
+}>) {
+  const { data: storages, isLoading } = useStorages();
+  const { expanded, toggle, add } = useToggleSet();
+
+  // Auto-expand a storage when deep-linked (e.g. cross-linked from Settings).
+  const [consumedTarget, setConsumedTarget] = useState<string | null>(null);
+  if (expandTarget && expandTarget !== consumedTarget && storages.length > 0) {
+    setConsumedTarget(expandTarget);
+    const match = storages.find((s) => s.displayLabel === expandTarget);
+    if (match) add(match.id);
+  }
+
+  if (isLoading) return <Loading dark={dark} />;
+  if (storages.length === 0) return <Empty dark={dark}>No storages configured.</Empty>;
+
+  const sorted = [...storages].sort((a, b) => a.displayLabel.localeCompare(b.displayLabel));
+
+  return (
+    <div className="flex flex-col gap-3">
+      <EntityHeader title="Storages" helpTopicId="inspector-storages" dark={dark} />
+      {sorted.map((storage) => (
+        <StorageCard
+          key={storage.id}
+          storage={storage}
+          dark={dark}
+          expanded={expanded.has(storage.id)}
+          onToggle={() => toggle(storage.id)}
+          onOpenSettings={onOpenSettings ? () => onOpenSettings("storage", storage.displayLabel) : undefined}
+          onNavigate={onNavigate}
         />
       ))}
     </div>

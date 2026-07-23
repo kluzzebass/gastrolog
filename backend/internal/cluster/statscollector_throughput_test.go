@@ -14,14 +14,15 @@ import (
 
 // stubStatsProvider implements StatsProvider with mutable counters.
 type stubStatsProvider struct {
-	appendStats   []StatsVaultAppendSnapshot
-	route         StatsRouteSnapshot
-	diskProtected []glid.GLID
-	sizeCapped    []glid.GLID
+	appendStats      []StatsVaultAppendSnapshot
+	route            StatsRouteSnapshot
+	storageProtected []glid.GLID
+	sizeCapped       []glid.GLID
+	storages         []StatsStorageSnapshot
 }
 
-func (s *stubStatsProvider) IngestQueueDepth() int    { return 0 }
-func (s *stubStatsProvider) IngestQueueCapacity() int { return 0 }
+func (s *stubStatsProvider) IngestQueueDepth() int       { return 0 }
+func (s *stubStatsProvider) IngestQueueCapacity() int    { return 0 }
 func (s *stubStatsProvider) IngestPressureLevel() string { return "normal" }
 func (s *stubStatsProvider) VaultSnapshots() []StatsVaultSnapshot {
 	out := make([]StatsVaultSnapshot, len(s.appendStats))
@@ -40,8 +41,11 @@ func (s *stubStatsProvider) VaultAppendStats() []StatsVaultAppendSnapshot {
 }
 func (s *stubStatsProvider) PipelineDiskSnapshots() []StatsVaultPipelineDiskSnapshot { return nil }
 func (s *stubStatsProvider) LocalStorageBytes() int64                                { return 0 }
-func (s *stubStatsProvider) DiskProtectedVaults() []glid.GLID                        { return s.diskProtected }
+func (s *stubStatsProvider) StorageProtectedVaults() []glid.GLID                     { return s.storageProtected }
 func (s *stubStatsProvider) SizeCappedVaults() []glid.GLID                           { return s.sizeCapped }
+func (s *stubStatsProvider) AgeBoundCappedVaults() []glid.GLID                       { return nil }
+func (s *stubStatsProvider) ChunkCountBoundCappedVaults() []glid.GLID                { return nil }
+func (s *stubStatsProvider) StorageSnapshots() []StatsStorageSnapshot                { return s.storages }
 
 func TestStatsCollector_ThroughputRates(t *testing.T) {
 	t.Parallel()

@@ -9,6 +9,7 @@ package gastrologv1
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -31,8 +32,18 @@ type FileStorage struct {
 	Name              string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
 	Path              string                 `protobuf:"bytes,4,opt,name=path,proto3" json:"path,omitempty"`
 	MemoryBudgetBytes uint64                 `protobuf:"varint,5,opt,name=memory_budget_bytes,json=memoryBudgetBytes,proto3" json:"memory_budget_bytes,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Disk-guard free-space thresholds for this storage: an absolute size
+	// ("10GB") or a percentage of the volume ("10%"), resolved against the
+	// volume actually sampled. Empty inherits the node defaults (10%/3%).
+	// Warn raises the disk-space alarm naming this storage; floor puts
+	// every vault placed here into admission refuse (cause
+	// STORAGE_DISK_PROTECT) while vaults on healthy storages keep
+	// ingesting. gastrolog-9akebz: moved off VaultConfig — the thresholds
+	// guard the volume, not the vaults sharing it.
+	DiskFreeWarn  string `protobuf:"bytes,6,opt,name=disk_free_warn,json=diskFreeWarn,proto3" json:"disk_free_warn,omitempty"`
+	DiskFreeFloor string `protobuf:"bytes,7,opt,name=disk_free_floor,json=diskFreeFloor,proto3" json:"disk_free_floor,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *FileStorage) Reset() {
@@ -98,6 +109,20 @@ func (x *FileStorage) GetMemoryBudgetBytes() uint64 {
 		return x.MemoryBudgetBytes
 	}
 	return 0
+}
+
+func (x *FileStorage) GetDiskFreeWarn() string {
+	if x != nil {
+		return x.DiskFreeWarn
+	}
+	return ""
+}
+
+func (x *FileStorage) GetDiskFreeFloor() string {
+	if x != nil {
+		return x.DiskFreeFloor
+	}
+	return ""
 }
 
 // NodeStorageConfig declares all locally-attached storage available on a node.
@@ -394,17 +419,231 @@ func (x *CloudService) GetReconcileSchedule() string {
 	return ""
 }
 
+// StorageState is one storage's disk-guard state — published only by the
+// node that owns the volume (only that node can statfs it) and merged
+// cluster-wide via the NodeStats broadcast, the same channel VaultStats and
+// VaultPipelineNodeDisk already use for per-node runtime signals
+// (gastrolog-3cobq4). Identity/threshold-expression fields are config-
+// derived (refreshed on the guard's discovery tick, same freshness contract
+// as the rest of the disk guard); free/total/verdicts come from the last
+// statfs sample. Every verdict/threshold field here is the server-computed
+// value the admission gate itself consults — never a client-side
+// derivation from free/total (operator directive, gastrolog-9akebz).
+type StorageState struct {
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	Id           []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name         string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Path         string                 `protobuf:"bytes,3,opt,name=path,proto3" json:"path,omitempty"`
+	NodeName     string                 `protobuf:"bytes,4,opt,name=node_name,json=nodeName,proto3" json:"node_name,omitempty"` // operator-facing node display name, pre-resolved
+	StorageClass uint32                 `protobuf:"varint,5,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"`
+	// node_id is the owning node's raw ID, wire-encoded the same way
+	// NodeStorageConfig.node_id already is ([]byte(nodeID) — a UTF-8 string
+	// cast, not raw GLID bytes; frontend id.ts/glid.ts's encode() already
+	// handles this dual convention). node_name stays the display label; this
+	// is the stable join key for grouping/filtering storages by node
+	// (gastrolog-3cobq4 review: name-based joins collide/rename-race).
+	NodeId []byte `protobuf:"bytes,18,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	// Threshold expressions in EFFECTIVE form ("10%", "10GB") — never empty:
+	// the storage's own explicit expression when set, otherwise the built-in
+	// default the guard actually resolves against. There is no configurable
+	// node-level override to inherit from (gastrolog-2mrfdw removed the env
+	// channel), so an unset storage expression is DEFAULTED, not inherited
+	// from anything operator-configurable — *_is_default says which case
+	// applies, never left for a client to infer by matching a hardcoded
+	// literal (gastrolog-3cobq4 review: the earlier warn_inherited naming
+	// implied a configurable parent that doesn't exist).
+	WarnExpr       string `protobuf:"bytes,6,opt,name=warn_expr,json=warnExpr,proto3" json:"warn_expr,omitempty"`
+	FloorExpr      string `protobuf:"bytes,7,opt,name=floor_expr,json=floorExpr,proto3" json:"floor_expr,omitempty"`
+	WarnIsDefault  bool   `protobuf:"varint,8,opt,name=warn_is_default,json=warnIsDefault,proto3" json:"warn_is_default,omitempty"`
+	FloorIsDefault bool   `protobuf:"varint,9,opt,name=floor_is_default,json=floorIsDefault,proto3" json:"floor_is_default,omitempty"`
+	// Effective thresholds resolved in bytes against the last sampled volume
+	// total — the numbers admission actually compares free space to.
+	WarnBytes  uint64 `protobuf:"varint,10,opt,name=warn_bytes,json=warnBytes,proto3" json:"warn_bytes,omitempty"`
+	FloorBytes uint64 `protobuf:"varint,11,opt,name=floor_bytes,json=floorBytes,proto3" json:"floor_bytes,omitempty"`
+	// Last statfs sample on the owning node.
+	FreeBytes  uint64                 `protobuf:"varint,12,opt,name=free_bytes,json=freeBytes,proto3" json:"free_bytes,omitempty"`
+	TotalBytes uint64                 `protobuf:"varint,13,opt,name=total_bytes,json=totalBytes,proto3" json:"total_bytes,omitempty"`
+	SampledAt  *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=sampled_at,json=sampledAt,proto3" json:"sampled_at,omitempty"`
+	// Server-computed verdicts (hysteresis-aware — the same state the
+	// admission gate consults), never derived client-side from free/warn/floor.
+	WarnVerdict    bool `protobuf:"varint,15,opt,name=warn_verdict,json=warnVerdict,proto3" json:"warn_verdict,omitempty"`
+	ProtectVerdict bool `protobuf:"varint,16,opt,name=protect_verdict,json=protectVerdict,proto3" json:"protect_verdict,omitempty"`
+	// Vault IDs with a config placement on this storage — config-derived, so
+	// correct even before the next guard sample.
+	PlacedVaultIds [][]byte `protobuf:"bytes,17,rep,name=placed_vault_ids,json=placedVaultIds,proto3" json:"placed_vault_ids,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *StorageState) Reset() {
+	*x = StorageState{}
+	mi := &file_gastrolog_v1_storage_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StorageState) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StorageState) ProtoMessage() {}
+
+func (x *StorageState) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_storage_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StorageState.ProtoReflect.Descriptor instead.
+func (*StorageState) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_storage_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *StorageState) GetId() []byte {
+	if x != nil {
+		return x.Id
+	}
+	return nil
+}
+
+func (x *StorageState) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *StorageState) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *StorageState) GetNodeName() string {
+	if x != nil {
+		return x.NodeName
+	}
+	return ""
+}
+
+func (x *StorageState) GetStorageClass() uint32 {
+	if x != nil {
+		return x.StorageClass
+	}
+	return 0
+}
+
+func (x *StorageState) GetNodeId() []byte {
+	if x != nil {
+		return x.NodeId
+	}
+	return nil
+}
+
+func (x *StorageState) GetWarnExpr() string {
+	if x != nil {
+		return x.WarnExpr
+	}
+	return ""
+}
+
+func (x *StorageState) GetFloorExpr() string {
+	if x != nil {
+		return x.FloorExpr
+	}
+	return ""
+}
+
+func (x *StorageState) GetWarnIsDefault() bool {
+	if x != nil {
+		return x.WarnIsDefault
+	}
+	return false
+}
+
+func (x *StorageState) GetFloorIsDefault() bool {
+	if x != nil {
+		return x.FloorIsDefault
+	}
+	return false
+}
+
+func (x *StorageState) GetWarnBytes() uint64 {
+	if x != nil {
+		return x.WarnBytes
+	}
+	return 0
+}
+
+func (x *StorageState) GetFloorBytes() uint64 {
+	if x != nil {
+		return x.FloorBytes
+	}
+	return 0
+}
+
+func (x *StorageState) GetFreeBytes() uint64 {
+	if x != nil {
+		return x.FreeBytes
+	}
+	return 0
+}
+
+func (x *StorageState) GetTotalBytes() uint64 {
+	if x != nil {
+		return x.TotalBytes
+	}
+	return 0
+}
+
+func (x *StorageState) GetSampledAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.SampledAt
+	}
+	return nil
+}
+
+func (x *StorageState) GetWarnVerdict() bool {
+	if x != nil {
+		return x.WarnVerdict
+	}
+	return false
+}
+
+func (x *StorageState) GetProtectVerdict() bool {
+	if x != nil {
+		return x.ProtectVerdict
+	}
+	return false
+}
+
+func (x *StorageState) GetPlacedVaultIds() [][]byte {
+	if x != nil {
+		return x.PlacedVaultIds
+	}
+	return nil
+}
+
 var File_gastrolog_v1_storage_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_storage_proto_rawDesc = "" +
 	"\n" +
-	"\x1agastrolog/v1/storage.proto\x12\fgastrolog.v1\"\x9a\x01\n" +
+	"\x1agastrolog/v1/storage.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xe8\x01\n" +
 	"\vFileStorage\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12#\n" +
 	"\rstorage_class\x18\x02 \x01(\rR\fstorageClass\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12\x12\n" +
 	"\x04path\x18\x04 \x01(\tR\x04path\x12.\n" +
-	"\x13memory_budget_bytes\x18\x05 \x01(\x04R\x11memoryBudgetBytes\"l\n" +
+	"\x13memory_budget_bytes\x18\x05 \x01(\x04R\x11memoryBudgetBytes\x12$\n" +
+	"\x0edisk_free_warn\x18\x06 \x01(\tR\fdiskFreeWarn\x12&\n" +
+	"\x0fdisk_free_floor\x18\a \x01(\tR\rdiskFreeFloor\"l\n" +
 	"\x11NodeStorageConfig\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\fR\x06nodeId\x12>\n" +
 	"\rfile_storages\x18\x02 \x03(\v2\x19.gastrolog.v1.FileStorageR\ffileStorages\"S\n" +
@@ -432,7 +671,33 @@ const file_gastrolog_v1_storage_proto_rawDesc = "" +
 	"\rrestore_speed\x18\x0f \x01(\tR\frestoreSpeed\x12!\n" +
 	"\frestore_days\x18\x10 \x01(\rR\vrestoreDays\x12,\n" +
 	"\x12suspect_grace_days\x18\x11 \x01(\rR\x10suspectGraceDays\x12-\n" +
-	"\x12reconcile_schedule\x18\x12 \x01(\tR\x11reconcileScheduleB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
+	"\x12reconcile_schedule\x18\x12 \x01(\tR\x11reconcileSchedule\"\xe0\x04\n" +
+	"\fStorageState\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
+	"\x04path\x18\x03 \x01(\tR\x04path\x12\x1b\n" +
+	"\tnode_name\x18\x04 \x01(\tR\bnodeName\x12#\n" +
+	"\rstorage_class\x18\x05 \x01(\rR\fstorageClass\x12\x17\n" +
+	"\anode_id\x18\x12 \x01(\fR\x06nodeId\x12\x1b\n" +
+	"\twarn_expr\x18\x06 \x01(\tR\bwarnExpr\x12\x1d\n" +
+	"\n" +
+	"floor_expr\x18\a \x01(\tR\tfloorExpr\x12&\n" +
+	"\x0fwarn_is_default\x18\b \x01(\bR\rwarnIsDefault\x12(\n" +
+	"\x10floor_is_default\x18\t \x01(\bR\x0efloorIsDefault\x12\x1d\n" +
+	"\n" +
+	"warn_bytes\x18\n" +
+	" \x01(\x04R\twarnBytes\x12\x1f\n" +
+	"\vfloor_bytes\x18\v \x01(\x04R\n" +
+	"floorBytes\x12\x1d\n" +
+	"\n" +
+	"free_bytes\x18\f \x01(\x04R\tfreeBytes\x12\x1f\n" +
+	"\vtotal_bytes\x18\r \x01(\x04R\n" +
+	"totalBytes\x129\n" +
+	"\n" +
+	"sampled_at\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampR\tsampledAt\x12!\n" +
+	"\fwarn_verdict\x18\x0f \x01(\bR\vwarnVerdict\x12'\n" +
+	"\x0fprotect_verdict\x18\x10 \x01(\bR\x0eprotectVerdict\x12(\n" +
+	"\x10placed_vault_ids\x18\x11 \x03(\fR\x0eplacedVaultIdsB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
 
 var (
 	file_gastrolog_v1_storage_proto_rawDescOnce sync.Once
@@ -446,21 +711,24 @@ func file_gastrolog_v1_storage_proto_rawDescGZIP() []byte {
 	return file_gastrolog_v1_storage_proto_rawDescData
 }
 
-var file_gastrolog_v1_storage_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_gastrolog_v1_storage_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_gastrolog_v1_storage_proto_goTypes = []any{
 	(*FileStorage)(nil),            // 0: gastrolog.v1.FileStorage
 	(*NodeStorageConfig)(nil),      // 1: gastrolog.v1.NodeStorageConfig
 	(*CloudStorageTransition)(nil), // 2: gastrolog.v1.CloudStorageTransition
 	(*CloudService)(nil),           // 3: gastrolog.v1.CloudService
+	(*StorageState)(nil),           // 4: gastrolog.v1.StorageState
+	(*timestamppb.Timestamp)(nil),  // 5: google.protobuf.Timestamp
 }
 var file_gastrolog_v1_storage_proto_depIdxs = []int32{
 	0, // 0: gastrolog.v1.NodeStorageConfig.file_storages:type_name -> gastrolog.v1.FileStorage
 	2, // 1: gastrolog.v1.CloudService.transitions:type_name -> gastrolog.v1.CloudStorageTransition
-	2, // [2:2] is the sub-list for method output_type
-	2, // [2:2] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	5, // 2: gastrolog.v1.StorageState.sampled_at:type_name -> google.protobuf.Timestamp
+	3, // [3:3] is the sub-list for method output_type
+	3, // [3:3] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_gastrolog_v1_storage_proto_init() }
@@ -474,7 +742,7 @@ func file_gastrolog_v1_storage_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gastrolog_v1_storage_proto_rawDesc), len(file_gastrolog_v1_storage_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

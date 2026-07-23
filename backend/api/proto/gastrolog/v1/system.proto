@@ -160,6 +160,14 @@ service SystemService {
   // Node storage
   rpc SetNodeStorageConfig(SetNodeStorageConfigRequest) returns (SetNodeStorageConfigResponse);
 
+  // ListStorages returns every configured file storage cluster-wide, with
+  // live guard state (free/total, resolved thresholds, verdicts) merged in
+  // from the owning node's NodeStats broadcast — the entity-list analogue
+  // of ListVaults (gastrolog-3cobq4). Local storages read the orchestrator
+  // directly; remote storages read the peer broadcast cache, the same
+  // PeerState channel VaultInfo uses for remote vault stats.
+  rpc ListStorages(ListStoragesRequest) returns (ListStoragesResponse);
+
   // DeleteLookup removes a lookup table by name (any type).
   rpc DeleteLookup(DeleteLookupRequest) returns (DeleteLookupResponse);
 
@@ -262,19 +270,15 @@ message VaultConfig {
   // Warm-cache eviction age (ttl mode only), as a duration expression ("1h",
   // "7d"). Empty = unset.
   string cache_ttl = 15;
-  string retention_disposition = 16;         // "delete" (default) or "route" — what retention does with aged-out records
-  // Per-vault disk-guard free-space thresholds on the vault's backing volume,
-  // as size expressions ("10GB"). Empty = inherit the node defaults
-  // (fraction-based, per-node). Warn raises the disk-space alarm; floor
-  // suspends admission for this vault while others keep ingesting.
-  string disk_free_warn = 17;
-  string disk_free_floor = 18;
-  // Per-node budget for this vault's whole local disk claim (sealed chunks,
-  // indexes, segment backlog), as a size expression ("50GB"). At the budget,
-  // admission for this vault is refused cluster-wide until retention drains
-  // it. Empty = unset (defaulted at creation); "0" rejected; a large value
-  // (e.g. "1PiB") is effectively unlimited (gastrolog-1epfgb / gastrolog-etcjdx).
-  string max_size = 19;
+  string retention_disposition = 16;         // "delete", "route", or "transfer" — what retention does with aged-out records
+  // Target vault ID for retention_disposition = "transfer": the sealed
+  // chunk is re-homed here unchanged when retention fires. Required when,
+  // and only valid when, disposition is "transfer" — see PutVault
+  // validation and docs/retention-transfer-disposition-design.md.
+  // Renumbered to 17 when disk_free_warn/disk_free_floor moved to
+  // FileStorage (gastrolog-9akebz) — no `reserved` (house rule): zero
+  // production deployments.
+  bytes retention_transfer_target_vault_id = 17;
 }
 
 message RouteDestination {
@@ -370,10 +374,46 @@ message RotationPolicyConfig {
 
 message RetentionPolicyConfig {
   string max_age = 1;
+  // max_size is the vault's disk-claim bound, in the same vocabulary as
+  // every other size quantity ("50GB"), and it can mean BOTH things at once
+  // (gastrolog-33ul6h correction: an earlier, superseded design split this
+  // into two fields — see the design doc history under docs/):
+  //   - DRAIN: oldest sealed chunks past the bound are drained (per the
+  //     vault's disposition), exactly as this field always meant.
+  //     Unconditional — every set max_size drains, regardless of refuse.
+  //   - REFUSE: while the vault's local disk claim is at/over the bound,
+  //     admission refuses cluster-wide — the backstop while drain catches
+  //     up or is deferred. Gated by refuse (gastrolog-5yfaqj, default off):
+  //     a max_size with no explicit refuse=true only drains.
+  // Effective bound resolution (refreshVaultDiskGuards): for each file
+  // vault, resolve every attached retention rule's policy; the effective
+  // REFUSE bound is the min over the REFUSE-ELIGIBLE policies' parsed
+  // max_size values; the creation default (system.DefaultVaultMaxSize)
+  // applies as a REFUSE-ONLY floor only when no attached policy STATES a
+  // max_size at all — a stated-but-soft max_size does not re-engage the
+  // floor either, the operator's opt-out stands. A default must never
+  // destroy data, so the floor never drains, only refuses.
   string max_size = 2;
   int64 max_chunks = 3;
   bytes id = 4;
   string name = 5;
+  // refuse generalizes the max_size REFUSE behavior above to every bound
+  // this policy states (gastrolog-5yfaqj). DEFAULT OFF (operator decision:
+  // bounds are drain-first, refusal is the explicit hard mode — unset
+  // reads as false, so a policy must opt IN explicitly). true means: while
+  // ANY of max_age/max_size/max_chunks is violated, admission refuses.
+  // false (unset or explicit) is the "soft bound" posture: the policy
+  // still drains, but the operator has not opted every attached bound
+  // into cluster-wide refusal — only the node-level disk guard backstops
+  // the vault while violated. max_size's refuse behavior is instantaneous;
+  // max_age/max_chunks refuse only once the retention runner has swept and
+  // failed to clear the violation — see orchestrator/retention.go to
+  // avoid refusing on the normal transient between a chunk's seal and the
+  // next sweep. Per-vault resolution is per bound KIND: the min over every
+  // attached policy that states it, with refuse-eligibility following the
+  // STATING policy's own flag (a vault mixing a hard and a soft policy
+  // refuses only on the hard one's bounds).
+  optional bool refuse = 6;
 }
 
 // IngesterAlive carries the per-node alive map for a single ingester, as
@@ -1144,6 +1184,12 @@ message SetNodeStorageConfigRequest {
 
 message SetNodeStorageConfigResponse {
   GetSystemResponse system = 1;
+}
+
+message ListStoragesRequest {}
+
+message ListStoragesResponse {
+  repeated StorageState storages = 1;
 }
 
 message DeleteLookupRequest {

@@ -144,10 +144,31 @@ func (s *SystemServer) PutRetentionPolicy(
 	cfg.ID = id
 	cfg.Name = req.Msg.Config.Name
 
+	// max_size parse-checks FIRST, before the IsEmpty no-op gate below
+	// (gastrolog-33ul6h finding 7, carried forward from an earlier,
+	// superseded design's separate refuse-bound field): IsEmpty's
+	// positiveSize check treats an
+	// unparseable expression the same as absent (both contribute nothing to
+	// "is this policy non-empty"), so an otherwise-empty policy with a
+	// garbled max_size would fall into IsEmpty()==true and surface the
+	// generic "must set at least one" error instead of the actual parse
+	// failure — the wrong diagnostic for what the operator typed. Checking
+	// parseability first ensures a malformed max_size always gets its own
+	// error, regardless of what else the policy sets.
+	//
+	// Must parse, and an explicit "0" is rejected: max_size is now both the
+	// drain trigger and the refuse bound, and "0" would mean "no bound", not
+	// "no restriction" — the state resolution treats as absent, so it must
+	// not be sayable.
+	if connErr := validateRetentionMaxSize(cfg.MaxSize, cfg.Name); connErr != nil {
+		return nil, connErr
+	}
+
 	// Reject policies with no conditions: they're silent no-ops that almost
-	// always reflect operator confusion rather than intent. See gastrolog-1rbuf.
+	// always reflect operator confusion rather than intent. See
+	// gastrolog-1rbuf.
 	if cfg.IsEmpty() {
-		return nil, errInvalidArg(errors.New("retention policy must set at least one of maxAge, maxBytes, or maxChunks"))
+		return nil, errInvalidArg(errors.New("retention policy must set at least one of maxAge, maxSize, or maxChunks"))
 	}
 
 	// Validate by trying to convert.
@@ -215,6 +236,28 @@ func (s *SystemServer) DeleteRetentionPolicy(
 	return connect.NewResponse(&apiv1.DeleteRetentionPolicyResponse{System: cfg}), nil
 }
 
+// validateRetentionMaxSize parse-checks a retention policy's max_size —
+// the combined drain-trigger-and-refuse-bound quantity (gastrolog-33ul6h):
+// unset is fine (no bound stored — the resolver's default floor applies
+// only when no attached policy has one at all); an unparseable expression is
+// rejected at write; an explicit "0" is rejected because it means "no
+// bound", the unrepresentable state this model exists to prevent.
+func validateRetentionMaxSize(maxSize *string, policyName string) *connect.Error {
+	if maxSize == nil || system.IsQuantityUnset(*maxSize) {
+		return nil
+	}
+	bytes, err := system.ParseSize(*maxSize)
+	if err != nil {
+		return errInvalidArg(fmt.Errorf("max-size %q on retention policy %q: %w", *maxSize, policyName, err))
+	}
+	if bytes == 0 {
+		return errInvalidArg(fmt.Errorf(
+			"max-size of %q on retention policy %q means no bound; omit it to leave this policy's bound unset, or set a real size",
+			*maxSize, policyName))
+	}
+	return nil
+}
+
 // --- Proto <-> Config conversion helpers for policies ---
 
 // protoToRotationPolicy converts a proto RotationPolicyConfig to a system.RotationPolicyConfig.
@@ -273,6 +316,13 @@ func protoToRetentionPolicy(p *apiv1.RetentionPolicyConfig) system.RetentionPoli
 	if p.MaxChunks > 0 {
 		cfg.MaxChunks = new(p.MaxChunks)
 	}
+	// refuse is genuinely tri-state (unset must default to false —
+	// gastrolog-5yfaqj: bounds are drain-first, refusal is the explicit
+	// hard mode), unlike the other fields above which use the
+	// empty-string/zero convention — so it's the one field carried as
+	// *bool straight through, matching the proto's own optional bool
+	// representation.
+	cfg.Refuse = p.Refuse
 
 	return cfg
 }
@@ -290,6 +340,7 @@ func retentionPolicyToProto(cfg system.RetentionPolicyConfig) *apiv1.RetentionPo
 	if cfg.MaxChunks != nil {
 		p.MaxChunks = *cfg.MaxChunks
 	}
+	p.Refuse = cfg.Refuse
 
 	return p
 }

@@ -44,8 +44,8 @@ func TestOnUploadCallbackFires(t *testing.T) {
 	if !captured.CloudBacked {
 		t.Error("CloudBacked should be true")
 	}
-	if captured.DiskBytes != 512 {
-		t.Errorf("DiskBytes = %d, want 512", captured.DiskBytes)
+	if captured.CloudBytes != 512 {
+		t.Errorf("CloudBytes = %d, want 512", captured.CloudBytes)
 	}
 	if captured.RecordCount != 42 {
 		t.Errorf("RecordCount = %d, want 42", captured.RecordCount)

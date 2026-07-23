@@ -73,6 +73,8 @@ export function useSetNodeStorageConfig() {
         name: string;
         path: string;
         memoryBudgetBytes: bigint;
+        diskFreeWarn: string;
+        diskFreeFloor: string;
       }[];
     }) => {
       return systemClient.setNodeStorageConfig({
@@ -85,7 +87,12 @@ export function useSetNodeStorageConfig() {
         } as NodeStorageConfig,
       });
     },
-    [],
+    // Invalidate the storage entity list (ListStorages, keyed ["storages"])
+    // — SetNodeStorageConfig can add, edit, or remove file storages, and
+    // without this the inspector's storage cards only refresh on the next
+    // WatchSystemStatus push, leaving a just-deleted storage's card
+    // stranded until then (gastrolog-3cobq4 review).
+    [["storages"]],
   );
 }
 

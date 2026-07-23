@@ -128,6 +128,15 @@ func (o *Orchestrator) ApplyConfig(sys *system.System, factories Factories) erro
 	} else if factories.HomeDir != "" {
 		o.homeDir = factories.HomeDir
 	}
+	// Cache vaultsDir the same way resolveVaultDir resolves it at each call
+	// site: VaultsDir when the operator set one, else HomeDir. Periodic
+	// passes with no per-call Factories (refreshStorageGuards) read this
+	// cached value instead of re-deriving it (gastrolog-3cobq4 regression).
+	if factories.VaultsDir != "" {
+		o.vaultsDir = factories.VaultsDir
+	} else if factories.HomeDir != "" {
+		o.vaultsDir = factories.HomeDir
+	}
 
 	if err := o.applyVaults(sys, factories); err != nil {
 		return err

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+
 	"gastrolog/internal/glid"
 
 	"connectrpc.com/connect"
@@ -40,11 +42,6 @@ type vaultQuantity struct {
 //     quantity never silently re-defaults a chosen one.
 func resolveVaultQuantities(p *apiv1.VaultConfig, vaultCfg *system.VaultConfig, existing []system.VaultConfig) *connect.Error {
 	for _, q := range []vaultQuantity{
-		{
-			flag: "max-size", applies: vaultCfg.Type == system.VaultTypeFile,
-			in: p.GetMaxSize(), dst: &vaultCfg.MaxSize, def: system.DefaultVaultMaxSize,
-			prev: func(v system.VaultConfig) string { return v.MaxSize },
-		},
 		{
 			flag: "cache-budget", applies: vaultCfg.IsCloud(),
 			in: p.GetCacheBudget(), dst: &vaultCfg.CacheBudget, def: system.DefaultVaultCacheBudget,
@@ -103,36 +100,102 @@ func resolveVaultQuantity(q vaultQuantity, vaultCfg *system.VaultConfig, existin
 // an empty value is legitimately "inherit" or "off" — so a malformed one is
 // caught at write instead of at use (gastrolog-etcjdx).
 //
-// The disk-free thresholds are the only volume-relative fields: they accept a
-// percentage of the volume ("10%") alongside an absolute size, because the
-// threshold guards the vault's own volume, so a share composes. An explicit
-// zero ("0", "0%") would disable the guard for this vault and is rejected,
-// like the explicit-0 budgets.
+// gastrolog-9akebz: the disk-free thresholds moved off VaultConfig onto the
+// storage entity a vault's placements reference (see validateFileStorageExpressions
+// in system_storage.go) — this function no longer touches them.
 func validateVaultExpressions(vaultCfg *system.VaultConfig) *connect.Error {
-	for _, f := range []struct {
-		flag string
-		expr string
-	}{
-		{"disk-free-warn", vaultCfg.DiskFreeWarn},
-		{"disk-free-floor", vaultCfg.DiskFreeFloor},
-	} {
-		if system.IsQuantityUnset(f.expr) {
-			continue
-		}
-		sp, err := system.ParseSizeOrPercent(f.expr)
-		if err != nil {
-			return errInvalidArg(fmt.Errorf("%s %q on vault %q: %w", f.flag, f.expr, vaultCfg.Name, err))
-		}
-		if sp.IsZero() {
-			return errInvalidArg(fmt.Errorf(
-				"%s of %q on vault %q disables the guard; omit it to inherit the node default, or set a real size or percentage",
-				f.flag, f.expr, vaultCfg.Name))
-		}
-	}
 	if !system.IsQuantityUnset(vaultCfg.CacheTTL) {
 		if _, err := system.ParseDuration(vaultCfg.CacheTTL); err != nil {
 			return errInvalidArg(fmt.Errorf("cache-ttl %q on vault %q: %w", vaultCfg.CacheTTL, vaultCfg.Name, err))
 		}
+	}
+	return nil
+}
+
+// validateRetentionTransferDisposition enforces the gastrolog-2l918
+// transfer-disposition config rules at write time, not at retention-sweep
+// time: disposition "transfer" requires a target vault ID; the target must
+// not be the source vault (self-transfer is the cascade footgun — a
+// transferred chunk would immediately re-qualify for the same rule); and
+// per spec decision #4, transfer is file → file only (cloud-backed and
+// memory vaults have different at-rest forms and lifecycle machinery, so
+// their pairing with transfer is an explicit config error rather than a
+// runtime surprise on the first retention sweep). vaults is the
+// already-loaded vault list (existing vaults, for the target lookup);
+// vaultCfg is the (already resolved) incoming config.
+func validateRetentionTransferDisposition(vaultCfg system.VaultConfig, vaults []system.VaultConfig) *connect.Error {
+	if vaultCfg.ResolveRetentionDisposition() != system.RetentionDispositionTransfer {
+		return nil
+	}
+	if vaultCfg.RetentionTransferTargetVaultID == nil {
+		return errInvalidArg(fmt.Errorf(
+			"vault %q: retention_disposition=transfer requires a retention_transfer_target_vault_id", vaultCfg.Name))
+	}
+	targetID := *vaultCfg.RetentionTransferTargetVaultID
+	if targetID == vaultCfg.ID {
+		return errInvalidArg(fmt.Errorf(
+			"vault %q: retention transfer target cannot be the vault itself (self-transfer is a retention cascade)", vaultCfg.Name))
+	}
+	var target *system.VaultConfig
+	for i := range vaults {
+		if vaults[i].ID == targetID {
+			target = &vaults[i]
+			break
+		}
+	}
+	if target == nil {
+		return errInvalidArg(fmt.Errorf(
+			"vault %q: retention transfer target %s not found", vaultCfg.Name, targetID))
+	}
+	if vaultCfg.Type != system.VaultTypeFile || vaultCfg.IsCloud() {
+		return errInvalidArg(fmt.Errorf(
+			"vault %q: retention_disposition=transfer requires a plain file-typed source vault (got %s, cloud=%t) — cloud-backed and memory vaults have different at-rest forms and lifecycle machinery",
+			vaultCfg.Name, vaultCfg.Type, vaultCfg.IsCloud()))
+	}
+	if target.Type != system.VaultTypeFile || target.IsCloud() {
+		return errInvalidArg(fmt.Errorf(
+			"vault %q: retention transfer target %q must be a plain file vault (got %s, cloud=%t) — cloud-backed and memory vaults have different at-rest forms and lifecycle machinery",
+			vaultCfg.Name, target.Name, target.Type, target.IsCloud()))
+	}
+	return detectTransferCycle(vaultCfg, vaults)
+}
+
+// detectTransferCycle rejects a transfer-target graph that would cycle
+// back to the writing vault — A→B→A, or any longer chain A→B→C→A
+// (gastrolog-2l918 review finding 3a). Self-transfer (the 1-hop cycle) is
+// already rejected above; this generalizes to the multi-hop case, which
+// self-transfer's simple equality check cannot catch. The graph is tiny
+// (one edge per vault, at most len(vaults) hops), so a plain walk with a
+// seen-set is the whole algorithm — no need for anything fancier.
+//
+// vaults is the existing vault list; vaultCfg is the incoming (not yet
+// persisted) config for its own ID, so the walk uses vaultCfg — not
+// whatever is currently stored — as the starting point and as the
+// resolution for its own ID if it appears again later in the chain (a
+// vault cannot cycle back to a stale view of itself).
+func detectTransferCycle(vaultCfg system.VaultConfig, vaults []system.VaultConfig) *connect.Error {
+	byID := make(map[glid.GLID]system.VaultConfig, len(vaults)+1)
+	for _, v := range vaults {
+		byID[v.ID] = v
+	}
+	byID[vaultCfg.ID] = vaultCfg
+
+	chain := []string{vaultCfg.Name}
+	seen := map[glid.GLID]bool{vaultCfg.ID: true}
+	cur := vaultCfg
+	for cur.ResolveRetentionDisposition() == system.RetentionDispositionTransfer && cur.RetentionTransferTargetVaultID != nil {
+		nextID := *cur.RetentionTransferTargetVaultID
+		next, ok := byID[nextID]
+		if !ok {
+			return nil // target doesn't exist — the "not found" check above already covers this
+		}
+		chain = append(chain, next.Name)
+		if seen[nextID] {
+			return errInvalidArg(fmt.Errorf(
+				"vault %q: retention transfer target graph has a cycle: %s", vaultCfg.Name, strings.Join(chain, " -> ")))
+		}
+		seen[nextID] = true
+		cur = next
 	}
 	return nil
 }
@@ -203,15 +266,19 @@ func (s *SystemServer) PutVault(
 		return nil, connErr
 	}
 
-	// Resolve the size budget: the wire distinguishes "unset" (absent) from
-	// "explicitly 0" (present, zero), and they mean opposite things
-	// (gastrolog-1epfgb). This is the single ingress for every surface — CLI
-	// create, UI, and config import all call PutVault — so resolving here
-	// makes an unbounded vault unrepresentable regardless of who asked.
+	// Resolve the vault's cache/memory budgets: the wire distinguishes
+	// "unset" (absent) from "explicitly 0" (present, zero), and they mean
+	// opposite things (gastrolog-1epfgb). This is the single ingress for
+	// every surface — CLI create, UI, and config import all call PutVault —
+	// so resolving here makes an unbounded vault unrepresentable regardless
+	// of who asked.
 	if connErr := resolveVaultQuantities(req.Msg.Config, &vaultCfg, vaults); connErr != nil {
 		return nil, connErr
 	}
 	if connErr := validateVaultExpressions(&vaultCfg); connErr != nil {
+		return nil, connErr
+	}
+	if connErr := validateRetentionTransferDisposition(vaultCfg, vaults); connErr != nil {
 		return nil, connErr
 	}
 

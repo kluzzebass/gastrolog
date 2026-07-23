@@ -333,6 +333,69 @@ describe("mergeChunksSnapshot — snapshots cannot shrink residency (gastrolog-6
   });
 });
 
+// gastrolog-33ul6h: diskBytes is per-node LIVE local cache state (eviction
+// drops it to 0, re-warm brings it back), not a monotone-growing field like
+// bytes/recordCount. cloudBytes IS fixed once the chunk is uploaded, so it
+// keeps the monotone-max shape.
+describe("mergeMeta — diskBytes/cloudBytes (gastrolog-33ul6h)", () => {
+  test("incoming cloudBytes is carried into the merged cache entry", () => {
+    // Before the fix, an UPLOADED event's cloudBytes was dropped entirely
+    // — the cache kept cloudBacked=true with cloudBytes=0 until the next
+    // ListChunks refetch.
+    const existing = new ChunkMeta({ id: bytes(40), cloudBacked: false, cloudBytes: BigInt(0) });
+    const incoming = new ChunkMeta({ id: bytes(40), cloudBacked: true, cloudBytes: BigInt(300) });
+    const merged = mergeMeta(existing, incoming);
+    expect(merged.cloudBacked).toBe(true);
+    expect(merged.cloudBytes).toBe(BigInt(300));
+  });
+
+  test("cloudBytes never regresses to a stale zero", () => {
+    const existing = new ChunkMeta({ id: bytes(41), cloudBytes: BigInt(300) });
+    const incoming = new ChunkMeta({ id: bytes(41), cloudBytes: BigInt(0) });
+    const merged = mergeMeta(existing, incoming);
+    expect(merged.cloudBytes).toBe(BigInt(300));
+  });
+
+  test("diskBytes is last-writer-wins, not monotone: eviction can drop it to 0", () => {
+    const existing = new ChunkMeta({
+      id: bytes(42),
+      cloudBacked: true,
+      diskBytes: BigInt(1200),
+      cloudBytes: BigInt(300),
+    });
+    const incoming = new ChunkMeta({
+      id: bytes(42),
+      cloudBacked: true,
+      diskBytes: BigInt(0),
+      cloudBytes: BigInt(300),
+    });
+    const merged = mergeMeta(existing, incoming);
+    expect(merged.diskBytes).toBe(BigInt(0));
+    expect(merged.cloudBytes).toBe(BigInt(300));
+  });
+
+  test("diskBytes also follows an increase (re-warm)", () => {
+    const existing = new ChunkMeta({ id: bytes(43), cloudBacked: true, diskBytes: BigInt(0) });
+    const incoming = new ChunkMeta({ id: bytes(43), cloudBacked: true, diskBytes: BigInt(900) });
+    const merged = mergeMeta(existing, incoming);
+    expect(merged.diskBytes).toBe(BigInt(900));
+  });
+
+  test("a full ListChunks snapshot resync also drops a stale positive diskBytes", () => {
+    // mergeChunksSnapshot -> mergeMeta is the only path that currently
+    // observes an eviction (no WatchChunks op announces it), so this is
+    // the case that matters most in production.
+    const cached = [
+      new ChunkMeta({ id: bytes(44), cloudBacked: true, diskBytes: BigInt(1200), cloudBytes: BigInt(300) }),
+    ];
+    const fresh = [
+      new ChunkMeta({ id: bytes(44), cloudBacked: true, diskBytes: BigInt(0), cloudBytes: BigInt(300) }),
+    ];
+    const merged = mergeChunksSnapshot(cached, fresh);
+    expect(merged[0]?.diskBytes).toBe(BigInt(0));
+  });
+});
+
 describe("shouldRefetchChunksAfterDelete", () => {
   test("true when bulk delete drains a non-empty cache", () => {
     const prev = [new ChunkMeta({ id: bytes(1) })];

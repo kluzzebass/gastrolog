@@ -99,17 +99,18 @@ func TestObjectMetadataRoundTrip(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			md := glcb.EncodeObjectMetadata(tc.bm)
-			// DiskBytes differs from RawBytes so we can prove Bytes tracks
-			// raw_bytes, not the wire size, when raw_bytes > 0.
-			const diskBytes = 5_000_000
-			got, err := glcb.DecodeObjectMetadata(tc.bm.ChunkID, blobInfoFrom(md, diskBytes))
+			// cloudBytes (the blob's object size) differs from RawBytes so
+			// we can prove Bytes tracks raw_bytes, not the wire size, when
+			// raw_bytes > 0.
+			const cloudBytes = 5_000_000
+			got, err := glcb.DecodeObjectMetadata(tc.bm.ChunkID, blobInfoFrom(md, cloudBytes))
 			if err != nil {
 				t.Fatalf("decode: %v", err)
 			}
 
 			wantBytes := tc.bm.RawBytes
 			if wantBytes <= 0 {
-				wantBytes = diskBytes // encoder writes raw_bytes=0 => Bytes falls back to DiskBytes
+				wantBytes = cloudBytes // encoder writes raw_bytes=0 => Bytes falls back to CloudBytes
 			}
 			assertMetaEqual(t, got, chunk.ChunkMeta{
 				RecordCount: int64(tc.bm.RecordCount),
@@ -128,8 +129,11 @@ func TestObjectMetadataRoundTrip(t *testing.T) {
 			if !got.Sealed {
 				t.Error("Sealed = false, want true")
 			}
-			if got.DiskBytes != diskBytes {
-				t.Errorf("DiskBytes = %d, want %d", got.DiskBytes, diskBytes)
+			if got.CloudBytes != cloudBytes {
+				t.Errorf("CloudBytes = %d, want %d", got.CloudBytes, cloudBytes)
+			}
+			if got.DiskBytes != 0 {
+				t.Errorf("DiskBytes = %d, want 0 (object-metadata decode carries no local disk fact)", got.DiskBytes)
 			}
 		})
 	}
@@ -281,8 +285,11 @@ func TestBlobMetaToChunkMeta(t *testing.T) {
 		IngestTSMonotonic: true,
 	}
 	got := glcb.BlobMetaToChunkMeta(bm, 111)
-	if got.RecordCount != 9 || got.Bytes != 321 || got.DiskBytes != 111 {
+	if got.RecordCount != 9 || got.Bytes != 321 || got.CloudBytes != 111 {
 		t.Errorf("unexpected meta: %+v", got)
+	}
+	if got.DiskBytes != 0 {
+		t.Errorf("DiskBytes = %d, want 0 (footer read carries no local disk fact)", got.DiskBytes)
 	}
 	if !got.Sealed || !got.IngestTSMonotonic {
 		t.Errorf("expected Sealed and IngestTSMonotonic true: %+v", got)
@@ -291,7 +298,7 @@ func TestBlobMetaToChunkMeta(t *testing.T) {
 		t.Errorf("WriteStart = %v, want %v", got.WriteStart, base)
 	}
 
-	// RawBytes unknown => Bytes falls back to diskBytes.
+	// RawBytes unknown => Bytes falls back to cloudBytes.
 	bm.RawBytes = 0
 	got = glcb.BlobMetaToChunkMeta(bm, 111)
 	if got.Bytes != 111 {

@@ -81,10 +81,24 @@ const (
 	vaultCatchupSweepSchedule = "13,33,53 * * * * *"
 )
 
-// alarmRetentionRouteDeferred names the deadlock in one alarm: route
-// fan-out deferred for consecutive sweeps, so the vault's only drain is
-// stopped (gastrolog-5ct2av).
-const alarmRetentionRouteDeferred = "retention-route-deferred"
+// alarmRetentionDeferred names the deadlock in one alarm: the vault's
+// configured non-delete disposition (route fan-out or transfer) deferred
+// for consecutive sweeps, so the vault's only drain is stopped
+// (gastrolog-5ct2av; generalized from route-only to cover transfer by
+// gastrolog-2l918).
+const alarmRetentionDeferred = "retention-deferred"
+
+// alarmRetentionUnenforceable names the case a vault's retention_rules ALL
+// resolve to no usable trigger (every referenced policy has none of
+// maxAge/maxSize/maxChunks set) — the vault's only drain never runs and
+// nothing bounds it, but nothing about that state looks different from a
+// healthy idle vault without this alarm. gastrolog-33ul6h correction: a
+// prior design carved out a "bound-only" policy (a size-only field that
+// bounded without draining) from this alarm; that field no longer exists —
+// max_size now always drains when set, so a policy with only max_size has a
+// trigger and simply doesn't reach this branch. See
+// retentionTargetForInstance. (gastrolog-1xl29s)
+const alarmRetentionUnenforceable = "retention-unenforceable"
 
 // retentionDeferralAlarmAfter is how many CONSECUTIVE deferred sweeps raise
 // the alarm. A count, not a clock: sweeps are the unit of retention time.
@@ -106,6 +120,21 @@ func retentionKey(vaultID glid.GLID, storageID string) string {
 // unconditionally destroyed.
 type retentionRule struct {
 	policy chunk.RetentionPolicy
+
+	// refuse, agePolicy, countPolicy (gastrolog-5yfaqj) support the
+	// post-sweep age/count refusal predicate — see
+	// retentionRunner.checkBoundViolations. refuse is the originating
+	// RetentionPolicyConfig.RefuseEnabled(): a violation only counts
+	// toward refusal when the STATING policy has refuse=true (a vault
+	// mixing a hard and a soft policy refuses only on the hard one's
+	// bounds). agePolicy/countPolicy are the SAME MaxAge/MaxChunks values
+	// `policy` was built from, isolated to one dimension apiece so
+	// checkBoundViolations can ask "is THIS specific bound still
+	// violated" independent of whatever else this rule's policy also
+	// bounds — nil when this rule's policy doesn't state that dimension.
+	refuse      bool
+	agePolicy   chunk.RetentionPolicy
+	countPolicy chunk.RetentionPolicy
 }
 
 // retentionRunner holds per-vault-instance state that persists across sweeps.
@@ -129,14 +158,15 @@ type retentionRunner struct {
 	idleLog logging.Throttle
 
 	// Deferral streak (gastrolog-5ct2av), guarded by mu: consecutive sweeps
-	// whose route fan-out could not run. Pure count, in memory only — a
-	// restart starts a fresh streak. sweepDeferred/sweepRouted are the
+	// whose configured disposition (route fan-out or transfer,
+	// gastrolog-2l918) could not run. Pure count, in memory only — a
+	// restart starts a fresh streak. sweepDeferred/sweepProgressed are the
 	// current sweep's scratch flags, folded into the streak by
 	// finishSweepDeferralState at sweep end.
 	deferralStreak    int
 	lastDeferralCause string
 	sweepDeferred     bool
-	sweepRouted       bool
+	sweepProgressed   bool
 	// sweepMatchedChunks is the current sweep's total policy-matched chunk
 	// count (across all rules, pre-dedup), set once per sweep just before
 	// finishSweepDeferralState folds the scratch state. Read into the
@@ -172,8 +202,31 @@ type retentionRunner struct {
 	// Refreshed on every sweep via retentionTargetForInstance so live config
 	// edits take effect on the next tick. Branches the per-chunk path:
 	// "delete" skips the routing engine entirely, "route" fans records
-	// out for operator-configured routes to forward.
+	// out for operator-configured routes to forward, "transfer" re-homes
+	// the sealed chunk to another vault unchanged (gastrolog-2l918).
 	disposition string
+	// transferTarget is VaultConfig.RetentionTransferTargetVaultID,
+	// refreshed alongside disposition on every sweep. Only meaningful
+	// when disposition == RetentionDispositionTransfer; PutVault
+	// validation guarantees it is non-nil whenever that's true, but
+	// fireTransferEvent re-checks defensively (config can drift between
+	// validation and sweep).
+	transferTarget *glid.GLID
+	// transferReceiptTick, when non-nil, overrides the real-time poll
+	// ticker fireTransferEvent uses while waiting for destination
+	// holder receipts. Tests inject a manually-driven channel so the
+	// stall/success paths are exercised without wall-clock sleeps; nil
+	// means production behavior (a real time.Ticker).
+	transferReceiptTick <-chan time.Time
+	// sweepStalledTransferTargets is the per-sweep circuit breaker
+	// (gastrolog-2l918 review finding 2): once a chunk's receipts wait
+	// stalls against a given target vault, every OTHER chunk targeting
+	// that SAME vault for the rest of THIS sweep defers immediately
+	// instead of also burning the full stall window — one stalled
+	// destination must not freeze retention on this vault for hours by
+	// serially re-waiting per chunk. Reset to nil at the start of every
+	// sweep(). Guarded by mu.
+	sweepStalledTransferTargets map[glid.GLID]bool
 
 	now    func() time.Time
 	logger *slog.Logger
@@ -233,13 +286,30 @@ func (o *Orchestrator) retentionSweepAll() {
 	}
 	for key, runner := range o.retention {
 		if !active[key] {
-			// A pruned runner's standing deferral alarm must be cleared here —
-			// nothing else will ever clear it once the runner stops sweeping
+			// A pruned runner's standing alarms must be cleared here —
+			// nothing else will ever clear them once the runner stops sweeping
 			// (vault removed from config, placement moved off this node,
-			// leadership lost). Mirrors disk_guard.go retainVaultGuards.
+			// leadership lost, or its vault-ctl Raft group lost its leader).
+			// Mirrors disk_guard.go retainVaultGuards. Covers both the
+			// deferral streak alarm and the unenforceable-rules alarm
+			// (gastrolog-1xl29s) — either may be standing when a runner
+			// falls out of this node's active set.
 			if o.alerts != nil {
-				o.alerts.Clear(alarmRetentionRouteDeferred, runner.vaultID.String())
+				o.alerts.Clear(alarmRetentionDeferred, runner.vaultID.String())
+				o.alerts.Clear(alarmRetentionUnenforceable, runner.vaultID.String())
 			}
+			// gastrolog-5yfaqj fix: the age/count bound-capped flags are
+			// THIS runner's verdict — nothing else on this node will ever
+			// call checkBoundViolations for this vault again once the
+			// runner is pruned (leadership moved, placement moved off,
+			// vault-ctl Raft lost its leader). Without releasing them
+			// here, a deposed leader keeps broadcasting
+			// age_bound_vault_ids/chunk_count_bound_vault_ids forever —
+			// every peer's admission-gate union refuses the vault
+			// cluster-wide permanently, long after the condition (and the
+			// runner that observed it) is gone.
+			o.SetVaultAgeBoundCapped(runner.vaultID, false)
+			o.SetVaultChunkCountBoundCapped(runner.vaultID, false)
 			delete(o.retention, key)
 		}
 	}
@@ -539,6 +609,7 @@ func (o *Orchestrator) retentionRunnerFor(vaultCfg system.VaultConfig, vaultInst
 	runner.vaultName = vaultCfg.Name
 	runner.vaultType = string(vaultCfg.Type)
 	runner.disposition = vaultCfg.ResolveRetentionDisposition()
+	runner.transferTarget = vaultCfg.RetentionTransferTargetVaultID
 	return runner
 }
 
@@ -549,7 +620,25 @@ func (o *Orchestrator) retentionRunnerFor(vaultCfg system.VaultConfig, vaultInst
 func (o *Orchestrator) retentionTargetForInstance(cfg *system.Config, vaultCfg system.VaultConfig, vaultInst *VaultInstance, active map[string]bool) *sweepTarget {
 	if vaultInst.HasRaftLeader != nil && !vaultInst.HasRaftLeader() {
 		// No runner either: without a Raft leader nothing may destroy this
-		// vault's chunks, memory-budget enforcement included.
+		// vault's chunks, memory-budget enforcement included. Not marking
+		// `active` here also means the GC loop in retentionSweepAll prunes
+		// any pre-existing runner for this vault on this node next tick,
+		// clearing its standing alarms — see that loop's comment.
+		//
+		// This is a DIFFERENT condition from the vault-leaderless alarm
+		// (leaderless_alarm.go): that one tracks config PLACEMENT leader
+		// resolution (system.LeaderNodeID over vaultCfg.Placements); this
+		// is the vault-ctl Raft group's own election state (hasLeader ==
+		// r.Leader() != "", see buildVaultRaftCallbacks), which spans every
+		// cluster node symmetrically and can be transiently unelected (a
+		// quorum blip, a fresh election) even when placement resolves
+		// cleanly. No existing alarm covers it, and unlike a trigger-less
+		// policy it is not necessarily a settled operator mistake — so this
+		// gets a throttled log, not a new alarm type (gastrolog-1xl29s).
+		if n, ok := o.retentionLeaderlessLog.Allow(vaultCfg.ID.String()); ok {
+			o.retentionLogger.Warn("retention: vault-ctl raft group has no leader; retention cannot run for this vault",
+				"vault", vaultCfg.Name, "suppressed", n)
+		}
 		return nil
 	}
 	// IsRaftLeader check removed: the instance apply forwarder transparently
@@ -558,21 +647,68 @@ func (o *Orchestrator) retentionTargetForInstance(cfg *system.Config, vaultCfg s
 	runner := o.retentionRunnerFor(vaultCfg, vaultInst, active)
 
 	if len(vaultCfg.RetentionRules) == 0 {
+		// Legitimately unconfigured — stays quiet, no log, no alarm. But if
+		// this vault previously raised retention-unenforceable (the
+		// operator removed retention_rules outright instead of fixing the
+		// policy), that condition no longer holds and must clear.
+		o.clearRetentionUnenforceable(vaultCfg.ID)
 		return nil
 	}
-	rules, err := resolveRetentionRulesFromVault(cfg, vaultCfg)
+	rules, triggerLess, err := resolveRetentionRulesFromVault(cfg, vaultCfg)
 	if err != nil {
 		o.retentionLogger.Warn("retention: failed to resolve rules",
 			"vault", vaultCfg.ID, "error", err)
+		// A different failure mode than the trigger-less gap this alarm
+		// names (unknown policy reference, invalid duration/size syntax) —
+		// already logged above. Clear rather than leave a stale
+		// trigger-less-worded alarm standing for an unrelated new error.
+		o.clearRetentionUnenforceable(vaultCfg.ID)
 		return nil
 	}
 	if len(rules) == 0 {
+		// Every referenced policy resolved with no drain trigger: the vault
+		// HAS retention rules, the operator EXPECTS enforcement, but nothing
+		// about this vault's referenced policies does anything — the exact
+		// live-incident gap (gastrolog-1xl29s). gastrolog-33ul6h correction: a
+		// prior design carved out a "bound-only" policy (size-only, no drain)
+		// from this alarm; that shape no longer exists — max_size now always
+		// drains when set, so this is the simple rule: zero triggers, always
+		// the alarm. Name it: throttled log plus a standing alarm, both
+		// naming which policies are trigger-less.
+		o.raiseRetentionUnenforceable(vaultCfg.ID, vaultCfg.Name, triggerLess)
+		runner.noteUnenforceable(triggerLess)
 		return nil
 	}
+	o.clearRetentionUnenforceable(vaultCfg.ID)
+
 	runner.mu.Lock()
 	runner.rules = rules
 	runner.mu.Unlock()
 	return &sweepTarget{runner: runner, rules: rules}
+}
+
+// raiseRetentionUnenforceable raises the retention-unenforceable alarm,
+// naming the vault and every referenced policy that resolved with no
+// trigger. Idempotent per the collector's Raise semantics — called on
+// every sweep tick while the condition holds.
+func (o *Orchestrator) raiseRetentionUnenforceable(vaultID glid.GLID, vaultName string, triggerLess []string) {
+	if o.alerts == nil {
+		return
+	}
+	o.alerts.Raise(alarmRetentionUnenforceable, vaultID.String(), fmt.Sprintf(
+		"Vault %s has retention_rules configured, but every referenced retention policy resolves with no trigger: %s. "+
+			"Retention cannot enforce anything until at least one referenced policy has a maxAge, maxSize, or maxChunks set.",
+		vaultName, strings.Join(triggerLess, ", ")))
+}
+
+// clearRetentionUnenforceable clears the retention-unenforceable alarm for
+// a vault. Safe to call unconditionally — Clear on an alarm that isn't
+// standing is a no-op at the collector.
+func (o *Orchestrator) clearRetentionUnenforceable(vaultID glid.GLID) {
+	if o.alerts == nil {
+		return
+	}
+	o.alerts.Clear(alarmRetentionUnenforceable, vaultID.String())
 }
 
 // (Disk-vs-manifest orphan cleanup lives on VaultLifecycleReconciler now —
@@ -586,8 +722,31 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 	// forwarded transparently to the Raft leader via VaultCtlChunkApplyForwarder.
 	// Config followers must not independently evaluate and transition chunks —
 	// that causes N× duplication.
+	//
+	// gastrolog-1xl29s audit finding: this guard is structurally
+	// UNREACHABLE via the only production caller. retentionSweepAll builds
+	// `targets` (the sole source of sweep() calls) by gating on
+	// vaultInst.IsLeader() BEFORE a runner is even minted, and a follower
+	// instance never gets a retention runner at all — followers react to
+	// the vault-ctl FSM's OnDelete callback instead (see the
+	// retentionRunner doc comment). So r.isLeader is always true by the
+	// time production code reaches here, and this branch can never log.
+	// That is WHY a real cluster's incident log had zero "retention sweep
+	// idle" / not-placement-leader lines ever, including from followers —
+	// not a bug in the branch, a branch that was never reachable to begin
+	// with. See TestRetentionSweepAllNeverInvokesSweepOnFollowerInstance.
+	//
+	// Kept as a correctness safety net for any future or test-only direct
+	// sweep() call on a non-leader runner (tests in this package do call
+	// sweep() directly, bypassing retentionSweepAll's gate). Hitting this
+	// WOULD mean an actual N×-duplication risk, not routine idleness, so it
+	// logs at Warn — not folded into the routine idle-diagnostics Info
+	// line noteIdle uses for "ran and found nothing to do".
 	if !r.isLeader {
-		r.noteIdle("not placement leader on this node", 0, candidateFilterStats{})
+		if n, ok := r.idleLog.Allow("not placement leader on this node"); ok {
+			r.logger.Warn("retention: sweep() called on a non-leader runner — should be unreachable via retentionSweepAll and would risk duplicate deletes",
+				"vault", r.vaultName, "suppressed", n)
+		}
 		return
 	}
 
@@ -595,15 +754,21 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 	if r.inflight == nil {
 		r.inflight = make(map[chunk.ChunkID]bool)
 	}
+	// Fresh per-sweep circuit-breaker state (gastrolog-2l918 review
+	// finding 2): a target that stalled LAST sweep gets a clean retry
+	// this sweep — only a stall observed DURING this sweep should defer
+	// its siblings immediately.
+	r.sweepStalledTransferTargets = nil
 	r.mu.Unlock()
 
 	if len(rules) == 0 {
+		r.checkBoundViolations(rules)
 		return
 	}
 
 	metas, err := r.cm.List()
 	if err != nil {
-		// Deliberately does not touch sweepDeferred/sweepRouted/deferralStreak:
+		// Deliberately does not touch sweepDeferred/sweepProgressed/deferralStreak:
 		// a transient List error is neither a fan-out deferral nor progress,
 		// so the deferral scratch state freezes here (carries whatever the
 		// previous sweep left it at) rather than folding into the streak
@@ -665,12 +830,14 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 		r.sweepMatchedChunks = 0
 		r.mu.Unlock()
 		r.finishSweepDeferralState()
+		r.checkBoundViolations(rules)
 		return
 	}
 
 	state := chunk.VaultState{
 		Chunks: sealed,
 		Now:    r.now(),
+		Claims: r.claimsIfNeeded(rules, sealed),
 	}
 
 	processed := make(map[chunk.ChunkID]bool)
@@ -713,6 +880,44 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 	r.sweepMatchedChunks = totalMatched
 	r.mu.Unlock()
 	r.finishSweepDeferralState()
+	r.checkBoundViolations(rules)
+}
+
+// claimsIfNeeded computes disk claims for sealed only when some rule in
+// this sweep actually reads them (chunk.NeedsDiskClaims — a
+// SizeRetentionPolicy, bare or composed). Skipping otherwise avoids an
+// index-size lookup per fallback chunk on every TTL/count-only sweep,
+// which is most sweeps most of the time.
+func (r *retentionRunner) claimsIfNeeded(rules []retentionRule, sealed []chunk.ChunkMeta) map[chunk.ChunkID]int64 {
+	for _, b := range rules {
+		if chunk.NeedsDiskClaims(b.policy) {
+			return r.chunkDiskClaims(sealed)
+		}
+	}
+	return nil
+}
+
+// chunkDiskClaims computes each sealed chunk's local disk claim
+// (chunk.DiskClaim) for this sweep — the currency SizeRetentionPolicy
+// measures against its budget. Same formula and index-size seam as the disk
+// guard's local footprint measurement (localVaultChunkBytes in
+// storage_bytes.go), scoped here to only the chunks this sweep evaluates.
+// r.orch is nil in a handful of unit-test harnesses that build a
+// retentionRunner directly without a backing Orchestrator; DiskClaim's
+// nil-safe lookup degrades those to the Bytes-only fallback rather than
+// panicking.
+func (r *retentionRunner) chunkDiskClaims(metas []chunk.ChunkMeta) map[chunk.ChunkID]int64 {
+	var lookup chunk.IndexSizeLookup
+	if r.orch != nil {
+		lookup = func(id chunk.ChunkID) (map[string]int64, error) {
+			return r.orch.IndexSizes(r.vaultID, id)
+		}
+	}
+	claims := make(map[chunk.ChunkID]int64, len(metas))
+	for _, meta := range metas {
+		claims[meta.ID] = chunk.DiskClaim(meta, lookup)
+	}
+	return claims
 }
 
 // appendUnlistedManifestSealed appends synthetic retention candidates for
@@ -732,16 +937,38 @@ func appendUnlistedManifestSealed(metas []chunk.ChunkMeta, vaultInst *VaultInsta
 		if listed[e.ID] || e.CloudBacked || !e.IsSealed() {
 			continue
 		}
+		// In-flight transfer landing (gastrolog-2l918 review finding 3c):
+		// an entry introduced by retention transfer disposition
+		// (TransferSourceVaultID set) with ZERO confirmed holders hasn't
+		// actually arrived on any destination home yet — the bytes are
+		// still in flight from the source, and cm.List() correctly has
+		// no local copy to report (which is why this synthetic path
+		// would otherwise be the one making it a candidate). Surfacing
+		// it here would let the DESTINATION vault's OWN retention rules
+		// (a short TTL, size pressure) tombstone the phantom placeholder
+		// out from under the transfer before receipts land — destroying
+		// an in-flight hand-off with no data ever having existed on
+		// this side, and stranding the source's receipts-wait forever.
+		// Once ANY holder acks, Holders is non-empty and the entry
+		// rejoins normal candidacy.
+		if !e.TransferSourceVaultID.IsZero() && len(e.Holders) == 0 {
+			continue
+		}
 		metas = append(metas, chunk.ChunkMeta{
-			ID:                e.ID,
-			WriteStart:        e.WriteStart,
-			WriteEnd:          e.WriteEnd,
-			SealedAt:          e.SealedAt,
-			RecordCount:       e.RecordCount,
-			Bytes:             e.Bytes,
-			Sealed:            true,
-			State:             e.State,
-			DiskBytes:         e.DiskBytes,
+			ID:          e.ID,
+			WriteStart:  e.WriteStart,
+			WriteEnd:    e.WriteEnd,
+			SealedAt:    e.SealedAt,
+			RecordCount: e.RecordCount,
+			Bytes:       e.Bytes,
+			Sealed:      true,
+			State:       e.State,
+			// No DiskBytes here (was already always zero: this loop
+			// excludes CloudBacked entries above, and ManifestEntry never
+			// carried a per-node local footprint for anything else — see
+			// gastrolog-33ul6h). The size-drain trigger's DiskClaim falls
+			// back to Bytes+indexes for these synthetic candidates, same
+			// as it always has.
 			IngestStart:       e.IngestStart,
 			IngestEnd:         e.IngestEnd,
 			SourceStart:       e.SourceStart,
@@ -766,33 +993,56 @@ func (r *retentionRunner) noteIdle(reason string, metas int, f candidateFilterSt
 		"filtered_unreadable", f.unreadable)
 }
 
-// noteFanOutDeferral records that this sweep's route fan-out could not run,
-// with an operator-readable cause for the alarm detail.
-func (r *retentionRunner) noteFanOutDeferral(cause string) {
+// noteUnenforceable reports, throttled, that a vault's retention rules
+// exist but resolve to zero usable policies — every referenced policy is
+// trigger-less. Distinct from noteIdle (a sweep that RAN and found nothing
+// to act on): this fires before sweep() is ever invoked for the tick, so
+// none of noteIdle's breadcrumbs get a chance to fire either. Shares the
+// runner's idleLog throttle — same operator-facing cadence, different
+// reason key. See gastrolog-1xl29s.
+func (r *retentionRunner) noteUnenforceable(triggerLess []string) {
+	if _, ok := r.idleLog.Allow("unenforceable"); !ok {
+		return
+	}
+	r.logger.Warn("retention: vault has retention rules configured but none resolve to a usable trigger",
+		"vault", r.vaultName, "trigger_less_policies", strings.Join(triggerLess, ", "))
+}
+
+// noteRetentionDeferral records that this sweep's configured disposition
+// (route fan-out or transfer) could not run, with an operator-readable
+// cause for the alarm detail. Progress and deferral are disposition-
+// agnostic (gastrolog-2l918): route fan-out and transfer feed the same
+// streak.
+func (r *retentionRunner) noteRetentionDeferral(cause string) {
 	r.mu.Lock()
 	r.sweepDeferred = true
 	r.lastDeferralCause = cause
 	r.mu.Unlock()
 }
 
-// noteFanOutProgress records that a chunk completed its route fan-out this
-// sweep — the deadlock, if one was forming, is not standing.
-func (r *retentionRunner) noteFanOutProgress() {
+// noteRetentionProgress records that a chunk completed its configured
+// disposition (route fan-out or transfer) this sweep — the deadlock, if
+// one was forming, is not standing. A successful transfer is progress
+// exactly like a successful route fan-out, per the 33ul6h
+// progress-is-progress fix.
+func (r *retentionRunner) noteRetentionProgress() {
 	r.mu.Lock()
-	r.sweepRouted = true
+	r.sweepProgressed = true
 	r.mu.Unlock()
 }
 
 // finishSweepDeferralState folds the sweep's scratch flags into the streak
-// and drives the retention-route-deferred alarm: raise at the threshold,
-// clear on progress. Called at the end of every sweep on the runner.
+// and drives the retention-deferred alarm (covers both route fan-out and
+// transfer disposition, gastrolog-2l918): raise at the threshold, clear on
+// progress. Called at the end of every sweep on the runner.
 func (r *retentionRunner) finishSweepDeferralState() {
 	r.mu.Lock()
-	deferred, routed, cause := r.sweepDeferred, r.sweepRouted, r.lastDeferralCause
+	deferred, progressed, cause := r.sweepDeferred, r.sweepProgressed, r.lastDeferralCause
 	matchedChunks := r.sweepMatchedChunks
-	r.sweepDeferred, r.sweepRouted = false, false
+	disposition := r.disposition
+	r.sweepDeferred, r.sweepProgressed = false, false
 	switch {
-	case routed:
+	case progressed:
 		r.deferralStreak = 0
 	case deferred:
 		r.deferralStreak++
@@ -806,16 +1056,122 @@ func (r *retentionRunner) finishSweepDeferralState() {
 	}
 	key := r.vaultID.String()
 	switch {
-	case routed:
-		r.orch.alerts.Clear(alarmRetentionRouteDeferred, key)
+	case progressed:
+		r.orch.alerts.Clear(alarmRetentionDeferred, key)
 	case deferred && streak >= retentionDeferralAlarmAfter:
-		r.orch.alerts.Raise(alarmRetentionRouteDeferred, key, fmt.Sprintf(
-			"%d chunks past policy are waiting. Retention route fan-out for vault %s has been deferred for %d consecutive sweeps: %s. "+
+		r.orch.alerts.Raise(alarmRetentionDeferred, key, fmt.Sprintf(
+			"%d chunks past policy are waiting. Retention %s for vault %s has been deferred for %d consecutive sweeps: %s. "+
 				"Expired chunks are retained and any size caps stay engaged until the drain runs. "+
-				"Free space on the starved volume, drain or grow the destination vault, or — last resort, "+
-				"discards the routed records — set this vault's retention disposition to delete.",
-			matchedChunks, name, streak, cause))
+				"Free space on the starved volume, drain or grow the destination/target vault, or — last resort, "+
+				"discards the records — set this vault's retention disposition to delete.",
+			matchedChunks, dispositionActionName(disposition), name, streak, cause))
 	}
+}
+
+// checkBoundViolations is the age/count VIOLATION PREDICATE (gastrolog-5yfaqj):
+// a violation is refusal-worthy only once retention has SWEPT AND FAILED
+// TO CLEAR it — never on the transient between a chunk's seal and the next
+// sweep. Called at every sweep exit (the early no-rules/no-eligible-chunks
+// returns and the normal end) against a FRESH chunk listing, so it reflects
+// what retention actually left behind after THIS sweep's deletes ran, not
+// what existed before them. No streak, no clock, no slack duration: the
+// sweep's own outcome, re-observed once per sweep, IS the predicate.
+//
+// Only rules whose originating policy has refuse=true count toward a
+// violation — a vault mixing a hard and a soft policy refuses only on the
+// hard one's bounds (min-per-kind resolution: the tightest attached policy
+// that also refuses wins; a looser refuse=false policy contributes
+// nothing here even if it's the one still matching chunks).
+func (r *retentionRunner) checkBoundViolations(rules []retentionRule) {
+	if r.orch == nil {
+		return
+	}
+
+	needsCheck := false
+	for _, rl := range rules {
+		if rl.agePolicy != nil || rl.countPolicy != nil {
+			needsCheck = true
+			break
+		}
+	}
+
+	var sealed []chunk.ChunkMeta
+	if needsCheck {
+		var ok bool
+		sealed, ok = r.currentSealedForBoundCheck()
+		if !ok {
+			// Transient — leave the guard's cached verdict as-is rather
+			// than guess; the next sweep retries. Mirrors sweep()'s own
+			// top-of-sweep List error handling.
+			return
+		}
+	}
+
+	state := chunk.VaultState{Chunks: sealed, Now: r.now()}
+	ageViolated, countViolated := false, false
+	for _, rl := range rules {
+		if !rl.refuse {
+			continue
+		}
+		if rl.agePolicy != nil && len(rl.agePolicy.Apply(state)) > 0 {
+			ageViolated = true
+		}
+		if rl.countPolicy != nil && len(rl.countPolicy.Apply(state)) > 0 {
+			countViolated = true
+		}
+	}
+
+	// Unconditional, even when needsCheck was false (no attached policy
+	// states either dimension): releases any capped state a since-removed
+	// bound may have left standing — nothing else clears it once the
+	// operator drops the last policy that stated it.
+	r.orch.SetVaultAgeBoundCapped(r.vaultID, ageViolated)
+	r.orch.SetVaultChunkCountBoundCapped(r.vaultID, countViolated)
+}
+
+// currentSealedForBoundCheck re-lists the vault's CURRENT sealed chunks for
+// checkBoundViolations — a fresh read reflecting whatever this sweep's
+// deletes actually did, not the pre-sweep snapshot sweep() started with.
+// Returns ok=false only on a transient list error, distinct from a
+// legitimately empty result.
+//
+// Ghost filter (gastrolog-5yfaqj review fix I1): a sealed chunk on disk
+// with no FSM manifest entry is the orphan reaper's problem, not
+// retention's — its FSM entry was finalize-deleted but the disk file was
+// never reaped, exactly the case selectRetentionCandidates already
+// excludes (see buildManifestSet). A sweep may never clear it (retention
+// doesn't touch ghosts at all), so it must not count toward the violation
+// either, or a vault could refuse admission forever over a chunk
+// retention itself will never act on. Chunks in unreadable-retry backoff
+// are DELIBERATELY NOT filtered here (unlike selectRetentionCandidates):
+// a chunk that keeps failing to read is an honest sweep failure — it
+// belongs in the violation count, not silently excluded.
+func (r *retentionRunner) currentSealedForBoundCheck() ([]chunk.ChunkMeta, bool) {
+	metas, err := r.cm.List()
+	if err != nil {
+		return nil, false
+	}
+	r.mu.Lock()
+	vaultInst := r.findVaultInstance()
+	r.mu.Unlock()
+	if vaultInst != nil && vaultInst.OverlayFromFSM != nil {
+		for i := range metas {
+			metas[i] = vaultInst.OverlayFromFSM(metas[i])
+		}
+	}
+	metas = appendUnlistedManifestSealed(metas, vaultInst)
+	manifest, manifestKnown := buildManifestSet(vaultInst)
+	var sealed []chunk.ChunkMeta
+	for _, m := range metas {
+		if !m.Sealed {
+			continue
+		}
+		if manifestKnown && !manifest[m.ID] {
+			continue // ghost
+		}
+		sealed = append(sealed, m)
+	}
+	return sealed, true
 }
 
 // buildManifestSet returns the FSM-known chunk IDs for the given instance and a
@@ -943,7 +1299,7 @@ func (r *retentionRunner) tryRetainChunk(id chunk.ChunkID, b retentionRule, alre
 		// delete, and a delete-disposition sweep that successfully destroys
 		// a chunk is freeing space exactly as intended — that is progress
 		// by definition, not just a completed route fan-out.
-		r.noteFanOutProgress()
+		r.noteRetentionProgress()
 		// Mark as retention-pending in vault-ctl Raft so all nodes see it —
 		// but ONLY if the FSM doesn't already carry the flag. Skipping the
 		// redundant Apply when the action stalls (transition unreachable
@@ -981,21 +1337,38 @@ func (r *retentionRunner) markRetentionPending(id chunk.ChunkID) bool {
 	return true
 }
 
-// applyRetentionDispositionToChunk runs the chunk's records through the
-// routing engine when the vault's disposition is "route"; otherwise it
-// is a no-op. Returns false when the fan-out was aborted before
-// completing (shutdown, stopped pipeline) — the caller must then leave
-// the chunk untouched so a later sweep retries the route from scratch
-// (gastrolog-5034va). On true the caller destroys the chunk via
-// expireChunk regardless of disposition. Extracted so tests can
-// verify the disposition gate without standing up the full
-// expire-chunk machinery (which needs a reconciler, Raft, etc.). See
-// gastrolog-18du3.
+// applyRetentionDispositionToChunk runs the chunk through the vault's
+// configured non-delete disposition — "route" fans its records through the
+// routing engine, "transfer" re-homes the sealed chunk to another vault
+// unchanged (gastrolog-2l918) — or is a no-op for "delete". Returns false
+// when the action was aborted before completing (shutdown, stopped
+// pipeline, stalled destination receipts) — the caller must then leave the
+// chunk untouched so a later sweep retries from scratch (gastrolog-5034va).
+// On true the caller destroys the LOCAL chunk via expireChunk regardless of
+// disposition — for transfer this is a pure local-copy delete, since the
+// data now lives on at the destination. Extracted so tests can verify the
+// disposition gate without standing up the full expire-chunk machinery
+// (which needs a reconciler, Raft, etc.). See gastrolog-18du3.
 func (r *retentionRunner) applyRetentionDispositionToChunk(id chunk.ChunkID) bool {
-	if r.disposition == system.RetentionDispositionRoute {
+	switch r.disposition {
+	case system.RetentionDispositionRoute:
 		return r.fireRetentionEvent(id)
+	case system.RetentionDispositionTransfer:
+		return r.fireTransferEvent(id)
+	default:
+		return true
 	}
-	return true
+}
+
+// dispositionActionName renders a disposition value for the shared
+// retention-deferred alarm text, naming which mechanism stalled.
+func dispositionActionName(disposition string) string {
+	switch disposition {
+	case system.RetentionDispositionTransfer:
+		return "transfer"
+	default:
+		return "route fan-out"
+	}
 }
 
 // fireRetentionEvent streams the chunk's records through the routing
@@ -1060,7 +1433,7 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 			r.logger.Warn("retention: route fan-out deferred — drain gate engaged below the disk floor; chunk retained for a later sweep",
 				"vault", r.vaultID, "suppressed", n)
 		}
-		r.noteFanOutDeferral("drain gate engaged (node below its disk floor)")
+		r.noteRetentionDeferral("drain gate engaged (node below its disk floor)")
 		return false
 	}
 	// No vault instance (or no chunk manager) means the records cannot be
@@ -1073,7 +1446,7 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 	if vaultInst == nil || vaultInst.Chunks == nil {
 		r.logger.Warn("retention: no vault instance for fan-out; chunk retained for a later sweep",
 			"vault", r.vaultID, "chunk", id)
-		r.noteFanOutDeferral("vault instance unavailable on the sweeping node")
+		r.noteRetentionDeferral("vault instance unavailable on the sweeping node")
 		return false
 	}
 
@@ -1111,7 +1484,7 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 			aborted.Store(true)
 			r.logger.Warn("retention: fan-out aborted; chunk will re-route on a later sweep",
 				"vault", r.vaultID, "chunk", id, "error", cause)
-			r.noteFanOutDeferral(cause.Error())
+			r.noteRetentionDeferral(cause.Error())
 			cancel()
 		})
 	}
@@ -1153,9 +1526,11 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 				case errors.Is(subErr, pipeline.ErrNotRunning),
 					errors.Is(subErr, context.Canceled),
 					errors.Is(subErr, ErrDiskProtect),
-					errors.Is(subErr, ErrVaultDiskProtect),
+					errors.Is(subErr, ErrStorageDiskProtect),
 					errors.Is(subErr, ErrVaultMaxSize),
 					errors.Is(subErr, ErrVaultBacklogBudget),
+					errors.Is(subErr, ErrVaultAgeBound),
+					errors.Is(subErr, ErrVaultChunkCountBound),
 					r.orch.shuttingDown():
 					// ErrDiskProtect is terminal for the whole fan-out: every
 					// subsequent record would be rejected the same way, and

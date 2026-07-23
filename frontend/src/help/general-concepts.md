@@ -64,7 +64,7 @@ flowchart TD
 
 [**Index**](help:indexers) — Sealed chunks are indexed in the background so the query engine can search without scanning every record.
 
-**Expire** — [Retention policies](help:policy-retention) periodically delete sealed chunks that are too old, too numerous, or pushing the vault over its size budget.
+**Expire** — [Retention policies](help:policy-retention) periodically delete sealed chunks that are too old, too numerous, or pushing the vault over its size bound. That same size bound also refuses new records outright while the vault is over it — see [Retention Policies](help:policy-retention).
 
 ## Routing
 

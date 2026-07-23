@@ -8,6 +8,7 @@ import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
 import { Job } from "./job_pb.js";
 import { ChunkAnalysis, ChunkChangeOp, ChunkMeta, ChunkValidation, ExportRecord, IndexInfo, ThroughputRate, VaultStats } from "./vault_pb.js";
 import { PerRouteStats, VaultRouteStats } from "./system_pb.js";
+import { StorageState } from "./storage_pb.js";
 import { ChunkPlan, HistogramBucket, TableResult } from "./query_pb.js";
 
 /**
@@ -734,23 +735,48 @@ export class NodeStats extends Message<NodeStats> {
   raftElectionsPerMin = 0;
 
   /**
-   * Vaults whose backing volume on THIS node is below its free-space floor.
-   * Every node's admission gate honors the union across live peers, so a
-   * starved vault volume anywhere in the cluster suspends new records for
-   * that vault at every front door while other vaults keep ingesting.
+   * Vaults with a placement on a storage, THIS node hosts, that is below
+   * its free-space floor. Every node's admission gate honors the union
+   * across live peers, so a starved storage anywhere in the cluster
+   * suspends new records for every vault placed on it at every front
+   * door while vaults on healthy storages keep ingesting. Renamed from
+   * disk_protected_vault_ids (gastrolog-9akebz: thresholds moved from
+   * VaultConfig to the storage entity; still vault-keyed — the node that
+   * samples the storage already knows which of its OWN vaults are placed
+   * on it, so the broadcast shape didn't need to become storage-keyed).
    *
-   * @generated from field: repeated bytes disk_protected_vault_ids = 48;
+   * @generated from field: repeated bytes storage_protected_vault_ids = 48;
    */
-  diskProtectedVaultIds: Uint8Array[] = [];
+  storageProtectedVaultIds: Uint8Array[] = [];
 
   /**
    * Vaults whose local disk claim on THIS node has reached their per-node
-   * max-size budget. Honored cluster-wide by the same per-vault admission
-   * gate as disk_protected_vault_ids, with a budget-specific error.
+   * max-size bound. Honored cluster-wide by the same per-vault admission
+   * gate as storage_protected_vault_ids, with a bound-specific error.
    *
    * @generated from field: repeated bytes size_capped_vault_ids = 49;
    */
   sizeCappedVaultIds: Uint8Array[] = [];
+
+  /**
+   * Vaults whose max-age retention bound is still violated after this
+   * node's retention runner swept and failed to clear it, on a policy
+   * with refuse=true (gastrolog-5yfaqj). Unlike size_capped_vault_ids this
+   * is NOT instantaneous — see RetentionPolicyConfig.refuse. Honored
+   * cluster-wide by the same per-vault admission gate.
+   *
+   * @generated from field: repeated bytes age_bound_vault_ids = 52;
+   */
+  ageBoundVaultIds: Uint8Array[] = [];
+
+  /**
+   * Vaults whose max-chunks retention bound is still violated after a
+   * failed sweep, on a policy with refuse=true. Same contract as
+   * age_bound_vault_ids.
+   *
+   * @generated from field: repeated bytes chunk_count_bound_vault_ids = 53;
+   */
+  chunkCountBoundVaultIds: Uint8Array[] = [];
 
   /**
    * Cumulative diagnostic log records this node's capture handler has
@@ -774,6 +800,17 @@ export class NodeStats extends Message<NodeStats> {
    * @generated from field: string ingest_pressure_level = 51;
    */
   ingestPressureLevel = "";
+
+  /**
+   * Per-storage disk-guard state for storages LOCALLY hosted on this node —
+   * only the owning node can statfs its volume (gastrolog-3cobq4). Bounded
+   * by the node's own NodeStorageConfig entries. Aggregated cluster-wide the
+   * same way VaultStats/VaultPipelineDisk are: each node reports its own,
+   * PeerState merges across live peers for the storage inspector.
+   *
+   * @generated from field: repeated gastrolog.v1.StorageState storages = 54;
+   */
+  storages: StorageState[] = [];
 
   constructor(data?: PartialMessage<NodeStats>) {
     super();
@@ -830,10 +867,13 @@ export class NodeStats extends Message<NodeStats> {
     { no: 45, name: "raft_leader_losses_total", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 46, name: "raft_failed_heartbeats_total", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 47, name: "raft_elections_per_min", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
-    { no: 48, name: "disk_protected_vault_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
+    { no: 48, name: "storage_protected_vault_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
     { no: 49, name: "size_capped_vault_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
+    { no: 52, name: "age_bound_vault_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
+    { no: 53, name: "chunk_count_bound_vault_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
     { no: 50, name: "self_ingester_drops_total", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 51, name: "ingest_pressure_level", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 54, name: "storages", kind: "message", T: StorageState, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): NodeStats {

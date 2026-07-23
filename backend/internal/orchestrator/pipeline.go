@@ -83,7 +83,7 @@ func (o *Orchestrator) ServeChunkGLCBPull(vaultID glid.GLID, chunkID chunk.Chunk
 // and waits for it: a nil return means every matched destination durably
 // committed the record (an unmatched record is a counted drop that also
 // returns nil). A per-destination admission rejection (ErrVaultMaxSize,
-// ErrVaultDiskProtect, ErrVaultBacklogBudget) surfaces here so the caller can
+// ErrStorageDiskProtect, ErrVaultBacklogBudget) surfaces here so the caller can
 // abort the whole chunk fan-out and retain the chunk — before the ack was
 // wired, the routing gate's whole-record nack went to a nil ack and the
 // record silently vanished (gastrolog-5ct2av).

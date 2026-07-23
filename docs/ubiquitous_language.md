@@ -102,7 +102,12 @@ for append-heavy write patterns and time-ordered reads.
 
 - **FileStorage** — a directory on a node's disk, identified by a GLID, tagged
   with a **StorageClass**. A node can have many file storages (different disks,
-  different performance classes). [`system.FileStorage`](../backend/internal/system/storage.go).
+  different performance classes). Carries the disk-guard free-space thresholds
+  (`DiskFreeWarn`/`DiskFreeFloor`, size-or-percent expressions; empty inherits
+  the node defaults) — moved here from `VaultConfig` (gastrolog-9akebz): the
+  thresholds guard the volume, not the vaults sharing it. A storage below its
+  floor puts every vault placed on it into admission refuse (cause
+  `STORAGE_DISK_PROTECT`). [`system.FileStorage`](../backend/internal/system/storage.go).
 
 - **NodeStorageConfig** — the list of file storages on one node. Runtime state
   (not operator-authored). [`system.NodeStorageConfig`](../backend/internal/system/storage.go).
@@ -464,24 +469,151 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
 - **Retention policy** (`RetentionPolicyConfig`) — named, reusable
   policy referenced by `RetentionRule`.
 
+- **Refuse** (`RetentionPolicyConfig.Refuse`, gastrolog-5yfaqj) — ONE
+  boolean generalizing `MaxSize`'s refuse behavior to every bound a
+  retention policy states (`MaxAge`, `MaxSize`, `MaxChunks`). Default OFF
+  (operator decision: bounds are drain-first, refusal is the explicit hard
+  mode — unset reads as false, a policy must opt IN explicitly); the
+  consequence is that an unset-flag policy is always drain-only, never
+  refusing, even one that sets `MaxSize`. Every SET parameter on a
+  `refuse=true` policy is a **hard bound**: drain restores it, and refusal
+  guards it while violated. `refuse=false` (unset or explicit) makes every
+  set parameter a **soft bound**: drain still restores it, but refusal is
+  off — the operator explicitly accepts that only the node-level disk
+  guard's own floor/warn bands backstop the vault while violated. Not
+  per-parameter flags (three knobs of ceremony) and not paired
+  refuse-values per dimension (the two-fields-per-concept split the
+  `MaxSize` field combine killed, see below) — one flag per policy.
+  - **Min-per-kind resolution**: a vault's effective bound, per KIND
+    (age/size/count), is the min over every attached policy that states
+    that kind. Refuse-eligibility follows the STATING policy's own flag —
+    a vault mixing a hard and a soft policy refuses only on the hard
+    one's bounds, even if the soft one's bound is the tighter (and
+    therefore drain-triggering) one.
+  - **Violation predicate for age/chunks** (the subtle part): normal
+    operation transiently violates both between a chunk's seal and the
+    next retention sweep — refusing on that transient would be pure
+    flapping. A violation counts as refusal-worthy only once the
+    retention runner has SWEPT AND FAILED TO CLEAR it
+    (`retentionRunner.checkBoundViolations`, called at every sweep exit
+    against a fresh post-sweep chunk listing) — clock-free, no streak, no
+    slack duration: the sweep's own outcome, re-observed once per sweep,
+    IS the predicate. `MaxSize`'s refuse check stays instantaneous
+    (measured every disk-guard tick, unchanged) — it is resource-backed
+    (disk fills regardless of sweep cadence), unlike age/count which are
+    purely retention-policy-derived.
+  - Surfaced as `VaultAdmissionCause` `AGE_BOUND` / `CHUNK_COUNT_BOUND`
+    (alongside the existing `MAX_SIZE_BOUND`) and the `vault-bound-capped`
+    alarm — see docs/alarm-management-design.md.
+
+- **Max size (retention policy)** (`RetentionPolicyConfig.MaxSize`,
+  gastrolog-33ul6h) — the vault's disk-claim bound, carried on a retention
+  policy rather than `VaultConfig` (that field is removed; no reserved tag,
+  per house rule). It means BOTH things at once — this is a corrected
+  design (operator, 2026-07-19, comment c2): an earlier shape that split
+  this into two fields was superseded before implementation, see the
+  retention design doc's superseded-section note (docs/) for the
+  measurement decisions, which still stand.
+  - **Drain** (evaluated by `SizeRetentionPolicy`): drains the oldest sealed
+    chunks, per the vault's disposition, once the vault's disk claim exceeds
+    the bound. Scope: the chunk store retention can act on.
+  - **Refuse** (evaluated by the disk guard's Admission gate; see the
+    generalized `Refuse` entry above — this is its size-specific,
+    instantaneous instantiation): refuses ingest admission for the vault
+    once its whole local footprint (chunk store + pipeline segment
+    backlog) exceeds the same bound, while the stating policy's `Refuse`
+    is explicitly true (default off, so a bare `MaxSize` alone drains
+    only). Scope: everything the vault holds on this node. The backstop
+    while drain catches up or is deferred. The creation-default floor
+    (below) stays refuse-only and unchanged, independent of any policy's
+    `Refuse` flag — a default must never destroy data, so the floor never
+    drains, only refuses.
+
+  Effective per-vault REFUSE bound = min over the refuse-eligible
+  (`Refuse` on) attached policies' `MaxSize`; falls back to the creation
+  default (`system.DefaultVaultMaxSize`) only when NO attached policy
+  states a size — that default floor is REFUSE-ONLY (it never drains),
+  because a default must never destroy data. A vault whose only size
+  policies are soft (`Refuse` off) has no refuse bound and no floor: the
+  operator explicitly accepted drain-only, backstopped by the node-level
+  guard alone. The DRAIN trigger mins over ALL stating policies regardless
+  of the flag. Feeds
+  `refreshVaultDiskGuards` → `orchestrator.resolveVaultSizeBound` → the disk
+  guard's Admission gate; the gate mechanism itself is unchanged, only its
+  config source. "Bound-only" (a size-only field with no drain) is not a
+  concept: a policy that sets only `MaxSize` is simply a drain policy that
+  also happens to bound the vault.
+
+  Measures the **disk claim** (`chunk.DiskClaim`): `DiskBytes` when
+  recorded (also what a cached cloud-backed chunk's cache file reports), 0
+  for a cloud-backed chunk with no local copy (an evicted chunk's
+  destruction frees nothing locally, so drain never selects one), otherwise
+  logical `Bytes` plus index sizes. One field, one measurement, one bound —
+  drain and refuse can no longer drift apart under compression the way two
+  independently-set fields could (they diverged 3-4× before gastrolog-33ul6h,
+  since the vault-level cap used to measure logical `Bytes` alone).
+
+  **`DiskBytes` vs `CloudBytes`** (`ChunkMeta`, gastrolog-33ul6h) — two
+  distinct currencies that must never substitute for each other. `DiskBytes`
+  is always the LOCAL on-disk footprint on the responding node: for a
+  cloud-backed chunk this is the warm-cache state (the cached GLCB's size
+  while cached, 0 once evicted), live and per-node — it changes on upload,
+  eviction, and re-warm. `CloudBytes` is the compressed cloud object's
+  transport size: cluster-wide, fixed at upload time, unaffected by any
+  node's local cache turnover. `chunk.DiskClaim` and every consumer that
+  measures against the disk-claim bound above reads `DiskBytes` only, never
+  `CloudBytes` — a chunk evicted from this node's cache must claim 0 here
+  even though its `CloudBytes` is unchanged and its object is still in the
+  cloud store.
+
 - **Retention event** — the cluster-visible signal that a chunk has aged
   out. Fires unconditionally on policy match; the vault's retention
   disposition decides whether the records are forwarded through the
-  routing engine before the chunk is destroyed.
+  routing engine, transferred to another vault, or dropped before the
+  chunk's local copy is destroyed.
 
 - **Retention disposition** (`VaultConfig.RetentionDisposition`,
-  gastrolog-18du3) — per-vault flag controlling what happens to records
-  when a retention event fires. Two canonical values:
+  gastrolog-18du3, extended by gastrolog-2l918) — per-vault flag
+  controlling what happens to records when a retention event fires.
+  Three canonical values:
   - **`delete`** (default): records drop, storage frees, the routing
     engine is never invoked. The safe default — no risk of accidental
-    cascades.
+    cascades. `transfer` cannot become the zero-config default: it
+    requires a target vault, and a default must be a value the operator
+    could type into the field.
   - **`route`**: records flow through the routing engine with synthetic
     `_source = "retention"` and `_vault = "<id>"`, so operator-configured
-    routes can forward them to archive vaults, cold storage, etc. The
-    chunk is destroyed regardless of disposition.
+    routes can forward them to archive vaults, cold storage, etc.
+  - **`transfer`** (`VaultConfig.RetentionTransferTargetVaultID`,
+    gastrolog-2l918): the sealed chunk is re-homed to the target vault
+    UNCHANGED — no record decode, no re-route, no re-ingest. Where
+    `route` filters/re-tags/fans out and `delete` drops, `transfer`
+    moves; it is the recommended primary pattern for archive/cold-
+    storage vaults (route stays the tool for filtering/re-tagging).
+    Mechanism: the destination's homes pull the sealed GLCB via the
+    same verify-before-promote replica catch-up machinery same-vault
+    replication uses (`glcb_catchup.go`), addressed at the source vault
+    via `ManifestEntry.TransferSourceVaultID`; destination holder
+    receipts must reach the destination's replication factor before the
+    source expires its local copy (`AckChunkHolder`/receipt-protocol
+    reuse — no loss window, nothing marked on the source until the
+    destination confirms). The destination-side retention clock starts
+    FRESH at arrival (`SealedAt` stamped on landing via the reused
+    `CmdRepatriateChunk` announce-import), so a shorter destination TTL
+    does not re-fire retention the moment the chunk lands; the chunk's
+    own record timestamps and identity are untouched. File vaults only
+    (source and target — cloud-backed and memory vaults have different
+    at-rest forms); self-transfer is rejected at `PutVault`. A stalled
+    or deferred transfer retains the chunk with the one-shot
+    unconsumed, same as a stalled route fan-out. See
+    docs/retention-transfer-disposition-design.md.
 
   Empty/unrecognized values resolve to `delete` via
   `VaultConfig.ResolveRetentionDisposition()`.
+
+  Note: do not confuse the drain half of max size with the unrelated
+  **Drain gate** / **Drain** verbs below (disk-guard backpressure, node
+  decommission — different concepts that happen to share the word "drain").
 
 ### Core state transitions (verbs)
 
@@ -499,8 +631,10 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
 
 - **Disk guard** — the per-node free-space guard job (`disk_guard.go`):
   samples the node's data volumes every 15s and drives two staged gates
-  plus the per-vault caps (max-size budget, backlog budget, per-vault
-  floor).
+  plus the per-vault caps (max-size budget, backlog budget) and, since
+  gastrolog-9akebz, a per-storage evaluation (`evaluateStorages`) — one
+  statfs/warn-floor verdict per locally-hosted `FileStorage`, regardless
+  of how many vaults share it; the floor is no longer a per-vault cap.
 
 - **Admission gate** (`protect`) — the disk guard's outer gate: suspends
   ingest admission and catch-up pulls. Engages below the free-space
@@ -513,10 +647,26 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
   admission gate, so the paths that free space run while admission is
   still suspended.
 
-- **Retention deferral** — a sweep whose route fan-out could not run
-  (drain gate engaged, destination vault gated, or fan-out stalled);
-  the chunk is retained for a later sweep. Consecutive deferrals raise
-  the `retention-route-deferred` alarm.
+- **Retention deferral** — a sweep whose configured non-delete
+  disposition (route fan-out or transfer) could not run (drain gate
+  engaged, destination/target vault gated, receipts stalled, etc.); the
+  chunk is retained for a later sweep. Consecutive deferrals raise the
+  `retention-deferred` alarm.
+
+- **Transfer (retention disposition)** — a third `RetentionDisposition`
+  value alongside `delete` and `route`: when a retention event fires,
+  the sealed chunk is re-homed to `RetentionTransferTargetVaultID`
+  UNCHANGED — no record decode, no re-route, no re-ingest. The
+  destination's homes pull the sealed GLCB (the same verify-before-
+  promote replica catch-up machinery same-vault replication uses,
+  addressed at the source vault); destination holder receipts must
+  reach the destination's replication factor before the source expires
+  its local copy — no loss window. The destination-side retention clock
+  starts fresh at arrival (`SealedAt` stamped on landing), so a shorter
+  destination TTL does not re-fire retention the moment the chunk
+  lands. File vaults only (source and target); self-transfer is
+  rejected at `PutVault`. See
+  docs/retention-transfer-disposition-design.md (gastrolog-2l918).
 
 - **Reconcile** — compare the vault FSM manifest against local disk;
   delete sealed chunks on disk that aren't in the manifest (orphan
@@ -1035,6 +1185,7 @@ Canonical milestone verbs (reuse these names; do not coin synonyms):
 | synthetic attribute | source predicate, RouteSource | Source/content predicates unify via `_source`/`_ingester`/`_vault`/`_reason` overlays at routing-eval time. |
 | retire (segment, distribution) | forget | Distribution's node-local drop of segment tracking was called `forgetSegment` while the exported entry point was `RetireSegments`; one verb per meaning (gastrolog-34zx9y). See [Pipeline](#9-pipeline) for the release / retire / purge distinction. |
 | glcb (container-format package) | chunk/cloud | The GLCB container package lived at `chunk/cloud`, but GLCB is universal — local-only vaults seal into it too. The package is `chunk/glcb`; "cloud" names only genuine object-storage interaction (blobstore, cloud-backed cache, cloud upload) (gastrolog-34zx9y). |
+| storage disk protect | vault disk protect | The disk-guard free-space thresholds moved from `VaultConfig` to `system.FileStorage` (gastrolog-9akebz): a below-floor storage protects every vault placed on it, not one vault's own threshold. Renamed through the stack: proto enum `VAULT_ADMISSION_CAUSE_VAULT_DISK_PROTECT` → `..._STORAGE_DISK_PROTECT`, `orchestrator.ErrVaultDiskProtect` → `ErrStorageDiskProtect`, `VaultAdmissionCauseVaultDiskProtect` → `VaultAdmissionCauseStorageDiskProtect`, NodeStats `disk_protected_vault_ids` → `storage_protected_vault_ids`, `PeerState.VaultDiskProtected(Nodes)` → `VaultStorageProtected(Nodes)`. |
 | complete (segment lifecycle) | close | "Close" is overloaded: writer shutdown vs the segment lifecycle event (working/ → completed/). The rotation trigger is `segmentation.CompletePolicy` and a segment COMPLETES; reserve Close for genuine resource shutdown (`Close()` methods, closed writers) (gastrolog-34zx9y). |
 | routed (routing counter) | ingested (at routing) | The counter that was `Ingested` on routing stats counts records ENTERING ROUTING, not ingestion — counter provenance matters when proving loss. Whole chain renamed: `Routed` = entered routing, `Matched` = matched a route and fanned out (proto `total_routed`/`total_matched`, NodeStats `route_stats_*`, UI labels) (gastrolog-34zx9y). "Ingested" stays only on genuine ingester counters (`MessagesIngested`, `BytesIngested`). |
 | unmatched (routing counter) | dropped (at routing) | "Dropped" named two different quantities. `Unmatched` = matched no route, an intentional counted drop (proto `total_unmatched`, NodeStats `route_stats_unmatched`, UI label "Unmatched"); the invariant is `Routed = Matched + Unmatched`. "Dropped" is reserved for delivery drops: `StatsSnapshot.PerVaultDropped` counts already-matched records whose fan-out delivery to a vault failed — a per-vault sub-account of `Matched`, never part of the routed sum (gastrolog-5sdzfv). |

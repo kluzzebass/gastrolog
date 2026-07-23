@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/orchestrator"
 	"strconv"
 
 	"connectrpc.com/connect"
@@ -136,6 +137,8 @@ func newNodeAddStorageCmd() *cobra.Command {
 			name, _ := cmd.Flags().GetString("name")
 			path, _ := cmd.Flags().GetString("path")
 			storageClass, _ := cmd.Flags().GetUint32("storage-class")
+			diskFreeWarn, _ := cmd.Flags().GetString("disk-free-warn")
+			diskFreeFloor, _ := cmd.Flags().GetString("disk-free-floor")
 
 			client := clientFromCmd(cmd)
 			r, err := newResolver(context.Background(), client)
@@ -157,10 +160,12 @@ func newNodeAddStorageCmd() *cobra.Command {
 			// Append new storage.
 			newFsID := glid.New()
 			existing = append(existing, &v1.FileStorage{
-				Id:           newFsID.ToProto(),
-				Name:         name,
-				Path:         path,
-				StorageClass: storageClass,
+				Id:            newFsID.ToProto(),
+				Name:          name,
+				Path:          path,
+				StorageClass:  storageClass,
+				DiskFreeWarn:  diskFreeWarn,
+				DiskFreeFloor: diskFreeFloor,
 			})
 
 			_, err = client.System.SetNodeStorageConfig(context.Background(), connect.NewRequest(&v1.SetNodeStorageConfigRequest{
@@ -179,6 +184,8 @@ func newNodeAddStorageCmd() *cobra.Command {
 	cmd.Flags().String("name", "", "storage name (required)")
 	cmd.Flags().String("path", "", "storage path (default: auto)")
 	cmd.Flags().Uint32("storage-class", 1, "storage class")
+	cmd.Flags().String("disk-free-warn", "", "free space below which the disk-space alarm raises for this storage (e.g. 10GB, 10%). Empty inherits the node default (10%)")
+	cmd.Flags().String("disk-free-floor", "", "free space below which every vault placed on this storage is refused cluster-wide (e.g. 3GB, 3%). Empty inherits the node default (3%)")
 	_ = cmd.MarkFlagRequired("name")
 	return cmd
 }
@@ -229,17 +236,34 @@ func newNodeListStorageCmd() *cobra.Command {
 					nodeName = nscNodeStr
 				}
 				for _, fs := range nsc.FileStorages {
+					warnExpr, warnIsDefault := orchestrator.EffectiveThresholdExpr(fs.DiskFreeWarn, orchestrator.DefaultDiskFreeWarn)
+					floorExpr, floorIsDefault := orchestrator.EffectiveThresholdExpr(fs.DiskFreeFloor, orchestrator.DefaultDiskFreeFloor)
 					rows = append(rows, []string{
 						nodeName, glid.FromBytes(fs.Id).String(), fs.Name,
 						strconv.FormatUint(uint64(fs.StorageClass), 10),
-						fs.Path,
+						fs.Path, thresholdExprLabel(warnExpr, warnIsDefault), thresholdExprLabel(floorExpr, floorIsDefault),
 					})
 				}
 			}
-			p.table([]string{"NODE", "STORAGE ID", "NAME", "CLASS", "PATH"}, rows)
+			p.table([]string{"NODE", "STORAGE ID", "NAME", "CLASS", "PATH", "DISK-FREE-WARN", "DISK-FREE-FLOOR"}, rows)
 			return nil
 		},
 	}
+}
+
+// thresholdExprLabel renders an EFFECTIVE threshold expression with its
+// provenance for the config-listing view: "(default)" when isDefault, the
+// bare expression otherwise. There is no configurable node-level override
+// to inherit from (gastrolog-2mrfdw removed the env channel), so an unset
+// expression is DEFAULTED, never "inherited" (gastrolog-3cobq4 review).
+// Unlike inspect storage's thresholdLabel, this has no live-guard bytes to
+// show — list-storage is a config view, not a live-state view — so it
+// renders the expression alone, verbatim from config, never re-derived.
+func thresholdExprLabel(expr string, isDefault bool) string {
+	if isDefault {
+		return expr + " (default)"
+	}
+	return expr
 }
 
 // fileStoragesForNode returns the existing FileStorages for nodeID. NodeId on

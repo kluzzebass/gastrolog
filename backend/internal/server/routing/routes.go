@@ -48,6 +48,11 @@ func DefaultRoutes() map[string]RPCRoute {
 		gastrologv1connect.SystemServiceGetRouteStatsProcedure:       {Strategy: RouteLocal},
 		gastrologv1connect.SystemServiceListManagedFilesProcedure:    {Strategy: RouteLocal},
 		gastrologv1connect.SystemServiceWatchSystemProcedure:         {Strategy: RouteLocal, IsStreaming: true},
+		// ListStorages composes replicated config with local-or-peer-broadcast
+		// guard state itself (gastrolog-3cobq4) — RouteLocal like the other
+		// config reads above, not RouteFanOut: no per-node fan-out is needed,
+		// the responding node already resolves every storage's live state.
+		gastrologv1connect.SystemServiceListStoragesProcedure: {Strategy: RouteLocal},
 		// Node-local operations — run on whichever node received the request.
 		gastrologv1connect.SystemServiceTestIngesterProcedure:        {Strategy: RouteLocal},
 		gastrologv1connect.SystemServiceTriggerIngesterProcedure:     {Strategy: RouteLocal, WrapResponse: NewRespWrapper[apiv1.TriggerIngesterResponse]()},
