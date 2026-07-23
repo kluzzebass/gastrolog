@@ -123,9 +123,26 @@ func (p *originPuller) setFails(n int) {
 type originFixture struct {
 	vaultID glid.GLID
 	root    string
+	seg     *segmentation.Manager
 	dist    *distribution.Manager
 	in      chan<- segmentation.Input
 	fsm     *vaultctlfsm.FSM
+}
+
+// completedSegments reports how many segments the origin's writer has promoted
+// working/ -> completed/. The writer completes a segment and enqueues its
+// publish BEFORE releasing that commit's acks (commitBatch.commit), so once
+// every ingest ack has fired this count is final: no further segment can ever
+// publish. That makes it the deterministic anchor for "the published set is
+// complete" — unlike polling the FSM, which is satisfiable at any prefix of
+// the publish stream while the last segment's publish is still in flight.
+func (o *originFixture) completedSegments() uint64 {
+	for _, st := range o.seg.AppendStats() {
+		if st.VaultID == o.vaultID {
+			return st.SegmentsCompleted
+		}
+	}
+	return 0
 }
 
 // newOriginFixture starts an origin for vaultID that closes a segment every
@@ -166,15 +183,18 @@ func newOriginFixture(t *testing.T, ctx context.Context, vaultID glid.GLID, fsm 
 		<-distDone
 	})
 
-	return &originFixture{vaultID: vaultID, root: root, dist: distMgr, in: in, fsm: fsm}
+	return &originFixture{vaultID: vaultID, root: root, seg: segMgr, dist: distMgr, in: in, fsm: fsm}
 }
 
 // ingestAndPublish feeds an 8-record batch that closes and publishes one or
 // more segments (the 256-byte complete policy typically yields several), waits
 // for the first to appear in the FSM registry, and returns that segment's ID.
-// Callers that assert on pull counts must quiesce until every published
+// Callers that assert on pull counts must quiesce until every completed
 // segment is collected — waiting on just the returned ID races the remaining
-// segments' first pulls (gastrolog-4fv63d).
+// segments' first pulls (gastrolog-4fv63d). Because all acks have fired by
+// return, completedSegments() is final; quiesce on that exact count, not on
+// "all FSM entries seen so far", or a still-in-flight last publish races the
+// assertion (gastrolog-3ly433).
 func (o *originFixture) ingestAndPublish(t *testing.T, ctx context.Context) glid.GLID {
 	t.Helper()
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
@@ -279,12 +299,21 @@ func TestPipelineCollectionReplicatesToRemoteHome(t *testing.T) {
 		return segmentHolds(fsm, segID, testHomeNode)
 	})
 
-	// The complete policy publishes several segments for the 8-record batch;
-	// quiesce until the home holds every one of them before snapshotting pull
-	// attempts, or a late segment's first pull reads as a "re-pull".
-	waitTrue(t, "every published segment collected and receipted", func() bool {
+	// The complete policy publishes several segments for the 8-record batch.
+	// Every ingest ack has fired, so the writer's completed count is final
+	// (see completedSegments) — anchor the quiesce to it. Requiring exactly
+	// that many FSM entries closes the prefix race where the last segment's
+	// publish lands after a "all entries seen so far are held" check passed
+	// and its legitimate first pull reads as a "re-pull" (gastrolog-3ly433;
+	// the earlier all-held quiesce from gastrolog-4fv63d could not tell
+	// "done publishing" from "done so far").
+	wantSegments := origin.completedSegments()
+	if wantSegments == 0 {
+		t.Fatal("origin completed no segments; the 8-record batch should close several")
+	}
+	waitTrue(t, "every completed segment published, collected, and receipted", func() bool {
 		entries := fsm.ListCompletedSegments()
-		if len(entries) == 0 {
+		if uint64(len(entries)) != wantSegments {
 			return false
 		}
 		for _, e := range entries {
