@@ -76,12 +76,45 @@ import (
 	"sync/atomic"
 	"time"
 
+	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/chunking"
 	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
+
+// reconcilerHost is the narrow set of orchestrator services the
+// chunk-lifecycle executor depends on. It replaces the reconciler's former
+// *Orchestrator back-pointer so the coupling surface is visible at the type
+// level and the reconciler is testable with a fake host instead of a full
+// orchestrator. *Orchestrator satisfies it (the accessor methods below adapt
+// the private pipeline / alert-sink / chunk-replicator fields, which an
+// interface cannot expose directly).
+type reconcilerHost interface {
+	// Pipeline-vault topology and recovery.
+	isPipelineIngestVault(vaultID glid.GLID) bool
+	pipelineVaultChunkRoot(vaultID glid.GLID) (string, bool)
+	pipelineVaultStagingRoot(vaultID glid.GLID) (string, bool)
+	recoverPipelineVault(ctx context.Context, vaultID glid.GLID) error
+
+	// Post-seal scheduling and pipeline follow-up work.
+	schedulePostSeal(vaultID glid.GLID, cm chunk.ChunkManager, chunkID chunk.ChunkID)
+	postSealWork(vaultID glid.GLID, cm chunk.ChunkManager, chunkID chunk.ChunkID)
+	schedulePipelineCloudUpload(vaultID glid.GLID, chunkID chunk.ChunkID)
+	noteRegisterSkip(vaultID glid.GLID, id chunk.ChunkID, reason string)
+	pullMissingGLCB(vaultID glid.GLID, e vaultctlfsm.ManifestEntry)
+
+	// Watch-subscriber and event-journal notifications.
+	EmitChunkSealed(vault glid.GLID, meta chunk.ChunkMeta)
+	EmitChunkDeleted(vault glid.GLID, chunkID chunk.ChunkID)
+	logChunkDeleted(vaultID glid.GLID, chunkID chunk.ChunkID)
+	logChunkExpunged(vaultID glid.GLID, chunkID chunk.ChunkID, reason string)
+
+	// Collaborator accessors (nil when the collaborator is unwired).
+	alertSink() alert.Sink
+	chunkReplicatorForReconcile() ChunkReplicator
+}
 
 // VaultLifecycleReconciler owns chunk-lifecycle execution for a single
 // VaultInstance. Created during instance wiring (reconfig_vaults.go), wired
@@ -97,10 +130,11 @@ type VaultLifecycleReconciler struct {
 	localNodeID string
 	logger      *slog.Logger
 
-	// orch is the parent orchestrator, kept so the reconciler can fan
-	// local deletes out to same-node sibling TIs (mirrors the legacy
-	// deleteFromFollowers path) and bump WatchChunks subscribers.
-	orch *Orchestrator
+	// orch is the narrow host facet of the parent orchestrator, kept so the
+	// reconciler can fan local deletes out to same-node sibling TIs (mirrors
+	// the legacy deleteFromFollowers path) and bump WatchChunks subscribers.
+	// Nil for reconcilers created without a host (memory-mode / unit tests).
+	orch reconcilerHost
 
 	// fsm is the instance sub-FSM this reconciler is bound to. Stored on
 	// Wire() so onAckDelete can read remaining ExpectedFrom without
@@ -131,7 +165,7 @@ type VaultLifecycleReconciler struct {
 // orch may be nil in tests that exercise the reconciler in isolation;
 // when nil, the same-node sibling cleanup path is skipped and chunk-
 // change notifications are dropped.
-func NewVaultLifecycleReconciler(orch *Orchestrator, vaultID glid.GLID, vaultInst *VaultInstance, localNodeID string, logger *slog.Logger) *VaultLifecycleReconciler {
+func NewVaultLifecycleReconciler(orch reconcilerHost, vaultID glid.GLID, vaultInst *VaultInstance, localNodeID string, logger *slog.Logger) *VaultLifecycleReconciler {
 	return &VaultLifecycleReconciler{
 		vaultID:     vaultID,
 		vaultInst:   vaultInst,
@@ -140,6 +174,23 @@ func NewVaultLifecycleReconciler(orch *Orchestrator, vaultID glid.GLID, vaultIns
 		logger:      compVaultLifecycle.Apply(logger).With("vault", vaultID),
 	}
 }
+
+// The three accessors below adapt private *Orchestrator fields into the
+// reconcilerHost interface; an interface cannot expose struct fields directly.
+// They are behavior-preserving thin wrappers over the former direct field
+// pokes (r.orch.pipeline.RecoverVault, r.orch.alerts, r.orch.chunkReplicator).
+
+// recoverPipelineVault drives pipeline recovery for a vault (adapts o.pipeline).
+func (o *Orchestrator) recoverPipelineVault(ctx context.Context, vaultID glid.GLID) error {
+	return o.pipeline.RecoverVault(ctx, vaultID)
+}
+
+// alertSink exposes the orchestrator's alert sink (nil when unwired).
+func (o *Orchestrator) alertSink() alert.Sink { return o.alerts }
+
+// chunkReplicatorForReconcile exposes the chunk replicator transport (nil when
+// unwired). Named distinctly from the chunkReplicator field it returns.
+func (o *Orchestrator) chunkReplicatorForReconcile() ChunkReplicator { return o.chunkReplicator }
 
 // Wire installs the reconciler's callbacks on the given vault-ctl FSM. Must
 // be called once after the FSM is constructed. Idempotent — repeat
@@ -282,7 +333,7 @@ func (r *VaultLifecycleReconciler) projectAllSealedFromFSM(fsm *vaultctlfsm.FSM)
 func (r *VaultLifecycleReconciler) resumeSealingFromFSM(fsm *vaultctlfsm.FSM) {
 	if r.orch != nil && r.orch.isPipelineIngestVault(r.vaultID) {
 		if _, ok := r.orch.pipelineVaultChunkRoot(r.vaultID); ok {
-			if err := r.orch.pipeline.RecoverVault(context.Background(), r.vaultID); err != nil {
+			if err := r.orch.recoverPipelineVault(context.Background(), r.vaultID); err != nil {
 				r.logger.Warn("reconcile-from-snapshot: pipeline recover failed",
 					"error", err)
 			}
@@ -908,10 +959,14 @@ func (r *VaultLifecycleReconciler) reconcileLocalOrphans(v *reconcileView) {
 // orphaned by an aborted ingest path (rare). Either way, deleting
 // it removes information the cluster has no other copy of.
 func (r *VaultLifecycleReconciler) alertUnknownOrphan(meta chunk.ChunkMeta) {
-	if r.orch == nil || r.orch.alerts == nil {
+	if r.orch == nil {
 		return
 	}
-	r.orch.alerts.Raise("unknown-orphan", fmt.Sprintf("%s:%s", r.vaultID, meta.ID),
+	sink := r.orch.alertSink()
+	if sink == nil {
+		return
+	}
+	sink.Raise("unknown-orphan", fmt.Sprintf("%s:%s", r.vaultID, meta.ID),
 		fmt.Sprintf("Vault %s: chunk %s on disk with %d records but not recognized by FSM; preserved for recovery",
 			r.vaultID, meta.ID, meta.RecordCount))
 }
@@ -1074,7 +1129,11 @@ func (r *VaultLifecycleReconciler) reconcileMissingReplicas(v *reconcileView) {
 		r.syncPipelineSealedGLCBs(v)
 		return
 	}
-	if r.orch == nil || r.orch.chunkReplicator == nil {
+	if r.orch == nil {
+		return
+	}
+	replicator := r.orch.chunkReplicatorForReconcile()
+	if replicator == nil {
 		return // no transport wired; cluster mode requires a replicator
 	}
 
@@ -1138,7 +1197,7 @@ func (r *VaultLifecycleReconciler) reconcileMissingReplicas(v *reconcileView) {
 	// the second arrival hits the local-already-present gate.
 	for _, peerNodeID := range peers {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		scheduled, err := r.orch.chunkReplicator.RequestReplicaCatchup(
+		scheduled, err := replicator.RequestReplicaCatchup(
 			ctx, peerNodeID, r.vaultID, chunkIDs, r.localNodeID)
 		cancel()
 		if err != nil {
@@ -1624,7 +1683,7 @@ func (r *VaultLifecycleReconciler) reconcileIdleActiveChunks(v *reconcileView) {
 	}
 	if r.orch != nil {
 		if _, ok := r.orch.pipelineVaultChunkRoot(r.vaultID); ok {
-			if err := r.orch.pipeline.RecoverVault(context.Background(), r.vaultID); err != nil {
+			if err := r.orch.recoverPipelineVault(context.Background(), r.vaultID); err != nil {
 				r.logger.Warn("idle-active sweep: pipeline recover failed", "error", err)
 			}
 		}
