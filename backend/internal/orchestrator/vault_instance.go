@@ -28,6 +28,29 @@ type VaultInstance struct {
 	LeaderNodeID    string                     // the leader node's ID (empty if this IS the leader)
 	FollowerTargets []system.ReplicationTarget // per-storage targets (populated on leader only)
 
+	// The three raft-backed callback facets below are embedded, so their
+	// fields promote onto VaultInstance (e.g. t.IsTombstoned, t.HasRaftLeader
+	// still resolve). They are wired atomically as a group by
+	// applyRaftCallbacks; every field is nil together for memory-mode vaults
+	// (no FSM, no replication). Grouping the ~15 former loose callbacks into
+	// named facets makes the "last-writer-wins" wiring concern typed: the
+	// wiring sets three cohesive dependencies instead of fifteen.
+	RaftLeadershipFacet
+	RaftApplyFacet
+	ManifestReadFacet
+
+	// Reconciler owns chunk-lifecycle execution for this vault instance:
+	// FSM-apply event handlers (seal, retention-pending, transition-streamed,
+	// transition-received, request-delete, ack-delete, finalize-delete) plus
+	// the canonical deleteChunk entry point. All cluster-wide deletes route
+	// through here over gastrolog-51gme steps 4-8. Nil for memory-mode vaults
+	// (no FSM, no replication).
+	Reconciler *VaultLifecycleReconciler
+}
+
+// RaftLeadershipFacet groups the vault control-plane Raft leadership queries.
+// All fields are nil when no Raft group exists (single-node / memory mode).
+type RaftLeadershipFacet struct {
 	// HasRaftLeader returns true if the vault control-plane Raft group has an elected leader (cluster mode).
 	// Nil when no Raft group exists (single-node / memory mode).
 	HasRaftLeader func() bool
@@ -35,7 +58,11 @@ type VaultInstance struct {
 	// IsRaftLeader returns true if THIS node is the vault ctl Raft leader (cluster mode).
 	// Nil when no Raft group exists (single-node / memory mode — always leader).
 	IsRaftLeader func() bool
+}
 
+// RaftApplyFacet groups the replicated-metadata mutations proposed through the
+// vault control-plane Raft group. All fields are nil when no Raft group exists.
+type RaftApplyFacet struct {
 	// ApplyRaftRetentionPending marks a chunk as retention-pending in replicated metadata.
 	ApplyRaftRetentionPending func(id chunk.ChunkID) error
 
@@ -43,18 +70,6 @@ type VaultInstance struct {
 	// node's chunk holder receipts — bytes-earned residency (batched).
 	ApplyRaftAckChunkHolders    func(ids []chunk.ChunkID, nodeID string) error
 	ApplyRaftRevokeChunkHolders func(ids []chunk.ChunkID, nodeID string) error
-
-	// ListRetentionPending returns chunk IDs with RetentionPending=true in the FSM.
-	ListRetentionPending func() []chunk.ChunkID
-
-	// IsTombstoned returns true if the given chunk ID has been deleted from
-	// this instance's replicated FSM and is still within the tombstone retention
-	// window. Used to reject stale replication commands (ImportSealed,
-	// Append, Seal) that race with retention — without this check, a late
-	// ImportSealed RPC could recreate a chunk the cluster already deleted,
-	// producing a "ghost" chunk on the follower. See gastrolog-11rzz.
-	// Nil when no Raft group exists.
-	IsTombstoned func(id chunk.ChunkID) bool
 
 	// ApplyRaftRequestDelete proposes the receipt-based delete protocol's
 	// opening command (CmdRequestDelete). The FSM adds a pendingDeletes entry
@@ -82,15 +97,12 @@ type VaultInstance struct {
 	// node's outstanding ack obligations would otherwise pin pendingDeletes
 	// entries forever. Nil when no Raft group exists. See gastrolog-51gme step 10.
 	ApplyRaftPruneNode func(nodeID string) error
+}
 
-	// Reconciler owns chunk-lifecycle execution for this vault instance:
-	// FSM-apply event handlers (seal, retention-pending, transition-streamed,
-	// transition-received, request-delete, ack-delete, finalize-delete) plus
-	// the canonical deleteChunk entry point. All cluster-wide deletes route
-	// through here over gastrolog-51gme steps 4-8. Nil for memory-mode vaults
-	// (no FSM, no replication).
-	Reconciler *VaultLifecycleReconciler
-
+// ManifestReadFacet groups the read-only queries against the vault control-plane
+// FSM manifest. All fields are nil for memory-mode vaults (no FSM); callers fall
+// back to the chunk manager in that case.
+type ManifestReadFacet struct {
 	// ListManifest returns all chunk IDs in the vault-ctl FSM view — the authoritative
 	// set of chunks that should exist. Nil when no Raft group exists.
 	ListManifest func() []chunk.ChunkID
@@ -108,29 +120,49 @@ type VaultInstance struct {
 	// instances; the orchestrator falls back to the chunk manager.
 	ManifestEntry func(id chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool)
 
+	// ListRetentionPending returns chunk IDs with RetentionPending=true in the FSM.
+	ListRetentionPending func() []chunk.ChunkID
+
+	// IsTombstoned returns true if the given chunk ID has been deleted from
+	// this instance's replicated FSM and is still within the tombstone retention
+	// window. Used to reject stale replication commands (ImportSealed,
+	// Append, Seal) that race with retention — without this check, a late
+	// ImportSealed RPC could recreate a chunk the cluster already deleted,
+	// producing a "ghost" chunk on the follower. See gastrolog-11rzz.
+	// Nil when no Raft group exists.
+	IsTombstoned func(id chunk.ChunkID) bool
+
 	// IsFSMReady returns true after the vault-ctl FSM has applied at least one log
 	// entry or restored from a snapshot. Before that, the manifest is incomplete
 	// and must not be used for reconciliation decisions.
 	IsFSMReady func() bool
 }
 
-// applyRaftCallbacks wires raft-backed metadata operations from a vaultRaftCallbacks.
+// applyRaftCallbacks wires raft-backed metadata operations from a
+// vaultRaftCallbacks into the three cohesive facets as a single group, so a
+// re-wire replaces each facet atomically rather than fifteen loose fields.
 func (t *VaultInstance) applyRaftCallbacks(cb vaultRaftCallbacks) {
-	t.HasRaftLeader = cb.hasLeader
-	t.IsRaftLeader = cb.isLeader
-	t.ApplyRaftRequestDelete = cb.applyRequestDelete
-	t.ApplyRaftAckDelete = cb.applyAckDelete
-	t.ApplyRaftFinalizeDelete = cb.applyFinalizeDelete
-	t.ApplyRaftPruneNode = cb.applyPruneNode
-	t.ListManifest = cb.listChunks
-	t.ApplyRaftRetentionPending = cb.applyRetPending
-	t.ApplyRaftAckChunkHolders = cb.applyAckChunkHolders
-	t.ApplyRaftRevokeChunkHolders = cb.applyRevokeChunkHolders
-	t.ListRetentionPending = cb.listRetPending
-	t.IsTombstoned = cb.isTombstoned
-	t.IsFSMReady = cb.isFSMReady
-	t.ManifestEntries = cb.manifestEntries
-	t.ManifestEntry = cb.manifestEntry
+	t.RaftLeadershipFacet = RaftLeadershipFacet{
+		HasRaftLeader: cb.hasLeader,
+		IsRaftLeader:  cb.isLeader,
+	}
+	t.RaftApplyFacet = RaftApplyFacet{
+		ApplyRaftRetentionPending:   cb.applyRetPending,
+		ApplyRaftAckChunkHolders:    cb.applyAckChunkHolders,
+		ApplyRaftRevokeChunkHolders: cb.applyRevokeChunkHolders,
+		ApplyRaftRequestDelete:      cb.applyRequestDelete,
+		ApplyRaftAckDelete:          cb.applyAckDelete,
+		ApplyRaftFinalizeDelete:     cb.applyFinalizeDelete,
+		ApplyRaftPruneNode:          cb.applyPruneNode,
+	}
+	t.ManifestReadFacet = ManifestReadFacet{
+		ListManifest:         cb.listChunks,
+		ManifestEntries:      cb.manifestEntries,
+		ManifestEntry:        cb.manifestEntry,
+		ListRetentionPending: cb.listRetPending,
+		IsTombstoned:         cb.isTombstoned,
+		IsFSMReady:           cb.isFSMReady,
+	}
 }
 
 // IsLeader returns true if this node is the leader for this instance.

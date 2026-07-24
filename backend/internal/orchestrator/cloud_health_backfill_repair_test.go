@@ -144,15 +144,19 @@ func backfillRepairFixture(t *testing.T, writeGLCB bool) (*Orchestrator, *VaultI
 	})
 
 	vaultInst := &VaultInstance{
-		VaultID:      vaultID,
-		Type:         "file",
-		Chunks:       mock,
-		IsRaftLeader: func() bool { return true },
-		ManifestEntry: func(cid chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool) {
-			if cid == id {
-				return entry, true
-			}
-			return vaultctlfsm.ManifestEntry{}, false
+		VaultID: vaultID,
+		Type:    "file",
+		Chunks:  mock,
+		RaftLeadershipFacet: RaftLeadershipFacet{
+			IsRaftLeader: func() bool { return true },
+		},
+		ManifestReadFacet: ManifestReadFacet{
+			ManifestEntry: func(cid chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool) {
+				if cid == id {
+					return entry, true
+				}
+				return vaultctlfsm.ManifestEntry{}, false
+			},
 		},
 	}
 	vaultInst.Reconciler = NewVaultLifecycleReconciler(orch, vaultID, vaultInst, "node-A", slog.Default())
@@ -278,7 +282,14 @@ func TestBackfillCloudUploads_SkipsSchedulingDuringBackoff(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node-A", Now: func() time.Time { return fixedNow }})
 	orch.markBackfillFailure(vaultID, chunkID, errors.New("boom"), true)
 
-	vaultInst := &VaultInstance{VaultID: vaultID, Type: "file", Chunks: mock, IsRaftLeader: func() bool { return true }}
+	vaultInst := &VaultInstance{
+		VaultID: vaultID,
+		Type:    "file",
+		Chunks:  mock,
+		RaftLeadershipFacet: RaftLeadershipFacet{
+			IsRaftLeader: func() bool { return true },
+		},
+	}
 	orch.backfillCloudUploads(vaultInst)
 	orch.Scheduler().Start()
 	defer func() { _ = orch.Scheduler().Stop() }()
@@ -593,10 +604,12 @@ func TestBackfillCloudUploads_CrossPathSuccessClearsEntryAndAlarm(t *testing.T) 
 	// vaultInst.Chunks itself is never told to upload it.
 	mock.chunks[0].CloudBacked = true
 	vaultInst := &VaultInstance{
-		VaultID:      vaultID,
-		Type:         "file",
-		Chunks:       mock,
-		IsRaftLeader: func() bool { return true },
+		VaultID: vaultID,
+		Type:    "file",
+		Chunks:  mock,
+		RaftLeadershipFacet: RaftLeadershipFacet{
+			IsRaftLeader: func() bool { return true },
+		},
 	}
 
 	orch.backfillCloudUploads(vaultInst)
@@ -649,10 +662,12 @@ func TestBackfillCloudUploads_CrossPathSuccessClearsBuildLagEntry(t *testing.T) 
 	// of this truth from the FSM is covered separately (see the sibling test).
 	mock.chunks[0].CloudBacked = true
 	vaultInst := &VaultInstance{
-		VaultID:      vaultID,
-		Type:         "file",
-		Chunks:       mock,
-		IsRaftLeader: func() bool { return true },
+		VaultID: vaultID,
+		Type:    "file",
+		Chunks:  mock,
+		RaftLeadershipFacet: RaftLeadershipFacet{
+			IsRaftLeader: func() bool { return true },
+		},
 	}
 
 	orch.backfillCloudUploads(vaultInst)
@@ -737,7 +752,14 @@ func TestEvaluateCloudHealth_PurgesBackfillFailuresForNonLeaderVault(t *testing.
 
 	mock := &mockCloudBackedChunkManager{}
 	mock.cloudStoreConfigured.Store(false) // follower now — no upload access
-	followerInst := &VaultInstance{VaultID: vaultID, Type: "file", Chunks: mock, IsRaftLeader: func() bool { return true }}
+	followerInst := &VaultInstance{
+		VaultID: vaultID,
+		Type:    "file",
+		Chunks:  mock,
+		RaftLeadershipFacet: RaftLeadershipFacet{
+			IsRaftLeader: func() bool { return true },
+		},
+	}
 	orch.RegisterVault(NewVault(glid.New(), followerInst))
 
 	orch.evaluateCloudHealth()

@@ -115,16 +115,20 @@ func TestSchedulePipelineCloudUpload_LeaderUploadsExternalGLCB(t *testing.T) {
 	}
 
 	vaultInst := &VaultInstance{
-		VaultID:      vaultID,
-		Type:         "file",
-		Chunks:       cm,
-		IsRaftLeader: func() bool { return false },
-		ManifestEntry: func(id chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool) {
-			e := fsm.Get(id)
-			if e == nil {
-				return vaultctlfsm.ManifestEntry{}, false
-			}
-			return *e, true
+		VaultID: vaultID,
+		Type:    "file",
+		Chunks:  cm,
+		RaftLeadershipFacet: RaftLeadershipFacet{
+			IsRaftLeader: func() bool { return false },
+		},
+		ManifestReadFacet: ManifestReadFacet{
+			ManifestEntry: func(id chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool) {
+				e := fsm.Get(id)
+				if e == nil {
+					return vaultctlfsm.ManifestEntry{}, false
+				}
+				return *e, true
+			},
 		},
 	}
 	orch.RegisterVault(NewVault(vaultID, vaultInst))
@@ -167,10 +171,12 @@ func TestSchedulePipelineCloudUpload_SkipsPlacementFollower(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "follower"})
 	markPipelineIngestVault(t, orch, vaultID, true)
 	orch.RegisterVault(NewVault(vaultID, &VaultInstance{
-		VaultID:      vaultID,
-		Type:         "file",
-		Chunks:       mock,
-		IsRaftLeader: func() bool { return true },
+		VaultID: vaultID,
+		Type:    "file",
+		Chunks:  mock,
+		RaftLeadershipFacet: RaftLeadershipFacet{
+			IsRaftLeader: func() bool { return true },
+		},
 	}))
 
 	orch.schedulePipelineCloudUpload(vaultID, chunkID)

@@ -395,12 +395,14 @@ func TestReadyz_localVaultReplicationNotReady(t *testing.T) {
 		t.Fatal(err)
 	}
 	orch.RegisterVault(orchestrator.NewVault(vid, &orchestrator.VaultInstance{
-		VaultID:    glid.New(),
-		Type:       "memory",
-		Chunks:     s.CM,
-		Indexes:    s.IM,
-		Query:      s.QE,
-		IsFSMReady: func() bool { return false },
+		VaultID: glid.New(),
+		Type:    "memory",
+		Chunks:  s.CM,
+		Indexes: s.IM,
+		Query:   s.QE,
+		ManifestReadFacet: orchestrator.ManifestReadFacet{
+			IsFSMReady: func() bool { return false },
+		},
 	}))
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatal(err)

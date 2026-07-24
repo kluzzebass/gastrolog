@@ -48,16 +48,18 @@ func TestIndexReaderMetadataBoundaryTier(t *testing.T) {
 	orch.RegisterVault(NewVault(vaultID, &VaultInstance{
 		VaultID: vaultID,
 		Type:    "file",
-		ManifestEntry: func(id chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool) {
-			e, ok := entries[id]
-			return e, ok
-		},
-		ManifestEntries: func() []vaultctlfsm.ManifestEntry {
-			var out []vaultctlfsm.ManifestEntry
-			for _, e := range entries {
-				out = append(out, e)
-			}
-			return out
+		ManifestReadFacet: ManifestReadFacet{
+			ManifestEntry: func(id chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool) {
+				e, ok := entries[id]
+				return e, ok
+			},
+			ManifestEntries: func() []vaultctlfsm.ManifestEntry {
+				var out []vaultctlfsm.ManifestEntry
+				for _, e := range entries {
+					out = append(out, e)
+				}
+				return out
+			},
 		},
 	}))
 
@@ -120,14 +122,16 @@ func TestIndexReaderChunkRootTier(t *testing.T) {
 	orch.RegisterVault(NewVault(fx.vaultID, &VaultInstance{
 		VaultID: fx.vaultID,
 		Type:    "file",
-		ManifestEntry: func(id chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool) {
-			e := fx.fsm.Get(id)
-			if e == nil {
-				return vaultctlfsm.ManifestEntry{}, false
-			}
-			return *e, true
+		ManifestReadFacet: ManifestReadFacet{
+			ManifestEntry: func(id chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool) {
+				e := fx.fsm.Get(id)
+				if e == nil {
+					return vaultctlfsm.ManifestEntry{}, false
+				}
+				return *e, true
+			},
+			ManifestEntries: func() []vaultctlfsm.ManifestEntry { return fx.fsm.List() },
 		},
-		ManifestEntries: func() []vaultctlfsm.ManifestEntry { return fx.fsm.List() },
 	}))
 
 	ir := orch.IndexReader()
