@@ -346,13 +346,17 @@ func TestBackfillCloudUploads_SkipsUnsealed(t *testing.T) {
 	}
 }
 
-func TestBackfillCloudUploads_SkipsWhenFSMOverlaySaysCloudBacked(t *testing.T) {
+func TestBackfillCloudUploads_SkipsWhenChunkIsCloudBacked(t *testing.T) {
 	t.Parallel()
 
 	chunkID := chunk.NewChunkID()
+	// The chunk is already cloud-backed (however it got there — locally, or
+	// grounded from the FSM: the grounding seam itself is unit-tested in
+	// grounded_meta_test.go and end-to-end across nodes by the multi-node
+	// manifest reliability tests). backfillCloudUploads must not re-upload it.
 	mock := &mockCloudBackedChunkManager{
 		chunks: []chunk.ChunkMeta{
-			{ID: chunkID, Sealed: true, CloudBacked: false,
+			{ID: chunkID, Sealed: true, CloudBacked: true,
 				WriteStart: time.Now(), WriteEnd: time.Now()},
 		},
 	}
@@ -364,11 +368,6 @@ func TestBackfillCloudUploads_SkipsWhenFSMOverlaySaysCloudBacked(t *testing.T) {
 		Type:         "cloud",
 		Chunks:       mock,
 		IsRaftLeader: func() bool { return true },
-		// FSM overlay says cloud-backed — backfill should skip.
-		OverlayFromFSM: func(m chunk.ChunkMeta) chunk.ChunkMeta {
-			m.CloudBacked = true
-			return m
-		},
 	}
 
 	orch.backfillCloudUploads(vaultInst)
@@ -378,7 +377,7 @@ func TestBackfillCloudUploads_SkipsWhenFSMOverlaySaysCloudBacked(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	if got := mock.uploadCallCount(); got != 0 {
-		t.Fatalf("expected 0 uploads when FSM overlay says cloud-backed, got %d", got)
+		t.Fatalf("expected 0 uploads for an already cloud-backed chunk, got %d", got)
 	}
 }
 

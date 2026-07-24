@@ -274,7 +274,6 @@ func (o *Orchestrator) ListAllChunkMetas(vaultID glid.GLID) ([]VaultChunkMeta, e
 	}
 
 	vaultType := vaultInst.Type
-	overlay := vaultInst.OverlayFromFSM
 
 	var entries []vaultctlfsm.ManifestEntry
 	if fsmEntries := o.VaultManifestEntriesIncludingOpen(vaultID); len(fsmEntries) > 0 {
@@ -291,9 +290,7 @@ func (o *Orchestrator) ListAllChunkMetas(vaultID glid.GLID) ([]VaultChunkMeta, e
 	for _, e := range entries {
 		m := e.ToChunkMeta()
 		o.overlayPipelineChunkMetaBounds(vaultID, &m)
-		if overlay != nil {
-			m = overlay(m)
-		}
+		m = o.groundChunkMeta(vaultID, m)
 		result = append(result, VaultChunkMeta{
 			ChunkMeta: m,
 			VaultID:   vaultInst.VaultID,
@@ -307,9 +304,7 @@ func (o *Orchestrator) ListAllChunkMetas(vaultID glid.GLID) ([]VaultChunkMeta, e
 	if active := vaultInst.Chunks.Active(); active != nil {
 		if _, ok := seen[active.ID]; !ok {
 			m := *active
-			if overlay != nil {
-				m = overlay(m)
-			}
+			m = o.groundChunkMeta(vaultID, m)
 			result = append(result, VaultChunkMeta{
 				ChunkMeta: m,
 				VaultID:   vaultInst.VaultID,
@@ -338,9 +333,7 @@ func (o *Orchestrator) GetChunkMeta(vaultID glid.GLID, chunkID chunk.ChunkID) (c
 	if vaultInst := vault.Instance; vaultInst != nil {
 		m, err := vaultInst.Chunks.Meta(chunkID)
 		if err == nil {
-			if vaultInst.OverlayFromFSM != nil {
-				m = vaultInst.OverlayFromFSM(m)
-			}
+			m = o.groundChunkMeta(vaultID, m)
 			return m, nil
 		}
 	}
@@ -361,9 +354,7 @@ func (o *Orchestrator) GetVaultChunkMeta(vaultID glid.GLID, chunkID chunk.ChunkI
 	if vaultInst := vault.Instance; vaultInst != nil {
 		m, err := vaultInst.Chunks.Meta(chunkID)
 		if err == nil {
-			if vaultInst.OverlayFromFSM != nil {
-				m = vaultInst.OverlayFromFSM(m)
-			}
+			m = o.groundChunkMeta(vaultID, m)
 			return VaultChunkMeta{
 				ChunkMeta: m,
 				VaultID:   vaultInst.VaultID,

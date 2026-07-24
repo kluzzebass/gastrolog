@@ -786,9 +786,9 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 	// selectRetentionCandidates' meta.Sealed gate reflects cluster
 	// truth — Sealing chunks (active-form files closed locally but
 	// GLCB not yet committed) must not be eligible.
-	if vaultInst != nil && vaultInst.OverlayFromFSM != nil {
+	if vaultInst != nil {
 		for i := range metas {
-			metas[i] = vaultInst.OverlayFromFSM(metas[i])
+			metas[i] = r.orch.groundChunkMeta(r.vaultID, metas[i])
 		}
 	}
 
@@ -1154,9 +1154,9 @@ func (r *retentionRunner) currentSealedForBoundCheck() ([]chunk.ChunkMeta, bool)
 	r.mu.Lock()
 	vaultInst := r.findVaultInstance()
 	r.mu.Unlock()
-	if vaultInst != nil && vaultInst.OverlayFromFSM != nil {
+	if vaultInst != nil {
 		for i := range metas {
-			metas[i] = vaultInst.OverlayFromFSM(metas[i])
+			metas[i] = r.orch.groundChunkMeta(r.vaultID, metas[i])
 		}
 	}
 	metas = appendUnlistedManifestSealed(metas, vaultInst)

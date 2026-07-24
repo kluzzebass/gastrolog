@@ -586,18 +586,17 @@ func TestBackfillCloudUploads_CrossPathSuccessClearsEntryAndAlarm(t *testing.T) 
 		t.Fatal("setup: expected the alarm to be standing before the cross-path success")
 	}
 
-	// The FSM overlay reporting CloudBacked=true is how the sweep learns the
-	// primary path already resolved this chunk — vaultInst.Chunks itself
-	// (the mock) is never told to upload it here.
+	// The chunk now reads cloud-backed — how the sweep learns the primary
+	// path already resolved it. (The grounding of cloud-backed truth from the
+	// FSM on a follower is covered by grounded_meta_test.go and the multi-node
+	// manifest reliability tests; here the mock reports it directly.)
+	// vaultInst.Chunks itself is never told to upload it.
+	mock.chunks[0].CloudBacked = true
 	vaultInst := &VaultInstance{
 		VaultID:      vaultID,
 		Type:         "file",
 		Chunks:       mock,
 		IsRaftLeader: func() bool { return true },
-		OverlayFromFSM: func(m chunk.ChunkMeta) chunk.ChunkMeta {
-			m.CloudBacked = true
-			return m
-		},
 	}
 
 	orch.backfillCloudUploads(vaultInst)
@@ -646,15 +645,14 @@ func TestBackfillCloudUploads_CrossPathSuccessClearsBuildLagEntry(t *testing.T) 
 		t.Fatal("setup: a build-lag entry must never have raised an alarm")
 	}
 
+	// The chunk now reads cloud-backed (primary path resolved it). Grounding
+	// of this truth from the FSM is covered separately (see the sibling test).
+	mock.chunks[0].CloudBacked = true
 	vaultInst := &VaultInstance{
 		VaultID:      vaultID,
 		Type:         "file",
 		Chunks:       mock,
 		IsRaftLeader: func() bool { return true },
-		OverlayFromFSM: func(m chunk.ChunkMeta) chunk.ChunkMeta {
-			m.CloudBacked = true
-			return m
-		},
 	}
 
 	orch.backfillCloudUploads(vaultInst)

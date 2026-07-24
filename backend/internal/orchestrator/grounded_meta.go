@@ -78,21 +78,37 @@ func groundMetaFromEntry(m chunk.ChunkMeta, e vaultctlfsm.ManifestEntry) chunk.C
 }
 
 // groundingEntry resolves the replicated vault-ctl manifest entry used to ground
-// a chunk meta. It reads the per-vault FSM directly — the O(1) equivalent of
-// scanning every FSM via manifestEntryByChunk, and the exact successor of the
-// per-instance OverlayFromFSM closure, which read the same vault's FSM. Every
-// node is a voter of every vault-ctl group (gastrolog-292yi), so the entry
-// resolves on any node that has joined the vault's control-plane group. Reports
-// false when there is no such FSM (memory mode / not joined) or the chunk is
-// absent from the manifest.
+// a chunk meta, mirroring the read core's dual (manifestEntryByChunk) scoped to
+// one vault:
+//
+//  1. The per-vault FSM via the group manager — resolvable on any voter
+//     (gastrolog-292yi), even on a node hosting no instance for the vault. Every
+//     node is a voter of every vault-ctl group, so this is the authoritative
+//     cluster-wide source. A present-but-absent chunk (FSM has the vault, not
+//     this chunk) reports false so local truth is preserved — matching the
+//     retired OverlayFromFSM, which read this same FSM.
+//  2. The local instance's own vault-ctl FSM callback (ManifestEntry), for a
+//     node with an instance whose group-manager handle isn't reachable here —
+//     the same replicated FSM, read through the instance closure.
+//
+// Both tiers read the FSM only; the seam never re-derives cluster-wide fields
+// from the local chunk manager (memory-mode vaults have no FSM callback, so
+// they report false and their already-authoritative local truth passes through
+// unchanged — exactly the nil-OverlayFromFSM behavior this replaces). Reports
+// false when neither tier resolves; the meta is returned unchanged.
 func (o *Orchestrator) groundingEntry(vaultID glid.GLID, id chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool) {
-	f := o.vaultCtlFSMForVault(vaultID)
-	if f == nil {
-		return vaultctlfsm.ManifestEntry{}, false
+	if f := o.vaultCtlFSMForVault(vaultID); f != nil {
+		e := f.Get(id)
+		if e == nil {
+			return vaultctlfsm.ManifestEntry{}, false
+		}
+		return *e, true
 	}
-	e := f.Get(id)
-	if e == nil {
-		return vaultctlfsm.ManifestEntry{}, false
+	o.mu.RLock()
+	v := o.vaults[vaultID]
+	o.mu.RUnlock()
+	if v != nil && v.Instance != nil && v.Instance.ManifestEntry != nil {
+		return v.Instance.ManifestEntry(id)
 	}
-	return *e, true
+	return vaultctlfsm.ManifestEntry{}, false
 }

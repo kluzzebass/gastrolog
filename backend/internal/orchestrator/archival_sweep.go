@@ -120,8 +120,8 @@ func (o *Orchestrator) archivalSweepAll() {
 //
 // Memory-mode vaults / no GroupManager have no FSM manifest at all
 // (ListClusterChunkMetas returns nil); fall back to the legacy
-// local-iteration + OverlayFromFSM path so single-node tests stay
-// unchanged.
+// local-iteration path — grounded through groundChunkMeta, a no-op
+// there — so single-node tests stay unchanged.
 func (o *Orchestrator) archivalSweepVault(vaultInst *VaultInstance, cs *system.CloudService, now time.Time) {
 	archiver, ok := vaultInst.Chunks.(chunk.ChunkArchiver)
 	if !ok {
@@ -167,11 +167,12 @@ func (o *Orchestrator) archivalSweepVault(vaultInst *VaultInstance, cs *system.C
 			if _, holdsLocally := localIDs[m.ID]; !holdsLocally {
 				continue
 			}
-		} else if vaultInst.OverlayFromFSM != nil {
-			// Legacy path: overlay FSM truth onto disk-derived meta.
+		} else {
+			// Legacy path: ground disk-derived meta in the FSM.
 			// gastrolog-1huz5 phase 3: gate on FSM-Sealed; archive only
-			// chunks whose GLCB has been committed.
-			m = vaultInst.OverlayFromFSM(m)
+			// chunks whose GLCB has been committed. groundChunkMeta is a
+			// no-op in memory mode (no vault-ctl FSM), leaving local truth.
+			m = o.groundChunkMeta(vaultInst.VaultID, m)
 		}
 		if !m.Sealed || !m.CloudBacked {
 			continue

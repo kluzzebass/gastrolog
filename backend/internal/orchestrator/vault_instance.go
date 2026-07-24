@@ -112,21 +112,6 @@ type VaultInstance struct {
 	// entry or restored from a snapshot. Before that, the manifest is incomplete
 	// and must not be used for reconciliation decisions.
 	IsFSMReady func() bool
-
-	// OverlayFromFSM returns a copy of the given chunk meta with cluster-wide
-	// fields (CloudBacked, Archived) sourced from replicated metadata
-	// FSM instead of the local chunk manager. The local chunk manager only
-	// reflects this node's view, which is wrong for those fields on follower
-	// nodes: followers strip sealed_backing from their chunk-manager params
-	// (see reconfig_vaults.go), so their CloudStore is nil and their local
-	// CloudBacked is permanently false even when the cluster has uploaded
-	// the chunk to S3. The FSM has the authoritative cluster-wide truth via
-	// the replicated CmdUploadChunk / CmdArchiveChunk commands, so we
-	// override from there. See gastrolog-asg4l.
-	//
-	// Nil when no Raft group exists (single-node / memory mode), in which
-	// case the local chunk manager view is already authoritative.
-	OverlayFromFSM func(chunk.ChunkMeta) chunk.ChunkMeta
 }
 
 // applyRaftCallbacks wires raft-backed metadata operations from a vaultRaftCallbacks.
@@ -144,7 +129,6 @@ func (t *VaultInstance) applyRaftCallbacks(cb vaultRaftCallbacks) {
 	t.ListRetentionPending = cb.listRetPending
 	t.IsTombstoned = cb.isTombstoned
 	t.IsFSMReady = cb.isFSMReady
-	t.OverlayFromFSM = cb.overlayFromFSM
 	t.ManifestEntries = cb.manifestEntries
 	t.ManifestEntry = cb.manifestEntry
 }
