@@ -2,6 +2,7 @@ package glcb
 
 import (
 	"errors"
+	"time"
 
 	"gastrolog/internal/chunk"
 )
@@ -53,6 +54,12 @@ func (c *glcbCursor) PrewarmSequential() {
 
 func (c *glcbCursor) ReadFanOutRecord(pos uint32) (chunk.Record, error) {
 	return c.reader.ReadFanOutRecord(pos)
+}
+
+// ProjectAttrs implements chunk.AttrsProjectionSource: it decodes a record to
+// just (writeTS, attrs), skipping the raw payload. See Reader.ProjectAttrs.
+func (c *glcbCursor) ProjectAttrs(pos uint32) (time.Time, chunk.Attributes, error) {
+	return c.reader.ProjectAttrs(pos)
 }
 
 func (c *glcbCursor) Next() (chunk.Record, chunk.RecordRef, error) {
@@ -131,6 +138,7 @@ func (c *glcbCursor) Close() error {
 }
 
 var (
-	_ chunk.RecordFanOutSource = (*glcbCursor)(nil)
-	_ chunk.RecordBatchReader  = (*glcbCursor)(nil)
+	_ chunk.RecordFanOutSource    = (*glcbCursor)(nil)
+	_ chunk.RecordBatchReader     = (*glcbCursor)(nil)
+	_ chunk.AttrsProjectionSource = (*glcbCursor)(nil)
 )

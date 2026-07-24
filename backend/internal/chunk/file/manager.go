@@ -1132,9 +1132,14 @@ func (m *Manager) ScanAttrs(id chunk.ChunkID, startPos uint64, fn func(writeTS t
 
 // scanAttrsViaGLCB iterates a sealed chunk's records via its data.glcb,
 // projecting each one to (writeTS, attrs) for the caller. Used by the
-// histogram's level-breakdown path; the chunkcloud cursor decodes full
-// records, but per-record CPU is bounded by the seekable-zstd frame
-// granularity (256 KB).
+// histogram's level-breakdown path, which never inspects message bodies.
+//
+// The GLCB is uncompressed (gastrolog-69fd5), so the record section is a plain
+// [frameLen][frame] sequence read straight off the whole-file mapping. Rather
+// than decode full records (which clones each raw payload off the mapping — see
+// cloneMmapRecord), this drives the AttrsProjectionSource seam: per record it
+// reads the fixed header + attr dict IDs and skips the [rawLen][raw] tail, so
+// the raw-payload allocation never happens.
 func scanAttrsViaGLCB(m *Manager, id chunk.ChunkID, startPos uint64, fn func(writeTS time.Time, attrs chunk.Attributes) bool) error {
 	cursor, err := m.openLocalGLCBCursor(id)
 	if err != nil {
@@ -1142,23 +1147,22 @@ func scanAttrsViaGLCB(m *Manager, id chunk.ChunkID, startPos uint64, fn func(wri
 	}
 	defer func() { _ = cursor.Close() }()
 
-	if startPos > 0 {
-		if err := cursor.Seek(chunk.RecordRef{ChunkID: id, Pos: startPos}); err != nil {
-			return fmt.Errorf("seek to %d: %w", startPos, err)
-		}
+	proj, ok := cursor.(chunk.AttrsProjectionSource)
+	if !ok {
+		return fmt.Errorf("data.glcb cursor for %s does not support attrs projection", id)
 	}
-	for {
-		rec, _, err := cursor.Next()
-		if errors.Is(err, chunk.ErrNoMoreRecords) {
-			return nil
-		}
+
+	recordCount := proj.RecordCount()
+	for pos := startPos; pos < recordCount; pos++ {
+		writeTS, attrs, err := proj.ProjectAttrs(uint32(pos)) //nolint:gosec // G115: pos < recordCount, bounded well below 2^32 by chunk policy
 		if err != nil {
 			return err
 		}
-		if !fn(rec.WriteTS, rec.Attrs) {
+		if !fn(writeTS, attrs) {
 			return nil
 		}
 	}
+	return nil
 }
 
 // loadExisting builds m.metas from the disk view at Manager construction
