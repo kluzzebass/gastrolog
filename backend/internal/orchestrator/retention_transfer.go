@@ -410,11 +410,12 @@ func (r *retentionRunner) tryLocalTransferCopy(targetID glid.GLID, id chunk.Chun
 	}
 	r.orch.mu.RUnlock()
 	if rec != nil {
-		// Same registration + holder-receipt seam runGLCBPull uses after a
-		// successful cross-node pull (registerPipelineGLCB stats the file,
-		// registers it with the local chunk manager, and proposes this
-		// node's AckChunkHolder receipt).
-		rec.registerPipelineGLCB(entry)
+		// Same holder-receipt seam runGLCBPull uses after a successful
+		// cross-node pull: the copied GLCB is now on the target vault's
+		// canonical path, so the lazy resolver makes it queryable on first
+		// lookup and this proposes the target's AckChunkHolder receipt
+		// event-driven (gastrolog-34kmv).
+		rec.ackOwnHolderReceipt(entry)
 	}
 }
 

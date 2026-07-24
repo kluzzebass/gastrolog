@@ -397,103 +397,52 @@ func (r *VaultLifecycleReconciler) projectAllCloudBackedFromFSM(fsm *vaultctlfsm
 	}
 }
 
-// registerPipelineGLCB makes a pipeline-built sealed chunk queryable on this
-// node by registering its data.glcb — which lives under the vault's
-// segmentation ChunkRoot, not the chunk manager's own dir — with the local
-// chunk Manager. Discovery of pipeline chunks already works (query lists them
-// from the vault-ctl FSM); this closes the byte-access gap so OpenCursor
-// resolves the GLCB instead of returning ErrChunkNotFound.
+// ackOwnHolderReceipt proposes this home's holder receipt for a sealed
+// pipeline chunk whose GLCB bytes are verifiably present on disk. It fires
+// event-driven at each moment a local copy becomes servable: build completion
+// (OnBuilt), seal (onSeal), replica-pull recovery, and retention-transfer
+// landing. Without it receipts earned only via the 20s sweep, and replica
+// counts staircased 4→1→2→3→4 after every seal as per-node batches landed (the
+// placement fallback overstates until the first receipt). The sweep remains
+// the reconciliation backstop for missed events and for revocation; a failed
+// proposal here is retried there.
 //
-// No-op unless: the local chunk Manager implements ExternalGLCBRegistrar, this
-// node runs the pipeline as a home for the vault (so a ChunkRoot exists), and
-// the GLCB file is present locally. A node that holds the FSM entry but not the
-// bytes (non-home, or a home that has not built this chunk yet) skips silently —
-// query there falls back to other holders. The registrar itself leaves
-// locally-owned (legacy / cloud-backed) chunks untouched. See gastrolog-2kysn.
-func (r *VaultLifecycleReconciler) registerPipelineGLCB(e vaultctlfsm.ManifestEntry) {
-	if r.vaultInst == nil || r.vaultInst.Chunks == nil || r.orch == nil {
+// Byte-presence gate: a holder receipt asserts THIS node holds the chunk's
+// bytes, so a home that has the FSM entry but has not built or pulled the
+// chunk yet must NOT claim one (durable truth, not counters). The gate is the
+// same pipeline-home ChunkRoot + on-disk GLCB check the retired
+// registerPipelineGLCB performed before registering. When a caller fires this
+// before the bytes exist (e.g. onSeal on a home whose build finishes after
+// CmdSealChunk applies), the receipt is skipped here and the later
+// build-completion event (OnBuilt) fires it once the file is present.
+// Queryability itself no longer depends on this call: the lazy on-miss GLCB
+// resolver serves the chunk on first lookup (gastrolog-34kmv).
+func (r *VaultLifecycleReconciler) ackOwnHolderReceipt(e vaultctlfsm.ManifestEntry) {
+	if r.vaultInst == nil || r.vaultInst.ApplyRaftAckChunkHolders == nil || r.orch == nil {
 		return
 	}
-	registrar, ok := r.vaultInst.Chunks.(chunk.ExternalGLCBRegistrar)
-	if !ok {
-		r.orch.noteRegisterSkip(r.vaultID, e.ID, "chunk manager is not an external-GLCB registrar")
+	if slices.Contains(e.Holders, r.localNodeID) {
 		return
 	}
 	chunkRoot, ok := r.orch.pipelineVaultChunkRoot(r.vaultID)
 	if !ok {
-		// pipelineVaults has no home registration for this vault on this
-		// node — either the pipeline wiring hasn't run yet (boot ordering)
-		// or home resolution went wrong. Every sealed chunk on disk is
-		// unservable until this clears.
-		r.orch.noteRegisterSkip(r.vaultID, e.ID, "no pipeline home registration (pipelineVaultChunkRoot)")
+		// No pipeline home registration for this vault on this node: not a
+		// home, so nothing to hold.
 		return
 	}
-	glcbPath := chunking.ChunkGLCBPath(chunkRoot, e.ID)
-	if _, err := os.Stat(glcbPath); err != nil {
-		// Bytes absent locally: this home has not built the chunk (or this
-		// node is not a holder). Query on a holder node serves it instead.
-		return
-	}
-	// No IsExternalGLCBAt short-circuit here: a lazy on-miss registration
-	// (gastrolog-2kmgj6) records the path without TS index offsets, and
-	// this call's file-enriched info is what upgrades them — the manager's
-	// registration core dedups the no-change case cheaply.
-	info, err := externalGLCBInfoForPipeline(e, glcbPath)
-	if err != nil {
-		r.logger.Warn("registerPipelineGLCB: read GLCB metadata failed",
-			"chunk", e.ID, "path", glcbPath, "error", err)
-		info = chunk.ExternalGLCBInfo{
-			WriteStart:  e.WriteStart,
-			WriteEnd:    e.WriteEnd,
-			IngestStart: e.IngestStart,
-			IngestEnd:   e.IngestEnd,
-			SourceStart: e.SourceStart,
-			SourceEnd:   e.SourceEnd,
-			RecordCount: e.RecordCount,
-			Bytes:       e.Bytes,
-			// No DiskBytes here: ManifestEntry carries no per-node local
-			// footprint (gastrolog-33ul6h). This is the degraded fallback
-			// when the GLCB itself is unreadable, so there's no local file
-			// to size either — 0 is honest, not a regression.
-			IngestIdxOffset:   e.IngestIdxOffset,
-			IngestIdxSize:     e.IngestIdxSize,
-			SourceIdxOffset:   e.SourceIdxOffset,
-			SourceIdxSize:     e.SourceIdxSize,
-			IngestTSMonotonic: e.IngestTSMonotonic,
-		}
-	}
-	if err := registrar.RegisterExternalGLCB(e.ID, glcbPath, info); err != nil {
-		r.logger.Warn("registerPipelineGLCB: RegisterExternalGLCB failed",
-			"chunk", e.ID, "path", glcbPath, "error", err)
-		return
-	}
-	r.ackOwnHolderReceipt(e)
-}
-
-// ackOwnHolderReceipt proposes this home's holder receipt the moment its
-// copy is registered servable — event-driven, covering the build (OnBuilt),
-// seal (onSeal), and replica-pull recovery paths through their shared
-// registration. Without it receipts earned only via the 20s sweep, and
-// replica counts staircased 4→1→2→3→4 after every seal as per-node batches
-// landed (the placement fallback overstates until the first receipt). The
-// sweep remains the reconciliation backstop for missed events and for
-// revocation; a failed proposal here is retried there.
-func (r *VaultLifecycleReconciler) ackOwnHolderReceipt(e vaultctlfsm.ManifestEntry) {
-	if r.vaultInst == nil || r.vaultInst.ApplyRaftAckChunkHolders == nil {
-		return
-	}
-	if slices.Contains(e.Holders, r.localNodeID) {
+	if _, err := os.Stat(chunking.ChunkGLCBPath(chunkRoot, e.ID)); err != nil {
+		// Bytes not on this node yet: no receipt to claim. The build/pull
+		// event that lands them fires this again.
 		return
 	}
 	ack := r.vaultInst.ApplyRaftAckChunkHolders
 	id := e.ID
 	nodeID := r.localNodeID
 	logger := r.logger
-	// Dispatched off-goroutine: onSeal (one of this function's callers via
-	// registerPipelineGLCB) runs on the Raft apply pump, and proposing from
-	// the pump deadlocks the leader — Apply posts to the very queue the
-	// pump is draining. Same hazard and same remedy as
-	// ReconcileFromSnapshot's obligation dispatch.
+	// Dispatched off-goroutine: onSeal (one of this function's callers) runs on
+	// the Raft apply pump, and proposing from the pump deadlocks the leader —
+	// Apply posts to the very queue the pump is draining. Same hazard and same
+	// remedy as ReconcileFromSnapshot's obligation dispatch.
 	go func() {
 		if err := ack([]chunk.ChunkID{id}, nodeID); err != nil {
 			logger.Debug("event-driven holder ack failed; catch-up sweep will retry",
@@ -550,10 +499,13 @@ func (r *VaultLifecycleReconciler) onSeal(e vaultctlfsm.ManifestEntry) {
 			"chunk", e.ID, "error", err)
 	}
 	// Pipeline-built sealed chunks live at the vault ChunkRoot, not the chunk
-	// manager dir, so EnsureSealed is a no-op for them. Register their GLCB by
-	// path so a freshly-sealed pipeline chunk is queryable on this home node
-	// immediately. No-op for legacy/cloud-backed chunks. See gastrolog-2kysn.
-	r.registerPipelineGLCB(e)
+	// manager dir, so EnsureSealed is a no-op for them. Queryability needs no
+	// action here: the lazy on-miss GLCB resolver serves the freshly-sealed
+	// chunk on first lookup (gastrolog-34kmv). What remains event-driven is the
+	// holder receipt — propose it now that this home's copy is (usually)
+	// built and on disk; the gate inside skips it when the build lags the seal,
+	// and OnBuilt fires it once the file lands. No-op for non-home vaults.
+	r.ackOwnHolderReceipt(e)
 	if r.orch != nil && r.orch.isPipelineIngestVault(r.vaultID) {
 		r.orch.schedulePipelineCloudUpload(r.vaultID, e.ID)
 	}

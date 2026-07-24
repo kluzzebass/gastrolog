@@ -209,7 +209,7 @@ func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, home bool, fsm 
 		spec.IsLeader = isLeader
 		spec.ChunkPolicy = policy
 		spec.OnChunkBuilt = func(id chunk.ChunkID) {
-			o.registerBuiltPipelineChunk(vaultID, fsm, id)
+			o.onPipelineChunkBuilt(vaultID, fsm, id)
 		}
 		spec.ChunkRequiredHolders = func() []string {
 			return o.vaultPlacementNodeIDs(vaultID)
@@ -235,37 +235,35 @@ func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, home bool, fsm 
 	return spec, nil
 }
 
-// registerBuiltPipelineChunk registers a freshly-built pipeline GLCB with the
-// local chunk manager when the FSM already shows the chunk Sealed. This
-// closes the build-finishes-last ordering gap: the reconciler's onSeal
-// callback registers the GLCB only when the file exists on disk, so a home
-// whose build completes AFTER CmdSealChunk applied would otherwise never
-// register it — its local queries would silently miss the chunk. When the
-// chunk is not Sealed yet (build-finishes-first ordering), this is a no-op
-// and the later onSeal registers it.
-func (o *Orchestrator) registerBuiltPipelineChunk(vaultID glid.GLID, fsm *vaultctlfsm.FSM, id chunk.ChunkID) {
+// onPipelineChunkBuilt handles a freshly-built pipeline GLCB on this home.
+// Queryability needs no action — the lazy on-miss GLCB resolver serves the
+// chunk on first lookup the moment its FSM entry and file both exist
+// (gastrolog-34kmv). Two build-completion effects remain event-driven here:
+// the home's holder receipt (build completion is the byte-presence proof the
+// receipt asserts, and it covers the build-finishes-after-seal ordering gap
+// where onSeal fired before the file existed), and — once the chunk is fully
+// Sealed — its cloud upload. A Sealing-only entry defers both to the later
+// seal.
+func (o *Orchestrator) onPipelineChunkBuilt(vaultID glid.GLID, fsm *vaultctlfsm.FSM, id chunk.ChunkID) {
 	e := fsm.Get(id)
 	if e == nil {
 		o.noteRegisterSkip(vaultID, id, "no FSM entry")
 		return
 	}
-	// Register as soon as the GLCB exists so sealing chunks are queryable
-	// before CmdSealChunk; fully sealed chunks still register here when build
-	// finishes after seal (registerBuiltPipelineChunk ordering gap).
 	if e.State != chunk.ChunkStateSealed && e.State != chunk.ChunkStateSealing {
 		return
 	}
 	ti := o.findLocalVaultInstance(vaultID)
 	if ti == nil || ti.Reconciler == nil {
 		// Boot ordering: OnBuilt can fire from chunking recovery before the
-		// vault instance/reconciler exists. The catch-up sweep re-runs
-		// registration, but the skip must be visible — a node once held
+		// vault instance/reconciler exists. The catch-up sweep re-earns the
+		// holder receipt, but the skip must be visible — a node once held
 		// 297 complete GLCBs its chunk manager knew nothing about, and
 		// retention/backfill/queries all starved with zero log lines.
 		o.noteRegisterSkip(vaultID, id, "vault instance or reconciler not ready")
 		return
 	}
-	ti.Reconciler.registerPipelineGLCB(*e)
+	ti.Reconciler.ackOwnHolderReceipt(*e)
 	if e.State == chunk.ChunkStateSealed {
 		o.schedulePipelineCloudUpload(vaultID, id)
 	}
@@ -471,7 +469,7 @@ func (o *Orchestrator) originRoot(vaultID glid.GLID) (string, error) {
 // Pipeline ingest vaults do not use the legacy chunk-manager path: no append to
 // m.active, no PostSealProcess/sealToGLCB in storage/disk-*, and no record-stream
 // replication or missing-replica catchup. Sealed bytes are produced once by the
-// pipeline; query access is registerPipelineGLCB (external path registration).
+// pipeline; query access is the lazy on-miss external-GLCB resolver.
 func (o *Orchestrator) isPipelineIngestVault(vaultID glid.GLID) bool {
 	if o == nil {
 		return false

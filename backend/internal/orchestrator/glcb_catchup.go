@@ -209,7 +209,11 @@ func (o *Orchestrator) runGLCBPull(destVaultID, sourceVaultID glid.GLID, e vault
 	}
 	o.mu.RUnlock()
 	if rec != nil {
-		rec.registerPipelineGLCB(e)
+		// The pulled bytes are now on the canonical path; the lazy resolver
+		// makes them queryable on first lookup. Propose this node's holder
+		// receipt event-driven now that the verified copy is on disk
+		// (gastrolog-34kmv).
+		rec.ackOwnHolderReceipt(e)
 	}
 }
 

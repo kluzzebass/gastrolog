@@ -1,7 +1,6 @@
 package orchestrator
 
 import (
-	"errors"
 	"fmt"
 	"time"
 
@@ -185,90 +184,53 @@ func (o *Orchestrator) backfillCloudUploads(vaultInst *VaultInstance) {
 }
 
 // runBackfillUpload performs one chunk's upload attempt — including
-// registration repair and failure-track bookkeeping — as the scheduler job
-// body. Extracted from backfillCloudUploads to keep the sweep loop small;
-// this is where the review follow-up's build-lag gate lives: onDisk (the
-// registration-missing signature — GLCB verifiably present on disk) is
-// computed once and gates BOTH repair applicability and entry into the
-// backoff/alarm track. A chunk whose local build simply hasn't finished yet
-// (onDisk false) fails the same not-found error but is owned by the
-// primary upload path (schedulePipelineCloudUpload / onSeal) and resolves
-// itself in seconds — pushing it into the 5-minute backoff track would
-// pollute it with build-lag noise that was never actually stuck. See
-// gastrolog-4ryguo review follow-up.
+// failure-track bookkeeping — as the scheduler job body. Extracted from
+// backfillCloudUploads to keep the sweep loop small; this is where the review
+// follow-up's build-lag gate lives: onDisk (GLCB verifiably present on disk)
+// is computed once and gates entry into the backoff/alarm track. A chunk
+// whose local build simply hasn't finished yet (onDisk false) fails the same
+// not-found error but is owned by the primary upload path
+// (schedulePipelineCloudUpload / onSeal) and resolves itself in seconds —
+// pushing it into the 5-minute backoff track would pollute it with build-lag
+// noise that was never actually stuck. See gastrolog-4ryguo review follow-up.
+//
+// No registration-repair step: UploadToCloud self-resolves an on-disk
+// FSM-sealed external chunk through the lazy on-miss GLCB resolver
+// (gastrolog-34kmv retired the eager repair — the registration gap
+// gastrolog-4ryguo patched is now closed at the source in Manager.uploadToCloud,
+// which looks the chunk up via lookupMeta rather than a raw m.metas read). A
+// failure that survives here is a genuine cloud/transient error, not a missing
+// registration.
 func (o *Orchestrator) runBackfillUpload(vaultInst *VaultInstance, id chunk.ChunkID, uploader chunk.ChunkCloudUploader) error {
 	err := uploader.UploadToCloud(id)
 	if err != nil {
 		onDisk := o.backfillChunkOnDisk(vaultInst.VaultID, id)
-		if onDisk {
-			err = o.repairAndRetryBackfill(vaultInst, id, err, uploader, onDisk)
-		}
-		if err != nil {
-			// Both onDisk cases get a failure entry with the same
-			// exponential backoff — one map, one strand-safe lifecycle
-			// (cross-path clear, the vault-scoped purges, and the
-			// vanished-candidate prune all apply regardless of onDisk).
-			// onDisk gates ALARM ELIGIBILITY only: build-lag and a
-			// genuinely-deleted GLCB are indistinguishable from an
-			// os.Stat, so neither pages an operator — build-lag entries
-			// clear entirely via the chunkIsCloudBacked cross-path once
-			// the primary upload lands, and a genuinely-deleted GLCB backs
-			// off to the cap without flooding the scheduler journal
-			// (backfillDue still gates it) or ever alarming for state the
-			// primary path owns. See gastrolog-4ryguo review follow-up.
-			o.logBackfillFailure(vaultInst.VaultID, id, err, onDisk)
-			o.markBackfillFailure(vaultInst.VaultID, id, err, onDisk)
-			return err
-		}
+		// Both onDisk cases get a failure entry with the same exponential
+		// backoff — one map, one strand-safe lifecycle (cross-path clear, the
+		// vault-scoped purges, and the vanished-candidate prune all apply
+		// regardless of onDisk). onDisk gates ALARM ELIGIBILITY only: build-lag
+		// and a genuinely-deleted GLCB are indistinguishable from an os.Stat,
+		// so neither pages an operator — build-lag entries clear entirely via
+		// the chunkIsCloudBacked cross-path once the primary upload lands, and
+		// a genuinely-deleted GLCB backs off to the cap without flooding the
+		// scheduler journal (backfillDue still gates it) or ever alarming for
+		// state the primary path owns. See gastrolog-4ryguo review follow-up.
+		o.logBackfillFailure(vaultInst.VaultID, id, err, onDisk)
+		o.markBackfillFailure(vaultInst.VaultID, id, err, onDisk)
+		return err
 	}
 	o.clearBackfillFailure(id)
 	return nil
 }
 
-// repairAndRetryBackfill detects the registration-missing signature that
-// made this bug permanent (gastrolog-4ryguo): the chunk is FSM-sealed with
-// its GLCB verifiably present on disk, but UploadToCloud failed because the
-// local chunk manager has no registration for it — the lazy-resolution gap
-// the gastrolog-2kmgj6 fix left open (appendUnlistedManifestSealed made the
-// chunk schedulable for backfill, not uploadable). Repairs the registration
-// via the same primitive pipeline sealing uses to register a freshly-built
-// GLCB (VaultLifecycleReconciler.registerPipelineGLCB) and retries the
-// upload once.
-//
-// Returns the original error untouched whenever repair does not apply:
-// wrong error, no reconciler, no manifest entry, or the GLCB genuinely
-// absent from disk (e.g. deleted out from under the manifest entry). That
-// last case is not repairable — falling through to backoff instead of
-// retrying here is what keeps it from tight-looping. onDisk is the caller's
-// already-computed backfillChunkOnDisk result, passed in rather than
-// re-derived via a second os.Stat.
-func (o *Orchestrator) repairAndRetryBackfill(vaultInst *VaultInstance, id chunk.ChunkID, uploadErr error, uploader chunk.ChunkCloudUploader, onDisk bool) error {
-	if !errors.Is(uploadErr, chunk.ErrChunkNotFound) {
-		return uploadErr
-	}
-	if vaultInst.Reconciler == nil || vaultInst.ManifestEntry == nil {
-		return uploadErr
-	}
-	if !onDisk {
-		// Bytes genuinely absent — nothing to repair.
-		return uploadErr
-	}
-	entry, ok := vaultInst.ManifestEntry(id)
-	if !ok {
-		return uploadErr
-	}
-	vaultInst.Reconciler.registerPipelineGLCB(entry)
-	return uploader.UploadToCloud(id)
-}
-
 // backfillChunkOnDisk reports whether a chunk's GLCB is verifiably present
-// on disk under this vault's pipeline chunk root — the registration-missing
-// signature predicate shared by three call sites: the repair-applicability
-// check, the failure-track entry gate (only a registration-missing-shaped
-// failure backs off/alarms; a build-lag failure does not), and the
-// operator-facing on-disk/awaiting-build log split. False whenever there is
-// no pipeline home registration for the vault on this node (root not found)
-// as well as when the file itself is absent.
+// on disk under this vault's pipeline chunk root — the alarm-eligibility
+// predicate shared by two call sites: the failure-track entry gate (only a
+// GLCB-on-disk failure backs off with alarm eligibility; a build-lag failure
+// backs off but never alarms) and the operator-facing on-disk/awaiting-build
+// log split. False whenever there is no pipeline home registration for the
+// vault on this node (root not found) as well as when the file itself is
+// absent.
 func (o *Orchestrator) backfillChunkOnDisk(vaultID glid.GLID, id chunk.ChunkID) bool {
 	root, ok := o.pipelineVaultChunkRoot(vaultID)
 	if !ok {

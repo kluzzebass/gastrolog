@@ -183,6 +183,134 @@ func TestSchedulePipelineCloudUpload_SkipsPlacementFollower(t *testing.T) {
 	}
 }
 
+// TestSchedulePipelineCloudUpload_LeaderUploadsWithoutEagerRegistration pins
+// the disease fix behind retiring the eager registration path (gastrolog-34kmv):
+// a sealed pipeline GLCB present on disk with an FSM sealed entry but NO eager
+// chunk-manager registration still uploads. The only registration path is the
+// lazy on-miss resolver, which Manager.uploadToCloud now consults via lookupMeta
+// — so the upload self-resolves the chunk instead of failing ErrChunkNotFound.
+// This replaces the former mock-based repair test in
+// cloud_health_backfill_repair_test.go.
+func TestSchedulePipelineCloudUpload_LeaderUploadsWithoutEagerRegistration(t *testing.T) {
+	t.Parallel()
+
+	vaultID := glid.New()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	orch := newTestOrch(t, Config{LocalNodeID: "node-A"})
+	markPipelineIngestVault(t, orch, vaultID, true)
+
+	// Build a valid data.glcb in a scratch manager, then place it on the pipeline ChunkRoot.
+	scratchDir := t.TempDir()
+	scratch, err := chunkfile.NewManager(chunkfile.Config{
+		Dir:            scratchDir,
+		Now:            time.Now,
+		RotationPolicy: chunk.NewRecordCountPolicy(100),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = scratch.Close() }()
+	for i := range 8 {
+		ts := now.Add(time.Duration(i) * time.Millisecond)
+		if _, _, err := scratch.Append(chunk.Record{IngestTS: ts, WriteTS: ts, Raw: []byte("pipeline-cloud")}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := scratch.Seal(); err != nil {
+		t.Fatal(err)
+	}
+	metas, err := scratch.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sealedID chunk.ChunkID
+	for _, m := range metas {
+		if m.Sealed {
+			sealedID = m.ID
+			break
+		}
+	}
+	if sealedID == (chunk.ChunkID{}) {
+		t.Fatal("no sealed chunk")
+	}
+	if err := scratch.PostSealProcess(context.Background(), sealedID); err != nil {
+		t.Fatal(err)
+	}
+	scratchGLCB := filepath.Join(scratchDir, sealedID.String(), "data.glcb")
+
+	fsm := vaultctlfsm.New()
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(sealedID, now, now, now)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(sealedID, now, 8, 512, now, now, now, false, now)}); err != nil {
+		t.Fatal(err)
+	}
+
+	chunkRoot := filepath.Join(orch.segmentsDir, vaultID.String(), "chunks")
+	pipelineGLCB := chunking.ChunkGLCBPath(chunkRoot, sealedID)
+	if err := os.MkdirAll(filepath.Dir(pipelineGLCB), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyFile(scratchGLCB, pipelineGLCB); err != nil {
+		t.Fatal(err)
+	}
+
+	store := blobstore.NewMemory()
+	cm, err := chunkfile.NewManager(chunkfile.Config{
+		Dir:            t.TempDir(),
+		Now:            time.Now,
+		RotationPolicy: chunk.NewRecordCountPolicy(1000),
+		CloudStore:     store,
+		VaultID:        vaultID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cm.Close() }()
+
+	vaultInst := &VaultInstance{
+		VaultID:      vaultID,
+		Type:         "file",
+		Chunks:       cm,
+		IsRaftLeader: func() bool { return false },
+		ManifestEntry: func(id chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool) {
+			e := fsm.Get(id)
+			if e == nil {
+				return vaultctlfsm.ManifestEntry{}, false
+			}
+			return *e, true
+		},
+	}
+	orch.RegisterVault(NewVault(vaultID, vaultInst))
+
+	// The ONLY registration path: the lazy on-miss resolver. No
+	// RegisterExternalGLCB call — the upload must self-resolve.
+	orch.installLazyGLCBResolverOn(vaultInst, vaultID, true, fsm, chunkRoot)
+
+	orch.schedulePipelineCloudUpload(vaultID, sealedID)
+
+	orch.Scheduler().Start()
+	defer func() { _ = orch.Scheduler().Stop() }()
+
+	deadline := time.Now().Add(5 * time.Second)
+	var blobCount int
+	for time.Now().Before(deadline) {
+		blobCount = 0
+		_ = store.List(context.Background(), "", func(blobstore.BlobInfo) error {
+			blobCount++
+			return nil
+		})
+		if blobCount > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if blobCount == 0 {
+		t.Fatal("expected blob in cloud store after lazy-resolved pipeline upload (no eager registration)")
+	}
+}
+
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
