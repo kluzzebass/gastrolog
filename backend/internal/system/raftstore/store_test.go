@@ -7,12 +7,18 @@ import (
 	"testing"
 	"time"
 
+	"gastrolog/internal/glid"
 	"gastrolog/internal/system"
+	"gastrolog/internal/system/command"
 	"gastrolog/internal/system/raftfsm"
 	"gastrolog/internal/system/storetest"
 
 	hraft "github.com/hashicorp/raft"
 )
+
+// testMaxAge satisfies RotationPolicyConfig's requirement for at least one
+// rotation rule in the apply-wait tests below.
+var testMaxAge = "1m"
 
 // newTestRaft creates a single-node in-memory raft instance that becomes
 // leader immediately. No cluster, no network — just raft's log + FSM
@@ -331,6 +337,118 @@ func TestApplyReturnsImmediatelyOnZeroAppliedIndex(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed > 100*time.Millisecond {
 		t.Errorf("wait fired despite applied_index=0 (took %s)", elapsed)
+	}
+}
+
+// newFollowerRaft creates a non-bootstrapped raft instance that always
+// returns ErrNotLeader from Apply, for exercising the forward path.
+func newFollowerRaft(t *testing.T, fsm *raftfsm.FSM) *hraft.Raft {
+	t.Helper()
+
+	conf := hraft.DefaultConfig()
+	conf.LocalID = "follower"
+	conf.LogOutput = io.Discard
+	conf.HeartbeatTimeout = 50 * time.Millisecond
+	conf.ElectionTimeout = 50 * time.Millisecond
+	conf.LeaderLeaseTimeout = 50 * time.Millisecond
+
+	logStore := hraft.NewInmemStore()
+	stableStore := hraft.NewInmemStore()
+	snapStore := hraft.NewInmemSnapshotStore()
+	_, transport := hraft.NewInmemTransport("follower")
+
+	r, err := hraft.NewRaft(conf, fsm, logStore, stableStore, snapStore, transport)
+	if err != nil {
+		t.Fatalf("NewRaft: %v", err)
+	}
+	t.Cleanup(func() { _ = r.Shutdown().Error() })
+	return r
+}
+
+// TestApplyWakesOnLocalFSMApply is the event-driven regression test for
+// gastrolog-3klg1: the post-forward wait must release the moment the local
+// FSM applies the leader's index — driven by the FSM apply notification,
+// not by polling raft.AppliedIndex. The test simulates replication by
+// applying the committed entry to the FSM directly; the concurrent write
+// call must then return with the mutation locally readable. No sleeps —
+// synchronization is the barrier's own completion.
+func TestApplyWakesOnLocalFSMApply(t *testing.T) {
+	t.Parallel()
+	fsm := raftfsm.New()
+	r := newFollowerRaft(t, fsm)
+
+	s := New(r, fsm, 5*time.Second)
+	const leaderIndex = 7
+	s.SetForwarder(&mockForwarder{appliedIndex: leaderIndex})
+
+	ctx := context.Background()
+	cfg := system.RotationPolicyConfig{ID: glid.New(), Name: "event-driven-probe", MaxAge: &testMaxAge}
+
+	done := make(chan error, 1)
+	go func() { done <- s.PutRotationPolicy(ctx, cfg) }()
+
+	// Simulate the follower's raft delivering the committed entry to the
+	// FSM. Whether this lands before or after the waiter registers, the
+	// tracker guarantees the wake.
+	data, err := command.Marshal(command.NewPutRotationPolicy(cfg))
+	if err != nil {
+		t.Fatalf("marshal command: %v", err)
+	}
+	fsm.Apply(&hraft.Log{Index: leaderIndex, Data: data})
+
+	if err := <-done; err != nil {
+		t.Fatalf("PutRotationPolicy via forward: %v", err)
+	}
+	got, err := s.GetRotationPolicy(ctx, cfg.ID)
+	if err != nil {
+		t.Fatalf("GetRotationPolicy after barrier released: %v", err)
+	}
+	if got == nil {
+		t.Fatal("barrier released before the local FSM reflected the write")
+	}
+}
+
+// TestApplyReturnsImmediatelyWhenAlreadyApplied covers the no-op forward:
+// the local FSM already applied the leader's index (e.g. replication beat
+// the forward response), so the barrier must not block at all.
+func TestApplyReturnsImmediatelyWhenAlreadyApplied(t *testing.T) {
+	t.Parallel()
+	fsm := raftfsm.New()
+	r := newFollowerRaft(t, fsm)
+
+	cfg := system.RotationPolicyConfig{ID: glid.New(), Name: "pre-applied-probe", MaxAge: &testMaxAge}
+	data, err := command.Marshal(command.NewPutRotationPolicy(cfg))
+	if err != nil {
+		t.Fatalf("marshal command: %v", err)
+	}
+	const leaderIndex = 3
+	fsm.Apply(&hraft.Log{Index: leaderIndex, Data: data})
+
+	// applyTimeout is irrelevant here — the wait must not engage. A hang
+	// would trip the test binary timeout, not a flaky bound.
+	s := New(r, fsm, 5*time.Second)
+	s.SetForwarder(&mockForwarder{appliedIndex: leaderIndex})
+
+	if _, err := s.ApplyRaw(data); err != nil {
+		t.Fatalf("ApplyRaw with already-applied index: %v", err)
+	}
+}
+
+// TestApplyWaitCancelledContext pins ctx cancellation semantics: a caller
+// cancelling mid-wait gets ctx.Err(), not the timeout error.
+func TestApplyWaitCancelledContext(t *testing.T) {
+	t.Parallel()
+	fsm := raftfsm.New()
+	r := newFollowerRaft(t, fsm)
+
+	s := New(r, fsm, 5*time.Second)
+	s.SetForwarder(&mockForwarder{appliedIndex: 42}) // never applied locally
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := s.applyRaw(ctx, []byte("forwarded-command"))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("applyRaw with cancelled ctx = %v, want context.Canceled", err)
 	}
 }
 

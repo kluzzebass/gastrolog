@@ -2344,6 +2344,16 @@ export class SystemSnapshot extends Message<SystemSnapshot> {
    */
   logLevels?: LogLevelConfig;
 
+  /**
+   * Highest Raft log index applied to the FSM when the snapshot was taken.
+   * Lets a follower that installs this snapshot (instead of replaying log
+   * entries) release read-after-write apply-wait barriers for every command
+   * the snapshot covers (gastrolog-3klg1).
+   *
+   * @generated from field: uint64 last_applied_index = 21;
+   */
+  lastAppliedIndex = protoInt64.zero;
+
   constructor(data?: PartialMessage<SystemSnapshot>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2372,6 +2382,7 @@ export class SystemSnapshot extends Message<SystemSnapshot> {
     { no: 18, name: "ingester_assignments", kind: "message", T: SetIngesterAssignmentCommand, repeated: true },
     { no: 19, name: "ingester_checkpoints", kind: "message", T: SetIngesterCheckpointCommand, repeated: true },
     { no: 20, name: "log_levels", kind: "message", T: LogLevelConfig },
+    { no: 21, name: "last_applied_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SystemSnapshot {

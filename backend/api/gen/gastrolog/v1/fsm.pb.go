@@ -3012,8 +3012,13 @@ type SystemSnapshot struct {
 	IngesterAssignments  []*SetIngesterAssignmentCommand `protobuf:"bytes,18,rep,name=ingester_assignments,json=ingesterAssignments,proto3" json:"ingester_assignments,omitempty"`
 	IngesterCheckpoints  []*SetIngesterCheckpointCommand `protobuf:"bytes,19,rep,name=ingester_checkpoints,json=ingesterCheckpoints,proto3" json:"ingester_checkpoints,omitempty"`
 	LogLevels            *LogLevelConfig                 `protobuf:"bytes,20,opt,name=log_levels,json=logLevels,proto3" json:"log_levels,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// Highest Raft log index applied to the FSM when the snapshot was taken.
+	// Lets a follower that installs this snapshot (instead of replaying log
+	// entries) release read-after-write apply-wait barriers for every command
+	// the snapshot covers (gastrolog-3klg1).
+	LastAppliedIndex uint64 `protobuf:"varint,21,opt,name=last_applied_index,json=lastAppliedIndex,proto3" json:"last_applied_index,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *SystemSnapshot) Reset() {
@@ -3184,6 +3189,13 @@ func (x *SystemSnapshot) GetLogLevels() *LogLevelConfig {
 		return x.LogLevels
 	}
 	return nil
+}
+
+func (x *SystemSnapshot) GetLastAppliedIndex() uint64 {
+	if x != nil {
+		return x.LastAppliedIndex
+	}
+	return 0
 }
 
 var File_gastrolog_v1_fsm_proto protoreflect.FileDescriptor
@@ -3411,7 +3423,7 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"ingesterId\x12\x12\n" +
 	"\x04data\x18\x02 \x01(\fR\x04data\"K\n" +
 	"\x13PutLogLevelsCommand\x124\n" +
-	"\x06config\x18\x01 \x01(\v2\x1c.gastrolog.v1.LogLevelConfigR\x06config\"\x93\f\n" +
+	"\x06config\x18\x01 \x01(\v2\x1c.gastrolog.v1.LogLevelConfigR\x06config\"\xc1\f\n" +
 	"\x0eSystemSnapshot\x12S\n" +
 	"\x11rotation_policies\x18\x01 \x03(\v2&.gastrolog.v1.PutRotationPolicyCommandR\x10rotationPolicies\x12V\n" +
 	"\x12retention_policies\x18\x02 \x03(\v2'.gastrolog.v1.PutRetentionPolicyCommandR\x11retentionPolicies\x125\n" +
@@ -3435,7 +3447,8 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"\x14ingester_assignments\x18\x12 \x03(\v2*.gastrolog.v1.SetIngesterAssignmentCommandR\x13ingesterAssignments\x12]\n" +
 	"\x14ingester_checkpoints\x18\x13 \x03(\v2*.gastrolog.v1.SetIngesterCheckpointCommandR\x13ingesterCheckpoints\x12;\n" +
 	"\n" +
-	"log_levels\x18\x14 \x01(\v2\x1c.gastrolog.v1.LogLevelConfigR\tlogLevels\x1a;\n" +
+	"log_levels\x18\x14 \x01(\v2\x1c.gastrolog.v1.LogLevelConfigR\tlogLevels\x12,\n" +
+	"\x12last_applied_index\x18\x15 \x01(\x04R\x10lastAppliedIndex\x1a;\n" +
 	"\rSettingsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"

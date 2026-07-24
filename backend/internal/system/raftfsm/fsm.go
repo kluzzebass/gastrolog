@@ -12,6 +12,7 @@ import (
 	"io"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/applywait"
 	"gastrolog/internal/system"
 	"gastrolog/internal/system/command"
 	"gastrolog/internal/system/memory"
@@ -84,13 +85,20 @@ func WithOnApply(fn func(Notification)) Option {
 type FSM struct {
 	store   *memory.Store
 	onApply func(Notification)
+
+	// applyWait is advanced after each log entry is applied (and after a
+	// snapshot restore, up to the index the snapshot embeds). Followers
+	// block on it after forwarding a mutation to the leader so their next
+	// read sees post-mutation state — the read-after-write barrier
+	// (gastrolog-2nxij, event-driven since gastrolog-3klg1).
+	applyWait *applywait.Tracker
 }
 
 var _ raft.FSM = (*FSM)(nil)
 
 // New creates a new FSM with a fresh in-memory store.
 func New(opts ...Option) *FSM {
-	f := &FSM{store: memory.NewStore()}
+	f := &FSM{store: memory.NewStore(), applyWait: applywait.New()}
 	for _, o := range opts {
 		o(f)
 	}
@@ -102,9 +110,21 @@ func (f *FSM) Store() *memory.Store {
 	return f.store
 }
 
+// ApplyWait returns the tracker that follows this FSM's applied index.
+// raftstore.Store waits on it after forwarding a command to the leader.
+func (f *FSM) ApplyWait() *applywait.Tracker {
+	return f.applyWait
+}
+
 // Apply deserializes a committed Raft log entry and dispatches to the store.
 // Returns nil on success or an error on failure.
 func (f *FSM) Apply(l *raft.Log) any {
+	// The entry is consumed regardless of dispatch outcome — advance the
+	// apply tracker on every return path, after the store mutation (if any)
+	// is visible. Mirrors raft's own AppliedIndex semantics, which count
+	// entries whose FSM application returned an error.
+	defer f.applyWait.Advance(l.Index)
+
 	cmd, err := command.Unmarshal(l.Data)
 	if err != nil {
 		return fmt.Errorf("unmarshal config command: %w", err)
@@ -724,6 +744,12 @@ func (f *FSM) Snapshot() (raft.FSMSnapshot, error) {
 	}
 
 	snap := command.BuildSnapshot(sys, users, tokens)
+	// Embed the highest applied index so a follower that receives this
+	// snapshot (instead of replaying log entries) can release apply-wait
+	// barriers for every command the snapshot covers. Raft serializes
+	// Snapshot with Apply on the FSM goroutine, so this reads the exact
+	// index the captured state reflects.
+	snap.LastAppliedIndex = f.applyWait.Applied()
 
 	data, err := command.MarshalSnapshot(snap)
 	if err != nil {
@@ -902,6 +928,10 @@ func (f *FSM) Restore(rc io.ReadCloser) error { //nolint:gocognit,gocyclo // sna
 	}
 
 	f.store = newStore
+	// Wake apply-wait barriers covered by this snapshot — the restored
+	// state includes every command up to the embedded index. Advance only
+	// after the store swap so released waiters read post-restore state.
+	f.applyWait.Advance(snap.GetLastAppliedIndex())
 	return nil
 }
 
