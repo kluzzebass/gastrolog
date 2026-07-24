@@ -396,6 +396,14 @@ type Orchestrator struct {
 	// during the transition.
 	chunkSignal *notify.Signal
 
+	// vaultReadySignal wakes goroutines blocked in WaitVaultReady whenever
+	// the vault registry changes (a vault is registered, gains/loses its
+	// local instance, or is removed). Replaces the source-side 100ms
+	// ForwardListChunks poll DrainVault used to detect that a target node
+	// had created the vault: the target now blocks on this broadcast and
+	// returns the instant registration completes. See gastrolog-3sdnn.
+	vaultReadySignal *notify.Signal
+
 	// chunkBus broadcasts typed ChunkChangeEvent values to subscribers.
 	// Replaces the chunkSignal-then-fan-out-refetch pattern: WatchChunks
 	// streams these events directly to clients so they can patch their
@@ -839,6 +847,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		alerts:                 cfg.Alerts,
 		suspects:               newSuspectTracker(),
 		chunkSignal:            notify.NewSignal(),
+		vaultReadySignal:       notify.NewSignal(),
 		chunkBus:               notify.NewBus[ChunkChangeEvent](256),
 		progressTrigger:        newProgressNotifier(),
 		vaultCtlLeaders:        newVaultCtlLeaderManager(baseLogger),

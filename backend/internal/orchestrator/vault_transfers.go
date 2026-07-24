@@ -392,6 +392,7 @@ func (o *Orchestrator) finishDrain(vaultID glid.GLID) {
 	}
 
 	delete(o.vaults, vaultID)
+	o.signalVaultReadyChange()
 
 	o.drainLogger.Info("vault drain completed, vault unregistered", "vault", vaultID)
 }

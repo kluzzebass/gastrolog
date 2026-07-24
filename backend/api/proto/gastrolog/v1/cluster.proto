@@ -455,6 +455,17 @@ message ForwardListChunksResponse {
   repeated ChunkMeta chunks = 1;
 }
 
+// ForwardWaitVaultReadyRequest asks a remote node to block until the named
+// vault is registered and ready to accept transferred records, or the RPC
+// deadline / cancellation fires. Replaces the source-side ForwardListChunks
+// poll used by DrainVault to synchronize with the target node's AddVault.
+// See gastrolog-3sdnn.
+message ForwardWaitVaultReadyRequest {
+  bytes vault_id = 1;
+}
+
+message ForwardWaitVaultReadyResponse {}
+
 // ForwardGetPipelineBacklogRequest asks a remote node for its local
 // on-disk pipeline segment counts for one vault.
 message ForwardGetPipelineBacklogRequest {

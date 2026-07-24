@@ -735,6 +735,7 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 	clusterSrv.SetSearchExecutor(newSearchExecutor(orch))
 	clusterSrv.SetContextExecutor(newContextExecutor(orch))
 	clusterSrv.SetListChunksExecutor(newListChunksExecutor(orch))
+	clusterSrv.SetWaitVaultReadyExecutor(orch.WaitVaultReady)
 	clusterSrv.SetPipelineBacklogDiskExecutor(newPipelineBacklogDiskExecutor(orch))
 	clusterSrv.SetGetIndexesExecutor(newGetIndexesExecutor(orch))
 	clusterSrv.SetValidateVaultExecutor(newValidateVaultExecutor(orch))

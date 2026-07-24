@@ -39,6 +39,13 @@ type ContextExecutor func(ctx context.Context, vaultID glid.GLID, chunkID chunk.
 // ListChunksExecutor lists chunks in a local vault for remote requests.
 type ListChunksExecutor func(ctx context.Context, vaultID glid.GLID) ([]*gastrologv1.ChunkMeta, error)
 
+// WaitVaultReadyExecutor blocks until a local vault is registered and ready to
+// accept transferred records, or ctx is cancelled. Used by the
+// ForwardWaitVaultReady handler so a draining source node can block on the
+// target's vault-ready signal instead of polling ForwardListChunks. See
+// gastrolog-3sdnn.
+type WaitVaultReadyExecutor func(ctx context.Context, vaultID glid.GLID) error
+
 // PipelineBacklogDiskExecutor returns local on-disk segment counts for remote
 // GetPipelineBacklog fan-out.
 type PipelineBacklogDiskExecutor func(ctx context.Context, vaultID glid.GLID) (*gastrologv1.ForwardGetPipelineBacklogResponse, error)
@@ -156,6 +163,12 @@ func (s *Server) SetContextExecutor(fn ContextExecutor) {
 // SetListChunksExecutor injects the callback for handling remote ListChunks requests.
 func (s *Server) SetListChunksExecutor(fn ListChunksExecutor) {
 	s.listChunksExecutor = fn
+}
+
+// SetWaitVaultReadyExecutor injects the callback for handling remote
+// WaitVaultReady requests (drain synchronization). See gastrolog-3sdnn.
+func (s *Server) SetWaitVaultReadyExecutor(fn WaitVaultReadyExecutor) {
+	s.waitVaultReadyExecutor = fn
 }
 
 // SetPipelineBacklogDiskExecutor injects the callback for remote pipeline backlog disk counts.
@@ -498,6 +511,34 @@ func (s *Server) forwardListChunks(ctx context.Context, req *gastrologv1.Forward
 		return nil, status.Errorf(codes.Internal, "list chunks: %v", err)
 	}
 	return &gastrologv1.ForwardListChunksResponse{Chunks: chunks}, nil
+}
+
+// forwardWaitVaultReady handles the ForwardWaitVaultReady RPC. Blocks until
+// the named local vault is registered and ready to accept transferred
+// records, or the RPC's context is cancelled (the caller's drain context, or
+// its deadline). Replaces the source-side ForwardListChunks poll used by
+// DrainVault. See gastrolog-3sdnn.
+func (s *Server) forwardWaitVaultReady(ctx context.Context, req *gastrologv1.ForwardWaitVaultReadyRequest) (*gastrologv1.ForwardWaitVaultReadyResponse, error) {
+	if s.waitVaultReadyExecutor == nil {
+		return nil, status.Error(codes.Unavailable, "wait vault ready executor not configured")
+	}
+	vaultID, err := parseVaultID(req.GetVaultId())
+	if err != nil {
+		return nil, err
+	}
+	if err := s.waitVaultReadyExecutor(ctx, vaultID); err != nil {
+		// Context cancellation/deadline is the caller's own timeout expiring;
+		// surface it as Canceled/DeadlineExceeded so the source classifies it
+		// as "gave up waiting", not a server fault.
+		if errors.Is(err, context.Canceled) {
+			return nil, status.Error(codes.Canceled, err.Error())
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil, status.Error(codes.DeadlineExceeded, err.Error())
+		}
+		return nil, status.Errorf(codes.Internal, "wait vault ready: %v", err)
+	}
+	return &gastrologv1.ForwardWaitVaultReadyResponse{}, nil
 }
 
 // forwardGetPipelineBacklog handles ForwardGetPipelineBacklog RPCs.
@@ -1053,6 +1094,10 @@ var clusterServiceDesc = grpc.ServiceDesc{
 			Handler:    forwardListChunksHandler,
 		},
 		{
+			MethodName: "ForwardWaitVaultReady",
+			Handler:    forwardWaitVaultReadyHandler,
+		},
+		{
 			MethodName: "ForwardGetPipelineBacklog",
 			Handler:    forwardGetPipelineBacklogHandler,
 		},
@@ -1171,6 +1216,7 @@ type clusterServiceServer interface {
 	broadcast(context.Context, *gastrologv1.BroadcastRequest) (*gastrologv1.BroadcastResponse, error)
 	forwardGetContext(context.Context, *gastrologv1.ForwardGetContextRequest) (*gastrologv1.ForwardGetContextResponse, error)
 	forwardListChunks(context.Context, *gastrologv1.ForwardListChunksRequest) (*gastrologv1.ForwardListChunksResponse, error)
+	forwardWaitVaultReady(context.Context, *gastrologv1.ForwardWaitVaultReadyRequest) (*gastrologv1.ForwardWaitVaultReadyResponse, error)
 	forwardGetPipelineBacklog(context.Context, *gastrologv1.ForwardGetPipelineBacklogRequest) (*gastrologv1.ForwardGetPipelineBacklogResponse, error)
 	forwardGetIndexes(context.Context, *gastrologv1.ForwardGetIndexesRequest) (*gastrologv1.ForwardGetIndexesResponse, error)
 	forwardValidateVault(context.Context, *gastrologv1.ForwardValidateVaultRequest) (*gastrologv1.ForwardValidateVaultResponse, error)
@@ -1258,6 +1304,25 @@ func forwardListChunksHandler(srv any, ctx context.Context, dec func(any) error,
 	}
 	handler := func(ctx context.Context, req any) (any, error) {
 		return s.forwardListChunks(ctx, req.(*gastrologv1.ForwardListChunksRequest))
+	}
+	return interceptor(ctx, req, info, handler)
+}
+
+func forwardWaitVaultReadyHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	req := &gastrologv1.ForwardWaitVaultReadyRequest{}
+	if err := dec(req); err != nil {
+		return nil, err
+	}
+	s := srv.(*Server)
+	if interceptor == nil {
+		return s.forwardWaitVaultReady(ctx, req)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/gastrolog.v1.ClusterService/ForwardWaitVaultReady",
+	}
+	handler := func(ctx context.Context, req any) (any, error) {
+		return s.forwardWaitVaultReady(ctx, req.(*gastrologv1.ForwardWaitVaultReadyRequest))
 	}
 	return interceptor(ctx, req, info, handler)
 }

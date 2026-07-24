@@ -88,6 +88,7 @@ func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg system.VaultConfig
 	vault.Name = vaultCfg.Name
 	vault.StorageType = string(vaultCfg.Type)
 	o.vaults[vaultCfg.ID] = vault
+	o.signalVaultReadyChange()
 
 	// Recompile the routing table immediately so the vault can receive
 	// records right away. The rotation sweep also reconciles every 15s
@@ -323,6 +324,7 @@ func (o *Orchestrator) teardownVault(id glid.GLID, vault *Vault) {
 	}
 
 	delete(o.vaults, id)
+	o.signalVaultReadyChange()
 }
 
 // DisableVault disables ingestion for a vault.
@@ -553,6 +555,7 @@ func (o *Orchestrator) removeVaultInstance(vaultID glid.GLID, deleteData bool) b
 		delete(o.vaults, vaultID)
 		o.logger.Info("vault removed", "vault", vaultID)
 	}
+	o.signalVaultReadyChange()
 
 	o.logger.Info("vault placement removed",
 		"vault", vaultID, "deleteData", deleteData)
@@ -647,6 +650,7 @@ func (o *Orchestrator) AddVaultInstance(ctx context.Context, vaultID glid.GLID, 
 		return nil
 	}
 	vault.Instance = ti
+	o.signalVaultReadyChange()
 	o.logger.Info("vault placement added", "vault", vaultID)
 	return nil
 }
@@ -686,6 +690,7 @@ func (o *Orchestrator) UnregisterVault(id glid.GLID) error {
 
 	// Remove from registry.
 	delete(o.vaults, id)
+	o.signalVaultReadyChange()
 
 	o.logger.Info("vault unregistered (data preserved)", "id", id, "name", vault.Name, "type", vault.Type())
 	return nil

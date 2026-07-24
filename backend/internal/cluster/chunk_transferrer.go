@@ -91,27 +91,19 @@ func (ct *ChunkTransferrer) TransferRecords(ctx context.Context, nodeID string, 
 	return nil
 }
 
-// WaitVaultReady polls the target node until the vault is registered and
-// accepting records, or ctx expires.
+// WaitVaultReady blocks until the target node reports the vault registered
+// and accepting records, or ctx expires. The target node holds the request
+// open on its vault-ready signal and responds the instant registration
+// completes — no client-side polling. ctx (the caller's drain context)
+// bounds the wait: on cancellation the RPC is torn down and the target's
+// waiter unblocks via the same context. Replaces the former 100ms
+// ForwardListChunks poll. See gastrolog-3sdnn.
 func (ct *ChunkTransferrer) WaitVaultReady(ctx context.Context, nodeID string, vaultID glid.GLID) error {
-	const pollInterval = 100 * time.Millisecond
-
-	vid := vaultID.ToProto()
-	for {
-		probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		req := &gastrologv1.ForwardListChunksRequest{VaultId: vid}
-		resp := &gastrologv1.ForwardListChunksResponse{}
-		err := ct.peers.InvokeService(probeCtx, nodeID, PurposeChunkWait,
-			"/gastrolog.v1.ClusterService/ForwardListChunks", req, resp)
-		cancel()
-		if err == nil {
-			return nil
-		}
-
-		select {
-		case <-time.After(pollInterval):
-		case <-ctx.Done():
-			return fmt.Errorf("vault %s not ready on node %s: %w", vaultID, nodeID, ctx.Err())
-		}
+	req := &gastrologv1.ForwardWaitVaultReadyRequest{VaultId: vaultID.ToProto()}
+	resp := &gastrologv1.ForwardWaitVaultReadyResponse{}
+	if err := ct.peers.InvokeService(ctx, nodeID, PurposeChunkWait,
+		"/gastrolog.v1.ClusterService/ForwardWaitVaultReady", req, resp); err != nil {
+		return fmt.Errorf("vault %s not ready on node %s: %w", vaultID, nodeID, err)
 	}
+	return nil
 }
