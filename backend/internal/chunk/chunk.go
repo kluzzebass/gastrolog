@@ -265,12 +265,6 @@ type ChunkBudgetMonitor interface {
 	BudgetExceeded() int64 // bytes over budget, 0 = within budget or no budget
 }
 
-// ChunkCacheEvictor extends ChunkManager with cache eviction. The orchestrator
-// calls EvictCache periodically to enforce size/TTL limits on the warm cache.
-type ChunkCacheEvictor interface {
-	EvictCache()
-}
-
 // CloudBackedChunkInfo carries the metadata needed to register a cloud-backed chunk
 // on a follower without streaming any records. All fields come from the vault
 // Raft FSM entry (populated by AnnounceSeal + AnnounceUpload on the leader).
