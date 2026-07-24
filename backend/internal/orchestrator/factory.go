@@ -147,12 +147,22 @@ func (o *Orchestrator) ApplyConfig(sys *system.System, factories Factories) erro
 		return err
 	}
 
-	// The 15s placement-reconcile sweep is retired (gastrolog-29xpy). Role,
-	// FollowerTargets, and routing-table refreshes are now driven by the FSM
-	// config dispatcher on the events that change them — see
-	// ReconcileVaultPlacement / ReconcilePlacements. Startup itself is the
-	// catch-up: applyVaults above builds every local instance with its role
-	// and FollowerTargets already set from config.
+	// The placement ROLE / FollowerTargets refresh legs of the retired 15s
+	// placement sweep are now event-driven (gastrolog-29xpy — see
+	// ReconcileVaultPlacement / ReconcilePlacements). The routing-table +
+	// pipeline-registration leg (reloadPipelineFromConfig) is NOT: it also
+	// aligns each vault-ctl Raft group's desired leader with the placement
+	// leader (SetDesiredLeaderID) and re-registers the pipeline vault as the
+	// vault-ctl handle/leadership converges — async Raft convergence with no
+	// config event to hang off. Without a periodic pass, a vault-ctl election
+	// that lands leadership on a non-home node leaves the chunking planner
+	// (home ∧ vault-ctl leader) running nowhere, stalling manifest planning
+	// until the next unrelated config change. Keep that one leg on a narrowed
+	// scheduler job (gastrolog-29xpy home-down regression); it is the sibling
+	// of vault-ctl-membership-reconcile, not the retired placement sweep.
+	if err := o.startPipelineConfigReconcile(); err != nil {
+		o.logger.Warn("failed to add pipeline-config-reconcile job", "error", err)
+	}
 
 	return nil
 }
