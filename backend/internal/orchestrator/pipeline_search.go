@@ -16,7 +16,7 @@ import (
 // Falls back to sealed Reader entries plus the legacy chunk-manager active
 // head when no vault-ctl FSM is wired on this node.
 func (o *Orchestrator) SearchChunkMetasForVault(vaultID glid.GLID) []chunk.ChunkMeta {
-	if entries := o.VaultManifestEntriesFromCtlFSM(vaultID); len(entries) > 0 {
+	if entries := o.VaultManifestEntriesIncludingOpen(vaultID); len(entries) > 0 {
 		out := make([]chunk.ChunkMeta, 0, len(entries))
 		for _, e := range entries {
 			m := e.ToChunkMeta()

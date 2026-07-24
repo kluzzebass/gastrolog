@@ -12,10 +12,11 @@ import (
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
-// ManifestReader returns a manifest.Reader backed by this orchestrator's
-// vaults. Walks the per-vault sub-FSMs to project a global view of sealed
-// chunk manifests; honors the active-chunk exception by filtering on
-// Sealed=true.
+// ManifestReader returns a manifest.Reader backed by the replicated vault-ctl
+// FSMs. Every node is a voter of every vault-ctl Raft group (gastrolog-292yi),
+// so the sealed-chunk manifest resolves on ANY node — including nodes that
+// host no instance for the vault. Honors the active-chunk exception by
+// filtering on IsSealed().
 //
 // Memory-mode vaults (no FSM, no replication) are projected from the local
 // chunk manager's List() so callers see a uniform view regardless of how
@@ -32,10 +33,12 @@ func (o *Orchestrator) IntegrityVerifier() chunk.IntegrityVerifier {
 	return &orchestratorManifestReader{o: o}
 }
 
-// orchestratorManifestReader implements manifest.Reader by walking the
-// orchestrator's vaults. Sealed entries from the vault-ctl FSM are returned
-// verbatim; memory-mode vaults project from chunk.ChunkManager because those
-// vaults are their own source of truth (no replication).
+// orchestratorManifestReader implements manifest.Reader on the unified
+// manifest read core (manifestEntryByChunk / manifestEntriesForVault):
+// vault-ctl FSM first, local memory-mode projection as fallback. Sealed
+// entries from the vault-ctl FSM are returned verbatim; memory-mode vaults
+// project from chunk.ChunkManager because those vaults are their own source
+// of truth (no replication).
 type orchestratorManifestReader struct {
 	o *Orchestrator
 }
@@ -61,57 +64,119 @@ func (r *orchestratorManifestReader) ExpectedDigest(id chunk.ChunkID) ([32]byte,
 }
 
 // Entry returns the sealed manifest entry for the given chunk ID. ChunkIDs
-// are globally unique, so this fans out across every vault until it finds
-// the chunk; it does NOT return active chunks (Sealed=false).
+// are globally unique, so this resolves across every vault-ctl FSM this node
+// participates in (any voter — no local instance required) before falling
+// back to memory-mode local projection; it does NOT return active chunks.
 func (r *orchestratorManifestReader) Entry(id chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool) {
-	r.o.mu.RLock()
-	defer r.o.mu.RUnlock()
-	for _, v := range r.o.vaults {
-		if v.Instance == nil {
-			continue
-		}
-		if e, ok := vaultManifestEntry(v.Instance, id); ok && e.IsSealed() {
-			return e, true
-		}
+	_, e, ok := r.o.manifestEntryByChunk(id)
+	if !ok || !e.IsSealed() {
+		return vaultctlfsm.ManifestEntry{}, false
 	}
-	return vaultctlfsm.ManifestEntry{}, false
+	return e, true
 }
 
 // EntriesForVault returns every sealed manifest entry for the given vault.
-// Returns nil when the vault isn't registered on this node.
+// Served from the replicated vault-ctl FSM on any voter; returns nil only
+// when this node has neither joined the vault's control-plane group nor
+// hosts a local instance for it.
 func (r *orchestratorManifestReader) EntriesForVault(key glid.GLID) []vaultctlfsm.ManifestEntry {
-	r.o.mu.RLock()
-	defer r.o.mu.RUnlock()
-	if v := r.o.vaults[key]; v != nil && v.Instance != nil {
-		return collectSealedEntries(v.Instance)
+	var out []vaultctlfsm.ManifestEntry
+	for _, e := range r.o.manifestEntriesForVault(key) {
+		if e.IsSealed() {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// VaultManifestEntriesIncludingOpen returns every manifest entry (sealed,
+// sealing AND open/active) for the given vault, read from the replicated
+// vault-ctl Raft FSM. Every node participates as a voter in every vault-ctl
+// Raft group (gastrolog-292yi), so the FSM is authoritative cluster-wide and
+// visible on nodes that don't host any instance for the vault. This is the
+// open-chunk-inclusive projection of the same read core that backs
+// ManifestReader (which stays sealed-only per the active-chunk exception).
+// Returns nil when there is no GroupManager (single-node / memory mode) or
+// when this node hasn't joined the vault-ctl group yet — callers keep their
+// own local-projection fallback for that case.
+func (o *Orchestrator) VaultManifestEntriesIncludingOpen(vaultID glid.GLID) []vaultctlfsm.ManifestEntry {
+	f := o.vaultCtlFSMForVault(vaultID)
+	if f == nil {
+		return nil
+	}
+	return f.ListIncludingPipelineManifest()
+}
+
+// manifestEntriesForVault is the single read core behind the per-vault
+// manifest surfaces: the replicated vault-ctl FSM first (visible on every
+// voter), the local instance projection (memory-mode vaults, which have no
+// FSM) as fallback. Entries come back in ALL lifecycle states; callers apply
+// their own sealed/open filter.
+func (o *Orchestrator) manifestEntriesForVault(vaultID glid.GLID) []vaultctlfsm.ManifestEntry {
+	if f := o.vaultCtlFSMForVault(vaultID); f != nil {
+		return f.ListIncludingPipelineManifest()
+	}
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	if v := o.vaults[vaultID]; v != nil && v.Instance != nil {
+		return vaultManifestEntries(v.Instance)
 	}
 	return nil
 }
 
-// VaultManifestEntriesFromCtlFSM returns every manifest entry (sealed and
-// active) for the given vault, read directly from the replicated vault-ctl
-// Raft FSM rather than from local VaultInstances. Every node participates as
-// a voter in every vault-ctl Raft group (gastrolog-292yi), so the FSM is
-// authoritative cluster-wide and visible on nodes that don't host any instance
-// instance for the vault — the case where ManifestReader().EntriesForVault
-// returns nil because o.vaults has no entry. Returns nil when there is no
-// GroupManager (single-node / memory mode) or when this node hasn't joined
-// the vault-ctl group yet.
-func (o *Orchestrator) VaultManifestEntriesFromCtlFSM(vaultID glid.GLID) []vaultctlfsm.ManifestEntry {
+// manifestEntryByChunk resolves the manifest entry and owning vault for a
+// chunk on the unified read core: every vault-ctl FSM this node participates
+// in first (any voter — no local instance required), then the local instances
+// (memory-mode projection). Open pipeline chunks live in the open-chunk
+// manifest, not the chunk map, so they do not resolve here; sealed-manifest
+// consumers don't want them and open-chunk consumers have
+// findPipelineOpenChunk.
+func (o *Orchestrator) manifestEntryByChunk(id chunk.ChunkID) (glid.GLID, vaultctlfsm.ManifestEntry, bool) {
+	for vid, f := range o.vaultCtlFSMs() {
+		if e := f.Get(id); e != nil {
+			return vid, *e, true
+		}
+	}
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	for vid, v := range o.vaults {
+		if v.Instance == nil {
+			continue
+		}
+		if e, ok := vaultManifestEntry(v.Instance, id); ok {
+			return vid, e, true
+		}
+	}
+	return glid.Nil, vaultctlfsm.ManifestEntry{}, false
+}
+
+// vaultCtlFSMs returns every vault-ctl chunk FSM this node participates in,
+// keyed by vault ID. With symmetric seeding (gastrolog-292yi) that is every
+// vault in the cluster, whether or not this node hosts an instance for it.
+// Nil when there is no GroupManager (single-node / memory mode).
+func (o *Orchestrator) vaultCtlFSMs() map[glid.GLID]*vaultctlfsm.FSM {
 	if o.groupMgr == nil {
 		return nil
 	}
-	g := o.groupMgr.GetGroup(raftgroup.VaultControlPlaneGroupID(vaultID))
-	if g == nil {
-		return nil
-	}
-	vfsm, ok := g.FSM.(*vaultraft.FSM)
-	if !ok || vfsm == nil {
-		return nil
-	}
-	var out []vaultctlfsm.ManifestEntry
-	for _, t := range vfsm.Vaults() {
-		out = append(out, t.ListIncludingPipelineManifest()...)
+	var out map[glid.GLID]*vaultctlfsm.FSM
+	for _, gid := range o.groupMgr.Groups() {
+		if !raftgroup.IsVaultControlPlaneGroupID(gid) {
+			continue
+		}
+		g := o.groupMgr.GetGroup(gid)
+		if g == nil {
+			continue
+		}
+		vfsm, ok := g.FSM.(*vaultraft.FSM)
+		if !ok || vfsm == nil {
+			continue
+		}
+		for vid, f := range vfsm.Vaults() {
+			if out == nil {
+				out = make(map[glid.GLID]*vaultctlfsm.FSM)
+			}
+			out[vid] = f
+		}
 	}
 	return out
 }
