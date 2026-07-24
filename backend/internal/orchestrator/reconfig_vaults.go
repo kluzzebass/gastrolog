@@ -1560,6 +1560,16 @@ func wireVaultFSMPipelineChunkEvents(o *Orchestrator, vaultID glid.GLID, fsm *va
 // chunk manager's RegisterCloudBackedChunk method. When the FSM applies CmdUploadChunk
 // (from the leader's AnnounceUpload), the follower's chunk manager registers
 // the cloud-backed chunk from metadata alone — no record streaming or S3 download.
+//
+// gastrolog-5bnxc verification (KEEP the RegisterCloudBackedChunk mirror — not
+// redundant): the FSM-grounded read seam (gastrolog-2lfjk/3jerp) grounds
+// metadata reads only, not byte-access. cm.OpenCursor for a cloud-only blob
+// resolves solely through the local cloud index, and the Manager has no lazy
+// FSM-backed cloud resolver, so this per-apply registration is the only path
+// that lets a follower serve a live-uploaded cloud chunk. Retiring it makes
+// OpenCursor return ErrChunkNotFound. Pinned by
+// file.TestOpenCursorCloudBackedRequiresCloudIndex. (The EmitChunkUploaded event
+// side is a separate concern and unaffected.)
 func wireVaultFSMOnUpload(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkManager, o *Orchestrator, logger *slog.Logger) {
 	if g == nil || cm == nil {
 		return
