@@ -47,6 +47,46 @@ func FuzzLogEncodeDecode(f *testing.F) {
 	})
 }
 
+// FuzzLogBatchEncodeDecode verifies a StoreLogs batch survives the
+// entryLogBatch round-trip: every sub-entry comes back in order with its
+// offset addressing exactly its encoded bytes (the retention read path preads
+// sub-entries at these offsets).
+func FuzzLogBatchEncodeDecode(f *testing.F) {
+	f.Add(uint64(1), []byte("a"), []byte("bb"), []byte{})
+	f.Add(uint64(0), []byte{}, []byte{}, []byte{0xFF})
+	f.Add(uint64(1<<63-1), make([]byte, 512), []byte("x"), []byte("yz"))
+
+	f.Fuzz(func(t *testing.T, base uint64, d1, d2, d3 []byte) {
+		logs := []*hraft.Log{
+			{Index: base, Term: 1, Type: hraft.LogCommand, Data: d1},
+			{Index: base + 1, Term: 2, Type: hraft.LogNoop, Data: d2},
+			{Index: base + 2, Term: 3, Type: hraft.LogBarrier, Data: d3},
+		}
+		payload := encodeLogBatch(logs)
+
+		var got []hraft.Log
+		forEachBatchEntry(payload, func(off int, enc []byte) {
+			if !bytes.Equal(payload[off:off+len(enc)], enc) {
+				t.Fatalf("offset %d does not address the sub-entry bytes", off)
+			}
+			var lg hraft.Log
+			if err := decodelog(enc, &lg); err != nil {
+				t.Fatalf("decode sub-entry: %v", err)
+			}
+			got = append(got, lg)
+		})
+		if len(got) != len(logs) {
+			t.Fatalf("round-tripped %d entries, want %d", len(got), len(logs))
+		}
+		for i, want := range logs {
+			if got[i].Index != want.Index || got[i].Term != want.Term || got[i].Type != want.Type ||
+				!bytes.Equal(got[i].Data, want.Data) {
+				t.Fatalf("entry %d mismatch: got %+v want %+v", i, got[i], want)
+			}
+		}
+	})
+}
+
 // FuzzStableSetEncodeDecode verifies stable set key/value round-trips.
 func FuzzStableSetEncodeDecode(f *testing.F) {
 	f.Add("CurrentTerm", []byte{0x01, 0x02})

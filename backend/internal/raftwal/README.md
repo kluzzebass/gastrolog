@@ -75,21 +75,26 @@ sequenceDiagram
 
 **Key property**: `StoreLogs` blocks until the batch containing its entry is fsynced. The caller gets the same durability guarantee as boltdb — when `StoreLogs` returns nil, the data is on disk.
 
+**Batched `StoreLogs`**: a multi-entry `StoreLogs` call is ONE submit through the batch writer and ONE WAL record (`entryLogBatch`), not N round-trips. The record's single CRC covers the whole batch, so replay applies it all-or-nothing — a torn write can never surface a half-applied batch. Single-entry calls use the plain `entryLog` record.
+
 ### Read Path
 
 ```mermaid
 flowchart LR
     R[raft.GetLog] --> GS[GroupStore.GetLog]
-    GS --> MEM[In-memory map<br/>groupID → index → payload]
-    MEM --> |found| RET[Return log entry]
-    MEM --> |not found| ERR[ErrLogNotFound]
+    GS --> WIN[Recent window<br/>index → payload, budget-bounded]
+    WIN --> |hit| RET[Return log entry]
+    WIN --> |miss| IDX[Log index<br/>index → segment location]
+    IDX --> |found| PREAD[pread from WAL segment]
+    PREAD --> RET
+    IDX --> |not found| ERR[ErrLogNotFound]
 
-    style MEM fill:#2d5016,stroke:#4a8c28
+    style WIN fill:#2d5016,stroke:#4a8c28
 ```
 
-All reads are served from memory. The in-memory map is populated during WAL replay on startup and updated on every write. No disk I/O on reads.
+The log **index** (index → segment/offset/length) is kept in memory for every live entry and rebuilt during WAL replay. **Payloads** are held in memory only inside the per-group recent window, bounded by `Config.LogCacheBudgetBytes` (default 1MiB); older entries are read back from the segment files with `ReadAt`. Memory over throughput: reads beyond the window cost a disk read, but heap is bounded by the budget rather than by log length — even when Raft snapshots lag and the live log grows.
 
-**Memory bound**: Raft calls `DeleteRange` after each snapshot to trim old log entries. With `TrailingLogs=64` (the default), at most ~64 entries per group are kept in memory. For 100 groups × 64 entries × ~1KB = ~6.4MB. Bounded by Raft's snapshot policy, not by the WAL.
+**Memory bound**: per group, `LogCacheBudgetBytes` of payloads plus the index (a few dozen bytes per live entry). Raft's `DeleteRange` after each snapshot trims the index; the payload heap is bounded by the budget regardless.
 
 ### On-Disk Format
 
@@ -115,6 +120,7 @@ All reads are served from memory. The in-memory map is populated during WAL repl
 | `entryStableUint64` | 3 | Key-length prefixed key + uint64 (little-endian) |
 | `entryDeleteRange` | 4 | min (uint64) + max (uint64) |
 | `entryGroupReg` | 5 | Group name (UTF-8 string) |
+| `entryLogBatch` | 6 | `[count:4]` then per entry `[len:4][serialized raft.Log]` — one atomic `StoreLogs` batch |
 
 **CRC32**: Castagnoli (SSE4.2 hardware-accelerated on x86/ARM). Covers only the payload, not the header — the header's integrity is implied by the CRC matching the payload length.
 
@@ -167,10 +173,10 @@ flowchart LR
 If the process crashes mid-write, the last entry may be incomplete (header written, payload truncated) or corrupt (partial payload). On replay:
 
 - **Truncated header** (< 13 bytes remaining): replay stops cleanly.
-- **Truncated payload** (header valid but not enough bytes follow): replay stops.
+- **Truncated payload** (header valid but not enough bytes follow): replay stops — before allocating, if the claimed length runs past EOF.
 - **Bad CRC** (header + payload present but CRC doesn't match): replay stops.
 
-In all cases, entries before the corruption point are fully recovered. The incomplete entry is discarded. Raft handles the gap — the leader will replicate the missing entries.
+In all cases, entries before the corruption point are fully recovered. The incomplete entry is discarded. Because a `StoreLogs` batch is a single record under one CRC, a torn batch is discarded **whole** — replay never surfaces a half-applied batch. Raft handles the gap — the leader will replicate the missing entries.
 
 ### Crash After fsync, Before Caller Notified
 
@@ -231,17 +237,18 @@ flowchart TD
     BW -->|write + fsync| SEG
 ```
 
-- **Reads** (`GetLog`, `Get`, `GetUint64`, `FirstIndex`, `LastIndex`): Acquire `mu.Lock`, read from in-memory map, release. No disk I/O.
-- **Writes** (`StoreLogs`, `Set`, `SetUint64`, `DeleteRange`): Submit to `writeCh` (non-blocking if channel has space), block on `done` channel until batch is fsynced.
-- **batchWriter**: Single goroutine. Acquires `mu.Lock` for each batch to update in-memory state. Writes to segment file and fsyncs under the lock.
+- **Reads** (`GetLog`, `Get`, `GetUint64`, `FirstIndex`, `LastIndex`): Acquire `stateMu.RLock`. Recent-window hits are a map lookup; older log entries `ReadAt` their payload from the segment file under the read lock (compaction closes superseded read handles only under `stateMu.Lock`, so a handle is never closed mid-read).
+- **Writes** (`StoreLogs`, `Set`, `SetUint64`, `DeleteRange`): Submit ONE op to `writeCh` (a multi-entry `StoreLogs` is one op), block on `done` channel until the batch is fsynced.
+- **batchWriter**: Single goroutine. Writes to the segment file, briefly takes `stateMu.Lock` to update in-memory state, then fsyncs without the lock.
 
-No lock contention between reads and the batch writer — reads finish quickly (map lookup), and the batch writer holds the lock only for the duration of memory updates + disk write.
+Reads never wait on fsync; the batch writer holds the write lock only for the in-memory index updates.
 
 ---
 
 ## Limitations
 
-- **In-memory index**: All log entries between `firstIndex` and `lastIndex` for each group are kept in memory. This is bounded by Raft's `TrailingLogs` config (default 64) but requires Raft to take snapshots regularly.
+- **In-memory index**: The log index (index → segment location) covers every live entry per group, so index memory grows with live-log length until Raft's post-snapshot `DeleteRange` trims it. Payload heap does NOT grow with log length — it is bounded by `LogCacheBudgetBytes` per group.
+- **No per-read CRC**: payloads read back from segments were CRC-verified at write/replay time; `GetLog` does not re-verify (batch sub-entries share one record CRC and cannot be verified individually).
 - **Segment compaction**: Triggered after successful `DeleteRange` batches when multiple segments exist; failures are best-effort ignored so `DeleteRange` success is never masked. There is no separate manual “prune WAL” API yet.
 - **Single writer**: All writes go through one goroutine. This is intentional (serializes fsync) but means write throughput is bounded by single-core speed + disk fsync latency. In practice, the 1ms batch window means this is not a bottleneck — multiple groups' writes are coalesced.
 - **No checksumming of headers**: The CRC covers only the payload. A corrupted header (wrong groupID or length) would cause replay to misparse subsequent entries. Mitigation: the CRC of the next entry would fail, stopping replay.
@@ -250,8 +257,8 @@ No lock contention between reads and the batch writer — reads finish quickly (
 
 ## Test Coverage
 
-- Unit tests covering happy path, edge cases, isolation, crash recovery, concurrency, and segment compaction after `DeleteRange`
-- 5 fuzz targets for encode/decode round-trips and corrupt segment replay
+- Unit tests covering happy path, edge cases, isolation, crash recovery, concurrency, segment compaction after `DeleteRange`, batched `StoreLogs` atomicity (torn/corrupt batch replay), and recent-window retention (eviction, disk-served reads, budget accounting)
+- 6 fuzz targets for encode/decode round-trips (including `entryLogBatch`) and corrupt segment replay
 - 2 hashicorp/raft integration tests (election + apply, snapshot + restore)
 - 2 benchmarks (WAL vs boltdb at 1/4/16/64 concurrent groups)
 - All tests pass with Go race detector enabled
