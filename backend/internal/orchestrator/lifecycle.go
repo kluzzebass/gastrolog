@@ -89,10 +89,19 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	// Start the pressure gate after everything else is wired.
 	o.auxWg.Go(func() { gate.Run(ctx, 200*time.Millisecond) })
 
-	// Periodic per-vault rate alert evaluator (gastrolog-47qyw). Evaluates
-	// retention rates against thresholds every 5 seconds and raises/clears
-	// alerts as needed.
-	o.auxWg.Go(func() { o.runRateAlertEvaluator(ctx, 5*time.Second) })
+	// Periodic retention-rate + cloud-health evaluation on the shared
+	// scheduler (gastrolog-47qyw, gastrolog-576bm). Replaces the raw 5s
+	// time.Ticker (runRateAlertEvaluator) that was invisible to the scheduler
+	// and inspector. Rate-threshold evaluation and cloud-store reachability
+	// polling are legitimate periodic policy work; the cloud-upload backfill
+	// this loop used to drive every tick is now edge-triggered (seal effect,
+	// leadership gain, snapshot restore) — see evaluateVaultCloudHealth.
+	// Registered here rather than in New() so it runs only while the
+	// orchestrator is started, matching the retired ticker's lifecycle. A
+	// registration failure degrades alerting but must not abort startup.
+	if err := o.startCloudHealthAndRateAlerts(); err != nil {
+		o.logger.Error("register cloud-health/rate-alert job", "error", err)
+	}
 
 	// Active-chunk progress throttle (gastrolog-4y03v). Append paths
 	// signal progressTrigger per record; this goroutine fans out to
@@ -136,21 +145,17 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	return nil
 }
 
-// runRateAlertEvaluator periodically evaluates the retention rate alerter and
-// cloud health. Exits when ctx is cancelled.
-func (o *Orchestrator) runRateAlertEvaluator(ctx context.Context, interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			now := o.now()
-			o.retentionRates.Evaluate(now)
-			o.evaluateCloudHealth()
-		}
-	}
+// rateAlertAndCloudHealthTick is the periodic scheduler job body that evaluates
+// the retention rate alerter (gastrolog-47qyw) and cloud health (raise/clear the
+// cloud-store alert, plus edge-triggered upload catch-up — see
+// evaluateVaultCloudHealth). It replaces the raw 5s time.Ticker that was
+// invisible to the scheduler/inspector and doubled as the cloud-upload
+// compensator (gastrolog-576bm); the rate-alert evaluation is legitimate
+// periodic policy work, so it stays periodic — only the backfill mechanism was
+// demoted off the tick.
+func (o *Orchestrator) rateAlertAndCloudHealthTick() {
+	o.retentionRates.Evaluate(o.now())
+	o.evaluateCloudHealth()
 }
 
 // Stop stops the ingest pipeline and the orchestrator's auxiliary

@@ -12,18 +12,44 @@ import (
 	"gastrolog/internal/pipeline/chunking"
 )
 
+const (
+	// cloudHealthAndRateAlertsJobName is the shared periodic scheduler job that
+	// evaluates retention rate alerts and cloud-store health. It replaces the
+	// raw 5s time.Ticker (runRateAlertEvaluator) so the work is visible in the
+	// job inspector. See gastrolog-576bm.
+	cloudHealthAndRateAlertsJobName = "cloud-health-rate-alerts"
+	cloudHealthAndRateAlertsPeriod  = 5 * time.Second
+)
+
+// startCloudHealthAndRateAlerts registers the periodic retention-rate + cloud-
+// health evaluation job on the shared scheduler. Legitimate periodic policy
+// work (rate-threshold evaluation and cloud-store reachability polling); the
+// cloud-upload backfill it used to drive every tick is now edge-triggered — see
+// evaluateVaultCloudHealth. gastrolog-576bm.
+func (o *Orchestrator) startCloudHealthAndRateAlerts() error {
+	if err := o.scheduler.AddJob(cloudHealthAndRateAlertsJobName,
+		CronEvery(cloudHealthAndRateAlertsPeriod), o.rateAlertAndCloudHealthTick); err != nil {
+		return err
+	}
+	o.scheduler.Describe(cloudHealthAndRateAlertsJobName,
+		"Retention rate alerts and cloud-store health evaluation")
+	return nil
+}
+
 // cloudHealthChecker is an optional interface implemented by chunk managers
-// that have a cloud backing store. The orchestrator polls this every 5s
-// to raise/clear a "cloud-store:<vaultID>" alert.
+// that have a cloud backing store. The orchestrator's periodic cloud-health
+// scheduler job polls this to raise/clear a "cloud-store:<vaultID>" alert.
 type cloudHealthChecker interface {
 	CloudDegraded() bool
 	CloudDegradedError() string
 }
 
 // evaluateCloudHealth checks every instance's cloud health and sets/clears
-// alerts. When an instance transitions from degraded → healthy, schedules
-// post-seal work for sealed chunks that are missing their cloud upload.
-// Runs in the rate alert evaluator loop (every 5s).
+// alerts. On the vault's uploader it fires a one-shot upload catch-up sweep
+// only on an edge (first observation, degraded→healthy recovery, or a stuck
+// backfill entry) — see evaluateVaultCloudHealth. Runs as a periodic scheduler
+// job (cloudHealthAndRateAlertsJobName), so it is operator-visible in the job
+// inspector, unlike the raw ticker it replaced (gastrolog-576bm).
 //
 // Also GCs cloud-backfill failure/backoff state the same way
 // retentionSweepAll GCs retention runners: a vault this node no longer runs
@@ -71,24 +97,108 @@ func vaultInstCanUploadToCloud(vi *VaultInstance) bool {
 	return ok && cs.CloudStoreConfigured()
 }
 
-// evaluateVaultCloudHealth checks a single cloud instance's health and runs
-// backfill on the vault leader only. Followers skip backfill — they learn
-// about cloud-backed chunks via the vault-ctl FSM.
+// evaluateVaultCloudHealth checks a single cloud instance's health and, on the
+// vault's cloud uploader only, fires a one-shot upload catch-up sweep on the
+// edges that the live onSeal effect cannot cover. It is NOT the primary upload
+// mechanism (that is the seal effect → schedulePipelineCloudUpload, plus the
+// vault-ctl leadership-gain and snapshot-restore catch-up hooks). Steady-state
+// healthy ticks with nothing stuck do no sweep at all — the retired 5s backfill
+// tick was a compensator for missed seal effects (gastrolog-576bm).
+//
+// The catch-up sweep runs only when NOT degraded (uploading into an unreachable
+// store is futile) and one of:
+//   - first observation as this vault's uploader — startup, or a placement /
+//     ctl-leadership change that just made this node the uploader; picks up
+//     chunks sealed before this node was the uploader;
+//   - degraded→healthy recovery — picks up chunks that sealed during the outage,
+//     whose live seal-effect upload failed and was never retried;
+//   - an outstanding backfill-failure entry for the vault — retries a stuck
+//     chunk on the existing exponential backoff (backfillDue gates the attempt).
+//
+// Followers (not the uploader) skip the sweep entirely — they learn about
+// cloud-backed chunks via the vault-ctl FSM — and their remembered degraded
+// state is dropped so a later uploader-gain is treated as a first observation.
 func (o *Orchestrator) evaluateVaultCloudHealth(vaultInst *VaultInstance) {
 	chk, ok := vaultInst.Chunks.(cloudHealthChecker)
 	if !ok {
 		return
 	}
-	if chk.CloudDegraded() {
+	degraded := chk.CloudDegraded()
+	if degraded {
 		o.alerts.Raise("cloud-store", vaultInst.VaultID.String(),
 			fmt.Sprintf("Cloud store unreachable for vault %s: %s",
 				vaultInst.VaultID.String()[:8], chk.CloudDegradedError()))
 	} else {
 		o.alerts.Clear("cloud-store", vaultInst.VaultID.String())
 	}
-	if vaultInstRunsCloudBackfill(vaultInst) {
+	if !vaultInstRunsCloudBackfill(vaultInst) {
+		o.forgetCloudDegradedState(vaultInst.VaultID)
+		return
+	}
+	prev, known := o.swapCloudDegradedState(vaultInst.VaultID, degraded)
+	if degraded {
+		return
+	}
+	firstObservation := !known
+	recovered := known && prev
+	if firstObservation || recovered || o.vaultHasBackfillFailures(vaultInst.VaultID) {
 		o.backfillCloudUploads(vaultInst)
 	}
+}
+
+// cloudUploadCatchupForVault runs a one-shot cloud-upload catch-up sweep for a
+// single vault — the event-driven replacement for the retired 5s backfill tick.
+// Invoked on the edges that can leave sealed-but-not-cloud-backed chunks
+// undiscovered by the live onSeal effect: vault-ctl leadership gain and snapshot
+// restore. No-op unless this node is the vault's cloud uploader
+// (vaultInstRunsCloudBackfill). Safe to call without holding o.mu —
+// findLocalVaultInstance takes its own read lock and the sweep locks for itself.
+func (o *Orchestrator) cloudUploadCatchupForVault(vaultID glid.GLID) {
+	vaultInst := o.findLocalVaultInstance(vaultID)
+	if vaultInst == nil || !vaultInstanceHasCloudBacking(vaultInst) {
+		return
+	}
+	if !vaultInstRunsCloudBackfill(vaultInst) {
+		return
+	}
+	o.backfillCloudUploads(vaultInst)
+}
+
+// swapCloudDegradedState records the latest observed cloud-degraded state for a
+// vault this node uploads for and returns the prior value plus whether one was
+// on record. Guarded by backfillMu.
+func (o *Orchestrator) swapCloudDegradedState(vaultID glid.GLID, degraded bool) (prev bool, known bool) {
+	o.backfillMu.Lock()
+	defer o.backfillMu.Unlock()
+	if o.cloudDegradedSeen == nil {
+		o.cloudDegradedSeen = make(map[glid.GLID]bool)
+	}
+	prev, known = o.cloudDegradedSeen[vaultID]
+	o.cloudDegradedSeen[vaultID] = degraded
+	return prev, known
+}
+
+// forgetCloudDegradedState drops a vault's remembered degraded state so the next
+// time this node becomes its uploader counts as a first observation (and fires a
+// catch-up sweep). Guarded by backfillMu.
+func (o *Orchestrator) forgetCloudDegradedState(vaultID glid.GLID) {
+	o.backfillMu.Lock()
+	defer o.backfillMu.Unlock()
+	delete(o.cloudDegradedSeen, vaultID)
+}
+
+// vaultHasBackfillFailures reports whether any chunk in the vault currently has
+// a backfill-failure backoff entry — the signal that a stuck upload still needs
+// periodic retry. Guarded by backfillMu.
+func (o *Orchestrator) vaultHasBackfillFailures(vaultID glid.GLID) bool {
+	o.backfillMu.Lock()
+	defer o.backfillMu.Unlock()
+	for _, entry := range o.backfillFailures {
+		if entry.vaultID == vaultID {
+			return true
+		}
+	}
+	return false
 }
 
 // vaultInstRunsCloudBackfill reports whether this node should schedule cloud

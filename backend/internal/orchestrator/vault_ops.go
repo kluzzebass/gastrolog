@@ -593,6 +593,13 @@ func (o *Orchestrator) runAfterVaultCtlRestore(vaultID glid.GLID) {
 	if o.pipeline != nil && o.isPipelineIngestVault(vaultID) {
 		o.recoverPipelineVaultAfterRestore(vaultID)
 	}
+	// Cloud-upload catch-up on snapshot restore: Restore replaces the FSM
+	// wholesale with no per-entry seal effects, so a chunk that became sealed-
+	// but-not-cloud-backed in the installed snapshot never scheduled an upload
+	// on this node. This replaces the retired 5s backfill tick's discovery role
+	// for the snapshot-restore gap (gastrolog-576bm). No-op unless this node is
+	// the vault's uploader.
+	o.cloudUploadCatchupForVault(vaultID)
 	o.vaultOpsLogger.Info("vault-ctl after-restore reconcile complete",
 		"vault", vaultID, "has_instance", t != nil)
 }
@@ -600,6 +607,15 @@ func (o *Orchestrator) runAfterVaultCtlRestore(vaultID glid.GLID) {
 // onVaultCtlLeadGained wakes the chunking worker when this home becomes the
 // vault-ctl leader. Planning and build passes run in the worker loop.
 func (o *Orchestrator) onVaultCtlLeadGained(vaultID glid.GLID) {
+	// Cloud-upload catch-up on leadership change: a chunk that sealed while
+	// this node was not the vault's uploader never saw the live onSeal upload
+	// effect here. This replaces the retired 5s backfill tick's discovery role
+	// for the leadership-change case (gastrolog-576bm). Applies to both
+	// type=cloud vaults (gated on vault-ctl leadership) and cloud-backed
+	// pipeline vaults (gated on CloudStore/placement leadership); the catch-up
+	// is a no-op unless this node is actually the uploader.
+	o.cloudUploadCatchupForVault(vaultID)
+
 	if o.pipeline == nil || !o.isPipelineIngestVault(vaultID) {
 		return
 	}
