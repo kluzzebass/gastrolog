@@ -958,10 +958,13 @@ func New(cfg Config) (*Orchestrator, error) {
 		return nil, fmt.Errorf("cache eviction sweep: %w", err)
 	}
 
-	// Vault-ctl membership reconcile safety net (gastrolog-11bla):
-	// wakes every active leader-epoch goroutine via desiredChanged
-	// every 30 s as a fallback for primary triggers (leadership
-	// gain, SetDesiredMembers) that may have missed firing.
+	// Vault-ctl membership reconcile residual (gastrolog-11bla,
+	// gastrolog-3oram): membership convergence is event-driven and the
+	// desiredChanged wake is captured before each pass so it is never lost.
+	// This 30 s re-drive is NOT a missed-signal fallback; it only retries a
+	// pass that bailed on a transient in-flight Raft-config error and supplies
+	// the confirming second observation for the damped leadership-transfer
+	// aligner in an otherwise-idle group.
 	if err := o.startVaultCtlMembershipReconcile(); err != nil {
 		return nil, fmt.Errorf("vault-ctl membership reconcile: %w", err)
 	}

@@ -21,11 +21,31 @@ const (
 	vaultCtlMembershipReconcileJobName = "vault-ctl-membership-reconcile"
 
 	// vaultCtlMembershipReconcileSchedule runs every 30 seconds.
-	// 6-field cron (with-seconds). Primary triggers for reconcile
-	// are leadership-gain (after raft.Barrier) and explicit
-	// SetDesiredMembers; this scheduled tick is the periodic safety
-	// net that wakes every active leader epoch via desiredChanged
-	// for cases where the explicit triggers were missed.
+	// 6-field cron (with-seconds).
+	//
+	// This is NOT a compensator for a missed desiredChanged signal —
+	// runLeaderEpoch captures the wake channel before each reconcile read,
+	// so a Notify racing an in-flight pass is never lost (gastrolog-3oram).
+	// Membership convergence (AddVoter / RemoveServer against the desired
+	// set) is fully event-driven: leadership-gain runs the initial pass,
+	// SetDesiredMembers / SetDesiredLeaderID fire desiredChanged, and a
+	// pass that yields mid-burst re-fires it.
+	//
+	// The residual periodic re-drive covers exactly two genuinely-delayed
+	// cases that have no instantaneous event source and cannot be re-fired
+	// immediately without harm:
+	//
+	//  1. Retry of a pass that bailed on a transient in-flight-config error
+	//     (AddVoter / RemoveServer commit-or-enqueue timeout, or a
+	//     GetConfiguration failure). An immediate re-notify would hot-spin
+	//     on "timed out enqueuing operation" while the prior configuration
+	//     change is still draining hashicorp/raft's serialized channel, so
+	//     the retry must be delayed.
+	//  2. The confirming second observation for the damped leadership-transfer
+	//     aligner (transferIfNeeded). A settled wrong vault-ctl leader is only
+	//     transferred after being seen on two passes; in an otherwise-idle
+	//     group (no config/placement churn) the organic election that produced
+	//     it is the only event, so a periodic pass supplies observation #2.
 	vaultCtlMembershipReconcileSchedule = "*/30 * * * * *"
 
 	// vaultMembershipChangeTimeout bounds the *log append* portion of
@@ -95,13 +115,20 @@ type vaultCtlLeaderManager struct {
 	misaligned map[glid.GLID]misalignedObservation
 
 	// desiredChanged broadcasts to every leader epoch goroutine whenever
-	// SetDesiredMembers updates a vault's target member set OR a reconcile
-	// pass bails partway through a burst with more work to do. Replaces
-	// the previous "wait for the 30 s safety-net tick" semantics: after
-	// K8s scale-out fires a flurry of NotifyNodeConfigPut events into
+	// SetDesiredMembers / SetDesiredLeaderID updates a vault's target OR a
+	// reconcile pass bails partway through a burst with more work to do.
+	// After K8s scale-out fires a flurry of NotifyNodeConfigPut events into
 	// RefreshVaultCtlMembers, the leader epochs converge in milliseconds
-	// instead of seconds. Notify is a no-op when no epoch is waiting, so
-	// signals are dropped harmlessly during shutdown. See gastrolog-5n6xz.
+	// instead of seconds. See gastrolog-5n6xz.
+	//
+	// runLeaderEpoch captures this signal's channel BEFORE reading the
+	// desired set on each pass (gastrolog-3oram), so a Notify that races an
+	// in-flight reconcile closes a channel the loop is already committed to
+	// waiting on and is re-observed on the next iteration — never dropped.
+	// The 30 s scheduled tick is therefore no longer the fallback for a
+	// missed wake; it only serves the two delayed residual cases documented
+	// on vaultCtlMembershipReconcileSchedule. Notify is a no-op when no epoch
+	// is waiting, so signals are dropped harmlessly during shutdown.
 	desiredChanged *notify.Signal
 
 	// commitTimeout bounds how long a single reconcile pass waits on an
@@ -120,6 +147,14 @@ type vaultCtlLeaderManager struct {
 	// onLeadGained fires at the start of each vault-ctl leader epoch so the
 	// orchestrator can wake pipeline chunking (manifest planner + sealed build).
 	onLeadGained func(vaultID glid.GLID)
+
+	// reconcileHook, if non-nil, is invoked at the start of each reconcile
+	// pass immediately after the desired set is read and BEFORE any
+	// membership change is issued. Test-only: it lets a test deliver a
+	// concurrent SetDesiredMembers during an in-flight pass to exercise the
+	// wake-capture (no-lost-wake) semantics of runLeaderEpoch. Nil in
+	// production. See gastrolog-3oram.
+	reconcileHook func()
 }
 
 // SetOnMemberRemoved registers a callback invoked after the leader
@@ -251,27 +286,31 @@ func (m *vaultCtlLeaderManager) SetDesiredLeaderID(vaultID glid.GLID, nodeID str
 }
 
 // safetyTick is the task fn invoked by the
-// vault-ctl-membership-reconcile scheduled job. Pokes
-// desiredChanged, which wakes every active leader epoch goroutine.
-// Each woken epoch runs reconcile in its OWN goroutine — that
-// preserves the existing single-reconciler-per-vault invariant
-// (event-driven loop in runLeaderEpoch is the sole reconcile
+// vault-ctl-membership-reconcile scheduled job. Pokes desiredChanged, which
+// wakes every active leader epoch goroutine. Each woken epoch runs reconcile
+// in its OWN goroutine — that preserves the single-reconciler-per-vault
+// invariant (the event-driven loop in runLeaderEpoch is the sole reconcile
 // driver, the scheduler just wakes it). See gastrolog-11bla.
+//
+// This tick is NOT the fallback for a missed desiredChanged signal — that
+// lost-wake race was fixed in runLeaderEpoch (gastrolog-3oram). It exists
+// only for the two genuinely-delayed residual cases documented on
+// vaultCtlMembershipReconcileSchedule: retrying a pass that bailed on a
+// transient in-flight-config error, and supplying the confirming second
+// observation for the damped leadership-transfer aligner in an idle group.
 func (m *vaultCtlLeaderManager) safetyTick() {
 	m.desiredChanged.Notify()
 }
 
-// startVaultCtlMembershipReconcile registers the membership-
-// reconcile safety net with the orchestrator's job scheduler.
-// Returns an error if AddJob fails. The Describe text explains
-// the every-node + per-group-leader semantics for the operator.
-// See gastrolog-11bla.
+// startVaultCtlMembershipReconcile registers the periodic residual re-drive
+// with the orchestrator's job scheduler. Returns an error if AddJob fails.
+// See gastrolog-11bla, gastrolog-3oram.
 func (o *Orchestrator) startVaultCtlMembershipReconcile() error {
 	if err := o.scheduler.AddJob(vaultCtlMembershipReconcileJobName, vaultCtlMembershipReconcileSchedule, o.vaultCtlLeaders.safetyTick); err != nil {
 		return err
 	}
 	o.scheduler.Describe(vaultCtlMembershipReconcileJobName,
-		"Per-vault-ctl membership reconcile safety net. Runs on every node every 30 seconds; wakes every active leader-epoch goroutine via the desiredChanged signal. The actual reconcile work runs in each epoch's existing goroutine (one per vault this node leads), so the single-reconciler-per-vault invariant is preserved. Primary triggers (leadership gain, SetDesiredMembers) remain event-driven; this is the fallback for cases neither catches.")
+		"Vault-ctl membership reconcile residual. Runs on every node every 30 seconds; pokes each active leader-epoch goroutine (one per vault this node leads) to re-run its reconcile pass, preserving the single-reconciler-per-vault invariant. Membership convergence is event-driven — leadership gain, SetDesiredMembers/SetDesiredLeaderID, and mid-burst yields all wake the epochs, and the wake is captured before each pass so it is never lost. This periodic re-drive is NOT a missed-signal fallback; it covers only two delayed cases with no instantaneous event: retrying a pass that bailed on a transient in-flight Raft-config error (an immediate retry would hot-spin on the still-draining serialized config channel), and giving the damped leadership-transfer aligner its confirming second observation when an idle group sees no other passes.")
 	return nil
 }
 
@@ -279,14 +318,26 @@ func (o *Orchestrator) startVaultCtlMembershipReconcile() error {
 // returns successfully on the leader. Exits when ctx is cancelled.
 //
 // The loop is event-driven: it wakes on ctx cancellation or on the
-// desiredChanged signal (fired by SetDesiredMembers, by a reconcile
-// pass that yielded mid-burst, OR by the periodic safety-net
-// vault-ctl-membership-reconcile scheduled job — see
-// startVaultCtlMembershipReconcile + gastrolog-11bla). The
-// desiredChanged path is what keeps burst scale-out responsive —
-// without it, a leftover voter would wait up to the scheduler tick
-// to be picked up. See gastrolog-5n6xz.
+// desiredChanged signal (fired by SetDesiredMembers / SetDesiredLeaderID, by
+// a reconcile pass that yielded mid-burst, OR by the periodic residual
+// re-drive — see startVaultCtlMembershipReconcile + gastrolog-11bla). The
+// desiredChanged path is what keeps burst scale-out responsive — without it,
+// a leftover voter would wait up to the residual tick to be picked up.
+// See gastrolog-5n6xz.
+//
+// No-lost-wake ordering (gastrolog-3oram): desiredChanged is a
+// close-and-recreate signal, so the wake channel must be captured BEFORE the
+// pass reads the desired set. If it were captured after (as the loop did
+// previously), a Notify that fired while reconcile was running would close a
+// channel nobody was waiting on and be replaced, dropping the wake until the
+// next Notify or the 30 s residual tick — precisely the "desiredChanged
+// signal missed" gap. By subscribing first and waiting last, any Notify
+// racing a pass closes the channel the loop is already committed to, so the
+// next iteration re-reconciles against the newer desired set.
 func (m *vaultCtlLeaderManager) runLeaderEpoch(ctx context.Context, vaultID glid.GLID, group *raftgroup.Group) {
+	// Subscribe before the initial reconcile reads the desired set.
+	wakeCh := m.desiredChanged.C()
+
 	// Initial reconcile immediately after barrier.
 	m.reconcile(vaultID, group)
 	if m.onLeadGained != nil {
@@ -297,13 +348,15 @@ func (m *vaultCtlLeaderManager) runLeaderEpoch(ctx context.Context, vaultID glid
 	}
 
 	for {
-		wakeCh := m.desiredChanged.C()
 		select {
 		case <-ctx.Done():
 			return
 		case <-wakeCh:
-			m.reconcile(vaultID, group)
 		}
+		// Re-subscribe BEFORE reconciling so a Notify that fires while this
+		// pass runs is captured by the next wait rather than dropped.
+		wakeCh = m.desiredChanged.C()
+		m.reconcile(vaultID, group)
 	}
 }
 
@@ -313,10 +366,20 @@ func (m *vaultCtlLeaderManager) runLeaderEpoch(ctx context.Context, vaultID glid
 // (or the next epoch on the new leader) will pick up where we left off.
 func (m *vaultCtlLeaderManager) reconcile(vaultID glid.GLID, group *raftgroup.Group) {
 	desired := m.desired.Get(vaultID)
+
+	// Test-only injection point: fire a concurrent desired-set change here,
+	// after the read above but before any membership work, to exercise the
+	// wake-capture semantics of runLeaderEpoch (gastrolog-3oram). Nil in
+	// production.
+	if m.reconcileHook != nil {
+		m.reconcileHook()
+	}
+
 	if len(desired) == 0 {
 		// No desired-members info yet. The orchestrator should have
 		// called SetDesiredMembers before Start; if it didn't, the next
-		// tick will catch up once it does.
+		// wake (SetDesiredMembers Notify, or the residual re-drive) will
+		// catch up once it does.
 		return
 	}
 

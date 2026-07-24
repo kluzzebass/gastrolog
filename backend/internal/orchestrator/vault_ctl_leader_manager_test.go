@@ -5,6 +5,7 @@ import (
 	"gastrolog/internal/glid"
 	"io"
 	"log/slog"
+	"sync"
 	"testing"
 	"time"
 
@@ -597,4 +598,193 @@ func TestTransferDampingIsPerVault(t *testing.T) {
 	if !m.confirmMisalignment(a, "node-B", "node-A") {
 		t.Fatal("vault A's second sighting must confirm independently")
 	}
+}
+
+// configHasServer reports whether the given server ID is present in the
+// group's current Raft configuration. Returns (present, ok) — ok is false
+// if the configuration could not be read this poll.
+func configHasServer(g *raftgroup.Group, id hraft.ServerID) (present, ok bool) {
+	fut := g.Raft.GetConfiguration()
+	if err := fut.Error(); err != nil {
+		return false, false
+	}
+	for _, srv := range fut.Configuration().Servers {
+		if srv.ID == id {
+			return true, true
+		}
+	}
+	return false, true
+}
+
+// TestVaultCtlLeaderManager_ConcurrentDesiredChangeDuringReconcileNotLost is
+// the gastrolog-3oram regression for the desiredChanged lost-wake race that
+// the 30 s membership-reconcile safety tick used to paper over.
+//
+// desiredChanged is a close-and-recreate signal. The old runLeaderEpoch loop
+// captured the wake channel at the top of each iteration and reconciled
+// inside the select case, so a Notify that fired WHILE reconcile was running
+// closed a channel nobody was waiting on and was replaced — the wake was lost
+// and the change waited for the periodic tick. The fix captures the wake
+// channel BEFORE each pass reads the desired set and waits on it AFTER acting,
+// so a racing Notify is always observed on the next iteration.
+//
+// The reconcileHook injects exactly that race: the initial pass reads the
+// desired set (reals only — a no-op pass), and while it runs the hook flips
+// the desired set to reals+synth and fires the Notify. There is NO
+// scheduler/cron in this harness, so the ONLY thing that can drive the
+// follow-up AddNonvoter of synth is the wake captured before the initial
+// pass. If that wake were lost (the pre-fix behavior), synth would never be
+// added and the test would time out. Because synth is never part of the
+// initial configuration, its eventual presence is an unambiguous witness
+// that the racing wake was delivered.
+func TestVaultCtlLeaderManager_ConcurrentDesiredChangeDuringReconcileNotLost(t *testing.T) {
+	t.Parallel()
+
+	groups, cleanup := makeTwoNodeVaultGroup(t, "lostwake-1", "lostwake-2")
+	defer cleanup()
+	leader := groups[0]
+
+	mgr := newVaultCtlLeaderManager(discardLogger())
+	defer mgr.StopAll()
+
+	vaultID := glid.New()
+
+	reals := []hraft.Server{
+		{ID: "lostwake-1", Address: "lostwake-1"},
+		{ID: "lostwake-2", Address: "lostwake-2"},
+	}
+	withSynth := append(append([]hraft.Server{}, reals...),
+		hraft.Server{ID: "lostwake-synth", Address: "lostwake-synth"})
+
+	// Initial desired = reals only: the first reconcile pass is a no-op.
+	mgr.SetDesiredMembers(vaultID, reals)
+
+	// One-shot hook: while the initial (no-op) pass runs — after it has read
+	// the desired set — flip the desired set to include synth and fire the
+	// Notify, racing the in-flight pass. Only a wake captured BEFORE that
+	// pass can carry this change into the next reconcile.
+	var once sync.Once
+	mgr.reconcileHook = func() {
+		once.Do(func() {
+			mgr.SetDesiredMembers(vaultID, withSynth)
+		})
+	}
+
+	mgr.Start(vaultID, leader)
+
+	// synth was never in the initial config, so its presence proves the
+	// racing wake drove a follow-up pass. A lost wake leaves synth absent
+	// forever (no periodic tick exists in this harness).
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if present, ok := configHasServer(leader, "lostwake-synth"); ok && present {
+			return // success — the concurrent wake was not lost
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatal("synth was never added within 5s — the concurrent desired change was lost (lost-wake regression)")
+}
+
+// TestVaultCtlLeaderManager_MembershipConvergesWhileLeaderElsewhere covers the
+// cluster-first case: a membership change (config dispatch fans SetDesiredMembers
+// to every node's manager) converges event-driven even though only one node is
+// the vault-ctl Raft leader. The follower node's manager receives the same call
+// but its leader epoch never runs (LeaderLoop only fires OnLead on the leader),
+// so it must be a harmless no-op while the leader's epoch does the AddVoter.
+//
+// No scheduler/cron is wired here, so convergence proves the event path alone
+// carries a scale-out across nodes.
+func TestVaultCtlLeaderManager_MembershipConvergesWhileLeaderElsewhere(t *testing.T) {
+	t.Parallel()
+
+	groups, cleanup := makeTwoNodeVaultGroup(t, "elsewhere-1", "elsewhere-2")
+	defer cleanup()
+	leaderGroup := groups[0]
+	followerGroup := groups[1]
+
+	mgrLeader := newVaultCtlLeaderManager(discardLogger())
+	defer mgrLeader.StopAll()
+	mgrFollower := newVaultCtlLeaderManager(discardLogger())
+	defer mgrFollower.StopAll()
+
+	vaultID := glid.New()
+
+	// Both managers start their local group's leader loop. Only the leader
+	// group's OnLead actually runs a reconcile epoch.
+	mgrLeader.Start(vaultID, leaderGroup)
+	mgrFollower.Start(vaultID, followerGroup)
+
+	// Config dispatch fans the new desired set to every node's manager.
+	desired := []hraft.Server{
+		{ID: "elsewhere-1", Address: "elsewhere-1"},
+		{ID: "elsewhere-2", Address: "elsewhere-2"},
+		{ID: "elsewhere-synth", Address: "elsewhere-synth"},
+	}
+	mgrLeader.SetDesiredMembers(vaultID, desired)
+	mgrFollower.SetDesiredMembers(vaultID, desired)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if present, ok := configHasServer(leaderGroup, "elsewhere-synth"); ok && present {
+			return // converged via the event path, no tick
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatal("synthetic peer did not converge event-driven within 5s (follower manager should be a no-op, leader converges)")
+}
+
+// TestVaultCtlLeaderManager_RapidDesiredChurnConvergesToFinal exercises the
+// coalescing property of the desiredChanged capture semantics under a rapid
+// burst of SetDesiredMembers calls: only the LAST desired set matters, and the
+// group must converge to it without any periodic tick even though most of the
+// intermediate Notifies land while a reconcile pass is already running.
+//
+// The interleaved calls toggle synth in and out; the FINAL call adds it. If
+// the final wake (or a decisive intermediate one) were lost while a reconcile
+// pass was already running, the group could settle on a stale reals-only set.
+// synth is never part of the initial config, so its terminal presence —
+// matching the last SetDesiredMembers — proves the last wake won.
+func TestVaultCtlLeaderManager_RapidDesiredChurnConvergesToFinal(t *testing.T) {
+	t.Parallel()
+
+	groups, cleanup := makeTwoNodeVaultGroup(t, "churn-1", "churn-2")
+	defer cleanup()
+	leader := groups[0]
+
+	mgr := newVaultCtlLeaderManager(discardLogger())
+	defer mgr.StopAll()
+
+	vaultID := glid.New()
+
+	reals := []hraft.Server{
+		{ID: "churn-1", Address: "churn-1"},
+		{ID: "churn-2", Address: "churn-2"},
+	}
+	withSynth := append(append([]hraft.Server{}, reals...),
+		hraft.Server{ID: "churn-synth", Address: "churn-synth"})
+
+	mgr.SetDesiredMembers(vaultID, reals)
+	mgr.Start(vaultID, leader)
+
+	// Rapid churn: remove, add, remove, add, ... Most of these Notifies land
+	// while a reconcile pass is already running, exercising the wake-capture
+	// coalescing under load.
+	for i := range 12 {
+		if i%2 == 0 {
+			mgr.SetDesiredMembers(vaultID, reals)
+		} else {
+			mgr.SetDesiredMembers(vaultID, withSynth)
+		}
+	}
+	// Final desired state includes synth.
+	mgr.SetDesiredMembers(vaultID, withSynth)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if present, ok := configHasServer(leader, "churn-synth"); ok && present {
+			return // converged to the final desired set
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatal("did not converge to final desired set (synth) within 5s — a wake in the burst was lost")
 }
