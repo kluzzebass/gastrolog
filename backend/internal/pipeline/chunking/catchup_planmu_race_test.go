@@ -65,8 +65,8 @@ func TestPlanCatchUpConcurrentWithPlanOnceNoRace(t *testing.T) {
 		// test is about lock discipline, not seal timing.
 		Policy: chunking.ManifestRotationPolicy{MaxRecords: 1_000_000},
 		Now:    func() time.Time { return evalNow },
-		RequiredHolders: func() []string {
-			return []string{"node-a", "node-b"}
+		RequiredHolders: func() ([]string, bool) {
+			return []string{"node-a", "node-b"}, true
 		},
 	}); err != nil {
 		t.Fatal(err)

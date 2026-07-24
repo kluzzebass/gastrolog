@@ -64,12 +64,13 @@ func TestSealDoesNotPurgeSegmentReferencedByQueuedManifest(t *testing.T) {
 
 	mgr := chunking.New(chunking.Config{})
 	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
-		VaultRoot: home,
-		ChunkRoot: filepath.Join(home, "chunks"),
-		FSM:       fsm,
-		Locate:    chunking.HeadSegmentLocator{Root: home},
-		Applier:   &fsmApplier{fsm: fsm},
-		IsLeader:  func() bool { return true },
+		RequiredHolders: chunking.NoRequiredHolders,
+		VaultRoot:       home,
+		ChunkRoot:       filepath.Join(home, "chunks"),
+		FSM:             fsm,
+		Locate:          chunking.HeadSegmentLocator{Root: home},
+		Applier:         &fsmApplier{fsm: fsm},
+		IsLeader:        func() bool { return true },
 	}); err != nil {
 		t.Fatal(err)
 	}

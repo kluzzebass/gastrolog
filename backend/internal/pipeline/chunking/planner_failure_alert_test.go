@@ -46,14 +46,15 @@ func TestCorruptSegmentIndexAlertsAndPlansOthers(t *testing.T) {
 
 	mgr := chunking.New(chunking.Config{})
 	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
-		VaultRoot: vaultRoot,
-		ChunkRoot: filepath.Join(vaultRoot, "chunks"),
-		FSM:       fsm,
-		Locate:    chunking.VaultSegmentLocator{Root: vaultRoot},
-		Applier:   applier,
-		IsLeader:  func() bool { return true },
-		Policy:    chunking.ManifestRotationPolicy{MaxRecords: 100},
-		Alerts:    sink,
+		RequiredHolders: chunking.NoRequiredHolders,
+		VaultRoot:       vaultRoot,
+		ChunkRoot:       filepath.Join(vaultRoot, "chunks"),
+		FSM:             fsm,
+		Locate:          chunking.VaultSegmentLocator{Root: vaultRoot},
+		Applier:         applier,
+		IsLeader:        func() bool { return true },
+		Policy:          chunking.ManifestRotationPolicy{MaxRecords: 100},
+		Alerts:          sink,
 	}); err != nil {
 		t.Fatal(err)
 	}

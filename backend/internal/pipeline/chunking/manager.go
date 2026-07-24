@@ -71,9 +71,15 @@ type VaultConfig struct {
 	// vaults). Optional — orchestrator uses it for operator audit logging.
 	OnManifestOpened func(*vaultctlfsm.OpenChunkManifest)
 	// RequiredHolders returns vault placement member node IDs that must appear
-	// in each segment's holder set before the leader proposes ReleaseSegments.
-	// Nil or empty means no holder gate (single-node tests).
-	RequiredHolders func() []string
+	// in each segment's holder set before the leader proposes ReleaseSegments
+	// or a home purges its head/ copy, plus whether the placement lookup
+	// resolved. Mandatory — registration rejects nil (gastrolog-4w1vt: a nil
+	// field used to silently disable the holder gate). ok=false means the
+	// lookup is unresolved (config load failure, vault missing from config):
+	// every release and purge gate fails closed so a multi-home vault never
+	// drops segments on a bad lookup. A vault that genuinely requires no
+	// holders (single-node tests) opts out EXPLICITLY with NoRequiredHolders.
+	RequiredHolders func() (required []string, ok bool)
 	// RetentionGiveUpTTL returns the vault's delete-disposition retention TTL
 	// (the shortest, when several rules apply) and whether a give-up bound is
 	// in effect. A registry segment whose records out-age this TTL is released
@@ -94,6 +100,14 @@ type VaultConfig struct {
 	// disables alarms.
 	Alerts alert.Sink
 }
+
+// NoRequiredHolders is the explicit no-holder-gate RequiredHolders source: it
+// resolves to an empty requirement, so exhausted segments release immediately
+// and head/ copies purge right after build. Vaults that genuinely need no
+// holder gate — single-node tests without placements — opt out with THIS,
+// never with a nil RequiredHolders: nil used to silently disable the gate and
+// registration now rejects it (gastrolog-4w1vt).
+func NoRequiredHolders() ([]string, bool) { return nil, true }
 
 type vaultChunking struct {
 	cfg VaultConfig
@@ -270,6 +284,9 @@ func newVaultChunking(cfg VaultConfig) (*vaultChunking, error) {
 	}
 	if cfg.ChunkRoot == "" {
 		return nil, errors.New("chunk root required")
+	}
+	if cfg.RequiredHolders == nil {
+		return nil, errors.New("required-holders source required (NoRequiredHolders is the explicit no-holder-gate opt-out)")
 	}
 	if cfg.IsLeader == nil {
 		cfg.IsLeader = func() bool { return false }
@@ -789,11 +806,10 @@ func (v *vaultChunking) releaseOnce(ctx context.Context) error {
 	if len(pending) == 0 {
 		return nil
 	}
-	required := v.requiredHolders()
-	holdersWired := v.cfg.RequiredHolders != nil
+	required, resolved := v.requiredHolders()
 	giveUpTTL, giveUpNow := v.giveUpBound()
 	scan := v.fsm().SnapshotReleaseScan(v.plannerMinHolders())
-	ready, stillPending := partitionPendingRelease(scan, pending, required, holdersWired, giveUpTTL, giveUpNow)
+	ready, stillPending := partitionPendingRelease(scan, pending, required, resolved, giveUpTTL, giveUpNow)
 	if len(ready) == 0 {
 		v.mu.Lock()
 		v.pendingRelease = append(stillPending, v.pendingRelease...)
@@ -814,10 +830,9 @@ func (v *vaultChunking) releaseOnce(ctx context.Context) error {
 	return nil
 }
 
-func (v *vaultChunking) requiredHolders() []string {
-	if v.cfg.RequiredHolders == nil {
-		return nil
-	}
+// requiredHolders reads the live placement requirement. resolved=false means
+// the lookup is unresolved and every release/purge gate must fail closed.
+func (v *vaultChunking) requiredHolders() (required []string, resolved bool) {
 	return v.cfg.RequiredHolders()
 }
 

@@ -211,8 +211,14 @@ func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, home bool, fsm 
 		spec.OnChunkBuilt = func(id chunk.ChunkID) {
 			o.registerBuiltPipelineChunk(vaultID, fsm, id)
 		}
-		spec.ChunkRequiredHolders = func() []string {
-			return o.vaultPlacementNodeIDs(vaultID)
+		spec.ChunkRequiredHolders = func() ([]string, bool) {
+			// A placed vault always has at least one member, so an empty
+			// lookup means the placement could not be resolved (config load
+			// failure, vault dropped from config) — report unresolved so the
+			// chunking release/purge gates fail closed instead of reading
+			// empty as "no holders required" (gastrolog-4w1vt).
+			ids := o.vaultPlacementNodeIDs(vaultID)
+			return ids, len(ids) > 0
 		}
 		spec.ChunkRetentionGiveUpTTL = func() (time.Duration, bool) {
 			return o.vaultRetentionGiveUpTTL(vaultID)

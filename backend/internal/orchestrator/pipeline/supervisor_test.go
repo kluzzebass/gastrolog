@@ -299,22 +299,23 @@ func TestSupervisorFullVaultHome(t *testing.T) {
 	receipts := &countingReceipts{}
 
 	spec := VaultSpec{
-		VaultID:     vaultID,
-		Origin:      true,
-		OriginRoot:  t.TempDir(),
-		Publisher:   pub,
-		Home:        true,
-		HomeRoot:    homeRoot,
-		ChunkRoot:   filepath.Join(homeRoot, "chunks"),
-		FSM:         fsm,
-		Log:         &publishedLog{pub: rec, vaultID: vaultID},
-		Pull:        &supervisorPull{sup: sup},
-		Receipts:    receipts,
-		Locate:      chunking.VaultSegmentLocator{Root: homeRoot},
-		Applier:     &fsmApplier{fsm: fsm},
-		IsLeader:    func() bool { return true },
-		ChunkPolicy: chunking.ManifestRotationPolicy{MaxRecords: 8},
-		NewChunkID:  func() chunk.ChunkID { return chunk.NewChunkID() },
+		VaultID:              vaultID,
+		Origin:               true,
+		OriginRoot:           t.TempDir(),
+		Publisher:            pub,
+		Home:                 true,
+		HomeRoot:             homeRoot,
+		ChunkRoot:            filepath.Join(homeRoot, "chunks"),
+		FSM:                  fsm,
+		Log:                  &publishedLog{pub: rec, vaultID: vaultID},
+		Pull:                 &supervisorPull{sup: sup},
+		Receipts:             receipts,
+		Locate:               chunking.VaultSegmentLocator{Root: homeRoot},
+		ChunkRequiredHolders: chunking.NoRequiredHolders,
+		Applier:              &fsmApplier{fsm: fsm},
+		IsLeader:             func() bool { return true },
+		ChunkPolicy:          chunking.ManifestRotationPolicy{MaxRecords: 8},
+		NewChunkID:           func() chunk.ChunkID { return chunk.NewChunkID() },
 	}
 	if err := sup.RegisterVault(spec); err != nil {
 		t.Fatalf("RegisterVault: %v", err)
@@ -353,20 +354,21 @@ func TestSupervisorReconcilePlacementFlap(t *testing.T) {
 	fsm := vaultctlfsm.New()
 	newSpec := func() VaultSpec {
 		return VaultSpec{
-			VaultID:    vaultID,
-			Origin:     true,
-			OriginRoot: t.TempDir(),
-			Publisher:  &recordingPublisher{},
-			Home:       true,
-			HomeRoot:   homeRoot,
-			ChunkRoot:  filepath.Join(homeRoot, "chunks"),
-			FSM:        fsm,
-			Log:        &publishedLog{pub: &recordingPublisher{}, vaultID: vaultID},
-			Pull:       &supervisorPull{sup: sup},
-			Receipts:   &countingReceipts{},
-			Locate:     chunking.VaultSegmentLocator{Root: homeRoot},
-			Applier:    &fsmApplier{fsm: fsm},
-			IsLeader:   func() bool { return false },
+			VaultID:              vaultID,
+			Origin:               true,
+			OriginRoot:           t.TempDir(),
+			Publisher:            &recordingPublisher{},
+			Home:                 true,
+			HomeRoot:             homeRoot,
+			ChunkRoot:            filepath.Join(homeRoot, "chunks"),
+			FSM:                  fsm,
+			Log:                  &publishedLog{pub: &recordingPublisher{}, vaultID: vaultID},
+			Pull:                 &supervisorPull{sup: sup},
+			Receipts:             &countingReceipts{},
+			Locate:               chunking.VaultSegmentLocator{Root: homeRoot},
+			ChunkRequiredHolders: chunking.NoRequiredHolders,
+			Applier:              &fsmApplier{fsm: fsm},
+			IsLeader:             func() bool { return false },
 		}
 	}
 
@@ -421,6 +423,8 @@ func TestSupervisorReleasePurgesOriginAndHomeHead(t *testing.T) {
 		Locate:     chunking.VaultSegmentLocator{Root: homeRoot},
 		Applier:    &fsmApplier{fsm: fsm},
 		IsLeader:   func() bool { return true },
+
+		ChunkRequiredHolders: chunking.NoRequiredHolders,
 	}
 	if err := sup.RegisterVault(spec); err != nil {
 		t.Fatalf("RegisterVault: %v", err)

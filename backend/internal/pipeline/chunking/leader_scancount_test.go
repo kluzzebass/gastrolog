@@ -31,13 +31,14 @@ func catchUpScanDelta(t *testing.T, segmentCount int) uint64 {
 	applier := &fsmApplier{fsm: fsm, log: &applyLog}
 	mgr := chunking.New(chunking.Config{})
 	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
-		VaultRoot: vaultRoot,
-		ChunkRoot: filepath.Join(vaultRoot, "chunks"),
-		FSM:       fsm,
-		Locate:    chunking.VaultSegmentLocator{Root: vaultRoot},
-		Applier:   applier,
-		IsLeader:  func() bool { return true },
-		Policy:    chunking.ManifestRotationPolicy{MaxRecords: 10_000},
+		RequiredHolders: chunking.NoRequiredHolders,
+		VaultRoot:       vaultRoot,
+		ChunkRoot:       filepath.Join(vaultRoot, "chunks"),
+		FSM:             fsm,
+		Locate:          chunking.VaultSegmentLocator{Root: vaultRoot},
+		Applier:         applier,
+		IsLeader:        func() bool { return true },
+		Policy:          chunking.ManifestRotationPolicy{MaxRecords: 10_000},
 	}); err != nil {
 		t.Fatal(err)
 	}

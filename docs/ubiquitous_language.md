@@ -1021,9 +1021,12 @@ describes what the code does today.
   inferred from optimistic counters.
 
 - **RequiredHolders** — chunking's callback returning the placement member
-  node IDs that must hold data before release gates open
-  (`chunking.VaultConfig.RequiredHolders`, wired from the supervisor's
-  `ChunkRequiredHolders`). The planner floor for chunk-holder eligibility is
+  node IDs that must hold data before release gates open, plus whether the
+  placement lookup resolved (`chunking.VaultConfig.RequiredHolders`, wired
+  from the supervisor's `ChunkRequiredHolders`). Mandatory at registration;
+  an unresolved lookup fails the release/purge gates closed, and
+  `chunking.NoRequiredHolders` is the explicit no-holder-gate opt-out for
+  single-node vaults. The planner floor for chunk-holder eligibility is
   `min(2, placement size)` (`plannerMinHolders`).
 
 ### Staging areas
