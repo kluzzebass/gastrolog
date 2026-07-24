@@ -3,6 +3,7 @@ package query
 import (
 	"context"
 	"errors"
+	"iter"
 	"maps"
 	"slices"
 	"strings"
@@ -111,6 +112,43 @@ func (e *Engine) runAggregation(ctx context.Context, records []chunk.Record, ph 
 	return &PipelineResult{Table: table}, nil
 }
 
+// runStreamingAggregation applies streamable pre-stats operators per-record
+// and feeds survivors directly into the aggregator, so the search result is
+// never materialized. Only aggregator group state is held in memory.
+func (e *Engine) runStreamingAggregation(ctx context.Context, it iter.Seq2[chunk.Record, error], ph *pipelinePhases, q Query) (*PipelineResult, error) {
+	agg, err := NewAggregator(ph.statsOp)
+	if err != nil {
+		return nil, err
+	}
+	sf := newStreamFilter(ctx, ph.preOps, e.lookupResolver)
+	for rec, recErr := range it {
+		if recErr != nil {
+			return nil, recErr
+		}
+		rec = rec.Copy()
+		materializeRecord(&rec)
+
+		keep, applyErr := sf.apply(&rec)
+		if applyErr != nil {
+			return nil, applyErr
+		}
+		if keep {
+			if err := agg.Add(rec); err != nil {
+				return nil, err
+			}
+		}
+		if sf.exhausted {
+			break
+		}
+	}
+	table := agg.Result(q.Start, q.End)
+	table, err = applyTableOps(ctx, table, ph.postOps, e.lookupResolver)
+	if err != nil {
+		return nil, err
+	}
+	return &PipelineResult{Table: table}, nil
+}
+
 // RunPipeline executes a pipeline query against the search engine.
 // Operators are split into pre-stats and post-stats phases.
 // Without stats, returns records; with stats, returns a table.
@@ -139,8 +177,23 @@ func (e *Engine) RunPipeline(ctx context.Context, q Query, pipeline *querylang.P
 		}
 	}
 
-	iter, _ := e.Search(ctx, q, nil)
-	records, err := applyRecordOps(ctx, iter, ph.preOps, e.lookupResolver)
+	it, _ := e.Search(ctx, q, nil)
+
+	// Aggregating pipeline with streamable pre-ops: feed records straight
+	// into the aggregator instead of materializing the search result.
+	if ph.statsOp != nil && opsStreamable(ph.preOps) {
+		return e.runStreamingAggregation(ctx, it, ph, q)
+	}
+
+	// When the pipeline has no explicit cap, RunPipeline truncates the final
+	// record output to origLimit (below). Passing that limit down lets
+	// applyRecordOps bound collection instead of materializing everything.
+	implicitLimit := 0
+	if ph.statsOp == nil && !ph.hasRaw && len(ph.preOps) > 0 && origLimit > 0 && !hasExplicitCap(ph.preOps) {
+		implicitLimit = origLimit
+	}
+
+	records, err := applyRecordOpsLimit(ctx, it, ph.preOps, e.lookupResolver, implicitLimit)
 	if err != nil {
 		return nil, err
 	}
