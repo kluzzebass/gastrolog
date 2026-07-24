@@ -230,19 +230,23 @@ func (o *Orchestrator) startRetentionSweep() error {
 	return nil
 }
 
-// startInstanceCatchupSweep registers the periodic per-node sweep that drives
-// local-state convergence on every vault instance. Every 20 seconds
-// (cron 13/33/53s, phase-offset from the retention sweep at second 0)
-// every node walks its OWN vault-ctl FSM and runs three independent
-// reconciliation passes per instance — see vaultCatchupSweepAll for the
-// per-pass invariants. Covers receipt-protocol delete convergence
-// (gastrolog-51gme) and create-side replication catchup
-// (gastrolog-2dgvj).
+// startInstanceCatchupSweep registers the periodic per-node reconcile
+// BACKSTOP that guarantees local-state convergence on every vault
+// instance. Every 20 seconds (cron 13/33/53s, phase-offset from the
+// retention sweep at second 0) every node walks its OWN vault-ctl FSM and
+// runs the reconcile categories — see vaultCatchupSweepAll for the
+// per-category invariants. Post gastrolog-3fu9t the primary convergence
+// is event-driven (delete obligations on CmdRequestDelete, orphans on
+// snapshot install, leader-only categories on lead-gained); this tick is
+// the safety net for dropped/raced events plus the two categories that
+// are periodic-by-nature (idle-active inactivity, grace-period GCs).
+// Original coverage: receipt-protocol delete convergence (gastrolog-51gme)
+// and create-side replication catchup (gastrolog-2dgvj).
 func (o *Orchestrator) startInstanceCatchupSweep() error {
 	if err := o.scheduler.AddJob(vaultCatchupSweepJobName, vaultCatchupSweepSchedule, o.vaultCatchupSweepAll); err != nil {
 		return fmt.Errorf("vault catchup sweep job: %w", err)
 	}
-	o.scheduler.Describe(vaultCatchupSweepJobName, "Vault catchup sweep (delete + orphan + replica convergence)")
+	o.scheduler.Describe(vaultCatchupSweepJobName, "Vault reconcile backstop (event-driven primary; catches missed delete/orphan/replica events + periodic idle-active & grace GCs)")
 	return nil
 }
 

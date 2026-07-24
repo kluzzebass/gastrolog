@@ -355,6 +355,19 @@ func (o *Orchestrator) retentionSweepAll() {
 // VaultLifecycleReconciler.ReconcileTick for the category catalogue and
 // per-category ownership docs (gastrolog-4pq56v).
 //
+// BACKSTOP, not the primary driver (gastrolog-3fu9t). Every category now
+// has an upstream event that drives its primary convergence — delete
+// obligations on CmdRequestDelete apply, local/staging orphans on
+// snapshot install (ReconcileFromSnapshot), and the leader-only
+// categories on lead-gained (ReconcileMembershipCatchup). This tick
+// catches the residual: dropped/raced events, and the two categories that
+// are periodic-by-nature (idle-active wall-clock inactivity, and the
+// grace-period GCs for stale-leader-FSM and abandoned-transfer). It is
+// kept as a defense-in-depth safety net because losing a chunk cleanup or
+// leaking a stranded entry is a durability/correctness concern, not a
+// tunable — the event wakes make it converge fast, the tick guarantees it
+// converges at all.
+//
 // Every category is local-only on the originating side: each node
 // consults its OWN replicated FSM state and decides independently.
 // The only remote action is missing-replica catchup's unary RPC to a

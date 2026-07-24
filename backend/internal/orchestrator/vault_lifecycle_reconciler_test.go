@@ -2150,3 +2150,148 @@ func TestSweepIdleActiveSkipsSealingAndSealedEntries(t *testing.T) {
 			cm.sealCalls, cm.ensured, cm.announcer.sealed)
 	}
 }
+
+// ---- gastrolog-3fu9t: event-driven reconcile wakes ----
+//
+// These tests pin the doctrine of gastrolog-3fu9t: each reconcile
+// category that has a genuine upstream event now converges on that event,
+// WITHOUT waiting for the periodic backstop tick. Each fires only the
+// upstream event (ReconcileFromSnapshot for the snapshot-install edge,
+// ReconcileMembershipCatchup for the lead-gained edge) and asserts the
+// reconcile action happened — never calling ReconcileTick /
+// vaultCatchupSweepAll. The periodic tick's own coverage stays in the
+// Sweep* / ReconcileTick tests above; these prove the events are wired.
+
+// TestReconcileFromSnapshotDeletesTombstonedLocalOrphan pins the
+// local-orphan category's event source: snapshot install. A delete cycle
+// that finalized while this node was offline leaves the restored FSM with
+// only a tombstone (no manifest entry, no pendingDeletes) and the local
+// bytes orphaned. ReconcileFromSnapshot — fired from the vault-ctl FSM's
+// after-restore hook — must clean it up on that event, not on the tick.
+func TestReconcileFromSnapshotDeletesTombstonedLocalOrphan(t *testing.T) {
+	t.Parallel()
+
+	fsm := vaultctlfsm.New()
+	cm := &reconcilerFakeChunkManager{}
+	now := time.Now()
+
+	// Tombstoned-absent (positive): full receipt cycle finalized while
+	// "offline"; local file survives with no obligation.
+	idTombstoned := chunk.NewChunkID()
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idTombstoned, now, now, now)})
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idTombstoned, now, 1, 1, now, now, now, false, now)})
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalRequestDelete(idTombstoned, now, "test", []string{"node-A"})})
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalAckDelete(idTombstoned, "node-A")})
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalFinalizeDelete(idTombstoned)})
+
+	// Live sealed (negative control): must survive the restore reconcile.
+	idLive := chunk.NewChunkID()
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idLive, now, now, now)})
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idLive, now, 1, 1, now, now, now, false, now)})
+
+	cm.chunks = []chunk.ChunkMeta{
+		{ID: idTombstoned, Sealed: true},
+		{ID: idLive, Sealed: true},
+	}
+
+	vaultInst := &VaultInstance{VaultID: glid.New(), Chunks: cm}
+	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
+	rec.Wire(fsm)
+
+	// Fire ONLY the snapshot-restore event. No tick, no SweepLocalOrphans.
+	rec.ReconcileFromSnapshot(fsm)
+
+	if len(cm.deleted) != 1 || cm.deleted[0] != idTombstoned {
+		t.Errorf("ReconcileFromSnapshot deleted = %v, want only [%s] (tombstoned orphan cleaned on the restore event, live chunk preserved)",
+			cm.deleted, idTombstoned)
+	}
+}
+
+// TestReconcileMembershipCatchupPrunesStalePendingAcks pins the
+// stale-pending-ack category's event source: gaining vault-ctl leadership
+// (ReconcileMembershipCatchup, wired to onVaultCtlLeadGained). A leader
+// that inherits a pendingDelete whose ExpectedFrom references a node
+// dropped from placement must prune it on the leadership edge, not wait
+// for the periodic backstop.
+func TestReconcileMembershipCatchupPrunesStalePendingAcks(t *testing.T) {
+	t.Parallel()
+
+	fsm := vaultctlfsm.New()
+	chunkID := chunk.NewChunkID()
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(chunkID, time.Now(), time.Now(), time.Now())})
+	_ = fsm.Apply(&hraft.Log{
+		Data: vaultctlfsm.MarshalRequestDelete(chunkID, time.Now(), "retention-ttl",
+			[]string{"leader-node", "follower-node", "stale-node"}),
+	})
+
+	var prunedNodes []string
+	vaultInst := &VaultInstance{
+		VaultID:    glid.New(),
+		IsFollower: false,
+		FollowerTargets: []system.ReplicationTarget{
+			{NodeID: "follower-node"},
+		},
+		ApplyRaftPruneNode: func(nodeID string) error {
+			prunedNodes = append(prunedNodes, nodeID)
+			return nil
+		},
+	}
+
+	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "leader-node", slog.Default())
+	rec.fsm = fsm
+
+	// Fire ONLY the lead-gained catchup wake. No ReconcileTick.
+	rec.ReconcileMembershipCatchup()
+
+	if len(prunedNodes) != 1 || prunedNodes[0] != "stale-node" {
+		t.Fatalf("membership catchup prune = %v, want [stale-node]", prunedNodes)
+	}
+}
+
+// TestReconcileMembershipCatchupRequestsMissingReplicasFromFollowers is
+// the multi-node convergence case for the replication category: a node
+// that just gained vault-ctl leadership but joined the placement set late
+// (gastrolog-19241) holds the FSM manifest without the historical bytes.
+// The lead-gained catchup wake must ask every follower to re-push the
+// missing sealed chunks — event-driven, without the backstop tick.
+func TestReconcileMembershipCatchupRequestsMissingReplicasFromFollowers(t *testing.T) {
+	t.Parallel()
+
+	fsm := vaultctlfsm.New()
+	cm := &reconcilerFakeChunkManager{}
+	now := time.Now()
+
+	idMissing := chunk.NewChunkID()
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idMissing, now, now, now)})
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idMissing, now, 1, 1, now, now, now, false, now)})
+
+	orch := newTestOrch(t, Config{LocalNodeID: "node-leader"})
+	fake := &captureCatchupReplicator{scheduledRet: 1}
+	orch.SetChunkReplicator(fake)
+
+	vaultInst := &VaultInstance{
+		VaultID:    glid.New(),
+		Type:       "memory",
+		Chunks:     cm,
+		IsFollower: false, // just became the leader
+		FollowerTargets: []system.ReplicationTarget{
+			{NodeID: "node-follower-1"},
+			{NodeID: "node-follower-2"},
+		},
+	}
+	rec := NewVaultLifecycleReconciler(orch, glid.New(), vaultInst, "node-leader", slog.Default())
+	rec.Wire(fsm)
+
+	// Fire ONLY the lead-gained catchup wake. No ReconcileTick.
+	rec.ReconcileMembershipCatchup()
+
+	if got := fake.calls.Load(); got != 2 {
+		t.Fatalf("new leader must request catchup from every follower on the lead-gained event, got %d call(s)", got)
+	}
+	if len(fake.lastChunks) != 1 || fake.lastChunks[0] != idMissing {
+		t.Errorf("requested chunks = %v, want only [%s]", fake.lastChunks, idMissing)
+	}
+	if fake.lastRequester != "node-leader" {
+		t.Errorf("requester = %q, want %q", fake.lastRequester, "node-leader")
+	}
+}
