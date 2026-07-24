@@ -72,6 +72,15 @@ message SearchResponse {
   // response message only. Excludes network/transport time so the UI can
   // distinguish server work from round-trip cost. See gastrolog-66b7x.
   int64 server_elapsed_ms = 7;
+
+  // Per-vault stream-health signal: the remote vaults this merged search
+  // fanned out to and merged (gastrolog-20lrg). Because a remote stream
+  // failure aborts the whole search (fail-on-remote-failure), any response
+  // the client actually receives was assembled from EVERY vault in this
+  // set — so it doubles as the contributor record for the merge. Empty for
+  // a purely-local search. Carried on the response that closes the stream,
+  // alongside the histogram.
+  repeated bytes contributing_vault_ids = 8;
 }
 
 // HistogramBucket holds the count for a single time bucket in the volume histogram.

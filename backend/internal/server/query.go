@@ -207,10 +207,11 @@ func (s *QueryServer) searchDirect(
 	}
 	var remoteIter iter.Seq2[chunk.Record, error]
 	var remoteHist []*apiv1.HistogramBucket
+	var contributingVaults []glid.GLID
 	if distributed {
-		remoteIter, remoteHist, _ = s.collectPartitionRemote(ctx, q, remoteTargets, remoteTokens)
+		remoteIter, remoteHist, contributingVaults = s.collectPartitionRemote(ctx, q, remoteTargets, remoteTokens)
 	} else {
-		remoteIter, remoteHist, _ = s.collectRemote(ctx, q, remoteTokens)
+		remoteIter, remoteHist, contributingVaults = s.collectRemote(ctx, q, remoteTokens)
 	}
 
 	// Histogram is computed only on the FIRST page of a paginated search.
@@ -248,7 +249,7 @@ func (s *QueryServer) searchDirect(
 		return token
 	}
 
-	return s.mergeAndStream(ctx, localIter, getToken, remoteIter, q.OrderBy, q.Reverse(), q.Limit, transform, nil, serverStart, stream, histCh)
+	return s.mergeAndStream(ctx, localIter, getToken, remoteIter, q.OrderBy, q.Reverse(), q.Limit, transform, nil, contributingVaults, serverStart, stream, histCh)
 }
 
 // computePageHistogram builds the page-1 volume histogram for a search.
@@ -427,6 +428,7 @@ func (s *QueryServer) mergeAndStream(
 	limit int,
 	transform *query.RecordTransform,
 	histogram []*apiv1.HistogramBucket,
+	contributingVaults []glid.GLID,
 	serverStart time.Time,
 	stream *connect.ServerStream[apiv1.SearchResponse],
 	histCh chan []*apiv1.HistogramBucket,
@@ -508,11 +510,12 @@ func (s *QueryServer) mergeAndStream(
 	}
 
 	if err := stream.Send(&apiv1.SearchResponse{
-		Records:         sb.pending(),
-		ResumeToken:     tokenBytes,
-		HasMore:         len(tokenBytes) > 0,
-		Histogram:       histogram,
-		ServerElapsedMs: time.Since(serverStart).Milliseconds(),
+		Records:              sb.pending(),
+		ResumeToken:          tokenBytes,
+		HasMore:              len(tokenBytes) > 0,
+		Histogram:            histogram,
+		ServerElapsedMs:      time.Since(serverStart).Milliseconds(),
+		ContributingVaultIds: glidsToProtoBytes(contributingVaults),
 	}); err != nil {
 		return err
 	}

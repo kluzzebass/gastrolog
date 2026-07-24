@@ -818,6 +818,19 @@ How the cluster reports what it's doing to itself, to operators, and to the UI.
   reconfiguration, not degradation, and never appear. Surfaced in the UI
   as a single "partial" badge. See gastrolog-66zrj / gastrolog-1ic07.
 
+- **Contributing vaults** (`SearchResponse.contributing_vault_ids`) — the
+  per-vault stream-health signal on a merged **search**: the remote vaults
+  the search fanned out to and merged. Distinct from a contribution report
+  because search is **fail-on-remote-failure** — a remote stream error
+  aborts the whole search (there is no partial search), so every vault in
+  this set contributed to any response the client actually receives. It is
+  the positive record of the merge's cross-vault span, not a degraded
+  signal; empty for a purely-local search. The pipeline aggregation path
+  (`| stats`, `| timechart`) shares the same fail-hard policy — a partial
+  aggregate is a wrong scalar presented as authoritative, so a failed
+  remote vault fails the whole query rather than silently undercounting.
+  See gastrolog-20lrg.
+
 - **Alarm** — a condition that **requires an operator action**, carrying a
   documented cause and response. The governing test is the whole definition:
   *does the operator have to do something?* If no, it is not an alarm. An

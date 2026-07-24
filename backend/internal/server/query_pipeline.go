@@ -40,8 +40,13 @@ func (s *QueryServer) searchPipeline(
 	histogram := HistogramToProto(eng.ComputeHistogram(ctx, q, 50))
 
 	if result.Table != nil {
-		// Fan out to remote nodes and merge table results.
-		remoteResults := s.collectRemotePipeline(ctx, q, pipeline)
+		// Fan out to remote nodes and merge table results. A remote failure
+		// fails the whole pipeline query — a partial aggregate is silently
+		// wrong (gastrolog-20lrg).
+		remoteResults, err := s.collectRemotePipeline(ctx, q, pipeline)
+		if err != nil {
+			return err
+		}
 		if len(remoteResults) > 0 {
 			result.Table = mergeTableResults(result.Table, remoteResults)
 		}

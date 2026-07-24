@@ -107,6 +107,19 @@ export class SearchResponse extends Message<SearchResponse> {
    */
   serverElapsedMs = protoInt64.zero;
 
+  /**
+   * Per-vault stream-health signal: the remote vaults this merged search
+   * fanned out to and merged (gastrolog-20lrg). Because a remote stream
+   * failure aborts the whole search (fail-on-remote-failure), any response
+   * the client actually receives was assembled from EVERY vault in this
+   * set — so it doubles as the contributor record for the merge. Empty for
+   * a purely-local search. Carried on the response that closes the stream,
+   * alongside the histogram.
+   *
+   * @generated from field: repeated bytes contributing_vault_ids = 8;
+   */
+  contributingVaultIds: Uint8Array[] = [];
+
   constructor(data?: PartialMessage<SearchResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -122,6 +135,7 @@ export class SearchResponse extends Message<SearchResponse> {
     { no: 5, name: "histogram", kind: "message", T: HistogramBucket, repeated: true },
     { no: 6, name: "archived_chunks", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
     { no: 7, name: "server_elapsed_ms", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 8, name: "contributing_vault_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SearchResponse {

@@ -93,8 +93,16 @@ type SearchResponse struct {
 	// response message only. Excludes network/transport time so the UI can
 	// distinguish server work from round-trip cost. See gastrolog-66b7x.
 	ServerElapsedMs int64 `protobuf:"varint,7,opt,name=server_elapsed_ms,json=serverElapsedMs,proto3" json:"server_elapsed_ms,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Per-vault stream-health signal: the remote vaults this merged search
+	// fanned out to and merged (gastrolog-20lrg). Because a remote stream
+	// failure aborts the whole search (fail-on-remote-failure), any response
+	// the client actually receives was assembled from EVERY vault in this
+	// set — so it doubles as the contributor record for the merge. Empty for
+	// a purely-local search. Carried on the response that closes the stream,
+	// alongside the histogram.
+	ContributingVaultIds [][]byte `protobuf:"bytes,8,rep,name=contributing_vault_ids,json=contributingVaultIds,proto3" json:"contributing_vault_ids,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *SearchResponse) Reset() {
@@ -174,6 +182,13 @@ func (x *SearchResponse) GetServerElapsedMs() int64 {
 		return x.ServerElapsedMs
 	}
 	return 0
+}
+
+func (x *SearchResponse) GetContributingVaultIds() [][]byte {
+	if x != nil {
+		return x.ContributingVaultIds
+	}
+	return nil
 }
 
 // HistogramBucket holds the count for a single time bucket in the volume histogram.
@@ -2361,7 +2376,7 @@ const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"\x18gastrolog/v1/query.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x18gastrolog/v1/vault.proto\"]\n" +
 	"\rSearchRequest\x12)\n" +
 	"\x05query\x18\x01 \x01(\v2\x13.gastrolog.v1.QueryR\x05query\x12!\n" +
-	"\fresume_token\x18\x02 \x01(\fR\vresumeToken\"\xce\x02\n" +
+	"\fresume_token\x18\x02 \x01(\fR\vresumeToken\"\x84\x03\n" +
 	"\x0eSearchResponse\x12.\n" +
 	"\arecords\x18\x01 \x03(\v2\x14.gastrolog.v1.RecordR\arecords\x12!\n" +
 	"\fresume_token\x18\x02 \x01(\fR\vresumeToken\x12\x19\n" +
@@ -2369,7 +2384,8 @@ const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"\ftable_result\x18\x04 \x01(\v2\x19.gastrolog.v1.TableResultR\vtableResult\x12;\n" +
 	"\thistogram\x18\x05 \x03(\v2\x1d.gastrolog.v1.HistogramBucketR\thistogram\x12'\n" +
 	"\x0farchived_chunks\x18\x06 \x01(\x05R\x0earchivedChunks\x12*\n" +
-	"\x11server_elapsed_ms\x18\a \x01(\x03R\x0fserverElapsedMs\"\xa4\x02\n" +
+	"\x11server_elapsed_ms\x18\a \x01(\x03R\x0fserverElapsedMs\x124\n" +
+	"\x16contributing_vault_ids\x18\b \x03(\fR\x14contributingVaultIds\"\xa4\x02\n" +
 	"\x0fHistogramBucket\x12!\n" +
 	"\ftimestamp_ms\x18\x01 \x01(\x03R\vtimestampMs\x12\x14\n" +
 	"\x05count\x18\x02 \x01(\x03R\x05count\x12Q\n" +
