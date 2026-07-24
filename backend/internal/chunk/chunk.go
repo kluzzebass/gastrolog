@@ -355,6 +355,18 @@ type RecordFanOutSource interface {
 	ReadFanOutRecord(pos uint32) (Record, error)
 }
 
+// AttrsProjectionSource projects a record to just (writeTS, attrs) by
+// position, decoding the record frame's fixed header and attr dict IDs while
+// skipping the raw payload entirely. Histogram level-breakdown sampling never
+// inspects message bodies, so the raw payload is dead weight: the full record
+// decode clones it off the mapping per record (cloneMmapRecord), an allocation
+// the projection avoids. Callers that need bodies use RecordFanOutSource /
+// RecordCursor instead.
+type AttrsProjectionSource interface {
+	RecordCount() uint64
+	ProjectAttrs(pos uint32) (writeTS time.Time, attrs Attributes, err error)
+}
+
 // SequentialPrewarmer is implemented by cursors whose backing store benefits
 // from a sequential page-cache warm before a full scan. mmap major faults pin
 // scheduler Ps inside non-preemptible kernel fault handlers; a full-chunk
