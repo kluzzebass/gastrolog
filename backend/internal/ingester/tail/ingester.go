@@ -14,7 +14,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 
 	"gastrolog/internal/chanwatch"
-	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/pipeline/ingestion"
 )
 
 // tailedFile tracks the state of a single file being tailed.
@@ -56,13 +56,13 @@ type ingester struct {
 }
 
 // SetPressureGate wires the orchestrator's pressure gate into the ingester.
-// Implements orchestrator.PressureAware.
+// Implements ingestion.PressureAware.
 func (ing *ingester) SetPressureGate(gate *chanwatch.PressureGate) {
 	ing.pressureGate = gate
 }
 
-// Run implements orchestrator.Ingester.
-func (ing *ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
+// Run implements ingestion.Ingester.
+func (ing *ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessage) error {
 	// Load bookmarks.
 	bm, err := loadBookmarks(ing.stateFile)
 	if err != nil {
@@ -195,7 +195,7 @@ func (ing *ingester) openFile(path string, bm bookmarks) {
 
 // readNewLines reads complete lines from a tailed file and emits them.
 // Caller must hold ing.mu.
-func (ing *ingester) readNewLines(tf *tailedFile, out chan<- orchestrator.IngestMessage) {
+func (ing *ingester) readNewLines(tf *tailedFile, out chan<- ingestion.IngesterMessage) {
 	info, err := os.Stat(tf.path)
 	if err != nil {
 		ing.logger.Warn("failed to stat file during read", "path", tf.path, "error", err)
@@ -269,7 +269,7 @@ func (ing *ingester) readNewLines(tf *tailedFile, out chan<- orchestrator.Ingest
 		raw := make([]byte, len(line))
 		copy(raw, line)
 
-		out <- orchestrator.IngestMessage{
+		out <- ingestion.IngesterMessage{
 			Attrs: map[string]string{
 				"ingester_type": "tail",
 				"file":          tf.path,
@@ -305,7 +305,7 @@ func (ing *ingester) bufferPartialLine(tf *tailedFile, info os.FileInfo, newOffs
 }
 
 // handleFSEvent processes a filesystem notification event.
-func (ing *ingester) handleFSEvent(event fsnotify.Event, bm bookmarks, out chan<- orchestrator.IngestMessage, _ *fsnotify.Watcher) {
+func (ing *ingester) handleFSEvent(event fsnotify.Event, bm bookmarks, out chan<- ingestion.IngesterMessage, _ *fsnotify.Watcher) {
 	ing.mu.Lock()
 	defer ing.mu.Unlock()
 
@@ -341,7 +341,7 @@ func (ing *ingester) handleFSEvent(event fsnotify.Event, bm bookmarks, out chan<
 }
 
 // poll re-evaluates globs, reads all files, and saves bookmarks.
-func (ing *ingester) poll(bm bookmarks, out chan<- orchestrator.IngestMessage, _ *fsnotify.Watcher) {
+func (ing *ingester) poll(bm bookmarks, out chan<- ingestion.IngesterMessage, _ *fsnotify.Watcher) {
 	// Discover files and open any new ones.
 	paths, err := discoverFiles(ing.patterns)
 	if err != nil {

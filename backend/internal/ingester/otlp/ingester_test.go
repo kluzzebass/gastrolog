@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/hex"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline/ingestion"
 	"io"
 	"net"
 	"net/http"
@@ -27,8 +28,6 @@ import (
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	logspb "go.opentelemetry.io/proto/otlp/logs/v1"
 	resourcepb "go.opentelemetry.io/proto/otlp/resource/v1"
-
-	"gastrolog/internal/orchestrator"
 )
 
 // makeExportRequest builds an ExportLogsServiceRequest from helpers.
@@ -68,7 +67,7 @@ func makeStringLogRecord(body string, ts time.Time) *logspb.LogRecord {
 
 // listenAndStartOTLP starts an OTLP ingester on two known random ports.
 // Returns (httpAddr, grpcAddr, out channel). Ingester runs until test ends.
-func listenAndStartOTLP(t *testing.T, chanSize int) (string, string, chan orchestrator.IngestMessage) {
+func listenAndStartOTLP(t *testing.T, chanSize int) (string, string, chan ingestion.IngesterMessage) {
 	t.Helper()
 
 	// Find two free ports.
@@ -86,7 +85,7 @@ func listenAndStartOTLP(t *testing.T, chanSize int) (string, string, chan orches
 	grpcAddr := grpcLn.Addr().String()
 	grpcLn.Close()
 
-	out := make(chan orchestrator.IngestMessage, chanSize)
+	out := make(chan ingestion.IngesterMessage, chanSize)
 	ing := New(Config{
 		ID:       "test-otlp",
 		HTTPAddr: httpAddr,
@@ -140,14 +139,14 @@ func postOTLPProto(t *testing.T, addr string, req *collogspb.ExportLogsServiceRe
 	return resp
 }
 
-func recv(t *testing.T, out chan orchestrator.IngestMessage) orchestrator.IngestMessage {
+func recv(t *testing.T, out chan ingestion.IngesterMessage) ingestion.IngesterMessage {
 	t.Helper()
 	select {
 	case msg := <-out:
 		return msg
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for message")
-		return orchestrator.IngestMessage{}
+		return ingestion.IngesterMessage{}
 	}
 }
 

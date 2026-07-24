@@ -145,10 +145,10 @@ type saturatingSource struct {
 	sent chan struct{}
 }
 
-func (s *saturatingSource) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
+func (s *saturatingSource) Run(ctx context.Context, out chan<- ingestion.IngesterMessage) error {
 	for {
 		select {
-		case out <- orchestrator.IngestMessage{Raw: []byte("x")}:
+		case out <- ingestion.IngesterMessage{Raw: []byte("x")}:
 			select {
 			case s.sent <- struct{}{}:
 			default:
@@ -227,7 +227,7 @@ func TestReportIngesterDivergence_ClearsAfterRebuildUnderSaturation(t *testing.T
 		t.Fatalf("desired-but-not-started ingester must log divergence, got %d", n)
 	}
 
-	desired := func(burst string, build func() (orchestrator.Ingester, error)) []orchestrator.IngesterDesired {
+	desired := func(burst string, build func() (ingestion.Ingester, error)) []orchestrator.IngesterDesired {
 		return []orchestrator.IngesterDesired{{
 			ID: id, Name: "flood", Type: "mock",
 			Params: map[string]string{"burst": burst},
@@ -236,7 +236,7 @@ func TestReportIngesterDivergence_ClearsAfterRebuildUnderSaturation(t *testing.T
 	}
 
 	first := &saturatingSource{sent: make(chan struct{}, 64)}
-	if err := orch.ReconcileIngesters(desired("1", func() (orchestrator.Ingester, error) {
+	if err := orch.ReconcileIngesters(desired("1", func() (ingestion.Ingester, error) {
 		return first, nil
 	})); err != nil {
 		t.Fatalf("first reconcile: %v", err)
@@ -265,7 +265,7 @@ func TestReportIngesterDivergence_ClearsAfterRebuildUnderSaturation(t *testing.T
 	// Config rebuild under saturation — the field trigger (scatterbox
 	// burst/interval change at 100 percent ingest-digest).
 	second := &saturatingSource{sent: make(chan struct{}, 64)}
-	if err := orch.ReconcileIngesters(desired("2", func() (orchestrator.Ingester, error) {
+	if err := orch.ReconcileIngesters(desired("2", func() (ingestion.Ingester, error) {
 		return second, nil
 	})); err != nil {
 		t.Fatalf("rebuild reconcile: %v", err)

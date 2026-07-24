@@ -8,14 +8,14 @@ import (
 	"time"
 
 	"gastrolog/internal/ingester/identitytest"
-	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/pipeline/ingestion"
 )
 
 // TestEventIDIdentity pins gastrolog-44b9r for the HTTP/Loki ingester.
 func TestEventIDIdentity(t *testing.T) {
 	t.Parallel()
 	const ingesterID = "test-http-ingester"
-	out := make(chan orchestrator.IngestMessage, 4)
+	out := make(chan ingestion.IngesterMessage, 4)
 	recv := New(Config{ID: ingesterID, Addr: "127.0.0.1:0"})
 	go func() { _ = recv.Run(t.Context(), out) }()
 

@@ -15,11 +15,11 @@ import (
 	"gastrolog/internal/ingester/syslogparse"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/logging/comp"
-	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/pipeline/ingestion"
 )
 
 // Ingester accepts syslog messages via UDP and/or TCP.
-// It implements orchestrator.Ingester.
+// It implements ingestion.Ingester.
 //
 // Supports both RFC 3164 (BSD) and RFC 5424 (IETF) formats with auto-detection.
 // Messages are parsed and relevant fields extracted into attributes.
@@ -27,7 +27,7 @@ type Ingester struct {
 	id      string
 	udpAddr string
 	tcpAddr string
-	out     chan<- orchestrator.IngestMessage
+	out     chan<- ingestion.IngesterMessage
 	logger  *slog.Logger
 
 	mu          sync.Mutex
@@ -42,7 +42,7 @@ type Ingester struct {
 }
 
 // SetPressureGate wires the orchestrator's pressure gate into the ingester.
-// Implements orchestrator.PressureAware.
+// Implements ingestion.PressureAware.
 func (r *Ingester) SetPressureGate(gate *chanwatch.PressureGate) {
 	r.pressureGate = gate
 }
@@ -75,7 +75,7 @@ func New(cfg Config) *Ingester {
 }
 
 // Run starts the syslog listeners and blocks until ctx is cancelled.
-func (r *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
+func (r *Ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessage) error {
 	r.out = out
 
 	var wg sync.WaitGroup
@@ -380,14 +380,14 @@ func (r *Ingester) TCPAddr() net.Addr {
 }
 
 // buildMessage parses a syslog message using syslogparse and wraps it in an IngestMessage.
-func (r *Ingester) buildMessage(data []byte, remoteIP string) orchestrator.IngestMessage {
+func (r *Ingester) buildMessage(data []byte, remoteIP string) ingestion.IngesterMessage {
 	attrs, _ := syslogparse.ParseMessage(data, remoteIP)
 	attrs["ingester_type"] = "syslog"
 
 	// SourceTS is not set — syslog timestamps are unreliable (no year in
 	// RFC 3164, optional in RFC 5424, sender clock drift). The timestamp
 	// digester extracts SourceTS from the raw message during digestion.
-	return orchestrator.IngestMessage{
+	return ingestion.IngesterMessage{
 		Attrs:      attrs,
 		Raw:        data,
 		IngestTS:   time.Now(),

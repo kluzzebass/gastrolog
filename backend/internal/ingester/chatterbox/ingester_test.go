@@ -3,12 +3,11 @@ package chatterbox
 import (
 	"context"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline/ingestion"
 	"strings"
 	"sync"
 	"testing"
 	"time"
-
-	"gastrolog/internal/orchestrator"
 )
 
 func TestNewIngester_Defaults(t *testing.T) {
@@ -161,7 +160,7 @@ func TestRun_EmitsMessages(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	out := make(chan orchestrator.IngestMessage, 100)
+	out := make(chan ingestion.IngesterMessage, 100)
 
 	var runErr error
 	done := make(chan struct{})
@@ -177,7 +176,7 @@ func TestRun_EmitsMessages(t *testing.T) {
 		t.Errorf("Run returned error: %v", runErr)
 	}
 
-	var messages []orchestrator.IngestMessage
+	var messages []ingestion.IngesterMessage
 	for msg := range out {
 		messages = append(messages, msg)
 	}
@@ -208,7 +207,7 @@ func TestRun_StopsOnContextCancel(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	out := make(chan orchestrator.IngestMessage, 10)
+	out := make(chan ingestion.IngesterMessage, 10)
 
 	done := make(chan struct{})
 	go func() {
@@ -246,7 +245,7 @@ func TestRun_ConcurrentIngesters(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	out := make(chan orchestrator.IngestMessage, 100)
+	out := make(chan ingestion.IngesterMessage, 100)
 
 	var wg sync.WaitGroup
 	wg.Go(func() { _ = r1.Run(ctx, out) })
@@ -272,7 +271,7 @@ func TestRun_ReturnsNilOnCancel(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	out := make(chan orchestrator.IngestMessage, 10)
+	out := make(chan ingestion.IngesterMessage, 10)
 
 	var runErr error
 	done := make(chan struct{})

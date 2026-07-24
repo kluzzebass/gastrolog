@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline/ingestion"
 	"log/slog"
 	"slices"
 	"strings"
@@ -281,10 +282,10 @@ func (s *stubCfgStore) ListNodeStorageConfigs(context.Context) ([]system.NodeSto
 	return s.nscs, nil
 }
 
-// noopIngester satisfies orchestrator.Ingester.
+// noopIngester satisfies ingestion.Ingester.
 type noopIngester struct{}
 
-func (noopIngester) Run(context.Context, chan<- orchestrator.IngestMessage) error { return nil }
+func (noopIngester) Run(context.Context, chan<- ingestion.IngesterMessage) error { return nil }
 
 // newTestDispatcher creates a configDispatcher wired to the given mocks.
 func newTestDispatcher(orch orchActions, store system.Store, h *captureHandler) *configDispatcher {
@@ -449,7 +450,7 @@ func TestHandle_VaultDeleted(t *testing.T) {
 // reg is the test ingester registration used across ingester dispatch tests.
 func testIngesterReg() orchestrator.IngesterRegistration {
 	return orchestrator.IngesterRegistration{
-		Factory: func(glid.GLID, map[string]string, *slog.Logger) (orchestrator.Ingester, error) {
+		Factory: func(glid.GLID, map[string]string, *slog.Logger) (ingestion.Ingester, error) {
 			return noopIngester{}, nil
 		},
 	}
@@ -1373,7 +1374,7 @@ func singletonTestIngester(ingID glid.GLID, nodeIDs ...string) (*system.Ingester
 	return &system.IngesterConfig{
 			ID: ingID, Type: "test", Enabled: true, NodeIDs: nodeIDs, Singleton: true,
 		}, orchestrator.IngesterRegistration{
-			Factory: func(glid.GLID, map[string]string, *slog.Logger) (orchestrator.Ingester, error) {
+			Factory: func(glid.GLID, map[string]string, *slog.Logger) (ingestion.Ingester, error) {
 				return noopIngester{}, nil
 			},
 			SingletonSupported: true,
@@ -1457,7 +1458,7 @@ func TestHandleIngesterAssignmentIgnoresParallel(t *testing.T) {
 		ingesterAssignments: map[glid.GLID]string{ingID: "other-node"},
 	}, h)
 	d.factories.IngesterTypes["test"] = orchestrator.IngesterRegistration{
-		Factory: func(glid.GLID, map[string]string, *slog.Logger) (orchestrator.Ingester, error) {
+		Factory: func(glid.GLID, map[string]string, *slog.Logger) (ingestion.Ingester, error) {
 			return noopIngester{}, nil
 		},
 		SingletonSupported: true,
@@ -1483,7 +1484,7 @@ func dispatcherForReplay(orch orchActions, store system.Store, h *captureHandler
 	d := newTestDispatcher(orch, store, h)
 	d.factories.IngesterTypes = map[string]orchestrator.IngesterRegistration{
 		"chatterbox-test": {
-			Factory: func(_ glid.GLID, _ map[string]string, _ *slog.Logger) (orchestrator.Ingester, error) {
+			Factory: func(_ glid.GLID, _ map[string]string, _ *slog.Logger) (ingestion.Ingester, error) {
 				return noopIngester{}, nil
 			},
 		},

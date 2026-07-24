@@ -4,10 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline/ingestion"
 	"testing"
 	"time"
-
-	"gastrolog/internal/orchestrator"
 )
 
 func TestEmitsSequentialRecords(t *testing.T) {
@@ -22,7 +21,7 @@ func TestEmitsSequentialRecords(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	out := make(chan orchestrator.IngestMessage, 100)
+	out := make(chan ingestion.IngesterMessage, 100)
 	done := make(chan struct{})
 	go func() {
 		_ = ing.Run(ctx, out)
@@ -77,7 +76,7 @@ func TestFactoryEmbedsNodeID(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 
-	out := make(chan orchestrator.IngestMessage, 64)
+	out := make(chan ingestion.IngesterMessage, 64)
 	done := make(chan struct{})
 	go func() {
 		_ = ing.Run(ctx, out)
@@ -117,7 +116,7 @@ func TestBurstMode(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
 
-	out := make(chan orchestrator.IngestMessage, 100)
+	out := make(chan ingestion.IngesterMessage, 100)
 	done := make(chan struct{})
 	go func() {
 		_ = ing.Run(ctx, out)

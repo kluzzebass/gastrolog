@@ -3,6 +3,7 @@ package server_test
 import (
 	"context"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline/ingestion"
 	"maps"
 	"net"
 	"net/http"
@@ -779,7 +780,7 @@ func TestDeleteIngesterNotFound(t *testing.T) {
 // noopIngester is a dummy ingester that blocks until cancelled.
 type noopIngester struct{}
 
-func (n *noopIngester) Run(ctx context.Context, _ chan<- orchestrator.IngestMessage) error {
+func (n *noopIngester) Run(ctx context.Context, _ chan<- ingestion.IngesterMessage) error {
 	<-ctx.Done()
 	return nil
 }

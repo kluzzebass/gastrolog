@@ -9,23 +9,22 @@ import (
 	"gastrolog/internal/pipeline/ingestion"
 )
 
-// ingesterAdapter bridges an orchestrator.Ingester (emitting IngestMessage) to
-// the ingestion.Ingester interface (emitting ingestion.IngesterMessage).
+// ingesterAdapter decorates an ingestion.Ingester with the orchestrator's
+// per-ingester observability. Ingesters now implement ingestion.Ingester
+// directly (emitting ingestion.IngesterMessage), so no message-type bridge is
+// needed; the adapter only rehomes the liveness and stats the V0 live loop used
+// to produce.
 //
-// It also rehomes the liveness and per-ingester stats the V0 live loop used to
-// produce: it toggles setIngesterAlive around each run and counts messages and
-// bytes as they pass through, feeding the orchestrator's existing observability
-// surface (IngesterStats + onIngesterAlive → Raft) so the cluster/UI behavior is
-// unchanged once the V0 loop is gone. Per-record write errors now surface
-// downstream via the durable-commit ack (ack-after-fsync), so Errors counts
-// run-level ingester failures rather than per-record write failures.
-//
-// EventID minting is owned by ingestion.Manager's Minter, so the V0 fields the
-// adapter drops (IngesterID/IngestTS) are intentionally not forwarded.
+// It toggles setIngesterAlive around each run and counts messages and bytes as
+// they pass through, feeding the orchestrator's existing observability surface
+// (IngesterStats + onIngesterAlive → Raft) so the cluster/UI behavior is
+// unchanged. Per-record write errors surface downstream via the durable-commit
+// ack (ack-after-fsync), so Errors counts run-level ingester failures rather
+// than per-record write failures.
 type ingesterAdapter struct {
 	o     *Orchestrator
 	id    glid.GLID
-	inner Ingester
+	inner ingestion.Ingester
 	stats *IngesterStats
 }
 
@@ -38,20 +37,21 @@ var (
 // value additionally implements ingestion.Checkpointable when inner is
 // Checkpointable, so the manager's checkpoint ticker engages only for ingesters
 // that actually persist state.
-func (o *Orchestrator) newIngesterAdapter(id glid.GLID, inner Ingester, stats *IngesterStats) ingestion.Ingester {
+func (o *Orchestrator) newIngesterAdapter(id glid.GLID, inner ingestion.Ingester, stats *IngesterStats) ingestion.Ingester {
 	base := &ingesterAdapter{o: o, id: id, inner: inner, stats: stats}
-	if cp, ok := inner.(Checkpointable); ok {
+	if cp, ok := inner.(ingestion.Checkpointable); ok {
 		return &checkpointingIngesterAdapter{ingesterAdapter: base, cp: cp}
 	}
 	return base
 }
 
-// Run translates the inner ingester's messages onto the digestion queue.
+// Run runs the inner ingester, counting throughput and toggling liveness while
+// forwarding each message unchanged onto the ingestion manager's queue.
 func (a *ingesterAdapter) Run(ctx context.Context, out chan<- ingestion.IngesterMessage) error {
 	a.o.setIngesterAlive(a.id, a.stats, true)
 	defer a.o.setIngesterAlive(a.id, a.stats, false)
 
-	innerOut := make(chan IngestMessage)
+	innerOut := make(chan ingestion.IngesterMessage)
 	errCh := make(chan error, 1)
 	go func() {
 		err := a.inner.Run(ctx, innerOut)
@@ -64,15 +64,8 @@ func (a *ingesterAdapter) Run(ctx context.Context, out chan<- ingestion.Ingester
 			a.stats.MessagesIngested.Add(1)
 			a.stats.BytesIngested.Add(int64(len(msg.Raw)))
 		}
-		minted := ingestion.IngesterMessage{
-			Attrs:    msg.Attrs,
-			Raw:      msg.Raw,
-			RawOwned: msg.RawOwned,
-			SourceTS: msg.SourceTS,
-			Ack:      msg.Ack,
-		}
 		select {
-		case out <- minted:
+		case out <- msg:
 		case <-ctx.Done():
 			// Inner respects ctx and will return; don't block draining it (a
 			// misbehaving ingester must not stall shutdown). Matches the
@@ -90,7 +83,7 @@ func (a *ingesterAdapter) Run(ctx context.Context, out chan<- ingestion.Ingester
 
 // SetPressureGate forwards backpressure to inner when it is PressureAware.
 func (a *ingesterAdapter) SetPressureGate(gate *chanwatch.PressureGate) {
-	if pa, ok := a.inner.(PressureAware); ok {
+	if pa, ok := a.inner.(ingestion.PressureAware); ok {
 		pa.SetPressureGate(gate)
 	}
 }
@@ -99,7 +92,7 @@ func (a *ingesterAdapter) SetPressureGate(gate *chanwatch.PressureGate) {
 // inner ingester.
 type checkpointingIngesterAdapter struct {
 	*ingesterAdapter
-	cp Checkpointable
+	cp ingestion.Checkpointable
 }
 
 var (

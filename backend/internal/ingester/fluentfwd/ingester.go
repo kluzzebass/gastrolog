@@ -22,14 +22,14 @@ import (
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/logging/comp"
-	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/pipeline/ingestion"
 )
 
 // Ingester accepts messages via the Fluent Forward protocol over TCP.
 type Ingester struct {
 	id     string
 	addr   string
-	out    chan<- orchestrator.IngestMessage
+	out    chan<- ingestion.IngesterMessage
 	logger *slog.Logger
 
 	// pressureGate throttles msgpack reads when the ingest pipeline is backed
@@ -40,7 +40,7 @@ type Ingester struct {
 }
 
 // SetPressureGate wires the orchestrator's pressure gate into the ingester.
-// Implements orchestrator.PressureAware.
+// Implements ingestion.PressureAware.
 func (ing *Ingester) SetPressureGate(gate *chanwatch.PressureGate) {
 	ing.pressureGate = gate
 }
@@ -91,7 +91,7 @@ func (et *eventTime) UnmarshalMsgpack(b []byte) error {
 }
 
 // Run starts the TCP listener and blocks until ctx is cancelled.
-func (ing *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
+func (ing *Ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessage) error {
 	ing.out = out
 
 	ln, err := net.Listen("tcp", ing.addr)
@@ -404,7 +404,7 @@ func (ing *Ingester) processRecord(ctx context.Context, tag string, ts time.Time
 		attrs[k] = fmt.Sprint(v)
 	}
 
-	msg := orchestrator.IngestMessage{
+	msg := ingestion.IngesterMessage{
 		Attrs:      attrs,
 		Raw:        []byte(raw),
 		RawOwned:   true,

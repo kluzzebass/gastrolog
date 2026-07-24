@@ -22,11 +22,11 @@ import (
 	"gastrolog/internal/ingester/syslogparse"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/logging/comp"
-	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/pipeline/ingestion"
 )
 
 // Ingester accepts syslog messages via the RELP protocol.
-// It implements orchestrator.Ingester.
+// It implements ingestion.Ingester.
 //
 // RELP provides reliable delivery: each message is acknowledged only after
 // it has been written to the chunk store, so the sender knows exactly which
@@ -49,7 +49,7 @@ type Ingester struct {
 }
 
 // SetPressureGate wires the orchestrator's pressure gate into the ingester.
-// Implements orchestrator.PressureAware.
+// Implements ingestion.PressureAware.
 func (r *Ingester) SetPressureGate(gate *chanwatch.PressureGate) {
 	r.pressureGate = gate
 }
@@ -81,7 +81,7 @@ func New(cfg Config) *Ingester {
 }
 
 // Run starts the RELP TCP listener and blocks until ctx is cancelled.
-func (r *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
+func (r *Ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessage) error {
 	listener, err := net.Listen("tcp", r.addr)
 	if err != nil {
 		return err
@@ -144,7 +144,7 @@ func (r *Ingester) Addr() net.Addr {
 }
 
 // handleConn handles a single RELP connection.
-func (r *Ingester) handleConn(ctx context.Context, conn net.Conn, out chan<- orchestrator.IngestMessage) {
+func (r *Ingester) handleConn(ctx context.Context, conn net.Conn, out chan<- ingestion.IngesterMessage) {
 	defer func() { _ = conn.Close() }()
 
 	remoteIP := ""
@@ -192,7 +192,7 @@ func (r *Ingester) handleConn(ctx context.Context, conn net.Conn, out chan<- orc
 func (r *Ingester) receiveAndForward(
 	ctx context.Context,
 	session *Session,
-	out chan<- orchestrator.IngestMessage,
+	out chan<- ingestion.IngesterMessage,
 	remoteIP string,
 ) bool {
 	msg, err := session.ReceiveLog()
@@ -212,7 +212,7 @@ func (r *Ingester) receiveAndForward(
 
 	// SourceTS not set — syslog timestamps are unreliable.
 	// The timestamp digester extracts SourceTS during digestion.
-	ingestMsg := orchestrator.IngestMessage{
+	ingestMsg := ingestion.IngesterMessage{
 		Attrs:      attrs,
 		Raw:        msg.Data,
 		IngestTS:   time.Now(),

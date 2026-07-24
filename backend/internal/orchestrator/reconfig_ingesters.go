@@ -26,7 +26,7 @@ type IngesterDesired struct {
 	// Params is the config-store parameter snapshot. A change triggers rebuild
 	// even when Name, Type, and Passive are unchanged.
 	Params map[string]string
-	Build  func() (Ingester, error)
+	Build  func() (ingestion.Ingester, error)
 }
 
 // ReconcileIngesters drives the running ingester set toward desired. It is the
@@ -158,7 +158,7 @@ func (i ingesterInfo) diff(other ingesterInfo) string {
 
 // setIngesterLocked installs (or replaces) an ingester in the desired set and
 // (re)builds its stable pipeline adapter. Caller holds o.mu.
-func (o *Orchestrator) setIngesterLocked(id glid.GLID, meta ingesterInfo, ing Ingester) {
+func (o *Orchestrator) setIngesterLocked(id glid.GLID, meta ingesterInfo, ing ingestion.Ingester) {
 	o.ingesters[id] = ing
 	o.ingesterMeta[id] = meta
 	if o.ingesterStats[id] == nil {

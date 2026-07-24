@@ -5,11 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline/ingestion"
 	"log/slog"
 	"strconv"
 	"strings"
-
-	"gastrolog/internal/orchestrator"
 )
 
 // ParamDefaults returns the default parameter values for an MQTT ingester.
@@ -21,8 +20,8 @@ func ParamDefaults() map[string]string {
 }
 
 // NewFactory returns an IngesterFactory for MQTT ingesters.
-func NewFactory() orchestrator.IngesterFactory {
-	return func(id glid.GLID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
+func NewFactory() ingestion.IngesterFactory {
+	return func(id glid.GLID, params map[string]string, logger *slog.Logger) (ingestion.Ingester, error) {
 		broker := params["broker"]
 		if broker == "" {
 			return nil, errors.New("mqtt ingester: broker param is required")

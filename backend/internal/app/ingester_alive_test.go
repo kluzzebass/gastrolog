@@ -8,6 +8,7 @@ import (
 
 	"gastrolog/internal/glid"
 	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/pipeline/ingestion"
 	"gastrolog/internal/system"
 	sysmem "gastrolog/internal/system/memory"
 )
@@ -135,7 +136,7 @@ func TestClearStaleIngesterAlive_LeavesRunningIngesterAlone(t *testing.T) {
 
 type noopRunner struct{}
 
-func (noopRunner) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
+func (noopRunner) Run(ctx context.Context, out chan<- ingestion.IngesterMessage) error {
 	<-ctx.Done()
 	return nil
 }

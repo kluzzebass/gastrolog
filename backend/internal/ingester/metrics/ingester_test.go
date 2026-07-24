@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline/ingestion"
 	"strings"
 	"testing"
 	"time"
@@ -16,8 +17,8 @@ type fakeStats struct {
 	snapshots []orchestrator.VaultSnapshot
 }
 
-func (f *fakeStats) IngestQueueDepth() int    { return f.depth }
-func (f *fakeStats) IngestQueueCapacity() int { return f.capacity }
+func (f *fakeStats) IngestQueueDepth() int       { return f.depth }
+func (f *fakeStats) IngestQueueCapacity() int    { return f.capacity }
 func (f *fakeStats) IngestPressureLevel() string { return "normal" }
 func (f *fakeStats) VaultSnapshots() []orchestrator.VaultSnapshot {
 	return f.snapshots
@@ -117,7 +118,7 @@ func TestSystemMetrics(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 
-	out := make(chan orchestrator.IngestMessage, 10)
+	out := make(chan ingestion.IngesterMessage, 10)
 	done := make(chan error, 1)
 	go func() { done <- ing.Run(ctx, out) }()
 
@@ -186,7 +187,7 @@ func TestVaultMetrics(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 
-	out := make(chan orchestrator.IngestMessage, 10)
+	out := make(chan ingestion.IngesterMessage, 10)
 	done := make(chan error, 1)
 	go func() { done <- ing.Run(ctx, out) }()
 
@@ -246,7 +247,7 @@ func TestDualTickerIndependence(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	out := make(chan orchestrator.IngestMessage, 20)
+	out := make(chan ingestion.IngesterMessage, 20)
 	done := make(chan error, 1)
 	go func() { done <- ing.Run(ctx, out) }()
 

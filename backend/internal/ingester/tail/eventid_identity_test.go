@@ -9,7 +9,7 @@ import (
 
 	"gastrolog/internal/glid"
 	"gastrolog/internal/ingester/identitytest"
-	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/pipeline/ingestion"
 )
 
 // TestEventIDIdentity pins gastrolog-44b9r for the file-tail ingester.
@@ -33,7 +33,7 @@ func TestEventIDIdentity(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	out := make(chan orchestrator.IngestMessage, 4)
+	out := make(chan ingestion.IngesterMessage, 4)
 	go func() { _ = ing.Run(ctx, out) }()
 
 	// Append a line so the tail emits.

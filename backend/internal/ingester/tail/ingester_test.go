@@ -3,18 +3,17 @@ package tail
 import (
 	"context"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline/ingestion"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
-
-	"gastrolog/internal/orchestrator"
 )
 
 // collectMessages reads messages from out until the channel is drained or timeout.
-func collectMessages(t *testing.T, out chan orchestrator.IngestMessage, timeout time.Duration) []orchestrator.IngestMessage {
+func collectMessages(t *testing.T, out chan ingestion.IngesterMessage, timeout time.Duration) []ingestion.IngesterMessage {
 	t.Helper()
-	var msgs []orchestrator.IngestMessage
+	var msgs []ingestion.IngesterMessage
 	deadline := time.After(timeout)
 	for {
 		select {
@@ -113,7 +112,7 @@ func TestSingleFileTailing(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	out := make(chan orchestrator.IngestMessage, 100)
+	out := make(chan ingestion.IngesterMessage, 100)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -185,7 +184,7 @@ func TestCRLFLineEndings(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	out := make(chan orchestrator.IngestMessage, 100)
+	out := make(chan ingestion.IngesterMessage, 100)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -235,7 +234,7 @@ func TestMultipleFiles(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	out := make(chan orchestrator.IngestMessage, 100)
+	out := make(chan ingestion.IngesterMessage, 100)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -286,7 +285,7 @@ func TestTruncationDetection(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	out := make(chan orchestrator.IngestMessage, 100)
+	out := make(chan ingestion.IngesterMessage, 100)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -402,7 +401,7 @@ func TestBookmarkResumeFromOffset(t *testing.T) {
 	ing.(*ingester).stateFile = stateFile
 
 	ctx, cancel := context.WithCancel(context.Background())
-	out := make(chan orchestrator.IngestMessage, 100)
+	out := make(chan ingestion.IngesterMessage, 100)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -501,7 +500,7 @@ func TestPollDetectsNewFile(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	out := make(chan orchestrator.IngestMessage, 100)
+	out := make(chan ingestion.IngesterMessage, 100)
 
 	errCh := make(chan error, 1)
 	go func() {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline/ingestion"
 	"log/slog"
 	"slices"
 	"testing"
@@ -140,10 +141,10 @@ func testVaultCfg(vaultID glid.GLID, vaultType system.VaultType) system.VaultCon
 	}
 }
 
-// fakeIngester implements Ingester for testing.
+// fakeIngester implements ingestion.Ingester for testing.
 type fakeIngester struct{}
 
-func (f *fakeIngester) Run(ctx context.Context, out chan<- IngestMessage) error {
+func (f *fakeIngester) Run(ctx context.Context, out chan<- ingestion.IngesterMessage) error {
 	<-ctx.Done()
 	return nil
 }
@@ -257,7 +258,7 @@ func TestApplyConfigIngesters(t *testing.T) {
 
 	factories := Factories{
 		IngesterTypes: map[string]IngesterRegistration{
-			"test": {Factory: func(id glid.GLID, params map[string]string, logger *slog.Logger) (Ingester, error) {
+			"test": {Factory: func(id glid.GLID, params map[string]string, logger *slog.Logger) (ingestion.Ingester, error) {
 				return &fakeIngester{}, nil
 			}},
 		},
@@ -292,7 +293,7 @@ func TestApplyConfigIngesterEligibility(t *testing.T) {
 
 	factories := Factories{
 		IngesterTypes: map[string]IngesterRegistration{
-			"test": {Factory: func(id glid.GLID, params map[string]string, logger *slog.Logger) (Ingester, error) {
+			"test": {Factory: func(id glid.GLID, params map[string]string, logger *slog.Logger) (ingestion.Ingester, error) {
 				return &fakeIngester{}, nil
 			}},
 		},
@@ -440,7 +441,7 @@ func TestApplyConfigDuplicateIngesterID(t *testing.T) {
 
 	factories := Factories{
 		IngesterTypes: map[string]IngesterRegistration{
-			"test": {Factory: func(id glid.GLID, params map[string]string, logger *slog.Logger) (Ingester, error) {
+			"test": {Factory: func(id glid.GLID, params map[string]string, logger *slog.Logger) (ingestion.Ingester, error) {
 				return &fakeIngester{}, nil
 			}},
 		},
@@ -529,7 +530,7 @@ func TestApplyConfigIngesterFactoryError(t *testing.T) {
 
 	factories := Factories{
 		IngesterTypes: map[string]IngesterRegistration{
-			"test": {Factory: func(id glid.GLID, params map[string]string, logger *slog.Logger) (Ingester, error) {
+			"test": {Factory: func(id glid.GLID, params map[string]string, logger *slog.Logger) (ingestion.Ingester, error) {
 				return nil, errors.New("factory error")
 			}},
 		},
@@ -553,7 +554,7 @@ func TestApplyConfigParamsPassedToIngesterFactory(t *testing.T) {
 	var receivedParams map[string]string
 	factories := Factories{
 		IngesterTypes: map[string]IngesterRegistration{
-			"test": {Factory: func(id glid.GLID, params map[string]string, logger *slog.Logger) (Ingester, error) {
+			"test": {Factory: func(id glid.GLID, params map[string]string, logger *slog.Logger) (ingestion.Ingester, error) {
 				receivedParams = params
 				return &fakeIngester{}, nil
 			}},

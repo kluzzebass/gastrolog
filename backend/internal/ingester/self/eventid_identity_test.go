@@ -8,7 +8,7 @@ import (
 	"gastrolog/internal/glid"
 	"gastrolog/internal/ingester/identitytest"
 	"gastrolog/internal/logging"
-	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/pipeline/ingestion"
 )
 
 // TestEventIDIdentity pins gastrolog-44b9r for the self ingester.
@@ -25,7 +25,7 @@ func TestEventIDIdentity(t *testing.T) {
 		t.Fatalf("factory: %v", err)
 	}
 
-	out := make(chan orchestrator.IngestMessage, 4)
+	out := make(chan ingestion.IngesterMessage, 4)
 	go func() { _ = ing.Run(t.Context(), out) }()
 
 	rec := slog.NewRecord(time.Now(), slog.LevelWarn, "identity probe", 0)

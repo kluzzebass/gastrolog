@@ -7,11 +7,12 @@ import (
 
 	"gastrolog/internal/glid"
 	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/pipeline/ingestion"
 )
 
 type staticIngester struct{}
 
-func (staticIngester) Run(context.Context, chan<- orchestrator.IngestMessage) error {
+func (staticIngester) Run(context.Context, chan<- ingestion.IngesterMessage) error {
 	return nil
 }
 
@@ -30,7 +31,7 @@ func TestReconcileIngesters_RebuildsOnParamChange(t *testing.T) {
 			Name:   "scatterbox",
 			Type:   "scatterbox",
 			Params: map[string]string{"burst": burst, "interval": "10ms"},
-			Build: func() (orchestrator.Ingester, error) {
+			Build: func() (ingestion.Ingester, error) {
 				builds.Add(1)
 				lastBurst.Store(burst)
 				return staticIngester{}, nil
@@ -74,7 +75,7 @@ func TestReconcileIngesters_IgnoresParamKeyOrder(t *testing.T) {
 		ID:   id,
 		Name: "scatterbox",
 		Type: "scatterbox",
-		Build: func() (orchestrator.Ingester, error) {
+		Build: func() (ingestion.Ingester, error) {
 			builds.Add(1)
 			return staticIngester{}, nil
 		},

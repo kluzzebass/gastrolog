@@ -4,14 +4,13 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"gastrolog/internal/pipeline/ingestion"
 	"log/slog"
 	"net/url"
 	"time"
 
 	"github.com/eclipse/paho.golang/autopaho"
 	"github.com/eclipse/paho.golang/paho"
-
-	"gastrolog/internal/orchestrator"
 )
 
 // v5Ingester uses the paho.golang autopaho v5 client.
@@ -21,7 +20,7 @@ type v5Ingester struct {
 	logger *slog.Logger
 }
 
-func (ing *v5Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
+func (ing *v5Ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessage) error {
 	brokerURL, err := url.Parse(ing.cfg.Broker)
 	if err != nil {
 		return fmt.Errorf("mqtt ingester: invalid broker URL %q: %w", ing.cfg.Broker, err)
