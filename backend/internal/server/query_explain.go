@@ -122,7 +122,7 @@ func (s *QueryServer) collectRemoteExplain(ctx context.Context, q query.Query, r
 		nodes = append(nodes, nodeID)
 	}
 
-	results, ok := peerFanOut(ctx, s.logger, "Explain", nodes,
+	results, ok, _ := peerFanOut(ctx, s.logger, "Explain", nodes,
 		func(peerCtx context.Context, nodeID string) (*apiv1.ForwardExplainResponse, error) {
 			vaultIDs := byNode[nodeID]
 			vaultBytes := make([][]byte, len(vaultIDs))

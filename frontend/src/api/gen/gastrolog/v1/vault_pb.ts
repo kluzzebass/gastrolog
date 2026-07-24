@@ -515,6 +515,16 @@ export class ListChunksResponse extends Message<ListChunksResponse> {
    */
   chunks: ChunkMeta[] = [];
 
+  /**
+   * Set only when the cross-node fan-out that produced `chunks` could not
+   * reach every peer that hosts this vault, so the merged list is a
+   * partial view. Absent on the happy path (all peers contributed) — the
+   * inspector shows nothing. See gastrolog-66zrj / gastrolog-1ic07.
+   *
+   * @generated from field: gastrolog.v1.ContributionReport contribution_report = 2;
+   */
+  contributionReport?: ContributionReport;
+
   constructor(data?: PartialMessage<ListChunksResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -524,6 +534,7 @@ export class ListChunksResponse extends Message<ListChunksResponse> {
   static readonly typeName = "gastrolog.v1.ListChunksResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "chunks", kind: "message", T: ChunkMeta, repeated: true },
+    { no: 2, name: "contribution_report", kind: "message", T: ContributionReport },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ListChunksResponse {
@@ -540,6 +551,104 @@ export class ListChunksResponse extends Message<ListChunksResponse> {
 
   static equals(a: ListChunksResponse | PlainMessage<ListChunksResponse> | undefined, b: ListChunksResponse | PlainMessage<ListChunksResponse> | undefined): boolean {
     return proto3.util.equals(ListChunksResponse, a, b);
+  }
+}
+
+/**
+ * DegradedPeer names one cluster node that failed to contribute to a
+ * fanned-out inspector/query merge — timed out, returned a transport
+ * error, or was otherwise unreachable for this request. Benign,
+ * expected non-answers (placement churn during reconfiguration, a peer
+ * that correctly reports it does not hold the requested chunk) are NOT
+ * degradation and never appear here.
+ *
+ * @generated from message gastrolog.v1.DegradedPeer
+ */
+export class DegradedPeer extends Message<DegradedPeer> {
+  /**
+   * the peer that did not contribute (glid string)
+   *
+   * @generated from field: string node_id = 1;
+   */
+  nodeId = "";
+
+  /**
+   * short human-readable cause (e.g. "timeout", transport error text)
+   *
+   * @generated from field: string reason = 2;
+   */
+  reason = "";
+
+  constructor(data?: PartialMessage<DegradedPeer>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.DegradedPeer";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "reason", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DegradedPeer {
+    return new DegradedPeer().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): DegradedPeer {
+    return new DegradedPeer().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): DegradedPeer {
+    return new DegradedPeer().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: DegradedPeer | PlainMessage<DegradedPeer> | undefined, b: DegradedPeer | PlainMessage<DegradedPeer> | undefined): boolean {
+    return proto3.util.equals(DegradedPeer, a, b);
+  }
+}
+
+/**
+ * ContributionReport accompanies any fanned-out inspector/query merge so
+ * a partial result reads as visibly partial instead of silently so. It
+ * is only attached when at least one peer failed to contribute; a fully
+ * successful fan-out omits it entirely (quiet-until-needed). Consumers
+ * treat a present-but-empty report the same as absent. See
+ * gastrolog-66zrj.
+ *
+ * @generated from message gastrolog.v1.ContributionReport
+ */
+export class ContributionReport extends Message<ContributionReport> {
+  /**
+   * @generated from field: repeated gastrolog.v1.DegradedPeer degraded = 1;
+   */
+  degraded: DegradedPeer[] = [];
+
+  constructor(data?: PartialMessage<ContributionReport>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ContributionReport";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "degraded", kind: "message", T: DegradedPeer, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ContributionReport {
+    return new ContributionReport().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ContributionReport {
+    return new ContributionReport().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ContributionReport {
+    return new ContributionReport().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ContributionReport | PlainMessage<ContributionReport> | undefined, b: ContributionReport | PlainMessage<ContributionReport> | undefined): boolean {
+    return proto3.util.equals(ContributionReport, a, b);
   }
 }
 

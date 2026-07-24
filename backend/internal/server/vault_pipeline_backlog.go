@@ -52,7 +52,7 @@ func (s *VaultServer) assemblePipelineBacklogRPC(ctx context.Context, vaultID gl
 	var peerDisk []cluster.PeerVaultPipelineDisk
 	if s.remotePipelineBacklog != nil {
 		remoteNodes := s.remoteClusterNodes(ctx)
-		results, ok := peerFanOut(ctx, s.logger, "GetPipelineBacklog", remoteNodes,
+		results, ok, _ := peerFanOut(ctx, s.logger, "GetPipelineBacklog", remoteNodes,
 			func(peerCtx context.Context, nodeID string) (*apiv1.ForwardGetPipelineBacklogResponse, error) {
 				return s.remotePipelineBacklog.GetPipelineBacklogDisk(peerCtx, nodeID, &apiv1.ForwardGetPipelineBacklogRequest{
 					VaultId: vaultID.ToProto(),

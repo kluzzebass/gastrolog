@@ -72,9 +72,10 @@ func (s *VaultServer) ListChunks(
 	// total latency is max(peer RTTs) bounded by peerInspectorTimeout.
 	// A peer that misses the deadline is silently dropped from the merged
 	// view; the UI gets the partial result instead of hanging.
+	var contribution *apiv1.ContributionReport
 	if !req.Msg.ActiveOnly && s.remoteChunkLister != nil {
 		remoteNodes := s.remoteVaultNodes(ctx, vaultID)
-		results, ok := peerFanOut(ctx, s.logger, "ListChunks", remoteNodes,
+		results, ok, report := peerFanOut(ctx, s.logger, "ListChunks", remoteNodes,
 			func(peerCtx context.Context, nodeID string) ([]*apiv1.ChunkMeta, error) {
 				remote, err := s.remoteChunkLister.ListChunks(peerCtx, nodeID, &apiv1.ForwardListChunksRequest{
 					VaultId: vaultID.ToProto(),
@@ -84,6 +85,7 @@ func (s *VaultServer) ListChunks(
 				}
 				return remote.Chunks, nil
 			})
+		contribution = report
 		for i, chunks := range results {
 			if !ok[i] {
 				continue
@@ -102,7 +104,10 @@ func (s *VaultServer) ListChunks(
 	// hosts multiple local instances).
 	chunks := dedupChunkReports(reports)
 	s.overlayChunkResidency(vaultID, chunks)
-	return connect.NewResponse(&apiv1.ListChunksResponse{Chunks: chunks}), nil
+	return connect.NewResponse(&apiv1.ListChunksResponse{
+		Chunks:             chunks,
+		ContributionReport: contribution,
+	}), nil
 }
 
 // overlayChunkResidency replaces the fan-out-derived replica sets with
@@ -434,7 +439,7 @@ func (s *VaultServer) GetIndexes(
 	if len(remoteNodes) == 0 {
 		return nil, mapVaultError(chunk.ErrChunkNotFound)
 	}
-	results, ok := peerFanOut(ctx, s.logger, "GetIndexes", remoteNodes,
+	results, ok, _ := peerFanOut(ctx, s.logger, "GetIndexes", remoteNodes,
 		func(peerCtx context.Context, nodeID string) (*apiv1.GetIndexesResponse, error) {
 			remote, err := s.remoteIndexer.GetIndexes(peerCtx, nodeID, &apiv1.ForwardGetIndexesRequest{
 				VaultId: vaultID.ToProto(),

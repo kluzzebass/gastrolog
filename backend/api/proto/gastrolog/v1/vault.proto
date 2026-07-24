@@ -163,6 +163,33 @@ message ListChunksRequest {
 
 message ListChunksResponse {
   repeated ChunkMeta chunks = 1;
+
+  // Set only when the cross-node fan-out that produced `chunks` could not
+  // reach every peer that hosts this vault, so the merged list is a
+  // partial view. Absent on the happy path (all peers contributed) — the
+  // inspector shows nothing. See gastrolog-66zrj / gastrolog-1ic07.
+  ContributionReport contribution_report = 2;
+}
+
+// DegradedPeer names one cluster node that failed to contribute to a
+// fanned-out inspector/query merge — timed out, returned a transport
+// error, or was otherwise unreachable for this request. Benign,
+// expected non-answers (placement churn during reconfiguration, a peer
+// that correctly reports it does not hold the requested chunk) are NOT
+// degradation and never appear here.
+message DegradedPeer {
+  string node_id = 1; // the peer that did not contribute (glid string)
+  string reason = 2;  // short human-readable cause (e.g. "timeout", transport error text)
+}
+
+// ContributionReport accompanies any fanned-out inspector/query merge so
+// a partial result reads as visibly partial instead of silently so. It
+// is only attached when at least one peer failed to contribute; a fully
+// successful fan-out omits it entirely (quiet-until-needed). Consumers
+// treat a present-but-empty report the same as absent. See
+// gastrolog-66zrj.
+message ContributionReport {
+  repeated DegradedPeer degraded = 1;
 }
 
 // ChunkState is the lifecycle stage of a chunk on the vault-ctl FSM.

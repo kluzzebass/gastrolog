@@ -2,7 +2,8 @@ import { encode } from "../../api/glid";
 import { useState, type ReactNode } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { clickableProps } from "../../utils";
-import { useChunks, useIndexes, useValidateVault, useConfig, useArchiveChunk, useRestoreChunk } from "../../api/hooks";
+import { useChunks, useChunksContribution, useIndexes, useValidateVault, useConfig, useArchiveChunk, useRestoreChunk } from "../../api/hooks";
+import { DegradedPeersBadge } from "../DegradedPeersBadge";
 import { useClusterStatus } from "../../api/hooks/useClusterStatus";
 import { useNodeRegistry } from "../../api/hooks";
 import { usePipelineBacklog } from "../../api/hooks";
@@ -146,6 +147,7 @@ export function VaultCard({
   // Use ListChunks data (fans out to leader nodes, authoritative per chunk).
   // ListVaults stats rely on periodic peer broadcasts and flicker.
   const { data: chunks } = useChunks(vault.id);
+  const chunksContribution = useChunksContribution(vault.id);
   const chunkCount = chunks?.length ?? 0;
   const recordCount = (chunks ?? []).reduce((sum, c) => sum + Number(c.recordCount), 0);
   // Vault size = summed per-chunk local disk claim — the same quantity the
@@ -177,6 +179,7 @@ export function VaultCard({
               refusing
             </Badge>
           )}
+          <DegradedPeersBadge report={chunksContribution} dark={dark} />
           <Badge variant="muted" dark={dark}>
             {chunkCount.toLocaleString()} chunks
           </Badge>

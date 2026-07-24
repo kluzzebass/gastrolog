@@ -1,6 +1,7 @@
 export {
   useVaults,
   useChunks,
+  useChunksContribution,
   useIndexes,
   useStats,
   useSealVault,
