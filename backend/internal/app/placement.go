@@ -25,9 +25,21 @@ const (
 	placementReconcileJobName = "vault-placement-reconcile"
 
 	// placementReconcileSchedule runs every 15 seconds. 6-field cron
-	// (with-seconds). The leadership-change observer + manual Trigger
-	// channel handle event-driven reconciles; this scheduled tick is
-	// the periodic safety net for cases neither path catches.
+	// (with-seconds).
+	//
+	// Every FSM-visible placement input now wakes the reconciler on its own
+	// event (gastrolog-29xpy): vault put, placements set, node-storage-config
+	// set, node lifecycle-state change, node-config add/remove, and ingester
+	// put/delete all fire pm.Trigger() from the config dispatcher, and
+	// leadership transitions run through pm.Run's Raft observer. What remains
+	// with NO event is peer-heartbeat LIVENESS EXPIRY: LivePeers() is a TTL
+	// test (time.Now vs last-seen), so a peer silently dropping out of the
+	// alive set is detectable only by re-evaluating on a clock. This tick is
+	// that re-evaluation — the honest, irreducible residual, not a catch-all
+	// for missed events. (Sustained absence is separately promoted to a
+	// NodeStateChanged FSM event by the unreachable sweep, which then triggers
+	// a reconcile; this tick covers the pre-promotion window and follower/
+	// singleton eligibility against the live-peer set.)
 	placementReconcileSchedule = "*/15 * * * * *"
 
 	// Alarm type IDs raised by the placement manager; the instance key is
@@ -110,20 +122,19 @@ func (pm *placementManager) Trigger() {
 	}
 }
 
-// startPlacementReconcile registers the periodic-fallback placement
-// reconcile with the supplied scheduler. The scheduled task just
-// pokes pm.Trigger() — the actual reconcile work still runs in
-// pm.Run's goroutine via triggerCh, preserving the existing
-// serialization. Only the leadership-change observer + manual
-// trigger paths can produce reconciles; this is the safety net for
-// edge cases that neither catches.
+// startPlacementReconcile registers the periodic placement reconcile with the
+// supplied scheduler. The scheduled task just pokes pm.Trigger() — the actual
+// reconcile work still runs in pm.Run's goroutine via triggerCh, preserving the
+// existing serialization. Config-input changes reconcile event-driven from the
+// dispatcher; this tick exists solely to re-evaluate peer-heartbeat liveness,
+// which is TTL-based and has no event (see placementReconcileSchedule).
 func startPlacementReconcile(_ context.Context, scheduler scheduledJobRegistry, pm *placementManager) error {
 	task := func() { pm.Trigger() }
 	if err := scheduler.AddJob(placementReconcileJobName, placementReconcileSchedule, task); err != nil {
 		return err
 	}
 	scheduler.Describe(placementReconcileJobName,
-		"Vault placement reconcile — periodic safety net. Runs on every node, every 15 seconds; the task pokes the placement manager's trigger channel, which only acts when this node is the Raft leader. Event-driven reconciles (leadership change, manual Trigger from RPC handlers) remain in pm.Run's goroutine; this scheduled tick is the fallback for edge cases neither catches.")
+		"Vault placement reconcile — peer-liveness re-evaluation. Runs on every node every 15 seconds; the task pokes the placement manager's trigger channel, which only acts when this node is the Raft leader. Every FSM-visible placement input (vault/placements/node-storage/node-state/node-config/ingester changes, leadership transitions) reconciles event-driven; this tick covers the one input with no event — peer-heartbeat liveness expiry (LivePeers is a TTL test, detectable only by re-evaluating on a clock).")
 	return nil
 }
 

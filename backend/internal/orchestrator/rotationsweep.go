@@ -8,24 +8,24 @@ import (
 	"gastrolog/internal/system"
 )
 
-const (
-	placementSweepJobName  = "placement-reconcile"
-	placementSweepSchedule = "*/15 * * * * *" // every 15 seconds
-)
-
-// placementSweep is the periodic config-reconcile job. Each tick it refreshes
-// every leader instance's sealed-chunk replication targets (FollowerTargets)
-// from the current placement config and republishes the pipeline routing table.
-// Both are safety nets — the FSM dispatch fan-out also reloads on config change
-// for immediate effect — so the sweep only repairs missed or racy updates.
+// ReconcilePlacements aligns every local vault instance's role and (for
+// leaders) sealed-chunk replication targets with the current placement
+// config, then republishes the pipeline routing table. This is the
+// event-driven successor to the retired 15s placement sweep (gastrolog-29xpy):
+// the FSM config dispatcher calls it when a change lands that can move roles
+// or targets across many vaults at once but is not scoped to a single vault —
+// a node-storage config change (which remaps storage→node for FollowerTargets)
+// and post-snapshot config replay (whose entries never fired onApply
+// notifications). Single-vault placement/vault changes take the cheaper
+// ReconcileVaultPlacement path.
 //
 // Active-chunk rotation is gone: the pipeline's chunking manager owns chunk
-// sealing (event-driven thresholds + scheduler-driven cron via reconcileChunkCron),
-// so the legacy chunk-manager rotation/cron path no longer runs here.
-func (o *Orchestrator) placementSweep() {
-	sys, err := o.loadSystem(context.Background())
+// sealing (event-driven thresholds + scheduler-driven cron via
+// reconcileChunkCron), so no chunk-manager rotation runs here.
+func (o *Orchestrator) ReconcilePlacements(ctx context.Context) {
+	sys, err := o.loadSystem(ctx)
 	if err != nil {
-		o.rotationLogger.Error("placement sweep: failed to load config", "error", err)
+		o.rotationLogger.Error("placement reconcile: failed to load config", "error", err)
 		return
 	}
 	if sys == nil {
@@ -44,13 +44,6 @@ func (o *Orchestrator) placementSweep() {
 		if vaultCfg == nil {
 			continue
 		}
-		// Reconcile the instance ROLE first, every tick, for every
-		// instance. Roles used to change only on config dispatch; a raced
-		// role update during placement flapping left every node believing
-		// it was a follower, and with no further config changes the vault
-		// sat leaderless for hours — retention, backfill scheduling, and
-		// target refreshes all silently stopped. The sweep is the safety
-		// net dispatch never had.
 		if !o.reconcileInstanceRole(sys, *vaultCfg, vaultInst) {
 			leaderless[vaultID] = vaultCfg.Name
 		}
@@ -60,14 +53,59 @@ func (o *Orchestrator) placementSweep() {
 	}
 	o.mu.RUnlock()
 
-	// A vault whose placements resolve to no leader is beyond the sweep's
-	// self-healing — sustained, that is an operator problem (alarm after
-	// the catalog's delay-on window; see updateLeaderlessAlarms).
+	// A vault whose placements resolve to no leader is beyond self-healing —
+	// sustained, that is an operator problem (alarm after the catalog's
+	// delay-on window; see updateLeaderlessAlarms). Passing the full outcome
+	// map lets vaults that re-resolved this pass diff to a Clear.
 	o.updateLeaderlessAlarms(leaderless)
 
-	// Reconcile the routing table from routes (safety net — dispatch also
-	// reloads on config changes for immediate effect).
 	o.reconcileFilters(sys)
+}
+
+// ReconcileVaultPlacement aligns ONE local vault instance's role and (for a
+// leader) sealed-chunk replication targets with the current placement config.
+// The FSM config dispatcher calls it on every single-vault placement change
+// (NotifyVaultPlacementsSet, NotifyVaultPut) so role and FollowerTargets move
+// the instant placements change — the two edges the retired sweep used to
+// close only on its next tick:
+//
+//   - Role: reconcileInstanceRole refuses to flip on a placement that resolves
+//     to no leader (mid-flap partial state), so the event path can no longer
+//     strand a vault leaderless the way the unguarded in-dispatch role write
+//     once did — the race the sweep was built to heal.
+//   - FollowerTargets: only ever refreshed at instance BUILD before this — a
+//     leader that kept its role while its follower set changed carried stale
+//     targets until the next 15s sweep. Now they refresh on the placement
+//     event itself.
+func (o *Orchestrator) ReconcileVaultPlacement(ctx context.Context, vaultID glid.GLID) {
+	sys, err := o.loadSystem(ctx)
+	if err != nil {
+		o.rotationLogger.Error("placement reconcile: failed to load config", "vault", vaultID, "error", err)
+		return
+	}
+	if sys == nil {
+		return
+	}
+	vaultCfg := findVaultConfig(sys.Config.Vaults, vaultID)
+	if vaultCfg == nil {
+		return
+	}
+
+	hasInstance := false
+	leaderResolved := true
+	o.mu.RLock()
+	if vault := o.vaults[vaultID]; vault != nil && vault.Instance != nil {
+		hasInstance = true
+		leaderResolved = o.reconcileInstanceRole(sys, *vaultCfg, vault.Instance)
+		if !vault.Instance.IsFollower {
+			o.refreshFollowerTargets(sys, *vaultCfg, vault.Instance)
+		}
+	}
+	o.mu.RUnlock()
+
+	if hasInstance {
+		o.updateLeaderlessAlarm(vaultID, vaultCfg.Name, !leaderResolved)
+	}
 }
 
 // reconcileFilters republishes the pipeline routing table from config under a
@@ -76,13 +114,13 @@ func (o *Orchestrator) reconcileFilters(sys *system.System) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if err := o.reloadRoutesFromConfig(sys); err != nil {
-		o.rotationLogger.Warn("placement sweep: routing-table reconciliation failed", "error", err)
+		o.rotationLogger.Warn("placement reconcile: routing-table reconciliation failed", "error", err)
 	}
 }
 
 // replicationTargetsEqual compares two ReplicationTarget slices by (NodeID,
 // StorageID) pairs. Order-insensitive. Used to detect FollowerTargets changes
-// across placementSweep ticks so the audit log only fires when something
+// across placement reconciles so the audit log only fires when something
 // actually moved.
 func replicationTargetsEqual(a, b []system.ReplicationTarget) bool {
 	if len(a) != len(b) {
@@ -101,13 +139,14 @@ func replicationTargetsEqual(a, b []system.ReplicationTarget) bool {
 }
 
 // reconcileInstanceRole aligns a local instance's leader/follower role with
-// the current placement config — the same computation the config dispatcher
-// runs on vault-put events, re-checked every sweep tick so a missed or
-// raced dispatch cannot leave a vault leaderless (or doubly-led) forever.
-// Membership add/remove stays dispatch-owned; this only corrects the role
-// of an instance that already exists. Called each tick by placementSweep
-// (caller holds o.mu.RLock; role fields are written lock-free by dispatch
-// today, and this follows the same convention).
+// the current placement config. It is the guarded, authoritative role
+// computation: it refuses to flip roles when placements resolve to no leader
+// (mid-flap partial state), so a raced dispatch cannot leave a vault leaderless
+// (or doubly-led). Membership add/remove stays dispatch-owned; this only
+// corrects the role of an instance that already exists. Called from
+// ReconcileVaultPlacement / ReconcilePlacements on the config event that
+// changed placements (caller holds o.mu.RLock; role fields are written
+// lock-free, matching the dispatch convention).
 func (o *Orchestrator) reconcileInstanceRole(sys *system.System, vaultCfg system.VaultConfig, vaultInst *VaultInstance) (leaderResolved bool) {
 	leaderNodeID := system.LeaderNodeID(vaultCfg.Placements, sys.Runtime.NodeStorageConfigs)
 	if leaderNodeID == "" {
@@ -133,7 +172,7 @@ func (o *Orchestrator) reconcileInstanceRole(sys *system.System, vaultCfg system
 		return true
 	}
 	vaultInst.IsFollower = isFollower
-	o.rotationLogger.Info("placement sweep: instance role reconciled",
+	o.rotationLogger.Info("placement reconcile: instance role reconciled",
 		"vault", vaultCfg.ID, "name", vaultCfg.Name, "isFollower", isFollower,
 		"leader", leaderNodeID)
 	return true
@@ -150,9 +189,9 @@ func replicationTargetNodes(targets []system.ReplicationTarget) []string {
 }
 
 // refreshFollowerTargets refreshes a leader instance's sealed-chunk replication
-// targets from the current placement config. Called each tick by placementSweep
-// (caller holds o.mu.RLock). Logs only on change so reconfiguration is auditable
-// without per-tick noise.
+// targets from the current placement config. Called from ReconcileVaultPlacement
+// / ReconcilePlacements on the placement event (caller holds o.mu.RLock). Logs
+// only on change so reconfiguration is auditable without noise.
 func (o *Orchestrator) refreshFollowerTargets(sys *system.System, vaultCfg system.VaultConfig, vaultInst *VaultInstance) {
 	newTargets := system.FollowerTargets(vaultCfg.Placements, sys.Runtime.NodeStorageConfigs)
 	if !replicationTargetsEqual(vaultInst.FollowerTargets, newTargets) {

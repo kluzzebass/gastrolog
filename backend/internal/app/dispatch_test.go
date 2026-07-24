@@ -125,6 +125,9 @@ type mockOrch struct {
 	refreshVaultCtlCalls [][]system.NodeConfig // node lists passed to RefreshVaultCtlMembers
 
 	archivalTriggerCalls int // number of TriggerArchivalSweep calls
+
+	reconcileVaultPlacementCalls []glid.GLID // vault IDs passed to ReconcileVaultPlacement
+	reconcilePlacementsCalls     int         // number of ReconcilePlacements calls
 }
 
 func (m *mockOrch) ListVaults() []glid.GLID    { return m.vaults }
@@ -154,10 +157,7 @@ func (m *mockOrch) ReloadFilters(context.Context) error {
 }
 func (m *mockOrch) ReloadRotationPolicies(context.Context) error  { return m.reloadRotationErr }
 func (m *mockOrch) ReloadRetentionPolicies(context.Context) error { return m.reloadRetentionErr }
-func (m *mockOrch) ApplyRotationPolicyForRole(context.Context, glid.GLID) error {
-	return nil
-}
-func (m *mockOrch) DisableVault(glid.GLID) error { return m.disableVaultErr }
+func (m *mockOrch) DisableVault(glid.GLID) error                  { return m.disableVaultErr }
 func (m *mockOrch) EnableVault(glid.GLID) error  { return m.enableVaultErr }
 func (m *mockOrch) ForceRemoveVault(id glid.GLID) error {
 	m.forceRemoveIDs = append(m.forceRemoveIDs, id)
@@ -1035,6 +1035,14 @@ func (m *mockOrch) FindLocalVaultInstance(vaultID glid.GLID) *orchestrator.Vault
 	return nil
 }
 
+func (m *mockOrch) ReconcileVaultPlacement(_ context.Context, vaultID glid.GLID) {
+	m.reconcileVaultPlacementCalls = append(m.reconcileVaultPlacementCalls, vaultID)
+}
+
+func (m *mockOrch) ReconcilePlacements(context.Context) {
+	m.reconcilePlacementsCalls++
+}
+
 func (m *mockOrch) RefreshVaultCtlMembers(nodes []system.NodeConfig, _ orchestrator.Factories) {
 	m.refreshVaultCtlCalls = append(m.refreshVaultCtlCalls, nodes)
 }
@@ -1105,41 +1113,35 @@ func TestHandle_NodeConfigChange_RefreshesVaultCtlMembers(t *testing.T) {
 	})
 }
 
-// gastrolog-4zy8a: when the placement leader transfers but this node stays
-// a follower, the local VaultInstance.LeaderNodeID must be refreshed so the
-// lifecycle reconciler's RequestReplicaCatchup targets the new leader
-// instead of looping forever against the old (stale) one.
-func TestHandle_PlacementsSet_RefreshesLeaderPointerWhenRoleUnchanged(t *testing.T) {
+// gastrolog-4zy8a / gastrolog-29xpy: when the placement leader transfers but
+// this node stays a follower, the local VaultInstance.LeaderNodeID must be
+// refreshed so the lifecycle reconciler's RequestReplicaCatchup targets the
+// new leader instead of looping forever against the old (stale) one. That
+// refresh moved from an in-dispatch role write into the orchestrator's guarded
+// ReconcileVaultPlacement (which the retired placement sweep also fed). The
+// dispatcher's job is now to DELEGATE that reconcile on NotifyVaultPlacementsSet;
+// the pointer refresh itself is covered by TestReconcileInstanceRole in the
+// orchestrator package.
+func TestHandle_PlacementsSet_DelegatesReconcile(t *testing.T) {
 	t.Parallel()
 
 	vaultID := glid.New()
-	oldLeaderID := glid.New().String()
-	newLeaderID := glid.New().String()
+	leaderID := glid.New().String()
 	localID := glid.New().String()
 
-	// Storage IDs as real GLIDs (placements store them as base32 strings).
-	oldLeaderStorage := glid.New()
-	newLeaderStorage := glid.New()
+	leaderStorage := glid.New()
 	localStorage := glid.New()
 
 	nscs := []system.NodeStorageConfig{
-		{NodeID: oldLeaderID, FileStorages: []system.FileStorage{{ID: oldLeaderStorage, StorageClass: 1}}},
-		{NodeID: newLeaderID, FileStorages: []system.FileStorage{{ID: newLeaderStorage, StorageClass: 1}}},
+		{NodeID: leaderID, FileStorages: []system.FileStorage{{ID: leaderStorage, StorageClass: 1}}},
 		{NodeID: localID, FileStorages: []system.FileStorage{{ID: localStorage, StorageClass: 1}}},
 	}
-
-	// New placement: new leader is on newLeaderID; local stays a follower.
 	placements := []system.VaultPlacement{
-		{StorageID: newLeaderStorage.String(), Leader: true},
+		{StorageID: leaderStorage.String(), Leader: true},
 		{StorageID: localStorage.String(), Leader: false},
 	}
 
-	// Existing in-memory vault instance: still pointing at the OLD leader.
-	existing := &orchestrator.VaultInstance{
-		VaultID:      vaultID,
-		IsFollower:   true,
-		LeaderNodeID: oldLeaderID,
-	}
+	existing := &orchestrator.VaultInstance{VaultID: vaultID, IsFollower: true}
 
 	h := &captureHandler{}
 	mo := &mockOrch{
@@ -1159,11 +1161,8 @@ func TestHandle_PlacementsSet_RefreshesLeaderPointerWhenRoleUnchanged(t *testing
 
 	d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPlacementsSet, ID: vaultID})
 
-	if existing.LeaderNodeID != newLeaderID {
-		t.Fatalf("LeaderNodeID not refreshed: want %q, got %q", newLeaderID, existing.LeaderNodeID)
-	}
-	if !existing.IsFollower {
-		t.Fatal("IsFollower should still be true (role didn't change)")
+	if !slices.Contains(mo.reconcileVaultPlacementCalls, vaultID) {
+		t.Fatalf("expected ReconcileVaultPlacement(%s) to be called, got %v", vaultID, mo.reconcileVaultPlacementCalls)
 	}
 }
 

@@ -29,7 +29,6 @@ type orchActions interface {
 	ReloadFilters(ctx context.Context) error
 	ReloadRotationPolicies(ctx context.Context) error
 	ReloadRetentionPolicies(ctx context.Context) error
-	ApplyRotationPolicyForRole(ctx context.Context, vaultID glid.GLID) error
 	DisableVault(id glid.GLID) error
 	EnableVault(id glid.GLID) error
 	ForceRemoveVault(id glid.GLID) error
@@ -43,6 +42,8 @@ type orchActions interface {
 	DrainVault(ctx context.Context, vaultID glid.GLID, targetNodeID string) error
 	IsDraining(vaultID glid.GLID) bool
 	CancelDrain(ctx context.Context, vaultID glid.GLID) error
+	ReconcileVaultPlacement(ctx context.Context, vaultID glid.GLID)
+	ReconcilePlacements(ctx context.Context)
 	ListIngesters() []glid.GLID
 	IsIngesterRunning(id glid.GLID) bool
 	ReconcileIngesters(desired []orchestrator.IngesterDesired) error
@@ -219,7 +220,7 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 	case raftfsm.NotifyVaultPut:
 		d.settle(entVault, n.ID.String(), "vault-put", d.handleVaultPut(ctx, n.ID))
 	case raftfsm.NotifyVaultDeleted:
-		d.settle(entVault, n.ID.String(), "vault-delete", d.handleVaultDeleted(n))
+		d.settle(entVault, n.ID.String(), "vault-delete", d.handleVaultDeleted(ctx, n))
 	case raftfsm.NotifyRoutePut, raftfsm.NotifyRouteDeleted:
 		d.settle(entRoute, "", "reload-filters", d.reloadFilters(ctx))
 	case raftfsm.NotifyRotationPolicyPut, raftfsm.NotifyRotationPolicyDeleted:
@@ -228,8 +229,16 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 		d.settle(entRetention, "", "reload-retention-policies", d.reloadRetentionPolicies(ctx))
 	case raftfsm.NotifyIngesterPut:
 		d.settle(entIngester, "", "reconcile-ingesters", d.reconcileIngesters(ctx))
+		// A new/enabled singleton ingester needs a Raft-assigned home node;
+		// a deleted one frees its assignment. That assignment is the
+		// placement manager's job (reconcileSingletonIngesters). Without a
+		// trigger the ingester runs on EVERY eligible node (shouldRunIngester
+		// permits local start while unassigned) until the placement manager's
+		// next pass narrows it to one. Wake it now (gastrolog-29xpy).
+		d.triggerPlacement()
 	case raftfsm.NotifyIngesterDeleted:
 		d.settle(entIngester, "", "reconcile-ingesters", d.reconcileIngesters(ctx))
+		d.triggerPlacement()
 	case raftfsm.NotifySettingPut:
 		d.settle(entSetting, n.Key, "apply-setting", d.handleSettingPut(ctx, n.Key))
 	case raftfsm.NotifyClusterTLSPut:
@@ -243,16 +252,21 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 		// bootstrap membership and a scaled-in node loops forever in
 		// pre-vote campaigns. See gastrolog-4zy8a.
 		d.settle(entNodeConfig, "", "refresh-vault-ctl-members", d.handleNodeConfigChange(ctx))
+		// Membership also changes the placement candidate set: a joined node
+		// opens a memory-vault follower slot (any alive node is eligible) and
+		// can relieve load; a removed node's vaults need re-placing. The
+		// placement manager reads live cluster membership, so wake it on the
+		// config event rather than leaving it to the periodic pass
+		// (gastrolog-29xpy).
+		d.triggerPlacement()
 	case raftfsm.NotifyNodeStateChanged:
 		// Node lifecycle state transitioned (e.g., Live → Unreachable,
 		// Maintenance → Live, etc.). The placement guard (gastrolog-slc6l)
 		// gates rotation on the soft-offline states, so a state change
 		// can flip a node from "rotation-permitted" to "rotation-gated"
 		// or vice versa. Wake the placement reconciler so the gate
-		// re-evaluates without waiting for the 15s ticker.
-		if d.placementTrigger != nil {
-			d.placementTrigger()
-		}
+		// re-evaluates without waiting for the periodic pass.
+		d.triggerPlacement()
 	case raftfsm.NotifyManagedFilePut:
 		if d.managedFileHandler != nil {
 			d.managedFileHandler.OnPut(ctx, n.ID)
@@ -274,15 +288,19 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 	case raftfsm.NotifyNodeStorageConfigSet:
 		// NSC changes the universe of eligible placement candidates —
 		// either by adding a storage (new follower slot opens up) or
-		// removing one (existing placements may need to migrate). The
-		// 15s placement ticker would eventually pick this up, but
-		// operators expect `gastrolog config node add-storage` to take
+		// removing one (existing placements may need to migrate).
+		// Operators expect `gastrolog config node add-storage` to take
 		// effect immediately; without a trigger the vault stays at its
-		// stale placement count for up to 15s and looks broken. See
-		// gastrolog-2yeie.
-		if d.placementTrigger != nil {
-			d.placementTrigger()
-		}
+		// stale placement count and looks broken. See gastrolog-2yeie.
+		d.triggerPlacement()
+		// NSC also remaps storageID→nodeID, which is how a leader instance
+		// resolves its FollowerTargets and any instance resolves its role
+		// (system.FollowerTargets / LeaderNodeID). A storage moving between
+		// nodes can shift targets/role without any placement edit, so
+		// reconcile every local instance from the new NSC directly rather
+		// than waiting on the placement manager to rewrite placements
+		// (gastrolog-29xpy — replaces the retired orchestrator placement sweep).
+		d.orch.ReconcilePlacements(ctx)
 	case raftfsm.NotifyCloudServicePut:
 		// An edit to a cloud service's archival transition chain changes the
 		// age thresholds the hourly archival sweep evaluates against. The
@@ -309,6 +327,14 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 	// skip stale refetches when it already holds a newer mutation response.
 	if d.configSignal != nil && n.Kind != raftfsm.NotifyClusterTLSPut {
 		d.configSignal.NotifyWithVersion(n.Index)
+	}
+}
+
+// triggerPlacement pokes the placement manager for an immediate reconcile,
+// tolerating the single-node case where no placement manager is wired.
+func (d *configDispatcher) triggerPlacement() {
+	if d.placementTrigger != nil {
+		d.placementTrigger()
 	}
 }
 
@@ -459,7 +485,7 @@ func (d *configDispatcher) applyExistingVaultChanges(ctx context.Context, id gli
 	return errors.Join(errs...)
 }
 
-func (d *configDispatcher) handleVaultDeleted(n raftfsm.Notification) error {
+func (d *configDispatcher) handleVaultDeleted(ctx context.Context, n raftfsm.Notification) error {
 	var errs []error
 	if err := d.orch.ForceRemoveVault(n.ID); err != nil && !errors.Is(err, orchestrator.ErrVaultNotFound) {
 		errs = append(errs, fmt.Errorf("force remove vault %q: %w", n.Name, err))
@@ -468,6 +494,14 @@ func (d *configDispatcher) handleVaultDeleted(n raftfsm.Notification) error {
 		if err := os.RemoveAll(n.Dir); err != nil {
 			errs = append(errs, fmt.Errorf("remove vault directory %q: %w", n.Dir, err))
 		}
+	}
+	// Republish the routing table and Origin/Home registrations so the
+	// deleted vault drops out of the pipeline immediately. teardownVault
+	// leaves this to ReloadFilters "when the deletion lands in config"; with
+	// the periodic placement sweep retired (gastrolog-29xpy), the delete
+	// event is where it lands.
+	if err := d.reloadFilters(ctx); err != nil {
+		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
 }
@@ -664,7 +698,7 @@ func (d *configDispatcher) handleInstancePut(ctx context.Context, vaultID glid.G
 
 	// Reload filters so ingestion routing picks up the new placement leader
 	// immediately. Without this, records are forwarded to the old (possibly
-	// dead) node until the rotation sweep recompiles filters (up to 15s).
+	// dead) node until the next routing-table republish.
 	if err := d.orch.ReloadFilters(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("reload filters after vault change: %w", err))
 	}
@@ -681,6 +715,8 @@ func (d *configDispatcher) handleInstancePut(ctx context.Context, vaultID glid.G
 	// Schedule catchup only for NEWLY added followers, not existing ones.
 	// When a leader changes but followers stay the same (e.g. a node dies),
 	// the surviving followers already have all chunks — no catchup needed.
+	// This reads the instance's PRIOR FollowerTargets, so it must run before
+	// ReconcileVaultPlacement below refreshes them.
 	if leaderNodeID == d.localNodeID && len(followerNodeIDs) > 0 && d.catchupScheduler != nil {
 		newFollowers := d.newFollowersForInstance(v.ID, followerNodeIDs)
 		if len(newFollowers) > 0 {
@@ -688,11 +724,18 @@ func (d *configDispatcher) handleInstancePut(ctx context.Context, vaultID glid.G
 		}
 	}
 
+	// Align this node's local instance with the new placements: role
+	// (leader/follower), leader pointer, and — for a leader — the sealed-chunk
+	// FollowerTargets. This is the authoritative, guarded reconcile that
+	// replaces the retired 15s placement sweep (gastrolog-29xpy): it will not
+	// flip roles on a placement that resolves to no leader (the mid-flap race
+	// that once stranded vaults leaderless), and it refreshes FollowerTargets
+	// on the placement event rather than at the next sweep tick.
+	d.orch.ReconcileVaultPlacement(ctx, vaultID)
+
 	// Trigger immediate placement reconcile so secondaries are assigned
-	// without waiting for the 15-second ticker.
-	if d.placementTrigger != nil {
-		d.placementTrigger()
-	}
+	// without waiting for the periodic pass.
+	d.triggerPlacement()
 	return errors.Join(errs...)
 }
 
@@ -750,7 +793,13 @@ func (d *configDispatcher) rebuildVaultIfInstanceMissing(ctx context.Context, v 
 	_ = vaultID // legacy parameter; instance is identified by v.ID under 1:1 collapse
 	existing := d.orch.FindLocalVaultInstance(v.ID)
 	if existing != nil {
-		return d.updateInstanceRoleIfNeeded(ctx, v.ID, existing)
+		// Instance already present — its role, leader pointer, and
+		// FollowerTargets are reconciled authoritatively by
+		// ReconcileVaultPlacement in handleInstancePut after this returns
+		// (gastrolog-29xpy). No in-place role write here: doing it unguarded
+		// on a mid-flap no-leader placement was the race that stranded vaults
+		// leaderless, which the retired placement sweep had to heal.
+		return nil
 	}
 	// The vault may not be registered in the orchestrator yet — typically
 	// because we got here via a NotifyVaultPlacementsSet that came in over
@@ -769,62 +818,6 @@ func (d *configDispatcher) rebuildVaultIfInstanceMissing(ctx context.Context, v 
 	// Instance doesn't exist locally yet — add it incrementally.
 	if err := d.orch.AddVaultInstance(ctx, v.ID, d.factories); err != nil {
 		return fmt.Errorf("add vault instance %s: %w", v.ID, err)
-	}
-	return nil
-}
-
-// updateInstanceRoleIfNeeded checks whether a vault instance's role
-// (leader ↔ follower) has changed and updates it in place — avoiding a full
-// vault rebuild and file lock churn.
-//
-// On a role transition, also re-applies the role-appropriate rotation
-// policy to the chunk manager: NeverRotatePolicy on follower, user policy
-// on leader. Without this, the chunk manager's policy lags the role flip
-// by up to 15 s (the rotationSweep interval). On a follower→leader flip,
-// the new leader carries NeverRotatePolicy during the gap and records pile
-// up without rotation; on a leader→follower flip, the new follower briefly
-// keeps the user policy and could rotate independently. See
-// gastrolog-50n4b.
-func (d *configDispatcher) updateInstanceRoleIfNeeded(ctx context.Context, vaultID glid.GLID, existing *orchestrator.VaultInstance) error {
-	v, err := d.cfgStore.GetVault(ctx, vaultID)
-	if err != nil {
-		return fmt.Errorf("get vault for role update %s: %w", vaultID, err)
-	}
-	if v == nil {
-		return nil
-	}
-	nscs, err := d.cfgStore.ListNodeStorageConfigs(ctx)
-	if err != nil {
-		return fmt.Errorf("list node storage configs for role update %s: %w", vaultID, err)
-	}
-	leaderNodeID := system.LeaderNodeID(func() []system.VaultPlacement { p, _ := d.cfgStore.GetVaultPlacements(ctx, vaultID); return p }(), nscs)
-	followerNodeIDs := system.FollowerNodeIDs(func() []system.VaultPlacement { p, _ := d.cfgStore.GetVaultPlacements(ctx, vaultID); return p }(), nscs)
-	shouldBeFollower := slices.Contains(followerNodeIDs, d.localNodeID)
-	roleChanged := existing.IsFollower != shouldBeFollower
-
-	// Always refresh LeaderNodeID, even when this node's role is unchanged.
-	// The placement leader can transfer between two other nodes (e.g. an
-	// existing leader fails over to a different node) while this follower
-	// stays a follower. Without this refresh, the local instance's leader
-	// pointer freezes at the original leader and the lifecycle reconciler's
-	// RequestReplicaCatchup loops forever against a stale target that
-	// rejects every request with "not placement leader". See gastrolog-4zy8a.
-	if shouldBeFollower {
-		existing.LeaderNodeID = leaderNodeID
-	} else {
-		existing.LeaderNodeID = ""
-	}
-
-	if !roleChanged {
-		return nil
-	}
-	existing.IsFollower = shouldBeFollower
-	// FollowerTargets are refreshed by the rotation sweep every 15s.
-	d.logger.Info("dispatch: vault role updated in place",
-		"vault", vaultID,
-		"isFollower", shouldBeFollower)
-	if err := d.orch.ApplyRotationPolicyForRole(ctx, vaultID); err != nil {
-		return fmt.Errorf("apply rotation policy after role change %s: %w", vaultID, err)
 	}
 	return nil
 }
@@ -936,4 +929,12 @@ func (d *configDispatcher) ReplayConfigFromStore(ctx context.Context) {
 	d.settle(entRoute, "", "reload-filters", d.reloadFilters(ctx))
 	d.settle(entRotation, "", "reload-rotation-policies", d.reloadRotationPolicies(ctx))
 	d.settle(entRetention, "", "reload-retention-policies", d.reloadRetentionPolicies(ctx))
+
+	// Reconcile role and FollowerTargets for vaults the orchestrator ALREADY
+	// had (the loop above skips them): their placements may have changed
+	// inside the installed snapshot, whose entries never fired onApply
+	// notifications. With the periodic placement sweep retired
+	// (gastrolog-29xpy), this replay is where a post-snapshot role/target
+	// drift is caught.
+	d.orch.ReconcilePlacements(ctx)
 }

@@ -297,7 +297,7 @@ func (o *Orchestrator) removeVaultJobs(_ glid.GLID, vault *Vault) {
 // teardownVault performs the common cleanup for all vault removal paths:
 // cancels pending jobs, closes managers, and removes from the registry. The
 // pipeline routing table and Origin registrations are reconciled separately by
-// ReloadFilters / placementSweep when the deletion lands in config.
+// ReloadFilters when the deletion lands in config.
 func (o *Orchestrator) teardownVault(id glid.GLID, vault *Vault) {
 	o.destroyVaultControlPlaneRaftGroup(id)
 

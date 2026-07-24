@@ -142,15 +142,12 @@ func (o *Orchestrator) ApplyConfig(sys *system.System, factories Factories) erro
 		return err
 	}
 
-	// Schedule the placement-reconcile sweep so sealed-chunk replication
-	// targets and the routing table self-heal even between config-change
-	// notifications.
-	if !o.scheduler.HasJob(placementSweepJobName) {
-		if err := o.scheduler.AddJob(placementSweepJobName, placementSweepSchedule, o.placementSweep); err != nil {
-			o.logger.Warn("failed to add placement-reconcile sweep job", "error", err)
-		}
-		o.scheduler.Describe(placementSweepJobName, "Refresh replication targets and routing table")
-	}
+	// The 15s placement-reconcile sweep is retired (gastrolog-29xpy). Role,
+	// FollowerTargets, and routing-table refreshes are now driven by the FSM
+	// config dispatcher on the events that change them — see
+	// ReconcileVaultPlacement / ReconcilePlacements. Startup itself is the
+	// catch-up: applyVaults above builds every local instance with its role
+	// and FollowerTargets already set from config.
 
 	return nil
 }
