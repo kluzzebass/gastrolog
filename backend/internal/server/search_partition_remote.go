@@ -1,9 +1,11 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"gastrolog/internal/glid"
 	"iter"
+	"slices"
 	"sync"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
@@ -28,13 +30,15 @@ func forwardSearchRequestFromTarget(t searchPartitionTarget, queryExpr string, r
 }
 
 // collectPartitionRemote opens streaming ForwardSearch RPCs for remote holder
-// partitions and returns a merged sorted iterator plus combined histogram.
+// partitions and returns a merged sorted iterator, combined histogram, and
+// the set of remote vaults fanned out to (the contributor set — see
+// collectRemote and gastrolog-20lrg).
 func (s *QueryServer) collectPartitionRemote(
 	ctx context.Context,
 	q query.Query,
 	targets []searchPartitionTarget,
 	remoteTokens map[glid.GLID][]byte,
-) (iter.Seq2[chunk.Record, error], []*apiv1.HistogramBucket, func() map[glid.GLID][]byte) {
+) (iter.Seq2[chunk.Record, error], []*apiv1.HistogramBucket, []glid.GLID) {
 	if s.remoteSearcher == nil || len(targets) == 0 {
 		return nil, nil, nil
 	}
@@ -45,10 +49,9 @@ func (s *QueryServer) collectPartitionRemote(
 	queryExpr := q.String()
 
 	type partitionStream struct {
-		records        <-chan []*apiv1.ExportRecord
-		errCh          <-chan error
-		getResumeToken func() []byte
-		vaultID        glid.GLID
+		records <-chan []*apiv1.ExportRecord
+		errCh   <-chan error
+		vaultID glid.GLID
 	}
 	var streams []partitionStream
 	var mu sync.Mutex
@@ -57,43 +60,40 @@ func (s *QueryServer) collectPartitionRemote(
 	for _, target := range targets {
 		wg.Go(func() {
 			req := forwardSearchRequestFromTarget(target, queryExpr, remoteTokens[target.vaultID])
-			recCh, _, eCh, getToken, _ := s.remoteSearcher.SearchStream(ctx, target.nodeID, req)
+			// Remote resume tokens are not propagated (see collectRemote).
+			recCh, _, eCh, _, _ := s.remoteSearcher.SearchStream(ctx, target.nodeID, req)
 			mu.Lock()
 			streams = append(streams, partitionStream{
-				records:        recCh,
-				errCh:          eCh,
-				getResumeToken: getToken,
-				vaultID:        target.vaultID,
+				records: recCh,
+				errCh:   eCh,
+				vaultID: target.vaultID,
 			})
 			mu.Unlock()
 		})
 	}
 	wg.Wait()
 
-	getRemoteTokens := func() map[glid.GLID][]byte {
-		tokens := make(map[glid.GLID][]byte)
-		for _, ps := range streams {
-			if ps.getResumeToken != nil {
-				if t := ps.getResumeToken(); len(t) > 0 {
-					tokens[ps.vaultID] = t
-				}
-			}
-		}
-		return tokens
-	}
-
 	if len(streams) == 0 {
 		return nil, nil, nil
 	}
+
+	// Contributor set: the remote holder-partition vaults fanned out to.
+	contributingVaults := make([]glid.GLID, 0, len(streams))
+	for _, ps := range streams {
+		contributingVaults = append(contributingVaults, ps.vaultID)
+	}
+	slices.SortFunc(contributingVaults, func(a, b glid.GLID) int {
+		return cmp.Compare(a.String(), b.String())
+	})
 
 	var iters []iter.Seq2[chunk.Record, error]
 	for _, ps := range streams {
 		iters = append(iters, channelToIter(ps.records, ps.errCh))
 	}
 	if len(iters) == 1 {
-		return iters[0], nil, getRemoteTokens
+		return iters[0], nil, contributingVaults
 	}
-	return kWayMerge(iters, q.OrderBy, q.Reverse()), nil, getRemoteTokens
+	return kWayMerge(iters, q.OrderBy, q.Reverse()), nil, contributingVaults
 }
 
 // searchPartitionTargets runs local holder-partition searches and merges them

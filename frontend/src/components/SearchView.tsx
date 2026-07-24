@@ -131,6 +131,7 @@ export function SearchView() {
                   totalChunks={sv.explainTotalChunks}
                   expression={sv.explainExpression}
                   pipelineStages={sv.explainPipelineStages}
+                  contributionReport={sv.explainContribution}
                   dark={sv.dark}
                 />
               )}

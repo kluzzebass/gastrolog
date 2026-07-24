@@ -5,6 +5,7 @@
 
 import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialMessage, PlainMessage } from "@bufbuild/protobuf";
 import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
+import { ContributionReport } from "./vault_pb.js";
 
 /**
  * @generated from message gastrolog.v1.SearchRequest
@@ -106,6 +107,19 @@ export class SearchResponse extends Message<SearchResponse> {
    */
   serverElapsedMs = protoInt64.zero;
 
+  /**
+   * Per-vault stream-health signal: the remote vaults this merged search
+   * fanned out to and merged (gastrolog-20lrg). Because a remote stream
+   * failure aborts the whole search (fail-on-remote-failure), any response
+   * the client actually receives was assembled from EVERY vault in this
+   * set — so it doubles as the contributor record for the merge. Empty for
+   * a purely-local search. Carried on the response that closes the stream,
+   * alongside the histogram.
+   *
+   * @generated from field: repeated bytes contributing_vault_ids = 8;
+   */
+  contributingVaultIds: Uint8Array[] = [];
+
   constructor(data?: PartialMessage<SearchResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -121,6 +135,7 @@ export class SearchResponse extends Message<SearchResponse> {
     { no: 5, name: "histogram", kind: "message", T: HistogramBucket, repeated: true },
     { no: 6, name: "archived_chunks", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
     { no: 7, name: "server_elapsed_ms", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 8, name: "contributing_vault_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SearchResponse {
@@ -478,6 +493,15 @@ export class ExplainResponse extends Message<ExplainResponse> {
    */
   pipelineStages: QueryPipelineStage[] = [];
 
+  /**
+   * Set only when the cross-node fan-out that gathered remote chunk plans
+   * could not reach every peer, so the plan omits some node's chunks.
+   * Absent when every peer contributed. See gastrolog-1ic07.
+   *
+   * @generated from field: gastrolog.v1.ContributionReport contribution_report = 8;
+   */
+  contributionReport?: ContributionReport;
+
   constructor(data?: PartialMessage<ExplainResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -493,6 +517,7 @@ export class ExplainResponse extends Message<ExplainResponse> {
     { no: 5, name: "query_start", kind: "message", T: Timestamp },
     { no: 6, name: "query_end", kind: "message", T: Timestamp },
     { no: 7, name: "pipeline_stages", kind: "message", T: QueryPipelineStage, repeated: true },
+    { no: 8, name: "contribution_report", kind: "message", T: ContributionReport },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ExplainResponse {

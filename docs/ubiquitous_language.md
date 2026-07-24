@@ -811,6 +811,38 @@ How the cluster reports what it's doing to itself, to operators, and to the UI.
   revoked mid-flight, or shutdown). They are a per-vault sub-account of
   `Matched`, never part of the `Routed = Matched + Unmatched` sum.
 
+- **Peer fan-out** — the unary inspector-RPC pattern where the connected
+  node queries every peer that hosts a vault concurrently, each under a
+  per-peer timeout, and merges the answers (`server/peer_fanout.go`). A
+  peer that times out or errors is elided from the merge instead of
+  blocking the handler — the inspector stays responsive on a degraded
+  cluster. Distinct from the Broadcaster (push, steady-state stats) — a
+  fan-out is a pull, on demand, for one request.
+
+- **Contribution report** (`ContributionReport`) — the record of which
+  peers failed to answer a peer fan-out, attached to the merged response
+  so a partial result reads as **visibly partial** instead of silently
+  dropping the peer. Names each **degraded peer** (`DegradedPeer`: node
+  ID + short reason — `timeout` or transport error text). Omitted
+  entirely when every peer contributed (quiet-until-needed), so its
+  presence alone means "this merge is incomplete." Benign placement-churn
+  non-answers (a peer reconfigured out of the vault) are expected
+  reconfiguration, not degradation, and never appear. Surfaced in the UI
+  as a single "partial" badge. See gastrolog-66zrj / gastrolog-1ic07.
+
+- **Contributing vaults** (`SearchResponse.contributing_vault_ids`) — the
+  per-vault stream-health signal on a merged **search**: the remote vaults
+  the search fanned out to and merged. Distinct from a contribution report
+  because search is **fail-on-remote-failure** — a remote stream error
+  aborts the whole search (there is no partial search), so every vault in
+  this set contributed to any response the client actually receives. It is
+  the positive record of the merge's cross-vault span, not a degraded
+  signal; empty for a purely-local search. The pipeline aggregation path
+  (`| stats`, `| timechart`) shares the same fail-hard policy — a partial
+  aggregate is a wrong scalar presented as authoritative, so a failed
+  remote vault fails the whole query rather than silently undercounting.
+  See gastrolog-20lrg.
+
 - **Alarm** — a condition that **requires an operator action**, carrying a
   documented cause and response. The governing test is the whole definition:
   *does the operator have to do something?* If no, it is not an alarm. An

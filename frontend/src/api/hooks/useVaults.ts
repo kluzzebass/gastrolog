@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { vaultClient, systemClient } from "../client";
-import { VaultInfo, ChunkMeta, GetStatsResponse } from "../gen/gastrolog/v1/vault_pb";
+import { VaultInfo, ChunkMeta, GetStatsResponse, ContributionReport } from "../gen/gastrolog/v1/vault_pb";
 import { VaultConfig } from "../gen/gastrolog/v1/system_pb";
 import { protoSharing, protoArraySharing } from "./protoSharing";
 import { useSystemMutation, useConfig } from "./useSystem";
@@ -69,6 +69,14 @@ export function useChunks(vaultId: string) {
     queryKey: ["chunks", vaultId],
     queryFn: async () => {
       const response = await vaultClient.listChunks({ vault: vaultId });
+      // Stash the fan-out contribution report so the inspector can flag a
+      // partial cross-node merge (some hosting peer timed out or failed).
+      // A response with every peer contributing clears any stale flag —
+      // quiet-until-needed. See gastrolog-66zrj.
+      qc.setQueryData<ContributionReport | null>(
+        ["chunks-contribution", vaultId],
+        response.contributionReport ?? null,
+      );
       return mergeChunksSnapshot(
         qc.getQueryData<ChunkMeta[]>(["chunks", vaultId]),
         response.chunks,
@@ -77,6 +85,29 @@ export function useChunks(vaultId: string) {
     structuralSharing: protoArraySharing(ChunkMeta.equals),
     enabled: !!vaultId,
   });
+}
+
+/**
+ * useChunksContribution exposes the most recent ListChunks fan-out
+ * contribution report for a vault, or null when the last merge reached
+ * every hosting peer. The report is written as a side-effect of
+ * useChunks; this reader subscribes to the sibling cache key so the
+ * inspector re-renders when the merge degrades or recovers. Only the
+ * initial ListChunks fetch carries a report — steady-state chunk updates
+ * arrive via the WatchChunks stream, which does not fan out. See
+ * gastrolog-66zrj.
+ */
+export function useChunksContribution(vaultId: string): ContributionReport | null {
+  const qc = useQueryClient();
+  return (
+    useQuery({
+      queryKey: ["chunks-contribution", vaultId],
+      queryFn: () =>
+        qc.getQueryData<ContributionReport | null>(["chunks-contribution", vaultId]) ?? null,
+      enabled: !!vaultId,
+      staleTime: Infinity,
+    }).data ?? null
+  );
 }
 
 export function useIndexes(vaultId: string, chunkId: string) {

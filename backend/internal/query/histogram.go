@@ -82,7 +82,7 @@ func (e *Engine) runTimechart(ctx context.Context, q Query, tc *querylang.Timech
 		return nil, err
 	}
 
-	result := timechartToTable(groupField, start, bucketWidth, numBuckets, counts, groupCounts)
+	result := timechartToTable(groupField, start, bucketWidth, numBuckets, counts, groupCounts, acc.cloudFlags, acc.cloudCounts)
 	result.Truncated = truncated
 	return result, nil
 }
@@ -825,27 +825,52 @@ func timechartBinRecord(ts time.Time, attrs chunk.Attributes, start, end time.Ti
 	}
 }
 
+// TimechartCloudFlagColumn and TimechartCloudCountColumn are sentinel
+// columns appended to every timechart TableResult, mirroring
+// HistogramBucket's has_cloud_data/cloud_count fields (search_histogram.go)
+// for the sidebar histogram. A "table" of raw counts alone can't distinguish
+// an exact filtered-scan bucket from one whose cloud contribution was scaled
+// by applyCloudSelectivity — these columns carry that provenance through
+// every downstream table op (sort/where/head/…), the multi-node merge
+// (query_merge.go), and into the frontend so cloud-derived buckets keep
+// rendering in the hatched "estimate" style consistently with the sidebar
+// histogram. See gastrolog-4of7c.
+const (
+	TimechartCloudFlagColumn  = "_has_cloud_data"
+	TimechartCloudCountColumn = "_cloud_count"
+)
+
 // timechartColumns returns the column list for a timechart result.
-// Without grouping: ["_time", "count"]. With grouping: ["_time", "<field>", "count"].
+// Without grouping: ["_time", "count", "_has_cloud_data", "_cloud_count"].
+// With grouping: ["_time", "<field>", "count", "_has_cloud_data", "_cloud_count"].
 func timechartColumns(groupField string) []string {
 	if groupField == "" {
-		return []string{"_time", "count"}
+		return []string{"_time", "count", TimechartCloudFlagColumn, TimechartCloudCountColumn}
 	}
-	return []string{"_time", groupField, "count"}
+	return []string{"_time", groupField, "count", TimechartCloudFlagColumn, TimechartCloudCountColumn}
 }
 
 // timechartToTable converts bucketed counts into a TableResult.
-// Without grouping: one row per bucket with columns ["_time", "count"].
-// With grouping: one row per bucket × group with columns ["_time", "<field>", "count"].
-func timechartToTable(groupField string, start time.Time, bucketWidth time.Duration, numBuckets int, counts []int64, groupCounts []map[string]int64) *TableResult {
+// Without grouping: one row per bucket. With grouping: one row per
+// bucket × group. Every row for a given bucket carries the same
+// TimechartCloudFlagColumn/TimechartCloudCountColumn values — the bucket's
+// cloud provenance, not a per-group split — sourced from the same
+// cloudFlags/cloudCounts accumulator that feeds HistogramBucket for the
+// sidebar histogram (see buildHistogramBuckets).
+func timechartToTable(groupField string, start time.Time, bucketWidth time.Duration, numBuckets int, counts []int64, groupCounts []map[string]int64, cloudFlags []bool, cloudCounts []int64) *TableResult {
 	columns := timechartColumns(groupField)
 	var rows [][]string
+
+	cloudCols := func(i int) []string {
+		return []string{strconv.FormatBool(cloudFlags[i]), strconv.FormatInt(cloudCounts[i], 10)}
+	}
 
 	if groupField == "" {
 		// No grouping — one row per bucket.
 		for i := range numBuckets {
 			ts := start.Add(bucketWidth * time.Duration(i)).Format(time.RFC3339Nano)
-			rows = append(rows, []string{ts, strconv.FormatInt(counts[i], 10)})
+			row := append([]string{ts, strconv.FormatInt(counts[i], 10)}, cloudCols(i)...)
+			rows = append(rows, row)
 		}
 		return &TableResult{Columns: columns, Rows: rows}
 	}
@@ -862,10 +887,11 @@ func timechartToTable(groupField string, start time.Time, bucketWidth time.Durat
 	for i := range numBuckets {
 		ts := start.Add(bucketWidth * time.Duration(i)).Format(time.RFC3339Nano)
 		total := counts[i]
+		cc := cloudCols(i)
 
 		if len(groupCounts[i]) == 0 {
 			// No group breakdown — emit a single row with empty group.
-			rows = append(rows, []string{ts, "", strconv.FormatInt(total, 10)})
+			rows = append(rows, append([]string{ts, "", strconv.FormatInt(total, 10)}, cc...))
 			continue
 		}
 
@@ -876,12 +902,12 @@ func timechartToTable(groupField string, start time.Time, bucketWidth time.Durat
 			if !ok || count == 0 {
 				continue
 			}
-			rows = append(rows, []string{ts, key, strconv.FormatInt(count, 10)})
+			rows = append(rows, append([]string{ts, key, strconv.FormatInt(count, 10)}, cc...))
 			groupTotal += count
 		}
 		// Emit remainder as empty-group row if total > sum of group counts.
 		if remainder := total - groupTotal; remainder > 0 {
-			rows = append(rows, []string{ts, "", strconv.FormatInt(remainder, 10)})
+			rows = append(rows, append([]string{ts, "", strconv.FormatInt(remainder, 10)}, cc...))
 		}
 	}
 

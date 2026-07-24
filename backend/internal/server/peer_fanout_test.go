@@ -39,7 +39,7 @@ func TestPeerFanOutHonorsPerPeerTimeout(t *testing.T) {
 	}
 
 	start := time.Now()
-	results, ok := peerFanOut(context.Background(), logger, "test", nodes, fn)
+	results, ok, report := peerFanOut(context.Background(), logger, "test", nodes, fn)
 	elapsed := time.Since(start)
 
 	// The whole call should finish within peerInspectorTimeout + a small
@@ -73,6 +73,21 @@ func TestPeerFanOutHonorsPerPeerTimeout(t *testing.T) {
 		t.Errorf("paused peer goroutine returned %d times, want 1 (timeout should have cancelled it)",
 			pausedReturned.Load())
 	}
+
+	// The merge must report itself as partial, naming the paused peer with
+	// a "timeout" reason (deadline overrun collapses to that single word).
+	if report == nil {
+		t.Fatalf("report = nil, want a ContributionReport naming node-paused")
+	}
+	if len(report.Degraded) != 1 {
+		t.Fatalf("report.Degraded = %d entries, want 1", len(report.Degraded))
+	}
+	if report.Degraded[0].NodeId != "node-paused" {
+		t.Errorf("degraded node = %q, want node-paused", report.Degraded[0].NodeId)
+	}
+	if report.Degraded[0].Reason != "timeout" {
+		t.Errorf("degraded reason = %q, want %q", report.Degraded[0].Reason, "timeout")
+	}
 }
 
 // TestPeerFanOutPreservesNodeOrder pins that results[i] corresponds to
@@ -101,7 +116,7 @@ func TestPeerFanOutPreservesNodeOrder(t *testing.T) {
 		return nodeID, nil
 	}
 
-	results, ok := peerFanOut(context.Background(), logger, "test", nodes, fn)
+	results, ok, report := peerFanOut(context.Background(), logger, "test", nodes, fn)
 
 	for i, n := range nodes {
 		if !ok[i] {
@@ -111,6 +126,12 @@ func TestPeerFanOutPreservesNodeOrder(t *testing.T) {
 		if results[i] != n {
 			t.Errorf("nodes[%d] = %q: results[%d] = %q (out-of-order)", i, n, i, results[i])
 		}
+	}
+
+	// Every peer contributed — the happy path must omit the report entirely
+	// so the UI stays quiet.
+	if report != nil {
+		t.Errorf("report = %+v, want nil (all peers contributed)", report)
 	}
 }
 
@@ -131,13 +152,25 @@ func TestPeerFanOutErroringPeerIsElided(t *testing.T) {
 		return "ok", nil
 	}
 
-	results, ok := peerFanOut(context.Background(), logger, "test", nodes, fn)
+	results, ok, report := peerFanOut(context.Background(), logger, "test", nodes, fn)
 
 	if !ok[0] || results[0] != "ok" {
 		t.Errorf("good: ok=%v, value=%q; want true, ok", ok[0], results[0])
 	}
 	if ok[1] {
 		t.Errorf("bad: ok=true, want false (errored peer must be elided)")
+	}
+
+	// The errored peer must appear in the contribution report carrying the
+	// transport error text verbatim (non-timeout failures keep their cause).
+	if report == nil || len(report.Degraded) != 1 {
+		t.Fatalf("report = %+v, want exactly one degraded peer", report)
+	}
+	if report.Degraded[0].NodeId != "bad" {
+		t.Errorf("degraded node = %q, want bad", report.Degraded[0].NodeId)
+	}
+	if report.Degraded[0].Reason != wantErr.Error() {
+		t.Errorf("degraded reason = %q, want %q", report.Degraded[0].Reason, wantErr.Error())
 	}
 }
 
@@ -148,7 +181,7 @@ func TestPeerFanOutEmptyNodes(t *testing.T) {
 	t.Parallel()
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	results, ok := peerFanOut(context.Background(), logger, "test", nil,
+	results, ok, report := peerFanOut(context.Background(), logger, "test", nil,
 		func(_ context.Context, _ string) (struct{}, error) {
 			t.Fatal("fn should never be called for an empty node list")
 			return struct{}{}, nil
@@ -156,5 +189,53 @@ func TestPeerFanOutEmptyNodes(t *testing.T) {
 
 	if len(results) != 0 || len(ok) != 0 {
 		t.Errorf("results/ok = (len %d, len %d), want both 0", len(results), len(ok))
+	}
+	if report != nil {
+		t.Errorf("report = %+v, want nil (no peers to fan out to)", report)
+	}
+}
+
+// TestPeerFanOutPlacementChurnNotDegraded pins that a benign
+// placement-churn error (peer no longer owns the vault during
+// reconfiguration) is elided from results WITHOUT being counted as
+// degradation — it is expected reconfiguration, not an operational
+// failure, so it must never make a merge read as partial. See
+// gastrolog-5z607 / gastrolog-1ic07.
+func TestPeerFanOutPlacementChurnNotDegraded(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	nodes := []string{"good", "churning", "broken"}
+	realErr := errors.New("connection refused")
+
+	fn := func(_ context.Context, nodeID string) (string, error) {
+		switch nodeID {
+		case "churning":
+			// A cross-RPC placement-churn error shape (peer reconfigured
+			// out of the vault); IsPlacementChurnErr recognises this.
+			return "", errors.New("follower rejected command: seal failed: vault instance not registered on this node: vault V")
+		case "broken":
+			return "", realErr
+		default:
+			return "ok", nil
+		}
+	}
+
+	results, ok, report := peerFanOut(context.Background(), logger, "test", nodes, fn)
+
+	if !ok[0] || results[0] != "ok" {
+		t.Errorf("good: ok=%v value=%q, want true ok", ok[0], results[0])
+	}
+	if ok[1] || ok[2] {
+		t.Errorf("churning/broken peers must be elided: ok=%v", ok)
+	}
+
+	// Only the genuinely broken peer is degradation; the churning peer is
+	// benign and must not appear.
+	if report == nil || len(report.Degraded) != 1 {
+		t.Fatalf("report = %+v, want exactly one degraded peer (broken only)", report)
+	}
+	if report.Degraded[0].NodeId != "broken" {
+		t.Errorf("degraded node = %q, want broken (churning must be excluded)", report.Degraded[0].NodeId)
 	}
 }

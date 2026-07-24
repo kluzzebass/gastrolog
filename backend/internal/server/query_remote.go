@@ -3,6 +3,7 @@ package server
 import (
 	"cmp"
 	"context"
+	"fmt"
 	"gastrolog/internal/glid"
 	"iter"
 	"slices"
@@ -17,10 +18,19 @@ import (
 )
 
 // collectRemote opens streaming ForwardSearch RPCs to all remote vaults and
-// returns a merged sorted iterator over their records plus the combined
-// histogram. The iterator performs a k-way merge — at most one record per
-// remote vault is held in memory at any time.
-func (s *QueryServer) collectRemote(ctx context.Context, q query.Query, remoteTokens map[glid.GLID][]byte) (iter.Seq2[chunk.Record, error], []*apiv1.HistogramBucket, func() map[glid.GLID][]byte) {
+// returns a merged sorted iterator over their records, the combined
+// histogram, and the set of remote vaults this search fanned out to. The
+// iterator performs a k-way merge — at most one record per remote vault is
+// held in memory at any time.
+//
+// The third return is the per-vault stream-health signal (gastrolog-20lrg):
+// the remote vaults contributing to this merged search. Because a remote
+// stream failure aborts the whole search (mergeIterators → mapSearchError,
+// the same fail-on-remote-failure policy the pipeline path now shares), any
+// successfully-returned response has been assembled from EVERY vault in this
+// set — so the fanned-out set is exactly the contributor set. nil when there
+// are no remote vaults in scope.
+func (s *QueryServer) collectRemote(ctx context.Context, q query.Query, remoteTokens map[glid.GLID][]byte) (iter.Seq2[chunk.Record, error], []*apiv1.HistogramBucket, []glid.GLID) {
 	if s.remoteSearcher == nil || s.cfgStore == nil {
 		return nil, nil, nil
 	}
@@ -37,11 +47,10 @@ func (s *QueryServer) collectRemote(ctx context.Context, q query.Query, remoteTo
 
 	// Fan out streaming RPCs concurrently — one per remote vault.
 	type vaultStream struct {
-		records        <-chan []*apiv1.ExportRecord
-		errCh          <-chan error
-		getResumeToken func() []byte
-		getHistogram   func() []*apiv1.HistogramBucket
-		vaultID        glid.GLID
+		records      <-chan []*apiv1.ExportRecord
+		errCh        <-chan error
+		getHistogram func() []*apiv1.HistogramBucket
+		vaultID      glid.GLID
 	}
 	var streams []vaultStream
 	var allHist []*apiv1.HistogramBucket
@@ -51,13 +60,16 @@ func (s *QueryServer) collectRemote(ctx context.Context, q query.Query, remoteTo
 	for nodeID, vaultIDs := range byNode {
 		for _, vid := range vaultIDs {
 			wg.Go(func() {
-				recCh, _, eCh, getToken, getHist := s.remoteSearcher.SearchStream(ctx, nodeID, &apiv1.ForwardSearchRequest{
+				// Remote opaque resume tokens are deliberately not propagated
+				// (the merge-level highwater drives pagination — see
+				// searchDirect), so the token getter is dropped here.
+				recCh, _, eCh, _, getHist := s.remoteSearcher.SearchStream(ctx, nodeID, &apiv1.ForwardSearchRequest{
 					VaultId:     vid.ToProto(),
 					Query:       queryExpr,
 					ResumeToken: remoteTokens[vid],
 				})
 				mu.Lock()
-				streams = append(streams, vaultStream{records: recCh, errCh: eCh, getResumeToken: getToken, getHistogram: getHist, vaultID: vid})
+				streams = append(streams, vaultStream{records: recCh, errCh: eCh, getHistogram: getHist, vaultID: vid})
 				mu.Unlock()
 			})
 		}
@@ -70,21 +82,19 @@ func (s *QueryServer) collectRemote(ctx context.Context, q query.Query, remoteTo
 		}
 	}
 
-	getRemoteTokens := func() map[glid.GLID][]byte {
-		tokens := make(map[glid.GLID][]byte)
-		for _, vs := range streams {
-			if vs.getResumeToken != nil {
-				if t := vs.getResumeToken(); len(t) > 0 {
-					tokens[vs.vaultID] = t
-				}
-			}
-		}
-		return tokens
-	}
-
 	if len(streams) == 0 {
 		return nil, allHist, nil
 	}
+
+	// The vaults this search fanned out to — the contributor set under the
+	// fail-on-remote-failure policy. Sorted for a deterministic wire order.
+	contributingVaults := make([]glid.GLID, 0, len(streams))
+	for _, vs := range streams {
+		contributingVaults = append(contributingVaults, vs.vaultID)
+	}
+	slices.SortFunc(contributingVaults, func(a, b glid.GLID) int {
+		return cmp.Compare(a.String(), b.String())
+	})
 
 	// Convert each channel into an iter.Seq2[chunk.Record, error].
 	var iters []iter.Seq2[chunk.Record, error]
@@ -94,12 +104,12 @@ func (s *QueryServer) collectRemote(ctx context.Context, q query.Query, remoteTo
 
 	// If only one remote vault, return its iterator directly.
 	if len(iters) == 1 {
-		return iters[0], allHist, getRemoteTokens
+		return iters[0], allHist, contributingVaults
 	}
 
 	// K-way merge of N iterators using a heap.
 	merged := kWayMerge(iters, q.OrderBy, q.Reverse())
-	return merged, allHist, getRemoteTokens
+	return merged, allHist, contributingVaults
 }
 
 // remoteVaultsByNode groups remote vault IDs by their owning node.
@@ -151,6 +161,14 @@ func (s *QueryServer) remoteVaultsByNodeFiltered(ctx context.Context, selectedVa
 // The result is sorted by timestamp to ensure chronological order even when
 // remote nodes produce slightly different bucket boundaries (e.g. from
 // independent "last=5m" resolution with clock skew).
+//
+// HasCloudData/CloudCount (see gastrolog-4of7c) merge like Count/GroupCounts,
+// not like an ordinary group key: HasCloudData ORs across nodes (a bucket
+// touched by cloud-derived data on ANY node stays flagged) and CloudCount
+// sums (each node contributes its own local applyCloudSelectivity estimate
+// for the bucket). Dropping these on merge would silently present a
+// cluster-wide bucket as exact whenever the node whose entry happened to
+// seed `a` for that timestamp had no cloud-backed chunks locally.
 func mergeHistogramBuckets(a, b []*apiv1.HistogramBucket) []*apiv1.HistogramBucket {
 	if len(b) == 0 {
 		return a
@@ -165,6 +183,10 @@ func mergeHistogramBuckets(a, b []*apiv1.HistogramBucket) []*apiv1.HistogramBuck
 	for _, bucket := range b {
 		if i, ok := idx[bucket.TimestampMs]; ok {
 			a[i].Count += bucket.Count
+			if bucket.HasCloudData {
+				a[i].HasCloudData = true
+			}
+			a[i].CloudCount += bucket.CloudCount
 			for k, v := range bucket.GroupCounts {
 				if a[i].GroupCounts == nil {
 					a[i].GroupCounts = make(map[string]int64)
@@ -330,14 +352,30 @@ func runMerge(yield func(chunk.Record, error) bool, states []mergeState, entries
 // The expression is reconstructed from the parsed q and pipeline with absolute
 // start/end timestamps so all nodes use identical time windows (avoids bucket
 // misalignment from re-evaluating relative "last=5m" on each node).
-func (s *QueryServer) collectRemotePipeline(ctx context.Context, q query.Query, pipeline *querylang.Pipeline) []*query.TableResult {
+//
+// Fail-on-remote-failure (gastrolog-20lrg): if ANY remote vault fails, the
+// whole pipeline query fails — a partial aggregate is silently wrong. A
+// `| stats count` or `| timechart` collapses many vaults into one number or
+// table; dropping a failed vault (the previous behaviour) undercounts with no
+// signal to the caller, presenting a derived-from-a-subset figure as
+// authoritative — exactly the data-integrity failure the project forbids, and
+// worse than an inspector fan-out where a missing node is a visible per-row
+// gap. There is no per-vault affordance in a merged stats table for a
+// "partial" badge, so returning-partial-with-report is not an option here.
+// This matches the two sibling query paths, which both already abort on any
+// remote error: searchDirect (mergeIterators → mapSearchError) and
+// searchPipelineGlobal (collectRemote consumption). The fan-out runs under the
+// request ctx — the same latency budget (s.queryTimeout) search uses — not the
+// inspector per-peer timeout, so a slow-but-alive vault is not failed faster
+// than the equivalent raw search would be.
+func (s *QueryServer) collectRemotePipeline(ctx context.Context, q query.Query, pipeline *querylang.Pipeline) ([]*query.TableResult, error) {
 	if s.remoteSearcher == nil || s.cfgStore == nil {
-		return nil
+		return nil, nil
 	}
 	selectedVaults, _ := query.ExtractVaultFilter(q.Normalize().BoolExpr, nil)
 	byNode := s.remoteVaultsByNode(ctx, selectedVaults)
 	if len(byNode) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	// Reconstruct expression with absolute timestamps so remote nodes
@@ -367,14 +405,12 @@ func (s *QueryServer) collectRemotePipeline(ctx context.Context, q query.Query, 
 	var wg sync.WaitGroup
 	for i, f := range fetches {
 		wg.Go(func() {
-			// Per-peer timeout (gastrolog-csspr): a paused peer with the
-			// parent ctx alone would hang this goroutine indefinitely,
-			// and wg.Wait() would block the whole pipeline handler.
-			// Bounding each call independently means total fan-out is
-			// max(peer RTTs) capped by peerInspectorTimeout.
-			peerCtx, cancel := context.WithTimeout(ctx, peerInspectorTimeout)
-			defer cancel()
-			responses[i], fetchErrors[i] = s.remoteSearcher.Search(peerCtx, f.nodeID, &apiv1.ForwardSearchRequest{
+			// Runs under the request ctx (bounded by s.queryTimeout, the
+			// same budget the streaming search uses) — not a per-peer
+			// inspector timeout: a pipeline is a query, so it must share
+			// search's latency policy, and wg.Wait() is bounded by the
+			// query timeout just as search's remote merge is.
+			responses[i], fetchErrors[i] = s.remoteSearcher.Search(ctx, f.nodeID, &apiv1.ForwardSearchRequest{
 				VaultId: f.vid.ToProto(),
 				Query:   remoteExpr,
 			})
@@ -385,8 +421,11 @@ func (s *QueryServer) collectRemotePipeline(ctx context.Context, q query.Query, 
 	var results []*query.TableResult
 	for i, resp := range responses {
 		if fetchErrors[i] != nil {
-			s.logger.Warn("pipeline: remote vault failed", "node", fetches[i].nodeID, "vault", fetches[i].vid, "err", fetchErrors[i])
-			continue
+			// Fail hard — a partial aggregate is a wrong number. Abort the
+			// whole pipeline query with the remote error, mapped the same
+			// way the streaming search maps a propagated remote error.
+			return nil, mapSearchError(fmt.Errorf("pipeline: remote vault %s on node %s failed: %w",
+				fetches[i].vid, fetches[i].nodeID, fetchErrors[i]))
 		}
 		if resp.GetTableResult() != nil {
 			if tr := protoToTableResult(resp.GetTableResult()); tr != nil {
@@ -398,5 +437,5 @@ func (s *QueryServer) collectRemotePipeline(ctx context.Context, q query.Query, 
 	if len(results) > 0 {
 		s.logger.Debug("pipeline: collected remote table results", "nodes", len(byNode), "tables", len(results))
 	}
-	return results
+	return results, nil
 }
