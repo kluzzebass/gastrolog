@@ -334,21 +334,18 @@ func (o *Orchestrator) retentionSweepAll() {
 	// Memory budget enforcement: transition oldest chunks when over budget.
 	o.enforceMemoryBudgets(cfg)
 
-	// Cache eviction: collect evictors under lock, run outside.
-	// EvictCache does filesystem I/O — holding the lock would block Raft applies.
-	var evictors []chunk.ChunkCacheEvictor
-	o.mu.RLock()
-	for _, vault := range o.vaults {
-		if vaultInst := vault.Instance; vaultInst != nil {
-			if evictor, ok := vaultInst.Chunks.(chunk.ChunkCacheEvictor); ok {
-				evictors = append(evictors, evictor)
-			}
-		}
-	}
-	o.mu.RUnlock()
-	for _, evictor := range evictors {
-		evictor.EvictCache()
-	}
+	// Cache eviction does NOT run here (gastrolog-1a18r): it is its own
+	// scheduled job (see cache_eviction.go, cron "23 * * * * *"),
+	// operator-visible in the Jobs inspector as its own unit. This
+	// retention sweep used to also call EvictCache via the now-removed
+	// chunk.ChunkCacheEvictor interface, but that interface's zero-return
+	// EvictCache() signature predates the chunk-redesign's warm-cache
+	// eviction (gastrolog-2idw8): file.Manager.EvictCache() returns
+	// (evicted int, freedBytes int64), so no chunk manager has satisfied
+	// chunk.ChunkCacheEvictor since 2idw8 landed — this branch never fired
+	// in production. Cache eviction is a node-local warm-cache concern,
+	// not a retention decision; it doesn't belong on this path even if it
+	// had worked.
 }
 
 // vaultCatchupSweepAll runs every 20 seconds (cron 13/33/53s, phase-
