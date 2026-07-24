@@ -23,7 +23,7 @@ Cross-phase map: broken invariants → compensating code. Epic: **gastrolog-2p31
 | Peer cache reflects current Raft membership | `PeerObservation` on config change | `peer_cache_reconcile` 30s | sweep-009 — gastrolog-9ohip |
 | Placement / FollowerTargets refresh on config apply | FSM config dispatch | `placementSweep` 15s | sweep-005 — audit-orch-006 |
 | Vault-ctl membership matches desired on leadership change | `SetDesiredMembers` + barrier | `vault_ctl_leader_manager` 30s | sweep-006 — audit-orch-007 |
-| Cloud upload announced → cm.cloudIdx updated | `CmdUploadChunk` apply | `backfillCloudUploads` 5s | sweep-013 — audit-orch-008 |
+| Sealed cloud vault chunk → UploadToCloud scheduled | seal effect (`onSeal`/`registerBuiltPipelineChunk`) + leadership-gain & snapshot-restore catch-up | edge-triggered `backfillCloudUploads` (recovery + stuck-retry only, no 5s primary) | sweep-013 — audit-orch-008 — **gastrolog-576bm** |
 | Receipt-protocol delete is sole delete executor | vault-ctl reconciler | `wireVaultFSMOnDelete` legacy | audit-orch-011 — gastrolog-51gme |
 | Steady-state FSM apply suffices without periodic re-walk | apply callbacks + snapshot restore hooks | `vaultCatchupSweepAll` 20s (6 sweeps) | sweep-010 — audit-orch-005 |
 | Ingester test/trigger runs on assignment node | placement + assignment | local-only RPC handlers | audit-server-001/002 |
@@ -41,7 +41,7 @@ completed chan drop → distribution 2s rescan (sweep-001)
 
 FSM apply miss / snapshot gap
   → vaultCatchup 20s: 6 reconciler sweeps (sweep-010)
-  → cloud backfill 5s (sweep-013)
+  → cloud backfill 5s (sweep-013) — RETIRED gastrolog-576bm: seal effect + leadership/snapshot catch-up; edge-triggered retry only
   → placement 15s (sweep-005)
   → vault-ctl membership 30s (sweep-006)
 ```

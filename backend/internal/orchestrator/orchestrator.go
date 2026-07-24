@@ -183,7 +183,8 @@ type Orchestrator struct {
 	mu locktrack.RWMutex
 
 	// backfillLogThrottle spaces cloud-backfill failure logging per vault;
-	// the sweep retries failing chunks every few seconds indefinitely.
+	// a stuck chunk is retried on its exponential backoff schedule by the
+	// periodic cloud-health evaluation for as long as it keeps failing.
 	backfillLogThrottle logging.Throttle
 	// registerSkipLog spaces skipped-GLCB-registration warnings per vault.
 	registerSkipLog logging.Throttle
@@ -208,6 +209,18 @@ type Orchestrator struct {
 	// state from scratch, which is fine — the point is to stop hammering a
 	// chunk that keeps failing, not to remember why forever.
 	backfillFailures map[chunk.ChunkID]*backfillFailureEntry
+
+	// cloudDegradedSeen remembers the last observed cloud-degraded state per
+	// vault this node uploads for, so the periodic cloud-health evaluation can
+	// fire a one-shot upload catch-up sweep on the edges that leave sealed-but-
+	// not-cloud-backed chunks undiscovered by the live onSeal effect: first
+	// observation as uploader (startup / placement gain), and degraded→healthy
+	// recovery (chunks sealed during a cloud outage never got a live upload).
+	// Guarded by backfillMu — the same lock as backfillFailures, since both are
+	// touched only from cloud-backfill code and never under o.mu. An entry is
+	// dropped when this node stops being the vault's uploader so a later
+	// re-gain is treated as a first observation again. See gastrolog-576bm.
+	cloudDegradedSeen map[glid.GLID]bool
 
 	// Vault registry. Each vault bundles Chunks, Indexes, and Query.
 	vaults map[glid.GLID]*Vault
