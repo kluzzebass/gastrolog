@@ -330,7 +330,7 @@ func (o *Orchestrator) vaultCtlHandle(vaultID glid.GLID) (*vaultctlfsm.FSM, vaul
 	}
 	var applier vaultctlfsm.Applier
 	if o.peerConns != nil {
-		applier = cluster.NewVaultCtlChunkApplyForwarder(g.Raft, gid, vaultID, o.peerConns, cluster.ReplicationTimeout)
+		applier = cluster.NewVaultCtlChunkApplyForwarder(g.Raft, gid, vaultID, groupApplyWait(g), o.peerConns, cluster.ReplicationTimeout)
 	} else {
 		applier = &vaultCtlApplier{o: o, vaultID: vaultID}
 	}

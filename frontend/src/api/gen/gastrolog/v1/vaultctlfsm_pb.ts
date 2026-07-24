@@ -2549,6 +2549,16 @@ export class VaultGroupSnapshot extends Message<VaultGroupSnapshot> {
    */
   vaults: VaultGroupSnapshotEntry[] = [];
 
+  /**
+   * Highest Raft log index applied to the group FSM when the snapshot was
+   * taken. Lets a follower that installs this snapshot (instead of replaying
+   * log entries) release read-after-write apply-wait barriers for every
+   * command the snapshot covers (gastrolog-4l24u).
+   *
+   * @generated from field: uint64 last_applied_index = 2;
+   */
+  lastAppliedIndex = protoInt64.zero;
+
   constructor(data?: PartialMessage<VaultGroupSnapshot>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2558,6 +2568,7 @@ export class VaultGroupSnapshot extends Message<VaultGroupSnapshot> {
   static readonly typeName = "gastrolog.v1.VaultGroupSnapshot";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "vaults", kind: "message", T: VaultGroupSnapshotEntry, repeated: true },
+    { no: 2, name: "last_applied_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultGroupSnapshot {

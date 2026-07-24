@@ -1390,9 +1390,21 @@ export class ForwardVaultApplyRequest extends Message<ForwardVaultApplyRequest> 
 }
 
 /**
+ * ForwardVaultApplyResponse carries the Raft log index at which the vault-ctl
+ * group leader applied the forwarded command. The forwarding follower blocks
+ * until its own group FSM has applied up to this index before returning, so
+ * an immediate local read sees post-mutation state — the same read-after-write
+ * barrier ForwardApplyResponse provides for the cluster-ctl group
+ * (gastrolog-2nxij, gastrolog-4l24u).
+ *
  * @generated from message gastrolog.v1.ForwardVaultApplyResponse
  */
 export class ForwardVaultApplyResponse extends Message<ForwardVaultApplyResponse> {
+  /**
+   * @generated from field: uint64 applied_index = 1;
+   */
+  appliedIndex = protoInt64.zero;
+
   constructor(data?: PartialMessage<ForwardVaultApplyResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1401,6 +1413,7 @@ export class ForwardVaultApplyResponse extends Message<ForwardVaultApplyResponse
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ForwardVaultApplyResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "applied_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardVaultApplyResponse {

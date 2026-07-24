@@ -727,6 +727,14 @@ Cross-node data movement. Three distinct mechanisms; do not confuse them.
   forwarder, different wrapping.
   [`cluster/vault_ctl_chunk_apply_forwarder.go`](../backend/internal/cluster/vault_ctl_chunk_apply_forwarder.go).
 
+- **Apply-wait barrier** — the read-after-write guarantee on every
+  forwarded Raft apply (config-Raft and vault-ctl alike): the leader
+  returns the log index it applied, and the forwarding node blocks until
+  its own local FSM has applied that index before returning. Event-driven
+  — the FSM feeds an `applywait.Tracker` from its Apply path (and from
+  snapshot restore), waking waiters the moment the mutation is locally
+  visible; never a poll. [`applywait/applywait.go`](../backend/internal/applywait/applywait.go).
+
 ### The verbs
 
 - **`fireAndForgetRemote`** — called from the ingest and append paths:

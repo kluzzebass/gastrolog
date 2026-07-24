@@ -7,6 +7,7 @@ import (
 	"time"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/applywait"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/vaultraft"
 
@@ -20,12 +21,14 @@ var ErrNoRaftLeader = errors.New("no raft leader")
 // control-plane Raft group. Every payload is wrapped as a vaultraft
 // OpVaultChunkFSM entry keyed by vault-instance ID. If this node is the
 // vault-ctl Raft leader, Apply runs locally; otherwise it forwards via
-// ForwardVaultApply RPC to the current leader. Constructed via
-// NewVaultCtlChunkApplyForwarder.
+// ForwardVaultApply RPC to the current leader and blocks until the local
+// group FSM has applied the leader's index — the read-after-write barrier
+// (gastrolog-4l24u). Constructed via NewVaultCtlChunkApplyForwarder.
 type VaultCtlChunkApplyForwarder struct {
 	raft            *hraft.Raft
 	vaultCtlGroupID string
 	vaultID         glid.GLID
+	applyWait       *applywait.Tracker
 	peers           *PeerConnManager
 	timeout         time.Duration
 }
@@ -33,12 +36,16 @@ type VaultCtlChunkApplyForwarder struct {
 // NewVaultCtlChunkApplyForwarder creates a forwarder that applies vaultctlfsm
 // commands to the vault control-plane Raft group, wrapping each payload
 // with OpVaultChunkFSM + instance ID. ForwardVaultApply uses the vault-ctl
-// group_id.
-func NewVaultCtlChunkApplyForwarder(r *hraft.Raft, vaultCtlGroupID string, vaultID glid.GLID, peers *PeerConnManager, timeout time.Duration) *VaultCtlChunkApplyForwarder {
+// group_id. applyWait is the group FSM's apply tracker
+// (vaultraft.FSM.ApplyWait); it drives the post-forward read-after-write
+// barrier. A nil tracker skips the barrier — only for groups whose FSM does
+// not expose one.
+func NewVaultCtlChunkApplyForwarder(r *hraft.Raft, vaultCtlGroupID string, vaultID glid.GLID, applyWait *applywait.Tracker, peers *PeerConnManager, timeout time.Duration) *VaultCtlChunkApplyForwarder {
 	return &VaultCtlChunkApplyForwarder{
 		raft:            r,
 		vaultCtlGroupID: vaultCtlGroupID,
 		vaultID:         vaultID,
+		applyWait:       applyWait,
 		peers:           peers,
 		timeout:         timeout,
 	}
@@ -81,5 +88,5 @@ func (f *VaultCtlChunkApplyForwarder) forwardToLeader(data []byte) error {
 		"/gastrolog.v1.ClusterService/ForwardVaultApply", req, resp); err != nil {
 		return fmt.Errorf("forward vault-ctl chunk apply RPC to %s: %w", leaderID, err)
 	}
-	return nil
+	return waitForGroupApply(f.applyWait, f.vaultCtlGroupID, resp.GetAppliedIndex(), f.timeout)
 }
