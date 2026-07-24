@@ -44,7 +44,6 @@ type MetadataAnnouncer interface {
 	// reconfiguration); keyScheme selects the blobKey() derivation
 	// function (only scheme 0 today). See gastrolog-grnc3.
 	AnnounceUpload(id ChunkID, cloudBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64, hash [32]byte, cloudServiceID glid.GLID, keyScheme uint8)
-	AnnounceDelete(id ChunkID)
 }
 
 // AnnouncerSetter is an optional interface for chunk managers that support
@@ -78,14 +77,14 @@ type AnnouncerGetter interface {
 }
 
 // SilentDeleter is an optional interface for chunk managers that can delete
-// a chunk WITHOUT firing the metadata announcer. This is used by vault-ctl Raft
-// FSM apply paths: when CmdDeleteChunk is applied via Raft on this node,
-// we need to delete the local files but must NOT re-announce the delete —
-// the announce already happened (it's what put us into this code path).
+// a chunk WITHOUT firing the metadata announcer. Used by the receipt-protocol
+// delete path (VaultLifecycleReconciler): when a node fulfills a delete
+// obligation, it removes the local files but must NOT re-announce — the
+// vault-ctl FSM already drove the delete cluster-wide.
 //
 // The contract: DeleteSilent does the same local cleanup as Delete (chunk
-// directory + in-memory metadata) but skips the AnnounceDelete call. It
-// returns the same errors as Delete (ErrChunkNotFound, ErrActiveChunk, etc).
+// directory + in-memory metadata). It returns the same errors as Delete
+// (ErrChunkNotFound, ErrActiveChunk, etc).
 type SilentDeleter interface {
 	DeleteSilent(id ChunkID) error
 }

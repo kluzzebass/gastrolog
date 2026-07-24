@@ -13,9 +13,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
-	chunkfile "gastrolog/internal/chunk/file"
 	"gastrolog/internal/cluster"
-	"gastrolog/internal/index"
 	"gastrolog/internal/lifecycle"
 	"gastrolog/internal/query"
 	"gastrolog/internal/raftgroup"
@@ -429,15 +427,14 @@ func (o *Orchestrator) forceRemoveVaultData(id glid.GLID, vaultInst *VaultInstan
 // chunks and their indexes. Returns the number of chunks found. Errors are
 // logged with the given prefix but do not abort the cleanup.
 //
-// CRITICAL: this is a LOCAL cleanup path. It MUST use DeleteNoAnnounce so
-// each chunk delete does not fire AnnounceDelete → CmdDeleteChunk on the
-// vault-ctl Raft. The announcement would propagate to every voter and trigger
-// FSM.applyDelete + onDelete on each node, physically wiping the chunk
-// across the entire cluster. The intended cluster-wide effect (when
+// CRITICAL: this is a LOCAL cleanup path — it removes this node's on-disk
+// copies only and MUST NOT drive a cluster-wide delete through the vault-ctl
+// FSM receipt protocol. The intended cluster-wide effect (when
 // RemoveVaultInstance reacts to placement loss, or DeleteVaultInstance
 // reacts to an admin teardown) comes from each node independently running
 // its own RemoveVaultInstance as the config change propagates — not from
-// per-chunk delete announcements out of one node. See gastrolog-4vz40.
+// a delete proposed out of one node. DeleteNoAnnounce is the local-only
+// delete that bypasses the receipt protocol. See gastrolog-4vz40.
 func (o *Orchestrator) sealAndDeleteAllChunks(vaultInst *VaultInstance, op string, vaultID glid.GLID) int {
 	if active := vaultInst.Chunks.Active(); active != nil {
 		if err := vaultInst.Chunks.Seal(); err != nil {
@@ -519,9 +516,9 @@ func (o *Orchestrator) removeVaultInstance(vaultID glid.GLID, deleteData bool) b
 	}
 
 	// Drop FSM → chunk-manager hooks before Close. Placement can remove the
-	// instance while the vault control-plane Raft group still receives
-	// CmdDeleteChunk from the leader; without clearing, onDelete would call
-	// DeleteSilent on an already-closed file.Manager.
+	// instance while the vault control-plane Raft group still delivers apply
+	// callbacks; without clearing, a hook could touch an already-closed
+	// file.Manager.
 	o.clearVaultFSMChunkCallbacks(vaultID)
 
 	// Close managers.
@@ -672,8 +669,8 @@ func (o *Orchestrator) UnregisterVault(id glid.GLID) error {
 	o.scheduler.RemoveJobsByPrefix("index-build:" + vaultPrefix)
 
 	// Stop vault control-plane Raft before closing chunk managers — same
-	// ordering as teardownVault. Otherwise trailing CmdDeleteChunk applies can
-	// fire onDelete against a closed Manager.
+	// ordering as teardownVault. Otherwise trailing apply callbacks can
+	// touch a closed Manager.
 	o.destroyVaultControlPlaneRaftGroup(id)
 
 	if err := vault.Close(); err != nil {
@@ -878,7 +875,7 @@ func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultCo
 		}
 		ti.applyRaftCallbacks(raftCB)
 		o.attachLifecycleReconciler(ti, vaultCfg.ID, vaultGroup)
-		wireVaultFSMOnDelete(vaultGroup, vaultCfg.ID, cm, nil, o, o.logger)
+		wireVaultFSMOnCreate(vaultGroup, vaultCfg.ID, cm, o)
 		return ti, nil
 	}
 
@@ -917,7 +914,7 @@ func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultCo
 	}
 	ti.applyRaftCallbacks(raftCB)
 	o.attachLifecycleReconciler(ti, vaultCfg.ID, vaultGroup)
-	wireVaultFSMOnDelete(vaultGroup, vaultCfg.ID, cm, im, o, o.logger)
+	wireVaultFSMOnCreate(vaultGroup, vaultCfg.ID, cm, o)
 	wireVaultFSMOnUpload(vaultGroup, vaultCfg.ID, cm, o, o.logger)
 	return ti, nil
 }
@@ -930,7 +927,7 @@ func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultCo
 //
 // Multiple TIs on the same node share an instance sub-FSM (1:1:1 placement makes
 // this rare, but possible). Each TI's reconciler.Wire() call rebinds the
-// callback set on the FSM; last-writer-wins matches the existing OnDelete /
+// callback set on the FSM; last-writer-wins matches the existing OnCreate /
 // OnUpload behavior wired alongside.
 func (o *Orchestrator) attachLifecycleReconciler(ti *VaultInstance, vaultID glid.GLID, vaultGroup *raftgroup.Group) {
 	ti.Reconciler = NewVaultLifecycleReconciler(o, vaultID, ti, o.localNodeID, o.baseLogger)
@@ -1028,7 +1025,7 @@ func (o *Orchestrator) buildInstanceForStorage(sys *system.System, vaultCfg syst
 	}
 	ti.applyRaftCallbacks(raftCB)
 	o.attachLifecycleReconciler(ti, vaultCfg.ID, vaultGroup)
-	wireVaultFSMOnDelete(vaultGroup, vaultCfg.ID, cm, im, o, o.logger)
+	wireVaultFSMOnCreate(vaultGroup, vaultCfg.ID, cm, o)
 	wireVaultFSMOnUpload(vaultGroup, vaultCfg.ID, cm, o, o.logger)
 	return ti, nil
 }
@@ -1424,7 +1421,7 @@ func (o *Orchestrator) rewireVaultInstanceAfterCtlRestore(vaultID glid.GLID, t *
 	return live
 }
 
-// clearVaultFSMChunkCallbacks clears OnDelete/OnUpload for a vault's FSM slice
+// clearVaultFSMChunkCallbacks clears OnUpload for a vault's FSM slice
 // in the vault control-plane group. Used before closing that vault's chunk
 // manager when the Raft group may still deliver log entries
 // (e.g. RemoveVaultInstance during placement loss).
@@ -1445,7 +1442,6 @@ func (o *Orchestrator) clearVaultFSMChunkCallbacks(vaultID glid.GLID) {
 	default:
 		return
 	}
-	fsm.SetOnDelete(nil)
 	fsm.SetOnUpload(nil)
 	if o.logger != nil {
 		o.logger.Debug("cleared vault-ctl FSM chunk callbacks before manager close",
@@ -1453,24 +1449,19 @@ func (o *Orchestrator) clearVaultFSMChunkCallbacks(vaultID glid.GLID) {
 	}
 }
 
-// wireVaultFSMOnDelete sets up the vault-ctl FSM's OnDelete callback so that
-// CmdDeleteChunk applied via Raft on this node deletes the local chunk
-// files (and indexes if available). The callback uses chunk.SilentDeleter
-// to avoid the announcer feedback loop — re-announcing the delete that
-// just arrived from Raft would cause infinite re-application.
+// wireVaultFSMOnCreate sets up the vault-ctl FSM's OnCreate callback so the
+// WatchChunks event bus gets CREATED events as soon as a new active chunk is
+// announced via CmdCreateChunk — the inspector shows the chunk immediately
+// rather than only after seal. Fired on every node where the apply ran;
+// followers learn about the new chunk via Raft replication. See gastrolog-3pf9w.
 //
-// Safe to call with nil group, nil cm, or a chunk manager that doesn't
-// implement SilentDeleter (e.g. memory vaults): the callback is simply not
-// wired in those cases.
+// Chunk-file deletion is NOT wired here: it flows exclusively through the
+// vault-ctl FSM's receipt protocol (CmdRequestDelete + acks + finalize),
+// executed by VaultLifecycleReconciler. The legacy CmdDeleteChunk OnDelete
+// cascade was removed in gastrolog-lh0rp.
 //
-// IMPORTANT: this callback acquires the chunk manager's m.mu via
-// DeleteSilent. For the FSM apply goroutine to do this safely, no other
-// goroutine may hold m.mu while waiting for a Raft round-trip (e.g. via
-// the Announcer). The chunk.file.Manager's Seal/Append/Compress paths
-// enforce this by releasing m.mu before calling the announcer; if a new
-// path is added that holds the mutex during an announcer call, this
-// callback will deadlock with it.
-func wireVaultFSMOnDelete(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkManager, im index.IndexManager, o *Orchestrator, logger *slog.Logger) {
+// Safe to call with nil group or nil cm: the callback is simply not wired.
+func wireVaultFSMOnCreate(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkManager, o *Orchestrator) {
 	if g == nil || cm == nil {
 		return
 	}
@@ -1483,56 +1474,11 @@ func wireVaultFSMOnDelete(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkM
 	default:
 		return
 	}
-	// Wire OnCreate alongside OnDelete: the WatchChunks event bus needs
-	// CREATED events as soon as a new active chunk is announced via
-	// CmdCreateChunk so the inspector shows the chunk immediately rather
-	// than only after seal. Fired on every node where the apply ran, same
-	// as OnDelete — followers learn about the new chunk via Raft replication.
-	// See gastrolog-3pf9w.
 	fsm.SetOnCreate(func(e vaultctlfsm.ManifestEntry) {
 		if o == nil {
 			return
 		}
 		o.EmitChunkCreated(vaultID, manifestEntryToChunkMeta(e, false)) // logs + event bus
-	})
-	silent, ok := cm.(chunk.SilentDeleter)
-	if !ok {
-		return
-	}
-	fsm.SetOnDelete(func(id chunk.ChunkID) {
-		// Emit a DELETED event regardless of local-delete outcome: the
-		// FSM's authoritative chunks-map entry is gone, so the
-		// inspector's projection on this node must drop the entry. Fire
-		// on every node where the apply ran, even ones that never had
-		// the chunk locally — they may have rendered it via the
-		// cluster-wide ListChunks fan-out. See gastrolog-2ob86.
-		if o != nil {
-			o.logChunkDeleted(vaultID, id)
-			defer o.EmitChunkDeleted(vaultID, id)
-		}
-		// Delete indexes first (they're metadata about the chunk).
-		// ErrChunkNotFound-equivalent errors are expected during log replay
-		// on a node that doesn't have the chunk locally — log at debug only.
-		if im != nil {
-			if err := im.DeleteIndexes(id); err != nil && logger != nil {
-				logger.Debug("FSM onDelete: DeleteIndexes failed",
-					"chunk", id, "error", err)
-			}
-		}
-		// Then delete the chunk files. DeleteSilent skips the announcer.
-		// ErrChunkNotFound / ErrActiveChunk are benign "nothing to delete"
-		// cases (log replay on a node without the chunk, or a forwarded
-		// chunk still being written). Debug-level only.
-		if err := silent.DeleteSilent(id); err != nil && logger != nil {
-			if errors.Is(err, chunk.ErrChunkNotFound) || errors.Is(err, chunk.ErrActiveChunk) ||
-				errors.Is(err, chunkfile.ErrManagerClosed) {
-				logger.Debug("FSM onDelete: DeleteSilent skipped",
-					"chunk", id, "reason", err)
-			} else {
-				logger.Warn("FSM onDelete: DeleteSilent failed",
-					"chunk", id, "error", err)
-			}
-		}
 	})
 }
 

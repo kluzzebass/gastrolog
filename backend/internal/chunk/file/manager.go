@@ -3087,20 +3087,18 @@ func (m *Manager) ReadWriteTimestamps(id chunk.ChunkID, positions []uint64) ([]t
 // Delete removes a sealed chunk and its data from disk.
 // Returns ErrActiveChunk if the chunk is the current active chunk.
 // Returns ErrChunkNotFound if the chunk does not exist.
+//
+// Delete does not announce: chunk deletion propagates cluster-wide through
+// the vault-ctl FSM's receipt protocol (VaultLifecycleReconciler), never
+// through a per-delete metadata announce. See gastrolog-lh0rp.
 func (m *Manager) Delete(id chunk.ChunkID) error {
-	if err := m.deleteInternal(id); err != nil {
-		return err
-	}
-	if m.cfg.Announcer != nil {
-		m.cfg.Announcer.AnnounceDelete(id)
-	}
-	return nil
+	return m.deleteInternal(id)
 }
 
-// DeleteSilent removes the chunk's local files and metadata without firing
-// the metadata announcer. Used by the vault FSM apply path when a delete
-// originating from any node propagates via Raft — re-announcing would create
-// an infinite feedback loop.
+// DeleteSilent removes the chunk's local files and metadata. Retained as an
+// explicit no-announce delete used by the receipt-protocol delete path
+// (chunk.DeleteNoAnnounce → VaultLifecycleReconciler). Behaviorally identical
+// to Delete now that Delete no longer announces.
 func (m *Manager) DeleteSilent(id chunk.ChunkID) error {
 	return m.deleteInternal(id)
 }

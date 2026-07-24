@@ -461,58 +461,6 @@ func (o *Orchestrator) findLocalVaultInstance(vaultID glid.GLID) *VaultInstance 
 	return vault.Instance
 }
 
-// deleteFromFollowers removes a chunk from all same-node follower instances
-// of an instance. Called by retention after deleting from the leader.
-// DeleteChunk deletes a specific chunk from an instance. If the chunk is
-// currently the vault's active chunk, it is sealed first so the delete can
-// proceed. This handles the follower case where the leader has moved on to a
-// new active chunk but the follower still has the old ID as active (records
-// sync via ChunkReplicator.AppendRecords preserves the leader's chunk ID).
-func (o *Orchestrator) DeleteChunk(vaultID glid.GLID, chunkID chunk.ChunkID) error {
-	vaultInst, err := o.findInstanceForDelete(vaultID)
-	if err != nil {
-		return err
-	}
-	return o.deleteChunkFromInstance(vaultInst, vaultID, chunkID)
-}
-
-// findInstanceForDelete returns the vault's instance or an error, releasing
-// the orchestrator read lock before returning.
-func (o *Orchestrator) findInstanceForDelete(vaultID glid.GLID) (*VaultInstance, error) {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	vault := o.vaults[vaultID]
-	if vault == nil || vault.Instance == nil {
-		return nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
-	}
-	return vault.Instance, nil
-}
-
-// deleteChunkFromInstance seals the active chunk if it matches, then
-// deletes the chunk via the lifecycle reconciler's receipt protocol when one
-// is wired (production) or via direct local cleanup otherwise (test harnesses
-// that build VaultInstances without going through ApplyConfig).
-//
-// reason="manual-delete-rpc" lands in the FSM's pendingDeletes audit trail so
-// operators can distinguish operator-initiated deletes from retention/transit
-// drivers in chunk-history reviews. See gastrolog-51gme step 7.
-func (o *Orchestrator) deleteChunkFromInstance(t *VaultInstance, vaultID glid.GLID, chunkID chunk.ChunkID) error {
-	if active := t.Chunks.Active(); active != nil && active.ID == chunkID {
-		if err := t.Chunks.Seal(); err != nil {
-			return fmt.Errorf("seal active before delete: %w", err)
-		}
-	}
-	if t.Reconciler != nil {
-		return t.Reconciler.deleteChunk(chunkID, "manual-delete-rpc", o.placementMembership(t))
-	}
-	if t.Indexes != nil {
-		if err := t.Indexes.DeleteIndexes(chunkID); err != nil {
-			o.vaultOpsLogger.Warn("delete chunk: delete indexes failed",
-				"vault", vaultID, "chunk", chunkID, "error", err)
-		}
-	}
-	return t.Chunks.Delete(chunkID)
-}
 
 // replaceForwardedChunk seals (if active) and deletes a pre-existing chunk
 // on a follower to make room for the canonical sealed version from the leader.
@@ -749,27 +697,6 @@ func (o *Orchestrator) placementMembership(vaultInst *VaultInstance) []string {
 	return expected
 }
 
-// deleteFromFollowers removes a chunk from same-node follower vault instances.
-// Called from the reconciler-less fallback in retention's expireChunk after
-// applyRaftDelete has already fired the global CmdDeleteChunk. Uses
-// DeleteNoAnnounce to avoid a redundant second Raft-wide announce (the
-// first one already propagated via OnDelete). The reconciler-driven
-// production path (gastrolog-51gme) walks same-node siblings itself in
-// VaultLifecycleReconciler.deleteLocalCopy.
-func (o *Orchestrator) deleteFromFollowers(vaultID glid.GLID, chunkID chunk.ChunkID) {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	vault := o.vaults[vaultID]
-	if vault == nil {
-		return
-	}
-	if t := vault.Instance; t != nil && t.IsFollower {
-		if err := chunk.DeleteNoAnnounce(t.Chunks, chunkID); err != nil {
-			o.vaultOpsLogger.Warn("delete from followers: failed",
-				"vault", vaultID, "chunk", chunkID, "error", err)
-		}
-	}
-}
 
 // --- Chunk write ---
 
@@ -911,13 +838,12 @@ func (o *Orchestrator) ImportToInstanceStorage(ctx context.Context, vaultID glid
 // work scheduling. See gastrolog-11rzz for the ordering rationale.
 //
 // Ordering matters: announce first, then re-check tombstone. This covers
-// the race where DeleteChunk applies between ImportRecords and our check
+// the race where a delete finalizes between ImportRecords and our check
 // — if we checked first we'd miss it; announcing first propagates the
 // create through the vault-ctl FSM (which rejects it when tombstoned via the
 // applyCreate guard), so by the time we re-check the tombstone state is
 // authoritative and any on-disk files we wrote are orphans we must
-// clean up explicitly because the FSM onDelete callback fired before
-// the files existed.
+// clean up explicitly.
 func (o *Orchestrator) finalizeImportedChunk(vaultID glid.GLID, cm chunk.ChunkManager, meta chunk.ChunkMeta, isTombstoned func(chunk.ChunkID) bool) error {
 	if meta.ID == (chunk.ChunkID{}) {
 		return nil

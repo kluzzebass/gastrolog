@@ -32,8 +32,8 @@ func buildRichFSM(t *testing.T) *FSM {
 	// tombstones: deleted chunk + a ghost tombstone for a never-seen chunk.
 	dead := testChunkID(12)
 	applyCmd(t, f, MarshalCreateChunk(dead, now, now, now))
-	applyCmd(t, f, MarshalDeleteChunk(dead))
-	applyCmd(t, f, MarshalDeleteChunk(testChunkID(13)))
+	applyCmd(t, f, MarshalFinalizeDelete(dead))
+	applyCmd(t, f, MarshalFinalizeDelete(testChunkID(13)))
 
 	// pending deletes: an in-flight delete with several expected-from nodes.
 	applyCmd(t, f, MarshalRequestDelete(testChunkID(14), now, "retention-ttl", []string{"n3", "n1", "n2"}))

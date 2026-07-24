@@ -134,10 +134,6 @@ type Server struct {
 	// Set by the composition root in app.go. See gastrolog-2dgvj.
 	replicaCatchupFn func(ctx context.Context, vaultID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (int, error)
 
-	// deleteChunkExecutor deletes a sealed chunk from a vault on this node.
-	// Invoked by the ChunkReplication stream handler.
-	deleteChunkExecutor DeleteChunkExecutor
-
 	// recordImporter imports records as a sealed chunk in a local vault.
 	// Set after the orchestrator is created, before chunk transfer starts.
 	recordImporter RecordImporter

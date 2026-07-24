@@ -26,12 +26,18 @@ func drainFixture(t *testing.T, disposition string) (*Orchestrator, *retentionRu
 	cm := &retentionFakeChunkManager{
 		chunks: []chunk.ChunkMeta{{ID: id, Sealed: true, Bytes: 1024, WriteStart: time.Now()}},
 	}
+	im := &retentionFakeIndexManager{}
+	vaultID := glid.New()
+	vaultInst := &VaultInstance{VaultID: vaultID, Chunks: cm, Indexes: im}
+	rec := NewVaultLifecycleReconciler(o, vaultID, vaultInst, "node-A", slog.Default())
+	vaultInst.Reconciler = rec
 	r := &retentionRunner{
 		isLeader:    true,
-		vaultID:     glid.New(),
+		vaultID:     vaultID,
 		cm:          cm,
-		im:          &retentionFakeIndexManager{},
+		im:          im,
 		orch:        o,
+		reconciler:  rec,
 		now:         o.now,
 		logger:      slog.Default(),
 		idleLog:     logging.Throttle{Interval: time.Minute},

@@ -48,30 +48,27 @@ message VaultCtlCommand {
     CreateChunkCommand create_chunk = 1;
     SealChunkCommand seal_chunk = 2;
     UploadChunkCommand upload_chunk = 3;
-    // delete_chunk (4) is retained for WAL replay only; no current producer
-    // emits it (see CmdDeleteChunk in fsm.go).
-    DeleteChunkCommand delete_chunk = 4;
-    RetentionPendingCommand retention_pending = 5;
-    RequestDeleteCommand request_delete = 6;
-    AckDeleteCommand ack_delete = 7;
-    FinalizeDeleteCommand finalize_delete = 8;
-    PruneNodeCommand prune_node = 9;
-    AttachOffsetsCommand attach_offsets = 10;
-    BeginSealCommand begin_seal = 11;
-    RepatriateChunkCommand repatriate_chunk = 12;
-    PublishCompletedSegmentCommand publish_completed_segment = 13;
-    OpenChunkManifestCommand open_chunk_manifest = 14;
-    AddOpenChunkSegmentRefCommand add_open_chunk_segment_ref = 15;
-    SealOpenChunkManifestCommand seal_open_chunk_manifest = 16;
-    ReleaseSegmentsCommand release_segments = 17;
-    AckSegmentHolderCommand ack_segment_holder = 18;
-    DiscardOpenChunkManifestCommand discard_open_chunk_manifest = 19;
-    PublishCompletedSegmentsCommand publish_completed_segments = 20;
-    AddOpenChunkSegmentRefsCommand add_open_chunk_segment_refs = 21;
-    AckChunkHolderCommand ack_chunk_holder = 22;
-    RevokeChunkHolderCommand revoke_chunk_holder = 23;
-    DiscardUnbuildableManifestsCommand discard_unbuildable_manifests = 24;
-    ClearTransferSourceCommand clear_transfer_source = 25;
+    RetentionPendingCommand retention_pending = 4;
+    RequestDeleteCommand request_delete = 5;
+    AckDeleteCommand ack_delete = 6;
+    FinalizeDeleteCommand finalize_delete = 7;
+    PruneNodeCommand prune_node = 8;
+    AttachOffsetsCommand attach_offsets = 9;
+    BeginSealCommand begin_seal = 10;
+    RepatriateChunkCommand repatriate_chunk = 11;
+    PublishCompletedSegmentCommand publish_completed_segment = 12;
+    OpenChunkManifestCommand open_chunk_manifest = 13;
+    AddOpenChunkSegmentRefCommand add_open_chunk_segment_ref = 14;
+    SealOpenChunkManifestCommand seal_open_chunk_manifest = 15;
+    ReleaseSegmentsCommand release_segments = 16;
+    AckSegmentHolderCommand ack_segment_holder = 17;
+    DiscardOpenChunkManifestCommand discard_open_chunk_manifest = 18;
+    PublishCompletedSegmentsCommand publish_completed_segments = 19;
+    AddOpenChunkSegmentRefsCommand add_open_chunk_segment_refs = 20;
+    AckChunkHolderCommand ack_chunk_holder = 21;
+    RevokeChunkHolderCommand revoke_chunk_holder = 22;
+    DiscardUnbuildableManifestsCommand discard_unbuildable_manifests = 23;
+    ClearTransferSourceCommand clear_transfer_source = 24;
   }
 }
 
@@ -110,10 +107,6 @@ message UploadChunkCommand {
   bytes hash = 7;
   bytes cloud_service_id = 8;
   uint32 key_scheme = 9;
-}
-
-message DeleteChunkCommand {
-  bytes id = 1;
 }
 
 message RetentionPendingCommand {

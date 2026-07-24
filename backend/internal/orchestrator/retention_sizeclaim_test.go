@@ -21,17 +21,21 @@ func newSizeTriggerFixture(t *testing.T, chunks []chunk.ChunkMeta, indexSizes ma
 	cm := &retentionFakeChunkManager{chunks: chunks}
 	im := &retentionFakeIndexManager{sizes: indexSizes}
 	vaultID := glid.New()
+	vaultInst := &VaultInstance{VaultID: vaultID, Chunks: cm, Indexes: im}
 	orch := &Orchestrator{vaults: map[glid.GLID]*Vault{
-		vaultID: {ID: vaultID, Instance: &VaultInstance{VaultID: vaultID, Chunks: cm, Indexes: im}},
+		vaultID: {ID: vaultID, Instance: vaultInst},
 	}}
+	rec := NewVaultLifecycleReconciler(orch, vaultID, vaultInst, "node-A", slog.Default())
+	vaultInst.Reconciler = rec
 	r := &retentionRunner{
-		isLeader: true,
-		vaultID:  vaultID,
-		cm:       cm,
-		im:       im,
-		orch:     orch,
-		now:      time.Now,
-		logger:   slog.Default(),
+		isLeader:   true,
+		vaultID:    vaultID,
+		cm:         cm,
+		im:         im,
+		orch:       orch,
+		reconciler: rec,
+		now:        time.Now,
+		logger:     slog.Default(),
 	}
 	return r, cm
 }

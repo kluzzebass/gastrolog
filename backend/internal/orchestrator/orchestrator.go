@@ -115,7 +115,6 @@ type drainState struct {
 // higher-level catchup scheduling (see ScheduleCatchup).
 type ChunkReplicator interface {
 	ImportSealedChunk(ctx context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error
-	DeleteChunk(ctx context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID) error
 
 	// RequestReplicaCatchup is the follower→leader inverse of the other
 	// methods on this interface. Sent by a follower's lifecycle reconciler
