@@ -238,6 +238,24 @@ var catalog = []AlarmType{
 		Response: "Fix the named configuration error.",
 	},
 	{
+		// gastrolog-1ovdy: the config dispatcher applies each committed
+		// config mutation to this node's orchestrator inside FSM.Apply. When
+		// a side effect fails (AddVault, reconcile, policy reload, TLS reload,
+		// membership refresh, …) the mutation is already durable in Raft but
+		// this node's running state diverges from it. The failure becomes a
+		// standing per-entity reconcile obligation and this alarm. No DelayOn:
+		// the apply does not self-heal on a timer — retry is event-driven (the
+		// next dispatch touching the entity, or startup replay) — so an
+		// unresolved divergence must annunciate immediately, like vault-init.
+		// Non-latching: it clears the moment a later apply of the same entity
+		// succeeds.
+		IDPrefix: "config-side-effect-failed",
+		Priority: High,
+		Source:   "config-dispatch",
+		Cause:    "A committed configuration change could not be applied to this node's orchestrator; this node's running state diverges from the replicated config. The condition is per-entity and node-scoped — other nodes may have applied the same change cleanly.",
+		Response: "Read the alarm detail for the failing entity, operation and error. It retries automatically on the next config change touching that entity and on node restart (startup reconcile). If it persists, resolve the named error on this node (e.g. disk, storage configuration, or a construction error).",
+	},
+	{
 		IDPrefix: "pipeline-backlog-capped",
 		Priority: High, // refused ingest is not lost data
 		Source:   "storage",
