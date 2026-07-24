@@ -318,7 +318,7 @@ func catchupCandidates(metas []chunk.ChunkMeta, _ string, manifestSet map[chunk.
 			continue
 		}
 		if m.CloudBacked {
-			continue // cloud-backed chunks replicate via FSM (RegisterCloudBackedChunk), not record streaming
+			continue // cloud-backed chunks resolve lazily from the FSM manifest, not record streaming
 		}
 		if manifestSet != nil && !manifestSet[m.ID] {
 			continue // FSM has retired this chunk — don't ship orphans

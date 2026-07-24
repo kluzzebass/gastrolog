@@ -828,8 +828,8 @@ func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultCo
 	params := buildVaultParams(sys, vaultCfg, o.localNodeID)
 
 	// Followers keep cloud store access for reads (queries) but skip uploads.
-	// The leader owns the blob; the follower adopts it via RegisterCloudBackedChunk
-	// when the vault-ctl FSM propagates the upload announcement.
+	// The leader owns the blob; the follower adopts it lazily via the
+	// cloud-backed resolver once the vault-ctl FSM carries the upload.
 	if isFollower {
 		params["_cloud_read_only"] = "true"
 	}
@@ -920,7 +920,8 @@ func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultCo
 	ti.applyRaftCallbacks(raftCB)
 	o.attachLifecycleReconciler(ti, vaultCfg.ID, vaultGroup)
 	wireVaultFSMOnCreate(vaultGroup, vaultCfg.ID, cm, o)
-	wireVaultFSMOnUpload(vaultGroup, vaultCfg.ID, cm, o, o.logger)
+	wireVaultFSMOnUpload(vaultGroup, vaultCfg.ID, o)
+	o.wireLazyCloudBackedResolver(vaultGroup, vaultCfg.ID, cm)
 	return ti, nil
 }
 
@@ -1031,7 +1032,8 @@ func (o *Orchestrator) buildInstanceForStorage(sys *system.System, vaultCfg syst
 	ti.applyRaftCallbacks(raftCB)
 	o.attachLifecycleReconciler(ti, vaultCfg.ID, vaultGroup)
 	wireVaultFSMOnCreate(vaultGroup, vaultCfg.ID, cm, o)
-	wireVaultFSMOnUpload(vaultGroup, vaultCfg.ID, cm, o, o.logger)
+	wireVaultFSMOnUpload(vaultGroup, vaultCfg.ID, o)
+	o.wireLazyCloudBackedResolver(vaultGroup, vaultCfg.ID, cm)
 	return ti, nil
 }
 
@@ -1508,21 +1510,13 @@ func wireVaultFSMPipelineChunkEvents(o *Orchestrator, vaultID glid.GLID, fsm *va
 }
 
 // wireVaultFSMOnUpload connects the vault-ctl FSM's OnUpload callback to the
-// chunk manager's RegisterCloudBackedChunk method. When the FSM applies CmdUploadChunk
-// (from the leader's AnnounceUpload), the follower's chunk manager registers
-// the cloud-backed chunk from metadata alone — no record streaming or S3 download.
-//
-// gastrolog-5bnxc verification (KEEP the RegisterCloudBackedChunk mirror — not
-// redundant): the FSM-grounded read seam (gastrolog-2lfjk/3jerp) grounds
-// metadata reads only, not byte-access. cm.OpenCursor for a cloud-only blob
-// resolves solely through the local cloud index, and the Manager has no lazy
-// FSM-backed cloud resolver, so this per-apply registration is the only path
-// that lets a follower serve a live-uploaded cloud chunk. Retiring it makes
-// OpenCursor return ErrChunkNotFound. Pinned by
-// file.TestOpenCursorCloudBackedRequiresCloudIndex. (The EmitChunkUploaded event
-// side is a separate concern and unaffected.)
-func wireVaultFSMOnUpload(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkManager, o *Orchestrator, logger *slog.Logger) {
-	if g == nil || cm == nil {
+// orchestrator's UPLOADED chunk event. Cloud-index registration deliberately
+// does NOT happen here: the chunk manager's lazy cloud-backed resolver
+// (wireLazyCloudBackedResolver) fills the cloud index from the FSM manifest on
+// the first lookup miss, covering live CmdUploadChunk replication and snapshot
+// install through the same single path (gastrolog-5bnxc).
+func wireVaultFSMOnUpload(g *raftgroup.Group, vaultID glid.GLID, o *Orchestrator) {
+	if g == nil {
 		return
 	}
 	var fsm *vaultctlfsm.FSM
@@ -1534,10 +1528,6 @@ func wireVaultFSMOnUpload(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkM
 	default:
 		return
 	}
-	registrar, ok := cm.(chunk.CloudBackedChunkRegistrar)
-	if !ok {
-		return
-	}
 	fsm.SetOnUpload(func(e vaultctlfsm.ManifestEntry) {
 		// Emit an UPLOADED event with the FSM's authoritative state —
 		// every cluster node's FSM applies the same CmdUploadChunk
@@ -1545,35 +1535,12 @@ func wireVaultFSMOnUpload(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkM
 		// DiskBytes / CloudBacked. Using local Manager.Meta instead
 		// produced per-node variance and inspector flicker. See
 		// gastrolog-3pf9w.
-		defer func() {
-			if o == nil {
-				return
-			}
-			meta := manifestEntryToChunkMeta(e, true)
-			meta.CloudBacked = true
-			o.EmitChunkUploaded(vaultID, meta)
-		}()
-		info := chunk.CloudBackedChunkInfo{
-			WriteStart:      e.WriteStart,
-			WriteEnd:        e.WriteEnd,
-			IngestStart:     e.IngestStart,
-			IngestEnd:       e.IngestEnd,
-			SourceStart:     e.SourceStart,
-			SourceEnd:       e.SourceEnd,
-			RecordCount:     e.RecordCount,
-			Bytes:           e.Bytes,
-			CloudBytes:      e.CloudBytes,
-			IngestIdxOffset: e.IngestIdxOffset,
-			IngestIdxSize:   e.IngestIdxSize,
-			SourceIdxOffset: e.SourceIdxOffset,
-			SourceIdxSize:   e.SourceIdxSize,
+		if o == nil {
+			return
 		}
-		if err := registrar.RegisterCloudBackedChunk(e.ID, info); err != nil {
-			if logger != nil {
-				logger.Debug("FSM onUpload: RegisterCloudBackedChunk failed",
-					"chunk", e.ID, "error", err)
-			}
-		}
+		meta := manifestEntryToChunkMeta(e, true)
+		meta.CloudBacked = true
+		o.EmitChunkUploaded(vaultID, meta)
 	})
 }
 

@@ -210,6 +210,31 @@ type Manager struct {
 	// m.mu, must be lock-light and never re-enter this manager. Protected by mu.
 	externalLister func() []chunk.ChunkID
 
+	// cloudBackedResolver resolves a meta-lookup miss to a cloud-backed chunk
+	// on demand from the replicated vault-ctl FSM manifest — the single fill
+	// path for cloudIdx entries this node did not upload itself
+	// (gastrolog-5bnxc). It replaces the two eager FSM mirrors (the snapshot
+	// projection pass and the per-apply onUpload registration): a chunk is
+	// servable the moment the FSM says CloudBacked, regardless of whether it
+	// arrived via live CmdUploadChunk replication or a wholesale snapshot
+	// install. Resolution registers metadata only (blob key derivation stays
+	// blobKey()); no byte fetch happens until a cursor actually reads.
+	// Called under m.mu — implementations must be lock-light (an FSM read;
+	// never re-enter this manager) and must not do I/O. The resolved entry is
+	// memoized into cloudIdx, so the FSM read happens once per chunk.
+	// Protected by mu.
+	cloudBackedResolver func(chunk.ChunkID) (chunk.CloudBackedChunkInfo, bool)
+
+	// cloudBackedLister enumerates the cloud-backed chunk IDs the resolver
+	// would accept (the vault-ctl manifest's CloudBacked entries). List()
+	// consults it so enumeration surfaces the same chunks the by-ID resolver
+	// serves — without it, a follower that never uploaded would hide
+	// FSM-known cloud-backed chunks from every List()-walking consumer until
+	// something happened to name them (the gastrolog-3s26vr failure shape,
+	// cloud edition). Same lock contract as cloudBackedResolver. Protected
+	// by mu.
+	cloudBackedLister func() []chunk.ChunkID
+
 	// glcbMapped holds one whole-file mmap per sealed chunk for local data.glcb.
 	// Aliased by OpenCursor, index TS lookups, and histogram paths.
 	glcbMapped sync.Map // chunk.ChunkID → *mappedGLCBEntry
@@ -788,19 +813,15 @@ func (m *Manager) Meta(id chunk.ChunkID) (chunk.ChunkMeta, error) {
 	return meta.toChunkMeta(), nil
 }
 
-// lookupMeta checks the local map first, then the cloud B+ tree index,
-// then the lazy external-GLCB resolver. Must be called with m.mu held.
+// lookupMeta checks the local map first, then the cloud B+ tree index
+// (backed by the lazy cloud-backed resolver on a miss), then the lazy
+// external-GLCB resolver. Must be called with m.mu held.
 func (m *Manager) lookupMeta(id chunk.ChunkID) *chunkMeta {
 	if meta, ok := m.metas[id]; ok {
 		return meta
 	}
-	if m.cloudIdx != nil {
-		m.cloudIdxMu.Lock()
-		meta, _ := m.cloudIdx.Lookup(id)
-		m.cloudIdxMu.Unlock()
-		if meta != nil {
-			return meta
-		}
+	if meta, hit := m.lookupCloudMetaLocked(id); hit {
+		return meta
 	}
 	if m.externalResolver != nil {
 		if glcbPath, info, ok := m.externalResolver(id); ok {
@@ -810,6 +831,41 @@ func (m *Manager) lookupMeta(id chunk.ChunkID) *chunkMeta {
 		}
 	}
 	return nil
+}
+
+// lookupCloudMetaLocked serves the cloud tier of lookupMeta: the cloudIdx
+// entry when present, else a lazy FSM-grounded fill (gastrolog-5bnxc) — the
+// cloud index is a cache of the replicated manifest's CloudBacked entries,
+// populated on miss. A successful resolve is memoized by the cloudIdx insert;
+// a failed resolve memoizes nothing, so an entry that appears in the FSM
+// later resolves then. hit=true means the cloud tier answered (meta may
+// still be nil on a registration error, which ends the lookup — a chunk the
+// FSM says is cloud-backed must not fall through to the external-GLCB tier).
+// Caller holds m.mu.
+func (m *Manager) lookupCloudMetaLocked(id chunk.ChunkID) (*chunkMeta, bool) {
+	if m.cloudIdx == nil {
+		return nil, false
+	}
+	m.cloudIdxMu.Lock()
+	meta, _ := m.cloudIdx.Lookup(id)
+	m.cloudIdxMu.Unlock()
+	if meta != nil {
+		return meta, true
+	}
+	if m.cloudBackedResolver == nil {
+		return nil, false
+	}
+	info, ok := m.cloudBackedResolver(id)
+	if !ok {
+		return nil, false
+	}
+	meta, err := m.registerCloudBackedChunkLocked(id, info)
+	if err != nil {
+		m.logger.Warn("lazy cloud-backed resolution failed",
+			"chunk", id, "error", err)
+		return nil, true
+	}
+	return meta, true
 }
 
 // SetExternalGLCBResolver installs the on-miss resolver for external
@@ -828,6 +884,22 @@ func (m *Manager) SetExternalGLCBLister(fn func() []chunk.ChunkID) {
 	m.externalLister = fn
 }
 
+// SetCloudBackedChunkResolver installs the on-miss resolver for cloud-backed
+// chunks. See the cloudBackedResolver field for the contract.
+func (m *Manager) SetCloudBackedChunkResolver(fn func(chunk.ChunkID) (chunk.CloudBackedChunkInfo, bool)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.cloudBackedResolver = fn
+}
+
+// SetCloudBackedChunkLister installs the enumeration companion to the
+// cloud-backed resolver. See the cloudBackedLister field for the contract.
+func (m *Manager) SetCloudBackedChunkLister(fn func() []chunk.ChunkID) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.cloudBackedLister = fn
+}
+
 func (m *Manager) List() ([]chunk.ChunkMeta, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -837,6 +909,7 @@ func (m *Manager) List() ([]chunk.ChunkMeta, error) {
 	// hasn't completed yet). The cloud version is authoritative.
 	var cloudIDs map[chunk.ChunkID]struct{}
 	if m.cloudIdx != nil {
+		m.resolveListedCloudBackedLocked()
 		if m.cloudListCache == nil {
 			m.rebuildCloudListCache()
 		}
@@ -899,6 +972,33 @@ func (m *Manager) appendExternalListedMetasLocked(out []chunk.ChunkMeta, cloudID
 		}
 	}
 	return out
+}
+
+// resolveListedCloudBackedLocked surfaces cloud-backed chunks the resolver
+// would serve but that no lookup has resolved into cloudIdx yet — the
+// enumeration half of lazy cloud-backed resolution (see cloudBackedLister).
+// Resolving memoizes into cloudIdx, so this pays its per-chunk cost once per
+// FSM-known chunk, not on every List. Caller holds m.mu; cloudIdx is non-nil.
+func (m *Manager) resolveListedCloudBackedLocked() {
+	if m.cloudBackedLister == nil || m.cloudBackedResolver == nil {
+		return
+	}
+	for _, id := range m.cloudBackedLister() {
+		if _, have := m.metas[id]; have {
+			continue
+		}
+		if m.cloudIdxHas(id) {
+			continue
+		}
+		info, ok := m.cloudBackedResolver(id)
+		if !ok {
+			continue // entry no longer cloud-backed, or FSM lost it since listing
+		}
+		if _, err := m.registerCloudBackedChunkLocked(id, info); err != nil {
+			m.logger.Warn("lazy cloud-backed resolution failed during enumeration",
+				"chunk", id, "error", err)
+		}
+	}
 }
 
 func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
@@ -3335,7 +3435,8 @@ func (m *Manager) PostSealProcess(ctx context.Context, id chunk.ChunkID) error {
 
 	// 5. Upload to cloud and delete local if cloud-backed.
 	// CloudReadOnly followers skip upload — they adopt the leader's blob
-	// via RegisterCloudBackedChunk when the vault FSM propagates the upload.
+	// lazily via the cloud-backed resolver once the vault FSM carries the
+	// upload (gastrolog-5bnxc).
 	if m.cfg.CloudStore != nil && !m.cfg.CloudReadOnly {
 		if err := m.uploadToCloud(id); err != nil {
 			m.logger.Warn("cloud upload failed, keeping local", "chunk", id, "error", err)
@@ -4651,31 +4752,31 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 	return nil
 }
 
-// RegisterCloudBackedChunk registers a cloud-backed chunk from metadata alone,
-// without streaming any records or downloading from S3. Creates a cloud
-// index entry so the chunk appears in List() and is queryable via
-// openCloudCursor. Used by follower nodes when the vault FSM
-// propagates the leader's AnnounceUpload.
+// registerCloudBackedChunkLocked registers a cloud-backed chunk from FSM
+// metadata alone, without streaming any records or downloading from the cloud
+// store. Creates a cloud index entry so the chunk appears in List() and is
+// queryable via openCloudCursor (the blob key is derived at read time by
+// blobKey(), never stored). This is the single cloudIdx fill path for chunks
+// this node did not upload itself: the lazy cloud-backed resolver calls it on
+// a lookup or enumeration miss (gastrolog-5bnxc — it replaced the eager
+// snapshot projection and per-apply onUpload mirrors).
 //
-// Idempotent: if the chunk is already registered (in metas or cloudIdx),
-// this is a no-op.
-func (m *Manager) RegisterCloudBackedChunk(id chunk.ChunkID, info chunk.CloudBackedChunkInfo) error {
+// Idempotent: if the chunk is already registered (in metas or cloudIdx), the
+// existing entry wins. Caller holds m.mu.
+func (m *Manager) registerCloudBackedChunkLocked(id chunk.ChunkID, info chunk.CloudBackedChunkInfo) (*chunkMeta, error) {
 	if m.cloudIdx == nil {
-		return errors.New("cloud index not available (no cloud store configured)")
+		return nil, errors.New("cloud index not available (no cloud store configured)")
 	}
 
 	// Check if already known.
-	m.mu.Lock()
-	if _, ok := m.metas[id]; ok {
-		m.mu.Unlock()
-		return nil // already local
+	if meta, ok := m.metas[id]; ok {
+		return meta, nil // already local
 	}
-	m.mu.Unlock()
 	m.cloudIdxMu.Lock()
 	existing, _ := m.cloudIdx.Lookup(id)
 	m.cloudIdxMu.Unlock()
 	if existing != nil {
-		return nil // already in cloud index
+		return existing, nil // already in cloud index
 	}
 
 	meta := &chunkMeta{
@@ -4707,20 +4808,18 @@ func (m *Manager) RegisterCloudBackedChunk(id chunk.ChunkID, info chunk.CloudBac
 	m.cloudIdxMu.Lock()
 	if err := m.cloudIdx.Insert(id, meta); err != nil {
 		m.cloudIdxMu.Unlock()
-		return fmt.Errorf("insert cloud-backed chunk %s: %w", id, err)
+		return nil, fmt.Errorf("insert cloud-backed chunk %s: %w", id, err)
 	}
 	if err := m.cloudIdx.Sync(); err != nil {
 		m.cloudIdxMu.Unlock()
-		return fmt.Errorf("sync cloud index for %s: %w", id, err)
+		return nil, fmt.Errorf("sync cloud index for %s: %w", id, err)
 	}
 	m.cloudIdxMu.Unlock()
 
-	m.mu.Lock()
 	m.cloudListCache = nil
-	m.mu.Unlock()
 
 	m.logger.Debug("registered cloud-backed chunk from metadata", "chunk", id, "records", info.RecordCount)
-	return nil
+	return meta, nil
 }
 
 // IsExternalGLCBAt reports whether id is registered to read glcbPath via the

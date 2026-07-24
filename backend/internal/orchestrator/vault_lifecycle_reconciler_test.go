@@ -1156,19 +1156,6 @@ func (r *recordingSilentDeleter) DeleteSilent(id chunk.ChunkID) error {
 	return nil
 }
 
-// recordingCloudRegistrar adds chunk.CloudBackedChunkRegistrar on top of the
-// silent-deleter fake.
-type recordingCloudRegistrar struct {
-	recordingSilentDeleter
-	registered  []chunk.ChunkID
-	registerErr error
-}
-
-func (r *recordingCloudRegistrar) RegisterCloudBackedChunk(id chunk.ChunkID, _ chunk.CloudBackedChunkInfo) error {
-	r.registered = append(r.registered, id)
-	return r.registerErr
-}
-
 // waitForChunkSignal blocks until the orchestrator's chunk signal fires
 // or the timeout elapses. Returns true on signal, false on timeout.
 func waitForChunkSignal(ch <-chan struct{}, timeout time.Duration) bool {
@@ -1340,7 +1327,9 @@ func TestReconcilerOnFinalizeDeleteEmitsChunkDeleted(t *testing.T) {
 // nodes, on receiving a CmdUploadChunk via Raft (the leader's
 // AnnounceUpload propagated through), refresh their inspector view.
 // Pre-fix the cloud-backed transition was invisible until manual
-// reload. See gastrolog-2ob86.
+// reload. See gastrolog-2ob86. (Cloud-index registration is no longer an
+// onUpload effect — the chunk manager's lazy cloud-backed resolver fills
+// the index from the FSM at first lookup; gastrolog-5bnxc.)
 func TestWireInstanceFSMOnUploadFiresNotifyChunkChange(t *testing.T) {
 	t.Parallel()
 
@@ -1352,10 +1341,9 @@ func TestWireInstanceFSMOnUploadFiresNotifyChunkChange(t *testing.T) {
 	signalCh := orch.ChunkSignal().C()
 
 	fsm := vaultctlfsm.New()
-	cm := &recordingCloudRegistrar{}
 	vaultID := glid.New()
 	g := &raftgroup.Group{FSM: fsm}
-	wireVaultFSMOnUpload(g, vaultID, cm, orch, slog.Default())
+	wireVaultFSMOnUpload(g, vaultID, orch)
 
 	id := chunk.NewChunkID()
 	now := time.Now()
@@ -1367,9 +1355,6 @@ func TestWireInstanceFSMOnUploadFiresNotifyChunkChange(t *testing.T) {
 
 	if !waitForChunkSignal(signalCh, time.Second) {
 		t.Fatal("expected chunk signal after CmdUploadChunk apply, got timeout")
-	}
-	if len(cm.registered) != 1 || cm.registered[0] != id {
-		t.Errorf("RegisterCloudBackedChunk = %v, want [%s]", cm.registered, id)
 	}
 }
 

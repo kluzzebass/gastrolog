@@ -2,6 +2,7 @@ package file
 
 import (
 	"context"
+	"errors"
 	"gastrolog/internal/glid"
 	"os"
 	"path/filepath"
@@ -319,9 +320,11 @@ func TestRestartPreservesCloudIndexes(t *testing.T) {
 	}
 }
 
-// TestRegisterCloudBackedChunk verifies that RegisterCloudBackedChunk creates a cloud
-// index entry from metadata alone, making the chunk visible in List().
-func TestRegisterCloudBackedChunk(t *testing.T) {
+// TestLazyCloudResolutionCreatesIndexEntry verifies that a lazy resolve
+// (lookupMeta miss answered by the cloud-backed resolver) creates a cloud
+// index entry from metadata alone, making the chunk visible in Meta() and
+// List() with the FSM's fields and DiskBytes 0.
+func TestLazyCloudResolutionCreatesIndexEntry(t *testing.T) {
 	t.Parallel()
 	cm, _, _ := newCloudManagerWithIndexes(t)
 
@@ -333,12 +336,19 @@ func TestRegisterCloudBackedChunk(t *testing.T) {
 		Bytes:       50000,
 		CloudBytes:  30000,
 	}
+	cm.SetCloudBackedChunkResolver(func(q chunk.ChunkID) (chunk.CloudBackedChunkInfo, bool) {
+		if q == id {
+			return info, true
+		}
+		return chunk.CloudBackedChunkInfo{}, false
+	})
 
-	if err := cm.RegisterCloudBackedChunk(id, info); err != nil {
-		t.Fatalf("RegisterCloudBackedChunk: %v", err)
+	// The by-ID lookup resolves and memoizes the entry.
+	if _, err := cm.Meta(id); err != nil {
+		t.Fatalf("Meta (lazy resolve): %v", err)
 	}
 
-	// Chunk should appear in List().
+	// Chunk should appear in List() (already memoized — no lister needed).
 	metas, err := cm.List()
 	if err != nil {
 		t.Fatalf("List: %v", err)
@@ -366,30 +376,44 @@ func TestRegisterCloudBackedChunk(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Error("registered cloud-backed chunk not found in List()")
+		t.Error("lazily resolved cloud-backed chunk not found in List()")
 	}
 }
 
-// TestRegisterCloudBackedChunkIdempotent verifies that calling RegisterCloudBackedChunk
-// twice for the same chunk ID is a no-op.
-func TestRegisterCloudBackedChunkIdempotent(t *testing.T) {
+// TestLazyCloudResolutionIdempotent verifies that repeated lookups for the
+// same chunk keep a single cloud-index entry (the first resolve memoizes;
+// later lookups hit the index).
+func TestLazyCloudResolutionIdempotent(t *testing.T) {
 	t.Parallel()
 	cm, _, _ := newCloudManagerWithIndexes(t)
 
 	id := chunk.NewChunkID()
 	info := chunk.CloudBackedChunkInfo{RecordCount: 50, Bytes: 1000, CloudBytes: 500}
+	cm.SetCloudBackedChunkResolver(func(q chunk.ChunkID) (chunk.CloudBackedChunkInfo, bool) {
+		if q == id {
+			return info, true
+		}
+		return chunk.CloudBackedChunkInfo{}, false
+	})
 
-	if err := cm.RegisterCloudBackedChunk(id, info); err != nil {
-		t.Fatalf("first RegisterCloudBackedChunk: %v", err)
+	if _, err := cm.Meta(id); err != nil {
+		t.Fatalf("first Meta (lazy resolve): %v", err)
 	}
-	if err := cm.RegisterCloudBackedChunk(id, info); err != nil {
-		t.Fatalf("second RegisterCloudBackedChunk should be no-op: %v", err)
+	if _, err := cm.Meta(id); err != nil {
+		t.Fatalf("second Meta should hit the memoized entry: %v", err)
+	}
+	cm.cloudIdxMu.Lock()
+	count := cm.cloudIdx.Count()
+	cm.cloudIdxMu.Unlock()
+	if count != 1 {
+		t.Errorf("cloudIdx count = %d, want 1", count)
 	}
 }
 
-// TestRegisterCloudBackedChunkRequiresCloudStore verifies that RegisterCloudBackedChunk
-// fails if the manager has no cloud store configured.
-func TestRegisterCloudBackedChunkRequiresCloudStore(t *testing.T) {
+// TestLazyCloudResolutionRequiresCloudStore verifies the resolver is inert on
+// a manager without a cloud store (nil cloudIdx): the miss stays a clean
+// miss and the resolver is never consulted.
+func TestLazyCloudResolutionRequiresCloudStore(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -400,9 +424,16 @@ func TestRegisterCloudBackedChunkRequiresCloudStore(t *testing.T) {
 	defer func() { _ = cm.Close() }()
 
 	id := chunk.NewChunkID()
-	info := chunk.CloudBackedChunkInfo{RecordCount: 10}
-	if err := cm.RegisterCloudBackedChunk(id, info); err == nil {
-		t.Error("expected error without cloud store, got nil")
+	resolverCalled := false
+	cm.SetCloudBackedChunkResolver(func(chunk.ChunkID) (chunk.CloudBackedChunkInfo, bool) {
+		resolverCalled = true
+		return chunk.CloudBackedChunkInfo{RecordCount: 10}, true
+	})
+	if _, err := cm.Meta(id); !errors.Is(err, chunk.ErrChunkNotFound) {
+		t.Errorf("Meta without cloud store: err = %v, want ErrChunkNotFound", err)
+	}
+	if resolverCalled {
+		t.Error("resolver consulted despite nil cloudIdx — must be a no-op without a cloud store")
 	}
 }
 
