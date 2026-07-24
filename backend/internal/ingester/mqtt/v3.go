@@ -4,12 +4,11 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"gastrolog/internal/pipeline/ingestion"
 	"log/slog"
 	"time"
 
 	pahov3 "github.com/eclipse/paho.mqtt.golang"
-
-	"gastrolog/internal/orchestrator"
 )
 
 // v3Ingester uses the paho.mqtt.golang v3.1.1 client.
@@ -19,7 +18,7 @@ type v3Ingester struct {
 	logger *slog.Logger
 }
 
-func (ing *v3Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
+func (ing *v3Ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessage) error {
 	opts := pahov3.NewClientOptions().
 		AddBroker(ing.cfg.Broker).
 		SetClientID(ing.cfg.ClientID).

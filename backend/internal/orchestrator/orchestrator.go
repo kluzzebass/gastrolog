@@ -213,7 +213,7 @@ type Orchestrator struct {
 	vaults map[glid.GLID]*Vault
 
 	// Ingester management.
-	ingesters        map[glid.GLID]Ingester
+	ingesters        map[glid.GLID]ingestion.Ingester
 	ingesterStats    map[glid.GLID]*IngesterStats     // per-ingester metrics
 	ingesterMeta     map[glid.GLID]ingesterInfo       // per-ingester name/type for logging
 	ingesterAdapters map[glid.GLID]ingestion.Ingester // stable pipeline adapters (no-flap reconcile identity)
@@ -812,7 +812,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		backfillLogThrottle:    logging.Throttle{Interval: 30 * time.Second},
 		retentionLeaderlessLog: logging.Throttle{Interval: 10 * time.Minute},
 		vaults:                 make(map[glid.GLID]*Vault),
-		ingesters:              make(map[glid.GLID]Ingester),
+		ingesters:              make(map[glid.GLID]ingestion.Ingester),
 		ingesterStats:          make(map[glid.GLID]*IngesterStats),
 		ingesterMeta:           make(map[glid.GLID]ingesterInfo),
 		ingesterAdapters:       make(map[glid.GLID]ingestion.Ingester),

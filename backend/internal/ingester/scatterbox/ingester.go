@@ -20,11 +20,11 @@ import (
 	"time"
 
 	"gastrolog/internal/chanwatch"
-	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/pipeline/ingestion"
 )
 
 // Ingester emits deterministic, traceable log records.
-// Implements orchestrator.Ingester and orchestrator.Triggerable.
+// Implements ingestion.Ingester and ingestion.Triggerable.
 type Ingester struct {
 	id       string
 	node     string // cluster node ID — embedded in every record body
@@ -41,7 +41,7 @@ type Ingester struct {
 }
 
 // SetPressureGate wires the orchestrator's pressure gate into the ingester.
-// Implements orchestrator.PressureAware.
+// Implements ingestion.PressureAware.
 func (s *Ingester) SetPressureGate(gate *chanwatch.PressureGate) {
 	s.pressureGate = gate
 }
@@ -49,14 +49,14 @@ func (s *Ingester) SetPressureGate(gate *chanwatch.PressureGate) {
 // Run emits records until ctx is cancelled.
 // In continuous mode (interval > 0), emits on aligned wall-clock boundaries.
 // In one-shot mode (interval = 0), waits for Trigger() calls.
-func (s *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
+func (s *Ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessage) error {
 	if s.interval == 0 {
 		return s.runOneShot(ctx, out)
 	}
 	return s.runContinuous(ctx, out)
 }
 
-func (s *Ingester) runContinuous(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
+func (s *Ingester) runContinuous(ctx context.Context, out chan<- ingestion.IngesterMessage) error {
 	for {
 		scheduled, triggered, err := waitForEmission(ctx, s.interval, s.trigger)
 		if err != nil {
@@ -70,7 +70,7 @@ func (s *Ingester) runContinuous(ctx context.Context, out chan<- orchestrator.In
 	}
 }
 
-func (s *Ingester) runOneShot(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
+func (s *Ingester) runOneShot(ctx context.Context, out chan<- ingestion.IngesterMessage) error {
 	for {
 		select {
 		case <-ctx.Done():
@@ -81,7 +81,7 @@ func (s *Ingester) runOneShot(ctx context.Context, out chan<- orchestrator.Inges
 	}
 }
 
-func (s *Ingester) emitBurst(ctx context.Context, out chan<- orchestrator.IngestMessage, at time.Time) {
+func (s *Ingester) emitBurst(ctx context.Context, out chan<- ingestion.IngesterMessage, at time.Time) {
 	// Backpressure: pause before emitting if the pipeline is elevated/critical.
 	// Returns silently on ctx cancel so the caller's loop can exit.
 	if s.pressureGate != nil {
@@ -102,7 +102,7 @@ func (s *Ingester) emitBurst(ctx context.Context, out chan<- orchestrator.Ingest
 // Trigger causes the ingester to emit one burst of records.
 // In one-shot mode, this is the only way to emit.
 // In continuous mode, this emits an extra burst immediately.
-// Implements orchestrator.Triggerable.
+// Implements ingestion.Triggerable.
 func (s *Ingester) Trigger() {
 	select {
 	case s.trigger <- struct{}{}:
@@ -117,7 +117,7 @@ func (s *Ingester) Trigger() {
 // field is the only thing that tells records from different nodes apart
 // (seq is per-instance-monotonic but per-node, so two nodes will produce
 // overlapping seq ranges).
-func (s *Ingester) generate(at time.Time) orchestrator.IngestMessage {
+func (s *Ingester) generate(at time.Time) ingestion.IngesterMessage {
 	seq := s.seq.Add(1)
 	now := at
 	if now.IsZero() {
@@ -132,7 +132,7 @@ func (s *Ingester) generate(at time.Time) orchestrator.IngestMessage {
 		s.node,
 	)
 
-	return orchestrator.IngestMessage{
+	return ingestion.IngesterMessage{
 		Attrs: map[string]string{
 			"ingester_type": "scatterbox",
 			"seq":           strconv.FormatUint(seq, 10),

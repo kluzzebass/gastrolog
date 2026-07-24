@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"gastrolog/internal/logging"
-	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/pipeline/ingestion"
 )
 
 func TestSelfIngesterEmit(t *testing.T) {
@@ -22,7 +22,7 @@ func TestSelfIngesterEmit(t *testing.T) {
 		t.Fatalf("factory: %v", err)
 	}
 
-	out := make(chan orchestrator.IngestMessage, 10)
+	out := make(chan ingestion.IngesterMessage, 10)
 
 	go func() { _ = ing.Run(t.Context(), out) }()
 
@@ -67,7 +67,7 @@ func TestSelfIngesterRunOpensAndClosesCaptureGate(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(t.Context())
-	out := make(chan orchestrator.IngestMessage, 1)
+	out := make(chan ingestion.IngesterMessage, 1)
 	done := make(chan struct{})
 	go func() {
 		_ = ing.Run(ctx, out)

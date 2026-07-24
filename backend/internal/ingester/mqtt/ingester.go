@@ -8,7 +8,7 @@ import (
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/logging/comp"
-	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/pipeline/ingestion"
 )
 
 // pressureAware is the shared state for v3 and v5 MQTT ingesters to store
@@ -19,7 +19,7 @@ type pressureAware struct {
 }
 
 // SetPressureGate wires the orchestrator's pressure gate into the ingester.
-// Implements orchestrator.PressureAware.
+// Implements ingestion.PressureAware.
 func (p *pressureAware) SetPressureGate(gate *chanwatch.PressureGate) {
 	p.pressureGate = gate
 }
@@ -40,7 +40,7 @@ type Config struct {
 }
 
 // New creates an MQTT ingester for the configured protocol version.
-func New(cfg Config) orchestrator.Ingester {
+func New(cfg Config) ingestion.Ingester {
 	logger := comp.Ingester.Sub("mqtt").Desc("MQTT subscribing ingester — accepts messages from MQTT v3.1.1 and v5 brokers.").Apply(logging.Default(cfg.Logger))
 	if cfg.Version == 5 {
 		return &v5Ingester{cfg: cfg, logger: logger}

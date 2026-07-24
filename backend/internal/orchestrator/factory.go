@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline/ingestion"
 	"log/slog"
 	"maps"
 	"slices"
@@ -35,21 +36,15 @@ import (
 // or an error describing the failure.
 type ConnectionTester func(ctx context.Context, params map[string]string) (string, error)
 
-// ListenAddr describes a network address that a listener ingester will bind to.
-type ListenAddr struct {
-	Network string // "tcp", "udp"
-	Address string
-}
-
 // IngesterRegistration bundles an ingester's factory, default parameters,
 // and optional connection tester into a single registration unit.
 // This prevents the factory, defaults, and tester maps from diverging
 // when new ingester types are added.
 type IngesterRegistration struct {
-	Factory     IngesterFactory
+	Factory     ingestion.IngesterFactory
 	Defaults    func() map[string]string
-	Tester      ConnectionTester                            // nil if not supported
-	ListenAddrs func(params map[string]string) []ListenAddr // nil for non-listeners
+	Tester      ConnectionTester                                      // nil if not supported
+	ListenAddrs func(params map[string]string) []ingestion.ListenAddr // nil for non-listeners
 
 	// SingletonSupported indicates whether it is meaningful to run this
 	// ingester type in singleton (Raft-assigned, one-node) mode. When false,
@@ -324,7 +319,7 @@ func (o *Orchestrator) applyIngester(recvCfg system.IngesterConfig, assignments 
 	}
 
 	// Restore checkpoint if available (active ingesters resuming after failover).
-	if cp, ok := recv.(Checkpointable); ok {
+	if cp, ok := recv.(ingestion.Checkpointable); ok {
 		if data := checkpoints[recvCfg.ID]; len(data) > 0 {
 			if err := cp.LoadCheckpoint(data); err != nil {
 				o.logger.Warn("ingester checkpoint load failed, starting fresh", "id", recvCfg.ID, "error", err)

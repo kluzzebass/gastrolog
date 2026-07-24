@@ -5,10 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline/ingestion"
 	"log/slog"
 	"strings"
-
-	"gastrolog/internal/orchestrator"
 )
 
 // ParamDefaults returns the default parameter values for a Kafka ingester.
@@ -19,8 +18,8 @@ func ParamDefaults() map[string]string {
 }
 
 // NewFactory returns an IngesterFactory for Kafka ingesters.
-func NewFactory() orchestrator.IngesterFactory {
-	return func(id glid.GLID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
+func NewFactory() ingestion.IngesterFactory {
+	return func(id glid.GLID, params map[string]string, logger *slog.Logger) (ingestion.Ingester, error) {
 		brokers := params["brokers"]
 		if brokers == "" {
 			return nil, errors.New("kafka ingester: brokers param is required")

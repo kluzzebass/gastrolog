@@ -1,6 +1,7 @@
 package otlp
 
 import (
+	"gastrolog/internal/pipeline/ingestion"
 	"testing"
 	"time"
 
@@ -8,8 +9,6 @@ import (
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	logspb "go.opentelemetry.io/proto/otlp/logs/v1"
 	"google.golang.org/protobuf/proto"
-
-	"gastrolog/internal/orchestrator"
 )
 
 // FuzzAnyValueToString feeds random proto-encoded AnyValue messages into
@@ -170,7 +169,7 @@ func FuzzExportLogsServiceRequest(f *testing.F) {
 		}
 
 		// Use a buffered channel so processExportRequest doesn't block.
-		out := make(chan orchestrator.IngestMessage, 1000)
+		out := make(chan ingestion.IngesterMessage, 1000)
 		ing := &Ingester{id: "fuzz-otlp", out: out}
 
 		ctx := t.Context()

@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/logging/comp"
+	"gastrolog/internal/pipeline/ingestion"
 	"log/slog"
 	"strconv"
 	"time"
 
 	"gastrolog/internal/logging"
-	"gastrolog/internal/orchestrator"
 )
 
 const (
@@ -32,8 +32,8 @@ func ParamDefaults() map[string]string {
 // attributable to the originating node. Without this, the four nodes emit
 // four JSON-identical records every interval and only the backend
 // ingester_id attr tells them apart.
-func NewFactory(nodeID string) orchestrator.IngesterFactory {
-	return func(id glid.GLID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
+func NewFactory(nodeID string) ingestion.IngesterFactory {
+	return func(id glid.GLID, params map[string]string, logger *slog.Logger) (ingestion.Ingester, error) {
 		ing, err := NewIngester(id, params, logger)
 		if err != nil {
 			return nil, err
@@ -54,7 +54,7 @@ func NewFactory(nodeID string) orchestrator.IngesterFactory {
 //
 // The returned ingester's node field is empty. Production code should use
 // NewFactory(nodeID) instead so records embed the cluster node identifier.
-func NewIngester(id glid.GLID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
+func NewIngester(id glid.GLID, params map[string]string, logger *slog.Logger) (ingestion.Ingester, error) {
 	interval := defaultInterval
 	burst := defaultBurst
 

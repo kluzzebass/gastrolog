@@ -9,9 +9,10 @@ import (
 	"time"
 
 	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline/ingestion"
 )
 
-// mockCheckpointIngester implements both Ingester and Checkpointable.
+// mockCheckpointIngester implements both ingestion.Ingester and ingestion.Checkpointable.
 type mockCheckpointIngester struct {
 	mu        sync.Mutex
 	state     map[string]string
@@ -27,14 +28,14 @@ func newMockCheckpointIngester() *mockCheckpointIngester {
 	}
 }
 
-func (m *mockCheckpointIngester) Run(ctx context.Context, out chan<- IngestMessage) error {
+func (m *mockCheckpointIngester) Run(ctx context.Context, out chan<- ingestion.IngesterMessage) error {
 	// Emit a few records, then block until cancelled or unblocked.
 	for i := 0; i < 3; i++ {
 		m.mu.Lock()
 		m.state["cursor"] = string(rune('0' + i + 1))
 		m.mu.Unlock()
 		select {
-		case out <- IngestMessage{
+		case out <- ingestion.IngesterMessage{
 			Raw:      []byte("msg"),
 			IngestTS: time.Now(),
 		}:

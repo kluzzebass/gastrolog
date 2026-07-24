@@ -12,6 +12,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline/ingestion"
 	"math/big"
 	"net"
 	"runtime"
@@ -19,8 +20,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"gastrolog/internal/orchestrator"
 )
 
 // writeRELPFrame writes a RELP frame: "TXNR SP COMMAND SP DATALEN SP DATA LF"
@@ -125,7 +124,7 @@ func TestRELPFactory(t *testing.T) {
 
 func TestRELPSession(t *testing.T) {
 	t.Parallel()
-	out := make(chan orchestrator.IngestMessage, 10)
+	out := make(chan ingestion.IngesterMessage, 10)
 	ing := New(Config{ID: "test-relp", Addr: "127.0.0.1:0"})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -225,7 +224,7 @@ func TestRELPSession(t *testing.T) {
 
 func TestRELPMultipleMessages(t *testing.T) {
 	t.Parallel()
-	out := make(chan orchestrator.IngestMessage, 10)
+	out := make(chan ingestion.IngesterMessage, 10)
 	ing := New(Config{ID: "test-relp", Addr: "127.0.0.1:0"})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -291,7 +290,7 @@ func TestRELPMultipleMessages(t *testing.T) {
 
 func TestRELPConnectionClose(t *testing.T) {
 	t.Parallel()
-	out := make(chan orchestrator.IngestMessage, 10)
+	out := make(chan ingestion.IngesterMessage, 10)
 	ing := New(Config{ID: "test-relp", Addr: "127.0.0.1:0"})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -401,7 +400,7 @@ func generateTestCert(t *testing.T) (tls.Certificate, *x509.CertPool) {
 
 func TestRELPTLS(t *testing.T) {
 	t.Parallel()
-	out := make(chan orchestrator.IngestMessage, 10)
+	out := make(chan ingestion.IngesterMessage, 10)
 
 	srvCert, caPool := generateTestCert(t)
 	tlsCfg := &tls.Config{

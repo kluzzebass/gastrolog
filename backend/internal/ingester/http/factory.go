@@ -4,9 +4,8 @@ import (
 	"cmp"
 	"fmt"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline/ingestion"
 	"log/slog"
-
-	"gastrolog/internal/orchestrator"
 )
 
 // ParamDefaults returns the default parameter values for an HTTP ingester.
@@ -17,8 +16,8 @@ func ParamDefaults() map[string]string {
 }
 
 // NewFactory returns a IngesterFactory for HTTP ingesters.
-func NewFactory() orchestrator.IngesterFactory {
-	return func(id glid.GLID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
+func NewFactory() ingestion.IngesterFactory {
+	return func(id glid.GLID, params map[string]string, logger *slog.Logger) (ingestion.Ingester, error) {
 		addr := cmp.Or(params["addr"], ":3100") // Loki's default port
 
 		// Validate addr format (basic check).

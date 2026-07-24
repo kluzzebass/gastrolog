@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chanwatch"
-	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/pipeline/ingestion"
 )
 
 // containerAttrs flattens container metadata into a map for querylang filter matching.
@@ -35,7 +35,7 @@ func streamContainer(
 	stdout, stderr bool,
 	ingesterID string,
 	logger *slog.Logger,
-	out chan<- orchestrator.IngestMessage,
+	out chan<- ingestion.IngesterMessage,
 	onTimestamp func(containerID string, ts time.Time),
 	gate *chanwatch.PressureGate,
 ) {
@@ -74,7 +74,7 @@ func streamOnce(
 	stdout, stderr bool,
 	ingesterID string,
 	logger *slog.Logger,
-	out chan<- orchestrator.IngestMessage,
+	out chan<- ingestion.IngesterMessage,
 	onTimestamp func(containerID string, ts time.Time),
 	lastTS *time.Time,
 	gate *chanwatch.PressureGate,

@@ -1,10 +1,9 @@
 package mqtt
 
 import (
+	"gastrolog/internal/pipeline/ingestion"
 	"strconv"
 	"time"
-
-	"gastrolog/internal/orchestrator"
 )
 
 // buildMessage assembles an IngestMessage from the protocol-agnostic
@@ -13,8 +12,8 @@ import (
 // IngesterID + IngestTS invariant in a single seam — the MQTT
 // ingester is broker-only so we can't drive an end-to-end test, but
 // this helper is trivially unit-testable from gastrolog-44b9r tests.
-func buildMessage(topic string, qos byte, retained bool, msgID uint16, payload []byte, ingesterID string, now time.Time) orchestrator.IngestMessage {
-	return orchestrator.IngestMessage{
+func buildMessage(topic string, qos byte, retained bool, msgID uint16, payload []byte, ingesterID string, now time.Time) ingestion.IngesterMessage {
+	return ingestion.IngesterMessage{
 		Attrs: map[string]string{
 			"ingester_type":   "mqtt",
 			"mqtt_topic":      topic,

@@ -2,12 +2,11 @@ package syslog
 
 import (
 	"fmt"
+	"gastrolog/internal/pipeline/ingestion"
 	"net"
 	"runtime"
 	"testing"
 	"time"
-
-	"gastrolog/internal/orchestrator"
 )
 
 // waitAddr polls f until it returns a non-nil address or the timeout expires.
@@ -23,7 +22,7 @@ func waitAddr(t *testing.T, f func() net.Addr) {
 }
 
 func TestSyslogUDPRFC3164(t *testing.T) {
-	out := make(chan orchestrator.IngestMessage, 10)
+	out := make(chan ingestion.IngesterMessage, 10)
 	recv := New(Config{UDPAddr: "127.0.0.1:0"})
 
 	ctx := t.Context()
@@ -70,7 +69,7 @@ func TestSyslogUDPRFC3164(t *testing.T) {
 }
 
 func TestSyslogUDPRFC5424(t *testing.T) {
-	out := make(chan orchestrator.IngestMessage, 10)
+	out := make(chan ingestion.IngesterMessage, 10)
 	recv := New(Config{UDPAddr: "127.0.0.1:0"})
 
 	ctx := t.Context()
@@ -127,7 +126,7 @@ func TestSyslogUDPRFC5424(t *testing.T) {
 }
 
 func TestSyslogTCPNewlineDelimited(t *testing.T) {
-	out := make(chan orchestrator.IngestMessage, 10)
+	out := make(chan ingestion.IngesterMessage, 10)
 	recv := New(Config{TCPAddr: "127.0.0.1:0"})
 
 	ctx := t.Context()
@@ -168,7 +167,7 @@ func TestSyslogTCPNewlineDelimited(t *testing.T) {
 }
 
 func TestSyslogTCPOctetCounted(t *testing.T) {
-	out := make(chan orchestrator.IngestMessage, 10)
+	out := make(chan ingestion.IngesterMessage, 10)
 	recv := New(Config{TCPAddr: "127.0.0.1:0"})
 
 	ctx := t.Context()
@@ -198,7 +197,7 @@ func TestSyslogTCPOctetCounted(t *testing.T) {
 }
 
 func TestSyslogMultipleUDPMessages(t *testing.T) {
-	out := make(chan orchestrator.IngestMessage, 100)
+	out := make(chan ingestion.IngesterMessage, 100)
 	recv := New(Config{UDPAddr: "127.0.0.1:0"})
 
 	ctx := t.Context()
@@ -232,7 +231,7 @@ func TestSyslogMultipleUDPMessages(t *testing.T) {
 }
 
 func TestSyslogRemoteIP(t *testing.T) {
-	out := make(chan orchestrator.IngestMessage, 10)
+	out := make(chan ingestion.IngesterMessage, 10)
 	recv := New(Config{UDPAddr: "127.0.0.1:0"})
 
 	ctx := t.Context()
@@ -259,7 +258,7 @@ func TestSyslogRemoteIP(t *testing.T) {
 }
 
 func TestSyslogRFC3164WithPID(t *testing.T) {
-	out := make(chan orchestrator.IngestMessage, 10)
+	out := make(chan ingestion.IngesterMessage, 10)
 	recv := New(Config{UDPAddr: "127.0.0.1:0"})
 
 	ctx := t.Context()
@@ -294,7 +293,7 @@ func TestSyslogRFC3164WithPID(t *testing.T) {
 }
 
 func TestSyslogNoPriority(t *testing.T) {
-	out := make(chan orchestrator.IngestMessage, 10)
+	out := make(chan ingestion.IngesterMessage, 10)
 	recv := New(Config{UDPAddr: "127.0.0.1:0"})
 
 	ctx := t.Context()
@@ -326,7 +325,7 @@ func TestSyslogNoPriority(t *testing.T) {
 }
 
 func TestSyslogBothUDPAndTCP(t *testing.T) {
-	out := make(chan orchestrator.IngestMessage, 10)
+	out := make(chan ingestion.IngesterMessage, 10)
 	recv := New(Config{
 		UDPAddr: "127.0.0.1:0",
 		TCPAddr: "127.0.0.1:0",

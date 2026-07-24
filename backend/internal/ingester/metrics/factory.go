@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/logging/comp"
+	"gastrolog/internal/pipeline/ingestion"
 	"log/slog"
 	"time"
 
@@ -33,8 +34,8 @@ func ParamDefaults() map[string]string {
 
 // NewFactory returns an IngesterFactory for the self-monitoring metrics ingester.
 // The StatsSource is captured by the returned closure (same pattern as docker's NewFactory).
-func NewFactory(src StatsSource) orchestrator.IngesterFactory {
-	return func(id glid.GLID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
+func NewFactory(src StatsSource) ingestion.IngesterFactory {
+	return func(id glid.GLID, params map[string]string, logger *slog.Logger) (ingestion.Ingester, error) {
 		interval := defaultInterval
 		if v := params["interval"]; v != "" {
 			d, err := time.ParseDuration(v)

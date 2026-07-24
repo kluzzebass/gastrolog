@@ -7,7 +7,7 @@ import (
 
 	"gastrolog/internal/glid"
 	"gastrolog/internal/ingester/identitytest"
-	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/pipeline/ingestion"
 )
 
 // TestEventIDIdentity pins gastrolog-44b9r for the metrics ingester.
@@ -28,7 +28,7 @@ func TestEventIDIdentity(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 
-	out := make(chan orchestrator.IngestMessage, 4)
+	out := make(chan ingestion.IngesterMessage, 4)
 	go func() { _ = ing.Run(ctx, out) }()
 
 	select {

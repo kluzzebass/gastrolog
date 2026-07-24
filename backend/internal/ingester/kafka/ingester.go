@@ -17,7 +17,7 @@ import (
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/logging/comp"
-	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/pipeline/ingestion"
 )
 
 const (
@@ -56,7 +56,7 @@ type Ingester struct {
 }
 
 // SetPressureGate wires the orchestrator's pressure gate into the ingester.
-// Implements orchestrator.PressureAware.
+// Implements ingestion.PressureAware.
 func (ing *Ingester) SetPressureGate(gate *chanwatch.PressureGate) {
 	ing.pressureGate = gate
 }
@@ -70,7 +70,7 @@ func New(cfg Config) *Ingester {
 }
 
 // Run connects to Kafka and polls messages until ctx is cancelled.
-func (ing *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
+func (ing *Ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessage) error {
 	opts := []kgo.Opt{
 		kgo.SeedBrokers(ing.cfg.Brokers...),
 		kgo.ConsumeTopics(ing.cfg.Topic),
@@ -180,8 +180,8 @@ func (ing *Ingester) handleFetchErrors(fetches kgo.Fetches, backoff *time.Durati
 	return true
 }
 
-// buildMessage converts a kgo.Record into an orchestrator.IngestMessage.
-func buildMessage(rec *kgo.Record, ingesterID string, now time.Time) orchestrator.IngestMessage {
+// buildMessage converts a kgo.Record into an ingestion.IngesterMessage.
+func buildMessage(rec *kgo.Record, ingesterID string, now time.Time) ingestion.IngesterMessage {
 	attrs := make(map[string]string, len(rec.Headers)+5)
 	attrs["ingester_type"] = "kafka"
 	attrs["kafka_topic"] = rec.Topic
@@ -190,7 +190,7 @@ func buildMessage(rec *kgo.Record, ingesterID string, now time.Time) orchestrato
 	for _, h := range rec.Headers {
 		attrs[h.Key] = string(h.Value)
 	}
-	return orchestrator.IngestMessage{
+	return ingestion.IngesterMessage{
 		Attrs:      attrs,
 		Raw:        rec.Value,
 		SourceTS:   rec.Timestamp,

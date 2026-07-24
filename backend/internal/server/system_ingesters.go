@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline/ingestion"
 	"maps"
 	"net"
 	"slices"
@@ -13,7 +14,6 @@ import (
 	"connectrpc.com/connect"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
-	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/system"
 	"gastrolog/internal/system/raftfsm"
 )
@@ -287,7 +287,7 @@ func (s *SystemServer) validateIngester(ingCfg system.IngesterConfig, existing [
 }
 
 // checkListenAddrs verifies that all addresses are available to bind.
-func checkListenAddrs(addrs []orchestrator.ListenAddr) error {
+func checkListenAddrs(addrs []ingestion.ListenAddr) error {
 	for _, a := range addrs {
 		if err := tryBind(a.Network, a.Address); err != nil {
 			return fmt.Errorf("%s %s: %w", a.Network, a.Address, err)
@@ -354,7 +354,7 @@ func (s *SystemServer) checkListenAddrConflicts(ingCfg system.IngesterConfig, ex
 
 // comparableListenAddrs returns listen addresses for other if its node set
 // overlaps with selfNodeIDs (meaning they could conflict). Returns nil otherwise.
-func (s *SystemServer) comparableListenAddrs(other system.IngesterConfig, selfNodeIDs []string) []orchestrator.ListenAddr {
+func (s *SystemServer) comparableListenAddrs(other system.IngesterConfig, selfNodeIDs []string) []ingestion.ListenAddr {
 	otherReg, ok := s.factories.IngesterTypes[other.Type]
 	if !ok || otherReg.ListenAddrs == nil {
 		return nil
@@ -366,7 +366,7 @@ func (s *SystemServer) comparableListenAddrs(other system.IngesterConfig, selfNo
 }
 
 // findAddrOverlap returns the first address that appears in both slices, or nil.
-func findAddrOverlap(a, b []orchestrator.ListenAddr) *orchestrator.ListenAddr {
+func findAddrOverlap(a, b []ingestion.ListenAddr) *ingestion.ListenAddr {
 	for i := range a {
 		for j := range b {
 			if a[i].Network == b[j].Network && a[i].Address == b[j].Address {

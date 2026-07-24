@@ -143,8 +143,11 @@ a vault's active chunk".
 ### Aggregates
 
 - **Ingester** — a protocol adapter that receives external input and produces
-  `IngestMessage` envelopes. Types include `chatterbox` (synthetic), `syslog-udp`,
+  `IngesterMessage` envelopes. Types include `chatterbox` (synthetic), `syslog-udp`,
   `http`, `kafka`, `file`, `jsonl`, and `self` (self-ingesting GastroLog logs).
+  The `Ingester` contract and its message/factory types live in
+  [`pipeline/ingestion`](../backend/internal/pipeline/ingestion) — ingesters are
+  "dumb" and depend only on those contracts, never on the orchestrator.
   Declarative config: [`system.IngesterConfig`](../backend/internal/system/vault.go).
 
 - **Singleton ingester** — an ingester that must run on exactly one node at a
@@ -158,10 +161,11 @@ a vault's active chunk".
 
 ### Domain events
 
-- **IngestMessage** — the internal envelope for a raw message entering the
-  pipeline. Holds the raw bytes, ingester-specific metadata (syslog priority,
-  HTTP headers), ingest timestamp, and ingester identity. The digester turns
-  this into a `Record`.
+- **IngesterMessage** — the envelope an ingester emits for a raw message
+  entering the pipeline. Holds the raw bytes, ingester-specific metadata (syslog
+  priority, HTTP headers), ingest timestamp, and ingester identity. The ingestion
+  manager mints an EventID and forwards an **IngestMessage** (the digestion-queue
+  element) downstream; the digester turns that into a `Record`.
 
 - **Digester** — the parser for one ingester type. Knows how to decode its
   input format into structured fields and attributes. Examples:

@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chanwatch"
-	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/pipeline/ingestion"
 	"gastrolog/internal/sysmetrics"
 )
 
@@ -28,14 +28,14 @@ type ingester struct {
 }
 
 // SetPressureGate wires the orchestrator's pressure gate into the ingester.
-// Implements orchestrator.PressureAware.
+// Implements ingestion.PressureAware.
 func (m *ingester) SetPressureGate(gate *chanwatch.PressureGate) {
 	m.pressureGate = gate
 }
 
 // Run emits system metrics on interval and vault metrics on vaultInterval
 // until ctx is cancelled.
-func (m *ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
+func (m *ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessage) error {
 	m.logger.Info("started", "interval", m.interval, "vault_interval", m.vaultInterval)
 
 	sysTicker := time.NewTicker(m.interval)
@@ -68,7 +68,7 @@ func (m *ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessag
 }
 
 // send attempts a context-aware channel send. Returns false if ctx is done.
-func send(ctx context.Context, out chan<- orchestrator.IngestMessage, msg orchestrator.IngestMessage) bool {
+func send(ctx context.Context, out chan<- ingestion.IngesterMessage, msg ingestion.IngesterMessage) bool {
 	select {
 	case out <- msg:
 		return true
@@ -77,7 +77,7 @@ func send(ctx context.Context, out chan<- orchestrator.IngestMessage, msg orches
 	}
 }
 
-func (m *ingester) collectSystem() orchestrator.IngestMessage {
+func (m *ingester) collectSystem() ingestion.IngesterMessage {
 	cpu := sysmetrics.CPUPercent()
 	mem := sysmetrics.Memory()
 	goroutines := runtime.NumGoroutine()
@@ -103,7 +103,7 @@ func (m *ingester) collectSystem() orchestrator.IngestMessage {
 		queueCap,
 	)
 
-	return orchestrator.IngestMessage{
+	return ingestion.IngesterMessage{
 		Attrs: map[string]string{
 			"ingester_type": "metrics",
 			"metric_type":   "system",
@@ -117,14 +117,14 @@ func (m *ingester) collectSystem() orchestrator.IngestMessage {
 	}
 }
 
-func (m *ingester) collectVaults() []orchestrator.IngestMessage {
+func (m *ingester) collectVaults() []ingestion.IngesterMessage {
 	snapshots := m.src.VaultSnapshots()
 	if len(snapshots) == 0 {
 		return nil
 	}
 
 	now := time.Now()
-	msgs := make([]orchestrator.IngestMessage, 0, len(snapshots))
+	msgs := make([]ingestion.IngesterMessage, 0, len(snapshots))
 	for _, snap := range snapshots {
 		raw := fmt.Sprintf(
 			"record_count=%d chunk_count=%d sealed_chunks=%d data_bytes=%d enabled=%t",
@@ -134,7 +134,7 @@ func (m *ingester) collectVaults() []orchestrator.IngestMessage {
 			snap.DataBytes,
 			snap.Enabled,
 		)
-		msgs = append(msgs, orchestrator.IngestMessage{
+		msgs = append(msgs, ingestion.IngesterMessage{
 			Attrs: map[string]string{
 				"ingester_type": "metrics",
 				"metric_type":   "vault",

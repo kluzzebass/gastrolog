@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline/ingestion"
 	"io"
 	"os"
 	"path/filepath"
@@ -16,7 +17,6 @@ import (
 	"time"
 
 	"gastrolog/internal/logging"
-	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/querylang"
 	sysmem "gastrolog/internal/system/memory"
 )
@@ -136,8 +136,8 @@ func makeRawLine(ts time.Time, line string) string {
 	return ts.Format(time.RFC3339Nano) + " " + line + "\n"
 }
 
-func collectMessages(ctx context.Context, out <-chan orchestrator.IngestMessage, count int, timeout time.Duration) []orchestrator.IngestMessage {
-	var msgs []orchestrator.IngestMessage
+func collectMessages(ctx context.Context, out <-chan ingestion.IngesterMessage, count int, timeout time.Duration) []ingestion.IngesterMessage {
+	var msgs []ingestion.IngesterMessage
 	deadline := time.After(timeout)
 	for len(msgs) < count {
 		select {
@@ -267,7 +267,7 @@ func TestSingleContainerTailing(t *testing.T) {
 	ing := newIngesterWithClient(cfg, client)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	out := make(chan orchestrator.IngestMessage, 10)
+	out := make(chan ingestion.IngesterMessage, 10)
 
 	go func() {
 		ing.Run(ctx, out)
@@ -344,7 +344,7 @@ func TestContainerStartEvent(t *testing.T) {
 	ing := newIngesterWithClient(cfg, client)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	out := make(chan orchestrator.IngestMessage, 10)
+	out := make(chan ingestion.IngesterMessage, 10)
 
 	go func() {
 		ing.Run(ctx, out)
@@ -397,7 +397,7 @@ func TestContainerStopEvent(t *testing.T) {
 	ing := newIngesterWithClient(cfg, client)
 
 	ctx := t.Context()
-	out := make(chan orchestrator.IngestMessage, 10)
+	out := make(chan ingestion.IngesterMessage, 10)
 
 	go func() {
 		ing.Run(ctx, out)
@@ -902,7 +902,7 @@ func TestGracefulShutdown(t *testing.T) {
 	ing := newIngesterWithClient(cfg, client)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	out := make(chan orchestrator.IngestMessage, 10)
+	out := make(chan ingestion.IngesterMessage, 10)
 
 	done := make(chan error, 1)
 	go func() {
@@ -979,7 +979,7 @@ func TestFilteredContainersNotTailed(t *testing.T) {
 	ing := newIngesterWithClient(cfg, client)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	out := make(chan orchestrator.IngestMessage, 10)
+	out := make(chan ingestion.IngesterMessage, 10)
 
 	go func() {
 		ing.Run(ctx, out)

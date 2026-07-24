@@ -6,11 +6,11 @@ package self
 import (
 	"gastrolog/internal/glid"
 	"gastrolog/internal/logging/comp"
+	"gastrolog/internal/pipeline/ingestion"
 	"log/slog"
 	"strings"
 
 	"gastrolog/internal/logging"
-	"gastrolog/internal/orchestrator"
 )
 
 // ParamDefaults returns the default parameter values for the self ingester.
@@ -29,8 +29,8 @@ func ParamDefaults() map[string]string {
 func NewFactory(
 	ch <-chan logging.CapturedRecord,
 	capture *logging.CaptureHandler,
-) orchestrator.IngesterFactory {
-	return func(id glid.GLID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
+) ingestion.IngesterFactory {
+	return func(id glid.GLID, params map[string]string, logger *slog.Logger) (ingestion.Ingester, error) {
 		scopedLogger := comp.Ingester.Sub("self").Desc("Self ingester — captures slog records emitted by this binary into a vault, mirroring stderr.").Apply(logging.Default(logger))
 
 		// Apply min_level param to the capture handler.

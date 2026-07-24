@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline/ingestion"
 	"log/slog"
 	"maps"
 	"os"
@@ -380,7 +381,7 @@ func (d *configDispatcher) ingesterDesired(ctx context.Context, cfg system.Inges
 		Type:    cfg.Type,
 		Passive: reg.ListenAddrs != nil,
 		Params:  maps.Clone(cfg.Params),
-		Build: func() (orchestrator.Ingester, error) {
+		Build: func() (ingestion.Ingester, error) {
 			params := cfg.Params
 			if d.factories.HomeDir != "" {
 				params = make(map[string]string, len(cfg.Params)+1)
@@ -392,7 +393,7 @@ func (d *configDispatcher) ingesterDesired(ctx context.Context, cfg system.Inges
 				return nil, err
 			}
 			// Restore Raft-replicated checkpoint if the ingester supports it.
-			if cp, ok := ing.(orchestrator.Checkpointable); ok {
+			if cp, ok := ing.(ingestion.Checkpointable); ok {
 				if data, cpErr := d.cfgStore.GetIngesterCheckpoint(ctx, cfg.ID); cpErr == nil && len(data) > 0 {
 					if loadErr := cp.LoadCheckpoint(data); loadErr != nil {
 						d.logger.Warn("dispatch: checkpoint load failed, starting fresh", "id", cfg.ID, "error", loadErr)

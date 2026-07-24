@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/logging/comp"
+	"gastrolog/internal/pipeline/ingestion"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -12,7 +13,6 @@ import (
 	"time"
 
 	"gastrolog/internal/logging"
-	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/querylang"
 	"gastrolog/internal/system"
 )
@@ -43,8 +43,8 @@ func DockerSocketExamples() []string {
 
 // NewFactory returns an IngesterFactory for Docker container log ingesters.
 // The config store is used to resolve certificate names for TLS.
-func NewFactory(cfgStore system.Store) orchestrator.IngesterFactory {
-	return func(id glid.GLID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
+func NewFactory(cfgStore system.Store) ingestion.IngesterFactory {
+	return func(id glid.GLID, params map[string]string, logger *slog.Logger) (ingestion.Ingester, error) {
 		cfg, err := parseConfig(id.String(), params, cfgStore, logger)
 		if err != nil {
 			return nil, err

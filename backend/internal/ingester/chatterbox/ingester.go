@@ -10,11 +10,11 @@ import (
 	"time"
 
 	"gastrolog/internal/chanwatch"
-	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/pipeline/ingestion"
 )
 
 // Ingester emits random log-like messages at random intervals.
-// It implements orchestrator.Ingester.
+// It implements ingestion.Ingester.
 //
 // Logging:
 //   - Logger is dependency-injected via the factory
@@ -46,7 +46,7 @@ type Ingester struct {
 }
 
 // SetPressureGate wires the orchestrator's pressure gate into the ingester.
-// Implements orchestrator.PressureAware. The gate is consulted at the top of
+// Implements ingestion.PressureAware. The gate is consulted at the top of
 // every burst cycle in Run — if pressure is elevated or critical, the ingester
 // blocks until it returns to normal or ctx is cancelled.
 func (r *Ingester) SetPressureGate(gate *chanwatch.PressureGate) {
@@ -55,7 +55,7 @@ func (r *Ingester) SetPressureGate(gate *chanwatch.PressureGate) {
 
 // Run starts the ingester and emits messages to the output channel.
 // Run blocks until ctx is cancelled. Returns nil on normal cancellation.
-func (r *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
+func (r *Ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessage) error {
 	timer := time.NewTimer(r.randomInterval())
 	defer timer.Stop()
 
@@ -96,12 +96,12 @@ func (r *Ingester) randomInterval() time.Duration {
 }
 
 // generateMessages creates one or more log-like messages.
-func (r *Ingester) generateMessages() []orchestrator.IngestMessage {
+func (r *Ingester) generateMessages() []ingestion.IngesterMessage {
 	format := r.selectFormat()
 	drafts := format.GenerateMulti(r.rng)
 
 	base := time.Now()
-	msgs := make([]orchestrator.IngestMessage, 0, len(drafts))
+	msgs := make([]ingestion.IngesterMessage, 0, len(drafts))
 	for i, d := range drafts {
 		attrs := make(map[string]string, len(d.Attrs)+2)
 		maps.Copy(attrs, d.Attrs)
@@ -110,7 +110,7 @@ func (r *Ingester) generateMessages() []orchestrator.IngestMessage {
 		// Offset each record by 1µs so they sort deterministically in order.
 		ingestTS := base.Add(time.Duration(i) * time.Microsecond)
 
-		msgs = append(msgs, orchestrator.IngestMessage{
+		msgs = append(msgs, ingestion.IngesterMessage{
 			Attrs:      attrs,
 			Raw:        d.Raw,
 			RawOwned:   true,

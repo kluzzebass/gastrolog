@@ -5,18 +5,17 @@ import (
 	"compress/gzip"
 	"encoding/binary"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline/ingestion"
 	"net"
 	"runtime"
 	"testing"
 	"time"
 
 	"github.com/vmihailenco/msgpack/v5"
-
-	"gastrolog/internal/orchestrator"
 )
 
 // dialIngester starts a Fluent Forward ingester and returns the TCP address and output channel.
-func dialIngester(t *testing.T, chanSize int) (string, chan orchestrator.IngestMessage) {
+func dialIngester(t *testing.T, chanSize int) (string, chan ingestion.IngesterMessage) {
 	t.Helper()
 
 	// Find a free port.
@@ -27,7 +26,7 @@ func dialIngester(t *testing.T, chanSize int) (string, chan orchestrator.IngestM
 	addr := ln.Addr().String()
 	ln.Close()
 
-	out := make(chan orchestrator.IngestMessage, chanSize)
+	out := make(chan ingestion.IngesterMessage, chanSize)
 	ing := New(Config{
 		ID:   "test-fwd",
 		Addr: addr,
@@ -53,14 +52,14 @@ func dialIngester(t *testing.T, chanSize int) (string, chan orchestrator.IngestM
 	return addr, out
 }
 
-func recv(t *testing.T, out chan orchestrator.IngestMessage) orchestrator.IngestMessage {
+func recv(t *testing.T, out chan ingestion.IngesterMessage) ingestion.IngesterMessage {
 	t.Helper()
 	select {
 	case msg := <-out:
 		return msg
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for message")
-		return orchestrator.IngestMessage{}
+		return ingestion.IngesterMessage{}
 	}
 }
 

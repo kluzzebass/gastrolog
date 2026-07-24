@@ -16,6 +16,7 @@ import (
 	indexmem "gastrolog/internal/index/memory"
 	"gastrolog/internal/memtest"
 	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/pipeline/ingestion"
 	"gastrolog/internal/pipeline/routing"
 	"gastrolog/internal/query"
 )
@@ -434,7 +435,7 @@ func newBlockingIngester() *blockingIngester {
 	}
 }
 
-func (r *blockingIngester) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
+func (r *blockingIngester) Run(ctx context.Context, out chan<- ingestion.IngesterMessage) error {
 	close(r.started)
 	defer close(r.stopped)
 	<-ctx.Done()
@@ -447,7 +448,7 @@ type failOnceIngester struct {
 	attempts atomic.Int32
 }
 
-func (f *failOnceIngester) Run(ctx context.Context, _ chan<- orchestrator.IngestMessage) error {
+func (f *failOnceIngester) Run(ctx context.Context, _ chan<- ingestion.IngesterMessage) error {
 	if f.attempts.Add(1) == 1 {
 		return errors.New("source unavailable")
 	}
@@ -591,7 +592,7 @@ func TestUnregisterIngester(t *testing.T) {
 		t.Fatalf("Stop failed: %v", err)
 	}
 
-	// Ingester should not have been started.
+	// The ingester should not have been started.
 	select {
 	case <-recv.started:
 		t.Error("ingester should not have been started after unregister")
@@ -866,11 +867,11 @@ func TestSearchWithContextUnknownRegistry(t *testing.T) {
 
 // routedTestVaults holds the vault IDs and chunk managers for the filtered test setup.
 type routedTestVaults struct {
-	prod      glid.GLID
-	staging   glid.GLID
-	archive   glid.GLID
+	prod     glid.GLID
+	staging  glid.GLID
+	archive  glid.GLID
 	catchAll glid.GLID
-	cms       map[glid.GLID]chunk.ChunkManager
+	cms      map[glid.GLID]chunk.ChunkManager
 }
 
 // newRoutedTestSetup creates an orchestrator with multiple vaults and a route table.
@@ -878,11 +879,11 @@ func newRoutedTestSetup(t *testing.T) (*orchestrator.Orchestrator, routedTestVau
 	t.Helper()
 
 	vaults := routedTestVaults{
-		prod:      glid.New(),
-		staging:   glid.New(),
-		archive:   glid.New(),
+		prod:     glid.New(),
+		staging:  glid.New(),
+		archive:  glid.New(),
 		catchAll: glid.New(),
-		cms:       make(map[glid.GLID]chunk.ChunkManager),
+		cms:      make(map[glid.GLID]chunk.ChunkManager),
 	}
 
 	orch := mustNewTestOrch(t, orchestrator.Config{})
@@ -905,11 +906,11 @@ func newRoutedTestSetupWithLoader(t *testing.T, loader *fakeSystemLoader) (*orch
 	t.Helper()
 
 	vaults := routedTestVaults{
-		prod:      glid.New(),
-		staging:   glid.New(),
-		archive:   glid.New(),
+		prod:     glid.New(),
+		staging:  glid.New(),
+		archive:  glid.New(),
 		catchAll: glid.New(),
-		cms:       make(map[glid.GLID]chunk.ChunkManager),
+		cms:      make(map[glid.GLID]chunk.ChunkManager),
 	}
 
 	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
