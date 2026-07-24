@@ -397,8 +397,15 @@ func (d *directTransferrer) TransferRecords(ctx context.Context, nodeID string, 
 	}
 }
 
-func (d *directTransferrer) WaitVaultReady(_ context.Context, _ string, _ glid.GLID) error {
-	return nil
+func (d *directTransferrer) WaitVaultReady(ctx context.Context, nodeID string, vaultID glid.GLID) error {
+	orch, ok := d.nodes[nodeID]
+	if !ok {
+		return fmt.Errorf("directTransferrer: unknown node %q", nodeID)
+	}
+	// In-process equivalent of the gRPC ForwardWaitVaultReady handler: block
+	// on the target orchestrator's real event-driven readiness signal so the
+	// multi-node drain tests exercise the consumer path. See gastrolog-3sdnn.
+	return orch.WaitVaultReady(ctx, vaultID)
 }
 
 // directChunkReplicator implements ChunkReplicator by calling directly into the

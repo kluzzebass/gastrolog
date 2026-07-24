@@ -58,6 +58,86 @@ func (v *Vault) ReadinessErr() error {
 	return nil
 }
 
+// signalVaultReadyChange wakes every goroutine blocked in WaitVaultReady so
+// it can re-evaluate the readiness predicate. Called after any vault registry
+// mutation (register, instance add/remove, unregister). Safe to call while
+// holding o.mu — notify.Signal uses its own leaf mutex. See gastrolog-3sdnn.
+//
+// Registry mutations are the complete set of readiness transitions for the
+// drain-target use case: a vault's local instance is only ever built (via
+// AddVault / AddVaultInstance) once its vault-ctl Raft group already spans
+// every node and has applied past index 0, so ReadinessErr's IsFSMReady gate
+// is already satisfied at the moment the instance lands in the registry —
+// there is no separate async "FSM became ready" edge to notify here.
+func (o *Orchestrator) signalVaultReadyChange() {
+	if o.vaultReadySignal != nil {
+		o.vaultReadySignal.Notify()
+	}
+}
+
+// vaultReadyState reports whether the named vault is currently ready to accept
+// transferred records, mirroring the success condition of ListAllChunkMetas
+// (the predicate the old ForwardListChunks poll observed):
+//   - vault absent from the registry -> not ready, not present
+//   - vault registered with no local instance (routing shell) -> ready
+//   - vault registered with a local instance -> ready iff replication-ready
+//
+// present distinguishes "never created yet" (keep waiting) from "was here,
+// now gone" (deleted while waiting) for WaitVaultReady's callers.
+func (o *Orchestrator) vaultReadyState(vaultID glid.GLID) (ready, present bool) {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	v := o.vaults[vaultID]
+	if v == nil {
+		return false, false
+	}
+	if v.Instance == nil {
+		// A registered routing shell lists chunks successfully (returns an
+		// empty set), which is exactly what the old poll treated as ready.
+		return true, true
+	}
+	return v.ReadinessErr() == nil, true
+}
+
+// WaitVaultReady blocks until the named vault is registered and ready to
+// accept transferred records on this node, or ctx is cancelled. It is the
+// event-driven replacement for the source node's 100ms ForwardListChunks
+// poll: the vault-ready broadcast wakes the waiter at each registry change
+// and it re-evaluates the same predicate the poll used. See gastrolog-3sdnn.
+//
+// Behavior across the four waiter states:
+//   - already ready: returns nil immediately.
+//   - becomes ready: wakes on the registration broadcast and returns nil.
+//   - never ready: blocks until ctx cancels/expires, returning ctx.Err().
+//   - deleted while waiting: once the vault has been observed present and
+//     then disappears, returns ErrVaultNotFound rather than hanging.
+func (o *Orchestrator) WaitVaultReady(ctx context.Context, vaultID glid.GLID) error {
+	sawPresent := false
+	for {
+		// Capture the wakeup channel BEFORE reading state so a change that
+		// lands between the read and the select cannot be missed (the
+		// captured channel is already closed and the select returns at once).
+		ch := o.vaultReadySignal.C()
+
+		ready, present := o.vaultReadyState(vaultID)
+		if ready {
+			return nil
+		}
+		if present {
+			sawPresent = true
+		} else if sawPresent {
+			return fmt.Errorf("%w: %s (deleted while waiting for readiness)", ErrVaultNotFound, vaultID)
+		}
+
+		select {
+		case <-ch:
+			// Registry changed; loop and re-evaluate.
+		case <-ctx.Done():
+			return fmt.Errorf("wait vault %s ready: %w", vaultID, ctx.Err())
+		}
+	}
+}
+
 // vaultReplicationReadinessErr handles the "vault may be nil" caller shape
 // (map lookup followed by readiness check). Returns ErrVaultNotFound for nil
 // vaults and otherwise delegates to Vault.ReadinessErr.
