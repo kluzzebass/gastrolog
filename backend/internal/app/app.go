@@ -541,25 +541,39 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		sweep := newUnreachableSweep(cfgStore, clusterSrv, peerState, nodeID, alertCollector, compPlacement.Apply(logger))
 		register("unreachable-sweep", startUnreachableSweep(ctx, orch.Scheduler(), sweep))
 
-		// Cluster-ctl learner promoter (gastrolog-2czh9). Watches for
-		// Nonvoter / Staging members and promotes them to voters once
-		// their broadcast RaftAppliedIndex has matched the leader's
-		// for a stability window. Companion to the JoinCluster-as-
-		// learner change (gastrolog-41sut) and the per-vault-ctl
-		// promoter below. Registered with the orchestrator job
-		// scheduler (gastrolog-5npek) so it appears in the inspector.
-		learnerPromoter := newClusterCtlLearnerPromoter(clusterSrv, peerState, compCluster.Apply(logger))
-		register("cluster-ctl-learner-promoter", startClusterCtlLearnerPromoter(ctx, orch.Scheduler(), learnerPromoter))
+		// Cluster-ctl learner promoter — event-driven (gastrolog-4vg17,
+		// retiring the 30s cron). Fresh nodes join as Nonvoter / Staging
+		// learners (gastrolog-41sut) and are promoted to Voter once their
+		// broadcast RaftAppliedIndex reaches the leader's applied index —
+		// protecting the quorum-loss window where a fresh joiner counts as
+		// a voter but cannot yet vote because its WAL is still catching up.
+		//
+		// The only channel by which the leader learns a learner's applied
+		// index is that learner's NodeStats broadcast (hashicorp/raft
+		// exposes no per-peer match index), so evaluation is driven by
+		// broadcast arrival — the "learner made progress" event — plus a
+		// leadership-gain observation for a node inheriting caught-up
+		// learners from a previous epoch. Leader-only inside evaluate().
+		ccPromoter := newClusterCtlLearnerPromoter(clusterSrv, peerState, compCluster.Apply(logger))
+		go ccPromoter.Run(ctx)
+		clusterSrv.Subscribe(ccPromoter.onBroadcast)
+		observeLearnerLeadershipGain(ctx, clusterSrv, ccPromoter)
 
-		// Per-vault-ctl learner promoter (gastrolog-gcbx7). Same
-		// shape as the cluster-ctl promoter but iterates every vault
-		// on each tick; only acts on groups this node leads. Catchup
-		// signal comes from VaultStats.RaftAppliedIndex in the
-		// existing NodeStats broadcast. Registered with the
-		// orchestrator job scheduler (gastrolog-4icsr).
+		// Per-vault-ctl learner promoter — same engine, one promotionGroup
+		// per vault this node hosts; evaluate()'s per-group isLeader() gate
+		// restricts action to groups this node currently leads. New
+		// members enter vault-ctl groups as Nonvoter learners via the
+		// vault-ctl leader manager's membership reconcile, which leaves
+		// promotion to this promoter. Driven by the same broadcast fabric
+		// (a single O(1) subscription covers every vault group — no
+		// per-group timer) plus the per-vault leadership-gain hook so a
+		// placement-driven leader transfer evaluates the new leader's
+		// learners immediately. (gastrolog-4vg17)
 		if groupMgr != nil {
-			vaultLearnerPromoter := newVaultCtlLearnerPromoter(cfgStore, groupMgr, peerState, nodeID, compCluster.Apply(logger))
-			register("vault-ctl-learner-promoter", startVaultCtlLearnerPromoter(ctx, orch.Scheduler(), vaultLearnerPromoter))
+			vcPromoter := newVaultCtlLearnerPromoter(ctx, cfgStore, groupMgr, peerState, compCluster.Apply(logger))
+			go vcPromoter.Run(ctx)
+			clusterSrv.Subscribe(vcPromoter.onBroadcast)
+			orch.AddOnVaultCtlLeadGained(func(glid.GLID) { vcPromoter.trigger() })
 		}
 	}
 

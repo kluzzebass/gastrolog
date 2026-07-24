@@ -893,7 +893,7 @@ func New(cfg Config) (*Orchestrator, error) {
 	// reconciler's onPruneNode handler will then propose
 	// CmdFinalizeDelete for any chunk whose ExpectedFrom became empty.
 	o.vaultCtlLeaders.SetOnMemberRemoved(o.proposePruneNodeForVault)
-	o.vaultCtlLeaders.SetOnLeadGained(o.onVaultCtlLeadGained)
+	o.vaultCtlLeaders.AddOnLeadGained(o.onVaultCtlLeadGained)
 
 	// Per-instance retention rate alerter (gastrolog-47qyw): the condition
 	// is >10 deletes/sec sustained over a 30s window. These constants ARE
@@ -986,6 +986,19 @@ func (o *Orchestrator) Logger() *slog.Logger {
 // Scheduler returns the shared scheduler for job submission and listing.
 func (o *Orchestrator) Scheduler() *Scheduler {
 	return o.scheduler
+}
+
+// AddOnVaultCtlLeadGained registers an additional listener invoked at the
+// start of each vault-ctl leader epoch (after Barrier), for the vault whose
+// leadership was gained. Additive — does not displace the orchestrator's own
+// pipeline-chunking wake. The app layer uses it to trigger event-driven
+// learner promotion on the new leader (gastrolog-4vg17). No-op before the
+// vault-ctl leader manager exists.
+func (o *Orchestrator) AddOnVaultCtlLeadGained(fn func(glid.GLID)) {
+	if o.vaultCtlLeaders == nil {
+		return
+	}
+	o.vaultCtlLeaders.AddOnLeadGained(fn)
 }
 
 // GetIngesterStats returns the stats for a specific ingester.

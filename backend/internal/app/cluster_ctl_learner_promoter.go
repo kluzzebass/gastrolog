@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"log/slog"
 	"strconv"
 	"time"
@@ -11,22 +10,6 @@ import (
 )
 
 const (
-	// clusterCtlLearnerPromoterJobName is the operator-visible name shown
-	// in the inspector's Scheduled view. Keep stable across releases.
-	clusterCtlLearnerPromoterJobName = "cluster-ctl-learner-promoter"
-
-	// clusterCtlLearnerPromoterSchedule runs every 30 seconds. Mirrors the
-	// unreachable sweep cadence; both are slow, leader-only scans that
-	// consult Raft membership state. 6-field cron (with-seconds).
-	clusterCtlLearnerPromoterSchedule = "*/30 * * * * *"
-
-	// clusterCtlLearnerStabilityTicks is the number of consecutive ticks a
-	// learner must be observed at caught-up state before promotion.
-	// Guards against transient apply-index parity caused by gossip lag
-	// or a brief stall in the leader's own apply pipeline. Two ticks at
-	// 30s gives ~60s of sustained-catchup confirmation.
-	clusterCtlLearnerStabilityTicks = 2
-
 	// clusterCtlLearnerPromoteTimeout bounds each AddVoter membership-change
 	// commit. The change is small (one config entry) so this is mostly
 	// a quorum-loss guard; a healthy cluster commits in milliseconds.
@@ -49,161 +32,67 @@ type peerStatsReader interface {
 	Get(senderID string) *gastrologv1.NodeStats
 }
 
-// clusterCtlLearnerPromoter promotes cluster-ctl learners (Nonvoter /
-// Staging members) to voters once they have caught up to the leader's
-// applied index and held that state across the stability window.
-// Runs on the cluster-ctl leader only.
-//
-// Companion to the per-vault-ctl learner promoter (gastrolog-gcbx7)
-// and the JoinCluster-as-learner change (gastrolog-41sut). The trio
-// implements the "new nodes join as non-voters, get promoted once
-// they have replicated the existing log" semantic — protecting the
-// cluster from quorum-loss windows where a fresh joiner has been
-// counted as a voter but cannot yet vote on Raft entries because
-// its WAL is still catching up.
-//
-// The "caught up" signal comes from the existing NodeStats broadcast
-// (cluster.PeerState): every node publishes its own
-// RaftAppliedIndex once per stats interval, and the leader compares
-// each learner's last-reported index against its own. This avoids
-// needing a new RPC purely for catchup probing; the heartbeat fabric
-// we already maintain answers the question.
-type clusterCtlLearnerPromoter struct {
-	cluster           raftMembership
-	peerState         peerStatsReader
-	logger            *slog.Logger
-	stabilityRequired int
-
-	// catchupTicks tracks consecutive caught-up observations per
-	// learner. Cleared on a single non-caught-up tick so a flaky
-	// learner never sneaks past the stability window.
-	catchupTicks map[string]int
-	now          func() time.Time
+// clusterCtlPromotionGroup adapts the single cluster-ctl Raft group to
+// the promotionGroup surface. cluster-ctl is a low-churn group (config
+// mutations only), so its catch-up tolerance is zero: a learner is
+// promotable once its broadcast RaftAppliedIndex reaches the leader's
+// applied index exactly.
+type clusterCtlPromotionGroup struct {
+	cluster   raftMembership
+	peerState peerStatsReader
+	logger    *slog.Logger
 }
 
-func newClusterCtlLearnerPromoter(c raftMembership, ps peerStatsReader, logger *slog.Logger) *clusterCtlLearnerPromoter {
-	return &clusterCtlLearnerPromoter{
-		cluster:           c,
-		peerState:         ps,
-		logger:            logger,
-		stabilityRequired: clusterCtlLearnerStabilityTicks,
-		catchupTicks:      make(map[string]int),
-		now:               time.Now,
-	}
-}
+func (g *clusterCtlPromotionGroup) label() string         { return "cluster-ctl" }
+func (g *clusterCtlPromotionGroup) isLeader() bool        { return g.cluster.IsLeader() }
+func (g *clusterCtlPromotionGroup) leaderApplied() uint64 { return localAppliedIndex(g.cluster) }
+func (g *clusterCtlPromotionGroup) tolerance() uint64     { return 0 }
 
-// tickOnce is the scheduled task body. Non-leader ticks are no-ops
-// so the scheduler can fire the same job on every node — only the
-// current cluster-ctl leader proposes AddVoter, preventing concurrent
-// membership change attempts that would fight Raft's single-mutation
-// invariant.
-func (p *clusterCtlLearnerPromoter) tickOnce(ctx context.Context) {
-	if !p.cluster.IsLeader() {
-		return
-	}
-	p.tick(ctx)
-}
-
-// startClusterCtlLearnerPromoter registers the promoter with the supplied
-// scheduler as a recurring job. Returns the AddJob error if any. On
-// success, attaches a Describe text for the inspector's Scheduled
-// view so the operator sees what the job does plus its leader-only
-// semantics.
-func startClusterCtlLearnerPromoter(ctx context.Context, scheduler scheduledJobRegistry, promoter *clusterCtlLearnerPromoter) error {
-	task := func() { promoter.tickOnce(ctx) }
-	if err := scheduler.AddJob(clusterCtlLearnerPromoterJobName, clusterCtlLearnerPromoterSchedule, task); err != nil {
-		return err
-	}
-	scheduler.Describe(clusterCtlLearnerPromoterJobName,
-		"Cluster-ctl learner promotion. Leader-only: scans the Raft configuration for Nonvoter / Staging members and promotes them to Voter once their broadcast RaftAppliedIndex has matched the leader's for a stability window.")
-	return nil
-}
-
-// tick scans the current Raft configuration once. For each learner it
-// either advances or resets the per-learner catchup-tick counter, and
-// promotes to voter when the counter reaches stabilityRequired.
-//
-// A learner with no recent NodeStats broadcast (no PeerState entry)
-// resets to zero — the leader has no evidence it's caught up, so it
-// can't promote. This also covers the bootstrap window where the new
-// node has joined Raft but hasn't yet been observed gossiping back.
-func (p *clusterCtlLearnerPromoter) tick(ctx context.Context) {
-	servers, err := p.cluster.Servers()
+func (g *clusterCtlPromotionGroup) learners() []learnerMember {
+	servers, err := g.cluster.Servers()
 	if err != nil {
-		p.logger.Error("cluster_ctl_learner_promoter: list servers", "error", err)
-		return
+		g.logger.Error("cluster_ctl_learner_promoter: list servers", "error", err)
+		return nil
 	}
-	leaderApplied := localAppliedIndex(p.cluster)
-	if leaderApplied == 0 {
-		// No applied entries yet — nothing to compare against; skip.
-		return
-	}
-
-	seen := make(map[string]bool, len(servers))
-	promotionUsed := false
+	var out []learnerMember
 	for _, srv := range servers {
+		// "Staging" is hashicorp/raft's transient suffrage between
+		// AddNonvoter and the membership commit landing — treat it as a
+		// learner so the promoter doesn't race itself by skipping it and
+		// then re-issuing AddVoter.
 		if srv.Suffrage != "Nonvoter" && srv.Suffrage != "Staging" {
 			continue
 		}
-		seen[srv.ID] = true
-		allowPromote := !promotionUsed
-		if p.evaluateLearner(ctx, srv, leaderApplied, allowPromote) {
-			promotionUsed = true
-		}
+		out = append(out, learnerMember{nodeID: srv.ID, addr: srv.Address})
 	}
-
-	// Drop tick counters for nodes that have left the configuration
-	// (either removed entirely or already promoted). Without this the
-	// map would slowly accumulate stale entries across cluster
-	// scale-ups and downs.
-	for id := range p.catchupTicks {
-		if !seen[id] {
-			delete(p.catchupTicks, id)
-		}
-	}
+	return out
 }
 
-// evaluateLearner inspects one learner's catchup state and either
-// advances the stability counter or promotes the learner. Split out
-// of tick() so the inner block is readable without a deeply nested
-// switch. When allowPromote is false the counter still advances but
-// AddVoter is deferred — tick promotes at most one learner per pass
-// because Raft commits membership changes one at a time; bursting
-// several AddVoter calls in one tick stalls the leader and triggers
-// cluster-wide elections on a fresh cluster.
-func (p *clusterCtlLearnerPromoter) evaluateLearner(ctx context.Context, srv cluster.RaftServer, leaderApplied uint64, allowPromote bool) bool {
-	stats := p.peerState.Get(srv.ID)
-	if stats == nil || stats.RaftAppliedIndex < leaderApplied {
-		p.catchupTicks[srv.ID] = 0
-		return false
+func (g *clusterCtlPromotionGroup) observedApplied(nodeID string) (uint64, bool) {
+	stats := g.peerState.Get(nodeID)
+	if stats == nil {
+		return 0, false
 	}
-	p.catchupTicks[srv.ID]++
-	if p.catchupTicks[srv.ID] < p.stabilityRequired {
-		p.logger.Debug("cluster_ctl_learner_promoter: learner caught up, awaiting stability",
-			"node", srv.ID, "ticks", p.catchupTicks[srv.ID], "needed", p.stabilityRequired)
-		return false
-	}
-	if !allowPromote {
-		return false
-	}
+	return stats.RaftAppliedIndex, true
+}
 
-	promoteCtx, cancel := context.WithTimeout(ctx, clusterCtlLearnerPromoteTimeout)
-	defer cancel()
-	_ = promoteCtx // hraft.AddVoter doesn't accept a context; the timeout governs the future.
+func (g *clusterCtlPromotionGroup) promote(m learnerMember) error {
+	return g.cluster.AddVoter(m.nodeID, m.addr, clusterCtlLearnerPromoteTimeout)
+}
 
-	if err := p.cluster.AddVoter(srv.ID, srv.Address, clusterCtlLearnerPromoteTimeout); err != nil {
-		p.logger.Warn("cluster_ctl_learner_promoter: AddVoter failed",
-			"node", srv.ID, "addr", srv.Address, "error", err)
-		// Leave the tick counter intact — the next tick will retry
-		// if the learner is still caught up. Resetting would force
-		// the operator to wait another stability window after a
-		// transient Raft hiccup.
-		return true
-	}
-	p.logger.Info("cluster_ctl_learner_promoter: promoted learner to voter",
-		"node", srv.ID, "addr", srv.Address, "leader_applied", leaderApplied)
-	delete(p.catchupTicks, srv.ID)
-	return true
+// newClusterCtlLearnerPromoter builds the event-driven promoter for the
+// cluster-ctl Raft group. Fresh nodes join as Nonvoter / Staging learners
+// (gastrolog-41sut) and are promoted to Voter once they have replicated
+// the existing log — protecting the cluster from the quorum-loss window
+// where a fresh joiner counts as a voter but cannot yet vote because its
+// WAL is still catching up. The single-element group provider means
+// evaluate() consults the one cluster-ctl group; the isLeader() gate
+// inside makes non-leader nodes no-ops. See gastrolog-4vg17.
+func newClusterCtlLearnerPromoter(c raftMembership, ps peerStatsReader, logger *slog.Logger) *learnerPromoter {
+	g := &clusterCtlPromotionGroup{cluster: c, peerState: ps, logger: logger}
+	return newLearnerPromoter("cluster-ctl", func() []promotionGroup {
+		return []promotionGroup{g}
+	}, logger)
 }
 
 // localAppliedIndex reads the local node's Raft applied_index from

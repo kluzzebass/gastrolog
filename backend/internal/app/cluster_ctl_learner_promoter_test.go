@@ -1,9 +1,6 @@
 package app
 
 import (
-	"context"
-	"io"
-	"log/slog"
 	"strconv"
 	"sync"
 	"testing"
@@ -16,15 +13,14 @@ import (
 // mockRaftMembership implements raftMembership with configurable
 // returns. Tracks AddVoter calls so tests can assert promotion shape.
 type mockRaftMembership struct {
-	mu             sync.Mutex
-	isLeader       bool
-	servers        []cluster.RaftServer
-	serversErr     error
-	addVoterErr    error
-	appliedIndex   uint64
-	statsMissing   bool
-	addVoterCalls  []addVoterCall
-	statsCallCount int
+	mu            sync.Mutex
+	isLeader      bool
+	servers       []cluster.RaftServer
+	serversErr    error
+	addVoterErr   error
+	appliedIndex  uint64
+	statsMissing  bool
+	addVoterCalls []addVoterCall
 }
 
 type addVoterCall struct {
@@ -34,6 +30,8 @@ type addVoterCall struct {
 
 func (m *mockRaftMembership) IsLeader() bool { return m.isLeader }
 func (m *mockRaftMembership) Servers() ([]cluster.RaftServer, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return append([]cluster.RaftServer(nil), m.servers...), m.serversErr
 }
 
@@ -44,9 +42,7 @@ func (m *mockRaftMembership) AddVoter(id, addr string, _ time.Duration) error {
 	if m.addVoterErr != nil {
 		return m.addVoterErr
 	}
-	// Reflect successful promotion in the configuration the next tick
-	// will read — so the test can verify the learner is gone from the
-	// catchup-ticks map after promotion completes.
+	// Reflect successful promotion in the configuration a later pass reads.
 	for i, s := range m.servers {
 		if s.ID == id {
 			m.servers[i].Suffrage = "Voter"
@@ -59,11 +55,16 @@ func (m *mockRaftMembership) AddVoter(id, addr string, _ time.Duration) error {
 func (m *mockRaftMembership) LocalStats() map[string]string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.statsCallCount++
 	if m.statsMissing {
 		return nil
 	}
 	return map[string]string{"applied_index": strconv.FormatUint(m.appliedIndex, 10)}
+}
+
+func (m *mockRaftMembership) voterCalls() []addVoterCall {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]addVoterCall(nil), m.addVoterCalls...)
 }
 
 // mockPeerStats implements peerStatsReader.
@@ -78,398 +79,196 @@ func (m *mockPeerStats) Get(senderID string) *gastrologv1.NodeStats {
 	return nil
 }
 
-func newPromoterForTest(srv raftMembership, ps peerStatsReader) *clusterCtlLearnerPromoter {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return newClusterCtlLearnerPromoter(srv, ps, logger)
-}
-
-func TestClusterCtlLearnerPromoter_NoLearners_NoOp(t *testing.T) {
+// TestClusterCtlPromoter_NoLearners_NoOp: a configuration of all voters
+// yields no promotion.
+func TestClusterCtlPromoter_NoLearners_NoOp(t *testing.T) {
 	t.Parallel()
 	srv := &mockRaftMembership{
-		isLeader:     true,
-		appliedIndex: 100,
+		isLeader: true, appliedIndex: 100,
 		servers: []cluster.RaftServer{
 			{ID: "n1", Address: "addr-1", Suffrage: "Voter"},
 			{ID: "n2", Address: "addr-2", Suffrage: "Voter"},
 		},
 	}
 	ps := &mockPeerStats{byNode: map[string]uint64{"n1": 100, "n2": 100}}
-	p := newPromoterForTest(srv, ps)
+	newClusterCtlLearnerPromoter(srv, ps, quietLogger()).evaluate()
 
-	p.tick(context.Background())
-
-	if len(srv.addVoterCalls) != 0 {
-		t.Fatalf("expected no AddVoter when no learners, got %v", srv.addVoterCalls)
+	if got := srv.voterCalls(); len(got) != 0 {
+		t.Fatalf("expected no AddVoter when no learners, got %v", got)
 	}
 }
 
-func TestClusterCtlLearnerPromoter_CaughtUpLearnerPromotedAfterStabilityWindow(t *testing.T) {
+// TestClusterCtlPromoter_CaughtUpLearnerPromoted: a Nonvoter that has
+// reached the leader's applied index is promoted on the first pass.
+func TestClusterCtlPromoter_CaughtUpLearnerPromoted(t *testing.T) {
 	t.Parallel()
 	srv := &mockRaftMembership{
-		isLeader:     true,
-		appliedIndex: 100,
+		isLeader: true, appliedIndex: 100,
 		servers: []cluster.RaftServer{
 			{ID: "leader", Address: "addr-l", Suffrage: "Voter"},
 			{ID: "learner", Address: "addr-x", Suffrage: "Nonvoter"},
 		},
 	}
 	ps := &mockPeerStats{byNode: map[string]uint64{"learner": 100}}
-	p := newPromoterForTest(srv, ps)
+	newClusterCtlLearnerPromoter(srv, ps, quietLogger()).evaluate()
 
-	// Tick 1: learner is caught up, but stability requires 2 — no promotion.
-	p.tick(context.Background())
-	if len(srv.addVoterCalls) != 0 {
-		t.Fatalf("tick 1: expected no AddVoter (need %d ticks), got %v",
-			p.stabilityRequired, srv.addVoterCalls)
-	}
-	if p.catchupTicks["learner"] != 1 {
-		t.Fatalf("tick 1: expected catchupTicks[learner]=1, got %d", p.catchupTicks["learner"])
-	}
-
-	// Tick 2: stability window satisfied — promote.
-	p.tick(context.Background())
-	if len(srv.addVoterCalls) != 1 || srv.addVoterCalls[0].id != "learner" {
-		t.Fatalf("tick 2: expected one AddVoter for learner, got %v", srv.addVoterCalls)
-	}
-	if srv.addVoterCalls[0].addr != "addr-x" {
-		t.Fatalf("AddVoter passed wrong address: %q", srv.addVoterCalls[0].addr)
-	}
-	// Counter is cleared post-promotion.
-	if _, present := p.catchupTicks["learner"]; present {
-		t.Fatalf("expected catchupTicks[learner] cleared after promotion, present=%v", p.catchupTicks["learner"])
+	got := srv.voterCalls()
+	if len(got) != 1 || got[0].id != "learner" || got[0].addr != "addr-x" {
+		t.Fatalf("expected one AddVoter(learner, addr-x), got %v", got)
 	}
 }
 
-func TestClusterCtlLearnerPromoter_OnePromotionPerTick(t *testing.T) {
+// TestClusterCtlPromoter_LaggingLearnerHeldOff: a Nonvoter behind the
+// leader (tolerance 0) is not promoted.
+func TestClusterCtlPromoter_LaggingLearnerHeldOff(t *testing.T) {
 	t.Parallel()
 	srv := &mockRaftMembership{
-		isLeader:     true,
-		appliedIndex: 100,
-		servers: []cluster.RaftServer{
-			{ID: "leader", Address: "addr-l", Suffrage: "Voter"},
-			{ID: "learner-a", Address: "addr-a", Suffrage: "Nonvoter"},
-			{ID: "learner-b", Address: "addr-b", Suffrage: "Nonvoter"},
-			{ID: "learner-c", Address: "addr-c", Suffrage: "Nonvoter"},
-		},
-	}
-	ps := &mockPeerStats{byNode: map[string]uint64{
-		"learner-a": 100,
-		"learner-b": 100,
-		"learner-c": 100,
-	}}
-	p := newPromoterForTest(srv, ps)
-
-	for range p.stabilityRequired {
-		p.tick(context.Background())
-	}
-	if len(srv.addVoterCalls) != 1 {
-		t.Fatalf("first stable tick: expected exactly one AddVoter, got %v", srv.addVoterCalls)
-	}
-	first := srv.addVoterCalls[0].id
-
-	p.tick(context.Background())
-	if len(srv.addVoterCalls) != 2 {
-		t.Fatalf("second stable tick: expected two AddVoter calls total, got %v", srv.addVoterCalls)
-	}
-	if srv.addVoterCalls[1].id == first {
-		t.Fatalf("second tick promoted same learner again: %q", first)
-	}
-
-	p.tick(context.Background())
-	if len(srv.addVoterCalls) != 3 {
-		t.Fatalf("third stable tick: expected three AddVoter calls total, got %v", srv.addVoterCalls)
-	}
-}
-
-func TestClusterCtlLearnerPromoter_LaggingLearnerHeldOff(t *testing.T) {
-	t.Parallel()
-	srv := &mockRaftMembership{
-		isLeader:     true,
-		appliedIndex: 100,
+		isLeader: true, appliedIndex: 100,
 		servers: []cluster.RaftServer{
 			{ID: "leader", Address: "addr-l", Suffrage: "Voter"},
 			{ID: "lagger", Address: "addr-y", Suffrage: "Nonvoter"},
 		},
 	}
-	ps := &mockPeerStats{byNode: map[string]uint64{"lagger": 50}} // behind
-	p := newPromoterForTest(srv, ps)
+	ps := &mockPeerStats{byNode: map[string]uint64{"lagger": 50}}
+	newClusterCtlLearnerPromoter(srv, ps, quietLogger()).evaluate()
 
-	for range 5 {
-		p.tick(context.Background())
-	}
-
-	if len(srv.addVoterCalls) != 0 {
-		t.Fatalf("expected no AddVoter for lagging learner, got %v", srv.addVoterCalls)
-	}
-	if p.catchupTicks["lagger"] != 0 {
-		t.Fatalf("expected catchupTicks[lagger]=0, got %d", p.catchupTicks["lagger"])
+	if got := srv.voterCalls(); len(got) != 0 {
+		t.Fatalf("expected no AddVoter for lagging learner, got %v", got)
 	}
 }
 
-// TestClusterCtlLearnerPromoter_TransientLagResets verifies the stability
-// counter resets to zero on a single non-caught-up tick. A flaky
-// learner that flickers between caught-up and lagging must complete
-// a CONTIGUOUS stability window — never sneaking promotion via
-// intermittent observations.
-func TestClusterCtlLearnerPromoter_TransientLagResets(t *testing.T) {
+// TestClusterCtlPromoter_NoPeerStatsBlocksPromotion: a learner with no
+// broadcast evidence is never promoted.
+func TestClusterCtlPromoter_NoPeerStatsBlocksPromotion(t *testing.T) {
 	t.Parallel()
 	srv := &mockRaftMembership{
-		isLeader:     true,
-		appliedIndex: 100,
-		servers: []cluster.RaftServer{
-			{ID: "leader", Address: "addr-l", Suffrage: "Voter"},
-			{ID: "flaky", Address: "addr-z", Suffrage: "Nonvoter"},
-		},
-	}
-	// Tick 1: caught up.
-	ps := &mockPeerStats{byNode: map[string]uint64{"flaky": 100}}
-	p := newPromoterForTest(srv, ps)
-	p.tick(context.Background())
-	if p.catchupTicks["flaky"] != 1 {
-		t.Fatalf("tick 1: expected catchupTicks=1, got %d", p.catchupTicks["flaky"])
-	}
-
-	// Tick 2: lagging (transient). Counter must reset.
-	ps.byNode["flaky"] = 80
-	p.tick(context.Background())
-	if p.catchupTicks["flaky"] != 0 {
-		t.Fatalf("tick 2 (lag): expected catchupTicks=0 after lag, got %d", p.catchupTicks["flaky"])
-	}
-	if len(srv.addVoterCalls) != 0 {
-		t.Fatalf("expected no AddVoter mid-flake, got %v", srv.addVoterCalls)
-	}
-
-	// Tick 3+4: caught up again. Must complete a fresh window.
-	ps.byNode["flaky"] = 100
-	p.tick(context.Background())
-	if len(srv.addVoterCalls) != 0 {
-		t.Fatalf("tick 3: expected no AddVoter (fresh window not done), got %v", srv.addVoterCalls)
-	}
-	p.tick(context.Background())
-	if len(srv.addVoterCalls) != 1 {
-		t.Fatalf("tick 4: expected promotion, got %v", srv.addVoterCalls)
-	}
-}
-
-// TestClusterCtlLearnerPromoter_NoPeerStatsBlocksPromotion verifies that a
-// learner with no recent NodeStats broadcast (no PeerState entry) is
-// never promoted — even if the leader's own applied_index is 0 (which
-// the early-out for "no log applied yet" guards), the absent stats
-// imply the leader has no evidence to act on.
-func TestClusterCtlLearnerPromoter_NoPeerStatsBlocksPromotion(t *testing.T) {
-	t.Parallel()
-	srv := &mockRaftMembership{
-		isLeader:     true,
-		appliedIndex: 100,
+		isLeader: true, appliedIndex: 100,
 		servers: []cluster.RaftServer{
 			{ID: "leader", Address: "addr-l", Suffrage: "Voter"},
 			{ID: "ghost", Address: "addr-g", Suffrage: "Nonvoter"},
 		},
 	}
-	ps := &mockPeerStats{byNode: map[string]uint64{}} // no entry for ghost
-	p := newPromoterForTest(srv, ps)
+	ps := &mockPeerStats{byNode: map[string]uint64{}}
+	newClusterCtlLearnerPromoter(srv, ps, quietLogger()).evaluate()
 
-	for range 5 {
-		p.tick(context.Background())
-	}
-
-	if len(srv.addVoterCalls) != 0 {
-		t.Fatalf("expected no AddVoter for unobserved learner, got %v", srv.addVoterCalls)
+	if got := srv.voterCalls(); len(got) != 0 {
+		t.Fatalf("expected no AddVoter for unobserved learner, got %v", got)
 	}
 }
 
-// TestClusterCtlLearnerPromoter_StagingTreatedAsLearner verifies the
-// "Staging" suffrage (hraft's transient state during AddVoter) is
-// treated as a learner — Staging is what hashicorp/raft reports
-// during the brief window between AddNonvoter and the membership
-// commit landing. The promoter must not race itself by skipping
-// these and then re-issuing AddVoter.
-func TestClusterCtlLearnerPromoter_StagingTreatedAsLearner(t *testing.T) {
+// TestClusterCtlPromoter_StagingTreatedAsLearner: hraft's transient
+// "Staging" suffrage (between AddNonvoter and commit) counts as a learner.
+func TestClusterCtlPromoter_StagingTreatedAsLearner(t *testing.T) {
 	t.Parallel()
 	srv := &mockRaftMembership{
-		isLeader:     true,
-		appliedIndex: 100,
+		isLeader: true, appliedIndex: 100,
 		servers: []cluster.RaftServer{
 			{ID: "leader", Address: "addr-l", Suffrage: "Voter"},
 			{ID: "staging", Address: "addr-s", Suffrage: "Staging"},
 		},
 	}
 	ps := &mockPeerStats{byNode: map[string]uint64{"staging": 100}}
-	p := newPromoterForTest(srv, ps)
+	newClusterCtlLearnerPromoter(srv, ps, quietLogger()).evaluate()
 
-	p.tick(context.Background())
-	if p.catchupTicks["staging"] != 1 {
-		t.Fatalf("expected Staging member counted, got catchupTicks=%d", p.catchupTicks["staging"])
+	got := srv.voterCalls()
+	if len(got) != 1 || got[0].id != "staging" {
+		t.Fatalf("expected Staging member promoted, got %v", got)
 	}
 }
 
-// TestClusterCtlLearnerPromoter_GoneLearnerCounterCleaned verifies that
-// when a learner leaves the configuration (promoted via another path,
-// or removed entirely) its tick-counter entry is cleaned up — the
-// map must not grow unboundedly across cluster scale-ups.
-func TestClusterCtlLearnerPromoter_GoneLearnerCounterCleaned(t *testing.T) {
+// TestClusterCtlPromoter_NonLeaderNoOp: a follower never proposes AddVoter,
+// even with a caught-up learner in the configuration.
+func TestClusterCtlPromoter_NonLeaderNoOp(t *testing.T) {
 	t.Parallel()
 	srv := &mockRaftMembership{
-		isLeader:     true,
-		appliedIndex: 100,
+		isLeader: false, appliedIndex: 100,
 		servers: []cluster.RaftServer{
-			{ID: "leader", Address: "addr-l", Suffrage: "Voter"},
-			{ID: "ephemeral", Address: "addr-e", Suffrage: "Nonvoter"},
+			{ID: "n1", Address: "addr-1", Suffrage: "Nonvoter"},
 		},
 	}
-	ps := &mockPeerStats{byNode: map[string]uint64{"ephemeral": 100}}
-	p := newPromoterForTest(srv, ps)
+	ps := &mockPeerStats{byNode: map[string]uint64{"n1": 100}}
+	newClusterCtlLearnerPromoter(srv, ps, quietLogger()).evaluate()
 
-	// Tick once — counter goes to 1.
-	p.tick(context.Background())
-	if p.catchupTicks["ephemeral"] != 1 {
-		t.Fatalf("setup: expected catchupTicks=1, got %d", p.catchupTicks["ephemeral"])
-	}
-
-	// Simulate the learner disappearing from the Raft configuration.
-	srv.servers = srv.servers[:1] // only the leader remains
-
-	p.tick(context.Background())
-	if _, present := p.catchupTicks["ephemeral"]; present {
-		t.Fatalf("expected catchupTicks[ephemeral] cleaned after departure")
+	if got := srv.voterCalls(); len(got) != 0 {
+		t.Fatalf("non-leader: AddVoter called %v", got)
 	}
 }
 
-// TestClusterCtlLearnerPromoter_AddVoterFailDoesNotResetCounter verifies
-// that a transient AddVoter failure (Raft quorum hiccup, slow commit)
-// leaves the catchup-tick counter intact so the next tick can retry
-// without forcing the operator through another full stability window.
-func TestClusterCtlLearnerPromoter_AddVoterFailDoesNotResetCounter(t *testing.T) {
+// TestClusterCtlPromoter_LeaderAppliedZeroSkips: a leader with no applied
+// entries yet has nothing to compare against.
+func TestClusterCtlPromoter_LeaderAppliedZeroSkips(t *testing.T) {
 	t.Parallel()
 	srv := &mockRaftMembership{
-		isLeader:     true,
-		appliedIndex: 100,
-		addVoterErr:  context.DeadlineExceeded,
+		isLeader: true, appliedIndex: 0,
+		servers: []cluster.RaftServer{
+			{ID: "leader", Address: "addr-l", Suffrage: "Voter"},
+			{ID: "learner", Address: "addr-x", Suffrage: "Nonvoter"},
+		},
+	}
+	ps := &mockPeerStats{byNode: map[string]uint64{"learner": 0}}
+	newClusterCtlLearnerPromoter(srv, ps, quietLogger()).evaluate()
+
+	if got := srv.voterCalls(); len(got) != 0 {
+		t.Fatalf("leaderApplied==0 must skip, got %v", got)
+	}
+}
+
+// TestClusterCtlPromoter_AddVoterFailRetries: a transient AddVoter failure
+// is retried on the next pass while the learner is still caught up.
+func TestClusterCtlPromoter_AddVoterFailRetries(t *testing.T) {
+	t.Parallel()
+	srv := &mockRaftMembership{
+		isLeader: true, appliedIndex: 100,
+		addVoterErr: errFakeMember,
 		servers: []cluster.RaftServer{
 			{ID: "leader", Address: "addr-l", Suffrage: "Voter"},
 			{ID: "stuck", Address: "addr-z", Suffrage: "Nonvoter"},
 		},
 	}
 	ps := &mockPeerStats{byNode: map[string]uint64{"stuck": 100}}
-	p := newPromoterForTest(srv, ps)
+	p := newClusterCtlLearnerPromoter(srv, ps, quietLogger())
 
-	p.tick(context.Background()) // counter=1, no AddVoter
-	p.tick(context.Background()) // counter=2, AddVoter fails
-	if len(srv.addVoterCalls) != 1 {
-		t.Fatalf("expected one AddVoter attempt, got %v", srv.addVoterCalls)
-	}
-	if p.catchupTicks["stuck"] < 2 {
-		t.Fatalf("expected counter preserved across AddVoter failure, got %d", p.catchupTicks["stuck"])
+	p.evaluate()
+	if got := srv.voterCalls(); len(got) != 1 {
+		t.Fatalf("expected one (failed) AddVoter attempt, got %v", got)
 	}
 
-	// Next tick: AddVoter succeeds now.
+	srv.mu.Lock()
 	srv.addVoterErr = nil
-	p.tick(context.Background())
-	if len(srv.addVoterCalls) != 2 {
-		t.Fatalf("expected retry to fire, got %v", srv.addVoterCalls)
+	srv.mu.Unlock()
+	p.evaluate()
+	if got := srv.voterCalls(); len(got) != 2 {
+		t.Fatalf("expected retry to fire, got %v", got)
+	}
+}
+
+// TestClusterCtlPromoter_ServersErrorNoOp: a Servers() error yields no
+// learners and no promotion (the error is logged, not fatal).
+func TestClusterCtlPromoter_ServersErrorNoOp(t *testing.T) {
+	t.Parallel()
+	srv := &mockRaftMembership{
+		isLeader: true, appliedIndex: 100, serversErr: errFakeMember,
+	}
+	ps := &mockPeerStats{byNode: map[string]uint64{}}
+	newClusterCtlLearnerPromoter(srv, ps, quietLogger()).evaluate()
+
+	if got := srv.voterCalls(); len(got) != 0 {
+		t.Fatalf("expected no AddVoter on Servers() error, got %v", got)
 	}
 }
 
 // TestLocalAppliedIndex_ParsesStats verifies the helper's parsing path
-// and its nil-safety. The leader's applied_index comes from
-// hraft.Stats() which returns string-typed values.
+// and its nil-safety.
 func TestLocalAppliedIndex_ParsesStats(t *testing.T) {
 	t.Parallel()
 	srv := &mockRaftMembership{appliedIndex: 42}
 	if got := localAppliedIndex(srv); got != 42 {
 		t.Fatalf("expected 42, got %d", got)
 	}
-
-	srv2 := &mockRaftMembership{statsMissing: true}
-	if got := localAppliedIndex(srv2); got != 0 {
+	if got := localAppliedIndex(&mockRaftMembership{statsMissing: true}); got != 0 {
 		t.Fatalf("expected 0 for missing stats, got %d", got)
 	}
-
 	if got := localAppliedIndex(nil); got != 0 {
 		t.Fatalf("expected 0 for nil membership, got %d", got)
-	}
-}
-
-// TestTickOnce_NonLeaderIsNoOp verifies the scheduler can fire the
-// promoter task on every node — only the cluster-ctl leader runs the
-// actual promotion logic. Followers must short-circuit before any
-// catchup bookkeeping or AddVoter call.
-func TestTickOnce_NonLeaderIsNoOp(t *testing.T) {
-	t.Parallel()
-	srv := &mockRaftMembership{
-		isLeader:     false,
-		appliedIndex: 100,
-		servers: []cluster.RaftServer{
-			{ID: "n1", Address: "addr-1", Suffrage: "Nonvoter"},
-		},
-	}
-	ps := &mockPeerStats{byNode: map[string]uint64{"n1": 100}}
-	p := newPromoterForTest(srv, ps)
-
-	p.tickOnce(context.Background())
-
-	if len(srv.addVoterCalls) != 0 {
-		t.Errorf("non-leader: AddVoter called %v", srv.addVoterCalls)
-	}
-	if got := p.catchupTicks["n1"]; got != 0 {
-		t.Errorf("non-leader: catchup advanced (got %d) — leader gate failed", got)
-	}
-}
-
-// TestStartClusterCtlLearnerPromoter_RegistersOperatorVisibleJob verifies
-// the promoter ships as a proper scheduled job: name + cron set, and
-// a non-empty Describe text so the inspector shows context to the
-// operator.
-func TestStartClusterCtlLearnerPromoter_RegistersOperatorVisibleJob(t *testing.T) {
-	t.Parallel()
-	srv := &mockRaftMembership{
-		isLeader:     true,
-		appliedIndex: 100,
-		servers: []cluster.RaftServer{
-			{ID: "leader", Address: "addr-l", Suffrage: "Voter"},
-			{ID: "n1", Address: "addr-1", Suffrage: "Nonvoter"},
-		},
-	}
-	ps := &mockPeerStats{byNode: map[string]uint64{"n1": 100}}
-	p := newPromoterForTest(srv, ps)
-	sched := &fakeScheduler{}
-
-	if err := startClusterCtlLearnerPromoter(context.Background(), sched, p); err != nil {
-		t.Fatalf("startClusterCtlLearnerPromoter: %v", err)
-	}
-	if sched.addJobName != clusterCtlLearnerPromoterJobName {
-		t.Errorf("AddJob name: got %q, want %q", sched.addJobName, clusterCtlLearnerPromoterJobName)
-	}
-	if sched.addJobCron != clusterCtlLearnerPromoterSchedule {
-		t.Errorf("AddJob cron: got %q, want %q", sched.addJobCron, clusterCtlLearnerPromoterSchedule)
-	}
-	if sched.describeMessage == "" {
-		t.Error("Describe message empty — operator inspector will show no context")
-	}
-
-	// Run the captured task as the scheduler would. A single tick on
-	// a caught-up learner advances catchupTicks to 1 (stability=2);
-	// no promotion yet, but proof the leader-side tick ran.
-	if task, ok := sched.addJobTaskFn.(func()); ok {
-		task()
-	} else {
-		t.Fatalf("expected captured task of type func(), got %T", sched.addJobTaskFn)
-	}
-	if got := p.catchupTicks["n1"]; got != 1 {
-		t.Errorf("after task run: expected catchupTicks[n1]=1, got %d", got)
-	}
-}
-
-// TestStartClusterCtlLearnerPromoter_PropagatesAddJobError verifies the
-// caller sees an AddJob failure (e.g. duplicate name).
-func TestStartClusterCtlLearnerPromoter_PropagatesAddJobError(t *testing.T) {
-	t.Parallel()
-	srv := &mockRaftMembership{isLeader: true, appliedIndex: 1}
-	ps := &mockPeerStats{byNode: map[string]uint64{}}
-	p := newPromoterForTest(srv, ps)
-	sched := &fakeScheduler{addJobErr: errFakeMember}
-
-	if err := startClusterCtlLearnerPromoter(context.Background(), sched, p); err == nil {
-		t.Fatal("expected AddJob error to propagate")
 	}
 }
