@@ -94,11 +94,13 @@ func TestReconcilerOnRequestDeleteDeletesLocalAndAcks(t *testing.T) {
 	vaultInst := &VaultInstance{
 		VaultID: glid.New(),
 		Chunks:  cm,
-		ApplyRaftAckDelete: func(id chunk.ChunkID, nodeID string) error {
-			ackedID = id
-			ackedNode = nodeID
-			ackCount.Add(1)
-			return nil
+		RaftApplyFacet: RaftApplyFacet{
+			ApplyRaftAckDelete: func(id chunk.ChunkID, nodeID string) error {
+				ackedID = id
+				ackedNode = nodeID
+				ackCount.Add(1)
+				return nil
+			},
 		},
 	}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
@@ -148,9 +150,11 @@ func TestReconcilerOnRequestDeleteIgnoresNotInExpectedFrom(t *testing.T) {
 	vaultInst := &VaultInstance{
 		VaultID: glid.New(),
 		Chunks:  cm,
-		ApplyRaftAckDelete: func(_ chunk.ChunkID, _ string) error {
-			ackCount.Add(1)
-			return nil
+		RaftApplyFacet: RaftApplyFacet{
+			ApplyRaftAckDelete: func(_ chunk.ChunkID, _ string) error {
+				ackCount.Add(1)
+				return nil
+			},
 		},
 	}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-Z", slog.Default())
@@ -191,15 +195,19 @@ func TestReconcilerOnAckDeleteAutoFinalizesInsideApply(t *testing.T) {
 		idMu             sync.Mutex
 	)
 	vaultInst := &VaultInstance{
-		VaultID:            glid.New(),
-		Chunks:             &reconcilerFakeChunkManager{},
-		IsRaftLeader:       func() bool { return true },
-		ApplyRaftAckDelete: func(_ chunk.ChunkID, _ string) error { return nil },
-		// ApplyRaftFinalizeDelete MUST NOT be called by the post-fix
-		// onAckDelete — finalize happens inline in applyAckDelete.
-		ApplyRaftFinalizeDelete: func(_ chunk.ChunkID) error {
-			proposedFinalize.Add(1)
-			return nil
+		VaultID: glid.New(),
+		Chunks:  &reconcilerFakeChunkManager{},
+		RaftLeadershipFacet: RaftLeadershipFacet{
+			IsRaftLeader: func() bool { return true },
+		},
+		RaftApplyFacet: RaftApplyFacet{
+			ApplyRaftAckDelete: func(_ chunk.ChunkID, _ string) error { return nil },
+			// ApplyRaftFinalizeDelete MUST NOT be called by the post-fix
+			// onAckDelete — finalize happens inline in applyAckDelete.
+			ApplyRaftFinalizeDelete: func(_ chunk.ChunkID) error {
+				proposedFinalize.Add(1)
+				return nil
+			},
 		},
 	}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
@@ -301,14 +309,18 @@ func TestReconcilerOnPruneNodeAutoFinalizesInsideApply(t *testing.T) {
 
 	var proposedFinalize atomic.Int32
 	vaultInst := &VaultInstance{
-		VaultID:      glid.New(),
-		Chunks:       &reconcilerFakeChunkManager{},
-		IsRaftLeader: func() bool { return true },
-		// ApplyRaftFinalizeDelete MUST NOT be called by the post-fix
-		// onPruneNode — finalize happens inline in applyPruneNode.
-		ApplyRaftFinalizeDelete: func(_ chunk.ChunkID) error {
-			proposedFinalize.Add(1)
-			return nil
+		VaultID: glid.New(),
+		Chunks:  &reconcilerFakeChunkManager{},
+		RaftLeadershipFacet: RaftLeadershipFacet{
+			IsRaftLeader: func() bool { return true },
+		},
+		RaftApplyFacet: RaftApplyFacet{
+			// ApplyRaftFinalizeDelete MUST NOT be called by the post-fix
+			// onPruneNode — finalize happens inline in applyPruneNode.
+			ApplyRaftFinalizeDelete: func(_ chunk.ChunkID) error {
+				proposedFinalize.Add(1)
+				return nil
+			},
 		},
 	}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-B", slog.Default())
@@ -451,9 +463,11 @@ func TestReconcileFromSnapshotProcessesPendingObligations(t *testing.T) {
 	vaultInst := &VaultInstance{
 		VaultID: glid.New(),
 		Chunks:  cm,
-		ApplyRaftAckDelete: func(id chunk.ChunkID, _ string) error {
-			ackCh <- id
-			return nil
+		RaftApplyFacet: RaftApplyFacet{
+			ApplyRaftAckDelete: func(id chunk.ChunkID, _ string) error {
+				ackCh <- id
+				return nil
+			},
 		},
 	}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
@@ -1034,10 +1048,12 @@ func TestFulfillObligationDemotesLocalActiveBeforeDelete(t *testing.T) {
 	vaultInst := &VaultInstance{
 		VaultID: glid.New(),
 		Chunks:  cm,
-		ApplyRaftAckDelete: func(id chunk.ChunkID, _ string) error {
-			ackedID = id
-			ackCount.Add(1)
-			return nil
+		RaftApplyFacet: RaftApplyFacet{
+			ApplyRaftAckDelete: func(id chunk.ChunkID, _ string) error {
+				ackedID = id
+				ackCount.Add(1)
+				return nil
+			},
 		},
 	}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
@@ -1276,10 +1292,14 @@ func TestReconcilerOnFinalizeDeleteEmitsChunkDeleted(t *testing.T) {
 	fsm := vaultctlfsm.New()
 	vaultID := glid.New()
 	vaultInst := &VaultInstance{
-		VaultID:            vaultID,
-		Chunks:             &reconcilerFakeChunkManager{},
-		IsRaftLeader:       func() bool { return true },
-		ApplyRaftAckDelete: func(_ chunk.ChunkID, _ string) error { return nil },
+		VaultID: vaultID,
+		Chunks:  &reconcilerFakeChunkManager{},
+		RaftLeadershipFacet: RaftLeadershipFacet{
+			IsRaftLeader: func() bool { return true },
+		},
+		RaftApplyFacet: RaftApplyFacet{
+			ApplyRaftAckDelete: func(_ chunk.ChunkID, _ string) error { return nil },
+		},
 	}
 	rec := NewVaultLifecycleReconciler(orch, vaultID, vaultInst, "node-A", slog.Default())
 	rec.Wire(fsm)
@@ -1570,11 +1590,13 @@ func TestSweepStaleLeaderFSMEntriesProposesDeleteForStrandedSealingChunk(t *test
 	vaultInst := &VaultInstance{
 		VaultID:    glid.New(),
 		Chunks:     cm,
-		IsFollower: false, // leader-only sweep
-		ApplyRaftRequestDelete: func(id chunk.ChunkID, reason string, _ []string) error {
-			deletedRequests = append(deletedRequests, id)
-			deleteReasons = append(deleteReasons, reason)
-			return nil
+		IsFollower: false,
+		RaftApplyFacet: RaftApplyFacet{
+			ApplyRaftRequestDelete: func(id chunk.ChunkID, reason string, _ []string) error {
+				deletedRequests = append(deletedRequests, id)
+				deleteReasons = append(deleteReasons, reason)
+				return nil
+			},
 		},
 	}
 
@@ -1627,13 +1649,17 @@ func TestSweepStaleLeaderFSMEntriesSkipsPipelineVault(t *testing.T) {
 	}
 	var deleted []chunk.ChunkID
 	vaultInst := &VaultInstance{
-		VaultID:       vaultID,
-		Chunks:        &reconcilerFakeChunkManager{},
-		IsFollower:    false,
-		HasRaftLeader: func() bool { return true },
-		ApplyRaftRequestDelete: func(id chunk.ChunkID, _ string, _ []string) error {
-			deleted = append(deleted, id)
-			return nil
+		VaultID:    vaultID,
+		Chunks:     &reconcilerFakeChunkManager{},
+		IsFollower: false,
+		RaftLeadershipFacet: RaftLeadershipFacet{
+			HasRaftLeader: func() bool { return true },
+		},
+		RaftApplyFacet: RaftApplyFacet{
+			ApplyRaftRequestDelete: func(id chunk.ChunkID, _ string, _ []string) error {
+				deleted = append(deleted, id)
+				return nil
+			},
 		},
 	}
 	rec := NewVaultLifecycleReconciler(orch, vaultID, vaultInst, "node-A", slog.Default())
@@ -1663,13 +1689,17 @@ func TestSweepStaleLeaderFSMEntriesRespectsSealedAtGrace(t *testing.T) {
 
 	var deleted []chunk.ChunkID
 	vaultInst := &VaultInstance{
-		VaultID:       glid.New(),
-		Chunks:        &reconcilerFakeChunkManager{},
-		IsFollower:    false,
-		HasRaftLeader: func() bool { return true },
-		ApplyRaftRequestDelete: func(id chunk.ChunkID, _ string, _ []string) error {
-			deleted = append(deleted, id)
-			return nil
+		VaultID:    glid.New(),
+		Chunks:     &reconcilerFakeChunkManager{},
+		IsFollower: false,
+		RaftLeadershipFacet: RaftLeadershipFacet{
+			HasRaftLeader: func() bool { return true },
+		},
+		RaftApplyFacet: RaftApplyFacet{
+			ApplyRaftRequestDelete: func(id chunk.ChunkID, _ string, _ []string) error {
+				deleted = append(deleted, id)
+				return nil
+			},
 		},
 	}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
@@ -1717,9 +1747,11 @@ func TestSweepStalePendingDeleteAcksPrunesNonPlacementNodes(t *testing.T) {
 		FollowerTargets: []system.ReplicationTarget{
 			{NodeID: "follower-node"},
 		},
-		ApplyRaftPruneNode: func(nodeID string) error {
-			prunedNodes = append(prunedNodes, nodeID)
-			return nil
+		RaftApplyFacet: RaftApplyFacet{
+			ApplyRaftPruneNode: func(nodeID string) error {
+				prunedNodes = append(prunedNodes, nodeID)
+				return nil
+			},
 		},
 	}
 
@@ -1763,9 +1795,11 @@ func TestSweepStalePendingDeleteAcksSkipsCurrentPlacementMembers(t *testing.T) {
 		FollowerTargets: []system.ReplicationTarget{
 			{NodeID: "follower-node"},
 		},
-		ApplyRaftPruneNode: func(nodeID string) error {
-			prunedNodes = append(prunedNodes, nodeID)
-			return nil
+		RaftApplyFacet: RaftApplyFacet{
+			ApplyRaftPruneNode: func(nodeID string) error {
+				prunedNodes = append(prunedNodes, nodeID)
+				return nil
+			},
 		},
 	}
 
@@ -1797,10 +1831,12 @@ func TestSweepStalePendingDeleteAcksFollowersAreNoOp(t *testing.T) {
 	var prunedNodes []string
 	vaultInst := &VaultInstance{
 		VaultID:    glid.New(),
-		IsFollower: true, // follower
-		ApplyRaftPruneNode: func(nodeID string) error {
-			prunedNodes = append(prunedNodes, nodeID)
-			return nil
+		IsFollower: true,
+		RaftApplyFacet: RaftApplyFacet{
+			ApplyRaftPruneNode: func(nodeID string) error {
+				prunedNodes = append(prunedNodes, nodeID)
+				return nil
+			},
 		},
 	}
 
@@ -2231,9 +2267,11 @@ func TestReconcileMembershipCatchupPrunesStalePendingAcks(t *testing.T) {
 		FollowerTargets: []system.ReplicationTarget{
 			{NodeID: "follower-node"},
 		},
-		ApplyRaftPruneNode: func(nodeID string) error {
-			prunedNodes = append(prunedNodes, nodeID)
-			return nil
+		RaftApplyFacet: RaftApplyFacet{
+			ApplyRaftPruneNode: func(nodeID string) error {
+				prunedNodes = append(prunedNodes, nodeID)
+				return nil
+			},
 		},
 	}
 

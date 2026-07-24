@@ -205,10 +205,12 @@ func TestBackfillCloudUploads_SchedulesSealedNonCloudBacked(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = alert.New()
 	vaultInst := &VaultInstance{
-		VaultID:      vaultID,
-		Type:         "cloud",
-		Chunks:       mock,
-		IsRaftLeader: func() bool { return true },
+		VaultID: vaultID,
+		Type:    "cloud",
+		Chunks:  mock,
+		RaftLeadershipFacet: RaftLeadershipFacet{
+			IsRaftLeader: func() bool { return true },
+		},
 	}
 
 	orch.backfillCloudUploads(vaultInst)
@@ -241,10 +243,12 @@ func TestBackfillCloudUploads_FileVaultWithCloudStore(t *testing.T) {
 	vaultID := glid.New()
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	vaultInst := &VaultInstance{
-		VaultID:      vaultID,
-		Type:         "file",
-		Chunks:       mock,
-		IsRaftLeader: func() bool { return true },
+		VaultID: vaultID,
+		Type:    "file",
+		Chunks:  mock,
+		RaftLeadershipFacet: RaftLeadershipFacet{
+			IsRaftLeader: func() bool { return true },
+		},
 	}
 
 	orch.backfillCloudUploads(vaultInst)
@@ -271,10 +275,12 @@ func TestBackfillCloudUploads_SkipsPlacementFollower(t *testing.T) {
 
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	vaultInst := &VaultInstance{
-		VaultID:      glid.New(),
-		Type:         "file",
-		Chunks:       mock,
-		IsRaftLeader: func() bool { return true }, // ctl leader, but not uploader
+		VaultID: glid.New(),
+		Type:    "file",
+		Chunks:  mock,
+		RaftLeadershipFacet: RaftLeadershipFacet{
+			IsRaftLeader: func() bool { return true },
+		},
 	}
 
 	orch.backfillCloudUploads(vaultInst)
@@ -300,10 +306,12 @@ func TestBackfillCloudUploads_SkipsCloudBacked(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = alert.New()
 	vaultInst := &VaultInstance{
-		VaultID:      glid.New(),
-		Type:         "cloud",
-		Chunks:       mock,
-		IsRaftLeader: func() bool { return true },
+		VaultID: glid.New(),
+		Type:    "cloud",
+		Chunks:  mock,
+		RaftLeadershipFacet: RaftLeadershipFacet{
+			IsRaftLeader: func() bool { return true },
+		},
 	}
 
 	orch.backfillCloudUploads(vaultInst)
@@ -330,10 +338,12 @@ func TestBackfillCloudUploads_SkipsUnsealed(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = alert.New()
 	vaultInst := &VaultInstance{
-		VaultID:      glid.New(),
-		Type:         "cloud",
-		Chunks:       mock,
-		IsRaftLeader: func() bool { return true },
+		VaultID: glid.New(),
+		Type:    "cloud",
+		Chunks:  mock,
+		RaftLeadershipFacet: RaftLeadershipFacet{
+			IsRaftLeader: func() bool { return true },
+		},
 	}
 
 	orch.backfillCloudUploads(vaultInst)
@@ -365,10 +375,12 @@ func TestBackfillCloudUploads_SkipsWhenChunkIsCloudBacked(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = alert.New()
 	vaultInst := &VaultInstance{
-		VaultID:      glid.New(),
-		Type:         "cloud",
-		Chunks:       mock,
-		IsRaftLeader: func() bool { return true },
+		VaultID: glid.New(),
+		Type:    "cloud",
+		Chunks:  mock,
+		RaftLeadershipFacet: RaftLeadershipFacet{
+			IsRaftLeader: func() bool { return true },
+		},
 	}
 
 	orch.backfillCloudUploads(vaultInst)
@@ -402,10 +414,12 @@ func TestBackfillCloudUploadsLeaderOnly(t *testing.T) {
 	orch.alerts = ac
 
 	vaultInst := &VaultInstance{
-		VaultID:      vaultID,
-		Type:         "cloud",
-		Chunks:       mock,
-		IsRaftLeader: func() bool { return true },
+		VaultID: vaultID,
+		Type:    "cloud",
+		Chunks:  mock,
+		RaftLeadershipFacet: RaftLeadershipFacet{
+			IsRaftLeader: func() bool { return true },
+		},
 	}
 	orch.RegisterVault(NewVault(glid.New(), vaultInst))
 
@@ -446,10 +460,12 @@ func TestBackfillCloudUploadsSkippedOnFollower(t *testing.T) {
 	orch.alerts = ac
 
 	vaultInst := &VaultInstance{
-		VaultID:      glid.New(),
-		Type:         "cloud",
-		Chunks:       mock,
-		IsRaftLeader: func() bool { return false },
+		VaultID: glid.New(),
+		Type:    "cloud",
+		Chunks:  mock,
+		RaftLeadershipFacet: RaftLeadershipFacet{
+			IsRaftLeader: func() bool { return false },
+		},
 	}
 	orch.RegisterVault(NewVault(glid.New(), vaultInst))
 
@@ -481,10 +497,12 @@ func TestBackfillCloudUploads_DeduplicatesPendingJobs(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = alert.New()
 	vaultInst := &VaultInstance{
-		VaultID:      vaultID,
-		Type:         "cloud",
-		Chunks:       mock,
-		IsRaftLeader: func() bool { return true },
+		VaultID: vaultID,
+		Type:    "cloud",
+		Chunks:  mock,
+		RaftLeadershipFacet: RaftLeadershipFacet{
+			IsRaftLeader: func() bool { return true },
+		},
 	}
 
 	// Call backfill twice — should only schedule once.
@@ -526,10 +544,10 @@ func TestEvaluateCloudHealth_SteadyStateHealthyDoesNotResweep(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = alert.New()
 	vaultInst := &VaultInstance{
-		VaultID:      vaultID,
-		Type:         "cloud",
-		Chunks:       mock,
-		IsRaftLeader: func() bool { return true },
+		VaultID:             vaultID,
+		Type:                "cloud",
+		Chunks:              mock,
+		RaftLeadershipFacet: RaftLeadershipFacet{IsRaftLeader: func() bool { return true }},
 	}
 	orch.RegisterVault(NewVault(vaultID, vaultInst))
 	defer func() { _ = orch.Scheduler().Stop() }()
@@ -579,10 +597,10 @@ func TestEvaluateCloudHealth_DegradedRecoveryTriggersCatchup(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = ac
 	vaultInst := &VaultInstance{
-		VaultID:      vaultID,
-		Type:         "cloud",
-		Chunks:       mock,
-		IsRaftLeader: func() bool { return true },
+		VaultID:             vaultID,
+		Type:                "cloud",
+		Chunks:              mock,
+		RaftLeadershipFacet: RaftLeadershipFacet{IsRaftLeader: func() bool { return true }},
 	}
 	orch.RegisterVault(NewVault(vaultID, vaultInst))
 	defer func() { _ = orch.Scheduler().Stop() }()
@@ -627,10 +645,10 @@ func TestEvaluateCloudHealth_SteadyStateRetriesStuckChunk(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node1", Now: clock})
 	orch.alerts = alert.New()
 	vaultInst := &VaultInstance{
-		VaultID:      vaultID,
-		Type:         "file",
-		Chunks:       mock,
-		IsRaftLeader: func() bool { return true },
+		VaultID:             vaultID,
+		Type:                "file",
+		Chunks:              mock,
+		RaftLeadershipFacet: RaftLeadershipFacet{IsRaftLeader: func() bool { return true }},
 	}
 	orch.RegisterVault(NewVault(vaultID, vaultInst))
 	defer func() { _ = orch.Scheduler().Stop() }()
@@ -680,10 +698,10 @@ func TestOnVaultCtlLeadGained_TriggersCloudUploadCatchup(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = alert.New()
 	vaultInst := &VaultInstance{
-		VaultID:      vaultID,
-		Type:         "cloud",
-		Chunks:       mock,
-		IsRaftLeader: func() bool { return true },
+		VaultID:             vaultID,
+		Type:                "cloud",
+		Chunks:              mock,
+		RaftLeadershipFacet: RaftLeadershipFacet{IsRaftLeader: func() bool { return true }},
 	}
 	orch.RegisterVault(NewVault(vaultID, vaultInst))
 	defer func() { _ = orch.Scheduler().Stop() }()
@@ -723,7 +741,7 @@ func TestCloudUploadCatchupForVault_SkipsNonUploaderAndUnregistered(t *testing.T
 	plainMock.cloudStoreConfigured.Store(false)
 	orch.RegisterVault(NewVault(plainID, &VaultInstance{
 		VaultID: plainID, Type: "file", Chunks: plainMock,
-		IsRaftLeader: func() bool { return true },
+		RaftLeadershipFacet: RaftLeadershipFacet{IsRaftLeader: func() bool { return true }},
 	}))
 	orch.cloudUploadCatchupForVault(plainID)
 
@@ -739,7 +757,7 @@ func TestCloudUploadCatchupForVault_SkipsNonUploaderAndUnregistered(t *testing.T
 	followerMock.cloudStoreConfigured.Store(false)
 	orch.RegisterVault(NewVault(followerID, &VaultInstance{
 		VaultID: followerID, Type: "cloud", Chunks: followerMock,
-		IsRaftLeader: func() bool { return false },
+		RaftLeadershipFacet: RaftLeadershipFacet{IsRaftLeader: func() bool { return false }},
 	}))
 	orch.cloudUploadCatchupForVault(followerID)
 

@@ -21,12 +21,14 @@ func notReadyVault(id glid.GLID) (*orchestrator.Vault, <-chan struct{}) {
 	checked := make(chan struct{}, 1)
 	inst := &orchestrator.VaultInstance{
 		VaultID: id,
-		IsFSMReady: func() bool {
-			select {
-			case checked <- struct{}{}:
-			default:
-			}
-			return false
+		ManifestReadFacet: orchestrator.ManifestReadFacet{
+			IsFSMReady: func() bool {
+				select {
+				case checked <- struct{}{}:
+				default:
+				}
+				return false
+			},
 		},
 	}
 	return orchestrator.NewVault(id, inst), checked

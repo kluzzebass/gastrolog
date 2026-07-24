@@ -67,10 +67,12 @@ func TestSweepAbandonedTransferAnnouncesRetractsOnlyTheStalePhantom(t *testing.T
 	vaultInst := &VaultInstance{
 		VaultID:    glid.New(),
 		IsFollower: false,
-		ApplyRaftRequestDelete: func(id chunk.ChunkID, reason string, _ []string) error {
-			deletedRequests = append(deletedRequests, id)
-			deleteReasons = append(deleteReasons, reason)
-			return nil
+		RaftApplyFacet: RaftApplyFacet{
+			ApplyRaftRequestDelete: func(id chunk.ChunkID, reason string, _ []string) error {
+				deletedRequests = append(deletedRequests, id)
+				deleteReasons = append(deleteReasons, reason)
+				return nil
+			},
 		},
 	}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
@@ -112,9 +114,11 @@ func TestSweepAbandonedTransferAnnouncesFollowerNoOp(t *testing.T) {
 	vaultInst := &VaultInstance{
 		VaultID:    glid.New(),
 		IsFollower: true,
-		ApplyRaftRequestDelete: func(id chunk.ChunkID, _ string, _ []string) error {
-			deleted = append(deleted, id)
-			return nil
+		RaftApplyFacet: RaftApplyFacet{
+			ApplyRaftRequestDelete: func(id chunk.ChunkID, _ string, _ []string) error {
+				deleted = append(deleted, id)
+				return nil
+			},
 		},
 	}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
