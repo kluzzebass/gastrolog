@@ -566,12 +566,21 @@ func (h *orchRelHarness) startNode(id string) {
 		// Without it, origin publishes from non-leader nodes are rejected
 		// with "group apply function not configured" and segments never
 		// reach the registry.
-		n.clusterSrv.SetGroupApplyFn(func(_ context.Context, groupID string, data []byte) error {
+		n.clusterSrv.SetGroupApplyFn(func(_ context.Context, groupID string, data []byte) (uint64, error) {
 			g := groupMgr.GetGroup(groupID)
 			if g == nil {
-				return fmt.Errorf("raft group %s not found", groupID)
+				return 0, fmt.Errorf("raft group %s not found", groupID)
 			}
-			return g.Raft.Apply(data, cluster.ReplicationTimeout).Error()
+			future := g.Raft.Apply(data, cluster.ReplicationTimeout)
+			if err := future.Error(); err != nil {
+				return 0, err
+			}
+			if resp := future.Response(); resp != nil {
+				if err, ok := resp.(error); ok && err != nil {
+					return future.Index(), err
+				}
+			}
+			return future.Index(), nil
 		})
 	}
 	n.factories = factories

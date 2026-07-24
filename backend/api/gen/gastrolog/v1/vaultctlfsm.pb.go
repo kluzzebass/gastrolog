@@ -3283,10 +3283,15 @@ func (x *VaultCtlSnapshot) GetSegmentChunks() []*SegmentChunkIDs {
 // VaultCtlSnapshot per vault instance (replaces the GLVCTLS1 magic + per-vault
 // blob framing in vaultraft/fsm.go).
 type VaultGroupSnapshot struct {
-	state         protoimpl.MessageState     `protogen:"open.v1"`
-	Vaults        []*VaultGroupSnapshotEntry `protobuf:"bytes,1,rep,name=vaults,proto3" json:"vaults,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state  protoimpl.MessageState     `protogen:"open.v1"`
+	Vaults []*VaultGroupSnapshotEntry `protobuf:"bytes,1,rep,name=vaults,proto3" json:"vaults,omitempty"`
+	// Highest Raft log index applied to the group FSM when the snapshot was
+	// taken. Lets a follower that installs this snapshot (instead of replaying
+	// log entries) release read-after-write apply-wait barriers for every
+	// command the snapshot covers (gastrolog-4l24u).
+	LastAppliedIndex uint64 `protobuf:"varint,2,opt,name=last_applied_index,json=lastAppliedIndex,proto3" json:"last_applied_index,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *VaultGroupSnapshot) Reset() {
@@ -3324,6 +3329,13 @@ func (x *VaultGroupSnapshot) GetVaults() []*VaultGroupSnapshotEntry {
 		return x.Vaults
 	}
 	return nil
+}
+
+func (x *VaultGroupSnapshot) GetLastAppliedIndex() uint64 {
+	if x != nil {
+		return x.LastAppliedIndex
+	}
+	return 0
 }
 
 type VaultGroupSnapshotEntry struct {
@@ -3638,9 +3650,10 @@ const file_gastrolog_v1_vaultctlfsm_proto_rawDesc = "" +
 	"\x10sealed_manifests\x18\x06 \x03(\v2$.gastrolog.v1.OpenChunkManifestStateR\x0fsealedManifests\x12N\n" +
 	"\x0esegment_resume\x18\a \x03(\v2'.gastrolog.v1.SegmentResumeRecordNumberR\rsegmentResume\x120\n" +
 	"\x14released_segment_ids\x18\b \x03(\fR\x12releasedSegmentIds\x12D\n" +
-	"\x0esegment_chunks\x18\t \x03(\v2\x1d.gastrolog.v1.SegmentChunkIDsR\rsegmentChunks\"S\n" +
+	"\x0esegment_chunks\x18\t \x03(\v2\x1d.gastrolog.v1.SegmentChunkIDsR\rsegmentChunks\"\x81\x01\n" +
 	"\x12VaultGroupSnapshot\x12=\n" +
-	"\x06vaults\x18\x01 \x03(\v2%.gastrolog.v1.VaultGroupSnapshotEntryR\x06vaults\"p\n" +
+	"\x06vaults\x18\x01 \x03(\v2%.gastrolog.v1.VaultGroupSnapshotEntryR\x06vaults\x12,\n" +
+	"\x12last_applied_index\x18\x02 \x01(\x04R\x10lastAppliedIndex\"p\n" +
 	"\x17VaultGroupSnapshotEntry\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12:\n" +
 	"\bsnapshot\x18\x02 \x01(\v2\x1e.gastrolog.v1.VaultCtlSnapshotR\bsnapshotB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"

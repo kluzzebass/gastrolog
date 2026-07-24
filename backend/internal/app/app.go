@@ -1651,12 +1651,27 @@ func wireClusterRaftApplies(clusterSrv *cluster.Server, groupMgr *raftgroup.Grou
 	if clusterSrv == nil || groupMgr == nil {
 		return
 	}
-	fn := func(_ context.Context, groupID string, data []byte) error {
+	fn := func(_ context.Context, groupID string, data []byte) (uint64, error) {
 		g := groupMgr.GetGroup(groupID)
 		if g == nil {
-			return fmt.Errorf("raft group %s not found", groupID)
+			return 0, fmt.Errorf("raft group %s not found", groupID)
 		}
-		return g.Raft.Apply(data, cluster.ReplicationTimeout).Error()
+		future := g.Raft.Apply(data, cluster.ReplicationTimeout)
+		if err := future.Error(); err != nil {
+			return 0, err
+		}
+		// Surface the FSM's semantic result to the forwarding follower —
+		// the local apply path (VaultCtlChunkApplyForwarder.Apply) checks
+		// future.Response() the same way; forwarded applies must not
+		// silently swallow FSM errors. The index is returned either way:
+		// the entry is committed and the follower's barrier should still
+		// wait for it.
+		if resp := future.Response(); resp != nil {
+			if err, ok := resp.(error); ok && err != nil {
+				return future.Index(), err
+			}
+		}
+		return future.Index(), nil
 	}
 	clusterSrv.SetGroupApplyFn(fn)
 }

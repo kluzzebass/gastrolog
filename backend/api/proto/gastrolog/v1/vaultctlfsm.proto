@@ -457,6 +457,11 @@ message VaultCtlSnapshot {
 // blob framing in vaultraft/fsm.go).
 message VaultGroupSnapshot {
   repeated VaultGroupSnapshotEntry vaults = 1;
+  // Highest Raft log index applied to the group FSM when the snapshot was
+  // taken. Lets a follower that installs this snapshot (instead of replaying
+  // log entries) release read-after-write apply-wait barriers for every
+  // command the snapshot covers (gastrolog-4l24u).
+  uint64 last_applied_index = 2;
 }
 
 message VaultGroupSnapshotEntry {

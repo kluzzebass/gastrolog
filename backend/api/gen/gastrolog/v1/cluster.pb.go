@@ -1689,8 +1689,15 @@ func (x *ForwardVaultApplyRequest) GetCommand() []byte {
 	return nil
 }
 
+// ForwardVaultApplyResponse carries the Raft log index at which the vault-ctl
+// group leader applied the forwarded command. The forwarding follower blocks
+// until its own group FSM has applied up to this index before returning, so
+// an immediate local read sees post-mutation state — the same read-after-write
+// barrier ForwardApplyResponse provides for the cluster-ctl group
+// (gastrolog-2nxij, gastrolog-4l24u).
 type ForwardVaultApplyResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
+	AppliedIndex  uint64                 `protobuf:"varint,1,opt,name=applied_index,json=appliedIndex,proto3" json:"applied_index,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1723,6 +1730,13 @@ func (x *ForwardVaultApplyResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use ForwardVaultApplyResponse.ProtoReflect.Descriptor instead.
 func (*ForwardVaultApplyResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *ForwardVaultApplyResponse) GetAppliedIndex() uint64 {
+	if x != nil {
+		return x.AppliedIndex
+	}
+	return 0
 }
 
 // ChunkReplicationCommand is sent leader → follower. The vault_id
@@ -4759,8 +4773,9 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x04name\x18\x06 \x01(\tR\x04name\"O\n" +
 	"\x18ForwardVaultApplyRequest\x12\x19\n" +
 	"\bgroup_id\x18\x01 \x01(\fR\agroupId\x12\x18\n" +
-	"\acommand\x18\x02 \x01(\fR\acommand\"\x1b\n" +
-	"\x19ForwardVaultApplyResponse\"\x83\x03\n" +
+	"\acommand\x18\x02 \x01(\fR\acommand\"@\n" +
+	"\x19ForwardVaultApplyResponse\x12#\n" +
+	"\rapplied_index\x18\x01 \x01(\x04R\fappliedIndex\"\x83\x03\n" +
 	"\x17ChunkReplicationCommand\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12I\n" +
 	"\fdelete_chunk\x18\n" +

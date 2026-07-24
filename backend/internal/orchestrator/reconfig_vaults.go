@@ -1208,7 +1208,7 @@ func (o *Orchestrator) ensureVaultCtlMetadata(vaultCfg system.VaultConfig, clust
 
 	var applier vaultctlfsm.Applier
 	if factories.PeerConns != nil {
-		applier = cluster.NewVaultCtlChunkApplyForwarder(r, vaultGID, vaultCfg.ID, factories.PeerConns, timeout)
+		applier = cluster.NewVaultCtlChunkApplyForwarder(r, vaultGID, vaultCfg.ID, vfsm.ApplyWait(), factories.PeerConns, timeout)
 	} else {
 		applier = &vaultCtlApplier{o: o, vaultID: vaultCfg.ID}
 	}
@@ -1413,7 +1413,7 @@ func (o *Orchestrator) rewireVaultInstanceAfterCtlRestore(vaultID glid.GLID, t *
 	vaultGID := raftgroup.VaultControlPlaneGroupID(vaultID)
 	var applier vaultctlfsm.Applier
 	if o.peerConns != nil {
-		applier = cluster.NewVaultCtlChunkApplyForwarder(g.Raft, vaultGID, vaultID, o.peerConns, cluster.ReplicationTimeout)
+		applier = cluster.NewVaultCtlChunkApplyForwarder(g.Raft, vaultGID, vaultID, vfsm.ApplyWait(), o.peerConns, cluster.ReplicationTimeout)
 	} else {
 		applier = &vaultCtlApplier{o: o, vaultID: vaultID}
 	}

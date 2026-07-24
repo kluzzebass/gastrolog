@@ -101,11 +101,13 @@ type Server struct {
 	applyFn func(ctx context.Context, data []byte) (uint64, error)
 
 	// groupApplyFn applies a pre-marshaled command to the multiraft group
-	// identified by groupID. Used by ForwardVaultApply for both the
+	// identified by groupID and returns the Raft log index at which the
+	// command was applied. Used by ForwardVaultApply for both the
 	// OpVaultChunkFSM-wrapped chunk-FSM case and the native vault-ctl
 	// command case — both target the vault-ctl Raft group via this single
-	// function.
-	groupApplyFn func(ctx context.Context, groupID string, data []byte) error
+	// function. Followers use the index to wait for their own group FSM to
+	// catch up before reading post-mutation state (gastrolog-4l24u).
+	groupApplyFn func(ctx context.Context, groupID string, data []byte) (uint64, error)
 
 	// enrollHandler handles the Enroll RPC for joining nodes.
 	enrollHandler EnrollHandler
@@ -428,9 +430,9 @@ func (s *Server) SetApplyFn(fn func(ctx context.Context, data []byte) (uint64, e
 // SetGroupApplyFn sets the function used by ForwardVaultApply handlers to
 // apply commands to a multiraft group on this node. Callers typically pass
 // a closure that resolves groupID via the GroupManager and calls Apply on
-// the resulting Raft instance. See wireClusterRaftApplies in app.go for the
-// canonical wiring.
-func (s *Server) SetGroupApplyFn(fn func(ctx context.Context, groupID string, data []byte) error) {
+// the resulting Raft instance, returning the applied log index. See
+// wireClusterRaftApplies in app.go for the canonical wiring.
+func (s *Server) SetGroupApplyFn(fn func(ctx context.Context, groupID string, data []byte) (uint64, error)) {
 	s.groupApplyFn = fn
 }
 

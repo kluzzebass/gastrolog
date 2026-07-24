@@ -692,15 +692,18 @@ func (s *Server) forwardApply(ctx context.Context, req *gastrologv1.ForwardApply
 // vault-ctl Raft FSM command — either an OpVaultChunkFSM-wrapped vaultctlfsm
 // command (see NewVaultCtlChunkApplyForwarder) or a native vault-ctl
 // command. The group ID is the vault-ctl Raft group ID. Dispatches to
-// the shared groupApplyFn.
+// the shared groupApplyFn and returns the applied log index so the
+// forwarding follower can wait for its own group FSM to catch up
+// (gastrolog-4l24u).
 func (s *Server) forwardVaultApply(ctx context.Context, req *gastrologv1.ForwardVaultApplyRequest) (*gastrologv1.ForwardVaultApplyResponse, error) {
 	if s.groupApplyFn == nil {
 		return nil, status.Error(codes.Unavailable, "group apply function not configured")
 	}
-	if err := s.groupApplyFn(ctx, string(req.GetGroupId()), req.GetCommand()); err != nil {
+	appliedIndex, err := s.groupApplyFn(ctx, string(req.GetGroupId()), req.GetCommand())
+	if err != nil {
 		return nil, status.Errorf(codes.Internal, "vault apply: %v", err)
 	}
-	return &gastrologv1.ForwardVaultApplyResponse{}, nil
+	return &gastrologv1.ForwardVaultApplyResponse{AppliedIndex: appliedIndex}, nil
 }
 
 // requestReplicaCatchup handles the RequestReplicaCatchup RPC. Sent
