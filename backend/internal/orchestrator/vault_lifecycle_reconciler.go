@@ -357,6 +357,21 @@ func (r *VaultLifecycleReconciler) resumeSealingFromFSM(fsm *vaultctlfsm.FSM) {
 // RegisterCloudBackedChunk is idempotent (skips if already in m.metas or
 // m.cloudIdx), so calling it for every cloud-backed entry is safe.
 // See gastrolog-3ukgz.
+//
+// gastrolog-5bnxc verification (KEEP — not redundant): this pass is
+// load-bearing, not superseded by the FSM-grounded read seam
+// (gastrolog-2lfjk/3jerp). That seam grounds chunk METADATA reads at the
+// orchestrator level (State/CloudBacked/Archived/SealedAt); it does NOT resolve
+// BYTES. cm.OpenCursor for a cloud-only blob resolves solely through the local
+// cloud index, and the Manager's lazy on-miss resolver serves only pipeline
+// GLCBs physically present on disk (it os.Stat's the file), so an evicted /
+// never-downloaded cloud blob stays unresolvable without a cloud-index entry.
+// Since snapshot install fires no per-apply onUpload effect, this projection is
+// the only path that populates the cloud index for chunks that arrived via
+// snapshot — retiring it makes OpenCursor return ErrChunkNotFound on a
+// snapshot-caught-up follower. Pinned by
+// file.TestOpenCursorCloudBackedRequiresCloudIndex. A future retirement needs a
+// lazy FSM-grounded cloud resolver in the Manager first (cluster-validated).
 func (r *VaultLifecycleReconciler) projectAllCloudBackedFromFSM(fsm *vaultctlfsm.FSM) {
 	if r.vaultInst == nil || r.vaultInst.Chunks == nil {
 		return
