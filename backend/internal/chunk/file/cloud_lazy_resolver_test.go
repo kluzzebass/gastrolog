@@ -387,6 +387,48 @@ func TestLazyCloudBackedResolverStoreUnreachable(t *testing.T) {
 	}
 }
 
+// TestLazyCloudBackedResolverArchiveRestore pins that the archival lifecycle
+// works on an entry that arrives lazily: ArchiveChunk / RestoreChunk look the
+// chunk up through lookupMeta, so the first archive call on an FSM-known but
+// locally-unresolved chunk resolves it, flips the archived flag on the
+// memoized entry, and a post-restore read serves records again.
+func TestLazyCloudBackedResolverArchiveRestore(t *testing.T) {
+	t.Parallel()
+
+	cm := newEvictionTestManager(t, "lru", 0, 0, nil)
+	const records = 10
+	id := uploadN(t, cm, 1, records)[0]
+	if evicted, _ := cm.EvictCacheLRU(1); evicted != 1 {
+		t.Fatalf("EvictCacheLRU: evicted = %d, want 1", evicted)
+	}
+	info := wipeCloudEntry(t, cm, id)
+	installCountingResolver(cm, id, info)
+
+	ctx := context.Background()
+	if err := cm.ArchiveChunk(ctx, id, "cold"); err != nil {
+		t.Fatalf("ArchiveChunk on lazily-resolved chunk: %v", err)
+	}
+	meta, err := cm.Meta(id)
+	if err != nil {
+		t.Fatalf("Meta after archive: %v", err)
+	}
+	if !meta.Archived {
+		t.Error("Archived = false after ArchiveChunk, want true")
+	}
+
+	// Archived chunks refuse reads until restored.
+	if _, err := cm.OpenCursor(id); err == nil {
+		t.Error("OpenCursor on archived chunk: expected error, got nil")
+	}
+
+	if err := cm.RestoreChunk(ctx, id, "standard", 1); err != nil {
+		t.Fatalf("RestoreChunk: %v", err)
+	}
+	if got := readAllCloudRecords(t, cm, id); got != records {
+		t.Errorf("served %d records after restore, want %d", got, records)
+	}
+}
+
 // TestLazyCloudBackedListerSurfacesInList pins the enumeration half: List()
 // consults the cloud lister so a chunk the FSM knows as CloudBacked appears
 // in enumeration (match-all search shape) without anything having named it
