@@ -277,6 +277,14 @@ message GetIndexesRequest {
 message GetIndexesResponse {
   bool sealed = 1;
   repeated IndexInfo indexes = 2;
+
+  // Set only when the chunk was NOT located and the fan-out could not
+  // reach every peer that hosts the vault — the "not found" result is
+  // then uncertain (an unreachable peer might hold the chunk), so the
+  // response degrades to empty-with-report instead of a hard not-found.
+  // Absent when the chunk was found or when every peer answered. See
+  // gastrolog-1ic07.
+  ContributionReport contribution_report = 3;
 }
 
 message IndexInfo {
@@ -609,6 +617,12 @@ message GetPipelineBacklogRequest {
 
 message GetPipelineBacklogResponse {
   VaultPipelineBacklog backlog = 1;
+
+  // Set only when the cross-node fan-out that summed per-node on-disk
+  // segment counts could not reach every peer — the cluster-wide totals
+  // then omit some node's segments. Absent when every peer contributed.
+  // See gastrolog-1ic07.
+  ContributionReport contribution_report = 2;
 }
 
 // VaultPipelineBacklog surfaces chunking pipeline depth for one vault.

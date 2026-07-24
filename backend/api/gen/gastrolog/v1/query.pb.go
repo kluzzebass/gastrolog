@@ -508,8 +508,12 @@ type ExplainResponse struct {
 	QueryStart     *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=query_start,json=queryStart,proto3" json:"query_start,omitempty"`             // Resolved query start time
 	QueryEnd       *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=query_end,json=queryEnd,proto3" json:"query_end,omitempty"`                   // Resolved query end time
 	PipelineStages []*QueryPipelineStage  `protobuf:"bytes,7,rep,name=pipeline_stages,json=pipelineStages,proto3" json:"pipeline_stages,omitempty"` // Pipeline operators after the filter
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Set only when the cross-node fan-out that gathered remote chunk plans
+	// could not reach every peer, so the plan omits some node's chunks.
+	// Absent when every peer contributed. See gastrolog-1ic07.
+	ContributionReport *ContributionReport `protobuf:"bytes,8,opt,name=contribution_report,json=contributionReport,proto3" json:"contribution_report,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *ExplainResponse) Reset() {
@@ -587,6 +591,13 @@ func (x *ExplainResponse) GetQueryEnd() *timestamppb.Timestamp {
 func (x *ExplainResponse) GetPipelineStages() []*QueryPipelineStage {
 	if x != nil {
 		return x.PipelineStages
+	}
+	return nil
+}
+
+func (x *ExplainResponse) GetContributionReport() *ContributionReport {
+	if x != nil {
+		return x.ContributionReport
 	}
 	return nil
 }
@@ -2347,7 +2358,7 @@ var File_gastrolog_v1_query_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"\n" +
-	"\x18gastrolog/v1/query.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"]\n" +
+	"\x18gastrolog/v1/query.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x18gastrolog/v1/vault.proto\"]\n" +
 	"\rSearchRequest\x12)\n" +
 	"\x05query\x18\x01 \x01(\v2\x13.gastrolog.v1.QueryR\x05query\x12!\n" +
 	"\fresume_token\x18\x02 \x01(\fR\vresumeToken\"\xce\x02\n" +
@@ -2382,7 +2393,7 @@ const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"\x0eFollowResponse\x12.\n" +
 	"\arecords\x18\x01 \x03(\v2\x14.gastrolog.v1.RecordR\arecords\";\n" +
 	"\x0eExplainRequest\x12)\n" +
-	"\x05query\x18\x01 \x01(\v2\x13.gastrolog.v1.QueryR\x05query\"\xe4\x02\n" +
+	"\x05query\x18\x01 \x01(\v2\x13.gastrolog.v1.QueryR\x05query\"\xb7\x03\n" +
 	"\x0fExplainResponse\x12/\n" +
 	"\x06chunks\x18\x01 \x03(\v2\x17.gastrolog.v1.ChunkPlanR\x06chunks\x12\x1c\n" +
 	"\tdirection\x18\x02 \x01(\tR\tdirection\x12!\n" +
@@ -2393,7 +2404,8 @@ const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"\vquery_start\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"queryStart\x127\n" +
 	"\tquery_end\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\bqueryEnd\x12I\n" +
-	"\x0fpipeline_stages\x18\a \x03(\v2 .gastrolog.v1.QueryPipelineStageR\x0epipelineStages\"\xaa\x01\n" +
+	"\x0fpipeline_stages\x18\a \x03(\v2 .gastrolog.v1.QueryPipelineStageR\x0epipelineStages\x12Q\n" +
+	"\x13contribution_report\x18\b \x01(\v2 .gastrolog.v1.ContributionReportR\x12contributionReport\"\xaa\x01\n" +
 	"\x12QueryPipelineStage\x12\x1a\n" +
 	"\boperator\x18\x01 \x01(\tR\boperator\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x12$\n" +
@@ -2622,6 +2634,7 @@ var file_gastrolog_v1_query_proto_goTypes = []any{
 	nil,                               // 36: gastrolog.v1.Record.AttrsEntry
 	nil,                               // 37: gastrolog.v1.ResumeToken.VaultTokensEntry
 	(*timestamppb.Timestamp)(nil),     // 38: google.protobuf.Timestamp
+	(*ContributionReport)(nil),        // 39: gastrolog.v1.ContributionReport
 }
 var file_gastrolog_v1_query_proto_depIdxs = []int32{
 	10, // 0: gastrolog.v1.SearchRequest.query:type_name -> gastrolog.v1.Query
@@ -2637,56 +2650,57 @@ var file_gastrolog_v1_query_proto_depIdxs = []int32{
 	38, // 10: gastrolog.v1.ExplainResponse.query_start:type_name -> google.protobuf.Timestamp
 	38, // 11: gastrolog.v1.ExplainResponse.query_end:type_name -> google.protobuf.Timestamp
 	9,  // 12: gastrolog.v1.ExplainResponse.pipeline_stages:type_name -> gastrolog.v1.QueryPipelineStage
-	38, // 13: gastrolog.v1.Query.start:type_name -> google.protobuf.Timestamp
-	38, // 14: gastrolog.v1.Query.end:type_name -> google.protobuf.Timestamp
-	11, // 15: gastrolog.v1.Query.kv_predicates:type_name -> gastrolog.v1.KVPredicate
-	38, // 16: gastrolog.v1.Record.ingest_ts:type_name -> google.protobuf.Timestamp
-	38, // 17: gastrolog.v1.Record.write_ts:type_name -> google.protobuf.Timestamp
-	36, // 18: gastrolog.v1.Record.attrs:type_name -> gastrolog.v1.Record.AttrsEntry
-	13, // 19: gastrolog.v1.Record.ref:type_name -> gastrolog.v1.RecordRef
-	38, // 20: gastrolog.v1.Record.source_ts:type_name -> google.protobuf.Timestamp
-	37, // 21: gastrolog.v1.ResumeToken.vault_tokens:type_name -> gastrolog.v1.ResumeToken.VaultTokensEntry
-	38, // 22: gastrolog.v1.ResumeToken.frozen_start:type_name -> google.protobuf.Timestamp
-	38, // 23: gastrolog.v1.ResumeToken.frozen_end:type_name -> google.protobuf.Timestamp
-	38, // 24: gastrolog.v1.ResumeToken.highwater_ts:type_name -> google.protobuf.Timestamp
-	16, // 25: gastrolog.v1.InnerVaultToken.positions:type_name -> gastrolog.v1.VaultPosition
-	38, // 26: gastrolog.v1.VaultPosition.resume_ts:type_name -> google.protobuf.Timestamp
-	19, // 27: gastrolog.v1.ChunkPlan.steps:type_name -> gastrolog.v1.PipelineStep
-	38, // 28: gastrolog.v1.ChunkPlan.write_start:type_name -> google.protobuf.Timestamp
-	38, // 29: gastrolog.v1.ChunkPlan.write_end:type_name -> google.protobuf.Timestamp
-	18, // 30: gastrolog.v1.ChunkPlan.branch_plans:type_name -> gastrolog.v1.BranchPlan
-	19, // 31: gastrolog.v1.BranchPlan.steps:type_name -> gastrolog.v1.PipelineStep
-	13, // 32: gastrolog.v1.GetContextRequest.ref:type_name -> gastrolog.v1.RecordRef
-	12, // 33: gastrolog.v1.GetContextResponse.before:type_name -> gastrolog.v1.Record
-	12, // 34: gastrolog.v1.GetContextResponse.anchor:type_name -> gastrolog.v1.Record
-	12, // 35: gastrolog.v1.GetContextResponse.after:type_name -> gastrolog.v1.Record
-	26, // 36: gastrolog.v1.ValidateQueryResponse.spans:type_name -> gastrolog.v1.HighlightSpan
-	31, // 37: gastrolog.v1.GetFieldsResponse.attr_fields:type_name -> gastrolog.v1.FieldInfo
-	31, // 38: gastrolog.v1.GetFieldsResponse.kv_fields:type_name -> gastrolog.v1.FieldInfo
-	32, // 39: gastrolog.v1.FieldInfo.top_values:type_name -> gastrolog.v1.FieldValue
-	0,  // 40: gastrolog.v1.QueryService.Search:input_type -> gastrolog.v1.SearchRequest
-	5,  // 41: gastrolog.v1.QueryService.Follow:input_type -> gastrolog.v1.FollowRequest
-	7,  // 42: gastrolog.v1.QueryService.Explain:input_type -> gastrolog.v1.ExplainRequest
-	20, // 43: gastrolog.v1.QueryService.GetContext:input_type -> gastrolog.v1.GetContextRequest
-	22, // 44: gastrolog.v1.QueryService.GetSyntax:input_type -> gastrolog.v1.GetSyntaxRequest
-	24, // 45: gastrolog.v1.QueryService.ValidateQuery:input_type -> gastrolog.v1.ValidateQueryRequest
-	27, // 46: gastrolog.v1.QueryService.GetPipelineFields:input_type -> gastrolog.v1.GetPipelineFieldsRequest
-	29, // 47: gastrolog.v1.QueryService.GetFields:input_type -> gastrolog.v1.GetFieldsRequest
-	33, // 48: gastrolog.v1.QueryService.ExportToVault:input_type -> gastrolog.v1.ExportToVaultRequest
-	1,  // 49: gastrolog.v1.QueryService.Search:output_type -> gastrolog.v1.SearchResponse
-	6,  // 50: gastrolog.v1.QueryService.Follow:output_type -> gastrolog.v1.FollowResponse
-	8,  // 51: gastrolog.v1.QueryService.Explain:output_type -> gastrolog.v1.ExplainResponse
-	21, // 52: gastrolog.v1.QueryService.GetContext:output_type -> gastrolog.v1.GetContextResponse
-	23, // 53: gastrolog.v1.QueryService.GetSyntax:output_type -> gastrolog.v1.GetSyntaxResponse
-	25, // 54: gastrolog.v1.QueryService.ValidateQuery:output_type -> gastrolog.v1.ValidateQueryResponse
-	28, // 55: gastrolog.v1.QueryService.GetPipelineFields:output_type -> gastrolog.v1.GetPipelineFieldsResponse
-	30, // 56: gastrolog.v1.QueryService.GetFields:output_type -> gastrolog.v1.GetFieldsResponse
-	34, // 57: gastrolog.v1.QueryService.ExportToVault:output_type -> gastrolog.v1.ExportToVaultResponse
-	49, // [49:58] is the sub-list for method output_type
-	40, // [40:49] is the sub-list for method input_type
-	40, // [40:40] is the sub-list for extension type_name
-	40, // [40:40] is the sub-list for extension extendee
-	0,  // [0:40] is the sub-list for field type_name
+	39, // 13: gastrolog.v1.ExplainResponse.contribution_report:type_name -> gastrolog.v1.ContributionReport
+	38, // 14: gastrolog.v1.Query.start:type_name -> google.protobuf.Timestamp
+	38, // 15: gastrolog.v1.Query.end:type_name -> google.protobuf.Timestamp
+	11, // 16: gastrolog.v1.Query.kv_predicates:type_name -> gastrolog.v1.KVPredicate
+	38, // 17: gastrolog.v1.Record.ingest_ts:type_name -> google.protobuf.Timestamp
+	38, // 18: gastrolog.v1.Record.write_ts:type_name -> google.protobuf.Timestamp
+	36, // 19: gastrolog.v1.Record.attrs:type_name -> gastrolog.v1.Record.AttrsEntry
+	13, // 20: gastrolog.v1.Record.ref:type_name -> gastrolog.v1.RecordRef
+	38, // 21: gastrolog.v1.Record.source_ts:type_name -> google.protobuf.Timestamp
+	37, // 22: gastrolog.v1.ResumeToken.vault_tokens:type_name -> gastrolog.v1.ResumeToken.VaultTokensEntry
+	38, // 23: gastrolog.v1.ResumeToken.frozen_start:type_name -> google.protobuf.Timestamp
+	38, // 24: gastrolog.v1.ResumeToken.frozen_end:type_name -> google.protobuf.Timestamp
+	38, // 25: gastrolog.v1.ResumeToken.highwater_ts:type_name -> google.protobuf.Timestamp
+	16, // 26: gastrolog.v1.InnerVaultToken.positions:type_name -> gastrolog.v1.VaultPosition
+	38, // 27: gastrolog.v1.VaultPosition.resume_ts:type_name -> google.protobuf.Timestamp
+	19, // 28: gastrolog.v1.ChunkPlan.steps:type_name -> gastrolog.v1.PipelineStep
+	38, // 29: gastrolog.v1.ChunkPlan.write_start:type_name -> google.protobuf.Timestamp
+	38, // 30: gastrolog.v1.ChunkPlan.write_end:type_name -> google.protobuf.Timestamp
+	18, // 31: gastrolog.v1.ChunkPlan.branch_plans:type_name -> gastrolog.v1.BranchPlan
+	19, // 32: gastrolog.v1.BranchPlan.steps:type_name -> gastrolog.v1.PipelineStep
+	13, // 33: gastrolog.v1.GetContextRequest.ref:type_name -> gastrolog.v1.RecordRef
+	12, // 34: gastrolog.v1.GetContextResponse.before:type_name -> gastrolog.v1.Record
+	12, // 35: gastrolog.v1.GetContextResponse.anchor:type_name -> gastrolog.v1.Record
+	12, // 36: gastrolog.v1.GetContextResponse.after:type_name -> gastrolog.v1.Record
+	26, // 37: gastrolog.v1.ValidateQueryResponse.spans:type_name -> gastrolog.v1.HighlightSpan
+	31, // 38: gastrolog.v1.GetFieldsResponse.attr_fields:type_name -> gastrolog.v1.FieldInfo
+	31, // 39: gastrolog.v1.GetFieldsResponse.kv_fields:type_name -> gastrolog.v1.FieldInfo
+	32, // 40: gastrolog.v1.FieldInfo.top_values:type_name -> gastrolog.v1.FieldValue
+	0,  // 41: gastrolog.v1.QueryService.Search:input_type -> gastrolog.v1.SearchRequest
+	5,  // 42: gastrolog.v1.QueryService.Follow:input_type -> gastrolog.v1.FollowRequest
+	7,  // 43: gastrolog.v1.QueryService.Explain:input_type -> gastrolog.v1.ExplainRequest
+	20, // 44: gastrolog.v1.QueryService.GetContext:input_type -> gastrolog.v1.GetContextRequest
+	22, // 45: gastrolog.v1.QueryService.GetSyntax:input_type -> gastrolog.v1.GetSyntaxRequest
+	24, // 46: gastrolog.v1.QueryService.ValidateQuery:input_type -> gastrolog.v1.ValidateQueryRequest
+	27, // 47: gastrolog.v1.QueryService.GetPipelineFields:input_type -> gastrolog.v1.GetPipelineFieldsRequest
+	29, // 48: gastrolog.v1.QueryService.GetFields:input_type -> gastrolog.v1.GetFieldsRequest
+	33, // 49: gastrolog.v1.QueryService.ExportToVault:input_type -> gastrolog.v1.ExportToVaultRequest
+	1,  // 50: gastrolog.v1.QueryService.Search:output_type -> gastrolog.v1.SearchResponse
+	6,  // 51: gastrolog.v1.QueryService.Follow:output_type -> gastrolog.v1.FollowResponse
+	8,  // 52: gastrolog.v1.QueryService.Explain:output_type -> gastrolog.v1.ExplainResponse
+	21, // 53: gastrolog.v1.QueryService.GetContext:output_type -> gastrolog.v1.GetContextResponse
+	23, // 54: gastrolog.v1.QueryService.GetSyntax:output_type -> gastrolog.v1.GetSyntaxResponse
+	25, // 55: gastrolog.v1.QueryService.ValidateQuery:output_type -> gastrolog.v1.ValidateQueryResponse
+	28, // 56: gastrolog.v1.QueryService.GetPipelineFields:output_type -> gastrolog.v1.GetPipelineFieldsResponse
+	30, // 57: gastrolog.v1.QueryService.GetFields:output_type -> gastrolog.v1.GetFieldsResponse
+	34, // 58: gastrolog.v1.QueryService.ExportToVault:output_type -> gastrolog.v1.ExportToVaultResponse
+	50, // [50:59] is the sub-list for method output_type
+	41, // [41:50] is the sub-list for method input_type
+	41, // [41:41] is the sub-list for extension type_name
+	41, // [41:41] is the sub-list for extension extendee
+	0,  // [0:41] is the sub-list for field type_name
 }
 
 func init() { file_gastrolog_v1_query_proto_init() }
@@ -2694,6 +2708,7 @@ func file_gastrolog_v1_query_proto_init() {
 	if File_gastrolog_v1_query_proto != nil {
 		return
 	}
+	file_gastrolog_v1_vault_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

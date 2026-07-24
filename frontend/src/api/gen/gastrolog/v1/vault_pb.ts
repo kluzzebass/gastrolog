@@ -983,6 +983,18 @@ export class GetIndexesResponse extends Message<GetIndexesResponse> {
    */
   indexes: IndexInfo[] = [];
 
+  /**
+   * Set only when the chunk was NOT located and the fan-out could not
+   * reach every peer that hosts the vault — the "not found" result is
+   * then uncertain (an unreachable peer might hold the chunk), so the
+   * response degrades to empty-with-report instead of a hard not-found.
+   * Absent when the chunk was found or when every peer answered. See
+   * gastrolog-1ic07.
+   *
+   * @generated from field: gastrolog.v1.ContributionReport contribution_report = 3;
+   */
+  contributionReport?: ContributionReport;
+
   constructor(data?: PartialMessage<GetIndexesResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -993,6 +1005,7 @@ export class GetIndexesResponse extends Message<GetIndexesResponse> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "sealed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 2, name: "indexes", kind: "message", T: IndexInfo, repeated: true },
+    { no: 3, name: "contribution_report", kind: "message", T: ContributionReport },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetIndexesResponse {
@@ -2968,6 +2981,16 @@ export class GetPipelineBacklogResponse extends Message<GetPipelineBacklogRespon
    */
   backlog?: VaultPipelineBacklog;
 
+  /**
+   * Set only when the cross-node fan-out that summed per-node on-disk
+   * segment counts could not reach every peer — the cluster-wide totals
+   * then omit some node's segments. Absent when every peer contributed.
+   * See gastrolog-1ic07.
+   *
+   * @generated from field: gastrolog.v1.ContributionReport contribution_report = 2;
+   */
+  contributionReport?: ContributionReport;
+
   constructor(data?: PartialMessage<GetPipelineBacklogResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2977,6 +3000,7 @@ export class GetPipelineBacklogResponse extends Message<GetPipelineBacklogRespon
   static readonly typeName = "gastrolog.v1.GetPipelineBacklogResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "backlog", kind: "message", T: VaultPipelineBacklog },
+    { no: 2, name: "contribution_report", kind: "message", T: ContributionReport },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetPipelineBacklogResponse {

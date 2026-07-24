@@ -122,7 +122,7 @@ func (s *QueryServer) collectRemoteExplain(ctx context.Context, q query.Query, r
 		nodes = append(nodes, nodeID)
 	}
 
-	results, ok, _ := peerFanOut(ctx, s.logger, "Explain", nodes,
+	results, ok, report := peerFanOut(ctx, s.logger, "Explain", nodes,
 		func(peerCtx context.Context, nodeID string) (*apiv1.ForwardExplainResponse, error) {
 			vaultIDs := byNode[nodeID]
 			vaultBytes := make([][]byte, len(vaultIDs))
@@ -142,4 +142,8 @@ func (s *QueryServer) collectRemoteExplain(ctx context.Context, q query.Query, r
 		resp.Chunks = append(resp.Chunks, remote.GetChunks()...)
 		resp.TotalChunks += remote.GetTotalChunks()
 	}
+
+	// A peer that failed to answer means the plan omits its chunks — stamp
+	// the response as partial so the inspector reads it as incomplete.
+	resp.ContributionReport = report
 }

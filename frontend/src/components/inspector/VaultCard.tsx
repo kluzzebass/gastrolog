@@ -1183,9 +1183,10 @@ function ChunkDetail({
           )}
           {!isLoading && (!data?.indexes || data.indexes.length === 0) && (
             <div
-              className={`text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}
+              className={`flex items-center gap-2 text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}
             >
-              No indexes.
+              <span>{data?.contributionReport ? "Indexes unavailable." : "No indexes."}</span>
+              <DegradedPeersBadge report={data?.contributionReport} dark={dark} />
             </div>
           )}
           {!isLoading && data?.indexes && data.indexes.length > 0 && (

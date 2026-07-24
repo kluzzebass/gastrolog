@@ -5,6 +5,7 @@ package gastrolog.v1;
 option go_package = "gastrolog/api/gen/gastrolog/v1;gastrologv1";
 
 import "google/protobuf/timestamp.proto";
+import "gastrolog/v1/vault.proto"; // ContributionReport for partial fan-out merges
 
 // QueryService provides log querying capabilities.
 service QueryService {
@@ -115,6 +116,11 @@ message ExplainResponse {
   google.protobuf.Timestamp query_start = 5; // Resolved query start time
   google.protobuf.Timestamp query_end = 6;   // Resolved query end time
   repeated QueryPipelineStage pipeline_stages = 7; // Pipeline operators after the filter
+
+  // Set only when the cross-node fan-out that gathered remote chunk plans
+  // could not reach every peer, so the plan omits some node's chunks.
+  // Absent when every peer contributed. See gastrolog-1ic07.
+  ContributionReport contribution_report = 8;
 }
 
 // QueryPipelineStage describes a single pipeline operator in the query.

@@ -5,6 +5,7 @@
 
 import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialMessage, PlainMessage } from "@bufbuild/protobuf";
 import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
+import { ContributionReport } from "./vault_pb.js";
 
 /**
  * @generated from message gastrolog.v1.SearchRequest
@@ -478,6 +479,15 @@ export class ExplainResponse extends Message<ExplainResponse> {
    */
   pipelineStages: QueryPipelineStage[] = [];
 
+  /**
+   * Set only when the cross-node fan-out that gathered remote chunk plans
+   * could not reach every peer, so the plan omits some node's chunks.
+   * Absent when every peer contributed. See gastrolog-1ic07.
+   *
+   * @generated from field: gastrolog.v1.ContributionReport contribution_report = 8;
+   */
+  contributionReport?: ContributionReport;
+
   constructor(data?: PartialMessage<ExplainResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -493,6 +503,7 @@ export class ExplainResponse extends Message<ExplainResponse> {
     { no: 5, name: "query_start", kind: "message", T: Timestamp },
     { no: 6, name: "query_end", kind: "message", T: Timestamp },
     { no: 7, name: "pipeline_stages", kind: "message", T: QueryPipelineStage, repeated: true },
+    { no: 8, name: "contribution_report", kind: "message", T: ContributionReport },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ExplainResponse {
