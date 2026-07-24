@@ -590,7 +590,29 @@ func (o *Orchestrator) runAfterVaultCtlRestore(vaultID glid.GLID) {
 
 // onVaultCtlLeadGained wakes the chunking worker when this home becomes the
 // vault-ctl leader. Planning and build passes run in the worker loop.
+//
+// Gaining vault-ctl leadership is also the upstream edge for the
+// reconciler's leader-only categories (gastrolog-3fu9t): fire
+// ReconcileMembershipCatchup so a late-joining leader pulls missing
+// replicas, retires unrecoverable FSM entries, prunes stale ExpectedFrom
+// nodes, and retracts abandoned transfer announces immediately instead of
+// waiting for the periodic backstop tick. Applies to every vault with a
+// reconciler, not just pipeline ingest vaults — the replicated-vault
+// missing-replica and stale-pending-ack categories are exactly the ones a
+// new leader must run. Dispatched on auxWg: the categories propose Raft
+// applies that route to this new leader's apply queue, so they must not
+// run on the leadership-tracking goroutine.
 func (o *Orchestrator) onVaultCtlLeadGained(vaultID glid.GLID) {
+	o.mu.RLock()
+	var rec *VaultLifecycleReconciler
+	if vault := o.vaults[vaultID]; vault != nil && vault.Instance != nil {
+		rec = vault.Instance.Reconciler
+	}
+	o.mu.RUnlock()
+	if rec != nil {
+		o.auxWg.Go(rec.ReconcileMembershipCatchup)
+	}
+
 	if o.pipeline == nil || !o.isPipelineIngestVault(vaultID) {
 		return
 	}

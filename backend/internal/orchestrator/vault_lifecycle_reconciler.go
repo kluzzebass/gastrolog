@@ -208,6 +208,25 @@ func (r *VaultLifecycleReconciler) ReconcileFromSnapshot(fsm *vaultctlfsm.FSM) {
 	// and AnnounceSeal fires.
 	r.resumeSealingFromFSM(fsm)
 
+	// Event-driven orphan cleanup (gastrolog-3fu9t). Snapshot install is
+	// the exact upstream edge that strands local- and staging-orphans: a
+	// delete cycle (CmdRequestDelete → acks → CmdFinalizeDelete) that ran
+	// to completion while this node was offline is NOT replayed
+	// command-by-command on rejoin — the snapshot jumps the FSM straight
+	// to the post-finalize state (tombstone present, no pendingDeletes
+	// entry, no manifest entry), leaving the local bytes with no
+	// obligation to drive cleanup. The log-replay rejoin path is already
+	// event-driven (onRequestDelete re-fires and fulfillObligation
+	// deletes); this closes the snapshot-install half so both orphan
+	// categories converge on the restore event instead of waiting for the
+	// periodic backstop tick. Both reconcilers are local-only (no Raft
+	// propose), so they are safe to run inline on the after-restore
+	// goroutine that drives ReconcileFromSnapshot.
+	if ov := r.gatherReconcileView(); ov != nil {
+		r.reconcileLocalOrphans(ov)
+		r.reconcileStagingOrphans(ov)
+	}
+
 	if len(pending) == 0 {
 		return
 	}
@@ -281,7 +300,7 @@ func (r *VaultLifecycleReconciler) projectAllSealedFromFSM(fsm *vaultctlfsm.FSM)
 // that ever held the chunk locally, so this is the right place).
 func (r *VaultLifecycleReconciler) resumeSealingFromFSM(fsm *vaultctlfsm.FSM) {
 	if r.orch != nil && r.orch.isPipelineIngestVault(r.vaultID) {
-		if _, ok := r.orch.pipelineVaultChunkRoot(r.vaultID); ok {
+		if _, ok := r.orch.pipelineVaultChunkRoot(r.vaultID); ok && r.orch.pipeline != nil {
 			if err := r.orch.pipeline.RecoverVault(context.Background(), r.vaultID); err != nil {
 				r.logger.Warn("reconcile-from-snapshot: pipeline recover failed",
 					"error", err)
@@ -707,11 +726,42 @@ func (r *VaultLifecycleReconciler) gatherReconcileView() *reconcileView {
 }
 
 // ReconcileTick runs every reconcile category against one shared view.
-// This is THE level-triggered pass: every 20s, each node diffs its own
-// disk and obligations against the replicated FSM, in both directions.
-// The per-category Sweep* methods remain as isolated entry points
-// (tests, targeted recovery) — each gathers its own view — but the
-// production cadence goes through here (gastrolog-4pq56v).
+// This is THE level-triggered backstop: every tick, each node diffs its
+// own disk and obligations against the replicated FSM, in both
+// directions. The per-category Sweep* methods remain as isolated entry
+// points (tests, targeted recovery) — each gathers its own view — but the
+// periodic cadence goes through here (gastrolog-4pq56v).
+//
+// Backstop, not primary (gastrolog-3fu9t). Every category now has an
+// upstream event that drives its PRIMARY convergence; the tick catches
+// the residual (dropped events, races, and the two categories that are
+// periodic-by-nature). Per-category event source and verdict:
+//
+//   - pendingObligations  event: CmdRequestDelete apply (onRequestDelete
+//                         → fulfillObligation) + ReconcileFromSnapshot.
+//                         Tick = retry backstop for a failed async ack.
+//   - localOrphans        event: snapshot install (ReconcileFromSnapshot)
+//                         + log-replay onRequestDelete. Tick = backstop.
+//   - stagingOrphans      event: snapshot install (ReconcileFromSnapshot)
+//                         + segment release. Tick = backstop.
+//   - missingReplicas     event: lead-gained + snapshot install
+//                         (ReconcileMembershipCatchup). No reliable
+//                         per-chunk edge (the leader's seal-time push has
+//                         no retry queue), so the tick stays as the
+//                         recovery backstop.
+//   - staleLeaderFSM      periodic-by-nature: a 1h grace-period GC of
+//                         FSM entries no reachable node can serve. The
+//                         "event" is absence of bytes past a timeout.
+//   - stalePendingAcks    event: leadership/placement change
+//                         (ReconcileMembershipCatchup on lead-gained) +
+//                         CmdPruneNode. Tick = backstop for placement
+//                         change under a stable leader.
+//   - idleActiveChunks    periodic-by-nature: wall-clock inactivity
+//                         detection (WriteEnd frozen past a threshold).
+//                         Inactivity is the ABSENCE of append events, so
+//                         there is no edge to wake on — genuinely a tick.
+//   - abandonedTransfer   periodic-by-nature: a 24h grace-period GC of
+//                         transfer announces with zero holders.
 func (r *VaultLifecycleReconciler) ReconcileTick() {
 	v := r.gatherReconcileView()
 	if v == nil {
@@ -724,6 +774,41 @@ func (r *VaultLifecycleReconciler) ReconcileTick() {
 	r.reconcileStaleLeaderFSMEntries(v)
 	r.reconcileStalePendingDeleteAcks(v)
 	r.reconcileIdleActiveChunks(v)
+	r.reconcileAbandonedTransferAnnounces(v)
+}
+
+// ReconcileMembershipCatchup runs the placement- and leadership-sensitive
+// reconcile categories in response to a membership/leadership edge
+// (gastrolog-3fu9t) rather than waiting for the periodic backstop tick.
+// Wired to onVaultCtlLeadGained: a node that just gained vault-ctl
+// leadership for this vault is the exact moment these categories need to
+// run:
+//
+//   - reconcileMissingReplicas: a leader that joined the placement set
+//     late holds the FSM manifest but not the historical bytes, and must
+//     pull them from a peer (gastrolog-19241) instead of waiting a tick.
+//   - reconcileStaleLeaderFSMEntries: retire sealed entries no reachable
+//     node can serve now that this node owns the leader-side decision.
+//   - reconcileStalePendingDeleteAcks: prune ExpectedFrom nodes dropped
+//     from placement before this leader took over, unsticking deletes.
+//   - reconcileAbandonedTransferAnnounces: retract transfer announces the
+//     source abandoned.
+//
+// Every category is internally role-gated (IsFollower / HasRaftLeader /
+// ApplyRaft* nil checks), so firing on a transient or stale role is a
+// safe no-op. The categories propose Raft applies, so callers MUST invoke
+// this off the leadership-tracking / apply-pump goroutine (a plain
+// goroutine dispatch) to avoid the apply-pump self-cycle. The periodic
+// ReconcileTick remains the backstop for edges this wake misses (a
+// placement change under a stable leader, a dropped lead-gained signal).
+func (r *VaultLifecycleReconciler) ReconcileMembershipCatchup() {
+	v := r.gatherReconcileView()
+	if v == nil {
+		return
+	}
+	r.reconcileMissingReplicas(v)
+	r.reconcileStaleLeaderFSMEntries(v)
+	r.reconcileStalePendingDeleteAcks(v)
 	r.reconcileAbandonedTransferAnnounces(v)
 }
 

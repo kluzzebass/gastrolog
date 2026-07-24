@@ -250,3 +250,52 @@ func TestReconcileTickRunsCategoriesAgainstOneView(t *testing.T) {
 		t.Error("ReconcileTick deleted a live chunk dir")
 	}
 }
+
+// TestReconcileFromSnapshotRunsStagingOrphanCleanup pins the
+// staging-orphan category's event source (gastrolog-3fu9t): snapshot
+// install. Like local orphans, staging orphans are stranded when a
+// release/finalize applied while this node was offline and the rejoin
+// came via snapshot (not command replay). ReconcileFromSnapshot — the
+// after-restore hook — must run the staging reconcile on that event, not
+// leave it for the periodic backstop tick. Fires ONLY the restore event;
+// never calls SweepStagingOrphans / ReconcileTick.
+func TestReconcileFromSnapshotRunsStagingOrphanCleanup(t *testing.T) {
+	t.Parallel()
+	f := newStagingSweepFixture(t)
+	now := time.Now()
+
+	// Released segment this node "missed": files on disk in all areas.
+	released := glid.New()
+	f.apply(t, vaultctlfsm.MarshalPublishCompletedSegment(publishEntry(released)))
+	f.apply(t, vaultctlfsm.MarshalReleaseSegments([]glid.GLID{released}))
+	relFile := paths.CompletedSegment(f.root, released)
+	f.writeSegmentFile(t, relFile)
+
+	// Tombstoned chunk staging dir: full delete cycle finalized "offline".
+	tombstoned := chunk.NewChunkID()
+	f.apply(t, vaultctlfsm.MarshalCreateChunk(tombstoned, now, now, now))
+	f.apply(t, vaultctlfsm.MarshalSealChunk(tombstoned, now, 1, 1, now, now, now, false, now))
+	f.apply(t, vaultctlfsm.MarshalRequestDelete(tombstoned, now, "test", []string{"node-B"}))
+	f.apply(t, vaultctlfsm.MarshalAckDelete(tombstoned, "node-B"))
+	f.apply(t, vaultctlfsm.MarshalFinalizeDelete(tombstoned))
+	tombstonedDir := f.writeChunkDir(t, tombstoned)
+
+	// Live sealed chunk dir: FSM manifest entry exists; must survive.
+	live := chunk.NewChunkID()
+	f.apply(t, vaultctlfsm.MarshalCreateChunk(live, now, now, now))
+	f.apply(t, vaultctlfsm.MarshalSealChunk(live, now, 1, 1, now, now, now, false, now))
+	liveDir := f.writeChunkDir(t, live)
+
+	// Fire ONLY the snapshot-restore event.
+	f.rec.ReconcileFromSnapshot(f.fsm)
+
+	if exists(relFile) {
+		t.Error("ReconcileFromSnapshot did not purge the released segment on the restore event")
+	}
+	if exists(tombstonedDir) {
+		t.Error("ReconcileFromSnapshot did not remove the tombstoned chunk dir on the restore event")
+	}
+	if !exists(liveDir) {
+		t.Error("ReconcileFromSnapshot deleted a live chunk dir")
+	}
+}
