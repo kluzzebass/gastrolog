@@ -8,6 +8,54 @@ import (
 	"gastrolog/internal/system"
 )
 
+const (
+	// pipelineConfigReconcileJobName is the operator-visible name for the
+	// pipeline-config reconcile safety net. Keep stable across releases.
+	pipelineConfigReconcileJobName = "pipeline-config-reconcile"
+
+	// pipelineConfigReconcileSchedule runs every 15 seconds. 6-field cron
+	// (with-seconds). This is the ONE leg of the retired placement sweep that
+	// stays periodic (gastrolog-29xpy): reloadPipelineFromConfig aligns each
+	// vault-ctl group's desired Raft leader with the placement leader and
+	// re-registers the pipeline vault as the vault-ctl handle/leadership
+	// converges. Those are async Raft outcomes (elections, group readiness)
+	// with no config event to trigger from, so they need a periodic pass —
+	// exactly like the sibling vault-ctl-membership-reconcile (30s). Role and
+	// FollowerTargets refreshes do have config events and are event-driven
+	// (ReconcileVaultPlacement / ReconcilePlacements).
+	pipelineConfigReconcileSchedule = "*/15 * * * * *"
+)
+
+// startPipelineConfigReconcile registers the pipeline-config reconcile safety
+// net with the orchestrator's job scheduler. Each tick reloads the routing
+// table + pipeline vault registrations from config and re-asserts each
+// vault-ctl group's desired leader (reconcileFilters → reloadPipelineFromConfig).
+func (o *Orchestrator) startPipelineConfigReconcile() error {
+	if o.scheduler.HasJob(pipelineConfigReconcileJobName) {
+		return nil
+	}
+	if err := o.scheduler.AddJob(pipelineConfigReconcileJobName, pipelineConfigReconcileSchedule, o.pipelineConfigReconcile); err != nil {
+		return err
+	}
+	o.scheduler.Describe(pipelineConfigReconcileJobName,
+		"Pipeline-config reconcile safety net. Runs on every node every 15 seconds: reloads the routing table and pipeline vault registrations from config and re-asserts each vault-ctl Raft group's desired leader (the placement leader). Covers async vault-ctl leadership/handle convergence — an election that lands leadership on a non-home node leaves the chunking planner (home ∧ vault-ctl leader) running nowhere until this pass realigns it — which has no config event to trigger from. The placement role/FollowerTargets/routing-table refreshes are event-driven (see ReconcileVaultPlacement); this is not the retired 15s placement sweep, only its no-config-event leg.")
+	return nil
+}
+
+// pipelineConfigReconcile is the scheduled task: load config and republish the
+// routing table + pipeline registrations + vault-ctl desired leaders.
+func (o *Orchestrator) pipelineConfigReconcile() {
+	sys, err := o.loadSystem(context.Background())
+	if err != nil {
+		o.rotationLogger.Error("pipeline-config reconcile: failed to load config", "error", err)
+		return
+	}
+	if sys == nil {
+		return
+	}
+	o.reconcileFilters(sys)
+}
+
 // ReconcilePlacements aligns every local vault instance's role and (for
 // leaders) sealed-chunk replication targets with the current placement
 // config, then republishes the pipeline routing table. This is the
