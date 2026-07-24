@@ -171,6 +171,28 @@ func (s *Store) ApplyRaw(data []byte) (uint64, error) {
 	return s.applyRaw(context.Background(), data)
 }
 
+// Barrier commits a state-free catch-up-barrier command through Raft and
+// blocks until the local FSM has applied it, guaranteeing the local FSM
+// reflects every entry committed cluster-wide before the call returned.
+//
+// It reuses the read-after-write machinery (applyRaw + the event-driven
+// apply-wait tracker, gastrolog-3klg1): on the leader raft.Apply is
+// synchronous, so the FSM is current on return; on a follower the barrier is
+// forwarded to the leader and this blocks on the tracker until the local FSM
+// applies up to the barrier's committed index — no polling, no stability
+// window. The barrier is an ordinary LogCommand (not a raft LogBarrier) so it
+// flows through FSM.Apply, which the FSM-fed tracker requires to advance.
+// Used by startup FSM catch-up (gastrolog-1go57); bound the wait by passing a
+// ctx with a deadline.
+func (s *Store) Barrier(ctx context.Context) error {
+	data, err := command.Marshal(command.NewCatchupBarrier())
+	if err != nil {
+		return fmt.Errorf("marshal catchup barrier: %w", err)
+	}
+	_, err = s.applyRaw(ctx, data)
+	return err
+}
+
 // ---------------------------------------------------------------------------
 // Read methods — delegate to fsm.Store()
 // ---------------------------------------------------------------------------

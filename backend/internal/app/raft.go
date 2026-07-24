@@ -2,13 +2,11 @@ package app
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"gastrolog/internal/alert"
 	"io"
 	"log/slog"
 	"os"
-	"strconv"
 	"time"
 
 	"gastrolog/internal/cluster"
@@ -66,11 +64,37 @@ func (s *raftClusterCtlStore) RaftLivenessSources() (*raftgroup.LivenessCounters
 	return &s.liveness, s.wal
 }
 
-// WaitForLeader polls until any node in the cluster becomes leader or the
-// context is cancelled.
+// WaitForLeader blocks until any node in the cluster is observed to be the
+// Raft leader, or the context is cancelled. Event-driven (gastrolog-1go57):
+// it registers a leadership observer and blocks on it instead of polling
+// LeaderWithID on a ticker. hashicorp/raft fires a LeaderObservation whenever
+// this node learns of a leadership change — including a follower learning the
+// leader's identity from its first AppendEntries — so re-reading LeaderWithID
+// on each observation is the authoritative "is a leader known yet" signal.
 func (s *raftClusterCtlStore) WaitForLeader(ctx context.Context, logger *slog.Logger) error {
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
+	// Register the observer BEFORE the initial LeaderWithID check so an
+	// election that lands between the check and registration cannot be
+	// missed: every leadership change from registration onward reaches
+	// obsCh, and the post-registration check covers a leader that already
+	// exists.
+	//
+	// Non-blocking observer (drops on a full buffer) so a lingering
+	// registration can never stall raft's observe() after this returns —
+	// correctness does not depend on receiving every observation, because
+	// LeaderWithID is the source of truth and any delivered observation
+	// triggers a re-check.
+	obsCh := make(chan hraft.Observation, 4)
+	observer := hraft.NewObserver(obsCh, false, func(o *hraft.Observation) bool {
+		_, ok := o.Data.(hraft.LeaderObservation)
+		return ok
+	})
+	s.raft.RegisterObserver(observer)
+	defer s.raft.DeregisterObserver(observer)
+
+	if addr, _ := s.raft.LeaderWithID(); addr != "" {
+		return nil
+	}
+
 	remind := time.NewTicker(10 * time.Second)
 	defer remind.Stop()
 	for {
@@ -79,7 +103,7 @@ func (s *raftClusterCtlStore) WaitForLeader(ctx context.Context, logger *slog.Lo
 			return ctx.Err()
 		case <-remind.C:
 			logger.Info("still waiting for cluster quorum (start 2+ nodes)")
-		case <-ticker.C:
+		case <-obsCh:
 			if addr, _ := s.raft.LeaderWithID(); addr != "" {
 				return nil
 			}
@@ -93,92 +117,32 @@ func (s *raftClusterCtlStore) WaitForLeader(ctx context.Context, logger *slog.Lo
 // snapshot level, and post-snapshot committed entries (e.g. placement
 // assignments) are not yet applied.
 //
-// Behaviour by role:
+// Mechanism (gastrolog-1go57): commit a state-free catch-up barrier through
+// the store and wait for the local FSM to apply it. On the leader raft.Apply
+// is synchronous, so this is a Raft barrier — a no-op entry committed to a
+// quorum and applied locally. On a follower the barrier is forwarded to the
+// leader, and the follower then blocks on the event-driven FSM apply-wait
+// tracker (gastrolog-3klg1) until its local FSM has applied up to the
+// barrier's committed index. Because that index is strictly greater than
+// every entry committed before the call, catching up to it guarantees every
+// prior committed command is locally visible.
 //
-//   - Leader: calls raft.Barrier(), which appends a no-op log entry and
-//     waits for it to commit + apply locally. Guarantees the leader's FSM
-//     is current to its own last-committed index at the moment of the call.
-//
-//   - Follower: this is the tricky case. On a fresh restart, both
-//     applied_index and commit_index are at the *snapshot's* index — they
-//     appear "equal" before the follower has received a single byte from
-//     the new leader. We can't just wait for `applied >= commit` because
-//     it's already true at startup against stale state.
-//
-//     The correct check is "wait for the local log to grow past the
-//     snapshot via AppendEntries from the leader, then for applied to
-//     catch up to that". We use a stability window: poll last_log_index
-//     until it has been STABLE (unchanged) for at least stabilityWindow.
-//     If new entries are still arriving, we keep waiting. Once stable AND
-//     applied_index has caught up to last_log_index, we're done.
-//
-//     Edge case: an idle cluster with no new entries since the snapshot.
-//     The first heartbeat from the leader will advance commit_index to
-//     match the leader's, even if no new log entries arrive. We bootstrap
-//     stability tracking from `last_log_index` (which equals commit_index
-//     in steady state) and accept any value as long as it's stable.
+// This replaces the former poll-until-stable follower path: the "stability
+// window" heuristic inferred catch-up from a quiet period; the barrier gives
+// a concrete committed target and the tracker releases the instant it is
+// applied — no polling, no wall-clock guess. The leader/follower split is
+// gone too: applyRaw already dispatches to raft.Apply on the leader and to
+// the forward-and-wait path on a follower.
 //
 // Assumes a leader has already been elected (call WaitForLeader first).
 func (s *raftClusterCtlStore) WaitForFSMCatchup(ctx context.Context, timeout time.Duration, logger *slog.Logger) error {
-	if s.raft.State() == hraft.Leader {
-		return s.raft.Barrier(timeout).Error()
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	logger.Debug("committing FSM catch-up barrier")
+	if err := s.raftStore.Barrier(ctx); err != nil {
+		return fmt.Errorf("commit catch-up barrier: %w", err)
 	}
-
-	const (
-		pollInterval    = 50 * time.Millisecond
-		stabilityWindow = 1 * time.Second
-	)
-
-	deadline := time.Now().Add(timeout)
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
-
-	var lastSeenLogIndex uint64
-	stableSince := time.Time{}
-
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-			if time.Now().After(deadline) {
-				return errors.New("timed out waiting for FSM catchup")
-			}
-			stats := s.raft.Stats()
-			lastLogIdx, err1 := strconv.ParseUint(stats["last_log_index"], 10, 64)
-			appliedIdx, err2 := strconv.ParseUint(stats["applied_index"], 10, 64)
-			if err1 != nil || err2 != nil {
-				continue
-			}
-
-			// If last_log_index changed, the local log is still growing
-			// (the leader is sending us entries). Reset stability tracking.
-			if lastLogIdx != lastSeenLogIndex {
-				lastSeenLogIndex = lastLogIdx
-				stableSince = time.Now()
-				logger.Debug("fsm catchup: log advancing",
-					"last_log_index", lastLogIdx, "applied_index", appliedIdx)
-				continue
-			}
-
-			// Log is stable. Wait for applied to catch up.
-			if appliedIdx < lastLogIdx {
-				logger.Debug("fsm catchup: applying log entries",
-					"last_log_index", lastLogIdx, "applied_index", appliedIdx)
-				continue
-			}
-
-			// Log is stable AND applied has caught up. Wait for the
-			// stability window before declaring success — this gives
-			// time for any in-flight heartbeats to bring more entries
-			// or for the leader's commit_index to propagate.
-			if time.Since(stableSince) >= stabilityWindow {
-				logger.Debug("fsm caught up",
-					"last_log_index", lastLogIdx, "applied_index", appliedIdx)
-				return nil
-			}
-		}
-	}
+	return nil
 }
 
 func (s *raftClusterCtlStore) Close() error {

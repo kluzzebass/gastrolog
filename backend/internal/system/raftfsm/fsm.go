@@ -178,6 +178,13 @@ func (f *FSM) Apply(l *raft.Log) any {
 		*gastrologv1.SystemCommand_DeleteUserRefreshTokens:
 		return f.applyRefreshToken(ctx, cmd)
 
+	case *gastrologv1.SystemCommand_CatchupBarrier:
+		// State-free startup catch-up barrier (gastrolog-1go57). No store
+		// mutation and no notification — its sole effect is the deferred
+		// applyWait.Advance(l.Index) above, which releases a node blocked
+		// on the FSM apply-wait tracker once it applies this entry.
+		return nil
+
 	default:
 		return fmt.Errorf("unknown config command type: %T", cmd.Command)
 	}
