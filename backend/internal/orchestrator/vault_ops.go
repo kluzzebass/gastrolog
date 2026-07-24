@@ -249,7 +249,7 @@ func (o *Orchestrator) ListClusterChunkMetas(vaultID glid.GLID) ([]chunk.ChunkMe
 // each tagged with its instance ID and type.
 //
 // Sealed chunks are projected from the vault-ctl FSM manifest
-// (VaultManifestEntriesFromCtlFSM) so every voter sees the full cluster chunk
+// (VaultManifestEntriesIncludingOpen) so every voter sees the full cluster chunk
 // set regardless of how many blobs this node's chunk manager has registered
 // yet. Without this, ListChunks fell back to Chunks.List() (local replicas
 // only) and the inspector showed a handful of chunks whenever remote fan-out
@@ -277,7 +277,7 @@ func (o *Orchestrator) ListAllChunkMetas(vaultID glid.GLID) ([]VaultChunkMeta, e
 	overlay := vaultInst.OverlayFromFSM
 
 	var entries []vaultctlfsm.ManifestEntry
-	if fsmEntries := o.VaultManifestEntriesFromCtlFSM(vaultID); len(fsmEntries) > 0 {
+	if fsmEntries := o.VaultManifestEntriesIncludingOpen(vaultID); len(fsmEntries) > 0 {
 		entries = fsmEntries
 	} else {
 		entries = vaultManifestEntries(vaultInst)

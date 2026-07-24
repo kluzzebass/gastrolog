@@ -165,7 +165,7 @@ func (s *QueryServer) buildSearchPartitionTargets(ctx context.Context, selectedV
 // vaultPartitionMetas returns lightweight chunk metas for partition planning
 // only (state + ID). Avoids pipeline bound overlay on every sealed chunk.
 func (s *QueryServer) vaultPartitionMetas(vaultID glid.GLID) []chunk.ChunkMeta {
-	if entries := s.orch.VaultManifestEntriesFromCtlFSM(vaultID); len(entries) > 0 {
+	if entries := s.orch.VaultManifestEntriesIncludingOpen(vaultID); len(entries) > 0 {
 		out := make([]chunk.ChunkMeta, 0, len(entries))
 		for _, e := range entries {
 			out = append(out, e.ToChunkMeta())

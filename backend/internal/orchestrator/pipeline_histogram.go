@@ -18,7 +18,7 @@ func (o *Orchestrator) findPipelineOpenChunk(chunkID chunk.ChunkID) (vaultID gli
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	for vid := range o.vaults {
-		for _, e := range o.VaultManifestEntriesFromCtlFSM(vid) {
+		for _, e := range o.VaultManifestEntriesIncludingOpen(vid) {
 			if e.ID != chunkID {
 				continue
 			}

@@ -1145,7 +1145,13 @@ func chunkBucketTotals(
 	for b := firstBucket; b <= lastBucket; b++ {
 		bStart := start.Add(bucketWidth * time.Duration(b))
 		bEnd := start.Add(bucketWidth * time.Duration(b+1))
-		startRank, _ := ir.FindIngestRank(meta.ID, bStart)
+		startRank, ok := ir.FindIngestRank(meta.ID, bStart)
+		if !ok {
+			// Per-lookup resolvability (gastrolog-enfwd): a missed edge
+			// combined with the RecordCount shortcut below would inflate
+			// this bucket; leave it at 0 instead.
+			continue
+		}
 		var endRank uint64
 		if !meta.IngestEnd.IsZero() && !bEnd.Before(meta.IngestEnd) {
 			endRank = uint64(meta.RecordCount) //nolint:gosec // G115: RecordCount is non-negative
@@ -1175,13 +1181,15 @@ func chunkBucketTotals(
 // Local chunks never use overlap — it smears by chunk metadata bounds rather
 // than per-record ingest_ts, producing phantom counts in quiet periods.
 //
-// We can't probe the index up front: findIngestRank at the chunk's
-// IngestStart returns (0, true) for a healthy index AND for a missing
-// index (rank zero is the natural answer at the chunk's earliest record),
-// so a single probe can't distinguish the two. Instead, run rank arithmetic
-// across all buckets first; if the total contribution is zero despite the
-// chunk having records, the index isn't actually serving lookups and we
-// fall back to overlap-based distribution (cloud-backed only).
+// Resolution is tracked PER LOOKUP (gastrolog-enfwd): the IndexReader can be
+// partially resolvable — FSM-metadata boundary answers (rank 0 strictly
+// before a sealed monotonic chunk's IngestStart) resolve on any voter with
+// no ITSI bytes at all, while interior timestamps stay unresolvable there.
+// Rank arithmetic is only trusted when every endpoint the loop needs
+// resolves; the first miss stops the loop and falls back. The payoff: a
+// chunk that fits inside a single bucket counts EXACTLY from replicated
+// metadata alone (startRank 0 at the bucket edge, endRank = RecordCount via
+// the IngestEnd shortcut) instead of being smeared or dropped.
 func timechartChunkByIndex(
 	ir manifest.IndexReader,
 	meta chunk.ChunkMeta,
@@ -1203,50 +1211,43 @@ func timechartChunkByIndex(
 		clampHi = meta.IngestStart
 	}
 
-	// Fast path: probe once before the per-bucket loop. If the IndexReader
-	// can't resolve the chunk's index at any TS, the rank-arithmetic loop
-	// would do 50×2 failed lookups per chunk — non-trivial overhead on a
-	// `last=12h` query touching ~1900 chunks. The probe distinguishes
-	// "working index that returns rank 0" (ok=true) from "no index
-	// reachable" (ok=false) cleanly via the boolean — only the rank value
-	// is ambiguous, not ok. On a miss we skip straight to FSM-based
-	// distribution.
-	probeTS := meta.IngestStart
-	if probeTS.IsZero() {
-		probeTS = clampHi
-	}
-	if !probeTS.IsZero() {
-		if _, ok := ir.FindIngestRank(meta.ID, probeTS); !ok {
-			if meta.CloudBacked {
-				distributeChunkRecordsByOverlap(meta, start, bucketWidth, firstBucket, lastBucket, counts, cloudFlags, true)
-				return true
-			}
-			return false
-		}
-	}
-
+	// Per-lookup resolution replaces the old single up-front probe: any
+	// in-window lookup a healthy local index serves resolves (every bucket
+	// edge the loop visits is <= the chunk's max in-window TS), so the
+	// first miss means the index isn't fully serving this chunk here and
+	// the loop stops — at most a couple of wasted lookups per unresolvable
+	// chunk, preserving the probe's cost bound on `last=12h` queries
+	// touching ~1900 chunks.
 	rankCounts := make([]int64, lastBucket-firstBucket+1)
 	var rankTotal int64
+	resolved := true
 	for b := firstBucket; b <= lastBucket; b++ {
 		bStart := start.Add(bucketWidth * time.Duration(b))
 		bEnd := start.Add(bucketWidth * time.Duration(b+1))
 
-		startRank, _ := ir.FindIngestRank(meta.ID, bStart)
+		startRank, ok := ir.FindIngestRank(meta.ID, bStart)
+		if !ok {
+			resolved = false
+			break
+		}
 
 		var endRank uint64
 		if !clampHi.IsZero() && !bEnd.Before(clampHi) {
 			endRank = uint64(meta.RecordCount) //nolint:gosec // G115: RecordCount is always non-negative
 		} else if rank, ok := ir.FindIngestRank(meta.ID, bEnd); ok {
 			endRank = rank
+		} else {
+			resolved = false
+			break
 		}
 
 		if endRank > startRank {
-			delta := int64(endRank - startRank)
+			delta := int64(endRank - startRank) //nolint:gosec // G115: bounded by RecordCount
 			rankCounts[b-firstBucket] = delta
 			rankTotal += delta
 		}
 	}
-	if rankTotal > 0 {
+	if resolved && rankTotal > 0 {
 		for i, c := range rankCounts {
 			counts[firstBucket+i] += c
 			if c > 0 && meta.CloudBacked && cloudFlags != nil {

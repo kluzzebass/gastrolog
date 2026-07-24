@@ -783,7 +783,7 @@ func normalizedRange(start, end time.Time) (time.Time, time.Time, bool) {
 //
 // Bounded queries (last=5m, explicit start=/end=) are no-ops.
 //
-// Reads from VaultManifestEntriesFromCtlFSM, which goes directly through the
+// Reads from VaultManifestEntriesIncludingOpen, which goes directly through the
 // vault-ctl Raft group's FSM rather than per-vault-instance state. Every node
 // is a voter of every vault-ctl group (gastrolog-292yi), so the FSM is
 // authoritative cluster-wide regardless of which node hosts the vault — a
@@ -854,7 +854,7 @@ func (s *QueryServer) aggregateVaultBounds(vaults []glid.GLID) (time.Time, time.
 		}
 	}
 	for _, vid := range vaults {
-		for _, e := range s.orch.VaultManifestEntriesFromCtlFSM(vid) {
+		for _, e := range s.orch.VaultManifestEntriesIncludingOpen(vid) {
 			if e.RecordCount == 0 {
 				continue
 			}
