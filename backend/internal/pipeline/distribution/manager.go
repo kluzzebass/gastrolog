@@ -142,15 +142,28 @@ func (m *Manager) logger() *slog.Logger {
 // RegisterVault adds a vault distribution path. Safe before or during Run.
 func (m *Manager) RegisterVault(vaultID glid.GLID, root string, cfg VaultConfig) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if _, ok := m.vaults[vaultID]; ok {
+		m.mu.Unlock()
 		return errors.New("vault already registered")
 	}
 	v, err := newVaultDist(root, cfg, m.logger())
 	if err != nil {
+		m.mu.Unlock()
 		return err
 	}
 	m.vaults[vaultID] = v
+	m.mu.Unlock()
+	// Registration is an event, not just a table update: every registration
+	// binds a fresh vaultDist whose staging state is empty, so segments
+	// already in completed/ that this registration must own — a publisher
+	// upgrade re-registration after a no-handle window (gastrolog-375el), a
+	// restart backlog registered after Run started, or a completed-channel
+	// delivery that raced the unregister/register swap — are only recoverable
+	// by rescanning completed/ now. The retry wake lets staged retries from
+	// the previous registration republish through the (possibly upgraded)
+	// publisher immediately instead of waiting out the failure backoff.
+	m.stranded.Notify()
+	m.publishRetry.Notify()
 	return nil
 }
 

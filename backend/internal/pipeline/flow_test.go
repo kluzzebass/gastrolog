@@ -368,15 +368,16 @@ func newHarness(t *testing.T, nodeID, ingesterID, vaultID glid.GLID, route *rout
 			isLeader = opts.chunkLeader
 		}
 		if err := chunkMgr.RegisterVault(vaultID, chunking.VaultConfig{
-			VaultRoot:  h.homeRoot,
-			ChunkRoot:  h.chunkRoot,
-			FSM:        h.fsm,
-			Locate:     chunking.VaultSegmentLocator{Root: h.homeRoot},
-			Applier:    &flowFsmApplier{fsm: h.fsm},
-			IsLeader:   isLeader,
-			NewChunkID: func() chunk.ChunkID { return chunkID },
-			Policy:     policy,
-			Collector:  flowSegmentCollector{collect: h.collect, vaultID: vaultID},
+			RequiredHolders: chunking.NoRequiredHolders,
+			VaultRoot:       h.homeRoot,
+			ChunkRoot:       h.chunkRoot,
+			FSM:             h.fsm,
+			Locate:          chunking.VaultSegmentLocator{Root: h.homeRoot},
+			Applier:         &flowFsmApplier{fsm: h.fsm},
+			IsLeader:        isLeader,
+			NewChunkID:      func() chunk.ChunkID { return chunkID },
+			Policy:          policy,
+			Collector:       flowSegmentCollector{collect: h.collect, vaultID: vaultID},
 		}); err != nil {
 			t.Fatalf("RegisterVault chunking: %v", err)
 		}

@@ -84,12 +84,13 @@ func planUntilOpenRef(t *testing.T, ctx context.Context, mgr *chunking.Manager, 
 // produces for a home with a vault-ctl handle.
 func chunkingSpec(home string, fsm *vaultctlfsm.FSM, isLeader func() bool) chunking.VaultConfig {
 	return chunking.VaultConfig{
-		VaultRoot: home,
-		ChunkRoot: filepath.Join(home, "chunks"),
-		FSM:       fsm,
-		Locate:    chunking.VaultSegmentLocator{Root: home},
-		Applier:   &fsmApplier{fsm: fsm},
-		IsLeader:  isLeader,
+		RequiredHolders: chunking.NoRequiredHolders,
+		VaultRoot:       home,
+		ChunkRoot:       filepath.Join(home, "chunks"),
+		FSM:             fsm,
+		Locate:          chunking.VaultSegmentLocator{Root: home},
+		Applier:         &fsmApplier{fsm: fsm},
+		IsLeader:        isLeader,
 	}
 }
 
