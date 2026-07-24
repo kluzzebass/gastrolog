@@ -144,9 +144,12 @@ type vaultCtlLeaderManager struct {
 	// Nil leaves the prune as a no-op (single-node tests, etc.).
 	onMemberRemoved func(vaultID glid.GLID, removedNodeID string)
 
-	// onLeadGained fires at the start of each vault-ctl leader epoch so the
-	// orchestrator can wake pipeline chunking (manifest planner + sealed build).
-	onLeadGained func(vaultID glid.GLID)
+	// leadGained fires at the start of each vault-ctl leader epoch. The
+	// orchestrator registers a listener to wake pipeline chunking
+	// (manifest planner + sealed build); the app layer registers another
+	// to trigger event-driven learner promotion on the new leader
+	// (gastrolog-4vg17). Additive so both coexist.
+	leadGained []func(vaultID glid.GLID)
 
 	// reconcileHook, if non-nil, is invoked at the start of each reconcile
 	// pass immediately after the desired set is read and BEFORE any
@@ -167,12 +170,14 @@ func (m *vaultCtlLeaderManager) SetOnMemberRemoved(fn func(vaultID glid.GLID, re
 	m.onMemberRemoved = fn
 }
 
-// SetOnLeadGained registers a callback invoked at the start of each vault-ctl
-// leader epoch (after Barrier). Used to wake pipeline chunking on the leader home.
-func (m *vaultCtlLeaderManager) SetOnLeadGained(fn func(vaultID glid.GLID)) {
+// AddOnLeadGained registers an additional callback invoked at the start of
+// each vault-ctl leader epoch (after Barrier). Additive: every registered
+// callback fires. Used to wake pipeline chunking on the leader home and to
+// trigger event-driven learner promotion (gastrolog-4vg17).
+func (m *vaultCtlLeaderManager) AddOnLeadGained(fn func(vaultID glid.GLID)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.onLeadGained = fn
+	m.leadGained = append(m.leadGained, fn)
 }
 
 // newVaultCtlLeaderManager supervises per-vault control-plane Raft leader epochs
@@ -340,10 +345,10 @@ func (m *vaultCtlLeaderManager) runLeaderEpoch(ctx context.Context, vaultID glid
 
 	// Initial reconcile immediately after barrier.
 	m.reconcile(vaultID, group)
-	if m.onLeadGained != nil {
-		m.mu.Lock()
-		fn := m.onLeadGained
-		m.mu.Unlock()
+	m.mu.Lock()
+	fns := append([]func(glid.GLID){}, m.leadGained...)
+	m.mu.Unlock()
+	for _, fn := range fns {
 		fn(vaultID)
 	}
 
