@@ -105,6 +105,10 @@ type orchRelHarness struct {
 	// routeVaultIdxs lists vaults (indexes into h.vaults) that get an
 	// enabled match-all route seeded in the shared config.
 	routeVaultIdxs []int
+	// rotationPolicyID is the shared pipeline rotation policy written by
+	// seedSharedConfig (nil without withPipelineCluster); vaults added
+	// mid-test (addRuntimeVault) reference it too.
+	rotationPolicyID *glid.GLID
 }
 
 // pipelineClusterOpts carries the pipeline tuning for withPipelineCluster.
@@ -444,6 +448,9 @@ func (h *orchRelHarness) seedSharedConfig() {
 		}
 		rotationPolicyID = &rpID
 	}
+	// Keep the shared policy reachable for vaults created mid-test
+	// (addRuntimeVault) so they seal on the same record-count policy.
+	h.rotationPolicyID = rotationPolicyID
 
 	// Register every vault + instance + placement. vaults[0] is the default;
 	// additional entries come from withExtraVault options.

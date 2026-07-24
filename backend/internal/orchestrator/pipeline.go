@@ -140,7 +140,7 @@ func (o *Orchestrator) SubmitToVault(ctx context.Context, vaultID glid.GLID, rec
 // pipelineVaultReg records how a vault is currently registered in the pipeline
 // supervisor, so reloadPipelineFromConfig re-registers only when something
 // material changed: its Home role (placement membership), whether the vault-ctl
-// handle is yet available (publisher upgraded from noop to the real
+// handle is yet available (publisher upgraded from fail-closed to the real
 // VaultCtlPublisher), or its chunk rotation policy (the chunking manager
 // captures the policy at register, so a policy edit must re-register).
 //
@@ -158,7 +158,7 @@ type pipelineVaultReg struct {
 // lands in a local durable segment wherever it is ingested). When the per-vault
 // vault-ctl handle is available, the Origin publishes completed-segment metadata
 // to the registry via the leader-forwarding applier; otherwise it falls back to
-// the noop publisher (single-node/memory mode with no group).
+// the fail-closed noHandlePublisher (single-node/memory mode with no group).
 //
 // When this node is also a placement member (Home) for the vault with a
 // vault-ctl handle, it registers the chunking side (Rubicon D): the leader
@@ -180,7 +180,7 @@ func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, home bool, fsm 
 		VaultID:    vaultID,
 		Origin:     true,
 		OriginRoot: root,
-		Publisher:  noopPublisher{},
+		Publisher:  noHandlePublisher{},
 	}
 	if hasHandle {
 		spec.Publisher = &distribution.VaultCtlPublisher{
@@ -523,15 +523,32 @@ func (o *Orchestrator) pipelineVaultStagingRoot(vaultID glid.GLID) (string, bool
 	return filepath.Join(segmentsDir, vaultID.String()), true
 }
 
-// noopPublisher is the distribution publisher used while no vault-ctl handle is
-// available (single-node/memory mode): it accepts and drops publish metadata.
-// With a handle, the VaultCtlPublisher takes over so completed segments are
-// announced to the vault-ctl log and pulled by home nodes.
-type noopPublisher struct{}
+// errNoVaultCtlHandle rejects publishes while no vault-ctl handle is available.
+// It is retryable by distribution's publish-retry classification (anything but
+// ErrUnknownVault / bytes-missing), so refused segments stay staged in the
+// retry queue instead of being dropped.
+var errNoVaultCtlHandle = errors.New("no vault-ctl handle; segment publish deferred")
 
-var _ distribution.Publisher = noopPublisher{}
+// noHandlePublisher is the fail-closed distribution publisher used while no
+// vault-ctl handle is available (vault-ctl group not present yet during
+// startup, or single-node/memory mode without a group manager). It refuses
+// every publish with a retryable error so completed segments ride the existing
+// publish-retry machinery until the handle appears: the old noop default
+// returned nil, which marked segments published that vault-ctl never saw, and
+// the publisher upgrade had nothing to republish — durable segments invisible
+// to collection and chunking until restart (gastrolog-375el).
+//
+// When the handle appears, reloadPipelineFromConfig re-registers the vault
+// with the real VaultCtlPublisher; distribution's registration wake (stranded
+// rescan + retry drain in Manager.RegisterVault) republishes everything still
+// in completed/ without waiting for the retry backoff.
+type noHandlePublisher struct{}
 
-func (noopPublisher) Publish(context.Context, distribution.Metadata) error { return nil }
+var _ distribution.Publisher = noHandlePublisher{}
+
+func (noHandlePublisher) Publish(context.Context, distribution.Metadata) error {
+	return errNoVaultCtlHandle
+}
 
 // buildRoutingTable compiles a routing table from the cluster-wide route
 // config. Routing is vault-only: each enabled route maps its match expression
