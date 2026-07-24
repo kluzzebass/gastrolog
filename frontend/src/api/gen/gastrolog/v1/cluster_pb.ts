@@ -3808,20 +3808,20 @@ export class ListPeerManagedFilesResponse extends Message<ListPeerManagedFilesRe
 }
 
 /**
- * ForwardRPCFrame carries a single frame in a generic ForwardRPC
- * bidirectional stream. Replaces per-RPC Forward* messages.
+ * ForwardRPCFrame carries one frame of a generic ForwardRPC exchange. The
+ * underlying gRPC method is a stream, but the contract is strictly unary:
+ * exactly one request frame and exactly one response frame. Server-streaming
+ * forwards are not supported (large streamed responses use ForwardSearch).
  *
- * Client sends: first frame has procedure + payload (serialized request).
- * Server sends: one or more frames with payload (serialized response).
- *   - Unary: single response frame with end_stream=true.
- *   - Server-streaming: multiple payload frames, last has end_stream=true.
- *   - Error: error_code != 0 with error_message, end_stream=true.
+ * Client sends: one frame with procedure + payload (serialized request).
+ * Server sends: one frame — either payload (serialized response) or
+ *   error_code != 0 with error_message.
  *
  * @generated from message gastrolog.v1.ForwardRPCFrame
  */
 export class ForwardRPCFrame extends Message<ForwardRPCFrame> {
   /**
-   * Connect procedure path, set in first client frame
+   * Connect procedure path, set in the client frame
    *
    * @generated from field: string procedure = 1;
    */
@@ -3848,13 +3848,6 @@ export class ForwardRPCFrame extends Message<ForwardRPCFrame> {
    */
   errorMessage = "";
 
-  /**
-   * true on last response frame
-   *
-   * @generated from field: bool end_stream = 5;
-   */
-  endStream = false;
-
   constructor(data?: PartialMessage<ForwardRPCFrame>) {
     super();
     proto3.util.initPartial(data, this);
@@ -3867,7 +3860,6 @@ export class ForwardRPCFrame extends Message<ForwardRPCFrame> {
     { no: 2, name: "payload", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 3, name: "error_code", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 4, name: "error_message", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 5, name: "end_stream", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardRPCFrame {

@@ -4528,21 +4528,21 @@ func (x *ListPeerManagedFilesResponse) GetFileIds() [][]byte {
 	return nil
 }
 
-// ForwardRPCFrame carries a single frame in a generic ForwardRPC
-// bidirectional stream. Replaces per-RPC Forward* messages.
+// ForwardRPCFrame carries one frame of a generic ForwardRPC exchange. The
+// underlying gRPC method is a stream, but the contract is strictly unary:
+// exactly one request frame and exactly one response frame. Server-streaming
+// forwards are not supported (large streamed responses use ForwardSearch).
 //
-// Client sends: first frame has procedure + payload (serialized request).
-// Server sends: one or more frames with payload (serialized response).
-//   - Unary: single response frame with end_stream=true.
-//   - Server-streaming: multiple payload frames, last has end_stream=true.
-//   - Error: error_code != 0 with error_message, end_stream=true.
+// Client sends: one frame with procedure + payload (serialized request).
+// Server sends: one frame — either payload (serialized response) or
+//
+//	error_code != 0 with error_message.
 type ForwardRPCFrame struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Procedure     string                 `protobuf:"bytes,1,opt,name=procedure,proto3" json:"procedure,omitempty"`                           // Connect procedure path, set in first client frame
+	Procedure     string                 `protobuf:"bytes,1,opt,name=procedure,proto3" json:"procedure,omitempty"`                           // Connect procedure path, set in the client frame
 	Payload       []byte                 `protobuf:"bytes,2,opt,name=payload,proto3" json:"payload,omitempty"`                               // proto-encoded request or response message
 	ErrorCode     uint32                 `protobuf:"varint,3,opt,name=error_code,json=errorCode,proto3" json:"error_code,omitempty"`         // Connect error code (0 = success, response only)
 	ErrorMessage  string                 `protobuf:"bytes,4,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"` // error detail (response only)
-	EndStream     bool                   `protobuf:"varint,5,opt,name=end_stream,json=endStream,proto3" json:"end_stream,omitempty"`         // true on last response frame
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4603,13 +4603,6 @@ func (x *ForwardRPCFrame) GetErrorMessage() string {
 		return x.ErrorMessage
 	}
 	return ""
-}
-
-func (x *ForwardRPCFrame) GetEndStream() bool {
-	if x != nil {
-		return x.EndStream
-	}
-	return false
 }
 
 var File_gastrolog_v1_cluster_proto protoreflect.FileDescriptor
@@ -4915,15 +4908,13 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x04data\x18\x01 \x01(\fR\x04data\"\x1d\n" +
 	"\x1bListPeerManagedFilesRequest\"9\n" +
 	"\x1cListPeerManagedFilesResponse\x12\x19\n" +
-	"\bfile_ids\x18\x01 \x03(\fR\afileIds\"\xac\x01\n" +
+	"\bfile_ids\x18\x01 \x03(\fR\afileIds\"\x8d\x01\n" +
 	"\x0fForwardRPCFrame\x12\x1c\n" +
 	"\tprocedure\x18\x01 \x01(\tR\tprocedure\x12\x18\n" +
 	"\apayload\x18\x02 \x01(\fR\apayload\x12\x1d\n" +
 	"\n" +
 	"error_code\x18\x03 \x01(\rR\terrorCode\x12#\n" +
-	"\rerror_message\x18\x04 \x01(\tR\ferrorMessage\x12\x1d\n" +
-	"\n" +
-	"end_stream\x18\x05 \x01(\bR\tendStream*}\n" +
+	"\rerror_message\x18\x04 \x01(\tR\ferrorMessage*}\n" +
 	"\rAlarmPriority\x12\x1e\n" +
 	"\x1aALARM_PRIORITY_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12ALARM_PRIORITY_LOW\x10\x01\x12\x17\n" +

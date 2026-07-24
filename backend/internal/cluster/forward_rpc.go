@@ -3,7 +3,6 @@ package cluster
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,13 +15,18 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// forwardRPCStreamHandler implements the bidirectional ForwardRPC stream.
-// The client sends a single frame (procedure + serialized request), and the
-// handler dispatches through the internal Connect mux, returning one or more
-// response frames.
+// forwardRPCStreamHandler implements the ForwardRPC transport. The underlying
+// gRPC method is a bidirectional stream, but the contract is strictly UNARY:
+// the client sends exactly one request frame (procedure + serialized request),
+// the handler dispatches it through the internal Connect mux, and exactly one
+// response frame is sent back (payload, or error_code + error_message).
 //
-// For unary RPCs: one response frame with end_stream=true.
-// For server-streaming RPCs: multiple payload frames, last has end_stream=true.
+// Server-streaming forwards are NOT supported on this path and never were: the
+// routing interceptor only ever calls ForwardUnary, and large streamed
+// responses (search) travel over the dedicated ForwardSearch RPC, not here.
+// A forwarded response larger than forwardRPCMaxResponseBytes cannot round-trip
+// and is rejected with a ResourceExhausted error frame rather than silently
+// truncated.
 func forwardRPCStreamHandler(srv any, stream grpc.ServerStream) error {
 	s, ok := srv.(*Server)
 	if !ok {
@@ -72,19 +76,37 @@ func forwardRPCStreamHandler(srv any, stream grpc.ServerStream) error {
 	return unaryResponseFrame(stream, resp.Body)
 }
 
-// unaryResponseFrame reads a raw proto response body and sends it as a
-// ForwardRPCFrame with end_stream=true. Connect unary responses are NOT
-// envelope-framed — the body is raw proto bytes.
+// forwardRPCMaxResponseBytes bounds a single forwarded unary response. It
+// mirrors the internal Connect mux's WithReadMaxBytes: a response larger than
+// this cannot be read back by the forwarding client, so the frame protocol
+// refuses it explicitly instead of silently truncating. gastrolog-4qhej will
+// add transport compression; the size check below runs on the uncompressed
+// body, the point at which compression would naturally be applied.
+const forwardRPCMaxResponseBytes = 4 << 20
+
+// unaryResponseFrame reads a raw proto response body and sends it as a single
+// ForwardRPCFrame. Connect unary responses are NOT envelope-framed — the body
+// is raw proto bytes. Responses exceeding forwardRPCMaxResponseBytes are
+// rejected with a ResourceExhausted error frame naming the limit, rather than
+// truncated to a corrupt payload.
 func unaryResponseFrame(stream grpc.ServerStream, body io.Reader) error {
-	// Read the entire response body (bounded by Connect's ReadMaxBytes).
+	// Read one byte past the limit so we can distinguish "exactly at the
+	// limit" (allowed) from "over the limit" (rejected).
 	var buf bytes.Buffer
-	if _, err := buf.ReadFrom(io.LimitReader(body, 4<<20)); err != nil {
+	if _, err := buf.ReadFrom(io.LimitReader(body, forwardRPCMaxResponseBytes+1)); err != nil {
 		return status.Errorf(codes.Internal, "read response body: %v", err)
+	}
+	if buf.Len() > forwardRPCMaxResponseBytes {
+		return stream.SendMsg(&gastrologv1.ForwardRPCFrame{
+			ErrorCode: uint32(codes.ResourceExhausted),
+			ErrorMessage: fmt.Sprintf(
+				"forwarded response exceeds forwardRPCMaxResponseBytes limit of %d bytes",
+				forwardRPCMaxResponseBytes),
+		})
 	}
 
 	return stream.SendMsg(&gastrologv1.ForwardRPCFrame{
-		Payload:   buf.Bytes(),
-		EndStream: true,
+		Payload: buf.Bytes(),
 	})
 }
 
@@ -105,7 +127,6 @@ func sendErrorFrame(stream grpc.ServerStream, resp *http.Response, _ string) err
 	return stream.SendMsg(&gastrologv1.ForwardRPCFrame{
 		ErrorCode:    code,
 		ErrorMessage: msg,
-		EndStream:    true,
 	})
 }
 
@@ -137,12 +158,10 @@ func httpStatusToConnectCode(httpStatus int) uint32 {
 
 const forwardRPCPurpose = PurposeFwdRPC
 
-// ForwardRPC opens a ForwardRPC bidirectional stream to a remote node and
-// sends a single request, returning the serialized response payload(s).
-// Used by the routing interceptor's Forwarder.
-//
-// For unary RPCs, returns a single payload. For server-streaming RPCs,
-// the caller should use ForwardRPCStream instead.
+// ForwardRPC opens a ForwardRPC stream to a remote node, sends a single
+// request frame, and returns the single serialized response payload. Used by
+// the routing interceptor's Forwarder. The contract is unary-only; there is no
+// server-streaming variant (large streamed responses use ForwardSearch).
 func ForwardRPC(ctx context.Context, peers *PeerConnManager, nodeID, procedure string, reqPayload []byte) ([]byte, uint32, string, error) {
 	// Bound the call so a paused remote (SIGSTOP, GC stall, …) can't wedge
 	// the caller forever. Forwarded unary RPCs are small request/response
@@ -187,73 +206,4 @@ func ForwardRPC(ctx context.Context, peers *PeerConnManager, nodeID, procedure s
 		return nil, resp.ErrorCode, resp.ErrorMessage, nil
 	}
 	return resp.Payload, 0, "", nil
-}
-
-// ForwardRPCStreamSender wraps a ForwardRPC gRPC stream for reading
-// server-streaming response frames.
-type ForwardRPCStreamSender struct {
-	stream grpc.ClientStream
-	handle PeerConnHandle
-}
-
-// Recv reads the next response frame from the stream. Returns io.EOF when
-// the server signals end_stream or the gRPC stream ends.
-func (s *ForwardRPCStreamSender) Recv() (*gastrologv1.ForwardRPCFrame, error) {
-	frame := &gastrologv1.ForwardRPCFrame{}
-	if err := s.stream.RecvMsg(frame); err != nil {
-		if !errors.Is(err, io.EOF) && s.handle != nil {
-			s.handle.Invalidate(err)
-		}
-		return nil, err
-	}
-	if frame.ErrorCode != 0 {
-		return frame, nil
-	}
-	if frame.EndStream && len(frame.Payload) == 0 {
-		return nil, io.EOF
-	}
-	return frame, nil
-}
-
-// Close releases the service-lane connection lease held for this stream.
-func (s *ForwardRPCStreamSender) Close() {
-	if s.handle != nil {
-		s.handle.Release()
-		s.handle = nil
-	}
-}
-
-// ForwardRPCStream opens a ForwardRPC stream for a server-streaming RPC.
-// Returns a ForwardRPCStreamSender that yields response frames.
-func ForwardRPCStream(ctx context.Context, peers *PeerConnManager, nodeID, procedure string, reqPayload []byte) (*ForwardRPCStreamSender, error) {
-	h, stream, err := peers.OpenServiceStream(ctx, nodeID, forwardRPCPurpose,
-		&grpc.StreamDesc{
-			StreamName:    "ForwardRPC",
-			ServerStreams: true,
-			ClientStreams: true,
-		},
-		"/gastrolog.v1.ClusterService/ForwardRPC",
-	)
-	if err != nil {
-		return nil, fmt.Errorf("open ForwardRPC stream to %s: %w", nodeID, err)
-	}
-
-	frame := &gastrologv1.ForwardRPCFrame{
-		Procedure: procedure,
-		Payload:   reqPayload,
-	}
-	if err := stream.SendMsg(frame); err != nil {
-		h.Invalidate(err)
-		h.Release()
-		return nil, fmt.Errorf("send request to %s: %w", nodeID, err)
-	}
-	if err := stream.CloseSend(); err != nil {
-		h.Release()
-		return nil, fmt.Errorf("close send to %s: %w", nodeID, err)
-	}
-
-	return &ForwardRPCStreamSender{
-		stream: stream,
-		handle: h,
-	}, nil
 }
