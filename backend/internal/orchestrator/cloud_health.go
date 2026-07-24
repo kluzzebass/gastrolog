@@ -253,13 +253,11 @@ func (o *Orchestrator) backfillCloudUploads(vaultInst *VaultInstance) {
 		// files but data.glcb does not exist yet — uploading would
 		// fail with no-such-file. Overlaying through the FSM makes us
 		// wait for AnnounceSeal in PostSealProcess.
-		if vaultInst.OverlayFromFSM != nil {
-			m = vaultInst.OverlayFromFSM(m)
-		}
+		m = o.groundChunkMeta(vaultInst.VaultID, m)
 		if !m.Sealed {
 			continue
 		}
-		if chunkIsCloudBacked(vaultInst, m) {
+		if o.chunkIsCloudBacked(vaultInst, m) {
 			// The PRIMARY path (schedulePipelineCloudUpload / onSeal) may
 			// have resolved this chunk before this sweep's RunOnce ever
 			// ran again — that upload never went through
@@ -568,11 +566,9 @@ func (o *Orchestrator) logBackfillFailure(vaultID glid.GLID, id chunk.ChunkID, e
 		"vault", vaultID, "chunk", id, "error", err, "suppressed", n)
 }
 
-// chunkIsCloudBacked checks the FSM (single source of truth) for CloudBacked.
-// Falls back to local state when no FSM exists (single-node / memory mode).
-func chunkIsCloudBacked(vaultInst *VaultInstance, m chunk.ChunkMeta) bool {
-	if vaultInst.OverlayFromFSM != nil {
-		return vaultInst.OverlayFromFSM(m).CloudBacked
-	}
-	return m.CloudBacked
+// chunkIsCloudBacked checks the FSM (single source of truth) for CloudBacked
+// via the grounded-read seam. Falls back to local state when no FSM exists
+// (single-node / memory mode), where groundChunkMeta is a no-op.
+func (o *Orchestrator) chunkIsCloudBacked(vaultInst *VaultInstance, m chunk.ChunkMeta) bool {
+	return o.groundChunkMeta(vaultInst.VaultID, m).CloudBacked
 }

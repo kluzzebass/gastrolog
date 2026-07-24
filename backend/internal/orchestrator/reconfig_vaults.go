@@ -1159,7 +1159,6 @@ type vaultRaftCallbacks struct {
 	isTombstoned            func(id chunk.ChunkID) bool
 	listChunks              func() []chunk.ChunkID
 	listRetPending          func() []chunk.ChunkID
-	overlayFromFSM          func(chunk.ChunkMeta) chunk.ChunkMeta
 	manifestEntries         func() []vaultctlfsm.ManifestEntry
 	manifestEntry           func(id chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool)
 }
@@ -1291,38 +1290,6 @@ func buildVaultRaftCallbacks(r *hraft.Raft, fsm *vaultctlfsm.FSM, applier vaultc
 			return ids
 		},
 		listRetPending: listFSMByFlag(fsm, func(e vaultctlfsm.ManifestEntry) bool { return e.RetentionPending }),
-		overlayFromFSM: func(m chunk.ChunkMeta) chunk.ChunkMeta {
-			if fsm == nil {
-				return m
-			}
-			e := fsm.Get(m.ID)
-			if e == nil {
-				return m
-			}
-			m.CloudBacked = e.CloudBacked
-			m.Archived = e.Archived
-			// Phase 3 (gastrolog-1huz5): the FSM is the cluster-wide
-			// source of truth for the lifecycle state. Local meta.Sealed
-			// flips at sealActiveLocked time but the cluster doesn't see
-			// the chunk as Sealed until sealToGLCB commits. Overlay
-			// State so producer-side iteration (retention, upload,
-			// archival sweep) can branch on cluster state without
-			// jumping the gun on Sealing chunks.
-			m.State = e.State
-			// Keep the legacy bool synced with State so the unaudited
-			// read sites (the bulk of the .Sealed checks across the
-			// codebase) still behave correctly: Sealing reads as
-			// not-yet-sealed.
-			m.Sealed = e.State == chunk.ChunkStateSealed
-			// Retention TTL anchors on SealedAt (wall-clock seal completion).
-			// Pipeline/file managers often leave local meta.SealedAt zero and
-			// only populate record-span WriteEnd — backlog catch-up then
-			// looks instantly expired without the FSM anchor.
-			if !e.SealedAt.IsZero() {
-				m.SealedAt = e.SealedAt
-			}
-			return m
-		},
 		manifestEntries: func() []vaultctlfsm.ManifestEntry {
 			if fsm == nil {
 				return nil

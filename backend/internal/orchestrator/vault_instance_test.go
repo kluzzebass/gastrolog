@@ -13,7 +13,31 @@ import (
 	indexmem "gastrolog/internal/index/memory"
 	"gastrolog/internal/query"
 	"gastrolog/internal/system"
+	"gastrolog/internal/vaultraft"
+	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
+
+// fixedMetaChunkManager is a minimal chunk.ChunkManager stub whose List/Meta
+// report a single fixed meta — enough to drive the orchestrator's grounded-read
+// seam (GetChunkMeta / ListAllChunkMetas) without a real storage backend.
+type fixedMetaChunkManager struct {
+	chunk.ChunkManager // embedded nil — only List/Meta are called
+	meta               chunk.ChunkMeta
+}
+
+func (m *fixedMetaChunkManager) List() ([]chunk.ChunkMeta, error) {
+	return []chunk.ChunkMeta{m.meta}, nil
+}
+
+func (m *fixedMetaChunkManager) Meta(id chunk.ChunkID) (chunk.ChunkMeta, error) {
+	if id == m.meta.ID {
+		return m.meta, nil
+	}
+	return chunk.ChunkMeta{}, chunk.ErrChunkNotFound
+}
+
+// Active reports no open chunk — this stub only serves the one sealed meta.
+func (m *fixedMetaChunkManager) Active() *chunk.ChunkMeta { return nil }
 
 func newMemInstance(t *testing.T, vaultID glid.GLID, isFollower bool, followers []system.ReplicationTarget) *VaultInstance {
 	t.Helper()
@@ -149,58 +173,57 @@ func TestImportToInstanceConcurrentSafe(t *testing.T) {
 // --- ListAllChunkMetas ---
 
 // TestListAllChunkMetasOverlaysFromFSM is the regression test for
-// gastrolog-asg4l. The local chunk manager only sets CloudBacked=true on the
-// node that actually uploaded the blob (the cold instance raft leader);
-// followers strip sealed_backing from their chunk-manager params and never
-// see the cloud state, so their local CloudBacked is permanently false. The
-// fix is to overlay the cluster-wide FSM view onto each chunk meta returned
-// from ListAllChunkMetas. Without the overlay the inspector showed "no cloud
-// badge" 75% of the time on a 4-node cluster (whichever 3 of 4 nodes the
-// query happened to land on were always followers).
+// gastrolog-asg4l, updated for the grounded-read seam (gastrolog-2lfjk/3jerp).
+// The local chunk manager only sets CloudBacked=true on the node that actually
+// uploaded the blob (the cold instance raft leader); followers strip
+// sealed_backing from their chunk-manager params and never see the cloud state,
+// so their local CloudBacked is permanently false. The fix grounds the
+// cluster-wide FSM view onto each chunk meta the orchestrator returns. Without
+// it the inspector showed "no cloud badge" 75% of the time on a 4-node cluster
+// (whichever 3 of 4 nodes the query landed on were always followers).
+//
+// This stands up a REAL single-voter vault-ctl raft group (not a faked
+// instance-level overlay): the FSM records CloudBacked=true via CmdUploadChunk
+// while the local chunk manager reports CloudBacked=false, exactly the follower
+// divergence the seam must correct.
 func TestListAllChunkMetasOverlaysFromFSM(t *testing.T) {
 	t.Parallel()
-	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-
 	vaultID := glid.New()
+	orch, g := newSingleNodeVaultCtlOrch(t, vaultID)
 
-	vaultInst := newMemInstance(t, vaultID, false, nil)
-	// Simulate the follower scenario: the FSM has CloudBacked=true (because
-	// some other node — the leader — uploaded the blob) but the local chunk
-	// manager has no CloudStore so its local meta reports CloudBacked=false.
-	// The OverlayFromFSM callback closes the gap.
-	vaultInst.OverlayFromFSM = func(m chunk.ChunkMeta) chunk.ChunkMeta {
-		m.CloudBacked = true
-		m.Archived = true
-		return m
+	chunkID := chunk.NewChunkID()
+	now := time.Now().UTC()
+	apply := func(data []byte) {
+		t.Helper()
+		if err := g.Raft.Apply(vaultraft.MarshalVaultChunkCommand(vaultID, data), 5*time.Second).Error(); err != nil {
+			t.Fatalf("Apply: %v", err)
+		}
 	}
+	apply(vaultctlfsm.MarshalCreateChunk(chunkID, now, now, now))
+	apply(vaultctlfsm.MarshalSealChunk(chunkID, now, 1, 100, now, now, now, true, now))
+	// Some other node uploaded the blob: the replicated FSM now says
+	// CloudBacked=true.
+	apply(vaultctlfsm.MarshalUploadChunk(chunkID, 1234, 0, 0, 0, 0, [32]byte{}, glid.GLID{}, 0))
 
-	vault := NewVault(vaultID, vaultInst)
-	vault.Name = "follower-with-fsm-overlay"
+	// The local follower instance has no CloudStore, so its chunk manager
+	// reports CloudBacked=false for the same chunk. DiskBytes is live warm-cache
+	// state only this node knows — grounding must not clobber it.
+	local := chunk.ChunkMeta{
+		ID: chunkID, Sealed: true, State: chunk.ChunkStateSealed,
+		CloudBacked: false, DiskBytes: 777, WriteStart: now, WriteEnd: now,
+	}
+	inst := &VaultInstance{VaultID: vaultID, Type: "file", Chunks: &fixedMetaChunkManager{meta: local}}
+	vault := NewVault(vaultID, inst)
+	vault.Name = "follower-grounded-from-fsm"
 	orch.RegisterVault(vault)
 
-	if _, _, err := vaultInst.Chunks.Append(testRecord("payload")); err != nil {
-		t.Fatal(err)
-	}
-	if err := vaultInst.Chunks.Seal(); err != nil {
-		t.Fatal(err)
-	}
-
-	// Sanity-check: the local chunk manager itself reports CloudBacked=false
-	// (because it has no CloudStore wired up). This is the bug condition we
-	// expect the overlay to correct.
-	rawMetas, err := vaultInst.Chunks.List()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(rawMetas) != 1 {
-		t.Fatalf("expected 1 raw meta, got %d", len(rawMetas))
-	}
-	if rawMetas[0].CloudBacked {
-		t.Fatal("test setup wrong: raw meta should have CloudBacked=false")
+	// Sanity: the raw local meta reports CloudBacked=false — the bug condition
+	// the grounded seam corrects.
+	if raw, err := inst.Chunks.Meta(chunkID); err != nil || raw.CloudBacked {
+		t.Fatalf("test setup wrong: raw local meta should have CloudBacked=false (err=%v, meta=%+v)", err, raw)
 	}
 
-	// The overlaid view from ListAllChunkMetas should have CloudBacked=true
-	// and Archived=true — the cluster-wide truth from the FSM.
+	// ListAllChunkMetas reflects the cluster-wide CloudBacked truth.
 	metas, err := orch.ListAllChunkMetas(vaultID)
 	if err != nil {
 		t.Fatal(err)
@@ -208,28 +231,27 @@ func TestListAllChunkMetasOverlaysFromFSM(t *testing.T) {
 	if len(metas) != 1 {
 		t.Fatalf("expected 1 chunk, got %d", len(metas))
 	}
-	got := metas[0].ChunkMeta
-	if !got.CloudBacked {
-		t.Errorf("CloudBacked not overlaid from FSM: got %+v", got)
-	}
-	if !got.Archived {
-		t.Errorf("Archived not overlaid from FSM: got %+v", got)
+	if got := metas[0].ChunkMeta; !got.CloudBacked {
+		t.Errorf("CloudBacked not grounded from FSM: got %+v", got)
 	}
 
-	// GetChunkMeta should also apply the overlay.
-	chunkID := got.ID
+	// GetChunkMeta grounds the LOCAL meta directly: CloudBacked flips to the
+	// cluster truth while the node-local DiskBytes survives untouched.
 	single, err := orch.GetChunkMeta(vaultID, chunkID)
 	if err != nil {
 		t.Fatalf("GetChunkMeta: %v", err)
 	}
-	if !single.CloudBacked || !single.Archived {
-		t.Errorf("GetChunkMeta did not apply overlay: %+v", single)
+	if !single.CloudBacked {
+		t.Errorf("GetChunkMeta did not ground CloudBacked from FSM: %+v", single)
+	}
+	if single.DiskBytes != 777 {
+		t.Errorf("GetChunkMeta clobbered local DiskBytes: got %d, want 777", single.DiskBytes)
 	}
 }
 
-// TestListAllChunkMetasNilOverlayPassthrough verifies that instances without an
-// OverlayFromFSM callback (single-node mode, memory vaults) pass the local
-// chunk manager's view through unchanged. The overlay is opt-in.
+// TestListAllChunkMetasNilOverlayPassthrough verifies that instances with no
+// vault-ctl FSM (single-node mode, memory vaults) pass the local chunk
+// manager's view through unchanged. Grounding is a no-op there.
 func TestListAllChunkMetasNilOverlayPassthrough(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
@@ -237,7 +259,8 @@ func TestListAllChunkMetasNilOverlayPassthrough(t *testing.T) {
 	vaultID := glid.New()
 
 	vaultInst := newMemInstance(t, vaultID, false, nil)
-	// Note: instance.OverlayFromFSM is nil, simulating an instance with no Raft group.
+	// Note: this orchestrator has no groupMgr, so groundChunkMeta is a no-op —
+	// simulating an instance with no Raft group.
 
 	vault := NewVault(vaultID, vaultInst)
 	orch.RegisterVault(vault)

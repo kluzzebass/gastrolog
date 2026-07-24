@@ -334,23 +334,13 @@ func (o *Orchestrator) drainSealed(ctx context.Context, vaultID glid.GLID, cm ch
 		return false
 	}
 
-	// Resolve the vault instance to overlay metas through the FSM.
+	// Ground metas in the FSM before the .Sealed gate.
 	// Phase 3 (gastrolog-1huz5): a chunk's local meta.Sealed flips at
 	// sealActiveLocked time but the FSM doesn't see it as Sealed until
-	// PostSealProcess commits the GLCB. Without the overlay, drain
-	// would race with concurrent post-seal assembly on Sealing chunks.
-	o.mu.RLock()
-	v := o.vaults[vaultID]
-	o.mu.RUnlock()
-	var overlay func(chunk.ChunkMeta) chunk.ChunkMeta
-	if v != nil && v.Instance != nil {
-		overlay = v.Instance.OverlayFromFSM
-	}
-
+	// PostSealProcess commits the GLCB. Without grounding, drain would
+	// race with concurrent post-seal assembly on Sealing chunks.
 	for _, meta := range metas {
-		if overlay != nil {
-			meta = overlay(meta)
-		}
+		meta = o.groundChunkMeta(vaultID, meta)
 		if !meta.Sealed {
 			continue
 		}

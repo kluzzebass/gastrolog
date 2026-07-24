@@ -205,9 +205,7 @@ func (o *Orchestrator) drainVaultChunks(ctx context.Context, sys *system.System,
 		// chunks (active-form sealed locally but GLCB not yet committed)
 		// are skipped. Drain ships sealed-form GLCBs; a Sealing chunk
 		// would race with concurrent PostSealProcess.
-		if vaultInst.OverlayFromFSM != nil {
-			meta = vaultInst.OverlayFromFSM(meta)
-		}
+		meta = o.groundChunkMeta(vaultID, meta)
 		if !meta.Sealed {
 			continue
 		}
