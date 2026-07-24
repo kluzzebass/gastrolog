@@ -73,6 +73,8 @@ When creating a **question** issue, always draft the title and description first
 4. Only run `dcat close` after user confirms
 5. **Upon closing:** commit (including tracker), **merge to the issue’s stack branch**, and **push that branch** — in that order after `dcat close`. Do not merge to the default branch or push the merge **before** the issue is closed.
 
+**When a closing epic retires architecture, a concept, or vocabulary:** sweep the open backlog (`dcat list --agent-only`) for issues predicated on what it just retired — titles, descriptions, and dependency edges go stale silently. The 2026-07 coherence sweep removed ~30 dead or duplicate issues that accumulated exactly this way (tier-era filings, pre-V3 pipeline bugs, twins of closed issues); don't let that rebuild.
+
 Do not open PRs for routine issue closes on a stack branch — merge the feature branch into its **stack branch** directly. PRs are **only** for landing work on **`main`**.
 
 ### Main branch protection
