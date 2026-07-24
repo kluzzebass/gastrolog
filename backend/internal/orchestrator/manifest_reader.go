@@ -6,6 +6,7 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/index"
+	filetsidx "gastrolog/internal/index/file/tsidx"
 	"gastrolog/internal/manifest"
 	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/vaultraft"
@@ -250,20 +251,23 @@ func vaultManifestEntries(t *VaultInstance) []vaultctlfsm.ManifestEntry {
 }
 
 // IndexReader returns a manifest.IndexReader that resolves IngestTS rank /
-// position lookups against this orchestrator's locally-hosted vaults. Phase 1
-// implementation delegates to the existing layered fallback
-// (chunk.ChunkManager.FindIngestEntryIndex → index.IndexManager.FindIngestEntryIndex).
-// A future pass will collapse those two file-access paths onto a single
-// FSM-grounded GLCB section reader; the interface boundary is in place
-// either way so callers (notably the histogram) don't have to know.
+// position lookups on the unified manifest read core (gastrolog-nlepn):
+// vault ownership comes from the replicated vault-ctl FSM (any voter), and
+// the lookup is served from whatever ITSI bytes are locally materialized —
+// the owning instance's chunk manager (active chunk B+ tree, cloud-backed
+// cached index), its index manager (sealed local sidecar), a pipeline open
+// chunk's built GLCB, or a sealed GLCB in the vault chunk root that no
+// manager serves (yet). No remote read is fabricated: when the bytes are
+// not local, the lookup reports unresolvable and callers fall back to the
+// FSM-based estimate (gastrolog-1952x).
 func (o *Orchestrator) IndexReader() manifest.IndexReader {
 	return &orchestratorIndexReader{o: o}
 }
 
-// orchestratorIndexReader implements manifest.IndexReader by walking the
-// orchestrator's local vault instances to find the chunk's owning instance,
-// then dispatching to that instance's chunk manager (and index manager) for
-// the actual rank/pos lookup.
+// orchestratorIndexReader implements manifest.IndexReader by resolving the
+// chunk's owning vault through the replicated manifest, then dispatching to
+// that vault's local managers (with byte-local GLCB fallbacks) for the
+// actual rank/pos lookup.
 type orchestratorIndexReader struct {
 	o *Orchestrator
 }
@@ -272,8 +276,9 @@ var _ manifest.IndexReader = (*orchestratorIndexReader)(nil)
 
 // FindIngestRank returns the rank of the first IngestTS-sorted entry with
 // TS >= ts. Tries the chunk manager (active chunk B+ tree, cloud-backed chunk
-// cached index) first; falls back to the index manager (sealed local
-// chunk sidecar). Returns (0, false) when neither serves the lookup.
+// cached index) first, then the index manager (sealed local chunk sidecar),
+// then a locally built pipeline GLCB, then a sealed GLCB in the vault chunk
+// root. Returns (0, false) when no local bytes serve the lookup.
 func (r *orchestratorIndexReader) FindIngestRank(chunkID chunk.ChunkID, ts time.Time) (uint64, bool) {
 	cm, im := r.lookupVaultManagers(chunkID)
 	if cm != nil {
@@ -287,6 +292,9 @@ func (r *orchestratorIndexReader) FindIngestRank(chunkID chunk.ChunkID, ts time.
 		}
 	}
 	if rank, ok := r.o.PipelineFindIngestRank(chunkID, ts); ok {
+		return rank, true
+	}
+	if rank, _, ok := r.o.chunkRootFindIngest(chunkID, ts); ok {
 		return rank, true
 	}
 	return 0, false
@@ -306,14 +314,39 @@ func (r *orchestratorIndexReader) FindIngestPos(chunkID chunk.ChunkID, ts time.T
 			return pos, true
 		}
 	}
+	if _, pos, ok := r.o.chunkRootFindIngest(chunkID, ts); ok {
+		return pos, true
+	}
 	return 0, false
 }
 
-// lookupVaultManagers walks the orchestrator's local vault instances to
-// find the (chunk, index) manager pair owning the given chunk. Returns
-// (nil, nil) when the chunk isn't local — a signal that the histogram
-// caller should fall back to FSM-based proportional distribution.
+// lookupVaultManagers resolves the (chunk, index) manager pair for the vault
+// owning the given chunk. Ownership comes from the replicated manifest first
+// (manifestEntryByChunk — resolvable on every voter, and correct even when
+// the local chunk manager hasn't registered the chunk yet); open chunks and
+// manifest misses fall back to probing local instances for the chunk.
+// Returns (nil, nil) when this node hosts no managers for the owning vault —
+// the caller then tries the byte-local GLCB fallbacks and finally reports
+// the lookup unresolvable (the histogram's cue to fall back to FSM-based
+// proportional distribution).
 func (r *orchestratorIndexReader) lookupVaultManagers(chunkID chunk.ChunkID) (chunk.ChunkManager, index.IndexManager) {
+	if vid, _, ok := r.o.manifestEntryByChunk(chunkID); ok {
+		r.o.mu.RLock()
+		v := r.o.vaults[vid]
+		var cm chunk.ChunkManager
+		var im index.IndexManager
+		if v != nil && v.Instance != nil {
+			cm, im = v.Instance.Chunks, v.Instance.Indexes
+		}
+		r.o.mu.RUnlock()
+		if cm != nil || im != nil {
+			return cm, im
+		}
+		// The manifest knows the chunk but this node hosts no instance
+		// for its vault. Fall through to the local probe — bytes can
+		// still be locally materialized under another instance while a
+		// retention transfer is in flight.
+	}
 	r.o.mu.RLock()
 	defer r.o.mu.RUnlock()
 	for _, v := range r.o.vaults {
@@ -326,6 +359,29 @@ func (r *orchestratorIndexReader) lookupVaultManagers(chunkID chunk.ChunkID) (ch
 		}
 	}
 	return nil, nil
+}
+
+// chunkRootFindIngest serves an IngestTS index lookup straight from a locally
+// materialized GLCB's ITSI section, addressed via the replicated manifest —
+// no chunk or index manager involvement. Covers sealed pipeline chunks whose
+// GLCB exists in this node's vault chunk root but is not (or not yet)
+// registered with a manager. Nodes without local bytes report false; remote
+// reads are never fabricated (the FSM-estimate residual is gastrolog-1952x).
+func (o *Orchestrator) chunkRootFindIngest(chunkID chunk.ChunkID, ts time.Time) (rank, pos uint64, ok bool) {
+	vid, e, found := o.manifestEntryByChunk(chunkID)
+	if !found || !e.IsSealed() {
+		return 0, 0, false
+	}
+	var hit bool
+	err := o.withPipelineChunkIngestIndex(vid, chunkID, func(mv filetsidx.MmapView) error {
+		r, p, found := mv.SearchTS(ts.UnixNano())
+		rank, pos, hit = uint64(r), uint64(p), found
+		return nil
+	})
+	if err != nil || !hit {
+		return 0, 0, false
+	}
+	return rank, pos, true
 }
 
 // chunkMetaToManifestEntry projects a chunk.ChunkMeta into the FSM-shaped
