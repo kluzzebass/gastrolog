@@ -47,6 +47,7 @@ type orchActions interface {
 	MaxConcurrentJobs() int
 	FindLocalVaultInstance(vaultID glid.GLID) *orchestrator.VaultInstance
 	RefreshVaultCtlMembers(clusterNodes []system.NodeConfig, f orchestrator.Factories)
+	TriggerArchivalSweep()
 }
 
 // ManagedFileHandler handles managed file lifecycle events from the FSM.
@@ -160,7 +161,18 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 		if d.placementTrigger != nil {
 			d.placementTrigger()
 		}
-	case raftfsm.NotifyCloudServicePut, raftfsm.NotifyCloudServiceDeleted,
+	case raftfsm.NotifyCloudServicePut:
+		// An edit to a cloud service's archival transition chain changes the
+		// age thresholds the hourly archival sweep evaluates against. The
+		// sweep is a genuine time-based policy evaluation (gastrolog-15nn1),
+		// but a config change is a discrete event: without an immediate
+		// re-evaluation, shortening an archival age would leave now-eligible
+		// chunks un-transitioned for up to an hour. Fire the sweep now, the
+		// same way NotifyNodeStorageConfigSet wakes the placement reconciler.
+		// archivalSweepAll is leader-gated per vault, so firing on every node
+		// is safe — only the vault leader acts.
+		d.orch.TriggerArchivalSweep()
+	case raftfsm.NotifyCloudServiceDeleted,
 		raftfsm.NotifySetupWizardDismissedSet,
 		raftfsm.NotifyIngesterAliveSet,
 		raftfsm.NotifyIngesterCheckpointSet,

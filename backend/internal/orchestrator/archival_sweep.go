@@ -13,11 +13,15 @@ import (
 )
 
 const (
-	archivalSweepJobName     = "archival-sweep"
-	archivalSweepSchedule    = "0 0 * * * *" // every hour, at minute 0
-	reconcileSweepJobName    = "cloud-reconcile"
-	defaultReconcileSchedule = "0 0 3 * * *" // daily at 3 AM
-	defaultSuspectGraceDays  = 7
+	archivalSweepJobName  = "archival-sweep"
+	archivalSweepSchedule = "0 0 * * * *" // every hour, at minute 0
+	// archivalSweepTriggerJobName is the one-time job scheduled when the
+	// archival policy changes, so a config edit re-evaluates immediately
+	// instead of waiting for the next hourly tick.
+	archivalSweepTriggerJobName = "archival-sweep-triggered"
+	reconcileSweepJobName       = "cloud-reconcile"
+	defaultReconcileSchedule    = "0 0 3 * * *" // daily at 3 AM
+	defaultSuspectGraceDays     = 7
 )
 
 // suspectTracker records when cloud-backed chunks were first observed missing.
@@ -53,12 +57,53 @@ func (s *suspectTracker) suspectSince(id chunk.ChunkID) (time.Time, bool) {
 }
 
 // startArchivalSweep registers the hourly archival sweep job.
+//
+// Verdict (gastrolog-15nn1 — policy vs compensator): this is a *genuine
+// time-based policy evaluation*, not a compensator for a missed event. An
+// archival transition is defined by wall-clock age — a cloud-backed chunk
+// becomes eligible for a storage-class transition when now-WriteEnd crosses a
+// threshold in the cloud service's transition chain. There is no discrete
+// upstream event to "become eligible" that the tick could be missing; the age
+// crossing IS the trigger, exactly like retention-age evaluation
+// (retentionSweepAll, the audit's canonical legitimate policy tick). So the
+// hourly tick is kept as the primary evaluation cadence.
+//
+// The one event-driven input is a *config* change to the archival policy: an
+// operator editing a cloud service's transition chain (e.g. shortening the
+// archival age) makes chunks eligible immediately, and should not wait up to an
+// hour for the next tick. That path is wired via TriggerArchivalSweep, fired
+// from the config dispatcher on NotifyCloudServicePut (mirroring the
+// NodeStorageConfigSet → placementTrigger precedent).
 func (o *Orchestrator) startArchivalSweep() error {
 	if err := o.scheduler.AddJob(archivalSweepJobName, archivalSweepSchedule, o.archivalSweepAll); err != nil {
 		return err
 	}
-	o.scheduler.Describe(archivalSweepJobName, "Archive cloud-backed chunks per lifecycle policy")
+	o.scheduler.Describe(archivalSweepJobName,
+		"Time-based lifecycle policy evaluation: transition cloud-backed chunks to archive storage classes by age")
 	return nil
+}
+
+// TriggerArchivalSweep runs the archival policy evaluation immediately rather
+// than waiting for the next hourly tick. It is fired when the archival policy
+// itself changes (cloud-service transition-chain edit), so an operator's edit
+// takes effect at once instead of up to an hour later.
+//
+// The work is submitted as a one-time scheduler job so it stays visible to the
+// operator inspector (never a raw goroutine). archivalSweepAll is fully
+// leader-gated per vault, so it is safe to fire on every node — only the vault
+// leader acts. Concurrent triggers coalesce: while one triggered run is still
+// pending we skip scheduling another (the hourly job and any in-flight run
+// already cover the same idempotent work).
+func (o *Orchestrator) TriggerArchivalSweep() {
+	if o.scheduler == nil {
+		return
+	}
+	if o.scheduler.HasJob(archivalSweepTriggerJobName) {
+		return // a triggered evaluation is already pending
+	}
+	if err := o.scheduler.RunOnce(archivalSweepTriggerJobName, o.archivalSweepAll); err != nil {
+		o.retentionLogger.Warn("archival sweep: trigger failed", "error", err)
+	}
 }
 
 // archivalSweepAll is the hourly job that transitions cloud-backed chunks to

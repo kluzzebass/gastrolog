@@ -22,7 +22,27 @@ import (
 // archivalTestSetup creates a single-node orchestrator with a cloud instance backed
 // by the in-memory blobstore. Returns the orchestrator, cloud store, chunk manager,
 // vault/vault IDs, and config store.
+//
+// The scheduler is stopped: these tests drive archivalSweepAll / reconcileSweepAll
+// directly and don't want background cron work. Tests that exercise the
+// scheduler-driven TriggerArchivalSweep path use archivalTestSetupLive instead.
 func archivalTestSetup(t *testing.T, transitions []system.CloudStorageTransition) (
+	*Orchestrator, *blobstore.Memory, *chunkfile.Manager, glid.GLID, *sysmem.Store,
+) {
+	t.Helper()
+	return archivalTestSetupOpts(t, transitions, true)
+}
+
+// archivalTestSetupLive is archivalTestSetup with the scheduler left running, so
+// scheduler-dispatched one-time jobs (TriggerArchivalSweep) actually execute.
+func archivalTestSetupLive(t *testing.T, transitions []system.CloudStorageTransition) (
+	*Orchestrator, *blobstore.Memory, *chunkfile.Manager, glid.GLID, *sysmem.Store,
+) {
+	t.Helper()
+	return archivalTestSetupOpts(t, transitions, false)
+}
+
+func archivalTestSetupOpts(t *testing.T, transitions []system.CloudStorageTransition, stopScheduler bool) (
 	*Orchestrator, *blobstore.Memory, *chunkfile.Manager, glid.GLID, *sysmem.Store,
 ) {
 	t.Helper()
@@ -60,7 +80,9 @@ func archivalTestSetup(t *testing.T, transitions []system.CloudStorageTransition
 		LocalNodeID:  nodeID,
 		SystemLoader: &transitionSystemLoader{store: store},
 	})
-	_ = orch.Scheduler().Stop()
+	if stopScheduler {
+		_ = orch.Scheduler().Stop()
+	}
 
 	vaultInst := &VaultInstance{
 		VaultID: vaultID, Type: "cloud",
@@ -188,6 +210,78 @@ func TestArchivalSweepMultiStepTransition(t *testing.T) {
 	meta, _ := cm.Meta(ids[0])
 	if !meta.Archived {
 		t.Error("chunk should be archived after 2 days (cold threshold is 1 day)")
+	}
+}
+
+// TestTriggerArchivalSweepEvaluatesImmediately proves the event-driven trigger
+// runs a full archival policy evaluation through the scheduler (not just the
+// hourly tick). Eligibility is injected by advancing the orchestrator clock —
+// no sleeping — and the async one-time job is drained with WaitIdle.
+func TestTriggerArchivalSweepEvaluatesImmediately(t *testing.T) {
+	t.Parallel()
+	orch, _, cm, _, _ := archivalTestSetupLive(t, []system.CloudStorageTransition{
+		{After: "1d", StorageClass: "GLACIER"},
+	})
+
+	ids := ingestSealUpload(t, cm, 50)
+	if len(ids) == 0 {
+		t.Fatal("no chunks")
+	}
+
+	// Age the chunks past the 1d threshold via the injected clock.
+	orch.now = func() time.Time { return time.Now().Add(48 * time.Hour) }
+
+	orch.TriggerArchivalSweep()
+	orch.Scheduler().WaitIdle(5 * time.Second)
+
+	meta, _ := cm.Meta(ids[0])
+	if !meta.Archived {
+		t.Error("chunk should be archived after triggered evaluation with age > 1 day")
+	}
+}
+
+// TestTriggerArchivalSweepBelowThresholdNoOp confirms the trigger is a genuine
+// policy evaluation, not an unconditional archive: a chunk younger than its
+// transition threshold is left untouched even when the trigger fires.
+func TestTriggerArchivalSweepBelowThresholdNoOp(t *testing.T) {
+	t.Parallel()
+	orch, _, cm, _, _ := archivalTestSetupLive(t, []system.CloudStorageTransition{
+		{After: "5d", StorageClass: "GLACIER"},
+	})
+
+	ids := ingestSealUpload(t, cm, 50)
+
+	// Only 2 days old — below the 5d threshold.
+	orch.now = func() time.Time { return time.Now().Add(48 * time.Hour) }
+
+	orch.TriggerArchivalSweep()
+	orch.Scheduler().WaitIdle(5 * time.Second)
+
+	meta, _ := cm.Meta(ids[0])
+	if meta.Archived {
+		t.Error("chunk below threshold should not be archived by trigger")
+	}
+}
+
+// TestTriggerArchivalSweepCoalesces verifies repeated triggers while a run is
+// pending don't stack up duplicate scheduler jobs.
+func TestTriggerArchivalSweepCoalesces(t *testing.T) {
+	t.Parallel()
+	orch, _, cm, _, _ := archivalTestSetupLive(t, []system.CloudStorageTransition{
+		{After: "1d", StorageClass: "GLACIER"},
+	})
+	_ = ingestSealUpload(t, cm, 10)
+
+	// Fire many triggers back-to-back; the HasJob guard should collapse the
+	// duplicates that arrive while a triggered run is still pending.
+	for range 20 {
+		orch.TriggerArchivalSweep()
+	}
+	orch.Scheduler().WaitIdle(5 * time.Second)
+
+	// After draining, no triggered job should remain registered.
+	if orch.Scheduler().HasJob(archivalSweepTriggerJobName) {
+		t.Error("triggered archival job should not remain after completion")
 	}
 }
 

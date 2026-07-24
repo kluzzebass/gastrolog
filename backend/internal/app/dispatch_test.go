@@ -99,6 +99,8 @@ type mockOrch struct {
 	localInstanceExported func(vaultID glid.GLID) *orchestrator.VaultInstance // configurable return
 
 	refreshVaultCtlCalls [][]system.NodeConfig // node lists passed to RefreshVaultCtlMembers
+
+	archivalTriggerCalls int // number of TriggerArchivalSweep calls
 }
 
 func (m *mockOrch) ListVaults() []glid.GLID    { return m.vaults }
@@ -802,6 +804,52 @@ func TestHandle_ClusterTLSPut(t *testing.T) {
 	})
 }
 
+// TestHandle_CloudServicePutTriggersArchivalSweep pins the event-driven half of
+// the archival policy (gastrolog-15nn1): editing a cloud service's archival
+// transition chain must re-evaluate the archival policy immediately instead of
+// waiting up to an hour for the next tick. NotifyCloudServiceDeleted, by
+// contrast, has no archival re-evaluation to do (the vault's transition chain
+// is gone), so it must NOT fire the trigger.
+func TestHandle_CloudServicePutTriggersArchivalSweep(t *testing.T) {
+	t.Run("put_triggers", func(t *testing.T) {
+		m := &mockOrch{}
+		d := newTestDispatcher(m, &stubCfgStore{}, &captureHandler{})
+
+		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyCloudServicePut, ID: glid.New()})
+
+		if m.archivalTriggerCalls != 1 {
+			t.Fatalf("expected 1 archival trigger on CloudServicePut, got %d", m.archivalTriggerCalls)
+		}
+	})
+
+	t.Run("delete_does_not_trigger", func(t *testing.T) {
+		m := &mockOrch{}
+		d := newTestDispatcher(m, &stubCfgStore{}, &captureHandler{})
+
+		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyCloudServiceDeleted, ID: glid.New()})
+
+		if m.archivalTriggerCalls != 0 {
+			t.Fatalf("expected no archival trigger on CloudServiceDeleted, got %d", m.archivalTriggerCalls)
+		}
+	})
+
+	t.Run("put_still_fires_config_signal", func(t *testing.T) {
+		sig := notify.NewSignal()
+		d := newTestDispatcher(&mockOrch{}, &stubCfgStore{}, &captureHandler{})
+		d.configSignal = sig
+
+		ch := sig.C()
+		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyCloudServicePut, ID: glid.New()})
+
+		select {
+		case <-ch:
+			// expected — WatchConfig streams still see the change.
+		default:
+			t.Fatal("configSignal should still fire on cloud service put")
+		}
+	})
+}
+
 func TestHandle_ConfigSignal(t *testing.T) {
 	t.Run("fires_on_vault_put", func(t *testing.T) {
 		h := &captureHandler{}
@@ -957,6 +1005,10 @@ func (m *mockOrch) FindLocalVaultInstance(vaultID glid.GLID) *orchestrator.Vault
 
 func (m *mockOrch) RefreshVaultCtlMembers(nodes []system.NodeConfig, _ orchestrator.Factories) {
 	m.refreshVaultCtlCalls = append(m.refreshVaultCtlCalls, nodes)
+}
+
+func (m *mockOrch) TriggerArchivalSweep() {
+	m.archivalTriggerCalls++
 }
 
 // gastrolog-4zy8a: every cluster membership change (NodeConfig add/remove)
