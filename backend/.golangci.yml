@@ -42,21 +42,14 @@ linters:
           msg: "chunk.DeleteNoAnnounce must only be called from VaultLifecycleReconciler. Route deletes through reconciler.deleteChunk so the receipt protocol drives them. See gastrolog-51gme."
         - pattern: "\\.DeleteSilent\\("
           msg: "DeleteSilent must only be called from VaultLifecycleReconciler / file.Manager internals. Route deletes through reconciler.deleteChunk. See gastrolog-51gme."
-        # gastrolog-51gme step 11: CmdDeleteChunk is deprecated. The
-        # FSM command + apply handler stay for WAL backward-compat
-        # (replaying old log segments must still work), but no new
-        # producer is allowed. Use MarshalRequestDelete +
-        # reconciler.deleteChunk instead.
-        - pattern: "vaultctlfsm\\.MarshalDeleteChunk"
-          msg: "MarshalDeleteChunk produces a deprecated FSM command. Use reconciler.deleteChunk → CmdRequestDelete instead. See gastrolog-51gme step 11."
-        # The announcing chunk-manager Delete fires AnnounceDelete → the
-        # legacy CmdDeleteChunk path. New callers must route through
-        # reconciler.deleteChunk so the receipt protocol drives cluster-
-        # wide propagation. The path-based exclusion list below allow-
-        # lists the legitimate non-reconciler call sites (memory-mode
-        # fallbacks; the chunk-package definition itself).
+        # A bare chunk-manager Delete removes only this node's local copy;
+        # it does NOT propagate the delete cluster-wide. New callers must
+        # route through VaultInstance.Reconciler.deleteChunk so the vault-ctl
+        # FSM receipt protocol drives cluster-wide propagation. The path-based
+        # exclusion list below allow-lists the legitimate non-reconciler call
+        # sites (memory-mode fallbacks; the chunk-package definition itself).
         - pattern: "Chunks\\.Delete$"
-          msg: "VaultInstance.Chunks.Delete announces CmdDeleteChunk. Route through VaultInstance.Reconciler.deleteChunk so the receipt protocol drives cluster-wide propagation. See gastrolog-51gme."
+          msg: "VaultInstance.Chunks.Delete is a local-only delete. Route through VaultInstance.Reconciler.deleteChunk so the receipt protocol drives cluster-wide propagation. See gastrolog-51gme."
   exclusions:
     paths:
       - _test\.go
@@ -64,12 +57,9 @@ linters:
     rules:
       # Allow-list for the gastrolog-51gme forbidigo rule above.
       # vault_lifecycle_reconciler.go: the reconciler itself.
-      # reconfig_vaults.go: vault teardown / drainSweep / wireVaultFSMOnDelete
-      #   (legacy CmdDeleteChunk OnDelete cascade, scheduled for removal in
-      #   step 11).
-      # vault_ops.go: replaceForwardedChunk (catchup-replicate cleanup) +
-      #   deleteFromFollowers (legacy fallback, removal alongside CmdDeleteChunk
-      #   in step 11).
+      # reconfig_vaults.go: vault teardown / drainSweep (sealAndDeleteAllChunks
+      #   uses DeleteNoAnnounce for local-only teardown cleanup).
+      # vault_ops.go: replaceForwardedChunk (catchup-replicate cleanup).
       # internal/chunk: where DeleteNoAnnounce is defined.
       - linters: [forbidigo]
         path: "internal/orchestrator/vault_lifecycle_reconciler\\.go"
@@ -93,8 +83,6 @@ linters:
         path: "internal/orchestrator/vault_drain\\.go"
       - linters: [forbidigo]
         path: "internal/orchestrator/vault_transfers\\.go"
-      - linters: [forbidigo]
-        path: "internal/orchestrator/retention\\.go"
       # CLI tools intentionally use fmt.Print* for human-facing output;
       # exempt them from forbidigo's built-in fmt.Print* / println / print
       # bans. (The receipt-protocol forbid rules don't apply at the cmd

@@ -183,13 +183,22 @@ func newRetentionRunner(cm chunk.ChunkManager, im index.IndexManager, policy chu
 			{policy: policy},
 		}
 	}
+	// Single-node harness: wire a reconciler with no Raft applier so
+	// expireChunk → reconciler.deleteChunk takes the single-node fallback
+	// (deleteLocalCopy) and removes the chunk/index locally. Chunk deletion
+	// only flows through the reconciler now (gastrolog-lh0rp).
+	vaultID := glid.New()
+	vaultInst := &VaultInstance{VaultID: vaultID, Chunks: cm, Indexes: im}
+	rec := NewVaultLifecycleReconciler(nil, vaultID, vaultInst, "node-local", slog.Default())
+	vaultInst.Reconciler = rec
 	r := &retentionRunner{
-		isLeader: true,
-		vaultID:  glid.New(),
-		cm:       cm,
-		im:       im,
-		now:      time.Now,
-		logger:   slog.Default(),
+		isLeader:   true,
+		vaultID:    vaultID,
+		cm:         cm,
+		im:         im,
+		reconciler: rec,
+		now:        time.Now,
+		logger:     slog.Default(),
 	}
 	return r, rules
 }

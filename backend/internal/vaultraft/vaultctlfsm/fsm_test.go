@@ -239,7 +239,7 @@ func TestFSMDelete(t *testing.T) {
 		t.Fatalf("count: got %d, want 1", fsm.Count())
 	}
 
-	applyCmd(t, fsm, MarshalDeleteChunk(id))
+	applyCmd(t, fsm, MarshalFinalizeDelete(id))
 	if fsm.Count() != 0 {
 		t.Errorf("count after delete: got %d, want 0", fsm.Count())
 	}
@@ -324,17 +324,17 @@ func TestFSMSnapshotRestoreTombstones(t *testing.T) {
 
 	dead1 := testChunkID(2)
 	applyCmd(t, fsm, MarshalCreateChunk(dead1, now, now, now))
-	applyCmd(t, fsm, MarshalDeleteChunk(dead1))
+	applyCmd(t, fsm, MarshalFinalizeDelete(dead1))
 
 	dead2 := testChunkID(3)
 	applyCmd(t, fsm, MarshalCreateChunk(dead2, now, now, now))
-	applyCmd(t, fsm, MarshalDeleteChunk(dead2))
+	applyCmd(t, fsm, MarshalFinalizeDelete(dead2))
 
 	// Also tombstone a chunk that never existed in this FSM (e.g. out-of-order
 	// log replay). Tombstone should still be recorded so a subsequent stale
 	// create would be rejected.
 	ghost := testChunkID(4)
-	applyCmd(t, fsm, MarshalDeleteChunk(ghost))
+	applyCmd(t, fsm, MarshalFinalizeDelete(ghost))
 
 	if !fsm.IsTombstoned(dead1) || !fsm.IsTombstoned(dead2) || !fsm.IsTombstoned(ghost) {
 		t.Fatal("expected all three deleted chunks to be tombstoned before snapshot")
@@ -372,7 +372,7 @@ func TestFSMPruneTombstones(t *testing.T) {
 
 	// Three tombstones; we'll prune the two old ones.
 	for i := 1; i <= 3; i++ {
-		applyCmd(t, fsm, MarshalDeleteChunk(testChunkID(byte(i))))
+		applyCmd(t, fsm, MarshalFinalizeDelete(testChunkID(byte(i))))
 	}
 	if len(fsm.tombstones) != 3 {
 		t.Fatalf("expected 3 tombstones, got %d", len(fsm.tombstones))

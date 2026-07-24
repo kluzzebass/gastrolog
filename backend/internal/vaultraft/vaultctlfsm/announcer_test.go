@@ -203,33 +203,6 @@ func TestAnnouncerReplicatesMetadata(t *testing.T) {
 			t.Errorf("node %d: RecordCount got %d, want 10", i, entry.RecordCount)
 		}
 	}
-
-	// Delete the chunk — triggers AnnounceDelete.
-	if err := mgr.Delete(chunkID); err != nil {
-		t.Fatalf("Delete: %v", err)
-	}
-
-	// Wait for delete to replicate.
-	deadline = time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		allGone := true
-		for _, n := range nodes {
-			if n.fsm.Get(chunkID) != nil {
-				allGone = false
-				break
-			}
-		}
-		if allGone {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-
-	for i, n := range nodes {
-		if n.fsm.Get(chunkID) != nil {
-			t.Errorf("node %d: chunk should be deleted from FSM", i)
-		}
-	}
 }
 
 // testApplier applies directly via raft.Apply — used in tests where the
@@ -502,7 +475,7 @@ func TestAnnouncerShortCircuitsDuringShutdown(t *testing.T) {
 	phase.BeginShutdown("test: draining")
 
 	ann.AnnounceSeal(id, time.Now(), 10, 512, time.Now(), time.Now(), time.Now(), false)
-	ann.AnnounceDelete(id)
+	ann.AnnounceBeginSeal(id)
 	if applier.calls != 1 {
 		t.Errorf("post-shutdown: calls = %d, want 1 (expected zero new calls)", applier.calls)
 	}

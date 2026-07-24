@@ -26,11 +26,12 @@ package orchestrator
 //     source-expire all route through deleteChunk; the staleness
 //     watchdog was deleted because the receipt protocol does not benefit
 //     from a fallback "delete the source anyway" decision.
-//   step 7 (manual-delete RPC via deleteChunkFromInstance):
-//     done. The CLI/UI delete now routes through the reconciler with
-//     reason "manual-delete-rpc". The active-chunk seal-first behavior
-//     is preserved so deletes targeting the active chunk still seal it
-//     before propagation.
+//   step 7 (manual-delete RPC): the manual-delete plumbing
+//     (Orchestrator.DeleteChunk / deleteChunkFromInstance, reached only
+//     through the ChunkReplicationDelete executor) was removed in
+//     gastrolog-lh0rp — it had no live user-facing entry point. A future
+//     operator delete should call reconciler.deleteChunk directly with
+//     reason "manual-delete-rpc".
 //   step 8 (FSM-sealed projection + drop the manager.go heuristic):
 //     done. onSeal and ReconcileFromSnapshot project FSM-sealed state
 //     onto the local chunk Manager via chunk.SealEnsurer.EnsureSealed.
@@ -50,18 +51,14 @@ package orchestrator
 //     successful RemoveServer call; the reconciler's onPruneNode handler
 //     (leader-only) proposes CmdFinalizeDelete for each finalizable
 //     chunk so deletes don't pin pendingDeletes forever.
-//   step 11 (deprecate CmdDeleteChunk): done. The dead production
-//     plumbing (VaultInstance.ApplyRaftDelete, vaultRaftCallbacks.applyDelete,
-//     buildVaultRaftCallbacks's MarshalDeleteChunk producer,
-//     retentionRunner.applyRaftDelete + clusterMode branch) was removed.
-//     CmdDeleteChunk + applyDeleteChunk + MarshalDeleteChunk stay in the
-//     FSM for WAL replay backward-compat, but a forbidigo rule blocks
-//     new MarshalDeleteChunk callers. The wireVaultFSMOnDelete callback
-//     and the legacy forwardDeletionToFollowers RPC chain stay too —
-//     they're reachable only from the older cluster harness in
-//     transition_test.go, which doesn't go through buildInstance and
-//     therefore has no reconciler attached. Migrating that harness onto
-//     the reconciler with a fake-FSM-applier is a follow-up refactor.
+//   step 11 (remove CmdDeleteChunk): done. The entire legacy delete chain
+//     was removed in gastrolog-lh0rp: the CmdDeleteChunk FSM command +
+//     applyDelete + MarshalDeleteChunk, the AnnounceDelete announcer path,
+//     the wireVaultFSMOnDelete OnDelete cascade, and the
+//     forwardDeletionToFollowers / ChunkReplicationDelete RPC chain. The
+//     receipt protocol (CmdRequestDelete + acks + finalize) is now the
+//     sole chunk-delete path; every retention/test harness routes through
+//     a wired VaultLifecycleReconciler.
 
 import (
 	"context"
@@ -97,9 +94,8 @@ type VaultLifecycleReconciler struct {
 	localNodeID string
 	logger      *slog.Logger
 
-	// orch is the parent orchestrator, kept so the reconciler can fan
-	// local deletes out to same-node sibling TIs (mirrors the legacy
-	// deleteFromFollowers path) and bump WatchChunks subscribers.
+	// orch is the parent orchestrator, kept so the reconciler can emit
+	// chunk-lifecycle events and bump WatchChunks subscribers.
 	orch *Orchestrator
 
 	// fsm is the instance sub-FSM this reconciler is bound to. Stored on
@@ -160,9 +156,8 @@ func (r *VaultLifecycleReconciler) Wire(fsm *vaultctlfsm.FSM) {
 	fsm.SetOnAckDelete(r.onAckDelete)
 	fsm.SetOnFinalizeDelete(r.onFinalizeDelete)
 	fsm.SetOnPruneNode(r.onPruneNode)
-	// Note: onDelete and onUpload remain wired by their existing call
-	// sites (file/manager.go). Migrating those into the reconciler
-	// happens during steps 4-7 alongside the path-by-path deletions.
+	// Note: onCreate and onUpload remain wired by their own call sites
+	// (wireVaultFSMOnCreate / wireVaultFSMOnUpload in reconfig_vaults.go).
 }
 
 // ReconcileFromSnapshot runs once after the FSM has been Restore'd from
@@ -604,7 +599,7 @@ func (r *VaultLifecycleReconciler) onFinalizeDelete(chunkID chunk.ChunkID) {
 	// when this node never held local bytes and never ran deleteLocalCopy.
 	// Without this, the WatchChunks projection on nodes that only learned
 	// about the chunk via ListChunks fan-out keeps showing retention-pending
-	// rows until a manual reload. Mirrors wireVaultFSMOnDelete / gastrolog-2ob86.
+	// rows until a manual reload. See gastrolog-2ob86.
 	if r.orch != nil {
 		r.orch.logChunkDeleted(r.vaultID, chunkID)
 		r.orch.EmitChunkDeleted(r.vaultID, chunkID)
@@ -1826,7 +1821,7 @@ func (r *VaultLifecycleReconciler) fulfillObligation(chunkID chunk.ChunkID, reas
 
 // deleteLocalCopy removes a chunk's local on-disk state from this
 // node. ErrChunkNotFound is treated as success — the chunk was already
-// gone (concurrent OnDelete cascade, or this node never had it).
+// gone (a concurrent obligation fulfillment, or this node never had it).
 //
 // When local chunk or index state existed, logs chunk expunged at INFO
 // with reason so operators see bytes leaving disk, not just a delete
@@ -1834,13 +1829,7 @@ func (r *VaultLifecycleReconciler) fulfillObligation(chunkID chunk.ChunkID, reas
 //
 // No same-node sibling fan-out: in the receipt protocol every node
 // runs its own per-TI reconciler, so each TI self-cleans via its own
-// r.instance.Chunks. The legacy `deleteFromFollowers` walk only made sense
-// when a single leader-side expireChunk had to clean up sibling
-// follower TIs on the same node; per-TI reconcilers obsolete that, and
-// per 1:1:1 placement there are no sibling TIs anyway. Calling
-// deleteFromFollowers here would re-visit the same TI we just deleted
-// from and log a spurious "chunk not found" warning. See the cluster
-// log storm fixed alongside this change.
+// r.instance.Chunks. Per 1:1:1 placement there are no sibling TIs anyway.
 func (r *VaultLifecycleReconciler) deleteLocalCopy(chunkID chunk.ChunkID, reason string) error {
 	if r.vaultInst == nil {
 		return nil

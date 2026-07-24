@@ -443,14 +443,6 @@ func (d *directChunkReplicator) ImportSealedChunk(ctx context.Context, nodeID st
 	return orch.ImportToVault(ctx, vaultID, chunkID, next)
 }
 
-func (d *directChunkReplicator) DeleteChunk(_ context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID) error {
-	orch, ok := d.nodes[nodeID]
-	if !ok {
-		return fmt.Errorf("directChunkReplicator: unknown node %q", nodeID)
-	}
-	return orch.DeleteChunk(vaultID, chunkID)
-}
-
 func (d *directChunkReplicator) RequestReplicaCatchup(ctx context.Context, leaderNodeID string, vaultID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (uint32, error) {
 	orch, ok := d.nodes[leaderNodeID]
 	if !ok {
@@ -459,14 +451,10 @@ func (d *directChunkReplicator) RequestReplicaCatchup(ctx context.Context, leade
 	return orch.CatchupSelectedChunks(ctx, vaultID, requesterNodeID, chunkIDs)
 }
 
-// newClusterRetentionRunner creates a retention runner with follower targets
-// for proper cross-node delete forwarding.
-//
-// Wires the reconciler so retention-ttl flows through the receipt protocol
-// (gastrolog-51gme step 4): CmdRequestDelete → onRequestDelete on every node
-// → CmdAckDelete from each → CmdFinalizeDelete on the leader. Without this,
-// expireChunk falls through to the legacy direct-delete fallback which
-// doesn't replicate, and the cluster retention assertions fail.
+// newClusterRetentionRunner creates a retention runner bound to the instance's
+// reconciler (wired by setupCluster with a fake FSM applier). retention-ttl
+// flows through the receipt protocol: reconciler.deleteChunk → CmdRequestDelete
+// → the fake applier fulfills the delete obligation on every expectedFrom node.
 func newClusterRetentionRunner(orch *Orchestrator, vaultID glid.GLID, vaultInst *VaultInstance) *retentionRunner {
 	return &retentionRunner{
 		isLeader:        true,
@@ -691,6 +679,33 @@ func setupCluster(t *testing.T, nodeIDs []string, vaultCount int, rotationRecord
 		}
 		orchs[nid].SetRemoteTransferrer(&directTransferrer{nodes: remotes})
 		orchs[nid].SetChunkReplicator(&directChunkReplicator{nodes: remotes})
+	}
+
+	// Wire a lifecycle reconciler onto every instance plus a fake FSM
+	// applier that drives the receipt-protocol delete in-process. When any
+	// node proposes CmdRequestDelete via reconciler.deleteChunk, the fake
+	// applier fulfills the obligation on every expectedFrom node's own
+	// reconciler — the deterministic, timing-free equivalent of the real
+	// onRequestDelete → fulfillObligation fan-out. This replaces the legacy
+	// direct-delete + ChunkReplicationDelete RPC fan-out the harness used
+	// before gastrolog-lh0rp.
+	recs := make(map[string]*VaultLifecycleReconciler, len(nodeIDs))
+	for _, nid := range nodeIDs {
+		inst := nodes[nid].instances[0]
+		rec := NewVaultLifecycleReconciler(orchs[nid], vaultID, inst, nid, logger.With("node", nid))
+		inst.Reconciler = rec
+		recs[nid] = rec
+	}
+	applyRequestDelete := func(chunkID chunk.ChunkID, reason string, expectedFrom []string) error {
+		for _, nid := range expectedFrom {
+			if rec, ok := recs[nid]; ok {
+				rec.fulfillObligation(chunkID, reason, "request-delete")
+			}
+		}
+		return nil
+	}
+	for _, nid := range nodeIDs {
+		nodes[nid].instances[0].ApplyRaftRequestDelete = applyRequestDelete
 	}
 
 	t.Cleanup(func() {

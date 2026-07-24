@@ -334,15 +334,14 @@ message ChunkReplicationCommand {
   bytes vault_id = 1;
 
   oneof command {
-    ChunkReplicationDelete delete_chunk = 10;
     // Sealed-chunk import is a three-phase sequence on the same stream:
     // ImportBegin → 1..N ImportRecords frames → ImportCommit. Replaces
     // a legacy single-frame ChunkReplicationImport that packed the whole
     // chunk into one message; chunks past the gRPC receive cap wedged
     // the catchup path forever. See gastrolog-4yvhh.
-    ChunkReplicationImportBegin import_begin = 11;
-    ChunkReplicationImportRecords import_records = 12;
-    ChunkReplicationImportCommit import_commit = 13;
+    ChunkReplicationImportBegin import_begin = 10;
+    ChunkReplicationImportRecords import_records = 11;
+    ChunkReplicationImportCommit import_commit = 12;
   }
 }
 
@@ -370,12 +369,6 @@ message ChunkReplicationImportRecords {
 // goroutine to drain and return, and acks with the importer's result.
 // chunk_id is echoed for sanity-checking against ImportBegin.
 message ChunkReplicationImportCommit {
-  bytes chunk_id = 1;
-}
-
-// ChunkReplicationDelete tells the follower to delete a sealed chunk
-// (after retention expiry on the leader).
-message ChunkReplicationDelete {
   bytes chunk_id = 1;
 }
 

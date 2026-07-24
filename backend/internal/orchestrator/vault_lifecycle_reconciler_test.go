@@ -41,9 +41,6 @@ func (c *captureCatchupReplicator) SealVault(_ context.Context, _ string, _ glid
 func (c *captureCatchupReplicator) ImportSealedChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ chunk.RecordIterator) error {
 	return nil
 }
-func (c *captureCatchupReplicator) DeleteChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID) error {
-	return nil
-}
 func (c *captureCatchupReplicator) RequestReplicaCatchup(_ context.Context, leaderNodeID string, vaultID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (uint32, error) {
 	c.calls.Add(1)
 	c.lastLeader = leaderNodeID
@@ -1263,45 +1260,6 @@ func TestReconcilerOnSealNotifiesEvenWhenEnsureSealedFails(t *testing.T) {
 	}
 }
 
-// TestWireInstanceFSMOnDeleteFiresNotifyChunkChange pins that the legacy
-// FSM-driven delete callback (CmdDeleteChunk applied via Raft, not the
-// receipt-protocol path) also fires NotifyChunkChange. Without this,
-// nodes that don't own the chunk locally — but display it via the
-// inspector's cluster-wide ListChunks fan-out — would never refresh
-// after a remote delete. See gastrolog-2ob86.
-func TestWireInstanceFSMOnDeleteFiresNotifyChunkChange(t *testing.T) {
-	t.Parallel()
-
-	orch, err := New(Config{LocalNodeID: "node-A"})
-	if err != nil {
-		t.Fatalf("orchestrator.New: %v", err)
-	}
-	startThrottleForTest(t, orch)
-	signalCh := orch.ChunkSignal().C()
-
-	fsm := vaultctlfsm.New()
-	cm := &recordingSilentDeleter{}
-	vaultID := glid.New()
-	g := &raftgroup.Group{FSM: fsm}
-	wireVaultFSMOnDelete(g, vaultID, cm, nil, orch, slog.Default())
-
-	id := chunk.NewChunkID()
-	now := time.Now()
-	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(id, now, now, now)}); err != nil {
-		t.Fatalf("apply create: %v", err)
-	}
-	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalDeleteChunk(id)}); err != nil {
-		t.Fatalf("apply delete: %v", err)
-	}
-
-	if !waitForChunkSignal(signalCh, time.Second) {
-		t.Fatal("expected chunk signal after CmdDeleteChunk apply, got timeout")
-	}
-	if len(cm.silentDeleted) != 1 || cm.silentDeleted[0] != id {
-		t.Errorf("DeleteSilent = %v, want [%s]", cm.silentDeleted, id)
-	}
-}
-
 // TestReconcilerOnFinalizeDeleteEmitsChunkDeleted pins that the receipt-
 // protocol finalize path (CmdAckDelete draining ExpectedFrom) emits a
 // typed DELETED event on every node, not just nodes that ran
@@ -1355,37 +1313,6 @@ func TestReconcilerOnFinalizeDeleteEmitsChunkDeleted(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for DELETED event on finalize")
-	}
-}
-
-// TestWireInstanceFSMOnDeleteNotifiesEvenWhenDeleteSilentFails pins the
-// FSM-state-is-authoritative principle for the delete callback: a
-// failed local file delete (chunk missing, manager closed, etc.) must
-// not gate the inspector signal. The chunks-map entry was removed from
-// the FSM regardless. See gastrolog-2ob86.
-func TestWireInstanceFSMOnDeleteNotifiesEvenWhenDeleteSilentFails(t *testing.T) {
-	t.Parallel()
-
-	orch, err := New(Config{LocalNodeID: "node-A"})
-	if err != nil {
-		t.Fatalf("orchestrator.New: %v", err)
-	}
-	startThrottleForTest(t, orch)
-	signalCh := orch.ChunkSignal().C()
-
-	fsm := vaultctlfsm.New()
-	cm := &recordingSilentDeleter{failNext: chunk.ErrChunkNotFound}
-	vaultID := glid.New()
-	g := &raftgroup.Group{FSM: fsm}
-	wireVaultFSMOnDelete(g, vaultID, cm, nil, orch, slog.Default())
-
-	id := chunk.NewChunkID()
-	now := time.Now()
-	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(id, now, now, now)})
-	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalDeleteChunk(id)})
-
-	if !waitForChunkSignal(signalCh, time.Second) {
-		t.Fatal("expected chunk signal even when DeleteSilent fails, got timeout")
 	}
 }
 
@@ -1954,7 +1881,6 @@ func (a *captureAnnouncer) AnnounceAttachOffsets(chunk.ChunkID, int64, int64, in
 }
 func (a *captureAnnouncer) AnnounceUpload(chunk.ChunkID, int64, int64, int64, int64, int64, [32]byte, glid.GLID, uint8) {
 }
-func (a *captureAnnouncer) AnnounceDelete(chunk.ChunkID) {}
 
 // TestSweepIdleActiveSealsLocalActivePastThreshold pins the m.active
 // branch: when an FSM-Active entry is the local m.active and has been

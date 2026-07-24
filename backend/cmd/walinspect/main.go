@@ -48,7 +48,7 @@ func main() {
 	var (
 		cmdOnly     = flag.Bool("cmd-only", false, "only print FSM-command log entries")
 		filterGroup = flag.String("filter-group", "", "only print entries from this group name (vault-ctl group ID, 'config', etc.)")
-		filterCmd   = flag.String("filter-cmd", "", "only print entries with this FSM command (e.g. CmdDeleteChunk)")
+		filterCmd   = flag.String("filter-cmd", "", "only print entries with this FSM command (e.g. CmdSealChunk)")
 		summary     = flag.Bool("summary", false, "print per-group + per-command counts only")
 		termHist    = flag.Bool("term-hist", false, "print per-(group, term, cmd) counts to localize spikes")
 	)
@@ -325,8 +325,6 @@ func innerCommandNameAndID(cmd *gastrologv1.VaultCtlCommand) (string, string) {
 		return "CmdSealChunk", chunkIDStr(c.SealChunk.GetId())
 	case *gastrologv1.VaultCtlCommand_UploadChunk:
 		return "CmdUploadChunk", chunkIDStr(c.UploadChunk.GetId())
-	case *gastrologv1.VaultCtlCommand_DeleteChunk:
-		return "CmdDeleteChunk", chunkIDStr(c.DeleteChunk.GetId())
 	case *gastrologv1.VaultCtlCommand_RetentionPending:
 		return "CmdRetentionPending", chunkIDStr(c.RetentionPending.GetId())
 	case *gastrologv1.VaultCtlCommand_RequestDelete:

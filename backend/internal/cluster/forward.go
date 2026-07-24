@@ -651,15 +651,6 @@ func (s *Server) forwardSealVault(ctx context.Context, req *gastrologv1.ForwardS
 	return &gastrologv1.ForwardSealVaultResponse{}, nil
 }
 
-// DeleteChunkExecutor deletes a specific sealed chunk from a vault on this
-// node. Invoked by the ChunkReplication stream handler.
-type DeleteChunkExecutor func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID) error
-
-// SetDeleteChunkExecutor injects the callback for handling ChunkReplicationDelete commands.
-func (s *Server) SetDeleteChunkExecutor(fn DeleteChunkExecutor) {
-	s.deleteChunkExecutor = fn
-}
-
 // forwardReindexVault handles the ForwardReindexVault RPC. Rebuilds all indexes
 // for a local vault.
 func (s *Server) forwardReindexVault(ctx context.Context, req *gastrologv1.ForwardReindexVaultRequest) (*gastrologv1.ForwardReindexVaultResponse, error) {

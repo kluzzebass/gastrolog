@@ -29,9 +29,6 @@ func (m *replicationFakeReplicator) ImportSealedChunk(_ context.Context, _ strin
 	m.replicatedChunks = append(m.replicatedChunks, chunkID)
 	return nil
 }
-func (m *replicationFakeReplicator) DeleteChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID) error {
-	return nil
-}
 func (m *replicationFakeReplicator) RequestReplicaCatchup(_ context.Context, _ string, _ glid.GLID, _ []chunk.ChunkID, _ string) (uint32, error) {
 	return 0, nil
 }
@@ -390,9 +387,6 @@ func (b *blockingCatchupReplicator) ImportSealedChunk(_ context.Context, _ strin
 	<-b.release
 	return nil
 }
-func (b *blockingCatchupReplicator) DeleteChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID) error {
-	return nil
-}
 func (b *blockingCatchupReplicator) RequestReplicaCatchup(_ context.Context, _ string, _ glid.GLID, _ []chunk.ChunkID, _ string) (uint32, error) {
 	return 0, nil
 }
@@ -711,22 +705,12 @@ func TestClusterReplicationDeletePropagation(t *testing.T) {
 		}
 	}
 
-	// Now delete all chunks on leader AND forward delete to followers.
+	// Delete all chunks cluster-wide via the receipt protocol. The leader's
+	// reconciler proposes CmdRequestDelete with every node in expectedFrom;
+	// setupCluster's fake FSM applier fulfills the obligation on each node.
 	for _, m := range metas {
-		// Delete on leader.
-		if err := leaderInst.Indexes.DeleteIndexes(m.ID); err != nil {
-			t.Logf("leader DeleteIndexes(%s): %v", m.ID, err)
-		}
-		if err := leaderInst.Chunks.Delete(m.ID); err != nil {
-			t.Fatalf("leader Delete(%s): %v", m.ID, err)
-		}
-		// Forward delete to each follower.
-		for _, fid := range []string{"f1", "f2", "f3"} {
-			if err := leaderNode.orch.chunkReplicator.DeleteChunk(
-				ctx, fid, h.vaultID, m.ID,
-			); err != nil {
-				t.Errorf("DeleteChunk(%s, %s): %v", fid, m.ID, err)
-			}
+		if err := leaderInst.Reconciler.deleteChunk(m.ID, "test-delete", h.allNodeIDs()); err != nil {
+			t.Errorf("deleteChunk(%s): %v", m.ID, err)
 		}
 	}
 

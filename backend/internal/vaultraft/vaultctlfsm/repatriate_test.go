@@ -86,7 +86,7 @@ func TestApplyRepatriate_RefusesIfTombstoned(t *testing.T) {
 	f := New()
 	id := chunk.ChunkID(glid.New())
 
-	if got := applyLog(f, MarshalDeleteChunk(id)); got != nil {
+	if got := applyLog(f, MarshalFinalizeDelete(id)); got != nil {
 		t.Fatalf("seed tombstone: %v", got)
 	}
 

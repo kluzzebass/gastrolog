@@ -743,9 +743,6 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 	clusterSrv.SetAnalyzeChunkExecutor(newAnalyzeChunkExecutor(orch))
 	clusterSrv.SetChunkEventSubscriber(newChunkEventSubscriber(orch))
 	clusterSrv.SetSealVaultExecutor(newSealVaultExecutor(orch))
-	clusterSrv.SetDeleteChunkExecutor(func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID) error {
-		return orch.DeleteChunk(vaultID, chunkID)
-	})
 	clusterSrv.SetReindexVaultExecutor(newReindexVaultExecutor(orch))
 	clusterSrv.SetExplainExecutor(newExplainExecutor(orch, nodeID))
 	clusterSrv.SetFollowExecutor(newFollowExecutor(orch))

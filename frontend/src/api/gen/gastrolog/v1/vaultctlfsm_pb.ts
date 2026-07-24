@@ -169,136 +169,127 @@ export class VaultCtlCommand extends Message<VaultCtlCommand> {
     case: "uploadChunk";
   } | {
     /**
-     * delete_chunk (4) is retained for WAL replay only; no current producer
-     * emits it (see CmdDeleteChunk in fsm.go).
-     *
-     * @generated from field: gastrolog.v1.DeleteChunkCommand delete_chunk = 4;
-     */
-    value: DeleteChunkCommand;
-    case: "deleteChunk";
-  } | {
-    /**
-     * @generated from field: gastrolog.v1.RetentionPendingCommand retention_pending = 5;
+     * @generated from field: gastrolog.v1.RetentionPendingCommand retention_pending = 4;
      */
     value: RetentionPendingCommand;
     case: "retentionPending";
   } | {
     /**
-     * @generated from field: gastrolog.v1.RequestDeleteCommand request_delete = 6;
+     * @generated from field: gastrolog.v1.RequestDeleteCommand request_delete = 5;
      */
     value: RequestDeleteCommand;
     case: "requestDelete";
   } | {
     /**
-     * @generated from field: gastrolog.v1.AckDeleteCommand ack_delete = 7;
+     * @generated from field: gastrolog.v1.AckDeleteCommand ack_delete = 6;
      */
     value: AckDeleteCommand;
     case: "ackDelete";
   } | {
     /**
-     * @generated from field: gastrolog.v1.FinalizeDeleteCommand finalize_delete = 8;
+     * @generated from field: gastrolog.v1.FinalizeDeleteCommand finalize_delete = 7;
      */
     value: FinalizeDeleteCommand;
     case: "finalizeDelete";
   } | {
     /**
-     * @generated from field: gastrolog.v1.PruneNodeCommand prune_node = 9;
+     * @generated from field: gastrolog.v1.PruneNodeCommand prune_node = 8;
      */
     value: PruneNodeCommand;
     case: "pruneNode";
   } | {
     /**
-     * @generated from field: gastrolog.v1.AttachOffsetsCommand attach_offsets = 10;
+     * @generated from field: gastrolog.v1.AttachOffsetsCommand attach_offsets = 9;
      */
     value: AttachOffsetsCommand;
     case: "attachOffsets";
   } | {
     /**
-     * @generated from field: gastrolog.v1.BeginSealCommand begin_seal = 11;
+     * @generated from field: gastrolog.v1.BeginSealCommand begin_seal = 10;
      */
     value: BeginSealCommand;
     case: "beginSeal";
   } | {
     /**
-     * @generated from field: gastrolog.v1.RepatriateChunkCommand repatriate_chunk = 12;
+     * @generated from field: gastrolog.v1.RepatriateChunkCommand repatriate_chunk = 11;
      */
     value: RepatriateChunkCommand;
     case: "repatriateChunk";
   } | {
     /**
-     * @generated from field: gastrolog.v1.PublishCompletedSegmentCommand publish_completed_segment = 13;
+     * @generated from field: gastrolog.v1.PublishCompletedSegmentCommand publish_completed_segment = 12;
      */
     value: PublishCompletedSegmentCommand;
     case: "publishCompletedSegment";
   } | {
     /**
-     * @generated from field: gastrolog.v1.OpenChunkManifestCommand open_chunk_manifest = 14;
+     * @generated from field: gastrolog.v1.OpenChunkManifestCommand open_chunk_manifest = 13;
      */
     value: OpenChunkManifestCommand;
     case: "openChunkManifest";
   } | {
     /**
-     * @generated from field: gastrolog.v1.AddOpenChunkSegmentRefCommand add_open_chunk_segment_ref = 15;
+     * @generated from field: gastrolog.v1.AddOpenChunkSegmentRefCommand add_open_chunk_segment_ref = 14;
      */
     value: AddOpenChunkSegmentRefCommand;
     case: "addOpenChunkSegmentRef";
   } | {
     /**
-     * @generated from field: gastrolog.v1.SealOpenChunkManifestCommand seal_open_chunk_manifest = 16;
+     * @generated from field: gastrolog.v1.SealOpenChunkManifestCommand seal_open_chunk_manifest = 15;
      */
     value: SealOpenChunkManifestCommand;
     case: "sealOpenChunkManifest";
   } | {
     /**
-     * @generated from field: gastrolog.v1.ReleaseSegmentsCommand release_segments = 17;
+     * @generated from field: gastrolog.v1.ReleaseSegmentsCommand release_segments = 16;
      */
     value: ReleaseSegmentsCommand;
     case: "releaseSegments";
   } | {
     /**
-     * @generated from field: gastrolog.v1.AckSegmentHolderCommand ack_segment_holder = 18;
+     * @generated from field: gastrolog.v1.AckSegmentHolderCommand ack_segment_holder = 17;
      */
     value: AckSegmentHolderCommand;
     case: "ackSegmentHolder";
   } | {
     /**
-     * @generated from field: gastrolog.v1.DiscardOpenChunkManifestCommand discard_open_chunk_manifest = 19;
+     * @generated from field: gastrolog.v1.DiscardOpenChunkManifestCommand discard_open_chunk_manifest = 18;
      */
     value: DiscardOpenChunkManifestCommand;
     case: "discardOpenChunkManifest";
   } | {
     /**
-     * @generated from field: gastrolog.v1.PublishCompletedSegmentsCommand publish_completed_segments = 20;
+     * @generated from field: gastrolog.v1.PublishCompletedSegmentsCommand publish_completed_segments = 19;
      */
     value: PublishCompletedSegmentsCommand;
     case: "publishCompletedSegments";
   } | {
     /**
-     * @generated from field: gastrolog.v1.AddOpenChunkSegmentRefsCommand add_open_chunk_segment_refs = 21;
+     * @generated from field: gastrolog.v1.AddOpenChunkSegmentRefsCommand add_open_chunk_segment_refs = 20;
      */
     value: AddOpenChunkSegmentRefsCommand;
     case: "addOpenChunkSegmentRefs";
   } | {
     /**
-     * @generated from field: gastrolog.v1.AckChunkHolderCommand ack_chunk_holder = 22;
+     * @generated from field: gastrolog.v1.AckChunkHolderCommand ack_chunk_holder = 21;
      */
     value: AckChunkHolderCommand;
     case: "ackChunkHolder";
   } | {
     /**
-     * @generated from field: gastrolog.v1.RevokeChunkHolderCommand revoke_chunk_holder = 23;
+     * @generated from field: gastrolog.v1.RevokeChunkHolderCommand revoke_chunk_holder = 22;
      */
     value: RevokeChunkHolderCommand;
     case: "revokeChunkHolder";
   } | {
     /**
-     * @generated from field: gastrolog.v1.DiscardUnbuildableManifestsCommand discard_unbuildable_manifests = 24;
+     * @generated from field: gastrolog.v1.DiscardUnbuildableManifestsCommand discard_unbuildable_manifests = 23;
      */
     value: DiscardUnbuildableManifestsCommand;
     case: "discardUnbuildableManifests";
   } | {
     /**
-     * @generated from field: gastrolog.v1.ClearTransferSourceCommand clear_transfer_source = 25;
+     * @generated from field: gastrolog.v1.ClearTransferSourceCommand clear_transfer_source = 24;
      */
     value: ClearTransferSourceCommand;
     case: "clearTransferSource";
@@ -315,28 +306,27 @@ export class VaultCtlCommand extends Message<VaultCtlCommand> {
     { no: 1, name: "create_chunk", kind: "message", T: CreateChunkCommand, oneof: "command" },
     { no: 2, name: "seal_chunk", kind: "message", T: SealChunkCommand, oneof: "command" },
     { no: 3, name: "upload_chunk", kind: "message", T: UploadChunkCommand, oneof: "command" },
-    { no: 4, name: "delete_chunk", kind: "message", T: DeleteChunkCommand, oneof: "command" },
-    { no: 5, name: "retention_pending", kind: "message", T: RetentionPendingCommand, oneof: "command" },
-    { no: 6, name: "request_delete", kind: "message", T: RequestDeleteCommand, oneof: "command" },
-    { no: 7, name: "ack_delete", kind: "message", T: AckDeleteCommand, oneof: "command" },
-    { no: 8, name: "finalize_delete", kind: "message", T: FinalizeDeleteCommand, oneof: "command" },
-    { no: 9, name: "prune_node", kind: "message", T: PruneNodeCommand, oneof: "command" },
-    { no: 10, name: "attach_offsets", kind: "message", T: AttachOffsetsCommand, oneof: "command" },
-    { no: 11, name: "begin_seal", kind: "message", T: BeginSealCommand, oneof: "command" },
-    { no: 12, name: "repatriate_chunk", kind: "message", T: RepatriateChunkCommand, oneof: "command" },
-    { no: 13, name: "publish_completed_segment", kind: "message", T: PublishCompletedSegmentCommand, oneof: "command" },
-    { no: 14, name: "open_chunk_manifest", kind: "message", T: OpenChunkManifestCommand, oneof: "command" },
-    { no: 15, name: "add_open_chunk_segment_ref", kind: "message", T: AddOpenChunkSegmentRefCommand, oneof: "command" },
-    { no: 16, name: "seal_open_chunk_manifest", kind: "message", T: SealOpenChunkManifestCommand, oneof: "command" },
-    { no: 17, name: "release_segments", kind: "message", T: ReleaseSegmentsCommand, oneof: "command" },
-    { no: 18, name: "ack_segment_holder", kind: "message", T: AckSegmentHolderCommand, oneof: "command" },
-    { no: 19, name: "discard_open_chunk_manifest", kind: "message", T: DiscardOpenChunkManifestCommand, oneof: "command" },
-    { no: 20, name: "publish_completed_segments", kind: "message", T: PublishCompletedSegmentsCommand, oneof: "command" },
-    { no: 21, name: "add_open_chunk_segment_refs", kind: "message", T: AddOpenChunkSegmentRefsCommand, oneof: "command" },
-    { no: 22, name: "ack_chunk_holder", kind: "message", T: AckChunkHolderCommand, oneof: "command" },
-    { no: 23, name: "revoke_chunk_holder", kind: "message", T: RevokeChunkHolderCommand, oneof: "command" },
-    { no: 24, name: "discard_unbuildable_manifests", kind: "message", T: DiscardUnbuildableManifestsCommand, oneof: "command" },
-    { no: 25, name: "clear_transfer_source", kind: "message", T: ClearTransferSourceCommand, oneof: "command" },
+    { no: 4, name: "retention_pending", kind: "message", T: RetentionPendingCommand, oneof: "command" },
+    { no: 5, name: "request_delete", kind: "message", T: RequestDeleteCommand, oneof: "command" },
+    { no: 6, name: "ack_delete", kind: "message", T: AckDeleteCommand, oneof: "command" },
+    { no: 7, name: "finalize_delete", kind: "message", T: FinalizeDeleteCommand, oneof: "command" },
+    { no: 8, name: "prune_node", kind: "message", T: PruneNodeCommand, oneof: "command" },
+    { no: 9, name: "attach_offsets", kind: "message", T: AttachOffsetsCommand, oneof: "command" },
+    { no: 10, name: "begin_seal", kind: "message", T: BeginSealCommand, oneof: "command" },
+    { no: 11, name: "repatriate_chunk", kind: "message", T: RepatriateChunkCommand, oneof: "command" },
+    { no: 12, name: "publish_completed_segment", kind: "message", T: PublishCompletedSegmentCommand, oneof: "command" },
+    { no: 13, name: "open_chunk_manifest", kind: "message", T: OpenChunkManifestCommand, oneof: "command" },
+    { no: 14, name: "add_open_chunk_segment_ref", kind: "message", T: AddOpenChunkSegmentRefCommand, oneof: "command" },
+    { no: 15, name: "seal_open_chunk_manifest", kind: "message", T: SealOpenChunkManifestCommand, oneof: "command" },
+    { no: 16, name: "release_segments", kind: "message", T: ReleaseSegmentsCommand, oneof: "command" },
+    { no: 17, name: "ack_segment_holder", kind: "message", T: AckSegmentHolderCommand, oneof: "command" },
+    { no: 18, name: "discard_open_chunk_manifest", kind: "message", T: DiscardOpenChunkManifestCommand, oneof: "command" },
+    { no: 19, name: "publish_completed_segments", kind: "message", T: PublishCompletedSegmentsCommand, oneof: "command" },
+    { no: 20, name: "add_open_chunk_segment_refs", kind: "message", T: AddOpenChunkSegmentRefsCommand, oneof: "command" },
+    { no: 21, name: "ack_chunk_holder", kind: "message", T: AckChunkHolderCommand, oneof: "command" },
+    { no: 22, name: "revoke_chunk_holder", kind: "message", T: RevokeChunkHolderCommand, oneof: "command" },
+    { no: 23, name: "discard_unbuildable_manifests", kind: "message", T: DiscardUnbuildableManifestsCommand, oneof: "command" },
+    { no: 24, name: "clear_transfer_source", kind: "message", T: ClearTransferSourceCommand, oneof: "command" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultCtlCommand {
@@ -587,43 +577,6 @@ export class UploadChunkCommand extends Message<UploadChunkCommand> {
 
   static equals(a: UploadChunkCommand | PlainMessage<UploadChunkCommand> | undefined, b: UploadChunkCommand | PlainMessage<UploadChunkCommand> | undefined): boolean {
     return proto3.util.equals(UploadChunkCommand, a, b);
-  }
-}
-
-/**
- * @generated from message gastrolog.v1.DeleteChunkCommand
- */
-export class DeleteChunkCommand extends Message<DeleteChunkCommand> {
-  /**
-   * @generated from field: bytes id = 1;
-   */
-  id = new Uint8Array(0);
-
-  constructor(data?: PartialMessage<DeleteChunkCommand>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.DeleteChunkCommand";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteChunkCommand {
-    return new DeleteChunkCommand().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): DeleteChunkCommand {
-    return new DeleteChunkCommand().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): DeleteChunkCommand {
-    return new DeleteChunkCommand().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: DeleteChunkCommand | PlainMessage<DeleteChunkCommand> | undefined, b: DeleteChunkCommand | PlainMessage<DeleteChunkCommand> | undefined): boolean {
-    return proto3.util.equals(DeleteChunkCommand, a, b);
   }
 }
 

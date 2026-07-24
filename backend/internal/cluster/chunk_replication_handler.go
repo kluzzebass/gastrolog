@@ -88,8 +88,6 @@ func (s *Server) handleReplicationCommand(ctx context.Context, msg *gastrologv1.
 		return s.handleReplicationImportRecords(cmd.ImportRecords, *pending)
 	case *gastrologv1.ChunkReplicationCommand_ImportCommit:
 		return s.handleReplicationImportCommit(cmd.ImportCommit, pending)
-	case *gastrologv1.ChunkReplicationCommand_DeleteChunk:
-		return s.handleReplicationDelete(ctx, vaultID, cmd.DeleteChunk)
 	default:
 		return &gastrologv1.ChunkReplicationAck{Ok: false, Error: "unknown command type"}
 	}
@@ -242,22 +240,4 @@ func (s *Server) handleReplicationImportCommit(cmd *gastrologv1.ChunkReplication
 		}
 	}
 	return &gastrologv1.ChunkReplicationAck{Ok: true, ChunkId: chunkIDBytes}
-}
-
-func (s *Server) handleReplicationDelete(ctx context.Context, vaultID glid.GLID, cmd *gastrologv1.ChunkReplicationDelete) *gastrologv1.ChunkReplicationAck {
-	if s.deleteChunkExecutor == nil {
-		return &gastrologv1.ChunkReplicationAck{Ok: false, Error: "delete executor not configured"}
-	}
-
-	chunkID := chunk.ChunkID(glid.FromBytes(cmd.GetChunkId()))
-
-	if err := s.deleteChunkExecutor(ctx, vaultID, chunkID); err != nil {
-		return &gastrologv1.ChunkReplicationAck{
-			Ok:      false,
-			Error:   "delete failed: " + err.Error(),
-			ChunkId: cmd.GetChunkId(),
-		}
-	}
-
-	return &gastrologv1.ChunkReplicationAck{Ok: true, ChunkId: cmd.GetChunkId()}
 }
