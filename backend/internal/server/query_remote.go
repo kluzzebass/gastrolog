@@ -151,6 +151,14 @@ func (s *QueryServer) remoteVaultsByNodeFiltered(ctx context.Context, selectedVa
 // The result is sorted by timestamp to ensure chronological order even when
 // remote nodes produce slightly different bucket boundaries (e.g. from
 // independent "last=5m" resolution with clock skew).
+//
+// HasCloudData/CloudCount (see gastrolog-4of7c) merge like Count/GroupCounts,
+// not like an ordinary group key: HasCloudData ORs across nodes (a bucket
+// touched by cloud-derived data on ANY node stays flagged) and CloudCount
+// sums (each node contributes its own local applyCloudSelectivity estimate
+// for the bucket). Dropping these on merge would silently present a
+// cluster-wide bucket as exact whenever the node whose entry happened to
+// seed `a` for that timestamp had no cloud-backed chunks locally.
 func mergeHistogramBuckets(a, b []*apiv1.HistogramBucket) []*apiv1.HistogramBucket {
 	if len(b) == 0 {
 		return a
@@ -165,6 +173,10 @@ func mergeHistogramBuckets(a, b []*apiv1.HistogramBucket) []*apiv1.HistogramBuck
 	for _, bucket := range b {
 		if i, ok := idx[bucket.TimestampMs]; ok {
 			a[i].Count += bucket.Count
+			if bucket.HasCloudData {
+				a[i].HasCloudData = true
+			}
+			a[i].CloudCount += bucket.CloudCount
 			for k, v := range bucket.GroupCounts {
 				if a[i].GroupCounts == nil {
 					a[i].GroupCounts = make(map[string]int64)
