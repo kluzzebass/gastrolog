@@ -452,6 +452,99 @@ func TestApplyWaitCancelledContext(t *testing.T) {
 	}
 }
 
+// TestBarrierOnLeaderApplies pins the leader path of the startup catch-up
+// barrier (gastrolog-1go57): on the leader raft.Apply is synchronous, so
+// Barrier commits a no-op entry and returns with the FSM current. The
+// apply-wait tracker must reflect the barrier's index on return.
+func TestBarrierOnLeaderApplies(t *testing.T) {
+	t.Parallel()
+	r, fsm := newTestRaft(t)
+	s := New(r, fsm, 5*time.Second)
+
+	before := fsm.ApplyWait().Applied()
+	if err := s.Barrier(context.Background()); err != nil {
+		t.Fatalf("Barrier on leader: %v", err)
+	}
+	if got := fsm.ApplyWait().Applied(); got <= before {
+		t.Fatalf("apply-wait tracker did not advance: before=%d after=%d", before, got)
+	}
+}
+
+// TestBarrierFollowerWakesOnLocalApply is the event-driven follower path
+// (gastrolog-1go57): the barrier is forwarded to the leader and Barrier
+// blocks until the local FSM applies up to the leader's index — released by
+// the FSM apply notification, not a poll. Replication is simulated by
+// applying the committed barrier entry to the FSM directly; no sleeps.
+func TestBarrierFollowerWakesOnLocalApply(t *testing.T) {
+	t.Parallel()
+	fsm := raftfsm.New()
+	r := newFollowerRaft(t, fsm)
+
+	const leaderIndex = 11
+	s := New(r, fsm, 5*time.Second)
+	s.SetForwarder(&mockForwarder{appliedIndex: leaderIndex})
+
+	done := make(chan error, 1)
+	go func() { done <- s.Barrier(context.Background()) }()
+
+	// The follower's raft delivers the committed barrier entry to the FSM.
+	// Whether this lands before or after the waiter registers, the tracker
+	// guarantees the wake.
+	data, err := command.Marshal(command.NewCatchupBarrier())
+	if err != nil {
+		t.Fatalf("marshal catchup barrier: %v", err)
+	}
+	fsm.Apply(&hraft.Log{Index: leaderIndex, Data: data})
+
+	if err := <-done; err != nil {
+		t.Fatalf("Barrier via forward: %v", err)
+	}
+}
+
+// TestBarrierFollowerTimeout pins that a follower that never catches up to
+// the forwarded barrier index surfaces a bounded timeout error, not a hang.
+func TestBarrierFollowerTimeout(t *testing.T) {
+	t.Parallel()
+	fsm := raftfsm.New()
+	r := newFollowerRaft(t, fsm)
+
+	s := New(r, fsm, 100*time.Millisecond)
+	s.SetForwarder(&mockForwarder{appliedIndex: 99}) // never applied locally
+
+	start := time.Now()
+	err := s.Barrier(context.Background())
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("expected timeout, got nil")
+	}
+	if !contains(err.Error(), "wait for local FSM apply") {
+		t.Errorf("expected wait-for-local-apply timeout, got: %v", err)
+	}
+	if elapsed < 50*time.Millisecond {
+		t.Errorf("returned too fast (%s), wait loop appears bypassed", elapsed)
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("took too long (%s), timeout bound not enforced", elapsed)
+	}
+}
+
+// TestBarrierFollowerCancelled pins ctx cancellation: a caller cancelling
+// mid-wait gets ctx.Err(), not the timeout error.
+func TestBarrierFollowerCancelled(t *testing.T) {
+	t.Parallel()
+	fsm := raftfsm.New()
+	r := newFollowerRaft(t, fsm)
+
+	s := New(r, fsm, 5*time.Second)
+	s.SetForwarder(&mockForwarder{appliedIndex: 42}) // never applied locally
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := s.Barrier(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Barrier with cancelled ctx = %v, want context.Canceled", err)
+	}
+}
+
 func contains(s, sub string) bool {
 	for i := 0; i+len(sub) <= len(s); i++ {
 		if s[i:i+len(sub)] == sub {
