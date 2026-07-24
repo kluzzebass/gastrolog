@@ -56,6 +56,30 @@ func (h *captureHandler) count() int {
 	return len(h.records)
 }
 
+// hasErrorContaining reports whether any captured record carries an "error"
+// attribute whose string form contains substr. Handlers now return errors
+// instead of logging per-operation messages, and settle() folds the error
+// into the obligation log line's "error" attribute, so failure assertions
+// look there rather than at the message text.
+func (h *captureHandler) hasErrorContaining(substr string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for i := range h.records {
+		found := false
+		h.records[i].Attrs(func(a slog.Attr) bool {
+			if a.Key == "error" && strings.Contains(a.Value.String(), substr) {
+				found = true
+				return false
+			}
+			return true
+		})
+		if found {
+			return true
+		}
+	}
+	return false
+}
+
 func (h *captureHandler) reset() {
 	h.mu.Lock()
 	h.records = h.records[:0]
@@ -324,8 +348,11 @@ func TestHandle_VaultPut(t *testing.T) {
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
 
-		if !h.hasMessage("dispatch: read vault config") {
-			t.Fatal("expected error log for store read failure")
+		if !h.hasErrorContaining("read vault config") {
+			t.Fatal("expected obligation error for store read failure")
+		}
+		if d.obligationCount() != 1 {
+			t.Fatalf("expected 1 reconcile obligation, got %d", d.obligationCount())
 		}
 	})
 
@@ -337,8 +364,8 @@ func TestHandle_VaultPut(t *testing.T) {
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
 
-		if !h.hasMessage("dispatch: read vault config") {
-			t.Fatal("expected error log for nil vault config")
+		if !h.hasErrorContaining("read vault config") {
+			t.Fatal("expected obligation error for nil vault config")
 		}
 	})
 
@@ -370,8 +397,8 @@ func TestHandle_VaultPut(t *testing.T) {
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
 
-		if !h.hasMessage("dispatch: add vault") {
-			t.Fatal("expected error log for AddVault failure")
+		if !h.hasErrorContaining("add vault") {
+			t.Fatal("expected obligation error for AddVault failure")
 		}
 	})
 
@@ -389,14 +416,19 @@ func TestHandle_VaultPut(t *testing.T) {
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
 
-		if !h.hasMessage("dispatch: reload filters") {
+		// All three sub-errors are attempted and joined into the single
+		// vault obligation — the handler does not bail on the first.
+		if !h.hasErrorContaining("reload filters") {
 			t.Error("expected reload filters error")
 		}
-		if !h.hasMessage("dispatch: reload rotation policies") {
+		if !h.hasErrorContaining("reload rotation policies") {
 			t.Error("expected reload rotation policies error")
 		}
-		if !h.hasMessage("dispatch: reload retention policies") {
+		if !h.hasErrorContaining("reload retention policies") {
 			t.Error("expected reload retention policies error")
+		}
+		if d.obligationCount() != 1 {
+			t.Fatalf("expected the three failures folded into 1 vault obligation, got %d", d.obligationCount())
 		}
 	})
 }
@@ -411,8 +443,8 @@ func TestHandle_VaultDeleted(t *testing.T) {
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultDeleted, ID: id})
 
-		if !h.hasMessage("dispatch: force remove vault") {
-			t.Fatal("expected error log for ForceRemoveVault failure")
+		if !h.hasErrorContaining("force remove vault") {
+			t.Fatal("expected obligation error for ForceRemoveVault failure")
 		}
 	})
 
@@ -471,8 +503,8 @@ func TestHandle_IngesterPut(t *testing.T) {
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterPut, ID: id})
 
-		if !h.hasMessage("dispatch: list ingesters") {
-			t.Fatal("expected error log for store list failure")
+		if !h.hasErrorContaining("list ingesters") {
+			t.Fatal("expected obligation error for store list failure")
 		}
 		if len(mo.reconcileCalls) != 0 {
 			t.Fatal("should not reconcile when the config list cannot be read")
@@ -551,7 +583,7 @@ func TestHandle_IngesterPut(t *testing.T) {
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterPut, ID: id})
 
-		if !h.hasMessage("dispatch: reconcile ingesters") {
+		if !h.hasErrorContaining("reconcile ingesters") {
 			t.Fatal("expected error log when ReconcileIngesters fails")
 		}
 	})
@@ -580,7 +612,7 @@ func TestHandle_IngesterDeleted(t *testing.T) {
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterDeleted, ID: id})
 
-		if !h.hasMessage("dispatch: reconcile ingesters") {
+		if !h.hasErrorContaining("reconcile ingesters") {
 			t.Fatal("expected error log when ReconcileIngesters fails")
 		}
 	})
@@ -600,19 +632,19 @@ func TestHandle_ReloadErrors(t *testing.T) {
 			name:    "route_put",
 			kind:    raftfsm.NotifyRoutePut,
 			orch:    &mockOrch{reloadFiltersErr: errors.New("f")},
-			wantMsg: "dispatch: reload filters",
+			wantMsg: "reload filters",
 		},
 		{
 			name:    "rotation_policy_put",
 			kind:    raftfsm.NotifyRotationPolicyPut,
 			orch:    &mockOrch{reloadRotationErr: errors.New("r")},
-			wantMsg: "dispatch: reload rotation policies",
+			wantMsg: "reload rotation policies",
 		},
 		{
 			name:    "retention_policy_deleted",
 			kind:    raftfsm.NotifyRetentionPolicyDeleted,
 			orch:    &mockOrch{reloadRetentionErr: errors.New("r")},
-			wantMsg: "dispatch: reload retention policies",
+			wantMsg: "reload retention policies",
 		},
 	}
 
@@ -623,8 +655,8 @@ func TestHandle_ReloadErrors(t *testing.T) {
 
 			d.Handle(raftfsm.Notification{Kind: tc.kind})
 
-			if !h.hasMessage(tc.wantMsg) {
-				t.Fatalf("expected %q in logs", tc.wantMsg)
+			if !h.hasErrorContaining(tc.wantMsg) {
+				t.Fatalf("expected %q in obligation error", tc.wantMsg)
 			}
 		})
 	}
@@ -665,8 +697,8 @@ func TestHandle_SettingPut(t *testing.T) {
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifySettingPut, Key: "server"})
 
-		if !h.hasMessage("dispatch: load server settings") {
-			t.Fatal("expected error log for LoadServerSettings failure")
+		if !h.hasErrorContaining("load server settings") {
+			t.Fatal("expected obligation error for LoadServerSettings failure")
 		}
 	})
 
@@ -681,8 +713,8 @@ func TestHandle_SettingPut(t *testing.T) {
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifySettingPut, Key: "server"})
 
-		if !h.hasMessage("dispatch: update max concurrent jobs") {
-			t.Fatal("expected error log for UpdateMaxConcurrentJobs failure")
+		if !h.hasErrorContaining("update max concurrent jobs") {
+			t.Fatal("expected obligation error for UpdateMaxConcurrentJobs failure")
 		}
 	})
 
@@ -781,7 +813,7 @@ func TestHandle_ClusterTLSPut(t *testing.T) {
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyClusterTLSPut})
 
-		if !h.hasMessage("dispatch: read cluster TLS for reload") {
+		if !h.hasErrorContaining("read cluster TLS for reload") {
 			t.Fatal("expected error log for Load failure")
 		}
 	})
@@ -795,7 +827,7 @@ func TestHandle_ClusterTLSPut(t *testing.T) {
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyClusterTLSPut})
 
-		if !h.hasMessage("dispatch: read cluster TLS for reload") {
+		if !h.hasErrorContaining("read cluster TLS for reload") {
 			t.Fatal("expected error log when ClusterTLS is nil in config")
 		}
 	})
@@ -941,8 +973,8 @@ func TestHandle_VaultDrain(t *testing.T) {
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
 
-		if !h.hasMessage("dispatch: cancel drain") {
-			t.Fatal("expected error log for CancelDrain failure")
+		if !h.hasErrorContaining("cancel drain") {
+			t.Fatal("expected obligation error for CancelDrain failure")
 		}
 	})
 }
@@ -1014,8 +1046,8 @@ func TestHandle_NodeConfigChange_RefreshesVaultCtlMembers(t *testing.T) {
 		if len(mo.refreshVaultCtlCalls) != 0 {
 			t.Fatalf("expected no refresh on list error, got %d", len(mo.refreshVaultCtlCalls))
 		}
-		if !h.hasMessage("dispatch: list nodes for vault-ctl membership refresh") {
-			t.Fatal("expected error log for ListNodes failure")
+		if !h.hasErrorContaining("list nodes for vault-ctl membership refresh") {
+			t.Fatal("expected obligation error for ListNodes failure")
 		}
 	})
 }
@@ -1122,11 +1154,16 @@ func TestHandle_PlacementsSet_RegistersVaultWhenMissing(t *testing.T) {
 	if len(mo.addVaultCalls) != 1 || mo.addVaultCalls[0] != vaultID {
 		t.Fatalf("expected defensive AddVault(%s), got %v", vaultID, mo.addVaultCalls)
 	}
-	if h.hasMessage("dispatch: add vault instance") {
+	// AddVault-before-instance must succeed, so the placement re-fire self-heals
+	// with no standing reconcile obligation for the vault.
+	if d.obligationCount() != 0 {
+		t.Fatalf("expected no reconcile obligation on self-healing rebuild, got %d", d.obligationCount())
+	}
+	if h.hasErrorContaining("add vault instance") {
 		t.Fatal("AddVaultInstance should not error: AddVault must run first when the vault is missing from the orchestrator")
 	}
-	if h.hasMessage("dispatch: add vault before instance") {
-		t.Fatal("defensive AddVault should succeed; got an error log")
+	if h.hasErrorContaining("add vault before instance") {
+		t.Fatal("defensive AddVault should succeed; got an error")
 	}
 }
 

@@ -260,7 +260,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 
 	configSignal := notify.NewSignal()
 	statsSignal := notify.NewSignal()
-	disp := &configDispatcher{localNodeID: nodeID, logger: compDispatch.Apply(logger), clusterTLS: clusterTLS, tlsFilePath: hd.ClusterTLSPath(), configSignal: configSignal}
+	disp := &configDispatcher{localNodeID: nodeID, logger: compDispatch.Apply(logger), clusterTLS: clusterTLS, tlsFilePath: hd.ClusterTLSPath(), configSignal: configSignal, alerts: alertCollector}
 	rawStore, err := openConfigStore(cfg.ConfigType, raftStoreOpts{
 		Home: hd, NodeID: nodeID, JoinAddr: cfg.JoinAddr,
 		ClusterSrv: clusterSrv, ClusterTLS: clusterTLS,
