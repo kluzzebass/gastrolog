@@ -1,25 +1,27 @@
 package orchestrator
 
-// Coverage for gastrolog-4ryguo: a sealed chunk with its GLCB on disk and an
-// FSM manifest entry but no chunk-manager registration used to be
-// permanently unresolvable — cloud backfill retried it every 5s forever,
-// failing "chunk not found", with no repair, no backoff, no alarm, and a
-// scheduled/completed INFO pair flooding the job journal every cycle.
+// Coverage for gastrolog-4ryguo's failure-tracking machinery. The original
+// registration gap — a sealed chunk with its GLCB on disk and an FSM manifest
+// entry but no chunk-manager registration, permanently unresolvable, cloud
+// backfill retrying every 5s forever — is now closed at the source:
+// Manager.uploadToCloud resolves the chunk through the lazy on-miss GLCB
+// resolver (lookupMeta) instead of a raw m.metas read, so a freshly-sealed
+// on-disk external chunk uploads with no register-first step and no repair
+// (gastrolog-34kmv retired the eager repairAndRetryBackfill). The multi-node
+// self-resolving upload is pinned in pipeline_cloud_upload_test.go.
 //
-// These tests pin: (1) the registration gap is repaired via the same
-// primitive pipeline sealing uses (registerPipelineGLCB) and the upload then
-// succeeds; (2) EVERY failure — registration-missing (GLCB on disk) or
-// GLCB-absent (build-lag / genuinely deleted) alike — backs off
-// exponentially instead of retrying every 5s, one map, one strand-safe
-// lifecycle; (3) only a registration-missing failure that persists past the
-// catalog's DelayOn raises the cloud-backfill-stuck alarm naming the chunk,
-// vault and cause — a GLCB-absent failure backs off the same way but NEVER
-// alarms, since build-lag and a genuinely-deleted GLCB are indistinguishable
-// by an os.Stat and neither should page an operator; (4) success clears both
-// the backoff state and the alarm (if any), whether the chunk resolved
-// through backfillCloudUploads itself or was uploaded by the PRIMARY path
+// These tests pin the backoff/alarm accounting that remains: (1) EVERY failure
+// — GLCB on disk or GLCB-absent (build-lag / genuinely deleted) alike — backs
+// off exponentially instead of retrying every 5s, one map, one strand-safe
+// lifecycle; (2) only a GLCB-on-disk failure that persists past the catalog's
+// DelayOn raises the cloud-backfill-stuck alarm naming the chunk, vault and
+// cause — a GLCB-absent failure backs off the same way but NEVER alarms, since
+// build-lag and a genuinely-deleted GLCB are indistinguishable by an os.Stat
+// and neither should page an operator; (3) success clears both the backoff
+// state and the alarm (if any), whether the chunk resolved through
+// backfillCloudUploads itself or was uploaded by the PRIMARY path
 // (schedulePipelineCloudUpload/onSeal) and observed cloud-backed on the next
-// sweep; (5) a chunk that vanishes (deleted), or a vault this node stops
+// sweep; (4) a chunk that vanishes (deleted), or a vault this node stops
 // running backfill for (leadership handoff, teardown), drops all state and
 // alarms too — no strand.
 
@@ -181,38 +183,13 @@ func waitBackfillJobDone(t *testing.T, orch *Orchestrator, jobName string, m *re
 	}
 }
 
-// ---------- repair (the disease) ----------
-
-func TestBackfillCloudUploads_RepairsRegistrationMissingChunk(t *testing.T) {
-	t.Parallel()
-	orch, vaultInst, id, mock := backfillRepairFixture(t, true)
-	ac := alert.New()
-	orch.alerts = ac
-
-	orch.backfillCloudUploads(vaultInst)
-	orch.Scheduler().Start()
-	defer func() { _ = orch.Scheduler().Stop() }()
-
-	jobName := fmt.Sprintf("cloud-backfill:%s:%s", vaultInst.VaultID, id)
-	waitBackfillJobDone(t, orch, jobName, mock, 2, 5*time.Second)
-
-	if got := mock.uploadCallCount(); got != 2 {
-		t.Fatalf("expected exactly 2 UploadToCloud calls (fail, then a repaired retry that succeeds), got %d", got)
-	}
-	if got := mock.registerCallCount(); got != 1 {
-		t.Fatalf("expected exactly 1 RegisterExternalGLCB call (the repair), got %d", got)
-	}
-
-	orch.backfillMu.Lock()
-	_, stillFailing := orch.backfillFailures[id]
-	orch.backfillMu.Unlock()
-	if stillFailing {
-		t.Fatal("a successfully repaired-and-uploaded chunk must carry no backoff state")
-	}
-	if alerts := ac.Standing(); len(alerts) != 0 {
-		t.Fatalf("a successfully repaired chunk must raise no alarm, got %v", alerts)
-	}
-}
+// The former TestBackfillCloudUploads_RepairsRegistrationMissingChunk is
+// retired with the eager repair (gastrolog-34kmv): a freshly-sealed on-disk
+// external chunk now uploads with no register-first step because
+// Manager.uploadToCloud self-resolves it via the lazy on-miss GLCB resolver.
+// That self-resolving upload is pinned end-to-end against a real chunk
+// manager in pipeline_cloud_upload_test.go
+// (TestSchedulePipelineCloudUpload_LeaderUploadsWithoutEagerRegistration).
 
 // ---------- backoff ----------
 

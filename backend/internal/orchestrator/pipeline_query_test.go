@@ -137,7 +137,8 @@ func buildSealedPipelineGLCB(t *testing.T, ctx context.Context, n int, raw strin
 	return sealedGLCBFixture{vaultID: vaultID, fsm: fsm, sealed: sealed, glcbPath: glcbPath}
 }
 
-// externalInfoFromEntry mirrors VaultLifecycleReconciler.registerPipelineGLCB.
+// externalInfoFromEntry mirrors externalGLCBInfoFromFSM: the FSM-derived
+// registration info the lazy resolver builds for a sealed pipeline chunk.
 func externalInfoFromEntry(e vaultctlfsm.ManifestEntry) chunk.ExternalGLCBInfo {
 	return chunk.ExternalGLCBInfo{
 		WriteStart:        e.WriteStart,

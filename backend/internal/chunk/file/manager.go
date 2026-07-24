@@ -4350,7 +4350,14 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		m.mu.Unlock()
 		return ErrManagerClosed
 	}
-	meta := m.metas[id]
+	// lookupMeta, not a raw m.metas read: a pipeline-built external chunk whose
+	// data.glcb is on disk with an FSM sealed entry but no eager registration
+	// resolves here on demand (the lazy on-miss resolver memoizes it into
+	// m.metas). Registration is a cache, not an upload prerequisite — this is
+	// what lets the seal→upload path (schedulePipelineCloudUpload) and the
+	// cloud-backfill sweep upload a freshly-sealed chunk with no
+	// register-first step. See gastrolog-34kmv.
+	meta := m.lookupMeta(id)
 	if meta == nil {
 		m.mu.Unlock()
 		return chunk.ErrChunkNotFound
