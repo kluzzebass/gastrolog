@@ -8,9 +8,93 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/chunking"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
+
+// TestIndexReaderMetadataBoundaryTier covers the byte-free tier of the
+// FSM-grounded IndexReader (gastrolog-enfwd): a sealed monotonic chunk
+// answers rank/pos 0 for timestamps strictly before IngestStart from
+// replicated metadata alone — on any voter, with no local ITSI bytes.
+// Everything at or past IngestStart, non-monotonic chunks, empty chunks
+// and unsealed chunks stay unresolvable.
+func TestIndexReaderMetadataBoundaryTier(t *testing.T) {
+	t.Parallel()
+	orch := newTestOrch(t, Config{LocalNodeID: "node-A"})
+	vaultID := glid.New()
+
+	start := time.Date(2026, 3, 1, 8, 0, 0, 0, time.UTC)
+	end := start.Add(10 * time.Second)
+	mono := vaultctlfsm.ManifestEntry{
+		ID: chunk.NewChunkID(), State: chunk.ChunkStateSealed,
+		RecordCount: 42, IngestStart: start, IngestEnd: end, IngestTSMonotonic: true,
+	}
+	nonMono := vaultctlfsm.ManifestEntry{
+		ID: chunk.NewChunkID(), State: chunk.ChunkStateSealed,
+		RecordCount: 42, IngestStart: start, IngestEnd: end, IngestTSMonotonic: false,
+	}
+	empty := vaultctlfsm.ManifestEntry{
+		ID: chunk.NewChunkID(), State: chunk.ChunkStateSealed,
+		RecordCount: 0, IngestStart: start, IngestEnd: end, IngestTSMonotonic: true,
+	}
+	active := vaultctlfsm.ManifestEntry{
+		ID: chunk.NewChunkID(), State: chunk.ChunkStateActive,
+		RecordCount: 42, IngestStart: start, IngestEnd: end, IngestTSMonotonic: true,
+	}
+	entries := map[chunk.ChunkID]vaultctlfsm.ManifestEntry{
+		mono.ID: mono, nonMono.ID: nonMono, empty.ID: empty, active.ID: active,
+	}
+	orch.RegisterVault(NewVault(vaultID, &VaultInstance{
+		VaultID: vaultID,
+		Type:    "file",
+		ManifestEntry: func(id chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool) {
+			e, ok := entries[id]
+			return e, ok
+		},
+		ManifestEntries: func() []vaultctlfsm.ManifestEntry {
+			var out []vaultctlfsm.ManifestEntry
+			for _, e := range entries {
+				out = append(out, e)
+			}
+			return out
+		},
+	}))
+
+	ir := orch.IndexReader()
+	before := start.Add(-time.Second)
+
+	// Happy: strictly-before on a sealed monotonic chunk → (0, true).
+	if rank, ok := ir.FindIngestRank(mono.ID, before); !ok || rank != 0 {
+		t.Errorf("FindIngestRank(mono, before start) = (%d, %v), want (0, true)", rank, ok)
+	}
+	if pos, ok := ir.FindIngestPos(mono.ID, before); !ok || pos != 0 {
+		t.Errorf("FindIngestPos(mono, before start) = (%d, %v), want (0, true)", pos, ok)
+	}
+
+	// Unresolvable without bytes: at IngestStart, interior, past end.
+	for name, ts := range map[string]time.Time{
+		"at start": start,
+		"interior": start.Add(5 * time.Second),
+		"past end": end.Add(time.Second),
+	} {
+		if got, ok := ir.FindIngestRank(mono.ID, ts); ok {
+			t.Errorf("FindIngestRank(mono, %s) = (%d, true), want unresolvable without bytes", name, got)
+		}
+	}
+
+	// Non-monotonic: IngestStart is not the minimum — no boundary answer.
+	if got, ok := ir.FindIngestRank(nonMono.ID, before); ok {
+		t.Errorf("FindIngestRank(non-monotonic, before start) = (%d, true), want unresolvable", got)
+	}
+	// Empty and active chunks: no boundary answer.
+	if got, ok := ir.FindIngestRank(empty.ID, before); ok {
+		t.Errorf("FindIngestRank(empty, before start) = (%d, true), want unresolvable", got)
+	}
+	if got, ok := ir.FindIngestRank(active.ID, before); ok {
+		t.Errorf("FindIngestRank(active, before start) = (%d, true), want unresolvable", got)
+	}
+}
 
 // TestIndexReaderChunkRootTier covers the byte-local GLCB fallback of the
 // FSM-grounded IndexReader (gastrolog-nlepn): a sealed pipeline chunk whose

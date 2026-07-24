@@ -111,9 +111,15 @@ type Reader interface {
 // FSM has the authoritative offsets.
 type IndexReader interface {
 	// FindIngestRank returns the rank of the first IngestTS-sorted entry
-	// with TS >= ts in the given chunk's IngestTS index. ok=false when the
-	// chunk's index isn't locally resolvable (uncached cloud-backed chunk, missing
-	// GLCB, or FSM unaware of chunk).
+	// with TS >= ts in the given chunk's IngestTS index. ok=false when THIS
+	// lookup isn't locally resolvable (uncached cloud-backed chunk, missing
+	// GLCB, or FSM unaware of chunk). Resolvability is per timestamp, not
+	// per chunk: implementations may answer boundary timestamps exactly
+	// from FSM-replicated index metadata (rank 0 strictly before a sealed
+	// monotonic chunk's IngestStart) while interior timestamps of the same
+	// chunk stay unresolvable without local ITSI bytes. Consumers doing
+	// rank arithmetic must check ok on every lookup and fall back (FSM
+	// proportional distribution) on the first miss.
 	FindIngestRank(chunkID chunk.ChunkID, ts time.Time) (rank uint64, ok bool)
 
 	// FindIngestPos returns the physical record position (in append order)

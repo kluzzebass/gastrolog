@@ -66,7 +66,8 @@ func TestOrchRel_RankLookupsAcrossVoters(t *testing.T) {
 	}
 
 	// The instance-less voter resolves the manifest (see the 3w8qj test) but
-	// holds no chunk bytes: rank lookups must be unresolvable, never invented.
+	// holds no chunk bytes: interior rank lookups must be unresolvable,
+	// never invented.
 	outIR := h.nodes[outsiderID].orch.IndexReader()
 	for _, e := range sealed {
 		if got, ok := outIR.FindIngestRank(e.ID, e.IngestEnd); ok {
@@ -74,6 +75,31 @@ func TestOrchRel_RankLookupsAcrossVoters(t *testing.T) {
 		}
 		if got, ok := outIR.FindIngestPos(e.ID, e.IngestStart); ok {
 			t.Errorf("outsider: FindIngestPos(%s, IngestStart) = (%d, true), want unresolvable without local bytes", e.ID, got)
+		}
+	}
+
+	// gastrolog-enfwd: the byte-free FSM-metadata boundary answer DOES
+	// resolve on the instance-less voter — a timestamp strictly before a
+	// sealed monotonic chunk's IngestStart is exactly rank 0, the same
+	// answer the chunk's own ITSI section gives on the homes.
+	for _, e := range sealed {
+		if !e.IngestTSMonotonic {
+			t.Fatalf("fixture chunk %s not monotonic; sequential ingest should be", e.ID)
+		}
+		before := e.IngestStart.Add(-time.Second)
+		rank, ok := outIR.FindIngestRank(e.ID, before)
+		if !ok || rank != 0 {
+			t.Errorf("outsider: FindIngestRank(%s, before IngestStart) = (%d, %v), want (0, true) from FSM metadata", e.ID, rank, ok)
+		}
+		pos, ok := outIR.FindIngestPos(e.ID, before)
+		if !ok || pos != 0 {
+			t.Errorf("outsider: FindIngestPos(%s, before IngestStart) = (%d, %v), want (0, true) from FSM metadata", e.ID, pos, ok)
+		}
+		// The homes give the identical answer from real bytes — the
+		// metadata tier never diverges from the ITSI truth.
+		homeIR := h.nodes[h.nodeIDs[0]].orch.IndexReader()
+		if hRank, hOK := homeIR.FindIngestRank(e.ID, before); !hOK || hRank != rank {
+			t.Errorf("home vs voter rank divergence for %s: home=(%d,%v) voter=(%d,%v)", e.ID, hRank, hOK, rank, ok)
 		}
 	}
 }

@@ -278,7 +278,9 @@ var _ manifest.IndexReader = (*orchestratorIndexReader)(nil)
 // TS >= ts. Tries the chunk manager (active chunk B+ tree, cloud-backed chunk
 // cached index) first, then the index manager (sealed local chunk sidecar),
 // then a locally built pipeline GLCB, then a sealed GLCB in the vault chunk
-// root. Returns (0, false) when no local bytes serve the lookup.
+// root, then the byte-free FSM-metadata boundary answer (sealed monotonic
+// chunks, ts strictly before IngestStart → rank 0). Returns (0, false) when
+// none of those serve the lookup.
 func (r *orchestratorIndexReader) FindIngestRank(chunkID chunk.ChunkID, ts time.Time) (uint64, bool) {
 	cm, im := r.lookupVaultManagers(chunkID)
 	if cm != nil {
@@ -295,6 +297,9 @@ func (r *orchestratorIndexReader) FindIngestRank(chunkID chunk.ChunkID, ts time.
 		return rank, true
 	}
 	if rank, _, ok := r.o.chunkRootFindIngest(chunkID, ts); ok {
+		return rank, true
+	}
+	if rank, ok := r.o.manifestBoundaryIngestRank(chunkID, ts); ok {
 		return rank, true
 	}
 	return 0, false
@@ -315,6 +320,11 @@ func (r *orchestratorIndexReader) FindIngestPos(chunkID chunk.ChunkID, ts time.T
 		}
 	}
 	if _, pos, ok := r.o.chunkRootFindIngest(chunkID, ts); ok {
+		return pos, true
+	}
+	// rank == pos on monotonic chunks, so the metadata boundary answer
+	// serves position lookups too.
+	if pos, ok := r.o.manifestBoundaryIngestRank(chunkID, ts); ok {
 		return pos, true
 	}
 	return 0, false
@@ -359,6 +369,29 @@ func (r *orchestratorIndexReader) lookupVaultManagers(chunkID chunk.ChunkID) (ch
 		}
 	}
 	return nil, nil
+}
+
+// manifestBoundaryIngestRank answers rank (and, on monotonic chunks,
+// position) lookups that need no ITSI bytes at all, from the FSM-replicated
+// index metadata (gastrolog-enfwd). On a sealed monotonic chunk the first
+// appended record carries the minimum IngestTS (IngestStart), so a timestamp
+// strictly before IngestStart resolves to rank 0 — exactly the answer the
+// chunk's own ITSI section would give — on ANY voter, bytes or not.
+// Timestamps at or after IngestStart need bytes and stay unresolvable here
+// (per-timestamp resolvability; consumers fall back to the FSM estimate,
+// gastrolog-1952x). Timestamps past IngestEnd already report unresolvable in
+// the byte tiers, matching the ITSI "past all entries" answer. Non-monotonic
+// chunks get no boundary answer: IngestStart is only the first APPENDED
+// record's timestamp there, not the minimum.
+func (o *Orchestrator) manifestBoundaryIngestRank(chunkID chunk.ChunkID, ts time.Time) (uint64, bool) {
+	_, e, ok := o.manifestEntryByChunk(chunkID)
+	if !ok || !e.IsSealed() || !e.IngestTSMonotonic || e.RecordCount <= 0 {
+		return 0, false
+	}
+	if e.IngestStart.IsZero() || !ts.Before(e.IngestStart) {
+		return 0, false
+	}
+	return 0, true
 }
 
 // chunkRootFindIngest serves an IngestTS index lookup straight from a locally
