@@ -374,7 +374,13 @@ func (v *vaultChunking) collectRefBatch(
 // applySealOpenManifest proposes SealOpenChunkManifest. Sealed manifests queue
 // FIFO on the FSM so rotation is not blocked while earlier chunks build.
 func (v *vaultChunking) applySealOpenManifest(chunkID chunk.ChunkID, sealedAt time.Time) error {
-	return v.applier().Apply(vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, sealedAt))
+	if err := v.applier().Apply(vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, sealedAt)); err != nil {
+		return err
+	}
+	// The vault chunked a manifest — chunking recovered, so a standing
+	// retention-give-up alarm no longer holds (gastrolog-68sfsl).
+	v.clearRetentionGiveUp()
+	return nil
 }
 
 // proposeOpenManifestWire picks a plannable segment and returns Raft log data

@@ -155,6 +155,13 @@ type vaultChunking struct {
 	// state so planner passes log/alert only on transitions
 	// (gastrolog-4bl9xx). Guarded by planMu like the planner pass itself.
 	underReplicatedAlerted bool
+	// giveUpAlerted tracks the retention-give-up alert state so release
+	// passes raise/clear and log only on transitions. Without it a vault
+	// shedding never-chunked segments emitted one WARN per pass (~40/min on
+	// the 18h cluster run) that buried the starvation in retention noise
+	// (gastrolog-68sfsl). Guarded by mu like pendingRelease, which the same
+	// release pass mutates.
+	giveUpAlerted bool
 	// planFailures tracks segments whose on-disk index cannot be opened or
 	// read (corrupt index, unreadable file). Without it a corrupt segment
 	// was skipped silently forever: never planned into a sealed manifest,

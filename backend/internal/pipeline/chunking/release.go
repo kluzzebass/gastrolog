@@ -1,12 +1,18 @@
 package chunking
 
 import (
+	"fmt"
 	"slices"
 	"time"
 
 	"gastrolog/internal/glid"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
+
+// retentionGiveUpAlarmType is the catalog type ID for a vault that keeps
+// shedding never-chunked segments at its retention give-up TTL; the instance
+// key is the vault ID. See docs/alarm-management-design.md and gastrolog-68sfsl.
+const retentionGiveUpAlarmType = "chunking-retention-giveup"
 
 // manifestSegmentIDs returns the unique segment IDs referenced by a sealed
 // manifest awaiting local GLCB build.
@@ -220,19 +226,73 @@ func (v *vaultChunking) enqueueRegistryReleaseCandidates() {
 			gaveUp++
 		}
 	}
-	if gaveUp > 0 {
-		// The counted expiry design-notes 28 demands: deliberate, visible —
-		// never a silent pipeline loss. These records out-aged retention
-		// without ever being chunked (island origin / uncollectable segment).
-		v.logger().Warn("retention give-up: releasing never-chunked segments whose records out-aged the retention TTL",
-			"vault", v.cfg.VaultID, "segments", gaveUp, "ttl", giveUpTTL.String())
-	}
+	// The counted expiry (design-notes 28) must be deliberate and visible —
+	// never a silent pipeline loss. But a per-pass WARN buried the STANDING
+	// starvation inside retention noise (~40/min for 18h on the cluster run,
+	// gastrolog-68sfsl): a lone island-origin segment gives up once, whereas a
+	// vault whose collection never delivers a second holder sheds pass after
+	// pass. noteRetentionGiveUp edge-logs and raises a standing operator alarm
+	// on the ok→shedding transition, and clears it when a pass finds nothing
+	// left to give up.
+	v.noteRetentionGiveUp(gaveUp, giveUpTTL)
 	if len(candidates) == 0 {
 		return
 	}
 	v.mu.Lock()
 	v.pendingRelease = appendUniqueGLIDs(v.pendingRelease, candidates)
 	v.mu.Unlock()
+}
+
+// noteRetentionGiveUp raises the sustained-give-up operator alarm on the first
+// give-up pass and logs the ok→shedding edge once. A vault sheds a lone
+// island-origin segment (no reachable holder) once, whereas a vault whose
+// collection never delivers a second holder sheds pass after pass — the
+// catalog DelayOn keeps the lone case from annunciating while the STANDING
+// flood does. Clearing is deliberately NOT tied to "a pass found nothing left
+// to give up": the backlog drains in bursts, so that edge chatters between
+// consecutive release passes. The condition that actually ended is "the vault
+// started chunking again" — cleared at the seal site via clearRetentionGiveUp.
+// This replaces the per-pass WARN that hid the starvation inside retention
+// noise on the 18h cluster run (gastrolog-68sfsl).
+func (v *vaultChunking) noteRetentionGiveUp(gaveUp int, ttl time.Duration) {
+	if gaveUp == 0 {
+		return
+	}
+	v.mu.Lock()
+	if v.giveUpAlerted {
+		v.mu.Unlock()
+		return
+	}
+	v.giveUpAlerted = true
+	v.mu.Unlock()
+
+	v.logger().Warn("retention give-up: vault is shedding never-chunked segments whose records out-aged the retention TTL — chunking is not keeping up",
+		"vault", v.cfg.VaultID, "segments", gaveUp, "ttl", ttl.String())
+	if v.cfg.Alerts != nil {
+		v.cfg.Alerts.Raise(retentionGiveUpAlarmType, v.cfg.VaultID.String(),
+			fmt.Sprintf("vault %s: shedding never-chunked segments at the %s retention give-up TTL — records are dropped before chunking references them; the planner needs min(2, placement) holders and collection is not delivering them",
+				v.cfg.VaultID, ttl))
+	}
+}
+
+// clearRetentionGiveUp clears the give-up alarm once the vault seals a chunk
+// again — the unambiguous signal that chunking recovered (collection delivered
+// the holders the planner was waiting on). Called from the leader's seal path;
+// a no-op when no give-up alarm stands.
+func (v *vaultChunking) clearRetentionGiveUp() {
+	v.mu.Lock()
+	if !v.giveUpAlerted {
+		v.mu.Unlock()
+		return
+	}
+	v.giveUpAlerted = false
+	v.mu.Unlock()
+
+	v.logger().Info("retention give-up cleared — vault sealed a chunk again",
+		"vault", v.cfg.VaultID)
+	if v.cfg.Alerts != nil {
+		v.cfg.Alerts.Clear(retentionGiveUpAlarmType, v.cfg.VaultID.String())
+	}
 }
 
 // giveUpBound resolves the vault's retention give-up TTL and the evaluation
