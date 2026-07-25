@@ -137,10 +137,24 @@ func scanMayRelease(scan *vaultctlfsm.ReleaseScan, entry *vaultctlfsm.CompletedS
 	return scanSegmentReady(scan, entry, requiredHolders)
 }
 
-// scanGiveUpExpired reports whether every record in the segment is older
-// than the vault's retention TTL — the counted give-up expiry. A segment
-// referenced by an unbuilt manifest never gives up: the build still needs its
-// bytes, and its records ARE reaching a chunk.
+// scanGiveUpExpired reports whether a segment has sat un-chunked in THIS
+// vault's registry longer than the give-up TTL — the counted give-up expiry
+// (design-notes 28), the bound on how long an uncollectable/island-origin
+// segment may leak registry space. A segment referenced by an unbuilt manifest
+// never gives up: the build still needs its bytes, and its records ARE reaching
+// a chunk.
+//
+// The anchor is PublishedAt (when the segment arrived in this vault's
+// registry), NOT the records' IngestTS. Records ROUTED from another vault's
+// retention-expired output arrive carrying their ORIGINAL (old) IngestTS —
+// provenance preserves it through SubmitDrain → routing → digestion (never the
+// fresh-ingest minter). Anchoring on record age shed every routed record at
+// arrival, before collection could deliver a second holder and the planner
+// could reference it: a cloud-backed destination could never chunk re-routed
+// retention output, and it never reached cloud (gastrolog-68sfsl). Records
+// legitimately arrive older than a destination's retention window; the give-up
+// bounds STUCK time, and the normal retention sweep deletes the records AFTER
+// they are chunked.
 func scanGiveUpExpired(scan *vaultctlfsm.ReleaseScan, entry *vaultctlfsm.CompletedSegmentEntry, ttl time.Duration, now time.Time) bool {
 	if ttl <= 0 || now.IsZero() {
 		return false
@@ -148,10 +162,10 @@ func scanGiveUpExpired(scan *vaultctlfsm.ReleaseScan, entry *vaultctlfsm.Complet
 	if _, ok := scan.Referenced[entry.SegmentID]; ok {
 		return false
 	}
-	if entry.LastIngestTS.IsZero() {
+	if entry.PublishedAt.IsZero() {
 		return false
 	}
-	return now.Sub(entry.LastIngestTS) > ttl
+	return now.Sub(entry.PublishedAt) > ttl
 }
 
 func holdersCover(holders, required []string) bool {

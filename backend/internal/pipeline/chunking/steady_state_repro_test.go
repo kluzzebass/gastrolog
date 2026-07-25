@@ -104,6 +104,50 @@ func TestSteadyStateGiveUpRaisesAndClearsStandingAlert(t *testing.T) {
 	}
 }
 
+// TestRoutedOldRecordsChunkDespiteAgePastTTL is the definitive experiment for
+// the PRIMARY cluster cause (gastrolog-68sfsl): records routed from another
+// vault's retention-expired output arrive carrying their ORIGINAL IngestTS,
+// already older than this destination's give-up TTL — even though collection is
+// healthy and delivers every holder. Anchoring the give-up on record IngestTS
+// sheds them at arrival before they can ever be chunked (the ~40/min give-up
+// rate that matched first-vault's drain, the 30-60s head lifetime, the zero
+// eligibility). Anchoring on registry arrival (PublishedAt) gives every segment
+// the full TTL window to be collected and chunked; normal retention then
+// deletes the records AFTER chunking.
+//
+// Fails before the fix (segments shed at arrival, zero seals); passes after.
+func TestRoutedOldRecordsChunkDespiteAgePastTTL(t *testing.T) {
+	t.Parallel()
+	h := newSteadyHarness(t, chunking.ManifestRotationPolicy{MaxAge: 2 * time.Minute}, 3*time.Minute, []string{"leader", "peer"})
+
+	// Records are 1h old at arrival (>> the 3m give-up TTL) — as routed
+	// retention output is. Collection is HEALTHY: both holders ack immediately.
+	const tick = 30 * time.Second
+	const recordAge = time.Hour
+	for i := 0; i < 12; i++ {
+		h.advance(tick)
+		seg, recs := h.publishAged(3, recordAge)
+		h.published += recs
+		h.ackHolder(seg, "leader")
+		h.ackHolder(seg, "peer")
+		// Release BEFORE plan, modelling the production race where the release
+		// wake can fire before the plan wake references the segment. With a
+		// record-age anchor the segment is give-up-expired from the moment it
+		// arrives, so this pass sheds it despite full collectability.
+		h.releaseToFixpoint()
+		h.planToFixpoint()
+	}
+
+	if h.sealedRecords() == 0 {
+		t.Fatalf("routed old-timestamp records were shed instead of chunked despite healthy 2-holder collection (published=%d, registryRemaining=%d)",
+			h.published, h.registryLen())
+	}
+	if raised, _ := h.sink.snapshot(); len(raised) != 0 {
+		t.Fatalf("in-TTL-at-arrival records raised the give-up alarm: %v", raised)
+	}
+	t.Logf("ROUTED-OLD: publishedRecords=%d sealedRecords=%d", h.published, h.sealedRecords())
+}
+
 // ---- harness ----
 
 type steadyHarness struct {
@@ -163,15 +207,27 @@ func (h *steadyHarness) advance(d time.Duration) {
 }
 
 func (h *steadyHarness) publishLocal(records int) (glid.GLID, int) {
+	return h.publishAged(records, 0)
+}
+
+// publishAged publishes a segment whose RECORD ingest timestamps are recordAge
+// in the past while its registry PublishedAt (arrival) is the current injected
+// clock. recordAge=0 is a freshly-ingested segment; a large recordAge models a
+// record ROUTED from another vault's retention-expired output — provenance
+// preserves the original (old) IngestTS, so the record arrives here already
+// older than the destination's give-up TTL even though it just arrived.
+func (h *steadyHarness) publishAged(records int, recordAge time.Duration) (glid.GLID, int) {
 	h.t.Helper()
 	segID := glid.New()
 	now := h.nowFn()
+	recTS := now.Add(-recordAge)
 	recs := make([]recordForSeg, records)
 	for r := 0; r < records; r++ {
-		recs[r] = recordForSeg{uint32(r), now.Add(time.Duration(r) * time.Millisecond), "rec"}
+		recs[r] = recordForSeg{uint32(r), recTS.Add(time.Duration(r) * time.Millisecond), "rec"}
 	}
 	writeCompletedSegment(h.t, h.vaultRoot, segID, h.vaultID, recs)
-	publishSegment(h.t, h.fsm, segID, now, uint32(records), now, now.Add(time.Duration(records)*time.Millisecond))
+	// PublishedAt = now (fresh arrival); FirstIngestTS/LastIngestTS = old.
+	publishSegment(h.t, h.fsm, segID, now, uint32(records), recTS, recTS.Add(time.Duration(records)*time.Millisecond))
 	return segID, records
 }
 

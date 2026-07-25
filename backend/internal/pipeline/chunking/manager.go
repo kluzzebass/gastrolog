@@ -82,11 +82,13 @@ type VaultConfig struct {
 	RequiredHolders func() (required []string, ok bool)
 	// RetentionGiveUpTTL returns the vault's delete-disposition retention TTL
 	// (the shortest, when several rules apply) and whether a give-up bound is
-	// in effect. A registry segment whose records out-age this TTL is released
-	// as a COUNTED expiry even though it was never chunked (island origin, no
-	// reachable holder): had the records been chunked, retention would already
-	// have deleted them. Route-disposition retention vetoes the bound — those
-	// records must be routed, not dropped. Nil disables (design-notes 28).
+	// in effect. A registry segment that has sat un-chunked in this vault's
+	// registry (measured from PublishedAt, not record IngestTS — see
+	// scanGiveUpExpired) longer than this TTL is released as a COUNTED expiry
+	// even though it was never chunked (island origin, no reachable holder):
+	// holding an uncollectable entry forever only leaks. Route-disposition
+	// retention vetoes the bound — those records must be routed, not dropped.
+	// Nil disables (design-notes 28; PublishedAt anchor: gastrolog-68sfsl).
 	RetentionGiveUpTTL func() (time.Duration, bool)
 	// IndexOpener opens a completed segment for planner indexing. Defaults
 	// to BuildOrderedIndex when nil (tests may inject a counting wrapper).
