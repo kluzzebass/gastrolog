@@ -255,8 +255,10 @@ func (r *VaultLifecycleReconciler) ReconcileFromSnapshot(fsm *vaultctlfsm.FSM) {
 
 	// Sealed-state projection acquires the chunk Manager mutex but
 	// does not propose Raft applies, so it is safe to run inline.
+	// Cloud-backed entries need no projection pass: the chunk manager's
+	// lazy cloud-backed resolver serves them from this restored FSM at
+	// first lookup (gastrolog-5bnxc).
 	r.projectAllSealedFromFSM(fsm)
-	r.projectAllCloudBackedFromFSM(fsm)
 	// Phase 3 (gastrolog-1huz5): chunks left in Sealing state on the
 	// FSM after a leader crash mid-PostSealProcess need their assembly
 	// resumed. Re-runs the post-seal pipeline so sealToGLCB completes
@@ -421,68 +423,6 @@ func (r *VaultLifecycleReconciler) resumeSealingFromFSM(fsm *vaultctlfsm.FSM) {
 	if resumed > 0 {
 		r.logger.Info("reconcile-from-snapshot: scheduled seal resumption",
 			"count", resumed)
-	}
-}
-
-// projectAllCloudBackedFromFSM iterates every cloud-backed entry in the
-// FSM and registers the chunk in the local chunk Manager's cloud index
-// via RegisterCloudBackedChunk. Used by ReconcileFromSnapshot after Restore —
-// the per-apply onUpload effect (which fires the same RegisterCloudBackedChunk
-// for live CmdUploadChunk replication) does NOT fire during snapshot
-// install (Restore replaces f.chunks wholesale, no per-entry effects),
-// so cloud-backed chunks that arrived during snapshot install would otherwise
-// be present in the FSM but absent from cm.cloudIdx — making
-// cm.OpenCursor return ErrChunkNotFound and aborting search streams.
-// RegisterCloudBackedChunk is idempotent (skips if already in m.metas or
-// m.cloudIdx), so calling it for every cloud-backed entry is safe.
-// See gastrolog-3ukgz.
-//
-// gastrolog-5bnxc verification (KEEP — not redundant): this pass is
-// load-bearing, not superseded by the FSM-grounded read seam
-// (gastrolog-2lfjk/3jerp). That seam grounds chunk METADATA reads at the
-// orchestrator level (State/CloudBacked/Archived/SealedAt); it does NOT resolve
-// BYTES. cm.OpenCursor for a cloud-only blob resolves solely through the local
-// cloud index, and the Manager's lazy on-miss resolver serves only pipeline
-// GLCBs physically present on disk (it os.Stat's the file), so an evicted /
-// never-downloaded cloud blob stays unresolvable without a cloud-index entry.
-// Since snapshot install fires no per-apply onUpload effect, this projection is
-// the only path that populates the cloud index for chunks that arrived via
-// snapshot — retiring it makes OpenCursor return ErrChunkNotFound on a
-// snapshot-caught-up follower. Pinned by
-// file.TestOpenCursorCloudBackedRequiresCloudIndex. A future retirement needs a
-// lazy FSM-grounded cloud resolver in the Manager first (cluster-validated).
-func (r *VaultLifecycleReconciler) projectAllCloudBackedFromFSM(fsm *vaultctlfsm.FSM) {
-	if r.vaultInst == nil || r.vaultInst.Chunks == nil {
-		return
-	}
-	registrar, ok := r.vaultInst.Chunks.(chunk.CloudBackedChunkRegistrar)
-	if !ok {
-		return
-	}
-	for _, e := range fsm.List() {
-		if !e.CloudBacked {
-			continue
-		}
-		info := chunk.CloudBackedChunkInfo{
-			WriteStart:        e.WriteStart,
-			WriteEnd:          e.WriteEnd,
-			IngestStart:       e.IngestStart,
-			IngestEnd:         e.IngestEnd,
-			SourceStart:       e.SourceStart,
-			SourceEnd:         e.SourceEnd,
-			RecordCount:       e.RecordCount,
-			Bytes:             e.Bytes,
-			CloudBytes:        e.CloudBytes,
-			IngestIdxOffset:   e.IngestIdxOffset,
-			IngestIdxSize:     e.IngestIdxSize,
-			SourceIdxOffset:   e.SourceIdxOffset,
-			SourceIdxSize:     e.SourceIdxSize,
-			IngestTSMonotonic: e.IngestTSMonotonic,
-		}
-		if err := registrar.RegisterCloudBackedChunk(e.ID, info); err != nil {
-			r.logger.Warn("reconcile-from-snapshot: RegisterCloudBackedChunk failed",
-				"chunk", e.ID, "error", err)
-		}
 	}
 }
 

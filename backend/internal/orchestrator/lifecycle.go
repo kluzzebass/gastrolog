@@ -295,7 +295,7 @@ func (o *Orchestrator) rebuildVaultIndexes(ctx context.Context, vaultID glid.GLI
 			continue
 		}
 		if meta.CloudBacked && vaultInst.IsFollower {
-			continue // no local data — adopted via RegisterCloudBackedChunk
+			continue // no local data — adopted lazily via the cloud-backed resolver
 		}
 		o.scheduleIndexRebuildIfNeeded(ctx, vaultID, vaultInst, meta)
 	}
