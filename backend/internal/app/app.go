@@ -1264,12 +1264,32 @@ func ensureNodeConfigAsync(ctx context.Context, cfgStore system.Store, nodeID, c
 	if err := waitForQuorum(ctx, cfgStore, logger); err != nil {
 		return
 	}
-	nodeName, err := ensureNodeConfig(ctx, cfgStore, nodeID, preferredName)
-	if err != nil {
-		logger.Warn("ensure node config failed (will retry on next start)", "error", err)
-		return
+	// Registration failures right after quorum are usually transient: a
+	// freshly-joined node may observe the leader before its raft log has
+	// backfilled (gastrolog-1rw6df), and the first forward can race that
+	// window. Retry with backoff instead of giving up until the next
+	// restart — self-registration is what makes the node visible to
+	// operators, so a one-shot here turns a 50ms race into a permanently
+	// missing registry entry.
+	backoff := 250 * time.Millisecond
+	const maxBackoff = 10 * time.Second
+	for {
+		nodeName, err := ensureNodeConfig(ctx, cfgStore, nodeID, preferredName)
+		if err == nil {
+			persistNodeName(logger, configType, hd, nodeName)
+			return
+		}
+		logger.Warn("ensure node config failed; retrying",
+			"error", err, "backoff", backoff)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
+		if backoff *= 2; backoff > maxBackoff {
+			backoff = maxBackoff
+		}
 	}
-	persistNodeName(logger, configType, hd, nodeName)
 }
 
 func persistNodeName(logger *slog.Logger, configType string, hd home.Dir, nodeName string) {
