@@ -1626,6 +1626,40 @@ func setupMultiRaft(clusterSrv *cluster.Server, rawStore system.Store, nodeID, h
 	return groupMgr, wal, resolver
 }
 
+// metricsStatsAdapter adapts *orchestrator.Orchestrator to the metrics
+// ingester's narrow StatsSource interface. The orchestrator's
+// orchestrator.VaultSnapshot stays a vault-domain DTO; this adapter converts
+// it into ingestmetrics.VaultSnapshot at the wiring seam so
+// internal/ingester/metrics depends on nothing in internal/orchestrator
+// (gastrolog-5e04ld).
+type metricsStatsAdapter struct {
+	orch *orchestrator.Orchestrator
+}
+
+func (a metricsStatsAdapter) IngestQueueDepth() int    { return a.orch.IngestQueueDepth() }
+func (a metricsStatsAdapter) IngestQueueCapacity() int { return a.orch.IngestQueueCapacity() }
+
+func (a metricsStatsAdapter) VaultSnapshots() []ingestmetrics.VaultSnapshot {
+	snaps := a.orch.VaultSnapshots()
+	out := make([]ingestmetrics.VaultSnapshot, len(snaps))
+	for i, s := range snaps {
+		out[i] = ingestmetrics.VaultSnapshot{
+			ID:           s.ID,
+			RecordCount:  s.RecordCount,
+			ChunkCount:   s.ChunkCount,
+			SealedChunks: s.SealedChunks,
+			DataBytes:    s.DataBytes,
+			Enabled:      s.Enabled,
+		}
+	}
+	return out
+}
+
+// Compile-time assertion: metricsStatsAdapter must satisfy the metrics
+// ingester's StatsSource so drift between orchestrator.VaultSnapshot and
+// ingestmetrics.VaultSnapshot breaks the build loudly instead of at runtime.
+var _ ingestmetrics.StatsSource = metricsStatsAdapter{}
+
 func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore system.Store, orch *orchestrator.Orchestrator, certMgr *cert.Manager, slogCh <-chan logging.CapturedRecord, slogCapture *logging.CaptureHandler, groupMgr *raftgroup.GroupManager, nodeAddrResolver func(string) (string, bool), nodeID string) orchestrator.Factories {
 	reg := func(factory ingestion.IngesterFactory, defaults func() map[string]string, tester orchestrator.ConnectionTester) orchestrator.IngesterRegistration {
 		return orchestrator.IngesterRegistration{Factory: factory, Defaults: defaults, Tester: tester}
@@ -1652,7 +1686,7 @@ func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore sys
 		"http":      listen(ingesthttp.NewFactory(), ingesthttp.ParamDefaults, ingesthttp.ListenAddrs),
 		"kafka":     regHA(ingestkafka.NewFactory(), ingestkafka.ParamDefaults, ingestkafka.TestConnection),
 		"mqtt":      regHA(ingestmqtt.NewFactory(), ingestmqtt.ParamDefaults, ingestmqtt.TestConnection),
-		"metrics":   reg(ingestmetrics.NewFactory(orch), ingestmetrics.ParamDefaults, nil),
+		"metrics":   reg(ingestmetrics.NewFactory(metricsStatsAdapter{orch: orch}), ingestmetrics.ParamDefaults, nil),
 		"otlp":      listen(ingestotlp.NewFactory(), ingestotlp.ParamDefaults, ingestotlp.ListenAddrs),
 		"relp":      listen(ingestrelp.NewFactory(certMgr), ingestrelp.ParamDefaults, ingestrelp.ListenAddrs),
 		"syslog":    listen(ingestsyslog.NewFactory(), ingestsyslog.ParamDefaults, ingestsyslog.ListenAddrs),

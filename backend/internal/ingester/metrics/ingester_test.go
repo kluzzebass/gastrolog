@@ -7,20 +7,18 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"gastrolog/internal/orchestrator"
 )
 
 type fakeStats struct {
 	depth     int
 	capacity  int
-	snapshots []orchestrator.VaultSnapshot
+	snapshots []VaultSnapshot
 }
 
 func (f *fakeStats) IngestQueueDepth() int       { return f.depth }
 func (f *fakeStats) IngestQueueCapacity() int    { return f.capacity }
 func (f *fakeStats) IngestPressureLevel() string { return "normal" }
-func (f *fakeStats) VaultSnapshots() []orchestrator.VaultSnapshot {
+func (f *fakeStats) VaultSnapshots() []VaultSnapshot {
 	return f.snapshots
 }
 
@@ -162,7 +160,7 @@ func TestVaultMetrics(t *testing.T) {
 	src := &fakeStats{
 		depth:    0,
 		capacity: 100,
-		snapshots: []orchestrator.VaultSnapshot{
+		snapshots: []VaultSnapshot{
 			{
 				ID:           vaultID,
 				RecordCount:  42,
@@ -229,7 +227,7 @@ func TestDualTickerIndependence(t *testing.T) {
 	src := &fakeStats{
 		depth:    1,
 		capacity: 100,
-		snapshots: []orchestrator.VaultSnapshot{
+		snapshots: []VaultSnapshot{
 			{ID: glid.New(), RecordCount: 10, ChunkCount: 1, Enabled: true},
 		},
 	}
