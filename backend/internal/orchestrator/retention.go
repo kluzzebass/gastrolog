@@ -359,8 +359,9 @@ func (o *Orchestrator) retentionSweepAll() {
 // has an upstream event that drives its primary convergence — delete
 // obligations on CmdRequestDelete apply, local/staging orphans on
 // snapshot install (ReconcileFromSnapshot), and the leader-only
-// categories on lead-gained plus on a placement move under a stable
-// leader (ReconcileMembershipCatchup). This tick
+// categories on lead-gained (ReconcileMembershipCatchup), and stale
+// pending-delete acks additionally on a placement move under a stable
+// leader (wakeStalePendingAckReconcile). This tick
 // catches the residual: dropped/raced events, and the two categories that
 // are periodic-by-nature (idle-active wall-clock inactivity, and the
 // grace-period GCs for stale-leader-FSM and abandoned-transfer). It is

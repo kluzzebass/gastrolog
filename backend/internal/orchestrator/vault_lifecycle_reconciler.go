@@ -706,8 +706,8 @@ func (r *VaultLifecycleReconciler) gatherReconcileView() *reconcileView {
 //                         + log-replay onRequestDelete. Tick = backstop.
 //   - stagingOrphans      event: snapshot install (ReconcileFromSnapshot)
 //                         + segment release. Tick = backstop.
-//   - missingReplicas     event: lead-gained + placement move + snapshot
-//                         install (ReconcileMembershipCatchup). No reliable
+//   - missingReplicas     event: lead-gained + snapshot install
+//                         (ReconcileMembershipCatchup). No reliable
 //                         per-chunk edge (the leader's seal-time push has
 //                         no retry queue), so the tick stays as the
 //                         recovery backstop.
@@ -716,9 +716,9 @@ func (r *VaultLifecycleReconciler) gatherReconcileView() *reconcileView {
 //                         "event" is absence of bytes past a timeout.
 //   - stalePendingAcks    event: leadership change (lead-gained) AND
 //                         placement move under a stable leader
-//                         (wakeMembershipCatchup on the FollowerTargets /
-//                         role reassignment, gastrolog-235dm7) +
-//                         CmdPruneNode. Tick = backstop.
+//                         (wakeStalePendingAckReconcile on the
+//                         FollowerTargets / role reassignment,
+//                         gastrolog-235dm7) + CmdPruneNode. Tick = backstop.
 //   - idleActiveChunks    periodic-by-nature: wall-clock inactivity
 //                         detection (WriteEnd frozen past a threshold).
 //                         Inactivity is the ABSENCE of append events, so
@@ -743,18 +743,9 @@ func (r *VaultLifecycleReconciler) ReconcileTick() {
 // ReconcileMembershipCatchup runs the placement- and leadership-sensitive
 // reconcile categories in response to a membership/leadership edge
 // (gastrolog-3fu9t) rather than waiting for the periodic backstop tick.
-//
-// Two upstream edges drive it:
-//
-//   - onVaultCtlLeadGained — this node just gained vault-ctl leadership for
-//     the vault.
-//   - wakeMembershipCatchup — this vault's placement membership moved under
-//     a STABLE leader: a rebalance that reassigns FollowerTargets (or flips
-//     this instance's role / leader pointer) with no leadership change and no
-//     RemoveServer, so no lead-gained edge fires (gastrolog-235dm7).
-//
-// A node that just gained vault-ctl leadership for this vault is the exact
-// moment these categories need to run:
+// Wired to onVaultCtlLeadGained: a node that just gained vault-ctl
+// leadership for this vault is the exact moment these categories need to
+// run:
 //
 //   - reconcileMissingReplicas: a leader that joined the placement set
 //     late holds the FSM manifest but not the historical bytes, and must
@@ -771,9 +762,15 @@ func (r *VaultLifecycleReconciler) ReconcileTick() {
 // safe no-op. The categories propose Raft applies, so callers MUST invoke
 // this off the leadership-tracking / apply-pump goroutine (a plain
 // goroutine dispatch) to avoid the apply-pump self-cycle. The periodic
-// ReconcileTick remains the durability backstop for edges both wakes miss
-// (a dropped lead-gained signal, a placement republish that raced the
-// instance build, an ApplyRaftPruneNode that failed once).
+// ReconcileTick remains the durability backstop for the edges no wake
+// covers (a dropped lead-gained signal, a republish that raced the instance
+// build, an ApplyRaft* that failed once).
+//
+// A placement move under a STABLE leader gets its own, narrower wake:
+// wakeStalePendingAckReconcile fires only reconcileStalePendingDeleteAcks,
+// because ExpectedFrom is the one thing a FollowerTargets reassignment
+// directly invalidates (gastrolog-235dm7). The other three categories here
+// stay on lead-gained + the backstop.
 func (r *VaultLifecycleReconciler) ReconcileMembershipCatchup() {
 	v := r.gatherReconcileView()
 	if v == nil {

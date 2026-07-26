@@ -107,7 +107,7 @@ func (o *Orchestrator) ReconcilePlacements(ctx context.Context) {
 	}
 	o.mu.RUnlock()
 
-	o.wakeMembershipCatchup(moved)
+	o.wakeStalePendingAckReconcile(moved)
 
 	// A vault whose placements resolve to no leader is beyond self-healing —
 	// sustained, that is an operator problem (alarm after the catalog's
@@ -165,17 +165,16 @@ func (o *Orchestrator) ReconcileVaultPlacement(ctx context.Context, vaultID glid
 	}
 	o.mu.RUnlock()
 
-	o.wakeMembershipCatchup(moved)
+	o.wakeStalePendingAckReconcile(moved)
 
 	if hasInstance {
 		o.updateLeaderlessAlarm(vaultID, vaultCfg.Name, !leaderResolved)
 	}
 }
 
-// wakeMembershipCatchup fires the reconciler's placement- and leadership-
-// sensitive categories (ReconcileMembershipCatchup) for every instance whose
-// placement membership just moved — a role flip, a leader-pointer change, or a
-// FollowerTargets reassignment.
+// wakeStalePendingAckReconcile fires the reconciler's stale-pending-delete-ack
+// category for every instance whose placement membership just moved — a role
+// flip, a leader-pointer change, or a FollowerTargets reassignment.
 //
 // This closes the last periodic-only reconcile category (gastrolog-235dm7).
 // gastrolog-3fu9t wired ReconcileMembershipCatchup to onVaultCtlLeadGained,
@@ -187,19 +186,29 @@ func (o *Orchestrator) ReconcileVaultPlacement(ctx context.Context, vaultID glid
 // until the periodic backstop tick notices. The reassignment IS the event; wake
 // on it.
 //
-// Only instances that actually moved are woken: replicationTargetsEqual /
-// the role diff gate this, so a no-op placement republish (the common case for
-// an unrelated vault config edit) costs nothing. Every woken category is
-// internally role-gated and idempotent, so a wake on a transient state is a
+// Deliberately ONLY the ack category, not the whole ReconcileMembershipCatchup
+// set. A placement move directly invalidates ExpectedFrom — that set is
+// literally derived from FollowerTargets, so the reassignment is its exact
+// upstream edge. The other three categories in that set are not this event's:
+// missing-replica catchup for a newly added follower is already dispatcher-owned
+// (catchupScheduler / newFollowersForInstance) and, on pipeline vaults, carries
+// holder-receipt ack/revoke that must not race a GLCB build that is merely
+// mid-flight; stale-leader-FSM and abandoned-transfer are grace-period GCs whose
+// edge is elapsed time, not membership. They keep their existing lead-gained
+// wake and the periodic backstop.
+//
+// Only instances that actually moved are woken: replicationTargetsEqual and the
+// role diff gate this, so a no-op placement republish (the common case for an
+// unrelated vault config edit) costs nothing. The category is internally
+// role-gated (leader-only) and idempotent, so a wake on transient state is a
 // safe no-op.
 //
-// Dispatched on auxWg for the same reason as onVaultCtlLeadGained: the
-// categories propose Raft applies, and the callers run under o.mu (and, via the
-// config dispatcher, on the FSM apply path) where a synchronous Apply would
-// deadlock.
-func (o *Orchestrator) wakeMembershipCatchup(moved []*VaultLifecycleReconciler) {
+// Dispatched on auxWg for the same reason as onVaultCtlLeadGained: it proposes
+// Raft applies, and the callers run under o.mu (and, via the config dispatcher,
+// on the FSM apply path) where a synchronous Apply would deadlock.
+func (o *Orchestrator) wakeStalePendingAckReconcile(moved []*VaultLifecycleReconciler) {
 	for _, rec := range moved {
-		o.auxWg.Go(rec.ReconcileMembershipCatchup)
+		o.auxWg.Go(rec.SweepStalePendingDeleteAcks)
 	}
 }
 
@@ -245,8 +254,8 @@ func replicationTargetsEqual(a, b []system.ReplicationTarget) bool {
 //
 // Reports changed=true when the instance's placement membership actually moved
 // — a role flip, or a follower's leader pointer moving to a different node.
-// Callers use it to wake the reconciler's membership-catchup categories on the
-// placement event (wakeMembershipCatchup) instead of leaving them to the
+// Callers use it to wake the reconciler's stale-pending-ack reconcile on the
+// placement event (wakeStalePendingAckReconcile) instead of leaving it to the
 // backstop tick.
 func (o *Orchestrator) reconcileInstanceRole(sys *system.System, vaultCfg system.VaultConfig, vaultInst *VaultInstance) (leaderResolved, changed bool) {
 	leaderNodeID := system.LeaderNodeID(vaultCfg.Placements, sys.Runtime.NodeStorageConfigs)
@@ -296,7 +305,7 @@ func replicationTargetNodes(targets []system.ReplicationTarget) []string {
 // / ReconcilePlacements on the placement event (caller holds o.mu.RLock). Logs
 // only on change so reconfiguration is auditable without noise, and reports
 // whether the target set moved so the caller can wake the reconciler's
-// membership-catchup categories (wakeMembershipCatchup) — a leader whose
+// stale-pending-ack reconcile (wakeStalePendingAckReconcile) — a leader whose
 // follower set shrank holds pendingDeletes naming the departed node in
 // ExpectedFrom, which nothing else unsticks under a stable leader.
 func (o *Orchestrator) refreshFollowerTargets(sys *system.System, vaultCfg system.VaultConfig, vaultInst *VaultInstance) (changed bool) {

@@ -347,9 +347,9 @@ func TestReconcilePlacements_StableLeaderRebalancePrunesStalePendingAcks(t *test
 // TestReconcileVaultPlacement_UnchangedPlacementDoesNotWakeCatchup pins the
 // gate: the wake fires on a MOVE, not on every config republish. An unrelated
 // vault edit re-fires NotifyVaultPut with identical placements; that must not
-// spray Raft proposals and catchup RPCs across every vault on the node. The
-// stale ExpectedFrom here ("ghost", never in placement) is deliberately left to
-// the periodic backstop — this documents what stays on the tick.
+// spray Raft proposals across every vault on the node. The stale ExpectedFrom
+// here ("ghost", never in placement) is deliberately left to the periodic
+// backstop — this documents what stays on the tick.
 func TestReconcileVaultPlacement_UnchangedPlacementDoesNotWakeCatchup(t *testing.T) {
 	t.Parallel()
 	vaultID := glid.New()
