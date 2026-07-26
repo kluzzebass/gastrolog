@@ -77,12 +77,25 @@ func (ing *Ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessa
 
 	errCh := make(chan error, 2)
 
-	// Start HTTP server.
+	// Bind BOTH listeners before serving anything. The HTTP /ready endpoint
+	// is the ingester's readiness signal, so it must not answer until every
+	// listener has a bound socket — serving HTTP before the gRPC bind let a
+	// client pass /ready and then get connection-refused on the gRPC port
+	// (gastrolog-2y7wd2). A bound listener accepts TCP connections at the
+	// kernel level even before Serve starts draining them, so bind-then-serve
+	// makes readiness honest without extra signaling.
 	httpLn, err := net.Listen("tcp", ing.httpAddr)
 	if err != nil {
 		return fmt.Errorf("otlp http listen: %w", err)
 	}
 
+	grpcLn, err := net.Listen("tcp", ing.grpcAddr)
+	if err != nil {
+		_ = httpLn.Close()
+		return fmt.Errorf("otlp grpc listen: %w", err)
+	}
+
+	// Start HTTP server.
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/logs", ing.handleHTTP)
 	mux.HandleFunc("GET /ready", func(w http.ResponseWriter, _ *http.Request) {
@@ -96,13 +109,6 @@ func (ing *Ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessa
 		}
 	}()
 	ing.logger.Info("otlp http listening", "addr", httpLn.Addr().String())
-
-	// Start gRPC server.
-	grpcLn, err := net.Listen("tcp", ing.grpcAddr)
-	if err != nil {
-		_ = httpSrv.Close()
-		return fmt.Errorf("otlp grpc listen: %w", err)
-	}
 
 	grpcSrv := grpc.NewServer()
 	collogspb.RegisterLogsServiceServer(grpcSrv, &logsServiceServer{ing: ing})
