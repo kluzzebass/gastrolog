@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"gastrolog/internal/glid"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -263,8 +265,101 @@ func TestTriggerArchivalSweepBelowThresholdNoOp(t *testing.T) {
 	}
 }
 
+// gatedSystemLoader holds every archival evaluation inside its first
+// statement — loadSystem — until the test releases it, so the winning
+// triggered job is PROVABLY still registered (still holding the claim) while
+// the rest of the stampede runs. That is what makes the assertion about the
+// claim-or-skip logic and nothing else: with a time-based join the winner
+// could legitimately finish and free the name mid-test, and the test would be
+// measuring scheduler cadence instead of coalescing. See gastrolog-69sjlj.
+type gatedSystemLoader struct {
+	inner       SystemLoader
+	entered     chan struct{}
+	release     chan struct{}
+	releaseOnce sync.Once
+	calls       atomic.Int32
+}
+
+func (g *gatedSystemLoader) Load(ctx context.Context) (*system.System, error) {
+	g.calls.Add(1)
+	g.entered <- struct{}{}
+	<-g.release
+	return g.inner.Load(ctx)
+}
+
+// releaseAll unblocks every gated evaluation. Deferred by the test so a
+// failing assertion doesn't leave a job wedged inside the gate, which would
+// stall the scheduler shutdown in orchestrator cleanup.
+func (g *gatedSystemLoader) releaseAll() {
+	g.releaseOnce.Do(func() { close(g.release) })
+}
+
+// TestTriggerArchivalSweepConcurrentTriggersClaimOnce is the unhappy-path
+// half of the coalescing contract. TriggerArchivalSweep fires from the config
+// dispatcher on NotifyCloudServicePut, so two operator edits (or one edit
+// racing a replayed apply) genuinely reach it concurrently. With the winning
+// job pinned inside its body for the whole stampede, exactly one evaluation is
+// the only correct outcome; the old HasJob-then-RunOnce guard let several
+// through, and each duplicate silently overwrote the previous registration so
+// one run's terminal job event never reached the inspector.
+func TestTriggerArchivalSweepConcurrentTriggersClaimOnce(t *testing.T) {
+	t.Parallel()
+	orch, _, cm, _, _ := archivalTestSetupLive(t, []system.CloudStorageTransition{
+		{After: "1d", StorageClass: "GLACIER"},
+	})
+	_ = ingestSealUpload(t, cm, 10)
+
+	gate := &gatedSystemLoader{
+		inner:   orch.sysLoader,
+		entered: make(chan struct{}, 32),
+		release: make(chan struct{}),
+	}
+	orch.sysLoader = gate
+	defer gate.releaseAll()
+
+	sub, cancel := orch.Scheduler().Events().Subscribe()
+	defer cancel()
+
+	const triggers = 16
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for range triggers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			orch.TriggerArchivalSweep()
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	// Join on the state transition, not the clock: the winner is now inside
+	// archivalSweepAll and cannot complete until we release it.
+	<-gate.entered
+
+	if n := countJobsNamed(orch, archivalSweepTriggerJobName); n != 1 {
+		t.Fatalf("triggered archival jobs registered = %d, want exactly 1", n)
+	}
+	select {
+	case <-gate.entered:
+		t.Fatal("a second triggered evaluation started while one was pending — triggers did not coalesce")
+	default:
+	}
+
+	gate.releaseAll()
+	awaitSchedulerJobDone(t, sub, archivalSweepTriggerJobName)
+
+	if got := gate.calls.Load(); got != 1 {
+		t.Fatalf("archival evaluation ran %d times for %d concurrent triggers, want 1", got, triggers)
+	}
+}
+
 // TestTriggerArchivalSweepCoalesces verifies repeated triggers while a run is
-// pending don't stack up duplicate scheduler jobs.
+// pending don't stack up duplicate scheduler jobs, and that the claim is a
+// lease on outstanding work rather than a permanent lock: once the triggered
+// run completes and leaves the registry, a later config edit can trigger a
+// fresh evaluation.
 func TestTriggerArchivalSweepCoalesces(t *testing.T) {
 	t.Parallel()
 	orch, _, cm, _, _ := archivalTestSetupLive(t, []system.CloudStorageTransition{
@@ -272,7 +367,7 @@ func TestTriggerArchivalSweepCoalesces(t *testing.T) {
 	})
 	_ = ingestSealUpload(t, cm, 10)
 
-	// Fire many triggers back-to-back; the HasJob guard should collapse the
+	// Fire many triggers back-to-back; the RunOnceIfAbsent claim collapses the
 	// duplicates that arrive while a triggered run is still pending.
 	for range 20 {
 		orch.TriggerArchivalSweep()
@@ -283,6 +378,12 @@ func TestTriggerArchivalSweepCoalesces(t *testing.T) {
 	if orch.Scheduler().HasJob(archivalSweepTriggerJobName) {
 		t.Error("triggered archival job should not remain after completion")
 	}
+
+	// The name is claimable again — a later edit is not swallowed forever.
+	sub, cancel := orch.Scheduler().Events().Subscribe()
+	defer cancel()
+	orch.TriggerArchivalSweep()
+	awaitSchedulerJobDone(t, sub, archivalSweepTriggerJobName)
 }
 
 // --- reconciliation sweep tests ---
