@@ -82,6 +82,7 @@ func (o *Orchestrator) ReconcilePlacements(ctx context.Context) {
 	cfg := &sys.Config
 
 	leaderless := make(map[glid.GLID]string)
+	var moved []*VaultLifecycleReconciler
 	o.mu.RLock()
 	for vaultID, vault := range o.vaults {
 		vaultInst := vault.Instance
@@ -92,14 +93,21 @@ func (o *Orchestrator) ReconcilePlacements(ctx context.Context) {
 		if vaultCfg == nil {
 			continue
 		}
-		if !o.reconcileInstanceRole(sys, *vaultCfg, vaultInst) {
+		leaderResolved, roleChanged := o.reconcileInstanceRole(sys, *vaultCfg, vaultInst)
+		if !leaderResolved {
 			leaderless[vaultID] = vaultCfg.Name
 		}
+		targetsChanged := false
 		if !vaultInst.IsFollower {
-			o.refreshFollowerTargets(sys, *vaultCfg, vaultInst)
+			targetsChanged = o.refreshFollowerTargets(sys, *vaultCfg, vaultInst)
+		}
+		if (roleChanged || targetsChanged) && vaultInst.Reconciler != nil {
+			moved = append(moved, vaultInst.Reconciler)
 		}
 	}
 	o.mu.RUnlock()
+
+	o.wakeStalePendingAckReconcile(moved)
 
 	// A vault whose placements resolve to no leader is beyond self-healing —
 	// sustained, that is an operator problem (alarm after the catalog's
@@ -141,18 +149,66 @@ func (o *Orchestrator) ReconcileVaultPlacement(ctx context.Context, vaultID glid
 
 	hasInstance := false
 	leaderResolved := true
+	var moved []*VaultLifecycleReconciler
 	o.mu.RLock()
 	if vault := o.vaults[vaultID]; vault != nil && vault.Instance != nil {
 		hasInstance = true
-		leaderResolved = o.reconcileInstanceRole(sys, *vaultCfg, vault.Instance)
+		roleChanged := false
+		leaderResolved, roleChanged = o.reconcileInstanceRole(sys, *vaultCfg, vault.Instance)
+		targetsChanged := false
 		if !vault.Instance.IsFollower {
-			o.refreshFollowerTargets(sys, *vaultCfg, vault.Instance)
+			targetsChanged = o.refreshFollowerTargets(sys, *vaultCfg, vault.Instance)
+		}
+		if (roleChanged || targetsChanged) && vault.Instance.Reconciler != nil {
+			moved = append(moved, vault.Instance.Reconciler)
 		}
 	}
 	o.mu.RUnlock()
 
+	o.wakeStalePendingAckReconcile(moved)
+
 	if hasInstance {
 		o.updateLeaderlessAlarm(vaultID, vaultCfg.Name, !leaderResolved)
+	}
+}
+
+// wakeStalePendingAckReconcile fires the reconciler's stale-pending-delete-ack
+// category for every instance whose placement membership just moved — a role
+// flip, a leader-pointer change, or a FollowerTargets reassignment.
+//
+// This closes the last periodic-only reconcile category (gastrolog-235dm7).
+// gastrolog-3fu9t wired ReconcileMembershipCatchup to onVaultCtlLeadGained,
+// which covers every membership edge that comes with a leadership change; it
+// does NOT cover a rebalance under a STABLE leader — placements move a follower
+// from node A to node B, the leader keeps both its placement role and its
+// vault-ctl Raft leadership, and no lead-gained edge fires. The leader's
+// pendingDeletes still name A in ExpectedFrom, so those deletes stay stuck
+// until the periodic backstop tick notices. The reassignment IS the event; wake
+// on it.
+//
+// Deliberately ONLY the ack category, not the whole ReconcileMembershipCatchup
+// set. A placement move directly invalidates ExpectedFrom — that set is
+// literally derived from FollowerTargets, so the reassignment is its exact
+// upstream edge. The other three categories in that set are not this event's:
+// missing-replica catchup for a newly added follower is already dispatcher-owned
+// (catchupScheduler / newFollowersForInstance) and, on pipeline vaults, carries
+// holder-receipt ack/revoke that must not race a GLCB build that is merely
+// mid-flight; stale-leader-FSM and abandoned-transfer are grace-period GCs whose
+// edge is elapsed time, not membership. They keep their existing lead-gained
+// wake and the periodic backstop.
+//
+// Only instances that actually moved are woken: replicationTargetsEqual and the
+// role diff gate this, so a no-op placement republish (the common case for an
+// unrelated vault config edit) costs nothing. The category is internally
+// role-gated (leader-only) and idempotent, so a wake on transient state is a
+// safe no-op.
+//
+// Dispatched on auxWg for the same reason as onVaultCtlLeadGained: it proposes
+// Raft applies, and the callers run under o.mu (and, via the config dispatcher,
+// on the FSM apply path) where a synchronous Apply would deadlock.
+func (o *Orchestrator) wakeStalePendingAckReconcile(moved []*VaultLifecycleReconciler) {
+	for _, rec := range moved {
+		o.auxWg.Go(rec.SweepStalePendingDeleteAcks)
 	}
 }
 
@@ -195,7 +251,13 @@ func replicationTargetsEqual(a, b []system.ReplicationTarget) bool {
 // ReconcileVaultPlacement / ReconcilePlacements on the config event that
 // changed placements (caller holds o.mu.RLock; role fields are written
 // lock-free, matching the dispatch convention).
-func (o *Orchestrator) reconcileInstanceRole(sys *system.System, vaultCfg system.VaultConfig, vaultInst *VaultInstance) (leaderResolved bool) {
+//
+// Reports changed=true when the instance's placement membership actually moved
+// — a role flip, or a follower's leader pointer moving to a different node.
+// Callers use it to wake the reconciler's stale-pending-ack reconcile on the
+// placement event (wakeStalePendingAckReconcile) instead of leaving it to the
+// backstop tick.
+func (o *Orchestrator) reconcileInstanceRole(sys *system.System, vaultCfg system.VaultConfig, vaultInst *VaultInstance) (leaderResolved, changed bool) {
 	leaderNodeID := system.LeaderNodeID(vaultCfg.Placements, sys.Runtime.NodeStorageConfigs)
 	if leaderNodeID == "" {
 		// Placements resolve to no leader (mid-flap partial state, or a
@@ -203,27 +265,29 @@ func (o *Orchestrator) reconcileInstanceRole(sys *system.System, vaultCfg system
 		// unresolvable state — that is exactly the race that strands
 		// vaults leaderless. Sustained, the caller raises the
 		// vault-leaderless alarm.
-		return false
+		return false, false
 	}
 	followerIDs := system.FollowerNodeIDs(vaultCfg.Placements, sys.Runtime.NodeStorageConfigs)
 	isLeader := leaderNodeID == o.localNodeID
 	isFollower := slices.Contains(followerIDs, o.localNodeID)
 	if !isLeader && !isFollower {
-		return true // not in placement: instance lifecycle is dispatch-owned
+		return true, false // not in placement: instance lifecycle is dispatch-owned
 	}
+	prevLeaderNodeID := vaultInst.LeaderNodeID
 	if isFollower {
 		vaultInst.LeaderNodeID = leaderNodeID
 	} else {
 		vaultInst.LeaderNodeID = ""
 	}
+	changed = vaultInst.LeaderNodeID != prevLeaderNodeID
 	if vaultInst.IsFollower == isFollower {
-		return true
+		return true, changed
 	}
 	vaultInst.IsFollower = isFollower
 	o.rotationLogger.Info("placement reconcile: instance role reconciled",
 		"vault", vaultCfg.ID, "name", vaultCfg.Name, "isFollower", isFollower,
 		"leader", leaderNodeID)
-	return true
+	return true, true
 }
 
 // replicationTargetNodes returns the NodeIDs of a ReplicationTarget slice for
@@ -239,10 +303,15 @@ func replicationTargetNodes(targets []system.ReplicationTarget) []string {
 // refreshFollowerTargets refreshes a leader instance's sealed-chunk replication
 // targets from the current placement config. Called from ReconcileVaultPlacement
 // / ReconcilePlacements on the placement event (caller holds o.mu.RLock). Logs
-// only on change so reconfiguration is auditable without noise.
-func (o *Orchestrator) refreshFollowerTargets(sys *system.System, vaultCfg system.VaultConfig, vaultInst *VaultInstance) {
+// only on change so reconfiguration is auditable without noise, and reports
+// whether the target set moved so the caller can wake the reconciler's
+// stale-pending-ack reconcile (wakeStalePendingAckReconcile) — a leader whose
+// follower set shrank holds pendingDeletes naming the departed node in
+// ExpectedFrom, which nothing else unsticks under a stable leader.
+func (o *Orchestrator) refreshFollowerTargets(sys *system.System, vaultCfg system.VaultConfig, vaultInst *VaultInstance) (changed bool) {
 	newTargets := system.FollowerTargets(vaultCfg.Placements, sys.Runtime.NodeStorageConfigs)
 	if !replicationTargetsEqual(vaultInst.FollowerTargets, newTargets) {
+		changed = true
 		o.rotationLogger.Info("FollowerTargets refreshed",
 			"vault", vaultCfg.ID,
 			"name", vaultCfg.Name,
@@ -250,4 +319,5 @@ func (o *Orchestrator) refreshFollowerTargets(sys *system.System, vaultCfg syste
 			"new", replicationTargetNodes(newTargets))
 	}
 	vaultInst.FollowerTargets = newTargets
+	return changed
 }
