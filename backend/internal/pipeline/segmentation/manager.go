@@ -148,12 +148,18 @@ type Manager struct {
 	// degraded). Post-accept loss must be visible, not silent.
 	dropped atomic.Uint64
 
+	// Lifecycle state lives entirely under mu — one source of truth. started
+	// and runCtx transition together in Run, so "started && runCtx == nil"
+	// is observable only after Run has exited, never during startup
+	// (gastrolog-40anrs: the old atomic started flag flipped outside mu,
+	// making a starting manager momentarily indistinguishable from an
+	// exited one and racing RegisterVault into a spurious ErrNotRunning).
 	mu      sync.Mutex
 	writers map[glid.GLID]*vaultWriter
 	runCtx  context.Context // non-nil while Run is active
+	started bool            // Run has been called
 
-	running atomic.Bool
-	wg      sync.WaitGroup
+	wg sync.WaitGroup
 }
 
 // New returns a manager and a read-only channel of completed segments.
@@ -223,7 +229,7 @@ func (m *Manager) DroppedRecords() uint64 {
 func (m *Manager) RegisterVault(vaultID glid.GLID, root string, vc VaultConfig) (chan<- Input, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.running.Load() && m.runCtx == nil {
+	if m.started && m.runCtx == nil {
 		return nil, ErrNotRunning
 	}
 	if _, ok := m.writers[vaultID]; ok {
@@ -280,11 +286,12 @@ func (m *Manager) UnregisterVault(vaultID glid.GLID) {
 
 // Run starts all registered vault writers until ctx is cancelled.
 func (m *Manager) Run(ctx context.Context) error {
-	if !m.running.CompareAndSwap(false, true) {
+	m.mu.Lock()
+	if m.started {
+		m.mu.Unlock()
 		return ErrAlreadyRunning
 	}
-
-	m.mu.Lock()
+	m.started = true
 	m.runCtx = ctx
 	writers := make([]*vaultWriter, 0, len(m.writers))
 	for _, w := range m.writers {
