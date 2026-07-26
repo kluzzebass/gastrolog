@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"gastrolog/internal/logging"
-	"gastrolog/internal/orchestrator"
 )
 
 const (
@@ -17,11 +16,26 @@ const (
 	defaultVaultInterval = 30 * time.Second
 )
 
+// VaultSnapshot is the subset of a vault's point-in-time state that the
+// metrics ingester reads when emitting a per-vault record. Defined here
+// (rather than reusing orchestrator.VaultSnapshot) so this package depends
+// on nothing outside pipeline/ingestion — the vault-domain DTO stays on the
+// orchestrator side, and the wiring seam (app.buildFactories) adapts it into
+// this narrower shape (gastrolog-5e04ld).
+type VaultSnapshot struct {
+	ID           glid.GLID
+	RecordCount  int64
+	ChunkCount   int
+	SealedChunks int
+	DataBytes    int64
+	Enabled      bool
+}
+
 // StatsSource provides ingest queue and per-vault statistics.
 type StatsSource interface {
 	IngestQueueDepth() int
 	IngestQueueCapacity() int
-	VaultSnapshots() []orchestrator.VaultSnapshot
+	VaultSnapshots() []VaultSnapshot
 }
 
 // ParamDefaults returns the default parameter values for a metrics ingester.
