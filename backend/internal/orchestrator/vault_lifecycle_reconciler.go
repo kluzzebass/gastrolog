@@ -714,10 +714,11 @@ func (r *VaultLifecycleReconciler) gatherReconcileView() *reconcileView {
 //   - staleLeaderFSM      periodic-by-nature: a 1h grace-period GC of
 //                         FSM entries no reachable node can serve. The
 //                         "event" is absence of bytes past a timeout.
-//   - stalePendingAcks    event: leadership/placement change
-//                         (ReconcileMembershipCatchup on lead-gained) +
-//                         CmdPruneNode. Tick = backstop for placement
-//                         change under a stable leader.
+//   - stalePendingAcks    event: leadership change (lead-gained) AND
+//                         placement move under a stable leader
+//                         (wakeStalePendingAckReconcile on the
+//                         FollowerTargets / role reassignment,
+//                         gastrolog-235dm7) + CmdPruneNode. Tick = backstop.
 //   - idleActiveChunks    periodic-by-nature: wall-clock inactivity
 //                         detection (WriteEnd frozen past a threshold).
 //                         Inactivity is the ABSENCE of append events, so
@@ -761,8 +762,15 @@ func (r *VaultLifecycleReconciler) ReconcileTick() {
 // safe no-op. The categories propose Raft applies, so callers MUST invoke
 // this off the leadership-tracking / apply-pump goroutine (a plain
 // goroutine dispatch) to avoid the apply-pump self-cycle. The periodic
-// ReconcileTick remains the backstop for edges this wake misses (a
-// placement change under a stable leader, a dropped lead-gained signal).
+// ReconcileTick remains the durability backstop for the edges no wake
+// covers (a dropped lead-gained signal, a republish that raced the instance
+// build, an ApplyRaft* that failed once).
+//
+// A placement move under a STABLE leader gets its own, narrower wake:
+// wakeStalePendingAckReconcile fires only reconcileStalePendingDeleteAcks,
+// because ExpectedFrom is the one thing a FollowerTargets reassignment
+// directly invalidates (gastrolog-235dm7). The other three categories here
+// stay on lead-gained + the backstop.
 func (r *VaultLifecycleReconciler) ReconcileMembershipCatchup() {
 	v := r.gatherReconcileView()
 	if v == nil {
