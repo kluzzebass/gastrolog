@@ -282,13 +282,14 @@ func (o *Orchestrator) listClusterChunkMetasLocked(vaultID glid.GLID) ([]chunk.C
 func (o *Orchestrator) removeVaultJobs(_ glid.GLID, vault *Vault) {
 	if vaultInst := vault.Instance; vaultInst != nil {
 		delete(o.retention, retentionKey(vaultInst.VaultID, vaultInst.StorageID))
-		// Cancel pending cloud-backfill jobs and drop any stranded backoff/
-		// alarm state for this vault — without this, a vault that leaves
-		// this node mid-backoff keeps its cloud-backfill-stuck alarm
+		// Cancel pending cloud-upload jobs (both the catch-up sweep's and the
+		// live seal effect's — they share one name now) and drop any stranded
+		// backoff/alarm state for this vault. Without this, a vault that
+		// leaves this node mid-backoff keeps its cloud-backfill-stuck alarm
 		// standing until the next evaluateCloudHealth sweep notices (or
 		// forever, if this node never runs that sweep for the vault
 		// again). See gastrolog-4ryguo review follow-up.
-		o.scheduler.RemoveJobsByPrefix("cloud-backfill:" + vaultInst.VaultID.String())
+		o.scheduler.RemoveJobsByPrefix(cloudUploadJobPrefix(vaultInst.VaultID))
 		o.purgeBackfillFailuresForVault(vaultInst.VaultID)
 	}
 }
@@ -306,9 +307,10 @@ func (o *Orchestrator) teardownVault(id glid.GLID, vault *Vault) {
 	o.scheduler.RemoveJobsByPrefix("compress:" + vaultPrefix)
 	o.scheduler.RemoveJobsByPrefix("index-build:" + vaultPrefix)
 	// Same reasoning as removeVaultJobs: a torn-down vault must not leave a
-	// stranded cloud-backfill-stuck alarm behind. See gastrolog-4ryguo
-	// review follow-up.
-	o.scheduler.RemoveJobsByPrefix("cloud-backfill:" + vaultPrefix)
+	// stranded cloud-backfill-stuck alarm behind, and an in-flight upload
+	// must not outlive the chunk manager it reads through. See
+	// gastrolog-4ryguo review follow-up.
+	o.scheduler.RemoveJobsByPrefix(cloudUploadJobPrefix(id))
 	o.purgeBackfillFailuresForVault(id)
 
 	// Remove the per-instance retention runner.

@@ -482,16 +482,70 @@ func TestBackfillCloudUploadsSkippedOnFollower(t *testing.T) {
 	}
 }
 
+// gatedCloudUploader holds every upload job inside UploadToCloud until the
+// test releases it. `entered` receives one chunk ID per call the instant the
+// job reaches the upload, and the call does not return until `release` closes.
+//
+// This is what turns the dedup assertion into a state gate instead of a race
+// against the scheduler. The old test called backfillCloudUploads twice and
+// hoped the first job had not finished yet; the only thing keeping the second
+// call from re-enqueueing was the first job still being registered, so on a
+// loaded machine the first job completed in between and the second call
+// legitimately re-enqueued — a scheduler-cadence assertion, ~20/40 flaky.
+// With the gate, the first job is PROVABLY still in flight and holding the
+// claim when the later requests are made, so the assertion is about the
+// claim-or-skip logic and nothing else.
+type gatedCloudUploader struct {
+	mockCloudBackedChunkManager
+	entered chan chunk.ChunkID
+	release chan struct{}
+}
+
+func newGatedCloudUploader(metas ...chunk.ChunkMeta) *gatedCloudUploader {
+	g := &gatedCloudUploader{
+		entered: make(chan chunk.ChunkID, 16),
+		release: make(chan struct{}),
+	}
+	g.chunks = metas
+	g.cloudStoreConfigured.Store(true)
+	return g
+}
+
+func (g *gatedCloudUploader) UploadToCloud(id chunk.ChunkID) error {
+	g.mu.Lock()
+	g.uploadCalls = append(g.uploadCalls, id)
+	g.mu.Unlock()
+	g.entered <- id
+	<-g.release
+	return nil
+}
+
+// countJobsNamed reports how many registered jobs carry exactly this name —
+// the direct read of the claim the upload paths compete for.
+func countJobsNamed(o *Orchestrator, name string) int {
+	n := 0
+	for _, info := range o.Scheduler().ListJobs() {
+		if info.Name == name {
+			n++
+		}
+	}
+	return n
+}
+
+// TestBackfillCloudUploads_DeduplicatesPendingJobs pins the claim-or-skip
+// contract: while an upload for a chunk is outstanding, no other request for
+// that same chunk may enqueue a second one — not a repeat catch-up sweep, and
+// not the live seal effect on the other code path. Both paths claim the same
+// scheduler job name through RunOnceIfAbsent, so the name is the idempotency
+// key. See gastrolog-3hwngy.
 func TestBackfillCloudUploads_DeduplicatesPendingJobs(t *testing.T) {
 	t.Parallel()
 
 	chunkID := chunk.NewChunkID()
-	mock := &mockCloudBackedChunkManager{
-		chunks: []chunk.ChunkMeta{
-			{ID: chunkID, Sealed: true, CloudBacked: false,
-				WriteStart: time.Now(), WriteEnd: time.Now()},
-		},
-	}
+	mock := newGatedCloudUploader(chunk.ChunkMeta{
+		ID: chunkID, Sealed: true, CloudBacked: false,
+		WriteStart: time.Now(), WriteEnd: time.Now(),
+	})
 
 	vaultID := glid.New()
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
@@ -504,21 +558,107 @@ func TestBackfillCloudUploads_DeduplicatesPendingJobs(t *testing.T) {
 			IsRaftLeader: func() bool { return true },
 		},
 	}
-
-	// Call backfill twice — should only schedule once.
-	orch.backfillCloudUploads(vaultInst)
-	orch.backfillCloudUploads(vaultInst)
-
-	orch.Scheduler().Start()
+	orch.RegisterVault(NewVault(vaultID, vaultInst))
+	markPipelineIngestVault(t, orch, vaultID, true)
 	defer func() { _ = orch.Scheduler().Stop() }()
 
-	if got := waitUploadCount(mock, 1, 5*time.Second); got != 1 {
-		t.Fatalf("expected 1 upload (deduped), got %d", got)
+	jobName := cloudUploadJobName(vaultID, chunkID)
+	sub, cancel := orch.Scheduler().Events().Subscribe()
+	defer cancel()
+
+	// Request 1 — the catch-up sweep. Join on the state transition: the job
+	// is now inside UploadToCloud and its claim is held.
+	orch.backfillCloudUploads(vaultInst)
+	<-mock.entered
+
+	// Request 2 — same path again. Request 3 — the OTHER path (the live seal
+	// effect). Both are synchronous calls: once they return, the
+	// claim-or-skip decision has already been made.
+	orch.backfillCloudUploads(vaultInst)
+	orch.schedulePipelineCloudUpload(vaultID, chunkID)
+
+	if n := countJobsNamed(orch, jobName); n != 1 {
+		t.Fatalf("cloud-upload jobs registered for chunk %s = %d, want exactly 1", chunkID, n)
 	}
-	// Brief grace period to ensure no second upload sneaks in.
-	time.Sleep(100 * time.Millisecond)
+	select {
+	case id := <-mock.entered:
+		t.Fatalf("a second upload job entered UploadToCloud for chunk %s — dedup failed", id)
+	default:
+	}
+
+	close(mock.release)
+	awaitSchedulerJobDone(t, sub, jobName)
+
 	if got := mock.uploadCallCount(); got != 1 {
 		t.Fatalf("expected 1 upload (deduped), got %d", got)
+	}
+}
+
+// TestCloudUpload_ConcurrentRequestsClaimOnce is the unhappy-path half: the
+// two request paths run on independent goroutines in production (the periodic
+// cloud-health evaluation, the vault-ctl leadership-gain and snapshot-restore
+// catch-ups, and the seal effect), so the claim must survive a genuine
+// concurrent stampede, not just sequential calls. The gated uploader keeps the
+// winning job in flight for the whole stampede, so a single upload is the only
+// correct outcome; a check-then-act guard lets several through.
+func TestCloudUpload_ConcurrentRequestsClaimOnce(t *testing.T) {
+	t.Parallel()
+
+	chunkID := chunk.NewChunkID()
+	mock := newGatedCloudUploader(chunk.ChunkMeta{
+		ID: chunkID, Sealed: true, CloudBacked: false,
+		WriteStart: time.Now(), WriteEnd: time.Now(),
+	})
+
+	vaultID := glid.New()
+	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
+	orch.alerts = alert.New()
+	vaultInst := &VaultInstance{
+		VaultID: vaultID,
+		Type:    "cloud",
+		Chunks:  mock,
+		RaftLeadershipFacet: RaftLeadershipFacet{
+			IsRaftLeader: func() bool { return true },
+		},
+	}
+	orch.RegisterVault(NewVault(vaultID, vaultInst))
+	markPipelineIngestVault(t, orch, vaultID, true)
+	defer func() { _ = orch.Scheduler().Stop() }()
+
+	jobName := cloudUploadJobName(vaultID, chunkID)
+	sub, cancel := orch.Scheduler().Events().Subscribe()
+	defer cancel()
+
+	const requesters = 8
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := range requesters {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			if i%2 == 0 {
+				orch.backfillCloudUploads(vaultInst)
+				return
+			}
+			orch.schedulePipelineCloudUpload(vaultID, chunkID)
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	// The winner is in flight and stays there until release, so every loser
+	// saw the claim held.
+	<-mock.entered
+	if n := countJobsNamed(orch, jobName); n != 1 {
+		t.Fatalf("cloud-upload jobs registered for chunk %s = %d, want exactly 1", chunkID, n)
+	}
+
+	close(mock.release)
+	awaitSchedulerJobDone(t, sub, jobName)
+
+	if got := mock.uploadCallCount(); got != 1 {
+		t.Fatalf("%d concurrent requests produced %d uploads, want 1", requesters, got)
 	}
 }
 
@@ -559,7 +699,7 @@ func TestEvaluateCloudHealth_SteadyStateHealthyDoesNotResweep(t *testing.T) {
 	}
 	// Let the upload job fully settle so a re-sweep would not be blocked by the
 	// in-flight dedup guard — isolating the "no edge → no sweep" behavior.
-	jobName := fmt.Sprintf("cloud-backfill:%s:%s", vaultID, chunkID)
+	jobName := cloudUploadJobName(vaultID, chunkID)
 	deadline := time.Now().Add(5 * time.Second)
 	for orch.Scheduler().HasPendingPrefix(jobName) && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
@@ -653,7 +793,7 @@ func TestEvaluateCloudHealth_SteadyStateRetriesStuckChunk(t *testing.T) {
 	orch.RegisterVault(NewVault(vaultID, vaultInst))
 	defer func() { _ = orch.Scheduler().Stop() }()
 
-	jobName := fmt.Sprintf("cloud-backfill:%s:%s", vaultID, chunkID)
+	jobName := cloudUploadJobName(vaultID, chunkID)
 
 	// First observation → sweep → upload attempt fails → backoff entry recorded.
 	orch.evaluateCloudHealth()

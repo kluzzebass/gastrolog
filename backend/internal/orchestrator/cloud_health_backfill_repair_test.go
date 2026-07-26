@@ -272,7 +272,7 @@ func TestBackfillCloudUploads_SkipsSchedulingDuringBackoff(t *testing.T) {
 	defer func() { _ = orch.Scheduler().Stop() }()
 	time.Sleep(100 * time.Millisecond)
 
-	jobName := fmt.Sprintf("cloud-backfill:%s:%s", vaultID, chunkID)
+	jobName := cloudUploadJobName(vaultID, chunkID)
 	if orch.Scheduler().HasPendingPrefix(jobName) {
 		t.Fatal("a chunk inside its backoff window must not have a job scheduled")
 	}
@@ -448,7 +448,7 @@ func TestBackfillCloudUploads_GLCBAbsentBacksOffWithoutAlarm(t *testing.T) {
 	orch.Scheduler().Start()
 	defer func() { _ = orch.Scheduler().Stop() }()
 
-	jobName := fmt.Sprintf("cloud-backfill:%s:%s", vaultInst.VaultID, id)
+	jobName := cloudUploadJobName(vaultInst.VaultID, id)
 	waitBackfillJobDone(t, orch, jobName, mock, 1, 5*time.Second)
 
 	if got := mock.registerCallCount(); got != 0 {
@@ -784,7 +784,7 @@ func TestTeardownVaultPurgesBackfillFailures(t *testing.T) {
 
 	// A pending cloud-backfill job for this vault must be cancelled too —
 	// block it on an unclosed channel so it's still pending when teardown runs.
-	jobName := "cloud-backfill:" + vaultID.String() + ":" + chunkID.String()
+	jobName := cloudUploadJobName(vaultID, chunkID)
 	blocked := make(chan struct{})
 	defer close(blocked) // let the job's goroutine exit; avoid leaking it
 	if err := orch.Scheduler().RunOnce(jobName, func() { <-blocked }); err != nil {

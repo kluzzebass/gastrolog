@@ -41,7 +41,7 @@ Some scheduled work is created per vault or chunk. Names follow predictable patt
 |---------|---------|---------|
 | `pipeline-rotation-*` | `pipeline-rotation-<vault-id>` | Pipeline chunk cron rotation for a vault |
 | `post-seal-*` | `post-seal-<chunk-id>` | Post-seal pipeline for a chunk |
-| `cloud-backfill-*` | `cloud-backfill-<chunk-id>` | Upload sealed chunk to cloud storage |
+| `cloud-upload-*` | `cloud-upload:<vault-id>:<chunk-id>` | Upload sealed chunk to cloud storage — one job per chunk, shared by the live seal effect and the catch-up sweep |
 | `replicate-*` | `replicate-<chunk-id>` | Replicate a sealed chunk to followers |
 | `replication-catchup-*` | `replication-catchup-<node>` | Catch up sealed chunks to a follower |
 | `rebuild-index-*` | `rebuild-index-<chunk-id>` | Rebuild missing indexes for one chunk |

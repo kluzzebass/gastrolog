@@ -276,16 +276,26 @@ func (o *Orchestrator) backfillCloudUploads(vaultInst *VaultInstance) {
 		if !o.backfillDue(m.ID) {
 			continue
 		}
-		name := fmt.Sprintf("cloud-backfill:%s:%s", vaultInst.VaultID, m.ID)
-		if o.scheduler.HasPendingPrefix(name) {
+		// Describe BEFORE scheduling — see schedulePipelineCloudUpload.
+		name := cloudUploadJobName(vaultInst.VaultID, m.ID)
+		o.scheduler.Describe(name, fmt.Sprintf("Cloud backfill upload for chunk %s", m.ID))
+		// Claim-or-skip in one step, keyed on the name shared with the live
+		// seal effect. A HasPendingPrefix check followed by RunOnce is a
+		// check-then-act race: two concurrent sweeps (the periodic cloud-health
+		// evaluation and a leadership-gain / snapshot-restore catch-up) can both
+		// observe "nothing pending" and both enqueue an upload for one chunk.
+		// See gastrolog-3hwngy.
+		scheduled, err := o.scheduler.RunOnceIfAbsent(name, func(id chunk.ChunkID) error {
+			return o.runBackfillUpload(vaultInst, id, uploader)
+		}, m.ID)
+		if err != nil {
+			o.cloudHealthLogger.Warn("failed to schedule cloud backfill upload",
+				"name", name, "error", err)
 			continue
 		}
-		if err := o.scheduler.RunOnce(name, func(id chunk.ChunkID) error {
-			return o.runBackfillUpload(vaultInst, id, uploader)
-		}, m.ID); err == nil {
+		if scheduled {
 			backfilled++
 		}
-		o.scheduler.Describe(name, fmt.Sprintf("Cloud backfill upload for chunk %s", m.ID))
 	}
 	if backfilled > 0 {
 		o.cloudHealthLogger.Debug("cloud backfill: scheduled uploads",
