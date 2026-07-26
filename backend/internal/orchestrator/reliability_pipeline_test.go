@@ -250,6 +250,54 @@ func (h *orchRelHarness) waitGLCBsOnHomes(v vaultSpec, homeIdxs []int, entries [
 	}
 }
 
+// waitSealedEntriesOnVoters blocks until every listed node resolves each given
+// sealed chunk through its OWN FSM-grounded ManifestReader, carrying the same
+// metadata the reference copy does.
+//
+// Sealed truth observed on one node (waitSealedRecords polls a single node's
+// FSM) is not evidence the Raft entry has been applied anywhere else: each
+// voter applies the vault-ctl log independently, and under CPU contention the
+// followers trail the observation point. That matters for every grounded read,
+// because all of the IndexReader's tiers — chunk manager, index manager,
+// chunk-root GLCB, and the byte-free metadata boundary — resolve chunk
+// ownership through the local FSM copy first (manifestEntryByChunk). Until the
+// sealed entry is applied on a node, that node answers "unresolvable"
+// regardless of what bytes are already on its disk.
+//
+// Progress metric: the count of (chunk, voter) pairs whose sealed entry has
+// converged.
+func (h *orchRelHarness) waitSealedEntriesOnVoters(v vaultSpec, nodeIdxs []int, entries []vaultctlfsm.ManifestEntry) {
+	h.t.Helper()
+	total := len(entries) * len(nodeIdxs)
+	what := fmt.Sprintf("vault %s: sealed manifest entries for %d chunks on %d voters", v.label, len(entries), len(nodeIdxs))
+	h.waitProgress(what, 50*time.Millisecond, func() (string, bool) {
+		resolved := 0
+		var pending []string
+		for _, want := range entries {
+			for _, idx := range nodeIdxs {
+				n := h.nodes[h.nodeIDs[idx]]
+				got, ok := n.orch.ManifestReader().Entry(want.ID)
+				if ok && sealedEntryMetadataMatches(got, want) {
+					resolved++
+					continue
+				}
+				pending = append(pending, fmt.Sprintf("%s@%s", want.ID, n.label))
+			}
+		}
+		return fmt.Sprintf("entries_resolved=%d/%d pending=%v", resolved, total, pending), resolved == total
+	}, func() { h.dumpPipelineState(v) })
+}
+
+// sealedEntryMetadataMatches reports whether a replicated copy of a sealed
+// manifest entry carries the same ingest metadata as the reference copy — the
+// fields grounded rank/pos reads are answered from.
+func sealedEntryMetadataMatches(got, want vaultctlfsm.ManifestEntry) bool {
+	return got.RecordCount == want.RecordCount &&
+		got.IngestStart.Equal(want.IngestStart) &&
+		got.IngestEnd.Equal(want.IngestEnd) &&
+		got.IngestTSMonotonic == want.IngestTSMonotonic
+}
+
 // searchRecords runs a match-all search for the vault on a node and returns
 // the raw record bodies.
 func (h *orchRelHarness) searchRecords(v vaultSpec, nodeID string) [][]byte {
