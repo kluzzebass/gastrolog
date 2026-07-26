@@ -183,10 +183,14 @@ func newScheduler(logger *slog.Logger, maxConcurrent int, now func() time.Time) 
 	return sched, nil
 }
 
-// MaxConcurrent returns the current concurrency limit.
 // HasPendingPrefix returns true if any active (not yet completed) job
 // has a name starting with prefix. Used by tests to wait for async
 // transitions to finish.
+//
+// NOT a deduplication guard. Pairing it with RunOnce to mean "enqueue this
+// work unless it is already queued" is a check-then-act race, and the answer
+// goes stale the instant the job completes. Use RunOnceIfAbsent, which does
+// the check and the registration under one lock hold. See gastrolog-3hwngy.
 func (s *Scheduler) HasPendingPrefix(prefix string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -222,6 +226,7 @@ func (s *Scheduler) WaitIdle(timeout time.Duration) {
 	}
 }
 
+// MaxConcurrent returns the current concurrency limit.
 func (s *Scheduler) MaxConcurrent() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -499,9 +504,44 @@ func (s *Scheduler) Start() {}
 
 // RunOnce schedules a one-time job that runs immediately. The job is
 // automatically removed from the active maps after completion, but its
-// progress info is retained for status polling.
+// progress info is retained for status polling. A job of the same name that
+// is already registered is replaced — use RunOnceIfAbsent when the name is
+// meant to be an idempotency key.
 func (s *Scheduler) RunOnce(name string, taskFn any, args ...any) error {
+	_, err := s.runOnce(name, false, taskFn, args...)
+	return err
+}
+
+// RunOnceIfAbsent schedules a one-time job only when no job of that name is
+// currently registered, and reports whether it did. The name is the
+// idempotency key: the presence check and the registration happen under a
+// single hold of s.mu, so two callers racing on the same name cannot both
+// enqueue.
+//
+// Callers must NOT open-code this as HasJob/HasPendingPrefix followed by
+// RunOnce. That shape is a check-then-act race — both callers observe
+// "absent" and both enqueue — and it is exactly how the cloud-upload paths
+// double-enqueued a chunk (gastrolog-3hwngy). It is also why RunOnce's
+// silent same-name overwrite is dangerous: the first job's completion
+// listener deletes s.jobs[name], which by then points at the SECOND job, so
+// the second job's own completion finds nothing and publishes no terminal
+// event.
+func (s *Scheduler) RunOnceIfAbsent(name string, taskFn any, args ...any) (bool, error) {
+	return s.runOnce(name, true, taskFn, args...)
+}
+
+// runOnce is the shared registration body for RunOnce and RunOnceIfAbsent.
+// When skipIfPresent is set, an existing registration under the same name
+// wins and this returns (false, nil).
+func (s *Scheduler) runOnce(name string, skipIfPresent bool, taskFn any, args ...any) (bool, error) {
 	s.mu.Lock()
+
+	if skipIfPresent {
+		if _, exists := s.jobs[name]; exists {
+			s.mu.Unlock()
+			return false, nil
+		}
+	}
 
 	j, err := s.scheduler.NewJob(
 		gocron.OneTimeJob(gocron.OneTimeJobStartImmediately()),
@@ -518,7 +558,7 @@ func (s *Scheduler) RunOnce(name string, taskFn any, args ...any) error {
 	)
 	if err != nil {
 		s.mu.Unlock()
-		return fmt.Errorf("create one-time job %s: %w", name, err)
+		return false, fmt.Errorf("create one-time job %s: %w", name, err)
 	}
 
 	s.jobs[name] = j
@@ -536,7 +576,7 @@ func (s *Scheduler) RunOnce(name string, taskFn any, args ...any) error {
 	// operations. Broker.Publish is non-blocking but still takes its own
 	// RWMutex — keep the two lock domains disjoint.
 	s.publishEvent(JobEventScheduled, info)
-	return nil
+	return true, nil
 }
 
 // Submit schedules a one-time job with progress tracking. Returns the gocron
