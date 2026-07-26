@@ -210,13 +210,14 @@ func registerFixtureVault(t *testing.T, fx builtGLCBFixture, sink alert.Sink) *c
 	t.Helper()
 	mgr := chunking.New(chunking.Config{})
 	if err := mgr.RegisterVault(fx.vaultID, chunking.VaultConfig{
-		VaultRoot: fx.home,
-		ChunkRoot: filepath.Join(fx.home, "chunks"),
-		FSM:       fx.fsm,
-		Locate:    chunking.HeadSegmentLocator{Root: fx.home},
-		Applier:   &flakyFSMApplier{fsm: fx.fsm},
-		IsLeader:  func() bool { return true },
-		Alerts:    sink,
+		RequiredHolders: chunking.NoRequiredHolders,
+		VaultRoot:       fx.home,
+		ChunkRoot:       filepath.Join(fx.home, "chunks"),
+		FSM:             fx.fsm,
+		Locate:          chunking.HeadSegmentLocator{Root: fx.home},
+		Applier:         &flakyFSMApplier{fsm: fx.fsm},
+		IsLeader:        func() bool { return true },
+		Alerts:          sink,
 	}); err != nil {
 		t.Fatal(err)
 	}

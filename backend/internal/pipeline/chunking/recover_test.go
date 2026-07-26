@@ -58,12 +58,13 @@ func TestRecoverOnceSealsFromExistingGLCB(t *testing.T) {
 
 	mgr := chunking.New(chunking.Config{})
 	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
-		VaultRoot: home,
-		ChunkRoot: filepath.Join(home, "chunks"),
-		FSM:       fsm,
-		Locate:    chunking.HeadSegmentLocator{Root: home},
-		Applier:   &flakyFSMApplier{fsm: fsm},
-		IsLeader:  func() bool { return true },
+		RequiredHolders: chunking.NoRequiredHolders,
+		VaultRoot:       home,
+		ChunkRoot:       filepath.Join(home, "chunks"),
+		FSM:             fsm,
+		Locate:          chunking.HeadSegmentLocator{Root: home},
+		Applier:         &flakyFSMApplier{fsm: fsm},
+		IsLeader:        func() bool { return true },
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -125,12 +126,13 @@ func TestRecoverOnceSealsOrphanActiveGLCB(t *testing.T) {
 
 	mgr := chunking.New(chunking.Config{})
 	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
-		VaultRoot: home,
-		ChunkRoot: filepath.Join(home, "chunks"),
-		FSM:       fsm,
-		Locate:    chunking.HeadSegmentLocator{Root: home},
-		Applier:   &flakyFSMApplier{fsm: fsm},
-		IsLeader:  func() bool { return true },
+		RequiredHolders: chunking.NoRequiredHolders,
+		VaultRoot:       home,
+		ChunkRoot:       filepath.Join(home, "chunks"),
+		FSM:             fsm,
+		Locate:          chunking.HeadSegmentLocator{Root: home},
+		Applier:         &flakyFSMApplier{fsm: fsm},
+		IsLeader:        func() bool { return true },
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -199,12 +201,13 @@ func TestRecoverOnceSkipsSealedEntries(t *testing.T) {
 	var mu sync.Mutex
 	mgr := chunking.New(chunking.Config{})
 	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
-		VaultRoot: home,
-		ChunkRoot: filepath.Join(home, "chunks"),
-		FSM:       fsm,
-		Locate:    chunking.HeadSegmentLocator{Root: home},
-		Applier:   &flakyFSMApplier{fsm: fsm},
-		IsLeader:  func() bool { return false },
+		RequiredHolders: chunking.NoRequiredHolders,
+		VaultRoot:       home,
+		ChunkRoot:       filepath.Join(home, "chunks"),
+		FSM:             fsm,
+		Locate:          chunking.HeadSegmentLocator{Root: home},
+		Applier:         &flakyFSMApplier{fsm: fsm},
+		IsLeader:        func() bool { return false },
 		OnBuilt: func(id chunk.ChunkID) {
 			mu.Lock()
 			rebuilt = append(rebuilt, id)
@@ -272,11 +275,12 @@ func TestRecoveryWaitsForFSMReplay(t *testing.T) {
 	var leader atomic.Bool
 	mgr := chunking.New(chunking.Config{})
 	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
-		VaultRoot: home,
-		ChunkRoot: filepath.Join(home, "chunks"),
-		FSM:       fsm,
-		Locate:    chunking.HeadSegmentLocator{Root: home},
-		Applier:   &flakyFSMApplier{fsm: fsm},
+		RequiredHolders: chunking.NoRequiredHolders,
+		VaultRoot:       home,
+		ChunkRoot:       filepath.Join(home, "chunks"),
+		FSM:             fsm,
+		Locate:          chunking.HeadSegmentLocator{Root: home},
+		Applier:         &flakyFSMApplier{fsm: fsm},
 		// Seal recovery proposes CmdSealChunk, which only the vault-ctl
 		// leader commits — this scenario is the recovering leader.
 		IsLeader: leader.Load,

@@ -38,26 +38,33 @@ func (s *VaultServer) GetPipelineBacklog(
 		return nil, connErr
 	}
 
-	snap, err := s.assemblePipelineBacklogRPC(ctx, vaultID)
+	snap, report, err := s.assemblePipelineBacklogRPC(ctx, vaultID)
 	if err != nil {
 		return nil, mapVaultError(err)
 	}
 
 	return connect.NewResponse(&apiv1.GetPipelineBacklogResponse{
-		Backlog: pipelineBacklogToProto(snap),
+		Backlog:            pipelineBacklogToProto(snap),
+		ContributionReport: report,
 	}), nil
 }
 
-func (s *VaultServer) assemblePipelineBacklogRPC(ctx context.Context, vaultID glid.GLID) (orchestrator.PipelineBacklogSnapshot, error) {
+// assemblePipelineBacklogRPC assembles the vault's backlog snapshot from
+// local FSM state plus a cross-node fan-out for per-node on-disk segment
+// counts. The returned report names any peer whose segment counts are
+// missing from the cluster-wide totals — nil when every peer contributed.
+func (s *VaultServer) assemblePipelineBacklogRPC(ctx context.Context, vaultID glid.GLID) (orchestrator.PipelineBacklogSnapshot, *apiv1.ContributionReport, error) {
 	var peerDisk []cluster.PeerVaultPipelineDisk
+	var report *apiv1.ContributionReport
 	if s.remotePipelineBacklog != nil {
 		remoteNodes := s.remoteClusterNodes(ctx)
-		results, ok := peerFanOut(ctx, s.logger, "GetPipelineBacklog", remoteNodes,
+		results, ok, fanReport := peerFanOut(ctx, s.logger, "GetPipelineBacklog", remoteNodes,
 			func(peerCtx context.Context, nodeID string) (*apiv1.ForwardGetPipelineBacklogResponse, error) {
 				return s.remotePipelineBacklog.GetPipelineBacklogDisk(peerCtx, nodeID, &apiv1.ForwardGetPipelineBacklogRequest{
 					VaultId: vaultID.ToProto(),
 				})
 			})
+		report = fanReport
 		for i, remote := range results {
 			if !ok[i] || remote == nil {
 				continue
@@ -76,7 +83,8 @@ func (s *VaultServer) assemblePipelineBacklogRPC(ctx context.Context, vaultID gl
 			})
 		}
 	}
-	return AssemblePipelineBacklog(s.orch, vaultID, s.localNodeID, peerDisk)
+	snap, err := AssemblePipelineBacklog(s.orch, vaultID, s.localNodeID, peerDisk)
+	return snap, report, err
 }
 
 func orchestratorDiskFromProto(p *apiv1.ForwardGetPipelineBacklogResponse) orchestrator.PipelineDiskSegmentCounts {

@@ -29,7 +29,7 @@ import (
 	"gastrolog/internal/ingester/bodyutil"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/logging/comp"
-	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/pipeline/ingestion"
 )
 
 // Ingester accepts OpenTelemetry log records via HTTP and gRPC.
@@ -37,7 +37,7 @@ type Ingester struct {
 	id       string
 	httpAddr string
 	grpcAddr string
-	out      chan<- orchestrator.IngestMessage
+	out      chan<- ingestion.IngesterMessage
 	logger   *slog.Logger
 
 	// pressureGate is consulted non-blockingly by processExportRequest to
@@ -48,7 +48,7 @@ type Ingester struct {
 }
 
 // SetPressureGate wires the orchestrator's pressure gate into the ingester.
-// Implements orchestrator.PressureAware.
+// Implements ingestion.PressureAware.
 func (ing *Ingester) SetPressureGate(gate *chanwatch.PressureGate) {
 	ing.pressureGate = gate
 }
@@ -72,17 +72,30 @@ func New(cfg Config) *Ingester {
 }
 
 // Run starts both HTTP and gRPC servers and blocks until ctx is cancelled.
-func (ing *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
+func (ing *Ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessage) error {
 	ing.out = out
 
 	errCh := make(chan error, 2)
 
-	// Start HTTP server.
+	// Bind BOTH listeners before serving anything. The HTTP /ready endpoint
+	// is the ingester's readiness signal, so it must not answer until every
+	// listener has a bound socket — serving HTTP before the gRPC bind let a
+	// client pass /ready and then get connection-refused on the gRPC port
+	// (gastrolog-2y7wd2). A bound listener accepts TCP connections at the
+	// kernel level even before Serve starts draining them, so bind-then-serve
+	// makes readiness honest without extra signaling.
 	httpLn, err := net.Listen("tcp", ing.httpAddr)
 	if err != nil {
 		return fmt.Errorf("otlp http listen: %w", err)
 	}
 
+	grpcLn, err := net.Listen("tcp", ing.grpcAddr)
+	if err != nil {
+		_ = httpLn.Close()
+		return fmt.Errorf("otlp grpc listen: %w", err)
+	}
+
+	// Start HTTP server.
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/logs", ing.handleHTTP)
 	mux.HandleFunc("GET /ready", func(w http.ResponseWriter, _ *http.Request) {
@@ -96,13 +109,6 @@ func (ing *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMess
 		}
 	}()
 	ing.logger.Info("otlp http listening", "addr", httpLn.Addr().String())
-
-	// Start gRPC server.
-	grpcLn, err := net.Listen("tcp", ing.grpcAddr)
-	if err != nil {
-		_ = httpSrv.Close()
-		return fmt.Errorf("otlp grpc listen: %w", err)
-	}
 
 	grpcSrv := grpc.NewServer()
 	collogspb.RegisterLogsServiceServer(grpcSrv, &logsServiceServer{ing: ing})
@@ -213,7 +219,7 @@ func (ing *Ingester) processExportRequest(ctx context.Context, req *collogspb.Ex
 	return nil
 }
 
-func (ing *Ingester) logRecordToMessage(lr *logspb.LogRecord, resourceAttrs, scopeAttrs map[string]string, now time.Time) orchestrator.IngestMessage {
+func (ing *Ingester) logRecordToMessage(lr *logspb.LogRecord, resourceAttrs, scopeAttrs map[string]string, now time.Time) ingestion.IngesterMessage {
 	attrs := make(map[string]string, len(resourceAttrs)+len(scopeAttrs)+8)
 
 	maps.Copy(attrs, resourceAttrs)
@@ -251,7 +257,7 @@ func (ing *Ingester) logRecordToMessage(lr *logspb.LogRecord, resourceAttrs, sco
 		attrs["observed_ts"] = t.Format(time.RFC3339Nano)
 	}
 
-	return orchestrator.IngestMessage{
+	return ingestion.IngesterMessage{
 		Attrs:      attrs,
 		Raw:        []byte(anyValueToString(lr.GetBody())),
 		RawOwned:   true,

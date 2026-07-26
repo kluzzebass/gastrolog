@@ -143,8 +143,11 @@ a vault's active chunk".
 ### Aggregates
 
 - **Ingester** — a protocol adapter that receives external input and produces
-  `IngestMessage` envelopes. Types include `chatterbox` (synthetic), `syslog-udp`,
+  `IngesterMessage` envelopes. Types include `chatterbox` (synthetic), `syslog-udp`,
   `http`, `kafka`, `file`, `jsonl`, and `self` (self-ingesting GastroLog logs).
+  The `Ingester` contract and its message/factory types live in
+  [`pipeline/ingestion`](../backend/internal/pipeline/ingestion) — ingesters are
+  "dumb" and depend only on those contracts, never on the orchestrator.
   Declarative config: [`system.IngesterConfig`](../backend/internal/system/vault.go).
 
 - **Singleton ingester** — an ingester that must run on exactly one node at a
@@ -158,10 +161,11 @@ a vault's active chunk".
 
 ### Domain events
 
-- **IngestMessage** — the internal envelope for a raw message entering the
-  pipeline. Holds the raw bytes, ingester-specific metadata (syslog priority,
-  HTTP headers), ingest timestamp, and ingester identity. The digester turns
-  this into a `Record`.
+- **IngesterMessage** — the envelope an ingester emits for a raw message
+  entering the pipeline. Holds the raw bytes, ingester-specific metadata (syslog
+  priority, HTTP headers), ingest timestamp, and ingester identity. The ingestion
+  manager mints an EventID and forwards an **IngestMessage** (the digestion-queue
+  element) downstream; the digester turns that into a `Record`.
 
 - **Digester** — the parser for one ingester type. Knows how to decode its
   input format into structured fields and attributes. Examples:
@@ -723,6 +727,14 @@ Cross-node data movement. Three distinct mechanisms; do not confuse them.
   forwarder, different wrapping.
   [`cluster/vault_ctl_chunk_apply_forwarder.go`](../backend/internal/cluster/vault_ctl_chunk_apply_forwarder.go).
 
+- **Apply-wait barrier** — the read-after-write guarantee on every
+  forwarded Raft apply (config-Raft and vault-ctl alike): the leader
+  returns the log index it applied, and the forwarding node blocks until
+  its own local FSM has applied that index before returning. Event-driven
+  — the FSM feeds an `applywait.Tracker` from its Apply path (and from
+  snapshot restore), waking waiters the moment the mutation is locally
+  visible; never a poll. [`applywait/applywait.go`](../backend/internal/applywait/applywait.go).
+
 ### The verbs
 
 - **`fireAndForgetRemote`** — called from the ingest and append paths:
@@ -798,6 +810,38 @@ How the cluster reports what it's doing to itself, to operators, and to the UI.
   whose fan-out delivery to one vault's segmentation queue failed (sink
   revoked mid-flight, or shutdown). They are a per-vault sub-account of
   `Matched`, never part of the `Routed = Matched + Unmatched` sum.
+
+- **Peer fan-out** — the unary inspector-RPC pattern where the connected
+  node queries every peer that hosts a vault concurrently, each under a
+  per-peer timeout, and merges the answers (`server/peer_fanout.go`). A
+  peer that times out or errors is elided from the merge instead of
+  blocking the handler — the inspector stays responsive on a degraded
+  cluster. Distinct from the Broadcaster (push, steady-state stats) — a
+  fan-out is a pull, on demand, for one request.
+
+- **Contribution report** (`ContributionReport`) — the record of which
+  peers failed to answer a peer fan-out, attached to the merged response
+  so a partial result reads as **visibly partial** instead of silently
+  dropping the peer. Names each **degraded peer** (`DegradedPeer`: node
+  ID + short reason — `timeout` or transport error text). Omitted
+  entirely when every peer contributed (quiet-until-needed), so its
+  presence alone means "this merge is incomplete." Benign placement-churn
+  non-answers (a peer reconfigured out of the vault) are expected
+  reconfiguration, not degradation, and never appear. Surfaced in the UI
+  as a single "partial" badge. See gastrolog-66zrj / gastrolog-1ic07.
+
+- **Contributing vaults** (`SearchResponse.contributing_vault_ids`) — the
+  per-vault stream-health signal on a merged **search**: the remote vaults
+  the search fanned out to and merged. Distinct from a contribution report
+  because search is **fail-on-remote-failure** — a remote stream error
+  aborts the whole search (there is no partial search), so every vault in
+  this set contributed to any response the client actually receives. It is
+  the positive record of the merge's cross-vault span, not a degraded
+  signal; empty for a purely-local search. The pipeline aggregation path
+  (`| stats`, `| timechart`) shares the same fail-hard policy — a partial
+  aggregate is a wrong scalar presented as authoritative, so a failed
+  remote vault fails the whole query rather than silently undercounting.
+  See gastrolog-20lrg.
 
 - **Alarm** — a condition that **requires an operator action**, carrying a
   documented cause and response. The governing test is the whole definition:
@@ -1021,9 +1065,12 @@ describes what the code does today.
   inferred from optimistic counters.
 
 - **RequiredHolders** — chunking's callback returning the placement member
-  node IDs that must hold data before release gates open
-  (`chunking.VaultConfig.RequiredHolders`, wired from the supervisor's
-  `ChunkRequiredHolders`). The planner floor for chunk-holder eligibility is
+  node IDs that must hold data before release gates open, plus whether the
+  placement lookup resolved (`chunking.VaultConfig.RequiredHolders`, wired
+  from the supervisor's `ChunkRequiredHolders`). Mandatory at registration;
+  an unresolved lookup fails the release/purge gates closed, and
+  `chunking.NoRequiredHolders` is the explicit no-holder-gate opt-out for
+  single-node vaults. The planner floor for chunk-holder eligibility is
   `min(2, placement size)` (`plannerMinHolders`).
 
 ### Staging areas

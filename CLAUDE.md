@@ -73,6 +73,8 @@ When creating a **question** issue, always draft the title and description first
 4. Only run `dcat close` after user confirms
 5. **Upon closing:** commit (including tracker), **merge to the issue’s stack branch**, and **push that branch** — in that order after `dcat close`. Do not merge to the default branch or push the merge **before** the issue is closed.
 
+**When a closing epic retires architecture, a concept, or vocabulary:** sweep the open backlog (`dcat list --agent-only`) for issues predicated on what it just retired — titles, descriptions, and dependency edges go stale silently. The 2026-07 coherence sweep removed ~30 dead or duplicate issues that accumulated exactly this way (tier-era filings, pre-V3 pipeline bugs, twins of closed issues); don't let that rebuild.
+
 Do not open PRs for routine issue closes on a stack branch — merge the feature branch into its **stack branch** directly. PRs are **only** for landing work on **`main`**.
 
 ### Main branch protection
@@ -174,6 +176,16 @@ Precedent: gastrolog-4k5mg removed all `reserved` declarations from prior cleanu
 ## Data Integrity: Facts Before Speculation
 
 Never present derived or approximate data as if it were authoritative. If it comes from the system, show it. If it's reconstructed client-side via heuristics, either don't show it or label it as derived. When in doubt, leave it out.
+
+## Single Source of Truth: don't keep a second synced copy
+
+Every entity has one owner (usually the FSM / replicated Raft state). **Before adding state that mirrors another owner's truth, don't — make the consumer read the owner.** A local cache or projection that must be kept in sync by a separate code path is the disease, not a convenience: the two copies drift, and the bug surfaces far from the second writer, so it costs enormous effort to trace.
+
+This is the single most repeated failure mode in this codebase. Precedent: FSM-vs-local-cm divergence (gastrolog-3ukgz), residency three-writer divergence (gastrolog-68wsli), the dual manifest read APIs unified in gastrolog-3w8qj, histogram count/CloudCount mirror bugs, and the whole gastrolog-2p313 audit epic (grounding chunk metadata in the FSM, retiring compensator sweeps that existed only because an event failed to reach a second copy).
+
+- If a read needs cluster truth, read the owner (or resolve from it lazily on a miss) — do not eagerly mirror it into a local map maintained by a different path.
+- **When you find two code paths independently maintaining the same entity, that is a bug waiting to happen — file it** (don't silently leave it, and don't add a third writer).
+- A cache is fine when it has exactly one fill path sourced from the owner and readers tolerate a miss by resolving from the owner. Two independent fill paths is the smell.
 
 ## Design Context
 

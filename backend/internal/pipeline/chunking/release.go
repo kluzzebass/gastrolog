@@ -1,12 +1,18 @@
 package chunking
 
 import (
+	"fmt"
 	"slices"
 	"time"
 
 	"gastrolog/internal/glid"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
+
+// retentionGiveUpAlarmType is the catalog type ID for a vault that keeps
+// shedding never-chunked segments at its retention give-up TTL; the instance
+// key is the vault ID. See docs/alarm-management-design.md and gastrolog-68sfsl.
+const retentionGiveUpAlarmType = "chunking-retention-giveup"
 
 // manifestSegmentIDs returns the unique segment IDs referenced by a sealed
 // manifest awaiting local GLCB build.
@@ -81,15 +87,17 @@ func scanSegmentExhausted(scan *vaultctlfsm.ReleaseScan, entry *vaultctlfsm.Comp
 
 // mayPurgeHeadAfterBuild reports whether this home may drop its head/ copy of a
 // segment after local GLCB build. Cluster vaults keep origin head/ and completed/
-// until every placement holder has ack'd; tests without
-// RequiredHolders wired keep the legacy immediate purge.
+// until every placement holder has ack'd; an unresolved placement lookup
+// (resolved=false) refuses the purge — fail closed — while the explicit
+// NoRequiredHolders opt-out (resolved, empty requirement) purges right after
+// build.
 //
 // A segment referenced by the open chunk or ANY queued sealed manifest must
 // survive: "exhausted for planning" means fully assigned to manifests, not
 // fully built. Purging on exhaustion alone deleted segments that later queued
 // chunks still needed, pinning those chunks in Sealing forever
 // (gastrolog-67c9b0).
-func mayPurgeHeadAfterBuild(fsm *vaultctlfsm.FSM, segmentID glid.GLID, requiredHolders []string, holdersWired bool, minChunkHolders int) bool {
+func mayPurgeHeadAfterBuild(fsm *vaultctlfsm.FSM, segmentID glid.GLID, requiredHolders []string, resolved bool, minChunkHolders int) bool {
 	if fsm != nil && fsm.SegmentReferencedInManifest(segmentID) {
 		return false
 	}
@@ -97,26 +105,23 @@ func mayPurgeHeadAfterBuild(fsm *vaultctlfsm.FSM, segmentID glid.GLID, requiredH
 	if entry == nil || !segmentExhaustedForPlanning(fsm, *entry) {
 		return false
 	}
-	if !holdersWired {
-		return true
+	if !resolved {
+		return false
 	}
 	// Superseded — records are durable in RF-replicated chunks; drop the local
 	// head copy without waiting on a possibly-dead home (design-notes 39/R3).
 	if fsm.SegmentSuperseded(segmentID, minChunkHolders) {
 		return true
 	}
-	if len(requiredHolders) == 0 {
-		return false
-	}
 	return holdersCover(entry.Holders, requiredHolders)
 }
 
 // scanMayRelease is the registry-release gate over a pass's ReleaseScan. It
-// refuses release when placement wiring is present yet unresolved (empty
-// required slice): holdersCover treats empty required as "ready" for
-// single-node tests, which must not drop segments on a multi-home vault when
-// placement lookup fails.
-func scanMayRelease(scan *vaultctlfsm.ReleaseScan, entry *vaultctlfsm.CompletedSegmentEntry, requiredHolders []string, holdersWired bool, giveUpTTL time.Duration, now time.Time) bool {
+// refuses release when the placement lookup is unresolved (resolved=false):
+// holdersCover treats an empty requirement as "ready" — correct for the
+// explicit NoRequiredHolders opt-out, fatal for a multi-home vault whose
+// placement lookup failed.
+func scanMayRelease(scan *vaultctlfsm.ReleaseScan, entry *vaultctlfsm.CompletedSegmentEntry, requiredHolders []string, resolved bool, giveUpTTL time.Duration, now time.Time) bool {
 	// Give-up bound (design-notes 28): records that out-age the vault's
 	// delete-disposition retention TTL are released even though they were
 	// never chunked — retention would already have deleted them had chunking
@@ -126,16 +131,30 @@ func scanMayRelease(scan *vaultctlfsm.ReleaseScan, entry *vaultctlfsm.CompletedS
 	if scanGiveUpExpired(scan, entry, giveUpTTL, now) {
 		return true
 	}
-	if holdersWired && len(requiredHolders) == 0 {
+	if !resolved {
 		return false
 	}
 	return scanSegmentReady(scan, entry, requiredHolders)
 }
 
-// scanGiveUpExpired reports whether every record in the segment is older
-// than the vault's retention TTL — the counted give-up expiry. A segment
-// referenced by an unbuilt manifest never gives up: the build still needs its
-// bytes, and its records ARE reaching a chunk.
+// scanGiveUpExpired reports whether a segment has sat un-chunked in THIS
+// vault's registry longer than the give-up TTL — the counted give-up expiry
+// (design-notes 28), the bound on how long an uncollectable/island-origin
+// segment may leak registry space. A segment referenced by an unbuilt manifest
+// never gives up: the build still needs its bytes, and its records ARE reaching
+// a chunk.
+//
+// The anchor is PublishedAt (when the segment arrived in this vault's
+// registry), NOT the records' IngestTS. Records ROUTED from another vault's
+// retention-expired output arrive carrying their ORIGINAL (old) IngestTS —
+// provenance preserves it through SubmitDrain → routing → digestion (never the
+// fresh-ingest minter). Anchoring on record age shed every routed record at
+// arrival, before collection could deliver a second holder and the planner
+// could reference it: a cloud-backed destination could never chunk re-routed
+// retention output, and it never reached cloud (gastrolog-68sfsl). Records
+// legitimately arrive older than a destination's retention window; the give-up
+// bounds STUCK time, and the normal retention sweep deletes the records AFTER
+// they are chunked.
 func scanGiveUpExpired(scan *vaultctlfsm.ReleaseScan, entry *vaultctlfsm.CompletedSegmentEntry, ttl time.Duration, now time.Time) bool {
 	if ttl <= 0 || now.IsZero() {
 		return false
@@ -143,10 +162,10 @@ func scanGiveUpExpired(scan *vaultctlfsm.ReleaseScan, entry *vaultctlfsm.Complet
 	if _, ok := scan.Referenced[entry.SegmentID]; ok {
 		return false
 	}
-	if entry.LastIngestTS.IsZero() {
+	if entry.PublishedAt.IsZero() {
 		return false
 	}
-	return now.Sub(entry.LastIngestTS) > ttl
+	return now.Sub(entry.PublishedAt) > ttl
 }
 
 func holdersCover(holders, required []string) bool {
@@ -164,13 +183,13 @@ func holdersCover(holders, required []string) bool {
 // partitionPendingRelease splits queued segment IDs into those ready for
 // ReleaseSegments now and those still awaiting holder receipts. Pure over the
 // pass's ReleaseScan.
-func partitionPendingRelease(scan *vaultctlfsm.ReleaseScan, pending []glid.GLID, requiredHolders []string, holdersWired bool, giveUpTTL time.Duration, now time.Time) (ready, stillPending []glid.GLID) {
+func partitionPendingRelease(scan *vaultctlfsm.ReleaseScan, pending []glid.GLID, requiredHolders []string, resolved bool, giveUpTTL time.Duration, now time.Time) (ready, stillPending []glid.GLID) {
 	for _, id := range pending {
 		entry := scan.Entry(id)
 		if entry == nil {
 			continue
 		}
-		if scanMayRelease(scan, entry, requiredHolders, holdersWired, giveUpTTL, now) {
+		if scanMayRelease(scan, entry, requiredHolders, resolved, giveUpTTL, now) {
 			ready = append(ready, id)
 			continue
 		}
@@ -205,15 +224,14 @@ func (v *vaultChunking) enqueueRegistryReleaseCandidates() {
 	if !v.cfg.IsLeader() {
 		return
 	}
-	required := v.requiredHolders()
-	holdersWired := v.cfg.RequiredHolders != nil
+	required, resolved := v.requiredHolders()
 	giveUpTTL, now := v.giveUpBound()
 	scan := v.fsm().SnapshotReleaseScan(v.plannerMinHolders())
 	var candidates []glid.GLID
 	gaveUp := 0
 	for i := range scan.Entries {
 		entry := &scan.Entries[i]
-		if !scanMayRelease(scan, entry, required, holdersWired, giveUpTTL, now) {
+		if !scanMayRelease(scan, entry, required, resolved, giveUpTTL, now) {
 			continue
 		}
 		candidates = append(candidates, entry.SegmentID)
@@ -222,19 +240,73 @@ func (v *vaultChunking) enqueueRegistryReleaseCandidates() {
 			gaveUp++
 		}
 	}
-	if gaveUp > 0 {
-		// The counted expiry design-notes 28 demands: deliberate, visible —
-		// never a silent pipeline loss. These records out-aged retention
-		// without ever being chunked (island origin / uncollectable segment).
-		v.logger().Warn("retention give-up: releasing never-chunked segments whose records out-aged the retention TTL",
-			"vault", v.cfg.VaultID, "segments", gaveUp, "ttl", giveUpTTL.String())
-	}
+	// The counted expiry (design-notes 28) must be deliberate and visible —
+	// never a silent pipeline loss. But a per-pass WARN buried the STANDING
+	// starvation inside retention noise (~40/min for 18h on the cluster run,
+	// gastrolog-68sfsl): a lone island-origin segment gives up once, whereas a
+	// vault whose collection never delivers a second holder sheds pass after
+	// pass. noteRetentionGiveUp edge-logs and raises a standing operator alarm
+	// on the ok→shedding transition, and clears it when a pass finds nothing
+	// left to give up.
+	v.noteRetentionGiveUp(gaveUp, giveUpTTL)
 	if len(candidates) == 0 {
 		return
 	}
 	v.mu.Lock()
 	v.pendingRelease = appendUniqueGLIDs(v.pendingRelease, candidates)
 	v.mu.Unlock()
+}
+
+// noteRetentionGiveUp raises the sustained-give-up operator alarm on the first
+// give-up pass and logs the ok→shedding edge once. A vault sheds a lone
+// island-origin segment (no reachable holder) once, whereas a vault whose
+// collection never delivers a second holder sheds pass after pass — the
+// catalog DelayOn keeps the lone case from annunciating while the STANDING
+// flood does. Clearing is deliberately NOT tied to "a pass found nothing left
+// to give up": the backlog drains in bursts, so that edge chatters between
+// consecutive release passes. The condition that actually ended is "the vault
+// started chunking again" — cleared at the seal site via clearRetentionGiveUp.
+// This replaces the per-pass WARN that hid the starvation inside retention
+// noise on the 18h cluster run (gastrolog-68sfsl).
+func (v *vaultChunking) noteRetentionGiveUp(gaveUp int, ttl time.Duration) {
+	if gaveUp == 0 {
+		return
+	}
+	v.mu.Lock()
+	if v.giveUpAlerted {
+		v.mu.Unlock()
+		return
+	}
+	v.giveUpAlerted = true
+	v.mu.Unlock()
+
+	v.logger().Warn("retention give-up: vault is shedding never-chunked segments whose records out-aged the retention TTL — chunking is not keeping up",
+		"vault", v.cfg.VaultID, "segments", gaveUp, "ttl", ttl.String())
+	if v.cfg.Alerts != nil {
+		v.cfg.Alerts.Raise(retentionGiveUpAlarmType, v.cfg.VaultID.String(),
+			fmt.Sprintf("vault %s: shedding never-chunked segments at the %s retention give-up TTL — records are dropped before chunking references them; the planner needs min(2, placement) holders and collection is not delivering them",
+				v.cfg.VaultID, ttl))
+	}
+}
+
+// clearRetentionGiveUp clears the give-up alarm once the vault seals a chunk
+// again — the unambiguous signal that chunking recovered (collection delivered
+// the holders the planner was waiting on). Called from the leader's seal path;
+// a no-op when no give-up alarm stands.
+func (v *vaultChunking) clearRetentionGiveUp() {
+	v.mu.Lock()
+	if !v.giveUpAlerted {
+		v.mu.Unlock()
+		return
+	}
+	v.giveUpAlerted = false
+	v.mu.Unlock()
+
+	v.logger().Info("retention give-up cleared — vault sealed a chunk again",
+		"vault", v.cfg.VaultID)
+	if v.cfg.Alerts != nil {
+		v.cfg.Alerts.Clear(retentionGiveUpAlarmType, v.cfg.VaultID.String())
+	}
 }
 
 // giveUpBound resolves the vault's retention give-up TTL and the evaluation

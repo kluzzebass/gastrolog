@@ -18,7 +18,7 @@ import (
 )
 
 // pressureAwareIngester is a test ingester that implements
-// orchestrator.PressureAware. It records the gate it receives via
+// ingestion.PressureAware. It records the gate it receives via
 // SetPressureGate and exposes the number of times gate.Wait returned.
 type pressureAwareIngester struct {
 	gate       *chanwatch.PressureGate
@@ -41,7 +41,7 @@ func (p *pressureAwareIngester) SetPressureGate(gate *chanwatch.PressureGate) {
 	close(p.gateSetCh)
 }
 
-func (p *pressureAwareIngester) Run(ctx context.Context, _ chan<- orchestrator.IngestMessage) error {
+func (p *pressureAwareIngester) Run(ctx context.Context, _ chan<- ingestion.IngesterMessage) error {
 	close(p.started)
 	for {
 		if p.gate != nil {
@@ -66,7 +66,7 @@ func (p *pressureAwareIngester) Run(ctx context.Context, _ chan<- orchestrator.I
 
 // TestPressureGateInjectedIntoPressureAwareIngester verifies that the
 // orchestrator calls SetPressureGate on any ingester implementing the
-// PressureAware interface, before Run is invoked.
+// ingestion.PressureAware interface, before Run is invoked.
 func TestPressureGateInjectedIntoPressureAwareIngester(t *testing.T) {
 	t.Parallel()
 	orch, _ := newIngesterTestSetup(t)
@@ -211,11 +211,11 @@ type floodIngester struct {
 	n       int
 }
 
-func (f *floodIngester) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
+func (f *floodIngester) Run(ctx context.Context, out chan<- ingestion.IngesterMessage) error {
 	close(f.started)
 	for range f.n {
 		select {
-		case out <- orchestrator.IngestMessage{Raw: []byte("x")}:
+		case out <- ingestion.IngesterMessage{Raw: []byte("x")}:
 		case <-ctx.Done():
 			return ctx.Err()
 		}

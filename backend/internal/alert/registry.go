@@ -67,6 +67,20 @@ var catalog = []AlarmType{
 		Response: "Investigate segment file corruption on the named node. If the vault has a delete-disposition retention TTL these records are released unchunked at expiry — the loss is scheduled, not hypothetical.",
 	},
 	{
+		IDPrefix: "chunking-retention-giveup",
+		Priority: Critical,
+		Source:   "chunking",
+		// Raised on the first give-up pass, cleared when the vault next seals
+		// a chunk. In a HEALTHY vault an occasional island-origin give-up is
+		// cleared by the next seal inside this window, so it never annunciates;
+		// a STARVED vault seals nothing, so the raise stands past DelayOn and
+		// annunciates — the condition that hid inside 40/min retention-noise
+		// WARNs on the 18h cluster run (gastrolog-68sfsl).
+		DelayOn:  2 * time.Minute,
+		Cause:    "A vault is repeatedly releasing never-chunked segments at its retention give-up TTL: records are aging out of the completed-segment registry before chunking ever references them, so they are dropped without reaching a chunk — even though the planner is actively running. On a cloud-backed vault the dropped records never reach cloud.",
+		Response: "The pipeline is not chunking this vault's segments within the retention TTL. The planner needs min(2, placement) holders before it can chunk a segment; check that segment collection is delivering copies to the vault's homes and that replication is progressing. Clears once the vault seals a chunk again.",
+	},
+	{
 		IDPrefix: "wal-reserve",
 		Priority: Critical,
 		Source:   "storage",
@@ -236,6 +250,24 @@ var catalog = []AlarmType{
 		Source:   "orchestrator",
 		Cause:    "The vault instance failed to construct from its configuration; the vault is not serving.",
 		Response: "Fix the named configuration error.",
+	},
+	{
+		// gastrolog-1ovdy: the config dispatcher applies each committed
+		// config mutation to this node's orchestrator inside FSM.Apply. When
+		// a side effect fails (AddVault, reconcile, policy reload, TLS reload,
+		// membership refresh, …) the mutation is already durable in Raft but
+		// this node's running state diverges from it. The failure becomes a
+		// standing per-entity reconcile obligation and this alarm. No DelayOn:
+		// the apply does not self-heal on a timer — retry is event-driven (the
+		// next dispatch touching the entity, or startup replay) — so an
+		// unresolved divergence must annunciate immediately, like vault-init.
+		// Non-latching: it clears the moment a later apply of the same entity
+		// succeeds.
+		IDPrefix: "config-side-effect-failed",
+		Priority: High,
+		Source:   "config-dispatch",
+		Cause:    "A committed configuration change could not be applied to this node's orchestrator; this node's running state diverges from the replicated config. The condition is per-entity and node-scoped — other nodes may have applied the same change cleanly.",
+		Response: "Read the alarm detail for the failing entity, operation and error. It retries automatically on the next config change touching that entity and on node restart (startup reconcile). If it persists, resolve the named error on this node (e.g. disk, storage configuration, or a construction error).",
 	},
 	{
 		IDPrefix: "pipeline-backlog-capped",

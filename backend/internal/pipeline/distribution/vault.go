@@ -53,6 +53,15 @@ type vaultDist struct {
 	mu                  sync.RWMutex
 	segments            map[glid.GLID]string   // segment ID → on-disk path
 	retired             map[glid.GLID]struct{} // released from vault-ctl; skip rescan republish
+	// finalized marks segments whose publish fully completed (vault-ctl
+	// committed, head promoted for local holders, counter incremented), and
+	// inflight marks segments a worker is currently attempting. Together they
+	// single-flight publishes per segment: the publish queue, the retry queue,
+	// and the stranded rescan can all carry the same segment after a
+	// re-registration (registration fires a rescan wake, gastrolog-375el),
+	// and only one attempt may commit or the publish counter double-counts.
+	finalized map[glid.GLID]struct{}
+	inflight  map[glid.GLID]struct{}
 	// badHeader remembers completed/ files whose fixed header failed to
 	// decode, keyed by segment ID (state, not time): each corrupt file is
 	// read and warned about exactly once, not on every rescan wake
@@ -84,6 +93,8 @@ func newVaultDist(root string, cfg VaultConfig, log *slog.Logger) (*vaultDist, e
 		segments:            make(map[glid.GLID]string),
 		retired:             make(map[glid.GLID]struct{}),
 		badHeader:           make(map[glid.GLID]struct{}),
+		finalized:           make(map[glid.GLID]struct{}),
+		inflight:            make(map[glid.GLID]struct{}),
 	}, nil
 }
 
@@ -204,7 +215,9 @@ func (v *vaultDist) stranded(vaultID glid.GLID) []segmentation.CompletedSegment 
 
 func (v *vaultDist) publish(ctx context.Context, seg segmentation.CompletedSegment) error {
 	// Synchronous path (PublishCompleted): publishes regardless of prior
-	// staging; the FSM treats an identical re-publish as a no-op.
+	// staging. A segment whose publish already fully completed is a no-op
+	// (see claimPublish); an earlier FAILED attempt republishes — the FSM
+	// treats an identical re-publish as a no-op.
 	meta, path, _, err := v.prepare(seg)
 	if err != nil {
 		return err
@@ -212,10 +225,43 @@ func (v *vaultDist) publish(ctx context.Context, seg segmentation.CompletedSegme
 	return v.publishStaged(ctx, meta, seg.SegmentID, path)
 }
 
+// claimPublish claims segID for one publish attempt. False means the segment
+// is already fully published or another worker's attempt is in flight — the
+// caller drops its duplicate. A failed in-flight attempt re-queues itself via
+// the retry path, so dropping the duplicate loses nothing.
+func (v *vaultDist) claimPublish(segID glid.GLID) bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if _, done := v.finalized[segID]; done {
+		return false
+	}
+	if _, busy := v.inflight[segID]; busy {
+		return false
+	}
+	v.inflight[segID] = struct{}{}
+	return true
+}
+
+// releasePublish ends a claimed attempt; done marks the segment fully
+// published so later duplicates (retry queue, stranded rescan) short-circuit.
+func (v *vaultDist) releasePublish(segID glid.GLID, done bool) {
+	v.mu.Lock()
+	delete(v.inflight, segID)
+	if done {
+		v.finalized[segID] = struct{}{}
+	}
+	v.mu.Unlock()
+}
+
 func (v *vaultDist) publishStaged(ctx context.Context, meta Metadata, segID glid.GLID, path string) error {
 	if v.isRetired(segID) {
 		return nil
 	}
+	if !v.claimPublish(segID) {
+		return nil
+	}
+	done := false
+	defer func() { v.releasePublish(segID, done) }()
 	if !v.segmentBytesPresent(segID, path) {
 		v.retireSegment(segID)
 		v.log.Warn("segment bytes missing at publish; retiring segment",
@@ -232,6 +278,7 @@ func (v *vaultDist) publishStaged(ctx context.Context, meta Metadata, segID glid
 		return err
 	}
 	v.published.Add(1)
+	done = true
 	if v.onPublishCommitted != nil {
 		v.onPublishCommitted(segID)
 	}
@@ -244,6 +291,9 @@ func (v *vaultDist) publishStagedBatch(ctx context.Context, items []pendingPubli
 		if v.isRetired(p.segID) {
 			continue
 		}
+		if !v.claimPublish(p.segID) {
+			continue
+		}
 		if !v.segmentBytesPresent(p.segID, p.path) {
 			// Retire THIS item only. Failing the whole coalesced batch here
 			// stranded the surviving batchmates permanently: the batch error
@@ -251,6 +301,7 @@ func (v *vaultDist) publishStagedBatch(ctx context.Context, items []pendingPubli
 			// and the stranded rescan skipped them as known — durable
 			// segments invisible to vault-ctl until restart (gastrolog-353kwm).
 			v.retireSegment(p.segID)
+			v.releasePublish(p.segID, false)
 			v.log.Warn("segment bytes missing at publish; retiring segment",
 				"segment", p.segID, "path", p.path)
 			continue
@@ -259,10 +310,6 @@ func (v *vaultDist) publishStagedBatch(ctx context.Context, items []pendingPubli
 	}
 	if len(live) == 0 {
 		return nil
-	}
-	if len(live) == 1 {
-		p := live[0]
-		return v.publishStaged(ctx, p.meta, p.segID, p.path)
 	}
 	metas := make([]Metadata, len(live))
 	for i, p := range live {
@@ -280,16 +327,27 @@ func (v *vaultDist) publishStagedBatch(ctx context.Context, items []pendingPubli
 		}
 	}
 	if err != nil {
+		for _, p := range live {
+			v.releasePublish(p.segID, false)
+		}
 		return err
 	}
-	for _, p := range live {
+	for i, p := range live {
 		if v.isRetired(p.segID) {
+			v.releasePublish(p.segID, false)
 			continue
 		}
 		if err := v.finalizeAfterPublish(p.segID, p.path); err != nil {
+			// Vault-ctl accepted the batch but this segment's head promote
+			// failed; release the rest un-finalized so the retry re-attempts
+			// them (the FSM treats the identical re-publish as a no-op).
+			for _, rest := range live[i:] {
+				v.releasePublish(rest.segID, false)
+			}
 			return err
 		}
 		v.published.Add(1)
+		v.releasePublish(p.segID, true)
 		if v.onPublishCommitted != nil {
 			v.onPublishCommitted(p.segID)
 		}
@@ -353,6 +411,7 @@ func (v *vaultDist) segmentBytesPresent(segID glid.GLID, path string) bool {
 func (v *vaultDist) retireSegment(segID glid.GLID) {
 	v.mu.Lock()
 	delete(v.segments, segID)
+	delete(v.finalized, segID)
 	v.retired[segID] = struct{}{}
 	v.mu.Unlock()
 }

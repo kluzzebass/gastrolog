@@ -16,7 +16,7 @@ import (
 	"gastrolog/internal/ingester/bodyutil"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/logging/comp"
-	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/pipeline/ingestion"
 )
 
 // Attribute limits to prevent abuse.
@@ -27,7 +27,7 @@ const (
 )
 
 // Ingester accepts log messages via the Loki Push API (POST /loki/api/v1/push).
-// It implements orchestrator.Ingester.
+// It implements ingestion.Ingester.
 //
 // This is compatible with Promtail, Grafana Alloy, Fluent Bit, and other tools
 // that support the Loki push protocol.
@@ -42,7 +42,7 @@ type Ingester struct {
 	addr     string
 	listener net.Listener
 	server   *http.Server
-	out      chan<- orchestrator.IngestMessage
+	out      chan<- ingestion.IngesterMessage
 	logger   *slog.Logger
 	ready    chan struct{} // closed once listener is bound
 
@@ -54,7 +54,7 @@ type Ingester struct {
 }
 
 // SetPressureGate wires the orchestrator's pressure gate into the ingester.
-// Implements orchestrator.PressureAware.
+// Implements ingestion.PressureAware.
 func (r *Ingester) SetPressureGate(gate *chanwatch.PressureGate) {
 	r.pressureGate = gate
 }
@@ -82,7 +82,7 @@ func New(cfg Config) *Ingester {
 }
 
 // Run starts the HTTP server and blocks until ctx is cancelled.
-func (r *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
+func (r *Ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessage) error {
 	r.out = out
 
 	mux := http.NewServeMux()
@@ -186,7 +186,7 @@ func (r *Ingester) handlePush(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-func (r *Ingester) decodePushBody(w http.ResponseWriter, req *http.Request) ([]orchestrator.IngestMessage, bool) {
+func (r *Ingester) decodePushBody(w http.ResponseWriter, req *http.Request) ([]ingestion.IngesterMessage, bool) {
 	data, err := bodyutil.ReadBody(req.Body, req.Header.Get("Content-Encoding"), 10<<20)
 	if err != nil {
 		http.Error(w, "failed to read body: "+err.Error(), http.StatusBadRequest)
@@ -200,7 +200,7 @@ func (r *Ingester) decodePushBody(w http.ResponseWriter, req *http.Request) ([]o
 		return nil, false
 	}
 
-	var messages []orchestrator.IngestMessage
+	var messages []ingestion.IngesterMessage
 	for _, stream := range pushReq.Streams {
 		for _, val := range stream.Values {
 			msg, err := r.parseValue(val, stream.Stream)
@@ -215,7 +215,7 @@ func (r *Ingester) decodePushBody(w http.ResponseWriter, req *http.Request) ([]o
 	return messages, true
 }
 
-func (r *Ingester) sendAcked(w http.ResponseWriter, req *http.Request, messages []orchestrator.IngestMessage) {
+func (r *Ingester) sendAcked(w http.ResponseWriter, req *http.Request, messages []ingestion.IngesterMessage) {
 	ackCh := make(chan error, len(messages))
 	for i := range messages {
 		messages[i].Ack = ackCh
@@ -245,14 +245,14 @@ func (r *Ingester) sendAcked(w http.ResponseWriter, req *http.Request, messages 
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (r *Ingester) sendFireAndForget(w http.ResponseWriter, req *http.Request, messages []orchestrator.IngestMessage) {
+func (r *Ingester) sendFireAndForget(w http.ResponseWriter, req *http.Request, messages []ingestion.IngesterMessage) {
 	if !r.sendAll(w, req, messages) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (r *Ingester) sendAll(w http.ResponseWriter, req *http.Request, messages []orchestrator.IngestMessage) bool {
+func (r *Ingester) sendAll(w http.ResponseWriter, req *http.Request, messages []ingestion.IngesterMessage) bool {
 	for _, msg := range messages {
 		select {
 		case r.out <- msg:
@@ -266,35 +266,35 @@ func (r *Ingester) sendAll(w http.ResponseWriter, req *http.Request, messages []
 
 // parseValue converts a Loki value to an IngestMessage.
 // Value format: ["timestamp_ns", "line"] or ["timestamp_ns", "line", {metadata}]
-func (r *Ingester) parseValue(val Value, streamLabels map[string]string) (orchestrator.IngestMessage, error) {
+func (r *Ingester) parseValue(val Value, streamLabels map[string]string) (ingestion.IngesterMessage, error) {
 	if len(val) < 2 {
-		return orchestrator.IngestMessage{}, errors.New("value must have at least 2 elements [timestamp, line]")
+		return ingestion.IngesterMessage{}, errors.New("value must have at least 2 elements [timestamp, line]")
 	}
 
 	// Parse timestamp (nanoseconds since epoch as string).
 	// This is the source timestamp from the log shipper.
 	var tsStr string
 	if err := json.Unmarshal(val[0], &tsStr); err != nil {
-		return orchestrator.IngestMessage{}, fmt.Errorf("timestamp must be a string: %w", err)
+		return ingestion.IngesterMessage{}, fmt.Errorf("timestamp must be a string: %w", err)
 	}
 
 	tsNanos, err := strconv.ParseInt(tsStr, 10, 64)
 	if err != nil {
-		return orchestrator.IngestMessage{}, fmt.Errorf("invalid timestamp %q: %w", tsStr, err)
+		return ingestion.IngesterMessage{}, fmt.Errorf("invalid timestamp %q: %w", tsStr, err)
 	}
 	sourceTS := time.Unix(0, tsNanos)
 
 	// Parse log line.
 	var line string
 	if err := json.Unmarshal(val[1], &line); err != nil {
-		return orchestrator.IngestMessage{}, fmt.Errorf("log line must be a string: %w", err)
+		return ingestion.IngesterMessage{}, fmt.Errorf("log line must be a string: %w", err)
 	}
 
 	// Build attrs from stream labels (with validation).
 	attrs := make(map[string]string, min(len(streamLabels), maxAttrs))
 	for k, v := range streamLabels {
 		if err := addAttr(attrs, k, v); err != nil {
-			return orchestrator.IngestMessage{}, fmt.Errorf("stream label: %w", err)
+			return ingestion.IngesterMessage{}, fmt.Errorf("stream label: %w", err)
 		}
 	}
 
@@ -302,18 +302,18 @@ func (r *Ingester) parseValue(val Value, streamLabels map[string]string) (orches
 	if len(val) >= 3 {
 		var metadata map[string]string
 		if err := json.Unmarshal(val[2], &metadata); err != nil {
-			return orchestrator.IngestMessage{}, fmt.Errorf("metadata must be an object: %w", err)
+			return ingestion.IngesterMessage{}, fmt.Errorf("metadata must be an object: %w", err)
 		}
 		for k, v := range metadata {
 			if err := addAttr(attrs, k, v); err != nil {
-				return orchestrator.IngestMessage{}, fmt.Errorf("metadata: %w", err)
+				return ingestion.IngesterMessage{}, fmt.Errorf("metadata: %w", err)
 			}
 		}
 	}
 
 	attrs["ingester_type"] = "http"
 
-	return orchestrator.IngestMessage{
+	return ingestion.IngesterMessage{
 		Attrs:      attrs,
 		Raw:        []byte(line),
 		RawOwned:   true,

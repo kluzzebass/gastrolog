@@ -1,10 +1,13 @@
 import { useState } from "react";
 import { useThemeClass } from "../hooks/useThemeClass";
 import { ChunkPlan, BranchPlan, PipelineStep, QueryPipelineStage } from "../api/client";
+// eslint-disable-next-line no-restricted-imports -- no ContributionReport model yet (gastrolog-2e2qs follow-up)
+import type { ContributionReport } from "../api/gen/gastrolog/v1/vault_pb";
 import { formatChunkId } from "../utils";
 import { encode } from "../api/glid";
 import { idFromBytes } from "../api/model/id";
 import { NodeBadge } from "./settings/NodeBadge";
+import { DegradedPeersBadge } from "./DegradedPeersBadge";
 import {
   type Range,
   stepToRanges,
@@ -19,6 +22,7 @@ export function ExplainPanel({
   totalChunks,
   expression,
   pipelineStages,
+  contributionReport,
   dark,
 }: Readonly<{
   chunks: ChunkPlan[];
@@ -26,6 +30,7 @@ export function ExplainPanel({
   totalChunks: number;
   expression: string;
   pipelineStages: QueryPipelineStage[];
+  contributionReport?: ContributionReport | null;
   dark: boolean;
 }>) {
   const c = useThemeClass(dark);
@@ -74,6 +79,7 @@ export function ExplainPanel({
           >
             {chunks.length} of {totalChunks} chunks
           </span>
+          <DegradedPeersBadge report={contributionReport} dark={dark} />
         </div>
         {expression && (
           <ExpressionBox

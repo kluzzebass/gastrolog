@@ -95,15 +95,20 @@ func newBoundRunnerFixtureWithManager(t *testing.T, vaultID glid.GLID, cm chunk.
 	g.SetVaultGuard(vaultID, "bound-test", []string{"volA"}, 10*gib, "", "")
 	orch.diskGuard = g
 
+	im := &retentionFakeIndexManager{}
+	vaultInst := &VaultInstance{VaultID: vaultID, Chunks: cm, Indexes: im}
+	rec := NewVaultLifecycleReconciler(orch, vaultID, vaultInst, "node-A", slog.Default())
+	vaultInst.Reconciler = rec
 	r := &retentionRunner{
-		vaultID:   vaultID,
-		vaultName: "bound-test",
-		orch:      orch,
-		cm:        cm,
-		im:        &retentionFakeIndexManager{},
-		logger:    slog.Default(),
-		now:       time.Now,
-		isLeader:  true,
+		vaultID:    vaultID,
+		vaultName:  "bound-test",
+		orch:       orch,
+		cm:         cm,
+		im:         im,
+		reconciler: rec,
+		logger:     slog.Default(),
+		now:        time.Now,
+		isLeader:   true,
 	}
 	return r, g, spy
 }

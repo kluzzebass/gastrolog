@@ -183,13 +183,22 @@ func newRetentionRunner(cm chunk.ChunkManager, im index.IndexManager, policy chu
 			{policy: policy},
 		}
 	}
+	// Single-node harness: wire a reconciler with no Raft applier so
+	// expireChunk → reconciler.deleteChunk takes the single-node fallback
+	// (deleteLocalCopy) and removes the chunk/index locally. Chunk deletion
+	// only flows through the reconciler now (gastrolog-lh0rp).
+	vaultID := glid.New()
+	vaultInst := &VaultInstance{VaultID: vaultID, Chunks: cm, Indexes: im}
+	rec := NewVaultLifecycleReconciler(nil, vaultID, vaultInst, "node-local", slog.Default())
+	vaultInst.Reconciler = rec
 	r := &retentionRunner{
-		isLeader: true,
-		vaultID:  glid.New(),
-		cm:       cm,
-		im:       im,
-		now:      time.Now,
-		logger:   slog.Default(),
+		isLeader:   true,
+		vaultID:    vaultID,
+		cm:         cm,
+		im:         im,
+		reconciler: rec,
+		now:        time.Now,
+		logger:     slog.Default(),
 	}
 	return r, rules
 }
@@ -485,11 +494,13 @@ func TestExpireChunkProposesRequestDelete(t *testing.T) {
 			{NodeID: "node-B", StorageID: "s-B"},
 			{NodeID: "node-C", StorageID: "s-C"},
 		},
-		ApplyRaftRequestDelete: func(cid chunk.ChunkID, reason string, expectedFrom []string) error {
-			gotChunkID = cid
-			gotReason = reason
-			gotExpectedFrom = expectedFrom
-			return nil
+		RaftApplyFacet: RaftApplyFacet{
+			ApplyRaftRequestDelete: func(cid chunk.ChunkID, reason string, expectedFrom []string) error {
+				gotChunkID = cid
+				gotReason = reason
+				gotExpectedFrom = expectedFrom
+				return nil
+			},
 		},
 	}
 	rec := NewVaultLifecycleReconciler(nil, vaultID, vaultInst, "node-A", slog.Default())
@@ -546,8 +557,10 @@ func TestExpireChunkSkipsLocalOnRequestDeleteFailure(t *testing.T) {
 		VaultID: vaultID,
 		Chunks:  cm,
 		Indexes: im,
-		ApplyRaftRequestDelete: func(_ chunk.ChunkID, _ string, _ []string) error {
-			return fmt.Errorf("not leader")
+		RaftApplyFacet: RaftApplyFacet{
+			ApplyRaftRequestDelete: func(_ chunk.ChunkID, _ string, _ []string) error {
+				return fmt.Errorf("not leader")
+			},
 		},
 	}
 	rec := NewVaultLifecycleReconciler(nil, vaultID, vaultInst, "node-A", slog.Default())
@@ -777,8 +790,8 @@ func TestRetentionTargetRefreshesCmOnExistingRunner(t *testing.T) {
 			}},
 		}},
 		RetentionPolicies: []system.RetentionPolicyConfig{{
-			ID:          policyID,
-			MaxAge:      strPtr("1h"),
+			ID:     policyID,
+			MaxAge: strPtr("1h"),
 		}},
 	}
 

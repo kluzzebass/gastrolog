@@ -1,5 +1,6 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
-import { usePipelineBacklog, useNodeRegistry } from "../../api/hooks";
+import { usePipelineBacklog, usePipelineBacklogContribution, useNodeRegistry } from "../../api/hooks";
+import { DegradedPeersBadge } from "../DegradedPeersBadge";
 import { idFromBytes, type EntityID } from "../../api/model/id";
 import { protoToInstant, instantToDate, formatDateTimeShort } from "../../utils/temporal";
 import { formatBytes } from "../../utils/units";
@@ -157,6 +158,7 @@ interface NodeRow {
 export function PipelineBacklogView({ vaultId, dark }: Readonly<PipelineBacklogViewProps>) {
   const c = useThemeClass(dark);
   const { data: backlog, isLoading } = usePipelineBacklog(vaultId);
+  const contribution = usePipelineBacklogContribution(vaultId);
   const nodes = useNodeRegistry();
 
   if (isLoading) {
@@ -201,11 +203,14 @@ export function PipelineBacklogView({ vaultId, dark }: Readonly<PipelineBacklogV
 
   return (
     <section className="flex flex-col gap-4">
-      <h3
-        className={`text-[0.75em] font-medium uppercase tracking-[0.15em] whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}
-      >
-        Pipeline backlog
-      </h3>
+      <div className="flex items-center gap-2">
+        <h3
+          className={`text-[0.75em] font-medium uppercase tracking-[0.15em] whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}
+        >
+          Pipeline backlog
+        </h3>
+        <DegradedPeersBadge report={contribution} dark={dark} />
+      </div>
 
       <div className={`rounded-lg border overflow-x-auto ${border}`}>
         <table className="w-full border-collapse">

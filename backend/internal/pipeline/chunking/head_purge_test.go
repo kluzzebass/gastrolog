@@ -51,7 +51,7 @@ func TestFlushHeadPurgeWaitsForAllHolderReceipts(t *testing.T) {
 		Locate:          chunking.HeadSegmentLocator{Root: home},
 		Applier:         &fsmApplier{fsm: fsm},
 		IsLeader:        func() bool { return true },
-		RequiredHolders: func() []string { return required },
+		RequiredHolders: func() ([]string, bool) { return required, true },
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -91,12 +91,13 @@ func TestFlushHeadPurgeWaitsForLocalBuild(t *testing.T) {
 
 	mgr := chunking.New(chunking.Config{})
 	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
-		VaultRoot: home,
-		ChunkRoot: filepath.Join(home, "chunks"),
-		FSM:       fsm,
-		Locate:    chunking.HeadSegmentLocator{Root: home},
-		Applier:   &fsmApplier{fsm: fsm},
-		IsLeader:  func() bool { return true },
+		RequiredHolders: chunking.NoRequiredHolders,
+		VaultRoot:       home,
+		ChunkRoot:       filepath.Join(home, "chunks"),
+		FSM:             fsm,
+		Locate:          chunking.HeadSegmentLocator{Root: home},
+		Applier:         &fsmApplier{fsm: fsm},
+		IsLeader:        func() bool { return true },
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -177,11 +178,12 @@ func TestPurgeStaleHeadCatchUpDropsOrphans(t *testing.T) {
 		_ = mgr.Run(ctx)
 	}()
 	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
-		VaultRoot: home,
-		ChunkRoot: filepath.Join(home, "chunks"),
-		FSM:       fsm,
-		Locate:    chunking.HeadSegmentLocator{Root: home},
-		IsLeader:  func() bool { return false },
+		RequiredHolders: chunking.NoRequiredHolders,
+		VaultRoot:       home,
+		ChunkRoot:       filepath.Join(home, "chunks"),
+		FSM:             fsm,
+		Locate:          chunking.HeadSegmentLocator{Root: home},
+		IsLeader:        func() bool { return false },
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -210,10 +212,11 @@ func TestReleaseSegmentsPurgesHeadOnFSMCallback(t *testing.T) {
 
 	mgr := chunking.New(chunking.Config{})
 	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
-		VaultRoot: home,
-		ChunkRoot: filepath.Join(home, "chunks"),
-		FSM:       fsm,
-		Locate:    chunking.HeadSegmentLocator{Root: home},
+		RequiredHolders: chunking.NoRequiredHolders,
+		VaultRoot:       home,
+		ChunkRoot:       filepath.Join(home, "chunks"),
+		FSM:             fsm,
+		Locate:          chunking.HeadSegmentLocator{Root: home},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -285,12 +288,13 @@ func TestManagerPurgesHeadWhenPeerSealBeforeLocalBuild(t *testing.T) {
 
 	mgr := chunking.New(chunking.Config{})
 	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
-		VaultRoot: home,
-		ChunkRoot: filepath.Join(home, "chunks"),
-		FSM:       fsm,
-		Locate:    chunking.HeadSegmentLocator{Root: home},
-		Applier:   &fsmApplier{fsm: fsm},
-		IsLeader:  func() bool { return false },
+		RequiredHolders: chunking.NoRequiredHolders,
+		VaultRoot:       home,
+		ChunkRoot:       filepath.Join(home, "chunks"),
+		FSM:             fsm,
+		Locate:          chunking.HeadSegmentLocator{Root: home},
+		Applier:         &fsmApplier{fsm: fsm},
+		IsLeader:        func() bool { return false },
 	}); err != nil {
 		t.Fatal(err)
 	}

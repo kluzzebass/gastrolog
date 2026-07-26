@@ -7,12 +7,18 @@ import (
 	"testing"
 	"time"
 
+	"gastrolog/internal/glid"
 	"gastrolog/internal/system"
+	"gastrolog/internal/system/command"
 	"gastrolog/internal/system/raftfsm"
 	"gastrolog/internal/system/storetest"
 
 	hraft "github.com/hashicorp/raft"
 )
+
+// testMaxAge satisfies RotationPolicyConfig's requirement for at least one
+// rotation rule in the apply-wait tests below.
+var testMaxAge = "1m"
 
 // newTestRaft creates a single-node in-memory raft instance that becomes
 // leader immediately. No cluster, no network — just raft's log + FSM
@@ -331,6 +337,211 @@ func TestApplyReturnsImmediatelyOnZeroAppliedIndex(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed > 100*time.Millisecond {
 		t.Errorf("wait fired despite applied_index=0 (took %s)", elapsed)
+	}
+}
+
+// newFollowerRaft creates a non-bootstrapped raft instance that always
+// returns ErrNotLeader from Apply, for exercising the forward path.
+func newFollowerRaft(t *testing.T, fsm *raftfsm.FSM) *hraft.Raft {
+	t.Helper()
+
+	conf := hraft.DefaultConfig()
+	conf.LocalID = "follower"
+	conf.LogOutput = io.Discard
+	conf.HeartbeatTimeout = 50 * time.Millisecond
+	conf.ElectionTimeout = 50 * time.Millisecond
+	conf.LeaderLeaseTimeout = 50 * time.Millisecond
+
+	logStore := hraft.NewInmemStore()
+	stableStore := hraft.NewInmemStore()
+	snapStore := hraft.NewInmemSnapshotStore()
+	_, transport := hraft.NewInmemTransport("follower")
+
+	r, err := hraft.NewRaft(conf, fsm, logStore, stableStore, snapStore, transport)
+	if err != nil {
+		t.Fatalf("NewRaft: %v", err)
+	}
+	t.Cleanup(func() { _ = r.Shutdown().Error() })
+	return r
+}
+
+// TestApplyWakesOnLocalFSMApply is the event-driven regression test for
+// gastrolog-3klg1: the post-forward wait must release the moment the local
+// FSM applies the leader's index — driven by the FSM apply notification,
+// not by polling raft.AppliedIndex. The test simulates replication by
+// applying the committed entry to the FSM directly; the concurrent write
+// call must then return with the mutation locally readable. No sleeps —
+// synchronization is the barrier's own completion.
+func TestApplyWakesOnLocalFSMApply(t *testing.T) {
+	t.Parallel()
+	fsm := raftfsm.New()
+	r := newFollowerRaft(t, fsm)
+
+	s := New(r, fsm, 5*time.Second)
+	const leaderIndex = 7
+	s.SetForwarder(&mockForwarder{appliedIndex: leaderIndex})
+
+	ctx := context.Background()
+	cfg := system.RotationPolicyConfig{ID: glid.New(), Name: "event-driven-probe", MaxAge: &testMaxAge}
+
+	done := make(chan error, 1)
+	go func() { done <- s.PutRotationPolicy(ctx, cfg) }()
+
+	// Simulate the follower's raft delivering the committed entry to the
+	// FSM. Whether this lands before or after the waiter registers, the
+	// tracker guarantees the wake.
+	data, err := command.Marshal(command.NewPutRotationPolicy(cfg))
+	if err != nil {
+		t.Fatalf("marshal command: %v", err)
+	}
+	fsm.Apply(&hraft.Log{Index: leaderIndex, Data: data})
+
+	if err := <-done; err != nil {
+		t.Fatalf("PutRotationPolicy via forward: %v", err)
+	}
+	got, err := s.GetRotationPolicy(ctx, cfg.ID)
+	if err != nil {
+		t.Fatalf("GetRotationPolicy after barrier released: %v", err)
+	}
+	if got == nil {
+		t.Fatal("barrier released before the local FSM reflected the write")
+	}
+}
+
+// TestApplyReturnsImmediatelyWhenAlreadyApplied covers the no-op forward:
+// the local FSM already applied the leader's index (e.g. replication beat
+// the forward response), so the barrier must not block at all.
+func TestApplyReturnsImmediatelyWhenAlreadyApplied(t *testing.T) {
+	t.Parallel()
+	fsm := raftfsm.New()
+	r := newFollowerRaft(t, fsm)
+
+	cfg := system.RotationPolicyConfig{ID: glid.New(), Name: "pre-applied-probe", MaxAge: &testMaxAge}
+	data, err := command.Marshal(command.NewPutRotationPolicy(cfg))
+	if err != nil {
+		t.Fatalf("marshal command: %v", err)
+	}
+	const leaderIndex = 3
+	fsm.Apply(&hraft.Log{Index: leaderIndex, Data: data})
+
+	// applyTimeout is irrelevant here — the wait must not engage. A hang
+	// would trip the test binary timeout, not a flaky bound.
+	s := New(r, fsm, 5*time.Second)
+	s.SetForwarder(&mockForwarder{appliedIndex: leaderIndex})
+
+	if _, err := s.ApplyRaw(data); err != nil {
+		t.Fatalf("ApplyRaw with already-applied index: %v", err)
+	}
+}
+
+// TestApplyWaitCancelledContext pins ctx cancellation semantics: a caller
+// cancelling mid-wait gets ctx.Err(), not the timeout error.
+func TestApplyWaitCancelledContext(t *testing.T) {
+	t.Parallel()
+	fsm := raftfsm.New()
+	r := newFollowerRaft(t, fsm)
+
+	s := New(r, fsm, 5*time.Second)
+	s.SetForwarder(&mockForwarder{appliedIndex: 42}) // never applied locally
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := s.applyRaw(ctx, []byte("forwarded-command"))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("applyRaw with cancelled ctx = %v, want context.Canceled", err)
+	}
+}
+
+// TestBarrierOnLeaderApplies pins the leader path of the startup catch-up
+// barrier (gastrolog-1go57): on the leader raft.Apply is synchronous, so
+// Barrier commits a no-op entry and returns with the FSM current. The
+// apply-wait tracker must reflect the barrier's index on return.
+func TestBarrierOnLeaderApplies(t *testing.T) {
+	t.Parallel()
+	r, fsm := newTestRaft(t)
+	s := New(r, fsm, 5*time.Second)
+
+	before := fsm.ApplyWait().Applied()
+	if err := s.Barrier(context.Background()); err != nil {
+		t.Fatalf("Barrier on leader: %v", err)
+	}
+	if got := fsm.ApplyWait().Applied(); got <= before {
+		t.Fatalf("apply-wait tracker did not advance: before=%d after=%d", before, got)
+	}
+}
+
+// TestBarrierFollowerWakesOnLocalApply is the event-driven follower path
+// (gastrolog-1go57): the barrier is forwarded to the leader and Barrier
+// blocks until the local FSM applies up to the leader's index — released by
+// the FSM apply notification, not a poll. Replication is simulated by
+// applying the committed barrier entry to the FSM directly; no sleeps.
+func TestBarrierFollowerWakesOnLocalApply(t *testing.T) {
+	t.Parallel()
+	fsm := raftfsm.New()
+	r := newFollowerRaft(t, fsm)
+
+	const leaderIndex = 11
+	s := New(r, fsm, 5*time.Second)
+	s.SetForwarder(&mockForwarder{appliedIndex: leaderIndex})
+
+	done := make(chan error, 1)
+	go func() { done <- s.Barrier(context.Background()) }()
+
+	// The follower's raft delivers the committed barrier entry to the FSM.
+	// Whether this lands before or after the waiter registers, the tracker
+	// guarantees the wake.
+	data, err := command.Marshal(command.NewCatchupBarrier())
+	if err != nil {
+		t.Fatalf("marshal catchup barrier: %v", err)
+	}
+	fsm.Apply(&hraft.Log{Index: leaderIndex, Data: data})
+
+	if err := <-done; err != nil {
+		t.Fatalf("Barrier via forward: %v", err)
+	}
+}
+
+// TestBarrierFollowerTimeout pins that a follower that never catches up to
+// the forwarded barrier index surfaces a bounded timeout error, not a hang.
+func TestBarrierFollowerTimeout(t *testing.T) {
+	t.Parallel()
+	fsm := raftfsm.New()
+	r := newFollowerRaft(t, fsm)
+
+	s := New(r, fsm, 100*time.Millisecond)
+	s.SetForwarder(&mockForwarder{appliedIndex: 99}) // never applied locally
+
+	start := time.Now()
+	err := s.Barrier(context.Background())
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("expected timeout, got nil")
+	}
+	if !contains(err.Error(), "wait for local FSM apply") {
+		t.Errorf("expected wait-for-local-apply timeout, got: %v", err)
+	}
+	if elapsed < 50*time.Millisecond {
+		t.Errorf("returned too fast (%s), wait loop appears bypassed", elapsed)
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("took too long (%s), timeout bound not enforced", elapsed)
+	}
+}
+
+// TestBarrierFollowerCancelled pins ctx cancellation: a caller cancelling
+// mid-wait gets ctx.Err(), not the timeout error.
+func TestBarrierFollowerCancelled(t *testing.T) {
+	t.Parallel()
+	fsm := raftfsm.New()
+	r := newFollowerRaft(t, fsm)
+
+	s := New(r, fsm, 5*time.Second)
+	s.SetForwarder(&mockForwarder{appliedIndex: 42}) // never applied locally
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := s.Barrier(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Barrier with cancelled ctx = %v, want context.Canceled", err)
 	}
 }
 

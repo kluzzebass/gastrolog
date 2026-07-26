@@ -30,7 +30,9 @@ func TestAppendUnlistedManifestSealed(t *testing.T) {
 		{ID: cloudID, State: chunk.ChunkStateSealed, SealedAt: now, CloudBacked: true},
 	}
 	vaultInst := &VaultInstance{
-		ManifestEntries: func() []vaultctlfsm.ManifestEntry { return entries },
+		ManifestReadFacet: ManifestReadFacet{
+			ManifestEntries: func() []vaultctlfsm.ManifestEntry { return entries },
+		},
 	}
 
 	metas := []chunk.ChunkMeta{{ID: listedID, Sealed: true, SealedAt: now}}
@@ -93,7 +95,9 @@ func TestAppendUnlistedManifestSealedExcludesInFlightTransferPhantom(t *testing.
 		{ID: landedID, State: chunk.ChunkStateSealed, SealedAt: now, RecordCount: 5, TransferSourceVaultID: sourceVaultID, Holders: []string{"node-A"}},
 	}
 	vaultInst := &VaultInstance{
-		ManifestEntries: func() []vaultctlfsm.ManifestEntry { return entries },
+		ManifestReadFacet: ManifestReadFacet{
+			ManifestEntries: func() []vaultctlfsm.ManifestEntry { return entries },
+		},
 	}
 
 	out := appendUnlistedManifestSealed(nil, vaultInst)

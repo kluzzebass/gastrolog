@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chanwatch"
-	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/pipeline/ingestion"
 	"gastrolog/internal/querylang"
 )
 
@@ -44,13 +44,13 @@ type ingester struct {
 }
 
 // SetPressureGate wires the orchestrator's pressure gate into the ingester.
-// Implements orchestrator.PressureAware.
+// Implements ingestion.PressureAware.
 func (ing *ingester) SetPressureGate(gate *chanwatch.PressureGate) {
 	ing.pressureGate = gate
 }
 
 // SaveCheckpoint returns the current container timestamps as a JSON blob.
-// Implements orchestrator.Checkpointable.
+// Implements ingestion.Checkpointable.
 func (ing *ingester) SaveCheckpoint() ([]byte, error) {
 	ing.mu.Lock()
 	st := state{Containers: make(map[string]containerBookmark, len(ing.lastTS))}
@@ -65,7 +65,7 @@ func (ing *ingester) SaveCheckpoint() ([]byte, error) {
 }
 
 // LoadCheckpoint restores container timestamps from a JSON blob. Called before Run().
-// Implements orchestrator.Checkpointable.
+// Implements ingestion.Checkpointable.
 func (ing *ingester) LoadCheckpoint(data []byte) error {
 	var st state
 	if err := json.Unmarshal(data, &st); err != nil {
@@ -75,8 +75,8 @@ func (ing *ingester) LoadCheckpoint(data []byte) error {
 	return nil
 }
 
-// Run implements orchestrator.Ingester.
-func (ing *ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
+// Run implements ingestion.Ingester.
+func (ing *ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessage) error {
 	// Load state: prefer Raft-replicated checkpoint, fall back to local file.
 	var st state
 	if ing.restoredState != nil {
@@ -179,7 +179,7 @@ func (ing *ingester) waitForDocker(ctx context.Context) error {
 
 // startContainer begins streaming logs for a container if it matches filters
 // and isn't already being tracked.
-func (ing *ingester) startContainer(ctx context.Context, info containerInfo, out chan<- orchestrator.IngestMessage, wg *sync.WaitGroup) {
+func (ing *ingester) startContainer(ctx context.Context, info containerInfo, out chan<- ingestion.IngesterMessage, wg *sync.WaitGroup) {
 	if !querylang.MatchAttrs(ing.filter, containerAttrs(info)) {
 		return
 	}
@@ -236,7 +236,7 @@ func (ing *ingester) updateTimestamp(containerID string, ts time.Time) {
 }
 
 // eventLoop listens for Docker container events and starts/stops streams.
-func (ing *ingester) eventLoop(ctx context.Context, out chan<- orchestrator.IngestMessage, wg *sync.WaitGroup) {
+func (ing *ingester) eventLoop(ctx context.Context, out chan<- ingestion.IngesterMessage, wg *sync.WaitGroup) {
 	for {
 		events, errs := ing.client.Events(ctx)
 		backoff := 1 * time.Second // Reset on successful connection.
@@ -278,7 +278,7 @@ func (ing *ingester) eventLoop(ctx context.Context, out chan<- orchestrator.Inge
 }
 
 // handleEvent processes a single Docker container event.
-func (ing *ingester) handleEvent(ctx context.Context, event containerEvent, out chan<- orchestrator.IngestMessage, wg *sync.WaitGroup) {
+func (ing *ingester) handleEvent(ctx context.Context, event containerEvent, out chan<- ingestion.IngesterMessage, wg *sync.WaitGroup) {
 	switch event.Action {
 	case "start":
 		// Inspect the container to get its full info.
@@ -295,7 +295,7 @@ func (ing *ingester) handleEvent(ctx context.Context, event containerEvent, out 
 }
 
 // pollLoop periodically discovers containers and starts new ones.
-func (ing *ingester) pollLoop(ctx context.Context, out chan<- orchestrator.IngestMessage, wg *sync.WaitGroup) {
+func (ing *ingester) pollLoop(ctx context.Context, out chan<- ingestion.IngesterMessage, wg *sync.WaitGroup) {
 	ticker := time.NewTicker(ing.pollInterval)
 	defer ticker.Stop()
 

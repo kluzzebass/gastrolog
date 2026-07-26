@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/logging/comp"
+	"gastrolog/internal/pipeline/ingestion"
 	"log/slog"
 	"path/filepath"
 	"time"
 
 	"gastrolog/internal/logging"
-	"gastrolog/internal/orchestrator"
 )
 
 // ParamDefaults returns the default parameter values for a tail ingester.
@@ -21,8 +21,8 @@ func ParamDefaults() map[string]string {
 }
 
 // NewFactory returns an IngesterFactory for file tail ingesters.
-func NewFactory() orchestrator.IngesterFactory {
-	return func(id glid.GLID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
+func NewFactory() ingestion.IngesterFactory {
+	return func(id glid.GLID, params map[string]string, logger *slog.Logger) (ingestion.Ingester, error) {
 		cfg, err := parseConfig(id.String(), params, logger)
 		if err != nil {
 			return nil, err

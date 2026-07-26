@@ -879,10 +879,26 @@ func (m *PeerConnManager) resolveAddr(nodeID string) (string, error) {
 	if err := future.Error(); err != nil {
 		return "", fmt.Errorf("get raft config: %w", err)
 	}
-	for _, srv := range future.Configuration().Servers {
+	leaderAddr, leaderID := m.raft.LeaderWithID()
+	return resolveAddrFromRaft(future.Configuration().Servers, leaderAddr, leaderID, nodeID)
+}
+
+// resolveAddrFromRaft maps a node ID to its cluster address using the local
+// raft configuration, falling back to the observed leader address when the
+// target IS the current leader but the configuration entry describing it has
+// not replicated yet. A freshly-joined node learns the leader's identity and
+// address from the first AppendEntries heartbeat before its log backfills
+// the configuration — in that window the config scan finds nothing, but raft
+// itself already holds the authoritative answer, so "leader known" must
+// imply "leader dialable" (gastrolog-1rw6df).
+func resolveAddrFromRaft(servers []hraft.Server, leaderAddr hraft.ServerAddress, leaderID hraft.ServerID, nodeID string) (string, error) {
+	for _, srv := range servers {
 		if string(srv.ID) == nodeID {
 			return string(srv.Address), nil
 		}
+	}
+	if string(leaderID) == nodeID && leaderAddr != "" {
+		return string(leaderAddr), nil
 	}
 	return "", fmt.Errorf("node %s not found in raft config", nodeID)
 }

@@ -21,6 +21,7 @@ import (
 
 // testNode bundles a cluster server, raft instance, and config store for testing.
 type testNode struct {
+	id     string
 	srv    *cluster.Server
 	raft   *hraft.Raft
 	store  *raftstore.Store
@@ -101,7 +102,7 @@ func newTestNode(t *testing.T, nodeID string, bootstrap bool) *testNode {
 		t.Fatalf("Start: %v", err)
 	}
 
-	return &testNode{srv: srv, raft: r, store: store, fsm: fsm}
+	return &testNode{id: nodeID, srv: srv, raft: r, store: store, fsm: fsm}
 }
 
 // waitLeader waits for a node to become leader.

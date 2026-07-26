@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"gastrolog/internal/applywait"
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/raftgroup"
@@ -31,8 +32,19 @@ func (o *Orchestrator) ApplyVaultControlPlane(vaultID glid.GLID, data []byte) er
 	if o.peerConns == nil {
 		return g.Raft.Apply(data, cluster.ReplicationTimeout).Error()
 	}
-	fwd := cluster.NewVaultApplyForwarder(g.Raft, gid, o.peerConns, cluster.ReplicationTimeout)
+	fwd := cluster.NewVaultApplyForwarder(g.Raft, gid, groupApplyWait(g), o.peerConns, cluster.ReplicationTimeout)
 	return fwd.Apply(data)
+}
+
+// groupApplyWait resolves the apply tracker for a vault-ctl Raft group's
+// FSM. Production vault-ctl groups always run a *vaultraft.FSM; the nil
+// fallback covers test groups with bare sub-FSMs, where the forwarders
+// skip the read-after-write barrier.
+func groupApplyWait(g *raftgroup.Group) *applywait.Tracker {
+	if vfsm, ok := g.FSM.(*vaultraft.FSM); ok && vfsm != nil {
+		return vfsm.ApplyWait()
+	}
+	return nil
 }
 
 // vaultCtlApplier implements vaultctlfsm.Applier by wrapping vault commands

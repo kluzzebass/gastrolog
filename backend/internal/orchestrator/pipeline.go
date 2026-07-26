@@ -140,7 +140,7 @@ func (o *Orchestrator) SubmitToVault(ctx context.Context, vaultID glid.GLID, rec
 // pipelineVaultReg records how a vault is currently registered in the pipeline
 // supervisor, so reloadPipelineFromConfig re-registers only when something
 // material changed: its Home role (placement membership), whether the vault-ctl
-// handle is yet available (publisher upgraded from noop to the real
+// handle is yet available (publisher upgraded from fail-closed to the real
 // VaultCtlPublisher), or its chunk rotation policy (the chunking manager
 // captures the policy at register, so a policy edit must re-register).
 //
@@ -158,7 +158,7 @@ type pipelineVaultReg struct {
 // lands in a local durable segment wherever it is ingested). When the per-vault
 // vault-ctl handle is available, the Origin publishes completed-segment metadata
 // to the registry via the leader-forwarding applier; otherwise it falls back to
-// the noop publisher (single-node/memory mode with no group).
+// the fail-closed noHandlePublisher (single-node/memory mode with no group).
 //
 // When this node is also a placement member (Home) for the vault with a
 // vault-ctl handle, it registers the chunking side (Rubicon D): the leader
@@ -180,7 +180,7 @@ func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, home bool, fsm 
 		VaultID:    vaultID,
 		Origin:     true,
 		OriginRoot: root,
-		Publisher:  noopPublisher{},
+		Publisher:  noHandlePublisher{},
 	}
 	if hasHandle {
 		spec.Publisher = &distribution.VaultCtlPublisher{
@@ -209,10 +209,16 @@ func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, home bool, fsm 
 		spec.IsLeader = isLeader
 		spec.ChunkPolicy = policy
 		spec.OnChunkBuilt = func(id chunk.ChunkID) {
-			o.registerBuiltPipelineChunk(vaultID, fsm, id)
+			o.onPipelineChunkBuilt(vaultID, fsm, id)
 		}
-		spec.ChunkRequiredHolders = func() []string {
-			return o.vaultPlacementNodeIDs(vaultID)
+		spec.ChunkRequiredHolders = func() ([]string, bool) {
+			// A placed vault always has at least one member, so an empty
+			// lookup means the placement could not be resolved (config load
+			// failure, vault dropped from config) — report unresolved so the
+			// chunking release/purge gates fail closed instead of reading
+			// empty as "no holders required" (gastrolog-4w1vt).
+			ids := o.vaultPlacementNodeIDs(vaultID)
+			return ids, len(ids) > 0
 		}
 		spec.ChunkRetentionGiveUpTTL = func() (time.Duration, bool) {
 			return o.vaultRetentionGiveUpTTL(vaultID)
@@ -235,37 +241,35 @@ func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, home bool, fsm 
 	return spec, nil
 }
 
-// registerBuiltPipelineChunk registers a freshly-built pipeline GLCB with the
-// local chunk manager when the FSM already shows the chunk Sealed. This
-// closes the build-finishes-last ordering gap: the reconciler's onSeal
-// callback registers the GLCB only when the file exists on disk, so a home
-// whose build completes AFTER CmdSealChunk applied would otherwise never
-// register it — its local queries would silently miss the chunk. When the
-// chunk is not Sealed yet (build-finishes-first ordering), this is a no-op
-// and the later onSeal registers it.
-func (o *Orchestrator) registerBuiltPipelineChunk(vaultID glid.GLID, fsm *vaultctlfsm.FSM, id chunk.ChunkID) {
+// onPipelineChunkBuilt handles a freshly-built pipeline GLCB on this home.
+// Queryability needs no action — the lazy on-miss GLCB resolver serves the
+// chunk on first lookup the moment its FSM entry and file both exist
+// (gastrolog-34kmv). Two build-completion effects remain event-driven here:
+// the home's holder receipt (build completion is the byte-presence proof the
+// receipt asserts, and it covers the build-finishes-after-seal ordering gap
+// where onSeal fired before the file existed), and — once the chunk is fully
+// Sealed — its cloud upload. A Sealing-only entry defers both to the later
+// seal.
+func (o *Orchestrator) onPipelineChunkBuilt(vaultID glid.GLID, fsm *vaultctlfsm.FSM, id chunk.ChunkID) {
 	e := fsm.Get(id)
 	if e == nil {
 		o.noteRegisterSkip(vaultID, id, "no FSM entry")
 		return
 	}
-	// Register as soon as the GLCB exists so sealing chunks are queryable
-	// before CmdSealChunk; fully sealed chunks still register here when build
-	// finishes after seal (registerBuiltPipelineChunk ordering gap).
 	if e.State != chunk.ChunkStateSealed && e.State != chunk.ChunkStateSealing {
 		return
 	}
 	ti := o.findLocalVaultInstance(vaultID)
 	if ti == nil || ti.Reconciler == nil {
 		// Boot ordering: OnBuilt can fire from chunking recovery before the
-		// vault instance/reconciler exists. The catch-up sweep re-runs
-		// registration, but the skip must be visible — a node once held
+		// vault instance/reconciler exists. The catch-up sweep re-earns the
+		// holder receipt, but the skip must be visible — a node once held
 		// 297 complete GLCBs its chunk manager knew nothing about, and
 		// retention/backfill/queries all starved with zero log lines.
 		o.noteRegisterSkip(vaultID, id, "vault instance or reconciler not ready")
 		return
 	}
-	ti.Reconciler.registerPipelineGLCB(*e)
+	ti.Reconciler.ackOwnHolderReceipt(*e)
 	if e.State == chunk.ChunkStateSealed {
 		o.schedulePipelineCloudUpload(vaultID, id)
 	}
@@ -330,7 +334,7 @@ func (o *Orchestrator) vaultCtlHandle(vaultID glid.GLID) (*vaultctlfsm.FSM, vaul
 	}
 	var applier vaultctlfsm.Applier
 	if o.peerConns != nil {
-		applier = cluster.NewVaultCtlChunkApplyForwarder(g.Raft, gid, vaultID, o.peerConns, cluster.ReplicationTimeout)
+		applier = cluster.NewVaultCtlChunkApplyForwarder(g.Raft, gid, vaultID, groupApplyWait(g), o.peerConns, cluster.ReplicationTimeout)
 	} else {
 		applier = &vaultCtlApplier{o: o, vaultID: vaultID}
 	}
@@ -471,7 +475,7 @@ func (o *Orchestrator) originRoot(vaultID glid.GLID) (string, error) {
 // Pipeline ingest vaults do not use the legacy chunk-manager path: no append to
 // m.active, no PostSealProcess/sealToGLCB in storage/disk-*, and no record-stream
 // replication or missing-replica catchup. Sealed bytes are produced once by the
-// pipeline; query access is registerPipelineGLCB (external path registration).
+// pipeline; query access is the lazy on-miss external-GLCB resolver.
 func (o *Orchestrator) isPipelineIngestVault(vaultID glid.GLID) bool {
 	if o == nil {
 		return false
@@ -523,15 +527,32 @@ func (o *Orchestrator) pipelineVaultStagingRoot(vaultID glid.GLID) (string, bool
 	return filepath.Join(segmentsDir, vaultID.String()), true
 }
 
-// noopPublisher is the distribution publisher used while no vault-ctl handle is
-// available (single-node/memory mode): it accepts and drops publish metadata.
-// With a handle, the VaultCtlPublisher takes over so completed segments are
-// announced to the vault-ctl log and pulled by home nodes.
-type noopPublisher struct{}
+// errNoVaultCtlHandle rejects publishes while no vault-ctl handle is available.
+// It is retryable by distribution's publish-retry classification (anything but
+// ErrUnknownVault / bytes-missing), so refused segments stay staged in the
+// retry queue instead of being dropped.
+var errNoVaultCtlHandle = errors.New("no vault-ctl handle; segment publish deferred")
 
-var _ distribution.Publisher = noopPublisher{}
+// noHandlePublisher is the fail-closed distribution publisher used while no
+// vault-ctl handle is available (vault-ctl group not present yet during
+// startup, or single-node/memory mode without a group manager). It refuses
+// every publish with a retryable error so completed segments ride the existing
+// publish-retry machinery until the handle appears: the old noop default
+// returned nil, which marked segments published that vault-ctl never saw, and
+// the publisher upgrade had nothing to republish — durable segments invisible
+// to collection and chunking until restart (gastrolog-375el).
+//
+// When the handle appears, reloadPipelineFromConfig re-registers the vault
+// with the real VaultCtlPublisher; distribution's registration wake (stranded
+// rescan + retry drain in Manager.RegisterVault) republishes everything still
+// in completed/ without waiting for the retry backoff.
+type noHandlePublisher struct{}
 
-func (noopPublisher) Publish(context.Context, distribution.Metadata) error { return nil }
+var _ distribution.Publisher = noHandlePublisher{}
+
+func (noHandlePublisher) Publish(context.Context, distribution.Metadata) error {
+	return errNoVaultCtlHandle
+}
 
 // buildRoutingTable compiles a routing table from the cluster-wide route
 // config. Routing is vault-only: each enabled route maps its match expression

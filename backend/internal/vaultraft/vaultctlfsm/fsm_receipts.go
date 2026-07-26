@@ -2,13 +2,13 @@ package vaultctlfsm
 
 // Receipt-based deletion protocol — gastrolog-51gme step 2.
 //
-// The single-shot CmdDeleteChunk path can't survive snapshot install:
-// when a node has been offline long enough that the rest of the cluster
-// has snapshotted past the individual delete log entries, the rejoining
-// node's FSM.Restore sets the new state directly without firing the
-// per-entry onDelete callbacks. The local Manager never learns about
+// A single-shot delete command can't survive snapshot install: when a
+// node has been offline long enough that the rest of the cluster has
+// snapshotted past the individual delete log entries, the rejoining
+// node's FSM.Restore sets the new state directly without firing any
+// per-entry delete callbacks. The local Manager never learns about
 // those deletions and only catches up via a periodic disk-vs-FSM walk
-// (the path we're deleting in step 5).
+// (the path removed in step 5).
 //
 // The replacement is an N-way receipt protocol that lives in the FSM
 // state itself, so a snapshot carries it across the boundary intact:
@@ -235,8 +235,8 @@ func (f *FSM) applyAckDelete(c *gastrologv1.AckDeleteCommand) (*chunk.ChunkID, s
 }
 
 // applyFinalizeDelete removes the entry from pendingDeletes, removes the
-// chunk metadata from the manifest (f.chunks), and records a tombstone —
-// matching the legacy CmdDeleteChunk apply contract. The leader proposes
+// chunk metadata from the manifest (f.chunks), and records a tombstone.
+// The leader proposes
 // this once expectedFrom is empty for an entry. Without the
 // chunks/tombstone updates the manifest carries dead entries forever
 // and stale ImportSealed RPCs could re-create the chunk after the
@@ -247,8 +247,7 @@ func (f *FSM) applyFinalizeDelete(c *gastrologv1.FinalizeDeleteCommand) (*chunk.
 
 	// Tombstone unconditionally so a stale ImportSealed/Append/Seal
 	// command racing the receipt protocol can be rejected even if the
-	// chunk metadata never lived in this FSM. Same rationale as
-	// applyDelete (CmdDeleteChunk) under gastrolog-11rzz.
+	// chunk metadata never lived in this FSM. See gastrolog-11rzz.
 	f.tombstones[id] = time.Now()
 
 	_, hadPending := f.pendingDeletes[id]

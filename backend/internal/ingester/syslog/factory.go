@@ -3,9 +3,8 @@ package syslog
 import (
 	"errors"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline/ingestion"
 	"log/slog"
-
-	"gastrolog/internal/orchestrator"
 )
 
 // ParamDefaults returns the default parameter values for a syslog ingester.
@@ -14,8 +13,8 @@ func ParamDefaults() map[string]string {
 }
 
 // NewFactory returns a IngesterFactory for syslog ingesters.
-func NewFactory() orchestrator.IngesterFactory {
-	return func(id glid.GLID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
+func NewFactory() ingestion.IngesterFactory {
+	return func(id glid.GLID, params map[string]string, logger *slog.Logger) (ingestion.Ingester, error) {
 		udpAddr := params["udp_addr"]
 		tcpAddr := params["tcp_addr"]
 

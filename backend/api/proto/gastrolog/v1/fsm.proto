@@ -55,8 +55,18 @@ message SystemCommand {
     SetIngesterCheckpointCommand set_ingester_checkpoint = 37;
     PutLogLevelsCommand put_log_levels = 38;
     SetNodeStateCommand set_node_state = 39;
+    CatchupBarrierCommand catchup_barrier = 40;
   }
 }
+
+// CatchupBarrierCommand is a state-free entry the FSM applies as a no-op. Its
+// only purpose is to occupy a committed Raft log index that flows through
+// FSM.Apply, so a node can commit one (or forward it to the leader) and then
+// block on the FSM apply-wait tracker until its local FSM has applied up to
+// that index — the startup FSM catch-up barrier (gastrolog-1go57). It carries
+// no fields and mutates no state; unlike a raft LogBarrier it reaches
+// FSM.Apply, which the event-driven tracker (fed only from FSM.Apply) requires.
+message CatchupBarrierCommand {}
 
 // --- Rotation Policies ---
 
@@ -381,4 +391,9 @@ message SystemSnapshot {
   repeated SetIngesterAssignmentCommand ingester_assignments = 18;
   repeated SetIngesterCheckpointCommand ingester_checkpoints = 19;
   LogLevelConfig log_levels = 20;
+  // Highest Raft log index applied to the FSM when the snapshot was taken.
+  // Lets a follower that installs this snapshot (instead of replaying log
+  // entries) release read-after-write apply-wait barriers for every command
+  // the snapshot covers (gastrolog-3klg1).
+  uint64 last_applied_index = 21;
 }

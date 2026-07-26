@@ -829,6 +829,23 @@ func ExtractPutClusterTLS(cmd *gastrologv1.PutClusterTLSCommand) system.ClusterT
 }
 
 // ---------------------------------------------------------------------------
+// Catch-up Barrier
+// ---------------------------------------------------------------------------
+
+// NewCatchupBarrier creates a state-free SystemCommand used as a startup FSM
+// catch-up barrier. Committing it (or forwarding it to the leader) yields a
+// Raft log index that flows through FSM.Apply; a node then blocks on the FSM
+// apply-wait tracker until its local FSM has applied up to that index. The
+// command mutates no state — the FSM handles it as a no-op (gastrolog-1go57).
+func NewCatchupBarrier() *gastrologv1.SystemCommand {
+	return &gastrologv1.SystemCommand{
+		Command: &gastrologv1.SystemCommand_CatchupBarrier{
+			CatchupBarrier: &gastrologv1.CatchupBarrierCommand{},
+		},
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Snapshot
 // ---------------------------------------------------------------------------
 

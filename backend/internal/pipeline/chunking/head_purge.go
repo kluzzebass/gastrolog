@@ -32,15 +32,14 @@ func (v *vaultChunking) flushHeadPurgeForManifest(pending *vaultctlfsm.OpenChunk
 	// wake-driven passes; a purge refused now is retried by the
 	// release-driven purge (OnReleaseSegments → drainReleasedPurge) and by
 	// later manifests referencing the same segment.
-	required := v.requiredHolders()
-	holdersWired := v.cfg.RequiredHolders != nil
+	required, resolved := v.requiredHolders()
 	minChunk := v.plannerMinHolders()
 	fsm := v.fsm()
 	purged := 0
 	failed := 0
 	var firstErr error
 	for _, id := range segmentIDs {
-		if !mayPurgeHeadAfterBuild(fsm, id, required, holdersWired, minChunk) {
+		if !mayPurgeHeadAfterBuild(fsm, id, required, resolved, minChunk) {
 			continue
 		}
 		// Per-segment detail at Debug: purges are a healthy-path event that

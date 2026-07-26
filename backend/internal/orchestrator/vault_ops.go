@@ -249,7 +249,7 @@ func (o *Orchestrator) ListClusterChunkMetas(vaultID glid.GLID) ([]chunk.ChunkMe
 // each tagged with its instance ID and type.
 //
 // Sealed chunks are projected from the vault-ctl FSM manifest
-// (VaultManifestEntriesFromCtlFSM) so every voter sees the full cluster chunk
+// (VaultManifestEntriesIncludingOpen) so every voter sees the full cluster chunk
 // set regardless of how many blobs this node's chunk manager has registered
 // yet. Without this, ListChunks fell back to Chunks.List() (local replicas
 // only) and the inspector showed a handful of chunks whenever remote fan-out
@@ -274,10 +274,9 @@ func (o *Orchestrator) ListAllChunkMetas(vaultID glid.GLID) ([]VaultChunkMeta, e
 	}
 
 	vaultType := vaultInst.Type
-	overlay := vaultInst.OverlayFromFSM
 
 	var entries []vaultctlfsm.ManifestEntry
-	if fsmEntries := o.VaultManifestEntriesFromCtlFSM(vaultID); len(fsmEntries) > 0 {
+	if fsmEntries := o.VaultManifestEntriesIncludingOpen(vaultID); len(fsmEntries) > 0 {
 		entries = fsmEntries
 	} else {
 		entries = vaultManifestEntries(vaultInst)
@@ -291,9 +290,7 @@ func (o *Orchestrator) ListAllChunkMetas(vaultID glid.GLID) ([]VaultChunkMeta, e
 	for _, e := range entries {
 		m := e.ToChunkMeta()
 		o.overlayPipelineChunkMetaBounds(vaultID, &m)
-		if overlay != nil {
-			m = overlay(m)
-		}
+		m = o.groundChunkMeta(vaultID, m)
 		result = append(result, VaultChunkMeta{
 			ChunkMeta: m,
 			VaultID:   vaultInst.VaultID,
@@ -307,9 +304,7 @@ func (o *Orchestrator) ListAllChunkMetas(vaultID glid.GLID) ([]VaultChunkMeta, e
 	if active := vaultInst.Chunks.Active(); active != nil {
 		if _, ok := seen[active.ID]; !ok {
 			m := *active
-			if overlay != nil {
-				m = overlay(m)
-			}
+			m = o.groundChunkMeta(vaultID, m)
 			result = append(result, VaultChunkMeta{
 				ChunkMeta: m,
 				VaultID:   vaultInst.VaultID,
@@ -338,9 +333,7 @@ func (o *Orchestrator) GetChunkMeta(vaultID glid.GLID, chunkID chunk.ChunkID) (c
 	if vaultInst := vault.Instance; vaultInst != nil {
 		m, err := vaultInst.Chunks.Meta(chunkID)
 		if err == nil {
-			if vaultInst.OverlayFromFSM != nil {
-				m = vaultInst.OverlayFromFSM(m)
-			}
+			m = o.groundChunkMeta(vaultID, m)
 			return m, nil
 		}
 	}
@@ -361,9 +354,7 @@ func (o *Orchestrator) GetVaultChunkMeta(vaultID glid.GLID, chunkID chunk.ChunkI
 	if vaultInst := vault.Instance; vaultInst != nil {
 		m, err := vaultInst.Chunks.Meta(chunkID)
 		if err == nil {
-			if vaultInst.OverlayFromFSM != nil {
-				m = vaultInst.OverlayFromFSM(m)
-			}
+			m = o.groundChunkMeta(vaultID, m)
 			return VaultChunkMeta{
 				ChunkMeta: m,
 				VaultID:   vaultInst.VaultID,
@@ -461,58 +452,6 @@ func (o *Orchestrator) findLocalVaultInstance(vaultID glid.GLID) *VaultInstance 
 	return vault.Instance
 }
 
-// deleteFromFollowers removes a chunk from all same-node follower instances
-// of an instance. Called by retention after deleting from the leader.
-// DeleteChunk deletes a specific chunk from an instance. If the chunk is
-// currently the vault's active chunk, it is sealed first so the delete can
-// proceed. This handles the follower case where the leader has moved on to a
-// new active chunk but the follower still has the old ID as active (records
-// sync via ChunkReplicator.AppendRecords preserves the leader's chunk ID).
-func (o *Orchestrator) DeleteChunk(vaultID glid.GLID, chunkID chunk.ChunkID) error {
-	vaultInst, err := o.findInstanceForDelete(vaultID)
-	if err != nil {
-		return err
-	}
-	return o.deleteChunkFromInstance(vaultInst, vaultID, chunkID)
-}
-
-// findInstanceForDelete returns the vault's instance or an error, releasing
-// the orchestrator read lock before returning.
-func (o *Orchestrator) findInstanceForDelete(vaultID glid.GLID) (*VaultInstance, error) {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	vault := o.vaults[vaultID]
-	if vault == nil || vault.Instance == nil {
-		return nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
-	}
-	return vault.Instance, nil
-}
-
-// deleteChunkFromInstance seals the active chunk if it matches, then
-// deletes the chunk via the lifecycle reconciler's receipt protocol when one
-// is wired (production) or via direct local cleanup otherwise (test harnesses
-// that build VaultInstances without going through ApplyConfig).
-//
-// reason="manual-delete-rpc" lands in the FSM's pendingDeletes audit trail so
-// operators can distinguish operator-initiated deletes from retention/transit
-// drivers in chunk-history reviews. See gastrolog-51gme step 7.
-func (o *Orchestrator) deleteChunkFromInstance(t *VaultInstance, vaultID glid.GLID, chunkID chunk.ChunkID) error {
-	if active := t.Chunks.Active(); active != nil && active.ID == chunkID {
-		if err := t.Chunks.Seal(); err != nil {
-			return fmt.Errorf("seal active before delete: %w", err)
-		}
-	}
-	if t.Reconciler != nil {
-		return t.Reconciler.deleteChunk(chunkID, "manual-delete-rpc", o.placementMembership(t))
-	}
-	if t.Indexes != nil {
-		if err := t.Indexes.DeleteIndexes(chunkID); err != nil {
-			o.vaultOpsLogger.Warn("delete chunk: delete indexes failed",
-				"vault", vaultID, "chunk", chunkID, "error", err)
-		}
-	}
-	return t.Chunks.Delete(chunkID)
-}
 
 // replaceForwardedChunk seals (if active) and deletes a pre-existing chunk
 // on a follower to make room for the canonical sealed version from the leader.
@@ -593,13 +532,51 @@ func (o *Orchestrator) runAfterVaultCtlRestore(vaultID glid.GLID) {
 	if o.pipeline != nil && o.isPipelineIngestVault(vaultID) {
 		o.recoverPipelineVaultAfterRestore(vaultID)
 	}
+	// Cloud-upload catch-up on snapshot restore: Restore replaces the FSM
+	// wholesale with no per-entry seal effects, so a chunk that became sealed-
+	// but-not-cloud-backed in the installed snapshot never scheduled an upload
+	// on this node. This replaces the retired 5s backfill tick's discovery role
+	// for the snapshot-restore gap (gastrolog-576bm). No-op unless this node is
+	// the vault's uploader.
+	o.cloudUploadCatchupForVault(vaultID)
 	o.vaultOpsLogger.Info("vault-ctl after-restore reconcile complete",
 		"vault", vaultID, "has_instance", t != nil)
 }
 
 // onVaultCtlLeadGained wakes the chunking worker when this home becomes the
 // vault-ctl leader. Planning and build passes run in the worker loop.
+//
+// Gaining vault-ctl leadership is also the upstream edge for the
+// reconciler's leader-only categories (gastrolog-3fu9t): fire
+// ReconcileMembershipCatchup so a late-joining leader pulls missing
+// replicas, retires unrecoverable FSM entries, prunes stale ExpectedFrom
+// nodes, and retracts abandoned transfer announces immediately instead of
+// waiting for the periodic backstop tick. Applies to every vault with a
+// reconciler, not just pipeline ingest vaults — the replicated-vault
+// missing-replica and stale-pending-ack categories are exactly the ones a
+// new leader must run. Dispatched on auxWg: the categories propose Raft
+// applies that route to this new leader's apply queue, so they must not
+// run on the leadership-tracking goroutine.
 func (o *Orchestrator) onVaultCtlLeadGained(vaultID glid.GLID) {
+	// Cloud-upload catch-up on leadership change: a chunk that sealed while
+	// this node was not the vault's uploader never saw the live onSeal upload
+	// effect here. This replaces the retired 5s backfill tick's discovery role
+	// for the leadership-change case (gastrolog-576bm). Applies to both
+	// type=cloud vaults (gated on vault-ctl leadership) and cloud-backed
+	// pipeline vaults (gated on CloudStore/placement leadership); the catch-up
+	// is a no-op unless this node is actually the uploader.
+	o.cloudUploadCatchupForVault(vaultID)
+
+	o.mu.RLock()
+	var rec *VaultLifecycleReconciler
+	if vault := o.vaults[vaultID]; vault != nil && vault.Instance != nil {
+		rec = vault.Instance.Reconciler
+	}
+	o.mu.RUnlock()
+	if rec != nil {
+		o.auxWg.Go(rec.ReconcileMembershipCatchup)
+	}
+
 	if o.pipeline == nil || !o.isPipelineIngestVault(vaultID) {
 		return
 	}
@@ -749,27 +726,6 @@ func (o *Orchestrator) placementMembership(vaultInst *VaultInstance) []string {
 	return expected
 }
 
-// deleteFromFollowers removes a chunk from same-node follower vault instances.
-// Called from the reconciler-less fallback in retention's expireChunk after
-// applyRaftDelete has already fired the global CmdDeleteChunk. Uses
-// DeleteNoAnnounce to avoid a redundant second Raft-wide announce (the
-// first one already propagated via OnDelete). The reconciler-driven
-// production path (gastrolog-51gme) walks same-node siblings itself in
-// VaultLifecycleReconciler.deleteLocalCopy.
-func (o *Orchestrator) deleteFromFollowers(vaultID glid.GLID, chunkID chunk.ChunkID) {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	vault := o.vaults[vaultID]
-	if vault == nil {
-		return
-	}
-	if t := vault.Instance; t != nil && t.IsFollower {
-		if err := chunk.DeleteNoAnnounce(t.Chunks, chunkID); err != nil {
-			o.vaultOpsLogger.Warn("delete from followers: failed",
-				"vault", vaultID, "chunk", chunkID, "error", err)
-		}
-	}
-}
 
 // --- Chunk write ---
 
@@ -911,13 +867,12 @@ func (o *Orchestrator) ImportToInstanceStorage(ctx context.Context, vaultID glid
 // work scheduling. See gastrolog-11rzz for the ordering rationale.
 //
 // Ordering matters: announce first, then re-check tombstone. This covers
-// the race where DeleteChunk applies between ImportRecords and our check
+// the race where a delete finalizes between ImportRecords and our check
 // — if we checked first we'd miss it; announcing first propagates the
 // create through the vault-ctl FSM (which rejects it when tombstoned via the
 // applyCreate guard), so by the time we re-check the tombstone state is
 // authoritative and any on-disk files we wrote are orphans we must
-// clean up explicitly because the FSM onDelete callback fired before
-// the files existed.
+// clean up explicitly.
 func (o *Orchestrator) finalizeImportedChunk(vaultID glid.GLID, cm chunk.ChunkManager, meta chunk.ChunkMeta, isTombstoned func(chunk.ChunkID) bool) error {
 	if meta.ID == (chunk.ChunkID{}) {
 		return nil

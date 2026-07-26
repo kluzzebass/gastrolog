@@ -282,18 +282,6 @@ func (tr *ChunkReplicator) ImportSealedChunk(ctx context.Context, nodeID string,
 	return nil
 }
 
-// DeleteChunk tells a follower to delete a sealed chunk.
-func (tr *ChunkReplicator) DeleteChunk(ctx context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID) error {
-	return tr.send(ctx, vaultID, nodeID, &gastrologv1.ChunkReplicationCommand{
-		VaultId: vaultID.ToProto(),
-		Command: &gastrologv1.ChunkReplicationCommand_DeleteChunk{
-			DeleteChunk: &gastrologv1.ChunkReplicationDelete{
-				ChunkId: glid.GLID(chunkID).ToProto(),
-			},
-		},
-	})
-}
-
 // RequestReplicaCatchup is the follower→leader catchup request. Sent
 // by a follower whose lifecycle reconciler has detected sealed chunks
 // in the FSM that are missing on its local disk (e.g. after a pause/

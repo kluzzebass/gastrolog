@@ -1008,3 +1008,83 @@ func (s *bufSink) Write(p []byte) (n int, err error) { return s.buf.Write(p) }
 func (s *bufSink) Close() error                      { return nil }
 func (s *bufSink) Cancel() error                     { return nil }
 func (s *bufSink) ID() string                        { return "test" }
+
+// --- Apply-wait tracker (gastrolog-3klg1) ---
+
+// TestApplyAdvancesApplyWait pins that every Apply advances the FSM's
+// apply-wait tracker to the entry's index — including entries whose
+// dispatch fails (the entry is consumed either way, matching raft's own
+// applied-index semantics).
+func TestApplyAdvancesApplyWait(t *testing.T) {
+	t.Parallel()
+	fsm := New()
+	if got := fsm.ApplyWait().Applied(); got != 0 {
+		t.Fatalf("fresh FSM Applied() = %d, want 0", got)
+	}
+
+	data, err := command.Marshal(command.NewPutRotationPolicy(system.RotationPolicyConfig{
+		ID: newID(), Name: "aw-probe",
+	}))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	fsm.Apply(&raft.Log{Index: 4, Data: data})
+	if got := fsm.ApplyWait().Applied(); got != 4 {
+		t.Fatalf("Applied() after Apply(index 4) = %d, want 4", got)
+	}
+
+	// A failing entry (garbage payload) still advances the tracker.
+	if res := fsm.Apply(&raft.Log{Index: 5, Data: []byte("not a protobuf")}); res == nil {
+		t.Fatal("expected error result for garbage payload")
+	}
+	if got := fsm.ApplyWait().Applied(); got != 5 {
+		t.Fatalf("Applied() after failing Apply(index 5) = %d, want 5", got)
+	}
+}
+
+// TestSnapshotRestoreAdvancesApplyWait covers the follower-installs-snapshot
+// path of the read-after-write barrier: when the target entry reaches the
+// follower inside a snapshot instead of via log replication, Restore must
+// release waiters up to the snapshot's embedded applied index — after the
+// store swap, so a released waiter reads post-restore state.
+func TestSnapshotRestoreAdvancesApplyWait(t *testing.T) {
+	t.Parallel()
+	fsm1 := New()
+	id := newID()
+	data, err := command.Marshal(command.NewPutRotationPolicy(system.RotationPolicyConfig{
+		ID: id, Name: "snap-barrier-probe",
+	}))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	fsm1.Apply(&raft.Log{Index: 9, Data: data})
+
+	snap, err := fsm1.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	var buf bytes.Buffer
+	if err := snap.Persist(&bufSink{buf: &buf}); err != nil {
+		t.Fatalf("Persist: %v", err)
+	}
+
+	fsm2 := New()
+	done := make(chan error, 1)
+	go func() { done <- fsm2.ApplyWait().Wait(context.Background(), 9) }()
+	if err := fsm2.Restore(io.NopCloser(&buf)); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("Wait(9) across Restore: %v", err)
+	}
+	got, err := fsm2.Store().GetRotationPolicy(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil {
+		t.Fatal("waiter released before restored state was readable")
+	}
+	if want := uint64(9); fsm2.ApplyWait().Applied() != want {
+		t.Fatalf("Applied() after Restore = %d, want %d", fsm2.ApplyWait().Applied(), want)
+	}
+}

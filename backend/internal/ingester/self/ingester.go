@@ -8,7 +8,7 @@ import (
 
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/logging"
-	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/pipeline/ingestion"
 )
 
 type ingester struct {
@@ -27,7 +27,7 @@ type ingester struct {
 
 // SetPressureGate registers a pressure transition callback that raises the
 // capture handler's minimum level under load and restores it on recovery.
-// Implements orchestrator.PressureAware.
+// Implements ingestion.PressureAware.
 //
 // The self ingester responds to pressure by *filtering* at the source
 // instead of blocking — blocking its own Run loop would cause captured
@@ -52,7 +52,7 @@ func (ing *ingester) SetPressureGate(gate *chanwatch.PressureGate) {
 	})
 }
 
-func (ing *ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
+func (ing *ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessage) error {
 	ing.logger.Info("started")
 
 	// Open the capture gate so slog records start flowing into ing.ch.
@@ -89,7 +89,7 @@ func (ing *ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMess
 }
 
 // convert transforms a CapturedRecord into an IngestMessage with a JSON body.
-func (ing *ingester) convert(cr logging.CapturedRecord) orchestrator.IngestMessage {
+func (ing *ingester) convert(cr logging.CapturedRecord) ingestion.IngesterMessage {
 	// Build a flat map of all attributes for the JSON body.
 	rec := make(map[string]any, 8)
 	rec["time"] = cr.Time
@@ -118,7 +118,7 @@ func (ing *ingester) convert(cr logging.CapturedRecord) orchestrator.IngestMessa
 
 	raw, _ := json.Marshal(rec) //nolint:errchkjson // map[string]any never fails
 
-	return orchestrator.IngestMessage{
+	return ingestion.IngesterMessage{
 		Attrs:      attrs,
 		Raw:        raw,
 		RawOwned:   true,

@@ -32,8 +32,13 @@ const (
 	entryStableU64   byte = 3
 	entryDeleteRange byte = 4
 	entryGroupReg    byte = 5
+	entryLogBatch    byte = 6
 
 	headerSize = 13
+
+	// entryLogBatch payload layout: [count:4] then per entry [len:4][encoded log].
+	logBatchCountSize    = 4
+	logBatchEntryLenSize = 4
 )
 
 var crc32Table = crc32.MakeTable(crc32.Castagnoli)
@@ -43,7 +48,7 @@ func main() {
 	var (
 		cmdOnly     = flag.Bool("cmd-only", false, "only print FSM-command log entries")
 		filterGroup = flag.String("filter-group", "", "only print entries from this group name (vault-ctl group ID, 'config', etc.)")
-		filterCmd   = flag.String("filter-cmd", "", "only print entries with this FSM command (e.g. CmdDeleteChunk)")
+		filterCmd   = flag.String("filter-cmd", "", "only print entries with this FSM command (e.g. CmdSealChunk)")
 		summary     = flag.Bool("summary", false, "print per-group + per-command counts only")
 		termHist    = flag.Bool("term-hist", false, "print per-(group, term, cmd) counts to localize spikes")
 	)
@@ -212,10 +217,44 @@ func walkSegment(path string, visit func(gid uint32, typ byte, payload []byte) e
 		if crc32.Checksum(payload, crc32Table) != stored {
 			return fmt.Errorf("crc mismatch in %s", filepath.Base(path))
 		}
+		if typ == entryLogBatch {
+			// Expand an atomic StoreLogs batch into per-entry visits so the
+			// output matches internal/raftwal replay semantics.
+			if err := walkLogBatch(payload, gid, visit); err != nil {
+				return err
+			}
+			continue
+		}
 		if err := visit(gid, typ, payload); err != nil {
 			return err
 		}
 	}
+}
+
+// walkLogBatch mirrors internal/raftwal.forEachBatchEntry: it visits each
+// sub-entry of an entryLogBatch payload as an entryLog. Bounds violations end
+// the walk silently — the record CRC already vouched for the bytes.
+func walkLogBatch(payload []byte, gid uint32, visit func(gid uint32, typ byte, payload []byte) error) error {
+	if len(payload) < logBatchCountSize {
+		return nil
+	}
+	count := int(binary.LittleEndian.Uint32(payload[0:logBatchCountSize]))
+	off := logBatchCountSize
+	for range count {
+		if off+logBatchEntryLenSize > len(payload) {
+			return nil
+		}
+		n := int(binary.LittleEndian.Uint32(payload[off : off+logBatchEntryLenSize]))
+		off += logBatchEntryLenSize
+		if off+n > len(payload) {
+			return nil
+		}
+		if err := visit(gid, entryLog, payload[off:off+n]); err != nil {
+			return err
+		}
+		off += n
+	}
+	return nil
 }
 
 // decodeLog matches internal/raftwal.decodelog.
@@ -286,8 +325,6 @@ func innerCommandNameAndID(cmd *gastrologv1.VaultCtlCommand) (string, string) {
 		return "CmdSealChunk", chunkIDStr(c.SealChunk.GetId())
 	case *gastrologv1.VaultCtlCommand_UploadChunk:
 		return "CmdUploadChunk", chunkIDStr(c.UploadChunk.GetId())
-	case *gastrologv1.VaultCtlCommand_DeleteChunk:
-		return "CmdDeleteChunk", chunkIDStr(c.DeleteChunk.GetId())
 	case *gastrologv1.VaultCtlCommand_RetentionPending:
 		return "CmdRetentionPending", chunkIDStr(c.RetentionPending.GetId())
 	case *gastrologv1.VaultCtlCommand_RequestDelete:
@@ -340,6 +377,8 @@ func typeName(t byte) string {
 		return "entryDeleteRange"
 	case entryGroupReg:
 		return "entryGroupReg"
+	case entryLogBatch:
+		return "entryLogBatch"
 	default:
 		return fmt.Sprintf("entryUnknown(%d)", t)
 	}

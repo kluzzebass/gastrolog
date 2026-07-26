@@ -6,16 +6,18 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/index"
+	filetsidx "gastrolog/internal/index/file/tsidx"
 	"gastrolog/internal/manifest"
 	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/vaultraft"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
-// ManifestReader returns a manifest.Reader backed by this orchestrator's
-// vaults. Walks the per-vault sub-FSMs to project a global view of sealed
-// chunk manifests; honors the active-chunk exception by filtering on
-// Sealed=true.
+// ManifestReader returns a manifest.Reader backed by the replicated vault-ctl
+// FSMs. Every node is a voter of every vault-ctl Raft group (gastrolog-292yi),
+// so the sealed-chunk manifest resolves on ANY node — including nodes that
+// host no instance for the vault. Honors the active-chunk exception by
+// filtering on IsSealed().
 //
 // Memory-mode vaults (no FSM, no replication) are projected from the local
 // chunk manager's List() so callers see a uniform view regardless of how
@@ -32,10 +34,12 @@ func (o *Orchestrator) IntegrityVerifier() chunk.IntegrityVerifier {
 	return &orchestratorManifestReader{o: o}
 }
 
-// orchestratorManifestReader implements manifest.Reader by walking the
-// orchestrator's vaults. Sealed entries from the vault-ctl FSM are returned
-// verbatim; memory-mode vaults project from chunk.ChunkManager because those
-// vaults are their own source of truth (no replication).
+// orchestratorManifestReader implements manifest.Reader on the unified
+// manifest read core (manifestEntryByChunk / manifestEntriesForVault):
+// vault-ctl FSM first, local memory-mode projection as fallback. Sealed
+// entries from the vault-ctl FSM are returned verbatim; memory-mode vaults
+// project from chunk.ChunkManager because those vaults are their own source
+// of truth (no replication).
 type orchestratorManifestReader struct {
 	o *Orchestrator
 }
@@ -61,57 +65,119 @@ func (r *orchestratorManifestReader) ExpectedDigest(id chunk.ChunkID) ([32]byte,
 }
 
 // Entry returns the sealed manifest entry for the given chunk ID. ChunkIDs
-// are globally unique, so this fans out across every vault until it finds
-// the chunk; it does NOT return active chunks (Sealed=false).
+// are globally unique, so this resolves across every vault-ctl FSM this node
+// participates in (any voter — no local instance required) before falling
+// back to memory-mode local projection; it does NOT return active chunks.
 func (r *orchestratorManifestReader) Entry(id chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool) {
-	r.o.mu.RLock()
-	defer r.o.mu.RUnlock()
-	for _, v := range r.o.vaults {
-		if v.Instance == nil {
-			continue
-		}
-		if e, ok := vaultManifestEntry(v.Instance, id); ok && e.IsSealed() {
-			return e, true
-		}
+	_, e, ok := r.o.manifestEntryByChunk(id)
+	if !ok || !e.IsSealed() {
+		return vaultctlfsm.ManifestEntry{}, false
 	}
-	return vaultctlfsm.ManifestEntry{}, false
+	return e, true
 }
 
 // EntriesForVault returns every sealed manifest entry for the given vault.
-// Returns nil when the vault isn't registered on this node.
+// Served from the replicated vault-ctl FSM on any voter; returns nil only
+// when this node has neither joined the vault's control-plane group nor
+// hosts a local instance for it.
 func (r *orchestratorManifestReader) EntriesForVault(key glid.GLID) []vaultctlfsm.ManifestEntry {
-	r.o.mu.RLock()
-	defer r.o.mu.RUnlock()
-	if v := r.o.vaults[key]; v != nil && v.Instance != nil {
-		return collectSealedEntries(v.Instance)
+	var out []vaultctlfsm.ManifestEntry
+	for _, e := range r.o.manifestEntriesForVault(key) {
+		if e.IsSealed() {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// VaultManifestEntriesIncludingOpen returns every manifest entry (sealed,
+// sealing AND open/active) for the given vault, read from the replicated
+// vault-ctl Raft FSM. Every node participates as a voter in every vault-ctl
+// Raft group (gastrolog-292yi), so the FSM is authoritative cluster-wide and
+// visible on nodes that don't host any instance for the vault. This is the
+// open-chunk-inclusive projection of the same read core that backs
+// ManifestReader (which stays sealed-only per the active-chunk exception).
+// Returns nil when there is no GroupManager (single-node / memory mode) or
+// when this node hasn't joined the vault-ctl group yet — callers keep their
+// own local-projection fallback for that case.
+func (o *Orchestrator) VaultManifestEntriesIncludingOpen(vaultID glid.GLID) []vaultctlfsm.ManifestEntry {
+	f := o.vaultCtlFSMForVault(vaultID)
+	if f == nil {
+		return nil
+	}
+	return f.ListIncludingPipelineManifest()
+}
+
+// manifestEntriesForVault is the single read core behind the per-vault
+// manifest surfaces: the replicated vault-ctl FSM first (visible on every
+// voter), the local instance projection (memory-mode vaults, which have no
+// FSM) as fallback. Entries come back in ALL lifecycle states; callers apply
+// their own sealed/open filter.
+func (o *Orchestrator) manifestEntriesForVault(vaultID glid.GLID) []vaultctlfsm.ManifestEntry {
+	if f := o.vaultCtlFSMForVault(vaultID); f != nil {
+		return f.ListIncludingPipelineManifest()
+	}
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	if v := o.vaults[vaultID]; v != nil && v.Instance != nil {
+		return vaultManifestEntries(v.Instance)
 	}
 	return nil
 }
 
-// VaultManifestEntriesFromCtlFSM returns every manifest entry (sealed and
-// active) for the given vault, read directly from the replicated vault-ctl
-// Raft FSM rather than from local VaultInstances. Every node participates as
-// a voter in every vault-ctl Raft group (gastrolog-292yi), so the FSM is
-// authoritative cluster-wide and visible on nodes that don't host any instance
-// instance for the vault — the case where ManifestReader().EntriesForVault
-// returns nil because o.vaults has no entry. Returns nil when there is no
-// GroupManager (single-node / memory mode) or when this node hasn't joined
-// the vault-ctl group yet.
-func (o *Orchestrator) VaultManifestEntriesFromCtlFSM(vaultID glid.GLID) []vaultctlfsm.ManifestEntry {
+// manifestEntryByChunk resolves the manifest entry and owning vault for a
+// chunk on the unified read core: every vault-ctl FSM this node participates
+// in first (any voter — no local instance required), then the local instances
+// (memory-mode projection). Open pipeline chunks live in the open-chunk
+// manifest, not the chunk map, so they do not resolve here; sealed-manifest
+// consumers don't want them and open-chunk consumers have
+// findPipelineOpenChunk.
+func (o *Orchestrator) manifestEntryByChunk(id chunk.ChunkID) (glid.GLID, vaultctlfsm.ManifestEntry, bool) {
+	for vid, f := range o.vaultCtlFSMs() {
+		if e := f.Get(id); e != nil {
+			return vid, *e, true
+		}
+	}
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	for vid, v := range o.vaults {
+		if v.Instance == nil {
+			continue
+		}
+		if e, ok := vaultManifestEntry(v.Instance, id); ok {
+			return vid, e, true
+		}
+	}
+	return glid.Nil, vaultctlfsm.ManifestEntry{}, false
+}
+
+// vaultCtlFSMs returns every vault-ctl chunk FSM this node participates in,
+// keyed by vault ID. With symmetric seeding (gastrolog-292yi) that is every
+// vault in the cluster, whether or not this node hosts an instance for it.
+// Nil when there is no GroupManager (single-node / memory mode).
+func (o *Orchestrator) vaultCtlFSMs() map[glid.GLID]*vaultctlfsm.FSM {
 	if o.groupMgr == nil {
 		return nil
 	}
-	g := o.groupMgr.GetGroup(raftgroup.VaultControlPlaneGroupID(vaultID))
-	if g == nil {
-		return nil
-	}
-	vfsm, ok := g.FSM.(*vaultraft.FSM)
-	if !ok || vfsm == nil {
-		return nil
-	}
-	var out []vaultctlfsm.ManifestEntry
-	for _, t := range vfsm.Vaults() {
-		out = append(out, t.ListIncludingPipelineManifest()...)
+	var out map[glid.GLID]*vaultctlfsm.FSM
+	for _, gid := range o.groupMgr.Groups() {
+		if !raftgroup.IsVaultControlPlaneGroupID(gid) {
+			continue
+		}
+		g := o.groupMgr.GetGroup(gid)
+		if g == nil {
+			continue
+		}
+		vfsm, ok := g.FSM.(*vaultraft.FSM)
+		if !ok || vfsm == nil {
+			continue
+		}
+		for vid, f := range vfsm.Vaults() {
+			if out == nil {
+				out = make(map[glid.GLID]*vaultctlfsm.FSM)
+			}
+			out[vid] = f
+		}
 	}
 	return out
 }
@@ -185,20 +251,23 @@ func vaultManifestEntries(t *VaultInstance) []vaultctlfsm.ManifestEntry {
 }
 
 // IndexReader returns a manifest.IndexReader that resolves IngestTS rank /
-// position lookups against this orchestrator's locally-hosted vaults. Phase 1
-// implementation delegates to the existing layered fallback
-// (chunk.ChunkManager.FindIngestEntryIndex → index.IndexManager.FindIngestEntryIndex).
-// A future pass will collapse those two file-access paths onto a single
-// FSM-grounded GLCB section reader; the interface boundary is in place
-// either way so callers (notably the histogram) don't have to know.
+// position lookups on the unified manifest read core (gastrolog-nlepn):
+// vault ownership comes from the replicated vault-ctl FSM (any voter), and
+// the lookup is served from whatever ITSI bytes are locally materialized —
+// the owning instance's chunk manager (active chunk B+ tree, cloud-backed
+// cached index), its index manager (sealed local sidecar), a pipeline open
+// chunk's built GLCB, or a sealed GLCB in the vault chunk root that no
+// manager serves (yet). No remote read is fabricated: when the bytes are
+// not local, the lookup reports unresolvable and callers fall back to the
+// FSM-based estimate (gastrolog-1952x).
 func (o *Orchestrator) IndexReader() manifest.IndexReader {
 	return &orchestratorIndexReader{o: o}
 }
 
-// orchestratorIndexReader implements manifest.IndexReader by walking the
-// orchestrator's local vault instances to find the chunk's owning instance,
-// then dispatching to that instance's chunk manager (and index manager) for
-// the actual rank/pos lookup.
+// orchestratorIndexReader implements manifest.IndexReader by resolving the
+// chunk's owning vault through the replicated manifest, then dispatching to
+// that vault's local managers (with byte-local GLCB fallbacks) for the
+// actual rank/pos lookup.
 type orchestratorIndexReader struct {
 	o *Orchestrator
 }
@@ -207,8 +276,11 @@ var _ manifest.IndexReader = (*orchestratorIndexReader)(nil)
 
 // FindIngestRank returns the rank of the first IngestTS-sorted entry with
 // TS >= ts. Tries the chunk manager (active chunk B+ tree, cloud-backed chunk
-// cached index) first; falls back to the index manager (sealed local
-// chunk sidecar). Returns (0, false) when neither serves the lookup.
+// cached index) first, then the index manager (sealed local chunk sidecar),
+// then a locally built pipeline GLCB, then a sealed GLCB in the vault chunk
+// root, then the byte-free FSM-metadata boundary answer (sealed monotonic
+// chunks, ts strictly before IngestStart → rank 0). Returns (0, false) when
+// none of those serve the lookup.
 func (r *orchestratorIndexReader) FindIngestRank(chunkID chunk.ChunkID, ts time.Time) (uint64, bool) {
 	cm, im := r.lookupVaultManagers(chunkID)
 	if cm != nil {
@@ -222,6 +294,12 @@ func (r *orchestratorIndexReader) FindIngestRank(chunkID chunk.ChunkID, ts time.
 		}
 	}
 	if rank, ok := r.o.PipelineFindIngestRank(chunkID, ts); ok {
+		return rank, true
+	}
+	if rank, _, ok := r.o.chunkRootFindIngest(chunkID, ts); ok {
+		return rank, true
+	}
+	if rank, ok := r.o.manifestBoundaryIngestRank(chunkID, ts); ok {
 		return rank, true
 	}
 	return 0, false
@@ -241,14 +319,44 @@ func (r *orchestratorIndexReader) FindIngestPos(chunkID chunk.ChunkID, ts time.T
 			return pos, true
 		}
 	}
+	if _, pos, ok := r.o.chunkRootFindIngest(chunkID, ts); ok {
+		return pos, true
+	}
+	// rank == pos on monotonic chunks, so the metadata boundary answer
+	// serves position lookups too.
+	if pos, ok := r.o.manifestBoundaryIngestRank(chunkID, ts); ok {
+		return pos, true
+	}
 	return 0, false
 }
 
-// lookupVaultManagers walks the orchestrator's local vault instances to
-// find the (chunk, index) manager pair owning the given chunk. Returns
-// (nil, nil) when the chunk isn't local — a signal that the histogram
-// caller should fall back to FSM-based proportional distribution.
+// lookupVaultManagers resolves the (chunk, index) manager pair for the vault
+// owning the given chunk. Ownership comes from the replicated manifest first
+// (manifestEntryByChunk — resolvable on every voter, and correct even when
+// the local chunk manager hasn't registered the chunk yet); open chunks and
+// manifest misses fall back to probing local instances for the chunk.
+// Returns (nil, nil) when this node hosts no managers for the owning vault —
+// the caller then tries the byte-local GLCB fallbacks and finally reports
+// the lookup unresolvable (the histogram's cue to fall back to FSM-based
+// proportional distribution).
 func (r *orchestratorIndexReader) lookupVaultManagers(chunkID chunk.ChunkID) (chunk.ChunkManager, index.IndexManager) {
+	if vid, _, ok := r.o.manifestEntryByChunk(chunkID); ok {
+		r.o.mu.RLock()
+		v := r.o.vaults[vid]
+		var cm chunk.ChunkManager
+		var im index.IndexManager
+		if v != nil && v.Instance != nil {
+			cm, im = v.Instance.Chunks, v.Instance.Indexes
+		}
+		r.o.mu.RUnlock()
+		if cm != nil || im != nil {
+			return cm, im
+		}
+		// The manifest knows the chunk but this node hosts no instance
+		// for its vault. Fall through to the local probe — bytes can
+		// still be locally materialized under another instance while a
+		// retention transfer is in flight.
+	}
 	r.o.mu.RLock()
 	defer r.o.mu.RUnlock()
 	for _, v := range r.o.vaults {
@@ -261,6 +369,52 @@ func (r *orchestratorIndexReader) lookupVaultManagers(chunkID chunk.ChunkID) (ch
 		}
 	}
 	return nil, nil
+}
+
+// manifestBoundaryIngestRank answers rank (and, on monotonic chunks,
+// position) lookups that need no ITSI bytes at all, from the FSM-replicated
+// index metadata (gastrolog-enfwd). On a sealed monotonic chunk the first
+// appended record carries the minimum IngestTS (IngestStart), so a timestamp
+// strictly before IngestStart resolves to rank 0 — exactly the answer the
+// chunk's own ITSI section would give — on ANY voter, bytes or not.
+// Timestamps at or after IngestStart need bytes and stay unresolvable here
+// (per-timestamp resolvability; consumers fall back to the FSM estimate,
+// gastrolog-1952x). Timestamps past IngestEnd already report unresolvable in
+// the byte tiers, matching the ITSI "past all entries" answer. Non-monotonic
+// chunks get no boundary answer: IngestStart is only the first APPENDED
+// record's timestamp there, not the minimum.
+func (o *Orchestrator) manifestBoundaryIngestRank(chunkID chunk.ChunkID, ts time.Time) (uint64, bool) {
+	_, e, ok := o.manifestEntryByChunk(chunkID)
+	if !ok || !e.IsSealed() || !e.IngestTSMonotonic || e.RecordCount <= 0 {
+		return 0, false
+	}
+	if e.IngestStart.IsZero() || !ts.Before(e.IngestStart) {
+		return 0, false
+	}
+	return 0, true
+}
+
+// chunkRootFindIngest serves an IngestTS index lookup straight from a locally
+// materialized GLCB's ITSI section, addressed via the replicated manifest —
+// no chunk or index manager involvement. Covers sealed pipeline chunks whose
+// GLCB exists in this node's vault chunk root but is not (or not yet)
+// registered with a manager. Nodes without local bytes report false; remote
+// reads are never fabricated (the FSM-estimate residual is gastrolog-1952x).
+func (o *Orchestrator) chunkRootFindIngest(chunkID chunk.ChunkID, ts time.Time) (rank, pos uint64, ok bool) {
+	vid, e, found := o.manifestEntryByChunk(chunkID)
+	if !found || !e.IsSealed() {
+		return 0, 0, false
+	}
+	var hit bool
+	err := o.withPipelineChunkIngestIndex(vid, chunkID, func(mv filetsidx.MmapView) error {
+		r, p, found := mv.SearchTS(ts.UnixNano())
+		rank, pos, hit = uint64(r), uint64(p), found
+		return nil
+	})
+	if err != nil || !hit {
+		return 0, 0, false
+	}
+	return rank, pos, true
 }
 
 // chunkMetaToManifestEntry projects a chunk.ChunkMeta into the FSM-shaped

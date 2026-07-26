@@ -40,12 +40,14 @@ func TestVaultReplicationReadinessErr_fsmNotReady(t *testing.T) {
 		t.Fatal(err)
 	}
 	vaultInst := &VaultInstance{
-		VaultID:    glid.New(),
-		Type:       "memory",
-		Chunks:     s.CM,
-		Indexes:    s.IM,
-		Query:      s.QE,
-		IsFSMReady: func() bool { return false },
+		VaultID: glid.New(),
+		Type:    "memory",
+		Chunks:  s.CM,
+		Indexes: s.IM,
+		Query:   s.QE,
+		ManifestReadFacet: ManifestReadFacet{
+			IsFSMReady: func() bool { return false },
+		},
 	}
 	v := NewVault(vid, vaultInst)
 	if err := vaultReplicationReadinessErr(vid, v); !errors.Is(err, ErrVaultNotReady) {
@@ -61,12 +63,14 @@ func TestVaultReplicationReadinessErr_ready(t *testing.T) {
 		t.Fatal(err)
 	}
 	vaultInst := &VaultInstance{
-		VaultID:    glid.New(),
-		Type:       "memory",
-		Chunks:     s.CM,
-		Indexes:    s.IM,
-		Query:      s.QE,
-		IsFSMReady: func() bool { return true },
+		VaultID: glid.New(),
+		Type:    "memory",
+		Chunks:  s.CM,
+		Indexes: s.IM,
+		Query:   s.QE,
+		ManifestReadFacet: ManifestReadFacet{
+			IsFSMReady: func() bool { return true },
+		},
 	}
 	v := NewVault(vid, vaultInst)
 	if err := vaultReplicationReadinessErr(vid, v); err != nil {
@@ -86,12 +90,14 @@ func TestListAllChunkMetas_vaultNotReady(t *testing.T) {
 		t.Fatal(err)
 	}
 	vaultInst := &VaultInstance{
-		VaultID:    glid.New(),
-		Type:       "memory",
-		Chunks:     s.CM,
-		Indexes:    s.IM,
-		Query:      s.QE,
-		IsFSMReady: func() bool { return false },
+		VaultID: glid.New(),
+		Type:    "memory",
+		Chunks:  s.CM,
+		Indexes: s.IM,
+		Query:   s.QE,
+		ManifestReadFacet: ManifestReadFacet{
+			IsFSMReady: func() bool { return false },
+		},
 	}
 	o.RegisterVault(NewVault(vid, vaultInst))
 	_, err = o.ListAllChunkMetas(vid)
@@ -135,12 +141,14 @@ func TestSearch_ErrVaultNotReady(t *testing.T) {
 		t.Fatal(err)
 	}
 	vaultInst := &VaultInstance{
-		VaultID:    glid.New(),
-		Type:       "memory",
-		Chunks:     s.CM,
-		Indexes:    s.IM,
-		Query:      s.QE,
-		IsFSMReady: func() bool { return false },
+		VaultID: glid.New(),
+		Type:    "memory",
+		Chunks:  s.CM,
+		Indexes: s.IM,
+		Query:   s.QE,
+		ManifestReadFacet: ManifestReadFacet{
+			IsFSMReady: func() bool { return false },
+		},
 	}
 	o.RegisterVault(NewVault(vid, vaultInst))
 	_, _, err = o.Search(context.Background(), vid, query.Query{}, nil)
@@ -162,12 +170,14 @@ func TestAppendToVault_ErrVaultNotReady(t *testing.T) {
 		t.Fatal(err)
 	}
 	vaultInst := &VaultInstance{
-		VaultID:    vaultID,
-		Type:       "memory",
-		Chunks:     s.CM,
-		Indexes:    s.IM,
-		Query:      s.QE,
-		IsFSMReady: func() bool { return false },
+		VaultID: vaultID,
+		Type:    "memory",
+		Chunks:  s.CM,
+		Indexes: s.IM,
+		Query:   s.QE,
+		ManifestReadFacet: ManifestReadFacet{
+			IsFSMReady: func() bool { return false },
+		},
 	}
 	o.RegisterVault(NewVault(vid, vaultInst))
 	err = o.AppendToVault(vid, chunk.ChunkID{}, chunk.Record{Raw: []byte("x")})
@@ -199,12 +209,14 @@ func TestLocalVaultsReplicationReady(t *testing.T) {
 		t.Fatal(err)
 	}
 	vaultInst := &VaultInstance{
-		VaultID:    glid.New(),
-		Type:       "memory",
-		Chunks:     s.CM,
-		Indexes:    s.IM,
-		Query:      s.QE,
-		IsFSMReady: func() bool { return false },
+		VaultID: glid.New(),
+		Type:    "memory",
+		Chunks:  s.CM,
+		Indexes: s.IM,
+		Query:   s.QE,
+		ManifestReadFacet: ManifestReadFacet{
+			IsFSMReady: func() bool { return false },
+		},
 	}
 	o.RegisterVault(NewVault(vid, vaultInst))
 	if o.liveReplicationReady() {
@@ -297,12 +309,14 @@ func TestSearchReadyRegistry_skipsNotReadyVault(t *testing.T) {
 		t.Fatal(err)
 	}
 	o.RegisterVault(NewVault(readyID, &VaultInstance{
-		VaultID:    glid.New(),
-		Type:       "memory",
-		Chunks:     sReady.CM,
-		Indexes:    sReady.IM,
-		Query:      sReady.QE,
-		IsFSMReady: func() bool { return true },
+		VaultID: glid.New(),
+		Type:    "memory",
+		Chunks:  sReady.CM,
+		Indexes: sReady.IM,
+		Query:   sReady.QE,
+		ManifestReadFacet: ManifestReadFacet{
+			IsFSMReady: func() bool { return true },
+		},
 	}))
 	notReadyID := glid.New()
 	sNR, err := memtest.NewVault(chunkmem.Config{})
@@ -310,12 +324,14 @@ func TestSearchReadyRegistry_skipsNotReadyVault(t *testing.T) {
 		t.Fatal(err)
 	}
 	o.RegisterVault(NewVault(notReadyID, &VaultInstance{
-		VaultID:    glid.New(),
-		Type:       "memory",
-		Chunks:     sNR.CM,
-		Indexes:    sNR.IM,
-		Query:      sNR.QE,
-		IsFSMReady: func() bool { return false },
+		VaultID: glid.New(),
+		Type:    "memory",
+		Chunks:  sNR.CM,
+		Indexes: sNR.IM,
+		Query:   sNR.QE,
+		ManifestReadFacet: ManifestReadFacet{
+			IsFSMReady: func() bool { return false },
+		},
 	}))
 	reg := &searchReadyRegistry{o: o}
 	ids := reg.ListVaults()

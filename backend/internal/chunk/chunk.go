@@ -265,15 +265,11 @@ type ChunkBudgetMonitor interface {
 	BudgetExceeded() int64 // bytes over budget, 0 = within budget or no budget
 }
 
-// ChunkCacheEvictor extends ChunkManager with cache eviction. The orchestrator
-// calls EvictCache periodically to enforce size/TTL limits on the warm cache.
-type ChunkCacheEvictor interface {
-	EvictCache()
-}
-
 // CloudBackedChunkInfo carries the metadata needed to register a cloud-backed chunk
-// on a follower without streaming any records. All fields come from the vault
-// Raft FSM entry (populated by AnnounceSeal + AnnounceUpload on the leader).
+// on a node without streaming any records. All fields come from the vault-ctl
+// FSM manifest entry (populated by AnnounceSeal + AnnounceUpload on the leader);
+// the lazy cloud-backed resolver hands it to the chunk manager on a lookup miss
+// (gastrolog-5bnxc).
 type CloudBackedChunkInfo struct {
 	WriteStart  time.Time
 	WriteEnd    time.Time
@@ -285,10 +281,10 @@ type CloudBackedChunkInfo struct {
 	Bytes       int64
 	// CloudBytes is the compressed cloud object size — the only size fact
 	// the FSM actually carries for an uploaded chunk (AnnounceUpload's
-	// param). There is deliberately no DiskBytes here: a follower
-	// registering from metadata alone has no local copy yet, so its local
-	// warm-cache footprint starts at 0 regardless of what the leader's
-	// blob is sized at — see RegisterCloudBackedChunk. gastrolog-33ul6h.
+	// param). There is deliberately no DiskBytes here: a node registering
+	// from metadata alone has no local copy yet, so its local warm-cache
+	// footprint starts at 0 regardless of what the leader's blob is sized
+	// at. gastrolog-33ul6h.
 	CloudBytes      int64
 	IngestIdxOffset int64
 	IngestIdxSize   int64
@@ -296,14 +292,6 @@ type CloudBackedChunkInfo struct {
 	SourceIdxSize   int64
 
 	IngestTSMonotonic bool // see ChunkMeta.IngestTSMonotonic
-}
-
-// CloudBackedChunkRegistrar extends ChunkManager with the ability to register a
-// cloud-backed chunk from metadata alone — no local files, no record streaming.
-// Used by follower nodes to adopt chunks from the shared S3 bucket after the
-// vault FSM propagates the leader's AnnounceUpload.
-type CloudBackedChunkRegistrar interface {
-	RegisterCloudBackedChunk(id ChunkID, info CloudBackedChunkInfo) error
 }
 
 // ExternalGLCBInfo carries the metadata needed to register a sealed chunk
@@ -353,6 +341,18 @@ type RecordCursor interface {
 type RecordFanOutSource interface {
 	RecordCount() uint64
 	ReadFanOutRecord(pos uint32) (Record, error)
+}
+
+// AttrsProjectionSource projects a record to just (writeTS, attrs) by
+// position, decoding the record frame's fixed header and attr dict IDs while
+// skipping the raw payload entirely. Histogram level-breakdown sampling never
+// inspects message bodies, so the raw payload is dead weight: the full record
+// decode clones it off the mapping per record (cloneMmapRecord), an allocation
+// the projection avoids. Callers that need bodies use RecordFanOutSource /
+// RecordCursor instead.
+type AttrsProjectionSource interface {
+	RecordCount() uint64
+	ProjectAttrs(pos uint32) (writeTS time.Time, attrs Attributes, err error)
 }
 
 // SequentialPrewarmer is implemented by cursors whose backing store benefits

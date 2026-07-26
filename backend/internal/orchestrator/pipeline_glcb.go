@@ -40,7 +40,10 @@ type externalGLCBResolverSetter interface {
 // call into the manager — ABBA). Its lock footprint is exactly:
 // groupMgr/FSM internal locks (via vaultCtlHandle, which is o.mu-free;
 // FSM apply effects fire outside FSM locks, so no path holds those locks
-// while entering the manager) plus one os.Stat.
+// while entering the manager) plus a one-time on-disk GLCB read
+// (externalGLCBInfoForPipeline): pure os.* file I/O that acquires no shared
+// lock, so no inversion with m.mu. The manager memoizes the resolved info
+// into m.metas, so the read happens ONCE per chunk on the first miss.
 //
 // Caller holds o.mu (the pipeline reload path).
 func (o *Orchestrator) installLazyGLCBResolver(vaultID glid.GLID, enabled bool, fsm *vaultctlfsm.FSM, chunkRoot string) {
@@ -83,15 +86,22 @@ func (o *Orchestrator) installLazyGLCBResolverOn(inst *VaultInstance, vaultID gl
 			return "", chunk.ExternalGLCBInfo{}, false
 		}
 		glcbPath := chunking.ChunkGLCBPath(chunkRoot, id)
-		if _, err := os.Stat(glcbPath); err != nil {
+		// File-enriched info: the memoized registration must be COMPLETE at
+		// first resolution — there is no eager re-registration pass to upgrade
+		// it afterward (registerPipelineGLCB is retired, gastrolog-34kmv). For a
+		// Sealed entry the FSM already carries index offsets and bounds, so the
+		// overlay only opens+stats the file and returns immediately (cheap). For
+		// a Sealing entry — built on disk but before CmdSealChunk committed its
+		// TS index offsets — the overlay reads them (and any missing bounds/
+		// counts) from the on-disk blob's TOC, so a query landing in that window
+		// still memoizes a servable, index-complete meta. A missing/unreadable
+		// file means the bytes are not on this node: fall through to other
+		// holders (same signal the previous os.Stat guard used).
+		info, err := externalGLCBInfoForPipeline(*e, glcbPath)
+		if err != nil {
 			return "", chunk.ExternalGLCBInfo{}, false
 		}
-		// Metadata comes from the FSM entry alone — no blob header read
-		// under the manager lock. Index offsets and bounds were committed
-		// by CmdSealChunk; Sealing entries resolve with what the manifest
-		// has (the register sweep's file overlay remains the enrichment
-		// path for those).
-		return glcbPath, externalGLCBInfoFromFSM(*e), true
+		return glcbPath, info, true
 	})
 	// Enumeration companion to the resolver: the sealed chunk IDs of this
 	// vault's committed manifest. List() calls the resolver on each ID it

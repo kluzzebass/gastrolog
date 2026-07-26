@@ -186,9 +186,13 @@ type VaultSpec struct {
 	// a route-disposition runner vetoes: those records must be routed, never
 	// dropped). See chunking.VaultConfig.RetentionGiveUpTTL.
 	ChunkRetentionGiveUpTTL func() (time.Duration, bool)
-	// ChunkRequiredHolders returns placement member node IDs that must hold each
-	// segment before the leader proposes ReleaseSegments. Optional.
-	ChunkRequiredHolders func() []string
+	// ChunkRequiredHolders returns placement member node IDs that must hold
+	// each segment before the leader proposes ReleaseSegments or a home purges
+	// its head/ copy, plus whether the placement lookup resolved (false fails
+	// the release/purge gates closed). Required whenever Locate is set —
+	// chunking registration rejects nil; chunking.NoRequiredHolders is the
+	// explicit no-holder-gate opt-out for single-node tests.
+	ChunkRequiredHolders func() ([]string, bool)
 }
 
 type vaultRoles struct {

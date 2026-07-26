@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"fmt"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline/ingestion"
 	"slices"
 
 	"gastrolog/internal/chunk"
@@ -16,16 +17,17 @@ func (o *Orchestrator) RegisterVault(vault *Vault) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.vaults[vault.ID] = vault
+	o.signalVaultReadyChange()
 }
 
 // RegisterIngester adds an ingester to the registry. When the orchestrator is
 // already running the ingester is reconciled into the pipeline immediately;
 // otherwise it starts when Start runs.
-func (o *Orchestrator) RegisterIngester(id glid.GLID, name, ingType string, r Ingester) {
+func (o *Orchestrator) RegisterIngester(id glid.GLID, name, ingType string, r ingestion.Ingester) {
 	o.registerIngester(id, name, ingType, false, r)
 }
 
-func (o *Orchestrator) registerIngester(id glid.GLID, name, ingType string, passive bool, r Ingester) {
+func (o *Orchestrator) registerIngester(id glid.GLID, name, ingType string, passive bool, r ingestion.Ingester) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.setIngesterLocked(id, ingesterInfo{Name: name, Type: ingType, Passive: passive}, r)
@@ -83,7 +85,7 @@ func (o *Orchestrator) TriggerIngester(id glid.GLID) error {
 	if !ok {
 		return fmt.Errorf("ingester not found: %s", id)
 	}
-	trig, ok := ing.(Triggerable)
+	trig, ok := ing.(ingestion.Triggerable)
 	if !ok {
 		return fmt.Errorf("ingester %s does not support triggering", id)
 	}

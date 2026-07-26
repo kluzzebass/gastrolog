@@ -95,25 +95,37 @@ type Reader interface {
 	EntriesForVault(vaultID glid.GLID) []vaultctlfsm.ManifestEntry
 }
 
-// IndexReader is the FSM-grounded read path for the IngestTS rank index
-// stored inside each sealed chunk's GLCB blob. Separate from Reader
-// (metadata-only) because index lookup involves file I/O — keeping the
-// interfaces narrow lets test mocks for metadata stay simple. Composes
-// with Reader: typical implementations look up an Entry via Reader, then
-// use Entry.IngestIdxOffset/Size to read the section from a chunk-local
-// byte stream.
+// IndexReader is the read path for the IngestTS rank index stored inside
+// each sealed chunk's GLCB blob. Separate from Reader (metadata-only)
+// because index lookup involves file I/O — keeping the interfaces narrow
+// lets test mocks for metadata stay simple.
+//
+// Section-offset authority (decided under gastrolog-jt0l4): for LOCAL
+// reads, the blob's own embedded TOC is authoritative — implementations
+// read sections via the mmap'd GLCB TOC, not via Entry.IngestIdxOffset/
+// Size. The FSM-replicated offsets are a replication/verification copy
+// (snapshot restore, digest checks), not the local read path; there is
+// exactly one authoritative source per access mode, never two synced
+// copies (see CLAUDE.md "Single Source of Truth"). Whether rank/pos reads
+// later collapse onto one FSM-grounded section reader is owned by the
+// GLCB codec abstraction (gastrolog-4jxqz) and will be decided with that
+// interface, not here.
 //
 // The histogram and other rank-arithmetic consumers route through this
 // instead of reaching into chunk.Manager.FindIngestEntryIndex /
-// index.Manager.FindIngestEntryIndex directly. The implementation is
-// responsible for dispatching to the right vault's chunk Manager and
-// using FSM-derived offsets — never trusting projected meta when the
-// FSM has the authoritative offsets.
+// index.Manager.FindIngestEntryIndex directly; the implementation is
+// responsible for dispatching to the right vault's chunk manager.
 type IndexReader interface {
 	// FindIngestRank returns the rank of the first IngestTS-sorted entry
-	// with TS >= ts in the given chunk's IngestTS index. ok=false when the
-	// chunk's index isn't locally resolvable (uncached cloud-backed chunk, missing
-	// GLCB, or FSM unaware of chunk).
+	// with TS >= ts in the given chunk's IngestTS index. ok=false when THIS
+	// lookup isn't locally resolvable (uncached cloud-backed chunk, missing
+	// GLCB, or FSM unaware of chunk). Resolvability is per timestamp, not
+	// per chunk: implementations may answer boundary timestamps exactly
+	// from FSM-replicated index metadata (rank 0 strictly before a sealed
+	// monotonic chunk's IngestStart) while interior timestamps of the same
+	// chunk stay unresolvable without local ITSI bytes. Consumers doing
+	// rank arithmetic must check ok on every lookup and fall back (FSM
+	// proportional distribution) on the first miss.
 	FindIngestRank(chunkID chunk.ChunkID, ts time.Time) (rank uint64, ok bool)
 
 	// FindIngestPos returns the physical record position (in append order)

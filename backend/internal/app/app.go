@@ -57,6 +57,7 @@ import (
 	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/pipeline/digestion"
+	"gastrolog/internal/pipeline/ingestion"
 	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/raftwal"
 	"gastrolog/internal/schedwatch"
@@ -260,7 +261,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 
 	configSignal := notify.NewSignal()
 	statsSignal := notify.NewSignal()
-	disp := &configDispatcher{localNodeID: nodeID, logger: compDispatch.Apply(logger), clusterTLS: clusterTLS, tlsFilePath: hd.ClusterTLSPath(), configSignal: configSignal}
+	disp := &configDispatcher{localNodeID: nodeID, logger: compDispatch.Apply(logger), clusterTLS: clusterTLS, tlsFilePath: hd.ClusterTLSPath(), configSignal: configSignal, alerts: alertCollector}
 	rawStore, err := openConfigStore(cfg.ConfigType, raftStoreOpts{
 		Home: hd, NodeID: nodeID, JoinAddr: cfg.JoinAddr,
 		ClusterSrv: clusterSrv, ClusterTLS: clusterTLS,
@@ -524,11 +525,11 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 			}
 		}
 
-		// Periodic placement-reconcile fallback (gastrolog-1ia46). The
-		// event-driven reconciles (leadership change, manual Trigger
-		// from RPC handlers) stay in pm.Run above; this scheduled
-		// job pokes pm.Trigger() as the periodic safety net so the
-		// fallback cadence is visible in the inspector.
+		// Periodic placement reconcile (gastrolog-1ia46, gastrolog-29xpy).
+		// Config-input changes reconcile event-driven from the dispatcher;
+		// this scheduled job pokes pm.Trigger() to re-evaluate peer-heartbeat
+		// liveness, the one placement input with no FSM event (TTL-based).
+		// Scheduler-registered so the cadence is visible in the inspector.
 		register("vault-placement-reconcile", startPlacementReconcile(ctx, orch.Scheduler(), pm))
 
 		// Heartbeat-driven node-state sweep (gastrolog-39m2k). Flips
@@ -541,25 +542,39 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		sweep := newUnreachableSweep(cfgStore, clusterSrv, peerState, nodeID, alertCollector, compPlacement.Apply(logger))
 		register("unreachable-sweep", startUnreachableSweep(ctx, orch.Scheduler(), sweep))
 
-		// Cluster-ctl learner promoter (gastrolog-2czh9). Watches for
-		// Nonvoter / Staging members and promotes them to voters once
-		// their broadcast RaftAppliedIndex has matched the leader's
-		// for a stability window. Companion to the JoinCluster-as-
-		// learner change (gastrolog-41sut) and the per-vault-ctl
-		// promoter below. Registered with the orchestrator job
-		// scheduler (gastrolog-5npek) so it appears in the inspector.
-		learnerPromoter := newClusterCtlLearnerPromoter(clusterSrv, peerState, compCluster.Apply(logger))
-		register("cluster-ctl-learner-promoter", startClusterCtlLearnerPromoter(ctx, orch.Scheduler(), learnerPromoter))
+		// Cluster-ctl learner promoter — event-driven (gastrolog-4vg17,
+		// retiring the 30s cron). Fresh nodes join as Nonvoter / Staging
+		// learners (gastrolog-41sut) and are promoted to Voter once their
+		// broadcast RaftAppliedIndex reaches the leader's applied index —
+		// protecting the quorum-loss window where a fresh joiner counts as
+		// a voter but cannot yet vote because its WAL is still catching up.
+		//
+		// The only channel by which the leader learns a learner's applied
+		// index is that learner's NodeStats broadcast (hashicorp/raft
+		// exposes no per-peer match index), so evaluation is driven by
+		// broadcast arrival — the "learner made progress" event — plus a
+		// leadership-gain observation for a node inheriting caught-up
+		// learners from a previous epoch. Leader-only inside evaluate().
+		ccPromoter := newClusterCtlLearnerPromoter(clusterSrv, peerState, compCluster.Apply(logger))
+		go ccPromoter.Run(ctx)
+		clusterSrv.Subscribe(ccPromoter.onBroadcast)
+		observeLearnerLeadershipGain(ctx, clusterSrv, ccPromoter)
 
-		// Per-vault-ctl learner promoter (gastrolog-gcbx7). Same
-		// shape as the cluster-ctl promoter but iterates every vault
-		// on each tick; only acts on groups this node leads. Catchup
-		// signal comes from VaultStats.RaftAppliedIndex in the
-		// existing NodeStats broadcast. Registered with the
-		// orchestrator job scheduler (gastrolog-4icsr).
+		// Per-vault-ctl learner promoter — same engine, one promotionGroup
+		// per vault this node hosts; evaluate()'s per-group isLeader() gate
+		// restricts action to groups this node currently leads. New
+		// members enter vault-ctl groups as Nonvoter learners via the
+		// vault-ctl leader manager's membership reconcile, which leaves
+		// promotion to this promoter. Driven by the same broadcast fabric
+		// (a single O(1) subscription covers every vault group — no
+		// per-group timer) plus the per-vault leadership-gain hook so a
+		// placement-driven leader transfer evaluates the new leader's
+		// learners immediately. (gastrolog-4vg17)
 		if groupMgr != nil {
-			vaultLearnerPromoter := newVaultCtlLearnerPromoter(cfgStore, groupMgr, peerState, nodeID, compCluster.Apply(logger))
-			register("vault-ctl-learner-promoter", startVaultCtlLearnerPromoter(ctx, orch.Scheduler(), vaultLearnerPromoter))
+			vcPromoter := newVaultCtlLearnerPromoter(ctx, cfgStore, groupMgr, peerState, compCluster.Apply(logger))
+			go vcPromoter.Run(ctx)
+			clusterSrv.Subscribe(vcPromoter.onBroadcast)
+			orch.AddOnVaultCtlLeadGained(func(glid.GLID) { vcPromoter.trigger() })
 		}
 	}
 
@@ -720,6 +735,7 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 	clusterSrv.SetSearchExecutor(newSearchExecutor(orch))
 	clusterSrv.SetContextExecutor(newContextExecutor(orch))
 	clusterSrv.SetListChunksExecutor(newListChunksExecutor(orch))
+	clusterSrv.SetWaitVaultReadyExecutor(orch.WaitVaultReady)
 	clusterSrv.SetPipelineBacklogDiskExecutor(newPipelineBacklogDiskExecutor(orch))
 	clusterSrv.SetGetIndexesExecutor(newGetIndexesExecutor(orch))
 	clusterSrv.SetValidateVaultExecutor(newValidateVaultExecutor(orch))
@@ -727,9 +743,6 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 	clusterSrv.SetAnalyzeChunkExecutor(newAnalyzeChunkExecutor(orch))
 	clusterSrv.SetChunkEventSubscriber(newChunkEventSubscriber(orch))
 	clusterSrv.SetSealVaultExecutor(newSealVaultExecutor(orch))
-	clusterSrv.SetDeleteChunkExecutor(func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID) error {
-		return orch.DeleteChunk(vaultID, chunkID)
-	})
 	clusterSrv.SetReindexVaultExecutor(newReindexVaultExecutor(orch))
 	clusterSrv.SetExplainExecutor(newExplainExecutor(orch, nodeID))
 	clusterSrv.SetFollowExecutor(newFollowExecutor(orch))
@@ -1251,12 +1264,32 @@ func ensureNodeConfigAsync(ctx context.Context, cfgStore system.Store, nodeID, c
 	if err := waitForQuorum(ctx, cfgStore, logger); err != nil {
 		return
 	}
-	nodeName, err := ensureNodeConfig(ctx, cfgStore, nodeID, preferredName)
-	if err != nil {
-		logger.Warn("ensure node config failed (will retry on next start)", "error", err)
-		return
+	// Registration failures right after quorum are usually transient: a
+	// freshly-joined node may observe the leader before its raft log has
+	// backfilled (gastrolog-1rw6df), and the first forward can race that
+	// window. Retry with backoff instead of giving up until the next
+	// restart — self-registration is what makes the node visible to
+	// operators, so a one-shot here turns a 50ms race into a permanently
+	// missing registry entry.
+	backoff := 250 * time.Millisecond
+	const maxBackoff = 10 * time.Second
+	for {
+		nodeName, err := ensureNodeConfig(ctx, cfgStore, nodeID, preferredName)
+		if err == nil {
+			persistNodeName(logger, configType, hd, nodeName)
+			return
+		}
+		logger.Warn("ensure node config failed; retrying",
+			"error", err, "backoff", backoff)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
+		if backoff *= 2; backoff > maxBackoff {
+			backoff = maxBackoff
+		}
 	}
-	persistNodeName(logger, configType, hd, nodeName)
 }
 
 func persistNodeName(logger *slog.Logger, configType string, hd home.Dir, nodeName string) {
@@ -1594,13 +1627,13 @@ func setupMultiRaft(clusterSrv *cluster.Server, rawStore system.Store, nodeID, h
 }
 
 func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore system.Store, orch *orchestrator.Orchestrator, certMgr *cert.Manager, slogCh <-chan logging.CapturedRecord, slogCapture *logging.CaptureHandler, groupMgr *raftgroup.GroupManager, nodeAddrResolver func(string) (string, bool), nodeID string) orchestrator.Factories {
-	reg := func(factory orchestrator.IngesterFactory, defaults func() map[string]string, tester orchestrator.ConnectionTester) orchestrator.IngesterRegistration {
+	reg := func(factory ingestion.IngesterFactory, defaults func() map[string]string, tester orchestrator.ConnectionTester) orchestrator.IngesterRegistration {
 		return orchestrator.IngesterRegistration{Factory: factory, Defaults: defaults, Tester: tester}
 	}
-	regHA := func(factory orchestrator.IngesterFactory, defaults func() map[string]string, tester orchestrator.ConnectionTester) orchestrator.IngesterRegistration {
+	regHA := func(factory ingestion.IngesterFactory, defaults func() map[string]string, tester orchestrator.ConnectionTester) orchestrator.IngesterRegistration {
 		return orchestrator.IngesterRegistration{Factory: factory, Defaults: defaults, Tester: tester, SingletonSupported: true}
 	}
-	listen := func(factory orchestrator.IngesterFactory, defaults func() map[string]string, addrs func(map[string]string) []orchestrator.ListenAddr) orchestrator.IngesterRegistration {
+	listen := func(factory ingestion.IngesterFactory, defaults func() map[string]string, addrs func(map[string]string) []ingestion.ListenAddr) orchestrator.IngesterRegistration {
 		return orchestrator.IngesterRegistration{Factory: factory, Defaults: defaults, ListenAddrs: addrs}
 	}
 	// SingletonSupported table (see gastrolog-2kcw4):
@@ -1651,12 +1684,27 @@ func wireClusterRaftApplies(clusterSrv *cluster.Server, groupMgr *raftgroup.Grou
 	if clusterSrv == nil || groupMgr == nil {
 		return
 	}
-	fn := func(_ context.Context, groupID string, data []byte) error {
+	fn := func(_ context.Context, groupID string, data []byte) (uint64, error) {
 		g := groupMgr.GetGroup(groupID)
 		if g == nil {
-			return fmt.Errorf("raft group %s not found", groupID)
+			return 0, fmt.Errorf("raft group %s not found", groupID)
 		}
-		return g.Raft.Apply(data, cluster.ReplicationTimeout).Error()
+		future := g.Raft.Apply(data, cluster.ReplicationTimeout)
+		if err := future.Error(); err != nil {
+			return 0, err
+		}
+		// Surface the FSM's semantic result to the forwarding follower —
+		// the local apply path (VaultCtlChunkApplyForwarder.Apply) checks
+		// future.Response() the same way; forwarded applies must not
+		// silently swallow FSM errors. The index is returned either way:
+		// the entry is committed and the follower's barrier should still
+		// wait for it.
+		if resp := future.Response(); resp != nil {
+			if err, ok := resp.(error); ok && err != nil {
+				return future.Index(), err
+			}
+		}
+		return future.Index(), nil
 	}
 	clusterSrv.SetGroupApplyFn(fn)
 }

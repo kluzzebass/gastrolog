@@ -94,12 +94,6 @@ func TestCommandRoundTrip(t *testing.T) {
 		}
 	})
 
-	t.Run("delete", func(t *testing.T) {
-		if decodeCommand(t, MarshalDeleteChunk(id)).GetDeleteChunk() == nil {
-			t.Errorf("wrong case")
-		}
-	})
-
 	t.Run("retention_pending", func(t *testing.T) {
 		if decodeCommand(t, MarshalRetentionPending(id)).GetRetentionPending() == nil {
 			t.Errorf("wrong case")

@@ -115,7 +115,6 @@ type drainState struct {
 // higher-level catchup scheduling (see ScheduleCatchup).
 type ChunkReplicator interface {
 	ImportSealedChunk(ctx context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error
-	DeleteChunk(ctx context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID) error
 
 	// RequestReplicaCatchup is the follower→leader inverse of the other
 	// methods on this interface. Sent by a follower's lifecycle reconciler
@@ -183,7 +182,8 @@ type Orchestrator struct {
 	mu locktrack.RWMutex
 
 	// backfillLogThrottle spaces cloud-backfill failure logging per vault;
-	// the sweep retries failing chunks every few seconds indefinitely.
+	// a stuck chunk is retried on its exponential backoff schedule by the
+	// periodic cloud-health evaluation for as long as it keeps failing.
 	backfillLogThrottle logging.Throttle
 	// registerSkipLog spaces skipped-GLCB-registration warnings per vault.
 	registerSkipLog logging.Throttle
@@ -209,11 +209,23 @@ type Orchestrator struct {
 	// chunk that keeps failing, not to remember why forever.
 	backfillFailures map[chunk.ChunkID]*backfillFailureEntry
 
+	// cloudDegradedSeen remembers the last observed cloud-degraded state per
+	// vault this node uploads for, so the periodic cloud-health evaluation can
+	// fire a one-shot upload catch-up sweep on the edges that leave sealed-but-
+	// not-cloud-backed chunks undiscovered by the live onSeal effect: first
+	// observation as uploader (startup / placement gain), and degraded→healthy
+	// recovery (chunks sealed during a cloud outage never got a live upload).
+	// Guarded by backfillMu — the same lock as backfillFailures, since both are
+	// touched only from cloud-backfill code and never under o.mu. An entry is
+	// dropped when this node stops being the vault's uploader so a later
+	// re-gain is treated as a first observation again. See gastrolog-576bm.
+	cloudDegradedSeen map[glid.GLID]bool
+
 	// Vault registry. Each vault bundles Chunks, Indexes, and Query.
 	vaults map[glid.GLID]*Vault
 
 	// Ingester management.
-	ingesters        map[glid.GLID]Ingester
+	ingesters        map[glid.GLID]ingestion.Ingester
 	ingesterStats    map[glid.GLID]*IngesterStats     // per-ingester metrics
 	ingesterMeta     map[glid.GLID]ingesterInfo       // per-ingester name/type for logging
 	ingesterAdapters map[glid.GLID]ingestion.Ingester // stable pipeline adapters (no-flap reconcile identity)
@@ -382,6 +394,14 @@ type Orchestrator struct {
 	// any caller that hasn't been migrated still produces a wake-up tick
 	// during the transition.
 	chunkSignal *notify.Signal
+
+	// vaultReadySignal wakes goroutines blocked in WaitVaultReady whenever
+	// the vault registry changes (a vault is registered, gains/loses its
+	// local instance, or is removed). Replaces the source-side 100ms
+	// ForwardListChunks poll DrainVault used to detect that a target node
+	// had created the vault: the target now blocks on this broadcast and
+	// returns the instant registration completes. See gastrolog-3sdnn.
+	vaultReadySignal *notify.Signal
 
 	// chunkBus broadcasts typed ChunkChangeEvent values to subscribers.
 	// Replaces the chunkSignal-then-fan-out-refetch pattern: WatchChunks
@@ -812,7 +832,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		backfillLogThrottle:    logging.Throttle{Interval: 30 * time.Second},
 		retentionLeaderlessLog: logging.Throttle{Interval: 10 * time.Minute},
 		vaults:                 make(map[glid.GLID]*Vault),
-		ingesters:              make(map[glid.GLID]Ingester),
+		ingesters:              make(map[glid.GLID]ingestion.Ingester),
 		ingesterStats:          make(map[glid.GLID]*IngesterStats),
 		ingesterMeta:           make(map[glid.GLID]ingesterInfo),
 		ingesterAdapters:       make(map[glid.GLID]ingestion.Ingester),
@@ -826,6 +846,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		alerts:                 cfg.Alerts,
 		suspects:               newSuspectTracker(),
 		chunkSignal:            notify.NewSignal(),
+		vaultReadySignal:       notify.NewSignal(),
 		chunkBus:               notify.NewBus[ChunkChangeEvent](256),
 		progressTrigger:        newProgressNotifier(),
 		vaultCtlLeaders:        newVaultCtlLeaderManager(baseLogger),
@@ -893,7 +914,7 @@ func New(cfg Config) (*Orchestrator, error) {
 	// reconciler's onPruneNode handler will then propose
 	// CmdFinalizeDelete for any chunk whose ExpectedFrom became empty.
 	o.vaultCtlLeaders.SetOnMemberRemoved(o.proposePruneNodeForVault)
-	o.vaultCtlLeaders.SetOnLeadGained(o.onVaultCtlLeadGained)
+	o.vaultCtlLeaders.AddOnLeadGained(o.onVaultCtlLeadGained)
 
 	// Per-instance retention rate alerter (gastrolog-47qyw): the condition
 	// is >10 deletes/sec sustained over a 30s window. These constants ARE
@@ -945,10 +966,13 @@ func New(cfg Config) (*Orchestrator, error) {
 		return nil, fmt.Errorf("cache eviction sweep: %w", err)
 	}
 
-	// Vault-ctl membership reconcile safety net (gastrolog-11bla):
-	// wakes every active leader-epoch goroutine via desiredChanged
-	// every 30 s as a fallback for primary triggers (leadership
-	// gain, SetDesiredMembers) that may have missed firing.
+	// Vault-ctl membership reconcile residual (gastrolog-11bla,
+	// gastrolog-3oram): membership convergence is event-driven and the
+	// desiredChanged wake is captured before each pass so it is never lost.
+	// This 30 s re-drive is NOT a missed-signal fallback; it only retries a
+	// pass that bailed on a transient in-flight Raft-config error and supplies
+	// the confirming second observation for the damped leadership-transfer
+	// aligner in an otherwise-idle group.
 	if err := o.startVaultCtlMembershipReconcile(); err != nil {
 		return nil, fmt.Errorf("vault-ctl membership reconcile: %w", err)
 	}
@@ -986,6 +1010,19 @@ func (o *Orchestrator) Logger() *slog.Logger {
 // Scheduler returns the shared scheduler for job submission and listing.
 func (o *Orchestrator) Scheduler() *Scheduler {
 	return o.scheduler
+}
+
+// AddOnVaultCtlLeadGained registers an additional listener invoked at the
+// start of each vault-ctl leader epoch (after Barrier), for the vault whose
+// leadership was gained. Additive — does not displace the orchestrator's own
+// pipeline-chunking wake. The app layer uses it to trigger event-driven
+// learner promotion on the new leader (gastrolog-4vg17). No-op before the
+// vault-ctl leader manager exists.
+func (o *Orchestrator) AddOnVaultCtlLeadGained(fn func(glid.GLID)) {
+	if o.vaultCtlLeaders == nil {
+		return
+	}
+	o.vaultCtlLeaders.AddOnLeadGained(fn)
 }
 
 // GetIngesterStats returns the stats for a specific ingester.

@@ -82,7 +82,7 @@ func (e *Engine) runTimechart(ctx context.Context, q Query, tc *querylang.Timech
 		return nil, err
 	}
 
-	result := timechartToTable(groupField, start, bucketWidth, numBuckets, counts, groupCounts)
+	result := timechartToTable(groupField, start, bucketWidth, numBuckets, counts, groupCounts, acc.cloudFlags, acc.cloudCounts)
 	result.Truncated = truncated
 	return result, nil
 }
@@ -825,27 +825,52 @@ func timechartBinRecord(ts time.Time, attrs chunk.Attributes, start, end time.Ti
 	}
 }
 
+// TimechartCloudFlagColumn and TimechartCloudCountColumn are sentinel
+// columns appended to every timechart TableResult, mirroring
+// HistogramBucket's has_cloud_data/cloud_count fields (search_histogram.go)
+// for the sidebar histogram. A "table" of raw counts alone can't distinguish
+// an exact filtered-scan bucket from one whose cloud contribution was scaled
+// by applyCloudSelectivity — these columns carry that provenance through
+// every downstream table op (sort/where/head/…), the multi-node merge
+// (query_merge.go), and into the frontend so cloud-derived buckets keep
+// rendering in the hatched "estimate" style consistently with the sidebar
+// histogram. See gastrolog-4of7c.
+const (
+	TimechartCloudFlagColumn  = "_has_cloud_data"
+	TimechartCloudCountColumn = "_cloud_count"
+)
+
 // timechartColumns returns the column list for a timechart result.
-// Without grouping: ["_time", "count"]. With grouping: ["_time", "<field>", "count"].
+// Without grouping: ["_time", "count", "_has_cloud_data", "_cloud_count"].
+// With grouping: ["_time", "<field>", "count", "_has_cloud_data", "_cloud_count"].
 func timechartColumns(groupField string) []string {
 	if groupField == "" {
-		return []string{"_time", "count"}
+		return []string{"_time", "count", TimechartCloudFlagColumn, TimechartCloudCountColumn}
 	}
-	return []string{"_time", groupField, "count"}
+	return []string{"_time", groupField, "count", TimechartCloudFlagColumn, TimechartCloudCountColumn}
 }
 
 // timechartToTable converts bucketed counts into a TableResult.
-// Without grouping: one row per bucket with columns ["_time", "count"].
-// With grouping: one row per bucket × group with columns ["_time", "<field>", "count"].
-func timechartToTable(groupField string, start time.Time, bucketWidth time.Duration, numBuckets int, counts []int64, groupCounts []map[string]int64) *TableResult {
+// Without grouping: one row per bucket. With grouping: one row per
+// bucket × group. Every row for a given bucket carries the same
+// TimechartCloudFlagColumn/TimechartCloudCountColumn values — the bucket's
+// cloud provenance, not a per-group split — sourced from the same
+// cloudFlags/cloudCounts accumulator that feeds HistogramBucket for the
+// sidebar histogram (see buildHistogramBuckets).
+func timechartToTable(groupField string, start time.Time, bucketWidth time.Duration, numBuckets int, counts []int64, groupCounts []map[string]int64, cloudFlags []bool, cloudCounts []int64) *TableResult {
 	columns := timechartColumns(groupField)
 	var rows [][]string
+
+	cloudCols := func(i int) []string {
+		return []string{strconv.FormatBool(cloudFlags[i]), strconv.FormatInt(cloudCounts[i], 10)}
+	}
 
 	if groupField == "" {
 		// No grouping — one row per bucket.
 		for i := range numBuckets {
 			ts := start.Add(bucketWidth * time.Duration(i)).Format(time.RFC3339Nano)
-			rows = append(rows, []string{ts, strconv.FormatInt(counts[i], 10)})
+			row := append([]string{ts, strconv.FormatInt(counts[i], 10)}, cloudCols(i)...)
+			rows = append(rows, row)
 		}
 		return &TableResult{Columns: columns, Rows: rows}
 	}
@@ -862,10 +887,11 @@ func timechartToTable(groupField string, start time.Time, bucketWidth time.Durat
 	for i := range numBuckets {
 		ts := start.Add(bucketWidth * time.Duration(i)).Format(time.RFC3339Nano)
 		total := counts[i]
+		cc := cloudCols(i)
 
 		if len(groupCounts[i]) == 0 {
 			// No group breakdown — emit a single row with empty group.
-			rows = append(rows, []string{ts, "", strconv.FormatInt(total, 10)})
+			rows = append(rows, append([]string{ts, "", strconv.FormatInt(total, 10)}, cc...))
 			continue
 		}
 
@@ -876,12 +902,12 @@ func timechartToTable(groupField string, start time.Time, bucketWidth time.Durat
 			if !ok || count == 0 {
 				continue
 			}
-			rows = append(rows, []string{ts, key, strconv.FormatInt(count, 10)})
+			rows = append(rows, append([]string{ts, key, strconv.FormatInt(count, 10)}, cc...))
 			groupTotal += count
 		}
 		// Emit remainder as empty-group row if total > sum of group counts.
 		if remainder := total - groupTotal; remainder > 0 {
-			rows = append(rows, []string{ts, "", strconv.FormatInt(remainder, 10)})
+			rows = append(rows, append([]string{ts, "", strconv.FormatInt(remainder, 10)}, cc...))
 		}
 	}
 
@@ -1145,7 +1171,13 @@ func chunkBucketTotals(
 	for b := firstBucket; b <= lastBucket; b++ {
 		bStart := start.Add(bucketWidth * time.Duration(b))
 		bEnd := start.Add(bucketWidth * time.Duration(b+1))
-		startRank, _ := ir.FindIngestRank(meta.ID, bStart)
+		startRank, ok := ir.FindIngestRank(meta.ID, bStart)
+		if !ok {
+			// Per-lookup resolvability (gastrolog-enfwd): a missed edge
+			// combined with the RecordCount shortcut below would inflate
+			// this bucket; leave it at 0 instead.
+			continue
+		}
 		var endRank uint64
 		if !meta.IngestEnd.IsZero() && !bEnd.Before(meta.IngestEnd) {
 			endRank = uint64(meta.RecordCount) //nolint:gosec // G115: RecordCount is non-negative
@@ -1175,13 +1207,15 @@ func chunkBucketTotals(
 // Local chunks never use overlap — it smears by chunk metadata bounds rather
 // than per-record ingest_ts, producing phantom counts in quiet periods.
 //
-// We can't probe the index up front: findIngestRank at the chunk's
-// IngestStart returns (0, true) for a healthy index AND for a missing
-// index (rank zero is the natural answer at the chunk's earliest record),
-// so a single probe can't distinguish the two. Instead, run rank arithmetic
-// across all buckets first; if the total contribution is zero despite the
-// chunk having records, the index isn't actually serving lookups and we
-// fall back to overlap-based distribution (cloud-backed only).
+// Resolution is tracked PER LOOKUP (gastrolog-enfwd): the IndexReader can be
+// partially resolvable — FSM-metadata boundary answers (rank 0 strictly
+// before a sealed monotonic chunk's IngestStart) resolve on any voter with
+// no ITSI bytes at all, while interior timestamps stay unresolvable there.
+// Rank arithmetic is only trusted when every endpoint the loop needs
+// resolves; the first miss stops the loop and falls back. The payoff: a
+// chunk that fits inside a single bucket counts EXACTLY from replicated
+// metadata alone (startRank 0 at the bucket edge, endRank = RecordCount via
+// the IngestEnd shortcut) instead of being smeared or dropped.
 func timechartChunkByIndex(
 	ir manifest.IndexReader,
 	meta chunk.ChunkMeta,
@@ -1203,50 +1237,43 @@ func timechartChunkByIndex(
 		clampHi = meta.IngestStart
 	}
 
-	// Fast path: probe once before the per-bucket loop. If the IndexReader
-	// can't resolve the chunk's index at any TS, the rank-arithmetic loop
-	// would do 50×2 failed lookups per chunk — non-trivial overhead on a
-	// `last=12h` query touching ~1900 chunks. The probe distinguishes
-	// "working index that returns rank 0" (ok=true) from "no index
-	// reachable" (ok=false) cleanly via the boolean — only the rank value
-	// is ambiguous, not ok. On a miss we skip straight to FSM-based
-	// distribution.
-	probeTS := meta.IngestStart
-	if probeTS.IsZero() {
-		probeTS = clampHi
-	}
-	if !probeTS.IsZero() {
-		if _, ok := ir.FindIngestRank(meta.ID, probeTS); !ok {
-			if meta.CloudBacked {
-				distributeChunkRecordsByOverlap(meta, start, bucketWidth, firstBucket, lastBucket, counts, cloudFlags, true)
-				return true
-			}
-			return false
-		}
-	}
-
+	// Per-lookup resolution replaces the old single up-front probe: any
+	// in-window lookup a healthy local index serves resolves (every bucket
+	// edge the loop visits is <= the chunk's max in-window TS), so the
+	// first miss means the index isn't fully serving this chunk here and
+	// the loop stops — at most a couple of wasted lookups per unresolvable
+	// chunk, preserving the probe's cost bound on `last=12h` queries
+	// touching ~1900 chunks.
 	rankCounts := make([]int64, lastBucket-firstBucket+1)
 	var rankTotal int64
+	resolved := true
 	for b := firstBucket; b <= lastBucket; b++ {
 		bStart := start.Add(bucketWidth * time.Duration(b))
 		bEnd := start.Add(bucketWidth * time.Duration(b+1))
 
-		startRank, _ := ir.FindIngestRank(meta.ID, bStart)
+		startRank, ok := ir.FindIngestRank(meta.ID, bStart)
+		if !ok {
+			resolved = false
+			break
+		}
 
 		var endRank uint64
 		if !clampHi.IsZero() && !bEnd.Before(clampHi) {
 			endRank = uint64(meta.RecordCount) //nolint:gosec // G115: RecordCount is always non-negative
 		} else if rank, ok := ir.FindIngestRank(meta.ID, bEnd); ok {
 			endRank = rank
+		} else {
+			resolved = false
+			break
 		}
 
 		if endRank > startRank {
-			delta := int64(endRank - startRank)
+			delta := int64(endRank - startRank) //nolint:gosec // G115: bounded by RecordCount
 			rankCounts[b-firstBucket] = delta
 			rankTotal += delta
 		}
 	}
-	if rankTotal > 0 {
+	if resolved && rankTotal > 0 {
 		for i, c := range rankCounts {
 			counts[firstBucket+i] += c
 			if c > 0 && meta.CloudBacked && cloudFlags != nil {

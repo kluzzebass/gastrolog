@@ -12,7 +12,11 @@ import (
 // results. The merge strategy depends on the column names:
 //
 //   - Timechart: columns contain "_time" — group by all columns except the
-//     last (count) and sum counts per bucket.
+//     last (count) and sum counts per bucket. The trailing cloud-provenance
+//     sentinel columns (query.TimechartCloudFlagColumn/CloudCountColumn) are
+//     also aggregates, not group keys — see detectAggColumns — so a bucket
+//     touched by cloud-derived data on any node stays flagged after the
+//     cluster-wide merge instead of splintering into per-node rows.
 //   - Stats: aggregate columns detected by name pattern (count, sum(*), etc.)
 //   - Fallback: concatenate rows.
 func mergeTableResults(local *query.TableResult, remotes []*query.TableResult) *query.TableResult {
@@ -43,6 +47,7 @@ const (
 	aggSum aggType = iota
 	aggMin
 	aggMax
+	aggOr // boolean OR — true if any node reports true (e.g. cloud-derived data present)
 )
 
 // aggColumn describes a column that participates in aggregation.
@@ -58,6 +63,17 @@ func detectAggColumns(cols []string) []aggColumn {
 	for i, col := range cols {
 		if col == "_time" {
 			continue // group key, not an aggregate
+		}
+		switch col {
+		case query.TimechartCloudFlagColumn:
+			// Any node's bucket touched by cloud-derived data keeps the
+			// whole bucket flagged after merge — OR, not a group key.
+			aggs = append(aggs, aggColumn{index: i, typ: aggOr})
+			continue
+		case query.TimechartCloudCountColumn:
+			// Per-node cloud contribution to the bucket — sums like count.
+			aggs = append(aggs, aggColumn{index: i, typ: aggSum})
+			continue
 		}
 		lower := strings.ToLower(col)
 		switch {
@@ -169,6 +185,13 @@ func mergeAggResults(results []*query.TableResult, cols []string, aggs []aggColu
 
 // mergeValue combines two string-encoded numeric values per the aggregate type.
 func mergeValue(a, b string, typ aggType) string {
+	if typ == aggOr {
+		if a == "true" || b == "true" {
+			return "true"
+		}
+		return "false"
+	}
+
 	va, errA := strconv.ParseFloat(a, 64)
 	vb, errB := strconv.ParseFloat(b, 64)
 	if errA != nil || errB != nil {
@@ -184,6 +207,8 @@ func mergeValue(a, b string, typ aggType) string {
 		result = math.Min(va, vb)
 	case aggMax:
 		result = math.Max(va, vb)
+	case aggOr:
+		panic("mergeValue: aggOr is handled by the early return above, unreachable")
 	}
 
 	// Format as integer if no fractional part.

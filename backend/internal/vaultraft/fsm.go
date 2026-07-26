@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/applywait"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 
@@ -41,13 +42,29 @@ type FSM struct {
 	// the receipt protocol's catchup mechanism is dead code.
 	// See gastrolog-51gme.
 	onAfterRestore func()
+
+	// applyWait is advanced after each log entry is applied (and after a
+	// snapshot restore, up to the index the snapshot embeds). The vault-ctl
+	// forward paths block on it after forwarding a command to the group
+	// leader so their next local read sees post-mutation state — the
+	// read-after-write barrier (gastrolog-4l24u), event-driven per
+	// gastrolog-3klg1.
+	applyWait *applywait.Tracker
 }
 
 // NewFSM returns a new vault control-plane FSM instance.
 func NewFSM() *FSM {
 	return &FSM{
-		vaults: make(map[glid.GLID]*vaultctlfsm.FSM),
+		vaults:    make(map[glid.GLID]*vaultctlfsm.FSM),
+		applyWait: applywait.New(),
 	}
+}
+
+// ApplyWait returns the tracker that follows this FSM's applied index.
+// VaultApplyForwarder / VaultCtlChunkApplyForwarder wait on it after
+// forwarding a command to the vault-ctl group leader.
+func (f *FSM) ApplyWait() *applywait.Tracker {
+	return f.applyWait
 }
 
 // SetOnAfterRestore registers a callback fired (outside the FSM
@@ -75,7 +92,15 @@ func (f *FSM) Vaults() map[glid.GLID]*vaultctlfsm.FSM {
 // Apply executes vault control-plane commands. Empty payloads are ignored.
 // The log data is a marshaled gastrologv1.VaultRaftCommand; see cmd.go.
 func (f *FSM) Apply(l *hraft.Log) any {
-	if l == nil || len(l.Data) == 0 {
+	if l == nil {
+		return nil
+	}
+	// The entry is consumed regardless of dispatch outcome — advance the
+	// apply tracker on every return path, after the sub-FSM mutation (if
+	// any) is visible. Mirrors raft's own applied-index semantics, which
+	// count entries whose FSM application returned an error.
+	defer f.applyWait.Advance(l.Index)
+	if len(l.Data) == 0 {
 		return nil
 	}
 	var cmd gastrologv1.VaultRaftCommand
@@ -141,6 +166,12 @@ func (f *FSM) Snapshot() (hraft.FSMSnapshot, error) {
 	ids := slices.SortedFunc(maps.Keys(f.vaults), glid.Compare)
 	group := &gastrologv1.VaultGroupSnapshot{
 		Vaults: make([]*gastrologv1.VaultGroupSnapshotEntry, 0, len(ids)),
+		// Embed the highest applied index so a follower that installs this
+		// snapshot (instead of replaying log entries) can release apply-wait
+		// barriers for every command the snapshot covers. Raft serializes
+		// Snapshot with Apply on the FSM goroutine, so this reads the exact
+		// index the captured state reflects.
+		LastAppliedIndex: f.applyWait.Applied(),
 	}
 	for _, id := range ids {
 		t := f.vaults[id]
@@ -160,7 +191,7 @@ func (f *FSM) Snapshot() (hraft.FSMSnapshot, error) {
 func (f *FSM) Restore(rc io.ReadCloser) error {
 	defer func() { _ = rc.Close() }()
 
-	raw, err := io.ReadAll(rc)
+	raw, err := io.ReadAll(rc) //ok:io-readall raft snapshot restore; input is this FSM's own marshaled VaultGroupSnapshot, bounded by manifest size
 	if err != nil {
 		return fmt.Errorf("vaultraft restore: read: %w", err)
 	}
@@ -186,6 +217,11 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 	f.vaults = nextVaults
 	hook := f.onAfterRestore
 	f.mu.Unlock()
+	// Wake apply-wait barriers covered by this snapshot — the restored
+	// state includes every command up to the embedded index. Advance after
+	// the sub-FSM map swap (waiters must read post-restore state) and
+	// before the potentially slow after-restore hook.
+	f.applyWait.Advance(group.GetLastAppliedIndex())
 	// Fire outside the mutex — the handler walks per-vault reconcilers
 	// which can call back into the FSM (Instances, PendingDeletes, etc.).
 	if hook != nil {

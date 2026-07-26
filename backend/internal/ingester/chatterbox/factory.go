@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/logging/comp"
+	"gastrolog/internal/pipeline/ingestion"
 	"log/slog"
 	"math/rand/v2"
 	"slices"
@@ -13,7 +14,6 @@ import (
 	"time"
 
 	"gastrolog/internal/logging"
-	"gastrolog/internal/orchestrator"
 )
 
 const (
@@ -65,7 +65,7 @@ func ParamDefaults() map[string]string {
 //
 // Returns an error if parameters are invalid (e.g., unparseable duration,
 // min > max, negative values, unknown format names).
-func NewIngester(id glid.GLID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
+func NewIngester(id glid.GLID, params map[string]string, logger *slog.Logger) (ingestion.Ingester, error) {
 	minInterval := defaultMinInterval
 	maxInterval := defaultMaxInterval
 	hostCount := defaultHostCount

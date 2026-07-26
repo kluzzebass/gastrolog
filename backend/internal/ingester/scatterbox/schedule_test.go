@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"gastrolog/internal/glid"
-	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/pipeline/ingestion"
 )
 
 func TestNextEmissionAlignsToEpoch(t *testing.T) {
@@ -45,7 +45,7 @@ func TestScheduledEmissionUsesAlignedTimestamp(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
 	defer cancel()
 
-	out := make(chan orchestrator.IngestMessage, 1)
+	out := make(chan ingestion.IngesterMessage, 1)
 	done := make(chan struct{})
 	go func() {
 		_ = ing.Run(ctx, out)

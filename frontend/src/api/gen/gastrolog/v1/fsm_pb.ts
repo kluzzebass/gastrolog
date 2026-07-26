@@ -257,6 +257,12 @@ export class SystemCommand extends Message<SystemCommand> {
      */
     value: SetNodeStateCommand;
     case: "setNodeState";
+  } | {
+    /**
+     * @generated from field: gastrolog.v1.CatchupBarrierCommand catchup_barrier = 40;
+     */
+    value: CatchupBarrierCommand;
+    case: "catchupBarrier";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<SystemCommand>) {
@@ -306,6 +312,7 @@ export class SystemCommand extends Message<SystemCommand> {
     { no: 37, name: "set_ingester_checkpoint", kind: "message", T: SetIngesterCheckpointCommand, oneof: "command" },
     { no: 38, name: "put_log_levels", kind: "message", T: PutLogLevelsCommand, oneof: "command" },
     { no: 39, name: "set_node_state", kind: "message", T: SetNodeStateCommand, oneof: "command" },
+    { no: 40, name: "catchup_barrier", kind: "message", T: CatchupBarrierCommand, oneof: "command" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SystemCommand {
@@ -322,6 +329,45 @@ export class SystemCommand extends Message<SystemCommand> {
 
   static equals(a: SystemCommand | PlainMessage<SystemCommand> | undefined, b: SystemCommand | PlainMessage<SystemCommand> | undefined): boolean {
     return proto3.util.equals(SystemCommand, a, b);
+  }
+}
+
+/**
+ * CatchupBarrierCommand is a state-free entry the FSM applies as a no-op. Its
+ * only purpose is to occupy a committed Raft log index that flows through
+ * FSM.Apply, so a node can commit one (or forward it to the leader) and then
+ * block on the FSM apply-wait tracker until its local FSM has applied up to
+ * that index — the startup FSM catch-up barrier (gastrolog-1go57). It carries
+ * no fields and mutates no state; unlike a raft LogBarrier it reaches
+ * FSM.Apply, which the event-driven tracker (fed only from FSM.Apply) requires.
+ *
+ * @generated from message gastrolog.v1.CatchupBarrierCommand
+ */
+export class CatchupBarrierCommand extends Message<CatchupBarrierCommand> {
+  constructor(data?: PartialMessage<CatchupBarrierCommand>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.CatchupBarrierCommand";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): CatchupBarrierCommand {
+    return new CatchupBarrierCommand().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): CatchupBarrierCommand {
+    return new CatchupBarrierCommand().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): CatchupBarrierCommand {
+    return new CatchupBarrierCommand().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: CatchupBarrierCommand | PlainMessage<CatchupBarrierCommand> | undefined, b: CatchupBarrierCommand | PlainMessage<CatchupBarrierCommand> | undefined): boolean {
+    return proto3.util.equals(CatchupBarrierCommand, a, b);
   }
 }
 
@@ -2344,6 +2390,16 @@ export class SystemSnapshot extends Message<SystemSnapshot> {
    */
   logLevels?: LogLevelConfig;
 
+  /**
+   * Highest Raft log index applied to the FSM when the snapshot was taken.
+   * Lets a follower that installs this snapshot (instead of replaying log
+   * entries) release read-after-write apply-wait barriers for every command
+   * the snapshot covers (gastrolog-3klg1).
+   *
+   * @generated from field: uint64 last_applied_index = 21;
+   */
+  lastAppliedIndex = protoInt64.zero;
+
   constructor(data?: PartialMessage<SystemSnapshot>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2372,6 +2428,7 @@ export class SystemSnapshot extends Message<SystemSnapshot> {
     { no: 18, name: "ingester_assignments", kind: "message", T: SetIngesterAssignmentCommand, repeated: true },
     { no: 19, name: "ingester_checkpoints", kind: "message", T: SetIngesterCheckpointCommand, repeated: true },
     { no: 20, name: "log_levels", kind: "message", T: LogLevelConfig },
+    { no: 21, name: "last_applied_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SystemSnapshot {

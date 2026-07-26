@@ -500,14 +500,10 @@ func (x *GetSystemResponse) GetEnvironmentColor() string {
 	return ""
 }
 
-// RetentionRule binds a retention policy to a vault. Phase 4 (gastrolog-42f9z)
-// collapsed the prior expire/eject/transition/archive action enum: a fired
-// retention event always streams the chunk's records through the routing
-// engine with `source = retention-trigger(vault_id)` and always destroys
-// the original chunk. The routing engine's verdict — re-route, keep, or
-// drop — drives placement. Today the routing table has no routes that
-// match retention-trigger sources, so all retention events drop, replicating
-// the legacy "expire" behavior. Phase 5 extends the routing table.
+// RetentionRule binds a retention policy to a vault. What happens when the
+// policy fires is governed by the owning VaultConfig's retention_disposition
+// (and, for "transfer", retention_transfer_target_vault_id) — see those
+// fields for the disposition semantics ("delete", "route", or "transfer").
 type RetentionRule struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	RetentionPolicyId []byte                 `protobuf:"bytes,1,opt,name=retention_policy_id,json=retentionPolicyId,proto3" json:"retention_policy_id,omitempty"`

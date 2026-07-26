@@ -374,7 +374,13 @@ func (v *vaultChunking) collectRefBatch(
 // applySealOpenManifest proposes SealOpenChunkManifest. Sealed manifests queue
 // FIFO on the FSM so rotation is not blocked while earlier chunks build.
 func (v *vaultChunking) applySealOpenManifest(chunkID chunk.ChunkID, sealedAt time.Time) error {
-	return v.applier().Apply(vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, sealedAt))
+	if err := v.applier().Apply(vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, sealedAt)); err != nil {
+		return err
+	}
+	// The vault chunked a manifest — chunking recovered, so a standing
+	// retention-give-up alarm no longer holds (gastrolog-68sfsl).
+	v.clearRetentionGiveUp()
+	return nil
 }
 
 // proposeOpenManifestWire picks a plannable segment and returns Raft log data
@@ -577,17 +583,17 @@ func (v *vaultChunking) eligibleFromEntries(entries []vaultctlfsm.CompletedSegme
 
 // plannerMinHolders returns the minimum holder count for a segment to be
 // plannable: min(2, placement size), from the same live RequiredHolders
-// source release/purge gating trusts. Zero (placement wiring absent —
-// single-node tests, memory vaults) disables the gate.
+// source release/purge gating trusts. Zero disables the gate — for the
+// explicit NoRequiredHolders opt-out (no placements to replicate to) and for
+// an unresolved placement lookup: planning is not release, chunks build from
+// local bytes that remain on disk, and the release/purge gates fail closed
+// on unresolved lookups independently.
 func (v *vaultChunking) plannerMinHolders() int {
-	if v.cfg.RequiredHolders == nil {
+	required, resolved := v.cfg.RequiredHolders()
+	if !resolved || len(required) == 0 {
 		return 0
 	}
-	n := len(v.cfg.RequiredHolders())
-	if n <= 0 {
-		return 0
-	}
-	return min(2, n)
+	return min(2, len(required))
 }
 
 // underReplicatedAlertAfter is the grace period before gated segments raise

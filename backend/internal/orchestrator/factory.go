@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline/ingestion"
 	"log/slog"
 	"maps"
 	"slices"
@@ -35,21 +36,15 @@ import (
 // or an error describing the failure.
 type ConnectionTester func(ctx context.Context, params map[string]string) (string, error)
 
-// ListenAddr describes a network address that a listener ingester will bind to.
-type ListenAddr struct {
-	Network string // "tcp", "udp"
-	Address string
-}
-
 // IngesterRegistration bundles an ingester's factory, default parameters,
 // and optional connection tester into a single registration unit.
 // This prevents the factory, defaults, and tester maps from diverging
 // when new ingester types are added.
 type IngesterRegistration struct {
-	Factory     IngesterFactory
+	Factory     ingestion.IngesterFactory
 	Defaults    func() map[string]string
-	Tester      ConnectionTester                            // nil if not supported
-	ListenAddrs func(params map[string]string) []ListenAddr // nil for non-listeners
+	Tester      ConnectionTester                                      // nil if not supported
+	ListenAddrs func(params map[string]string) []ingestion.ListenAddr // nil for non-listeners
 
 	// SingletonSupported indicates whether it is meaningful to run this
 	// ingester type in singleton (Raft-assigned, one-node) mode. When false,
@@ -147,14 +142,21 @@ func (o *Orchestrator) ApplyConfig(sys *system.System, factories Factories) erro
 		return err
 	}
 
-	// Schedule the placement-reconcile sweep so sealed-chunk replication
-	// targets and the routing table self-heal even between config-change
-	// notifications.
-	if !o.scheduler.HasJob(placementSweepJobName) {
-		if err := o.scheduler.AddJob(placementSweepJobName, placementSweepSchedule, o.placementSweep); err != nil {
-			o.logger.Warn("failed to add placement-reconcile sweep job", "error", err)
-		}
-		o.scheduler.Describe(placementSweepJobName, "Refresh replication targets and routing table")
+	// The placement ROLE / FollowerTargets refresh legs of the retired 15s
+	// placement sweep are now event-driven (gastrolog-29xpy — see
+	// ReconcileVaultPlacement / ReconcilePlacements). The routing-table +
+	// pipeline-registration leg (reloadPipelineFromConfig) is NOT: it also
+	// aligns each vault-ctl Raft group's desired leader with the placement
+	// leader (SetDesiredLeaderID) and re-registers the pipeline vault as the
+	// vault-ctl handle/leadership converges — async Raft convergence with no
+	// config event to hang off. Without a periodic pass, a vault-ctl election
+	// that lands leadership on a non-home node leaves the chunking planner
+	// (home ∧ vault-ctl leader) running nowhere, stalling manifest planning
+	// until the next unrelated config change. Keep that one leg on a narrowed
+	// scheduler job (gastrolog-29xpy home-down regression); it is the sibling
+	// of vault-ctl-membership-reconcile, not the retired placement sweep.
+	if err := o.startPipelineConfigReconcile(); err != nil {
+		o.logger.Warn("failed to add pipeline-config-reconcile job", "error", err)
 	}
 
 	return nil
@@ -238,19 +240,23 @@ func (o *Orchestrator) startRetentionSweep() error {
 	return nil
 }
 
-// startInstanceCatchupSweep registers the periodic per-node sweep that drives
-// local-state convergence on every vault instance. Every 20 seconds
-// (cron 13/33/53s, phase-offset from the retention sweep at second 0)
-// every node walks its OWN vault-ctl FSM and runs three independent
-// reconciliation passes per instance — see vaultCatchupSweepAll for the
-// per-pass invariants. Covers receipt-protocol delete convergence
-// (gastrolog-51gme) and create-side replication catchup
-// (gastrolog-2dgvj).
+// startInstanceCatchupSweep registers the periodic per-node reconcile
+// BACKSTOP that guarantees local-state convergence on every vault
+// instance. Every 20 seconds (cron 13/33/53s, phase-offset from the
+// retention sweep at second 0) every node walks its OWN vault-ctl FSM and
+// runs the reconcile categories — see vaultCatchupSweepAll for the
+// per-category invariants. Post gastrolog-3fu9t the primary convergence
+// is event-driven (delete obligations on CmdRequestDelete, orphans on
+// snapshot install, leader-only categories on lead-gained); this tick is
+// the safety net for dropped/raced events plus the two categories that
+// are periodic-by-nature (idle-active inactivity, grace-period GCs).
+// Original coverage: receipt-protocol delete convergence (gastrolog-51gme)
+// and create-side replication catchup (gastrolog-2dgvj).
 func (o *Orchestrator) startInstanceCatchupSweep() error {
 	if err := o.scheduler.AddJob(vaultCatchupSweepJobName, vaultCatchupSweepSchedule, o.vaultCatchupSweepAll); err != nil {
 		return fmt.Errorf("vault catchup sweep job: %w", err)
 	}
-	o.scheduler.Describe(vaultCatchupSweepJobName, "Vault catchup sweep (delete + orphan + replica convergence)")
+	o.scheduler.Describe(vaultCatchupSweepJobName, "Vault reconcile backstop (event-driven primary; catches missed delete/orphan/replica events + periodic idle-active & grace GCs)")
 	return nil
 }
 
@@ -324,7 +330,7 @@ func (o *Orchestrator) applyIngester(recvCfg system.IngesterConfig, assignments 
 	}
 
 	// Restore checkpoint if available (active ingesters resuming after failover).
-	if cp, ok := recv.(Checkpointable); ok {
+	if cp, ok := recv.(ingestion.Checkpointable); ok {
 		if data := checkpoints[recvCfg.ID]; len(data) > 0 {
 			if err := cp.LoadCheckpoint(data); err != nil {
 				o.logger.Warn("ingester checkpoint load failed, starting fresh", "id", recvCfg.ID, "error", err)

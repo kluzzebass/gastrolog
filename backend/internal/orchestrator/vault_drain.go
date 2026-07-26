@@ -41,10 +41,11 @@ func vaultDrainKey(vaultID glid.GLID) string {
 // chunks transition to the next instance in the vault chain. In rebalance mode,
 // chunks replicate to the same instance on the target node.
 //
-// Role: **vault leader only**. The drain walks the vault's chunks and applies
-// CmdDeleteChunk / CmdTransitionStreamed to the vault control-plane Raft,
-// which only the leader may write to. Callers must check `instance.IsLeader()`
-// before invoking — callers in dispatch do so explicitly.
+// Role: **vault leader only**. The drain walks the vault's chunks and drives
+// deletes/transitions through the vault control-plane Raft (the receipt
+// protocol's CmdRequestDelete), which only the leader may write to. Callers
+// must check `instance.IsLeader()` before invoking — callers in dispatch do
+// so explicitly.
 //
 // Readiness: no explicit Vault.ReadinessErr gate. Drain is itself a
 // readiness-affecting state change, so it runs as soon as the vault instance
@@ -204,9 +205,7 @@ func (o *Orchestrator) drainVaultChunks(ctx context.Context, sys *system.System,
 		// chunks (active-form sealed locally but GLCB not yet committed)
 		// are skipped. Drain ships sealed-form GLCBs; a Sealing chunk
 		// would race with concurrent PostSealProcess.
-		if vaultInst.OverlayFromFSM != nil {
-			meta = vaultInst.OverlayFromFSM(meta)
-		}
+		meta = o.groundChunkMeta(vaultID, meta)
 		if !meta.Sealed {
 			continue
 		}

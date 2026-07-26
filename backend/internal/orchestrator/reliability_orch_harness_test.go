@@ -105,6 +105,10 @@ type orchRelHarness struct {
 	// routeVaultIdxs lists vaults (indexes into h.vaults) that get an
 	// enabled match-all route seeded in the shared config.
 	routeVaultIdxs []int
+	// rotationPolicyID is the shared pipeline rotation policy written by
+	// seedSharedConfig (nil without withPipelineCluster); vaults added
+	// mid-test (addRuntimeVault) reference it too.
+	rotationPolicyID *glid.GLID
 }
 
 // pipelineClusterOpts carries the pipeline tuning for withPipelineCluster.
@@ -444,6 +448,9 @@ func (h *orchRelHarness) seedSharedConfig() {
 		}
 		rotationPolicyID = &rpID
 	}
+	// Keep the shared policy reachable for vaults created mid-test
+	// (addRuntimeVault) so they seal on the same record-count policy.
+	h.rotationPolicyID = rotationPolicyID
 
 	// Register every vault + instance + placement. vaults[0] is the default;
 	// additional entries come from withExtraVault options.
@@ -566,12 +573,21 @@ func (h *orchRelHarness) startNode(id string) {
 		// Without it, origin publishes from non-leader nodes are rejected
 		// with "group apply function not configured" and segments never
 		// reach the registry.
-		n.clusterSrv.SetGroupApplyFn(func(_ context.Context, groupID string, data []byte) error {
+		n.clusterSrv.SetGroupApplyFn(func(_ context.Context, groupID string, data []byte) (uint64, error) {
 			g := groupMgr.GetGroup(groupID)
 			if g == nil {
-				return fmt.Errorf("raft group %s not found", groupID)
+				return 0, fmt.Errorf("raft group %s not found", groupID)
 			}
-			return g.Raft.Apply(data, cluster.ReplicationTimeout).Error()
+			future := g.Raft.Apply(data, cluster.ReplicationTimeout)
+			if err := future.Error(); err != nil {
+				return 0, err
+			}
+			if resp := future.Response(); resp != nil {
+				if err, ok := resp.(error); ok && err != nil {
+					return future.Index(), err
+				}
+			}
+			return future.Index(), nil
 		})
 	}
 	n.factories = factories

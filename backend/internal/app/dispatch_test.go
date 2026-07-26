@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline/ingestion"
 	"log/slog"
 	"slices"
 	"strings"
@@ -56,6 +57,30 @@ func (h *captureHandler) count() int {
 	return len(h.records)
 }
 
+// hasErrorContaining reports whether any captured record carries an "error"
+// attribute whose string form contains substr. Handlers now return errors
+// instead of logging per-operation messages, and settle() folds the error
+// into the obligation log line's "error" attribute, so failure assertions
+// look there rather than at the message text.
+func (h *captureHandler) hasErrorContaining(substr string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for i := range h.records {
+		found := false
+		h.records[i].Attrs(func(a slog.Attr) bool {
+			if a.Key == "error" && strings.Contains(a.Value.String(), substr) {
+				found = true
+				return false
+			}
+			return true
+		})
+		if found {
+			return true
+		}
+	}
+	return false
+}
+
 func (h *captureHandler) reset() {
 	h.mu.Lock()
 	h.records = h.records[:0]
@@ -98,6 +123,11 @@ type mockOrch struct {
 	localInstanceExported func(vaultID glid.GLID) *orchestrator.VaultInstance // configurable return
 
 	refreshVaultCtlCalls [][]system.NodeConfig // node lists passed to RefreshVaultCtlMembers
+
+	archivalTriggerCalls int // number of TriggerArchivalSweep calls
+
+	reconcileVaultPlacementCalls []glid.GLID // vault IDs passed to ReconcileVaultPlacement
+	reconcilePlacementsCalls     int         // number of ReconcilePlacements calls
 }
 
 func (m *mockOrch) ListVaults() []glid.GLID    { return m.vaults }
@@ -127,10 +157,7 @@ func (m *mockOrch) ReloadFilters(context.Context) error {
 }
 func (m *mockOrch) ReloadRotationPolicies(context.Context) error  { return m.reloadRotationErr }
 func (m *mockOrch) ReloadRetentionPolicies(context.Context) error { return m.reloadRetentionErr }
-func (m *mockOrch) ApplyRotationPolicyForRole(context.Context, glid.GLID) error {
-	return nil
-}
-func (m *mockOrch) DisableVault(glid.GLID) error { return m.disableVaultErr }
+func (m *mockOrch) DisableVault(glid.GLID) error                  { return m.disableVaultErr }
 func (m *mockOrch) EnableVault(glid.GLID) error  { return m.enableVaultErr }
 func (m *mockOrch) ForceRemoveVault(id glid.GLID) error {
 	m.forceRemoveIDs = append(m.forceRemoveIDs, id)
@@ -281,10 +308,10 @@ func (s *stubCfgStore) ListNodeStorageConfigs(context.Context) ([]system.NodeSto
 	return s.nscs, nil
 }
 
-// noopIngester satisfies orchestrator.Ingester.
+// noopIngester satisfies ingestion.Ingester.
 type noopIngester struct{}
 
-func (noopIngester) Run(context.Context, chan<- orchestrator.IngestMessage) error { return nil }
+func (noopIngester) Run(context.Context, chan<- ingestion.IngesterMessage) error { return nil }
 
 // newTestDispatcher creates a configDispatcher wired to the given mocks.
 func newTestDispatcher(orch orchActions, store system.Store, h *captureHandler) *configDispatcher {
@@ -324,8 +351,11 @@ func TestHandle_VaultPut(t *testing.T) {
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
 
-		if !h.hasMessage("dispatch: read vault config") {
-			t.Fatal("expected error log for store read failure")
+		if !h.hasErrorContaining("read vault config") {
+			t.Fatal("expected obligation error for store read failure")
+		}
+		if d.obligationCount() != 1 {
+			t.Fatalf("expected 1 reconcile obligation, got %d", d.obligationCount())
 		}
 	})
 
@@ -337,8 +367,8 @@ func TestHandle_VaultPut(t *testing.T) {
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
 
-		if !h.hasMessage("dispatch: read vault config") {
-			t.Fatal("expected error log for nil vault config")
+		if !h.hasErrorContaining("read vault config") {
+			t.Fatal("expected obligation error for nil vault config")
 		}
 	})
 
@@ -370,8 +400,8 @@ func TestHandle_VaultPut(t *testing.T) {
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
 
-		if !h.hasMessage("dispatch: add vault") {
-			t.Fatal("expected error log for AddVault failure")
+		if !h.hasErrorContaining("add vault") {
+			t.Fatal("expected obligation error for AddVault failure")
 		}
 	})
 
@@ -389,14 +419,19 @@ func TestHandle_VaultPut(t *testing.T) {
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
 
-		if !h.hasMessage("dispatch: reload filters") {
+		// All three sub-errors are attempted and joined into the single
+		// vault obligation — the handler does not bail on the first.
+		if !h.hasErrorContaining("reload filters") {
 			t.Error("expected reload filters error")
 		}
-		if !h.hasMessage("dispatch: reload rotation policies") {
+		if !h.hasErrorContaining("reload rotation policies") {
 			t.Error("expected reload rotation policies error")
 		}
-		if !h.hasMessage("dispatch: reload retention policies") {
+		if !h.hasErrorContaining("reload retention policies") {
 			t.Error("expected reload retention policies error")
+		}
+		if d.obligationCount() != 1 {
+			t.Fatalf("expected the three failures folded into 1 vault obligation, got %d", d.obligationCount())
 		}
 	})
 }
@@ -411,8 +446,8 @@ func TestHandle_VaultDeleted(t *testing.T) {
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultDeleted, ID: id})
 
-		if !h.hasMessage("dispatch: force remove vault") {
-			t.Fatal("expected error log for ForceRemoveVault failure")
+		if !h.hasErrorContaining("force remove vault") {
+			t.Fatal("expected obligation error for ForceRemoveVault failure")
 		}
 	})
 
@@ -449,7 +484,7 @@ func TestHandle_VaultDeleted(t *testing.T) {
 // reg is the test ingester registration used across ingester dispatch tests.
 func testIngesterReg() orchestrator.IngesterRegistration {
 	return orchestrator.IngesterRegistration{
-		Factory: func(glid.GLID, map[string]string, *slog.Logger) (orchestrator.Ingester, error) {
+		Factory: func(glid.GLID, map[string]string, *slog.Logger) (ingestion.Ingester, error) {
 			return noopIngester{}, nil
 		},
 	}
@@ -471,8 +506,8 @@ func TestHandle_IngesterPut(t *testing.T) {
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterPut, ID: id})
 
-		if !h.hasMessage("dispatch: list ingesters") {
-			t.Fatal("expected error log for store list failure")
+		if !h.hasErrorContaining("list ingesters") {
+			t.Fatal("expected obligation error for store list failure")
 		}
 		if len(mo.reconcileCalls) != 0 {
 			t.Fatal("should not reconcile when the config list cannot be read")
@@ -551,7 +586,7 @@ func TestHandle_IngesterPut(t *testing.T) {
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterPut, ID: id})
 
-		if !h.hasMessage("dispatch: reconcile ingesters") {
+		if !h.hasErrorContaining("reconcile ingesters") {
 			t.Fatal("expected error log when ReconcileIngesters fails")
 		}
 	})
@@ -580,7 +615,7 @@ func TestHandle_IngesterDeleted(t *testing.T) {
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterDeleted, ID: id})
 
-		if !h.hasMessage("dispatch: reconcile ingesters") {
+		if !h.hasErrorContaining("reconcile ingesters") {
 			t.Fatal("expected error log when ReconcileIngesters fails")
 		}
 	})
@@ -600,19 +635,19 @@ func TestHandle_ReloadErrors(t *testing.T) {
 			name:    "route_put",
 			kind:    raftfsm.NotifyRoutePut,
 			orch:    &mockOrch{reloadFiltersErr: errors.New("f")},
-			wantMsg: "dispatch: reload filters",
+			wantMsg: "reload filters",
 		},
 		{
 			name:    "rotation_policy_put",
 			kind:    raftfsm.NotifyRotationPolicyPut,
 			orch:    &mockOrch{reloadRotationErr: errors.New("r")},
-			wantMsg: "dispatch: reload rotation policies",
+			wantMsg: "reload rotation policies",
 		},
 		{
 			name:    "retention_policy_deleted",
 			kind:    raftfsm.NotifyRetentionPolicyDeleted,
 			orch:    &mockOrch{reloadRetentionErr: errors.New("r")},
-			wantMsg: "dispatch: reload retention policies",
+			wantMsg: "reload retention policies",
 		},
 	}
 
@@ -623,8 +658,8 @@ func TestHandle_ReloadErrors(t *testing.T) {
 
 			d.Handle(raftfsm.Notification{Kind: tc.kind})
 
-			if !h.hasMessage(tc.wantMsg) {
-				t.Fatalf("expected %q in logs", tc.wantMsg)
+			if !h.hasErrorContaining(tc.wantMsg) {
+				t.Fatalf("expected %q in obligation error", tc.wantMsg)
 			}
 		})
 	}
@@ -665,8 +700,8 @@ func TestHandle_SettingPut(t *testing.T) {
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifySettingPut, Key: "server"})
 
-		if !h.hasMessage("dispatch: load server settings") {
-			t.Fatal("expected error log for LoadServerSettings failure")
+		if !h.hasErrorContaining("load server settings") {
+			t.Fatal("expected obligation error for LoadServerSettings failure")
 		}
 	})
 
@@ -681,8 +716,8 @@ func TestHandle_SettingPut(t *testing.T) {
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifySettingPut, Key: "server"})
 
-		if !h.hasMessage("dispatch: update max concurrent jobs") {
-			t.Fatal("expected error log for UpdateMaxConcurrentJobs failure")
+		if !h.hasErrorContaining("update max concurrent jobs") {
+			t.Fatal("expected obligation error for UpdateMaxConcurrentJobs failure")
 		}
 	})
 
@@ -781,7 +816,7 @@ func TestHandle_ClusterTLSPut(t *testing.T) {
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyClusterTLSPut})
 
-		if !h.hasMessage("dispatch: read cluster TLS for reload") {
+		if !h.hasErrorContaining("read cluster TLS for reload") {
 			t.Fatal("expected error log for Load failure")
 		}
 	})
@@ -795,8 +830,54 @@ func TestHandle_ClusterTLSPut(t *testing.T) {
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyClusterTLSPut})
 
-		if !h.hasMessage("dispatch: read cluster TLS for reload") {
+		if !h.hasErrorContaining("read cluster TLS for reload") {
 			t.Fatal("expected error log when ClusterTLS is nil in config")
+		}
+	})
+}
+
+// TestHandle_CloudServicePutTriggersArchivalSweep pins the event-driven half of
+// the archival policy (gastrolog-15nn1): editing a cloud service's archival
+// transition chain must re-evaluate the archival policy immediately instead of
+// waiting up to an hour for the next tick. NotifyCloudServiceDeleted, by
+// contrast, has no archival re-evaluation to do (the vault's transition chain
+// is gone), so it must NOT fire the trigger.
+func TestHandle_CloudServicePutTriggersArchivalSweep(t *testing.T) {
+	t.Run("put_triggers", func(t *testing.T) {
+		m := &mockOrch{}
+		d := newTestDispatcher(m, &stubCfgStore{}, &captureHandler{})
+
+		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyCloudServicePut, ID: glid.New()})
+
+		if m.archivalTriggerCalls != 1 {
+			t.Fatalf("expected 1 archival trigger on CloudServicePut, got %d", m.archivalTriggerCalls)
+		}
+	})
+
+	t.Run("delete_does_not_trigger", func(t *testing.T) {
+		m := &mockOrch{}
+		d := newTestDispatcher(m, &stubCfgStore{}, &captureHandler{})
+
+		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyCloudServiceDeleted, ID: glid.New()})
+
+		if m.archivalTriggerCalls != 0 {
+			t.Fatalf("expected no archival trigger on CloudServiceDeleted, got %d", m.archivalTriggerCalls)
+		}
+	})
+
+	t.Run("put_still_fires_config_signal", func(t *testing.T) {
+		sig := notify.NewSignal()
+		d := newTestDispatcher(&mockOrch{}, &stubCfgStore{}, &captureHandler{})
+		d.configSignal = sig
+
+		ch := sig.C()
+		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyCloudServicePut, ID: glid.New()})
+
+		select {
+		case <-ch:
+			// expected — WatchConfig streams still see the change.
+		default:
+			t.Fatal("configSignal should still fire on cloud service put")
 		}
 	})
 }
@@ -941,8 +1022,8 @@ func TestHandle_VaultDrain(t *testing.T) {
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
 
-		if !h.hasMessage("dispatch: cancel drain") {
-			t.Fatal("expected error log for CancelDrain failure")
+		if !h.hasErrorContaining("cancel drain") {
+			t.Fatal("expected obligation error for CancelDrain failure")
 		}
 	})
 }
@@ -954,8 +1035,20 @@ func (m *mockOrch) FindLocalVaultInstance(vaultID glid.GLID) *orchestrator.Vault
 	return nil
 }
 
+func (m *mockOrch) ReconcileVaultPlacement(_ context.Context, vaultID glid.GLID) {
+	m.reconcileVaultPlacementCalls = append(m.reconcileVaultPlacementCalls, vaultID)
+}
+
+func (m *mockOrch) ReconcilePlacements(context.Context) {
+	m.reconcilePlacementsCalls++
+}
+
 func (m *mockOrch) RefreshVaultCtlMembers(nodes []system.NodeConfig, _ orchestrator.Factories) {
 	m.refreshVaultCtlCalls = append(m.refreshVaultCtlCalls, nodes)
+}
+
+func (m *mockOrch) TriggerArchivalSweep() {
+	m.archivalTriggerCalls++
 }
 
 // gastrolog-4zy8a: every cluster membership change (NodeConfig add/remove)
@@ -1014,47 +1107,41 @@ func TestHandle_NodeConfigChange_RefreshesVaultCtlMembers(t *testing.T) {
 		if len(mo.refreshVaultCtlCalls) != 0 {
 			t.Fatalf("expected no refresh on list error, got %d", len(mo.refreshVaultCtlCalls))
 		}
-		if !h.hasMessage("dispatch: list nodes for vault-ctl membership refresh") {
-			t.Fatal("expected error log for ListNodes failure")
+		if !h.hasErrorContaining("list nodes for vault-ctl membership refresh") {
+			t.Fatal("expected obligation error for ListNodes failure")
 		}
 	})
 }
 
-// gastrolog-4zy8a: when the placement leader transfers but this node stays
-// a follower, the local VaultInstance.LeaderNodeID must be refreshed so the
-// lifecycle reconciler's RequestReplicaCatchup targets the new leader
-// instead of looping forever against the old (stale) one.
-func TestHandle_PlacementsSet_RefreshesLeaderPointerWhenRoleUnchanged(t *testing.T) {
+// gastrolog-4zy8a / gastrolog-29xpy: when the placement leader transfers but
+// this node stays a follower, the local VaultInstance.LeaderNodeID must be
+// refreshed so the lifecycle reconciler's RequestReplicaCatchup targets the
+// new leader instead of looping forever against the old (stale) one. That
+// refresh moved from an in-dispatch role write into the orchestrator's guarded
+// ReconcileVaultPlacement (which the retired placement sweep also fed). The
+// dispatcher's job is now to DELEGATE that reconcile on NotifyVaultPlacementsSet;
+// the pointer refresh itself is covered by TestReconcileInstanceRole in the
+// orchestrator package.
+func TestHandle_PlacementsSet_DelegatesReconcile(t *testing.T) {
 	t.Parallel()
 
 	vaultID := glid.New()
-	oldLeaderID := glid.New().String()
-	newLeaderID := glid.New().String()
+	leaderID := glid.New().String()
 	localID := glid.New().String()
 
-	// Storage IDs as real GLIDs (placements store them as base32 strings).
-	oldLeaderStorage := glid.New()
-	newLeaderStorage := glid.New()
+	leaderStorage := glid.New()
 	localStorage := glid.New()
 
 	nscs := []system.NodeStorageConfig{
-		{NodeID: oldLeaderID, FileStorages: []system.FileStorage{{ID: oldLeaderStorage, StorageClass: 1}}},
-		{NodeID: newLeaderID, FileStorages: []system.FileStorage{{ID: newLeaderStorage, StorageClass: 1}}},
+		{NodeID: leaderID, FileStorages: []system.FileStorage{{ID: leaderStorage, StorageClass: 1}}},
 		{NodeID: localID, FileStorages: []system.FileStorage{{ID: localStorage, StorageClass: 1}}},
 	}
-
-	// New placement: new leader is on newLeaderID; local stays a follower.
 	placements := []system.VaultPlacement{
-		{StorageID: newLeaderStorage.String(), Leader: true},
+		{StorageID: leaderStorage.String(), Leader: true},
 		{StorageID: localStorage.String(), Leader: false},
 	}
 
-	// Existing in-memory vault instance: still pointing at the OLD leader.
-	existing := &orchestrator.VaultInstance{
-		VaultID:      vaultID,
-		IsFollower:   true,
-		LeaderNodeID: oldLeaderID,
-	}
+	existing := &orchestrator.VaultInstance{VaultID: vaultID, IsFollower: true}
 
 	h := &captureHandler{}
 	mo := &mockOrch{
@@ -1074,11 +1161,8 @@ func TestHandle_PlacementsSet_RefreshesLeaderPointerWhenRoleUnchanged(t *testing
 
 	d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPlacementsSet, ID: vaultID})
 
-	if existing.LeaderNodeID != newLeaderID {
-		t.Fatalf("LeaderNodeID not refreshed: want %q, got %q", newLeaderID, existing.LeaderNodeID)
-	}
-	if !existing.IsFollower {
-		t.Fatal("IsFollower should still be true (role didn't change)")
+	if !slices.Contains(mo.reconcileVaultPlacementCalls, vaultID) {
+		t.Fatalf("expected ReconcileVaultPlacement(%s) to be called, got %v", vaultID, mo.reconcileVaultPlacementCalls)
 	}
 }
 
@@ -1122,11 +1206,16 @@ func TestHandle_PlacementsSet_RegistersVaultWhenMissing(t *testing.T) {
 	if len(mo.addVaultCalls) != 1 || mo.addVaultCalls[0] != vaultID {
 		t.Fatalf("expected defensive AddVault(%s), got %v", vaultID, mo.addVaultCalls)
 	}
-	if h.hasMessage("dispatch: add vault instance") {
+	// AddVault-before-instance must succeed, so the placement re-fire self-heals
+	// with no standing reconcile obligation for the vault.
+	if d.obligationCount() != 0 {
+		t.Fatalf("expected no reconcile obligation on self-healing rebuild, got %d", d.obligationCount())
+	}
+	if h.hasErrorContaining("add vault instance") {
 		t.Fatal("AddVaultInstance should not error: AddVault must run first when the vault is missing from the orchestrator")
 	}
-	if h.hasMessage("dispatch: add vault before instance") {
-		t.Fatal("defensive AddVault should succeed; got an error log")
+	if h.hasErrorContaining("add vault before instance") {
+		t.Fatal("defensive AddVault should succeed; got an error")
 	}
 }
 
@@ -1373,7 +1462,7 @@ func singletonTestIngester(ingID glid.GLID, nodeIDs ...string) (*system.Ingester
 	return &system.IngesterConfig{
 			ID: ingID, Type: "test", Enabled: true, NodeIDs: nodeIDs, Singleton: true,
 		}, orchestrator.IngesterRegistration{
-			Factory: func(glid.GLID, map[string]string, *slog.Logger) (orchestrator.Ingester, error) {
+			Factory: func(glid.GLID, map[string]string, *slog.Logger) (ingestion.Ingester, error) {
 				return noopIngester{}, nil
 			},
 			SingletonSupported: true,
@@ -1457,7 +1546,7 @@ func TestHandleIngesterAssignmentIgnoresParallel(t *testing.T) {
 		ingesterAssignments: map[glid.GLID]string{ingID: "other-node"},
 	}, h)
 	d.factories.IngesterTypes["test"] = orchestrator.IngesterRegistration{
-		Factory: func(glid.GLID, map[string]string, *slog.Logger) (orchestrator.Ingester, error) {
+		Factory: func(glid.GLID, map[string]string, *slog.Logger) (ingestion.Ingester, error) {
 			return noopIngester{}, nil
 		},
 		SingletonSupported: true,
@@ -1483,7 +1572,7 @@ func dispatcherForReplay(orch orchActions, store system.Store, h *captureHandler
 	d := newTestDispatcher(orch, store, h)
 	d.factories.IngesterTypes = map[string]orchestrator.IngesterRegistration{
 		"chatterbox-test": {
-			Factory: func(_ glid.GLID, _ map[string]string, _ *slog.Logger) (orchestrator.Ingester, error) {
+			Factory: func(_ glid.GLID, _ map[string]string, _ *slog.Logger) (ingestion.Ingester, error) {
 				return noopIngester{}, nil
 			},
 		},

@@ -50,10 +50,10 @@ type saturatingIngester struct {
 	sent chan struct{}
 }
 
-func (f *saturatingIngester) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
+func (f *saturatingIngester) Run(ctx context.Context, out chan<- ingestion.IngesterMessage) error {
 	for {
 		select {
-		case out <- orchestrator.IngestMessage{Raw: []byte("x")}:
+		case out <- ingestion.IngesterMessage{Raw: []byte("x")}:
 			select {
 			case f.sent <- struct{}{}:
 			default:
@@ -78,7 +78,7 @@ func expectAlive(t *testing.T, events <-chan bool, want bool) {
 
 // saturatedFloodDesired returns a desired-set for one flood ingester whose
 // params carry a marker so changing it forces a rebuild.
-func saturatedFloodDesired(id glid.GLID, burst string, build func() (orchestrator.Ingester, error)) []orchestrator.IngesterDesired {
+func saturatedFloodDesired(id glid.GLID, burst string, build func() (ingestion.Ingester, error)) []orchestrator.IngesterDesired {
 	return []orchestrator.IngesterDesired{{
 		ID:     id,
 		Name:   "flood",
@@ -111,7 +111,7 @@ func TestIngesterRebuildUnderSaturationKeepsAliveTruth(t *testing.T) {
 
 	id := glid.New()
 	first := &saturatingIngester{sent: make(chan struct{}, 64)}
-	if err := orch.ReconcileIngesters(saturatedFloodDesired(id, "1", func() (orchestrator.Ingester, error) {
+	if err := orch.ReconcileIngesters(saturatedFloodDesired(id, "1", func() (ingestion.Ingester, error) {
 		return first, nil
 	})); err != nil {
 		t.Fatalf("first reconcile: %v", err)
@@ -140,7 +140,7 @@ func TestIngesterRebuildUnderSaturationKeepsAliveTruth(t *testing.T) {
 	// Rebuild under saturation: param change forces stop+start on the same
 	// shared IngesterStats.
 	second := &saturatingIngester{sent: make(chan struct{}, 64)}
-	if err := orch.ReconcileIngesters(saturatedFloodDesired(id, "2", func() (orchestrator.Ingester, error) {
+	if err := orch.ReconcileIngesters(saturatedFloodDesired(id, "2", func() (ingestion.Ingester, error) {
 		return second, nil
 	})); err != nil {
 		t.Fatalf("rebuild reconcile: %v", err)
@@ -174,7 +174,7 @@ func TestIngesterRebuildUnderSaturationKeepsAliveTruth(t *testing.T) {
 // failingIngester fails every attempt immediately.
 type failingIngester struct{}
 
-func (failingIngester) Run(context.Context, chan<- orchestrator.IngestMessage) error {
+func (failingIngester) Run(context.Context, chan<- ingestion.IngesterMessage) error {
 	return errors.New("source unavailable")
 }
 
@@ -203,7 +203,7 @@ func TestIngesterAliveFalseDuringRetryBackoff(t *testing.T) {
 	}
 
 	id := glid.New()
-	if err := orch.ReconcileIngesters(saturatedFloodDesired(id, "1", func() (orchestrator.Ingester, error) {
+	if err := orch.ReconcileIngesters(saturatedFloodDesired(id, "1", func() (ingestion.Ingester, error) {
 		return failingIngester{}, nil
 	})); err != nil {
 		t.Fatalf("reconcile: %v", err)

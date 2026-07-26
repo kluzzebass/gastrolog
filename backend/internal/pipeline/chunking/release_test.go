@@ -17,14 +17,15 @@ func releaseScanFor(fsm *vaultctlfsm.FSM, minChunkHolders int) *vaultctlfsm.Rele
 }
 
 // testMayRelease evaluates the registry-release gate for one segment the way
-// production does: one scan per pass, pure decision over it.
-func testMayRelease(fsm *vaultctlfsm.FSM, segID glid.GLID, required []string, holdersWired bool, minChunkHolders int, giveUpTTL time.Duration, now time.Time) bool {
+// production does: one scan per pass, pure decision over it. resolved=false
+// models an unresolved placement lookup (fail closed).
+func testMayRelease(fsm *vaultctlfsm.FSM, segID glid.GLID, required []string, resolved bool, minChunkHolders int, giveUpTTL time.Duration, now time.Time) bool {
 	scan := releaseScanFor(fsm, minChunkHolders)
 	entry := scan.Entry(segID)
 	if entry == nil {
 		return false
 	}
-	return scanMayRelease(scan, entry, required, holdersWired, giveUpTTL, now)
+	return scanMayRelease(scan, entry, required, resolved, giveUpTTL, now)
 }
 
 func TestReleasableSegmentIDsSkipsPartialSlices(t *testing.T) {
@@ -160,7 +161,9 @@ func TestSegmentReadyForRegistryReleaseBlockedInSealedManifest(t *testing.T) {
 	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, now.Add(time.Minute))}); err != nil {
 		t.Fatal(err)
 	}
-	if testMayRelease(fsm, segID, nil, false, 2, 0, time.Time{}) {
+	// Even the explicit no-holder-gate opt-out (resolved, empty requirement)
+	// must not release a segment still referenced by an unbuilt manifest.
+	if testMayRelease(fsm, segID, nil, true, 2, 0, time.Time{}) {
 		t.Fatal("segment in sealed manifest awaiting build must not be releasable")
 	}
 }
@@ -255,9 +258,9 @@ func TestReleaseGiveUpOnRetentionExpiry(t *testing.T) {
 		t.Fatal("segment past the retention TTL must give up (counted expiry)")
 	}
 
-	// Placement lookup unresolved (holdersWired, empty required): give-up
-	// still fires — that broken state is exactly what it exists for.
-	if !testMayRelease(fsm, segID, nil, true, 2, ttl, ingested.Add(ttl+time.Second)) {
+	// Placement lookup unresolved (resolved=false): give-up still fires —
+	// that broken state is exactly what it exists for.
+	if !testMayRelease(fsm, segID, nil, false, 2, ttl, ingested.Add(ttl+time.Second)) {
 		t.Fatal("give-up must fire even with unresolved placement")
 	}
 

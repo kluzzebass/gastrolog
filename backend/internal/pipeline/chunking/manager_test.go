@@ -56,12 +56,13 @@ func TestManagerBuildOnceBuildsGLCBAndAnnouncesSeal(t *testing.T) {
 	var applied [][]byte
 	mgr := chunking.New(chunking.Config{})
 	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
-		VaultRoot: home,
-		ChunkRoot: filepath.Join(home, "chunks"),
-		FSM:       fsm,
-		Locate:    chunking.HeadSegmentLocator{Root: home},
-		Applier:   &recordingApplier{out: &applied, fsm: fsm},
-		IsLeader:  func() bool { return true },
+		RequiredHolders: chunking.NoRequiredHolders,
+		VaultRoot:       home,
+		ChunkRoot:       filepath.Join(home, "chunks"),
+		FSM:             fsm,
+		Locate:          chunking.HeadSegmentLocator{Root: home},
+		Applier:         &recordingApplier{out: &applied, fsm: fsm},
+		IsLeader:        func() bool { return true },
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -147,12 +148,13 @@ func TestManagerBuildOnceReleasesCompletedRegistry(t *testing.T) {
 
 	mgr := chunking.New(chunking.Config{})
 	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
-		VaultRoot: home,
-		ChunkRoot: filepath.Join(home, "chunks"),
-		FSM:       fsm,
-		Locate:    chunking.HeadSegmentLocator{Root: home},
-		Applier:   &fsmApplier{fsm: fsm},
-		IsLeader:  func() bool { return true },
+		RequiredHolders: chunking.NoRequiredHolders,
+		VaultRoot:       home,
+		ChunkRoot:       filepath.Join(home, "chunks"),
+		FSM:             fsm,
+		Locate:          chunking.HeadSegmentLocator{Root: home},
+		Applier:         &fsmApplier{fsm: fsm},
+		IsLeader:        func() bool { return true },
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -197,12 +199,13 @@ func TestManagerBuildOncePurgesHeadStaging(t *testing.T) {
 
 	mgr := chunking.New(chunking.Config{})
 	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
-		VaultRoot: home,
-		ChunkRoot: filepath.Join(home, "chunks"),
-		FSM:       fsm,
-		Locate:    chunking.HeadSegmentLocator{Root: home},
-		Applier:   &fsmApplier{fsm: fsm},
-		IsLeader:  func() bool { return true },
+		RequiredHolders: chunking.NoRequiredHolders,
+		VaultRoot:       home,
+		ChunkRoot:       filepath.Join(home, "chunks"),
+		FSM:             fsm,
+		Locate:          chunking.HeadSegmentLocator{Root: home},
+		Applier:         &fsmApplier{fsm: fsm},
+		IsLeader:        func() bool { return true },
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -246,12 +249,13 @@ func TestManagerPurgesHeadWhenSealWinsElsewhere(t *testing.T) {
 
 	spec := func(home string, applier chunking.VaultCtlApplier, leader bool) chunking.VaultConfig {
 		return chunking.VaultConfig{
-			VaultRoot: home,
-			ChunkRoot: filepath.Join(home, "chunks"),
-			FSM:       fsm,
-			Locate:    chunking.HeadSegmentLocator{Root: home},
-			Applier:   applier,
-			IsLeader:  func() bool { return leader },
+			RequiredHolders: chunking.NoRequiredHolders,
+			VaultRoot:       home,
+			ChunkRoot:       filepath.Join(home, "chunks"),
+			FSM:             fsm,
+			Locate:          chunking.HeadSegmentLocator{Root: home},
+			Applier:         applier,
+			IsLeader:        func() bool { return leader },
 		}
 	}
 
@@ -326,8 +330,8 @@ func TestManagerBuildOnceWaitsForHoldersBeforeRelease(t *testing.T) {
 		Locate:    chunking.HeadSegmentLocator{Root: home},
 		Applier:   &fsmApplier{fsm: fsm},
 		IsLeader:  func() bool { return true },
-		RequiredHolders: func() []string {
-			return []string{"home-a", "home-b"}
+		RequiredHolders: func() ([]string, bool) {
+			return []string{"home-a", "home-b"}, true
 		},
 	}); err != nil {
 		t.Fatal(err)
@@ -393,8 +397,8 @@ func TestManagerWorkerReleasesAfterBuildWithoutNewHolderAck(t *testing.T) {
 		Locate:    chunking.HeadSegmentLocator{Root: home},
 		Applier:   &fsmApplier{fsm: fsm},
 		IsLeader:  func() bool { return true },
-		RequiredHolders: func() []string {
-			return []string{"home-a", "home-b"}
+		RequiredHolders: func() ([]string, bool) {
+			return []string{"home-a", "home-b"}, true
 		},
 	}); err != nil {
 		t.Fatal(err)
@@ -461,8 +465,8 @@ func TestManagerReleaseUnpinsDeadHolderWithFixedPlacement(t *testing.T) {
 		IsLeader:  func() bool { return true },
 		// FIXED placement including the dead node: the placement shrink that
 		// confounded the live-cluster run cannot happen here.
-		RequiredHolders: func() []string {
-			return []string{"live-a", "live-b", "dead-home"}
+		RequiredHolders: func() ([]string, bool) {
+			return []string{"live-a", "live-b", "dead-home"}, true
 		},
 	}); err != nil {
 		t.Fatal(err)
@@ -559,12 +563,13 @@ func TestBuildMaterializesMissingSegments(t *testing.T) {
 	var collects atomic.Int32
 	mgr := chunking.New(chunking.Config{})
 	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
-		VaultRoot: home,
-		ChunkRoot: filepath.Join(home, "chunks"),
-		FSM:       fsm,
-		Locate:    chunking.HeadSegmentLocator{Root: home},
-		Collector: collectorSpy{&collects},
-		IsLeader:  func() bool { return true },
+		RequiredHolders: chunking.NoRequiredHolders,
+		VaultRoot:       home,
+		ChunkRoot:       filepath.Join(home, "chunks"),
+		FSM:             fsm,
+		Locate:          chunking.HeadSegmentLocator{Root: home},
+		Collector:       collectorSpy{&collects},
+		IsLeader:        func() bool { return true },
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -610,12 +615,13 @@ func TestManagerFollowerSkipsQuietlyWhenSegmentsMissing(t *testing.T) {
 	var collects atomic.Int32
 	mgr := chunking.New(chunking.Config{})
 	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
-		VaultRoot: home,
-		ChunkRoot: filepath.Join(home, "chunks"),
-		FSM:       fsm,
-		Locate:    chunking.HeadSegmentLocator{Root: home},
-		Collector: collectorSpy{&collects},
-		IsLeader:  func() bool { return false },
+		RequiredHolders: chunking.NoRequiredHolders,
+		VaultRoot:       home,
+		ChunkRoot:       filepath.Join(home, "chunks"),
+		FSM:             fsm,
+		Locate:          chunking.HeadSegmentLocator{Root: home},
+		Collector:       collectorSpy{&collects},
+		IsLeader:        func() bool { return false },
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -650,11 +656,12 @@ func TestManagerBuildsOnSealEvent(t *testing.T) {
 
 	mgr := chunking.New(chunking.Config{})
 	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
-		VaultRoot: home,
-		ChunkRoot: filepath.Join(home, "chunks"),
-		FSM:       fsm,
-		Locate:    chunking.HeadSegmentLocator{Root: home},
-		IsLeader:  func() bool { return false },
+		RequiredHolders: chunking.NoRequiredHolders,
+		VaultRoot:       home,
+		ChunkRoot:       filepath.Join(home, "chunks"),
+		FSM:             fsm,
+		Locate:          chunking.HeadSegmentLocator{Root: home},
+		IsLeader:        func() bool { return false },
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -703,12 +710,13 @@ func TestManagerFollowerHomeBuildsWithoutProposingSealChunk(t *testing.T) {
 	var applied [][]byte
 	mgr := chunking.New(chunking.Config{})
 	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
-		VaultRoot: home,
-		ChunkRoot: filepath.Join(home, "chunks"),
-		FSM:       fsm,
-		Locate:    chunking.HeadSegmentLocator{Root: home},
-		Applier:   &recordingApplier{out: &applied, fsm: fsm},
-		IsLeader:  func() bool { return false },
+		RequiredHolders: chunking.NoRequiredHolders,
+		VaultRoot:       home,
+		ChunkRoot:       filepath.Join(home, "chunks"),
+		FSM:             fsm,
+		Locate:          chunking.HeadSegmentLocator{Root: home},
+		Applier:         &recordingApplier{out: &applied, fsm: fsm},
+		IsLeader:        func() bool { return false },
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -807,12 +815,13 @@ func TestBuildMaterializesSpecificSegmentIDs(t *testing.T) {
 	rec := &segmentCollectorRecorder{}
 	mgr := chunking.New(chunking.Config{})
 	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
-		VaultRoot: home,
-		ChunkRoot: filepath.Join(home, "chunks"),
-		FSM:       fsm,
-		Locate:    chunking.HeadSegmentLocator{Root: home},
-		Collector: rec,
-		IsLeader:  func() bool { return true },
+		RequiredHolders: chunking.NoRequiredHolders,
+		VaultRoot:       home,
+		ChunkRoot:       filepath.Join(home, "chunks"),
+		FSM:             fsm,
+		Locate:          chunking.HeadSegmentLocator{Root: home},
+		Collector:       rec,
+		IsLeader:        func() bool { return true },
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -888,12 +897,13 @@ func TestManagerBuildOnceFollowerHomeBuildsGLCBWithoutSealing(t *testing.T) {
 
 	mgr := chunking.New(chunking.Config{})
 	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
-		VaultRoot: home,
-		ChunkRoot: filepath.Join(home, "chunks"),
-		FSM:       fsm,
-		Locate:    chunking.HeadSegmentLocator{Root: home},
-		Applier:   &flakyFSMApplier{fsm: fsm},
-		IsLeader:  func() bool { return false },
+		RequiredHolders: chunking.NoRequiredHolders,
+		VaultRoot:       home,
+		ChunkRoot:       filepath.Join(home, "chunks"),
+		FSM:             fsm,
+		Locate:          chunking.HeadSegmentLocator{Root: home},
+		Applier:         &flakyFSMApplier{fsm: fsm},
+		IsLeader:        func() bool { return false },
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -937,12 +947,13 @@ func TestManagerBuildOnceUsesExistingGLCBWithoutSegments(t *testing.T) {
 
 	follower := chunking.New(chunking.Config{})
 	if err := follower.RegisterVault(vaultID, chunking.VaultConfig{
-		VaultRoot: home,
-		ChunkRoot: filepath.Join(home, "chunks"),
-		FSM:       fsm,
-		Locate:    chunking.HeadSegmentLocator{Root: home},
-		Applier:   &flakyFSMApplier{fsm: fsm},
-		IsLeader:  func() bool { return false },
+		RequiredHolders: chunking.NoRequiredHolders,
+		VaultRoot:       home,
+		ChunkRoot:       filepath.Join(home, "chunks"),
+		FSM:             fsm,
+		Locate:          chunking.HeadSegmentLocator{Root: home},
+		Applier:         &flakyFSMApplier{fsm: fsm},
+		IsLeader:        func() bool { return false },
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -959,12 +970,13 @@ func TestManagerBuildOnceUsesExistingGLCBWithoutSegments(t *testing.T) {
 
 	leader := chunking.New(chunking.Config{})
 	if err := leader.RegisterVault(vaultID, chunking.VaultConfig{
-		VaultRoot: home,
-		ChunkRoot: filepath.Join(home, "chunks"),
-		FSM:       fsm,
-		Locate:    chunking.HeadSegmentLocator{Root: home},
-		Applier:   &flakyFSMApplier{fsm: fsm},
-		IsLeader:  func() bool { return true },
+		RequiredHolders: chunking.NoRequiredHolders,
+		VaultRoot:       home,
+		ChunkRoot:       filepath.Join(home, "chunks"),
+		FSM:             fsm,
+		Locate:          chunking.HeadSegmentLocator{Root: home},
+		Applier:         &flakyFSMApplier{fsm: fsm},
+		IsLeader:        func() bool { return true },
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1006,12 +1018,13 @@ func TestManagerBuildOnceSealsAfterLeadershipTransfer(t *testing.T) {
 	leader.Store(false)
 	mgr := chunking.New(chunking.Config{})
 	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
-		VaultRoot: home,
-		ChunkRoot: filepath.Join(home, "chunks"),
-		FSM:       fsm,
-		Locate:    chunking.HeadSegmentLocator{Root: home},
-		Applier:   &flakyFSMApplier{fsm: fsm},
-		IsLeader:  leader.Load,
+		RequiredHolders: chunking.NoRequiredHolders,
+		VaultRoot:       home,
+		ChunkRoot:       filepath.Join(home, "chunks"),
+		FSM:             fsm,
+		Locate:          chunking.HeadSegmentLocator{Root: home},
+		Applier:         &flakyFSMApplier{fsm: fsm},
+		IsLeader:        leader.Load,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1060,12 +1073,13 @@ func TestManagerBuildOnceRetriesSealApplyAfterFailure(t *testing.T) {
 	applier := &flakyFSMApplier{fsm: fsm, fail: 1}
 	mgr := chunking.New(chunking.Config{})
 	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
-		VaultRoot: home,
-		ChunkRoot: filepath.Join(home, "chunks"),
-		FSM:       fsm,
-		Locate:    chunking.HeadSegmentLocator{Root: home},
-		Applier:   applier,
-		IsLeader:  func() bool { return true },
+		RequiredHolders: chunking.NoRequiredHolders,
+		VaultRoot:       home,
+		ChunkRoot:       filepath.Join(home, "chunks"),
+		FSM:             fsm,
+		Locate:          chunking.HeadSegmentLocator{Root: home},
+		Applier:         applier,
+		IsLeader:        func() bool { return true },
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1107,11 +1121,12 @@ func TestManagerUnregisterVault(t *testing.T) {
 	fsm := vaultctlfsm.New()
 	mgr := chunking.New(chunking.Config{})
 	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
-		VaultRoot: t.TempDir(),
-		ChunkRoot: filepath.Join(t.TempDir(), "chunks"),
-		FSM:       fsm,
-		Locate:    chunking.HeadSegmentLocator{Root: t.TempDir()},
-		IsLeader:  func() bool { return true },
+		RequiredHolders: chunking.NoRequiredHolders,
+		VaultRoot:       t.TempDir(),
+		ChunkRoot:       filepath.Join(t.TempDir(), "chunks"),
+		FSM:             fsm,
+		Locate:          chunking.HeadSegmentLocator{Root: t.TempDir()},
+		IsLeader:        func() bool { return true },
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1141,12 +1156,13 @@ func TestRewireVaultFSMRebindsLiveRegistry(t *testing.T) {
 	applier := &recordingApplier{out: &applied, fsm: liveFSM}
 	mgr := chunking.New(chunking.Config{})
 	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
-		VaultRoot: home,
-		ChunkRoot: filepath.Join(home, "chunks"),
-		FSM:       staleFSM,
-		Locate:    chunking.HeadSegmentLocator{Root: home},
-		Applier:   applier,
-		IsLeader:  func() bool { return true },
+		RequiredHolders: chunking.NoRequiredHolders,
+		VaultRoot:       home,
+		ChunkRoot:       filepath.Join(home, "chunks"),
+		FSM:             staleFSM,
+		Locate:          chunking.HeadSegmentLocator{Root: home},
+		Applier:         applier,
+		IsLeader:        func() bool { return true },
 	}); err != nil {
 		t.Fatal(err)
 	}

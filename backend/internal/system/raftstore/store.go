@@ -118,40 +118,34 @@ func (s *Store) forwardAndWait(ctx context.Context, data []byte) (uint64, error)
 	return appliedIndex, nil
 }
 
-// waitForLocalApply blocks until the local Raft FSM has applied at least
-// the given index, bounded by the effective timeout. Used on followers
-// after Forward to ensure post-mutation reads see the new state.
+// waitForLocalApply blocks until the local FSM has applied at least the
+// given index, bounded by the effective timeout. Used on followers after
+// Forward to ensure post-mutation reads see the new state.
 //
-// Polls raft.AppliedIndex at a short interval — the local Raft worker
-// applies committed entries asynchronously after Forward returns from
-// the leader, so this typically returns within a few milliseconds. Times
-// out if the follower never catches up (partitioned, log truncated,
-// etc.) so a stuck cluster surfaces as a client-visible error rather
-// than a hang. See gastrolog-2nxij.
+// Event-driven (gastrolog-3klg1): the FSM advances its applywait.Tracker
+// as it applies each committed entry (and on snapshot restore), waking
+// this wait the moment the mutation is locally visible — no polling. This
+// also closes a race the previous 5ms raft.AppliedIndex() poll had:
+// hashicorp/raft advances AppliedIndex when it enqueues an entry for the
+// FSM goroutine, before FSM.Apply runs, so the poll could release a
+// reader while the store still showed pre-mutation state. Times out if
+// the follower never catches up (partitioned, log truncated, etc.) so a
+// stuck cluster surfaces as a client-visible error rather than a hang.
+// See gastrolog-2nxij.
 func (s *Store) waitForLocalApply(ctx context.Context, target uint64) error {
 	if target == 0 {
 		return nil
 	}
-	if s.raft.AppliedIndex() >= target {
-		return nil
-	}
-	const pollInterval = 5 * time.Millisecond
-	deadline := time.Now().Add(s.effectiveTimeout(ctx))
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
+	tracker := s.fsm.ApplyWait()
+	waitCtx, cancel := context.WithTimeout(ctx, s.effectiveTimeout(ctx))
+	defer cancel()
+	if err := tracker.Wait(waitCtx, target); err != nil {
+		if ctx.Err() != nil {
 			return ctx.Err()
-		case <-ticker.C:
-			if s.raft.AppliedIndex() >= target {
-				return nil
-			}
-			if time.Now().After(deadline) {
-				return fmt.Errorf("wait for local FSM apply at index %d: timeout (last applied %d)", target, s.raft.AppliedIndex())
-			}
 		}
+		return fmt.Errorf("wait for local FSM apply at index %d: timeout (last applied %d)", target, tracker.Applied())
 	}
+	return nil
 }
 
 // effectiveTimeout returns min(ctx deadline, s.applyTimeout). Raft.Apply
@@ -175,6 +169,28 @@ func (s *Store) effectiveTimeout(ctx context.Context) time.Duration {
 // FSM to catch up. See gastrolog-2nxij.
 func (s *Store) ApplyRaw(data []byte) (uint64, error) {
 	return s.applyRaw(context.Background(), data)
+}
+
+// Barrier commits a state-free catch-up-barrier command through Raft and
+// blocks until the local FSM has applied it, guaranteeing the local FSM
+// reflects every entry committed cluster-wide before the call returned.
+//
+// It reuses the read-after-write machinery (applyRaw + the event-driven
+// apply-wait tracker, gastrolog-3klg1): on the leader raft.Apply is
+// synchronous, so the FSM is current on return; on a follower the barrier is
+// forwarded to the leader and this blocks on the tracker until the local FSM
+// applies up to the barrier's committed index — no polling, no stability
+// window. The barrier is an ordinary LogCommand (not a raft LogBarrier) so it
+// flows through FSM.Apply, which the FSM-fed tracker requires to advance.
+// Used by startup FSM catch-up (gastrolog-1go57); bound the wait by passing a
+// ctx with a deadline.
+func (s *Store) Barrier(ctx context.Context) error {
+	data, err := command.Marshal(command.NewCatchupBarrier())
+	if err != nil {
+		return fmt.Errorf("marshal catchup barrier: %w", err)
+	}
+	_, err = s.applyRaw(ctx, data)
+	return err
 }
 
 // ---------------------------------------------------------------------------

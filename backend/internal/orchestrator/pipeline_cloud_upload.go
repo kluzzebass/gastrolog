@@ -32,18 +32,13 @@ func (o *Orchestrator) schedulePipelineCloudUpload(vaultID glid.GLID, chunkID ch
 	if !ok {
 		return
 	}
+	// The FSM manifest entry is the cluster-wide seal/upload gate: skip a
+	// chunk the cluster hasn't finished sealing (GLCB not yet committed) or
+	// has already uploaded. ManifestEntry is nil only in memory mode, where
+	// cloud upload is already gated off above (vaultInstCanUploadToCloud).
 	if vaultInst.ManifestEntry != nil {
 		e, ok := vaultInst.ManifestEntry(chunkID)
 		if !ok || e.State != chunk.ChunkStateSealed || e.CloudBacked {
-			return
-		}
-	} else if vaultInst.OverlayFromFSM != nil {
-		meta, err := vaultInst.Chunks.Meta(chunkID)
-		if err != nil {
-			return
-		}
-		meta = vaultInst.OverlayFromFSM(meta)
-		if !meta.Sealed || meta.CloudBacked {
 			return
 		}
 	}

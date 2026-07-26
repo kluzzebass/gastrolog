@@ -177,12 +177,9 @@ type retentionRunner struct {
 	applyRaftRetentionPending func(id chunk.ChunkID) error
 
 	// reconciler is the instance lifecycle reconciler that owns chunk-lifecycle
-	// execution. All production deletes route through reconciler.deleteChunk
-	// → CmdRequestDelete (gastrolog-51gme steps 4-7). Nil only in older test
-	// harnesses that build VaultInstances directly without going through
-	// buildInstance; those harnesses fall through to the legacy
-	// direct-delete path below (for cross-node propagation they wire
-	// directChunkReplicator.DeleteChunk RPC fan-out separately).
+	// execution. All deletes route through reconciler.deleteChunk →
+	// CmdRequestDelete (gastrolog-51gme steps 4-7); it is the only delete
+	// path. Test harnesses that exercise expiry must wire a reconciler.
 	reconciler *VaultLifecycleReconciler
 
 	// isLeader returns true if this node is the config leader for this instance.
@@ -334,21 +331,18 @@ func (o *Orchestrator) retentionSweepAll() {
 	// Memory budget enforcement: transition oldest chunks when over budget.
 	o.enforceMemoryBudgets(cfg)
 
-	// Cache eviction: collect evictors under lock, run outside.
-	// EvictCache does filesystem I/O — holding the lock would block Raft applies.
-	var evictors []chunk.ChunkCacheEvictor
-	o.mu.RLock()
-	for _, vault := range o.vaults {
-		if vaultInst := vault.Instance; vaultInst != nil {
-			if evictor, ok := vaultInst.Chunks.(chunk.ChunkCacheEvictor); ok {
-				evictors = append(evictors, evictor)
-			}
-		}
-	}
-	o.mu.RUnlock()
-	for _, evictor := range evictors {
-		evictor.EvictCache()
-	}
+	// Cache eviction does NOT run here (gastrolog-1a18r): it is its own
+	// scheduled job (see cache_eviction.go, cron "23 * * * * *"),
+	// operator-visible in the Jobs inspector as its own unit. This
+	// retention sweep used to also call EvictCache via the now-removed
+	// chunk.ChunkCacheEvictor interface, but that interface's zero-return
+	// EvictCache() signature predates the chunk-redesign's warm-cache
+	// eviction (gastrolog-2idw8): file.Manager.EvictCache() returns
+	// (evicted int, freedBytes int64), so no chunk manager has satisfied
+	// chunk.ChunkCacheEvictor since 2idw8 landed — this branch never fired
+	// in production. Cache eviction is a node-local warm-cache concern,
+	// not a retention decision; it doesn't belong on this path even if it
+	// had worked.
 }
 
 // vaultCatchupSweepAll runs every 20 seconds (cron 13/33/53s, phase-
@@ -360,6 +354,19 @@ func (o *Orchestrator) retentionSweepAll() {
 // stale pending-delete acks, idle actives). See
 // VaultLifecycleReconciler.ReconcileTick for the category catalogue and
 // per-category ownership docs (gastrolog-4pq56v).
+//
+// BACKSTOP, not the primary driver (gastrolog-3fu9t). Every category now
+// has an upstream event that drives its primary convergence — delete
+// obligations on CmdRequestDelete apply, local/staging orphans on
+// snapshot install (ReconcileFromSnapshot), and the leader-only
+// categories on lead-gained (ReconcileMembershipCatchup). This tick
+// catches the residual: dropped/raced events, and the two categories that
+// are periodic-by-nature (idle-active wall-clock inactivity, and the
+// grace-period GCs for stale-leader-FSM and abandoned-transfer). It is
+// kept as a defense-in-depth safety net because losing a chunk cleanup or
+// leaking a stranded entry is a durability/correctness concern, not a
+// tunable — the event wakes make it converge fast, the tick guarantees it
+// converges at all.
 //
 // Every category is local-only on the originating side: each node
 // consults its OWN replicated FSM state and decides independently.
@@ -786,9 +793,9 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 	// selectRetentionCandidates' meta.Sealed gate reflects cluster
 	// truth — Sealing chunks (active-form files closed locally but
 	// GLCB not yet committed) must not be eligible.
-	if vaultInst != nil && vaultInst.OverlayFromFSM != nil {
+	if vaultInst != nil {
 		for i := range metas {
-			metas[i] = vaultInst.OverlayFromFSM(metas[i])
+			metas[i] = r.orch.groundChunkMeta(r.vaultID, metas[i])
 		}
 	}
 
@@ -1154,9 +1161,9 @@ func (r *retentionRunner) currentSealedForBoundCheck() ([]chunk.ChunkMeta, bool)
 	r.mu.Lock()
 	vaultInst := r.findVaultInstance()
 	r.mu.Unlock()
-	if vaultInst != nil && vaultInst.OverlayFromFSM != nil {
+	if vaultInst != nil {
 		for i := range metas {
-			metas[i] = vaultInst.OverlayFromFSM(metas[i])
+			metas[i] = r.orch.groundChunkMeta(r.vaultID, metas[i])
 		}
 	}
 	metas = appendUnlistedManifestSealed(metas, vaultInst)
@@ -1843,38 +1850,12 @@ func (r *retentionRunner) expireChunk(id chunk.ChunkID, reason string) {
 		return
 	}
 
-	// Reconciler-less fallback: legacy direct-delete path.
-	//
-	// Reached only by older test harnesses that build a retentionRunner
-	// without going through buildInstance (so instance.Reconciler is nil).
-	// They wire cross-node propagation via directChunkReplicator.DeleteChunk
-	// RPC fan-out (forwardDeletionToFollowers below) instead of vault-ctl
-	// Raft. Production has no path into here after gastrolog-51gme step 11
-	// — ApplyRaftDelete / CmdDeleteChunk producers are gone.
-	if err := r.im.DeleteIndexes(id); err != nil {
-		r.logger.Error("retention: failed to delete indexes",
-			"vault", r.vaultID, "chunk", id.String(), "error", err)
-		return
-	}
-	if err := r.cm.Delete(id); err != nil && !errors.Is(err, chunk.ErrChunkNotFound) {
-		r.logger.Error("retention: failed to delete chunk",
-			"vault", r.vaultID, "chunk", id.String(), "error", err)
-		return
-	}
-	if r.orch != nil {
-		if r.orch.retentionRates != nil {
-			r.orch.retentionRates.Record(r.vaultID, r.orch.now())
-		}
-		if r.orch.stageEvents != nil {
-			r.orch.stageEvents.recordRetentionDelete(r.vaultID)
-		}
-		r.orch.logChunkExpunged(r.vaultID, id, reason)
-		r.orch.EmitChunkDeleted(r.vaultID, id)
-		r.orch.deleteFromFollowers(r.vaultID, id)
-		r.forwardDeletionToFollowers(id)
-	}
-	r.logger.Debug("retention: deleted chunk (no-reconciler fallback)",
-		"vault", r.vaultID, "chunk", id.String())
+	// A retention runner with no reconciler cannot delete: chunk deletion
+	// flows exclusively through the vault-ctl FSM receipt protocol, which
+	// the reconciler owns. Production always wires one (buildInstance); a
+	// nil reconciler here means a misconfigured runner.
+	r.logger.Error("retention: no reconciler wired, cannot expire chunk",
+		"vault", r.vaultID, "chunk", id.String(), "reason", reason)
 }
 
 // expectedFromForExpire returns the placement-membership-at-decision-time
@@ -1907,55 +1888,3 @@ func (r *retentionRunner) expectedFromForExpire() []string {
 // (placementMembership lives on Orchestrator in vault_ops.go and serves
 // the cluster paths that aren't routed through a retention runner —
 // archival sweep, the cloud reconciliation suspect-expiry, etc.)
-
-// forwardDeletionToFollowers sends an explicit delete RPC to each remote
-// follower. Used only by the reconciler-less fallback path in expireChunk
-// (test harnesses without a vault-ctl Raft group / VaultLifecycleReconciler).
-// Production runs through the receipt protocol and never reaches here.
-// The directChunkReplicator.DeleteChunk RPC chain stays for that harness;
-// removing it requires migrating the harness onto the reconciler with a
-// fake-FSM-applier — a follow-up refactor outside the scope of step 11.
-func (r *retentionRunner) forwardDeletionToFollowers(id chunk.ChunkID) {
-	for _, target := range r.followerTargets {
-		if target.NodeID == r.orch.localNodeID {
-			continue // already handled by deleteFromFollowers
-		}
-		r.forwardDeleteWithRetry(target.NodeID, id)
-	}
-}
-
-// forwardDeleteWithRetry sends a chunk-delete RPC to a follower with up to
-// 3 retries on transient failures. "chunk not found" means the chunk is
-// already gone on the follower — goal achieved, no retry needed.
-func (r *retentionRunner) forwardDeleteWithRetry(nodeID string, id chunk.ChunkID) {
-	const maxAttempts = 3
-	for attempt := range maxAttempts {
-		err := r.sendDeleteToFollower(nodeID, id)
-		if err == nil {
-			return
-		}
-		if strings.Contains(err.Error(), "chunk not found") {
-			r.logger.Debug("retention: chunk already gone on follower",
-				"vault", r.vaultID, "chunk", id.String(), "follower", nodeID)
-			return
-		}
-		if attempt < maxAttempts-1 {
-			time.Sleep(time.Duration(attempt+1) * 50 * time.Millisecond)
-			continue
-		}
-		r.logger.Warn("retention: failed to forward chunk deletion to follower",
-			"vault", r.vaultID, "chunk", id.String(),
-			"follower", nodeID, "error", err, "attempts", maxAttempts)
-	}
-}
-
-// sendDeleteToFollower issues a single chunk-delete RPC via the instance
-// replicator. Returns nil when no replicator is configured (single-node mode).
-func (r *retentionRunner) sendDeleteToFollower(followerID string, id chunk.ChunkID) error {
-	if r.orch.chunkReplicator == nil {
-		return nil
-	}
-	return r.orch.chunkReplicator.DeleteChunk(
-		context.Background(), followerID, r.vaultID, id,
-	)
-}

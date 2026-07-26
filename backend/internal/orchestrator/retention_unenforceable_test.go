@@ -345,10 +345,12 @@ func TestRetentionTargetHasRaftLeaderFalseLogsThrottledWarnNoAlarm(t *testing.T)
 	orch := newUnenforceableTestOrch(t, sink, logSink)
 
 	vaultInst := &VaultInstance{
-		VaultID:       vaultID,
-		Chunks:        &retentionFakeChunkManager{},
-		Indexes:       &retentionFakeIndexManager{},
-		HasRaftLeader: func() bool { return false },
+		VaultID: vaultID,
+		Chunks:  &retentionFakeChunkManager{},
+		Indexes: &retentionFakeIndexManager{},
+		RaftLeadershipFacet: RaftLeadershipFacet{
+			HasRaftLeader: func() bool { return false },
+		},
 	}
 	active := make(map[string]bool)
 

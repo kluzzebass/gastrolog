@@ -33,7 +33,13 @@ const (
 // self-ingester captures.
 func startIngesterReconcileSweep(ctx context.Context, scheduler scheduledJobRegistry, d *configDispatcher, logger *slog.Logger) error {
 	task := func() {
-		d.reconcileIngesters(ctx)
+		// Route through settle so this existing safety-net sweep doubles as
+		// the clear/retry point for a standing ingester reconcile obligation:
+		// a successful pass clears it, a still-failing pass keeps it standing.
+		// This reuses an existing trigger — it does not add a new sweep — and
+		// is distinct from the divergence LOG below (desired ingester not
+		// running), which stays a log per the operator razor.
+		d.settle(entIngester, "", "reconcile-ingesters", d.reconcileIngesters(ctx))
 		d.reportIngesterDivergence(ctx, logger)
 	}
 	if err := scheduler.AddJob(ingesterReconcileJobName, ingesterReconcileSchedule, task); err != nil {

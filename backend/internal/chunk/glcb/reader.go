@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"slices"
+	"time"
 
 	"gastrolog/internal/chunk"
 )
@@ -215,6 +216,35 @@ func (rd *Reader) readRecordAt(pos uint32) (chunk.Record, error) {
 	return cloneMmapRecord(rec), nil
 }
 
+// ProjectAttrs decodes a record by position (0-based) to just its writeTS and
+// attributes, reading the fixed frame header + attr dict IDs and skipping the
+// [rawLen][raw] payload entirely. It is the AttrsProjectionSource seam for
+// histogram level-breakdown sampling, which never touches message bodies.
+//
+// Unlike readRecordAt there is no cloneMmapRecord step: the returned attrs are
+// heap strings out of the dictionary (never aliased to the mapping) and no raw
+// slice is produced, so the projection allocates nothing beyond the attrs map
+// itself. writeTS is copied by value out of the mapping.
+func (rd *Reader) ProjectAttrs(pos uint32) (time.Time, chunk.Attributes, error) {
+	if pos >= rd.meta.RecordCount {
+		return time.Time{}, nil, chunk.ErrNoMoreRecords
+	}
+
+	idx, err := recordIndexAt(rd.indexBytes, pos)
+	if err != nil {
+		return time.Time{}, nil, err
+	}
+	if idx.Offset > math.MaxInt64 {
+		return time.Time{}, nil, fmt.Errorf("record %d: offset %d overflows int64", pos, idx.Offset)
+	}
+	absOff := rd.recordsBaseOff + int64(idx.Offset)
+	frameEnd := absOff + int64(idx.Size)
+	if absOff < 0 || frameEnd > int64(len(rd.mmapData)) {
+		return time.Time{}, nil, fmt.Errorf("record %d: frame [%d,%d) out of mmap bounds %d", pos, absOff, frameEnd, len(rd.mmapData))
+	}
+	return decodeFrameAttrsProjection(rd.mmapData[absOff:frameEnd], rd.dict)
+}
+
 // Close drops the Reader's references into the mapping. The mmap's lifetime
 // is owned by the MappedBlob that produced this Reader.
 func (rd *Reader) Close() error {
@@ -307,4 +337,37 @@ func decodeFrame(frame []byte, dict chunk.DictReader) (chunk.Record, error) {
 	}
 	rec.Raw = frame[off : off+int(rawLen)]
 	return rec, nil
+}
+
+// decodeFrameAttrsProjection decodes only the writeTS and attributes from a
+// record frame, skipping the [rawLen][raw] payload entirely. It mirrors
+// decodeFrame's fixed-header layout (see the package comment) but reads just
+// the one timestamp the projection needs and stops after the attrs block — the
+// raw tail is never sliced, so no cloneMmapRecord copy of it is ever made.
+// Every field read is bounds-checked at its own site so the layout and the
+// guard never drift.
+func decodeFrameAttrsProjection(frame []byte, dict chunk.DictReader) (time.Time, chunk.Attributes, error) {
+	// writeTS is the third fixed timestamp (sourceTS, ingestTS, writeTS).
+	writeTSOff := 2 * frameTSSize
+	if writeTSOff+frameTSSize > len(frame) {
+		return time.Time{}, nil, errors.New("truncated writeTS")
+	}
+	writeTS := tsFromNanos(binary.LittleEndian.Uint64(frame[writeTSOff:]))
+
+	// The attrs block follows the whole fixed header (three timestamps, two
+	// GLIDs, ingestSeq), so the two GLIDs and ingestSeq are skipped unread.
+	off := frameFixedHeaderSize
+	if off+frameAttrCountSize > len(frame) {
+		return time.Time{}, nil, errors.New("truncated attr count")
+	}
+	attrCount := int(binary.LittleEndian.Uint16(frame[off:]))
+	attrDataLen := frameAttrCountSize + attrCount*frameAttrPairSize
+	if off+attrDataLen > len(frame) {
+		return time.Time{}, nil, errors.New("truncated attrs")
+	}
+	attrs, err := chunk.DecodeWithDict(frame[off:off+attrDataLen], dict)
+	if err != nil {
+		return time.Time{}, nil, fmt.Errorf("decode attrs: %w", err)
+	}
+	return writeTS, attrs, nil
 }

@@ -29,6 +29,7 @@ import (
 	"gastrolog/internal/ingester/chatterbox"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/pipeline/chunking"
+	"gastrolog/internal/pipeline/ingestion"
 	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/pipeline/segmentation"
 	"gastrolog/internal/query"
@@ -464,7 +465,7 @@ func TestOrchPipeline_IngesterReassignmentKeepsFlowing(t *testing.T) {
 		ID:   ingID,
 		Name: "chatter",
 		Type: "chatterbox",
-		Build: func() (orchestrator.Ingester, error) {
+		Build: func() (ingestion.Ingester, error) {
 			return chatterbox.NewIngester(ingID, map[string]string{
 				"minInterval": "1ms",
 				"maxInterval": "5ms",
@@ -571,7 +572,7 @@ func TestOrchPipeline_SustainedIngestManifestKeepsPace(t *testing.T) {
 		ID:   ingID,
 		Name: "soak-chatter",
 		Type: "chatterbox",
-		Build: func() (orchestrator.Ingester, error) {
+		Build: func() (ingestion.Ingester, error) {
 			return chatterbox.NewIngester(ingID, map[string]string{
 				"minInterval": "1ms",
 				"maxInterval": "5ms",
