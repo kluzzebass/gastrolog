@@ -82,11 +82,13 @@ type VaultConfig struct {
 	RequiredHolders func() (required []string, ok bool)
 	// RetentionGiveUpTTL returns the vault's delete-disposition retention TTL
 	// (the shortest, when several rules apply) and whether a give-up bound is
-	// in effect. A registry segment whose records out-age this TTL is released
-	// as a COUNTED expiry even though it was never chunked (island origin, no
-	// reachable holder): had the records been chunked, retention would already
-	// have deleted them. Route-disposition retention vetoes the bound — those
-	// records must be routed, not dropped. Nil disables (design-notes 28).
+	// in effect. A registry segment that has sat un-chunked in this vault's
+	// registry (measured from PublishedAt, not record IngestTS — see
+	// scanGiveUpExpired) longer than this TTL is released as a COUNTED expiry
+	// even though it was never chunked (island origin, no reachable holder):
+	// holding an uncollectable entry forever only leaks. Route-disposition
+	// retention vetoes the bound — those records must be routed, not dropped.
+	// Nil disables (design-notes 28; PublishedAt anchor: gastrolog-68sfsl).
 	RetentionGiveUpTTL func() (time.Duration, bool)
 	// IndexOpener opens a completed segment for planner indexing. Defaults
 	// to BuildOrderedIndex when nil (tests may inject a counting wrapper).
@@ -155,6 +157,13 @@ type vaultChunking struct {
 	// state so planner passes log/alert only on transitions
 	// (gastrolog-4bl9xx). Guarded by planMu like the planner pass itself.
 	underReplicatedAlerted bool
+	// giveUpAlerted tracks the retention-give-up alert state so release
+	// passes raise/clear and log only on transitions. Without it a vault
+	// shedding never-chunked segments emitted one WARN per pass (~40/min on
+	// the 18h cluster run) that buried the starvation in retention noise
+	// (gastrolog-68sfsl). Guarded by mu like pendingRelease, which the same
+	// release pass mutates.
+	giveUpAlerted bool
 	// planFailures tracks segments whose on-disk index cannot be opened or
 	// read (corrupt index, unreadable file). Without it a corrupt segment
 	// was skipped silently forever: never planned into a sealed manifest,

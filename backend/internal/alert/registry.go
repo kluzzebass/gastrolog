@@ -67,6 +67,20 @@ var catalog = []AlarmType{
 		Response: "Investigate segment file corruption on the named node. If the vault has a delete-disposition retention TTL these records are released unchunked at expiry — the loss is scheduled, not hypothetical.",
 	},
 	{
+		IDPrefix: "chunking-retention-giveup",
+		Priority: Critical,
+		Source:   "chunking",
+		// Raised on the first give-up pass, cleared when the vault next seals
+		// a chunk. In a HEALTHY vault an occasional island-origin give-up is
+		// cleared by the next seal inside this window, so it never annunciates;
+		// a STARVED vault seals nothing, so the raise stands past DelayOn and
+		// annunciates — the condition that hid inside 40/min retention-noise
+		// WARNs on the 18h cluster run (gastrolog-68sfsl).
+		DelayOn:  2 * time.Minute,
+		Cause:    "A vault is repeatedly releasing never-chunked segments at its retention give-up TTL: records are aging out of the completed-segment registry before chunking ever references them, so they are dropped without reaching a chunk — even though the planner is actively running. On a cloud-backed vault the dropped records never reach cloud.",
+		Response: "The pipeline is not chunking this vault's segments within the retention TTL. The planner needs min(2, placement) holders before it can chunk a segment; check that segment collection is delivering copies to the vault's homes and that replication is progressing. Clears once the vault seals a chunk again.",
+	},
+	{
 		IDPrefix: "wal-reserve",
 		Priority: Critical,
 		Source:   "storage",
