@@ -111,7 +111,11 @@ func (o *Orchestrator) pullMissingGLCB(vaultID glid.GLID, e vaultctlfsm.Manifest
 		sourceVaultID = e.TransferSourceVaultID
 	}
 
+	// Describe BEFORE scheduling — see scheduleReplication for why (missing
+	// label on the Scheduled event, leaked descriptions entry when the job
+	// finishes first). gastrolog-69sjlj.
 	name := fmt.Sprintf("glcb-catchup:%s:%s", vaultID, e.ID)
+	o.scheduler.Describe(name, fmt.Sprintf("Replica catch-up pull of chunk %s from a peer home", e.ID))
 	err := o.scheduler.RunOnce(name, func() {
 		defer func() {
 			o.glcbPullMu.Lock()
@@ -126,7 +130,6 @@ func (o *Orchestrator) pullMissingGLCB(vaultID glid.GLID, e vaultctlfsm.Manifest
 		o.glcbPullMu.Unlock()
 		return
 	}
-	o.scheduler.Describe(name, fmt.Sprintf("Replica catch-up pull of chunk %s from a peer home", e.ID))
 }
 
 // runGLCBPull tries each peer home in placement order until one supplies a

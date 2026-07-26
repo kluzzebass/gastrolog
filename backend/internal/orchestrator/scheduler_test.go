@@ -215,3 +215,102 @@ func awaitSchedulerJobDone(t *testing.T, sub *JobSubscription, name string) {
 		}
 	}
 }
+
+// hasDescription reports whether the scheduler still holds a description entry
+// for name. completeOneTimeJob deletes the entry when a one-time job finishes,
+// so a lingering entry after completion is a leak.
+func hasDescription(s *Scheduler, name string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.descriptions[name]
+	return ok
+}
+
+// awaitSchedulerJobScheduled returns the Scheduled event for name — the event
+// that carries the label to the operator inspector.
+func awaitSchedulerJobScheduled(t *testing.T, sub *JobSubscription, name string) JobInfo {
+	t.Helper()
+	for {
+		select {
+		case evt, ok := <-sub.Events():
+			if !ok {
+				t.Fatalf("job event stream closed before %s was scheduled", name)
+			}
+			if evt.Job.Name == name && evt.Kind == JobEventScheduled {
+				return evt.Job
+			}
+		case <-time.After(30 * time.Second):
+			t.Fatalf("timed out waiting for %s to be scheduled", name)
+		}
+	}
+}
+
+// TestDescribeBeforeRunOnceLabelsEventAndReleases pins the ordering contract
+// every one-time job site must follow: Describe FIRST, then schedule. The
+// description is snapshotted into the Scheduled event's JobInfo at
+// registration time, and completeOneTimeJob deletes the entry when the job
+// finishes — so describing first is what puts the label on the event AND what
+// lets the entry be released. See gastrolog-69sjlj.
+func TestDescribeBeforeRunOnceLabelsEventAndReleases(t *testing.T) {
+	t.Parallel()
+
+	sched, err := newScheduler(slog.Default(), 4, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sched.Stop() }()
+
+	sub, cancel := sched.Events().Subscribe()
+	defer cancel()
+
+	sched.Describe("described-first", "a label the inspector can show")
+	if err := sched.RunOnce("described-first", func() {}); err != nil {
+		t.Fatal(err)
+	}
+
+	info := awaitSchedulerJobScheduled(t, sub, "described-first")
+	if info.Description != "a label the inspector can show" {
+		t.Errorf("Scheduled event description = %q, want the label set before scheduling", info.Description)
+	}
+
+	awaitSchedulerJobDone(t, sub, "described-first")
+	if hasDescription(sched, "described-first") {
+		t.Error("description entry survived job completion — it should have been released")
+	}
+}
+
+// TestDescribeAfterRunOnceLosesLabelAndLeaks is the control for the ordering
+// above: it pins the defect the call sites had, so the reason for the rule is
+// executable rather than folklore. Describing after scheduling puts no label
+// on the Scheduled event, and when the job finishes first the deletion runs
+// before the description is added — leaving an entry with no job, one per
+// invocation, for the process lifetime.
+func TestDescribeAfterRunOnceLosesLabelAndLeaks(t *testing.T) {
+	t.Parallel()
+
+	sched, err := newScheduler(slog.Default(), 4, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sched.Stop() }()
+
+	sub, cancel := sched.Events().Subscribe()
+	defer cancel()
+
+	if err := sched.RunOnce("described-late", func() {}); err != nil {
+		t.Fatal(err)
+	}
+	info := awaitSchedulerJobScheduled(t, sub, "described-late")
+	if info.Description != "" {
+		t.Errorf("Scheduled event description = %q; describing after scheduling cannot label the event", info.Description)
+	}
+
+	// Join on the job's own completion, then describe — the ordering that
+	// leaks. No sleep: the terminal event IS the "job finished first" state.
+	awaitSchedulerJobDone(t, sub, "described-late")
+	sched.Describe("described-late", "too late to matter")
+
+	if !hasDescription(sched, "described-late") {
+		t.Fatal("expected the late description to strand — if this now releases, the leak is fixed in the scheduler and the call-site ordering rule can be revisited")
+	}
+}
