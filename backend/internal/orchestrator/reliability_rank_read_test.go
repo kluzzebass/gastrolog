@@ -24,6 +24,9 @@ func TestOrchRel_RankLookupsAcrossVoters(t *testing.T) {
 	)
 	v := h.vaults[1]
 	homeIdxs := []int{0, 1, 2}
+	// Symmetric seeding (gastrolog-292yi): every node votes on vault B's
+	// control-plane group, homes and instance-less node 3 alike.
+	voterIdxs := []int{0, 1, 2, 3}
 	outsiderID := h.nodeIDs[3]
 
 	const total = 2 * pipelineChunkMaxRecords
@@ -33,6 +36,13 @@ func TestOrchRel_RankLookupsAcrossVoters(t *testing.T) {
 		t.Fatalf("expected 2 sealed chunks, got %d", len(sealed))
 	}
 	h.waitGLCBsOnHomes(v, homeIdxs, sealed)
+	// The sealed set above is one home's view of the FSM. Every tier of the
+	// grounded read — local bytes included — first resolves the chunk's owning
+	// vault through the reading node's own FSM copy, so a node that has not
+	// applied the seal yet reports the lookup unresolvable no matter what it
+	// holds on disk. Gate on that apply landing on every voter the assertions
+	// interrogate, not on the one node the seal was observed through.
+	h.waitSealedEntriesOnVoters(v, voterIdxs, sealed)
 
 	// Every home resolves exact ranks — the bytes are local (chunk manager
 	// registration or the chunk-root GLCB tier; either way the answer comes
