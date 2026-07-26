@@ -2,12 +2,18 @@ package orchestrator
 
 import (
 	"context"
+	"log/slog"
+	"sync"
 	"testing"
 	"time"
 
 	"gastrolog/internal/alert"
+	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/system"
+	"gastrolog/internal/vaultraft/vaultctlfsm"
+
+	hraft "github.com/hashicorp/raft"
 )
 
 // These tests pin the event-driven placement reconcile that replaced the 15s
@@ -185,6 +191,259 @@ func TestReconcileVaultPlacement_PropagatesToAllNodes(t *testing.T) {
 		if !insts[nodeID].IsFollower || insts[nodeID].LeaderNodeID != "L" {
 			t.Fatalf("follower %s wrong: IsFollower=%v LeaderNodeID=%q",
 				nodeID, insts[nodeID].IsFollower, insts[nodeID].LeaderNodeID)
+		}
+	}
+}
+
+// ---- gastrolog-235dm7: stable-leader rebalance wakes the ack reconcile ----
+//
+// gastrolog-3fu9t made the reconciler's leader-only categories converge on the
+// lead-gained edge (ReconcileMembershipCatchup ← onVaultCtlLeadGained). That
+// covers every membership move that comes WITH a leadership change. It does not
+// cover a rebalance under a STABLE leader: placements move a follower from one
+// node to another, the leader keeps its role and its vault-ctl Raft leadership,
+// and no lead-gained edge fires — so the leader's pendingDeletes kept naming
+// the departed node in ExpectedFrom until the 20s backstop tick noticed. The
+// reassignment IS the event; these tests pin that it now wakes the reconcile.
+//
+// Every case neuters the vault-catchup-sweep schedule first
+// (neuterCatchupSweep) so a green run cannot be the backstop tick's doing.
+
+// neuterCatchupSweep removes the periodic reconcile backstop from the
+// orchestrator's scheduler so a test can only pass on the event path. Fails the
+// test if the job is still registered afterwards — the guard is worthless if
+// the job name drifts.
+func neuterCatchupSweep(t *testing.T, o *Orchestrator) {
+	t.Helper()
+	o.scheduler.RemoveJob(vaultCatchupSweepJobName)
+	if o.scheduler.HasJob(vaultCatchupSweepJobName) {
+		t.Fatalf("%s still scheduled: the test cannot prove event-driven convergence", vaultCatchupSweepJobName)
+	}
+}
+
+// prunedRecorder captures ApplyRaftPruneNode proposals. The wake runs on the
+// orchestrator's auxWg goroutine, so tests read it only after auxWg.Wait().
+type prunedRecorder struct {
+	mu    sync.Mutex
+	nodes []string
+}
+
+func (p *prunedRecorder) apply(nodeID string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.nodes = append(p.nodes, nodeID)
+	return nil
+}
+
+func (p *prunedRecorder) list() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]string(nil), p.nodes...)
+}
+
+// pendingDeleteFSM returns a vault-ctl FSM holding exactly one pendingDelete
+// whose ExpectedFrom is the given node set — the receipt-protocol state that
+// goes stale when placement drops one of those nodes.
+func pendingDeleteFSM(expectedFrom ...string) *vaultctlfsm.FSM {
+	fsm := vaultctlfsm.New()
+	now := time.Now()
+	chunkID := chunk.NewChunkID()
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(chunkID, now, now, now)})
+	_ = fsm.Apply(&hraft.Log{
+		Data: vaultctlfsm.MarshalRequestDelete(chunkID, now, "retention-ttl", expectedFrom),
+	})
+	return fsm
+}
+
+// instanceWithPendingAcks builds a vault instance for nodeID with the given
+// FollowerTargets, a wired lifecycle reconciler, and an FSM carrying one
+// pendingDelete over expectedFrom. Callers flip IsFollower/LeaderNodeID for
+// follower nodes.
+func instanceWithPendingAcks(vaultID glid.GLID, nodeID string, targets []system.ReplicationTarget, rec *prunedRecorder, expectedFrom ...string) *VaultInstance {
+	inst := &VaultInstance{
+		VaultID:         vaultID,
+		IsFollower:      false,
+		FollowerTargets: targets,
+		RaftApplyFacet:  RaftApplyFacet{ApplyRaftPruneNode: rec.apply},
+	}
+	inst.Reconciler = NewVaultLifecycleReconciler(nil, vaultID, inst, nodeID, slog.Default())
+	inst.Reconciler.fsm = pendingDeleteFSM(expectedFrom...)
+	return inst
+}
+
+// TestReconcileVaultPlacement_StableLeaderRebalancePrunesStalePendingAcks is
+// the issue's exact shape: placements move the follower from A to B while
+// leader L keeps its role (no leadership change, no RemoveServer). L's
+// pendingDelete still expects an ack from A, which will never come. The
+// FollowerTargets reassignment must wake the ack reconcile and prune A.
+func TestReconcileVaultPlacement_StableLeaderRebalancePrunesStalePendingAcks(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	sL, sA, sB := glid.New(), glid.New(), glid.New()
+	nscs := []system.NodeStorageConfig{
+		{NodeID: "L", FileStorages: []system.FileStorage{{ID: sL}}},
+		{NodeID: "A", FileStorages: []system.FileStorage{{ID: sA}}},
+		{NodeID: "B", FileStorages: []system.FileStorage{{ID: sB}}},
+	}
+	oldPlacements := []system.VaultPlacement{{StorageID: sL.String(), Leader: true}, {StorageID: sA.String()}}
+	newPlacements := []system.VaultPlacement{{StorageID: sL.String(), Leader: true}, {StorageID: sB.String()}}
+
+	pruned := &prunedRecorder{}
+	inst := instanceWithPendingAcks(vaultID, "L",
+		system.FollowerTargets(oldPlacements, nscs), pruned, "L", "A")
+
+	o := newTestOrch(t, Config{LocalNodeID: "L"})
+	neuterCatchupSweep(t, o)
+	o.sysLoader = &mnLoader{sys: mkSys(vaultID, newPlacements, nscs)}
+	o.vaults[vaultID] = &Vault{ID: vaultID, Instance: inst}
+
+	// The placement event, and nothing else.
+	o.ReconcileVaultPlacement(context.Background(), vaultID)
+	o.auxWg.Wait()
+
+	if got := pruned.list(); len(got) != 1 || got[0] != "A" {
+		t.Fatalf("stable-leader rebalance pruned %v, want [A] — the departed follower's stale ExpectedFrom must be pruned on the placement event, not on the backstop tick", got)
+	}
+}
+
+// TestReconcilePlacements_StableLeaderRebalancePrunesStalePendingAcks covers
+// the other dispatcher entry point: a node-storage-config change remaps
+// storage→node, moving FollowerTargets with no placement edit at all
+// (NotifyNodeStorageConfigSet → ReconcilePlacements). Same stable leader, same
+// stuck ack, same requirement.
+func TestReconcilePlacements_StableLeaderRebalancePrunesStalePendingAcks(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	sL, sF := glid.New(), glid.New()
+	placements := []system.VaultPlacement{{StorageID: sL.String(), Leader: true}, {StorageID: sF.String()}}
+	// The follower storage sF migrates from node A to node B. Placements are
+	// untouched; only the NSC changed.
+	oldNSCs := []system.NodeStorageConfig{
+		{NodeID: "L", FileStorages: []system.FileStorage{{ID: sL}}},
+		{NodeID: "A", FileStorages: []system.FileStorage{{ID: sF}}},
+	}
+	newNSCs := []system.NodeStorageConfig{
+		{NodeID: "L", FileStorages: []system.FileStorage{{ID: sL}}},
+		{NodeID: "B", FileStorages: []system.FileStorage{{ID: sF}}},
+	}
+
+	pruned := &prunedRecorder{}
+	inst := instanceWithPendingAcks(vaultID, "L",
+		system.FollowerTargets(placements, oldNSCs), pruned, "L", "A")
+
+	o := newTestOrch(t, Config{LocalNodeID: "L"})
+	neuterCatchupSweep(t, o)
+	o.sysLoader = &mnLoader{sys: mkSys(vaultID, placements, newNSCs)}
+	o.vaults[vaultID] = &Vault{ID: vaultID, Instance: inst}
+
+	o.ReconcilePlacements(context.Background())
+	o.auxWg.Wait()
+
+	if got := pruned.list(); len(got) != 1 || got[0] != "A" {
+		t.Fatalf("NSC-driven rebalance pruned %v, want [A]", got)
+	}
+}
+
+// TestReconcileVaultPlacement_UnchangedPlacementDoesNotWakeCatchup pins the
+// gate: the wake fires on a MOVE, not on every config republish. An unrelated
+// vault edit re-fires NotifyVaultPut with identical placements; that must not
+// spray Raft proposals and catchup RPCs across every vault on the node. The
+// stale ExpectedFrom here ("ghost", never in placement) is deliberately left to
+// the periodic backstop — this documents what stays on the tick.
+func TestReconcileVaultPlacement_UnchangedPlacementDoesNotWakeCatchup(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	sL, sF := glid.New(), glid.New()
+	nscs := []system.NodeStorageConfig{
+		{NodeID: "L", FileStorages: []system.FileStorage{{ID: sL}}},
+		{NodeID: "F", FileStorages: []system.FileStorage{{ID: sF}}},
+	}
+	placements := []system.VaultPlacement{{StorageID: sL.String(), Leader: true}, {StorageID: sF.String()}}
+
+	pruned := &prunedRecorder{}
+	inst := instanceWithPendingAcks(vaultID, "L",
+		system.FollowerTargets(placements, nscs), pruned, "L", "F", "ghost")
+
+	o := newTestOrch(t, Config{LocalNodeID: "L"})
+	neuterCatchupSweep(t, o)
+	o.sysLoader = &mnLoader{sys: mkSys(vaultID, placements, nscs)}
+	o.vaults[vaultID] = &Vault{ID: vaultID, Instance: inst}
+
+	// Republish the SAME placements: nothing moved.
+	o.ReconcileVaultPlacement(context.Background(), vaultID)
+	o.auxWg.Wait()
+
+	if got := pruned.list(); len(got) != 0 {
+		t.Fatalf("no-op placement republish proposed %v; the wake must be gated on an actual membership move", got)
+	}
+	// The reconcile itself still works when driven directly — proving the
+	// stale state is real and only the WAKE was gated.
+	inst.Reconciler.SweepStalePendingDeleteAcks()
+	if got := pruned.list(); len(got) != 1 || got[0] != "ghost" {
+		t.Fatalf("backstop sweep pruned %v, want [ghost]", got)
+	}
+}
+
+// TestReconcileVaultPlacement_StableLeaderRebalanceMultiNode is the cluster
+// case. One placement config change (follower F3 → F4) is replicated to every
+// node, and each node independently reconciles its own instance from it. Only
+// the leader may propose the prune: the ack reconcile is placement-leader-only,
+// so followers reconciling the same event must stay silent. This is the
+// invariant that keeps a rebalance from producing N duplicate CmdPruneNode
+// proposals in an N-node cluster.
+func TestReconcileVaultPlacement_StableLeaderRebalanceMultiNode(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	sL, sF1, sF2, sF3, sF4 := glid.New(), glid.New(), glid.New(), glid.New(), glid.New()
+	nscs := []system.NodeStorageConfig{
+		{NodeID: "L", FileStorages: []system.FileStorage{{ID: sL}}},
+		{NodeID: "F1", FileStorages: []system.FileStorage{{ID: sF1}}},
+		{NodeID: "F2", FileStorages: []system.FileStorage{{ID: sF2}}},
+		{NodeID: "F3", FileStorages: []system.FileStorage{{ID: sF3}}},
+		{NodeID: "F4", FileStorages: []system.FileStorage{{ID: sF4}}},
+	}
+	oldPlacements := []system.VaultPlacement{
+		{StorageID: sL.String(), Leader: true},
+		{StorageID: sF1.String()}, {StorageID: sF2.String()}, {StorageID: sF3.String()},
+	}
+	// Rebalance: F3 leaves the placement set, F4 joins. Leader L is untouched.
+	newPlacements := []system.VaultPlacement{
+		{StorageID: sL.String(), Leader: true},
+		{StorageID: sF1.String()}, {StorageID: sF2.String()}, {StorageID: sF4.String()},
+	}
+	sys := mkSys(vaultID, newPlacements, nscs)
+
+	expectedFrom := []string{"L", "F1", "F2", "F3"}
+	pruned := map[string]*prunedRecorder{}
+	for _, nodeID := range []string{"L", "F1", "F2", "F3", "F4"} {
+		rec := &prunedRecorder{}
+		pruned[nodeID] = rec
+
+		var inst *VaultInstance
+		if nodeID == "L" {
+			inst = instanceWithPendingAcks(vaultID, nodeID,
+				system.FollowerTargets(oldPlacements, nscs), rec, expectedFrom...)
+		} else {
+			inst = instanceWithPendingAcks(vaultID, nodeID, nil, rec, expectedFrom...)
+			inst.IsFollower = true
+			inst.LeaderNodeID = "L"
+		}
+
+		o := newTestOrch(t, Config{LocalNodeID: nodeID})
+		neuterCatchupSweep(t, o)
+		o.sysLoader = &mnLoader{sys: sys}
+		o.vaults[vaultID] = &Vault{ID: vaultID, Instance: inst}
+
+		o.ReconcileVaultPlacement(context.Background(), vaultID)
+		o.auxWg.Wait()
+	}
+
+	if got := pruned["L"].list(); len(got) != 1 || got[0] != "F3" {
+		t.Fatalf("leader pruned %v, want [F3]", got)
+	}
+	for _, nodeID := range []string{"F1", "F2", "F3", "F4"} {
+		if got := pruned[nodeID].list(); len(got) != 0 {
+			t.Fatalf("follower %s proposed %v; only the placement leader may prune stale ExpectedFrom", nodeID, got)
 		}
 	}
 }

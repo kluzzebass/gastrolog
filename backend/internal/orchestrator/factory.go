@@ -247,9 +247,10 @@ func (o *Orchestrator) startRetentionSweep() error {
 // runs the reconcile categories — see vaultCatchupSweepAll for the
 // per-category invariants. Post gastrolog-3fu9t the primary convergence
 // is event-driven (delete obligations on CmdRequestDelete, orphans on
-// snapshot install, leader-only categories on lead-gained); this tick is
-// the safety net for dropped/raced events plus the two categories that
-// are periodic-by-nature (idle-active inactivity, grace-period GCs).
+// snapshot install, leader-only categories on lead-gained and — since
+// gastrolog-235dm7 — on a placement move under a stable leader); this
+// tick is the safety net for dropped/raced events plus the two categories
+// that are periodic-by-nature (idle-active inactivity, grace-period GCs).
 // Original coverage: receipt-protocol delete convergence (gastrolog-51gme)
 // and create-side replication catchup (gastrolog-2dgvj).
 func (o *Orchestrator) startInstanceCatchupSweep() error {
