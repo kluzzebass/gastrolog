@@ -931,7 +931,10 @@ func drainIterator(next chunk.RecordIterator) {
 // chicken-and-egg deadlock with readiness recovery.
 //
 // After sealing, schedules the post-seal pipeline (compress, index, and
-// sealed-chunk replication to followers) via schedulePostSeal.
+// sealed-chunk replication to followers) via schedulePostSeal. That
+// scheduling is mandatory, not an optimization: Chunks.Seal() only
+// announces Active → Sealing, and the post-seal pipeline owns the
+// AnnounceSeal that promotes the vault-ctl manifest entry to Sealed.
 func (o *Orchestrator) SealActive(vaultID glid.GLID) (int, error) {
 	o.mu.RLock()
 	vault := o.vaults[vaultID]

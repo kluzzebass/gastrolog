@@ -105,7 +105,15 @@ func (s *SystemServer) PutCertificate(
 		return nil, errRequired("name")
 	}
 
-	existing, err := s.loadExistingCert(ctx, string(req.Msg.Id), req.Msg.Name)
+	// The CLI and the UI both send the raw 16-byte GLID (glid.ToProto /
+	// frontend decode()); older callers sent the 26-character text form in
+	// the same bytes field. Normalise to text once so both work — before
+	// this, a Put with a raw-bytes ID failed with "invalid ID", which broke
+	// certificate updates from the UI and every cert in a config import
+	// (gastrolog-2nr3aa).
+	reqID := certIDText(req.Msg.Id)
+
+	existing, err := s.loadExistingCert(ctx, reqID, req.Msg.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +131,7 @@ func (s *SystemServer) PutCertificate(
 		return nil, err
 	}
 
-	certID, err := resolveCertID(existing.ID, string(req.Msg.Id))
+	certID, err := resolveCertID(existing.ID, reqID)
 	if err != nil {
 		return nil, errInvalidArg(err)
 	}
@@ -166,6 +174,19 @@ func (s *SystemServer) PutCertificate(
 		return nil, errInternal(err)
 	}
 	return connect.NewResponse(&apiv1.PutCertificateResponse{System: cfg}), nil
+}
+
+// certIDText renders a certificate ID from PutCertificateRequest, which
+// accepts both the raw 16-byte GLID and its text form in the same bytes field.
+// Empty in, empty out — the caller then resolves the cert by name.
+func certIDText(b []byte) string {
+	if len(b) == 0 {
+		return ""
+	}
+	if len(b) == glid.Size {
+		return glid.FromBytes(b).String()
+	}
+	return string(b)
 }
 
 func (s *SystemServer) loadExistingCert(ctx context.Context, id, name string) (system.CertPEM, error) {

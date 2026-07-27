@@ -265,11 +265,11 @@ type Orchestrator struct {
 	// chunkGLCBPuller streams sealed chunk GLCBs from peer homes for
 	// replica catch-up — a home that missed builds (wedged, down) whose
 	// source segments were already released has no other recovery path.
+	// Concurrent sweeps never pull the same GLCB twice, and the in-flight
+	// budget is never overshot, because both are claimed on the scheduler's
+	// job map (RunOnceIfAbsentUnderLimit in pullMissingGLCB) rather than in a
+	// second inflight map of the orchestrator's own.
 	chunkGLCBPuller *cluster.ChunkGLCBPuller
-	// glcbPullInflight claims per-chunk pulls so concurrent sweeps never
-	// pull the same GLCB twice. Guarded by glcbPullMu.
-	glcbPullMu       sync.Mutex
-	glcbPullInflight map[chunk.ChunkID]bool
 
 	// leaderlessReported is the set of vaults reported leaderless to the
 	// alarm collector last sweep tick, so departures diff to a Clear. The

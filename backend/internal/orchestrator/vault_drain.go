@@ -122,12 +122,14 @@ func (o *Orchestrator) DrainInstance(ctx context.Context, vaultID glid.GLID, mod
 		}
 	}
 
-	// Submit async drain job.
+	// Submit async drain job. Describe BEFORE submitting — see
+	// scheduleReplication for why (missing label on the Scheduled event,
+	// leaked descriptions entry when the job finishes first). gastrolog-69sjlj.
 	jobName := fmt.Sprintf("drain-vault:%s:%s", vaultID, vaultID)
+	o.scheduler.Describe(jobName, fmt.Sprintf("Drain vault %s from vault", vaultID))
 	jobID := o.scheduler.Submit(jobName, func(ctx2 context.Context, job *JobProgress) {
 		o.vaultDrainWorker(drainCtx, vaultID, mode, targetNodeID)
 	})
-	o.scheduler.Describe(jobName, fmt.Sprintf("Drain vault %s from vault", vaultID))
 
 	o.mu.Lock()
 	if d, ok := o.vaultDraining[key]; ok {
@@ -181,10 +183,17 @@ func (o *Orchestrator) vaultDrainWorker(ctx context.Context, vaultID glid.GLID, 
 		return // context cancelled or error — defer handles cleanup
 	}
 
-	// Final seal to catch any stragglers.
+	// Final seal to catch any stragglers. Seal() only fires
+	// AnnounceBeginSeal (Active → Sealing); the post-seal pipeline owns the
+	// matching AnnounceSeal, so it must be scheduled or the manifest entry
+	// parks in Sealing forever and drainVaultChunks' FSM grounding keeps
+	// skipping the chunk as not-yet-Sealed.
 	if active := vaultInst.Chunks.Active(); active != nil {
+		chunkID := active.ID
 		if err := vaultInst.Chunks.Seal(); err != nil {
 			o.drainLogger.Warn("vault drain: final seal failed", "vault", vaultID, "error", err)
+		} else {
+			o.postSealWork(vaultID, vaultInst.Chunks, chunkID)
 		}
 		o.drainVaultChunks(ctx, sys, vaultID, vaultInst, mode, targetNodeID)
 	}
