@@ -613,9 +613,6 @@ func buildClusterSettings(c *clusterExport) *v1.PutClusterSettings {
 	if c.BroadcastInterval != "" {
 		pc.BroadcastInterval = &c.BroadcastInterval
 	}
-	if c.HeartbeatInterval != "" {
-		pc.HeartbeatInterval = &c.HeartbeatInterval
-	}
 	if c.PipelineBacklogMax != "" {
 		pc.PipelineBacklogMax = &c.PipelineBacklogMax
 	}

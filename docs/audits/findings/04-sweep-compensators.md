@@ -21,14 +21,14 @@ Every row is a **formal finding**. Remediation: fix upstream + remove/narrow tic
 | sweep-012 | 60s | `orchestrator/cache_eviction.go` | LRU/TTL warm-cache eviction | Duplicates retention-tick `EvictCache` | **gastrolog-1a18r** (see **gastrolog-2idw8** closed) |
 | sweep-013 | 5s | `orchestrator/cloud_health.go` `backfillCloudUploads` | Schedule cloud upload jobs | Missed `AnnounceUpload`; snapshot restore gap | **gastrolog-576bm** |
 | sweep-014 | 1 min | `orchestrator/retention.go` `retentionSweepAll` | Rule eval + memory budget | Policy (legitimate) + eviction duplication | — |
-| sweep-015 | 30s | `app/unreachable_sweep.go` | Live↔Unreachable from PeerState | Heartbeat not wired to FSM | **gastrolog-48o1r** |
+| sweep-015 | 30s | `app/unreachable_sweep.go` | Live↔Unreachable from PeerState | Peer contact not wired to FSM — the signal is now Raft last-contact (gastrolog-1lbifx), not the deleted heartbeat broadcast | **gastrolog-48o1r** |
 | sweep-016 | 30s | `app/cluster_ctl_learner_promoter.go` | Promote caught-up learners | Join-as-learner promotion gate | **gastrolog-4vg17** |
 | sweep-017 | hourly | `orchestrator/archival_sweep.go` | Cloud storage-class transitions | Verify policy vs missed events | **gastrolog-15nn1** |
 | sweep-018 | daily 03:00 | `orchestrator/archival_sweep.go` `reconcileSweepAll` | Remove cloud index entries with missing blobs | Hot path never removes suspect index | **gastrolog-2iwai** |
 
 ## Legitimate ticks (not compensators — document only)
 
-- `statscollector` 1s heartbeat / 5s stats broadcast
+- `statscollector` 5s stats broadcast (the 1s peer heartbeat alongside it was deleted in gastrolog-1lbifx; liveness comes from Raft last-contact)
 - `multiraft` 1ms heartbeat batch window
 - hashicorp `SnapshotInterval` 30s in `raftgroup/groupmanager.go`
 - `orchestrator` progress notifier 1s (UI throttle)

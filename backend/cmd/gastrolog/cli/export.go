@@ -270,7 +270,6 @@ type maxmindExport struct {
 
 type clusterExport struct {
 	BroadcastInterval  string `json:"broadcast_interval,omitempty"`
-	HeartbeatInterval  string `json:"heartbeat_interval,omitempty"`
 	PipelineBacklogMax string `json:"pipeline_backlog_max,omitempty"`
 }
 
@@ -353,7 +352,6 @@ func settingsToExport(sc *v1.GetSettingsResponse) (auth *authExport, query *quer
 	if cl := sc.GetCluster(); cl != nil {
 		ce := clusterExport{
 			BroadcastInterval:  cl.GetBroadcastInterval(),
-			HeartbeatInterval:  cl.GetHeartbeatInterval(),
 			PipelineBacklogMax: cl.GetPipelineBacklogMax(),
 		}
 		if ce != (clusterExport{}) {

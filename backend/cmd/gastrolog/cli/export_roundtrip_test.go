@@ -583,7 +583,7 @@ func seedEveryConfigType(t *testing.T, ctx context.Context, addr string, store *
 	maxResults, maxJobs, minLen := int32(5000), int32(4), int32(12)
 	tlsEnabled, redirect := true, true
 	httpsPort := "8443"
-	broadcast, heartbeat, backlog := "5s", "2s", "1GiB"
+	broadcast, backlog := "5s", "1GiB"
 	if _, err := client.System.PutServiceSettings(ctx, connect.NewRequest(&v1.PutServiceSettingsRequest{
 		Auth: &v1.PutAuthSettings{
 			TokenDuration: &tokenDuration, RefreshTokenDuration: &refresh,
@@ -596,7 +596,7 @@ func seedEveryConfigType(t *testing.T, ctx context.Context, addr string, store *
 			HttpToHttpsRedirect: &redirect, HttpsPort: &httpsPort,
 		},
 		Cluster: &v1.PutClusterSettings{
-			BroadcastInterval: &broadcast, HeartbeatInterval: &heartbeat, PipelineBacklogMax: &backlog,
+			BroadcastInterval: &broadcast, PipelineBacklogMax: &backlog,
 		},
 	})); err != nil {
 		t.Fatalf("PutServiceSettings: %v", err)

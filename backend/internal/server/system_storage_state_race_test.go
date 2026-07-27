@@ -48,7 +48,7 @@ func TestListStorages_ConcurrentAccessDoesNotRaceSharedPeerState(t *testing.T) {
 		t.Fatalf("SetNodeStorageConfig: %v", err)
 	}
 
-	peerState := cluster.NewPeerState(time.Minute)
+	peerState := cluster.NewPeerState(time.Minute, 0)
 	peerState.Update("peer-1", &gastrologv1.NodeStats{
 		Storages: []*gastrologv1.StorageState{{
 			Id:   storageID.ToProto(),

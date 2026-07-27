@@ -20,7 +20,6 @@ The **Max Concurrent Jobs** setting in [Cluster settings](settings:service) [![i
 | `cache-eviction` | Evicts warm-cache cloud-backed chunks (LRU + TTL) |
 | `cloud-reconcile` | Reconciles cloud index metadata against blob store |
 | `cluster-ctl-learner-promoter` | Promotes caught-up cluster-ctl learners to voters (leader-only) |
-| `cluster-peer-heartbeat` | Lightweight peer liveness broadcast |
 | `cluster-stats-broadcast` | Broadcasts local NodeStats to all cluster peers |
 | `managed-files-reconcile` | Pulls missing managed files from peers when local disk drifts |
 | `maxmind-update` | Downloads MaxMind GeoLite2 lookup databases |

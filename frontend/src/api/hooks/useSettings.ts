@@ -47,7 +47,6 @@ type ServiceTLS = {
 
 type ServiceCluster = {
   broadcastInterval?: string;
-  heartbeatInterval?: string;
   pipelineBacklogMax?: string;
 };
 

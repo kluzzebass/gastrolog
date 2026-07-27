@@ -350,7 +350,7 @@ func (s *VaultServer) remoteVaultNodes(ctx context.Context, vaultID glid.GLID) [
 }
 
 // GetChunk returns details for a specific chunk.
-// Routing: RouteTargeted — the interceptor forwards to the vault-owning node.
+// Routing: RouteToResourceOwner — the interceptor forwards to the vault-owning node.
 func (s *VaultServer) GetChunk(
 	ctx context.Context,
 	req *connect.Request[apiv1.GetChunkRequest],
@@ -401,7 +401,7 @@ func (s *VaultServer) GetChunk(
 // Routing: RouteLocal — the handler tries the local node first, then
 // fans out to remote vault-hosting nodes if the chunk has migrated to a
 // vault this node doesn't host. Cross-vault migration (warm → cloud,
-// etc.) shifts a chunk's owning node, so a single RouteTargeted hop
+// etc.) shifts a chunk's owning node, so a single RouteToResourceOwner hop
 // would frequently miss and produce ErrChunkNotFound log spam. See
 // gastrolog-3570f.
 func (s *VaultServer) GetIndexes(
@@ -510,7 +510,7 @@ func reportToProto(report *orchestrator.ChunkIndexReport) *apiv1.GetIndexesRespo
 }
 
 // AnalyzeChunk returns detailed index analysis for a chunk.
-// Routing: RouteTargeted — the interceptor forwards to the vault-owning node.
+// Routing: RouteToResourceOwner — the interceptor forwards to the vault-owning node.
 func (s *VaultServer) AnalyzeChunk(
 	ctx context.Context,
 	req *connect.Request[apiv1.AnalyzeChunkRequest],
@@ -576,7 +576,7 @@ func (s *VaultServer) analyzeChunkSingle(vaultID glid.GLID, chunkProto []byte) (
 }
 
 // ValidateVault checks chunk and index integrity for a vault.
-// Routing: RouteTargeted — the interceptor forwards to the vault-owning node.
+// Routing: RouteToResourceOwner — the interceptor forwards to the vault-owning node.
 func (s *VaultServer) ValidateVault(
 	ctx context.Context,
 	req *connect.Request[apiv1.ValidateVaultRequest],

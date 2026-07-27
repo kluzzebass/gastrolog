@@ -3133,18 +3133,11 @@ export class StaticLookupRow extends Message<StaticLookupRow> {
  */
 export class ClusterSettings extends Message<ClusterSettings> {
   /**
-   * Go duration string, e.g. "5s". Default: "5s".
+   * Go duration string, e.g. "5s". Default: "5s". Also anchors the PeerState stats TTL (broadcast_interval × GLOG_PEER_TTL_MULTIPLIER); peer LIVENESS comes from Raft last-contact, not from this cadence.
    *
    * @generated from field: string broadcast_interval = 1;
    */
   broadcastInterval = "";
-
-  /**
-   * Go duration string, e.g. "1s". Default: "1s". Lightweight liveness ping; PeerState TTL is 8× this (defaultPeerTTLMultiplier).
-   *
-   * @generated from field: string heartbeat_interval = 2;
-   */
-  heartbeatInterval = "";
 
   /**
    * Per-vault pipeline backlog budget in bytes (unreleased completed segments
@@ -3154,7 +3147,7 @@ export class ClusterSettings extends Message<ClusterSettings> {
    * BEFORE disk pressure; the disk guard remains the backstop. A size
    * expression ("8GiB"); empty = unbounded (gastrolog-etcjdx).
    *
-   * @generated from field: string pipeline_backlog_max = 3;
+   * @generated from field: string pipeline_backlog_max = 2;
    */
   pipelineBacklogMax = "";
 
@@ -3167,8 +3160,7 @@ export class ClusterSettings extends Message<ClusterSettings> {
   static readonly typeName = "gastrolog.v1.ClusterSettings";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "broadcast_interval", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "heartbeat_interval", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 3, name: "pipeline_backlog_max", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "pipeline_backlog_max", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ClusterSettings {
@@ -3674,12 +3666,7 @@ export class PutClusterSettings extends Message<PutClusterSettings> {
   broadcastInterval?: string;
 
   /**
-   * @generated from field: optional string heartbeat_interval = 2;
-   */
-  heartbeatInterval?: string;
-
-  /**
-   * @generated from field: optional string pipeline_backlog_max = 3;
+   * @generated from field: optional string pipeline_backlog_max = 2;
    */
   pipelineBacklogMax?: string;
 
@@ -3692,8 +3679,7 @@ export class PutClusterSettings extends Message<PutClusterSettings> {
   static readonly typeName = "gastrolog.v1.PutClusterSettings";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "broadcast_interval", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
-    { no: 2, name: "heartbeat_interval", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
-    { no: 3, name: "pipeline_backlog_max", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
+    { no: 2, name: "pipeline_backlog_max", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutClusterSettings {

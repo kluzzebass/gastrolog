@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
@@ -12,8 +13,9 @@ import (
 // RoutingInterceptor is a Connect interceptor that auto-routes requests
 // based on their strategy classification:
 //
-//   - RouteTargeted: duck-type GetVaultId() on the request, resolve the
-//     owning node, forward via ForwardRPC if remote.
+//   - RouteToResourceOwner: read the resource ID declared by the route,
+//     resolve the owning node(s) from replicated state, forward via
+//     ForwardRPC if the owner is remote.
 //   - Explicit targeting: honor routing.WithTargetNode(ctx, nodeID).
 //   - Already forwarded: execute locally (loop prevention).
 //   - Everything else (RouteLocal, RouteLeader, RouteFanOut): pass through.
@@ -26,17 +28,17 @@ type UnaryForwarder interface {
 type RoutingInterceptor struct {
 	registry    *Registry
 	localNodeID string
-	vaultOwner  VaultOwnerResolver
+	owners      OwnerResolvers
 	forwarder   UnaryForwarder
 }
 
 // NewRoutingInterceptor creates a routing interceptor. If forwarder is nil
 // (single-node mode), the interceptor is a no-op pass-through.
-func NewRoutingInterceptor(registry *Registry, localNodeID string, vaultOwner VaultOwnerResolver, forwarder UnaryForwarder) *RoutingInterceptor {
+func NewRoutingInterceptor(registry *Registry, localNodeID string, owners OwnerResolvers, forwarder UnaryForwarder) *RoutingInterceptor {
 	return &RoutingInterceptor{
 		registry:    registry,
 		localNodeID: localNodeID,
-		vaultOwner:  vaultOwner,
+		owners:      owners,
 		forwarder:   forwarder,
 	}
 }
@@ -71,8 +73,11 @@ func (ri *RoutingInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFun
 		}
 
 		// Strategy-based routing.
-		if route.Strategy == RouteTargeted {
-			target := ri.resolveVaultTarget(ctx, req.Any())
+		if route.Strategy == RouteToResourceOwner {
+			target, err := ri.resolveOwner(ctx, route, req.Any())
+			if err != nil {
+				return nil, err
+			}
 			if target == "" || target == ri.localNodeID || ri.forwarder == nil {
 				return next(ctx, req)
 			}
@@ -107,7 +112,7 @@ func (ri *RoutingInterceptor) WrapStreamingHandler(next connect.StreamingHandler
 		// Streaming RPCs pass through to the handler which manages its own
 		// routing. The interceptor can't generically forward streaming RPCs
 		// because Connect's StreamingHandlerConn.Receive() requires a
-		// concrete type. Server-streaming RouteTargeted (ExportVault) and
+		// concrete type. Server-streaming RouteToResourceOwner (ExportVault) and
 		// RouteFanOut (Search, Follow) use handler-level routing.
 		_ = route
 		return next(ctx, conn)
@@ -119,24 +124,43 @@ func (ri *RoutingInterceptor) WrapStreamingClient(next connect.StreamingClientFu
 	return next
 }
 
-// vaultGetter is the duck-typed interface for proto messages with a vault field.
-// All RouteTargeted request messages (ListChunksRequest, GetChunkRequest, etc.)
-// have a `string vault = 1` field that generates this getter.
-type vaultGetter interface {
-	GetVault() string
-}
+// resolveOwner reads the resource ID declared by the route, asks that
+// resource kind's OwnerResolver which node(s) own it, and picks the node to
+// execute on. An empty target means "execute locally".
+//
+// Selection over a plural owner set: prefer the local node when it is an
+// owner (no hop), otherwise take the first — resolvers return a
+// deterministic order, so every node in the cluster picks the same one.
+func (ri *RoutingInterceptor) resolveOwner(ctx context.Context, route RPCRoute, msg any) (string, *connect.Error) {
+	ref := route.Resource
+	if ref == nil {
+		return "", nil
+	}
+	resolver := ri.owners[ref.Kind]
+	if resolver == nil {
+		return "", nil
+	}
+	resourceID := ref.ID(msg)
+	if resourceID == "" {
+		return "", nil
+	}
 
-// resolveVaultTarget extracts the vault ID from the request (duck-typed)
-// and resolves which node owns it.
-func (ri *RoutingInterceptor) resolveVaultTarget(ctx context.Context, msg any) string {
-	if ri.vaultOwner == nil {
-		return ""
+	owners, err := resolver.ResolveOwners(ctx, resourceID)
+	if err != nil {
+		if errors.Is(err, ErrResourceNotFound) {
+			return "", connect.NewError(connect.CodeNotFound,
+				fmt.Errorf("%s %s: %w", ref.Kind, resourceID, err))
+		}
+		return "", connect.NewError(connect.CodeFailedPrecondition,
+			fmt.Errorf("resolve %s owner for %s: %w", ref.Kind, resourceID, err))
 	}
-	v, ok := msg.(vaultGetter)
-	if !ok || v.GetVault() == "" {
-		return ""
+	if len(owners) == 0 {
+		return "", nil
 	}
-	return ri.vaultOwner.ResolveVaultOwner(ctx, v.GetVault())
+	if slices.Contains(owners, ri.localNodeID) {
+		return ri.localNodeID, nil
+	}
+	return owners[0], nil
 }
 
 // forwardUnary serializes the request, forwards via ForwardRPC, and returns
