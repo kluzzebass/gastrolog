@@ -257,7 +257,11 @@ message VaultConfig {
   bytes cloud_service_id = 9;
   uint32 replication_factor = 10;          // desired RF (1 = no replication, default)
   string path = 11;                         // direct path for JSONL sinks
-  repeated VaultPlacement placements = 12;  // system-managed: file storage assignments by placement manager
+  // OUTPUT ONLY. File storage assignments owned by the placement manager.
+  // Populated on reads; IGNORED on PutVault, which re-derives the field from
+  // the owner so a client cannot overwrite placement truth by round-tripping a
+  // config it read earlier (gastrolog-kl8c3s).
+  repeated VaultPlacement placements = 12;
   string cache_eviction = 13;               // "lru" (default) or "ttl"
   // Warm-cache soft cap for cloud-backed chunks, as a size expression
   // ("1GiB"). Empty = unset (defaulted at creation for cloud vaults); "0"

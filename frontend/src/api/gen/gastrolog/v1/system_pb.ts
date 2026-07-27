@@ -546,7 +546,10 @@ export class VaultConfig extends Message<VaultConfig> {
   path = "";
 
   /**
-   * system-managed: file storage assignments by placement manager
+   * OUTPUT ONLY. File storage assignments owned by the placement manager.
+   * Populated on reads; IGNORED on PutVault, which re-derives the field from
+   * the owner so a client cannot overwrite placement truth by round-tripping a
+   * config it read earlier (gastrolog-kl8c3s).
    *
    * @generated from field: repeated gastrolog.v1.VaultPlacement placements = 12;
    */
