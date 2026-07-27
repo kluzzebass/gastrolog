@@ -609,6 +609,15 @@ func (o *Orchestrator) retentionRunnerFor(vaultCfg system.VaultConfig, vaultInst
 		}
 		o.retention[key] = runner
 	}
+	// Under runner.mu, not just o.mu: the runner outlives this call and is read
+	// concurrently by goroutines that never take o.mu. vaultRetentionGiveUpTTL
+	// (the chunking release worker's give-up bound) reads disposition and rules
+	// under runner.mu, having deliberately released o.mu first — so refreshing
+	// these fields with only o.mu held is an unsynchronised write against that
+	// read, and the give-up bound decides whether unchunkable segments are shed
+	// (gastrolog-3kcr1u). o.mu -> runner.mu is the established order here; see
+	// UnreadableChunks, which takes the same pair the same way round.
+	runner.mu.Lock()
 	runner.cm = vaultInst.Chunks
 	runner.im = vaultInst.Indexes
 	runner.applyRaftRetentionPending = vaultInst.ApplyRaftRetentionPending
@@ -619,6 +628,7 @@ func (o *Orchestrator) retentionRunnerFor(vaultCfg system.VaultConfig, vaultInst
 	runner.vaultType = string(vaultCfg.Type)
 	runner.disposition = vaultCfg.ResolveRetentionDisposition()
 	runner.transferTarget = vaultCfg.RetentionTransferTargetVaultID
+	runner.mu.Unlock()
 	return runner
 }
 
