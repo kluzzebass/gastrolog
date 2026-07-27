@@ -101,12 +101,17 @@ func TestVaultOwner_ResolvesLeaderPlacement(t *testing.T) {
 		{StorageID: system.SyntheticStorageID("node-2"), Leader: true},
 	}
 	if err := store.PutVault(ctx, system.VaultConfig{
-		ID:         vaultID,
-		Name:       "v",
-		Type:       system.VaultTypeMemory,
-		Placements: placements,
+		ID:   vaultID,
+		Name: "v",
+		Type: system.VaultTypeMemory,
 	}); err != nil {
 		t.Fatalf("PutVault: %v", err)
+	}
+	// Placements are seeded through their owner. PutVault deliberately ignores
+	// them now, so a fixture that attached them to the config would silently
+	// resolve no owners (gastrolog-kl8c3s).
+	if err := store.SetVaultPlacements(ctx, vaultID, placements); err != nil {
+		t.Fatalf("SetVaultPlacements: %v", err)
 	}
 
 	owners, err := ownerResolvers(store)[routing.ResourceVault].ResolveOwners(ctx, vaultID.String())
