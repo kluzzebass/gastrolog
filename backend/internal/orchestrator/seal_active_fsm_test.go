@@ -47,7 +47,7 @@ func newSealActiveFixture(t *testing.T) (*Orchestrator, glid.GLID, *vaultctlfsm.
 	orch := newTestOrch(t, Config{LocalNodeID: "node-A"})
 	orch.RegisterVault(NewVault(vaultID, inst))
 	orch.mu.Lock()
-	orch.pipelineVaults[vaultID] = pipelineVaultReg{home: true, hasHandle: true}
+	orch.setPipelineVaultLocked(vaultID, pipelineVaultReg{home: true, hasHandle: true})
 	orch.mu.Unlock()
 	return orch, vaultID, fsm
 }
@@ -116,7 +116,7 @@ func TestSealActiveWithoutVaultCtlGroupIsNoop(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node-A"})
 	orch.RegisterVault(NewVault(vaultID, inst))
 	orch.mu.Lock()
-	orch.pipelineVaults[vaultID] = pipelineVaultReg{home: true, hasHandle: true}
+	orch.setPipelineVaultLocked(vaultID, pipelineVaultReg{home: true, hasHandle: true})
 	orch.mu.Unlock()
 
 	if err := orch.AppendToVault(vaultID, chunk.ChunkID{}, makeRecord("one")); err != nil {

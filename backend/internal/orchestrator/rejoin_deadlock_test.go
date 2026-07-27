@@ -28,7 +28,7 @@ func TestFinishPendingCtlRestoreSafeUnderWriteLock(t *testing.T) {
 	// The vault must look pipeline-registered so the reconcile chain reaches
 	// isPipelineIngestVault's RLock — the deadlock edge.
 	orch.mu.Lock()
-	orch.pipelineVaults[vid] = pipelineVaultReg{}
+	orch.setPipelineVaultLocked(vid, pipelineVaultReg{})
 	orch.mu.Unlock()
 	orch.pendingPipelineCtlRestore.Store(vid, struct{}{})
 

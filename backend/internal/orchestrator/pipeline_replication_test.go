@@ -21,7 +21,7 @@ import (
 func markPipelineIngestVault(t *testing.T, o *Orchestrator, vaultID glid.GLID, home bool) {
 	t.Helper()
 	o.mu.Lock()
-	o.pipelineVaults[vaultID] = pipelineVaultReg{home: home, hasHandle: true}
+	o.setPipelineVaultLocked(vaultID, pipelineVaultReg{home: home, hasHandle: true})
 	o.mu.Unlock()
 }
 

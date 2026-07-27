@@ -50,13 +50,19 @@ func (o *Orchestrator) postSealWork(vaultID glid.GLID, cm chunk.ChunkManager, ch
 // recursive RLock behind a waiting writer. Found via the gastrolog-38snf4
 // gate forensics (TestDrainConcurrentWithIngestion 10-minute hang).
 func (o *Orchestrator) schedulePostSeal(vaultID glid.GLID, cm chunk.ChunkManager, chunkID chunk.ChunkID) {
-	o.mu.RLock()
-	_, pipeline := o.pipelineVaults[vaultID]
+	// The pipeline check reads the lock-free snapshot, so a pipeline vault
+	// reaches the scheduling below without touching o.mu at all — the same
+	// hazard as gastrolog-38snf4 above, one layer out: a Raft apply pump that
+	// blocks here stalls every apply for the group, and a caller holding o.mu
+	// while awaiting one of those applies then never returns (gastrolog-1abzem).
+	// Only the legacy follower-replication branch still needs the lock.
+	_, pipeline := o.lookupPipelineVault(vaultID)
 	var followerTargets []system.ReplicationTarget
 	if !pipeline {
+		o.mu.RLock()
 		followerTargets = o.followerReplicationTargetsLocked(vaultID, cm)
+		o.mu.RUnlock()
 	}
-	o.mu.RUnlock()
 
 	processor, ok := cm.(chunk.ChunkPostSealProcessor)
 	if ok {

@@ -256,8 +256,24 @@ type Orchestrator struct {
 	// pipelineVaults tracks which vaults are currently registered in the pipeline
 	// supervisor and whether each is registered as a Home (collection) on this
 	// node, so a route/placement reload registers/unregisters/re-registers only
-	// the delta. Guarded by o.mu.
-	pipelineVaults map[glid.GLID]pipelineVaultReg
+	// the delta.
+	//
+	// Held as an immutable map behind an atomic pointer, and READ WITHOUT o.mu,
+	// because the vault-ctl Raft apply pump reads it. hashicorp/raft runs
+	// exactly one FSM goroutine per group, so a handler that blocks on o.mu
+	// stops every apply for that group — and a caller holding o.mu while
+	// awaiting a Raft apply then waits forever, since the entry it waits for
+	// can only be applied by the goroutine its own lock is blocking. That cycle
+	// wedged a node permanently (gastrolog-1abzem). RLock is not a fix either:
+	// Go blocks a new RLock behind a queued writer, which is how the same class
+	// bit gastrolog-38snf4. See the apply-pump rule in
+	// vault_lifecycle_reconciler.go.
+	//
+	// Writers hold o.mu (to serialize read-modify-write) and go through
+	// setPipelineVaultLocked / deletePipelineVaultLocked, which copy-on-write.
+	// The atomic pointer is the ONLY representation — deliberately, so that no
+	// second copy can drift out of sync with it.
+	pipelineVaults atomic.Pointer[map[glid.GLID]pipelineVaultReg]
 
 	// segmentPuller streams completed segments from peer holders for
 	// collection. Set from factories during ApplyConfig (cluster mode only).
@@ -857,7 +873,6 @@ func New(cfg Config) (*Orchestrator, error) {
 		diskGuard:              newDiskGuardWithLogger(cfg.DiskGuardPaths, cfg.Logger),
 		homeDir:                homeDirFromSegments(cfg.SegmentsDir),
 		vaultsDir:              homeDirFromSegments(cfg.SegmentsDir),
-		pipelineVaults:         make(map[glid.GLID]pipelineVaultReg),
 		now:                    cfg.Now,
 		logger:                 logger,
 		baseLogger:             baseLogger,

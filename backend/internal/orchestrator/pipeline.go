@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -480,10 +481,53 @@ func (o *Orchestrator) isPipelineIngestVault(vaultID glid.GLID) bool {
 	if o == nil {
 		return false
 	}
-	o.mu.RLock()
-	_, ok := o.pipelineVaults[vaultID]
-	o.mu.RUnlock()
+	_, ok := o.lookupPipelineVault(vaultID)
 	return ok
+}
+
+// pipelineVaultsMap returns the current registrations as an immutable map,
+// without taking o.mu. Never nil, and MUST NOT be mutated by the caller — a
+// published map is shared with every concurrent reader.
+func (o *Orchestrator) pipelineVaultsMap() map[glid.GLID]pipelineVaultReg {
+	if o == nil {
+		return nil
+	}
+	if cur := o.pipelineVaults.Load(); cur != nil {
+		return *cur
+	}
+	return nil
+}
+
+// lookupPipelineVault reads a vault's pipeline registration WITHOUT taking o.mu.
+//
+// Safe to call from the vault-ctl Raft apply pump, which must never block on
+// o.mu — see the pipelineVaults field comment and gastrolog-1abzem.
+func (o *Orchestrator) lookupPipelineVault(vaultID glid.GLID) (pipelineVaultReg, bool) {
+	reg, ok := o.pipelineVaultsMap()[vaultID]
+	return reg, ok
+}
+
+// setPipelineVaultLocked records a vault's pipeline registration. Caller holds
+// o.mu, which serializes the read-modify-write; readers need no lock because
+// the new map is published atomically and never mutated afterwards.
+func (o *Orchestrator) setPipelineVaultLocked(vaultID glid.GLID, reg pipelineVaultReg) {
+	next := maps.Clone(o.pipelineVaultsMap())
+	if next == nil {
+		next = make(map[glid.GLID]pipelineVaultReg, 1)
+	}
+	next[vaultID] = reg
+	o.pipelineVaults.Store(&next)
+}
+
+// deletePipelineVaultLocked drops a vault's pipeline registration. Caller holds o.mu.
+func (o *Orchestrator) deletePipelineVaultLocked(vaultID glid.GLID) {
+	cur := o.pipelineVaultsMap()
+	if _, ok := cur[vaultID]; !ok {
+		return
+	}
+	next := maps.Clone(cur)
+	delete(next, vaultID)
+	o.pipelineVaults.Store(&next)
 }
 
 // pipelineVaultChunkRoot returns the segmentation chunk root for a vault when
@@ -491,23 +535,21 @@ func (o *Orchestrator) isPipelineIngestVault(vaultID glid.GLID) bool {
 // which pipeline-built sealed GLCBs land (<segmentsDir>/<vaultID>/chunks, the
 // "chunks" subdir of originRoot). ok=false when the vault is not a pipeline home
 // on this node or no segments base is configured, in which case there are no
-// pipeline GLCBs to register. Takes o.mu only to read the registration map and
-// segments base; the caller does the stat/registration I/O outside the lock.
+// pipeline GLCBs to register. Lock-free: reads the published registration
+// snapshot, and segmentsDir is write-once at construction. The caller does the
+// stat/registration I/O afterwards. Both properties are required, not
+// incidental — the Raft apply pump calls this (gastrolog-1abzem).
 // Mirrors the path math in originRoot + buildPipelineVaultSpec (spec.ChunkRoot).
 // See gastrolog-2kysn (Rubicon E1).
 func (o *Orchestrator) pipelineVaultChunkRoot(vaultID glid.GLID) (string, bool) {
-	o.mu.Lock()
-	segmentsDir := o.segmentsDir
-	reg, registered := o.pipelineVaults[vaultID]
-	o.mu.Unlock()
-	if segmentsDir == "" {
+	if o.segmentsDir == "" {
 		return "", false
 	}
-	root := filepath.Join(segmentsDir, vaultID.String(), "chunks")
-	if registered && reg.home {
-		return root, true
+	reg, registered := o.lookupPipelineVault(vaultID)
+	if !registered || !reg.home {
+		return "", false
 	}
-	return "", false
+	return filepath.Join(o.segmentsDir, vaultID.String(), "chunks"), true
 }
 
 // pipelineVaultStagingRoot returns the segment staging root for a vault
@@ -516,15 +558,17 @@ func (o *Orchestrator) pipelineVaultChunkRoot(vaultID glid.GLID) (string, bool) 
 // pre-head/ and chunks/). Unlike pipelineVaultChunkRoot it is NOT
 // home-gated: origins hold completed/ files too, and the staging-orphan
 // sweep (gastrolog-27czpq) must purge released segments on every role.
+//
+// Lock-free for the same reason as pipelineVaultChunkRoot: reachable from the
+// Raft apply pump, which must not block on o.mu (gastrolog-1abzem).
 func (o *Orchestrator) pipelineVaultStagingRoot(vaultID glid.GLID) (string, bool) {
-	o.mu.Lock()
-	segmentsDir := o.segmentsDir
-	_, registered := o.pipelineVaults[vaultID]
-	o.mu.Unlock()
-	if segmentsDir == "" || !registered {
+	if o.segmentsDir == "" {
 		return "", false
 	}
-	return filepath.Join(segmentsDir, vaultID.String()), true
+	if _, registered := o.lookupPipelineVault(vaultID); !registered {
+		return "", false
+	}
+	return filepath.Join(o.segmentsDir, vaultID.String()), true
 }
 
 // errNoVaultCtlHandle rejects publishes while no vault-ctl handle is available.
@@ -647,12 +691,12 @@ func (o *Orchestrator) reloadPipelineFromConfig(sys *system.System) error {
 
 	// Unregister vaults that are no longer any route's destination, tearing
 	// down their cron rotation job as well.
-	for vid := range o.pipelineVaults {
+	for vid := range o.pipelineVaultsMap() {
 		if _, ok := desired[vid]; !ok {
 			o.pipeline.UnregisterVault(vid)
 			o.reconcileChunkCron(vid, false, "")
 			o.installLazyGLCBResolver(vid, false, nil, "")
-			delete(o.pipelineVaults, vid)
+			o.deletePipelineVaultLocked(vid)
 		}
 	}
 
@@ -667,14 +711,14 @@ func (o *Orchestrator) reloadPipelineFromConfig(sys *system.System) error {
 		policy, cronExpr := o.resolveChunkPolicy(sys, vid)
 		chunkEnabled := home && hasHandle
 		want := pipelineVaultReg{home: home, hasHandle: hasHandle, policy: policy}
-		if prev, ok := o.pipelineVaults[vid]; ok {
+		if prev, ok := o.lookupPipelineVault(vid); ok {
 			if prev == want {
 				o.reconcileChunkCron(vid, chunkEnabled, cronExpr)
 				o.finishPendingPipelineCtlRestore(vid)
 				continue
 			}
 			o.pipeline.UnregisterVault(vid)
-			delete(o.pipelineVaults, vid)
+			o.deletePipelineVaultLocked(vid)
 		}
 		spec, err := o.buildPipelineVaultSpec(vid, home, fsm, applier, isLeader, hasHandle, policy)
 		if err != nil {
@@ -683,7 +727,7 @@ func (o *Orchestrator) reloadPipelineFromConfig(sys *system.System) error {
 		if err := o.pipeline.RegisterVault(spec); err != nil {
 			return fmt.Errorf("register vault %s: %w", vid, err)
 		}
-		o.pipelineVaults[vid] = want
+		o.setPipelineVaultLocked(vid, want)
 		o.reconcileChunkCron(vid, chunkEnabled, cronExpr)
 		o.installLazyGLCBResolver(vid, chunkEnabled, fsm, spec.ChunkRoot)
 		o.finishPendingPipelineCtlRestore(vid)
