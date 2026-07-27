@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"slices"
 
 	"gastrolog/internal/glid"
@@ -30,11 +31,18 @@ const (
 // net with the orchestrator's job scheduler. Each tick reloads the routing
 // table + pipeline vault registrations from config and re-asserts each
 // vault-ctl group's desired leader (reconcileFilters → reloadPipelineFromConfig).
+//
+// Called from ApplyConfig, i.e. on every config apply, so finding the job
+// already registered is the normal case and not a failure. That is expressed
+// by testing AddJob's ErrJobExists rather than by a HasJob pre-check: the
+// pre-check was a check-then-act race (two applies could both see "absent",
+// and only the loser's AddJob error would say so) and it was misleading, since
+// AddJob already answers the same question atomically. See gastrolog-69sjlj.
 func (o *Orchestrator) startPipelineConfigReconcile() error {
-	if o.scheduler.HasJob(pipelineConfigReconcileJobName) {
-		return nil
-	}
 	if err := o.scheduler.AddJob(pipelineConfigReconcileJobName, sweepCron(pipelineConfigReconcileSchedule), o.pipelineConfigReconcile); err != nil {
+		if errors.Is(err, ErrJobExists) {
+			return nil // registered by an earlier apply; nothing to do
+		}
 		return err
 	}
 	o.scheduler.Describe(pipelineConfigReconcileJobName,

@@ -91,17 +91,23 @@ func (o *Orchestrator) startArchivalSweep() error {
 // The work is submitted as a one-time scheduler job so it stays visible to the
 // operator inspector (never a raw goroutine). archivalSweepAll is fully
 // leader-gated per vault, so it is safe to fire on every node — only the vault
-// leader acts. Concurrent triggers coalesce: while one triggered run is still
-// pending we skip scheduling another (the hourly job and any in-flight run
-// already cover the same idempotent work).
+// leader acts.
+//
+// Concurrent triggers coalesce, and the job name is what makes that true: the
+// claim is taken with RunOnceIfAbsent, which does the presence check and the
+// registration under one hold of the scheduler mutex. The previous shape —
+// HasJob followed by RunOnce — only claimed to coalesce: two config edits
+// landing together (a transition-chain edit fans out to every node from the
+// same NotifyCloudServicePut) could both observe "nothing pending" and both
+// enqueue, and the duplicate then silently overwrote the first registration so
+// one of the two runs published no terminal job event to the inspector. See
+// gastrolog-69sjlj, and gastrolog-3hwngy for the same shape causing duplicate
+// cloud uploads.
 func (o *Orchestrator) TriggerArchivalSweep() {
 	if o.scheduler == nil {
 		return
 	}
-	if o.scheduler.HasJob(archivalSweepTriggerJobName) {
-		return // a triggered evaluation is already pending
-	}
-	if err := o.scheduler.RunOnce(archivalSweepTriggerJobName, o.archivalSweepAll); err != nil {
+	if _, err := o.scheduler.RunOnceIfAbsent(archivalSweepTriggerJobName, o.archivalSweepAll); err != nil {
 		o.retentionLogger.Warn("archival sweep: trigger failed", "error", err)
 	}
 }

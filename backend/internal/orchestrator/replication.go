@@ -18,7 +18,14 @@ func (o *Orchestrator) scheduleReplication(vaultID glid.GLID, chunkID chunk.Chun
 	if len(targets) == 0 || o.isPipelineIngestVault(vaultID) {
 		return
 	}
+	// Describe BEFORE scheduling: the description is read into the Scheduled
+	// event's JobInfo, and completeOneTimeJob deletes the entry when the job
+	// finishes. Describing afterwards both lost the label on the event and
+	// leaked one descriptions entry per chunk whenever the job finished first
+	// — the delete ran, then the late Describe re-added an entry nothing was
+	// left to remove. See gastrolog-69sjlj.
 	name := fmt.Sprintf("replicate:%s:%s", vaultID, chunkID)
+	o.scheduler.Describe(name, fmt.Sprintf("Replicate chunk %s to %d followers", chunkID, len(targets)))
 	if err := o.scheduler.RunOnce(name, func() {
 		// Created inside the closure so the timeout starts when the job executes,
 		// not when it's scheduled.
@@ -28,7 +35,6 @@ func (o *Orchestrator) scheduleReplication(vaultID glid.GLID, chunkID chunk.Chun
 	}); err != nil {
 		o.replicationLogger.Warn("failed to schedule replication", "name", name, "error", err)
 	}
-	o.scheduler.Describe(name, fmt.Sprintf("Replicate chunk %s to %d followers", chunkID, len(targets)))
 }
 
 // replicateSealedChunk copies a sealed chunk from the leader to all follower

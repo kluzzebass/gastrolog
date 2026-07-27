@@ -3,10 +3,13 @@ package cli
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"gastrolog/internal/glid"
+	"io"
 	"os"
+	"slices"
 	"strings"
 
 	"connectrpc.com/connect"
@@ -69,24 +72,133 @@ func newImportCmd() *cobra.Command {
 // readImportDoc reads and decodes an exportDoc from a file argument or stdin.
 func readImportDoc(args []string) (exportDoc, error) {
 	var doc exportDoc
+	var raw []byte
+	var err error
 	if len(args) == 1 {
-		f, err := os.Open(args[0])
+		// Path is the CLI argument the operator typed.
+		raw, err = os.ReadFile(args[0]) //ok:os-readfile a config document, already decoded whole into memory
 		if err != nil {
 			return doc, err
 		}
-		defer func() { _ = f.Close() }()
-		if err := json.NewDecoder(f).Decode(&doc); err != nil {
-			return doc, fmt.Errorf("decode JSON: %w", err)
-		}
 	} else {
-		if err := json.NewDecoder(os.Stdin).Decode(&doc); err != nil {
-			return doc, fmt.Errorf("decode JSON from stdin: %w", err)
+		raw, err = io.ReadAll(os.Stdin) //ok:io-readall a config document, already decoded whole into memory
+		if err != nil {
+			return doc, fmt.Errorf("read JSON from stdin: %w", err)
 		}
+	}
+	if err := json.Unmarshal(decodeGLIDFields(raw), &doc); err != nil {
+		return doc, fmt.Errorf("decode JSON: %w", err)
 	}
 	return doc, nil
 }
 
-// importEntities imports all entities from the document in dependency order.
+// protoIDSections are the export-document sections that decode into generated
+// proto messages, where an ID field is a bytes field that encoding/json reads
+// as base64. `config export` renders those IDs as base32hex GLID strings for
+// readability (printer.json → convertGLIDFields), so the document has to be
+// turned back before it can be decoded — without this, importing an exported
+// document failed on the first entity with an ID ("illegal base64 data"), so
+// no export/import round trip worked at all (gastrolog-2nr3aa).
+//
+// Sections that decode into local structs with string IDs (certificates,
+// users, nodes, managed_files) are left alone: their IDs are already text.
+var protoIDSections = map[string]bool{
+	"rotation_policies":    true,
+	"retention_policies":   true,
+	"cloud_services":       true,
+	"vaults":               true,
+	"ingesters":            true,
+	"routes":               true,
+	"node_storage_configs": true,
+}
+
+// decodeGLIDFields is the inverse of convertGLIDFields: within the proto
+// sections it rewrites base32hex GLID strings in ID fields back to the base64
+// encoding of the raw 16 bytes that encoding/json expects. Values that are not
+// GLIDs — including IDs already written as base64 by hand — are left as they
+// are, so a hand-authored document still imports.
+func decodeGLIDFields(data []byte) []byte {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(data, &top); err != nil {
+		return data // not an object; let the real decode report the error
+	}
+	changed := false
+	for key, raw := range top {
+		if !protoIDSections[key] {
+			continue
+		}
+		var v any
+		if err := json.Unmarshal(raw, &v); err != nil {
+			continue
+		}
+		unwalkJSON(v, "")
+		encoded, err := json.Marshal(v)
+		if err != nil {
+			continue
+		}
+		top[key] = encoded
+		changed = true
+	}
+	if !changed {
+		return data
+	}
+	out, err := json.Marshal(top)
+	if err != nil {
+		return data
+	}
+	return out
+}
+
+// unwalkJSON mirrors walkJSON, converting GLID strings back to base64 bytes.
+func unwalkJSON(v any, key string) {
+	switch val := v.(type) {
+	case map[string]any:
+		for k, child := range val {
+			if s, ok := child.(string); ok && isIDField(k) {
+				if converted, ok := glidToBase64(s); ok {
+					val[k] = converted
+				}
+			} else {
+				unwalkJSON(child, k)
+			}
+		}
+	case []any:
+		for i, item := range val {
+			if s, ok := item.(string); ok && isIDField(key) {
+				if converted, ok := glidToBase64(s); ok {
+					val[i] = converted
+					continue
+				}
+			}
+			unwalkJSON(item, key)
+		}
+	}
+}
+
+// glidToBase64 converts a base32hex GLID string to the base64 form
+// encoding/json uses for proto bytes fields.
+func glidToBase64(s string) (string, bool) {
+	g, err := glid.Parse(s)
+	if err != nil || g.IsZero() {
+		return "", false
+	}
+	return base64.StdEncoding.EncodeToString(g.Bytes()), true
+}
+
+// importStep imports one section of the document, returning how many entities
+// it put.
+type importStep func(context.Context, *server.Client, *resolver, *exportDoc) (int, error)
+
+// importEntities imports all entities from the document.
+//
+// The steps run in dependency order: a referenced entity is put before the
+// entities that name it. Cloud services before vaults (cloud_service_id),
+// nodes before node storage (node_id) and ingesters (node_ids), vaults before
+// routes (destination vault_id).
+//
+// gastrolog-4kkoo (Phase 5): no FilterConfig entity; a route's match
+// expression is inlined on the route's stages and is imported with the route
+// by importRoutes.
 func importEntities(ctx context.Context, client *server.Client, doc *exportDoc) (int, error) {
 	r, err := newResolver(ctx, client)
 	if err != nil {
@@ -94,10 +206,37 @@ func importEntities(ctx context.Context, client *server.Client, doc *exportDoc) 
 	}
 
 	var imported int
+	for _, step := range []importStep{
+		importRotationPolicies,
+		importRetentionPolicies,
+		importCloudServices,
+		importNodes,
+		importNodeStorageConfigs,
+		importVaults,
+		importIngesters,
+		importRoutes,
+		importLogLevels,
+		importCertificates,
+		reportUnrestorable,
+	} {
+		n, stepErr := step(ctx, client, r, doc)
+		imported += n
+		if stepErr != nil {
+			return imported, stepErr
+		}
+	}
 
-	// gastrolog-4kkoo (Phase 5): no FilterConfig entity; expressions are
-	// inlined on routes (handled below in the Routes block).
+	n, err := importServerSettings(ctx, client, doc)
+	if err != nil {
+		return imported, err
+	}
+	imported += n
 
+	return imported, nil
+}
+
+func importRotationPolicies(ctx context.Context, client *server.Client, r *resolver, doc *exportDoc) (int, error) {
+	var imported int
 	for _, p := range doc.RotationPolicies {
 		ensureProtoID(p.Name, r.rotationPolicies, &p.Id)
 		_, err := client.System.PutRotationPolicy(ctx, connect.NewRequest(&v1.PutRotationPolicyRequest{
@@ -108,7 +247,11 @@ func importEntities(ctx context.Context, client *server.Client, doc *exportDoc) 
 		}
 		imported++
 	}
+	return imported, nil
+}
 
+func importRetentionPolicies(ctx context.Context, client *server.Client, r *resolver, doc *exportDoc) (int, error) {
+	var imported int
 	for _, p := range doc.RetentionPolicies {
 		ensureProtoID(p.Name, r.retentionPolicies, &p.Id)
 		_, err := client.System.PutRetentionPolicy(ctx, connect.NewRequest(&v1.PutRetentionPolicyRequest{
@@ -119,8 +262,61 @@ func importEntities(ctx context.Context, client *server.Client, doc *exportDoc) 
 		}
 		imported++
 	}
+	return imported, nil
+}
 
-	for _, v := range doc.Vaults {
+func importCloudServices(ctx context.Context, client *server.Client, r *resolver, doc *exportDoc) (int, error) {
+	var imported int
+	for _, cs := range doc.CloudServices {
+		ensureProtoID(cs.Name, r.cloudServices, &cs.Id)
+		_, err := client.System.PutCloudService(ctx, connect.NewRequest(&v1.PutCloudServiceRequest{
+			Config: cs,
+		}))
+		if err != nil {
+			return imported, fmt.Errorf("import cloud service %q: %w", cs.Name, err)
+		}
+		imported++
+	}
+	return imported, nil
+}
+
+func importNodes(ctx context.Context, client *server.Client, r *resolver, doc *exportDoc) (int, error) {
+	var imported int
+	for _, n := range doc.Nodes {
+		ensureID(n.Name, r.nodes, &n.ID)
+		nodeID, parseErr := glid.ParseUUID(n.ID)
+		if parseErr != nil {
+			return imported, fmt.Errorf("import node %q: invalid ID %q: %w", n.Name, n.ID, parseErr)
+		}
+		_, err := client.System.PutNodeConfig(ctx, connect.NewRequest(&v1.PutNodeConfigRequest{
+			Config: &v1.NodeConfig{Id: nodeID.ToProto(), Name: n.Name},
+		}))
+		if err != nil {
+			return imported, fmt.Errorf("import node %q: %w", n.Name, err)
+		}
+		imported++
+	}
+	return imported, nil
+}
+
+func importNodeStorageConfigs(ctx context.Context, client *server.Client, _ *resolver, doc *exportDoc) (int, error) {
+	var imported int
+	for _, nsc := range doc.NodeStorageConfigs {
+		nsc.NodeId = textIDBytes(nsc.NodeId)
+		_, err := client.System.SetNodeStorageConfig(ctx, connect.NewRequest(&v1.SetNodeStorageConfigRequest{
+			Config: nsc,
+		}))
+		if err != nil {
+			return imported, fmt.Errorf("import storage config for node %s: %w", formatIDBytes(nsc.NodeId), err)
+		}
+		imported++
+	}
+	return imported, nil
+}
+
+func importVaults(ctx context.Context, client *server.Client, r *resolver, doc *exportDoc) (int, error) {
+	var imported int
+	for _, v := range orderVaultsForImport(doc.Vaults) {
 		ensureProtoID(v.Name, r.vaults, &v.Id)
 		_, err := client.System.PutVault(ctx, connect.NewRequest(&v1.PutVaultRequest{
 			Config: v,
@@ -130,9 +326,55 @@ func importEntities(ctx context.Context, client *server.Client, doc *exportDoc) 
 		}
 		imported++
 	}
+	return imported, nil
+}
 
+// orderVaultsForImport puts a vault's retention transfer target ahead of the
+// vault that names it: PutVault rejects a target that does not exist yet, and
+// the document's order is whatever the store's map iteration produced, so
+// importing in document order would restore a transfer pair only by luck.
+// Vaults whose target is not in the document (already on the target cluster,
+// or a genuine dangling reference the server should reject) keep their place.
+func orderVaultsForImport(vaults protoList[*v1.VaultConfig]) []*v1.VaultConfig {
+	inDoc := make(map[string]bool, len(vaults))
+	for _, v := range vaults {
+		inDoc[string(v.GetId())] = true
+	}
+
+	ordered := make([]*v1.VaultConfig, 0, len(vaults))
+	placed := make(map[string]bool, len(vaults))
+	remaining := slices.Clone([]*v1.VaultConfig(vaults))
+	for len(remaining) > 0 {
+		progressed := false
+		still := remaining[:0:0]
+		for _, v := range remaining {
+			target := string(v.GetRetentionTransferTargetVaultId())
+			if target == "" || placed[target] || !inDoc[target] {
+				ordered = append(ordered, v)
+				placed[string(v.GetId())] = true
+				progressed = true
+				continue
+			}
+			still = append(still, v)
+		}
+		if !progressed {
+			// A cycle in the document. Hand the rest over unchanged and let
+			// the server's cycle detection produce the real error.
+			return append(ordered, still...)
+		}
+		remaining = still
+	}
+	return ordered
+}
+
+func importIngesters(ctx context.Context, client *server.Client, r *resolver, doc *exportDoc) (int, error) {
+	var imported int
 	for _, ig := range doc.Ingesters {
 		ensureProtoID(ig.Name, r.ingesters, &ig.Id)
+		for i := range ig.NodeIds {
+			ig.NodeIds[i] = textIDBytes(ig.NodeIds[i])
+		}
+		ig.NodeId = textIDBytes(ig.NodeId)
 		_, err := client.System.PutIngester(ctx, connect.NewRequest(&v1.PutIngesterRequest{
 			Config: ig,
 		}))
@@ -141,18 +383,38 @@ func importEntities(ctx context.Context, client *server.Client, doc *exportDoc) 
 		}
 		imported++
 	}
+	return imported, nil
+}
 
-	for _, n := range doc.Nodes {
-		ensureProtoID(n.Name, r.nodes, &n.Id)
-		_, err := client.System.PutNodeConfig(ctx, connect.NewRequest(&v1.PutNodeConfigRequest{
-			Config: n,
+func importRoutes(ctx context.Context, client *server.Client, r *resolver, doc *exportDoc) (int, error) {
+	var imported int
+	for _, rt := range doc.Routes {
+		ensureProtoID(rt.Name, r.routes, &rt.Id)
+		_, err := client.System.PutRoute(ctx, connect.NewRequest(&v1.PutRouteRequest{
+			Config: rt,
 		}))
 		if err != nil {
-			return imported, fmt.Errorf("import node %q: %w", n.Name, err)
+			return imported, fmt.Errorf("import route %q: %w", rt.Name, err)
 		}
 		imported++
 	}
+	return imported, nil
+}
 
+func importLogLevels(ctx context.Context, client *server.Client, _ *resolver, doc *exportDoc) (int, error) {
+	if doc.LogLevels == nil || doc.LogLevels.Msg == nil {
+		return 0, nil
+	}
+	if _, err := client.System.PutLogLevels(ctx, connect.NewRequest(&v1.PutLogLevelsRequest{
+		Config: doc.LogLevels.Msg,
+	})); err != nil {
+		return 0, fmt.Errorf("import log levels: %w", err)
+	}
+	return 1, nil
+}
+
+func importCertificates(ctx context.Context, client *server.Client, r *resolver, doc *exportDoc) (int, error) {
+	var imported int
 	for _, c := range doc.Certificates {
 		ensureID(c.Name, r.certs, &c.ID)
 		certIDBytes, parseErr := glid.ParseUUID(c.ID)
@@ -170,23 +432,48 @@ func importEntities(ctx context.Context, client *server.Client, doc *exportDoc) 
 		}
 		imported++
 	}
+	return imported, nil
+}
 
+// reportUnrestorable announces what the document lists but cannot restore —
+// see exportExclusions(). It imports nothing; the point is that the operator
+// sees per entity what did not come back instead of inferring it from a
+// count.
+func reportUnrestorable(ctx context.Context, client *server.Client, r *resolver, doc *exportDoc) (int, error) {
 	for _, u := range doc.Users {
 		// Users can only be created with passwords, which we don't export.
 		// On import, we skip users that already exist and warn about new ones.
 		if _, ok := r.users[strings.ToLower(u.Username)]; ok {
 			continue // already exists, skip (no way to update role without password)
 		}
-		_, _ = fmt.Fprintf(os.Stderr, "Warning: skipping user %q — cannot create without password\n", u.Username)
+		_, _ = fmt.Fprintf(os.Stderr, "Warning: skipping user %q — cannot create without password (use 'config user create')\n", u.Username)
 	}
 
-	n, err := importServerSettings(ctx, client, doc)
-	if err != nil {
-		return imported, err
+	for _, f := range doc.ManagedFiles {
+		// Managed file content is an uploaded blob on disk, not config, so it
+		// is not in the document. Existing files with the same name stay.
+		if existing, err := client.System.ListManagedFiles(ctx, connect.NewRequest(&v1.ListManagedFilesRequest{})); err == nil {
+			if slices.ContainsFunc(existing.Msg.Files, func(mf *v1.ManagedFileInfo) bool { return mf.Name == f.Name }) {
+				continue
+			}
+		}
+		_, _ = fmt.Fprintf(os.Stderr, "Warning: skipping managed file %q — contents are not part of a config export (use 'config file upload')\n", f.Name)
 	}
-	imported += n
+	return 0, nil
+}
 
-	return imported, nil
+// textIDBytes normalises a node ID that a proto bytes field carries as text
+// rather than as raw bytes. IngesterConfig.node_id(s) and
+// NodeStorageConfig.node_id are the exceptions: the store keys those by the ID
+// string, so the server does string(b) on them, while every other proto ID
+// field is the raw 16 bytes. decodeGLIDFields cannot tell the two apart from
+// the document alone, so it produces raw bytes and the text-form fields are
+// converted back here.
+func textIDBytes(b []byte) []byte {
+	if len(b) != glid.Size {
+		return b
+	}
+	return []byte(glid.FromBytes(b).String())
 }
 
 // ensureID reuses an existing ID if the name matches, or generates a new UUIDv7.
@@ -216,7 +503,18 @@ func deleteAll(ctx context.Context, client *server.Client) error {
 		return err
 	}
 
-	// Delete in reverse dependency order: vaults, ingesters first, then policies/filters.
+	// Delete in reverse dependency order: routes and vaults first (routes name
+	// vaults, vaults name cloud services), then ingesters, then policies.
+	//
+	// Managed files are deliberately not deleted: their content is an
+	// uploaded blob that no import can restore, so --replace must not destroy
+	// it. Node records and node storage configs are cluster-managed and stay
+	// for the same reason — a node that is live keeps its identity.
+	for _, rt := range resp.Msg.Routes {
+		if _, err := client.System.DeleteRoute(ctx, connect.NewRequest(&v1.DeleteRouteRequest{Id: rt.Id})); err != nil {
+			return fmt.Errorf("delete route %s: %w", rt.Name, err)
+		}
+	}
 	for _, v := range resp.Msg.Vaults {
 		if _, err := client.System.DeleteVault(ctx, connect.NewRequest(&v1.DeleteVaultRequest{Id: v.Id, Force: true})); err != nil {
 			return fmt.Errorf("delete vault %s: %w", v.Name, err)
@@ -237,6 +535,12 @@ func deleteAll(ctx context.Context, client *server.Client) error {
 	for _, p := range resp.Msg.RetentionPolicies {
 		if _, err := client.System.DeleteRetentionPolicy(ctx, connect.NewRequest(&v1.DeleteRetentionPolicyRequest{Id: p.Id})); err != nil {
 			return fmt.Errorf("delete retention policy %s: %w", p.Name, err)
+		}
+	}
+	// After the vaults that referenced them are gone.
+	for _, cs := range resp.Msg.CloudServices {
+		if _, err := client.System.DeleteCloudService(ctx, connect.NewRequest(&v1.DeleteCloudServiceRequest{Id: cs.Id})); err != nil {
+			return fmt.Errorf("delete cloud service %s: %w", cs.Name, err)
 		}
 	}
 

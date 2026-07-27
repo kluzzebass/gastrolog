@@ -12,6 +12,7 @@ import (
 	chunkfile "gastrolog/internal/chunk/file"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/chunking"
+	"gastrolog/internal/system"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 
 	hraft "github.com/hashicorp/raft"
@@ -80,9 +81,13 @@ func TestSweepMissingReplicas_PipelineVault_SyncsGLCBNotCatchup(t *testing.T) {
 	}
 }
 
-// TestSchedulePostSeal_PipelineVault_NoJob verifies the legacy post-seal
-// scheduler is not used for pipeline ingest vaults.
-func TestSchedulePostSeal_PipelineVault_NoJob(t *testing.T) {
+// TestSchedulePostSeal_PipelineVault_NoRecordStreamReplication verifies that
+// pipeline registration suppresses the thing the pipeline actually replaces —
+// follower record-stream replication — and nothing else. It must NOT suppress
+// the post-seal pipeline: Seal() announces only Active → Sealing and the
+// matching AnnounceSeal lives in PostSealProcess, so skipping the post-seal
+// job parks the manifest entry in Sealing forever.
+func TestSchedulePostSeal_PipelineVault_NoRecordStreamReplication(t *testing.T) {
 	t.Parallel()
 
 	vaultID := glid.New()
@@ -100,12 +105,30 @@ func TestSchedulePostSeal_PipelineVault_NoJob(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = cm.Close() })
 
+	orch.RegisterVault(NewVault(vaultID, &VaultInstance{
+		VaultID: vaultID,
+		Type:    "file",
+		Chunks:  cm,
+		FollowerTargets: []system.ReplicationTarget{
+			{NodeID: "node-B", StorageID: "storage-B"},
+		},
+	}))
+
 	orch.schedulePostSeal(vaultID, cm, chunkID)
 
+	postSealJob := "post-seal:" + vaultID.String() + ":" + chunkID.String()
+	replicateJob := "replicate:" + vaultID.String() + ":" + chunkID.String()
+	var sawPostSeal bool
 	for _, job := range orch.scheduler.ListJobs() {
-		if job.Name == "post-seal:"+vaultID.String()+":"+chunkID.String() {
-			t.Fatalf("post-seal job scheduled for pipeline vault: %+v", job)
+		switch job.Name {
+		case postSealJob:
+			sawPostSeal = true
+		case replicateJob:
+			t.Fatalf("record-stream replication scheduled for pipeline vault: %+v", job)
 		}
+	}
+	if !sawPostSeal {
+		t.Fatalf("post-seal job %q not scheduled; the Sealing → Sealed announce rides it", postSealJob)
 	}
 }
 

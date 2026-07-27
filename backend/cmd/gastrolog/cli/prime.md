@@ -248,6 +248,11 @@ COMMON TASKS
   gastrolog config export > config.json
   gastrolog config import < config.json
 
+  The document's "excluded" section lists what it cannot carry (user
+  passwords, certificate private keys, managed file contents, runtime
+  state); "contains_secrets" lists the credentials it does carry — treat
+  the file as a secret. Everything else survives the round trip.
+
 ═══════════════════════════════════════════════════
 LOG FORMAT ADVICE
 ═══════════════════════════════════════════════════
