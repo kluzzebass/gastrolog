@@ -286,6 +286,91 @@ func TestImportDecodesExportedIDs(t *testing.T) {
 	}
 }
 
+// TestConfigImportOrdersTransferTargets: a vault with
+// retention_disposition=transfer names another vault, and PutVault rejects a
+// target that does not exist yet. Entity order in the document is whatever the
+// store's map iteration produced, so an import that puts vaults in document
+// order restores this config only when it gets lucky. The document below is
+// deliberately ordered source-first.
+func TestConfigImportOrdersTransferTargets(t *testing.T) {
+	ctx := context.Background()
+	srcURL, _ := newRoundTripServer(t)
+	client := server.NewClient(srcURL)
+
+	targetID, sourceID := glid.New(), glid.New()
+	putFileVault(t, ctx, client, targetID, "archive", nil)
+	putFileVault(t, ctx, client, sourceID, "hot", &targetID)
+
+	exported := runExport(t, srcURL)
+	exported["vaults"] = reorderVaults(t, exported["vaults"], "hot", "archive")
+
+	dstURL, dstStore := newRoundTripServer(t)
+	runImport(t, dstURL, exported)
+
+	vaults, err := dstStore.ListVaults(ctx)
+	if err != nil {
+		t.Fatalf("ListVaults: %v", err)
+	}
+	if len(vaults) != 2 {
+		t.Fatalf("after import: got %d vaults, want 2", len(vaults))
+	}
+	for _, v := range vaults {
+		if v.Name != "hot" {
+			continue
+		}
+		if v.RetentionTransferTargetVaultID == nil || *v.RetentionTransferTargetVaultID != targetID {
+			t.Errorf("hot vault transfer target = %v, want %s", v.RetentionTransferTargetVaultID, targetID)
+		}
+	}
+}
+
+// TestOrderVaultsForImportHandlesCycle: a hand-edited document can name a
+// transfer cycle. Ordering must hand every vault over anyway so the server's
+// cycle detection reports it, rather than spinning or dropping vaults.
+func TestOrderVaultsForImportHandlesCycle(t *testing.T) {
+	a, b := glid.New(), glid.New()
+	vaults := protoList[*v1.VaultConfig]{
+		{Id: a.ToProto(), Name: "a", RetentionTransferTargetVaultId: b.ToProto()},
+		{Id: b.ToProto(), Name: "b", RetentionTransferTargetVaultId: a.ToProto()},
+	}
+	got := orderVaultsForImport(vaults)
+	if len(got) != 2 {
+		t.Fatalf("got %d vaults, want both", len(got))
+	}
+	seen := map[string]bool{}
+	for _, v := range got {
+		seen[v.Name] = true
+	}
+	if !seen["a"] || !seen["b"] {
+		t.Errorf("ordering dropped a vault: %v", seen)
+	}
+}
+
+// reorderVaults rewrites the vaults section into the given name order.
+func reorderVaults(t *testing.T, raw json.RawMessage, names ...string) json.RawMessage {
+	t.Helper()
+	var items []map[string]any
+	if err := json.Unmarshal(raw, &items); err != nil {
+		t.Fatal(err)
+	}
+	ordered := make([]map[string]any, 0, len(items))
+	for _, name := range names {
+		for _, item := range items {
+			if item["name"] == name {
+				ordered = append(ordered, item)
+			}
+		}
+	}
+	if len(ordered) != len(items) {
+		t.Fatalf("reorderVaults: named %d of %d vaults", len(ordered), len(items))
+	}
+	out, err := json.Marshal(ordered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
 // TestConfigImportRejectsUnknownEntityFields: a field the server does not know
 // must stop the import, not be dropped on the way in. Silently ignoring it is
 // how a config ends up looking restored while a setting is missing.
@@ -543,6 +628,22 @@ func mustPutVault(t *testing.T, ctx context.Context, client *server.Client, id g
 	}
 	if rule != nil {
 		cfg.RetentionRules = []*v1.RetentionRule{rule}
+	}
+	if _, err := client.System.PutVault(ctx, connect.NewRequest(&v1.PutVaultRequest{Config: cfg})); err != nil {
+		t.Fatalf("PutVault %q: %v", name, err)
+	}
+}
+
+// putFileVault creates a file vault, optionally with retention transfer to
+// another vault.
+func putFileVault(t *testing.T, ctx context.Context, client *server.Client, id glid.GLID, name string, transferTo *glid.GLID) {
+	t.Helper()
+	cfg := &v1.VaultConfig{
+		Id: id.ToProto(), Name: name, Enabled: true, Type: v1.VaultType_VAULT_TYPE_FILE,
+	}
+	if transferTo != nil {
+		cfg.RetentionDisposition = "transfer"
+		cfg.RetentionTransferTargetVaultId = transferTo.ToProto()
 	}
 	if _, err := client.System.PutVault(ctx, connect.NewRequest(&v1.PutVaultRequest{Config: cfg})); err != nil {
 		t.Fatalf("PutVault %q: %v", name, err)

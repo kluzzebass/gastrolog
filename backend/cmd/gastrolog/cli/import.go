@@ -316,7 +316,7 @@ func importNodeStorageConfigs(ctx context.Context, client *server.Client, _ *res
 
 func importVaults(ctx context.Context, client *server.Client, r *resolver, doc *exportDoc) (int, error) {
 	var imported int
-	for _, v := range doc.Vaults {
+	for _, v := range orderVaultsForImport(doc.Vaults) {
 		ensureProtoID(v.Name, r.vaults, &v.Id)
 		_, err := client.System.PutVault(ctx, connect.NewRequest(&v1.PutVaultRequest{
 			Config: v,
@@ -327,6 +327,44 @@ func importVaults(ctx context.Context, client *server.Client, r *resolver, doc *
 		imported++
 	}
 	return imported, nil
+}
+
+// orderVaultsForImport puts a vault's retention transfer target ahead of the
+// vault that names it: PutVault rejects a target that does not exist yet, and
+// the document's order is whatever the store's map iteration produced, so
+// importing in document order would restore a transfer pair only by luck.
+// Vaults whose target is not in the document (already on the target cluster,
+// or a genuine dangling reference the server should reject) keep their place.
+func orderVaultsForImport(vaults protoList[*v1.VaultConfig]) []*v1.VaultConfig {
+	inDoc := make(map[string]bool, len(vaults))
+	for _, v := range vaults {
+		inDoc[string(v.GetId())] = true
+	}
+
+	ordered := make([]*v1.VaultConfig, 0, len(vaults))
+	placed := make(map[string]bool, len(vaults))
+	remaining := slices.Clone([]*v1.VaultConfig(vaults))
+	for len(remaining) > 0 {
+		progressed := false
+		still := remaining[:0:0]
+		for _, v := range remaining {
+			target := string(v.GetRetentionTransferTargetVaultId())
+			if target == "" || placed[target] || !inDoc[target] {
+				ordered = append(ordered, v)
+				placed[string(v.GetId())] = true
+				progressed = true
+				continue
+			}
+			still = append(still, v)
+		}
+		if !progressed {
+			// A cycle in the document. Hand the rest over unchanged and let
+			// the server's cycle detection produce the real error.
+			return append(ordered, still...)
+		}
+		remaining = still
+	}
+	return ordered
 }
 
 func importIngesters(ctx context.Context, client *server.Client, r *resolver, doc *exportDoc) (int, error) {
