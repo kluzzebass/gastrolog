@@ -279,6 +279,74 @@ func TestImportDecodesExportedIDs(t *testing.T) {
 	}
 }
 
+// TestConfigImportRejectsUnknownEntityFields: a field the server does not know
+// must stop the import, not be dropped on the way in. Silently ignoring it is
+// how a config ends up looking restored while a setting is missing.
+func TestConfigImportRejectsUnknownEntityFields(t *testing.T) {
+	dstURL, dstStore := newRoundTripServer(t)
+	doc := map[string]json.RawMessage{
+		"vaults": json.RawMessage(`[{"id":"` + glid.New().String() + `","name":"logs","type":"VAULT_TYPE_MEMORY","retention_dispositoin":"route"}]`),
+	}
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewConfigCommand()
+	AddClientFlags(cmd)
+	cmd.SetArgs([]string{"import", path, "--addr", dstURL})
+	cmd.SilenceUsage, cmd.SilenceErrors = true, true
+	err = cmd.Execute()
+	if err == nil {
+		t.Fatal("import accepted a misspelled field, want an error")
+	}
+	vaults, listErr := dstStore.ListVaults(context.Background())
+	if listErr != nil {
+		t.Fatalf("ListVaults: %v", listErr)
+	}
+	if len(vaults) != 0 {
+		t.Errorf("rejected document still persisted %d vaults", len(vaults))
+	}
+}
+
+// TestConfigExportImportEmptyCluster: nothing configured is a legitimate
+// state, and it must not turn into an error or a phantom entity. Server
+// settings still appear — those are the effective values, which is what an
+// operator reviewing an export wants to see.
+func TestConfigExportImportEmptyCluster(t *testing.T) {
+	ctx := context.Background()
+	srcURL, _ := newRoundTripServer(t)
+	exported := runExport(t, srcURL)
+
+	entitySections := append(slices.Clone(referenceOnlySections),
+		"rotation_policies", "retention_policies", "cloud_services", "vaults",
+		"ingesters", "routes", "nodes", "node_storage_configs", "certificates")
+	for _, section := range entitySections {
+		if raw, ok := exported[section]; ok {
+			t.Errorf("empty cluster exported entity section %q: %s", section, raw)
+		}
+	}
+
+	dstURL, dstStore := newRoundTripServer(t)
+	runImport(t, dstURL, exported)
+
+	vaults, err := dstStore.ListVaults(ctx)
+	if err != nil {
+		t.Fatalf("ListVaults: %v", err)
+	}
+	routes, err := dstStore.ListRoutes(ctx)
+	if err != nil {
+		t.Fatalf("ListRoutes: %v", err)
+	}
+	if len(vaults) != 0 || len(routes) != 0 {
+		t.Errorf("importing an empty document created entities: %d vaults, %d routes", len(vaults), len(routes))
+	}
+}
+
 // --- fixture ---------------------------------------------------------------
 
 func newRoundTripServer(t *testing.T) (string, *sysmem.Store) {
