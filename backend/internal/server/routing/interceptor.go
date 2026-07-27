@@ -112,7 +112,7 @@ func (ri *RoutingInterceptor) WrapStreamingHandler(next connect.StreamingHandler
 		// Streaming RPCs pass through to the handler which manages its own
 		// routing. The interceptor can't generically forward streaming RPCs
 		// because Connect's StreamingHandlerConn.Receive() requires a
-		// concrete type. Server-streaming RouteTargeted (ExportVault) and
+		// concrete type. Server-streaming RouteToResourceOwner (ExportVault) and
 		// RouteFanOut (Search, Follow) use handler-level routing.
 		_ = route
 		return next(ctx, conn)

@@ -58,8 +58,8 @@ When reviewing code, check each of these. Report findings as PASS, FAIL, or N/A:
 
 ### New RPC Endpoints
 - [ ] Is the new RPC declared in the routing registry (`internal/server/routing/routes.go`)? The coverage test (`TestAllProceduresDeclared`) enforces this — if not, the test fails.
-- [ ] Is the strategy classification correct? RouteTargeted for vault-scoped ops, RouteFanOut for multi-node merges, RouteLocal for reads, RouteLeader for mutations.
-- [ ] For RouteTargeted unary RPCs: does the request proto have a `vault` field so the interceptor can auto-route?
+- [ ] Is the strategy classification correct? RouteToResourceOwner for actions on a specific resource (a vault, an ingester), RouteFanOut for multi-node merges, RouteLocal for reads, RouteLeader for config mutations.
+- [ ] For RouteToResourceOwner unary RPCs: does the route declare `Resource: OwnerOf(kind, getter)` so the interceptor can resolve the owner, and is there a registered `OwnerResolver` for that kind?
 - [ ] Is there a corresponding `Forward*` RPC in cluster/forward.go for cross-node calls? (Legacy — new RPCs use ForwardRPC via the routing interceptor.)
 - [ ] Does single-node mode (nil RoutingForwarder/RemoteSearcher/PeerState) degrade gracefully?
 
@@ -72,7 +72,7 @@ These are the bugs that keep recurring. Flag them immediately:
 3. **"Summing averages"**: Merging `avg()` across nodes by summing — mathematically wrong. Needs `sum+count` per node, then `totalSum/totalCount`.
 4. **"Missing route declaration"**: New RPC added to proto but not declared in `routing/routes.go`. The `TestAllProceduresDeclared` coverage test catches this — run it.
 5. **"Config applied locally"**: State change applied directly to in-memory struct instead of going through Raft apply.
-6. **"Wrong strategy"**: RouteLocal for a vault-scoped RPC (should be RouteTargeted) or RouteFanOut for a single-vault read (should be RouteTargeted).
+6. **"Wrong strategy"**: RouteLocal for a vault-scoped RPC (should be RouteToResourceOwner) or RouteFanOut for a single-vault read (should be RouteToResourceOwner).
 
 ## Output Format
 
