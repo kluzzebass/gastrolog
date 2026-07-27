@@ -1,67 +1,50 @@
+import type { Timestamp } from "../api/model/node";
 import { Badge } from "./Badge";
 import { formatDuration } from "../utils/units";
 import { useTick } from "./inspector/JobCard";
 
-// gastrolog-778iv: surface time-since-last-broadcast for peer nodes
-// whose stats have gone silent. The 0–5 min window between "peer
-// stopped broadcasting" and "unreachable_sweep flips state to
-// Unreachable" was previously a blank "offline" badge with no
-// duration; now it shows "offline Xs" / "offline Xm".
+// How long a node has been silent is a cluster fact, so it comes from the
+// cluster: ClusterNode.last_seen, which the backend fills from
+// PeerState.LastSeen (the max of last Raft contact and last stats broadcast).
 //
-// Shape per issue: client-side tracking from local viewing-node
-// observation, no proto change. Module-level Map persists during the
-// SPA session. Page reload loses the offline-since value for nodes
-// already offline, falling back to "offline" without duration — the
-// issue documents this as the trade-off of shape 1.
+// This badge previously timed the duration itself, from Date.now() at the
+// moment THIS TAB first saw stats go missing, held in a module-level Map. That
+// measured how long the tab had been open, not how long the node had been gone:
+// two tabs disagreed, a reload reset it, and a node down for hours read
+// "offline 5s" to whoever had just opened the panel. See gastrolog-231eli.
 //
-// Seamless handoff to NodeStateBadge: the unreachable_sweep now
-// records StateSince = lastSeen (not the wall-clock moment the sweep
-// noticed the lapse), so NodeStateBadge's "unreachable Xm" picks up
-// the same elapsed value this badge was showing as "offline Xs". The
-// visible jump is the label change (offline → unreachable), not the
-// counter resetting to zero.
-const offlineSince = new Map<string, number>();
-
-// recordOffline returns the timestamp (ms epoch) when nodeId first
-// became offline in this session, or null if currently online. Side-
-// effecting: updates the module-level Map as transitions happen.
-function recordOffline(nodeId: string, isOffline: boolean): number | null {
-  if (!isOffline) {
-    offlineSince.delete(nodeId);
-    return null;
-  }
-  if (!offlineSince.has(nodeId)) {
-    offlineSince.set(nodeId, Date.now());
-  }
-  return offlineSince.get(nodeId) ?? null;
-}
+// The local clock still appears here, in useTick and in the elapsed
+// subtraction, and that is fine — the ORIGIN is authoritative and only the
+// "how long ago was it" arithmetic is local, exactly as NodeStateBadge does it
+// with state_since. What must never come from the browser is the instant being
+// measured from.
 
 interface OfflineBadgeProps {
-  nodeId: string;
+  /** Cluster's last positive evidence of life; undefined if never seen. */
+  lastSeen?: Timestamp;
   isOffline: boolean;
   dark: boolean;
 }
 
-export function OfflineBadge({ nodeId, isOffline, dark }: Readonly<OfflineBadgeProps>) {
+export function OfflineBadge({ lastSeen, isOffline, dark }: Readonly<OfflineBadgeProps>) {
   const now = useTick();
-  const since = recordOffline(nodeId, isOffline);
   if (!isOffline) return null;
+
+  // No last_seen means the cluster has never had positive evidence for this
+  // node — a deliberate signal from PeerState.LastSeen, not a missing value to
+  // paper over. Say "offline" and claim nothing about duration.
   let text = "offline";
-  if (since !== null) {
-    const elapsedMs = now - since;
-    if (elapsedMs >= 1_000) {
-      text = `offline ${formatDuration(BigInt(Math.floor(elapsedMs / 1_000)))}`;
+  const seenSecs = lastSeen?.seconds ?? 0n;
+  if (seenSecs > 0n) {
+    const elapsed = BigInt(Math.floor(now / 1000)) - seenSecs;
+    if (elapsed >= 1n) {
+      text = `offline ${formatDuration(elapsed)}`;
     }
   }
+
   return (
     <Badge variant="error" dark={dark} title="cluster has not heard from this node">
       {text}
     </Badge>
   );
-}
-
-// _resetOfflineTrackerForTest is exported only to give tests a clean
-// slate between runs. Not part of the production API.
-export function _resetOfflineTrackerForTest(): void {
-  offlineSince.clear();
 }

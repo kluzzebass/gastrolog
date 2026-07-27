@@ -39,6 +39,11 @@ type ClusterStatusProvider interface {
 // NodeStatsProvider returns the latest stats for a given cluster node.
 type NodeStatsProvider interface {
 	Get(senderID string) *apiv1.NodeStats
+	// LastSeen is the most recent instant this cluster had ANY positive
+	// evidence the node was alive. Surfaced on ClusterNode so the UI can show
+	// how long a node has actually been silent instead of inventing the
+	// duration client-side (gastrolog-231eli).
+	LastSeen(nodeID string) time.Time
 }
 
 // LifecycleServer implements the LifecycleService.
@@ -170,6 +175,64 @@ func (s *LifecycleServer) Shutdown(
 	return connect.NewResponse(&apiv1.ShutdownResponse{}), nil
 }
 
+// buildClusterNode projects one Raft server plus its NodeConfig into the API
+// shape, attaching per-node stats and liveness. Split out of GetClusterStatus
+// so that function stays within the cognitive-complexity budget.
+func (s *LifecycleServer) buildClusterNode(srv cluster.RaftServer, leaderID string, cfg system.NodeConfig) *apiv1.ClusterNode {
+	role := apiv1.ClusterNodeRole_CLUSTER_NODE_ROLE_FOLLOWER
+	isLeader := srv.ID == leaderID
+	if isLeader {
+		role = apiv1.ClusterNodeRole_CLUSTER_NODE_ROLE_LEADER
+	}
+
+	var suffrage apiv1.ClusterNodeSuffrage
+	switch srv.Suffrage {
+	case "Voter":
+		suffrage = apiv1.ClusterNodeSuffrage_CLUSTER_NODE_SUFFRAGE_VOTER
+	case "Nonvoter":
+		suffrage = apiv1.ClusterNodeSuffrage_CLUSTER_NODE_SUFFRAGE_NONVOTER
+	case "Staging":
+		suffrage = apiv1.ClusterNodeSuffrage_CLUSTER_NODE_SUFFRAGE_STAGING
+	}
+
+	node := &apiv1.ClusterNode{
+		Id:       []byte(srv.ID),
+		Name:     cfg.Name,
+		Address:  srv.Address,
+		Role:     role,
+		Suffrage: suffrage,
+		IsLeader: isLeader,
+		State:    command.NodeStateToProto(cfg.EffectiveState()),
+	}
+	if !cfg.StateSince.IsZero() {
+		node.StateSince = timestamppb.New(cfg.StateSince)
+	}
+
+	isLocal := srv.ID == s.nodeID
+	// Attach per-node stats: real-time for local, last broadcast for peers.
+	if isLocal && s.localStats != nil {
+		node.Stats = s.localStats()
+	} else if s.peerStats != nil {
+		node.Stats = s.peerStats.Get(srv.ID)
+	}
+
+	// Last positive evidence of life, carried whether or not stats are present —
+	// a node reads as offline exactly when Stats is nil, which is when this value
+	// is the only thing that can say for how long (gastrolog-231eli). The local
+	// node is trivially seen now: it is the one answering. A zero LastSeen is
+	// PeerState's deliberate "never observed" signal and stays unset, so callers
+	// render a bare "offline" rather than an elapsed time.
+	switch {
+	case isLocal:
+		node.LastSeen = timestamppb.New(time.Now())
+	case s.peerStats != nil:
+		if seen := s.peerStats.LastSeen(srv.ID); !seen.IsZero() {
+			node.LastSeen = timestamppb.New(seen)
+		}
+	}
+	return node
+}
+
 // GetClusterStatus returns the current cluster topology and Raft state.
 func (s *LifecycleServer) GetClusterStatus(
 	ctx context.Context,
@@ -200,42 +263,7 @@ func (s *LifecycleServer) GetClusterStatus(
 
 	nodes := make([]*apiv1.ClusterNode, 0, len(servers))
 	for _, srv := range servers {
-		role := apiv1.ClusterNodeRole_CLUSTER_NODE_ROLE_FOLLOWER
-		isLeader := srv.ID == leaderID
-		if isLeader {
-			role = apiv1.ClusterNodeRole_CLUSTER_NODE_ROLE_LEADER
-		}
-
-		var suffrage apiv1.ClusterNodeSuffrage
-		switch srv.Suffrage {
-		case "Voter":
-			suffrage = apiv1.ClusterNodeSuffrage_CLUSTER_NODE_SUFFRAGE_VOTER
-		case "Nonvoter":
-			suffrage = apiv1.ClusterNodeSuffrage_CLUSTER_NODE_SUFFRAGE_NONVOTER
-		case "Staging":
-			suffrage = apiv1.ClusterNodeSuffrage_CLUSTER_NODE_SUFFRAGE_STAGING
-		}
-
-		cfg := cfgByID[srv.ID]
-		node := &apiv1.ClusterNode{
-			Id:       []byte(srv.ID),
-			Name:     cfg.Name,
-			Address:  srv.Address,
-			Role:     role,
-			Suffrage: suffrage,
-			IsLeader: isLeader,
-			State:    command.NodeStateToProto(cfg.EffectiveState()),
-		}
-		if !cfg.StateSince.IsZero() {
-			node.StateSince = timestamppb.New(cfg.StateSince)
-		}
-
-		// Attach per-node stats: real-time for local, last broadcast for peers.
-		if isLocal := srv.ID == s.nodeID; isLocal && s.localStats != nil {
-			node.Stats = s.localStats()
-		} else if s.peerStats != nil {
-			node.Stats = s.peerStats.Get(srv.ID)
-		}
+		node := s.buildClusterNode(srv, leaderID, cfgByID[srv.ID])
 
 		// Copy advertised addresses from stats onto the ClusterNode.
 		if node.Stats != nil {

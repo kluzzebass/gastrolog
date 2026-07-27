@@ -56,7 +56,7 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
     (configData?.nodeConfigs ?? []).map((nc) => [encode(nc.id), nc]),
   );
 
-  let nodes: { id: string; name: string; role: ClusterNodeRole; suffrage: ClusterNodeSuffrage; isLeader: boolean; hasStats: boolean; state: NodeState; stateSince?: Timestamp }[];
+  let nodes: { id: string; name: string; role: ClusterNodeRole; suffrage: ClusterNodeSuffrage; isLeader: boolean; hasStats: boolean; state: NodeState; stateSince?: Timestamp; lastSeen?: Timestamp }[];
   if (clusterEnabled) {
     nodes = (clusterData?.nodes ?? []).map((cn) => ({
       id: encode(cn.id),
@@ -67,6 +67,7 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
       hasStats: !!cn.stats,
       state: cn.state,
       stateSince: cn.stateSince,
+      lastSeen: cn.lastSeen,
     }));
   } else if (localNodeId) {
     nodes = [{
@@ -78,6 +79,8 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
       hasStats: true,
       state: NodeState.LIVE,
       stateSince: undefined,
+      // Single-node mode: this node is the one answering, so it is never offline.
+      lastSeen: undefined,
     }];
   } else {
     nodes = [];
@@ -135,7 +138,7 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
                     <NodeStateBadge state={node.state} stateSince={node.stateSince} dark={dark} />
                   )}
                   {clusterEnabled && !isLocal && node.state === NodeState.LIVE && (
-                    <OfflineBadge nodeId={node.id} isOffline={!node.hasStats} dark={dark} />
+                    <OfflineBadge lastSeen={node.lastSeen} isOffline={!node.hasStats} dark={dark} />
                   )}
                   {clusterEnabled && node.role !== ClusterNodeRole.UNSPECIFIED && (
                     <Badge variant={node.isLeader ? "copper" : "muted"} dark={dark}>
