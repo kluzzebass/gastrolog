@@ -82,8 +82,15 @@ func TestConfigExportImportRoundTrip(t *testing.T) {
 			t.Errorf("export is missing section %q — the fixture created one of every type", section)
 		}
 	}
-	if len(exported["excluded"]) == 0 || len(exported["contains_secrets"]) == 0 {
-		t.Error("export must state what it excludes and which secrets it carries")
+	if len(exported["excluded"]) == 0 {
+		t.Error("export must state what it excludes")
+	}
+	// The fixture stores cloud credentials and a MaxMind license key, so the
+	// document must say it carries them.
+	for _, want := range []string{"cloud service credentials", "maxmind"} {
+		if !bytes.Contains(exported["contains_secrets"], []byte(want)) {
+			t.Errorf("contains_secrets = %s, want it to name %q", exported["contains_secrets"], want)
+		}
 	}
 
 	// Import into a fresh store, then export again and diff.
@@ -329,6 +336,11 @@ func TestConfigExportImportEmptyCluster(t *testing.T) {
 		if raw, ok := exported[section]; ok {
 			t.Errorf("empty cluster exported entity section %q: %s", section, raw)
 		}
+	}
+	// No cloud service, no MaxMind key: the document must not claim to carry
+	// credentials it does not have.
+	if got := string(exported["contains_secrets"]); got != "[]" {
+		t.Errorf("contains_secrets = %s, want [] for a cluster with no credentials", got)
 	}
 
 	dstURL, dstStore := newRoundTripServer(t)

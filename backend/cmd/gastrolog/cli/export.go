@@ -172,13 +172,23 @@ func exportExclusions() []exclusionNote {
 	}
 }
 
-// exportSecrets names the secrets the document does carry, so the file is
-// handled as the credential store it is.
-func exportSecrets() []string {
-	return []string{
-		"cloud service credentials (access_key, secret_key, connection_string, credentials_json)",
-		"maxmind account id and license key",
+// exportSecrets names the secrets this document actually carries, so the file
+// is handled as the credential store it is. Computed from the content, not
+// asserted from the format: claiming credentials that are not there is the
+// same class of lie as omitting the ones that are.
+func exportSecrets(services []*v1.CloudService, maxmind *maxmindExport) []string {
+	out := []string{} // an explicit empty list, not a null: "none" is a fact too
+	for _, cs := range services {
+		if cs.GetAccessKey() != "" || cs.GetSecretKey() != "" ||
+			cs.GetConnectionString() != "" || cs.GetCredentialsJson() != "" {
+			out = append(out, "cloud service credentials (access_key, secret_key, connection_string, credentials_json)")
+			break
+		}
 	}
+	if maxmind != nil && (maxmind.LicenseKey != "" || maxmind.AccountID != "") {
+		out = append(out, "maxmind account id and license key")
+	}
+	return out
 }
 
 type certExport struct {
@@ -463,7 +473,7 @@ func newExportCmd() *cobra.Command {
 
 			doc := &exportDoc{
 				Excluded:             exportExclusions(),
-				ContainsSecrets:      exportSecrets(),
+				ContainsSecrets:      exportSecrets(cfgResp.Msg.CloudServices, maxmind),
 				RotationPolicies:     cfgResp.Msg.RotationPolicies,
 				RetentionPolicies:    cfgResp.Msg.RetentionPolicies,
 				CloudServices:        cfgResp.Msg.CloudServices,
