@@ -69,6 +69,10 @@ func (o *Orchestrator) scheduleCatchupForNode(vaultID glid.GLID, nodeID string, 
 	if attempt > 0 {
 		name += fmt.Sprintf(":retry-%d", attempt)
 	}
+	// Describe BEFORE scheduling — see scheduleReplication for why (missing
+	// label on the Scheduled event, leaked descriptions entry when the job
+	// finishes first). gastrolog-69sjlj.
+	o.scheduler.Describe(name, "Replicate sealed chunks to follower "+nodeID[:8])
 	if err := o.scheduler.RunOnce(name, func() {
 		// On retries, wait for the recovering node to finish building
 		// its vaults. The instance appears within a few seconds as the
@@ -91,7 +95,6 @@ func (o *Orchestrator) scheduleCatchupForNode(vaultID glid.GLID, nodeID string, 
 	}); err != nil {
 		o.replicationLogger.Warn("failed to schedule replication catchup", "name", name, "error", err)
 	}
-	o.scheduler.Describe(name, "Replicate sealed chunks to follower "+nodeID[:8])
 }
 
 // catchupFollower copies all sealed chunks from the leader's vault instance

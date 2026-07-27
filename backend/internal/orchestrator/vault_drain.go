@@ -122,12 +122,14 @@ func (o *Orchestrator) DrainInstance(ctx context.Context, vaultID glid.GLID, mod
 		}
 	}
 
-	// Submit async drain job.
+	// Submit async drain job. Describe BEFORE submitting — see
+	// scheduleReplication for why (missing label on the Scheduled event,
+	// leaked descriptions entry when the job finishes first). gastrolog-69sjlj.
 	jobName := fmt.Sprintf("drain-vault:%s:%s", vaultID, vaultID)
+	o.scheduler.Describe(jobName, fmt.Sprintf("Drain vault %s from vault", vaultID))
 	jobID := o.scheduler.Submit(jobName, func(ctx2 context.Context, job *JobProgress) {
 		o.vaultDrainWorker(drainCtx, vaultID, mode, targetNodeID)
 	})
-	o.scheduler.Describe(jobName, fmt.Sprintf("Drain vault %s from vault", vaultID))
 
 	o.mu.Lock()
 	if d, ok := o.vaultDraining[key]; ok {

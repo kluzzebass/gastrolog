@@ -60,7 +60,11 @@ func (o *Orchestrator) schedulePostSeal(vaultID glid.GLID, cm chunk.ChunkManager
 
 	processor, ok := cm.(chunk.ChunkPostSealProcessor)
 	if ok {
+		// Describe BEFORE scheduling — see scheduleReplication for why
+		// (missing label on the Scheduled event, leaked descriptions entry
+		// when the job finishes first). gastrolog-69sjlj.
 		name := fmt.Sprintf("post-seal:%s:%s", vaultID, chunkID)
+		o.scheduler.Describe(name, fmt.Sprintf("Post-seal pipeline for chunk %s", chunkID))
 		wrappedFn := func(ctx context.Context, id chunk.ChunkID) error {
 			if err := processor.PostSealProcess(ctx, id); err != nil {
 				return err
@@ -81,7 +85,6 @@ func (o *Orchestrator) schedulePostSeal(vaultID glid.GLID, cm chunk.ChunkManager
 		if err := o.scheduler.RunOnce(name, wrappedFn, context.Background(), chunkID); err != nil {
 			o.logger.Warn("failed to schedule post-seal", "name", name, "error", err)
 		}
-		o.scheduler.Describe(name, fmt.Sprintf("Post-seal pipeline for chunk %s", chunkID))
 		return
 	}
 

@@ -315,12 +315,15 @@ func (o *Orchestrator) scheduleIndexRebuildIfNeeded(ctx context.Context, vaultID
 	}
 	o.logger.Info("rebuilding missing indexes",
 		"vault", vaultID, "chunk", meta.ID.String())
+	// Describe BEFORE scheduling — see scheduleReplication for why (missing
+	// label on the Scheduled event, leaked descriptions entry when the job
+	// finishes first). gastrolog-69sjlj.
 	name := fmt.Sprintf("index-rebuild:%s:%s:%s", vaultID, vaultInst.VaultID, meta.ID)
+	o.scheduler.Describe(name, fmt.Sprintf("Rebuild missing indexes for chunk %s", meta.ID))
 	runBuild := func(runCtx context.Context, chunkID chunk.ChunkID) error {
 		return vaultInst.Indexes.BuildIndexes(runCtx, chunkID)
 	}
 	if err := o.scheduler.RunOnce(name, runBuild, ctx, meta.ID); err != nil {
 		o.logger.Warn("failed to schedule index rebuild", "name", name, "error", err)
 	}
-	o.scheduler.Describe(name, fmt.Sprintf("Rebuild missing indexes for chunk %s", meta.ID))
 }
