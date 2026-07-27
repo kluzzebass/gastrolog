@@ -522,53 +522,54 @@ func makeEvictionHandler(
 	}
 }
 
+// nodeRemover is the leader-side removal serializer: one instance per
+// node, shared by every entry point that can start a removal here (the
+// local-leader call and the ForwardRemoveNode handler). Removal requests
+// arrive in bursts — kubectl scale fires preStop on many pods at once —
+// and a gate is only as good as the state it reads, so remove() holds mu
+// across BOTH the gate evaluation and the removal itself. Request N+1
+// therefore re-reads the FSM after request N has committed its Raft
+// membership change and deleted the departed NodeConfig, instead of
+// clearing a gate computed against the same pre-removal snapshot.
+type nodeRemover struct {
+	mu       sync.Mutex
+	cfgStore system.Store
+	logger   *slog.Logger
+	// execute performs the removal proper once the gates pass: Raft
+	// membership change, FSM node-config cleanup, eviction notification.
+	execute func(ctx context.Context, targetNodeID string, opts cluster.RemoveNodeOptions) error
+}
+
+// remove runs the leader-side removal gates and, if they pass, the
+// removal — serialized against every other removal on this node.
+func (r *nodeRemover) remove(ctx context.Context, targetNodeID string, opts cluster.RemoveNodeOptions) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Gates run on the leader, inside the serializer, so the placement
+	// state they read is the cluster's authoritative view AND reflects
+	// every removal already committed by this node.
+	if err := evaluateRemovalGates(ctx, r.cfgStore, targetNodeID, opts, r.logger); err != nil {
+		return err
+	}
+	return r.execute(ctx, targetNodeID, opts)
+}
+
 // makeRemoveNodeFunc creates the callback for the RemoveNode RPC. The
 // returned function runs the leader-side removal gates — orphan-refusal
 // (gastrolog-2ch9y) and RF-preservation (gastrolog-3vyex) — before the
 // Raft membership change, so a removal that would destroy or degrade a
 // vault fails with an operator-actionable error listing the affected
-// vaults. opts.Force skips both gates, loudly logged.
-//
-// Removals are serialized on the leader by removeSerializer: every gate
-// re-reads the FSM AFTER acquiring it, so a burst of concurrent removal
-// requests (kubectl scale firing preStop on many pods at once) is
-// evaluated one at a time against the cumulative post-removal state
-// rather than a shared pre-removal snapshot. The Raft membership change
-// and the NodeConfig delete happen inside the same critical section —
-// DeleteNode sweeps the departed node's NodeStorageConfig, which is what
-// makes request N+1 see request N's effect on placement resolution.
-//
-// This is the composition root for remove-node: it holds the leader-side
-// gates, the eviction notification, FSM cleanup, and the follower-forward
-// fallback in one function. Splitting them would require threading
-// clusterSrv, cfgStore, and logger through three helpers without any
-// reuse — net negative readability.
-//
-//nolint:gocognit // composition root; see the note above.
+// vaults. opts.Force skips both gates, loudly logged. When this node is
+// not the leader the request is forwarded, policy and all, to the node
+// that owns the gates.
 func makeRemoveNodeFunc(
 	clusterSrv *cluster.Server,
 	cfgStore system.Store,
 	nodeID string,
 	logger *slog.Logger,
 ) cluster.RemoveNodeFunc {
-	// removeSerializer is the single coordination point for removals on
-	// this node. Both entry points below — the local-leader call and the
-	// ForwardRemoveNode handler — run through removeOnLeader, so they
-	// share it.
-	var removeSerializer sync.Mutex
-
-	removeOnLeader := func(ctx context.Context, targetNodeID string, opts cluster.RemoveNodeOptions) error {
-		removeSerializer.Lock()
-		defer removeSerializer.Unlock()
-
-		// Gates run on the leader, inside the serializer, so the
-		// placement snapshot they read is the cluster's authoritative
-		// view AND reflects every removal already committed by this
-		// node.
-		if err := evaluateRemovalGates(ctx, cfgStore, targetNodeID, opts, logger); err != nil {
-			return err
-		}
-
+	execute := func(ctx context.Context, targetNodeID string, opts cluster.RemoveNodeOptions) error {
 		peerConns := clusterSrv.PeerConns()
 		var evictHandle cluster.PeerConnHandle
 		if peerConns != nil {
@@ -617,13 +618,14 @@ func makeRemoveNodeFunc(
 		return nil
 	}
 
-	clusterSrv.SetRemoveNodeFn(removeOnLeader)
+	remover := &nodeRemover{cfgStore: cfgStore, logger: logger, execute: execute}
+	clusterSrv.SetRemoveNodeFn(remover.remove)
 
 	return func(ctx context.Context, targetNodeID string, opts cluster.RemoveNodeOptions) error {
 		_, leaderID := clusterSrv.LeaderInfo()
 
 		if leaderID == nodeID {
-			return removeOnLeader(ctx, targetNodeID, opts)
+			return remover.remove(ctx, targetNodeID, opts)
 		}
 
 		if leaderID == "" {
@@ -846,6 +848,10 @@ func vaultsBelowRFAfterRemoval(ctx context.Context, cfgStore system.Store, targe
 	}
 
 	liveNodes := liveReplacementCandidates(nodes, targetNodeID)
+	members := make(map[string]bool, len(nodes))
+	for _, n := range nodes {
+		members[n.ID.String()] = true
+	}
 
 	var degraded []degradedVault
 	for _, v := range vaults {
@@ -853,7 +859,7 @@ func vaultsBelowRFAfterRemoval(ctx context.Context, cfgStore system.Store, targe
 		if err != nil || len(placements) == 0 {
 			continue
 		}
-		if d, below := vaultBelowRFAfterRemoval(v, placements, nscs, liveNodes, targetNodeID); below {
+		if d, below := vaultBelowRFAfterRemoval(v, placements, nscs, liveNodes, members, targetNodeID); below {
 			degraded = append(degraded, d)
 		}
 	}
@@ -882,16 +888,25 @@ func liveReplacementCandidates(nodes []system.NodeConfig, targetNodeID string) [
 // counting the Live nodes that could still be re-placed onto? Returns
 // the populated degradedVault and true when the vault is below RF with
 // no way back.
+//
+// members is the current cluster node set. A placement whose node is no
+// longer a member does not count as surviving — it is a leftover the
+// placement manager has yet to clean up, not a copy of the data. This
+// is what makes back-to-back removals add up: the previous removal
+// deleted that NodeConfig, so this one sees one fewer member. Synthetic
+// (memory-vault) storage IDs encode their node directly and would
+// otherwise keep resolving to a node that has already left.
 func vaultBelowRFAfterRemoval(
 	v system.VaultConfig,
 	placements []system.VaultPlacement,
 	nscs []system.NodeStorageConfig,
 	liveNodes []string,
+	members map[string]bool,
 	targetNodeID string,
 ) (degradedVault, bool) {
 	surviving := make(map[string]bool, len(placements))
 	for _, nid := range system.PlacementNodeIDs(placements, nscs) {
-		if nid != targetNodeID {
+		if nid != targetNodeID && members[nid] {
 			surviving[nid] = true
 		}
 	}
