@@ -40,10 +40,8 @@ func newStagingSweepFixture(t *testing.T) *stagingSweepFixture {
 			t.Fatalf("mkdir %s: %v", dir, err)
 		}
 	}
-	orch := &Orchestrator{
-		segmentsDir:    base,
-		pipelineVaults: map[glid.GLID]pipelineVaultReg{vaultID: {home: true}},
-	}
+	orch := &Orchestrator{segmentsDir: base}
+	orch.setPipelineVaultLocked(vaultID, pipelineVaultReg{home: true})
 	fsm := vaultctlfsm.New()
 	rec := NewVaultLifecycleReconciler(orch, vaultID, &VaultInstance{VaultID: vaultID}, "node-A", slog.Default())
 	rec.Wire(fsm)

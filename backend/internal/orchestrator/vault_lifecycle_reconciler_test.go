@@ -1628,10 +1628,8 @@ func TestSweepStaleLeaderFSMEntriesSkipsPipelineVault(t *testing.T) {
 	}
 
 	vaultID := glid.New()
-	orch := &Orchestrator{
-		segmentsDir:    t.TempDir(),
-		pipelineVaults: map[glid.GLID]pipelineVaultReg{vaultID: {home: true, hasHandle: true}},
-	}
+	orch := &Orchestrator{segmentsDir: t.TempDir()}
+	orch.setPipelineVaultLocked(vaultID, pipelineVaultReg{home: true, hasHandle: true})
 	var deleted []chunk.ChunkID
 	vaultInst := &VaultInstance{
 		VaultID:    vaultID,

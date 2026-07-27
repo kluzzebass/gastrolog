@@ -85,9 +85,7 @@ func (o *Orchestrator) vaultRegistryBacklogBytes(vaultID glid.GLID) int64 {
 }
 
 func (o *Orchestrator) localPipelineSegmentStorageBytes(vaultID glid.GLID) int64 {
-	o.mu.RLock()
-	_, inPipeline := o.pipelineVaults[vaultID]
-	o.mu.RUnlock()
+	_, inPipeline := o.lookupPipelineVault(vaultID)
 	if !inPipeline {
 		return 0
 	}

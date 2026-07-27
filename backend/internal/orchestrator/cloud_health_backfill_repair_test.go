@@ -117,7 +117,7 @@ func backfillRepairFixture(t *testing.T, writeGLCB bool) (*Orchestrator, *VaultI
 	base := t.TempDir()
 
 	orch := newTestOrch(t, Config{LocalNodeID: "node-A", SegmentsDir: base})
-	orch.pipelineVaults[vaultID] = pipelineVaultReg{home: true}
+	orch.setPipelineVaultLocked(vaultID, pipelineVaultReg{home: true})
 
 	chunkRoot := filepath.Join(base, vaultID.String(), "chunks")
 	if writeGLCB {
