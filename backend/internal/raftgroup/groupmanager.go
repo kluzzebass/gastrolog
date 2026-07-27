@@ -505,6 +505,20 @@ func raftTimeouts(cfg GroupConfig) (heartbeat, election, lease time.Duration) {
 // In a multi-node group, every participating node calls seedGroup with the
 // same member list. The nodes then elect a leader through normal Raft election.
 // No node holds a special "bootstrap" role.
+//
+// A late joiner races its own seeding against its peers' election. The peers
+// seed first, elect, and their RequestVote reaches this instance the moment
+// NewRaft registers it with the transport — which can be BEFORE this function
+// runs. The instance then has a term (though still no configuration), and
+// hraft refuses to bootstrap it: ErrCantBootstrap. That is not a failure. The
+// node is a valid follower of a group that already exists; the configuration
+// arrives with the leader's next AppendEntries, exactly as it does in the
+// restart case above. Treating it as an error tore the whole group down
+// (CreateGroup shuts the instance down and returns), and since every retry
+// starts from state that is now definitely non-empty, the node could never
+// join that group again — a permanent, silent loss of a voter, self-inflicted
+// by losing a startup race. Found via gastrolog-4yzpcj: compressing the
+// election timeout for tests made the race routine instead of rare.
 func (m *GroupManager) seedGroup(r *hraft.Raft, members []hraft.Server) error {
 	existing := r.GetConfiguration()
 	if err := existing.Error(); err != nil {
@@ -513,5 +527,11 @@ func (m *GroupManager) seedGroup(r *hraft.Raft, members []hraft.Server) error {
 	if len(existing.Configuration().Servers) > 0 {
 		return nil // already seeded (restart)
 	}
-	return r.BootstrapCluster(hraft.Configuration{Servers: members}).Error()
+	if err := r.BootstrapCluster(hraft.Configuration{Servers: members}).Error(); err != nil {
+		if errors.Is(err, hraft.ErrCantBootstrap) {
+			return nil // peers got there first; the leader will replicate the configuration
+		}
+		return err
+	}
+	return nil
 }
