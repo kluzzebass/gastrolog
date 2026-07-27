@@ -242,7 +242,7 @@ var catalog = []AlarmType{
 		Priority: High,
 		Source:   "node-lifecycle",
 		Cause:    "A peer node has been Unreachable past the grace period.",
-		Response: "Investigate or restart the node. Removal is operator-initiated, never automatic.",
+		Response: "Investigate or restart the node.",
 	},
 	{
 		IDPrefix: "vault-init",

@@ -196,6 +196,16 @@ func (p *mnPeerNodeStats) Get(senderID string) *gastrologv1.NodeStats {
 	return c.CollectLocalSnapshot()
 }
 
+// LastSeen: this harness collects straight from each node's live collector
+// rather than replaying broadcasts, so a node it knows about is by definition
+// being observed right now, and one it does not know about has never been seen.
+func (p *mnPeerNodeStats) LastSeen(nodeID string) time.Time {
+	if _, ok := p.collectors[nodeID]; !ok {
+		return time.Time{}
+	}
+	return time.Now()
+}
+
 // setupMultiNode creates an N-node in-process cluster. The first nodeID
 // is the coordinator (runs the server). All other nodes are remote —
 // the coordinator's directRemoteSearcher calls into their orchestrators.

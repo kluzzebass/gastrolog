@@ -299,6 +299,18 @@ func (s *Store) PutVault(ctx context.Context, cfg system.VaultConfig) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Placements are owned by the placement manager and reach VaultConfig ONLY
+	// through SetVaultPlacements, which mirrors them here for the orchestrator's
+	// reads. A config write must therefore never carry them: PutVault stores the
+	// whole struct, so a client that Puts a vault it read earlier — or a UI form
+	// or config import that simply omits the field — would overwrite that mirror
+	// with a stale or empty list while s.vaultPlacements kept the real one. The
+	// two would then disagree until the next placement event, with the
+	// orchestrator reading the wrong side (gastrolog-kl8c3s).
+	//
+	// Re-deriving from the owner here rather than rejecting the request keeps
+	// read-modify-write round trips working, which is what every client does.
+	cfg.Placements = slices.Clone(s.vaultPlacements[cfg.ID])
 	s.vaults[cfg.ID] = copyVaultConfig(cfg)
 	return nil
 }

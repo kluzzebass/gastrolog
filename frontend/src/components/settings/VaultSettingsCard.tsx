@@ -85,9 +85,13 @@ function vaultToEntry(v: VaultConfig): StorageEntry {
   };
 }
 
-// entryToVault rolls a StorageEntry edit back into a VaultConfig, preserving
-// fields that aren't part of the form (placements — caller supplies name and
-// enabled).
+// entryToVault rolls a StorageEntry edit back into a VaultConfig (caller
+// supplies name and enabled).
+//
+// Placements are deliberately NOT sent. They are owned by the placement manager
+// and PutVault ignores them, re-deriving from the owner — this used to echo them
+// back purely so a config edit would not wipe the copy the orchestrator reads
+// (gastrolog-kl8c3s). Sending them now would be a no-op that reads like intent.
 function entryToVault(
   vault: VaultConfig,
   entry: StorageEntry,
@@ -122,7 +126,6 @@ function entryToVault(
         : new Uint8Array(0),
     replicationFactor: entry.type === "jsonl" ? 1 : parseInt(entry.replicationFactor, 10) || 1,
     path: entry.type === "jsonl" ? entry.path : "",
-    placements: vault.placements,
   });
 }
 

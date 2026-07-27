@@ -554,6 +554,24 @@ export class ClusterNode extends Message<ClusterNode> {
    */
   stateSince?: Timestamp;
 
+  /**
+   * Most recent instant this cluster had ANY positive evidence the node was
+   * alive — the max of its last Raft contact and its last received stats
+   * broadcast (cluster.PeerState.LastSeen). Zero means no positive evidence
+   * has ever been observed, which callers must render as a bare "offline"
+   * rather than an elapsed time.
+   *
+   * Deliberately on ClusterNode and NOT inside NodeStats: a node is shown as
+   * offline precisely when its stats are absent, so a field nested in stats
+   * would be missing in the only case this one is for. Before this existed the
+   * UI timed offline duration from Date.now() in the browser, which measured
+   * how long the tab had been open rather than how long the node had been gone
+   * (gastrolog-231eli).
+   *
+   * @generated from field: google.protobuf.Timestamp last_seen = 12;
+   */
+  lastSeen?: Timestamp;
+
   constructor(data?: PartialMessage<ClusterNode>) {
     super();
     proto3.util.initPartial(data, this);
@@ -573,6 +591,7 @@ export class ClusterNode extends Message<ClusterNode> {
     { no: 9, name: "pprof_address", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 10, name: "state", kind: "enum", T: proto3.getEnumType(NodeState) },
     { no: 11, name: "state_since", kind: "message", T: Timestamp },
+    { no: 12, name: "last_seen", kind: "message", T: Timestamp },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ClusterNode {

@@ -88,4 +88,14 @@ export class Node {
   get stateSince(): Timestamp | undefined {
     return this.cluster?.stateSince;
   }
+
+  /**
+   * Most recent instant the cluster had positive evidence this node was alive
+   * (max of last Raft contact and last stats broadcast). Undefined when the
+   * cluster has never seen it — render that as a bare "offline", never as an
+   * elapsed time.
+   */
+  get lastSeen(): Timestamp | undefined {
+    return this.cluster?.lastSeen;
+  }
 }

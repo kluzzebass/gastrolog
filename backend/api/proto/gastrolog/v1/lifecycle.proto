@@ -122,6 +122,19 @@ message ClusterNode {
   // Wall-clock instant the current state was entered. Zero if the
   // node has never had State explicitly set.
   google.protobuf.Timestamp state_since = 11;
+  // Most recent instant this cluster had ANY positive evidence the node was
+  // alive — the max of its last Raft contact and its last received stats
+  // broadcast (cluster.PeerState.LastSeen). Zero means no positive evidence
+  // has ever been observed, which callers must render as a bare "offline"
+  // rather than an elapsed time.
+  //
+  // Deliberately on ClusterNode and NOT inside NodeStats: a node is shown as
+  // offline precisely when its stats are absent, so a field nested in stats
+  // would be missing in the only case this one is for. Before this existed the
+  // UI timed offline duration from Date.now() in the browser, which measured
+  // how long the tab had been open rather than how long the node had been gone
+  // (gastrolog-231eli).
+  google.protobuf.Timestamp last_seen = 12;
 }
 
 enum ClusterNodeRole {

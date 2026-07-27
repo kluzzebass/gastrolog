@@ -419,7 +419,36 @@ func (pm *placementManager) placeVault(ctx context.Context, v system.VaultConfig
 	//     reconcile loop. No alert — these are deliberate operator
 	//     states, not unexpected absences.
 	// See docs/node-lifecycle-design.md "Behavior gates by state".
-	if currentLeader != "" {
+	// A leader that has DEPARTED — no NodeConfig and no heartbeat — is exempt
+	// from every guard below. Those guards exist to protect a node that still
+	// exists; none of them should pin a placement to one that does not. Without
+	// this a departed leader read as NodeStateUnknown (the zero value of the
+	// nodeStates map), fell into the Unknown/Live case, failed the heartbeat
+	// check, and had its placement retained FOREVER by the two-clock guard's
+	// "node just went quiet" branch — a ghost placement pinned to a node that had
+	// left, with followers never extended to compensate because the placement
+	// target already looked met (gastrolog-68y1vn).
+	//
+	// BOTH signals are required, because neither is sufficient alone:
+	//
+	//   - Missing config alone does not mean gone. Nodes write their own
+	//     NodeConfig asynchronously after start (ensureNodeConfigAsync retries
+	//     until it lands), so a perfectly healthy node can be absent from
+	//     ListNodes for a window, and rotating its placements during that window
+	//     would be exactly the churn the soft-offline guard was built to stop.
+	//   - No heartbeat alone certainly does not mean gone — that is the
+	//     transient absence the two-clock guard protects, and treating it as
+	//     departure would orphan the returning node's chunks at RF=1.
+	//
+	// Together they mean the cluster has neither a record of the node nor any
+	// contact with it. A node that still has a config and is unreachable keeps
+	// its placement: that is the soft-offline guard doing its job, untouched
+	// here, and it is also the no-auto-remove stance — only an operator removes
+	// a node, and removal is what deletes the config.
+	_, leaderKnown := nodeStates[currentLeader]
+	leaderDeparted := currentLeader != "" && !leaderKnown && !alive[currentLeader]
+
+	if currentLeader != "" && !leaderDeparted {
 		switch nodeStates[currentLeader] {
 		case system.NodeStateUnknown, system.NodeStateLive:
 			// Live state (and legacy Unknown which maps to Live via
@@ -466,11 +495,22 @@ func (pm *placementManager) placeVault(ctx context.Context, v system.VaultConfig
 		pm.alerts.Clear(softOfflineAlarmType, v.ID.String())
 	}
 
-	// Current leader assignment still valid — check followers too. The
-	// leader is guaranteed heartbeat-alive on this path (the two-clock
-	// guard above returned otherwise), so only eligibility (storage
-	// config) can invalidate it here.
-	if currentLeader != "" && pm.nodeEligible(v, currentLeader, nscs) {
+	// Current leader assignment still valid — check followers too. A leader that
+	// still has a NodeConfig is guaranteed heartbeat-alive on this path (the
+	// two-clock guard above returned otherwise), so only eligibility (storage
+	// config) can invalidate it. A DEPARTED leader also arrives here, and fails
+	// the eligibility check below because its storage config left with it —
+	// which is what lets the re-placement further down actually run
+	// (gastrolog-68y1vn).
+	// leaderDeparted is part of the condition because eligibility alone does not
+	// imply existence: a memory vault reports EVERY node eligible ("any node can
+	// serve memory vaults"), including one that has left the cluster, so without
+	// this a departed memory-vault leader would be retained here even though the
+	// guard above correctly let it through. File vaults fail eligibility on their
+	// own — DeleteNode sweeps the node's storage config, so the leader stops
+	// resolving — but relying on that would make the outcome depend on vault type
+	// (gastrolog-68y1vn).
+	if currentLeader != "" && !leaderDeparted && pm.nodeEligible(v, currentLeader, nscs) {
 		pm.clearUnplacedAlarms(v)
 		pm.placeFollowers(ctx, &v, alive, nscs, vaultCount)
 		return

@@ -618,13 +618,17 @@ type VaultConfig struct {
 	// vaults); "0" is rejected (unbounded RAM is an OOM). See gastrolog-etcjdx
 	// for why all config quantities are stored as the operator's expression and
 	// resolved at use.
-	MemoryBudget      string            `protobuf:"bytes,7,opt,name=memory_budget,json=memoryBudget,proto3" json:"memory_budget,omitempty"`
-	StorageClass      uint32            `protobuf:"varint,8,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"`
-	CloudServiceId    []byte            `protobuf:"bytes,9,opt,name=cloud_service_id,json=cloudServiceId,proto3" json:"cloud_service_id,omitempty"`
-	ReplicationFactor uint32            `protobuf:"varint,10,opt,name=replication_factor,json=replicationFactor,proto3" json:"replication_factor,omitempty"` // desired RF (1 = no replication, default)
-	Path              string            `protobuf:"bytes,11,opt,name=path,proto3" json:"path,omitempty"`                                                     // direct path for JSONL sinks
-	Placements        []*VaultPlacement `protobuf:"bytes,12,rep,name=placements,proto3" json:"placements,omitempty"`                                         // system-managed: file storage assignments by placement manager
-	CacheEviction     string            `protobuf:"bytes,13,opt,name=cache_eviction,json=cacheEviction,proto3" json:"cache_eviction,omitempty"`              // "lru" (default) or "ttl"
+	MemoryBudget      string `protobuf:"bytes,7,opt,name=memory_budget,json=memoryBudget,proto3" json:"memory_budget,omitempty"`
+	StorageClass      uint32 `protobuf:"varint,8,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"`
+	CloudServiceId    []byte `protobuf:"bytes,9,opt,name=cloud_service_id,json=cloudServiceId,proto3" json:"cloud_service_id,omitempty"`
+	ReplicationFactor uint32 `protobuf:"varint,10,opt,name=replication_factor,json=replicationFactor,proto3" json:"replication_factor,omitempty"` // desired RF (1 = no replication, default)
+	Path              string `protobuf:"bytes,11,opt,name=path,proto3" json:"path,omitempty"`                                                     // direct path for JSONL sinks
+	// OUTPUT ONLY. File storage assignments owned by the placement manager.
+	// Populated on reads; IGNORED on PutVault, which re-derives the field from
+	// the owner so a client cannot overwrite placement truth by round-tripping a
+	// config it read earlier (gastrolog-kl8c3s).
+	Placements    []*VaultPlacement `protobuf:"bytes,12,rep,name=placements,proto3" json:"placements,omitempty"`
+	CacheEviction string            `protobuf:"bytes,13,opt,name=cache_eviction,json=cacheEviction,proto3" json:"cache_eviction,omitempty"` // "lru" (default) or "ttl"
 	// Warm-cache soft cap for cloud-backed chunks, as a size expression
 	// ("1GiB"). Empty = unset (defaulted at creation for cloud vaults); "0"
 	// rejected.

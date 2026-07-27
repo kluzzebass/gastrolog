@@ -195,7 +195,7 @@ export function InspectorDialog({
                   </span>
                   <span className="ml-auto flex items-center gap-1">
                     {!isLocal && node.state === NodeState.LIVE && (
-                      <OfflineBadge nodeId={node.id} isOffline={!node.isOnline} dark={dark} />
+                      <OfflineBadge lastSeen={node.lastSeen} isOffline={!node.isOnline} dark={dark} />
                     )}
                     {node.isLeader && (
                       <Badge variant="copper" dark={dark}>leader</Badge>
