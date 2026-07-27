@@ -119,11 +119,10 @@ type Server struct {
 	// meaning it has been removed from the cluster and should shut down.
 	evictionHandler func()
 
-	// removeNodeFn handles the full node removal on the leader: Raft membership
-	// change + eviction notification. The force flag bypasses the
-	// orphan-refusal gate (see gastrolog-2ch9y). Set by the composition
-	// root in main.go.
-	removeNodeFn func(ctx context.Context, nodeID string, force bool) error
+	// removeNodeFn handles the full node removal on the leader: gate
+	// evaluation, Raft membership change, and eviction notification. Set
+	// by the composition root in app.go.
+	removeNodeFn RemoveNodeFunc
 
 	// setNodeSuffrageFn handles promote/demote on the leader. Set by main.go.
 	setNodeSuffrageFn func(ctx context.Context, nodeID, nodeAddr string, voter bool) error
@@ -442,10 +441,62 @@ func (s *Server) SetEvictionHandler(fn func()) {
 	s.evictionHandler = fn
 }
 
+// RemovalPolicy names who asked for a node removal, which decides how
+// the leader-side gates treat a removal that degrades redundancy
+// without orphaning anything (gastrolog-3vyex).
+type RemovalPolicy int
+
+const (
+	// RemovalPolicyOperator is the `gastrolog cluster remove-node` path:
+	// a deliberate topology change with a human on the other end. The
+	// RF-preservation gate is pessimistic here — a removal that would
+	// leave a vault below its replication factor with nowhere to
+	// re-place is refused, and the operator decides (add an eligible
+	// node, drain the vault, or re-run with --force).
+	RemovalPolicyOperator RemovalPolicy = iota
+
+	// RemovalPolicySelf is the preStop `gastrolog cluster demote-self`
+	// path: the node is asking for its own removal while it is already
+	// terminating. The RF-preservation gate is optimistic here — the pod
+	// leaves either way, so refusing would only strand a voter in the
+	// Raft configuration; placement reconcile re-places the vault once
+	// an eligible node is available. Kubernetes cannot tell a rolling
+	// restart from a scale-down, which is exactly why this path must not
+	// refuse (see the project's no-auto-remove stance).
+	RemovalPolicySelf
+)
+
+// String renders the policy for logs.
+func (p RemovalPolicy) String() string {
+	if p == RemovalPolicySelf {
+		return "self"
+	}
+	return "operator"
+}
+
+// RemoveNodeOptions carries the caller's intent into the leader-side
+// removal gates.
+type RemoveNodeOptions struct {
+	// Force bypasses every removal gate — the orphan-refusal gate
+	// (gastrolog-2ch9y) and the RF-preservation gate (gastrolog-3vyex)
+	// alike — acknowledging data loss / reduced redundancy. Every bypass
+	// is logged loudly on the leader.
+	Force bool
+
+	// Policy distinguishes operator-driven removal from preStop
+	// self-removal. Zero value is the pessimistic operator policy.
+	Policy RemovalPolicy
+}
+
+// RemoveNodeFunc executes a node removal on the leader: gate
+// evaluation, Raft membership change, FSM node-config cleanup, and the
+// eviction notification.
+type RemoveNodeFunc func(ctx context.Context, nodeID string, opts RemoveNodeOptions) error
+
 // SetRemoveNodeFn registers the callback for the ForwardRemoveNode RPC.
-// This is called on the leader to execute the Raft removal + notification.
-// The force flag bypasses the orphan-refusal gate (gastrolog-2ch9y).
-func (s *Server) SetRemoveNodeFn(fn func(ctx context.Context, nodeID string, force bool) error) {
+// This is called on the leader to execute the removal gates, the Raft
+// removal, and the eviction notification.
+func (s *Server) SetRemoveNodeFn(fn RemoveNodeFunc) {
 	s.removeNodeFn = fn
 }
 

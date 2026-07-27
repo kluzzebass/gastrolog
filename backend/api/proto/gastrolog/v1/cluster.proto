@@ -584,8 +584,15 @@ message NotifyEvictionResponse {}
 // and sends the eviction notification.
 message ForwardRemoveNodeRequest {
   bytes node_id = 1;
-  // force bypasses the orphan-refusal gate (see RemoveNodeRequest.force).
+  // force bypasses the leader-side removal gates (see RemoveNodeRequest.force).
   bool force = 2;
+  // self_removal marks the preStop `gastrolog cluster demote-self` path,
+  // where the node is asking for its own removal while it is already
+  // terminating. The leader's RF-preservation gate is optimistic for
+  // that path (allow; placement reconcile re-places) and pessimistic for
+  // operator-driven removal (refuse). Carried across the follower →
+  // leader hop so the policy survives forwarding. See gastrolog-3vyex.
+  bool self_removal = 3;
 }
 
 message ForwardRemoveNodeResponse {}

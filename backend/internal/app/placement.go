@@ -852,30 +852,45 @@ func (pm *placementManager) handleUnplaceable(_ context.Context, v system.VaultC
 	}
 }
 
-// nodeEligible checks whether a specific node can serve a vault.
-func (pm *placementManager) nodeEligible(v system.VaultConfig, nodeID string, nscs []system.NodeStorageConfig) bool {
+// nodeEligibleForVault reports whether a node can host a placement for
+// a vault, given the cluster's storage configs and the vault's current
+// placements. This is THE definition of placement eligibility: the
+// placement manager asks it when choosing leaders and followers, and
+// the RF-preservation removal gate (gastrolog-3vyex) asks the same
+// question about re-placement candidates. Do not fork a second copy —
+// a gate that disagrees with the placer is worse than no gate.
+//
+// Liveness and lifecycle state are the CALLER's filter (the placement
+// manager passes its alive set; the removal gate passes nodes in
+// NodeStateLive). This function answers only "can this node hold this
+// vault's data".
+func nodeEligibleForVault(v system.VaultConfig, nodeID string, nscs []system.NodeStorageConfig, placements []system.VaultPlacement) bool {
 	switch v.Type {
 	case system.VaultTypeMemory:
 		return true // any node can serve memory vaults
 	case system.VaultTypeFile:
 		return nodeHasStorageClass(nscs, nodeID, v.StorageClass)
 	case system.VaultTypeJSONL:
-		// JSONL vaults have explicit node assignment via Path.
-		leaderNodeID := system.LeaderNodeID(func() []system.VaultPlacement {
-			p, _ := pm.cfgStore.GetVaultPlacements(context.Background(), v.ID)
-			return p
-		}(), nscs)
-		return leaderNodeID == nodeID
+		// JSONL vaults have explicit node assignment via Path — only the
+		// node already holding the leader placement is eligible.
+		return system.LeaderNodeID(placements, nscs) == nodeID
 	default:
 		return false
 	}
 }
 
+// nodeEligible checks whether a specific node can serve a vault.
+func (pm *placementManager) nodeEligible(v system.VaultConfig, nodeID string, nscs []system.NodeStorageConfig) bool {
+	placements, _ := pm.cfgStore.GetVaultPlacements(context.Background(), v.ID)
+	return nodeEligibleForVault(v, nodeID, nscs, placements)
+}
+
 // eligibleNodes returns all alive nodes that can serve a vault.
 func (pm *placementManager) eligibleNodes(v system.VaultConfig, alive map[string]bool, nscs []system.NodeStorageConfig) []string {
+	placements, _ := pm.cfgStore.GetVaultPlacements(context.Background(), v.ID)
 	var result []string
 	for nodeID := range alive {
-		if pm.nodeEligible(v, nodeID, nscs) {
+		if nodeEligibleForVault(v, nodeID, nscs, placements) {
 			result = append(result, nodeID)
 		}
 	}

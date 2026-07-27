@@ -837,18 +837,24 @@ export class RemoveNodeRequest extends Message<RemoveNodeRequest> {
    * a different node, and accidentally removing the node you're
    * currently connected to is hazardous. Set to true ONLY by the
    * `gastrolog cluster demote-self` preStop hook path (gastrolog-24iv4)
-   * where self-removal is the intent.
+   * where self-removal is the intent. It also selects the optimistic
+   * RF-preservation policy on the leader (gastrolog-3vyex): a preStop
+   * self-removal that drops a vault below its replication factor is
+   * allowed and re-placed by placement reconcile, where the same
+   * removal requested by an operator is refused.
    *
    * @generated from field: bool allow_self = 2;
    */
   allowSelf = false;
 
   /**
-   * force bypasses the orphan-refusal gate: when true, removal proceeds
-   * even if it would leave a vault with zero placements (data loss).
-   * Default false — the gate refuses removal of the sole holder of any
-   * vault. Operators set this only with explicit data-loss
-   * acknowledgement. See gastrolog-2ch9y.
+   * force bypasses the leader-side removal gates: when true, removal
+   * proceeds even if it would leave a vault with zero placements (data
+   * loss, gastrolog-2ch9y) or below its replication factor with no
+   * eligible node to re-place onto (reduced redundancy,
+   * gastrolog-3vyex). Default false — the gates refuse both. Operators
+   * set this only with explicit acknowledgement; every bypass is logged
+   * loudly on the leader.
    *
    * @generated from field: bool force = 3;
    */

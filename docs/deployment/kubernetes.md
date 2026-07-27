@@ -193,6 +193,29 @@ holds Raft state required for new joiners to enroll. The recipes
 enforce a floor of 3 replicas (bootstrap + 2 joiners minimum) to
 preserve quorum tolerance.
 
+### When a shrink is refused
+
+`cluster remove-node` runs two gates on the Raft leader before it
+touches membership. It refuses if the removal would leave a vault
+with **zero** placements (data loss), and it refuses if the removal
+would leave a vault **below its replication factor** with no
+eligible Live node to re-place onto (reduced redundancy). The error
+names the affected vaults.
+
+Remedies, in preference order: lower the vault's replication factor
+if the smaller cluster is the new normal, drain the vault to other
+nodes first, or re-run with `--force` to accept the loss. The
+`kubernetes-contract` / `kubernetes-scale` recipes ignore removal
+errors, so a refusal there shows up as a pod that scaled away while
+its node is still in `cluster status` — re-run the removal by hand
+to see the reason.
+
+The preStop hook (`cluster demote-self`) is deliberately exempt from
+the replication-factor gate: the pod is terminating either way, and
+K8s cannot tell a rolling restart from a scale-down, so refusing
+would only strand a voter. Placement reconcile re-places the vault
+on a surviving node.
+
 ## Production considerations
 
 - **Image registry**: change `image: gastrolog:test` to a

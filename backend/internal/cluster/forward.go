@@ -782,7 +782,11 @@ func (s *Server) forwardRemoveNode(ctx context.Context, req *gastrologv1.Forward
 	if s.removeNodeFn == nil {
 		return nil, status.Error(codes.Unavailable, "remove node not configured")
 	}
-	if err := s.removeNodeFn(ctx, string(req.GetNodeId()), req.GetForce()); err != nil {
+	opts := RemoveNodeOptions{Force: req.GetForce(), Policy: RemovalPolicyOperator}
+	if req.GetSelfRemoval() {
+		opts.Policy = RemovalPolicySelf
+	}
+	if err := s.removeNodeFn(ctx, string(req.GetNodeId()), opts); err != nil {
 		return nil, status.Errorf(codes.Internal, "remove node: %v", err)
 	}
 	return &gastrologv1.ForwardRemoveNodeResponse{}, nil
@@ -1635,9 +1639,16 @@ func NewForwardRemoveNodeClient(cc grpc.ClientConnInterface) *ForwardRemoveNodeC
 }
 
 // ForwardRemoveNode asks the leader to remove a node from the cluster.
-// The force flag bypasses the orphan-refusal gate (gastrolog-2ch9y).
-func (c *ForwardRemoveNodeClient) ForwardRemoveNode(ctx context.Context, nodeID string, force bool) error {
-	req := &gastrologv1.ForwardRemoveNodeRequest{NodeId: []byte(nodeID), Force: force}
+// opts carries the force flag (bypasses every removal gate) and the
+// removal policy, which must survive the follower → leader hop so the
+// leader's RF-preservation gate applies the right stance
+// (gastrolog-3vyex).
+func (c *ForwardRemoveNodeClient) ForwardRemoveNode(ctx context.Context, nodeID string, opts RemoveNodeOptions) error {
+	req := &gastrologv1.ForwardRemoveNodeRequest{
+		NodeId:      []byte(nodeID),
+		Force:       opts.Force,
+		SelfRemoval: opts.Policy == RemovalPolicySelf,
+	}
 	out := &gastrologv1.ForwardRemoveNodeResponse{}
 	return c.cc.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardRemoveNode", req, out)
 }
