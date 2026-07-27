@@ -179,15 +179,21 @@ const (
 	// an arbitrary fraction of the compute (gastrolog-5h1uq2). A wait fails
 	// only when its observed progress metric has not changed for this stall
 	// window. The window sits well above the slowest legitimate quiet period
-	// between progress events — the 20s vault catch-up sweep cron — with
-	// headroom for contention stretching a tick.
-	orchHarnessStallWindow = 60 * time.Second
+	// between progress events, which is a reconcile-sweep period: the test
+	// profile runs those every second (testprofile_test.go), so this is
+	// twenty periods of headroom for contention stretching a tick. It was 60s
+	// when the sweeps ticked every 20s — the same ratio, re-anchored on the
+	// cadence the binary actually runs (gastrolog-4yzpcj). Shrinking it does
+	// not make a passing run faster; it makes a WEDGED one report in a third
+	// of the time, which is the whole point of the feedback loop.
+	orchHarnessStallWindow = 20 * time.Second
 	// orchHarnessHardBackstop bounds total wait time even while progress
 	// trickles, so a livelocked metric (one that keeps changing without ever
 	// converging — election churn, oscillating counts) still fails with
 	// diagnostics instead of hanging the package. Steady progress toward the
-	// goal finishes far inside this; only a true wedge or livelock reaches it.
-	orchHarnessHardBackstop = 5 * time.Minute
+	// goal finishes far inside this — the slowest single harness test runs in
+	// under ten seconds — so only a true wedge or livelock reaches it.
+	orchHarnessHardBackstop = 2 * time.Minute
 )
 
 // orchRelHarnessSlots caps how many orchRel harnesses run concurrently in
