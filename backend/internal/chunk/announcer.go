@@ -130,3 +130,24 @@ func DeleteNoAnnounce(cm ChunkManager, id ChunkID) error {
 	}
 	return cm.Delete(id)
 }
+
+// SealNoAnnounce seals the given chunk locally without firing the metadata
+// announcer. Used by LOCAL teardown paths (placement loss, vault instance
+// removal) that need the active chunk demoted so it can be deleted, but must
+// not propagate a lifecycle transition via vault-ctl Raft.
+//
+// Seal() is the wrong primitive there: it fires AnnounceBeginSeal (Active →
+// Sealing) and leaves the matching AnnounceSeal to the post-seal pipeline,
+// which a teardown never runs — so the cluster-wide manifest entry parks in
+// Sealing while this node throws its bytes away.
+//
+// If the manager implements SealEnsurer, this calls EnsureSealed (the common
+// case — file.Manager supports it, and its contract is force-demote the local
+// active without announcing). Otherwise it falls back to Seal(), which is safe
+// for manager types that have no announcer wired (memory, jsonl).
+func SealNoAnnounce(cm ChunkManager, id ChunkID) error {
+	if ensurer, ok := cm.(SealEnsurer); ok {
+		return ensurer.EnsureSealed(id)
+	}
+	return cm.Seal()
+}

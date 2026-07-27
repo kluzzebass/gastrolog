@@ -439,9 +439,15 @@ func (o *Orchestrator) forceRemoveVaultData(id glid.GLID, vaultInst *VaultInstan
 // its own RemoveVaultInstance as the config change propagates — not from
 // a delete proposed out of one node. DeleteNoAnnounce is the local-only
 // delete that bypasses the receipt protocol. See gastrolog-4vz40.
+//
+// The seal obeys the same rule: SealNoAnnounce demotes the local active so it
+// can be deleted, where Seal() would announce a cluster-wide Active → Sealing
+// transition that this node then never completes (it is discarding the bytes,
+// not assembling a sealed form) — leaving every replica's manifest entry
+// parked in Sealing.
 func (o *Orchestrator) sealAndDeleteAllChunks(vaultInst *VaultInstance, op string, vaultID glid.GLID) int {
 	if active := vaultInst.Chunks.Active(); active != nil {
-		if err := vaultInst.Chunks.Seal(); err != nil {
+		if err := chunk.SealNoAnnounce(vaultInst.Chunks, active.ID); err != nil {
 			o.logger.Warn(op+": seal failed", "vault", vaultID, "error", err)
 		}
 	}
