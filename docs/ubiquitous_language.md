@@ -392,6 +392,28 @@ gRPC transport:
   (from cluster-ctl Raft FSM) and drives their side effects into the local
   orchestrator (register vault, build vault instance, start ingester, etc.).
 
+### Request routing
+
+How an operator-issued RPC finds the node that should execute it. See
+[`cluster_routing.md`](./cluster_routing.md).
+
+- **Routing strategy** — the per-procedure classification in
+  `routing/routes.go`: `RouteLocal`, `RouteLeader`, `RouteToResourceOwner`,
+  `RouteFanOut`. Every generated procedure must be classified.
+
+- **Resource owner** — the node (or nodes) that own a named resource and
+  must therefore execute imperative actions on it: the **vault leader** for
+  a vault, the nodes **running** an ingester for an ingester. Distinct from
+  the **Raft leader**, which owns config mutations. Actions like seal,
+  reindex, and trigger go to the resource owner directly — they are not
+  config mutations and must not be tunnelled through Raft to reach a node.
+
+- **Owner resolver** — the per-`ResourceKind` implementation
+  (`routing.OwnerResolver`) that answers "which node(s) own this resource",
+  reading only replicated cluster state so every node answers identically.
+  Returns a deterministically-ordered set, because ownership is plural for
+  parallel ingesters.
+
 ### Transport
 
 - **Multiraft transport** — gRPC service that multiplexes AppendEntries,

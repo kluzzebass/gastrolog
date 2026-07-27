@@ -133,10 +133,10 @@ func TestStrategyDistribution(t *testing.T) {
 	}
 
 	want := map[routing.Strategy]int{
-		routing.RouteLocal:    48,
-		routing.RouteLeader:   37,
-		routing.RouteTargeted: 11,
-		routing.RouteFanOut:   7,
+		routing.RouteLocal:           47,
+		routing.RouteLeader:          37,
+		routing.RouteToResourceOwner: 12,
+		routing.RouteFanOut:          7,
 	}
 
 	for strategy, expected := range want {
@@ -156,21 +156,54 @@ func TestStrategyDistribution(t *testing.T) {
 	}
 }
 
-// TestRouteTargetedHaveWrapResponse verifies that every unary RouteTargeted
-// entry has a non-nil WrapResponse function (the interceptor needs this to
-// deserialize forwarded responses).
-func TestRouteTargetedHaveWrapResponse(t *testing.T) {
+// TestRouteToResourceOwnerHaveWrapResponse verifies that every unary
+// RouteToResourceOwner entry has a non-nil WrapResponse function (the
+// interceptor needs this to deserialize forwarded responses).
+func TestRouteToResourceOwnerHaveWrapResponse(t *testing.T) {
 	for proc, route := range routing.DefaultRoutes() {
-		if route.Strategy != routing.RouteTargeted {
+		if route.Strategy != routing.RouteToResourceOwner {
 			continue
 		}
 		if route.IsStreaming {
-			// Streaming RouteTargeted (ExportVault) is handled by the
-			// handler, not the interceptor.
+			// Streaming RouteToResourceOwner (ExportVault) is handled by
+			// the handler, not the interceptor.
 			continue
 		}
 		if route.WrapResponse == nil {
-			t.Errorf("unary RouteTargeted procedure %s has nil WrapResponse", proc)
+			t.Errorf("unary RouteToResourceOwner procedure %s has nil WrapResponse", proc)
+		}
+	}
+}
+
+// TestRouteToResourceOwnerHaveResource verifies every RouteToResourceOwner
+// entry declares which resource it targets. Without a ResourceRef the
+// interceptor has nothing to resolve and would silently execute the RPC on
+// whichever node the client happened to reach.
+func TestRouteToResourceOwnerHaveResource(t *testing.T) {
+	for proc, route := range routing.DefaultRoutes() {
+		if route.Strategy != routing.RouteToResourceOwner {
+			continue
+		}
+		if route.Resource == nil {
+			t.Errorf("RouteToResourceOwner procedure %s has nil Resource", proc)
+			continue
+		}
+		if route.Resource.Kind == "" {
+			t.Errorf("RouteToResourceOwner procedure %s has empty Resource.Kind", proc)
+		}
+		if route.Resource.ID == nil {
+			t.Errorf("RouteToResourceOwner procedure %s has nil Resource.ID extractor", proc)
+		}
+	}
+}
+
+// TestResourceOnlyOnOwnerRoutes verifies no other strategy carries a
+// Resource — a Resource on a RouteLocal/RouteLeader entry would be dead
+// declaration that reads as if routing happens when it does not.
+func TestResourceOnlyOnOwnerRoutes(t *testing.T) {
+	for proc, route := range routing.DefaultRoutes() {
+		if route.Strategy != routing.RouteToResourceOwner && route.Resource != nil {
+			t.Errorf("procedure %s is %s but declares a Resource", proc, route.Strategy)
 		}
 	}
 }
