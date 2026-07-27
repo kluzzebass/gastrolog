@@ -6,12 +6,14 @@ import (
 	"context"
 	"crypto/subtle"
 	"crypto/tls"
+	"fmt"
 	"gastrolog/internal/glid"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -380,45 +382,109 @@ func (s *Server) routingInterceptor() []connect.Interceptor {
 		return nil
 	}
 	registry := routing.NewRegistry(routing.DefaultRoutes())
-	resolver := &configVaultOwner{cfgStore: s.cfgStore, localNodeID: s.localNodeID}
-	ri := routing.NewRoutingInterceptor(registry, s.localNodeID, resolver, s.routingForwarder)
+	ri := routing.NewRoutingInterceptor(registry, s.localNodeID, ownerResolvers(s.cfgStore), s.routingForwarder)
 	return []connect.Interceptor{ri}
+}
+
+// ownerResolvers builds the resource-owner resolver set the routing
+// interceptor consults for RouteToResourceOwner RPCs. Every resolver reads
+// the cluster-ctl Raft store, so any node answers identically
+// (gastrolog-51ge9). Adding a resource kind means one entry here plus a
+// Resource declaration on the procedure in routing.DefaultRoutes().
+func ownerResolvers(cfgStore system.Store) routing.OwnerResolvers {
+	return routing.OwnerResolvers{
+		routing.ResourceVault:    &configVaultOwner{cfgStore: cfgStore},
+		routing.ResourceIngester: &configIngesterOwner{cfgStore: cfgStore},
+	}
 }
 
 // configVaultOwner resolves vault ownership from the config store.
 type configVaultOwner struct {
-	cfgStore    system.Store
-	localNodeID string
+	cfgStore system.Store
 }
 
-// ResolveVaultOwner returns the node ID of the vault leader, or "" when
-// the vault is owned locally / has no placement / cannot be resolved.
+// ResolveOwners returns the vault's leader node, or nil when the vault has
+// no resolvable placement. A vault that is absent from config resolves to
+// nil rather than an error: the handler's own vault lookup produces the
+// domain-accurate error (and some callers legitimately name a vault this
+// node knows nothing about yet).
 //
 // Reads VaultConfig.Placements directly.
-func (c *configVaultOwner) ResolveVaultOwner(ctx context.Context, vaultID string) string {
+func (c *configVaultOwner) ResolveOwners(ctx context.Context, vaultID string) ([]string, error) {
 	if c.cfgStore == nil {
-		return ""
+		return nil, nil
 	}
 	id, err := glid.ParseUUID(vaultID)
 	if err != nil {
-		return ""
+		return nil, nil //nolint:nilerr // not a GLID reference — not the routing layer's to interpret; the handler validates it
 	}
 	vaultCfg, err := c.cfgStore.GetVault(ctx, id)
-	if err != nil || vaultCfg == nil {
-		return ""
+	if err != nil {
+		return nil, fmt.Errorf("read vault config: %w", err)
 	}
-	if len(vaultCfg.Placements) == 0 {
-		return ""
+	if vaultCfg == nil || len(vaultCfg.Placements) == 0 {
+		return nil, nil
 	}
 	nscs, err := c.cfgStore.ListNodeStorageConfigs(ctx)
 	if err != nil {
-		return ""
+		return nil, fmt.Errorf("read node storage configs: %w", err)
 	}
 	leaderNodeID := system.LeaderNodeID(vaultCfg.Placements, nscs)
-	if leaderNodeID == "" || leaderNodeID == c.localNodeID {
-		return ""
+	if leaderNodeID == "" {
+		return nil, nil
 	}
-	return leaderNodeID
+	return []string{leaderNodeID}, nil
+}
+
+// configIngesterOwner resolves which node(s) run an ingester, from the
+// Raft-replicated alive map (system.Runtime). The alive map is written by
+// the node that actually started the ingester, so it is the owner of this
+// fact — and it is plural by construction: a parallel (non-singleton)
+// ingester is alive on every eligible node, which is what ingester HA
+// needs the routing layer to be able to express.
+type configIngesterOwner struct {
+	cfgStore system.Store
+}
+
+// ResolveOwners returns the sorted set of nodes currently running the
+// ingester.
+//
+//   - Ingester absent from config → ErrResourceNotFound. Definitive and
+//     identical on every node, instead of whichever node received the
+//     request reporting "not found" because it merely does not run it.
+//   - Configured but not alive anywhere (not started yet, or its alive
+//     apply has not landed) → nil, so the request executes locally and the
+//     handler reports the runtime state it sees.
+func (c *configIngesterOwner) ResolveOwners(ctx context.Context, ingesterID string) ([]string, error) {
+	if c.cfgStore == nil {
+		return nil, nil
+	}
+	id, err := glid.ParseUUID(ingesterID)
+	if err != nil {
+		return nil, nil //nolint:nilerr // not a GLID reference — the handler reports the invalid ID
+	}
+	cfg, err := c.cfgStore.GetIngester(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("read ingester config: %w", err)
+	}
+	if cfg == nil {
+		return nil, routing.ErrResourceNotFound
+	}
+	alive, err := c.cfgStore.GetIngesterAlive(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("read ingester alive state: %w", err)
+	}
+	owners := make([]string, 0, len(alive))
+	for nodeID, isAlive := range alive {
+		if isAlive {
+			owners = append(owners, nodeID)
+		}
+	}
+	if len(owners) == 0 {
+		return nil, nil
+	}
+	slices.Sort(owners)
+	return owners, nil
 }
 
 // isLoopback returns true if host is a loopback address (localhost, 127.0.0.1, ::1).

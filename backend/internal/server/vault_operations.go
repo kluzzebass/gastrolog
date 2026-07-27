@@ -17,7 +17,7 @@ import (
 )
 
 // SealVault seals the active chunk of a vault.
-// Routing: RouteTargeted — the interceptor forwards to the vault-owning node.
+// Routing: RouteToResourceOwner — the interceptor forwards to the vault-owning node.
 func (s *VaultServer) SealVault(
 	ctx context.Context,
 	req *connect.Request[apiv1.SealVaultRequest],
@@ -47,7 +47,7 @@ func (s *VaultServer) SealVault(
 // sweep retries them immediately. Operator-driven recovery action;
 // see gastrolog-25vur.
 //
-// Routing: RouteTargeted — the interceptor forwards to the vault-owning
+// Routing: RouteToResourceOwner — the interceptor forwards to the vault-owning
 // node. Per-vault-instance unreadable maps live on the local
 // orchestrator, so the retry-now action only resets the runners that
 // actually hold the entries.
@@ -72,7 +72,7 @@ func (s *VaultServer) RetryUnreadableChunks(
 }
 
 // ReindexVault rebuilds all indexes for sealed chunks in a vault.
-// Routing: RouteTargeted — the interceptor forwards to the vault-owning node.
+// Routing: RouteToResourceOwner — the interceptor forwards to the vault-owning node.
 func (s *VaultServer) ReindexVault(
 	ctx context.Context,
 	req *connect.Request[apiv1.ReindexVaultRequest],
@@ -288,7 +288,7 @@ func (s *VaultServer) createVault(ctx context.Context, cfg system.VaultConfig) *
 }
 
 // ArchiveChunk transitions a cloud-backed sealed chunk to an offline storage class.
-// Routing: RouteTargeted — forwarded to the vault-owning node.
+// Routing: RouteToResourceOwner — forwarded to the vault-owning node.
 func (s *VaultServer) ArchiveChunk(
 	ctx context.Context,
 	req *connect.Request[apiv1.ArchiveChunkRequest],
@@ -319,7 +319,7 @@ func (s *VaultServer) ArchiveChunk(
 }
 
 // RestoreChunk initiates retrieval of an archived chunk from offline storage.
-// Routing: RouteTargeted — forwarded to the vault-owning node.
+// Routing: RouteToResourceOwner — forwarded to the vault-owning node.
 func (s *VaultServer) RestoreChunk(
 	ctx context.Context,
 	req *connect.Request[apiv1.RestoreChunkRequest],
@@ -343,7 +343,7 @@ func (s *VaultServer) RestoreChunk(
 }
 
 // RepatriateOrphan re-introduces a sealed local chunk into the vault-ctl
-// FSM manifest. Routing: RouteTargeted — the interceptor forwards to the
+// FSM manifest. Routing: RouteToResourceOwner — the interceptor forwards to the
 // vault-owning node. Orphan chunks are local to a specific node's disk,
 // so the FSM proposal has to originate from that node.
 //

@@ -665,15 +665,14 @@ message StaticLookupRow {
 }
 
 message ClusterSettings {
-  string broadcast_interval = 1; // Go duration string, e.g. "5s". Default: "5s".
-  string heartbeat_interval = 2; // Go duration string, e.g. "1s". Default: "1s". Lightweight liveness ping; PeerState TTL is 8× this (defaultPeerTTLMultiplier).
+  string broadcast_interval = 1; // Go duration string, e.g. "5s". Default: "5s". Also anchors the PeerState stats TTL (broadcast_interval × GLOG_PEER_TTL_MULTIPLIER); peer LIVENESS comes from Raft last-contact, not from this cadence.
   // Per-vault pipeline backlog budget in bytes (unreleased completed segments
   // in the vault-ctl registry). When a vault's backlog reaches the budget,
   // ingest admission for that vault is refused (retryable backpressure) until
   // chunking drains it below the budget. The operating bound that engages
   // BEFORE disk pressure; the disk guard remains the backstop. A size
   // expression ("8GiB"); empty = unbounded (gastrolog-etcjdx).
-  string pipeline_backlog_max = 3;
+  string pipeline_backlog_max = 2;
 }
 
 message GetSettingsResponse {
@@ -740,8 +739,7 @@ message PutLookupSettings {
 
 message PutClusterSettings {
   optional string broadcast_interval = 1;
-  optional string heartbeat_interval = 2;
-  optional string pipeline_backlog_max = 3;
+  optional string pipeline_backlog_max = 2;
 }
 
 message PutServiceSettingsRequest {

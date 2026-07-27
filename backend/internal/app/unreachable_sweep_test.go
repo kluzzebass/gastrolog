@@ -21,7 +21,7 @@ import (
 func newSweepTest(t *testing.T, threshold, peerTTL time.Duration) (*unreachableSweep, *sysmem.Store, *cluster.PeerState, glid.GLID, glid.GLID) {
 	t.Helper()
 	store := sysmem.NewStore()
-	peerState := cluster.NewPeerState(peerTTL)
+	peerState := cluster.NewPeerState(peerTTL, 0)
 	localID := glid.New()
 	peerID := glid.New()
 
@@ -261,7 +261,7 @@ func TestUnreachableSweep_EnvVarThresholdOverride(t *testing.T) {
 	// Not parallel: mutates the process environment.
 	t.Setenv("GLOG_UNREACHABLE_THRESHOLD", "2s")
 	store := sysmem.NewStore()
-	peerState := cluster.NewPeerState(10 * time.Second)
+	peerState := cluster.NewPeerState(10 * time.Second, 0)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	sweep := newUnreachableSweep(store, nil, peerState, "local", nil, logger)
 	if sweep.threshold != 2*time.Second {
@@ -273,7 +273,7 @@ func TestUnreachableSweep_EnvVarInvalidFallsBack(t *testing.T) {
 	// Not parallel: mutates the process environment.
 	t.Setenv("GLOG_UNREACHABLE_THRESHOLD", "not-a-duration")
 	store := sysmem.NewStore()
-	peerState := cluster.NewPeerState(10 * time.Second)
+	peerState := cluster.NewPeerState(10 * time.Second, 0)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	sweep := newUnreachableSweep(store, nil, peerState, "local", nil, logger)
 	if sweep.threshold != defaultUnreachableThreshold {
@@ -288,7 +288,7 @@ func TestUnreachableSweep_EnvVarInvalidFallsBack(t *testing.T) {
 func newAlertSweepTest(t *testing.T, alertThreshold time.Duration) (*unreachableSweep, *sysmem.Store, *alert.Collector, glid.GLID) {
 	t.Helper()
 	store := sysmem.NewStore()
-	peerState := cluster.NewPeerState(time.Hour)
+	peerState := cluster.NewPeerState(time.Hour, 0)
 	collector := alert.New()
 	peerID := glid.New()
 	now := time.Now()

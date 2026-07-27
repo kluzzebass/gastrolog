@@ -44,10 +44,3 @@ type RemoteError struct {
 func (e *RemoteError) Error() string {
 	return fmt.Sprintf("remote error (code=%d): %s", e.Code, e.Message)
 }
-
-// VaultOwnerResolver looks up which node owns a vault by ID.
-type VaultOwnerResolver interface {
-	// ResolveVaultOwner returns the node ID that owns the vault, or empty
-	// string if the vault is not found or has no assigned node.
-	ResolveVaultOwner(ctx context.Context, vaultID string) string
-}

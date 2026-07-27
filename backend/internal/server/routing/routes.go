@@ -12,7 +12,8 @@ import (
 // Strategy classification rationale:
 //   - RouteLocal: reads replicated state or performs node-local computation
 //   - RouteLeader: admin mutations that go through Raft Apply
-//   - RouteTargeted: must execute on the node that owns the vault
+//   - RouteToResourceOwner: must execute on the node that owns the resource
+//     named in the request; the entry declares which resource via Resource
 //   - RouteFanOut: handler fans out to all nodes and merges results
 func DefaultRoutes() map[string]RPCRoute {
 	return map[string]RPCRoute{
@@ -54,8 +55,16 @@ func DefaultRoutes() map[string]RPCRoute {
 		// the responding node already resolves every storage's live state.
 		gastrologv1connect.SystemServiceListStoragesProcedure: {Strategy: RouteLocal},
 		// Node-local operations — run on whichever node received the request.
-		gastrologv1connect.SystemServiceTestIngesterProcedure:        {Strategy: RouteLocal},
-		gastrologv1connect.SystemServiceTriggerIngesterProcedure:     {Strategy: RouteLocal, WrapResponse: NewRespWrapper[apiv1.TriggerIngesterResponse]()},
+		gastrologv1connect.SystemServiceTestIngesterProcedure: {Strategy: RouteLocal},
+		// TriggerIngester is an imperative action on a specific ingester: it
+		// must run where that ingester runs. The backend resolves the owning
+		// node from the replicated alive map — no X-Target-Node from the
+		// client, no config mutation tunnelled through Raft (gastrolog-51ge9).
+		gastrologv1connect.SystemServiceTriggerIngesterProcedure: {
+			Strategy:     RouteToResourceOwner,
+			Resource:     OwnerOf(ResourceIngester, func(m *apiv1.TriggerIngesterRequest) string { return ProtoGLID(m.GetId()) }),
+			WrapResponse: NewRespWrapper[apiv1.TriggerIngesterResponse](),
+		},
 		gastrologv1connect.SystemServiceTestCloudServiceProcedure:    {Strategy: RouteLocal},
 		gastrologv1connect.SystemServiceTestHTTPLookupProcedure:      {Strategy: RouteLocal},
 		gastrologv1connect.SystemServicePreviewCSVLookupProcedure:    {Strategy: RouteLocal},
@@ -135,23 +144,68 @@ func DefaultRoutes() map[string]RPCRoute {
 		gastrologv1connect.VaultServiceListVaultsProcedure: {Strategy: RouteLocal},
 		gastrologv1connect.VaultServiceGetVaultProcedure:   {Strategy: RouteLocal},
 		gastrologv1connect.VaultServiceGetStatsProcedure:   {Strategy: RouteLocal},
-		// Targeted — must execute on the node that owns the vault.
+		// Owner-routed — must execute on the node that owns the vault.
 		// WrapResponse enables the interceptor to deserialize forwarded responses.
-		gastrologv1connect.VaultServiceListChunksProcedure:         {Strategy: RouteFanOut},
-		gastrologv1connect.VaultServiceGetChunkProcedure:           {Strategy: RouteTargeted, WrapResponse: NewRespWrapper[apiv1.GetChunkResponse]()},
+		gastrologv1connect.VaultServiceListChunksProcedure: {Strategy: RouteFanOut},
+		gastrologv1connect.VaultServiceGetChunkProcedure: {
+			Strategy:     RouteToResourceOwner,
+			Resource:     OwnerOf(ResourceVault, (*apiv1.GetChunkRequest).GetVault),
+			WrapResponse: NewRespWrapper[apiv1.GetChunkResponse](),
+		},
 		gastrologv1connect.VaultServiceGetIndexesProcedure:         {Strategy: RouteLocal}, // gastrolog-3570f: handler fans out to vault-hosting peers
 		gastrologv1connect.VaultServiceGetPipelineBacklogProcedure: {Strategy: RouteLocal},
 
-		gastrologv1connect.VaultServiceAnalyzeChunkProcedure:          {Strategy: RouteTargeted, WrapResponse: NewRespWrapper[apiv1.AnalyzeChunkResponse]()},
-		gastrologv1connect.VaultServiceValidateVaultProcedure:         {Strategy: RouteTargeted, WrapResponse: NewRespWrapper[apiv1.ValidateVaultResponse]()},
-		gastrologv1connect.VaultServiceSealVaultProcedure:             {Strategy: RouteTargeted, WrapResponse: NewRespWrapper[apiv1.SealVaultResponse]()},
-		gastrologv1connect.VaultServiceRetryUnreadableChunksProcedure: {Strategy: RouteTargeted, WrapResponse: NewRespWrapper[apiv1.RetryUnreadableChunksResponse]()},
-		gastrologv1connect.VaultServiceReindexVaultProcedure:          {Strategy: RouteTargeted, WrapResponse: NewRespWrapper[apiv1.ReindexVaultResponse]()},
-		gastrologv1connect.VaultServiceExportVaultProcedure:           {Strategy: RouteTargeted, IsStreaming: true}, // streaming — handler manages routing
-		gastrologv1connect.VaultServiceImportRecordsProcedure:         {Strategy: RouteTargeted, WrapResponse: NewRespWrapper[apiv1.ImportRecordsResponse]()},
-		gastrologv1connect.VaultServiceArchiveChunkProcedure:          {Strategy: RouteTargeted, WrapResponse: NewRespWrapper[apiv1.ArchiveChunkResponse]()},
-		gastrologv1connect.VaultServiceRestoreChunkProcedure:          {Strategy: RouteTargeted, WrapResponse: NewRespWrapper[apiv1.RestoreChunkResponse]()},
-		gastrologv1connect.VaultServiceWatchChunksProcedure:           {Strategy: RouteLocal, IsStreaming: true},
-		gastrologv1connect.VaultServiceRepatriateOrphanProcedure:      {Strategy: RouteTargeted, WrapResponse: NewRespWrapper[apiv1.RepatriateOrphanResponse]()},
+		gastrologv1connect.VaultServiceAnalyzeChunkProcedure: {
+			Strategy:     RouteToResourceOwner,
+			Resource:     OwnerOf(ResourceVault, (*apiv1.AnalyzeChunkRequest).GetVault),
+			WrapResponse: NewRespWrapper[apiv1.AnalyzeChunkResponse](),
+		},
+		gastrologv1connect.VaultServiceValidateVaultProcedure: {
+			Strategy:     RouteToResourceOwner,
+			Resource:     OwnerOf(ResourceVault, (*apiv1.ValidateVaultRequest).GetVault),
+			WrapResponse: NewRespWrapper[apiv1.ValidateVaultResponse](),
+		},
+		gastrologv1connect.VaultServiceSealVaultProcedure: {
+			Strategy:     RouteToResourceOwner,
+			Resource:     OwnerOf(ResourceVault, (*apiv1.SealVaultRequest).GetVault),
+			WrapResponse: NewRespWrapper[apiv1.SealVaultResponse](),
+		},
+		gastrologv1connect.VaultServiceRetryUnreadableChunksProcedure: {
+			Strategy:     RouteToResourceOwner,
+			Resource:     OwnerOf(ResourceVault, (*apiv1.RetryUnreadableChunksRequest).GetVault),
+			WrapResponse: NewRespWrapper[apiv1.RetryUnreadableChunksResponse](),
+		},
+		gastrologv1connect.VaultServiceReindexVaultProcedure: {
+			Strategy:     RouteToResourceOwner,
+			Resource:     OwnerOf(ResourceVault, (*apiv1.ReindexVaultRequest).GetVault),
+			WrapResponse: NewRespWrapper[apiv1.ReindexVaultResponse](),
+		},
+		// Streaming — the handler manages its own routing.
+		gastrologv1connect.VaultServiceExportVaultProcedure: {
+			Strategy:    RouteToResourceOwner,
+			Resource:    OwnerOf(ResourceVault, (*apiv1.ExportVaultRequest).GetVault),
+			IsStreaming: true,
+		},
+		gastrologv1connect.VaultServiceImportRecordsProcedure: {
+			Strategy:     RouteToResourceOwner,
+			Resource:     OwnerOf(ResourceVault, (*apiv1.ImportRecordsRequest).GetVault),
+			WrapResponse: NewRespWrapper[apiv1.ImportRecordsResponse](),
+		},
+		gastrologv1connect.VaultServiceArchiveChunkProcedure: {
+			Strategy:     RouteToResourceOwner,
+			Resource:     OwnerOf(ResourceVault, (*apiv1.ArchiveChunkRequest).GetVault),
+			WrapResponse: NewRespWrapper[apiv1.ArchiveChunkResponse](),
+		},
+		gastrologv1connect.VaultServiceRestoreChunkProcedure: {
+			Strategy:     RouteToResourceOwner,
+			Resource:     OwnerOf(ResourceVault, (*apiv1.RestoreChunkRequest).GetVault),
+			WrapResponse: NewRespWrapper[apiv1.RestoreChunkResponse](),
+		},
+		gastrologv1connect.VaultServiceWatchChunksProcedure: {Strategy: RouteLocal, IsStreaming: true},
+		gastrologv1connect.VaultServiceRepatriateOrphanProcedure: {
+			Strategy:     RouteToResourceOwner,
+			Resource:     OwnerOf(ResourceVault, (*apiv1.RepatriateOrphanRequest).GetVault),
+			WrapResponse: NewRespWrapper[apiv1.RepatriateOrphanResponse](),
+		},
 	}
 }

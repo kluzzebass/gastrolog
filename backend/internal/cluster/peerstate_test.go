@@ -10,7 +10,7 @@ import (
 )
 
 func TestPeerState_Delete(t *testing.T) {
-	ps := NewPeerState(time.Minute)
+	ps := NewPeerState(time.Minute, 0)
 	ps.Update("node-a", &gastrologv1.NodeStats{}, time.Now())
 	ps.Update("node-b", &gastrologv1.NodeStats{}, time.Now())
 
@@ -31,7 +31,7 @@ func TestPeerState_Delete(t *testing.T) {
 // TestPeerState_Delete_Missing verifies Delete on an unknown node is a no-op,
 // not a panic.
 func TestPeerState_Delete_Missing(t *testing.T) {
-	ps := NewPeerState(time.Minute)
+	ps := NewPeerState(time.Minute, 0)
 	ps.Delete("never-existed") // must not panic
 }
 
@@ -40,7 +40,7 @@ func TestPeerState_Delete_Missing(t *testing.T) {
 // MarkUnreachable which is also restored by later updates — these are both
 // idempotent from a data-freshness perspective).
 func TestPeerState_Delete_SurvivesLaterUpdate(t *testing.T) {
-	ps := NewPeerState(time.Minute)
+	ps := NewPeerState(time.Minute, 0)
 	ps.Update("node-a", &gastrologv1.NodeStats{}, time.Now())
 	ps.Delete("node-a")
 	ps.Update("node-a", &gastrologv1.NodeStats{}, time.Now())
@@ -49,16 +49,16 @@ func TestPeerState_Delete_SurvivesLaterUpdate(t *testing.T) {
 	}
 }
 
-// TestPeerState_HandleBroadcast_HeartbeatTouchesLastSeen verifies that a
-// Heartbeat broadcast refreshes lastSeen without overwriting the cached
-// NodeStats from the last NodeStats broadcast. This is the central
-// invariant of gastrolog-2kio8: stats stay queryable between heavy
-// broadcasts; liveness updates ride on the lightweight heartbeat.
-func TestPeerState_HandleBroadcast_HeartbeatTouchesLastSeen(t *testing.T) {
-	ps := NewPeerState(4 * time.Second)
+// The central invariant gastrolog-2kio8 introduced, carried over to its
+// replacement: the fast liveness signal refreshes reachability WITHOUT
+// touching the cached NodeStats, so a peer's last known payload stays
+// queryable between the heavy 5s broadcasts. That signal used to be an empty
+// Heartbeat broadcast; since gastrolog-1lbifx it is Raft contact, and the
+// invariant has to survive the swap.
+func TestPeerState_RaftContactDoesNotClobberCachedStats(t *testing.T) {
+	ps := NewPeerState(4*time.Second, 4*time.Second)
 	stats := &gastrologv1.NodeStats{NodeName: "alpha", Version: "v1"}
 
-	// First, full NodeStats broadcast lands.
 	ps.HandleBroadcast(&gastrologv1.BroadcastMessage{
 		SenderId:  []byte("node-a"),
 		Timestamp: nil,
@@ -68,117 +68,90 @@ func TestPeerState_HandleBroadcast_HeartbeatTouchesLastSeen(t *testing.T) {
 		t.Fatalf("after NodeStats: want stats with NodeName=alpha, got %v", got)
 	}
 
-	// Snapshot current entry's received timestamp via reflection-free path:
-	// Touch with an older time, then send a heartbeat — heartbeat must
-	// override to a newer time AND keep stats intact.
-	ps.Touch("node-a", time.Now().Add(-3*time.Second))
-
-	ps.HandleBroadcast(&gastrologv1.BroadcastMessage{
-		SenderId: []byte("node-a"),
-		Payload:  &gastrologv1.BroadcastMessage_Heartbeat{Heartbeat: &gastrologv1.Heartbeat{}},
-	})
+	ps.RecordRaftContact("node-a", "cluster-ctl", time.Now())
 
 	got := ps.Get("node-a")
 	if got == nil {
-		t.Fatal("after Heartbeat: stats should still be returned (within TTL)")
+		t.Fatal("after Raft contact: stats should still be returned (within TTL)")
 	}
 	if got.NodeName != "alpha" || got.Version != "v1" {
-		t.Errorf("Heartbeat clobbered stats: want NodeName=alpha Version=v1, got %+v", got)
+		t.Errorf("Raft contact clobbered stats: want NodeName=alpha Version=v1, got %+v", got)
 	}
-	live := ps.LivePeers()
-	found := false
-	for _, id := range live {
-		if id == "node-a" {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("LivePeers should include node-a after heartbeat refreshed lastSeen, got %v", live)
+	if !livePeerContains(ps, "node-a") {
+		t.Errorf("LivePeers should include node-a after Raft contact, got %v", ps.LivePeers())
 	}
 }
 
-// TestPeerState_HandleBroadcast_HeartbeatOnlyForUnknownPeer verifies that
-// a heartbeat from a peer we've never seen NodeStats from still tracks
-// liveness. Otherwise a node booting up would appear dead until its
-// first 5s NodeStats broadcast lands.
-func TestPeerState_HandleBroadcast_HeartbeatOnlyForUnknownPeer(t *testing.T) {
-	ps := NewPeerState(4 * time.Second)
+// Only NodeStats moves peer state. A NodeJobs broadcast rides the same
+// envelope and lands on the same subscriber list, and it must NOT be mistaken
+// for liveness — the peer-jobs cache is a separate consumer with its own TTL.
+// Before gastrolog-1lbifx an empty Heartbeat payload was the other case
+// handled here; nothing replaced it, and nothing should.
+func TestPeerState_HandleBroadcast_IgnoresNonStatsPayloads(t *testing.T) {
+	ps := NewPeerState(4*time.Second, 4*time.Second)
 
 	ps.HandleBroadcast(&gastrologv1.BroadcastMessage{
-		SenderId: []byte("node-fresh"),
-		Payload:  &gastrologv1.BroadcastMessage_Heartbeat{Heartbeat: &gastrologv1.Heartbeat{}},
+		SenderId: []byte("node-jobs-only"),
+		Payload:  &gastrologv1.BroadcastMessage_NodeJobs{NodeJobs: &gastrologv1.NodeJobs{}},
 	})
 
-	live := ps.LivePeers()
-	found := false
-	for _, id := range live {
-		if id == "node-fresh" {
-			found = true
-		}
+	if live := ps.LivePeers(); len(live) != 0 {
+		t.Errorf("LivePeers = %v, want empty — a jobs broadcast is not a liveness signal", live)
 	}
-	if !found {
-		t.Errorf("LivePeers should include node-fresh after heartbeat-only, got %v", live)
-	}
-	// No NodeStats received yet — Get returns nil because the entry's
-	// stats field is nil, even though lastSeen is fresh.
-	if got := ps.Get("node-fresh"); got != nil {
-		t.Errorf("Get on heartbeat-only peer: want nil stats, got %v", got)
+	if !ps.LastSeen("node-jobs-only").IsZero() {
+		t.Error("a jobs broadcast must not create liveness evidence")
 	}
 }
 
-// TestPeerState_PausedPeerDetectedWithinTTL is the timing acceptance
-// for gastrolog-2kio8: a peer broadcasting heartbeats every 100ms with
-// a 400ms TTL (4× safety factor — same shape as the production 1s/4s
-// defaults, scaled down for test speed) must be marked offline within
-// ~500ms of its heartbeats stopping.
+// The timing acceptance from gastrolog-2kio8, re-pointed at the signal that
+// replaced the heartbeat broadcast: a peer whose Raft contact stops while we
+// keep probing must drop out of LivePeers within its TTL plus polling slack.
 //
-// Before this issue, the equivalent timing was 5s broadcast / 20s TTL,
-// so detection took 15-20s. The math here proves the new defaults give
-// 0.4-0.5s detection; production (1s/4s) gives 4-5s. Same shape, faster
-// constants.
+// Constants are scaled down from production for test speed but keep the
+// production shape — contact arriving well inside the TTL, then stopping
+// abruptly. Production is a 4s Raft window against a ~200ms probe cadence,
+// where the old broadcast shape was an 8s window against a 1s cadence: the
+// same test, a faster verdict.
 func TestPeerState_PausedPeerDetectedWithinTTL(t *testing.T) {
 	const (
-		heartbeatTick = 100 * time.Millisecond
-		ttl           = 400 * time.Millisecond // 4× heartbeat
-		detectBudget  = ttl + 2*heartbeatTick  // TTL + 2 ticks of polling slack
+		contactTick  = 100 * time.Millisecond
+		ttl          = 400 * time.Millisecond
+		detectBudget = ttl + 2*contactTick // TTL + 2 ticks of polling slack
 	)
-	ps := NewPeerState(ttl)
+	ps := NewPeerState(time.Hour, ttl)
 
-	// Goroutine simulating node-B broadcasting heartbeats. Stops when ctx fires.
+	// node-B answers our Raft probes until ctx fires. The stats TTL is an
+	// hour, so nothing but the Raft signal can decide this test.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	ps.Update("node-B", &gastrologv1.NodeStats{}, time.Now())
 	go func() {
-		ticker := time.NewTicker(heartbeatTick)
+		ticker := time.NewTicker(contactTick)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-ticker.C:
-				ps.HandleBroadcast(&gastrologv1.BroadcastMessage{
-					SenderId: []byte("node-B"),
-					Payload:  &gastrologv1.BroadcastMessage_Heartbeat{Heartbeat: &gastrologv1.Heartbeat{}},
-				})
+			case now := <-ticker.C:
+				ps.RecordRaftContact("node-B", "cluster-ctl", now)
 			}
 		}
 	}()
 
-	// Let a few heartbeats land. node-B must be alive.
-	time.Sleep(3 * heartbeatTick)
+	time.Sleep(3 * contactTick)
 	if !livePeerContains(ps, "node-B") {
-		t.Fatalf("node-B should be alive after 3 heartbeats, got %v", ps.LivePeers())
+		t.Fatalf("node-B should be alive after 3 contacts, got %v", ps.LivePeers())
 	}
 
-	// Pause node-B by stopping its heartbeat goroutine.
+	// node-B pauses: contact stops, but we keep probing it, which is what
+	// makes the silence count.
 	pauseAt := time.Now()
 	cancel()
 
-	// Within detectBudget of the pause, node-B must drop from LivePeers.
-	deadline := pauseAt.Add(detectBudget)
-	for time.Now().Before(deadline) {
+	for time.Now().Before(pauseAt.Add(detectBudget)) {
+		ps.RecordRaftProbe("node-B", "cluster-ctl", time.Now())
 		if !livePeerContains(ps, "node-B") {
-			elapsed := time.Since(pauseAt)
-			t.Logf("node-B detected offline %v after pause (budget %v)", elapsed, detectBudget)
+			t.Logf("node-B detected offline %v after pause (budget %v)", time.Since(pauseAt), detectBudget)
 			return
 		}
 		time.Sleep(20 * time.Millisecond)
@@ -195,17 +168,18 @@ func livePeerContains(ps *PeerState, id string) bool {
 	return false
 }
 
-// TestPeerState_HeartbeatExpiresWithTTL verifies that absent any further
-// broadcast, a peer expires from LivePeers after the TTL.
-func TestPeerState_HeartbeatExpiresWithTTL(t *testing.T) {
-	ps := NewPeerState(50 * time.Millisecond)
+// Absent any further evidence, a peer known only from its NodeStats broadcast
+// expires from LivePeers after the stats TTL — the fallback path for peers
+// this node shares no Raft edge with.
+func TestPeerState_BroadcastOnlyPeerExpiresWithTTL(t *testing.T) {
+	ps := NewPeerState(50*time.Millisecond, 4*time.Second)
 
 	ps.HandleBroadcast(&gastrologv1.BroadcastMessage{
 		SenderId: []byte("node-a"),
-		Payload:  &gastrologv1.BroadcastMessage_Heartbeat{Heartbeat: &gastrologv1.Heartbeat{}},
+		Payload:  &gastrologv1.BroadcastMessage_NodeStats{NodeStats: &gastrologv1.NodeStats{}},
 	})
 	if len(ps.LivePeers()) != 1 {
-		t.Fatal("precondition: 1 live peer after heartbeat")
+		t.Fatal("precondition: 1 live peer after the broadcast")
 	}
 	time.Sleep(80 * time.Millisecond)
 	if live := ps.LivePeers(); len(live) != 0 {
@@ -248,7 +222,7 @@ func TestPeerState_VaultStorageProtected(t *testing.T) {
 	starved := glid.New()
 	healthy := glid.New()
 
-	ps := NewPeerState(time.Minute)
+	ps := NewPeerState(time.Minute, 0)
 	ps.Update("node-a", &gastrologv1.NodeStats{
 		StorageProtectedVaultIds: [][]byte{starved.ToProto()},
 	}, time.Now())
@@ -284,7 +258,7 @@ func TestPeerState_FindStorageState(t *testing.T) {
 	hosted := glid.New()
 	unknown := glid.New()
 
-	ps := NewPeerState(time.Minute)
+	ps := NewPeerState(time.Minute, 0)
 	ps.Update("node-a", &gastrologv1.NodeStats{
 		Storages: []*gastrologv1.StorageState{{
 			Id:        hosted.ToProto(),
@@ -327,7 +301,7 @@ func TestPeerState_FindStorageState(t *testing.T) {
 func TestPeerState_VaultStorageProtectedNodeNames(t *testing.T) {
 	starved := glid.New()
 
-	ps := NewPeerState(time.Minute)
+	ps := NewPeerState(time.Minute, 0)
 	// Three reporting peers, updated out of sorted order, one with no
 	// NodeName yet (falls back to its raw node ID).
 	ps.Update("node-c", &gastrologv1.NodeStats{
@@ -370,7 +344,7 @@ func TestPeerState_VaultStorageProtectedNodeNames(t *testing.T) {
 func TestPeerState_VaultSizeCapped(t *testing.T) {
 	capped := glid.New()
 	roomy := glid.New()
-	ps := NewPeerState(time.Minute)
+	ps := NewPeerState(time.Minute, 0)
 	ps.Update("node-a", &gastrologv1.NodeStats{
 		SizeCappedVaultIds: [][]byte{capped.ToProto()},
 	}, time.Now())

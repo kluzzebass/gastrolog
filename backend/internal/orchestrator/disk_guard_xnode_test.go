@@ -24,7 +24,7 @@ func TestVaultAdmissionGateHonorsPeerBroadcast(t *testing.T) {
 	healthy := glid.New()
 
 	ttl := time.Minute
-	ps := cluster.NewPeerState(ttl)
+	ps := cluster.NewPeerState(ttl, 0)
 	// Peer "node-a" broadcasts that it has one vault below its disk floor and
 	// one at its max-size bound.
 	ps.Update("node-a", &gastrologv1.NodeStats{

@@ -853,22 +853,26 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 		return nil, nil, nil, nil, nil
 	}
 
-	broadcastInterval, heartbeatInterval := loadClusterIntervals(ctx, cfgStore)
+	broadcastInterval := loadBroadcastInterval(ctx, cfgStore)
 
-	// PeerState TTL must be a multiple of the **heartbeat** cadence (not
-	// the heavy NodeStats cadence) so paused-peer detection is fast.
-	// Default 8× heartbeat: tolerate up to 7 missed heartbeats before
-	// offline. The previous 4× setting caused user-visible UI flapping
-	// (gastrolog-4iacg): a single late broadcast — network blip, GC
-	// pause, scheduler hiccup — would lapse the TTL, the inspector
-	// would flip the peer offline, the next broadcast would restore
-	// it, and the cycle repeated every ~5 seconds. 8× absorbs single
-	// missed broadcasts; networks with worse jitter can tune via
-	// GLOG_PEER_TTL_MULTIPLIER. Original 4× rationale was the safety
-	// factor from gastrolog-2kio8's 5s broadcast / 20s shape — that
-	// matched theoretical missed-broadcast math but underestimated
-	// real-world jitter on 1s heartbeats.
-	peerState := cluster.NewPeerState(peerTTLMultiplier(logger) * heartbeatInterval)
+	// Two windows, each anchored on the thing that actually refreshes it.
+	//
+	// The stats TTL bounds how long a peer's cached NodeStats stays
+	// queryable, so it is a multiple of the NodeStats broadcast cadence.
+	// It used to be a multiple of the 1s liveness heartbeat instead, because
+	// that heartbeat was also what kept liveness fresh — the multiplier had
+	// to be raised to 8× to stop a single late message flapping the
+	// inspector every ~5 seconds (gastrolog-4iacg). With liveness moved to
+	// Raft last-contact (gastrolog-1lbifx), this window no longer gates
+	// detection speed at all, so 3× the 5s broadcast gives MORE absolute
+	// slack than the old 8× 1s while tolerating two consecutive missed
+	// broadcasts. Networks with worse jitter tune GLOG_PEER_TTL_MULTIPLIER.
+	//
+	// The Raft window is what detection speed now rides on; see
+	// raftContactTTL.
+	peerState := cluster.NewPeerState(peerTTLMultiplier(logger)*broadcastInterval, raftContactTTL())
+
+	wireRaftContactRecorder(clusterSrv.MultiRaftTransport(), peerState)
 	clusterSrv.Subscribe(peerState.HandleBroadcast)
 
 	peerJobState := cluster.NewPeerJobState(20 * time.Second)
@@ -919,7 +923,6 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 		Version:           Version,
 		StartTime:         time.Now(),
 		Interval:          broadcastInterval,
-		HeartbeatInterval: heartbeatInterval,
 		ApiAddress:        apiAddr,
 		PprofAddress:      pprofAddr,
 		StatsSignal:       statsSignal,
@@ -930,7 +933,7 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 		go collector.BroadcastJobs(ctx)
 	})
 
-	if err := startStatsCollectorJobs(orch.Scheduler(), collector, ctx, broadcastInterval, heartbeatInterval); err != nil {
+	if err := startStatsCollectorJobs(orch.Scheduler(), collector, ctx, broadcastInterval); err != nil {
 		logger.Error("register stats collector scheduler jobs", "error", err)
 	}
 
@@ -1337,17 +1340,25 @@ func loadMaxConcurrentJobs(ctx context.Context, cfgStore system.Store) int {
 	return ss.Scheduler.MaxConcurrentJobs
 }
 
-// defaultPeerTTLMultiplier is the multiplier applied to the heartbeat
-// interval to compute the PeerState TTL. 8× tolerates up to 7 missed
-// heartbeats; raised from the original 4× in gastrolog-4iacg because
-// the tighter window caused UI flapping on single late broadcasts.
-const defaultPeerTTLMultiplier = 8
+// defaultPeerTTLMultiplier is the multiplier applied to the NodeStats
+// broadcast interval to compute the PeerState stats TTL: how long a peer's
+// last broadcast payload stays queryable, and the liveness fallback for peers
+// this node shares no Raft edge with.
+//
+// 3× tolerates two consecutive missed broadcasts. It was 8× against the 1s
+// liveness heartbeat, because that heartbeat was also the liveness clock and
+// a single late one flapped the inspector (gastrolog-4iacg). Anchored on the
+// 5s broadcast instead, 3× is 15s of slack where 8× 1s was 8s — more
+// tolerance, not less — and it no longer costs detection latency, which now
+// rides on raftContactTTL.
+const defaultPeerTTLMultiplier = 3
 
-// peerTTLMultiplier returns the PeerState TTL multiplier, sourced
+// peerTTLMultiplier returns the PeerState stats-TTL multiplier, sourced
 // from GLOG_PEER_TTL_MULTIPLIER if set to a positive integer,
 // otherwise defaultPeerTTLMultiplier. Operators on pathological
-// networks can raise this to absorb worse jitter without paying
-// proportional detection latency on healthy clusters.
+// networks can raise this to absorb worse jitter; since gastrolog-1lbifx
+// raising it costs no detection latency at all, because peer liveness is
+// derived from Raft last-contact rather than from broadcast arrival.
 func peerTTLMultiplier(logger *slog.Logger) time.Duration {
 	v := os.Getenv("GLOG_PEER_TTL_MULTIPLIER")
 	if v == "" {
@@ -1362,26 +1373,68 @@ func peerTTLMultiplier(logger *slog.Logger) time.Duration {
 	return time.Duration(n)
 }
 
-// loadClusterIntervals reads the broadcast and heartbeat intervals from
-// configured server settings. Either may be zero on return — the
-// StatsCollector applies its own defaults (5s broadcast, 1s heartbeat).
-// The heartbeat is forced to a sane minimum here too so the PeerState
-// TTL (multiplier × heartbeat) never collapses to 0.
-func loadClusterIntervals(ctx context.Context, cfgStore system.Store) (broadcast, heartbeat time.Duration) {
+// wireRaftContactRecorder makes PeerState the sink for the Raft transport's
+// per-peer reachability evidence (gastrolog-1lbifx) — every outbound probe and
+// every contact, in either direction, on every group.
+//
+// Wired here rather than at transport construction because PeerState is built
+// with the stats collector, well after the transport. That leaves a boot
+// window in which no contact is recorded, which is harmless by construction:
+// with no Raft evidence for a peer, PeerState.IsLive falls through to the
+// stats broadcast, exactly as it does for a peer this node shares no Raft
+// group with.
+//
+// A nil transport is a single-node or test configuration with no cluster
+// stack at all; skipping is correct, and there are no peers to be liveness
+// about.
+func wireRaftContactRecorder(tm *multiraft.Transport[string], peerState *cluster.PeerState) {
+	if tm == nil || peerState == nil {
+		return
+	}
+	tm.SetContactRecorder(peerState)
+}
+
+// raftContactTTLMultiplier is how many Raft heartbeat timeouts of silence
+// make a peer we are actively probing read as unreachable (gastrolog-1lbifx).
+//
+// 2× is chosen against the transport's own budget, not picked for feel: a
+// leader probes each follower roughly every HeartbeatTimeout/10, and a probe
+// to a wedged peer burns a full heartbeatRPCTimeout (which multiraft pins at
+// >= the detector's heartbeat timeout) before it fails. Two timeouts therefore
+// tolerate one completely timed-out probe plus its retry — around ten missed
+// heartbeats at the shipped 2s/200ms shape — while still detecting a paused
+// peer in about half the time the deleted 1s liveness broadcast managed
+// (8× 1s). Anything tighter would let one slow-but-successful probe flip a
+// healthy peer, which is the gastrolog-4iacg flapping failure again.
+const raftContactTTLMultiplier = 2
+
+// raftContactTTL derives the PeerState Raft-evidence window from the Raft
+// failure detector's configured heartbeat timeout, so widening the detector
+// (GLOG_RAFT_HEARTBEAT_TIMEOUT) widens this in lockstep instead of leaving
+// liveness stricter than consensus — the same inversion gastrolog-1io54g had
+// to unwind inside the transport.
+func raftContactTTL() time.Duration {
+	heartbeat, _, _ := raftgroup.RaftTimeouts(raftgroup.GroupConfig{})
+	return raftContactTTLMultiplier * heartbeat
+}
+
+// defaultBroadcastInterval is the NodeStats broadcast cadence used when the
+// operator has not configured one.
+const defaultBroadcastInterval = 5 * time.Second
+
+// loadBroadcastInterval reads the NodeStats broadcast cadence from configured
+// server settings, falling back to the default when unset or unparseable.
+// Never returns zero: the PeerState stats TTL is a multiple of it and would
+// otherwise collapse to 0, expiring every peer's cached stats instantly.
+func loadBroadcastInterval(ctx context.Context, cfgStore system.Store) time.Duration {
 	ss, err := cfgStore.LoadServerSettings(ctx)
 	if err != nil {
-		return 0, 1 * time.Second
+		return defaultBroadcastInterval
 	}
 	if d, err := time.ParseDuration(ss.Cluster.BroadcastInterval); err == nil && d > 0 {
-		broadcast = d
+		return d
 	}
-	if d, err := time.ParseDuration(ss.Cluster.HeartbeatInterval); err == nil && d > 0 {
-		heartbeat = d
-	}
-	if heartbeat <= 0 {
-		heartbeat = 1 * time.Second
-	}
-	return broadcast, heartbeat
+	return defaultBroadcastInterval
 }
 
 func buildAuthTokens(ctx context.Context, logger *slog.Logger, cfgStore system.Store, noAuth bool) (*auth.TokenService, error) {

@@ -12,16 +12,74 @@ import (
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
+	"gastrolog/internal/glid"
 	"gastrolog/internal/server/routing"
 )
 
-// mockVaultOwner resolves vault ownership from a map.
-type mockVaultOwner struct {
-	owners map[string]string // vault → node_id
+// mockOwner resolves ownership from a map, standing in for a resolver
+// backed by replicated cluster state.
+type mockOwner struct {
+	owners map[string][]string // resource ID → node IDs
+	err    error               // when set, returned for every lookup
 }
 
-func (m *mockVaultOwner) ResolveVaultOwner(_ context.Context, vaultID string) string {
-	return m.owners[vaultID]
+func (m *mockOwner) ResolveOwners(_ context.Context, resourceID string) ([]string, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.owners[resourceID], nil
+}
+
+// vaultOwners builds an OwnerResolvers set with only a vault resolver.
+func vaultOwners(owners map[string][]string) routing.OwnerResolvers {
+	return routing.OwnerResolvers{routing.ResourceVault: &mockOwner{owners: owners}}
+}
+
+// recordingForwarder captures what the interceptor forwarded and returns a
+// canned response payload, standing in for ForwardRPC to a peer node.
+type recordingForwarder struct {
+	gotNode      string
+	gotProcedure string
+	gotPayload   []byte
+	respond      func(procedure string, payload []byte) ([]byte, error)
+}
+
+func (f *recordingForwarder) ForwardUnary(_ context.Context, nodeID, procedure string, reqPayload []byte) ([]byte, error) {
+	f.gotNode = nodeID
+	f.gotProcedure = procedure
+	f.gotPayload = reqPayload
+	return f.respond(procedure, reqPayload)
+}
+
+// failForwarder fails the test if the interceptor forwards at all. Used by
+// cases that must stay local — a nil forwarder would make them pass for the
+// wrong reason (nil forwarder disables forwarding entirely).
+type failForwarder struct{ t *testing.T }
+
+func (f *failForwarder) ForwardUnary(_ context.Context, nodeID, procedure string, _ []byte) ([]byte, error) {
+	f.t.Helper()
+	f.t.Errorf("unexpected forward of %s to %s", procedure, nodeID)
+	return nil, errors.New("must not forward")
+}
+
+// forwardMarker stands in for the ForwardRPC dispatch path, which marks the
+// handler context as already-forwarded before the routing interceptor runs.
+type forwardMarker struct{}
+
+func (forwardMarker) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
+	return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+		return next(routing.WithForwarded(ctx), req)
+	}
+}
+
+func (forwardMarker) WrapStreamingClient(next connect.StreamingClientFunc) connect.StreamingClientFunc {
+	return next
+}
+
+func (forwardMarker) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
+	return func(ctx context.Context, conn connect.StreamingHandlerConn) error {
+		return next(routing.WithForwarded(ctx), conn)
+	}
 }
 
 // testRegistry builds a full registry for testing.
@@ -43,11 +101,12 @@ func runUnary[Req, Resp any](
 	handler func(ctx context.Context, req *connect.Request[Req]) (*connect.Response[Resp], error),
 	ctx context.Context,
 	headers map[string]string,
+	outer ...connect.Interceptor,
 ) (*connect.Response[Resp], error) {
 	t.Helper()
 
 	opts := []connect.HandlerOption{
-		connect.WithInterceptors(ri),
+		connect.WithInterceptors(append(append([]connect.Interceptor{}, outer...), ri)...),
 	}
 	mux := http.NewServeMux()
 	mux.Handle(procedure, connect.NewUnaryHandler(procedure, handler, opts...))
@@ -89,17 +148,18 @@ func TestRoutingInterceptor_RouteLocal_AlwaysLocal(t *testing.T) {
 	_ = resp
 }
 
-func TestRoutingInterceptor_RouteTargeted_LocalVault(t *testing.T) {
-	vaultOwner := &mockVaultOwner{owners: map[string]string{}} // empty = local
-	ri := routing.NewRoutingInterceptor(testRegistry(), "node-1", vaultOwner, nil)
+func TestRoutingInterceptor_ResourceOwner_LocalVault(t *testing.T) {
+	// Local node is among the owners → execute locally, no hop.
+	owners := vaultOwners(map[string][]string{"some-vault": {"node-1"}})
+	ri := routing.NewRoutingInterceptor(testRegistry(), "node-1", owners, &failForwarder{t: t})
 
 	var handlerCalled bool
 	_, err := runUnary(t, ri,
-		gastrologv1connect.VaultServiceListChunksProcedure,
-		&apiv1.ListChunksRequest{Vault: "some-vault"},
-		func(ctx context.Context, req *connect.Request[apiv1.ListChunksRequest]) (*connect.Response[apiv1.ListChunksResponse], error) {
+		gastrologv1connect.VaultServiceGetChunkProcedure,
+		&apiv1.GetChunkRequest{Vault: "some-vault"},
+		func(ctx context.Context, req *connect.Request[apiv1.GetChunkRequest]) (*connect.Response[apiv1.GetChunkResponse], error) {
 			handlerCalled = true
-			return connect.NewResponse(&apiv1.ListChunksResponse{}), nil
+			return connect.NewResponse(&apiv1.GetChunkResponse{}), nil
 		},
 		context.Background(), nil,
 	)
@@ -111,17 +171,17 @@ func TestRoutingInterceptor_RouteTargeted_LocalVault(t *testing.T) {
 	}
 }
 
-func TestRoutingInterceptor_RouteTargeted_EmptyVault(t *testing.T) {
-	vaultOwner := &mockVaultOwner{owners: map[string]string{}}
-	ri := routing.NewRoutingInterceptor(testRegistry(), "node-1", vaultOwner, nil)
+func TestRoutingInterceptor_ResourceOwner_EmptyVault(t *testing.T) {
+	owners := vaultOwners(map[string][]string{})
+	ri := routing.NewRoutingInterceptor(testRegistry(), "node-1", owners, &failForwarder{t: t})
 
 	var handlerCalled bool
 	_, err := runUnary(t, ri,
-		gastrologv1connect.VaultServiceListChunksProcedure,
-		&apiv1.ListChunksRequest{Vault: ""},
-		func(ctx context.Context, req *connect.Request[apiv1.ListChunksRequest]) (*connect.Response[apiv1.ListChunksResponse], error) {
+		gastrologv1connect.VaultServiceGetChunkProcedure,
+		&apiv1.GetChunkRequest{Vault: ""},
+		func(ctx context.Context, req *connect.Request[apiv1.GetChunkRequest]) (*connect.Response[apiv1.GetChunkResponse], error) {
 			handlerCalled = true
-			return connect.NewResponse(&apiv1.ListChunksResponse{}), nil
+			return connect.NewResponse(&apiv1.GetChunkResponse{}), nil
 		},
 		context.Background(), nil,
 	)
@@ -130,6 +190,215 @@ func TestRoutingInterceptor_RouteTargeted_EmptyVault(t *testing.T) {
 	}
 	if !handlerCalled {
 		t.Error("handler was not called for empty vault field")
+	}
+}
+
+// TestRoutingInterceptor_ResourceOwner_ForwardsToRemote is the core of the
+// mechanism: a request naming a resource this node does not own is
+// serialized and forwarded to the owner, and the owner's response comes
+// back to the caller.
+func TestRoutingInterceptor_ResourceOwner_ForwardsToRemote(t *testing.T) {
+	fwd := &recordingForwarder{
+		respond: func(procedure string, payload []byte) ([]byte, error) {
+			return proto.Marshal(&apiv1.GetChunkResponse{Chunk: &apiv1.ChunkMeta{Id: []byte("from-owner")}})
+		},
+	}
+	owners := vaultOwners(map[string][]string{"remote-vault": {"node-2"}})
+	ri := routing.NewRoutingInterceptor(testRegistry(), "node-1", owners, fwd)
+
+	var handlerCalled bool
+	resp, err := runUnary(t, ri,
+		gastrologv1connect.VaultServiceGetChunkProcedure,
+		&apiv1.GetChunkRequest{Vault: "remote-vault"},
+		func(ctx context.Context, req *connect.Request[apiv1.GetChunkRequest]) (*connect.Response[apiv1.GetChunkResponse], error) {
+			handlerCalled = true
+			return connect.NewResponse(&apiv1.GetChunkResponse{}), nil
+		},
+		context.Background(), nil,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if handlerCalled {
+		t.Error("local handler ran for a remotely-owned vault")
+	}
+	if fwd.gotNode != "node-2" {
+		t.Errorf("forwarded to %q, want node-2", fwd.gotNode)
+	}
+	if string(resp.Msg.GetChunk().GetId()) != "from-owner" {
+		t.Errorf("response did not come from the owner: %v", resp.Msg)
+	}
+}
+
+// TestRoutingInterceptor_ResourceOwner_PluralOwners covers the ingester-HA
+// shape: several nodes own the resource. When the local node is one of
+// them the request stays local; otherwise every node picks the same owner
+// (the first, resolvers return a deterministic order).
+func TestRoutingInterceptor_ResourceOwner_PluralOwners(t *testing.T) {
+	owners := vaultOwners(map[string][]string{"shared": {"node-2", "node-3", "node-4"}})
+
+	t.Run("local node is an owner", func(t *testing.T) {
+		ri := routing.NewRoutingInterceptor(testRegistry(), "node-3", owners, &failForwarder{t: t})
+		var handlerCalled bool
+		_, err := runUnary(t, ri,
+			gastrologv1connect.VaultServiceGetChunkProcedure,
+			&apiv1.GetChunkRequest{Vault: "shared"},
+			func(ctx context.Context, req *connect.Request[apiv1.GetChunkRequest]) (*connect.Response[apiv1.GetChunkResponse], error) {
+				handlerCalled = true
+				return connect.NewResponse(&apiv1.GetChunkResponse{}), nil
+			},
+			context.Background(), nil,
+		)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !handlerCalled {
+			t.Error("handler did not run although the local node owns the resource")
+		}
+	})
+
+	// Every non-owner node must land on the same owner.
+	for _, from := range []string{"node-1", "node-5"} {
+		t.Run("from "+from, func(t *testing.T) {
+			fwd := &recordingForwarder{
+				respond: func(string, []byte) ([]byte, error) {
+					return proto.Marshal(&apiv1.GetChunkResponse{})
+				},
+			}
+			ri := routing.NewRoutingInterceptor(testRegistry(), from, owners, fwd)
+			_, err := runUnary(t, ri,
+				gastrologv1connect.VaultServiceGetChunkProcedure,
+				&apiv1.GetChunkRequest{Vault: "shared"},
+				func(ctx context.Context, req *connect.Request[apiv1.GetChunkRequest]) (*connect.Response[apiv1.GetChunkResponse], error) {
+					t.Error("handler ran on a non-owner node")
+					return connect.NewResponse(&apiv1.GetChunkResponse{}), nil
+				},
+				context.Background(), nil,
+			)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if fwd.gotNode != "node-2" {
+				t.Errorf("forwarded to %q, want node-2 (first owner)", fwd.gotNode)
+			}
+		})
+	}
+}
+
+// TestRoutingInterceptor_ResourceOwner_NotFound: a resolver that positively
+// knows the resource does not exist produces a clean NotFound instead of
+// letting an arbitrary node run the handler.
+func TestRoutingInterceptor_ResourceOwner_NotFound(t *testing.T) {
+	owners := routing.OwnerResolvers{
+		routing.ResourceVault: &mockOwner{err: routing.ErrResourceNotFound},
+	}
+	ri := routing.NewRoutingInterceptor(testRegistry(), "node-1", owners, &failForwarder{t: t})
+
+	var handlerCalled bool
+	_, err := runUnary(t, ri,
+		gastrologv1connect.VaultServiceGetChunkProcedure,
+		&apiv1.GetChunkRequest{Vault: "ghost"},
+		func(ctx context.Context, req *connect.Request[apiv1.GetChunkRequest]) (*connect.Response[apiv1.GetChunkResponse], error) {
+			handlerCalled = true
+			return connect.NewResponse(&apiv1.GetChunkResponse{}), nil
+		},
+		context.Background(), nil,
+	)
+	if handlerCalled {
+		t.Error("handler ran for a resource the resolver said does not exist")
+	}
+	if connect.CodeOf(err) != connect.CodeNotFound {
+		t.Fatalf("got %v (%v), want CodeNotFound", connect.CodeOf(err), err)
+	}
+}
+
+// TestRoutingInterceptor_ResourceOwner_ResolverError: any other resolver
+// failure surfaces as FailedPrecondition rather than a silent local run.
+func TestRoutingInterceptor_ResourceOwner_ResolverError(t *testing.T) {
+	owners := routing.OwnerResolvers{
+		routing.ResourceVault: &mockOwner{err: errors.New("store unavailable")},
+	}
+	ri := routing.NewRoutingInterceptor(testRegistry(), "node-1", owners, &failForwarder{t: t})
+
+	var handlerCalled bool
+	_, err := runUnary(t, ri,
+		gastrologv1connect.VaultServiceGetChunkProcedure,
+		&apiv1.GetChunkRequest{Vault: "some-vault"},
+		func(ctx context.Context, req *connect.Request[apiv1.GetChunkRequest]) (*connect.Response[apiv1.GetChunkResponse], error) {
+			handlerCalled = true
+			return connect.NewResponse(&apiv1.GetChunkResponse{}), nil
+		},
+		context.Background(), nil,
+	)
+	if handlerCalled {
+		t.Error("handler ran despite an unresolvable owner")
+	}
+	if connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Fatalf("got %v (%v), want CodeFailedPrecondition", connect.CodeOf(err), err)
+	}
+}
+
+// TestRoutingInterceptor_ResourceOwner_IngesterKind proves the mechanism is
+// not vault-shaped: TriggerIngester routes on the ingester resource kind,
+// with no X-Target-Node header from the caller.
+func TestRoutingInterceptor_ResourceOwner_IngesterKind(t *testing.T) {
+	ingesterID := glid.New()
+	fwd := &recordingForwarder{
+		respond: func(string, []byte) ([]byte, error) {
+			return proto.Marshal(&apiv1.TriggerIngesterResponse{})
+		},
+	}
+	owners := routing.OwnerResolvers{
+		routing.ResourceIngester: &mockOwner{owners: map[string][]string{
+			ingesterID.String(): {"node-2"},
+		}},
+	}
+	ri := routing.NewRoutingInterceptor(testRegistry(), "node-1", owners, fwd)
+
+	_, err := runUnary(t, ri,
+		gastrologv1connect.SystemServiceTriggerIngesterProcedure,
+		&apiv1.TriggerIngesterRequest{Id: ingesterID.Bytes()},
+		func(ctx context.Context, req *connect.Request[apiv1.TriggerIngesterRequest]) (*connect.Response[apiv1.TriggerIngesterResponse], error) {
+			t.Error("handler ran on a node that does not run the ingester")
+			return connect.NewResponse(&apiv1.TriggerIngesterResponse{}), nil
+		},
+		context.Background(), nil,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fwd.gotNode != "node-2" {
+		t.Errorf("forwarded to %q, want node-2", fwd.gotNode)
+	}
+	if fwd.gotProcedure != gastrologv1connect.SystemServiceTriggerIngesterProcedure {
+		t.Errorf("forwarded procedure %q", fwd.gotProcedure)
+	}
+}
+
+// TestRoutingInterceptor_ResourceOwner_MalformedID: an ID that is not a
+// GLID yields no routing decision, so the handler runs and reports the
+// validation error itself.
+func TestRoutingInterceptor_ResourceOwner_MalformedID(t *testing.T) {
+	owners := routing.OwnerResolvers{
+		routing.ResourceIngester: &mockOwner{err: errors.New("resolver must not be consulted")},
+	}
+	ri := routing.NewRoutingInterceptor(testRegistry(), "node-1", owners, &failForwarder{t: t})
+
+	var handlerCalled bool
+	_, err := runUnary(t, ri,
+		gastrologv1connect.SystemServiceTriggerIngesterProcedure,
+		&apiv1.TriggerIngesterRequest{Id: []byte("too-short")},
+		func(ctx context.Context, req *connect.Request[apiv1.TriggerIngesterRequest]) (*connect.Response[apiv1.TriggerIngesterResponse], error) {
+			handlerCalled = true
+			return connect.NewResponse(&apiv1.TriggerIngesterResponse{}), nil
+		},
+		context.Background(), nil,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !handlerCalled {
+		t.Error("handler was not called for a malformed resource ID")
 	}
 }
 
@@ -198,18 +467,22 @@ func TestRoutingInterceptor_ExplicitTarget_SameNode(t *testing.T) {
 }
 
 func TestRoutingInterceptor_AlreadyForwarded_NoReforward(t *testing.T) {
-	ri := routing.NewRoutingInterceptor(testRegistry(), "node-1", nil, nil)
+	owners := vaultOwners(map[string][]string{"remote-vault": {"node-2"}})
+	ri := routing.NewRoutingInterceptor(testRegistry(), "node-1", owners, &failForwarder{t: t})
 
 	var handlerCalled bool
-	ctx := routing.WithForwarded(context.Background())
+	// The forwarded mark is set server-side (the ForwardRPC dispatch path
+	// wraps the handler context), so it has to be applied by an interceptor
+	// ahead of the routing one — a client-side context value would not
+	// survive the HTTP hop.
 	_, err := runUnary(t, ri,
-		gastrologv1connect.VaultServiceListChunksProcedure,
-		&apiv1.ListChunksRequest{Vault: "remote-vault"},
-		func(ctx context.Context, req *connect.Request[apiv1.ListChunksRequest]) (*connect.Response[apiv1.ListChunksResponse], error) {
+		gastrologv1connect.VaultServiceGetChunkProcedure,
+		&apiv1.GetChunkRequest{Vault: "remote-vault"},
+		func(ctx context.Context, req *connect.Request[apiv1.GetChunkRequest]) (*connect.Response[apiv1.GetChunkResponse], error) {
 			handlerCalled = true
-			return connect.NewResponse(&apiv1.ListChunksResponse{}), nil
+			return connect.NewResponse(&apiv1.GetChunkResponse{}), nil
 		},
-		ctx, nil,
+		context.Background(), nil, forwardMarker{},
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -220,18 +493,16 @@ func TestRoutingInterceptor_AlreadyForwarded_NoReforward(t *testing.T) {
 }
 
 func TestRoutingInterceptor_SingleNodeMode(t *testing.T) {
-	vaultOwner := &mockVaultOwner{owners: map[string]string{
-		"remote-vault": "node-2",
-	}}
-	ri := routing.NewRoutingInterceptor(testRegistry(), "node-1", vaultOwner, nil)
+	owners := vaultOwners(map[string][]string{"remote-vault": {"node-2"}})
+	ri := routing.NewRoutingInterceptor(testRegistry(), "node-1", owners, nil)
 
 	var handlerCalled bool
 	_, err := runUnary(t, ri,
-		gastrologv1connect.VaultServiceListChunksProcedure,
-		&apiv1.ListChunksRequest{Vault: "remote-vault"},
-		func(ctx context.Context, req *connect.Request[apiv1.ListChunksRequest]) (*connect.Response[apiv1.ListChunksResponse], error) {
+		gastrologv1connect.VaultServiceGetChunkProcedure,
+		&apiv1.GetChunkRequest{Vault: "remote-vault"},
+		func(ctx context.Context, req *connect.Request[apiv1.GetChunkRequest]) (*connect.Response[apiv1.GetChunkResponse], error) {
 			handlerCalled = true
-			return connect.NewResponse(&apiv1.ListChunksResponse{}), nil
+			return connect.NewResponse(&apiv1.GetChunkResponse{}), nil
 		},
 		context.Background(), nil,
 	)
@@ -322,7 +593,7 @@ func TestStrategyString(t *testing.T) {
 	}{
 		{routing.RouteLocal, "RouteLocal"},
 		{routing.RouteLeader, "RouteLeader"},
-		{routing.RouteTargeted, "RouteTargeted"},
+		{routing.RouteToResourceOwner, "RouteToResourceOwner"},
 		{routing.RouteFanOut, "RouteFanOut"},
 		{routing.Strategy(99), "Unknown"},
 	}

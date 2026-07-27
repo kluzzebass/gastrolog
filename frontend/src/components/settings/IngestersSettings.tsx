@@ -365,7 +365,6 @@ function IngesterCard({
           onChange={(p) => setEdit({ params: p })}
           dark={dark}
           ingesterId={encode(ing.id)}
-          ingesterNodeId={edit.nodeIds[0] ?? ""}
         />
         {listenError && (
           <p className={`text-[0.8em] text-severity-error`}>
