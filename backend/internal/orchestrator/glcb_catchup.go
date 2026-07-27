@@ -24,6 +24,16 @@ const glcbPullTimeout = 5 * time.Minute
 // 20s catch-up sweep instead of saturating disk and peer bandwidth at once.
 const maxConcurrentGLCBPulls = 4
 
+// glcbCatchupJobPrefix names every replica catch-up pull job. It is both the
+// per-chunk idempotency key's stem and the budget domain for
+// maxConcurrentGLCBPulls, so the scheduler's job map is the single owner of
+// "which pulls are outstanding". See pullMissingGLCB.
+const glcbCatchupJobPrefix = "glcb-catchup:"
+
+func glcbCatchupJobName(vaultID glid.GLID, chunkID chunk.ChunkID) string {
+	return glcbCatchupJobPrefix + vaultID.String() + ":" + chunkID.String()
+}
+
 // pullMissingGLCB schedules recovery of this home's copy of a sealed chunk
 // whose GLCB is absent from local disk: pull from a peer home, verify the
 // assembled file's seal metadata against the manifest entry, rename into
@@ -48,6 +58,14 @@ const maxConcurrentGLCBPulls = 4
 // here, a pull for the chunk is already in flight, or the in-flight cap is
 // reached (the next sweep tick retries). The pull itself runs as a one-time
 // scheduler job so the sweep never blocks behind a slow peer.
+//
+// "Already in flight" and "at the cap" are both answered by the scheduler's
+// own job map, via RunOnceIfAbsentUnderLimit keyed on glcbCatchupJobName /
+// glcbCatchupJobPrefix. There is deliberately no second bookkeeping map: the
+// claim is a lease held for exactly as long as the job is registered, so
+// cancelling a pending pull (RemoveJobsByPrefix on vault teardown) releases
+// the right to retry it instead of stranding a claim that would stop the
+// chunk from ever being pulled again.
 func (o *Orchestrator) pullMissingGLCB(vaultID glid.GLID, e vaultctlfsm.ManifestEntry) {
 	if o.chunkGLCBPuller == nil || o.scheduler == nil {
 		return // single-node: every chunk this node should hold, it built
@@ -92,17 +110,6 @@ func (o *Orchestrator) pullMissingGLCB(vaultID glid.GLID, e vaultctlfsm.Manifest
 		return
 	}
 
-	o.glcbPullMu.Lock()
-	if o.glcbPullInflight == nil {
-		o.glcbPullInflight = make(map[chunk.ChunkID]bool)
-	}
-	if o.glcbPullInflight[e.ID] || len(o.glcbPullInflight) >= maxConcurrentGLCBPulls {
-		o.glcbPullMu.Unlock()
-		return
-	}
-	o.glcbPullInflight[e.ID] = true
-	o.glcbPullMu.Unlock()
-
 	// The pull's SOURCE vault is normally this same vault (same-vault
 	// replica catch-up); a transfer-introduced entry pulls from the
 	// vault it was transferred FROM instead — see the doc comment above.
@@ -114,21 +121,19 @@ func (o *Orchestrator) pullMissingGLCB(vaultID glid.GLID, e vaultctlfsm.Manifest
 	// Describe BEFORE scheduling — see scheduleReplication for why (missing
 	// label on the Scheduled event, leaked descriptions entry when the job
 	// finishes first). gastrolog-69sjlj.
-	name := fmt.Sprintf("glcb-catchup:%s:%s", vaultID, e.ID)
+	name := glcbCatchupJobName(vaultID, e.ID)
 	o.scheduler.Describe(name, fmt.Sprintf("Replica catch-up pull of chunk %s from a peer home", e.ID))
-	err := o.scheduler.RunOnce(name, func() {
-		defer func() {
-			o.glcbPullMu.Lock()
-			delete(o.glcbPullInflight, e.ID)
-			o.glcbPullMu.Unlock()
-		}()
+	// Claim the pull and check the in-flight budget in one hold of the
+	// scheduler's lock. Both facts now live in exactly one place — the
+	// scheduler's job map — which is the point: this used to be a separate
+	// glcbPullInflight map with its own mutex, a second copy of "is this work
+	// outstanding" that RemoveJobsByPrefix could never release. See
+	// gastrolog-69sjlj.
+	if _, err := o.scheduler.RunOnceIfAbsentUnderLimit(name, glcbCatchupJobPrefix, maxConcurrentGLCBPulls, func() {
 		o.runGLCBPull(vaultID, sourceVaultID, e, glcbPath) // destVaultID=vaultID, sourceVaultID may differ (transfer)
-	})
-	if err != nil {
-		o.glcbPullMu.Lock()
-		delete(o.glcbPullInflight, e.ID)
-		o.glcbPullMu.Unlock()
-		return
+	}); err != nil {
+		o.logger.Warn("failed to schedule GLCB replica pull",
+			"vault", vaultID, "chunk", e.ID, "error", err)
 	}
 }
 

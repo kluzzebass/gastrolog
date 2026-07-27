@@ -404,6 +404,20 @@ func (s *Scheduler) RemoveJobsByPrefix(prefix string) {
 	}
 }
 
+// countByPrefixLocked counts registered jobs whose name starts with prefix.
+// Must be called with s.mu held — it is the budget half of
+// RunOnceIfAbsentUnderLimit's decision and must not be observable apart from
+// the registration it gates.
+func (s *Scheduler) countByPrefixLocked(prefix string) int {
+	n := 0
+	for name := range s.jobs {
+		if strings.HasPrefix(name, prefix) {
+			n++
+		}
+	}
+	return n
+}
+
 // HasJob returns true if a job with the given name exists.
 func (s *Scheduler) HasJob(name string) bool {
 	s.mu.Lock()
@@ -522,7 +536,7 @@ func (s *Scheduler) Start() {}
 // is already registered is replaced — use RunOnceIfAbsent when the name is
 // meant to be an idempotency key.
 func (s *Scheduler) RunOnce(name string, taskFn any, args ...any) error {
-	_, err := s.runOnce(name, false, taskFn, args...)
+	_, err := s.runOnce(name, nil, taskFn, args...)
 	return err
 }
 
@@ -541,17 +555,57 @@ func (s *Scheduler) RunOnce(name string, taskFn any, args ...any) error {
 // the second job's own completion finds nothing and publishes no terminal
 // event.
 func (s *Scheduler) RunOnceIfAbsent(name string, taskFn any, args ...any) (bool, error) {
-	return s.runOnce(name, true, taskFn, args...)
+	return s.runOnce(name, &onceClaim{}, taskFn, args...)
 }
 
-// runOnce is the shared registration body for RunOnce and RunOnceIfAbsent.
-// When skipIfPresent is set, an existing registration under the same name
-// wins and this returns (false, nil).
-func (s *Scheduler) runOnce(name string, skipIfPresent bool, taskFn any, args ...any) (bool, error) {
+// RunOnceIfAbsentUnderLimit is RunOnceIfAbsent with a budget: it also declines
+// when limit or more jobs whose name starts with prefix are already
+// registered. Both conditions and the registration are decided under a single
+// hold of s.mu, so a stampede cannot overshoot the budget.
+//
+// This exists so a bounded pool of one-time jobs needs no second copy of "what
+// is outstanding" beside the scheduler's own job map. The GLCB replica
+// catch-up used to keep exactly that — a per-chunk inflight map with its own
+// mutex, released by the job body's defer — which meant two owners of the same
+// fact: cancelling those jobs with RemoveJobsByPrefix would have stranded the
+// map entries and stopped those chunks from ever being pulled again. See
+// gastrolog-69sjlj and the single-source-of-truth rule in CLAUDE.md.
+//
+// The claim is a lease on outstanding work, released when the job leaves the
+// registry — on completion (completeOneTimeJob) or on cancellation
+// (RemoveJob/RemoveJobsByPrefix), which is the point: cancelling the work also
+// releases the right to redo it.
+func (s *Scheduler) RunOnceIfAbsentUnderLimit(name, prefix string, limit int, taskFn any, args ...any) (bool, error) {
+	return s.runOnce(name, &onceClaim{prefix: prefix, limit: limit}, taskFn, args...)
+}
+
+// onceClaim describes the conditions a one-time registration must satisfy.
+// A zero value means "only when this exact name is absent"; a non-zero limit
+// additionally caps how many jobs sharing prefix may be registered at once.
+type onceClaim struct {
+	prefix string
+	limit  int // <= 0: unbounded
+}
+
+// runOnce is the shared registration body for RunOnce and the claiming
+// variants. When claim is non-nil and its conditions are not met, nothing is
+// registered and this returns (false, nil).
+func (s *Scheduler) runOnce(name string, claim *onceClaim, taskFn any, args ...any) (bool, error) {
 	s.mu.Lock()
 
-	if skipIfPresent {
+	if claim != nil {
 		if _, exists := s.jobs[name]; exists {
+			s.mu.Unlock()
+			return false, nil
+		}
+		if claim.limit > 0 && s.countByPrefixLocked(claim.prefix) >= claim.limit {
+			// Budget full, and the name is provably absent (checked just
+			// above, under this same lock hold). Any description sitting
+			// under an unregistered name is garbage — it belongs to this
+			// declined attempt, since callers describe before scheduling so
+			// the label reaches the Scheduled event. Drop it rather than
+			// strand an entry no completion will ever remove.
+			delete(s.descriptions, name)
 			s.mu.Unlock()
 			return false, nil
 		}

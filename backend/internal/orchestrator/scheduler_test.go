@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"fmt"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -216,6 +217,31 @@ func awaitSchedulerJobDone(t *testing.T, sub *JobSubscription, name string) {
 	}
 }
 
+// awaitSchedulerJobsDone blocks until every named job has published a terminal
+// event. It tracks the whole set at once because the events interleave in
+// completion order, and a per-name wait would consume — and discard — the
+// events it is not currently looking for.
+func awaitSchedulerJobsDone(t *testing.T, sub *JobSubscription, names ...string) {
+	t.Helper()
+	pending := make(map[string]bool, len(names))
+	for _, n := range names {
+		pending[n] = true
+	}
+	for len(pending) > 0 {
+		select {
+		case evt, ok := <-sub.Events():
+			if !ok {
+				t.Fatalf("job event stream closed with %d jobs outstanding", len(pending))
+			}
+			if evt.Kind == JobEventCompleted || evt.Kind == JobEventFailed {
+				delete(pending, evt.Job.Name)
+			}
+		case <-time.After(30 * time.Second):
+			t.Fatalf("timed out with %d jobs outstanding", len(pending))
+		}
+	}
+}
+
 // hasDescription reports whether the scheduler still holds a description entry
 // for name. completeOneTimeJob deletes the entry when a one-time job finishes,
 // so a lingering entry after completion is a leak.
@@ -313,4 +339,222 @@ func TestDescribeAfterRunOnceLosesLabelAndLeaks(t *testing.T) {
 	if !hasDescription(sched, "described-late") {
 		t.Fatal("expected the late description to strand — if this now releases, the leak is fixed in the scheduler and the call-site ordering rule can be revisited")
 	}
+}
+
+// blockingClaims registers n gated jobs under prefix and returns the release
+// func. Each job is provably inside its body when this returns, so the caller
+// is testing the claim state, not racing the scheduler.
+func blockingClaims(t *testing.T, sched *Scheduler, prefix string, limit, n int) (func(), *atomic.Int32) {
+	t.Helper()
+	entered := make(chan struct{}, n)
+	release := make(chan struct{})
+	var ran atomic.Int32
+	for i := range n {
+		ok, err := sched.RunOnceIfAbsentUnderLimit(
+			fmt.Sprintf("%s%d", prefix, i), prefix, limit, func() {
+				ran.Add(1)
+				entered <- struct{}{}
+				<-release
+			})
+		if err != nil || !ok {
+			t.Fatalf("claim %d: scheduled=%v err=%v", i, ok, err)
+		}
+	}
+	for range n {
+		<-entered
+	}
+	var once sync.Once
+	return func() { once.Do(func() { close(release) }) }, &ran
+}
+
+// TestRunOnceIfAbsentUnderLimitHoldsTheBudget pins the budget half of the
+// claim: with the limit's worth of jobs outstanding, further distinct names
+// are declined until one finishes. This is the property that used to live in
+// the orchestrator's own glcbPullInflight map (maxConcurrentGLCBPulls), moved
+// onto the scheduler so "what is outstanding" has one owner. See
+// gastrolog-69sjlj.
+func TestRunOnceIfAbsentUnderLimitHoldsTheBudget(t *testing.T) {
+	t.Parallel()
+
+	sched, err := newScheduler(slog.Default(), 8, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sched.Stop() }()
+
+	const limit = 4
+	release, ran := blockingClaims(t, sched, "budgeted:", limit, limit)
+	defer release()
+
+	// Budget is full: a fresh name is declined, not queued.
+	ok, err := sched.RunOnceIfAbsentUnderLimit("budgeted:over", "budgeted:", limit, func() {
+		t.Error("a job past the budget must not run")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Fatal("claim succeeded past the in-flight budget")
+	}
+	if sched.HasJob("budgeted:over") {
+		t.Error("declined claim left a job registered")
+	}
+	// Jobs under a different prefix share no budget with these.
+	ok, err = sched.RunOnceIfAbsentUnderLimit("other:0", "other:", limit, func() {})
+	if err != nil || !ok {
+		t.Fatalf("unrelated prefix declined: scheduled=%v err=%v", ok, err)
+	}
+
+	sub, cancel := sched.Events().Subscribe()
+	defer cancel()
+	release()
+	names := make([]string, 0, limit)
+	for i := range limit {
+		names = append(names, fmt.Sprintf("budgeted:%d", i))
+	}
+	awaitSchedulerJobsDone(t, sub, names...)
+	if got := ran.Load(); got != limit {
+		t.Errorf("ran %d budgeted jobs, want %d", got, limit)
+	}
+
+	// The budget is a lease, not a quota: it frees as jobs complete.
+	ok, err = sched.RunOnceIfAbsentUnderLimit("budgeted:over", "budgeted:", limit, func() {})
+	if err != nil || !ok {
+		t.Fatalf("claim after the budget drained: scheduled=%v err=%v", ok, err)
+	}
+}
+
+// TestRunOnceIfAbsentUnderLimitConcurrentClaimsRespectBudget is the
+// stampede case: the GLCB catch-up sweep walks a whole manifest, so many
+// distinct chunk names hit the budget at once. A count-then-register guard
+// would overshoot; the count and the registration happen under one lock hold.
+func TestRunOnceIfAbsentUnderLimitConcurrentClaimsRespectBudget(t *testing.T) {
+	t.Parallel()
+
+	sched, err := newScheduler(slog.Default(), 16, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sched.Stop() }()
+
+	const (
+		limit  = 4
+		racers = 24
+		prefix = "stampede:"
+	)
+	release := make(chan struct{})
+	defer close(release)
+	var ran, claimed atomic.Int32
+
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := range racers {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			ok, err := sched.RunOnceIfAbsentUnderLimit(
+				fmt.Sprintf("%s%d", prefix, i), prefix, limit, func() {
+					ran.Add(1)
+					<-release
+				})
+			if err != nil {
+				t.Errorf("claim %d: %v", i, err)
+				return
+			}
+			if ok {
+				claimed.Add(1)
+			}
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	if got := claimed.Load(); got != limit {
+		t.Errorf("%d racers claimed %d slots, want exactly the budget %d", racers, got, limit)
+	}
+	if got := countJobsByPrefix(sched, prefix); got != limit {
+		t.Errorf("jobs registered under %q = %d, want the budget %d", prefix, got, limit)
+	}
+	if got := ran.Load(); got > limit {
+		t.Errorf("%d job bodies started, want at most the budget %d", got, limit)
+	}
+}
+
+// TestRunOnceIfAbsentUnderLimitCancelReleasesClaim is the regression the
+// migration off glcbPullInflight exists for. Cancelling a pending job —
+// RemoveJobsByPrefix, as vault teardown does — must release the right to redo
+// that work. With the claim held in a separate map, the cancelled job's entry
+// stranded and that chunk would never be pulled again.
+func TestRunOnceIfAbsentUnderLimitCancelReleasesClaim(t *testing.T) {
+	t.Parallel()
+
+	sched, err := newScheduler(slog.Default(), 8, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sched.Stop() }()
+
+	const limit = 2
+	release, _ := blockingClaims(t, sched, "cancelled:", limit, limit)
+	defer release()
+
+	if ok, err := sched.RunOnceIfAbsentUnderLimit("cancelled:0", "cancelled:", limit, func() {}); err != nil || ok {
+		t.Fatalf("re-claim while outstanding: scheduled=%v err=%v, want declined", ok, err)
+	}
+
+	sched.RemoveJobsByPrefix("cancelled:")
+
+	if got := countJobsByPrefix(sched, "cancelled:"); got != 0 {
+		t.Fatalf("jobs still registered after cancellation = %d", got)
+	}
+	ok, err := sched.RunOnceIfAbsentUnderLimit("cancelled:0", "cancelled:", limit, func() {})
+	if err != nil || !ok {
+		t.Fatalf("re-claim after cancellation: scheduled=%v err=%v, want granted — a cancelled job must not strand its claim", ok, err)
+	}
+}
+
+// TestRunOnceIfAbsentUnderLimitDeclineReleasesDescription closes the leak the
+// budget path would otherwise open. Callers describe before scheduling (so
+// the label reaches the Scheduled event), so a claim declined by the budget
+// leaves a description under a name with no job and no completion to remove
+// it — one per chunk the sweep ever deferred.
+func TestRunOnceIfAbsentUnderLimitDeclineReleasesDescription(t *testing.T) {
+	t.Parallel()
+
+	sched, err := newScheduler(slog.Default(), 8, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sched.Stop() }()
+
+	const limit = 2
+	release, _ := blockingClaims(t, sched, "deferred:", limit, limit)
+	defer release()
+
+	sched.Describe("deferred:over", "a pull that will be deferred")
+	ok, err := sched.RunOnceIfAbsentUnderLimit("deferred:over", "deferred:", limit, func() {})
+	if err != nil || ok {
+		t.Fatalf("claim past the budget: scheduled=%v err=%v, want declined", ok, err)
+	}
+	if hasDescription(sched, "deferred:over") {
+		t.Error("a budget-declined claim stranded its description — no job exists to release it")
+	}
+
+	// A claim declined because the NAME is taken must leave the live job's
+	// label alone — that description belongs to the running job.
+	sched.Describe("deferred:0", "the running pull's label")
+	if ok, err := sched.RunOnceIfAbsentUnderLimit("deferred:0", "deferred:", limit, func() {}); err != nil || ok {
+		t.Fatalf("re-claim of a held name: scheduled=%v err=%v, want declined", ok, err)
+	}
+	if !hasDescription(sched, "deferred:0") {
+		t.Error("declining a held name dropped the running job's description")
+	}
+}
+
+// countJobsByPrefix counts registered jobs under a name prefix.
+func countJobsByPrefix(s *Scheduler, prefix string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.countByPrefixLocked(prefix)
 }
