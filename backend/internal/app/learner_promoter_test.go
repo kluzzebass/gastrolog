@@ -276,8 +276,8 @@ func TestEvaluate_PromoteFailureRetries(t *testing.T) {
 }
 
 // TestOnBroadcast_TriggersOnlyOnNodeStats: the broadcast subscriber wakes
-// an evaluation on NodeStats (which carries applied index) but ignores
-// heartbeats (which cannot change a promotion decision).
+// an evaluation on NodeStats (which carries applied index) but ignores every
+// other payload — none of them can change a promotion decision.
 func TestOnBroadcast_TriggersOnlyOnNodeStats(t *testing.T) {
 	t.Parallel()
 	p := newLearnerPromoter("test", func() []promotionGroup { return nil }, quietLogger())
@@ -293,14 +293,14 @@ func TestOnBroadcast_TriggersOnlyOnNodeStats(t *testing.T) {
 		t.Fatal("NodeStats broadcast should have triggered the promoter")
 	}
 
-	// Heartbeat → no trigger (channel stays open).
+	// Any other payload → no trigger (channel stays open).
 	after := p.wake.C()
 	p.onBroadcast(&gastrologv1.BroadcastMessage{
-		Payload: &gastrologv1.BroadcastMessage_Heartbeat{Heartbeat: &gastrologv1.Heartbeat{}},
+		Payload: &gastrologv1.BroadcastMessage_NodeJobs{NodeJobs: &gastrologv1.NodeJobs{}},
 	})
 	select {
 	case <-after:
-		t.Fatal("heartbeat broadcast must not trigger the promoter")
+		t.Fatal("a non-NodeStats broadcast must not trigger the promoter")
 	default:
 	}
 }

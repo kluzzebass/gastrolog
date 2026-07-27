@@ -16,8 +16,7 @@ Controls how [cluster nodes](settings:nodes) [![icon:help]()](help:clustering-no
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| **Broadcast Interval** | How often each node sends its full stats payload (vault stats, ingester stats, alerts) to peers | `5s` |
-| **Heartbeat Interval** | How often each node sends a lightweight liveness ping. Detection of frozen or paused peers takes ~4× this interval | `1s` |
+| **Broadcast Interval** | How often each node sends its full stats payload (vault stats, ingester stats, alerts) to peers. Observability only — peer liveness comes from Raft contact, so raising this does not slow failure detection | `5s` |
 
 ## Pipeline
 

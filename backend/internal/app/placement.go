@@ -32,9 +32,10 @@ const (
 	// set, node lifecycle-state change, node-config add/remove, and ingester
 	// put/delete all fire pm.Trigger() from the config dispatcher, and
 	// leadership transitions run through pm.Run's Raft observer. What remains
-	// with NO event is peer-heartbeat LIVENESS EXPIRY: LivePeers() is a TTL
-	// test (time.Now vs last-seen), so a peer silently dropping out of the
-	// alive set is detectable only by re-evaluating on a clock. This tick is
+	// with NO event is peer LIVENESS EXPIRY: LivePeers() is a freshness test
+	// (time.Now vs last Raft contact, or vs last broadcast for peers we share
+	// no Raft edge with), so a peer silently dropping out of the alive set is
+	// detectable only by re-evaluating on a clock. This tick is
 	// that re-evaluation — the honest, irreducible residual, not a catch-all
 	// for missed events. (Sustained absence is separately promoted to a
 	// NodeStateChanged FSM event by the unreachable sweep, which then triggers

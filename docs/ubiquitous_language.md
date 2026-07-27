@@ -392,6 +392,31 @@ gRPC transport:
   (from cluster-ctl Raft FSM) and drives their side effects into the local
   orchestrator (register vault, build vault instance, start ingester, etc.).
 
+### Peer liveness
+
+- **Raft contact** — positive evidence that a peer node was alive: an outbound
+  Raft RPC to it came back, or an inbound Raft RPC from it was handled, on any
+  Raft group the two nodes share. Aggregated **any-group, most-recent-wins**;
+  silence in one group is never evidence of anything, because it usually just
+  means no Raft edge exists there.
+
+- **Raft probe** — an *attempt* at an outbound Raft RPC to a peer, whether or
+  not it succeeded. Distinct from contact and recorded separately: only while
+  this node is probing a peer does the absence of contact mean the peer is
+  gone. Followers exchange Raft traffic only with their leader, so two
+  co-followers have no Raft edge and their mutual silence carries no
+  information.
+
+- **Peer liveness** — the short-window verdict "is this peer reachable right
+  now" (`PeerState.IsLive` / `LivePeers`). Fresh Raft contact wins; otherwise a
+  fresh probe with no contact is an authoritative *not live*; otherwise there
+  is no Raft edge and the verdict falls back to stats-broadcast freshness.
+
+- **Last-seen** — the long-horizon `PeerState.LastSeen`: the newest moment of
+  *any* positive evidence, Raft contact or broadcast arrival. Never suppressed
+  by a failing probe. The unreachable sweep and the stale-voter reaper measure
+  their multi-minute thresholds against this, not against peer liveness.
+
 ### Transport
 
 - **Multiraft transport** — gRPC service that multiplexes AppendEntries,
@@ -1219,6 +1244,7 @@ Canonical milestone verbs (reuse these names; do not coin synonyms):
 | vault-ctl Raft   |                   | One Raft group per vault, authoritative for that vault's chunk metadata. Follows the `{scope}-ctl` naming pattern for control-plane Raft groups. |
 | cluster-ctl Raft | system Raft, config Raft, cluster Raft | One Raft group per cluster, authoritative for cluster-wide configuration. Pairs with `vault-ctl Raft` to form the `{scope}-ctl` pattern. The on-disk Raft group ID and type names were renamed from `system` → `cluster-ctl` in gastrolog-5eu6v. |
 | instance FSM     |                   | Per-vault chunk-metadata sub-FSM in `vaultctlfsm`. |
+| Raft contact     | peer heartbeat, liveness ping | Peer liveness comes from Raft's own per-group traffic. The dedicated `Heartbeat` broadcast that "peer heartbeat" named was deleted in gastrolog-1lbifx; "heartbeat" now only ever means hashicorp/raft's replication heartbeat. |
 | vault replication |                  | Record streams from leader to follower, per vault. |
 | ingester         | source, collector | "Ingester" is the proto name; "source" leaks from UI copy.          |
 | route            | pipeline (at ingest) | Ingestion "route" ≠ query "pipeline"; use "route pipeline" or "ingestion pipeline" to bridge. |

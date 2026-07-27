@@ -2,7 +2,7 @@ import { Badge } from "./Badge";
 import { formatDuration } from "../utils/units";
 import { useTick } from "./inspector/JobCard";
 
-// gastrolog-778iv: surface time-since-last-heartbeat for peer nodes
+// gastrolog-778iv: surface time-since-last-broadcast for peer nodes
 // whose stats have gone silent. The 0–5 min window between "peer
 // stopped broadcasting" and "unreachable_sweep flips state to
 // Unreachable" was previously a blank "offline" badge with no

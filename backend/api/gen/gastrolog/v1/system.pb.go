@@ -3698,15 +3698,14 @@ func (x *StaticLookupRow) GetValues() map[string]string {
 
 type ClusterSettings struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
-	BroadcastInterval string                 `protobuf:"bytes,1,opt,name=broadcast_interval,json=broadcastInterval,proto3" json:"broadcast_interval,omitempty"` // Go duration string, e.g. "5s". Default: "5s".
-	HeartbeatInterval string                 `protobuf:"bytes,2,opt,name=heartbeat_interval,json=heartbeatInterval,proto3" json:"heartbeat_interval,omitempty"` // Go duration string, e.g. "1s". Default: "1s". Lightweight liveness ping; PeerState TTL is 8× this (defaultPeerTTLMultiplier).
+	BroadcastInterval string                 `protobuf:"bytes,1,opt,name=broadcast_interval,json=broadcastInterval,proto3" json:"broadcast_interval,omitempty"` // Go duration string, e.g. "5s". Default: "5s". Also anchors the PeerState stats TTL (broadcast_interval × GLOG_PEER_TTL_MULTIPLIER); peer LIVENESS comes from Raft last-contact, not from this cadence.
 	// Per-vault pipeline backlog budget in bytes (unreleased completed segments
 	// in the vault-ctl registry). When a vault's backlog reaches the budget,
 	// ingest admission for that vault is refused (retryable backpressure) until
 	// chunking drains it below the budget. The operating bound that engages
 	// BEFORE disk pressure; the disk guard remains the backstop. A size
 	// expression ("8GiB"); empty = unbounded (gastrolog-etcjdx).
-	PipelineBacklogMax string `protobuf:"bytes,3,opt,name=pipeline_backlog_max,json=pipelineBacklogMax,proto3" json:"pipeline_backlog_max,omitempty"`
+	PipelineBacklogMax string `protobuf:"bytes,2,opt,name=pipeline_backlog_max,json=pipelineBacklogMax,proto3" json:"pipeline_backlog_max,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -3744,13 +3743,6 @@ func (*ClusterSettings) Descriptor() ([]byte, []int) {
 func (x *ClusterSettings) GetBroadcastInterval() string {
 	if x != nil {
 		return x.BroadcastInterval
-	}
-	return ""
-}
-
-func (x *ClusterSettings) GetHeartbeatInterval() string {
-	if x != nil {
-		return x.HeartbeatInterval
 	}
 	return ""
 }
@@ -4341,8 +4333,7 @@ func (x *PutLookupSettings) GetYamlFileLookups() []*YAMLFileLookupEntry {
 type PutClusterSettings struct {
 	state              protoimpl.MessageState `protogen:"open.v1"`
 	BroadcastInterval  *string                `protobuf:"bytes,1,opt,name=broadcast_interval,json=broadcastInterval,proto3,oneof" json:"broadcast_interval,omitempty"`
-	HeartbeatInterval  *string                `protobuf:"bytes,2,opt,name=heartbeat_interval,json=heartbeatInterval,proto3,oneof" json:"heartbeat_interval,omitempty"`
-	PipelineBacklogMax *string                `protobuf:"bytes,3,opt,name=pipeline_backlog_max,json=pipelineBacklogMax,proto3,oneof" json:"pipeline_backlog_max,omitempty"`
+	PipelineBacklogMax *string                `protobuf:"bytes,2,opt,name=pipeline_backlog_max,json=pipelineBacklogMax,proto3,oneof" json:"pipeline_backlog_max,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -4380,13 +4371,6 @@ func (*PutClusterSettings) Descriptor() ([]byte, []int) {
 func (x *PutClusterSettings) GetBroadcastInterval() string {
 	if x != nil && x.BroadcastInterval != nil {
 		return *x.BroadcastInterval
-	}
-	return ""
-}
-
-func (x *PutClusterSettings) GetHeartbeatInterval() string {
-	if x != nil && x.HeartbeatInterval != nil {
-		return *x.HeartbeatInterval
 	}
 	return ""
 }
@@ -9252,11 +9236,10 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x06values\x18\x01 \x03(\v2).gastrolog.v1.StaticLookupRow.ValuesEntryR\x06values\x1a9\n" +
 	"\vValuesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xa1\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"r\n" +
 	"\x0fClusterSettings\x12-\n" +
-	"\x12broadcast_interval\x18\x01 \x01(\tR\x11broadcastInterval\x12-\n" +
-	"\x12heartbeat_interval\x18\x02 \x01(\tR\x11heartbeatInterval\x120\n" +
-	"\x14pipeline_backlog_max\x18\x03 \x01(\tR\x12pipelineBacklogMax\"\xf8\x03\n" +
+	"\x12broadcast_interval\x18\x01 \x01(\tR\x11broadcastInterval\x120\n" +
+	"\x14pipeline_backlog_max\x18\x02 \x01(\tR\x12pipelineBacklogMax\"\xf8\x03\n" +
 	"\x13GetSettingsResponse\x12.\n" +
 	"\x04auth\x18\x01 \x01(\v2\x1a.gastrolog.v1.AuthSettingsR\x04auth\x121\n" +
 	"\x05query\x18\x02 \x01(\v2\x1b.gastrolog.v1.QuerySettingsR\x05query\x12=\n" +
@@ -9327,13 +9310,11 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\vcsv_lookups\x18\x04 \x03(\v2\x1c.gastrolog.v1.CSVLookupEntryR\n" +
 	"csvLookups\x12F\n" +
 	"\x0estatic_lookups\x18\x05 \x03(\v2\x1f.gastrolog.v1.StaticLookupEntryR\rstaticLookups\x12M\n" +
-	"\x11yaml_file_lookups\x18\x06 \x03(\v2!.gastrolog.v1.YAMLFileLookupEntryR\x0fyamlFileLookups\"\xfa\x01\n" +
+	"\x11yaml_file_lookups\x18\x06 \x03(\v2!.gastrolog.v1.YAMLFileLookupEntryR\x0fyamlFileLookups\"\xaf\x01\n" +
 	"\x12PutClusterSettings\x122\n" +
-	"\x12broadcast_interval\x18\x01 \x01(\tH\x00R\x11broadcastInterval\x88\x01\x01\x122\n" +
-	"\x12heartbeat_interval\x18\x02 \x01(\tH\x01R\x11heartbeatInterval\x88\x01\x01\x125\n" +
-	"\x14pipeline_backlog_max\x18\x03 \x01(\tH\x02R\x12pipelineBacklogMax\x88\x01\x01B\x15\n" +
-	"\x13_broadcast_intervalB\x15\n" +
-	"\x13_heartbeat_intervalB\x17\n" +
+	"\x12broadcast_interval\x18\x01 \x01(\tH\x00R\x11broadcastInterval\x88\x01\x01\x125\n" +
+	"\x14pipeline_backlog_max\x18\x02 \x01(\tH\x01R\x12pipelineBacklogMax\x88\x01\x01B\x15\n" +
+	"\x13_broadcast_intervalB\x17\n" +
 	"\x15_pipeline_backlog_max\"\xb2\x02\n" +
 	"\x19PutServiceSettingsRequest\x121\n" +
 	"\x04auth\x18\x01 \x01(\v2\x1d.gastrolog.v1.PutAuthSettingsR\x04auth\x124\n" +

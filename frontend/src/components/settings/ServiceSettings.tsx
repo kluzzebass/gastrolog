@@ -33,7 +33,6 @@ interface ServiceFormState {
   queryTimeout: string;
   maxResultCount: string;
   broadcastInterval: string;
-  heartbeatInterval: string;
   pipelineBacklogMax: string; // human size; per-vault pipeline backlog budget; empty = unbounded
   initialized: boolean;
 }
@@ -67,7 +66,6 @@ function fieldsFromData(data: GetSettingsResponse): ServiceFormState {
     queryTimeout: query?.timeout ?? "",
     maxResultCount: query?.maxResultCount ? String(query.maxResultCount) : "10000",
     broadcastInterval: data.cluster?.broadcastInterval || "5s",
-    heartbeatInterval: data.cluster?.heartbeatInterval || "1s",
     pipelineBacklogMax:
       data.cluster && data.cluster.pipelineBacklogMax !== ""
         ? data.cluster.pipelineBacklogMax
@@ -82,7 +80,7 @@ const INITIAL_STATE: ServiceFormState = {
   httpsPort: "", requireMixedCase: false, requireDigit: false,
   requireSpecial: false, maxConsecutiveRepeats: "", forbidAnimalNoise: false,
   refreshTokenDuration: "", maxFollowDuration: "", queryTimeout: "",
-  maxResultCount: "", broadcastInterval: "", heartbeatInterval: "",
+  maxResultCount: "", broadcastInterval: "",
   pipelineBacklogMax: "", initialized: false,
 };
 
@@ -159,7 +157,6 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
       s.queryTimeout !== (data.query?.timeout ?? "") ||
       s.maxResultCount !== String(data.query?.maxResultCount || 10000) ||
       s.broadcastInterval !== (data.cluster?.broadcastInterval || "5s") ||
-      s.heartbeatInterval !== (data.cluster?.heartbeatInterval || "1s") ||
       s.pipelineBacklogMax !==
         (data.cluster && data.cluster.pipelineBacklogMax !== ""
           ? data.cluster.pipelineBacklogMax
@@ -174,7 +171,6 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
     const effectiveMaxRepeats = parseInt(s.maxConsecutiveRepeats, 10) || 0;
     const effectiveMaxResultCount = parseInt(s.maxResultCount, 10) || 0;
     const effectiveBroadcast = s.broadcastInterval || undefined;
-    const effectiveHeartbeat = s.heartbeatInterval || undefined;
     try {
       await putConfig.mutateAsync({
         auth: {
@@ -205,7 +201,6 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
         },
         cluster: {
           broadcastInterval: effectiveBroadcast,
-          heartbeatInterval: effectiveHeartbeat,
           // Always sent: clearing the field means 0 = unbounded, which must
           // reach the store (undefined would merge-skip and keep the old budget).
           pipelineBacklogMax: s.pipelineBacklogMax,
@@ -578,28 +573,6 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
                     return <p className="text-[0.75em] text-severity-warn mt-1">Invalid duration format</p>;
                   if (secs !== null && secs < 1)
                     return <p className="text-[0.75em] text-severity-warn mt-1">Must be at least 1 second</p>;
-                  return null;
-                })()}
-              </FormField>
-              <FormField
-                label="Heartbeat Interval"
-                description="How often each node sends a lightweight liveness ping. Detection of frozen or paused peers takes ~4× this interval. Should be much shorter than the broadcast interval."
-                dark={dark}
-              >
-                <TextInput
-                  value={s.heartbeatInterval}
-                  onChange={set("heartbeatInterval")}
-                  placeholder="1s"
-                  dark={dark}
-                  mono
-                  examples={["500ms", "1s", "2s", "5s"]}
-                />
-                {(() => {
-                  const secs = parseDurationSeconds(s.heartbeatInterval);
-                  if (s.heartbeatInterval && secs === null)
-                    return <p className="text-[0.75em] text-severity-warn mt-1">Invalid duration format</p>;
-                  if (secs !== null && secs < 0.1)
-                    return <p className="text-[0.75em] text-severity-warn mt-1">Must be at least 100ms</p>;
                   return null;
                 })()}
               </FormField>

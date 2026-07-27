@@ -249,8 +249,7 @@ type StatsCollectorConfig struct {
 	NodeNameFn         func() string // lazily resolved node name
 	Version            string
 	StartTime          time.Time
-	Interval           time.Duration  // heavy NodeStats broadcast cadence (default 5s)
-	HeartbeatInterval  time.Duration  // lightweight liveness ping cadence (default 1s); 0 disables
+	Interval           time.Duration  // NodeStats broadcast cadence (default 5s)
 	ApiAddress         string         // HTTP API listen address (e.g. ":4564")
 	PprofAddress       string         // pprof listen address, empty if disabled
 	StatsSignal        *notify.Signal // fired after each broadcast to notify WatchSystemStatus streams
@@ -293,9 +292,6 @@ type StatsCollector struct {
 func NewStatsCollector(cfg StatsCollectorConfig) *StatsCollector {
 	if cfg.Interval <= 0 {
 		cfg.Interval = 5 * time.Second
-	}
-	if cfg.HeartbeatInterval <= 0 {
-		cfg.HeartbeatInterval = 1 * time.Second
 	}
 	return &StatsCollector{
 		cfg:   cfg,
@@ -345,19 +341,6 @@ func (c *StatsCollector) BroadcastStats(ctx context.Context) {
 	if c.cfg.StatsSignal != nil {
 		c.cfg.StatsSignal.Notify()
 	}
-}
-
-// BroadcastHeartbeat sends the lightweight peer-liveness marker. Registered as
-// a separate scheduler job so it cannot be delayed by BroadcastStats work.
-func (c *StatsCollector) BroadcastHeartbeat(ctx context.Context) {
-	if c.cfg.Broadcaster == nil {
-		return
-	}
-	c.cfg.Broadcaster.Send(ctx, &gastrologv1.BroadcastMessage{
-		SenderId:  []byte(c.cfg.NodeID),
-		Timestamp: timestamppb.Now(),
-		Payload:   &gastrologv1.BroadcastMessage_Heartbeat{Heartbeat: &gastrologv1.Heartbeat{}},
-	})
 }
 
 // CollectLocalSnapshot gathers a NodeStats snapshot for the local node without
