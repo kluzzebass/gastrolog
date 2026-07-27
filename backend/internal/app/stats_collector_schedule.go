@@ -9,54 +9,37 @@ import (
 	"gastrolog/internal/orchestrator"
 )
 
-const (
-	clusterStatsBroadcastJobName = "cluster-stats-broadcast"
-	clusterPeerHeartbeatJobName  = "cluster-peer-heartbeat"
-)
+const clusterStatsBroadcastJobName = "cluster-stats-broadcast"
 
-// startStatsCollectorJobs registers peer stats broadcast and heartbeat as
-// separate scheduled jobs on the orchestrator scheduler. Splitting them
-// ensures a slow NodeStats collection pass cannot delay peer liveness
-// heartbeats (gastrolog-2kio8, gastrolog-2vqw3 follow-up).
+// startStatsCollectorJobs registers the peer stats broadcast on the
+// orchestrator scheduler.
+//
+// It used to register a second job alongside it — a lightweight peer heartbeat
+// on its own schedule, split out (gastrolog-2kio8, gastrolog-2vqw3) so a slow
+// NodeStats collection pass could not delay peer liveness. That job is gone:
+// Raft's own per-group heartbeats already carry peer liveness
+// (gastrolog-1lbifx), so the starvation the split protected against no longer
+// has anything to starve. This broadcast now carries observability payload
+// only; nothing in the cluster waits on its cadence to notice a dead peer.
 func startStatsCollectorJobs(
 	scheduler scheduledJobRegistry,
 	collector *cluster.StatsCollector,
 	ctx context.Context,
-	broadcastInterval, heartbeatInterval time.Duration,
+	broadcastInterval time.Duration,
 ) error {
 	if err := scheduler.AddJob(
 		clusterStatsBroadcastJobName,
-		orchestrator.CronEvery(broadcastIntervalOr(5*time.Second, broadcastInterval)),
+		orchestrator.CronEvery(broadcastIntervalOr(defaultBroadcastInterval, broadcastInterval)),
 		func() { collector.BroadcastStats(ctx) },
 	); err != nil {
 		return fmt.Errorf("cluster stats broadcast job: %w", err)
 	}
 	scheduler.Describe(clusterStatsBroadcastJobName,
 		"Broadcast local NodeStats to all cluster peers (vault, route, ingest queue, alerts)")
-
-	if heartbeatInterval <= 0 {
-		return nil
-	}
-	if err := scheduler.AddJob(
-		clusterPeerHeartbeatJobName,
-		orchestrator.CronEvery(heartbeatIntervalOr(time.Second, heartbeatInterval)),
-		func() { collector.BroadcastHeartbeat(ctx) },
-	); err != nil {
-		return fmt.Errorf("cluster peer heartbeat job: %w", err)
-	}
-	scheduler.Describe(clusterPeerHeartbeatJobName,
-		"Broadcast lightweight peer liveness heartbeat (refreshes PeerState last-seen)")
 	return nil
 }
 
 func broadcastIntervalOr(fallback, interval time.Duration) time.Duration {
-	if interval <= 0 {
-		return fallback
-	}
-	return interval
-}
-
-func heartbeatIntervalOr(fallback, interval time.Duration) time.Duration {
 	if interval <= 0 {
 		return fallback
 	}

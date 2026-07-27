@@ -4,7 +4,7 @@
 
 ## Context
 
-The current node-lifecycle treats node liveness as binary: a node is either in `LivePeers` (heartbeats current within ~4s) or it is not. Every cluster decision — placement rotation, peer routing, decommission — derives from this single bit. The recent wave of fixes (gastrolog-2yeie series) hardened the *membership* layer but did not introduce gradations between "live" and "decommissioned." That gap is what allows transient absence (k8s rolling restart) to be misclassified as permanent removal, triggering placement rotation that orphans chunks on the absent node's disk.
+The current node-lifecycle treats node liveness as binary: a node is either in `LivePeers` (Raft contact current within ~4s) or it is not. Every cluster decision — placement rotation, peer routing, decommission — derives from this single bit. The recent wave of fixes (gastrolog-2yeie series) hardened the *membership* layer but did not introduce gradations between "live" and "decommissioned." That gap is what allows transient absence (k8s rolling restart) to be misclassified as permanent removal, triggering placement rotation that orphans chunks on the absent node's disk.
 
 This design introduces six explicit node states with deliberate transitions, separates **cluster-detected absence** (`Unreachable`) from **operator-declared absence** (`Maintenance`) — both of which share the *soft-offline* property of "do not rotate placement off this node" — and folds in a learner-based join model so new nodes do not count toward Raft quorum until they are caught up.
 
@@ -18,11 +18,11 @@ A companion epic, [gastrolog-2ujjh](dcat://gastrolog-2ujjh) (Fan-out data-plane 
 stateDiagram-v2
     [*] --> Live: Join (as learner) → caught up → promoted
 
-    Live --> Unreachable: heartbeat lapse > threshold (auto)
+    Live --> Unreachable: contact lapse > threshold (auto)
     Live --> Maintenance: cluster maintenance (operator)
     Live --> Draining: cluster drain (operator)
 
-    Unreachable --> Live: heartbeat resumes
+    Unreachable --> Live: contact resumes
     Unreachable --> Maintenance: cluster maintenance (operator commits)
     Unreachable --> Draining: cluster drain (operator)
 
@@ -43,7 +43,7 @@ stateDiagram-v2
 
 **Unreachable** (soft-offline; cluster-detected) — heartbeats have lapsed past the threshold (default 5 min). **Placement does NOT rotate off this node.** Vault-ctl Raft groups: still a voter (unreachable; quorum maintained by other voters). Reads addressed to this node fail with connection error (no change to current read routing). Auto-trigger entry: heartbeat-lapse exceeds the threshold (configurable via env var). Auto-clear: heartbeat resumes. Persistent alert fires on entry; alert tone is "noticed a problem" — operator may want to act.
 
-**Maintenance** (soft-offline; operator-declared) — operator has explicitly placed this node in maintenance mode via `cluster maintenance <node>`. Cluster behavior identical to `Unreachable` for placement-rotation and quorum participation. The differences: entry is operator-initiated and sticky (heartbeat resumption does NOT auto-clear), exit requires explicit `cluster online <node>`, and alerts are informational rather than warning ("this is intentional"). The state captures operator intent that may persist across transient reachability changes — e.g., the operator is preparing the underlying host for kernel maintenance and wants the cluster to ignore brief reachability flaps during the window.
+**Maintenance** (soft-offline; operator-declared) — operator has explicitly placed this node in maintenance mode via `cluster maintenance <node>`. Cluster behavior identical to `Unreachable` for placement-rotation and quorum participation. The differences: entry is operator-initiated and sticky (contact resumption does NOT auto-clear), exit requires explicit `cluster online <node>`, and alerts are informational rather than warning ("this is intentional"). The state captures operator intent that may persist across transient reachability changes — e.g., the operator is preparing the underlying host for kernel maintenance and wants the cluster to ignore brief reachability flaps during the window.
 
 **Draining** — operator-initiated via `cluster drain <node>`. Active chunk transfers OUT to remaining holders. Placement updates only after the destination has the bytes (coordinated migration, not a flip-and-hope). No new placements assigned. Reads and writes still served while transfers run. Operator can cancel while in progress. Transitions to Decommissioning automatically once all chunks for which this node is in the placement set have moved AND the under-RF refusal check passes.
 
@@ -65,7 +65,7 @@ stateDiagram-v2
 
 The **"Placement may rotate FROM Unreachable/Maintenance = no"** rows are the load-bearing gate for the RF=1 rolling-redeploy scenario and for operator maintenance windows. Both soft-offline states share the same placement-rotation gate; the placement guard in [placement.go](backend/internal/app/placement.go) treats them identically.
 
-The reads/writes row differs slightly between `Unreachable` and `Maintenance` only in expected outcome: an `Unreachable` node is by definition not heartbeating, so reads to it will almost always fail; a `Maintenance` node may or may not be reachable depending on what the operator is doing (it may be fully functional and just flagged as "leave me alone"). The cluster's *behavior* is the same in both — try the node, observe success or failure — but the *probability of success* differs.
+The reads/writes row differs slightly between `Unreachable` and `Maintenance` only in expected outcome: an `Unreachable` node is by definition out of contact, so reads to it will almost always fail; a `Maintenance` node may or may not be reachable depending on what the operator is doing (it may be fully functional and just flagged as "leave me alone"). The cluster's *behavior* is the same in both — try the node, observe success or failure — but the *probability of success* differs.
 
 ## Storage layout for state
 
@@ -89,10 +89,12 @@ type NodeConfig struct {
 | From → To | Trigger | Mechanism |
 |---|---|---|
 | Live → Unreachable | `time.Since(peerState.LastSeen(node)) > unreachableThreshold` | Leader-side sweep on a low-frequency tick (e.g. 30s) proposes `CmdSetNodeState{node, Unreachable}` |
+
+`peerState.LastSeen` is the most recent moment this node had positive evidence a peer was alive: Raft contact on any group it shares with the peer, or the arrival of the peer's stats broadcast, whichever is newer (gastrolog-1lbifx). Raft contact is what makes it fresh — the cluster-ctl group spans every node, so the cluster-ctl leader, which is the node that runs this sweep, is replicating to every peer several times a second.
 | Live → Maintenance | `cluster maintenance <node>` CLI | RPC proposes `CmdSetNodeState{node, Maintenance}` |
 | Live → Draining | `cluster drain <node>` CLI | RPC proposes `CmdSetNodeState{node, Draining}`; drain orchestrator begins transfers |
-| Unreachable → Live | heartbeat resumes | Same sweep proposes `CmdSetNodeState{node, Live}` |
-| Unreachable → Maintenance | `cluster maintenance <node>` CLI | Operator commits to the offline state; auto-restore-on-heartbeat behavior is replaced with sticky operator control |
+| Unreachable → Live | contact resumes | Same sweep proposes `CmdSetNodeState{node, Live}` |
+| Unreachable → Maintenance | `cluster maintenance <node>` CLI | Operator commits to the offline state; auto-restore-on-contact behavior is replaced with sticky operator control |
 | Unreachable → Draining | `cluster drain <node>` CLI | Operator begins removal |
 | Maintenance → Live | `cluster online <node>` CLI | Operator clears maintenance |
 | Maintenance → Draining | `cluster drain <node>` CLI | Operator begins removal |
@@ -110,14 +112,14 @@ gastrolog cluster cancel-drain <node>    # Draining → Live (rare; only while t
 gastrolog cluster remove-node <node>     # convenience: drain + decommission + remove (must pass orphan gate)
 ```
 
-Cluster-detected soft-offline (`Unreachable`) is not something the operator manually invokes; the cluster auto-detects it via heartbeat lapse, and the operator promotes it to `Maintenance` via `cluster maintenance` if sticky operator control is desired.
+Cluster-detected soft-offline (`Unreachable`) is not something the operator manually invokes; the cluster auto-detects it via contact lapse, and the operator promotes it to `Maintenance` via `cluster maintenance` if sticky operator control is desired.
 
 ## API surface principles
 
 The CLI verbs and status RPCs above must satisfy these properties:
 
 - **Idempotent verbs.** Calling `cluster maintenance <node>` twice has the same effect as calling it once: the second call returns success with no state change, not an error. Same for `cluster drain`, `cluster online`, `cluster cancel-drain`, `cluster promote-learner`. A consumer that retries on transient failure must be safe to do so.
-- **Watchable status.** Node states and per-node metadata (state, `StateSince`, last-heartbeat, etc.) are accessible via a server-stream RPC, not just point-in-time queries. Consumers can react to state transitions without polling.
+- **Watchable status.** Node states and per-node metadata (state, `StateSince`, last-seen, etc.) are accessible via a server-stream RPC, not just point-in-time queries. Consumers can react to state transitions without polling.
 - **Machine-readable output.** Every state-querying CLI verb supports `--output json` (or equivalent structured output) for parseable consumption.
 - **Stable state names.** `Live` / `Unreachable` / `Maintenance` / `Draining` / `Decommissioning` are part of the API contract once released. Renaming or splitting them post-release is a breaking change.
 - **No hidden state.** Every operationally-relevant fact about a node (current state, entry timestamp, transition history, alert-relevant counters) is observable via the status API. Decisions made by external systems cannot rely on state that the API doesn't surface.
@@ -148,7 +150,7 @@ A new background sweep runs per vault-ctl group **on the group's leader**. When 
 
 **Why apply-index match (not log-index threshold):** the most rigorous criterion. "Has applied every command the leader has applied" is the strongest correctness statement before counting toward quorum. Log-index thresholds admit learners that have replicated entries but not yet applied them — fine for some systems, but vault-ctl groups have FSM-sensitive operations (chunk lifecycle commands) where apply-index match matters.
 
-**Stability window:** one heartbeat interval (default 1s). Prevents flapping if the learner momentarily catches up then falls behind.
+**Stability window:** one Raft heartbeat timeout (default 2s). Prevents flapping if the learner momentarily catches up then falls behind.
 
 ### Failure modes
 
@@ -158,7 +160,7 @@ A new background sweep runs per vault-ctl group **on the group's leader**. When 
 
 ### Composition with the soft-offline states
 
-Learners can become `Unreachable` (heartbeats lapsed) or be placed in `Maintenance` (operator) the same way voters can. A learner in either soft-offline state is not promoted while in that state. State transition back to `Live` unlocks promotion on the next sweep tick.
+Learners can become `Unreachable` (contact lapsed) or be placed in `Maintenance` (operator) the same way voters can. A learner in either soft-offline state is not promoted while in that state. State transition back to `Live` unlocks promotion on the next sweep tick.
 
 ## Relationship to the data-plane epic
 
@@ -187,7 +189,7 @@ This document is sufficient to open the following implementation issues:
 
 1. Node state machine — `NodeConfig` schema addition + `CmdSetNodeState` + transition validators (six states: Live / Unreachable / Maintenance / Draining / Decommissioning / Removed)
 2. State-driven placement guard in [placement.go](backend/internal/app/placement.go) — gates on both soft-offline states identically
-3. `Unreachable` auto-trigger sweep (leader-side) + heartbeat-resume auto-clear
+3. `Unreachable` auto-trigger sweep (leader-side) + contact-resume auto-clear
 4. Operator CLI verbs for state transitions (`maintenance`, `online`, `drain`, `cancel-drain`, `remove-node`)
 5. UI surface for per-node state visibility with the warning/informational tone distinction
 6. Learner-based join: `AddNonvoter` path in [cluster/join.go](backend/internal/cluster/join.go)

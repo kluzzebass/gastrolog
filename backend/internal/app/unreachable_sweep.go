@@ -13,9 +13,17 @@ import (
 )
 
 const (
-	// defaultUnreachableThreshold is the heartbeat-lapse window after
-	// which the sweep transitions a Live node to Unreachable. Overridable
-	// via GLOG_UNREACHABLE_THRESHOLD (any time.ParseDuration string).
+	// defaultUnreachableThreshold is the contact-lapse window after which
+	// the sweep transitions a Live node to Unreachable. Overridable via
+	// GLOG_UNREACHABLE_THRESHOLD (any time.ParseDuration string).
+	//
+	// "Contact" is PeerState.LastSeen: the most recent Raft contact on any
+	// group shared with the peer, or the arrival of its stats broadcast,
+	// whichever is newer (gastrolog-1lbifx). The transition phase runs on
+	// the cluster-ctl leader, and cluster-ctl spans every node, so the
+	// deciding node is replicating to every peer several times a second —
+	// this threshold is measured against a signal that refreshes far faster
+	// than it does.
 	defaultUnreachableThreshold = 5 * time.Minute
 
 	// defaultUnreachableAlertThreshold is the time-in-Unreachable window
@@ -33,7 +41,8 @@ const (
 	// unreachableSweepSchedule runs every 30 seconds. Low frequency by
 	// design — the transition phase proposes Raft commands, so faster
 	// ticks just add log churn without helping detection (PeerState's
-	// TTL is the actual detection floor). 6-field cron (with-seconds).
+	// evidence freshness is the actual detection floor). 6-field cron
+	// (with-seconds).
 	unreachableSweepSchedule = "*/30 * * * * *"
 
 	// unreachableAlertID is the stable per-node alert ID prefix. Format:
@@ -42,17 +51,19 @@ const (
 )
 
 // unreachableSweep transitions nodes between Live and Unreachable based
-// on PeerState heartbeat freshness. Runs on the cluster-ctl leader only.
+// on PeerState.LastSeen freshness — Raft contact on any shared group, or the
+// peer's stats broadcast, whichever is newer. Runs on the cluster-ctl leader
+// only.
 //
-// Heartbeat-driven gating closes the RF=1 redeploy bug (gastrolog-2i1g9):
+// Contact-driven gating closes the RF=1 redeploy bug (gastrolog-2i1g9):
 // when a node briefly disappears (pod restart, network blip), the sweep
 // flips its NodeConfig.State to Unreachable, which the placement guard
 // (placement.go) reads to refuse leader rotation. The chunks stay where
 // they live; placement does not move them off the absent node.
 //
 // State transitions handled here:
-//   - Live → Unreachable: lastSeen older than threshold (heartbeat lapse)
-//   - Unreachable → Live: lastSeen within threshold (heartbeat resume,
+//   - Live → Unreachable: lastSeen older than threshold (contact lapse)
+//   - Unreachable → Live: lastSeen within threshold (contact resume,
 //     a.k.a. auto-clear)
 //
 // Operator-set states (Maintenance, Draining, Decommissioning) are
@@ -109,7 +120,7 @@ func startUnreachableSweep(ctx context.Context, scheduler scheduledJobRegistry, 
 		return err
 	}
 	scheduler.Describe(unreachableSweepJobName,
-		"Heartbeat-driven Live↔Unreachable node-state sweep. Two phases per tick: (1) transitions — leader-only, proposes SetNodeState commands when PeerState lastSeen crosses the threshold; (2) alerts — every node, raises a warning when a node has been Unreachable for longer than the alert threshold. Tunable via GLOG_UNREACHABLE_THRESHOLD and GLOG_UNREACHABLE_ALERT_THRESHOLD.")
+		"Contact-driven Live↔Unreachable node-state sweep, where contact is Raft last-contact or the peer's stats broadcast, whichever is newer. Two phases per tick: (1) transitions — leader-only, proposes SetNodeState commands when PeerState lastSeen crosses the threshold; (2) alerts — every node, raises a warning when a node has been Unreachable for longer than the alert threshold. Tunable via GLOG_UNREACHABLE_THRESHOLD and GLOG_UNREACHABLE_ALERT_THRESHOLD.")
 	return nil
 }
 
@@ -192,9 +203,10 @@ func (s *unreachableSweep) alertTick(ctx context.Context) {
 //   - SetNodeState(Live) for Unreachable nodes with current heartbeat
 //
 // The leader's own row is skipped because PeerState carries no entry
-// for the local node — Heartbeats are broadcast TO peers, not back to
-// self — so its LastSeen would always be zero and the sweep would
-// otherwise flip the leader Unreachable as soon as the cluster started.
+// for the local node — a node neither broadcasts to itself nor runs Raft
+// RPCs against itself — so its LastSeen would always be zero and the sweep
+// would otherwise flip the leader Unreachable as soon as the cluster
+// started.
 //
 // A zero LastSeen is interpreted as "no positive evidence yet" (per
 // the documented contract on PeerState.LastSeen) and never produces a

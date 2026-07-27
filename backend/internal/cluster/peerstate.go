@@ -700,44 +700,24 @@ func (p *PeerState) LivePeers() []string {
 }
 
 // HandleBroadcast is a subscriber callback for the cluster broadcast system.
-// Two payload types update peer liveness here:
-//   - NodeStats: full state from the heavy 5s broadcast — replaces both
-//     the cached stats and the last-seen timestamp.
-//   - Heartbeat: empty marker from the lightweight 1s broadcast — only
-//     refreshes last-seen so cached stats from the most recent NodeStats
-//     remain queryable. This is what makes paused-peer detection fast
-//     without making the bulky payload fly every second. See
-//     gastrolog-2kio8.
+// NodeStats is the only payload that lands here: it replaces both the cached
+// stats and the last-received timestamp.
 //
-// The Heartbeat case is on its way out: gastrolog-1lbifx derives the same fast
-// liveness from Raft's own per-group heartbeats (RecordRaftContact /
-// RecordRaftProbe). It stays wired until the parity tests in
-// peerstate_raft_contact_test.go demonstrate the Raft-derived signal reproduces
-// its behaviour, and is removed in the following commit.
+// There used to be a second case. An empty Heartbeat message flew every second
+// purely to refresh last-seen, because PeerState had no faster liveness input
+// than the 5s NodeStats payload (gastrolog-2kio8). Raft's own per-group
+// heartbeats already prove the same thing on the same wire, so gastrolog-1lbifx
+// deleted the extra message rather than keeping a third opinion about whether
+// a peer is up. Fast liveness now arrives through RecordRaftContact /
+// RecordRaftProbe, and this broadcast carries observability payload only.
 func (p *PeerState) HandleBroadcast(msg *gastrologv1.BroadcastMessage) {
+	ns := msg.GetNodeStats()
+	if ns == nil {
+		return
+	}
 	received := time.Now()
 	if msg.Timestamp != nil {
 		received = msg.Timestamp.AsTime()
 	}
-	if ns := msg.GetNodeStats(); ns != nil {
-		p.Update(string(msg.SenderId), ns, received)
-		return
-	}
-	if msg.GetHeartbeat() != nil {
-		p.Touch(string(msg.SenderId), received)
-		return
-	}
-}
-
-// Touch refreshes the last-seen timestamp for senderID without changing
-// the cached NodeStats. Used by Heartbeat broadcasts (which don't carry
-// stats) to extend the TTL of an already-known peer. If senderID has no
-// existing entry, a stub entry with nil stats is created so liveness is
-// trackable for new peers before their first NodeStats arrives.
-func (p *PeerState) Touch(senderID string, received time.Time) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	e := p.entries[senderID]
-	e.received = received
-	p.entries[senderID] = e
+	p.Update(string(msg.SenderId), ns, received)
 }
