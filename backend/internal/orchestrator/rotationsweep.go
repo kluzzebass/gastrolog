@@ -34,7 +34,7 @@ func (o *Orchestrator) startPipelineConfigReconcile() error {
 	if o.scheduler.HasJob(pipelineConfigReconcileJobName) {
 		return nil
 	}
-	if err := o.scheduler.AddJob(pipelineConfigReconcileJobName, pipelineConfigReconcileSchedule, o.pipelineConfigReconcile); err != nil {
+	if err := o.scheduler.AddJob(pipelineConfigReconcileJobName, sweepCron(pipelineConfigReconcileSchedule), o.pipelineConfigReconcile); err != nil {
 		return err
 	}
 	o.scheduler.Describe(pipelineConfigReconcileJobName,

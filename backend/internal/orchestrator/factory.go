@@ -233,7 +233,7 @@ func (o *Orchestrator) initVault(sys *system.System, vaultCfg system.VaultConfig
 // startRetentionSweep registers the single retention sweep job that discovers
 // and evaluates all vault instances each tick. No per-vault lifecycle needed.
 func (o *Orchestrator) startRetentionSweep() error {
-	if err := o.scheduler.AddJob(retentionJobName, defaultRetentionSchedule, o.retentionSweepAll); err != nil {
+	if err := o.scheduler.AddJob(retentionJobName, sweepCron(defaultRetentionSchedule), o.retentionSweepAll); err != nil {
 		return fmt.Errorf("retention sweep job: %w", err)
 	}
 	o.scheduler.Describe(retentionJobName, "Retention sweep (all vaults)")
@@ -255,7 +255,7 @@ func (o *Orchestrator) startRetentionSweep() error {
 // Original coverage: receipt-protocol delete convergence (gastrolog-51gme)
 // and create-side replication catchup (gastrolog-2dgvj).
 func (o *Orchestrator) startInstanceCatchupSweep() error {
-	if err := o.scheduler.AddJob(vaultCatchupSweepJobName, vaultCatchupSweepSchedule, o.vaultCatchupSweepAll); err != nil {
+	if err := o.scheduler.AddJob(vaultCatchupSweepJobName, sweepCron(vaultCatchupSweepSchedule), o.vaultCatchupSweepAll); err != nil {
 		return fmt.Errorf("vault catchup sweep job: %w", err)
 	}
 	o.scheduler.Describe(vaultCatchupSweepJobName, "Vault reconcile backstop (event-driven primary; catches missed delete/orphan/replica events + periodic idle-active & grace GCs)")

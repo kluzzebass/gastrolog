@@ -311,7 +311,7 @@ func (m *vaultCtlLeaderManager) safetyTick() {
 // with the orchestrator's job scheduler. Returns an error if AddJob fails.
 // See gastrolog-11bla, gastrolog-3oram.
 func (o *Orchestrator) startVaultCtlMembershipReconcile() error {
-	if err := o.scheduler.AddJob(vaultCtlMembershipReconcileJobName, vaultCtlMembershipReconcileSchedule, o.vaultCtlLeaders.safetyTick); err != nil {
+	if err := o.scheduler.AddJob(vaultCtlMembershipReconcileJobName, sweepCron(vaultCtlMembershipReconcileSchedule), o.vaultCtlLeaders.safetyTick); err != nil {
 		return err
 	}
 	o.scheduler.Describe(vaultCtlMembershipReconcileJobName,
