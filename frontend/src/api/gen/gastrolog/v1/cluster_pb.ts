@@ -3085,11 +3085,23 @@ export class ForwardRemoveNodeRequest extends Message<ForwardRemoveNodeRequest> 
   nodeId = new Uint8Array(0);
 
   /**
-   * force bypasses the orphan-refusal gate (see RemoveNodeRequest.force).
+   * force bypasses the leader-side removal gates (see RemoveNodeRequest.force).
    *
    * @generated from field: bool force = 2;
    */
   force = false;
+
+  /**
+   * self_removal marks the preStop `gastrolog cluster demote-self` path,
+   * where the node is asking for its own removal while it is already
+   * terminating. The leader's RF-preservation gate is optimistic for
+   * that path (allow; placement reconcile re-places) and pessimistic for
+   * operator-driven removal (refuse). Carried across the follower →
+   * leader hop so the policy survives forwarding. See gastrolog-3vyex.
+   *
+   * @generated from field: bool self_removal = 3;
+   */
+  selfRemoval = false;
 
   constructor(data?: PartialMessage<ForwardRemoveNodeRequest>) {
     super();
@@ -3101,6 +3113,7 @@ export class ForwardRemoveNodeRequest extends Message<ForwardRemoveNodeRequest> 
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "force", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 3, name: "self_removal", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardRemoveNodeRequest {

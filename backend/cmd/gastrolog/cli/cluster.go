@@ -389,8 +389,10 @@ func newClusterRemoveNodeCmd() *cobra.Command {
 		Use:   "remove-node <node-name-or-id>",
 		Short: "Remove a node from the cluster",
 		Long: "Remove a node from the cluster. Refuses by default if removal " +
-			"would orphan any vault (sole-replica-on-this-node case); use " +
-			"--force to override with explicit data-loss acknowledgement.",
+			"would orphan any vault (sole-replica-on-this-node case), or if it " +
+			"would leave a vault below its replication factor with no eligible " +
+			"node to re-place onto; use --force to override with explicit " +
+			"data-loss / reduced-redundancy acknowledgement.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := clientFromCmd(cmd)
@@ -414,7 +416,8 @@ func newClusterRemoveNodeCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false,
-		"bypass the orphan-refusal gate (acknowledges potential data loss)")
+		"bypass the removal gates: orphan-refusal (acknowledges potential data loss) "+
+			"and RF-preservation (acknowledges reduced redundancy)")
 	return cmd
 }
 
@@ -476,8 +479,15 @@ func newClusterDemoteSelfCmd() *cobra.Command {
 			}
 
 			_, err = client.Lifecycle.RemoveNode(context.Background(), connect.NewRequest(&v1.RemoveNodeRequest{
-				NodeId:    []byte(id),
-				AllowSelf: true, // gastrolog-24iv4: opt out of the operator-typo guard; this RPC IS the self-remove path.
+				NodeId: []byte(id),
+				// gastrolog-24iv4: opt out of the operator-typo guard;
+				// this RPC IS the self-remove path. allow_self also
+				// selects the optimistic RF-preservation policy on the
+				// leader (gastrolog-3vyex): a removal that merely drops a
+				// vault below its replication factor is allowed here and
+				// re-placed by placement reconcile, where the same
+				// removal typed by an operator would be refused.
+				AllowSelf: true,
 				// Force bypasses the orphan-refusal gate (gastrolog-2ch9y).
 				// demote-self runs from K8s preStop, where the pod is
 				// terminating regardless — refusing here would leave the
