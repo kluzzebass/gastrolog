@@ -25,7 +25,7 @@ func leaderPlacement(nodeID string) []system.VaultPlacement {
 func newTestPlacement(t *testing.T, localNodeID string, livePeers []string) (*placementManager, *sysmem.Store, *alert.Collector) {
 	t.Helper()
 	store := sysmem.NewStore()
-	ps := cluster.NewPeerState(60 * time.Second)
+	ps := cluster.NewPeerState(60 * time.Second, 0)
 	now := time.Now()
 	for _, p := range livePeers {
 		ps.Update(p, nil, now)

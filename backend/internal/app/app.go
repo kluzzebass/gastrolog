@@ -868,7 +868,18 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 	// factor from gastrolog-2kio8's 5s broadcast / 20s shape — that
 	// matched theoretical missed-broadcast math but underestimated
 	// real-world jitter on 1s heartbeats.
-	peerState := cluster.NewPeerState(peerTTLMultiplier(logger) * heartbeatInterval)
+	peerState := cluster.NewPeerState(peerTTLMultiplier(logger)*heartbeatInterval, raftContactTTL())
+
+	// Raft's own per-group traffic is the fast peer-liveness input
+	// (gastrolog-1lbifx): the transport reports every outbound probe and
+	// every contact, in either direction, on every group. Wired here rather
+	// than at transport construction because PeerState is created here; the
+	// recorder is nil-safe, so contact simply isn't recorded during the boot
+	// window before this line runs — which is exactly the no-Raft-edge case
+	// PeerState.IsLive already falls back to broadcast freshness for.
+	if tm := clusterSrv.MultiRaftTransport(); tm != nil {
+		tm.SetContactRecorder(peerState)
+	}
 	clusterSrv.Subscribe(peerState.HandleBroadcast)
 
 	peerJobState := cluster.NewPeerJobState(20 * time.Second)
@@ -1360,6 +1371,30 @@ func peerTTLMultiplier(logger *slog.Logger) time.Duration {
 		return defaultPeerTTLMultiplier
 	}
 	return time.Duration(n)
+}
+
+// raftContactTTLMultiplier is how many Raft heartbeat timeouts of silence
+// make a peer we are actively probing read as unreachable (gastrolog-1lbifx).
+//
+// 2× is chosen against the transport's own budget, not picked for feel: a
+// leader probes each follower roughly every HeartbeatTimeout/10, and a probe
+// to a wedged peer burns a full heartbeatRPCTimeout (which multiraft pins at
+// >= the detector's heartbeat timeout) before it fails. Two timeouts therefore
+// tolerate one completely timed-out probe plus its retry — around ten missed
+// heartbeats at the shipped 2s/200ms shape — while still detecting a paused
+// peer in about half the time the deleted 1s liveness broadcast managed
+// (8× 1s). Anything tighter would let one slow-but-successful probe flip a
+// healthy peer, which is the gastrolog-4iacg flapping failure again.
+const raftContactTTLMultiplier = 2
+
+// raftContactTTL derives the PeerState Raft-evidence window from the Raft
+// failure detector's configured heartbeat timeout, so widening the detector
+// (GLOG_RAFT_HEARTBEAT_TIMEOUT) widens this in lockstep instead of leaving
+// liveness stricter than consensus — the same inversion gastrolog-1io54g had
+// to unwind inside the transport.
+func raftContactTTL() time.Duration {
+	heartbeat, _, _ := raftgroup.RaftTimeouts(raftgroup.GroupConfig{})
+	return raftContactTTLMultiplier * heartbeat
 }
 
 // loadClusterIntervals reads the broadcast and heartbeat intervals from

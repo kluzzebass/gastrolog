@@ -33,6 +33,12 @@ type Transport[K comparable] struct {
 	mu     sync.RWMutex
 	groups map[K]*groupState
 
+	// contact receives per-peer Raft reachability evidence (see contact.go).
+	// Optional: nil until the cluster layer wires it, and nil forever in
+	// tests that don't care.
+	contactMu sync.RWMutex
+	contact   ContactRecorder
+
 	shutdown     bool
 	shutdownCh   chan struct{}
 	shutdownLock sync.Mutex
@@ -252,6 +258,17 @@ func (t *Transport[K]) InboundLanes() *InboundLaneRegistry {
 // dispatchRPC delivers command to the Hashicorp raft consumer for groupID.
 func (t *Transport[K]) dispatchRPC(groupID K, command any, data io.Reader) (any, error) {
 	start := time.Now()
+
+	// Every inbound Raft RPC — AppendEntries, batched heartbeats, votes,
+	// TimeoutNow, InstallSnapshot, pipelined appends — funnels through here,
+	// so this is the single place inbound contact is recorded. Recorded
+	// before dispatch: the sender proved it was alive by reaching us at all,
+	// even if the group turns out to be unregistered or shutting down.
+	// hraft stamps the sender's ServerID into every request's RPCHeader.
+	if h, ok := command.(raft.WithRPCHeader); ok {
+		t.recordInbound(string(h.GetRPCHeader().ID), groupID)
+	}
+
 	gs := t.getGroup(groupID)
 	if gs == nil {
 		return nil, status.Errorf(codes.NotFound, "raft group %q not registered", t.groupIDString(groupID))
@@ -387,6 +404,7 @@ func (g *groupTransport[K]) AppendEntries(id raft.ServerID, target raft.ServerAd
 	lease, c, err := g.parent.acquireRaft(target, g.groupID)
 	connWait := time.Since(connStart)
 	if err != nil {
+		g.parent.recordProbe(id, g.groupID, err)
 		traceOutboundAppendEntries(g.groupID, target, args, connWait, 0, time.Since(start), err)
 		return err
 	}
@@ -401,6 +419,7 @@ func (g *groupTransport[K]) AppendEntries(id raft.ServerID, target raft.ServerAd
 	ret, err := c.AppendEntries(ctx, encodeAppendEntriesRequest(g.parent.encodeKey(g.groupID), args))
 	rpcDur := time.Since(rpcStart)
 	total := time.Since(start)
+	g.parent.recordProbe(id, g.groupID, err)
 	traceOutboundAppendEntries(g.groupID, target, args, connWait, rpcDur, total, err)
 	if err != nil {
 		lease.Invalidate(err)
@@ -413,12 +432,14 @@ func (g *groupTransport[K]) AppendEntries(id raft.ServerID, target raft.ServerAd
 func (g *groupTransport[K]) RequestVote(id raft.ServerID, target raft.ServerAddress, args *raft.RequestVoteRequest, resp *raft.RequestVoteResponse) error {
 	lease, c, err := g.parent.acquireRaft(target, g.groupID)
 	if err != nil {
+		g.parent.recordProbe(id, g.groupID, err)
 		return err
 	}
 	defer lease.Release()
 	ctx, cancel := context.WithTimeout(context.Background(), requestVoteRPCTimeout)
 	defer cancel()
 	ret, err := c.RequestVote(ctx, encodeRequestVoteRequest(g.parent.encodeKey(g.groupID), args))
+	g.parent.recordProbe(id, g.groupID, err)
 	if err != nil {
 		lease.Invalidate(err)
 		return err
@@ -431,12 +452,14 @@ func (g *groupTransport[K]) RequestPreVote(id raft.ServerID, target raft.ServerA
 	start := time.Now()
 	lease, c, err := g.parent.acquireRaft(target, g.groupID)
 	if err != nil {
+		g.parent.recordProbe(id, g.groupID, err)
 		return err
 	}
 	defer lease.Release()
 	ctx, cancel := context.WithTimeout(context.Background(), requestPreVoteRPCTimeout)
 	defer cancel()
 	ret, err := c.RequestPreVote(ctx, encodeRequestPreVoteRequest(g.parent.encodeKey(g.groupID), args))
+	g.parent.recordProbe(id, g.groupID, err)
 	if err != nil {
 		lease.Invalidate(err)
 		logOutboundRaftRPCError(g.groupID, "RequestPreVote", target, time.Since(start), err)
@@ -449,12 +472,14 @@ func (g *groupTransport[K]) RequestPreVote(id raft.ServerID, target raft.ServerA
 func (g *groupTransport[K]) TimeoutNow(id raft.ServerID, target raft.ServerAddress, args *raft.TimeoutNowRequest, resp *raft.TimeoutNowResponse) error {
 	lease, c, err := g.parent.acquireRaft(target, g.groupID)
 	if err != nil {
+		g.parent.recordProbe(id, g.groupID, err)
 		return err
 	}
 	defer lease.Release()
 	ctx, cancel := context.WithTimeout(context.Background(), timeoutNowRPCTimeout)
 	defer cancel()
 	ret, err := c.TimeoutNow(ctx, encodeTimeoutNowRequest(g.parent.encodeKey(g.groupID), args))
+	g.parent.recordProbe(id, g.groupID, err)
 	if err != nil {
 		lease.Invalidate(err)
 		return err
@@ -463,7 +488,12 @@ func (g *groupTransport[K]) TimeoutNow(id raft.ServerID, target raft.ServerAddre
 	return nil
 }
 
-func (g *groupTransport[K]) InstallSnapshot(id raft.ServerID, target raft.ServerAddress, req *raft.InstallSnapshotRequest, resp *raft.InstallSnapshotResponse, data io.Reader) error {
+func (g *groupTransport[K]) InstallSnapshot(id raft.ServerID, target raft.ServerAddress, req *raft.InstallSnapshotRequest, resp *raft.InstallSnapshotResponse, data io.Reader) (retErr error) {
+	// One probe per snapshot install, dated at completion. A snapshot can
+	// take minutes, so it is deliberately NOT the liveness signal for this
+	// peer — hraft runs the follower's heartbeat loop on its own goroutine
+	// throughout the transfer, and those probes are what carry contact.
+	defer func() { g.parent.recordProbe(id, g.groupID, retErr) }()
 	lease, c, err := g.parent.acquireRaft(target, g.groupID)
 	if err != nil {
 		return err
@@ -509,6 +539,7 @@ func (g *groupTransport[K]) InstallSnapshot(id raft.ServerID, target raft.Server
 func (g *groupTransport[K]) AppendEntriesPipeline(id raft.ServerID, target raft.ServerAddress) (raft.AppendPipeline, error) {
 	lease, c, err := g.parent.acquireRaft(target, g.groupID)
 	if err != nil {
+		g.parent.recordProbe(id, g.groupID, err)
 		return nil, err
 	}
 	// Pipelined AppendEntries is a long-lived stream deliberately kept
@@ -522,6 +553,7 @@ func (g *groupTransport[K]) AppendEntriesPipeline(id raft.ServerID, target raft.
 	// cancel function stored on the pipeline and tears down the stream.
 	ctx, cancel := context.WithCancel(context.Background())
 	stream, err := c.AppendEntriesPipeline(ctx)
+	g.parent.recordProbe(id, g.groupID, err)
 	if err != nil {
 		cancel()
 		lease.Release()
@@ -535,6 +567,13 @@ func (g *groupTransport[K]) AppendEntriesPipeline(id raft.ServerID, target raft.
 		inflightCh:   make(chan *appendFuture, 20),
 		doneCh:       make(chan raft.AppendFuture, 20),
 		receiverDone: make(chan struct{}),
+		// Reachability evidence for the pipelined path: a send is a probe
+		// (it proves only that we tried), a received response is contact
+		// (it proves the peer answered). Captured here because the
+		// per-request calls below carry no ServerID.
+		contact:    g.parent.contactRecorder(),
+		peerID:     string(id),
+		groupIDStr: g.parent.groupIDString(g.groupID),
 	}
 	go p.receiver()
 	return p, nil
@@ -581,6 +620,28 @@ type pipelineAPI struct {
 	inflightCh    chan *appendFuture
 	doneCh        chan raft.AppendFuture
 	receiverDone  chan struct{} // closed when receiver() exits
+
+	// Per-peer reachability evidence; nil when no recorder is wired.
+	contact    ContactRecorder
+	peerID     string
+	groupIDStr string
+}
+
+// probe records an outbound attempt on the pipeline: proof that the Raft edge
+// to this peer is live-and-probing, with no claim about the peer answering.
+func (p *pipelineAPI) probe() {
+	if p.contact == nil || p.peerID == "" {
+		return
+	}
+	p.contact.RecordRaftProbe(p.peerID, p.groupIDStr, time.Now())
+}
+
+// gotResponse records positive contact: the peer answered a pipelined append.
+func (p *pipelineAPI) gotResponse() {
+	if p.contact == nil || p.peerID == "" {
+		return
+	}
+	p.contact.RecordRaftContact(p.peerID, p.groupIDStr, time.Now())
 }
 
 func (p *pipelineAPI) AppendEntries(req *raft.AppendEntriesRequest, _ *raft.AppendEntriesResponse) (raft.AppendFuture, error) {
@@ -589,6 +650,11 @@ func (p *pipelineAPI) AppendEntries(req *raft.AppendEntriesRequest, _ *raft.Appe
 		request: req,
 		done:    make(chan struct{}),
 	}
+	// A queued write proves only that we tried, never that the peer is
+	// there — so both the success and failure paths record a probe and
+	// neither records contact. The matching contact lands in receiver()
+	// when the response actually comes back.
+	p.probe()
 	if err := p.stream.SendMsg(encodeAppendEntriesRequest(p.groupID, req)); err != nil {
 		return nil, err
 	}
@@ -623,6 +689,7 @@ func (p *pipelineAPI) receiver() {
 		if err := p.stream.RecvMsg(msg); err != nil {
 			af.err = err
 		} else {
+			p.gotResponse()
 			af.response = *decodeAppendEntriesResponse(msg)
 		}
 		close(af.done)

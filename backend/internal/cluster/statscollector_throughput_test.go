@@ -235,7 +235,7 @@ func assertRate(t *testing.T, name string, got, want float64) {
 
 func TestPeerState_AggregateRouteRates(t *testing.T) {
 	t.Parallel()
-	ps := NewPeerState(time.Minute)
+	ps := NewPeerState(time.Minute, 0)
 	ps.Update("node-b", &gastrologv1.NodeStats{
 		RouteRouted:  &gastrologv1.ThroughputRate{InstantPerSec: 100, Avg_1MPerSec: 90, Avg_15MPerSec: 85},
 		RouteMatched: &gastrologv1.ThroughputRate{InstantPerSec: 80},

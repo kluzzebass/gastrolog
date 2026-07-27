@@ -10,7 +10,7 @@ import (
 )
 
 func TestPeerState_Delete(t *testing.T) {
-	ps := NewPeerState(time.Minute)
+	ps := NewPeerState(time.Minute, 0)
 	ps.Update("node-a", &gastrologv1.NodeStats{}, time.Now())
 	ps.Update("node-b", &gastrologv1.NodeStats{}, time.Now())
 
@@ -31,7 +31,7 @@ func TestPeerState_Delete(t *testing.T) {
 // TestPeerState_Delete_Missing verifies Delete on an unknown node is a no-op,
 // not a panic.
 func TestPeerState_Delete_Missing(t *testing.T) {
-	ps := NewPeerState(time.Minute)
+	ps := NewPeerState(time.Minute, 0)
 	ps.Delete("never-existed") // must not panic
 }
 
@@ -40,7 +40,7 @@ func TestPeerState_Delete_Missing(t *testing.T) {
 // MarkUnreachable which is also restored by later updates — these are both
 // idempotent from a data-freshness perspective).
 func TestPeerState_Delete_SurvivesLaterUpdate(t *testing.T) {
-	ps := NewPeerState(time.Minute)
+	ps := NewPeerState(time.Minute, 0)
 	ps.Update("node-a", &gastrologv1.NodeStats{}, time.Now())
 	ps.Delete("node-a")
 	ps.Update("node-a", &gastrologv1.NodeStats{}, time.Now())
@@ -55,7 +55,7 @@ func TestPeerState_Delete_SurvivesLaterUpdate(t *testing.T) {
 // invariant of gastrolog-2kio8: stats stay queryable between heavy
 // broadcasts; liveness updates ride on the lightweight heartbeat.
 func TestPeerState_HandleBroadcast_HeartbeatTouchesLastSeen(t *testing.T) {
-	ps := NewPeerState(4 * time.Second)
+	ps := NewPeerState(4 * time.Second, 0)
 	stats := &gastrologv1.NodeStats{NodeName: "alpha", Version: "v1"}
 
 	// First, full NodeStats broadcast lands.
@@ -102,7 +102,7 @@ func TestPeerState_HandleBroadcast_HeartbeatTouchesLastSeen(t *testing.T) {
 // liveness. Otherwise a node booting up would appear dead until its
 // first 5s NodeStats broadcast lands.
 func TestPeerState_HandleBroadcast_HeartbeatOnlyForUnknownPeer(t *testing.T) {
-	ps := NewPeerState(4 * time.Second)
+	ps := NewPeerState(4 * time.Second, 0)
 
 	ps.HandleBroadcast(&gastrologv1.BroadcastMessage{
 		SenderId: []byte("node-fresh"),
@@ -142,7 +142,7 @@ func TestPeerState_PausedPeerDetectedWithinTTL(t *testing.T) {
 		ttl           = 400 * time.Millisecond // 4× heartbeat
 		detectBudget  = ttl + 2*heartbeatTick  // TTL + 2 ticks of polling slack
 	)
-	ps := NewPeerState(ttl)
+	ps := NewPeerState(ttl, 0)
 
 	// Goroutine simulating node-B broadcasting heartbeats. Stops when ctx fires.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -198,7 +198,7 @@ func livePeerContains(ps *PeerState, id string) bool {
 // TestPeerState_HeartbeatExpiresWithTTL verifies that absent any further
 // broadcast, a peer expires from LivePeers after the TTL.
 func TestPeerState_HeartbeatExpiresWithTTL(t *testing.T) {
-	ps := NewPeerState(50 * time.Millisecond)
+	ps := NewPeerState(50 * time.Millisecond, 0)
 
 	ps.HandleBroadcast(&gastrologv1.BroadcastMessage{
 		SenderId: []byte("node-a"),
@@ -248,7 +248,7 @@ func TestPeerState_VaultStorageProtected(t *testing.T) {
 	starved := glid.New()
 	healthy := glid.New()
 
-	ps := NewPeerState(time.Minute)
+	ps := NewPeerState(time.Minute, 0)
 	ps.Update("node-a", &gastrologv1.NodeStats{
 		StorageProtectedVaultIds: [][]byte{starved.ToProto()},
 	}, time.Now())
@@ -284,7 +284,7 @@ func TestPeerState_FindStorageState(t *testing.T) {
 	hosted := glid.New()
 	unknown := glid.New()
 
-	ps := NewPeerState(time.Minute)
+	ps := NewPeerState(time.Minute, 0)
 	ps.Update("node-a", &gastrologv1.NodeStats{
 		Storages: []*gastrologv1.StorageState{{
 			Id:        hosted.ToProto(),
@@ -327,7 +327,7 @@ func TestPeerState_FindStorageState(t *testing.T) {
 func TestPeerState_VaultStorageProtectedNodeNames(t *testing.T) {
 	starved := glid.New()
 
-	ps := NewPeerState(time.Minute)
+	ps := NewPeerState(time.Minute, 0)
 	// Three reporting peers, updated out of sorted order, one with no
 	// NodeName yet (falls back to its raw node ID).
 	ps.Update("node-c", &gastrologv1.NodeStats{
@@ -370,7 +370,7 @@ func TestPeerState_VaultStorageProtectedNodeNames(t *testing.T) {
 func TestPeerState_VaultSizeCapped(t *testing.T) {
 	capped := glid.New()
 	roomy := glid.New()
-	ps := NewPeerState(time.Minute)
+	ps := NewPeerState(time.Minute, 0)
 	ps.Update("node-a", &gastrologv1.NodeStats{
 		SizeCappedVaultIds: [][]byte{capped.ToProto()},
 	}, time.Now())

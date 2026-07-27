@@ -15,17 +15,84 @@ type peerEntry struct {
 	received time.Time
 }
 
-// PeerState stores the most recent NodeStats from each cluster peer.
-// Entries expire after a configurable TTL (typically 3× the broadcast interval).
+// raftEntry is the Raft-derived reachability evidence for one peer, folded
+// across every Raft group on this node (gastrolog-1lbifx).
+//
+// # The aggregation rule
+//
+// Raft contact is per group — cluster-ctl plus one vault-ctl group per vault —
+// and a node can hold a different role in each. These two timestamps are the
+// ANY-GROUP, MOST-RECENT-WINS fold over all of them:
+//
+//	lastContact = max over groups G, over both directions, of the last time
+//	              this node exchanged Raft traffic with the peer in G
+//	lastProbe   = max over groups G of the last time this node ATTEMPTED an
+//	              outbound Raft RPC to the peer in G (success or failure)
+//
+// Why max/any-group and not min/all-groups: contact in ONE group proves the
+// peer's process is up and its cluster listener is serving, which is the whole
+// question. Silence in another group proves only that no Raft edge exists
+// there right now — this node is not its leader, or the peer is not a member,
+// or the group has not started yet. Positive evidence aggregates; absence does
+// not. An all-groups rule would read a peer as dead the instant leadership
+// moved or a vault was created, which is false by construction.
+//
+// # Why lastProbe exists
+//
+// Raft's per-group topology is a star: followers exchange traffic only with
+// their leader. Two co-followers therefore have NO Raft edge and never will,
+// until one of them leads something. Their mutual silence is not evidence of
+// death, and a rule that read it that way would declare half a healthy cluster
+// unreachable. lastProbe is what separates the two cases: this node only
+// probes peers it is actively replicating to, so a fresh lastProbe with a
+// stale lastContact means "we are asking and getting nothing back" — real,
+// authoritative negative evidence — while a stale lastProbe means "we are not
+// asking", and the verdict falls back to the NodeStats broadcast.
+//
+// lastProbe also retracts itself: a node that loses leadership of a group
+// stops probing its members, so the timestamp ages out on its own within
+// raftTTL. No leadership or membership bookkeeping is mirrored here — which is
+// the point, since a mirrored copy of Raft's configuration is exactly the kind
+// of second synced copy this codebase keeps getting bitten by.
+type raftEntry struct {
+	lastContact time.Time
+	lastProbe   time.Time
+}
+
+// PeerState stores the most recent NodeStats from each cluster peer, plus the
+// Raft-derived reachability evidence that drives peer liveness.
+//
+// Two independent freshness clocks, deliberately not merged into one:
+//
+//   - ttl bounds how long a peer's cached NodeStats stays QUERYABLE. Every
+//     stats reader (Get, FindVaultStats, VaultStorageProtected, the Aggregate*
+//     family, …) uses it, and it is anchored on the NodeStats broadcast
+//     interval because that is what refreshes the payload.
+//   - raftTTL bounds how long Raft evidence stays ADMISSIBLE for the liveness
+//     verdict. It is anchored on the Raft heartbeat timeout, because that is
+//     what refreshes it — a leader probes each follower roughly every
+//     HeartbeatTimeout/10.
+//
+// Keeping them apart is what lets liveness be fast (raftTTL, ~seconds) without
+// making cached stats expire at the same rate, and vice versa. Before
+// gastrolog-1lbifx a dedicated 1s Heartbeat broadcast supplied the fast clock;
+// Raft's own per-group traffic already carried it, so the extra broadcast was
+// deleted rather than kept as a third opinion.
 type PeerState struct {
 	mu      sync.RWMutex
 	entries map[string]peerEntry
+	raft    map[string]raftEntry
 	ttl     time.Duration
+	raftTTL time.Duration
 }
 
 // MarkUnreachable immediately expires a peer so LivePeers() stops including
 // it. Called when the record forwarder detects a dead stream — no need to
-// wait for the TTL. The next broadcast from the peer will restore it.
+// wait for the TTL. The next broadcast, or the next Raft contact, restores it.
+//
+// Both evidence clocks are cleared: leaving the Raft contact standing would
+// let it out-vote the forwarder's first-hand knowledge that the peer's stream
+// just died, and the whole point of this call is "don't wait, we know".
 func (p *PeerState) MarkUnreachable(nodeID string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -33,6 +100,7 @@ func (p *PeerState) MarkUnreachable(nodeID string) {
 		e.received = time.Time{} // zero time = always expired
 		p.entries[nodeID] = e
 	}
+	delete(p.raft, nodeID)
 }
 
 // Delete removes a peer's entry entirely. Unlike MarkUnreachable (transient
@@ -43,6 +111,7 @@ func (p *PeerState) MarkUnreachable(nodeID string) {
 func (p *PeerState) Delete(nodeID string) {
 	p.mu.Lock()
 	delete(p.entries, nodeID)
+	delete(p.raft, nodeID)
 	p.mu.Unlock()
 }
 
@@ -57,13 +126,28 @@ func (p *PeerState) ReconcilePeers(keep map[string]struct{}) {
 			delete(p.entries, id)
 		}
 	}
+	for id := range p.raft {
+		if _, ok := keep[id]; !ok {
+			delete(p.raft, id)
+		}
+	}
 }
 
-// NewPeerState creates a PeerState with the given TTL.
-func NewPeerState(ttl time.Duration) *PeerState {
+// NewPeerState creates a PeerState.
+//
+// statsTTL bounds how long a peer's cached NodeStats stays queryable; anchor
+// it on the NodeStats broadcast interval. raftContactTTL bounds how long Raft
+// reachability evidence stays admissible for the liveness verdict; anchor it
+// on the Raft heartbeat timeout. A zero or negative raftContactTTL disables
+// the Raft input entirely, leaving liveness on broadcast freshness alone —
+// the shape the cluster had before gastrolog-1lbifx, and what a test that
+// only exercises broadcast paths should pass.
+func NewPeerState(statsTTL, raftContactTTL time.Duration) *PeerState {
 	return &PeerState{
 		entries: make(map[string]peerEntry),
-		ttl:     ttl,
+		raft:    make(map[string]raftEntry),
+		ttl:     statsTTL,
+		raftTTL: raftContactTTL,
 	}
 }
 
@@ -480,33 +564,135 @@ func (p *PeerState) vaultListedByAnyPeer(vaultID glid.GLID, list func(*gastrolog
 	return false
 }
 
-// LastSeen returns the timestamp of the most recent broadcast received
-// from the named peer, or the zero time if no broadcast has ever been
-// observed. Used by the stale-voter reaper (gastrolog-6bfwk) to detect
-// voters that have been unreachable for longer than the eviction
-// threshold — distinct from LivePeers which only answers the
-// short-window "is it currently reachable" question (~TTL seconds).
+// RecordRaftContact folds positive Raft reachability evidence for peerID into
+// the any-group maximum. Implements multiraft.ContactRecorder; called from the
+// Raft transport whenever an outbound RPC to the peer completes cleanly or an
+// inbound RPC from it is handled, on any group.
 //
-// A zero return is a deliberate "no positive evidence" signal: the
-// reaper must NOT evict on it. Genuinely-never-up nodes are operator
-// territory (manual cluster remove-node), not automatic.
+// Monotone: an out-of-order or duplicated record can never move the timestamp
+// backwards, so a slow group's late callback cannot un-see a fresher one.
+func (p *PeerState) RecordRaftContact(peerID, _ string, at time.Time) {
+	if peerID == "" {
+		return
+	}
+	p.mu.Lock()
+	e := p.raft[peerID]
+	if at.After(e.lastContact) {
+		e.lastContact = at
+		p.raft[peerID] = e
+	}
+	p.mu.Unlock()
+}
+
+// RecordRaftProbe folds an outbound Raft RPC ATTEMPT for peerID into the
+// any-group maximum. Implements multiraft.ContactRecorder.
+//
+// This is what makes a lapse in RecordRaftContact meaningful — see raftEntry's
+// doc comment. The group ID is accepted (and ignored) because the aggregation
+// is a max over groups: keeping a per-group map would store strictly more
+// state to compute the same number, and would then need its own eviction path
+// when groups come and go.
+func (p *PeerState) RecordRaftProbe(peerID, _ string, at time.Time) {
+	if peerID == "" {
+		return
+	}
+	p.mu.Lock()
+	e := p.raft[peerID]
+	if at.After(e.lastProbe) {
+		e.lastProbe = at
+		p.raft[peerID] = e
+	}
+	p.mu.Unlock()
+}
+
+// LastSeen returns the most recent moment this node had ANY positive evidence
+// that the named peer was alive — the max of its last Raft contact and its
+// last received broadcast — or the zero time if neither has ever been
+// observed.
+//
+// Deliberately a pure max over positive evidence, with no probe-authority
+// rule: this is the long-horizon accessor. The unreachable sweep
+// (gastrolog-2i1g9, five-minute threshold) and the stale-voter reaper
+// (gastrolog-6bfwk) both ask "has this node been silent for a very long
+// time", and for that question a failing Raft probe must not be allowed to
+// discard the fact that the peer was broadcasting a second ago. The
+// short-window "is it reachable right now" question is LivePeers/IsLive,
+// which does apply probe authority.
+//
+// A zero return is a deliberate "no positive evidence" signal: the reaper must
+// NOT evict on it. Genuinely-never-up nodes are operator territory (manual
+// cluster remove-node), not automatic.
 func (p *PeerState) LastSeen(nodeID string) time.Time {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	if e, ok := p.entries[nodeID]; ok {
-		return e.received
+	last := p.entries[nodeID].received
+	if c := p.raft[nodeID].lastContact; c.After(last) {
+		last = c
 	}
-	return time.Time{}
+	return last
 }
 
-// LivePeers returns the node IDs of all peers whose stats have not expired.
+// IsLive reports whether the named peer is reachable right now.
+//
+// The verdict, in priority order:
+//
+//  1. Fresh Raft contact (within raftTTL) → live. Positive evidence from any
+//     group wins outright, including evidence that arrived inbound while our
+//     own probes to the peer were failing: a peer we can hear is alive, even
+//     under an asymmetric partition.
+//  2. Otherwise, if we are currently probing the peer over Raft (a probe
+//     within raftTTL) → NOT live. This is the fast-detection path and the only
+//     place absence counts as evidence. It requires roughly raftTTL worth of
+//     consecutive unanswered heartbeats, so a single blip cannot trip it.
+//     Note the deliberate consequence: a peer whose broadcasts still arrive
+//     but whose Raft lane has gone silent reads as not live. That is the
+//     honest answer for every consumer of this method — a node the cluster-ctl
+//     leader cannot replicate to cannot hold vault leadership or accept
+//     replicated writes, whatever else it is still doing.
+//  3. Otherwise there is no Raft edge to this peer at all — the boot window
+//     before groups exist, a peer we neither lead nor follow, or a cluster
+//     whose Raft transport has no contact recorder wired. Fall back to
+//     NodeStats broadcast freshness, which is full-mesh by construction and is
+//     what liveness rested on before Raft evidence existed.
+//
+// A peer with no evidence of any kind is not live.
+func (p *PeerState) IsLive(nodeID string) bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.isLiveLocked(nodeID, time.Now())
+}
+
+func (p *PeerState) isLiveLocked(nodeID string, now time.Time) bool {
+	if p.raftTTL > 0 {
+		rc := p.raft[nodeID]
+		if !rc.lastContact.IsZero() && now.Sub(rc.lastContact) <= p.raftTTL {
+			return true
+		}
+		if !rc.lastProbe.IsZero() && now.Sub(rc.lastProbe) <= p.raftTTL {
+			return false
+		}
+	}
+	received := p.entries[nodeID].received
+	return !received.IsZero() && now.Sub(received) <= p.ttl
+}
+
+// LivePeers returns the node IDs of every peer IsLive currently answers true
+// for. A peer known only through Raft contact (no NodeStats broadcast yet)
+// counts — liveness and stats freshness are separate questions.
 func (p *PeerState) LivePeers() []string {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	now := time.Now()
+	seen := make(map[string]struct{}, len(p.entries)+len(p.raft))
 	var live []string
-	for id, e := range p.entries {
-		if now.Sub(e.received) <= p.ttl {
+	for id := range p.entries {
+		seen[id] = struct{}{}
+	}
+	for id := range p.raft {
+		seen[id] = struct{}{}
+	}
+	for id := range seen {
+		if p.isLiveLocked(id, now) {
 			live = append(live, id)
 		}
 	}
@@ -522,6 +708,12 @@ func (p *PeerState) LivePeers() []string {
 //     remain queryable. This is what makes paused-peer detection fast
 //     without making the bulky payload fly every second. See
 //     gastrolog-2kio8.
+//
+// The Heartbeat case is on its way out: gastrolog-1lbifx derives the same fast
+// liveness from Raft's own per-group heartbeats (RecordRaftContact /
+// RecordRaftProbe). It stays wired until the parity tests in
+// peerstate_raft_contact_test.go demonstrate the Raft-derived signal reproduces
+// its behaviour, and is removed in the following commit.
 func (p *PeerState) HandleBroadcast(msg *gastrologv1.BroadcastMessage) {
 	received := time.Now()
 	if msg.Timestamp != nil {
