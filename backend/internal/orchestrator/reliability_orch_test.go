@@ -612,7 +612,7 @@ func TestOrchRel_SlowPeer_BackoffAbsorbs(t *testing.T) {
 	h := newOrchRelHarness(t, 3)
 
 	victim := h.nodeIDs[2]
-	h.slowPeer(victim, 200*time.Millisecond)
+	h.slowPeer(victim, slowPeerLatency())
 	t.Cleanup(func() { h.slowPeer(victim, 0) })
 
 	const records = 10

@@ -719,6 +719,21 @@ func (h *orchRelHarness) unpausePeer(id string) {
 	n.clusterSrv.Unpause()
 }
 
+// slowPeerLatency is the per-handler delay for "slow but unmistakably
+// alive" scenarios, expressed as ONE Raft heartbeat interval — the cadence
+// hashicorp/raft probes followers at, HeartbeatTimeout/10. That is the
+// meaningful unit: the peer is a full probe interval late on every call,
+// orders of magnitude slower than an in-process handler, yet an order of
+// magnitude inside the failure detector, so it stays alive rather than
+// reading as dead. Deriving it keeps that relationship true under any
+// detector configuration; the previous flat 200ms was this exact value at
+// the shipped 2s base, and silently became detector-breaking when the
+// detector was compressed (gastrolog-4yzpcj).
+func slowPeerLatency() time.Duration {
+	heartbeat, _, _ := raftgroup.RaftTimeouts(raftgroup.GroupConfig{})
+	return heartbeat / 10
+}
+
 // slowPeer adds per-handler latency to an otherwise-healthy peer.
 // d=0 clears the slow-down. Use for scenarios that need slow-but-not-
 // stopped behavior (e.g. verifying backoff + retry paths when a peer
