@@ -403,8 +403,9 @@ func newExportCmd() *cobra.Command {
 			"passwords, the JWT signing secret, certificate private keys, managed file " +
 			"contents and cluster-managed runtime state. Users and managed files are " +
 			"listed for reference but 'config import' cannot recreate them.\n\n" +
-			"The output DOES contain cloud service credentials and the MaxMind license " +
-			"key (see \"contains_secrets\"). Treat the file as a secret.",
+			"The output carries the secrets a restore needs — cloud service credentials, " +
+			"the MaxMind license key — and names the ones it actually contains in " +
+			"\"contains_secrets\". Treat the file accordingly.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := clientFromCmd(cmd)
 			ctx := context.Background()
