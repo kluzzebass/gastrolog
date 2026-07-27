@@ -59,7 +59,11 @@ func (t *Transport[K]) SetContactRecorder(r ContactRecorder) {
 	t.contactMu.Unlock()
 }
 
-func (t *Transport[K]) contactRecorder() ContactRecorder {
+// ContactRecorder returns the wired reachability recorder, or nil if none is
+// attached. Exported as the symmetric read of SetContactRecorder so callers
+// can assert the wiring actually happened — an unattached recorder is silent
+// by design, which makes it exactly the kind of mistake nothing would notice.
+func (t *Transport[K]) ContactRecorder() ContactRecorder {
 	t.contactMu.RLock()
 	r := t.contact
 	t.contactMu.RUnlock()
@@ -72,7 +76,7 @@ func (t *Transport[K]) contactRecorder() ContactRecorder {
 // dating the probe at completion (not at dispatch) keeps a long-blocking call
 // against a paused peer from looking like a fresh probe for its whole duration.
 func (t *Transport[K]) recordProbe(peerID raft.ServerID, groupID K, err error) {
-	r := t.contactRecorder()
+	r := t.ContactRecorder()
 	if r == nil || peerID == "" {
 		return
 	}
@@ -89,7 +93,7 @@ func (t *Transport[K]) recordProbe(peerID raft.ServerID, groupID K, err error) {
 // its absence tells us nothing (a leader that steps down simply stops
 // heartbeating us, and must not read as dead).
 func (t *Transport[K]) recordInbound(peerID string, groupID K) {
-	r := t.contactRecorder()
+	r := t.ContactRecorder()
 	if r == nil || peerID == "" {
 		return
 	}

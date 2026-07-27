@@ -872,16 +872,7 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 	// raftContactTTL.
 	peerState := cluster.NewPeerState(peerTTLMultiplier(logger)*broadcastInterval, raftContactTTL())
 
-	// Raft's own per-group traffic is the fast peer-liveness input
-	// (gastrolog-1lbifx): the transport reports every outbound probe and
-	// every contact, in either direction, on every group. Wired here rather
-	// than at transport construction because PeerState is created here; the
-	// recorder is nil-safe, so contact simply isn't recorded during the boot
-	// window before this line runs — which is exactly the no-Raft-edge case
-	// PeerState.IsLive already falls back to broadcast freshness for.
-	if tm := clusterSrv.MultiRaftTransport(); tm != nil {
-		tm.SetContactRecorder(peerState)
-	}
+	wireRaftContactRecorder(clusterSrv.MultiRaftTransport(), peerState)
 	clusterSrv.Subscribe(peerState.HandleBroadcast)
 
 	peerJobState := cluster.NewPeerJobState(20 * time.Second)
@@ -1380,6 +1371,27 @@ func peerTTLMultiplier(logger *slog.Logger) time.Duration {
 		return defaultPeerTTLMultiplier
 	}
 	return time.Duration(n)
+}
+
+// wireRaftContactRecorder makes PeerState the sink for the Raft transport's
+// per-peer reachability evidence (gastrolog-1lbifx) — every outbound probe and
+// every contact, in either direction, on every group.
+//
+// Wired here rather than at transport construction because PeerState is built
+// with the stats collector, well after the transport. That leaves a boot
+// window in which no contact is recorded, which is harmless by construction:
+// with no Raft evidence for a peer, PeerState.IsLive falls through to the
+// stats broadcast, exactly as it does for a peer this node shares no Raft
+// group with.
+//
+// A nil transport is a single-node or test configuration with no cluster
+// stack at all; skipping is correct, and there are no peers to be liveness
+// about.
+func wireRaftContactRecorder(tm *multiraft.Transport[string], peerState *cluster.PeerState) {
+	if tm == nil || peerState == nil {
+		return
+	}
+	tm.SetContactRecorder(peerState)
 }
 
 // raftContactTTLMultiplier is how many Raft heartbeat timeouts of silence

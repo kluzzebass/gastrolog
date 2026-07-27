@@ -571,7 +571,7 @@ func (g *groupTransport[K]) AppendEntriesPipeline(id raft.ServerID, target raft.
 		// (it proves only that we tried), a received response is contact
 		// (it proves the peer answered). Captured here because the
 		// per-request calls below carry no ServerID.
-		contact:    g.parent.contactRecorder(),
+		contact:    g.parent.ContactRecorder(),
 		peerID:     string(id),
 		groupIDStr: g.parent.groupIDString(g.groupID),
 	}

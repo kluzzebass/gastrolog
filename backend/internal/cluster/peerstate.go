@@ -8,7 +8,14 @@ import (
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/multiraft"
 )
+
+// PeerState is the Raft transport's reachability sink. Asserted here so a
+// signature drift on either side is a compile error rather than a cluster that
+// silently stops recording contact and falls back to broadcast freshness for
+// every peer.
+var _ multiraft.ContactRecorder = (*PeerState)(nil)
 
 type peerEntry struct {
 	stats    *gastrologv1.NodeStats
