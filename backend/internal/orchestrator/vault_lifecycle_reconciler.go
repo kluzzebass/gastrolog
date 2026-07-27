@@ -1663,9 +1663,10 @@ const idleActiveThreshold = 10 * time.Minute
 //  3. Require age > threshold. Live chunks rotate via the normal
 //     rotation path; only frozen WriteEnd indicates orphaning.
 //  4. If the chunk is the local m.active, call Chunks.Seal() — that
-//     fires AnnounceSeal cluster-wide and rotates a fresh active.
-//     Otherwise EnsureSealed the local files and manually call the
-//     announcer with the local metadata to propose CmdSealChunk.
+//     fires AnnounceBeginSeal cluster-wide and rotates a fresh active;
+//     the post-seal pipeline scheduled right after proposes the matching
+//     CmdSealChunk. Otherwise EnsureSealed the local files and manually
+//     call the announcer with the local metadata to propose CmdSealChunk.
 //
 // Idempotency: CmdSealChunk applies on every replica. If two holders
 // race (both have local copies of the same Active entry and both
@@ -1770,8 +1771,10 @@ func (r *VaultLifecycleReconciler) sealIfIdleActive(e vaultctlfsm.ManifestEntry,
 }
 
 // sealLocalActive seals the current m.active via Chunks.Seal(), which
-// fires AnnounceSeal internally and rotates a fresh active. Used when
-// the FSM Active entry matches the chunk manager's local m.active
+// fires AnnounceBeginSeal (Active → Sealing) and rotates a fresh active.
+// postSealWork then runs the post-seal pipeline, whose AnnounceSeal
+// completes the transition to Sealed once the GLCB is committed. Used
+// when the FSM Active entry matches the chunk manager's local m.active
 // pointer (the steady-state orphan: this node's active stream
 // stopped after a leader transfer).
 func (r *VaultLifecycleReconciler) sealLocalActive(id chunk.ChunkID) bool {

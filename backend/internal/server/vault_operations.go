@@ -89,7 +89,13 @@ func (s *VaultServer) ReindexVault(
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("vault not found"))
 	}
 
+	// Describe BEFORE submitting: the description is read into the Scheduled
+	// event's JobInfo, and the scheduler deletes the entry when the job
+	// finishes. Describing afterwards both lost the label on the event and
+	// leaked one descriptions entry per reindex whenever the job finished
+	// first. See gastrolog-69sjlj.
 	jobName := "reindex:" + vaultID.String()
+	s.orch.Scheduler().Describe(jobName, fmt.Sprintf("Rebuild all indexes for '%s'", s.vaultName(ctx, vaultID)))
 	jobID := s.orch.Scheduler().Submit(jobName, func(ctx context.Context, job *orchestrator.JobProgress) {
 		metas, err := s.orch.ListLocalChunkMetas(vaultID)
 		if err != nil {
@@ -120,7 +126,6 @@ func (s *VaultServer) ReindexVault(
 			job.IncrChunks()
 		}
 	})
-	s.orch.Scheduler().Describe(jobName, fmt.Sprintf("Rebuild all indexes for '%s'", s.vaultName(ctx, vaultID)))
 
 	return connect.NewResponse(&apiv1.ReindexVaultResponse{JobId: []byte(jobID)}), nil
 }

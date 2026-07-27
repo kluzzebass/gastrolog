@@ -30,6 +30,19 @@ func (o *Orchestrator) postSealWork(vaultID glid.GLID, cm chunk.ChunkManager, ch
 // as one sequential job. Otherwise falls back to compress-only for non-file managers.
 // After the pipeline completes, sealed-chunk replication is triggered for leader vaults.
 //
+// This runs for pipeline-registered vaults too. The chunk manager's Seal()
+// fires AnnounceBeginSeal (Active → Sealing) and the matching AnnounceSeal
+// (Sealing → Sealed) lives inside PostSealProcess — the two are halves of one
+// FSM transition, so skipping the post-seal pipeline parks the manifest entry
+// in Sealing forever. A vault-level "is this a pipeline vault" gate used to
+// short-circuit here, which stranded every chunk-manager seal on a pipeline
+// vault (i.e. on every vault with a local instance, since reloadPipelineFromConfig
+// registers each vault this node homes). Pipeline-produced chunks never reach
+// this function: they live in the pipeline chunk root, the pipeline commits
+// CmdSealChunk for them itself, and every caller here passes a chunk the local
+// chunk manager holds. The one thing the pipeline genuinely replaces —
+// follower record-stream replication — stays gated inside scheduleReplication.
+//
 // Self-locking: callers must NOT hold o.mu. The old contract (callers wrap in
 // RLock for the vault-map read, while isPipelineIngestVault re-RLocked
 // internally) deadlocked the node whenever a writer (DrainVault, retention
@@ -44,13 +57,14 @@ func (o *Orchestrator) schedulePostSeal(vaultID glid.GLID, cm chunk.ChunkManager
 		followerTargets = o.followerReplicationTargetsLocked(vaultID, cm)
 	}
 	o.mu.RUnlock()
-	if pipeline {
-		return
-	}
 
 	processor, ok := cm.(chunk.ChunkPostSealProcessor)
 	if ok {
+		// Describe BEFORE scheduling — see scheduleReplication for why
+		// (missing label on the Scheduled event, leaked descriptions entry
+		// when the job finishes first). gastrolog-69sjlj.
 		name := fmt.Sprintf("post-seal:%s:%s", vaultID, chunkID)
+		o.scheduler.Describe(name, fmt.Sprintf("Post-seal pipeline for chunk %s", chunkID))
 		wrappedFn := func(ctx context.Context, id chunk.ChunkID) error {
 			if err := processor.PostSealProcess(ctx, id); err != nil {
 				return err
@@ -71,7 +85,6 @@ func (o *Orchestrator) schedulePostSeal(vaultID glid.GLID, cm chunk.ChunkManager
 		if err := o.scheduler.RunOnce(name, wrappedFn, context.Background(), chunkID); err != nil {
 			o.logger.Warn("failed to schedule post-seal", "name", name, "error", err)
 		}
-		o.scheduler.Describe(name, fmt.Sprintf("Post-seal pipeline for chunk %s", chunkID))
 		return
 	}
 

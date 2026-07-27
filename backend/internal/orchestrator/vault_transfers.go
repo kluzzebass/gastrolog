@@ -273,12 +273,14 @@ func (o *Orchestrator) DrainVault(ctx context.Context, vaultID glid.GLID, target
 		o.drainLogger.Warn("drain: failed to seal active chunk", "vault", vaultID, "error", err)
 	}
 
-	// Submit async job.
+	// Submit async job. Describe BEFORE submitting — see scheduleReplication
+	// for why (missing label on the Scheduled event, leaked descriptions entry
+	// when the job finishes first). gastrolog-69sjlj.
 	jobName := "drain:" + vaultID.String()
+	o.scheduler.Describe(jobName, "Drain vault to node "+targetNodeID)
 	jobID := o.scheduler.Submit(jobName, func(ctx context.Context, job *JobProgress) {
 		o.drainWorker(drainCtx, vaultID, targetNodeID, job)
 	})
-	o.scheduler.Describe(jobName, "Drain vault to node "+targetNodeID)
 
 	o.mu.Lock()
 	if d, ok := o.draining[vaultID]; ok {

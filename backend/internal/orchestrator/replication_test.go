@@ -66,6 +66,39 @@ func testRecord(raw string) chunk.Record {
 	}
 }
 
+// TestScheduleReplicationDescribesBeforeScheduling checks the real call site
+// follows the ordering the scheduler contract requires (see
+// TestDescribeBeforeRunOnceLabelsEventAndReleases): the replication job's
+// label must be on its Scheduled event, and the descriptions entry must be
+// gone once the job finishes. Describing after RunOnce lost the label and
+// leaked one entry per replicated chunk — unbounded on a busy leader.
+// See gastrolog-69sjlj.
+func TestScheduleReplicationDescribesBeforeScheduling(t *testing.T) {
+	t.Parallel()
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
+
+	sub, cancel := orch.Scheduler().Events().Subscribe()
+	defer cancel()
+
+	vaultID := glid.New()
+	chunkID := chunk.NewChunkID()
+	name := fmt.Sprintf("replicate:%s:%s", vaultID, chunkID)
+
+	// No transferrer is wired, so the job body returns immediately — this
+	// test is about the registration order, not the replication itself.
+	orch.scheduleReplication(vaultID, chunkID, []system.ReplicationTarget{{NodeID: "node-2"}})
+
+	info := awaitSchedulerJobScheduled(t, sub, name)
+	if info.Description == "" {
+		t.Error("replication job's Scheduled event carries no description — Describe ran after scheduling")
+	}
+
+	awaitSchedulerJobDone(t, sub, name)
+	if hasDescription(orch.Scheduler(), name) {
+		t.Error("replication job's description survived completion — one leaked entry per chunk")
+	}
+}
+
 // ================================================================
 // SEAL ACTIVE CHUNK TESTS
 // ================================================================
