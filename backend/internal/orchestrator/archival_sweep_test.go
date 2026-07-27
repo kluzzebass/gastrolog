@@ -310,11 +310,11 @@ func TestTriggerArchivalSweepConcurrentTriggersClaimOnce(t *testing.T) {
 	_ = ingestSealUpload(t, cm, 10)
 
 	gate := &gatedSystemLoader{
-		inner:   orch.sysLoader,
+		inner:   orch.systemLoader(),
 		entered: make(chan struct{}, 32),
 		release: make(chan struct{}),
 	}
-	orch.sysLoader = gate
+	orch.setSystemLoader(gate)
 	defer gate.releaseAll()
 
 	sub, cancel := orch.Scheduler().Events().Subscribe()

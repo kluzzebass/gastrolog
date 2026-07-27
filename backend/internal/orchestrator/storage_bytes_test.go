@@ -104,10 +104,8 @@ func TestLocalManagedFileStorageBytesFromConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	o := &Orchestrator{
-		homeDir:   homeRoot,
-		sysLoader: store,
-	}
+	o := &Orchestrator{homeDir: homeRoot}
+	o.setSystemLoader(store)
 
 	if got := o.localManagedFileStorageBytes(t.Context()); got != 999 {
 		t.Fatalf("localManagedFileStorageBytes() = %d, want 999 (config size, not 2-byte file)", got)

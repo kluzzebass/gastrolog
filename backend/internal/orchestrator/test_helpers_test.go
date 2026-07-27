@@ -619,7 +619,7 @@ func setupCluster(t *testing.T, nodeIDs []string, vaultCount int, rotationRecord
 	for _, nid := range nodeIDs {
 		nodeLogger := logger.With("node", nid)
 		orch := newTestOrch(t, Config{LocalNodeID: nid, Logger: nodeLogger})
-		orch.sysLoader = &transitionSystemLoader{store: store}
+		orch.setSystemLoader(&transitionSystemLoader{store: store})
 		orchs[nid] = orch
 
 		isLeader := nid == leaderID

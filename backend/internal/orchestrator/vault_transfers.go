@@ -123,10 +123,11 @@ func (o *Orchestrator) moveChunkRemote(ctx context.Context, chunkID chunk.ChunkI
 // With vault storage, vaults no longer have a NodeID. All nodes can serve
 // all vaults. This always returns empty string (local).
 func (o *Orchestrator) resolveVaultNode(ctx context.Context, vaultID glid.GLID) (string, error) {
-	if o.sysLoader == nil {
+	loader := o.systemLoader()
+	if loader == nil {
 		return "", errors.New("config loader not configured")
 	}
-	sys, err := o.sysLoader.Load(ctx)
+	sys, err := loader.Load(ctx)
 	if err != nil {
 		return "", fmt.Errorf("load config: %w", err)
 	}

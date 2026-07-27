@@ -1912,7 +1912,7 @@ func (o *Orchestrator) refreshBacklogBudget(ctx context.Context) {
 	if o.diskGuard == nil {
 		return
 	}
-	loader, ok := o.sysLoader.(serverSettingsLoader)
+	loader, ok := o.systemLoader().(serverSettingsLoader)
 	if !ok {
 		return
 	}

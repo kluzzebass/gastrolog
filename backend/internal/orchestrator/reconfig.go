@@ -53,10 +53,31 @@ func IsPlacementChurnErr(err error) bool {
 // loadSystem loads the full system state (config + runtime) via the SystemLoader.
 // Returns ErrNoSystemLoader if no SystemLoader is set.
 func (o *Orchestrator) loadSystem(ctx context.Context) (*system.System, error) {
-	if o.sysLoader == nil {
+	loader := o.systemLoader()
+	if loader == nil {
 		return nil, ErrNoSystemLoader
 	}
-	return o.sysLoader.Load(ctx)
+	return loader.Load(ctx)
+}
+
+// systemLoader returns the configured SystemLoader, or nil. Safe to call from
+// any goroutine — scheduled sweeps read it off the job executor while tests
+// install one after Start (gastrolog-19wmgn).
+func (o *Orchestrator) systemLoader() SystemLoader {
+	if p := o.sysLoader.Load(); p != nil {
+		return *p
+	}
+	return nil
+}
+
+// setSystemLoader installs the SystemLoader. Production calls this once during
+// construction; tests swap loaders mid-flight, which is why it is atomic.
+func (o *Orchestrator) setSystemLoader(l SystemLoader) {
+	if l == nil {
+		o.sysLoader.Store(nil)
+		return
+	}
+	o.sysLoader.Store(&l)
 }
 
 // MaxConcurrentJobs returns the current scheduler concurrency limit.

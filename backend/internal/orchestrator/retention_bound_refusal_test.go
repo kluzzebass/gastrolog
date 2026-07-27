@@ -436,7 +436,7 @@ func TestRetentionSweepAllReleasesBoundCapsOnLeadershipLoss(t *testing.T) {
 	// TestRetentionSweepAllClearsAlarmOnRunnerGC's fixture).
 	store := sysmem.NewStore()
 	_ = store.PutVault(t.Context(), system.VaultConfig{ID: glid.New(), Name: "other", Type: system.VaultTypeMemory})
-	o.sysLoader = &transitionSystemLoader{store: store}
+	o.setSystemLoader(&transitionSystemLoader{store: store})
 
 	o.mu.Lock()
 	if o.retention == nil {

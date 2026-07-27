@@ -56,7 +56,7 @@ func TestReconcileVaultPlacement_RefreshesFollowerTargets(t *testing.T) {
 		FollowerTargets: system.FollowerTargets(oldPlacements, nscs)}
 
 	o := newTestOrch(t, Config{LocalNodeID: "L"})
-	o.sysLoader = &mnLoader{sys: mkSys(vaultID, newPlacements, nscs)}
+	o.setSystemLoader(&mnLoader{sys: mkSys(vaultID, newPlacements, nscs)})
 	o.vaults[vaultID] = &Vault{ID: vaultID, Instance: inst}
 
 	o.ReconcileVaultPlacement(context.Background(), vaultID)
@@ -102,7 +102,7 @@ func TestReconcileVaultPlacement_RacyNoLeaderDoesNotStrand(t *testing.T) {
 
 	// Mid-flap: placements resolve to NO leader (only a follower entry lands).
 	noLeader := []system.VaultPlacement{{StorageID: sF.String()}}
-	o.sysLoader = &mnLoader{sys: mkSys(vaultID, noLeader, nscs)}
+	o.setSystemLoader(&mnLoader{sys: mkSys(vaultID, noLeader, nscs)})
 	o.ReconcileVaultPlacement(context.Background(), vaultID)
 
 	// Role MUST be untouched on unresolvable placement — this is the whole race.
@@ -128,7 +128,7 @@ func TestReconcileVaultPlacement_RacyNoLeaderDoesNotStrand(t *testing.T) {
 
 	// A real leader resolves on the next placement event: clear + heal role.
 	resolved := []system.VaultPlacement{{StorageID: sL.String(), Leader: true}, {StorageID: sF.String()}}
-	o.sysLoader = &mnLoader{sys: mkSys(vaultID, resolved, nscs)}
+	o.setSystemLoader(&mnLoader{sys: mkSys(vaultID, resolved, nscs)})
 	o.ReconcileVaultPlacement(context.Background(), vaultID)
 
 	if coll.Count() != 0 {
@@ -173,7 +173,7 @@ func TestReconcileVaultPlacement_PropagatesToAllNodes(t *testing.T) {
 		inst := &VaultInstance{VaultID: vaultID, IsFollower: true, LeaderNodeID: "stale"}
 		insts[nodeID] = inst
 		o := newTestOrch(t, Config{LocalNodeID: nodeID})
-		o.sysLoader = &mnLoader{sys: sys}
+		o.setSystemLoader(&mnLoader{sys: sys})
 		o.vaults[vaultID] = &Vault{ID: vaultID, Instance: inst}
 		o.ReconcileVaultPlacement(context.Background(), vaultID)
 	}
@@ -294,7 +294,7 @@ func TestReconcileVaultPlacement_StableLeaderRebalancePrunesStalePendingAcks(t *
 
 	o := newTestOrch(t, Config{LocalNodeID: "L"})
 	neuterCatchupSweep(t, o)
-	o.sysLoader = &mnLoader{sys: mkSys(vaultID, newPlacements, nscs)}
+	o.setSystemLoader(&mnLoader{sys: mkSys(vaultID, newPlacements, nscs)})
 	o.vaults[vaultID] = &Vault{ID: vaultID, Instance: inst}
 
 	// The placement event, and nothing else.
@@ -333,7 +333,7 @@ func TestReconcilePlacements_StableLeaderRebalancePrunesStalePendingAcks(t *test
 
 	o := newTestOrch(t, Config{LocalNodeID: "L"})
 	neuterCatchupSweep(t, o)
-	o.sysLoader = &mnLoader{sys: mkSys(vaultID, placements, newNSCs)}
+	o.setSystemLoader(&mnLoader{sys: mkSys(vaultID, placements, newNSCs)})
 	o.vaults[vaultID] = &Vault{ID: vaultID, Instance: inst}
 
 	o.ReconcilePlacements(context.Background())
@@ -366,7 +366,7 @@ func TestReconcileVaultPlacement_UnchangedPlacementDoesNotWakeCatchup(t *testing
 
 	o := newTestOrch(t, Config{LocalNodeID: "L"})
 	neuterCatchupSweep(t, o)
-	o.sysLoader = &mnLoader{sys: mkSys(vaultID, placements, nscs)}
+	o.setSystemLoader(&mnLoader{sys: mkSys(vaultID, placements, nscs)})
 	o.vaults[vaultID] = &Vault{ID: vaultID, Instance: inst}
 
 	// Republish the SAME placements: nothing moved.
@@ -431,7 +431,7 @@ func TestReconcileVaultPlacement_StableLeaderRebalanceMultiNode(t *testing.T) {
 
 		o := newTestOrch(t, Config{LocalNodeID: nodeID})
 		neuterCatchupSweep(t, o)
-		o.sysLoader = &mnLoader{sys: sys}
+		o.setSystemLoader(&mnLoader{sys: sys})
 		o.vaults[vaultID] = &Vault{ID: vaultID, Instance: inst}
 
 		o.ReconcileVaultPlacement(context.Background(), vaultID)

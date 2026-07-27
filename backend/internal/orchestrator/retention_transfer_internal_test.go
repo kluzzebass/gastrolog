@@ -228,7 +228,7 @@ func newResolveTargetOrch(t *testing.T, vaults ...system.VaultConfig) *Orchestra
 			t.Fatalf("PutVault: %v", err)
 		}
 	}
-	orch.sysLoader = &transitionSystemLoader{store: store}
+	orch.setSystemLoader(&transitionSystemLoader{store: store})
 	return orch
 }
 

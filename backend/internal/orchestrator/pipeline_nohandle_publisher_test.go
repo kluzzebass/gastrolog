@@ -48,7 +48,7 @@ func TestNoGroupModePublishFailClosed(t *testing.T) {
 		// record below becomes a completed segment without size/age waits.
 		SegmentCompletePolicy: segmentation.CompletePolicy{MaxBytes: 1},
 	})
-	orch.sysLoader = testSystemLoader{cfg: cfg}
+	orch.setSystemLoader(testSystemLoader{cfg: cfg})
 	if err := orch.ReloadFilters(context.Background()); err != nil {
 		t.Fatalf("ReloadFilters: %v", err)
 	}

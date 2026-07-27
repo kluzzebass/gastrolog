@@ -107,7 +107,7 @@ func TestDiskGuardJobBodyProtectsStorageEndToEnd(t *testing.T) {
 		DiskGuardPaths: []string{"nodepath"}, // non-empty: startDiskGuard only registers the job when the node itself has paths to guard
 		Alerts:         spy,
 	})
-	orch.sysLoader = testSystemLoaderWithRuntime{cfg: cfg, rt: rt}
+	orch.setSystemLoader(testSystemLoaderWithRuntime{cfg: cfg, rt: rt})
 	// Path resolution against vaultsDir is tested on its own
 	// (disk_guard_storage_path_test.go); disable it here so "volA" stays the
 	// literal fake-sampler key this test's assertions depend on — this test

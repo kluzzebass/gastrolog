@@ -205,7 +205,7 @@ func TestRetentionSweepAllClearsAlarmOnRunnerGC(t *testing.T) {
 	// pre-seeded runner below is still the only thing the GC loop sees.
 	store := sysmem.NewStore()
 	_ = store.PutVault(t.Context(), system.VaultConfig{ID: glid.New(), Name: "other", Type: system.VaultTypeMemory})
-	o.sysLoader = &transitionSystemLoader{store: store}
+	o.setSystemLoader(&transitionSystemLoader{store: store})
 
 	vaultID := glid.New()
 	o.mu.Lock()
