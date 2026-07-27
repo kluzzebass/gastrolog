@@ -46,6 +46,29 @@ func CronEvery(interval time.Duration) string {
 	return fmt.Sprintf("*/%d * * * * *", sec)
 }
 
+// sweepCadenceOverride, when non-empty, replaces the cron expression of every
+// periodic reconcile sweep that goes through sweepCron. It is written from the
+// orchestrator package's TestMain ONLY (testprofile_test.go) and is empty in
+// every shipped build — production cadence is the constant passed to sweepCron.
+//
+// The seam exists because the orchestrator's multi-node acceptance tests wait
+// on real sweep ticks: at production cadence a single retention-driven
+// assertion costs a 60s cron period and a catch-up assertion costs 20s, which
+// is what made the package's non-short runtime wall-clock rather than
+// compute bound (gastrolog-4yzpcj). Compressing the cadence keeps the periodic
+// code path under test — the sweeps still run on their own timer, nothing is
+// poked by hand — it just stops the suite from sitting out real minutes.
+var sweepCadenceOverride string
+
+// sweepCron resolves the cron expression a periodic sweep registers with.
+// Returns production unchanged unless the test profile is installed.
+func sweepCron(production string) string {
+	if sweepCadenceOverride != "" {
+		return sweepCadenceOverride
+	}
+	return production
+}
+
 // NormalizeCronSchedule converts legacy "@every" and 5-field cron expressions
 // to canonical 6-field cron (second minute hour dom month dow).
 func NormalizeCronSchedule(expr string) string {

@@ -85,6 +85,16 @@ const (
 	// base: those groups run heavier FSM work and share the node with
 	// chunking GLCB builds, so they tolerate longer scheduling pauses than
 	// data-plane groups.
+	//
+	// The slack is applied as an ADDITION capped at half the base window
+	// (see raftTimeouts). At the shipped default — and at every base at or
+	// above it — the cap is inert and the vault-ctl window is exactly
+	// base + 1s, as it always was. The cap only binds when the node-wide
+	// base is configured BELOW the default, and it exists so that
+	// compressing the base compresses the vault-ctl detector in lockstep
+	// instead of leaving a fixed second dominating the window. That is the
+	// same lockstep property gastrolog-1lbifx established between the
+	// detector and Raft-contact liveness.
 	vaultCtlTimeoutSlack = 1 * time.Second
 )
 
@@ -471,7 +481,7 @@ func raftTimeouts(cfg GroupConfig) (heartbeat, election, lease time.Duration) {
 	heartbeat = baseHeartbeatTimeout
 	lease = baseLeaderLease
 	if IsVaultControlPlaneGroupID(cfg.GroupID) {
-		heartbeat += vaultCtlTimeoutSlack
+		heartbeat += min(vaultCtlTimeoutSlack, heartbeat/2)
 	}
 	election = heartbeat
 	if cfg.HeartbeatTimeout > 0 {

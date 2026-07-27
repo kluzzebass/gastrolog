@@ -761,6 +761,65 @@ func (h *orchRelHarness) waitForAllReady() {
 	})
 }
 
+// sweepJobLastRun reports when a node's named scheduler job last ran, and
+// whether the job is registered at all. This is the orchestrator's own
+// observable "a periodic sweep executed" signal (Scheduler.ListJobs, the
+// same data the operator inspector shows) — tests that need to reason about
+// sweeps should count OBSERVED sweeps through this rather than assume a
+// wall-clock window contained one.
+func (h *orchRelHarness) sweepJobLastRun(nodeID, job string) (time.Time, bool) {
+	n := h.nodes[nodeID]
+	if n == nil || n.orch == nil {
+		return time.Time{}, false
+	}
+	for _, info := range n.orch.Scheduler().ListJobs() {
+		if info.Name == job {
+			return info.LastRun, true
+		}
+	}
+	return time.Time{}, false
+}
+
+// holdAcrossSweeps asserts invariant continuously until the named scheduler
+// job on nodeID has been observed to run `sweeps` times, failing the moment
+// the invariant breaks.
+//
+// This is how a "nothing happened" property is proven without a wall-clock
+// window: the negative only means something if the sweep that could have
+// violated it actually ran, and this waits for exactly that evidence instead
+// of assuming a fixed number of seconds contained a tick. It is also
+// cadence-independent — it costs whatever the sweep cadence is, production or
+// compressed, with no constant to keep in sync.
+//
+// invariant returns (description, ok); a false ok fails immediately with the
+// description. The wait is progress-bound like waitProgress: the sweep count
+// advancing is the progress metric, so a sweep that stops ticking fails as a
+// stall rather than silently passing the test.
+func (h *orchRelHarness) holdAcrossSweeps(what, nodeID, job string, sweeps int, invariant func() (string, bool)) {
+	h.t.Helper()
+	// Anchor on the job's CURRENT last-run so an earlier sweep is not
+	// miscounted as one of ours — the caller wants sweeps that happened
+	// after the state it just set up.
+	prev, ok := h.sweepJobLastRun(nodeID, job)
+	if !ok {
+		h.t.Fatalf("%s: scheduler job %q is not registered on %s", what, job, h.nodes[nodeID].label)
+	}
+	seen := 0
+	h.waitProgress(fmt.Sprintf("%s (across %d %q sweeps)", what, sweeps, job),
+		50*time.Millisecond,
+		func() (string, bool) {
+			if desc, ok := invariant(); !ok {
+				h.t.Fatalf("%s: invariant violated after %d observed %q sweeps: %s", what, seen, job, desc)
+			}
+			last, _ := h.sweepJobLastRun(nodeID, job)
+			if last.After(prev) {
+				prev = last
+				seen++
+			}
+			return fmt.Sprintf("%s_sweeps=%d/%d", job, seen, sweeps), seen >= sweeps
+		}, nil)
+}
+
 // vaultCtlRaftView summarizes a node's default-vault vault-ctl Raft group
 // (state + term) for readiness/leader progress metrics.
 func (h *orchRelHarness) vaultCtlRaftView(n *orchRelNode) string {

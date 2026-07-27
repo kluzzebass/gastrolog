@@ -65,6 +65,27 @@ func TestConfigureTimeouts(t *testing.T) {
 		t.Fatalf("configured vault ctl: got %v %v %v", hb, el, ll)
 	}
 
+	// A base BELOW the shipped default scales the vault-ctl slack down with
+	// it (capped at half the base) instead of letting a fixed second
+	// dominate the window. Without the cap a 200ms base would still give
+	// vault-ctl a 1.2s detector — six times the base — so compressing the
+	// node-wide detector would not compress vault-ctl elections at all.
+	if err := ConfigureTimeouts(200*time.Millisecond, 150*time.Millisecond); err != nil {
+		t.Fatalf("ConfigureTimeouts (compressed): %v", err)
+	}
+	hb, el, ll = raftTimeouts(GroupConfig{GroupID: VaultControlPlaneGroupID(glid.New())})
+	if hb != 300*time.Millisecond || el != hb || ll != 150*time.Millisecond {
+		t.Fatalf("compressed vault ctl: got %v %v %v, want 300ms 300ms 150ms", hb, el, ll)
+	}
+	// The cap is inert at and above the shipped default: exactly base + 1s.
+	if err := ConfigureTimeouts(DefaultHeartbeatTimeout, DefaultLeaderLeaseTimeout); err != nil {
+		t.Fatalf("ConfigureTimeouts (default): %v", err)
+	}
+	hb, _, _ = raftTimeouts(GroupConfig{GroupID: VaultControlPlaneGroupID(glid.New())})
+	if hb != DefaultHeartbeatTimeout+vaultCtlTimeoutSlack {
+		t.Fatalf("default vault ctl after reconfigure: got %v, want %v", hb, DefaultHeartbeatTimeout+vaultCtlTimeoutSlack)
+	}
+
 	// Lease longer than the detector window must be rejected, not clamped:
 	// hashicorp/raft panics on it, and silent clamping hides operator error.
 	if err := ConfigureTimeouts(2*time.Second, 3*time.Second); err == nil {

@@ -12,11 +12,13 @@ package orchestrator_test
 // so this family cannot run against the memory-vault-only harness in
 // server package tests (33ul6h finding).
 //
-// Retention runs on a real one-minute cron (defaultRetentionSchedule); the
-// harness has no fast-forward, so these tests wait on real sweep ticks —
-// the same tradeoff reliability_glcb_catchup_test.go already accepts for
-// the 20s vault-catchup-sweep cron. testing.Short() skips them; they run
-// under the mandatory full gate (go test ./... without -short).
+// These tests wait on REAL retention sweep ticks — nothing here pokes the
+// sweep by hand, and the assertions are written in sweeps rather than
+// seconds so they hold at any cadence. The package's test binary installs a
+// compressed cron profile (testprofile_test.go, gastrolog-4yzpcj), so a
+// sweep costs a second instead of a minute; run the same tests without that
+// profile and they still pass, only slower. testing.Short() skips them; they
+// run under the mandatory full gate (go test ./... without -short).
 
 import (
 	"context"
@@ -30,31 +32,13 @@ import (
 	"gastrolog/internal/system"
 )
 
-// waitForCronDrivenProgress polls sample like h.waitProgress, but with a
-// deadline this test controls instead of the harness's fixed 60s stall
-// window (orchHarnessStallWindow). Retention itself only ticks once every
-// 60s (defaultRetentionSchedule); a 60s stall window has essentially zero
-// margin against cron-phase misalignment (the wait can start anywhere in
-// the minute), so h.waitProgress's own detector is the wrong tool for a
-// signal this coarse. deadline should comfortably exceed a few retention
-// periods.
-func waitForCronDrivenProgress(t *testing.T, what string, deadline time.Duration, sample func() (string, bool)) {
-	t.Helper()
-	start := time.Now()
-	end := start.Add(deadline)
-	var last string
-	for {
-		s, done := sample()
-		last = s
-		if done {
-			return
-		}
-		if time.Now().After(end) {
-			t.Fatalf("%s: not done after %s (last observed: %s)", what, deadline, last)
-		}
-		time.Sleep(2 * time.Second)
-	}
-}
+// retentionSweepJob is the scheduler job name the retention sweep registers
+// under (orchestrator.retentionJobName). Tests here reason in SWEEPS, not
+// seconds: the retention sweep is what makes a transfer happen, so its
+// observed run count — read back through Scheduler.ListJobs — is the honest
+// unit of retention time (the same unit retentionDeferralAlarmAfter counts
+// in), and it stays correct at any cron cadence.
+const retentionSweepJob = "retention"
 
 // putTransferRetentionPolicy creates a MaxAge=1ms retention policy — the
 // fastest deterministic trigger available. MaxChunks=0 looks like an
@@ -197,10 +181,10 @@ func TestOrchPipeline_TransferDispositionSingleNode(t *testing.T) {
 	// byte-identical GLCB, a FRESH SealedAt anchor, and
 	// TransferSourceVaultID naming the source.
 	var destEntry chunk.ChunkID
-	waitForCronDrivenProgress(t, "chunk transferred to destination vault", 3*time.Minute, func() (string, bool) {
+	h.waitProgress("chunk transferred to destination vault", 50*time.Millisecond, func() (string, bool) {
 		entries := h.sealedPipelineChunks(dest, node)
 		return fmt.Sprintf("dest_sealed_chunks=%d", len(entries)), len(entries) == 1
-	})
+	}, nil)
 	destEntries := h.sealedPipelineChunks(dest, node)
 	if len(destEntries) != 1 {
 		t.Fatalf("destination has %d sealed chunks, want 1", len(destEntries))
@@ -234,10 +218,10 @@ func TestOrchPipeline_TransferDispositionSingleNode(t *testing.T) {
 	// only after) — this is the observable consequence of the 5034va
 	// ordering: by the time the destination is confirmed, the source has
 	// released its copy.
-	waitForCronDrivenProgress(t, "source chunk expired after destination receipts", 3*time.Minute, func() (string, bool) {
+	h.waitProgress("source chunk expired after destination receipts", 50*time.Millisecond, func() (string, bool) {
 		entries := h.sealedPipelineChunks(source, node)
 		return fmt.Sprintf("source_sealed_chunks=%d", len(entries)), len(entries) == 0
-	})
+	}, nil)
 	if _, err := os.Stat(h.pipelineGLCBPath(node, source, e.ID)); !os.IsNotExist(err) {
 		t.Fatalf("source GLCB file still on disk after transfer completed (err=%v)", err)
 	}
@@ -279,27 +263,26 @@ func TestOrchPipeline_TransferDispositionDefersWhenTargetDisabled(t *testing.T) 
 	policyID := putTransferRetentionPolicy(t, h, "transfer-deferred-policy")
 	configureTransferDisposition(t, h, source, dest.id, policyID)
 
-	// There is no positive "a sweep ran and deferred" signal exposed
-	// outside the package to poll for (that's exactly what makes this a
-	// defer-not-drop test rather than a progress-wait) — Orchestrator
-	// exposes no exported alarm/streak accessor. Proving the negative
-	// (retention never destroys the chunk) needs SOME bounded real-time
-	// observation window; this asserts the invariant continuously across
-	// repeated samples spanning at least one real retention cron tick
-	// (60s) rather than a single blind sleep-then-check, so a violation
-	// at ANY point during the window fails immediately instead of only
-	// being checked once at the end.
-	deadline := time.Now().Add(70 * time.Second)
-	for time.Now().Before(deadline) {
-		entriesNow := h.sealedPipelineChunks(source, node)
-		if len(entriesNow) != 1 || entriesNow[0].ID != e.ID {
-			t.Fatalf("source chunk must be RETAINED (deferred) while the transfer target is disabled; sealed_chunks=%v", entriesNow)
-		}
-		if destEntries := h.sealedPipelineChunks(dest, node); len(destEntries) != 0 {
-			t.Fatalf("destination must NOT have received anything while disabled; got %d entries", len(destEntries))
-		}
-		time.Sleep(5 * time.Second)
-	}
+	// Proving the negative (retention never destroys the chunk) only means
+	// something once the sweep that COULD have destroyed it has actually
+	// run. The observation window is therefore counted in retention sweeps
+	// the scheduler reports having executed — not in seconds, which merely
+	// approximated "a tick probably happened in there". Three of them, so
+	// the window also spans the deferral streak that raises the alarm
+	// (retentionDeferralAlarmAfter): the invariant must survive the streak,
+	// not just the first deferral. The invariant is re-checked on every
+	// poll, so a violation at ANY point in the window fails immediately.
+	h.holdAcrossSweeps("transfer target disabled: source retained, destination untouched",
+		node, retentionSweepJob, 3, func() (string, bool) {
+			entriesNow := h.sealedPipelineChunks(source, node)
+			if len(entriesNow) != 1 || entriesNow[0].ID != e.ID {
+				return fmt.Sprintf("source chunk must be RETAINED (deferred) while the transfer target is disabled; sealed_chunks=%v", entriesNow), false
+			}
+			if destEntries := h.sealedPipelineChunks(dest, node); len(destEntries) != 0 {
+				return fmt.Sprintf("destination must NOT have received anything while disabled; got %d entries", len(destEntries)), false
+			}
+			return "retained", true
+		})
 	if _, err := os.Stat(h.pipelineGLCBPath(node, source, e.ID)); err != nil {
 		t.Fatalf("source GLCB must still be on disk while deferred: %v", err)
 	}
@@ -355,10 +338,10 @@ func TestOrchPipeline_TransferDispositionMultiNodeDestRF(t *testing.T) {
 
 	// Every destination home earns a GLCB file — this is the cross-node
 	// pull generalization actually running end to end.
-	waitForCronDrivenProgress(t, "destination vault C: sealed chunk appears", 3*time.Minute, func() (string, bool) {
+	h.waitProgress("destination vault C: sealed chunk appears", 50*time.Millisecond, func() (string, bool) {
 		n := len(h.sealedPipelineChunks(dest, h.nodeIDs[destHomeIdxs[0]]))
 		return fmt.Sprintf("dest_sealed=%d", n), n == 1
-	})
+	}, nil)
 	destEntries := h.sealedPipelineChunks(dest, h.nodeIDs[destHomeIdxs[0]])
 	if len(destEntries) != 1 || destEntries[0].ID != e.ID {
 		t.Fatalf("destination sealed entries = %v, want exactly the transferred chunk %s", destEntries, e.ID)
@@ -381,10 +364,10 @@ func TestOrchPipeline_TransferDispositionMultiNodeDestRF(t *testing.T) {
 
 	// The source releases its copy only once every destination home
 	// holds the chunk (observable end state of the 5034va ordering).
-	waitForCronDrivenProgress(t, "source chunk expired after multi-home destination receipts", 3*time.Minute, func() (string, bool) {
+	h.waitProgress("source chunk expired after multi-home destination receipts", 50*time.Millisecond, func() (string, bool) {
 		entries := h.sealedPipelineChunks(source, sourceNode)
 		return fmt.Sprintf("source_sealed=%d", len(entries)), len(entries) == 0
-	})
+	}, nil)
 	if _, err := os.Stat(h.pipelineGLCBPath(sourceNode, source, e.ID)); !os.IsNotExist(err) {
 		t.Fatalf("source GLCB file still on disk after multi-home transfer completed (err=%v)", err)
 	}

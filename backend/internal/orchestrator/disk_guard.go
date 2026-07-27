@@ -1935,7 +1935,7 @@ func (o *Orchestrator) startDiskGuard() error {
 	if o.diskGuard == nil || len(o.diskGuard.paths) == 0 {
 		return nil
 	}
-	if err := o.scheduler.AddJob(diskGuardJobName, diskGuardSchedule, o.diskGuardTick); err != nil {
+	if err := o.scheduler.AddJob(diskGuardJobName, sweepCron(diskGuardSchedule), o.diskGuardTick); err != nil {
 		return fmt.Errorf("disk guard: %w", err)
 	}
 	o.scheduler.Describe(diskGuardJobName,
