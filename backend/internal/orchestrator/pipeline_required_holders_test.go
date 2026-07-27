@@ -34,14 +34,14 @@ func TestChunkRequiredHoldersReportsUnresolvedOnEmptyLookup(t *testing.T) {
 	}
 
 	// Vault absent from config (lookup fails): unresolved, never "no holders".
-	orch.sysLoader = testSystemLoader{cfg: &system.Config{}}
+	orch.setSystemLoader(testSystemLoader{cfg: &system.Config{}})
 	if ids, ok := buildSpec()(); ok || len(ids) != 0 {
 		t.Fatalf("empty lookup = (%v, %v), want unresolved", ids, ok)
 	}
 
 	// Vault placed on two nodes: resolved with both members.
 	storageA, storageB := glid.New(), glid.New()
-	orch.sysLoader = testSystemLoaderWithRuntime{
+	orch.setSystemLoader(testSystemLoaderWithRuntime{
 		cfg: &system.Config{
 			Vaults: []system.VaultConfig{{
 				ID:   vaultID,
@@ -59,7 +59,7 @@ func TestChunkRequiredHoldersReportsUnresolvedOnEmptyLookup(t *testing.T) {
 				{NodeID: "node-B", FileStorages: []system.FileStorage{{ID: storageB}}},
 			},
 		},
-	}
+	})
 	ids, ok := buildSpec()()
 	if !ok || len(ids) != 2 {
 		t.Fatalf("placed lookup = (%v, %v), want both members resolved", ids, ok)

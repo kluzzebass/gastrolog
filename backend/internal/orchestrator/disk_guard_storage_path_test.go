@@ -102,7 +102,7 @@ func TestRefreshStorageGuardsResolvesRelativePathAgainstVaultsDir(t *testing.T) 
 
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
 	orch.vaultsDir = home
-	orch.sysLoader = testSystemLoaderWithRuntime{cfg: cfg, rt: rt}
+	orch.setSystemLoader(testSystemLoaderWithRuntime{cfg: cfg, rt: rt})
 	// Deliberately NOT overriding orch.diskGuard.sample: this must exercise
 	// the real statfs syscall against the real resolved directory.
 
@@ -165,7 +165,7 @@ func TestRefreshStorageGuardsAbsolutePathUnaffected(t *testing.T) {
 
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
 	orch.vaultsDir = t.TempDir() // a DIFFERENT dir — must not get joined in
-	orch.sysLoader = testSystemLoaderWithRuntime{cfg: cfg, rt: rt}
+	orch.setSystemLoader(testSystemLoaderWithRuntime{cfg: cfg, rt: rt})
 
 	orch.refreshVaultDiskGuards(context.Background())
 

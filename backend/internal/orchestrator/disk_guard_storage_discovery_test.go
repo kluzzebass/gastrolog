@@ -60,7 +60,7 @@ func TestRefreshVaultDiskGuardsRegistersStorageFromConfig(t *testing.T) {
 	// it here so "volA" stays the literal fake-sampler key this test's
 	// assertions depend on.
 	orch.vaultsDir = ""
-	orch.sysLoader = testSystemLoaderWithRuntime{cfg: cfg, rt: rt}
+	orch.setSystemLoader(testSystemLoaderWithRuntime{cfg: cfg, rt: rt})
 	orch.diskGuard.sample = func(path string) (uint64, uint64, error) {
 		if path == "volA" {
 			return 30 * gib, 100 * gib, nil // 30% free — below the storage's 40% floor
@@ -117,7 +117,7 @@ func TestRefreshVaultDiskGuardsPublishesPlacementsAndClass(t *testing.T) {
 	// it here so "volA" stays the literal fake-sampler key this test's
 	// assertions depend on.
 	orch.vaultsDir = ""
-	orch.sysLoader = testSystemLoaderWithRuntime{cfg: cfg, rt: rt}
+	orch.setSystemLoader(testSystemLoaderWithRuntime{cfg: cfg, rt: rt})
 	orch.diskGuard.sample = func(path string) (uint64, uint64, error) {
 		if path == "volA" {
 			return 50 * gib, 100 * gib, nil
@@ -184,7 +184,7 @@ func TestRefreshVaultDiskGuardsPlacementsClearWhenVaultRemoved(t *testing.T) {
 	// it here so "volA" stays the literal fake-sampler key this test's
 	// assertions depend on.
 	orch.vaultsDir = ""
-	orch.sysLoader = loader
+	orch.setSystemLoader(loader)
 	orch.diskGuard.sample = func(path string) (uint64, uint64, error) {
 		if path == "volA" {
 			return 50 * gib, 100 * gib, nil
@@ -254,7 +254,7 @@ func TestRefreshVaultDiskGuardsStorageRemovalReleasesNoStrand(t *testing.T) {
 	// assertions depend on.
 	orch.vaultsDir = ""
 	loader := &testSystemLoaderWithRuntime{cfg: cfg, rt: rt}
-	orch.sysLoader = loader
+	orch.setSystemLoader(loader)
 	orch.diskGuard.sample = func(path string) (uint64, uint64, error) {
 		if path == "volA" {
 			return 30 * gib, 100 * gib, nil
@@ -352,7 +352,7 @@ func TestRefreshVaultDiskGuardsResolvesNodeDisplayName(t *testing.T) {
 	// Path resolution tested separately; disable it here so "volA" stays
 	// literal.
 	orch.vaultsDir = ""
-	orch.sysLoader = testSystemLoaderWithRuntime{cfg: cfg, rt: rt}
+	orch.setSystemLoader(testSystemLoaderWithRuntime{cfg: cfg, rt: rt})
 	orch.diskGuard.sample = func(path string) (uint64, uint64, error) {
 		if path == "volA" {
 			return 30 * gib, 100 * gib, nil // below the storage's 40% floor

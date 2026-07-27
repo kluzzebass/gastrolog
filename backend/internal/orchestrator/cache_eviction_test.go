@@ -35,7 +35,7 @@ func newEvictionTestOrch(t *testing.T) (*Orchestrator, *evictCountingChunkManage
 	store := newTestStore(&system.Config{
 		Vaults: []system.VaultConfig{{ID: vaultID, Name: "v", Type: system.VaultTypeMemory}},
 	}, "node1")
-	orch.sysLoader = &transitionSystemLoader{store: store, nodeID: "node1"}
+	orch.setSystemLoader(&transitionSystemLoader{store: store, nodeID: "node1"})
 
 	evictor := &evictCountingChunkManager{}
 	vaultInst := &VaultInstance{VaultID: vaultID, Type: "memory", Chunks: evictor}

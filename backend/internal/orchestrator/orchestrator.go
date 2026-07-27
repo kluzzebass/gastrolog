@@ -390,8 +390,13 @@ type Orchestrator struct {
 	// Clock for testing.
 	now func() time.Time
 
-	// Config loader for hot-update operations.
-	sysLoader SystemLoader
+	// Config loader for hot-update operations. Atomic because scheduled sweeps
+	// read it from their own goroutines (retentionSweepAll → loadSystem) while
+	// test harnesses assign it after the scheduler is already running. Production
+	// sets it once at construction, but the safety of that was an unwritten
+	// convention the type now enforces — reaching it through setSystemLoader /
+	// systemLoader means no caller can reintroduce the race (gastrolog-19wmgn).
+	sysLoader atomic.Pointer[SystemLoader]
 
 	// Local node identity for multi-node filtering.
 	localNodeID string
@@ -677,10 +682,11 @@ func (o *Orchestrator) ChunkResidency(vaultID glid.GLID, chunkID chunk.ChunkID) 
 // alert messages that say "instance ssd-hot" instead of just a UUID. Safe to
 // call from any goroutine — it acquires the orchestrator read lock.
 func (o *Orchestrator) vaultLabel(vaultID glid.GLID) string {
-	if o.sysLoader == nil {
+	loader := o.systemLoader()
+	if loader == nil {
 		return ""
 	}
-	sys, err := o.sysLoader.Load(context.Background())
+	sys, err := loader.Load(context.Background())
 	if err != nil || sys == nil {
 		return ""
 	}
@@ -695,10 +701,11 @@ func (o *Orchestrator) vaultLabel(vaultID glid.GLID) string {
 // nodeLabel returns the operator-friendly name for a cluster node ID, or ""
 // when unknown. Safe to call from any goroutine.
 func (o *Orchestrator) nodeLabel(nodeID string) string {
-	if nodeID == "" || o.sysLoader == nil {
+	loader := o.systemLoader()
+	if nodeID == "" || loader == nil {
 		return ""
 	}
-	sys, err := o.sysLoader.Load(context.Background())
+	sys, err := loader.Load(context.Background())
 	if err != nil || sys == nil {
 		return ""
 	}
@@ -856,7 +863,6 @@ func New(cfg Config) (*Orchestrator, error) {
 		vaultDraining:          make(map[string]*vaultDrainState),
 		retention:              make(map[string]*retentionRunner),
 		scheduler:              sched,
-		sysLoader:              cfg.SystemLoader,
 		localNodeID:            cfg.LocalNodeID,
 		localNodeIDGLID:        parseNodeGLID(cfg.LocalNodeID),
 		alerts:                 cfg.Alerts,
@@ -885,6 +891,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		cacheEvictionLogger:    compCacheEviction.Apply(baseLogger),
 		cloudHealthLogger:      compCloudHealth.Apply(baseLogger),
 	}
+	o.setSystemLoader(cfg.SystemLoader)
 
 	// The max-size bound measures the vault's whole local disk claim.
 	o.diskGuard.vaultFootprint = o.localVaultFootprintBytes

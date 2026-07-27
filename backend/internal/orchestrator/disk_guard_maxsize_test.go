@@ -324,7 +324,7 @@ func TestRefreshVaultDiskGuardsCappedFromPolicyMaxSizeLifecycle(t *testing.T) {
 	}
 
 	orch := newTestOrch(t, Config{})
-	orch.sysLoader = testSystemLoader{cfg: cfg}
+	orch.setSystemLoader(testSystemLoader{cfg: cfg})
 
 	// Footprint fixed above the 10GiB policy bound but below the 1GiB
 	// default — the capped/uncapped verdict below can only be explained by
@@ -404,7 +404,7 @@ func TestRefreshVaultDiskGuardsLogsOnBoundChangeOnly(t *testing.T) {
 
 	logSink := &syncBuffer{}
 	orch := newTestOrch(t, Config{Logger: slog.New(slog.NewTextHandler(logSink, nil))})
-	orch.sysLoader = testSystemLoader{cfg: cfg}
+	orch.setSystemLoader(testSystemLoader{cfg: cfg})
 	ctx := context.Background()
 
 	const changeMsg = "vault max-size bound changed"

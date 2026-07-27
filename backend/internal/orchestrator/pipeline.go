@@ -288,10 +288,11 @@ func (o *Orchestrator) noteRegisterSkip(vaultID glid.GLID, id chunk.ChunkID, rea
 // vaultPlacementNodeIDs returns the node IDs of every placement member for a
 // vault, used to gate ReleaseSegments until each home has holder receipts.
 func (o *Orchestrator) vaultPlacementNodeIDs(vaultID glid.GLID) []string {
-	if o.sysLoader == nil {
+	loader := o.systemLoader()
+	if loader == nil {
 		return nil
 	}
-	sys, err := o.sysLoader.Load(context.Background())
+	sys, err := loader.Load(context.Background())
 	if err != nil || sys == nil {
 		return nil
 	}

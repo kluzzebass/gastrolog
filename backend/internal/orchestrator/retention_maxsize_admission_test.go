@@ -108,7 +108,7 @@ func TestResolvedPolicyBudgetCapsSubmitToVaultLocally(t *testing.T) {
 	}
 
 	orch := startedPipelineOrch(t, Config{LocalNodeID: "node-A"})
-	orch.sysLoader = testSystemLoader{cfg: cfg}
+	orch.setSystemLoader(testSystemLoader{cfg: cfg})
 
 	// Footprint fixed above the 10GiB policy budget but below the 1GiB
 	// default — the capped verdict below can only be explained by the

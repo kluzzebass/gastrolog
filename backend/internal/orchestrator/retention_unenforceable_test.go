@@ -394,7 +394,7 @@ func TestRetentionSweepAllClearsUnenforceableAlarmOnRunnerGC(t *testing.T) {
 
 	store := sysmem.NewStore()
 	_ = store.PutVault(t.Context(), system.VaultConfig{ID: glid.New(), Name: "other", Type: system.VaultTypeMemory})
-	o.sysLoader = &transitionSystemLoader{store: store}
+	o.setSystemLoader(&transitionSystemLoader{store: store})
 
 	vaultID := glid.New()
 	o.mu.Lock()
@@ -434,7 +434,7 @@ func TestRetentionSweepAllDoesNotDestroyChunksWhenPolicyTriggerLess(t *testing.T
 
 	sink := &recordingSink{}
 	orch := newUnenforceableTestOrch(t, sink, &syncBuffer{})
-	orch.sysLoader = testSystemLoader{cfg: cfg}
+	orch.setSystemLoader(testSystemLoader{cfg: cfg})
 
 	cm := &retentionFakeChunkManager{chunks: []chunk.ChunkMeta{{
 		ID:     chunk.ChunkID{},
@@ -484,7 +484,7 @@ func TestRetentionSweepAllNeverInvokesSweepOnFollowerInstance(t *testing.T) {
 
 	logSink := &syncBuffer{}
 	orch := newUnenforceableTestOrch(t, &recordingSink{}, logSink)
-	orch.sysLoader = testSystemLoader{cfg: cfg}
+	orch.setSystemLoader(testSystemLoader{cfg: cfg})
 
 	cm := &retentionFakeChunkManager{chunks: []chunk.ChunkMeta{{
 		ID:     chunk.ChunkID{},
