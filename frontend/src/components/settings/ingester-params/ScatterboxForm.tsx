@@ -15,7 +15,6 @@ export function ScatterboxForm({
   dark,
   defaults: d,
   ingesterId,
-  ingesterNodeId,
 }: Readonly<ScatterboxFormProps>) {
   const c = useThemeClass(dark);
   const set = (key: string, value: string) =>
@@ -28,10 +27,9 @@ export function ScatterboxForm({
   const handleTrigger = async () => {
     if (!ingesterId) return;
     try {
-      await systemClient.triggerIngester(
-        { id: decode(ingesterId) },
-        ingesterNodeId ? { headers: { "X-Target-Node": ingesterNodeId } } : {},
-      );
+      // No target node: the backend resolves which node runs this ingester
+      // and routes the trigger there (gastrolog-51ge9).
+      await systemClient.triggerIngester({ id: decode(ingesterId) });
       setTriggerState("sent");
     } catch {
       setTriggerState("error");

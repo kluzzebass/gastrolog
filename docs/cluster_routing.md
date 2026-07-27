@@ -27,31 +27,80 @@ flowchart TD
     CheckStrategy -->|RouteLocal| Local
     CheckStrategy -->|RouteLeader| Local
     CheckStrategy -->|RouteFanOut| Local
-    CheckStrategy -->|RouteTargeted| FindOwner{"Duck-type GetVault,<br/>resolve owner"}
+    CheckStrategy -->|RouteToResourceOwner| FindOwner{"Read declared resource ID,<br/>resolve owning node(s)"}
 
-    FindOwner -->|Local or unknown| Local
-    FindOwner -->|Remote| Forward["Forward via ForwardRPC"]
+    FindOwner -->|"Resource absent"| NotFound["Reject: CodeNotFound"]
+    FindOwner -->|"Local is an owner, or no owner known"| Local
+    FindOwner -->|Remote owner| Forward["Forward via ForwardRPC"]
     Forward --> ProxyBack["Deserialize + return"]
     ForwardExplicit --> ProxyBack
 ```
 
-| Strategy | Count | Interceptor action | Example RPCs |
-|----------|------:|-------------------|-------------|
-| **RouteLocal** | 45 | Pass through | Health, GetConfig, ListVaults, GetStats, WatchConfig, ValidateExpression |
-| **RouteLeader** | 37 | Pass through (Raft Apply handles leader-forwarding) | PutVault, PutIngester, PutRoute, PutServiceSettings, PutLookupSettings, DeleteVault |
-| **RouteTargeted** | 10 | Auto-forward to vault owner via ForwardRPC | ListChunks, GetIndexes, SealVault, ValidateVault |
-| **RouteFanOut** | 7 | Pass through (handler fans out) | Search, Follow, Explain, GetContext, GetFields |
+| Strategy | Interceptor action | Example RPCs |
+|----------|-------------------|-------------|
+| **RouteLocal** | Pass through | Health, GetSystem, ListVaults, GetStats, WatchSystem, ValidateExpression |
+| **RouteLeader** | Pass through (Raft Apply handles leader-forwarding) | PutVault, PutIngester, PutRoute, PutServiceSettings, PutLookupSettings, DeleteVault |
+| **RouteToResourceOwner** | Resolve the resource's owning node(s), auto-forward via ForwardRPC | SealVault, ReindexVault, ValidateVault, GetChunk, TriggerIngester |
+| **RouteFanOut** | Pass through (handler fans out) | Search, Follow, Explain, GetContext, GetFields |
 
-> Phase 5 (gastrolog-4kkoo) dropped `PutFilter` / `DeleteFilter` (RouteLeader, -2) and added `ValidateExpression` (RouteLocal, +1). Match expressions are inlined on `RouteConfig.Stages` — there is no separate filter entity. The strategy distribution test enforces the totals.
+`TestStrategyDistribution` pins the per-strategy counts, so adding an RPC
+forces an explicit classification decision rather than a silent default.
 
 ## How Forwarding Works
 
-### RouteTargeted — interceptor auto-routing
+### RouteToResourceOwner — interceptor auto-routing
 
-The interceptor duck-types `GetVault()` on the request proto to extract
-the vault ID, then looks up the owning node from the config store. If the
-vault is on another node, it serializes the request, sends it via the
-generic `ForwardRPC` gRPC stream, and deserializes the response.
+This is the strategy for **imperative actions on a specific resource**:
+seal a vault, reindex it, trigger an ingester. They are not config
+mutations, so they must NOT be tunnelled through `RouteLeader` and a Raft
+round-trip just to reach the right node — the interceptor delivers them
+directly (gastrolog-51ge9).
+
+Each such procedure declares, in `routing/routes.go`, **which resource it
+targets** and **how to read that resource's ID out of its request**:
+
+```go
+gastrologv1connect.VaultServiceSealVaultProcedure: {
+    Strategy:     RouteToResourceOwner,
+    Resource:     OwnerOf(ResourceVault, (*apiv1.SealVaultRequest).GetVault),
+    WrapResponse: NewRespWrapper[apiv1.SealVaultResponse](),
+},
+```
+
+The declaration is per-procedure and compile-checked (`OwnerOf` is generic
+over the request type) rather than duck-typed at runtime: proto messages
+carry many differently-scoped `id` fields, and guessing between them
+silently misroutes requests.
+
+Each `ResourceKind` has one registered `OwnerResolver`
+(`server.ownerResolvers`), which answers from **replicated cluster state**
+only — never node-local knowledge, so every node gives the same answer:
+
+| Resource kind | Owner is | Read from |
+|---------------|----------|-----------|
+| `ResourceVault` | the vault leader | `VaultConfig.Placements` + node storage configs |
+| `ResourceIngester` | every node running the ingester | the Raft-replicated ingester alive map |
+
+`ResolveOwners` returns a **set** of nodes in deterministic order —
+ownership is genuinely plural (a parallel ingester runs on every eligible
+node; ingester HA extends this), and resolvers that can only produce one
+owner return a one-element slice. The interceptor prefers the local node
+when it is an owner (no hop), otherwise takes the first, so every node
+picks the same target.
+
+Resolver outcomes:
+
+- **owners returned** — forward to one of them (or run locally).
+- **`ErrResourceNotFound`** — the resource positively does not exist;
+  the caller gets `CodeNotFound` from the receiving node instead of an
+  arbitrary node running the handler and reporting a locally-flavored
+  error. Any other resolver error becomes `CodeFailedPrecondition`.
+- **no owner, no error** — no routing decision available (unparseable ID,
+  ownership not yet reported). The request executes locally and the
+  handler produces its own domain error.
+
+Adding a new resource kind is one resolver plus one `OwnerResolvers`
+entry; the interceptor does not change.
 
 ```mermaid
 sequenceDiagram
@@ -59,9 +108,9 @@ sequenceDiagram
     participant Node1 as Node 1 (API)
     participant Node2 as Node 2 (vault owner)
 
-    Client->>Node1: ListChunks(vault=V)
-    Node1->>Node1: Interceptor: GetVault() → V
-    Node1->>Node1: Config store: V owned by Node 2
+    Client->>Node1: GetChunk(vault=V)
+    Node1->>Node1: Interceptor: Resource.ID(req) → V
+    Node1->>Node1: Owner resolver: V owned by Node 2
     alt Vault is local
         Node1->>Node1: Execute handler
         Node1-->>Client: Response
@@ -85,8 +134,8 @@ that replaces per-RPC `Forward*` handlers for unary RPCs. One
 
 ```
 ForwardRPCFrame {
-  procedure: "/gastrolog.v1.VaultService/ListChunks"
-  payload:   <serialized ListChunksRequest>
+  procedure: "/gastrolog.v1.VaultService/GetChunk"
+  payload:   <serialized GetChunkRequest>
 }
 ```
 
@@ -176,9 +225,10 @@ All inter-node communication runs over a single gRPC server per node
 |-----|---------|---------|
 | ForwardRPC | bidirectional | Forward any unary RPC to any node |
 
-ForwardRPC coexists with the legacy per-RPC handlers. RouteTargeted
-unary RPCs are routed via the interceptor → ForwardRPC. Streaming RPCs
-and RouteFanOut still use the dedicated per-RPC handlers.
+ForwardRPC coexists with the legacy per-RPC handlers.
+RouteToResourceOwner unary RPCs are routed via the interceptor →
+ForwardRPC. Streaming RPCs and RouteFanOut still use the dedicated
+per-RPC handlers.
 
 ## Context Helpers
 
@@ -191,6 +241,9 @@ ctx = routing.WithForwarded(ctx)               // mark as forwarded (loop preven
 
 The interceptor also reads `X-Target-Node` from HTTP request headers,
 so any transport (browser, CLI, unix socket) can target a specific node.
+This is an operator/debug escape hatch, not the normal path: clients do
+NOT resolve ownership. The UI sends no `X-Target-Node` — the backend
+answers "which node owns this" from replicated state.
 
 ## What This Does Not Cover
 
@@ -201,7 +254,12 @@ so any transport (browser, CLI, unix socket) can target a specific node.
 - **Load balancing.** For RouteLocal RPCs, the interceptor could route
   to the least loaded node. This is a future optimization.
 
-- **Streaming RouteTargeted.** ExportVault is the only streaming
-  RouteTargeted RPC. It uses handler-level routing because the
+- **Streaming RouteToResourceOwner.** ExportVault is the only streaming
+  owner-routed RPC. It uses handler-level routing because the
   interceptor can't generically receive typed messages from
   `StreamingHandlerConn`.
+
+- **Multi-owner fan-out.** When a resource has several owners the
+  interceptor picks one. An action that must reach *all* owners is a
+  RouteFanOut concern (it needs per-RPC merge semantics); no such RPC
+  exists yet.

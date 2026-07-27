@@ -18,7 +18,7 @@ import (
 // node's local disk but is missing from the vault-ctl FSM manifest gets
 // re-introduced into the FSM via CmdRepatriateChunk.
 //
-// The RPC is RouteTargeted: the interceptor forwards it to the node
+// The RPC is RouteToResourceOwner: the interceptor forwards it to the node
 // that owns the vault, but orphan chunks are inherently node-local.
 // Run this command against the node that holds the orphan on disk —
 // usually that's also the vault owner, but if the orphan is on a
