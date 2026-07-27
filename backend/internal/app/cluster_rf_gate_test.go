@@ -715,8 +715,10 @@ func TestNodeRemover_AllowedRemovalIsReplacedByReconcile(t *testing.T) {
 		t.Fatalf("removal with an eligible spare must be allowed: %v", err)
 	}
 
-	// The placement manager sees the surviving nodes and the spare.
-	peers := cluster.NewPeerState(time.Minute)
+	// The placement manager sees the surviving nodes and the spare. Zero
+	// raft-contact TTL: this test feeds liveness through broadcast Update only,
+	// so the Raft input stays disabled (gastrolog-1lbifx).
+	peers := cluster.NewPeerState(time.Minute, 0)
 	now := time.Now()
 	peers.Update(c.ids["b"].String(), nil, now)
 	peers.Update(c.ids["d"].String(), nil, now)
