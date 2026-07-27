@@ -388,6 +388,24 @@ gRPC transport:
   on the cluster-ctl Raft leader, reacts to node join/leave, vault create/delete,
   and ingester changes.
 
+- **Removal gate** — a leader-side check that runs before a node removal
+  commits, refusing removals that would cost data or redundancy. Two gates
+  exist, evaluated in severity order and bypassed together by `--force`:
+  the **orphan-refusal gate** (removal would leave a vault with zero
+  placements — data loss) and the **RF-preservation gate** (removal would
+  leave a vault below its replication factor with too few eligible Live
+  nodes to re-place onto — reduced redundancy). Refusals name the affected
+  vaults; the RF gate wraps the `ErrWouldDropBelowRF` sentinel.
+  [`backend/internal/app/cluster.go`](../backend/internal/app/cluster.go).
+
+- **Removal policy** — who asked for a node removal, which decides the
+  RF-preservation gate's stance. **Operator** (`cluster remove-node`) is
+  pessimistic: refuse and let the operator choose a remedy. **Self**
+  (`cluster demote-self` from a preStop hook) is optimistic: allow, because
+  the node is terminating regardless and placement reconcile re-places.
+  Carried across the follower → leader forward hop so the stance does not
+  depend on which node the caller reached.
+
 - **Dispatcher** — the subsystem that reacts to *applied* config changes
   (from cluster-ctl Raft FSM) and drives their side effects into the local
   orchestrator (register vault, build vault instance, start ingester, etc.).

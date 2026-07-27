@@ -40,6 +40,8 @@ The last remaining voter cannot be demoted — at least one voter must always ex
 
 Removing a node evicts it from the cluster entirely. The removed node stops receiving replicated state and must re-join with a fresh token if needed. You cannot remove the local node — only peer nodes can be evicted.
 
+Removal is refused when it would cost data or redundancy: if the node holds the only copy of a vault, or if removing it would leave a vault below its replication factor with no other eligible node to re-place onto. The error names the affected vaults. Lower the replication factor, drain those vaults to other nodes, or add an eligible node — or use `gastrolog cluster remove-node <node> --force` to remove anyway and accept the loss.
+
 ## Offline Nodes
 
 Nodes that haven't broadcast stats recently show an **offline** badge. This typically means the node is down or unreachable. Offline nodes still count toward quorum if they're voters — if too many voters go offline, the cluster loses write availability until quorum is restored.

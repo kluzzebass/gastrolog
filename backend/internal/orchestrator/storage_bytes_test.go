@@ -69,10 +69,8 @@ func TestLocalPipelineSegmentStorageOrphanUsesFileStat(t *testing.T) {
 	}
 
 	vaultID := glid.New()
-	o := &Orchestrator{
-		segmentsDir:    filepath.Dir(root),
-		pipelineVaults: map[glid.GLID]pipelineVaultReg{vaultID: {home: true}},
-	}
+	o := &Orchestrator{segmentsDir: filepath.Dir(root)}
+	o.setPipelineVaultLocked(vaultID, pipelineVaultReg{home: true})
 	vaultRoot := filepath.Join(o.segmentsDir, vaultID.String())
 	if err := os.Rename(root, vaultRoot); err != nil {
 		t.Fatal(err)

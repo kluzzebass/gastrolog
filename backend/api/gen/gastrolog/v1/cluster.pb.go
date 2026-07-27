@@ -3624,8 +3624,15 @@ func (*NotifyEvictionResponse) Descriptor() ([]byte, []int) {
 type ForwardRemoveNodeRequest struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
 	NodeId []byte                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
-	// force bypasses the orphan-refusal gate (see RemoveNodeRequest.force).
-	Force         bool `protobuf:"varint,2,opt,name=force,proto3" json:"force,omitempty"`
+	// force bypasses the leader-side removal gates (see RemoveNodeRequest.force).
+	Force bool `protobuf:"varint,2,opt,name=force,proto3" json:"force,omitempty"`
+	// self_removal marks the preStop `gastrolog cluster demote-self` path,
+	// where the node is asking for its own removal while it is already
+	// terminating. The leader's RF-preservation gate is optimistic for
+	// that path (allow; placement reconcile re-places) and pessimistic for
+	// operator-driven removal (refuse). Carried across the follower →
+	// leader hop so the policy survives forwarding. See gastrolog-3vyex.
+	SelfRemoval   bool `protobuf:"varint,3,opt,name=self_removal,json=selfRemoval,proto3" json:"self_removal,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3670,6 +3677,13 @@ func (x *ForwardRemoveNodeRequest) GetNodeId() []byte {
 func (x *ForwardRemoveNodeRequest) GetForce() bool {
 	if x != nil {
 		return x.Force
+	}
+	return false
+}
+
+func (x *ForwardRemoveNodeRequest) GetSelfRemoval() bool {
+	if x != nil {
+		return x.SelfRemoval
 	}
 	return false
 }
@@ -4842,10 +4856,11 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x06job_id\x18\x01 \x01(\fR\x05jobId\"/\n" +
 	"\x15NotifyEvictionRequest\x12\x16\n" +
 	"\x06reason\x18\x01 \x01(\tR\x06reason\"\x18\n" +
-	"\x16NotifyEvictionResponse\"I\n" +
+	"\x16NotifyEvictionResponse\"l\n" +
 	"\x18ForwardRemoveNodeRequest\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\fR\x06nodeId\x12\x14\n" +
-	"\x05force\x18\x02 \x01(\bR\x05force\"\x1b\n" +
+	"\x05force\x18\x02 \x01(\bR\x05force\x12!\n" +
+	"\fself_removal\x18\x03 \x01(\bR\vselfRemoval\"\x1b\n" +
 	"\x19ForwardRemoveNodeResponse\"k\n" +
 	"\x1dForwardSetNodeSuffrageRequest\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\fR\x06nodeId\x12\x1b\n" +

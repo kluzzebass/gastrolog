@@ -39,7 +39,7 @@ const (
 // and only the loser's AddJob error would say so) and it was misleading, since
 // AddJob already answers the same question atomically. See gastrolog-69sjlj.
 func (o *Orchestrator) startPipelineConfigReconcile() error {
-	if err := o.scheduler.AddJob(pipelineConfigReconcileJobName, pipelineConfigReconcileSchedule, o.pipelineConfigReconcile); err != nil {
+	if err := o.scheduler.AddJob(pipelineConfigReconcileJobName, sweepCron(pipelineConfigReconcileSchedule), o.pipelineConfigReconcile); err != nil {
 		if errors.Is(err, ErrJobExists) {
 			return nil // registered by an earlier apply; nothing to do
 		}

@@ -179,15 +179,21 @@ const (
 	// an arbitrary fraction of the compute (gastrolog-5h1uq2). A wait fails
 	// only when its observed progress metric has not changed for this stall
 	// window. The window sits well above the slowest legitimate quiet period
-	// between progress events — the 20s vault catch-up sweep cron — with
-	// headroom for contention stretching a tick.
-	orchHarnessStallWindow = 60 * time.Second
+	// between progress events, which is a reconcile-sweep period: the test
+	// profile runs those every second (testprofile_test.go), so this is
+	// twenty periods of headroom for contention stretching a tick. It was 60s
+	// when the sweeps ticked every 20s — the same ratio, re-anchored on the
+	// cadence the binary actually runs (gastrolog-4yzpcj). Shrinking it does
+	// not make a passing run faster; it makes a WEDGED one report in a third
+	// of the time, which is the whole point of the feedback loop.
+	orchHarnessStallWindow = 20 * time.Second
 	// orchHarnessHardBackstop bounds total wait time even while progress
 	// trickles, so a livelocked metric (one that keeps changing without ever
 	// converging — election churn, oscillating counts) still fails with
 	// diagnostics instead of hanging the package. Steady progress toward the
-	// goal finishes far inside this; only a true wedge or livelock reaches it.
-	orchHarnessHardBackstop = 5 * time.Minute
+	// goal finishes far inside this — the slowest single harness test runs in
+	// under ten seconds — so only a true wedge or livelock reaches it.
+	orchHarnessHardBackstop = 2 * time.Minute
 )
 
 // orchRelHarnessSlots caps how many orchRel harnesses run concurrently in
@@ -719,6 +725,21 @@ func (h *orchRelHarness) unpausePeer(id string) {
 	n.clusterSrv.Unpause()
 }
 
+// slowPeerLatency is the per-handler delay for "slow but unmistakably
+// alive" scenarios, expressed as ONE Raft heartbeat interval — the cadence
+// hashicorp/raft probes followers at, HeartbeatTimeout/10. That is the
+// meaningful unit: the peer is a full probe interval late on every call,
+// orders of magnitude slower than an in-process handler, yet an order of
+// magnitude inside the failure detector, so it stays alive rather than
+// reading as dead. Deriving it keeps that relationship true under any
+// detector configuration; the previous flat 200ms was this exact value at
+// the shipped 2s base, and silently became detector-breaking when the
+// detector was compressed (gastrolog-4yzpcj).
+func slowPeerLatency() time.Duration {
+	heartbeat, _, _ := raftgroup.RaftTimeouts(raftgroup.GroupConfig{})
+	return heartbeat / 10
+}
+
 // slowPeer adds per-handler latency to an otherwise-healthy peer.
 // d=0 clears the slow-down. Use for scenarios that need slow-but-not-
 // stopped behavior (e.g. verifying backoff + retry paths when a peer
@@ -759,6 +780,65 @@ func (h *orchRelHarness) waitForAllReady() {
 		_ = pprof.Lookup("goroutine").WriteTo(&stacks, 1)
 		h.t.Logf("goroutine profile at readiness stall:\n%s", stacks.String())
 	})
+}
+
+// sweepJobLastRun reports when a node's named scheduler job last ran, and
+// whether the job is registered at all. This is the orchestrator's own
+// observable "a periodic sweep executed" signal (Scheduler.ListJobs, the
+// same data the operator inspector shows) — tests that need to reason about
+// sweeps should count OBSERVED sweeps through this rather than assume a
+// wall-clock window contained one.
+func (h *orchRelHarness) sweepJobLastRun(nodeID, job string) (time.Time, bool) {
+	n := h.nodes[nodeID]
+	if n == nil || n.orch == nil {
+		return time.Time{}, false
+	}
+	for _, info := range n.orch.Scheduler().ListJobs() {
+		if info.Name == job {
+			return info.LastRun, true
+		}
+	}
+	return time.Time{}, false
+}
+
+// holdAcrossSweeps asserts invariant continuously until the named scheduler
+// job on nodeID has been observed to run `sweeps` times, failing the moment
+// the invariant breaks.
+//
+// This is how a "nothing happened" property is proven without a wall-clock
+// window: the negative only means something if the sweep that could have
+// violated it actually ran, and this waits for exactly that evidence instead
+// of assuming a fixed number of seconds contained a tick. It is also
+// cadence-independent — it costs whatever the sweep cadence is, production or
+// compressed, with no constant to keep in sync.
+//
+// invariant returns (description, ok); a false ok fails immediately with the
+// description. The wait is progress-bound like waitProgress: the sweep count
+// advancing is the progress metric, so a sweep that stops ticking fails as a
+// stall rather than silently passing the test.
+func (h *orchRelHarness) holdAcrossSweeps(what, nodeID, job string, sweeps int, invariant func() (string, bool)) {
+	h.t.Helper()
+	// Anchor on the job's CURRENT last-run so an earlier sweep is not
+	// miscounted as one of ours — the caller wants sweeps that happened
+	// after the state it just set up.
+	prev, ok := h.sweepJobLastRun(nodeID, job)
+	if !ok {
+		h.t.Fatalf("%s: scheduler job %q is not registered on %s", what, job, h.nodes[nodeID].label)
+	}
+	seen := 0
+	h.waitProgress(fmt.Sprintf("%s (across %d %q sweeps)", what, sweeps, job),
+		50*time.Millisecond,
+		func() (string, bool) {
+			if desc, ok := invariant(); !ok {
+				h.t.Fatalf("%s: invariant violated after %d observed %q sweeps: %s", what, seen, job, desc)
+			}
+			last, _ := h.sweepJobLastRun(nodeID, job)
+			if last.After(prev) {
+				prev = last
+				seen++
+			}
+			return fmt.Sprintf("%s_sweeps=%d/%d", job, seen, sweeps), seen >= sweeps
+		}, nil)
 }
 
 // vaultCtlRaftView summarizes a node's default-vault vault-ctl Raft group

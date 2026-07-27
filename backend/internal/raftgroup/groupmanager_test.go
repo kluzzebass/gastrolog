@@ -517,3 +517,64 @@ func TestGroupRecoveryAfterRestart(t *testing.T) {
 	srv2.Stop()
 	_ = tp2.Close()
 }
+
+// TestCreateGroupLateJoinerKeepsGroupWhenPeersAlreadyElected pins the
+// seedGroup race a late joiner loses (gastrolog-4yzpcj).
+//
+// Every node of a group seeds symmetrically, but a node that starts late
+// races its own bootstrap against peers that have already begun electing.
+// The instant NewRaft registers the instance with the transport, an inbound
+// RequestVote can stamp a term on it — leaving it with a term but still no
+// configuration, which is precisely the state hraft refuses to bootstrap
+// (ErrCantBootstrap). That refusal is correct and harmless: the node is a
+// valid follower and the leader replicates the configuration to it.
+//
+// Treating it as a CreateGroup failure was not harmless. The instance was
+// shut down and discarded, and every retry started from state that was by
+// then definitely non-empty, so the node could never join that group again
+// — a voter silently and permanently lost to a startup race.
+//
+// The term is stamped directly on the group's stable store here rather than
+// won by racing real peers: that IS the state the race produces, and pinning
+// it deterministically beats reproducing a timing window.
+func TestCreateGroupLateJoinerKeepsGroupWhenPeersAlreadyElected(t *testing.T) {
+	// Not parallel — Raft instances + gRPC servers need clean sequential lifecycle.
+	nodes := makeManagerCluster(t, []string{"node-1"})
+	n := nodes[0]
+
+	const groupID = "late-joiner"
+	// hraft's stable-store key for the persisted term.
+	if err := n.manager.wal.GroupStore(groupID).SetUint64([]byte("CurrentTerm"), 7); err != nil {
+		t.Fatalf("stamp CurrentTerm: %v", err)
+	}
+
+	// A three-member symmetric seed, as every participating node passes.
+	members := []hraft.Server{
+		{ID: "node-1", Address: n.transport.LocalAddr()},
+		{ID: "node-2", Address: hraft.ServerAddress("node-2")},
+		{ID: "node-3", Address: hraft.ServerAddress("node-3")},
+	}
+	g, err := n.manager.CreateGroup(GroupConfig{
+		GroupID:     groupID,
+		FSM:         &counterFSM{},
+		SeedMembers: members,
+	})
+	if err != nil {
+		t.Fatalf("CreateGroup for a late joiner must succeed, got: %v", err)
+	}
+	if g == nil || n.manager.GetGroup(groupID) == nil {
+		t.Fatal("late joiner's group is missing from the manager")
+	}
+
+	// The bootstrap really was refused — the node holds no configuration and
+	// is waiting for the leader to replicate one. If it had bootstrapped, it
+	// would be a three-server group here and this test would be exercising
+	// the ordinary seeding path instead of the race.
+	cfg := g.Raft.GetConfiguration()
+	if err := cfg.Error(); err != nil {
+		t.Fatalf("GetConfiguration: %v", err)
+	}
+	if servers := cfg.Configuration().Servers; len(servers) != 0 {
+		t.Fatalf("late joiner bootstrapped anyway: %d servers configured, want 0", len(servers))
+	}
+}

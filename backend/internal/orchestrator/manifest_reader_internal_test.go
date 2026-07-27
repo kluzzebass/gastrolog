@@ -114,7 +114,7 @@ func TestIndexReaderChunkRootTier(t *testing.T) {
 
 	base := t.TempDir()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-A", SegmentsDir: base})
-	orch.pipelineVaults[fx.vaultID] = pipelineVaultReg{home: true}
+	orch.setPipelineVaultLocked(fx.vaultID, pipelineVaultReg{home: true})
 
 	// Instance carrying only the manifest callbacks (backed by the fixture
 	// FSM) — no chunk manager, no index manager. Ownership resolves through

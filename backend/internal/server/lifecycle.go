@@ -54,7 +54,7 @@ type LifecycleServer struct {
 	localStats        func() *apiv1.NodeStats
 	clusterRouteRates func() (*apiv1.ThroughputRate, *apiv1.ThroughputRate)
 	joinClusterFn     func(ctx context.Context, leaderAddr, joinToken string) error
-	removeNodeFn      func(ctx context.Context, nodeID string, force bool) error
+	removeNodeFn      cluster.RemoveNodeFunc
 	setNodeSuffrageFn func(ctx context.Context, nodeID string, voter bool) error
 	statsSignal       *notify.Signal         // fired by stats collector on each broadcast tick
 	peerRouteStats    PeerRouteStatsProvider // for aggregating route stats across cluster
@@ -90,9 +90,11 @@ func (s *LifecycleServer) SetJoinClusterFunc(fn func(ctx context.Context, leader
 	s.joinClusterFn = fn
 }
 
-// SetRemoveNodeFunc sets the callback for the RemoveNode RPC. The force
-// flag bypasses the orphan-refusal gate (gastrolog-2ch9y).
-func (s *LifecycleServer) SetRemoveNodeFunc(fn func(ctx context.Context, nodeID string, force bool) error) {
+// SetRemoveNodeFunc sets the callback for the RemoveNode RPC.
+// opts.Force bypasses the leader-side removal gates (orphan-refusal,
+// gastrolog-2ch9y; RF-preservation, gastrolog-3vyex) and opts.Policy
+// carries the operator vs preStop-self stance.
+func (s *LifecycleServer) SetRemoveNodeFunc(fn cluster.RemoveNodeFunc) {
 	s.removeNodeFn = fn
 }
 
@@ -403,12 +405,25 @@ func (s *LifecycleServer) RemoveNode(
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("cannot remove self from cluster (set allow_self=true to override)"))
 	}
 
-	s.logger.Info("removing node from cluster", "node_id", nodeID, "force", req.Msg.Force)
-	if err := s.removeNodeFn(ctx, nodeID, req.Msg.Force); err != nil {
+	// Removal policy (gastrolog-3vyex): self-removal via allow_self is the
+	// preStop `cluster demote-self` path — the node is already
+	// terminating, so the leader's RF-preservation gate is optimistic
+	// there (allow; placement reconcile re-places). Everything else is an
+	// operator-driven topology change and gets the pessimistic stance
+	// (refuse a removal that drops a vault below its replication factor).
+	// The orphan-refusal gate applies to both.
+	opts := cluster.RemoveNodeOptions{Force: req.Msg.Force, Policy: cluster.RemovalPolicyOperator}
+	if req.Msg.AllowSelf && nodeID == s.nodeID {
+		opts.Policy = cluster.RemovalPolicySelf
+	}
+
+	s.logger.Info("removing node from cluster", "node_id", nodeID, "force", opts.Force, "policy", opts.Policy)
+	if err := s.removeNodeFn(ctx, nodeID, opts); err != nil {
 		s.logger.Error("node removal failed", "node_id", nodeID, "error", err)
-		// Orphan-refusal rejections are operator-correctable (drain
-		// the vault, or re-run with --force). Surface as FailedPrecondition
-		// so the CLI can treat them differently from genuine internal errors.
+		// Removal-gate rejections (orphan-refusal, RF-preservation) are
+		// operator-correctable: drain the vault, add an eligible node, or
+		// re-run with --force. Surface as FailedPrecondition so the CLI
+		// can treat them differently from genuine internal errors.
 		if strings.Contains(err.Error(), "refusing to remove node") {
 			return nil, connect.NewError(connect.CodeFailedPrecondition, err)
 		}

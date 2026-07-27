@@ -111,9 +111,14 @@ func TestStartPipelineConfigReconcileRegistersOnce(t *testing.T) {
 	if n := countJobsNamed(o, pipelineConfigReconcileJobName); n != 1 {
 		t.Fatalf("pipeline-config-reconcile jobs registered = %d, want exactly 1", n)
 	}
-	if o.Scheduler().JobSchedule(pipelineConfigReconcileJobName) != pipelineConfigReconcileSchedule {
+	// Compare against the resolver, not the production constant: the sweep
+	// registers sweepCron(pipelineConfigReconcileSchedule), which this test
+	// binary compresses (gastrolog-4yzpcj). What is being pinned is that the
+	// surviving registration carries the configured schedule, not which
+	// cadence this profile happens to configure.
+	if want := sweepCron(pipelineConfigReconcileSchedule); o.Scheduler().JobSchedule(pipelineConfigReconcileJobName) != want {
 		t.Errorf("registered schedule = %q, want %q",
-			o.Scheduler().JobSchedule(pipelineConfigReconcileJobName), pipelineConfigReconcileSchedule)
+			o.Scheduler().JobSchedule(pipelineConfigReconcileJobName), want)
 	}
 }
 

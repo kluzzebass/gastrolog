@@ -26,6 +26,7 @@ import (
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/auth"
 	"gastrolog/internal/cert"
+	"gastrolog/internal/cluster"
 	"gastrolog/internal/frontend"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/lookup"
@@ -139,9 +140,10 @@ type Config struct {
 	JoinClusterFunc func(ctx context.Context, leaderAddr, joinToken string) error
 
 	// RemoveNodeFunc is called by the RemoveNode RPC to evict a node from the
-	// cluster. The force flag bypasses the orphan-refusal gate (gastrolog-2ch9y).
-	// Nil disables.
-	RemoveNodeFunc func(ctx context.Context, nodeID string, force bool) error
+	// cluster. opts.Force bypasses the leader-side removal gates
+	// (orphan-refusal, RF-preservation) and opts.Policy selects the
+	// operator vs preStop-self stance. Nil disables.
+	RemoveNodeFunc cluster.RemoveNodeFunc
 
 	// SetNodeSuffrageFunc is called by the SetNodeSuffrage RPC to promote or
 	// demote a node. Handles leader-forwarding internally. Nil disables.
@@ -219,7 +221,7 @@ type Server struct {
 	localNodeID           string
 	clusterAddress        string
 	joinClusterFn         func(ctx context.Context, leaderAddr, joinToken string) error
-	removeNodeFn          func(ctx context.Context, nodeID string, force bool) error
+	removeNodeFn          cluster.RemoveNodeFunc
 	setNodeSuffrageFn     func(ctx context.Context, nodeID string, voter bool) error
 	startTime             time.Time
 	homeDir               string                     // gastrolog home directory; empty for in-memory config
