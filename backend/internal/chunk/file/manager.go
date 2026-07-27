@@ -3957,9 +3957,14 @@ func (m *Manager) ArchiveChunk(ctx context.Context, id chunk.ChunkID, storageCla
 		m.mu.Unlock()
 		return fmt.Errorf("chunk %s is not cloud-backed, cannot archive", id)
 	}
-	if meta.archived {
+	// Compare the CURRENT class against the requested one, not a bare
+	// "archived" bool. The bool short-circuited on any prior archive, so a
+	// chunk that had moved to the first class of a multi-step transition
+	// chain could never advance to a colder one — it silently stopped moving
+	// to cheaper storage (gastrolog-35ygqv).
+	if m.storageClasses[id] == storageClass {
 		m.mu.Unlock()
-		return nil // already archived
+		return nil // already in this class
 	}
 	m.mu.Unlock()
 
@@ -3974,6 +3979,14 @@ func (m *Manager) ArchiveChunk(ctx context.Context, id chunk.ChunkID, storageCla
 	}
 
 	m.setArchivedFlag(id, true, storageClass)
+
+	// Replicate the new class. Announced AFTER the cloud call succeeds, so the
+	// FSM never claims a class the blob is not actually in; a failed announce
+	// leaves the FSM behind and the next sweep re-archives, which the cloud
+	// store treats as idempotent.
+	if m.cfg.Announcer != nil {
+		m.cfg.Announcer.AnnounceArchived(id, storageClass)
+	}
 
 	m.logger.Debug("chunk archived",
 		"chunk", id.String(), "storageClass", storageClass)
@@ -4006,6 +4019,14 @@ func (m *Manager) RestoreChunk(ctx context.Context, id chunk.ChunkID, speed stri
 	}
 
 	m.setArchivedFlag(id, false, "")
+
+	// Announce the clear for the same reason the archive announces the set:
+	// otherwise the FSM keeps naming a class the blob has left, and every
+	// other node — plus the archival sweep's comparison — believes it
+	// (gastrolog-35ygqv).
+	if m.cfg.Announcer != nil {
+		m.cfg.Announcer.AnnounceArchived(id, "")
+	}
 
 	m.logger.Info("chunk restore initiated", "chunk", id.String())
 	return nil

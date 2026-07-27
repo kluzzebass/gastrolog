@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"gastrolog/internal/glid"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -198,7 +199,7 @@ func TestArchivalSweepIgnoresInactiveServices(t *testing.T) {
 
 func TestArchivalSweepMultiStepTransition(t *testing.T) {
 	t.Parallel()
-	orch, _, cm, _, _ := archivalTestSetup(t, []system.CloudStorageTransition{
+	orch, cloudStore, cm, _, _ := archivalTestSetup(t, []system.CloudStorageTransition{
 		{After: "1d", StorageClass: "cold"},
 		{After: "30d", StorageClass: "deep-freeze"},
 	})
@@ -213,6 +214,48 @@ func TestArchivalSweepMultiStepTransition(t *testing.T) {
 	if !meta.Archived {
 		t.Error("chunk should be archived after 2 days (cold threshold is 1 day)")
 	}
+	if got := blobStorageClass(t, cloudStore, ids[0]); got != "cold" {
+		t.Fatalf("blob storage class = %q, want %q after the first step", got, "cold")
+	}
+
+	// 31 days old → must ADVANCE to the second transition. This is the half the
+	// test was missing: it asserted only that the chunk reached the FIRST class,
+	// which the bug never prevented. ArchiveChunk short-circuited on a bare
+	// "archived" bool, so a chunk already in ANY class never moved to a colder
+	// one and silently stopped migrating to cheaper storage (gastrolog-35ygqv).
+	orch.now = func() time.Time { return time.Now().Add(31 * 24 * time.Hour) }
+	orch.archivalSweepAll()
+
+	if got := blobStorageClass(t, cloudStore, ids[0]); got != "deep-freeze" {
+		t.Fatalf("blob storage class = %q, want %q: the transition chain stalled at its first step",
+			got, "deep-freeze")
+	}
+	if meta, _ = cm.Meta(ids[0]); !meta.Archived {
+		t.Error("chunk must remain archived after advancing to the colder class")
+	}
+}
+
+// blobStorageClass reads the class the chunk's blob is ACTUALLY in, from the
+// cloud store itself, rather than from any of the places the system caches it.
+// That is the point of gastrolog-35ygqv: the bookkeeping was the unreliable
+// part, so the assertion should not go through it.
+func blobStorageClass(t *testing.T, cloudStore *blobstore.Memory, id chunk.ChunkID) string {
+	t.Helper()
+	var class string
+	var found bool
+	err := cloudStore.List(context.Background(), "", func(info blobstore.BlobInfo) error {
+		if strings.Contains(info.Key, id.String()) && strings.HasSuffix(info.Key, ".glcb") {
+			class, found = info.StorageClass, true
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("list blobs: %v", err)
+	}
+	if !found {
+		t.Fatalf("no blob found for chunk %s", id)
+	}
+	return class
 }
 
 // TestTriggerArchivalSweepEvaluatesImmediately proves the event-driven trigger

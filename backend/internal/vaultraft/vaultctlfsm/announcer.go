@@ -68,6 +68,10 @@ func (a *Announcer) AnnounceUpload(id chunk.ChunkID, cloudBytes, ingestIdxOff, i
 	a.apply("upload", id, MarshalUploadChunk(id, cloudBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize, hash, cloudServiceID, keyScheme))
 }
 
+func (a *Announcer) AnnounceArchived(id chunk.ChunkID, storageClass string) {
+	a.apply("archive", id, MarshalArchiveChunk(id, storageClass))
+}
+
 func (a *Announcer) apply(op string, id chunk.ChunkID, data []byte) {
 	// Skip entirely during shutdown. The local raft may already be down
 	// (or about to be) — trying to apply would fail with "raft is already
