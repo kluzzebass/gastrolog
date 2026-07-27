@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"gastrolog/internal/glid"
 	"github.com/google/uuid"
@@ -316,14 +317,27 @@ func (s *Scheduler) Rebuild(maxConcurrent int) error {
 	return nil
 }
 
+// ErrJobExists is returned by AddJob when a job of that name is already
+// registered.
+//
+// AddJob's presence check and its registration happen under a single hold of
+// s.mu, so this error IS the atomic "someone else got there first" answer.
+// Callers whose registration is idempotent by nature (re-run on every config
+// apply) should test for it with errors.Is rather than guarding the call with
+// HasJob: the pre-check is a check-then-act race and it hides genuine
+// registration failures behind a shape that looks deliberate. See
+// gastrolog-69sjlj.
+var ErrJobExists = errors.New("scheduled job already exists")
+
 // AddJob registers a named cron job. The name must be unique across all subsystems.
 // The task function and its arguments are passed to gocron.NewTask.
+// Returns ErrJobExists if the name is already taken.
 func (s *Scheduler) AddJob(name, cronExpr string, taskFn any, args ...any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if _, exists := s.jobs[name]; exists {
-		return fmt.Errorf("scheduled job already exists: %s", name)
+		return fmt.Errorf("%w: %s", ErrJobExists, name)
 	}
 
 	j, err := s.scheduler.NewJob(
