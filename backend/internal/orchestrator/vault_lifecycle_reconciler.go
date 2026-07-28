@@ -152,6 +152,18 @@ type VaultLifecycleReconciler struct {
 	// observe what would have been scheduled without spinning up the
 	// full orchestrator scheduler. Phase 3 (gastrolog-1huz5).
 	postSealHook func(vaultID glid.GLID, cm chunk.ChunkManager, id chunk.ChunkID)
+
+	// sealResumeAttempts counts how many times the STEADY-STATE pass has
+	// re-driven each chunk's post-seal. Guarded by mu.
+	//
+	// The tick re-selects any entry still in Sealing, and the RunOnceIfAbsent
+	// claim only prevents an overlapping duplicate — it frees the name when the
+	// job completes, including when it completes by failing. So without a bound,
+	// a chunk whose post-seal can never succeed gets a fresh GLCB rebuild on
+	// every pass, at a cadence an operator can set to one second. Attempts are
+	// counted rather than timed: a retry budget is about how many times the work
+	// has been proven not to help, which wall-clock does not measure.
+	sealResumeAttempts map[chunk.ChunkID]int
 }
 
 // NewVaultLifecycleReconciler creates a reconciler for a vault instance.
@@ -503,7 +515,104 @@ func (r *VaultLifecycleReconciler) reconcileSealingResume(v *reconcileView) {
 		}
 		schedule = r.orch.schedulePostSeal
 	}
-	r.resumeSealingEntries(v.entries, v.localMetas, schedule, "seal-resume", false)
+	r.forgetSettledSealResumes(v.entries)
+	r.resumeSealingEntries(v.entries, v.localMetas, r.budgetedResume(schedule), "seal-resume", false)
+}
+
+// maxSealResumeAttempts bounds how many times the steady-state pass re-drives
+// one chunk's post-seal before it stops and raises an alarm instead.
+//
+// Three because the retry only pays off for a failure that is not about this
+// chunk — a transient disk or announce error. A post-seal that fails on the
+// chunk's own bytes fails identically every time, and repeating it is a rebuild
+// and re-announce per pass forever: the duplicate-work shape gastrolog-3hwngy
+// postmortemed. Past the budget the condition is degraded and belongs in front
+// of an operator, not in a loop.
+const maxSealResumeAttempts = 3
+
+// budgetedResume wraps the schedule callback with the retry budget, so the
+// policy lives here and resumeSealingEntries stays shared with the restore
+// pass — which is deliberately unbounded, being a fresh start after a crash
+// rather than a repetition of work already proven not to help.
+func (r *VaultLifecycleReconciler) budgetedResume(
+	schedule func(glid.GLID, chunk.ChunkManager, chunk.ChunkID),
+) func(glid.GLID, chunk.ChunkManager, chunk.ChunkID) {
+	return func(vaultID glid.GLID, cm chunk.ChunkManager, id chunk.ChunkID) {
+		r.mu.Lock()
+		if r.sealResumeAttempts == nil {
+			r.sealResumeAttempts = make(map[chunk.ChunkID]int)
+		}
+		r.sealResumeAttempts[id]++
+		attempts := r.sealResumeAttempts[id]
+		r.mu.Unlock()
+
+		if attempts > maxSealResumeAttempts {
+			// Report once, on the pass that crosses the budget. Later passes
+			// stay silent: the alarm is standing and nothing has changed.
+			if attempts == maxSealResumeAttempts+1 {
+				r.reportSealResumeGaveUp(vaultID, id)
+			}
+			return
+		}
+		schedule(vaultID, cm, id)
+	}
+}
+
+// reportSealResumeGaveUp records that a chunk has exhausted its resume budget:
+// a warn line for the log, and a standing alarm because the chunk is left
+// neither writable nor durable-complete and nothing else surfaces that.
+func (r *VaultLifecycleReconciler) reportSealResumeGaveUp(vaultID glid.GLID, id chunk.ChunkID) {
+	r.logger.Warn("seal-resume: giving up on stranded chunk",
+		"chunk", id, "attempts", maxSealResumeAttempts)
+	if r.orch == nil {
+		return
+	}
+	sink := r.orch.alertSink()
+	if sink == nil {
+		return
+	}
+	sink.Raise("seal-stranded", id.String(),
+		fmt.Sprintf("Chunk %s in vault %s is stuck in Sealing: post-seal did not complete in %d attempts. "+
+			"The chunk is neither writable nor durable-complete.",
+			id, vaultID, maxSealResumeAttempts))
+}
+
+// forgetSettledSealResumes drops retry state for chunks that are no longer
+// Sealing, and clears their alarm. A chunk that reached Sealed is settled; one
+// that left the manifest entirely is gone. Without this the budget would be
+// spent permanently, so a later legitimate strand of the same chunk id would
+// never be retried.
+func (r *VaultLifecycleReconciler) forgetSettledSealResumes(entries []vaultctlfsm.ManifestEntry) {
+	r.mu.Lock()
+	if len(r.sealResumeAttempts) == 0 {
+		r.mu.Unlock()
+		return
+	}
+	stillSealing := make(map[chunk.ChunkID]bool, len(entries))
+	for _, e := range entries {
+		if e.State == chunk.ChunkStateSealing {
+			stillSealing[e.ID] = true
+		}
+	}
+	var settled []chunk.ChunkID
+	for id := range r.sealResumeAttempts {
+		if !stillSealing[id] {
+			settled = append(settled, id)
+			delete(r.sealResumeAttempts, id)
+		}
+	}
+	r.mu.Unlock()
+
+	if r.orch == nil {
+		return
+	}
+	sink := r.orch.alertSink()
+	if sink == nil {
+		return
+	}
+	for _, id := range settled {
+		sink.Clear("seal-stranded", id.String())
+	}
 }
 
 // SweepSealingResume is the isolated entry point for the seal-resume category,
