@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"log/slog"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +26,24 @@ const (
 	JobStatusCompleted JobStatus = 3
 	JobStatusFailed    JobStatus = 4
 )
+
+// String makes the status readable wherever a job is logged. Without it a
+// stalled-job diagnostic reports "status=2", which is the same amount of
+// information as reporting nothing.
+func (s JobStatus) String() string {
+	switch s {
+	case JobStatusPending:
+		return "pending"
+	case JobStatusRunning:
+		return "running"
+	case JobStatusCompleted:
+		return "completed"
+	case JobStatusFailed:
+		return "failed"
+	default:
+		return "unknown(" + strconv.Itoa(int(s)) + ")"
+	}
+}
 
 // JobProgress tracks progress counters and errors for a running or completed job.
 // Methods are safe for concurrent use.
