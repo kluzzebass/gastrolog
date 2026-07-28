@@ -622,11 +622,11 @@ func (s *Scheduler) runOnce(name string, claim *onceClaim, taskFn any, args ...a
 		gocron.NewTask(taskFn, args...),
 		gocron.WithName(name),
 		gocron.WithEventListeners(
-			gocron.AfterJobRuns(func(_ uuid.UUID, jobName string) {
-				s.completeOneTimeJob(jobName)
+			gocron.AfterJobRuns(func(jobID uuid.UUID, jobName string) {
+				s.completeOneTimeJob(jobID, jobName)
 			}),
-			gocron.AfterJobRunsWithError(func(_ uuid.UUID, jobName string, _ error) {
-				s.completeOneTimeJob(jobName)
+			gocron.AfterJobRunsWithError(func(jobID uuid.UUID, jobName string, _ error) {
+				s.completeOneTimeJob(jobID, jobName)
 			}),
 		),
 	)
@@ -702,11 +702,11 @@ func (s *Scheduler) Submit(name string, fn func(context.Context, *JobProgress)) 
 		gocron.NewTask(wrapper),
 		gocron.WithName(name),
 		gocron.WithEventListeners(
-			gocron.AfterJobRuns(func(_ uuid.UUID, jobName string) {
-				s.completeOneTimeJob(jobName)
+			gocron.AfterJobRuns(func(jobID uuid.UUID, jobName string) {
+				s.completeOneTimeJob(jobID, jobName)
 			}),
-			gocron.AfterJobRunsWithError(func(_ uuid.UUID, jobName string, _ error) {
-				s.completeOneTimeJob(jobName)
+			gocron.AfterJobRunsWithError(func(jobID uuid.UUID, jobName string, _ error) {
+				s.completeOneTimeJob(jobID, jobName)
 			}),
 		),
 	)
@@ -745,34 +745,50 @@ func (s *Scheduler) Submit(name string, fn func(context.Context, *JobProgress)) 
 	return id
 }
 
-// completeOneTimeJob moves a finished one-time job from the active maps
-// to the completed map so its progress remains available for polling.
-func (s *Scheduler) completeOneTimeJob(name string) {
+// completeOneTimeJob moves a finished one-time job from the active maps into
+// the completed registry.
+//
+// Keyed by the job's OWN id, which gocron hands to the event listener. It used
+// to discard that id and re-derive one by looking the NAME up in s.jobs — which
+// is only the same job when no one has since registered another under that
+// name. RunOnce overwrites s.jobs[name] without touching the job already
+// running, so after an overwrite the first job's completion recorded the
+// SECOND job's id, stamped it with a LastRun the second job had not reached,
+// and deleted the registry entry while that job was still running. The second
+// job's own completion then found nothing under the name and returned silently:
+// no completion record, no onJobChange notification, and any progress it wrote
+// afterwards leaked with nothing left to delete it. WaitIdle and
+// HasPendingPrefix read s.jobs, so they reported idle mid-flight
+// (gastrolog-1scomn).
+//
+// Both bodies still run — a duplicate schedule is the caller's bug, and this
+// does not try to hide it. What it stops is the scheduler misreporting its own
+// state when it happens.
+func (s *Scheduler) completeOneTimeJob(id uuid.UUID, name string) {
 	s.mu.Lock()
 
-	j, ok := s.jobs[name]
-	if !ok {
-		s.mu.Unlock()
-		return
-	}
-
-	id := j.ID().String()
+	jobID := id.String()
 	info := JobInfo{
-		ID:          id,
+		ID:          jobID,
 		Name:        name,
 		Description: s.descriptions[name],
 		Schedule:    "once",
-		Progress:    s.progress[id],
+		Progress:    s.progress[jobID],
 	}
-	if lr, err := j.LastRun(); err == nil {
-		info.LastRun = lr
+	// Retire the name only when it still points at THIS job. If another job has
+	// taken it, that job is still live and its registry entry is not ours to
+	// delete.
+	if j, ok := s.jobs[name]; ok && j.ID() == id {
+		if lr, err := j.LastRun(); err == nil {
+			info.LastRun = lr
+		}
+		delete(s.jobs, name)
+		delete(s.schedules, name)
+		delete(s.descriptions, name)
 	}
 
-	s.completed[id] = info
-	delete(s.jobs, name)
-	delete(s.schedules, name)
-	delete(s.descriptions, name)
-	delete(s.progress, id)
+	s.completed[jobID] = info
+	delete(s.progress, jobID)
 	notify := s.onJobChange
 	s.mu.Unlock()
 
