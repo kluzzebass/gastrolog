@@ -18,6 +18,11 @@ import (
 	"gastrolog/internal/chunk"
 )
 
+// catchupSweepJob is the scheduler job that carries ReconcileTick — and with it
+// the seal-resume category. Mirrors catchupSweepJob, which this
+// external test package cannot see, the same way retentionSweepJob does.
+const catchupSweepJob = "vault-catchup-sweep"
+
 // TestOrchRel_StrandedSeal_ResumesWithoutRestart strands a seal the way a
 // failed post-seal job does — the FSM entry advances to Sealing and nothing
 // ever runs the second half — and then lets the steady-state reconcile pass

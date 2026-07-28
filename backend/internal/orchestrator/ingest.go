@@ -76,6 +76,23 @@ func (o *Orchestrator) schedulePostSeal(vaultID glid.GLID, cm chunk.ChunkManager
 	o.scheduleReplication(vaultID, chunkID, followerTargets)
 }
 
+// postSealJobName is the scheduler name claimed for one chunk's post-seal. The
+// claim IS this string, so anything that needs to know whether a post-seal is
+// already in flight has to build it the same way — hence one function rather
+// than two format calls that can drift.
+func postSealJobName(vaultID glid.GLID, chunkID chunk.ChunkID) string {
+	return fmt.Sprintf("post-seal:%s:%s", vaultID, chunkID)
+}
+
+// postSealInFlight reports whether a post-seal job for this chunk is currently
+// registered — i.e. RunOnceIfAbsent would decline a second one.
+func (o *Orchestrator) postSealInFlight(vaultID glid.GLID, chunkID chunk.ChunkID) bool {
+	if o == nil || o.scheduler == nil {
+		return false
+	}
+	return o.scheduler.HasJob(postSealJobName(vaultID, chunkID))
+}
+
 // schedulePostSealProcessing registers the post-seal pipeline for one chunk.
 // Split out of schedulePostSeal to keep that function's nesting within budget.
 func (o *Orchestrator) schedulePostSealProcessing(
@@ -88,7 +105,7 @@ func (o *Orchestrator) schedulePostSealProcessing(
 	// Describe BEFORE scheduling — see scheduleReplication for why (missing
 	// label on the Scheduled event, leaked descriptions entry when the job
 	// finishes first). gastrolog-69sjlj.
-	name := fmt.Sprintf("post-seal:%s:%s", vaultID, chunkID)
+	name := postSealJobName(vaultID, chunkID)
 	o.scheduler.Describe(name, fmt.Sprintf("Post-seal pipeline for chunk %s", chunkID))
 	wrappedFn := func(ctx context.Context, id chunk.ChunkID) error {
 		if err := processor.PostSealProcess(ctx, id); err != nil {

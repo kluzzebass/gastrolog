@@ -14,6 +14,7 @@ package orchestrator
 // every second, forever, for a chunk that will never succeed.
 
 import (
+	"context"
 	"log/slog"
 	"strings"
 	"testing"
@@ -138,5 +139,58 @@ func promoteToSealed(t *testing.T, fsm *vaultctlfsm.FSM, id chunk.ChunkID) {
 	now := time.Now()
 	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(id, now, 1, 1, now, now, now, false, now)}); err != nil {
 		t.Fatalf("promote %s to sealed: %v", id, err)
+	}
+}
+
+// An in-flight post-seal must not spend retry budget.
+//
+// budgetedResume originally counted CALLS. schedulePostSeal's RunOnceIfAbsent
+// declines while a job for that chunk is already registered, so a GLCB build
+// spanning several ticks was charged a retry for every tick it was healthily
+// running — and then abandoned when the budget ran out. Observed directly: a
+// stranded chunk resumed at :06, :07 and :08 under a compressed sweep cadence,
+// then never again. That is strictly worse than the unbounded retry the budget
+// replaced, because unbounded at least kept trying.
+//
+// Uses a real scheduler with a real claim rather than a stub, so the thing under
+// test is the same HasJob the production path consults.
+func TestSealResumeDoesNotSpendBudgetWhilePostSealIsInFlight(t *testing.T) {
+	t.Parallel()
+	rec, idSealing := sealResumeFixture(t, slog.Default())
+	orch := newTestOrch(t, Config{LocalNodeID: "node-A"})
+	rec.orch = orch
+	scheduled := recordScheduled(rec)
+
+	// Claim the chunk's post-seal name with a job that will not finish yet —
+	// exactly the state a GLCB build in progress leaves the scheduler in.
+	release := make(chan struct{})
+	if err := orch.scheduler.RunOnce(postSealJobName(rec.vaultID, idSealing),
+		func(context.Context) error { <-release; return nil }); err != nil {
+		t.Fatalf("claim post-seal name: %v", err)
+	}
+	if !orch.postSealInFlight(rec.vaultID, idSealing) {
+		t.Fatal("fixture assumption broken: the claimed job is not reported in flight")
+	}
+
+	for range maxSealResumeAttempts * 3 {
+		rec.ReconcileTick()
+	}
+	if len(*scheduled) != 0 {
+		t.Fatalf("scheduled %d times while a post-seal was in flight; want 0", len(*scheduled))
+	}
+	if got := rec.sealResumeAttempts[idSealing]; got != 0 {
+		t.Fatalf("spent %d of the retry budget on passes that enqueued nothing; want 0", got)
+	}
+
+	// Let it finish and drain, then the budget applies as normal.
+	close(release)
+	requireIdle(t, orch.scheduler, postSealDrainBudget)
+
+	for range maxSealResumeAttempts * 3 {
+		rec.ReconcileTick()
+	}
+	if len(*scheduled) != maxSealResumeAttempts {
+		t.Errorf("after the job cleared, scheduled %d times, want the full budget of %d",
+			len(*scheduled), maxSealResumeAttempts)
 	}
 }

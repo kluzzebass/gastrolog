@@ -97,6 +97,7 @@ type reconcilerHost interface {
 
 	// Post-seal scheduling and pipeline follow-up work.
 	schedulePostSeal(vaultID glid.GLID, cm chunk.ChunkManager, chunkID chunk.ChunkID)
+	postSealInFlight(vaultID glid.GLID, chunkID chunk.ChunkID) bool
 	postSealWork(vaultID glid.GLID, cm chunk.ChunkManager, chunkID chunk.ChunkID)
 	schedulePipelineCloudUpload(vaultID glid.GLID, chunkID chunk.ChunkID)
 	noteRegisterSkip(vaultID glid.GLID, id chunk.ChunkID, reason string)
@@ -538,6 +539,16 @@ func (r *VaultLifecycleReconciler) budgetedResume(
 	schedule func(glid.GLID, chunk.ChunkManager, chunk.ChunkID),
 ) func(glid.GLID, chunk.ChunkManager, chunk.ChunkID) {
 	return func(vaultID glid.GLID, cm chunk.ChunkManager, id chunk.ChunkID) {
+		// A post-seal already running for this chunk means RunOnceIfAbsent would
+		// decline a second one, so this pass costs nothing and must not spend
+		// budget. Counting calls rather than enqueues abandoned work that was
+		// progressing fine: a GLCB build spanning a few ticks burned its own
+		// retry budget and was then given up on, which is strictly worse than
+		// the unbounded retry this budget replaced.
+		if r.orch != nil && r.orch.postSealInFlight(vaultID, id) {
+			return
+		}
+
 		r.mu.Lock()
 		if r.sealResumeAttempts == nil {
 			r.sealResumeAttempts = make(map[chunk.ChunkID]int)
