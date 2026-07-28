@@ -64,33 +64,8 @@ func (o *Orchestrator) schedulePostSeal(vaultID glid.GLID, cm chunk.ChunkManager
 		o.mu.RUnlock()
 	}
 
-	processor, ok := cm.(chunk.ChunkPostSealProcessor)
-	if ok {
-		// Describe BEFORE scheduling — see scheduleReplication for why
-		// (missing label on the Scheduled event, leaked descriptions entry
-		// when the job finishes first). gastrolog-69sjlj.
-		name := fmt.Sprintf("post-seal:%s:%s", vaultID, chunkID)
-		o.scheduler.Describe(name, fmt.Sprintf("Post-seal pipeline for chunk %s", chunkID))
-		wrappedFn := func(ctx context.Context, id chunk.ChunkID) error {
-			if err := processor.PostSealProcess(ctx, id); err != nil {
-				return err
-			}
-			// Notify: compression/indexing done, chunk meta changed again
-			// (DiskBytes, etc.). Carry the fresh meta so clients can patch
-			// their cache without a refetch.
-			if meta, err := cm.Meta(id); err == nil {
-				o.EmitChunkSealed(vaultID, meta)
-			} else {
-				o.NotifyChunkChange()
-			}
-			// Schedule replication as a separate job — never blocks the
-			// post-seal scheduler slot.
-			o.scheduleReplication(vaultID, id, followerTargets)
-			return nil
-		}
-		if err := o.scheduler.RunOnce(name, wrappedFn, context.Background(), chunkID); err != nil {
-			o.logger.Warn("failed to schedule post-seal", "name", name, "error", err)
-		}
+	if processor, ok := cm.(chunk.ChunkPostSealProcessor); ok {
+		o.schedulePostSealProcessing(vaultID, cm, processor, chunkID, followerTargets)
 		return
 	}
 
@@ -99,6 +74,60 @@ func (o *Orchestrator) schedulePostSeal(vaultID glid.GLID, cm chunk.ChunkManager
 	// chunkfile.Manager implemented it, and it now goes through the
 	// PostSealProcess branch above.
 	o.scheduleReplication(vaultID, chunkID, followerTargets)
+}
+
+// schedulePostSealProcessing registers the post-seal pipeline for one chunk.
+// Split out of schedulePostSeal to keep that function's nesting within budget.
+func (o *Orchestrator) schedulePostSealProcessing(
+	vaultID glid.GLID,
+	cm chunk.ChunkManager,
+	processor chunk.ChunkPostSealProcessor,
+	chunkID chunk.ChunkID,
+	followerTargets []system.ReplicationTarget,
+) {
+	// Describe BEFORE scheduling — see scheduleReplication for why (missing
+	// label on the Scheduled event, leaked descriptions entry when the job
+	// finishes first). gastrolog-69sjlj.
+	name := fmt.Sprintf("post-seal:%s:%s", vaultID, chunkID)
+	o.scheduler.Describe(name, fmt.Sprintf("Post-seal pipeline for chunk %s", chunkID))
+	wrappedFn := func(ctx context.Context, id chunk.ChunkID) error {
+		if err := processor.PostSealProcess(ctx, id); err != nil {
+			return err
+		}
+		// Notify: compression/indexing done, chunk meta changed again
+		// (DiskBytes, etc.). Carry the fresh meta so clients can patch
+		// their cache without a refetch.
+		if meta, err := cm.Meta(id); err == nil {
+			o.EmitChunkSealed(vaultID, meta)
+		} else {
+			o.NotifyChunkChange()
+		}
+		// Schedule replication as a separate job — never blocks the
+		// post-seal scheduler slot.
+		o.scheduleReplication(vaultID, id, followerTargets)
+		return nil
+	}
+
+	// Claim the name. Several independent paths reach post-seal for one chunk
+	// with no coordination between them — postSealWork from ingest, two direct
+	// calls in vault_ops, vault_drain, and the lifecycle reconciler's
+	// sealLocalActive / sealMetadataOnlyOrphan — and RunOnce would overwrite the
+	// registry entry without stopping the job already running, so the work would
+	// run twice. It is not idempotent: sealToGLCB rebuilds the GLCB from the
+	// record cursor with no already-built short-circuit, then re-announces and
+	// re-enters the upload path. That is the shape gastrolog-3hwngy postmortemed
+	// as duplicate S3 PUTs and duplicate Raft commands, and it fixed the
+	// cloud-upload claim the same way (gastrolog-3xr5dk).
+	//
+	// A claim on IN-FLIGHT work only: once the job completes the name frees, so
+	// a later post-seal of the same chunk still runs.
+	scheduled, err := o.scheduler.RunOnceIfAbsent(name, wrappedFn, context.Background(), chunkID)
+	if err != nil {
+		o.logger.Warn("failed to schedule post-seal", "name", name, "error", err)
+	} else if !scheduled {
+		o.logger.Debug("post-seal already in flight for this chunk; not scheduling a second",
+			"vault", vaultID, "chunk", chunkID)
+	}
 }
 
 // followerReplicationTargetsLocked returns the follower targets for the vault
