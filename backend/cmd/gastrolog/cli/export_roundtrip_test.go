@@ -55,6 +55,7 @@ var restorableSections = []string{
 	"tls",
 	"maxmind",
 	"cluster",
+	"lookup",
 }
 
 // referenceOnlySections are exported so the document is readable, but cannot
@@ -212,6 +213,23 @@ func TestConfigImportReplaceRemovesStaleEntities(t *testing.T) {
 	client := server.NewClient(dstURL)
 	staleVault := glid.New()
 	mustPutVault(t, ctx, client, staleVault, "stale-vault", nil)
+	// A lookup the document does not contain. proto3 cannot express "clear this
+	// list", so before gastrolog-4j7srt a stale enrichment table survived
+	// --replace and kept enriching records the restored config never mentions.
+	// Deliberately a YAML-file lookup: the document contains http, static, mmdb
+	// and csv lookups, and PutLookupSettings replaces each list it CONTAINS —
+	// so a stale entry of one of those kinds is cleared as a side effect and
+	// proves nothing. Only a kind the document omits entirely exercises the
+	// gap, because proto3 cannot express "clear this list".
+	if _, err := client.System.PutLookupSettings(ctx, connect.NewRequest(&v1.PutLookupSettingsRequest{
+		Lookup: &v1.PutLookupSettings{
+			YamlFileLookups: []*v1.YAMLFileLookupEntry{{
+				Name: "stale-yaml", FileId: glid.New().ToProto(), KeyColumn: "host",
+			}},
+		},
+	})); err != nil {
+		t.Fatalf("PutLookupSettings (stale): %v", err)
+	}
 	if _, err := client.System.PutRoute(ctx, connect.NewRequest(&v1.PutRouteRequest{
 		Config: &v1.RouteConfig{
 			Id: glid.New().ToProto(), Name: "stale-route",
@@ -246,6 +264,21 @@ func TestConfigImportReplaceRemovesStaleEntities(t *testing.T) {
 	if len(services) != 1 || services[0].Name != "minio" {
 		t.Errorf("after --replace: cloud services = %+v, want only the imported one", services)
 	}
+	// The stale lookup must be gone, and only the document's remain.
+	settingsAfter, err := server.NewClient(dstURL).System.GetSettings(ctx, connect.NewRequest(&v1.GetSettingsRequest{}))
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	for _, e := range settingsAfter.Msg.GetLookup().GetYamlFileLookups() {
+		if e.GetName() == "stale-yaml" {
+			t.Errorf("after --replace: stale lookup %q survived — the document has no "+
+				"yaml lookups, so nothing replaced that list", e.GetName())
+		}
+	}
+	if got := len(settingsAfter.Msg.GetLookup().GetStaticLookups()); got != 1 {
+		t.Errorf("after --replace: static lookups = %d, want 1 (the imported one)", got)
+	}
+
 	// The archival chain must survive the round trip intact. An empty class
 	// here would read as "delete at this age" rather than "move to a colder
 	// tier" — the round trip losing this field is a data-destroying outcome,
@@ -264,8 +297,19 @@ func TestConfigImportReplaceRemovesStaleEntities(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListVaults: %v", err)
 	}
-	if len(vaults) != 1 || vaults[0].Name != "logs" {
-		t.Errorf("after --replace: vaults = %+v, want only the imported one", vaults)
+	// Exactly the fixture's vaults, and nothing the target had before. The
+	// fixture seeds two: a memory vault and a file/cloud-tiered one whose
+	// storage_class, replication_factor and cache_* fields a memory vault never
+	// exercises (gastrolog-4j7srt).
+	gotVaults := map[string]bool{}
+	for _, v := range vaults {
+		gotVaults[v.Name] = true
+	}
+	if len(vaults) != 2 || !gotVaults["logs"] || !gotVaults["tiered"] {
+		t.Errorf("after --replace: vaults = %+v, want exactly the two imported ones", vaults)
+	}
+	if gotVaults["stale-vault"] {
+		t.Error("after --replace: the target's pre-existing vault survived")
 	}
 }
 
@@ -503,6 +547,54 @@ func seedEveryConfigType(t *testing.T, ctx context.Context, addr string, store *
 		Config: &v1.RetentionPolicyConfig{Id: retentionID.ToProto(), Name: "thirty-days", MaxAge: "30d", MaxSize: "50GB"},
 	})); err != nil {
 		t.Fatalf("PutRetentionPolicy: %v", err)
+	}
+
+	// A file-backed, cloud-tiered vault with the fields a memory vault never
+	// exercises. The round trip is a byte-diff of export -> import -> export, so
+	// it can only detect the loss of fields the FIXTURE populated: a vault that
+	// only ever sets id/name/enabled/type/memory_budget leaves storage_class,
+	// replication_factor, cache_* and the retention disposition untested
+	// (gastrolog-4j7srt).
+	tieredID := glid.New()
+	if _, err := client.System.PutVault(ctx, connect.NewRequest(&v1.PutVaultRequest{
+		Config: &v1.VaultConfig{
+			Id: tieredID.ToProto(), Name: "tiered", Enabled: true,
+			Type:                 v1.VaultType_VAULT_TYPE_FILE,
+			StorageClass:         2,
+			ReplicationFactor:    3,
+			CacheEviction:        "ttl",
+			CacheBudget:          "256MiB",
+			CacheTtl:             "12h",
+			RetentionDisposition: "delete",
+		},
+	})); err != nil {
+		t.Fatalf("PutVault tiered: %v", err)
+	}
+
+	// Enrichment lookup tables. Every kind, with non-default fields set: these
+	// were absent from the document entirely, and a fixture that leaves a field
+	// zero cannot detect that field being dropped (gastrolog-4j7srt).
+	if _, err := client.System.PutLookupSettings(ctx, connect.NewRequest(&v1.PutLookupSettingsRequest{
+		Lookup: &v1.PutLookupSettings{
+			HttpLookups: []*v1.HTTPLookupEntry{{
+				Name: "users", UrlTemplate: "http://api/users/{value}",
+				Headers: map[string]string{"Authorization": "Bearer x"},
+				Timeout: "3s", CacheTtl: "5m", CacheSize: 500,
+				ResponsePaths: []string{"$.data.user"},
+			}},
+			StaticLookups: []*v1.StaticLookupEntry{{
+				Name: "teams", KeyColumn: "host", ValueColumns: []string{"team", "owner"},
+				Rows: []*v1.StaticLookupRow{
+					{Values: map[string]string{"host": "web-1", "team": "frontend", "owner": "ana"}},
+				},
+			}},
+			MmdbLookups: []*v1.MMDBLookupEntry{{Name: "geoip", DbType: "city"}},
+			CsvLookups: []*v1.CSVLookupEntry{{
+				Name: "assets", KeyColumn: "hostname", ValueColumns: []string{"rack", "site"},
+			}},
+		},
+	})); err != nil {
+		t.Fatalf("PutLookupSettings: %v", err)
 	}
 
 	cloudID := glid.New()

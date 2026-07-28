@@ -216,6 +216,7 @@ func importEntities(ctx context.Context, client *server.Client, doc *exportDoc) 
 		importIngesters,
 		importRoutes,
 		importLogLevels,
+		importLookups,
 		importCertificates,
 		reportUnrestorable,
 	} {
@@ -401,6 +402,31 @@ func importRoutes(ctx context.Context, client *server.Client, r *resolver, doc *
 	return imported, nil
 }
 
+// importLookups restores the enrichment lookup tables. PutLookupSettings
+// replaces each list wholesale when present, so this is also the --replace
+// behaviour: a lookup on the target that the document does not contain is
+// removed, which is what "restore this configuration" has to mean
+// (gastrolog-4j7srt).
+func importLookups(ctx context.Context, client *server.Client, _ *resolver, doc *exportDoc) (int, error) {
+	if doc.Lookup == nil || doc.Lookup.Msg == nil {
+		return 0, nil
+	}
+	l := doc.Lookup.Msg
+	if _, err := client.System.PutLookupSettings(ctx, connect.NewRequest(&v1.PutLookupSettingsRequest{
+		Lookup: &v1.PutLookupSettings{
+			HttpLookups:     l.GetHttpLookups(),
+			JsonFileLookups: l.GetJsonFileLookups(),
+			YamlFileLookups: l.GetYamlFileLookups(),
+			MmdbLookups:     l.GetMmdbLookups(),
+			CsvLookups:      l.GetCsvLookups(),
+			StaticLookups:   l.GetStaticLookups(),
+		},
+	})); err != nil {
+		return 0, fmt.Errorf("import lookups: %w", err)
+	}
+	return 1, nil
+}
+
 func importLogLevels(ctx context.Context, client *server.Client, _ *resolver, doc *exportDoc) (int, error) {
 	if doc.LogLevels == nil || doc.LogLevels.Msg == nil {
 		return 0, nil
@@ -497,6 +523,48 @@ func ensureProtoID(name string, existing map[string]string, id *[]byte) {
 }
 
 // deleteAll removes all config entities (not server config).
+// deleteAllLookups removes every enrichment lookup table from the target.
+//
+// Needed because PutLookupSettings replaces a list only when the request
+// CONTAINS it, and proto3 cannot distinguish an empty repeated field from an
+// absent one — so importing a document with no yaml lookups (say) could not
+// clear the target's, and stale enrichment tables would survive a --replace
+// (gastrolog-4j7srt). Split out of deleteAll to keep that function within the
+// cognitive-complexity budget.
+func deleteAllLookups(ctx context.Context, client *server.Client) error {
+	settings, err := client.System.GetSettings(ctx, connect.NewRequest(&v1.GetSettingsRequest{}))
+	if err != nil {
+		// Settings unreadable: nothing to clear that we can name.
+		return nil //nolint:nilerr // best-effort clear; the import itself still reports failures
+	}
+	l := settings.Msg.GetLookup()
+	var names []string
+	for _, e := range l.GetHttpLookups() {
+		names = append(names, e.GetName())
+	}
+	for _, e := range l.GetJsonFileLookups() {
+		names = append(names, e.GetName())
+	}
+	for _, e := range l.GetYamlFileLookups() {
+		names = append(names, e.GetName())
+	}
+	for _, e := range l.GetMmdbLookups() {
+		names = append(names, e.GetName())
+	}
+	for _, e := range l.GetCsvLookups() {
+		names = append(names, e.GetName())
+	}
+	for _, e := range l.GetStaticLookups() {
+		names = append(names, e.GetName())
+	}
+	for _, name := range names {
+		if _, err := client.System.DeleteLookup(ctx, connect.NewRequest(&v1.DeleteLookupRequest{Name: name})); err != nil {
+			return fmt.Errorf("delete lookup %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
 func deleteAll(ctx context.Context, client *server.Client) error {
 	resp, err := client.System.GetSystem(ctx, connect.NewRequest(&v1.GetSystemRequest{}))
 	if err != nil {
@@ -542,6 +610,10 @@ func deleteAll(ctx context.Context, client *server.Client) error {
 		if _, err := client.System.DeleteCloudService(ctx, connect.NewRequest(&v1.DeleteCloudServiceRequest{Id: cs.Id})); err != nil {
 			return fmt.Errorf("delete cloud service %s: %w", cs.Name, err)
 		}
+	}
+
+	if err := deleteAllLookups(ctx, client); err != nil {
+		return err
 	}
 
 	// Delete certs.

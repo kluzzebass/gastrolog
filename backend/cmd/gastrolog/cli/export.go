@@ -45,13 +45,20 @@ type exportDoc struct {
 	Users              []*userExport                        `json:"users,omitempty"`
 
 	// Server settings — hierarchical.
-	Auth                 *authExport                   `json:"auth,omitempty"`
-	Query                *queryExport                  `json:"query,omitempty"`
-	Scheduler            *schedulerExport              `json:"scheduler,omitempty"`
-	TLS                  *tlsExport                    `json:"tls,omitempty"`
-	MaxMind              *maxmindExport                `json:"maxmind,omitempty"`
-	Cluster              *clusterExport                `json:"cluster,omitempty"`
-	LogLevels            *protoMsg[*v1.LogLevelConfig] `json:"log_levels,omitempty"`
+	Auth      *authExport                   `json:"auth,omitempty"`
+	Query     *queryExport                  `json:"query,omitempty"`
+	Scheduler *schedulerExport              `json:"scheduler,omitempty"`
+	TLS       *tlsExport                    `json:"tls,omitempty"`
+	MaxMind   *maxmindExport                `json:"maxmind,omitempty"`
+	Cluster   *clusterExport                `json:"cluster,omitempty"`
+	LogLevels *protoMsg[*v1.LogLevelConfig] `json:"log_levels,omitempty"`
+	// Lookup carries the enrichment lookup tables (HTTP, JSON/YAML file, MMDB,
+	// CSV, static). These were silently absent from the document — not
+	// exported, not imported, and not named in `excluded` either, so a restore
+	// dropped every lookup definition with nothing to indicate it
+	// (gastrolog-4j7srt). The uploaded blobs they reference are separately
+	// excluded as managed files; this is the configuration that points at them.
+	Lookup               *protoMsg[*v1.LookupSettings] `json:"lookup,omitempty"`
 	SetupWizardDismissed bool                          `json:"setup_wizard_dismissed,omitempty"`
 }
 
@@ -365,6 +372,13 @@ func settingsToExport(sc *v1.GetSettingsResponse) (auth *authExport, query *quer
 
 // logLevelsExport boxes the log level config for the document, or returns nil
 // when the cluster has never set one.
+func lookupExport(cfg *v1.LookupSettings) *protoMsg[*v1.LookupSettings] {
+	if cfg == nil {
+		return nil
+	}
+	return &protoMsg[*v1.LookupSettings]{Msg: cfg}
+}
+
 func logLevelsExport(cfg *v1.LogLevelConfig) *protoMsg[*v1.LogLevelConfig] {
 	if cfg == nil {
 		return nil
@@ -491,6 +505,7 @@ func newExportCmd() *cobra.Command {
 				MaxMind:              maxmind,
 				Cluster:              cluster,
 				LogLevels:            logLevelsExport(cfgResp.Msg.LogLevels),
+				Lookup:               lookupExport(scResp.Msg.GetLookup()),
 				SetupWizardDismissed: setupDismissed,
 			}
 
