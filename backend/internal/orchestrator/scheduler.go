@@ -597,6 +597,13 @@ type onceClaim struct {
 // variants. When claim is non-nil and its conditions are not met, nothing is
 // registered and this returns (false, nil).
 func (s *Scheduler) runOnce(name string, claim *onceClaim, taskFn any, args ...any) (bool, error) {
+	return s.runOnceWith(name, claim, nil, taskFn, args...)
+}
+
+// runOnceWith is runOnce with an optional caller-supplied progress record. The
+// record cannot be registered before the job exists — s.progress is keyed by
+// job id — so it is threaded in and filed once gocron has minted one.
+func (s *Scheduler) runOnceWith(name string, claim *onceClaim, prog *JobProgress, taskFn any, args ...any) (bool, error) {
 	s.mu.Lock()
 
 	if claim != nil {
@@ -623,10 +630,10 @@ func (s *Scheduler) runOnce(name string, claim *onceClaim, taskFn any, args ...a
 		gocron.WithName(name),
 		gocron.WithEventListeners(
 			gocron.AfterJobRuns(func(jobID uuid.UUID, jobName string) {
-				s.completeOneTimeJob(jobID, jobName)
+				s.completeOneTimeJob(jobID, jobName, false, "")
 			}),
-			gocron.AfterJobRunsWithError(func(jobID uuid.UUID, jobName string, _ error) {
-				s.completeOneTimeJob(jobID, jobName)
+			gocron.AfterJobRunsWithError(func(jobID uuid.UUID, jobName string, err error) {
+				s.completeOneTimeJob(jobID, jobName, true, err.Error())
 			}),
 		),
 	)
@@ -637,11 +644,28 @@ func (s *Scheduler) runOnce(name string, claim *onceClaim, taskFn any, args ...a
 
 	s.jobs[name] = j
 	s.schedules[name] = "once"
+	jobID := j.ID().String()
+
+	// Every one-time job gets a progress record, even when its task never
+	// touches it. Two reasons: the job is otherwise invisible in the Jobs
+	// inspector beyond a bare name, and cleanupCompletedLocked DELETES any
+	// completed entry whose Progress is nil — so a RunOnce job used to vanish
+	// entirely the moment anything called ListJobs, leaving no trace that it
+	// ran, succeeded or failed (gastrolog-68dusi).
+	//
+	// If the caller supplied its own record (RunOnceWithProgress) it is already
+	// in s.progress under this id; otherwise start a status-only one.
+	if prog == nil {
+		prog = &JobProgress{Status: JobStatusRunning, StartedAt: s.now()}
+	}
+	s.progress[jobID] = prog
+
 	info := JobInfo{
-		ID:          j.ID().String(),
+		ID:          jobID,
 		Name:        name,
 		Description: s.descriptions[name],
 		Schedule:    "once",
+		Progress:    s.progress[jobID],
 	}
 	s.logger.Debug("one-time job scheduled", "name", name)
 	s.mu.Unlock()
@@ -651,6 +675,42 @@ func (s *Scheduler) runOnce(name string, claim *onceClaim, taskFn any, args ...a
 	// RWMutex — keep the two lock domains disjoint.
 	s.publishEvent(JobEventScheduled, info)
 	return true, nil
+}
+
+// RunOnceWithProgress schedules a one-time job whose task reports its own
+// progress. The fn receives a detached context and the job's JobProgress, and
+// its error marks the job failed.
+//
+// Plain RunOnce jobs now get a status-only record automatically, so this is for
+// work that has something to count — chunks pushed, records written, per-item
+// error detail. Same registration semantics as RunOnce, including the
+// last-writer-wins overwrite; use RunOnceIfAbsentWithProgress to claim a name.
+func (s *Scheduler) RunOnceWithProgress(name string, fn func(context.Context, *JobProgress) error) error {
+	_, err := s.runOnceProgress(name, nil, fn)
+	return err
+}
+
+// RunOnceIfAbsentWithProgress is RunOnceWithProgress with RunOnceIfAbsent's
+// claim: it registers only when the name is free, and reports whether it did.
+func (s *Scheduler) RunOnceIfAbsentWithProgress(name string, fn func(context.Context, *JobProgress) error) (bool, error) {
+	return s.runOnceProgress(name, &onceClaim{}, fn)
+}
+
+// runOnceProgress pre-registers a progress record, then schedules a task closed
+// over it. The record has to exist before the job does, because runOnce records
+// it in the Scheduled event's JobInfo and the task may start immediately.
+func (s *Scheduler) runOnceProgress(name string, claim *onceClaim, fn func(context.Context, *JobProgress) error) (bool, error) {
+	prog := &JobProgress{Status: JobStatusRunning, StartedAt: s.now()}
+	task := func() error {
+		ctx := context.WithoutCancel(context.Background())
+		if err := fn(ctx, prog); err != nil {
+			prog.Fail(s.now(), err.Error())
+			return err
+		}
+		prog.Complete(s.now())
+		return nil
+	}
+	return s.runOnceWith(name, claim, prog, task)
 }
 
 // Submit schedules a one-time job with progress tracking. Returns the gocron
@@ -703,10 +763,10 @@ func (s *Scheduler) Submit(name string, fn func(context.Context, *JobProgress)) 
 		gocron.WithName(name),
 		gocron.WithEventListeners(
 			gocron.AfterJobRuns(func(jobID uuid.UUID, jobName string) {
-				s.completeOneTimeJob(jobID, jobName)
+				s.completeOneTimeJob(jobID, jobName, false, "")
 			}),
-			gocron.AfterJobRunsWithError(func(jobID uuid.UUID, jobName string, _ error) {
-				s.completeOneTimeJob(jobID, jobName)
+			gocron.AfterJobRunsWithError(func(jobID uuid.UUID, jobName string, err error) {
+				s.completeOneTimeJob(jobID, jobName, true, err.Error())
 			}),
 		),
 	)
@@ -764,7 +824,7 @@ func (s *Scheduler) Submit(name string, fn func(context.Context, *JobProgress)) 
 // Both bodies still run — a duplicate schedule is the caller's bug, and this
 // does not try to hide it. What it stops is the scheduler misreporting its own
 // state when it happens.
-func (s *Scheduler) completeOneTimeJob(id uuid.UUID, name string) {
+func (s *Scheduler) completeOneTimeJob(id uuid.UUID, name string, failed bool, taskErr string) {
 	s.mu.Lock()
 
 	jobID := id.String()
@@ -792,14 +852,30 @@ func (s *Scheduler) completeOneTimeJob(id uuid.UUID, name string) {
 	notify := s.onJobChange
 	s.mu.Unlock()
 
+	// Stamp the terminal status. A task that reported its own outcome (Complete
+	// or Fail) keeps it; one that never touched its record is completed here, so
+	// the retained entry says something rather than sitting at "running" forever
+	// (gastrolog-68dusi).
+	if info.Progress != nil {
+		info.Progress.mu.RLock()
+		status := info.Progress.Status
+		info.Progress.mu.RUnlock()
+		if status != JobStatusCompleted && status != JobStatusFailed {
+			if failed {
+				info.Progress.Fail(s.now(), taskErr)
+			} else {
+				info.Progress.Complete(s.now())
+			}
+		}
+	}
+
 	if notify != nil {
 		notify()
 	}
-	// Classify the terminal event. A Submit-registered job has a Progress
-	// record whose Status distinguishes completed vs failed. RunOnce jobs
-	// have no progress record — we treat them as Completed regardless of
-	// the task's return value (gocron calls AfterJobRuns on both success
-	// and error, and the task's error isn't propagated to us here).
+	// Classify the terminal event from the progress record, which every
+	// one-time job now has. gocron calls a DIFFERENT listener on error, so the
+	// task's failure reaches us as the `failed` argument rather than having to
+	// be inferred (gastrolog-68dusi).
 	kind := JobEventCompleted
 	if info.Progress != nil {
 		info.Progress.mu.RLock()
