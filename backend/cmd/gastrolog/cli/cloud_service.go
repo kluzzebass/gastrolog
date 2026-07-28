@@ -253,7 +253,7 @@ func applyCloudServiceFlags(cmd *cobra.Command, cfg *v1.CloudService) {
 		for _, spec := range specs {
 			parts := splitTransitionSpec(spec)
 			cfg.Transitions = append(cfg.Transitions, &v1.CloudStorageTransition{
-				After:        parts[0],
+				After:             parts[0],
 				CloudStorageClass: parts[1],
 			})
 		}

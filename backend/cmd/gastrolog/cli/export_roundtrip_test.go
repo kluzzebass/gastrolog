@@ -246,6 +246,20 @@ func TestConfigImportReplaceRemovesStaleEntities(t *testing.T) {
 	if len(services) != 1 || services[0].Name != "minio" {
 		t.Errorf("after --replace: cloud services = %+v, want only the imported one", services)
 	}
+	// The archival chain must survive the round trip intact. An empty class
+	// here would read as "delete at this age" rather than "move to a colder
+	// tier" — the round trip losing this field is a data-destroying outcome,
+	// not a cosmetic one (gastrolog-108bcg).
+	if got := services[0].Transitions; len(got) != 2 {
+		t.Fatalf("archival transitions after round trip: %+v, want 2", got)
+	} else {
+		if got[0].After != "30d" || got[0].CloudStorageClass != "GLACIER" {
+			t.Errorf("transition[0] = %+v, want {30d GLACIER}", got[0])
+		}
+		if got[1].After != "365d" || got[1].CloudStorageClass != "DEEP_ARCHIVE" {
+			t.Errorf("transition[1] = %+v, want {365d DEEP_ARCHIVE}", got[1])
+		}
+	}
 	vaults, err := dstStore.ListVaults(ctx)
 	if err != nil {
 		t.Fatalf("ListVaults: %v", err)
@@ -498,6 +512,16 @@ func seedEveryConfigType(t *testing.T, ctx context.Context, addr string, store *
 			Region: "us-east-1", Endpoint: "http://localhost:19000",
 			AccessKey: "access", SecretKey: "secret",
 			ArchivalMode: "none", ReconcileSchedule: "0 3 * * *",
+			// A two-step archival chain, because the transition's cloud class
+			// is exported by its PROTO field name (UseProtoNames) and an
+			// absent class does not mean "unset" — it means DELETE the chunk
+			// at that age. A round trip that drops it would turn a
+			// move-to-colder-storage policy into an expiry policy, silently.
+			// gastrolog-108bcg renamed that field, so it needs covering here.
+			Transitions: []*v1.CloudStorageTransition{
+				{After: "30d", CloudStorageClass: "GLACIER"},
+				{After: "365d", CloudStorageClass: "DEEP_ARCHIVE"},
+			},
 		},
 	})); err != nil {
 		t.Fatalf("PutCloudService: %v", err)

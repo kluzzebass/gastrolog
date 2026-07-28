@@ -202,7 +202,7 @@ type ManifestEntry struct {
 	// running flag (which only flips one direction, true → false).
 	IngestTSMonotonic bool
 
-	CloudBacked      bool
+	CloudBacked bool
 	// CloudStorageClass is the cloud archival tier this chunk currently sits
 	// in ("GLACIER", "cold"), as last announced by CmdArchiveChunk. Empty
 	// means standard storage. Archived is derived from it rather than tracked
@@ -213,8 +213,8 @@ type ManifestEntry struct {
 	// vault may live on. Different concept, same words — see
 	// docs/ubiquitous_language.md.
 	CloudStorageClass string
-	Archived         bool
-	RetentionPending bool
+	Archived          bool
+	RetentionPending  bool
 
 	// Cloud-specific TOC offsets (GLCB format).
 	IngestIdxOffset int64
@@ -294,7 +294,7 @@ type FSM struct {
 	// observable and gives the fix a regression guard.
 	completedListScans atomic.Uint64
 
-	ready    bool               // true after first Apply or Restore
+	ready    bool                // true after first Apply or Restore
 	onUpload func(ManifestEntry) // called after CmdUploadChunk applies (outside lock)
 
 	// Step-1 reconciler-wiring hooks for gastrolog-51gme. Each fires

@@ -20,7 +20,7 @@ func CloudServiceToProto(cs system.CloudService) *gastrologv1.CloudService {
 	transitions := make([]*gastrologv1.CloudStorageTransition, len(cs.Transitions))
 	for i, t := range cs.Transitions {
 		transitions[i] = &gastrologv1.CloudStorageTransition{
-			After:        t.After,
+			After:             t.After,
 			CloudStorageClass: t.CloudStorageClass,
 		}
 	}
@@ -54,7 +54,7 @@ func CloudServiceFromProto(p *gastrologv1.CloudService) system.CloudService {
 	transitions := make([]system.CloudStorageTransition, len(p.GetTransitions()))
 	for i, t := range p.GetTransitions() {
 		transitions[i] = system.CloudStorageTransition{
-			After:        t.GetAfter(),
+			After:             t.GetAfter(),
 			CloudStorageClass: t.GetCloudStorageClass(),
 		}
 	}
