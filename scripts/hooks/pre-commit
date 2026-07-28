@@ -17,6 +17,25 @@ NC='\033[0m'
 
 failed=0
 
+# Proto: generated code must match the .proto it came from.
+#
+# A partial regeneration is invisible to every other gate: the stale generated
+# file is self-consistent, so tsc and the test suites compile happily against
+# the OLD field names while the wire format has already moved. That is exactly
+# how the storage_class -> cloud_storage_class rename reached main-bound review
+# with a frontend that would have read undefined at runtime.
+if git diff --cached --name-only | grep -q '\.proto$'; then
+  printf "Checking generated code is in sync... "
+  if just gen > /dev/null 2>&1 && git diff --quiet -- backend/api/gen frontend/src/api/gen; then
+    printf "${GREEN}ok${NC}\n"
+  else
+    printf "${RED}FAILED${NC}\n"
+    echo "  .proto changed but generated output differs. Run 'just gen' and stage the result:"
+    git diff --name-only -- backend/api/gen frontend/src/api/gen | sed 's/^/    /'
+    failed=1
+  fi
+fi
+
 # Backend: golangci-lint
 if git diff --cached --name-only | grep -q '^backend/'; then
   printf "Running golangci-lint... "
