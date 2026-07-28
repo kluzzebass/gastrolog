@@ -356,14 +356,14 @@ message ClearTransferSourceCommand {
 }
 
 // ArchiveChunkCommand records that a chunk's cloud blob now sits in
-// storage_class. Replicated so every node — not just the one that called the
+// cloud_storage_class. Replicated so every node — not just the one that called the
 // cloud API — can tell what class a chunk is in, which is what lets a
 // multi-step transition chain advance (gastrolog-35ygqv).
 //
-// An empty storage_class means the chunk was restored to standard storage.
+// An empty cloud_storage_class means the chunk was restored to standard storage.
 message ArchiveChunkCommand {
   bytes id = 1;
-  string storage_class = 2;
+  string cloud_storage_class = 2;
 }
 
 // ---------- Snapshot (replaces the 5 hand-rolled sections) ------------------
@@ -424,12 +424,19 @@ message ManifestEntry {
   // says, which is why that bool is now derived from this rather than tracked
   // beside it.
   //
+  // Named cloud_storage_class, not storage_class: in this system a bare
+  // "storage class" is the uint32 local class on FileStorage / CloudService /
+  // VaultConfig that says WHICH DISK a vault may live on. This is the string
+  // cloud archival tier ("GLACIER", "cold"), which docs/ubiquitous_language.md
+  // calls a "cloud storage class". Two different things, and the numeric one
+  // owns the short name.
+  //
   // This is the AUTHORITATIVE current class. It used to live only in a
   // node-local map on whichever node performed the archive, so the archival
   // sweep's "already at the target class?" comparison read an empty string on
   // the FSM path and a multi-step transition chain could never advance past
   // its first step (gastrolog-35ygqv).
-  string storage_class = 26;
+  string cloud_storage_class = 26;
 }
 
 // Tombstone records a deleted chunk ID and the apply time of the delete.

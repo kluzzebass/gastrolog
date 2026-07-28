@@ -25,15 +25,15 @@ func TestApplyArchiveChunk_RecordsClassAndDerivesArchived(t *testing.T) {
 	id := testChunkID(1)
 	seedChunk(t, f, id)
 
-	if got := f.Get(id); got.StorageClass != "" || got.Archived {
-		t.Fatalf("seed entry should start unarchived, got class=%q archived=%v", got.StorageClass, got.Archived)
+	if got := f.Get(id); got.CloudStorageClass != "" || got.Archived {
+		t.Fatalf("seed entry should start unarchived, got class=%q archived=%v", got.CloudStorageClass, got.Archived)
 	}
 
 	applyCmd(t, f, MarshalArchiveChunk(id, "cold"))
 
 	got := f.Get(id)
-	if got.StorageClass != "cold" {
-		t.Errorf("StorageClass = %q, want %q", got.StorageClass, "cold")
+	if got.CloudStorageClass != "cold" {
+		t.Errorf("CloudStorageClass = %q, want %q", got.CloudStorageClass, "cold")
 	}
 	if !got.Archived {
 		t.Error("Archived must be derived from a non-empty class")
@@ -54,9 +54,9 @@ func TestApplyArchiveChunk_AdvancesToAColderClass(t *testing.T) {
 	applyCmd(t, f, MarshalArchiveChunk(id, "cold"))
 	applyCmd(t, f, MarshalArchiveChunk(id, "deep-freeze"))
 
-	if got := f.Get(id); got.StorageClass != "deep-freeze" {
-		t.Fatalf("StorageClass = %q, want %q: the chain must advance, not stick at its first step",
-			got.StorageClass, "deep-freeze")
+	if got := f.Get(id); got.CloudStorageClass != "deep-freeze" {
+		t.Fatalf("CloudStorageClass = %q, want %q: the chain must advance, not stick at its first step",
+			got.CloudStorageClass, "deep-freeze")
 	}
 }
 
@@ -72,8 +72,8 @@ func TestApplyArchiveChunk_EmptyClassClearsArchived(t *testing.T) {
 	applyCmd(t, f, MarshalArchiveChunk(id, ""))
 
 	got := f.Get(id)
-	if got.StorageClass != "" {
-		t.Errorf("StorageClass = %q, want empty after restore", got.StorageClass)
+	if got.CloudStorageClass != "" {
+		t.Errorf("CloudStorageClass = %q, want empty after restore", got.CloudStorageClass)
 	}
 	if got.Archived {
 		t.Error("Archived must clear with the class")
@@ -88,8 +88,8 @@ func TestApplyArchiveChunk_IdempotentAndNoOpWhenMissing(t *testing.T) {
 
 	applyCmd(t, f, MarshalArchiveChunk(id, "cold"))
 	applyCmd(t, f, MarshalArchiveChunk(id, "cold"))
-	if got := f.Get(id); got.StorageClass != "cold" {
-		t.Errorf("StorageClass = %q, want %q after a replayed archive", got.StorageClass, "cold")
+	if got := f.Get(id); got.CloudStorageClass != "cold" {
+		t.Errorf("CloudStorageClass = %q, want %q after a replayed archive", got.CloudStorageClass, "cold")
 	}
 
 	// An archive for a chunk this FSM does not know must not error: the cloud
@@ -117,8 +117,8 @@ func TestArchiveChunk_SnapshotRoundTrip(t *testing.T) {
 	if got == nil {
 		t.Fatal("entry missing after restore")
 	}
-	if got.StorageClass != "deep-freeze" {
-		t.Errorf("StorageClass = %q after restore, want %q", got.StorageClass, "deep-freeze")
+	if got.CloudStorageClass != "deep-freeze" {
+		t.Errorf("CloudStorageClass = %q after restore, want %q", got.CloudStorageClass, "deep-freeze")
 	}
 	if !got.Archived {
 		t.Error("Archived must survive the snapshot boundary too")

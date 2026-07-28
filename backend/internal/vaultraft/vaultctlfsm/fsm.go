@@ -203,11 +203,16 @@ type ManifestEntry struct {
 	IngestTSMonotonic bool
 
 	CloudBacked      bool
-	// StorageClass is the cloud storage class this chunk currently sits in,
-	// as last announced by CmdArchiveChunk. Empty means standard storage.
-	// Archived is derived from it (see archivedFrom) rather than tracked
+	// CloudStorageClass is the cloud archival tier this chunk currently sits
+	// in ("GLACIER", "cold"), as last announced by CmdArchiveChunk. Empty
+	// means standard storage. Archived is derived from it rather than tracked
 	// separately, so the two can never disagree (gastrolog-35ygqv).
-	StorageClass     string
+	//
+	// NOT "StorageClass": that name belongs to the uint32 local class on
+	// FileStorage / CloudService / VaultConfig, which selects which disk a
+	// vault may live on. Different concept, same words — see
+	// docs/ubiquitous_language.md.
+	CloudStorageClass string
 	Archived         bool
 	RetentionPending bool
 
@@ -273,7 +278,7 @@ func (e *ManifestEntry) ToChunkMeta() chunk.ChunkMeta {
 		IngestTSMonotonic: e.IngestTSMonotonic,
 		CloudBacked:       e.CloudBacked,
 		Archived:          e.Archived,
-		StorageClass:      e.StorageClass,
+		StorageClass:      e.CloudStorageClass,
 	}
 }
 
@@ -1574,21 +1579,21 @@ func (f *FSM) applyArchiveChunk(c *gastrologv1.ArchiveChunkCommand) error {
 	if e == nil {
 		return nil
 	}
-	e.StorageClass = c.GetStorageClass()
-	e.Archived = e.StorageClass != ""
+	e.CloudStorageClass = c.GetCloudStorageClass()
+	e.Archived = e.CloudStorageClass != ""
 	return nil
 }
 
 // NewArchiveChunk builds an ArchiveChunk command message. See CmdArchiveChunk.
-func NewArchiveChunk(id chunk.ChunkID, storageClass string) *gastrologv1.VaultCtlCommand {
+func NewArchiveChunk(id chunk.ChunkID, cloudStorageClass string) *gastrologv1.VaultCtlCommand {
 	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_ArchiveChunk{
-		ArchiveChunk: &gastrologv1.ArchiveChunkCommand{Id: id[:], StorageClass: storageClass},
+		ArchiveChunk: &gastrologv1.ArchiveChunkCommand{Id: id[:], CloudStorageClass: cloudStorageClass},
 	}}
 }
 
 // MarshalArchiveChunk builds the Raft log data for an ArchiveChunk command.
-func MarshalArchiveChunk(id chunk.ChunkID, storageClass string) []byte {
-	return mustMarshalCommand(NewArchiveChunk(id, storageClass))
+func MarshalArchiveChunk(id chunk.ChunkID, cloudStorageClass string) []byte {
+	return mustMarshalCommand(NewArchiveChunk(id, cloudStorageClass))
 }
 
 // AttachOffsets: [16 ChunkID][8 IngestIdxOff][8 IngestIdxSize][8 SourceIdxOff][8 SourceIdxSize]
@@ -1801,7 +1806,7 @@ func entryToProto(e *ManifestEntry) *gastrologv1.ManifestEntry {
 		IngestTsMonotonic:     e.IngestTSMonotonic,
 		CloudBacked:           e.CloudBacked,
 		Archived:              e.Archived,
-		StorageClass:          e.StorageClass,
+		CloudStorageClass:     e.CloudStorageClass,
 		RetentionPending:      e.RetentionPending,
 		IngestIdxOffset:       e.IngestIdxOffset,
 		IngestIdxSize:         e.IngestIdxSize,
@@ -1844,7 +1849,7 @@ func entryFromProto(p *gastrologv1.ManifestEntry) ManifestEntry {
 		SealedAt:          time.Unix(0, p.GetSealedAtNanos()),
 		CloudBacked:       p.GetCloudBacked(),
 		Archived:          p.GetArchived(),
-		StorageClass:      p.GetStorageClass(),
+		CloudStorageClass: p.GetCloudStorageClass(),
 		RetentionPending:  p.GetRetentionPending(),
 		IngestIdxOffset:   p.GetIngestIdxOffset(),
 		IngestIdxSize:     p.GetIngestIdxSize(),

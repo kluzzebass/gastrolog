@@ -224,7 +224,7 @@ func TestAnnouncerReplicatesMetadata(t *testing.T) {
 		for time.Now().Before(deadline) {
 			all := true
 			for _, n := range nodes {
-				if e := n.fsm.Get(chunkID); e == nil || e.StorageClass != want {
+				if e := n.fsm.Get(chunkID); e == nil || e.CloudStorageClass != want {
 					all = false
 					break
 				}
@@ -238,9 +238,9 @@ func TestAnnouncerReplicatesMetadata(t *testing.T) {
 			e := n.fsm.Get(chunkID)
 			got := "<missing entry>"
 			if e != nil {
-				got = e.StorageClass
+				got = e.CloudStorageClass
 			}
-			t.Errorf("node %d: StorageClass = %q, want %q", i, got, want)
+			t.Errorf("node %d: CloudStorageClass = %q, want %q", i, got, want)
 		}
 		t.Fatalf("storage class %q did not reach every node's FSM", want)
 	}

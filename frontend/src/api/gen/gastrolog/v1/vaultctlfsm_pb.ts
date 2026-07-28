@@ -2086,11 +2086,11 @@ export class ClearTransferSourceCommand extends Message<ClearTransferSourceComma
 
 /**
  * ArchiveChunkCommand records that a chunk's cloud blob now sits in
- * storage_class. Replicated so every node — not just the one that called the
+ * cloud_storage_class. Replicated so every node — not just the one that called the
  * cloud API — can tell what class a chunk is in, which is what lets a
  * multi-step transition chain advance (gastrolog-35ygqv).
  *
- * An empty storage_class means the chunk was restored to standard storage.
+ * An empty cloud_storage_class means the chunk was restored to standard storage.
  *
  * @generated from message gastrolog.v1.ArchiveChunkCommand
  */
@@ -2101,9 +2101,9 @@ export class ArchiveChunkCommand extends Message<ArchiveChunkCommand> {
   id = new Uint8Array(0);
 
   /**
-   * @generated from field: string storage_class = 2;
+   * @generated from field: string cloud_storage_class = 2;
    */
-  storageClass = "";
+  cloudStorageClass = "";
 
   constructor(data?: PartialMessage<ArchiveChunkCommand>) {
     super();
@@ -2114,7 +2114,7 @@ export class ArchiveChunkCommand extends Message<ArchiveChunkCommand> {
   static readonly typeName = "gastrolog.v1.ArchiveChunkCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 2, name: "storage_class", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "cloud_storage_class", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ArchiveChunkCommand {
@@ -2299,15 +2299,22 @@ export class ManifestEntry extends Message<ManifestEntry> {
    * says, which is why that bool is now derived from this rather than tracked
    * beside it.
    *
+   * Named cloud_storage_class, not storage_class: in this system a bare
+   * "storage class" is the uint32 local class on FileStorage / CloudService /
+   * VaultConfig that says WHICH DISK a vault may live on. This is the string
+   * cloud archival tier ("GLACIER", "cold"), which docs/ubiquitous_language.md
+   * calls a "cloud storage class". Two different things, and the numeric one
+   * owns the short name.
+   *
    * This is the AUTHORITATIVE current class. It used to live only in a
    * node-local map on whichever node performed the archive, so the archival
    * sweep's "already at the target class?" comparison read an empty string on
    * the FSM path and a multi-step transition chain could never advance past
    * its first step (gastrolog-35ygqv).
    *
-   * @generated from field: string storage_class = 26;
+   * @generated from field: string cloud_storage_class = 26;
    */
-  storageClass = "";
+  cloudStorageClass = "";
 
   constructor(data?: PartialMessage<ManifestEntry>) {
     super();
@@ -2342,7 +2349,7 @@ export class ManifestEntry extends Message<ManifestEntry> {
     { no: 23, name: "sealed_at_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 24, name: "holders", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
     { no: 25, name: "transfer_source_vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 26, name: "storage_class", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 26, name: "cloud_storage_class", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ManifestEntry {

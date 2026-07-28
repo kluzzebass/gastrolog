@@ -2733,17 +2733,17 @@ func (x *ClearTransferSourceCommand) GetChunkId() []byte {
 }
 
 // ArchiveChunkCommand records that a chunk's cloud blob now sits in
-// storage_class. Replicated so every node — not just the one that called the
+// cloud_storage_class. Replicated so every node — not just the one that called the
 // cloud API — can tell what class a chunk is in, which is what lets a
 // multi-step transition chain advance (gastrolog-35ygqv).
 //
-// An empty storage_class means the chunk was restored to standard storage.
+// An empty cloud_storage_class means the chunk was restored to standard storage.
 type ArchiveChunkCommand struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	StorageClass  string                 `protobuf:"bytes,2,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Id                []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	CloudStorageClass string                 `protobuf:"bytes,2,opt,name=cloud_storage_class,json=cloudStorageClass,proto3" json:"cloud_storage_class,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *ArchiveChunkCommand) Reset() {
@@ -2783,9 +2783,9 @@ func (x *ArchiveChunkCommand) GetId() []byte {
 	return nil
 }
 
-func (x *ArchiveChunkCommand) GetStorageClass() string {
+func (x *ArchiveChunkCommand) GetCloudStorageClass() string {
 	if x != nil {
-		return x.StorageClass
+		return x.CloudStorageClass
 	}
 	return ""
 }
@@ -2847,14 +2847,21 @@ type ManifestEntry struct {
 	// says, which is why that bool is now derived from this rather than tracked
 	// beside it.
 	//
+	// Named cloud_storage_class, not storage_class: in this system a bare
+	// "storage class" is the uint32 local class on FileStorage / CloudService /
+	// VaultConfig that says WHICH DISK a vault may live on. This is the string
+	// cloud archival tier ("GLACIER", "cold"), which docs/ubiquitous_language.md
+	// calls a "cloud storage class". Two different things, and the numeric one
+	// owns the short name.
+	//
 	// This is the AUTHORITATIVE current class. It used to live only in a
 	// node-local map on whichever node performed the archive, so the archival
 	// sweep's "already at the target class?" comparison read an empty string on
 	// the FSM path and a multi-step transition chain could never advance past
 	// its first step (gastrolog-35ygqv).
-	StorageClass  string `protobuf:"bytes,26,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	CloudStorageClass string `protobuf:"bytes,26,opt,name=cloud_storage_class,json=cloudStorageClass,proto3" json:"cloud_storage_class,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *ManifestEntry) Reset() {
@@ -3062,9 +3069,9 @@ func (x *ManifestEntry) GetTransferSourceVaultId() []byte {
 	return nil
 }
 
-func (x *ManifestEntry) GetStorageClass() string {
+func (x *ManifestEntry) GetCloudStorageClass() string {
 	if x != nil {
-		return x.StorageClass
+		return x.CloudStorageClass
 	}
 	return ""
 }
@@ -3628,10 +3635,10 @@ const file_gastrolog_v1_vaultctlfsm_proto_rawDesc = "" +
 	"\tchunk_ids\x18\x01 \x03(\fR\bchunkIds\x12\x17\n" +
 	"\anode_id\x18\x02 \x01(\tR\x06nodeId\"7\n" +
 	"\x1aClearTransferSourceCommand\x12\x19\n" +
-	"\bchunk_id\x18\x01 \x01(\fR\achunkId\"J\n" +
+	"\bchunk_id\x18\x01 \x01(\fR\achunkId\"U\n" +
 	"\x13ArchiveChunkCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\fR\x02id\x12#\n" +
-	"\rstorage_class\x18\x02 \x01(\tR\fstorageClass\"\xee\a\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12.\n" +
+	"\x13cloud_storage_class\x18\x02 \x01(\tR\x11cloudStorageClass\"\xf9\a\n" +
 	"\rManifestEntry\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12*\n" +
 	"\x11write_start_nanos\x18\x02 \x01(\x03R\x0fwriteStartNanos\x12&\n" +
@@ -3660,8 +3667,8 @@ const file_gastrolog_v1_vaultctlfsm_proto_rawDesc = "" +
 	"key_scheme\x18\x16 \x01(\rR\tkeyScheme\x12&\n" +
 	"\x0fsealed_at_nanos\x18\x17 \x01(\x03R\rsealedAtNanos\x12\x18\n" +
 	"\aholders\x18\x18 \x03(\tR\aholders\x127\n" +
-	"\x18transfer_source_vault_id\x18\x19 \x01(\fR\x15transferSourceVaultId\x12#\n" +
-	"\rstorage_class\x18\x1a \x01(\tR\fstorageClass\"P\n" +
+	"\x18transfer_source_vault_id\x18\x19 \x01(\fR\x15transferSourceVaultId\x12.\n" +
+	"\x13cloud_storage_class\x18\x1a \x01(\tR\x11cloudStorageClass\"P\n" +
 	"\tTombstone\x12\x19\n" +
 	"\bchunk_id\x18\x01 \x01(\fR\achunkId\x12(\n" +
 	"\x10deleted_at_nanos\x18\x02 \x01(\x03R\x0edeletedAtNanos\"\x93\x01\n" +

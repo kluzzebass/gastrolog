@@ -53,7 +53,7 @@ type MetadataAnnouncer interface {
 	// chains: the archival sweep compares current class against the chain's
 	// target, and an unreplicated class reads as empty forever
 	// (gastrolog-35ygqv).
-	AnnounceArchived(id ChunkID, storageClass string)
+	AnnounceArchived(id ChunkID, cloudStorageClass string)
 }
 
 // AnnouncerSetter is an optional interface for chunk managers that support
