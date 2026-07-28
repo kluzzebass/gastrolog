@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"gastrolog/internal/blobstore"
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
 	"gastrolog/internal/lifecycle"
@@ -129,10 +130,14 @@ func TestAnnouncerReplicatesMetadata(t *testing.T) {
 	applier := &testApplier{raft: leaderGroup.Raft, timeout: 5 * time.Second}
 	announcer := NewAnnouncer(applier, nil, nil)
 	dir := t.TempDir()
+	// A cloud store so the sealed chunk gets uploaded and can then be
+	// archived — the archival half of the loop this test covers.
+	cloudStore := blobstore.NewMemory()
 	mgr, err := chunkfile.NewManager(chunkfile.Config{
-		Dir:       dir,
-		Now:       time.Now,
-		Announcer: announcer,
+		Dir:        dir,
+		Now:        time.Now,
+		Announcer:  announcer,
+		CloudStore: cloudStore,
 	})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
@@ -201,6 +206,59 @@ func TestAnnouncerReplicatesMetadata(t *testing.T) {
 		}
 		if entry.RecordCount != 10 {
 			t.Errorf("node %d: RecordCount got %d, want 10", i, entry.RecordCount)
+		}
+	}
+
+	// ---- archival: the class must reach EVERY node's FSM ----
+	//
+	// Only the node that calls the cloud API knows which class a blob moved
+	// to. That used to be the end of it — the class lived in a node-local map
+	// — so the archival sweep, which compares a chunk's current class against
+	// its transition chain's target, read an empty string on the FSM path and
+	// a multi-step chain could never advance past its first step
+	// (gastrolog-35ygqv). This is the assertion that the class is now
+	// replicated state rather than local knowledge.
+	waitClass := func(want string) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			all := true
+			for _, n := range nodes {
+				if e := n.fsm.Get(chunkID); e == nil || e.StorageClass != want {
+					all = false
+					break
+				}
+			}
+			if all {
+				return
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		for i, n := range nodes {
+			e := n.fsm.Get(chunkID)
+			got := "<missing entry>"
+			if e != nil {
+				got = e.StorageClass
+			}
+			t.Errorf("node %d: StorageClass = %q, want %q", i, got, want)
+		}
+		t.Fatalf("storage class %q did not reach every node's FSM", want)
+	}
+
+	if err := mgr.ArchiveChunk(t.Context(), chunkID, "cold"); err != nil {
+		t.Fatalf("ArchiveChunk: %v", err)
+	}
+	waitClass("cold")
+
+	// And it must ADVANCE to a colder class, which the old bool guard refused.
+	if err := mgr.ArchiveChunk(t.Context(), chunkID, "deep-freeze"); err != nil {
+		t.Fatalf("ArchiveChunk (second step): %v", err)
+	}
+	waitClass("deep-freeze")
+
+	for i, n := range nodes {
+		if e := n.fsm.Get(chunkID); !e.Archived {
+			t.Errorf("node %d: Archived must be derived from a non-empty class", i)
 		}
 	}
 }

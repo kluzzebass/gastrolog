@@ -3984,8 +3984,8 @@ func (m *Manager) ArchiveChunk(ctx context.Context, id chunk.ChunkID, storageCla
 	// FSM never claims a class the blob is not actually in; a failed announce
 	// leaves the FSM behind and the next sweep re-archives, which the cloud
 	// store treats as idempotent.
-	if m.cfg.Announcer != nil {
-		m.cfg.Announcer.AnnounceArchived(id, storageClass)
+	if ann := m.GetAnnouncer(); ann != nil {
+		ann.AnnounceArchived(id, storageClass)
 	}
 
 	m.logger.Debug("chunk archived",
@@ -4024,8 +4024,8 @@ func (m *Manager) RestoreChunk(ctx context.Context, id chunk.ChunkID, speed stri
 	// otherwise the FSM keeps naming a class the blob has left, and every
 	// other node — plus the archival sweep's comparison — believes it
 	// (gastrolog-35ygqv).
-	if m.cfg.Announcer != nil {
-		m.cfg.Announcer.AnnounceArchived(id, "")
+	if ann := m.GetAnnouncer(); ann != nil {
+		ann.AnnounceArchived(id, "")
 	}
 
 	m.logger.Info("chunk restore initiated", "chunk", id.String())
