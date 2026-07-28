@@ -896,9 +896,6 @@ func (s *Scheduler) completeOneTimeJob(id uuid.UUID, name string, failed bool, t
 		}
 	}
 
-	if notify != nil {
-		notify()
-	}
 	// Classify the terminal event from the progress record, which every
 	// one-time job now has. gocron calls a DIFFERENT listener on error, so the
 	// task's failure reaches us as the `failed` argument rather than having to
@@ -910,6 +907,25 @@ func (s *Scheduler) completeOneTimeJob(id uuid.UUID, name string, failed bool, t
 			kind = JobEventFailed
 		}
 		info.Progress.mu.RUnlock()
+	}
+	// A failed one-time job used to write nothing to the log. The failure was
+	// recorded on the progress record and published as an event, and the
+	// success path logged "job finished" — so the only observable difference
+	// between a job that worked and one that died was the absence of a line.
+	// That is how a failing post-seal can strand a chunk in Sealing with no
+	// trace anywhere (gastrolog-231ik: the stall was unfalsifiable across runs
+	// precisely because this path is silent).
+	//
+	// Logged BEFORE the listeners are woken, so anything that reacts to the
+	// terminal event — an operator tailing logs, a test waiting on the
+	// notification — finds the explanation already written rather than racing
+	// it.
+	if kind == JobEventFailed {
+		s.logger.Warn("one-time job failed", "name", name, "id", jobID, "error", taskErr)
+	}
+
+	if notify != nil {
+		notify()
 	}
 	s.publishEvent(kind, info)
 }
