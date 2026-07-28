@@ -745,11 +745,11 @@ export class ChunkMeta extends Message<ChunkMeta> {
   retentionPending = false;
 
   /**
-   * current cloud storage class (e.g. "GLACIER", "cold", "Archive")
+   * current cloud archival tier (e.g. "GLACIER", "cold", "Archive")
    *
-   * @generated from field: string storage_class = 15;
+   * @generated from field: string cloud_storage_class = 15;
    */
-  storageClass = "";
+  cloudStorageClass = "";
 
   /**
    * how many nodes currently have this chunk (leader + followers that have caught up)
@@ -821,7 +821,7 @@ export class ChunkMeta extends Message<ChunkMeta> {
     { no: 12, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 13, name: "vault_type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 14, name: "retention_pending", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 15, name: "storage_class", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 15, name: "cloud_storage_class", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 16, name: "replica_count", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
     { no: 17, name: "replica_node_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
     { no: 18, name: "pending_ack_node_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
@@ -2562,11 +2562,11 @@ export class ArchiveChunkRequest extends Message<ArchiveChunkRequest> {
   chunkId = new Uint8Array(0);
 
   /**
-   * Target: "GLACIER", "DEEP_ARCHIVE", "Archive"
+   * Target cloud archival tier: "GLACIER", "DEEP_ARCHIVE", "Archive"
    *
-   * @generated from field: string storage_class = 3;
+   * @generated from field: string cloud_storage_class = 3;
    */
-  storageClass = "";
+  cloudStorageClass = "";
 
   constructor(data?: PartialMessage<ArchiveChunkRequest>) {
     super();
@@ -2578,7 +2578,7 @@ export class ArchiveChunkRequest extends Message<ArchiveChunkRequest> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "vault", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 3, name: "storage_class", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "cloud_storage_class", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ArchiveChunkRequest {

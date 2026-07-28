@@ -546,10 +546,12 @@ export class VaultConfig extends Message<VaultConfig> {
   path = "";
 
   /**
-   * OUTPUT ONLY. File storage assignments owned by the placement manager.
-   * Populated on reads; IGNORED on PutVault, which re-derives the field from
-   * the owner so a client cannot overwrite placement truth by round-tripping a
-   * config it read earlier (gastrolog-kl8c3s).
+   * OUTPUT ONLY. File storage assignments owned by the placement manager,
+   * attached from Runtime.VaultPlacements when a vault is read. The domain
+   * VaultConfig no longer carries them at all, so a write cannot express them:
+   * the field is absent from the type a PutVault command marshals
+   * (gastrolog-kl8c3s closed a second writer to the mirror; gastrolog-617qns
+   * removed the mirror).
    *
    * @generated from field: repeated gastrolog.v1.VaultPlacement placements = 12;
    */

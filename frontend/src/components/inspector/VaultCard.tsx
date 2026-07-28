@@ -998,7 +998,7 @@ function ChunkRow({
               })()
             )}
             {chunk.archived && (
-              <Badge variant="warn" dark={dark}>{chunk.storageClass || "archived"}</Badge>
+              <Badge variant="warn" dark={dark}>{chunk.cloudStorageClass || "archived"}</Badge>
             )}
             {chunk.retentionPending && (
               <Badge
@@ -1153,7 +1153,7 @@ function ChunkDetail({
             <div className={`flex items-center gap-3 text-[0.85em]`}>
               <span className={`font-mono w-20 ${c("text-text-bright", "text-light-text-bright")}`}>class</span>
               <span className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}>
-                {chunk.storageClass || "standard"}
+                {chunk.cloudStorageClass || "standard"}
               </span>
               {!chunk.archived && (
                 <ArchiveButton vaultId={vaultId} chunkId={encode(chunk.id)} dark={dark} />
