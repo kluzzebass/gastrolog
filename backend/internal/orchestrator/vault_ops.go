@@ -452,7 +452,6 @@ func (o *Orchestrator) findLocalVaultInstance(vaultID glid.GLID) *VaultInstance 
 	return vault.Instance
 }
 
-
 // replaceForwardedChunk seals (if active) and deletes a pre-existing chunk
 // on a follower to make room for the canonical sealed version from the leader.
 // The pre-existing chunk may come from:
@@ -725,7 +724,6 @@ func (o *Orchestrator) placementMembership(vaultInst *VaultInstance) []string {
 	}
 	return expected
 }
-
 
 // --- Chunk write ---
 

@@ -261,7 +261,7 @@ func TestUnreachableSweep_EnvVarThresholdOverride(t *testing.T) {
 	// Not parallel: mutates the process environment.
 	t.Setenv("GLOG_UNREACHABLE_THRESHOLD", "2s")
 	store := sysmem.NewStore()
-	peerState := cluster.NewPeerState(10 * time.Second, 0)
+	peerState := cluster.NewPeerState(10*time.Second, 0)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	sweep := newUnreachableSweep(store, nil, peerState, "local", nil, logger)
 	if sweep.threshold != 2*time.Second {
@@ -273,7 +273,7 @@ func TestUnreachableSweep_EnvVarInvalidFallsBack(t *testing.T) {
 	// Not parallel: mutates the process environment.
 	t.Setenv("GLOG_UNREACHABLE_THRESHOLD", "not-a-duration")
 	store := sysmem.NewStore()
-	peerState := cluster.NewPeerState(10 * time.Second, 0)
+	peerState := cluster.NewPeerState(10*time.Second, 0)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	sweep := newUnreachableSweep(store, nil, peerState, "local", nil, logger)
 	if sweep.threshold != defaultUnreachableThreshold {

@@ -186,8 +186,6 @@ func newRotationPolicyDeleteCmd() *cobra.Command {
 	}
 }
 
-
-
 // parseDurationFlag parses a duration string at full precision (Go syntax,
 // e.g. "2h3m10s1004ms") or a plain integer (seconds). The old helper returned
 // whole seconds, silently truncating sub-second input.
@@ -208,5 +206,3 @@ func formatInt64(v int64) string {
 	}
 	return strconv.FormatInt(v, 10)
 }
-
-

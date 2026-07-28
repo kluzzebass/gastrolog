@@ -22,17 +22,17 @@ import (
 // sourced from the manifest entry:
 //
 //   - State        cluster lifecycle (Active/Sealing/Sealed). Local meta.Sealed
-//                  flips at sealActiveLocked time, but the cluster only sees the
-//                  chunk as Sealed once sealToGLCB commits (gastrolog-1huz5), so
-//                  producer-side iteration must branch on the FSM state to avoid
-//                  jumping the gun on Sealing chunks.
+//     flips at sealActiveLocked time, but the cluster only sees the
+//     chunk as Sealed once sealToGLCB commits (gastrolog-1huz5), so
+//     producer-side iteration must branch on the FSM state to avoid
+//     jumping the gun on Sealing chunks.
 //   - Sealed       kept in sync with State (Sealing reads as not-yet-sealed) so
-//                  the unaudited legacy .Sealed read sites stay correct.
+//     the unaudited legacy .Sealed read sites stay correct.
 //   - CloudBacked  } cloud upload / archive effects a follower cannot observe
 //   - Archived     } locally.
 //   - SealedAt     retention MaxAge anchor. Pipeline / file managers often leave
-//                  local SealedAt zero and only populate WriteEnd, so the FSM's
-//                  wall-clock seal completion is applied when present.
+//     local SealedAt zero and only populate WriteEnd, so the FSM's
+//     wall-clock seal completion is applied when present.
 //
 // Every node-local fact is preserved untouched: DiskBytes (per-node warm-cache
 // footprint), CloudBytes, and every other field the local manager owns. The

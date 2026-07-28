@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+#
+# Install with `just hooks-install` (copies this file to .git/hooks/pre-commit).
+#
+# This lives under version control on purpose. It used to exist only in
+# .git/hooks, which no clone carries and no review ever sees — so when the
+# backend drifted 21 files out of gofmt, nothing anywhere in the repo recorded
+# that a gate was supposed to exist. Formatting itself is enforced by the
+# `formatters:` block in backend/.golangci.yml, which `golangci-lint run`
+# below reports on; keeping it there means the rule survives even if the hook
+# is not installed.
+set -euo pipefail
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+NC='\033[0m'
+
+failed=0
+
+# Backend: golangci-lint
+if git diff --cached --name-only | grep -q '^backend/'; then
+  printf "Running golangci-lint... "
+  if (cd backend && golangci-lint run ./...) > /dev/null 2>&1; then
+    printf "${GREEN}ok${NC}\n"
+  else
+    printf "${RED}FAILED${NC}\n"
+    (cd backend && golangci-lint run ./...) 2>&1 | head -30
+    failed=1
+  fi
+fi
+
+# Frontend: tsc + eslint
+if git diff --cached --name-only | grep -q '^frontend/'; then
+  printf "Running tsc... "
+  if (cd frontend && bunx tsc --noEmit) > /dev/null 2>&1; then
+    printf "${GREEN}ok${NC}\n"
+  else
+    printf "${RED}FAILED${NC}\n"
+    (cd frontend && bunx tsc --noEmit) 2>&1 | head -30
+    failed=1
+  fi
+
+  printf "Running eslint... "
+  if (cd frontend && bun run lint) > /dev/null 2>&1; then
+    printf "${GREEN}ok${NC}\n"
+  else
+    printf "${RED}FAILED${NC}\n"
+    (cd frontend && bun run lint) 2>&1 | head -30
+    failed=1
+  fi
+fi
+
+if [ "$failed" -ne 0 ]; then
+  printf "\n${RED}Pre-commit checks failed. Fix the issues above before committing.${NC}\n"
+  exit 1
+fi

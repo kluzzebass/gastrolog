@@ -81,7 +81,7 @@ func TestLifecycleTransitionsLogExactlyOneLineEach(t *testing.T) {
 	// Second firing: same edges, nothing carried over.
 	c.Raise("wal-reserve", "cluster-ctl", "reservation below floor again")
 	clk.Advance(2 * time.Hour)
-	c.Standing() // reads settle, never log
+	c.Standing()                          // reads settle, never log
 	c.Clear("wal-reserve", "cluster-ctl") // released
 	c.Standing()
 

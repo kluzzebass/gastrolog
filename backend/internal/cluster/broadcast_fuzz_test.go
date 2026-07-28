@@ -84,7 +84,7 @@ func FuzzBroadcastMessageDeserialize(f *testing.F) {
 
 		// Also exercise PeerState.HandleBroadcast which is the primary
 		// subscriber in production.
-		ps := NewPeerState(30 * time.Second, 0)
+		ps := NewPeerState(30*time.Second, 0)
 		ps.HandleBroadcast(&msg)
 	})
 }

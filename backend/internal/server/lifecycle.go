@@ -682,12 +682,12 @@ func (s *LifecycleServer) buildRouteStats() *apiv1.GetRouteStatsResponse {
 	}
 
 	resp := &apiv1.GetRouteStatsResponse{
-		TotalRouted:     totalRouted,
-		TotalUnmatched:    totalUnmatched,
-		TotalMatched:    totalMatched,
+		TotalRouted:      totalRouted,
+		TotalUnmatched:   totalUnmatched,
+		TotalMatched:     totalMatched,
 		RouteTableActive: routeTableActive,
-		RoutedRate:      routedRate,
-		MatchedRate:     matchedRate,
+		RoutedRate:       routedRate,
+		MatchedRate:      matchedRate,
 	}
 	for _, vs := range vaultMap {
 		resp.VaultStats = append(resp.VaultStats, vs)

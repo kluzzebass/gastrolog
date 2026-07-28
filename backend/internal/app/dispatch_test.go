@@ -158,7 +158,7 @@ func (m *mockOrch) ReloadFilters(context.Context) error {
 func (m *mockOrch) ReloadRotationPolicies(context.Context) error  { return m.reloadRotationErr }
 func (m *mockOrch) ReloadRetentionPolicies(context.Context) error { return m.reloadRetentionErr }
 func (m *mockOrch) DisableVault(glid.GLID) error                  { return m.disableVaultErr }
-func (m *mockOrch) EnableVault(glid.GLID) error  { return m.enableVaultErr }
+func (m *mockOrch) EnableVault(glid.GLID) error                   { return m.enableVaultErr }
 func (m *mockOrch) ForceRemoveVault(id glid.GLID) error {
 	m.forceRemoveIDs = append(m.forceRemoveIDs, id)
 	return m.forceRemoveErr

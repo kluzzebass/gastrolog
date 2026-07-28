@@ -37,6 +37,15 @@ build-all:
 clean:
     rm -rf build
 
+# Install the version-controlled git hooks into .git/hooks.
+# .git/hooks is not carried by a clone, so the hook there can silently go
+# missing (or drift from scripts/hooks/) with nothing to notice. Re-run this
+# after cloning and whenever scripts/hooks/ changes.
+hooks-install:
+    cp scripts/hooks/pre-commit .git/hooks/pre-commit
+    chmod +x .git/hooks/pre-commit
+    @echo "installed .git/hooks/pre-commit"
+
 # Build Docker image
 docker tag="gastrolog:latest":
     docker build --build-arg VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo dev) -t {{tag}} .

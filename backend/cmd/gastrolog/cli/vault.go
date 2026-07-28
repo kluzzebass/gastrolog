@@ -305,7 +305,6 @@ func setFromFlag(cmd *cobra.Command, name string, dst *string) {
 	}
 }
 
-
 func resolveVaultCloudService(ctx context.Context, cmd *cobra.Command, client *server.Client, cfg *v1.VaultConfig) error {
 	csName, _ := cmd.Flags().GetString("cloud-service")
 	if csName == "" {

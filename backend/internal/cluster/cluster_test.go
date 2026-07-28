@@ -155,8 +155,8 @@ func TestSingleNodeForwardApply(t *testing.T) {
 	ctx := context.Background()
 	probeID := glid.New()
 	err := node.store.PutRotationPolicy(ctx, system.RotationPolicyConfig{
-		ID:          probeID,
-		Name:        "test-probe",
+		ID:     probeID,
+		Name:   "test-probe",
 		MaxAge: &dummyMaxAge,
 	})
 	if err != nil {
@@ -218,8 +218,8 @@ func TestThreeNodeCluster(t *testing.T) {
 	ctx := context.Background()
 	probeID := glid.New()
 	if err := node1.store.PutRotationPolicy(ctx, system.RotationPolicyConfig{
-		ID:          probeID,
-		Name:        "leader-probe",
+		ID:     probeID,
+		Name:   "leader-probe",
 		MaxAge: &dummyMaxAge,
 	}); err != nil {
 		t.Fatalf("PutRotationPolicy on leader: %v", err)
@@ -246,8 +246,8 @@ func TestThreeNodeCluster(t *testing.T) {
 	// Write on a follower — should be forwarded to the leader.
 	followerProbeID := glid.New()
 	if err := node2.store.PutRotationPolicy(ctx, system.RotationPolicyConfig{
-		ID:          followerProbeID,
-		Name:        "follower-probe",
+		ID:     followerProbeID,
+		Name:   "follower-probe",
 		MaxAge: &dummyMaxAge,
 	}); err != nil {
 		t.Fatalf("PutRotationPolicy on follower: %v", err)
@@ -279,8 +279,8 @@ func TestThreeNodeCluster(t *testing.T) {
 	// snapshot that caused the settings UI to display pre-mutation state.
 	readBackProbeID := glid.New()
 	if err := node2.store.PutRotationPolicy(ctx, system.RotationPolicyConfig{
-		ID:          readBackProbeID,
-		Name:        "read-back-probe",
+		ID:     readBackProbeID,
+		Name:   "read-back-probe",
 		MaxAge: &dummyMaxAge,
 	}); err != nil {
 		t.Fatalf("PutRotationPolicy on follower for read-back: %v", err)

@@ -700,31 +700,31 @@ func (r *VaultLifecycleReconciler) gatherReconcileView() *reconcileView {
 // periodic-by-nature). Per-category event source and verdict:
 //
 //   - pendingObligations  event: CmdRequestDelete apply (onRequestDelete
-//                         → fulfillObligation) + ReconcileFromSnapshot.
-//                         Tick = retry backstop for a failed async ack.
+//     → fulfillObligation) + ReconcileFromSnapshot.
+//     Tick = retry backstop for a failed async ack.
 //   - localOrphans        event: snapshot install (ReconcileFromSnapshot)
-//                         + log-replay onRequestDelete. Tick = backstop.
+//   - log-replay onRequestDelete. Tick = backstop.
 //   - stagingOrphans      event: snapshot install (ReconcileFromSnapshot)
-//                         + segment release. Tick = backstop.
+//   - segment release. Tick = backstop.
 //   - missingReplicas     event: lead-gained + snapshot install
-//                         (ReconcileMembershipCatchup). No reliable
-//                         per-chunk edge (the leader's seal-time push has
-//                         no retry queue), so the tick stays as the
-//                         recovery backstop.
+//     (ReconcileMembershipCatchup). No reliable
+//     per-chunk edge (the leader's seal-time push has
+//     no retry queue), so the tick stays as the
+//     recovery backstop.
 //   - staleLeaderFSM      periodic-by-nature: a 1h grace-period GC of
-//                         FSM entries no reachable node can serve. The
-//                         "event" is absence of bytes past a timeout.
+//     FSM entries no reachable node can serve. The
+//     "event" is absence of bytes past a timeout.
 //   - stalePendingAcks    event: leadership change (lead-gained) AND
-//                         placement move under a stable leader
-//                         (wakeStalePendingAckReconcile on the
-//                         FollowerTargets / role reassignment,
-//                         gastrolog-235dm7) + CmdPruneNode. Tick = backstop.
+//     placement move under a stable leader
+//     (wakeStalePendingAckReconcile on the
+//     FollowerTargets / role reassignment,
+//     gastrolog-235dm7) + CmdPruneNode. Tick = backstop.
 //   - idleActiveChunks    periodic-by-nature: wall-clock inactivity
-//                         detection (WriteEnd frozen past a threshold).
-//                         Inactivity is the ABSENCE of append events, so
-//                         there is no edge to wake on — genuinely a tick.
+//     detection (WriteEnd frozen past a threshold).
+//     Inactivity is the ABSENCE of append events, so
+//     there is no edge to wake on — genuinely a tick.
 //   - abandonedTransfer   periodic-by-nature: a 24h grace-period GC of
-//                         transfer announces with zero holders.
+//     transfer announces with zero holders.
 func (r *VaultLifecycleReconciler) ReconcileTick() {
 	v := r.gatherReconcileView()
 	if v == nil {
