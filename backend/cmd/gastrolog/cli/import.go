@@ -110,6 +110,11 @@ var protoIDSections = map[string]bool{
 	"ingesters":            true,
 	"routes":               true,
 	"node_storage_configs": true,
+	// Lookups carry file_id fields with the same treatment. Omitting the
+	// section meant an exported file-backed lookup came back as base64-decoded
+	// garbage — 19 bytes that glid.MustParse then PANICKED on, taking down the
+	// settings endpoint (gastrolog-4j7srt / gastrolog-5vqx2r).
+	"lookup": true,
 }
 
 // decodeGLIDFields is the inverse of convertGLIDFields: within the proto

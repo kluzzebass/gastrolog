@@ -69,6 +69,27 @@ func TestEveryConfigTypeHasAnExportSection(t *testing.T) {
 	}
 }
 
+// protoIDSections is a SECOND hardcoded list, and it drifted the same way: a
+// section whose document carries GLID strings but which is missing from that
+// map imports as base64 garbage. For lookups that garbage reached
+// glid.MustParse and panicked the settings endpoint. Any section backed by a
+// generated proto message needs an entry.
+func TestProtoSectionsDecodeTheirIDs(t *testing.T) {
+	t.Parallel()
+	// Sections whose document form is a generated proto message. Kept beside
+	// the export doc so adding a proto-backed section forces a decision here.
+	protoBacked := []string{
+		"rotation_policies", "retention_policies", "cloud_services", "vaults",
+		"ingesters", "routes", "node_storage_configs", "lookup",
+	}
+	for _, section := range protoBacked {
+		if !protoIDSections[section] {
+			t.Errorf("section %q decodes into a proto message but is not in protoIDSections — "+
+				"its GLID strings will be read as base64 and produce garbage IDs", section)
+		}
+	}
+}
+
 // The section names above must actually exist in the export document, or the
 // mapping is a comforting fiction.
 func TestExportSectionsExistInTheDocument(t *testing.T) {

@@ -224,7 +224,7 @@ func TestConfigImportReplaceRemovesStaleEntities(t *testing.T) {
 	if _, err := client.System.PutLookupSettings(ctx, connect.NewRequest(&v1.PutLookupSettingsRequest{
 		Lookup: &v1.PutLookupSettings{
 			YamlFileLookups: []*v1.YAMLFileLookupEntry{{
-				Name: "stale-yaml", FileId: glid.New().ToProto(), KeyColumn: "host",
+				Name: "stale-yaml", FileId: glid.New().Bytes(), KeyColumn: "host",
 			}},
 		},
 	})); err != nil {
@@ -590,7 +590,8 @@ func seedEveryConfigType(t *testing.T, ctx context.Context, addr string, store *
 			}},
 			MmdbLookups: []*v1.MMDBLookupEntry{{Name: "geoip", DbType: "city"}},
 			CsvLookups: []*v1.CSVLookupEntry{{
-				Name: "assets", KeyColumn: "hostname", ValueColumns: []string{"rack", "site"},
+				Name: "assets", FileId: glid.New().Bytes(), KeyColumn: "hostname",
+				ValueColumns: []string{"rack", "site"},
 			}},
 		},
 	})); err != nil {

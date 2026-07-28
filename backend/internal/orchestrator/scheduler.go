@@ -184,9 +184,16 @@ func newScheduler(logger *slog.Logger, maxConcurrent int, now func() time.Time) 
 	return sched, nil
 }
 
-// HasPendingPrefix returns true if any active (not yet completed) job
-// has a name starting with prefix. Used by tests to wait for async
-// transitions to finish.
+// HasPendingPrefix returns true if any active job has a name starting with
+// prefix. Used by tests to wait for async transitions to finish.
+//
+// Membership in s.jobs IS "pending": the completion path records the result in
+// s.completed and deletes the job from s.jobs, so a name still present has not
+// finished. This used to additionally test s.completed[name], which could never
+// match — s.completed is keyed by job ID, not name — so the predicate silently
+// degraded to the membership test it now performs openly. Harmless because the
+// two agree, but a helper whose body claims a check it does not perform is how
+// the next reader mistakes it for a dedup guard (gastrolog-1scomn).
 //
 // NOT a deduplication guard. Pairing it with RunOnce to mean "enqueue this
 // work unless it is already queued" is a check-then-act race, and the answer
@@ -197,9 +204,7 @@ func (s *Scheduler) HasPendingPrefix(prefix string) bool {
 	defer s.mu.Unlock()
 	for name := range s.jobs {
 		if strings.HasPrefix(name, prefix) {
-			if _, done := s.completed[name]; !done {
-				return true
-			}
+			return true
 		}
 	}
 	return false
@@ -212,11 +217,12 @@ func (s *Scheduler) WaitIdle(timeout time.Duration) {
 	for time.Now().Before(deadline) {
 		s.mu.Lock()
 		pending := 0
+		// Same as HasPendingPrefix: a completed job is gone from s.jobs, and the
+		// s.completed[name] test this used to perform was keyed by name against a
+		// map keyed by job ID, so it never matched (gastrolog-1scomn).
 		for name := range s.jobs {
-			if _, done := s.completed[name]; !done {
-				if sched, ok := s.schedules[name]; ok && sched == "once" {
-					pending++
-				}
+			if sched, ok := s.schedules[name]; ok && sched == "once" {
+				pending++
 			}
 		}
 		s.mu.Unlock()
