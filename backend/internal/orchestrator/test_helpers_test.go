@@ -764,7 +764,7 @@ func (h *clusterHarness) sealAndReplicate(t *testing.T, leaderNode *clusterTestN
 	// Drain post-seal + replication jobs for the newly-sealed chunk.
 	// A late ImportSealedChunk would recreate the chunk on a follower
 	// after the transition delete has fired.
-	leaderNode.orch.Scheduler().WaitIdle(30 * time.Second)
+	requireIdle(t, leaderNode.orch.Scheduler(), 30*time.Second)
 }
 
 // assertVaultDirEmpty verifies that an instance's filesystem directory contains no
@@ -887,4 +887,19 @@ func waitForTransitions(t *testing.T, orch *Orchestrator, timeout time.Duration)
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("transition jobs did not complete within timeout")
+}
+
+// requireIdle drains the scheduler's one-time jobs and FAILS if the budget
+// expires first.
+//
+// Every WaitIdle call site in this package used to discard the outcome, so a
+// scheduler that had not finished draining looked exactly like one that had.
+// That is a test which reports success for a state it never reached; under
+// full-suite load it becomes a test which reports failure for a bug that is not
+// there. Route drains through here so a blown budget says so.
+func requireIdle(t *testing.T, sched *Scheduler, budget time.Duration) {
+	t.Helper()
+	if !sched.WaitIdle(budget) {
+		t.Fatalf("scheduler still had one-time jobs pending after %s", budget)
+	}
 }

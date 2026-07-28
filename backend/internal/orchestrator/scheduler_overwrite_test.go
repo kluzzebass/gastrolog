@@ -9,10 +9,43 @@ package orchestrator
 import (
 	"context"
 	"log/slog"
-	"sync/atomic"
 	"testing"
 	"time"
 )
+
+// awaitNotifications blocks until the scheduler has fired n job-change events.
+//
+// The bound is a deadlock backstop, not the synchronisation: each event is
+// waited FOR, so a loaded machine simply waits longer. The first version of
+// these tests inverted that — it slept, or called the WaitIdle helper (which
+// returns nothing, so a timeout there is indistinguishable from success) and
+// then read a counter. Under full-suite load the wait expired, the assertion
+// ran against a half-finished scheduler, and the test failed while passing 20/20
+// in isolation.
+func awaitNotifications(t *testing.T, ch <-chan struct{}, n int, what string) {
+	t.Helper()
+	for i := range n {
+		select {
+		case <-ch:
+		case <-time.After(30 * time.Second):
+			t.Fatalf("timed out waiting for %s: got %d of %d job-change events", what, i, n)
+		}
+	}
+}
+
+// notifyChan wires a buffered channel to the scheduler's job-change callback.
+// Buffered because the callback runs on the scheduler's own goroutine and must
+// never block on a test that is not yet receiving.
+func notifyChan(sched *Scheduler) chan struct{} {
+	ch := make(chan struct{}, 64)
+	sched.SetOnJobChange(func() {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	})
+	return ch
+}
 
 func TestOverwrittenOneTimeJobsBothComplete(t *testing.T) {
 	t.Parallel()
@@ -22,13 +55,11 @@ func TestOverwrittenOneTimeJobsBothComplete(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = sched.Stop() })
 
-	var notifications atomic.Int32
-	sched.SetOnJobChange(func() { notifications.Add(1) })
+	notified := notifyChan(sched)
 
 	const name = "overwritten"
 	firstStarted := make(chan struct{})
 	releaseFirst := make(chan struct{})
-	secondDone := make(chan struct{})
 
 	if err := sched.RunOnce(name, func(context.Context) error {
 		close(firstStarted)
@@ -42,29 +73,23 @@ func TestOverwrittenOneTimeJobsBothComplete(t *testing.T) {
 	// Second registration under the same name, while the first still runs.
 	if err := sched.RunOnce(name, func(context.Context) error {
 		<-releaseFirst
-		time.Sleep(30 * time.Millisecond)
-		close(secondDone)
 		return nil
 	}); err != nil {
 		t.Fatalf("RunOnce (second): %v", err)
 	}
 
 	close(releaseFirst)
-	<-secondDone
-	sched.WaitIdle(5 * time.Second)
 
 	// Two distinct jobs ran, so two terminal events must fire. Before the fix
 	// the first job's completion was filed under the SECOND job's id, and the
 	// second job's own completion found nothing under the name and returned
-	// silently — one event instead of two.
+	// silently — one event instead of two, so this wait would never satisfy.
 	//
 	// Counted through onJobChange rather than ListJobs: a RunOnce job carries no
 	// progress record, and cleanupCompletedLocked drops progress-less entries on
 	// the next ListJobs call, so the completion registry is deliberately
 	// ephemeral for them.
-	if got := notifications.Load(); got < 2 {
-		t.Errorf("terminal notifications = %d, want at least 2 (one per job that ran)", got)
-	}
+	awaitNotifications(t, notified, 2, "both one-time jobs to report completion")
 }
 
 // The registry entry must not be retired by a job that no longer owns the name:
@@ -77,6 +102,8 @@ func TestOverwrittenJobDoesNotRetireTheLiveEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = sched.Stop() })
+
+	notified := notifyChan(sched)
 
 	const name = "still-running"
 	firstStarted := make(chan struct{})
@@ -102,16 +129,23 @@ func TestOverwrittenJobDoesNotRetireTheLiveEntry(t *testing.T) {
 	}
 	<-secondStarted
 
-	// Retire the first job. The second is still running and still owns the name.
+	// Retire the first job and wait for the scheduler to have actually processed
+	// that completion — the state this asserts on only exists afterwards. Sleeping
+	// a fixed 100ms here was the same mistake as above: on a loaded machine the
+	// retirement had not happened yet, so the assertion tested nothing.
 	close(releaseFirst)
-	time.Sleep(100 * time.Millisecond)
+	awaitNotifications(t, notified, 1, "the first job's retirement")
 
 	if !sched.HasPendingPrefix(name) {
 		t.Error("scheduler reported idle while a job under that name was still running")
 	}
 
+	// completeOneTimeJob drops the registry entry under the lock and fires the
+	// notification after releasing it, so once the event lands the name is
+	// already retired — waiting on it is sound where WaitIdle's silent timeout
+	// was not.
 	close(releaseSecond)
-	sched.WaitIdle(5 * time.Second)
+	awaitNotifications(t, notified, 1, "the second job's completion")
 	if sched.HasPendingPrefix(name) {
 		t.Error("still pending after both jobs finished")
 	}

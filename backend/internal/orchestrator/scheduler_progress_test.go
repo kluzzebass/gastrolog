@@ -36,7 +36,7 @@ func TestRunOnceLeavesACompletionRecord(t *testing.T) {
 	if err := sched.RunOnce("post-seal:chunk-1", func(context.Context) error { return nil }); err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
-	sched.WaitIdle(5 * time.Second)
+	requireIdle(t, sched, 5*time.Second)
 
 	// ListJobs runs cleanupCompletedLocked, which is what used to delete this.
 	info, ok := jobByName(t, sched, "post-seal:chunk-1")
@@ -67,7 +67,7 @@ func TestRunOnceFailureIsVisible(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
-	sched.WaitIdle(5 * time.Second)
+	requireIdle(t, sched, 5*time.Second)
 
 	info, ok := jobByName(t, sched, "build:chunk-2")
 	if !ok {
@@ -100,7 +100,7 @@ func TestRunOnceWithProgressReportsDetail(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("RunOnceWithProgress: %v", err)
 	}
-	sched.WaitIdle(5 * time.Second)
+	requireIdle(t, sched, 5*time.Second)
 
 	info, ok := jobByName(t, sched, "replicate:vault-a")
 	if !ok {
@@ -137,7 +137,7 @@ func TestRunOnceWithProgressKeepsItsOwnFailure(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("RunOnceWithProgress: %v", err)
 	}
-	sched.WaitIdle(5 * time.Second)
+	requireIdle(t, sched, 5*time.Second)
 
 	info, ok := jobByName(t, sched, "upload:chunk-3")
 	if !ok {

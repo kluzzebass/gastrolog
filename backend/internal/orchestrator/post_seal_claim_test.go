@@ -65,7 +65,7 @@ func TestPostSealDoesNotRunTwiceForOneChunk(t *testing.T) {
 	orch.schedulePostSeal(vaultID, cm, chunkID)
 
 	close(cm.release)
-	orch.scheduler.WaitIdle(5 * time.Second)
+	requireIdle(t, orch.scheduler, 5*time.Second)
 
 	if got := cm.calls.Load(); got != 1 {
 		t.Errorf("PostSealProcess ran %d times for one chunk, want 1: the GLCB is rebuilt "+
@@ -86,7 +86,7 @@ func TestPostSealRunsAgainAfterTheFirstCompletes(t *testing.T) {
 	orch.RegisterVault(NewVault(vaultID, &VaultInstance{VaultID: vaultID, Type: "file", Chunks: cm}))
 
 	orch.schedulePostSeal(vaultID, cm, chunkID)
-	orch.scheduler.WaitIdle(5 * time.Second)
+	requireIdle(t, orch.scheduler, 5*time.Second)
 	select {
 	case <-cm.started:
 	case <-time.After(5 * time.Second):
@@ -94,7 +94,7 @@ func TestPostSealRunsAgainAfterTheFirstCompletes(t *testing.T) {
 	}
 
 	orch.schedulePostSeal(vaultID, cm, chunkID)
-	orch.scheduler.WaitIdle(5 * time.Second)
+	requireIdle(t, orch.scheduler, 5*time.Second)
 
 	if got := cm.calls.Load(); got != 2 {
 		t.Errorf("PostSealProcess ran %d times across two separate seals, want 2: "+

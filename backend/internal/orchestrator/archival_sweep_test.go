@@ -277,7 +277,7 @@ func TestTriggerArchivalSweepEvaluatesImmediately(t *testing.T) {
 	orch.now = func() time.Time { return time.Now().Add(48 * time.Hour) }
 
 	orch.TriggerArchivalSweep()
-	orch.Scheduler().WaitIdle(5 * time.Second)
+	requireIdle(t, orch.Scheduler(), 5*time.Second)
 
 	meta, _ := cm.Meta(ids[0])
 	if !meta.Archived {
@@ -300,7 +300,7 @@ func TestTriggerArchivalSweepBelowThresholdNoOp(t *testing.T) {
 	orch.now = func() time.Time { return time.Now().Add(48 * time.Hour) }
 
 	orch.TriggerArchivalSweep()
-	orch.Scheduler().WaitIdle(5 * time.Second)
+	requireIdle(t, orch.Scheduler(), 5*time.Second)
 
 	meta, _ := cm.Meta(ids[0])
 	if meta.Archived {
@@ -415,7 +415,7 @@ func TestTriggerArchivalSweepCoalesces(t *testing.T) {
 	for range 20 {
 		orch.TriggerArchivalSweep()
 	}
-	orch.Scheduler().WaitIdle(5 * time.Second)
+	requireIdle(t, orch.Scheduler(), 5*time.Second)
 
 	// After draining, no triggered job should remain registered.
 	if orch.Scheduler().HasJob(archivalSweepTriggerJobName) {
