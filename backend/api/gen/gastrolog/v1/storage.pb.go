@@ -179,14 +179,17 @@ func (x *NodeStorageConfig) GetFileStorages() []*FileStorage {
 }
 
 // CloudStorageTransition defines a single step in an archival lifecycle chain.
-// Transitions are ordered by after_days (ascending). An empty storage_class
+// Transitions are ordered by after_days (ascending). An empty cloud_storage_class
 // means "delete" (expiry).
 type CloudStorageTransition struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	After         string                 `protobuf:"bytes,1,opt,name=after,proto3" json:"after,omitempty"`                                   // duration after chunk seal (e.g. "30s", "7d", "2w", "360d")
-	StorageClass  string                 `protobuf:"bytes,2,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"` // target class (e.g. "GLACIER", "DEEP_ARCHIVE", "Archive"), empty = delete
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	After string                 `protobuf:"bytes,1,opt,name=after,proto3" json:"after,omitempty"` // duration after chunk seal (e.g. "30s", "7d", "2w", "360d")
+	// Target CLOUD storage class — the archival tier ("GLACIER", "DEEP_ARCHIVE",
+	// "Archive"); empty = delete. Distinct from the uint32 storage_class above,
+	// which selects which local disk a vault may live on (gastrolog-108bcg).
+	CloudStorageClass string `protobuf:"bytes,2,opt,name=cloud_storage_class,json=cloudStorageClass,proto3" json:"cloud_storage_class,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *CloudStorageTransition) Reset() {
@@ -226,9 +229,9 @@ func (x *CloudStorageTransition) GetAfter() string {
 	return ""
 }
 
-func (x *CloudStorageTransition) GetStorageClass() string {
+func (x *CloudStorageTransition) GetCloudStorageClass() string {
 	if x != nil {
-		return x.StorageClass
+		return x.CloudStorageClass
 	}
 	return ""
 }
@@ -646,10 +649,10 @@ const file_gastrolog_v1_storage_proto_rawDesc = "" +
 	"\x0fdisk_free_floor\x18\a \x01(\tR\rdiskFreeFloor\"l\n" +
 	"\x11NodeStorageConfig\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\fR\x06nodeId\x12>\n" +
-	"\rfile_storages\x18\x02 \x03(\v2\x19.gastrolog.v1.FileStorageR\ffileStorages\"S\n" +
+	"\rfile_storages\x18\x02 \x03(\v2\x19.gastrolog.v1.FileStorageR\ffileStorages\"^\n" +
 	"\x16CloudStorageTransition\x12\x14\n" +
-	"\x05after\x18\x01 \x01(\tR\x05after\x12#\n" +
-	"\rstorage_class\x18\x02 \x01(\tR\fstorageClass\"\x85\x05\n" +
+	"\x05after\x18\x01 \x01(\tR\x05after\x12.\n" +
+	"\x13cloud_storage_class\x18\x02 \x01(\tR\x11cloudStorageClass\"\x85\x05\n" +
 	"\fCloudService\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +

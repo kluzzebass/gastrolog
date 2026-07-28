@@ -301,11 +301,11 @@ func (s *VaultServer) ArchiveChunk(
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid chunk_id: %w", err))
 	}
-	storageClass := req.Msg.StorageClass
+	storageClass := req.Msg.CloudStorageClass
 	if storageClass == "" {
 		// Resolve from the cloud service's first transition.
 		if cs := s.lookupCloudServiceForChunk(ctx, vaultID, chunkID); cs != nil && len(cs.Transitions) > 0 {
-			storageClass = cs.Transitions[0].StorageClass
+			storageClass = cs.Transitions[0].CloudStorageClass
 		}
 	}
 	if storageClass == "" {

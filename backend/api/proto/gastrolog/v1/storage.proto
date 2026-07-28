@@ -35,11 +35,14 @@ message NodeStorageConfig {
 }
 
 // CloudStorageTransition defines a single step in an archival lifecycle chain.
-// Transitions are ordered by after_days (ascending). An empty storage_class
+// Transitions are ordered by after_days (ascending). An empty cloud_storage_class
 // means "delete" (expiry).
 message CloudStorageTransition {
   string after = 1;          // duration after chunk seal (e.g. "30s", "7d", "2w", "360d")
-  string storage_class = 2;  // target class (e.g. "GLACIER", "DEEP_ARCHIVE", "Archive"), empty = delete
+  // Target CLOUD storage class — the archival tier ("GLACIER", "DEEP_ARCHIVE",
+  // "Archive"); empty = delete. Distinct from the uint32 storage_class above,
+  // which selects which local disk a vault may live on (gastrolog-108bcg).
+  string cloud_storage_class = 2;
 }
 
 // CloudService defines a cluster-wide cloud storage endpoint.

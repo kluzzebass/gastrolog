@@ -151,7 +151,10 @@ type NodeStorageConfig struct {
 // CloudStorageTransition defines a single step in an archival lifecycle chain.
 type CloudStorageTransition struct {
 	After        string `json:"after"`        // duration string (e.g. "30s", "7d", "2w", "360d")
-	StorageClass string `json:"storageClass"` // empty = delete (expiry)
+	// CloudStorageClass is the archival TIER ("GLACIER", "cold"); empty means
+	// delete at this age. Not the uint32 storage_class elsewhere in this file,
+	// which selects a local disk (gastrolog-108bcg).
+	CloudStorageClass string `json:"cloudStorageClass"`
 }
 
 type CloudService struct {

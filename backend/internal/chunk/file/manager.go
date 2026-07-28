@@ -4239,7 +4239,7 @@ func (m *Manager) rebuildCloudListCache() {
 	if err := m.cloudIdx.ForEach(func(id chunk.ChunkID, meta *chunkMeta) bool {
 		if _, exists := m.metas[id]; !exists {
 			cm := meta.toChunkMeta()
-			cm.StorageClass = m.storageClasses[id]
+			cm.CloudStorageClass = m.storageClasses[id]
 			cache = append(cache, cm)
 		}
 		return true

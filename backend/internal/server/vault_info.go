@@ -454,7 +454,7 @@ func ChunkMetaToProto(meta chunk.ChunkMeta) *apiv1.ChunkMeta {
 		CloudBytes:   meta.CloudBytes,
 		CloudBacked:  meta.CloudBacked,
 		Archived:     meta.Archived,
-		StorageClass: meta.StorageClass,
+		CloudStorageClass: meta.CloudStorageClass,
 		State:        chunkStateToProto(meta.State, meta.Sealed),
 	}
 	if saneRecordTime(meta.WriteStart) {

@@ -278,7 +278,7 @@ func (e *ManifestEntry) ToChunkMeta() chunk.ChunkMeta {
 		IngestTSMonotonic: e.IngestTSMonotonic,
 		CloudBacked:       e.CloudBacked,
 		Archived:          e.Archived,
-		StorageClass:      e.CloudStorageClass,
+		CloudStorageClass: e.CloudStorageClass,
 	}
 }
 
