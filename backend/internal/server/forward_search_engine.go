@@ -61,7 +61,7 @@ func (s *QueryServer) hasMultiHolderVaultsInScope(ctx context.Context, selectedV
 		if len(selected) > 0 && !selected[v.ID] {
 			continue
 		}
-		if len(system.PlacementNodeIDs(v.Placements, nscs)) > 1 {
+		if len(system.PlacementNodeIDs(s.placementsFor(ctx, v.ID), nscs)) > 1 {
 			return true
 		}
 	}

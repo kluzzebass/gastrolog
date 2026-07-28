@@ -95,11 +95,10 @@ func seedStorageWithPlacement(t *testing.T, h *multiNodeHarness, nodeID, path, f
 	vaultID = glid.New()
 	placements := []system.VaultPlacement{{StorageID: storageID.String(), Leader: true}}
 	if err := h.cfgStore.PutVault(ctx, system.VaultConfig{
-		ID:         vaultID,
-		Name:       "on-guarded-storage",
-		Enabled:    true,
-		Type:       system.VaultTypeFile,
-		Placements: placements,
+		ID:      vaultID,
+		Name:    "on-guarded-storage",
+		Enabled: true,
+		Type:    system.VaultTypeFile,
 	}); err != nil {
 		t.Fatalf("PutVault: %v", err)
 	}

@@ -297,7 +297,13 @@ func (s *SystemServer) loadSystemVaults(ctx context.Context, resp *apiv1.GetSyst
 		return fmt.Errorf("list vaults: %w", err)
 	}
 	for _, vaultCfg := range cfgStores {
-		resp.Vaults = append(resp.Vaults, convert.VaultConfigToProto(vaultCfg))
+		// Placements are read from their owner and attached for the response;
+		// the UI resolves leader/follower node IDs from them.
+		placements, err := s.sysStore.GetVaultPlacements(ctx, vaultCfg.ID)
+		if err != nil {
+			return fmt.Errorf("read vault placements: %w", err)
+		}
+		resp.Vaults = append(resp.Vaults, convert.VaultConfigToProto(vaultCfg, placements))
 	}
 	return nil
 }

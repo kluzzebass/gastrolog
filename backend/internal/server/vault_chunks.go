@@ -320,13 +320,10 @@ func chunkMetaStartNanos(c *apiv1.ChunkMeta) int64 {
 // vault — both leader and followers. Leader provides authoritative chunk
 // metadata; followers are queried to verify replica presence for the UI.
 //
-// Reads VaultConfig.Placements directly.
+// Reads placements from their owner (gastrolog-617qns).
 func (s *VaultServer) remoteVaultNodes(ctx context.Context, vaultID glid.GLID) []string {
-	vaultCfg, err := s.cfgStore.GetVault(ctx, vaultID)
-	if err != nil || vaultCfg == nil {
-		return nil
-	}
-	if len(vaultCfg.Placements) == 0 {
+	placements, err := s.cfgStore.GetVaultPlacements(ctx, vaultID)
+	if err != nil || len(placements) == 0 {
 		return nil
 	}
 	nscs, err := s.cfgStore.ListNodeStorageConfigs(ctx)
@@ -335,12 +332,12 @@ func (s *VaultServer) remoteVaultNodes(ctx context.Context, vaultID glid.GLID) [
 	}
 	seen := make(map[string]bool)
 	var nodes []string
-	leaderNodeID := system.LeaderNodeID(vaultCfg.Placements, nscs)
+	leaderNodeID := system.LeaderNodeID(placements, nscs)
 	if leaderNodeID != "" && leaderNodeID != s.localNodeID {
 		seen[leaderNodeID] = true
 		nodes = append(nodes, leaderNodeID)
 	}
-	for _, sid := range system.FollowerNodeIDs(vaultCfg.Placements, nscs) {
+	for _, sid := range system.FollowerNodeIDs(placements, nscs) {
 		if sid != s.localNodeID && !seen[sid] {
 			seen[sid] = true
 			nodes = append(nodes, sid)

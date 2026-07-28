@@ -599,7 +599,7 @@ func (o *Orchestrator) AddVaultInstance(ctx context.Context, vaultID glid.GLID, 
 	o.ensureVaultControlPlaneRaftGroup(vaultID, rt.Nodes, factories)
 
 	nscs := rt.NodeStorageConfigs
-	placements := vaultCfg.Placements
+	placements := sys.PlacementsFor(vaultCfg.ID)
 	leaderNodeID := system.LeaderNodeID(placements, nscs)
 	followerNodeIDs := system.FollowerNodeIDs(placements, nscs)
 	isLeader := leaderNodeID == "" || leaderNodeID == o.localNodeID
@@ -738,7 +738,7 @@ func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.Va
 	// Determine this node's role for this vault. With one-replica-per-node
 	// (Phase 2 invariant) the node is at most one of: leader, follower, neither.
 	nscs := rt.NodeStorageConfigs
-	placements := vaultCfg.Placements
+	placements := sys.PlacementsFor(vaultCfg.ID)
 	leaderNodeID := system.LeaderNodeID(placements, nscs)
 	followerNodeIDs := system.FollowerNodeIDs(placements, nscs)
 	isLeader := leaderNodeID == "" || leaderNodeID == o.localNodeID
@@ -797,7 +797,7 @@ func (o *Orchestrator) alertVaultInitFailed(vaultID glid.GLID, vaultName string,
 func (o *Orchestrator) buildLeaderInstance(sys *system.System, vaultCfg system.VaultConfig, factories Factories) (*VaultInstance, error) {
 	// Read placements from VaultConfig (mirrored from vault placements via
 	// the FSM bridge — gastrolog-257l7).
-	storageID := system.LeaderStorageID(vaultCfg.Placements)
+	storageID := system.LeaderStorageID(sys.PlacementsFor(vaultCfg.ID))
 	if storageID != "" && !strings.HasPrefix(storageID, system.SyntheticStoragePrefix) {
 		ti, err := o.buildInstanceForStorage(sys, vaultCfg, factories, storageID, false)
 		if err != nil {

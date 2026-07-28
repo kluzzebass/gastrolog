@@ -266,7 +266,7 @@ func replicationTargetsEqual(a, b []system.ReplicationTarget) bool {
 // placement event (wakeStalePendingAckReconcile) instead of leaving it to the
 // backstop tick.
 func (o *Orchestrator) reconcileInstanceRole(sys *system.System, vaultCfg system.VaultConfig, vaultInst *VaultInstance) (leaderResolved, changed bool) {
-	leaderNodeID := system.LeaderNodeID(vaultCfg.Placements, sys.Runtime.NodeStorageConfigs)
+	leaderNodeID := system.LeaderNodeID(sys.PlacementsFor(vaultCfg.ID), sys.Runtime.NodeStorageConfigs)
 	if leaderNodeID == "" {
 		// Placements resolve to no leader (mid-flap partial state, or a
 		// storage config transiently missing). Never flip roles on
@@ -275,7 +275,7 @@ func (o *Orchestrator) reconcileInstanceRole(sys *system.System, vaultCfg system
 		// vault-leaderless alarm.
 		return false, false
 	}
-	followerIDs := system.FollowerNodeIDs(vaultCfg.Placements, sys.Runtime.NodeStorageConfigs)
+	followerIDs := system.FollowerNodeIDs(sys.PlacementsFor(vaultCfg.ID), sys.Runtime.NodeStorageConfigs)
 	isLeader := leaderNodeID == o.localNodeID
 	isFollower := slices.Contains(followerIDs, o.localNodeID)
 	if !isLeader && !isFollower {
@@ -317,7 +317,7 @@ func replicationTargetNodes(targets []system.ReplicationTarget) []string {
 // follower set shrank holds pendingDeletes naming the departed node in
 // ExpectedFrom, which nothing else unsticks under a stable leader.
 func (o *Orchestrator) refreshFollowerTargets(sys *system.System, vaultCfg system.VaultConfig, vaultInst *VaultInstance) (changed bool) {
-	newTargets := system.FollowerTargets(vaultCfg.Placements, sys.Runtime.NodeStorageConfigs)
+	newTargets := system.FollowerTargets(sys.PlacementsFor(vaultCfg.ID), sys.Runtime.NodeStorageConfigs)
 	if !replicationTargetsEqual(vaultInst.FollowerTargets, newTargets) {
 		changed = true
 		o.rotationLogger.Info("FollowerTargets refreshed",

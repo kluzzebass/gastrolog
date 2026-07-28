@@ -78,7 +78,7 @@ only — never node-local knowledge, so every node gives the same answer:
 
 | Resource kind | Owner is | Read from |
 |---------------|----------|-----------|
-| `ResourceVault` | the vault leader | `VaultConfig.Placements` + node storage configs |
+| `ResourceVault` | the vault leader | `GetVaultPlacements` + node storage configs |
 | `ResourceIngester` | every node running the ingester | the Raft-replicated ingester alive map |
 
 `ResolveOwners` returns a **set** of nodes in deterministic order —

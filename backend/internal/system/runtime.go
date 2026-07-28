@@ -35,3 +35,21 @@ type Runtime struct {
 	// UI state.
 	SetupWizardDismissed bool `json:"setup_wizard_dismissed,omitempty"`
 }
+
+// PlacementsFor returns a vault's placements from the runtime map, which the
+// store fills from the placement manager's own state.
+//
+// This is the OWNER. VaultConfig used to carry a mirrored copy that
+// SetVaultPlacements kept in sync, and readers took it from there — two
+// representations of one entity, with the mirror's correctness resting on one
+// function remembering to update two places. gastrolog-kl8c3s closed a second
+// writer to that mirror; gastrolog-617qns removed the mirror.
+//
+// Returns nil for a vault with no placements, which callers already handle:
+// LeaderNodeID and friends treat an empty slice as "unplaced".
+func (s *System) PlacementsFor(vaultID glid.GLID) []VaultPlacement {
+	if s == nil {
+		return nil
+	}
+	return s.Runtime.VaultPlacements[vaultID]
+}

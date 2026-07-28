@@ -37,12 +37,14 @@ func TestRefreshVaultDiskGuardsRegistersStorageFromConfig(t *testing.T) {
 			Name:    "on-disk",
 			Enabled: true,
 			Type:    system.VaultTypeFile,
-			Placements: []system.VaultPlacement{
-				{StorageID: storageID.String(), Leader: true},
-			},
 		}},
 	}
 	rt := system.Runtime{
+		VaultPlacements: map[glid.GLID][]system.VaultPlacement{
+			vaultID: {
+				{StorageID: storageID.String(), Leader: true},
+			},
+		},
 		NodeStorageConfigs: []system.NodeStorageConfig{{
 			NodeID: nodeID,
 			FileStorages: []system.FileStorage{{
@@ -95,12 +97,14 @@ func TestRefreshVaultDiskGuardsPublishesPlacementsAndClass(t *testing.T) {
 			Name:    "on-disk",
 			Enabled: true,
 			Type:    system.VaultTypeFile,
-			Placements: []system.VaultPlacement{
-				{StorageID: storageID.String(), Leader: true},
-			},
 		}},
 	}
 	rt := system.Runtime{
+		VaultPlacements: map[glid.GLID][]system.VaultPlacement{
+			vaultID: {
+				{StorageID: storageID.String(), Leader: true},
+			},
+		},
 		NodeStorageConfigs: []system.NodeStorageConfig{{
 			NodeID: nodeID,
 			FileStorages: []system.FileStorage{{
@@ -155,6 +159,11 @@ func TestRefreshVaultDiskGuardsPlacementsClearWhenVaultRemoved(t *testing.T) {
 	const nodeID = "node-1"
 
 	rt := system.Runtime{
+		VaultPlacements: map[glid.GLID][]system.VaultPlacement{
+			vaultID: {
+				{StorageID: storageID.String(), Leader: true},
+			},
+		},
 		NodeStorageConfigs: []system.NodeStorageConfig{{
 			NodeID: nodeID,
 			FileStorages: []system.FileStorage{{
@@ -170,9 +179,6 @@ func TestRefreshVaultDiskGuardsPlacementsClearWhenVaultRemoved(t *testing.T) {
 				Name:    "on-disk",
 				Enabled: true,
 				Type:    system.VaultTypeFile,
-				Placements: []system.VaultPlacement{
-					{StorageID: storageID.String(), Leader: true},
-				},
 			}},
 		},
 		rt: rt,
@@ -230,12 +236,14 @@ func TestRefreshVaultDiskGuardsStorageRemovalReleasesNoStrand(t *testing.T) {
 			Name:    "on-disk",
 			Enabled: true,
 			Type:    system.VaultTypeFile,
-			Placements: []system.VaultPlacement{
-				{StorageID: storageID.String(), Leader: true},
-			},
 		}},
 	}
 	rt := system.Runtime{
+		VaultPlacements: map[glid.GLID][]system.VaultPlacement{
+			vaultID: {
+				{StorageID: storageID.String(), Leader: true},
+			},
+		},
 		NodeStorageConfigs: []system.NodeStorageConfig{{
 			NodeID: nodeID,
 			FileStorages: []system.FileStorage{{
@@ -325,9 +333,6 @@ func TestRefreshVaultDiskGuardsResolvesNodeDisplayName(t *testing.T) {
 			Name:    "on-disk",
 			Enabled: true,
 			Type:    system.VaultTypeFile,
-			Placements: []system.VaultPlacement{
-				{StorageID: storageID.String(), Leader: true},
-			},
 		}},
 	}
 	// NodeConfig.ID and NodeStorageConfig.NodeID are looked up independently
@@ -335,6 +340,11 @@ func TestRefreshVaultDiskGuardsResolvesNodeDisplayName(t *testing.T) {
 	// the latter) — both must agree with orch.LocalNodeID to exercise "this
 	// is the local node, resolve its display name" end to end.
 	rt := system.Runtime{
+		VaultPlacements: map[glid.GLID][]system.VaultPlacement{
+			vaultID: {
+				{StorageID: storageID.String(), Leader: true},
+			},
+		},
 		Nodes: []system.NodeConfig{{ID: nodeGLID, Name: nodeDisplay}},
 		NodeStorageConfigs: []system.NodeStorageConfig{{
 			NodeID: nodeIDStr,

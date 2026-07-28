@@ -548,29 +548,7 @@ func (f *FSM) applySetVaultPlacements(ctx context.Context, pb *gastrologv1.SetVa
 	if err := f.store.SetVaultPlacements(ctx, vaultID, placements); err != nil {
 		return nil, err
 	}
-	// Mirror placements back onto the matching VaultConfig.Placements.
-	// Placement-driven write path; PutVault is the user-facing surface.
-	if err := f.mirrorPlacementsToVault(ctx, vaultID, placements); err != nil {
-		return nil, err
-	}
 	return &Notification{Kind: NotifyVaultPlacementsSet, ID: vaultID}, nil
-}
-
-// mirrorPlacementsToVault writes the placement set to the owning vault's
-// VaultConfig.Placements.
-func (f *FSM) mirrorPlacementsToVault(ctx context.Context, vaultID glid.GLID, placements []system.VaultPlacement) error {
-	v, err := f.store.GetVault(ctx, vaultID)
-	if err != nil || v == nil {
-		return nil //nolint:nilerr // vault not yet present; will pick up on PutVault
-	}
-	merged := *v
-	if len(placements) > 0 {
-		merged.Placements = make([]system.VaultPlacement, len(placements))
-		copy(merged.Placements, placements)
-	} else {
-		merged.Placements = nil
-	}
-	return f.store.PutVault(ctx, merged)
 }
 
 func (f *FSM) applySetIngesterAlive(ctx context.Context, cmd *gastrologv1.SetIngesterAliveCommand) (*Notification, error) {

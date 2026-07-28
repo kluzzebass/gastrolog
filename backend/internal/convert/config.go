@@ -134,9 +134,15 @@ func NodeStorageConfigFromProto(p *gastrologv1.NodeStorageConfig) system.NodeSto
 // ---------------------------------------------------------------------------
 
 // VaultConfigToProto converts a system.VaultConfig to its proto representation.
-func VaultConfigToProto(v system.VaultConfig) *gastrologv1.VaultConfig {
-	pbPlacements := make([]*gastrologv1.VaultPlacement, len(v.Placements))
-	for i, p := range v.Placements {
+//
+// Placements are passed in rather than read off the config: they are owned by
+// the placement manager and live in Runtime.VaultPlacements, and VaultConfig no
+// longer carries a mirrored copy (gastrolog-617qns). Read paths supply
+// System.PlacementsFor(id); write paths supply nil, which is now structural
+// rather than a convention — a PutVault command has no placements to send.
+func VaultConfigToProto(v system.VaultConfig, placements []system.VaultPlacement) *gastrologv1.VaultConfig {
+	pbPlacements := make([]*gastrologv1.VaultPlacement, len(placements))
+	for i, p := range placements {
 		pbPlacements[i] = &gastrologv1.VaultPlacement{
 			StorageId: []byte(p.StorageID),
 			Leader:    p.Leader,
@@ -201,12 +207,8 @@ func VaultConfigFromProto(p *gastrologv1.VaultConfig) (system.VaultConfig, error
 		cfg.RetentionRules = append(cfg.RetentionRules, rule)
 	}
 
-	for _, pp := range p.GetPlacements() {
-		cfg.Placements = append(cfg.Placements, system.VaultPlacement{
-			StorageID: string(pp.GetStorageId()),
-			Leader:    pp.GetLeader(),
-		})
-	}
+	// Placements on the request are ignored: they are owned by the placement
+	// manager and the domain type does not carry them (gastrolog-617qns).
 
 	return cfg, nil
 }

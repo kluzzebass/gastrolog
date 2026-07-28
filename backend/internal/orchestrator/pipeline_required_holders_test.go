@@ -47,13 +47,15 @@ func TestChunkRequiredHoldersReportsUnresolvedOnEmptyLookup(t *testing.T) {
 				ID:   vaultID,
 				Name: "placed",
 				Type: system.VaultTypeFile,
-				Placements: []system.VaultPlacement{
-					{StorageID: storageA.String(), Leader: true},
-					{StorageID: storageB.String()},
-				},
 			}},
 		},
 		rt: system.Runtime{
+			VaultPlacements: map[glid.GLID][]system.VaultPlacement{
+				vaultID: {
+					{StorageID: storageA.String(), Leader: true},
+					{StorageID: storageB.String()},
+				},
+			},
 			NodeStorageConfigs: []system.NodeStorageConfig{
 				{NodeID: "node-A", FileStorages: []system.FileStorage{{ID: storageA}}},
 				{NodeID: "node-B", FileStorages: []system.FileStorage{{ID: storageB}}},

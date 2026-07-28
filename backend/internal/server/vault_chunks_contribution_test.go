@@ -162,10 +162,9 @@ func newContributionVaultServer(t *testing.T, localID string, remoteIDs []string
 		placements = append(placements, system.VaultPlacement{StorageID: system.SyntheticStorageID(rid)})
 	}
 	if err := cfgStore.PutVault(ctx, system.VaultConfig{
-		ID:         vaultID,
-		Name:       "vault-" + localID,
-		Type:       system.VaultTypeMemory,
-		Placements: placements,
+		ID:   vaultID,
+		Name: "vault-" + localID,
+		Type: system.VaultTypeMemory,
 	}); err != nil {
 		t.Fatalf("PutVault: %v", err)
 	}
@@ -404,10 +403,9 @@ func TestExplain_PartialFanOutCarriesReport(t *testing.T) {
 		{StorageID: system.SyntheticStorageID(deadID), Leader: true},
 	}
 	if err := cfgStore.PutVault(ctx, system.VaultConfig{
-		ID:         remoteVaultID,
-		Name:       "vault-remote",
-		Type:       system.VaultTypeMemory,
-		Placements: placements,
+		ID:   remoteVaultID,
+		Name: "vault-remote",
+		Type: system.VaultTypeMemory,
 	}); err != nil {
 		t.Fatalf("PutVault: %v", err)
 	}
