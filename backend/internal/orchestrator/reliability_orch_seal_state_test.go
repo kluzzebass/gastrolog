@@ -3,6 +3,7 @@ package orchestrator_test
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -92,6 +93,36 @@ func TestOrchRel_SealActive_PromotesEveryNodeToSealed(t *testing.T) {
 			for cid, st := range h.chunkStatesOnNode(id) {
 				h.t.Logf("%s: chunk %s state=%s", h.nodes[id].label, cid, st)
 			}
+			h.logPostSealJobs(id)
 		}
 	})
+}
+
+// logPostSealJobs reports what the node's scheduler thinks of the post-seal
+// pipeline. An entry stranded in Sealing has exactly three explanations, and
+// this distinguishes them: the job is absent (it ran and the Sealed announce
+// did not land, or it was never scheduled), pending (scheduled but starved
+// behind the concurrency limit), or running (in-flight and slow). Without this
+// the stall dump shows only the symptom, which is what made this member of
+// gastrolog-231ik unfalsifiable across runs.
+func (h *orchRelHarness) logPostSealJobs(id string) {
+	n := h.nodes[id]
+	if n == nil || n.orch == nil {
+		return
+	}
+	found := false
+	for _, j := range n.orch.Scheduler().ListJobs() {
+		if !strings.HasPrefix(j.Name, "post-seal:") {
+			continue
+		}
+		found = true
+		status := "no progress record"
+		if snap := j.Snapshot(); snap.Progress != nil {
+			status = fmt.Sprintf("status=%s started=%s", snap.Progress.Status, snap.Progress.StartedAt)
+		}
+		h.t.Logf("%s: job %s lastRun=%s %s", n.label, j.Name, j.LastRun, status)
+	}
+	if !found {
+		h.t.Logf("%s: no post-seal job in the scheduler registry", n.label)
+	}
 }

@@ -24,8 +24,8 @@ import (
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/server"
-	sysmem "gastrolog/internal/system/memory"
 	"gastrolog/internal/system"
+	sysmem "gastrolog/internal/system/memory"
 )
 
 func TestListStorages_ConcurrentAccessDoesNotRaceSharedPeerState(t *testing.T) {

@@ -124,6 +124,15 @@ const (
 	// missed (crash, apply failure) and a pull still gets addressed at
 	// an already-expired source.
 	CmdClearTransferSource Command = 24
+
+	// CmdArchiveChunk records the cloud storage class a chunk's blob now
+	// sits in. Before it existed, that class lived only in a node-local map
+	// on whichever node called the cloud API, so the archival sweep's
+	// "already at the target class?" test read an empty string on the FSM
+	// path and a multi-step transition chain (cold -> deep-freeze) could
+	// never advance past its first step. Idempotent; an empty class means
+	// restored to standard storage (gastrolog-35ygqv).
+	CmdArchiveChunk Command = 25
 )
 
 // ManifestEntry holds the full metadata for one chunk in this vault's
@@ -193,9 +202,19 @@ type ManifestEntry struct {
 	// running flag (which only flips one direction, true → false).
 	IngestTSMonotonic bool
 
-	CloudBacked      bool
-	Archived         bool
-	RetentionPending bool
+	CloudBacked bool
+	// CloudStorageClass is the cloud archival tier this chunk currently sits
+	// in ("GLACIER", "cold"), as last announced by CmdArchiveChunk. Empty
+	// means standard storage. Archived is derived from it rather than tracked
+	// separately, so the two can never disagree (gastrolog-35ygqv).
+	//
+	// NOT "StorageClass": that name belongs to the uint32 local class on
+	// FileStorage / CloudService / VaultConfig, which selects which disk a
+	// vault may live on. Different concept, same words — see
+	// docs/ubiquitous_language.md.
+	CloudStorageClass string
+	Archived          bool
+	RetentionPending  bool
 
 	// Cloud-specific TOC offsets (GLCB format).
 	IngestIdxOffset int64
@@ -259,6 +278,7 @@ func (e *ManifestEntry) ToChunkMeta() chunk.ChunkMeta {
 		IngestTSMonotonic: e.IngestTSMonotonic,
 		CloudBacked:       e.CloudBacked,
 		Archived:          e.Archived,
+		CloudStorageClass: e.CloudStorageClass,
 	}
 }
 
@@ -274,7 +294,7 @@ type FSM struct {
 	// observable and gives the fix a regression guard.
 	completedListScans atomic.Uint64
 
-	ready    bool               // true after first Apply or Restore
+	ready    bool                // true after first Apply or Restore
 	onUpload func(ManifestEntry) // called after CmdUploadChunk applies (outside lock)
 
 	// Step-1 reconciler-wiring hooks for gastrolog-51gme. Each fires
@@ -1086,6 +1106,8 @@ func (f *FSM) applyLocked(cmd *gastrologv1.VaultCtlCommand) (any, applyEffects) 
 		fx.createdEntry = f.captureEntry(result, chunkIDFromProto(c.RepatriateChunk.GetEntry().GetId()))
 	case *gastrologv1.VaultCtlCommand_ClearTransferSource:
 		result = f.applyClearTransferSource(c.ClearTransferSource)
+	case *gastrologv1.VaultCtlCommand_ArchiveChunk:
+		result = f.applyArchiveChunk(c.ArchiveChunk)
 	default:
 		var ok bool
 		result, fx, ok = f.tryApplySegmentPipelineLocked(cmd)
@@ -1545,6 +1567,35 @@ func (f *FSM) applyClearTransferSource(c *gastrologv1.ClearTransferSourceCommand
 	return nil
 }
 
+// applyArchiveChunk records the storage class a chunk's cloud blob now sits
+// in, and derives Archived from it. Idempotent: replaying the same class is a
+// no-op, and an unknown chunk is ignored rather than erroring, because the
+// archive itself already succeeded against the cloud store — failing the apply
+// would not un-archive it, it would only make the FSM disagree with the blob.
+// See CmdArchiveChunk and gastrolog-35ygqv.
+func (f *FSM) applyArchiveChunk(c *gastrologv1.ArchiveChunkCommand) error {
+	id := chunkIDFromProto(c.GetId())
+	e := f.chunks[id]
+	if e == nil {
+		return nil
+	}
+	e.CloudStorageClass = c.GetCloudStorageClass()
+	e.Archived = e.CloudStorageClass != ""
+	return nil
+}
+
+// NewArchiveChunk builds an ArchiveChunk command message. See CmdArchiveChunk.
+func NewArchiveChunk(id chunk.ChunkID, cloudStorageClass string) *gastrologv1.VaultCtlCommand {
+	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_ArchiveChunk{
+		ArchiveChunk: &gastrologv1.ArchiveChunkCommand{Id: id[:], CloudStorageClass: cloudStorageClass},
+	}}
+}
+
+// MarshalArchiveChunk builds the Raft log data for an ArchiveChunk command.
+func MarshalArchiveChunk(id chunk.ChunkID, cloudStorageClass string) []byte {
+	return mustMarshalCommand(NewArchiveChunk(id, cloudStorageClass))
+}
+
 // AttachOffsets: [16 ChunkID][8 IngestIdxOff][8 IngestIdxSize][8 SourceIdxOff][8 SourceIdxSize]
 //
 // Fired after sealToGLCB on the leader (and after finalizeImportedChunk
@@ -1755,6 +1806,7 @@ func entryToProto(e *ManifestEntry) *gastrologv1.ManifestEntry {
 		IngestTsMonotonic:     e.IngestTSMonotonic,
 		CloudBacked:           e.CloudBacked,
 		Archived:              e.Archived,
+		CloudStorageClass:     e.CloudStorageClass,
 		RetentionPending:      e.RetentionPending,
 		IngestIdxOffset:       e.IngestIdxOffset,
 		IngestIdxSize:         e.IngestIdxSize,
@@ -1797,6 +1849,7 @@ func entryFromProto(p *gastrologv1.ManifestEntry) ManifestEntry {
 		SealedAt:          time.Unix(0, p.GetSealedAtNanos()),
 		CloudBacked:       p.GetCloudBacked(),
 		Archived:          p.GetArchived(),
+		CloudStorageClass: p.GetCloudStorageClass(),
 		RetentionPending:  p.GetRetentionPending(),
 		IngestIdxOffset:   p.GetIngestIdxOffset(),
 		IngestIdxSize:     p.GetIngestIdxSize(),

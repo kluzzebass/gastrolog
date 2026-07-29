@@ -206,8 +206,7 @@ func drainIterToProto(it iter.Seq2[chunk.Record, error]) []*apiv1.Record {
 // remoteNodeForVault returns the owning node ID if the vault is remote,
 // or "" if the vault is local or lookup fails.
 //
-// Reads VaultConfig.Placements directly (mirrored from vault placements via
-// the FSM bridge — gastrolog-257l7).
+// Placements come from their owner via placementsFor.
 func (s *QueryServer) remoteNodeForVault(ctx context.Context, vaultID glid.GLID) string {
 	// If the vault is registered locally, it's not remote.
 	if slices.Contains(s.orch.ListVaults(), vaultID) {
@@ -218,20 +217,32 @@ func (s *QueryServer) remoteNodeForVault(ctx context.Context, vaultID glid.GLID)
 		return ""
 	}
 
-	vaultCfg, err := s.cfgStore.GetVault(ctx, vaultID)
-	if err != nil || vaultCfg == nil {
-		return ""
-	}
-	if len(vaultCfg.Placements) == 0 {
+	placements := s.placementsFor(ctx, vaultID)
+	if len(placements) == 0 {
 		return ""
 	}
 	nscs, err := s.cfgStore.ListNodeStorageConfigs(ctx)
 	if err != nil {
 		return ""
 	}
-	leaderNodeID := system.LeaderNodeID(vaultCfg.Placements, nscs)
+	leaderNodeID := system.LeaderNodeID(placements, nscs)
 	if leaderNodeID == "" || leaderNodeID == s.localNodeID {
 		return ""
 	}
 	return leaderNodeID
+}
+
+// placementsFor reads a vault's placements from their owner. VaultConfig used to
+// carry a mirrored copy and these paths read it from there; the mirror is gone
+// (gastrolog-617qns). Errors read as "no placements", which every caller here
+// already treats as "not remotely held".
+func (s *QueryServer) placementsFor(ctx context.Context, vaultID glid.GLID) []system.VaultPlacement {
+	if s.cfgStore == nil {
+		return nil
+	}
+	p, err := s.cfgStore.GetVaultPlacements(ctx, vaultID)
+	if err != nil {
+		return nil
+	}
+	return p
 }

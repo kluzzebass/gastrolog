@@ -214,4 +214,3 @@ func causesMatch(got []*gastrologv1.VaultAdmissionRefusal, want []gastrologv1.Va
 	}
 	return true
 }
-

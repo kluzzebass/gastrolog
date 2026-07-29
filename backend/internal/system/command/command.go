@@ -157,7 +157,7 @@ func ExtractDeleteRetentionPolicy(cmd *gastrologv1.DeleteRetentionPolicyCommand)
 
 func putVaultCmd(cfg system.VaultConfig) *gastrologv1.PutVaultCommand {
 	return &gastrologv1.PutVaultCommand{
-		Vault: convert.VaultConfigToProto(cfg),
+		Vault: convert.VaultConfigToProto(cfg, nil), // a write never carries placements (gastrolog-617qns)
 	}
 }
 

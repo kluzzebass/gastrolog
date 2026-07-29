@@ -35,9 +35,10 @@ func TestReconcileInstanceRole(t *testing.T) {
 					{NodeID: "node-L", FileStorages: []system.FileStorage{{ID: leaderStorage}}},
 					{NodeID: "node-F", FileStorages: []system.FileStorage{{ID: followerStorage}}},
 				},
+				VaultPlacements: map[glid.GLID][]system.VaultPlacement{vaultID: placements},
 			},
 			Config: system.Config{
-				Vaults: []system.VaultConfig{{ID: vaultID, Placements: placements}},
+				Vaults: []system.VaultConfig{{ID: vaultID}},
 			},
 		}
 	}

@@ -409,7 +409,7 @@ type configVaultOwner struct {
 // domain-accurate error (and some callers legitimately name a vault this
 // node knows nothing about yet).
 //
-// Reads VaultConfig.Placements directly.
+// Reads placements from their owner (gastrolog-617qns).
 func (c *configVaultOwner) ResolveOwners(ctx context.Context, vaultID string) ([]string, error) {
 	if c.cfgStore == nil {
 		return nil, nil
@@ -422,14 +422,23 @@ func (c *configVaultOwner) ResolveOwners(ctx context.Context, vaultID string) ([
 	if err != nil {
 		return nil, fmt.Errorf("read vault config: %w", err)
 	}
-	if vaultCfg == nil || len(vaultCfg.Placements) == 0 {
+	if vaultCfg == nil {
+		return nil, nil
+	}
+	// Placements come from their owner; VaultConfig no longer mirrors them
+	// (gastrolog-617qns).
+	placements, err := c.cfgStore.GetVaultPlacements(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("read vault placements: %w", err)
+	}
+	if len(placements) == 0 {
 		return nil, nil
 	}
 	nscs, err := c.cfgStore.ListNodeStorageConfigs(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("read node storage configs: %w", err)
 	}
-	leaderNodeID := system.LeaderNodeID(vaultCfg.Placements, nscs)
+	leaderNodeID := system.LeaderNodeID(placements, nscs)
 	if leaderNodeID == "" {
 		return nil, nil
 	}

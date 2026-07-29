@@ -1,9 +1,9 @@
 package server
 
 import (
-	"log/slog"
 	"compress/gzip"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"

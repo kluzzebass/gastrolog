@@ -146,7 +146,8 @@ func (s *Store) Load(ctx context.Context) (*system.System, error) {
 	}
 	rt.SetupWizardDismissed = s.setupWizardDismissed
 
-	// Runtime: vault placements (mirrored onto VaultConfig.Placements).
+	// Runtime: vault placements — the owner. VaultConfig no longer carries a
+	// mirrored copy (gastrolog-617qns).
 	if len(s.vaultPlacements) > 0 {
 		rt.VaultPlacements = make(map[glid.GLID][]system.VaultPlacement, len(s.vaultPlacements))
 		for id, p := range s.vaultPlacements {
@@ -299,18 +300,10 @@ func (s *Store) PutVault(ctx context.Context, cfg system.VaultConfig) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Placements are owned by the placement manager and reach VaultConfig ONLY
-	// through SetVaultPlacements, which mirrors them here for the orchestrator's
-	// reads. A config write must therefore never carry them: PutVault stores the
-	// whole struct, so a client that Puts a vault it read earlier — or a UI form
-	// or config import that simply omits the field — would overwrite that mirror
-	// with a stale or empty list while s.vaultPlacements kept the real one. The
-	// two would then disagree until the next placement event, with the
-	// orchestrator reading the wrong side (gastrolog-kl8c3s).
-	//
-	// Re-deriving from the owner here rather than rejecting the request keeps
-	// read-modify-write round trips working, which is what every client does.
-	cfg.Placements = slices.Clone(s.vaultPlacements[cfg.ID])
+	// Placements live in s.vaultPlacements and nowhere else, so a config write
+	// cannot touch them at all now — VaultConfig has no placement field to
+	// overwrite. That is what gastrolog-kl8c3s had to defend against by
+	// re-deriving here, and what gastrolog-617qns removed the need for.
 	s.vaults[cfg.ID] = copyVaultConfig(cfg)
 	return nil
 }
@@ -1031,10 +1024,6 @@ func copyVaultConfig(st system.VaultConfig) system.VaultConfig {
 			}
 		}
 	}
-	if len(st.Placements) > 0 {
-		cp.Placements = make([]system.VaultPlacement, len(st.Placements))
-		copy(cp.Placements, st.Placements)
-	}
 	return cp
 }
 
@@ -1132,18 +1121,6 @@ func (s *Store) SetVaultPlacements(_ context.Context, vaultID glid.GLID, placeme
 	cp := make([]system.VaultPlacement, len(placements))
 	copy(cp, placements)
 	s.vaultPlacements[vaultID] = cp
-	// Mirror the placement set onto VaultConfig.Placements so the
-	// orchestrator's reads see them.
-	if v, ok := s.vaults[vaultID]; ok {
-		merged := v
-		if len(placements) > 0 {
-			merged.Placements = make([]system.VaultPlacement, len(placements))
-			copy(merged.Placements, placements)
-		} else {
-			merged.Placements = nil
-		}
-		s.vaults[vaultID] = copyVaultConfig(merged)
-	}
 	return nil
 }
 

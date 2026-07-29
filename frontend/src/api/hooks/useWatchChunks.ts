@@ -338,7 +338,7 @@ export function mergeMeta(existing: ChunkMeta | undefined, incoming: ChunkMeta):
   if (merged.sealed) {
     merged.state = ChunkState.SEALED;
   }
-  merged.storageClass = incoming.storageClass;
+  merged.cloudStorageClass = incoming.cloudStorageClass;
   // Monotone time-end fields: take max(existing, incoming). CREATED
   // events have zero-value WriteEnd/IngestEnd (chunk has no records
   // yet); if such an event arrives out of order after a SEALED event,

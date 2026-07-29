@@ -1671,7 +1671,7 @@ func (o *Orchestrator) refreshStorageGuards(sys *system.System, rt *system.Runti
 		if vc.Type != system.VaultTypeFile {
 			continue
 		}
-		for _, p := range vc.Placements {
+		for _, p := range sys.PlacementsFor(vc.ID) {
 			if _, ok := placedVaults[p.StorageID]; !ok {
 				continue
 			}
@@ -1710,7 +1710,7 @@ func (o *Orchestrator) refreshVaultDiskGuards(ctx context.Context) {
 			continue
 		}
 		var storageIDs []string
-		for _, p := range vc.Placements {
+		for _, p := range sys.PlacementsFor(vc.ID) {
 			if system.NodeIDForStorage(p.StorageID, rt.NodeStorageConfigs) != o.localNodeID {
 				continue
 			}

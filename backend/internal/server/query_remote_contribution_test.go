@@ -83,10 +83,9 @@ func newQueryServerWithRemoteVaults(t *testing.T, searcher RemoteSearcher, vault
 			{StorageID: system.SyntheticStorageID(nodeID), Leader: true},
 		}
 		if err := cfgStore.PutVault(ctx, system.VaultConfig{
-			ID:         vid,
-			Name:       "vault-" + nodeID,
-			Type:       system.VaultTypeMemory,
-			Placements: placements,
+			ID:   vid,
+			Name: "vault-" + nodeID,
+			Type: system.VaultTypeMemory,
 		}); err != nil {
 			t.Fatalf("PutVault: %v", err)
 		}

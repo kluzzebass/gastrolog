@@ -42,9 +42,9 @@ func NewArchiveCommand() *cobra.Command {
 			}
 			_, err = client.Vault.ArchiveChunk(context.Background(),
 				connect.NewRequest(&v1.ArchiveChunkRequest{
-					Vault:        vaultID,
-					ChunkId:      glid.GLID(chunkID).ToProto(),
-					StorageClass: storageClass,
+					Vault:             vaultID,
+					ChunkId:           glid.GLID(chunkID).ToProto(),
+					CloudStorageClass: storageClass,
 				}))
 			if err != nil {
 				return err

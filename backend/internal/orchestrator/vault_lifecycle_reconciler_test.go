@@ -1901,6 +1901,8 @@ func (a *captureAnnouncer) AnnounceAttachOffsets(chunk.ChunkID, int64, int64, in
 func (a *captureAnnouncer) AnnounceUpload(chunk.ChunkID, int64, int64, int64, int64, int64, [32]byte, glid.GLID, uint8) {
 }
 
+func (a *captureAnnouncer) AnnounceArchived(chunk.ChunkID, string) {}
+
 // TestSweepIdleActiveSealsLocalActivePastThreshold pins the m.active
 // branch: when an FSM-Active entry is the local m.active and has been
 // idle past the threshold, the sweep calls Chunks.Seal() (which the

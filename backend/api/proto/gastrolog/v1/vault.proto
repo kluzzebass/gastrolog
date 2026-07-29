@@ -235,7 +235,7 @@ message ChunkMeta {
   bytes vault_id = 12;    // which vault this chunk belongs to
   string vault_type = 13;  // vault type: "memory", "file", "jsonl"
   bool retention_pending = 14; // true = chunk is marked for retention processing
-  string storage_class = 15;   // current cloud storage class (e.g. "GLACIER", "cold", "Archive")
+  string cloud_storage_class = 15;   // current cloud archival tier (e.g. "GLACIER", "cold", "Archive")
   int32 replica_count = 16;    // how many nodes currently have this chunk (leader + followers that have caught up)
   // Cluster-wide replica residency: the set of node IDs that reported having
   // this chunk locally during the most recent ListChunks fan-out. Lets the
@@ -529,7 +529,7 @@ message RetryUnreadableChunksResponse {
 message ArchiveChunkRequest {
   string vault = 1;
   bytes chunk_id = 2;
-  string storage_class = 3; // Target: "GLACIER", "DEEP_ARCHIVE", "Archive"
+  string cloud_storage_class = 3; // Target cloud archival tier: "GLACIER", "DEEP_ARCHIVE", "Archive"
 }
 
 message ArchiveChunkResponse {}

@@ -151,11 +151,16 @@ func TestScheduler_Events_OnJobChange_StillFires(t *testing.T) {
 	}
 }
 
-// TestScheduler_Events_RunOnceFailureStillCompletes confirms that RunOnce
-// jobs whose task panics/errors still emit JobEventCompleted (there's no
-// JobProgress to carry failure state; gocron's AfterJobRunsWithError path
-// routes through the same completeOneTimeJob, which publishes Completed).
-func TestScheduler_Events_RunOnceFailureStillCompletes(t *testing.T) {
+// TestScheduler_Events_RunOnceFailureEmitsFailed pins that a RunOnce task
+// returning an error emits JobEventFailed.
+//
+// This assertion used to be the opposite, and its comment said why: "there's no
+// JobProgress to carry failure state". That was a limitation being recorded as
+// a requirement — a job that failed was reported to every subscriber, and to the
+// Jobs inspector, as having completed. Every one-time job now carries a progress
+// record, and gocron routes errors to a different listener, so the outcome is
+// known rather than inferred (gastrolog-68dusi).
+func TestScheduler_Events_RunOnceFailureEmitsFailed(t *testing.T) {
 	s := newQuietScheduler(t)
 	sub, cancel := s.Events().Subscribe()
 	defer cancel()
@@ -167,7 +172,12 @@ func TestScheduler_Events_RunOnceFailureStillCompletes(t *testing.T) {
 	}
 
 	evts := collectEvents(t, sub, 2, 2*time.Second)
-	if evts[1].Kind != JobEventCompleted {
-		t.Errorf("RunOnce returning an error still emits Completed for the broker; got %v", evts[1].Kind)
+	if evts[1].Kind != JobEventFailed {
+		t.Errorf("a RunOnce task that returned an error emitted %v, want Failed", evts[1].Kind)
+	}
+	if p := evts[1].Job.Progress; p == nil {
+		t.Error("failed one-time job carries no progress record")
+	} else if p.Status != JobStatusFailed || p.Error == "" {
+		t.Errorf("progress = {status:%v error:%q}, want failed with the task's error", p.Status, p.Error)
 	}
 }

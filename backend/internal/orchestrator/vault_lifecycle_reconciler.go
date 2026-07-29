@@ -97,6 +97,7 @@ type reconcilerHost interface {
 
 	// Post-seal scheduling and pipeline follow-up work.
 	schedulePostSeal(vaultID glid.GLID, cm chunk.ChunkManager, chunkID chunk.ChunkID)
+	postSealInFlight(vaultID glid.GLID, chunkID chunk.ChunkID) bool
 	postSealWork(vaultID glid.GLID, cm chunk.ChunkManager, chunkID chunk.ChunkID)
 	schedulePipelineCloudUpload(vaultID glid.GLID, chunkID chunk.ChunkID)
 	noteRegisterSkip(vaultID glid.GLID, id chunk.ChunkID, reason string)
@@ -152,6 +153,18 @@ type VaultLifecycleReconciler struct {
 	// observe what would have been scheduled without spinning up the
 	// full orchestrator scheduler. Phase 3 (gastrolog-1huz5).
 	postSealHook func(vaultID glid.GLID, cm chunk.ChunkManager, id chunk.ChunkID)
+
+	// sealResumeAttempts counts how many times the STEADY-STATE pass has
+	// re-driven each chunk's post-seal. Guarded by mu.
+	//
+	// The tick re-selects any entry still in Sealing, and the RunOnceIfAbsent
+	// claim only prevents an overlapping duplicate — it frees the name when the
+	// job completes, including when it completes by failing. So without a bound,
+	// a chunk whose post-seal can never succeed gets a fresh GLCB rebuild on
+	// every pass, at a cadence an operator can set to one second. Attempts are
+	// counted rather than timed: a retry budget is about how many times the work
+	// has been proven not to help, which wall-clock does not measure.
+	sealResumeAttempts map[chunk.ChunkID]int
 }
 
 // NewVaultLifecycleReconciler creates a reconciler for a vault instance.
@@ -383,13 +396,40 @@ func (r *VaultLifecycleReconciler) resumeSealingFromFSM(fsm *vaultctlfsm.FSM) {
 			"error", err)
 		return
 	}
+	r.resumeSealingEntries(fsm.List(), localMetas, schedule, "reconcile-from-snapshot", true)
+}
+
+// resumeSealingEntries schedules PostSealProcess for every Sealing entry whose
+// chunk this node holds locally and has sealed on disk. Shared by the
+// snapshot-restore pass and the steady-state category so the two cannot drift
+// on which entries are recoverable.
+//
+// warnAnomalies separates the callers' expectations, which are genuinely
+// different rather than a verbosity preference:
+//
+//   - After a restore, a Sealing entry whose local chunk is missing or unsealed
+//     means the crash tore the seal in a way this path cannot repair. It should
+//     be loud: it happened once, and an operator needs to see it.
+//   - On a steady-state pass the same two shapes are ordinary transients. An
+//     entry is Sealing for the whole normal duration of PostSealProcess, and a
+//     tick landing inside that window would otherwise warn about healthy work
+//     in flight, every tick, forever. The stale-fsm sweep already owns the
+//     genuinely stranded no-local-chunk case (gastrolog-1huz5) on its own grace
+//     period.
+func (r *VaultLifecycleReconciler) resumeSealingEntries(
+	entries []vaultctlfsm.ManifestEntry,
+	localMetas []chunk.ChunkMeta,
+	schedule func(glid.GLID, chunk.ChunkManager, chunk.ChunkID),
+	reason string,
+	warnAnomalies bool,
+) int {
 	localByID := make(map[chunk.ChunkID]chunk.ChunkMeta, len(localMetas))
 	for _, m := range localMetas {
 		localByID[m.ID] = m
 	}
 
 	resumed := 0
-	for _, e := range fsm.List() {
+	for _, e := range entries {
 		if e.State != chunk.ChunkStateSealing {
 			continue
 		}
@@ -397,33 +437,203 @@ func (r *VaultLifecycleReconciler) resumeSealingFromFSM(fsm *vaultctlfsm.FSM) {
 		if !ok {
 			// No local active-form files to assemble from. Either a
 			// follower-turned-leader (unreachable in 1:1:1) or the
-			// chunk has been retired without a Sealed transition. Log
-			// and move on — operator-visible because this is genuinely
-			// unrecoverable through this path.
-			r.logger.Warn("reconcile-from-snapshot: Sealing entry has no local chunk; cannot resume",
-				"chunk", e.ID)
+			// chunk has been retired without a Sealed transition.
+			// Unrecoverable through this path.
+			if warnAnomalies {
+				r.logger.Warn(reason+": Sealing entry has no local chunk; cannot resume",
+					"chunk", e.ID)
+			}
 			continue
 		}
 		if !local.Sealed {
-			// Active-form files weren't sealed at crash time. The seal
-			// flag is only flipped after sealActiveLocked closes the
-			// files, so this state is a deeper bug — the FSM advanced
-			// past CmdBeginSeal but the local sealed-flag write was
-			// lost. Log loudly; the next ingest+rotate cycle will
-			// re-run the full path on a different chunk.
-			r.logger.Warn("reconcile-from-snapshot: Sealing entry but local chunk not sealed on disk",
-				"chunk", e.ID)
+			// Active-form files aren't sealed. After a restore that means
+			// the FSM advanced past CmdBeginSeal but the local sealed-flag
+			// write was lost — a deeper bug. In steady state it is simply
+			// the window between CmdBeginSeal applying and sealActiveLocked
+			// closing the files.
+			if warnAnomalies {
+				r.logger.Warn(reason+": Sealing entry but local chunk not sealed on disk",
+					"chunk", e.ID)
+			}
 			continue
 		}
-		r.logger.Info("reconcile-from-snapshot: resuming PostSealProcess for Sealing chunk",
-			"chunk", e.ID)
+		r.logger.Info(reason+": resuming PostSealProcess for Sealing chunk", "chunk", e.ID)
 		schedule(r.vaultID, r.vaultInst.Chunks, e.ID)
 		resumed++
 	}
 	if resumed > 0 {
-		r.logger.Info("reconcile-from-snapshot: scheduled seal resumption",
-			"count", resumed)
+		r.logger.Info(reason+": scheduled seal resumption", "count", resumed)
 	}
+	return resumed
+}
+
+// reconcileSealingResume is the steady-state half of seal resumption
+// (gastrolog-v6nf71).
+//
+// The Sealing → Sealed transition rides a scheduled one-time job. Before this
+// category existed, resumeSealingFromFSM had exactly one caller —
+// ReconcileFromSnapshot, fired only by the vault-ctl FSM's after-restore hook —
+// so a post-seal that failed, or never got scheduled, stranded its manifest
+// entry until the node restarted or took a snapshot install. The chunk is then
+// neither writable nor durable-complete, and nothing else looks at it: the
+// stale-fsm sweep skips any chunk the leader holds locally, which is precisely
+// the case here.
+//
+// Rescheduling is idempotent by construction — schedulePostSealProcessing
+// claims the job name with RunOnceIfAbsent — so a pass that fires while a
+// healthy post-seal is still running is a no-op rather than a duplicate build.
+// That is what makes it safe to run this on every tick.
+func (r *VaultLifecycleReconciler) reconcileSealingResume(v *reconcileView) {
+	if v == nil || v.localListErr != nil {
+		return
+	}
+	if r.vaultInst == nil || r.vaultInst.Chunks == nil {
+		return
+	}
+	// Deliberately NOT gated on isPipelineIngestVault. The snapshot pass
+	// branches there because a restore wants the pipeline's own RecoverVault;
+	// steady state must not, for two reasons. Every home-placed vault is a
+	// pipeline vault, so the gate made this category a no-op almost everywhere
+	// (caught by TestOrchRel_StrandedSeal_ResumesWithoutRestart, which is a
+	// three-node harness whose vault is pipeline-registered). And it would
+	// contradict the path being resumed: schedulePostSeal does not skip
+	// pipeline vaults either — it only skips their follower-target lookup — so
+	// SealActive schedules post-seal for them like any other vault.
+	//
+	// What makes this safe is not the vault flag but the per-entry
+	// preconditions in resumeSealingEntries: the chunk must be in THIS node's
+	// chunk manager and already sealed on disk. A chunk the pipeline owns and
+	// this node never held locally fails that test and is left alone.
+	// Only the node that can propose the follow-on CmdSealChunk should
+	// schedule the work, matching every other leader-side category here.
+	if r.vaultInst.HasRaftLeader != nil && !r.vaultInst.HasRaftLeader() {
+		return
+	}
+	schedule := r.postSealHook
+	if schedule == nil {
+		if r.orch == nil {
+			return
+		}
+		schedule = r.orch.schedulePostSeal
+	}
+	r.forgetSettledSealResumes(v.entries)
+	r.resumeSealingEntries(v.entries, v.localMetas, r.budgetedResume(schedule), "seal-resume", false)
+}
+
+// maxSealResumeAttempts bounds how many times the steady-state pass re-drives
+// one chunk's post-seal before it stops and raises an alarm instead.
+//
+// Three because the retry only pays off for a failure that is not about this
+// chunk — a transient disk or announce error. A post-seal that fails on the
+// chunk's own bytes fails identically every time, and repeating it is a rebuild
+// and re-announce per pass forever: the duplicate-work shape gastrolog-3hwngy
+// postmortemed. Past the budget the condition is degraded and belongs in front
+// of an operator, not in a loop.
+const maxSealResumeAttempts = 3
+
+// budgetedResume wraps the schedule callback with the retry budget, so the
+// policy lives here and resumeSealingEntries stays shared with the restore
+// pass — which is deliberately unbounded, being a fresh start after a crash
+// rather than a repetition of work already proven not to help.
+func (r *VaultLifecycleReconciler) budgetedResume(
+	schedule func(glid.GLID, chunk.ChunkManager, chunk.ChunkID),
+) func(glid.GLID, chunk.ChunkManager, chunk.ChunkID) {
+	return func(vaultID glid.GLID, cm chunk.ChunkManager, id chunk.ChunkID) {
+		// A post-seal already running for this chunk means RunOnceIfAbsent would
+		// decline a second one, so this pass costs nothing and must not spend
+		// budget. Counting calls rather than enqueues abandoned work that was
+		// progressing fine: a GLCB build spanning a few ticks burned its own
+		// retry budget and was then given up on, which is strictly worse than
+		// the unbounded retry this budget replaced.
+		if r.orch != nil && r.orch.postSealInFlight(vaultID, id) {
+			return
+		}
+
+		r.mu.Lock()
+		if r.sealResumeAttempts == nil {
+			r.sealResumeAttempts = make(map[chunk.ChunkID]int)
+		}
+		r.sealResumeAttempts[id]++
+		attempts := r.sealResumeAttempts[id]
+		r.mu.Unlock()
+
+		if attempts > maxSealResumeAttempts {
+			// Report once, on the pass that crosses the budget. Later passes
+			// stay silent: the alarm is standing and nothing has changed.
+			if attempts == maxSealResumeAttempts+1 {
+				r.reportSealResumeGaveUp(vaultID, id)
+			}
+			return
+		}
+		schedule(vaultID, cm, id)
+	}
+}
+
+// reportSealResumeGaveUp records that a chunk has exhausted its resume budget:
+// a warn line for the log, and a standing alarm because the chunk is left
+// neither writable nor durable-complete and nothing else surfaces that.
+func (r *VaultLifecycleReconciler) reportSealResumeGaveUp(vaultID glid.GLID, id chunk.ChunkID) {
+	r.logger.Warn("seal-resume: giving up on stranded chunk",
+		"chunk", id, "attempts", maxSealResumeAttempts)
+	if r.orch == nil {
+		return
+	}
+	sink := r.orch.alertSink()
+	if sink == nil {
+		return
+	}
+	sink.Raise("seal-stranded", id.String(),
+		fmt.Sprintf("Chunk %s in vault %s is stuck in Sealing: post-seal did not complete in %d attempts. "+
+			"The chunk is neither writable nor durable-complete.",
+			id, vaultID, maxSealResumeAttempts))
+}
+
+// forgetSettledSealResumes drops retry state for chunks that are no longer
+// Sealing, and clears their alarm. A chunk that reached Sealed is settled; one
+// that left the manifest entirely is gone. Without this the budget would be
+// spent permanently, so a later legitimate strand of the same chunk id would
+// never be retried.
+func (r *VaultLifecycleReconciler) forgetSettledSealResumes(entries []vaultctlfsm.ManifestEntry) {
+	r.mu.Lock()
+	if len(r.sealResumeAttempts) == 0 {
+		r.mu.Unlock()
+		return
+	}
+	stillSealing := make(map[chunk.ChunkID]bool, len(entries))
+	for _, e := range entries {
+		if e.State == chunk.ChunkStateSealing {
+			stillSealing[e.ID] = true
+		}
+	}
+	var settled []chunk.ChunkID
+	for id := range r.sealResumeAttempts {
+		if !stillSealing[id] {
+			settled = append(settled, id)
+			delete(r.sealResumeAttempts, id)
+		}
+	}
+	r.mu.Unlock()
+
+	if r.orch == nil {
+		return
+	}
+	sink := r.orch.alertSink()
+	if sink == nil {
+		return
+	}
+	for _, id := range settled {
+		sink.Clear("seal-stranded", id.String())
+	}
+}
+
+// SweepSealingResume is the isolated entry point for the seal-resume category,
+// matching the other Sweep* methods: it gathers its own view.
+func (r *VaultLifecycleReconciler) SweepSealingResume() {
+	v := r.gatherReconcileView()
+	if v == nil {
+		return
+	}
+	r.reconcileSealingResume(v)
 }
 
 // ackOwnHolderReceipt proposes this home's holder receipt for a sealed
@@ -700,31 +910,40 @@ func (r *VaultLifecycleReconciler) gatherReconcileView() *reconcileView {
 // periodic-by-nature). Per-category event source and verdict:
 //
 //   - pendingObligations  event: CmdRequestDelete apply (onRequestDelete
-//                         → fulfillObligation) + ReconcileFromSnapshot.
-//                         Tick = retry backstop for a failed async ack.
+//     → fulfillObligation) + ReconcileFromSnapshot.
+//     Tick = retry backstop for a failed async ack.
 //   - localOrphans        event: snapshot install (ReconcileFromSnapshot)
-//                         + log-replay onRequestDelete. Tick = backstop.
+//   - log-replay onRequestDelete. Tick = backstop.
 //   - stagingOrphans      event: snapshot install (ReconcileFromSnapshot)
-//                         + segment release. Tick = backstop.
+//   - segment release. Tick = backstop.
 //   - missingReplicas     event: lead-gained + snapshot install
-//                         (ReconcileMembershipCatchup). No reliable
-//                         per-chunk edge (the leader's seal-time push has
-//                         no retry queue), so the tick stays as the
-//                         recovery backstop.
+//     (ReconcileMembershipCatchup). No reliable
+//     per-chunk edge (the leader's seal-time push has
+//     no retry queue), so the tick stays as the
+//     recovery backstop.
 //   - staleLeaderFSM      periodic-by-nature: a 1h grace-period GC of
-//                         FSM entries no reachable node can serve. The
-//                         "event" is absence of bytes past a timeout.
+//     FSM entries no reachable node can serve. The
+//     "event" is absence of bytes past a timeout.
 //   - stalePendingAcks    event: leadership change (lead-gained) AND
-//                         placement move under a stable leader
-//                         (wakeStalePendingAckReconcile on the
-//                         FollowerTargets / role reassignment,
-//                         gastrolog-235dm7) + CmdPruneNode. Tick = backstop.
+//     placement move under a stable leader
+//     (wakeStalePendingAckReconcile on the
+//     FollowerTargets / role reassignment,
+//     gastrolog-235dm7) + CmdPruneNode. Tick = backstop.
 //   - idleActiveChunks    periodic-by-nature: wall-clock inactivity
-//                         detection (WriteEnd frozen past a threshold).
-//                         Inactivity is the ABSENCE of append events, so
-//                         there is no edge to wake on — genuinely a tick.
+//     detection (WriteEnd frozen past a threshold).
+//     Inactivity is the ABSENCE of append events, so
+//     there is no edge to wake on — genuinely a tick.
 //   - abandonedTransfer   periodic-by-nature: a 24h grace-period GC of
-//                         transfer announces with zero holders.
+//     transfer announces with zero holders.
+//   - sealingResume       event: leadership change (lead-gained), since a
+//     node that just took the leader-side decision may
+//     hold a chunk stranded mid-seal. Tick = backstop
+//     for the case with no edge at all — a post-seal
+//     job that failed under a stable leader. This
+//     category was missing entirely until
+//     gastrolog-v6nf71: resume ran only from the
+//     FSM's after-restore hook, so recovery meant
+//     restarting the node.
 func (r *VaultLifecycleReconciler) ReconcileTick() {
 	v := r.gatherReconcileView()
 	if v == nil {
@@ -738,6 +957,7 @@ func (r *VaultLifecycleReconciler) ReconcileTick() {
 	r.reconcileStalePendingDeleteAcks(v)
 	r.reconcileIdleActiveChunks(v)
 	r.reconcileAbandonedTransferAnnounces(v)
+	r.reconcileSealingResume(v)
 }
 
 // ReconcileMembershipCatchup runs the placement- and leadership-sensitive
@@ -756,6 +976,10 @@ func (r *VaultLifecycleReconciler) ReconcileTick() {
 //     from placement before this leader took over, unsticking deletes.
 //   - reconcileAbandonedTransferAnnounces: retract transfer announces the
 //     source abandoned.
+//   - reconcileSealingResume: a chunk stranded mid-seal is invisible to
+//     every other category (the stale-fsm sweep skips chunks the leader
+//     holds locally), so the new leader must re-drive its post-seal
+//     rather than leave it parked in Sealing (gastrolog-v6nf71).
 //
 // Every category is internally role-gated (IsFollower / HasRaftLeader /
 // ApplyRaft* nil checks), so firing on a transient or stale role is a
@@ -780,6 +1004,7 @@ func (r *VaultLifecycleReconciler) ReconcileMembershipCatchup() {
 	r.reconcileStaleLeaderFSMEntries(v)
 	r.reconcileStalePendingDeleteAcks(v)
 	r.reconcileAbandonedTransferAnnounces(v)
+	r.reconcileSealingResume(v)
 }
 
 func (r *VaultLifecycleReconciler) SweepPendingObligations() {

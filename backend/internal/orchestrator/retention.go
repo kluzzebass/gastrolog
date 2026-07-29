@@ -1501,8 +1501,20 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) bool {
 	abort := func(cause error) {
 		abortOnce.Do(func() {
 			aborted.Store(true)
-			r.logger.Warn("retention: fan-out aborted; chunk will re-route on a later sweep",
-				"vault", r.vaultID, "chunk", id, "error", cause)
+			// Throttled per cause, not per chunk. abortOnce already reduced a
+			// per-RECORD warn to one per chunk (gastrolog-5034va), but a
+			// standing condition — a destination parked at its max-size bound,
+			// say — still hits every chunk of every sweep, and the operator
+			// gets the same line at tens per second forever. The transfer
+			// disposition throttles the identical event this way already
+			// (retention_transfer.go). The condition itself is carried by the
+			// retention-deferred alarm, which noteRetentionDeferral below feeds
+			// unthrottled, so the log only has to name it periodically
+			// (gastrolog-4dr79b).
+			if n, ok := r.idleLog.Allow("route-fanout-abort:" + cause.Error()); ok {
+				r.logger.Warn("retention: fan-out aborted; chunk will re-route on a later sweep",
+					"vault", r.vaultID, "chunk", id, "error", cause, "suppressed", n)
+			}
 			r.noteRetentionDeferral(cause.Error())
 			cancel()
 		})

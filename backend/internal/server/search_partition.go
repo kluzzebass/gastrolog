@@ -132,14 +132,15 @@ func (s *QueryServer) buildSearchPartitionTargets(ctx context.Context, selectedV
 		if len(selected) > 0 && !selected[v.ID] {
 			continue
 		}
-		if len(v.Placements) == 0 {
+		placements := s.placementsFor(ctx, v.ID)
+		if len(placements) == 0 {
 			continue
 		}
-		holders := system.PlacementNodeIDs(v.Placements, nscs)
+		holders := system.PlacementNodeIDs(placements, nscs)
 		if len(holders) == 0 {
 			continue
 		}
-		leaderNodeID := system.LeaderNodeID(v.Placements, nscs)
+		leaderNodeID := system.LeaderNodeID(placements, nscs)
 		metas := s.vaultPartitionMetas(v.ID)
 		if len(metas) == 0 {
 			nodeID := leaderNodeID

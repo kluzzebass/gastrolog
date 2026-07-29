@@ -139,7 +139,7 @@ export class NodeStorageConfig extends Message<NodeStorageConfig> {
 
 /**
  * CloudStorageTransition defines a single step in an archival lifecycle chain.
- * Transitions are ordered by after_days (ascending). An empty storage_class
+ * Transitions are ordered by after_days (ascending). An empty cloud_storage_class
  * means "delete" (expiry).
  *
  * @generated from message gastrolog.v1.CloudStorageTransition
@@ -153,11 +153,13 @@ export class CloudStorageTransition extends Message<CloudStorageTransition> {
   after = "";
 
   /**
-   * target class (e.g. "GLACIER", "DEEP_ARCHIVE", "Archive"), empty = delete
+   * Target CLOUD storage class — the archival tier ("GLACIER", "DEEP_ARCHIVE",
+   * "Archive"); empty = delete. Distinct from the uint32 storage_class above,
+   * which selects which local disk a vault may live on (gastrolog-108bcg).
    *
-   * @generated from field: string storage_class = 2;
+   * @generated from field: string cloud_storage_class = 2;
    */
-  storageClass = "";
+  cloudStorageClass = "";
 
   constructor(data?: PartialMessage<CloudStorageTransition>) {
     super();
@@ -168,7 +170,7 @@ export class CloudStorageTransition extends Message<CloudStorageTransition> {
   static readonly typeName = "gastrolog.v1.CloudStorageTransition";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "after", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "storage_class", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "cloud_storage_class", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): CloudStorageTransition {

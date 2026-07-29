@@ -387,8 +387,8 @@ func TestRetentionTargetThreadsDispositionFromVaultConfig(t *testing.T) {
 					}},
 				}},
 				RetentionPolicies: []system.RetentionPolicyConfig{{
-					ID:          policyID,
-					MaxAge:      strPtr("1h"),
+					ID:     policyID,
+					MaxAge: strPtr("1h"),
 				}},
 			}
 

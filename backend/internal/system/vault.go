@@ -44,9 +44,6 @@ type VaultConfig struct {
 	// Path is the direct path for JSONL sinks.
 	Path string `json:"path,omitempty"`
 
-	// Placements are system-managed file storage assignments.
-	Placements []VaultPlacement `json:"placements,omitempty"`
-
 	// CacheEviction is "lru" (default) or "ttl" — only meaningful for cloud-backed.
 	CacheEviction string `json:"cacheEviction,omitempty"`
 

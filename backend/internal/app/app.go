@@ -920,13 +920,13 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 			}
 			return n.Name
 		},
-		Version:           Version,
-		StartTime:         time.Now(),
-		Interval:          broadcastInterval,
-		ApiAddress:        apiAddr,
-		PprofAddress:      pprofAddr,
-		StatsSignal:       statsSignal,
-		Logger:            compStatsCollector.Apply(logger),
+		Version:      Version,
+		StartTime:    time.Now(),
+		Interval:     broadcastInterval,
+		ApiAddress:   apiAddr,
+		PprofAddress: pprofAddr,
+		StatsSignal:  statsSignal,
+		Logger:       compStatsCollector.Apply(logger),
 	})
 
 	orch.Scheduler().SetOnJobChange(func() {

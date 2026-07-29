@@ -304,8 +304,8 @@ func buildChunkKV(c *v1.ChunkMeta, vaultName string, nodeNames map[string]string
 		// See gastrolog-33ul6h.
 		pairs = append(pairs, [2]string{"Cloud Size", units.FormatBytesDisplay(c.CloudBytes)})
 	}
-	if c.StorageClass != "" {
-		pairs = append(pairs, [2]string{"Storage Class", c.StorageClass})
+	if c.CloudStorageClass != "" {
+		pairs = append(pairs, [2]string{"Storage Class", c.CloudStorageClass})
 	}
 	pairs = appendTS(pairs, "Write Start", c.WriteStart)
 	pairs = appendTS(pairs, "Write End", c.WriteEnd)

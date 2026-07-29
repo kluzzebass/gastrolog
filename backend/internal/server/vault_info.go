@@ -446,16 +446,16 @@ func (s *VaultServer) vaultInfoFromLocal(ctx context.Context, id glid.GLID) *api
 
 func ChunkMetaToProto(meta chunk.ChunkMeta) *apiv1.ChunkMeta {
 	pb := &apiv1.ChunkMeta{
-		Id:           glid.GLID(meta.ID).ToProto(),
-		Sealed:       meta.Sealed,
-		RecordCount:  meta.RecordCount,
-		Bytes:        meta.Bytes,
-		DiskBytes:    meta.DiskBytes,
-		CloudBytes:   meta.CloudBytes,
-		CloudBacked:  meta.CloudBacked,
-		Archived:     meta.Archived,
-		StorageClass: meta.StorageClass,
-		State:        chunkStateToProto(meta.State, meta.Sealed),
+		Id:                glid.GLID(meta.ID).ToProto(),
+		Sealed:            meta.Sealed,
+		RecordCount:       meta.RecordCount,
+		Bytes:             meta.Bytes,
+		DiskBytes:         meta.DiskBytes,
+		CloudBytes:        meta.CloudBytes,
+		CloudBacked:       meta.CloudBacked,
+		Archived:          meta.Archived,
+		CloudStorageClass: meta.CloudStorageClass,
+		State:             chunkStateToProto(meta.State, meta.Sealed),
 	}
 	if saneRecordTime(meta.WriteStart) {
 		pb.WriteStart = timestamppb.New(meta.WriteStart)

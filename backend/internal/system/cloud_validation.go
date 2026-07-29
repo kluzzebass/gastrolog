@@ -78,19 +78,19 @@ func validateS3ClassOrdering(transitions []CloudStorageTransition) []string {
 	var warnings []string
 	prevOrder := -1
 	for i, t := range transitions {
-		if t.StorageClass == "" {
+		if t.CloudStorageClass == "" {
 			continue
 		}
-		order, known := s3ClassOrder[t.StorageClass]
+		order, known := s3ClassOrder[t.CloudStorageClass]
 		if !known {
 			warnings = append(warnings, fmt.Sprintf(
-				"transition %d: unknown S3 storage class %q", i+1, t.StorageClass))
+				"transition %d: unknown S3 storage class %q", i+1, t.CloudStorageClass))
 			continue
 		}
 		if order <= prevOrder {
 			warnings = append(warnings, fmt.Sprintf(
 				"transition %d: S3 class %q cannot follow a downstream class (must move forward: IA → GLACIER_IR → GLACIER → DEEP_ARCHIVE)",
-				i+1, t.StorageClass))
+				i+1, t.CloudStorageClass))
 		}
 		prevOrder = order
 	}
@@ -100,10 +100,10 @@ func validateS3ClassOrdering(transitions []CloudStorageTransition) []string {
 func validateMinDurations(transitions []CloudStorageTransition, durations []time.Duration) []string {
 	var warnings []string
 	for i, t := range transitions {
-		if t.StorageClass == "" || i+1 >= len(transitions) {
+		if t.CloudStorageClass == "" || i+1 >= len(transitions) {
 			continue
 		}
-		minDur, hasMin := minStorageDuration[t.StorageClass]
+		minDur, hasMin := minStorageDuration[t.CloudStorageClass]
 		if !hasMin {
 			continue
 		}
@@ -111,7 +111,7 @@ func validateMinDurations(transitions []CloudStorageTransition, durations []time
 		if durationInClass < minDur {
 			warnings = append(warnings, fmt.Sprintf(
 				"transition %d: %q has a minimum storage duration of %s, but data will only stay %s before the next transition — early deletion charges apply",
-				i+1, t.StorageClass, FormatDuration(minDur), FormatDuration(durationInClass)))
+				i+1, t.CloudStorageClass, FormatDuration(minDur), FormatDuration(durationInClass)))
 		}
 	}
 	return warnings
@@ -121,11 +121,11 @@ func validateExpiryAfterArchive(transitions []CloudStorageTransition, durations 
 	var warnings []string
 	for i := 1; i < len(transitions); i++ {
 		t := transitions[i]
-		if t.StorageClass != "" {
+		if t.CloudStorageClass != "" {
 			continue // not a delete step
 		}
 		prev := transitions[i-1]
-		minDur, hasMin := minStorageDuration[prev.StorageClass]
+		minDur, hasMin := minStorageDuration[prev.CloudStorageClass]
 		if !hasMin {
 			continue
 		}
@@ -133,7 +133,7 @@ func validateExpiryAfterArchive(transitions []CloudStorageTransition, durations 
 		if durationInPrev < minDur {
 			warnings = append(warnings, fmt.Sprintf(
 				"transition %d: deleting after %s in %q (minimum %s) — early deletion charges apply",
-				i+1, FormatDuration(durationInPrev), prev.StorageClass, FormatDuration(minDur)))
+				i+1, FormatDuration(durationInPrev), prev.CloudStorageClass, FormatDuration(minDur)))
 		}
 	}
 	return warnings

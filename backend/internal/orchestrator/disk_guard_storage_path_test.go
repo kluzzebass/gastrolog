@@ -84,12 +84,14 @@ func TestRefreshStorageGuardsResolvesRelativePathAgainstVaultsDir(t *testing.T) 
 			Name:    "on-disk",
 			Enabled: true,
 			Type:    system.VaultTypeFile,
-			Placements: []system.VaultPlacement{
-				{StorageID: storageID.String(), Leader: true},
-			},
 		}},
 	}
 	rt := system.Runtime{
+		VaultPlacements: map[glid.GLID][]system.VaultPlacement{
+			vaultID: {
+				{StorageID: storageID.String(), Leader: true},
+			},
+		},
 		NodeStorageConfigs: []system.NodeStorageConfig{{
 			NodeID: nodeID,
 			FileStorages: []system.FileStorage{{
@@ -147,12 +149,14 @@ func TestRefreshStorageGuardsAbsolutePathUnaffected(t *testing.T) {
 			Name:    "on-disk",
 			Enabled: true,
 			Type:    system.VaultTypeFile,
-			Placements: []system.VaultPlacement{
-				{StorageID: storageID.String(), Leader: true},
-			},
 		}},
 	}
 	rt := system.Runtime{
+		VaultPlacements: map[glid.GLID][]system.VaultPlacement{
+			vaultID: {
+				{StorageID: storageID.String(), Leader: true},
+			},
+		},
 		NodeStorageConfigs: []system.NodeStorageConfig{{
 			NodeID: nodeID,
 			FileStorages: []system.FileStorage{{

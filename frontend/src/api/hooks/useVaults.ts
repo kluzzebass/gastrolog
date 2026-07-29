@@ -241,11 +241,11 @@ export function useDeleteVault() {
 export function useArchiveChunk() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (args: { vaultId: string; chunkId: string; storageClass?: string }) => {
+    mutationFn: async (args: { vaultId: string; chunkId: string; cloudStorageClass?: string }) => {
       await vaultClient.archiveChunk({
         vault: args.vaultId,
         chunkId: decode(args.chunkId),
-        storageClass: args.storageClass ?? "",
+        cloudStorageClass: args.cloudStorageClass ?? "",
       });
     },
     onSuccess: () => {

@@ -239,22 +239,22 @@ func (o *Orchestrator) archivalSweepVault(vaultInst *VaultInstance, cs *system.C
 			continue
 		}
 
-		if target.StorageClass == "" {
+		if target.CloudStorageClass == "" {
 			o.archivalExpire(vaultInst, m.ID, age)
 			continue
 		}
 
 		// Skip if already at the target class.
-		if m.StorageClass == target.StorageClass {
+		if m.CloudStorageClass == target.CloudStorageClass {
 			continue
 		}
 
-		if err := archiver.ArchiveChunk(context.Background(), m.ID, target.StorageClass); err != nil {
+		if err := archiver.ArchiveChunk(context.Background(), m.ID, target.CloudStorageClass); err != nil {
 			o.retentionLogger.Warn("archival sweep: archive failed",
-				"chunk", m.ID.String(), "class", target.StorageClass, "error", err)
+				"chunk", m.ID.String(), "class", target.CloudStorageClass, "error", err)
 		} else {
 			o.retentionLogger.Debug("archival sweep: archived chunk",
-				"chunk", m.ID.String(), "class", target.StorageClass, "age", age)
+				"chunk", m.ID.String(), "class", target.CloudStorageClass, "age", age)
 		}
 	}
 }

@@ -30,8 +30,13 @@ func (l *mnLoader) Load(context.Context) (*system.System, error) { return l.sys,
 
 func mkSys(vaultID glid.GLID, placements []system.VaultPlacement, nscs []system.NodeStorageConfig) *system.System {
 	return &system.System{
-		Runtime: system.Runtime{NodeStorageConfigs: nscs},
-		Config:  system.Config{Vaults: []system.VaultConfig{{ID: vaultID, Name: "v", Placements: placements}}},
+		Runtime: system.Runtime{
+			NodeStorageConfigs: nscs,
+			// Placements live on the runtime map, their owner; VaultConfig no
+			// longer mirrors them (gastrolog-617qns).
+			VaultPlacements: map[glid.GLID][]system.VaultPlacement{vaultID: placements},
+		},
+		Config: system.Config{Vaults: []system.VaultConfig{{ID: vaultID, Name: "v"}}},
 	}
 }
 

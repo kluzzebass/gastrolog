@@ -297,7 +297,13 @@ func (s *SystemServer) loadSystemVaults(ctx context.Context, resp *apiv1.GetSyst
 		return fmt.Errorf("list vaults: %w", err)
 	}
 	for _, vaultCfg := range cfgStores {
-		resp.Vaults = append(resp.Vaults, convert.VaultConfigToProto(vaultCfg))
+		// Placements are read from their owner and attached for the response;
+		// the UI resolves leader/follower node IDs from them.
+		placements, err := s.sysStore.GetVaultPlacements(ctx, vaultCfg.ID)
+		if err != nil {
+			return fmt.Errorf("read vault placements: %w", err)
+		}
+		resp.Vaults = append(resp.Vaults, convert.VaultConfigToProto(vaultCfg, placements))
 	}
 	return nil
 }
@@ -406,8 +412,8 @@ func (s *SystemServer) loadConfigCloudServices(ctx context.Context, resp *apiv1.
 		transitions := make([]*apiv1.CloudStorageTransition, len(cs.Transitions))
 		for i, t := range cs.Transitions {
 			transitions[i] = &apiv1.CloudStorageTransition{
-				After:        t.After,
-				StorageClass: t.StorageClass,
+				After:             t.After,
+				CloudStorageClass: t.CloudStorageClass,
 			}
 		}
 		resp.CloudServices = append(resp.CloudServices, &apiv1.CloudService{
@@ -537,6 +543,14 @@ func (s *SystemServer) PutLookupSettings(
 	ss, err := s.loadServerSettings(ctx)
 	if err != nil {
 		return nil, err
+	}
+	// Validate BEFORE converting. The converters skip entries they cannot
+	// represent, which is the right validation OUTCOME but was happening
+	// silently while this RPC returned success: a client submitting a file
+	// lookup with no file ID was told the write succeeded and got nothing, with
+	// nothing logged (gastrolog-7eu4nt).
+	if connErr := validateSubmittedLookups(req.Msg.Lookup); connErr != nil {
+		return nil, connErr
 	}
 	mergeLookup(req.Msg.Lookup, &ss.Lookup)
 	if connErr := validateLookupNames(ss.Lookup); connErr != nil {
@@ -1067,7 +1081,7 @@ func jsonFileLookupsToProto(lookups []system.JSONFileLookupConfig) []*apiv1.JSON
 	for i, l := range lookups {
 		out[i] = &apiv1.JSONFileLookupEntry{
 			Name:         l.Name,
-			FileId:       glid.MustParse(l.FileID).ToProto(),
+			FileId:       lookupFileIDToProto(l.FileID),
 			Query:        l.Query,
 			KeyColumn:    l.KeyColumn,
 			ValueColumns: l.ValueColumns,
@@ -1101,7 +1115,7 @@ func yamlFileLookupsToProto(lookups []system.YAMLFileLookupConfig) []*apiv1.YAML
 	for i, l := range lookups {
 		out[i] = &apiv1.YAMLFileLookupEntry{
 			Name:         l.Name,
-			FileId:       glid.MustParse(l.FileID).ToProto(),
+			FileId:       lookupFileIDToProto(l.FileID),
 			Query:        l.Query,
 			KeyColumn:    l.KeyColumn,
 			ValueColumns: l.ValueColumns,
@@ -1136,7 +1150,7 @@ func mmdbLookupsToProto(lookups []system.MMDBLookupConfig) []*apiv1.MMDBLookupEn
 		out[i] = &apiv1.MMDBLookupEntry{
 			Name:   l.Name,
 			DbType: l.DBType,
-			FileId: glid.MustParse(l.FileID).ToProto(),
+			FileId: lookupFileIDToProto(l.FileID),
 		}
 	}
 	return out
@@ -1157,6 +1171,26 @@ func mmdbLookupsFromProto(entries []*apiv1.MMDBLookupEntry) []system.MMDBLookupC
 	return out
 }
 
+// lookupFileIDToProto renders a stored lookup file ID for the wire.
+//
+// Deliberately lenient, because parseLookupFileID is: on the way IN an
+// unrecognised file ID falls through to string(b) and is stored as-is, so the
+// way OUT must cope with whatever that produced. It used to call
+// glid.MustParse, which PANICS — so a file ID the write path accepted crashed
+// the HTTP handler on the next GetSettings, on every node that served it
+// (gastrolog-5vqx2r). An unparseable ID now renders as empty rather than
+// taking the settings endpoint down.
+func lookupFileIDToProto(id string) []byte {
+	if id == "" {
+		return nil
+	}
+	g, err := glid.Parse(id)
+	if err != nil {
+		return nil
+	}
+	return g.ToProto()
+}
+
 func csvLookupsToProto(lookups []system.CSVLookupConfig) []*apiv1.CSVLookupEntry {
 	if len(lookups) == 0 {
 		return nil
@@ -1165,7 +1199,7 @@ func csvLookupsToProto(lookups []system.CSVLookupConfig) []*apiv1.CSVLookupEntry
 	for i, l := range lookups {
 		out[i] = &apiv1.CSVLookupEntry{
 			Name:         l.Name,
-			FileId:       glid.MustParse(l.FileID).ToProto(),
+			FileId:       lookupFileIDToProto(l.FileID),
 			KeyColumn:    l.KeyColumn,
 			ValueColumns: l.ValueColumns,
 		}
@@ -1294,6 +1328,88 @@ func validateTokenDurations(auth system.AuthConfig) *connect.Error {
 // validateLookupNames checks that no two lookup tables (across all types)
 // share the same name. Duplicate names would shadow each other in the
 // pipeline registry.
+// validateSubmittedLookups rejects entries the converters would drop. Each
+// kind's requirements mirror the skip conditions in *LookupsFromProto exactly,
+// so what is accepted here is what gets stored — the point being that a client
+// learns which entry and which field, instead of a success response and a
+// missing lookup (gastrolog-7eu4nt).
+//
+// Note MMDB and static lookups need only a name: an MMDB entry with no file ID
+// deliberately means "use the auto-downloaded database".
+// validLookupFileID reports whether b round-trips as a GLID, in either the
+// 16-byte wire form or the legacy stringified form.
+func validLookupFileID(b []byte) bool {
+	if len(b) == glid.Size {
+		return true
+	}
+	_, err := glid.Parse(string(b))
+	return err == nil
+}
+
+func validateSubmittedLookups(l *apiv1.PutLookupSettings) *connect.Error {
+	// name-only kinds: an MMDB entry with no file ID deliberately means "use the
+	// auto-downloaded database", and static lookups carry their rows inline.
+	for _, e := range l.GetMmdbLookups() {
+		if e.GetName() == "" {
+			return errLookupName("mmdb")
+		}
+	}
+	for _, e := range l.GetStaticLookups() {
+		if e.GetName() == "" {
+			return errLookupName("static")
+		}
+	}
+	for _, e := range l.GetHttpLookups() {
+		if e.GetName() == "" {
+			return errLookupName("http")
+		}
+		if e.GetUrlTemplate() == "" {
+			return connect.NewError(connect.CodeInvalidArgument,
+				fmt.Errorf("http lookup %q: url_template is required", e.GetName()))
+		}
+	}
+	for _, e := range l.GetJsonFileLookups() {
+		if connErr := validateFileLookup("json file", e.GetName(), e.GetFileId()); connErr != nil {
+			return connErr
+		}
+	}
+	for _, e := range l.GetYamlFileLookups() {
+		if connErr := validateFileLookup("yaml file", e.GetName(), e.GetFileId()); connErr != nil {
+			return connErr
+		}
+	}
+	for _, e := range l.GetCsvLookups() {
+		if connErr := validateFileLookup("csv", e.GetName(), e.GetFileId()); connErr != nil {
+			return connErr
+		}
+	}
+	return nil
+}
+
+func errLookupName(kind string) *connect.Error {
+	return connect.NewError(connect.CodeInvalidArgument,
+		fmt.Errorf("%s lookup: name is required", kind))
+}
+
+// validateFileLookup checks the requirements shared by every file-backed kind:
+// a name, and a file ID that can be rendered back out again. The second is not
+// pedantry — parseLookupFileID stores an unrecognised ID verbatim and the read
+// path then had nothing to return for it (gastrolog-5x40ki).
+func validateFileLookup(kind, name string, fileID []byte) *connect.Error {
+	if name == "" {
+		return errLookupName(kind)
+	}
+	if len(fileID) == 0 {
+		return connect.NewError(connect.CodeInvalidArgument,
+			fmt.Errorf("%s lookup %q: file_id is required", kind, name))
+	}
+	if !validLookupFileID(fileID) {
+		return connect.NewError(connect.CodeInvalidArgument,
+			fmt.Errorf("%s lookup %q: file_id is not a valid ID", kind, name))
+	}
+	return nil
+}
+
 func validateLookupNames(lc system.LookupConfig) *connect.Error {
 	seen := make(map[string]string) // name → type
 	for _, l := range lc.HTTPLookups {

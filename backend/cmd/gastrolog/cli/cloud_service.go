@@ -189,7 +189,7 @@ func printCloudService(cmd *cobra.Command, cs *v1.CloudService) error {
 		pairs = append(pairs, [2]string{"Archival Mode", cs.ArchivalMode})
 	}
 	for i, tr := range cs.Transitions {
-		class := tr.StorageClass
+		class := tr.CloudStorageClass
 		if class == "" {
 			class = "(delete)"
 		}
@@ -253,8 +253,8 @@ func applyCloudServiceFlags(cmd *cobra.Command, cfg *v1.CloudService) {
 		for _, spec := range specs {
 			parts := splitTransitionSpec(spec)
 			cfg.Transitions = append(cfg.Transitions, &v1.CloudStorageTransition{
-				After:        parts[0],
-				StorageClass: parts[1],
+				After:             parts[0],
+				CloudStorageClass: parts[1],
 			})
 		}
 	}

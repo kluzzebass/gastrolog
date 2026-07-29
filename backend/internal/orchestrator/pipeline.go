@@ -299,7 +299,7 @@ func (o *Orchestrator) vaultPlacementNodeIDs(vaultID glid.GLID) []string {
 	for i := range sys.Config.Vaults {
 		v := &sys.Config.Vaults[i]
 		if v.ID == vaultID {
-			return system.PlacementNodeIDs(v.Placements, sys.Runtime.NodeStorageConfigs)
+			return system.PlacementNodeIDs(sys.PlacementsFor(v.ID), sys.Runtime.NodeStorageConfigs)
 		}
 	}
 	return nil
@@ -453,10 +453,11 @@ func (o *Orchestrator) isVaultHome(sys *system.System, vaultID glid.GLID) bool {
 			continue
 		}
 		nscs := sys.Runtime.NodeStorageConfigs
-		if system.LeaderNodeID(v.Placements, nscs) == o.localNodeID {
+		placements := sys.PlacementsFor(v.ID)
+		if system.LeaderNodeID(placements, nscs) == o.localNodeID {
 			return true
 		}
-		return slices.Contains(system.FollowerNodeIDs(v.Placements, nscs), o.localNodeID)
+		return slices.Contains(system.FollowerNodeIDs(placements, nscs), o.localNodeID)
 	}
 	return false
 }
@@ -686,7 +687,7 @@ func (o *Orchestrator) reloadPipelineFromConfig(sys *system.System) error {
 		for i := range sys.Config.Vaults {
 			v := &sys.Config.Vaults[i]
 			o.vaultCtlLeaders.SetDesiredLeaderID(v.ID,
-				system.LeaderNodeID(v.Placements, sys.Runtime.NodeStorageConfigs))
+				system.LeaderNodeID(sys.PlacementsFor(v.ID), sys.Runtime.NodeStorageConfigs))
 		}
 	}
 

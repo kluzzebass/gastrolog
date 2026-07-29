@@ -812,16 +812,16 @@ type ChunkMeta struct {
 	// disk_bytes is the LOCAL on-disk footprint on the responding node, always
 	// — for a cloud-backed chunk this is the warm-cache state (the cached
 	// GLCB's size while cached, 0 once evicted), never the cloud object size.
-	DiskBytes        int64                  `protobuf:"varint,7,opt,name=disk_bytes,json=diskBytes,proto3" json:"disk_bytes,omitempty"`
-	IngestStart      *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=ingest_start,json=ingestStart,proto3" json:"ingest_start,omitempty"`
-	IngestEnd        *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=ingest_end,json=ingestEnd,proto3" json:"ingest_end,omitempty"`
-	CloudBacked      bool                   `protobuf:"varint,10,opt,name=cloud_backed,json=cloudBacked,proto3" json:"cloud_backed,omitempty"`                // true = chunk lives in cloud storage (S3/Azure/GCS)
-	Archived         bool                   `protobuf:"varint,11,opt,name=archived,proto3" json:"archived,omitempty"`                                         // true = chunk is in offline storage class (Glacier, Azure Archive)
-	VaultId          []byte                 `protobuf:"bytes,12,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`                             // which vault this chunk belongs to
-	VaultType        string                 `protobuf:"bytes,13,opt,name=vault_type,json=vaultType,proto3" json:"vault_type,omitempty"`                       // vault type: "memory", "file", "jsonl"
-	RetentionPending bool                   `protobuf:"varint,14,opt,name=retention_pending,json=retentionPending,proto3" json:"retention_pending,omitempty"` // true = chunk is marked for retention processing
-	StorageClass     string                 `protobuf:"bytes,15,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"`              // current cloud storage class (e.g. "GLACIER", "cold", "Archive")
-	ReplicaCount     int32                  `protobuf:"varint,16,opt,name=replica_count,json=replicaCount,proto3" json:"replica_count,omitempty"`             // how many nodes currently have this chunk (leader + followers that have caught up)
+	DiskBytes         int64                  `protobuf:"varint,7,opt,name=disk_bytes,json=diskBytes,proto3" json:"disk_bytes,omitempty"`
+	IngestStart       *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=ingest_start,json=ingestStart,proto3" json:"ingest_start,omitempty"`
+	IngestEnd         *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=ingest_end,json=ingestEnd,proto3" json:"ingest_end,omitempty"`
+	CloudBacked       bool                   `protobuf:"varint,10,opt,name=cloud_backed,json=cloudBacked,proto3" json:"cloud_backed,omitempty"`                    // true = chunk lives in cloud storage (S3/Azure/GCS)
+	Archived          bool                   `protobuf:"varint,11,opt,name=archived,proto3" json:"archived,omitempty"`                                             // true = chunk is in offline storage class (Glacier, Azure Archive)
+	VaultId           []byte                 `protobuf:"bytes,12,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`                                 // which vault this chunk belongs to
+	VaultType         string                 `protobuf:"bytes,13,opt,name=vault_type,json=vaultType,proto3" json:"vault_type,omitempty"`                           // vault type: "memory", "file", "jsonl"
+	RetentionPending  bool                   `protobuf:"varint,14,opt,name=retention_pending,json=retentionPending,proto3" json:"retention_pending,omitempty"`     // true = chunk is marked for retention processing
+	CloudStorageClass string                 `protobuf:"bytes,15,opt,name=cloud_storage_class,json=cloudStorageClass,proto3" json:"cloud_storage_class,omitempty"` // current cloud archival tier (e.g. "GLACIER", "cold", "Archive")
+	ReplicaCount      int32                  `protobuf:"varint,16,opt,name=replica_count,json=replicaCount,proto3" json:"replica_count,omitempty"`                 // how many nodes currently have this chunk (leader + followers that have caught up)
 	// Cluster-wide replica residency: the set of node IDs that reported having
 	// this chunk locally during the most recent ListChunks fan-out. Lets the
 	// inspector show which nodes physically hold each replica, distinct from
@@ -975,9 +975,9 @@ func (x *ChunkMeta) GetRetentionPending() bool {
 	return false
 }
 
-func (x *ChunkMeta) GetStorageClass() string {
+func (x *ChunkMeta) GetCloudStorageClass() string {
 	if x != nil {
-		return x.StorageClass
+		return x.CloudStorageClass
 	}
 	return ""
 }
@@ -3019,12 +3019,12 @@ func (x *RetryUnreadableChunksResponse) GetRetriedCount() int32 {
 }
 
 type ArchiveChunkRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Vault         string                 `protobuf:"bytes,1,opt,name=vault,proto3" json:"vault,omitempty"`
-	ChunkId       []byte                 `protobuf:"bytes,2,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
-	StorageClass  string                 `protobuf:"bytes,3,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"` // Target: "GLACIER", "DEEP_ARCHIVE", "Archive"
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Vault             string                 `protobuf:"bytes,1,opt,name=vault,proto3" json:"vault,omitempty"`
+	ChunkId           []byte                 `protobuf:"bytes,2,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
+	CloudStorageClass string                 `protobuf:"bytes,3,opt,name=cloud_storage_class,json=cloudStorageClass,proto3" json:"cloud_storage_class,omitempty"` // Target cloud archival tier: "GLACIER", "DEEP_ARCHIVE", "Archive"
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *ArchiveChunkRequest) Reset() {
@@ -3071,9 +3071,9 @@ func (x *ArchiveChunkRequest) GetChunkId() []byte {
 	return nil
 }
 
-func (x *ArchiveChunkRequest) GetStorageClass() string {
+func (x *ArchiveChunkRequest) GetCloudStorageClass() string {
 	if x != nil {
-		return x.StorageClass
+		return x.CloudStorageClass
 	}
 	return ""
 }
@@ -3922,7 +3922,7 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x16\n" +
 	"\x06reason\x18\x02 \x01(\tR\x06reason\"L\n" +
 	"\x12ContributionReport\x126\n" +
-	"\bdegraded\x18\x01 \x03(\v2\x1a.gastrolog.v1.DegradedPeerR\bdegraded\"\x97\x06\n" +
+	"\bdegraded\x18\x01 \x03(\v2\x1a.gastrolog.v1.DegradedPeerR\bdegraded\"\xa2\x06\n" +
 	"\tChunkMeta\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12;\n" +
 	"\vwrite_start\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
@@ -3942,8 +3942,8 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\bvault_id\x18\f \x01(\fR\avaultId\x12\x1d\n" +
 	"\n" +
 	"vault_type\x18\r \x01(\tR\tvaultType\x12+\n" +
-	"\x11retention_pending\x18\x0e \x01(\bR\x10retentionPending\x12#\n" +
-	"\rstorage_class\x18\x0f \x01(\tR\fstorageClass\x12#\n" +
+	"\x11retention_pending\x18\x0e \x01(\bR\x10retentionPending\x12.\n" +
+	"\x13cloud_storage_class\x18\x0f \x01(\tR\x11cloudStorageClass\x12#\n" +
 	"\rreplica_count\x18\x10 \x01(\x05R\freplicaCount\x12(\n" +
 	"\x10replica_node_ids\x18\x11 \x03(\tR\x0ereplicaNodeIds\x12/\n" +
 	"\x14pending_ack_node_ids\x18\x12 \x03(\tR\x11pendingAckNodeIds\x12.\n" +
@@ -4115,11 +4115,11 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\x1cRetryUnreadableChunksRequest\x12\x14\n" +
 	"\x05vault\x18\x01 \x01(\tR\x05vault\"D\n" +
 	"\x1dRetryUnreadableChunksResponse\x12#\n" +
-	"\rretried_count\x18\x01 \x01(\x05R\fretriedCount\"k\n" +
+	"\rretried_count\x18\x01 \x01(\x05R\fretriedCount\"v\n" +
 	"\x13ArchiveChunkRequest\x12\x14\n" +
 	"\x05vault\x18\x01 \x01(\tR\x05vault\x12\x19\n" +
-	"\bchunk_id\x18\x02 \x01(\fR\achunkId\x12#\n" +
-	"\rstorage_class\x18\x03 \x01(\tR\fstorageClass\"\x16\n" +
+	"\bchunk_id\x18\x02 \x01(\fR\achunkId\x12.\n" +
+	"\x13cloud_storage_class\x18\x03 \x01(\tR\x11cloudStorageClass\"\x16\n" +
 	"\x14ArchiveChunkResponse\"\x8e\x01\n" +
 	"\x13RestoreChunkRequest\x12\x14\n" +
 	"\x05vault\x18\x01 \x01(\tR\x05vault\x12\x19\n" +

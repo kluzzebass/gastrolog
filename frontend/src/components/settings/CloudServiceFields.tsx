@@ -5,7 +5,7 @@ import { Button } from "./Buttons";
 
 interface CloudStorageTransitionEdit {
   after: string; // duration (e.g. "30s", "7d", "2w")
-  storageClass: string; // empty = delete
+  cloudStorageClass: string; // empty = delete
 }
 
 interface CloudServiceFieldValues {
@@ -222,7 +222,7 @@ function ArchivalSection({
 
   const setTransition = (idx: number, patch: Partial<CloudStorageTransitionEdit>) => {
     const updated = values.transitions.map((t, i) =>
-      i === idx ? { after: patch.after ?? t.after, storageClass: patch.storageClass ?? t.storageClass } : t,
+      i === idx ? { after: patch.after ?? t.after, cloudStorageClass: patch.cloudStorageClass ?? t.cloudStorageClass } : t,
     );
     onChange({ transitions: updated });
   };
@@ -237,7 +237,7 @@ function ArchivalSection({
     }
     const firstClass = classOptions[0]?.value ?? "";
     onChange({
-      transitions: [...existing, { after: defaultAfter, storageClass: firstClass }],
+      transitions: [...existing, { after: defaultAfter, cloudStorageClass: firstClass }],
     });
   };
 
@@ -290,8 +290,8 @@ function ArchivalSection({
               <div className="flex-1">
                 <FormField label={i === 0 ? "Storage Class" : ""} dark={dark}>
                   <SelectInput
-                    value={t.storageClass}
-                    onChange={(v) => setTransition(i, { storageClass: v })}
+                    value={t.cloudStorageClass}
+                    onChange={(v) => setTransition(i, { cloudStorageClass: v })}
                     options={classOptions}
                     dark={dark}
                   />

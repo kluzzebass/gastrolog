@@ -49,7 +49,7 @@ func FuzzNodeStatsDeserialize(f *testing.F) {
 		}
 
 		// Exercise the PeerState path that processes incoming NodeStats.
-		ps := NewPeerState(30 * time.Second, 0)
+		ps := NewPeerState(30*time.Second, 0)
 		msg := &gastrologv1.BroadcastMessage{
 			SenderId:  []byte("fuzz-sender"),
 			Timestamp: timestamppb.Now(),

@@ -729,7 +729,7 @@ func TestStorageSnapshotsReportsWarnAndProtectVerdicts(t *testing.T) {
 // here is exactly that path.
 func TestStorageSnapshotsWarnVerdictIndependentOfAlertSink(t *testing.T) {
 	t.Parallel()
-	total := 400 * gib // warn=40GiB, floor=12GiB
+	total := 400 * gib                                                        // warn=40GiB, floor=12GiB
 	g, sampler := newGuardFixture(total, map[string]uint64{"volA": 30 * gib}) // inside the warn band
 	g.SetStorageGuard("storA", "a", "node-1", "volA", "", "")
 

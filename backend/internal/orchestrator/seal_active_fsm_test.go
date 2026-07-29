@@ -93,7 +93,7 @@ func TestSealActivePromotesFSMEntryToSealed(t *testing.T) {
 	// The Sealing → Sealed half of the transition rides the post-seal job
 	// (GLCB assembly, then AnnounceSeal). Drain the scheduler rather than
 	// asserting on the intermediate state.
-	orch.scheduler.WaitIdle(postSealDrainBudget)
+	requireIdle(t, orch.scheduler, postSealDrainBudget)
 
 	if got := fsmState(t, fsm, chunkID); got != chunk.ChunkStateSealed {
 		t.Fatalf("post-seal FSM state = %s, want sealed (entry stranded mid-seal)", got)
@@ -129,7 +129,7 @@ func TestSealActiveWithoutVaultCtlGroupIsNoop(t *testing.T) {
 	if sealed != 1 {
 		t.Fatalf("SealActive sealed %d vaults, want 1", sealed)
 	}
-	orch.scheduler.WaitIdle(postSealDrainBudget)
+	requireIdle(t, orch.scheduler, postSealDrainBudget)
 
 	metas, err := inst.Chunks.List()
 	if err != nil {
@@ -159,7 +159,7 @@ func TestLocalTeardownSealDoesNotStrandManifestEntry(t *testing.T) {
 	}
 
 	orch.sealAndDeleteAllChunks(vaultInst, "teardown-test", vaultID)
-	orch.scheduler.WaitIdle(postSealDrainBudget)
+	requireIdle(t, orch.scheduler, postSealDrainBudget)
 
 	if got := fsmState(t, fsm, chunkID); got != chunk.ChunkStateActive {
 		t.Fatalf("post-teardown FSM state = %s, want active — a local teardown must not "+

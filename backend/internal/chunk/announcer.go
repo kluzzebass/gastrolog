@@ -44,6 +44,16 @@ type MetadataAnnouncer interface {
 	// reconfiguration); keyScheme selects the blobKey() derivation
 	// function (only scheme 0 today). See gastrolog-grnc3.
 	AnnounceUpload(id ChunkID, cloudBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64, hash [32]byte, cloudServiceID glid.GLID, keyScheme uint8)
+
+	// AnnounceArchived records the cloud storage class a chunk's blob now
+	// sits in; an empty class means restored to standard storage. Only the
+	// node that called the cloud API knows this, so without replicating it
+	// every other node — and this node after a restart — cannot tell what
+	// class a chunk is in. That is what stalled multi-step transition
+	// chains: the archival sweep compares current class against the chain's
+	// target, and an unreplicated class reads as empty forever
+	// (gastrolog-35ygqv).
+	AnnounceArchived(id ChunkID, cloudStorageClass string)
 }
 
 // AnnouncerSetter is an optional interface for chunk managers that support

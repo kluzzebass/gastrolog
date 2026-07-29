@@ -143,7 +143,11 @@ func (s *SystemServer) placementsByStorage(ctx context.Context) (map[string][]gl
 		if vc.Type != system.VaultTypeFile {
 			continue
 		}
-		for _, p := range vc.Placements {
+		placements, err := s.sysStore.GetVaultPlacements(ctx, vc.ID)
+		if err != nil {
+			continue
+		}
+		for _, p := range placements {
 			out[p.StorageID] = append(out[p.StorageID], vc.ID)
 		}
 	}

@@ -90,3 +90,15 @@ linters:
       # chunk lifecycle.)
       - linters: [forbidigo]
         path: "cmd/"
+
+# gofmt is enforced here rather than only in the local pre-commit hook: the
+# hook lives in .git/hooks and does not survive a clone, so a formatter that
+# only exists there is a gate that silently disappears. The backend had drifted
+# 21 files out of format while `golangci-lint run` passed, because v2 moved
+# formatters out of `linters:` and nothing had been re-enabled under this key.
+formatters:
+  enable:
+    - gofmt
+  exclusions:
+    paths:
+      - api/gen/
