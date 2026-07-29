@@ -305,6 +305,14 @@ func (s *SystemServer) PutVault(
 
 	// Persist to config store. For raft stores, the FSM notification callback
 	// handles orchestrator side effects. For non-raft stores, notify() does.
+	// Record the mutation before applying it, while the prior value is still
+	// readable. Vault config changes were entirely unlogged (gastrolog-1jnfco)
+	// while ingester changes carried a field diff — and a disposition flip
+	// decides whether records are destroyed or forwarded, which is exactly the
+	// kind of change that needs a timestamp when the result surprises someone.
+	// Field NAMES only; values stay in the config store.
+	s.logVaultConfigChange(ctx, vaultCfg)
+
 	if err := s.sysStore.PutVault(ctx, vaultCfg); err != nil {
 		return nil, errInternal(err)
 	}
@@ -510,4 +518,24 @@ func (s *SystemServer) TestCloudService(
 		Success: true,
 		Message: msg,
 	}), nil
+}
+
+// logVaultConfigChange emits one line naming the vault and the fields whose
+// values are about to change. A create logs as a create; an update that changes
+// nothing logs nothing, so a config import that rewrites every vault verbatim
+// stays quiet.
+func (s *SystemServer) logVaultConfigChange(ctx context.Context, next system.VaultConfig) {
+	if s.logger == nil {
+		return
+	}
+	prev, err := s.sysStore.GetVault(ctx, next.ID)
+	if err != nil || prev == nil {
+		s.logger.Info("vault created", "vault", next.ID, "name", next.Name, "type", next.Type)
+		return
+	}
+	changed := prev.DiffFields(next)
+	if len(changed) == 0 {
+		return
+	}
+	s.logger.Info("vault config changed", "vault", next.ID, "name", next.Name, "changed", changed)
 }

@@ -26,6 +26,8 @@ import (
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/auth"
 	"gastrolog/internal/convert"
+	"log/slog"
+
 	"gastrolog/internal/logging"
 	"gastrolog/internal/lookup"
 	"gastrolog/internal/notify"
@@ -83,6 +85,9 @@ type SystemServerConfig struct {
 	// label. Empty label hides the banner.
 	EnvironmentLabel string
 	EnvironmentColor string
+
+	// Logger records config mutations. See PutVault (gastrolog-1jnfco).
+	Logger *slog.Logger
 }
 
 // SystemServer implements the ConfigService.
@@ -109,6 +114,7 @@ type SystemServer struct {
 	logFilter            *logging.ComponentFilterHandler
 	environmentLabel     string
 	environmentColor     string
+	logger               *slog.Logger
 }
 
 var _ gastrologv1connect.SystemServiceHandler = (*SystemServer)(nil)
@@ -138,6 +144,7 @@ func NewSystemServer(cfg SystemServerConfig) *SystemServer {
 		logFilter:            cfg.LogFilter,
 		environmentLabel:     cfg.EnvironmentLabel,
 		environmentColor:     cfg.EnvironmentColor,
+		logger:               logging.Default(cfg.Logger),
 	}
 }
 

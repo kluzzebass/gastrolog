@@ -90,9 +90,20 @@ func TestOrchRel_StrandedSeal_ResumesWithoutRestart(t *testing.T) {
 	if inst.Reconciler == nil {
 		t.Fatal("vault instance has no lifecycle reconciler")
 	}
-	inst.Reconciler.ReconcileTick()
-
+	// Re-driven on every poll rather than called once. The categories inside
+	// ReconcileTick are leadership-gated, so a single invocation can land while
+	// the group is mid-election and do nothing, with no retry — which is how a
+	// one-shot call failed under full-suite load. Production drives this from
+	// the periodic tick, so repeating it is the faithful shape, not a
+	// workaround.
 	h.waitProgress("stranded entry reaching Sealed on every node", 50*time.Millisecond, func() (string, bool) {
+		for _, id := range h.nodeIDs {
+			if n := h.nodes[id]; n != nil && n.orch != nil {
+				if vi := n.orch.FindLocalVaultInstance(h.vaultID); vi != nil && vi.Reconciler != nil {
+					vi.Reconciler.ReconcileTick()
+				}
+			}
+		}
 		var views []string
 		allSealed := true
 		for _, id := range h.nodeIDs {

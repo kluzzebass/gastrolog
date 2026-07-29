@@ -280,3 +280,56 @@ type CertPEM struct {
 	CertFile string    `json:"cert_file,omitempty"`
 	KeyFile  string    `json:"key_file,omitempty"`
 }
+
+// DiffFields returns the names of the fields that differ between two vault
+// configs, in a stable order. Names ONLY, never values: a vault config
+// references cloud services and storage, and the point of the line is that a
+// change happened and to what — the values are already in the config store.
+//
+// Exists because vault config changes were entirely unlogged (gastrolog-1jnfco)
+// while ingester changes carried a field-level diff. During the gastrolog-6ckv0y
+// investigation there was no way to establish WHEN a vault's retention
+// disposition had been flipped, which is the difference between "the change
+// never landed" and "the change landed and something ignored it".
+func (v VaultConfig) DiffFields(other VaultConfig) []string {
+	var changed []string
+	add := func(cond bool, name string) {
+		if cond {
+			changed = append(changed, name)
+		}
+	}
+	add(v.Name != other.Name, "name")
+	add(v.Enabled != other.Enabled, "enabled")
+	add(v.Type != other.Type, "type")
+	add(v.Path != other.Path, "path")
+	add(v.StorageClass != other.StorageClass, "storageClass")
+	add(v.ReplicationFactor != other.ReplicationFactor, "replicationFactor")
+	add(v.RetentionDisposition != other.RetentionDisposition, "retentionDisposition")
+	add(!glidPtrEqual(v.RetentionTransferTargetVaultID, other.RetentionTransferTargetVaultID),
+		"retentionTransferTargetVaultId")
+	add(!retentionRulesEqual(v.RetentionRules, other.RetentionRules), "retentionRules")
+	add(!glidPtrEqual(v.CloudServiceID, other.CloudServiceID), "cloudServiceId")
+	add(v.RotationPolicyID != other.RotationPolicyID, "rotationPolicyId")
+	add(v.CacheEviction != other.CacheEviction, "cacheEviction")
+	add(v.CacheTTL != other.CacheTTL, "cacheTtl")
+	return changed
+}
+
+func glidPtrEqual(a, b *glid.GLID) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+func retentionRulesEqual(a, b []RetentionRule) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
