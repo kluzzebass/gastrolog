@@ -70,22 +70,21 @@ func TestOrchRel_StrandedSeal_ResumesWithoutRestart(t *testing.T) {
 		t.Fatalf("Seal: %v", err)
 	}
 
-	// The entry must actually be stranded, or the rest of this test proves
-	// nothing. Sealing has to have replicated before we assert recovery.
-	h.waitProgress("stranded entry reaching Sealing on every node", 50*time.Millisecond, func() (string, bool) {
-		var views []string
-		allSealing := true
-		for _, id := range h.nodeIDs {
-			st, ok := h.chunkStatesOnNode(id)[strandedID]
-			if !ok || st != chunk.ChunkStateSealing {
-				allSealing = false
-			}
-			views = append(views, fmt.Sprintf("%s=%s", h.nodes[id].label, st))
-		}
-		return fmt.Sprintf("%v", views), allSealing
-	}, func() {
-		t.Logf("chunk %s never reached Sealing; the strand setup itself failed", strandedID)
-	})
+	// Precondition: the chunk is sealed on the leader's DISK. That is the
+	// durable half of the strand and it is stable — unlike the manifest's
+	// Sealing state, which is a transient the recovery is designed to end.
+	//
+	// An earlier version waited for every node to be observed at Sealing
+	// simultaneously. Once vault-ctl apply forwarding was wired for this
+	// harness (gastrolog-231ik) the resume began completing in ~100ms, so that
+	// window frequently never existed: the trajectory went
+	// node-1=sealed while node-2/3 were still catching up. Asserting on a state
+	// the fix deliberately makes brief is a test that gets less reliable as the
+	// system gets better.
+	if meta, err := inst.Chunks.Meta(strandedID); err != nil || !meta.Sealed {
+		t.Fatalf("precondition: chunk is not sealed on the leader's disk (err=%v); "+
+			"the strand setup did not take", err)
+	}
 
 	if inst.Reconciler == nil {
 		t.Fatal("vault instance has no lifecycle reconciler")
