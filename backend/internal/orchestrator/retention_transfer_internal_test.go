@@ -359,7 +359,7 @@ func TestApplyRetentionDispositionToChunkDeleteIsNoOp(t *testing.T) {
 func TestFireTransferEventReturnsFalseWithNoOrchestrator(t *testing.T) {
 	t.Parallel()
 	r := &retentionRunner{}
-	if got := r.fireTransferEvent(chunk.NewChunkID()); got {
+	if got := r.fireTransferEvent(chunk.NewChunkID(), nil); got {
 		t.Fatal("want false (retain) when r.orch is nil")
 	}
 }
@@ -418,7 +418,10 @@ func TestFireTransferEventDefersImmediatelyWhenTargetStalledThisSweep(t *testing
 	}
 	r.markTransferTargetStalledThisSweep(targetID)
 
-	if got := r.fireTransferEvent(chunk.NewChunkID()); got {
+	// The target is passed in now rather than read off the runner
+	// (gastrolog-6ckv0y): the disposition and its target are resolved per
+	// chunk from current config.
+	if got := r.fireTransferEvent(chunk.NewChunkID(), &targetID); got {
 		t.Fatal("want false (defer) when the target already stalled this sweep")
 	}
 	r.mu.Lock()

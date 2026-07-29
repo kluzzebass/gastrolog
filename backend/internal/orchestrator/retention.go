@@ -1055,10 +1055,15 @@ func (r *retentionRunner) noteRetentionProgress() {
 // transfer disposition, gastrolog-2l918): raise at the threshold, clear on
 // progress. Called at the end of every sweep on the runner.
 func (r *retentionRunner) finishSweepDeferralState() {
+	// Resolved BEFORE taking r.mu: currentDisposition takes it on its fallback
+	// path, and a sync.Mutex is not reentrant — calling it under the lock
+	// deadlocked the whole package (TestSweepSizeTriggerUsesDiskClaim hung out
+	// its 10-minute budget).
+	disposition, _ := r.currentDisposition()
+
 	r.mu.Lock()
 	deferred, progressed, cause := r.sweepDeferred, r.sweepProgressed, r.lastDeferralCause
 	matchedChunks := r.sweepMatchedChunks
-	disposition := r.disposition
 	r.sweepDeferred, r.sweepProgressed = false, false
 	switch {
 	case progressed:
@@ -1356,6 +1361,41 @@ func (r *retentionRunner) markRetentionPending(id chunk.ChunkID) bool {
 	return true
 }
 
+// currentDisposition resolves this vault's retention disposition and transfer
+// target from the CONFIG STORE, at the moment a chunk is about to be acted on.
+//
+// It deliberately does not read the runner's captured fields as the primary
+// source (gastrolog-6ckv0y). Those are set once per sweep by retentionRunnerFor,
+// and a sweep processes its entire matched chunk set without returning — while
+// the retention cron is registered WithSingletonMode(LimitModeReschedule), so
+// every tick that lands during a running sweep is DROPPED and never refreshes
+// them. The effective refresh interval is therefore one whole sweep, not one
+// minute, and a slow sweep (gastrolog-17s8rn: ~1 chunk per 24s) can outlive a
+// config change by tens of minutes. Observed on the dev cluster: a vault whose
+// stored disposition was "delete" kept fanning records out to its route target
+// at ~2600 records/sec because the in-flight sweep still held "route".
+//
+// A disposition is a policy decision about what to do with THIS chunk. It has
+// to be evaluated when the action is taken, not when the batch began.
+//
+// The captured fields remain as the fallback for a config load that fails: an
+// unreadable config is not a reason to change what retention does mid-sweep.
+func (r *retentionRunner) currentDisposition() (string, *glid.GLID) {
+	if r.orch != nil {
+		if sys, err := r.orch.loadSystem(context.Background()); err == nil && sys != nil {
+			for i := range sys.Config.Vaults {
+				if sys.Config.Vaults[i].ID == r.vaultID {
+					vc := sys.Config.Vaults[i]
+					return vc.ResolveRetentionDisposition(), vc.RetentionTransferTargetVaultID
+				}
+			}
+		}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.disposition, r.transferTarget
+}
+
 // applyRetentionDispositionToChunk runs the chunk through the vault's
 // configured non-delete disposition — "route" fans its records through the
 // routing engine, "transfer" re-homes the sealed chunk to another vault
@@ -1369,11 +1409,12 @@ func (r *retentionRunner) markRetentionPending(id chunk.ChunkID) bool {
 // disposition gate without standing up the full expire-chunk machinery
 // (which needs a reconciler, Raft, etc.). See gastrolog-18du3.
 func (r *retentionRunner) applyRetentionDispositionToChunk(id chunk.ChunkID) bool {
-	switch r.disposition {
+	disposition, target := r.currentDisposition()
+	switch disposition {
 	case system.RetentionDispositionRoute:
 		return r.fireRetentionEvent(id)
 	case system.RetentionDispositionTransfer:
-		return r.fireTransferEvent(id)
+		return r.fireTransferEvent(id, target)
 	default:
 		return true
 	}

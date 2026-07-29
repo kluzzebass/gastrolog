@@ -99,7 +99,7 @@ const transferReceiptsMaxStallTicks = 60
 // (defer, chunk retained, one-shot NOT consumed) at any point the transfer
 // cannot currently proceed — the same contract fireRetentionEvent honors
 // for route disposition. See applyRetentionDispositionToChunk.
-func (r *retentionRunner) fireTransferEvent(id chunk.ChunkID) bool {
+func (r *retentionRunner) fireTransferEvent(id chunk.ChunkID, target *glid.GLID) bool {
 	if r.orch == nil {
 		// No orchestrator: nothing to transfer into. Retain rather than
 		// silently succeed — a disposition that cannot reach a
@@ -123,11 +123,11 @@ func (r *retentionRunner) fireTransferEvent(id chunk.ChunkID) bool {
 		return false
 	}
 
-	if r.transferTarget == nil {
+	if target == nil {
 		r.deferTransfer(id, deferCatTargetUnconfigured, "retention_transfer_target_vault_id is not set")
 		return false
 	}
-	targetID := *r.transferTarget
+	targetID := *target
 
 	// Per-sweep circuit breaker (gastrolog-2l918 review finding 2): a
 	// target that already stalled a DIFFERENT chunk's receipts wait this
