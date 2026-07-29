@@ -44,12 +44,16 @@ func NewVaultApplyForwarder(r *hraft.Raft, groupID string, applyWait *applywait.
 }
 
 // Apply applies a vault control-plane command. Tries locally first; forwards on
-// ErrNotLeader. When forwarded, Apply returns only after this node's own
-// group FSM has caught up to the leader's applied index, so an immediate
-// local read sees post-mutation state.
+// ErrNotLeader, and retries while a leadership transfer is in progress
+// (gastrolog-4jh4mb — see applyRetryingLeadershipTransfer for why those two
+// errors get different treatment). When forwarded, Apply returns only after
+// this node's own group FSM has caught up to the leader's applied index, so an
+// immediate local read sees post-mutation state.
 func (f *VaultApplyForwarder) Apply(data []byte) error {
-	future := f.raft.Apply(data, f.timeout)
-	if err := future.Error(); err != nil {
+	err := applyRetryingLeadershipTransfer(func() error {
+		return f.raft.Apply(data, f.timeout).Error()
+	}, nil)
+	if err != nil {
 		if errors.Is(err, hraft.ErrNotLeader) {
 			return f.forwardToLeader(data)
 		}
