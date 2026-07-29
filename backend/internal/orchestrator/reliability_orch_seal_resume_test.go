@@ -70,29 +70,39 @@ func TestOrchRel_StrandedSeal_ResumesWithoutRestart(t *testing.T) {
 		t.Fatalf("Seal: %v", err)
 	}
 
-	// The entry must actually be stranded, or the rest of this test proves
-	// nothing. Sealing has to have replicated before we assert recovery.
-	h.waitProgress("stranded entry reaching Sealing on every node", 50*time.Millisecond, func() (string, bool) {
-		var views []string
-		allSealing := true
-		for _, id := range h.nodeIDs {
-			st, ok := h.chunkStatesOnNode(id)[strandedID]
-			if !ok || st != chunk.ChunkStateSealing {
-				allSealing = false
-			}
-			views = append(views, fmt.Sprintf("%s=%s", h.nodes[id].label, st))
-		}
-		return fmt.Sprintf("%v", views), allSealing
-	}, func() {
-		t.Logf("chunk %s never reached Sealing; the strand setup itself failed", strandedID)
-	})
+	// Precondition: the chunk is sealed on the leader's DISK. That is the
+	// durable half of the strand and it is stable — unlike the manifest's
+	// Sealing state, which is a transient the recovery is designed to end.
+	//
+	// An earlier version waited for every node to be observed at Sealing
+	// simultaneously. Once vault-ctl apply forwarding was wired for this
+	// harness (gastrolog-231ik) the resume began completing in ~100ms, so that
+	// window frequently never existed: the trajectory went
+	// node-1=sealed while node-2/3 were still catching up. Asserting on a state
+	// the fix deliberately makes brief is a test that gets less reliable as the
+	// system gets better.
+	if meta, err := inst.Chunks.Meta(strandedID); err != nil || !meta.Sealed {
+		t.Fatalf("precondition: chunk is not sealed on the leader's disk (err=%v); "+
+			"the strand setup did not take", err)
+	}
 
 	if inst.Reconciler == nil {
 		t.Fatal("vault instance has no lifecycle reconciler")
 	}
-	inst.Reconciler.ReconcileTick()
-
+	// Re-driven on every poll rather than called once. The categories inside
+	// ReconcileTick are leadership-gated, so a single invocation can land while
+	// the group is mid-election and do nothing, with no retry — which is how a
+	// one-shot call failed under full-suite load. Production drives this from
+	// the periodic tick, so repeating it is the faithful shape, not a
+	// workaround.
 	h.waitProgress("stranded entry reaching Sealed on every node", 50*time.Millisecond, func() (string, bool) {
+		for _, id := range h.nodeIDs {
+			if n := h.nodes[id]; n != nil && n.orch != nil {
+				if vi := n.orch.FindLocalVaultInstance(h.vaultID); vi != nil && vi.Reconciler != nil {
+					vi.Reconciler.ReconcileTick()
+				}
+			}
+		}
 		var views []string
 		allSealed := true
 		for _, id := range h.nodeIDs {
@@ -152,9 +162,16 @@ func TestOrchRel_ReconcileTickLeavesCompletedSealsAlone(t *testing.T) {
 	if len(before) != len(after) {
 		t.Fatalf("reconcile ticks changed the manifest: %d entries before, %d after", len(before), len(after))
 	}
+	// Only a REGRESSION is a violation. A chunk still mid-post-seal when the
+	// snapshot was taken legitimately reaches Sealed during these reconcile ticks, and an
+	// earlier version of this assertion called that a failure — it demanded the
+	// manifest be frozen, which a live cluster's is not.
 	for id, st := range before {
-		if after[id] != st {
-			t.Errorf("chunk %s moved from %s to %s across reconcile ticks", id, st, after[id])
+		if st == chunk.ChunkStateSealed && after[id] != chunk.ChunkStateSealed {
+			t.Errorf("chunk %s regressed from sealed to %s across reconcile ticks", id, after[id])
+		}
+		if after[id] == chunk.ChunkStateActive && st != chunk.ChunkStateActive {
+			t.Errorf("chunk %s was pushed back to active from %s", id, st)
 		}
 	}
 }

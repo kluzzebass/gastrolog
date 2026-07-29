@@ -599,13 +599,13 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
     drains, only refuses.
 
   Effective per-vault REFUSE bound = min over the refuse-eligible
-  (`Refuse` on) attached policies' `MaxSize`; falls back to the creation
-  default (`system.DefaultVaultMaxSize`) only when NO attached policy
-  states a size — that default floor is REFUSE-ONLY (it never drains),
-  because a default must never destroy data. A vault whose only size
-  policies are soft (`Refuse` off) has no refuse bound and no floor: the
-  operator explicitly accepted drain-only, backstopped by the node-level
-  guard alone. The DRAIN trigger mins over ALL stating policies regardless
+  (`Refuse` on) attached policies' `MaxSize`, and NO bound when none states
+  one. There is no per-vault default (gastrolog-vl2p98): the old creation
+  floor was refuse-only — it blocked admission and drained nothing — so a
+  vault with no drain policy reached it and could never recover, and it made
+  an unconfigured vault stricter than any configured one, since `Refuse`
+  defaults off. A vault with no refusing size policy is backstopped by the
+  node-level guard alone. The DRAIN trigger mins over ALL stating policies regardless
   of the flag. Feeds
   `refreshVaultDiskGuards` → `orchestrator.resolveVaultSizeBound` → the disk
   guard's Admission gate; the gate mechanism itself is unchanged, only its

@@ -339,8 +339,11 @@ func (o *Orchestrator) retentionMootsPull(vaultID glid.GLID, e vaultctlfsm.Manif
 	for _, r := range runners {
 		r.mu.Lock()
 		rules := r.rules
-		disposition := r.disposition
 		r.mu.Unlock()
+		// Resolved from current config, not the sweep-captured field
+		// (gastrolog-6ckv0y). Read OUTSIDE r.mu: currentDisposition takes it
+		// for its fallback path.
+		disposition, _ := r.currentDisposition()
 		if disposition != system.RetentionDispositionDelete {
 			return false
 		}
@@ -391,8 +394,11 @@ func (o *Orchestrator) vaultRetentionGiveUpTTL(vaultID glid.GLID) (time.Duration
 	for _, r := range runners {
 		r.mu.Lock()
 		rules := r.rules
-		disposition := r.disposition
 		r.mu.Unlock()
+		// Resolved from current config, not the sweep-captured field
+		// (gastrolog-6ckv0y). Read OUTSIDE r.mu: currentDisposition takes it
+		// for its fallback path.
+		disposition, _ := r.currentDisposition()
 		if disposition != system.RetentionDispositionDelete {
 			return 0, false
 		}

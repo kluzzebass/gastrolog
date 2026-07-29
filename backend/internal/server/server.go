@@ -606,6 +606,7 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 	s.queryServer = queryServer
 	vaultServer := NewVaultServer(s.orch, s.cfgStore, s.factories, s.peerVaultStats, s.remoteChunkLister, s.remotePipelineBacklog, s.remoteChunkWatcher, s.remoteIndexer, s.localNodeID, s.logger)
 	configServer := NewSystemServer(SystemServerConfig{
+		Logger:             compServer.Apply(s.logger),
 		Orch:               s.orch,
 		CfgStore:           s.cfgStore,
 		Factories:          s.factories,

@@ -873,7 +873,7 @@ func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultCo
 	}
 
 	// Wire the Raft announcer now that both the group and chunk manager exist.
-	setVaultRaftAnnouncer(cm, applier, o.phase, o.logger)
+	setVaultRaftAnnouncer(cm, applier, o.phase, o.logger, o.announceResultHook(vaultCfg.ID))
 	// Wire the FSM-backed integrity verifier so cold-cache cloud downloads
 	// reject blobs whose digest doesn't match what the leader stamped at
 	// upload time. gastrolog-grnc3.
@@ -1002,7 +1002,7 @@ func (o *Orchestrator) buildInstanceForStorage(sys *system.System, vaultCfg syst
 	}
 
 	// Wire Raft announcer now that chunk manager exists.
-	setVaultRaftAnnouncer(cm, applier, o.phase, o.logger)
+	setVaultRaftAnnouncer(cm, applier, o.phase, o.logger, o.announceResultHook(vaultCfg.ID))
 
 	// Follower replicas need index builders for local queries.
 	imFactory, ok := factories.IndexManagers[factoryName]
@@ -1355,7 +1355,7 @@ func setIntegrityVerifier(cm chunk.ChunkManager, v chunk.IntegrityVerifier) {
 // routing to the vault ctl Raft leader when peers are configured. The phase parameter lets
 // the announcer short-circuit during shutdown so trailing applies don't
 // fire "raft is already shutdown" warnings (see gastrolog-1e5ke).
-func setVaultRaftAnnouncer(cm chunk.ChunkManager, applier vaultctlfsm.Applier, phase *lifecycle.Phase, logger *slog.Logger) {
+func setVaultRaftAnnouncer(cm chunk.ChunkManager, applier vaultctlfsm.Applier, phase *lifecycle.Phase, logger *slog.Logger, onResult func(op string, id chunk.ChunkID, err error)) {
 	if applier == nil {
 		return
 	}
@@ -1363,7 +1363,11 @@ func setVaultRaftAnnouncer(cm chunk.ChunkManager, applier vaultctlfsm.Applier, p
 	if !ok {
 		return
 	}
-	setter.SetAnnouncer(vaultctlfsm.NewAnnouncer(applier, phase, logger))
+	ann := vaultctlfsm.NewAnnouncer(applier, phase, logger)
+	if onResult != nil {
+		ann.SetResultHook(onResult)
+	}
+	setter.SetAnnouncer(ann)
 }
 
 // rewireVaultInstanceAfterCtlRestore rebinds the vault instance's reconciler
@@ -1749,4 +1753,34 @@ func findCloudService(cfg *system.Config, id glid.GLID) *system.CloudService {
 		}
 	}
 	return nil
+}
+
+// announceResultHook returns the callback the vault-ctl announcer uses to
+// report each announce attempt's outcome for one vault.
+//
+// One standing alarm per VAULT, not per chunk. A node that cannot commit
+// announces cannot commit them for any chunk, so a per-chunk alarm would turn a
+// single condition into a flood — and the alarm system exists to reduce, not to
+// enumerate. The alarm clears on the next announce that commits, which is the
+// condition genuinely ending rather than a timer expiring.
+//
+// This is the visibility half of gastrolog-3ba5ei. The MetadataAnnouncer
+// contract stays best-effort by design — the calls fire from deferred closures
+// with no caller to return an error to, deferred precisely so a Raft round trip
+// cannot deadlock against the FSM apply path. What changes is that
+// "does not block the local operation" no longer also means "is invisible".
+func (o *Orchestrator) announceResultHook(vaultID glid.GLID) func(string, chunk.ChunkID, error) {
+	return func(op string, id chunk.ChunkID, err error) {
+		if o == nil || o.alerts == nil {
+			return
+		}
+		if err == nil {
+			o.alerts.Clear("vault-announce-failing", vaultID.String())
+			return
+		}
+		o.alerts.Raise("vault-announce-failing", vaultID.String(),
+			fmt.Sprintf("Vault %s cannot commit chunk metadata announces (last: %s for chunk %s: %v). "+
+				"Seals and uploads complete locally while the replicated manifest does not learn about them.",
+				vaultID, op, id, err))
+	}
 }

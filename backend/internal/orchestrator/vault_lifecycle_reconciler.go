@@ -626,6 +626,88 @@ func (r *VaultLifecycleReconciler) forgetSettledSealResumes(entries []vaultctlfs
 	}
 }
 
+// reconcileSealAnnounceDivergence re-announces a seal the manifest never
+// learned about (gastrolog-3ba5ei).
+//
+// Announcer.apply discards a failed vault-ctl Apply into a warn line, so an
+// announce that cannot commit is invisible to its caller: Seal() returns nil
+// with the local sealed flag already set, and PostSealProcess then runs and
+// reports completed. The result is a chunk sealed and immutable on disk whose
+// manifest entry still says Active — the cluster believes it is still being
+// written to. Nothing reconciled that: sealIfIdleActive is the one place that
+// recognises the state and it deliberately declines, because re-running the
+// post-seal pipeline is the wrong response.
+//
+// Re-running post-seal IS wrong; the GLCB is already built. What was missing is
+// re-ANNOUNCING. applySeal sets Sealed unconditionally, with no Sealing
+// precondition, so one CmdSealChunk carrying the local metadata converges the
+// entry directly from Active.
+//
+// The local chunk manager is the authority here, not this node's opinion: the
+// values announced are read straight off the sealed local meta, which is what
+// the original AnnounceSeal would have carried.
+func (r *VaultLifecycleReconciler) reconcileSealAnnounceDivergence(v *reconcileView) {
+	if v == nil || v.localListErr != nil {
+		return
+	}
+	if r.vaultInst == nil || r.vaultInst.Chunks == nil {
+		return
+	}
+	// Only the node that can commit the announce should propose it.
+	if r.vaultInst.HasRaftLeader != nil && !r.vaultInst.HasRaftLeader() {
+		return
+	}
+	announcerGetter, ok := r.vaultInst.Chunks.(chunk.AnnouncerGetter)
+	if !ok {
+		return
+	}
+	announcer := announcerGetter.GetAnnouncer()
+	if announcer == nil {
+		return
+	}
+
+	localByID := make(map[chunk.ChunkID]chunk.ChunkMeta, len(v.localMetas))
+	for _, m := range v.localMetas {
+		localByID[m.ID] = m
+	}
+	// The chunk currently open for writes is Active in the manifest because it
+	// IS active. Never re-announce that one.
+	var localActiveID chunk.ChunkID
+	if a := r.vaultInst.Chunks.Active(); a != nil {
+		localActiveID = a.ID
+	}
+
+	reannounced := 0
+	for _, e := range v.entries {
+		if e.State != chunk.ChunkStateActive || e.ID == localActiveID {
+			continue
+		}
+		local, ok := localByID[e.ID]
+		if !ok || !local.Sealed {
+			// Not sealed locally: the manifest and this node agree, or this
+			// node never held the chunk. Either way not a divergence.
+			continue
+		}
+		r.logger.Warn("seal-announce divergence: chunk is sealed on disk but Active in the manifest; re-announcing",
+			"chunk", e.ID, "vault", r.vaultID)
+		announcer.AnnounceSeal(e.ID, local.WriteEnd, local.RecordCount, local.Bytes,
+			local.IngestStart, local.IngestEnd, local.SourceEnd, local.IngestTSMonotonic)
+		reannounced++
+	}
+	if reannounced > 0 {
+		r.logger.Info("seal-announce divergence: re-announced seals the manifest missed",
+			"vault", r.vaultID, "count", reannounced)
+	}
+}
+
+// SweepSealAnnounceDivergence is the isolated entry point for the
+// seal-announce-divergence category, matching the other Sweep* methods.
+func (r *VaultLifecycleReconciler) SweepSealAnnounceDivergence() {
+	if v := r.gatherReconcileView(); v != nil {
+		r.reconcileSealAnnounceDivergence(v)
+	}
+}
+
 // SweepSealingResume is the isolated entry point for the seal-resume category,
 // matching the other Sweep* methods: it gathers its own view.
 func (r *VaultLifecycleReconciler) SweepSealingResume() {
@@ -958,6 +1040,7 @@ func (r *VaultLifecycleReconciler) ReconcileTick() {
 	r.reconcileIdleActiveChunks(v)
 	r.reconcileAbandonedTransferAnnounces(v)
 	r.reconcileSealingResume(v)
+	r.reconcileSealAnnounceDivergence(v)
 }
 
 // ReconcileMembershipCatchup runs the placement- and leadership-sensitive
@@ -1005,6 +1088,7 @@ func (r *VaultLifecycleReconciler) ReconcileMembershipCatchup() {
 	r.reconcileStalePendingDeleteAcks(v)
 	r.reconcileAbandonedTransferAnnounces(v)
 	r.reconcileSealingResume(v)
+	r.reconcileSealAnnounceDivergence(v)
 }
 
 func (r *VaultLifecycleReconciler) SweepPendingObligations() {

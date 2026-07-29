@@ -238,7 +238,7 @@ func (s *SystemServer) DeleteRetentionPolicy(
 
 // validateRetentionMaxSize parse-checks a retention policy's max_size —
 // the combined drain-trigger-and-refuse-bound quantity (gastrolog-33ul6h):
-// unset is fine (no bound stored — the resolver's default floor applies
+// unset is fine (no bound stored — the vault simply has no size bound;
 // only when no attached policy has one at all); an unparseable expression is
 // rejected at write; an explicit "0" is rejected because it means "no
 // bound", the unrepresentable state this model exists to prevent.

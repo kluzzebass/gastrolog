@@ -92,22 +92,15 @@ type VaultConfig struct {
 	// longer a vault-level field — it lives on the retention policy
 	// (RetentionPolicyConfig.MaxSize, which drains AND refuses at the same
 	// bound) attached via RetentionRules, min-wins across attached policies,
-	// with DefaultVaultMaxSize as the refuse-only floor when no attached
-	// policy carries one. See orchestrator.resolveVaultSizeBound
+	// and NO bound at all when no attached policy carries one — there is no
+	// per-vault default (gastrolog-vl2p98); the volume-level storage
+	// thresholds are the backstop. See orchestrator.resolveVaultSizeBound
 	// (disk_guard.go).
 }
 
 // Defaults are expressions, like the fields they fill: what the operator would
 // have typed. Stored verbatim at creation, so a defaulted vault reads exactly
 // like a configured one (gastrolog-etcjdx).
-
-// DefaultVaultMaxSize is the per-node max-size bound applied when a vault is
-// created without one. Deliberately small: the safe failure of a too-small
-// bound is a per-vault refusal that alarms, not the node-wide disk guard
-// deadlock an unbounded vault invites (gastrolog-5ct2av). Operators who want
-// more set --max-size explicitly. Not derived from the volume: a per-vault
-// share does not compose across vaults sharing a disk.
-const DefaultVaultMaxSize = "1GiB"
 
 // DefaultVaultCacheBudget is the warm-cache soft cap applied when a
 // cloud-backed vault is created without one (the value the field long
@@ -286,4 +279,57 @@ type CertPEM struct {
 	KeyPEM   string    `json:"key_pem,omitempty"`
 	CertFile string    `json:"cert_file,omitempty"`
 	KeyFile  string    `json:"key_file,omitempty"`
+}
+
+// DiffFields returns the names of the fields that differ between two vault
+// configs, in a stable order. Names ONLY, never values: a vault config
+// references cloud services and storage, and the point of the line is that a
+// change happened and to what — the values are already in the config store.
+//
+// Exists because vault config changes were entirely unlogged (gastrolog-1jnfco)
+// while ingester changes carried a field-level diff. During the gastrolog-6ckv0y
+// investigation there was no way to establish WHEN a vault's retention
+// disposition had been flipped, which is the difference between "the change
+// never landed" and "the change landed and something ignored it".
+func (v VaultConfig) DiffFields(other VaultConfig) []string {
+	var changed []string
+	add := func(cond bool, name string) {
+		if cond {
+			changed = append(changed, name)
+		}
+	}
+	add(v.Name != other.Name, "name")
+	add(v.Enabled != other.Enabled, "enabled")
+	add(v.Type != other.Type, "type")
+	add(v.Path != other.Path, "path")
+	add(v.StorageClass != other.StorageClass, "storageClass")
+	add(v.ReplicationFactor != other.ReplicationFactor, "replicationFactor")
+	add(v.RetentionDisposition != other.RetentionDisposition, "retentionDisposition")
+	add(!glidPtrEqual(v.RetentionTransferTargetVaultID, other.RetentionTransferTargetVaultID),
+		"retentionTransferTargetVaultId")
+	add(!retentionRulesEqual(v.RetentionRules, other.RetentionRules), "retentionRules")
+	add(!glidPtrEqual(v.CloudServiceID, other.CloudServiceID), "cloudServiceId")
+	add(v.RotationPolicyID != other.RotationPolicyID, "rotationPolicyId")
+	add(v.CacheEviction != other.CacheEviction, "cacheEviction")
+	add(v.CacheTTL != other.CacheTTL, "cacheTtl")
+	return changed
+}
+
+func glidPtrEqual(a, b *glid.GLID) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+func retentionRulesEqual(a, b []RetentionRule) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

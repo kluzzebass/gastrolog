@@ -570,31 +570,42 @@ func (h *orchRelHarness) startNode(id string) {
 	n.peerConns = cluster.NewStaticPeerConns(id, h.resolver())
 	n.peerConns.SetStaticPeerIDs(h.nodeIDs)
 	n.clusterSrv.MultiRaftTransport().SetPeerConnPool(n.peerConns)
+	// Vault-ctl apply forwarding, wired for EVERY multi-node harness rather
+	// than only pipeline ones (gastrolog-231ik).
+	//
+	// factories.PeerConns is what makes ensureVaultCtlMetadata choose the
+	// forwarding applier; without it a vault-ctl announce from a node that is
+	// not the group leader hits g.Raft.Apply directly and fails with
+	// "node is not the leader". A chunk sealed on a non-leader then never
+	// reaches the manifest, and the test passes or fails depending on which
+	// node happened to win the election — the coin-flip behind this family's
+	// intermittency. Production always has PeerConns in a real cluster, so
+	// gating it on pipeline mode made the harness LESS representative, not
+	// more.
+	factories.PeerConns = n.peerConns
+	// ForwardVaultApply receiver: applies forwarded vault-ctl commands to
+	// the local Raft group, mirroring wireClusterRaftApplies in app.go.
+	// Without it, forwarded applies (and origin publishes from non-leader
+	// nodes) are rejected with "group apply function not configured".
+	n.clusterSrv.SetGroupApplyFn(func(_ context.Context, groupID string, data []byte) (uint64, error) {
+		g := groupMgr.GetGroup(groupID)
+		if g == nil {
+			return 0, fmt.Errorf("raft group %s not found", groupID)
+		}
+		future := g.Raft.Apply(data, cluster.ReplicationTimeout)
+		if err := future.Error(); err != nil {
+			return 0, err
+		}
+		if resp := future.Response(); resp != nil {
+			if err, ok := resp.(error); ok && err != nil {
+				return future.Index(), err
+			}
+		}
+		return future.Index(), nil
+	})
 	if h.pipeline != nil {
-		factories.PeerConns = n.peerConns
 		n.clusterSrv.SetSegmentPullServer(orch.ServeSegmentPull)
 		n.clusterSrv.SetChunkGLCBPullServer(orch.ServeChunkGLCBPull)
-		// ForwardVaultApply receiver: applies forwarded vault-ctl commands to
-		// the local Raft group, mirroring wireClusterRaftApplies in app.go.
-		// Without it, origin publishes from non-leader nodes are rejected
-		// with "group apply function not configured" and segments never
-		// reach the registry.
-		n.clusterSrv.SetGroupApplyFn(func(_ context.Context, groupID string, data []byte) (uint64, error) {
-			g := groupMgr.GetGroup(groupID)
-			if g == nil {
-				return 0, fmt.Errorf("raft group %s not found", groupID)
-			}
-			future := g.Raft.Apply(data, cluster.ReplicationTimeout)
-			if err := future.Error(); err != nil {
-				return 0, err
-			}
-			if resp := future.Response(); resp != nil {
-				if err, ok := resp.(error); ok && err != nil {
-					return future.Index(), err
-				}
-			}
-			return future.Index(), nil
-		})
 	}
 	n.factories = factories
 

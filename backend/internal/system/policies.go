@@ -155,7 +155,7 @@ type RetentionPolicyConfig struct {
 	//     off): a MaxSize policy with no explicit Refuse:true only drains,
 	//     it does not refuse. Resolved at the config→runtime boundary by
 	//     refreshVaultDiskGuards: min over every REFUSE-ELIGIBLE attached
-	//     policy's parsed MaxSize, floored by system.DefaultVaultMaxSize
+	//     policy's parsed MaxSize; no bound at all when none states one
 	//     (refuse-only — a default must never destroy data) only when no
 	//     attached policy STATES a MaxSize at all — a stated-but-soft
 	//     MaxSize does not re-engage the floor either; the operator's
@@ -186,11 +186,10 @@ type RetentionPolicyConfig struct {
 	// policy that states it, with refuse-eligibility following the
 	// STATING policy's own flag — a vault mixing a hard and a soft policy
 	// refuses only on the hard one's bounds. When NO attached policy
-	// opts in, there is no refuse bound at all for that kind — for
-	// MaxSize this also means the refuse-only creation-default floor
-	// does not re-engage (see resolveVaultSizeBoundSource): it applies
-	// only when no attached policy STATES a size bound, not when one
-	// states it without refusing.
+	// opts in, there is no refuse bound at all for that kind. Since
+	// gastrolog-vl2p98 there is no per-vault default to fall back to
+	// either: a vault with no stated (or no refusing) size bound simply
+	// has none, and the volume's free-space thresholds are the backstop.
 	Refuse *bool `json:"refuse,omitempty"`
 }
 
