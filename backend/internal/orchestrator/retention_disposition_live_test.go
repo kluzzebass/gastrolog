@@ -166,3 +166,74 @@ func TestVaultMissingFromConfigFallsBackToTheCapturedDisposition(t *testing.T) {
 		t.Fatalf("vault absent from config: %q, want the captured %q", got, system.RetentionDispositionRoute)
 	}
 }
+
+// flipAfterLoader flips disposition once a given number of resolutions have
+// happened, simulating an operator changing it partway through a sweep that is
+// already processing chunks.
+type flipAfterLoader struct {
+	vaultID  glid.GLID
+	before   string
+	after    string
+	flipAt   int
+	resolved int
+}
+
+func (l *flipAfterLoader) Load(context.Context) (*system.System, error) {
+	l.resolved++
+	d := l.before
+	if l.resolved > l.flipAt {
+		d = l.after
+	}
+	return &system.System{
+		Config: system.Config{
+			Vaults: []system.VaultConfig{{
+				ID:                   l.vaultID,
+				Name:                 "v",
+				Type:                 system.VaultTypeFile,
+				RetentionDisposition: d,
+			}},
+		},
+	}, nil
+}
+
+// The definition-of-done case: a disposition changed WHILE a sweep is walking
+// its chunk set must be honoured by the chunks that come after the change, not
+// deferred to the next sweep.
+//
+// Each chunk resolves independently, so flipping after the 3rd resolution means
+// chunks 1-3 route and 4-8 delete. Under the old per-sweep capture the split
+// would be 8-0: every chunk in the batch would carry the value the sweep began
+// with.
+func TestDispositionFlipMidSweepSplitsTheBatch(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	loader := &flipAfterLoader{
+		vaultID: vaultID,
+		before:  system.RetentionDispositionRoute,
+		after:   system.RetentionDispositionDelete,
+		flipAt:  3,
+	}
+	orch := newTestOrch(t, Config{LocalNodeID: "node-A"})
+	orch.setSystemLoader(loader)
+	r := &retentionRunner{
+		vaultID:     vaultID,
+		orch:        orch,
+		disposition: system.RetentionDispositionRoute,
+	}
+
+	const chunks = 8
+	var routed, deleted int
+	for range chunks {
+		switch d, _ := r.currentDisposition(); d {
+		case system.RetentionDispositionRoute:
+			routed++
+		case system.RetentionDispositionDelete:
+			deleted++
+		}
+	}
+
+	if routed != 3 || deleted != chunks-3 {
+		t.Fatalf("routed=%d deleted=%d, want 3 and %d — the batch must split at the change, "+
+			"not carry the sweep's opening value to every chunk", routed, deleted, chunks-3)
+	}
+}
