@@ -17,6 +17,9 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/raftgroup"
+
+	hraft "github.com/hashicorp/raft"
 )
 
 // TestOrchRel_SealAnnounceDivergence_ConvergesEveryNode produces a REAL
@@ -74,7 +77,15 @@ func TestOrchRel_SealAnnounceDivergence_ConvergesEveryNode(t *testing.T) {
 				}
 				views = append(views, fmt.Sprintf("%s=%s", h.nodes[id].label, st))
 			}
-			return fmt.Sprintf("%v", views), all
+			// Leadership is part of the progress metric, not just the chunk
+			// states: the sweep is leadership-gated, so a window spent
+			// electing is real activity that would otherwise read as a
+			// 20-second stall under package-parallel load.
+			leaderNow := "none"
+			if l := h.currentVaultCtlLeader(); l != nil {
+				leaderNow = l.label
+			}
+			return fmt.Sprintf("%v leader=%s", views, leaderNow), all
 		}, func() {
 			t.Logf("chunk %s never appeared on every node; nothing to diverge", chunkID)
 		})
@@ -109,8 +120,7 @@ func TestOrchRel_SealAnnounceDivergence_ConvergesEveryNode(t *testing.T) {
 		t.Fatalf("precondition: chunk is not sealed on the leader's disk (err=%v)", err)
 	}
 
-	leaderInst := inst
-	if leaderInst.Reconciler == nil {
+	if inst.Reconciler == nil {
 		t.Fatal("leader has no lifecycle reconciler")
 	}
 	// The recovery is itself a Raft command, so every voter must converge — a
@@ -125,7 +135,19 @@ func TestOrchRel_SealAnnounceDivergence_ConvergesEveryNode(t *testing.T) {
 	// shape, not a workaround.
 	h.waitProgress("every node reaching Sealed after the divergence sweep", 50*time.Millisecond,
 		func() (string, bool) {
-			leaderInst.Reconciler.SweepSealAnnounceDivergence()
+			// Re-resolve the leader each poll rather than reusing the one
+			// captured before the seal: under package-parallel load the
+			// vault-ctl group re-elects, and the sweep is leadership-gated,
+			// so pinning one node can leave nobody driving the recovery.
+			for _, id := range h.nodeIDs {
+				n := h.nodes[id]
+				if n == nil || n.orch == nil {
+					continue
+				}
+				if vi := n.orch.FindLocalVaultInstance(h.vaultID); vi != nil && vi.Reconciler != nil {
+					vi.Reconciler.SweepSealAnnounceDivergence()
+				}
+			}
 			var views []string
 			all := true
 			for _, id := range h.nodeIDs {
@@ -181,9 +203,40 @@ func TestOrchRel_SealAnnounceDivergence_LeavesHealthyClusterAlone(t *testing.T) 
 	if len(before) != len(after) {
 		t.Fatalf("the divergence sweep changed the manifest: %d entries before, %d after", len(before), len(after))
 	}
+	// Only a REGRESSION is a violation. A chunk still mid-post-seal when the
+	// snapshot was taken legitimately reaches Sealed during these divergence sweeps, and an
+	// earlier version of this assertion called that a failure — it demanded the
+	// manifest be frozen, which a live cluster's is not.
 	for id, st := range before {
-		if after[id] != st {
-			t.Errorf("chunk %s moved from %s to %s across divergence sweeps", id, st, after[id])
+		if st == chunk.ChunkStateSealed && after[id] != chunk.ChunkStateSealed {
+			t.Errorf("chunk %s regressed from sealed to %s across divergence sweeps", id, after[id])
+		}
+		if after[id] == chunk.ChunkStateActive && st != chunk.ChunkStateActive {
+			t.Errorf("chunk %s was pushed back to active from %s", id, st)
 		}
 	}
+}
+
+// currentVaultCtlLeader returns the node currently holding vault-ctl leadership
+// for the harness's default vault, or nil if the group is mid-election.
+//
+// Unlike waitForVaultCtlLeader this does not wait: callers use it inside a
+// progress predicate, where "nobody is leader right now" is information to
+// report rather than a condition to block on.
+func (h *orchRelHarness) currentVaultCtlLeader() *orchRelNode {
+	gid := raftgroup.VaultControlPlaneGroupID(h.vaultID)
+	for _, id := range h.nodeIDs {
+		n := h.nodes[id]
+		if n == nil || n.groupMgr == nil {
+			continue
+		}
+		g := n.groupMgr.GetGroup(gid)
+		if g == nil || g.Raft == nil {
+			continue
+		}
+		if g.Raft.State() == hraft.Leader {
+			return n
+		}
+	}
+	return nil
 }

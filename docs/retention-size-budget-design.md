@@ -47,7 +47,9 @@ do not measure the same thing.
    retention policy. A policy is the vault's complete size/age lifecycle:
    drain triggers plus an optional hard refuse bound.
 2. The refuse bound lives ON THE POLICY, min-wins across a vault's attached
-   policies, creation default as the floor when none carries a bound.
+   policies, and there is NO bound when none carries one (gastrolog-vl2p98
+   removed the creation-default floor; the volume's free-space thresholds
+   are the backstop).
 3. ONE meaning of size: the local disk claim — and it includes the warm
    cache of cloud-backed chunks ("a cached GLCB file takes up just as much
    space as a GLCB file in a regular vault").
@@ -70,10 +72,12 @@ do not measure the same thing.
 - Effective budget resolution (config→runtime boundary,
   `refreshVaultDiskGuards`): for each file vault, resolve every attached
   retention rule's policy; effective budget = min over the policies'
-  parsed `size_budget` values; if no attached policy carries one, the
-  creation default (`system.DefaultVaultMaxSize`, today "1GiB") applies.
-  A file vault therefore remains bounded with zero retention rules, zero
-  policies, or only trigger-less policies — the product-defaults invariant
+  parsed `size_budget` values; if no attached policy carries one, the vault
+  has no size bound. A file vault with zero retention rules is bounded by
+  its VOLUME (`FileStorage.DiskFreeWarn` / `DiskFreeFloor`, 10%/3%), not by
+  a per-vault byte default — gastrolog-vl2p98 removed that floor, because it
+  refused admission without draining and so could never recover, and because
+  it made an unconfigured vault stricter than any configured one
   survives with no operator diligence required.
 - Validation moves with the field: `PutRetentionPolicy` parse-checks
   `size_budget` (must parse, must be > 0 when set) the way `PutVault`

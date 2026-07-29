@@ -981,13 +981,11 @@ func (g *diskGuard) clearVaultBacklogState(alerts alert.Sink, id glid.GLID, v *v
 // clearVaultSizeState releases a standing size cap/alarm when the bound is
 // unset (0) — otherwise a vault capped under a since-removed or
 // since-softened max-size bound would refuse admission forever.
-// gastrolog-5yfaqj made 0 reachable for the first time: previously
-// resolveVaultSizeBoundSource always resolved to either a stated bound or
-// the default floor, never 0; now a vault whose only attached size
-// policies are all refuse=false (soft bound — drains, never refuses)
-// correctly resolves to 0 (no refuse bound, and the default floor must
-// NOT re-engage over the operator's explicit opt-out). Mirrors
-// clearVaultBacklogState.
+// gastrolog-5yfaqj made 0 reachable for the first time (a vault whose only
+// attached size policies are all refuse=false — soft, drains but never
+// refuses), and gastrolog-vl2p98 made it the ordinary case by deleting the
+// per-vault default: a vault with no stated size bound resolves to 0 rather
+// than to a floor. Mirrors clearVaultBacklogState.
 func (g *diskGuard) clearVaultSizeState(alerts alert.Sink, id glid.GLID, v *vaultDiskGuard) {
 	if v.capped.Load() {
 		v.capped.Store(false)
@@ -1835,16 +1833,24 @@ func attachedChunkCountBound(vc system.VaultConfig, policies []system.RetentionP
 
 // resolveVaultSizeBound computes the effective per-node disk-claim REFUSE
 // bound for a file vault (gastrolog-33ul6h): attachedSizeBound's min-wins
-// result over refuse-eligible policies, or the creation default
-// (system.DefaultVaultMaxSize) as the refuse-only floor when NO attached
-// policy states a usable bound at all — zero retention rules, zero
-// policies, or only bound-less policies — so a file vault stays bounded
-// with no operator diligence required. gastrolog-5yfaqj corner case: when
-// at least one attached policy DOES state a usable bound but every one of
-// them is refuse=false (soft), the result is 0 — no refuse bound applies,
-// and the default floor does NOT re-engage either, because the operator
-// explicitly opted every stating policy out of refusal; silently falling
-// back to the floor would override that choice.
+// result over refuse-eligible policies, and 0 — no refuse bound — when no
+// attached policy states one.
+//
+// There is deliberately no default floor (gastrolog-vl2p98). A 1GiB creation
+// default used to apply here, and it refused admission, which made the ABSENCE
+// of configuration stricter than anything an operator could write: Refuse
+// defaults off, so a stated max_size only drains unless refuse:true is explicit,
+// while stating nothing produced a refusing bound at 1GiB. No value typed into
+// max_size could reproduce that, and a vault managed by max_age alone — a
+// perfectly good configuration — had ingestion refused on an axis it never
+// configured.
+//
+// The node-level protection that default was justified by is provided on the
+// correct axis by the storage free-space thresholds (FileStorage.DiskFreeWarn /
+// DiskFreeFloor, defaults 10%/3%). Those are percentages of the VOLUME, so they
+// compose across vaults sharing a disk; a per-vault byte count does not, which
+// is why gastrolog-9akebz moved those thresholds off the vault in the first
+// place.
 func resolveVaultSizeBound(vc system.VaultConfig, policies []system.RetentionPolicyConfig) uint64 {
 	bound, _ := resolveVaultSizeBoundSource(vc, policies)
 	return bound
@@ -1863,8 +1869,7 @@ func resolveVaultSizeBoundSource(vc system.VaultConfig, policies []system.Retent
 	if anyStated {
 		return 0, "no refuse-eligible policy (soft bound only)"
 	}
-	def, _ := system.ParseSize(system.DefaultVaultMaxSize)
-	return def, "default floor"
+	return 0, "no attached policy states a size bound"
 }
 
 // currentMaxSizeBytes returns the vault's currently-registered max-size

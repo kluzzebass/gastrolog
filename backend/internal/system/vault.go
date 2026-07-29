@@ -92,22 +92,15 @@ type VaultConfig struct {
 	// longer a vault-level field — it lives on the retention policy
 	// (RetentionPolicyConfig.MaxSize, which drains AND refuses at the same
 	// bound) attached via RetentionRules, min-wins across attached policies,
-	// with DefaultVaultMaxSize as the refuse-only floor when no attached
-	// policy carries one. See orchestrator.resolveVaultSizeBound
+	// and NO bound at all when no attached policy carries one — there is no
+	// per-vault default (gastrolog-vl2p98); the volume-level storage
+	// thresholds are the backstop. See orchestrator.resolveVaultSizeBound
 	// (disk_guard.go).
 }
 
 // Defaults are expressions, like the fields they fill: what the operator would
 // have typed. Stored verbatim at creation, so a defaulted vault reads exactly
 // like a configured one (gastrolog-etcjdx).
-
-// DefaultVaultMaxSize is the per-node max-size bound applied when a vault is
-// created without one. Deliberately small: the safe failure of a too-small
-// bound is a per-vault refusal that alarms, not the node-wide disk guard
-// deadlock an unbounded vault invites (gastrolog-5ct2av). Operators who want
-// more set --max-size explicitly. Not derived from the volume: a per-vault
-// share does not compose across vaults sharing a disk.
-const DefaultVaultMaxSize = "1GiB"
 
 // DefaultVaultCacheBudget is the warm-cache soft cap applied when a
 // cloud-backed vault is created without one (the value the field long

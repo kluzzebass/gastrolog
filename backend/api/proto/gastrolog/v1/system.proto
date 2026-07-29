@@ -390,11 +390,12 @@ message RetentionPolicyConfig {
   // Effective bound resolution (refreshVaultDiskGuards): for each file
   // vault, resolve every attached retention rule's policy; the effective
   // REFUSE bound is the min over the REFUSE-ELIGIBLE policies' parsed
-  // max_size values; the creation default (system.DefaultVaultMaxSize)
-  // applies as a REFUSE-ONLY floor only when no attached policy STATES a
-  // max_size at all — a stated-but-soft max_size does not re-engage the
-  // floor either, the operator's opt-out stands. A default must never
-  // destroy data, so the floor never drains, only refuses.
+  // max_size values, and NO bound at all when none states one. There is no
+  // per-vault default (gastrolog-vl2p98): the old creation floor refused
+  // admission without draining, so a vault with no drain policy reached it
+  // and could never recover, and because refuse defaults off it made an
+  // unconfigured vault stricter than any configured one. A vault with no
+  // refusing max_size is bounded by its volume's free-space thresholds.
   string max_size = 2;
   int64 max_chunks = 3;
   bytes id = 4;

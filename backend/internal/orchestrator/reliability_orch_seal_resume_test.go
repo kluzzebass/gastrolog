@@ -152,9 +152,16 @@ func TestOrchRel_ReconcileTickLeavesCompletedSealsAlone(t *testing.T) {
 	if len(before) != len(after) {
 		t.Fatalf("reconcile ticks changed the manifest: %d entries before, %d after", len(before), len(after))
 	}
+	// Only a REGRESSION is a violation. A chunk still mid-post-seal when the
+	// snapshot was taken legitimately reaches Sealed during these reconcile ticks, and an
+	// earlier version of this assertion called that a failure — it demanded the
+	// manifest be frozen, which a live cluster's is not.
 	for id, st := range before {
-		if after[id] != st {
-			t.Errorf("chunk %s moved from %s to %s across reconcile ticks", id, st, after[id])
+		if st == chunk.ChunkStateSealed && after[id] != chunk.ChunkStateSealed {
+			t.Errorf("chunk %s regressed from sealed to %s across reconcile ticks", id, after[id])
+		}
+		if after[id] == chunk.ChunkStateActive && st != chunk.ChunkStateActive {
+			t.Errorf("chunk %s was pushed back to active from %s", id, st)
 		}
 	}
 }
