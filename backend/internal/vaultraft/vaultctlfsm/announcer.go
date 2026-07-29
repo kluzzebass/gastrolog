@@ -28,6 +28,10 @@ type Applier interface {
 // reconcile-on-load pass covers any missed announces on the next
 // startup. See gastrolog-1e5ke.
 type Announcer struct {
+	// onResult, when set, observes every announce attempt's outcome. See
+	// SetResultHook.
+	onResult func(op string, id chunk.ChunkID, err error)
+
 	applier Applier
 	phase   *lifecycle.Phase
 	logger  *slog.Logger
@@ -39,6 +43,24 @@ type Announcer struct {
 // begins shutting down.
 func NewAnnouncer(applier Applier, phase *lifecycle.Phase, logger *slog.Logger) *Announcer {
 	return &Announcer{applier: applier, phase: phase, logger: logger}
+}
+
+// SetResultHook registers a callback invoked after every announce attempt, with
+// the error the apply returned or nil.
+//
+// The MetadataAnnouncer contract is deliberately best-effort — "failures are
+// logged but don't block the local operation" — and that is load-bearing: these
+// calls fire from deferred closures in the chunk manager, run after the manager
+// mutex is released precisely so a Raft round trip cannot deadlock against the
+// FSM apply path, and have no caller left to return an error to. Threading an
+// error back through would mean unwinding that.
+//
+// But "does not block the local operation" was allowed to mean "is invisible",
+// and that is what let a seal complete while the manifest silently stayed Active
+// (gastrolog-3ba5ei). The hook separates the two: the announce still does not
+// block anything, and the failure still reaches an operator.
+func (a *Announcer) SetResultHook(fn func(op string, id chunk.ChunkID, err error)) {
+	a.onResult = fn
 }
 
 var _ chunk.MetadataAnnouncer = (*Announcer)(nil)
@@ -80,10 +102,12 @@ func (a *Announcer) apply(op string, id chunk.ChunkID, data []byte) {
 	if a.phase != nil && a.phase.ShuttingDown() {
 		return
 	}
-	if err := a.applier.Apply(data); err != nil {
-		if a.logger != nil {
-			a.logger.Warn("chunk metadata announce failed",
-				"op", op, "chunk", id.String(), "error", err)
-		}
+	err := a.applier.Apply(data)
+	if err != nil && a.logger != nil {
+		a.logger.Warn("chunk metadata announce failed",
+			"op", op, "chunk", id.String(), "error", err)
+	}
+	if a.onResult != nil {
+		a.onResult(op, id, err)
 	}
 }

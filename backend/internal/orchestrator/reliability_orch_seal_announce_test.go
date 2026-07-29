@@ -113,13 +113,19 @@ func TestOrchRel_SealAnnounceDivergence_ConvergesEveryNode(t *testing.T) {
 	if leaderInst.Reconciler == nil {
 		t.Fatal("leader has no lifecycle reconciler")
 	}
-	leaderInst.Reconciler.SweepSealAnnounceDivergence()
-
 	// The recovery is itself a Raft command, so every voter must converge — a
 	// leader that fixed only its own copy would leave the same bug one layer
 	// down.
+	//
+	// The sweep is re-driven on every poll rather than called once. It is
+	// gated on vault-ctl leadership, so a single invocation can land in a
+	// moment when this node is mid-election and do nothing, with no retry — a
+	// one-shot call failed exactly that way under full-suite load. Production
+	// drives this from the periodic tick, so repeating it here is the faithful
+	// shape, not a workaround.
 	h.waitProgress("every node reaching Sealed after the divergence sweep", 50*time.Millisecond,
 		func() (string, bool) {
+			leaderInst.Reconciler.SweepSealAnnounceDivergence()
 			var views []string
 			all := true
 			for _, id := range h.nodeIDs {

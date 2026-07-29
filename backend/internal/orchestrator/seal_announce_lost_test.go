@@ -15,6 +15,7 @@ package orchestrator
 
 import (
 	"log/slog"
+	"strings"
 	"testing"
 
 	"gastrolog/internal/chunk"
@@ -240,5 +241,39 @@ func TestSealAnnounceDivergenceLeavesTheOpenActiveChunkAlone(t *testing.T) {
 
 	if got := fsmState(t, fsm, active.ID); got != chunk.ChunkStateActive {
 		t.Errorf("the open active chunk was moved to %s; it must stay active", got)
+	}
+}
+
+// The visibility half of gastrolog-3ba5ei: an announce that cannot commit must
+// reach an operator, not just the log.
+func TestFailedAnnounceRaisesAVaultAlarmAndClearsOnRecovery(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	sink := &recordingSink{}
+	orch := newTestOrch(t, Config{LocalNodeID: "node-A"})
+	orch.alerts = sink
+	hook := orch.announceResultHook(vaultID)
+	id := chunk.NewChunkID()
+
+	hook("begin-seal", id, errApplyRefused)
+	if n := countPrefixed(sink.raises, "vault-announce-failing|"+vaultID.String()+"|"); n != 1 {
+		t.Fatalf("raises for a failed announce = %d, want 1", n)
+	}
+
+	// Keyed by vault, not by chunk: a node that cannot commit cannot commit for
+	// any chunk, and one alarm per chunk would be a flood of one condition.
+	for range 5 {
+		hook("seal", chunk.NewChunkID(), errApplyRefused)
+	}
+	for _, r := range sink.raises {
+		if !strings.HasPrefix(r, "vault-announce-failing|"+vaultID.String()+"|") {
+			t.Fatalf("alarm instance key is not the vault: %q", r)
+		}
+	}
+
+	// Clears when announces commit again — the condition ending, not a timer.
+	hook("seal", id, nil)
+	if n := countPrefixed(sink.clears, "vault-announce-failing|"+vaultID.String()); n != 1 {
+		t.Errorf("clears after a successful announce = %d, want 1", n)
 	}
 }
