@@ -11,7 +11,7 @@ import (
 // evictCountingChunkManager is a minimal ChunkManager (reusing
 // retentionFakeChunkManager's no-op method set) that also implements
 // CacheEvictor, counting how many times EvictCache is called. Used to
-// pin down gastrolog-1a18r: the dedicated cache-eviction job is the only
+// pin down the rule that the dedicated cache-eviction job is the only
 // path that may ever call EvictCache — the retention sweep must not.
 type evictCountingChunkManager struct {
 	retentionFakeChunkManager
@@ -60,7 +60,7 @@ func TestCacheEvictionSweepAll_FiresEvictCache(t *testing.T) {
 	}
 }
 
-// TestRetentionSweepAll_DoesNotCallEvictCache pins down gastrolog-1a18r:
+// TestRetentionSweepAll_DoesNotCallEvictCache pins down the rule that
 // the retention sweep must never call EvictCache — that is the
 // cache-eviction job's sole responsibility. Regression guard for the
 // duplicate-eviction bug the two independent scheduler jobs used to

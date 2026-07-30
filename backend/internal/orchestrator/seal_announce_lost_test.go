@@ -3,8 +3,9 @@ package orchestrator
 // A seal whose vault-ctl announce fails leaves the chunk sealed on disk and
 // Active in the replicated manifest — and every layer reports success.
 //
-// This is the state captured under gastrolog-231ik: entry Active on all three
-// nodes while the sealing leader's post-seal job read status=completed. The
+// This is the state captured during a reliability-orch flake: entry Active on
+// all three nodes while the sealing leader's post-seal job read
+// status=completed. The
 // flake is one way to trigger it; the defect is that a failed announce is both
 // invisible and unrecoverable. That does not need a flake to demonstrate.
 //
@@ -108,7 +109,7 @@ func TestLostBeginSealAnnounceLeavesChunkSealedLocallyButActiveInFSM(t *testing.
 	}
 	requireIdle(t, orch.scheduler, postSealDrainBudget)
 
-	// The three observations from the gastrolog-231ik capture.
+	// The three observations from that capture.
 	local, err := orch.vaults[vaultID].Instance.Chunks.Meta(chunkID)
 	if err != nil {
 		t.Fatalf("local Meta: %v", err)
@@ -244,8 +245,8 @@ func TestSealAnnounceDivergenceLeavesTheOpenActiveChunkAlone(t *testing.T) {
 	}
 }
 
-// The visibility half of gastrolog-3ba5ei: an announce that cannot commit must
-// reach an operator, not just the log.
+// The visibility half: an announce that cannot commit must reach an operator,
+// not just the log.
 func TestFailedAnnounceRaisesAVaultAlarmAndClearsOnRecovery(t *testing.T) {
 	t.Parallel()
 	vaultID := glid.New()

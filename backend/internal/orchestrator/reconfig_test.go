@@ -44,8 +44,8 @@ func TestReloadFilters(t *testing.T) {
 	loader := &fakeSystemLoader{}
 	orch, vaults := newRoutedTestSetupWithLoader(t, loader)
 
-	// gastrolog-4kkoo (Phase 5): explicit priorities so the prod route
-	// fires before the archive catch-all under first-match-wins.
+	// Explicit priorities so the prod route fires before the archive
+	// catch-all under first-match-wins.
 	loader.cfg = &system.Config{
 		Routes: []system.RouteConfig{
 			{ID: glid.New(), Name: "prod", Priority: 10, Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "env=prod"}}}, Destinations: []glid.GLID{vaults.prod}, Enabled: true},
@@ -551,12 +551,12 @@ func TestVaultConfigNotFound(t *testing.T) {
 	}
 }
 
-// gastrolog-4kkoo (Phase 5): TestUpdateVaultFilter / TestUpdateVaultFilterNotFound /
-// TestUpdateVaultFilterInvalid removed. The Phase-4 UpdateVaultFilter API
-// is gone — vaults no longer carry filters; routes do. The equivalent
-// behavior (changing where a record lands when its source attrs match)
-// is exercised by TestReloadFilters in this file via swapping the
-// route's match expression and calling ReloadFilters.
+// TestUpdateVaultFilter / TestUpdateVaultFilterNotFound /
+// TestUpdateVaultFilterInvalid removed. The UpdateVaultFilter API is gone —
+// vaults no longer carry filters; routes do. The equivalent behavior (changing
+// where a record lands when its source attrs match) is exercised by
+// TestReloadFilters in this file via swapping the route's match expression and
+// calling ReloadFilters.
 
 func TestSetRotationPolicyOnVaultDirectly(t *testing.T) {
 	t.Parallel()
@@ -836,23 +836,22 @@ func TestRetentionSingleJobRegistered(t *testing.T) {
 	}
 }
 
-// gastrolog-4kkoo (Phase 5): TestUpdateVaultFilterNotFound and
-// TestUpdateVaultFilterInvalid removed alongside UpdateVaultFilter.
-// Invalid-expression handling at the route level is covered by
-// TestReloadFiltersInvalidExpression earlier in this file, which
+// TestUpdateVaultFilterNotFound and TestUpdateVaultFilterInvalid were removed
+// alongside UpdateVaultFilter. Invalid-expression handling at the route level
+// is covered by TestReloadFiltersInvalidExpression earlier in this file, which
 // asserts that a route carrying a bad expression fails ReloadFilters.
 
 func strPtr(s string) *string { return &s }
 
 func int64Ptr(v int64) *int64 { return &v }
 
-// TestReloadRotationPolicies_AppliesSynchronously was removed in Rubicon E2
-// (gastrolog-358ak): ReloadRotationPolicies no longer hot-swaps the per-instance
-// chunk manager's rotation policy (the active-chunk append path is gone). Chunk
-// rotation is now governed by the pipeline chunking manifest policy, applied at
-// pipeline vault (re)registration via reloadPipelineFromConfig. The reload path's
-// remaining effect (republish routing table + reconcile pipeline vaults) is
-// covered by the route/reconfig tests.
+// TestReloadRotationPolicies_AppliesSynchronously was removed in Rubicon E2:
+// ReloadRotationPolicies no longer hot-swaps the per-instance chunk manager's
+// rotation policy (the active-chunk append path is gone). Chunk rotation is now
+// governed by the pipeline chunking manifest policy, applied at pipeline vault
+// (re)registration via reloadPipelineFromConfig. The reload path's remaining
+// effect (republish routing table + reconcile pipeline vaults) is covered by the
+// route/reconfig tests.
 
 // TestReloadRotationPolicies_SkipsFollowers verifies the reload path does not
 // stomp on follower replicas — the rotationSweep is the sole authority for
@@ -954,12 +953,12 @@ func TestReloadRotationPolicies_NilPolicyID(t *testing.T) {
 	}
 }
 
-// The per-CM role-based rotation regression tests (gastrolog-50n4b) were
-// removed in Rubicon E2 (gastrolog-358ak): the per-instance chunk manager no
-// longer performs active-chunk rotation under a user/never policy. Chunk
-// rotation is now governed by the pipeline chunking manifest policy
-// (resolveChunkPolicy / manifestRotationPolicy), and ApplyRotationPolicyForRole
-// is a retained no-op (see TestApplyRotationPolicyForRole_NoInstanceIsNoop).
+// The per-CM role-based rotation regression tests were removed in Rubicon E2:
+// the per-instance chunk manager no longer performs active-chunk rotation under
+// a user/never policy. Chunk rotation is now governed by the pipeline chunking
+// manifest policy (resolveChunkPolicy / manifestRotationPolicy), and
+// ApplyRotationPolicyForRole is a retained no-op (see
+// TestApplyRotationPolicyForRole_NoInstanceIsNoop).
 
 // TestApplyRotationPolicyForRole_NoInstanceIsNoop covers the warm-up case
 // where a vault is registered but its Instance is still nil — the call

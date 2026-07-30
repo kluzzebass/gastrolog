@@ -1,10 +1,9 @@
 package orchestrator
 
-// Coverage for gastrolog-338j51: the warm-cache config must actually reach
-// the file-manager factory. Before this, nothing populated the cache_* param
-// keys the factory reads, so an operator's cache-budget was silently ignored
-// and the cache ran unbounded. This asserts the config → param bridge that
-// buildVaultParams' memory-budget already had and the cache config lacked.
+// The warm-cache config must actually reach the file-manager factory. Without
+// the cache_* param keys the factory reads, an operator's cache budget is
+// silently ignored and the cache runs unbounded. This asserts the config →
+// param bridge, which buildVaultParams supplies for the memory budget too.
 
 import (
 	"testing"
@@ -22,7 +21,7 @@ func TestAddCacheParamsThreadsConfigToFactory(t *testing.T) {
 	})
 
 	// Expressions pass through verbatim — the factory resolves them with the
-	// shared parser (gastrolog-etcjdx).
+	// shared parser.
 	if got := params["cache_eviction"]; got != "lru" {
 		t.Errorf("cache_eviction = %q, want lru", got)
 	}

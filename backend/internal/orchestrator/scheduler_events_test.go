@@ -159,7 +159,7 @@ func TestScheduler_Events_OnJobChange_StillFires(t *testing.T) {
 // a requirement — a job that failed was reported to every subscriber, and to the
 // Jobs inspector, as having completed. Every one-time job now carries a progress
 // record, and gocron routes errors to a different listener, so the outcome is
-// known rather than inferred (gastrolog-68dusi).
+// known rather than inferred.
 func TestScheduler_Events_RunOnceFailureEmitsFailed(t *testing.T) {
 	s := newQuietScheduler(t)
 	sub, cancel := s.Events().Subscribe()

@@ -1,9 +1,9 @@
 package orchestrator
 
-// gastrolog-5034va: the route-disposition fan-out was shutdown-blind. A
-// stopped pipeline supervisor turned every record submit into an identical
-// per-record WARN (tens of thousands of lines per expiring chunk on every
-// shutdown), and — worse — the aborted fan-out still burned the one-shot
+// The route-disposition fan-out was shutdown-blind. A stopped pipeline
+// supervisor turned every record submit into an identical per-record WARN
+// (tens of thousands of lines per expiring chunk on every shutdown), and —
+// worse — the aborted fan-out still burned the one-shot
 // routing gate: the pending flag was applied before routing, so the next
 // sweep skipped routing and destroyed the chunk unrouted. These tests pin
 // the fixed behavior: single-warn abort, gate preserved on abort, pending

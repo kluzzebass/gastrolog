@@ -1,12 +1,12 @@
 package orchestrator_test
 
-// gastrolog-4rdb9f: an ingester config rebuild under a saturated pipeline
-// must leave the alive surface truthful. The field incident: the old run,
-// parked in a send on the full ingest-digest queue, woke on cancel AFTER the
-// successor had stored alive=true on the SAME shared IngesterStats (reused
-// across rebuilds by design so counters survive), and its deferred
-// alive-false clobbered it — IsIngesterRunning lied false forever and the
-// convergence sweep reported divergence every 15s on 3 of 4 nodes.
+// An ingester config rebuild under a saturated pipeline must leave the alive
+// surface truthful. The field incident: the old run, parked in a send on the
+// full ingest-digest queue, woke on cancel AFTER the successor had stored
+// alive=true on the SAME shared IngesterStats (reused across rebuilds by
+// design so counters survive), and its deferred alive-false clobbered it —
+// IsIngesterRunning lied false forever and the convergence sweep reported
+// divergence every 15s on 3 of 4 nodes.
 //
 // These tests run the real orchestrator + pipeline: a digester that blocks
 // every record pins the digestion stage exactly like the saturated field
@@ -152,7 +152,7 @@ func TestIngesterRebuildUnderSaturationKeepsAliveTruth(t *testing.T) {
 	expectAlive(t, aliveCh, false)
 	expectAlive(t, aliveCh, true)
 	if !orch.IsIngesterRunning(id) {
-		t.Fatal("rebuilt ingester must report running (gastrolog-4rdb9f: stale alive-false clobbered the successor)")
+		t.Fatal("rebuilt ingester must report running (stale alive-false clobbered the successor)")
 	}
 	select {
 	case v := <-aliveCh:

@@ -1,7 +1,7 @@
 package orchestrator
 
 // Unit coverage for the transfer disposition executor's non-Raft-dependent
-// pieces (gastrolog-2l918): the destination-receipts watchdog, the
+// pieces: the destination-receipts watchdog, the
 // announce-import idempotency/corruption gate, target-state re-validation,
 // and the disposition-gate dispatch. Full end-to-end (real vault-ctl Raft
 // FSM, real GLCB bytes, real receipts) coverage lives in the
@@ -172,11 +172,11 @@ func TestEnsureDestManifestEntryDefersOnRecordCountMismatch(t *testing.T) {
 	}
 }
 
-// TestEnsureDestManifestEntryDefersOnTombstone pins gastrolog-2l918 review
-// finding 3b: an announce refused because the destination TOMBSTONED this
-// chunk ID must be a NAMED defer cause (deferCatTombstoned) distinct from
-// deferCatCorruption — a prior transfer to this destination was retracted
-// (abandoned-announce GC, finding 4) or an operator deleted the chunk, and
+// TestEnsureDestManifestEntryDefersOnTombstone pins that an announce refused
+// because the destination TOMBSTONED this chunk ID must be a NAMED defer
+// cause (deferCatTombstoned) distinct from deferCatCorruption — a prior
+// transfer to this destination was retracted (abandoned-announce GC) or an
+// operator deleted the chunk, and
 // the right response is "wait for the tombstone to prune", not "declare
 // corruption and alarm as such".
 func TestEnsureDestManifestEntryDefersOnTombstone(t *testing.T) {
@@ -352,10 +352,10 @@ func TestApplyRetentionDispositionToChunkDeleteIsNoOp(t *testing.T) {
 	}
 }
 
-// TestFireTransferEventReturnsFalseWithNoOrchestrator pins gastrolog-2l918
-// review finding 6: a nil orchestrator must retain the chunk (false), not
-// silently report success (true) — the old behavior would have destroyed
-// the source's only copy with nothing to transfer into.
+// TestFireTransferEventReturnsFalseWithNoOrchestrator pins that a nil
+// orchestrator must retain the chunk (false), not silently report success
+// (true) — the old behavior would have destroyed the source's only copy
+// with nothing to transfer into.
 func TestFireTransferEventReturnsFalseWithNoOrchestrator(t *testing.T) {
 	t.Parallel()
 	r := &retentionRunner{}
@@ -364,7 +364,7 @@ func TestFireTransferEventReturnsFalseWithNoOrchestrator(t *testing.T) {
 	}
 }
 
-// ---------- per-sweep transfer-target stall circuit breaker (gastrolog-2l918 review finding 2) ----------
+// ---------- per-sweep transfer-target stall circuit breaker ----------
 
 // TestTransferTargetStalledThisSweep pins the breaker's state machine in
 // isolation: unmarked reports not-stalled; marking one target trips the
@@ -418,9 +418,9 @@ func TestFireTransferEventDefersImmediatelyWhenTargetStalledThisSweep(t *testing
 	}
 	r.markTransferTargetStalledThisSweep(targetID)
 
-	// The target is passed in now rather than read off the runner
-	// (gastrolog-6ckv0y): the disposition and its target are resolved per
-	// chunk from current config.
+	// The target is passed in now rather than read off the runner: the
+	// disposition and its target are resolved per chunk from current
+	// config.
 	if got := r.fireTransferEvent(chunk.NewChunkID(), &targetID); got {
 		t.Fatal("want false (defer) when the target already stalled this sweep")
 	}

@@ -7,7 +7,7 @@ package orchestrator
 // registry entry without stopping the job already running, so the work would run
 // twice. It is not idempotent: sealToGLCB rebuilds the GLCB from the record
 // cursor with no already-built short-circuit, then re-announces and re-enters
-// the upload path — the gastrolog-3hwngy shape (gastrolog-3xr5dk).
+// the upload path.
 
 import (
 	"context"

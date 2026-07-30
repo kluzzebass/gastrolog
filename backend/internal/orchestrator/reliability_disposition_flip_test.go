@@ -1,8 +1,8 @@
 package orchestrator_test
 
-// End-to-end coverage for gastrolog-6ckv0y: a disposition changed on a RUNNING
-// cluster must be honoured by the retention sweep, not deferred until the sweep
-// that is already in flight finishes.
+// End-to-end coverage: a disposition changed on a RUNNING cluster must be
+// honoured by the retention sweep, not deferred until the sweep that is
+// already in flight finishes.
 //
 // The unit tests pin that currentDisposition resolves from the config store.
 // This pins the thing the operator actually observes: flip the setting, and the

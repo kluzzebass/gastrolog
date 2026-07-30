@@ -27,7 +27,7 @@ func afterRestoreRaftTimeouts() (heartbeat, election, lease time.Duration) {
 	return 100 * time.Millisecond, 100 * time.Millisecond, 50 * time.Millisecond
 }
 
-// TestCreateGroupRestoreWithInstanceDoesNotDeadlock pins gastrolog-4tadr:
+// TestCreateGroupRestoreWithInstanceDoesNotDeadlock pins the rule that
 // afterVaultCtlRestore must not call groupMgr.GetGroup synchronously from
 // inside fsm.Restore while CreateGroup holds groupMgr.mu.
 func TestCreateGroupRestoreWithInstanceDoesNotDeadlock(t *testing.T) {

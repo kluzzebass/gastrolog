@@ -22,7 +22,7 @@ import (
 // that live only as an FSM entry plus an on-disk GLCB. Without the lister,
 // lazy resolution serves a chunk you already name but hides it from
 // enumeration, so a restarted home answers a match-all with zero records
-// until some other path happens to register the chunk (gastrolog-3s26vr).
+// until some other path happens to register the chunk.
 type externalGLCBResolverSetter interface {
 	SetExternalGLCBResolver(func(chunk.ChunkID) (string, chunk.ExternalGLCBInfo, bool))
 	SetExternalGLCBLister(func() []chunk.ChunkID)
@@ -88,15 +88,14 @@ func (o *Orchestrator) installLazyGLCBResolverOn(inst *VaultInstance, vaultID gl
 		glcbPath := chunking.ChunkGLCBPath(chunkRoot, id)
 		// File-enriched info: the memoized registration must be COMPLETE at
 		// first resolution — there is no eager re-registration pass to upgrade
-		// it afterward (registerPipelineGLCB is retired, gastrolog-34kmv). For a
-		// Sealed entry the FSM already carries index offsets and bounds, so the
-		// overlay only opens+stats the file and returns immediately (cheap). For
-		// a Sealing entry — built on disk but before CmdSealChunk committed its
-		// TS index offsets — the overlay reads them (and any missing bounds/
-		// counts) from the on-disk blob's TOC, so a query landing in that window
-		// still memoizes a servable, index-complete meta. A missing/unreadable
-		// file means the bytes are not on this node: fall through to other
-		// holders (same signal the previous os.Stat guard used).
+		// it afterward. For a Sealed entry the FSM already carries index
+		// offsets and bounds, so the overlay only opens+stats the file and
+		// returns immediately (cheap). For a Sealing entry — built on disk but
+		// before CmdSealChunk committed its TS index offsets — the overlay
+		// reads them (and any missing bounds/counts) from the on-disk blob's
+		// TOC, so a query landing in that window still memoizes a servable,
+		// index-complete meta. A missing/unreadable file means the bytes are
+		// not on this node: fall through to other holders.
 		info, err := externalGLCBInfoForPipeline(*e, glcbPath)
 		if err != nil {
 			return "", chunk.ExternalGLCBInfo{}, false
@@ -148,18 +147,14 @@ func externalGLCBInfoFromFSM(e vaultctlfsm.ManifestEntry) chunk.ExternalGLCBInfo
 		RecordCount: e.RecordCount,
 		Bytes:       e.Bytes,
 		// No DiskBytes seed here: ManifestEntry carries no per-node local
-		// footprint (see gastrolog-33ul6h). overlayPipelineGLCBFromBuild's
-		// info.DiskBytes==0 fallback below recomputes it from the actual
-		// local build result — but only when it runs at all:
+		// footprint. overlayPipelineGLCBFromBuild's info.DiskBytes==0
+		// fallback below recomputes it from the actual local build
+		// result — but only when it runs at all:
 		// overlayPipelineGLCBFromBuild early-returns once the FSM entry
 		// already has RecordCount and both IngestStart/IngestEnd (the
 		// steady-state case, once CmdSealChunk has fully committed), so
-		// DiskBytes stays 0 there. That's unchanged from before this
-		// field was removed: ManifestEntry.DiskBytes was never populated
-		// for a non-cloud entry either (only CmdUploadChunk ever set it),
-		// so this seed was already always 0 in that same steady-state
-		// case. chunk.DiskClaim's Bytes+index-size legacy fallback covers
-		// sizing whenever DiskBytes lands at 0, same as it always has.
+		// DiskBytes stays 0 there. chunk.DiskClaim's Bytes+index-size
+		// fallback covers sizing whenever DiskBytes lands at 0.
 		IngestIdxOffset:   e.IngestIdxOffset,
 		IngestIdxSize:     e.IngestIdxSize,
 		SourceIdxOffset:   e.SourceIdxOffset,

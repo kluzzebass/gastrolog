@@ -225,8 +225,8 @@ func TestManifestRecordCursorReverseSeek(t *testing.T) {
 // open-count instrumentation (not timing), that a full reverse scan over an
 // active pipeline chunk performs ZERO full-verify segment opens and exactly
 // one mapped open per distinct manifest segment for the whole cursor lifetime
-// (gastrolog-54mjat) — and that reverse reads return the same record at the
-// same position as forward iteration.
+// — and that reverse reads return the same record at the same position as
+// forward iteration.
 func TestManifestRecordCursorReverseNoReopenAndForwardParity(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

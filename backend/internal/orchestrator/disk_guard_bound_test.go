@@ -1,12 +1,11 @@
 package orchestrator
 
-// gastrolog-5yfaqj: refusal generalizes from max-size to every retention
-// policy bound. This file covers the disk-guard-level plumbing for the two
-// new causes (age, chunk-count) — the setter/getter pair the retention
-// runner's post-sweep verdict drives, the shared vault-bound-capped alarm
-// with its per-cause entity key, vaultAdmissionCauses/vaultAdmissionGate
-// wiring (local and remote-peer), the NodeStats broadcast listers, and
-// retainVaultGuards' alarm cleanup on prune. The retention-runner side of
+// Refusal generalizes from max-size to every retention policy bound. This file
+// covers the disk-guard-level plumbing for the age and chunk-count causes — the
+// setter/getter pair the retention runner's post-sweep verdict drives, the
+// shared vault-bound-capped alarm with its per-cause entity key,
+// vaultAdmissionCauses/vaultAdmissionGate wiring (local and remote-peer), the
+// NodeStats broadcast listers, and retainVaultGuards' alarm cleanup on prune. The retention-runner side of
 // the VIOLATION PREDICATE (swept-and-failed-to-clear) is covered in
 // retention_bound_refusal_test.go — these tests drive the guard's setters
 // directly, standing in for whatever verdict a sweep would have reported.
@@ -240,9 +239,9 @@ func TestRetainVaultGuardsClearsBoundAlarms(t *testing.T) {
 // the hard one was removed) — this is the same "unset bound must not
 // strand a standing cap" contract clearVaultBacklogState already
 // guarantees for the backlog budget, now needed for size because
-// gastrolog-5yfaqj made maxSizeBytes==0 reachable via a LIVE transition
-// for the first time (previously resolveVaultSizeBoundSource always
-// resolved to a nonzero bound, never 0).
+// generalizing refusal to every retention bound made maxSizeBytes==0
+// reachable via a LIVE transition for the first time (previously
+// resolveVaultSizeBoundSource always resolved to a nonzero bound, never 0).
 func TestVaultMaxSizeReleasesWhenBoundBecomesSoftOnly(t *testing.T) {
 	t.Parallel()
 	g, _ := newGuardFixture(400*gib, map[string]uint64{"volA": 200 * gib})

@@ -1,9 +1,9 @@
 package orchestrator
 
-// gastrolog-5ct2av: a route-disposition vault whose fan-out is deferred
-// sweep after sweep must raise ONE alarm that names the deadlock — the
-// incident's operator signal was three unrelated warnings from three
-// subsystems. The streak is a pure count of consecutive deferred sweeps;
+// A route-disposition vault whose fan-out is deferred sweep after sweep
+// must raise ONE alarm that names the deadlock — the incident's operator
+// signal was three unrelated warnings from three subsystems. The streak
+// is a pure count of consecutive deferred sweeps;
 // nothing persists across restart.
 
 import (
@@ -237,9 +237,9 @@ func TestRetentionSweepAllClearsAlarmOnRunnerGC(t *testing.T) {
 }
 
 // TestRetentionRouteDeferredStringFullyRenamed proves the alarm rename
-// (gastrolog-2l918: retention-route-deferred -> retention-deferred, done
-// because transfer disposition now shares the same deferral streak and
-// alarm as route) left no trace in the Go source tree. Walks every .go
+// (retention-route-deferred -> retention-deferred, done because transfer
+// disposition now shares the same deferral streak and alarm as route)
+// left no trace in the Go source tree. Walks every .go
 // file under backend/ except api/gen (generated protobuf, out of scope for
 // a hand-rename) and this test's own file (which must legitimately name
 // the old identifier to build the needle and describe what it's checking).

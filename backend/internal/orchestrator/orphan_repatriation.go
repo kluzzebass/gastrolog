@@ -12,9 +12,10 @@ import (
 
 // orphan_repatriation.go: operator-driven recovery for unknown
 // orphan chunks. Unknown orphans are sealed chunks present on
-// local disk but absent from the vault-ctl FSM manifest — see
-// gastrolog-3y8py's no-auto-delete-of-unknown-orphans invariant
-// and gastrolog-32bf2 for the full motivation.
+// local disk but absent from the vault-ctl FSM manifest. They are
+// never auto-deleted — SweepLocalOrphans only alerts on them, so
+// the recovery surface for an FSM glitch survives until an
+// operator acts.
 //
 // The repatriation flow:
 //   1. Local Chunks.List() reports a sealed chunk with RecordCount > 0.
@@ -53,8 +54,6 @@ var ErrOrphanNotEligible = errors.New("chunk not eligible for repatriation")
 // chunk's idx.log headers — no record replay required. State is
 // always Sealed (active-chunk state isn't reconstructable from
 // disk alone).
-//
-// See gastrolog-32bf2.
 func (o *Orchestrator) RepatriateOrphan(vaultID glid.GLID, chunkID chunk.ChunkID) error {
 	o.mu.RLock()
 	vault, exists := o.vaults[vaultID]

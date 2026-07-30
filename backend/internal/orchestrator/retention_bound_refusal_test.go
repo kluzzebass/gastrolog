@@ -1,8 +1,8 @@
 package orchestrator
 
-// gastrolog-5yfaqj: refusal generalizes from max-size to every retention
-// policy bound (age, chunk-count), gated by a per-policy refuse flag
-// (default on). The VIOLATION PREDICATE is the subtle part: normal
+// Refusal generalizes from max-size to every retention policy bound (age,
+// chunk-count), gated by a per-policy refuse flag (default on). The
+// VIOLATION PREDICATE is the subtle part: normal
 // operation transiently violates both dimensions between a chunk's seal
 // and the next sweep — refusing on that transient is pure flapping. A
 // violation only counts once retentionRunner.checkBoundViolations
@@ -310,8 +310,8 @@ func TestCheckBoundViolationsHardSoftPolicyMix(t *testing.T) {
 }
 
 // TestCheckBoundViolationsDeferralAlarmCoexistsWithRefusal pins the
-// interaction with the gastrolog-5ct2av deferral machinery: a
-// route-disposition vault whose fan-out keeps deferring raises BOTH the
+// interaction with the deferral machinery: a route-disposition vault
+// whose fan-out keeps deferring raises BOTH the
 // retention-deferred alarm (at its 3-consecutive-sweep threshold) AND the
 // age-bound-capped alarm (from sweep 1, since the post-sweep predicate has
 // no streak requirement) — coherently, one not clobbering the other.

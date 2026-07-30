@@ -15,12 +15,12 @@ import (
 	hraft "github.com/hashicorp/raft"
 )
 
-// SweepStagingOrphans (gastrolog-27czpq) reconciles the pipeline staging
-// areas on disk against the replicated FSM with positive evidence only.
-// These tests pin the safety contract: released/tombstoned files go,
-// everything else — live, awaiting-publish, unknown, pending-delete —
-// stays. The failure mode of a stale FSM must be a delayed cleanup,
-// never a deleted live file (the cardinal rule).
+// SweepStagingOrphans reconciles the pipeline staging areas on disk
+// against the replicated FSM with positive evidence only. These tests
+// pin the safety contract: released/tombstoned files go, everything
+// else — live, awaiting-publish, unknown, pending-delete — stays. The
+// failure mode of a stale FSM must be a delayed cleanup, never a
+// deleted live file (the cardinal rule).
 
 // stagingSweepFixture builds an on-disk vault staging root, an
 // orchestrator that resolves it, and a wired reconciler.
@@ -208,10 +208,10 @@ func TestStagingSweepNoopBeforeFSMReady(t *testing.T) {
 	}
 }
 
-// ReconcileTick is the consolidated production entry point
-// (gastrolog-4pq56v): one gathered view, every category run against it.
-// Reuse the staging fixture to prove the tick reaches the categories
-// with the same semantics as the isolated Sweep* wrappers.
+// ReconcileTick is the consolidated production entry point: one gathered
+// view, every category run against it. Reuse the staging fixture to prove
+// the tick reaches the categories with the same semantics as the isolated
+// Sweep* wrappers.
 func TestReconcileTickRunsCategoriesAgainstOneView(t *testing.T) {
 	t.Parallel()
 	f := newStagingSweepFixture(t)
@@ -249,14 +249,14 @@ func TestReconcileTickRunsCategoriesAgainstOneView(t *testing.T) {
 	}
 }
 
-// TestReconcileFromSnapshotRunsStagingOrphanCleanup pins the
-// staging-orphan category's event source (gastrolog-3fu9t): snapshot
-// install. Like local orphans, staging orphans are stranded when a
-// release/finalize applied while this node was offline and the rejoin
-// came via snapshot (not command replay). ReconcileFromSnapshot — the
-// after-restore hook — must run the staging reconcile on that event, not
-// leave it for the periodic backstop tick. Fires ONLY the restore event;
-// never calls SweepStagingOrphans / ReconcileTick.
+// TestReconcileFromSnapshotRunsStagingOrphanCleanup pins the staging-orphan
+// category's event source: snapshot install. Like local orphans, staging
+// orphans are stranded when a release/finalize applied while this node was
+// offline and the rejoin came via snapshot (not command replay).
+// ReconcileFromSnapshot — the after-restore hook — must run the staging
+// reconcile on that event, not leave it for the periodic backstop tick.
+// Fires ONLY the restore event; never calls SweepStagingOrphans /
+// ReconcileTick.
 func TestReconcileFromSnapshotRunsStagingOrphanCleanup(t *testing.T) {
 	t.Parallel()
 	f := newStagingSweepFixture(t)

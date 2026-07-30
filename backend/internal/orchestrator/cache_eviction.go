@@ -3,8 +3,7 @@ package orchestrator
 // CacheEvictor is implemented by chunk managers that hold a warm cache of
 // cloud-backed chunk content (chunk/file.Manager). The orchestrator's
 // scheduled sweep calls EvictCache to apply whatever LRU + TTL policies
-// the manager was configured with at construction time. See
-// gastrolog-2idw8.
+// the manager was configured with at construction time.
 type CacheEvictor interface {
 	EvictCache() (evicted int, freedBytes int64)
 }
@@ -59,7 +58,7 @@ func (o *Orchestrator) cacheEvictionSweepAll() {
 
 // startCacheEvictionSweep registers the periodic warm-cache eviction
 // sweep. Each tick walks every leader instance and asks its chunk manager to
-// apply its configured eviction policies. See gastrolog-2idw8.
+// apply its configured eviction policies.
 func (o *Orchestrator) startCacheEvictionSweep() error {
 	if err := o.scheduler.AddJob(cacheEvictionJobName, cacheEvictionSchedule, o.cacheEvictionSweepAll); err != nil {
 		return err

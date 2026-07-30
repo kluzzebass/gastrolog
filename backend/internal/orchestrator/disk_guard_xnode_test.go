@@ -1,11 +1,11 @@
 package orchestrator
 
-// Cross-node admission coverage (gastrolog-5jobl5 / gastrolog-20ywka): a vault
-// protected or size-capped on ANOTHER node must be refused here, learned via
-// the NodeStats broadcast. This wires the REAL cluster.PeerState to the gate
-// (as app startup does with SetRemoteVault*), rather than a fake lookup — so
-// it proves the actual peer-broadcast → gate path, including TTL expiry. The
-// server multi-node harness mocks the stat providers and cannot exercise this.
+// Cross-node admission coverage: a vault protected or size-capped on ANOTHER
+// node must be refused here, learned via the NodeStats broadcast. This wires
+// the REAL cluster.PeerState to the gate (as app startup does with
+// SetRemoteVault*), rather than a fake lookup — so it proves the actual
+// peer-broadcast → gate path, including TTL expiry. The server multi-node
+// harness mocks the stat providers and cannot exercise this.
 
 import (
 	"errors"

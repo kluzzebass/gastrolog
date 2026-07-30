@@ -190,8 +190,8 @@ func TestSchedulePipelineCloudUpload_SkipsPlacementFollower(t *testing.T) {
 }
 
 // TestSchedulePipelineCloudUpload_LeaderUploadsWithoutEagerRegistration pins
-// the disease fix behind retiring the eager registration path (gastrolog-34kmv):
-// a sealed pipeline GLCB present on disk with an FSM sealed entry but NO eager
+// the disease fix behind retiring the eager registration path: a sealed
+// pipeline GLCB present on disk with an FSM sealed entry but NO eager
 // chunk-manager registration still uploads. The only registration path is the
 // lazy on-miss resolver, which Manager.uploadToCloud now consults via lookupMeta
 // — so the upload self-resolves the chunk instead of failing ErrChunkNotFound.

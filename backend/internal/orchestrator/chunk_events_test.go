@@ -126,9 +126,9 @@ func TestChunkBusEmitsSealedAndDeleted(t *testing.T) {
 
 // TestChunkBusEmitsProgressWithRecordCount covers the PROGRESS shape:
 // no Meta, just a record count. Frontend uses this to update the active
-// chunk's count in place without replacing the entire entry. The
-// gastrolog-1bgvm dedup fix ensures the count is monotonic across nodes,
-// so the client can just write the carried count directly.
+// chunk's count in place without replacing the entire entry. Dedup across
+// per-node chunk views keeps the count monotonic, so the client can just
+// write the carried count directly.
 func TestChunkBusEmitsProgressWithRecordCount(t *testing.T) {
 	t.Parallel()
 	orch := mustNewTestOrch(t, orchestrator.Config{})
@@ -185,9 +185,7 @@ func TestChunkBusMonotonicVersion(t *testing.T) {
 	}
 }
 
-// Note: the emit-on-advance / quiet-on-idle / reset-on-rotation contract of the
-// progress emitter was previously unit-tested here against the per-instance
-// chunk manager's Active() count. Rubicon E2 (gastrolog-358ak) retargeted the
-// emitter to the vault-ctl FSM open-chunk manifest (leader-only), so that
-// contract is now covered by the cluster-level PROGRESS integration test rather
-// than a bare in-process emitter call.
+// Note: the progress emitter reads the vault-ctl FSM open-chunk manifest and
+// emits only on the leader, so its emit-on-advance / quiet-on-idle /
+// reset-on-rotation contract is covered by the cluster-level PROGRESS
+// integration test rather than a bare in-process emitter call.

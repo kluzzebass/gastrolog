@@ -6,7 +6,7 @@ package orchestrator
 // JobEventFailed, and the success path logged "job finished" — so from the log
 // alone, a job that died and a job that never ran were the same thing: silence.
 // Post-seal rides a one-time job, which is why a chunk stranded in Sealing left
-// no evidence anywhere and why that member of gastrolog-231ik stayed
+// no evidence anywhere and why that reliability-orch test flake stayed
 // unfalsifiable across runs.
 
 import (

@@ -10,7 +10,7 @@ import (
 )
 
 // TestAppendUnlistedManifestSealed pins retention's candidate sourcing under
-// lazy resolution (gastrolog-2kmgj6): sealed manifest entries the chunk
+// lazy resolution: sealed manifest entries the chunk
 // manager has not resolved yet must appear as candidates; listed, unsealed,
 // and cloud-backed entries must not duplicate or leak in. Without this, a
 // restart empties cm.List() and retention starves exactly like the
@@ -56,8 +56,8 @@ func TestAppendUnlistedManifestSealed(t *testing.T) {
 	if !synthetic.Sealed || synthetic.SealedAt.IsZero() {
 		t.Fatalf("synthetic candidate lost fields: %+v", synthetic)
 	}
-	// ManifestEntry carries no per-node local-disk fact (gastrolog-33ul6h):
-	// the synthetic candidate's DiskBytes must stay 0, never inherit
+	// ManifestEntry carries no per-node local-disk fact: the synthetic
+	// candidate's DiskBytes must stay 0, never inherit
 	// anything FSM-sourced. chunk.DiskClaim's Bytes+indexes fallback
 	// covers sizing for these candidates, same as it always has.
 	if synthetic.DiskBytes != 0 {
@@ -73,11 +73,11 @@ func TestAppendUnlistedManifestSealed(t *testing.T) {
 	}
 }
 
-// TestAppendUnlistedManifestSealedExcludesInFlightTransferPhantom pins
-// gastrolog-2l918 review finding 3c: a manifest entry introduced by
-// retention transfer disposition (TransferSourceVaultID set) with ZERO
-// confirmed holders must NOT become a destination retention candidate —
-// the bytes haven't landed on any home yet, so a short destination TTL
+// TestAppendUnlistedManifestSealedExcludesInFlightTransferPhantom pins that
+// a manifest entry introduced by retention transfer disposition
+// (TransferSourceVaultID set) with ZERO confirmed holders must NOT become a
+// destination retention candidate — the bytes haven't landed on any home
+// yet, so a short destination TTL
 // firing on it would tombstone the transfer's own placeholder out from
 // under the still-in-flight hand-off. An otherwise-identical entry that
 // HAS earned at least one holder receipt is a normal candidate again.

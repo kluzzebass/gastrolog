@@ -16,14 +16,14 @@ const (
 
 	// pipelineConfigReconcileSchedule runs every 15 seconds. 6-field cron
 	// (with-seconds). This is the ONE leg of the retired placement sweep that
-	// stays periodic (gastrolog-29xpy): reloadPipelineFromConfig aligns each
-	// vault-ctl group's desired Raft leader with the placement leader and
-	// re-registers the pipeline vault as the vault-ctl handle/leadership
-	// converges. Those are async Raft outcomes (elections, group readiness)
-	// with no config event to trigger from, so they need a periodic pass —
-	// exactly like the sibling vault-ctl-membership-reconcile (30s). Role and
-	// FollowerTargets refreshes do have config events and are event-driven
-	// (ReconcileVaultPlacement / ReconcilePlacements).
+	// stays periodic: reloadPipelineFromConfig aligns each vault-ctl group's
+	// desired Raft leader with the placement leader and re-registers the
+	// pipeline vault as the vault-ctl handle/leadership converges. Those are
+	// async Raft outcomes (elections, group readiness) with no config event to
+	// trigger from, so they need a periodic pass — exactly like the sibling
+	// vault-ctl-membership-reconcile (30s). Role and FollowerTargets refreshes
+	// do have config events and are event-driven (ReconcileVaultPlacement /
+	// ReconcilePlacements).
 	pipelineConfigReconcileSchedule = "*/15 * * * * *"
 )
 
@@ -37,7 +37,7 @@ const (
 // by testing AddJob's ErrJobExists rather than by a HasJob pre-check: the
 // pre-check was a check-then-act race (two applies could both see "absent",
 // and only the loser's AddJob error would say so) and it was misleading, since
-// AddJob already answers the same question atomically. See gastrolog-69sjlj.
+// AddJob already answers the same question atomically.
 func (o *Orchestrator) startPipelineConfigReconcile() error {
 	if err := o.scheduler.AddJob(pipelineConfigReconcileJobName, sweepCron(pipelineConfigReconcileSchedule), o.pipelineConfigReconcile); err != nil {
 		if errors.Is(err, ErrJobExists) {
@@ -67,7 +67,7 @@ func (o *Orchestrator) pipelineConfigReconcile() {
 // ReconcilePlacements aligns every local vault instance's role and (for
 // leaders) sealed-chunk replication targets with the current placement
 // config, then republishes the pipeline routing table. This is the
-// event-driven successor to the retired 15s placement sweep (gastrolog-29xpy):
+// event-driven successor to the retired 15s placement sweep:
 // the FSM config dispatcher calls it when a change lands that can move roles
 // or targets across many vaults at once but is not scoped to a single vault —
 // a node-storage config change (which remaps storage→node for FollowerTargets)
@@ -184,15 +184,14 @@ func (o *Orchestrator) ReconcileVaultPlacement(ctx context.Context, vaultID glid
 // category for every instance whose placement membership just moved — a role
 // flip, a leader-pointer change, or a FollowerTargets reassignment.
 //
-// This closes the last periodic-only reconcile category (gastrolog-235dm7).
-// gastrolog-3fu9t wired ReconcileMembershipCatchup to onVaultCtlLeadGained,
-// which covers every membership edge that comes with a leadership change; it
-// does NOT cover a rebalance under a STABLE leader — placements move a follower
-// from node A to node B, the leader keeps both its placement role and its
-// vault-ctl Raft leadership, and no lead-gained edge fires. The leader's
-// pendingDeletes still name A in ExpectedFrom, so those deletes stay stuck
-// until the periodic backstop tick notices. The reassignment IS the event; wake
-// on it.
+// This closes the last periodic-only reconcile category. ReconcileMembershipCatchup
+// runs on onVaultCtlLeadGained, which covers every membership edge that comes
+// with a leadership change; it does NOT cover a rebalance under a STABLE leader
+// — placements move a follower from node A to node B, the leader keeps both its
+// placement role and its vault-ctl Raft leadership, and no lead-gained edge
+// fires. The leader's pendingDeletes still name A in ExpectedFrom, so those
+// deletes stay stuck until the periodic backstop tick notices. The reassignment
+// IS the event; wake on it.
 //
 // Deliberately ONLY the ack category, not the whole ReconcileMembershipCatchup
 // set. A placement move directly invalidates ExpectedFrom — that set is

@@ -1,6 +1,6 @@
 package orchestrator
 
-// Test-timing profile for this package's test binary (gastrolog-4yzpcj).
+// Test-timing profile for this package's test binary.
 //
 // The orchestrator package's non-short runtime was WAIT bound, not compute
 // bound: a full pass burned ~520s wall on ~51s of CPU (~10% of one core on a

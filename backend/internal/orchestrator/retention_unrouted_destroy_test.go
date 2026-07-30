@@ -1,11 +1,10 @@
 package orchestrator
 
-// Coverage for gastrolog-65riw5: fireRetentionEvent must never report
-// "completed" when zero records reached a route. The caller destroys the
-// chunk on true, so a false positive ejects every record in it unrouted —
-// loss of the operator's route disposition, which applyRetentionDisposition-
-// ToChunk explicitly promises never to trade for anything. Duplicates at the
-// route target are acceptable; loss is not.
+// fireRetentionEvent must never report "completed" when zero records reached
+// a route. The caller destroys the chunk on true, so a false positive ejects
+// every record in it unrouted — loss of the operator's route disposition,
+// which applyRetentionDispositionToChunk explicitly promises never to trade
+// for anything. Duplicates at the route target are acceptable; loss is not.
 
 import (
 	"errors"

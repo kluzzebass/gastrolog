@@ -1,7 +1,7 @@
 package orchestrator_test
 
-// Multi-node coverage for gastrolog-375el: the vault-ctl no-handle startup
-// window. A route can land on a node before that node's vault-ctl group for
+// Multi-node coverage for the vault-ctl no-handle startup window.
+// A route can land on a node before that node's vault-ctl group for
 // the destination vault exists (dispatcher fan-out has no cross-concern
 // ordering guarantee), leaving the node an Origin with the fail-closed
 // noHandlePublisher. Records ingested during that window are durable local

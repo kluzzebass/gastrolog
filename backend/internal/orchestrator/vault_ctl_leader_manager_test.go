@@ -140,10 +140,10 @@ func TestVaultCtlLeaderManager_ReconcileAddsMissingMember(t *testing.T) {
 	t.Fatal("synthetic peer was not added to Raft configuration within 5s")
 }
 
-// gastrolog-4zy8a: when a known voter's address changes (e.g. a K8s pod gets
-// a new IP after a rolling restart), the reconcile pass must rewrite the
-// stored address via AddVoter. Without this, the vault-ctl Raft group keeps
-// the old IP and the rebooted pod is unreachable forever.
+// When a known voter's address changes (e.g. a K8s pod gets a new IP after a
+// rolling restart), the reconcile pass must rewrite the stored address via
+// AddVoter. Without this, the vault-ctl Raft group keeps the old IP and the
+// rebooted pod is unreachable forever.
 //
 // Uses a 2-real-node cluster (so the 2 reachable members form a 2-of-3
 // majority for config changes) plus a synthetic 3rd voter "peer-rolled"
@@ -407,13 +407,13 @@ func TestVaultMembershipMap_RoundTrip(t *testing.T) {
 	}
 }
 
-// TestVaultCtlLeaderManager_SetDesiredMembersWakesEpoch is the
-// gastrolog-5n6xz regression for the desiredChanged signal path. Before
-// the fix the leader-epoch reconcile loop only woke on the 30 s
-// safety-net ticker, so a SetDesiredMembers call that arrived mid-burst
-// had to wait up to half a minute before its diff was applied. After
-// the fix, SetDesiredMembers fires desiredChanged and the next reconcile
-// pass runs within a select-iteration of the goroutine scheduler.
+// TestVaultCtlLeaderManager_SetDesiredMembersWakesEpoch is the regression
+// for the desiredChanged signal path. Before the fix the leader-epoch
+// reconcile loop only woke on the 30 s safety-net ticker, so a
+// SetDesiredMembers call that arrived mid-burst had to wait up to half a
+// minute before its diff was applied. After the fix, SetDesiredMembers
+// fires desiredChanged and the next reconcile pass runs within a
+// select-iteration of the goroutine scheduler.
 //
 // Uses a 2-real-node cluster so the AddVoter for a third (synthetic)
 // peer commits via the two live nodes — exercising the full reconcile
@@ -464,13 +464,13 @@ func TestVaultCtlLeaderManager_SetDesiredMembersWakesEpoch(t *testing.T) {
 	t.Fatal("synthetic peer did not converge within 2 s — wake signal not driving reconcile")
 }
 
-// TestVaultCtlLeaderManager_BurstYieldsAndResumes is the gastrolog-5n6xz
-// regression for the cap-per-pass + signal-rewake path. We submit a
-// desired set with more peers than vaultMembershipMaxPerPass and verify
-// the burst converges fully via multiple short passes driven by the
-// re-fired desiredChanged signal. A regression to the pre-fix "serialize
-// the whole burst" or "wait 30 s for next tick" behavior would fail this
-// test on either correctness (incomplete config) or timing (deadline).
+// TestVaultCtlLeaderManager_BurstYieldsAndResumes is the regression for the
+// cap-per-pass + signal-rewake path. We submit a desired set with more peers
+// than vaultMembershipMaxPerPass and verify the burst converges fully via
+// multiple short passes driven by the re-fired desiredChanged signal. A
+// regression to the pre-fix "serialize the whole burst" or "wait 30 s for
+// next tick" behavior would fail this test on either correctness (incomplete
+// config) or timing (deadline).
 //
 // vaultMembershipCommitTimeout is shortened so the bail path is fast
 // when individual commits stall on the unreachable synthetic peers
@@ -529,10 +529,10 @@ func TestVaultCtlLeaderManager_BurstYieldsAndResumes(t *testing.T) {
 	t.Fatal("first synthetic peer did not converge within 3 s after burst")
 }
 
-// transferIfNeeded damping (gastrolog-5kcq5q): a misaligned leader must be
-// observed on two consecutive passes before a transfer is commanded, so a
-// single organic election settles in one term instead of cascading through
-// immediate re-alignment transfers.
+// transferIfNeeded damping: a misaligned leader must be observed on two
+// consecutive passes before a transfer is commanded, so a single organic
+// election settles in one term instead of cascading through immediate
+// re-alignment transfers.
 func TestTransferDampingConfirmsOnSecondIdenticalSighting(t *testing.T) {
 	t.Parallel()
 	m := &vaultCtlLeaderManager{}
@@ -617,8 +617,8 @@ func configHasServer(g *raftgroup.Group, id hraft.ServerID) (present, ok bool) {
 }
 
 // TestVaultCtlLeaderManager_ConcurrentDesiredChangeDuringReconcileNotLost is
-// the gastrolog-3oram regression for the desiredChanged lost-wake race that
-// the 30 s membership-reconcile safety tick used to paper over.
+// the regression for the desiredChanged lost-wake race that the 30 s
+// membership-reconcile safety tick used to paper over.
 //
 // desiredChanged is a close-and-recreate signal. The old runLeaderEpoch loop
 // captured the wake channel at the top of each iteration and reconciled

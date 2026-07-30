@@ -194,8 +194,7 @@ func TestLocalVaultsReplicationReady(t *testing.T) {
 	}
 	// liveReplicationReady is used here because the cached
 	// LocalVaultsReplicationReady is only refreshed by the goroutine
-	// started in Start(), which this test does not call. See
-	// gastrolog-5n6xz for the rationale behind splitting the methods.
+	// started in Start(), which this test does not call.
 	if !o.liveReplicationReady() {
 		t.Fatal("empty orchestrator should be replication-ready")
 	}
@@ -224,8 +223,8 @@ func TestLocalVaultsReplicationReady(t *testing.T) {
 	}
 }
 
-// TestReadyzPathNotBlockedByWriter is the gastrolog-5n6xz regression for
-// the full /readyz handler responsiveness fix. Every method the handler
+// TestReadyzPathNotBlockedByWriter is the regression for the full /readyz
+// handler responsiveness fix. Every method the handler
 // invokes — IsRunning, draining.Load, LocalVaultsReplicationReady — must
 // return immediately even while another goroutine is holding o.mu.Lock().
 // kubelet's probe times out otherwise, which is the original failure mode

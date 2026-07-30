@@ -10,12 +10,12 @@ import (
 )
 
 // This file provides test-only seeding primitives that replaced the production
-// active-chunk append/seal path removed in Rubicon E2 (gastrolog-358ak). The
-// live write path is now the pipeline (Supervisor.Submit / SubmitToVault); the
-// per-instance chunk.ChunkManager active-chunk append is no longer driven by
-// production code. Tests still need a cheap way to materialize records and
-// sealed chunks directly in a vault's chunk store without standing up the full
-// pipeline, so these helpers reproduce the *local* portion of the old
+// active-chunk append/seal path removed in Rubicon E2. The live write path is
+// the pipeline (Supervisor.Submit / SubmitToVault); the per-instance
+// chunk.ChunkManager active-chunk append is not driven by production code.
+// Tests still need a cheap way to materialize records and sealed chunks
+// directly in a vault's chunk store without standing up the full pipeline, so
+// these helpers reproduce the *local* portion of the old
 // Orchestrator.AppendToVault / SealActiveChunk (no cross-node follower
 // forwarding, which E2 deleted).
 

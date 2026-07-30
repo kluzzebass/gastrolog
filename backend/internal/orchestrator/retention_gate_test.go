@@ -1,9 +1,9 @@
 package orchestrator
 
-// gastrolog-5ct2av: per-destination admission rejections must reach the
-// retention fan-out as terminal aborts. Before the ack was wired, the
-// routing gate's whole-record nack went to a nil ack channel: the record
-// vanished, Submit returned nil, and the chunk was destroyed unrouted.
+// Per-destination admission rejections must reach the retention fan-out as
+// terminal aborts. Before the ack was wired, the routing gate's whole-record
+// nack went to a nil ack channel: the record vanished, Submit returned nil,
+// and the chunk was destroyed unrouted.
 
 import (
 	"errors"
@@ -136,7 +136,7 @@ func errorsIsVaultMaxSize(err error) bool { return errors.Is(err, ErrVaultMaxSiz
 // TestFireRetentionEventRunsUnderAdmissionGate pins the drain-gate
 // reclassification: with the node's admission gate engaged (free space in
 // the warn band) but the drain gate open, retention fan-out must complete —
-// this is exactly the incident's frozen band (gastrolog-5ct2av).
+// this is exactly the incident's frozen band.
 func TestFireRetentionEventRunsUnderAdmissionGate(t *testing.T) {
 	t.Parallel()
 
@@ -194,14 +194,14 @@ func TestFireRetentionEventDefersBelowFloor(t *testing.T) {
 }
 
 // TestFireRetentionEventAbortsOnAgeBoundCappedDestination extends the
-// TestFireRetentionEventAbortsOnCappedDestination family (gastrolog-5yfaqj
-// review fix C2): a destination vault refused on the NEW age-bound cause
-// must abort the fan-out the same terminal way size/backlog capping do —
-// before this fix, ErrVaultAgeBound/ErrVaultChunkCountBound fell into the
-// default per-record-drop branch instead of the terminal-abort list, so
-// EVERY record in the source chunk was dropped (not just the ones that
-// happened to submit first) and the chunk was still destroyed by the
-// caller afterward — a route-disposition vault silently converted into a
+// TestFireRetentionEventAbortsOnCappedDestination family: a destination
+// vault refused on the NEW age-bound cause must abort the fan-out the same
+// terminal way size/backlog capping do — before this fix,
+// ErrVaultAgeBound/ErrVaultChunkCountBound fell into the default
+// per-record-drop branch instead of the terminal-abort list, so EVERY
+// record in the source chunk was dropped (not just the ones that happened
+// to submit first) and the chunk was still destroyed by the caller
+// afterward — a route-disposition vault silently converted into a
 // delete-and-lose vault the moment its destination started refusing on an
 // age or count bound.
 func TestFireRetentionEventAbortsOnAgeBoundCappedDestination(t *testing.T) {

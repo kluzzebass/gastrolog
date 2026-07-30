@@ -1,9 +1,9 @@
 package orchestrator
 
-// Coverage for gastrolog-aop1yc: memory-budget enforcement must retire
-// chunks through the sweep's cached retention runner, not a bare one minted
-// per chunk. The inline runner carried no disposition (so a delete-vault got
-// fanned out anyway) and a fresh unreadable map on every iteration (so the
+// Memory-budget enforcement must retire chunks through the sweep's cached
+// retention runner, not a bare one minted per chunk. The inline runner
+// carried no disposition (so a delete-vault got fanned out anyway) and a
+// fresh unreadable map on every iteration (so the
 // retry backoff never accumulated and the operator's "Retry unreadable"
 // action could not see the chunks at all).
 
@@ -65,8 +65,8 @@ func TestDrainExcessChunksHonorsDeleteDisposition(t *testing.T) {
 
 // A vault configured "route" must not have its chunks destroyed when the
 // fan-out could not deliver a single record — here because no vault instance
-// is registered, so the records cannot even be read. Before gastrolog-aop1yc
-// this path ignored the verdict entirely and destroyed regardless.
+// is registered, so the records cannot even be read. This path used to ignore
+// the verdict entirely and destroy regardless.
 func TestDrainExcessChunksRetainsWhenRouteFanOutCannotRun(t *testing.T) {
 	t.Parallel()
 	o, r, cm, _ := drainFixture(t, system.RetentionDispositionRoute)

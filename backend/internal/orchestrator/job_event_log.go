@@ -8,8 +8,7 @@ import (
 // and emits a structured slog entry for every transition. Lifecycle
 // events flow through the slog handler chain — including the self
 // ingester's CaptureHandler — so operators can search them like any
-// other log line. See gastrolog-5euo for the self-ingester capture
-// wiring and gastrolog-5mcqm for the broker.
+// other log line.
 //
 // One-to-one mapping: the broker already coalesces the high-frequency
 // progress events upstream, so this consumer just emits one log line

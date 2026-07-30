@@ -30,7 +30,7 @@ import (
 //   - OrchRel_FreshCluster_VaultReady           (end-to-end readiness bug regression)
 //   - OrchRel_SealedChunk_ReplicatesCrossNode   (append + seal → manifest replicates)
 //   - OrchRel_Restart_SealedChunkSurvives       (WAL replay at orchestrator layer)
-//   - OrchRel_PausedPeer_ClusterStaysHealthy    (end-to-end gastrolog-5oofa regression)
+//   - OrchRel_PausedPeer_ClusterStaysHealthy    (end-to-end paused-peer stall regression)
 //   - OrchRel_FollowerWipe_CatchupRebuilds      (disk replacement / fresh node replace)
 //   - OrchRel_TwoVaults_Isolated                 (paused-peer failure localized to one vault)
 //   - OrchRel_ConcurrentAppendAndPause           (high-load tolerance under peer pause)
@@ -42,11 +42,11 @@ import (
 
 // Boots a 3-node cluster with real vault-ctl Raft; every node's
 // orchestrator reports LocalVaultsReplicationReady=true within the
-// harness's deadline. This is the real end-to-end regression test for
-// gastrolog-5j6eu: on fresh init with no user commands, readiness must
-// flip true because hraft's post-bootstrap LogConfiguration + post-
-// election LogNoop advance r.AppliedIndex(), and the isFSMReady closure
-// we wire in buildVaultRaftCallbacks now keys on that.
+// harness's deadline. This is the real end-to-end regression test: on
+// fresh init with no user commands, readiness must flip true because
+// hraft's post-bootstrap LogConfiguration + post-election LogNoop advance
+// r.AppliedIndex(), and the isFSMReady closure we wire in
+// buildVaultRaftCallbacks now keys on that.
 //
 // Goes through the full orchestrator.LocalVaultsReplicationReady →
 // Vault.ReadinessErr → instance.IsFSMReady path used by search/ingest RPCs
@@ -140,10 +140,10 @@ func TestOrchRel_Restart_SealedChunkSurvives(t *testing.T) {
 	h.assertAllNodesSee(pre)
 }
 
-// End-to-end regression for gastrolog-5oofa: SIGSTOPing a peer must not
-// stall the rest of the cluster. Pause the third node's gRPC handlers
-// (TCP stays up; app-level frozen), then exercise the ingest + seal
-// path on node1. With the 5oofa fix, append/seal complete normally:
+// End-to-end regression: SIGSTOPing a peer must not stall the rest of
+// the cluster. Pause the third node's gRPC handlers (TCP stays up;
+// app-level frozen), then exercise the ingest + seal path on node1.
+// With the fix, append/seal complete normally:
 // fireAndForgetRemote's per-target goroutine against the paused node
 // times out via the ChunkReplicator.send ctx deadline, the circuit
 // breaker trips, and ingest proceeds. Without the fix, the ingest path
@@ -202,7 +202,7 @@ func TestOrchRel_PausedPeer_ClusterStaysHealthy(t *testing.T) {
 			t.Fatalf("append+seal failed under paused peer: %v", err)
 		}
 	case <-time.After(orchHarnessHardBackstop):
-		t.Fatal("append+seal deadlocked with paused peer (gastrolog-5oofa regressed)")
+		t.Fatal("append+seal deadlocked with paused peer (paused-peer stall regressed)")
 	}
 
 	// The sealed chunk must be visible on the two healthy nodes. The
@@ -448,8 +448,8 @@ func TestOrchRel_PausedPeer_Restart_Recovers(t *testing.T) {
 	h.assertAllNodesSee(baseline)
 }
 
-// TestOrchRel_NodeRestartCatchupReplication is the regression for
-// gastrolog-4g9i6: a node going briefly offline and coming back must
+// TestOrchRel_NodeRestartCatchupReplication is the multi-node redeploy
+// regression: a node going briefly offline and coming back must
 // rejoin its vault-ctl Raft group under the same identity and catch up
 // on missed chunk seals via Raft log replication. Closes the bug class
 // that motivated the FSM-authority migration epic — operators perform
@@ -841,8 +841,9 @@ func TestOrchRel_MultiVault_IsolatedFromPausedPeer(t *testing.T) {
 
 	// Vault B bound: the structural isolation property is that vault B's
 	// append+seal path never blocks on the paused peer — a regression
-	// (gastrolog-5oofa class: orchestrator-wide lock held while waiting on
-	// node2) blocks INDEFINITELY, so the shared stall window catches it.
+	// (the paused-peer stall class: orchestrator-wide lock held while
+	// waiting on node2) blocks INDEFINITELY, so the shared stall window
+	// catches it.
 	// A fine-grained "milliseconds, not seconds" latency assertion is not
 	// contention-robust: under multi-suite CPU load the same phase
 	// (including vault-ctl leader waits) legitimately takes >10s with no

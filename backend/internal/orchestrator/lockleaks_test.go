@@ -4,9 +4,9 @@ import (
 	"testing"
 )
 
-// TestLockTrackingDefaultOnAndEnvOff: o.mu tracking is on by default
-// (gastrolog-1ug3rq — the next orphaned hold must name its acquisition
-// site) and GLOG_LOCK_TRACKING=off disables it.
+// TestLockTrackingDefaultOnAndEnvOff: o.mu tracking is on by default (so the
+// next orphaned hold names its acquisition site) and GLOG_LOCK_TRACKING=off
+// disables it.
 func TestLockTrackingDefaultOnAndEnvOff(t *testing.T) {
 	t.Setenv("GLOG_LOCK_TRACKING", "")
 	o, err := New(Config{})

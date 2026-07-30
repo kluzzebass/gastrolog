@@ -1,7 +1,7 @@
 package orchestrator_test
 
-// Multi-node coverage for gastrolog-v6nf71: a chunk stranded mid-seal must
-// reach Sealed on EVERY node without restarting anything.
+// Multi-node coverage for steady-state seal resumption: a chunk stranded
+// mid-seal must reach Sealed on EVERY node without restarting anything.
 //
 // The single-node tests (seal_resume_steady_state_test.go) pin which entries
 // the category picks up and which it leaves alone. This pins the part that only
@@ -76,10 +76,10 @@ func TestOrchRel_StrandedSeal_ResumesWithoutRestart(t *testing.T) {
 	//
 	// An earlier version waited for every node to be observed at Sealing
 	// simultaneously. Once vault-ctl apply forwarding was wired for this
-	// harness (gastrolog-231ik) the resume began completing in ~100ms, so that
-	// window frequently never existed: the trajectory went
-	// node-1=sealed while node-2/3 were still catching up. Asserting on a state
-	// the fix deliberately makes brief is a test that gets less reliable as the
+	// harness the resume began completing in ~100ms, so that window
+	// frequently never existed: the trajectory went node-1=sealed while
+	// node-2/3 were still catching up. Asserting on a state the fix
+	// deliberately makes brief is a test that gets less reliable as the
 	// system gets better.
 	if meta, err := inst.Chunks.Meta(strandedID); err != nil || !meta.Sealed {
 		t.Fatalf("precondition: chunk is not sealed on the leader's disk (err=%v); "+
@@ -126,7 +126,9 @@ func TestOrchRel_StrandedSeal_ResumesWithoutRestart(t *testing.T) {
 // A reconcile pass over a HEALTHY cluster must not disturb anything. The tick
 // now runs on every cadence for every vault, so a category that re-drove seals
 // it should not touch would rebuild GLCBs and re-announce across the cluster
-// forever — the duplicate-work shape gastrolog-3hwngy postmortemed.
+// forever. That is not a hypothetical: unclaimed duplicate upload work has
+// shipped here before, as duplicate S3 PUTs and duplicate AnnounceUpload
+// commands.
 func TestOrchRel_ReconcileTickLeavesCompletedSealsAlone(t *testing.T) {
 	if testing.Short() {
 		t.Skip("multi-node reliability test")

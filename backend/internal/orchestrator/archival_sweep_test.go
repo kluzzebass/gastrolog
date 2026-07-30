@@ -222,7 +222,7 @@ func TestArchivalSweepMultiStepTransition(t *testing.T) {
 	// test was missing: it asserted only that the chunk reached the FIRST class,
 	// which the bug never prevented. ArchiveChunk short-circuited on a bare
 	// "archived" bool, so a chunk already in ANY class never moved to a colder
-	// one and silently stopped migrating to cheaper storage (gastrolog-35ygqv).
+	// one and silently stopped migrating to cheaper storage.
 	orch.now = func() time.Time { return time.Now().Add(31 * 24 * time.Hour) }
 	orch.archivalSweepAll()
 
@@ -237,8 +237,8 @@ func TestArchivalSweepMultiStepTransition(t *testing.T) {
 
 // blobStorageClass reads the class the chunk's blob is ACTUALLY in, from the
 // cloud store itself, rather than from any of the places the system caches it.
-// That is the point of gastrolog-35ygqv: the bookkeeping was the unreliable
-// part, so the assertion should not go through it.
+// The bookkeeping was the unreliable part, so the assertion should not go
+// through it.
 func blobStorageClass(t *testing.T, cloudStore *blobstore.Memory, id chunk.ChunkID) string {
 	t.Helper()
 	var class string
@@ -314,7 +314,7 @@ func TestTriggerArchivalSweepBelowThresholdNoOp(t *testing.T) {
 // the rest of the stampede runs. That is what makes the assertion about the
 // claim-or-skip logic and nothing else: with a time-based join the winner
 // could legitimately finish and free the name mid-test, and the test would be
-// measuring scheduler cadence instead of coalescing. See gastrolog-69sjlj.
+// measuring scheduler cadence instead of coalescing.
 type gatedSystemLoader struct {
 	inner       SystemLoader
 	entered     chan struct{}
@@ -534,12 +534,6 @@ func TestReconcileSweepClearsSuspectWhenBlobReturns(t *testing.T) {
 		t.Error("suspect should be cleared after blob becomes readable")
 	}
 }
-
-// Phase 4 (gastrolog-42f9z) deleted TestChunkSuspectSkippedInTransition:
-// the transition action is gone, so the "transition should skip suspect
-// chunk" test no longer exists. The reconcile-sweep tests above still
-// pin the suspect-marking and grace-period behavior, which is the part
-// of the suspect protocol that survived Phase 4.
 
 // --- full lifecycle test ---
 
@@ -1332,7 +1326,7 @@ func TestCloudClusterReconcileSweepDetectsMissingBlobs(t *testing.T) {
 // chunks our own retention just deleted. Without this, every retention
 // sweep on a cloud instance produced a paired WARN per evicted chunk
 // (cache/download fallback + reconcile/mark-suspect) and corresponding UI
-// alerts — dozens per second. See gastrolog-2c96i.
+// alerts — dozens per second.
 func TestCloudClusterReconcileSkipsTombstoned(t *testing.T) {
 	t.Parallel()
 	h := setupCloudCluster(t, nil)
@@ -1392,9 +1386,8 @@ func TestCloudClusterReconcileSkipsTombstoned(t *testing.T) {
 
 // --- Warm cache and eviction tests ---
 //
-// The legacy CacheDir / CacheBudget / CacheEviction machinery was removed in
-// gastrolog-24m1t step 7k. The chunk dir itself is now the warm cache; the
-// cache-population invariant lives next to OpenCursor in the chunk/file
-// package (TestUploadKeepsLocalGLCB, TestCacheHitAvoidsCloudDownload,
-// TestColdCacheDownloadsToChunkDir, TestDeleteRemovesWarmCache). Eviction
-// will be tracked under its own follow-up issue against the new layout.
+// The chunk dir itself is the warm cache; the cache-population invariant lives
+// next to OpenCursor in the chunk/file package (TestUploadKeepsLocalGLCB,
+// TestCacheHitAvoidsCloudDownload, TestColdCacheDownloadsToChunkDir,
+// TestDeleteRemovesWarmCache). Eviction against that layout is not covered
+// here yet.

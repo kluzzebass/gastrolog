@@ -84,7 +84,7 @@ func TestReconcileInstanceRole(t *testing.T) {
 // even when applies land concurrently. The HasJob pre-check this replaced was
 // a check-then-act race; AddJob's own ErrJobExists answers the same question
 // under one lock hold, and a registration failure that is NOT "already there"
-// now propagates instead of being masked. See gastrolog-69sjlj.
+// now propagates instead of being masked.
 func TestStartPipelineConfigReconcileRegistersOnce(t *testing.T) {
 	t.Parallel()
 	o := newTestOrch(t, Config{LocalNodeID: "node-1"})
@@ -114,9 +114,9 @@ func TestStartPipelineConfigReconcileRegistersOnce(t *testing.T) {
 	}
 	// Compare against the resolver, not the production constant: the sweep
 	// registers sweepCron(pipelineConfigReconcileSchedule), which this test
-	// binary compresses (gastrolog-4yzpcj). What is being pinned is that the
-	// surviving registration carries the configured schedule, not which
-	// cadence this profile happens to configure.
+	// binary compresses. What is being pinned is that the surviving
+	// registration carries the configured schedule, not which cadence this
+	// profile happens to configure.
 	if want := sweepCron(pipelineConfigReconcileSchedule); o.Scheduler().JobSchedule(pipelineConfigReconcileJobName) != want {
 		t.Errorf("registered schedule = %q, want %q",
 			o.Scheduler().JobSchedule(pipelineConfigReconcileJobName), want)

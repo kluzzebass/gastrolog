@@ -28,8 +28,7 @@ func markPipelineIngestVault(t *testing.T, o *Orchestrator, vaultID glid.GLID, h
 // TestSweepMissingReplicas_PipelineVault_SyncsGLCBNotCatchup verifies pipeline
 // ingest vaults never request record-stream catchup from peers, and that a
 // sealed chunk with its GLCB on disk resolves LAZILY at first chunk-manager
-// lookup via the on-miss resolver — the sweep registers nothing
-// (gastrolog-2kmgj6).
+// lookup via the on-miss resolver — the sweep registers nothing.
 func TestSweepMissingReplicas_PipelineVault_SyncsGLCBNotCatchup(t *testing.T) {
 	t.Parallel()
 

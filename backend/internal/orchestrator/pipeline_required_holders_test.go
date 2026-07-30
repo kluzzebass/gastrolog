@@ -1,8 +1,8 @@
 package orchestrator
 
-// Coverage for gastrolog-4w1vt at the orchestrator wiring seam: the
-// ChunkRequiredHolders closure buildPipelineVaultSpec hands to chunking must
-// report ok=false when the placement lookup comes back empty — a placed vault
+// Coverage at the orchestrator wiring seam: the ChunkRequiredHolders closure
+// buildPipelineVaultSpec hands to chunking must report ok=false when the
+// placement lookup comes back empty — a placed vault
 // always has at least one member, so empty means the lookup failed (config
 // load error, vault dropped from config) and the chunking release/purge gates
 // must fail closed rather than reading empty as "no holders required".

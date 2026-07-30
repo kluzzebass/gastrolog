@@ -9,7 +9,7 @@ import (
 
 // TestStageEventCounters_PerVaultMonotonic verifies the orchestrator-owned
 // GLCB-pull and retention-delete counters accumulate per vault and snapshot
-// cleanly (gastrolog-4r784a).
+// cleanly.
 func TestStageEventCounters_PerVaultMonotonic(t *testing.T) {
 	t.Parallel()
 	s := newStageEventCounters()

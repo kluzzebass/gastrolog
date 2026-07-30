@@ -1,6 +1,6 @@
 package orchestrator
 
-// Seal resumption on a RUNNING node (gastrolog-v6nf71).
+// Seal resumption on a RUNNING node.
 //
 // The Sealing → Sealed half of a seal rides a scheduled one-time job. Until
 // this category existed, resumeSealingFromFSM had exactly one caller —
@@ -169,9 +169,9 @@ func TestSealResumeDoesNotWarnAboutInFlightSeals(t *testing.T) {
 	}
 }
 
-// The no-local-chunk case belongs to the stale-fsm sweep and its grace period
-// (gastrolog-1huz5), not here: this path cannot rebuild a GLCB it has no bytes
-// for. Steady state skips it silently rather than warning every tick about a
+// The no-local-chunk case belongs to the stale-fsm sweep and its grace
+// period, not here: this path cannot rebuild a GLCB it has no bytes for.
+// Steady state skips it silently rather than warning every tick about a
 // condition another category is already timing out.
 func TestSealResumeSkipsAndStaysQuietWhenChunkIsAbsentLocally(t *testing.T) {
 	t.Parallel()

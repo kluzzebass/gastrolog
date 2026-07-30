@@ -1,23 +1,22 @@
 package orchestrator_test
 
 // Orchestrator-level acceptance coverage for the retention "transfer"
-// disposition (gastrolog-2l918): a fired retention event re-homes a sealed
-// chunk to a target vault UNCHANGED via the reused RepatriateChunk
+// disposition: a fired retention event re-homes a sealed chunk to a
+// target vault UNCHANGED via the reused RepatriateChunk
 // announce-import + GLCB replica catch-up + holder-receipt machinery (see
 // backend/internal/orchestrator/retention_transfer.go). These tests use
 // the same orchRelHarness real file-vault + real vault-ctl Raft + real
 // pipeline infrastructure the GLCB replica catch-up and cluster-ingest
 // acceptance tests use (reliability_glcb_catchup_test.go,
-// reliability_pipeline_test.go) — file vaults only, per spec decision #4,
-// so this family cannot run against the memory-vault-only harness in
-// server package tests (33ul6h finding).
+// reliability_pipeline_test.go) — file vaults only, so this family cannot
+// run against the memory-vault-only harness in server package tests.
 //
 // These tests wait on REAL retention sweep ticks — nothing here pokes the
 // sweep by hand, and the assertions are written in sweeps rather than
 // seconds so they hold at any cadence. The package's test binary installs a
-// compressed cron profile (testprofile_test.go, gastrolog-4yzpcj), so a
-// sweep costs a second instead of a minute; run the same tests without that
-// profile and they still pass, only slower. testing.Short() skips them; they
+// compressed cron profile (testprofile_test.go), so a sweep costs a second
+// instead of a minute; run the same tests without that profile and they
+// still pass, only slower. testing.Short() skips them; they
 // run under the mandatory full gate (go test ./... without -short).
 
 import (
@@ -142,7 +141,7 @@ func disableVault(t *testing.T, h *orchRelHarness, v vaultSpec) {
 // source, and the source's local copy is expired ONLY after that — this
 // harness cannot directly observe "not before", but it CAN observe the end
 // state: source gone, destination present and byte-identical, which is
-// the only externally-checkable consequence of the 5034va ordering.
+// the only externally-checkable consequence of that ordering.
 func TestOrchPipeline_TransferDispositionSingleNode(t *testing.T) {
 	if testing.Short() {
 		t.Skip("multi-node-harness pipeline acceptance test (single node here, but real cron + real Raft)")
@@ -215,9 +214,9 @@ func TestOrchPipeline_TransferDispositionSingleNode(t *testing.T) {
 	}
 
 	// The source's local copy is gone (retained until receipts, expired
-	// only after) — this is the observable consequence of the 5034va
-	// ordering: by the time the destination is confirmed, the source has
-	// released its copy.
+	// only after) — this is the observable consequence of the
+	// deliver-then-expire ordering: by the time the destination is
+	// confirmed, the source has released its copy.
 	h.waitProgress("source chunk expired after destination receipts", 50*time.Millisecond, func() (string, bool) {
 		entries := h.sealedPipelineChunks(source, node)
 		return fmt.Sprintf("source_sealed_chunks=%d", len(entries)), len(entries) == 0
@@ -363,7 +362,8 @@ func TestOrchPipeline_TransferDispositionMultiNodeDestRF(t *testing.T) {
 	h.waitChunkHolders(dest, e.ID, destHomeIdxs)
 
 	// The source releases its copy only once every destination home
-	// holds the chunk (observable end state of the 5034va ordering).
+	// holds the chunk (observable end state of the deliver-then-expire
+	// ordering).
 	h.waitProgress("source chunk expired after multi-home destination receipts", 50*time.Millisecond, func() (string, bool) {
 		entries := h.sealedPipelineChunks(source, sourceNode)
 		return fmt.Sprintf("source_sealed=%d", len(entries)), len(entries) == 0
@@ -372,10 +372,10 @@ func TestOrchPipeline_TransferDispositionMultiNodeDestRF(t *testing.T) {
 		t.Fatalf("source GLCB file still on disk after multi-home transfer completed (err=%v)", err)
 	}
 
-	// gastrolog-2l918 review finding 1a: on completion, the destination's
-	// manifest entry must have TransferSourceVaultID CLEARED — left set,
-	// every future replica-repair pull for this chunk would keep
-	// addressing itself at the now-empty source vault.
+	// On completion, the destination's manifest entry must have
+	// TransferSourceVaultID CLEARED — left set, every future
+	// replica-repair pull for this chunk would keep addressing itself
+	// at the now-empty source vault.
 	finalEntries := h.sealedPipelineChunks(dest, h.nodeIDs[destHomeIdxs[0]])
 	if len(finalEntries) != 1 || finalEntries[0].ID != e.ID {
 		t.Fatalf("destination sealed entries after completion = %v, want exactly %s", finalEntries, e.ID)
@@ -385,14 +385,13 @@ func TestOrchPipeline_TransferDispositionMultiNodeDestRF(t *testing.T) {
 			finalEntries[0].TransferSourceVaultID)
 	}
 
-	// gastrolog-2l918 review finding 1b, the defense-in-depth other half:
-	// a destination home that loses its copy AFTER the source vault has
-	// expired its own copies must still self-heal. The source vault no
-	// longer holds this chunk at all (asserted above), so if
-	// runGLCBPull's replica-repair pull were still addressed at the
-	// (already-empty) source, this would time out forever — recovery can
-	// only succeed via the holder-set fallback pulling from ANOTHER
-	// destination home.
+	// The defense-in-depth other half: a destination home that loses
+	// its copy AFTER the source vault has expired its own copies must
+	// still self-heal. The source vault no longer holds this chunk at
+	// all (asserted above), so if runGLCBPull's replica-repair pull
+	// were still addressed at the (already-empty) source, this would
+	// time out forever — recovery can only succeed via the holder-set
+	// fallback pulling from ANOTHER destination home.
 	victimIdx := destHomeIdxs[0]
 	victimPath := h.pipelineGLCBPath(h.nodeIDs[victimIdx], dest, e.ID)
 	if err := os.Remove(victimPath); err != nil {
