@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-// gastrolog-2cb2r: JoinCluster classifies certain gRPC + raftadmin
-// errors as transient and retries until the caller's ctx deadline.
+// JoinCluster classifies certain gRPC + raftadmin errors as transient
+// and retries until the caller's ctx deadline.
 // These tests pin the classification — if a future agent changes the
 // underlying transport errors, the breakage should show up here, not
 // as a silent regression to CrashLoopBackOff-driven retry.

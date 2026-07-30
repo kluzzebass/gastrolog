@@ -79,9 +79,9 @@ func forwardRPCStreamHandler(srv any, stream grpc.ServerStream) error {
 // forwardRPCMaxResponseBytes bounds a single forwarded unary response. It
 // mirrors the internal Connect mux's WithReadMaxBytes: a response larger than
 // this cannot be read back by the forwarding client, so the frame protocol
-// refuses it explicitly instead of silently truncating. gastrolog-4qhej will
-// add transport compression; the size check below runs on the uncompressed
-// body, the point at which compression would naturally be applied.
+// refuses it explicitly instead of silently truncating. The size check below
+// runs on the uncompressed body, where planned zstd transport compression will
+// hook in — revisit this limit when that lands.
 const forwardRPCMaxResponseBytes = 4 << 20
 
 // unaryResponseFrame reads a raw proto response body and sends it as a single
@@ -165,7 +165,7 @@ const forwardRPCPurpose = PurposeFwdRPC
 func ForwardRPC(ctx context.Context, peers *PeerConnManager, nodeID, procedure string, reqPayload []byte) ([]byte, uint32, string, error) {
 	// Bound the call so a paused remote (SIGSTOP, GC stall, …) can't wedge
 	// the caller forever. Forwarded unary RPCs are small request/response
-	// pairs; unaryCallTimeout is plenty of headroom. See gastrolog-4rp6i.
+	// pairs; unaryCallTimeout is plenty of headroom.
 	ctx, cancel := context.WithTimeout(ctx, unaryCallTimeout)
 	defer cancel()
 

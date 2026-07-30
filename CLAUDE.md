@@ -13,6 +13,27 @@ The role of this file is to describe common mistakes and confusion points that a
 
 Never run `cluster-kill`, `cluster-run`, `pkill` on gastrolog servers, start/stop/restart nodes, or bounce the live cluster to “validate” or “recover.” Use in-process `go test` only. The user’s cluster (e.g. `/Volumes/Storage/Gastrolog`, `data/node*`) is theirs; killing it wastes soak state and trust. See [`MEMORY.md`](./MEMORY.md).
 
+## Code files are not historical documents
+
+**Never reference an issue ID in the codebase.** No `gastrolog-xxxxx` in comments, identifiers, log messages, test names, or error strings. Not "see gastrolog-4k5mg", not a trailing "(gastrolog-2l918)" provenance tag, not "the gastrolog-1abzem deadlock".
+
+**dcat and git already hold the history.** A tracker ID in a comment is a dangling pointer — issues close, tombstone, get superseded, get deleted — and it outsources the comment's job to something the reader has to go look up. Whatever the reader needs must be *in* the comment. Tracker IDs belong in **commit messages only**; that is where the link between a change and its issue lives, permanently and searchably.
+
+**A source file describes the code as it is now.** It is not a changelog. Do not write comments about:
+
+- what the code used to do, or how it was implemented before
+- an approach that was tried and abandoned, or "we used to X, now we Y"
+- which commit, PR, or issue changed it
+- a bug that was fixed here, framed as history rather than as the reason a guard exists
+
+If a guard exists because something broke, say what breaks without it — present tense, no story. "Deferred so the announce cannot deadlock against the FSM apply path" beats three sentences about the incident that revealed it.
+
+**Comments are for what the code cannot say itself.** Add one only when it is genuinely necessary: a non-obvious invariant, a constraint imposed from outside, a deliberate choice a reader would otherwise "fix". Default to none.
+
+**If explaining a piece of code takes a full paragraph, the code is probably badly written.** Treat a long comment as a smell pointing at the code, not as good documentation. Extract a named function, rename the variable, restructure — then the comment gets short or disappears.
+
+Exceptions, narrow: tokens that merely *look* like issue IDs and are actually code — TLS SANs (`gastrolog-raft`, `gastrolog-cluster`), header names (`x-gastrolog-node-id`) — are identifiers and stay. Verify with `dcat show <id>` before removing anything that matches the shape.
+
 ## Vocabulary
 
 Read [`docs/ubiquitous_language.md`](./docs/ubiquitous_language.md) before writing prose (commit messages, issue titles, comments, code identifiers) that names domain concepts. It defines 8 bounded contexts and ~75 canonical terms, plus a consistency-rules table naming the synonyms to phase out (`primary` → leader, `cloud chunk` → cloud-backed chunk, etc.). Use the canonical terms. Extend the doc in the same PR when introducing a new concept.

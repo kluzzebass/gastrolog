@@ -21,7 +21,7 @@ import (
 // approaches the receive cap, regardless of chunk size. The byte budget
 // dominates for realistic record sizes; the record-count cap covers the
 // pathological case of many tiny records inflating per-record proto
-// framing overhead. See gastrolog-4yvhh.
+// framing overhead.
 const (
 	importRecordsMaxBytes   = 8 * 1024 * 1024
 	importRecordsMaxRecords = 4096
@@ -121,8 +121,8 @@ func (tr *ChunkReplicator) getOrOpen(vaultID glid.GLID, nodeID string) (*vaultSt
 // creation. We enforce the caller deadline by running the blocking calls
 // in a helper goroutine and racing them against ctx.Done().
 //
-// See gastrolog-5oofa: without this, RecvMsg on a paused peer blocks
-// forever, holding ts.mu and cascading into ingest-path stalls.
+// Without this, RecvMsg on a paused peer blocks forever, holding ts.mu
+// and cascading into ingest-path stalls.
 func (tr *ChunkReplicator) send(ctx context.Context, vaultID glid.GLID, nodeID string, cmd *gastrologv1.ChunkReplicationCommand) error {
 	ts, err := tr.getOrOpen(vaultID, nodeID)
 	if err != nil {
@@ -155,7 +155,7 @@ func (tr *ChunkReplicator) send(ctx context.Context, vaultID glid.GLID, nodeID s
 		// ack left pending import state on the receiver while the sender
 		// moved on to the next chunk on the same stream — ImportBegin
 		// preempted the wedged import and spammed WARN on every catchup
-		// frame. See gastrolog-2o9e9.
+		// frame.
 		tr.closeStream(vaultID, nodeID)
 		return fmt.Errorf("follower rejected command: %s", ack.Error)
 	}
@@ -203,7 +203,7 @@ func (tr *ChunkReplicator) closeStream(vaultID glid.GLID, nodeID string) {
 //
 // Per-frame size is capped by importRecordsMaxBytes / importRecordsMaxRecords
 // so individual gRPC messages always fit under the receive cap regardless
-// of how large the chunk grows. See gastrolog-4yvhh.
+// of how large the chunk grows.
 func (tr *ChunkReplicator) ImportSealedChunk(ctx context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error {
 	chunkIDProto := glid.GLID(chunkID).ToProto()
 
@@ -290,7 +290,7 @@ func (tr *ChunkReplicator) ImportSealedChunk(ctx context.Context, nodeID string,
 // via the existing replicateToFollower machinery, so success here
 // means "request accepted, pushes scheduled" — not "delivered". The
 // follower will re-request anything still missing on the next sweep
-// tick. See gastrolog-2dgvj.
+// tick.
 //
 // Unary RPC (not on the existing ChunkReplication bidirectional stream
 // which is exclusively leader→follower commands): the request is

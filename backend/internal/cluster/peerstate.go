@@ -23,7 +23,7 @@ type peerEntry struct {
 }
 
 // raftEntry is the Raft-derived reachability evidence for one peer, folded
-// across every Raft group on this node (gastrolog-1lbifx).
+// across every Raft group on this node.
 //
 // # The aggregation rule
 //
@@ -81,10 +81,10 @@ type raftEntry struct {
 //     HeartbeatTimeout/10.
 //
 // Keeping them apart is what lets liveness be fast (raftTTL, ~seconds) without
-// making cached stats expire at the same rate, and vice versa. Before
-// gastrolog-1lbifx a dedicated 1s Heartbeat broadcast supplied the fast clock;
-// Raft's own per-group traffic already carried it, so the extra broadcast was
-// deleted rather than kept as a third opinion.
+// making cached stats expire at the same rate, and vice versa. A dedicated 1s
+// Heartbeat broadcast used to supply the fast clock; Raft's own per-group
+// traffic already carried it, so the extra broadcast was deleted rather than
+// kept as a third opinion.
 type PeerState struct {
 	mu      sync.RWMutex
 	entries map[string]peerEntry
@@ -147,8 +147,8 @@ func (p *PeerState) ReconcilePeers(keep map[string]struct{}) {
 // reachability evidence stays admissible for the liveness verdict; anchor it
 // on the Raft heartbeat timeout. A zero or negative raftContactTTL disables
 // the Raft input entirely, leaving liveness on broadcast freshness alone —
-// the shape the cluster had before gastrolog-1lbifx, and what a test that
-// only exercises broadcast paths should pass.
+// the shape the cluster had before Raft contact became a liveness input, and
+// what a test that only exercises broadcast paths should pass.
 func NewPeerState(statsTTL, raftContactTTL time.Duration) *PeerState {
 	return &PeerState{
 		entries: make(map[string]peerEntry),
@@ -195,12 +195,12 @@ func (p *PeerState) FindVaultStats(vaultID string) *gastrologv1.VaultStats {
 	return nil
 }
 
-// FindStorageState scans all live peers for a StorageState matching the
-// given ID (gastrolog-3cobq4). storageID is the GLID's canonical String()
-// form (matches every other resolver in this codebase, e.g. resolve() /
-// FindVaultStats callers) — parsed here and compared against the wire's raw
-// GLID bytes, never a raw-bytes-vs-string comparison (that mismatch bit
-// StatsVaultRouteSnapshot before it was fixed to carry glid.GLID directly).
+// FindStorageState scans all live peers for a StorageState matching the given
+// ID. storageID is the GLID's canonical String() form (matches every other
+// resolver in this codebase, e.g. resolve() / FindVaultStats callers) — parsed
+// here and compared against the wire's raw GLID bytes, never a
+// raw-bytes-vs-string comparison (that mismatch bit StatsVaultRouteSnapshot
+// before it was fixed to carry glid.GLID directly).
 // A storage is only ever reported by its owning node (only that node can
 // statfs the volume), so this returns at most one match. Returns nil if no
 // live peer reports state for this storage — e.g. the owning node is down,
@@ -307,7 +307,7 @@ func (p *PeerState) CollectIngesterAlive(ingesterID string) map[string]bool {
 // taken under one lock so the sums and the fingerprint can never disagree.
 // The stats collector's summed window re-anchors when the fingerprint
 // changes, so a peer's stats expiring and later resuming can never read as
-// a throughput spike (gastrolog-mliwrd).
+// a throughput spike.
 func (p *PeerState) AggregateRouteTotals() (routed, matched int64, members []string) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -383,7 +383,7 @@ func (p *PeerState) AggregateRouteStats() (routed, unmatched, matched int64, rou
 // AggregateRouteRates sums live peers' rolling-window routing rates from
 // their NodeStats broadcasts, per horizon. Sparks are omitted: per-node tick
 // phases differ, so an element-wise sum would fabricate a series no node
-// observed. The caller adds the local node's own rates (gastrolog-4eh5ns).
+// observed. The caller adds the local node's own rates.
 func (p *PeerState) AggregateRouteRates() (routed, matched *gastrologv1.ThroughputRate) {
 	routed = &gastrologv1.ThroughputRate{}
 	matched = &gastrologv1.ThroughputRate{}
@@ -451,11 +451,11 @@ func (p *PeerState) AggregatePipelineDisk() map[glid.GLID][]PeerVaultPipelineDis
 }
 
 // VaultStorageProtected reports whether any live peer has a storage backing
-// this vault below its free-space floor (gastrolog-9akebz: renamed from
-// VaultDiskProtected — the thresholds moved from VaultConfig to the storage
-// entity a vault's placements reference). Combined with the local guard,
-// this makes per-vault admission cluster-consistent: the starved storage is
-// usually on a different node than the front door taking the records.
+// this vault below its free-space floor (renamed from VaultDiskProtected — the
+// thresholds moved from VaultConfig to the storage entity a vault's placements
+// reference). Combined with the local guard, this makes per-vault admission
+// cluster-consistent: the starved storage is usually on a different node than
+// the front door taking the records.
 func (p *PeerState) VaultStorageProtected(vaultID glid.GLID) bool {
 	return p.vaultListedByAnyPeer(vaultID, func(ns *gastrologv1.NodeStats) [][]byte {
 		return ns.StorageProtectedVaultIds
@@ -472,10 +472,9 @@ func (p *PeerState) VaultSizeCapped(vaultID glid.GLID) bool {
 
 // VaultAgeBoundCapped reports whether any live peer's retention runner has
 // swept and failed to clear this vault's max-age bound, on a policy with
-// refuse=true (gastrolog-5yfaqj). Same cluster-consistency contract as
-// VaultDiskProtected: only the retention leader for a vault instance
-// derives this, so a peer that only fronts ingest for the vault needs the
-// broadcast.
+// refuse=true. Same cluster-consistency contract as VaultDiskProtected: only
+// the retention leader for a vault instance derives this, so a peer that only
+// fronts ingest for the vault needs the broadcast.
 func (p *PeerState) VaultAgeBoundCapped(vaultID glid.GLID) bool {
 	return p.vaultListedByAnyPeer(vaultID, func(ns *gastrologv1.NodeStats) [][]byte {
 		return ns.AgeBoundVaultIds
@@ -492,8 +491,8 @@ func (p *PeerState) VaultChunkCountBoundCapped(vaultID glid.GLID) bool {
 // VaultStorageProtectedNodes returns the live peers currently reporting a
 // storage backing this vault under disk protect — the WHO to
 // VaultStorageProtected's whether. The placement manager uses it to name
-// the degraded home in the vault-home-cannot-store alarm (gastrolog-38bm9t).
-// Renamed from VaultDiskProtectedNodes (gastrolog-9akebz).
+// the degraded home in the vault-home-cannot-store alarm. Renamed from
+// VaultDiskProtectedNodes.
 func (p *PeerState) VaultStorageProtectedNodes(vaultID glid.GLID) []string {
 	want := vaultID.ToProto()
 	p.mu.RLock()
@@ -516,12 +515,11 @@ func (p *PeerState) VaultStorageProtectedNodes(vaultID glid.GLID) []string {
 
 // VaultStorageProtectedNodeNames is VaultStorageProtectedNodes' operator-
 // facing sibling: the same live peers, named instead of ID-keyed, for the
-// admission-detail signal's "reported by <name>" text (gastrolog-9akebz).
-// Deliberately a SEPARATE method from VaultStorageProtectedNodes rather
-// than a repurposing of it — the placement manager compares that method's
-// output against raw node IDs for set membership (vaultStorageProtectedSet
-// in backend/internal/app/placement.go), so swapping its return value to
-// names would silently break that match.
+// admission-detail signal's "reported by <name>" text. Deliberately a SEPARATE
+// method from VaultStorageProtectedNodes rather than a repurposing of it — the
+// placement manager compares that method's output against raw node IDs for set
+// membership (vaultStorageProtectedSet in backend/internal/app/placement.go),
+// so swapping its return value to names would silently break that match.
 //
 // The name comes from each peer's OWN broadcast NodeStats.NodeName —
 // already resident in this entry, no config-store lookup — falling back to
@@ -618,12 +616,11 @@ func (p *PeerState) RecordRaftProbe(peerID, _ string, at time.Time) {
 // observed.
 //
 // Deliberately a pure max over positive evidence, with no probe-authority
-// rule: this is the long-horizon accessor. The unreachable sweep
-// (gastrolog-2i1g9, five-minute threshold) and the stale-voter reaper
-// (gastrolog-6bfwk) both ask "has this node been silent for a very long
-// time", and for that question a failing Raft probe must not be allowed to
-// discard the fact that the peer was broadcasting a second ago. The
-// short-window "is it reachable right now" question is LivePeers/IsLive,
+// rule: this is the long-horizon accessor. The unreachable sweep (five-minute
+// threshold) and the stale-voter reaper both ask "has this node been silent
+// for a very long time", and for that question a failing Raft probe must not
+// be allowed to discard the fact that the peer was broadcasting a second ago.
+// The short-window "is it reachable right now" question is LivePeers/IsLive,
 // which does apply probe authority.
 //
 // A zero return is a deliberate "no positive evidence" signal: the reaper must
@@ -712,11 +709,11 @@ func (p *PeerState) LivePeers() []string {
 //
 // There used to be a second case. An empty Heartbeat message flew every second
 // purely to refresh last-seen, because PeerState had no faster liveness input
-// than the 5s NodeStats payload (gastrolog-2kio8). Raft's own per-group
-// heartbeats already prove the same thing on the same wire, so gastrolog-1lbifx
-// deleted the extra message rather than keeping a third opinion about whether
-// a peer is up. Fast liveness now arrives through RecordRaftContact /
-// RecordRaftProbe, and this broadcast carries observability payload only.
+// than the 5s NodeStats payload. Raft's own per-group heartbeats already prove
+// the same thing on the same wire, so the extra message was deleted rather
+// than kept as a third opinion about whether a peer is up. Fast liveness now
+// arrives through RecordRaftContact / RecordRaftProbe, and this broadcast
+// carries observability payload only.
 func (p *PeerState) HandleBroadcast(msg *gastrologv1.BroadcastMessage) {
 	ns := msg.GetNodeStats()
 	if ns == nil {

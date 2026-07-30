@@ -1,6 +1,6 @@
 package cluster
 
-// Coverage for gastrolog-4eh5ns: per-vault segmentation append rates and
+// Coverage: per-vault segmentation append rates and
 // node-level routing rates from the collector's rolling windows, plus the
 // cross-peer rate aggregation GetRouteStats uses for cluster totals.
 
@@ -149,7 +149,7 @@ func TestStatsCollector_EwmaAverages(t *testing.T) {
 	}
 }
 
-// TestStatsCollector_StageCounters (gastrolog-4r784a): the discrete pipeline
+// TestStatsCollector_StageCounters: the discrete pipeline
 // stage-count milestones pass through as cumulative totals, and the four
 // rate-bearing milestones (segments completed/published, chunks built/sealed)
 // get windowed rates from the same rolling-window mechanism as append/seal.
@@ -258,7 +258,7 @@ func TestPeerState_AggregateRouteRates(t *testing.T) {
 
 // TestStatsCollector_ClusterRouteRates: the cluster-total series (including
 // the spark the route panel renders) is windowed server-side over SUMMED
-// cluster counters — never accumulated client-side (gastrolog-4eh5ns).
+// cluster counters — never accumulated client-side.
 func TestStatsCollector_ClusterRouteRates(t *testing.T) {
 	t.Parallel()
 	var clusterRouted, clusterMatched int64 = 10000, 8000

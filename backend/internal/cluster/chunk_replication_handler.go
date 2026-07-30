@@ -39,7 +39,7 @@ type pendingImport struct {
 // import arrives. This eliminates the race between record forwarding and
 // sealed chunk replacement.
 //
-// Streaming ImportSealed (gastrolog-4yvhh) maintains per-stream state in
+// Streaming ImportSealed maintains per-stream state in
 // `pending`: ImportBegin opens it, ImportRecords frames push records into
 // the channel, ImportCommit closes the channel and collects the importer
 // result. At most one import is in flight per stream because the leader's
@@ -117,9 +117,9 @@ func (s *Server) handleReplicationImportBegin(ctx context.Context, vaultID glid.
 	// this (vault, follower) pair until the stream itself tore down. Treat
 	// a fresh ImportBegin as the leader's signal that it has moved on:
 	// cancel the wedged import, drain its result, and accept the new one.
-	// See gastrolog-5z7l8 — without this, partial imports leave sealed
-	// chunks permanently under-replicated, with the leader logging
-	// "ImportBegin while import for chunk X already in flight" forever.
+	// Without this, partial imports leave sealed chunks permanently
+	// under-replicated, with the leader logging "ImportBegin while import
+	// for chunk X already in flight" forever.
 	if p := *pending; p != nil {
 		s.logger.Warn("ImportBegin while previous import in flight — preempting",
 			"vault", vaultID, "prev_chunk", p.chunkID, "new_chunk",

@@ -1,6 +1,7 @@
 // Package cluster manages the dedicated cluster gRPC port used for Raft
 // consensus and inter-node RPCs. The cluster port is separate from the
-// HTTPS API port and uses plain gRPC (TLS is added by gastrolog-2lzw).
+// HTTPS API port and speaks gRPC over mTLS when Config.TLS is set (plain
+// gRPC otherwise).
 //
 // Lifecycle:
 //  1. New(cfg)           — create the server and bind the listen port
@@ -63,7 +64,7 @@ type Config struct {
 
 	// ByteMetrics tracks per-peer gRPC wire bytes on the cluster port.
 	// Inbound: server stats handler (all lanes). Outbound: mirrored from
-	// PeerConnManager when wired in SetRaft. See gastrolog-5uyy6.
+	// PeerConnManager when wired in SetRaft.
 	ByteMetrics *PeerByteMetrics
 
 	// Logger for structured logging.
@@ -87,7 +88,7 @@ type Server struct {
 	// stream.RecvMsg() — vault replication, stream forward records, forward
 	// import records — wrap their Recv in recvOrShutdown() so they observe
 	// this cancellation within a few milliseconds rather than waiting for
-	// grpcSrv.GracefulStop()'s transport-level drain. See gastrolog-1e5ke.
+	// grpcSrv.GracefulStop()'s transport-level drain.
 	stopCtx    context.Context
 	stopCancel context.CancelFunc
 
@@ -97,7 +98,7 @@ type Server struct {
 	// applyFn applies a pre-marshaled ConfigCommand on the leader and returns
 	// the Raft log index at which the command was applied. Followers use the
 	// index to wait for their own FSM to catch up before reading post-mutation
-	// state. See gastrolog-2nxij.
+	// state.
 	applyFn func(ctx context.Context, data []byte) (uint64, error)
 
 	// groupApplyFn applies a pre-marshaled command to the multiraft group
@@ -106,7 +107,7 @@ type Server struct {
 	// OpVaultChunkFSM-wrapped chunk-FSM case and the native vault-ctl
 	// command case — both target the vault-ctl Raft group via this single
 	// function. Followers use the index to wait for their own group FSM to
-	// catch up before reading post-mutation state (gastrolog-4l24u).
+	// catch up before reading post-mutation state.
 	groupApplyFn func(ctx context.Context, groupID string, data []byte) (uint64, error)
 
 	// enrollHandler handles the Enroll RPC for joining nodes.
@@ -132,7 +133,7 @@ type Server struct {
 	// requesting follower via the existing replicateToFollower machinery.
 	// Returns the count of chunks for which a push was actually scheduled
 	// (after leader-side filtering: tombstoned, cloud-backed, missing-locally).
-	// Set by the composition root in app.go. See gastrolog-2dgvj.
+	// Set by the composition root in app.go.
 	replicaCatchupFn func(ctx context.Context, vaultID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (int, error)
 
 	// recordImporter imports records as a sealed chunk in a local vault.
@@ -163,7 +164,7 @@ type Server struct {
 	listChunksExecutor ListChunksExecutor
 
 	// waitVaultReadyExecutor blocks until a local vault is ready for remote
-	// WaitVaultReady requests (drain synchronization). See gastrolog-3sdnn.
+	// WaitVaultReady requests (drain synchronization).
 	waitVaultReadyExecutor WaitVaultReadyExecutor
 
 	// pipelineBacklogDiskExecutor returns local pipeline disk counts for remote fan-out.
@@ -221,7 +222,7 @@ type Server struct {
 	// a SIGSTOPed peer: the TCP socket stays accepted and the connection
 	// stays open, but no RPC response ever returns. Production code does
 	// not call Pause/Unpause; the pauseGate stays nil and the interceptor
-	// is a no-op. See gastrolog-5oofa / gastrolog-5ff7z.
+	// is a no-op.
 	pauseMu   sync.Mutex
 	pauseGate chan struct{}
 
@@ -286,8 +287,6 @@ var errShuttingDown = errors.New("cluster server shutting down")
 // (or Stop) closes the transport, at which point it drops the result on
 // the floor. This costs at most one goroutine per active stream during
 // the tiny shutdown window.
-//
-// Added for gastrolog-1e5ke.
 func (s *Server) recvOrShutdown(stream grpc.ServerStream, msg any) error {
 	// Fast path: already shutting down — do not even try to Recv.
 	if s.stopCtx.Err() != nil {
@@ -353,7 +352,7 @@ func (s *Server) SetRaft(r *hraft.Raft) {
 }
 
 // ByteMetrics returns the shared per-peer byte-counter tracker. Returns
-// nil if byte tracking is not configured. See gastrolog-47u85.
+// nil if byte tracking is not configured.
 func (s *Server) ByteMetrics() *PeerByteMetrics {
 	return s.cfg.ByteMetrics
 }
@@ -421,7 +420,7 @@ func (s *Server) SetInternalHandler(h http.Handler) {
 // SetApplyFn sets the function used by the ForwardApply handler to apply
 // commands on the leader node. The function returns the Raft log index at
 // which the command was applied so followers can wait for their own FSM
-// to catch up before reading post-mutation state (gastrolog-2nxij).
+// to catch up before reading post-mutation state.
 func (s *Server) SetApplyFn(fn func(ctx context.Context, data []byte) (uint64, error)) {
 	s.applyFn = fn
 }
@@ -443,7 +442,7 @@ func (s *Server) SetEvictionHandler(fn func()) {
 
 // RemovalPolicy names who asked for a node removal, which decides how
 // the leader-side gates treat a removal that degrades redundancy
-// without orphaning anything (gastrolog-3vyex).
+// without orphaning anything.
 type RemovalPolicy int
 
 const (
@@ -477,10 +476,9 @@ func (p RemovalPolicy) String() string {
 // RemoveNodeOptions carries the caller's intent into the leader-side
 // removal gates.
 type RemoveNodeOptions struct {
-	// Force bypasses every removal gate — the orphan-refusal gate
-	// (gastrolog-2ch9y) and the RF-preservation gate (gastrolog-3vyex)
-	// alike — acknowledging data loss / reduced redundancy. Every bypass
-	// is logged loudly on the leader.
+	// Force bypasses every removal gate — the orphan-refusal gate and
+	// the RF-preservation gate alike — acknowledging data loss / reduced
+	// redundancy. Every bypass is logged loudly on the leader.
 	Force bool
 
 	// Policy distinguishes operator-driven removal from preStop
@@ -511,7 +509,7 @@ func (s *Server) SetNodeSuffrageFn(fn func(ctx context.Context, nodeID, nodeAddr
 // requesting follower via the existing replicateToFollower machinery.
 // Returns the count of chunks for which a push was actually scheduled
 // (after leader-side filtering of tombstoned / cloud-backed / locally-
-// missing chunks). See gastrolog-2dgvj.
+// missing chunks).
 func (s *Server) SetReplicaCatchupFn(fn func(ctx context.Context, vaultID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (int, error)) {
 	s.replicaCatchupFn = fn
 }
@@ -521,7 +519,6 @@ func (s *Server) SetReplicaCatchupFn(fn func(ctx context.Context, vaultID glid.G
 // streams stay open; only application-level progress halts. Intended for
 // reliability tests that simulate SIGSTOPed peers; production code never
 // calls this. Idempotent — calling Pause while already paused is a no-op.
-// See gastrolog-5oofa / gastrolog-5ff7z.
 func (s *Server) Pause() {
 	s.pauseMu.Lock()
 	defer s.pauseMu.Unlock()
@@ -788,7 +785,7 @@ func requireClientCert(ctx context.Context, method string) error {
 //     in stream.RecvMsg() until the peer closes the stream — which
 //     never happens during a planned cluster shutdown because peers are
 //     also shutting down — and GracefulStop() waits the full fallback
-//     timeout. See gastrolog-1e5ke.
+//     timeout.
 //
 //  2. Close the SNI demuxer so no new inbound cluster connections arrive.
 //

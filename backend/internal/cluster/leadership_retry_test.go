@@ -9,7 +9,7 @@ import (
 )
 
 // Raft's three leadership errors need three different responses, and the bug
-// this guards (gastrolog-4jh4mb) was treating them as one.
+// this guards was treating them as one.
 
 func TestLeadershipTransferIsRetriedUntilItSettles(t *testing.T) {
 	t.Parallel()

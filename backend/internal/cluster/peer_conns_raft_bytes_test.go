@@ -11,7 +11,7 @@ import (
 
 // TestPeerConnManager_RaftLaneTracksBytes verifies multiraft-style raft-lane
 // dials stamp x-gastrolog-node-id, increment per-connection catalog bytes, and
-// mirror outbound totals into PeerByteMetrics (gastrolog-5uyy6).
+// mirror outbound totals into PeerByteMetrics.
 func TestPeerConnManager_RaftLaneTracksBytes(t *testing.T) {
 	t.Parallel()
 

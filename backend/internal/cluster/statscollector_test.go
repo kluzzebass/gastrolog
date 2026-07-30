@@ -7,12 +7,12 @@ import (
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 )
 
-// gastrolog-mliwrd: the cluster ingest/route series sums counters across
-// TTL-live peer broadcasts. A peer whose stats expired and later resumed
-// rejoined the sum as a one-tick jump that read as traffic — the UI showed
-// 5m averages of 138K/s from a 40K/s source, which is arithmetically
-// impossible for a true average. The summed window must re-anchor on any
-// contributor-set change, exactly like the counter-reset branch.
+// The cluster ingest/route series sums counters across TTL-live peer
+// broadcasts. A peer whose stats expired and later resumed rejoined the sum
+// as a one-tick jump that read as traffic — the UI showed 5m averages of
+// 138K/s from a 40K/s source, which is arithmetically impossible for a true
+// average. The summed window must re-anchor on any contributor-set change,
+// exactly like the counter-reset branch.
 func TestSummedWindowReanchorsOnMembershipChange(t *testing.T) {
 	t.Parallel()
 	s := &rateSeries{}
@@ -50,7 +50,7 @@ func TestSummedWindowReanchorsOnMembershipChange(t *testing.T) {
 	}
 	for i, ew := range []float64{r.Avg_1MPerSec, r.Avg_5MPerSec, r.Avg_15MPerSec} {
 		if ew > 45_000 {
-			t.Fatalf("EWMA[%d] = %.0f/s after reappearance — exceeds the 40K/s source max (gastrolog-mliwrd regression)", i, ew)
+			t.Fatalf("EWMA[%d] = %.0f/s after reappearance — exceeds the 40K/s source max", i, ew)
 		}
 	}
 }

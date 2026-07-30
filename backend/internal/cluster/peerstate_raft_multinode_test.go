@@ -13,7 +13,7 @@ import (
 	"google.golang.org/grpc"
 )
 
-// Multi-node coverage for gastrolog-1lbifx. Everything above this file drives
+// Multi-node coverage for Raft-derived peer liveness. Everything above this file drives
 // PeerState by hand; this one stands up three REAL hashicorp/raft instances
 // speaking over the real multiraft gRPC transport and lets their own
 // replication heartbeats be the only liveness input. No NodeStats broadcast is

@@ -1,9 +1,9 @@
 package cluster
 
-// Coverage for gastrolog-1io54g: Raft liveness fields in NodeStats, and for
-// gastrolog-5nvb4y: neither election storm nor WAL latency may raise an
-// alarm — both are diagnostics with no operator action, carried as stats
-// plus transition-edge logs (EEMUA 191 actionability test).
+// Coverage: Raft liveness fields in NodeStats, and that neither election
+// storm nor WAL latency may raise an alarm — both are diagnostics with no
+// operator action, carried as stats plus transition-edge logs (EEMUA 191
+// actionability test).
 
 import (
 	"context"
@@ -53,7 +53,7 @@ func TestStatsCollector_RaftLivenessFieldsAndAlerts(t *testing.T) {
 	}
 	// WAL append latency is a diagnostic, not an alarm: the max ships in
 	// stats and the degraded transition is logged, but nothing reaches the
-	// alarm list (gastrolog-5nvb4y).
+	// alarm list.
 	if alertActive(alerts, "raft-wal-latency") {
 		t.Fatal("wal latency must not raise an alarm; it is log + stats only")
 	}
@@ -81,8 +81,8 @@ func TestStatsCollector_RaftLivenessFieldsAndAlerts(t *testing.T) {
 		t.Fatalf("wal avg = %vms, want ~2ms", got)
 	}
 	// Election churn is a diagnostic, not an alarm (EEMUA 191 actionability
-	// test, gastrolog-29380r): the rate ships in stats, transitions are
-	// logged, and no alert may appear.
+	// test): the rate ships in stats, transitions are logged, and no alert
+	// may appear.
 	if alertActive(alerts, "raft-liveness-elections") {
 		t.Fatal("election churn must not raise an alarm; it is log + stats only")
 	}
@@ -148,7 +148,7 @@ func (s *logSpy) count(substr string) int {
 
 // A demoted diagnostic logs once entering the condition and once on
 // recovery — never once per tick, which is the chattering the razor demotion
-// exists to avoid (gastrolog-5nvb4y). No alert collector is wired here on
+// exists to avoid. No alert collector is wired here on
 // purpose: before this change the whole block sat behind a `cfg.Alerts ==
 // nil` guard, which silently disabled the logging on any node without a
 // collector.

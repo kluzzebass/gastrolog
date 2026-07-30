@@ -16,7 +16,7 @@ import (
 // hop: a preStop self-removal forwarded from a follower must still be
 // evaluated optimistically on the leader, and an operator removal
 // pessimistically, or the gate's stance would depend on which node the
-// caller happened to reach (gastrolog-3vyex).
+// caller happened to reach.
 
 // startForwardRemoveNodeLeader stands up a real gRPC ClusterService whose
 // removeNodeFn is fn, and returns a PeerConnManager that resolves

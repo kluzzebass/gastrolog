@@ -7,8 +7,8 @@ import (
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 )
 
-// Coverage for gastrolog-1lbifx: PeerState liveness derived from Raft
-// last-contact instead of a dedicated 1s liveness broadcast.
+// Coverage for PeerState liveness derived from Raft last-contact instead of
+// a dedicated 1s liveness broadcast.
 //
 // Every assertion here drives time by passing explicit timestamps into the
 // recorders rather than by sleeping. That is not just for speed: a test that
@@ -286,8 +286,9 @@ func TestPeerState_PausedPeerDetectionWindowEdges(t *testing.T) {
 // No flicker under jitter: a healthy peer whose probe round-trips vary wildly
 // — GC pauses, scheduler hiccups, a slow disk on the follower — must stay
 // continuously live as long as every gap stays inside the TTL. This is the
-// regression the heartbeat TTL multiplier had to be raised for
-// (gastrolog-4iacg); the Raft-derived signal must not reintroduce it.
+// regression the heartbeat TTL multiplier had to be raised for — one late
+// broadcast lapsed the TTL and flapped the node offline until the next one;
+// the Raft-derived signal must not reintroduce it.
 func TestPeerState_NoFlickerUnderJitteredContact(t *testing.T) {
 	ps := newRaftPeerState()
 

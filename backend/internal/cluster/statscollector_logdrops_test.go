@@ -1,6 +1,6 @@
 package cluster
 
-// Coverage for gastrolog-3phtqv: the diagnostic-log drop count is a metric,
+// Coverage: the diagnostic-log drop count is a metric,
 // not an alarm. It reaches NodeStats as a plain counter read, and the
 // collector tolerates a node with no capture handler wired.
 //
@@ -81,7 +81,7 @@ func (s *stubPressureStats) IngestPressureLevel() string { return s.level }
 
 // Ingest pressure ships as a level for the health surfaces and raises no
 // alarm: a throttled pipeline is already handled — the throttle is the
-// response — so there is nothing for an operator to do (gastrolog-3phtqv).
+// response — so there is nothing for an operator to do.
 func TestStatsCollector_IngestPressureIsAMetricNotAnAlarm(t *testing.T) {
 	t.Parallel()
 	stats0 := &stubPressureStats{level: "normal"}

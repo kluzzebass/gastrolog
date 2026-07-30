@@ -1,8 +1,8 @@
 package cluster
 
-// Coverage for the disk-guard cross-node admission transport (gastrolog-5jobl5
-// / gastrolog-20ywka): the StatsCollector must copy a node's locally
-// protected / size-capped vault IDs into the broadcast NodeStats, which is
+// Coverage for the disk-guard cross-node admission transport: the
+// StatsCollector must copy a node's locally protected / size-capped vault
+// IDs into the broadcast NodeStats, which is
 // how every other node's admission gate learns to refuse those vaults. The
 // multi-node server harness mocks the stat providers, so it cannot exercise
 // this path — this drives the real collector.

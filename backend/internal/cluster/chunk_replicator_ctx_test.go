@@ -7,8 +7,8 @@ import (
 	"time"
 )
 
-// Regression test for gastrolog-5oofa: the runWithCtx helper is what
-// prevents ChunkReplicator.send from blocking forever on a paused peer.
+// Regression test: the runWithCtx helper is what prevents
+// ChunkReplicator.send from blocking forever on a paused peer.
 // Before this helper was added, send called stream.SendMsg / RecvMsg
 // directly with no ctx handling — a SIGSTOPed follower's stream would
 // block RecvMsg indefinitely, cascading into an orchestrator-wide

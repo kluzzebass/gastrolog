@@ -44,11 +44,10 @@ const (
 // deadline is the ultimate retry budget — JoinCluster never retries
 // past it.
 //
-// See gastrolog-2cb2r: the previous 3-hop leader-follow loop did not
-// recover from concurrent AddVoter races during fresh-cluster
-// bootstrap, leaving joiners to rely on kubelet's CrashLoopBackOff for
-// retry — visible as RESTARTS=1-2 on `kubectl get pods` and a slower
-// time-to-quorum.
+// The previous 3-hop leader-follow loop did not recover from concurrent
+// AddVoter races during fresh-cluster bootstrap, leaving joiners to rely
+// on kubelet's CrashLoopBackOff for retry — visible as RESTARTS=1-2 on
+// `kubectl get pods` and a slower time-to-quorum.
 //
 // logger may be nil, in which case retry attempts are silent. Callers
 // from app.go pass their slog instance so retries land in the same
@@ -108,7 +107,8 @@ func JoinCluster(ctx context.Context, logger *slog.Logger, addr, nodeID, nodeAdd
 // Error matching is on string contents because the underlying errors
 // arrive wrapped through gRPC and raftadmin's pb.Result.Error string
 // field, neither of which exposes typed sentinels we can errors.Is
-// against. See gastrolog-2cb2r for the full set of observed errors.
+// against. Only "not the leader" has been seen in the wild, on fresh
+// K8s bootstrap; the other cases below are defensive.
 func isTransientJoinErr(err error) bool {
 	if err == nil {
 		return false

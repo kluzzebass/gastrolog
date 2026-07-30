@@ -17,9 +17,9 @@ import (
 // pinned grpc-go: marshal the message through the registered proto CodecV2
 // into grpc's pooled buffers, then free them the way the transport does after
 // the wire write (stream.go SendMsg -> prepareMsg -> encode -> codecV2.Marshal;
-// deferred data.Free()). This isolates the server-side write path — the
-// subject of gastrolog-47jm3m — from client-side unmarshal allocations that an
-// end-to-end benchmark would conflate with it.
+// deferred data.Free()). This isolates the server-side write path from
+// client-side unmarshal allocations that an end-to-end benchmark would
+// conflate with it.
 type benchSinkStream struct {
 	grpc.ServerStream
 	codec encoding.CodecV2
@@ -36,15 +36,15 @@ func (s *benchSinkStream) SendMsg(m any) error {
 	return nil
 }
 
-// filedCopyChunkWriter replicates the segment chunk writer as filed in
-// gastrolog-47jm3m: a fresh copy of every frame (and a fresh message) because
-// the no-copy SendMsg contract had not been established yet. Benchmark
-// baseline only.
-type filedCopyChunkWriter struct {
+// perFrameCopyChunkWriter is the writer shape that predates the no-copy
+// SendMsg contract documented on segmentChunkWriter.Write: a fresh []byte per
+// frame, defensive against the transport retaining the previous frame's Data.
+// Benchmark baseline only.
+type perFrameCopyChunkWriter struct {
 	stream grpc.ServerStream
 }
 
-func (w *filedCopyChunkWriter) Write(p []byte) (int, error) {
+func (w *perFrameCopyChunkWriter) Write(p []byte) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
@@ -62,11 +62,11 @@ type writeOnly struct{ io.Writer }
 
 // BenchmarkSegmentPullServeWrite measures one full segment served through the
 // PullSegment write path (open file -> io.Copy -> chunk writer -> SendMsg
-// marshal), per op, across the three historical shapes of the writer:
+// marshal), per op, across the three shapes the writer has had:
 //
-//	filed-copy-32k:   fresh []byte copy per 32KB frame (as filed)
-//	no-copy-32k:      no-copy SendMsg contract, io.Copy 32KB scratch (gastrolog-1xee1s)
-//	no-copy-1m-frames: no-copy + ReadFrom pullFrameSize framing (this change)
+//	per-frame-copy-32k: fresh []byte copy per 32KB frame
+//	no-copy-32k:        no-copy SendMsg contract, io.Copy 32KB scratch
+//	no-copy-1m-frames:  no-copy + ReadFrom pullFrameSize framing (current)
 func BenchmarkSegmentPullServeWrite(b *testing.B) {
 	const segSize = 8 << 20
 	payload := make([]byte, segSize)
@@ -105,8 +105,8 @@ func BenchmarkSegmentPullServeWrite(b *testing.B) {
 		}
 	}
 
-	b.Run("filed-copy-32k", func(b *testing.B) {
-		run(b, func(s grpc.ServerStream) io.Writer { return &filedCopyChunkWriter{stream: s} })
+	b.Run("per-frame-copy-32k", func(b *testing.B) {
+		run(b, func(s grpc.ServerStream) io.Writer { return &perFrameCopyChunkWriter{stream: s} })
 	})
 	b.Run("no-copy-32k", func(b *testing.B) {
 		run(b, func(s grpc.ServerStream) io.Writer { return writeOnly{&segmentChunkWriter{stream: s}} })

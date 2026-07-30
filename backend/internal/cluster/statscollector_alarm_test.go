@@ -85,8 +85,10 @@ func TestStatsCollector_AlarmBroadcastShape(t *testing.T) {
 		t.Errorf("software faults sit outside the priority scale, got %v", fault.Priority)
 	}
 
-	// retention-rate is an ordinary catalog row (gastrolog-1cruar) — its
-	// priority, cause and response come from the catalog like any other type.
+	// retention-rate reads as operator-authored but no rule is configurable
+	// anywhere, so it is an ordinary catalog row: it enters through the same
+	// Raise path, and its priority, cause and response come from the catalog
+	// rather than from the call site.
 	rate := byID["retention-rate:vault-2"]
 	if rate == nil {
 		t.Fatal("retention-rate alarm missing from broadcast")

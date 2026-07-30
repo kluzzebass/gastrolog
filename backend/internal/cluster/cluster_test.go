@@ -150,8 +150,8 @@ func TestSingleNodeForwardApply(t *testing.T) {
 
 	waitLeader(t, node.raft, 5*time.Second)
 
-	// gastrolog-4kkoo (Phase 5): exercise raft.Apply via rotation policy
-	// instead of the deleted filter command.
+	// Exercise raft.Apply via rotation policy instead of the deleted
+	// filter command.
 	ctx := context.Background()
 	probeID := glid.New()
 	err := node.store.PutRotationPolicy(ctx, system.RotationPolicyConfig{
@@ -213,8 +213,8 @@ func TestThreeNodeCluster(t *testing.T) {
 		}
 	}
 
-	// gastrolog-4kkoo (Phase 5): exercise replication via rotation policy
-	// instead of the deleted filter command.
+	// Exercise replication via rotation policy instead of the deleted
+	// filter command.
 	ctx := context.Background()
 	probeID := glid.New()
 	if err := node1.store.PutRotationPolicy(ctx, system.RotationPolicyConfig{
@@ -270,7 +270,7 @@ func TestThreeNodeCluster(t *testing.T) {
 		t.Errorf("got name %q, want follower-probe", leaderGot.Name)
 	}
 
-	// gastrolog-2nxij regression: after PutRotationPolicy returns on a
+	// Regression: after PutRotationPolicy returns on a
 	// follower, the follower's OWN local FSM must already reflect the
 	// write — no polling. Before the fix, the follower's Forward returned
 	// as soon as the leader applied, and the follower's local FSM caught

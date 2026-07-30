@@ -40,9 +40,8 @@ type StatsVaultSnapshot struct {
 
 // StatsVaultAppendSnapshot captures one vault's cumulative pipeline stage
 // counters for broadcast; the collector's rolling windows turn them into
-// per-second rates (gastrolog-4eh5ns, gastrolog-10n6k8). Append counters are
-// origin-side; Collected/Sealed are home-side and zero on nodes without that
-// role for the vault.
+// per-second rates. Append counters are origin-side; Collected/Sealed are
+// home-side and zero on nodes without that role for the vault.
 type StatsVaultAppendSnapshot struct {
 	VaultID          glid.GLID
 	RecordsAppended  uint64
@@ -55,8 +54,8 @@ type StatsVaultAppendSnapshot struct {
 	SealedRecords    uint64
 	SealedBytes      uint64
 
-	// Discrete pipeline stage-count milestones (gastrolog-4r784a), monotonic
-	// per vault. Origin-owned: SegmentsCompleted, SegmentsPublished. Home-owned:
+	// Discrete pipeline stage-count milestones, monotonic per vault.
+	// Origin-owned: SegmentsCompleted, SegmentsPublished. Home-owned:
 	// ChunksBuilt, HeadPurges, GLCBPullsAttempted/Failed, RetentionDeletes.
 	// Leader-owned: ChunksPlanned, ChunksSealed, SegmentsReleased. Cluster
 	// totals are the sum across nodes (each milestone counted once by its
@@ -114,8 +113,8 @@ type StatsVaultPipelineDiskSnapshot struct {
 }
 
 // StatsStorageSnapshot is one LOCALLY-hosted storage's disk-guard state,
-// broadcast via NodeStats for the storage inspector (gastrolog-3cobq4).
-// Mirrors orchestrator.StorageSnapshot without importing it.
+// broadcast via NodeStats for the storage inspector. Mirrors
+// orchestrator.StorageSnapshot without importing it.
 type StatsStorageSnapshot struct {
 	ID             string
 	Name           string
@@ -142,8 +141,9 @@ type StatsProvider interface {
 	IngestQueueDepth() int
 	IngestQueueCapacity() int
 	// IngestPressureLevel is the pressure gate's current level as a string
-	// ("normal", "elevated", "critical"). Broadcast as a health metric; it
-	// raises no alarm (gastrolog-3phtqv).
+	// ("normal", "elevated", "critical"). Broadcast as a health metric, not
+	// an alarm: the throttle is itself the response, so nothing is waiting
+	// on an operator.
 	IngestPressureLevel() string
 	VaultSnapshots() []StatsVaultSnapshot
 	IngesterIDs() []string
@@ -153,35 +153,34 @@ type StatsProvider interface {
 	PipelineDiskSnapshots() []StatsVaultPipelineDiskSnapshot
 	LocalStorageBytes() int64
 	// StorageProtectedVaults lists vaults with a placement on a LOCALLY-
-	// hosted storage that is below its free-space floor (gastrolog-9akebz:
-	// renamed from DiskProtectedVaults — the thresholds moved from
-	// VaultConfig to the storage entity a vault's placements reference).
-	// Broadcast so every node's admission gate can honor the cluster-wide
-	// union.
+	// hosted storage that is below its free-space floor (renamed from
+	// DiskProtectedVaults — the thresholds moved from VaultConfig to the
+	// storage entity a vault's placements reference). Broadcast so every
+	// node's admission gate can honor the cluster-wide union.
 	StorageProtectedVaults() []glid.GLID
 	// SizeCappedVaults lists vaults at their local max-size bound —
 	// broadcast for the same cluster-wide admission union.
 	SizeCappedVaults() []glid.GLID
 	// AgeBoundCappedVaults lists vaults whose max-age retention bound is
 	// still violated after this node's retention runner swept and failed
-	// to clear it, on a policy with refuse=true (gastrolog-5yfaqj).
-	// Broadcast for the same cluster-wide admission union.
+	// to clear it, on a policy with refuse=true. Broadcast for the same
+	// cluster-wide admission union.
 	AgeBoundCappedVaults() []glid.GLID
 	// ChunkCountBoundCappedVaults is AgeBoundCappedVaults' max-chunks
 	// sibling.
 	ChunkCountBoundCappedVaults() []glid.GLID
 	// StorageSnapshots lists the disk-guard state of every storage LOCALLY
 	// hosted on this node — free/total, resolved thresholds, verdicts, and
-	// config-derived placements (gastrolog-3cobq4). Broadcast so the
-	// storage inspector can render every storage cluster-wide; only the
+	// config-derived placements. Broadcast so the storage
+	// inspector can render every storage cluster-wide; only the
 	// owning node can statfs its volume, so this is the sole source.
 	StorageSnapshots() []StatsStorageSnapshot
 }
 
 // RaftLivenessProvider exposes aggregated Raft WAL append latency and
-// liveness counters across every Raft instance on this node
-// (gastrolog-1io54g). Totals are pure reads; TakeWALAppendMax resets the
-// max and must only be called from the ticking path.
+// liveness counters across every Raft instance on this node. Totals are
+// pure reads; TakeWALAppendMax resets the max and must only be called from
+// the ticking path.
 type RaftLivenessProvider interface {
 	WALAppendTotals() (count, totalNanos uint64)
 	TakeWALAppendMax() (maxNanos uint64)
@@ -197,8 +196,7 @@ type RaftStatsProvider interface {
 // diagnostic log records. Satisfied by *logging.CaptureHandler; defined at
 // the consumer site to avoid importing logging. The count is a metric with
 // no operator action — it must never become an alarm or a log line, since
-// logging about dropped logs feeds the self-ingester that is dropping them
-// (gastrolog-3phtqv).
+// logging about dropped logs feeds the self-ingester that is dropping them.
 type LogDropsProvider interface {
 	DroppedCount() int64
 }
@@ -230,17 +228,17 @@ type StatsCollectorConfig struct {
 	RaftStats    RaftStatsProvider
 	Stats        StatsProvider
 	PeerConns    PeerConnSnapshotProvider // optional; nil disables peer conn stats
-	RaftLiveness RaftLivenessProvider     // optional; nil disables Raft liveness stats (gastrolog-1io54g)
+	RaftLiveness RaftLivenessProvider     // optional; nil disables Raft liveness stats
 	// ClusterRouteTotals returns the cluster-wide cumulative route counters
 	// (local node + live peers' broadcast totals). The collector windows the
 	// SUMMED counters so cluster rates and their spark history are computed
 	// server-side from system data — never accumulated client-side, and
-	// never fabricated by summing phase-skewed per-node spark arrays
-	// (gastrolog-4eh5ns). Optional; nil disables cluster route rates.
+	// never fabricated by summing phase-skewed per-node spark arrays.
+	// Optional; nil disables cluster route rates.
 	// The membership string fingerprints the contributor set behind the
 	// sums (sorted live-peer IDs + self). The summed window re-anchors on
 	// any change so contributors entering/leaving the sum can never read
-	// as traffic (gastrolog-mliwrd).
+	// as traffic.
 	ClusterRouteTotals func() (routed, matched int64, membership string)
 	Alerts             AlertProvider    // optional; nil if no alert collector
 	LogDrops           LogDropsProvider // optional; nil disables the drop counter
@@ -269,11 +267,11 @@ type StatsCollector struct {
 	// now its own series). See rateseries.go.
 	rates map[string]*rateSeries
 	// clusterRouted/clusterMatched cache the latest cluster-total route
-	// rate series for the RPC/stream builders (gastrolog-4eh5ns).
+	// rate series for the RPC/stream builders.
 	clusterRouted  *gastrologv1.ThroughputRate
 	clusterMatched *gastrologv1.ThroughputRate
 	// walMaxNanos caches the last tick's WAL append max so snapshot reads
-	// between ticks see it without consuming the accumulator (gastrolog-1io54g).
+	// between ticks see it without consuming the accumulator.
 	walMaxNanos uint64
 	// electionStormActive is the storm/calm hysteresis state for the
 	// transition-edge logging in collectRaftLiveness. Guarded by mu.
@@ -401,9 +399,9 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 			})
 		}
 
-		// Per-vault segmentation append throughput (gastrolog-4eh5ns).
-		// Rates come from rolling windows over the writer's cumulative
-		// counters; totals and queue gauges pass through as-is.
+		// Per-vault segmentation append throughput. Rates come from
+		// rolling windows over the writer's cumulative counters; totals
+		// and queue gauges pass through as-is.
 		vaultByID := make(map[string]*gastrologv1.VaultStats, len(stats.Vaults))
 		for _, v := range stats.Vaults {
 			vaultByID[string(v.Id)] = v
@@ -428,8 +426,8 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 			v.SealedRecords = c.emitRate(now, "seal:records:"+id, int64(as.SealedRecords), stepWindows)          //nolint:gosec // counters < 2^63
 			v.SealedBytes = c.emitRate(now, "seal:bytes:"+id, int64(as.SealedBytes), stepWindows)                //nolint:gosec // counters < 2^63
 
-			// Discrete pipeline stage-count milestones (gastrolog-4r784a):
-			// cumulative totals pass through as-is; rates for the throughput
+			// Discrete pipeline stage-count milestones: cumulative
+			// totals pass through as-is; rates for the throughput
 			// milestones come from the collector's rolling windows over the
 			// totals, paired two-per-window like every other rate here.
 			v.SegmentsCompletedTotal = as.SegmentsCompleted
@@ -470,7 +468,7 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 		stats.RouteStatsRouteTableActive = rs.RouteTableActive
 		c.collectClusterRouteRates(now, stepWindows)
 
-		// Node-level routing throughput windows (gastrolog-4eh5ns).
+		// Node-level routing throughput windows.
 		stats.RouteRouted = c.emitRate(now, "route:routed", rs.Routed, stepWindows)
 		stats.RouteMatched = c.emitRate(now, "route:matched", rs.Matched, stepWindows)
 		for _, vs := range rs.VaultStats {
@@ -535,7 +533,7 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 
 	// Discarded diagnostic log records: a pure counter read, no thresholds
 	// and no alarm — the operator has nothing to do about it and the health
-	// surfaces trend it (gastrolog-3phtqv).
+	// surfaces trend it.
 	if c.cfg.LogDrops != nil {
 		stats.SelfIngesterDropsTotal = uint64(max(c.cfg.LogDrops.DroppedCount(), 0))
 	}
@@ -607,8 +605,8 @@ func (c *StatsCollector) appendPeerTrafficTotals(stats *gastrologv1.NodeStats, n
 }
 
 // appendStorageStates fills stats.Storages from every locally-hosted
-// storage's guard snapshot (gastrolog-3cobq4). A separate method (rather
-// than inline in collectLocal) both keeps collectLocal's cognitive
+// storage's guard snapshot. A separate method (rather than
+// inline in collectLocal) both keeps collectLocal's cognitive
 // complexity down and mirrors appendPeerTrafficTotals/collectRaftLiveness'
 // existing shape: one self-contained call per broadcast section.
 func (c *StatsCollector) appendStorageStates(stats *gastrologv1.NodeStats) {
@@ -623,7 +621,7 @@ func (c *StatsCollector) appendStorageStates(stats *gastrologv1.NodeStats) {
 }
 
 // storageStateToProto converts one local storage guard snapshot to its wire
-// form for the NodeStats broadcast (gastrolog-3cobq4). ss.ID is the GLID's
+// form for the NodeStats broadcast. ss.ID is the GLID's
 // canonical String() form (the storage guard's map key, sid := fs.ID.String()
 // at refresh time) — the wire field carries raw GLID bytes, matching
 // FileStorage.Id and VaultInfo.Id, never the ASCII string cast that broke
@@ -709,7 +707,7 @@ func (c *StatsCollector) applyPublishedPurposeWindows(stats *gastrologv1.NodeSta
 	}
 }
 
-// Raft liveness logging thresholds (gastrolog-1io54g). Storm: sustained
+// Raft liveness logging thresholds. Storm: sustained
 // elections at a rate no healthy cluster shows (the 2026-07-04 incident ran
 // 7-13/min). Calm clears with hysteresis so a single quiet tick doesn't
 // flap the log. WAL max latency: one slow append is normal on shared
@@ -725,7 +723,7 @@ const (
 // collectRaftLiveness populates the Raft WAL latency and election liveness
 // fields and logs the degraded-liveness transitions. Threshold evaluation
 // lives here, not in a component, because the rolling-window rates only
-// exist in the collector (gastrolog-1io54g).
+// exist in the collector.
 func (c *StatsCollector) collectRaftLiveness(stats *gastrologv1.NodeStats, now time.Time, stepWindows bool) {
 	if c.cfg.RaftLiveness == nil {
 		return
@@ -760,7 +758,7 @@ func (c *StatsCollector) collectRaftLiveness(stats *gastrologv1.NodeStats, now t
 	// Election churn and WAL append latency are diagnostics, not alarms:
 	// neither has an operator action — both point at engineering-side disk
 	// contention — and both rates already ship in stats for the health
-	// surfaces (EEMUA 191 actionability test, gastrolog-29380r). Log on the
+	// surfaces (EEMUA 191 actionability test). Log on the
 	// transition edges only, with the same hysteresis the alerts had, so a
 	// sustained condition is one line, not one per tick.
 	c.mu.Lock()
@@ -810,8 +808,7 @@ func (c *StatsCollector) collectRaftLiveness(stats *gastrologv1.NodeStats, now t
 // resulting series (including spark) is this node's honest observation of
 // cluster rate at its tick cadence. Counter drops (peer TTL expiry, node
 // restart) re-anchor via the series' reset guard, and any change in the
-// contributor-set fingerprint re-anchors both series (gastrolog-4eh5ns,
-// gastrolog-mliwrd).
+// contributor-set fingerprint re-anchors both series.
 func (c *StatsCollector) collectClusterRouteRates(now time.Time, stepWindows bool) {
 	if c.cfg.ClusterRouteTotals == nil {
 		return
@@ -829,7 +826,7 @@ func (c *StatsCollector) collectClusterRouteRates(now time.Time, stepWindows boo
 // (instant/30s/1m + spark), computed server-side from summed cluster counters
 // at each stats tick. Safe between ticks; returns empty rates before the
 // first tick. Proto messages carry an internal mutex, so the copies are
-// rebuilt field-by-field rather than dereferenced (gastrolog-4eh5ns).
+// rebuilt field-by-field rather than dereferenced.
 func (c *StatsCollector) ClusterRouteRates() (routed, matched *gastrologv1.ThroughputRate) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

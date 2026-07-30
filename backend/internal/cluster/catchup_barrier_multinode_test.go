@@ -9,7 +9,7 @@ import (
 )
 
 // TestFourNodeFollowerCatchupBarrier is the multi-node regression test for the
-// event-driven startup FSM catch-up (gastrolog-1go57). On a 4-node cluster a
+// event-driven startup FSM catch-up. On a 4-node cluster a
 // follower that has joined an established cluster must, after committing a
 // catch-up barrier (store.Barrier — the primitive WaitForFSMCatchup uses),
 // have its local FSM caught up to every entry committed cluster-wide before

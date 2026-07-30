@@ -19,7 +19,7 @@ import (
 	"gastrolog/internal/glid"
 )
 
-// Streaming ImportSealed (gastrolog-4yvhh) is verified at two layers:
+// Streaming ImportSealed is verified at two layers:
 //
 //   1. handler side — Begin → Records → Commit drives the importer
 //      goroutine via a channel-backed iterator; this file pins those
@@ -213,8 +213,7 @@ func TestImportStreaming_RecordsBeforeBegin(t *testing.T) {
 // Commit (orchestrator restart, cursor read error, ctx cancel) would
 // leave the follower wedged forever — every subsequent ImportSealed
 // for the same (vault, follower) stream got rejected with "ImportBegin
-// while import for chunk X already in flight". Regression test for
-// gastrolog-5z7l8.
+// while import for chunk X already in flight".
 func TestImportStreaming_BeginPreemptsStuckPending(t *testing.T) {
 	t.Parallel()
 	// Block the importer so the first Begin is still in-flight when the
@@ -363,9 +362,8 @@ func (f *fakeClientStream) RecvMsg(m any) error {
 // TestImportSealedChunk_LeaderFrameBounds verifies the streaming-frame
 // invariant: every wire message is under importRecordsMaxBytes, even for
 // chunks that are an order of magnitude larger than the gRPC receive cap.
-// This is the regression test for gastrolog-4yvhh — pre-fix, the whole
-// chunk shipped as one message and the cluster wedged the moment any
-// chunk crossed 128 MiB.
+// Pre-fix, the whole chunk shipped as one message and the cluster wedged
+// the moment any chunk crossed 128 MiB.
 func TestImportSealedChunk_LeaderFrameBounds(t *testing.T) {
 	t.Parallel()
 

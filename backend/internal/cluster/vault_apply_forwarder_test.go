@@ -46,7 +46,7 @@ func TestVaultApplyForwarder_LeaderShutdown(t *testing.T) {
 	}
 }
 
-// --- waitForGroupApply (gastrolog-4l24u read-after-write barrier) ---
+// --- waitForGroupApply (read-after-write barrier) ---
 
 func TestWaitForGroupApply_ZeroTargetAndNilTracker(t *testing.T) {
 	t.Parallel()

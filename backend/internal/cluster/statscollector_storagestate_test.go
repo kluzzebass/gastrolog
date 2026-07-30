@@ -1,7 +1,7 @@
 package cluster
 
-// Coverage for gastrolog-3cobq4: the StatsCollector must copy a node's
-// LOCALLY-hosted storage disk-guard snapshots into the broadcast NodeStats
+// The StatsCollector must copy a node's LOCALLY-hosted
+// storage disk-guard snapshots into the broadcast NodeStats
 // as StorageState entries — the wire shape the storage inspector's
 // entity-list and per-node views both read. Mirrors
 // statscollector_diskguard_test.go's shape for the sibling vault-ID

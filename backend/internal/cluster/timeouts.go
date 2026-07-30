@@ -9,7 +9,7 @@ import "time"
 // follower: ImportBegin → ImportRecords → ImportCommit. Must cover large
 // sealed chunks (10k+ records) under ingest/replication load; 10s was
 // too short and caused mid-import abandons that cascaded into catchup
-// preempt storms (gastrolog-2o9e9).
+// preempt storms.
 const ReplicationTimeout = 60 * time.Second
 
 // ForwardingTimeout is the deadline for lightweight single-command

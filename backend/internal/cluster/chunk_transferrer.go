@@ -20,7 +20,7 @@ import (
 // stream.RecvMsg blocks forever waiting for an application-level response that
 // will never come, holding pipeline channel slots indefinitely and silently
 // wedging the entire data plane. With these in place, the wedge is bounded
-// and surfaces as a logged error within seconds. See gastrolog-4rp6i.
+// and surfaces as a logged error within seconds.
 const (
 	unaryCallTimeout  = 5 * time.Second
 	streamCallTimeout = 15 * time.Second
@@ -97,7 +97,7 @@ func (ct *ChunkTransferrer) TransferRecords(ctx context.Context, nodeID string, 
 // completes — no client-side polling. ctx (the caller's drain context)
 // bounds the wait: on cancellation the RPC is torn down and the target's
 // waiter unblocks via the same context. Replaces the former 100ms
-// ForwardListChunks poll. See gastrolog-3sdnn.
+// ForwardListChunks poll.
 func (ct *ChunkTransferrer) WaitVaultReady(ctx context.Context, nodeID string, vaultID glid.GLID) error {
 	req := &gastrologv1.ForwardWaitVaultReadyRequest{VaultId: vaultID.ToProto()}
 	resp := &gastrologv1.ForwardWaitVaultReadyResponse{}
