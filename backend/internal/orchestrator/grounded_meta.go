@@ -8,10 +8,9 @@ import (
 
 // groundChunkMeta returns a copy of a node-local chunk meta with the
 // cluster-wide lifecycle fields grounded in the replicated vault-ctl FSM
-// manifest. It is the single orchestrator-level seam that replaces per-call-site
-// OverlayFromFSM patching (gastrolog-2lfjk): the chunk manager stays local-truth
-// only, and every producer-side reader that needs cluster-wide truth grounds
-// the local meta here.
+// manifest. It is the single orchestrator-level seam for that: the chunk
+// manager stays local-truth only, and every producer-side reader that needs
+// cluster-wide truth grounds the local meta here.
 //
 // The local chunk manager only reflects THIS node's view. For the cluster-wide
 // fields that view is wrong on follower nodes: followers strip sealed_backing
@@ -23,7 +22,7 @@ import (
 //
 //   - State        cluster lifecycle (Active/Sealing/Sealed). Local meta.Sealed
 //     flips at sealActiveLocked time, but the cluster only sees the
-//     chunk as Sealed once sealToGLCB commits (gastrolog-1huz5), so
+//     chunk as Sealed once sealToGLCB commits, so
 //     producer-side iteration must branch on the FSM state to avoid
 //     jumping the gun on Sealing chunks.
 //   - Sealed       kept in sync with State (Sealing reads as not-yet-sealed) so
@@ -37,7 +36,7 @@ import (
 // Every node-local fact is preserved untouched: DiskBytes (per-node warm-cache
 // footprint), CloudBytes, and every other field the local manager owns. The
 // FSM's ManifestEntry has no per-node disk claim to overlay, so DiskBytes must
-// never be clobbered (gastrolog-33ul6h; pinned by
+// never be clobbered (pinned by
 // TestGroundMetaFromEntryDoesNotClobberLocalDiskBytes).
 //
 // When this node participates in no vault-ctl FSM for the vault (memory-mode
@@ -54,8 +53,7 @@ func (o *Orchestrator) groundChunkMeta(vaultID glid.GLID, m chunk.ChunkMeta) chu
 // chunkMetaGrounder returns groundChunkMeta bound to a single vault, for call
 // sites that hand the grounding step around as a value (streaming projections,
 // transfer planners). The returned function returns its argument unchanged
-// whenever the vault has no local vault-ctl FSM — matching the nil-OverlayFromFSM
-// behavior it replaces, so callers no longer need a nil guard.
+// whenever the vault has no local vault-ctl FSM, so callers need no nil guard.
 func (o *Orchestrator) chunkMetaGrounder(vaultID glid.GLID) func(chunk.ChunkMeta) chunk.ChunkMeta {
 	return func(m chunk.ChunkMeta) chunk.ChunkMeta {
 		return o.groundChunkMeta(vaultID, m)
@@ -81,12 +79,11 @@ func groundMetaFromEntry(m chunk.ChunkMeta, e vaultctlfsm.ManifestEntry) chunk.C
 // a chunk meta, mirroring the read core's dual (manifestEntryByChunk) scoped to
 // one vault:
 //
-//  1. The per-vault FSM via the group manager — resolvable on any voter
-//     (gastrolog-292yi), even on a node hosting no instance for the vault. Every
-//     node is a voter of every vault-ctl group, so this is the authoritative
-//     cluster-wide source. A present-but-absent chunk (FSM has the vault, not
-//     this chunk) reports false so local truth is preserved — matching the
-//     retired OverlayFromFSM, which read this same FSM.
+//  1. The per-vault FSM via the group manager — resolvable on any voter, even
+//     on a node hosting no instance for the vault. Every node is a voter of
+//     every vault-ctl group, so this is the authoritative cluster-wide source.
+//     A present-but-absent chunk (FSM has the vault, not this chunk) reports
+//     false so local truth is preserved.
 //  2. The local instance's own vault-ctl FSM callback (ManifestEntry), for a
 //     node with an instance whose group-manager handle isn't reachable here —
 //     the same replicated FSM, read through the instance closure.

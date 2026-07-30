@@ -14,7 +14,7 @@ import (
 )
 
 // TestIndexReaderMetadataBoundaryTier covers the byte-free tier of the
-// FSM-grounded IndexReader (gastrolog-enfwd): a sealed monotonic chunk
+// FSM-grounded IndexReader: a sealed monotonic chunk
 // answers rank/pos 0 for timestamps strictly before IngestStart from
 // replicated metadata alone — on any voter, with no local ITSI bytes.
 // Everything at or past IngestStart, non-monotonic chunks, empty chunks
@@ -99,7 +99,7 @@ func TestIndexReaderMetadataBoundaryTier(t *testing.T) {
 }
 
 // TestIndexReaderChunkRootTier covers the byte-local GLCB fallback of the
-// FSM-grounded IndexReader (gastrolog-nlepn): a sealed pipeline chunk whose
+// FSM-grounded IndexReader: a sealed pipeline chunk whose
 // GLCB sits in this node's vault chunk root but is served by no chunk or
 // index manager must still resolve IngestTS rank/pos lookups — and must
 // report unresolvable (never fabricate) when the bytes are absent.
@@ -185,8 +185,8 @@ func TestIndexReaderChunkRootTier(t *testing.T) {
 		t.Error("FindIngestRank(unknown chunk) resolved")
 	}
 
-	// Bytes deleted (retention, eviction): unresolvable again — the
-	// FSM-estimate residual (gastrolog-1952x) is the caller's business.
+	// Bytes deleted (retention, eviction): unresolvable again — falling
+	// back to the FSM estimate is the caller's business.
 	if err := os.Remove(dst); err != nil {
 		t.Fatalf("remove GLCB: %v", err)
 	}

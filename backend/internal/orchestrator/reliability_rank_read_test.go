@@ -5,13 +5,13 @@ import (
 	"time"
 )
 
-// TestOrchRel_RankLookupsAcrossVoters covers the FSM-grounded IndexReader
-// (gastrolog-nlepn) on a real cluster: vault B is homed on nodes {0,1,2};
+// TestOrchRel_RankLookupsAcrossVoters covers the FSM-grounded IndexReader on
+// a real cluster: vault B is homed on nodes {0,1,2};
 // node 3 is the ingest origin and a vault-ctl voter without an instance.
 // Every home — leader or follower — must resolve exact IngestTS ranks for
 // the sealed chunks from its locally materialized bytes; the instance-less
 // voter must report the lookup unresolvable rather than fabricate an answer
-// (its residual is the FSM estimate, gastrolog-1952x).
+// (its residual is the FSM estimate).
 func TestOrchRel_RankLookupsAcrossVoters(t *testing.T) {
 	if testing.Short() {
 		t.Skip("multi-node reliability test")
@@ -24,7 +24,7 @@ func TestOrchRel_RankLookupsAcrossVoters(t *testing.T) {
 	)
 	v := h.vaults[1]
 	homeIdxs := []int{0, 1, 2}
-	// Symmetric seeding (gastrolog-292yi): every node votes on vault B's
+	// Symmetric seeding: every node votes on vault B's
 	// control-plane group, homes and instance-less node 3 alike.
 	voterIdxs := []int{0, 1, 2, 3}
 	outsiderID := h.nodeIDs[3]
@@ -88,7 +88,7 @@ func TestOrchRel_RankLookupsAcrossVoters(t *testing.T) {
 		}
 	}
 
-	// gastrolog-enfwd: the byte-free FSM-metadata boundary answer DOES
+	// The byte-free FSM-metadata boundary answer DOES
 	// resolve on the instance-less voter — a timestamp strictly before a
 	// sealed monotonic chunk's IngestStart is exactly rank 0, the same
 	// answer the chunk's own ITSI section gives on the homes.

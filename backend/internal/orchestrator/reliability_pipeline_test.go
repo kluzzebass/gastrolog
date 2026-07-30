@@ -1,6 +1,6 @@
 package orchestrator_test
 
-// Rubicon E3 (gastrolog-18f9r): 4+ node cluster acceptance for the V3
+// Rubicon E3: 4+ node cluster acceptance for the V3
 // pipeline. These tests run the FULL production write path across real
 // in-process nodes: ingest on any node → routing → durable local segment →
 // distribution publish through vault-ctl Raft → home-side collection over the
@@ -181,7 +181,7 @@ func countHeadSegmentFiles(root string) (int, error) {
 }
 
 // assertHeadBounded checks head/ does not grow unbounded relative to the
-// vault-ctl completed-segment registry (gastrolog-3vlse).
+// vault-ctl completed-segment registry.
 func (h *orchRelHarness) assertHeadBounded(v vaultSpec, homeIdxs []int, registrySegments int, allowance int) {
 	h.t.Helper()
 	for _, idx := range homeIdxs {
@@ -546,7 +546,7 @@ func TestOrchPipeline_IngesterReassignmentKeepsFlowing(t *testing.T) {
 }
 
 // pipelinePlannerHealth summarizes vault-ctl FSM pipeline state on the leader
-// for soak assertions (gastrolog-1cedo).
+// for soak assertions.
 type pipelinePlannerHealth struct {
 	RegistrySegments int
 	RegistryRecords  int64
@@ -590,8 +590,7 @@ func pipelinePlannerHealthFromFSM(sub *vaultctlfsm.FSM) pipelinePlannerHealth {
 // TestOrchPipeline_SustainedIngestManifestKeepsPace runs steady synthetic
 // ingest through the full pipeline and asserts the vault leader's planner
 // keeps the open manifest near rotation policy instead of letting millions
-// of registry records stall behind a tiny manifest (gastrolog-1cedo /
-// regression for gastrolog-3bn3q).
+// of registry records stall behind a tiny manifest.
 func TestOrchPipeline_SustainedIngestManifestKeepsPace(t *testing.T) {
 	if testing.Short() {
 		t.Skip("multi-node pipeline soak test")
