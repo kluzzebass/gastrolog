@@ -28,7 +28,7 @@ func TestGLCBDecodeLRUEvictsUnpinned(t *testing.T) {
 	}
 	defer func() { _ = cm.Close() }()
 	// Force eviction on the second decode. Per-Manager, so parallel tests
-	// keep their own default cap (gastrolog-1woee2).
+	// keep their own default cap.
 	cm.glcbDecodeCap = 1
 
 	if err := cm.RegisterExternalGLCB(idA, glcbA, chunk.ExternalGLCBInfo{RecordCount: 4}); err != nil {

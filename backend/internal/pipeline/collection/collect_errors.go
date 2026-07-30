@@ -46,8 +46,7 @@ func retryableCollectErr(err error) bool {
 
 // retryableCollectSuberr classifies one failure by collection-owned
 // sentinels via errors.Is — never by transport status types or error prose,
-// so rewording a message elsewhere cannot flip classification
-// (gastrolog-466kq5).
+// so rewording a message elsewhere cannot flip classification.
 func retryableCollectSuberr(err error) bool {
 	if errors.Is(err, ErrCorruptSegment) {
 		// Checksum verification failed: the serving holder has wrong bytes.
@@ -60,8 +59,8 @@ func retryableCollectSuberr(err error) bool {
 		return true
 	}
 	if errors.Is(err, ErrPreHeadPurged) {
-		// A concurrent release purge deleted the pre-head file mid-promote
-		// (gastrolog-2as548). The next pass re-reads registry truth: a
+		// A concurrent release purge deleted the pre-head file mid-promote.
+		// The next pass re-reads registry truth: a
 		// released segment drops out of Roll; a still-assigned one re-pulls.
 		// Explicit even though the wrapped ENOENT already matches the
 		// os.ErrNotExist arm below — classification must not depend on how

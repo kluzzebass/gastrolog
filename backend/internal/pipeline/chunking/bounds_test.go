@@ -84,8 +84,7 @@ func TestSliceRecordBoundsMatchesRecordScan(t *testing.T) {
 }
 
 // BenchmarkSliceRecordBounds measures the planner's bounds pass — the scan
-// that ran hot enough on a loaded home to be its largest allocation source
-// (gastrolog-11y2iv increment 3).
+// that ran hot enough on a loaded home to be its largest allocation source.
 func BenchmarkSliceRecordBounds(b *testing.B) {
 	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
 	segID := glid.New()

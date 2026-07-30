@@ -13,8 +13,7 @@ import (
 
 // TestSealToGLCB_ProducesValidBlob verifies that sealToGLCB writes a
 // data.glcb file in the chunk directory and that it parses cleanly via
-// the chunkcloud reader. Capability test for the gastrolog-24m1t step
-// 7c machinery — sealToGLCB is not yet wired into the seal pipeline.
+// the chunkcloud reader.
 func TestSealToGLCB_ProducesValidBlob(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -86,9 +85,8 @@ func TestSealToGLCB_ProducesValidBlob(t *testing.T) {
 }
 
 // TestPostSealProcess_ProducesGLCB verifies that after PostSealProcess
-// runs, the chunk directory contains a data.glcb file alongside the
-// multi-file artifacts. Stage 2a of gastrolog-24m1t step 7c — sealToGLCB
-// is now wired in but read paths still consume multi-file.
+// runs, the chunk directory contains a committed data.glcb file and no
+// leftover data.glcb.tmp.
 func TestPostSealProcess_ProducesGLCB(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -131,8 +129,7 @@ func TestPostSealProcess_ProducesGLCB(t *testing.T) {
 
 // TestLoadChunkMetaFromGLCB verifies that a sealed chunk's metadata can
 // be reconstructed from its data.glcb file alone, without reading
-// idx.log. Capability test for the loadExisting migration in stage 3b
-// of gastrolog-24m1t step 7c.
+// idx.log — the metadata source loadExisting relies on.
 func TestLoadChunkMetaFromGLCB(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -181,13 +178,11 @@ func TestLoadChunkMetaFromGLCB(t *testing.T) {
 	}
 }
 
-// TestLoadExisting_GLCBOnlyChunk simulates the future state where
-// sealed chunks live as data.glcb only (no multi-file artifacts). The
-// test seals a chunk via the normal pipeline, then deletes the
-// multi-file artifacts manually, restarts the manager, and verifies
-// the sealed chunk is loaded from data.glcb. Regression-protection for
-// gastrolog-24m1t step 7c stage 3b — once multi-file generation goes
-// away, this is the steady-state load path.
+// TestLoadExisting_GLCBOnlyChunk covers the steady-state sealed layout:
+// data.glcb only, no multi-file artifacts. The test seals a chunk via
+// the normal pipeline, removes any remaining multi-file artifacts,
+// restarts the manager, and verifies the sealed chunk is loaded from
+// data.glcb rather than being treated as cloud-backed-only.
 func TestLoadExisting_GLCBOnlyChunk(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -304,18 +299,15 @@ func TestSealToGLCB_RefusesUnsealedChunk(t *testing.T) {
 	}
 }
 
-// TestSealToGLCB_StaleTmpAcrossRestartSweptAndSealSucceeds verifies the
-// gastrolog-66hmx3 fix for the gastrolog-5do8sh gap 7d wedge: a stale
-// data.glcb.tmp left by a crash mid-seal must not permanently block the
-// chunk from ever producing its data.glcb.
-//
-// Before the fix: cleanOrphanTempFiles only matched a ".compress-" prefix
-// or a ".tmp." substring — "data.glcb.tmp" matched neither, so it survived
-// every restart and every retry failed O_EXCL forever.
-//
-// After the fix: cleanOrphanTempFiles matches the dataGLCBTmpFileName
-// constant explicitly, so a restart's loadExisting sweep removes the
-// stale tmp and the next sealToGLCB succeeds.
+// TestSealToGLCB_StaleTmpAcrossRestartSweptAndSealSucceeds pins the
+// anti-wedge contract: a stale data.glcb.tmp left by a crash mid-seal must
+// not permanently block the chunk from ever producing its data.glcb.
+// cleanOrphanTempFiles matches the dataGLCBTmpFileName constant
+// explicitly, so a restart's loadExisting sweep removes the stale tmp and
+// the next sealToGLCB succeeds. A sweep pattern that misses it (matching
+// only a ".compress-" prefix or a ".tmp." substring — "data.glcb.tmp"
+// matches neither) lets the tmp survive every restart, failing every
+// retry's O_EXCL forever.
 func TestSealToGLCB_StaleTmpAcrossRestartSweptAndSealSucceeds(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -369,13 +361,12 @@ func TestSealToGLCB_StaleTmpAcrossRestartSweptAndSealSucceeds(t *testing.T) {
 }
 
 // TestSealToGLCB_StaleTmpWithoutRestartUnlinksAndRetries verifies the
-// gastrolog-66hmx3 in-process resilience half of the fix: sealToGLCB does
-// not need a process restart to recover from a stale tmp. Holding the
-// per-chunk write lock across the tmp-file section (see sealToGLCB) makes
-// any O_EXCL "file exists" it observes provably a leftover from a run that
-// already exited — no other in-process caller can be mid-write on the
-// tmpPath while the lock is held — so it is always safe to unlink and
-// retry once within the same call.
+// in-process resilience half: sealToGLCB does not need a process restart
+// to recover from a stale tmp. Holding the per-chunk write lock across the
+// tmp-file section (see sealToGLCB) makes any O_EXCL "file exists" it
+// observes provably a leftover from a run that already exited — no other
+// in-process caller can be mid-write on the tmpPath while the lock is held
+// — so it is always safe to unlink and retry once within the same call.
 func TestSealToGLCB_StaleTmpWithoutRestartUnlinksAndRetries(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

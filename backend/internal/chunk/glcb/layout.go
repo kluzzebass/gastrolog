@@ -37,7 +37,7 @@ type blobLayoutMeta struct {
 	IndexSize   uint32
 	// IngestTSMonotonic records at build time whether ingest timestamps are
 	// non-decreasing in merge (EventID) order. Persisted so recovery never
-	// re-derives it by touching every record frame (gastrolog-699s7p).
+	// re-derives it by touching every record frame.
 	IngestTSMonotonic bool
 }
 

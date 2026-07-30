@@ -10,9 +10,9 @@ import (
 	"gastrolog/internal/pipeline/collection"
 )
 
-// TestCollectOnceRacesWorkerLifecycle reproduces the interleaving behind
-// gastrolog-54kqlj: CollectOnce used to read v.stopWorker after releasing
-// m.mu, racing startWorkerLocked's write of that same field under m.mu.
+// TestCollectOnceRacesWorkerLifecycle reproduces the interleaving that
+// catches an unsynchronized v.stopWorker read: reading that field after
+// releasing m.mu races startWorkerLocked's write of it under m.mu.
 //
 // Each vault is registered BEFORE Run so v.stopWorker starts nil and only
 // transitions to non-nil when Run's startup loop actually runs (a write

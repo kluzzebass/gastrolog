@@ -1,8 +1,8 @@
 package chunking
 
-// Coverage for gastrolog-4w1vt: RequiredHolders is mandatory at chunking
-// registration (a nil field used to silently disable the release/purge holder
-// gate), the unresolved-placement state fails every gate closed, and the
+// Coverage for the holder gate: RequiredHolders is mandatory at chunking
+// registration and rejected outright, the unresolved-placement state fails
+// every gate closed, and the
 // explicit NoRequiredHolders opt-out reproduces the ungated single-node
 // behavior deliberately rather than by omission.
 

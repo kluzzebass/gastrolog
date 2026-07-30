@@ -12,7 +12,7 @@ import (
 // decodeDictFromBuf decodes dictionary entries from a byte buffer. It is
 // the heap-decoding counterpart of chunk.NewMmapStringDict, kept only as
 // the fuzz target below — production readers parse the dict in place from
-// the blob mapping (gastrolog-2v9d67).
+// the blob mapping.
 func decodeDictFromBuf(buf []byte, dictEntries uint32) (*chunk.StringDict, error) {
 	dict := chunk.NewStringDict()
 	off := 0

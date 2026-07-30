@@ -62,13 +62,13 @@ type vaultWriter struct {
 	dropped *atomic.Uint64 // manager-wide dropped-records counter
 
 	// Cumulative throughput counters for the stats broadcast; the collector's
-	// rolling windows turn them into per-second rates (gastrolog-4eh5ns).
+	// rolling windows turn them into per-second rates.
 	recordsAppended atomic.Uint64 // frames appended to the working segment
 	bytesAppended   atomic.Uint64 // frame body bytes appended
 	recordsDurable  atomic.Uint64 // records released by a successful group commit
 	// segmentsCompleted counts working/ → completed/ promotions (the first
-	// pipeline stage-count milestone, gastrolog-4r784a). Includes segments
-	// recovered from an orphaned working/ file at startup.
+	// pipeline stage-count milestone). Includes segments recovered from an
+	// orphaned working/ file at startup.
 	segmentsCompleted atomic.Uint64
 
 	// Resolved per-vault commit/fsync tuning (Config default + VaultConfig override).
@@ -283,7 +283,7 @@ func (w *vaultWriter) shutdownCommit(b *commitBatch) {
 // handleInput encodes and appends one input under the active commit policy,
 // downgrading the writer instead of killing the loop on disk errors: a dead
 // writer with a still-open bounded input queue wedges routing — and then the
-// node — once the queue fills (gastrolog-1c9f5l).
+// node — once the queue fills.
 func (w *vaultWriter) handleInput(b *commitBatch, in Input) {
 	if w.degraded {
 		w.rejectDegraded(in)
@@ -426,10 +426,12 @@ func (w *vaultWriter) tryReopen(b *commitBatch) {
 
 // commitBatch accumulates encoded frames and their parked acks between
 // fsyncs. Frames stay in memory until commit flushes them with ONE data
-// write + ONE header rewrite (gastrolog-1ojsm6) — the previous per-record
-// 3-pwrite shape capped a writer at ~25K rec/s. The loss window is
-// unchanged: acks release only after the commit fsync, and un-acked
-// records were never durable before their fsync either.
+// write + ONE header rewrite. Writing per record instead costs three
+// serialized pwrites each (length prefix, body, header rewrite), which
+// measured out at ~25K rec/s per vault writer. The loss window is unchanged:
+// acks release only after the
+// commit fsync, and un-acked records were never durable before their fsync
+// either.
 type commitBatch struct {
 	w           *vaultWriter
 	timer       *time.Timer
@@ -603,8 +605,7 @@ func (w *vaultWriter) maybeCompleteNoSync() error {
 }
 
 func (w *vaultWriter) maybeCompleteLocked() error {
-	// In-memory append anchor: the per-commit Stat syscall bought nothing
-	// (gastrolog-1ojsm6).
+	// Size from the in-memory append anchor — no Stat syscall per commit.
 	if w.shouldComplete(w.seg.DataSize()) {
 		return w.rotateSegmentLocked()
 	}
@@ -634,8 +635,7 @@ func (w *vaultWriter) rotateSegmentLocked() error {
 	}
 	// Hand the finalized segment's batch buffer to its successor: a fresh
 	// multi-MB buffer per rotation was the top allocation site under pour
-	// load (gastrolog-11y2iv). Optional interface — test fakes don't carry
-	// scratch.
+	// load. Optional interface — test fakes don't carry scratch.
 	var scratch []byte
 	if sc, ok := w.seg.(scratchCarrier); ok {
 		scratch = sc.TakeScratch()
@@ -664,11 +664,10 @@ func (w *vaultWriter) completeWorkingSegmentLocked() error {
 	}
 	// Durability barrier AFTER Finalize: it truncates, writes the index
 	// tails, sorts via writable mmap, and rewrites the header. Syncing
-	// before it (as this used to) left all of that unsynced at publish —
-	// after a crash the registry-referenced segment could fail
-	// segment.Open on the origin and collectors got non-retryable
-	// ErrCorruptSegment (gastrolog-4mqy06). DisableFsync vaults opt out
-	// of durability wholesale (dev/load testing only).
+	// before it leaves all of that unsynced at publish: after a crash the
+	// registry-referenced segment can fail segment.Open on the origin and
+	// collectors get non-retryable ErrCorruptSegment. DisableFsync vaults
+	// opt out of durability wholesale (dev/load testing only).
 	if !w.disableFsync {
 		if err := w.seg.Sync(); err != nil {
 			return err

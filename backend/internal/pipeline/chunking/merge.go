@@ -89,12 +89,11 @@ func (h *mergeHeap) pop() mergeEntry {
 
 // loadSpanCursors maps every referenced segment read-only (one mapping per
 // distinct path, shared across spans) and returns a closer that unmaps them
-// all. Mapped access replaces the previous ~3 preads per merged record, and
-// skips the full-file CRC re-verification that segment.Open performs — each
-// segment was already verified when it entered this node, and the built
-// GLCB carries its own digest (gastrolog-1rca2d). The closer also fixes the
-// long-standing leak of one open segment handle per merged segment: the
-// previous OrderedIndex opens were never closed.
+// all. Mapped access avoids ~3 preads per merged record and skips the
+// full-file CRC re-verification that segment.Open performs — each segment
+// was already verified when it entered this node, and the built GLCB carries
+// its own digest. The closer is what keeps the merge from leaking one open
+// segment handle per merged segment.
 func loadSpanCursors(refs []SpanRef) ([]spanCursor, func(), error) {
 	segments := make(map[string]*segment.MappedSegment, len(refs))
 	closeAll := func() {
@@ -149,7 +148,7 @@ type mergeStep struct {
 // This is the single ordering authority for open-chunk reads: the forward
 // view stream (MergeSpanViews) and the positional reader (OpenChunkReader)
 // both consume it, so record-at-position can never disagree with iteration
-// order (gastrolog-54mjat).
+// order.
 func mergeSpanEntries(cursors []spanCursor) iter.Seq2[mergeStep, error] {
 	return func(yield func(mergeStep, error) bool) {
 		entries, err := seedMergeEntries(cursors)
@@ -185,7 +184,7 @@ func mergeSpanEntries(cursors []spanCursor) iter.Seq2[mergeStep, error] {
 // only; each frame is parsed when its entry wins. Views alias the span
 // mappings and are valid only within the yield call — the GLCB build
 // transcodes them immediately, which is the point: no per-record attrs
-// map or Raw copy on the bulk path (gastrolog-11y2iv).
+// map or Raw copy on the bulk path.
 func MergeSpanViews(refs []SpanRef) iter.Seq2[record.View, error] {
 	return func(yield func(record.View, error) bool) {
 		if len(refs) == 0 {

@@ -11,8 +11,8 @@ import (
 	"gastrolog/internal/pipeline/segmentation"
 )
 
-// TestPublishIngressBacklogReadsHeadersOnly is the gastrolog-faj2yv acceptance
-// test: a restart backlog of completed/ segments must publish without a single
+// TestPublishIngressBacklogReadsHeadersOnly is the acceptance test: a
+// restart backlog of completed/ segments must publish without a single
 // full-verify segment.Open — the stranded rescan and publish staging read only
 // the fixed header of each file.
 func TestPublishIngressBacklogReadsHeadersOnly(t *testing.T) {
@@ -83,7 +83,7 @@ func TestPublishIngressBacklogReadsHeadersOnly(t *testing.T) {
 
 // TestPublishCompletedZeroHeaderReadsHeaderOnly covers the metadataForPublish
 // fallback: a completed segment delivered without a decoded header must fill
-// metadata from a fixed-header read, not a full-verify Open (gastrolog-faj2yv).
+// metadata from a fixed-header read, not a full-verify Open.
 func TestPublishCompletedZeroHeaderReadsHeaderOnly(t *testing.T) {
 	// Not parallel: asserts on the segment package's process-wide counters.
 	vaultID := glid.New()

@@ -1,12 +1,12 @@
 package segment_test
 
-// gastrolog-1vepg0: the segment record checksum must be content-sensitive.
-// The previous rolling CRC32 consumed lenPrefix ++ body ++ bodyCRC per frame,
-// and CRC(M ++ CRC(M)) cancels the content contribution by CRC linearity —
-// the checksum pinned only frame-length structure (count, lengths,
-// truncation), so a same-length content substitution with a fixed-up frame
-// CRC passed segment.Open, publish, and collection's published-checksum
-// verify. These tests pin content sensitivity.
+// The segment record checksum must be content-sensitive, not just a witness
+// to frame-length structure (count, lengths, truncation): a same-length
+// content substitution with a fixed-up frame CRC must fail segment.Open,
+// publish, and collection's published-checksum verify. A rolling CRC32 over
+// lenPrefix ++ body ++ bodyCRC cannot do this — CRC(M ++ CRC(M)) cancels the
+// content contribution by CRC linearity. These tests pin content
+// sensitivity.
 
 import (
 	"encoding/binary"

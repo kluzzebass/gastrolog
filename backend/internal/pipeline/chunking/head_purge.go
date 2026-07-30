@@ -9,9 +9,9 @@ import (
 
 // flushHeadPurgeForManifest removes head/ copies for manifest segment IDs once
 // this home has built the sealed GLCB. Purging before build completes leaves
-// "no such file" build failures on follower homes (gastrolog-3vlse). Holder
-// receipts are committed before purge so ReleaseSegments is not blocked on the
-// vault-ctl leader missing its own ack (gastrolog-3vlse follow-up).
+// "no such file" build failures on follower homes. Holder receipts are
+// committed before purge so ReleaseSegments is not blocked on the vault-ctl
+// leader missing its own ack.
 //
 // On multi-home vaults, purge is also gated on every placement holder having
 // committed a receipt. Origins promote completed→head (rename), so head/ is
@@ -25,13 +25,13 @@ func (v *vaultChunking) flushHeadPurgeForManifest(pending *vaultctlfsm.OpenChunk
 	if !v.progress.alreadyBuilt(key) {
 		return
 	}
-	// No blocking collect here (gastrolog-1b51yf): this used to run a full
-	// CollectOnce pass to freshen holder receipts before the purge decision,
-	// which serialized the seal queue behind collection — one sealed chunk
-	// per full pass under backlog. Receipts arrive via collection's own
-	// wake-driven passes; a purge refused now is retried by the
-	// release-driven purge (OnReleaseSegments → drainReleasedPurge) and by
-	// later manifests referencing the same segment.
+	// No blocking collect here: a full CollectOnce pass to freshen holder
+	// receipts before the purge decision serialized the seal queue behind
+	// collection — one sealed chunk per full pass under backlog. Receipts
+	// arrive via collection's own wake-driven passes; a purge refused now is
+	// retried by the release-driven purge (OnReleaseSegments →
+	// drainReleasedPurge) and by later manifests referencing the same
+	// segment.
 	required, resolved := v.requiredHolders()
 	minChunk := v.plannerMinHolders()
 	fsm := v.fsm()
@@ -44,8 +44,8 @@ func (v *vaultChunking) flushHeadPurgeForManifest(pending *vaultctlfsm.OpenChunk
 		}
 		// Per-segment detail at Debug: purges are a healthy-path event that
 		// fires per segment per node — Info per segment floods the log at
-		// production ingest rates (gastrolog-67c9b0 forensics only need the
-		// trail when purge behavior is in question).
+		// production ingest rates (forensics only need the trail when purge
+		// behavior is in question).
 		v.logger().Debug("purging head segment after build",
 			"segment", id, "chunk", pending.ChunkID)
 		if err := paths.PurgeHeadStaging(v.cfg.VaultRoot, id); err != nil {
@@ -58,8 +58,8 @@ func (v *vaultChunking) flushHeadPurgeForManifest(pending *vaultctlfsm.OpenChunk
 		purged++
 	}
 	if failed > 0 {
-		// One line per batch, not per segment (gastrolog-67c9b0 precedent):
-		// head copies that fail to purge stay on disk and grow head/.
+		// One line per batch, not per segment: head copies that fail to
+		// purge stay on disk and grow head/.
 		v.logger().Warn("head purge failed after build — head copies remain on disk",
 			"chunk", pending.ChunkID, "failed", failed, "error", firstErr)
 	}
@@ -72,7 +72,7 @@ func (v *vaultChunking) flushHeadPurgeForManifest(pending *vaultctlfsm.OpenChunk
 
 // drainReleasedPurge purges head/ copies for segment IDs queued by the
 // wake-only ReleaseSegments FSM callback. Runs on the worker goroutine —
-// never on the Raft apply goroutine (gastrolog-38snf4 teardown deadlock).
+// never on the Raft apply goroutine (teardown deadlocks otherwise).
 func (v *vaultChunking) drainReleasedPurge() {
 	v.purgeMu.Lock()
 	ids := v.pendingPurge
@@ -120,7 +120,7 @@ func (v *vaultChunking) purgeReleasedHead(ids []glid.GLID) {
 // Skipped until the vault-ctl FSM has replayed: on process start the registry
 // can be empty briefly while head/ still holds the prior process's files. Purging
 // then makes the inspector show zero head counts until collection re-pulls every
-// segment (gastrolog-3vlse follow-up).
+// segment.
 func (v *vaultChunking) purgeStaleHeadCatchUp() {
 	if v.fsm() != nil && !v.fsm().Ready() {
 		return
@@ -146,8 +146,8 @@ func (v *vaultChunking) purgeStaleHeadCatchUp() {
 			continue
 		}
 		// Full-queue reference scan, not just the head-of-queue manifest:
-		// a segment can be referenced only by a later queued sealed manifest
-		// (gastrolog-67c9b0).
+		// a segment can be referenced only by a later queued sealed
+		// manifest.
 		if fsm.SegmentReferencedInManifest(id) {
 			continue
 		}

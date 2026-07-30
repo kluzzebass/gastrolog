@@ -13,7 +13,7 @@ import (
 )
 
 // TestPlanCatchUpConcurrentWithPlanOnceNoRace pins the concurrency contract
-// planCatchUp and planStepLocked share (gastrolog-cqz1ef): planCatchUp's own
+// planCatchUp and planStepLocked share: planCatchUp's own
 // newPlannerPass snapshot must be taken under planMu, exactly like the
 // pass=nil path inside planStepLocked, because newPlannerPass reaches
 // noteUnderReplicated — documented "caller holds planMu" — which mutates
@@ -26,9 +26,9 @@ import (
 // runs on the per-vault worker's wake loop (manager.go startWorkerLocked ->
 // runBuildPass). Nothing serializes the two call sites against each other;
 // only planMu does. This test reproduces that shape directly against the
-// exported Manager API and relies on `-race` to catch a regression: before
-// the fix, planCatchUp read/wrote v.underReplicatedAlerted outside planMu
-// while a concurrent PlanOnce touched the same field under the lock.
+// exported Manager API and relies on `-race` to catch a regression: an
+// unlocked planCatchUp read/write of v.underReplicatedAlerted racing a
+// concurrent PlanOnce that touches the same field under the lock.
 func TestPlanCatchUpConcurrentWithPlanOnceNoRace(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)

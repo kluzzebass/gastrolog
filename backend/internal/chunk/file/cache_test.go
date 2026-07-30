@@ -81,10 +81,10 @@ func ingestAndUpload(t *testing.T, cm *Manager, n int) chunk.ChunkID {
 	return chunk.ChunkID{}
 }
 
-// TestUploadKeepsLocalGLCB asserts the post-step-7k contract: after a chunk
+// TestUploadKeepsLocalGLCB asserts the warm-cache contract: after a chunk
 // is sealed and uploaded to the cloud, its local data.glcb file remains in
-// place inside <chunkDir> as the warm cache. Step 7j stopped removing it;
-// step 7k removed the parallel CacheDir copy.
+// place inside <chunkDir> as the warm cache — there is no parallel
+// CacheDir copy.
 func TestUploadKeepsLocalGLCB(t *testing.T) {
 	t.Parallel()
 	cm, _ := newCacheTestManager(t)
@@ -141,8 +141,8 @@ func TestCacheHitAvoidsCloudDownload(t *testing.T) {
 
 // TestColdCacheDownloadsToChunkDir simulates an evicted / never-cached
 // cloud-backed chunk: deleting the in-tree data.glcb forces openCloudCursor to
-// download the blob fresh, which post step 7k lands at <chunkDir>/data.glcb
-// so the next read goes through the warm-cache fast path.
+// download the blob fresh, which lands at <chunkDir>/data.glcb so the next
+// read goes through the warm-cache fast path.
 func TestColdCacheDownloadsToChunkDir(t *testing.T) {
 	t.Parallel()
 	cm, store := newCacheTestManager(t)
@@ -223,8 +223,8 @@ func (v *staticVerifier) ExpectedDigest(chunk.ChunkID) ([32]byte, bool) {
 	return v.digest, v.have
 }
 
-// TestColdCacheVerifiesBlobDigest covers the integrity check landed in
-// gastrolog-grnc3: a cold-cache cloud download is rejected when the GLCB
+// TestColdCacheVerifiesBlobDigest covers the blob-digest integrity
+// check: a cold-cache cloud download is rejected when the GLCB
 // whole-blob digest read from the TOC footer doesn't match what the FSM
 // stamped at upload time. Without verification the warm cache would
 // happily seed itself with corrupted bytes and re-serve them forever.
@@ -271,9 +271,9 @@ func TestColdCacheVerifiesBlobDigest(t *testing.T) {
 	}
 
 	// Cold-cache + wrong expected digest: the download must be rejected and
-	// the tmp file cleaned up. Phase 6 (gastrolog-69fd5) removed the
-	// range-request fallback — a digest mismatch now surfaces an error
-	// rather than silently switching to per-frame range reads.
+	// the tmp file cleaned up. There is no range-request fallback — a
+	// digest mismatch surfaces an error rather than silently switching to
+	// per-frame range reads.
 	if err := os.Remove(glcbPath); err != nil {
 		t.Fatal(err)
 	}

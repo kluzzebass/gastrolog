@@ -15,21 +15,20 @@ import (
 type OrderedIndex struct {
 	sf *segment.File
 	// scratch backs ViewAt frame reads, reused across calls so bounds
-	// scans allocate nothing per record (gastrolog-11y2iv).
+	// scans allocate nothing per record.
 	scratch []byte
 	// filePositions caches every record's frame offset in EventID order from
 	// one bulk index read. Per-record paths (the GLCB build merge's ViewAt,
 	// RecordAt) previously issued an index pread PER RECORD on top of the
 	// frame read — half the build's syscalls, and under the shared-disk dev
 	// cluster those blocking preads park OS threads and starve raft
-	// heartbeat goroutines (gastrolog-5kcq5q / gastrolog-2m0f75).
+	// heartbeat goroutines.
 	filePositions []uint32
 	// frameLens caches every record's on-disk frame length in EventID order,
 	// derived from one bulk index read: frames are appended back-to-back, so
 	// each length is the gap to the next frame offset (the last runs to the
 	// index region). Built lazily on the first FrameByteLenAt — the planner's
-	// slice-sizing loop previously issued two preads PER RECORD
-	// (gastrolog-2m0f75).
+	// slice-sizing loop previously issued two preads PER RECORD.
 	frameLens []uint32
 }
 

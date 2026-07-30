@@ -38,12 +38,11 @@ const (
 	ingestBTFileName = "ingest.bt"
 	sourceBTFileName = "source.bt"
 
-	// dataGLCBFileName is the canonical sealed-chunk artifact under the
-	// chunk redesign (gastrolog-2pw28): a single self-contained, byte-
-	// identical-across-replicas, integrity-checked GLCB blob. Sibling
-	// files in the chunk directory may exist for node-local artifacts
-	// (custom indexes, build-time ledgers) but only data.glcb is the
-	// replicable / cloud-uploadable shape.
+	// dataGLCBFileName is the canonical sealed-chunk artifact: a single
+	// self-contained, byte-identical-across-replicas, integrity-checked
+	// GLCB blob. Sibling files in the chunk directory may exist for
+	// node-local artifacts (custom indexes, build-time ledgers) but only
+	// data.glcb is the replicable / cloud-uploadable shape.
 	dataGLCBFileName    = "data.glcb"
 	dataGLCBTmpFileName = "data.glcb.tmp"
 
@@ -51,16 +50,16 @@ const (
 	// onto every CmdUploadChunk. Only scheme 0 ("vault-<vault>/<chunk>.glcb")
 	// exists today; future schemes (date-prefixed, hash-sharded,
 	// multi-bucket) get new values without rendering existing FSM entries
-	// ambiguous. See gastrolog-grnc3.
+	// ambiguous.
 	currentKeyScheme uint8 = 0
 )
 
 // Per-call timeouts on cloud storage operations that run on the post-seal
 // pipeline or hold the chunk-manager mutex. Without these, a slow or
 // unresponsive S3 can block the post-seal pipeline indefinitely, causing
-// ingest backpressure that cascades up through the ingester. See
-// gastrolog-21xs8. The S3 client's own retry logic compounds delays
-// rather than capping them, so we need explicit per-call deadlines.
+// ingest backpressure that cascades up through the ingester. The S3
+// client's own retry logic compounds delays rather than capping them, so
+// we need explicit per-call deadlines.
 //
 // Declared as vars (not consts) so tests can monkey-patch shorter values
 // for deterministic timeout-regression tests without burning 60+ seconds
@@ -118,8 +117,7 @@ type Config struct {
 	// CloudServiceID is the FSM-snapshot identifier for the cloud service
 	// this Manager is currently wired to. Recorded onto every CmdUploadChunk
 	// so a chunk's authoritative store survives a vault reconfiguration that
-	// repoints CloudStore. Zero value when CloudStore is nil. See
-	// gastrolog-grnc3.
+	// repoints CloudStore. Zero value when CloudStore is nil.
 	CloudServiceID glid.GLID
 
 	// CloudReadOnly, when true, enables cloud store reads (cursor, cache)
@@ -130,7 +128,7 @@ type Config struct {
 	// CacheEviction selects the warm-cache eviction policy: "lru" (default)
 	// or "ttl". The two are mutually exclusive — operators pick one mode,
 	// not both. Empty string is treated as "lru" so a vault with a budget
-	// but no explicit policy still gets eviction. See gastrolog-2idw8.
+	// but no explicit policy still gets eviction.
 	CacheEviction string
 
 	// CacheBudgetBytes is the soft cap on total bytes occupied by warm-cache
@@ -151,9 +149,9 @@ type Config struct {
 
 	// IntegrityVerifier, when non-nil, is consulted on every cold-cache
 	// cloud download to verify the GLCB whole-blob digest matches the
-	// FSM-recorded value (gastrolog-grnc3). A mismatch causes the
-	// downloaded file to be deleted and the read to error — the next
-	// retry re-fetches. nil disables verification (acceptable in
+	// FSM-recorded value. A mismatch causes the downloaded file to be
+	// deleted and the read to error — the next retry re-fetches.
+	// nil disables verification (acceptable in
 	// single-node tests; required in production cluster setups).
 	IntegrityVerifier chunk.IntegrityVerifier
 }
@@ -186,7 +184,7 @@ type Manager struct {
 	// (<homeRoot>/chunks/<id>/data.glcb), not chunkDir(id). The read path
 	// (glcbPath → openLocalGLCBCursor / hasLocalGLCB) consults this map so
 	// OpenCursor serves these chunks without copying or relocating bytes.
-	// Protected by mu. See gastrolog-2kysn (Rubicon E1).
+	// Protected by mu.
 	externalGLCB map[chunk.ChunkID]string
 
 	// externalResolver resolves a meta-lookup miss to an external pipeline
@@ -195,9 +193,9 @@ type Manager struct {
 	// manifest says the chunk is sealed here and the file exists. Called
 	// under m.mu — implementations must be lock-light (an FSM read and a
 	// stat; never re-enter this manager) and must not do heavy I/O.
-	// Replaces the boot-eager registration scan: a chunk is servable the
-	// moment its manifest entry and file both exist, regardless of process
-	// history or sweep timing. Protected by mu.
+	// A chunk is servable the moment its manifest entry and file both
+	// exist, regardless of process history or sweep timing. Protected by
+	// mu.
 	externalResolver func(chunk.ChunkID) (string, chunk.ExternalGLCBInfo, bool)
 
 	// externalLister enumerates the external-GLCB chunk IDs the resolver would
@@ -205,16 +203,14 @@ type Manager struct {
 	// enumeration surfaces the same chunks the by-ID resolver serves: a
 	// match-all search or holder-scope gate walks the manager rather than
 	// naming a chunk, so without this a restarted home's sealed chunks stay
-	// invisible to enumeration until some other path registers them
-	// (gastrolog-3s26vr). Same lock contract as externalResolver: called under
-	// m.mu, must be lock-light and never re-enter this manager. Protected by mu.
+	// invisible to enumeration until some other path registers them. Same
+	// lock contract as externalResolver: called under m.mu, must be
+	// lock-light and never re-enter this manager. Protected by mu.
 	externalLister func() []chunk.ChunkID
 
 	// cloudBackedResolver resolves a meta-lookup miss to a cloud-backed chunk
 	// on demand from the replicated vault-ctl FSM manifest — the single fill
-	// path for cloudIdx entries this node did not upload itself
-	// (gastrolog-5bnxc). It replaces the two eager FSM mirrors (the snapshot
-	// projection pass and the per-apply onUpload registration): a chunk is
+	// path for cloudIdx entries this node did not upload itself. A chunk is
 	// servable the moment the FSM says CloudBacked, regardless of whether it
 	// arrived via live CmdUploadChunk replication or a wholesale snapshot
 	// install. Resolution registers metadata only (blob key derivation stays
@@ -230,9 +226,9 @@ type Manager struct {
 	// consults it so enumeration surfaces the same chunks the by-ID resolver
 	// serves — without it, a follower that never uploaded would hide
 	// FSM-known cloud-backed chunks from every List()-walking consumer until
-	// something happened to name them (the gastrolog-3s26vr failure shape,
-	// cloud edition). Same lock contract as cloudBackedResolver. Protected
-	// by mu.
+	// something happened to name them (the post-restart zero-results
+	// failure shape, cloud edition). Same lock contract as
+	// cloudBackedResolver. Protected by mu.
 	cloudBackedLister func() []chunk.ChunkID
 
 	// glcbMapped holds one whole-file mmap per sealed chunk for local data.glcb.
@@ -263,9 +259,9 @@ type Manager struct {
 	// take a read lock; compression's atomic rename and retention's
 	// os.RemoveAll take the write lock. Without this, an in-flight
 	// cursor.Next could SIGBUS when the underlying file is unlinked or
-	// renamed out from under its mmap region — the gastrolog-26zu1
-	// node-killing crash. The per-chunk granularity preserves
-	// concurrency between mutators on different chunks.
+	// renamed out from under its mmap region — a node-killing crash.
+	// The per-chunk granularity preserves concurrency between mutators
+	// on different chunks.
 	//
 	// Lifecycle: created on first chunkLockFor(id) call, removed only
 	// after the chunk is fully deleted (deleteInternal). Map entries
@@ -281,14 +277,14 @@ type Manager struct {
 	// pick the coldest entries when the cache exceeds its budget. In-memory
 	// only — never persisted; eviction signals don't outlive the process,
 	// per the chunk-redesign doc's "cache eviction signals are node-local,
-	// not FSM state" rule. See gastrolog-2idw8.
+	// not FSM state" rule.
 	lastAccessMu sync.Mutex
 	lastAccess   map[chunk.ChunkID]time.Time
 
 	// cloudDegraded tracks whether the cloud store is currently unreachable.
 	// Set on any failed cloud operation (init, upload, download, list);
 	// cleared on any successful one. The orchestrator polls this to raise
-	// or clear an operator-visible alert. See gastrolog-68fqk.
+	// or clear an operator-visible alert.
 	cloudDegraded    atomic.Bool
 	cloudDegradedErr atomic.Value // stores the last cloud error (string) for alert messages
 
@@ -357,7 +353,6 @@ type chunkMeta struct {
 	// edge ingesters (RELP, Syslog, Fluent, etc.) routinely stamp
 	// arbitrary IngestTS values or deliver out of order, and downstream
 	// relays may happen to receive records in IngestTS order.
-	// See gastrolog-66b7x.
 	ingestTSMonotonic bool
 
 	cloudBacked bool // true = chunk lives in cloud, not on local disk
@@ -373,14 +368,14 @@ type chunkMeta struct {
 	// captured at sealToGLCB time. Distinct from logicalDataBytes which on
 	// the legacy multi-file path summed raw + attr + idx — different meaning.
 	// Used by uploadToCloud to populate cloud BlobMeta.RawBytes without
-	// re-parsing the seekable record body. See gastrolog-24m1t step 7h.
+	// re-parsing the seekable record body.
 	rawBytes int64
 
 	// blobDigest is the GLCB whole-blob hash from the TOC footer:
 	// sha256(header ‖ section_hashes_in_TOC_order ‖ TOC_bytes). Captured
 	// at sealToGLCB time so AnnounceUpload can publish it onto the FSM
 	// entry without re-reading the local file. Verified on every cache
-	// re-fetch (gastrolog-grnc3).
+	// re-fetch.
 	blobDigest [32]byte
 }
 
@@ -509,7 +504,7 @@ func NewManager(cfg Config) (*Manager, error) {
 			// works independently. Existing cloud-backed chunks will be discovered
 			// on the next reconciliation sweep when S3 comes online. This
 			// prevents the entire vault from being permanently skipped on
-			// this node. See gastrolog-68fqk.
+			// this node.
 			logger.Warn("cloud-backed chunk discovery failed, continuing without cloud index",
 				"error", err)
 			manager.cloudDegraded.Store(true)
@@ -540,10 +535,10 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 		}
 	}
 
-	// Defense-in-depth (gastrolog-uccg6): refuse to append to an
-	// active chunk whose meta is marked sealed. EnsureSealed clears
-	// m.active when force-demoting, so this branch should be
-	// unreachable in steady state — but if any future path leaves
+	// Defense-in-depth: refuse to append to an active chunk whose
+	// meta is marked sealed. EnsureSealed clears m.active when
+	// force-demoting, so this branch should be unreachable in steady
+	// state — but if any future path leaves
 	// m.active pointing at a sealed chunk (e.g. a partial demote, a
 	// race with a concurrent SetSealed call), the rejection is the
 	// last line of defense before records silently land on a frozen
@@ -726,7 +721,7 @@ func (m *Manager) updateActiveState(record chunk.Record, rawLen, attrLen uint64)
 	// and the running max equals IngestTS. Each subsequent Append flips
 	// the flag to false if the record's IngestTS predates the current max
 	// (i.e. records are no longer in IngestTS-monotonic order). The flag
-	// only flips one direction (true → false). See gastrolog-66b7x.
+	// only flips one direction (true → false).
 	if m.active.meta.ingestStart.IsZero() {
 		m.active.meta.ingestTSMonotonic = true
 	} else if m.active.meta.ingestTSMonotonic && record.IngestTS.Before(m.active.meta.ingestEnd) {
@@ -834,9 +829,9 @@ func (m *Manager) lookupMeta(id chunk.ChunkID) *chunkMeta {
 }
 
 // lookupCloudMetaLocked serves the cloud tier of lookupMeta: the cloudIdx
-// entry when present, else a lazy FSM-grounded fill (gastrolog-5bnxc) — the
-// cloud index is a cache of the replicated manifest's CloudBacked entries,
-// populated on miss. A successful resolve is memoized by the cloudIdx insert;
+// entry when present, else a lazy FSM-grounded fill — the cloud index is a
+// cache of the replicated manifest's CloudBacked entries, populated on
+// miss. A successful resolve is memoized by the cloudIdx insert;
 // a failed resolve memoizes nothing, so an entry that appears in the FSM
 // later resolves then. hit=true means the cloud tier answered (meta may
 // still be nil on a registration error, which ends the lookup — a chunk the
@@ -945,10 +940,10 @@ func (m *Manager) List() ([]chunk.ChunkMeta, error) {
 // would serve but that no path has registered into m.metas yet. Enumeration
 // (match-all search, holder scope) walks the manager rather than naming a
 // chunk, so a restarted home's sealed chunks would otherwise be invisible to
-// List even though the by-ID resolver serves them — the total-resolution
-// stall of gastrolog-3s26vr. Resolving memoizes into m.metas, so this scan
-// pays its per-chunk cost once after (re)start, not on every List. Caller
-// holds m.mu.
+// List even though the by-ID resolver serves them — a total-resolution
+// stall that serves zero records after restart. Resolving memoizes into
+// m.metas, so this scan pays its per-chunk cost once after (re)start, not
+// on every List. Caller holds m.mu.
 func (m *Manager) appendExternalListedMetasLocked(out []chunk.ChunkMeta, cloudIDs map[chunk.ChunkID]struct{}) []chunk.ChunkMeta {
 	if m.externalLister == nil || m.externalResolver == nil {
 		return out
@@ -1020,10 +1015,9 @@ func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 		// Local data.glcb is the warm cache for cloud-backed chunks: when
 		// the leader uploads or any node downloads, the same file lives at
 		// <chunkDir>/data.glcb and the read goes through the sealed-local
-		// path with no S3 round-trip. Falls back to range-request reads
+		// path with no S3 round-trip. Falls back to a full-blob download
 		// when the local copy was evicted under disk pressure or never
-		// existed (follower that hasn't seen this chunk yet). See
-		// gastrolog-24m1t step 7j.
+		// existed (follower that hasn't seen this chunk yet).
 		//
 		// Archived chunks deliberately bypass the local cache: archive
 		// semantics require an explicit Restore before reads, and serving
@@ -1049,12 +1043,10 @@ func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 		return cursor, err
 	}
 
-	// Prefer data.glcb when present. After PostSealProcess (post-seal
-	// pipeline stage 7c stage 2a), every sealed chunk has a data.glcb
-	// alongside the multi-file artifacts; the GLCB cursor reads through
-	// a whole-file mmap with the same per-chunk read lock as multi-file
-	// mmap cursors (release-on-Close). Multi-file remains the fallback
-	// until step 7c stage 3 deletes that path. See gastrolog-24m1t.
+	// Prefer data.glcb when present: PostSealProcess gives every sealed
+	// chunk one, and the GLCB cursor reads through a whole-file mmap with
+	// the same per-chunk read lock as multi-file mmap cursors
+	// (release-on-Close). Multi-file is the fallback.
 	if sealed && m.hasLocalGLCB(id) {
 		if cursor, err := m.openLocalGLCBCursor(id); err == nil {
 			return cursor, nil
@@ -1067,9 +1059,9 @@ func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	// rename / os.RemoveAll, so an in-flight cursor's mmap regions can't
 	// be invalidated under it. The lock release is wired into the
 	// cursor's Close so it tracks the cursor's actual lifetime — the
-	// indexer Build pass (gastrolog-26zu1's SIGBUS site) holds its
-	// cursor across multiple Next() calls and per-record CPU work, so
-	// release-on-Close is the right hook. See gastrolog-26zu1.
+	// indexer Build pass — the SIGBUS site — holds its cursor across
+	// multiple Next() calls and per-record CPU work, so release-on-Close
+	// is the right hook.
 	chunkLock := m.chunkLockFor(id)
 	chunkLock.RLock()
 
@@ -1079,8 +1071,8 @@ func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	// initial snapshot and the RLock acquisition: if cloudBacked is
 	// now true the local files are gone and we MUST route to the
 	// cloud cursor instead of constructing an mmap cursor on
-	// already-deleted files (gastrolog-2owzp). ErrChunkNotFound is
-	// the outcome whether the meta vanished pre- or mid-OpenCursor.
+	// already-deleted files. ErrChunkNotFound is the outcome whether
+	// the meta vanished pre- or mid-OpenCursor.
 	m.mu.Lock()
 	meta = m.lookupMeta(id)
 	cloudBackedNow := meta != nil && meta.cloudBacked
@@ -1098,13 +1090,12 @@ func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	// Re-check for data.glcb under the read lock, mirroring the cloudBacked
 	// re-check above — and use the RE-READ sealed flag, not the entry
 	// snapshot: an imported chunk seals (FSM announce) and converts to GLCB
-	// concurrently with readers, and since sealToGLCB started holding the
-	// per-chunk write lock across the GLCB write (gastrolog-66hmx3) a
-	// reader that decided "multi-file, unsealed" before the conversion
-	// queues behind it and can wake AFTER removeLocalDataFiles dropped
-	// raw.log/idx.log — opening files that no longer exist. If the GLCB
-	// appeared while we waited, route to it; it is the canonical sealed
-	// artifact.
+	// concurrently with readers, and since sealToGLCB holds the per-chunk
+	// write lock across the GLCB write, a reader that decided
+	// "multi-file, unsealed" before the conversion queues behind it and
+	// can wake AFTER removeLocalDataFiles dropped raw.log/idx.log —
+	// opening files that no longer exist. If the GLCB appeared while we
+	// waited, route to it; it is the canonical sealed artifact.
 	if sealedNow && m.hasLocalGLCB(id) {
 		chunkLock.RUnlock()
 		if cursor, err := m.openLocalGLCBCursor(id); err == nil {
@@ -1161,8 +1152,7 @@ func (m *Manager) chunkLockFor(id chunk.ChunkID) *sync.RWMutex {
 //
 // Holds the per-chunk read lock for the scan duration so concurrent
 // CompressChunk / deleteInternal can't invalidate the mmap regions
-// scanAttrsSealed relies on. Same coordination as OpenCursor; see
-// gastrolog-26zu1.
+// scanAttrsSealed relies on. Same coordination as OpenCursor.
 func (m *Manager) ScanAttrs(id chunk.ChunkID, startPos uint64, fn func(writeTS time.Time, attrs chunk.Attributes) bool) error {
 	// Snapshot meta flags under the lock — reading them after unlocking
 	// races with CompressChunk/uploadToCloud which mutate them.
@@ -1197,9 +1187,8 @@ func (m *Manager) ScanAttrs(id chunk.ChunkID, startPos uint64, fn func(writeTS t
 	}
 
 	// Sealed chunks with data.glcb: route through the GLCB cursor so the
-	// per-chunk artifact is the source of truth (gastrolog-24m1t step 7c
-	// stage 3). Multi-file fallback below stays in place until step 7d
-	// retires the multi-file generation entirely.
+	// per-chunk artifact is the source of truth. The multi-file path
+	// below is the fallback for chunks without one.
 	if sealed && m.hasLocalGLCB(id) {
 		return scanAttrsViaGLCB(m, id, startPos, fn)
 	}
@@ -1234,7 +1223,7 @@ func (m *Manager) ScanAttrs(id chunk.ChunkID, startPos uint64, fn func(writeTS t
 // projecting each one to (writeTS, attrs) for the caller. Used by the
 // histogram's level-breakdown path, which never inspects message bodies.
 //
-// The GLCB is uncompressed (gastrolog-69fd5), so the record section is a plain
+// The GLCB is uncompressed, so the record section is a plain
 // [frameLen][frame] sequence read straight off the whole-file mapping. Rather
 // than decode full records (which clones each raw payload off the mapping — see
 // cloneMmapRecord), this drives the AttrsProjectionSource seam: per record it
@@ -1283,11 +1272,10 @@ func scanAttrsViaGLCB(m *Manager, id chunk.ChunkID, startPos uint64, fn func(wri
 //   - tombstoned in the FSM → SweepLocalOrphans deletes (positive
 //     proof of finalize-delete);
 //   - RecordCount == 0 ghost (rotation artifact never received
-//     records) → SweepLocalOrphans deletes per gastrolog-66b7x;
+//     records) → SweepLocalOrphans deletes;
 //   - RecordCount > 0 unknown orphan → SweepLocalOrphans alerts
 //     and PRESERVES the on-disk files per the no-auto-delete-of-
-//     unknown-orphans invariant (docs/disk-authority-audit.md;
-//     gastrolog-3y8py).
+//     unknown-orphans invariant (docs/disk-authority-audit.md).
 //   - chunks present in the FSM manifest but absent on disk:
 //     SweepMissingReplicas requests catchup from a peer.
 //
@@ -1335,13 +1323,12 @@ func (m *Manager) loadExisting() error {
 		}
 	}
 
-	// gastrolog-51gme step 8 deleted the "multiple unsealed → seal all
-	// but newest" startup heuristic that lived here. Sealed-state
-	// projection is now FSM-driven via VaultLifecycleReconciler.onSeal +
-	// ReconcileFromSnapshot, which call chunk.SealEnsurer.EnsureSealed
-	// on this Manager once the vault sub-FSM has loaded. Until that
-	// projection runs, multiple unsealed chunks are tolerated; the
-	// newest is opened as active and the older ones stay as
+	// Sealed-state projection is FSM-driven via
+	// VaultLifecycleReconciler.onSeal + ReconcileFromSnapshot, which call
+	// chunk.SealEnsurer.EnsureSealed on this Manager once the vault
+	// sub-FSM has loaded — startup does not guess which unsealed chunks
+	// to seal. Until that projection runs, multiple unsealed chunks are
+	// tolerated; the newest is opened as active and the older ones stay
 	// unsealed-on-disk until the FSM tells us they were sealed.
 	if len(unsealedIDs) > 1 {
 		slices.SortFunc(unsealedIDs, func(a, b chunk.ChunkID) int {
@@ -1367,8 +1354,8 @@ func (m *Manager) loadExisting() error {
 // These can be left behind by crashed compression jobs (.compress-*),
 // index builds or cloud-cache downloads (*.tmp.*), a crashed sealToGLCB
 // (the fixed-name dataGLCBTmpFileName, matched exactly rather than by
-// pattern — gastrolog-66hmx3), or a crashed sealToGLCB's glcb.Writer
-// record-staging file (glcb.RecordsStagingPrefix*). Best-effort: errors
+// pattern), or a crashed sealToGLCB's glcb.Writer record-staging file
+// (glcb.RecordsStagingPrefix*). Best-effort: errors
 // are logged but not returned.
 //
 // This predicate must track every writer that drops a temp file into a
@@ -1428,17 +1415,14 @@ func isOrphanTempFileName(name string) bool {
 // Does NOT fire AnnounceSeal (the FSM already has CmdSealChunk
 // applied; a second announce would duplicate the Raft entry).
 //
-// Force-demote-always rationale: a prior design (gastrolog-uccg6-followup)
-// split this into "steady-state skip-active" + "recovery force-demote"
-// on the theory that the leader's record-stream would swap the
-// follower's active pointer in steady state. That assumption is
-// topology-dependent — true for ingest vaults fed by continuous appends,
-// false for downstream vaults fed only by transitions. The split left
-// receipt-protocol delete obligations bouncing off ErrActiveChunk
-// forever on retention-fed vaults (gastrolog-2yeht). Always-force-demote
-// is the correct invariant for every topology: FSM is authoritative,
-// local active must yield. See gastrolog-51gme step 8 / gastrolog-uccg6 /
-// gastrolog-2yeht.
+// Force-demote-always rationale: whether the leader's record-stream
+// swaps a follower's active pointer is topology-dependent — true for
+// ingest vaults fed by continuous appends, false for downstream vaults
+// fed only by transitions. Skipping the active chunk in "steady state"
+// therefore leaves receipt-protocol delete obligations bouncing off
+// ErrActiveChunk forever on retention-fed vaults. Always-force-demote is
+// the correct invariant for every topology: FSM is authoritative, local
+// active must yield.
 func (m *Manager) EnsureSealed(id chunk.ChunkID) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -1777,12 +1761,9 @@ func (m *Manager) rebuildBTrees(id chunk.ChunkID, idxFile *os.File, recordCount 
 
 // loadChunkMetaFromGLCB reads a sealed chunk's metadata directly from its
 // data.glcb file via the chunkcloud reader. Used at startup for chunks
-// that have only data.glcb in the directory (no multi-file artifacts) —
-// once stage 3b retires multi-file generation, this becomes the primary
-// load path. See gastrolog-24m1t.
-//
-// Capability-only: not yet wired into loadExisting. The current load
-// path still goes through loadChunkMeta (idx.log-based).
+// that have only data.glcb in the directory (no multi-file artifacts);
+// loadExisting reaches it via recoverChunkWithoutIdxLog. Chunks that
+// still have idx.log load through loadChunkMeta instead.
 func (m *Manager) loadChunkMetaFromGLCB(id chunk.ChunkID) (*chunkMeta, error) {
 	path := filepath.Join(m.chunkDir(id), dataGLCBFileName)
 	blob, err := glcb.OpenMappedBlob(filepath.Clean(path))
@@ -1824,7 +1805,7 @@ func (m *Manager) loadChunkMetaFromGLCB(id chunk.ChunkID) (*chunkMeta, error) {
 // recoverChunkWithoutIdxLog handles a chunk directory whose idx.log is
 // missing — three cases:
 //
-//   - data.glcb is present: stage-3b layout (sealed chunk lives as a
+//   - data.glcb is present: GLCB-only layout (sealed chunk lives as a
 //     single GLCB blob); loadChunkMetaFromGLCB reconstructs the meta.
 //   - The directory has other files (e.g. an index sidecar): cloud-backed
 //     chunk where the cloud blob is the source of truth and only the
@@ -1898,7 +1879,7 @@ func (m *Manager) loadChunkMeta(id chunk.ChunkID) (*chunkMeta, error) {
 	// source-WriteTS order — so the physical first/last records are not
 	// the IngestTS extrema. Scanning all idx entries is O(records) but
 	// the idx file is small (12 bytes/entry) and only loaded once per
-	// chunk on manager startup. See gastrolog-66b7x.
+	// chunk on manager startup.
 	if err := scanTSBounds(idxFile, recordCount, meta); err != nil {
 		return nil, fmt.Errorf("scan TS bounds for chunk %s: %w", id, err)
 	}
@@ -1942,7 +1923,6 @@ func (m *Manager) readFirstLastEntries(idxFile *os.File, recordCount uint64) (Id
 // not match Ingest/Source TS order (so first+last physical entries are not
 // the TS extrema). The monotonicity flag is also derived here — true if and
 // only if every entry's IngestTS is >= its predecessor in physical order.
-// See gastrolog-66b7x.
 func scanTSBounds(idxFile *os.File, recordCount uint64, meta *chunkMeta) error {
 	if recordCount == 0 {
 		return nil
@@ -2209,12 +2189,11 @@ func (m *Manager) sealLocked() error {
 // rest of the cluster learns about the seal via vault-ctl Raft.
 //
 // When announce is false, the announcer is NOT called: this path is
-// for FSM-driven projection (gastrolog-uccg6 / gastrolog-51gme step 8),
-// where the chunk is already sealed in the FSM and proposing
-// CmdSealChunk again would duplicate the Raft entry. EnsureSealed
-// uses this when projecting an FSM-sealed chunk that happens to be
-// the local active pointer — the offline-during-seal restart case
-// from the original incident.
+// for FSM-driven projection, where the chunk is already sealed in the
+// FSM and proposing CmdSealChunk again would duplicate the Raft entry.
+// EnsureSealed uses this when projecting an FSM-sealed chunk that
+// happens to be the local active pointer — the case where this node was
+// offline while the rest of the cluster sealed it.
 //
 // Caller must hold m.mu.
 func (m *Manager) sealActiveLocked(announce bool) error {
@@ -2275,9 +2254,9 @@ func (m *Manager) sealActiveLocked(announce bool) error {
 
 	if announce && m.cfg.Announcer != nil {
 		ann := m.cfg.Announcer
-		// Phase 3 (gastrolog-1huz5): emit BeginSeal here only; the chunk
-		// is now Sealing on the FSM. The matching AnnounceSeal fires
-		// from PostSealProcess after sealToGLCB has committed the GLCB,
+		// Emit BeginSeal here only; the chunk is now Sealing on the FSM.
+		// The matching AnnounceSeal fires from PostSealProcess after
+		// sealToGLCB has committed the GLCB,
 		// so the Sealing window covers real assembly time. Local files
 		// stay readable through the window — m.active is cleared but
 		// the on-disk raw.log/idx.log/attr.log/dict.log remain, and
@@ -2413,8 +2392,7 @@ func (s *importState) writeRecord(rec chunk.Record) error {
 		// ImportRecords (cross-node sealed-chunk replication, MoveChunk,
 		// catchup paths). Without these, follower-replicated chunks land
 		// with zero EventIDs and histogram dedup can't match them
-		// against leader-original records → silent double-count. See
-		// gastrolog-5qwkw.
+		// against leader-original records → silent double-count.
 		IngestSeq:  rec.EventID.IngestSeq,
 		IngesterID: rec.EventID.IngesterID,
 		NodeID:     rec.EventID.NodeID,
@@ -2466,7 +2444,7 @@ func (s *importState) writeRecord(rec chunk.Record) error {
 // If id is the zero ChunkID, a new ID is generated. Passing the ID directly
 // rather than via SetNextChunkID avoids a race where a concurrent Append
 // (via openLocked) could consume the pending ID and leave the import to
-// allocate a fresh, untracked one — see gastrolog-11rzz.
+// allocate a fresh, untracked one.
 func (m *Manager) ImportRecords(id chunk.ChunkID, next chunk.RecordIterator) (chunk.ChunkMeta, error) {
 	m.mu.Lock()
 	if m.closed {
@@ -2571,7 +2549,7 @@ func (m *Manager) ImportRecords(id chunk.ChunkID, next chunk.RecordIterator) (ch
 // the cloud store IS reachable, the blob just isn't there. This happens
 // routinely when an FSM-listed chunk's data was never uploaded (or was
 // already deleted) and we hit it via search fan-out. Without this carve-out
-// every such miss would raise the cloud-unreachable alert (gastrolog-3ukgz).
+// every such miss would raise the cloud-unreachable alert.
 func (m *Manager) trackCloudResult(err error) {
 	if err != nil && !errors.Is(err, blobstore.ErrBlobNotFound) {
 		m.cloudDegraded.Store(true)
@@ -2655,7 +2633,6 @@ func (m *Manager) Close() error {
 // after Close() — the manager must not be used afterward. Used when a vault
 // is deleted, to clean up leftover files (.lock, cloud.idx) and the vault
 // directory itself so removed vaults don't accumulate as orphans.
-// See gastrolog-42j4n.
 func (m *Manager) RemoveDir() error {
 	if !m.closed {
 		return errors.New("manager must be closed before RemoveDir")
@@ -2887,7 +2864,6 @@ func (m *Manager) FindStartPosition(id chunk.ChunkID, ts time.Time) (uint64, boo
 // ScanActiveIngestTS iterates the active chunk's IngestTS B+ tree, calling
 // cb for each entry's IngestTS in IngestTS-sorted order. No attr or raw
 // reads. Returns ErrChunkNotFound if id is not the current active chunk.
-// See gastrolog-66b7x.
 func (m *Manager) ScanActiveIngestTS(id chunk.ChunkID, cb func(tsNanos int64) bool) error {
 	m.mu.Lock()
 	active := m.active
@@ -2911,7 +2887,7 @@ func (m *Manager) ScanActiveIngestTS(id chunk.ChunkID, cb func(tsNanos int64) bo
 // ScanActiveByIngestTS iterates the active chunk's records in physical order,
 // exposing IngestTS + Attributes per record. Single pass over idx + attr; the
 // dict is loaded once at the start. Returns ErrChunkNotFound if id is not the
-// current active chunk. See gastrolog-66b7x.
+// current active chunk.
 func (m *Manager) ScanActiveByIngestTS(id chunk.ChunkID, cb func(ingestTS time.Time, attrs chunk.Attributes) bool) error {
 	m.mu.Lock()
 	active := m.active
@@ -2929,7 +2905,7 @@ func (m *Manager) ScanActiveByIngestTS(id chunk.ChunkID, cb func(ingestTS time.T
 // for the active chunk. Returns (0, false, nil) for sealed chunks (cloud or
 // local) — the index manager owns those via OpenIngestMmap, which reads the
 // embedded ITSI section out of data.glcb regardless of cloud-backed status
-// (the warm cache makes both look identical). See gastrolog-1dg3i.
+// (the warm cache makes both look identical).
 func (m *Manager) FindIngestStartPosition(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
 	m.mu.Lock()
 	active := m.active
@@ -2953,9 +2929,8 @@ func (m *Manager) FindIngestStartPosition(id chunk.ChunkID, ts time.Time) (uint6
 // only equal to rank for monotonic chunks (callers gate on
 // meta.IngestTSMonotonic). Returns (0, false, nil) for sealed chunks —
 // caller falls through to IndexManager.FindIngestEntryIndex which mmaps
-// the ITSI section directly from data.glcb (cloud or local — same path
-// post-gastrolog-24m1t step 7j warm cache; see gastrolog-1dg3i).
-// See gastrolog-66b7x.
+// the ITSI section directly from data.glcb (cloud or local — the warm
+// cache makes both the same path).
 func (m *Manager) FindIngestEntryIndex(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
 	m.mu.Lock()
 	active := m.active
@@ -3059,8 +3034,8 @@ func (m *Manager) HasLocalContent(id chunk.ChunkID) bool {
 	if !meta.cloudBacked {
 		return true
 	}
-	// In-tree warm cache (gastrolog-24m1t step 7j): the local data.glcb is
-	// the chunk's authoritative cache for cloud-backed reads.
+	// In-tree warm cache: the local data.glcb is the chunk's
+	// authoritative cache for cloud-backed reads.
 	return m.hasLocalGLCB(id)
 }
 
@@ -3092,7 +3067,7 @@ func (m *Manager) HeadCloudBlob(id chunk.ChunkID) error {
 // FindSourceStartPosition returns the earliest record position with SourceTS >= ts.
 // Active chunks: B+ tree lookup. Sealed (local or cloud-warm-cached): caller
 // falls through to IndexManager.FindSourceStartPosition (which mmaps the
-// embedded STSI section out of data.glcb). See gastrolog-1dg3i.
+// embedded STSI section out of data.glcb).
 func (m *Manager) FindSourceStartPosition(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
 	m.mu.Lock()
 	active := m.active
@@ -3111,16 +3086,13 @@ func (m *Manager) FindSourceStartPosition(id chunk.ChunkID, ts time.Time) (uint6
 	return uint64(it.Value()), true, nil
 }
 
-// LoadIngestEntries / LoadSourceEntries / .ts-cache plumbing was retired
-// in gastrolog-1dg3i: the histogram and search-side TS-ordered scanners
-// now read the embedded ITSI/STSI sections directly from data.glcb via
-// filetsidx.OpenIngestMmap / OpenSourceMmap (handled by the IndexManager).
-// Cloud-backed chunks reach the same path through their warm-cache data.glcb;
-// when the warm cache is cold the histogram falls back to FSM-proportional
-// distribution rather than fetching the index section from S3. Removed:
-// tsCacheDir / tsCachePath / searchTSCacheFile / downloadTSIndex /
-// readTSEntriesFromFile / findCloudTSRank / findCloudTSPosition /
-// loadTSEntries.
+// TS-ordered scanning has no plumbing here: the histogram and
+// search-side scanners read the embedded ITSI/STSI sections directly
+// from data.glcb via filetsidx.OpenIngestMmap / OpenSourceMmap (handled
+// by the IndexManager). Cloud-backed chunks reach the same path through
+// their warm-cache data.glcb; when the warm cache is cold the histogram
+// falls back to FSM-proportional distribution rather than fetching the
+// index section from S3.
 
 // ReadWriteTimestamps reads the WriteTS for each given record position in a chunk.
 // Opens idx.log once and reads only the 8-byte WriteTS field for each position.
@@ -3194,7 +3166,7 @@ func (m *Manager) ReadWriteTimestamps(id chunk.ChunkID, positions []uint64) ([]t
 //
 // Delete does not announce: chunk deletion propagates cluster-wide through
 // the vault-ctl FSM's receipt protocol (VaultLifecycleReconciler), never
-// through a per-delete metadata announce. See gastrolog-lh0rp.
+// through a per-delete metadata announce.
 func (m *Manager) Delete(id chunk.ChunkID) error {
 	return m.deleteInternal(id)
 }
@@ -3220,8 +3192,8 @@ func (m *Manager) deleteInternal(id chunk.ChunkID) error {
 		<-ch.(chan struct{})
 	}
 
-	// Per-chunk write lock (gastrolog-26zu1): block until in-flight
-	// cursor reads on this chunk drain before unlinking files. Without
+	// Per-chunk write lock: block until in-flight cursor reads on this
+	// chunk drain before unlinking files. Without
 	// this, an indexer cursor mid-Next() could SIGBUS when os.RemoveAll
 	// invalidates its mmap regions.
 	chunkLock := m.chunkLockFor(id)
@@ -3255,7 +3227,7 @@ func (m *Manager) deleteInternal(id chunk.ChunkID) error {
 		// Remove the directory unconditionally — DeleteSilent's contract is
 		// "leave no trace of this chunk." Returning ErrChunkNotFound without
 		// checking disk leaves orphan directories that fail the cluster-
-		// transition invariant (see gastrolog-11rzz).
+		// transition invariant.
 		dir := m.chunkDir(id)
 		m.mu.Unlock()
 		if _, statErr := os.Stat(dir); statErr == nil {
@@ -3275,7 +3247,7 @@ func (m *Manager) deleteInternal(id chunk.ChunkID) error {
 		// Release the lock before the S3 API call — cloud deletes can take
 		// hundreds of milliseconds and would block all Appends. Bound the
 		// call so an unresponsive S3 can't hold the mu re-acquisition
-		// indefinitely. See gastrolog-21xs8.
+		// indefinitely.
 		key := m.blobKey(id)
 		m.mu.Unlock()
 		ctx, cancel := context.WithTimeout(context.Background(), cloudDeleteTimeout)
@@ -3288,14 +3260,14 @@ func (m *Manager) deleteInternal(id chunk.ChunkID) error {
 		}
 		m.removeFromCloudIndex(id)
 		// Remove the in-tree warm cache copy of the cloud blob — the
-		// chunk dir is the cache post step 7j, so blowing it away on
-		// delete keeps disk usage bounded by retention.
+		// chunk dir IS that cache, so blowing it away on delete keeps
+		// disk usage bounded by retention.
 		_ = os.RemoveAll(m.chunkDir(id))
 	} else {
 		// Pipeline-built sealed chunks register an external data.glcb under the
 		// vault's segmentation ChunkRoot (<chunkRoot>/<id>/data.glcb), outside
 		// this manager's Dir. Remove that tree on delete so retention/archival
-		// does not leave orphan GLCBs (gastrolog-358ak, Rubicon E2).
+		// does not leave orphan GLCBs.
 		dir := m.chunkDir(id)
 		if extPath, external := m.externalGLCB[id]; external {
 			dir = filepath.Dir(extPath)
@@ -3335,9 +3307,9 @@ func (m *Manager) HasIndexBuilders() bool {
 // compress → build indexes → refresh sizes → upload to cloud.
 // Safe to call concurrently — tracked per-chunk for Delete, globally for Close.
 func (m *Manager) PostSealProcess(ctx context.Context, id chunk.ChunkID) error {
-	// Guard: reject unsealed chunks upfront. Without this, CompressChunk
-	// silently no-ops and the index builders fail with ErrChunkNotSealed,
-	// producing a spurious WARN on every call. See gastrolog-89k15.
+	// Guard: reject unsealed chunks upfront. Without this the index
+	// builders fail with ErrChunkNotSealed, producing a spurious WARN
+	// on every call.
 	//
 	// closed check + postSealWg.Add must happen under the same lock Close()
 	// uses to set closed=true, otherwise Close's Wait can return on a zero
@@ -3369,15 +3341,15 @@ func (m *Manager) PostSealProcess(ctx context.Context, id chunk.ChunkID) error {
 	}()
 
 	// 1. Package the sealed chunk as a single data.glcb blob — the
-	// canonical sealed-chunk artifact under gastrolog-24m1t. Failure is
-	// fatal; there is no longer a multi-file fallback.
+	// canonical sealed-chunk artifact. Failure is fatal; there is no
+	// multi-file fallback.
 	if _, _, err := m.sealToGLCB(id); err != nil {
 		return fmt.Errorf("seal chunk %s to GLCB: %w", id, err)
 	}
 
-	// 1a. Phase 3 (gastrolog-1huz5): GLCB committed locally — fire the
-	// Sealing → Sealed transition on the FSM now. Reads the seal
-	// metadata from the local meta (captured at sealActiveLocked
+	// 1a. GLCB committed locally — fire the Sealing → Sealed transition
+	// on the FSM now. Reads the seal metadata from the local meta
+	// (captured at sealActiveLocked
 	// time). Followed by AnnounceAttachOffsets so consumers learning
 	// about the seal also see the section offsets.
 	if m.cfg.Announcer != nil {
@@ -3436,7 +3408,7 @@ func (m *Manager) PostSealProcess(ctx context.Context, id chunk.ChunkID) error {
 	// 5. Upload to cloud and delete local if cloud-backed.
 	// CloudReadOnly followers skip upload — they adopt the leader's blob
 	// lazily via the cloud-backed resolver once the vault FSM carries the
-	// upload (gastrolog-5bnxc).
+	// upload.
 	if m.cfg.CloudStore != nil && !m.cfg.CloudReadOnly {
 		if err := m.uploadToCloud(id); err != nil {
 			m.logger.Warn("cloud upload failed, keeping local", "chunk", id, "error", err)
@@ -3548,7 +3520,7 @@ func (m *Manager) GLCBBlobPath(id chunk.ChunkID) (string, bool) {
 // vault ChunkRoot rather than this manager's Dir) it returns that path;
 // otherwise the canonical <chunkDir>/data.glcb. Safe to call without mu
 // held — it briefly takes mu to read the externalGLCB map and is never
-// invoked from a code path that already holds it. See gastrolog-2kysn.
+// invoked from a code path that already holds it.
 func (m *Manager) glcbPath(id chunk.ChunkID) string {
 	m.mu.Lock()
 	p, ok := m.externalGLCB[id]
@@ -3563,7 +3535,7 @@ func (m *Manager) glcbPath(id chunk.ChunkID) string {
 // (or just populated). The lastAccess map is consulted by EvictCacheLRU to
 // pick the coldest entries when the cache exceeds its budget. Map is
 // in-memory only — never persisted; eviction signals don't outlive the
-// process. See gastrolog-2idw8.
+// process.
 func (m *Manager) touchLastAccess(id chunk.ChunkID) {
 	m.lastAccessMu.Lock()
 	m.lastAccess[id] = m.cfg.Now()
@@ -3581,8 +3553,7 @@ func (m *Manager) touchLastAccess(id chunk.ChunkID) {
 // rule, and additional restrictions (storage-pressure, corrupt-blob,
 // pin-list, …) drop in alongside without touching the policy branches.
 // LRU and TTL remain mutually exclusive with each other; everything
-// outside that pair composes with whichever base policy was picked. See
-// gastrolog-2idw8.
+// outside that pair composes with whichever base policy was picked.
 type evictionRule struct {
 	name        string
 	shouldEvict func(c cacheEntry, totalRemaining int64) bool
@@ -3738,7 +3709,7 @@ func (m *Manager) runEvictionSweep(label string, rules []evictionRule) (int, int
 		// (diskBytes -> 0) BEFORE releasing this chunk's lock, so no
 		// concurrent reader/re-warmer can observe the window where the
 		// file is already gone but the index still claims a positive
-		// local footprint. See gastrolog-33ul6h.
+		// local footprint.
 		m.updateCloudDiskBytes(c.id, 0)
 		chunkLock.Unlock()
 		m.lastAccessMu.Lock()
@@ -3871,8 +3842,8 @@ func (m *Manager) downloadCloudBlobToChunkDir(id chunk.ChunkID) (chunk.RecordCur
 		return nil, err
 	}
 
-	// Integrity check (gastrolog-grnc3): before promoting tmp → final,
-	// read the TOC footer and verify the recorded BlobDigest matches what
+	// Integrity check: before promoting tmp → final, read the TOC footer
+	// and verify the recorded BlobDigest matches what
 	// the FSM stamped at upload time. A mismatch means the bytes we just
 	// pulled are not the bytes the leader uploaded — corruption in flight,
 	// a clobbered S3 object, or a retention race. Reject so we don't seed
@@ -3890,7 +3861,7 @@ func (m *Manager) downloadCloudBlobToChunkDir(id chunk.ChunkID) (chunk.RecordCur
 	// an in-flight re-warm and an eviction sweep could interleave and
 	// leave the file and the persisted claim disagreeing. Released before
 	// openLocalGLCBCursor below, which takes its OWN (read) lock on the
-	// same non-reentrant mutex. See gastrolog-33ul6h.
+	// same non-reentrant mutex.
 	chunkLock := m.chunkLockFor(id)
 	chunkLock.Lock()
 	if err := os.Rename(tmpPath, finalPath); err != nil { //nolint:gosec // G304: tmpPath is from os.CreateTemp inside chunkDir
@@ -3900,7 +3871,7 @@ func (m *Manager) downloadCloudBlobToChunkDir(id chunk.ChunkID) (chunk.RecordCur
 	}
 	// The chunk is re-warmed — the cloud index's persisted diskBytes must
 	// reflect the newly-cached local file, not stay at 0 (evicted) or a
-	// stale prior value. See gastrolog-33ul6h.
+	// stale prior value.
 	m.updateCloudDiskBytes(id, m.computeDiskBytes(id))
 	chunkLock.Unlock()
 
@@ -3918,9 +3889,9 @@ func (m *Manager) verifyDownloadedBlob(id chunk.ChunkID, path string) error {
 	}
 	expected, ok := m.cfg.IntegrityVerifier.ExpectedDigest(id)
 	if !ok {
-		// No FSM expectation on file (pre-grnc3 entry, or the upload's
-		// CmdUploadChunk hasn't applied locally yet). Skip; a later read
-		// will re-verify once the FSM catches up.
+		// No FSM expectation on file (entry predates digest recording,
+		// or the upload's CmdUploadChunk hasn't applied locally yet).
+		// Skip; a later read will re-verify once the FSM catches up.
 		return nil
 	}
 	f, err := os.Open(filepath.Clean(path))
@@ -3958,10 +3929,10 @@ func (m *Manager) ArchiveChunk(ctx context.Context, id chunk.ChunkID, storageCla
 		return fmt.Errorf("chunk %s is not cloud-backed, cannot archive", id)
 	}
 	// Compare the CURRENT class against the requested one, not a bare
-	// "archived" bool. The bool short-circuited on any prior archive, so a
-	// chunk that had moved to the first class of a multi-step transition
-	// chain could never advance to a colder one — it silently stopped moving
-	// to cheaper storage (gastrolog-35ygqv).
+	// "archived" bool. A bool short-circuits on any prior archive, so a
+	// chunk that has moved to the first class of a multi-step transition
+	// chain never advances to a colder one — it silently stops moving to
+	// cheaper storage.
 	if m.storageClasses[id] == storageClass {
 		m.mu.Unlock()
 		return nil // already in this class
@@ -4022,8 +3993,7 @@ func (m *Manager) RestoreChunk(ctx context.Context, id chunk.ChunkID, speed stri
 
 	// Announce the clear for the same reason the archive announces the set:
 	// otherwise the FSM keeps naming a class the blob has left, and every
-	// other node — plus the archival sweep's comparison — believes it
-	// (gastrolog-35ygqv).
+	// other node — plus the archival sweep's comparison — believes it.
 	if ann := m.GetAnnouncer(); ann != nil {
 		ann.AnnounceArchived(id, "")
 	}
@@ -4097,8 +4067,7 @@ func (m *Manager) GetAnnouncer() chunk.MetadataAnnouncer {
 }
 
 // SetIntegrityVerifier injects the verifier consulted on every cold-cache
-// cloud download (gastrolog-grnc3). Safe to pass nil to disable
-// verification entirely.
+// cloud download. Safe to pass nil to disable verification entirely.
 func (m *Manager) SetIntegrityVerifier(v chunk.IntegrityVerifier) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -4283,7 +4252,7 @@ func (m *Manager) cloudIdxHas(id chunk.ChunkID) bool {
 // SetCloudStore injects (or replaces) the cloud store on a running Manager.
 // Used for lazy initialization when S3 was unreachable at construction time
 // but becomes available later. Also re-runs cloud-backed chunk discovery if the
-// cloud index is empty. Safe for concurrent use. See gastrolog-68fqk.
+// cloud index is empty. Safe for concurrent use.
 func (m *Manager) SetCloudStore(store blobstore.Store) {
 	m.mu.Lock()
 	m.cfg.CloudStore = store
@@ -4303,7 +4272,7 @@ func (m *Manager) SetCloudStore(store blobstore.Store) {
 // UploadToCloud uploads a sealed chunk to the configured cloud store.
 // Implements chunk.ChunkCloudUploader. Returns an error if the upload fails
 // (unlike PostSealProcess which swallows upload errors to avoid blocking
-// replication). Used by the cloud backfill path. See gastrolog-68fqk.
+// replication). Used by the cloud backfill path.
 func (m *Manager) UploadToCloud(id chunk.ChunkID) error {
 	if m.cfg.CloudStore == nil {
 		return errors.New("cloud store not configured")
@@ -4316,20 +4285,15 @@ func (m *Manager) UploadToCloud(id chunk.ChunkID) error {
 
 // CloudStoreConfigured reports whether this manager can upload sealed chunks
 // to object storage (leader with a wired CloudStore). Used by cloud-health
-// evaluation for file vaults with cloud_service_id. See gastrolog-34azvz.
+// evaluation for file vaults with cloud_service_id.
 func (m *Manager) CloudStoreConfigured() bool {
 	return m.cfg.CloudStore != nil && !m.cfg.CloudReadOnly
 }
 
 // sealToGLCB packages a sealed multi-file chunk into a single
 // `<chunkdir>/data.glcb` blob atomically: write to data.glcb.tmp, fsync,
-// rename. Same encoding as uploadToCloud (the cloud blob and the local
-// sealed file are byte-identical by construction, which is what unlocks
-// binary chunk replication later — gastrolog-3o5b4).
-//
-// Capability-only: not yet wired into the seal pipeline. Subsequent
-// commits flip PostSealProcess to call this in place of CompressChunk
-// and switch read paths to consume data.glcb. See gastrolog-24m1t.
+// rename. Same encoding as uploadToCloud: the cloud blob and the local
+// sealed file are byte-identical by construction.
 //
 // On success returns the GLCB writer so callers can read TOC offsets
 // and NumFrames without a second pass over the file.
@@ -4396,10 +4360,9 @@ func (m *Manager) sealToGLCB(id chunk.ChunkID) (*glcb.Writer, int64, error) {
 	// sealToGLCB/openLocalGLCBCursor/OpenCursor for this id blocks on the
 	// same lock). So if OpenFile still reports the file exists, it can only
 	// be a tmp abandoned by a process that crashed between create and
-	// rename in a PRIOR run — cleanOrphanTempFiles is supposed to remove
-	// that on the next startup (gastrolog-66hmx3), but a process that never
-	// restarted between the crash and this retry would otherwise stay
-	// wedged forever. Remove it and retry the O_EXCL create once so the
+	// rename in a PRIOR run — cleanOrphanTempFiles removes that on the
+	// next startup, but a process that never restarted between the crash
+	// and this retry would otherwise stay wedged forever. Remove it and retry the O_EXCL create once so the
 	// seal cannot wedge without a restart either.
 	chunkLock := m.chunkLockFor(id)
 	chunkLock.Lock()
@@ -4420,8 +4383,8 @@ func (m *Manager) sealToGLCB(id chunk.ChunkID) (*glcb.Writer, int64, error) {
 		_ = os.Remove(tmpPath)
 	}
 
-	// The format is unconditionally uncompressed at the file layer
-	// (gastrolog-69fd5); WriteTo no longer needs a shared zstd encoder.
+	// The format is unconditionally uncompressed at the file layer, so
+	// WriteTo needs no shared zstd encoder.
 	written, werr := w.WriteTo(f)
 	if werr != nil {
 		cleanup()
@@ -4461,12 +4424,11 @@ func (m *Manager) sealToGLCB(id chunk.ChunkID) (*glcb.Writer, int64, error) {
 func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 	key := m.blobKey(id)
 
-	// Snapshot the BlobMeta + cached TOC under the manager lock. After step
-	// 7c the local data.glcb is byte-identical to what NewWriter would emit
-	// (sealToGLCB and the cloud writer share the encoder), so streaming the
-	// file straight to S3 replaces the legacy cursor → NewWriter → buf →
-	// upload dance — saving one full encode pass and keeping the compressed
-	// bytes off the heap. See gastrolog-24m1t step 7h.
+	// Snapshot the BlobMeta + cached TOC under the manager lock. The local
+	// data.glcb is byte-identical to what NewWriter would emit (sealToGLCB
+	// and the cloud writer share the encoder), so the file streams straight
+	// to S3 — no second encode pass, and the compressed bytes never hit the
+	// heap.
 	m.mu.Lock()
 	if m.closed {
 		m.mu.Unlock()
@@ -4478,7 +4440,7 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 	// m.metas). Registration is a cache, not an upload prerequisite — this is
 	// what lets the seal→upload path (schedulePipelineCloudUpload) and the
 	// cloud-backfill sweep upload a freshly-sealed chunk with no
-	// register-first step. See gastrolog-34kmv.
+	// register-first step.
 	meta := m.lookupMeta(id)
 	if meta == nil {
 		m.mu.Unlock()
@@ -4532,8 +4494,7 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		return fmt.Errorf("open data.glcb for upload: %w", err)
 	}
 
-	// Wrap the uncompressed GLCB with zstd as a transport-only layer
-	// (gastrolog-69fd5 / docs/obsoleted/vault_redesign.md decisions 6 and 9).
+	// Wrap the uncompressed GLCB with zstd as a transport-only layer.
 	// The format itself stays uncompressed on local disk; cloud transport
 	// applies the wrapper here and DownloadAndUnwrap removes it on read.
 	pr, pw := io.Pipe()
@@ -4586,14 +4547,14 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 	}
 
 	// No separate CacheDir mirror — the local data.glcb that we just
-	// uploaded stays in <chunkDir> and IS the warm cache (step 7k).
+	// uploaded stays in <chunkDir> and IS the warm cache.
 
 	// Take the per-chunk write lock around the FSM announce, the file
 	// removal, AND the metadata transition. Cursors in flight on this
 	// chunk must drain before mmap regions are invalidated. Without
 	// this, an indexer Build pass running concurrently with
 	// backfillCloudUploads SIGBUSes inside DecodeIdxEntry when its
-	// idx.log mmap region is removed mid-Next(). See gastrolog-2owzp.
+	// idx.log mmap region is removed mid-Next().
 	chunkLock := m.chunkLockFor(id)
 	chunkLock.Lock()
 	defer chunkLock.Unlock()
@@ -4602,10 +4563,9 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 	// blocks on quorum + local FSM apply, so once this returns the FSM is
 	// authoritative for "this chunk is cloud-backed". Readers landing between
 	// the announce and the file removal still see consistent state — the FSM
-	// CloudBacked flag flips first, then the local files go. The previous
-	// order had a window where files were gone but the FSM still said local,
-	// producing the L>>count / gap / dip artifacts in histogram.
-	// See gastrolog-35l6a.
+	// CloudBacked flag flips first, then the local files go. The reverse
+	// order leaves a window where files are gone but the FSM still says
+	// local, producing the L>>count / gap / dip artifacts in histogram.
 	if m.cfg.Announcer != nil {
 		m.cfg.Announcer.AnnounceUpload(id, blobSize,
 			toc.IngestIdxOffset, toc.IngestIdxSize,
@@ -4614,11 +4574,10 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 	}
 
 	// Delete the multi-file data artifacts (raw.log/idx.log/etc.) — they
-	// are redundant with data.glcb and remain only on chunks sealed before
-	// step 7c stage 3b landed. Keep the local data.glcb itself: post step
-	// 7j it is the warm cache for the now-cloud-backed chunk, read
-	// transparently via OpenCursor's local-GLCB fast path. Eviction under
-	// disk pressure can delete it later; the cloud blob is authoritative.
+	// are redundant with data.glcb. Keep the local data.glcb itself: it is
+	// the warm cache for the now-cloud-backed chunk, read transparently via
+	// OpenCursor's local-GLCB fast path. Eviction under disk pressure can
+	// delete it later; the cloud blob is authoritative.
 	if err := m.removeLocalDataFiles(id); err != nil {
 		return fmt.Errorf("remove local data files after cloud upload: %w", err)
 	}
@@ -4626,7 +4585,7 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 	// Treat the upload itself as an access for eviction purposes — without
 	// this the just-uploaded warm cache has zero lastAccess and the next
 	// TTL sweep would immediately evict a chunk no reader has had a chance
-	// to touch. See gastrolog-2idw8.
+	// to touch.
 	m.touchLastAccess(id)
 
 	// Move metadata from in-memory map to cloud B+ tree index.
@@ -4636,8 +4595,7 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 	// above only deleted the redundant multi-file artifacts, not data.glcb
 	// itself, so the chunk dir's on-disk size right now (computeDiskBytes)
 	// is the honest local claim — NOT blobSize, which is the compressed
-	// cloud object's transport size and belongs on cloudBytes instead. See
-	// gastrolog-33ul6h.
+	// cloud object's transport size and belongs on cloudBytes instead.
 	m.mu.Lock()
 	meta = m.metas[id]
 	if meta != nil {
@@ -4678,12 +4636,12 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 // byte-identical to the cloud blob by construction (sealToGLCB and the cloud
 // writer share the encoder, and the input record set is the same), so the
 // TOC cached on chunkMeta during sealToGLCB matches what's in S3 — no range
-// request needed to read it back. See gastrolog-24m1t step 7i.
+// request needed to read it back.
 func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 	// Per-chunk write lock around the FSM announce, the disk transition,
-	// and the meta mutation; same rationale as uploadToCloud
-	// (gastrolog-2owzp). adoptCloudBlob fires when another node beat us
-	// to the upload — we still transition local files to cloud-only state,
+	// and the meta mutation; same rationale as uploadToCloud.
+	// adoptCloudBlob fires when another node beat us to the upload — we
+	// still transition local files to cloud-only state,
 	// which is the same mutation any in-flight cursor needs to drain
 	// against.
 	chunkLock := m.chunkLockFor(id)
@@ -4714,9 +4672,9 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 	// quorum + local FSM apply, so once the announce returns the FSM is
 	// authoritative for "this chunk is cloud-backed". Without this, the FSM
 	// overlay keeps returning CloudBacked=false and the backfill re-adopts on
-	// every cycle (gastrolog-68fqk); readers landing between removeLocalDataFiles
-	// and the announce would have observed "FSM says local, files gone",
-	// producing histogram artifacts (gastrolog-35l6a).
+	// every cycle; readers landing between removeLocalDataFiles and the
+	// announce would have observed "FSM says local, files gone",
+	// producing histogram artifacts.
 	if m.cfg.Announcer != nil {
 		m.cfg.Announcer.AnnounceUpload(id, blobSize,
 			ingestIdxOff, ingestIdxSize,
@@ -4726,19 +4684,19 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 
 	// Delete the multi-file data artifacts (raw.log/idx.log/etc.) — same
 	// rationale as uploadToCloud: data.glcb itself stays as the warm cache
-	// for the now-cloud-backed chunk (gastrolog-24m1t step 7j).
+	// for the now-cloud-backed chunk.
 	if err := m.removeLocalDataFiles(id); err != nil {
 		return fmt.Errorf("remove local data files after cloud adopt: %w", err)
 	}
 
-	// Treat the adoption as an access — same rationale as uploadToCloud
-	// (gastrolog-2idw8): without this the warm cache has zero lastAccess
-	// and the next TTL sweep would immediately evict it.
+	// Treat the adoption as an access — same rationale as uploadToCloud:
+	// without this the warm cache has zero lastAccess and the next TTL
+	// sweep would immediately evict it.
 	m.touchLastAccess(id)
 
 	// Same diskBytes/cloudBytes split as uploadToCloud: data.glcb stays as
 	// the local warm cache, so the honest local claim is what's actually on
-	// disk right now, not the compressed blob size. See gastrolog-33ul6h.
+	// disk right now, not the compressed blob size.
 	m.mu.Lock()
 	meta := m.metas[id]
 	if meta != nil {
@@ -4779,8 +4737,7 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 // queryable via openCloudCursor (the blob key is derived at read time by
 // blobKey(), never stored). This is the single cloudIdx fill path for chunks
 // this node did not upload itself: the lazy cloud-backed resolver calls it on
-// a lookup or enumeration miss (gastrolog-5bnxc — it replaced the eager
-// snapshot projection and per-apply onUpload mirrors).
+// a lookup or enumeration miss.
 //
 // Idempotent: if the chunk is already registered (in metas or cloudIdx), the
 // existing entry wins. Caller holds m.mu.
@@ -4816,8 +4773,7 @@ func (m *Manager) registerCloudBackedChunkLocked(id chunk.ChunkID, info chunk.Cl
 		// diskBytes stays 0: this node is registering the chunk from FSM
 		// metadata alone, with no local copy — nothing has been downloaded
 		// here yet. info.CloudBytes (the leader's uploaded blob size) is a
-		// cluster-wide fact, not evidence of local presence. See
-		// gastrolog-33ul6h.
+		// cluster-wide fact, not evidence of local presence.
 		diskBytes:       0,
 		cloudBytes:      info.CloudBytes,
 		ingestIdxOffset: info.IngestIdxOffset,
@@ -4859,7 +4815,7 @@ func (m *Manager) IsExternalGLCBAt(id chunk.ChunkID, glcbPath string) bool {
 // routes to openLocalGLCBCursor and the chunk appears in List/Meta) plus the
 // external source path. Idempotent: re-registering refreshes the recorded path
 // and meta. A chunk already managed locally (in m.metas without an external
-// path, or cloud-backed) is left untouched. See gastrolog-2kysn (Rubicon E1).
+// path, or cloud-backed) is left untouched.
 func (m *Manager) RegisterExternalGLCB(id chunk.ChunkID, glcbPath string, info chunk.ExternalGLCBInfo) error {
 	if glcbPath == "" {
 		return errors.New("external GLCB path required")
@@ -4976,10 +4932,9 @@ func (m *Manager) scanAttrsCloud(id chunk.ChunkID, startPos uint64, fn func(writ
 //
 // Strategy: download the zstd-wrapped cloud blob, unwrap into the local
 // chunk dir, and open a normal local-GLCB cursor against it. There is
-// no range-fetch fallback in the post-Phase-6 model (gastrolog-69fd5):
-// the format itself is uncompressed and the cloud wrapper covers the
-// whole blob, so partial fetches don't gain anything over a one-shot
-// streaming download.
+// no range-fetch fallback: the format itself is uncompressed and the
+// cloud wrapper covers the whole blob, so partial fetches don't gain
+// anything over a one-shot streaming download.
 func (m *Manager) openCloudCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	m.mu.Lock()
 	meta := m.lookupMeta(id)
@@ -5014,13 +4969,13 @@ func (m *Manager) loadCloudBackedChunks() error {
 			m.logger.Info("cloud index ready", "count", newCount)
 		}
 		// Drop local m.metas entries for chunks that the cloud index also
-		// holds — post step 7j the local data.glcb sticks around as warm
-		// cache after upload, but the authoritative meta (with archived /
-		// TOC offsets) is the cloud index entry. Without this
+		// holds — the local data.glcb sticks around as warm cache after
+		// upload, but the authoritative meta (with archived / TOC
+		// offsets) is the cloud index entry. Without this
 		// reconciliation a restart resurrects a stale local-sealed meta
 		// that masks the cloud-recorded archived flag. The data.glcb file
 		// itself stays put — OpenCursor's local-GLCB fast path picks it
-		// up via hasLocalGLCB. See gastrolog-24m1t step 7j.
+		// up via hasLocalGLCB.
 		m.dropLocalMetaForCloudBackedChunks()
 		m.reconcileCloudDiskBytesAtStartup()
 	}
@@ -5042,7 +4997,7 @@ func (m *Manager) loadCloudBackedChunks() error {
 // eviction sweep too. The mirror case (crash between a completed
 // download's rename and its update) leaves a stale-zero claim, similarly
 // permanent. Startup is not a hot path, so a full stat pass here is the
-// right place to close both windows. See gastrolog-33ul6h.
+// right place to close both windows.
 func (m *Manager) reconcileCloudDiskBytesAtStartup() {
 	if m.cloudIdx == nil {
 		return
@@ -5112,7 +5067,7 @@ func (m *Manager) loadCloudBackedChunksFromStore() error {
 		// in favor of the authoritative cloud entry that's about to be
 		// inserted into cloudIdx — the local data.glcb file stays in
 		// place as cache and will be picked up by OpenCursor's local-GLCB
-		// fast path. See gastrolog-24m1t step 7j.
+		// fast path.
 		delete(m.metas, id)
 		cm, decErr := glcb.DecodeObjectMetadata(id, blob)
 		if decErr != nil {
@@ -5120,8 +5075,8 @@ func (m *Manager) loadCloudBackedChunksFromStore() error {
 			// footer, which is the source of truth for record count and
 			// bounds. A malformed cache must never be indexed as a
 			// zero-record / zero-time ChunkMeta — that would feed wrong
-			// retention sweeps and query pruning (gastrolog-5opw43). Fall
-			// back to the authoritative footer.
+			// retention sweeps and query pruning. Fall back to the
+			// authoritative footer.
 			authoritative, fbErr := m.chunkMetaFromCloudBlobFooter(id, blob)
 			if fbErr != nil {
 				// Even the footer is unreadable. Skip indexing this blob
@@ -5150,7 +5105,7 @@ func (m *Manager) loadCloudBackedChunksFromStore() error {
 			// codec-mismatch cloud-index rebuild can rediscover a blob
 			// whose data.glcb survived on disk as a still-warm cache —
 			// this stat is what keeps that cache from reporting as
-			// evicted. See gastrolog-33ul6h.
+			// evicted.
 			diskBytes:   m.computeDiskBytes(id),
 			cloudBytes:  cm.CloudBytes,
 			sealed:      true,
@@ -5202,7 +5157,7 @@ func (m *Manager) loadCloudBackedChunksFromStore() error {
 // mmaps it just long enough to read the layout/TOC meta, and discards it — no
 // warm-cache promotion, no locking side effects. This is the fallback for
 // loadCloudBackedChunksFromStore when DecodeObjectMetadata fails; the footer is
-// the source of truth, the object metadata is only a cache (gastrolog-5opw43).
+// the source of truth, the object metadata is only a cache.
 func (m *Manager) chunkMetaFromCloudBlobFooter(id chunk.ChunkID, blob blobstore.BlobInfo) (chunk.ChunkMeta, error) {
 	tmp, err := os.CreateTemp("", "glcb-footer-*.glcb")
 	if err != nil {

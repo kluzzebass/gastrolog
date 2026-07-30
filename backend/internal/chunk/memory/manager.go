@@ -287,7 +287,7 @@ func (m *Manager) updateMetaLocked(record chunk.Record, recordCount int64) {
 	m.active.meta.WriteEnd = record.WriteTS
 	m.active.meta.RecordCount = recordCount
 
-	// Track IngestTS monotonicity. See gastrolog-66b7x.
+	// Track IngestTS monotonicity (see ChunkMeta.IngestTSMonotonic).
 	if m.active.meta.IngestStart.IsZero() {
 		m.active.meta.IngestTSMonotonic = true
 	} else if m.active.meta.IngestTSMonotonic && record.IngestTS.Before(m.active.meta.IngestEnd) {
@@ -358,8 +358,7 @@ func (m *Manager) FindStartPosition(id chunk.ChunkID, ts time.Time) (uint64, boo
 
 // updateImportMetaBounds folds one imported record's TS values into the
 // chunk's meta — IngestTS/SourceTS extents and IngestTS monotonicity.
-// Extracted from ImportRecords to keep its complexity bounded.
-// See gastrolog-66b7x.
+// Split out of ImportRecords to keep its complexity bounded.
 func updateImportMetaBounds(meta *chunk.ChunkMeta, rec chunk.Record) {
 	if meta.WriteStart.IsZero() {
 		meta.WriteStart = rec.WriteTS
@@ -433,7 +432,7 @@ func (m *Manager) ScanActiveByIngestTS(id chunk.ChunkID, cb func(ingestTS time.T
 // FindIngestEntryIndex returns rank for monotonic active chunks (where
 // position == rank); for non-monotonic chunks the in-memory manager
 // doesn't maintain a separate rank index, so callers gating on
-// IngestTSMonotonic should bypass this. See gastrolog-66b7x.
+// IngestTSMonotonic should bypass this.
 func (m *Manager) FindIngestEntryIndex(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
 	return m.FindIngestStartPosition(id, ts)
 }
@@ -693,8 +692,10 @@ func (m *Manager) CheckRotation() *string {
 // if WriteTS is zero, the current time from Now is used. The new chunk is
 // independent of the active chunk.
 //
-// If id is the zero ChunkID, a new ID is generated. See gastrolog-11rzz for
-// why ID goes via an explicit parameter rather than SetNextChunkID.
+// If id is the zero ChunkID, a new ID is generated. Passing the ID directly
+// rather than via SetNextChunkID avoids a race where a concurrent Append
+// (via openLocked) could consume the pending ID and leave the import to
+// allocate a fresh, untracked one.
 func (m *Manager) ImportRecords(id chunk.ChunkID, next chunk.RecordIterator) (chunk.ChunkMeta, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

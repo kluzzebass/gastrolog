@@ -368,7 +368,7 @@ func TestLazyCloudResolutionCreatesIndexEntry(t *testing.T) {
 			}
 			// This node registered the chunk from FSM metadata alone —
 			// it has no local copy yet, so DiskBytes must start at 0
-			// regardless of the leader's blob size. See gastrolog-33ul6h.
+			// regardless of the leader's blob size.
 			if m.DiskBytes != 0 {
 				t.Errorf("DiskBytes = %d, want 0 (no local copy on register)", m.DiskBytes)
 			}

@@ -169,8 +169,8 @@ func (p *retireOnPublish) Publish(ctx context.Context, meta Metadata) error {
 // RetireSegments entry point and vaultDist.retireSegment's direct per-ID entry
 // point (the one publishStaged/publishStagedBatch use for the bytes-missing
 // path) leave identical bookkeeping: dropped from v.segments, added to
-// v.retired. RetireSegments is a thin loop over retireSegment
-// (gastrolog-2zvfp2) — this pins that the two entry points cannot diverge.
+// v.retired. RetireSegments is a thin loop over retireSegment — this pins
+// that the two entry points cannot diverge.
 func TestRetireSegmentsMatchesRetireSegment(t *testing.T) {
 	t.Parallel()
 	vaultID := glid.New()

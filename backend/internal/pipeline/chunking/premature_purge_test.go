@@ -1,7 +1,7 @@
 package chunking_test
 
-// Reproduction for gastrolog-67c9b0: a segment's spans can split across two
-// chunks. When chunk A seals first while chunk B is still QUEUED, no purge
+// A segment's spans can split across two chunks. When chunk A seals first
+// while chunk B is still QUEUED, no purge
 // or release may destroy the segment — B's build still needs the bytes.
 // Observed live as ~60 chunks pinned in 'sealing' since their referenced
 // segments vanished cluster-wide (ENOENT on every home, permanently
@@ -86,7 +86,7 @@ func TestSealDoesNotPurgeSegmentReferencedByQueuedManifest(t *testing.T) {
 	// THE INVARIANT: chunk B still references this segment from the queue,
 	// so A's post-seal release/purge must leave the bytes alone.
 	if _, err := os.Stat(headPath); err != nil {
-		t.Fatalf("segment purged while queued chunk B still references it: %v — B is now permanently unbuildable (gastrolog-67c9b0)", err)
+		t.Fatalf("segment purged while queued chunk B still references it: %v — B is now permanently unbuildable", err)
 	}
 
 	// And chunk B must complete from those bytes.

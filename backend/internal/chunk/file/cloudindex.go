@@ -25,15 +25,12 @@ const cloudIndexFile = "cloud.idx"
 //     size. Distinct currency from DiskBytes: DiskBytes is this node's LIVE
 //     local warm-cache footprint (0 when evicted, refreshed on every
 //     warm/evict/re-warm transition); CloudBytes is the cluster-wide,
-//     upload-time-fixed blob size. See gastrolog-33ul6h.
+//     upload-time-fixed blob size.
 //
-// Pre-Phase-6 layouts included a trailing int32 NumFrames (seekable
-// zstd frame count). With seekable-zstd gone (gastrolog-69fd5), the
-// field is dropped — the codec value size shrunk from 110 to 106 bytes,
-// and the cloud index is wiped + repopulated on first open by
-// openCloudIndex's incompatible-codec branch. The gastrolog-33ul6h
-// CloudBytes addition grows it again, 106 -> 114, via the same mechanism
-// (no migration: formats stay V1 pre-release, house policy).
+// Changing this layout needs no migration: openCloudIndex's
+// incompatible-codec branch wipes and repopulates the index on first open
+// when the stored value size no longer matches (formats stay V1
+// pre-release, house policy).
 type cloudMetaValue [114]byte
 
 const (
@@ -87,7 +84,8 @@ func decodeCloudMeta(id chunk.ChunkID, v cloudMetaValue) *chunkMeta {
 		sourceStart: time.Unix(0, int64(binary.LittleEndian.Uint64(v[56:64]))), //nolint:gosec // round-trip
 		sourceEnd:   time.Unix(0, int64(binary.LittleEndian.Uint64(v[64:72]))), //nolint:gosec // round-trip
 		sealed:      flags&flagSealed != 0,
-		// flagCompressed (1<<1) reserved — see Phase 6 (gastrolog-69fd5).
+		// flagCompressed (1<<1) reserved — local GLCB is uncompressed;
+		// zstd is a cloud-transport concern only.
 		archived:        flags&flagArchived != 0,
 		cloudBacked:     true,
 		ingestIdxOffset: int64(binary.LittleEndian.Uint64(v[74:82])),   //nolint:gosec // round-trip

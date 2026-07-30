@@ -58,13 +58,12 @@ func TestMappedBlobRoundTrip(t *testing.T) {
 	}
 }
 
-// TestMappedBlobRecordsSurviveUnmap pins the detach contract behind
-// gastrolog-11y2iv's clone reduction: records returned by ReadRecord must
-// remain fully readable (attrs AND raw) after the blob is closed and its
-// mapping released. Raw is detached by cloneMmapRecord; attrs strings are
-// interned heap copies from MmapStringDict. If either ever aliases the
-// mapping again, this test reads freed memory and crashes under -race /
-// segfaults outright.
+// TestMappedBlobRecordsSurviveUnmap pins the detach contract behind the
+// clone reduction: records returned by ReadRecord must remain fully readable
+// (attrs AND raw) after the blob is closed and its mapping released. Raw is
+// detached by cloneMmapRecord; attrs strings are interned heap copies from
+// MmapStringDict. If either ever aliases the mapping again, this test reads
+// freed memory and crashes under -race / segfaults outright.
 func TestMappedBlobRecordsSurviveUnmap(t *testing.T) {
 	t.Parallel()
 	chunkID, vaultID, records := testRecords()
@@ -118,7 +117,7 @@ func TestMappedBlobRecordsSurviveUnmap(t *testing.T) {
 }
 
 // BenchmarkMappedBlobReadRecord measures the per-record read cost on the
-// mmap path — the retention-drain and search hot loop (gastrolog-11y2iv).
+// mmap path — the retention-drain and search hot loop.
 func BenchmarkMappedBlobReadRecord(b *testing.B) {
 	chunkID, vaultID, records := testRecords()
 

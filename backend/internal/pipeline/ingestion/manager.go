@@ -68,8 +68,8 @@ type Config struct {
 // of flooding the log every few seconds. The counter resets on any clean run
 // exit, so an ingester that recovers and later fails again starts back at the
 // base delay. Operator visibility does not ride on the log line: the
-// convergence sweep's divergence log (gastrolog-3mnjlo) stays
-// raised between attempts and clears once a retry holds.
+// convergence sweep's divergence log stays raised between attempts and
+// clears once a retry holds.
 const (
 	retryBackoffBase   = 3 * time.Second
 	retryBackoffFactor = 2
@@ -140,8 +140,8 @@ type Manager struct {
 	// runIngester goroutine has fully returned — after every goroutine of the
 	// attempt (including the Ingester.Run goroutine, see pumpIngester) has
 	// exited. Reconcile waits on these so a replaced ingester's old run can
-	// never overlap its successor (gastrolog-4rdb9f: a stale run's deferred
-	// alive-false clobbered the new run's alive-true on the shared stats).
+	// never overlap its successor — a stale run's deferred alive-false
+	// clobbered the new run's alive-true on the shared stats.
 	dones map[glid.GLID]chan struct{}
 
 	ingesterWg sync.WaitGroup
@@ -208,7 +208,7 @@ func (m *Manager) Start(parent context.Context) error {
 		m.startLocked(id, ing)
 	}
 
-	// Close-on-exit contract (gastrolog-5kcq5q): the output queue closes on
+	// Close-on-exit contract: the output queue closes on
 	// EVERY run exit — Stop below, or the parent context dying without a
 	// Stop call. Downstream stages (digestion, the pump, routing) shut down
 	// purely by close cascade with plain per-record channel ops; a run exit
@@ -262,10 +262,10 @@ func (m *Manager) Stop() error {
 // successor has started, and its deferred teardown (the orchestrator
 // adapter's alive-false, against the same shared IngesterStats reused across
 // rebuilds) lands last — leaving a running ingester reported not-running
-// until the next rebuild, so the convergence sweep re-raised
-// divergence forever on a healthy node (gastrolog-4rdb9f). The wait
-// happens with mu released — never hold the state lock while blocking on a
-// goroutine — and is unbounded by design: Ingester.Run is contractually
+// until the next rebuild, so the convergence sweep re-raised divergence
+// forever on a healthy node. The wait happens with mu released — never hold
+// the state lock while blocking on a goroutine — and is unbounded by
+// design: Ingester.Run is contractually
 // required to exit promptly on cancellation (Stop already waits unboundedly
 // on the same goroutines via ingesterWg).
 func (m *Manager) Reconcile(snapshot []IngesterSpec) error {
@@ -398,12 +398,10 @@ func (m *Manager) stopLocked(id glid.GLID) chan struct{} {
 //     recoverable when another process releases the port or a co-located node
 //     dies.
 //   - Non-passive ingesters retry only when the run returned an error; a clean
-//     exit means a finite source completed. Before gastrolog-fjwhbr an error
-//     exit was logged once and the goroutine returned: ingest for that source
-//     stopped until a config change rebuilt the spec. Between failing attempts
-//     the ingester's alive state stays down, so the convergence sweep's
-//     divergence log (gastrolog-3mnjlo) surfaces the degraded
-//     condition and clears it once a retry holds.
+//     exit means a finite source completed. Between failing attempts the
+//     ingester's alive state stays down, so the convergence sweep's
+//     divergence log surfaces the degraded condition and clears it once a
+//     retry holds.
 func (m *Manager) runIngester(
 	id glid.GLID,
 	ing Ingester,
@@ -527,7 +525,7 @@ func (m *Manager) pumpIngester(
 			// writes — the orchestrator adapter's deferred alive-false and
 			// its ingest counters — land after the manager considers this
 			// attempt finished, clobbering the successor started on the
-			// done signal (gastrolog-4rdb9f).
+			// done signal.
 			for range ingesterOut { //nolint:revive // draining until close
 			}
 			<-errCh

@@ -54,7 +54,7 @@ func (v *vaultChunking) afterSealBuild(ctx context.Context, pending *vaultctlfsm
 	}
 	key := buildKey{chunkID: pending.ChunkID, sealedAt: pending.SealedAt}
 	// claimPostSeal refuses until the local build is marked done — see the
-	// sealProgress method comment (gastrolog-3vlse).
+	// sealProgress method comment.
 	claimed, done := v.progress.claimPostSeal(key)
 	if !claimed {
 		// Another caller owns this cycle's post-seal work — typically the
@@ -63,9 +63,9 @@ func (v *vaultChunking) afterSealBuild(ctx context.Context, pending *vaultctlfsm
 		// the claimant to FINISH: callers rely on "afterSealBuild returns ⇒
 		// head purge + release enqueue done", and returning while the
 		// claimant was mid-purge let BuildOnce return before the head copy
-		// was gone (gastrolog-4cxvdi). A nil channel means no claim exists
-		// for this cycle yet (build not marked); a later build pass runs the
-		// work, and there is nothing to wait for.
+		// was gone. A nil channel means no claim exists for this cycle yet
+		// (build not marked); a later build pass runs the work, and there is
+		// nothing to wait for.
 		if done != nil {
 			<-done
 		}
@@ -109,9 +109,8 @@ func (v *vaultChunking) buildOnce(ctx context.Context) error {
 		return err
 	}
 	if builtNow {
-		// Stage throughput (gastrolog-10n6k8): this home just materialized
-		// the sealed GLCB locally. chunksBuilt is the per-chunk milestone
-		// counterpart (gastrolog-4r784a).
+		// Stage throughput: this home just materialized the sealed GLCB
+		// locally. chunksBuilt is the per-chunk milestone counterpart.
 		v.sealedRecords.Add(uint64(result.RecordCount))
 		v.sealedBytes.Add(uint64(result.Bytes)) //nolint:gosec // sizes are non-negative
 		v.chunksBuilt.Add(1)
@@ -139,7 +138,7 @@ func (v *vaultChunking) buildOnceIfSealedElsewhere(ctx context.Context, pending 
 	v.progress.clearPendingAfterBuilt(pending.ChunkID, key)
 
 	// Another home proposed CmdSealChunk first; this home still needs local
-	// head purge and release-queue work (gastrolog-3vlse).
+	// head purge and release-queue work.
 	v.afterSealBuild(ctx, pending)
 	v.fireOnBuiltOnce(pending, key, true)
 	return true, nil
@@ -190,10 +189,10 @@ func (v *vaultChunking) adoptExistingGLCBIfPresent(pending *vaultctlfsm.OpenChun
 	}
 	result, readErr := BuildResultFromExistingGLCB(glcbPath, sealedAt)
 	if readErr != nil {
-		// Unified corrupt-GLCB story (gastrolog-687m11, glcb_corrupt.go):
-		// quarantine + alert, then report "not adopted" so the caller falls
-		// through to a full rebuild from source segments — the pre-687m11
-		// silent self-heal, now with the corruption signal preserved.
+		// Unified corrupt-GLCB story (glcb_corrupt.go): quarantine + alert,
+		// then report "not adopted" so the caller falls through to a full
+		// rebuild from source segments — self-heal with the corruption
+		// signal preserved.
 		v.quarantineCorruptGLCB(pending.ChunkID, glcbPath, readErr)
 		return BuildResult{}, false, nil
 	}
@@ -258,9 +257,9 @@ func (v *vaultChunking) proposeSealOnce(ctx context.Context, pending *vaultctlfs
 	if !v.chunkSealCommitted(pending.ChunkID) {
 		return false, fmt.Errorf("chunking: CmdSealChunk did not commit seal for %s", pending.ChunkID)
 	}
-	// Leader-owned chunk-seal milestone (gastrolog-4r784a): count once here,
-	// after the seal is confirmed committed, so cluster totals never
-	// double-count follower materializations.
+	// Leader-owned chunk-seal milestone: count once here, after the seal is
+	// confirmed committed, so cluster totals never double-count follower
+	// materializations.
 	v.chunksSealed.Add(1)
 	v.progress.markProposed(key)
 	v.afterSealBuild(ctx, pending)
@@ -294,7 +293,7 @@ func (v *vaultChunking) finishBuildOnce(ctx context.Context, pending *vaultctlfs
 	// drainReleasedPurge) and by later manifests referencing the segment.
 	// Re-flushing here doubled the seal tail: a second full purge pass —
 	// including releasableSegmentIDs over the whole manifest — on every build
-	// wake after the post-seal work had already run (gastrolog-2m0f75).
+	// wake after the post-seal work had already run.
 	// Retain the pending manifest until CmdSealChunk commits so
 	// OnSealedManifestCleared can run afterSealBuild on follower homes.
 	if entry := v.fsm().Get(pending.ChunkID); entry != nil && entry.State == chunk.ChunkStateSealed {
@@ -417,16 +416,16 @@ func (v *vaultChunking) proposeDiscardIfGhostRefs(manifest SealedManifest, missi
 // instance key is the vault ID. The catalog's DelayOn (2min) is what keeps
 // routine collection catch-up out of the alarm list; this site raises the
 // raw condition every blocked build pass. The suppressed activation edge is
-// logged by the collector with this raise's full detail — during the 6h
-// gastrolog-4bl9xx stall the log carried 244k bare retry lines and never a
-// statement of WHAT was blocked on WHOM (gastrolog-67c9b0 follow-up).
+// logged by the collector with this raise's full detail — during one 6h
+// stall the log carried 244k bare retry lines and never a statement of WHAT
+// was blocked on WHOM.
 const buildBlockedAlarmType = "chunking-build-blocked"
 
 // noteBuildBlocked reports that the head-of-queue sealed manifest is
 // unbuildable because referenced segment files are missing on this node.
 // Sealing is serial per vault: a blocked head manifest pins every later chunk
-// in Sealing and the records inside are unqueryable until it clears
-// (gastrolog-67c9b0). Called only from the build pass, under buildMu.
+// in Sealing and the records inside are unqueryable until it clears. Called
+// only from the build pass, under buildMu.
 func (v *vaultChunking) noteBuildBlocked(chunkID chunk.ChunkID, missing []glid.GLID) {
 	if v.cfg.Alerts == nil || len(missing) == 0 {
 		return

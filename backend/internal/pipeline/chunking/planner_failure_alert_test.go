@@ -1,11 +1,11 @@
 package chunking_test
 
-// Planner error visibility (gastrolog-6wwdos): a registry segment whose
-// on-disk index cannot be opened or read was skipped silently by every
-// planner pass — records never planned into a sealed manifest, head purge
-// blocked, zero diagnostics. The planner now logs the failure (state-based,
-// once per segment per failure state), raises an operator alert on repeated
-// failures, and keeps planning every other segment.
+// Planner error visibility: a registry segment whose on-disk index cannot be
+// opened or read is skipped by every planner pass — its records are never
+// planned into a sealed manifest and head purge stays blocked. The planner
+// logs the failure (state-based, once per segment per failure state), raises
+// an operator alert on repeated failures, and keeps planning every other
+// segment.
 
 import (
 	"os"

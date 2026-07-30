@@ -58,18 +58,17 @@ type vaultDist struct {
 	// inflight marks segments a worker is currently attempting. Together they
 	// single-flight publishes per segment: the publish queue, the retry queue,
 	// and the stranded rescan can all carry the same segment after a
-	// re-registration (registration fires a rescan wake, gastrolog-375el),
+	// re-registration (registration fires a rescan wake),
 	// and only one attempt may commit or the publish counter double-counts.
 	finalized map[glid.GLID]struct{}
 	inflight  map[glid.GLID]struct{}
 	// badHeader remembers completed/ files whose fixed header failed to
 	// decode, keyed by segment ID (state, not time): each corrupt file is
-	// read and warned about exactly once, not on every rescan wake
-	// (gastrolog-faj2yv).
+	// read and warned about exactly once, not on every rescan wake.
 	badHeader map[glid.GLID]struct{}
 	// published counts segments this origin committed to the vault-ctl
 	// registry (one per successful publish) — the segment-publish stage
-	// counter (gastrolog-4r784a). Origin-owned: the leader publishes intent.
+	// counter. Origin-owned: the leader publishes intent.
 	published atomic.Uint64
 }
 
@@ -105,7 +104,7 @@ func newVaultDist(root string, cfg VaultConfig, log *slog.Logger) (*vaultDist, e
 // alreadyStaged reports that a prior prepare registered this segment — the
 // stranded rescan and the completed-channel delivery can race on the same
 // segment (the file exists in completed/ before its notification is consumed),
-// and only the first staging may enqueue the publish (gastrolog-x5c8ge).
+// and only the first staging may enqueue the publish.
 func (v *vaultDist) prepare(seg segmentation.CompletedSegment) (meta Metadata, path string, alreadyStaged bool, err error) {
 	v.mu.RLock()
 	registered, known := v.segments[seg.SegmentID]
@@ -153,7 +152,7 @@ func metadataForPublish(seg segmentation.CompletedSegment) (Metadata, error) {
 		// Header-only read: this node finalized and fsynced the file, so a
 		// full segment.Open here re-verified every record byte just to fetch
 		// counts; the checksum travels in the header for downstream
-		// verification instead (gastrolog-faj2yv).
+		// verification instead.
 		h, err := segment.ReadHeader(seg.Path)
 		if err != nil {
 			return Metadata{}, err
@@ -167,16 +166,14 @@ func metadataForPublish(seg segmentation.CompletedSegment) (Metadata, error) {
 // prepared yet — segments whose channel notification was dropped (burst) or
 // that predate this process (restart). Cost is one directory listing plus one
 // fixed-header read per unknown segment: a restart backlog must not re-verify
-// every byte of every completed file before the first publish
-// (gastrolog-faj2yv).
+// every byte of every completed file before the first publish.
 func (v *vaultDist) stranded(vaultID glid.GLID) []segmentation.CompletedSegment {
 	ids, err := paths.ListSegmentIDs(paths.CompletedDir(v.root))
 	if err != nil {
 		v.log.Warn("stranded rescan: reading completed/ failed", "vault", vaultID, "error", err)
 		return nil
 	}
-	// Publish in segment-ID order (GLIDs are time-ordered), matching the old
-	// name-sorted directory walk.
+	// Publish in segment-ID order (GLIDs are time-ordered).
 	sorted := slices.SortedFunc(maps.Keys(ids), glid.GLID.Compare)
 	var out []segmentation.CompletedSegment
 	for _, segID := range sorted {
@@ -299,7 +296,7 @@ func (v *vaultDist) publishStagedBatch(ctx context.Context, items []pendingPubli
 			// stranded the surviving batchmates permanently: the batch error
 			// was classified non-retryable, the items stayed in v.segments,
 			// and the stranded rescan skipped them as known — durable
-			// segments invisible to vault-ctl until restart (gastrolog-353kwm).
+			// segments invisible to vault-ctl until restart.
 			v.retireSegment(p.segID)
 			v.releasePublish(p.segID, false)
 			v.log.Warn("segment bytes missing at publish; retiring segment",

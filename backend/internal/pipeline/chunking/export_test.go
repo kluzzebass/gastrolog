@@ -5,9 +5,9 @@ import (
 	"gastrolog/internal/pipeline/paths"
 )
 
-// Test-only exports (gastrolog-2v9d67). Production code has no callers for
-// these seams; they live here so the external chunking_test package can
-// reach package internals without keeping dead symbols in shipping code.
+// Test-only exports. Production code has no callers for these seams; they
+// live here so the external chunking_test package can reach package
+// internals without keeping dead symbols in shipping code.
 
 // HeadSegmentLocator resolves segments present under vaultRoot/head/ only —
 // unlike the production VaultSegmentLocator (locator.go), which also probes
@@ -28,8 +28,8 @@ func CatchUpBudget(eligible int, policy ManifestRotationPolicy) int {
 
 // IsGLCBBuildTmpName exposes isGLCBBuildTmpName so the external
 // chunking_test package can pin the BuildGLCBFile-writer /
-// sweepOrphanGLCBBuildTmp-sweeper naming contract (gastrolog-66hmx3)
-// without needing an internal-package test file.
+// sweepOrphanGLCBBuildTmp-sweeper naming contract without needing an
+// internal-package test file.
 func IsGLCBBuildTmpName(name string) bool {
 	return isGLCBBuildTmpName(name)
 }

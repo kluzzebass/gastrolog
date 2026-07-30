@@ -1,9 +1,9 @@
 package glcb
 
-// DownloadAndUnwrap tests (gastrolog-5do8sh): the canonical download-side
-// unwrap against the in-memory blob store — happy path, both blob-store
-// sentinel translations, and corrupt zstd transport payloads. No network,
-// no timing.
+// DownloadAndUnwrap tests: the canonical download-side unwrap against
+// the in-memory blob store — happy path, both blob-store sentinel
+// translations, and corrupt zstd transport payloads. No network, no
+// timing.
 
 import (
 	"bytes"

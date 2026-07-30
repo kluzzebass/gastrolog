@@ -14,15 +14,13 @@ import (
 	"gastrolog/internal/glid"
 )
 
-// This file pins the lazy FSM-grounded cloud-backed resolver
-// (gastrolog-5bnxc): the cloud index is a cache of the replicated vault-ctl
-// manifest's CloudBacked entries with exactly ONE fill path — resolution on a
-// lookup/enumeration miss — replacing the two retired eager mirrors (the
-// reconciler's snapshot projection pass and the per-apply onUpload
-// registration). The founding failure shape: a follower that caught up via
-// snapshot install had the cloud entry in its FSM but nothing in its cloud
-// index (Restore fires no per-apply effects), so OpenCursor returned
-// ErrChunkNotFound and search streams aborted.
+// This file pins the lazy FSM-grounded cloud-backed resolver: the cloud
+// index is a cache of the replicated vault-ctl manifest's CloudBacked
+// entries with exactly ONE fill path — resolution on a lookup/enumeration
+// miss. The failure shape it prevents: a follower that catches up via
+// snapshot install has the cloud entry in its FSM but nothing in its cloud
+// index (Restore fires no per-apply effects), so OpenCursor returns
+// ErrChunkNotFound and search streams abort.
 
 // wipeCloudEntry reproduces the snapshot-install follower state for a chunk
 // this manager uploaded itself: blob in the cloud store, no cloud-index
@@ -106,15 +104,13 @@ func readAllCloudRecords(t *testing.T, cm *Manager, id chunk.ChunkID) int {
 	return got
 }
 
-// TestOpenCursorCloudBackedResolvesLazilyFromFSM is the repurposed
-// gastrolog-5bnxc pin (formerly TestOpenCursorCloudBackedRequiresCloudIndex,
-// which pinned the eager mirrors): in the exact snapshot-install follower
-// state — blob only in the cloud store, empty cloud index, no local meta —
-// OpenCursor serves the chunk's records through the lazy resolver, with no
-// eager registration pass anywhere. Resolution is metadata-only (the blob
-// key is derived by blobKey()); the byte fetch happens when the cursor
-// reads. The FSM hit is memoized by the cloud-index insert, so repeated
-// reads cost one resolver call total.
+// TestOpenCursorCloudBackedResolvesLazilyFromFSM: in the exact
+// snapshot-install follower state — blob only in the cloud store, empty
+// cloud index, no local meta — OpenCursor serves the chunk's records
+// through the lazy resolver, with no eager registration pass anywhere.
+// Resolution is metadata-only (the blob key is derived by blobKey()); the
+// byte fetch happens when the cursor reads. The FSM hit is memoized by the
+// cloud-index insert, so repeated reads cost one resolver call total.
 func TestOpenCursorCloudBackedResolvesLazilyFromFSM(t *testing.T) {
 	t.Parallel()
 
@@ -432,7 +428,8 @@ func TestLazyCloudBackedResolverArchiveRestore(t *testing.T) {
 // TestLazyCloudBackedListerSurfacesInList pins the enumeration half: List()
 // consults the cloud lister so a chunk the FSM knows as CloudBacked appears
 // in enumeration (match-all search shape) without anything having named it
-// by ID first — the gastrolog-3s26vr failure shape, cloud edition.
+// by ID first — the post-restart zero-results failure shape, cloud
+// edition.
 func TestLazyCloudBackedListerSurfacesInList(t *testing.T) {
 	t.Parallel()
 

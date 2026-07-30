@@ -1,9 +1,9 @@
 package segment_test
 
-// Coverage for gastrolog-1ojsm6: AppendFrames commits a whole batch with one
-// data write and one header rewrite. On-disk layout, header fields, and the
-// running checksum must be byte-identical to sequential single appends, and
-// crash recovery must reconcile a torn batch exactly like a torn single.
+// AppendFrames commits a whole batch with one data write and one header
+// rewrite. On-disk layout, header fields, and the running checksum must be
+// byte-identical to sequential single appends, and crash recovery must
+// reconcile a torn batch exactly like a torn single.
 
 import (
 	"bytes"
@@ -143,9 +143,9 @@ func TestAppendFramesRecoversTornBatchTail(t *testing.T) {
 }
 
 // TestFinalizeFromMemoryMatchesDiskScan: writer-created segments finalize via
-// the in-memory index build (gastrolog-oin19g); crash-recovered segments
-// (Open path, no capture) use the disk scan. Both must produce byte-identical
-// files — same tails, same sort, same checksums, same header.
+// the in-memory index build; crash-recovered segments (Open path, no
+// capture) use the disk scan. Both must produce byte-identical files — same
+// tails, same sort, same checksums, same header.
 func TestFinalizeFromMemoryMatchesDiskScan(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

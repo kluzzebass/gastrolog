@@ -248,7 +248,7 @@ func TestDeleteSilent_RemovesExternalGLCBDir(t *testing.T) {
 }
 
 // TestUploadToCloud_ExternalGLCBPath verifies pipeline-registered GLCBs upload
-// from their external path, not chunkDir(id). See gastrolog-34azvz.
+// from their external path, not chunkDir(id).
 func TestUploadToCloud_ExternalGLCBPath(t *testing.T) {
 	t.Parallel()
 

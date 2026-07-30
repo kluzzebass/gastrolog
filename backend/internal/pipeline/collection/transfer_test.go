@@ -76,8 +76,7 @@ func segmentChecksumOf(t *testing.T, data []byte) uint64 {
 }
 
 // pullToPreHead lands segment bytes in the vault pre-head area through the
-// production transfer path (PullToPreHead), standing in for the deleted
-// ReceiveToPreHead (gastrolog-2v9d67).
+// production transfer path (PullToPreHead).
 func pullToPreHead(t *testing.T, root string, segID glid.GLID, data []byte) string {
 	t.Helper()
 	path, err := collection.PullToPreHead(context.Background(), root, glid.New(), segID, stubPull{data: data})
@@ -153,7 +152,7 @@ func TestPromoteVerifiedRejectsCorruptTransfer(t *testing.T) {
 // TestPromoteVerifiedRejectsPublishedChecksumMismatch: internally-valid
 // segment bytes whose record checksum does not match the published checksum
 // must be discarded, not promoted — internal consistency alone lets a holder
-// serving stale-but-valid bytes into this home's GLCB (gastrolog-5zotim).
+// serving stale-but-valid bytes into this home's GLCB.
 func TestPromoteVerifiedRejectsPublishedChecksumMismatch(t *testing.T) {
 	t.Parallel()
 	vaultID := glid.New()
@@ -185,7 +184,7 @@ func TestPromoteVerifiedRejectsPublishedChecksumMismatch(t *testing.T) {
 // tamperFrameSameLength substitutes content inside the first record frame
 // WITHOUT changing any frame length, and fixes up the frame's embedded CRC32
 // so the frame stays internally valid — a holder serving corrupted-in-place
-// or substituted bytes with matching frame geometry (gastrolog-1vepg0).
+// or substituted bytes with matching frame geometry.
 func tamperFrameSameLength(t *testing.T, data []byte) []byte {
 	t.Helper()
 	out := append([]byte(nil), data...)
@@ -202,8 +201,8 @@ func tamperFrameSameLength(t *testing.T, data []byte) []byte {
 
 // TestPromoteVerifiedRejectsSameLengthSubstitution: a same-length content
 // substitution with fixed-up frame CRCs must be rejected against the
-// published checksum — the previous content-blind rolling CRC32 let it pass
-// every verify and merge divergent bytes into home GLCBs (gastrolog-1vepg0).
+// published checksum — a content-blind checksum would let it pass every
+// verify and merge divergent bytes into home GLCBs.
 func TestPromoteVerifiedRejectsSameLengthSubstitution(t *testing.T) {
 	t.Parallel()
 	vaultID := glid.New()
@@ -231,7 +230,7 @@ func TestPromoteVerifiedRejectsSameLengthSubstitution(t *testing.T) {
 }
 
 // TestPromoteVerifiedPurgedPreHeadIsNotCorrupt reproduces the release-purge
-// race observed on the soak cluster (gastrolog-2as548): a segment lands in
+// race observed on the soak cluster: a segment lands in
 // pre-head via a clean pull, then a concurrent release purge
 // (paths.PurgeHeadStaging — the supervisor's OnReleaseSegments hook and
 // chunking's release/stale purges) deletes the file before PromoteVerified

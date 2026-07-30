@@ -9,9 +9,9 @@ import (
 
 // defaultGLCBDecodedTablesCap bounds how many sealed chunks may hold
 // heap-decoded GLCB dict+record index at once. Mmaps stay in glcbMapped; LRU
-// eviction and cursor close drop decode state only (gastrolog-2o9e9 histogram
-// attr scan). Per-Manager state (glcbDecodeCap), not a package global — tests
-// tune it per instance without racing parallel readers (gastrolog-1woee2).
+// eviction and cursor close drop decode state only. Per-Manager state
+// (glcbDecodeCap), not a package global — tests tune it per instance without
+// racing parallel readers.
 const defaultGLCBDecodedTablesCap = 32
 
 // noteGLCBDecoded records that id's GLCB dict/index are loaded and enforces

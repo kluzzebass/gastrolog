@@ -46,7 +46,7 @@ func NewFactory() chunk.ManagerFactory {
 		if v, ok := params[ParamBudget]; ok {
 			// A size expression ("1GiB"), resolved with the shared parser like
 			// the file manager's cache budget — the memory budget is the
-			// operator's expression threaded through unchanged (gastrolog-etcjdx).
+			// operator's expression threaded through unchanged.
 			n, err := system.ParseSize(v)
 			if err != nil {
 				return nil, fmt.Errorf("invalid %s: %w", ParamBudget, err)

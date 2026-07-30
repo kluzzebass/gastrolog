@@ -26,7 +26,7 @@ var (
 	// because the registry no longer needs the segment. A catch-up race, not
 	// a data-integrity failure: no byte was ever verified and found wrong.
 	// Joining ErrCorruptSegment here instead surfaced every such race as a
-	// "checksum verification failed" data-integrity WARN (gastrolog-2as548).
+	// "checksum verification failed" data-integrity WARN.
 	ErrPreHeadPurged = errors.New("pre-head segment purged during collect")
 )
 
@@ -53,7 +53,7 @@ func PullToPreHead(ctx context.Context, vaultRoot string, vaultID, segmentID gli
 		// Durability barrier: the holder receipt this pull leads to asserts
 		// cluster-wide that a copy exists. Fsync before the receipt can
 		// commit, or a crash leaves the cluster trusting a torn copy —
-		// potentially the last one (gastrolog-4mqy06).
+		// potentially the last one.
 		pullErr = f.Sync()
 	}
 	closeErr := f.Close()
@@ -86,8 +86,8 @@ func isPreHeadPullingName(name string) bool {
 
 // sweepOrphanPullingFiles removes pre-head/*.pulling files left behind by a
 // pull that crashed between PullToPreHead's O_TRUNC open and its rename
-// commit (gastrolog-5do8sh gap 7, gastrolog-66hmx3). Unlike the
-// data.glcb.tmp wedge, this leak is hygiene rather than correctness: a
+// commit. Unlike the data.glcb.tmp wedge, this leak is hygiene rather
+// than correctness: a
 // FINAL-named pre-head orphan blocks nothing (a later collect pass reads
 // through it and a real re-pull of the same segment reuses the exact same
 // tmp path with O_TRUNC, discarding the stale bytes on rename — see
@@ -120,29 +120,26 @@ func sweepOrphanPullingFiles(vaultRoot string, logger *slog.Logger) {
 // PromoteVerified opens the pre-head segment, verifies its checksum, and atomically
 // renames it into head. A corrupt transfer is discarded from pre-head. The
 // verified header is returned so callers can count arrivals without a
-// re-read (gastrolog-10n6k8).
+// re-read.
 //
 // publishedChecksum is the record checksum the origin published to the
 // vault-ctl registry (CompletedSegmentEntry.Checksum). segment.Open only
 // proves the file is consistent with its OWN header — a holder serving stale
 // or wrong-but-internally-valid bytes would still pass, get receipted, and
-// merge divergent bytes into this home's GLCB (gastrolog-5zotim). Zero means
+// merge divergent bytes into this home's GLCB. Zero means
 // no published expectation is available (no registry entry — tests, targeted
 // collects before the FSM caught up); internal verification alone then gates
 // the promote.
 //
 // The record checksum is XXH64 over the record region — content-sensitive,
-// including same-length substitution. Its rolling-CRC32 predecessor folded
-// each frame's trailing CRC32 into itself, and CRC(M ++ CRC(M)) cancels the
-// content contribution, pinning only frame-length structure
-// (gastrolog-1vepg0).
+// so same-length substitution of record bytes fails verification.
 func PromoteVerified(preHeadPath, vaultRoot string, publishedChecksum uint64) (string, segment.Header, error) {
 	sf, err := segment.Open(preHeadPath)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			// A concurrent release purge won the race for this file. Only a
 			// verification failure may carry ErrCorruptSegment; a missing
-			// file verified nothing (gastrolog-2as548).
+			// file verified nothing.
 			return "", segment.Header{}, fmt.Errorf("%w: %w", ErrPreHeadPurged, err)
 		}
 		_ = os.Remove(preHeadPath)
@@ -167,7 +164,7 @@ func PromoteVerified(preHeadPath, vaultRoot string, publishedChecksum uint64) (s
 			// Verified fine, then a concurrent release purge removed the
 			// source before the rename (head/ was just ensured, so ENOENT
 			// means the pre-head name is gone). Same race as the open-time
-			// window above (gastrolog-2as548).
+			// window above.
 			return "", segment.Header{}, fmt.Errorf("%w: %w", ErrPreHeadPurged, err)
 		}
 		_ = os.Remove(preHeadPath)

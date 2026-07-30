@@ -1,8 +1,8 @@
 package chunking
 
 // State-based rate limiting for planner index failures and head-purge error
-// logging (gastrolog-6wwdos). Wall-clock-gated throttles are a defect in this
-// project; the planner logs on failure-state transitions instead.
+// logging. Wall-clock-gated throttles are a defect in this project; the
+// planner logs on failure-state transitions instead.
 
 import (
 	"bytes"

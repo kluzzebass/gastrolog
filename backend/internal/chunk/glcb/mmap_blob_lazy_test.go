@@ -42,8 +42,9 @@ func writeTestGLCB(t *testing.T) string {
 	return path
 }
 
-// Section-only GLCB access (histogram ITSI lookups) must not heap-decode dict
-// or record index — gastrolog-2o9e9 histogram amplifier.
+// Section-only GLCB access (histogram ITSI lookups) must not heap-decode
+// dict or record index, so a histogram does not heap-load every chunk in
+// its window.
 func TestMappedBlobSectionSkipsRecordTables(t *testing.T) {
 	t.Parallel()
 	path := writeTestGLCB(t)

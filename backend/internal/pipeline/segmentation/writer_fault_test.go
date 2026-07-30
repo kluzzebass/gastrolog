@@ -1,10 +1,10 @@
 package segmentation
 
-// Fault-injection coverage for gastrolog-1c9f5l: a commit (fsync/rotation)
-// failure must never silently kill a vault writer. The writer abandons the
-// suspect segment for crash recovery, rotates, and keeps serving; when even
-// rotation fails it degrades — nacking ack producers immediately and counting
-// fire-and-forget drops — instead of wedging the bounded input queue.
+// Fault-injection coverage: a commit (fsync/rotation) failure must never
+// silently kill a vault writer. The writer abandons the suspect segment for
+// crash recovery, rotates, and keeps serving; when even rotation fails it
+// degrades — nacking ack producers immediately and counting fire-and-forget
+// drops — instead of wedging the bounded input queue.
 
 import (
 	"context"
@@ -99,8 +99,8 @@ func newTestTextLogger(w io.Writer) *slog.Logger {
 }
 
 // sendAck submits an ack-bearing input and returns the ack result, failing the
-// test if the ack does not resolve — the whole point of gastrolog-1c9f5l is
-// that producers must never hang on a broken writer.
+// test if the ack does not resolve — producers must never hang on a broken
+// writer.
 func sendAck(t *testing.T, in chan<- Input, rec *record.Record) error {
 	t.Helper()
 	ack := make(chan error, 1)
@@ -324,9 +324,9 @@ func TestShutdownFlushFailureLogged(t *testing.T) {
 }
 
 // TestAppendStatsCounters: the per-vault throughput counters feeding the
-// stats broadcast (gastrolog-4eh5ns). After N acked records, appended and
-// durable both equal N (acks resolve only after the group-commit fsync), and
-// byte counts reflect the appended frame bodies.
+// stats broadcast. After N acked records, appended and durable both equal N
+// (acks resolve only after the group-commit fsync), and byte counts reflect
+// the appended frame bodies.
 func TestAppendStatsCounters(t *testing.T) {
 	t.Parallel()
 	vaultID := glid.New()

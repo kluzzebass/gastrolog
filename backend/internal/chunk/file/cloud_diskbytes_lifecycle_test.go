@@ -11,10 +11,10 @@ import (
 
 // TestCloudDiskBytesLifecycle drives the real Manager through the full
 // cloud-backed chunk lifecycle against a fake blob store, pinning the
-// gastrolog-33ul6h measurement fix: DiskBytes always means the chunk's
-// LOCAL on-disk footprint (the warm-cache state), never the compressed
-// cloud object size — and CloudBytes always means the cloud object size,
-// never the local footprint.
+// size measurements: DiskBytes always means the chunk's LOCAL on-disk
+// footprint (the warm-cache state), never the compressed cloud object
+// size — and CloudBytes always means the cloud object size, never the
+// local footprint.
 //
 //   - sealed -> uploaded: the local data.glcb stays on disk as the warm
 //     cache (upload only deletes the redundant multi-file artifacts), so

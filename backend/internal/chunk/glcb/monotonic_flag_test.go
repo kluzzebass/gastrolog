@@ -1,9 +1,8 @@
 package glcb_test
 
-// IngestTSMonotonic is a build-time fact persisted in the blob layout meta
-// (gastrolog-699s7p) — the old design re-derived it after the fact by
-// touching the ingestTS of every record frame, minutes per large blob on
-// slow volumes. These tests pin the round-trip for both values.
+// IngestTSMonotonic is a build-time fact persisted in the blob layout
+// meta, never derived by touching record frames. These tests pin the
+// round-trip for both values.
 
 import (
 	"os"
