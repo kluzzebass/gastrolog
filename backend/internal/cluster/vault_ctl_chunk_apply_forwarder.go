@@ -52,11 +52,23 @@ func NewVaultCtlChunkApplyForwarder(r *hraft.Raft, vaultCtlGroupID string, vault
 }
 
 // Apply applies a chunk-FSM command. Tries locally first; forwards to the
-// vault-ctl Raft leader on ErrNotLeader.
+// vault-ctl Raft leader on ErrNotLeader, and retries while a leadership
+// transfer is in progress.
+//
+// The retry is what stops a seal announce being dropped mid-transfer
+// (gastrolog-4jh4mb): the observed failure was op=seal and op=attach-offsets
+// returning "leadership transfer in progress", which is not ErrNotLeader and so
+// was never forwarded, leaving the chunk sealed on disk with its manifest entry
+// behind. See applyRetryingLeadershipTransfer for why ErrLeadershipLost is
+// deliberately excluded.
 func (f *VaultCtlChunkApplyForwarder) Apply(data []byte) error {
 	payload := vaultraft.MarshalVaultChunkCommand(f.vaultID, data)
-	future := f.raft.Apply(payload, f.timeout)
-	if err := future.Error(); err != nil {
+	var future hraft.ApplyFuture
+	err := applyRetryingLeadershipTransfer(func() error {
+		future = f.raft.Apply(payload, f.timeout)
+		return future.Error()
+	}, nil)
+	if err != nil {
 		if errors.Is(err, hraft.ErrNotLeader) {
 			return f.forwardToLeader(payload)
 		}

@@ -87,8 +87,20 @@ func (s *Store) apply(ctx context.Context, cmd *gastrologv1.SystemCommand) error
 // can read post-mutation state from the local FSM immediately — fixes the
 // read-after-write race described in gastrolog-2nxij.
 func (s *Store) applyRaw(ctx context.Context, data []byte) (uint64, error) {
-	future := s.raft.Apply(data, s.effectiveTimeout(ctx))
-	if err := future.Error(); err != nil {
+	// Retry while a leadership transfer is in progress before deciding what to
+	// do with the error (gastrolog-4jh4mb). ErrLeadershipTransferInProgress is
+	// NOT ErrNotLeader — this node still leads, it is just refusing new entries
+	// mid-handover — so forwarding would bounce straight back. The transfer
+	// settles in milliseconds; afterwards this either applies or returns
+	// ErrNotLeader and forwards. ErrLeadershipLost stays un-retried: the entry
+	// may already be committed, and a duplicated config apply is worse than a
+	// surfaced error.
+	var future raft.ApplyFuture
+	err := applyRetryingLeadershipTransfer(func() error {
+		future = s.raft.Apply(data, s.effectiveTimeout(ctx))
+		return future.Error()
+	})
+	if err != nil {
 		if errors.Is(err, raft.ErrNotLeader) && s.forwarder != nil {
 			return s.forwardAndWait(ctx, data)
 		}
@@ -497,4 +509,27 @@ func (s *Store) GetSetupWizardDismissed(ctx context.Context) (bool, error) {
 
 func (s *Store) SetSetupWizardDismissed(ctx context.Context, dismissed bool) error {
 	return s.apply(ctx, command.NewSetSetupWizardDismissed(dismissed))
+}
+
+// applyRetryingLeadershipTransfer mirrors cluster's helper of the same name for
+// the config store's own Raft group. Duplicated rather than shared because
+// importing internal/cluster here would invert the dependency — raftstore is
+// below cluster, not beside it. The BOUNDS are intentionally identical; if one
+// changes the other should, and this comment is the link between them.
+func applyRetryingLeadershipTransfer(apply func() error) error {
+	const (
+		attempts = 5
+		backoff  = 20 * time.Millisecond
+	)
+	var err error
+	for attempt := range attempts {
+		err = apply()
+		if !errors.Is(err, raft.ErrLeadershipTransferInProgress) {
+			return err
+		}
+		if attempt < attempts-1 {
+			time.Sleep(backoff)
+		}
+	}
+	return err
 }
