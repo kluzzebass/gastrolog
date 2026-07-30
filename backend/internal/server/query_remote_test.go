@@ -6,17 +6,15 @@ import (
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 )
 
-// TestMergeHistogramBucketsPreservesCloudProvenance is the regression test
-// for gastrolog-4of7c: mergeHistogramBuckets combines the sidebar
-// "Volume" histogram across cluster nodes (query.go/query_pipeline.go
-// call it on every fan-out search/pipeline request). Before this fix, a
-// remote node's HasCloudData/CloudCount were silently dropped whenever its
-// bucket matched an existing timestamp — the merged bucket only kept
-// whichever node happened to seed the map first. In a cluster where only
-// some nodes host the cloud-backed chunk for a given bucket, that meant the
-// cluster-wide histogram could present an applyCloudSelectivity-derived
-// count as exact just because the coordinator's own local bucket (with no
-// cloud data) was merged first.
+// TestMergeHistogramBucketsPreservesCloudProvenance pins that a remote node's
+// HasCloudData/CloudCount survive a merge into an existing timestamp bucket.
+// mergeHistogramBuckets combines the sidebar "Volume" histogram across cluster
+// nodes (query.go/query_pipeline.go call it on every fan-out search/pipeline
+// request); in a cluster where only some nodes host the cloud-backed chunk for
+// a given bucket, dropping that provenance would let the cluster-wide
+// histogram present an applyCloudSelectivity-derived count as exact, just
+// because the coordinator's own local bucket (with no cloud data) seeded the
+// map first.
 func TestMergeHistogramBucketsPreservesCloudProvenance(t *testing.T) {
 	// Local node: bucket at t0 has no cloud data at all (exact).
 	local := []*apiv1.HistogramBucket{

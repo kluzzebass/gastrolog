@@ -23,13 +23,13 @@ import (
 // iterator performs a k-way merge — at most one record per remote vault is
 // held in memory at any time.
 //
-// The third return is the per-vault stream-health signal (gastrolog-20lrg):
-// the remote vaults contributing to this merged search. Because a remote
-// stream failure aborts the whole search (mergeIterators → mapSearchError,
-// the same fail-on-remote-failure policy the pipeline path now shares), any
-// successfully-returned response has been assembled from EVERY vault in this
-// set — so the fanned-out set is exactly the contributor set. nil when there
-// are no remote vaults in scope.
+// The third return is the per-vault stream-health signal: the remote vaults
+// contributing to this merged search. Because a remote stream failure aborts
+// the whole search (mergeIterators → mapSearchError, the same policy the
+// pipeline path uses for fail-on-remote-failure), any successfully-returned
+// response has been assembled from EVERY vault in this set — so the fanned-out
+// set is exactly the contributor set. nil when there are no remote vaults in
+// scope.
 func (s *QueryServer) collectRemote(ctx context.Context, q query.Query, remoteTokens map[glid.GLID][]byte) (iter.Seq2[chunk.Record, error], []*apiv1.HistogramBucket, []glid.GLID) {
 	if s.remoteSearcher == nil || s.cfgStore == nil {
 		return nil, nil, nil
@@ -162,13 +162,13 @@ func (s *QueryServer) remoteVaultsByNodeFiltered(ctx context.Context, selectedVa
 // remote nodes produce slightly different bucket boundaries (e.g. from
 // independent "last=5m" resolution with clock skew).
 //
-// HasCloudData/CloudCount (see gastrolog-4of7c) merge like Count/GroupCounts,
-// not like an ordinary group key: HasCloudData ORs across nodes (a bucket
-// touched by cloud-derived data on ANY node stays flagged) and CloudCount
-// sums (each node contributes its own local applyCloudSelectivity estimate
-// for the bucket). Dropping these on merge would silently present a
-// cluster-wide bucket as exact whenever the node whose entry happened to
-// seed `a` for that timestamp had no cloud-backed chunks locally.
+// HasCloudData/CloudCount merge like Count/GroupCounts, not like an ordinary
+// group key: HasCloudData ORs across nodes (a bucket touched by cloud-derived
+// data on ANY node stays flagged) and CloudCount sums (each node contributes
+// its own local applyCloudSelectivity estimate for the bucket). Dropping
+// these on merge would silently present a cluster-wide bucket as exact
+// whenever the node whose entry happened to seed `a` for that timestamp had
+// no cloud-backed chunks locally.
 func mergeHistogramBuckets(a, b []*apiv1.HistogramBucket) []*apiv1.HistogramBucket {
 	if len(b) == 0 {
 		return a
@@ -353,17 +353,16 @@ func runMerge(yield func(chunk.Record, error) bool, states []mergeState, entries
 // start/end timestamps so all nodes use identical time windows (avoids bucket
 // misalignment from re-evaluating relative "last=5m" on each node).
 //
-// Fail-on-remote-failure (gastrolog-20lrg): if ANY remote vault fails, the
-// whole pipeline query fails — a partial aggregate is silently wrong. A
-// `| stats count` or `| timechart` collapses many vaults into one number or
-// table; dropping a failed vault (the previous behaviour) undercounts with no
-// signal to the caller, presenting a derived-from-a-subset figure as
-// authoritative — exactly the data-integrity failure the project forbids, and
-// worse than an inspector fan-out where a missing node is a visible per-row
-// gap. There is no per-vault affordance in a merged stats table for a
-// "partial" badge, so returning-partial-with-report is not an option here.
-// This matches the two sibling query paths, which both already abort on any
-// remote error: searchDirect (mergeIterators → mapSearchError) and
+// Fail-on-remote-failure: if ANY remote vault fails, the whole pipeline
+// query fails — a partial aggregate is silently wrong. A `| stats count` or
+// `| timechart` collapses many vaults into one number or table; dropping a
+// failed vault undercounts with no signal to the caller, presenting a
+// derived-from-a-subset figure as authoritative — exactly the data-integrity
+// failure the project forbids, and worse than an inspector fan-out where a
+// missing node is a visible per-row gap. There is no per-vault affordance in
+// a merged stats table for a "partial" badge, so returning-partial-with-report
+// is not an option here. This matches the two sibling query paths, which both
+// abort on any remote error: searchDirect (mergeIterators → mapSearchError) and
 // searchPipelineGlobal (collectRemote consumption). The fan-out runs under the
 // request ctx — the same latency budget (s.queryTimeout) search uses — not the
 // inspector per-peer timeout, so a slow-but-alive vault is not failed faster

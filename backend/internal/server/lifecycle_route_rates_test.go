@@ -1,10 +1,10 @@
 package server
 
-// Regression test for gastrolog-4eh5ns: the WatchSystemStatus stream builder
-// (buildRouteStats) is what actually feeds the UI's route-stats cache — the
-// stream continuously overwrites the cache, so a response built WITHOUT the
-// throughput rate fields pinned the route inspector at 0/s even while the
-// GetRouteStats RPC returned correct rates.
+// Regression coverage for the WatchSystemStatus stream builder
+// (buildRouteStats), which is what actually feeds the UI's route-stats
+// cache — the stream continuously overwrites the cache, so a response built
+// WITHOUT the throughput rate fields pins the route inspector at 0/s even
+// while the GetRouteStats RPC returns correct rates.
 
 import (
 	"path/filepath"

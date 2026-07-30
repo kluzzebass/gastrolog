@@ -19,13 +19,12 @@ import (
 	sysmem "gastrolog/internal/system/memory"
 )
 
-// The RemoveNode RPC is where the removal policy is decided
-// (gastrolog-3vyex): allow_self against this node is the preStop
-// `cluster demote-self` path and gets the optimistic RF stance;
-// everything else is operator-driven and gets the pessimistic one. These
-// tests pin that derivation and the error classification, with the
-// leader-side gates stubbed — the gates themselves are tested in
-// internal/app.
+// The RemoveNode RPC is where the removal policy is decided: allow_self
+// against this node is the preStop `cluster demote-self` path and gets the
+// optimistic RF stance; everything else is operator-driven and gets the
+// pessimistic one. These tests pin that derivation and the error
+// classification, with the leader-side gates stubbed — the gates themselves
+// are tested in internal/app.
 
 type removeNodeRecorder struct {
 	mu    sync.Mutex
@@ -154,8 +153,8 @@ func TestRemoveNode_ForcePassedThrough(t *testing.T) {
 	}
 }
 
-// Self-removal without allow_self is still blocked by the typo guard
-// before any policy is chosen (gastrolog-24iv4, unchanged).
+// Self-removal without allow_self is blocked by the typo guard before any
+// policy is chosen.
 func TestRemoveNode_SelfWithoutAllowSelfRejected(t *testing.T) {
 	t.Parallel()
 	rec := &removeNodeRecorder{}

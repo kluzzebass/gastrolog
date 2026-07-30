@@ -1,9 +1,8 @@
 package server_test
 
-// Coverage for the typeable-defaults directive (policy decision 6), moved
-// from VaultConfig to FileStorage (gastrolog-9akebz): the disk-free
-// thresholds accept a percentage of the volume ("10%") alongside an
-// absolute size, stored verbatim on the storage entity a vault's
+// Coverage for the typeable-defaults directive (policy decision 6): the
+// disk-free thresholds accept a percentage of the volume ("10%") alongside
+// an absolute size, stored verbatim on the storage entity a vault's
 // placements reference (not on the vault itself); and an explicit zero
 // threshold is rejected like the explicit-0 budgets.
 

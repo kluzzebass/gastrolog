@@ -50,8 +50,8 @@ type Config struct {
 	// Logger for structured logging.
 	Logger *slog.Logger
 
-	// CertManager provides TLS certificates. When non-nil and a server cert is configured,
-	// the server can serve HTTPS (see gastrolog-q232).
+	// CertManager provides TLS certificates. When non-nil and a server cert
+	// is configured, the server can serve HTTPS.
 	CertManager CertManager
 
 	// NoAuth disables authentication. All requests are treated as admin.
@@ -100,7 +100,7 @@ type Config struct {
 	PeerPipelineDisk PeerPipelineDiskProvider
 
 	// PeerStorageStats looks up a storage's disk-guard state from cluster
-	// peer broadcasts, for storages not locally hosted (gastrolog-3cobq4).
+	// peer broadcasts, for storages not locally hosted.
 	// Nil in single-node mode. Typically the same *cluster.PeerState as PeerStats.
 	PeerStorageStats PeerStorageStatsProvider
 
@@ -120,7 +120,7 @@ type Config struct {
 	LocalStats func() *apiv1.NodeStats
 	// ClusterRouteRates returns the server-side cluster-total route rate
 	// series (instant/30s/1m + spark) windowed over summed cluster counters
-	// by the stats collector. Nil in single-node mode (gastrolog-4eh5ns).
+	// by the stats collector. Nil in single-node mode.
 	ClusterRouteRates func() (*apiv1.ThroughputRate, *apiv1.ThroughputRate)
 
 	// ConfigSignal broadcasts config changes to WatchConfig streams.
@@ -164,7 +164,7 @@ type Config struct {
 	// endpoint when non-empty. The endpoint is gated on a shared secret
 	// sent in the X-Bootstrap-Token-Secret header. Used by joiners
 	// configured with --bootstrap-token-url to fetch the join token
-	// without log-scraping or shared volumes (gastrolog-o9z6o).
+	// without log-scraping or shared volumes.
 	BootstrapTokenServeSecret string
 
 	// BootstrapTokenFn returns the current cluster join token. Called
@@ -173,14 +173,14 @@ type Config struct {
 	BootstrapTokenFn func() (string, error)
 
 	// LogFilter is the ComponentFilterHandler whose rule set is driven
-	// from the system config store (gastrolog-3flfp). Used by the
-	// PutLogLevels / ListLogComponents RPC handlers. Nil disables both.
+	// from the system config store. Used by the PutLogLevels /
+	// ListLogComponents RPC handlers. Nil disables both.
 	LogFilter *logging.ComponentFilterHandler
 
 	// EnvironmentLabel and EnvironmentColor are display-only deploy
 	// metadata surfaced to the UI header so operators can tell at a
-	// glance which deployment they are looking at (gastrolog-4vr0l).
-	// Empty label hides the banner.
+	// glance which deployment they are looking at. Empty label hides the
+	// banner.
 	EnvironmentLabel string
 	EnvironmentColor string
 }
@@ -234,15 +234,15 @@ type Server struct {
 	routingForwarder      routing.UnaryForwarder    // forwards requests to remote nodes; nil in single-node
 	placementReconcile    func(ctx context.Context) // synchronous placement; nil in non-cluster mode
 
-	// gastrolog-o9z6o: bootstrap-token endpoint configuration. When the
-	// secret is non-empty, /cluster/bootstrap-token is registered and
-	// gated on the X-Bootstrap-Token-Secret header.
+	// Bootstrap-token endpoint configuration. When the secret is non-empty,
+	// /cluster/bootstrap-token is registered and gated on the
+	// X-Bootstrap-Token-Secret header.
 	bootstrapTokenServeSecret string
 	bootstrapTokenFn          func() (string, error)
 
-	logFilter *logging.ComponentFilterHandler // gastrolog-3flfp; nil disables PutLogLevels/ListLogComponents
+	logFilter *logging.ComponentFilterHandler // nil disables PutLogLevels/ListLogComponents
 
-	// Environment banner (gastrolog-4vr0l). Empty label hides the banner.
+	// Environment banner. Empty label hides the banner.
 	environmentLabel string
 	environmentColor string
 
@@ -324,7 +324,7 @@ func New(orch *orchestrator.Orchestrator, cfgStore system.Store, factories orche
 // when the operator configured BootstrapTokenServeSecret + BootstrapTokenFn.
 // Joiners running with --bootstrap-token-url + --bootstrap-token-secret
 // fetch the join token here, gated on the shared secret in the
-// X-Bootstrap-Token-Secret header. See gastrolog-o9z6o.
+// X-Bootstrap-Token-Secret header.
 func (s *Server) registerBootstrapToken(mux *http.ServeMux) {
 	if s.bootstrapTokenServeSecret == "" || s.bootstrapTokenFn == nil {
 		return
@@ -388,9 +388,9 @@ func (s *Server) routingInterceptor() []connect.Interceptor {
 
 // ownerResolvers builds the resource-owner resolver set the routing
 // interceptor consults for RouteToResourceOwner RPCs. Every resolver reads
-// the cluster-ctl Raft store, so any node answers identically
-// (gastrolog-51ge9). Adding a resource kind means one entry here plus a
-// Resource declaration on the procedure in routing.DefaultRoutes().
+// the cluster-ctl Raft store, so any node answers identically. Adding a
+// resource kind means one entry here plus a Resource declaration on the
+// procedure in routing.DefaultRoutes().
 func ownerResolvers(cfgStore system.Store) routing.OwnerResolvers {
 	return routing.OwnerResolvers{
 		routing.ResourceVault:    &configVaultOwner{cfgStore: cfgStore},
@@ -409,7 +409,7 @@ type configVaultOwner struct {
 // domain-accurate error (and some callers legitimately name a vault this
 // node knows nothing about yet).
 //
-// Reads placements from their owner (gastrolog-617qns).
+// Reads placements from their owner.
 func (c *configVaultOwner) ResolveOwners(ctx context.Context, vaultID string) ([]string, error) {
 	if c.cfgStore == nil {
 		return nil, nil
@@ -425,8 +425,8 @@ func (c *configVaultOwner) ResolveOwners(ctx context.Context, vaultID string) ([
 	if vaultCfg == nil {
 		return nil, nil
 	}
-	// Placements come from their owner; VaultConfig no longer mirrors them
-	// (gastrolog-617qns).
+	// Placements come from their owner; the domain VaultConfig does not
+	// carry them.
 	placements, err := c.cfgStore.GetVaultPlacements(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("read vault placements: %w", err)

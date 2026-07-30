@@ -12,10 +12,10 @@ import (
 	sysmem "gastrolog/internal/system/memory"
 )
 
-// Owner resolvers (gastrolog-51ge9) answer "which node(s) own this
-// resource" for the routing interceptor. They read only the replicated
-// cluster-ctl store — they carry no node identity at all — which is what
-// makes the answer identical on every node.
+// Owner resolvers answer "which node(s) own this resource" for the routing
+// interceptor. They read only the replicated cluster-ctl store — they carry
+// no node identity at all — which is what makes the answer identical on
+// every node.
 
 func TestOwnerResolvers_CoverEveryDeclaredResourceKind(t *testing.T) {
 	resolvers := ownerResolvers(sysmem.NewStore())
@@ -108,8 +108,8 @@ func TestVaultOwner_ResolvesLeaderPlacement(t *testing.T) {
 		t.Fatalf("PutVault: %v", err)
 	}
 	// Placements are seeded through their owner. PutVault deliberately ignores
-	// them now, so a fixture that attached them to the config would silently
-	// resolve no owners (gastrolog-kl8c3s).
+	// them, so a fixture that attached them to the config would silently
+	// resolve no owners.
 	if err := store.SetVaultPlacements(ctx, vaultID, placements); err != nil {
 		t.Fatalf("SetVaultPlacements: %v", err)
 	}

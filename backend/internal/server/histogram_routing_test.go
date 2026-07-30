@@ -16,18 +16,18 @@ import (
 	sysmem "gastrolog/internal/system/memory"
 )
 
-// TestHistogramFullyLocal_RequiresLeadership is the regression for
-// gastrolog-2g334. The bug: histogramFullyLocal used LocalReplicaVaultIDs
-// which includes follower vaults, so a node that's only a follower would
-// skip the cross-node fan-out and serve the histogram from purely local
-// data. Followers receive only sealed chunks via replication — the active
-// (un-sealed) chunk lives only on the leader and is never replicated.
-// The follower-only view drops every record currently in the active
-// chunk, producing an empty right edge where the histogram cuts off at
-// the last sealed chunk's IngestEnd instead of running up to "now".
+// TestHistogramFullyLocal_RequiresLeadership pins the leadership gate on
+// the local-only histogram path. Selecting that path from local replica
+// membership instead would let a follower-only node skip the cross-node
+// fan-out and serve the histogram from purely local data. Followers
+// receive only sealed chunks via replication — the active (un-sealed)
+// chunk lives only on the leader and is never replicated — so the
+// follower-only view drops every record currently in the active chunk,
+// cutting the histogram off at the last sealed chunk's IngestEnd instead
+// of running up to "now".
 //
-// The fix gates the local-only path on local LEADERSHIP of every queried
-// vault, so a follower node correctly falls back to the leader-engine +
+// histogramFullyLocal therefore requires local LEADERSHIP of every
+// queried vault, so a follower node falls back to the leader-engine +
 // remote-merge path that includes the leader's active chunk.
 func TestHistogramFullyLocal_RequiresLeadership(t *testing.T) {
 	t.Parallel()

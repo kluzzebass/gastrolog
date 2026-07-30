@@ -104,10 +104,10 @@ func allVaultsQuery() query.Query {
 	return query.Query{}
 }
 
-// TestCollectRemote_ReportsContributors pins gastrolog-20lrg(a): a merged
-// search records which remote vaults contributed. Under fail-on-remote-
-// failure the fanned-out set IS the contributor set, so a successful
-// two-vault fan-out returns both vault IDs.
+// TestCollectRemote_ReportsContributors pins that a merged search records
+// which remote vaults contributed. Under fail-on-remote-failure the
+// fanned-out set IS the contributor set, so a successful two-vault fan-out
+// returns both vault IDs.
 func TestCollectRemote_ReportsContributors(t *testing.T) {
 	t.Parallel()
 
@@ -149,9 +149,9 @@ func statsPipeline(t *testing.T) *querylang.Pipeline {
 	return pipeline
 }
 
-// TestCollectRemotePipeline_FailsOnRemoteFailure pins gastrolog-20lrg(b):
-// a failed remote vault fails the whole pipeline query (fail-hard), never
-// a silent partial aggregate.
+// TestCollectRemotePipeline_FailsOnRemoteFailure pins that a failed remote
+// vault fails the whole pipeline query (fail-hard), never a silent partial
+// aggregate.
 func TestCollectRemotePipeline_FailsOnRemoteFailure(t *testing.T) {
 	t.Parallel()
 

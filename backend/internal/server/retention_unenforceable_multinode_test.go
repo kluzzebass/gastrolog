@@ -1,7 +1,7 @@
 package server_test
 
-// gastrolog-1xl29s: multi-node pin for the retention-unenforceable alarm
-// lifecycle. The orchestrator-level tests (internal/orchestrator/
+// Multi-node pin for the retention-unenforceable alarm lifecycle. The
+// orchestrator-level tests (internal/orchestrator/
 // retention_unenforceable_test.go) already cover retentionTargetForInstance
 // and retentionSweepAll directly; these tests instead exercise the seam the
 // unit tests cannot reach: a real per-node retention-sweep CRON tick
@@ -12,17 +12,12 @@ package server_test
 // alerts_multinode_test.go's tests read), on a vault whose retention_rules
 // were attached via the shared config store rather than an in-process call.
 //
-// setupMultiNode/setupMNNode were changed alongside this file: previously
-// each node's alert.Collector (h.alerts[id]) was built only for the
-// GetClusterStatus stats-collector wiring, AFTER node construction —
-// orchestrator.Config.Alerts was never set, so orch.alerts stayed nil on
-// every node and no multi-node test before this one ever exercised a real
-// alarm-raising code path end to end (existing alerts_multinode_test.go
-// tests call h.alerts[id].Raise(...) directly on the bare collector). The
-// collectors are now built before node creation and threaded into
-// orchestrator.Config so o.alerts.Raise/Clear in production code (e.g.
-// raiseRetentionUnenforceable) actually reaches the same collector
-// GetClusterStatus reads from.
+// Under WithClusterStats the harness builds each node's alert.Collector
+// (h.alerts[id]) before node creation and threads it into
+// orchestrator.Config, so production alarm-raising code — o.alerts.Raise /
+// Clear, e.g. raiseRetentionUnenforceable — reaches the same collector
+// GetClusterStatus reads from. Tests that call h.alerts[id].Raise(...)
+// directly drive the bare collector and bypass that path; these do not.
 
 import (
 	"context"
@@ -38,9 +33,8 @@ import (
 // * * *" — every minute on the minute). Unexported in the orchestrator
 // package and there is no test-only trigger for it reachable from this
 // external package (server_test) or any exported Orchestrator method — see
-// this file's package comment and the report for gastrolog-1xl29s. Waiting
-// for the real cron is therefore the only non-stub way to observe this
-// end to end from here.
+// this file's package comment. Waiting for the real cron is therefore the
+// only non-stub way to observe this end to end from here.
 const retentionSweepPeriod = 60 * time.Second
 
 // mnAlarmWaitDeadline is comfortably more than one retentionSweepPeriod so a
@@ -50,15 +44,15 @@ const mnAlarmWaitDeadline = 75 * time.Second
 
 // seedTriggerLessRetentionVault attaches a policy with no trigger set (no
 // maxAge/maxSize/maxChunks) to nodeID's vault, writing directly to the
-// harness's shared config store. This mirrors how the gastrolog-1xl29s
-// incident's on-disk state actually arose: a Raft-log replay of an old wire
-// format decoded as a bare {id, name}, below any RPC validation.
-// PutRetentionPolicy the RPC rejects an empty policy outright (IsEmpty gate,
-// gastrolog-1rbuf: "retention policy must set at least one of maxAge,
-// maxBytes, or maxChunks") — going through the store directly is not a test
-// shortcut, it is the only path that can reproduce the incident's state at
-// all, matching this file's "no chunk destroyed" and "alarm visible"
-// assertions against production code exactly as the incident hit it.
+// harness's shared config store. That mirrors how such state reaches disk
+// in the field: a Raft-log replay of an old wire format decoded as a bare
+// {id, name}, below any RPC validation. PutRetentionPolicy the RPC rejects
+// an empty policy outright (IsEmpty gate: "retention policy must set at
+// least one of maxAge, maxBytes, or maxChunks") — going through the store
+// directly is not a test shortcut, it is the only path that can reproduce
+// that state at all, so this file's "no chunk destroyed" and "alarm
+// visible" assertions run against production code exactly as the on-disk
+// state presents it.
 func seedTriggerLessRetentionVault(t *testing.T, h *multiNodeHarness, nodeID, policyName string) (policyID glid.GLID, alarmID string) {
 	t.Helper()
 	ctx := context.Background()
@@ -121,13 +115,13 @@ type byNodeAlarmDetail struct {
 }
 
 // TestMultiNodeRetentionUnenforceableAlarmVisibleAndNoDestruction covers
-// acceptance bullet 1: a trigger-less policy attached to a vault, across a
+// the case where a trigger-less policy attached to a vault, across a
 // real multi-node harness, makes the retention-unenforceable alarm visible
 // through the cluster alarm surface, and destroys nothing while the
 // condition holds.
 func TestMultiNodeRetentionUnenforceableAlarmVisibleAndNoDestruction(t *testing.T) {
 	if testing.Short() {
-		t.Skip("waits for a real retention-sweep cron tick (defaultRetentionSchedule, 60s cadence) — gastrolog-1xl29s")
+		t.Skip("waits for a real retention-sweep cron tick (defaultRetentionSchedule, 60s cadence)")
 	}
 	t.Parallel()
 
@@ -183,11 +177,11 @@ func TestMultiNodeRetentionUnenforceableAlarmVisibleAndNoDestruction(t *testing.
 }
 
 // TestMultiNodeRetentionUnenforceableAlarmClearsWhenTriggerRestored covers
-// acceptance bullet 2: restoring a trigger on the policy (PutRetentionPolicy
+// the case where restoring a trigger on the policy (PutRetentionPolicy
 // with max_age set) clears the alarm on a subsequent real sweep tick.
 func TestMultiNodeRetentionUnenforceableAlarmClearsWhenTriggerRestored(t *testing.T) {
 	if testing.Short() {
-		t.Skip("waits for two real retention-sweep cron ticks (defaultRetentionSchedule, 60s cadence) — gastrolog-1xl29s")
+		t.Skip("waits for two real retention-sweep cron ticks (defaultRetentionSchedule, 60s cadence)")
 	}
 	t.Parallel()
 

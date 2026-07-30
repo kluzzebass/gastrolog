@@ -49,13 +49,12 @@ func (s *SystemServer) PutCloudService(
 	cfg := convert.CloudServiceFromProto(req.Msg.Config)
 	cfg.ID = id
 
-	// Config-accept validation (gastrolog-7au6u9): reject configs that
-	// would fail blobstore store creation at vault init, so a bad
-	// provider config (bare endpoint, missing bucket, …) errors here —
-	// visible to the CLI/UI/API caller — instead of persisting and
-	// killing vault init on every node. Deterministic shape checks only
-	// (blobstore.ValidateConfig): same verdict on every node, no network,
-	// and it runs before the Raft apply — never inside the FSM apply
+	// Config-accept validation: reject configs that would fail blobstore store
+	// creation at vault init, so a bad provider config (bare endpoint, missing
+	// bucket, …) errors here — visible to the CLI/UI/API caller — instead of
+	// persisting and killing vault init on every node. Deterministic shape
+	// checks only (blobstore.ValidateConfig): same verdict on every node, no
+	// network, and it runs before the Raft apply — never inside the FSM apply
 	// path, where a rejection would break replay of persisted state.
 	if err := blobstore.ValidateConfig(cfg.Provider, cfg.StoreParams()); err != nil {
 		return nil, errInvalidArg(fmt.Errorf("cloud service %q: %w", cfg.Name, err))
@@ -161,13 +160,13 @@ func (s *SystemServer) SetNodeStorageConfig(
 }
 
 // validateFileStorageExpressions parse-checks a file storage's disk-guard
-// free-space thresholds (gastrolog-9akebz: moved here from VaultConfig — the
-// thresholds guard the volume a storage entity represents, not the vaults
-// placed on it). An empty value legitimately means "inherit the node
-// default"; a percentage of the volume ("10%") is allowed alongside an
-// absolute size because the threshold guards this storage's own volume, so a
-// share composes; an explicit zero ("0", "0%") would disable the guard for
-// this storage and is rejected, like the vault-quantity explicit-0 rule.
+// free-space thresholds. They live on the storage because they guard the
+// volume a storage entity represents, not the vaults placed on it. An
+// empty value legitimately means "inherit the node default"; a percentage
+// of the volume ("10%") is allowed alongside an absolute size because the
+// threshold guards this storage's own volume, so a share composes; an
+// explicit zero ("0", "0%") would disable the guard for this storage and
+// is rejected, like the vault-quantity explicit-0 rule.
 func validateFileStorageExpressions(fs system.FileStorage) *connect.Error {
 	for _, f := range []struct {
 		flag string
@@ -194,4 +193,4 @@ func validateFileStorageExpressions(fs system.FileStorage) *connect.Error {
 
 // --- Proto <-> Config conversion ---
 //
-// Canonical converters live in the convert package (gastrolog-2f8et).
+// Canonical converters live in the convert package.

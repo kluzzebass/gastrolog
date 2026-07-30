@@ -13,10 +13,10 @@ import (
 )
 
 // putLiveNode seeds a NodeConfig with State=Live. buildIngesterAlive
-// now intersects its FSM alive map with the set of nodes whose
-// EffectiveState() is NodeStateLive (gastrolog-2kzb4), so tests that
-// rely on a node-ID appearing in the result must register that node
-// with the cfg store first.
+// intersects its FSM alive map with the set of nodes whose
+// EffectiveState() is NodeStateLive, so tests that rely on a node-ID
+// appearing in the result must register that node with the cfg store
+// first.
 func putLiveNode(t *testing.T, cfgStore *sysmem.Store, name string) glid.GLID {
 	t.Helper()
 	id := glid.New()
@@ -95,10 +95,10 @@ func TestBuildIngesterAlive(t *testing.T) {
 	}
 }
 
-// TestBuildIngesterAlive_FiltersOfflineNodes is the gastrolog-2kzb4
-// regression: an FSM alive entry for a node that is no longer Live
-// must be dropped from the returned proto, so the inspector doesn't
-// keep reporting "ingester running on a node that's clearly offline."
+// TestBuildIngesterAlive_FiltersOfflineNodes pins that an FSM alive
+// entry for a node that is no longer Live is dropped from the returned
+// proto, so the inspector doesn't keep reporting "ingester running on a
+// node that's clearly offline."
 //
 // Setup: two nodes registered, only node-A is Live. The ingester's
 // FSM alive map says both are running. After filter: only node-A

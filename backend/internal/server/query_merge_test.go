@@ -8,15 +8,15 @@ import (
 
 // TestMergeTableResultsCloudSelectivityColumns verifies the multi-node
 // merge of a `| timechart` TableResult treats the cloud-provenance sentinel
-// columns (query.TimechartCloudFlagColumn/CloudCountColumn — see
-// gastrolog-4of7c) as aggregates, not group keys. Every cluster node
-// independently computes its own local applyCloudSelectivity estimate for a
-// bucket; if these columns were left as ordinary group-by keys (the default
-// for any unrecognized column — see detectAggColumns), two nodes disagreeing
-// on has_cloud_data or cloud_count for the same (_time, group) bucket would
-// splinter into separate rows instead of merging into one, corrupting the
-// cluster-wide histogram. Cloud flags must OR across nodes; cloud counts
-// must sum, same as the "count" column.
+// columns (query.TimechartCloudFlagColumn/CloudCountColumn) as aggregates,
+// not group keys. Every cluster node independently computes its own local
+// applyCloudSelectivity estimate for a bucket; if these columns were left
+// as ordinary group-by keys (the default for any unrecognized column — see
+// detectAggColumns), two nodes disagreeing on has_cloud_data or cloud_count
+// for the same (_time, group) bucket would splinter into separate rows
+// instead of merging into one, corrupting the cluster-wide histogram. Cloud
+// flags must OR across nodes; cloud counts must sum, same as the "count"
+// column.
 func TestMergeTableResultsCloudSelectivityColumns(t *testing.T) {
 	cols := []string{"_time", "count", query.TimechartCloudFlagColumn, query.TimechartCloudCountColumn}
 

@@ -44,10 +44,10 @@ func (s *SystemServer) PutRoute(
 		return nil, connErr
 	}
 
-	// gastrolog-4kkoo (Phase 5): no FilterConfig lookup; the gating expression
-	// arrives inline on req.Msg.Config.Stages and is validated structurally
-	// here. Semantic validation (parse, attribute existence) is the
-	// orchestrator's job at reload time.
+	// No FilterConfig lookup: the gating expression arrives inline on
+	// req.Msg.Config.Stages and is validated structurally here. Semantic
+	// validation (parse, attribute existence) is the orchestrator's job at
+	// reload time.
 
 	// Validate all destination vault IDs reference existing vaults.
 	var destinations []glid.GLID
@@ -112,12 +112,9 @@ func (s *SystemServer) DeleteRoute(
 		return nil, connErr
 	}
 
-	// Phase 4 (gastrolog-42f9z): retention rules no longer carry route
+	// No referential-integrity check: retention rules carry no route
 	// targets — the routing engine owns the WHAT via the route's source
-	// predicate. The eject-route referential-integrity check is gone.
-	// When Phase 5 adds richer routing, route deletion may need new
-	// integrity guards (e.g. block deletion if any retention-trigger
-	// route is the sole drain for a vault), but those don't exist yet.
+	// predicate — so nothing in config can dangle when a route goes away.
 
 	if err := s.sysStore.DeleteRoute(ctx, id); err != nil {
 		return nil, errInternal(err)

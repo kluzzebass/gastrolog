@@ -33,15 +33,14 @@ type RemoteChunkLister interface {
 // remote node's chunk event bus. The WatchChunks RPC handler uses this
 // to multiplex events from every cluster node into the single stream
 // served to the inspector, so cross-node active-chunk progress reaches
-// clients without requiring per-node connections from the browser. See
-// gastrolog-3pf9w.
+// clients without requiring per-node connections from the browser.
 type RemoteChunkWatcher interface {
 	WatchChunks(ctx context.Context, nodeID string, onEvent func(*apiv1.ForwardWatchChunksResponse) error) error
 }
 
 // RemoteIndexer queries chunk index information on a remote node.
 // Used by GetIndexes when the chunk has migrated to a vault this node
-// doesn't host. See gastrolog-3570f.
+// doesn't host.
 type RemoteIndexer interface {
 	GetIndexes(ctx context.Context, nodeID string, req *apiv1.ForwardGetIndexesRequest) (*apiv1.ForwardGetIndexesResponse, error)
 }

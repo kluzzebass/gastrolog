@@ -44,8 +44,7 @@ func (s *VaultServer) SealVault(
 
 // RetryUnreadableChunks resets the retry backoff for every chunk
 // currently flagged unreadable in the vault, so the next retention
-// sweep retries them immediately. Operator-driven recovery action;
-// see gastrolog-25vur.
+// sweep retries them immediately. Operator-driven recovery action.
 //
 // Routing: RouteToResourceOwner — the interceptor forwards to the vault-owning
 // node. Per-vault-instance unreadable maps live on the local
@@ -91,9 +90,9 @@ func (s *VaultServer) ReindexVault(
 
 	// Describe BEFORE submitting: the description is read into the Scheduled
 	// event's JobInfo, and the scheduler deletes the entry when the job
-	// finishes. Describing afterwards both lost the label on the event and
-	// leaked one descriptions entry per reindex whenever the job finished
-	// first. See gastrolog-69sjlj.
+	// finishes. Describing afterwards both loses the label on the event and
+	// leaks one descriptions entry per reindex whenever the job finishes
+	// first.
 	jobName := "reindex:" + vaultID.String()
 	s.orch.Scheduler().Describe(jobName, fmt.Sprintf("Rebuild all indexes for '%s'", s.vaultName(ctx, vaultID)))
 	jobID := s.orch.Scheduler().Submit(jobName, func(ctx context.Context, job *orchestrator.JobProgress) {
@@ -351,8 +350,6 @@ func (s *VaultServer) RestoreChunk(
 //   - ErrVaultNotFound, ErrOrphanNotFound → CodeNotFound
 //   - ErrOrphanNotEligible              → CodeFailedPrecondition
 //   - anything else                      → CodeInternal
-//
-// See gastrolog-32bf2.
 func (s *VaultServer) RepatriateOrphan(
 	ctx context.Context,
 	req *connect.Request[apiv1.RepatriateOrphanRequest],

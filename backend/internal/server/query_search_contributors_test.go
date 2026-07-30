@@ -11,9 +11,9 @@ import (
 	"gastrolog/internal/glid"
 )
 
-// TestMultiNode_SearchReportsContributingVaults pins gastrolog-20lrg(a)
-// end-to-end: a merged search's SearchResponse carries the remote vaults
-// that contributed. The coordinator (node-A) leads its own vault locally,
+// TestMultiNode_SearchReportsContributingVaults pins end-to-end that a
+// merged search's SearchResponse carries the remote vaults that
+// contributed. The coordinator (node-A) leads its own vault locally,
 // so only the remote node-B vault appears in the contributor set — the
 // signal is about the cross-node stream health, and a local vault never
 // streams over the wire.

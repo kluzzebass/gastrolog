@@ -64,14 +64,14 @@ func (s *VaultServer) ListChunks(
 	// node's active chunk stats for the 5-second refresh; the full
 	// cluster-wide picture comes through the stream-driven refetch.
 	//
-	// Parallel fan-out with per-peer timeout (gastrolog-csspr): a paused
-	// or partitioned peer used to block this loop for minutes (gRPC
-	// keepalive being the only natural bound), freezing the entire
-	// inspector UI on every node that hits this handler. Now each peer
-	// gets its own bounded context and they all run concurrently, so
-	// total latency is max(peer RTTs) bounded by peerInspectorTimeout.
-	// A peer that misses the deadline is silently dropped from the merged
-	// view; the UI gets the partial result instead of hanging.
+	// Parallel fan-out with per-peer timeout: a paused or partitioned peer
+	// would otherwise block this loop for minutes (gRPC keepalive being
+	// the only natural bound), freezing the entire inspector UI on every
+	// node that hits this handler. Each peer gets its own bounded context
+	// and they all run concurrently, so total latency is max(peer RTTs)
+	// bounded by peerInspectorTimeout. A peer that misses the deadline is
+	// silently dropped from the merged view; the UI gets the partial
+	// result instead of hanging.
 	var contribution *apiv1.ContributionReport
 	if !req.Msg.ActiveOnly && s.remoteChunkLister != nil {
 		remoteNodes := s.remoteVaultNodes(ctx, vaultID)
@@ -114,11 +114,11 @@ func (s *VaultServer) ListChunks(
 // authoritative holder receipts from the vault-ctl FSM, so ListChunks
 // and WatchChunks stamp the SAME residency semantics. The fan-out set
 // (which nodes answered this round) is reachability evidence, not bytes
-// truth — a slow peer vanishing for a round used to ping-pong against
-// the FSM-stamped watch residency and regress sealed pips to amber
-// (gastrolog-68wsli). The reachability set survives only as a fallback
-// where no FSM exists for the vault (memory mode / single-node), where
-// receipts never happen.
+// truth — a slow peer vanishing for a round would otherwise ping-pong
+// against the FSM-stamped watch residency and regress sealed pips to
+// amber. The reachability set survives only as a fallback where no FSM
+// exists for the vault (memory mode / single-node), where receipts never
+// happen.
 //
 // An empty-but-known residency (chunk in the FSM, zero receipts yet)
 // overwrites too: for a just-sealed chunk it is the truth — the homes'
@@ -219,7 +219,7 @@ func dedupChunkReports(reports []chunkReport) []*apiv1.ChunkMeta {
 		// inspector can show which nodes physically hold this chunk.
 		// Skip the synthetic "__anon_*" keys used by unit tests where
 		// no reportingNode was set; those carry no operator value.
-		// Sort for deterministic display. See gastrolog-51gme.
+		// Sort for deterministic display.
 		nodeIDs := make([]string, 0, len(a.nodes))
 		for nid := range a.nodes {
 			if !strings.HasPrefix(nid, "__anon_") {
@@ -234,9 +234,9 @@ func dedupChunkReports(reports []chunkReport) []*apiv1.ChunkMeta {
 }
 
 // moreAuthoritative reports whether a is a more-advanced view of the same
-// chunk than b. Higher authority = later in the chunk lifecycle. With the
-// Compressed flag merged into Sealed (gastrolog-24m1t step 7f), the only
-// lifecycle transition is unsealed → sealed.
+// chunk than b. Higher authority = later in the chunk lifecycle. There is
+// no separate compressed state — compression is part of sealing — so the
+// only lifecycle transition is unsealed → sealed.
 //
 // For two unsealed views of the same chunk — which happens when the leader
 // and any follower both report the active chunk in the fan-out — pick the
@@ -247,7 +247,7 @@ func dedupChunkReports(reports []chunkReport) []*apiv1.ChunkMeta {
 // (followers only replicate sealed chunks, so their active-chunk count
 // lags or is zero) win the round, producing visible oscillation in the
 // inspector UI as successive ticks flip between leader-wins and
-// follower-wins rounds. See gastrolog-1bgvm.
+// follower-wins rounds.
 func moreAuthoritative(a, b *apiv1.ChunkMeta) bool {
 	ra, rb := chunkLifecycleRank(a), chunkLifecycleRank(b)
 	if ra != rb {
@@ -320,7 +320,7 @@ func chunkMetaStartNanos(c *apiv1.ChunkMeta) int64 {
 // vault — both leader and followers. Leader provides authoritative chunk
 // metadata; followers are queried to verify replica presence for the UI.
 //
-// Reads placements from their owner (gastrolog-617qns).
+// Reads placements from their owner.
 func (s *VaultServer) remoteVaultNodes(ctx context.Context, vaultID glid.GLID) []string {
 	placements, err := s.cfgStore.GetVaultPlacements(ctx, vaultID)
 	if err != nil || len(placements) == 0 {
@@ -370,11 +370,11 @@ func (s *VaultServer) GetChunk(
 		return nil, mapVaultError(err)
 	}
 
-	// Same overlays ListChunks applies (UI/CLI parity, gastrolog-45ywhx):
-	// retention-pending and pending-ack state from the receipt protocol,
-	// and holder-receipt residency from the vault-ctl FSM. Without these
-	// the single-chunk view showed none of the lifecycle state the vault
-	// listing (and the UI inspector) shows.
+	// Same overlays ListChunks applies (UI/CLI parity): retention-pending
+	// and pending-ack state from the receipt protocol, and holder-receipt
+	// residency from the vault-ctl FSM. Without these the single-chunk view
+	// shows none of the lifecycle state the vault listing (and the UI
+	// inspector) shows.
 	pb := VaultChunkMetaToProto(meta)
 	if pending := s.orch.RetentionPendingChunks(vaultID); pending != nil {
 		pb.RetentionPending = pending[chunkID]
@@ -399,8 +399,7 @@ func (s *VaultServer) GetChunk(
 // fans out to remote vault-hosting nodes if the chunk has migrated to a
 // vault this node doesn't host. Cross-vault migration (warm → cloud,
 // etc.) shifts a chunk's owning node, so a single RouteToResourceOwner hop
-// would frequently miss and produce ErrChunkNotFound log spam. See
-// gastrolog-3570f.
+// would frequently miss and produce ErrChunkNotFound log spam.
 func (s *VaultServer) GetIndexes(
 	ctx context.Context,
 	req *connect.Request[apiv1.GetIndexesRequest],
@@ -429,8 +428,8 @@ func (s *VaultServer) GetIndexes(
 	// different node. Fan out to all peers hosting this vault; the one
 	// that has the chunk responds with index info. Peers that simply don't
 	// hold the chunk answer not-found — a benign non-answer, distinct from
-	// a peer that failed to respond at all (gastrolog-1ic07): only the
-	// latter degrades the merge and lands in the contribution report.
+	// a peer that failed to respond at all: only the latter degrades the
+	// merge and lands in the contribution report.
 	if s.remoteIndexer == nil {
 		return nil, mapVaultError(chunk.ErrChunkNotFound)
 	}
@@ -479,7 +478,7 @@ func (s *VaultServer) GetIndexes(
 // isNotFoundErr reports whether err is a chunk-/vault-not-found signal,
 // whether raised locally as a sentinel or rendered across a Connect RPC
 // as CodeNotFound. Used to treat a peer's "I don't hold it" as a benign
-// non-answer during the GetIndexes fan-out. See gastrolog-1ic07.
+// non-answer during the GetIndexes fan-out.
 func isNotFoundErr(err error) bool {
 	if errors.Is(err, chunk.ErrChunkNotFound) || errors.Is(err, orchestrator.ErrVaultNotFound) {
 		return true
@@ -664,8 +663,7 @@ func validateChunk(orch *orchestrator.Orchestrator, vaultID glid.GLID, meta chun
 // carries the vault ID, chunk ID, op, and either a full ChunkMeta (for
 // CREATED / SEALED / UPLOADED) or a record count (for PROGRESS). Clients
 // patch their local cache directly from the event payload instead of
-// refetching ListChunks on every notification — see gastrolog-3pf9w for
-// the pre-3pf9w shape and why it was replaced.
+// refetching ListChunks on every notification.
 //
 // Routing: RouteLocal — each node emits events for the vaults it hosts;
 // the client maintains one WatchChunks stream per cluster node and merges
@@ -702,7 +700,7 @@ func (s *VaultServer) WatchChunks(
 	// tracking and idempotent setQueryData merges. PROGRESS events are
 	// only emitted on the node that hosts the active chunk's leader, so
 	// peer streaming is the only way they reach a client connected to a
-	// node that doesn't host the vault. See gastrolog-3pf9w.
+	// node that doesn't host the vault.
 	if s.remoteChunkWatcher != nil {
 		for _, nodeID := range s.peerNodeIDs(streamCtx) {
 			nid := nodeID
@@ -740,8 +738,8 @@ func (s *VaultServer) WatchChunks(
 // stampReplicaInfo overlays authoritative cluster-wide replica and
 // retention state on the outbound event's chunk meta, sourced from the
 // vault-ctl FSM. Without this, the client has to reconstruct replica
-// counts from per-node event attribution (which drifts — gastrolog-66vmg)
-// and never sees retention_pending flip live (ListChunks-only overlay).
+// counts from per-node event attribution (which drifts) and never sees
+// retention_pending flip live (ListChunks-only overlay).
 //
 // Replica fields silently no-op when the FSM doesn't know about the chunk
 // (single-node mode, memory vault, or the chunk has been finalized between
@@ -783,8 +781,8 @@ func (s *VaultServer) stampReplicaInfo(ctx context.Context, msg *apiv1.WatchChun
 // receipts) stamps nothing: replica_count zero already means "no
 // authoritative value" on the wire, so mergeMeta keeps the client's
 // last authoritative set (or the ListChunks-seeded one). Both sources
-// now carry the same holder-receipt semantics, so there is no
-// cross-source ping-pong (gastrolog-68wsli).
+// carry the same holder-receipt semantics, so there is no cross-source
+// ping-pong.
 func applyResidencyStamp(meta *apiv1.ChunkMeta, residency []string) {
 	if len(residency) == 0 {
 		return
@@ -804,8 +802,7 @@ func applyResidencyStamp(meta *apiv1.ChunkMeta, residency []string) {
 // event so subscribers can attribute the source consistently with peer
 // events — without it, the client can't tell which node produced a
 // CREATED/SEALED/PROGRESS event and replica-count tracking that derives
-// from per-node attribution undercounts the connected node. See
-// gastrolog-4zy8a.
+// from per-node attribution undercounts the connected node.
 func (s *VaultServer) runLocalChunkEventForwarder(
 	ctx context.Context,
 	events <-chan notify.Versioned[orchestrator.ChunkChangeEvent],

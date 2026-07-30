@@ -17,10 +17,10 @@ import (
 	"gastrolog/internal/system"
 )
 
-// Resource-owner routing (gastrolog-51ge9): an imperative action naming a
-// resource must reach the node that owns the resource, resolved by the
-// BACKEND from replicated state — no X-Target-Node header from the client,
-// and no config mutation tunnelled through Raft to get there.
+// Resource-owner routing: an imperative action naming a resource must reach
+// the node that owns the resource, resolved by the BACKEND from replicated
+// state — no X-Target-Node header from the client, and no config mutation
+// tunnelled through Raft to get there.
 //
 // TriggerIngester is the converted consumer. Every node in these tests has
 // the ingester registered in its orchestrator, so a test only passes when

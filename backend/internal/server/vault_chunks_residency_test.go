@@ -7,8 +7,8 @@ import (
 	"gastrolog/internal/chunk"
 )
 
-// Residency semantics (gastrolog-68wsli): replica_node_ids means holder
-// receipts, everywhere. These tests pin the two wire-mapping rules that
+// Residency semantics: replica_node_ids means holder receipts,
+// everywhere. These tests pin the two wire-mapping rules that
 // keep ListChunks and WatchChunks from ping-ponging against each other:
 // the ListChunks overlay replaces the fan-out-derived set whenever the
 // FSM knows the chunk (including with an EMPTY set — the honest

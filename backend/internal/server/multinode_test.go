@@ -72,10 +72,10 @@ type multiNodeHarness struct {
 	peerVaultStats    *mnPeerVaultStats
 	peerStorageStats  *mnPeerStorageStats
 	// alerts is each node's alert.Collector; populated only with
-	// WithClusterStats (gastrolog-33d9n2).
+	// WithClusterStats.
 	alerts map[string]*alert.Collector
 	// routingFwd is the in-process ForwardRPC stand-in; tests can remove a
-	// node's handler to simulate an unreachable raiser (gastrolog-1z5gg4).
+	// node's handler to simulate an unreachable raiser.
 	routingFwd *directUnaryForwarder
 }
 
@@ -105,24 +105,24 @@ type mnConfig struct {
 	noVault map[string]bool
 	// environmentLabel / environmentColor are set on the coordinator's
 	// server.Config to exercise the env-banner field propagation through
-	// GetSystem (gastrolog-4vr0l).
+	// GetSystem.
 	environmentLabel string
 	environmentColor string
 	// clusterStats wires GetClusterStatus's per-node stats path: a mock
 	// Raft membership over all harness nodes, a per-node alert.Collector
 	// feeding a real cluster.StatsCollector, and a NodeStatsProvider that
 	// live-collects each peer's stats — standing in for the periodic
-	// NodeStats broadcast (gastrolog-33d9n2).
+	// NodeStats broadcast.
 	clusterStats bool
 	// alertClock, when set, is the deterministic clock every node's
-	// alert.Collector runs on (gastrolog-4wvxqh).
+	// alert.Collector runs on.
 	alertClock func() time.Time
 	// diskGuardNodes is the set of node IDs whose orchestrator gets a
 	// DiskGuardPaths entry (its own SegmentsDir tmpdir), starting the real
-	// disk-guard scheduler job (gastrolog-3cobq4). Off by default — most
-	// multi-node tests have no use for a live statfs job ticking every 15s
-	// in the background — so tests that DO need it (waiting for a real
-	// tick) opt in per node via WithDiskGuard.
+	// disk-guard scheduler job. Off by default — most multi-node tests have
+	// no use for a live statfs job ticking every 15s in the background — so
+	// tests that DO need it (waiting for a real tick) opt in per node via
+	// WithDiskGuard.
 	diskGuardNodes map[string]bool
 }
 
@@ -137,7 +137,7 @@ func WithoutVault(nodeIDs ...string) mnOption {
 }
 
 // WithEnvironment sets the coordinator's environment banner label and
-// color so tests can assert they reach GetSystem (gastrolog-4vr0l).
+// color so tests can assert they reach GetSystem.
 func WithEnvironment(label, color string) mnOption {
 	return func(c *mnConfig) {
 		c.environmentLabel = label
@@ -147,7 +147,7 @@ func WithEnvironment(label, color string) mnOption {
 
 // WithClusterStats enables the GetClusterStatus per-node stats wiring so
 // tests can raise alerts on any node's alert.Collector and observe them
-// from the coordinator's RPC surface (gastrolog-33d9n2).
+// from the coordinator's RPC surface.
 func WithClusterStats() mnOption {
 	return func(c *mnConfig) {
 		c.clusterStats = true
@@ -155,12 +155,12 @@ func WithClusterStats() mnOption {
 }
 
 // WithDiskGuard starts the real disk-guard scheduler job (15s cadence) on
-// the given nodes, pointed at each node's own SegmentsDir tmpdir
-// (gastrolog-3cobq4). Needed only by tests that wait for a live
-// refreshVaultDiskGuards/evaluateStorages tick — there is no test-only
-// trigger for that unexported cron job reachable from this external
-// package (same constraint retention_unenforceable_multinode_test.go
-// documents for the retention sweep).
+// the given nodes, pointed at each node's own SegmentsDir tmpdir. Needed
+// only by tests that wait for a live refreshVaultDiskGuards/evaluateStorages
+// tick — there is no test-only trigger for that unexported cron job
+// reachable from this external package (same constraint
+// retention_unenforceable_multinode_test.go documents for the retention
+// sweep).
 func WithDiskGuard(nodeIDs ...string) mnOption {
 	return func(c *mnConfig) {
 		for _, id := range nodeIDs {
@@ -171,8 +171,8 @@ func WithDiskGuard(nodeIDs ...string) mnOption {
 
 // WithAlertClock puts every node's alert.Collector on the given clock so
 // suppression tests (catalog DelayOn/DelayOff) advance time
-// deterministically instead of sleeping (gastrolog-4wvxqh). Implies the
-// same wiring as WithClusterStats.
+// deterministically instead of sleeping. Implies the same wiring as
+// WithClusterStats.
 func WithAlertClock(now func() time.Time) mnOption {
 	return func(c *mnConfig) {
 		c.clusterStats = true
@@ -226,13 +226,11 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 	ctx := context.Background()
 
 	// Per-node alert collectors, built BEFORE node creation so each
-	// orchestrator can be wired to its own collector at construction time
-	// (gastrolog-1xl29s): orchestrator.Config.Alerts has no post-construction
-	// setter, so wiring it late (as this used to, further down where the
-	// GetClusterStatus stats collectors are built) left every node's own
-	// orch.alerts nil — production alarm-raising code (o.alerts.Raise(...))
-	// never actually ran in any multi-node test; only tests that called
-	// h.alerts[id].Raise(...) directly on the bare collector worked. Assigned
+	// orchestrator can be wired to its own collector at construction time:
+	// orchestrator.Config.Alerts has no post-construction setter, so wiring it
+	// any later leaves every node's orch.alerts nil and the production
+	// alarm-raising path (o.alerts.Raise(...)) never runs — only direct
+	// h.alerts[id].Raise(...) calls on the bare collector would. Assigned
 	// conditionally so tests without the option keep the nil interfaces of
 	// single-node mode.
 	alertsByNode := make(map[string]*alert.Collector, len(nodeIDs))
@@ -384,9 +382,9 @@ func mnOrchConfig(nodeID string, loader system.Store, tmpDir string, alerts *ale
 	if diskGuard {
 		// The disk-guard scheduler job (refreshVaultDiskGuards/
 		// evaluateStorages, 15s cadence) only registers when at least one
-		// path is configured (gastrolog-3cobq4) — see startDiskGuard's
-		// no-op-without-paths guard. tmpDir always exists (t.TempDir()),
-		// so this is a real, harmless statfs target.
+		// path is configured — see startDiskGuard's no-op-without-paths
+		// guard. tmpDir always exists (t.TempDir()), so this is a real,
+		// harmless statfs target.
 		cfg.DiskGuardPaths = []string{tmpDir}
 	}
 	return cfg
@@ -599,9 +597,9 @@ func (p *mnPeerVaultStats) FindVaultStats(vaultID string) *gastrologv1.VaultStat
 }
 
 // mnPeerStorageStats implements PeerStorageStatsProvider by scanning all
-// non-coordinator orchestrators' local storage guard snapshots
-// (gastrolog-3cobq4) — the harness's stand-in for the NodeStats broadcast +
-// PeerState, same shortcut mnPeerVaultStats takes above for vault stats:
+// non-coordinator orchestrators' local storage guard snapshots — the
+// harness's stand-in for the NodeStats broadcast + PeerState, same shortcut
+// mnPeerVaultStats takes above for vault stats:
 // storages only ever live on their owning node, so this is a direct read of
 // the remote orchestrator's own StorageSnapshots(), never a wire round-trip.
 type mnPeerStorageStats struct {
@@ -1029,7 +1027,7 @@ func (d *directRemoteSearcher) ExportToVault(_ context.Context, _ string, _ *gas
 }
 
 // directRemoteIndexer dispatches GetIndexes to a peer's orchestrator
-// in-process. Used by the multi-node harness to exercise gastrolog-3570f's
+// in-process. Used by the multi-node harness to exercise the GetIndexes
 // fan-out path without a real cluster RPC stack.
 type directRemoteIndexer struct {
 	nodes map[string]*orchestrator.Orchestrator
@@ -1215,7 +1213,7 @@ func tableToMap(t *testing.T, table *gastrologv1.TableResult, keyCol, valCol str
 // VaultTypeMemory (IsFSMReady == nil, treated as ready), so it does NOT
 // exercise the Raft-backed readiness gate that fails on a real cluster
 // bootstrap. The full reproduction requires a Raft-backed multi-node
-// harness — tracked as part of gastrolog-5ff7z.
+// harness.
 func TestMultiNode_SearchOnFreshClusterReturnsEmpty(t *testing.T) {
 	t.Parallel()
 	h := setupMultiNode(t, []string{"node-A", "node-B"})
@@ -2587,11 +2585,11 @@ func TestMultiNode_ListVaultsCrossNode(t *testing.T) {
 	}
 }
 
-// TestMultiNode_GetIndexesLocalFastPath pins gastrolog-3570f's local
-// hit: when the queried node has the chunk, GetIndexes resolves
-// without fanning out. Coordinator hosts data-1's vault directly here
-// (single-node case, no WithoutVault on coord) so the local path is
-// the only one that should fire.
+// TestMultiNode_GetIndexesLocalFastPath pins the local hit: when the
+// queried node has the chunk, GetIndexes resolves without fanning out.
+// Coordinator hosts data-1's vault directly here (single-node case, no
+// WithoutVault on coord) so the local path is the only one that should
+// fire.
 func TestMultiNode_GetIndexesLocalFastPath(t *testing.T) {
 	t.Parallel()
 	h := setupMultiNode(t, []string{"coord", "data-1"})
@@ -2669,10 +2667,11 @@ func TestMultiNode_GetIndexesRemote(t *testing.T) {
 	_ = resp.Msg.Sealed // proves the response was populated
 }
 
-// TestMultiNode_PutVaultRejectsShapeChange covers gastrolog-3ul0s through
-// the cluster forwarding path. The guard runs at the Raft leader; rejected
-// writes never replicate. We hit a follower node so the request goes
-// through the leader-routing interceptor before reaching PutVault.
+// TestMultiNode_PutVaultRejectsShapeChange covers vault-shape immutability
+// (type, cloud_service_id) through the cluster forwarding path. The guard
+// runs at the Raft leader; rejected writes never replicate. We hit a
+// follower node so the request goes through the leader-routing interceptor
+// before reaching PutVault.
 func TestMultiNode_PutVaultRejectsShapeChange(t *testing.T) {
 	t.Parallel()
 	h := setupMultiNode(t, []string{"node-A", "node-B"})
@@ -2847,7 +2846,6 @@ func TestMultiNode_ListJobsCrossNode(t *testing.T) {
 // only its LOCAL chunk view; without coordinator-side resolution every node
 // picks a different (start, end) pair and mergeHistogramBuckets — which
 // matches by exact TimestampMs — emits buckets across N disjoint ranges.
-// See gastrolog-2zdsc.
 func TestMultiNode_UnboundedHistogramAlignsBuckets(t *testing.T) {
 	t.Parallel()
 	h := setupMultiNode(t, []string{"coord", "data-1", "data-2"})
@@ -2979,9 +2977,8 @@ func TestMultiNode_LookupDeletePropagation(t *testing.T) {
 	}
 }
 
-// TestEnvironmentBannerPropagates covers gastrolog-4vr0l: the api node's
-// --environment-label / --environment-color flags reach the frontend
-// through GetSystem.
+// TestEnvironmentBannerPropagates: the api node's --environment-label /
+// --environment-color flags reach the frontend through GetSystem.
 func TestEnvironmentBannerPropagates(t *testing.T) {
 	t.Parallel()
 	h := setupMultiNode(t,
@@ -3044,10 +3041,10 @@ func TestEnvironmentBannerLabelWithoutColor(t *testing.T) {
 }
 
 // TestMultiNode_RetentionSubmitDefersOnRemoteCappedDestination pins the
-// cross-node deferral seam for gastrolog-5ct2av: a destination vault
-// size-capped on a DIFFERENT node must reject the retention submit on the
-// sweeping node (via the peer-state lookup the NodeStats broadcast feeds),
-// and the same rejection must occur regardless of which node submits.
+// cross-node deferral seam: a destination vault size-capped on a
+// DIFFERENT node must reject the retention submit on the sweeping node (via
+// the peer-state lookup the NodeStats broadcast feeds), and the same
+// rejection must occur regardless of which node submits.
 func TestMultiNode_RetentionSubmitDefersOnRemoteCappedDestination(t *testing.T) {
 	if testing.Short() {
 		t.Skip("multi-node pipeline convergence test")
@@ -3102,11 +3099,11 @@ func TestMultiNode_RetentionSubmitDefersOnRemoteCappedDestination(t *testing.T) 
 }
 
 // TestMultiNode_VaultAdmissionCausesConsistentAcrossNodes pins the backend
-// signal's cluster-consistency contract (gastrolog-33ul6h): the vault
-// "refusing admission" badge is now a first-class backend field
-// (VaultInfo.AdmissionRefused), computed on the RESPONDING node from its own
-// local guard plus its live-peer broadcasts — the same inputs
-// vaultAdmissionGate itself consults (orchestrator.VaultAdmissionCauses).
+// signal's cluster-consistency contract: the vault "refusing admission"
+// badge is a first-class backend field (VaultInfo.AdmissionRefused),
+// computed on the RESPONDING node from its own local guard plus its
+// live-peer broadcasts — the same inputs vaultAdmissionGate itself consults
+// (orchestrator.VaultAdmissionCauses).
 // Every node in a cluster receives the same NodeStats broadcasts, so every
 // node must report the SAME causes for the same vault, regardless of which
 // node the operator happens to be connected to. Modeled on

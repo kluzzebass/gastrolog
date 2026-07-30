@@ -1,16 +1,14 @@
 package server_test
 
-// gastrolog-3cobq4 review fix: allStorageStates took the pointer
-// PeerStorageStats.FindStorageState returns straight into the shared
-// per-peer stats cache and mutated PlacedVaultIds on it outside any lock.
 // cluster.PeerState.FindStorageState returns the exact *StorageState living
 // inside its cached NodeStats entry — the same object every concurrent
 // WatchSystemStatus subscriber / ListStorages caller / GetClusterStatus
-// caller reads and marshals. This test drives the REAL cluster.PeerState
-// (not a harness fake — the fakes elsewhere in this package build a fresh
-// proto per call and can't reproduce this aliasing) with concurrent
-// ListStorages calls plus a concurrent stats-broadcast tick, so `go test
-// -race` catches the shared-mutation race directly.
+// caller reads and marshals — so allStorageStates must not mutate
+// PlacedVaultIds on what it gets back. This test drives the REAL
+// cluster.PeerState (not a harness fake — the fakes elsewhere in this
+// package build a fresh proto per call and can't reproduce this aliasing)
+// with concurrent ListStorages calls plus a concurrent stats-broadcast tick,
+// so `go test -race` catches the shared-mutation race directly.
 
 import (
 	"context"

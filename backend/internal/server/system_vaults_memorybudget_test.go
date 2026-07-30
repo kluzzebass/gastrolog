@@ -1,8 +1,8 @@
 package server_test
 
-// Coverage for gastrolog-1qd5wz / gastrolog-etcjdx: a memory vault's in-RAM cap
-// is a stored expression resolved at use, scoped to memory vaults. Unset →
-// default; explicit "0" → rejected; non-memory → left empty.
+// A memory vault's in-RAM cap is a stored expression resolved at use, scoped
+// to memory vaults. Unset → default; explicit "0" → rejected; non-memory →
+// left empty.
 
 import (
 	"context"

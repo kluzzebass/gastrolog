@@ -1,10 +1,10 @@
 package server_test
 
-// Coverage for the retention transfer disposition validation matrix
-// (gastrolog-2l918): disposition "transfer" requires a target vault ID,
-// the target must not be the source (self-transfer is the cascade
-// footgun), and both source and target must be file vaults — cloud and
-// memory vaults have different at-rest forms and lifecycle machinery.
+// Coverage for the retention transfer disposition validation matrix:
+// disposition "transfer" requires a target vault ID, the target must not
+// be the source (self-transfer is the cascade footgun), and both source
+// and target must be file vaults — cloud and memory vaults have
+// different at-rest forms and lifecycle machinery.
 // See docs/retention-transfer-disposition-design.md.
 
 import (
@@ -36,8 +36,7 @@ func putVault(t *testing.T, client gastrologv1connect.SystemServiceClient, cfg *
 
 // TestPutVaultTransferRequiresTarget rejects disposition="transfer" with no
 // target vault set — a defaults-must-be-typeable violation waiting to
-// happen otherwise (transfer can never be a zero-config default; see
-// gastrolog-2l918-c3).
+// happen otherwise (transfer can never be a zero-config default).
 func TestPutVaultTransferRequiresTarget(t *testing.T) {
 	client, _, _ := newConfigTestSetup(t)
 
@@ -177,10 +176,10 @@ func TestPutVaultRouteDispositionDoesNotRequireTarget(t *testing.T) {
 
 // TestPutVaultTransferRejectsTwoHopCycle rejects A→B→A: self-transfer
 // (the 1-hop case) is caught by the simple target==self check above, but
-// a 2-hop cycle needs the target-graph walk (gastrolog-2l918 review
-// finding 3a). B is configured to transfer into A FIRST — that alone is
-// not a cycle (A has no transfer disposition yet) — then closing the loop
-// by pointing A at B must be rejected.
+// a 2-hop cycle needs the target-graph walk. B is configured to transfer
+// into A FIRST — that alone is not a cycle (A has no transfer
+// disposition yet) — then closing the loop by pointing A at B must be
+// rejected.
 func TestPutVaultTransferRejectsTwoHopCycle(t *testing.T) {
 	client, _, _ := newConfigTestSetup(t)
 

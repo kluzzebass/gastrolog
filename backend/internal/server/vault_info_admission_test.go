@@ -1,15 +1,15 @@
 package server_test
 
-// Coverage for the VaultInfo.AdmissionRefused RPC field (gastrolog-33ul6h
-// operator directive): the vault "refusing admission" signal must come from
-// the backend's own admission-causes collector, not be derived client-side
-// from alarm state. These tests drive the REAL orchestrator admission gate
-// (via the same exported peer-broadcast hooks production wiring installs —
-// SetRemoteVaultStorageProtected / SetRemoteVaultSizeCapped, per the existing
+// Coverage for the VaultInfo.AdmissionRefused RPC field: the vault "refusing
+// admission" signal must come from the backend's own admission-causes
+// collector, not be derived client-side from alarm state. These tests drive
+// the REAL orchestrator admission gate (via the same exported peer-broadcast
+// hooks production wiring installs — SetRemoteVaultStorageProtected /
+// SetRemoteVaultSizeCapped, per the existing
 // TestMultiNode_RetentionSubmitDefersOnRemoteCappedDestination pattern) and
 // assert the ListVaults/GetVault RPCs report exactly what the gate itself
-// would enforce. gastrolog-9akebz: AdmissionRefused entries are now
-// VaultAdmissionRefusal{cause, detail} pairs, not bare cause enums.
+// would enforce. AdmissionRefused entries are VaultAdmissionRefusal{cause,
+// detail} pairs, not bare cause enums.
 
 import (
 	"context"
@@ -118,7 +118,7 @@ func TestListVaultsAdmissionRefusedEmpty(t *testing.T) {
 // gate's peer-broadcast half (SetRemoteVaultStorageProtected) and asserts
 // the RPC field reports VAULT_ADMISSION_CAUSE_STORAGE_DISK_PROTECT — the
 // same cause vaultAdmissionGate would refuse the vault with — plus a
-// non-empty detail naming the reporting node (gastrolog-9akebz).
+// non-empty detail naming the reporting node.
 func TestListVaultsAdmissionRefusedStorageDiskProtect(t *testing.T) {
 	t.Parallel()
 	sysClient, vaultClient, _, orch := admissionTestSetup(t)

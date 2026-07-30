@@ -10,10 +10,10 @@ import (
 	"time"
 )
 
-// TestPeerFanOutHonorsPerPeerTimeout pins the gastrolog-csspr invariant
-// that one paused peer cannot block the whole inspector handler. A peer
-// whose fn never returns must be elided within peerInspectorTimeout
-// while healthy peers' results land normally.
+// TestPeerFanOutHonorsPerPeerTimeout pins the invariant that one paused
+// peer cannot block the whole inspector handler. A peer whose fn never
+// returns must be elided within peerInspectorTimeout while healthy
+// peers' results land normally.
 //
 // The "paused" peer simulates SIGSTOP on a real node: its TCP connection
 // stays open, gRPC keepalive doesn't fire for many minutes, and the
@@ -199,8 +199,7 @@ func TestPeerFanOutEmptyNodes(t *testing.T) {
 // placement-churn error (peer no longer owns the vault during
 // reconfiguration) is elided from results WITHOUT being counted as
 // degradation — it is expected reconfiguration, not an operational
-// failure, so it must never make a merge read as partial. See
-// gastrolog-5z607 / gastrolog-1ic07.
+// failure, so it must never make a merge read as partial.
 func TestPeerFanOutPlacementChurnNotDegraded(t *testing.T) {
 	t.Parallel()
 

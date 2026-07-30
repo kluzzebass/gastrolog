@@ -1,18 +1,12 @@
 package server_test
 
-// Coverage for gastrolog-33ul6h: the vault's disk-claim bound moved off
-// VaultConfig.max_size (see gastrolog-1epfgb / gastrolog-etcjdx for its
-// prior home, formerly covered by system_vaults_maxsize_test.go) onto
-// RetentionPolicyConfig.max_size, which now means BOTH things at once —
-// operator correction 2026-07-19 (comment c2): an earlier design that split
-// this into two fields was superseded before implementation (see the
-// design doc history under docs/). max_size
-// drains oldest sealed chunks past the bound, and — when the policy's
-// refuse flag is explicitly on (gastrolog-5yfaqj: refuse now defaults
-// off) — also refuses admission while the vault's local claim is at/over
-// it. PutRetentionPolicy parse-checks it — must parse, must be > 0 when
-// set; an absent max_size is not
-// defaulted here (no per-policy stamping) — the default floor is applied
+// Coverage for the vault's disk-claim bound, which lives on
+// RetentionPolicyConfig.max_size and means BOTH things at once: it drains
+// oldest sealed chunks past the bound, and — when the policy's refuse flag
+// is explicitly on (refuse defaults off) — also refuses admission while the
+// vault's local claim is at/over it. PutRetentionPolicy parse-checks it —
+// must parse, must be > 0 when set; an absent max_size is not defaulted
+// here (no per-policy stamping) — the default floor is applied
 // downstream by the disk-guard resolver (orchestrator.resolveVaultSizeBound)
 // only when NO attached policy carries a bound at all, and that floor is
 // refuse-only (a default must never destroy data).
@@ -152,13 +146,12 @@ func TestPutRetentionPolicyRejectsUnparseableMaxSize(t *testing.T) {
 }
 
 // TestPutRetentionPolicyUnparseableMaxSizeOnOtherwiseEmptyPolicyGetsParseError
-// pins the validation ORDER (gastrolog-33ul6h finding 7): a policy that sets
-// no maxAge/maxChunks and ONLY an unparseable maxSize must report the
-// actual parse failure, not the
-// generic "must set at least one" no-op-policy message — IsEmpty()'s
+// pins the validation ORDER: a policy that sets no maxAge/maxChunks and
+// ONLY an unparseable maxSize must report the actual parse failure, not the
+// generic "must set at least one" no-op-policy message. IsEmpty()'s
 // positiveSize check treats an unparseable expression the same as absent,
-// so before the reorder this case fell through to the wrong, less
-// actionable error.
+// so the parse check has to run first or this case falls through to the
+// wrong, less actionable error.
 func TestPutRetentionPolicyUnparseableMaxSizeOnOtherwiseEmptyPolicyGetsParseError(t *testing.T) {
 	client, _, _ := newConfigTestSetup(t)
 	ctx := context.Background()

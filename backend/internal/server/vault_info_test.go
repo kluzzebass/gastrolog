@@ -9,11 +9,11 @@ import (
 )
 
 // TestChunkStateToProto pins the wire lifecycle for every internal state.
-// The Unknown row matters most (gastrolog-5wh571): a local meta with no
-// FSM-overlaid state comes from a two-state manager (memory mode, fresh
-// head), so the producer resolves it to Active/Sealed here — consumers
-// render UNSPECIFIED as "unknown" and never guess, so letting Unknown
-// leak onto the wire would badge every memory-mode active chunk unknown.
+// The Unknown row matters most: a local meta with no FSM-overlaid state
+// comes from a two-state manager (memory mode, fresh head), so the producer
+// resolves it to Active/Sealed here — consumers render UNSPECIFIED as
+// "unknown" and never guess, so letting Unknown leak onto the wire would
+// badge every memory-mode active chunk unknown.
 func TestChunkStateToProto(t *testing.T) {
 	t.Parallel()
 

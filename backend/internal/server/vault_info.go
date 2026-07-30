@@ -155,7 +155,7 @@ func (s *VaultServer) accumulateChunkBytes(stat *apiv1.VaultStats, vaultID glid.
 	// An evicted cloud-backed chunk has nothing local to reclaim — it must
 	// not fall back to logical Bytes (the object still exists in the cloud
 	// store, at CloudBytes, a currency this local-disk stat never touches).
-	// Same rule as chunk.DiskClaim. See gastrolog-33ul6h.
+	// Same rule as chunk.DiskClaim.
 	if meta.CloudBacked && meta.DiskBytes == 0 {
 		return
 	}
@@ -360,9 +360,8 @@ func (s *VaultServer) vaultInfoFromConfig(cfg system.VaultConfig, localSet map[g
 // causes already fold in peer broadcasts, and the backlog budget is
 // FSM-replicated, so the collector reports the correct cluster-wide verdict
 // for local and remote vaults alike. Each entry carries the backend's own
-// detail text for that cause (gastrolog-9akebz) — which storage and its
-// free-vs-floor numbers, or the bound kind and value — never a client-side
-// reconstruction.
+// detail text for that cause — which storage and its free-vs-floor numbers,
+// or the bound kind and value — never a client-side reconstruction.
 func (s *VaultServer) fillAdmissionRefused(info *apiv1.VaultInfo, id glid.GLID) {
 	causes := s.orch.VaultAdmissionCauseDetails(id)
 	if len(causes) == 0 {
@@ -493,9 +492,8 @@ func chunkStateToProto(state chunk.ChunkState, sealed bool) apiv1.ChunkState {
 		// driving the announce protocol (same derivation as
 		// chunkMetaToManifestEntry). Resolve it HERE, where the
 		// manager semantics are known — consumers render UNSPECIFIED
-		// as "unknown" and never guess (gastrolog-5wh571), so leaving
-		// it on the wire would badge every memory-mode active chunk
-		// as unknown.
+		// as "unknown" and never guess, so leaving it on the wire
+		// would badge every memory-mode active chunk as unknown.
 		if sealed {
 			return apiv1.ChunkState_CHUNK_STATE_SEALED
 		}

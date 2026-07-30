@@ -106,11 +106,11 @@ func (s *SystemServer) PutCertificate(
 	}
 
 	// The CLI and the UI both send the raw 16-byte GLID (glid.ToProto /
-	// frontend decode()); older callers sent the 26-character text form in
-	// the same bytes field. Normalise to text once so both work — before
-	// this, a Put with a raw-bytes ID failed with "invalid ID", which broke
-	// certificate updates from the UI and every cert in a config import
-	// (gastrolog-2nr3aa).
+	// frontend decode()); other callers send the 26-character text form in
+	// the same bytes field. Everything downstream parses the text form, so
+	// normalise once here; otherwise a Put carrying a raw-bytes ID fails
+	// with "invalid ID", breaking certificate updates from the UI and
+	// every cert in a config import.
 	reqID := certIDText(req.Msg.Id)
 
 	existing, err := s.loadExistingCert(ctx, reqID, req.Msg.Name)
