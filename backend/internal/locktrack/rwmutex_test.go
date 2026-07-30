@@ -7,9 +7,9 @@ import (
 	"time"
 )
 
-// leakAnRLock acquires a read lock and returns without releasing —
-// the gastrolog-1ug3rq shape. Named so the test can assert the leak
-// report contains this function.
+// leakAnRLock acquires a read lock and returns without releasing — the
+// orphaned-hold shape this package exists to diagnose. Named so the test can
+// assert the leak report contains this function.
 func leakAnRLock(m *RWMutex) {
 	m.RLock()
 }

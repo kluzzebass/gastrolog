@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { gotoAuthenticated } from "./helpers";
 
 /**
- * Advanced auth flow E2E tests (gastrolog-a9f1w).
+ * Advanced auth flow E2E tests.
  *
  * Tests password change, session expiry handling, and role-based
  * visibility. Separate from auth.spec.ts which handles initial

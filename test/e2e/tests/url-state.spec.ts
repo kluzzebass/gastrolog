@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { gotoAuthenticated, typeQuery } from "./helpers";
 
 /**
- * URL-driven state and deep linking E2E tests (gastrolog-16xj3).
+ * URL-driven state and deep linking E2E tests.
  *
  * Verifies that search state is encoded in the URL and that loading
  * a URL with query params pre-fills and executes the search.

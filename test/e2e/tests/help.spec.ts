@@ -103,7 +103,7 @@ test.describe.serial("Help", () => {
     await expect(dialog).not.toBeVisible();
   });
 
-  // ── Help links from settings (gastrolog-1op0n) ─────────────────────
+  // ── Help links from settings ───────────────────────────────────────
 
   test("settings tabs have help links that open help dialog", async ({
     page,

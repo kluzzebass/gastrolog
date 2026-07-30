@@ -26,14 +26,15 @@ failed=0
 # Enforced by grep rather than by golangci-lint: forbidigo inspects identifiers
 # and call expressions, not comment text, so a forbidigo pattern here matches
 # nothing (verified). The exclusions are real tokens that merely look like issue
-# ids: TLS SANs, a gRPC metadata header, a certificate subject, and a log-file
-# name prefix. Requiring a digit would be a tempting shortcut but is wrong —
+# ids: TLS SANs, a gRPC metadata header, a certificate subject, a log-file name
+# prefix, and a blobstore reachability probe key. Requiring a digit would be a
+# tempting shortcut but is wrong —
 # 55 real issue ids have none. Add to the list when a new code token collides.
 STAGED_SRC=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(go|ts|tsx)$' | grep -v '/gen/' || true)
 if [ -n "$STAGED_SRC" ]; then
   printf "Checking for tracker IDs in source... "
   HITS=$(git grep -nE 'gastrolog-[a-z0-9]{4,}' -- $STAGED_SRC 2>/dev/null \
-    | grep -vE 'gastrolog-(raft|cluster|node|test|lifecycle)\b' || true)
+    | grep -vE 'gastrolog-(raft|cluster|node|test|lifecycle|connection)\b' || true)
   if [ -z "$HITS" ]; then
     printf "${GREEN}ok${NC}\n"
   else

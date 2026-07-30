@@ -27,9 +27,10 @@ func TestRecordCountsTiers(t *testing.T) {
 	}
 }
 
-// TestCriticalTierFollowsConfiguredLease: with a widened leader lease
-// (gastrolog-o6plq9), gaps past the shipped 1.5s default but inside the
-// lease stay sub-critical — no critical count.
+// TestCriticalTierFollowsConfiguredLease: with a widened leader lease, gaps
+// past the 1.5s default but inside the lease stay sub-critical — no critical
+// count. Critical means lease-lethal, so it has to follow the configured
+// lease rather than a constant.
 func TestCriticalTierFollowsConfiguredLease(t *testing.T) {
 	t.Parallel()
 	w := New(slog.Default(), 4*time.Second)

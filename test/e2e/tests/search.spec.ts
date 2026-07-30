@@ -184,7 +184,7 @@ test.describe.serial("Search", () => {
     }
   });
 
-  // ── Severity filters (gastrolog-5pdlh) ─────────────────────────────
+  // ── Severity filters ───────────────────────────────────────────────
 
   test("all five severity buttons are visible", async ({ page }) => {
     await gotoAuthenticated(page, "/search");
@@ -234,7 +234,7 @@ test.describe.serial("Search", () => {
     await page.getByRole("button", { name: "Trace", exact: true }).click();
   });
 
-  // ── Time range presets (gastrolog-5pdlh) ───────────────────────────
+  // ── Time range presets ─────────────────────────────────────────────
 
   test("all time range presets are visible", async ({ page }) => {
     await gotoAuthenticated(page, "/search");
@@ -279,7 +279,7 @@ test.describe.serial("Search", () => {
     expect(wideCount).toBeGreaterThanOrEqual(narrowCount);
   });
 
-  // ── Vault selector (gastrolog-5pdlh) ───────────────────────────────
+  // ── Vault selector ─────────────────────────────────────────────────
 
   test("clicking a vault filters search to that vault", async ({ page }) => {
     await gotoAuthenticated(page, "/search");
@@ -308,7 +308,7 @@ test.describe.serial("Search", () => {
     }
   });
 
-  // ── Detail sidebar field interactions (gastrolog-psw6z) ────────────
+  // ── Detail sidebar field interactions ──────────────────────────────
 
   test("detail sidebar shows field key-value pairs", async ({ page }) => {
     await gotoAuthenticated(page, "/search");
@@ -376,7 +376,7 @@ test.describe.serial("Search", () => {
     await expect(copyButtons.first()).toBeVisible({ timeout: 5_000 });
   });
 
-  // ── Event identity (gastrolog-2ip1b) ────────────────────────────────
+  // ── Event identity ──────────────────────────────────────────────────
 
   test("detail sidebar shows event identity section", async ({ page }) => {
     await gotoAuthenticated(page, "/search");
@@ -424,7 +424,7 @@ test.describe.serial("Search", () => {
     await expect(identityBtn).toBeVisible({ timeout: 5_000 });
   });
 
-  // ── Explain plan (gastrolog-mingv) ─────────────────────────────────
+  // ── Explain plan ───────────────────────────────────────────────────
 
   test("explain plan shows execution plan", async ({ page }) => {
     await gotoAuthenticated(page, "/search");
@@ -472,7 +472,7 @@ test.describe.serial("Search", () => {
     }
   });
 
-  // ── Histogram interactions (gastrolog-37lxp) ────────────────────────
+  // ── Histogram interactions ──────────────────────────────────────────
 
   test("histogram renders with bar elements", async ({ page }) => {
     await gotoAuthenticated(page, "/search");

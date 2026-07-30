@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { gotoAuthenticated, typeQuery } from "./helpers";
 
 /**
- * Collapsible pane interaction E2E tests (gastrolog-4xu88).
+ * Collapsible pane interaction E2E tests.
  *
  * Tests expanding and collapsing the left sidebar and right detail panel,
  * and verifies interactions within each pane.

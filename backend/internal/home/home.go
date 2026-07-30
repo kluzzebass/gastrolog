@@ -91,7 +91,7 @@ func (d Dir) RaftDir() string {
 
 // ClusterCtlWALDir returns the on-disk directory for the cluster-ctl raftwal.
 // Isolated from vault groups so cluster heartbeats are not coupled to vault
-// append/fsync batching (gastrolog-3tp89).
+// append/fsync batching.
 func (d Dir) ClusterCtlWALDir() string {
 	return filepath.Join(d.RaftDir(), "wal")
 }

@@ -70,10 +70,10 @@ func ValidateAttrFilter(expr Expr) error {
 // AttrSource is a read view over record attributes for filter evaluation.
 // It exists so hot paths can evaluate filters against layered or wire-form
 // attribute views without materializing a map[string]string per record —
-// per-record enrichment copies alone were ~10GB of garbage per soak run
-// (gastrolog-11y2iv). Get is an exact-key lookup; All iterates every
-// key/value pair (used by case-insensitive fallbacks and glob scans) and
-// must not yield duplicate keys.
+// per-record enrichment copies alone measured ~10GB of garbage per run.
+// Get is an exact-key lookup; All iterates every key/value pair (used by
+// case-insensitive fallbacks and glob scans) and must not yield duplicate
+// keys.
 type AttrSource interface {
 	Get(key string) (string, bool)
 	All(yield func(key, value string) bool)

@@ -51,8 +51,8 @@ type PressureThresholds struct {
 	CriticalAt float64 // gate enters Critical at or above this ratio
 }
 
-// DefaultThresholds returns the recommended thresholds from gastrolog-4fguu:
-// escalate to Elevated at 80%, to Critical at 95%, return to Normal at 50%.
+// DefaultThresholds returns the recommended thresholds: escalate to Elevated
+// at 80%, to Critical at 95%, return to Normal at 50%.
 func DefaultThresholds() PressureThresholds {
 	return PressureThresholds{
 		NormalAt:   0.50,

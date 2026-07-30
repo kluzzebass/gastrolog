@@ -181,7 +181,7 @@ func TestCPUPercentPackageLevel(t *testing.T) {
 }
 
 // Memory sources from runtime/metrics (never ReadMemStats — its
-// stop-the-world stalls Raft heartbeats, gastrolog-5kcq5q). A mistyped
+// stop-the-world stalls Raft heartbeats). A mistyped
 // metric name yields KindBad and silently reads zero, so pin that every
 // mapped field is populated on a live runtime.
 func TestMemoryFieldsPopulated(t *testing.T) {

@@ -1,5 +1,5 @@
-// Package schedwatch measures Go scheduler starvation (gastrolog-1io54g
-// phase 2). A 10ms ticker records how late its own wake-ups arrive: gaps of
+// Package schedwatch measures Go scheduler starvation. A 10ms ticker
+// records how late its own wake-ups arrive: gaps of
 // hundreds of milliseconds mean NO goroutine ran on schedule — heartbeat
 // senders, heartbeat receivers, and election timers included, in every Raft
 // group at once, on leader and follower alike.

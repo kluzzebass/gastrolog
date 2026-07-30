@@ -2,15 +2,14 @@ import { test, expect } from "@playwright/test";
 import { gotoAuthenticated, typeQuery } from "./helpers";
 
 /**
- * Pipeline operator and result visualization E2E tests
- * (gastrolog-3gylm, gastrolog-47b4o, gastrolog-2q7dv).
+ * Pipeline operator and result visualization E2E tests.
  *
  * Tests pipe queries (count, top, stats, sort, limit), chart/table
  * toggle, and export functionality.
  */
 
 test.describe.serial("Pipeline operators and visualizations", () => {
-  // ── count operator (gastrolog-3gylm) ─────────────────────────────────
+  // ── count operator ───────────────────────────────────────────────────
 
   test("count operator returns a single value", async ({ page }) => {
     await gotoAuthenticated(page, "/search");
@@ -86,7 +85,7 @@ test.describe.serial("Pipeline operators and visualizations", () => {
     }
   });
 
-  // ── Chart/Table toggle (gastrolog-47b4o) ─────────────────────────────
+  // ── Chart/Table toggle ───────────────────────────────────────────────
 
   test("chart and table views toggle for pipeline results", async ({
     page,
@@ -119,7 +118,7 @@ test.describe.serial("Pipeline operators and visualizations", () => {
     }
   });
 
-  // ── Export (gastrolog-2q7dv) ──────────────────────────────────────────
+  // ── Export ────────────────────────────────────────────────────────────
 
   test("export button is visible after search", async ({ page }) => {
     await gotoAuthenticated(page, "/search");

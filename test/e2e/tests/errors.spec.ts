@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { gotoAuthenticated, typeQuery, openSettingsTab } from "./helpers";
 
 /**
- * Error states and validation E2E tests (gastrolog-sa2di).
+ * Error states and validation E2E tests.
  *
  * Tests invalid query syntax, form validation in settings,
  * and edge case UI states.

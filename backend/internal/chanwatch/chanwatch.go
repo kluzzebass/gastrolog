@@ -7,7 +7,7 @@
 // Channel saturation is a diagnostic, not an alarm: the operator has no
 // action to take — relieving it is capacity-tuning engineering work — so it
 // is logged and never raised to the alarm list (EEMUA 191 actionability
-// test, gastrolog-29380r).
+// test).
 package chanwatch
 
 import (

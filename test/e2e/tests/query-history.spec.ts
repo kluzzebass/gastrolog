@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { gotoAuthenticated, typeQuery } from "./helpers";
 
 /**
- * Query history and saved queries E2E tests (gastrolog-1yzy2).
+ * Query history and saved queries E2E tests.
  *
  * Each test is self-contained — seeds its own data since Playwright
  * gives each test a fresh browser context (no shared localStorage).

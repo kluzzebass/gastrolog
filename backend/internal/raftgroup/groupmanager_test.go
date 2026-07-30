@@ -519,7 +519,7 @@ func TestGroupRecoveryAfterRestart(t *testing.T) {
 }
 
 // TestCreateGroupLateJoinerKeepsGroupWhenPeersAlreadyElected pins the
-// seedGroup race a late joiner loses (gastrolog-4yzpcj).
+// seedGroup race a late joiner loses.
 //
 // Every node of a group seeds symmetrically, but a node that starts late
 // races its own bootstrap against peers that have already begun electing.

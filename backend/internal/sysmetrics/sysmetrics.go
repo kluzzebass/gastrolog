@@ -110,8 +110,7 @@ var memSampleNames = []string{
 // stops the world, and with the stats collector calling this every
 // broadcast tick the pauses measured 18-512ms per call on an
 // oversubscribed host — long enough to stall Raft heartbeat processing
-// past the election timeout and flap leadership (gastrolog-5kcq5q;
-// execution-trace evidence on the issue). metrics.Read takes no
+// past the election timeout and flap leadership. metrics.Read takes no
 // stop-the-world and reads the same accounting. Field equivalences per
 // the runtime/metrics documentation.
 func Memory() MemoryStats {
