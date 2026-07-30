@@ -72,9 +72,9 @@ func TestUnreachableSweep_LiveToUnreachable(t *testing.T) {
 	if n.EffectiveState() != system.NodeStateUnreachable {
 		t.Fatalf("expected Unreachable, got %s", n.EffectiveState())
 	}
-	// gastrolog-778iv: StateSince anchors to lastSeen, not now, so the
-	// inspector's "unreachable Xm" duration matches the moment the
-	// peer actually went silent.
+	// StateSince anchors to lastSeen, not now, so the inspector's
+	// "unreachable Xm" duration matches the moment the peer actually went
+	// silent.
 	if !n.StateSince.Equal(time.Unix(1000, 0)) {
 		t.Fatalf("expected StateSince=lastSeen=1000, got %v", n.StateSince)
 	}
@@ -429,8 +429,7 @@ func TestUnreachableSweep_AlertSilentInMaintenance(t *testing.T) {
 // peer to Unreachable → placement reconciler reads the Unreachable
 // state and retains the existing leader placement instead of rotating.
 // Heartbeat resumes → sweep auto-clears back to Live → placement now
-// permits rotation again. This is the cluster behavior described in
-// the gastrolog-39m2k acceptance criteria.
+// permits rotation again.
 //
 // Uses real wall-clock timestamps (rather than mocked sweep.now)
 // because the placement manager's PeerState liveness check reads the

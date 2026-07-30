@@ -26,8 +26,8 @@ type NotifyKind int
 const (
 	NotifyVaultPut NotifyKind = iota + 1
 	NotifyVaultDeleted
-	// gastrolog-4kkoo (Phase 5): NotifyFilterPut/Deleted removed; expressions
-	// live inline on routes, so route-put/delete carries the change.
+	// Filters have no notification kind: expressions live inline on
+	// routes, so route-put/delete carries the change.
 	NotifyRotationPolicyPut
 	NotifyRotationPolicyDeleted
 	NotifyRetentionPolicyPut
@@ -89,8 +89,7 @@ type FSM struct {
 	// applyWait is advanced after each log entry is applied (and after a
 	// snapshot restore, up to the index the snapshot embeds). Followers
 	// block on it after forwarding a mutation to the leader so their next
-	// read sees post-mutation state — the read-after-write barrier
-	// (gastrolog-2nxij, event-driven since gastrolog-3klg1).
+	// read sees post-mutation state — the read-after-write barrier.
 	applyWait *applywait.Tracker
 }
 
@@ -179,8 +178,8 @@ func (f *FSM) Apply(l *raft.Log) any {
 		return f.applyRefreshToken(ctx, cmd)
 
 	case *gastrologv1.SystemCommand_CatchupBarrier:
-		// State-free startup catch-up barrier (gastrolog-1go57). No store
-		// mutation and no notification — its sole effect is the deferred
+		// State-free startup catch-up barrier. No store mutation and no
+		// notification — its sole effect is the deferred
 		// applyWait.Advance(l.Index) above, which releases a node blocked
 		// on the FSM apply-wait tracker once it applies this entry.
 		return nil
@@ -230,8 +229,8 @@ func (f *FSM) dispatchConfig(ctx context.Context, cmd *gastrologv1.SystemCommand
 	case *gastrologv1.SystemCommand_PutSetting:
 		return f.applyPutSetting(ctx, c.PutSetting)
 	case *gastrologv1.SystemCommand_DeleteSetting:
-		// No-op: settings KV was removed, but we keep this case for backward compat
-		// with old raft log entries.
+		// No-op: there is no settings KV. The case exists so raft logs
+		// still carrying this command replay cleanly.
 		return nil, nil
 	case *gastrologv1.SystemCommand_PutCertificate:
 		cert, err := command.ExtractPutCertificate(c.PutCertificate)
@@ -783,7 +782,7 @@ func (f *FSM) Restore(rc io.ReadCloser) error { //nolint:gocognit,gocyclo // sna
 	rt := &sys.Runtime
 
 	// Config entities.
-	// gastrolog-4kkoo (Phase 5): no Filters; expressions live inline on routes.
+	// No Filters: expressions live inline on routes.
 	for _, rp := range cfg.RotationPolicies {
 		if err := newStore.PutRotationPolicy(ctx, rp); err != nil {
 			return fmt.Errorf("restore rotation policy %s: %w", rp.ID, err)
@@ -857,12 +856,9 @@ func (f *FSM) Restore(rc io.ReadCloser) error { //nolint:gocognit,gocyclo // sna
 			return fmt.Errorf("restore node %s: %w", n.ID, err)
 		}
 	}
-	// gastrolog-485u1: build a set of valid node IDs once so the per-
-	// node maps below can skip entries that reference nodes which no
-	// longer exist in NodeConfigs. Snapshots captured before the
-	// DeleteNode-sweeps-stale-state fix landed carry leaked entries;
-	// dropping them at Restore time is a one-time migration safety net.
-	// Steady-state snapshots (post-fix) won't have orphans to skip.
+	// Build the set of valid node IDs once so the per-node maps below can
+	// skip entries referencing nodes that no longer exist in NodeConfigs.
+	// A snapshot carrying such orphans must not restore them.
 	validNodes := make(map[string]struct{}, len(rt.Nodes))
 	for _, n := range rt.Nodes {
 		validNodes[n.ID.String()] = struct{}{}

@@ -16,12 +16,11 @@ func TestConformance(t *testing.T) {
 	})
 }
 
-// gastrolog-485u1: DeleteNode atomically sweeps every FSM map that
-// references the deleted node ID — IngesterAlive flag entries, the
-// NodeStorageConfig, and any IngesterAssignment pointing at the node.
-// Pre-fix DeleteNode only deleted the `nodes` map entry; the stale
-// references surfaced as inspector badges reading "10/3" forever after
-// a cluster scale-down.
+// DeleteNode atomically sweeps every FSM map that references the deleted
+// node ID — IngesterAlive flag entries, the NodeStorageConfig, and any
+// IngesterAssignment pointing at the node. Deleting only the `nodes` map
+// entry leaves references that surface as inspector badges reading "10/3"
+// forever after a cluster scale-down.
 func TestDeleteNodeSweepsReferences(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

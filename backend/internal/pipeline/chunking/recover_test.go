@@ -150,10 +150,10 @@ func TestRecoverOnceSealsOrphanActiveGLCB(t *testing.T) {
 
 // TestRecoverOnceSkipsSealedEntries: a chunk already Sealed cluster-wide
 // whose GLCB survives on disk needs NO recovery work — registration is
-// lazy (the chunk manager's on-miss resolver, gastrolog-2kmgj6), so
-// recovery must not fire OnBuilt per sealed chunk. The eager re-fire this
-// replaces was O(all chunks) of boot work and raced FSM replay; servability
-// now comes from the resolver at first lookup, independent of recovery.
+// lazy (the chunk manager's on-miss resolver), so recovery must not fire
+// OnBuilt per sealed chunk and boot stays free of per-chunk work.
+// Servability comes from the resolver at first lookup, independent of
+// recovery.
 func TestRecoverOnceSkipsSealedEntries(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
@@ -271,7 +271,7 @@ func TestRecoveryWaitsForFSMReplay(t *testing.T) {
 	// fake replay below completes. With leadership from the start, the
 	// worker's leader planner raced the direct applies and proposed its OWN
 	// open manifest between publish and open ("open chunk manifest already
-	// exists"), an interleaving real replay forbids (gastrolog-4cxvdi).
+	// exists"), an interleaving real replay forbids.
 	var leader atomic.Bool
 	mgr := chunking.New(chunking.Config{})
 	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{

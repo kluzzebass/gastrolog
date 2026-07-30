@@ -18,8 +18,8 @@ func newTestCaptureHandler(t *testing.T, capSize int) (*CaptureHandler, chan Cap
 	h := NewCaptureHandler(inner, ch, nil)
 	// Default threshold is Warn — lower so tests can emit Info records.
 	h.SetMinCaptureLevel(slog.LevelDebug)
-	// Default gate is OFF (gastrolog-6bvu6) — open it so tests that
-	// exercise the capture path actually see records on the channel.
+	// Default gate is OFF — open it so tests that exercise the capture
+	// path actually see records on the channel.
 	h.SetEnabled(true)
 	return h, ch
 }
@@ -101,7 +101,6 @@ func TestCaptureHandlerWithAttrsClonesShareDroppedCounter(t *testing.T) {
 // CaptureHandler does NOT tee records into the channel until SetEnabled(true)
 // is called. This is the steady-state behavior when the self ingester is
 // disabled — producers must not fill the channel without a consumer.
-// See gastrolog-6bvu6.
 func TestCaptureHandlerDefaultGateClosed(t *testing.T) {
 	t.Parallel()
 	ch := make(chan CapturedRecord, 16)

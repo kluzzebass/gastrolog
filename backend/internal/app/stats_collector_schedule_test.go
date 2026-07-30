@@ -19,12 +19,9 @@ func (f *fakeScheduledJobRegistry) AddJob(name, cronExpr string, taskFn any, arg
 
 func (f *fakeScheduledJobRegistry) Describe(string, string) {}
 
-// One broadcast job, and only one. There used to be a second — a lightweight
-// peer heartbeat on its own cadence, split out so slow stats collection could
-// not starve peer liveness (gastrolog-2kio8). gastrolog-1lbifx moved liveness
-// onto Raft last-contact and deleted it, so this asserts the absence: a
-// re-added liveness broadcast would be a third opinion about whether a peer is
-// up, which is exactly what that issue removed.
+// One broadcast job, and only one. Peer liveness is derived from Raft
+// last-contact, so a separate liveness broadcast registered here would be a
+// second opinion about whether a peer is up.
 func TestStartStatsCollectorJobsRegistersOnlyTheStatsBroadcast(t *testing.T) {
 	t.Parallel()
 

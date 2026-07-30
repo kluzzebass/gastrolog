@@ -27,20 +27,20 @@ const (
 	// placementReconcileSchedule runs every 15 seconds. 6-field cron
 	// (with-seconds).
 	//
-	// Every FSM-visible placement input now wakes the reconciler on its own
-	// event (gastrolog-29xpy): vault put, placements set, node-storage-config
-	// set, node lifecycle-state change, node-config add/remove, and ingester
-	// put/delete all fire pm.Trigger() from the config dispatcher, and
-	// leadership transitions run through pm.Run's Raft observer. What remains
-	// with NO event is peer LIVENESS EXPIRY: LivePeers() is a freshness test
-	// (time.Now vs last Raft contact, or vs last broadcast for peers we share
-	// no Raft edge with), so a peer silently dropping out of the alive set is
-	// detectable only by re-evaluating on a clock. This tick is
-	// that re-evaluation — the honest, irreducible residual, not a catch-all
-	// for missed events. (Sustained absence is separately promoted to a
-	// NodeStateChanged FSM event by the unreachable sweep, which then triggers
-	// a reconcile; this tick covers the pre-promotion window and follower/
-	// singleton eligibility against the live-peer set.)
+	// Every FSM-visible placement input wakes the reconciler on its own event:
+	// vault put, placements set, node-storage-config set, node lifecycle-state
+	// change, node-config add/remove, and ingester put/delete all fire
+	// pm.Trigger() from the config dispatcher, and leadership transitions run
+	// through pm.Run's Raft observer. What remains with NO event is peer
+	// LIVENESS EXPIRY: LivePeers() is a freshness test (time.Now vs last Raft
+	// contact, or vs last broadcast for peers we share no Raft edge with), so
+	// a peer silently dropping out of the alive set is detectable only by
+	// re-evaluating on a clock. This tick is that re-evaluation — the honest,
+	// irreducible residual, not a catch-all for missed events. (Sustained
+	// absence is separately promoted to a NodeStateChanged FSM event by the
+	// unreachable sweep, which then triggers a reconcile; this tick covers the
+	// pre-promotion window and follower/singleton eligibility against the
+	// live-peer set.)
 	placementReconcileSchedule = "*/15 * * * * *"
 
 	// Alarm type IDs raised by the placement manager; the instance key is
@@ -83,17 +83,16 @@ type placementManager struct {
 	// (PeerState.VaultStorageProtectedNodes); the local node does not
 	// appear in its own peer table, so the degraded-home alarm needs this
 	// direct orchestrator lookup. Nil in tests that don't exercise the
-	// local-degraded case. Renamed from localVaultDiskProtected
-	// (gastrolog-9akebz).
+	// local-degraded case.
 	localVaultStorageProtected func(glid.GLID) bool
 }
 
 // Run blocks until ctx is cancelled. Handles the two event-driven
 // reconcile sources — leadership transitions (via the Raft observer
 // channel) and manual triggers (Trigger() / RPC handlers via
-// triggerCh). The periodic-fallback cadence is NOT in this loop
-// anymore; that piece lives in startPlacementReconcile so it shows
-// up in the inspector's Scheduled view (gastrolog-1ia46).
+// triggerCh). The periodic-fallback cadence is not in this loop; it
+// lives in startPlacementReconcile so it shows up in the inspector's
+// Scheduled view.
 func (pm *placementManager) Run(ctx context.Context) {
 	leaderCh := make(chan hraft.Observation, 4)
 	pm.clusterSrv.RegisterLeaderObserver(leaderCh)
@@ -184,7 +183,7 @@ func (pm *placementManager) reconcile(ctx context.Context) {
 	// in-transition (Draining, Decommissioning) states refuse rotation.
 	// Only Live state permits the existing rotate-on-unreachable
 	// behavior. See docs/node-lifecycle-design.md "Behavior gates by
-	// state" and gastrolog-slc6l.
+	// state".
 	nodeConfigs, err := pm.cfgStore.ListNodes(ctx)
 	if err != nil {
 		pm.logger.Error("placement: list nodes", "error", err)
@@ -229,15 +228,15 @@ func (pm *placementManager) reconcile(ctx context.Context) {
 	pm.reconcileSingletonIngesters(ctx, alive)
 }
 
-// reportDegradedHomes raises (or clears) the vault-home-cannot-store alarm
-// (gastrolog-38bm9t): a placement member whose local backing volume for
-// this vault is under disk protect is a degraded holder — it can't take
-// collection writes or build GLCBs. selectFollowers backfills a healthy
-// eligible replica AUTOMATICALLY (the degraded member stops counting
-// toward RF but is retained), so the alarm's job is visibility: name the
-// degraded home and say whether the backfill restored RF storable members
-// or the topology has no spare and admission is throttling at the source.
-// Runs after placeVault, so it reports the post-backfill placement.
+// reportDegradedHomes raises (or clears) the vault-home-cannot-store alarm: a
+// placement member whose local backing volume for this vault is under disk
+// protect is a degraded holder — it can't take collection writes or build
+// GLCBs. selectFollowers backfills a healthy eligible replica AUTOMATICALLY
+// (the degraded member stops counting toward RF but is retained), so the
+// alarm's job is visibility: name the degraded home and say whether the
+// backfill restored RF storable members or the topology has no spare and
+// admission is throttling at the source. Runs after placeVault, so it reports
+// the post-backfill placement.
 func (pm *placementManager) reportDegradedHomes(ctx context.Context, v system.VaultConfig, alive map[string]bool, nscs []system.NodeStorageConfig, nodeNames map[string]string) {
 	if pm.alerts == nil {
 		return
@@ -406,9 +405,9 @@ func (pm *placementManager) placeVault(ctx context.Context, v system.VaultConfig
 		return p
 	}(), nscs)
 
-	// State-driven placement guard (gastrolog-slc6l). Rotation is
-	// permitted only when the current leader's node is in the Live
-	// state. Any other state refuses rotation:
+	// State-driven placement guard. Rotation is permitted only when the
+	// current leader's node is in the Live state. Any other state refuses
+	// rotation:
 	//   - Unreachable / Maintenance (soft-offline): retain placement,
 	//     raise warning alert. Closes the RF=1 redeploy bug — placement
 	//     can't move chunks off a transiently-absent node and orphan
@@ -422,12 +421,12 @@ func (pm *placementManager) placeVault(ctx context.Context, v system.VaultConfig
 	// A leader that has DEPARTED — no NodeConfig and no heartbeat — is exempt
 	// from every guard below. Those guards exist to protect a node that still
 	// exists; none of them should pin a placement to one that does not. Without
-	// this a departed leader read as NodeStateUnknown (the zero value of the
-	// nodeStates map), fell into the Unknown/Live case, failed the heartbeat
-	// check, and had its placement retained FOREVER by the two-clock guard's
-	// "node just went quiet" branch — a ghost placement pinned to a node that had
+	// this a departed leader reads as NodeStateUnknown (the zero value of the
+	// nodeStates map), falls into the Unknown/Live case, fails the heartbeat
+	// check, and has its placement retained FOREVER by the two-clock guard's
+	// "node just went quiet" branch — a ghost placement pinned to a node that has
 	// left, with followers never extended to compensate because the placement
-	// target already looked met (gastrolog-68y1vn).
+	// target already looks met.
 	//
 	// BOTH signals are required, because neither is sufficient alone:
 	//
@@ -456,17 +455,17 @@ func (pm *placementManager) placeVault(ctx context.Context, v system.VaultConfig
 			// through to the eligibility check below — unless the
 			// heartbeat says the node just went quiet.
 			//
-			// Two-clock inversion (gastrolog-2d35dc): heartbeat
-			// liveness (peer TTL, ~8s) must never move a leader — only
-			// the node lifecycle state machine may. A leader that is
-			// state-Live but heartbeat-absent is in the pre-Unreachable
-			// window (the unreachable sweep flips the state after its
-			// 5-minute grace); before this guard, the alive[] check
-			// below reassigned leadership ~26s into any blip — exactly
-			// the transient absence slc6l's soft-offline gate promised
-			// to protect, orphaning the returning node's chunks at
-			// RF=1. Same treatment as Unreachable: retain placement,
-			// alert, reconcile followers only.
+			// Two-clock inversion: heartbeat liveness (peer TTL, ~8s)
+			// must never move a leader — only the node lifecycle state
+			// machine may. A leader that is state-Live but
+			// heartbeat-absent is in the pre-Unreachable window (the
+			// unreachable sweep flips the state after its 5-minute
+			// grace); without this guard the alive[] check below
+			// reassigns leadership ~26s into any blip — exactly the
+			// transient absence the soft-offline gate exists to
+			// protect, orphaning the returning node's chunks at RF=1.
+			// Same treatment as Unreachable: retain placement, alert,
+			// reconcile followers only.
 			if !alive[currentLeader] {
 				if pm.alerts != nil {
 					pm.alerts.Raise(softOfflineAlarmType, v.ID.String(),
@@ -500,16 +499,15 @@ func (pm *placementManager) placeVault(ctx context.Context, v system.VaultConfig
 	// two-clock guard above returned otherwise), so only eligibility (storage
 	// config) can invalidate it. A DEPARTED leader also arrives here, and fails
 	// the eligibility check below because its storage config left with it —
-	// which is what lets the re-placement further down actually run
-	// (gastrolog-68y1vn).
+	// which is what lets the re-placement further down actually run.
 	// leaderDeparted is part of the condition because eligibility alone does not
 	// imply existence: a memory vault reports EVERY node eligible ("any node can
 	// serve memory vaults"), including one that has left the cluster, so without
 	// this a departed memory-vault leader would be retained here even though the
 	// guard above correctly let it through. File vaults fail eligibility on their
 	// own — DeleteNode sweeps the node's storage config, so the leader stops
-	// resolving — but relying on that would make the outcome depend on vault type
-	// (gastrolog-68y1vn).
+	// resolving — but relying on that would make the outcome depend on vault
+	// type.
 	if currentLeader != "" && !leaderDeparted && pm.nodeEligible(v, currentLeader, nscs) {
 		pm.clearUnplacedAlarms(v)
 		pm.placeFollowers(ctx, &v, alive, nscs, vaultCount)
@@ -532,7 +530,7 @@ func (pm *placementManager) placeVault(ctx context.Context, v system.VaultConfig
 	// Replace the leader placement. StorageIDForNode is strict: "" means the
 	// selected node lost its matching storage class since the eligibility
 	// check — refuse the placement loudly rather than land the leader on the
-	// wrong disk class (gastrolog-2bv1x).
+	// wrong disk class.
 	storageID := system.StorageIDForNode(best, v, nscs)
 	if storageID == "" {
 		pm.logger.Error("placement: no storage of required class on selected node; refusing leader placement",
@@ -589,12 +587,12 @@ func (pm *placementManager) placeFollowers(ctx context.Context, v *system.VaultC
 	}())
 	leaderNodeID := system.NodeIDForStorage(leaderStorageID, nscs)
 
-	// Degraded-home backfill (gastrolog-38bm9t): members whose local
-	// volume for this vault is under disk protect stop counting toward
-	// RF; the healthy-follower target grows so an eligible node becomes
-	// a replica automatically. A degraded LEADER raises the target even
-	// for RF=1 vaults — the state guards retain its leadership, but the
-	// vault still needs one member that can actually store.
+	// Degraded-home backfill: members whose local volume for this vault
+	// is under disk protect stop counting toward RF; the healthy-follower
+	// target grows so an eligible node becomes a replica automatically. A
+	// degraded LEADER raises the target even for RF=1 vaults — the state
+	// guards retain its leadership, but the vault still needs one member
+	// that can actually store.
 	degraded := pm.vaultStorageProtectedSet(v.ID)
 	rf := int(v.ReplicationFactor)
 	if rf <= 0 {
@@ -684,14 +682,13 @@ func (pm *placementManager) followerCandidates(v system.VaultConfig, leaderStora
 // candidates backfilled until target healthy followers exist. Returns the
 // placements and the healthy-follower count.
 //
-// Degraded-home backfill (gastrolog-38bm9t): a placement member whose
-// local volume for this vault is under disk protect cannot take
-// collection writes or build GLCBs, so it stops COUNTING toward the
-// replication factor — but it is never dropped here (its bytes may
-// recover when space frees; removal is the operator's call). Healthy
-// eligible candidates backfill automatically so the vault keeps RF
-// storable members and the release gate keeps moving. When the degraded
-// member recovers it counts again, and the healthy cap trims the
+// Degraded-home backfill: a placement member whose local volume for this
+// vault is under disk protect cannot take collection writes or build GLCBs,
+// so it stops COUNTING toward the replication factor — but it is never
+// dropped here (its bytes may recover when space frees; removal is the
+// operator's call). Healthy eligible candidates backfill automatically so the
+// vault keeps RF storable members and the release gate keeps moving. When the
+// degraded member recovers it counts again, and the healthy cap trims the
 // placement back on a later pass.
 func (pm *placementManager) selectFollowers(v *system.VaultConfig, target int, leaderStorageID, leaderNodeID string, degraded map[string]bool, candidates []eligibleStorage, nscs []system.NodeStorageConfig, alive map[string]bool, vaultCount map[string]int) ([]system.VaultPlacement, int) {
 	var kept []system.VaultPlacement
@@ -748,8 +745,7 @@ func (pm *placementManager) selectFollowers(v *system.VaultConfig, target int, l
 // vaultStorageProtectedSet returns the node IDs currently reporting a
 // storage backing this vault under disk protect: live peers via the
 // NodeStats broadcast, the local node via the orchestrator lookup (it is
-// absent from its own peer table). Renamed from vaultDiskProtectedSet
-// (gastrolog-9akebz).
+// absent from its own peer table).
 func (pm *placementManager) vaultStorageProtectedSet(vaultID glid.GLID) map[string]bool {
 	protected := make(map[string]bool)
 	if pm.peerState != nil {
@@ -871,11 +867,7 @@ func (pm *placementManager) handleUnplaceable(_ context.Context, v system.VaultC
 	// destroy valid leader+follower assignments that already exist on
 	// disk and never recover them once the cluster stabilizes — the
 	// next tick sees no current leader, has to re-elect from scratch,
-	// and loses any follower history. See gastrolog-2yeie: before
-	// yield-leadership preStop preserved cluster state across pod
-	// restart, demote-self was wiping state on every restart anyway so
-	// the destructive branch here was a no-op. Now that state survives,
-	// the wipe is visible.
+	// and loses any follower history.
 	//
 	// Keep current placements intact; raise the alert so the operator
 	// sees the degraded condition; let the next reconcile tick promote
@@ -897,9 +889,9 @@ func (pm *placementManager) handleUnplaceable(_ context.Context, v system.VaultC
 // a vault, given the cluster's storage configs and the vault's current
 // placements. This is THE definition of placement eligibility: the
 // placement manager asks it when choosing leaders and followers, and
-// the RF-preservation removal gate (gastrolog-3vyex) asks the same
-// question about re-placement candidates. Do not fork a second copy —
-// a gate that disagrees with the placer is worse than no gate.
+// the RF-preservation removal gate asks the same question about
+// re-placement candidates. Do not fork a second copy — a gate that
+// disagrees with the placer is worse than no gate.
 //
 // Liveness and lifecycle state are the CALLER's filter (the placement
 // manager passes its alive set; the removal gate passes nodes in

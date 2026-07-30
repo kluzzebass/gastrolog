@@ -6,9 +6,10 @@ import (
 )
 
 // TestConfigureRPCTimeouts: per-RPC deadlines derive from the configured
-// failure-detector timing and never undercut it (the gastrolog-1io54g
-// inversion) or shrink below the shipped defaults. Not parallel: mutates
-// package-level deadlines.
+// failure-detector timing and never undercut it or shrink below the shipped
+// defaults. A deadline shorter than the detector window aborts heartbeat
+// probes that a sub-second stall merely delayed, manufacturing elections.
+// Not parallel: mutates package-level deadlines.
 func TestConfigureRPCTimeouts(t *testing.T) {
 	restore := func() { ConfigureRPCTimeouts(2*time.Second, 2*time.Second) }
 	t.Cleanup(restore)

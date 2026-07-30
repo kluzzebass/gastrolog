@@ -99,7 +99,7 @@ func (g *vaultCtlPromotionGroup) promote(m learnerMember) error {
 // then restricts action to the groups this node currently leads. New
 // members are added to vault-ctl groups as Nonvoter learners by the
 // vault-ctl leader manager's membership reconcile, which explicitly
-// leaves promotion to this promoter. See gastrolog-4vg17.
+// leaves promotion to this promoter.
 func newVaultCtlLearnerPromoter(ctx context.Context, cfgStore system.Store, groupMgr vaultCtlRaftGroupAccess, ps peerStatsReader, logger *slog.Logger) *learnerPromoter {
 	return newLearnerPromoter("vault-ctl", func() []promotionGroup {
 		vaults, err := cfgStore.ListVaults(ctx)

@@ -1,8 +1,8 @@
 package system_test
 
-// ParseSizeOrPercent is replicated-and-resolved-per-node like ParseSize
-// (gastrolog-etcjdx), so its meaning is pinned the same way: these fail
-// loudly if a canonical expression ever drifts. The percentage grammar is
+// ParseSizeOrPercent is replicated-and-resolved-per-node like ParseSize,
+// so its meaning is pinned the same way: these fail loudly if a canonical
+// expression ever drifts. The percentage grammar is
 // what makes volume-scaled defaults typeable (docs/product-defaults-policy-
 // design.md, decision 6), so its rejects are contracts too.
 

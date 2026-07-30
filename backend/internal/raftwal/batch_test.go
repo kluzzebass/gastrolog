@@ -1,9 +1,9 @@
 package raftwal
 
-// Coverage for gastrolog-53lk2 (batched StoreLogs): a StoreLogs call is ONE
-// submit through the batch writer and ONE WAL record, so an N-entry batch is
-// atomic on disk — replay after a torn or corrupted write never surfaces a
-// half-applied batch.
+// Coverage for batched StoreLogs: a StoreLogs call is ONE submit through the
+// batch writer and ONE WAL record, so an N-entry batch is atomic on disk —
+// replay after a torn or corrupted write never surfaces a half-applied
+// batch.
 
 import (
 	"fmt"

@@ -1,7 +1,6 @@
 package raftgroup
 
-// Coverage for gastrolog-1io54g: liveness counter classification of Raft
-// observer events.
+// Coverage for liveness counter classification of Raft observer events.
 
 import (
 	"testing"

@@ -1,8 +1,8 @@
 // Package idxmmap provides a shared helper for loading index files via mmap.
 // All on-disk index files in gastrolog (tsidx, attr, kv, json, token) are
 // sealed/immutable once written, which makes them ideal mmap candidates.
-// Slurping them into heap-allocated []byte caused unnecessary GC pressure
-// during query load — see gastrolog-3rvws.
+// Slurping them into heap-allocated []byte adds unnecessary GC pressure
+// during query load.
 //
 // The helper assumes the decoder is "self-copying": it extracts all needed
 // values out of the mmap region (via binary.LittleEndian.* and string(data[...]))

@@ -14,12 +14,11 @@ import (
 	sysmem "gastrolog/internal/system/memory"
 )
 
-// Coverage for gastrolog-1lbifx at the sweep boundary: Live<->Unreachable must
-// follow real peer contact, which since this issue means Raft last-contact, and
-// must NOT follow the stats broadcast on its own. The stats broadcast is
-// observability payload now; a node whose broadcast stalls while Raft keeps
-// replicating to it is not unreachable, and flipping it would rotate placement
-// off a perfectly healthy node.
+// Coverage at the sweep boundary: Live<->Unreachable must follow real peer
+// contact — Raft last-contact — and must NOT follow the stats broadcast on its
+// own. The stats broadcast is observability payload; a node whose broadcast
+// stalls while Raft keeps replicating to it is not unreachable, and flipping it
+// would rotate placement off a perfectly healthy node.
 
 // newRaftSweepTest is newSweepTest with the Raft input enabled, so the sweep
 // sees a PeerState shaped the way production wires it.

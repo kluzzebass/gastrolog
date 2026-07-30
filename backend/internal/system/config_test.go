@@ -366,9 +366,9 @@ func TestToRetentionPolicy(t *testing.T) {
 	})
 }
 
-// gastrolog-1rbuf regression: IsEmpty must report true for fully-unset
-// configs and false as soon as any condition is populated. PutRotationPolicy
-// uses IsEmpty to reject silent-no-op policies at the admission boundary.
+// IsEmpty must report true for fully-unset configs and false as soon as any
+// condition is populated. PutRotationPolicy uses IsEmpty to reject
+// silent-no-op policies at the admission boundary.
 func TestRotationPolicyConfigIsEmpty(t *testing.T) {
 	t.Parallel()
 	empty := ""
@@ -397,7 +397,7 @@ func TestRotationPolicyConfigIsEmpty(t *testing.T) {
 	}
 }
 
-// gastrolog-1rbuf regression: same shape for retention policies.
+// Same shape for retention policies.
 func TestRetentionPolicyConfigIsEmpty(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -423,14 +423,13 @@ func TestRetentionPolicyConfigIsEmpty(t *testing.T) {
 	}
 }
 
-// TestRetentionPolicyConfigRefuseEnabled pins gastrolog-5yfaqj's default
-// (operator decision: bounds are drain-first, refusal is the explicit
-// hard mode): unset (nil) must read as false — a policy opts IN to
-// refusal explicitly, never opts out. This is the one field on
-// RetentionPolicyConfig that is genuinely tri-state (unlike
-// MaxAge/MaxSize's empty-string-means-unset convention), because "unset"
-// and "true" must mean different things (true is the explicit hard-bound
-// opt-in; unset and false are indistinguishable in effect, both soft).
+// TestRetentionPolicyConfigRefuseEnabled pins the default (bounds are
+// drain-first, refusal is the explicit hard mode): unset (nil) must read as
+// false — a policy opts IN to refusal explicitly, never opts out. This is
+// the one field on RetentionPolicyConfig that is genuinely tri-state (unlike
+// MaxAge/MaxSize's empty-string-means-unset convention), because "unset" and
+// "true" must mean different things (true is the explicit hard-bound opt-in;
+// unset and false are indistinguishable in effect, both soft).
 func TestRetentionPolicyConfigRefuseEnabled(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

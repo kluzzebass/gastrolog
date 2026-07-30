@@ -214,11 +214,11 @@ func testRetentionPolicies(t *testing.T, newStore func(t *testing.T) system.Stor
 			MaxAge:    new("720h"),
 			MaxSize:   new("10GB"),
 			MaxChunks: new(int64(100)),
-			// Explicit true, not the (now off) default — a store that
+			// Explicit true, not the default (off) — a store that
 			// silently drops this back to nil on write would silently
-			// flip the operator's hard-bound choice to soft
-			// (gastrolog-5yfaqj; caught a real bug in the memory store's
-			// copyRetentionPolicy, which forgot this field entirely).
+			// flip the operator's hard-bound choice to soft. Caught a
+			// real bug in the memory store's copyRetentionPolicy, which
+			// forgot this field entirely.
 			Refuse: new(true),
 		}
 

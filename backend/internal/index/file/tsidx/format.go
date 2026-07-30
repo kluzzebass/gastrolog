@@ -52,7 +52,7 @@ func decodeRawEntries(data []byte) ([]Entry, error) {
 // the first entry with TS >= ts. Distinct from FindStartPosition: this
 // returns the index in the sorted slice, FindStartPosition returns the
 // physical record position from the entry's Pos field. The two differ on
-// non-monotonic chunks built via ImportRecords. See gastrolog-66b7x.
+// non-monotonic chunks built via ImportRecords.
 //
 // The search reuses tsindex.Compare's ordering via slices.BinarySearchFunc:
 // probing for {TS: ts, Pos: 0} finds the first entry with TS >= ts, since
@@ -191,7 +191,7 @@ func (v MmapView) Close() error {
 // heap-allocated entry slice. This mirrors tsindex.FindStart's search
 // shape but also returns rank (the index in the sorted region), which
 // FindStart does not expose; that is reader-side machinery specific to
-// tsidx's mmap views and stays local. See gastrolog-66b7x.
+// tsidx's mmap views and stays local.
 func (v MmapView) SearchTS(tsNano int64) (rank uint32, pos uint32, ok bool) {
 	if v.n == 0 {
 		return 0, 0, false

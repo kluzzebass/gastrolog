@@ -3,7 +3,7 @@ package convert
 // config.go provides canonical converters between config domain types and
 // their protobuf representations. Both the server RPC handlers and the
 // Raft FSM command package call these functions — there is exactly one
-// source of truth for each field mapping. See gastrolog-2f8et.
+// source of truth for each field mapping.
 
 import (
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
@@ -136,10 +136,10 @@ func NodeStorageConfigFromProto(p *gastrologv1.NodeStorageConfig) system.NodeSto
 // VaultConfigToProto converts a system.VaultConfig to its proto representation.
 //
 // Placements are passed in rather than read off the config: they are owned by
-// the placement manager and live in Runtime.VaultPlacements, and VaultConfig no
-// longer carries a mirrored copy (gastrolog-617qns). Read paths supply
-// System.PlacementsFor(id); write paths supply nil, which is now structural
-// rather than a convention — a PutVault command has no placements to send.
+// the placement manager and live in Runtime.VaultPlacements; VaultConfig
+// carries no mirrored copy. Read paths supply System.PlacementsFor(id); write
+// paths supply nil, which is structural rather than a convention — a PutVault
+// command has no placements to send.
 func VaultConfigToProto(v system.VaultConfig, placements []system.VaultPlacement) *gastrologv1.VaultConfig {
 	pbPlacements := make([]*gastrologv1.VaultPlacement, len(placements))
 	for i, p := range placements {
@@ -208,7 +208,7 @@ func VaultConfigFromProto(p *gastrologv1.VaultConfig) (system.VaultConfig, error
 	}
 
 	// Placements on the request are ignored: they are owned by the placement
-	// manager and the domain type does not carry them (gastrolog-617qns).
+	// manager and the domain type does not carry them.
 
 	return cfg, nil
 }
@@ -228,12 +228,12 @@ func VaultTypeToProto(t system.VaultType) gastrologv1.VaultType {
 }
 
 // ---------------------------------------------------------------------------
-// Route stages (gastrolog-4kkoo Phase 5)
+// Route stages
 // ---------------------------------------------------------------------------
 
 // RouteStagesToProto converts a slice of system.RouteStage to its proto
-// representation. Today only MatchStage is set; future kinds (per
-// gastrolog-5e85x Programmable Ingestion) plug into the same oneof.
+// representation. Today only MatchStage is set; the future stage kinds
+// planned for Programmable Ingestion plug into the same oneof.
 func RouteStagesToProto(stages []system.RouteStage) []*gastrologv1.RouteStage {
 	if len(stages) == 0 {
 		return nil
@@ -287,7 +287,7 @@ func VaultTypeFromProto(t gastrologv1.VaultType) system.VaultType {
 	}
 }
 
-// --- Log Levels (gastrolog-3flfp) ---
+// --- Log Levels ---
 
 // LogLevelConfigToProto converts a system.LogLevelConfig to its proto form.
 // The Go side stores levels as int64 (matching slog.Level); the wire form

@@ -35,9 +35,9 @@ type VaultCtlApplier interface {
 //
 // Deliberately NO blocking full-pass method: the chunking worker must never
 // wait on a collection pass. Under backlog a pass takes minutes-to-hours and
-// the serial seal loop stalled at one chunk per pass (gastrolog-1b51yf).
-// Collection wakes chunking on every pass completion (OnPassComplete), so a
-// non-blocking Nudge is all the worker ever needs.
+// the serial seal loop stalled at one chunk per pass. Collection wakes
+// chunking on every pass completion (OnPassComplete), so a non-blocking Nudge
+// is all the worker ever needs.
 type SegmentCollector interface {
 	// CollectSegments pulls the given segment IDs when manifest refs require
 	// bytes this home does not yet hold.
@@ -73,12 +73,12 @@ type VaultConfig struct {
 	// RequiredHolders returns vault placement member node IDs that must appear
 	// in each segment's holder set before the leader proposes ReleaseSegments
 	// or a home purges its head/ copy, plus whether the placement lookup
-	// resolved. Mandatory — registration rejects nil (gastrolog-4w1vt: a nil
-	// field used to silently disable the holder gate). ok=false means the
-	// lookup is unresolved (config load failure, vault missing from config):
-	// every release and purge gate fails closed so a multi-home vault never
-	// drops segments on a bad lookup. A vault that genuinely requires no
-	// holders (single-node tests) opts out EXPLICITLY with NoRequiredHolders.
+	// resolved. Mandatory: registration rejects nil, and every gate calls it
+	// unconditionally. ok=false means the lookup is unresolved
+	// (config load failure, vault missing from config): every release and
+	// purge gate fails closed so a multi-home vault never drops segments on a
+	// bad lookup. A vault that genuinely requires no holders (single-node
+	// tests) opts out EXPLICITLY with NoRequiredHolders.
 	RequiredHolders func() (required []string, ok bool)
 	// RetentionGiveUpTTL returns the vault's delete-disposition retention TTL
 	// (the shortest, when several rules apply) and whether a give-up bound is
@@ -88,7 +88,7 @@ type VaultConfig struct {
 	// even though it was never chunked (island origin, no reachable holder):
 	// holding an uncollectable entry forever only leaks. Route-disposition
 	// retention vetoes the bound — those records must be routed, not dropped.
-	// Nil disables (design-notes 28; PublishedAt anchor: gastrolog-68sfsl).
+	// Nil disables (design-notes 28).
 	RetentionGiveUpTTL func() (time.Duration, bool)
 	// IndexOpener opens a completed segment for planner indexing. Defaults
 	// to BuildOrderedIndex when nil (tests may inject a counting wrapper).
@@ -97,9 +97,8 @@ type VaultConfig struct {
 	// Nil uses time.Now (production). Tests inject a fixed clock.
 	Now func() time.Time
 	// Alerts raises operator alerts for blocked GLCB builds (sealed manifest
-	// referencing segments missing on this node — chunks pinned in Sealing,
-	// gastrolog-67c9b0). Nil inherits the manager Config sink; both nil
-	// disables alarms.
+	// referencing segments missing on this node — chunks pinned in Sealing).
+	// Nil inherits the manager Config sink; both nil disables alarms.
 	Alerts alert.Sink
 }
 
@@ -107,19 +106,18 @@ type VaultConfig struct {
 // resolves to an empty requirement, so exhausted segments release immediately
 // and head/ copies purge right after build. Vaults that genuinely need no
 // holder gate — single-node tests without placements — opt out with THIS,
-// never with a nil RequiredHolders: nil used to silently disable the gate and
-// registration now rejects it (gastrolog-4w1vt).
+// never with a nil RequiredHolders, which registration rejects.
 func NoRequiredHolders() ([]string, bool) { return nil, true }
 
 type vaultChunking struct {
 	cfg VaultConfig
 
-	// Stage-throughput counters (gastrolog-10n6k8): records/bytes this home
-	// materialized into sealed GLCBs.
+	// Stage-throughput counters: records/bytes this home materialized into
+	// sealed GLCBs.
 	sealedRecords atomic.Uint64
 	sealedBytes   atomic.Uint64
 
-	// Chunk-lifecycle stage counters (gastrolog-4r784a), monotonic per vault:
+	// Chunk-lifecycle stage counters, monotonic per vault:
 	//   chunksPlanned  — open manifests the leader opened (leader-owned).
 	//   chunksBuilt    — GLCBs this home materialized (home-owned).
 	//   chunksSealed   — CmdSealChunk commits the leader landed (leader-owned).
@@ -141,8 +139,7 @@ type vaultChunking struct {
 	segmentIndexCache map[glid.GLID]*OrderedIndex
 	// rewired, when non-nil, overrides cfg.FSM/LookupFSM/Applier after a
 	// vault-ctl snapshot Restore. Atomic publication — workers read via
-	// fsm()/applier() while RewireVaultFSM stores under Manager.mu
-	// (gastrolog-50m2vi).
+	// fsm()/applier() while RewireVaultFSM stores under Manager.mu.
 	rewired atomic.Pointer[chunkRewire]
 	// progress is the exactly-once state machine for the sealed-manifest
 	// build/seal/post-seal/OnBuilt lifecycle. Owns its own lock.
@@ -154,21 +151,19 @@ type vaultChunking struct {
 	purgeLogThrottle logging.Throttle
 
 	// underReplicatedAlerted tracks the under-replicated-segments alert
-	// state so planner passes log/alert only on transitions
-	// (gastrolog-4bl9xx). Guarded by planMu like the planner pass itself.
+	// state so planner passes log/alert only on transitions. Guarded by
+	// planMu like the planner pass itself.
 	underReplicatedAlerted bool
 	// giveUpAlerted tracks the retention-give-up alert state so release
 	// passes raise/clear and log only on transitions. Without it a vault
 	// shedding never-chunked segments emitted one WARN per pass (~40/min on
-	// the 18h cluster run) that buried the starvation in retention noise
-	// (gastrolog-68sfsl). Guarded by mu like pendingRelease, which the same
-	// release pass mutates.
+	// the 18h cluster run) that buried the starvation in retention noise.
+	// Guarded by mu like pendingRelease, which the same release pass mutates.
 	giveUpAlerted bool
 	// planFailures tracks segments whose on-disk index cannot be opened or
 	// read (corrupt index, unreadable file). Without it a corrupt segment
 	// was skipped silently forever: never planned into a sealed manifest,
-	// head purge blocked (gastrolog-6wwdos). Guarded by planMu like the
-	// planner pass itself.
+	// head purge blocked. Guarded by planMu like the planner pass itself.
 	planFailures map[glid.GLID]*planFailure
 	// planFailureAlerted tracks the unplannable-segment alert state so
 	// planner passes raise/clear only on transitions. Guarded by planMu.
@@ -176,7 +171,7 @@ type vaultChunking struct {
 	// corruptMu guards corruptGLCBs. Its own lock:
 	// corruption is flagged from the build pass (under buildMu) and restart
 	// recovery, and cleared from those plus the orchestrator's peer re-pull
-	// (Manager.NoteGLCBRestored) — see glcb_corrupt.go (gastrolog-687m11).
+	// (Manager.NoteGLCBRestored) — see glcb_corrupt.go.
 	corruptMu sync.Mutex
 	// corruptGLCBs maps chunks whose existing sealed GLCB was detected
 	// unreadable (and quarantined) to the read-error detail, feeding the
@@ -216,7 +211,7 @@ type vaultChunking struct {
 	// buildMu serializes actual build passes. The worker's spawned build and
 	// the Manager.BuildOnce test entry point must not run buildOnce
 	// concurrently: the winner seals and purges head/ while the loser is
-	// mid-merge reading those segment files (gastrolog-2qj3pw).
+	// mid-merge reading those segment files.
 	buildMu sync.Mutex
 	// buildWG tracks the in-flight build goroutine so worker shutdown waits
 	// for it without polling.
@@ -234,8 +229,8 @@ func (v *vaultChunking) logger() *slog.Logger {
 
 // chunkRewire is the rewireable collaborator bundle, published atomically by
 // RewireVaultFSM after a group snapshot Restore. Field-by-field mutation of
-// v.cfg raced live build/plan workers reading it (gastrolog-50m2vi); workers
-// go through fsm()/applier() which Load one immutable snapshot.
+// v.cfg races live build/plan workers reading it; workers go through
+// fsm()/applier() which Load one immutable snapshot.
 type chunkRewire struct {
 	fsm       *vaultctlfsm.FSM
 	lookupFSM func() *vaultctlfsm.FSM
@@ -336,7 +331,7 @@ type Manager struct {
 	wg      sync.WaitGroup
 
 	// buildFailLog throttles the per-retry build-failure warn to one line
-	// per vault per interval with a suppressed count (gastrolog-4elpu1).
+	// per vault per interval with a suppressed count.
 	buildFailLog logging.Throttle
 }
 
@@ -351,7 +346,7 @@ func New(cfg Config) *Manager {
 }
 
 // retryLogInterval spaces identical retry-failure warn lines per vault; the
-// retry loop itself is unthrottled (gastrolog-4elpu1).
+// retry loop itself is unthrottled.
 const retryLogInterval = 30 * time.Second
 
 func (m *Manager) logger() *slog.Logger {
@@ -391,8 +386,7 @@ func (m *Manager) RegisterVault(vaultID glid.GLID, cfg VaultConfig) error {
 //
 // The FSM/LookupFSM/Applier trio is published as ONE atomic chunkRewire
 // snapshot instead of mutating v.cfg under live build/plan workers, and
-// Manager.mu is held across the body so concurrent rewires serialize
-// (gastrolog-50m2vi).
+// Manager.mu is held across the body so concurrent rewires serialize.
 func (m *Manager) RewireVaultFSM(vaultID glid.GLID, fsm *vaultctlfsm.FSM, applier VaultCtlApplier) error {
 	if fsm == nil {
 		return errors.New("vault-ctl FSM required")
@@ -404,10 +398,10 @@ func (m *Manager) RewireVaultFSM(vaultID glid.GLID, fsm *vaultctlfsm.FSM, applie
 		return ErrUnknownVault
 	}
 	m.unwireVaultFSMCallbacks(v)
-	// lookupFSM stays the registration-time live getter (cfg is immutable
-	// now); when none was registered, fsm() falls back to rw.fsm directly.
-	// The old code synthesized a closure capturing the first rewire's FSM,
-	// which went stale on a second rewire.
+	// lookupFSM stays the registration-time live getter (cfg is immutable);
+	// when none was registered, fsm() falls back to rw.fsm directly. A
+	// synthesized closure capturing this rewire's FSM would go stale on the
+	// next rewire.
 	rw := &chunkRewire{fsm: fsm, lookupFSM: v.cfg.LookupFSM}
 	if prev := v.rewired.Load(); prev != nil {
 		rw.applier = prev.applier
@@ -481,12 +475,11 @@ func (m *Manager) wireVaultFSMCallbacks(v *vaultChunking, cfg VaultConfig) {
 	})
 	v.unsubRelease = cfg.FSM.AddOnReleaseSegments(func(ids []glid.GLID) {
 		// Wake-only, like every other FSM callback: this fires on the Raft
-		// FSM-apply goroutine. Purging inline did disk I/O there and — via
+		// FSM-apply goroutine. Purging inline does disk I/O there and — via
 		// purgeStaleHeadCatchUp → LookupFSM → GroupManager.GetGroup —
-		// acquired the group-manager lock, which Shutdown holds while
+		// acquires the group-manager lock, which Shutdown holds while
 		// waiting for this very apply goroutine to exit: a teardown
-		// deadlock (gastrolog-38snf4 gate forensics). The worker's release
-		// branch drains the queued IDs.
+		// deadlock. The worker's release branch drains the queued IDs.
 		v.purgeMu.Lock()
 		v.pendingPurge = append(v.pendingPurge, ids...)
 		v.purgeMu.Unlock()
@@ -570,7 +563,7 @@ func (m *Manager) RotateCron(ctx context.Context, vaultID glid.GLID) error {
 // leadership aligns on the placement leader so catch-up runs after startup
 // elections, not only on the first worker tick.
 // VaultSealStats is one vault's cumulative seal counters on this home
-// (records/bytes materialized into sealed GLCBs) — gastrolog-10n6k8.
+// (records/bytes materialized into sealed GLCBs).
 type VaultSealStats struct {
 	VaultID       glid.GLID
 	SealedRecords uint64
@@ -596,9 +589,9 @@ func (m *Manager) SealStats() []VaultSealStats {
 }
 
 // VaultStageStats is one vault's cumulative chunk-lifecycle stage counters on
-// this node (gastrolog-4r784a). Planned/Sealed/Released are leader-owned;
-// Built and HeadPurges are home-owned. HeadPurges reuses the existing
-// released+stale head-purge accumulators.
+// this node. Planned/Sealed/Released are leader-owned; Built and HeadPurges
+// are home-owned. HeadPurges reuses the existing released+stale head-purge
+// accumulators.
 type VaultStageStats struct {
 	VaultID          glid.GLID
 	ChunksPlanned    uint64
@@ -640,8 +633,7 @@ func (m *Manager) NotifyVault(vaultID glid.GLID) {
 
 // BuildOnce runs one build pass for a vault (for tests). It serializes with
 // the worker's in-flight build via buildMu: an unserialized foreground build
-// races the background build+seal+head-purge and hits ENOENT mid-merge
-// (gastrolog-2qj3pw).
+// races the background build+seal+head-purge and hits ENOENT mid-merge.
 func (m *Manager) BuildOnce(ctx context.Context, vaultID glid.GLID) error {
 	m.mu.Lock()
 	v, ok := m.vaults[vaultID]
@@ -791,7 +783,7 @@ func (m *Manager) runBuildPass(ctx context.Context, v *vaultChunking, log *slog.
 		v.buildMu.Unlock()
 		if err != nil && ctx.Err() == nil {
 			// Retrying is correct; logging every retry is a firehose — a 6h
-			// blocked build once emitted 244k of these (gastrolog-4elpu1).
+			// blocked build once emitted 244k of these.
 			if n, ok := m.buildFailLog.Allow(v.cfg.VaultID.String()); ok {
 				log.Warn("chunking build failed", "error", err, "suppressed", n)
 			}
@@ -831,7 +823,7 @@ func (v *vaultChunking) releaseOnce(ctx context.Context) error {
 		v.mu.Unlock()
 		return err
 	}
-	// Leader-owned segment-release milestone (gastrolog-4r784a).
+	// Leader-owned segment-release milestone.
 	v.segmentsReleased.Add(uint64(len(ready)))
 	v.mu.Lock()
 	v.pendingRelease = append(stillPending, v.pendingRelease...)

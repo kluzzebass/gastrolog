@@ -20,7 +20,7 @@ var ErrNoMergeRecords = errors.New("merge produced no records")
 // for its atomic-rename staging file. Exported as a constant (rather than
 // re-typing the literal at each call site) so the startup orphan sweep in
 // recover.go matches this writer's exact naming contract instead of
-// guessing a pattern — see gastrolog-66hmx3 / gastrolog-5do8sh gap 7.
+// guessing a pattern.
 const glcbBuildTmpPrefix = ".glcb.tmp."
 
 // BuildGLCBInput names the chunk identity and span plan for a GLCB build.
@@ -92,7 +92,7 @@ func BuildGLCBFile(path string, in BuildGLCBInput) (BuildGLCBResult, error) {
 		return BuildGLCBResult{}, err
 	}
 	// Durability barrier: CmdSealChunk references this GLCB cluster-wide;
-	// the rename must survive power loss (gastrolog-4mqy06).
+	// the rename must survive power loss.
 	if err := paths.SyncDir(filepath.Dir(dest)); err != nil {
 		return BuildGLCBResult{}, err
 	}
@@ -123,7 +123,7 @@ func buildGLCBTo(dst io.Writer, workDir string, in BuildGLCBInput) (BuildGLCBRes
 	var recordCount uint32
 	// Views, not Records: the merge is a pure transcode (segment wire ->
 	// dict wire) and materializing an attrs map per record was ~24GB of
-	// garbage per soak run (gastrolog-11y2iv).
+	// garbage per soak run.
 	for v, err := range MergeSpanViews(in.Refs) {
 		if err != nil {
 			return BuildGLCBResult{}, err

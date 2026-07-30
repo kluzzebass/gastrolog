@@ -585,9 +585,9 @@ func TestDeleteRangeIdempotent(t *testing.T) {
 	}
 }
 
-// Regression: suffix-style DeleteRange must not poison reads of the surviving
-// prefix (hashicorp/raft appendEntries conflict path). A too-wide "deleted"
-// horizon previously made GetLog panic the Raft node via ErrLogNotFound.
+// Suffix-style DeleteRange must not poison reads of the surviving prefix
+// (hashicorp/raft appendEntries conflict path): a too-wide "deleted" horizon
+// makes GetLog return ErrLogNotFound, which panics the Raft node.
 func TestDeleteRangeSuffixPreservesPrefix(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

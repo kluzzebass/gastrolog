@@ -10,11 +10,11 @@ import (
 	"gastrolog/internal/system/raftfsm"
 )
 
-// gastrolog-1ovdy: the config dispatcher no longer swallows the errors of the
-// orchestrator side effects it fires from inside FSM.Apply. A failed side
-// effect becomes a standing per-entity reconcile obligation plus a
-// config-side-effect-failed alarm; the next successful dispatch of the same
-// entity clears both. These tests exercise that seam directly.
+// The config dispatcher surfaces the errors of the orchestrator side effects
+// it fires from inside FSM.Apply. A failed side effect becomes a standing
+// per-entity reconcile obligation plus a config-side-effect-failed alarm; the
+// next successful dispatch of the same entity clears both. These tests
+// exercise that seam directly.
 
 // newAlertingDispatcher wires a test dispatcher to a real alarm collector so
 // obligation transitions can be observed as standing alarms.

@@ -930,7 +930,7 @@ func TestPlacementSingletonIngesterUnknownType(t *testing.T) {
 	}
 }
 
-// ---------- State-driven placement guard (gastrolog-slc6l) ----------
+// ---------- State-driven placement guard ----------
 
 // setupStateGuardTest creates a placement manager with two nodes (the
 // local node and a peer) registered as real NodeConfig records in the
@@ -1037,13 +1037,13 @@ func TestPlacement_LiveLeaderHeartbeatLost_RetainsPlacement(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	// Live peer with NO live heartbeats — the pre-Unreachable window.
-	// Two-clock inversion (gastrolog-2d35dc): heartbeat loss alone must
-	// never move a leader; only the node lifecycle state machine may.
-	// Before the fix this window rotated leadership ~26s into any blip
-	// (measured live) — the exact transient absence slc6l's soft-offline
-	// gate exists to protect — because the guard read the FSM state
-	// (which the unreachable sweep flips only after its 5-minute grace)
-	// while the rotate path read raw heartbeat liveness.
+	// Guard and rotate path must read the same clock: heartbeat loss
+	// alone never moves a leader, only the node lifecycle state machine
+	// may. Reading raw heartbeat liveness on the rotate path while the
+	// guard reads FSM state (which the unreachable sweep flips only
+	// after its 5-minute grace) rotates leadership within seconds of any
+	// blip — exactly the transient absence the soft-offline gate exists
+	// to protect.
 	localID := glid.New()
 	peerID := glid.New()
 	pm, store, alerts := newTestPlacement(t, localID.String(), nil /* no live peers */)
@@ -1139,7 +1139,7 @@ func TestStartPlacementReconcile_PropagatesAddJobError(t *testing.T) {
 	}
 }
 
-// ---------- Degraded-home alarm (gastrolog-38bm9t) ----------
+// ---------- Degraded-home alarm ----------
 
 func alertMessage(alerts *alert.Collector, prefix string) string {
 	for _, a := range alerts.Standing() {

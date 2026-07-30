@@ -204,7 +204,7 @@ func (d *configDispatcher) obligationCount() int {
 // Handle dispatches a single FSM notification to the appropriate orchestrator
 // methods. It runs inline from within FSM.Apply, so it stays fast: the
 // mutation is already durable in Raft and cannot be rolled back. Failures are
-// no longer swallowed — each side effect that can fail returns an error, and
+// not swallowed — each side effect that can fail returns an error, and
 // Handle records it as a per-entity reconcile obligation and raises a standing
 // alarm via settle(). The obligation is retried event-driven: the next
 // dispatch touching the same entity re-runs the handler (and settle clears the
@@ -234,7 +234,7 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 		// placement manager's job (reconcileSingletonIngesters). Without a
 		// trigger the ingester runs on EVERY eligible node (shouldRunIngester
 		// permits local start while unassigned) until the placement manager's
-		// next pass narrows it to one. Wake it now (gastrolog-29xpy).
+		// next pass narrows it to one. Wake it now.
 		d.triggerPlacement()
 	case raftfsm.NotifyIngesterDeleted:
 		d.settle(entIngester, "", "reconcile-ingesters", d.reconcileIngesters(ctx))
@@ -250,22 +250,21 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 		// then issues AddVoter / RemoveServer to converge the per-group
 		// configuration. Without this, vault-ctl groups stay frozen at
 		// bootstrap membership and a scaled-in node loops forever in
-		// pre-vote campaigns. See gastrolog-4zy8a.
+		// pre-vote campaigns.
 		d.settle(entNodeConfig, "", "refresh-vault-ctl-members", d.handleNodeConfigChange(ctx))
 		// Membership also changes the placement candidate set: a joined node
 		// opens a memory-vault follower slot (any alive node is eligible) and
 		// can relieve load; a removed node's vaults need re-placing. The
 		// placement manager reads live cluster membership, so wake it on the
-		// config event rather than leaving it to the periodic pass
-		// (gastrolog-29xpy).
+		// config event.
 		d.triggerPlacement()
 	case raftfsm.NotifyNodeStateChanged:
 		// Node lifecycle state transitioned (e.g., Live → Unreachable,
-		// Maintenance → Live, etc.). The placement guard (gastrolog-slc6l)
-		// gates rotation on the soft-offline states, so a state change
-		// can flip a node from "rotation-permitted" to "rotation-gated"
-		// or vice versa. Wake the placement reconciler so the gate
-		// re-evaluates without waiting for the periodic pass.
+		// Maintenance → Live, etc.). The placement guard gates rotation
+		// on the soft-offline states, so a state change can flip a node
+		// from "rotation-permitted" to "rotation-gated" or vice versa.
+		// Wake the placement reconciler so the gate re-evaluates
+		// promptly.
 		d.triggerPlacement()
 	case raftfsm.NotifyManagedFilePut:
 		if d.managedFileHandler != nil {
@@ -281,9 +280,9 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 		// Re-fire handleInstancePut so applyInstanceMembershipChange can pick
 		// up the now-complete placements. Without this re-trigger, a
 		// rejoining node that replays VaultPut before
-		// CmdSetVaultPlacements never builds the missing instance — the
-		// failure mode that left node3 with only 1 of 3 instances after
-		// a snapshot/replication catchup. See gastrolog-51gme.
+		// CmdSetVaultPlacements never builds the missing instance, and
+		// comes back from a snapshot/replication catchup holding fewer
+		// instances than its placements call for.
 		d.settle(entVault, n.ID.String(), "instance-put", d.handleInstancePut(ctx, n.ID))
 	case raftfsm.NotifyNodeStorageConfigSet:
 		// NSC changes the universe of eligible placement candidates —
@@ -291,23 +290,22 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 		// removing one (existing placements may need to migrate).
 		// Operators expect `gastrolog config node add-storage` to take
 		// effect immediately; without a trigger the vault stays at its
-		// stale placement count and looks broken. See gastrolog-2yeie.
+		// stale placement count and looks broken.
 		d.triggerPlacement()
 		// NSC also remaps storageID→nodeID, which is how a leader instance
 		// resolves its FollowerTargets and any instance resolves its role
 		// (system.FollowerTargets / LeaderNodeID). A storage moving between
 		// nodes can shift targets/role without any placement edit, so
 		// reconcile every local instance from the new NSC directly rather
-		// than waiting on the placement manager to rewrite placements
-		// (gastrolog-29xpy — replaces the retired orchestrator placement sweep).
+		// than waiting on the placement manager to rewrite placements.
 		d.orch.ReconcilePlacements(ctx)
 	case raftfsm.NotifyCloudServicePut:
 		// An edit to a cloud service's archival transition chain changes the
 		// age thresholds the hourly archival sweep evaluates against. The
-		// sweep is a genuine time-based policy evaluation (gastrolog-15nn1),
-		// but a config change is a discrete event: without an immediate
-		// re-evaluation, shortening an archival age would leave now-eligible
-		// chunks un-transitioned for up to an hour. Fire the sweep now, the
+		// sweep is a genuine time-based policy evaluation, but a config
+		// change is a discrete event: without an immediate re-evaluation,
+		// shortening an archival age would leave now-eligible chunks
+		// un-transitioned for up to an hour. Fire the sweep now, the
 		// same way NotifyNodeStorageConfigSet wakes the placement reconciler.
 		// archivalSweepAll is leader-gated per vault, so firing on every node
 		// is safe — only the vault leader acts.
@@ -498,8 +496,7 @@ func (d *configDispatcher) handleVaultDeleted(ctx context.Context, n raftfsm.Not
 	// Republish the routing table and Origin/Home registrations so the
 	// deleted vault drops out of the pipeline immediately. teardownVault
 	// leaves this to ReloadFilters "when the deletion lands in config"; with
-	// the periodic placement sweep retired (gastrolog-29xpy), the delete
-	// event is where it lands.
+	// no periodic placement sweep, the delete event is where it lands.
 	if err := d.reloadFilters(ctx); err != nil {
 		errs = append(errs, err)
 	}
@@ -726,11 +723,10 @@ func (d *configDispatcher) handleInstancePut(ctx context.Context, vaultID glid.G
 
 	// Align this node's local instance with the new placements: role
 	// (leader/follower), leader pointer, and — for a leader — the sealed-chunk
-	// FollowerTargets. This is the authoritative, guarded reconcile that
-	// replaces the retired 15s placement sweep (gastrolog-29xpy): it will not
-	// flip roles on a placement that resolves to no leader (the mid-flap race
-	// that once stranded vaults leaderless), and it refreshes FollowerTargets
-	// on the placement event rather than at the next sweep tick.
+	// FollowerTargets. This is the authoritative, guarded reconcile: it will
+	// not flip roles on a placement that resolves to no leader (a mid-flap
+	// race that strands vaults leaderless), and it refreshes FollowerTargets
+	// on the placement event.
 	d.orch.ReconcileVaultPlacement(ctx, vaultID)
 
 	// Trigger immediate placement reconcile so secondaries are assigned
@@ -765,11 +761,11 @@ func (d *configDispatcher) applyInstanceMembershipChange(ctx context.Context, v 
 		return nil
 	}
 
-	// Every node participates in every vault-ctl Raft group (gastrolog-292yi),
-	// whether or not it has a storage placement for this vault. Non-storage
-	// nodes still need to join as voters — without that, a vault with RF
-	// smaller than the cluster size can't reach quorum because most nodes
-	// never registered the group. AddVaultInstance handles both cases: storage
+	// Every node participates in every vault-ctl Raft group, whether or not
+	// it has a storage placement for this vault. Non-storage nodes still
+	// need to join as voters — without that, a vault with RF smaller than
+	// the cluster size can't reach quorum because most nodes never
+	// registered the group. AddVaultInstance handles both cases: storage
 	// nodes get a VaultInstance, non-storage nodes only get a Raft group.
 	vaultBelongsHere := leaderNodeID == d.localNodeID || slices.Contains(followerNodeIDs, d.localNodeID)
 	if !vaultBelongsHere {
@@ -795,10 +791,9 @@ func (d *configDispatcher) rebuildVaultIfInstanceMissing(ctx context.Context, v 
 	if existing != nil {
 		// Instance already present — its role, leader pointer, and
 		// FollowerTargets are reconciled authoritatively by
-		// ReconcileVaultPlacement in handleInstancePut after this returns
-		// (gastrolog-29xpy). No in-place role write here: doing it unguarded
-		// on a mid-flap no-leader placement was the race that stranded vaults
-		// leaderless, which the retired placement sweep had to heal.
+		// ReconcileVaultPlacement in handleInstancePut after this returns.
+		// No in-place role write here: doing it unguarded on a mid-flap
+		// no-leader placement strands the vault leaderless.
 		return nil
 	}
 	// The vault may not be registered in the orchestrator yet — typically
@@ -808,7 +803,7 @@ func (d *configDispatcher) rebuildVaultIfInstanceMissing(ctx context.Context, v 
 	// NOT fire onApply notifications, so the dispatcher never saw the
 	// vault-put for this vault. Without this guard, AddVaultInstance below
 	// fails with ErrVaultNotFound and the orchestrator permanently lacks
-	// the vault until the operator forces a config write. See gastrolog-3idjc.
+	// the vault until the operator forces a config write.
 	if !slices.Contains(d.orch.ListVaults(), v.ID) {
 		if err := d.orch.AddVault(ctx, v, d.factories); err != nil &&
 			!errors.Is(err, orchestrator.ErrDuplicateID) {
@@ -888,7 +883,7 @@ func (d *configDispatcher) handleNodeConfigChange(ctx context.Context) error {
 // joiner has finished snapshot replication: FSM.Restore does not fire
 // onApply notifications (only FSM.Apply does), so a joiner whose state
 // arrived purely via snapshot would otherwise see an empty
-// vault/ingester registry. See gastrolog-3hcfm.
+// vault/ingester registry.
 //
 // For vaults we only call the per-entity handler for those the orchestrator
 // does NOT already have (a joiner whose state arrived via post-snapshot Apply
@@ -933,8 +928,7 @@ func (d *configDispatcher) ReplayConfigFromStore(ctx context.Context) {
 	// Reconcile role and FollowerTargets for vaults the orchestrator ALREADY
 	// had (the loop above skips them): their placements may have changed
 	// inside the installed snapshot, whose entries never fired onApply
-	// notifications. With the periodic placement sweep retired
-	// (gastrolog-29xpy), this replay is where a post-snapshot role/target
-	// drift is caught.
+	// notifications. With no periodic placement sweep, this replay is where
+	// a post-snapshot role/target drift is caught.
 	d.orch.ReconcilePlacements(ctx)
 }

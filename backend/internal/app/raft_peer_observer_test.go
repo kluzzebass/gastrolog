@@ -172,7 +172,8 @@ func TestRunPeerRemovalLoop_MultipleRemovals(t *testing.T) {
 // TestRunPeerRemovalLoop_VariadicEvictors verifies that every supplied
 // evictor is called on a removal — the variadic signature is what lets
 // the production wiring (app.go) thread all six per-peer caches through
-// the same loop (gastrolog-9ohip).
+// the same loop, so a removed node leaves no stale per-peer entries
+// behind.
 func TestRunPeerRemovalLoop_VariadicEvictors(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

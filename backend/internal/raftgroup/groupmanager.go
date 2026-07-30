@@ -89,19 +89,16 @@ const (
 	// The slack is applied as an ADDITION capped at half the base window
 	// (see raftTimeouts). At the shipped default — and at every base at or
 	// above it — the cap is inert and the vault-ctl window is exactly
-	// base + 1s, as it always was. The cap only binds when the node-wide
-	// base is configured BELOW the default, and it exists so that
-	// compressing the base compresses the vault-ctl detector in lockstep
-	// instead of leaving a fixed second dominating the window. That is the
-	// same lockstep property gastrolog-1lbifx established between the
-	// detector and Raft-contact liveness.
+	// base + 1s. The cap only binds when the node-wide base is configured
+	// BELOW the default, and it exists so that compressing the base
+	// compresses the vault-ctl detector in lockstep instead of leaving a
+	// fixed second dominating the window.
 	vaultCtlTimeoutSlack = 1 * time.Second
 )
 
 // Node-wide base failure-detector timing, overridable once at boot via
-// ConfigureTimeouts (--raft-heartbeat-timeout / --raft-leader-lease,
-// gastrolog-o6plq9). The election timeout always equals the heartbeat
-// timeout, as the previous per-profile constants had it; per-group
+// ConfigureTimeouts (--raft-heartbeat-timeout / --raft-leader-lease). The
+// election timeout always equals the heartbeat timeout; per-group
 // GroupConfig overrides still win over the base.
 var (
 	baseHeartbeatTimeout = DefaultHeartbeatTimeout
@@ -149,7 +146,7 @@ type GroupManager struct {
 	wal            *raftwal.WAL // optional shared WAL; nil = per-group boltdb
 	logger         *slog.Logger
 	// liveness accumulates Raft liveness events across all groups on this
-	// node for the NodeStats broadcast (gastrolog-1io54g).
+	// node for the NodeStats broadcast.
 	liveness LivenessCounters
 }
 
@@ -364,7 +361,7 @@ func (m *GroupManager) RemoveMember(groupID string, serverID hraft.ServerID) err
 // delays on follower nodes. If shutdownLast is set, that group is stopped after
 // all others complete.
 // Liveness returns the node-level Raft liveness counters accumulated across
-// every group this manager observes (gastrolog-1io54g).
+// every group this manager observes.
 func (m *GroupManager) Liveness() *LivenessCounters {
 	return &m.liveness
 }
@@ -513,12 +510,12 @@ func raftTimeouts(cfg GroupConfig) (heartbeat, election, lease time.Duration) {
 // hraft refuses to bootstrap it: ErrCantBootstrap. That is not a failure. The
 // node is a valid follower of a group that already exists; the configuration
 // arrives with the leader's next AppendEntries, exactly as it does in the
-// restart case above. Treating it as an error tore the whole group down
-// (CreateGroup shuts the instance down and returns), and since every retry
-// starts from state that is now definitely non-empty, the node could never
-// join that group again — a permanent, silent loss of a voter, self-inflicted
-// by losing a startup race. Found via gastrolog-4yzpcj: compressing the
-// election timeout for tests made the race routine instead of rare.
+// restart case above. Treating it as an error would tear the whole group
+// down (CreateGroup shuts the instance down and returns), and since every
+// retry starts from state that is by then non-empty, the node could never
+// join that group again — a permanent, silent loss of a voter from losing a
+// startup race. Compressed election timeouts make the race routine rather
+// than rare.
 func (m *GroupManager) seedGroup(r *hraft.Raft, members []hraft.Server) error {
 	existing := r.GetConfiguration()
 	if err := existing.Error(); err != nil {

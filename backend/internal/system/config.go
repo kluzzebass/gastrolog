@@ -49,8 +49,7 @@ type System struct {
 // Config holds operator-controlled settings — things the operator creates,
 // edits, and deletes via the CLI or UI.
 type Config struct {
-	// Entity collections.
-	// gastrolog-4kkoo (Phase 5): Filters removed; expressions inlined on Routes.
+	// Entity collections. Match expressions live inline on Routes.
 	RotationPolicies  []RotationPolicyConfig  `json:"rotationPolicies,omitempty"`
 	RetentionPolicies []RetentionPolicyConfig `json:"retentionPolicies,omitempty"`
 	Ingesters         []IngesterConfig        `json:"ingesters,omitempty"`
@@ -218,11 +217,10 @@ type ClusterTLS struct {
 	JoinToken      string `json:"join_token"`
 }
 
-// LogLevelConfig is the cluster-wide per-component log level configuration
-// (gastrolog-3flfp). Default is the fallback level used when no rule
-// matches a component path; Rules are pattern-keyed overrides where
-// patterns follow the gitignore-style grammar implemented in
-// internal/logging/rules.go.
+// LogLevelConfig is the cluster-wide per-component log level
+// configuration. Default is the fallback level used when no rule matches a
+// component path; Rules are pattern-keyed overrides where patterns follow the
+// gitignore-style grammar implemented in internal/logging/rules.go.
 //
 // Stored atomically via PutLogLevels so a single Raft commit replaces the
 // whole rule set across every node. The empty LogLevelConfig (zero

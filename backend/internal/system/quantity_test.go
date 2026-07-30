@@ -1,10 +1,9 @@
 package system_test
 
 // The config-quantity model replicates the operator's expression and resolves
-// it independently on each node (gastrolog-etcjdx). That is only safe if the
-// parsers are deterministic and stable: these pins fail loudly if a canonical
-// expression's meaning ever drifts, which is the exact risk the old
-// numeric-at-rest rule guarded against and this replaces.
+// it independently on each node. That is only safe if the parsers are
+// deterministic and stable: these pins fail loudly if a canonical
+// expression's meaning ever drifts.
 
 import (
 	"testing"

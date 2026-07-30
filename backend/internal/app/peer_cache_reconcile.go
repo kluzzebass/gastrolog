@@ -14,7 +14,6 @@ import (
 // Registered with the orchestrator's job scheduler so the operator
 // can see it in the inspector's Scheduled view alongside the other
 // periodic sweeps (cache-eviction, archival-sweep, retention, etc.).
-// gastrolog-9ohip.
 
 const (
 	// peerCacheReconcileJobName is the operator-visible name shown

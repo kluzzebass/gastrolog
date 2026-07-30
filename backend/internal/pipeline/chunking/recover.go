@@ -14,9 +14,9 @@ import (
 
 // BuildResultFromExistingGLCB reads seal metadata from a pipeline GLCB that
 // already exists on disk. Header-only: IngestTSMonotonic is persisted in the
-// blob layout meta at build time (gastrolog-699s7p), so no record frame is
-// ever touched. Used on the hot build path and after restart when local
-// materialization finished but CmdSealChunk did not apply before shutdown.
+// blob layout meta at build time, so no record frame is ever touched. Used
+// on the hot build path and after restart when local materialization
+// finished but CmdSealChunk did not apply before shutdown.
 func BuildResultFromExistingGLCB(glcbPath string, sealedAt time.Time) (BuildResult, error) {
 	meta, fileBytes, err := readGLCBSealMeta(glcbPath)
 	if err != nil {
@@ -56,12 +56,11 @@ func (v *vaultChunking) recoverOnce(ctx context.Context) error {
 	}
 	// Sweep BuildGLCBFile's crash-orphaned staging files before anything
 	// else runs. BuildGLCBFile relies on this happening on the recovery
-	// path it documents ("re-running with the same inputs is safe") but
-	// there was previously no sweep at all — a crash between CreateTemp
-	// and the rename left ".glcb.tmp.*" in the chunk dir forever
-	// (gastrolog-5do8sh gap 7, gastrolog-66hmx3). Best-effort: a failed
-	// sweep must not block the rest of recovery, which is what actually
-	// gets the chunk sealed.
+	// path it documents ("re-running with the same inputs is safe"):
+	// without it a crash between CreateTemp and the rename leaves
+	// ".glcb.tmp.*" in the chunk dir forever. Best-effort: a failed sweep
+	// must not block the rest of recovery, which is what actually gets the
+	// chunk sealed.
 	//
 	// Under buildMu: RecoverOnce runs on the vault-registration catch-up
 	// goroutine concurrently with the wake-driven worker's build pass, and
@@ -96,12 +95,10 @@ func (v *vaultChunking) recoverOnce(ctx context.Context) error {
 		if e.IsSealed() {
 			// Sealed cluster-wide: nothing to build or propose, and
 			// registration is lazy — the chunk manager's on-miss resolver
-			// serves the on-disk GLCB at first lookup (gastrolog-2kmgj6).
-			// Skipping BEFORE the stat keeps recovery O(unsealed), not
-			// O(all chunks): the eager re-registration scan this replaced
-			// was the sub-3s-startup violation, and its ordering hazards
-			// (pre-replay runs, sweep-timing gaps) left restarted nodes
-			// logging 'chunk not found' against bytes they held.
+			// serves the on-disk GLCB at first lookup. Skipping BEFORE
+			// the stat keeps recovery O(unsealed), not O(all chunks),
+			// which is what keeps startup sub-3s per the vision's
+			// 30k-chunk registry target.
 			continue
 		}
 		glcbPath := ChunkGLCBPath(v.cfg.ChunkRoot, e.ID)
@@ -131,7 +128,7 @@ func isGLCBBuildTmpName(name string) bool {
 // directory (ChunkGLCBPath), so this only needs one level of listing.
 // Best-effort and owner-local: this package is the only writer of this
 // tmp shape, so it is the only package responsible for sweeping it (no
-// global janitor). See gastrolog-66hmx3.
+// global janitor).
 func (v *vaultChunking) sweepOrphanGLCBBuildTmp() {
 	entries, err := os.ReadDir(v.cfg.ChunkRoot)
 	if err != nil {
@@ -184,15 +181,14 @@ func (v *vaultChunking) recoverBuiltGLCB(ctx context.Context, pending *vaultctlf
 	}
 	result, err := BuildResultFromExistingGLCB(glcbPath, sealedAt)
 	if err != nil {
-		// Unified corrupt-GLCB story (gastrolog-687m11, glcb_corrupt.go):
-		// quarantine + alert, then degrade to EXACTLY the missing-GLCB case
-		// this function already handles (return nil, nothing recovered here).
-		// The pre-687m11 behavior propagated the error and never rebuilt —
-		// the chunk starved until operator action. Now the worker's build
-		// pass rebuilds the pending sealed manifest from source segments
-		// (collection pulls any this home lacks), and a chunk sealed
-		// cluster-wide whose segments are long released is re-pulled from a
-		// peer home by the orchestrator's GLCB catch-up sweep on stat-miss.
+		// Unified corrupt-GLCB story (glcb_corrupt.go): quarantine + alert,
+		// then degrade to EXACTLY the missing-GLCB case this function
+		// already handles (return nil, nothing recovered here). The worker's
+		// build pass rebuilds the pending sealed manifest from source
+		// segments (collection pulls any this home lacks), and a chunk
+		// sealed cluster-wide whose segments are long released is re-pulled
+		// from a peer home by the orchestrator's GLCB catch-up sweep on
+		// stat-miss.
 		v.quarantineCorruptGLCB(pending.ChunkID, glcbPath, err)
 		return nil
 	}

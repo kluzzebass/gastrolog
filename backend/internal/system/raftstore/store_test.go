@@ -230,7 +230,7 @@ func TestApplyForwarderError(t *testing.T) {
 // TestApplyReturnsAppliedIndexOnLeader pins that the leader path returns the
 // raft log index from the future, not zero. The mutation handlers in
 // SystemServer don't read this index, but the cluster ForwardApply handler
-// does (returning it to the forwarding follower) — gastrolog-2nxij.
+// does (returning it to the forwarding follower).
 func TestApplyReturnsAppliedIndexOnLeader(t *testing.T) {
 	t.Parallel()
 	r, fsm := newTestRaft(t)
@@ -246,10 +246,9 @@ func TestApplyReturnsAppliedIndexOnLeader(t *testing.T) {
 	}
 }
 
-// TestApplyWaitsForLocalApplyAfterForward is the regression test for
-// gastrolog-2nxij. After Forward returns the leader's applied index, the
-// follower's applyRaw must block until its local raft.AppliedIndex catches
-// up. The mock forwarder reports an index in the future; the test asserts
+// TestApplyWaitsForLocalApplyAfterForward pins the post-forward wait. After
+// Forward returns the leader's applied index, the follower's applyRaw must
+// block until its local raft.AppliedIndex catches up. The mock forwarder reports an index in the future; the test asserts
 // applyRaw times out rather than returning while still behind.
 //
 // This proves the wait loop is wired and bounded, without needing a real
@@ -365,10 +364,9 @@ func newFollowerRaft(t *testing.T, fsm *raftfsm.FSM) *hraft.Raft {
 	return r
 }
 
-// TestApplyWakesOnLocalFSMApply is the event-driven regression test for
-// gastrolog-3klg1: the post-forward wait must release the moment the local
-// FSM applies the leader's index — driven by the FSM apply notification,
-// not by polling raft.AppliedIndex. The test simulates replication by
+// TestApplyWakesOnLocalFSMApply pins the event-driven wake: the post-forward
+// wait must release the moment the local FSM applies the leader's index —
+// driven by the FSM apply notification, not by polling raft.AppliedIndex. The test simulates replication by
 // applying the committed entry to the FSM directly; the concurrent write
 // call must then return with the mutation locally readable. No sleeps —
 // synchronization is the barrier's own completion.
@@ -453,7 +451,7 @@ func TestApplyWaitCancelledContext(t *testing.T) {
 }
 
 // TestBarrierOnLeaderApplies pins the leader path of the startup catch-up
-// barrier (gastrolog-1go57): on the leader raft.Apply is synchronous, so
+// barrier: on the leader raft.Apply is synchronous, so
 // Barrier commits a no-op entry and returns with the FSM current. The
 // apply-wait tracker must reflect the barrier's index on return.
 func TestBarrierOnLeaderApplies(t *testing.T) {
@@ -470,8 +468,8 @@ func TestBarrierOnLeaderApplies(t *testing.T) {
 	}
 }
 
-// TestBarrierFollowerWakesOnLocalApply is the event-driven follower path
-// (gastrolog-1go57): the barrier is forwarded to the leader and Barrier
+// TestBarrierFollowerWakesOnLocalApply is the event-driven follower path:
+// the barrier is forwarded to the leader and Barrier
 // blocks until the local FSM applies up to the leader's index — released by
 // the FSM apply notification, not a poll. Replication is simulated by
 // applying the committed barrier entry to the FSM directly; no sleeps.

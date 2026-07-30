@@ -37,9 +37,9 @@ func setupCluster(ctx context.Context, logger *slog.Logger, cfg RunConfig, hd ho
 	clusterTLS := cluster.NewClusterTLS()
 
 	// Joining flow: enroll with the leader before creating the cluster server.
-	// gastrolog-o9z6o: cfg.JoinToken may have been populated from a
-	// file or HTTP source by resolveJoinTokenFromSources before we got
-	// here, so the literal-token check still does the right thing.
+	// cfg.JoinToken may have been populated from a file or HTTP source by
+	// resolveJoinTokenFromSources before we got here, so the literal-token
+	// check still does the right thing.
 	if cfg.JoinAddr != "" && cfg.JoinToken != "" {
 		enrolled, err := enrollInCluster(ctx, logger, cfg, hd, nodeID)
 		if err != nil {
@@ -118,7 +118,7 @@ func startClusterServices(ctx context.Context, clusterSrv *cluster.Server, clust
 // bootstrapClusterTLS generates CA, cluster cert, and join token. When
 // writeBootstrapTokenPath is non-empty, the token is also written
 // atomically to that path with mode 0600 so an orchestrator-launched
-// joiner can pick it up via --bootstrap-token-file (gastrolog-o9z6o).
+// joiner can pick it up via --bootstrap-token-file.
 func bootstrapClusterTLS(ctx context.Context, cfgStore system.Store, ctls *cluster.ClusterTLS, tlsFilePath string, logger *slog.Logger, writeBootstrapTokenPath string) error {
 	existingCfg, err := cfgStore.Load(ctx)
 	if err != nil {
@@ -175,8 +175,8 @@ func bootstrapClusterTLS(ctx context.Context, cfgStore system.Store, ctls *clust
 // loadExistingClusterTLS handles the restart path: cluster TLS material
 // already exists in the store from a prior run, so reuse it instead of
 // regenerating. Also writes the join token to the configured path if
-// requested. Extracted from bootstrapClusterTLS to keep both branches
-// flat per the project's nestif lint rule.
+// requested. Separate from bootstrapClusterTLS's generate path to keep both
+// branches flat per the project's nestif lint rule.
 func loadExistingClusterTLS(existing *system.ClusterTLS, ctls *cluster.ClusterTLS, tlsFilePath string, logger *slog.Logger, writeBootstrapTokenPath string) error {
 	if err := ctls.Load([]byte(existing.ClusterCertPEM), []byte(existing.ClusterKeyPEM), []byte(existing.CACertPEM)); err != nil {
 		return fmt.Errorf("load existing cluster TLS: %w", err)
@@ -411,8 +411,8 @@ func makeJoinClusterFunc(
 		// runtime single-node-to-cluster join — the joining node is
 		// new to the target cluster's Raft membership regardless of
 		// its own local state, so the safe shape is to enter as a
-		// learner and let the cluster-ctl promoter (gastrolog-2czh9)
-		// upgrade to voter once caught up.
+		// learner and let the cluster-ctl promoter upgrade to voter once
+		// caught up.
 		logger.Info("requesting cluster membership (as learner)", "leader_addr", leaderAddr)
 		joinCtx, joinCancel := context.WithTimeout(ctx, 30*time.Second)
 		err = cluster.JoinCluster(joinCtx, logger, leaderAddr, nodeID, clusterAddr, clusterTLS, false)
@@ -556,13 +556,12 @@ func (r *nodeRemover) remove(ctx context.Context, targetNodeID string, opts clus
 }
 
 // makeRemoveNodeFunc creates the callback for the RemoveNode RPC. The
-// returned function runs the leader-side removal gates — orphan-refusal
-// (gastrolog-2ch9y) and RF-preservation (gastrolog-3vyex) — before the
-// Raft membership change, so a removal that would destroy or degrade a
-// vault fails with an operator-actionable error listing the affected
-// vaults. opts.Force skips both gates, loudly logged. When this node is
-// not the leader the request is forwarded, policy and all, to the node
-// that owns the gates.
+// returned function runs the leader-side removal gates — orphan-refusal and
+// RF-preservation — before the Raft membership change, so a removal that
+// would destroy or degrade a vault fails with an operator-actionable error
+// listing the affected vaults. opts.Force skips both gates, loudly logged.
+// When this node is not the leader the request is forwarded, policy and all,
+// to the node that owns the gates.
 func makeRemoveNodeFunc(
 	clusterSrv *cluster.Server,
 	cfgStore system.Store,
@@ -590,7 +589,7 @@ func makeRemoveNodeFunc(
 		// (placement manager, RefreshVaultCtlMembers, ListNodes RPC) stop
 		// treating the removed node as a cluster member. Without this, a
 		// scale-down leaves stale NodeConfig entries that keep vault-ctl Raft
-		// groups attempting to talk to defunct pod IPs. See gastrolog-4zy8a.
+		// groups attempting to talk to defunct pod IPs.
 		if cfgStore != nil {
 			targetGLID, err := glid.Parse(targetNodeID)
 			if err != nil {
@@ -640,7 +639,7 @@ func makeRemoveNodeFunc(
 			"force", opts.Force, "policy", opts.Policy)
 		// The policy rides along: the gates run on the leader, so a
 		// preStop self-removal that lands on a follower must still be
-		// evaluated optimistically there (gastrolog-3vyex).
+		// evaluated optimistically there.
 		req := &gastrologv1.ForwardRemoveNodeRequest{
 			NodeId:      []byte(targetNodeID),
 			Force:       opts.Force,
@@ -671,10 +670,9 @@ func evaluateRemovalGates(
 	opts cluster.RemoveNodeOptions,
 	logger *slog.Logger,
 ) error {
-	// Orphan-refusal gate (gastrolog-2ch9y): removal would leave a vault
-	// with zero placements. Applies to every removal policy — losing a
-	// vault entirely is never an acceptable side effect of a pod
-	// terminating.
+	// Orphan-refusal gate: removal would leave a vault with zero
+	// placements. Applies to every removal policy — losing a vault entirely
+	// is never an acceptable side effect of a pod terminating.
 	if orphans := vaultsOrphanedByRemoval(ctx, cfgStore, targetNodeID); len(orphans) > 0 {
 		if !opts.Force {
 			return orphanRefusalError(targetNodeID, orphans)
@@ -684,9 +682,9 @@ func evaluateRemovalGates(
 			"orphaned_vaults", orphans)
 	}
 
-	// RF-preservation gate (gastrolog-3vyex): removal would leave a
-	// vault with fewer surviving placements than its replication factor,
-	// and no eligible Live node is available to re-place onto.
+	// RF-preservation gate: removal would leave a vault with fewer
+	// surviving placements than its replication factor, and no eligible
+	// Live node is available to re-place onto.
 	degraded := vaultsBelowRFAfterRemoval(ctx, cfgStore, targetNodeID)
 	if len(degraded) == 0 {
 		return nil
@@ -809,7 +807,7 @@ type degradedVault struct {
 
 // vaultsBelowRFAfterRemoval returns the vaults that removing
 // targetNodeID would leave below their replication factor with no way
-// back. Used by the RF-preservation gate (gastrolog-3vyex). An empty
+// back. Used by the RF-preservation gate. An empty
 // return means redundancy survives the removal — either it was already
 // satisfied without the target, or the placement manager has somewhere
 // to re-place.

@@ -14,11 +14,10 @@ func quietPeerTTLLogger() *slog.Logger {
 // TestPeerTTLMultiplier_DefaultWhenUnset verifies the documented fallback
 // when GLOG_PEER_TTL_MULTIPLIER is unset.
 //
-// The multiplier's anchor changed with gastrolog-1lbifx: it now multiplies the
-// 5s NodeStats broadcast interval rather than the deleted 1s liveness
-// heartbeat, so the default came down from 8 to 3 while the absolute window
-// grew from 8s to 15s. The jitter that forced 4 -> 8 (gastrolog-4iacg) had
-// this window deciding peer liveness; it no longer does.
+// The multiplier scales the 5s NodeStats broadcast interval, so the default
+// of 3 gives a 15s stats TTL — two consecutive missed broadcasts of slack.
+// Jitter in that window does not flap peer liveness, which is derived from
+// Raft last-contact instead.
 func TestPeerTTLMultiplier_DefaultWhenUnset(t *testing.T) {
 	// Not parallel — touches process env.
 	t.Setenv("GLOG_PEER_TTL_MULTIPLIER", "")

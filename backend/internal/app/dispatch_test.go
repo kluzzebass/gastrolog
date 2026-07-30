@@ -628,9 +628,8 @@ func TestHandle_ReloadErrors(t *testing.T) {
 		orch    *mockOrch
 		wantMsg string
 	}{
-		// gastrolog-4kkoo (Phase 5): NotifyFilterPut/Deleted removed —
-		// expressions are inline on routes, so route_put / route_deleted
-		// already cover the reload-filters dispatch case.
+		// Match expressions are inline on routes, so route_put /
+		// route_deleted cover the reload-filters dispatch case.
 		{
 			name:    "route_put",
 			kind:    raftfsm.NotifyRoutePut,
@@ -837,11 +836,11 @@ func TestHandle_ClusterTLSPut(t *testing.T) {
 }
 
 // TestHandle_CloudServicePutTriggersArchivalSweep pins the event-driven half of
-// the archival policy (gastrolog-15nn1): editing a cloud service's archival
-// transition chain must re-evaluate the archival policy immediately instead of
-// waiting up to an hour for the next tick. NotifyCloudServiceDeleted, by
-// contrast, has no archival re-evaluation to do (the vault's transition chain
-// is gone), so it must NOT fire the trigger.
+// the archival policy: editing a cloud service's archival transition chain
+// must re-evaluate the archival policy immediately instead of waiting up to an
+// hour for the next tick. NotifyCloudServiceDeleted, by contrast, has no
+// archival re-evaluation to do (the vault's transition chain is gone), so it
+// must NOT fire the trigger.
 func TestHandle_CloudServicePutTriggersArchivalSweep(t *testing.T) {
 	t.Run("put_triggers", func(t *testing.T) {
 		m := &mockOrch{}
@@ -1051,10 +1050,10 @@ func (m *mockOrch) TriggerArchivalSweep() {
 	m.archivalTriggerCalls++
 }
 
-// gastrolog-4zy8a: every cluster membership change (NodeConfig add/remove)
-// must propagate into per-vault vault-ctl Raft groups via RefreshVaultCtlMembers.
-// Without this, vault-ctl groups stay frozen at bootstrap membership and
-// scaled-in nodes loop forever in pre-vote campaigns.
+// Every cluster membership change (NodeConfig add/remove) must propagate into
+// per-vault vault-ctl Raft groups via RefreshVaultCtlMembers. Without this,
+// vault-ctl groups stay frozen at bootstrap membership and scaled-in nodes
+// loop forever in pre-vote campaigns.
 func TestHandle_NodeConfigChange_RefreshesVaultCtlMembers(t *testing.T) {
 	t.Parallel()
 
@@ -1113,15 +1112,13 @@ func TestHandle_NodeConfigChange_RefreshesVaultCtlMembers(t *testing.T) {
 	})
 }
 
-// gastrolog-4zy8a / gastrolog-29xpy: when the placement leader transfers but
-// this node stays a follower, the local VaultInstance.LeaderNodeID must be
-// refreshed so the lifecycle reconciler's RequestReplicaCatchup targets the
-// new leader instead of looping forever against the old (stale) one. That
-// refresh moved from an in-dispatch role write into the orchestrator's guarded
-// ReconcileVaultPlacement (which the retired placement sweep also fed). The
-// dispatcher's job is now to DELEGATE that reconcile on NotifyVaultPlacementsSet;
-// the pointer refresh itself is covered by TestReconcileInstanceRole in the
-// orchestrator package.
+// When the placement leader transfers but this node stays a follower, the
+// local VaultInstance.LeaderNodeID must be refreshed so the lifecycle
+// reconciler's RequestReplicaCatchup targets the new leader instead of looping
+// forever against the old (stale) one. That refresh lives in the
+// orchestrator's guarded ReconcileVaultPlacement; the dispatcher's job is to
+// DELEGATE that reconcile on NotifyVaultPlacementsSet. The pointer refresh
+// itself is covered by TestReconcileInstanceRole in the orchestrator package.
 func TestHandle_PlacementsSet_DelegatesReconcile(t *testing.T) {
 	t.Parallel()
 
@@ -1166,10 +1163,10 @@ func TestHandle_PlacementsSet_DelegatesReconcile(t *testing.T) {
 	}
 }
 
-// gastrolog-3idjc: when a fresh joiner replays the cluster's post-snapshot
-// log, NotifyVaultPlacementsSet for a vault can arrive before the dispatcher
-// has ever seen a NotifyVaultPut for that vault — because the vault-put
-// landed inside the snapshot and snapshot restore does NOT fire onApply
+// When a fresh joiner replays the cluster's post-snapshot log,
+// NotifyVaultPlacementsSet for a vault can arrive before the dispatcher has
+// ever seen a NotifyVaultPut for that vault — because the vault-put landed
+// inside the snapshot and snapshot restore does NOT fire onApply
 // notifications. The orchestrator's vault list is therefore empty for this
 // vault, and a naive AddVaultInstance fails with ErrVaultNotFound, leaving
 // the joiner permanently without the vault.
@@ -1219,7 +1216,7 @@ func TestHandle_PlacementsSet_RegistersVaultWhenMissing(t *testing.T) {
 	}
 }
 
-// gastrolog-3idjc: when the vault IS already registered (steady state),
+// When the vault IS already registered (steady state),
 // rebuildVaultIfInstanceMissing must not redundantly call AddVault — only
 // AddVaultInstance.
 func TestHandle_PlacementsSet_DoesNotReregisterExistingVault(t *testing.T) {
@@ -1290,7 +1287,7 @@ func TestShouldRunIngesterParallelNotOnSelectedNode(t *testing.T) {
 
 // AllNodes=true must short-circuit any NodeIDs check — a brand-new node
 // that was never in NodeIDs still runs the ingester. That's the whole
-// point of the flag (gastrolog-2g7lr).
+// point of the flag.
 func TestShouldRunIngesterAllNodesIncludesNewJoiner(t *testing.T) {
 	t.Parallel()
 	h := &captureHandler{}
@@ -1306,7 +1303,7 @@ func TestShouldRunIngesterAllNodesIncludesNewJoiner(t *testing.T) {
 	}
 
 	if !d.shouldRunIngester(context.Background(), cfg, false) {
-		t.Fatal("AllNodes=true must run on every node, including those not in NodeIDs (gastrolog-2g7lr)")
+		t.Fatal("AllNodes=true must run on every node, including those not in NodeIDs")
 	}
 }
 
@@ -1562,7 +1559,7 @@ func TestHandleIngesterAssignmentIgnoresParallel(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// ReplayConfigFromStore — gastrolog-3hcfm: post-snapshot-replication catchup
+// ReplayConfigFromStore — post-snapshot-replication catchup
 // ---------------------------------------------------------------------------
 
 // dispatcherForReplay creates a configDispatcher with the chatterbox-style

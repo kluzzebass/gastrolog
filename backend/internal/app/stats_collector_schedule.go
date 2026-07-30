@@ -14,13 +14,10 @@ const clusterStatsBroadcastJobName = "cluster-stats-broadcast"
 // startStatsCollectorJobs registers the peer stats broadcast on the
 // orchestrator scheduler.
 //
-// It used to register a second job alongside it — a lightweight peer heartbeat
-// on its own schedule, split out (gastrolog-2kio8, gastrolog-2vqw3) so a slow
-// NodeStats collection pass could not delay peer liveness. That job is gone:
-// Raft's own per-group heartbeats already carry peer liveness
-// (gastrolog-1lbifx), so the starvation the split protected against no longer
-// has anything to starve. This broadcast now carries observability payload
-// only; nothing in the cluster waits on its cadence to notice a dead peer.
+// The broadcast carries observability payload only. Peer liveness rides
+// on Raft's own per-group heartbeats, so nothing in the cluster waits on
+// this cadence to notice a dead peer and a slow NodeStats collection pass
+// cannot delay liveness detection.
 func startStatsCollectorJobs(
 	scheduler scheduledJobRegistry,
 	collector *cluster.StatsCollector,

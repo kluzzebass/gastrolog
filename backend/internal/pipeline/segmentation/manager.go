@@ -48,9 +48,9 @@ type Config struct {
 	// binds when fsync latency dominates the commit cycle — on volumes
 	// where F_FULLFSYNC costs tens to hundreds of ms, sustained throughput
 	// is SyncBatchSize divided by that latency, so the cap must exceed the
-	// records arriving during one flush (gastrolog-1ojsm6/oin19g: measured
-	// ~200ms per F_FULLFSYNC on an external volume → 1024 capped the
-	// pipeline at ~22K rec/s while the node sat idle).
+	// records arriving during one flush: measured ~200ms per F_FULLFSYNC on
+	// an external volume, where 1024 capped the pipeline at ~22K rec/s while
+	// the node sat idle.
 	SyncBatchSize int
 	// SyncBatchWindow is the max wait before fsyncing a partial fire-and-forget
 	// group. Defaults to 2ms.
@@ -64,7 +64,7 @@ type Config struct {
 	DisableFsync bool
 	// EncodeQueueCap is the bounded channel between encode and append stages.
 	// Defaults to 8192 so producers keep filling the next batch while the
-	// current commit's fsync is in flight (gastrolog-1ojsm6).
+	// current commit's fsync is in flight.
 	EncodeQueueCap int
 	// CompletedCap is the bounded completed-segment notification queue. Defaults to 512.
 	CompletedCap int
@@ -150,10 +150,9 @@ type Manager struct {
 
 	// Lifecycle state lives entirely under mu — one source of truth. started
 	// and runCtx transition together in Run, so "started && runCtx == nil"
-	// is observable only after Run has exited, never during startup
-	// (gastrolog-40anrs: the old atomic started flag flipped outside mu,
-	// making a starting manager momentarily indistinguishable from an
-	// exited one and racing RegisterVault into a spurious ErrNotRunning).
+	// is observable only after Run has exited, never during startup. A
+	// starting manager that looked exited would race RegisterVault into a
+	// spurious ErrNotRunning.
 	mu      sync.Mutex
 	writers map[glid.GLID]*vaultWriter
 	runCtx  context.Context // non-nil while Run is active
@@ -179,7 +178,7 @@ func New(cfg Config) (*Manager, <-chan CompletedSegment) {
 // AppendStats is one vault's cumulative segmentation throughput counters.
 // RecordsDurable lags RecordsAppended by the in-flight commit batch; the gap
 // plus queue depth is the backpressure picture. Rates are computed downstream
-// by the stats collector's rolling windows (gastrolog-4eh5ns).
+// by the stats collector's rolling windows.
 type AppendStats struct {
 	VaultID         glid.GLID
 	RecordsAppended uint64
@@ -188,7 +187,7 @@ type AppendStats struct {
 	QueueDepth      int
 	QueueCap        int
 	// SegmentsCompleted counts working/ → completed/ promotions for this vault
-	// — the first pipeline stage-count milestone (gastrolog-4r784a).
+	// — the first pipeline stage-count milestone.
 	SegmentsCompleted uint64
 }
 

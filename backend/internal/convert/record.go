@@ -131,8 +131,8 @@ func ChunkToRecord(rec chunk.Record) record.Record {
 // rec.Attrs (freshly materialized per record, e.g. a retention drain
 // cursor): the map transfers without a defensive copy. Raw already
 // transfers by reference in both variants; this extends the same
-// ownership contract to Attrs. Per-record attrs copies on the drain
-// path were a measurable slice of GC churn (gastrolog-11y2iv).
+// ownership contract to Attrs. Per-record attrs copies on the drain path
+// were a measurable slice of GC churn, which is what this variant removes.
 func ChunkToRecordOwned(rec chunk.Record) record.Record {
 	out := ChunkToRecord(chunk.Record{
 		SourceTS:       rec.SourceTS,

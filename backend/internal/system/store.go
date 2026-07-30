@@ -26,8 +26,8 @@ type Store interface {
 	// Load reads the full system state (config + runtime). Returns nil if nothing exists (bootstrap signal).
 	Load(ctx context.Context) (*System, error)
 
-	// gastrolog-4kkoo (Phase 5): filter CRUD removed. Filters are inlined
-	// onto RouteConfig.Stages[].Match.Expression — no separate entity.
+	// Filters have no CRUD: they are not a separate entity. Match
+	// expressions live inline on RouteConfig.Stages[].Match.Expression.
 
 	// Rotation policies
 	GetRotationPolicy(ctx context.Context, id glid.GLID) (*RotationPolicyConfig, error)
@@ -84,8 +84,8 @@ type Store interface {
 	// Read via Load() → Config.ClusterTLS; PutClusterTLS is the Raft write path.
 	PutClusterTLS(ctx context.Context, tls ClusterTLS) error
 
-	// Log levels (gastrolog-3flfp). Cluster-wide per-component severity
-	// configuration. Read via Load() → Config.LogLevels.
+	// Log levels. Cluster-wide per-component severity configuration.
+	// Read via Load() → Config.LogLevels.
 	GetLogLevels(ctx context.Context) (LogLevelConfig, error)
 	PutLogLevels(ctx context.Context, cfg LogLevelConfig) error
 

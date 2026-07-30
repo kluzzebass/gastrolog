@@ -8,7 +8,7 @@ import (
 )
 
 // A diff that says "something changed" is barely better than silence, so the
-// field that changed must be named exactly (gastrolog-1jnfco).
+// field that changed must be named exactly.
 func TestVaultConfigDiffNamesTheChangedFieldOnly(t *testing.T) {
 	t.Parallel()
 	base := VaultConfig{

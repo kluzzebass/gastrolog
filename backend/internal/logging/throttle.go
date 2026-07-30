@@ -8,10 +8,10 @@ import (
 // Throttle rate-limits repeated log emissions per key: the first Allow in
 // each interval passes and reports how many were suppressed since the last
 // pass. Retry loops against a known-failing dependency are correct behavior;
-// logging every attempt buries the signal under a firehose — a 6h blocked
-// build once produced 300k+ identical warn lines (gastrolog-4elpu1). The
-// emitting site includes the suppressed count so operators still see
-// magnitude ("still blocked, N retries suppressed"), just not N lines.
+// logging every attempt buries the signal under a firehose: a 6h blocked
+// build once produced 300k+ identical warn lines. The emitting site includes
+// the suppressed count so operators still see magnitude ("still blocked, N
+// retries suppressed"), just not N lines.
 type Throttle struct {
 	// Interval is the minimum spacing between emissions per key.
 	Interval time.Duration

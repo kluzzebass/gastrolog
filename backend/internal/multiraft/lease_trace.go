@@ -159,8 +159,8 @@ func traceInboundAppendEntries[K comparable](
 
 // logOutboundRaftRPCError records election-path RPC failures at WARN. Hashicorp
 // raft downgrades its own "failed to make requestVote RPC" to debug, so without
-// this, TLS/transport failures on per-group lanes show up only as pre-vote
-// refused=3 with no visible cause (gastrolog-1dg8z).
+// this, TLS/transport failures on per-group lanes show up only as a raised
+// `refused=` count in hashicorp raft's pre-vote tally, with no visible cause.
 func logOutboundRaftRPCError[K comparable](groupID K, rpc string, target raft.ServerAddress, total time.Duration, err error) {
 	if err == nil {
 		return

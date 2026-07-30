@@ -38,7 +38,7 @@ type serverSettings struct {
 // Store is an in-memory ConfigStore implementation.
 type Store struct {
 	mu sync.RWMutex
-	// gastrolog-4kkoo (Phase 5): no filters map; expressions inline on routes.
+	// Match expressions live inline on routes; there is no filter registry.
 	rotationPolicies     map[glid.GLID]system.RotationPolicyConfig
 	retentionPolicies    map[glid.GLID]system.RetentionPolicyConfig
 	vaults               map[glid.GLID]system.VaultConfig
@@ -112,7 +112,6 @@ func (s *Store) Load(ctx context.Context) (*system.System, error) {
 	rt := &sys.Runtime
 
 	// Config: operator-controlled entities.
-	// gastrolog-4kkoo (Phase 5): Filters removed; expressions inline on routes.
 	cfg.RotationPolicies = collectAndSort(s.rotationPolicies, copyRotationPolicy, func(a, b system.RotationPolicyConfig) int { return glid.Compare(a.ID, b.ID) })
 	cfg.RetentionPolicies = collectAndSort(s.retentionPolicies, copyRetentionPolicy, func(a, b system.RetentionPolicyConfig) int { return glid.Compare(a.ID, b.ID) })
 	cfg.Vaults = collectAndSort(s.vaults, copyVaultConfig, func(a, b system.VaultConfig) int { return glid.Compare(a.ID, b.ID) })
@@ -132,7 +131,7 @@ func (s *Store) Load(ctx context.Context) (*system.System, error) {
 		cfg.Cluster = s.ss.ss.Cluster
 	}
 
-	// Config: log levels (gastrolog-3flfp).
+	// Config: log levels.
 	if s.logLevels != nil {
 		cfg.LogLevels = copyLogLevels(*s.logLevels)
 	}
@@ -146,8 +145,8 @@ func (s *Store) Load(ctx context.Context) (*system.System, error) {
 	}
 	rt.SetupWizardDismissed = s.setupWizardDismissed
 
-	// Runtime: vault placements — the owner. VaultConfig no longer carries a
-	// mirrored copy (gastrolog-617qns).
+	// Runtime: vault placements — the owner. VaultConfig carries no
+	// mirrored copy.
 	if len(s.vaultPlacements) > 0 {
 		rt.VaultPlacements = make(map[glid.GLID][]system.VaultPlacement, len(s.vaultPlacements))
 		for id, p := range s.vaultPlacements {
@@ -300,10 +299,9 @@ func (s *Store) PutVault(ctx context.Context, cfg system.VaultConfig) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Placements live in s.vaultPlacements and nowhere else, so a config write
-	// cannot touch them at all now — VaultConfig has no placement field to
-	// overwrite. That is what gastrolog-kl8c3s had to defend against by
-	// re-deriving here, and what gastrolog-617qns removed the need for.
+	// Placements live in s.vaultPlacements and nowhere else, so a config
+	// write cannot touch them — VaultConfig has no placement field to
+	// overwrite.
 	s.vaults[cfg.ID] = copyVaultConfig(cfg)
 	return nil
 }
@@ -530,7 +528,7 @@ func (s *Store) SetNodeState(_ context.Context, id glid.GLID, state system.NodeS
 // flags (badge reads "10/3" forever), stale NodeStorageConfig entries
 // (ghost storages in placement helpers), and stale IngesterAssignment
 // pointers at decommissioned nodes (singleton ingesters pinned to a
-// dead host). See gastrolog-485u1 / gastrolog-3qr8z.
+// dead host).
 //
 // All mutations happen under s.mu so the post-delete state is
 // consistent: no surviving FSM map carries a reference to the deleted
@@ -977,12 +975,8 @@ func copyRetentionPolicy(rp system.RetentionPolicyConfig) system.RetentionPolicy
 	if rp.MaxChunks != nil {
 		c.MaxChunks = new(*rp.MaxChunks)
 	}
-	// Refuse (gastrolog-5yfaqj) was missing here — silently dropped every
-	// explicit Refuse value (true AND false alike) back to nil on every
-	// write, which the OLD default-true semantics happened to mask (nil
-	// still read as true) but the operator's explicit refuse=false opt-out
-	// was ALWAYS silently discarded by this store, and now that the
-	// default flipped to off, an explicit refuse=true would be too.
+	// Refuse is deep-copied like the bounds above; omitting it would reset
+	// the operator's explicit value to nil on every write.
 	if rp.Refuse != nil {
 		c.Refuse = new(*rp.Refuse)
 	}

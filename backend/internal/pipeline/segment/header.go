@@ -61,7 +61,7 @@ type Header struct {
 	// A non-linear digest, NOT a CRC: each frame ends with its own CRC32 and
 	// rolling a CRC over lenPrefix ++ body ++ bodyCRC cancels the content
 	// contribution (CRC(M ++ CRC(M)) is constant), leaving the checksum blind
-	// to same-length substitution (gastrolog-1vepg0). Zero while empty.
+	// to same-length substitution. Zero while empty.
 	SegmentChecksum uint64
 	IndexChecksum   uint32 // CRC32(IEEE) of index bytes [IndexOffset:IndexOffset+RecordCount*IndexEntrySize)
 	// Source index tail; zero/empty while working.
@@ -77,7 +77,7 @@ type Header struct {
 // because the caller never read the header from disk or because the segment
 // is genuinely empty — re-reading the header from disk is the correct move in
 // both cases. Publish paths use this to decide whether metadata must come
-// from a header-only disk read (gastrolog-faj2yv).
+// from a header-only disk read.
 func (h Header) IsUnpopulated() bool {
 	return h.RecordCount == 0 && h.SegmentChecksum == 0
 }

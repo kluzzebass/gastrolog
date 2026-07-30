@@ -53,21 +53,21 @@ type raftClusterCtlStore struct {
 	wal       *raftwal.WAL
 	forwarder io.Closer // *cluster.Forwarder; nil for single-node
 	// liveness accumulates cluster-ctl Raft liveness events for the
-	// NodeStats broadcast (gastrolog-1io54g); vault groups have their own
-	// counters on the GroupManager.
+	// NodeStats broadcast; vault groups have their own counters on the
+	// GroupManager.
 	liveness raftgroup.LivenessCounters
 }
 
 // RaftLivenessSources exposes the cluster-ctl group's liveness counters and
-// WAL for the node-level Raft liveness aggregation (gastrolog-1io54g).
+// WAL for the node-level Raft liveness aggregation.
 func (s *raftClusterCtlStore) RaftLivenessSources() (*raftgroup.LivenessCounters, *raftwal.WAL) {
 	return &s.liveness, s.wal
 }
 
 // WaitForLeader blocks until any node in the cluster is observed to be the
-// Raft leader, or the context is cancelled. Event-driven (gastrolog-1go57):
-// it registers a leadership observer and blocks on it instead of polling
-// LeaderWithID on a ticker. hashicorp/raft fires a LeaderObservation whenever
+// Raft leader, or the context is cancelled. Event-driven: it registers a
+// leadership observer and blocks on it rather than polling LeaderWithID on
+// a ticker. hashicorp/raft fires a LeaderObservation whenever
 // this node learns of a leadership change — including a follower learning the
 // leader's identity from its first AppendEntries — so re-reading LeaderWithID
 // on each observation is the authoritative "is a leader known yet" signal.
@@ -117,22 +117,18 @@ func (s *raftClusterCtlStore) WaitForLeader(ctx context.Context, logger *slog.Lo
 // snapshot level, and post-snapshot committed entries (e.g. placement
 // assignments) are not yet applied.
 //
-// Mechanism (gastrolog-1go57): commit a state-free catch-up barrier through
-// the store and wait for the local FSM to apply it. On the leader raft.Apply
-// is synchronous, so this is a Raft barrier — a no-op entry committed to a
-// quorum and applied locally. On a follower the barrier is forwarded to the
-// leader, and the follower then blocks on the event-driven FSM apply-wait
-// tracker (gastrolog-3klg1) until its local FSM has applied up to the
-// barrier's committed index. Because that index is strictly greater than
-// every entry committed before the call, catching up to it guarantees every
-// prior committed command is locally visible.
-//
-// This replaces the former poll-until-stable follower path: the "stability
-// window" heuristic inferred catch-up from a quiet period; the barrier gives
-// a concrete committed target and the tracker releases the instant it is
-// applied — no polling, no wall-clock guess. The leader/follower split is
-// gone too: applyRaw already dispatches to raft.Apply on the leader and to
-// the forward-and-wait path on a follower.
+// Mechanism: commit a state-free catch-up barrier through the store and wait
+// for the local FSM to apply it. On the leader raft.Apply is synchronous, so
+// this is a Raft barrier — a no-op entry committed to a quorum and applied
+// locally. On a follower the barrier is forwarded to the leader, and the
+// follower then blocks on the event-driven FSM apply-wait tracker until its
+// local FSM has applied up to the barrier's committed index. Because that
+// index is strictly greater than every entry committed before the call,
+// catching up to it guarantees every prior committed command is locally
+// visible: a concrete committed target that releases the instant it is
+// applied, with no polling and no wall-clock guess. applyRaw owns the
+// leader/follower split — raft.Apply on the leader, forward-and-wait on a
+// follower.
 //
 // Assumes a leader has already been elected (call WaitForLeader first).
 func (s *raftClusterCtlStore) WaitForFSMCatchup(ctx context.Context, timeout time.Duration, logger *slog.Logger) error {
@@ -372,8 +368,8 @@ type peerEvictor interface {
 // silently dropped. Stops when ctx is cancelled.
 //
 // Every supplied evictor is called on every removal so per-peer satellite
-// state can't outlive cluster membership — see gastrolog-9ohip for the
-// inventory of caches that previously leaked.
+// state can't outlive cluster membership; a cache left out of the evictor
+// list keeps the removed node alive in the UI as a raw GLID.
 func observePeerRemovals(ctx context.Context, clusterSrv *cluster.Server, logger *slog.Logger, evictors ...peerEvictor) {
 	ch := make(chan hraft.Observation, 16)
 	clusterSrv.RegisterPeerObserver(ch)
@@ -458,7 +454,7 @@ type leaderChecker interface {
 // placeholder NodeConfig for every freshly admitted peer. Without this,
 // new joiners briefly appear as raw GLIDs in the UI because they are
 // admitted to Raft membership BEFORE their own async ensureNodeConfig
-// write commits — see gastrolog-4dqfs.
+// write commits.
 //
 // Strategy: the leader observes every PeerObservation.Removed==false
 // event, looks up the peer's NodeConfig, and writes a petname-bearing

@@ -52,12 +52,12 @@ func lastAttr(h *captureHandler, substr, key string) string {
 	return val
 }
 
-// TestReportIngesterDivergence pins the log half of the convergence sweep
-// (gastrolog-3mnjlo, demoted from an alarm on the operator razor): a
+// TestReportIngesterDivergence pins the log half of the convergence sweep — a
+// log line rather than an alarm, per the operator razor. A
 // desired-but-not-running ingester logs ONE divergence line — once per state
 // change, never per 15s tick — convergence logs one restored line, and
-// ingesters this node should NOT run (disabled, other-node pinned) never
-// count as missing.
+// ingesters this node should NOT run (disabled, other-node pinned) never count
+// as missing.
 func TestReportIngesterDivergence(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -124,7 +124,7 @@ func TestReportIngesterDivergence(t *testing.T) {
 }
 
 // pinnedDigester holds every record until release is closed, pinning the
-// digestion workers like the saturated field pipeline (gastrolog-4rdb9f).
+// digestion workers the way a saturated pipeline does.
 type pinnedDigester struct {
 	entered chan struct{}
 	release chan struct{}
@@ -172,20 +172,20 @@ func awaitAlive(t *testing.T, events <-chan bool, want bool) {
 }
 
 // TestReportIngesterDivergence_ClearsAfterRebuildUnderSaturation is the
-// gastrolog-4rdb9f sweep-level regression: on the live cluster, a config
-// rebuild under a saturated pipeline left the shared Alive flag false for a
-// running ingester, so this sweep reported divergence every 15s on 3 of 4
-// nodes — the surface an operator must trust during an incident was lying.
-// Here the sweep runs against a REAL orchestrator + pipeline (not a mock)
-// that just rebuilt an ingester while the digestion stage was pinned: the
-// sweep must report convergence, not divergence.
+// sweep-level regression for a stale shared Alive flag: a config rebuild under
+// a saturated pipeline can leave Alive false for an ingester that is running,
+// and then this sweep reports divergence every 15s — the surface an operator
+// must trust during an incident, lying. Here the sweep runs against a REAL
+// orchestrator + pipeline (not a mock) that just rebuilt an ingester while the
+// digestion stage was pinned: the sweep must report convergence, not
+// divergence.
 //
 // A full multi-node reproduction is impractical without timing games — the
 // multinode harness drives rebuilds through Raft config dispatch and cannot
 // deterministically pin one node's digest queue at the rebuild instant — so
 // this focused sweep-against-real-manager test carries the multi-dimension
-// intent: the exact component chain the field incident traversed
-// (manager rebuild → shared IngesterStats → IsIngesterRunning → sweep log).
+// intent: the exact component chain the failure traverses (manager rebuild →
+// shared IngesterStats → IsIngesterRunning → sweep log).
 func TestReportIngesterDivergence_ClearsAfterRebuildUnderSaturation(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -273,10 +273,10 @@ func TestReportIngesterDivergence_ClearsAfterRebuildUnderSaturation(t *testing.T
 	awaitAlive(t, aliveCh, false)
 	awaitAlive(t, aliveCh, true)
 
-	// The sweep after the rebuild: pre-fix the stale Alive flag made this
-	// report divergence forever on a healthy ingester.
+	// The sweep after the rebuild: a stale Alive flag here would report
+	// divergence forever on a healthy ingester.
 	d.reportIngesterDivergence(ctx, logger)
 	if n := countMessages(capture, divergenceLogMsg); n != 1 {
-		t.Fatalf("gastrolog-4rdb9f: sweep must not report divergence on a running ingester after a rebuild under saturation (got %d divergence lines)", n)
+		t.Fatalf("sweep must not report divergence on a running ingester after a rebuild under saturation (got %d divergence lines)", n)
 	}
 }

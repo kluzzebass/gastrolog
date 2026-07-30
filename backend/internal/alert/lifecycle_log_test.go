@@ -8,12 +8,11 @@ import (
 	"time"
 )
 
-// The log stream IS the event record (gastrolog-1m3e0d): every alarm
-// lifecycle transition edge logs exactly one structured slog line from the
-// collector, and the self ingester captures those lines into a vault. These
-// tests pin that contract the way the removed event-journal tests pinned
-// ring entries: one line per transition, none for suppressed flaps, on an
-// injected clock with zero sleeps.
+// The log stream IS the event record: every alarm lifecycle transition edge
+// logs exactly one structured slog line from the collector, and the self
+// ingester captures those lines into a vault. These tests pin that contract:
+// one line per transition, none for suppressed flaps, on an injected clock
+// with zero sleeps.
 
 // logSpy is a slog.Handler that records every line with its level and
 // attributes, so tests assert on structure, not formatting.

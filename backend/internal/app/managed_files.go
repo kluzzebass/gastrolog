@@ -126,7 +126,7 @@ func wireManagedFiles(ctx context.Context, deps serverDeps, srv *server.Server) 
 	// Startup reconciliation with backoff — one-shot, retries
 	// internally, not periodic. The periodic drift check below is
 	// registered with the orchestrator job scheduler so the operator
-	// sees it in the inspector (gastrolog-2gmpf).
+	// sees it in the inspector.
 	go reconcileManagedFilesStartup(ctx, mgr)
 	if err := startManagedFilesReconcile(ctx, deps.Orch.Scheduler(), mgr); err != nil {
 		deps.Logger.Warn("schedule managed-files-reconcile job", "error", err)

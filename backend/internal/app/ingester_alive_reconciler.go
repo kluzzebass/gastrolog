@@ -13,7 +13,7 @@ import (
 // transient failures with bounded exponential backoff. Solves the gap
 // where the per-ingester run goroutine fires OnIngesterAlive once and an
 // unlucky Raft-startup race drops the apply — leaving the goroutine
-// running but the FSM alive map empty (gastrolog-1ox8z).
+// running but the FSM alive map empty.
 //
 // Design notes:
 //   - Fire-and-forget from the ingester goroutine's perspective:
@@ -22,9 +22,9 @@ import (
 //   - Single-goroutine worker preserves event order: alive=true followed
 //     by alive=false applies in that sequence even with retries, so the
 //     FSM converges to the last value the orchestrator declared.
-//   - Errors are LOGGED (the original code silently dropped them with
-//     `_ =`). Persistent failures escalate to ERROR after the retry
-//     budget is exhausted; transient retries log at WARN.
+//   - Errors are logged, never dropped. Persistent failures escalate to
+//     ERROR after the retry budget is exhausted; transient retries log at
+//     WARN.
 type AliveReconciler struct {
 	queue  chan aliveEvent
 	store  system.Store

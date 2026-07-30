@@ -65,7 +65,7 @@ const servicePath = "/gastrolog.v1.MultiRaftTransportService/"
 // but never responds at the application layer; without a deadline, the
 // caller goroutine hangs until OS TCP keepalive (minutes) kicks in. That
 // cascades into leader replication stalls and cluster-wide head-of-line
-// blocking — see gastrolog-5oofa.
+// blocking.
 //
 // Values are chosen against cluster-ctl / vault-ctl Raft timeouts in
 // raftgroup: tight enough that a paused peer fails fast and hraft retries,
@@ -74,22 +74,20 @@ const installSnapshotRPCTimeout = 5 * time.Minute // bulk transfer; bounded by c
 
 // Defaults match the raftgroup base detector timing (heartbeat 2s,
 // election 2s); ConfigureRPCTimeouts re-derives them when the operator
-// widens the detector (gastrolog-o6plq9).
+// widens the detector.
 var (
 	appendEntriesRPCTimeout = 3 * time.Second
 	// heartbeatRPCTimeout must not undercut the consensus failure budget
-	// (raftgroup base heartbeat timeout, leader lease). At the old
-	// hardcoded 1s the transport was STRICTER than the failure detector it
-	// serves: probes that would have completed at ~1.2s — endpoint paused
-	// by a sub-second scheduler stall — were aborted at exactly 1000ms and
-	// counted as failed contact, aging lease/last-contact clocks past their
-	// real thresholds and manufacturing elections from stalls that were
-	// individually survivable (gastrolog-1io54g: lease traces showed
-	// conn_wait_ms=0, rpc_ms=1000, DeadlineExceeded during churn). A probe
-	// completing inside the detector window still resets the follower's
-	// election timer and still counts as leader contact; only the failure
-	// detector may decide something is dead. ConfigureRPCTimeouts keeps
-	// this relation true by construction.
+	// (raftgroup base heartbeat timeout, leader lease). A transport
+	// STRICTER than the failure detector it serves aborts probes that
+	// would have completed just past its deadline — an endpoint paused by
+	// a sub-second scheduler stall — and counts them as failed contact,
+	// aging lease/last-contact clocks past their real thresholds and
+	// manufacturing elections from stalls that are individually
+	// survivable. A probe completing inside the detector window still
+	// resets the follower's election timer and still counts as leader
+	// contact; only the failure detector may decide something is dead.
+	// ConfigureRPCTimeouts keeps this relation true by construction.
 	heartbeatRPCTimeout      = 2 * time.Second
 	requestVoteRPCTimeout    = 2 * time.Second
 	requestPreVoteRPCTimeout = 2 * time.Second
@@ -98,9 +96,9 @@ var (
 
 // ConfigureRPCTimeouts derives the per-RPC deadlines from the configured
 // failure-detector timing so the transport can never be stricter than the
-// detector it serves (the gastrolog-1io54g inversion, unrepresentable by
-// construction). Call once at boot, before any transport carries traffic;
-// deadlines never shrink below the shipped defaults.
+// detector it serves — that inversion is unrepresentable by construction.
+// Call once at boot, before any transport carries traffic; deadlines never
+// shrink below the shipped defaults.
 func ConfigureRPCTimeouts(heartbeat, election time.Duration) {
 	heartbeatRPCTimeout = max(2*time.Second, heartbeat)
 	appendEntriesRPCTimeout = max(3*time.Second, heartbeat+time.Second)
@@ -546,7 +544,7 @@ func (g *groupTransport[K]) AppendEntriesPipeline(id raft.ServerID, target raft.
 	// idle between bursts. DO NOT add a timeout here: hraft treats idle
 	// pipelines as healthy and a premature timeout causes cascading
 	// pipeline-reopen churn that the placement manager misreads as
-	// "peer is unreliable" and reassigns vaults away. See gastrolog-5oofa.
+	// "peer is unreliable" and reassigns vaults away.
 	//
 	// Pipeline lifecycle is hraft's responsibility: when it wants the
 	// pipeline to go away it calls pipelineAPI.Close, which invokes the

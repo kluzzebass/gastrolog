@@ -230,7 +230,7 @@ type IndexManager interface {
 	// two differ for chunks where physical layout doesn't match IngestTS order
 	// (notably chunks built via ImportRecords). Histogram bucket counts must
 	// use rank arithmetic (endIdx - startIdx) — position arithmetic is wrong
-	// on non-monotonic chunks. See gastrolog-66b7x.
+	// on non-monotonic chunks.
 	FindIngestEntryIndex(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error)
 
 	// FindSourceStartPosition returns the earliest record position with SourceTS >= ts.
