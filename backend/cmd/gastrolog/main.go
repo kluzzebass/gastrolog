@@ -187,32 +187,32 @@ func main() {
 	serverCmd.Flags().String("join-token", "", "join token for cluster enrollment (from cluster-init node)")
 	serverCmd.Flags().String("name", "", "node name (default: random petname)")
 
-	// Non-interactive cluster bootstrap (gastrolog-o9z6o).
+	// Non-interactive cluster bootstrap.
 	serverCmd.Flags().String("write-bootstrap-token", "", "bootstrap node only: atomically write the join token to this path (mode 0600) for joiners to read via --bootstrap-token-file")
 	serverCmd.Flags().String("bootstrap-token-file", "", "joiner only: read the join token from this path, polling with backoff until present (alternative to --join-token)")
 	serverCmd.Flags().String("bootstrap-token-serve-secret", "", "bootstrap node only: serve the join token at GET /cluster/bootstrap-token, gated on this secret (empty disables endpoint)")
 	serverCmd.Flags().String("bootstrap-token-url", "", "joiner only: fetch the join token from this URL, polling with backoff (alternative to --join-token); pair with --bootstrap-token-secret")
 	serverCmd.Flags().String("bootstrap-token-secret", "", "joiner only: secret sent in the X-Bootstrap-Token-Secret header when fetching from --bootstrap-token-url")
 
-	// Initial admin provisioning (gastrolog-3ot7r). Bootstrap node only;
-	// no-op once any user exists.
+	// Initial admin provisioning. Bootstrap node only; no-op once any user
+	// exists.
 	serverCmd.Flags().String("initial-admin-file", "", "bootstrap node only: read initial admin credentials from this file (JSON {\"username\":..., \"password\":...} or \"username:password\" line)")
 	serverCmd.Flags().String("initial-admin-user", "", "bootstrap node only: initial admin username (paired with --initial-admin-password); ignored if --initial-admin-file is set")
 	serverCmd.Flags().String("initial-admin-password", "", "bootstrap node only: initial admin password (paired with --initial-admin-user); ignored if --initial-admin-file is set")
 
-	// Environment banner (gastrolog-4vr0l). Displayed in the UI header so
-	// operators can tell at a glance which deployment they are looking at.
-	// Both are display-only metadata; empty label hides the banner entirely.
+	// Environment banner. Displayed in the UI header so operators can tell
+	// at a glance which deployment they are looking at. Both are
+	// display-only metadata; empty label hides the banner entirely.
 	serverCmd.Flags().String("environment-label", "", "label rendered in the UI header banner (e.g. \"Kubernetes\", \"Development\"); empty hides the banner")
 	serverCmd.Flags().String("environment-color", "", "CSS color for the UI header banner (e.g. \"red\", \"#c4302b\"); empty uses the palette default")
 	serverCmd.Flags().Bool("segment-hot-path-fsync", true, "fsync segmentation group-commit flushes (default true); set false for load testing — also GLOG_SEGMENT_HOT_PATH_FSYNC")
 
-	// Raft failure-detector timing (gastrolog-o6plq9). The operator lever
-	// for substrates whose scheduler-stall tail exceeds the shipped window
-	// (e.g. a loaded macOS dev host): widen both to tolerate longer pauses
-	// at the cost of slower real-crash failover. Election timeout tracks the
-	// heartbeat timeout; vault-ctl groups add 1s slack; transport RPC
-	// deadlines derive so they can never undercut the detector.
+	// Raft failure-detector timing. The operator lever for substrates whose
+	// scheduler-stall tail exceeds the shipped window (e.g. a loaded macOS
+	// dev host): widen both to tolerate longer pauses at the cost of slower
+	// real-crash failover. Election timeout tracks the heartbeat timeout;
+	// vault-ctl groups add 1s slack; transport RPC deadlines derive so they
+	// can never undercut the detector.
 	serverCmd.Flags().Duration("raft-heartbeat-timeout", 0, "base Raft heartbeat/election timeout for all groups (default 2s, vault-ctl +1s); 0 keeps the default — also GLOG_RAFT_HEARTBEAT_TIMEOUT")
 	serverCmd.Flags().Duration("raft-leader-lease", 0, "Raft leader lease for all groups (default 1.5s, must not exceed the heartbeat timeout); 0 keeps the default — also GLOG_RAFT_LEADER_LEASE")
 

@@ -18,13 +18,12 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// Command identifies the type of chunk metadata mutation. Since the
-// gastrolog-5lrg7 protobuf migration, commands are encoded as
-// gastrologv1.VaultCtlCommand (a oneof) rather than an opcode byte. These
-// constants are no longer part of any wire encoding; they are retained as the
-// canonical record of the opcode→proto-field tag mapping (the oneof field
-// numbers in vaultctlfsm.proto deliberately match these values) and as the
-// anchor for the domain documentation below.
+// Command identifies the type of chunk metadata mutation. Commands are
+// encoded as gastrologv1.VaultCtlCommand (a oneof) rather than an opcode
+// byte, so these constants are not part of any wire encoding; they are
+// retained as the canonical record of the opcode→proto-field tag mapping
+// (the oneof field numbers in vaultctlfsm.proto deliberately match these
+// values) and as the anchor for the domain documentation below.
 type Command byte
 
 const (
@@ -34,33 +33,31 @@ const (
 
 	CmdRetentionPending Command = 4
 
-	// Receipt-based deletion protocol — gastrolog-51gme step 2. An N-way
-	// receipt protocol that survives snapshot install and gives every node
-	// a first-class "delete locally and ack" obligation. This is the sole
-	// chunk-delete path; the legacy single-shot CmdDeleteChunk fan-out was
-	// removed entirely in gastrolog-lh0rp. See docs in fsm_receipts.go.
+	// Receipt-based deletion protocol: an N-way receipt exchange that
+	// survives snapshot install and gives every node a first-class "delete
+	// locally and ack" obligation. This is the sole chunk-delete path. See
+	// docs in fsm_receipts.go.
 	CmdRequestDelete  Command = 5 // vault leader proposes a delete; replicates the expected-acks set
 	CmdAckDelete      Command = 6 // each expected node acks after handling its local side
 	CmdFinalizeDelete Command = 7 // leader removes the entry once expectedFrom is empty
 
-	// Membership-change cleanup — gastrolog-51gme step 10. After a node
-	// is removed from this vault-ctl Raft group's voter set (decommissioned
-	// or rebalanced away), the leader proposes CmdPruneNode to drop that
-	// node's slot from every pendingDeletes entry's ExpectedFrom. Without
-	// this, deletes proposed before the node left would never finalize:
-	// the leader would hold the entry forever waiting for an ack from a
-	// node that no longer participates.
+	// Membership-change cleanup. After a node is removed from this
+	// vault-ctl Raft group's voter set (decommissioned or rebalanced
+	// away), the leader proposes CmdPruneNode to drop that node's slot
+	// from every pendingDeletes entry's ExpectedFrom. Without this,
+	// deletes proposed before the node left would never finalize: the
+	// leader would hold the entry forever waiting for an ack from a node
+	// that no longer participates.
 	CmdPruneNode Command = 8
 
 	// CmdAttachOffsets carries the GLCB blob's section-offset/size pairs
 	// (IngestTS index, SourceTS index) once sealToGLCB has produced
-	// data.glcb on the leader. Replaces the original "offsets
-	// only land in the FSM via CmdUploadChunk" gap that left
-	// sealed-but-not-yet-uploaded chunks with zero offsets in the
-	// manifest, breaking the histogram's GLCB section-reader path. Fires
-	// from chunk/file.Manager after sealToGLCB and from the import path
-	// (orchestrator/vault_ops.finalizeImportedChunk) for replicated
-	// chunks. See gastrolog-1dg3i.
+	// data.glcb on the leader. Without it the offsets would only land in
+	// the FSM via CmdUploadChunk, leaving sealed-but-not-yet-uploaded
+	// chunks with zero offsets in the manifest and breaking the
+	// histogram's GLCB section-reader path. Fires from chunk/file.Manager
+	// after sealToGLCB and from the import path
+	// (orchestrator/vault_ops.finalizeImportedChunk) for replicated chunks.
 	CmdAttachOffsets Command = 9
 
 	// CmdBeginSeal carries the Active → Sealing transition: the leader
@@ -69,7 +66,7 @@ const (
 	// observes the in-flight assembly window explicitly — uploads,
 	// retention triggers, and replication-completeness checks gate on
 	// State == Sealed; the Sealing entry is not yet a finished chunk
-	// even though it's no longer accepting writes. See gastrolog-1huz5.
+	// even though it's no longer accepting writes.
 	CmdBeginSeal Command = 10
 
 	// CmdRepatriateChunk re-introduces a sealed chunk's manifest entry
@@ -78,14 +75,14 @@ const (
 	// backup desync, etc.). Payload is the full ManifestEntry
 	// reconstructed from the local chunk's idx.log headers. Apply
 	// inserts the entry in Sealed state, refusing if the entry
-	// already exists or is tombstoned. See gastrolog-32bf2.
+	// already exists or is tombstoned.
 	CmdRepatriateChunk Command = 11
 
 	// CmdPublishCompletedSegment registers completed segment metadata in the
-	// vault-ctl FSM when Segmentation closes a segment. See gastrolog-5pyl3.
+	// vault-ctl FSM when Segmentation closes a segment.
 	CmdPublishCompletedSegment Command = 12
 
-	// Open-chunk manifest (direction D). See gastrolog-53ron.
+	// Open-chunk manifest (direction D).
 	CmdOpenChunkManifest      Command = 13
 	CmdAddOpenChunkSegmentRef Command = 14
 	CmdSealOpenChunkManifest  Command = 15
@@ -93,7 +90,7 @@ const (
 
 	// CmdAckSegmentHolder records that a node now holds a completed segment
 	// (Rubicon C). Appends the node to the segment registry entry's holder
-	// set; idempotent. See gastrolog-2z3oa.
+	// set; idempotent.
 	CmdAckSegmentHolder Command = 17
 
 	// CmdPublishCompletedSegments registers many completed segments in one
@@ -101,7 +98,7 @@ const (
 	CmdPublishCompletedSegments Command = 19
 
 	// CmdAddOpenChunkSegmentRefs appends many open-chunk segment refs in one
-	// vault-ctl apply (chunking planner batching). See gastrolog-3i9nt.
+	// vault-ctl apply (chunking planner batching).
 	CmdAddOpenChunkSegmentRefs Command = 20
 
 	// CmdAckChunkHolder records that a node holds a sealed chunk's verified
@@ -117,21 +114,19 @@ const (
 	// holder receipts that the source vault is about to expire its own
 	// copies. Proposed by the SOURCE vault's retention runner against
 	// the DESTINATION vault's FSM, right before the source's local
-	// expire (gastrolog-2l918 review finding 1). Idempotent; a no-op if
-	// the entry is missing or the field is already clear. See
-	// pullMissingGLCB / runGLCBPull (glcb_catchup.go) for the defense-
-	// in-depth other half: a holder-set fallback when this clear was
-	// missed (crash, apply failure) and a pull still gets addressed at
-	// an already-expired source.
+	// expire. Idempotent; a no-op if the entry is missing or the field is
+	// already clear. See pullMissingGLCB / runGLCBPull (glcb_catchup.go)
+	// for the defense-in-depth other half: a holder-set fallback when this
+	// clear was missed (crash, apply failure) and a pull still gets
+	// addressed at an already-expired source.
 	CmdClearTransferSource Command = 24
 
 	// CmdArchiveChunk records the cloud storage class a chunk's blob now
-	// sits in. Before it existed, that class lived only in a node-local map
-	// on whichever node called the cloud API, so the archival sweep's
-	// "already at the target class?" test read an empty string on the FSM
-	// path and a multi-step transition chain (cold -> deep-freeze) could
-	// never advance past its first step. Idempotent; an empty class means
-	// restored to standard storage (gastrolog-35ygqv).
+	// sits in. Replicating it is what lets the archival sweep's "already at
+	// the target class?" test read authoritative state on any voter, so a
+	// multi-step transition chain (cold -> deep-freeze) advances past its
+	// first step. Idempotent; an empty class means restored to standard
+	// storage.
 	CmdArchiveChunk Command = 25
 )
 
@@ -140,8 +135,7 @@ const (
 // docs/ubiquitous_language.md). Every chunk in the cluster is described by
 // exactly one ManifestEntry, mutated only by the Cmd* applies. This is the
 // Raft-replicated equivalent of file.Manager.chunkMeta + cloudIdx entries
-// — and the source of truth they project from after the chunk redesign
-// (gastrolog-2pw28).
+// — and the source of truth they project from.
 type ManifestEntry struct {
 	ID          chunk.ChunkID
 	WriteStart  time.Time
@@ -149,9 +143,8 @@ type ManifestEntry struct {
 	RecordCount int64
 	Bytes       int64
 	// State is the chunk's lifecycle state (Active|Sealing|Sealed).
-	// Phase 3 (gastrolog-1huz5) replaced the legacy Sealed bool with
-	// this three-state field; consumers that just want "is the cluster
-	// done sealing this chunk?" check `State == chunk.ChunkStateSealed`.
+	// Consumers that just want "is the cluster done sealing this chunk?"
+	// check `State == chunk.ChunkStateSealed`.
 	// ChunkMeta still carries a separate `Sealed` bool because its
 	// semantics differ — ChunkMeta.Sealed is the LOCAL active-form-closed
 	// signal, distinct from this cluster-wide lifecycle state.
@@ -160,8 +153,7 @@ type ManifestEntry struct {
 	// by CmdUploadChunk (0 until uploaded). This entry never carried a real
 	// per-node local-disk-bytes fact — ManifestEntry is Raft-replicated
 	// cluster state, and local warm-cache footprint is node-local and
-	// lives in file.Manager's own chunkMeta/cloudIdx instead. Was
-	// misleadingly named DiskBytes; renamed honestly. See gastrolog-33ul6h.
+	// lives in file.Manager's own chunkMeta/cloudIdx instead.
 	CloudBytes int64
 
 	IngestStart time.Time
@@ -180,9 +172,9 @@ type ManifestEntry struct {
 	Holders []string
 
 	// TransferSourceVaultID is non-zero only for a chunk introduced via
-	// retention transfer disposition (gastrolog-2l918): the vault ID this
-	// chunk's bytes still need to be pulled FROM. Zero value for every
-	// normally-chunked or same-vault repatriated entry. Consulted by the
+	// retention transfer disposition: the vault ID this chunk's bytes
+	// still need to be pulled FROM. Zero value for every normally-chunked
+	// or same-vault repatriated entry. Consulted by the
 	// GLCB replica catch-up sweep (pullMissingGLCB) to address its pull
 	// at the SOURCE vault's chunk root instead of this vault's own
 	// placement peers. Cleared (CmdClearTransferSource) by the source's
@@ -206,7 +198,7 @@ type ManifestEntry struct {
 	// CloudStorageClass is the cloud archival tier this chunk currently sits
 	// in ("GLACIER", "cold"), as last announced by CmdArchiveChunk. Empty
 	// means standard storage. Archived is derived from it rather than tracked
-	// separately, so the two can never disagree (gastrolog-35ygqv).
+	// separately, so the two can never disagree.
 	//
 	// NOT "StorageClass": that name belongs to the uint32 local class on
 	// FileStorage / CloudService / VaultConfig, which selects which disk a
@@ -223,7 +215,7 @@ type ManifestEntry struct {
 	SourceIdxSize   int64
 
 	// Integrity fields populated at upload time, verified on every cache
-	// re-fetch. See gastrolog-grnc3.
+	// re-fetch.
 	//
 	// Hash is the GLCB whole-blob digest from the TOC footer:
 	// sha256(header ‖ section_hashes_in_TOC_order ‖ TOC_bytes). Re-fetch
@@ -243,12 +235,11 @@ type ManifestEntry struct {
 }
 
 // IsSealed reports whether the chunk has reached the cluster-wide
-// Sealed state (GLCB committed). Replaces the legacy Sealed bool
-// after Phase 3 (gastrolog-1huz5). For ChunkMeta produced from this
-// entry, ChunkMeta.Sealed carries the same answer for downstream
-// consumers — but those consumers must remember that ChunkMeta from
-// the local chunk Manager (un-overlaid) has DIFFERENT semantics:
-// it's the local active-form-closed signal, which flips earlier.
+// Sealed state (GLCB committed). For ChunkMeta produced from this entry,
+// ChunkMeta.Sealed carries the same answer for downstream consumers — but
+// those consumers must remember that ChunkMeta from the local chunk
+// Manager (un-overlaid) has DIFFERENT semantics: it's the local
+// active-form-closed signal, which flips earlier.
 func (e *ManifestEntry) IsSealed() bool {
 	return e.State == chunk.ChunkStateSealed
 }
@@ -258,7 +249,7 @@ func (e *ManifestEntry) IsSealed() bool {
 // file.Manager's own chunkMeta/cloudIdx track, and this ManifestEntry-
 // sourced meta has no local Manager behind it. CloudBytes (the cloud
 // object size) is the one size fact the FSM actually carries for an
-// uploaded chunk. See gastrolog-33ul6h.
+// uploaded chunk.
 func (e *ManifestEntry) ToChunkMeta() chunk.ChunkMeta {
 	state := e.State
 	return chunk.ChunkMeta{
@@ -290,18 +281,16 @@ type FSM struct {
 
 	// completedListScans counts ListCompletedSegments calls — a full O(N)
 	// registry walk. The chunking-leader plan pass regressed to O(N^2) by
-	// re-scanning per step (gastrolog-36ba70); this makes scan frequency
-	// observable and gives the fix a regression guard.
+	// re-scanning per step; this makes scan frequency observable so that
+	// regression cannot return unnoticed.
 	completedListScans atomic.Uint64
 
 	ready    bool                // true after first Apply or Restore
 	onUpload func(ManifestEntry) // called after CmdUploadChunk applies (outside lock)
 
-	// Step-1 reconciler-wiring hooks for gastrolog-51gme. Each fires
-	// outside the FSM mutex after the corresponding Cmd applies, so the
-	// reconciler can project FSM state changes into local Manager state
-	// without polling. No callers wired yet — adding the surface here
-	// unblocks subsequent steps without requiring an FSM API churn.
+	// Reconciler-wiring hooks. Each fires outside the FSM mutex after the
+	// corresponding Cmd applies, so the reconciler can project FSM state
+	// changes into local Manager state without polling.
 	onCreate func(ManifestEntry) // CmdCreateChunk applied; passes the freshly-created entry
 	// onSeal fan-out: slot 0 is SetOnSeal (reconciler); AddOnSeal uses ids ≥ 1.
 	onSeal             map[int]func(ManifestEntry)
@@ -310,16 +299,15 @@ type FSM struct {
 	// onHoldersChanged fires (outside the FSM lock) once per chunk whose
 	// Holders set actually changed under CmdAckChunkHolder /
 	// CmdRevokeChunkHolder, with the post-apply entry. Residency is
-	// receipt-only (gastrolog-68wsli), so subscribers — the WatchChunks
-	// bus — need an edge when receipts land or revoke; without it the
-	// inspector's honest pre-receipt amber never turns green until a
-	// full snapshot refetch. Idempotent re-acks don't fire.
+	// receipt-only, so subscribers — the WatchChunks bus — need an edge
+	// when receipts land or revoke; without it the inspector's honest
+	// pre-receipt amber never turns green until a full snapshot refetch.
+	// Idempotent re-acks don't fire.
 	onHoldersChanged func(ManifestEntry)
 
-	// Step-2 receipt-protocol state and hooks for gastrolog-51gme.
-	// pendingDeletes is the queue of chunk deletes awaiting per-node
-	// acknowledgement. See PendingDelete and the apply* functions in
-	// fsm_receipts.go.
+	// Receipt-protocol state and hooks. pendingDeletes is the queue of
+	// chunk deletes awaiting per-node acknowledgement. See PendingDelete
+	// and the apply* functions in fsm_receipts.go.
 	pendingDeletes map[chunk.ChunkID]*PendingDelete
 
 	onRequestDelete  func(PendingDelete)           // CmdRequestDelete applied; passes a copy of the new entry
@@ -333,7 +321,6 @@ type FSM struct {
 	// arrive after a chunk has been deleted — closes the race between
 	// retention and post-seal replication where a late replication RPC
 	// could otherwise recreate a "ghost" chunk on a follower.
-	// See gastrolog-11rzz.
 	//
 	// Periodically pruned by the orchestrator (entries older than the
 	// replication-job deadline, typically a few minutes, cannot still be
@@ -380,7 +367,7 @@ type FSM struct {
 	// onPublishCompletedSegment fan-out: each registered callback fires after a
 	// new completed segment is registered (outside the FSM lock). Idempotent
 	// replays do not fire. Keyed by a monotonic id so Collection and Chunking
-	// can subscribe and unsubscribe independently (gastrolog-2z3oa).
+	// can subscribe and unsubscribe independently.
 	onPublishCompletedSegment map[int]func(CompletedSegmentEntry)
 	onPublishSeq              int
 	// onOpenChunkManifest fires after a new open-chunk manifest is created.
@@ -459,7 +446,6 @@ func (f *FSM) Ready() bool {
 // CmdCreateChunk applies. The callback receives the freshly-created
 // manifest entry. Used by the WatchChunks event bus to emit CREATED
 // events as soon as a new active chunk is announced across the cluster.
-// See gastrolog-3pf9w.
 func (f *FSM) SetOnCreate(fn func(ManifestEntry)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -490,10 +476,9 @@ func (f *FSM) SetOnHoldersChanged(fn func(ManifestEntry)) {
 
 // SetOnSeal registers a callback invoked (outside the FSM lock) after
 // CmdSealChunk applies. The callback receives a copy of the now-sealed
-// entry. The reconciler (gastrolog-51gme) uses this to project the
-// FSM-side seal into the local Manager's chunk meta — closes the
-// gastrolog-uccg6 active-vs-sealed divergence path that previously
-// relied on a periodic disk-vs-FSM walk.
+// entry. The reconciler uses this to project the FSM-side seal into the
+// local Manager's chunk meta, so the local manager cannot go on treating
+// a cluster-sealed chunk as active.
 //
 // Fires once per actual seal apply. A re-apply (log replay over an
 // already-sealed entry) still fires the callback because the FSM
@@ -635,7 +620,7 @@ func (f *FSM) AddOnReleaseSegments(fn func([]glid.GLID)) (remove func()) {
 // lock) after PublishCompletedSegment registers new segment metadata. Idempotent
 // replays of an already-present entry do not fire the callback. Multiple
 // subscribers (Collection, Chunking) may register independently; the returned
-// closure removes this one. See gastrolog-2z3oa.
+// closure removes this one.
 func (f *FSM) AddOnPublishCompletedSegment(fn func(CompletedSegmentEntry)) (remove func()) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -750,8 +735,8 @@ func (f *FSM) SetOnRetentionPending(fn func(chunk.ChunkID)) {
 // after CmdRequestDelete applies. The callback receives a copy of the
 // new pending entry — chunk ID, reason, expectedFrom set. Every node in
 // the placement uses this to learn that a delete was requested and
-// (where appropriate) propose CmdAckDelete. Part of gastrolog-51gme's
-// receipt-based deletion protocol.
+// (where appropriate) propose CmdAckDelete. Part of the receipt-based
+// deletion protocol.
 func (f *FSM) SetOnRequestDelete(fn func(PendingDelete)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -784,8 +769,7 @@ func (f *FSM) SetOnFinalizeDelete(fn func(chunk.ChunkID)) {
 // of chunkIDs whose pendingDeletes ExpectedFrom became empty as a
 // result. Leader-side reconcilers should propose CmdFinalizeDelete for
 // each finalizable chunk so the receipt protocol can complete deletes
-// that the decommissioned node would otherwise have blocked. See
-// gastrolog-51gme step 10.
+// that the decommissioned node would otherwise have blocked.
 func (f *FSM) SetOnPruneNode(fn func(prunedNodeID string, finalizable []chunk.ChunkID)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -861,7 +845,7 @@ func (f *FSM) Count() int {
 // ---------- Raft FSM interface ----------
 
 // Apply handles a Raft log entry. The log data is a marshaled
-// gastrologv1.VaultCtlCommand (gastrolog-5lrg7).
+// gastrologv1.VaultCtlCommand.
 //
 // Post-apply subscriber callbacks (onCreate, onUpload, onSeal, the receipt-
 // protocol delete hooks, …) are invoked OUTSIDE the FSM mutex so that
@@ -1020,12 +1004,12 @@ func (e applyEffects) firePipelineCallbacks() {
 }
 
 func (e applyEffects) firePruneFinalizeCallbacks() {
-	// gastrolog-15fm8: applyPruneNode now finalizes drained-ExpectedFrom
-	// chunks atomically inside the same apply. Fire onFinalizeDelete
-	// per chunk so audit / cache-eviction subscribers see the same
-	// stream of finalize signals they would have if a CmdFinalizeDelete
-	// had applied per chunk. Skip if onPruneNode was the subscriber's
-	// only hook (they get the same information through the slice).
+	// applyPruneNode finalizes drained-ExpectedFrom chunks atomically
+	// inside the same apply. Fire onFinalizeDelete per chunk so audit /
+	// cache-eviction subscribers see the same stream of finalize signals
+	// they would have if a CmdFinalizeDelete had applied per chunk. Skip
+	// if onPruneNode was the subscriber's only hook (they get the same
+	// information through the slice).
 	if e.onFinalizeDelete == nil {
 		return
 	}
@@ -1077,10 +1061,10 @@ func (f *FSM) applyLocked(cmd *gastrologv1.VaultCtlCommand) (any, applyEffects) 
 		id, nodeID, finalized, result = f.applyAckDelete(c.AckDelete)
 		fx.ackedDeleteID = id
 		fx.ackedDeleteNodeID = nodeID
-		// gastrolog-15fm8: a draining ack atomically finalizes inside
-		// the same apply. Surface the finalize to subscribers via the
-		// existing onFinalizeDelete callback so audit / cache-eviction
-		// paths fire identically to an explicit CmdFinalizeDelete.
+		// A draining ack atomically finalizes inside the same apply.
+		// Surface the finalize to subscribers via the existing
+		// onFinalizeDelete callback so audit / cache-eviction paths
+		// fire identically to an explicit CmdFinalizeDelete.
 		if finalized {
 			fx.finalizedDeleteID = id
 		}
@@ -1184,7 +1168,7 @@ func (f *FSM) tryApplySegmentPipelineLocked(cmd *gastrologv1.VaultCtlCommand) (a
 			// entry. There are no on-disk files (the manifest carried no
 			// refs/records), so only a DELETED event is owed — route it
 			// through the receipt protocol's finalize callback, which emits
-			// DELETED without any file/index deletion. See gastrolog-lh0rp.
+			// DELETED without any file/index deletion.
 			fx.finalizedDeleteID = deleted
 		}
 		return result, fx, true
@@ -1316,7 +1300,7 @@ func captureID(applyResult any, id chunk.ChunkID) *chunk.ChunkID {
 
 // SnapshotProto builds the proto representation of all FSM state. Exported
 // so the outer vaultraft FSM can embed it in a VaultGroupSnapshot without a
-// re-marshal round-trip (gastrolog-5lrg7).
+// re-marshal round-trip.
 func (f *FSM) SnapshotProto() *gastrologv1.VaultCtlSnapshot {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
@@ -1327,7 +1311,7 @@ func (f *FSM) SnapshotProto() *gastrologv1.VaultCtlSnapshot {
 // tombstones, pending deletes) are emitted in chunk-ID order so equal FSM
 // state always yields a byte-identical snapshot. InstallSnapshot does not
 // require canonical bytes, but determinism keeps snapshot diffing, debugging,
-// and round-trip equality checks sane (gastrolog-5lrg7).
+// and round-trip equality checks sane.
 func (f *FSM) snapshotProtoLocked() *gastrologv1.VaultCtlSnapshot {
 	snap := &gastrologv1.VaultCtlSnapshot{
 		Entries:           make([]*gastrologv1.ManifestEntry, 0, len(f.chunks)),
@@ -1435,9 +1419,9 @@ func (f *FSM) applyCreate(c *gastrologv1.CreateChunkCommand) error {
 	// Reject creates for tombstoned chunk IDs. If the vault already finalized
 	// a delete for this ID, a later CreateChunk (late replication /
 	// out-of-order Raft apply) must not resurrect it in the live map —
-	// that's exactly the ghost-chunk bug from gastrolog-11rzz. The
-	// orchestrator's post-import path separately cleans up any on-disk
-	// files via the tombstone re-check after announce.
+	// that is the ghost-chunk failure. The orchestrator's post-import path
+	// separately cleans up any on-disk files via the tombstone re-check
+	// after announce.
 	if _, dead := f.tombstones[id]; dead {
 		return nil
 	}
@@ -1497,7 +1481,7 @@ func (f *FSM) applySeal(c *gastrologv1.SealChunkCommand) error {
 // rotation policy fires and before sealed-form assembly begins. The
 // chunk's metadata still reflects active-form bookkeeping (no WriteEnd
 // / final RecordCount yet — those come in CmdSealChunk). Idempotent:
-// repeated BeginSeals on the same chunk are harmless. See gastrolog-1huz5.
+// repeated BeginSeals on the same chunk are harmless.
 func (f *FSM) applyBeginSeal(c *gastrologv1.BeginSealCommand) error {
 	id := chunkIDFromProto(c.GetId())
 
@@ -1533,8 +1517,6 @@ func (f *FSM) applyBeginSeal(c *gastrologv1.BeginSealCommand) error {
 //     Sealed regardless of what the payload says — repatriation
 //     only handles sealed chunks (active-chunk state is in-memory
 //     on the leader, not reconstructable from idx.log alone).
-//
-// See gastrolog-32bf2.
 func (f *FSM) applyRepatriate(c *gastrologv1.RepatriateChunkCommand) error {
 	if c.GetEntry() == nil {
 		return errors.New("repatriate chunk: missing entry")
@@ -1555,8 +1537,7 @@ func (f *FSM) applyRepatriate(c *gastrologv1.RepatriateChunkCommand) error {
 // applyClearTransferSource clears a manifest entry's TransferSourceVaultID.
 // Idempotent: a no-op (nil error, no state change) when the entry doesn't
 // exist or the field is already the zero GLID — a replayed or retried
-// clear must never error. See CmdClearTransferSource and
-// gastrolog-2l918 review finding 1.
+// clear must never error. See CmdClearTransferSource.
 func (f *FSM) applyClearTransferSource(c *gastrologv1.ClearTransferSourceCommand) error {
 	id := chunkIDFromProto(c.GetChunkId())
 	e := f.chunks[id]
@@ -1572,7 +1553,7 @@ func (f *FSM) applyClearTransferSource(c *gastrologv1.ClearTransferSourceCommand
 // no-op, and an unknown chunk is ignored rather than erroring, because the
 // archive itself already succeeded against the cloud store — failing the apply
 // would not un-archive it, it would only make the FSM disagree with the blob.
-// See CmdArchiveChunk and gastrolog-35ygqv.
+// See CmdArchiveChunk.
 func (f *FSM) applyArchiveChunk(c *gastrologv1.ArchiveChunkCommand) error {
 	id := chunkIDFromProto(c.GetId())
 	e := f.chunks[id]
@@ -1632,7 +1613,7 @@ func (f *FSM) applyUpload(c *gastrologv1.UploadChunkCommand) error {
 	e.SourceIdxSize = c.GetSourceIdxSize()
 	e.CloudBacked = true
 
-	// Integrity fields (gastrolog-grnc3) — present only on the extended form.
+	// Integrity fields — present only on the extended form.
 	if h := c.GetHash(); len(h) > 0 {
 		copy(e.Hash[:], h)
 		e.CloudServiceID = glid.FromBytes(c.GetCloudServiceId())
@@ -1654,7 +1635,7 @@ func (f *FSM) applyRetentionPending(c *gastrologv1.RetentionPendingCommand) erro
 //
 // Each Marshal* returns a marshaled gastrologv1.VaultCtlCommand. The
 // New* builders return the typed message so the outer vaultraft envelope
-// can wrap it without a re-marshal round-trip (gastrolog-5lrg7).
+// can wrap it without a re-marshal round-trip.
 
 // mustMarshalCommand marshals a VaultCtlCommand. proto.Marshal of these
 // in-memory messages cannot fail; a non-nil error indicates a programmer
@@ -1702,7 +1683,7 @@ func MarshalSealChunk(id chunk.ChunkID, writeEnd time.Time, recordCount, bytes i
 	return mustMarshalCommand(NewSealChunk(id, writeEnd, recordCount, bytes, ingestStart, ingestEnd, sourceEnd, ingestTSMonotonic, sealedAt))
 }
 
-// NewBeginSeal builds a BeginSeal command message. gastrolog-1huz5.
+// NewBeginSeal builds a BeginSeal command message.
 func NewBeginSeal(id chunk.ChunkID) *gastrologv1.VaultCtlCommand {
 	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_BeginSeal{BeginSeal: &gastrologv1.BeginSealCommand{Id: id[:]}}}
 }
@@ -1713,9 +1694,7 @@ func MarshalBeginSeal(id chunk.ChunkID) []byte {
 }
 
 // NewUploadChunk builds an UploadChunk command message. cloudBytes is the
-// compressed cloud object's transport size (was misleadingly passed as
-// "diskBytes"; see gastrolog-33ul6h). The integrity fields (hash, cloud
-// service ID, key scheme) are gastrolog-grnc3 additions.
+// compressed cloud object's transport size, not any local disk size.
 func NewUploadChunk(id chunk.ChunkID, cloudBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64, hash [32]byte, cloudServiceID glid.GLID, keyScheme uint8) *gastrologv1.VaultCtlCommand {
 	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_UploadChunk{UploadChunk: &gastrologv1.UploadChunkCommand{
 		Id:              id[:],
@@ -1764,7 +1743,7 @@ func MarshalRetentionPending(id chunk.ChunkID) []byte {
 // NewRepatriateChunk builds a RepatriateChunk command message carrying the
 // full ManifestEntry. State is forced to ChunkStateSealed on apply
 // regardless of what entry.State says — only sealed chunks are
-// repatriatable. See gastrolog-32bf2.
+// repatriatable.
 func NewRepatriateChunk(entry ManifestEntry) *gastrologv1.VaultCtlCommand {
 	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_RepatriateChunk{RepatriateChunk: &gastrologv1.RepatriateChunkCommand{Entry: entryToProto(&entry)}}}
 }
@@ -1868,12 +1847,7 @@ func entryFromProto(p *gastrologv1.ManifestEntry) ManifestEntry {
 
 // ---------- Snapshot ----------
 //
-// The snapshot is a marshaled gastrologv1.VaultCtlSnapshot (gastrolog-5lrg7).
-// It replaced a hand-rolled versioned section format (magic "GLTRSNAP" +
-// per-kind length-prefixed sections). Old snapshots that predate the proto
-// format are NOT backward-readable by design; the project permits cluster
-// re-initialization (zero deployments) and Raft regenerates snapshots from
-// the log on the next apply cycle.
+// The snapshot is a marshaled gastrologv1.VaultCtlSnapshot.
 
 type fsmSnapshot struct {
 	snap *gastrologv1.VaultCtlSnapshot

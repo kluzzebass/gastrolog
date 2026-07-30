@@ -21,7 +21,7 @@ const (
 // (rather than reusing orchestrator.VaultSnapshot) so this package depends
 // on nothing outside pipeline/ingestion — the vault-domain DTO stays on the
 // orchestrator side, and the wiring seam (app.buildFactories) adapts it into
-// this narrower shape (gastrolog-5e04ld).
+// this narrower shape.
 type VaultSnapshot struct {
 	ID           glid.GLID
 	RecordCount  int64

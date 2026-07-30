@@ -13,7 +13,7 @@ import { CrossLinkBadge, CrossLinkChip } from "./CrossLinkBadge";
 // same two server-computed, hysteresis-aware booleans the admission gate
 // itself consults (StorageState.warn_verdict / protect_verdict), never
 // re-derived from free/warn/floor here. Matches the CLI's storageVerdict
-// (gastrolog-3cobq4 UI/CLI parity) and the vault card's "refusing" grammar:
+// (UI/CLI parity) and the vault card's "refusing" grammar:
 // a badge appears only while the condition is active, nothing when healthy.
 export function storageVerdictLabel(storage: Pick<Storage, "warnVerdict" | "protectVerdict">): "protected" | "warn" | null {
   if (storage.protectVerdict) return "protected";
@@ -24,13 +24,12 @@ export function storageVerdictLabel(storage: Pick<Storage, "warnVerdict" | "prot
 // thresholdLabel renders an effective threshold with its provenance — the
 // resolved bytes value always leads (placeholder-style: the effective
 // value is what matters). expr is the EFFECTIVE expression from the wire,
-// verbatim, never re-derived here (gastrolog-9akebz: render the wire).
-// Mirrors the CLI's thresholdLabel exactly (gastrolog-3cobq4).
+// verbatim, never re-derived here (render the wire). Mirrors the CLI's
+// thresholdLabel exactly.
 //
 // isDefault storages get "(expr, default)" — there is no configurable
-// node-level override to inherit from (gastrolog-2mrfdw removed the env
-// channel), so an unset expression is DEFAULTED, never "inherited"
-// (gastrolog-3cobq4 review). An explicit percentage expression ("10%")
+// node-level override to inherit from, so an unset expression is
+// DEFAULTED, never "inherited". An explicit percentage expression ("10%")
 // still gets "(expr)": a percentage carries information the resolved byte
 // count alone can't (it rescales with the volume). An explicit
 // absolute-size expression ("20GiB") resolves to exactly the shown byte

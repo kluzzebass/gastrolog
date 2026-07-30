@@ -10,7 +10,8 @@ import (
 	"gastrolog/internal/pipeline/ingestion"
 )
 
-// TestEventIDIdentity pins gastrolog-44b9r for the metrics ingester.
+// TestEventIDIdentity pins the identity invariant for the metrics ingester:
+// the configured IngesterID and a non-zero IngestTS on every message.
 func TestEventIDIdentity(t *testing.T) {
 	t.Parallel()
 	src := &fakeStats{depth: 1, capacity: 1000}

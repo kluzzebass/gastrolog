@@ -1,7 +1,6 @@
 package vaultraft
 
-// Cross-cutting verification for the vault-ctl protobuf migration
-// (gastrolog-2q1xq, epic gastrolog-5lrg7):
+// Cross-cutting verification for the vault-ctl protobuf encoding:
 //   - multi-node (5) InstallSnapshot/restore carrying every snapshot section,
 //   - WAL-replay determinism (identical proto command stream => identical FSM
 //     state and byte-identical snapshots).
@@ -132,8 +131,7 @@ func protoCmdStream(v1 glid.GLID, now time.Time) [][]byte {
 
 // TestProtoVerify_WALReplayDeterministic verifies that replaying an identical
 // proto command stream produces identical FSM state and byte-identical
-// snapshots. This is the migration's "WAL replay yields identical FSM state"
-// acceptance, checked at the encoding level (gastrolog-5lrg7 / gastrolog-2q1xq).
+// snapshots.
 func TestProtoVerify_WALReplayDeterministic(t *testing.T) {
 	t.Parallel()
 	v1 := glid.New()

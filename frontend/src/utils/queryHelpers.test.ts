@@ -90,7 +90,7 @@ describe("stripAllDirectives", () => {
 });
 
 describe("buildTimeTokens", () => {
-  test("All range emits last=all sentinel (gastrolog-2zdsc)", () =>
+  test("All range emits last=all sentinel", () =>
     expect(buildTimeTokens("All", false)).toBe("last=all reverse=false"));
   test("All range reversed", () =>
     expect(buildTimeTokens("All", true)).toBe("last=all reverse=true"));
@@ -228,9 +228,9 @@ describe("resolveQueryEffectAction", () => {
   test("search with skipNextSearch returns 'skip-search'", () =>
     expect(resolveQueryEffectAction("last=5m foo", false, true)).toBe("skip-search"));
 
-  // Regression for gastrolog-2zdsc: "All" emits last=all so the
-  // search-effect detector must see a real last= token and execute the
-  // search instead of injecting the default 5m range.
+  // Regression: "All" emits last=all so the search-effect detector must
+  // see a real last= token and execute the search instead of injecting
+  // the default 5m range.
   test("search with last=all returns 'search'", () =>
     expect(resolveQueryEffectAction("last=all foo", false, false)).toBe("search"));
 });

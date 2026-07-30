@@ -1,5 +1,5 @@
-// Seal-pip state derivation (gastrolog-4fzwu3). Pure functions so the
-// grammar is unit-testable apart from rendering. Design reference:
+// Seal-pip state derivation. Pure functions so the grammar is
+// unit-testable apart from rendering. Design reference:
 // docs/mockups/seal-pips.html.
 //
 // Vocabulary: a CHUNK SEAL is the cluster-wide fact (CmdSealChunk applied,
@@ -8,7 +8,7 @@
 // is normal operation; the pip row exists so it reads as catch-up instead
 // of "resealing already sealed chunks".
 
-// eslint-disable-next-line no-restricted-imports -- no Chunk model yet (gastrolog-2e2qs follow-up)
+// eslint-disable-next-line no-restricted-imports -- no Chunk model yet
 import { ChunkState, type ChunkMeta } from "../../api/gen/gastrolog/v1/vault_pb";
 
 /** Lifecycle state of one pip. Birth fills green; death drains red.
@@ -28,15 +28,14 @@ export type PipState =
   | "ghost"; // muted dot after a gap — copy on a node outside placement
 
 /** Cluster-wide chunk lifecycle as rendered to the operator. Mirrors the
- *  CLI's inspect badge vocabulary (gastrolog-5wh571): same states, same
- *  words. */
+ *  CLI's inspect badge vocabulary: same states, same words. */
 export type ChunkLifecycle = "active" | "sealing" | "sealed" | "unknown";
 
 /** chunkLifecycleState maps the FSM overlay to the pip grammar's
  *  cluster-wide chunk lifecycle. The three-state enum is the sole
  *  authority — the legacy Sealed bool is only true at CHUNK_STATE_SEALED,
- *  and deriving the lifecycle from it painted SEALING chunks as active
- *  (gastrolog-5wh571). Unspecified renders as "unknown", never a guess. */
+ *  and deriving the lifecycle from it painted SEALING chunks as active.
+ *  Unspecified renders as "unknown", never a guess. */
 export function chunkLifecycleState(chunk: ChunkMeta): ChunkLifecycle {
   switch (chunk.state) {
     case ChunkState.ACTIVE:
@@ -89,8 +88,7 @@ export function pipOrder(nodes: readonly string[]): string[] {
  *  placement transition one source can reference a node the other doesn't
  *  know yet. A node never vanishes from the row while any source still
  *  references it: it renders in the grammar-correct state (ghost, or holds
- *  when it owes a delete ack) instead of flapping the row count
- *  (gastrolog-68wsli). */
+ *  when it owes a delete ack) instead of flapping the row count. */
 export function computePips(input: PipInputs): { pips: SealPip[]; ghosts: SealPip[] } {
   const resident = new Set(input.residentNodes);
   const owesAck = new Set(input.pendingAckNodes);
@@ -112,8 +110,7 @@ export function computePips(input: PipInputs): { pips: SealPip[]; ghosts: SealPi
     if (input.chunkState === "unknown") {
       // Lifecycle missing from the FSM overlay: claim nothing. Residency
       // for non-sealed chunks is a placement fallback rather than
-      // bytes-truth, so even a resident pip would be a guess here
-      // (gastrolog-5wh571).
+      // bytes-truth, so even a resident pip would be a guess here.
       return { node, state: "unknown", title: `${node}: chunk lifecycle unknown — no state in the FSM overlay` };
     }
     if (input.chunkState === "active") {

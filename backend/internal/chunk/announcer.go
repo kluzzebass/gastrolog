@@ -17,7 +17,6 @@ type MetadataAnnouncer interface {
 	// AnnounceBeginSeal fires the Active → Sealing transition before
 	// the chunk manager's sealToGLCB runs. Lets followers and
 	// retention/upload code observe the in-flight assembly window.
-	// gastrolog-1huz5.
 	AnnounceBeginSeal(id ChunkID)
 	// AnnounceSeal carries the chunk manager's running min IngestTS
 	// (ingestStart) and IngestTSMonotonic flag in addition to the seal
@@ -35,14 +34,13 @@ type MetadataAnnouncer interface {
 	// GLCB section-reader path.
 	AnnounceAttachOffsets(id ChunkID, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64)
 	// AnnounceUpload publishes a successful cloud upload. cloudBytes is the
-	// compressed cloud object's transport size (was misleadingly passed
-	// through as "diskBytes"; local warm-cache footprint is per-node state
-	// that never belonged on this cluster-replicated announce — see
-	// gastrolog-33ul6h). hash is the GLCB whole-blob digest (32 bytes) read
-	// from the TOC footer; cloudServiceID is the cloud service the chunk
-	// was actually uploaded to (snapshot, survives later vault
+	// compressed cloud object's transport size; local warm-cache footprint
+	// is per-node state and does not belong on this cluster-replicated
+	// announce. hash is the GLCB whole-blob digest (32 bytes) read from the
+	// TOC footer; cloudServiceID is the cloud service the chunk was
+	// actually uploaded to (snapshot, survives later vault
 	// reconfiguration); keyScheme selects the blobKey() derivation
-	// function (only scheme 0 today). See gastrolog-grnc3.
+	// function (only scheme 0 today).
 	AnnounceUpload(id ChunkID, cloudBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64, hash [32]byte, cloudServiceID glid.GLID, keyScheme uint8)
 
 	// AnnounceArchived records the cloud storage class a chunk's blob now
@@ -51,8 +49,7 @@ type MetadataAnnouncer interface {
 	// every other node — and this node after a restart — cannot tell what
 	// class a chunk is in. That is what stalled multi-step transition
 	// chains: the archival sweep compares current class against the chain's
-	// target, and an unreplicated class reads as empty forever
-	// (gastrolog-35ygqv).
+	// target, and an unreplicated class reads as empty forever.
 	AnnounceArchived(id ChunkID, cloudStorageClass string)
 }
 
@@ -63,12 +60,12 @@ type AnnouncerSetter interface {
 }
 
 // IntegrityVerifier reports the expected GLCB whole-blob digest for a chunk
-// (the value the FSM stamped onto CmdUploadChunk via gastrolog-grnc3). The
-// chunk manager calls ExpectedDigest after every cold-cache cloud download
-// and rejects any blob whose actual digest doesn't match. The (zero, false)
-// return path means "no expectation on file" — used during the migration
-// from pre-grnc3 entries that have no recorded hash; a nil verifier on the
-// Manager Config disables verification entirely (single-node tests).
+// (the value the FSM stamped onto CmdUploadChunk). The chunk manager calls
+// ExpectedDigest after every cold-cache cloud download and rejects any blob
+// whose actual digest doesn't match. The (zero, false) return path means
+// "no expectation on file" — used for entries that carry no recorded hash;
+// a nil verifier on the Manager Config disables verification entirely
+// (single-node tests).
 type IntegrityVerifier interface {
 	ExpectedDigest(id ChunkID) ([32]byte, bool)
 }
@@ -108,16 +105,15 @@ type SilentDeleter interface {
 // files, mark sealed=true, clear m.active). The FSM is authoritative; if
 // it says sealed, the local Manager's stale active pointer must yield.
 //
-// Why force-demote always (not just on recovery): a previous design split
-// this into "steady-state skip-active" + "recovery force-demote" on the
-// theory that the leader's record-stream would swap the follower's active
-// pointer in steady state. That assumption is topology-dependent — true for
-// ingest vaults fed by continuous appends, false for downstream vaults fed
-// only by transitions. The skip-active variant left receipt-protocol delete
-// obligations bouncing off ErrActiveChunk forever on retention-fed vaults
-// (gastrolog-2yeht), and SweepLocalOrphans transitively blocked because no
-// tombstone gets created when finalize never fires. The single-method
-// always-demote contract is correct for every topology.
+// Why force-demote always, not just on recovery: skipping the active
+// pointer in steady state assumes the leader's record-stream swaps the
+// follower's active pointer, which is topology-dependent — true for ingest
+// vaults fed by continuous appends, false for downstream vaults fed only by
+// transitions. On a retention-fed vault that leaves receipt-protocol delete
+// obligations bouncing off ErrActiveChunk forever, and SweepLocalOrphans
+// blocks transitively because no tombstone gets created when finalize never
+// fires. The single-method always-demote contract is correct for every
+// topology.
 //
 // Idempotent: a chunk that doesn't exist locally is a silent no-op (this
 // node never had it). A chunk that's already locally sealed is a no-op.

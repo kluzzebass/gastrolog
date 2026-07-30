@@ -8,7 +8,7 @@ import (
 
 // TestVaultHasStageActivity verifies the stage-counter table's row-inclusion
 // rule: a vault appears only when at least one discrete stage milestone has a
-// non-zero total on that node (gastrolog-4r784a).
+// non-zero total on that node.
 func TestVaultHasStageActivity(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

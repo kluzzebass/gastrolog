@@ -22,7 +22,6 @@ import { VaultSettingsCard } from "./VaultSettingsCard";
 
 // A cloud-backed vault is a file vault with cloudServiceId set; cloud-ness
 // is derived via isCloudBacked() rather than a separate type discriminator.
-// See gastrolog-4k5mg.
 export type VaultTypeLabel = "memory" | "file" | "jsonl";
 
 /** Returns true if this vault is cloud-backed (file vault with a cloud service binding). */
@@ -32,10 +31,9 @@ export function isCloudBacked(v: { type: VaultTypeLabel; cloudServiceId: string 
 
 /**
  * Candidate targets for retention_disposition = "transfer": file-typed,
- * non-cloud vaults other than the one identified by excludeId. Per
- * gastrolog-2l918 spec decision #4, transfer is file → file only (both
- * source and target plain, non-cloud file vaults); self-transfer is
- * rejected at PutVault as the retention cascade footgun.
+ * non-cloud vaults other than the one identified by excludeId. Transfer is
+ * file → file only (both source and target plain, non-cloud file vaults);
+ * self-transfer is rejected at PutVault as the retention cascade footgun.
  */
 export function transferTargetOptions(
   vaults: { id: Uint8Array; name: string; type: VaultType; cloudServiceId: Uint8Array }[],
@@ -210,16 +208,16 @@ export function VaultStorageForm({
   rotationPolicyOptions: { value: string; label: string }[];
   retentionPolicyOptions: { value: string; label: string }[];
   // Candidate targets for retention_disposition = "transfer" — file-typed,
-  // non-cloud vaults other than this one (gastrolog-2l918: transfer is
-  // file → file only, self-transfer rejected at PutVault).
+  // non-cloud vaults other than this one (transfer is file → file only,
+  // self-transfer rejected at PutVault).
   transferTargetOptions: { value: string; label: string }[];
   nodeOptions: { value: string; label: string }[];
   vaultName: string;
   maxRF?: number;
   // cloudLocked freezes the Cloud Storage selector. The backend rejects
-  // cloud_service_id changes on existing vaults (gastrolog-3ul0s) — to
-  // change cloud binding, create a new vault and route data via
-  // retention. The Add form leaves this false; edit-existing passes true.
+  // cloud_service_id changes on existing vaults — to change cloud binding,
+  // create a new vault and route data via retention. The Add form leaves
+  // this false; edit-existing passes true.
   cloudLocked?: boolean;
   onTypeChange?: (t: VaultTypeLabel) => void;
   onUpdate: (patch: Partial<StorageEntry>) => void;
@@ -558,8 +556,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
       cloudServiceId: cloudBacked ? decode(storage.cloudServiceId) : new Uint8Array(0),
       cacheEviction: cloudBacked ? (storage.cacheEviction || "lru") : "",
       // Expressions pass through verbatim; the server defaults an unset value
-      // for the applicable vault type and rejects an explicit "0"
-      // (gastrolog-etcjdx).
+      // for the applicable vault type and rejects an explicit "0".
       cacheBudget: cloudBacked ? storage.cacheBudget : "",
       cacheTtl: cloudBacked ? storage.cacheTTL : "",
       memoryBudget: storage.type === "memory" ? storage.memoryBudget : "",

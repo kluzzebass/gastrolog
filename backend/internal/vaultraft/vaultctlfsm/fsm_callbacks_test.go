@@ -11,9 +11,7 @@ import (
 	hraft "github.com/hashicorp/raft"
 )
 
-// gastrolog-51gme step 1: tests pinning the four new FSM apply
-// callbacks (onSeal, onRetentionPending, onTransitionStreamed,
-// onTransitionReceived) so the reconciler can rely on them.
+// Tests pinning the FSM apply callbacks the reconciler relies on.
 
 func TestOnSealCallbackFires(t *testing.T) {
 	t.Parallel()
@@ -364,10 +362,8 @@ func TestOnRetentionPendingCallbackFires(t *testing.T) {
 	}
 }
 
-// gastrolog-5sywa: TestOnTransitionStreamedCallbackFires and
-// TestOnTransitionReceivedCallbackFires were deleted along with the
-// receipt protocol they pinned. The earlier "no-panic when callbacks
-// unregistered" test stays useful for surviving callbacks.
+// Applying each callback-bearing command with no callback registered
+// must not panic and must not regress apply behaviour.
 func TestNewCallbacksNoPanicWhenUnregistered(t *testing.T) {
 	t.Parallel()
 
@@ -375,8 +371,7 @@ func TestNewCallbacksNoPanicWhenUnregistered(t *testing.T) {
 	id := chunk.NewChunkID()
 	now := time.Now()
 
-	// None of the new callbacks are set. Applying each command must
-	// not panic and must not regress existing apply behavior.
+	// No callbacks are set.
 	fsm.Apply(&hraft.Log{Data: MarshalCreateChunk(id, now, now, now)})
 	if err := fsm.Apply(&hraft.Log{Data: MarshalSealChunk(id, now, 1, 1, now, now, now, false, now)}); err != nil {
 		t.Errorf("seal apply unexpected error: %v", err)

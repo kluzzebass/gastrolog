@@ -10,10 +10,10 @@ import (
 	"gastrolog/internal/pipeline/ingestion"
 )
 
-// TestEventIDIdentity pins gastrolog-44b9r: every IngestMessage emitted
-// by the chatterbox ingester carries the configured IngesterID and a
-// non-zero IngestTS — the orchestrator's digest path needs both to
-// stamp a complete EventID downstream.
+// TestEventIDIdentity pins the identity invariant: every IngestMessage
+// emitted by the chatterbox ingester carries the configured IngesterID and
+// a non-zero IngestTS — the orchestrator's digest path needs both to stamp
+// a complete EventID downstream.
 func TestEventIDIdentity(t *testing.T) {
 	t.Parallel()
 	id := glid.New()

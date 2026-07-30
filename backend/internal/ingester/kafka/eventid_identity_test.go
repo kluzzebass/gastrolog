@@ -9,7 +9,7 @@ import (
 	"gastrolog/internal/ingester/identitytest"
 )
 
-// TestEventIDIdentity pins gastrolog-44b9r for the Kafka ingester.
+// TestEventIDIdentity pins the identity invariant for the Kafka ingester.
 // Kafka is broker-only (no embedded broker available in unit tests),
 // so we test buildMessage directly — that's the single seam where
 // IngesterID and IngestTS land on the IngestMessage. A regression

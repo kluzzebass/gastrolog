@@ -20,7 +20,7 @@ type ingester struct {
 	// adjust in response to pressure transitions. When pressure is
 	// normal, capture.minLevel stays at baseLevel; when elevated or
 	// critical, we raise it so only errors get captured — reducing the
-	// self-ingest rate without blocking. See gastrolog-4fguu.
+	// self-ingest rate without blocking.
 	capture   *logging.CaptureHandler
 	baseLevel slog.Level
 }
@@ -58,7 +58,7 @@ func (ing *ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessa
 	// Open the capture gate so slog records start flowing into ing.ch.
 	// Closed in the deferred teardown so the channel stops filling the
 	// moment this ingester goes away — otherwise producers would keep
-	// teeing into a channel with no consumer (gastrolog-6bvu6).
+	// teeing into a channel with no consumer.
 	if ing.capture != nil {
 		ing.capture.SetEnabled(true)
 		defer ing.capture.SetEnabled(false)
@@ -69,7 +69,7 @@ func (ing *ingester) Run(ctx context.Context, out chan<- ingestion.IngesterMessa
 	// CaptureHandler.DroppedCount by the stats collector and shipped as
 	// NodeStats.self_ingester_drops_total. It must not become an alarm or a
 	// log line — a log about dropped logs feeds the capture channel that is
-	// dropping them (gastrolog-3phtqv, was gastrolog-5d5a3).
+	// dropping them.
 	for {
 		select {
 		case <-ctx.Done():

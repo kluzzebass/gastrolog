@@ -21,14 +21,11 @@ function bytes(b: number): Uint8Array<ArrayBuffer> {
 
 const ts = (sec: number): Timestamp => new Timestamp({ seconds: BigInt(sec), nanos: 0 });
 
-// gastrolog-66vmg: the server stamps authoritative replicaCount /
-// replicaNodeIds on every event. mergeMeta must trust those values
-// when present so the inspector's badge converges to the cluster-wide
-// truth without operator action. Pre-fix, mergeMeta preserved the
-// existing cached value and the client tried to reconstruct it from
-// per-node event evidence — which drifted on leadership transfer and
-// during the active-chunk catchup window.
-describe("mergeMeta — replica info trust model (gastrolog-66vmg)", () => {
+// The server stamps authoritative replicaCount / replicaNodeIds on every
+// event. mergeMeta must trust those values when present so the
+// inspector's badge converges to the cluster-wide truth without operator
+// action.
+describe("mergeMeta — replica info trust model", () => {
   test("incoming replicaCount > 0 overrides existing", () => {
     const existing = new ChunkMeta({
       id: bytes(1),
@@ -157,10 +154,9 @@ describe("mergeMeta — replica info trust model (gastrolog-66vmg)", () => {
   });
 });
 
-// gastrolog-66vmg: mutateCache no longer accumulates replica evidence
-// from per-event nodeId attribution — that was the source of drift.
-// Events from any node with the same authoritative replicaCount stamp
-// produce the same end state.
+// mutateCache accumulates no replica evidence from per-event nodeId
+// attribution. Events from any node with the same authoritative
+// replicaCount stamp produce the same end state.
 describe("mutateCache — server-authoritative replica info", () => {
   test("CREATED event uses meta's authoritative replicaCount", () => {
     const id = bytes(10);
@@ -185,10 +181,9 @@ describe("mutateCache — server-authoritative replica info", () => {
   });
 
   test("event nodeId is NOT auto-merged into replicaNodeIds (server is authoritative)", () => {
-    // Pre-fix: an event from a previously-unseen node would have
-    // added that node to replicaNodeIds and bumped replicaCount,
-    // producing client-side drift. Post-fix: only the server's
-    // explicit stamp on meta matters.
+    // Only the server's explicit stamp on meta matters: an event from a
+    // previously-unseen node must not add that node to replicaNodeIds or
+    // bump replicaCount, which is client-side drift.
     const id = bytes(11);
     const existing = new ChunkMeta({
       id,
@@ -207,8 +202,8 @@ describe("mutateCache — server-authoritative replica info", () => {
       chunkId: id,
       op: ChunkChangeOp.SEALED,
       meta: incoming,
-      // Event came from a node not in the replicaNodeIds set; pre-fix
-      // this would have grown the count to 3. Post-fix: server's stamp
+      // Event came from a node not in the replicaNodeIds set; growing the
+      // count to 3 off that is the drift. The server's stamp
       // (replicaCount=2) wins.
       nodeId: new TextEncoder().encode("node-stranger"),
     });
@@ -220,15 +215,15 @@ describe("mutateCache — server-authoritative replica info", () => {
   });
 });
 
-// gastrolog-68wsli: ListChunks refetches derive replica_node_ids from
-// which nodes REPORTED the chunk in that fan-out round (reachability
-// evidence), while WatchChunks stamps residency from the vault-ctl FSM
-// (bytes truth). During a node rejoin the two ping-ponged the cache —
-// the seal-pip row count flapped as the rejoining node vanished from
-// one snapshot and reappeared on the next stamp. A snapshot may only
-// GROW the cached replica set; real shrink (delete acks, holder
-// revokes) still arrives via watch stamps, which replace it wholesale.
-describe("mergeChunksSnapshot — snapshots cannot shrink residency (gastrolog-68wsli)", () => {
+// ListChunks refetches derive replica_node_ids from which nodes REPORTED
+// the chunk in that fan-out round (reachability evidence), while
+// WatchChunks stamps residency from the vault-ctl FSM (bytes truth).
+// During a node rejoin the two ping-ponged the cache — the seal-pip row
+// count flapped as the rejoining node vanished from one snapshot and
+// reappeared on the next stamp. A snapshot may only GROW the cached
+// replica set; real shrink (delete acks, holder revokes) still arrives
+// via watch stamps, which replace it wholesale.
+describe("mergeChunksSnapshot — snapshots cannot shrink residency", () => {
   test("snapshot missing a node keeps the watch-established replica set", () => {
     const cached = [
       new ChunkMeta({
@@ -333,15 +328,15 @@ describe("mergeChunksSnapshot — snapshots cannot shrink residency (gastrolog-6
   });
 });
 
-// gastrolog-33ul6h: diskBytes is per-node LIVE local cache state (eviction
-// drops it to 0, re-warm brings it back), not a monotone-growing field like
-// bytes/recordCount. cloudBytes IS fixed once the chunk is uploaded, so it
-// keeps the monotone-max shape.
-describe("mergeMeta — diskBytes/cloudBytes (gastrolog-33ul6h)", () => {
+// diskBytes is per-node LIVE local cache state (eviction drops it to 0,
+// re-warm brings it back), not a monotone-growing field like
+// bytes/recordCount. cloudBytes IS fixed once the chunk is uploaded, so
+// it keeps the monotone-max shape.
+describe("mergeMeta — diskBytes/cloudBytes", () => {
   test("incoming cloudBytes is carried into the merged cache entry", () => {
-    // Before the fix, an UPLOADED event's cloudBytes was dropped entirely
-    // — the cache kept cloudBacked=true with cloudBytes=0 until the next
-    // ListChunks refetch.
+    // Dropping an UPLOADED event's cloudBytes left the cache with
+    // cloudBacked=true and cloudBytes=0 until the next ListChunks
+    // refetch.
     const existing = new ChunkMeta({ id: bytes(40), cloudBacked: false, cloudBytes: BigInt(0) });
     const incoming = new ChunkMeta({ id: bytes(40), cloudBacked: true, cloudBytes: BigInt(300) });
     const merged = mergeMeta(existing, incoming);

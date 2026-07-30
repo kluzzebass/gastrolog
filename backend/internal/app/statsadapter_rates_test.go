@@ -1,10 +1,10 @@
 package app
 
-// End-to-end reproduction rig for gastrolog-4eh5ns "rates show 0/s": real
-// orchestrator + pipeline routing + the REAL orchStatsAdapter + real
-// StatsCollector ticks. If this passes, the backend produces nonzero rates
-// from live traffic and the fault is in serving or deployment; if it fails,
-// the window/adapter chain is broken.
+// End-to-end reproduction rig for "rates show 0/s": real orchestrator +
+// pipeline routing + the REAL orchStatsAdapter + real StatsCollector ticks.
+// If this passes, the backend produces nonzero rates from live traffic and
+// the fault is in serving or deployment; if it fails, the window/adapter
+// chain is broken.
 
 import (
 	"context"

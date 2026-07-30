@@ -22,8 +22,7 @@ func decodeCommand(t *testing.T, data []byte) *gastrologv1.VaultCtlCommand {
 }
 
 // TestCommandRoundTrip verifies every Marshal* produces a VaultCtlCommand that
-// decodes back to the expected oneof case with its key fields intact
-// (gastrolog-5lrg7).
+// decodes back to the expected oneof case with its key fields intact.
 func TestCommandRoundTrip(t *testing.T) {
 	t.Parallel()
 	id := testChunkID(7)
@@ -237,7 +236,7 @@ func TestCommandRoundTrip(t *testing.T) {
 }
 
 // TestApplyRejectsMalformedBytes verifies Apply returns an error (not a panic)
-// for empty and undecodable command bytes (gastrolog-5lrg7 unhappy path).
+// for empty and undecodable command bytes (unhappy path).
 func TestApplyRejectsMalformedBytes(t *testing.T) {
 	t.Parallel()
 	f := New()
@@ -255,7 +254,7 @@ func TestApplyRejectsMalformedBytes(t *testing.T) {
 }
 
 // TestApplyRejectsEmptyOneof verifies a VaultCtlCommand with no command set is
-// rejected by the dispatch (gastrolog-5lrg7 unhappy path).
+// rejected by the dispatch (unhappy path).
 func TestApplyRejectsEmptyOneof(t *testing.T) {
 	t.Parallel()
 	f := New()

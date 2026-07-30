@@ -19,12 +19,11 @@ func NewAlertsCommand() *cobra.Command {
 }
 
 // newAlertsCmd lists the standing system alerts every node includes in its
-// NodeStats broadcast (gastrolog-33d9n2). Alarms are state, not events: they
-// stand while a condition holds and clear when it resolves, so this surface
-// stays readable even when a suspended system writes no logs. Any node can
-// answer — alerts ride the same PeerState aggregation GetClusterStatus
-// already serves, so the view is cluster-wide from whichever node the CLI
-// is pointed at.
+// NodeStats broadcast. Alarms are state, not events: they stand while a
+// condition holds and clear when it resolves, so this surface stays readable
+// even when a suspended system writes no logs. Any node can answer — alerts
+// ride the same PeerState aggregation GetClusterStatus already serves, so the
+// view is cluster-wide from whichever node the CLI is pointed at.
 func newAlertsCmd() *cobra.Command {
 	var nodeFilter string
 	cmd := &cobra.Command{
@@ -268,8 +267,8 @@ func alertsToJSON(alerts []nodeAlert) []alertJSON {
 	return out
 }
 
-// systemAlertRows builds the standing-alert table for `cluster status`
-// (gastrolog-33d9n2) — parity with the inspector's System Alerts panel.
+// systemAlertRows builds the standing-alert table for `cluster status` —
+// parity with the inspector's System Alerts panel.
 // Alerts arrive in the same NodeStats the liveness tables already read, so
 // this is rendering data in hand, not new plumbing. No standing alerts →
 // no table: quiet until needed.

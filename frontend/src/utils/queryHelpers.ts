@@ -54,7 +54,7 @@ export const buildTimeTokens = (range: string, reverse: boolean): string => {
   // "All" emits the explicit `last=all` sentinel so the search-effect
   // detector distinguishes "user picked unbounded" from "no time range
   // chosen, inject the default." Without the sentinel a user-picked
-  // "All" gets clobbered by the default-range injection. See gastrolog-2zdsc.
+  // "All" gets clobbered by the default-range injection.
   if (range === "All") return `last=all ${rev}`;
   if (range in timeRangeMs) return `last=${range} ${rev}`;
   return rev;

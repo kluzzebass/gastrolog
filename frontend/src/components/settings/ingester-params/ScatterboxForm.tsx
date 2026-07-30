@@ -28,7 +28,7 @@ export function ScatterboxForm({
     if (!ingesterId) return;
     try {
       // No target node: the backend resolves which node runs this ingester
-      // and routes the trigger there (gastrolog-51ge9).
+      // and routes the trigger there.
       await systemClient.triggerIngester({ id: decode(ingesterId) });
       setTriggerState("sent");
     } catch {

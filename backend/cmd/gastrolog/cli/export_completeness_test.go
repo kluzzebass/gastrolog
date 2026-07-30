@@ -4,7 +4,7 @@ package cli
 // as the list: a config type added to system.Config and to neither list is
 // invisible to it, which is exactly how every enrichment lookup table came to
 // be absent from the document — unexported, unimported, and not declared in
-// `excluded` either (gastrolog-4j7srt).
+// `excluded` either.
 //
 // This test derives the expectation from system.Config instead, so the next
 // type added fails here rather than on a live cluster during a restore.
@@ -60,7 +60,7 @@ func TestEveryConfigTypeHasAnExportSection(t *testing.T) {
 			}
 			t.Errorf("system.Config.%s has no export section and is not listed as exempt — "+
 				"a config type that is neither exported nor declared in the document's "+
-				"`excluded` list vanishes silently on restore (gastrolog-4j7srt)", name)
+				"`excluded` list vanishes silently on restore", name)
 			continue
 		}
 		if section == "" {

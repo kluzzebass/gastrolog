@@ -34,9 +34,9 @@ func TestChunkHolderAckRevokeLifecycle(t *testing.T) {
 	id := chunk.NewChunkID()
 	f := newHolderTestFSM(t, id)
 
-	// No receipts: residency is empty — never a placement assumption
-	// (gastrolog-68wsli: the optimistic fallback made residency
-	// non-monotonic and regressed sealed pips to amber).
+	// No receipts: residency is empty — never a placement assumption (an
+	// optimistic fallback made residency non-monotonic and regressed sealed
+	// pips to amber).
 	if got := residency(f, id); len(got) != 0 {
 		t.Fatalf("pre-receipt residency = %v, want empty (no placement fallback)", got)
 	}
@@ -116,9 +116,9 @@ func TestChunkHoldersSurviveSnapshotRestore(t *testing.T) {
 	}
 }
 
-// onHoldersChanged is the live edge for receipt-only residency
-// (gastrolog-68wsli): the WatchChunks bus subscribes so the inspector
-// sees holder growth without a snapshot refetch. Fires once per chunk
+// onHoldersChanged is the live edge for receipt-only residency: the
+// WatchChunks bus subscribes so the inspector sees holder growth without
+// a snapshot refetch. Fires once per chunk
 // whose holder set actually changed; idempotent re-acks stay silent.
 func TestChunkHolderChangeCallbackFiresPerActualChange(t *testing.T) {
 	t.Parallel()

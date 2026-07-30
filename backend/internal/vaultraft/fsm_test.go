@@ -115,10 +115,10 @@ func TestFSM_SnapshotRestore_twoInstances(t *testing.T) {
 	}
 }
 
-// TestFSM_OnAfterRestoreFires pins the gastrolog-51gme catchup hook:
-// snapshot install must fire SetOnAfterRestore so the orchestrator can
-// run ReconcileFromSnapshot on every instance. Without this, the receipt
-// protocol's pendingDeletes silently leak across snapshot boundaries.
+// TestFSM_OnAfterRestoreFires pins the catchup hook: snapshot install must
+// fire SetOnAfterRestore so the orchestrator can run ReconcileFromSnapshot
+// on every instance. Without this, the receipt protocol's pendingDeletes
+// silently leak across snapshot boundaries.
 func TestFSM_OnAfterRestoreFires(t *testing.T) {
 	t.Parallel()
 
@@ -154,7 +154,7 @@ func TestFSM_OnAfterRestoreFires(t *testing.T) {
 	}
 }
 
-// --- Apply-wait tracker (gastrolog-4l24u) ---
+// --- Apply-wait tracker ---
 
 // TestFSM_ApplyAdvancesApplyWait pins that every Apply advances the group
 // FSM's apply-wait tracker to the entry's index — noops, vault-scoped

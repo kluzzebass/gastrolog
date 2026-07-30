@@ -11,7 +11,7 @@ import (
 	"gastrolog/internal/pipeline/ingestion"
 )
 
-// TestEventIDIdentity pins gastrolog-44b9r for the RELP ingester.
+// TestEventIDIdentity pins the identity invariant for the RELP ingester.
 func TestEventIDIdentity(t *testing.T) {
 	t.Parallel()
 	const ingesterID = "test-relp-ingester"

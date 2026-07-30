@@ -8,10 +8,10 @@ import (
 )
 
 // TestApplyClearTransferSource_HappyPath verifies CmdClearTransferSource
-// zeroes TransferSourceVaultID on an existing entry — the fix for
-// gastrolog-2l918 review finding 1: without this, an entry introduced by
-// retention transfer keeps pointing replica-repair pulls at the source
-// vault forever, even after the source has expired its own copies.
+// zeroes TransferSourceVaultID on an existing entry. Without this, an
+// entry introduced by retention transfer keeps pointing replica-repair
+// pulls at the source vault forever, even after the source has expired
+// its own copies.
 func TestApplyClearTransferSource_HappyPath(t *testing.T) {
 	t.Parallel()
 	f := New()

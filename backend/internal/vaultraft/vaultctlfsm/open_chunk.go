@@ -192,8 +192,8 @@ func (f *FSM) SealedManifestHeadChunkID() (chunk.ChunkID, bool) {
 // release pass reads. The per-segment gates each took the FSM lock several
 // times (registry copy + referenced-in-manifest walk over ALL refs + resume
 // lookup + supersession walk), making a release pass O(N x refs) in lock
-// round-trips against the Raft apply path (gastrolog-2m0f75). One snapshot
-// per pass; decisions over it are pure.
+// round-trips against the Raft apply path. One snapshot per pass;
+// decisions over it are pure.
 type ReleaseScan struct {
 	Entries []CompletedSegmentEntry
 	// byID indexes Entries for pending-queue lookups.
@@ -607,11 +607,11 @@ func (f *FSM) SegmentReferencedInManifest(segmentID glid.GLID) bool {
 
 // SegmentReleased reports whether segmentID was dropped from the registry
 // by a ReleaseSegments apply. This is positive, replicated, snapshot-
-// persisted evidence of release — the staging-orphan sweep
-// (gastrolog-27czpq) uses it to delete local segment files whose release
-// effect this node missed while offline. Registry absence alone is NOT
-// evidence: a completed segment awaiting its distribution publish is also
-// registry-absent, and deleting it would lose ingested records.
+// persisted evidence of release — the staging-orphan sweep uses it to
+// delete local segment files whose release effect this node missed while
+// offline. Registry absence alone is NOT evidence: a completed segment
+// awaiting its distribution publish is also registry-absent, and deleting
+// it would lose ingested records.
 func (f *FSM) SegmentReleased(segmentID glid.GLID) bool {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
@@ -644,7 +644,7 @@ func (f *FSM) applyReleaseSegments(c *gastrologv1.ReleaseSegmentsCommand) []glid
 		}
 		// Apply-time re-check: a proposal raced ahead of a plan command that
 		// referenced this segment. Releasing here would purge the head/ copy
-		// every home still needs to build the queued chunk (gastrolog-67c9b0).
+		// every home still needs to build the queued chunk.
 		// Deterministic — every node sees identical state at this log index.
 		if f.segmentReferencedInManifestLocked(segID) {
 			continue

@@ -18,7 +18,6 @@ func applyLog(f *FSM, data []byte) any {
 // absent from the FSM gets re-introduced when CmdRepatriateChunk
 // fires. State is forced to Sealed regardless of the payload's
 // stated State — repatriation handles sealed chunks only.
-// gastrolog-32bf2.
 func TestApplyRepatriate_HappyPath(t *testing.T) {
 	t.Parallel()
 	f := New()
@@ -80,7 +79,7 @@ func TestApplyRepatriate_RefusesIfAlreadyPresent(t *testing.T) {
 
 // TestApplyRepatriate_RefusesIfTombstoned guards against
 // resurrecting a chunk the cluster has explicitly forgotten —
-// same tombstone guard as CmdCreateChunk (gastrolog-11rzz).
+// same tombstone guard as CmdCreateChunk.
 func TestApplyRepatriate_RefusesIfTombstoned(t *testing.T) {
 	t.Parallel()
 	f := New()

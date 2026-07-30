@@ -39,7 +39,7 @@ type ingester struct {
 	// pressureGate throttles per-container log streaming when the ingest
 	// pipeline is backed up. Pausing emission makes the internal entries
 	// channel fill, blocking readRaw/readMultiplexed which in turn stops
-	// reading from Docker's HTTP log stream. See gastrolog-4fguu.
+	// reading from Docker's HTTP log stream.
 	pressureGate *chanwatch.PressureGate
 }
 

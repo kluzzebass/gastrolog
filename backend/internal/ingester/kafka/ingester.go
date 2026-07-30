@@ -51,7 +51,7 @@ type Ingester struct {
 	// pressureGate throttles PollFetches calls when the ingest pipeline is
 	// backed up. Kafka offset tracking makes pausing lossless — we resume
 	// from the same offset when pressure clears. Injected by the
-	// orchestrator; nil means no throttling. See gastrolog-4fguu.
+	// orchestrator; nil means no throttling.
 	pressureGate *chanwatch.PressureGate
 }
 

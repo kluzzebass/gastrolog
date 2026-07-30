@@ -98,7 +98,7 @@ func readImportDoc(args []string) (exportDoc, error) {
 // readability (printer.json → convertGLIDFields), so the document has to be
 // turned back before it can be decoded — without this, importing an exported
 // document failed on the first entity with an ID ("illegal base64 data"), so
-// no export/import round trip worked at all (gastrolog-2nr3aa).
+// no export/import round trip worked at all.
 //
 // Sections that decode into local structs with string IDs (certificates,
 // users, nodes, managed_files) are left alone: their IDs are already text.
@@ -113,7 +113,7 @@ var protoIDSections = map[string]bool{
 	// Lookups carry file_id fields with the same treatment. Omitting the
 	// section meant an exported file-backed lookup came back as base64-decoded
 	// garbage — 19 bytes that glid.MustParse then PANICKED on, taking down the
-	// settings endpoint (gastrolog-4j7srt / gastrolog-5vqx2r).
+	// settings endpoint.
 	"lookup": true,
 }
 
@@ -201,9 +201,8 @@ type importStep func(context.Context, *server.Client, *resolver, *exportDoc) (in
 // nodes before node storage (node_id) and ingesters (node_ids), vaults before
 // routes (destination vault_id).
 //
-// gastrolog-4kkoo (Phase 5): no FilterConfig entity; a route's match
-// expression is inlined on the route's stages and is imported with the route
-// by importRoutes.
+// There is no FilterConfig entity: a route's match expression is inlined on
+// the route's stages and is imported with the route by importRoutes.
 func importEntities(ctx context.Context, client *server.Client, doc *exportDoc) (int, error) {
 	r, err := newResolver(ctx, client)
 	if err != nil {
@@ -410,8 +409,7 @@ func importRoutes(ctx context.Context, client *server.Client, r *resolver, doc *
 // importLookups restores the enrichment lookup tables. PutLookupSettings
 // replaces each list wholesale when present, so this is also the --replace
 // behaviour: a lookup on the target that the document does not contain is
-// removed, which is what "restore this configuration" has to mean
-// (gastrolog-4j7srt).
+// removed, which is what "restore this configuration" has to mean.
 func importLookups(ctx context.Context, client *server.Client, _ *resolver, doc *exportDoc) (int, error) {
 	if doc.Lookup == nil || doc.Lookup.Msg == nil {
 		return 0, nil
@@ -533,9 +531,9 @@ func ensureProtoID(name string, existing map[string]string, id *[]byte) {
 // Needed because PutLookupSettings replaces a list only when the request
 // CONTAINS it, and proto3 cannot distinguish an empty repeated field from an
 // absent one — so importing a document with no yaml lookups (say) could not
-// clear the target's, and stale enrichment tables would survive a --replace
-// (gastrolog-4j7srt). Split out of deleteAll to keep that function within the
-// cognitive-complexity budget.
+// clear the target's, and stale enrichment tables would survive a --replace.
+// Split out of deleteAll to keep that function within the cognitive-complexity
+// budget.
 func deleteAllLookups(ctx context.Context, client *server.Client) error {
 	settings, err := client.System.GetSettings(ctx, connect.NewRequest(&v1.GetSettingsRequest{}))
 	if err != nil {
@@ -598,8 +596,8 @@ func deleteAll(ctx context.Context, client *server.Client) error {
 			return fmt.Errorf("delete ingester %s: %w", ig.Name, err)
 		}
 	}
-	// gastrolog-4kkoo (Phase 5): no Filters to delete; expressions live on
-	// routes, which are deleted below.
+	// There are no filters to delete; expressions live on routes, which are
+	// deleted below.
 	for _, p := range resp.Msg.RotationPolicies {
 		if _, err := client.System.DeleteRotationPolicy(ctx, connect.NewRequest(&v1.DeleteRotationPolicyRequest{Id: p.Id})); err != nil {
 			return fmt.Errorf("delete rotation policy %s: %w", p.Name, err)

@@ -52,10 +52,10 @@ const addRetentionFormInitial: AddRetentionFormState = {
   newMaxAge: "",
   newMaxBytes: "",
   newMaxChunks: "",
-  // RetentionPolicyConfig.Refuse defaults off (nil reads as false —
-  // gastrolog-5yfaqj: bounds are drain-first, refusal is the explicit
-  // hard mode) — match that here so the add form starts in the same
-  // state a freshly-created policy would resolve to.
+  // RetentionPolicyConfig.Refuse defaults off (nil reads as false — bounds
+  // are drain-first, refusal is the explicit hard mode) — match that here
+  // so the add form starts in the same state a freshly-created policy
+  // would resolve to.
   newRefuse: false,
 };
 
@@ -108,9 +108,9 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
   const effectiveName = newName.trim() || namePlaceholder || "default";
   const nameConflict = existingNames.has(effectiveName);
   const vaults = config?.vaults ?? [];
-  // gastrolog-1rbuf: at least one condition must be set, otherwise the
-  // retention policy is a silent no-op. Backend rejects empty policies
-  // with InvalidArgument; mirror the rule client-side.
+  // At least one condition must be set, otherwise the retention policy is
+  // a silent no-op. Backend rejects empty policies with InvalidArgument;
+  // mirror the rule client-side.
   const newPolicyEmpty = !newMaxAge.trim() && !newMaxBytes.trim() && !newMaxChunks.trim();
 
   const defaults = (id: string): PolicyEdit => {
@@ -264,8 +264,8 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
         const id = encode(pol.id);
         const edit = getEdit(id);
         const refs = vaultRefsForRetentionPolicy(id, vaults);
-        // gastrolog-1rbuf: backend rejects empty policies; disable Save
-        // preemptively if the operator has cleared every condition.
+        // Backend rejects empty policies; disable Save preemptively if the
+        // operator has cleared every condition.
         const editEmpty = !edit.maxAge.trim() && !edit.maxBytes.trim() && !edit.maxChunks.trim();
         return (
           <SettingsCard

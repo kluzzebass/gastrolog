@@ -65,8 +65,8 @@ func newRouteListCmd() *cobra.Command {
 }
 
 // routeExpression returns the first MatchStage expression on the route, or
-// "" if no match stage is present. gastrolog-4kkoo (Phase 5) ships only
-// one stage variant; future stages plug into the same RouteStage oneof.
+// "" if no match stage is present. Match is the only stage variant today;
+// future stages plug into the same RouteStage oneof.
 func routeExpression(r *v1.RouteConfig) string {
 	for _, s := range r.GetStages() {
 		if m := s.GetMatch(); m != nil {
@@ -186,8 +186,7 @@ func newRouteCreateCmd() *cobra.Command {
 
 // resolveRouteFilterAndDestinations applies the --expression and --destination
 // flags onto cfg. It only builds a resolver when --destination is set, since
-// the expression is a free-form string that no longer references a filter
-// entity (gastrolog-4kkoo Phase 5).
+// the expression is a free-form string, not a reference to another entity.
 func resolveRouteFilterAndDestinations(ctx context.Context, cmd *cobra.Command, client *server.Client, cfg *v1.RouteConfig) error {
 	if cmd.Flags().Changed("expression") {
 		expr, _ := cmd.Flags().GetString("expression")

@@ -8,12 +8,11 @@ import (
 )
 
 // TestApplyVaultFlagsRetentionDisposition exercises the
-// --retention-disposition validation switch directly (gastrolog-2l918:
-// disposition gains "transfer" alongside "delete"/"route"). No live client
-// is touched — a nil *server.Client is safe here because none of these
-// flag values are changed, so applyVaultFlags never reaches a
-// client-resolving branch (cloud-service, rotation-policy, retention-policy,
-// retention-transfer-target).
+// --retention-disposition validation switch directly (disposition accepts
+// "transfer" alongside "delete"/"route"). No live client is touched — a nil
+// *server.Client is safe here because none of these flag values are changed,
+// so applyVaultFlags never reaches a client-resolving branch (cloud-service,
+// rotation-policy, retention-policy, retention-transfer-target).
 func TestApplyVaultFlagsRetentionDisposition(t *testing.T) {
 	tests := []struct {
 		name    string

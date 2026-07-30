@@ -254,8 +254,7 @@ func newNodeListStorageCmd() *cobra.Command {
 // thresholdExprLabel renders an EFFECTIVE threshold expression with its
 // provenance for the config-listing view: "(default)" when isDefault, the
 // bare expression otherwise. There is no configurable node-level override
-// to inherit from (gastrolog-2mrfdw removed the env channel), so an unset
-// expression is DEFAULTED, never "inherited" (gastrolog-3cobq4 review).
+// to inherit from, so an unset expression is DEFAULTED, never "inherited".
 // Unlike inspect storage's thresholdLabel, this has no live-guard bytes to
 // show — list-storage is a config view, not a live-state view — so it
 // renders the expression alone, verbatim from config, never re-derived.
@@ -269,7 +268,7 @@ func thresholdExprLabel(expr string, isDefault bool) string {
 // fileStoragesForNode returns the existing FileStorages for nodeID. NodeId on
 // the wire is the UTF-8 GLID string ([]byte(cfg.NodeID)) — decode with
 // string(), like list-storage. Decoding as binary GLID bytes made add-storage
-// miss the existing config and clobber it instead of merging (gastrolog-4gp8h).
+// miss the existing config and clobber it instead of merging.
 func fileStoragesForNode(nscs []*v1.NodeStorageConfig, nodeID string) []*v1.FileStorage {
 	for _, nsc := range nscs {
 		if string(nsc.NodeId) == nodeID {

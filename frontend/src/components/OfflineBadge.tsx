@@ -7,11 +7,10 @@ import { useTick } from "./inspector/JobCard";
 // cluster: ClusterNode.last_seen, which the backend fills from
 // PeerState.LastSeen (the max of last Raft contact and last stats broadcast).
 //
-// This badge previously timed the duration itself, from Date.now() at the
-// moment THIS TAB first saw stats go missing, held in a module-level Map. That
-// measured how long the tab had been open, not how long the node had been gone:
-// two tabs disagreed, a reload reset it, and a node down for hours read
-// "offline 5s" to whoever had just opened the panel. See gastrolog-231eli.
+// Timing the duration in the browser instead — from the moment THIS TAB first
+// saw stats go missing — measured how long the tab had been open, not how long
+// the node had been gone: two tabs disagreed, a reload reset it, and a node
+// down for hours read "offline 5s" to whoever had just opened the panel.
 //
 // The local clock still appears here, in useTick and in the elapsed
 // subtraction, and that is fine — the ORIGIN is authoritative and only the

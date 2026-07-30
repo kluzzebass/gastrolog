@@ -23,7 +23,7 @@ import (
 // system.Config for the owning list). What cannot be restored is named in
 // Excluded rather than dropped in silence — a document titled "full
 // configuration" that quietly omits a config type asserts a completeness it
-// does not have (gastrolog-2nr3aa).
+// does not have.
 type exportDoc struct {
 	// Excluded and ContainsSecrets are emitted first, unconditionally, so
 	// the limits of the document are the first thing a reader sees.
@@ -31,7 +31,7 @@ type exportDoc struct {
 	ContainsSecrets []string        `json:"contains_secrets"`
 
 	// Entity collections.
-	// gastrolog-4kkoo (Phase 5): no Filters; expressions live inline on routes.
+	// There is no filters section; expressions live inline on routes.
 	RotationPolicies   protoList[*v1.RotationPolicyConfig]  `json:"rotation_policies,omitempty"`
 	RetentionPolicies  protoList[*v1.RetentionPolicyConfig] `json:"retention_policies,omitempty"`
 	CloudServices      protoList[*v1.CloudService]          `json:"cloud_services,omitempty"`
@@ -55,9 +55,9 @@ type exportDoc struct {
 	// Lookup carries the enrichment lookup tables (HTTP, JSON/YAML file, MMDB,
 	// CSV, static). These were silently absent from the document — not
 	// exported, not imported, and not named in `excluded` either, so a restore
-	// dropped every lookup definition with nothing to indicate it
-	// (gastrolog-4j7srt). The uploaded blobs they reference are separately
-	// excluded as managed files; this is the configuration that points at them.
+	// dropped every lookup definition with nothing to indicate it. The
+	// uploaded blobs they reference are separately excluded as managed files;
+	// this is the configuration that points at them.
 	Lookup               *protoMsg[*v1.LookupSettings] `json:"lookup,omitempty"`
 	SetupWizardDismissed bool                          `json:"setup_wizard_dismissed,omitempty"`
 }

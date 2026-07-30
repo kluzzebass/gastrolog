@@ -55,10 +55,9 @@ function CompactView({
           <CompactStatRow label="Stack" value={formatBytes(Number(stats.memoryStackInuse))} mono dark={dark} />
           <CompactStatRow label="GC Cycles" value={stats.numGc.toLocaleString()} mono dark={dark} />
           {/* Diagnostic log records discarded because the capture channel was
-              full (gastrolog-3phtqv). Shown only once it happens: at zero
-              there is nothing to say, and it is a capacity signal to trend,
-              not a condition to act on — hence a stat here rather than an
-              alarm. */}
+              full. Shown only once it happens: at zero there is nothing to
+              say, and it is a capacity signal to trend, not a condition to
+              act on — hence a stat here rather than an alarm. */}
           {stats.selfIngesterDropsTotal > BigInt(0) && (
             <CompactStatRow
               label="Log Drops"
@@ -105,11 +104,10 @@ function CompactView({
                 dark={dark}
               />
             )}
-            {/* Ingest pressure raises no alarm (gastrolog-3phtqv): a throttled
-                pipeline is a handled condition, not one waiting on an
-                operator. It is shown here, next to the queue depth it derives
-                from, and only once it leaves normal — at normal there is
-                nothing to say. */}
+            {/* Ingest pressure raises no alarm: a throttled pipeline is a
+                handled condition, not one waiting on an operator. It is shown
+                here, next to the queue depth it derives from, and only once it
+                leaves normal — at normal there is nothing to say. */}
             {stats.ingestPressureLevel !== "" && stats.ingestPressureLevel !== "normal" && (
               <CompactStatRow
                 label="Pressure"
@@ -121,9 +119,9 @@ function CompactView({
         </section>
       )}
 
-      {/* Pipeline throughput: rolling-window rates from the stats broadcast
-          (gastrolog-4eh5ns). Section appears once the node has routing
-          activity or a local segmentation writer. */}
+      {/* Pipeline throughput: rolling-window rates from the stats broadcast.
+          Section appears once the node has routing activity or a local
+          segmentation writer. */}
       {(Number(stats.routeStatsRouted) > 0 || stats.vaults.some((v) => v.appendQueueCapacity > 0)) && (
         <section>
           <CompactDivider dark={dark} />
@@ -163,10 +161,9 @@ function CompactView({
             <CompactStatRow label="FSM Pending" value={stats.raftFsmPending.toString()} mono dark={dark} />
             <CompactStatRow label="Last Contact" value={stats.raftLastContact || "never"} dark={dark} />
           </div>
-          {/* Raft liveness (gastrolog-1io54g): WAL append health and election
-              churn across every group on this node. Elections/min above ~3
-              sustained is a storm; WAL max latency near 1s means bulk I/O is
-              starving consensus. */}
+          {/* Raft liveness: WAL append health and election churn across every
+              group on this node. Elections/min above ~3 sustained is a storm;
+              WAL max latency near 1s means bulk I/O is starving consensus. */}
           {stats.raftWalAppendsTotal > 0 && (
             <div className="grid grid-cols-2 gap-x-6 gap-y-1 mt-1">
               <CompactStatRow
@@ -356,7 +353,7 @@ export function ClusterSummaryView({
         </div>
       </section>
 
-      {/* Cluster throughput: summed rolling-window rates (gastrolog-4eh5ns) */}
+      {/* Cluster throughput: summed rolling-window rates */}
       <CompactDivider dark={dark} />
       <section>
         <CompactSectionLabel label="Throughput" dark={dark} />

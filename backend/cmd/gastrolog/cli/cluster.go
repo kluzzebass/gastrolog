@@ -86,9 +86,9 @@ func newClusterStatusCmd() *cobra.Command {
 				p.table([]string{"ID", "NAME", "ADDRESS", "ROLE", "SUFFRAGE"}, rows)
 			}
 
-			// Standing alerts directly after topology (gastrolog-33d9n2):
-			// alarms are state, not events — when a suspended system goes
-			// log-silent, this table is what still says why.
+			// Standing alerts directly after topology: alarms are state,
+			// not events — when a suspended system goes log-silent, this
+			// table is what still says why.
 			if alertRows := systemAlertRows(msg.Nodes); len(alertRows) > 0 {
 				fmt.Println()
 				p.table([]string{"NODE", "STATE", "PRIORITY", "SOURCE", "DETAIL", "FIRST SEEN"}, alertRows)
@@ -128,9 +128,9 @@ func newClusterStatusCmd() *cobra.Command {
 	}
 }
 
-// raftLivenessRows builds the per-node Raft liveness table (gastrolog-1io54g)
-// — parity with the inspector's Raft section. Nodes with no WAL appends are
-// skipped: they run no Raft group and have nothing to report.
+// raftLivenessRows builds the per-node Raft liveness table — parity with the
+// inspector's Raft section. Nodes with no WAL appends are skipped: they run
+// no Raft group and have nothing to report.
 func raftLivenessRows(nodes []*v1.ClusterNode) [][]string {
 	var rows [][]string
 	for _, n := range nodes {
@@ -149,10 +149,10 @@ func raftLivenessRows(nodes []*v1.ClusterNode) [][]string {
 	return rows
 }
 
-// logDropRows builds the per-node discarded-diagnostic-log table
-// (gastrolog-3phtqv) — parity with the inspector's System section. Nodes that
-// have dropped nothing are skipped: at zero there is nothing to report, and
-// this is a capacity signal to trend, not an alarm to act on.
+// logDropRows builds the per-node discarded-diagnostic-log table — parity
+// with the inspector's System section. Nodes that have dropped nothing are
+// skipped: at zero there is nothing to report, and this is a capacity signal
+// to trend, not an alarm to act on.
 func logDropRows(nodes []*v1.ClusterNode) [][]string {
 	var rows [][]string
 	for _, n := range nodes {
@@ -167,10 +167,10 @@ func logDropRows(nodes []*v1.ClusterNode) [][]string {
 	return rows
 }
 
-// ingestPressureRows builds the per-node ingest-pressure table
-// (gastrolog-3phtqv) — parity with the inspector's Ingest Queue section.
-// Nodes at normal are skipped: a throttled pipeline is a handled condition
-// reported for trending, not an alarm, and normal is the uneventful case.
+// ingestPressureRows builds the per-node ingest-pressure table — parity with
+// the inspector's Ingest Queue section. Nodes at normal are skipped: a
+// throttled pipeline is a handled condition reported for trending, not an
+// alarm, and normal is the uneventful case.
 func ingestPressureRows(nodes []*v1.ClusterNode) [][]string {
 	var rows [][]string
 	for _, n := range nodes {
@@ -188,8 +188,7 @@ func ingestPressureRows(nodes []*v1.ClusterNode) [][]string {
 
 // newClusterThroughputCmd shows the pipeline throughput rates the inspector
 // displays: cluster-total routing rates from GetRouteStats and per-node,
-// per-vault segmentation append rates from the NodeStats broadcast
-// (gastrolog-4eh5ns).
+// per-vault segmentation append rates from the NodeStats broadcast.
 func newClusterThroughputCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "throughput",
@@ -234,7 +233,7 @@ func newClusterThroughputCmd() *cobra.Command {
 					}
 					// APPEND (ingest) vs BUILD (chunk build) are the two ends of
 					// the "did the consume side keep up?" question — kept side by
-					// side so the answer is one glance (gastrolog-423tpt).
+					// side so the answer is one glance.
 					rows = append(rows, []string{
 						n.Name,
 						vs.Name,
@@ -278,8 +277,8 @@ func newClusterThroughputCmd() *cobra.Command {
 
 // vaultHasStageActivity reports whether a vault has any non-zero discrete
 // pipeline stage-count milestone on this node, so the stage-counter table only
-// lists vaults that actually reached a stage here (gastrolog-4r784a). Pure so
-// the row-inclusion rule is unit-testable without a live cluster.
+// lists vaults that actually reached a stage here. Pure so the row-inclusion
+// rule is unit-testable without a live cluster.
 func vaultHasStageActivity(vs *v1.VaultStats) bool {
 	if vs == nil {
 		return false
@@ -422,10 +421,10 @@ func newClusterRemoveNodeCmd() *cobra.Command {
 }
 
 // newClusterDemoteSelfCmd is the preStop-hook command for K8s
-// rolling-restart / scale-down (gastrolog-24iv4 Step A): the pod tells
-// the cluster to remove this node from Raft membership before SIGTERM
-// arrives. Returns success once the RemoveServer commit has propagated,
-// so the pod terminates without leaving a stranded voter behind.
+// rolling-restart / scale-down: the pod tells the cluster to remove this
+// node from Raft membership before SIGTERM arrives. Returns success once the
+// RemoveServer commit has propagated, so the pod terminates without leaving
+// a stranded voter behind.
 //
 // Distinct from `cluster remove-node`: that requires an operator to
 // specify the target node by name. demote-self looks up its own name
@@ -480,21 +479,21 @@ func newClusterDemoteSelfCmd() *cobra.Command {
 
 			_, err = client.Lifecycle.RemoveNode(context.Background(), connect.NewRequest(&v1.RemoveNodeRequest{
 				NodeId: []byte(id),
-				// gastrolog-24iv4: opt out of the operator-typo guard;
-				// this RPC IS the self-remove path. allow_self also
-				// selects the optimistic RF-preservation policy on the
-				// leader (gastrolog-3vyex): a removal that merely drops a
-				// vault below its replication factor is allowed here and
-				// re-placed by placement reconcile, where the same
-				// removal typed by an operator would be refused.
+				// Opt out of the operator-typo guard; this RPC IS the
+				// self-remove path. allow_self also selects the
+				// optimistic RF-preservation policy on the leader: a
+				// removal that merely drops a vault below its
+				// replication factor is allowed here and re-placed by
+				// placement reconcile, where the same removal typed by
+				// an operator would be refused.
 				AllowSelf: true,
-				// Force bypasses the orphan-refusal gate (gastrolog-2ch9y).
-				// demote-self runs from K8s preStop, where the pod is
-				// terminating regardless — refusing here would leave the
-				// Raft membership stale (the very hazard 24iv4 + 6bfwk
-				// were designed to close) without preventing the orphan,
-				// since the pod still goes away when SIGKILL hits the
-				// preStop deadline. The operator-facing `cluster remove-node`
+				// Force bypasses the orphan-refusal gate. demote-self
+				// runs from K8s preStop, where the pod is terminating
+				// regardless — refusing here would leave the Raft
+				// membership stale (the exact hazard the preStop path
+				// exists to close) without preventing the orphan, since
+				// the pod still goes away when SIGKILL hits the preStop
+				// deadline. The operator-facing `cluster remove-node`
 				// path keeps the gate; demote-self is the programmatic
 				// shutdown sequence and runs unconditionally.
 				Force: true,
@@ -517,7 +516,7 @@ func newClusterDemoteSelfCmd() *cobra.Command {
 // leadership if it holds it, and is a no-op otherwise. The node stays
 // in the cluster's voter set; the brief absence during pod restart is
 // handled by normal Raft heartbeat timeout, and the node rejoins as a
-// known follower when it comes back. See gastrolog-2yeie.
+// known follower when it comes back.
 //
 // Use this for k8s preStop hooks where the pod is being restarted, not
 // permanently removed. For true scale-down, the operator should call

@@ -7,8 +7,8 @@ import (
 	"gastrolog/internal/ingester/identitytest"
 )
 
-// TestEventIDIdentity pins gastrolog-44b9r for the OTLP ingester. The
-// shared listenAndStartOTLP helper hard-codes the ingester ID to
+// TestEventIDIdentity pins the identity invariant for the OTLP ingester.
+// The shared listenAndStartOTLP helper hard-codes the ingester ID to
 // "test-otlp"; we round-trip an OTLP record and assert that ID
 // arrives on the IngestMessage along with a non-zero IngestTS.
 func TestEventIDIdentity(t *testing.T) {

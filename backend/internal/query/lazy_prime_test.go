@@ -182,7 +182,7 @@ func TestLazyPrimeUnlimitedSearchCorrectness(t *testing.T) {
 	}
 }
 
-// TestLazyPrimeBoundedOpensAtManyChunks guards gastrolog-2o9e9 acceptance: cursor
+// TestLazyPrimeBoundedOpensAtManyChunks guards the lazy-prime bound: cursor
 // opens must not scale with total chunk count when the result limit is small.
 func TestLazyPrimeBoundedOpensAtManyChunks(t *testing.T) {
 	t.Parallel()

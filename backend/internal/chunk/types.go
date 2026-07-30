@@ -21,7 +21,6 @@ var (
 	// as a benign no-op (chunk absent = goal achieved). Lives in this shared
 	// package so both the orchestrator (producer) and cluster replication
 	// handlers (consumer) can reference it without circular imports.
-	// See gastrolog-11rzz.
 	ErrChunkTombstoned = errors.New("chunk is tombstoned")
 )
 
@@ -146,7 +145,7 @@ type RecordRef struct {
 // ChunkState is the explicit lifecycle stage of a chunk on the vault-ctl
 // FSM. Active → Sealing → Sealed. The Sealing window is the period
 // between rotation (leader stops accepting appends) and FSM commit of
-// the sealed-form GLCB. See gastrolog-1huz5.
+// the sealed-form GLCB.
 type ChunkState uint8
 
 const (
@@ -194,7 +193,7 @@ type ChunkMeta struct {
 	// during the migration so consumers that haven't audited yet see
 	// the safe "treat as sealed" branch. New code should branch on State.
 	Sealed bool
-	// State is the explicit three-state lifecycle. See gastrolog-1huz5.
+	// State is the explicit three-state lifecycle.
 	// Zero value (ChunkStateUnknown) round-trips legacy entries that
 	// pre-date the field — callers fall back to Sealed in that case.
 	State ChunkState
@@ -230,23 +229,22 @@ type ChunkMeta struct {
 	// when physical record position equals IngestTS-sorted rank
 	// (monotonic) vs when it doesn't (non-monotonic). Histograms use
 	// this to pick between fast O(buckets × log N) rank arithmetic
-	// and the slower full-scan bucketize path. See gastrolog-66b7x.
+	// and the slower full-scan bucketize path.
 	IngestTSMonotonic bool
 	CloudBacked       bool   // true = chunk lives in cloud storage, not local disk
 	Archived          bool   // true = chunk is in an offline storage class (Glacier, Azure Archive)
 	CloudStorageClass string // cloud archival tier (e.g. "GLACIER", "cold", "Archive"); empty = standard
 }
 
-// EventID uniquely identifies a record across the cluster.
-// Composed of the ingester's UUID, the emitting node's UUID, the ingestion
-// timestamp, and a per-ingester rolling sequence number. NodeID is required
-// because singleton/parallel HA (gastrolog-2kcw4) allows the same ingester
-// to run concurrently on multiple nodes, each maintaining its own
-// per-ingester sequence counter — without NodeID in the identity key,
-// two nodes can legitimately mint the same (IngesterID, IngestTS, IngestSeq)
-// tuple in the same microsecond.
-// All fields are fixed-size value types, so EventID is comparable and usable
-// as a map key.
+// EventID uniquely identifies a record across the cluster. Composed of the
+// ingester's UUID, the emitting node's UUID, the ingestion timestamp, and a
+// per-ingester rolling sequence number. NodeID is required because
+// singleton/parallel HA allows the same ingester to run concurrently on
+// multiple nodes, each maintaining its own per-ingester sequence counter —
+// without NodeID in the identity key, two nodes can legitimately mint the
+// same (IngesterID, IngestTS, IngestSeq) tuple in the same microsecond. All
+// fields are fixed-size value types, so EventID is comparable and usable as
+// a map key.
 type EventID struct {
 	IngesterID glid.GLID
 	NodeID     glid.GLID

@@ -1,7 +1,7 @@
 import type { SealPip, PipState } from "./sealPipState";
 
 // SealPips renders the per-node copy-seal lifecycle for one chunk row
-// (gastrolog-4fzwu3; design reference docs/mockups/seal-pips.html).
+// (design reference docs/mockups/seal-pips.html).
 // One circle per placement node, identical order in every row. Fill
 // degree carries the lifecycle (hollow → half → solid) so the grammar
 // survives colorblindness and small sizes; color is secondary. Ghost

@@ -321,7 +321,7 @@ export function useSearchView() {
   // Sync draft when URL changes (browser back/forward, time-range picker,
   // histogram bucket click). Do NOT reset pollInterval — the operator
   // explicitly selected a refresh cadence and expects it to keep firing
-  // against whatever range is currently shown. See gastrolog-5tl95.
+  // against whatever range is currently shown.
   const [prevQ, setPrevQ] = useState(q);
   if (q !== prevQ) {
     setPrevQ(q);
@@ -364,7 +364,7 @@ export function useSearchView() {
           const key = lastMatch[1];
           if (key === "all") {
             // Explicit unbounded range — distinct from "no last= directive
-            // at all" which gets default-injected. See gastrolog-2zdsc.
+            // at all" which gets default-injected.
             setTimeRange("All");
             setRangeStart(null);
             setRangeEnd(null);
@@ -506,7 +506,7 @@ export function useSearchView() {
     if (!pollInterval || isFollowMode) return;
     // Leading-edge fire on Off→on (and on any cadence change): operator
     // expects movement immediately when picking a refresh interval, not
-    // after waiting one full tick. See gastrolog-5tl95.
+    // after waiting one full tick.
     searchRef.current(qRef.current, false, false, true);
     const id = setInterval(() => {
       searchRef.current(qRef.current, false, false, true);

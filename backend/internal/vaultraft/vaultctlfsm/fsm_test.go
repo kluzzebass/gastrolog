@@ -78,9 +78,8 @@ func TestFSMSeal(t *testing.T) {
 	}
 }
 
-// TestFSMChunkStateTransitions exercises Phase 3's three-state lifecycle:
+// TestFSMChunkStateTransitions exercises the three-state lifecycle:
 // CmdCreateChunk → Active, CmdBeginSeal → Sealing, CmdSealChunk → Sealed.
-// gastrolog-1huz5.
 func TestFSMChunkStateTransitions(t *testing.T) {
 	fsm := New()
 	id := testChunkID(99)
@@ -120,7 +119,7 @@ func TestFSMChunkStateTransitions(t *testing.T) {
 
 // TestFSMBeginSealIdempotent verifies that a stale BeginSeal replay
 // does not regress a Sealed chunk back to Sealing. Important for
-// snapshot replay and Raft log catchup. gastrolog-1huz5.
+// snapshot replay and Raft log catchup.
 func TestFSMBeginSealIdempotent(t *testing.T) {
 	fsm := New()
 	id := testChunkID(98)
@@ -144,7 +143,6 @@ func TestFSMBeginSealIdempotent(t *testing.T) {
 
 // TestFSMSnapshotPreservesState verifies the State field round-trips
 // through the snapshot encoder/decoder for each lifecycle stage.
-// gastrolog-1huz5.
 func TestFSMSnapshotPreservesState(t *testing.T) {
 	fsm := New()
 	now := time.Now().Truncate(time.Nanosecond)
@@ -312,7 +310,7 @@ func TestFSMSnapshotRestore(t *testing.T) {
 
 // TestFSMSnapshotRestoreTombstones verifies that tombstones round-trip
 // through Snapshot/Restore so receivers keep rejecting stale replication
-// commands across restarts and snapshot installs. See gastrolog-11rzz.
+// commands across restarts and snapshot installs.
 func TestFSMSnapshotRestoreTombstones(t *testing.T) {
 	fsm := New()
 	now := time.Now().Truncate(time.Nanosecond)

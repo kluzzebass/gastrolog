@@ -11,7 +11,7 @@ export function usePipelineBacklog(vaultId: string) {
       const response = await vaultClient.getPipelineBacklog({ vault: vaultId });
       // Stash the fan-out contribution report so the pipeline view can flag
       // cluster-wide segment totals that omit an unreachable node. Absent
-      // report clears any stale flag — quiet-until-needed (gastrolog-1ic07).
+      // report clears any stale flag — quiet-until-needed.
       qc.setQueryData<ContributionReport | null>(
         ["pipeline-backlog-contribution", vaultId],
         response.contributionReport ?? null,
@@ -29,8 +29,7 @@ export function usePipelineBacklog(vaultId: string) {
  * fan-out contribution report for a vault, or null when the last cross-node
  * segment-count merge reached every peer. Written as a side-effect of
  * usePipelineBacklog; this reader subscribes to the sibling cache key so the
- * pipeline view re-renders when the merge degrades or recovers. See
- * gastrolog-1ic07.
+ * pipeline view re-renders when the merge degrades or recovers.
  */
 export function usePipelineBacklogContribution(vaultId: string): ContributionReport | null {
   const qc = useQueryClient();

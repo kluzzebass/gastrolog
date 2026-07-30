@@ -16,9 +16,9 @@ import type { SettingsTab } from "./SettingsDialog";
 import { sortByName } from "../../lib/sort";
 import type { RouteConfig } from "../../api/gen/gastrolog/v1/system_pb";
 
-// gastrolog-4kkoo (Phase 5): the route's gating predicate is the inline
-// expression on the first MatchStage. Future stage kinds (gastrolog-5e85x:
-// enrich, redact, sample, fork, route_by_field) plug into the same oneof.
+// The route's gating predicate is the inline expression on the first
+// MatchStage. Planned stage kinds (enrich, redact, sample, fork,
+// route_by_field) plug into the same oneof.
 function routeExpression(r: RouteConfig): string {
   for (const stage of r.stages) {
     if (stage.stage.case === "match") return stage.stage.value.expression;

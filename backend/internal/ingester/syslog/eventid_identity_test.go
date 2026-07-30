@@ -9,7 +9,7 @@ import (
 	"gastrolog/internal/pipeline/ingestion"
 )
 
-// TestEventIDIdentity pins gastrolog-44b9r for the syslog ingester
+// TestEventIDIdentity pins the identity invariant for the syslog ingester
 // (UDP path).
 func TestEventIDIdentity(t *testing.T) {
 	t.Parallel()

@@ -17,7 +17,7 @@ import (
 	"gastrolog/internal/system"
 )
 
-// Initial admin user provisioning (gastrolog-3ot7r).
+// Initial admin user provisioning.
 //
 // Container orchestrators (Docker Compose, Kubernetes) need a way to
 // inject the initial admin credentials at boot without an interactive

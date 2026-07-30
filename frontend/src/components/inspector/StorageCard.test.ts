@@ -5,7 +5,7 @@ import { storageVerdictLabel, thresholdLabel } from "./StorageCard";
 // healthy, "warn" below the warn threshold, "protected" below the floor
 // (which supersedes warn — a storage can't be simultaneously warn-only and
 // protected). Both inputs are the server-computed, hysteresis-aware
-// booleans the admission gate itself consults (gastrolog-3cobq4);
+// booleans the admission gate itself consults;
 // storageVerdictLabel does no derivation, only a two-flag → label mapping,
 // mirroring the CLI's storageVerdict for UI/CLI parity.
 describe("storageVerdictLabel", () => {
@@ -31,7 +31,7 @@ describe("storageVerdictLabel", () => {
 // value is what matters" convention and the CLI's identical helper. expr
 // is always the effective, non-empty expression from the wire.
 describe("thresholdLabel", () => {
-  test("defaulted threshold labels the source as \"default\", not \"inherited\" — there is no configurable node-level override to inherit from (gastrolog-2mrfdw)", () => {
+  test("defaulted threshold labels the source as \"default\", not \"inherited\" — there is no configurable node-level override to inherit from", () => {
     expect(thresholdLabel("10%", true, 3_000_000_000n)).toBe("2.8 GiB (10%, default)");
   });
 

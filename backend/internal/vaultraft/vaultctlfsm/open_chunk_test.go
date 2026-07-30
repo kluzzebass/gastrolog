@@ -277,7 +277,7 @@ func TestReleaseSegments(t *testing.T) {
 	// segA is referenced by the open chunk manifest: the apply-time guard must
 	// refuse the release even though a (buggy or racing) leader proposed it.
 	// Releasing a referenced segment purges the head/ copy homes still need to
-	// build the chunk (gastrolog-67c9b0).
+	// build the chunk.
 	applyCmd(t, fsm, MarshalReleaseSegments([]glid.GLID{segA}))
 	if fsm.GetCompletedSegment(segA) == nil {
 		t.Fatal("segA is referenced by the open chunk; release must be refused")

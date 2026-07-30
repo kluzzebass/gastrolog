@@ -51,7 +51,7 @@ export function histogramBucketsToData(
 // cloud-estimate provenance as the sidebar histogram's HasCloudData/
 // CloudCount fields, so the "table" chart view of a timechart pipeline
 // result labels applyCloudSelectivity-derived buckets consistently with the
-// sidebar rather than always reading as exact. See gastrolog-4of7c.
+// sidebar rather than always reading as exact.
 const CLOUD_FLAG_COLUMN = "_has_cloud_data";
 const CLOUD_COUNT_COLUMN = "_cloud_count";
 

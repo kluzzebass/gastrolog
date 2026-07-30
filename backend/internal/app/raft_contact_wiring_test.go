@@ -54,8 +54,9 @@ func TestWireRaftContactRecorder_NilInputsAreNoOps(t *testing.T) {
 
 // The Raft evidence window is derived from the failure detector rather than
 // hardcoded, so widening the detector widens liveness with it. A liveness
-// window stricter than the consensus timeout it serves is the gastrolog-1io54g
-// inversion, and it must stay unrepresentable here too.
+// window stricter than the consensus timeout it serves is the inversion that
+// had to be unwound inside the transport, and it must stay unrepresentable
+// here too.
 func TestRaftContactTTL_TracksTheFailureDetector(t *testing.T) {
 	// Not parallel: ConfigureTimeouts mutates package-level raftgroup state.
 	base, _, baseLease := raftgroup.RaftTimeouts(raftgroup.GroupConfig{})

@@ -16,7 +16,7 @@ import (
 // being counted while retention starved on chunks it didn't hold) and
 // made residency non-monotonic (full placement set collapsing to the
 // true holders when the first receipt landed — the sealed-pips-regress-
-// to-amber bug, gastrolog-68wsli).
+// to-amber bug).
 
 // applyAckChunkHolder appends nodeID to each chunk's holder set. Idempotent
 // per chunk; unknown chunk IDs are skipped (sealed-then-expunged races).

@@ -1,8 +1,8 @@
 package query_test
 
-// Tests for gastrolog-4of7c: applyCloudSelectivity scales a cloud-backed
-// bucket's contribution by a single global local-filter ratio. That derived
-// count must be visibly labeled as an estimate wherever it surfaces:
+// Tests for applyCloudSelectivity, which scales a cloud-backed bucket's
+// contribution by a single global local-filter ratio. That derived count
+// must be visibly labeled as an estimate wherever it surfaces:
 //   - ComputeHistogram's HistogramBucket.HasCloudData/CloudCount (sidebar
 //     "Volume" histogram — search_histogram.go buildHistogramBuckets).
 //   - runTimechart's TableResult sentinel columns (the `| timechart`

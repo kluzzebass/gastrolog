@@ -31,7 +31,7 @@ func mkAlert(id string, pri v1.AlarmPriority, source, detail string, firstSeen t
 
 // TestCollectNodeAlerts_Attribution verifies each alert row carries the name
 // of the node that raised it — the same alert ID on two nodes stays two
-// attributed rows, never merged (gastrolog-33d9n2).
+// attributed rows, never merged.
 func TestCollectNodeAlerts_Attribution(t *testing.T) {
 	t.Parallel()
 	t0 := time.Date(2026, 7, 17, 10, 0, 0, 0, time.UTC)

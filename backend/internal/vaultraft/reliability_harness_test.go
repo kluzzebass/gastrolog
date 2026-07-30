@@ -59,12 +59,12 @@ const (
 	// apply) is CPU-bound in-process activity, so under multi-suite
 	// contention a fixed wall-clock budget buys an arbitrary fraction of the
 	// compute — TestReliability_ConcurrentWrites_NoDivergence starved and
-	// failed at 10.5s under full-suite load despite passing solo in ~1s
-	// (gastrolog-1pqndk). A wait fails only when its observed progress
-	// metric has not changed for this stall window. The window sits well
-	// above any legitimate quiet period in this harness — the raft config
-	// above uses 300ms election/heartbeat timeouts, so even several stalled
-	// election rounds under contention fit comfortably inside it.
+	// failed at 10.5s under full-suite load despite passing solo in ~1s. A
+	// wait fails only when its observed progress metric has not changed for
+	// this stall window. The window sits well above any legitimate quiet
+	// period in this harness — the raft config above uses 300ms
+	// election/heartbeat timeouts, so even several stalled election rounds
+	// under contention fit comfortably inside it.
 	harnessStallWindow = 60 * time.Second
 	// harnessHardBackstop bounds total wait time even while progress
 	// trickles, so a livelocked metric (one that keeps changing without ever
@@ -357,11 +357,11 @@ func (h *reliabilityHarness) leader() *reliabilityNode {
 // aggressive 300ms election timeouts, leadership can move mid-apply — either
 // spontaneously when a loaded machine starves heartbeats (hraft returns
 // ErrLeadershipLost for a mid-commit step-down; observed under full-suite
-// runs, gastrolog-2qqp8l) or when a scenario forces a transfer. These are
-// documented retryable transients, not quorum failures; re-applying the same
-// command bytes is safe because the FSM apply is convergent (applyCreate
-// overwrites with identical values). A real quorum loss still fails: the
-// retries stall out against the shared progress-wait window.
+// runs) or when a scenario forces a transfer. These are documented
+// retryable transients, not quorum failures; re-applying the same command
+// bytes is safe because the FSM apply is convergent (applyCreate overwrites
+// with identical values). A real quorum loss still fails: the retries stall
+// out against the shared progress-wait window.
 func (h *reliabilityHarness) applyInstanceCreate(vaultID glid.GLID, chunkID chunk.ChunkID, at time.Time) {
 	h.t.Helper()
 	wire := vaultctlfsm.MarshalCreateChunk(chunkID, at, at, at)
@@ -372,10 +372,10 @@ func (h *reliabilityHarness) applyInstanceCreate(vaultID glid.GLID, chunkID chun
 // currently leads, with the same transient-retry policy as
 // applyInstanceCreate. Stopped nodes can't win elections, so following
 // h.leader() never resurrects a downed leader in failover scenarios.
-// Progress-based (gastrolog-1pqndk): retries across leadership transitions
-// are themselves expected under contention, so this only fails when the
-// same (leader, error) pair repeats for the stall window — genuinely no
-// forward motion — rather than a fixed retry deadline.
+// Progress-based: retries across leadership transitions are themselves
+// expected under contention, so this only fails when the same (leader,
+// error) pair repeats for the stall window — genuinely no forward motion —
+// rather than a fixed retry deadline.
 func (h *reliabilityHarness) applyCommand(cmd []byte, what string) {
 	h.t.Helper()
 	h.waitProgress(what, 50*time.Millisecond, func() (string, bool) {

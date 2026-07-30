@@ -21,10 +21,10 @@ export function applyStatusMessage(qc: QueryClient, msg: WatchSystemStatusRespon
   }
   // storages is always present on the message proto (buildSystemStatus
   // populates it unconditionally, an empty slice included) — write
-  // unconditionally too, same as routeStats above. The old `length > 0`
-  // guard silently kept the LAST-deleted storage's card in the cache
-  // forever, because a config edit that leaves zero storages never writes
-  // anything to overwrite the stale non-empty list (gastrolog-3cobq4 review).
+  // unconditionally too, same as routeStats above. A `length > 0` guard
+  // silently kept the LAST-deleted storage's card in the cache forever,
+  // because a config edit that leaves zero storages never writes anything
+  // to overwrite the stale non-empty list.
   qc.setQueryData(["storages"], msg.storages);
   if (msg.stats) {
     qc.setQueryData(["stats", "all"], msg.stats);

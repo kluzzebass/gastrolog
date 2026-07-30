@@ -3,13 +3,13 @@ import { chunkDiskClaimBytes, vaultRefusingCauseLabels, vaultRefusalDetails } fr
 import { ChunkMeta, VaultAdmissionCause, VaultAdmissionRefusal } from "../../api/gen/gastrolog/v1/vault_pb";
 
 // Test helper: refusals arrive on the wire as VaultAdmissionRefusal{cause,
-// detail} (gastrolog-9akebz) — build them tersely for cause-only assertions.
+// detail} — build them tersely for cause-only assertions.
 function refusal(cause: VaultAdmissionCause, detail = ""): VaultAdmissionRefusal {
   return new VaultAdmissionRefusal({ cause, detail });
 }
 
-// Pins the gastrolog-33ul6h fix: the vault size badge and per-row size cell
-// both sum this LOCAL disk claim, never the cloud object size and never a
+// Pins the size accounting: the vault size badge and per-row size cell both
+// sum this LOCAL disk claim, never the cloud object size and never a
 // logical-bytes fallback for an evicted cloud-backed chunk.
 describe("chunkDiskClaimBytes", () => {
   test("local sealed chunk reports diskBytes", () => {
@@ -64,18 +64,16 @@ describe("chunkDiskClaimBytes", () => {
   });
 });
 
-// Pins gastrolog-33ul6h: the vault card's "refusing" badge reads a
+// Pins the badge's source: the vault card's "refusing" badge reads a
 // first-class backend field (VaultInfo.admissionRefused, populated by the
 // responding node's own admission-causes collector) and maps its enum
 // values to terse labels — never a UI-side derivation from alarm state.
 // vaultRefusingCauseLabels' empty-vs-non-empty result is exactly what gates
 // the badge's visibility in VaultCard (`refusingCauses.length > 0`).
 //
-// gastrolog-9akebz: the wire type became VaultAdmissionRefusal{cause,
-// detail} (was a bare cause enum) and VAULT_DISK_PROTECT was renamed
-// STORAGE_DISK_PROTECT — the disk-free thresholds moved off the vault onto
-// the storage it's placed on, so a below-floor storage refuses every vault
-// placed there, not just the one that used to own the threshold.
+// The wire type is VaultAdmissionRefusal{cause, detail}. Disk-free
+// thresholds belong to the storage, not the vault, so STORAGE_DISK_PROTECT
+// refuses every vault placed on a below-floor storage.
 describe("vaultRefusingCauseLabels", () => {
   test("empty causes yields no labels (badge hidden)", () => {
     expect(vaultRefusingCauseLabels([])).toEqual([]);
@@ -99,7 +97,7 @@ describe("vaultRefusingCauseLabels", () => {
     ]);
   });
 
-  // gastrolog-5yfaqj: refusal generalized to age and chunk-count bounds.
+  // Refusal covers age and chunk-count bounds, not only size.
   test("AGE_BOUND maps to its label", () => {
     expect(vaultRefusingCauseLabels([refusal(VaultAdmissionCause.AGE_BOUND)])).toEqual([
       "past age bound",
@@ -144,9 +142,9 @@ describe("vaultRefusingCauseLabels", () => {
   });
 });
 
-// Pins gastrolog-9akebz: the inspector's expanded refusal section renders
-// the backend's detail string VERBATIM alongside the cause label — no
-// client-side reconstruction of which storage or bound is involved (the
+// Pins the detail rendering: the inspector's expanded refusal section
+// renders the backend's detail string VERBATIM alongside the cause label —
+// no client-side reconstruction of which storage or bound is involved (the
 // operator directive: every signal shown comes from published backend
 // fields).
 describe("vaultRefusalDetails", () => {

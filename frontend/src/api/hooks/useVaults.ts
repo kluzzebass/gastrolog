@@ -54,16 +54,15 @@ export function useVault(id: string) {
  * uses ListChunks (cluster fan-out + dedup); subsequent updates arrive
  * via the WatchChunks stream as typed diffs (created / progress / sealed
  * / deleted / uploaded) and patch this cache in place via setQueryData
- * — no refetch on the steady-state path. See gastrolog-3pf9w for the
- * pre-3pf9w shape and why it was replaced.
+ * — no refetch on the steady-state path.
  */
 export function useChunks(vaultId: string) {
   // Initial fetch only. Subsequent updates arrive via useWatchChunks,
   // which mutates the per-vault cache directly. Refetches merge with the
   // cached watch-stamped list instead of replacing it: a fan-out round
   // that misses a slow or catching-up node must not erase residency the
-  // stream already established, or the seal-pip row flaps
-  // (gastrolog-68wsli; see mergeChunksSnapshot).
+  // stream already established, or the seal-pip row flaps (see
+  // mergeChunksSnapshot).
   const qc = useQueryClient();
   return useQuery({
     queryKey: ["chunks", vaultId],
@@ -72,7 +71,7 @@ export function useChunks(vaultId: string) {
       // Stash the fan-out contribution report so the inspector can flag a
       // partial cross-node merge (some hosting peer timed out or failed).
       // A response with every peer contributing clears any stale flag —
-      // quiet-until-needed. See gastrolog-66zrj.
+      // quiet-until-needed.
       qc.setQueryData<ContributionReport | null>(
         ["chunks-contribution", vaultId],
         response.contributionReport ?? null,
@@ -94,8 +93,7 @@ export function useChunks(vaultId: string) {
  * useChunks; this reader subscribes to the sibling cache key so the
  * inspector re-renders when the merge degrades or recovers. Only the
  * initial ListChunks fetch carries a report — steady-state chunk updates
- * arrive via the WatchChunks stream, which does not fan out. See
- * gastrolog-66zrj.
+ * arrive via the WatchChunks stream, which does not fan out.
  */
 export function useChunksContribution(vaultId: string): ContributionReport | null {
   const qc = useQueryClient();
@@ -168,7 +166,6 @@ export function useReindexVault() {
 // Operator-driven recovery: reset retry backoff for chunks flagged
 // unreadable in this vault so the next retention sweep retries them
 // immediately. Returns the count of chunks whose backoff was reset.
-// See gastrolog-25vur.
 export function useRetryUnreadableChunks() {
   const qc = useQueryClient();
   return useMutation({

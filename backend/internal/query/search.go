@@ -221,8 +221,7 @@ func (e *Engine) collectVaultChunks(
 	// Global planner order across vaults. The lazy-prime merge assumes
 	// adjacent chunks are time-ordered; per-vault sorted runs concatenated in
 	// registry enumeration order let a later-timestamped vault open first,
-	// satisfy Limit, and silently skip an earlier vault's records
-	// (gastrolog-33bkl7).
+	// satisfy Limit, and silently skip an earlier vault's records.
 	cmp := chunkCmp(q.OrderBy, q.Reverse())
 	slices.SortFunc(allChunks, func(a, b vaultChunk) int { return cmp(a.meta, b.meta) })
 	return allChunks, archivedCount, nil

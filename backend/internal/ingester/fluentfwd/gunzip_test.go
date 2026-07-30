@@ -58,10 +58,10 @@ func TestGunzip_NearCap(t *testing.T) {
 	}
 }
 
-// TestGunzip_GzipBomb is the regression test for gastrolog-e3qug. A small
+// TestGunzip_GzipBomb is the regression test for unbounded gunzip. A small
 // gzip blob that decompresses to MORE than the cap (200 MiB > 100 MiB cap)
 // must be rejected with an error rather than allocating the full 200 MiB.
-// Without the fix this test would either OOM the process or take seconds
+// Without the cap this test would either OOM the process or take seconds
 // of memory churn.
 func TestGunzip_GzipBomb(t *testing.T) {
 	t.Parallel()

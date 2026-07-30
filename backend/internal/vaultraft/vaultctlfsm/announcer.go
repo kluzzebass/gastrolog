@@ -26,7 +26,7 @@ type Applier interface {
 // that fire when the orchestrator's drain queues a last-minute chunk
 // event after the local vault-ctl Raft has been torn down. The chunk-FSM's
 // reconcile-on-load pass covers any missed announces on the next
-// startup. See gastrolog-1e5ke.
+// startup.
 type Announcer struct {
 	// onResult, when set, observes every announce attempt's outcome. See
 	// SetResultHook.
@@ -55,10 +55,10 @@ func NewAnnouncer(applier Applier, phase *lifecycle.Phase, logger *slog.Logger) 
 // FSM apply path, and have no caller left to return an error to. Threading an
 // error back through would mean unwinding that.
 //
-// But "does not block the local operation" was allowed to mean "is invisible",
-// and that is what let a seal complete while the manifest silently stayed Active
-// (gastrolog-3ba5ei). The hook separates the two: the announce still does not
-// block anything, and the failure still reaches an operator.
+// But "does not block the local operation" was allowed to mean "is
+// invisible", and that is what let a seal complete while the manifest
+// silently stayed Active. The hook separates the two: the announce still
+// does not block anything, and the failure still reaches an operator.
 func (a *Announcer) SetResultHook(fn func(op string, id chunk.ChunkID, err error)) {
 	a.onResult = fn
 }
@@ -72,7 +72,7 @@ func (a *Announcer) AnnounceCreate(id chunk.ChunkID, writeStart, ingestStart, so
 // AnnounceBeginSeal fires the Active → Sealing transition before the
 // leader starts assembling the sealed-form GLCB. Lets followers and
 // retention/upload code observe the in-flight assembly window
-// explicitly. gastrolog-1huz5.
+// explicitly.
 func (a *Announcer) AnnounceBeginSeal(id chunk.ChunkID) {
 	a.apply("begin-seal", id, MarshalBeginSeal(id))
 }

@@ -144,8 +144,8 @@ export function PoliciesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly
   const effectiveName = newName.trim() || namePlaceholder || "default";
   const nameConflict = existingNames.has(effectiveName);
   const vaults = config?.vaults ?? [];
-  // gastrolog-1rbuf: at least one condition must be set, otherwise the
-  // policy is a silent no-op when assigned to a vault. Backend rejects
+  // At least one condition must be set, otherwise the policy is a silent
+  // no-op when assigned to a vault. Backend rejects
   // empty policies with InvalidArgument; mirror the rule in the form so
   // the operator sees disabled state before submitting.
   const newPolicyEmpty =
@@ -305,8 +305,8 @@ export function PoliciesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly
         const id = encode(pol.id);
         const edit = getEdit(id);
         const refs = vaultRefsForRotationPolicy(id, vaults);
-        // gastrolog-1rbuf: same emptiness gate as the create form — the
-        // backend rejects empty policies, so disable Save preemptively
+        // Same emptiness gate as the create form — the backend rejects
+        // empty policies, so disable Save preemptively
         // when the operator has cleared every condition.
         const editEmpty =
           !edit.maxAge.trim() && !edit.maxBytes.trim() && !edit.maxRecords.trim() && !edit.cron.trim();

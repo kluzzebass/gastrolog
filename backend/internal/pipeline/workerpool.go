@@ -7,9 +7,9 @@ import "sync"
 
 // RunWorkerPool fans a stage's input queue out to workers goroutines, each
 // draining in with handle until the queue closes, and blocks until all
-// workers exit. Shutdown is close-driven (gastrolog-5kcq5q): the producer
-// closes in on every exit path, so workers receive with a plain range
-// instead of per-record ctx selects.
+// workers exit. Shutdown is close-driven: the producer closes in on every
+// exit path, so workers receive with a plain range instead of per-record
+// ctx selects.
 func RunWorkerPool[T any](workers int, in <-chan T, handle func(T)) {
 	var wg sync.WaitGroup
 	for range workers {

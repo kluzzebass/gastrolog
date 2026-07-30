@@ -9,7 +9,7 @@ import (
 	"gastrolog/internal/ingester/identitytest"
 )
 
-// TestEventIDIdentity pins gastrolog-44b9r for the Fluent Forward
+// TestEventIDIdentity pins the identity invariant for the Fluent Forward
 // ingester. dialIngester hard-codes ID to "test-fwd"; round-trip a
 // minimal Message-mode payload and assert.
 func TestEventIDIdentity(t *testing.T) {

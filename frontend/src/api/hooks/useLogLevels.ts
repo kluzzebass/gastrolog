@@ -7,10 +7,10 @@ import {
 import { useQuery } from "@tanstack/react-query";
 
 /**
- * usePutLogLevels mutates the cluster-wide LogLevelConfig (gastrolog-3flfp).
- * The mutation replaces the entire rule set in one Raft commit; callers
- * who only want to add/remove individual rules should read the current
- * config first (via useConfig), modify locally, then dispatch.
+ * usePutLogLevels mutates the cluster-wide LogLevelConfig. The mutation
+ * replaces the entire rule set in one Raft commit; callers who only want
+ * to add/remove individual rules should read the current config first
+ * (via useConfig), modify locally, then dispatch.
  */
 export function usePutLogLevels() {
   return useSystemMutation(

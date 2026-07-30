@@ -66,7 +66,7 @@ export function parseBytes(s: string): bigint {
   if (!match) return 0n;
   // BigInt multipliers so large units (PiB, EiB) stay exact — Number math
   // loses precision above 2^53, which would corrupt an EiB value on the way
-  // to the wire. Keep parity with the backend's ParseSize (gastrolog-etcjdx).
+  // to the wire. Keep parity with the backend's ParseSize.
   const mult: Record<string, bigint> = {
     B: 1n,
     KB: 1_000n,

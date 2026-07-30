@@ -6,10 +6,10 @@ import { Storage } from "../model/storage";
 
 /**
  * Returns every configured storage cluster-wide as Storage models — the
- * entity-list surface for the storage inspector (gastrolog-3cobq4). Mirrors
- * useVaults: ListStorages already composes identity (config) with live
- * guard state (local-or-peer) server-side, so there is no client-side join
- * here, just the raw-bytes → EntityID reshape the Storage wrapper does.
+ * entity-list surface for the storage inspector. Mirrors useVaults:
+ * ListStorages already composes identity (config) with live guard state
+ * (local-or-peer) server-side, so there is no client-side join here, just
+ * the raw-bytes → EntityID reshape the Storage wrapper does.
  *
  * Push-invalidated by WatchSystemStatus's `storages` field (see
  * useWatchSystemStatus), which writes straight into this same query key —

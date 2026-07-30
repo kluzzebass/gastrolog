@@ -167,7 +167,7 @@ func printVaultSection(vault *v1.VaultConfig, chunks []*v1.ChunkMeta, nodeNames 
 // renderPendingAcks formats the receipt-protocol's still-owed-ack node
 // list as a trailing "  pending-ack: node-2, node-3" suffix. Empty
 // list renders as empty string so chunks without a stuck delete don't
-// get a noisy column. See gastrolog-51gme.
+// get a noisy column.
 func renderPendingAcks(nodeIDs []string, nodeNames map[string]string) string {
 	if len(nodeIDs) == 0 {
 		return ""
@@ -287,8 +287,8 @@ func buildChunkKV(c *v1.ChunkMeta, vaultName string, nodeNames map[string]string
 		{"Logical Size", units.FormatBytesDisplay(c.Bytes)},
 		{"Disk Size", formatDiskSize(c)},
 		{"Replicas", strconv.Itoa(int(c.ReplicaCount))},
-		// Holder-receipt residency, same truth the UI's seal pips render
-		// (gastrolog-45ywhx parity). "—" = zero verified copies.
+		// Holder-receipt residency, same truth the UI's seal pips render.
+		// "—" = zero verified copies.
 		{"Resident On", renderReplicaResidency(c.ReplicaNodeIds, nodeNames)},
 	}
 	if len(c.PendingAckNodeIds) > 0 {
@@ -301,7 +301,6 @@ func buildChunkKV(c *v1.ChunkMeta, vaultName string, nodeNames map[string]string
 		// Distinguish the two currencies: Disk Size above is THIS node's
 		// live local cache state (0 once evicted); Cloud Size is the fixed
 		// compressed object size, unaffected by local eviction/re-warm.
-		// See gastrolog-33ul6h.
 		pairs = append(pairs, [2]string{"Cloud Size", units.FormatBytesDisplay(c.CloudBytes)})
 	}
 	if c.CloudStorageClass != "" {
@@ -322,13 +321,12 @@ func formatDiskSize(c *v1.ChunkMeta) string {
 // record bytes when DiskBytes is unset — pipeline GLCB chunks never
 // populate DiskBytes (the manager store holds no local copy; bytes live
 // in the staging GLCB), and rendering their size as "0 B" while the UI
-// shows the logical size was a parity bug (gastrolog-45ywhx).
+// shows the logical size was a parity bug.
 //
 // A cloud-backed chunk with DiskBytes==0 is different: it was evicted from
 // this node's warm cache, not "never measured." It must report 0 here, not
 // fall back to logical Bytes — the object still exists in the cloud store,
-// at Cloud Size, a currency this local-disk stat never touches. See
-// gastrolog-33ul6h.
+// at Cloud Size, a currency this local-disk stat never touches.
 func chunkSizeBytes(c *v1.ChunkMeta) int64 {
 	if c.CloudBacked && c.DiskBytes == 0 {
 		return 0
@@ -351,8 +349,8 @@ func appendTS(pairs [][2]string, label string, ts *timestamppb.Timestamp) [][2]s
 // The lifecycle badge reads the three-state enum, never the legacy Sealed
 // bool: Sealed is only true at CHUNK_STATE_SEALED, so a binary else-branch
 // painted SEALING chunks as "active" — the opposite diagnosis when seals
-// are wedged and retention cannot fire (gastrolog-5wh571). An unspecified
-// state renders as "unknown", never a guess.
+// are wedged and retention cannot fire. An unspecified state renders as
+// "unknown", never a guess.
 func chunkBadges(c *v1.ChunkMeta) string {
 	var parts []string
 	switch c.State {
@@ -367,8 +365,8 @@ func chunkBadges(c *v1.ChunkMeta) string {
 	default:
 		parts = append(parts, "unknown")
 	}
-	// "compressed" badge dropped — sealed chunks are GLCB which is
-	// zstd-compressed by construction (gastrolog-24m1t step 7f).
+	// No "compressed" badge: sealed chunks are GLCB, which is
+	// zstd-compressed by construction.
 	if c.CloudBacked {
 		parts = append(parts, "cloud")
 	}
