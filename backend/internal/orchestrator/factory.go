@@ -126,7 +126,8 @@ func (o *Orchestrator) ApplyConfig(sys *system.System, factories Factories) erro
 	// Cache vaultsDir the same way resolveVaultDir resolves it at each call
 	// site: VaultsDir when the operator set one, else HomeDir. Periodic
 	// passes with no per-call Factories (refreshStorageGuards) read this
-	// cached value instead of re-deriving it (gastrolog-3cobq4 regression).
+	// cached value instead of re-deriving it; re-deriving it there was a real
+	// regression when the periodic guard refresh landed.
 	if factories.VaultsDir != "" {
 		o.vaultsDir = factories.VaultsDir
 	} else if factories.HomeDir != "" {
@@ -143,18 +144,18 @@ func (o *Orchestrator) ApplyConfig(sys *system.System, factories Factories) erro
 	}
 
 	// The placement ROLE / FollowerTargets refresh legs of the retired 15s
-	// placement sweep are now event-driven (gastrolog-29xpy — see
-	// ReconcileVaultPlacement / ReconcilePlacements). The routing-table +
-	// pipeline-registration leg (reloadPipelineFromConfig) is NOT: it also
-	// aligns each vault-ctl Raft group's desired leader with the placement
-	// leader (SetDesiredLeaderID) and re-registers the pipeline vault as the
-	// vault-ctl handle/leadership converges — async Raft convergence with no
-	// config event to hang off. Without a periodic pass, a vault-ctl election
-	// that lands leadership on a non-home node leaves the chunking planner
-	// (home ∧ vault-ctl leader) running nowhere, stalling manifest planning
-	// until the next unrelated config change. Keep that one leg on a narrowed
-	// scheduler job (gastrolog-29xpy home-down regression); it is the sibling
-	// of vault-ctl-membership-reconcile, not the retired placement sweep.
+	// placement sweep are now event-driven (see ReconcileVaultPlacement /
+	// ReconcilePlacements). The routing-table + pipeline-registration leg
+	// (reloadPipelineFromConfig) is NOT: it also aligns each vault-ctl Raft
+	// group's desired leader with the placement leader (SetDesiredLeaderID)
+	// and re-registers the pipeline vault as the vault-ctl handle/leadership
+	// converges — async Raft convergence with no config event to hang off.
+	// Without a periodic pass, a vault-ctl election that lands leadership on a
+	// non-home node leaves the chunking planner (home ∧ vault-ctl leader)
+	// running nowhere, stalling manifest planning until the next unrelated
+	// config change. Keep that one leg on a narrowed scheduler job — narrowing
+	// it away regressed once, with a home node down — it is the sibling of
+	// vault-ctl-membership-reconcile, not the retired placement sweep.
 	if err := o.startPipelineConfigReconcile(); err != nil {
 		o.logger.Warn("failed to add pipeline-config-reconcile job", "error", err)
 	}
@@ -186,8 +187,8 @@ func (o *Orchestrator) applyVaults(sys *system.System, factories Factories) erro
 	// NOT single-threaded — raft config replay drives the dispatcher
 	// (handleInstancePut → ReloadFilters, locked) concurrently with
 	// ApplyConfig, and the unlocked reload here raced it into a fatal
-	// concurrent map write on o.pipelineVaults during a rolling restart
-	// with live placement changes (gastrolog-2xog2h, node crash).
+	// concurrent map write on o.pipelineVaults that crashed a node during a
+	// rolling restart with live placement changes.
 	o.mu.Lock()
 	err := o.reloadRoutesFromConfig(sys)
 	o.mu.Unlock()
@@ -217,7 +218,7 @@ func (o *Orchestrator) initVault(sys *system.System, vaultCfg system.VaultConfig
 	// shell is registered so a later placement-driven AddVaultInstance can
 	// hydrate it. On cluster snapshot restore there's no NotifyVaultPut for
 	// bulk-loaded state, so initVault must register here or subsequent
-	// AddVaultInstance fires "vault not found" in a loop. See gastrolog-264pk.
+	// AddVaultInstance fires "vault not found" in a loop.
 	vault := NewVault(vaultCfg.ID, instance)
 	vault.Name = vaultCfg.Name
 	vault.Enabled = vaultCfg.Enabled
@@ -245,15 +246,12 @@ func (o *Orchestrator) startRetentionSweep() error {
 // instance. Every 20 seconds (cron 13/33/53s, phase-offset from the
 // retention sweep at second 0) every node walks its OWN vault-ctl FSM and
 // runs the reconcile categories — see vaultCatchupSweepAll for the
-// per-category invariants. Post gastrolog-3fu9t the primary convergence
-// is event-driven (delete obligations on CmdRequestDelete, orphans on
-// snapshot install, leader-only categories on lead-gained, and stale
-// pending-delete acks additionally on a placement move under a stable
-// leader — gastrolog-235dm7); this tick is the safety net for
+// per-category invariants. The primary convergence is event-driven (delete
+// obligations on CmdRequestDelete, orphans on snapshot install, leader-only
+// categories on lead-gained, and stale pending-delete acks additionally on a
+// placement move under a stable leader); this tick is the safety net for
 // dropped/raced events plus the two categories that are periodic-by-nature
 // (idle-active inactivity, grace-period GCs).
-// Original coverage: receipt-protocol delete convergence (gastrolog-51gme)
-// and create-side replication catchup (gastrolog-2dgvj).
 func (o *Orchestrator) startInstanceCatchupSweep() error {
 	if err := o.scheduler.AddJob(vaultCatchupSweepJobName, sweepCron(vaultCatchupSweepSchedule), o.vaultCatchupSweepAll); err != nil {
 		return fmt.Errorf("vault catchup sweep job: %w", err)

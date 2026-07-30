@@ -191,10 +191,10 @@ func newOriginFixture(t *testing.T, ctx context.Context, vaultID glid.GLID, fsm 
 // for the first to appear in the FSM registry, and returns that segment's ID.
 // Callers that assert on pull counts must quiesce until every completed
 // segment is collected — waiting on just the returned ID races the remaining
-// segments' first pulls (gastrolog-4fv63d). Because all acks have fired by
-// return, completedSegments() is final; quiesce on that exact count, not on
-// "all FSM entries seen so far", or a still-in-flight last publish races the
-// assertion (gastrolog-3ly433).
+// segments' first pulls. Because all acks have fired by return,
+// completedSegments() is final; quiesce on that exact count, not on "all FSM
+// entries seen so far", or a still-in-flight last publish races the
+// assertion.
 func (o *originFixture) ingestAndPublish(t *testing.T, ctx context.Context) glid.GLID {
 	t.Helper()
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
@@ -304,9 +304,7 @@ func TestPipelineCollectionReplicatesToRemoteHome(t *testing.T) {
 	// (see completedSegments) — anchor the quiesce to it. Requiring exactly
 	// that many FSM entries closes the prefix race where the last segment's
 	// publish lands after a "all entries seen so far are held" check passed
-	// and its legitimate first pull reads as a "re-pull" (gastrolog-3ly433;
-	// the earlier all-held quiesce from gastrolog-4fv63d could not tell
-	// "done publishing" from "done so far").
+	// and its legitimate first pull reads as a "re-pull".
 	wantSegments := origin.completedSegments()
 	if wantSegments == 0 {
 		t.Fatal("origin completed no segments; the 8-record batch should close several")
@@ -437,9 +435,9 @@ func TestPipelineCollectionRecoversFromUnreachableOriginViaRetries(t *testing.T)
 	if !headHas(t, homeRoot, segID) {
 		t.Fatalf("segment never recovered into head/ after transient failures (attempts=%d)", puller.attemptCount())
 	}
-	// The holder receipt commits as a batch at the END of the collect pass
-	// (gastrolog-38snf4), so head/ becomes visible slightly before the FSM
-	// records the holder — wait rather than asserting instantly.
+	// The holder receipt commits as a batch at the END of the collect pass,
+	// so head/ becomes visible slightly before the FSM records the holder —
+	// wait rather than asserting instantly.
 	waitTrue(t, "home recorded as holder after recovery", func() bool {
 		return segmentHolds(fsm, segID, testHomeNode)
 	})
@@ -737,8 +735,8 @@ func TestPipelineSegmentPullClientResolvesSourcesAndBuffers(t *testing.T) {
 // TestPipelineSegmentPullClientStreamsToFileTruncatingFailures: with a
 // rewindable dest (the production pre-head temp file), the pull client
 // streams each candidate directly into the file — no whole-segment RAM
-// buffer (gastrolog-1xee1s) — and truncates partial bytes from a failed
-// source before trying the next one.
+// buffer — and truncates partial bytes from a failed source before trying
+// the next one.
 func TestPipelineSegmentPullClientStreamsToFileTruncatingFailures(t *testing.T) {
 	fsm := vaultctlfsm.New()
 	applier := &fsmApplier{fsm: fsm}
@@ -878,9 +876,9 @@ func waitTrue(t *testing.T, what string, fn func() bool) {
 }
 
 // TestSegmentPullClientAttachesUnavailableSentinel pins the boundary
-// translation in the segment pull client (gastrolog-466kq5): registry and
-// holder-resolution misses carry collection.ErrSegmentUnavailable so retry
-// classification runs on errors.Is — never on these messages' prose.
+// translation in the segment pull client: registry and holder-resolution
+// misses carry collection.ErrSegmentUnavailable so retry classification
+// runs on errors.Is — never on these messages' prose.
 func TestSegmentPullClientAttachesUnavailableSentinel(t *testing.T) {
 	t.Parallel()
 	fsm := vaultctlfsm.New()
@@ -912,10 +910,10 @@ func TestSegmentPullClientAttachesUnavailableSentinel(t *testing.T) {
 }
 
 // TestTranslateServePullError pins the server-side boundary mapping against
-// the real distribution sentinels it must translate (gastrolog-466kq5):
-// "cannot serve this segment here" becomes collection.ErrSegmentUnavailable
-// (encoded as NotFound on the wire); genuine serving faults pass through
-// unchanged so the pulling home logs them at Warn instead of deferring.
+// the real distribution sentinels it must translate: "cannot serve this
+// segment here" becomes collection.ErrSegmentUnavailable (encoded as
+// NotFound on the wire); genuine serving faults pass through unchanged so
+// the pulling home logs them at Warn instead of deferring.
 func TestTranslateServePullError(t *testing.T) {
 	t.Parallel()
 

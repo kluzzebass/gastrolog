@@ -186,7 +186,7 @@ func newRetentionRunner(cm chunk.ChunkManager, im index.IndexManager, policy chu
 	// Single-node harness: wire a reconciler with no Raft applier so
 	// expireChunk → reconciler.deleteChunk takes the single-node fallback
 	// (deleteLocalCopy) and removes the chunk/index locally. Chunk deletion
-	// only flows through the reconciler now (gastrolog-lh0rp).
+	// only flows through the reconciler.
 	vaultID := glid.New()
 	vaultInst := &VaultInstance{VaultID: vaultID, Chunks: cm, Indexes: im}
 	rec := NewVaultLifecycleReconciler(nil, vaultID, vaultInst, "node-local", slog.Default())
@@ -359,7 +359,7 @@ func TestSweepWithNoBindings(t *testing.T) {
 	}
 }
 
-// TestSweepGoroutineCountBounded pins the gastrolog-33eabj fix: a sweep
+// TestSweepGoroutineCountBounded pins the sweep's goroutine bound: a sweep
 // matching many chunks must process them through a worker pool of
 // retentionChunkWorkers goroutines pulling from a channel — NOT spawn one
 // goroutine per matched chunk parked on a semaphore (668 were observed
@@ -458,7 +458,7 @@ func TestSetBindingsHotSwap(t *testing.T) {
 		t.Fatalf("expected 2 chunk deletions after rule swap, got %d", len(cm.deleted))
 	}
 	// The sweep deletes matched chunks from parallel workers; inter-chunk
-	// order is intentionally unspecified (gastrolog-2fvcb5).
+	// order is intentionally unspecified.
 	for _, id := range []chunk.ChunkID{id0, id1} {
 		if !slices.Contains(cm.deleted, id) {
 			t.Errorf("expected deleted chunk %s, got %v", id, cm.deleted)
@@ -466,9 +466,9 @@ func TestSetBindingsHotSwap(t *testing.T) {
 	}
 }
 
-// TestExpireChunkProposesRequestDelete pins the gastrolog-51gme step 4
-// contract: in cluster mode, expireChunk routes through the lifecycle
-// reconciler and proposes CmdRequestDelete (not the legacy CmdDeleteChunk).
+// TestExpireChunkProposesRequestDelete pins the delete-path contract: in
+// cluster mode, expireChunk routes through the lifecycle reconciler and
+// proposes CmdRequestDelete (not the legacy CmdDeleteChunk).
 // The local file delete only happens when CmdRequestDelete commits and the
 // FSM dispatches onRequestDelete — so an isolated retentionRunner test that
 // stubs only the applier MUST observe an empty deleted-list, because the
@@ -544,7 +544,7 @@ func TestExpireChunkProposesRequestDelete(t *testing.T) {
 // invariant: when CmdRequestDelete cannot be proposed (e.g. not leader,
 // applier rejection), no local delete happens. The FSM apply chain is the
 // only path that touches local files, and a failed propose leaves the
-// chain unfired. See gastrolog-51gme step 4.
+// chain unfired.
 func TestExpireChunkSkipsLocalOnRequestDeleteFailure(t *testing.T) {
 	id := chunkIDAt(time.Now())
 	cm := &retentionFakeChunkManager{
@@ -845,8 +845,3 @@ func TestRetentionTargetRefreshesCmOnExistingRunner(t *testing.T) {
 		t.Error("expected same runner instance across calls")
 	}
 }
-
-// gastrolog-51gme step 5 removed the disk-vs-manifest sweep and the
-// tests that pinned it. The receipt protocol's catchup invariant is
-// now covered by TestReconcileFromSnapshotProcessesPendingObligations
-// in vault_lifecycle_reconciler_test.go.

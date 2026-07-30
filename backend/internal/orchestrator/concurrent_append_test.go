@@ -20,8 +20,10 @@ import (
 	sysmem "gastrolog/internal/system/memory"
 )
 
-// TestConcurrentAppendAttrIntegrity reproduces gastrolog-4dd48:
-// concurrent AppendToVault calls through the orchestrator corrupt attr.log.
+// TestConcurrentAppendAttrIntegrity guards attr.log integrity under
+// concurrent AppendToVault calls through the orchestrator: 8 goroutines
+// burst into one file-backed vault, then every record is read back via
+// cursor. Corrupt attr.log surfaces as an error from cursor.Next().
 func TestConcurrentAppendAttrIntegrity(t *testing.T) {
 	t.Parallel()
 
@@ -142,7 +144,7 @@ func TestConcurrentAppendAttrIntegrity(t *testing.T) {
 }
 
 // ==========================================================================
-// gastrolog-63cku: Transition concurrent with active appends
+// Transition concurrent with active appends
 // ==========================================================================
 
 // TestTransitionConcurrentWithAppends runs appends and transitions simultaneously.
@@ -151,7 +153,7 @@ func TestConcurrentAppendAttrIntegrity(t *testing.T) {
 // Verifies no data loss and no panics from concurrent Delete + Append races.
 
 // ==========================================================================
-// gastrolog-5omo1: Cursor open on chunk when Seal fires
+// Cursor open on chunk when Seal fires
 // ==========================================================================
 
 // TestCursorOpenDuringSeal opens a cursor on the active chunk, then seals it
@@ -236,7 +238,7 @@ func TestCursorOpenDuringSeal(t *testing.T) {
 }
 
 // ==========================================================================
-// gastrolog-3p8zh: ImportToVault cursor verification
+// ImportToVault cursor verification
 // ==========================================================================
 
 // TestImportToInstanceCursorVerified imports records to a file-backed instance and
@@ -342,7 +344,7 @@ func testIterFromSlice(records []chunk.Record) chunk.RecordIterator {
 }
 
 // ==========================================================================
-// gastrolog-3u8uh: Remote import succeeds but source delete fails
+// Remote import succeeds but source delete fails
 // ==========================================================================
 
 // TestTransitionSourceDeleteFailsAfterImport verifies behavior when the
@@ -357,7 +359,7 @@ func (f *failingIndexManager) DeleteIndexes(_ chunk.ChunkID) error {
 }
 
 // ==========================================================================
-// gastrolog-60h49: Faulty blobstore for cloud instance tests
+// Faulty blobstore for cloud instance tests
 // ==========================================================================
 
 // faultyBlobstore wraps a real blobstore and injects failures.
@@ -452,7 +454,7 @@ func TestCloudUploadFailureRetainsChunk(t *testing.T) {
 // source chunk is retained.
 
 // ==========================================================================
-// gastrolog-5otbi: Vault reconfiguration during active transition
+// Vault reconfiguration during active transition
 // ==========================================================================
 
 // TestReconfigDuringTransitionDoesNotPanic verifies that changing the vault's
@@ -460,7 +462,7 @@ func TestCloudUploadFailureRetainsChunk(t *testing.T) {
 // should either complete with the original config or fail gracefully.
 
 // ==========================================================================
-// gastrolog-2wz6f: Drain concurrent with active ingestion
+// Drain concurrent with active ingestion
 // ==========================================================================
 
 // TestDrainConcurrentWithIngestion starts a drain while records are still
@@ -477,7 +479,7 @@ func TestDrainConcurrentWithIngestion(t *testing.T) {
 		ID: vaultID, Name: "drain-concurrent",
 	})
 	_ = vaultID // legacy fixture handle; vault registered above is the only canonical config
-	// gastrolog-4kkoo (Phase 5): expression inlined on the route via Stages.
+	// Match expression is inlined on the route via Stages.
 	_ = store.PutRoute(context.Background(), system.RouteConfig{
 		ID: routeID, Name: "default",
 		Stages:       []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}},
@@ -584,7 +586,7 @@ func TestDrainConcurrentWithIngestion(t *testing.T) {
 }
 
 // ==========================================================================
-// gastrolog-2zsjr: Seal failure handling
+// Seal failure handling
 // ==========================================================================
 
 // TestSealFailureChunkRemains verifies that if Seal fails (e.g., from a

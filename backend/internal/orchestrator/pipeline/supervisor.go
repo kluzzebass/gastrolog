@@ -7,12 +7,9 @@
 // the seven pipeline/* managers per vault home as placement changes bring vaults
 // onto or off this node.
 //
-// The supervisor lifecycle and queue wiring landed first (gastrolog-3kx8v).
-// Ingester factories, ack-after-durable semantics, vault-ctl feeds, and the
-// leader planner are filled in by later Rubicon slices (gastrolog-214bz B→E).
 // Injection points (publishers, appliers, FSM callbacks, pull/log/receipt
-// clients, segment collectors) are supplied per vault via VaultSpec, so this package
-// carries no opinion about how they are produced.
+// clients, segment collectors) are supplied per vault via VaultSpec, so this
+// package carries no opinion about how they are produced.
 package pipeline
 
 import (
@@ -68,8 +65,8 @@ type Config struct {
 	// from AdmissionGate: the drain gate resumes EARLIER than the
 	// node-global admission gate on disk recovery so the pipeline can seal
 	// backlog into chunks retention frees, rather than deadlocking behind
-	// the closed front door (gastrolog-67gvjo staged release). Falls back
-	// to tracking AdmissionGate when nil.
+	// the closed front door (staged release). Falls back to tracking
+	// AdmissionGate when nil.
 	DeferWritesGate func() bool
 
 	// VaultAdmissionGate, when non-nil, is the per-destination admission
@@ -287,8 +284,8 @@ func New(cfg Config) *Supervisor {
 	})
 	// Heavy-write stages pause whenever admission is rejecting: builds and
 	// inbound pulls create bytes, and under disk protect the last free
-	// megabytes belong to the WAL (gastrolog-38bm9t — builds ENOSPC-looped
-	// while protect held the front door).
+	// megabytes belong to the WAL (builds ENOSPC-looped while protect held
+	// the front door).
 	deferWrites := func() bool {
 		if cfg.DeferWritesGate != nil {
 			return cfg.DeferWritesGate()
@@ -398,12 +395,12 @@ func (s *Supervisor) Stop() error {
 // so the segmentation commit loop never stalls releasing it.
 func (s *Supervisor) pump() {
 	defer s.closeRouting()
-	// Close-driven like the stages it bridges (gastrolog-5kcq5q): drains
-	// digestOut until digestion closes it, then closes routingIn so the
-	// routing workers exit. The pump sends directly — it is the sole
-	// goroutine that closes routingIn, so its own sends can never race
-	// that close; Submit (retention fan-out, the other producer) keeps
-	// the guarded, ctx-bounded sendRouting path.
+	// Close-driven like the stages it bridges: drains digestOut until
+	// digestion closes it, then closes routingIn so the routing workers
+	// exit. The pump sends directly — it is the sole goroutine that closes
+	// routingIn, so its own sends can never race that close; Submit
+	// (retention fan-out, the other producer) keeps the guarded,
+	// ctx-bounded sendRouting path.
 	for out := range s.digestOut {
 		if out.Err != nil {
 			if out.Ack != nil {
@@ -526,9 +523,9 @@ func (s *Supervisor) Submit(ctx context.Context, in routing.Input) error {
 // SubmitDrain routes a record exactly like Submit but skips the node-global
 // admission gate: drain work — retention route fan-out — must run whenever
 // the pipeline runs, because it is the mechanism that frees the space the
-// admission gate is waiting for (gastrolog-5ct2av). Per-destination
-// admission still applies in the routing stage, and the drain gate
-// (deferWrites) is enforced by the caller before any record is read.
+// admission gate is waiting for. Per-destination admission still applies in
+// the routing stage, and the drain gate (deferWrites) is enforced by the
+// caller before any record is read.
 func (s *Supervisor) SubmitDrain(ctx context.Context, in routing.Input) error {
 	if !s.running.Load() {
 		return ErrNotRunning
@@ -598,26 +595,24 @@ func (s *Supervisor) IngestQueueDepth() int { return len(s.ingestOut) }
 func (s *Supervisor) IngestQueueCapacity() int { return cap(s.ingestOut) }
 
 // AppendStats returns per-vault cumulative segmentation throughput counters
-// for the stats broadcast (gastrolog-4eh5ns).
+// for the stats broadcast.
 func (s *Supervisor) AppendStats() []segmentation.AppendStats {
 	return s.seg.AppendStats()
 }
 
-// CollectStats returns per-vault cumulative home-side collection counters
-// (gastrolog-10n6k8).
+// CollectStats returns per-vault cumulative home-side collection counters.
 func (s *Supervisor) CollectStats() []collection.VaultCollectStats {
 	return s.col.CollectStats()
 }
 
-// SealStats returns per-vault cumulative GLCB seal counters
-// (gastrolog-10n6k8).
+// SealStats returns per-vault cumulative GLCB seal counters.
 func (s *Supervisor) SealStats() []chunking.VaultSealStats {
 	return s.chunk.SealStats()
 }
 
 // PublishStats returns per-vault cumulative segment-publish counters from the
-// distribution manager (gastrolog-4r784a). Empty on nodes without a
-// distribution role for any vault.
+// distribution manager. Empty on nodes without a distribution role for any
+// vault.
 func (s *Supervisor) PublishStats() []distribution.VaultPublishStats {
 	if s.dist == nil {
 		return nil
@@ -626,8 +621,8 @@ func (s *Supervisor) PublishStats() []distribution.VaultPublishStats {
 }
 
 // ChunkStageStats returns per-vault cumulative chunk-lifecycle stage counters
-// from the chunking manager (gastrolog-4r784a). Empty on nodes without a home
-// role for any vault.
+// from the chunking manager. Empty on nodes without a home role for any
+// vault.
 func (s *Supervisor) ChunkStageStats() []chunking.VaultStageStats {
 	if s.chunk == nil {
 		return nil
@@ -698,7 +693,7 @@ func (s *Supervisor) RegisterVault(spec VaultSpec) error {
 			}
 			// Drop head/pre-head on every staging root this node uses. Distribution
 			// promotes under OriginRoot; collection/chunking use HomeRoot when set.
-			// Purging only HomeRoot left OriginRoot/head debris (gastrolog-3vlse).
+			// Purging only HomeRoot left OriginRoot/head debris.
 			for _, id := range ids {
 				for _, root := range headPurgeRoots {
 					_ = paths.PurgeHeadStaging(root, id)
@@ -848,7 +843,7 @@ func (s *Supervisor) ChunkingRegistered(vaultID glid.GLID) bool {
 // NoteGLCBRestored clears a chunk's corrupt-GLCB state (quarantine file +
 // operator alert) after its canonical GLCB was restored outside chunking —
 // the orchestrator's GLCB catch-up sweep re-pulled a verified copy from a
-// peer home (gastrolog-687m11).
+// peer home.
 func (s *Supervisor) NoteGLCBRestored(vaultID glid.GLID, chunkID chunk.ChunkID) {
 	if s.chunk != nil {
 		s.chunk.NoteGLCBRestored(vaultID, chunkID)
@@ -952,8 +947,8 @@ func (n vaultSegmentCollector) CollectSegments(ctx context.Context, segmentIDs [
 }
 
 // Nudge wakes the collection worker without waiting for a pass. The chunking
-// worker must never block on collection (gastrolog-1b51yf); pass completion
-// re-wakes chunking via OnPassComplete.
+// worker must never block on collection; pass completion re-wakes chunking
+// via OnPassComplete.
 func (n vaultSegmentCollector) Nudge() {
 	n.mgr.Notify(n.vaultID)
 }

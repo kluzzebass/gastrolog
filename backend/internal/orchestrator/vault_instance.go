@@ -43,8 +43,7 @@ type VaultInstance struct {
 	// FSM-apply event handlers (seal, retention-pending, transition-streamed,
 	// transition-received, request-delete, ack-delete, finalize-delete) plus
 	// the canonical deleteChunk entry point. All cluster-wide deletes route
-	// through here over gastrolog-51gme steps 4-8. Nil for memory-mode vaults
-	// (no FSM, no replication).
+	// through here. Nil for memory-mode vaults (no FSM, no replication).
 	Reconciler *VaultLifecycleReconciler
 }
 
@@ -76,26 +75,25 @@ type RaftApplyFacet struct {
 	// keyed by chunk ID with the given reason and expectedFrom set; every
 	// node in expectedFrom owes a CmdAckDelete after deleting its local
 	// copy, and the leader proposes CmdFinalizeDelete once expectedFrom is
-	// empty. Nil when no Raft group exists. See gastrolog-51gme.
+	// empty. Nil when no Raft group exists.
 	ApplyRaftRequestDelete func(id chunk.ChunkID, reason string, expectedFrom []string) error
 
 	// ApplyRaftAckDelete proposes a node's ack of a pending delete obligation.
 	// Idempotent: duplicate / unknown-node acks are no-ops. Nil when no Raft
-	// group exists. See gastrolog-51gme.
+	// group exists.
 	ApplyRaftAckDelete func(id chunk.ChunkID, nodeID string) error
 
 	// ApplyRaftFinalizeDelete proposes the leader's finalization of a pending
 	// delete. Removes the pendingDeletes entry; the entry-removal already
 	// happened in the FSM applyFinalizeDelete handler, so this is purely the
-	// distributed-commit signal. Nil when no Raft group exists. See
-	// gastrolog-51gme.
+	// distributed-commit signal. Nil when no Raft group exists.
 	ApplyRaftFinalizeDelete func(id chunk.ChunkID) error
 
 	// ApplyRaftPruneNode proposes removal of a node from every pendingDeletes
 	// entry's ExpectedFrom set on this instance sub-FSM. Used by the leader's
 	// membership-change handler after RemoveServer succeeds: a decommissioned
 	// node's outstanding ack obligations would otherwise pin pendingDeletes
-	// entries forever. Nil when no Raft group exists. See gastrolog-51gme step 10.
+	// entries forever. Nil when no Raft group exists.
 	ApplyRaftPruneNode func(nodeID string) error
 }
 
@@ -128,8 +126,8 @@ type ManifestReadFacet struct {
 	// window. Used to reject stale replication commands (ImportSealed,
 	// Append, Seal) that race with retention — without this check, a late
 	// ImportSealed RPC could recreate a chunk the cluster already deleted,
-	// producing a "ghost" chunk on the follower. See gastrolog-11rzz.
-	// Nil when no Raft group exists.
+	// producing a "ghost" chunk on the follower. Nil when no Raft group
+	// exists.
 	IsTombstoned func(id chunk.ChunkID) bool
 
 	// IsFSMReady returns true after the vault-ctl FSM has applied at least one log

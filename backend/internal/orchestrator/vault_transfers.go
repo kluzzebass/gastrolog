@@ -49,10 +49,10 @@ func (o *Orchestrator) MoveChunk(ctx context.Context, chunkID chunk.ChunkID, src
 	if err != nil {
 		return fmt.Errorf("open chunk %s: %w", chunkID, err)
 	}
-	// Close-on-return as a safety net; we Close explicitly post-stream
-	// so the cursor's per-chunk RLock (gastrolog-26zu1) is released
-	// before deleteSourceChunk takes the write lock — otherwise the
-	// same goroutine self-deadlocks on RLock→Lock upgrade.
+	// Close-on-return as a safety net; we Close explicitly post-stream so
+	// the cursor's per-chunk RLock is released before deleteSourceChunk
+	// takes the write lock — otherwise the same goroutine self-deadlocks
+	// on RLock→Lock upgrade.
 	cursorClosed := false
 	defer func() {
 		if !cursorClosed {
@@ -106,8 +106,7 @@ func (o *Orchestrator) moveChunkRemote(ctx context.Context, chunkID chunk.ChunkI
 	}
 
 	// Release cursor's read lock before deleting the source chunk
-	// (gastrolog-26zu1: same-goroutine RLock→Lock upgrade would
-	// deadlock).
+	// (same-goroutine RLock→Lock upgrade would deadlock).
 	_ = cursor.Close()
 	cursorClosed = true
 
@@ -163,7 +162,7 @@ func (o *Orchestrator) isRemoteVault(ctx context.Context, vaultID glid.GLID) (st
 // wired (production) so the source-side delete propagates cluster-wide
 // via CmdRequestDelete. Falls back to a direct local delete for
 // memory-mode vaults without Raft. Reason "vault-migrate-source-expire"
-// lands in pendingDeletes audit. See gastrolog-51gme.
+// lands in pendingDeletes audit.
 func (o *Orchestrator) deleteSourceChunk(srcID glid.GLID, chunkID chunk.ChunkID) error {
 	vaultInst, err := o.findInstanceForChunk(srcID, chunkID)
 	if err != nil {
@@ -276,7 +275,7 @@ func (o *Orchestrator) DrainVault(ctx context.Context, vaultID glid.GLID, target
 
 	// Submit async job. Describe BEFORE submitting — see scheduleReplication
 	// for why (missing label on the Scheduled event, leaked descriptions entry
-	// when the job finishes first). gastrolog-69sjlj.
+	// when the job finishes first).
 	jobName := "drain:" + vaultID.String()
 	o.scheduler.Describe(jobName, "Drain vault to node "+targetNodeID)
 	jobID := o.scheduler.Submit(jobName, func(ctx context.Context, job *JobProgress) {
@@ -337,11 +336,10 @@ func (o *Orchestrator) drainSealed(ctx context.Context, vaultID glid.GLID, cm ch
 		return false
 	}
 
-	// Ground metas in the FSM before the .Sealed gate.
-	// Phase 3 (gastrolog-1huz5): a chunk's local meta.Sealed flips at
-	// sealActiveLocked time but the FSM doesn't see it as Sealed until
-	// PostSealProcess commits the GLCB. Without grounding, drain would
-	// race with concurrent post-seal assembly on Sealing chunks.
+	// Ground metas in the FSM before the .Sealed gate: a chunk's local
+	// meta.Sealed flips at sealActiveLocked time but the FSM doesn't see it
+	// as Sealed until PostSealProcess commits the GLCB. Without grounding,
+	// drain would race with concurrent post-seal assembly on Sealing chunks.
 	for _, meta := range metas {
 		meta = o.groundChunkMeta(vaultID, meta)
 		if !meta.Sealed {

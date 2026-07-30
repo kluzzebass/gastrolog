@@ -24,9 +24,7 @@ type cloudBackedChunkResolverSetter interface {
 // replicated vault-ctl FSM manifest at lookup time: a chunk is servable the
 // moment the FSM says CloudBacked, whether that fact arrived via live
 // CmdUploadChunk replication or a wholesale snapshot install (which fires no
-// per-apply effects). This is the single fill path that retired the two eager
-// cloudIdx mirrors — the reconciler's snapshot projection pass and the
-// per-apply onUpload registration (gastrolog-5bnxc): the cloud index is a
+// per-apply effects). This is the single fill path: the cloud index is a
 // cache of the manifest's CloudBacked entries, filled from the owner on miss.
 //
 // Resolution registers metadata only — the blob key is derived by the

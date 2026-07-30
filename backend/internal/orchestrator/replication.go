@@ -23,7 +23,7 @@ func (o *Orchestrator) scheduleReplication(vaultID glid.GLID, chunkID chunk.Chun
 	// finishes. Describing afterwards both lost the label on the event and
 	// leaked one descriptions entry per chunk whenever the job finished first
 	// — the delete ran, then the late Describe re-added an entry nothing was
-	// left to remove. See gastrolog-69sjlj.
+	// left to remove.
 	name := fmt.Sprintf("replicate:%s:%s", vaultID, chunkID)
 	o.scheduler.Describe(name, fmt.Sprintf("Replicate chunk %s to %d followers", chunkID, len(targets)))
 	if err := o.scheduler.RunOnce(name, func() {
@@ -61,7 +61,7 @@ func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID glid.GL
 	// sending ImportSealedChunk to followers would recreate a chunk the
 	// cluster has already decided to forget (ghost chunk). Closes the
 	// retention-beats-replication ordering at the leader; the receiver-side
-	// tombstone check closes the reverse ordering. See gastrolog-11rzz.
+	// tombstone check closes the reverse ordering.
 	if vaultInst.IsTombstoned != nil && vaultInst.IsTombstoned(chunkID) {
 		o.replicationLogger.Debug("replication: skipping tombstoned chunk (retention beat replication)",
 			"vault", vaultID, "chunk", chunkID.String())
@@ -81,7 +81,7 @@ func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID glid.GL
 	// Track per-target outcomes so the caller / logs reflect the actual
 	// replica count rather than the target count. Without this, a single
 	// unhealthy follower silently caps every chunk at less-than-RF and
-	// the only signal is the chunk's replica_count column. See gastrolog-3tn5g.
+	// the only signal is the chunk's replica_count column.
 	var (
 		succeeded   int
 		failedNodes []string
@@ -134,7 +134,7 @@ func (o *Orchestrator) replicateToTarget(ctx context.Context, vaultID glid.GLID,
 	if err := o.replicateToFollower(ctx, vaultID, chunkID, sourceCM, tgt.NodeID); err != nil {
 		// Placement churn (peer evicted the vault instance) is expected
 		// during reconfiguration and gets logged at Debug rather than
-		// WARN-spamming the operator dashboard. See gastrolog-5z607.
+		// WARN-spamming the operator dashboard.
 		level := slog.LevelWarn
 		if IsPlacementChurnErr(err) {
 			level = slog.LevelDebug
@@ -186,7 +186,7 @@ func (o *Orchestrator) replicateToFollower(ctx context.Context, vaultID glid.GLI
 	// Chunk is readable — open a fresh cursor for the actual transfer.
 	// The cursor streams records on demand; ImportSealedChunk consumes it
 	// via a RecordIterator, so nothing proportional to chunk size lands on
-	// the leader's heap during the push. See gastrolog-4yvhh.
+	// the leader's heap during the push.
 	cursor, err := cm.OpenCursor(chunkID)
 	if err != nil {
 		return fmt.Errorf("open cursor: %w", err)
@@ -200,7 +200,7 @@ func (o *Orchestrator) replicateToFollower(ctx context.Context, vaultID glid.GLI
 	// Raft, and the follower's post-import cleanup only catches the
 	// case where the tombstone is on its own FSM. This leader-side
 	// recheck short-circuits the RPC entirely when the leader already
-	// knows the chunk is gone. See gastrolog-11rzz.
+	// knows the chunk is gone.
 	vaultInst := o.findLocalVaultInstance(vaultID)
 	if vaultInst != nil && vaultInst.IsTombstoned != nil && vaultInst.IsTombstoned(chunkID) {
 		o.replicationLogger.Debug("replication: chunk tombstoned after probe, aborting send",

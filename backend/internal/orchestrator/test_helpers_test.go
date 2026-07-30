@@ -404,7 +404,7 @@ func (d *directTransferrer) WaitVaultReady(ctx context.Context, nodeID string, v
 	}
 	// In-process equivalent of the gRPC ForwardWaitVaultReady handler: block
 	// on the target orchestrator's real event-driven readiness signal so the
-	// multi-node drain tests exercise the consumer path. See gastrolog-3sdnn.
+	// multi-node drain tests exercise the consumer path.
 	return orch.WaitVaultReady(ctx, vaultID)
 }
 
@@ -653,10 +653,8 @@ func setupCluster(t *testing.T, nodeIDs []string, vaultCount int, rotationRecord
 			instances[i] = vaultInst
 		}
 
-		// Phase 2 (gastrolog-3iy5l): vaults are single-instance. Use the
-		// first instance as the vault's instance; vaultCount > 1 is unused
-		// post-collapse (callers that asked for it were transition tests
-		// that have been removed).
+		// Vaults are single-instance. Use the first instance as the
+		// vault's instance; vaultCount > 1 is unused.
 		vault := NewVault(vaultID, instances[0])
 		vault.Name = "cluster-vault"
 		orch.RegisterVault(vault)
@@ -686,9 +684,7 @@ func setupCluster(t *testing.T, nodeIDs []string, vaultCount int, rotationRecord
 	// node proposes CmdRequestDelete via reconciler.deleteChunk, the fake
 	// applier fulfills the obligation on every expectedFrom node's own
 	// reconciler — the deterministic, timing-free equivalent of the real
-	// onRequestDelete → fulfillObligation fan-out. This replaces the legacy
-	// direct-delete + ChunkReplicationDelete RPC fan-out the harness used
-	// before gastrolog-lh0rp.
+	// onRequestDelete → fulfillObligation fan-out.
 	recs := make(map[string]*VaultLifecycleReconciler, len(nodeIDs))
 	for _, nid := range nodeIDs {
 		inst := nodes[nid].instances[0]
@@ -875,8 +871,8 @@ func waitForDrainJob(t *testing.T, orch *Orchestrator, vaultID glid.GLID, timeou
 // only called in buildInstance but not buildInstanceForStorage.
 
 // waitForTransitions polls until all transition:* jobs in the scheduler
-// have completed. Transitions run as one-shot scheduler jobs since
-// gastrolog-4913n, so tests that call sweep() need to wait.
+// have completed. Transitions run as one-shot scheduler jobs, so tests
+// that call sweep() need to wait.
 func waitForTransitions(t *testing.T, orch *Orchestrator, timeout time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)

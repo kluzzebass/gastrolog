@@ -176,14 +176,12 @@ const (
 	// Harness convergence waits are progress-based (see waitProgress), not
 	// wall-clock-bounded: the awaited work is CPU-bound in-process cluster
 	// activity, so under multi-suite contention a fixed wall-clock budget buys
-	// an arbitrary fraction of the compute (gastrolog-5h1uq2). A wait fails
-	// only when its observed progress metric has not changed for this stall
-	// window. The window sits well above the slowest legitimate quiet period
-	// between progress events, which is a reconcile-sweep period: the test
-	// profile runs those every second (testprofile_test.go), so this is
-	// twenty periods of headroom for contention stretching a tick. It was 60s
-	// when the sweeps ticked every 20s — the same ratio, re-anchored on the
-	// cadence the binary actually runs (gastrolog-4yzpcj). Shrinking it does
+	// an arbitrary fraction of the compute. A wait fails only when its
+	// observed progress metric has not changed for this stall window. The
+	// window sits well above the slowest legitimate quiet period between
+	// progress events, which is a reconcile-sweep period: the test profile
+	// runs those every second (testprofile_test.go), so this is twenty
+	// periods of headroom for contention stretching a tick. Shrinking it does
 	// not make a passing run faster; it makes a WEDGED one report in a third
 	// of the time, which is the whole point of the feedback loop.
 	orchHarnessStallWindow = 20 * time.Second
@@ -571,7 +569,7 @@ func (h *orchRelHarness) startNode(id string) {
 	n.peerConns.SetStaticPeerIDs(h.nodeIDs)
 	n.clusterSrv.MultiRaftTransport().SetPeerConnPool(n.peerConns)
 	// Vault-ctl apply forwarding, wired for EVERY multi-node harness rather
-	// than only pipeline ones (gastrolog-231ik).
+	// than only pipeline ones.
 	//
 	// factories.PeerConns is what makes ensureVaultCtlMetadata choose the
 	// forwarding applier; without it a vault-ctl announce from a node that is
@@ -579,9 +577,7 @@ func (h *orchRelHarness) startNode(id string) {
 	// "node is not the leader". A chunk sealed on a non-leader then never
 	// reaches the manifest, and the test passes or fails depending on which
 	// node happened to win the election — the coin-flip behind this family's
-	// intermittency. Production always has PeerConns in a real cluster, so
-	// gating it on pipeline mode made the harness LESS representative, not
-	// more.
+	// intermittency. Production always has PeerConns in a real cluster.
 	factories.PeerConns = n.peerConns
 	// ForwardVaultApply receiver: applies forwarded vault-ctl commands to
 	// the local Raft group, mirroring wireClusterRaftApplies in app.go.
@@ -716,7 +712,7 @@ func (h *orchRelHarness) wipeNode(id string) {
 // pausePeer makes all inbound gRPC handlers on `id` block until unpausePeer
 // is called. Simulates a SIGSTOPed peer: TCP stays up, application-level
 // progress halts. Use to test that the rest of the cluster keeps serving
-// while one peer is frozen. See gastrolog-5oofa.
+// while one peer is frozen.
 func (h *orchRelHarness) pausePeer(id string) {
 	h.t.Helper()
 	n := h.nodes[id]
@@ -743,9 +739,9 @@ func (h *orchRelHarness) unpausePeer(id string) {
 // orders of magnitude slower than an in-process handler, yet an order of
 // magnitude inside the failure detector, so it stays alive rather than
 // reading as dead. Deriving it keeps that relationship true under any
-// detector configuration; the previous flat 200ms was this exact value at
-// the shipped 2s base, and silently became detector-breaking when the
-// detector was compressed (gastrolog-4yzpcj).
+// detector configuration; a flat 200ms is this exact value at the 2s
+// heartbeat default, and silently became detector-breaking once the test
+// profile compressed the detector.
 func slowPeerLatency() time.Duration {
 	heartbeat, _, _ := raftgroup.RaftTimeouts(raftgroup.GroupConfig{})
 	return heartbeat / 10
@@ -766,7 +762,7 @@ func (h *orchRelHarness) slowPeer(id string, d time.Duration) {
 
 // waitForAllReady blocks until every live node reports
 // LocalVaultsReplicationReady == true. This is the actual gate search and
-// ingest RPCs use — regressing it is what gastrolog-5j6eu fixed.
+// ingest RPCs use.
 func (h *orchRelHarness) waitForAllReady() {
 	h.t.Helper()
 	// Progress metric: the set of not-ready nodes plus their vault-ctl Raft

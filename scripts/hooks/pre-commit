@@ -17,6 +17,33 @@ NC='\033[0m'
 
 failed=0
 
+# Tracker IDs must not enter the codebase.
+#
+# CLAUDE.md: source files are not historical documents. A comment citing a
+# ticket is a dangling pointer — issues close, tombstone and get superseded —
+# and it outsources the comment's job to something the reader must look up.
+#
+# Enforced by grep rather than by golangci-lint: forbidigo inspects identifiers
+# and call expressions, not comment text, so a forbidigo pattern here matches
+# nothing (verified). The exclusions are real tokens that merely look like issue
+# ids: TLS SANs, a gRPC metadata header, a certificate subject, and a log-file
+# name prefix. Requiring a digit would be a tempting shortcut but is wrong —
+# 55 real issue ids have none. Add to the list when a new code token collides.
+STAGED_SRC=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(go|ts|tsx)$' | grep -v '/gen/' || true)
+if [ -n "$STAGED_SRC" ]; then
+  printf "Checking for tracker IDs in source... "
+  HITS=$(git grep -nE 'gastrolog-[a-z0-9]{4,}' -- $STAGED_SRC 2>/dev/null \
+    | grep -vE 'gastrolog-(raft|cluster|node|test|lifecycle)\b' || true)
+  if [ -z "$HITS" ]; then
+    printf "${GREEN}ok${NC}\n"
+  else
+    printf "${RED}FAILED${NC}\n"
+    echo "  Tracker IDs belong in COMMIT MESSAGES ONLY. Put the reason in the comment:"
+    echo "$HITS" | sed 's/^/    /' | head -20
+    failed=1
+  fi
+fi
+
 # Proto: generated code must match the .proto it came from.
 #
 # A partial regeneration is invisible to every other gate: the stale generated
